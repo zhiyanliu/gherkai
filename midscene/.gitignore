@@ -1,0 +1,44 @@
+# ── midscene (.gitignore) — Node / TypeScript / Midscene.js ─────
+
+# ── Dependencies ──
+node_modules/
+.pnp
+.pnp.js
+.yarn/cache
+.yarn/unplugged
+.yarn/build-state.yml
+.yarn/install-state.gz
+
+# ── Build output ──
+dist/
+build/
+out/
+*.tsbuildinfo
+
+# ── Package manager debug logs ──
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+# 锁文件保留入库(package-lock.json / pnpm-lock.yaml / yarn.lock)以保证可复现
+
+# ── Midscene 运行产物 ──
+midscene_run/
+*.report.html
+.midscene/
+
+# ── Playwright (JS) ──
+playwright-report/
+test-results/
+/playwright/.cache/
+videos/
+screenshots/
+
+# ── Test / coverage ──
+coverage/
+.nyc_output/
+
+# ── 本地敏感 / 配置 ──
+.env
+.env.*
+!.env.example

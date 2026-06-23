@@ -1,0 +1,4 @@
+{
+  "//": "局部标记 BDD step 为 ESM，使 tsx --import 能正确解析 import 语句；不影响 midscene 子工程根的 commonjs 设置。",
+  "type": "module"
+}

@@ -1,0 +1,50 @@
+# ── novaact_runner (.gitignore) — Python / Nova Act ─────────────
+
+# ── Virtual environments ──
+.venv/
+venv/
+env/
+ENV/
+
+# ── Byte-compiled / optimized ──
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# ── Packaging / build ──
+build/
+dist/
+wheels/
+*.egg-info/
+.eggs/
+*.egg
+
+# ── uv ──
+# 锁文件应入库以保证可复现，故不忽略 uv.lock
+# (若改用 pip-tools，requirements.txt 同理保留)
+
+# ── Test / coverage ──
+.pytest_cache/
+.behave_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.mypy_cache/
+.ruff_cache/
+
+# ── Nova Act / Playwright (Python) 运行产物 ──
+nova_act_logs/
+*.trace
+traces/
+videos/
+# Playwright(Python) 浏览器缓存通常在用户目录，不在工程内；
+# 但若设置了本地 user_data_dir，请在此忽略：
+user-data-dir/
+*.user_data/
+
+# ── 本地敏感 / 配置 ──
+.env
+.env.*
+!.env.example

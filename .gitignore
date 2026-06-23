@@ -1,0 +1,57 @@
+# ── Root .gitignore (monorepo) ──────────────────────────────────
+# 各子项目(novaact_runner/, midscene/)有各自的 .gitignore 管语言特定产物。
+# 这里只放跨语言通用、以及仓库级的忽略项。
+
+# ── OS ──
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+desktop.ini
+
+# ── Editors / IDE ──
+.idea/
+*.swp
+*.swo
+*~
+# VS Code: 默认忽略，但保留可共享的工作区设置
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/launch.json
+
+# ── 环境变量 / 密钥（关键：AWS / Bedrock / Nova Act key 绝不入库）──
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.aws/
+credentials
+
+# ── 测试报告 / 产物（两套引擎都会生成）──
+# Midscene 报告
+midscene_run/
+**/midscene_run/
+*.report.html
+# Nova Act traces / 录屏 / session 数据
+**/nova_act_logs/
+**/*.trace
+**/traces/
+# 通用
+*.log
+logs/
+screenshots/
+test-results/
+playwright-report/
+
+# ── 通用临时 ──
+tmp/
+.tmp/
+*.tmp
+
+# Claude 工作流工具（个人/工作流，非本项目框架代码）
+.claude/
+skills-lock.json

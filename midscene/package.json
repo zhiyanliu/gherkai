@@ -1,0 +1,26 @@
+{
+  "name": "midscene",
+  "version": "1.0.0",
+  "description": "Midscene.js (TypeScript) 侧的执行引擎 —— 用 Bedrock OpenAI GPT-5.5 模型驱动视觉 UI 自动化。",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "@aws-crypto/sha256-js": "^5.2.0",
+    "@aws-sdk/client-bedrock-agentcore": "^3.1074.0",
+    "@aws-sdk/credential-providers": "^3.1074.0",
+    "@aws-sdk/protocol-http": "^3.370.0",
+    "@aws-sdk/signature-v4": "^3.370.0",
+    "@cucumber/cucumber": "^13.0.0",
+    "@midscene/web": "^1.9.8",
+    "@playwright/test": "^1.61.0",
+    "playwright": "^1.61.0",
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.3"
+  }
+}

@@ -1,0 +1,18 @@
+[project]
+name = "novaact"
+version = "0.1.0"
+description = "Nova Act (Python) engine — AI UI-automation test runner"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "nova-act>=3.4.187.0",
+    "pytest>=9.1.1",
+    "pytest-bdd>=8.1.0",
+]
+
+[tool.pytest.ini_options]
+# 精准屏蔽第三方库 bedrock_agentcore 内部的 Pydantic 旧式 class Config 弃用警告
+# （非我方代码、无法修；只过滤这一条，其它警告照常显示，不掩盖自身问题）
+filterwarnings = [
+    "ignore:Support for class-based `config` is deprecated:DeprecationWarning:bedrock_agentcore.runtime.context",
+]
