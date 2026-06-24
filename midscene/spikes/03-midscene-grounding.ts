@@ -17,7 +17,7 @@ import {
   StartBrowserSessionCommand,
   StopBrowserSessionCommand,
 } from "@aws-sdk/client-bedrock-agentcore";
-import { sigv4Fetch, signCdpUpgrade, BASE_URL, MODEL, REGION } from "../../lib/agentcore-sigv4.mjs";
+import { sigv4Fetch, signCdpUpgrade, BASE_URL, MODEL, REGION } from "../lib/agentcore-sigv4.mjs";
 
 const BROWSER_ID = "aws.browser.v1";
 const N_FLAKE = 10; // B(AI 断言) 抖动探测次数

@@ -5,7 +5,7 @@
 // 两套签名 service code 不同（CONTEXT「AgentCore 浏览器会话」已警示别混）：
 //   - 模型连接 → service "bedrock"           （Bedrock /openai/v1 chat-completions）
 //   - 浏览器连接（CDP）→ service "bedrock-agentcore"  （AgentCore CDP WebSocket upgrade）
-// 配方与失败模式见 ../spikes/midscene-sigv4/SIGV4-FETCH-RECIPE.md + 根 docs/adr/0008。
+// 配方与失败模式见 ../spikes/SIGV4-FETCH-RECIPE.md + 根 docs/adr/0008。
 import { SignatureV4 } from "@aws-sdk/signature-v4";
 import { HttpRequest } from "@aws-sdk/protocol-http";
 import { Sha256 } from "@aws-crypto/sha256-js";

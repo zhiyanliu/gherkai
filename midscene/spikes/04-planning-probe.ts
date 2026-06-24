@@ -4,7 +4,7 @@
 // 复用已验证的 SigV4 自签（service "bedrock"，与 grounding 同源）。
 // 跑：cd midscene && AWS_REGION=us-east-1 node_modules/.bin/tsx spikes/midscene-sigv4/04-planning-probe.ts
 import OpenAI from "openai";
-import { sigv4Fetch, BASE_URL } from "../../lib/agentcore-sigv4.mjs";
+import { sigv4Fetch, BASE_URL } from "../lib/agentcore-sigv4.mjs";
 
 // 主选 deepseek.v3.2，走已验证的 bedrock-runtime /openai/v1（与 grounding 同端点）。
 // 备选（取消注释切换）：

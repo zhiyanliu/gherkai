@@ -9,7 +9,7 @@ import {
   StartBrowserSessionCommand,
   StopBrowserSessionCommand,
 } from "@aws-sdk/client-bedrock-agentcore";
-import { signCdpUpgrade, REGION } from "../../lib/agentcore-sigv4.mjs";
+import { signCdpUpgrade, REGION } from "../lib/agentcore-sigv4.mjs";
 
 const BROWSER_ID = "aws.browser.v1"; // 系统默认 browser（ADR 0011）
 

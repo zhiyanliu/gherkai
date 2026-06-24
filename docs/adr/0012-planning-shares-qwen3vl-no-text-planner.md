@@ -23,4 +23,4 @@ Midscene 的 planning（把高层意图拆解成动作步骤）角色，**继续
 
 ## 探针
 
-`midscene/spikes/midscene-sigv4/04-planning-probe.ts`：验证任一候选的 (a) chat-completions 可达 + (b) image_url 容忍两关。当前所有纯文本候选卡在 (b)。
+`midscene/spikes/04-planning-probe.ts`：验证任一候选的 (a) chat-completions 可达 + (b) image_url 容忍两关。当前所有纯文本候选卡在 (b)。

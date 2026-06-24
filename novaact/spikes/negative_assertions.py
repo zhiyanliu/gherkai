@@ -1,6 +1,6 @@
 """A · 负向用例（expect-failure 探针）：验证"该红能红"——Nova Act 腿。
 
-对标 midscene/spikes/midscene-sigv4/05-negative-assertions.ts：故意造必假断言，
+对标 midscene/spikes/05-negative-assertions.ts：故意造必假断言，
 验证 act_get(各 schema) 在"不符"时给出 false / 不匹配的值（→ 上层会判失败），
 并带一个对照正向（防"全假"假象）。一次性证伪探针。
 

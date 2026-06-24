@@ -11,7 +11,7 @@ Midscene.js (TypeScript) 侧的执行引擎。用 **Qwen3-VL 235B on Bedrock** �
 - 模型：`qwen.qwen3-vl-235b-a22b`，`MIDSCENE_USE_QWEN3_VL=true`
 - base URL：`https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1`
 - 接线：经 Midscene `createOpenAIClient` 注入带 SigV4 签名的自定义 `fetch`
-- 配方与失败模式：`spikes/midscene-sigv4/SIGV4-FETCH-RECIPE.md`
+- 配方与失败模式：`spikes/SIGV4-FETCH-RECIPE.md`
 
 ## 跑 BDD（cucumber-js，加载根 `features/`）
 
@@ -23,9 +23,9 @@ NODE_OPTIONS="--import tsx/esm" AWS_REGION=us-east-1 \
 ## 跑 spike（三段式自检，可独立跑）
 
 ```bash
-AWS_REGION=us-east-1 node_modules/.bin/tsx spikes/midscene-sigv4/01-model-sigv4.ts      # 模型跳
-AWS_REGION=us-east-1 node_modules/.bin/tsx spikes/midscene-sigv4/02-agentcore-cdp.ts    # CDP 跳
-AWS_REGION=us-east-1 node_modules/.bin/tsx spikes/midscene-sigv4/03-midscene-grounding.ts # 合体
+AWS_REGION=us-east-1 node_modules/.bin/tsx spikes/01-model-sigv4.ts      # 模型跳
+AWS_REGION=us-east-1 node_modules/.bin/tsx spikes/02-agentcore-cdp.ts    # CDP 跳
+AWS_REGION=us-east-1 node_modules/.bin/tsx spikes/03-midscene-grounding.ts # 合体
 ```
 
 ## 注意

@@ -21,7 +21,7 @@
 
 **第一个实验**：写好 SigV4 fetch 后，跑一次真实 Midscene `aiTap`/`aiAssert`（本地琐碎页面），一次绿灯即坐实自签接线全链路可用。
 
-## ✅ 已实测全通（2026-06-23，`midscene/spikes/midscene-sigv4/`）
+## ✅ 已实测全通（2026-06-23，`midscene/spikes/`）
 
 三段式自检全绿，本 ADR 的承重未知**已关闭**：
 - 第 1 段（模型连接）：openai-node + sigv4Fetch 调 qwen3-vl，文本 `"ok"` + 视觉 `"Red Blue"`，**一次过未撞 403**——SigV4 字节匹配正确。

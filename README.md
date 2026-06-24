@@ -37,14 +37,14 @@
 yaozhou/
 ├── README.md                  ← 本文件
 ├── CONTEXT.md                 ← 领域术语表（glossary）
-├── docs/adr/                  ← 17 条架构决策记录
+├── docs/adr/                  ← 21 条架构决策记录
 ├── features/                  ← 单一共享 .feature（两套 runner 都加载；通用 step 风格）
 │   └── wikipedia_generic.feature
 ├── midscene/                  ← Midscene 引擎子工程（TS）
 │   ├── cucumber.mjs           ← cucumber-js 配置（指向根 features/）
 │   ├── lib/agentcore-sigv4.mts ← 共享 SigV4 模块（模型连接 + 浏览器连接/CDP；spike/bdd 共用）
 │   ├── bdd/steps/generic.steps.ts ← Midscene 侧通用 step（QA 不写代码）
-│   └── spikes/midscene-sigv4/ ← 三段式自检 spike（01/02/03）+ SIGV4-FETCH-RECIPE.md 配方笔记
+│   └── spikes/ ← 自检 spike（01 模型/02 CDP/03 合体/04 planning/05 负向）+ SIGV4-FETCH-RECIPE.md
 └── novaact/                   ← Nova Act 引擎子工程（Python）
     ├── bdd/test_generic_steps.py  ← Nova Act 侧通用 step（pytest-bdd）
     └── spikes/wikipedia_benchmark.py  ← Nova Act 腿 spike
@@ -64,8 +64,9 @@ yaozhou/
 **Midscene 侧（cucumber-js + TS）：**
 ```bash
 cd midscene
-NODE_OPTIONS="--import tsx/esm" AWS_REGION=us-east-1 \
-  node_modules/.bin/cucumber-js -c cucumber.mjs ../features/wikipedia_generic.feature
+# 跑全部 feature：
+NODE_OPTIONS="--import tsx/esm" AWS_REGION=us-east-1 node_modules/.bin/cucumber-js -c cucumber.mjs
+# 跑子集用 tag（勿再传 feature 路径，会与配置 paths 合并）：... -c cucumber.mjs --tags "@engine:midscene"
 # → 报告：midscene/midscene_run/report/*.html
 ```
 
@@ -78,11 +79,18 @@ AWS_REGION=us-east-1 .venv/bin/python -m pytest bdd/test_generic_steps.py -s
 
 两者加载的是**同一个** `features/wikipedia_generic.feature`（通用 step 风格，QA 只写自然语言）。
 
+### 怎么写 `.feature`（QA 零代码，ADR 0020）
+
+- 动作/断言都写**纯人话、无路由关键词**：`When "搜索 OpenAI"` / `Then "进入了 OpenAI 词条页"` → 默认走 AI（动作=aiAct/act；断言=aiBoolean/act_get+投票）。
+- scope/引擎用 **tag**（ADR 0019）：`@scope:login`（共享会话、串行）/ `@engine:midscene|novaact`（选腿）。
+- **确定性精确检查**（URL/DOM，不容 AI 抖动）：由 test engineer 在 `deterministic.steps.ts` / `deterministic_steps.py` 脚手架按需写（QA 不碰）。
+- Midscene 侧依赖一个本地 cucumber 补丁让裸 `When/Then` 不冲突（ADR 0021，已随 `patches/` + `postinstall` 固化）。
+
 ## Spike（可独立跑的技术验证脚本）
 
 ```bash
 # Midscene 腿三段式自检（隔离验证：模型连接 / 浏览器连接(CDP) / 合体）
-cd midscene && AWS_REGION=us-east-1 node_modules/.bin/tsx spikes/midscene-sigv4/01-model-sigv4.ts
+cd midscene && AWS_REGION=us-east-1 node_modules/.bin/tsx spikes/01-model-sigv4.ts
 # 02-agentcore-cdp.ts / 03-midscene-grounding.ts 同理
 
 # Nova Act 腿对标 spike
