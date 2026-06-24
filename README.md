@@ -14,7 +14,7 @@
 | M2     | 单一 `.feature` 被两套 runner 驱动          | ✅                   |
 | M3     | Nova Act 接 AgentCore 云端浏览器            | ✅                   |
 | M4     | Midscene 接 AgentCore（一度被视为"最大难关"） | ✅ 实测零坑          |
-| M5     | 报告统一                                    | ⬜ 推迟（见 ADR 0010） |
+| M5     | 报告统一（= RunReport）                      | ⬜ 推迟（归宿见 ADR 0016；spike 洞见 0010） |
 
 ## 架构速览
 
@@ -37,16 +37,16 @@
 yaozhou/
 ├── README.md                  ← 本文件
 ├── CONTEXT.md                 ← 领域术语表（glossary）
-├── docs/adr/                  ← 11 条架构决策记录
-├── features/                  ← 单一共享 .feature（两套 runner 都加载）
-│   └── wikipedia_search.feature
+├── docs/adr/                  ← 17 条架构决策记录
+├── features/                  ← 单一共享 .feature（两套 runner 都加载；通用 step 风格）
+│   └── wikipedia_generic.feature
 ├── midscene/                  ← Midscene 引擎子工程（TS）
 │   ├── cucumber.mjs           ← cucumber-js 配置（指向根 features/）
 │   ├── lib/agentcore-sigv4.mts ← 共享 SigV4 模块（模型连接 + 浏览器连接/CDP；spike/bdd 共用）
-│   ├── bdd/steps/             ← Midscene 侧 step definitions
+│   ├── bdd/steps/generic.steps.ts ← Midscene 侧通用 step（QA 不写代码）
 │   └── spikes/midscene-sigv4/ ← 三段式自检 spike（01/02/03）+ SIGV4-FETCH-RECIPE.md 配方笔记
 └── novaact/                   ← Nova Act 引擎子工程（Python）
-    ├── bdd/test_wikipedia.py  ← Nova Act 侧 step definitions（pytest-bdd）
+    ├── bdd/test_generic_steps.py  ← Nova Act 侧通用 step（pytest-bdd）
     └── spikes/wikipedia_benchmark.py  ← Nova Act 腿 spike
 ```
 
@@ -59,23 +59,24 @@ yaozhou/
 - Nova Act workflow definition（IAM 路径必需）：**代码会自动 create-if-not-exists**（`novaact/lib/workflow_setup.py`），无需手动操作。若想手动预建也可：`aws nova-act create-workflow-definition --region us-east-1 --name spike-wikipedia-benchmark`（见 ADR 0004）。
 - Node 22（midscene）、Python 3.13 + uv（novaact）
 
-## 运行（M2：同一份 .feature，两套引擎）
+## 运行（同一份 .feature，两套引擎，通用 step）
 
 **Midscene 侧（cucumber-js + TS）：**
 ```bash
 cd midscene
-NODE_OPTIONS="--import tsx/esm" AWS_REGION=us-east-1 node_modules/.bin/cucumber-js -c cucumber.mjs
+NODE_OPTIONS="--import tsx/esm" AWS_REGION=us-east-1 \
+  node_modules/.bin/cucumber-js -c cucumber.mjs ../features/wikipedia_generic.feature
 # → 报告：midscene/midscene_run/report/*.html
 ```
 
 **Nova Act 侧（pytest-bdd + Python）：**
 ```bash
 cd novaact
-AWS_REGION=us-east-1 .venv/bin/python -m pytest bdd/test_wikipedia.py -s
+AWS_REGION=us-east-1 .venv/bin/python -m pytest bdd/test_generic_steps.py -s
 # → trajectory：$TMPDIR/..._nova_act_logs/<sessionId>/（默认临时目录，见 ADR 0010）
 ```
 
-两者加载的是**同一个** `features/wikipedia_search.feature`。
+两者加载的是**同一个** `features/wikipedia_generic.feature`（通用 step 风格，QA 只写自然语言）。
 
 ## Spike（可独立跑的技术验证脚本）
 

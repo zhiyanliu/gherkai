@@ -36,7 +36,7 @@ _Avoid_: 把骨架验证用例当成最终交付的业务测试。
 spike 脚本**紧贴各自引擎的语言/依赖环境**，放在对应子工程内、诚实标记可丢弃：
 - Midscene（TS）→ `midscene/spikes/`，复用 `midscene/node_modules`（含其配方笔记 `SIGV4-FETCH-RECIPE.md`，与代码同居）。
 - Nova Act（Python）→ `novaact/spikes/`，用 `novaact/.venv`。
-不设 git 根级 `spikes/`（早期曾有，因布局统一为 by-engine 已撤销）。**引擎内**复用的代码（如 Midscene 的 SigV4，仅 Midscene 的 spike 与 bdd 共用）抽到该引擎的 `lib/`（见 `midscene/lib/agentcore-sigv4.mts`）；这不是跨引擎共享——SigV4 是 Midscene 专属，Nova Act 走 IAM/Workflow 不碰它。跨引擎真正共享的是 `features/`（用例），见 [[共享边界]]（ADR 0013）。
+不设 git 根级 `spikes/`（早期曾有，因布局统一为 by-engine 已撤销）。**引擎内**复用的代码（如 Midscene 的 SigV4，仅 Midscene 的 spike 与 bdd 共用）抽到该引擎的 `lib/`（见 `midscene/lib/agentcore-sigv4.mts`）；这不是跨引擎共享——SigV4 是 Midscene 专属，Nova Act 走 IAM/Workflow 不碰它。跨引擎真正共享的是 `features/`（用例），见 [跨引擎共享边界](./docs/adr/0013-cross-engine-sharing-boundary.md)（ADR 0013）。
 _Avoid_: 把某一引擎专属的 spike/文档/代码放到根级或另一引擎目录下；也别误以为引擎内的 `lib/` 是两腿共享。
 
 **确定性断言 vs AI 断言 (Deterministic vs AI assertion)**:
@@ -46,3 +46,38 @@ _Avoid_: 把 AI 断言当成"无需治理就可信"——它为主，但必须�
 **报告产物模型 (Report artifact model)**:
 两条腿的报告形态根本不同（2026-06 实测）：**Midscene 出单一 `report.html`**（落项目内 `midscene_run/report/`，含每步截图+AI 决策+坐标）；**Nova Act 出多个分散的 trajectory HTML**（每次 `act`/`act_get` 一个，默认落系统临时目录 `$TMPDIR/..._nova_act_logs/`，可被系统清理，需 `logs_directory=` 固定到项目内）。这是将来报告统一（M5）必须弥合的差异。
 _Avoid_: 笼统说「两腿都出报告」而忽略其形态/落点/生命周期的根本不同。
+
+## 产品形态（v1.0）
+
+**通用 step (Generic step)**:
+一组**抽象原语** step（导航 / AI 动作 / AI 布尔·取数·取串·否定断言 / 确定性锚点），任何用例复用，QA 不写代码——场景细节放进引号里的自然语言，不放进 step 措辞。这是"QA 只写 `.feature`、零代码"承诺的唯一载体，**其能力边界 = 产品能力边界**。两腿对称实现（Midscene `aiAct/aiBoolean/aiNumber/aiString` ↔ Nova Act `act/act_get(各 schema)`）。详见 ADR 0018。
+_Avoid_: 写绑死具体场景的 step（如"语言版本数量"）——那不是通用 step；把它当成"任意动作都能稳跑"——开放性动作会引入页面瞬态 flaky（ADR 0018）。
+
+**柔性冒烟 (Flexible smoke)**:
+v1.0 的核心定位（ADR 0015）——只验证业务**意图是否达成**（流程能否走通），对达成路径上未被点名的视觉/文案/布局变化高度宽容。AI 柔性是差异化核心，与"精确回归（任何差异都报警）"本质对立。
+_Avoid_: 把它当精确/像素级回归工具用。
+
+**显式断言锚点 (Explicit assertion anchor)**:
+QA 在 `.feature` 里**点名**要精确核对的项（如 `Then 页面显示 "¥99"`、`Then 必须有 "记住我"`）。AI 只对点名项精确判断；没点名的不在测试范围。「能否抓某类变更」取决于**点没点名**，不是做不到。半结构化 step 是其入口。
+_Avoid_: 以为"不点名也能抓变更"，或把它与下面 A/B 两种不确定性混为一谈。
+
+**两种不确定性 (A: flakiness / B: 柔性吞变更)**:
+A = 同一页面 AI 判断飘忽（随机噪声）→ **投票可治**；B = 页面真变了但 AI 柔性照样跑过、不报警（灵敏度不足）→ **投票治不了**，v1.0 接受为已知边界（ADR 0015）。
+_Avoid_: 以为"投票能带来确定性"——它只压 A，给不了对变更的灵敏度（B）。
+
+**Run 数据模型 (Run data model)**:
+执行的层级（ADR 0016）：**Run ⊃ Job(=Scope) ⊃ Scenario**。Scope = 共享操作上下文的 scenario 分组，是执行单元（scope 内串行、scope 间并行）；Feature 是正交的组织轴。Run 产出两样：**RunResult**（机器可读汇总判定，给退出码/CI/WebUI）与 **RunReport**（人看的归集报告，即原 M5「报告统一」的归宿）。
+_Avoid_: 把 Feature 当执行单元；把 Job 当 scenario 粒度（破坏会话依赖）；混淆 RunResult（数据）与 RunReport（报告）。
+
+**执行核心库窄腰 (Core-library narrow waist)**:
+真正的窄腰是**执行核心库**（解析 `.feature` → 分组 scope → 调度 → 收集结果），**不是 CLI**（早先措辞修正，见 ADR 0016）。CLI 是核心库的第一个、最薄的前端；WebUI 是另一个前端，**直接调核心、不 shell-out CLI**。CI/skill 通过 CLI 这个皮间接用核心。上层前端与可替换的**执行后端**（本地进程 / Fargate）都围绕核心库解耦。
+_Avoid_: 把逻辑焊死在 CLI `main()` 里；以为"WebUI 要包 CLI"；把"选哪个执行后端"当成一锤定终身。
+（版本演进 spike→v0.x→v1.0→v1.x→v2.0 见 ADR 0016。）
+
+**执行后端 (Execution backend)**:
+核心库之下真正跑测试 job 的地方，是一个 **port**（`ExecutionBackend`），由组合根注入。演进：v1.0 本地进程（浏览器仍在云端 AgentCore Browser）→ 云端倾向 Fargate/ECS（批处理 shape-fit，ADR 0017；非 AgentCore Runtime）。
+_Avoid_: 混淆"浏览器在云端"（spike 已验证）与"执行进程也在云端"（>v1.0）。
+
+**Ports 层 (Ports & adapters)**:
+核心库把可替换的外部依赖收成独立 port（`ResultStore` 状态、`ReportStore` 报告产物、`ExecutionBackend` 执行后端），导出稳定接口；核心只依赖接口。**具体 adapter 由组合根（CLI main / WebUI bootstrap）注入**，不由 module 内部 env-sniff 自选（后者是本项目踩过的 Midscene `GlobalConfigManager` 反模式）。v1.0 只写 local adapter，云端再填 DDB/S3/Fargate（ADR 0016）。
+_Avoid_: 把多个 port 揉成一个上帝 module；让 port-module 用全局单例自选实现。

@@ -56,3 +56,8 @@
 **② Nova Act 报告默认落临时目录、会被系统清理**——留不住、不可追溯。`NovaAct(logs_directory=...)` 可固定到项目内（类比 Midscene 的 `midscene_run/`）。spike 阶段尚未固定（用例已验证通过即可），M2/M5 接入时应设 `logs_directory` 并 gitignore。
 
 **③ 两腿的 AI「断言」机制**：spike 里用了不对称写法（Midscene `aiAssert` 抛错式 / Nova Act `act_get(BOOL_SCHEMA)` 取布尔再判定）。**但实际可对称**（2026-06 查证安装源码）：Midscene 有 `aiBoolean(prompt) -> Promise<boolean>`，与 Nova Act `act_get(..., BOOL_SCHEMA)` 形态完全一致（问是非、拿布尔、不抛错）。Midscene 取结构化的全家族：`aiBoolean / aiNumber / aiString / aiQuery<T> / aiAsk`（对标 act_get 的标量与通用版）；`aiAssert` 则是 Nova Act 无对应的抛错式断言。→ 抖动治理（ADR 0014）应统一走 `aiBoolean` ↔ `act_get(BOOL_SCHEMA)` 的对称布尔路径，便于两腿都在布尔值上做投票。
+
+## 待 backfill（spike 遗留，v0.x/v1.0 接入时处理，非 spike 阻塞项）
+
+- **断言对称化**：spike 现有代码（`03-midscene-grounding.ts` 用 `aiAssert`、bdd step 亦然）需重构为 `aiBoolean` ↔ `act_get(BOOL_SCHEMA)` 的对称布尔路径，才能统一做投票（上③）。
+- **`logs_directory` 固定**：Nova Act 报告现仍落临时目录（上②）；接入正式跑批时设 `NovaAct(logs_directory=...)` 到项目内并 gitignore。

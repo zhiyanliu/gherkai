@@ -10,7 +10,7 @@ Nova Act (Python) 侧的执行引擎。用 Amazon 自家模型 `nova-act-latest`
 
 - `model_id="nova-act-latest"`，`boto_session_kwargs={"region_name": "us-east-1"}`
 - workflow definition：**代码自动 create-if-not-exists**（`lib/workflow_setup.py` 的 `ensure_workflow_definition()`，bdd 与 spike 已接入），无需手动 CLI。boto3 与 `aws nova-act create-workflow-definition` 等价。
-- 注意：`provider.cdp_session()` 靠 contextvar 识别 workflow；用 `@workflow` 装饰器，或在 fixture 内手动 `set_current_workflow(wf)`（见 `bdd/test_wikipedia.py`）。
+- 注意：`provider.cdp_session()` 靠 contextvar 识别 workflow；用 `@workflow` 装饰器，或在 fixture 内手动 `set_current_workflow(wf)`（见 `bdd/test_generic_steps.py`）。
 
 ## 环境
 
