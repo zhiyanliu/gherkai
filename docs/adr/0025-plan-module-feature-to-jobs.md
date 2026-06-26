@@ -1,0 +1,107 @@
+# plan 模块：`.feature` → job 列表（解析 + scope 分组）
+
+核心库把一组 `.feature` 变成可调度的 **job 列表**的模块。它兑现 [0019](./0019-feature-tags-scope-and-engine.md)/[0016](./0016-execution-architecture-core-lib-run-model.md) 一直 defer 到核心库的「scope 分组 + engine 冲突校验 + Gherkin 解析」。输出的 Job 正是 [0024](./0024-worker-core-protocol.md) worker↔core 协议的输入形状。下一块 `schedule`（scope 串/并行调度）以本模块输出为输入，另立。
+
+## 接口（深模块，小）
+
+```
+plan(features: [{uri, text}], config: {defaultEngine}) -> Job[]
+
+Job = {
+  scopeId, scopeName, engine,
+  scenarios: [
+    { id, name, steps: [ { index, keyword, text, argument? } ] }
+  ]
+}
+```
+
+- **接受 feature 内容（`{uri, text}`）而非路径** → core 不碰文件系统（skill：accept dependencies, don't create them），纯数据 in / 纯数据 out，可被 test 直接喂字符串。读文件是组合根/CLI 的事。
+- **输出 `Job[]` = [0024](./0024-worker-core-protocol.md) 协议输入形状**：一个 Job = 一个 scope = 一个会话边界 = schedule 交给单个 worker 的活。
+- **删除测试**：删掉本模块，「按 tag 分组 + engine 校验 + Gherkin 展开」会在 CLI / 未来 WebUI 各写一遍 → 它在挣钱。
+
+## 内部实现（深，但借力官方 Compiler）
+
+两个 internal seam：
+
+### `parse`（藏第三方库 gherkin-official）
+
+- 每个 feature：`Parser().parse(text)` → 原始 AST → `Compiler().compile({**doc, "uri": uri})` → **pickles（完全展开）** → 映射成我们的领域模型 `{id, name, steps:[{index, keyword, text, argument?}]}`。（`Compiler().compile()` **要求 `gherkin_document` 带 `uri` 键**，缺则 `KeyError`——故 `uri` 是 parse 的必填燃料，不只是关联键元数据。）
+- **Background / Scenario Outline+Examples / DataTable / DocString 三档由 Compiler 展开**（实测 `gherkin-official` 已装版可一步给出：Background 前插每个 scenario、Outline 按 Examples 行笛卡尔展开成 N 个 scenario、`<placeholder>` 已插值、DataTable/DocString 已归入 step `argument`）。**不自己写展开**——其边角（And/But 的 Conjunction keywordType 继承、多 Examples 表 + 三层 tag 合并、Rule 层 background 叠加、占位符转义）cucumber 官方都处理好且有跨语言一致性测试背书，自己重写 = 维护一份 cucumber compiler，不值。
+- **step 保持 pickle 内顺序 = feature 书写顺序**（见下「step 顺序」语义）。
+- **`keyword` 字段（实测要点，避免踩坑）**：pickle step **不含字面 keyword**，只暴露归一化 `type`（取值 `Context`/`Action`/`Outcome`，And/But 已折叠继承上一条非连接词的类型）。parse 把 `type` 映射成我们领域模型的 `keyword`，**统一取书写词 `Given`/`When`/`Then`**（`Context→Given`、`Action→When`、`Outcome→Then`）与 [0024](./0024-worker-core-protocol.md) 示例一致；worker 只需「是不是 `Then`（断言）」这个类别即足够派发（[0024](./0024-worker-core-protocol.md)），故 And/But 字面丢失无碍。
+- **`index`**：scenario 内 0-based 书写序号，由 parse 合成（pickle step 无此字段），作 [0024](./0024-worker-core-protocol.md) `stepIndex` 的回指键、不参与重排。
+- **`argument`**：承载展开后的 dataTable/docString（有则有、无则缺省）；其内部形状见下「argument 形状」。
+- **行号来源（id 派生依赖）**：pickle **不带 `location`/行号**，只有顶层 `astNodeIds`。parse seam **内部同时持有 AST**，用 pickle 的 `astNodeIds` → AST 节点 `location.line` 回查行号（供下「id 派生」用）；Outline 展开的 example 行号取 `astNodeIds` 中的 Examples 行节点。行号属 seam 内部细节，不外泄。
+
+### `scope`（tag 分组 + engine 校验）
+
+- 读每个 scenario 的 tag → 按 `@scope:<name>` 分组 → 每组解析 `@engine` → 产出 Job。
+- 语义见下。
+
+## 已定语义
+
+### scope 全局命名空间（跨文件合并，撞名 warning）
+
+- 相同 `@scope:X` 的 scenario 归同一 scope，**无论在哪个 `.feature` 文件**——忠于 [0019](./0019-feature-tags-scope-and-engine.md)「相同值同 scope」字面语义，保住「一条 session 线可跨文件组织」的表达力。
+- **跨文件合并时打 warning log**：多人写不同 feature 可能意外撞名 → 意外串到一个会话/串行。warning 给可见信号，不阻断（合并仍按字面语义生效）。
+- **未标 `@scope` 的 scenario**：各自独立 = 各自一个**单元素 scope = 各自一个 job/会话**（[0016](./0016-execution-architecture-core-lib-run-model.md) job=scope 的直接推论）。其成本含义（N 个独立 scenario = N 个会话）由 schedule 的并发上限治理，不是 plan 的事。
+
+### 一个 scenario 多个 `@scope` 值 → 报错（feature 级传播允许）
+
+- **背景**：Gherkin 标准里，贴在 **Feature 行**的 tag 会**下传给该 feature 的每个 scenario**（gherkin-official 编译出的 pickle `tags` 已合并 feature 级 + scenario 级）。故一个 scenario 可能同时背 feature 级 `@scope:login` + 自身的 `@scope:checkout` = 两个不同 `@scope` 值。
+- **裁决（与 engine 冲突对称）**：一个 scenario 解析出**多个不同 `@scope` 值 → 报错、拒绝运行**。理由同 engine：scope = 会话边界，一个 scenario 只能属一条会话线，同属两个 scope 物理自相矛盾。
+- **feature 级 `@scope` 传播仍允许**：在 Feature 行标 `@scope:X` 让整个文件归一个会话，是受支持的便利写法——只要其下没有 scenario 再标一个**不同**的 `@scope` 值（标相同值无害、不算冲突）。
+
+### engine 解析（缺省容错，冲突报错）
+
+- 整个 scope 未标 `@engine` → 用 `config.defaultEngine`（[0016](./0016-execution-architecture-core-lib-run-model.md) 单腿默认）。
+- scope 内任一 scenario 标了 `@engine` → 全 scope 继承（[0019](./0019-feature-tags-scope-and-engine.md) 容错缺省）。
+- **同一 scope 出现多个不同 engine 值 → 报错、拒绝运行**（[0019](./0019-feature-tags-scope-and-engine.md)：同 scope 跨引擎 = 物理自相矛盾）。
+
+### step 顺序 = 书写顺序，keyword 只决定派发
+
+- worker 拿到的 steps **严格按 feature 书写顺序**，逐条执行；**keyword 不约束顺序、不触发重排**。
+- 合法且要支持乱序：`Given→Then→When→Then`（现有 `features/wikipedia_assertions.feature` 就是真实样本）——Then 在 When 前 = 就在那个时点判定。Gherkin 关键字本不强制 Given/When/Then 顺序，我们忠于此。
+- keyword 的唯一作用 = worker 派发（`When`→AI 动作 / `Then`→AI 断言+投票 / URL 形态→确定性导航 / 命中注册表→确定性，见 [0024](./0024-worker-core-protocol.md)/[0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md)）。core 不消费 keyword 的顺序语义。
+
+### id 派生（RunStore/RunReport 关联键：稳定 + 可追溯）
+
+**`uri` 约定**：plan 把调用方传入的 `uri` **原样**用作 id 前缀，**不做路径解析**（plan 不碰 FS、无 base dir，故无「相对谁」的语义）。调用方（组合根/CLI）负责传一个稳定可读的 `uri`（如相对仓库根的路径）。下文 id 规则统一以 `<uri>` 表示。
+
+- `scenarioId`：`<uri>:<scenario行号>`；Outline 展开的多个 scenario 共享 scenario 行号，故各自再加 `:<example行号>` 消歧（行号取自 AST，见上「行号来源」）。
+- `scenarioName`：Scenario 标题（`<placeholder>` 已插值）；Outline 展开的多个 scenario 若标题模板不含占位符会重名，故**追加 Examples 行标识**（如 `登录 [role=admin]`）保证可区分、可追溯。
+- `scopeId`：有 `@scope:X` → 用 `X`（干净 token）；无标 → 各 scenario 自成单元素 scope，`scopeId` **= 该 scenario 的 `scenarioId`**（直接复用，自动继承上面的 Outline `:<example行号>` 消歧，不会撞 id）。
+- `scopeName`：有 `@scope:X` → `@scope` 原值（可含空格/标点的人写名）；无标 → 取该 scenario 的标题（人写名），**不复用机器派生的 `scopeId`**（保持 name = 人写展示名的语义，对齐 [0024](./0024-worker-core-protocol.md)）。
+- 行号稳定（feature 不大改即不变）、人可读出来源。若未来需更强稳定性可引 `@id:` tag，暂不做。
+
+## 第三方库 seam（gherkin-official 藏在 parse 后）
+
+- core 只认我们的领域模型 `{id,name,steps[{index,keyword,text,argument?}]}`；**gherkin 的 pickle dict 形状不外泄**到 core 其余部分。
+- **`argument` 是 parse 重映射成的自有形状、不透传 pickle 子 dict**：实测 pickle 的 argument 是 `{docString:{content}}` / `{dataTable:{rows:[{cells:[{value}]}]}}` 这类 gherkin 内部结构；parse 把它归一成我们自有的简洁形状（如 `{kind:"docString", content}` / `{kind:"dataTable", rows:[[cell…]…]}`），避免 pickle 形状经 argument 漏进领域模型。
+- 这是个 seam，但**性质 = 单实现（gherkin-official）+ 防御性封装**，**非** [0024](./0024-worker-core-protocol.md) `Engine` port 那种「两个真 adapter」的 seam（那里 midscene/novaact 是两个真实现）。立得住靠两个理由：① [0024](./0024-worker-core-protocol.md) 的 step 领域模型 ≠ pickle 形状，本就要转换层；② 本项目有被第三方解析库行为坑过的教训（cucumber 补丁 [0021](./0021-local-cucumber-patch-step-keyword-disambiguation.md) → 已退役、core 自解析 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)），把库行为收在一个接口后，升级/适配/替换只动 `parse` 内部。（下条「升级 ≥31.0.0 回归比对」是**同库版本迁移**，非引入第二个解析器实现。）
+- 已装 `gherkin-official 29.0.0`（导入名 `gherkin`，路径 `gherkin.parser` / `gherkin.pickles.compiler`）；`pytest-bdd 8.1.0` 内部即依赖它。**不依赖 pytest-bdd 的内部解析符号**（既要退役、又是非公开 API）。如需顶层 `from gherkin import Parser, Compiler` 公开导出需 ≥31.0.0；升级后用同一 feature 回归比对一次。
+
+## test cases（护栏，本模块强制）
+
+「三档全支持」必须有测试背书（否则边角易漏）。覆盖：
+
+- Background 前插每个 scenario；
+- Scenario Outline 按 Examples 多行展开 + `<placeholder>` 插值；**且展开后 N 个 scenario 的 id 与 name 各自可区分**（id 靠 `:<example行号>`；name 追加 Examples 行标识，避免 N 个同名）；
+- DataTable / DocString 进 step `argument`（重映射成自有形状，非 pickle 子 dict）；
+- 乱序 `Given→Then→When→Then`（保序、不重排）；keyword 由 pickle `type`（Context/Action/Outcome）映射成 `Given/When/Then`；
+- 跨文件相同 `@scope` 合并（+ warning）；
+- 同一 scope 多个不同 engine → 报错；
+- 一个 scenario 多个不同 `@scope` 值（feature 级传播 + scenario 级）→ 报错；feature 级 `@scope` 传播（无冲突时）→ 正常归一个 scope；
+- scope 缺省 engine → 用 defaultEngine；
+- 未标 scope 的 scenario → 各自独立成 job（含未标 scope 的 Outline → N 个 job 不撞 id）；
+- id 派生稳定可追溯。
+
+## 现在做 / 留口子
+
+- **现在做（v1.0）**：上述 `plan` 接口、parse（借 Compiler）、scope 分组 + engine 校验、id 派生、三档 Gherkin 特性、test cases。
+- **留口子不实现**：`@id:` 显式 id tag；Rule 层级的特殊处理（Compiler 已展开，暂不暴露 Rule 概念到领域模型）；feature 级 tag 的更多语义（现仅 `@scope`/`@engine`）。
+
+## 重议
+
+- 若 Gherkin 特性展开行为随 gherkin-official 升级变化 → 只动 `parse` 内部 + 回归 test cases。
+- 若出现 id 跨运行不稳的真实痛点（feature 频繁改行号）→ 引 `@id:` tag。

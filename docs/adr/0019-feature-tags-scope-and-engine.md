@@ -44,7 +44,7 @@ Scenario: 在登录态下修改昵称
 ## 范围（tag 语义已定 / 调度实现待核心库）
 
 - **语义已定（本 ADR）**：定 `@scope:`/`@engine:` 语义；两腿各验证"能读到 tag 并据 `@engine:` 选腿"的最小行为（engine 选择无需调度，可立即验，v0.x 已做）。
-- **待 v1.0 核心库**：scope 的串/并行**调度**、同 scope 的**会话共享**、engine 冲突**校验**的实现——它们需要调度层（核心库），bdd 直跑层做不了，提前做会返工。落地形态见 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)。
+- **待 v1.0 核心库**：scope 分组 + engine 冲突**校验**的实现见 [0025](./0025-plan-module-feature-to-jobs.md)（plan 模块）；job 间（=scope 间）并行**调度**、会话共享见 [0026](./0026-schedule-module.md)（schedule 模块；scope 内串行已被 worker 消化）。它们需要核心库，bdd 直跑层做不了。执行形态见 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)。
 
 ## 已验证（v0.x，2026-06）：`@engine:` 路由两腿对称成立
 

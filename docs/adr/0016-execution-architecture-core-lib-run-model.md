@@ -129,7 +129,7 @@ G1/G2 是 v1.0 核心库 `.feature` 解析的前置——其声明语法**现已
 
 ## 现在做 / 现在不做
 
-- **现在做（v1.0）**：核心库 `core/` 可被调用（逻辑不焊死在 CLI main 里）；钉死上面数据模型；定义 ports 接口（`Engine`/`RunStore`/`ResultStore`/`ReportStore`）+ 写 local adapter + 组合根注入；核心自解析 Gherkin + 两腿薄 worker（[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)）。
+- **现在做（v1.0）**：核心库 `core/` 可被调用（逻辑不焊死在 CLI main 里）；钉死上面数据模型；定义 ports 接口（`Engine`/`RunStore`/`ResultStore`/`ReportStore`）+ 写 local adapter + 组合根注入；核心自解析 Gherkin + 两腿薄 worker（[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)）。模块设计：worker↔core 协议见 [0024](./0024-worker-core-protocol.md)；`.feature`→job 列表的 plan 模块（解析 + scope 分组 + engine 校验）见 [0025](./0025-plan-module-feature-to-jobs.md)；job 间并发调度 + 失败隔离 + 优雅终止的 schedule 模块见 [0026](./0026-schedule-module.md)。
 - **现在不做**：DynamoDB / S3 / Fargate adapter / 无状态机制 / WebUI ——接口已留好，等云端真需要时填 adapter + 组合根换注入。**避免为想象中的云端预先盖机器。**
 - **G1/G2 声明语法已定**（ADR 0019）；其**调度实现**（scope 串/并行、会话共享、engine 冲突校验）由 v1.0 核心库落地。
 - **多用例组织**（feature 分目录/命名约定、跑批入口、跑批层选择 feature/tag）同样由 v1.0 核心库落地——它依赖核心库的调度层，在 bdd 直跑层做是临时的、核心库会重做。当前 `features/` 下多个文件仅是 v0.x 打磨产物，未做有意组织。（旧的 cucumber `--tags` 选子集约定随 BDD runner 一并退役，见 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)；选子集改由核心调度层据 tag 实现。）

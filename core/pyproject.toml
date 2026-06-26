@@ -1,0 +1,25 @@
+[project]
+name = "core"
+version = "0.1.0"
+description = "执行核心库（窄腰）：解析 .feature → 分组 scope → 调度 → 收集结果。零引擎依赖（ADR 0016）"
+readme = "README.md"
+requires-python = ">=3.13"
+# 仅 Gherkin 解析依赖——核心不 import 任何引擎（ADR 0023/0024：引擎跑在 worker 子进程里）
+dependencies = [
+    "gherkin-official>=29.0.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["core"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -14,7 +14,7 @@
 
 ## 输入（core → worker）：一个 scope 的活
 
-core 解析 `.feature` 成 `(keyword, text)` 序列发给 worker；**worker 不碰 `.feature` 文件**（单一解析事实源在 core，[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)）。
+一个 scope 输入 = core 的 plan 模块（[0025](./0025-plan-module-feature-to-jobs.md)）产出的一个 **Job**；core 解析 `.feature` 成有序 step 序列发给 worker，**worker 不碰 `.feature` 文件**（单一解析事实源在 core，[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)）。Background/Outline/DataTable/DocString 已在 plan 阶段展开（[0025](./0025-plan-module-feature-to-jobs.md)），worker 只见展开后的有序 step。
 
 ```jsonc
 {
@@ -28,14 +28,16 @@ core 解析 `.feature` 成 `(keyword, text)` 序列发给 worker；**worker 不�
         { "index": 0, "keyword": "Given", "text": "打开 \"https://...\"" },
         { "index": 1, "keyword": "When",  "text": "在搜索框输入 OpenAI 并提交搜索" },
         { "index": 2, "keyword": "Then",  "text": "当前页面是关于 OpenAI 的维基百科词条页" }
+        // step 可选带 "argument"：承载 DataTable/DocString 等多行参数（见 0025），有则有、无则缺省
       ]
     }
   ]
 }
 ```
 
-- **`{id, name}` 双标识**：与 scenario 给 QA 的配置心智一致；name 是人写的原值（tag/标题，可含空格/标点），id 是 core 派生的稳定干净 key（用作 RunStore/RunReport 的关联键）。
-- worker 拿 `keyword` + `text` 决定派发（见下「worker 派发」），拿 `text` 喂引擎。
+- **`{id, name}` 双标识**：与 scenario 给 QA 的配置心智一致；name 是人写的原值（tag/标题，可含空格/标点），id 是 core 派生的稳定干净 key（用作 RunStore/RunReport 的关联键）。id 派生规则见 [0025](./0025-plan-module-feature-to-jobs.md)。
+- **step.`argument`（可选）**：承载展开后的 DataTable/DocString（[0025](./0025-plan-module-feature-to-jobs.md)）；有则有、无则缺省。worker 把它连同 `text` 一起喂引擎。
+- worker 拿 `keyword` + `text` 决定派发（见下「worker 派发」），拿 `text`(+`argument`) 喂引擎。
 
 ## 输出（worker → core）：流式 JSON Lines
 
@@ -120,6 +122,16 @@ worker **边跑边流式上报**（每行一个事件），core 实时收。选�
 ## 协议是测试面（skill：interface is the test surface）
 
 core 的 `schedule`/汇总逻辑应能用一个**假 worker**（in-memory adapter，吐预设的 JSON Lines）测试，无需真起子进程、真连 AgentCore。这要求协议是纯数据（输入纯数据 in、事件流 out），不夹带句柄/回调——本 ADR 的 schema 满足。`Engine` port 的两个真 adapter（spawn node / spawn python worker）与这个假 adapter 形状一致（[0016](./0016-execution-architecture-core-lib-run-model.md)）。
+
+## 终止契约（core 请求 worker 优雅停止）
+
+协议是**单向数据流**（core 一次性喂 job → worker 流式吐事件）+ **进程级生命周期**。core 对运行中 worker 唯一需要下达的指令是「停」（超时兜底 / fail-fast 中止，见 [0026](./0026-schedule-module.md)），故不引入双向控制通道，而是把「停」做成显式契约——**分三层、各管一段，「怎么停」的机制不在协议顶层**：
+
+- **逻辑层（协议顶层）：core 经 `Engine` port 请求「停」**（`engine.stop(handle, gracePeriod)`，见 [0026](./0026-schedule-module.md)）。schedule 只表达逻辑意图，**不懂信号/进程**。
+- **机制层（Engine adapter）：把「停」翻成具体机制**——**子进程 adapter**：`SIGTERM` → 等 `gracePeriod`（默认 5s）→ 未退 `SIGKILL` 兜底；**未来 Fargate adapter**：`StopTask`。信号/进程是 adapter 的「进程世界」知识（[0016](./0016-execution-architecture-core-lib-run-model.md) ports&adapters），不渗进 schedule/协议顶层。
+- **worker 层：worker 必须响应停止信号做清理**。子进程 worker **必须捕获 `SIGTERM`**，在 finally 里**停掉 AgentCore 会话**（防泄漏继续烧钱）后退出——这正是现有 `generic.steps` After hook / `nova_ctx` finally 已跑通的清理逻辑（[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)），worker 化后移入 SIGTERM 处理。SIGKILL 兜底时会话清理可能落空（已知代价）。
+- **会话清理归 worker，schedule/adapter 都不懂 AgentCore**：三层都不调 StopBrowserSession，各层只认下层的契约边界（保持纯净）。
+- **未来演进（控制流，记路标不实现）**：若 core 需要对运行中 worker 下达「停」之外的指令（暂停 / 取消单个 scenario / 动态调度 / WebUI 交互），届时引入**显式 core→worker 控制通道**（双向消息流），另立 ADR。当前唯一控制指令是「停」，为一条指令建通用双向协议属过度工程（删除测试）。
 
 ## 现在做 / 留口子
 

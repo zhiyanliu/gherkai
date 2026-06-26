@@ -39,7 +39,7 @@
 yaozhou/
 ├── README.md                  ← 本文件
 ├── CONTEXT.md                 ← 领域术语表（glossary）
-├── docs/adr/                  ← 24 条架构决策记录
+├── docs/adr/                  ← 26 条架构决策记录
 ├── features/                  ← 共享 .feature（同一份被两腿加载；通用 step 风格）
 │   ├── wikipedia_generic.feature
 │   ├── wikipedia_assertions.feature
