@@ -1,4 +1,4 @@
-# B 步验证：tag 路由——每个 runner 只跑标了自己引擎（或未标=默认）的 scenario。
+# v0.x 验证：tag 路由——每个 runner 只跑标了自己引擎（或未标=默认）的 scenario。
 # 验证 @engine: tag 两腿可读、可据此路由。用 example.com（极简稳定，本验证只关心路由不关心内容）。
 Feature: 引擎路由（tag 验证）
 

@@ -26,7 +26,7 @@
 - AgentCore 会话生命周期编排（起/停/清理/配额）
 - 用例与测试数据的组织规范、跑批入口
 
-**这些落地的前提是统一到一种语言**，即形态 B 编排器（[0006](./0006-form-a-two-subprojects-no-orchestrator.md)）。其技术可能性已知但未验证：Nova Act 有官方 TS SDK `@aws-sdk/client-nova-act`，但它是否等同于本地 `nova.act()` 的浏览器自动化语义未证（见 0006 的不确定性记录）。**原型阶段不上形态 B**，故这些公共设施现在不抽；记着方向即可。
+**这些落地的前提**原以为是「统一到一种语言（形态 B 编排器）」，但后续实查证伪了这个前提的可行性：**Nova Act acting 锁死 Python，全 TS 统一不可行**（[0023](./0023-novaact-acting-python-locked-no-ts-core.md)：`@aws-sdk/client-nova-act` 是客户端驱动的 REST 循环、非 `nova.act()` 等价物）。框架公共设施改由**核心库（Python）+ 两腿子进程 worker**承载（[0016](./0016-execution-architecture-core-lib-run-model.md)/[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)）：报告归集=`ReportStore`/RunReport、会话生命周期=各 worker 内、跑批入口=核心调度+CLI。即「跨引擎共享止于 `features/`」仍成立（worker 代码仍各属各腿），公共设施落在**核心库**这一层、不靠跨引擎共享引擎代码。
 
 ## 何时重议
 

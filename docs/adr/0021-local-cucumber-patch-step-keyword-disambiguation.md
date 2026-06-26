@@ -1,5 +1,7 @@
 # 本地 patch @cucumber/cucumber：按关键字消除 When/Then 同 pattern 歧义
 
+> **⚠️ 状态：基本作废（被 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md) 取代）。** B1 转向后核心库自解析 Gherkin、从 AST 直接知道关键字，cucumber-js 入口连同本补丁一并退役——本 ADR 所述的 pattern-only 歧义问题不复存在。保留本文作**决策史**：记录我们曾用 patch-package 规范地解此歧义、为何、以及后来为何退役。下文描述 B1 之前（v0.x）的状态。
+
 为支撑 [0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md) 的「默认 AI = 无关键词 `When "{x}"` / `Then "{x}"`」设计，对第三方库 `@cucumber/cucumber` 打了一个**本地补丁**（patch-package）。本 ADR 记录其存在、原因、约束——**未文档化的第三方修改是维护陷阱,必须在此交代清楚**。
 
 ## 问题

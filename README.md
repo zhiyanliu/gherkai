@@ -6,6 +6,8 @@
 
 ## 现状（2026-06，已端到端验证）
 
+> **本 README 描述 `spike-validated` / v0.x 形态**（双 BDD runner 直跑：cucumber-js + pytest-bdd）。此形态已端到端验证、当前可跑。**v1.0 起架构有重大调整**：核心库自解析 Gherkin + 两腿薄 worker 子进程，**退役** cucumber-js/pytest-bdd 及 cucumber 补丁，改为 `core/` + `cli/` + `engines/{midscene,novaact}` 布局——见 ADR 0016（执行架构）/ 0022（BDD runner 退役）/ 0023（核心语言）。下文凡涉双 runner、`cucumber.mjs`、cucumber 补丁处均为 v0.x 形态。
+
 三层链路的每一层、每个连接点都已在真实 AWS 账号用真实请求验证通过：
 
 | 里程碑 | 内容                                        | 状态                |
@@ -19,8 +21,8 @@
 ## 架构速览
 
 ```
-① 用例层   features/*.feature              ← 单一共享 Gherkin（ADR 0005）
-              │  被两套 runner 各自加载
+① 用例层   features/*.feature              ← 共享 Gherkin，两腿同读一份（ADR 0005）
+              │  被两套 runner 各自加载（v0.x 形态）
 ② 执行层   Midscene(TS)    ┃  Nova Act(Python)   ← 两个独立 AI 引擎，平级
    runner  cucumber-js     ┃  pytest-bdd
    大脑    Qwen3-VL@Bedrock ┃  nova-act-latest
@@ -37,9 +39,12 @@
 yaozhou/
 ├── README.md                  ← 本文件
 ├── CONTEXT.md                 ← 领域术语表（glossary）
-├── docs/adr/                  ← 21 条架构决策记录
-├── features/                  ← 单一共享 .feature（两套 runner 都加载；通用 step 风格）
-│   └── wikipedia_generic.feature
+├── docs/adr/                  ← 24 条架构决策记录
+├── features/                  ← 共享 .feature（同一份被两腿加载；通用 step 风格）
+│   ├── wikipedia_generic.feature
+│   ├── wikipedia_assertions.feature
+│   ├── wikipedia_robustness.feature
+│   └── engine_routing.feature
 ├── midscene/                  ← Midscene 引擎子工程（TS）
 │   ├── cucumber.mjs           ← cucumber-js 配置（指向根 features/）
 │   ├── lib/agentcore-sigv4.mts ← 共享 SigV4 模块（模型连接 + 浏览器连接/CDP；spike/bdd 共用）
@@ -77,7 +82,7 @@ AWS_REGION=us-east-1 .venv/bin/python -m pytest bdd/test_generic_steps.py -s
 # → trajectory：$TMPDIR/..._nova_act_logs/<sessionId>/（默认临时目录，见 ADR 0010）
 ```
 
-两者加载的是**同一个** `features/wikipedia_generic.feature`（通用 step 风格，QA 只写自然语言）。
+两腿加载的是**同一份** `features/` 下的 `.feature`（通用 step 风格，QA 只写自然语言）。
 
 ### 怎么写 `.feature`（QA 零代码，ADR 0020）
 

@@ -72,14 +72,22 @@ _Avoid_: 以为"投票能带来确定性"——它只压 A，给不了对变更�
 _Avoid_: 把 Feature 当执行单元；把 Job 当 scenario 粒度（破坏会话依赖）；混淆 RunResult（数据）与 RunReport（报告）。
 
 **执行核心库窄腰 (Core-library narrow waist)**:
-真正的窄腰是**执行核心库**（解析 `.feature` → 分组 scope → 调度 → 收集结果），**不是 CLI**（早先措辞修正，见 ADR 0016）。CLI 是核心库的第一个、最薄的前端；WebUI 是另一个前端，**直接调核心、不 shell-out CLI**。CI/skill 通过 CLI 这个皮间接用核心。上层前端与可替换的**执行后端**（本地进程 / Fargate）都围绕核心库解耦。
-_Avoid_: 把逻辑焊死在 CLI `main()` 里；以为"WebUI 要包 CLI"；把"选哪个执行后端"当成一锤定终身。
+真正的窄腰是**执行核心库**（解析 `.feature` → 分组 scope → 调度 → 收集结果），**不是 CLI**（早先措辞修正，见 ADR 0016）。CLI 是核心库的第一个、最薄的前端；WebUI 是另一个前端，**直接调核心、不 shell-out CLI**。CI/skill 通过 CLI 这个皮间接用核心。上层前端与可替换的执行引擎（`Engine` port，本地进程 / Fargate；见下「执行引擎 port」条）都围绕核心库解耦。
+_Avoid_: 把逻辑焊死在 CLI `main()` 里；以为"WebUI 要包 CLI"；把"选哪个执行引擎（`Engine`）"当成一锤定终身。
 （版本演进 spike→v0.x→v1.0→v1.x→v2.0 见 ADR 0016。）
 
-**执行后端 (Execution backend)**:
-核心库之下真正跑测试 job 的地方，是一个 **port**（`ExecutionBackend`），由组合根注入。演进：v1.0 本地进程（浏览器仍在云端 AgentCore Browser）→ 云端倾向 Fargate/ECS（批处理 shape-fit，ADR 0017；非 AgentCore Runtime）。
-_Avoid_: 混淆"浏览器在云端"（spike 已验证）与"执行进程也在云端"（>v1.0）。
+**执行引擎 port (Engine port)**:
+核心库之下真正跑一个 scope 的地方，是一个 **port**（`Engine`，由 `ExecutionBackend` 重命名以对齐「引擎」术语，ADR 0016），由组合根注入。v1.0 的两个 adapter `MidsceneEngine`/`NovaActEngine` **形状一致**：各 spawn 对应语言的 worker 子进程、讲同一套 JSON 协议。演进：v1.0 本地进程（浏览器仍在云端 AgentCore Browser）→ 云端倾向 Fargate/ECS（批处理 shape-fit，ADR 0017；非 AgentCore Runtime）。
+_Avoid_: 混淆"浏览器在云端"（spike 已验证）与"执行进程也在云端"（>v1.0）；把它当成"核心 import 引擎"——核心永不 import 引擎，只 spawn worker。
+
+**两腿都子进程 + 薄 worker (Both-legs-subprocess + thin worker)**:
+两引擎语言锁死（Midscene 锁 TS、Nova Act acting 锁 Python，ADR 0023 证伪了全 TS 核心），故核心（Python）**对每个 scope spawn 一个 worker 子进程**——两腿对称、核心零引擎依赖。worker = 被 spawn 的进程，一生 = 开 AgentCore 会话 → 按 scope 串行跑 scenarios（每 step 派发成 act/assert）→ 回 JSON → 退出（一次调用 = 一个 job = 一个 scope）。**核心自解析 Gherkin**（单一事实源），worker 只派发不解析——故 cucumber 补丁与 pytest-bdd 路由 hack 退役（ADR 0022）。
+_Avoid_: 以为子进程里跑整个 BDD runner（那是被否的 B2）；把 worker（运行时角色）与 engine（领域概念/目录名）混用。
+
+**确定性 step 注册表 (Deterministic step registry)**:
+test engineer 扩展确定性锚点的落点：在对应 worker 里登记 `(模式 → handler)`（`@deterministic`）。核心发原始 step 文本，worker 先查注册表命中走精确 handler、未命中落 catch-all 走 AI。匹配放 worker（确定性 handler 引擎特定，碰 Playwright/CDP），核心对 step 语义无知。延续 ADR 0020 角色边界（QA 永不碰）。
+_Avoid_: 把匹配放进核心（核心只解析结构+调度，不懂 step 语义）；以为 QA 要写确定性 step。
 
 **Ports 层 (Ports & adapters)**:
-核心库把可替换的外部依赖收成独立 port（`ResultStore` 状态、`ReportStore` 报告产物、`ExecutionBackend` 执行后端），导出稳定接口；核心只依赖接口。**具体 adapter 由组合根（CLI main / WebUI bootstrap）注入**，不由 module 内部 env-sniff 自选（后者是本项目踩过的 Midscene `GlobalConfigManager` 反模式）。v1.0 只写 local adapter，云端再填 DDB/S3/Fargate（ADR 0016）。
-_Avoid_: 把多个 port 揉成一个上帝 module；让 port-module 用全局单例自选实现。
+核心库把可替换的外部依赖收成独立 port，导出稳定接口；核心只依赖接口。四个 port（ADR 0016）：`Engine`（跑 scope）、`RunStore`（**控制面**：run/job 状态/血缘，频繁读写、撑轮询续跑——DDB 主要服务它）、`ResultStore`（**数据面**：每 scenario 判定/投票/报告指针，追加为主）、`ReportStore`（归集报告产物）。`RunStore` 从原 `ResultStore` 拆出（控制面 vs 数据面访问模式不同）。**具体 adapter 由组合根（CLI main / WebUI bootstrap）注入**，不由 module 内部 env-sniff 自选（后者是本项目踩过的 Midscene `GlobalConfigManager` 反模式）。adapters 按 port 分子目录；v1.0 只写 local adapter，云端再填 DDB/S3/Fargate（ADR 0016）。
+_Avoid_: 把多个 port 揉成一个上帝 module；让 port-module 用全局单例自选实现；混淆控制面（RunStore）与数据面（ResultStore）。

@@ -23,7 +23,7 @@
 - 安装的源码：`novaact/.venv/lib/python3.13/site-packages/nova_act/`
   - AgentCore provider：`browser_auth/agentcore_session_provider.py`（`cdp_session()` yield `(ws_url, headers)`）
   - workflow contextvar：`types/workflow.py`（`@workflow` 设 `set_current_workflow`；`with Workflow` 不设，见 ADR 0004 / bdd 修复）
-- 多语言 SDK（形态 B 探路，能力存疑，见 ADR 0006）：npm `@aws-sdk/client-nova-act`、Go `aws-sdk-go-v2/service/novaact`
+- 多语言 SDK（形态 B 探路，**已证伪**：是客户端驱动的 REST 循环、非 `nova.act()` acting 等价物，acting 锁 Python，见 ADR 0006/0023）：npm `@aws-sdk/client-nova-act`、Go `aws-sdk-go-v2/service/novaact`
 
 ## AWS Bedrock / AgentCore
 
