@@ -33,7 +33,7 @@ class SubprocessWorkerHandle:
         proc = self._proc
         if proc.poll() is not None:
             return  # 已退出
-        proc.terminate()  # SIGTERM —— worker 捕获后 finally 停 AgentCore 会话再退（ADR 0024）
+        proc.terminate()  # SIGTERM —— worker 捕获后 raise→with __exit__ 解栈停 AgentCore 会话再退（ADR 0024）
         try:
             proc.wait(timeout=grace_period_s)
         except subprocess.TimeoutExpired:

@@ -39,8 +39,8 @@
 | **Job** | 提交给执行面的单元 | **= Scope**（被 session-scope 语义强制：若 job=scenario，有依赖的 scenario 会被拆到不同 microVM 无法共享会话） |
 | **Run** | 一次执行，封装多个 job | `runId`、总状态、起止、**RunResult**、**RunReport** |
 
-- **RunResult** = 机器可读汇总判定（退出码 / CI / WebUI 状态）。
-- **RunReport** = 人看的归集报告（把两腿割裂的 Midscene html / Nova trajectory 归到一处）。**这就是原 M5「报告统一」的归宿**——它不再是孤立 TODO，而是 RunReport 实体的实现。
+- **RunResult** = 机器可读汇总判定（退出码 / CI / WebUI 状态）。**已实现**：`core/model.py` 的 `RunResult`（status 三态 + 各 job 结果 + `total_cost_usd` 跨 scope 成本汇总）。
+- **RunReport** = 人看的归集报告（把两腿割裂的 Midscene html / Nova trajectory 归到一处）。**这是原 M5「报告统一」的归宿**——**v1.0 当前未实现（deferred）**：决定「先散着」（见下「版本切分」），等输出/消费要求清晰再定形态。
 
 **已定 = 概念/层级（上表）+ 协议层字段（[0024](./0024-worker-core-protocol.md)）**：每 scenario 判定（status 三态）、抖动投票 tally、规范化 errorType、cost 信封、报告产物指针（reportRefs）等 **scenario/scope 级字段已由 worker↔core 协议钉死**——它们是 RunResult/RunReport 的字段来源。**仍未定 = 持久化层 Run/Job 级字段**（runId / jobId(scopeId) / 会话血缘 sessionId / 起止时间 / DDB 表结构 / WebUI 读取面）：有意留到 v1.0 真实跑批逼出（"报告要展示什么、CI 要读什么"届时自然浮现），避免现在纸上列错。（原计划在 v0.x 逼出，但 v0.x 判「方向已证」未做真实用例验收，顺延 v1.0，见下「版本切分」。）
 
@@ -84,19 +84,21 @@ core/
 
 ## 工程布局：core / cli / engines 三者平级对标
 
+下为**目标态**。**当前实装态（v1.0 进行中）**标在各行右侧 ✅/⬜：core/ 已建；engines/ 迁移与 cli/ 待接 Midscene 那轮做，现 Nova worker 在顶层 `novaact/worker/`、组合根用 `core/run_e2e.py`（CLI 雏形）。
+
 ```
 yaozhou/
-├── core/                ← 窄腰：parse / scope 分组 / schedule / ports / 协议（纯编排，零引擎依赖）
-│   ├── parse.py · scope.py · schedule.py · protocol.py · ports.py
-│   └── adapters/        ← 见上「Ports & Adapters」（按 port 分子目录，现仅 local）
-├── cli/                 ← 最薄前端 = 组合根（在此 new 出具体 adapter 注入给 core）
+├── core/                ← 窄腰：纯编排，零引擎依赖                          ✅ 已建
+│   ├── model.py · parse.py · scope.py · schedule.py · wire.py · ports.py    ✅（协议序列化文件名是 wire.py）
+│   ├── adapters/        ← 按 port 分；现有 subprocess_engine.py（单 adapter 参数化，非 midscene.py/novaact.py 两文件）✅
+│   └── run_e2e.py       ← 组合根 / CLI 雏形                                ✅（暂代下方 cli/main.py）
+├── cli/                 ← 最薄前端 = 组合根（在此 new 出具体 adapter 注入给 core）  ⬜ 待建（现由 core/run_e2e.py 暂代）
 │   └── main.py
-└── engines/             ← 两个可插拔引擎，与 core 平级对标
-    ├── midscene/        ← 整个 TS 子工程（package.json/node_modules/lib/worker 入口）
-    │   ├── worker/run-scope.ts · ai-steps.ts · deterministic.ts   ← 由现 bdd/ 改造（脱装饰器）
-    │   └── lib/agentcore-sigv4.mts                                ← 原样保留，worker 进程内用
-    └── novaact/         ← 整个 Python 子工程（pyproject/.venv/lib/worker 入口）
-        ├── worker/run_scope.py · ai_steps.py · deterministic_steps.py
+└── engines/             ← 两个可插拔引擎，与 core 平级对标                  ⬜ 待迁移（现 midscene/、novaact/ 仍在顶层）
+    ├── midscene/        ← 整个 TS 子工程                                  ⬜ 未接 worker（Midscene 腿下一轮）
+    │   └── lib/agentcore-sigv4.mts
+    └── novaact/         ← 整个 Python 子工程                              ✅ worker 已落地（现位于顶层 novaact/worker/run_scope.py）
+        ├── worker/run_scope.py                                          ✅（确定性注册表/ai_steps 拆分留口子，见 0022）
         └── lib/workflow_setup.py
 ```
 
@@ -129,7 +131,8 @@ G1/G2 是 v1.0 核心库 `.feature` 解析的前置——其声明语法**现已
 
 ## 现在做 / 现在不做
 
-- **现在做（v1.0）**：核心库 `core/` 可被调用（逻辑不焊死在 CLI main 里）；钉死上面数据模型；定义 ports 接口（`Engine`/`RunStore`/`ResultStore`/`ReportStore`）+ 写 local adapter + 组合根注入；核心自解析 Gherkin + 两腿薄 worker（[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)）。模块设计：worker↔core 协议见 [0024](./0024-worker-core-protocol.md)；`.feature`→job 列表的 plan 模块（解析 + scope 分组 + engine 校验）见 [0025](./0025-plan-module-feature-to-jobs.md)；job 间并发调度 + 失败隔离 + 优雅终止的 schedule 模块见 [0026](./0026-schedule-module.md)。
+- **现在做（v1.0）**：核心库 `core/` 可被调用（逻辑不焊死在 CLI main 里）；钉死上面数据模型；定义 ports 接口（`Engine`/`RunStore`/`ResultStore`/`ReportStore`）+ 组合根注入；核心自解析 Gherkin + 薄 worker（[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)）。模块设计：worker↔core 协议见 [0024](./0024-worker-core-protocol.md)；plan 模块见 [0025](./0025-plan-module-feature-to-jobs.md)；schedule 模块见 [0026](./0026-schedule-module.md)。
+  - **ports 落地状态（v1.0 当前）**：`Engine` port 的 local adapter **已建**（`core/adapters/subprocess_engine.py`，子进程起 worker）；`RunStore`/`ResultStore`/`ReportStore` **仅定义了接口 Protocol、local adapter 尚未建**（结果现仅在内存 `RunResult`，未持久化）——待真实跑批逼出字段后填（与上「数据模型」节的字段级 schema 顺延一致）。Nova 腿 worker 已落地；Midscene 腿 worker 待下一轮。
 - **现在不做**：DynamoDB / S3 / Fargate adapter / 无状态机制 / WebUI ——接口已留好，等云端真需要时填 adapter + 组合根换注入。**避免为想象中的云端预先盖机器。**
 - **G1/G2 声明语法已定**（ADR 0019）；其**调度实现**（scope 串/并行、会话共享、engine 冲突校验）由 v1.0 核心库落地。
 - **多用例组织**（feature 分目录/命名约定、跑批入口、跑批层选择 feature/tag）同样由 v1.0 核心库落地——它依赖核心库的调度层，在 bdd 直跑层做是临时的、核心库会重做。当前 `features/` 下多个文件仅是 v0.x 打磨产物，未做有意组织。（旧的 cucumber `--tags` 选子集约定随 BDD runner 一并退役，见 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)；选子集改由核心调度层据 tag 实现。）

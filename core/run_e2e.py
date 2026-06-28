@@ -51,18 +51,25 @@ def main() -> int:
     def sink(ev: Event) -> None:
         print(f"  [event] {_fmt_event(ev)}")
 
-    # 4) schedule：单 job 串行（max_concurrency=1，只烧一个会话的钱），给个超时兜底
-    print("[e2e] schedule: 起真 Nova Act worker → 真 AgentCore 会话（烧钱）...")
+    # 4) schedule：并发上限可配（env MAX_CONCURRENCY，默认 1），给个超时兜底
+    import os
+    max_conc = int(os.environ.get("MAX_CONCURRENCY", "1"))
+    job_timeout = float(os.environ.get("JOB_TIMEOUT", "300"))
+    print(f"[e2e] schedule: 起真 Nova Act worker → 真 AgentCore 会话（烧钱）"
+          f"max_concurrency={max_conc} job_timeout={job_timeout}s...")
     result = schedule(
         jobs, resolver, sink,
-        ScheduleOpts(max_concurrency=1, job_timeout_s=300.0, grace_period_s=10.0),
+        ScheduleOpts(max_concurrency=max_conc, job_timeout_s=job_timeout, grace_period_s=10.0),
     )
 
     # 5) 汇总
     print(f"\n[e2e] ===== RunResult =====")
     print(f"  总状态: {result.status.value}")
+    if result.total_cost_usd is not None:
+        print(f"  总成本: ${result.total_cost_usd:.4f}")
     for jr in result.jobs:
-        print(f"  job {jr.scope_id!r}: {jr.status.value}"
+        cost_str = f"  ${jr.cost_usd:.4f}" if jr.cost_usd is not None else ""
+        print(f"  job {jr.scope_id!r}: {jr.status.value}{cost_str}"
               + (f"  ({jr.error_type}: {jr.message})" if jr.error_type else ""))
         for sr in jr.scenarios:
             print(f"    scenario {sr.scenario_id!r}: {sr.status.value}")

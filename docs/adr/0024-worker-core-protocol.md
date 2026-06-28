@@ -45,6 +45,13 @@ worker **边跑边流式上报**（每行一个事件），core 实时收。选�
 
 **事件顺序不变量**（接口的一部分，core 假定有序、乱序为 worker 违约）：`scenario_started` 必先于其 `step_done`；`scenario_done` 收尾本 scenario；`scope_done` 收尾全 scope（且为流的最后一条）。
 
+**传输通道：三通道分离（实现期细化，子进程 worker）**——0024 事件**不走 stdout**，而走一条专用管道，与引擎 SDK 的进度噪声、worker 自身诊断物理隔离：
+- **事件通道**（纯 0024 JSON Lines）：core adapter 自建管道，把写端 fd 号经环境变量 `EVENTS_FD` 告知 worker（`pass_fds` 让子进程继承该 fd 但**不重映射 fd 号**，故不硬编码 3；worker 读 `EVENTS_FD` 打开事件输出）。
+- **stdout**：留给引擎 SDK 的进度噪声（Nova Act 把 `act(...)`/trajectory 路径打到 stdout）——adapter 当日志透传，不解析。
+- **stderr**：worker 自身诊断/错误——独立通道，不被 SDK 噪声淹。
+- 调试回落：worker 无 `EVENTS_FD`（手动直跑、无 adapter）时事件回落 stdout，便于 `echo job | worker` 看输出。
+- 起因：真跑发现 Nova Act SDK 把进度信息打进 stdout，会污染事件流（被当 JSON 解析失败）——故把事件挪到专用 fd。
+
 ```jsonc
 {"type":"scenario_started","scenarioId":"..."}
 // 动作步：无 votes（core 据此知道它不是 AI 断言，不纳入抖动汇总）
@@ -127,16 +134,17 @@ core 的 `schedule`/汇总逻辑应能用一个**假 worker**（in-memory adapte
 
 协议是**单向数据流**（core 一次性喂 job → worker 流式吐事件）+ **进程级生命周期**。core 对运行中 worker 唯一需要下达的指令是「停」（超时兜底 / fail-fast 中止，见 [0026](./0026-schedule-module.md)），故不引入双向控制通道，而是把「停」做成显式契约——**分三层、各管一段，「怎么停」的机制不在协议顶层**：
 
-- **逻辑层（协议顶层）：core 经 `Engine` port 请求「停」**（`engine.stop(handle, gracePeriod)`，见 [0026](./0026-schedule-module.md)）。schedule 只表达逻辑意图，**不懂信号/进程**。
-- **机制层（Engine adapter）：把「停」翻成具体机制**——**子进程 adapter**：`SIGTERM` → 等 `gracePeriod`（默认 5s）→ 未退 `SIGKILL` 兜底；**未来 Fargate adapter**：`StopTask`。信号/进程是 adapter 的「进程世界」知识（[0016](./0016-execution-architecture-core-lib-run-model.md) ports&adapters），不渗进 schedule/协议顶层。
-- **worker 层：worker 必须响应停止信号做清理**。子进程 worker **必须捕获 `SIGTERM`**，在 finally 里**停掉 AgentCore 会话**（防泄漏继续烧钱）后退出——这正是现有 `generic.steps` After hook / `nova_ctx` finally 已跑通的清理逻辑（[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)），worker 化后移入 SIGTERM 处理。SIGKILL 兜底时会话清理可能落空（已知代价）。
+- **逻辑层（协议顶层）：schedule 经 worker 句柄请求「停」**（`handle.stop(gracePeriod)`；`handle` 由 `engine.run_scope(job)` 返回、schedule 持有，见 [0026](./0026-schedule-module.md)）。schedule 只表达逻辑意图，**不懂信号/进程**。（`Engine` port 只有 `run_scope`，**不挂 stop**——句柄自己知道怎么停，无需把 handle 反传回 engine。）
+- **机制层（Engine adapter / WorkerHandle）：把「停」翻成具体机制**——**子进程 adapter**：`SIGTERM` → 等 `gracePeriod`（默认 5s）→ 未退 `SIGKILL` 兜底；**未来 Fargate adapter**：`StopTask`。信号/进程是 adapter 的「进程世界」知识（[0016](./0016-execution-architecture-core-lib-run-model.md) ports&adapters），不渗进 schedule/协议顶层。
+- **worker 层：worker 必须响应停止信号做清理**。子进程 worker **必须捕获 `SIGTERM`**——但**不是在 handler 里 `sys.exit`**（那会跳过 `with` 块的 `__exit__`、泄漏 AgentCore 会话，是已修的真实 bug），而是 **handler `raise` 一个 `BaseException` 子类**（如 `_Terminated`；继承 `BaseException` 而非 `Exception` 以穿透 step 级 `except Exception` 不被吞）→ 异常冒泡触发三层 `with`（Workflow / `cdp_session` / `NovaAct`）的 `__exit__` 解栈，由 `cdp_session` 内 `with browser_session` 的 `__exit__` **真正释放 AgentCore 会话**（手动 `nova.close()` 只关 Playwright 连接、关不掉会话）。SIGKILL 兜底时会话清理可能落空（已知代价）。
 - **会话清理归 worker，schedule/adapter 都不懂 AgentCore**：三层都不调 StopBrowserSession，各层只认下层的契约边界（保持纯净）。
 - **未来演进（控制流，记路标不实现）**：若 core 需要对运行中 worker 下达「停」之外的指令（暂停 / 取消单个 scenario / 动态调度 / WebUI 交互），届时引入**显式 core→worker 控制通道**（双向消息流），另立 ADR。当前唯一控制指令是「停」，为一条指令建通用双向协议属过度工程（删除测试）。
 
 ## 现在做 / 留口子
 
-- **现在做（v1.0）**：上述输入/输出 schema、cost 信封、三态 status/规范化 errorType/votes 区分 AI 断言；worker 派发逻辑（确定性注册表 > URL 导航 > 默认 AI）；两腿 worker 按此 emit（Midscene worker 设法取 dump usage + reportFile；Nova worker 设 `replayable=True` 取 trajectory 路径 + 由 `time_worked_s` 算 cost_usd）。
-- **留口子不实现**：精确 token 成本（Nova 侧，等上述 UNKNOWN 有结论）；per-vote 细节；trajectory 内部结构的结构化提取（现仅存路径指针）。
+- **现在做（v1.0，已落地）**：上述输入/输出 schema、cost 信封、三态 status/votes 区分 AI 断言；worker 派发逻辑（URL 导航 > 默认 AI）；Nova worker 由 `time_worked_s` 算 cost_usd、`get_session_id()` 取会话血缘。
+- **已实现但粗粒度（留待细化）**：`errorType` —— Nova worker 当前一律归 `engine_error`（`except Exception` 兜底），按 Nova 异常树细分（timeout/guardrail/navigation_error）留口子；确定性 step 注册表（[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)）—— 仅内建 URL→导航分支，注册表本身未建。
+- **留口子不实现**：精确 token 成本（Nova 侧，等上述 UNKNOWN 有结论）；per-vote 细节；**`reportRefs`**（Nova worker 暂未设 `replayable=True` 采 trajectory 路径，事件不带 reportRefs；协议形状已留、worker 未填）；trajectory 内部结构的结构化提取。
 
 ## 重议
 

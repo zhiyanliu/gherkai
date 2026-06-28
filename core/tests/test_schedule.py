@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 from core.model import (
+    Cost,
     Job,
     Scenario,
     ScenarioDone,
@@ -194,6 +195,56 @@ def test_output_order_stable():
     })
     result = schedule(jobs, FakeResolver(engine), CollectSink())
     assert [jr.scope_id for jr in result.jobs] == ["z", "a", "m"]
+
+
+# ---- cost 汇总：step→job→run 累加 cost_usd ----
+def _events_with_cost(scenario_id: str, step_costs: list[float]) -> list:
+    """构造带 cost 的事件流：每个 step 一个 cost_usd。"""
+    evs = [ScenarioStarted(scenario_id=scenario_id)]
+    for i, c in enumerate(step_costs):
+        evs.append(StepDone(
+            scenario_id=scenario_id, step_index=i, status=Status.PASSED,
+            cost=Cost(cost_usd=c, precision="estimated", basis="agent_time",
+                      evidence={"time_worked_s": c / 4.75 * 3600}),
+        ))
+    evs.append(ScenarioDone(scenario_id=scenario_id, status=Status.PASSED))
+    return evs
+
+
+def test_cost_aggregation_step_to_job_to_run():
+    # 两个 scope：a 的 step 成本 [0.01, 0.02]=0.03；b 的 [0.05]=0.05；run 总 0.08
+    engine = FakeEngine({
+        "a": _events_with_cost("a:0", [0.01, 0.02]),
+        "b": _events_with_cost("b:0", [0.05]),
+    })
+    result = schedule([_job("a"), _job("b")], FakeResolver(engine), CollectSink())
+    a_jr = next(jr for jr in result.jobs if jr.scope_id == "a")
+    b_jr = next(jr for jr in result.jobs if jr.scope_id == "b")
+    assert abs(a_jr.cost_usd - 0.03) < 1e-9   # scope 级累加
+    assert abs(b_jr.cost_usd - 0.05) < 1e-9
+    assert abs(result.total_cost_usd - 0.08) < 1e-9  # run 级跨 scope 累加
+
+
+def test_cost_none_when_no_cost_data():
+    # 无 cost 的事件流 → cost_usd / total_cost_usd 保持 None（不假装 0）
+    engine = FakeEngine({"a": _passing_events("a", "a:0")})  # 这些 step 无 cost
+    result = schedule([_job("a")], FakeResolver(engine), CollectSink())
+    assert result.jobs[0].cost_usd is None
+    assert result.total_cost_usd is None
+
+
+def test_cost_partial_some_jobs_have_cost():
+    # 混合：a 有 cost、b 无 → run 总 = a 的（只对有 cost 的求和）
+    engine = FakeEngine({
+        "a": _events_with_cost("a:0", [0.04]),
+        "b": _passing_events("b", "b:0"),  # 无 cost
+    })
+    result = schedule([_job("a"), _job("b")], FakeResolver(engine), CollectSink())
+    a_jr = next(jr for jr in result.jobs if jr.scope_id == "a")
+    b_jr = next(jr for jr in result.jobs if jr.scope_id == "b")
+    assert abs(a_jr.cost_usd - 0.04) < 1e-9
+    assert b_jr.cost_usd is None
+    assert abs(result.total_cost_usd - 0.04) < 1e-9
 
 
 # ---- 并发上限：max_concurrency=1 → 串行，仍全部跑完 ----

@@ -1,11 +1,14 @@
-"""Nova Act 薄 worker（ADR 0022/0024）：读 stdin 的 job JSON → 跑一个 scope → 吐 0024 事件到 stdout。
+"""Nova Act 薄 worker（ADR 0022/0024）：读 stdin 的 job JSON → 跑一个 scope → 吐 0024 事件到事件通道。
 
 这是从 bdd/test_generic_steps.py 改造而来：脱掉 pytest-bdd 装饰器，逻辑（开会话/act/投票/派发）原样复用。
 core 经子进程 adapter 起本 worker（ADR 0026 机制层），讲 0024 协议。
 
+三通道分离（ADR 0024）：0024 事件吐到 EVENTS_FD 指定的 fd（无则回落 stdout，便于手动直跑调试）；
+引擎 SDK 的进度噪声留 stdout；worker 自身诊断/日志走 stderr。
+
 一生（ADR 0024）：
-  读 stdin job → 开 AgentCore 会话 → 按 scope 串行跑 scenarios（每 step 派发）→ 逐事件吐 stdout
-  → scope_done → 退出。捕获 SIGTERM：finally 停会话（终止契约）。
+  读 stdin job → 开 AgentCore 会话 → 按 scope 串行跑 scenarios（每 step 派发）→ 逐事件吐事件通道
+  → scope_done → 退出。SIGTERM：handler raise _Terminated → 三层 with 解栈释放会话（终止契约）。
 
 派发（ADR 0020/0024）：
   step.text 含 URL 字面量（引号内 https?://）→ 内建确定性导航 go_to_url（不浪费 AI）
@@ -153,50 +156,58 @@ def _aggregate(statuses: list[str]) -> str:
     return "passed"
 
 
+class _Terminated(BaseException):
+    """SIGTERM 转成的异常（ADR 0024 终止契约）。
+
+    继承 BaseException 而非 Exception——这样它不会被 _run_step 的 `except Exception` 误吞，
+    而是穿透 step 级 catch、向上冒泡，触发三层 with（NovaAct / cdp_session / workflow）的
+    __exit__ 按序跑完整清理链。AgentCore 会话释放在 cdp_session 内的 `with browser_session`
+    那层（实测 agentcore_session_provider.cdp_session），靠它的 __exit__ 真正关会话——
+    手动 nova.close() 只关 Playwright 连接、关不掉 AgentCore 会话（会继续烧钱）。
+    """
+
+
 def main() -> int:
     job = json.loads(sys.stdin.readline())
     scope = job["scope"]
     scenarios = job["scenarios"]
-
-    nova = None
     session_id = None
 
     def _on_sigterm(signum, frame):
-        # 终止契约（ADR 0024）：收到 SIGTERM → 关会话再退。with 块的 __exit__ 在 sys.exit 时不一定跑，
-        # 故这里显式关。
-        log("worker: SIGTERM received, closing AgentCore session")
-        try:
-            if nova is not None:
-                nova.close()
-        except Exception:
-            pass
-        sys.exit(0)
+        # 不在这里 sys.exit（那样会跳过 with 的 __exit__、泄漏 AgentCore 会话）；
+        # 而是 raise，让异常冒泡触发三层 with 的自然清理（ADR 0024）。
+        log("worker: SIGTERM received, unwinding for clean session shutdown")
+        raise _Terminated()
 
     signal.signal(signal.SIGTERM, _on_sigterm)
 
     ensure_workflow_definition(WORKFLOW_DEF, region=REGION, description="Nova Act worker (ADR 0024)")
     wf = Workflow(model_id=MODEL_ID, boto_session_kwargs={"region_name": REGION}, workflow_definition_name=WORKFLOW_DEF)
-    with wf:
-        outer = get_current_workflow()
-        set_current_workflow(wf)
-        try:
-            provider = AgentCoreBrowserSessionProvider(region=REGION)
-            with provider.cdp_session() as (ws_url, headers):
-                with NovaAct(
-                    cdp_endpoint_url=ws_url, cdp_headers=headers, browser_auth=provider,
-                    starting_page="about:blank",
-                ) as nova:
-                    # 取真实 AgentCore 会话 id（血缘，进 scope_done → RunStore，ADR 0016/0024）。
-                    # NovaAct 已 started，get_session_id() 安全。
-                    session_id = nova.get_session_id()
-                    # scope 内串行跑 scenarios，共享同一会话（ADR 0019/0024）
-                    for sc in scenarios:
-                        sid = sc["id"]
-                        emit({"type": "scenario_started", "scenarioId": sid})
-                        statuses = [_run_step(nova, sid, st) for st in sc["steps"]]
-                        emit({"type": "scenario_done", "scenarioId": sid, "status": _aggregate(statuses)})
-        finally:
-            set_current_workflow(outer)
+    try:
+        with wf:
+            outer = get_current_workflow()
+            set_current_workflow(wf)
+            try:
+                provider = AgentCoreBrowserSessionProvider(region=REGION)
+                with provider.cdp_session() as (ws_url, headers):
+                    with NovaAct(
+                        cdp_endpoint_url=ws_url, cdp_headers=headers, browser_auth=provider,
+                        starting_page="about:blank",
+                    ) as nova:
+                        # 取真实 AgentCore 会话 id（血缘，进 scope_done → RunStore，ADR 0016/0024）。
+                        session_id = nova.get_session_id()
+                        # scope 内串行跑 scenarios，共享同一会话（ADR 0019/0024）
+                        for sc in scenarios:
+                            sid = sc["id"]
+                            emit({"type": "scenario_started", "scenarioId": sid})
+                            statuses = [_run_step(nova, sid, st) for st in sc["steps"]]
+                            emit({"type": "scenario_done", "scenarioId": sid, "status": _aggregate(statuses)})
+            finally:
+                set_current_workflow(outer)
+    except _Terminated:
+        # SIGTERM：三层 with 的 __exit__ 已在冒泡过程中跑完（会话已释放）。干净退出，不吐 scope_done。
+        log("worker: session shutdown complete after SIGTERM")
+        return 0
 
     emit({
         "type": "scope_done", "scopeId": scope["id"], "sessionId": session_id,

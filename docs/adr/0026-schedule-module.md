@@ -9,14 +9,15 @@ schedule(jobs: Job[], engines: EngineResolver, sink: (event) -> void, opts) -> R
    // EngineResolver: (engineName) -> Engine —— 按 job.engine 解析 Engine，schedule 对腿数/腿名无知
    // sink: 接收 0024 原始流式事件的回调（pass-through，供进度/落地）
 
-opts = {
+opts = {                 // 时间单位统一为秒；代码字段名带 _s 后缀（job_timeout_s/grace_period_s）
   maxConcurrency = 4,    // 同时在跑的 worker 上限
   failFast = false,      // 任一 job 崩是否中止整批
-  jobTimeout = null,     // per-job 墙钟超时（null=不超时；超时记 status:error + errorType:timeout）
-  gracePeriod = 5_000,   // 停止请求后等 worker 优雅退出的宽限毫秒，超期强杀
-  clock,                 // 时间源（可注入，便于 fake clock 单测超时/grace 路径）
+  jobTimeout = null,     // per-job 墙钟超时（秒；null=不超时；超时记 status:error + errorType:timeout）
+  gracePeriod = 5,       // 停止请求后等 worker 优雅退出的宽限秒，超期强杀
+  clock,                 // 时间源（可注入 fake clock 单测超时/grace 路径；默认 monotonic，抗系统时钟回拨）
 }
 ```
+（上为语言中立伪代码；实际实现为 dataclass `ScheduleOpts`，字段 snake_case：`max_concurrency`/`fail_fast`/`job_timeout_s`/`grace_period_s`/`clock`。）
 
 - **注入 `engines`（`EngineResolver`：按 `job.engine` 解析 Engine）而非自己 spawn** → 可测（skill：accept dependencies, don't create them）：测试注入假 Engine（吐预设 JSON Lines，[0024](./0024-worker-core-protocol.md)）即可验调度逻辑，无需真起子进程/真连 AgentCore。**schedule 对腿数/腿名无知**——焊死 `{midscene, novaact}` 会让第三个引擎到来即改接口；用 resolver 则只动组合根注入。
 - **注入 `sink`**（`(event) -> void` 回调，收流式事件的去处：写 ResultStore / 转 RunReport / CLI 打印进度）→ schedule 边收边转，不自己决定结果存哪（[0016](./0016-execution-architecture-core-lib-run-model.md) ports）。
@@ -51,17 +52,19 @@ opts = {
 ### 优雅终止（schedule 只下逻辑「停」指令，机制归 adapter）
 
 三层各司其职，「怎么停」的具体机制**不在 schedule**：
-- **schedule → Engine port**：只调逻辑指令 `engine.stop(handle, gracePeriod)`（「请停这个 worker」）。schedule **不懂** SIGTERM/进程/StopTask——只知道「下停止指令、等归约」。
-- **Engine adapter → worker**：把逻辑「停」翻成具体机制——**子进程 adapter**：`SIGTERM` → 等 `gracePeriod`（默认 5s）→ 未退则 `SIGKILL` 兜底；**未来 Fargate adapter**：翻成 `StopTask`。这是 adapter 该藏的「进程/云」知识（[0016](./0016-execution-architecture-core-lib-run-model.md) ports&adapters），**故「上云只换 adapter」成立**（见下「留口子」），schedule 一行不改。
-- **worker 内部**：收到停止信号 → finally 拆 engine SDK + 停 AgentCore 会话 → 退出（[0024](./0024-worker-core-protocol.md) 终止契约；现 `generic.steps` After / `nova_ctx` finally 已是此形状）。
+- **schedule → WorkerHandle**：只调逻辑指令 `handle.stop(gracePeriod)`（「请停这个 worker」）。`handle` 由 `engine.run_scope(job)` 返回、schedule 持有；`Engine` port **只有 `run_scope`、不挂 stop**（句柄自己知道怎么停）。schedule **不懂** SIGTERM/进程/StopTask——只知道「下停止指令、等归约」。
+- **WorkerHandle（adapter 内）→ worker**：把逻辑「停」翻成具体机制——**子进程 handle**：`SIGTERM` → 等 `gracePeriod`（默认 5s）→ 未退则 `SIGKILL` 兜底；**未来 Fargate**：翻成 `StopTask`。这是 adapter 该藏的「进程/云」知识（[0016](./0016-execution-architecture-core-lib-run-model.md) ports&adapters），**故「上云只换 adapter」成立**（见下「留口子」），schedule 一行不改。
+- **worker 内部**：收到 `SIGTERM` → handler `raise` 一个 `BaseException` 子类（穿透 step 级 `except Exception`）→ 三层 `with`（Workflow / cdp_session / NovaAct）的 `__exit__` 解栈，由 `with browser_session` 的 `__exit__` 真正释放 AgentCore 会话（**不**用 `sys.exit`——那会跳过 `__exit__` 泄漏会话，是已修的真实 bug；详见 [0024](./0024-worker-core-protocol.md) 终止契约）。
 - **会话清理归 worker，schedule/adapter 都不懂 AgentCore**：schedule 下逻辑指令、adapter 发机制信号、worker 停会话——三层都不调 StopBrowserSession（保持各层纯净，不渗入下层知识）。
 
 > **进程拓扑（澄清「几个地方」）**：实际是 **2 进程 + 1 远程 + 1 seam**——①core/schedule 进程；②`Engine` adapter（在 core 进程内，但它是通向「进程/云」世界的 seam，「怎么停」知识归这里）；③worker 子进程（engine SDK 是**进程内的库**、非独立进程）；④远程 AgentCore 浏览器会话（云端、worker 经 CDP 连）。engine SDK 拆除 + 会话停止都在 worker 进程内完成。
 
-### 事件归集
+### 事件归集（status + cost 两级归约）
 
-- 边收 worker 的流式事件（[0024](./0024-worker-core-protocol.md) JSON Lines：`scenario_started`/`step_done`/`scenario_done`/`scope_done`）边转给 `sink`；汇总成 `RunResult`。
+- 边收 worker 的流式事件（[0024](./0024-worker-core-protocol.md) JSON Lines：`scenario_started`/`step_done`/`scenario_done`/`scope_done`）边转给 `sink`；归约成 `RunResult`。
 - 多 worker 并行 → 多路事件流交错，schedule 按 `scopeId`/`scenarioId` 归位（[0024](./0024-worker-core-protocol.md) 标识键）。
+- **status 归约**：scenario → job（任一 error→error / 任一 failed→failed / 全 passed→passed）→ run（同规则跨 job）。
+- **cost 归约**（产品价值：一次跑批多少钱）：累加 `step_done.cost.cost_usd` 成 `JobResult.cost_usd`（scope 级），再跨 job 求和成 `RunResult.total_cost_usd`（run 级）。语义：**无任何 cost 数据则 None、不假装 0**（cost 信封见 [0024](./0024-worker-core-protocol.md)）。
 
 ## 治理旋钮 = 注入参数 + 保守默认（贯穿原则）
 
@@ -69,8 +72,8 @@ opts = {
 
 ## 现在做 / 留口子
 
-- **现在做（v1.0）**：上述接口、job 间并发（上限+排队）、失败隔离（默认隔离/可配 fail-fast）、超时兜底、优雅终止（schedule 调 `engine.stop(handle, grace)`；子进程 adapter 内 SIGTERM+宽限+SIGKILL）、事件归集成 RunResult。
-- **留口子不实现**：core→worker 控制流（暂停/取消单 scenario/动态调度，等真需求，见 [0024](./0024-worker-core-protocol.md) 终止契约节）；跨 job 的智能调度（按成本/优先级排序，现 FIFO 排队即可）；云端分布式调度（v1.1 Fargate，[0017](./0017-cloud-execution-fargate-over-runtime.md)，那时「起 worker」从 spawn 子进程换成提交 Fargate task、`engine.stop` 从发信号换成 StopTask，**均在 Engine adapter 内部，schedule 接口/旋钮不变**）。
+- **现在做（v1.0）**：上述接口、job 间并发（上限+排队）、失败隔离（默认隔离/可配 fail-fast）、超时兜底、优雅终止（schedule 调 `handle.stop(grace)`；子进程 handle 内 SIGTERM+宽限+SIGKILL）、事件归集成 RunResult（status + cost 两级归约）。
+- **留口子不实现**：core→worker 控制流（暂停/取消单 scenario/动态调度，等真需求，见 [0024](./0024-worker-core-protocol.md) 终止契约节）；跨 job 的智能调度（按成本/优先级排序，现 FIFO 排队即可）；云端分布式调度（v1.1 Fargate，[0017](./0017-cloud-execution-fargate-over-runtime.md)，那时「起 worker」从 spawn 子进程换成提交 Fargate task、`handle.stop` 从发信号换成 StopTask，**均在 Engine adapter / WorkerHandle 内部，schedule 接口/旋钮不变**）。
 
 ## 重议
 

@@ -69,7 +69,7 @@ Job = {
 **`uri` 约定**：plan 把调用方传入的 `uri` **原样**用作 id 前缀，**不做路径解析**（plan 不碰 FS、无 base dir，故无「相对谁」的语义）。调用方（组合根/CLI）负责传一个稳定可读的 `uri`（如相对仓库根的路径）。下文 id 规则统一以 `<uri>` 表示。
 
 - `scenarioId`：`<uri>:<scenario行号>`；Outline 展开的多个 scenario 共享 scenario 行号，故各自再加 `:<example行号>` 消歧（行号取自 AST，见上「行号来源」）。
-- `scenarioName`：Scenario 标题（`<placeholder>` 已插值）；Outline 展开的多个 scenario 若标题模板不含占位符会重名，故**追加 Examples 行标识**（如 `登录 [role=admin]`）保证可区分、可追溯。
+- `scenarioName`：Scenario 标题（`<placeholder>` 已插值）；Outline 展开的多个 scenario 若标题模板不含占位符会重名，故**追加 Examples 行标识**（实现用 `[@<example行号>]`，如 `登录 [@15]`）保证可区分、可追溯。
 - `scopeId`：有 `@scope:X` → 用 `X`（干净 token）；无标 → 各 scenario 自成单元素 scope，`scopeId` **= 该 scenario 的 `scenarioId`**（直接复用，自动继承上面的 Outline `:<example行号>` 消歧，不会撞 id）。
 - `scopeName`：有 `@scope:X` → `@scope` 原值（可含空格/标点的人写名）；无标 → 取该 scenario 的标题（人写名），**不复用机器派生的 `scopeId`**（保持 name = 人写展示名的语义，对齐 [0024](./0024-worker-core-protocol.md)）。
 - 行号稳定（feature 不大改即不变）、人可读出来源。若未来需更强稳定性可引 `@id:` tag，暂不做。
@@ -79,7 +79,7 @@ Job = {
 - core 只认我们的领域模型 `{id,name,steps[{index,keyword,text,argument?}]}`；**gherkin 的 pickle dict 形状不外泄**到 core 其余部分。
 - **`argument` 是 parse 重映射成的自有形状、不透传 pickle 子 dict**：实测 pickle 的 argument 是 `{docString:{content}}` / `{dataTable:{rows:[{cells:[{value}]}]}}` 这类 gherkin 内部结构；parse 把它归一成我们自有的简洁形状（如 `{kind:"docString", content}` / `{kind:"dataTable", rows:[[cell…]…]}`），避免 pickle 形状经 argument 漏进领域模型。
 - 这是个 seam，但**性质 = 单实现（gherkin-official）+ 防御性封装**，**非** [0024](./0024-worker-core-protocol.md) `Engine` port 那种「两个真 adapter」的 seam（那里 midscene/novaact 是两个真实现）。立得住靠两个理由：① [0024](./0024-worker-core-protocol.md) 的 step 领域模型 ≠ pickle 形状，本就要转换层；② 本项目有被第三方解析库行为坑过的教训（cucumber 补丁 [0021](./0021-local-cucumber-patch-step-keyword-disambiguation.md) → 已退役、core 自解析 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)），把库行为收在一个接口后，升级/适配/替换只动 `parse` 内部。（下条「升级 ≥31.0.0 回归比对」是**同库版本迁移**，非引入第二个解析器实现。）
-- 已装 `gherkin-official 29.0.0`（导入名 `gherkin`，路径 `gherkin.parser` / `gherkin.pickles.compiler`）；`pytest-bdd 8.1.0` 内部即依赖它。**不依赖 pytest-bdd 的内部解析符号**（既要退役、又是非公开 API）。如需顶层 `from gherkin import Parser, Compiler` 公开导出需 ≥31.0.0；升级后用同一 feature 回归比对一次。
+- 版本（实装）：**core 子工程装 `gherkin-official 41.0.0`，直接用顶层导出 `from gherkin import Parser, Compiler`**（≥31.0.0 起提供顶层导出）。导入名 `gherkin`。（novaact worker 的 venv 另装 29.0.0——但 worker **不 import gherkin**、不解析 `.feature`（解析是 core 的事，[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)），故版本不一致无碍。）**不依赖 pytest-bdd 的内部解析符号**（既要退役、又是非公开 API）。Parser→dict、Compiler→pickles 这套核心契约跨大版本稳定；升级后用同一 feature 回归比对一次。
 
 ## test cases（护栏，本模块强制）
 

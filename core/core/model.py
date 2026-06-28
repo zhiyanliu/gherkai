@@ -174,6 +174,7 @@ class JobResult:
     status: Status  # 汇总：任一 scenario error→error；任一 failed→failed；全 passed→passed
     scenarios: list[ScenarioResult] = field(default_factory=list)
     session_id: str | None = None
+    cost_usd: float | None = None  # scope 级成本（累加本 scope 各 step 的 cost.cost_usd；无则 None）
     error_type: str | None = None  # job 级失败（worker 崩/超时）时有
     message: str | None = None
 

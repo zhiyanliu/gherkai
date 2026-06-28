@@ -144,6 +144,9 @@ class _Worker:
             cur = scenario_status.get(event.scenario_id)
             if event.status == Status.ERROR or (event.status == Status.FAILED and cur != Status.ERROR):
                 scenario_status[event.scenario_id] = event.status
+            # 累加 step 成本到 scope 级（cost_usd 可对称汇总，ADR 0024）
+            if event.cost is not None and event.cost.cost_usd is not None:
+                result.cost_usd = (result.cost_usd or 0.0) + event.cost.cost_usd
         elif isinstance(event, ScopeDone):
             result.session_id = event.session_id
 
@@ -190,6 +193,8 @@ def schedule(
     job_results.sort(key=lambda jr: order.get(jr.scope_id, 0))
 
     run_status = _aggregate([jr.status for jr in job_results])
-    # total_cost_usd 留待 ResultStore 落地：cost 在 step_done 事件的 cost.cost_usd 里，
-    # 由 sink/ResultStore 侧累加（避免 schedule 与存储层重复持有 cost）。schedule 不算，置 None。
-    return RunResult(status=run_status, jobs=job_results, total_cost_usd=None)
+    # 跨 job 累加 scope 级成本 → run 级 total_cost_usd（产品价值：一次跑批多少钱，ADR 0024）。
+    # None 语义：无任何 cost 数据时仍 None（不假装 0）；有则求和。
+    job_costs = [jr.cost_usd for jr in job_results if jr.cost_usd is not None]
+    total_cost = sum(job_costs) if job_costs else None
+    return RunResult(status=run_status, jobs=job_results, total_cost_usd=total_cost)

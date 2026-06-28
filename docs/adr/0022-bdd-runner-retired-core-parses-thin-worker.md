@@ -37,6 +37,8 @@
 
 ## 确定性 step 怎么扩展（test engineer 的扩展点）
 
+> **实现状态（v1.0 当前）**：下述 `@deterministic` 注册表**尚未落地**——Nova worker（`novaact/worker/run_scope.py`）当前只有**内建的 URL→导航确定性分支**（step 文本含引号内 URL → `go_to_url`，[0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md)），其余 step 走默认 AI catch-all（When→act / Then→act_get+投票）。下文描述的「test engineer 自注册任意确定性 step」是**留口子的设计目标**，待真实需求出现时建。
+
 **扩展点 = 对应 worker 里的一张 step 注册表**（`(模式 → handler)`）。延续 [0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md) 的脚手架定位与角色边界（QA 永远只写人话、不碰确定性 step）：
 
 ```python
