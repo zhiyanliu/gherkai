@@ -17,7 +17,7 @@ from __future__ import annotations
 import threading
 import time as _time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable
 
 from core.model import (
@@ -27,11 +27,25 @@ from core.model import (
     RunResult,
     ScenarioDone,
     ScenarioResult,
+    ScenarioStarted,
     ScopeDone,
+    ScopeStarted,
     Status,
     StepDone,
+    StepResult,
+    StepStarted,
 )
 from core.ports import EngineResolver, Sink
+
+
+@dataclass
+class _Timing:
+    """单个 worker 跑批中各级起始时间戳 + 暂存的 step 结果（core 算墙钟时长用，ADR 0024）。"""
+
+    scope_start: float | None = None
+    scenario_start: dict[str, float] = field(default_factory=dict)
+    step_start: dict[tuple[str, int], float] = field(default_factory=dict)
+    steps: dict[str, list[StepResult]] = field(default_factory=dict)  # scenario_id → 暂存 StepResult
 
 
 @dataclass
@@ -76,6 +90,8 @@ class _Worker:
         job = self.job
         result = JobResult(scope_id=job.scope_id, status=Status.PASSED)
         scenario_status: dict[str, Status] = {}
+        # 时长追踪（core 用事件到达时间戳算墙钟，ADR 0024；clock 与超时复用同一注入时钟）：
+        timing = _Timing()
 
         # 起 worker 前先看是否已被 fail-fast 中止（排队中的 job 不该再起、不烧钱）
         if self.abort_flag.is_set():
@@ -113,7 +129,7 @@ class _Worker:
                     return result
 
                 self._emit(event)
-                self._reduce(event, result, scenario_status)
+                self._reduce(event, result, scenario_status, timing, clock())
         except Exception as e:  # worker 迭代中崩（异常退出）
             self._stop()
             result.status = Status.ERROR
@@ -129,26 +145,54 @@ class _Worker:
         with self.sink_lock:  # 多 worker 并发 → 串行化 sink 调用（sink 实现不必线程安全）
             self.sink(event)
 
-    def _reduce(self, event: Event, result: JobResult, scenario_status: dict[str, Status]) -> None:
-        if isinstance(event, ScenarioDone):
-            scenario_status[event.scenario_id] = event.status
-            result.scenarios.append(
-                ScenarioResult(
-                    scenario_id=event.scenario_id,
-                    status=event.status,
-                    report_refs=event.report_refs,
-                )
-            )
+    def _reduce(
+        self, event: Event, result: JobResult, scenario_status: dict[str, Status],
+        timing: "_Timing", now: float,
+    ) -> None:
+        # started 事件：记各级起始时间戳（now = 事件到达 core 的墙钟，ADR 0024）
+        if isinstance(event, ScopeStarted):
+            timing.scope_start = now
+        elif isinstance(event, ScenarioStarted):
+            timing.scenario_start[event.scenario_id] = now
+        elif isinstance(event, StepStarted):
+            timing.step_start[(event.scenario_id, event.step_index)] = now
         elif isinstance(event, StepDone):
             # 兜底：若某 scenario 有 step error 但无 scenario_done，仍记一笔（取最严重）
             cur = scenario_status.get(event.scenario_id)
             if event.status == Status.ERROR or (event.status == Status.FAILED and cur != Status.ERROR):
                 scenario_status[event.scenario_id] = event.status
-            # 累加 step 成本到 scope 级（cost_usd 可对称汇总，ADR 0024）
-            if event.cost is not None and event.cost.cost_usd is not None:
-                result.cost_usd = (result.cost_usd or 0.0) + event.cost.cost_usd
+            # 累加 step 成本到 scope 级（ADR 0024）：core 只合计 engine 报的原生量、不算美元。
+            cost = event.cost
+            if cost is not None:
+                if cost.tokens is not None:
+                    result.total_tokens = (result.total_tokens or 0) + cost.tokens
+                if cost.time_worked_s is not None:
+                    result.total_time_worked_s = (result.total_time_worked_s or 0.0) + cost.time_worked_s
+            # step 墙钟时长（step_started→此刻）+ 暂存 StepResult，待 scenario_done 挂入
+            st = timing.step_start.get((event.scenario_id, event.step_index))
+            dur_ms = (now - st) * 1000.0 if st is not None else None
+            timing.steps.setdefault(event.scenario_id, []).append(
+                StepResult(index=event.step_index, status=event.status,
+                           duration_ms=dur_ms, votes=event.votes, error_type=event.error_type)
+            )
+        elif isinstance(event, ScenarioDone):
+            scenario_status[event.scenario_id] = event.status
+            ss = timing.scenario_start.get(event.scenario_id)
+            result.scenarios.append(
+                ScenarioResult(
+                    scenario_id=event.scenario_id,
+                    status=event.status,
+                    steps=timing.steps.get(event.scenario_id, []),
+                    duration_ms=(now - ss) * 1000.0 if ss is not None else None,
+                    report_refs=event.report_refs,
+                )
+            )
         elif isinstance(event, ScopeDone):
             result.session_id = event.session_id
+            if event.report_refs:
+                result.report_refs = result.report_refs + event.report_refs
+            if timing.scope_start is not None:
+                result.duration_ms = (now - timing.scope_start) * 1000.0
 
     def _stop(self) -> None:
         if self.handle is not None:
@@ -176,6 +220,7 @@ def schedule(
         _Worker(job, engines, sink, sink_lock, opts, abort_flag) for job in jobs
     ]
 
+    run_start = opts.clock()  # run 级墙钟起点（整体包住，含并发）
     job_results: list[JobResult] = []
     with ThreadPoolExecutor(max_workers=max(1, opts.max_concurrency)) as pool:
         future_to_worker = {pool.submit(w.run): w for w in workers}
@@ -187,14 +232,20 @@ def schedule(
                 abort_flag.set()
                 for w in workers:
                     w._stop()
+    run_duration_ms = (opts.clock() - run_start) * 1000.0
 
     # 还原成 jobs 输入顺序（as_completed 是完成序），稳定输出
     order = {job.scope_id: i for i, job in enumerate(jobs)}
     job_results.sort(key=lambda jr: order.get(jr.scope_id, 0))
 
     run_status = _aggregate([jr.status for jr in job_results])
-    # 跨 job 累加 scope 级成本 → run 级 total_cost_usd（产品价值：一次跑批多少钱，ADR 0024）。
-    # None 语义：无任何 cost 数据时仍 None（不假装 0）；有则求和。
-    job_costs = [jr.cost_usd for jr in job_results if jr.cost_usd is not None]
-    total_cost = sum(job_costs) if job_costs else None
-    return RunResult(status=run_status, jobs=job_results, total_cost_usd=total_cost)
+    # 成本归约（ADR 0024）：core 只各自合计 engine 报的原生量，不算美元、不判可信度。
+    #   total_tokens / total_time_worked_s = 跨 job 求和；None=无腿报这个量（不假装 0）。
+    tok = [jr.total_tokens for jr in job_results if jr.total_tokens is not None]
+    tw = [jr.total_time_worked_s for jr in job_results if jr.total_time_worked_s is not None]
+    return RunResult(
+        status=run_status, jobs=job_results,
+        total_tokens=sum(tok) if tok else None,
+        total_time_worked_s=sum(tw) if tw else None,
+        duration_ms=run_duration_ms,
+    )

@@ -33,13 +33,14 @@
 
 | 概念 | 是什么 | 产出 |
 |---|---|---|
-| **Scenario** | Gherkin 单个 `Scenario:` | pass/fail、A/B 断言、抖动数据（投票）、原生报告引用 |
+| **Step** | scenario 内单步 | pass/fail/error、投票 tally、墙钟时长（`StepResult`，core 首次保留 step 级粒度） |
+| **Scenario** | Gherkin 单个 `Scenario:` | pass/fail、A/B 断言、抖动数据（投票）、原生报告引用、墙钟时长 |
 | **Feature**（`.feature`） | 含 1..N scenario | **组织轴**（正交，非执行单元） |
-| **Scope**（session scope） | 共享操作上下文的 scenario 分组 | **执行单元**：scope 内串行、scope 间并行；语义层配置（用例的上下文依赖在此显式表达） |
+| **Scope**（session scope） | 共享操作上下文的 scenario 分组 | **执行单元**：scope 内串行、scope 间并行；产出原生量成本合计 + 墙钟时长 |
 | **Job** | 提交给执行面的单元 | **= Scope**（被 session-scope 语义强制：若 job=scenario，有依赖的 scenario 会被拆到不同 microVM 无法共享会话） |
-| **Run** | 一次执行，封装多个 job | `runId`、总状态、起止、**RunResult**、**RunReport** |
+| **Run** | 一次执行，封装多个 job | `runId`、总状态、起止、墙钟时长、**RunResult**、**RunReport** |
 
-- **RunResult** = 机器可读汇总判定（退出码 / CI / WebUI 状态）。**已实现**：`core/model.py` 的 `RunResult`（status 三态 + 各 job 结果 + `total_cost_usd` 跨 scope 成本汇总）。
+- **RunResult** = 机器可读汇总判定（退出码 / CI / WebUI 状态）。**已实现**：`core/model.py` 的 `RunResult`（status 三态 + 各 job 结果 + `total_tokens`/`total_time_worked_s` 两个原生量各自跨 scope 合计 + `duration_ms` 总墙钟时长）。其下 `JobResult` → `ScenarioResult` → `StepResult` 三层结果（core 首次保留 step 级粒度），各级带 `duration_ms` 墙钟时长（性能指标，与成本的 `time_worked_s` 正交，见 [0024](./0024-worker-core-protocol.md)）。
 - **RunReport** = 人看的归集报告（把两腿割裂的 Midscene html / Nova trajectory 归到一处）。**这是原 M5「报告统一」的归宿**——**v1.0 当前未实现（deferred）**：决定「先散着」（见下「版本切分」），等输出/消费要求清晰再定形态。
 
 **已定 = 概念/层级（上表）+ 协议层字段（[0024](./0024-worker-core-protocol.md)）**：每 scenario 判定（status 三态）、抖动投票 tally、规范化 errorType、cost 信封、报告产物指针（reportRefs）等 **scenario/scope 级字段已由 worker↔core 协议钉死**——它们是 RunResult/RunReport 的字段来源。**仍未定 = 持久化层 Run/Job 级字段**（runId / jobId(scopeId) / 会话血缘 sessionId / 起止时间 / DDB 表结构 / WebUI 读取面）：有意留到 v1.0 真实跑批逼出（"报告要展示什么、CI 要读什么"届时自然浮现），避免现在纸上列错。（原计划在 v0.x 逼出，但 v0.x 判「方向已证」未做真实用例验收，顺延 v1.0，见下「版本切分」。）
@@ -95,7 +96,7 @@ yaozhou/
 ├── cli/                 ← 最薄前端 = 组合根（在此 new 出具体 adapter 注入给 core）  ⬜ 待建（现由 core/run_e2e.py 暂代）
 │   └── main.py
 └── engines/             ← 两个可插拔引擎，与 core 平级对标                  ⬜ 待迁移（现 midscene/、novaact/ 仍在顶层）
-    ├── midscene/        ← 整个 TS 子工程                                  ⬜ 未接 worker（Midscene 腿下一轮）
+    ├── midscene/        ← 整个 TS 子工程                                  ✅ worker 已落地（现在顶层 midscene/worker/run-scope.ts）
     │   └── lib/agentcore-sigv4.mts
     └── novaact/         ← 整个 Python 子工程                              ✅ worker 已落地（现位于顶层 novaact/worker/run_scope.py）
         ├── worker/run_scope.py                                          ✅（确定性注册表/ai_steps 拆分留口子，见 0022）
@@ -132,7 +133,7 @@ G1/G2 是 v1.0 核心库 `.feature` 解析的前置——其声明语法**现已
 ## 现在做 / 现在不做
 
 - **现在做（v1.0）**：核心库 `core/` 可被调用（逻辑不焊死在 CLI main 里）；钉死上面数据模型；定义 ports 接口（`Engine`/`RunStore`/`ResultStore`/`ReportStore`）+ 组合根注入；核心自解析 Gherkin + 薄 worker（[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)）。模块设计：worker↔core 协议见 [0024](./0024-worker-core-protocol.md)；plan 模块见 [0025](./0025-plan-module-feature-to-jobs.md)；schedule 模块见 [0026](./0026-schedule-module.md)。
-  - **ports 落地状态（v1.0 当前）**：`Engine` port 的 local adapter **已建**（`core/adapters/subprocess_engine.py`，子进程起 worker）；`RunStore`/`ResultStore`/`ReportStore` **仅定义了接口 Protocol、local adapter 尚未建**（结果现仅在内存 `RunResult`，未持久化）——待真实跑批逼出字段后填（与上「数据模型」节的字段级 schema 顺延一致）。Nova 腿 worker 已落地；Midscene 腿 worker 待下一轮。
+  - **ports 落地状态（v1.0 当前）**：`Engine` port 的 local adapter **已建**（`core/adapters/subprocess_engine.py`，子进程起 worker）；`RunStore`/`ResultStore`/`ReportStore` **仅定义了接口 Protocol、local adapter 尚未建**（结果现仅在内存 `RunResult`，未持久化）——待真实跑批逼出字段后填（与上「数据模型」节的字段级 schema 顺延一致）。**两腿 worker 均已落地**（`novaact/worker/run_scope.py` + `midscene/worker/run-scope.ts`），两腿对称、同讲 0024 协议。
 - **现在不做**：DynamoDB / S3 / Fargate adapter / 无状态机制 / WebUI ——接口已留好，等云端真需要时填 adapter + 组合根换注入。**避免为想象中的云端预先盖机器。**
 - **G1/G2 声明语法已定**（ADR 0019）；其**调度实现**（scope 串/并行、会话共享、engine 冲突校验）由 v1.0 核心库落地。
 - **多用例组织**（feature 分目录/命名约定、跑批入口、跑批层选择 feature/tag）同样由 v1.0 核心库落地——它依赖核心库的调度层，在 bdd 直跑层做是临时的、核心库会重做。当前 `features/` 下多个文件仅是 v0.x 打磨产物，未做有意组织。（旧的 cucumber `--tags` 选子集约定随 BDD runner 一并退役，见 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)；选子集改由核心调度层据 tag 实现。）

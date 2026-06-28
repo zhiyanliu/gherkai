@@ -63,13 +63,15 @@ class Job:
 
 @dataclass(frozen=True)
 class Cost:
-    """step 级成本信封（ADR 0024）。cost_usd 跨引擎可汇总；evidence 由 basis 判别。"""
+    """step 级成本：engine 只报**原生量**，平铺、各 optional（ADR 0024）。
 
-    cost_usd: float | None  # 一等、对称、可 sum() 汇总（产品价值）
-    precision: Literal["exact", "estimated"]  # 由 basis 派生：tokens→exact / agent_time→estimated
-    basis: Literal["tokens", "agent_time"]  # 结构判别器：决定 evidence 形状
-    evidence: dict  # basis=tokens → {prompt_tokens,completion_tokens,total_tokens}
-    #                  basis=agent_time → {time_worked_s,human_wait_time_s,num_steps_executed}
+    原则：core 不算、不折美元、不判可信度——engine 提供什么就报什么，core 只各自合计。
+    哪个量有值，本身就说明该 engine 按什么计费（Nova 报 time_worked_s、Midscene 报 tokens）；
+    美元折算交给消费者（用自己 AWS 账户的真实费率），框架不追会过期的单价表。
+    """
+
+    tokens: int | None = None          # LLM token 用量（Midscene/Bedrock 原生给；Nova 拿不到）
+    time_worked_s: float | None = None  # agent 工作时长秒（Nova SDK 原生给；Midscene 无此概念）
 
 
 # ============================================================================
@@ -111,13 +113,28 @@ class ReportRef:
     path: str
 
 
-# --- 四种事件（worker 按此顺序流式 emit；core 假定有序，ADR 0024）---
+# --- 事件（worker 按序流式 emit；core 假定有序，ADR 0024）---
+# 三级 started/done 对齐：scope_started/scenario_started/step_started 与各自 *_done 配对。
+# started 事件让 core 用事件到达时间戳算各级墙钟时长（性能指标，与 cost 正交）。
+
+
+@dataclass(frozen=True)
+class ScopeStarted:
+    scope_id: str
+    type: Literal["scope_started"] = "scope_started"
 
 
 @dataclass(frozen=True)
 class ScenarioStarted:
     scenario_id: str
     type: Literal["scenario_started"] = "scenario_started"
+
+
+@dataclass(frozen=True)
+class StepStarted:
+    scenario_id: str
+    step_index: int
+    type: Literal["step_started"] = "step_started"
 
 
 @dataclass(frozen=True)
@@ -145,11 +162,12 @@ class ScopeDone:
     scope_id: str
     session_id: str | None = None  # AgentCore 会话血缘
     report_refs: tuple[ReportRef, ...] = ()
-    cost_rate: dict | None = None  # {nova_act_usd_per_agent_hour: 4.75} 等配置常量
     type: Literal["scope_done"] = "scope_done"
 
 
-Event = ScenarioStarted | StepDone | ScenarioDone | ScopeDone
+Event = (
+    ScopeStarted | ScenarioStarted | StepStarted | StepDone | ScenarioDone | ScopeDone
+)
 
 
 # ============================================================================
@@ -158,11 +176,27 @@ Event = ScenarioStarted | StepDone | ScenarioDone | ScopeDone
 
 
 @dataclass
+class StepResult:
+    """单个 step 的归约结果（core 首次保留 step 级粒度，ADR 0024）。
+
+    duration_ms = step 墙钟时长（core 用 step_started→step_done 的事件到达时间戳算）。
+    """
+
+    index: int
+    status: Status
+    duration_ms: float | None = None  # 墙钟时长（性能指标，与 cost 的 time_worked_s 正交）
+    votes: Votes | None = None
+    error_type: str | None = None
+
+
+@dataclass
 class ScenarioResult:
     """单个 scenario 的归约结果。"""
 
     scenario_id: str
     status: Status
+    steps: list[StepResult] = field(default_factory=list)
+    duration_ms: float | None = None  # 墙钟时长（scenario_started→scenario_done）
     report_refs: tuple[ReportRef, ...] = ()
 
 
@@ -174,7 +208,11 @@ class JobResult:
     status: Status  # 汇总：任一 scenario error→error；任一 failed→failed；全 passed→passed
     scenarios: list[ScenarioResult] = field(default_factory=list)
     session_id: str | None = None
-    cost_usd: float | None = None  # scope 级成本（累加本 scope 各 step 的 cost.cost_usd；无则 None）
+    # 成本：core 只各自合计 engine 报的原生量（None=该腿没报这个量）。美元折算交消费者。
+    total_tokens: int | None = None  # scope 级 token 合计（如 Midscene）
+    total_time_worked_s: float | None = None  # scope 级 agent 工作时长合计（如 Nova）
+    duration_ms: float | None = None  # scope 墙钟时长（scope_started→scope_done；性能指标，与成本正交）
+    report_refs: tuple[ReportRef, ...] = ()  # scope 级原生报告产物指针（来自 scope_done，进 RunReport，ADR 0024）
     error_type: str | None = None  # job 级失败（worker 崩/超时）时有
     message: str | None = None
 
@@ -184,8 +222,14 @@ class RunResult:
     """一次执行的机器可读汇总判定（给退出码/CI，ADR 0016）。
 
     RunResult 是 schedule 对事件流的归约终值；sink 收的是同一事件流的原始流式视图（ADR 0026）。
+
+    成本（ADR 0024）：core 不算、不折美元——只各自合计 engine 报的**原生量**
+    （token 用量 / agent 工作时长）。哪个有值取决于哪些腿报了它（Nova 报时长、Midscene 报 token）；
+    美元折算交给消费者（用自己 AWS 账户的真实费率）。None=无任何腿报这个量。
     """
 
     status: Status  # 总判定：任一 job error→error；任一 failed→failed；全 passed→passed
     jobs: list[JobResult] = field(default_factory=list)
-    total_cost_usd: float | None = None  # 跨 job 累加（None 表示无任何成本数据）
+    total_tokens: int | None = None  # 跨 job 的 token 合计（None=无腿报 token）
+    total_time_worked_s: float | None = None  # 跨 job 的 agent 工作时长合计（None=无腿报时长）
+    duration_ms: float | None = None  # 整个 run 的墙钟时长（schedule 整体包住；含并发，≠ 各 scope 时长之和）

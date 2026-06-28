@@ -7,16 +7,32 @@ from __future__ import annotations
 from core.model import (
     Cost,
     Job,
+    ReportRef,
     Scenario,
     ScenarioDone,
     ScenarioStarted,
+    ScopeDone,
+    ScopeStarted,
     Status,
     Step,
     StepDone,
+    StepStarted,
     Votes,
 )
 from core.schedule import ScheduleOpts, schedule
 from tests.fake_engine import CollectSink, FakeEngine, FakeResolver
+
+
+class _IncClock:
+    """确定性递增时钟：每次调用 +step（默认 1.0）。用于精确测时长。"""
+
+    def __init__(self, step: float = 1.0) -> None:
+        self.t = 0.0
+        self.step = step
+
+    def __call__(self) -> float:
+        self.t += self.step
+        return self.t
 
 
 def _job(scope_id: str, engine: str = "midscene", n_scenarios: int = 1) -> Job:
@@ -197,54 +213,101 @@ def test_output_order_stable():
     assert [jr.scope_id for jr in result.jobs] == ["z", "a", "m"]
 
 
-# ---- cost 汇总：step→job→run 累加 cost_usd ----
-def _events_with_cost(scenario_id: str, step_costs: list[float]) -> list:
-    """构造带 cost 的事件流：每个 step 一个 cost_usd。"""
+# ---- cost 归约：core 只各自合计 engine 报的原生量（tokens / time_worked_s），不算美元 ----
+def _events_with_time(scenario_id: str, step_times: list[float]) -> list:
+    """Nova 形态：每 step 报原生量 time_worked_s。"""
     evs = [ScenarioStarted(scenario_id=scenario_id)]
-    for i, c in enumerate(step_costs):
+    for i, t in enumerate(step_times):
         evs.append(StepDone(
             scenario_id=scenario_id, step_index=i, status=Status.PASSED,
-            cost=Cost(cost_usd=c, precision="estimated", basis="agent_time",
-                      evidence={"time_worked_s": c / 4.75 * 3600}),
+            cost=Cost(time_worked_s=t),
         ))
     evs.append(ScenarioDone(scenario_id=scenario_id, status=Status.PASSED))
     return evs
 
 
-def test_cost_aggregation_step_to_job_to_run():
-    # 两个 scope：a 的 step 成本 [0.01, 0.02]=0.03；b 的 [0.05]=0.05；run 总 0.08
+def _events_with_tokens(scenario_id: str, step_tokens: list[int]) -> list:
+    """Midscene 形态：每 step 报原生量 tokens。"""
+    evs = [ScenarioStarted(scenario_id=scenario_id)]
+    for i, t in enumerate(step_tokens):
+        evs.append(StepDone(
+            scenario_id=scenario_id, step_index=i, status=Status.PASSED,
+            cost=Cost(tokens=t),
+        ))
+    evs.append(ScenarioDone(scenario_id=scenario_id, status=Status.PASSED))
+    return evs
+
+
+def test_time_worked_aggregation_step_to_job_to_run():
+    # Nova 形态：time_worked_s 累加 step→scope→run
     engine = FakeEngine({
-        "a": _events_with_cost("a:0", [0.01, 0.02]),
-        "b": _events_with_cost("b:0", [0.05]),
+        "a": _events_with_time("a:0", [9.0, 3.0]),   # scope a = 12.0s
+        "b": _events_with_time("b:0", [5.0]),         # scope b = 5.0s
     })
     result = schedule([_job("a"), _job("b")], FakeResolver(engine), CollectSink())
     a_jr = next(jr for jr in result.jobs if jr.scope_id == "a")
     b_jr = next(jr for jr in result.jobs if jr.scope_id == "b")
-    assert abs(a_jr.cost_usd - 0.03) < 1e-9   # scope 级累加
-    assert abs(b_jr.cost_usd - 0.05) < 1e-9
-    assert abs(result.total_cost_usd - 0.08) < 1e-9  # run 级跨 scope 累加
+    assert abs(a_jr.total_time_worked_s - 12.0) < 1e-9
+    assert abs(b_jr.total_time_worked_s - 5.0) < 1e-9
+    assert abs(result.total_time_worked_s - 17.0) < 1e-9  # run 级跨 scope 合计
+    assert result.total_tokens is None  # Nova 腿不报 token
+
+
+def test_token_aggregation():
+    # Midscene 形态：tokens 累加
+    engine = FakeEngine({"m": _events_with_tokens("m:0", [1000, 500])})
+    result = schedule([_job("m")], FakeResolver(engine), CollectSink())
+    m_jr = result.jobs[0]
+    assert m_jr.total_tokens == 1500
+    assert m_jr.total_time_worked_s is None  # Midscene 不报时长
+    assert result.total_tokens == 1500
+    assert result.total_time_worked_s is None
 
 
 def test_cost_none_when_no_cost_data():
-    # 无 cost 的事件流 → cost_usd / total_cost_usd 保持 None（不假装 0）
-    engine = FakeEngine({"a": _passing_events("a", "a:0")})  # 这些 step 无 cost
+    # 无 cost 的事件流 → 两个原生量合计都保持 None（不假装 0）
+    engine = FakeEngine({"a": _passing_events("a", "a:0")})
     result = schedule([_job("a")], FakeResolver(engine), CollectSink())
-    assert result.jobs[0].cost_usd is None
-    assert result.total_cost_usd is None
+    assert result.jobs[0].total_tokens is None
+    assert result.jobs[0].total_time_worked_s is None
+    assert result.total_tokens is None
+    assert result.total_time_worked_s is None
 
 
-def test_cost_partial_some_jobs_have_cost():
-    # 混合：a 有 cost、b 无 → run 总 = a 的（只对有 cost 的求和）
+def test_mixed_legs_each_native_metric_aggregated_separately():
+    # 混腿：nova 报 time_worked_s、midscene 报 tokens → 各自合计、互不污染、都不丢
     engine = FakeEngine({
-        "a": _events_with_cost("a:0", [0.04]),
-        "b": _passing_events("b", "b:0"),  # 无 cost
+        "nova": _events_with_time("nova:0", [9.0]),
+        "mid": _events_with_tokens("mid:0", [2000]),
     })
-    result = schedule([_job("a"), _job("b")], FakeResolver(engine), CollectSink())
-    a_jr = next(jr for jr in result.jobs if jr.scope_id == "a")
-    b_jr = next(jr for jr in result.jobs if jr.scope_id == "b")
-    assert abs(a_jr.cost_usd - 0.04) < 1e-9
-    assert b_jr.cost_usd is None
-    assert abs(result.total_cost_usd - 0.04) < 1e-9
+    result = schedule([_job("nova"), _job("mid")], FakeResolver(engine), CollectSink())
+    nova_jr = next(jr for jr in result.jobs if jr.scope_id == "nova")
+    mid_jr = next(jr for jr in result.jobs if jr.scope_id == "mid")
+    assert abs(nova_jr.total_time_worked_s - 9.0) < 1e-9 and nova_jr.total_tokens is None
+    assert mid_jr.total_tokens == 2000 and mid_jr.total_time_worked_s is None
+    # run 级：两个原生量各自合计，都不被静默漏掉
+    assert abs(result.total_time_worked_s - 9.0) < 1e-9
+    assert result.total_tokens == 2000
+
+
+def test_failed_and_error_steps_cost_still_aggregated():
+    # 失败/出错的 step 也真实烧了钱（act/投票照样消耗时长 token）→ cost 仍累加，不漏报成本。
+    events = [
+        ScenarioStarted(scenario_id="x:0"),
+        # 失败的 AI 断言步带 cost
+        StepDone(scenario_id="x:0", step_index=0, status=Status.FAILED,
+                 votes=Votes(1, 3), error_type="assertion_failed", cost=Cost(tokens=1200)),
+        # 出错的 step 带 cost
+        StepDone(scenario_id="x:0", step_index=1, status=Status.ERROR,
+                 error_type="engine_error", cost=Cost(tokens=800)),
+        ScenarioDone(scenario_id="x:0", status=Status.ERROR),
+    ]
+    engine = FakeEngine({"x": events})
+    result = schedule([_job("x")], FakeResolver(engine), CollectSink())
+    jr = result.jobs[0]
+    assert jr.status == Status.ERROR        # 状态如实反映失败
+    assert jr.total_tokens == 2000          # 但失败步烧的 token 仍计入（1200+800）
+    assert result.total_tokens == 2000
 
 
 # ---- 并发上限：max_concurrency=1 → 串行，仍全部跑完 ----
@@ -254,3 +317,66 @@ def test_serial_concurrency_one():
     result = schedule(jobs, FakeResolver(engine), CollectSink(), ScheduleOpts(max_concurrency=1))
     assert result.status == Status.PASSED
     assert len(result.jobs) == 5
+
+
+# ---- 三级执行时长：core 基于 started/done 事件到达时间戳算（ADR 0024）----
+def _full_timed_events(scope_id: str, scenario_id: str, n_steps: int = 2) -> list:
+    """完整 started/done 三级配对事件流（含 scope/step started）。"""
+    evs: list = [ScopeStarted(scope_id=scope_id), ScenarioStarted(scenario_id=scenario_id)]
+    for i in range(n_steps):
+        evs.append(StepStarted(scenario_id=scenario_id, step_index=i))
+        evs.append(StepDone(scenario_id=scenario_id, step_index=i, status=Status.PASSED))
+    evs.append(ScenarioDone(scenario_id=scenario_id, status=Status.PASSED))
+    evs.append(ScopeDone(scope_id=scope_id, session_id="s"))
+    return evs
+
+
+def test_three_level_durations():
+    # 递增 clock（每事件到达 +1.0s）+ 完整 started/done 流 → core 算出三级时长。
+    # 无超时（job_timeout_s=None）时 core 每事件只读 1 次 clock，时长可预期且层级嵌套。
+    engine = FakeEngine({"sc": _full_timed_events("sc", "sc:0", n_steps=2)})
+    result = schedule(
+        [_job("sc")], FakeResolver(engine), CollectSink(),
+        ScheduleOpts(clock=_IncClock(1.0)),  # 单位秒；core 乘 1000 → ms
+    )
+    jr = result.jobs[0]
+    sr = jr.scenarios[0]
+    # 每个 step 有时长，且 > 0
+    assert len(sr.steps) == 2
+    assert all(s.duration_ms is not None and s.duration_ms > 0 for s in sr.steps)
+    # 层级嵌套：step ≤ scenario ≤ scope（scenario 含其所有 step + started/done 间隔）
+    assert sr.duration_ms is not None and jr.duration_ms is not None
+    assert max(s.duration_ms for s in sr.steps) <= sr.duration_ms
+    assert sr.duration_ms <= jr.duration_ms
+    # run 级时长由 schedule 整体包住（独立于 worker 事件，故 > 0）
+    assert result.duration_ms is not None and result.duration_ms > 0
+    # step 索引保序
+    assert [s.index for s in sr.steps] == [0, 1]
+
+
+def test_durations_none_without_started_events():
+    # 旧式事件流（无 started 事件）→ 时长字段为 None（不报错、不假装）
+    engine = FakeEngine({"a": _passing_events("a", "a:0")})  # 无 ScopeStarted/StepStarted
+    result = schedule([_job("a")], FakeResolver(engine), CollectSink(), ScheduleOpts(clock=_IncClock()))
+    jr = result.jobs[0]
+    assert jr.duration_ms is None                      # 无 scope_started
+    assert jr.scenarios[0].steps == [] or all(
+        s.duration_ms is None for s in jr.scenarios[0].steps
+    )  # 无 step_started → step 时长 None（且本流无 step_started，step 也没被记）
+
+
+# ---- scope 级 reportRefs 从 scope_done 归约进 JobResult（Midscene 报告归集，ADR 0024）----
+def test_scope_report_refs_reduced():
+    events = [
+        ScenarioStarted(scenario_id="m:0"),
+        StepDone(scenario_id="m:0", step_index=0, status=Status.PASSED),
+        ScenarioDone(scenario_id="m:0", status=Status.PASSED),
+        ScopeDone(scope_id="m", session_id="sess-1",
+                  report_refs=(ReportRef(granularity="scope", path="/midscene_run/report/x.html"),)),
+    ]
+    engine = FakeEngine({"m": events})
+    result = schedule([_job("m")], FakeResolver(engine), CollectSink())
+    jr = result.jobs[0]
+    assert len(jr.report_refs) == 1
+    assert jr.report_refs[0].granularity == "scope"
+    assert jr.report_refs[0].path == "/midscene_run/report/x.html"

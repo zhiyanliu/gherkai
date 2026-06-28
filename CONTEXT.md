@@ -25,8 +25,8 @@ _Avoid_: 把「会话」与「endpoint 种类」混为一谈（§0 旧措辞的�
 _Avoid_: 把 spike 与里程碑（M1–M5 的工程推进）混用。
 
 **用例描述层 (Feature)**:
-语言无关的 Gherkin `.feature` 文件，描述业务可读的测试意图。同一份 `.feature` 可被两套引擎各自的 runner 加载，step 实现分别用 TS 和 Python。
-_Avoid_: 把 feature（意图描述）与 step definition（绑定的执行代码）混用。
+语言无关的 Gherkin `.feature` 文件，描述业务可读的测试意图。**核心库自解析**这份 `.feature`（单一事实源，ADR 0022/0025），分组成 scope/job 后把有序 step 派发给两腿 worker——不再是「两套 runner 各自加载」（cucumber-js/pytest-bdd 已随 BDD runner 退役，ADR 0022）。
+_Avoid_: 把 feature（意图描述）与 step 派发执行混用；以为仍是「两套 BDD runner 各自跑同一份 feature」（早先 v0.x 形态，已退役）。
 
 **骨架验证用例 (Skeleton case)**:
 为证明链路本身活着而刻意挑选稳定、中立、英文、无登录站点（如维基百科）写的探针用例。与「真实业务用例」分开看待，避免把站点不稳定的噪声误判成框架缺陷。
@@ -44,13 +44,13 @@ _Avoid_: 把某一引擎专属的 spike/文档/代码放到根级或另一引擎
 _Avoid_: 把 AI 断言当成"无需治理就可信"——它为主，但必须配抖动监控。
 
 **报告产物模型 (Report artifact model)**:
-两条腿的报告形态根本不同（2026-06 实测）：**Midscene 出单一 `report.html`**（落项目内 `midscene_run/report/`，含每步截图+AI 决策+坐标）；**Nova Act 出多个分散的 trajectory HTML**（每次 `act`/`act_get` 一个，默认落系统临时目录 `$TMPDIR/..._nova_act_logs/`，可被系统清理，需 `logs_directory=` 固定到项目内）。这是将来报告统一（M5）必须弥合的差异。
-_Avoid_: 笼统说「两腿都出报告」而忽略其形态/落点/生命周期的根本不同。
+两条腿的报告形态根本不同（2026-06 实测）：**Midscene 出单一 `report.html`**（落项目内 `midscene_run/report/`，含每步截图+AI 决策+坐标，= scope 级）；**Nova Act 出多个分散的 trajectory HTML**（每次 `act`/`act_get` 一个，默认落系统临时目录 `$TMPDIR/..._nova_act_logs/`，可被系统清理，= act 级）。worker 经 0024 协议的 **`reportRefs`**（带 `granularity` 标签）把产物路径报回 core，归进 `JobResult.report_refs`。**当前**：Midscene worker 已报 scope 级 html；Nova worker 暂未报（留口子）。报告**归集**（RunReport）仍 deferred。
+_Avoid_: 笼统说「两腿都出报告」而忽略其形态/落点/粒度（scope vs act）的根本不同；把「reportRefs 已报路径」与「RunReport 已归集」混为一谈。
 
 ## 产品形态（v1.0）
 
 **通用 step (Generic step)**:
-一组**抽象原语** step（导航 / AI 动作 / AI 布尔·取数·取串·否定断言 / 确定性锚点），任何用例复用，QA 不写代码——场景细节放进引号里的自然语言，不放进 step 措辞。这是"QA 只写 `.feature`、零代码"承诺的唯一载体，**其能力边界 = 产品能力边界**。两腿对称实现（Midscene `aiAct/aiBoolean/aiNumber/aiString` ↔ Nova Act `act/act_get(各 schema)`）。详见 ADR 0018。
+极少数**抽象原语**：URL 导航（确定性，含引号内 URL）/ AI 动作（When→aiAct/act）/ AI 布尔断言（Then→aiBoolean/act_get(BOOL)+投票）/ 确定性锚点（脚手架）。任何用例复用，QA 不写代码——场景细节放进引号里的自然语言，不放进 step 措辞。这是"QA 只写 `.feature`、零代码"承诺的唯一载体，**其能力边界 = 产品能力边界**。两腿对称实现（Midscene `aiAct/aiBoolean` ↔ Nova Act `act/act_get(BOOL_SCHEMA)`）。**「取数/取串」等原语已删**（ADR 0018：避免过度设计，QA 直接写人话让 AI 判，需精确数值走确定性锚点）。详见 ADR 0018/0020。
 _Avoid_: 写绑死具体场景的 step（如"语言版本数量"）——那不是通用 step；把它当成"任意动作都能稳跑"——开放性动作会引入页面瞬态 flaky（ADR 0018）。
 
 **柔性冒烟 (Flexible smoke)**:
@@ -67,9 +67,17 @@ _Avoid_: 以为"不点名也能抓变更"；把它与 A/B 两种不确定性混�
 A = 同一页面 AI 判断飘忽（随机噪声）→ **投票可治**；B = 页面真变了但 AI 柔性照样跑过、不报警（灵敏度不足）→ **投票治不了**，v1.0 接受为已知边界（ADR 0015）。
 _Avoid_: 以为"投票能带来确定性"——它只压 A，给不了对变更的灵敏度（B）。
 
+**成本可观测 (Cost observability)**:
+产品价值之一：一次跑批花了多少（ADR 0024）。**原则——engine 只报原生量、core 只各自合计、不折美元**：两腿计费轴不同（Nova 按 agent 工作时长 `time_worked_s`、Midscene 按 LLM token），core 各自累加成 `total_time_worked_s` / `total_tokens`（step→scope→run，无腿报则 None）。**美元折算交消费者**（用自己 AWS 账户的真实费率）——框架不内置费率常量（避免追会过期的单价表）。与**墙钟时长** `duration_ms`（性能）正交：`time_worked_s` 是 Nova 计费量、`duration_ms` 是 core 测的执行墙钟，两个数不同。
+_Avoid_: 以为框架算美元（曾有的 `cost_usd`/`precision`/`basis`/$4.75 折算模型已废，改为只报原生量）；混淆成本 `time_worked_s` 与性能 `duration_ms`。
+
 **Run 数据模型 (Run data model)**:
-执行的层级（ADR 0016）：**Run ⊃ Job(=Scope) ⊃ Scenario**。Scope = 共享操作上下文的 scenario 分组，是执行单元（scope 内串行、scope 间并行）；Feature 是正交的组织轴。Run 产出两样：**RunResult**（机器可读汇总判定，给退出码/CI/WebUI）与 **RunReport**（人看的归集报告，即原 M5「报告统一」的归宿）。
-_Avoid_: 把 Feature 当执行单元；把 Job 当 scenario 粒度（破坏会话依赖）；混淆 RunResult（数据）与 RunReport（报告）。
+执行的层级（ADR 0016）：**Run ⊃ Job(=Scope) ⊃ Scenario ⊃ Step**。Scope = 共享操作上下文的 scenario 分组，是执行单元（scope 内串行、scope 间并行）；Feature 是正交的组织轴。Step 是最细一级（core 经 `StepResult` 首次保留 step 级粒度）。各级带**墙钟时长** `duration_ms`（性能指标）。Run 产出两样：**RunResult**（机器可读汇总判定，给退出码/CI/WebUI；含 status、各级时长、原生量成本合计 `total_tokens`/`total_time_worked_s`）与 **RunReport**（人看的归集报告，原 M5「报告统一」的归宿，v1.0 暂 deferred）。
+_Avoid_: 把 Feature 当执行单元；**把 Job 当 scenario 粒度（破坏会话依赖）——Job = Scope，不是 scenario**；混淆 RunResult（数据）与 RunReport（报告）；混淆墙钟时长 `duration_ms`（性能）与成本 `time_worked_s`（Nova 计费量）。
+
+**标识符 (id：scenarioId / scopeId)**:
+关联键（把 worker 事件挂回 scenario、未来做 RunStore/DDB 主键），是**不透明标识符**——只在 JSON/dict key/未来 DB key 用，全支持任意 UTF-8（空格、中文路径原样保留，**不 normalize**：任何清洗字符的转换都会把不同输入映射成同一输出、制造撞名，而撞名是静默灾难，比"id 含空格"严重得多）。core **不拿 id 当路径解析**。`scenarioId = <uri>:<行号>[:<example行号>]`；`uri` 由调用方原样传入、core 不解析。**唯一性责任在调用方**：plan 要求 `features` 列表 uri 互异（重复 = 接口违约 → 报错，ADR 0025）。若未来某消费层（URL/文件名）需安全字符 id，由该层做**可逆**编码（urlencode 等、保唯一），不在 core 做有损 normalize。
+_Avoid_: 对 id 做有损 normalize（撞名风险 > 可读性收益）；把 id 当文件路径去读；以为 uri 重复会被 core 静默 merge（那是撞 id 的 bug，core 报错；跨文件同 `@scope` 合并是另一回事，见 scope 语义）。
 
 **执行核心库窄腰 (Core-library narrow waist)**:
 真正的窄腰是**执行核心库**（解析 `.feature` → 分组 scope → 调度 → 收集结果），**不是 CLI**（早先措辞修正，见 ADR 0016）。CLI 是核心库的第一个、最薄的前端；WebUI 是另一个前端，**直接调核心、不 shell-out CLI**。CI/skill 通过 CLI 这个皮间接用核心。上层前端与可替换的执行引擎（`Engine` port，本地进程 / Fargate；见下「执行引擎 port」条）都围绕核心库解耦。

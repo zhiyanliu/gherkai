@@ -70,24 +70,30 @@ def test_event_scenario_started():
 
 
 def test_event_step_done_with_votes_and_cost():
+    # cost 是平铺 optional 原生量（ADR 0024）：Nova 报 time_worked_s
     ev = event_from_json({
         "type": "step_done",
         "scenarioId": "s:0",
         "stepIndex": 2,
         "status": "passed",
         "votes": {"yes": 3, "total": 3},
-        "cost": {
-            "cost_usd": 0.012,
-            "precision": "estimated",
-            "basis": "agent_time",
-            "evidence": {"time_worked_s": 9.3, "human_wait_time_s": 0, "num_steps_executed": 4},
-        },
+        "cost": {"time_worked_s": 9.3},
     })
     assert isinstance(ev, StepDone)
     assert ev.status == Status.PASSED
     assert ev.votes.yes == 3
-    assert ev.cost.basis == "agent_time"
-    assert ev.cost.cost_usd == 0.012
+    assert ev.cost.time_worked_s == 9.3
+    assert ev.cost.tokens is None
+
+
+def test_event_step_done_cost_tokens():
+    # Midscene 报 tokens
+    ev = event_from_json({
+        "type": "step_done", "scenarioId": "s:0", "stepIndex": 1, "status": "passed",
+        "cost": {"tokens": 1915},
+    })
+    assert ev.cost.tokens == 1915
+    assert ev.cost.time_worked_s is None
 
 
 def test_event_step_done_failed():
@@ -104,13 +110,11 @@ def test_event_scope_done():
     ev = event_from_json({
         "type": "scope_done", "scopeId": "login", "sessionId": "sess-123",
         "reportRefs": [{"granularity": "act", "path": "/tmp/x.html"}],
-        "costRate": {"nova_act_usd_per_agent_hour": 4.75},
     })
     assert isinstance(ev, ScopeDone)
     assert ev.scope_id == "login"
     assert ev.session_id == "sess-123"
     assert ev.report_refs[0].path == "/tmp/x.html"
-    assert ev.cost_rate["nova_act_usd_per_agent_hour"] == 4.75
 
 
 # ---- 从行解析（worker stdout 一行）----

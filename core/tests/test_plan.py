@@ -110,6 +110,21 @@ def test_cross_file_scope_merge_warns(caplog):
     assert any("跨" in r.message and "合并" in r.message for r in caplog.records)  # warning 打了
 
 
+# ---- 重复 uri → 报错（接口违约，与上面跨文件 @scope 合并正交：那是 warning、这是 error）----
+def test_duplicate_uri_errors():
+    f = FeatureSource("dup.feature", "Feature: D\n  Scenario: s\n    When \"x\"\n")
+    with pytest.raises(PlanError, match="重复 uri"):
+        plan([f, f], CFG)  # 同一文件喂两遍 = 调用方 bug，fail-fast
+
+
+def test_distinct_uri_ok():
+    # 不同 uri（即便内容相同）→ 不报错（是两份独立 feature，不是重复传同一份）
+    fa = FeatureSource("a.feature", "Feature: A\n  Scenario: s\n    When \"x\"\n")
+    fb = FeatureSource("b.feature", "Feature: B\n  Scenario: s\n    When \"x\"\n")
+    jobs = plan([fa, fb], CFG)
+    assert len(jobs) == 2
+
+
 # ---- 同一 scope 多个不同 engine → 报错 ----
 def test_engine_conflict_errors():
     with pytest.raises(PlanError, match="多个 @engine"):

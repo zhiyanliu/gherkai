@@ -82,7 +82,23 @@ def _resolve_engine(scope_id: str, members: list[ParsedScenario], default_engine
 
 
 def plan(features: list[FeatureSource], config: PlanConfig) -> list[Job]:
-    """core 窄腰第一步：一组 .feature → 可调度的 Job 列表（ADR 0025）。"""
+    """core 窄腰第一步：一组 .feature → 可调度的 Job 列表（ADR 0025）。
+
+    严格契约：`features` 的 uri 必须互异（uri 是 scenarioId 前缀，重复会撞 id）。重复 → PlanError。
+    这是**接口违约**校验，与「跨文件同 @scope 合并」（领域语义、warning、见下文 scope 分组）正交：
+    前者防脏输入（同一文件喂两遍），后者是有意的跨文件会话共享。收集 feature 时的去重等便利逻辑
+    由调用方（CLI/WebUI）负责，core 窄腰只接 uri 互异的列表（ADR 0025）。
+    """
+    # 0) 入口校验：uri 互异（接口违约则 fail-fast，不静默吞——ADR 0025）
+    seen_uris: set[str] = set()
+    for f in features:
+        if f.uri in seen_uris:
+            raise PlanError(
+                f"features 含重复 uri {f.uri!r}：uri 是 scenarioId 前缀，重复会撞 id。"
+                f"core 窄腰要求 uri 互异（调用方负责收集时去重）。"
+            )
+        seen_uris.add(f.uri)
+
     # 1) 解析所有 feature → ParsedScenario（带 tags）
     all_parsed: list[ParsedScenario] = []
     for f in features:

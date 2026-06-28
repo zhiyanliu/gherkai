@@ -66,7 +66,9 @@ Job = {
 
 ### id 派生（RunStore/RunReport 关联键：稳定 + 可追溯）
 
-**`uri` 约定**：plan 把调用方传入的 `uri` **原样**用作 id 前缀，**不做路径解析**（plan 不碰 FS、无 base dir，故无「相对谁」的语义）。调用方（组合根/CLI）负责传一个稳定可读的 `uri`（如相对仓库根的路径）。下文 id 规则统一以 `<uri>` 表示。
+**id 是不透明标识符**：`scenarioId`/`scopeId` 只在 JSON/dict key/未来 DB key 用（全支持任意 UTF-8），core **不拿它当路径解析**。**不对 id 做 normalize**——清洗字符（空格→下划线、删非 ASCII 等）会把不同输入映射成同一输出、**制造撞名**，而撞名是静默灾难（schedule 归位错乱、DB 主键冲突），远比「id 含空格/中文」严重。故含空格/中文的 uri **原样保留**。若未来某消费层（URL/文件名）需安全字符 id，由该层做**可逆**编码（urlencode 等、保唯一），不在 core 做有损转换。
+
+**`uri` 约定 + 互异契约**：plan 把调用方传入的 `uri` **原样**用作 id 前缀，**不做路径解析**（plan 不碰 FS、无 base dir）。调用方（组合根/CLI）负责传**稳定可读且互异**的 `uri`。**plan 入口校验 uri 互异——重复 = 接口违约 → 报错**（同一文件喂两遍会撞 scenarioId、结果错乱；这是脏输入，fail-fast，不静默吞）。注意这与「跨文件同 `@scope` 合并」（领域语义、warning）**正交**：前者是 uri 重复（bug、报错），后者是不同 uri 但同 scope 值（有意、合并、warning）。收集去重等便利逻辑由调用方负责，core 窄腰只接 uri 互异的列表。下文 id 规则统一以 `<uri>` 表示。
 
 - `scenarioId`：`<uri>:<scenario行号>`；Outline 展开的多个 scenario 共享 scenario 行号，故各自再加 `:<example行号>` 消歧（行号取自 AST，见上「行号来源」）。
 - `scenarioName`：Scenario 标题（`<placeholder>` 已插值）；Outline 展开的多个 scenario 若标题模板不含占位符会重名，故**追加 Examples 行标识**（实现用 `[@<example行号>]`，如 `登录 [@15]`）保证可区分、可追溯。
@@ -90,6 +92,7 @@ Job = {
 - DataTable / DocString 进 step `argument`（重映射成自有形状，非 pickle 子 dict）；
 - 乱序 `Given→Then→When→Then`（保序、不重排）；keyword 由 pickle `type`（Context/Action/Outcome）映射成 `Given/When/Then`；
 - 跨文件相同 `@scope` 合并（+ warning）；
+- **重复 uri → 报错**（接口违约；与上一条跨文件 `@scope` 合并正交：那是 warning、这是 error）；不同 uri 即便内容相同 → 放行；
 - 同一 scope 多个不同 engine → 报错；
 - 一个 scenario 多个不同 `@scope` 值（feature 级传播 + scenario 级）→ 报错；feature 级 `@scope` 传播（无冲突时）→ 正常归一个 scope；
 - scope 缺省 engine → 用 defaultEngine；

@@ -21,10 +21,12 @@ from core.model import (
     ScenarioDone,
     ScenarioStarted,
     ScopeDone,
+    ScopeStarted,
     Status,
     Step,
     StepArgument,
     StepDone,
+    StepStarted,
     Votes,
 )
 
@@ -80,11 +82,10 @@ def job_to_line(job: Job) -> str:
 def _cost_from_json(d: dict | None) -> Cost | None:
     if d is None:
         return None
+    # 只认 engine 报的原生量（平铺、各 optional，ADR 0024）；旧字段 cost_usd/precision/basis 已废弃
     return Cost(
-        cost_usd=d.get("cost_usd"),
-        precision=d["precision"],
-        basis=d["basis"],
-        evidence=d.get("evidence", {}),
+        tokens=d.get("tokens"),
+        time_worked_s=d.get("time_worked_s"),
     )
 
 
@@ -103,8 +104,12 @@ def _report_refs_from_json(items: list | None) -> tuple[ReportRef, ...]:
 def event_from_json(d: dict) -> Event:
     """JSON dict（worker stdout 一行）→ model.Event，按 "type" 分派（ADR 0024）。"""
     t = d.get("type")
+    if t == "scope_started":
+        return ScopeStarted(scope_id=d["scopeId"])
     if t == "scenario_started":
         return ScenarioStarted(scenario_id=d["scenarioId"])
+    if t == "step_started":
+        return StepStarted(scenario_id=d["scenarioId"], step_index=d["stepIndex"])
     if t == "step_done":
         return StepDone(
             scenario_id=d["scenarioId"],
@@ -126,7 +131,6 @@ def event_from_json(d: dict) -> Event:
             scope_id=d["scopeId"],
             session_id=d.get("sessionId"),
             report_refs=_report_refs_from_json(d.get("reportRefs")),
-            cost_rate=d.get("costRate"),
         )
     raise ValueError(f"未知事件 type: {t!r}（不符合 ADR 0024 协议）")
 

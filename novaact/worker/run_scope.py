@@ -16,7 +16,7 @@ core 经子进程 adapter 起本 worker（ADR 0026 机制层），讲 0024 协�
   keyword=Then → act_get(BOOL) + N 次投票（AI 断言，带 votes）
   keyword=Given 且非 URL → 也走 act（前置动作）
 
-cost（ADR 0024）：Nova Act 按 agent-hour 计费，cost_usd = time_worked_s/3600 × rate（默认 4.75）。
+cost（ADR 0024）：Nova SDK 原生给 time_worked_s，worker 只报该原生量；core 合计、美元折算交消费者（不内置费率）。
 
 跑（一般由 core adapter spawn，也可手动）：
   echo '<job json>' | AWS_REGION=us-east-1 .venv/bin/python worker/run_scope.py
@@ -40,7 +40,6 @@ REGION = os.environ.get("AWS_REGION", "us-east-1")
 MODEL_ID = "nova-act-latest"
 WORKFLOW_DEF = "spike-wikipedia-benchmark"
 VOTES = 3  # AI 断言投票次数（治种类A抖动，ADR 0014）
-NOVA_USD_PER_AGENT_HOUR = 4.75  # ADR 0024，来源 aws.amazon.com/nova/pricing
 
 _URL_IN_QUOTES = re.compile(r'"(https?://[^"]+)"')
 
@@ -66,24 +65,14 @@ def log(msg: str) -> None:
 
 
 def _cost_from_result(r) -> dict | None:
-    """从 act/act_get 结果的 metadata.time_worked_s 算 agent_time cost（ADR 0024）。"""
+    """报 Nova SDK 原生量 time_worked_s（ADR 0024：engine 只报原生量，core 不算美元）。"""
     md = getattr(r, "metadata", None)
     if md is None:
         return None
     tw = getattr(md, "time_worked_s", None)
     if tw is None:
         return None
-    cost_usd = tw / 3600.0 * NOVA_USD_PER_AGENT_HOUR
-    return {
-        "cost_usd": round(cost_usd, 6),
-        "precision": "estimated",  # agent_time → estimated（ADR 0024）
-        "basis": "agent_time",
-        "evidence": {
-            "time_worked_s": tw,
-            "human_wait_time_s": getattr(md, "human_wait_time_s", 0.0),
-            "num_steps_executed": getattr(md, "num_steps_executed", None),
-        },
-    }
+    return {"time_worked_s": tw}
 
 
 def _run_step(nova, scenario_id: str, step: dict) -> str:
@@ -92,6 +81,7 @@ def _run_step(nova, scenario_id: str, step: dict) -> str:
     keyword = step["keyword"]
     text = step["text"]
 
+    emit({"type": "step_started", "scenarioId": scenario_id, "stepIndex": idx})  # step 时长起点
     try:
         url_match = _URL_IN_QUOTES.search(text)
         if url_match:
@@ -196,6 +186,7 @@ def main() -> int:
                     ) as nova:
                         # 取真实 AgentCore 会话 id（血缘，进 scope_done → RunStore，ADR 0016/0024）。
                         session_id = nova.get_session_id()
+                        emit({"type": "scope_started", "scopeId": scope["id"]})  # 三级时长起点
                         # scope 内串行跑 scenarios，共享同一会话（ADR 0019/0024）
                         for sc in scenarios:
                             sid = sc["id"]
@@ -209,10 +200,7 @@ def main() -> int:
         log("worker: session shutdown complete after SIGTERM")
         return 0
 
-    emit({
-        "type": "scope_done", "scopeId": scope["id"], "sessionId": session_id,
-        "costRate": {"nova_act_usd_per_agent_hour": NOVA_USD_PER_AGENT_HOUR},
-    })
+    emit({"type": "scope_done", "scopeId": scope["id"], "sessionId": session_id})
     return 0
 
 
