@@ -9,8 +9,8 @@ core 其余部分只认 model.*，不见 pickle dict 形状。
 - pickle 不带行号，只有 astNodeIds；行号需从 AST 节点 location.line 回查（id→node 索引）。
 - argument 在 pickle 里是 {docString:{content}} / {dataTable:{rows:[{cells:[{value}]}]}}，这里重映射成 model.StepArgument。
 
-版本：core 用 gherkin-official>=29.0.0。本模块用 41.x 的顶层导出 `from gherkin import Parser, Compiler`
-（>=31.0.0 才有顶层导出；29.0.0 需走 gherkin.parser / gherkin.pickles.compiler 子模块路径）。
+版本：core 下限 gherkin-official>=31.0.0（实装 41.x）。本模块用顶层导出 `from gherkin import Parser, Compiler`
+——该导出 ≥31.0.0 才有（<31 需走 gherkin.parser / gherkin.pickles.compiler 子模块路径），故下限锁 31。
 """
 from __future__ import annotations
 

@@ -1,6 +1,6 @@
 // Midscene 薄 worker（ADR 0022/0024）：读 stdin 的 job JSON → 跑一个 scope → 吐 0024 事件到事件通道。
 //
-// 从 bdd/steps/generic.steps.ts 改造而来：脱掉 cucumber 装饰器，逻辑（开会话/aiAct/aiBoolean 投票/派发）原样复用。
+// 不含 BDD runner 装饰器：会话/aiAct/aiBoolean 投票/派发逻辑直接在本进程跑（ADR 0022 薄 worker）。
 // core 经子进程 adapter 起本 worker（ADR 0026 机制层），讲 0024 协议——与 Nova Act 腿对称。
 //
 // 三通道分离（ADR 0024）：0024 事件吐到 EVENTS_FD 指定的 fd（无则回落 stdout，便于手动直跑调试）；

@@ -45,12 +45,12 @@ yaozhou/
 │   ├── wikipedia_assertions.feature
 │   ├── wikipedia_robustness.feature
 │   └── engine_routing.feature
-├── midscene/                  ← Midscene 引擎子工程（TS）
+├── engines/midscene/                  ← Midscene 引擎子工程（TS）
 │   ├── cucumber.mjs           ← cucumber-js 配置（指向根 features/）
 │   ├── lib/agentcore-sigv4.mts ← 共享 SigV4 模块（模型连接 + 浏览器连接/CDP；spike/bdd 共用）
 │   ├── bdd/steps/generic.steps.ts ← Midscene 侧通用 step（QA 不写代码）
 │   └── spikes/ ← 自检 spike（01 模型/02 CDP/03 合体/04 planning/05 负向）+ SIGV4-FETCH-RECIPE.md
-└── novaact/                   ← Nova Act 引擎子工程（Python）
+└── engines/novaact/                   ← Nova Act 引擎子工程（Python）
     ├── bdd/test_generic_steps.py  ← Nova Act 侧通用 step（pytest-bdd）
     └── spikes/wikipedia_benchmark.py  ← Nova Act 腿 spike
 ```
@@ -61,23 +61,23 @@ yaozhou/
   - Bedrock 模型访问：`qwen.qwen3-vl-235b-a22b`（Midscene 大脑）
   - AgentCore Browser（`bedrock-agentcore` 服务）
   - Nova Act 服务（`nova-act`）+ 模型 `nova-act-latest`
-- Nova Act workflow definition（IAM 路径必需）：**代码会自动 create-if-not-exists**（`novaact/lib/workflow_setup.py`），无需手动操作。若想手动预建也可：`aws nova-act create-workflow-definition --region us-east-1 --name spike-wikipedia-benchmark`（见 ADR 0004）。
+- Nova Act workflow definition（IAM 路径必需）：**代码会自动 create-if-not-exists**（`engines/novaact/lib/workflow_setup.py`），无需手动操作。若想手动预建也可：`aws nova-act create-workflow-definition --region us-east-1 --name spike-wikipedia-benchmark`（见 ADR 0004）。
 - Node 22（midscene）、Python 3.13 + uv（novaact）
 
 ## 运行（同一份 .feature，两套引擎，通用 step）
 
 **Midscene 侧（cucumber-js + TS）：**
 ```bash
-cd midscene
+cd engines/midscene
 # 跑全部 feature：
 NODE_OPTIONS="--import tsx/esm" AWS_REGION=us-east-1 node_modules/.bin/cucumber-js -c cucumber.mjs
 # 跑子集用 tag（勿再传 feature 路径，会与配置 paths 合并）：... -c cucumber.mjs --tags "@engine:midscene"
-# → 报告：midscene/midscene_run/report/*.html
+# → 报告：engines/midscene/midscene_run/report/*.html
 ```
 
 **Nova Act 侧（pytest-bdd + Python）：**
 ```bash
-cd novaact
+cd engines/novaact
 AWS_REGION=us-east-1 .venv/bin/python -m pytest bdd/test_generic_steps.py -s
 # → trajectory：$TMPDIR/..._nova_act_logs/<sessionId>/（默认临时目录，见 ADR 0010）
 ```
@@ -95,14 +95,14 @@ AWS_REGION=us-east-1 .venv/bin/python -m pytest bdd/test_generic_steps.py -s
 
 ```bash
 # Midscene 腿三段式自检（隔离验证：模型连接 / 浏览器连接(CDP) / 合体）
-cd midscene && AWS_REGION=us-east-1 node_modules/.bin/tsx spikes/01-model-sigv4.ts
+cd engines/midscene && AWS_REGION=us-east-1 node_modules/.bin/tsx spikes/01-model-sigv4.ts
 # 02-agentcore-cdp.ts / 03-midscene-grounding.ts 同理
 
 # Nova Act 腿对标 spike
-cd novaact && AWS_REGION=us-east-1 .venv/bin/python spikes/wikipedia_benchmark.py
+cd engines/novaact && AWS_REGION=us-east-1 .venv/bin/python spikes/wikipedia_benchmark.py
 ```
 
 ## 注意
 
 - 运行会真实消耗 AWS 费用（模型调用 + AgentCore 会话）。
-- 环境隔离：TS 依赖在 `midscene/node_modules`，Python 依赖在 `novaact/.venv`，均不污染全局。
+- 环境隔离：TS 依赖在 `engines/midscene/node_modules`，Python 依赖在 `engines/novaact/.venv`，均不污染全局。

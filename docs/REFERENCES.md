@@ -10,7 +10,7 @@
 - https://midscenejs.com/model-common-config.md — family 列表 + 配置块
 - https://midscenejs.com/integrate-with-playwright.md
 - https://midscenejs.com/bridge-mode.md — 连桌面 Chrome（CDP 接法参考）
-- 安装的源码（本机 ground truth）：`midscene/node_modules/@midscene/core/dist/`、`.../shared/dist/`
+- 安装的源码（本机 ground truth）：`engines/midscene/node_modules/@midscene/core/dist/`、`.../shared/dist/`
   - `createOpenAIClient` 注入点：`@midscene/core .../service-caller/index`（见 ADR 0008）
   - 隔离 ModelConfigManager：`@midscene/core .../agent/agent.js`（传 createOpenAIClient/modelConfig 即切隔离，见 spike 配方 §7）
   - planning 无条件附图：`@midscene/core .../ai-model/llm-planning.js`（见 ADR 0012）
@@ -20,7 +20,7 @@
 
 - https://github.com/aws/nova-act — README（AgentCore 接法、`nova.page`、HITL）
 - https://nova.amazon.com/act — API key 生成、Playground
-- 安装的源码：`novaact/.venv/lib/python3.13/site-packages/nova_act/`
+- 安装的源码：`engines/novaact/.venv/lib/python3.13/site-packages/nova_act/`
   - AgentCore provider：`browser_auth/agentcore_session_provider.py`（`cdp_session()` yield `(ws_url, headers)`）
   - workflow contextvar：`types/workflow.py`（`@workflow` 设 `set_current_workflow`；`with Workflow` 不设，见 ADR 0004 / bdd 修复）
 - 多语言 SDK（形态 B 探路，**已证伪**：是客户端驱动的 REST 循环、非 `nova.act()` acting 等价物，acting 锁 Python，见 ADR 0006/0023）：npm `@aws-sdk/client-nova-act`、Go `aws-sdk-go-v2/service/novaact`

@@ -37,7 +37,7 @@
 
 ## 确定性 step 怎么扩展（test engineer 的扩展点）
 
-> **实现状态（v1.0 当前）**：下述 `@deterministic` 注册表**尚未落地**——Nova worker（`novaact/worker/run_scope.py`）当前只有**内建的 URL→导航确定性分支**（step 文本含引号内 URL → `go_to_url`，[0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md)），其余 step 走默认 AI catch-all（When→act / Then→act_get+投票）。下文描述的「test engineer 自注册任意确定性 step」是**留口子的设计目标**，待真实需求出现时建。
+> **实现状态（v1.0 当前）**：下述 `@deterministic` 注册表**尚未落地**——Nova worker（`engines/novaact/worker/run_scope.py`）当前只有**内建的 URL→导航确定性分支**（step 文本含引号内 URL → `go_to_url`，[0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md)），其余 step 走默认 AI catch-all（When→act / Then→act_get+投票）。下文描述的「test engineer 自注册任意确定性 step」是**留口子的设计目标**，待真实需求出现时建。
 
 **扩展点 = 对应 worker 里的一张 step 注册表**（`(模式 → handler)`）。延续 [0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md) 的脚手架定位与角色边界（QA 永远只写人话、不碰确定性 step）：
 
@@ -66,10 +66,10 @@ def color_is(ctx, sel, hex):
 
 | 退役 | 原因 |
 |---|---|
-| `midscene/cucumber.mjs` | worker 形态不需要 cucumber 入口 |
-| `midscene/patches/@cucumber+cucumber+13.0.0.patch` + `postinstall` | **B1 核心红利**：核心从 AST 直接知道关键字，When/Then 歧义消失（[0021](./0021-local-cucumber-patch-step-keyword-disambiguation.md) 那个 pattern-only 匹配问题不复存在） |
-| `novaact/bdd/conftest.py`（tag 路由 hook） | engine 路由改由核心调度层做（[0019](./0019-feature-tags-scope-and-engine.md)） |
-| `midscene/bdd/package.json`（`{type:module}`） | 折叠进 worker 工程配置 |
+| `engines/midscene/cucumber.mjs` | worker 形态不需要 cucumber 入口 |
+| `engines/midscene/patches/@cucumber+cucumber+13.0.0.patch` + `postinstall` | **B1 核心红利**：核心从 AST 直接知道关键字，When/Then 歧义消失（[0021](./0021-local-cucumber-patch-step-keyword-disambiguation.md) 那个 pattern-only 匹配问题不复存在） |
+| `engines/novaact/bdd/conftest.py`（tag 路由 hook） | engine 路由改由核心调度层做（[0019](./0019-feature-tags-scope-and-engine.md)） |
+| `engines/midscene/bdd/package.json`（`{type:module}`） | 折叠进 worker 工程配置 |
 
 **存活/迁移（不删）**：`agentcore-sigv4.mts`、`workflow_setup.py`（worker 进程内直接用）；`generic.steps` / `test_generic_steps` 的**逻辑**（开会话/act/投票，迁入 worker，脱装饰器）；`deterministic.steps` / `deterministic_steps`（迁入 worker 注册表）；全部 spike 与 `SIGV4-FETCH-RECIPE.md`（独立可跑的证据，[0010](./0010-spike-as-apples-to-apples-benchmark.md)，保留在 `spike-validated` tag 与各引擎 `spikes/`）。
 

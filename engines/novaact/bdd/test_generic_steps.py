@@ -36,7 +36,8 @@ WORKFLOW_DEF = "spike-wikipedia-benchmark"
 VOTES = 3  # AI 断言投票次数（治种类A抖动，ADR 0014）；取多数
 
 # 与 Midscene 腿共享 features/ 下全部通用 step feature（一份份共享，ADR 0005）
-FEATURES_DIR = Path(__file__).resolve().parents[2] / "features"
+# 本文件在 engines/novaact/bdd/，上溯 3 级到仓库根：bdd → novaact → engines → 根，故 parents[3]
+FEATURES_DIR = Path(__file__).resolve().parents[3] / "features"
 scenarios(str(FEATURES_DIR))
 
 
@@ -88,5 +89,5 @@ def _ai_confirm(nova_ctx, claim):
 
 
 # 注：① 确定性锚点（不走 AI 的精确 URL/DOM 查）见 deterministic_steps.py 脚手架（ADR 0020，按需自建）。
-#     ② 曾有的「否定断言」「取数/取文本」「AI 确认/AI 执行」等带关键词 step 均已删除——
-#        统一归入无关键词的 When/Then "{人话}"（ADR 0020：QA 零预设、默认走 AI）。
+#     ② 不设「否定断言」「取数/取文本」「AI 确认/AI 执行」等带关键词的专用 step——
+#        一律走无关键词的 When/Then "{人话}"（ADR 0020：QA 零预设、默认走 AI）。

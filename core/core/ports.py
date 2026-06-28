@@ -35,7 +35,7 @@ class WorkerHandle(Protocol):
 
 @runtime_checkable
 class Engine(Protocol):
-    """执行引擎 port（早先名 ExecutionBackend，ADR 0016 重命名）。
+    """执行引擎 port（ADR 0016）。
 
     schedule 经此起 worker；adapter 形状一致（spawn node / spawn python / 未来 Fargate），schedule 对腿无知。
     """

@@ -1,4 +1,4 @@
-"""端到端撞真引擎（ADR 0024/0026 第一次真跑）：组合根接线 + 烧真 AWS 钱。
+"""端到端撞真引擎（ADR 0024/0026）：组合根接线 + 烧真 AWS 钱。
 
 core plan(.feature) → schedule(注入子进程 Engine adapter) → 真 Nova Act worker
 → 真 AgentCore 会话 → 回 0024 事件 → RunResult。
@@ -22,8 +22,8 @@ from core.schedule import ScheduleOpts, schedule
 import os
 
 REPO = Path(__file__).resolve().parents[1]
-NOVAACT_DIR = REPO / "novaact"
-MIDSCENE_DIR = REPO / "midscene"
+NOVAACT_DIR = REPO / "engines" / "novaact"
+MIDSCENE_DIR = REPO / "engines" / "midscene"
 
 
 def main() -> int:

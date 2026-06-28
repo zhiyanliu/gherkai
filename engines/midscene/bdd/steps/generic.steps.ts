@@ -78,6 +78,6 @@ Then("{string}", async function (this: W, claim: string) {
 });
 
 // 注：① 确定性锚点（不走 AI 的精确 URL/DOM 查）见 deterministic.steps.ts 脚手架（ADR 0020，按需自建）。
-//     ② 曾有的「否定断言」「取数/取文本」「AI 确认/AI 执行」等带关键词 step 均已删除——
-//        统一归入无关键词的 When/Then "{人话}"（ADR 0020：QA 零预设、默认走 AI）。
+//     ② 不设「否定断言」「取数/取文本」「AI 确认/AI 执行」等带关键词的专用 step——
+//        一律走无关键词的 When/Then "{人话}"（ADR 0020：QA 零预设、默认走 AI）。
 // 若将来确需精确数值核对，走确定性锚点（ADR 0015），而非新增 AI 取数原语。

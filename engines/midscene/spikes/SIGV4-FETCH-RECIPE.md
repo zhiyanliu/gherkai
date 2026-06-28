@@ -93,7 +93,7 @@ npm i @aws-sdk/signature-v4 @aws-sdk/protocol-http @aws-crypto/sha256-js @aws-sd
 
 → 路径/model-id 不再是"最低置信"，已实证。
 
-## 6. TS 端到端实测（2026-06-23，`midscene/spikes/01-model-sigv4.ts`）—— 已全绿
+## 6. TS 端到端实测（2026-06-23，`engines/midscene/spikes/01-model-sigv4.ts`）—— 已全绿
 
 用 openai-node v6.3.0 + 本配方的 `sigv4Fetch`，在本账号实跑：
 - **[01a] 文本** → `"ok"`（HTTP 200）：TS SigV4 自签**字节匹配正确**，最小手建请求签名法有效，`Bearer unused` 删除有效，混版本 SigV4 包（3.370.0 / 3.1074.0）无兼容问题。**一次过，未撞 403。**

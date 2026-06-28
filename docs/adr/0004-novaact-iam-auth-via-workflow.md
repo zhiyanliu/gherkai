@@ -9,7 +9,7 @@
 
 **决定**：代码形态固定为 `NOVA_ACT_API_KEY` 不设 + `AgentCoreBrowserSessionProvider` + `Workflow(workflow_definition_name=..., model_id=...)`，让浏览器与模型都跑在 IAM 上。
 
-## ✅ 已实测全通（2026-06-23，`novaact/spikes/wikipedia_benchmark.py`）
+## ✅ 已实测全通（2026-06-23，`engines/novaact/spikes/wikipedia_benchmark.py`）
 
 纯 IAM 经 `@workflow` 端到端跑通：维基用例动作成功、AgentCore 云端浏览器连上、workflow run 状态 `SUCCEEDED`、`nova-act-latest` 模型访问授予。**ADR 早先标记的"IAM 经 Workflow 能否授权 nova-act 服务"残余风险——已关闭。**
 
@@ -19,7 +19,7 @@
 ```
 aws nova-act create-workflow-definition --region us-east-1 --name "<name>"
 ```
-**但已做成代码端到端闭环（2026-06，实证）**：boto3 有等价的 `create_workflow_definition`/`get_workflow_definition`，故用 create-if-not-exists 的 `ensure_workflow_definition()`（见 `novaact/lib/workflow_setup.py`）——首次自动建、之后探测到即跳过，幂等。bdd fixture 与 spike 都已接入，**无需手动 CLI 前置**。已实证：删掉 definition 后代码能从零自动建回。
+**但已做成代码端到端闭环（2026-06，实证）**：boto3 有等价的 `create_workflow_definition`/`get_workflow_definition`，故用 create-if-not-exists 的 `ensure_workflow_definition()`（见 `engines/novaact/lib/workflow_setup.py`）——首次自动建、之后探测到即跳过，幂等。bdd fixture 与 spike 都已接入，**无需手动 CLI 前置**。已实证：删掉 definition 后代码能从零自动建回。
 本项目用的 definition 名：`spike-wikipedia-benchmark`。生产化时也可改由 IaC / 部署脚本统一管理。
 
 **退路**：若某账号/region IAM 路径不可用，退回 `NOVA_ACT_API_KEY`（从 nova.amazon.com/act 生成）。

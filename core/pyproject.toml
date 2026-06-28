@@ -5,8 +5,9 @@ description = "执行核心库（窄腰）：解析 .feature → 分组 scope �
 readme = "README.md"
 requires-python = ">=3.13"
 # 仅 Gherkin 解析依赖——核心不 import 任何引擎（ADR 0023/0024：引擎跑在 worker 子进程里）
+# 下限 31.0.0：parse.py 用顶层导出 `from gherkin import Parser, Compiler`，该导出 ≥31.0.0 才有（ADR 0025）
 dependencies = [
-    "gherkin-official>=29.0.0",
+    "gherkin-official>=31.0.0",
 ]
 
 [dependency-groups]

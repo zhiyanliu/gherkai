@@ -14,6 +14,6 @@
 
 **已在本账号实测（2026-06-22）**：用 IAM/SigV4 凭证向 `bedrock-runtime.us-west-2.amazonaws.com/openai/v1/chat/completions` 发真实请求，`qwen.qwen3-vl-235b-a22b` 返回 HTTP 200。证实：模型访问已授予、chat-completions 协议可用、在本账号 region 可达。
 
-**鉴权方式**：上述实测走的是 SigV4。Midscene 经 `createOpenAIClient` 自签 SigV4 接入（不用 bearer key），详见 [0008](./0008-midscene-bedrock-auth-sigv4-selfsign.md)；接线配方与账号实测见 `midscene/spikes/SIGV4-FETCH-RECIPE.md`。
+**鉴权方式**：上述实测走的是 SigV4。Midscene 经 `createOpenAIClient` 自签 SigV4 接入（不用 bearer key），详见 [0008](./0008-midscene-bedrock-auth-sigv4-selfsign.md)；接线配方与账号实测见 `engines/midscene/spikes/SIGV4-FETCH-RECIPE.md`。
 
 **未实测项**：Qwen3-VL 在英文 UI 上的逐像素定位质量（仅属推断，须 spike 实测）；235B MoE 的成本/延迟/配额。若 spike 实测定位质量不达标，按 [0009](./0009-maximize-aws-hard-constraint.md) 在 **AWS 内**寻找改进（换 Bedrock 其他 VL 模型 / SageMaker 自托管 / 调 grounding 策略），**不**以离开 AWS 为出路。

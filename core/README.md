@@ -12,11 +12,14 @@
 
 ```
 core/
-├── model.py      ← 领域模型：Job / Scenario / Step / 事件 / RunResult（纯数据）
+├── model.py      ← 领域模型：Job / Scenario / Step / 6 类事件 / 四层结果 RunResult（纯数据）
 ├── parse.py      ← .feature → 领域模型（借 gherkin-official Compiler；库藏在此 seam 后）
 ├── scope.py      ← tag 分组 + engine 校验 → Job[]；对外 plan(features, config) -> Job[]
-├── ports.py      ← Engine / RunStore / ResultStore / ReportStore 接口（组合根注入）
-└── schedule.py   ← schedule(jobs, engines, sink, opts) -> RunResult（并发/隔离/超时/优雅停）
+├── wire.py       ← Job↔JSON 与 0024 事件↔JSON 的线序列化（worker↔core 协议落地）
+├── ports.py      ← Engine / WorkerHandle / EngineResolver / Sink / RunStore / ResultStore / ReportStore 接口（组合根注入）
+├── schedule.py   ← schedule(jobs, engines, sink, opts) -> RunResult（并发/隔离/超时/优雅停）
+└── adapters/
+    └── subprocess_engine.py  ← Engine 唯一实装：spawn worker 子进程 + 读事件流（store adapter 待建）
 ```
 
 ## 跑测试

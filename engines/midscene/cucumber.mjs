@@ -6,8 +6,8 @@
 //     例：... -c cucumber.mjs --tags "@engine:midscene"
 //   多用例组织/跑批入口的正式形态留给核心库(C)，见 docs/adr/0016。
 export default {
-  // 共享 .feature 在 git 根的 features/（ADR 0005）；本配置在 midscene/，故 ../features
-  paths: ["../features/**/*.feature"],
+  // 共享 .feature 在 git 根的 features/（ADR 0005）；本配置在 engines/midscene/，故 ../../features
+  paths: ["../../features/**/*.feature"],
   import: ["bdd/steps/**/*.ts"],
   // tsx 在 Node 22 要用 --import（见运行命令的 NODE_OPTIONS），不能用废弃的 loader 字段
   format: ["progress"],

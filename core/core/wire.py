@@ -82,7 +82,7 @@ def job_to_line(job: Job) -> str:
 def _cost_from_json(d: dict | None) -> Cost | None:
     if d is None:
         return None
-    # 只认 engine 报的原生量（平铺、各 optional，ADR 0024）；旧字段 cost_usd/precision/basis 已废弃
+    # 只认 engine 报的原生量（平铺、各 optional，ADR 0024）：tokens / time_worked_s，无折算美元
     return Cost(
         tokens=d.get("tokens"),
         time_worked_s=d.get("time_worked_s"),

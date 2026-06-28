@@ -8,10 +8,10 @@
   CLI(人/CI/skill)   WebUI 后端        ← 前端「皮」（薄）；都直接调核心，平级
         └──────┬──────┘
           执行核心库 core/（窄腰：解析 .feature → 分组 scope → 调度 → 收集结果；零引擎依赖）
-                │  Engine port：runScope(scope) → JSON 结果
-        ┌───────┴───────┐                ← 两个 adapter 形状一致，平级对标
-   MidsceneEngine   NovaActEngine         spawn 各自语言的 worker 子进程，讲同一套 JSON 协议
-   spawn Node worker  spawn Python worker
+                │  Engine port：run_scope(job) → 0024 事件流
+        ┌───────┴───────┐                ← 同一个 SubprocessEngine，两腿只是 cmd 不同（形状本就一致）
+   spawn Node worker  spawn Python worker   按 job.engine 经 EngineResolver 选 cmd，讲同一套 0024 协议
+   (midscene 腿)       (novaact 腿)
         │                 │
    AgentCore 会话A    AgentCore 会话B      ← 会话生命周期在 worker 内（已验证）
 ```
@@ -52,10 +52,10 @@
 
 ## 留口子：Ports & Adapters（六边形架构），组合根注入
 
-可替换的外部依赖不散落成 `runScope` 的一堆参数，而是收成一个 **ports 层**（类比 DAO 层）：导出稳定接口，核心只依赖接口、不知实现是谁。
+可替换的外部依赖不散落成 `run_scope` 的一堆参数，而是收成一个 **ports 层**（类比 DAO 层）：导出稳定接口，核心只依赖接口、不知实现是谁。
 
 **按关注点拆成独立 port（不揉成上帝 module）**：
-- `Engine` —— 真正跑一个 scope 的地方（早先名 `ExecutionBackend`，现**重命名为 `Engine`** 对齐 CONTEXT 「引擎」术语）。v1.0 的 adapter = `MidsceneEngine` / `NovaActEngine`，各 spawn 对应语言的 worker 子进程、讲同一套 JSON 协议（[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)）。两 adapter 形状一致。
+- `Engine` —— 真正跑一个 scope 的地方（名 `Engine`，对齐 CONTEXT 「引擎」术语）。**实装收敛为单个参数化 adapter `SubprocessEngine`**（`core/core/adapters/subprocess_engine.py`）：以 `cmd`/`cwd`/`env` 参数化,既能 spawn Node worker 也能 spawn Python worker——因两腿"spawn 子进程 + 讲同一套 0024 协议"的形状本就完全一致（[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)），无需 `MidsceneEngine`/`NovaActEngine` 两个类。哪条腿由组合根传不同 `cmd` 决定（`EngineResolver` 按 `job.engine` 选）。
 - `RunStore` —— **控制面**：run/job 的状态、status、起止时间、会话血缘 sessionId（频繁读写：轮询/续跑/WebUI 进度）。**这才是未来 DynamoDB 真正要存的东西**（可恢复、可轮询）。
 - `ResultStore` —— **数据面**：每 scenario 的 pass/fail、投票抖动、原生报告指针（追加为主；RunReport 归集与 CI 读判定靠它）。
 - `ReportStore` —— 存归集报告产物（local FS → S3）。
@@ -63,17 +63,19 @@
 
 > **`RunStore` 从原 `ResultStore` 拆出（对本 ADR 早先单一 `ResultStore` 的修正）**：控制面（状态/血缘，频繁读写、撑轮询续跑）与数据面（结果落地，追加为主）访问模式与生命周期不同，拆成两个 port 更内聚——也让「DDB 存什么」清晰（DDB 主要服务 `RunStore`）。
 
-**adapters 按 port 分子目录**（不按后端分）：
+**adapters 按 port 分子目录的目标布局**（多后端时不按后端混放）——下为**目标态**，当前实装更扁平（见图后说明）：
 
 ```
 core/
-├── ports.py                 ← 接口定义（Engine / RunStore / ResultStore / ReportStore）
+├── ports.py                 ← 接口定义（Engine / WorkerHandle / EngineResolver / Sink / RunStore / ResultStore / ReportStore）
 └── adapters/
-    ├── engine/{midscene.py, novaact.py}   ← spawn 各自 worker、讲协议
-    ├── run_store/local.py                 ← 控制面；（未来 ddb.py）
-    ├── result_store/local.py              ← 数据面；（未来对象存储）
-    └── report_store/local.py              ← 归集报告；（未来 s3.py）
+    ├── subprocess_engine.py              ← Engine 实装：单个参数化 adapter（spawn node / python 皆可）✅ 已建
+    ├── run_store/local.py                ← 控制面；（未来 ddb.py）        ⬜ 待建
+    ├── result_store/local.py             ← 数据面；（未来对象存储）        ⬜ 待建
+    └── report_store/local.py             ← 归集报告；（未来 s3.py）        ⬜ 待建
 ```
+
+**当前实装**：`adapters/` 下只有 `subprocess_engine.py`（Engine port 的唯一 adapter）；三个 store port 仅在 `ports.py` 定义接口、**local adapter 尚未建**（结果现仅在内存 `RunResult`，未持久化）。多个 store adapter 落地后再按 port 分子目录（rule-of-three）。
 
 **选实现 = 组合根注入，不是 module 自选**（关键，避开本会话踩过的坑）：
 - 接口定义在 `ports`；**具体 adapter 由调用方（CLI 的 main / WebUI 的 bootstrap = 组合根）在启动时注入**给核心。核心只认接口。
@@ -85,7 +87,7 @@ core/
 
 ## 工程布局：core / cli / engines 三者平级对标
 
-下为**目标态**。**当前实装态（v1.0 进行中）**标在各行右侧 ✅/⬜：core/ 已建；engines/ 迁移与 cli/ 待接 Midscene 那轮做，现 Nova worker 在顶层 `novaact/worker/`、组合根用 `core/run_e2e.py`（CLI 雏形）。
+**当前实装态（v1.0 进行中）**标在各行右侧 ✅/⬜：core/ 已建、engines/ 已迁、两腿 worker 已落地；仅 cli/ 待建（现组合根用 `core/run_e2e.py` 暂代）。
 
 ```
 yaozhou/
@@ -95,17 +97,18 @@ yaozhou/
 │   └── run_e2e.py       ← 组合根 / CLI 雏形                                ✅（暂代下方 cli/main.py）
 ├── cli/                 ← 最薄前端 = 组合根（在此 new 出具体 adapter 注入给 core）  ⬜ 待建（现由 core/run_e2e.py 暂代）
 │   └── main.py
-└── engines/             ← 两个可插拔引擎，与 core 平级对标                  ⬜ 待迁移（现 midscene/、novaact/ 仍在顶层）
-    ├── midscene/        ← 整个 TS 子工程                                  ✅ worker 已落地（现在顶层 midscene/worker/run-scope.ts）
-    │   └── lib/agentcore-sigv4.mts
-    └── novaact/         ← 整个 Python 子工程                              ✅ worker 已落地（现位于顶层 novaact/worker/run_scope.py）
+└── engines/             ← 两个可插拔引擎，与 core 平级对标                  ✅ 已迁
+    ├── midscene/        ← 整个 TS 子工程                                  ✅ worker：engines/midscene/worker/run-scope.ts
+    │   ├── worker/run-scope.ts · lib/agentcore-sigv4.mts
+    │   └── （node_modules / spikes / cucumber 等整体随迁）
+    └── novaact/         ← 整个 Python 子工程                              ✅ worker：engines/novaact/worker/run_scope.py
         ├── worker/run_scope.py                                          ✅（确定性注册表/ai_steps 拆分留口子，见 0022）
-        └── lib/workflow_setup.py
+        └── lib/workflow_setup.py · .venv（整体随迁）
 ```
 
 - **`engines/{midscene,novaact}` 提升为与 `core/` 平级**（不再各藏一个 `worker/` 子目录）：引擎子工程必须连同其依赖环境（`node_modules`+`agentcore-sigv4.mts` / `.venv`+`workflow_setup.py`）整体存在，故**整体**移到 `engines/` 下，既对称又不把代码与依赖环境拆开。
 - **目录名用 `engine` 而非 `worker`**：对齐 CONTEXT 「引擎」与 `Engine` port；worker 是运行时角色（被 spawn 的进程），engine 是领域概念——`engines/midscene/` 内**含**一个 worker 入口。
-- **窄腰目录名 `core`、不叫 `lib`**：`lib` 已被各引擎子级占用（`midscene/lib`、`novaact/lib` 放引擎内共享模块），复用会混淆。散文里称「核心库 / core 包」无妨（它确是 cli/未来 WebUI 依赖的可导入库），但**目录**是 `core`。
+- **窄腰目录名 `core`、不叫 `lib`**：`lib` 已被各引擎子级占用（`engines/midscene/lib`、`engines/novaact/lib` 放引擎内共享模块），复用会混淆。散文里称「核心库 / core 包」无妨（它确是 cli/未来 WebUI 依赖的可导入库），但**目录**是 `core`。
 
 ## 版本切分（按完成线，非时间；版本号用 SemVer）
 
@@ -133,7 +136,7 @@ G1/G2 是 v1.0 核心库 `.feature` 解析的前置——其声明语法**现已
 ## 现在做 / 现在不做
 
 - **现在做（v1.0）**：核心库 `core/` 可被调用（逻辑不焊死在 CLI main 里）；钉死上面数据模型；定义 ports 接口（`Engine`/`RunStore`/`ResultStore`/`ReportStore`）+ 组合根注入；核心自解析 Gherkin + 薄 worker（[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)）。模块设计：worker↔core 协议见 [0024](./0024-worker-core-protocol.md)；plan 模块见 [0025](./0025-plan-module-feature-to-jobs.md)；schedule 模块见 [0026](./0026-schedule-module.md)。
-  - **ports 落地状态（v1.0 当前）**：`Engine` port 的 local adapter **已建**（`core/adapters/subprocess_engine.py`，子进程起 worker）；`RunStore`/`ResultStore`/`ReportStore` **仅定义了接口 Protocol、local adapter 尚未建**（结果现仅在内存 `RunResult`，未持久化）——待真实跑批逼出字段后填（与上「数据模型」节的字段级 schema 顺延一致）。**两腿 worker 均已落地**（`novaact/worker/run_scope.py` + `midscene/worker/run-scope.ts`），两腿对称、同讲 0024 协议。
+  - **ports 落地状态（v1.0 当前）**：`Engine` port 的 local adapter **已建**（`core/adapters/subprocess_engine.py`，子进程起 worker）；`RunStore`/`ResultStore`/`ReportStore` **仅定义了接口 Protocol、local adapter 尚未建**（结果现仅在内存 `RunResult`，未持久化）——待真实跑批逼出字段后填（与上「数据模型」节的字段级 schema 顺延一致）。**两腿 worker 均已落地**（`engines/novaact/worker/run_scope.py` + `engines/midscene/worker/run-scope.ts`），两腿对称、同讲 0024 协议。
 - **现在不做**：DynamoDB / S3 / Fargate adapter / 无状态机制 / WebUI ——接口已留好，等云端真需要时填 adapter + 组合根换注入。**避免为想象中的云端预先盖机器。**
 - **G1/G2 声明语法已定**（ADR 0019）；其**调度实现**（scope 串/并行、会话共享、engine 冲突校验）由 v1.0 核心库落地。
 - **多用例组织**（feature 分目录/命名约定、跑批入口、跑批层选择 feature/tag）同样由 v1.0 核心库落地——它依赖核心库的调度层，在 bdd 直跑层做是临时的、核心库会重做。当前 `features/` 下多个文件仅是 v0.x 打磨产物，未做有意组织。（旧的 cucumber `--tags` 选子集约定随 BDD runner 一并退役，见 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)；选子集改由核心调度层据 tag 实现。）

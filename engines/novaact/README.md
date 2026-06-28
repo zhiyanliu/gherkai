@@ -18,14 +18,19 @@ Nova Act (Python) 侧的执行引擎。用 Amazon 自家模型 `nova-act-latest`
 
 ## 跑 BDD（pytest-bdd，加载根 `features/`）
 
+> v0.x 形态：v1.0 起 pytest-bdd 退役，改由根 `core/` 自解析 `.feature` +
+> 本子工程的 `worker/run_scope.py` 薄 worker 执行（见根 ADR 0022）。下方
+> pytest 跑法仅 v0.x 适用，`bdd/` 仍保留。
+
 ```bash
-AWS_REGION=us-east-1 .venv/bin/python -m pytest bdd/test_wikipedia.py -s
+AWS_REGION=us-east-1 .venv/bin/python -m pytest bdd/test_generic_steps.py -s
 ```
 
-## 跑 spike（对标基准，可独立跑）
+## 跑 spike（可独立跑）
 
 ```bash
-AWS_REGION=us-east-1 .venv/bin/python spikes/wikipedia_benchmark.py
+AWS_REGION=us-east-1 .venv/bin/python spikes/wikipedia_benchmark.py    # 对标基准（维基百科端到端）
+AWS_REGION=us-east-1 .venv/bin/python spikes/negative_assertions.py    # 负向断言（"该红能红"，对标 midscene 05）
 ```
 
 ## 报告

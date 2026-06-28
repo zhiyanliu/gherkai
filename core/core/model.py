@@ -177,7 +177,7 @@ Event = (
 
 @dataclass
 class StepResult:
-    """单个 step 的归约结果（core 首次保留 step 级粒度，ADR 0024）。
+    """单个 step 的归约结果（core 保留 step 级粒度，ADR 0024）。
 
     duration_ms = step 墙钟时长（core 用 step_started→step_done 的事件到达时间戳算）。
     """

@@ -34,9 +34,9 @@ _Avoid_: 把骨架验证用例当成最终交付的业务测试。
 
 **穿刺脚本落点（by-engine）**:
 spike 脚本**紧贴各自引擎的语言/依赖环境**，放在对应子工程内、诚实标记可丢弃：
-- Midscene（TS）→ `midscene/spikes/`，复用 `midscene/node_modules`（含其配方笔记 `SIGV4-FETCH-RECIPE.md`，与代码同居）。
-- Nova Act（Python）→ `novaact/spikes/`，用 `novaact/.venv`。
-不设 git 根级 `spikes/`（早期曾有，因布局统一为 by-engine 已撤销）。**引擎内**复用的代码（如 Midscene 的 SigV4，仅 Midscene 的 spike 与 bdd 共用）抽到该引擎的 `lib/`（见 `midscene/lib/agentcore-sigv4.mts`）；这不是跨引擎共享——SigV4 是 Midscene 专属，Nova Act 走 IAM/Workflow 不碰它。跨引擎真正共享的是 `features/`（用例），见 [跨引擎共享边界](./docs/adr/0013-cross-engine-sharing-boundary.md)（ADR 0013）。
+- Midscene（TS）→ `engines/midscene/spikes/`，复用 `engines/midscene/node_modules`（含其配方笔记 `SIGV4-FETCH-RECIPE.md`，与代码同居）。
+- Nova Act（Python）→ `engines/novaact/spikes/`，用 `engines/novaact/.venv`。
+不设 git 根级 `spikes/`（早期曾有，因布局统一为 by-engine 已撤销）。**引擎内**复用的代码（如 Midscene 的 SigV4，仅 Midscene 的 spike 与 bdd 共用）抽到该引擎的 `lib/`（见 `engines/midscene/lib/agentcore-sigv4.mts`）；这不是跨引擎共享——SigV4 是 Midscene 专属，Nova Act 走 IAM/Workflow 不碰它。跨引擎真正共享的是 `features/`（用例），见 [跨引擎共享边界](./docs/adr/0013-cross-engine-sharing-boundary.md)（ADR 0013）。
 _Avoid_: 把某一引擎专属的 spike/文档/代码放到根级或另一引擎目录下；也别误以为引擎内的 `lib/` 是两腿共享。
 
 **确定性断言 vs AI 断言 (Deterministic vs AI assertion)**:
@@ -85,7 +85,7 @@ _Avoid_: 把逻辑焊死在 CLI `main()` 里；以为"WebUI 要包 CLI"；把"�
 （版本演进 spike→v0.x→v1.0→v1.x→v2.0 见 ADR 0016。）
 
 **执行引擎 port (Engine port)**:
-核心库之下真正跑一个 scope 的地方，是一个 **port**（`Engine`，由 `ExecutionBackend` 重命名以对齐「引擎」术语，ADR 0016），由组合根注入。v1.0 的两个 adapter `MidsceneEngine`/`NovaActEngine` **形状一致**：各 spawn 对应语言的 worker 子进程、讲同一套 JSON 协议。演进：v1.0 本地进程（浏览器仍在云端 AgentCore Browser）→ 云端倾向 Fargate/ECS（批处理 shape-fit，ADR 0017；非 AgentCore Runtime）。
+核心库之下真正跑一个 scope 的地方，是一个 **port**（`Engine`，对齐「引擎」术语，ADR 0016），由组合根注入。v1.0 实装为**单个参数化 adapter `SubprocessEngine`**（`core/core/adapters/subprocess_engine.py`）：用 `cmd`/`cwd`/`env` 参数化即可 spawn Node 或 Python worker——两腿"spawn 子进程 + 讲同一套 0024 协议"形状本就一致，无需两个具名 adapter 类；哪条腿由组合根传不同 `cmd`、经 `EngineResolver` 按 `job.engine` 选。演进：v1.0 本地进程（浏览器仍在云端 AgentCore Browser）→ 云端倾向 Fargate/ECS（批处理 shape-fit，ADR 0017；非 AgentCore Runtime）。
 _Avoid_: 混淆"浏览器在云端"（spike 已验证）与"执行进程也在云端"（>v1.0）；把它当成"核心 import 引擎"——核心永不 import 引擎，只 spawn worker。
 
 **两腿都子进程 + 薄 worker (Both-legs-subprocess + thin worker)**:
@@ -97,5 +97,5 @@ test engineer 扩展确定性锚点的落点：在对应 worker 里登记 `(模�
 _Avoid_: 把匹配放进核心（核心只解析结构+调度，不懂 step 语义）；以为 QA 要写确定性 step。
 
 **Ports 层 (Ports & adapters)**:
-核心库把可替换的外部依赖收成独立 port，导出稳定接口；核心只依赖接口。四个 port（ADR 0016）：`Engine`（跑 scope）、`RunStore`（**控制面**：run/job 状态/血缘，频繁读写、撑轮询续跑——DDB 主要服务它）、`ResultStore`（**数据面**：每 scenario 判定/投票/报告指针，追加为主）、`ReportStore`（归集报告产物）。`RunStore` 从原 `ResultStore` 拆出（控制面 vs 数据面访问模式不同）。**具体 adapter 由组合根（CLI main / WebUI bootstrap）注入**，不由 module 内部 env-sniff 自选（后者是本项目踩过的 Midscene `GlobalConfigManager` 反模式）。adapters 按 port 分子目录；v1.0 只写 local adapter，云端再填 DDB/S3/Fargate（ADR 0016）。
+核心库把可替换的外部依赖收成独立 port，导出稳定接口；核心只依赖接口。四个 port（ADR 0016）：`Engine`（跑 scope）、`RunStore`（**控制面**：run/job 状态/血缘，频繁读写、撑轮询续跑——DDB 主要服务它）、`ResultStore`（**数据面**：每 scenario 判定/投票/报告指针，追加为主）、`ReportStore`（归集报告产物）。`RunStore` 从原 `ResultStore` 拆出（控制面 vs 数据面访问模式不同）。**具体 adapter 由组合根（CLI main / WebUI bootstrap）注入**，不由 module 内部 env-sniff 自选（后者是本项目踩过的 Midscene `GlobalConfigManager` 反模式）。**当前实装**：`adapters/` 只有 `subprocess_engine.py`（Engine 的唯一 adapter）；三个 store port **仅定义接口、local adapter 尚未建**（结果现仅在内存 `RunResult`）。多个 adapter 落地后再按 port 分子目录，云端再填 DDB/S3/Fargate（rule-of-three，ADR 0016）。
 _Avoid_: 把多个 port 揉成一个上帝 module；让 port-module 用全局单例自选实现；混淆控制面（RunStore）与数据面（ResultStore）。

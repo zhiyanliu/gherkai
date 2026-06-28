@@ -28,7 +28,7 @@ __PICKLE_TYPE_TO_KEYWORD = { Context: 'Given', Action: 'When', Outcome: 'Then' }
 
 - `package.json` 必须**精确 pin** `"@cucumber/cucumber": "13.0.0"`（不是 `^13.0.0`）。否则升级到 13.0.x 后 patch-package **静默跳过**（找不到匹配版本）→ 无报错地退回 ambiguous 匹配。
 - `postinstall: patch-package` 钩子使补丁在 `npm install` 后自动应用。
-- 升级 cucumber 时：改版本号 → `cd midscene && npx patch-package @cucumber/cucumber` 重新生成 → 提交新 `.patch`。
+- 升级 cucumber 时：改版本号 → `cd engines/midscene && npx patch-package @cucumber/cucumber` 重新生成 → 提交新 `.patch`。
 - **验证补丁已生效**：`grep __PICKLE_TYPE_TO_KEYWORD node_modules/@cucumber/cucumber/lib/assemble/assemble_test_cases.js`（建议纳入 CI 的 postinstall 后置检查）。
 
 ## 重议
