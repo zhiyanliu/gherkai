@@ -23,6 +23,7 @@ cost（ADR 0024）：Nova SDK 原生给 time_worked_s，worker 只报该原生�
 """
 from __future__ import annotations
 
+import inspect
 import json
 import os
 import re
@@ -36,12 +37,34 @@ from nova_act.types.workflow import set_current_workflow, get_current_workflow
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # novaact/ 根，便于 import lib
 from lib.workflow_setup import ensure_workflow_definition
 
+# 确定性 step 注册表（ADR 0022）+ test engineer 的锚点脚手架。
+# 先 import 注册机制（提供 @deterministic 装饰器），再 import 脚手架——脚手架顶层的
+# @deterministic 在 import 时执行，把锚点登记进 _deterministic._REGISTRY。
+import deterministic as _deterministic  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bdd"))  # 便于 import deterministic_steps
+import deterministic_steps  # noqa: E402,F401  仅为触发注册（其顶层 @deterministic 副作用）
+
 REGION = os.environ.get("AWS_REGION", "us-east-1")
 MODEL_ID = "nova-act-latest"
 WORKFLOW_DEF = "spike-wikipedia-benchmark"
 VOTES = 3  # AI 断言投票次数（治种类A抖动，ADR 0014）
 
 _URL_IN_QUOTES = re.compile(r'"(https?://[^"]+)"')
+
+
+class _DeterministicCtx:
+    """传给确定性 handler 的上下文：暴露 Playwright `page`（精确 DOM/URL 查，不走 AI）。
+
+    Nova 把底层 Playwright Page 暴露在 `nova.page`（spike 已验证）。handler 拿它做
+    `ctx.page.url` / `ctx.page.locator(...)` 这类确定性判定。
+    """
+
+    def __init__(self, nova) -> None:
+        self._nova = nova
+
+    @property
+    def page(self):
+        return self._nova.page
 
 # 三通道分离（ADR 0024）：协议事件走专用 fd（core adapter 读这个），与 SDK 打到 stdout 的进度噪声、
 # worker 自己的诊断（stderr）物理隔离。adapter 经环境变量 EVENTS_FD 告知该 fd 号（pass_fds 继承，号不固定）。
@@ -76,16 +99,45 @@ def _cost_from_result(r) -> dict | None:
 
 
 def _run_step(nova, scenario_id: str, step: dict) -> str:
-    """派发执行一个 step，吐 step_done 事件，返回该 step 的 status（passed/failed/error）。"""
+    """派发执行一个 step，吐 step_done 事件，返回该 step 的 status（passed/failed/error）。
+
+    派发优先级（ADR 0022/0020/0024）：
+      ① 确定性注册表命中（test engineer 注册的精确 handler，不投票、可复现）
+      ② 内建 URL 导航（step 含引号内 URL）
+      ③ Then → AI 断言 + 投票 / When·Given → AI 动作（默认 catch-all）
+    """
     idx = step["index"]
     keyword = step["keyword"]
     text = step["text"]
 
     emit({"type": "step_started", "scenarioId": scenario_id, "stepIndex": idx})  # step 时长起点
     try:
+        # ① 确定性注册表（ADR 0022）：命中走精确 handler、不投票；AssertionError→failed，其它→error
+        hit = _deterministic.match(text)
+        if hit is not None:
+            handler, groups = hit
+            ctx = _DeterministicCtx(nova)
+            try:
+                ret = handler(ctx, **groups)
+                if inspect.isawaitable(ret):
+                    # Nova 腿是同步 worker：async handler 的断言不会被执行（返回 coroutine 即静默判 passed）。
+                    # 显式报错而非静默假阳性——确定性 handler 必须同步（与 Nova SDK 同步模型一致）。
+                    raise TypeError(
+                        f"确定性 handler 不能是 async（Nova 腿同步执行）：{getattr(handler, '__name__', handler)!r}"
+                    )
+            except AssertionError as ae:
+                emit({
+                    "type": "step_done", "scenarioId": scenario_id, "stepIndex": idx,
+                    "status": "failed", "errorType": "assertion_failed",
+                    "message": str(ae) or f"确定性断言未过：{text}",
+                })
+                return "failed"
+            emit({"type": "step_done", "scenarioId": scenario_id, "stepIndex": idx, "status": "passed"})
+            return "passed"
+
         url_match = _URL_IN_QUOTES.search(text)
         if url_match:
-            # 内建确定性导航（ADR 0020）：抽 URL 直接 go_to_url，不浪费 AI
+            # ② 内建确定性导航（ADR 0020）：抽 URL 直接 go_to_url，不浪费 AI
             nova.go_to_url(url_match.group(1))
             emit({"type": "step_done", "scenarioId": scenario_id, "stepIndex": idx, "status": "passed"})
             return "passed"

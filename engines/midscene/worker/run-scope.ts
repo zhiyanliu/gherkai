@@ -10,7 +10,8 @@
 // token 数，worker 只报 {tokens}；core 合计、美元折算交消费者（不追 Qwen 单价）。两腿对称：都只报原生量。
 //
 // 跑（一般由 core adapter spawn；也可手动）：
-//   echo '<job json>' | AWS_REGION=us-east-1 node --import tsx/esm worker/run-scope.ts
+//   echo '<job json>' | AWS_REGION=us-east-1 node --import tsx worker/run-scope.ts
+//   （用 `--import tsx`，非 `tsx/esm`：本子工程是 commonjs，tsx/esm loader 会冲突——与 cli compose 一致）
 import OpenAI from "openai";
 import { PlaywrightAgent } from "@midscene/web/playwright";
 import { chromium, type Browser } from "playwright";
@@ -21,6 +22,10 @@ import {
 } from "@aws-sdk/client-bedrock-agentcore";
 import * as fs from "node:fs";
 import { sigv4Fetch, signCdpUpgrade, BASE_URL, MODEL, REGION } from "../lib/agentcore-sigv4.mjs";
+// 确定性 step 注册表（ADR 0022）+ test engineer 的锚点脚手架。
+// import 脚手架即触发其顶层 deterministic(...) 注册副作用（对称 Nova 腿 import deterministic_steps）。
+import { match as matchDeterministic, DeterministicAssertion } from "./deterministic.js";
+import "../bdd/steps/deterministic.steps.js";
 
 const BROWSER_ID = "aws.browser.v1";
 const VOTES = 3; // AI 断言投票次数（治种类A抖动，ADR 0014）
@@ -168,9 +173,28 @@ async function runStep(
   const { index, keyword, text } = step;
   emit({ type: "step_started", scenarioId, stepIndex: index });  // step 时长起点
   try {
+    // ① 确定性注册表（ADR 0022）：命中走精确 handler、不投票；AssertionError→failed，其它→error
+    const hit = matchDeterministic(text);
+    if (hit) {
+      try {
+        await hit.handler({ page }, hit.groups);
+      } catch (e) {
+        if (e instanceof DeterministicAssertion || (e as Error).name === "AssertionError") {
+          emit({
+            type: "step_done", scenarioId, stepIndex: index,
+            status: "failed", errorType: "assertion_failed",
+            message: (e as Error).message || `确定性断言未过：${text}`,
+          });
+          return "failed";
+        }
+        throw e; // 其它异常 → 落到下面 catch，记 error
+      }
+      emit({ type: "step_done", scenarioId, stepIndex: index, status: "passed" });
+      return "passed";
+    }
     const urlMatch = URL_IN_QUOTES.exec(text);
     if (urlMatch) {
-      // 内建确定性导航（ADR 0020）：抽 URL 直接 goto，不浪费 AI
+      // ② 内建确定性导航（ADR 0020）：抽 URL 直接 goto，不浪费 AI
       await page.goto(urlMatch[1], { waitUntil: "domcontentloaded", timeout: 60_000 });
       emit({ type: "step_done", scenarioId, stepIndex: index, status: "passed" });
       return "passed";

@@ -135,8 +135,8 @@ core 的 `schedule`/汇总逻辑应能用一个**假 worker**（in-memory adapte
 
 ## 现在做 / 留口子
 
-- **现在做（v1.0，已落地）**：上述输入/输出 schema、cost 信封（engine 报原生量 time_worked_s/tokens、core 合计）、三态 status/votes 区分 AI 断言；worker 派发逻辑（URL 导航 > 默认 AI）；两腿 worker `get_session_id` 取会话血缘；Midscene worker 取 `agent.reportFile` 报 scope 级 reportRefs。
-- **已实现但粗粒度（留待细化）**：`errorType` —— Nova worker 当前一律归 `engine_error`（`except Exception` 兜底），按 Nova 异常树细分（timeout/guardrail/navigation_error）留口子；确定性 step 注册表（[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)）—— 仅内建 URL→导航分支，注册表本身未建。
+- **现在做（v1.0，已落地）**：上述输入/输出 schema、cost 信封（engine 报原生量 time_worked_s/tokens、core 合计）、三态 status/votes 区分 AI 断言；worker 派发逻辑（确定性注册表 > 内建 URL 导航 > 默认 AI，[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)）；两腿对称的 `@deterministic` 注册表（命中走精确 handler、不投票）；两腿 worker `get_session_id` 取会话血缘；Midscene worker 取 `agent.reportFile` 报 scope 级 reportRefs。
+- **已实现但粗粒度（留待细化）**：`errorType` —— Nova worker 当前一律归 `engine_error`（`except Exception` 兜底），按 Nova 异常树细分（timeout/guardrail/navigation_error）留口子。
 - **留口子不实现**：per-vote 细节；**Nova 侧 `reportRefs`**（Nova worker 暂未设 `replayable=True` 采 trajectory 路径——Midscene 侧已填 scope 级 html）；trajectory 内部结构的结构化提取；美元折算（交消费者，框架不做）。
 
 ## 重议
