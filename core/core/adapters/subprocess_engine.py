@@ -109,8 +109,12 @@ def _read_events(proc: subprocess.Popen, events_r: int) -> Iterator[Event]:
     proc.wait()
     rc = proc.returncode
     if rc is not None and rc > 0:
-        # 正零 = 正常；负 = 被信号杀（-SIGTERM/-SIGKILL，schedule 主动停的，属正常中止）；
-        # 正非零 = worker 自身崩了但没吐完整事件流 → 抛错让 schedule 记 error。
+        # 此 rc 检查仅在 fd3 自然 EOF（worker 自行退出）后执行——schedule 主动停 worker 走 _stop() 后
+        # 即 return、放弃此 generator（GeneratorExit 在 yield 处冒出，不到这里），故主动停的退出码不经此。
+        # 0 = 正常；负 = 被 SIGKILL 强杀（grace 超时，schedule 主动停的尾路径，不到此检查）；
+        # 正非零 = worker 自行异常退出（崩溃/会话清理失败 exit 1 / 网络码 80）→ 抛错让 schedule 记 error。
+        # 注：两腿 worker 与 echo_worker 均自装 SIGTERM handler 后 process.exit/sys.exit（正码），
+        # 故「负码=SIGTERM」不成立——负码只来自 SIGKILL，且那条路径不经此检查（见上）。
         if rc == EX_WORKER_NETWORK:
             # worker 以网络专用退出码退出（建连失败、重试耗尽，ADR 0028）：抛类型化异常，
             # schedule 据此记 network_error 并可选择性重试整 job。

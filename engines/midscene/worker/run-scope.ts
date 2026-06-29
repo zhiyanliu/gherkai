@@ -35,6 +35,13 @@ const BROWSER_ID = "aws.browser.v1";
 const EX_WORKER_NETWORK = 80;
 const CONNECT_ATTEMPTS = 4; // 建连重试上限（ADR 0028）；退避 [0.5,1,2]s，总 ~3.5s < grace 5s
 const CONNECT_BACKOFF_MS = [500, 1000, 2000];
+// SIGTERM cleanup 里单个 StopBrowserSession 的超时预算（ADR 0028）：退化网络下 Stop 可能挂很久
+// （共享 client maxAttempts=3、无显式超时），超过 schedule grace 会被 SIGKILL 打断到一半 → 会话泄漏。
+// 套这个预算：挂死时及时放弃，至少让 worker 干净退出、不被强杀。须 < grace（schedule 默认 5s，cli 10s）。
+const STOP_SESSION_BUDGET_MS = 3000;
+// StartBrowserSession 已发出 RPC 但 sessionId 未返回的在途窗口兜底（ADR 0028）：SIGTERM 落在这一瞬时
+// 服务端可能已建会话但客户端没拿到 id。给一小段时间让 Start 的 await 返回、id 落进待清理集，再 cleanup。
+const INFLIGHT_SETTLE_MS = 1500;
 
 // 是否网络/SSL 瞬时故障（可重试，ADR 0028）。Node 侧按 error code / TLS 错识别瞬时类。
 // 遍历 error.cause 链：SDK 常把底层 socket/TLS 错包成自有 Error，只看最外层会漏判（防环：限 8 层）。
@@ -104,31 +111,54 @@ async function main(): Promise<number> {
   const scope = job.scope;
 
   const cp = new BedrockAgentCoreClient({ region: REGION });
-  let sessionId: string | undefined;
+  // 待清理会话集（ADR 0028 会话跟踪重构）：每次 StartBrowserSession 成功即把 id 加进来——含被重试丢弃的
+  // 中间 attempt 会话。SIGTERM handler / cleanup 遍历它逐个 Stop，**不再靠单一 sessionId 快照**（旧实现：
+  // 重试时 sessionId 被后一个 attempt 覆盖/置空，handler 只能 Stop 到当前快照 → 在途/已弃的 attempt 会话泄漏）。
+  const pendingSessions = new Set<string>();
+  let sessionId: string | undefined; // 最终成功会话 id（血缘，进 scope_done；非清理依据——清理看 pendingSessions）
+  let startInFlight = false; // StartBrowserSession RPC 已发出、await 未返回（SIGTERM 兜底等待的精确信号，ADR 0028）
   let browser: Browser | undefined;
   let cleanedUp = false;
   let cleanupFailed = false; // StopBrowserSession 失败 → worker 非 0 退出，让泄漏可观测（对照 Nova）
+
+  async function stopSession(sid: string): Promise<boolean> {
+    // 单个会话 Stop，套超时预算（ADR 0028）：退化网络下 Stop 可能挂死、超 grace 被 SIGKILL 打断 → 泄漏。
+    // 超时即放弃（返回 false=未确认释放），让 worker 能干净退出。timedOut 哨兵区分「超时」与「Stop 成功」。
+    const timedOut = Symbol("timeout");
+    try {
+      const r = await Promise.race([
+        cp.send(new StopBrowserSessionCommand({ browserIdentifier: BROWSER_ID, sessionId: sid })).then(() => true),
+        new Promise<typeof timedOut>((res) => setTimeout(() => res(timedOut), STOP_SESSION_BUDGET_MS)),
+      ]);
+      if (r === timedOut) {
+        log(`worker: StopBrowserSession TIMEOUT >${STOP_SESSION_BUDGET_MS}ms (会话可能泄漏，需排查): session=${sid}`);
+        return false;
+      }
+      return true;
+    } catch (e) {
+      log(`worker: StopBrowserSession FAILED (会话可能泄漏，需排查): ${(e as Error).message}`);
+      return false;
+    }
+  }
 
   // 会话清理（ADR 0024 终止契约，对照 Nova 的 with __exit__）：
   //   顺序——**先发 StopBrowserSession 释放会话（最重要、优先）**，再关 browser；
   //   不让易挂起的 browser.close 挟持会话释放（审计窗口 5）。close 套超时预算，避免耗尽 grace。
   //   幂等：cleanedUp 守卫，防 SIGTERM handler 与 finally 双调。
-  //   StopBrowserSession 失败不静默吞：记日志 + 置 cleanupFailed → 非 0 退出（审计窗口 C）。
+  //   **并行** Stop pendingSessions（每个套超时预算）；任一未确认释放 → cleanupFailed（除非 discardAttempt）。
+  //   并行（Promise.all）而非串行：N 个会话累积时墙钟 ≈ 单个预算（3s）而非 N×3s——串行会让重试积累的
+  //   多个泄漏会话把 cleanup 拖过 grace 被 SIGKILL 截断（正是本修复要防的泄漏，ADR 0028）。
   //   discardAttempt=true（丢弃中间建连 attempt 的部分会话，ADR 0028）：Stop 失败只 log、**不点亮
   //   final cleanupFailed**——那个会话本就要丢、与「最终态会话是否泄漏」无关；否则一次中间失败会毒化
   //   后续成功 attempt 的退出码（误报泄漏 → core 当 engine_error）。final cleanup（默认）才管 cleanupFailed。
   async function cleanup(discardAttempt = false): Promise<void> {
     if (cleanedUp) return;
     cleanedUp = true;
-    const sid = sessionId;
-    if (sid) {
-      try {
-        await cp.send(new StopBrowserSessionCommand({ browserIdentifier: BROWSER_ID, sessionId: sid }));
-      } catch (e) {
-        if (!discardAttempt) cleanupFailed = true;
-        log(`worker: StopBrowserSession FAILED (会话可能泄漏，需排查): ${(e as Error).message}`);
-      }
-    }
+    await Promise.all([...pendingSessions].map(async (sid) => {
+      const ok = await stopSession(sid);
+      if (ok) pendingSessions.delete(sid);
+      else if (!discardAttempt) cleanupFailed = true;
+    }));
     // 会话已释放，再尽力关本地 browser；套超时，挂住也不拖垮（会话已停，close 失败无计费影响）
     if (browser) {
       await Promise.race([
@@ -145,11 +175,12 @@ async function main(): Promise<number> {
     if (terminated) return;
     terminated = true;
     onTerminate?.();  // 立即唤醒正在退避的重试循环，使其尽快停（不再 reconnect/跑 act）
-    log("worker: SIGTERM received, releasing AgentCore session");
-    // 窗口(1) 兜底：若 SIGTERM 在 StartBrowserSession 返回前到达，sessionId 还没赋值，
-    // 但服务端可能已建会话。给一小段时间让 Start 的 await 返回、sessionId 落地，再 cleanup。
-    if (!sessionId) {
-      await new Promise<void>((r) => setTimeout(r, 1500));
+    log("worker: SIGTERM received, releasing AgentCore session(s)");
+    // 在途窗口兜底（ADR 0028）：SIGTERM 落在 StartBrowserSession 已发 RPC 但 id 未返回的一瞬（startInFlight）时，
+    // 待清理集还空但服务端可能已建会话。给一小段时间让 Start 的 await 返回、id 落进 pendingSessions，再 cleanup。
+    // 重试循环每 attempt 的 id 一返回即入集（见 connect），故此处只需覆盖「Start 在途未返回」这一瞬。
+    if (startInFlight && pendingSessions.size === 0) {
+      await new Promise<void>((r) => setTimeout(r, INFLIGHT_SETTLE_MS));
     }
     await cleanup();
     log(`worker: session shutdown complete after SIGTERM${cleanupFailed ? " (WITH FAILURE)" : ""}`);
@@ -163,8 +194,15 @@ async function main(): Promise<number> {
   // 整段可被重试；scope_started 一 emit（会话已起、act 即将跑）即跳出重试域，绝不重试 act。
   // 每次 attempt 前若上次部分建起了会话/browser，先 cleanup 释放（防泄漏 + 不重复占用）。
   async function connect(): Promise<{ page: import("playwright").Page; agent: PlaywrightAgent }> {
-    const started = await cp.send(new StartBrowserSessionCommand({ browserIdentifier: BROWSER_ID, name: "worker" }));
-    sessionId = started.sessionId!;  // 立即赋值 → SIGTERM handler 能 Stop 本次会话（防窗口泄漏）
+    startInFlight = true;  // Start RPC 在途（SIGTERM 兜底信号）；返回/抛错后清
+    let started;
+    try {
+      started = await cp.send(new StartBrowserSessionCommand({ browserIdentifier: BROWSER_ID, name: "worker" }));
+    } finally {
+      startInFlight = false;
+    }
+    sessionId = started.sessionId!;
+    pendingSessions.add(sessionId);  // 立即入待清理集 → SIGTERM handler 能 Stop 本次（含被重试丢弃的）会话
     const wsUrl = started.streams?.automationStream?.streamEndpoint!;
     const headers = await signCdpUpgrade(wsUrl);
     browser = await chromium.connectOverCDP(wsUrl, { headers });
@@ -187,10 +225,11 @@ async function main(): Promise<number> {
       } catch (e) {
         // 丢弃本次 attempt 部分建起的会话/browser（如 connectOverCDP 失败但 StartBrowserSession 成功）。
         // discardAttempt=true：Stop 失败不污染 final cleanupFailed（这个会话本就要丢，ADR 0028）。
+        // cleanup 遍历 pendingSessions 逐个 Stop，成功的从集里删；未删的（Stop 失败/超时）留到后续 cleanup 再试。
         cleanedUp = false; // 允许对本次 attempt 的部分会话再清一次
         await cleanup(true);
         browser = undefined;
-        const sid = sessionId; sessionId = undefined;
+        const sid = sessionId; sessionId = undefined; // 清血缘：失败 attempt 的 id 不该进 scope_done
         cleanedUp = false; // 重置守卫：留给后续 attempt 成功后的 final cleanup（否则被本次置 true 永久跳过）
         if (terminated) throw e;  // 已收 SIGTERM → 不重试
         if (!isTransientNetwork(e) || attempt >= CONNECT_ATTEMPTS - 1) {
