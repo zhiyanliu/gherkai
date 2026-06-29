@@ -8,6 +8,7 @@ from __future__ import annotations
 import threading
 from typing import Callable, Iterator
 
+from core.errors import WorkerNetworkError
 from core.model import Event, Job
 
 
@@ -33,10 +34,15 @@ class FakeEngine:
         self,
         behaviors: dict[str, list[Event] | Callable[[Job], Iterator[Event]]],
         crash_after: dict[str, int] | None = None,
+        network_crash_after: dict[str, int] | None = None,
         on_event: Callable[[str, int], None] | None = None,
     ) -> None:
         self.behaviors = behaviors
         self.crash_after = crash_after or {}
+        # network_crash_after: scope_id -> 第 N 个事件后抛 WorkerNetworkError（模拟建连失败，ADR 0028）。
+        # N=0 模拟「会话未起就建连失败」（零事件）。每个 scope_id 的崩溃次数可用 list 表达递减（模拟重试后成功）。
+        self.network_crash_after = network_crash_after or {}
+        self.run_count: dict[str, int] = {}  # 每个 scope_id 被 run_scope 的次数（验证 job 级重试）
         self.on_event = on_event
         self.handles: dict[str, FakeWorkerHandle] = {}
         self._lock = threading.Lock()
@@ -45,22 +51,32 @@ class FakeEngine:
         handle = FakeWorkerHandle()
         with self._lock:
             self.handles[job.scope_id] = handle
-        return handle, self._gen(job, handle)
+            attempt = self.run_count.get(job.scope_id, 0)
+            self.run_count[job.scope_id] = attempt + 1
+        return handle, self._gen(job, handle, attempt)
 
-    def _gen(self, job: Job, handle: FakeWorkerHandle) -> Iterator[Event]:
+    def _gen(self, job: Job, handle: FakeWorkerHandle, attempt: int) -> Iterator[Event]:
         behavior = self.behaviors.get(job.scope_id, [])
         events = behavior(job) if callable(behavior) else iter(behavior)
         crash_at = self.crash_after.get(job.scope_id)
+        # network_crash_after[scope_id] 可为 int（每次都崩）或 list（按 attempt 序：[0,0] 前两次崩、之后成功）
+        nc = self.network_crash_after.get(job.scope_id)
+        net_crash_at = nc[attempt] if isinstance(nc, list) and attempt < len(nc) else (nc if isinstance(nc, int) else None)
         i = 0
         for ev in events:
             if handle.stopped:  # 被 schedule 优雅停 → worker 配合退出（ADR 0024 终止契约）
                 return
+            if net_crash_at is not None and i >= net_crash_at:
+                raise WorkerNetworkError(f"fake worker {job.scope_id} 建连失败（attempt {attempt}）")
             if crash_at is not None and i >= crash_at:
                 raise RuntimeError(f"fake worker {job.scope_id} 在第 {i} 个事件后崩溃")
             if self.on_event is not None:
                 self.on_event(job.scope_id, i)
             yield ev
             i += 1
+        # 事件流跑完后若仍要 network-crash（net_crash_at >= 事件数，模拟「零/少事件就建连失败」）
+        if net_crash_at is not None and i >= net_crash_at:
+            raise WorkerNetworkError(f"fake worker {job.scope_id} 建连失败（attempt {attempt}）")
 
 
 class CollectSink:

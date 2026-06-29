@@ -70,6 +70,31 @@ def test_adapter_crash_is_error():
     assert result.jobs[0].error_type == "engine_error"
 
 
+# ---- worker 以 EX_WORKER_NETWORK(80) 退出 → adapter 翻 WorkerNetworkError → schedule 记 network_error ----
+# 这是退出码→分类链路唯一的真跨进程 seam（ADR 0028），FakeEngine 直接 raise 绕不过它，必须真 spawn。
+def test_adapter_network_exit_maps_to_network_error():
+    from core.errors import WorkerNetworkError
+    engine = _engine("net")
+    # 直接用 adapter：消费事件流应抛 WorkerNetworkError（returncode 80 翻译）
+    handle, events = engine.run_scope(_job("s"))
+    raised = None
+    try:
+        list(events)
+    except WorkerNetworkError as e:
+        raised = e
+    assert raised is not None, "exit 80 应被 adapter 翻成 WorkerNetworkError"
+
+
+def test_adapter_network_error_with_schedule_classified_and_retried():
+    from core.schedule import ScheduleOpts
+    engine = _engine("net")
+    # 经 schedule：记 network_error；开 network_retry=1 → 真重新 spawn worker（净跨进程验证）
+    result = schedule([_job("s")], lambda name: engine, CollectSink(), run_id="test-run",
+                      opts=ScheduleOpts(network_retry=1, retry_sleep=lambda _s: None))
+    assert result.status == Status.ERROR
+    assert result.jobs[0].error_type == "network_error"  # exit 80 → 真 seam → network_error
+
+
 # ---- worker 卡死 → SIGTERM 停止（adapter handle.stop 直接测）----
 def test_adapter_stop_hanging_worker():
     engine = _engine("hang")

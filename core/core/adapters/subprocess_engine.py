@@ -19,8 +19,14 @@ import sys
 import threading
 from typing import Iterator
 
+from core.errors import WorkerNetworkError
 from core.model import Event, Job
 from core.wire import event_from_line, job_to_line
+
+# worker 网络专用退出码（ADR 0028）：worker 建连失败、重试耗尽时以此码退出，作 out-of-band 信号
+# （建连失败发生在任何事件 emit 之前，无法走事件通道）。值避开 POSIX sysexits(64-78)/signal 保留区。
+# **两腿 worker 必须用同一个值**（Nova run_scope.py / Midscene run-scope.ts 各自硬编码 80）。
+EX_WORKER_NETWORK = 80
 
 
 class SubprocessWorkerHandle:
@@ -101,10 +107,15 @@ def _read_events(proc: subprocess.Popen, events_r: int) -> Iterator[Event]:
             yield event_from_line(line)  # 解析失败 → 抛 ValueError，schedule 捕获记 error
     # fd3 耗尽 = worker 关了事件通道。等它真正退出，拿 returncode。
     proc.wait()
-    if proc.returncode is not None and proc.returncode > 0:
+    rc = proc.returncode
+    if rc is not None and rc > 0:
         # 正零 = 正常；负 = 被信号杀（-SIGTERM/-SIGKILL，schedule 主动停的，属正常中止）；
         # 正非零 = worker 自身崩了但没吐完整事件流 → 抛错让 schedule 记 error。
-        raise RuntimeError(f"worker 异常退出 returncode={proc.returncode}")
+        if rc == EX_WORKER_NETWORK:
+            # worker 以网络专用退出码退出（建连失败、重试耗尽，ADR 0028）：抛类型化异常，
+            # schedule 据此记 network_error 并可选择性重试整 job。
+            raise WorkerNetworkError(f"worker 建连失败（网络/SSL 瞬时故障），退出码 {rc}")
+        raise RuntimeError(f"worker 异常退出 returncode={rc}")
 
 
 # 8 色 ANSI 前景色（按 scope_id 哈希挑一个，保证同一 worker 每次同色）

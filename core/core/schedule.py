@@ -35,6 +35,7 @@ from core.model import (
     StepResult,
     StepStarted,
 )
+from core.errors import WorkerNetworkError
 from core.ports import EngineResolver, Sink
 
 
@@ -55,6 +56,10 @@ class ScheduleOpts:
     job_timeout_s: float | None = None  # per-job 墙钟超时（None=不超时）
     grace_period_s: float = 5.0  # 停止请求后等 worker 优雅退出的宽限秒
     clock: Callable[[], float] = _time.monotonic  # 时间源（可注入 fake clock 测超时/grace 路径）
+    # 网络瞬时故障的 job 级重试（ADR 0028）：仅对 error_type==network_error 且「会话未起（零 step_done）」
+    # 的 job 重试整批。默认 0=关（本地 smoke 不需要；CI/抖动环境可开）。
+    network_retry: int = 0  # 额外重试次数（总尝试 = network_retry + 1）
+    retry_sleep: Callable[[float], None] = _time.sleep  # 重试间隔（可注入 no-op，保 fake-clock 单测纯净）
 
 
 def _aggregate(statuses: list[Status]) -> Status:
@@ -87,9 +92,43 @@ class _Worker:
         self.handle = None  # 暴露给 fail-fast：其他 job 崩时外部可 stop 本 worker
 
     def run(self) -> JobResult:
+        """跑一个 job，含网络瞬时故障的选择性重试（ADR 0028）。
+
+        重试门槛（双条件 AND，绝不放宽）：① 本次以 network_error 失败（worker 建连失败、
+        重试耗尽）② 「会话未起」= 本次零 step_done（证明 act 没跑、无副作用、不烧重复钱）。
+        fail_fast/timeout 优先级高于 network 重试（它们已主动中止，不再重跑）。
+        """
+        # deadline 跨 attempt 共享（ADR 0028）：覆盖所有 attempt 之和，重试不重置——否则 N 次重试
+        # 各拿一整份 job_timeout、绕过超时上限。run 级算一次，所有 _run_once 共用。
+        deadline = (self.opts.clock() + self.opts.job_timeout_s) if self.opts.job_timeout_s else None
+        last: JobResult | None = None
+        for attempt in range(self.opts.network_retry + 1):
+            if attempt > 0:
+                # 仅在「上次是 network_error 且会话未起」时走到这；退避用注入 sleep（保 fake-clock 纯净）
+                self.opts.retry_sleep(min(2.0 * attempt, 4.0))
+            result, is_network, saw_step = self._run_once(deadline)
+            last = result
+            # 可重试 = network_error + 会话未起（零 step_done）+ 未被 fail-fast 中止 + 还有重试额度
+            retriable = (
+                is_network
+                and not saw_step
+                and not self.abort_flag.is_set()
+                and attempt < self.opts.network_retry
+            )
+            if not retriable:
+                return result
+        return last  # 重试耗尽，返回最后一次（network_error）
+
+    def _run_once(self, deadline: float | None) -> tuple[JobResult, bool, bool]:
+        """单次执行 job。返回 (JobResult, 是否 network_error, 是否 emit 过 step_done)。
+
+        deadline：run 级共享的超时截止（None=不超时）；跨 attempt 不重置（ADR 0028）。
+        """
         job = self.job
         result = JobResult(scope_id=job.scope_id, status=Status.PASSED, engine=job.engine)
         scenario_status: dict[str, Status] = {}
+        saw_step = False  # 是否观察到 step_done（会话已起、act 可能有副作用 → 不可 job 级重试，ADR 0028）
+        self_stopped = False  # schedule 主动停了本 worker（timeout/fail-fast）→ 其后的退出码不当 network（ADR 0028）
         # 时长追踪（core 用事件到达时间戳算墙钟，ADR 0024；clock 与超时复用同一注入时钟）：
         timing = _Timing()
 
@@ -98,7 +137,7 @@ class _Worker:
             result.status = Status.ERROR
             result.error_type = "engine_error"
             result.message = "fail-fast：批次已中止，未启动"
-            return result
+            return result, False, saw_step
 
         try:
             engine = self.engines(job.engine)
@@ -107,39 +146,61 @@ class _Worker:
             result.status = Status.ERROR
             result.error_type = "engine_error"
             result.message = f"起 worker 失败：{e}"
-            return result
+            return result, False, saw_step
 
-        deadline = (self.opts.clock() + self.opts.job_timeout_s) if self.opts.job_timeout_s else None
         clock = self.opts.clock
 
         try:
             for event in events:
-                # 事件间检查：超时 / fail-fast → 优雅停 worker（ADR 0026）
+                # 事件间检查：超时 / fail-fast → 优雅停 worker（ADR 0026）。
+                # 这两条优先于 network 重试：已主动中止的 job 不再重跑（ADR 0028）。
                 if deadline is not None and clock() > deadline:
+                    self_stopped = True
                     self._stop()
                     result.status = Status.ERROR
                     result.error_type = "timeout"
                     result.message = f"job 超时（>{self.opts.job_timeout_s}s）"
-                    return result
+                    return result, False, saw_step
                 if self.abort_flag.is_set():
+                    self_stopped = True
                     self._stop()
                     result.status = Status.ERROR
                     result.error_type = "engine_error"
                     result.message = "fail-fast：其他 job 失败，本 job 被中止"
-                    return result
+                    return result, False, saw_step
 
+                if isinstance(event, StepDone):
+                    saw_step = True  # 会话已起、有 act 执行 → 封掉 job 级重试（防重复副作用）
                 self._emit(event)
                 self._reduce(event, result, scenario_status, timing, clock())
-        except Exception as e:  # worker 迭代中崩（异常退出）
+        except WorkerNetworkError as e:  # 建连失败、重试耗尽（ADR 0028）：可被 job 级重试
+            self._stop()
+            result.status = Status.ERROR
+            # 竞态防护（ADR 0028）：worker 卡在建连退避里不吐事件时，上面的 timeout/abort 分支没机会执行
+            # （for-event 阻塞在读），worker 最终退 80 直达此处。故在此**重新判**超时/fail-fast：
+            # 若墙钟已超 / 已被 fail-fast 中止，则这是「主动中止」语义，记 timeout/engine_error、**不重试**
+            # （主动中止优先于 network 重试），不能让超时预算被建连退避绕过。
+            if self_stopped or self.abort_flag.is_set():
+                result.error_type = "engine_error"
+                result.message = f"worker 被主动停止（fail-fast）后以网络码退出：{e}"
+                return result, False, saw_step
+            if deadline is not None and clock() > deadline:
+                result.error_type = "timeout"
+                result.message = f"job 超时（>{self.opts.job_timeout_s}s）——建连退避期间超时"
+                return result, False, saw_step
+            result.error_type = "network_error"
+            result.message = f"worker 建连失败（网络/SSL 瞬时故障）：{e}"
+            return result, True, saw_step
+        except Exception as e:  # worker 迭代中崩（其它异常退出）
             self._stop()
             result.status = Status.ERROR
             result.error_type = "engine_error"
             result.message = f"worker 异常：{e}"
-            return result
+            return result, False, saw_step
 
         # 正常跑完：job 状态 = 各 scenario 归约
         result.status = _aggregate(list(scenario_status.values()))
-        return result
+        return result, False, saw_step
 
     def _emit(self, event: Event) -> None:
         with self.sink_lock:  # 多 worker 并发 → 串行化 sink 调用（sink 实现不必线程安全）

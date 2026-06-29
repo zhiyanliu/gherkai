@@ -5,6 +5,8 @@
   WORKER_MODE=pass   → 对每个 scenario 吐 started/step_done(passed)/scenario_done，最后 scope_done
   WORKER_MODE=hang   → 吐一个 started 后死循环（测 SIGTERM 停止 + 会话清理 finally）
   WORKER_MODE=crash  → 吐一个 started 后非零退出（测 worker 崩 → schedule 记 error）
+  WORKER_MODE=net    → 不吐任何事件，直接以 EX_WORKER_NETWORK(80) 退出
+                       （模拟建连失败先于事件 emit → adapter 翻 WorkerNetworkError → schedule 记 network_error，ADR 0028）
 """
 import json
 import os
@@ -42,6 +44,11 @@ def main():
     job = json.loads(sys.stdin.readline())
     mode = os.environ.get("WORKER_MODE", "pass")
     scope = job["scope"]
+
+    if mode == "net":
+        # 建连失败先于任何事件 emit（ADR 0028）：直接以网络专用退出码退出，不吐 scope_started。
+        sys.stderr.write("echo_worker: simulated connect failure, exiting EX_WORKER_NETWORK\n")
+        sys.exit(80)
 
     for sc in job["scenarios"]:
         sid = sc["id"]

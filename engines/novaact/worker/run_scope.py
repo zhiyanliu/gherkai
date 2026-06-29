@@ -225,6 +225,62 @@ def _aggregate(statuses: list[str]) -> str:
     return "passed"
 
 
+import socket
+import ssl
+import time
+
+# 网络专用退出码（ADR 0028）：与 core/adapters/subprocess_engine.py 的 EX_WORKER_NETWORK 同值。
+EX_WORKER_NETWORK = 80
+
+# 建连重试参数（ADR 0028）：仅裹幂等的建连段，act 永不重试。退避手写（不用 botocore 内部 retry，
+# 否则 SIGTERM 穿不透）；总退避预算 ~3.5s < schedule 默认 grace 5s。
+_CONNECT_ATTEMPTS = 4
+_BACKOFF_S = [0.5, 1.0, 2.0]  # attempt 失败后的退避；±20% jitter 由调用处加（这里固定，本地 smoke 够用）
+
+
+def _is_transient_network(e: BaseException) -> bool:
+    """是否网络/SSL 瞬时故障（可重试，ADR 0028）。
+
+    白名单匹配**具体**瞬时类型，不用宽 OSError 兜底——ssl.SSLError 与 socket.gaierror（DNS 永久错）
+    都继承 OSError，宽匹配会把永久错也当瞬时重试。gaierror 明确排除。
+
+    **遍历异常链**（__cause__/__context__）：Nova/boto SDK 常把底层 ssl.SSLError 包成自有异常
+    （BrowserAuthError 等），只看最外层会漏判——任一层命中白名单即判瞬时（用 id 集防环）。
+    """
+    transient: tuple[type[BaseException], ...] = (ssl.SSLError, ConnectionError, TimeoutError, socket.timeout)
+    try:
+        from botocore.exceptions import EndpointConnectionError, ConnectionClosedError
+        transient += (EndpointConnectionError, ConnectionClosedError)
+    except ImportError:
+        pass
+    try:
+        from urllib3.exceptions import ProtocolError
+        transient += (ProtocolError,)
+    except ImportError:
+        pass
+
+    seen: set[int] = set()
+    cur: BaseException | None = e
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        if isinstance(cur, socket.gaierror):  # DNS 解析失败 = 永久错，不重试（此层直接否决）
+            return False
+        if isinstance(cur, transient):
+            return True
+        cur = cur.__cause__ or cur.__context__
+    return False
+
+
+class _NetworkExhausted(BaseException):
+    """建连重试耗尽（ADR 0028）。
+
+    在重试循环里 raise——此时本次失败 attempt 的 `with cdp_session`/`with NovaAct`（在 _run_session 内）
+    **已随该次异常解栈、__exit__ 已跑**（释放了本次可能部分建起的会话），故 raise 点已无会话级 with 在身上。
+    继承 BaseException（同 _Terminated）使它穿过外层 `with wf` 的 finally（恢复 workflow contextvar）
+    冒泡到 main 顶层 `except _NetworkExhausted` → `return EX_WORKER_NETWORK`。不在 with 内裸 sys.exit。
+    """
+
+
 class _Terminated(BaseException):
     """SIGTERM 转成的异常（ADR 0024 终止契约）。
 
@@ -252,48 +308,78 @@ def main() -> int:
 
     ensure_workflow_definition(WORKFLOW_DEF, region=REGION, description="Nova Act worker (ADR 0024)")
     wf = Workflow(model_id=MODEL_ID, boto_session_kwargs={"region_name": REGION}, workflow_definition_name=WORKFLOW_DEF)
+    # 建连重试状态（ADR 0028）：started 一旦 True（scope_started 已 emit、会话已起），
+    # 任何后续异常都不再当「可重试建连失败」——act 已可能跑、有副作用，绝不重试。
+    started = False
+
+    def _run_session() -> None:
+        """建连 + 跑完所有 scenarios。建连段异常可被外层重试；scope_started emit 后不可。"""
+        nonlocal session_id, started
+        provider = AgentCoreBrowserSessionProvider(region=REGION)
+        with provider.cdp_session() as (ws_url, headers):
+            # logs_directory：trajectory 落到 run 专属持久目录（ADR 0027）。cli 经环境变量
+            # NOVA_LOGS_DIR 传入 reports/<run_id>/nova-trajectories；无则用 SDK 默认临时目录
+            # （会被系统清理）。Nova 的 validate_path 要求该目录**已存在**，故先 mkdir。
+            logs_dir = os.environ.get("NOVA_LOGS_DIR") or None
+            if logs_dir:
+                os.makedirs(logs_dir, exist_ok=True)
+            with NovaAct(
+                cdp_endpoint_url=ws_url, cdp_headers=headers, browser_auth=provider,
+                starting_page="about:blank", logs_directory=logs_dir,
+            ) as nova:
+                # 取真实 AgentCore 会话 id（血缘，进 scope_done → RunStore，ADR 0016/0024）。
+                session_id = nova.get_session_id()
+                emit({"type": "scope_started", "scopeId": scope["id"]})  # 三级时长起点
+                started = True  # 越过此点 = 会话已起、act 即将跑 → 退出建连重试域（ADR 0028）
+                # scope 内串行跑 scenarios，共享同一会话（ADR 0019/0024）
+                for sc in scenarios:
+                    sid = sc["id"]
+                    emit({"type": "scenario_started", "scenarioId": sid})
+                    traj: list[str] = []  # 本 scenario 的 trajectory 路径累积（ADR 0027）
+                    statuses = [_run_step(nova, sid, st, traj) for st in sc["steps"]]
+                    # act 级 reportRefs：每个 trajectory 一条，经 scenario_done 回传（对称 Midscene scope 级）
+                    report_refs = [
+                        {"kind": "act", "ref": f"file://{p}", "label": f"trajectory {i + 1}"}
+                        for i, p in enumerate(traj)
+                    ]
+                    emit({
+                        "type": "scenario_done", "scenarioId": sid,
+                        "status": _aggregate(statuses), "reportRefs": report_refs,
+                    })
+
     try:
         with wf:
             outer = get_current_workflow()
             set_current_workflow(wf)
             try:
-                provider = AgentCoreBrowserSessionProvider(region=REGION)
-                with provider.cdp_session() as (ws_url, headers):
-                    # logs_directory：trajectory 落到 run 专属持久目录（ADR 0027）。cli 经环境变量
-                    # NOVA_LOGS_DIR 传入 reports/<run_id>/nova-trajectories；无则用 SDK 默认临时目录
-                    # （会被系统清理——手动直跑/无 RunReport 时无碍）。
-                    # Nova 的 validate_path 要求该目录**已存在**，故先 mkdir。
-                    logs_dir = os.environ.get("NOVA_LOGS_DIR") or None
-                    if logs_dir:
-                        os.makedirs(logs_dir, exist_ok=True)
-                    with NovaAct(
-                        cdp_endpoint_url=ws_url, cdp_headers=headers, browser_auth=provider,
-                        starting_page="about:blank", logs_directory=logs_dir,
-                    ) as nova:
-                        # 取真实 AgentCore 会话 id（血缘，进 scope_done → RunStore，ADR 0016/0024）。
-                        session_id = nova.get_session_id()
-                        emit({"type": "scope_started", "scopeId": scope["id"]})  # 三级时长起点
-                        # scope 内串行跑 scenarios，共享同一会话（ADR 0019/0024）
-                        for sc in scenarios:
-                            sid = sc["id"]
-                            emit({"type": "scenario_started", "scenarioId": sid})
-                            traj: list[str] = []  # 本 scenario 的 trajectory 路径累积（ADR 0027）
-                            statuses = [_run_step(nova, sid, st, traj) for st in sc["steps"]]
-                            # act 级 reportRefs：每个 trajectory 一条，经 scenario_done 回传（对称 Midscene scope 级）
-                            report_refs = [
-                                {"kind": "act", "ref": f"file://{p}", "label": f"trajectory {i + 1}"}
-                                for i, p in enumerate(traj)
-                            ]
-                            emit({
-                                "type": "scenario_done", "scenarioId": sid,
-                                "status": _aggregate(statuses), "reportRefs": report_refs,
-                            })
+                # 建连重试循环（ADR 0028）：仅裹建连段；scope_started 一 emit 即 started=True、跳出重试。
+                # 每次 attempt 用全新 provider/cdp_session/NovaAct，with __exit__ 清掉本次部分建起的会话。
+                for attempt in range(_CONNECT_ATTEMPTS):
+                    try:
+                        _run_session()
+                        break  # 成功（跑完）
+                    except _Terminated:
+                        raise  # SIGTERM：交三层 with 清理，不重试
+                    except BaseException as e:  # noqa: BLE001
+                        if started or not _is_transient_network(e):
+                            raise  # 会话已起 / 非瞬时网络错 → 不重试，原样冒泡
+                        if attempt >= _CONNECT_ATTEMPTS - 1:
+                            log(f"worker: 建连重试耗尽（{attempt + 1} 次），网络/SSL 瞬时故障：{e}")
+                            raise _NetworkExhausted() from e
+                        backoff = _BACKOFF_S[min(attempt, len(_BACKOFF_S) - 1)]
+                        log(f"worker: 建连失败（attempt {attempt + 1}），{backoff}s 后重试：{e}")
+                        time.sleep(backoff)  # 手写退避：SIGTERM handler raise 可中途打断（_Terminated 冒泡）
             finally:
                 set_current_workflow(outer)
     except _Terminated:
         # SIGTERM：三层 with 的 __exit__ 已在冒泡过程中跑完（会话已释放）。干净退出，不吐 scope_done。
         log("worker: session shutdown complete after SIGTERM")
         return 0
+    except _NetworkExhausted:
+        # 建连重试耗尽（ADR 0028）：三层 with __exit__ 已清理。以网络专用退出码退出，
+        # core 据此记 network_error 并可选择性重试整 job。不吐 scope_done。
+        log("worker: connect retries exhausted, exiting with network code")
+        return EX_WORKER_NETWORK
 
     emit({"type": "scope_done", "scopeId": scope["id"], "sessionId": session_id})
     return 0

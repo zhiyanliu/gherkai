@@ -380,3 +380,77 @@ def test_scope_report_refs_reduced():
     assert len(jr.report_refs) == 1
     assert jr.report_refs[0].kind == "scope"
     assert jr.report_refs[0].ref == "file:///midscene_run/report/x.html"
+
+
+# ---- 网络瞬时故障的 job 级重试（ADR 0028）----
+
+_NOSLEEP = lambda _s: None  # 注入 no-op sleep，保单测不真等
+
+
+def test_network_error_retried_then_succeeds():
+    # 前两次 attempt 建连失败（零事件），第三次成功 → job 重试后 passed
+    sid = "n:0"
+    engine = FakeEngine(
+        {"n": _passing_events("n", sid)},
+        network_crash_after={"n": [0, 0]},  # attempt 0/1 崩（第0个事件前），attempt 2 不在 list→成功
+    )
+    result = schedule([_job("n")], FakeResolver(engine), CollectSink(), run_id="test-run",
+                      opts=ScheduleOpts(network_retry=2, retry_sleep=_NOSLEEP))
+    assert result.status == Status.PASSED
+    assert engine.run_count["n"] == 3  # 起了 3 次 worker（2 次重试）
+
+
+def test_network_error_exhausted_is_network_error():
+    # 每次 attempt 都建连失败 → 重试耗尽 → job error_type=network_error
+    engine = FakeEngine({"n": _passing_events("n", "n:0")}, network_crash_after={"n": 0})
+    result = schedule([_job("n")], FakeResolver(engine), CollectSink(), run_id="test-run",
+                      opts=ScheduleOpts(network_retry=2, retry_sleep=_NOSLEEP))
+    assert result.status == Status.ERROR
+    assert result.jobs[0].error_type == "network_error"
+    assert engine.run_count["n"] == 3  # network_retry=2 → 总 3 次
+
+
+def test_network_error_not_retried_when_session_started():
+    # 会话已起（已 emit 过 step_done）后才网络崩 → 不 job 级重试（防重复副作用，ADR 0028）
+    sid = "n:0"
+    events = [
+        ScenarioStarted(scenario_id=sid),
+        StepDone(scenario_id=sid, step_index=0, status=Status.PASSED, votes=Votes(3, 3)),
+    ]
+    engine = FakeEngine({"n": events}, network_crash_after={"n": 2})  # 第2个事件后崩（已过 step_done）
+    result = schedule([_job("n")], FakeResolver(engine), CollectSink(), run_id="test-run",
+                      opts=ScheduleOpts(network_retry=2, retry_sleep=_NOSLEEP))
+    assert result.status == Status.ERROR
+    assert result.jobs[0].error_type == "network_error"
+    assert engine.run_count["n"] == 1  # 会话已起 → 不重试，只跑 1 次
+
+
+def test_network_retry_default_off():
+    # 默认 network_retry=0 → 网络崩不重试，记 network_error
+    engine = FakeEngine({"n": _passing_events("n", "n:0")}, network_crash_after={"n": 0})
+    result = schedule([_job("n")], FakeResolver(engine), CollectSink(), run_id="test-run")
+    assert result.status == Status.ERROR
+    assert result.jobs[0].error_type == "network_error"
+    assert engine.run_count["n"] == 1  # 默认不重试
+
+
+def test_non_network_crash_not_retried():
+    # 普通 worker 崩（engine_error）即使开了 network_retry 也不重试
+    engine = FakeEngine({"n": _passing_events("n", "n:0")}, crash_after={"n": 0})
+    result = schedule([_job("n")], FakeResolver(engine), CollectSink(), run_id="test-run",
+                      opts=ScheduleOpts(network_retry=2, retry_sleep=_NOSLEEP))
+    assert result.status == Status.ERROR
+    assert result.jobs[0].error_type == "engine_error"
+    assert engine.run_count["n"] == 1  # engine_error 不重试
+
+
+def test_network_retry_deadline_not_reset_across_attempts():
+    # job_timeout 跨 attempt 不重置（ADR 0028）：用 _IncClock 让时间每次读 +1s，
+    # job_timeout_s=2 → 第一次 attempt 建连崩、重试时 clock 已过 deadline → 记 timeout（不再无限重试）
+    engine = FakeEngine({"n": _passing_events("n", "n:0")}, network_crash_after={"n": 0})
+    clock = _IncClock(1.0)
+    result = schedule([_job("n")], FakeResolver(engine), CollectSink(), run_id="test-run",
+                      opts=ScheduleOpts(network_retry=5, job_timeout_s=2.0, clock=clock, retry_sleep=_NOSLEEP))
+    # deadline 跨 attempt 共享：几次 attempt 后墙钟超 2s → 转 timeout，不会用满 network_retry=5
+    assert result.status == Status.ERROR
+    assert engine.run_count["n"] < 6  # 没用满 5 次重试（被共享 deadline 截断）

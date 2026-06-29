@@ -94,6 +94,7 @@ ErrorType = Literal[
     "guardrail",  # error 态：引擎护栏拦截
     "engine_error",  # error 态：引擎内部/通用异常（Midscene 通用 Error 归此）
     "navigation_error",  # error 态：导航失败
+    "network_error",  # error 态：网络/SSL/连接层瞬时故障（建连失败，可重试，ADR 0028）
 ]
 
 

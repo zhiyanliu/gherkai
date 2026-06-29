@@ -29,6 +29,28 @@ import "../bdd/steps/deterministic.steps.js";
 
 const BROWSER_ID = "aws.browser.v1";
 const VOTES = 3; // AI 断言投票次数（治种类A抖动，ADR 0014）
+// 网络专用退出码（ADR 0028）：与 core/adapters/subprocess_engine.py 的 EX_WORKER_NETWORK 同值。
+// worker 建连失败、重试耗尽时以此码退出，作 out-of-band 信号（建连失败先于任何事件 emit）。
+const EX_WORKER_NETWORK = 80;
+const CONNECT_ATTEMPTS = 4; // 建连重试上限（ADR 0028）；退避 [0.5,1,2]s，总 ~3.5s < grace 5s
+const CONNECT_BACKOFF_MS = [500, 1000, 2000];
+
+// 是否网络/SSL 瞬时故障（可重试，ADR 0028）。Node 侧按 error code / TLS 错识别瞬时类。
+// 遍历 error.cause 链：SDK 常把底层 socket/TLS 错包成自有 Error，只看最外层会漏判（防环：限 8 层）。
+function isTransientNetwork(e: unknown): boolean {
+  let cur = e as { code?: string; message?: string; cause?: unknown } | undefined;
+  for (let depth = 0; cur && depth < 8; depth++) {
+    const code = cur.code ?? "";
+    if (code === "ENOTFOUND") return false; // DNS 未找到（永久），此层直接否决
+    if (["ECONNRESET", "ECONNREFUSED", "ETIMEDOUT", "EPIPE", "EAI_AGAIN", "ECONNABORTED"].includes(code)) {
+      return true; // EAI_AGAIN = DNS 临时失败，当瞬时
+    }
+    const msg = cur.message ?? "";
+    if (/\b(socket hang up|ssl|tls|econnreset|epipe|timeout|handshake|UNEXPECTED_EOF)\b/i.test(msg)) return true;
+    cur = cur.cause as typeof cur;
+  }
+  return false;
+}
 const MODEL_CONFIG = {
   MIDSCENE_MODEL_NAME: MODEL,
   MIDSCENE_MODEL_BASE_URL: BASE_URL,
@@ -91,7 +113,10 @@ async function main(): Promise<number> {
   //   不让易挂起的 browser.close 挟持会话释放（审计窗口 5）。close 套超时预算，避免耗尽 grace。
   //   幂等：cleanedUp 守卫，防 SIGTERM handler 与 finally 双调。
   //   StopBrowserSession 失败不静默吞：记日志 + 置 cleanupFailed → 非 0 退出（审计窗口 C）。
-  async function cleanup(): Promise<void> {
+  //   discardAttempt=true（丢弃中间建连 attempt 的部分会话，ADR 0028）：Stop 失败只 log、**不点亮
+  //   final cleanupFailed**——那个会话本就要丢、与「最终态会话是否泄漏」无关；否则一次中间失败会毒化
+  //   后续成功 attempt 的退出码（误报泄漏 → core 当 engine_error）。final cleanup（默认）才管 cleanupFailed。
+  async function cleanup(discardAttempt = false): Promise<void> {
     if (cleanedUp) return;
     cleanedUp = true;
     const sid = sessionId;
@@ -99,7 +124,7 @@ async function main(): Promise<number> {
       try {
         await cp.send(new StopBrowserSessionCommand({ browserIdentifier: BROWSER_ID, sessionId: sid }));
       } catch (e) {
-        cleanupFailed = true;
+        if (!discardAttempt) cleanupFailed = true;
         log(`worker: StopBrowserSession FAILED (会话可能泄漏，需排查): ${(e as Error).message}`);
       }
     }
@@ -114,9 +139,11 @@ async function main(): Promise<number> {
 
   // SIGTERM：清理会话再退（防 AgentCore 会话泄漏继续烧钱）。
   let terminated = false;
+  let onTerminate: (() => void) | undefined;  // 重试退避用：SIGTERM 到达即 resolve、打断退避（对称 Nova 的 sleep 被信号打断）
   process.on("SIGTERM", async () => {
     if (terminated) return;
     terminated = true;
+    onTerminate?.();  // 立即唤醒正在退避的重试循环，使其尽快停（不再 reconnect/跑 act）
     log("worker: SIGTERM received, releasing AgentCore session");
     // 窗口(1) 兜底：若 SIGTERM 在 StartBrowserSession 返回前到达，sessionId 还没赋值，
     // 但服务端可能已建会话。给一小段时间让 Start 的 await 返回、sessionId 落地，再 cleanup。
@@ -129,10 +156,14 @@ async function main(): Promise<number> {
   });
 
   const reportRefs: Array<{ kind: string; ref: string; label?: string }> = [];
+  let networkExhausted = false; // 建连重试耗尽（ADR 0028）→ 退 EX_WORKER_NETWORK
 
-  try {
+  // 建连段（ADR 0028）：StartBrowserSession → CDP 握手 → connectOverCDP → PlaywrightAgent。
+  // 整段可被重试；scope_started 一 emit（会话已起、act 即将跑）即跳出重试域，绝不重试 act。
+  // 每次 attempt 前若上次部分建起了会话/browser，先 cleanup 释放（防泄漏 + 不重复占用）。
+  async function connect(): Promise<{ page: import("playwright").Page; agent: PlaywrightAgent }> {
     const started = await cp.send(new StartBrowserSessionCommand({ browserIdentifier: BROWSER_ID, name: "worker" }));
-    sessionId = started.sessionId!;
+    sessionId = started.sessionId!;  // 立即赋值 → SIGTERM handler 能 Stop 本次会话（防窗口泄漏）
     const wsUrl = started.streams?.automationStream?.streamEndpoint!;
     const headers = await signCdpUpgrade(wsUrl);
     browser = await chromium.connectOverCDP(wsUrl, { headers });
@@ -143,8 +174,40 @@ async function main(): Promise<number> {
       modelConfig: MODEL_CONFIG,
       createOpenAIClient: async () => new OpenAI({ baseURL: BASE_URL, apiKey: "unused", fetch: sigv4Fetch }) as any,
     });
+    return { page, agent };
+  }
 
-    emit({ type: "scope_started", scopeId: scope.id });  // 三级时长起点
+  try {
+    let conn: { page: import("playwright").Page; agent: PlaywrightAgent } | undefined;
+    for (let attempt = 0; attempt < CONNECT_ATTEMPTS; attempt++) {
+      try {
+        conn = await connect();
+        break; // 建连成功
+      } catch (e) {
+        // 丢弃本次 attempt 部分建起的会话/browser（如 connectOverCDP 失败但 StartBrowserSession 成功）。
+        // discardAttempt=true：Stop 失败不污染 final cleanupFailed（这个会话本就要丢，ADR 0028）。
+        cleanedUp = false; // 允许对本次 attempt 的部分会话再清一次
+        await cleanup(true);
+        browser = undefined;
+        const sid = sessionId; sessionId = undefined;
+        cleanedUp = false; // 重置守卫：留给后续 attempt 成功后的 final cleanup（否则被本次置 true 永久跳过）
+        if (terminated) throw e;  // 已收 SIGTERM → 不重试
+        if (!isTransientNetwork(e) || attempt >= CONNECT_ATTEMPTS - 1) {
+          if (isTransientNetwork(e)) { networkExhausted = true; log(`worker: 建连重试耗尽（${attempt + 1} 次）：${(e as Error).message}`); }
+          throw e; // 非瞬时 / 重试耗尽 → 冒泡
+        }
+        log(`worker: 建连失败（attempt ${attempt + 1}, session=${sid ?? "—"}），重试：${(e as Error).message}`);
+        // 退避：与 SIGTERM 竞速——收到信号即提前结束退避，使循环顶部 terminated 检查尽快生效（对称 Nova）
+        await new Promise<void>((resolve) => {
+          const t = setTimeout(resolve, CONNECT_BACKOFF_MS[Math.min(attempt, CONNECT_BACKOFF_MS.length - 1)]);
+          onTerminate = () => { clearTimeout(t); resolve(); };
+        });
+        if (terminated) throw e;  // 退避被 SIGTERM 打断 → 不再重连
+      }
+    }
+    const { page, agent } = conn!;
+
+    emit({ type: "scope_started", scopeId: scope.id });  // 三级时长起点（越过此点不再重试建连）
     // scope 内串行跑 scenarios，共享同一会话（ADR 0019/0024）
     for (const sc of job.scenarios) {
       emit({ type: "scenario_started", scenarioId: sc.id });
@@ -161,6 +224,14 @@ async function main(): Promise<number> {
     if (agent.reportFile) {
       reportRefs.push({ kind: "scope", ref: `file://${agent.reportFile}`, label: "Midscene report" });
     }
+  } catch (e) {
+    await cleanup();
+    // 建连重试耗尽（网络瞬时故障）→ 退网络专用码（ADR 0028）；但 cleanupFailed（会话泄漏）优先级更高。
+    if (networkExhausted && !cleanupFailed) {
+      log("worker: connect retries exhausted, exiting with network code");
+      return EX_WORKER_NETWORK;
+    }
+    throw e; // 非网络耗尽 → 原样冒泡到 main().catch（记 engine_error）
   } finally {
     await cleanup();
   }

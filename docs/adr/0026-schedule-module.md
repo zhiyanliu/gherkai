@@ -18,7 +18,7 @@ opts = {                 // 时间单位统一为秒；代码字段名带 _s 后
   clock,                 // 时间源（可注入 fake clock 单测超时/grace 路径；默认 monotonic，抗系统时钟回拨）
 }
 ```
-（上为语言中立伪代码；实际实现为 dataclass `ScheduleOpts`，字段 snake_case：`max_concurrency`/`fail_fast`/`job_timeout_s`/`grace_period_s`/`clock`。）
+（上为语言中立伪代码；实际实现为 dataclass `ScheduleOpts`，字段 snake_case：`max_concurrency`/`fail_fast`/`job_timeout_s`/`grace_period_s`/`clock`/`network_retry`（默认 0）/`retry_sleep`（[0028](./0028-transient-network-ssl-resilience.md)）。）
 
 - **注入 `engines`（`EngineResolver`：按 `job.engine` 解析 Engine）而非自己 spawn** → 可测（skill：accept dependencies, don't create them）：测试注入假 Engine（吐预设 JSON Lines，[0024](./0024-worker-core-protocol.md)）即可验调度逻辑，无需真起子进程/真连 AgentCore。**schedule 对腿数/腿名无知**——焊死 `{midscene, novaact}` 会让第三个引擎到来即改接口；用 resolver 则只动组合根注入。
 - **注入 `sink`**（`(event) -> void` 回调，收流式事件的去处：实时落 ResultStore / CLI 打印进度）→ schedule 边收边转，不自己决定结果存哪（[0016](./0016-execution-architecture-core-lib-run-model.md) ports）。（RunReport **不**走 sink——它由 `ReportStore.write` 从归约后的 `RunResult` 派生，[0027](./0027-runreport-aggregation-index.md)。）
@@ -49,6 +49,12 @@ opts = {                 // 时间单位统一为秒；代码字段名带 _s 后
 
 - `jobTimeout`（per-job 墙钟，可配，默认 null=不超时）：防一个 job 卡死（AI 死循环 / 网络挂）永久占用并发槽位 + 烧钱。超时 → 优雅终止该 worker（走下文终止契约：停止请求→宽限→强杀）、记 `status:error` + `errorType:timeout`（[0024](./0024-worker-core-protocol.md) status 三态 + 规范化 errorType）。
 - 引擎 SDK 各自也有超时（Midscene/Nova Act 都有），但那只覆盖「引擎调用内」卡住；**进程层面卡死（非引擎调用内）只有 schedule 能兜**，故 schedule 这层超时是必要的外层保险。
+
+### 网络瞬时故障的 job 级重试（[0028](./0028-transient-network-ssl-resilience.md)）
+
+- worker 建连失败、重试耗尽 → 以专用退出码退出 → adapter 抛 `WorkerNetworkError` → schedule 记 `error_type="network_error"`。
+- schedule 对这类 job **选择性整体重试**（重新 spawn worker），门槛双条件 AND：① `network_error` ② 「会话未起」= 本次零 `step_done`（证明 act 没跑、无副作用——绝不重试可能已点击的 act）。**fail_fast/timeout 优先级更高**（已主动中止的不重跑）。
+- `ScheduleOpts` 加 `network_retry: int = 0`（默认关,本地 smoke 不需要;CI/抖动环境可开,同「注入参数+保守默认」原则）+ `retry_sleep`（注入,单测传 no-op 保 fake-clock 纯净）。`job_timeout` deadline 跨 attempt 不重置。
 
 ### 优雅终止（schedule 只下逻辑「停」指令，机制归 adapter）
 
