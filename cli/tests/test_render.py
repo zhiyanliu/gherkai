@@ -3,8 +3,10 @@ from __future__ import annotations
 
 from core.model import (
     Cost,
+    Job,
     JobResult,
     ReportRef,
+    RunMeta,
     RunResult,
     ScenarioResult,
     ScopeDone,
@@ -18,17 +20,17 @@ from cli import render
 
 
 def _sample_run() -> RunResult:
+    job = Job(scope_id="features/demo.feature:6", scope_name="demo", engine="midscene", scenarios=())
     return RunResult(
-        run_id="20260629-test01",
+        run_meta=RunMeta(run_id="20260629-test01", created_at="", jobs=(job,)),
         status=Status.PASSED,
         duration_ms=12000.0,
         total_tokens=10573,
         total_time_worked_s=None,
         jobs=[
             JobResult(
-                scope_id="features/demo.feature:6",
+                job=job,
                 status=Status.PASSED,
-                engine="midscene",
                 total_tokens=10573,
                 duration_ms=11000.0,
                 session_id="sess-abc",
@@ -60,7 +62,8 @@ def test_render_text_nests_and_shows_cost_and_duration():
     assert "10573 tokens" in txt
     assert "总墙钟时长: 12.0s" in txt
     assert "scope 墙钟: 11.0s" in txt
-    assert "step[1]: passed (7.0s)" in txt
+    assert "step[1]: passed (7.0s) 投票 3/3" in txt  # 多票 step 显 tally（与 format_event/index.html 一致）
+    assert "step[0]: passed (3.0s)" in txt and "投票" not in txt.split("step[0]")[1].split("step[1]")[0]  # step0 无 votes 不显
     assert "sessionId: sess-abc" in txt
     assert "report[scope]: file:///x/report.html" in txt
 
@@ -74,8 +77,10 @@ def test_to_dict_shape_and_no_dollar():
     assert "cost_usd" not in d
     assert d["run_id"] == "20260629-test01"
     job = d["jobs"][0]
+    # 聚合形态 normalize：jobs[] 只留 scope_id 作 join key；engine/scope_name 在 run_meta.jobs[]（不冗余）
     assert job["scope_id"] == "features/demo.feature:6"
-    assert job["engine"] == "midscene"
+    assert "engine" not in job and "scope_name" not in job
+    assert d["run_meta"]["jobs"][0]["engine"] == "midscene"   # def 真值在 run_meta
     assert job["report_refs"] == [
         {"kind": "scope", "ref": "file:///x/report.html", "label": "Midscene report"}
     ]
@@ -99,6 +104,16 @@ def test_format_event_step_done_with_votes_and_cost():
     assert "status=passed" in s
     assert "votes=2/3" in s
     assert "tokens=1234" in s
+
+
+def test_format_event_single_vote_hides_tally():
+    # assertion_votes=1 → Votes(1,1)：单次判定无抖动 tally 意义，渲染不显 "1/1"（避免噪声）
+    ev = StepDone(scenario_id="x", step_index=0, status=Status.PASSED, votes=Votes(yes=1, total=1))
+    s = render.format_event(ev)
+    assert "votes=" not in s  # total==1 隐藏
+    # 但多票仍显
+    ev3 = StepDone(scenario_id="x", step_index=0, status=Status.PASSED, votes=Votes(yes=3, total=3))
+    assert "votes=3/3" in render.format_event(ev3)
 
 
 def test_format_event_scope_done():

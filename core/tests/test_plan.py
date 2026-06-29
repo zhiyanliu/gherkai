@@ -208,3 +208,19 @@ def test_engine_inherited_within_scope():
     )
     assert len(jobs) == 1
     assert jobs[0].engine == "novaact"  # c2 未标也继承
+
+
+# ---- assertion_votes：PlanConfig 缺省贯穿进每个 Job（ADR 0014）----
+def test_assertion_votes_default_is_one():
+    jobs = _plan("Feature: F\n  Scenario: s\n    Then \"对吗\"\n")  # CFG 未设 → 默认 1
+    assert jobs[0].assertion_votes == 1
+
+
+def test_assertion_votes_from_config_propagates_to_all_jobs():
+    cfg = PlanConfig(default_engine="midscene", default_assertion_votes=3)
+    jobs = plan(
+        [FeatureSource("t.feature", "Feature: F\n  Scenario: a\n    Then \"x\"\n  Scenario: b\n    Then \"y\"\n")],
+        cfg,
+    )
+    assert len(jobs) == 2
+    assert all(j.assertion_votes == 3 for j in jobs)  # 缺省值贯穿到每个 job

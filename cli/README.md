@@ -27,28 +27,36 @@ uv sync                                            # 装环境（core 作 path �
 # 跑一个 feature（默认引擎 novaact，默认 max-concurrency=1）
 uv run python -m cli run ../features/wikipedia_generic.feature
 
-# 选 Midscene 腿、放开并发、JSON 输出
+# 未标 @engine 的 scope 默认走 Midscene 腿、放开并发、JSON 输出
 uv run python -m cli run ../features/wikipedia_generic.feature \
-  --engine midscene --max-concurrency 2 --json
+  --default-engine midscene --max-concurrency 2 --json
 
 # 列可用引擎及其 spawn 命令（不烧钱）
 uv run python -m cli list-engines
 ```
 
-未标 `@engine` 的 scope 用 `--engine` 指定的默认腿；标了 `@engine:` 的按 tag 走（ADR 0019）。
+未标 `@engine` 的 scope 用 `--default-engine` 指定的默认腿；标了 `@engine:` 的按 tag 走、不受此 flag 影响（ADR 0019）。
 
 ## 退出码
 
 - `0` —— RunResult 总状态 passed
 - `1` —— 跑完了但有 failed/error（断言没过 / 引擎异常）
-- `2` —— 没跑成：feature 读不到、plan 配置矛盾（PlanError）、或无子命令
+- `2` —— 没跑成：feature 读不到、plan 配置矛盾（PlanError）、参数非法（如 `--assertion-votes < 1`）、或无子命令
+
+## 输出：stdout = 数据 / stderr = 进度
+
+遵循 Unix 惯例：**stdout 只放该命令的核心产出**（`--json` 的 JSON 文档 / 人看的文本汇总 / `list-engines` 列表），**stderr 放所有进度诊断**（plan、逐事件、run_id、RunReport 落点、worker 透传日志）。故：
+
+- `cli run … --json > r.json` —— `r.json` 是纯净 JSON（进度仍在终端可见、不污染文件）
+- `cli run … > summary.txt` —— `summary.txt` 是纯净文本汇总
 
 ## 选项（`run`）
 
 | flag | 默认 | 说明 |
 |---|---|---|
 | `features...` | — | 一个或多个 `.feature` 路径（位置参数） |
-| `--engine` | `novaact` | 未标 `@engine` 的 scope 用的默认引擎 |
+| `--default-engine` | `novaact` | 未标 `@engine` 的 scope 用的默认引擎（标了 `@engine:` 的按 tag 走） |
+| `--assertion-votes` | `1` | AI 断言（`Then`）投票次数（默认 1=单次判定）；调高（如 3/5）启用抖动检测：跑 N 次取多数票（ADR 0014）。须 ≥1 |
 | `--max-concurrency` | `1` | 同时在跑的 worker 上限（护真实成本/配额） |
 | `--timeout` | `300` | 单 job 墙钟超时秒（`<=0` 不超时） |
 | `--grace` | `10` | 停止请求后等优雅退出的宽限秒 |

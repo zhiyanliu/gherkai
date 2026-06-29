@@ -28,7 +28,8 @@ import { match as matchDeterministic, DeterministicAssertion } from "./determini
 import "../bdd/steps/deterministic.steps.js";
 
 const BROWSER_ID = "aws.browser.v1";
-const VOTES = 3; // AI 断言投票次数（治种类A抖动，ADR 0014）
+// AI 断言投票次数由 job.assertionVotes 决定（ADR 0014/0024，组合根经 --assertion-votes 设）。
+// 默认 1（不抖动检测，结果直观）；调高才跑 N 次取多数票。
 // 网络专用退出码（ADR 0028）：与 core/adapters/subprocess_engine.py 的 EX_WORKER_NETWORK 同值。
 // worker 建连失败、重试耗尽时以此码退出，作 out-of-band 信号（建连失败先于任何事件 emit）。
 const EX_WORKER_NETWORK = 80;
@@ -70,7 +71,7 @@ function log(msg: string): void {
 
 interface Step { index: number; keyword: string; text: string; argument?: unknown }
 interface Scenario { id: string; name: string; steps: Step[] }
-interface Job { scope: { id: string; name: string }; engine: string; scenarios: Scenario[] }
+interface Job { scope: { id: string; name: string }; engine: string; scenarios: Scenario[]; assertionVotes?: number }
 
 function unquote(text: string): string {
   const t = text.trim();
@@ -209,11 +210,12 @@ async function main(): Promise<number> {
 
     emit({ type: "scope_started", scopeId: scope.id });  // 三级时长起点（越过此点不再重试建连）
     // scope 内串行跑 scenarios，共享同一会话（ADR 0019/0024）
+    const votesN = job.assertionVotes ?? 1;  // AI 断言投票次数（ADR 0014/0024）；缺省 1
     for (const sc of job.scenarios) {
       emit({ type: "scenario_started", scenarioId: sc.id });
       const statuses: string[] = [];
       for (const step of sc.steps) {
-        statuses.push(await runStep(agent, page, sc.id, step));
+        statuses.push(await runStep(agent, page, sc.id, step, votesN));
       }
       emit({ type: "scenario_done", scenarioId: sc.id, status: aggregate(statuses) });
     }
@@ -242,7 +244,7 @@ async function main(): Promise<number> {
 }
 
 async function runStep(
-  agent: PlaywrightAgent, page: import("playwright").Page, scenarioId: string, step: Step,
+  agent: PlaywrightAgent, page: import("playwright").Page, scenarioId: string, step: Step, votesN: number,
 ): Promise<string> {
   const { index, keyword, text } = step;
   emit({ type: "step_started", scenarioId, stepIndex: index });  // step 时长起点
@@ -274,18 +276,18 @@ async function runStep(
       return "passed";
     }
     if (keyword === "Then") {
-      // AI 断言 + N 次投票（ADR 0014/0024）
+      // AI 断言 + N 次投票（ADR 0014/0024）；votesN=1 即单次判定（仍发 votes 标记这是 AI 断言）
       let yes = 0;
-      for (let i = 0; i < VOTES; i++) if (await agent.aiBoolean(unquote(text))) yes++;
-      const passed = yes > VOTES / 2;
+      for (let i = 0; i < votesN; i++) if (await agent.aiBoolean(unquote(text))) yes++;
+      const passed = yes > votesN / 2;
       const ev: Record<string, unknown> = {
         type: "step_done", scenarioId, stepIndex: index,
         status: passed ? "passed" : "failed",
-        votes: { yes, total: VOTES },
+        votes: { yes, total: votesN },
       };
       const cost = lastCost(agent);
       if (cost) ev.cost = cost;
-      if (!passed) { ev.errorType = "assertion_failed"; ev.message = `AI 断言未过多数票（${yes}/${VOTES}）：${text}`; }
+      if (!passed) { ev.errorType = "assertion_failed"; ev.message = `AI 断言未过多数票（${yes}/${votesN}）：${text}`; }
       emit(ev);
       return passed ? "passed" : "failed";
     }

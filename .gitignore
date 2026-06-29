@@ -40,6 +40,9 @@ midscene_run/
 **/nova_act_logs/
 **/*.trace
 **/traces/
+# RunReport / 跑批产物（cli 落 cli/reports/<run_id>/；worker 误落点兜底）——派生品，不入库
+reports/
+**/reports/
 # 通用
 *.log
 logs/

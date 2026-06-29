@@ -47,7 +47,8 @@ import deterministic_steps  # noqa: E402,F401  仅为触发注册（其顶层 @d
 REGION = os.environ.get("AWS_REGION", "us-east-1")
 MODEL_ID = "nova-act-latest"
 WORKFLOW_DEF = "spike-wikipedia-benchmark"
-VOTES = 3  # AI 断言投票次数（治种类A抖动，ADR 0014）
+# AI 断言投票次数由 job.assertionVotes 决定（ADR 0014/0024，组合根经 --assertion-votes 设）。
+# 默认 1（不抖动检测，结果直观）；调高才跑 N 次取多数票。
 
 _URL_IN_QUOTES = re.compile(r'"(https?://[^"]+)"')
 
@@ -115,13 +116,16 @@ def _collect_traj(r, traj_sink: list[str]) -> None:
         html = p[: -len("_trajectory.json")] + ".html"
         if os.path.exists(html):
             p = html
-    traj_sink.append(p)
+    # 绝对化兜底：reportRef 是 file://<path>，相对路径会成坏 URI（host 被当成路径首段）且跨进程
+    # cwd 歧义。SDK 通常已回绝对路径（cli 传绝对 NOVA_LOGS_DIR）；此处再 abspath 一道，防御相对漏网。
+    traj_sink.append(os.path.abspath(p))
 
 
-def _run_step(nova, scenario_id: str, step: dict, traj_sink: list[str]) -> str:
+def _run_step(nova, scenario_id: str, step: dict, traj_sink: list[str], votes_n: int) -> str:
     """派发执行一个 step，吐 step_done 事件，返回该 step 的 status（passed/failed/error）。
 
     traj_sink：本 scenario 的 trajectory 路径累积器（每次 AI act 收一个，ADR 0027）。
+    votes_n：AI 断言（Then）投票次数（来自 job.assertionVotes，ADR 0014）；1=不抖动检测。
 
     派发优先级（ADR 0022/0020/0024）：
       ① 确定性注册表命中（test engineer 注册的精确 handler，不投票、可复现）
@@ -165,26 +169,26 @@ def _run_step(nova, scenario_id: str, step: dict, traj_sink: list[str]) -> str:
             return "passed"
 
         if keyword == "Then":
-            # AI 断言 + N 次投票（ADR 0014/0024）
+            # AI 断言 + N 次投票（ADR 0014/0024）；votes_n=1 即单次判定（仍发 votes 标记这是 AI 断言）
             votes = []
             last_cost = None
-            for _ in range(VOTES):
+            for _ in range(votes_n):
                 r = nova.act_get(_unquote(text), BOOL_SCHEMA)
                 votes.append(bool(r.matches_schema and r.parsed_response))
                 last_cost = _cost_from_result(r)
                 _collect_traj(r, traj_sink)
             yes = sum(votes)
-            passed = yes > VOTES / 2
+            passed = yes > votes_n / 2
             ev = {
                 "type": "step_done", "scenarioId": scenario_id, "stepIndex": idx,
                 "status": "passed" if passed else "failed",
-                "votes": {"yes": yes, "total": VOTES},
+                "votes": {"yes": yes, "total": votes_n},
             }
             if last_cost:
                 ev["cost"] = last_cost
             if not passed:
                 ev["errorType"] = "assertion_failed"
-                ev["message"] = f"AI 断言未过多数票（{yes}/{VOTES}）：{text}"
+                ev["message"] = f"AI 断言未过多数票（{yes}/{votes_n}）：{text}"
             emit(ev)
             return "passed" if passed else "failed"
 
@@ -296,6 +300,7 @@ def main() -> int:
     job = json.loads(sys.stdin.readline())
     scope = job["scope"]
     scenarios = job["scenarios"]
+    votes_n = int(job.get("assertionVotes", 1))  # AI 断言投票次数（ADR 0014/0024）；缺省 1
     session_id = None
 
     def _on_sigterm(signum, frame):
@@ -326,6 +331,10 @@ def main() -> int:
             with NovaAct(
                 cdp_endpoint_url=ws_url, cdp_headers=headers, browser_auth=provider,
                 starting_page="about:blank", logs_directory=logs_dir,
+                # tty=False：worker 是 cli spawn 的子进程，stdout/stderr 是管道而非交互终端。
+                # SDK 默认 tty=True 会喷逐帧刷新的思考动画（💭 . / 💭 .. / 🎬 …），在管道里成了刷屏噪声；
+                # 关掉后输出干净的逐行日志（think/return/Approx. Time Worked 等有用行保留）。SDK 文档亦推荐非 tty 场景置 False。
+                tty=False,
             ) as nova:
                 # 取真实 AgentCore 会话 id（血缘，进 scope_done → RunStore，ADR 0016/0024）。
                 session_id = nova.get_session_id()
@@ -336,7 +345,7 @@ def main() -> int:
                     sid = sc["id"]
                     emit({"type": "scenario_started", "scenarioId": sid})
                     traj: list[str] = []  # 本 scenario 的 trajectory 路径累积（ADR 0027）
-                    statuses = [_run_step(nova, sid, st, traj) for st in sc["steps"]]
+                    statuses = [_run_step(nova, sid, st, traj, votes_n) for st in sc["steps"]]
                     # act 级 reportRefs：每个 trajectory 一条，经 scenario_done 回传（对称 Midscene scope 级）
                     report_refs = [
                         {"kind": "act", "ref": f"file://{p}", "label": f"trajectory {i + 1}"}

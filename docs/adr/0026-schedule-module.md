@@ -5,10 +5,11 @@
 ## 接口（深模块，小）
 
 ```
-schedule(jobs: Job[], engines: EngineResolver, sink: (event) -> void, run_id: str, opts) -> RunResult
+schedule(run_meta: RunMeta, engines: EngineResolver, sink: (event) -> void, opts) -> RunResult
+   // RunMeta: 一次 run 的 definition（run_id + created_at + jobs: Job[]），组合根执行前生成/组装（ADR 0016/0027）
+   //          schedule 把 run_meta 原样放进 RunResult（合成）+ 归约判定，不自己生成 run_id
    // EngineResolver: (engineName) -> Engine —— 按 job.engine 解析 Engine，schedule 对腿数/腿名无知
    // sink: 接收 0024 原始流式事件的回调（pass-through，供进度/落地）
-   // run_id: 一次 run 的标识，组合根 mint 后传入、schedule 透传进 RunResult（不自己生成；ADR 0027）
 
 opts = {                 // 时间单位统一为秒；代码字段名带 _s 后缀（job_timeout_s/grace_period_s）
   maxConcurrency = 4,    // 同时在跑的 worker 上限

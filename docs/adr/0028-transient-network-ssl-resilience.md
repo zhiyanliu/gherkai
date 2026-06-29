@@ -74,6 +74,9 @@ worker **按白名单匹配具体瞬时异常类型**,不用宽基类兜底:
 
 - `ScheduleOpts` 加 `network_retry: int = 0`（默认关,本地 smoke 不需要;CI/抖动环境可开）+
   `retry_sleep: Callable[[float], None] = time.sleep`（**注入**,单测传 no-op 保 fake-clock 纯净）。
+- core 层退避公式：第 N 次重试前 sleep `min(2.0 × attempt, 4.0)` 秒（attempt 1→2s、2→4s、3+→封顶 4s），
+  与 worker 层退避（`[0.5,1,2]s`,见上）相互独立、各管各层。退避秒数硬编码在调用点（固定 core 行为,非可配项;
+  仅 `retry_sleep` 本身可注入以便单测）。
 - 重试门槛**双条件 AND**:`error_type == "network_error"` AND **本次零 `step_done`**（`saw_step=False`,证明会话未起、act 没跑、无副作用）。
 - **fail_fast / timeout 优先级高于 network 重试**:它们已主动中止 job,不再重跑。
 - `schedule._Worker.run` 包重试循环,`_run_once` 返回 `(JobResult, is_network, saw_step)`;对 schedule 主循环透明（先跑完所有 attempt 得终值,再交 fail_fast 判定）。

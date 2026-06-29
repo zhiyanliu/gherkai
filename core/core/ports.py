@@ -14,7 +14,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterator, Protocol, runtime_checkable
 
-from core.model import Event, Job, JobResult, RunResult
+from core.model import Event, Job, JobResult, RunMeta, RunResult, RunState
 
 
 # ============================================================================
@@ -63,23 +63,36 @@ class Sink(Protocol):
 
 
 # ============================================================================
-# 状态/结果/报告 port（ADR 0016；现仅定义，local adapter 与 schedule 同期或稍后填）
+# 状态/结果/报告 port（ADR 0016 三层切分）。local adapter 均已建：RunStore 落 RunMeta(definition)+
+# RunState(运行态)；ResultStore 落 JobResult(判定真值)；ReportStore 归集 RunReport(0027)。控制面更野心的
+# 字段（jobId/起止时刻/DDB 表/执行中实时更新读取面）仍 defer，待真实续跑/轮询/WebUI 需求逼出（ADR 0016）。
 # ============================================================================
 
 
 @runtime_checkable
 class RunStore(Protocol):
-    """控制面：run/job 生命周期状态、status、起止、会话血缘（撑轮询/续跑/WebUI 进度）。"""
+    """控制面：一次 run 的 **definition（RunMeta）+ 运行态（RunState）**，不存判定明细（ADR 0016 三层切分）。
 
-    def save_run(self, result: RunResult) -> None: ...
-    def load_run(self, run_id: str) -> RunResult | None: ...
+    definition（run_id/created_at/跑哪些 job）执行前确定；运行态（总 status/各 job status/血缘/起止）
+    执行后产生。本地同步 cli 跑完一次性 save；「执行中实时更新」靠 sink 消费 event（本轮不写，机制已在）。
+    判定明细真值在 ResultStore（不在此）。local adapter = LocalRunStore（落 run_meta.json + run_state.json）。
+    """
+
+    def save_run(self, meta: RunMeta, state: RunState) -> None: ...
+    def load_run_meta(self, run_id: str) -> RunMeta | None: ...
+    def load_run_state(self, run_id: str) -> RunState | None: ...
 
 
 @runtime_checkable
 class ResultStore(Protocol):
-    """数据面：每 scenario 判定、投票抖动、报告指针（追加为主；CI 读判定真值靠它）。"""
+    """数据面：每 job(=scope) 判定真值，追加为主（**判定真值唯一权威**；CI 读判定靠它，ADR 0016）。
+
+    local adapter = LocalResultStore（每 job 落 <root>/<run_id>/jobs/<encoded_scope_id>.json）。
+    """
 
     def save_job_result(self, run_id: str, job: JobResult) -> None: ...
+    def load_job_result(self, run_id: str, scope_id: str) -> JobResult | None: ...
+    def load_all(self, run_id: str) -> list[JobResult]: ...
 
 
 @runtime_checkable
@@ -94,7 +107,7 @@ class ReportStore(Protocol):
     def write(self, run_id: str, result: RunResult, *, created_at: str = "", materialize: bool = False) -> Path:
         """从 RunResult 归集出 <report_root>/<run_id>/{manifest.json, index.html}，返回 index.html 路径。
 
-        created_at: 组合根 mint 的时间戳字符串（core 不取时钟；进 manifest 信封）。
+        created_at: 组合根生成的时间戳字符串（core 不取时钟；进 manifest 信封）。
         materialize=False（默认）：不拷贝产物，index.html 链接直接指向各 ReportRef.ref（本地够用）。
         materialize=True（opt-in）：按字节把产物拷进 <run_id>/artifacts/，链接转相对 → 目录自包含
           （可整体搬走/上 S3）。按字节拷贝/移动允许；解析/重写/合并产物内容禁止（ADR 0027）。

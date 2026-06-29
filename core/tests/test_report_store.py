@@ -4,13 +4,28 @@ from pathlib import Path
 
 from core.adapters.report_store.local import LocalReportStore
 from core.model import (
+    Job,
     JobResult,
     ReportRef,
+    RunMeta,
     RunResult,
     ScenarioResult,
     Status,
     StepResult,
+    Votes,
 )
+
+
+def _jr(scope_id: str, engine: str, **kw) -> JobResult:
+    """测试 helper：JobResult 持有 Job（definition）+ 判定字段。"""
+    job = Job(scope_id=scope_id, scope_name=scope_id, engine=engine, scenarios=())
+    return JobResult(job=job, **kw)
+
+
+def _rr(run_id: str, jobs: list[JobResult], **kw) -> RunResult:
+    """测试 helper：RunResult = RunMeta(definition) + 判定 jobs。run_meta.jobs 取自各 jr.job。"""
+    meta = RunMeta(run_id=run_id, created_at="", jobs=tuple(jr.job for jr in jobs))
+    return RunResult(run_meta=meta, jobs=jobs, **kw)
 
 
 def _run_with_refs(tmp: Path) -> RunResult:
@@ -19,16 +34,12 @@ def _run_with_refs(tmp: Path) -> RunResult:
     art.mkdir(parents=True)
     html = art / "x.html"
     html.write_text("<html>原生报告</html>", encoding="utf-8")
-    return RunResult(
-        run_id="20260629-abc123",
-        status=Status.PASSED,
-        duration_ms=12000.0,
-        total_tokens=10573,
-        jobs=[
-            JobResult(
-                scope_id="features/wiki.feature:6",
+    return _rr(
+        "20260629-abc123",
+        [
+            _jr(
+                "features/wiki.feature:6", "midscene",
                 status=Status.PASSED,
-                engine="midscene",
                 total_tokens=10573,
                 duration_ms=11000.0,
                 report_refs=(ReportRef(kind="scope", ref=f"file://{html}", label="Midscene report"),),
@@ -43,6 +54,9 @@ def _run_with_refs(tmp: Path) -> RunResult:
                 ],
             )
         ],
+        status=Status.PASSED,
+        duration_ms=12000.0,
+        total_tokens=10573,
     )
 
 
@@ -66,10 +80,9 @@ def test_manifest_shape(tmp_path: Path):
     assert m["schema_version"] == 1
     assert m["run_id"] == "20260629-abc123"
     assert m["created_at"] == "2026-06-29T00:00:00Z"
-    assert m["tool"] == "yaozhou"
-    # result 是 to_dict 的单一真理源
-    assert m["result"]["run_id"] == "20260629-abc123"
-    assert m["result"]["jobs"][0]["engine"] == "midscene"
+    assert "tool" not in m  # 不硬编码不确定的产品名进对外契约（删，无聚合多工具需求）
+    # manifest 是纯派生视图：不内嵌 result 真值副本（靠 run_id 软引用，判定真值在 ResultStore，ADR 0027/0016）
+    assert "result" not in m
     # report_index 扁平投影：scope 级（scenario_id=None）+ act 级各一条
     idx = m["report_index"]
     assert len(idx) == 2
@@ -90,6 +103,61 @@ def test_index_html_links_and_summary(tmp_path: Path):
     assert "midscene" in txt
     assert "Midscene report" in txt  # label 作锚文本
     assert "[scope]" in txt and "[act]" in txt  # kind 原样回显（不分支）
+    # 判定明细块：scope_id / scenario_id / step / sessionId 直接呈现在页上（不止产物导航）
+    assert "判定明细" in txt
+    assert "features/wiki.feature:6" in txt   # scenario_id
+    assert "step[0]" in txt                   # step 级判定
+
+
+def test_index_html_votes_tally_shown_only_when_multi_vote(tmp_path: Path):
+    # 投票 tally：assertion_votes>1 才在 index.html 显 N/N 票；==1（单次判定）隐藏（避免 1/1 噪声）。
+    def _run(total: int) -> RunResult:
+        return _rr("vrun", [_jr(
+            "s", "midscene", status=Status.PASSED,
+            scenarios=[ScenarioResult(scenario_id="s:0", status=Status.PASSED, steps=[
+                StepResult(index=0, status=Status.PASSED, votes=Votes(yes=total, total=total)),
+            ])],
+        )], status=Status.PASSED)
+    store = LocalReportStore(tmp_path / "reports")
+    # 多票：显 tally
+    txt3 = store.write("vrun", _run(3), created_at="x").read_text("utf-8")
+    assert "3/3 票" in txt3
+    # 单票：隐藏（不出现 1/1 票）
+    import shutil; shutil.rmtree(tmp_path / "reports")
+    txt1 = store.write("vrun", _run(1), created_at="x").read_text("utf-8")
+    assert "1/1 票" not in txt1
+
+
+def test_index_html_shows_verdict_even_without_report_refs(tmp_path: Path):
+    # 用户痛点护栏：纯确定性 run（无原生产物 report_refs=[]）的 index.html 也要能看懂结果——
+    # 判定明细（job/scenario/step status + 时长 + sessionId）直接渲染，不再是一张白纸。
+    run = _rr(
+        "det-run",
+        [_jr(
+            "features/anchor.feature:7", "midscene",
+            status=Status.PASSED, duration_ms=3800.0, session_id="01KW9DSK",
+            scenarios=[ScenarioResult(
+                scenario_id="features/anchor.feature:7", status=Status.PASSED, duration_ms=3200.0,
+                steps=[
+                    StepResult(index=0, status=Status.PASSED, duration_ms=3200.0),
+                    StepResult(index=1, status=Status.PASSED, duration_ms=0.04),
+                ],
+            )],
+        )],
+        status=Status.PASSED, duration_ms=4000.0,
+    )
+    store = LocalReportStore(tmp_path / "reports")
+    idx = store.write(run.run_id, run)
+    txt = idx.read_text("utf-8")
+    # 判定明细可见
+    assert "判定明细" in txt
+    assert "features/anchor.feature:7" in txt
+    assert "step[0]" in txt and "step[1]" in txt
+    assert "01KW9DSK" in txt                   # sessionId 呈现（会话血缘可追）
+    # 产物区为空但有意义提示，且不再含已移除的内部设计语
+    assert "无原生报告产物" in txt
+    assert "本页不解析其内容" not in txt        # 已移除的底注
+    assert "归集索引（ADR" not in txt
 
 
 def test_materialize_copies_local_artifact(tmp_path: Path):
@@ -117,9 +185,7 @@ def test_default_no_materialize_keeps_ref(tmp_path: Path):
 
 
 def test_empty_report_refs_still_valid_index(tmp_path: Path):
-    run = RunResult(run_id="empty-run", status=Status.PASSED, jobs=[
-        JobResult(scope_id="s", status=Status.PASSED, engine="novaact"),
-    ])
+    run = _rr("empty-run", [_jr("s", "novaact", status=Status.PASSED)], status=Status.PASSED)
     store = LocalReportStore(tmp_path / "reports")
     idx = store.write(run.run_id, run)
     txt = idx.read_text("utf-8")
@@ -133,12 +199,12 @@ def test_materialize_same_basename_no_collision(tmp_path: Path):
     # 两个不同目录、同 basename 的本地产物：materialize 不能互相覆盖（数据丢失回归）
     d1 = tmp_path / "a"; d1.mkdir(); (d1 / "report.html").write_text("AAA", encoding="utf-8")
     d2 = tmp_path / "b"; d2.mkdir(); (d2 / "report.html").write_text("BBB", encoding="utf-8")
-    run = RunResult(run_id="collide", status=Status.PASSED, jobs=[
-        JobResult(scope_id="s1", status=Status.PASSED, engine="e",
-                  report_refs=(ReportRef(kind="scope", ref=f"file://{d1}/report.html"),)),
-        JobResult(scope_id="s2", status=Status.PASSED, engine="e",
-                  report_refs=(ReportRef(kind="scope", ref=f"file://{d2}/report.html"),)),
-    ])
+    run = _rr("collide", [
+        _jr("s1", "e", status=Status.PASSED,
+            report_refs=(ReportRef(kind="scope", ref=f"file://{d1}/report.html"),)),
+        _jr("s2", "e", status=Status.PASSED,
+            report_refs=(ReportRef(kind="scope", ref=f"file://{d2}/report.html"),)),
+    ], status=Status.PASSED)
     store = LocalReportStore(tmp_path / "reports")
     store.write(run.run_id, run, materialize=True)
     art = tmp_path / "reports" / "collide" / "artifacts"
@@ -154,10 +220,10 @@ def test_materialize_percent_encoded_path(tmp_path: Path):
     src = tmp_path / "trajectory 词条页.html"
     src.write_text("traj", encoding="utf-8")
     ref = "file://" + quote(str(src))  # 路径 percent-encode（空格→%20、中文→%XX）
-    run = RunResult(run_id="pe", status=Status.PASSED, jobs=[
-        JobResult(scope_id="s", status=Status.PASSED, engine="novaact",
-                  report_refs=(ReportRef(kind="act", ref=ref),)),
-    ])
+    run = _rr("pe", [
+        _jr("s", "novaact", status=Status.PASSED,
+            report_refs=(ReportRef(kind="act", ref=ref),)),
+    ], status=Status.PASSED)
     store = LocalReportStore(tmp_path / "reports")
     store.write(run.run_id, run, materialize=True)
     art = tmp_path / "reports" / "pe" / "artifacts"
@@ -167,10 +233,10 @@ def test_materialize_percent_encoded_path(tmp_path: Path):
 
 def test_file_uri_with_remote_host_not_copied(tmp_path: Path):
     # file://server/share/x.html（带非 localhost host = 远端/UNC）→ 不当本地拷
-    run = RunResult(run_id="unc", status=Status.PASSED, jobs=[
-        JobResult(scope_id="s", status=Status.PASSED, engine="e",
-                  report_refs=(ReportRef(kind="scope", ref="file://server/share/x.html"),)),
-    ])
+    run = _rr("unc", [
+        _jr("s", "e", status=Status.PASSED,
+            report_refs=(ReportRef(kind="scope", ref="file://server/share/x.html"),)),
+    ], status=Status.PASSED)
     store = LocalReportStore(tmp_path / "reports")
     store.write(run.run_id, run, materialize=True)
     # 不拷贝 → 无 artifacts，href 保持原 ref
@@ -179,10 +245,10 @@ def test_file_uri_with_remote_host_not_copied(tmp_path: Path):
 
 def test_remote_ref_not_copied_even_when_materialize(tmp_path: Path):
     # 未来引擎报 https:// 外部 URL：materialize 也不拷贝（不 fetch 远端），href 保持原样
-    run = RunResult(run_id="r", status=Status.PASSED, jobs=[
-        JobResult(scope_id="s", status=Status.PASSED, engine="future",
-                  report_refs=(ReportRef(kind="video", ref="https://example.com/rec.mp4"),)),
-    ])
+    run = _rr("r", [
+        _jr("s", "future", status=Status.PASSED,
+            report_refs=(ReportRef(kind="video", ref="https://example.com/rec.mp4"),)),
+    ], status=Status.PASSED)
     store = LocalReportStore(tmp_path / "reports")
     store.write(run.run_id, run, materialize=True)
     m = json.loads((tmp_path / "reports" / "r" / "manifest.json").read_text("utf-8"))

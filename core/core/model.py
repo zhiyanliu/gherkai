@@ -54,6 +54,9 @@ class Job:
     scope_name: str  # @scope 原值（人写名）；无标用 scenario 标题
     engine: str  # 已完成冲突校验的引擎名（如 "midscene"/"novaact"）
     scenarios: tuple[Scenario, ...]
+    # AI 断言（Then）投票次数（治种类A抖动，ADR 0014）：worker 跑该断言 N 次取多数票。
+    # 默认 1（不抖动检测，结果/日志最直观）；调高（如 3/5）才启用抖动治理。组合根经 --assertion-votes 设。
+    assertion_votes: int = 1
 
 
 # ============================================================================
@@ -210,11 +213,15 @@ class ScenarioResult:
 
 @dataclass
 class JobResult:
-    """单个 job(=scope) 的归约结果。"""
+    """单个 job(=scope) 的归约结果（数据面判定 + 持有它的 definition）。
 
-    scope_id: str
+    **持有 `job`（definition）而非重复抄它的字段**（ADR 0016 三层切分）：scope_id/scope_name/engine
+    经 property 从 `job` 取，消除「抄字段抄漏」病根（旧版抄了 engine 漏了 scope_name）。
+    本类只背**判定**：status/scenarios/session_id/cost/duration/report_refs/error_type/message。
+    """
+
+    job: Job  # 这个 job 的 definition（plan 产出；scope_id/scope_name/engine/scenarios 的唯一真值）
     status: Status  # 汇总：任一 scenario error→error；任一 failed→failed；全 passed→passed
-    engine: str = ""  # 跑这个 scope 的引擎名（来自 Job.engine；使 RunResult 自包含，供 RunReport 标注，ADR 0027）
     scenarios: list[ScenarioResult] = field(default_factory=list)
     session_id: str | None = None
     # 成本：core 只各自合计 engine 报的原生量（None=该腿没报这个量）。美元折算交消费者。
@@ -225,10 +232,23 @@ class JobResult:
     error_type: str | None = None  # job 级失败（worker 崩/超时）时有
     message: str | None = None
 
+    # definition 字段经 property delegate 给 job（读法稳定、存储唯一，ADR 0016）
+    @property
+    def scope_id(self) -> str:
+        return self.job.scope_id
+
+    @property
+    def scope_name(self) -> str:
+        return self.job.scope_name
+
+    @property
+    def engine(self) -> str:
+        return self.job.engine
+
 
 @dataclass
 class RunResult:
-    """一次执行的机器可读汇总判定（给退出码/CI，ADR 0016）。
+    """一次执行的机器可读汇总判定 = **definition（run_meta）+ 判定（jobs）的显式合成**（ADR 0016/0026）。
 
     RunResult 是 schedule 对事件流的归约终值；sink 收的是同一事件流的原始流式视图（ADR 0026）。
 
@@ -237,9 +257,72 @@ class RunResult:
     美元折算交给消费者（用自己 AWS 账户的真实费率）。None=无任何腿报这个量。
     """
 
-    run_id: str  # 一次 run 的标识（组合根 mint、schedule 透传；RunReport 主键 / 未来 RunStore PK，ADR 0027）
+    run_meta: RunMeta  # 这次 run 的 definition（run_id/created_at/jobs；执行前确定，不从结果反推）
     status: Status  # 总判定：任一 job error→error；任一 failed→failed；全 passed→passed
     jobs: list[JobResult] = field(default_factory=list)
     total_tokens: int | None = None  # 跨 job 的 token 合计（None=无腿报 token）
     total_time_worked_s: float | None = None  # 跨 job 的 agent 工作时长合计（None=无腿报时长）
     duration_ms: float | None = None  # 整个 run 的墙钟时长（schedule 整体包住；含并发，≠ 各 scope 时长之和）
+
+    @property
+    def run_id(self) -> str:
+        return self.run_meta.run_id
+
+
+# ============================================================================
+# definition（前置身份）与控制面运行态（ADR 0016 三层切分）
+# ============================================================================
+
+
+@dataclass(frozen=True)
+class RunMeta:
+    """一次 run 的 **definition**（前置身份，执行前由 plan 产出 + 组合根生成确定，不从 RunResult 反推）。
+
+    含「要跑什么」的全部：run_id + created_at + 完整 Job 列表（Job 含 scope/engine/scenarios/steps）。
+    **不含 status/判定**（那是执行后才有，属控制面运行态 RunState / 数据面 ResultStore）。
+    """
+
+    run_id: str  # 组合根生成（RunReport 主键 / 未来 RunStore PK）
+    created_at: str  # 组合根生成的时间戳（core 不取时钟）
+    jobs: tuple[Job, ...]  # 这次跑哪些 job（完整 definition，来自 plan 产出）
+
+
+@dataclass(frozen=True)
+class JobState:
+    """单个 job 的控制面运行态（执行后才有）。"""
+
+    scope_id: str
+    status: Status
+    session_id: str | None = None  # AgentCore 会话血缘
+
+
+@dataclass(frozen=True)
+class RunState:
+    """一次 run 的**控制面运行态**（status/血缘/起止；执行后产生，ADR 0016 控制面）。
+
+    与 RunMeta（definition）分开：definition 执行前确定、不变；运行态随执行产生。本地同步 cli
+    跑完一次性落；「执行中实时更新」靠 sink 消费 event（本轮不写 status-sink，机制已在，ADR 0026）。
+    started_at/ended_at 本轮留 optional、暂不取时钟（ADR 0016 起止时间字段顺延）。
+    """
+
+    run_id: str
+    status: Status
+    jobs: tuple[JobState, ...]
+    started_at: str | None = None
+    ended_at: str | None = None
+
+
+def run_state_from_result(result: RunResult) -> RunState:
+    """从 RunResult 投影出控制面运行态（ADR 0016/0027）。
+
+    投影的是**运行态**（status/session_id，本就执行后才有），非从结果反推 definition 身份——
+    scope_id 经 jr.job 取（definition 本在 job 里）。
+    """
+    return RunState(
+        run_id=result.run_id,
+        status=result.status,
+        jobs=tuple(
+            JobState(scope_id=jr.scope_id, status=jr.status, session_id=jr.session_id)
+            for jr in result.jobs
+        ),
+    )

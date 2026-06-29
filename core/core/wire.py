@@ -66,6 +66,9 @@ def job_to_json(job: Job) -> dict:
         "scope": {"id": job.scope_id, "name": job.scope_name},
         "engine": job.engine,
         "scenarios": [_scenario_to_json(sc) for sc in job.scenarios],
+        # assertionVotes：AI 断言（Then）投票次数（治种类A抖动，ADR 0014/0024）。worker 据此跑 N 次取多数票。
+        # camelCase 与协议其余字段一致；前缀 assertion 点明只作用于 AI 断言（动作 step 无投票）。
+        "assertionVotes": job.assertion_votes,
     }
 
 

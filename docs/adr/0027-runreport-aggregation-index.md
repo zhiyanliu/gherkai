@@ -32,16 +32,16 @@
 
 归集必须有个 run 标识（manifest 目录名 / 未来 DDB 主键）。[0016](./0016-execution-architecture-core-lib-run-model.md) 早把 `run_id` 列为「持久化层 Run 级字段、deferred」——RunReport 落地把它逼了出来：
 
-- **生成权在组合根**（cli 的 `compose` / 未来 WebUI bootstrap），不在 `schedule` 内部 mint。理由：WebUI 语义是「提交即返回 runId、之后轮询」——runId 必须**先于**跑批存在；schedule 内部生成会与该模型打架。也避免 schedule 内部 `uuid`/时钟破坏其「fake-clock 可确定性单测」的定位。
-- **`RunResult` 加 `run_id: str` 一等字段**，使其自描述（`save_run(RunResult)` 落库后能用自身字段对上 `load_run(run_id)` 主键）。`schedule` 加 `run_id` 入参、原样透传、不生成。
+- **生成权在组合根**（cli 的 `compose` / 未来 WebUI bootstrap），不在 `schedule` 内部生成。理由：WebUI 语义是「提交即返回 runId、之后轮询」——runId 必须**先于**跑批存在；schedule 内部生成会与该模型打架。也避免 schedule 内部 `uuid`/时钟破坏其「fake-clock 可确定性单测」的定位。
+- **run_id 落进 `RunMeta`（definition），`RunResult` 经 property 取**：组合根生成 run_id 后包成 `RunMeta(run_id, created_at, jobs)` 喂 `schedule(run_meta, ...)`；`RunResult` 持 `run_meta`、`run_id` 经 property delegate（自描述：落库后用自身字段对上主键）。这是后续「三层切分」重构的结果（见 [0016](./0016-execution-architecture-core-lib-run-model.md)）——早先是 `RunResult` 直挂 `run_id` 字段、`schedule` 收裸 `run_id` 入参，现归位到 definition 层。
 - run_id 对调用方**不透明**，只保证「可排序 + 抗碰撞」（实现用时间戳前缀 + 随机尾，格式留 `compose` 实现、不入本 ADR 契约）。
-- **生命周期**：run_id 在 `schedule` 调用点 mint。`plan` 阶段失败（feature 读不到 / `PlanError`）发生在 schedule 之前 → 不 mint run_id、不产 RunReport。
+- **生命周期**：run_id 在组合根生成（先于 `schedule`）。`plan` 阶段失败（feature 读不到 / `PlanError`）发生在 schedule 之前 → 不生成 run_id、不产 RunReport。
 
-## JobResult 加 `engine` 字段
+## JobResult 自带 `engine`（经持有的 `Job`）
 
-RunReport 要按引擎标注每条产物。`JobResult` 当前无 `engine`（要跨 `Job[]` 按 scope_id join 才拿得到，脆弱且让 adapter 同时认识输入侧 `Job` 与输出侧 `RunResult` 两套模型）。
+RunReport 要按引擎标注每条产物。`JobResult` 须能就地拿到 `engine`（否则要跨 `Job[]` 按 scope_id join 才拿得到，脆弱且让 adapter 同时认识输入侧 `Job` 与输出侧 `RunResult` 两套模型）。
 
-**给 `JobResult` 加 `engine: str`**（本就来自 `Job.engine`，`schedule` 归约时填）。`RunResult` 自此自包含，`to_dict`/manifest 直接读 `jr.engine`，无需跨模型 join。
+**`JobResult` 持有它的 `Job`(definition)，`engine`/`scope_id`/`scope_name` 经 property delegate 给 `self.job`**（不重复抄存）。`RunResult` 自此自包含，`to_dict`/manifest 直接读 `jr.engine`，无需跨模型 join。这是「三层切分」重构的结果（见 [0016](./0016-execution-architecture-core-lib-run-model.md)）——早先是给 `JobResult` 单加一个 `engine: str` 抄存字段，但「抄字段」会漏（旧版抄了 `engine` 漏了 `scope_name`），改为持 `Job` + property，存储唯一、读法稳定。
 
 ## ReportStore 接口：整 run 一次写
 
@@ -81,27 +81,29 @@ class ReportStore(Protocol):
 - **要自包含 → `--materialize`**：把两腿产物都按字节收进 `artifacts/`、链接转相对。本地 smoke
   （[0015](./0015-v1-positioning-smoke-not-regression.md)）默认不强行统一落点是务实取舍——不为本地够用的场景付每 run 拷 MB 的代价。
 
-**职责边界（三 port 正交，[0016](./0016-execution-architecture-core-lib-run-model.md)）**：`RunStore`=控制面（run/job 状态、血缘）、`ResultStore`=数据面（判定真值）、`ReportStore`=**纯派生只读导航视图**（可从 `RunResult` 完全重建、永不作 CI 判定源）。`ResultStore` 旧 docstring「RunReport 归集靠它」一句删除——归集职责移交 `ReportStore`。
+**职责边界（三 port 正交，[0016](./0016-execution-architecture-core-lib-run-model.md)）**：`RunStore`=控制面（definition `RunMeta` + 运行态 `RunState`：status/血缘）、`ResultStore`=数据面（判定真值唯一权威）、`ReportStore`=**纯派生只读导航视图**（可从 `RunResult` 完全重建、永不作 CI 判定源）。`ResultStore` 旧 docstring「RunReport 归集靠它」一句删除——归集职责移交 `ReportStore`。
 
 ## manifest.json 形态
 
-复用 `core.serialize.to_dict(RunResult)` 为**单一真理源**（序列化属 core——窄腰已序列化 run→job→scenario→step，cli `--json` 与 manifest 共用同一函数），外加薄信封：
+**纯派生导航视图：薄信封 + 扁平 report_index，不内嵌 result 真值副本**。判定真值由 `ResultStore` 持有（数据面，每 job 落 `jobs/<scope_id>.json` / 未来对象存储），运行态/身份由 `RunStore` 持有（`run_meta.json` + `run_state.json` / 未来 DDB，[0016](./0016-execution-architecture-core-lib-run-model.md)）；manifest 靠 **`run_id` 软引用**那次 run——CI 要判定就拿 run_id 找 `ResultStore`。这样 report 是真·派生品（可删可重建、永不作判定源），无真值冗余、无一致性风险。
 
 ```jsonc
 {
   "schema_version": 1,
-  "run_id": "...",
-  "created_at": "...",           // 组合根 mint 时间戳（字符串，由调用方传入）
-  "tool": "yaozhou",
-  "result": { /* to_dict(RunResult) 原样：含各级 status/duration/cost + report_refs */ },
+  "run_id": "...",               // 软引用那次 run；完整判定真值在 ResultStore（jobs/*.json），按此 id 取
+  "created_at": "...",           // 组合根生成的时间戳（字符串，由调用方传入）
   "report_index": [              // 扁平投影，便于 CI/WebUI 直接遍历
-    { "scope_id": "...", "scenario_id": "..."|null, "engine": "...", "kind": "...", "ref": "...", "label": "..." }
+    { "scope_id": "...", "scenario_id": "..."|null, "engine": "...", "kind": "...",
+      "ref": "...", "href": "...", "label": "..." }
   ]
 }
 ```
 
-- `report_index` 从 `result` 树一次投影（result 已含全部 report_refs，**不走逐条 append**）；`scenario_id=null` 表 scope 级 ref。
-- `to_dict` 补两处当前遗漏：`job.engine`、`scenario.report_refs`（`ScenarioResult.report_refs` 已存在但未序列化）。
+- `report_index` 从内存 `RunResult` 树一次投影（含全部 report_refs，**不走逐条 append**）；`scenario_id=null` 表 scope 级 ref。
+- 每条含 `ref`（原始不透明指针，原样保留）与 `href`（index.html 实际导航用的链接）：`materialize=False` 时 `href == ref`；`materialize=True` 时 `href` 是拷进 `artifacts/` 的相对路径（`ref` 仍留原值）。
+- index.html 的 run 摘要（status/时长/成本/各 job 上色）**直接用内存 `RunResult`** 渲染，不从 manifest 读（manifest 已不含 result）。
+- **早先设计曾让 manifest 内嵌 `to_dict(result)`**，但那让派生视图承载判定真值副本（与 `ResultStore` 的 job 判定 + `RunStore` 的运行态冗余）——已改为软引用 run_id（消除冗余）。`serialize.to_dict/from_dict` 仍是单一序列化真理源（cli `--json` 与各 store 共用），只是不再塞进 manifest。
+- `to_dict` 含 `job.engine`、`scenario.report_refs`（序列化补齐项）。
 - manifest **不冗余 status 当判定源**——`result` 里已有，CI 读 `result.status`，不读信封。
 
 ## index.html 形态
@@ -142,10 +144,11 @@ URL、断言了什么」都不落痕（只有 pass/fail 进 result 树）。大�
 
 ## 现在做 / 留口子
 
-- **现在做（v1.0）**：上述 `ReportRef` 改造、`run_id` 字段 + 组合根 mint、`JobResult.engine`、`ReportStore.write` 接口 + `LocalReportStore`（manifest + index，默认不 materialize）、Nova trajectory 持久化 + act 级 reportRefs、cli 默认生成 RunReport（`--no-report` 跳过、`--report-dir` 配落点、`--materialize` opt-in）、单测 + 两腿真 e2e。
+- **现在做（v1.0）**：上述 `ReportRef` 改造、`run_id`（归位进 `RunMeta` definition）+ 组合根生成、`JobResult` 经持有的 `Job` 取 `engine`、`ReportStore.write` 接口 + `LocalReportStore`（manifest + index，默认不 materialize）、Nova trajectory 持久化 + act 级 reportRefs、cli 默认生成 RunReport（`--no-report` 跳过、`--report-dir` 配落点、`--materialize` opt-in）、单测 + 两腿真 e2e。
 - **留口子不实现**：
   - **确定性 step 产物可观测性**：让 `@deterministic` handler 可选地产一个轻量产物（当时 URL / 截图 / 检查描述），使纯确定性用例的 RunReport 也有内容可看。本轮判定真值在 result 树已够；产物可观测另开一轮（与 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md) 确定性 step 设计一并演进）。
-  - `materialize` 的 S3 后端；`RunStore.load_run` 的**读回面**（v1.0 只先行「写面」——manifest 落盘；读回成 `RunResult` 顺延，与 [0016](./0016-execution-architecture-core-lib-run-model.md)「local adapter 尚未建、字段待真实跑批逼出」一致）；按 `kind` 的富渲染（`<video>`/`<iframe>`，皮层将来做）；trajectory 内部结构化提取。
+  - `materialize` 的 S3 后端；按 `kind` 的富渲染（`<video>`/`<iframe>`，皮层将来做）；trajectory 内部结构化提取。
+  （注：store 读回面**已落地**——`RunStore.load_run_meta`/`load_run_state` + `ResultStore.load_job_result`/`load_all`，靠 `serialize.from_dict` 完整重建 RunMeta/RunState/JobResult，[0016](./0016-execution-architecture-core-lib-run-model.md)；原此处「读回面顺延」已兑现。）
 
 ## 重议
 

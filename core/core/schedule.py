@@ -24,6 +24,7 @@ from core.model import (
     Event,
     Job,
     JobResult,
+    RunMeta,
     RunResult,
     ScenarioDone,
     ScenarioResult,
@@ -125,7 +126,7 @@ class _Worker:
         deadline：run 级共享的超时截止（None=不超时）；跨 attempt 不重置（ADR 0028）。
         """
         job = self.job
-        result = JobResult(scope_id=job.scope_id, status=Status.PASSED, engine=job.engine)
+        result = JobResult(job=job, status=Status.PASSED)
         scenario_status: dict[str, Status] = {}
         saw_step = False  # 是否观察到 step_done（会话已起、act 可能有副作用 → 不可 job 级重试，ADR 0028）
         self_stopped = False  # schedule 主动停了本 worker（timeout/fail-fast）→ 其后的退出码不当 network（ADR 0028）
@@ -264,20 +265,22 @@ class _Worker:
 
 
 def schedule(
-    jobs: list[Job],
+    run_meta: RunMeta,
     engines: EngineResolver,
     sink: Sink,
-    run_id: str,
     opts: ScheduleOpts | None = None,
 ) -> RunResult:
-    """跑一批 job → RunResult（ADR 0026）。
+    """跑一次 run（RunMeta = definition）→ RunResult（ADR 0026）。
 
-    run_id:  一次 run 的标识，由组合根 mint 后传入（schedule 不自己生成——保其 fake-clock
-             可确定性单测的纯归约定位；WebUI「提交即返回 runId」也要求 id 先于跑批存在，ADR 0027）。
-    engines: 按 job.engine 解析 Engine 的 resolver（schedule 对腿数/腿名无知）。
-    sink:    接收 ADR 0024 原始流式事件的回调（与 RunResult 是同一事件流的两个视图）。
+    run_meta: 一次 run 的 definition（run_id + created_at + jobs），由组合根生成 run_id + plan
+              产出 jobs 后构造传入（schedule 不自己生成 id、不取时钟——保 fake-clock 可确定性单测的
+              纯归约定位；WebUI「提交即返回 runId」也要求 definition 先于跑批存在，ADR 0027）。
+              schedule 原样把 run_meta 放进 RunResult（definition + 判定的合成），不从结果反推身份。
+    engines:  按 job.engine 解析 Engine 的 resolver（schedule 对腿数/腿名无知）。
+    sink:     接收 ADR 0024 原始流式事件的回调（与 RunResult 是同一事件流的两个视图）。
     """
     opts = opts or ScheduleOpts()
+    jobs = list(run_meta.jobs)
     sink_lock = threading.Lock()
     abort_flag = threading.Event()
     workers = [
@@ -308,7 +311,7 @@ def schedule(
     tok = [jr.total_tokens for jr in job_results if jr.total_tokens is not None]
     tw = [jr.total_time_worked_s for jr in job_results if jr.total_time_worked_s is not None]
     return RunResult(
-        run_id=run_id,
+        run_meta=run_meta,
         status=run_status, jobs=job_results,
         total_tokens=sum(tok) if tok else None,
         total_time_worked_s=sum(tw) if tw else None,

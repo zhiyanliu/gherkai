@@ -16,7 +16,7 @@ def format_event(ev: Event) -> str:
         if v is not None:
             parts.append(f"{attr}={getattr(v, 'value', v)}")
     votes = getattr(ev, "votes", None)
-    if votes:
+    if votes and votes.total > 1:  # total==1=单次判定，无抖动 tally 意义，不显（避免 1/1 噪声）
         parts.append(f"votes={votes.yes}/{votes.total}")
     cost = getattr(ev, "cost", None)
     if cost:
@@ -61,7 +61,9 @@ def render_text(result: RunResult) -> str:
             dur = f"  ({_ms(sr.duration_ms)})" if sr.duration_ms is not None else ""
             out.append(f"    scenario {sr.scenario_id!r}: {sr.status.value}{dur}")
             for st in sr.steps:
-                out.append(f"      step[{st.index}]: {st.status.value} ({_ms(st.duration_ms)})")
+                # total>1 才显投票 tally（与 format_event/index.html 一致；1/1 无抖动意义，不显）
+                v = f" 投票 {st.votes.yes}/{st.votes.total}" if st.votes and st.votes.total > 1 else ""
+                out.append(f"      step[{st.index}]: {st.status.value} ({_ms(st.duration_ms)}){v}")
         if jr.session_id:
             out.append(f"    sessionId: {jr.session_id}")
         for rr in jr.report_refs:

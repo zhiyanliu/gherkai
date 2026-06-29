@@ -38,6 +38,9 @@ class FeatureSource:
 @dataclass(frozen=True)
 class PlanConfig:
     default_engine: str
+    # AI 断言投票次数缺省（ADR 0014）：无 per-scope 覆盖时所有 job 用它。默认 1（不抖动检测）。
+    # 与 default_engine 对称——未来可由 @votes: tag per-scope 覆盖（留口子，现不实现）。
+    default_assertion_votes: int = 1
 
 
 def _values_with_prefix(tags: tuple[str, ...], prefix: str) -> list[str]:
@@ -148,6 +151,7 @@ def plan(features: list[FeatureSource], config: PlanConfig) -> list[Job]:
                 scope_name=scope_name,
                 engine=engine,
                 scenarios=tuple(m.scenario for m in members),  # 丢弃 tags，Scenario 保持纯净
+                assertion_votes=config.default_assertion_votes,  # per-scope 覆盖留口子（@votes:），现统一用缺省
             )
         )
     return jobs

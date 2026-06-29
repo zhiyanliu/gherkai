@@ -10,11 +10,15 @@ import time
 from pathlib import Path
 
 from core.adapters.subprocess_engine import SubprocessEngine
-from core.model import Job, Scenario, ScopeDone, Status, Step
+from core.model import Job, RunMeta, Scenario, ScopeDone, Status, Step
 from core.schedule import schedule
 from tests.fake_engine import CollectSink
 
 _WORKER = str(Path(__file__).parent / "fixtures" / "echo_worker.py")
+
+
+def _rm(jobs: list[Job], run_id: str = "test-run") -> RunMeta:
+    return RunMeta(run_id=run_id, created_at="", jobs=tuple(jobs))
 
 
 def _engine(mode: str) -> SubprocessEngine:
@@ -55,7 +59,7 @@ def test_adapter_roundtrip_pass():
 # ---- adapter + schedule 端到端（跨进程，假 worker）----
 def test_adapter_with_schedule_pass():
     engine = _engine("pass")
-    result = schedule([_job("s")], lambda name: engine, CollectSink(), run_id="test-run")
+    result = schedule(_rm([_job("s")]), lambda name: engine, CollectSink())
     assert result.status == Status.PASSED
     assert result.jobs[0].status == Status.PASSED
     assert result.jobs[0].session_id == "echo-sess"
@@ -64,7 +68,7 @@ def test_adapter_with_schedule_pass():
 # ---- worker 崩（非零退出）→ schedule 记 error ----
 def test_adapter_crash_is_error():
     engine = _engine("crash")
-    result = schedule([_job("s")], lambda name: engine, CollectSink(), run_id="test-run")
+    result = schedule(_rm([_job("s")]), lambda name: engine, CollectSink())
     assert result.status == Status.ERROR
     assert result.jobs[0].status == Status.ERROR
     assert result.jobs[0].error_type == "engine_error"
@@ -89,7 +93,7 @@ def test_adapter_network_error_with_schedule_classified_and_retried():
     from core.schedule import ScheduleOpts
     engine = _engine("net")
     # 经 schedule：记 network_error；开 network_retry=1 → 真重新 spawn worker（净跨进程验证）
-    result = schedule([_job("s")], lambda name: engine, CollectSink(), run_id="test-run",
+    result = schedule(_rm([_job("s")]), lambda name: engine, CollectSink(),
                       opts=ScheduleOpts(network_retry=1, retry_sleep=lambda _s: None))
     assert result.status == Status.ERROR
     assert result.jobs[0].error_type == "network_error"  # exit 80 → 真 seam → network_error

@@ -19,7 +19,7 @@ from core.scope import FeatureSource
 
 
 def new_run_id() -> str:
-    """mint 一个 run_id（组合根职责，ADR 0027）。
+    """生成一个 run_id（组合根职责，ADR 0027）。
 
     对调用方不透明，只保证「可排序（时间戳前缀）+ 抗碰撞（随机尾）」。格式是 compose 实现细节、
     不入 ADR 契约。形如 20260629T141207Z-a3f9c1。

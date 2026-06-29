@@ -21,6 +21,7 @@
   "scope":  { "id": "login", "name": "login" },   // name=@scope tag 原值(可含不宜做 key 的字符)；
                                                   // id=core 派生的干净 key。未标 scope → core 生成两者。
   "engine": "midscene",                           // core 已完成 @engine 冲突校验(见 0019)
+  "assertionVotes": 1,                             // AI 断言(Then)投票次数(治抖动，见 0014)；默认 1=单次判定
   "scenarios": [
     {
       "id": "...", "name": "搜索 OpenAI 并进入词条",  // name=Scenario: 标题；id 同理派生/生成
@@ -36,6 +37,7 @@
 ```
 
 - **`{id, name}` 双标识**：与 scenario 给 QA 的配置心智一致；name 是人写的原值（tag/标题，可含空格/标点），id 是 core 派生的稳定干净 key（用作 RunStore/RunReport 的关联键）。id 派生规则见 [0025](./0025-plan-module-feature-to-jobs.md)。
+- **`assertionVotes`**：AI 断言（`Then`）投票次数（治种类A抖动，[0014](./0014-ai-first-assertions.md)）。worker 对每个 AI 断言跑 N 次取多数票（`yes > N/2`）、回 `votes:{yes,total:N}`。默认 1=单次判定（仍回 `votes` 以标记「这是 AI 断言」——core 靠 votes 存在与否区分 AI 断言 vs 动作/确定性 step）。组合根经 CLI `--assertion-votes` 设、贯穿 plan→Job。
 - **step.`argument`（可选）**：承载展开后的 DataTable/DocString（[0025](./0025-plan-module-feature-to-jobs.md)）；有则有、无则缺省。worker 把它连同 `text` 一起喂引擎。
 - worker 拿 `keyword` + `text` 决定派发（见下「worker 派发」），拿 `text`(+`argument`) 喂引擎。
 
