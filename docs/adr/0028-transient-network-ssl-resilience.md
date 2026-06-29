@@ -86,8 +86,8 @@ worker **按白名单匹配具体瞬时异常类型**,不用宽基类兜底:
 
 - **现在做（v1.0）**:上述两层重试、`network_error` 分类、退出码约定、白名单识别、会话泄漏防护、core job 重试（默认关）、单测。
 - **Midscene SIGTERM 会话泄漏两窗口已根治（后续轮）**:
-  - **重试放大的 in-flight 会话窗口**:会话跟踪从「单一 `sessionId` 快照」重构为 **`pendingSessions: Set<string>` 待清理集**——每次 `StartBrowserSession` 成功即把 id 入集（含被重试丢弃的中间 attempt 会话），SIGTERM handler / `cleanup` 遍历集逐个 Stop，成功的从集里删。彻底解决「重试时 sessionId 被后一 attempt 覆盖/置空 → handler 只能 Stop 当前快照、漏掉在途/已弃会话」。剩余仅「`StartBrowserSession` 已发 RPC 但 id 未返回」一瞬（`startInFlight` 标记），由 handler 在该标记下等 `INFLIGHT_SETTLE_MS`(1500ms) 让 id 落集再清，兜底。
-  - **`StopBrowserSession` 超 `grace_period`**:`stopSession` 给每个 Stop 套 `Promise.race` 超时预算 `STOP_SESSION_BUDGET_MS`(3000ms)——退化网络下 Stop 挂死即放弃、返回未确认释放（记 `cleanupFailed` 让泄漏可观测），不被 SIGKILL 打断到一半。**多会话并行 Stop**（`cleanup` 用 `Promise.all` 而非串行 for）：重试积累 N 个泄漏会话时墙钟 ≈ 单个预算（3s）而非 N×3s——串行会把 cleanup 拖过 grace 被 SIGKILL 截断（正是本修复要防的泄漏）。**最坏 cleanup 墙钟 ≈ 并行 Stop 3s + `browser.close` 3s = 6s**（与会话数无关）：< cli 默认 grace 10s 安全；> schedule 库默认 5s 但 cli 实际配 10s，且这是 best-effort 清理（超时即放弃、泄漏经 `cleanupFailed` 退 1 可观测）。in-flight 兜底分支（无会话、`browser` 未建）仅 1.5s，与有会话路径互斥。
+  - **重试放大的 in-flight 会话窗口**:会话跟踪从「单一 `sessionId` 快照」重构为**待清理会话集**——每次 `StartBrowserSession` 成功即把 id 入集（含被重试丢弃的中间 attempt 会话），cleanup 遍历集逐个 Stop。彻底解决「重试时 sessionId 被后一 attempt 覆盖/置空 → handler 只能 Stop 当前快照、漏掉在途/已弃会话」。剩余仅「Start 已发 RPC 但 id 未返回」一瞬，由一个在途标记 + 短暂兜底等待覆盖。
+  - **`StopBrowserSession` 超 `grace_period`**:每个 Stop 套超时预算（挂死即放弃、记 `cleanupFailed` 让泄漏可观测，不被 SIGKILL 打断到一半）；cleanup **并行** Stop（`Promise.all` 而非串行）——否则重试积累的 N 个泄漏会话串行会把 cleanup 拖过 grace 被 SIGKILL 截断（正是本修复要防的泄漏）。并行后最坏 cleanup 墙钟与会话数无关、< cli 默认 grace。常量值与算术见 `run-scope.ts`（代码为准，ADR 不复制以免漂移）。
   - **Nova 腿不对称（不动，SDK 限制）**:Nova 无 in-flight 窗口（建连在 `with cdp_session` 内、`__exit__` 结构性清理）；但其 `StopBrowserSession` **在 Nova SDK 的 `AgentCoreBrowserSessionProvider.cdp_session().__exit__` 内部**，是 SDK 黑盒——**无法在 worker 层套超时预算**（不像 Midscene 是自己 `cp.send(StopBrowserSessionCommand)`）。硬加 worker 级看门狗 `os._exit` 会跳过 SDK 剩余清理、反而可能更多泄漏。故 Nova 侧依赖 schedule 的 `grace_period`（cli 默认 10s，够 SDK maxAttempts=3）给足释放时间，不强加超时。
 - **留口子不实现**:
   - **act 中途的瞬时恢复**（长任务执行中 CDP 闪断 → 涉及会话状态恢复,复杂且有副作用风险）——明确 defer。

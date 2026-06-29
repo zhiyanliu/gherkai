@@ -109,16 +109,15 @@ worker **边跑边流式上报**（每行一个事件），core 实时收。选�
 ```
 
 - **`cost` 的字段全 optional**：`tokens`（LLM token 用量）/ `time_worked_s`（agent 工作时长秒）。engine 报哪个就有哪个——**哪个量有值，本身就说明该 engine 按什么计费**，不需要额外的 `basis` 判别器或 `precision` 可信度标签。
-- **core 只各自合计、不交叉、不折算**：`StepDone.cost.tokens` → `JobResult.total_tokens` → `RunResult.total_tokens`；`time_worked_s` 同理 → `total_time_worked_s`。语义「无腿报这个量则 None、不假装 0」。混腿跑批时两个原生量**各自合计、互不污染、都不丢**（Nova 的时长和 Midscene 的 token 并列呈现）。
-- **美元折算是消费者的事**：消费者拿到 token 合计 / 时长合计后，用自己账户的真实费率折美元（Nova 时长 × agent-hour 费率、Midscene token × Qwen 单价）。框架不内置任何费率常量。
-- **为什么不让 engine 自己折美元**（连 Nova 也不）：Nova 的 `$4.75/agent-hour` 虽是公开统一费率、可硬编码，但为「对称、一致、不维护会过期的费率」起见，**两腿都只报原生量**——Nova 报 time_worked_s（不自乘费率）、Midscene 报 token。这是对前一版「Nova 折美元、Midscene 留 null」设计的简化：core 退回纯搬运的薄管道，成本语义的解释权完全归消费者。
+- **core 只各自合计、不交叉、不折算**：`StepDone.cost.tokens` → `JobResult.total_tokens` → `RunResult.total_tokens`；`time_worked_s` 同理 → `total_time_worked_s`。语义「无腿报这个量则 None、不假装 0」。混腿跑批时两个原生量**各自合计、互不污染、都不丢**。
+- **连 Nova 也不自折美元**：Nova 的 `$4.75/agent-hour` 虽是公开统一费率可硬编码，但为「两腿对称、不维护会过期的费率」起见仍只报 `time_worked_s`——core 退回纯搬运的薄管道，美元折算权完全归消费者（用自己账户费率）。
 - **扩展**：未来新引擎若有新计费轴（如「按请求数」），`cost` 加一个 optional 原生量字段、`RunResult` 加一个对应合计即可，顶层不破坏。
 
 ## 实查依据（2026-06，读已装源码 + 线上核实，经对抗核验）
 
 - **Midscene**：`aiAct()→string|undefined`、`aiBoolean()→bare boolean`，**失败抛异常**（status 由 worker 捕获算出）；token 在 `agent._unstableLogContent().executions[].tasks[].usage.total_tokens`；报告路径 `agent.reportFile`（destroy 后），1 个 html/worker。
 - **Nova Act**：`act()→ActResult`、`act_get()→ActGetResult(matches_schema/parsed_response)`，**失败抛异常树**（guardrail/timeout/agentFailed/限流…）；**token/cost 任何 SDK 路径都拿不到**（`ActResult`/`ActMetadata`/trajectory/wire 全无 token 字段；`InvokeActStepResponse` 只有 `calls`+`step_id`；pydantic 默认 ignore，即便服务端回 usage 也被静默丢弃）。
-- **Nova 原生量 `time_worked_s`**：SDK 原生给（`ActMetadata.time_worked_s = (end−start) − human_wait_time_s`，公式 `_calculate_time_worked` 在 `dispatcher.py:117-148`，自标 "Approx. Time Worked"）。它与 Nova 计费口径一致（Nova 按 **$4.75/agent-hour**、扣除等人时间，`aws.amazon.com/nova/pricing` 逐字核实）——故消费者可用 `time_worked_s/3600 × 费率` 高保真折美元。**但折算由消费者做、不由 worker/core 做**（框架只报原生 `time_worked_s`，不内置 $4.75）。
+- **Nova 原生量 `time_worked_s`**：SDK 原生给（= 工作时长扣除等人时间，自标 "Approx. Time Worked"）。它与 Nova 计费口径一致（Nova 按 **$4.75/agent-hour**、扣除等人时间，`aws.amazon.com/nova/pricing` 逐字核实）——故消费者可用 `time_worked_s/3600 × 费率` 高保真折美元。**但折算由消费者做、不由 worker/core 做**（框架只报原生量，不内置 $4.75）。
 - **两个 UNKNOWN（记为 SDK 外、v1.0 不依赖，非可用路径）**：① 线上 invoke-step 响应是否藏了被 SDK 丢弃的 usage——需真实抓包才能定；② CloudWatch/Cost Explorer 是否暴露可读的 per-act 成本指标——需 AWS Nova Act 用户指南（JS SPA，未能 fetch）。两者 v1.0 都不依赖；若未来追求精确 token 成本再探。
 
 ## 协议是测试面（skill：interface is the test surface）
@@ -146,5 +145,5 @@ core 的 `schedule`/汇总逻辑应能用一个**假 worker**（in-memory adapte
 
 ## 重议
 
-- 若出现第三个引擎、或某引擎新计费轴（如「按请求数」）→ `cost` 加一个 optional 原生量字段、`RunResult` 加对应合计即可，顶层接口不破坏。
+- 第三个引擎 / 新计费轴的扩展方式见上「成本信封」扩展条。
 - 若产品确需框架直接给美元 → 在**消费层**（CLI/报告/WebUI）加费率配置做折算，而非在 worker/core 内置费率（保持 core 纯搬运）。

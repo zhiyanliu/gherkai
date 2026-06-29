@@ -18,15 +18,15 @@ _Avoid_: 把 grounding 与 planning（规划/推理角色）混用。
 
 **AgentCore 浏览器会话 (AgentCore Browser session)**:
 AWS 托管的、隔离的单个云端 Chromium 实例，暴露一个 CDP-over-WebSocket 自动化 endpoint（鉴权用 upgrade 请求上的 header-based SigV4）。一个会话只承载一个自动化客户端——两个引擎需各自一个会话，不共享。
-_Avoid_: 把「会话」与「endpoint 种类」混为一谈（§0 旧措辞的错误）。注意此处的 CDP-endpoint SigV4 与 Midscene 调 Bedrock `/openai/v1` 的 SigV4 是两套不同的签名场景，别混。
+_Avoid_: 把「会话」与「endpoint 种类」混为一谈。注意此处的 CDP-endpoint SigV4 与 Midscene 调 Bedrock `/openai/v1` 的 SigV4 是两套不同的签名场景，别混。
 
 **穿刺 / Spike**:
 一次性、风险优先的最小垂直切片，目的是用最小代价撞通最可能失败的环节、得到「成不成」的认知，而非交付可维护代码。
 _Avoid_: 把 spike 与里程碑（M1–M5 的工程推进）混用。
 
 **用例描述层 (Feature)**:
-语言无关的 Gherkin `.feature` 文件，描述业务可读的测试意图。**核心库自解析**这份 `.feature`（单一事实源，ADR 0022/0025），分组成 scope/job 后把有序 step 派发给两腿 worker——不再是「两套 runner 各自加载」（cucumber-js/pytest-bdd 已随 BDD runner 退役，ADR 0022）。
-_Avoid_: 把 feature（意图描述）与 step 派发执行混用；以为仍是「两套 BDD runner 各自跑同一份 feature」（早先 v0.x 形态，已退役）。
+语言无关的 Gherkin `.feature` 文件，描述业务可读的测试意图。**核心库自解析**这份 `.feature`（单一事实源，ADR 0022/0025），分组成 scope/job 后把有序 step 派发给两腿 worker（BDD runner 已退役，ADR 0022）。
+_Avoid_: 把 feature（意图描述）与 step 派发执行混用。
 
 **骨架验证用例 (Skeleton case)**:
 为证明链路本身活着而刻意挑选稳定、中立、英文、无登录站点（如维基百科）写的探针用例。与「真实业务用例」分开看待，避免把站点不稳定的噪声误判成框架缺陷。
@@ -36,7 +36,7 @@ _Avoid_: 把骨架验证用例当成最终交付的业务测试。
 spike 脚本**紧贴各自引擎的语言/依赖环境**，放在对应子工程内、诚实标记可丢弃：
 - Midscene（TS）→ `engines/midscene/spikes/`，复用 `engines/midscene/node_modules`（含其配方笔记 `SIGV4-FETCH-RECIPE.md`，与代码同居）。
 - Nova Act（Python）→ `engines/novaact/spikes/`，用 `engines/novaact/.venv`。
-不设 git 根级 `spikes/`（早期曾有，因布局统一为 by-engine 已撤销）。**引擎内**复用的代码（如 Midscene 的 SigV4，仅 Midscene 的 spike 与 bdd 共用）抽到该引擎的 `lib/`（见 `engines/midscene/lib/agentcore-sigv4.mts`）；这不是跨引擎共享——SigV4 是 Midscene 专属，Nova Act 走 IAM/Workflow 不碰它。跨引擎真正共享的是 `features/`（用例），见 [跨引擎共享边界](./docs/adr/0013-cross-engine-sharing-boundary.md)（ADR 0013）。
+不设 git 根级 `spikes/`，spike 紧贴各自引擎子工程。**引擎内**复用的代码（如 Midscene 的 SigV4，仅 Midscene 的 spike 与 bdd 共用）抽到该引擎的 `lib/`（见 `engines/midscene/lib/agentcore-sigv4.mts`）；这不是跨引擎共享——SigV4 是 Midscene 专属，Nova Act 走 IAM/Workflow 不碰它。跨引擎真正共享的是 `features/`（用例），见 [跨引擎共享边界](./docs/adr/0013-cross-engine-sharing-boundary.md)（ADR 0013）。
 _Avoid_: 把某一引擎专属的 spike/文档/代码放到根级或另一引擎目录下；也别误以为引擎内的 `lib/` 是两腿共享。
 
 **确定性断言 vs AI 断言 (Deterministic vs AI assertion)**:
@@ -44,13 +44,13 @@ _Avoid_: 把某一引擎专属的 spike/文档/代码放到根级或另一引擎
 _Avoid_: 把 AI 断言当成"无需治理就可信"——它为主，但必须配抖动监控。
 
 **报告产物模型 (Report artifact model)**:
-两条腿的报告形态根本不同（2026-06 实测）：**Midscene 出单一 `report.html`**（落项目内 `midscene_run/report/`，含每步截图+AI 决策+坐标，= scope 级）；**Nova Act 出多个分散的 trajectory HTML**（每次 `act`/`act_get` 一个，= act 级；worker 设 `logs_directory` 持久化到 run 专属目录，否则默认临时目录会被清理）。worker 经 0024 协议的 **`reportRefs`**（`{kind, ref, label}`，`ref` 用 `file://` URI）把产物路径报回 core——Midscene scope 级走 `scope_done`、Nova act 级走 `scenario_done`，归进 `JobResult`/`ScenarioResult.report_refs`。**RunReport（ADR 0027）= 跨腿归集索引**：`ReportStore` 把整个 `RunResult` 归集成 `manifest.json`（机器可读）+ `index.html`（人可导航入口），**不解析/不融合原生产物内容**，只索引/链接（cli 每次 run **默认生成**到 `reports/<run_id>/`，`--no-report` 跳过；`--materialize` 才把产物拷成自包含目录）。新引擎报任意 `kind` 零改 core（core 不透明搬运、永不按 kind 分支）。
+两条腿的报告形态根本不同：**Midscene 出单一 `report.html`**（含每步截图+AI 决策+坐标，= scope 级）；**Nova Act 出多个分散的 trajectory HTML**（每次 `act`/`act_get` 一个，= act 级）。worker 经 0024 协议把产物路径报回 core（`reportRefs`，字段形状见 ADR 0024），core **不透明搬运**。**RunReport（ADR 0027）= 跨腿归集索引**：`ReportStore` 把 `RunResult` 归集成 `manifest.json`（机器可读）+ `index.html`（人可导航入口），**不解析/不融合原生产物内容**，只索引/链接（cli 每次 run **默认生成**，`--no-report` 跳过、`--materialize` 拷成自包含目录）。新引擎报任意 `kind` 零改 core（永不按 kind 分支）。
 _Avoid_: 笼统说「两腿都出报告」而忽略其形态/落点/粒度（scope vs act）的根本不同；把 RunReport 当成「解析两腿 html 融合成一个大报告」（它只归集索引、不碰产物内容）；以为 core 会按 `kind`/引擎分支处理产物（永不——扩展性契约，ADR 0027）。
 
 ## 产品形态（v1.0）
 
 **通用 step (Generic step)**:
-极少数**抽象原语**：URL 导航（确定性，含引号内 URL）/ AI 动作（When→aiAct/act）/ AI 布尔断言（Then→aiBoolean/act_get(BOOL)+投票）/ 确定性锚点（脚手架）。任何用例复用，QA 不写代码——场景细节放进引号里的自然语言，不放进 step 措辞。这是"QA 只写 `.feature`、零代码"承诺的唯一载体，**其能力边界 = 产品能力边界**。两腿对称实现（Midscene `aiAct/aiBoolean` ↔ Nova Act `act/act_get(BOOL_SCHEMA)`）。**「取数/取串」等原语已删**（ADR 0018：避免过度设计，QA 直接写人话让 AI 判，需精确数值走确定性锚点）。详见 ADR 0018/0020。
+极少数**抽象原语**：URL 导航（确定性，含引号内 URL）/ AI 动作（When）/ AI 布尔断言（Then，+投票）/ 确定性锚点（脚手架）。任何用例复用，QA 不写代码——场景细节放进引号里的自然语言，不放进 step 措辞。这是"QA 只写 `.feature`、零代码"承诺的唯一载体，**其能力边界 = 产品能力边界**。两腿对称实现（函数签名见 ADR 0018/0020）。**「取数/取串」等原语已删**（ADR 0018：避免过度设计，QA 直接写人话让 AI 判，需精确数值走确定性锚点）。
 _Avoid_: 写绑死具体场景的 step（如"语言版本数量"）——那不是通用 step；把它当成"任意动作都能稳跑"——开放性动作会引入页面瞬态 flaky（ADR 0018）。
 
 **柔性冒烟 (Flexible smoke)**:
@@ -69,11 +69,11 @@ _Avoid_: 以为"投票能带来确定性"——它只压 A，给不了对变更�
 
 **成本可观测 (Cost observability)**:
 产品价值之一：一次跑批花了多少（ADR 0024）。**原则——engine 只报原生量、core 只各自合计、不折美元**：两腿计费轴不同（Nova 按 agent 工作时长 `time_worked_s`、Midscene 按 LLM token），core 各自累加成 `total_time_worked_s` / `total_tokens`（step→scope→run，无腿报则 None）。**美元折算交消费者**（用自己 AWS 账户的真实费率）——框架不内置费率常量（避免追会过期的单价表）。与**墙钟时长** `duration_ms`（性能）正交：`time_worked_s` 是 Nova 计费量、`duration_ms` 是 core 测的执行墙钟，两个数不同。
-_Avoid_: 以为框架算美元（曾有的 `cost_usd`/`precision`/`basis`/$4.75 折算模型已废，改为只报原生量）；混淆成本 `time_worked_s` 与性能 `duration_ms`。
+_Avoid_: 以为框架算美元（不折美元、只报原生量，美元交消费者）；混淆成本 `time_worked_s` 与性能 `duration_ms`。
 
 **Run 数据模型 (Run data model)**:
 执行的层级（ADR 0016）：**Run ⊃ Job(=Scope) ⊃ Scenario ⊃ Step**。Scope = 共享操作上下文的 scenario 分组，是执行单元（scope 内串行、scope 间并行）；Feature 是正交的组织轴。Step 是最细一级（core 经 `StepResult` 保留 step 级粒度）。各级带**墙钟时长** `duration_ms`（性能指标）。Run 产出两样：**RunResult**（机器可读汇总判定，给退出码/CI/WebUI；含 run_id、status、各级时长、原生量成本合计 `total_tokens`/`total_time_worked_s`）与 **RunReport**（人看的归集索引，原 M5「报告统一」的归宿，**v1.0 已实现**：manifest.json + index.html 入口，只索引/链接原生产物、不融合内容，ADR 0027）。
-_Avoid_: 把 Feature 当执行单元；**把 Job 当 scenario 粒度（破坏会话依赖）——Job = Scope，不是 scenario**；混淆 RunResult（数据）与 RunReport（报告）；混淆墙钟时长 `duration_ms`（性能）与成本 `time_worked_s`（Nova 计费量）。
+_Avoid_: 把 Feature 当执行单元；**把 Job 当 scenario 粒度（破坏会话依赖）——Job = Scope，不是 scenario**；混淆 RunResult（数据）与 RunReport（报告）。
 
 **标识符 (id：scenarioId / scopeId)**:
 关联键（把 worker 事件挂回 scenario、未来做 RunStore/DDB 主键），是**不透明标识符**——只在 JSON/dict key/未来 DB key 用，全支持任意 UTF-8（空格、中文路径原样保留，**不 normalize**：任何清洗字符的转换都会把不同输入映射成同一输出、制造撞名，而撞名是静默灾难，比"id 含空格"严重得多）。core **不拿 id 当路径解析**。`scenarioId = <uri>:<行号>[:<example行号>]`；`uri` 由调用方原样传入、core 不解析。**唯一性责任在调用方**：plan 要求 `features` 列表 uri 互异（重复 = 接口违约 → 报错，ADR 0025）。若未来某消费层（URL/文件名）需安全字符 id，由该层做**可逆**编码（urlencode 等、保唯一），不在 core 做有损 normalize。
@@ -85,7 +85,7 @@ _Avoid_: 把逻辑焊死在 CLI `main()` 里；以为"WebUI 要包 CLI"；把"�
 （版本演进 spike→v0.x→v1.0→v1.x→v2.0 见 ADR 0016。）
 
 **执行引擎 port (Engine port)**:
-核心库之下真正跑一个 scope 的地方，是一个 **port**（`Engine`，对齐「引擎」术语，ADR 0016），由组合根注入。v1.0 实装为**单个参数化 adapter `SubprocessEngine`**（`core/core/adapters/subprocess_engine.py`）：用 `cmd`/`cwd`/`env` 参数化即可 spawn Node 或 Python worker——两腿"spawn 子进程 + 讲同一套 0024 协议"形状本就一致，无需两个具名 adapter 类；哪条腿由组合根传不同 `cmd`、经 `EngineResolver` 按 `job.engine` 选。演进：v1.0 本地进程（浏览器仍在云端 AgentCore Browser）→ 云端倾向 Fargate/ECS（批处理 shape-fit，ADR 0017；非 AgentCore Runtime）。
+核心库之下真正跑一个 scope 的地方，是一个 **port**（`Engine`，对齐「引擎」术语，ADR 0016），由组合根注入。v1.0 实装为**单个参数化 `SubprocessEngine`**（`cmd`/`cwd`/`env` 参数化即可 spawn Node 或 Python worker——两腿"spawn 子进程 + 讲同一套 0024 协议"形状本就一致，无需两个具名 adapter 类；经 `EngineResolver` 按 `job.engine` 选）。演进：v1.0 本地进程（浏览器仍在云端 AgentCore Browser）→ 云端倾向 Fargate/ECS（批处理 shape-fit，ADR 0017；非 AgentCore Runtime）。
 _Avoid_: 混淆"浏览器在云端"（spike 已验证）与"执行进程也在云端"（>v1.0）；把它当成"核心 import 引擎"——核心永不 import 引擎，只 spawn worker。
 
 **两腿都子进程 + 薄 worker (Both-legs-subprocess + thin worker)**:
@@ -97,5 +97,5 @@ test engineer 扩展确定性锚点的落点：在对应 worker 里登记 `(模�
 _Avoid_: 把匹配放进核心（核心只解析结构+调度，不懂 step 语义）；以为 QA 要写确定性 step。
 
 **Ports 层 (Ports & adapters)**:
-核心库把可替换的外部依赖收成独立 port，导出稳定接口；核心只依赖接口。四个 port（ADR 0016）：`Engine`（跑 scope）、`RunStore`（**控制面**：run 的 definition(RunMeta) + 运行态(RunState：status/血缘/起止)，频繁读写、撑轮询续跑——DDB 主要服务它）、`ResultStore`（**数据面**：每 job(=scope) 判定真值/投票，追加为主——判定真值唯一权威）、`ReportStore`（把 `RunResult` 归集成 RunReport=manifest+index 的派生只读导航视图，ADR 0027）。`RunStore` 从原 `ResultStore` 拆出（控制面 vs 数据面访问模式不同）。**具体 adapter 由组合根（CLI main / WebUI bootstrap）注入**，不由 module 内部 env-sniff 自选（后者是本项目踩过的 Midscene `GlobalConfigManager` 反模式）。**当前实装**：四个 port 的 local adapter **均已建**——`subprocess_engine.py`（Engine）、`run_store/local.py`（落 `run_meta.json`(definition) + `run_state.json`(运行态) + 读回）、`result_store/local.py`（每 job 判定落 `jobs/<scope_id>.json`）、`report_store/local.py`（RunReport，ADR 0027）；cli 跑完落 `<report-dir>/<run_id>/`。store adapter 只持久化已成形的 RunMeta/RunState/JobResult，**未发明 ADR 有意 defer 的控制面字段**（jobId/起止/DDB 表/续跑读取面待真实需求逼出）。云端再填 DDB/S3/Fargate（rule-of-three，ADR 0016）。
+核心库把可替换的外部依赖收成独立 port，导出稳定接口；核心只依赖接口。四个 port（ADR 0016）：`Engine`（跑 scope）、`RunStore`（**控制面**：run 的 definition(RunMeta) + 运行态(RunState：status/血缘/起止)，频繁读写、撑轮询续跑——DDB 主要服务它）、`ResultStore`（**数据面**：每 job(=scope) 判定真值/投票，追加为主——判定真值唯一权威）、`ReportStore`（把 `RunResult` 归集成 RunReport=manifest+index 的派生只读导航视图，ADR 0027）。`RunStore` 从原 `ResultStore` 拆出（控制面 vs 数据面访问模式不同）。**具体 adapter 由组合根（CLI main / WebUI bootstrap）注入**，不由 module 内部 env-sniff 自选（后者是本项目踩过的 Midscene `GlobalConfigManager` 反模式）。**当前实装**：四个 port 的 local adapter 均已建（见 `core/core/adapters/`，落盘形状以代码/ADR 0016 为准），cli 跑完落 `<report-dir>/<run_id>/`；只持久化已成形模型，**未发明 ADR 有意 defer 的字段**（jobId/起止/DDB 表/续跑读取面待真实需求逼出）。云端再填 DDB/S3/Fargate（rule-of-three，ADR 0016）。
 _Avoid_: 把多个 port 揉成一个上帝 module；让 port-module 用全局单例自选实现；混淆控制面（RunStore）与数据面（ResultStore）。

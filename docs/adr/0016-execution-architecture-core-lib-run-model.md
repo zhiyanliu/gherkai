@@ -16,7 +16,7 @@
    AgentCore 会话A    AgentCore 会话B      ← 会话生命周期在 worker 内（已验证）
 ```
 
-- **窄腰是「核心库」`core/`，不是 CLI**（早先措辞修正）。CLI 是核心的第一个、最薄的前端；WebUI 是另一个前端，**直接调核心、不 shell-out CLI**（后者才是"难集成"的错误做法）。
+- **窄腰是「核心库」`core/`，不是 CLI**。CLI 是核心的第一个、最薄的前端；WebUI 是另一个前端，**直接调核心、不 shell-out CLI**（后者才是"难集成"的错误做法）。
 - CI / AI-skill 通过 CLI 这个皮间接用核心；都契合"调命令→等结果→看退出码"。
 - **阻塞 vs 非阻塞是调用方的选择，不是核心的属性**：CLI 可轮询到完成（像阻塞）；WebUI 提交即返回 runId、之后轮询。同一核心两种皮都满足。
 
@@ -40,7 +40,7 @@
 | **Job** | 提交给执行面的单元 | **= Scope**（被 session-scope 语义强制：若 job=scenario，有依赖的 scenario 会被拆到不同 microVM 无法共享会话） |
 | **Run** | 一次执行，封装多个 job | `runId`、总状态、起止、墙钟时长、**RunResult**、**RunReport** |
 
-- **RunResult** = 机器可读汇总判定（退出码 / CI / WebUI 状态）= **definition（`run_meta`）+ 判定（`jobs`）的显式合成**（见下「三层切分」）。**已实现**：`core/model.py` 的 `RunResult`（`run_meta: RunMeta` + status 三态 + 各 job 结果 + `total_tokens`/`total_time_worked_s` 两个原生量各自跨 scope 合计 + `duration_ms` 总墙钟时长；`run_id` 经 property delegate 给 `run_meta`）。其下 `JobResult`（**持有它的 `Job`(definition)**，scope_id/scope_name/engine 经 property 取，不再重复抄存）→ `ScenarioResult` → `StepResult` 三层结果（core 保留 step 级粒度），各级带 `duration_ms` 墙钟时长（性能指标，与成本的 `time_worked_s` 正交，见 [0024](./0024-worker-core-protocol.md)）。
+- **RunResult** = 机器可读汇总判定（退出码 / CI / WebUI 状态）= **definition（`run_meta`）+ 判定（`jobs`）的显式合成**（见下「三层切分」）。字段构成：`run_meta` + status 三态 + 各 job 结果 + `total_tokens`/`total_time_worked_s` 两个原生量各自跨 scope 合计 + `duration_ms` 总墙钟。其下 `JobResult` → `ScenarioResult` → `StepResult` 三层结果（core 保留 step 级粒度），各级带 `duration_ms` 墙钟时长（性能指标，与成本的 `time_worked_s` **正交**，见 [0024](./0024-worker-core-protocol.md)）。
 - **RunReport** = 人看的归集报告（把两腿割裂的 Midscene html / Nova trajectory 归到一处）。**这是原 M5「报告统一」的归宿**——**v1.0 已实现（[0027](./0027-runreport-aggregation-index.md)）**：定为**跨腿归集索引**（`manifest.json` 机器可读 + `index.html` 人可导航入口），**只索引/链接原生产物、不解析融合其内容**；新引擎报任意 `kind` 零改 core。由 `ReportStore` 从 `RunResult` 一次归集（cli 每次 run **默认生成**，`--no-report` 跳过）。
 
 ### 三层切分：definition / 控制面运行态 / 数据面判定（数据流向不从结果反推）
@@ -76,7 +76,7 @@
 - `ReportStore` —— 把 `RunResult` 归集成 RunReport（manifest + index，派生只读导航视图；local FS → S3）。**已实装** `LocalReportStore`（[0027](./0027-runreport-aggregation-index.md)）。
 - （其余按需，如凭证源；保持各自独立、生命周期不同）
 
-> **`RunStore` 从原 `ResultStore` 拆出（对本 ADR 早先单一 `ResultStore` 的修正）**：控制面（状态/血缘，频繁读写、撑轮询续跑）与数据面（结果落地，追加为主）访问模式与生命周期不同，拆成两个 port 更内聚——也让「DDB 存什么」清晰（DDB 主要服务 `RunStore`）。
+> **`RunStore` 与 `ResultStore` 分立的理由**：控制面（状态/血缘，频繁读写、撑轮询续跑）与数据面（结果落地，追加为主）访问模式与生命周期不同，拆成两个 port 更内聚——也让「DDB 存什么」清晰（DDB 主要服务 `RunStore`）。
 
 **adapters 按 port 分子目录的目标布局**（多后端时不按后端混放）——下为**目标态**，当前实装更扁平（见图后说明）：
 
@@ -90,7 +90,7 @@ core/
     └── result_store/local.py             ← 数据面；（未来对象存储）        ✅ 已建
 ```
 
-**当前实装**：四个 port 的 local adapter **均已建**——`subprocess_engine.py`（Engine）、`run_store/local.py`（`LocalRunStore`：`save_run(meta, state)` 落 `run_meta.json`(definition) + `run_state.json`(运行态)，`load_run_meta`/`load_run_state` 读回）、`result_store/local.py`（`LocalResultStore`：每 job 判定落 `jobs/<编码 scope_id>.json`）、`report_store/local.py`（`LocalReportStore`，归集 RunReport，[0027](./0027-runreport-aggregation-index.md)）。判定结果不再仅在内存，cli 跑完落 `<report-dir>/<run_id>/`。**克制**：store adapter 只忠实持久化已成形的 `RunMeta`/`RunState`/`JobResult`（复用 `serialize.to_dict/from_dict` 单一序列化真理源），**未发明** jobId/DDB 表/轮询续跑读取面那些字段——它们仍 defer，待真实续跑/轮询/WebUI 需求逼出（见上「数据模型」节字段级 schema 顺延）。云端再填 DDB/S3/Fargate。
+**当前实装**：四个 port 的 local adapter **均已建**（`subprocess_engine.py` / `run_store/` / `result_store/` / `report_store/`，方法签名以代码与上「按关注点拆 port」节的契约描述为准）。判定结果不再仅在内存，cli 跑完落 `<report-dir>/<run_id>/`（`run_meta.json` + `run_state.json` + `jobs/` + RunReport）。**克制**：store adapter 只忠实持久化已成形的 `RunMeta`/`RunState`/`JobResult`（复用 `serialize` 单一序列化真理源），**未发明** jobId/DDB 表/轮询续跑读取面那些字段——它们仍 defer，待真实续跑/轮询/WebUI 需求逼出（见上「数据模型」节字段级 schema 顺延）。云端再填 DDB/S3/Fargate。
 
 **选实现 = 组合根注入，不是 module 自选**（关键，避开本会话踩过的坑）：
 - 接口定义在 `ports`；**具体 adapter 由调用方（CLI 的 main / WebUI 的 bootstrap = 组合根）在启动时注入**给核心。核心只认接口。
@@ -102,7 +102,7 @@ core/
 
 ## 工程布局：core / cli / engines 三者平级对标
 
-**当前实装态（v1.0 进行中）**标在各行右侧 ✅/⬜：core/ 已建、cli/ 已建、engines/ 已迁、两腿 worker 已落地（曾用 `core/run_e2e.py` 作组合根雏形，cli/ 落地后退役）。
+**当前实装态（v1.0 进行中）**标在各行右侧 ✅/⬜：core/ 已建、cli/ 已建、engines/ 已迁、两腿 worker 已落地。
 
 ```
 yaozhou/
@@ -151,7 +151,7 @@ G1/G2 是 v1.0 核心库 `.feature` 解析的前置——其声明语法**现已
 ## 现在做 / 现在不做
 
 - **现在做（v1.0）**：核心库 `core/` 可被调用（逻辑不焊死在 CLI main 里）；钉死上面数据模型；定义 ports 接口（`Engine`/`RunStore`/`ResultStore`/`ReportStore`）+ 组合根注入；核心自解析 Gherkin + 薄 worker（[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)）。模块设计：worker↔core 协议见 [0024](./0024-worker-core-protocol.md)；plan 模块见 [0025](./0025-plan-module-feature-to-jobs.md)；schedule 模块见 [0026](./0026-schedule-module.md)。
-  - **ports 落地状态（v1.0 当前）**：四个 port 的 local adapter **均已建**——`Engine`（`subprocess_engine.py`，子进程起 worker）、`RunStore`（`run_store/local.py`，`save_run(meta,state)` 落 run_meta.json + run_state.json，`load_run_meta`/`load_run_state` 读回）、`ResultStore`（`result_store/local.py`，每 job 判定落盘 + `load_all` 读回）、`ReportStore`（`report_store/local.py`，归集 RunReport）。store adapter 只持久化已成形的 RunMeta/RunState/JobResult、**未发明 ADR 有意 defer 的字段**（jobId/DDB 表/续跑读取面待真实需求逼出，与「数据模型」节字段级 schema 顺延一致）。**两腿 worker 均已落地**（`engines/novaact/worker/run_scope.py` + `engines/midscene/worker/run-scope.ts`），两腿对称、同讲 0024 协议。
+  - **ports 落地状态**：四个 port 的 local adapter 均已建（详见上「留口子：Ports & Adapters」节）。**两腿 worker 均已落地**（`engines/{novaact,midscene}/worker/`），两腿对称、同讲 0024 协议。
 - **现在不做**：DynamoDB / S3 / Fargate adapter / 无状态机制 / WebUI ——接口已留好，等云端真需要时填 adapter + 组合根换注入。**避免为想象中的云端预先盖机器。**
 - **G1/G2 声明语法已定**（ADR 0019）；其**调度实现**（scope 串/并行、会话共享、engine 冲突校验）由 v1.0 核心库落地。
 - **多用例组织**（feature 分目录/命名约定、跑批入口、跑批层选择 feature/tag）同样由 v1.0 核心库落地——它依赖核心库的调度层，在 bdd 直跑层做是临时的、核心库会重做。当前 `features/` 下多个文件仅是 v0.x 打磨产物，未做有意组织。（旧的 cucumber `--tags` 选子集约定随 BDD runner 一并退役，见 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)；选子集改由核心调度层据 tag 实现。）

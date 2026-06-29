@@ -62,7 +62,7 @@ opts = {                 // 时间单位统一为秒；代码字段名带 _s 后
 三层各司其职，「怎么停」的具体机制**不在 schedule**：
 - **schedule → WorkerHandle**：只调逻辑指令 `handle.stop(gracePeriod)`（「请停这个 worker」）。`handle` 由 `engine.run_scope(job)` 返回、schedule 持有；`Engine` port **只有 `run_scope`、不挂 stop**（句柄自己知道怎么停）。schedule **不懂** SIGTERM/进程/StopTask——只知道「下停止指令、等归约」。
 - **WorkerHandle（adapter 内）→ worker**：把逻辑「停」翻成具体机制——**子进程 handle**：`SIGTERM` → 等 `gracePeriod`（默认 5s）→ 未退则 `SIGKILL` 兜底；**未来 Fargate**：翻成 `StopTask`。这是 adapter 该藏的「进程/云」知识（[0016](./0016-execution-architecture-core-lib-run-model.md) ports&adapters），**故「上云只换 adapter」成立**（见下「留口子」），schedule 一行不改。
-- **worker 内部**：收到 `SIGTERM` 做会话清理，两腿机制不同、殊途同归（详见 [0024](./0024-worker-core-protocol.md) 终止契约）——**Nova**：handler `raise` `BaseException` 子类 → 三层 `with` 的 `__exit__` 解栈、由 `with browser_session` 间接释放会话（不 `sys.exit`，那会跳过 `__exit__` 泄漏会话，是已修的真实 bug）；**Midscene**：有序显式 cleanup（先 `StopBrowserSession` 再 `browser.close` 套超时；Stop 失败 → 非 0 退出可观测）。
+- **worker 内部**：收到 `SIGTERM` 做会话清理，两腿机制不同、殊途同归释放会话（详见 [0024](./0024-worker-core-protocol.md) 终止契约 + [0028](./0028-transient-network-ssl-resilience.md) Midscene 会话集清理）。
 - **会话清理归 worker，schedule/adapter 不碰 AgentCore**：schedule 下逻辑指令、adapter 发机制信号——**StopBrowserSession 只由 worker 调**（Nova 经 `with browser_session` 间接、Midscene 显式调），schedule/adapter 保持对 AgentCore 无知。
 
 > **进程拓扑（澄清「几个地方」）**：实际是 **2 进程 + 1 远程 + 1 seam**——①core/schedule 进程；②`Engine` adapter（在 core 进程内，但它是通向「进程/云」世界的 seam，「怎么停」知识归这里）；③worker 子进程（engine SDK 是**进程内的库**、非独立进程）；④远程 AgentCore 浏览器会话（云端、worker 经 CDP 连）。engine SDK 拆除 + 会话停止都在 worker 进程内完成。

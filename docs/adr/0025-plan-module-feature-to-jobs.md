@@ -52,11 +52,12 @@ Job = {
 - **裁决（与 engine 冲突对称）**：一个 scenario 解析出**多个不同 `@scope` 值 → 报错、拒绝运行**。理由同 engine：scope = 会话边界，一个 scenario 只能属一条会话线，同属两个 scope 物理自相矛盾。
 - **feature 级 `@scope` 传播仍允许**：在 Feature 行标 `@scope:X` 让整个文件归一个会话，是受支持的便利写法——只要其下没有 scenario 再标一个**不同**的 `@scope` 值（标相同值无害、不算冲突）。
 
-### engine 解析（缺省容错，冲突报错）
+### engine 解析（scope 级，规则同 [0019](./0019-feature-tags-scope-and-engine.md)）
 
-- 整个 scope 未标 `@engine` → 用 `config.defaultEngine`（[0016](./0016-execution-architecture-core-lib-run-model.md) 单腿默认）。
-- scope 内任一 scenario 标了 `@engine` → 全 scope 继承（[0019](./0019-feature-tags-scope-and-engine.md) 容错缺省）。
-- **同一 scope 出现多个不同 engine 值 → 报错、拒绝运行**（[0019](./0019-feature-tags-scope-and-engine.md)：同 scope 跨引擎 = 物理自相矛盾）。
+本模块兑现 engine 解析的校验实现；规则与否决理由的权威在 0019。三种情形：
+- 整 scope 未标 `@engine` → 用 `config.defaultEngine`；
+- scope 内任一 scenario 标了 → 全 scope 继承；
+- 同 scope 多个不同 engine 值 → 报错拒运行（物理自相矛盾）。
 
 ### step 顺序 = 书写顺序，keyword 只决定派发
 

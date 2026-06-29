@@ -33,7 +33,7 @@
 归集必须有个 run 标识（manifest 目录名 / 未来 DDB 主键）。[0016](./0016-execution-architecture-core-lib-run-model.md) 早把 `run_id` 列为「持久化层 Run 级字段、deferred」——RunReport 落地把它逼了出来：
 
 - **生成权在组合根**（cli 的 `compose` / 未来 WebUI bootstrap），不在 `schedule` 内部生成。理由：WebUI 语义是「提交即返回 runId、之后轮询」——runId 必须**先于**跑批存在；schedule 内部生成会与该模型打架。也避免 schedule 内部 `uuid`/时钟破坏其「fake-clock 可确定性单测」的定位。
-- **run_id 落进 `RunMeta`（definition），`RunResult` 经 property 取**：组合根生成 run_id 后包成 `RunMeta(run_id, created_at, jobs)` 喂 `schedule(run_meta, ...)`；`RunResult` 持 `run_meta`、`run_id` 经 property delegate（自描述：落库后用自身字段对上主键）。这是后续「三层切分」重构的结果（见 [0016](./0016-execution-architecture-core-lib-run-model.md)）——早先是 `RunResult` 直挂 `run_id` 字段、`schedule` 收裸 `run_id` 入参，现归位到 definition 层。
+- **run_id 落进 `RunMeta`（definition），`RunResult` 经 property 取**：组合根生成 run_id 后包成 `RunMeta(run_id, created_at, jobs)` 喂 `schedule(run_meta, ...)`；`RunResult` 持 `run_meta`、`run_id` 经 property delegate（自描述：落库后用自身字段对上主键）。run_id 归位 definition 层属「三层切分」（见 [0016](./0016-execution-architecture-core-lib-run-model.md)）。
 - run_id 对调用方**不透明**，只保证「可排序 + 抗碰撞」（实现用时间戳前缀 + 随机尾，格式留 `compose` 实现、不入本 ADR 契约）。
 - **生命周期**：run_id 在组合根生成（先于 `schedule`）。`plan` 阶段失败（feature 读不到 / `PlanError`）发生在 schedule 之前 → 不生成 run_id、不产 RunReport。
 
@@ -41,7 +41,7 @@
 
 RunReport 要按引擎标注每条产物。`JobResult` 须能就地拿到 `engine`（否则要跨 `Job[]` 按 scope_id join 才拿得到，脆弱且让 adapter 同时认识输入侧 `Job` 与输出侧 `RunResult` 两套模型）。
 
-**`JobResult` 持有它的 `Job`(definition)，`engine`/`scope_id`/`scope_name` 经 property delegate 给 `self.job`**（不重复抄存）。`RunResult` 自此自包含，`to_dict`/manifest 直接读 `jr.engine`，无需跨模型 join。这是「三层切分」重构的结果（见 [0016](./0016-execution-architecture-core-lib-run-model.md)）——早先是给 `JobResult` 单加一个 `engine: str` 抄存字段，但「抄字段」会漏（旧版抄了 `engine` 漏了 `scope_name`），改为持 `Job` + property，存储唯一、读法稳定。
+**`JobResult` 持有它的 `Job`(definition)，`engine`/`scope_id`/`scope_name` 经 property delegate 给 `self.job`**（不重复抄存——抄字段易漏，持 `Job` + property 则存储唯一、读法稳定）。`RunResult` 自此自包含，`to_dict`/manifest 直接读 `jr.engine`，无需跨模型 join（属「三层切分」，见 [0016](./0016-execution-architecture-core-lib-run-model.md)）。
 
 ## ReportStore 接口：整 run 一次写
 
@@ -102,7 +102,7 @@ class ReportStore(Protocol):
 - `report_index` 从内存 `RunResult` 树一次投影（含全部 report_refs，**不走逐条 append**）；`scenario_id=null` 表 scope 级 ref。
 - 每条含 `ref`（原始不透明指针，原样保留）与 `href`（index.html 实际导航用的链接）：`materialize=False` 时 `href == ref`；`materialize=True` 时 `href` 是拷进 `artifacts/` 的相对路径（`ref` 仍留原值）。
 - index.html 的 run 摘要（status/时长/成本/各 job 上色）**直接用内存 `RunResult`** 渲染，不从 manifest 读（manifest 已不含 result）。
-- **早先设计曾让 manifest 内嵌 `to_dict(result)`**，但那让派生视图承载判定真值副本（与 `ResultStore` 的 job 判定 + `RunStore` 的运行态冗余）——已改为软引用 run_id（消除冗余）。`serialize.to_dict/from_dict` 仍是单一序列化真理源（cli `--json` 与各 store 共用），只是不再塞进 manifest。
+- **manifest 不内嵌 `to_dict(result)`**（曾考虑、否决）：那会让派生视图承载判定真值副本（与 `ResultStore`/`RunStore` 冗余）；改为软引用 run_id 消除冗余。`serialize` 仍是单一序列化真理源（cli `--json` 与各 store 共用），只是不塞进 manifest。
 - `to_dict` 含 `job.engine`、`scenario.report_refs`（序列化补齐项）。
 - manifest **不冗余 status 当判定源**——`result` 里已有，CI 读 `result.status`，不读信封。
 
@@ -148,7 +148,7 @@ URL、断言了什么」都不落痕（只有 pass/fail 进 result 树）。大�
 - **留口子不实现**：
   - **确定性 step 产物可观测性**：让 `@deterministic` handler 可选地产一个轻量产物（当时 URL / 截图 / 检查描述），使纯确定性用例的 RunReport 也有内容可看。本轮判定真值在 result 树已够；产物可观测另开一轮（与 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md) 确定性 step 设计一并演进）。
   - `materialize` 的 S3 后端；按 `kind` 的富渲染（`<video>`/`<iframe>`，皮层将来做）；trajectory 内部结构化提取。
-  （注：store 读回面**已落地**——`RunStore.load_run_meta`/`load_run_state` + `ResultStore.load_job_result`/`load_all`，靠 `serialize.from_dict` 完整重建 RunMeta/RunState/JobResult，[0016](./0016-execution-architecture-core-lib-run-model.md)；原此处「读回面顺延」已兑现。）
+  （注：store 读回面**已落地**——`RunStore.load_run_meta`/`load_run_state` + `ResultStore.load_job_result`/`load_all`，靠 `serialize` 完整重建，[0016](./0016-execution-architecture-core-lib-run-model.md)。）
 
 ## 重议
 
