@@ -1,7 +1,7 @@
 """ports 层（ADR 0016 六边形架构）：核心只依赖这些接口，具体 adapter 由组合根注入。
 
 四个 port（关注点拆开，不揉成上帝 module）：
-- Engine        —— 真正跑一个 scope（spawn worker、讲 0024 协议）；adapter = 子进程/未来 Fargate
+- Engine        —— 真正跑一个 scope（spawn worker、讲 ADR 0024 协议）；adapter = 子进程/未来 Fargate
 - RunStore      —— 控制面：run/job 状态、血缘、起止（频繁读写，撑轮询续跑；未来 DDB 主要服务它）
 - ResultStore   —— 数据面：每 scenario 判定、投票、报告指针（追加为主）
 - ReportStore   —— 归集报告产物（local FS → S3）
@@ -41,7 +41,7 @@ class Engine(Protocol):
     """
 
     def run_scope(self, job: Job) -> tuple[WorkerHandle, Iterator[Event]]:
-        """起一个 worker 跑这个 job，返回 (句柄, 0024 事件流迭代器)。
+        """起一个 worker 跑这个 job，返回 (句柄, ADR 0024 事件流迭代器)。
 
         事件流逐条产出（ADR 0024 流式）；迭代结束 = worker 正常退出。
         句柄供 schedule 在超时/fail-fast 时 stop（ADR 0026）。
@@ -55,7 +55,7 @@ class EngineResolver(Protocol):
     def __call__(self, engine_name: str) -> Engine: ...
 
 
-# Sink：接收 0024 原始流式事件的回调（pass-through，供进度/落地；与 RunResult 是同一事件流的两个视图，ADR 0026）
+# Sink：接收 ADR 0024 原始流式事件的回调（pass-through，供进度/落地；与 RunResult 是同一事件流的两个视图，ADR 0026）
 @runtime_checkable
 class Sink(Protocol):
     def __call__(self, event: Event) -> None: ...

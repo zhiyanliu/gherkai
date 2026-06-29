@@ -3,6 +3,25 @@ revision = 3
 requires-python = ">=3.13"
 
 [[package]]
+name = "cli"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "core" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "core", editable = "../core" }]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=8.0.0" }]
+
+[[package]]
 name = "colorama"
 version = "0.4.6"
 source = { registry = "https://pypi.org/simple" }
@@ -14,14 +33,9 @@ wheels = [
 [[package]]
 name = "core"
 version = "0.1.0"
-source = { editable = "." }
+source = { editable = "../core" }
 dependencies = [
     { name = "gherkin-official" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "pytest" },
 ]
 
 [package.metadata]

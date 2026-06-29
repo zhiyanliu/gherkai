@@ -1,9 +1,9 @@
-"""Nova Act 薄 worker（ADR 0022/0024）：读 stdin 的 job JSON → 跑一个 scope → 吐 0024 事件到事件通道。
+"""Nova Act 薄 worker（ADR 0022/0024）：读 stdin 的 job JSON → 跑一个 scope → 吐 ADR 0024 事件到事件通道。
 
 不含 BDD runner 装饰器：会话/act/投票/派发逻辑直接在本进程跑（ADR 0022 薄 worker）。
-core 经子进程 adapter 起本 worker（ADR 0026 机制层），讲 0024 协议。
+core 经子进程 adapter 起本 worker（ADR 0026 机制层），讲 ADR 0024 协议。
 
-三通道分离（ADR 0024）：0024 事件吐到 EVENTS_FD 指定的 fd（无则回落 stdout，便于手动直跑调试）；
+三通道分离（ADR 0024）：协议事件吐到 EVENTS_FD 指定的 fd（无则回落 stdout，便于手动直跑调试）；
 引擎 SDK 的进度噪声留 stdout；worker 自身诊断/日志走 stderr。
 
 一生（ADR 0024）：
@@ -43,7 +43,7 @@ VOTES = 3  # AI 断言投票次数（治种类A抖动，ADR 0014）
 
 _URL_IN_QUOTES = re.compile(r'"(https?://[^"]+)"')
 
-# 三通道分离（ADR 0024）：0024 事件走专用 fd（core adapter 读这个），与 SDK 打到 stdout 的进度噪声、
+# 三通道分离（ADR 0024）：协议事件走专用 fd（core adapter 读这个），与 SDK 打到 stdout 的进度噪声、
 # worker 自己的诊断（stderr）物理隔离。adapter 经环境变量 EVENTS_FD 告知该 fd 号（pass_fds 继承，号不固定）。
 # 无 EVENTS_FD（手动直跑、无 adapter）时回落 stdout，便于调试（`echo job | worker` 仍能看事件）。
 _events_fd = os.environ.get("EVENTS_FD")
@@ -54,7 +54,7 @@ except (OSError, ValueError):
 
 
 def emit(obj: dict) -> None:
-    """吐一条 0024 事件到事件通道（fd3，JSON Lines，字段名 camelCase 与 core/wire.py 一致）。"""
+    """吐一条 ADR 0024 事件到事件通道（fd3，JSON Lines，字段名 camelCase 与 core/wire.py 一致）。"""
     _events_out.write(json.dumps(obj, ensure_ascii=False) + "\n")
     _events_out.flush()
 

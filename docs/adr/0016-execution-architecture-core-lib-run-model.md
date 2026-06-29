@@ -87,16 +87,15 @@ core/
 
 ## 工程布局：core / cli / engines 三者平级对标
 
-**当前实装态（v1.0 进行中）**标在各行右侧 ✅/⬜：core/ 已建、engines/ 已迁、两腿 worker 已落地；仅 cli/ 待建（现组合根用 `core/run_e2e.py` 暂代）。
+**当前实装态（v1.0 进行中）**标在各行右侧 ✅/⬜：core/ 已建、cli/ 已建、engines/ 已迁、两腿 worker 已落地（曾用 `core/run_e2e.py` 作组合根雏形，cli/ 落地后退役）。
 
 ```
 yaozhou/
 ├── core/                ← 窄腰：纯编排，零引擎依赖                          ✅ 已建
 │   ├── model.py · parse.py · scope.py · schedule.py · wire.py · ports.py    ✅（协议序列化文件名是 wire.py）
-│   ├── adapters/        ← 按 port 分；现有 subprocess_engine.py（单 adapter 参数化，非 midscene.py/novaact.py 两文件）✅
-│   └── run_e2e.py       ← 组合根 / CLI 雏形                                ✅（暂代下方 cli/main.py）
-├── cli/                 ← 最薄前端 = 组合根（在此 new 出具体 adapter 注入给 core）  ⬜ 待建（现由 core/run_e2e.py 暂代）
-│   └── main.py
+│   └── adapters/        ← 按 port 分；现有 subprocess_engine.py（单 adapter 参数化，非 midscene.py/novaact.py 两文件）✅
+├── cli/                 ← 最薄前端 = 组合根（在此 new 出具体 adapter 注入给 core）  ✅ 已建（独立子工程，core 作 path 依赖）
+│   └── cli/{__main__.py（argparse 皮）· compose.py（组合根/引擎注册表，WebUI 复用）· render.py（事件/RunResult 渲染）}
 └── engines/             ← 两个可插拔引擎，与 core 平级对标                  ✅ 已迁
     ├── midscene/        ← 整个 TS 子工程                                  ✅ worker：engines/midscene/worker/run-scope.ts
     │   ├── worker/run-scope.ts · lib/agentcore-sigv4.mts

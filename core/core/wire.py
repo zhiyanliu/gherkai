@@ -1,6 +1,6 @@
 """wire 协议（ADR 0024）：core↔worker 的 JSON 序列化层。
 
-core 把 Job 序列化成 JSON 喂 worker stdin；worker 逐行吐 0024 事件到专用事件通道（fd，号经
+core 把 Job 序列化成 JSON 喂 worker stdin；worker 逐行吐 ADR 0024 事件到专用事件通道（fd，号经
 EVENTS_FD 传给 worker；非 stdout——stdout 留给引擎 SDK 噪声，ADR 0024 三通道分离），
 core 读行反序列化成 model.Event。这是两端（core 子进程 adapter + 语言无关的 worker）共用的形状约定。
 

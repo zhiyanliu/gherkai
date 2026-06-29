@@ -1,4 +1,4 @@
-"""测试用假 worker：读 stdin 的 job JSON，吐预设 0024 事件到 stdout。
+"""测试用假 worker：读 stdin 的 job JSON，吐预设 ADR 0024 事件到 stdout。
 
 不接任何真引擎——只验证子进程 adapter 的 spawn/stdin/stdout/SIGTERM 管道（不烧 AWS）。
 行为由环境变量控制：
@@ -24,7 +24,7 @@ def _on_sigterm(signum, frame):
     sys.exit(0)
 
 
-# 0024 事件走 EVENTS_FD 指定的 fd（与真 worker 一致，ADR 0024 三通道分离）；无则回落 stdout
+# ADR 0024 事件走 EVENTS_FD 指定的 fd（与真 worker 一致，ADR 0024 三通道分离）；无则回落 stdout
 _events_fd = os.environ.get("EVENTS_FD")
 try:
     _events_out = os.fdopen(int(_events_fd), "w", encoding="utf-8") if _events_fd else sys.stdout

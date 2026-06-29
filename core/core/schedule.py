@@ -4,7 +4,7 @@ job 间并行（maxConcurrency 上限）、失败隔离（默认）/ fail-fast�
 schedule 只下逻辑「停」（handle.stop(grace)），不懂信号/进程——机制藏在 Engine adapter（ADR 0026）。
 
 并发模型：每个 worker 一个线程，ThreadPoolExecutor(max_workers=maxConcurrency) 自然限制
-同时在跑的 worker 数（= 同时活的 AgentCore 会话数，保护真实成本）。worker 线程内迭代 0024 事件流、
+同时在跑的 worker 数（= 同时活的 AgentCore 会话数，保护真实成本）。worker 线程内迭代 ADR 0024 事件流、
 转 sink、归约成 JobResult。
 
 超时/fail-fast 用**事件间检查**：每收一个事件后查 (clock.now()-start > jobTimeout) 或 abort_flag，
@@ -211,7 +211,7 @@ def schedule(
     """跑一批 job → RunResult（ADR 0026）。
 
     engines: 按 job.engine 解析 Engine 的 resolver（schedule 对腿数/腿名无知）。
-    sink:    接收 0024 原始流式事件的回调（与 RunResult 是同一事件流的两个视图）。
+    sink:    接收 ADR 0024 原始流式事件的回调（与 RunResult 是同一事件流的两个视图）。
     """
     opts = opts or ScheduleOpts()
     sink_lock = threading.Lock()

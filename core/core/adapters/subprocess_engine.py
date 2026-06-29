@@ -1,4 +1,4 @@
-"""子进程 Engine adapter（ADR 0026 机制层）：spawn 一个讲 0024 协议的 worker 子进程。
+"""子进程 Engine adapter（ADR 0026 机制层）：spawn 一个讲 ADR 0024 协议的 worker 子进程。
 
 这是 core 与「进程世界」的 seam——「怎么起 worker、怎么停」的进程/信号知识藏在这里，
 schedule 只下逻辑指令（run_scope / handle.stop），对信号/进程无知（ADR 0026）。
@@ -48,9 +48,14 @@ class SubprocessEngine:
         self._cwd = cwd
         self._env = env
 
+    @property
+    def cmd(self) -> list[str]:
+        """启 worker 的命令行（只读，供组合根自省/日志，如 CLI 的 list-engines）。"""
+        return list(self._cmd)
+
     def run_scope(self, job: Job) -> tuple[SubprocessWorkerHandle, Iterator[Event]]:
         # 三通道分离（fd3）：
-        #   fd3   = 纯 0024 事件（adapter 读这个）—— 自建管道，写端映射到子进程 fd3
+        #   fd3   = 纯 ADR 0024 事件（adapter 读这个）—— 自建管道，写端映射到子进程 fd3
         #   stdout= 引擎 SDK 的进度噪声（adapter 当日志透传，不解析）
         #   stderr= worker 自己的诊断/错误（独立，不被 SDK 噪声淹）
         events_r, events_w = os.pipe()
@@ -87,7 +92,7 @@ class SubprocessEngine:
 
 
 def _read_events(proc: subprocess.Popen, events_r: int) -> Iterator[Event]:
-    """逐行读 fd3（纯 0024 事件）→ Event。worker 异常退出且 returncode>0 时抛错（schedule 记 error）。"""
+    """逐行读 fd3（纯 ADR 0024 事件）→ Event。worker 异常退出且 returncode>0 时抛错（schedule 记 error）。"""
     with os.fdopen(events_r, "r", encoding="utf-8") as events:
         for line in events:
             line = line.strip()

@@ -28,3 +28,13 @@ core/
 cd core
 uv run pytest
 ```
+
+## 实际执行（跑 .feature）
+
+core 是库，不自带可执行入口。用 [`cli/`](../cli/README.md) 这张皮来跑（它是组合根：读
+feature、注入引擎 adapter、渲染结果）：
+
+```bash
+cd cli && uv run python -m cli run ../features/wikipedia_generic.feature
+```
+

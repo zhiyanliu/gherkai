@@ -1,6 +1,6 @@
 """内存假 Engine（测试夹具，ADR 0026「接口是测试面」）。
 
-直接在进程内吐预设的 0024 事件流，不 spawn 子进程、不连 AgentCore。
+直接在进程内吐预设的 ADR 0024 事件流，不 spawn 子进程、不连 AgentCore。
 支持：正常事件流、worker 崩（迭代中抛异常）、慢 worker（配合 fake clock 测超时）、记录 stop。
 """
 from __future__ import annotations

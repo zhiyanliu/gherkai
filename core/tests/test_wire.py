@@ -17,7 +17,7 @@ from core.model import (
 from core.wire import event_from_json, event_from_line, job_to_json
 
 
-# ---- Job 序列化：形状符合 0024 输入示例 ----
+# ---- Job 序列化：形状符合 ADR 0024 输入示例 ----
 def test_job_to_json_shape():
     job = Job(
         scope_id="login",
