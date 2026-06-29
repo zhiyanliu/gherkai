@@ -3,14 +3,15 @@
 四个 port（关注点拆开，不揉成上帝 module）：
 - Engine        —— 真正跑一个 scope（spawn worker、讲 ADR 0024 协议）；adapter = 子进程/未来 Fargate
 - RunStore      —— 控制面：run/job 状态、血缘、起止（频繁读写，撑轮询续跑；未来 DDB 主要服务它）
-- ResultStore   —— 数据面：每 scenario 判定、投票、报告指针（追加为主）
-- ReportStore   —— 归集报告产物（local FS → S3）
+- ResultStore   —— 数据面：每 scenario 判定真值、投票（追加为主）
+- ReportStore   —— 归集报告产物为派生只读导航视图（RunReport：manifest + index，ADR 0027）
 
 禁止：port 内部 env-sniff 自选实现（Midscene GlobalConfigManager 反模式）。adapter 一律组合根注入。
 rule-of-three 克制：接口现在定（逼清边界），实现只写 local，云端 adapter 真需要时再填。
 """
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Iterator, Protocol, runtime_checkable
 
 from core.model import Event, Job, JobResult, RunResult
@@ -76,13 +77,26 @@ class RunStore(Protocol):
 
 @runtime_checkable
 class ResultStore(Protocol):
-    """数据面：每 scenario 判定、投票抖动、报告指针（追加为主；RunReport 归集与 CI 读判定靠它）。"""
+    """数据面：每 scenario 判定、投票抖动、报告指针（追加为主；CI 读判定真值靠它）。"""
 
     def save_job_result(self, run_id: str, job: JobResult) -> None: ...
 
 
 @runtime_checkable
 class ReportStore(Protocol):
-    """归集报告产物（local FS → S3）。v1.0 先「散着」（ADR 0016 版本切分），此接口留口子。"""
+    """归集报告产物为一份**派生只读导航视图**（RunReport，ADR 0027）：manifest.json + index.html。
 
-    def save_report_ref(self, run_id: str, scope_id: str, path: str, granularity: str) -> None: ...
+    纯派生：可从 RunResult 完全重建，**永不作 CI 判定源**（判定真值在 RunResult/ResultStore）。
+    只读 result 的 report_refs + scope_id/scenario_id/engine/status/时长/成本做导航，
+    不读 votes/steps 细节、不拿产物内容、不按 kind 分支（不透明搬运）。
+    """
+
+    def write(self, run_id: str, result: RunResult, *, created_at: str = "", materialize: bool = False) -> Path:
+        """从 RunResult 归集出 <report_root>/<run_id>/{manifest.json, index.html}，返回 index.html 路径。
+
+        created_at: 组合根 mint 的时间戳字符串（core 不取时钟；进 manifest 信封）。
+        materialize=False（默认）：不拷贝产物，index.html 链接直接指向各 ReportRef.ref（本地够用）。
+        materialize=True（opt-in）：按字节把产物拷进 <run_id>/artifacts/，链接转相对 → 目录自包含
+          （可整体搬走/上 S3）。按字节拷贝/移动允许；解析/重写/合并产物内容禁止（ADR 0027）。
+        """
+        ...

@@ -41,7 +41,7 @@
 | **Run** | 一次执行，封装多个 job | `runId`、总状态、起止、墙钟时长、**RunResult**、**RunReport** |
 
 - **RunResult** = 机器可读汇总判定（退出码 / CI / WebUI 状态）。**已实现**：`core/model.py` 的 `RunResult`（status 三态 + 各 job 结果 + `total_tokens`/`total_time_worked_s` 两个原生量各自跨 scope 合计 + `duration_ms` 总墙钟时长）。其下 `JobResult` → `ScenarioResult` → `StepResult` 三层结果（core 首次保留 step 级粒度），各级带 `duration_ms` 墙钟时长（性能指标，与成本的 `time_worked_s` 正交，见 [0024](./0024-worker-core-protocol.md)）。
-- **RunReport** = 人看的归集报告（把两腿割裂的 Midscene html / Nova trajectory 归到一处）。**这是原 M5「报告统一」的归宿**——**v1.0 当前未实现（deferred）**：决定「先散着」（见下「版本切分」），等输出/消费要求清晰再定形态。
+- **RunReport** = 人看的归集报告（把两腿割裂的 Midscene html / Nova trajectory 归到一处）。**这是原 M5「报告统一」的归宿**——**v1.0 已实现（[0027](./0027-runreport-aggregation-index.md)）**：定为**跨腿归集索引**（`manifest.json` 机器可读 + `index.html` 人可导航入口），**只索引/链接原生产物、不解析融合其内容**；新引擎报任意 `kind` 零改 core。由 `ReportStore` 从 `RunResult` 一次归集（cli 每次 run **默认生成**，`--no-report` 跳过）。
 
 **已定 = 概念/层级（上表）+ 协议层字段（[0024](./0024-worker-core-protocol.md)）**：每 scenario 判定（status 三态）、抖动投票 tally、规范化 errorType、cost 信封、报告产物指针（reportRefs）等 **scenario/scope 级字段已由 worker↔core 协议钉死**——它们是 RunResult/RunReport 的字段来源。**仍未定 = 持久化层 Run/Job 级字段**（runId / jobId(scopeId) / 会话血缘 sessionId / 起止时间 / DDB 表结构 / WebUI 读取面）：有意留到 v1.0 真实跑批逼出（"报告要展示什么、CI 要读什么"届时自然浮现），避免现在纸上列错。（原计划在 v0.x 逼出，但 v0.x 判「方向已证」未做真实用例验收，顺延 v1.0，见下「版本切分」。）
 
@@ -57,8 +57,8 @@
 **按关注点拆成独立 port（不揉成上帝 module）**：
 - `Engine` —— 真正跑一个 scope 的地方（名 `Engine`，对齐 CONTEXT 「引擎」术语）。**实装收敛为单个参数化 adapter `SubprocessEngine`**（`core/core/adapters/subprocess_engine.py`）：以 `cmd`/`cwd`/`env` 参数化,既能 spawn Node worker 也能 spawn Python worker——因两腿"spawn 子进程 + 讲同一套 0024 协议"的形状本就完全一致（[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)），无需 `MidsceneEngine`/`NovaActEngine` 两个类。哪条腿由组合根传不同 `cmd` 决定（`EngineResolver` 按 `job.engine` 选）。
 - `RunStore` —— **控制面**：run/job 的状态、status、起止时间、会话血缘 sessionId（频繁读写：轮询/续跑/WebUI 进度）。**这才是未来 DynamoDB 真正要存的东西**（可恢复、可轮询）。
-- `ResultStore` —— **数据面**：每 scenario 的 pass/fail、投票抖动、原生报告指针（追加为主；RunReport 归集与 CI 读判定靠它）。
-- `ReportStore` —— 存归集报告产物（local FS → S3）。
+- `ResultStore` —— **数据面**：每 scenario 的 pass/fail、投票抖动、原生报告指针（追加为主；CI 读判定真值靠它）。
+- `ReportStore` —— 把 `RunResult` 归集成 RunReport（manifest + index，派生只读导航视图；local FS → S3）。**已实装** `LocalReportStore`（[0027](./0027-runreport-aggregation-index.md)）。
 - （其余按需，如凭证源；保持各自独立、生命周期不同）
 
 > **`RunStore` 从原 `ResultStore` 拆出（对本 ADR 早先单一 `ResultStore` 的修正）**：控制面（状态/血缘，频繁读写、撑轮询续跑）与数据面（结果落地，追加为主）访问模式与生命周期不同，拆成两个 port 更内聚——也让「DDB 存什么」清晰（DDB 主要服务 `RunStore`）。
@@ -70,12 +70,12 @@ core/
 ├── ports.py                 ← 接口定义（Engine / WorkerHandle / EngineResolver / Sink / RunStore / ResultStore / ReportStore）
 └── adapters/
     ├── subprocess_engine.py              ← Engine 实装：单个参数化 adapter（spawn node / python 皆可）✅ 已建
+    ├── report_store/local.py             ← RunReport 归集（manifest+index；未来 s3.py）✅ 已建（0027）
     ├── run_store/local.py                ← 控制面；（未来 ddb.py）        ⬜ 待建
-    ├── result_store/local.py             ← 数据面；（未来对象存储）        ⬜ 待建
-    └── report_store/local.py             ← 归集报告；（未来 s3.py）        ⬜ 待建
+    └── result_store/local.py             ← 数据面；（未来对象存储）        ⬜ 待建
 ```
 
-**当前实装**：`adapters/` 下只有 `subprocess_engine.py`（Engine port 的唯一 adapter）；三个 store port 仅在 `ports.py` 定义接口、**local adapter 尚未建**（结果现仅在内存 `RunResult`，未持久化）。多个 store adapter 落地后再按 port 分子目录（rule-of-three）。
+**当前实装**：`adapters/` 有 `subprocess_engine.py`（Engine）+ `report_store/local.py`（`LocalReportStore`，归集 RunReport，[0027](./0027-runreport-aggregation-index.md)）；`RunStore`/`ResultStore` 仍仅在 `ports.py` 定义接口、**local adapter 尚未建**（判定结果现仅在内存 `RunResult`，未持久化——RunReport 是从 `RunResult` 派生的只读视图，不算持久化判定真值）。这两个 store adapter 落地后再各按 port 分子目录（rule-of-three）。
 
 **选实现 = 组合根注入，不是 module 自选**（关键，避开本会话踩过的坑）：
 - 接口定义在 `ports`；**具体 adapter 由调用方（CLI 的 main / WebUI 的 bootstrap = 组合根）在启动时注入**给核心。核心只认接口。
@@ -119,8 +119,8 @@ yaozhou/
   - **原验收标准**：≥3 个**真实业务用例**（含不同动作类型）全部 QA 零 step 代码跑通；每处破例写代码记为反证；破例过多 → 假设不成立。
   - **实际达成**：用**骨架用例**（wikipedia / example.com，见 CONTEXT「骨架验证用例」）覆盖了单步/多步复合/开放动作/AI 布尔·否定·取数·取串断言/主观判定/tag 路由，**全程 QA 零代码**，两腿都跑通——可行性**方向已证**。
   - **决定（边界，务必读）**：**v0.1.0 判「方向已证」，不补真实用例即进 v1.0.0**。理由——① 团队当前**拿不到真实业务用例**（站点登录态等不可得），强等是空等；② 没有真实用例 → 破例无从触发 → **「破例清单」这条验收无法在 v0.x 执行**。故把「真实业务用例验收 + 破例记录」**顺延并入 v1.0.0**：待有真实用例时在 v1.0 里跑出破例、据以校验「QA 零代码」承诺。**已知风险**：v1.0 架构基于「骨架用例都很顺」的乐观假设设计，真实用例的破例（登录 / HITL / 动态内容 flaky）可能反过来要求调整 v1.0 架构——接受此返工风险，因前置条件（真实用例）确实不具备。
-  - **报告**：v0.x 原目标含「报告能看」。**决定先「散着」**——两腿原生产物（Midscene html / Nova trajectory，落点见 CONTEXT「报告产物模型」）暂不归集，手动查目录够用。RunReport 归集形态**等输出/消费要求（报告要展示什么、CI/WebUI 要读什么）清晰后再定**，与「字段级 schema 留到真实跑批逼出」同一克制。
-- **v1.0.0（团队 QA 日常可用）— ⏳ 架构设计中（本 ADR + 0022/0023）**：多用例组织、跑批入口（CLI 阻塞跑一批）、scope 调度、抖动治理（投票）落地；本地执行。**承接 v0.x 顺延项**：真实业务用例验收 + 破例清单、RunReport 归集（待输出要求清晰）。
+  - **报告**：v0.x 原目标含「报告能看」，当时**决定先「散着」**（手动查目录够用），归集形态待要求清晰再定。**v1.0 已落地为 RunReport 归集索引**（[0027](./0027-runreport-aggregation-index.md)）：不重渲染原生产物、只归集成统一清单 + 导航入口——回答了「先散着」时悬而未决的形态问题（索引而非融合）。
+- **v1.0.0（团队 QA 日常可用）— ⏳ 架构设计中（本 ADR + 0022/0023）**：多用例组织、跑批入口（CLI 阻塞跑一批）、scope 调度、抖动治理（投票）落地；本地执行。**承接 v0.x 顺延项**：真实业务用例验收 + 破例清单（RunReport 归集已落地，[0027](./0027-runreport-aggregation-index.md)）。
 - **v1.1.0（云端执行）— ⬜ 留口子不实现**：CLI 提交 → Fargate 跑 → 轮询收集，**job = scope** 粒度（上云时坐实，见 [0017](./0017-cloud-execution-fargate-over-runtime.md)）；外置状态存储（DDB，主要服务 `RunStore`）+ 无状态核心。**= 加 adapter + 组合根换注入，核心不动**（「留口子不实现」= 接口现在定、实现等真需要时填）。
 - **v2.0.0（规模化）— ⬜ 留口子不实现**：WebUI 前端（直接调核心）。
 

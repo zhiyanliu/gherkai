@@ -68,7 +68,7 @@ def test_all_pass():
         "b": _passing_events("b", "b:0"),
     })
     sink = CollectSink()
-    result = schedule(jobs, FakeResolver(engine), sink)
+    result = schedule(jobs, FakeResolver(engine), sink, run_id="test-run")
     assert result.status == Status.PASSED
     assert len(result.jobs) == 2
     assert all(jr.status == Status.PASSED for jr in result.jobs)
@@ -80,7 +80,7 @@ def test_all_pass():
 def test_assertion_failed_is_failed_not_error():
     jobs = [_job("a")]
     engine = FakeEngine({"a": _failing_events("a", "a:0")})
-    result = schedule(jobs, FakeResolver(engine), CollectSink())
+    result = schedule(jobs, FakeResolver(engine), CollectSink(), run_id="test-run")
     assert result.status == Status.FAILED
     assert result.jobs[0].status == Status.FAILED
     assert result.jobs[0].scenarios[0].status == Status.FAILED
@@ -96,7 +96,7 @@ def test_failure_isolation_default():
         },
         crash_after={"crash": 1},  # crash job 在第 1 个事件后崩
     )
-    result = schedule(jobs, FakeResolver(engine), CollectSink())
+    result = schedule(jobs, FakeResolver(engine), CollectSink(), run_id="test-run")
     # 默认隔离：crash → error，ok 照样 passed
     crash_jr = next(jr for jr in result.jobs if jr.scope_id == "crash")
     ok_jr = next(jr for jr in result.jobs if jr.scope_id == "ok")
@@ -127,8 +127,8 @@ def test_fail_fast_batch_errors():
         crash_after={"crash": 0},  # crash 立刻崩
     )
     result = schedule(
-        jobs, FakeResolver(engine), CollectSink(),
-        ScheduleOpts(max_concurrency=2, fail_fast=True),
+        jobs, FakeResolver(engine), CollectSink(), run_id="test-run",
+        opts=ScheduleOpts(max_concurrency=2, fail_fast=True),
     )
     assert result.status == Status.ERROR  # 确定性：批次报错
     crash_jr = next(jr for jr in result.jobs if jr.scope_id == "crash")
@@ -145,7 +145,7 @@ def test_no_fail_fast_lets_others_finish():
         },
         crash_after={"crash": 0},
     )
-    result = schedule(jobs, FakeResolver(engine), CollectSink(), ScheduleOpts(fail_fast=False))
+    result = schedule(jobs, FakeResolver(engine), CollectSink(), run_id="test-run", opts=ScheduleOpts(fail_fast=False))
     ok_jr = next(jr for jr in result.jobs if jr.scope_id == "ok")
     assert ok_jr.status == Status.PASSED  # 隔离：ok 跑完
 
@@ -168,8 +168,8 @@ def test_timeout_with_fake_clock():
     jobs = [_job("slow")]
     engine = FakeEngine({"slow": long_events})
     result = schedule(
-        jobs, FakeResolver(engine), CollectSink(),
-        ScheduleOpts(job_timeout_s=5.0, grace_period_s=2.0, clock=fake_clock),
+        jobs, FakeResolver(engine), CollectSink(), run_id="test-run",
+        opts=ScheduleOpts(job_timeout_s=5.0, grace_period_s=2.0, clock=fake_clock),
     )
     assert result.status == Status.ERROR
     assert result.jobs[0].error_type == "timeout"
@@ -193,7 +193,7 @@ def test_engine_start_failure():
         return boom if name == "boom_engine" else good
 
     jobs = [_job("a", engine="boom_engine"), _job("b", engine="good")]
-    result = schedule(jobs, resolver, CollectSink())
+    result = schedule(jobs, resolver, CollectSink(), run_id="test-run")
     a_jr = next(jr for jr in result.jobs if jr.scope_id == "a")
     b_jr = next(jr for jr in result.jobs if jr.scope_id == "b")
     assert a_jr.status == Status.ERROR
@@ -209,7 +209,7 @@ def test_output_order_stable():
         "a": _passing_events("a", "a:0"),
         "m": _passing_events("m", "m:0"),
     })
-    result = schedule(jobs, FakeResolver(engine), CollectSink())
+    result = schedule(jobs, FakeResolver(engine), CollectSink(), run_id="test-run")
     assert [jr.scope_id for jr in result.jobs] == ["z", "a", "m"]
 
 
@@ -244,7 +244,7 @@ def test_time_worked_aggregation_step_to_job_to_run():
         "a": _events_with_time("a:0", [9.0, 3.0]),   # scope a = 12.0s
         "b": _events_with_time("b:0", [5.0]),         # scope b = 5.0s
     })
-    result = schedule([_job("a"), _job("b")], FakeResolver(engine), CollectSink())
+    result = schedule([_job("a"), _job("b")], FakeResolver(engine), CollectSink(), run_id="test-run")
     a_jr = next(jr for jr in result.jobs if jr.scope_id == "a")
     b_jr = next(jr for jr in result.jobs if jr.scope_id == "b")
     assert abs(a_jr.total_time_worked_s - 12.0) < 1e-9
@@ -256,7 +256,7 @@ def test_time_worked_aggregation_step_to_job_to_run():
 def test_token_aggregation():
     # Midscene 形态：tokens 累加
     engine = FakeEngine({"m": _events_with_tokens("m:0", [1000, 500])})
-    result = schedule([_job("m")], FakeResolver(engine), CollectSink())
+    result = schedule([_job("m")], FakeResolver(engine), CollectSink(), run_id="test-run")
     m_jr = result.jobs[0]
     assert m_jr.total_tokens == 1500
     assert m_jr.total_time_worked_s is None  # Midscene 不报时长
@@ -267,7 +267,7 @@ def test_token_aggregation():
 def test_cost_none_when_no_cost_data():
     # 无 cost 的事件流 → 两个原生量合计都保持 None（不假装 0）
     engine = FakeEngine({"a": _passing_events("a", "a:0")})
-    result = schedule([_job("a")], FakeResolver(engine), CollectSink())
+    result = schedule([_job("a")], FakeResolver(engine), CollectSink(), run_id="test-run")
     assert result.jobs[0].total_tokens is None
     assert result.jobs[0].total_time_worked_s is None
     assert result.total_tokens is None
@@ -280,7 +280,7 @@ def test_mixed_legs_each_native_metric_aggregated_separately():
         "nova": _events_with_time("nova:0", [9.0]),
         "mid": _events_with_tokens("mid:0", [2000]),
     })
-    result = schedule([_job("nova"), _job("mid")], FakeResolver(engine), CollectSink())
+    result = schedule([_job("nova"), _job("mid")], FakeResolver(engine), CollectSink(), run_id="test-run")
     nova_jr = next(jr for jr in result.jobs if jr.scope_id == "nova")
     mid_jr = next(jr for jr in result.jobs if jr.scope_id == "mid")
     assert abs(nova_jr.total_time_worked_s - 9.0) < 1e-9 and nova_jr.total_tokens is None
@@ -303,7 +303,7 @@ def test_failed_and_error_steps_cost_still_aggregated():
         ScenarioDone(scenario_id="x:0", status=Status.ERROR),
     ]
     engine = FakeEngine({"x": events})
-    result = schedule([_job("x")], FakeResolver(engine), CollectSink())
+    result = schedule([_job("x")], FakeResolver(engine), CollectSink(), run_id="test-run")
     jr = result.jobs[0]
     assert jr.status == Status.ERROR        # 状态如实反映失败
     assert jr.total_tokens == 2000          # 但失败步烧的 token 仍计入（1200+800）
@@ -314,7 +314,7 @@ def test_failed_and_error_steps_cost_still_aggregated():
 def test_serial_concurrency_one():
     jobs = [_job(f"j{i}") for i in range(5)]
     engine = FakeEngine({f"j{i}": _passing_events(f"j{i}", f"j{i}:0") for i in range(5)})
-    result = schedule(jobs, FakeResolver(engine), CollectSink(), ScheduleOpts(max_concurrency=1))
+    result = schedule(jobs, FakeResolver(engine), CollectSink(), run_id="test-run", opts=ScheduleOpts(max_concurrency=1))
     assert result.status == Status.PASSED
     assert len(result.jobs) == 5
 
@@ -336,8 +336,8 @@ def test_three_level_durations():
     # 无超时（job_timeout_s=None）时 core 每事件只读 1 次 clock，时长可预期且层级嵌套。
     engine = FakeEngine({"sc": _full_timed_events("sc", "sc:0", n_steps=2)})
     result = schedule(
-        [_job("sc")], FakeResolver(engine), CollectSink(),
-        ScheduleOpts(clock=_IncClock(1.0)),  # 单位秒；core 乘 1000 → ms
+        [_job("sc")], FakeResolver(engine), CollectSink(), run_id="test-run",
+        opts=ScheduleOpts(clock=_IncClock(1.0)),  # 单位秒；core 乘 1000 → ms
     )
     jr = result.jobs[0]
     sr = jr.scenarios[0]
@@ -357,7 +357,7 @@ def test_three_level_durations():
 def test_durations_none_without_started_events():
     # 旧式事件流（无 started 事件）→ 时长字段为 None（不报错、不假装）
     engine = FakeEngine({"a": _passing_events("a", "a:0")})  # 无 ScopeStarted/StepStarted
-    result = schedule([_job("a")], FakeResolver(engine), CollectSink(), ScheduleOpts(clock=_IncClock()))
+    result = schedule([_job("a")], FakeResolver(engine), CollectSink(), run_id="test-run", opts=ScheduleOpts(clock=_IncClock()))
     jr = result.jobs[0]
     assert jr.duration_ms is None                      # 无 scope_started
     assert jr.scenarios[0].steps == [] or all(
@@ -372,11 +372,11 @@ def test_scope_report_refs_reduced():
         StepDone(scenario_id="m:0", step_index=0, status=Status.PASSED),
         ScenarioDone(scenario_id="m:0", status=Status.PASSED),
         ScopeDone(scope_id="m", session_id="sess-1",
-                  report_refs=(ReportRef(granularity="scope", path="/midscene_run/report/x.html"),)),
+                  report_refs=(ReportRef(kind="scope", ref="file:///midscene_run/report/x.html"),)),
     ]
     engine = FakeEngine({"m": events})
-    result = schedule([_job("m")], FakeResolver(engine), CollectSink())
+    result = schedule([_job("m")], FakeResolver(engine), CollectSink(), run_id="test-run")
     jr = result.jobs[0]
     assert len(jr.report_refs) == 1
-    assert jr.report_refs[0].granularity == "scope"
-    assert jr.report_refs[0].path == "/midscene_run/report/x.html"
+    assert jr.report_refs[0].kind == "scope"
+    assert jr.report_refs[0].ref == "file:///midscene_run/report/x.html"

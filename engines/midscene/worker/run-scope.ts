@@ -128,7 +128,7 @@ async function main(): Promise<number> {
     process.exit(cleanupFailed ? 1 : 0);
   });
 
-  const reportRefs: Array<{ granularity: string; path: string }> = [];
+  const reportRefs: Array<{ kind: string; ref: string; label?: string }> = [];
 
   try {
     const started = await cp.send(new StartBrowserSessionCommand({ browserIdentifier: BROWSER_ID, name: "worker" }));
@@ -155,9 +155,12 @@ async function main(): Promise<number> {
       emit({ type: "scenario_done", scenarioId: sc.id, status: aggregate(statuses) });
     }
 
-    // 归集原生报告（ADR 0024 reportRefs）：destroy 后 reportFile finalize，Midscene 出 1 个 html/worker（scope 级）
+    // 归集原生报告（ADR 0027 reportRefs）：destroy 后 reportFile finalize，Midscene 出 1 个 html/worker（scope 级）
+    // ref 用 file:// URI（ADR 0027：本地产物统一前缀）；agent.reportFile 是绝对路径。
     await agent.destroy().catch(() => {});
-    if (agent.reportFile) reportRefs.push({ granularity: "scope", path: agent.reportFile });
+    if (agent.reportFile) {
+      reportRefs.push({ kind: "scope", ref: `file://${agent.reportFile}`, label: "Midscene report" });
+    }
   } finally {
     await cleanup();
   }

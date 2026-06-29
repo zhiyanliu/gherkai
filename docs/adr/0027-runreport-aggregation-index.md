@@ -1,0 +1,153 @@
+# RunReport：跨腿归集索引（不融合原生产物内容）
+
+兑现 [0016](./0016-execution-architecture-core-lib-run-model.md) 一直 deferred 的「报告统一」（原里程碑 M5）。本 ADR 定 **RunReport 的语义、形态与扩展性契约**，并落地 `ReportStore` 的 local adapter。
+
+## 决定：RunReport = 归集索引，不是内容融合
+
+两条腿的**原生**报告形态根本不同且不可统一（[0010](./0010-spike-as-apples-to-apples-benchmark.md) / CONTEXT「报告产物模型」）：Midscene 出单个 `report.html`（scope 级），Nova 出多个 trajectory（act 级）；未来引擎可能是录屏、外部 URL、JSON trace。
+
+**RunReport 不试图解析/重渲染这些产物**——那等于给每个引擎写一个 HTML 解析器，既脆又把 core 锁死到具体引擎。RunReport 是一份**跨腿、跨产物的统一目录 + 导航入口**：
+
+- **`manifest.json`** —— 机器可读（CI / WebUI 消费）：一次 run 的判定/时长/成本（复用 `RunResult`）+ 一份扁平的报告产物清单（每条指向哪个 scope·scenario、哪个引擎、什么 kind、产物在哪）。
+- **`index.html`** —— 人可导航：一个最小的单文件入口，每个产物一行链接，点开看**原样的**原生产物。
+
+原生产物保持原样（各引擎自己最懂怎么呈现），RunReport 只**索引/链接**它们。
+
+> **允许 vs 禁止的边界（写死）**：core/ReportStore 对产物只允许「按字节拷贝/移动 + 算一个链接」；**禁止**解析、重写、抽截图、合并内容。「产物在哪、属于谁」是归集索引的本分；「产物里画了什么」是引擎的事。
+
+## 扩展性契约：新引擎零改 core
+
+头等约束。保证机制：
+
+- **`ReportRef = {kind: str, ref: str, label: str | None}`**（取代旧 `{granularity: Literal["scope","act"], path}`）：
+  - `kind` —— **开放字符串**，引擎自报（`scope`/`act`/未来 `video`/`trace`/`har`…）。core/wire/schedule **永不读它的值、永不按它分支**。`scope`/`act` 降为文档化约定常量，非枚举。
+  - `ref` —— **统一指针 URI**，不假定是本地文件。本地产物用 `file://` 前缀；未来可是 `s3://`/`https://`。core/ReportStore **不 stat、不 fetch、不打开** ref，只索引/链接。
+  - `label` —— 可选人类可读锚文本；缺省由消费端回落 `kind`。worker 可全部不报。
+- **铁律**：`core/model.py`、`core/wire.py`、`core/schedule.py` 对 `ReportRef` 永久是**不透明搬运**。任何「按 kind 选 `<video>`/`<iframe>`」之类的渲染分支**只允许出现在 cli / WebUI 皮层**，绝不写回 core。
+- 新引擎接入 = 它的 worker 报自己的 `ReportRef`，经 [0024](./0024-worker-core-protocol.md) 协议原样进 `report_refs`，归到 RunReport，**core 一行不改**。
+
+> 旧 `granularity: Literal` 是「核心谎称收窄、wire 实则放行」的假约束——`wire.py` 反序列化时从不校验枚举、Midscene worker 的 TS 类型本就是 `string`。放开成 `str` 是**消除既存不一致**，非新增灵活性。
+
+## run_id：归集索引的主键（落地逼出）
+
+归集必须有个 run 标识（manifest 目录名 / 未来 DDB 主键）。[0016](./0016-execution-architecture-core-lib-run-model.md) 早把 `run_id` 列为「持久化层 Run 级字段、deferred」——RunReport 落地把它逼了出来：
+
+- **生成权在组合根**（cli 的 `compose` / 未来 WebUI bootstrap），不在 `schedule` 内部 mint。理由：WebUI 语义是「提交即返回 runId、之后轮询」——runId 必须**先于**跑批存在；schedule 内部生成会与该模型打架。也避免 schedule 内部 `uuid`/时钟破坏其「fake-clock 可确定性单测」的定位。
+- **`RunResult` 加 `run_id: str` 一等字段**，使其自描述（`save_run(RunResult)` 落库后能用自身字段对上 `load_run(run_id)` 主键）。`schedule` 加 `run_id` 入参、原样透传、不生成。
+- run_id 对调用方**不透明**，只保证「可排序 + 抗碰撞」（实现用时间戳前缀 + 随机尾，格式留 `compose` 实现、不入本 ADR 契约）。
+- **生命周期**：run_id 在 `schedule` 调用点 mint。`plan` 阶段失败（feature 读不到 / `PlanError`）发生在 schedule 之前 → 不 mint run_id、不产 RunReport。
+
+## JobResult 加 `engine` 字段
+
+RunReport 要按引擎标注每条产物。`JobResult` 当前无 `engine`（要跨 `Job[]` 按 scope_id join 才拿得到，脆弱且让 adapter 同时认识输入侧 `Job` 与输出侧 `RunResult` 两套模型）。
+
+**给 `JobResult` 加 `engine: str`**（本就来自 `Job.engine`，`schedule` 归约时填）。`RunResult` 自此自包含，`to_dict`/manifest 直接读 `jr.engine`，无需跨模型 join。
+
+## ReportStore 接口：整 run 一次写
+
+旧 `save_report_ref(run_id, scope_id, path, granularity)`（逐条、且连 scenario_id 都没有，承载不了 scenario 级 ref）退役。改为**整 run 一次**：
+
+```python
+class ReportStore(Protocol):
+    def write(self, run_id: str, result: RunResult, *, created_at: str = "", materialize: bool = False) -> Path:
+        """从 RunResult 归集出 <report_root>/<run_id>/{manifest.json, index.html}，返回 index.html 路径。
+
+        只读 result 的 report_refs + scope_id/scenario_id/engine/status/时长/成本 做**导航视图**；
+        不读 votes/steps 细节、不拿 status 当 CI 判定源（判定真值在 RunResult/ResultStore）。
+        """
+```
+
+- `materialize=False`（默认）：不拷贝产物，`index.html` 的链接直接指向 `ref`（本地够用；v1.0 定位本地 smoke，[0015](./0015-v1-positioning-smoke-not-regression.md)）。
+- `materialize=True`（opt-in）：按字节把产物拷进 `<run_id>/artifacts/`，链接转相对路径 → 目录自包含、可整体搬走/上 S3/发同事/CI 归档。
+  - **默认不拷**是刻意的：本地跑时产物就在本机、手动查目录够用（[0016](./0016-execution-architecture-core-lib-run-model.md)「先散着」）。每 run 拷 N 个 MB 级 html + Nova 多个 trajectory 是纯磁盘放大、零收益——拷贝的价值只在搬运/上云时兑现，故 opt-in，不为想象中的 S3 场景提前盖机器。
+- `LocalReportStore` → 未来 `S3ReportStore` 只换「拷到哪 / 链接前缀」，core 不动。
+
+**「生成 RunReport」与「materialize 产物」是两个正交开关，默认值不同（刻意）**：
+- **生成 RunReport = run 的应得产物，cli 默认开**。每次 run 都归集到 `<report-dir>/<run_id>/`
+  （`--report-dir` 配落点，默认 `reports/`）；`--no-report` 是逃生舱（CI 只看退出码/JSON、或调试不想落盘）。
+  理由：manifest+index 仅几 KB（不拷产物时），却给出「这次 run 结果在哪、各腿报告在哪」的统一入口——
+  一个跑完不知结果在哪的工具是不完整的，不该要用户记得加 flag。
+- **materialize = 把产物拷成自包含目录，opt-in（默认关）**。它代价大（每 run 拷 MB 级 html + Nova
+  多 trajectory），价值只在搬运/上云/发同事时兑现，故按需开。两者独立：默认「生成 index 但不拷产物」
+  （index 链接指向产物原位）。
+
+**默认（不 materialize）两腿产物落点不对称——已知、接受**：
+- **Nova**：trajectory **直接落在 `reports/<run_id>/nova-trajectories/`（report 目录内）**——cli 把
+  `NOVA_LOGS_DIR` 设到那里，Nova SDK 直接写，不经拷贝。
+- **Midscene**：`report.html` 由其 SDK 写死生成在 **`engines/midscene/midscene_run/report/`（report
+  目录外、引擎子工程内）**，cli 控制不了其落点，默认只 `file://` 链接过去、不动它。
+- 故默认 RunReport **非自包含**：index 链接一半指向目录内（Nova）、一半指向目录外（Midscene），
+  本机都能点开，但整个 `reports/<run_id>/` 不能原样搬走（Midscene 链接到另一台机器会断）。
+- **要自包含 → `--materialize`**：把两腿产物都按字节收进 `artifacts/`、链接转相对。本地 smoke
+  （[0015](./0015-v1-positioning-smoke-not-regression.md)）默认不强行统一落点是务实取舍——不为本地够用的场景付每 run 拷 MB 的代价。
+
+**职责边界（三 port 正交，[0016](./0016-execution-architecture-core-lib-run-model.md)）**：`RunStore`=控制面（run/job 状态、血缘）、`ResultStore`=数据面（判定真值）、`ReportStore`=**纯派生只读导航视图**（可从 `RunResult` 完全重建、永不作 CI 判定源）。`ResultStore` 旧 docstring「RunReport 归集靠它」一句删除——归集职责移交 `ReportStore`。
+
+## manifest.json 形态
+
+复用 `core.serialize.to_dict(RunResult)` 为**单一真理源**（序列化属 core——窄腰已序列化 run→job→scenario→step，cli `--json` 与 manifest 共用同一函数），外加薄信封：
+
+```jsonc
+{
+  "schema_version": 1,
+  "run_id": "...",
+  "created_at": "...",           // 组合根 mint 时间戳（字符串，由调用方传入）
+  "tool": "yaozhou",
+  "result": { /* to_dict(RunResult) 原样：含各级 status/duration/cost + report_refs */ },
+  "report_index": [              // 扁平投影，便于 CI/WebUI 直接遍历
+    { "scope_id": "...", "scenario_id": "..."|null, "engine": "...", "kind": "...", "ref": "...", "label": "..." }
+  ]
+}
+```
+
+- `report_index` 从 `result` 树一次投影（result 已含全部 report_refs，**不走逐条 append**）；`scenario_id=null` 表 scope 级 ref。
+- `to_dict` 补两处当前遗漏：`job.engine`、`scenario.report_refs`（`ScenarioResult.report_refs` 已存在但未序列化）。
+- manifest **不冗余 status 当判定源**——`result` 里已有，CI 读 `result.status`，不读信封。
+
+## index.html 形态
+
+最小「带状态摘要的链接清单」：纯 Python 字符串拼装 + `html.escape()`，**无模板引擎、无外链 JS/CSS、单文件**（对齐 `wire.py`「手写映射、显式稳定」与 core「薄编排层无重型依赖」）。
+
+- 顶部一行 run 摘要（run_id + 总 status + duration + 原生量成本）。
+- 一个列表，每条 report_ref 一行：job.status 三态上色 + scope_id + engine + `[kind]` + 指向 `ref` 的 `<a>`（`label` 或回落 `kind` 作锚文本）。
+- 三态上色用内联 `<style>`。
+- **空态**：无任何 report_ref 时仍生成有效的「空报告」index.html（标注本次无原生产物），不报错。
+
+## act 级 reportRef 的回传与归属（Nova 腿补对称）
+
+Nova trajectory 此前落系统临时目录（会被清理）、worker 不报。本轮一起补：
+
+- Nova worker 设 `NovaAct(logs_directory=<run 专属持久目录>)`，act/act_get 的 trajectory 落到那里。
+- worker 在 **`scenario_done`** 边界聚合本 scenario 的 act 产物，报 act 级 `ReportRef`（`kind="act"`，`ref=file://...`）——经 [0024](./0024-worker-core-protocol.md) `ScenarioDone.report_refs`（协议已支持）回传。
+- 与 Midscene 的 scope 级（`scope_done.report_refs`）对称：两腿都报、kind 各异、core 不分支。
+
+## 纯确定性用例 → 空 report_index（已知、合理、非缺陷）
+
+一个**只含确定性 step**（导航 + `@deterministic` 锚点，零 AI step）的用例，跑出的 RunReport
+`report_index` **为空**、`index.html` 显示「本次 run 无原生报告产物」。这是**有意的诚实空态**，不是 bug：
+
+- 原生报告产物**只在引擎实际执行 AI 操作时才产生**（Midscene 的 `agent.reportFile` 仅在调过
+  agent 后存在；Nova 的 trajectory 仅在 `act`/`act_get` 后存在）。确定性 step 走 `page.goto`/
+  `page.url`，**从不调引擎**，故**根本没有产物可归集**。RunReport 忠实反映「无产物」，不伪造内容。
+- **判定不丢**：`result` 树仍含每个确定性 step 的 pass/fail/error + 时长（CI、退出码、status 汇总
+  全程可用）。空的只是「人看的原生轨迹链接」，不是判定数据。
+- 行为与含 AI step 的用例**一致**（都产有效 RunReport），产物差异**合理**（确定性 step 本就不产
+  引擎报告）。验证 Midscene scope 级归集必须用含 AI 的用例——这不是 walkaround，是 Midscene
+  报告天生 scope 级、且只在用 AI 时产生的客观事实。
+
+**但这暴露一个上游缺口**（非本 ADR 范围）：确定性 step **不产任何可观测产物**——连「检查了哪个
+URL、断言了什么」都不落痕（只有 pass/fail 进 result 树）。大量用确定性锚点的团队，其 RunReport
+人看部分会长期空。这是「确定性 step 产物可观测性」问题，留待后续（见下「留口子」），本轮 RunReport
+只负责归集**已有的**产物。
+
+## 现在做 / 留口子
+
+- **现在做（v1.0）**：上述 `ReportRef` 改造、`run_id` 字段 + 组合根 mint、`JobResult.engine`、`ReportStore.write` 接口 + `LocalReportStore`（manifest + index，默认不 materialize）、Nova trajectory 持久化 + act 级 reportRefs、cli 默认生成 RunReport（`--no-report` 跳过、`--report-dir` 配落点、`--materialize` opt-in）、单测 + 两腿真 e2e。
+- **留口子不实现**：
+  - **确定性 step 产物可观测性**：让 `@deterministic` handler 可选地产一个轻量产物（当时 URL / 截图 / 检查描述），使纯确定性用例的 RunReport 也有内容可看。本轮判定真值在 result 树已够；产物可观测另开一轮（与 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md) 确定性 step 设计一并演进）。
+  - `materialize` 的 S3 后端；`RunStore.load_run` 的**读回面**（v1.0 只先行「写面」——manifest 落盘；读回成 `RunResult` 顺延，与 [0016](./0016-execution-architecture-core-lib-run-model.md)「local adapter 尚未建、字段待真实跑批逼出」一致）；按 `kind` 的富渲染（`<video>`/`<iframe>`，皮层将来做）；trajectory 内部结构化提取。
+
+## 重议
+
+- 若出现「报告必须自包含搬运」的硬需求成为默认 → 重议 `materialize` 默认值。
+- 若 CI/WebUI 消费 manifest 逼出更多结构化字段 → 扩 `report_index`（加字段，不改 `ReportRef` 三元组语义）。

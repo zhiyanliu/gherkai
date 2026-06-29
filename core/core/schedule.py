@@ -88,7 +88,7 @@ class _Worker:
 
     def run(self) -> JobResult:
         job = self.job
-        result = JobResult(scope_id=job.scope_id, status=Status.PASSED)
+        result = JobResult(scope_id=job.scope_id, status=Status.PASSED, engine=job.engine)
         scenario_status: dict[str, Status] = {}
         # 时长追踪（core 用事件到达时间戳算墙钟，ADR 0024；clock 与超时复用同一注入时钟）：
         timing = _Timing()
@@ -206,10 +206,13 @@ def schedule(
     jobs: list[Job],
     engines: EngineResolver,
     sink: Sink,
+    run_id: str,
     opts: ScheduleOpts | None = None,
 ) -> RunResult:
     """跑一批 job → RunResult（ADR 0026）。
 
+    run_id:  一次 run 的标识，由组合根 mint 后传入（schedule 不自己生成——保其 fake-clock
+             可确定性单测的纯归约定位；WebUI「提交即返回 runId」也要求 id 先于跑批存在，ADR 0027）。
     engines: 按 job.engine 解析 Engine 的 resolver（schedule 对腿数/腿名无知）。
     sink:    接收 ADR 0024 原始流式事件的回调（与 RunResult 是同一事件流的两个视图）。
     """
@@ -244,6 +247,7 @@ def schedule(
     tok = [jr.total_tokens for jr in job_results if jr.total_tokens is not None]
     tw = [jr.total_time_worked_s for jr in job_results if jr.total_time_worked_s is not None]
     return RunResult(
+        run_id=run_id,
         status=run_status, jobs=job_results,
         total_tokens=sum(tok) if tok else None,
         total_time_worked_s=sum(tw) if tw else None,

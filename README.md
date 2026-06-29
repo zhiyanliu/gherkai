@@ -16,7 +16,7 @@
 | M2     | 单一 `.feature` 被两套 runner 驱动          | ✅                   |
 | M3     | Nova Act 接 AgentCore 云端浏览器            | ✅                   |
 | M4     | Midscene 接 AgentCore（一度被视为"最大难关"） | ✅ 实测零坑          |
-| M5     | 报告统一（= RunReport）                      | ⬜ 推迟（归宿见 ADR 0016；spike 洞见 0010） |
+| M5     | 报告统一（= RunReport）                      | ✅ v1.0 归集索引（ADR 0027；manifest + index，不融合产物） |
 
 ## 架构速览
 
@@ -39,12 +39,13 @@
 yaozhou/
 ├── README.md                  ← 本文件
 ├── CONTEXT.md                 ← 领域术语表（glossary）
-├── docs/adr/                  ← 26 条架构决策记录
+├── docs/adr/                  ← 27 条架构决策记录
 ├── features/                  ← 共享 .feature（同一份被两腿加载；通用 step 风格）
 │   ├── wikipedia_generic.feature
 │   ├── wikipedia_assertions.feature
 │   ├── wikipedia_robustness.feature
-│   └── engine_routing.feature
+│   ├── engine_routing.feature
+│   └── deterministic_anchor.feature   ← @deterministic 锚点验证（ADR 0022/0027）
 ├── engines/midscene/                  ← Midscene 引擎子工程（TS）
 │   ├── cucumber.mjs           ← cucumber-js 配置（指向根 features/）
 │   ├── lib/agentcore-sigv4.mts ← 共享 SigV4 模块（模型连接 + 浏览器连接/CDP；spike/bdd 共用）

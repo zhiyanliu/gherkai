@@ -55,7 +55,7 @@ def test_adapter_roundtrip_pass():
 # ---- adapter + schedule 端到端（跨进程，假 worker）----
 def test_adapter_with_schedule_pass():
     engine = _engine("pass")
-    result = schedule([_job("s")], lambda name: engine, CollectSink())
+    result = schedule([_job("s")], lambda name: engine, CollectSink(), run_id="test-run")
     assert result.status == Status.PASSED
     assert result.jobs[0].status == Status.PASSED
     assert result.jobs[0].session_id == "echo-sess"
@@ -64,7 +64,7 @@ def test_adapter_with_schedule_pass():
 # ---- worker 崩（非零退出）→ schedule 记 error ----
 def test_adapter_crash_is_error():
     engine = _engine("crash")
-    result = schedule([_job("s")], lambda name: engine, CollectSink())
+    result = schedule([_job("s")], lambda name: engine, CollectSink(), run_id="test-run")
     assert result.status == Status.ERROR
     assert result.jobs[0].status == Status.ERROR
     assert result.jobs[0].error_type == "engine_error"

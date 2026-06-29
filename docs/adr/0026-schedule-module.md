@@ -5,9 +5,10 @@
 ## 接口（深模块，小）
 
 ```
-schedule(jobs: Job[], engines: EngineResolver, sink: (event) -> void, opts) -> RunResult
+schedule(jobs: Job[], engines: EngineResolver, sink: (event) -> void, run_id: str, opts) -> RunResult
    // EngineResolver: (engineName) -> Engine —— 按 job.engine 解析 Engine，schedule 对腿数/腿名无知
    // sink: 接收 0024 原始流式事件的回调（pass-through，供进度/落地）
+   // run_id: 一次 run 的标识，组合根 mint 后传入、schedule 透传进 RunResult（不自己生成；ADR 0027）
 
 opts = {                 // 时间单位统一为秒；代码字段名带 _s 后缀（job_timeout_s/grace_period_s）
   maxConcurrency = 4,    // 同时在跑的 worker 上限
@@ -20,7 +21,7 @@ opts = {                 // 时间单位统一为秒；代码字段名带 _s 后
 （上为语言中立伪代码；实际实现为 dataclass `ScheduleOpts`，字段 snake_case：`max_concurrency`/`fail_fast`/`job_timeout_s`/`grace_period_s`/`clock`。）
 
 - **注入 `engines`（`EngineResolver`：按 `job.engine` 解析 Engine）而非自己 spawn** → 可测（skill：accept dependencies, don't create them）：测试注入假 Engine（吐预设 JSON Lines，[0024](./0024-worker-core-protocol.md)）即可验调度逻辑，无需真起子进程/真连 AgentCore。**schedule 对腿数/腿名无知**——焊死 `{midscene, novaact}` 会让第三个引擎到来即改接口；用 resolver 则只动组合根注入。
-- **注入 `sink`**（`(event) -> void` 回调，收流式事件的去处：写 ResultStore / 转 RunReport / CLI 打印进度）→ schedule 边收边转，不自己决定结果存哪（[0016](./0016-execution-architecture-core-lib-run-model.md) ports）。
+- **注入 `sink`**（`(event) -> void` 回调，收流式事件的去处：实时落 ResultStore / CLI 打印进度）→ schedule 边收边转，不自己决定结果存哪（[0016](./0016-execution-architecture-core-lib-run-model.md) ports）。（RunReport **不**走 sink——它由 `ReportStore.write` 从归约后的 `RunResult` 派生，[0027](./0027-runreport-aggregation-index.md)。）
 - **`sink` vs `RunResult` 边界（不是两次独立判定）**：`sink` 收的是 [0024](./0024-worker-core-protocol.md) **原始流式事件**（pass-through，供实时进度/逐条落地）；`RunResult` 是 schedule 对**同一事件流的归约终值**（权威汇总判定，给退出码/CI）。同一份事实的两个视图——流式过程 vs 终态归约，非两套判定来源。
 - **注入 `clock`**（时间源）→ 超时杀 / grace→kill 这两条 schedule 独有难逻辑可用 fake clock 确定性单测，不靠真实墙钟等待。
 - **返回 `RunResult`**（机器可读汇总判定，给退出码/CI，[0016](./0016-execution-architecture-core-lib-run-model.md)）。

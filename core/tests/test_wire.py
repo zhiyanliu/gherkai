@@ -109,12 +109,14 @@ def test_event_step_done_failed():
 def test_event_scope_done():
     ev = event_from_json({
         "type": "scope_done", "scopeId": "login", "sessionId": "sess-123",
-        "reportRefs": [{"granularity": "act", "path": "/tmp/x.html"}],
+        "reportRefs": [{"kind": "act", "ref": "file:///tmp/x.html", "label": "trajectory 1"}],
     })
     assert isinstance(ev, ScopeDone)
     assert ev.scope_id == "login"
     assert ev.session_id == "sess-123"
-    assert ev.report_refs[0].path == "/tmp/x.html"
+    assert ev.report_refs[0].kind == "act"
+    assert ev.report_refs[0].ref == "file:///tmp/x.html"
+    assert ev.report_refs[0].label == "trajectory 1"
 
 
 # ---- 从行解析（worker stdout 一行）----

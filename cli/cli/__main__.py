@@ -13,6 +13,7 @@ import json
 import sys
 from pathlib import Path
 
+from core.adapters.report_store.local import LocalReportStore
 from core.model import Event
 from core.scope import PlanConfig, PlanError, plan
 from core.schedule import ScheduleOpts, schedule
@@ -48,6 +49,19 @@ def _build_parser() -> argparse.ArgumentParser:
     run.add_argument("--fail-fast", action="store_true", help="任一 job 崩则中止整批")
     run.add_argument("--json", action="store_true", help="只输出机器可读 JSON（不打进度/文本汇总）")
     run.add_argument("--quiet", action="store_true", help="不打逐事件进度（仍打文本汇总）")
+    # RunReport 是 run 的应得产物：默认总归集（manifest.json + index.html）到 <report-dir>/<run_id>/。
+    run.add_argument(
+        "--report-dir", default="reports", metavar="DIR",
+        help="RunReport 归集落点（默认 reports/；每次 run 落 DIR/<run_id>/，ADR 0027）",
+    )
+    run.add_argument(
+        "--no-report", action="store_true",
+        help="跳过 RunReport 归集（CI 只看退出码/JSON、或调试时不想落盘的逃生舱）",
+    )
+    run.add_argument(
+        "--materialize", action="store_true",
+        help="归集时把本地原生产物按字节拷进 <run_id>/artifacts/（自包含、可搬运/上 S3；默认只链接不拷）",
+    )
 
     sub.add_parser("list-engines", help="列出可用引擎及其 spawn 命令")
     return p
@@ -85,8 +99,12 @@ def _cmd_run(args, repo: Path) -> int:
         for j in jobs:
             print(f"  - scope={j.scope_id!r} engine={j.engine} scenarios={len(j.scenarios)}")
 
-    # 3) 组合根：注入具体引擎 resolver（core 引擎无关）
-    resolver = compose.make_resolver(compose.build_engines(repo))
+    # 3) 组合根：mint run_id（先于跑批，ADR 0027）+ 注入具体引擎 resolver（core 引擎无关）
+    run_id = compose.new_run_id()
+    do_report = not args.no_report  # RunReport 默认生成；--no-report 跳过（逃生舱）
+    # 归集时让 Nova trajectory 落到 run 专属持久目录（否则用 SDK 默认临时目录，会被清理）
+    nova_logs_dir = (Path(args.report_dir) / run_id / "nova-trajectories") if do_report else None
+    resolver = compose.make_resolver(compose.build_engines(repo, nova_logs_dir=nova_logs_dir))
 
     # 4) sink：逐事件进度（--json/--quiet 时关掉）
     def sink(ev: Event) -> None:
@@ -95,13 +113,13 @@ def _cmd_run(args, repo: Path) -> int:
 
     if not use_json:
         print(
-            f"schedule: 起真 worker → 真 AgentCore 会话（烧钱）"
+            f"run_id={run_id}  schedule: 起真 worker → 真 AgentCore 会话（烧钱）"
             f"max_concurrency={args.max_concurrency} job_timeout={args.timeout}s ..."
         )
 
     # 5) schedule：跑（timeout<=0 → 不超时）
     result = schedule(
-        jobs, resolver, sink,
+        jobs, resolver, sink, run_id,
         ScheduleOpts(
             max_concurrency=args.max_concurrency,
             fail_fast=args.fail_fast,
@@ -115,6 +133,15 @@ def _cmd_run(args, repo: Path) -> int:
         print(json.dumps(render.to_dict(result), ensure_ascii=False, indent=2))
     else:
         print(render.render_text(result))
+
+    # 7) 归集 RunReport（默认生成，run 的应得产物；--no-report 跳过，ADR 0027）
+    if do_report:
+        store = LocalReportStore(Path(args.report_dir))
+        index = store.write(run_id, result, created_at=compose.now_iso(), materialize=args.materialize)
+        if use_json:
+            print(json.dumps({"report_index": str(index)}, ensure_ascii=False))
+        else:
+            print(f"\nRunReport: {index}")
 
     return 0 if result.status.value == "passed" else 1
 

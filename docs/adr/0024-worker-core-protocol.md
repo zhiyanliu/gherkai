@@ -6,7 +6,7 @@
 
 协议接口（调用方必须知道的一切）按「跨引擎概念 vs 引擎特定细节」分两层，保持**小而深**：
 - **一等字段** = core 要理解/分支的跨引擎概念（status、votes、cost 原生量、errorType、reportRefs）。删了它们域价值就消失（删除测试）。
-- **引擎特定细节 / core 不分支的信息** = 收进带标签的子对象（reportRefs 的 `granularity` 标签等），core 存但不解析、不分支。引擎差异与派发细节不抬进顶层接口。
+- **引擎特定细节 / core 不分支的信息** = 收进带标签的子对象（reportRefs 的 `kind` 开放标签等），core 存但不解析、不分支。引擎差异与派发细节不抬进顶层接口。
 
 > 反面（被拒）：把每个引擎的富返回值（Midscene 的 token/dump、Nova 的 metadata）摊平进协议顶层 → 宽接口、浅模块、消费者要按引擎特例化。实查证实两腿返回形状高度非对称（见下「实查依据」），更要靠分层把非对称收进子对象。
 >
@@ -63,9 +63,12 @@ worker **边跑边流式上报**（每行一个事件），core 实时收。选�
 {"type":"step_started","scenarioId":"...","stepIndex":2}
 // AI 断言步：有 votes（core 据此纳入抖动汇总）
 {"type":"step_done","scenarioId":"...","stepIndex":2,"status":"passed","votes":{"yes":3,"total":3},"cost":{"tokens":1915}}
-{"type":"scenario_done","scenarioId":"...","status":"passed"}
+// scenario_done 可带 act 级 reportRefs（Nova：每 act 一个 trajectory）
+{"type":"scenario_done","scenarioId":"...","status":"passed",
+   "reportRefs":[{"kind":"act","ref":"file:///.../act_1.html","label":"trajectory 1"}]}
+// scope_done 可带 scope 级 reportRefs（Midscene：1 个 html/worker）
 {"type":"scope_done","scopeId":"login","sessionId":"...",
-   "reportRefs":[{"granularity":"scope","path":"midscene_run/report/xxx.html"}]}
+   "reportRefs":[{"kind":"scope","ref":"file:///.../midscene_run/report/xxx.html","label":"Midscene report"}]}
 ```
 
 - **`cost` 只挂 `step_done`**；scenario/scope/run 级合计由 **core 累加 step 的原生量得出**（token / time_worked_s 各自合计），事件不重复携带（避免双重真相源）。详见下「成本信封」。
@@ -85,7 +88,7 @@ worker **边跑边流式上报**（每行一个事件），core 实时收。选�
 - **`errorType` + `message`**（规范化失败分类）：`errorType` 取自固定类别集，让 RunResult/未来重试能按类型分支；`message` 是人类可读诊断。**`failed` 与 `error` 两态均可带 `errorType`**（`failed`→`assertion_failed`；`error`→其余执行故障类）。**两腿映射**：Nova Act 有丰富异常树（按类映射），Midscene 只抛通用 `Error`（归 `engine_error`）。初始类别集：`assertion_failed`（断言没过）/ `timeout` / `guardrail` / `engine_error`（引擎内部/通用异常）/ `navigation_error`。类别集可随真实失败样本扩充。
 
 **core 不分支的附加信息**（存进 RunReport，不进 core 逻辑分支）：
-- **`reportRefs`**：list，每项带 `granularity` 标签（`scope` 级 / `act` 级）。两腿报告粒度不同（Midscene 1 个 html/worker = scope 级；Nova 天然每 act 一个 trajectory = act 级，[0010](./0010-spike-as-apples-to-apples-benchmark.md)），core **不按 granularity 分支**——有啥收啥、原样归进 RunReport 供人渲染。**当前实现**：Midscene worker 填 scope 级 html；Nova worker 暂未填（见下「留口子」），故 act 级 reportRefs 尚无腿产出。
+- **`reportRefs`**：list，每项 `{kind, ref, label?}`（`kind` 开放字符串如 `scope`/`act`/未来 `video`，`ref` 统一 URI、本地用 `file://`，`label` 可选锚文本）。两腿报告粒度不同（Midscene 1 个 html/worker = `scope` 级，由 `scope_done` 带；Nova 每 act 一个 trajectory = `act` 级，由 `scenario_done` 带，[0010](./0010-spike-as-apples-to-apples-benchmark.md)），core **永不读 `kind` 值、不解释 `ref`**——不透明搬运、原样归进 RunReport（[0027](./0027-runreport-aggregation-index.md)）。**当前实现**：两腿均已填（Midscene scope 级 html；Nova act 级 trajectory，worker 设 `logs_directory` 持久化）。`ReportRef` 形态详见 [0027](./0027-runreport-aggregation-index.md)。
 
 **worker 派发（不进协议，仅说明 worker 内部如何把 step 变成引擎调用）**：worker 收到 `(keyword, text)` 后按优先级派发——① 命中 test engineer 的确定性注册表（[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)）→ 精确判定、无 votes；② 否则若 step 文本含 URL 字面量（引号内 `https?://…`）→ 内建确定性导航（code 抽 URL 直接 goto/go_to_url，不浪费 AI、不跑偏），动词随意（"打开/访问/前往…"皆可，对齐 [0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md) 纯人话）；③ 否则 `When` → AI 动作（aiAct/act，无 votes）、`Then` → AI 断言（aiBoolean/act_get + 投票，带 votes）。这些区别 core 不消费，故不出现在协议字段中。
 
@@ -135,9 +138,9 @@ core 的 `schedule`/汇总逻辑应能用一个**假 worker**（in-memory adapte
 
 ## 现在做 / 留口子
 
-- **现在做（v1.0，已落地）**：上述输入/输出 schema、cost 信封（engine 报原生量 time_worked_s/tokens、core 合计）、三态 status/votes 区分 AI 断言；worker 派发逻辑（确定性注册表 > 内建 URL 导航 > 默认 AI，[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)）；两腿对称的 `@deterministic` 注册表（命中走精确 handler、不投票）；两腿 worker `get_session_id` 取会话血缘；Midscene worker 取 `agent.reportFile` 报 scope 级 reportRefs。
+- **现在做（v1.0，已落地）**：上述输入/输出 schema、cost 信封（engine 报原生量 time_worked_s/tokens、core 合计）、三态 status/votes 区分 AI 断言；worker 派发逻辑（确定性注册表 > 内建 URL 导航 > 默认 AI，[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)）；两腿对称的 `@deterministic` 注册表（命中走精确 handler、不投票）；两腿 worker `get_session_id` 取会话血缘；**两腿对称的 reportRefs**——Midscene 取 `agent.reportFile` 报 scope 级（`scope_done`），Nova 设 `logs_directory` 持久化 trajectory、取 `metadata.trajectory_file_path` 报 act 级（`scenario_done`），归集成 RunReport（[0027](./0027-runreport-aggregation-index.md)）。
 - **已实现但粗粒度（留待细化）**：`errorType` —— Nova worker 当前一律归 `engine_error`（`except Exception` 兜底），按 Nova 异常树细分（timeout/guardrail/navigation_error）留口子。
-- **留口子不实现**：per-vote 细节；**Nova 侧 `reportRefs`**（Nova worker 暂未设 `replayable=True` 采 trajectory 路径——Midscene 侧已填 scope 级 html）；trajectory 内部结构的结构化提取；美元折算（交消费者，框架不做）。
+- **留口子不实现**：per-vote 细节；trajectory 内部结构的结构化提取；美元折算（交消费者，框架不做）。
 
 ## 重议
 

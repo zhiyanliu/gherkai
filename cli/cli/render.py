@@ -5,6 +5,7 @@ core 产出纯数据（RunResult、Event）；怎么展示是皮的事，故渲�
 from __future__ import annotations
 
 from core.model import Event, RunResult
+from core.serialize import to_dict  # 单一真理源（ADR 0027）：cli --json 与 manifest 共用
 
 
 def format_event(ev: Event) -> str:
@@ -64,56 +65,9 @@ def render_text(result: RunResult) -> str:
         if jr.session_id:
             out.append(f"    sessionId: {jr.session_id}")
         for rr in jr.report_refs:
-            out.append(f"    report[{rr.granularity}]: {rr.path}")
+            out.append(f"    report[{rr.kind}]: {rr.ref}")
     return "\n".join(out)
 
 
-def to_dict(result: RunResult) -> dict:
-    """RunResult → 朴素 dict（供 --json；机器可读，CI/WebUI 消费）。
-
-    cost 只含 engine 报的原生量；不折美元（ADR 0024）。
-    """
-    return {
-        "status": result.status.value,
-        "duration_ms": result.duration_ms,
-        "total_tokens": result.total_tokens,
-        "total_time_worked_s": result.total_time_worked_s,
-        "jobs": [
-            {
-                "scope_id": jr.scope_id,
-                "status": jr.status.value,
-                "duration_ms": jr.duration_ms,
-                "total_tokens": jr.total_tokens,
-                "total_time_worked_s": jr.total_time_worked_s,
-                "session_id": jr.session_id,
-                "error_type": jr.error_type,
-                "message": jr.message,
-                "report_refs": [
-                    {"granularity": rr.granularity, "path": rr.path} for rr in jr.report_refs
-                ],
-                "scenarios": [
-                    {
-                        "scenario_id": sr.scenario_id,
-                        "status": sr.status.value,
-                        "duration_ms": sr.duration_ms,
-                        "steps": [
-                            {
-                                "index": st.index,
-                                "status": st.status.value,
-                                "duration_ms": st.duration_ms,
-                                "votes": (
-                                    {"yes": st.votes.yes, "total": st.votes.total}
-                                    if st.votes
-                                    else None
-                                ),
-                                "error_type": st.error_type,
-                            }
-                            for st in sr.steps
-                        ],
-                    }
-                    for sr in jr.scenarios
-                ],
-            }
-            for jr in result.jobs
-        ],
-    }
+# to_dict 已移入 core.serialize（单一真理源，cli 与 manifest 共用），从那里 re-export。
+__all__ = ["format_event", "render_text", "to_dict"]

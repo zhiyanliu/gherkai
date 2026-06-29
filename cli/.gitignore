@@ -3,3 +3,5 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .python-version
+# RunReport 跑批产物（默认落点，ADR 0027）——本地产物，不入版本控制
+reports/

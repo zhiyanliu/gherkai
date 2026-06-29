@@ -98,7 +98,11 @@ def _votes_from_json(d: dict | None) -> Votes | None:
 def _report_refs_from_json(items: list | None) -> tuple[ReportRef, ...]:
     if not items:
         return ()
-    return tuple(ReportRef(granularity=r["granularity"], path=r["path"]) for r in items)
+    # 不透明搬运（ADR 0027）：原样读 kind/ref/label，不校验 kind 值、不解释 ref。
+    return tuple(
+        ReportRef(kind=r["kind"], ref=r["ref"], label=r.get("label"))
+        for r in items
+    )
 
 
 def event_from_json(d: dict) -> Event:

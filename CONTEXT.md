@@ -44,8 +44,8 @@ _Avoid_: 把某一引擎专属的 spike/文档/代码放到根级或另一引擎
 _Avoid_: 把 AI 断言当成"无需治理就可信"——它为主，但必须配抖动监控。
 
 **报告产物模型 (Report artifact model)**:
-两条腿的报告形态根本不同（2026-06 实测）：**Midscene 出单一 `report.html`**（落项目内 `midscene_run/report/`，含每步截图+AI 决策+坐标，= scope 级）；**Nova Act 出多个分散的 trajectory HTML**（每次 `act`/`act_get` 一个，默认落系统临时目录 `$TMPDIR/..._nova_act_logs/`，可被系统清理，= act 级）。worker 经 0024 协议的 **`reportRefs`**（带 `granularity` 标签）把产物路径报回 core，归进 `JobResult.report_refs`。**当前**：Midscene worker 已报 scope 级 html；Nova worker 暂未报（留口子）。报告**归集**（RunReport）仍 deferred。
-_Avoid_: 笼统说「两腿都出报告」而忽略其形态/落点/粒度（scope vs act）的根本不同；把「reportRefs 已报路径」与「RunReport 已归集」混为一谈。
+两条腿的报告形态根本不同（2026-06 实测）：**Midscene 出单一 `report.html`**（落项目内 `midscene_run/report/`，含每步截图+AI 决策+坐标，= scope 级）；**Nova Act 出多个分散的 trajectory HTML**（每次 `act`/`act_get` 一个，= act 级；worker 设 `logs_directory` 持久化到 run 专属目录，否则默认临时目录会被清理）。worker 经 0024 协议的 **`reportRefs`**（`{kind, ref, label}`，`ref` 用 `file://` URI）把产物路径报回 core——Midscene scope 级走 `scope_done`、Nova act 级走 `scenario_done`，归进 `JobResult`/`ScenarioResult.report_refs`。**RunReport（ADR 0027）= 跨腿归集索引**：`ReportStore` 把整个 `RunResult` 归集成 `manifest.json`（机器可读）+ `index.html`（人可导航入口），**不解析/不融合原生产物内容**，只索引/链接（cli 每次 run **默认生成**到 `reports/<run_id>/`，`--no-report` 跳过；`--materialize` 才把产物拷成自包含目录）。新引擎报任意 `kind` 零改 core（core 不透明搬运、永不按 kind 分支）。
+_Avoid_: 笼统说「两腿都出报告」而忽略其形态/落点/粒度（scope vs act）的根本不同；把 RunReport 当成「解析两腿 html 融合成一个大报告」（它只归集索引、不碰产物内容）；以为 core 会按 `kind`/引擎分支处理产物（永不——扩展性契约，ADR 0027）。
 
 ## 产品形态（v1.0）
 
@@ -72,7 +72,7 @@ _Avoid_: 以为"投票能带来确定性"——它只压 A，给不了对变更�
 _Avoid_: 以为框架算美元（曾有的 `cost_usd`/`precision`/`basis`/$4.75 折算模型已废，改为只报原生量）；混淆成本 `time_worked_s` 与性能 `duration_ms`。
 
 **Run 数据模型 (Run data model)**:
-执行的层级（ADR 0016）：**Run ⊃ Job(=Scope) ⊃ Scenario ⊃ Step**。Scope = 共享操作上下文的 scenario 分组，是执行单元（scope 内串行、scope 间并行）；Feature 是正交的组织轴。Step 是最细一级（core 经 `StepResult` 首次保留 step 级粒度）。各级带**墙钟时长** `duration_ms`（性能指标）。Run 产出两样：**RunResult**（机器可读汇总判定，给退出码/CI/WebUI；含 status、各级时长、原生量成本合计 `total_tokens`/`total_time_worked_s`）与 **RunReport**（人看的归集报告，原 M5「报告统一」的归宿，v1.0 暂 deferred）。
+执行的层级（ADR 0016）：**Run ⊃ Job(=Scope) ⊃ Scenario ⊃ Step**。Scope = 共享操作上下文的 scenario 分组，是执行单元（scope 内串行、scope 间并行）；Feature 是正交的组织轴。Step 是最细一级（core 经 `StepResult` 保留 step 级粒度）。各级带**墙钟时长** `duration_ms`（性能指标）。Run 产出两样：**RunResult**（机器可读汇总判定，给退出码/CI/WebUI；含 run_id、status、各级时长、原生量成本合计 `total_tokens`/`total_time_worked_s`）与 **RunReport**（人看的归集索引，原 M5「报告统一」的归宿，**v1.0 已实现**：manifest.json + index.html 入口，只索引/链接原生产物、不融合内容，ADR 0027）。
 _Avoid_: 把 Feature 当执行单元；**把 Job 当 scenario 粒度（破坏会话依赖）——Job = Scope，不是 scenario**；混淆 RunResult（数据）与 RunReport（报告）；混淆墙钟时长 `duration_ms`（性能）与成本 `time_worked_s`（Nova 计费量）。
 
 **标识符 (id：scenarioId / scopeId)**:
@@ -97,5 +97,5 @@ test engineer 扩展确定性锚点的落点：在对应 worker 里登记 `(模�
 _Avoid_: 把匹配放进核心（核心只解析结构+调度，不懂 step 语义）；以为 QA 要写确定性 step。
 
 **Ports 层 (Ports & adapters)**:
-核心库把可替换的外部依赖收成独立 port，导出稳定接口；核心只依赖接口。四个 port（ADR 0016）：`Engine`（跑 scope）、`RunStore`（**控制面**：run/job 状态/血缘，频繁读写、撑轮询续跑——DDB 主要服务它）、`ResultStore`（**数据面**：每 scenario 判定/投票/报告指针，追加为主）、`ReportStore`（归集报告产物）。`RunStore` 从原 `ResultStore` 拆出（控制面 vs 数据面访问模式不同）。**具体 adapter 由组合根（CLI main / WebUI bootstrap）注入**，不由 module 内部 env-sniff 自选（后者是本项目踩过的 Midscene `GlobalConfigManager` 反模式）。**当前实装**：`adapters/` 只有 `subprocess_engine.py`（Engine 的唯一 adapter）；三个 store port **仅定义接口、local adapter 尚未建**（结果现仅在内存 `RunResult`）。多个 adapter 落地后再按 port 分子目录，云端再填 DDB/S3/Fargate（rule-of-three，ADR 0016）。
+核心库把可替换的外部依赖收成独立 port，导出稳定接口；核心只依赖接口。四个 port（ADR 0016）：`Engine`（跑 scope）、`RunStore`（**控制面**：run/job 状态/血缘，频繁读写、撑轮询续跑——DDB 主要服务它）、`ResultStore`（**数据面**：每 scenario 判定真值/投票，追加为主）、`ReportStore`（把 `RunResult` 归集成 RunReport=manifest+index 的派生只读导航视图，ADR 0027）。`RunStore` 从原 `ResultStore` 拆出（控制面 vs 数据面访问模式不同）。**具体 adapter 由组合根（CLI main / WebUI bootstrap）注入**，不由 module 内部 env-sniff 自选（后者是本项目踩过的 Midscene `GlobalConfigManager` 反模式）。**当前实装**：`adapters/` 含 `subprocess_engine.py`（Engine）与 `report_store/local.py`（`LocalReportStore`，ADR 0027）；`RunStore`/`ResultStore` **仅定义接口、local adapter 尚未建**（判定结果现仅在内存 `RunResult`，未持久化）。这两个 store adapter 落地后再各按 port 分子目录，云端再填 DDB/S3/Fargate（rule-of-three，ADR 0016）。
 _Avoid_: 把多个 port 揉成一个上帝 module；让 port-module 用全局单例自选实现；混淆控制面（RunStore）与数据面（ResultStore）。

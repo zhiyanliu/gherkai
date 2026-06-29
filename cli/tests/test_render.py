@@ -19,6 +19,7 @@ from cli import render
 
 def _sample_run() -> RunResult:
     return RunResult(
+        run_id="20260629-test01",
         status=Status.PASSED,
         duration_ms=12000.0,
         total_tokens=10573,
@@ -27,10 +28,11 @@ def _sample_run() -> RunResult:
             JobResult(
                 scope_id="features/demo.feature:6",
                 status=Status.PASSED,
+                engine="midscene",
                 total_tokens=10573,
                 duration_ms=11000.0,
                 session_id="sess-abc",
-                report_refs=(ReportRef(granularity="scope", path="/x/report.html"),),
+                report_refs=(ReportRef(kind="scope", ref="file:///x/report.html", label="Midscene report"),),
                 scenarios=[
                     ScenarioResult(
                         scenario_id="features/demo.feature:6",
@@ -60,7 +62,7 @@ def test_render_text_nests_and_shows_cost_and_duration():
     assert "scope 墙钟: 11.0s" in txt
     assert "step[1]: passed (7.0s)" in txt
     assert "sessionId: sess-abc" in txt
-    assert "report[scope]: /x/report.html" in txt
+    assert "report[scope]: file:///x/report.html" in txt
 
 
 def test_to_dict_shape_and_no_dollar():
@@ -70,9 +72,13 @@ def test_to_dict_shape_and_no_dollar():
     assert d["total_time_worked_s"] is None
     # 不折美元：dict 里只有原生量，无 cost_usd 等字段
     assert "cost_usd" not in d
+    assert d["run_id"] == "20260629-test01"
     job = d["jobs"][0]
     assert job["scope_id"] == "features/demo.feature:6"
-    assert job["report_refs"] == [{"granularity": "scope", "path": "/x/report.html"}]
+    assert job["engine"] == "midscene"
+    assert job["report_refs"] == [
+        {"kind": "scope", "ref": "file:///x/report.html", "label": "Midscene report"}
+    ]
     step1 = job["scenarios"][0]["steps"][1]
     assert step1["votes"] == {"yes": 3, "total": 3}
     assert step1["duration_ms"] == 7000.0

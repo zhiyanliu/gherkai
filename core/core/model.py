@@ -107,10 +107,17 @@ class Votes:
 
 @dataclass(frozen=True)
 class ReportRef:
-    """原生报告产物指针（ADR 0024/0010）。core 不按 granularity 分支，原样归 RunReport。"""
+    """原生报告产物指针（ADR 0027/0024/0010）。core 永远是**不透明搬运**——不读 kind 值、
+    不 stat/fetch ref、不按 kind 分支。新引擎报任意 kind 都零改 core（扩展性契约）。
 
-    granularity: Literal["scope", "act"]
-    path: str
+    kind:  开放字符串，引擎自报。约定值 "scope"/"act"，未来可 "video"/"trace"/"har"…（非枚举）。
+    ref:   统一指针 URI，不假定是本地文件。本地产物用 file:// 前缀；未来可 s3://、https://。
+    label: 可选人类可读锚文本；缺省由消费端（cli/WebUI 皮层）回落 kind。
+    """
+
+    kind: str
+    ref: str
+    label: str | None = None
 
 
 # --- 事件（worker 按序流式 emit；core 假定有序，ADR 0024）---
@@ -206,6 +213,7 @@ class JobResult:
 
     scope_id: str
     status: Status  # 汇总：任一 scenario error→error；任一 failed→failed；全 passed→passed
+    engine: str = ""  # 跑这个 scope 的引擎名（来自 Job.engine；使 RunResult 自包含，供 RunReport 标注，ADR 0027）
     scenarios: list[ScenarioResult] = field(default_factory=list)
     session_id: str | None = None
     # 成本：core 只各自合计 engine 报的原生量（None=该腿没报这个量）。美元折算交消费者。
@@ -228,6 +236,7 @@ class RunResult:
     美元折算交给消费者（用自己 AWS 账户的真实费率）。None=无任何腿报这个量。
     """
 
+    run_id: str  # 一次 run 的标识（组合根 mint、schedule 透传；RunReport 主键 / 未来 RunStore PK，ADR 0027）
     status: Status  # 总判定：任一 job error→error；任一 failed→failed；全 passed→passed
     jobs: list[JobResult] = field(default_factory=list)
     total_tokens: int | None = None  # 跨 job 的 token 合计（None=无腿报 token）

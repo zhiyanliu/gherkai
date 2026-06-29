@@ -98,8 +98,30 @@ def _cost_from_result(r) -> dict | None:
     return {"time_worked_s": tw}
 
 
-def _run_step(nova, scenario_id: str, step: dict) -> str:
+def _collect_traj(r, traj_sink: list[str]) -> None:
+    """从 act/act_get 结果的 metadata 收集本次 act 的 trajectory **HTML** 路径（ADR 0027）。
+
+    Nova 每次 act 出一对产物：`act_<id>_<prompt>_trajectory.json`（数据）+ `act_<id>_<prompt>.html`
+    （人看的轨迹页）。metadata.trajectory_file_path 给的是 .json；归集索引要指向人能看的 .html，
+    故从 json 路径推导 html（去 `_trajectory.json` 加 `.html`）。html 不存在则回退 json。
+    收集进 traj_sink，scenario_done 边界聚合成 act 级 reportRefs（对称 Midscene 的 scope 级）。
+    """
+    md = getattr(r, "metadata", None)
+    p = getattr(md, "trajectory_file_path", None) if md else None
+    if not p:
+        return
+    p = str(p)
+    if p.endswith("_trajectory.json"):
+        html = p[: -len("_trajectory.json")] + ".html"
+        if os.path.exists(html):
+            p = html
+    traj_sink.append(p)
+
+
+def _run_step(nova, scenario_id: str, step: dict, traj_sink: list[str]) -> str:
     """派发执行一个 step，吐 step_done 事件，返回该 step 的 status（passed/failed/error）。
+
+    traj_sink：本 scenario 的 trajectory 路径累积器（每次 AI act 收一个，ADR 0027）。
 
     派发优先级（ADR 0022/0020/0024）：
       ① 确定性注册表命中（test engineer 注册的精确 handler，不投票、可复现）
@@ -150,6 +172,7 @@ def _run_step(nova, scenario_id: str, step: dict) -> str:
                 r = nova.act_get(_unquote(text), BOOL_SCHEMA)
                 votes.append(bool(r.matches_schema and r.parsed_response))
                 last_cost = _cost_from_result(r)
+                _collect_traj(r, traj_sink)
             yes = sum(votes)
             passed = yes > VOTES / 2
             ev = {
@@ -167,6 +190,7 @@ def _run_step(nova, scenario_id: str, step: dict) -> str:
 
         # When / Given（非 URL）→ AI 动作（无 votes）
         r = nova.act(_unquote(text))
+        _collect_traj(r, traj_sink)
         ev = {"type": "step_done", "scenarioId": scenario_id, "stepIndex": idx, "status": "passed"}
         cost = _cost_from_result(r)
         if cost:
@@ -175,6 +199,9 @@ def _run_step(nova, scenario_id: str, step: dict) -> str:
         return "passed"
 
     except Exception as e:
+        # 失败的 act 最需要看 trajectory——Nova 的 ActError 也带 metadata.trajectory_file_path
+        # （SDK 在 finally 已写盘），同一 helper 收集（ADR 0027：失败 act 的产物不丢）。
+        _collect_traj(e, traj_sink)
         emit({
             "type": "step_done", "scenarioId": scenario_id, "stepIndex": idx,
             "status": "error", "errorType": "engine_error", "message": f"{type(e).__name__}: {e}",
@@ -232,9 +259,16 @@ def main() -> int:
             try:
                 provider = AgentCoreBrowserSessionProvider(region=REGION)
                 with provider.cdp_session() as (ws_url, headers):
+                    # logs_directory：trajectory 落到 run 专属持久目录（ADR 0027）。cli 经环境变量
+                    # NOVA_LOGS_DIR 传入 reports/<run_id>/nova-trajectories；无则用 SDK 默认临时目录
+                    # （会被系统清理——手动直跑/无 RunReport 时无碍）。
+                    # Nova 的 validate_path 要求该目录**已存在**，故先 mkdir。
+                    logs_dir = os.environ.get("NOVA_LOGS_DIR") or None
+                    if logs_dir:
+                        os.makedirs(logs_dir, exist_ok=True)
                     with NovaAct(
                         cdp_endpoint_url=ws_url, cdp_headers=headers, browser_auth=provider,
-                        starting_page="about:blank",
+                        starting_page="about:blank", logs_directory=logs_dir,
                     ) as nova:
                         # 取真实 AgentCore 会话 id（血缘，进 scope_done → RunStore，ADR 0016/0024）。
                         session_id = nova.get_session_id()
@@ -243,8 +277,17 @@ def main() -> int:
                         for sc in scenarios:
                             sid = sc["id"]
                             emit({"type": "scenario_started", "scenarioId": sid})
-                            statuses = [_run_step(nova, sid, st) for st in sc["steps"]]
-                            emit({"type": "scenario_done", "scenarioId": sid, "status": _aggregate(statuses)})
+                            traj: list[str] = []  # 本 scenario 的 trajectory 路径累积（ADR 0027）
+                            statuses = [_run_step(nova, sid, st, traj) for st in sc["steps"]]
+                            # act 级 reportRefs：每个 trajectory 一条，经 scenario_done 回传（对称 Midscene scope 级）
+                            report_refs = [
+                                {"kind": "act", "ref": f"file://{p}", "label": f"trajectory {i + 1}"}
+                                for i, p in enumerate(traj)
+                            ]
+                            emit({
+                                "type": "scenario_done", "scenarioId": sid,
+                                "status": _aggregate(statuses), "reportRefs": report_refs,
+                            })
             finally:
                 set_current_workflow(outer)
     except _Terminated:
