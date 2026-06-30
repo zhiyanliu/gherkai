@@ -21,6 +21,7 @@ import {
   StopBrowserSessionCommand,
 } from "@aws-sdk/client-bedrock-agentcore";
 import * as fs from "node:fs";
+import { pathToFileURL } from "node:url";
 import { sigv4Fetch, signCdpUpgrade, BASE_URL, MODEL, REGION } from "../lib/agentcore-sigv4.mjs";
 // 确定性 step 注册表（ADR 0022）+ test engineer 的锚点脚手架。
 // import 脚手架即触发其顶层 deterministic(...) 注册副作用（对称 Nova 引擎 import deterministic_steps）。
@@ -82,19 +83,30 @@ interface Scenario { id: string; name: string; steps: Step[] }
 interface Job { scope: { id: string; name: string }; engine: string; scenarios: Scenario[]; assertionVotes?: number }
 
 
-// 报 Midscene/Bedrock 原生量 token（ADR 0024：engine 只报原生量，core 不算美元）。
-// 从 agent._unstableLogContent 取最近一次 AI 调用的 usage.total_tokens；取不到则返回 undefined。
-function lastCost(agent: PlaywrightAgent): Record<string, unknown> | undefined {
+// Midscene/Bedrock 原生量 token 累计（ADR 0024：engine 只报原生量，core 不算美元）。
+// _unstableLogContent().executions 是**整个 agent 会话累积**的——故按 step 取 token 必须用"增量"：
+// step 跑前记一次累计、跑后再记一次、差值才是本 step 的 token。否则：取末次 usage 会少报（多票断言只
+// 算最后一票，欠计 (N-1)/N）；或求和全部会双计（把前面 step 的也算进来）。返回 [task 数, token 累计和]。
+function cumulativeTokens(agent: PlaywrightAgent): [number, number] {
   try {
-    const content = (agent as any)._unstableLogContent?.();
-    const execs = content?.executions ?? [];
-    let usage: any = undefined;
-    for (const ex of execs) for (const task of ex.tasks ?? []) if (task.usage) usage = task.usage;
-    if (!usage || usage.total_tokens == null) return undefined;
-    return { tokens: usage.total_tokens };
+    const execs = (agent as any)._unstableLogContent?.()?.executions ?? [];
+    let count = 0;
+    let tokens = 0;
+    for (const ex of execs) for (const task of ex.tasks ?? []) {
+      count++;
+      if (task.usage?.total_tokens != null) tokens += task.usage.total_tokens;
+    }
+    return [count, tokens];
   } catch {
-    return undefined;
+    return [0, 0];
   }
+}
+
+// 本 step 的 token 成本 = 跑后累计 − 跑前累计（增量）。增量 0（无新 usage）→ undefined（不假装 0）。
+function stepCost(beforeTokens: number, agent: PlaywrightAgent): Record<string, unknown> | undefined {
+  const [, after] = cumulativeTokens(agent);
+  const delta = after - beforeTokens;
+  return delta > 0 ? { tokens: delta } : undefined;
 }
 
 async function readStdin(): Promise<string> {
@@ -314,6 +326,7 @@ async function runStep(
     if (keyword === "Then") {
       // AI 断言 + N 次投票（ADR 0014/0024）；votesN=1 即单次判定（仍发 votes 标记这是 AI 断言）
       const instr = buildInstruction(step.text, step.argument as any);  // 自然语言 + 多行参数（DataTable/DocString，ADR 0024）
+      const [, tokBefore] = cumulativeTokens(agent);  // 投票前累计 → 用增量算本 step 全 N 票成本（不少报）
       let yes = 0;
       for (let i = 0; i < votesN; i++) if (await agent.aiBoolean(instr)) yes++;
       const passed = yes > votesN / 2;
@@ -322,16 +335,17 @@ async function runStep(
         status: passed ? "passed" : "failed",
         votes: { yes, total: votesN },
       };
-      const cost = lastCost(agent);
+      const cost = stepCost(tokBefore, agent);  // N 票 token 增量合计（修：原 lastCost 只算最后一票）
       if (cost) ev.cost = cost;
       if (!passed) { ev.errorType = "assertion_failed"; ev.message = `AI 断言未过多数票（${yes}/${votesN}）：${text}`; }
       emit(ev);
       return passed ? "passed" : "failed";
     }
     // When / Given（非 URL）→ AI 动作（无 votes）
+    const [, tokBefore] = cumulativeTokens(agent);  // 动作前累计 → 增量算本 step 成本
     await agent.aiAct(buildInstruction(step.text, step.argument as any));
     const ev: Record<string, unknown> = { type: "step_done", scenarioId, stepIndex: index, status: "passed" };
-    const cost = lastCost(agent);
+    const cost = stepCost(tokBefore, agent);
     if (cost) ev.cost = cost;
     emit(ev);
     return "passed";
@@ -355,4 +369,13 @@ function aggregate(statuses: string[]): string {
   return "passed";
 }
 
-main().then((code) => process.exit(code)).catch((e) => { log(`worker fatal: ${e}`); process.exit(1); });
+// 测试可见（对称 Nova：Nova worker 靠 if __name__ 守卫使 _run_step/_is_transient_network 可 import 测）。
+export { runStep, isTransientNetwork, aggregate };
+
+// 仅作为入口被直接运行时才跑 main（对称 Nova 的 `if __name__ == "__main__"`）——
+// 被测试 import 时不触发 main，使 runStep/isTransientNetwork 可注 fake agent 单测。
+// tsx 下 import.meta.url 是本模块 URL；process.argv[1] 是入口脚本路径，二者指同一文件即"作入口运行"。
+const _entry = process.argv[1] ? pathToFileURL(process.argv[1]).href : "";
+if (import.meta.url === _entry) {
+  main().then((code) => process.exit(code)).catch((e) => { log(`worker fatal: ${e}`); process.exit(1); });
+}

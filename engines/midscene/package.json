@@ -4,7 +4,7 @@
   "description": "Midscene.js (TypeScript) 侧的执行引擎 —— 用 Qwen3-VL on Bedrock（SigV4 自签）驱动视觉 UI 自动化。",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "node --import tsx --test worker/*.test.ts",
     "postinstall": "patch-package"
   },
   "keywords": [],

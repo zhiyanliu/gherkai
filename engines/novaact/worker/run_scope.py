@@ -172,11 +172,13 @@ def _run_step(nova, scenario_id: str, step: dict, traj_sink: list[str], votes_n:
             # AI 断言 + N 次投票（ADR 0014/0024）；votes_n=1 即单次判定（仍发 votes 标记这是 AI 断言）
             instruction = _instruction(text, step)  # 自然语言 + 多行参数（DataTable/DocString，ADR 0024）
             votes = []
-            last_cost = None
+            tw_total = 0.0  # N 票 time_worked_s 累加（修：原 last_cost 只算最后一票，votes>1 时欠计 (N-1)/N）
             for _ in range(votes_n):
                 r = nova.act_get(instruction, BOOL_SCHEMA)
                 votes.append(bool(r.matches_schema and r.parsed_response))
-                last_cost = _cost_from_result(r)
+                c = _cost_from_result(r)  # 每票各自的原生量（Nova 每 act 独立报，对称累加而非覆盖）
+                if c and c.get("time_worked_s") is not None:
+                    tw_total += c["time_worked_s"]
                 _collect_traj(r, traj_sink)
             yes = sum(votes)
             passed = yes > votes_n / 2
@@ -185,8 +187,8 @@ def _run_step(nova, scenario_id: str, step: dict, traj_sink: list[str], votes_n:
                 "status": "passed" if passed else "failed",
                 "votes": {"yes": yes, "total": votes_n},
             }
-            if last_cost:
-                ev["cost"] = last_cost
+            if tw_total > 0:
+                ev["cost"] = {"time_worked_s": tw_total}  # 全 N 票合计
             if not passed:
                 ev["errorType"] = "assertion_failed"
                 ev["message"] = f"AI 断言未过多数票（{yes}/{votes_n}）：{text}"
@@ -212,10 +214,9 @@ def _run_step(nova, scenario_id: str, step: dict, traj_sink: list[str], votes_n:
         # schedule 的 job 级重试要求「会话未起（零 step_done）」，而此处 step_started 早已 emit、saw_step=True，
         # 双条件 AND 天然不满足；且本失败走 step_done 事件流（非退出码 80），core 侧 is_network=False。
         # 故"act 中途恢复"仍是 defer（ADR 0028），这里只把失败原因记准。
-        err_type = "network_error" if _is_transient_network(e) else "engine_error"
         emit({
             "type": "step_done", "scenarioId": scenario_id, "stepIndex": idx,
-            "status": "error", "errorType": err_type, "message": f"{type(e).__name__}: {e}",
+            "status": "error", "errorType": _classify_act_error(e), "message": f"{type(e).__name__}: {e}",
         })
         return "error"
 
@@ -322,6 +323,29 @@ def _is_transient_network(e: BaseException) -> bool:
             return True
         cur = cur.__cause__ or cur.__context__
     return False
+
+
+def _classify_act_error(e: BaseException) -> str:
+    """把 act/act_get 中途异常映射到规范化 errorType（ADR 0024/0028）。优先级：
+    网络瞬时 > Nova SDK 异常树（timeout/guardrail/…）> engine_error 兜底。
+    **仅诊断分类、不影响重试/恢复**（act 不幂等，恢复仍 defer，ADR 0028）。
+    Nova SDK 异常树现成且结构化（act_errors.py），把 timeout/guardrail 从笼统 engine_error 拆出，
+    便于排查与未来按类型处置（ADR 0024「errorType 已实现但粗粒度，留待细化」的兑现）。"""
+    if _is_transient_network(e):
+        return "network_error"
+    try:
+        from nova_act.types.act_errors import (
+            ActTimeoutError, ActGuardrailsError, ActStateGuardrailError,
+        )
+        timeout_types: tuple[type[BaseException], ...] = (ActTimeoutError,)
+        guardrail_types: tuple[type[BaseException], ...] = (ActGuardrailsError, ActStateGuardrailError)
+    except ImportError:
+        return "engine_error"
+    if isinstance(e, timeout_types):
+        return "timeout"
+    if isinstance(e, guardrail_types):
+        return "guardrail"
+    return "engine_error"  # 其余执行故障（含未细分的 ActError 子类）仍归 engine_error
 
 
 class _NetworkExhausted(BaseException):

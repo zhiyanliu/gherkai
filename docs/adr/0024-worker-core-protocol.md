@@ -73,7 +73,7 @@ worker **边跑边流式上报**（每行一个事件），core 实时收。选�
    "reportRefs":[{"kind":"scope","ref":"file:///.../midscene_run/report/xxx.html","label":"Midscene report"}]}
 ```
 
-- **`cost` 只挂 `step_done`**；scenario/scope/run 级合计由 **core 累加 step 的原生量得出**（token / time_worked_s 各自合计），事件不重复携带（避免双重真相源）。详见下「成本信封」。
+- **`cost` 只挂 `step_done`**；scenario/scope/run 级合计由 **core 累加 step 的原生量得出**（token / time_worked_s 各自合计），事件不重复携带（避免双重真相源）。详见下「成本信封」。**多票 AI 断言（assertionVotes>1）的 `step_done.cost` 是该 step 全 N 票之和**——worker 按增量/累加算（Midscene 取累计 token 差、Nova 累加每票 time_worked_s），不是只算最后一票（否则欠计 (N-1)/N）。
 - **`scopeId`**（= 输入 `scope.id`，RunStore/RunReport 关联键）随 `scope_done` 回；`sessionId` 是语义不同的 AgentCore 会话血缘，二者都带。
 - step 不再带 `kind` 字段：core 靠 `votes` 的**存在与否**区分「AI 断言（纳入抖动汇总）vs 其余」即足够；worker 内部如何派发（导航/动作/确定性）是其实现细节，不进协议（见上「删除测试逼出的两处收窄」②）。
 
@@ -141,7 +141,7 @@ core 的 `schedule`/汇总逻辑应能用一个**假 worker**（in-memory adapte
 ## 现在做 / 留口子
 
 - **现在做（v1.0，已落地）**：上述输入/输出 schema、cost 信封（engine 报原生量 time_worked_s/tokens、core 合计）、三态 status/votes 区分 AI 断言；worker 派发逻辑（确定性注册表 > 内建 URL 导航 > 默认 AI，[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)）；两个引擎对称的 `@deterministic` 注册表（命中走精确 handler、不投票）；两个引擎 worker `get_session_id` 取会话血缘；**两个引擎对称的 reportRefs**——Midscene 取 `agent.reportFile` 报 scope 级（`scope_done`），Nova 设 `logs_directory` 持久化 trajectory、取 `metadata.trajectory_file_path` 报 act 级（`scenario_done`），归集成 RunReport（[0027](./0027-runreport-aggregation-index.md)）。
-- **已实现但粗粒度（留待细化）**：`errorType` —— 建连层瞬时故障已细分为 `network_error`（两个引擎 worker 建连重试 + 退出码约定,[0028](./0028-transient-network-ssl-resilience.md)）；其余执行故障 Nova worker 仍一律归 `engine_error`（`except Exception` 兜底），按 Nova 异常树细分（timeout/guardrail/navigation_error）仍留口子。
+- **`errorType` 分类（已细化）**：建连层瞬时故障 → `network_error`（两个引擎 worker 建连重试 + 退出码约定,[0028](./0028-transient-network-ssl-resilience.md)）；act 中途失败 Nova worker 经 `_classify_act_error` 按 SDK 异常树细分——网络瞬时→`network_error`、`ActTimeoutError`→`timeout`、`ActGuardrailsError`/`ActStateGuardrailError`→`guardrail`、其余→`engine_error` 兜底（**仅诊断分类、不触发重试/恢复**，[0028](./0028-transient-network-ssl-resilience.md)）。`navigation_error` 暂无对应 SDK 类、留空槽位；Midscene 只抛通用 `Error`，act 中途仅区分 network_error vs engine_error。
 - **留口子不实现**：per-vote 细节（= 每票的 thought/reason，SDK 拿不到；非 yes/no——见上 `votes` 字段澄清）；trajectory 内部结构的结构化提取；美元折算（交消费者，框架不做）。
 
 ## 重议
