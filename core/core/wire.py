@@ -17,6 +17,7 @@ from core.model import (
     Event,
     Job,
     ReportRef,
+    ResourceUri,
     Scenario,
     ScenarioDone,
     ScenarioStarted,
@@ -102,8 +103,9 @@ def _report_refs_from_json(items: list | None) -> tuple[ReportRef, ...]:
     if not items:
         return ()
     # 不透明搬运（ADR 0027）：原样读 kind/ref/label，不校验 kind 值、不解释 ref。
+    # ref 包成 ResourceUri 仅为命名意图（worker 报的 file://…/s3://… 指针），运行时仍是该字符串。
     return tuple(
-        ReportRef(kind=r["kind"], ref=r["ref"], label=r.get("label"))
+        ReportRef(kind=r["kind"], ref=ResourceUri(r["ref"]), label=r.get("label"))
         for r in items
     )
 

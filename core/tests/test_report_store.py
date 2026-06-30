@@ -1,12 +1,15 @@
 """LocalReportStore 单测（ADR 0027）：归集 manifest + index，纯本地、不连引擎。"""
 import json
 from pathlib import Path
+from urllib.parse import urlparse
+from urllib.request import url2pathname
 
 from core.adapters.report_store.local import LocalReportStore
 from core.model import (
     Job,
     JobResult,
     ReportRef,
+    ResourceUri,
     RunMeta,
     RunResult,
     ScenarioResult,
@@ -14,6 +17,11 @@ from core.model import (
     StepResult,
     Votes,
 )
+
+
+def _uri_to_path(uri: str) -> Path:
+    """write() 现返回 file:// ResourceUri（ADR 0027 统一资源指针）；测试侧还原成本地 Path 读内容。"""
+    return Path(url2pathname(urlparse(uri).path))
 
 
 def _jr(scope_id: str, engine: str, **kw) -> JobResult:
@@ -42,14 +50,14 @@ def _run_with_refs(tmp: Path) -> RunResult:
                 status=Status.PASSED,
                 total_tokens=10573,
                 duration_ms=11000.0,
-                report_refs=(ReportRef(kind="scope", ref=f"file://{html}", label="Midscene report"),),
+                report_refs=(ReportRef(kind="scope", ref=ResourceUri(f"file://{html}"), label="Midscene report"),),
                 scenarios=[
                     ScenarioResult(
                         scenario_id="features/wiki.feature:6",
                         status=Status.PASSED,
                         steps=[StepResult(index=0, status=Status.PASSED)],
                         # scenario 级 ref（act 粒度，对称 Nova）
-                        report_refs=(ReportRef(kind="act", ref="file:///tmp/traj/act_0.html"),),
+                        report_refs=(ReportRef(kind="act", ref=ResourceUri("file:///tmp/traj/act_0.html")),),
                     )
                 ],
             )
@@ -66,9 +74,11 @@ def test_writes_manifest_and_index(tmp_path: Path):
     index = store.write(run.run_id, run, created_at="2026-06-29T00:00:00Z")
 
     run_dir = tmp_path / "reports" / "20260629-abc123"
-    assert index == run_dir / "index.html"
+    # write 返回 file:// ResourceUri（不再是裸 Path）：还原成 Path 后应等于、且文件确实存在
+    assert _uri_to_path(index) == (run_dir / "index.html").resolve()
+    assert index.startswith("file://") and index.endswith("/index.html")
     assert (run_dir / "manifest.json").exists()
-    assert index.exists()
+    assert _uri_to_path(index).exists()
 
 
 def test_manifest_shape(tmp_path: Path):
@@ -97,7 +107,7 @@ def test_index_html_links_and_summary(tmp_path: Path):
     run = _run_with_refs(tmp_path)
     store = LocalReportStore(tmp_path / "reports")
     idx = store.write(run.run_id, run, created_at="x")
-    txt = idx.read_text("utf-8")
+    txt = _uri_to_path(idx).read_text("utf-8")
     assert "20260629-abc123" in txt
     assert "passed" in txt.lower()
     assert "midscene" in txt
@@ -120,11 +130,11 @@ def test_index_html_votes_tally_shown_only_when_multi_vote(tmp_path: Path):
         )], status=Status.PASSED)
     store = LocalReportStore(tmp_path / "reports")
     # 多票：显 tally
-    txt3 = store.write("vrun", _run(3), created_at="x").read_text("utf-8")
+    txt3 = _uri_to_path(store.write("vrun", _run(3), created_at="x")).read_text("utf-8")
     assert "3/3 票" in txt3
     # 单票：隐藏（不出现 1/1 票）
     import shutil; shutil.rmtree(tmp_path / "reports")
-    txt1 = store.write("vrun", _run(1), created_at="x").read_text("utf-8")
+    txt1 = _uri_to_path(store.write("vrun", _run(1), created_at="x")).read_text("utf-8")
     assert "1/1 票" not in txt1
 
 
@@ -148,7 +158,7 @@ def test_index_html_shows_verdict_even_without_report_refs(tmp_path: Path):
     )
     store = LocalReportStore(tmp_path / "reports")
     idx = store.write(run.run_id, run)
-    txt = idx.read_text("utf-8")
+    txt = _uri_to_path(idx).read_text("utf-8")
     # 判定明细可见
     assert "判定明细" in txt
     assert "features/anchor.feature:7" in txt
@@ -188,7 +198,7 @@ def test_empty_report_refs_still_valid_index(tmp_path: Path):
     run = _rr("empty-run", [_jr("s", "novaact", status=Status.PASSED)], status=Status.PASSED)
     store = LocalReportStore(tmp_path / "reports")
     idx = store.write(run.run_id, run)
-    txt = idx.read_text("utf-8")
+    txt = _uri_to_path(idx).read_text("utf-8")
     assert "empty-run" in txt
     assert "无原生报告产物" in txt  # 空态有效页
     m = json.loads((tmp_path / "reports" / "empty-run" / "manifest.json").read_text("utf-8"))
@@ -201,9 +211,9 @@ def test_materialize_same_basename_no_collision(tmp_path: Path):
     d2 = tmp_path / "b"; d2.mkdir(); (d2 / "report.html").write_text("BBB", encoding="utf-8")
     run = _rr("collide", [
         _jr("s1", "e", status=Status.PASSED,
-            report_refs=(ReportRef(kind="scope", ref=f"file://{d1}/report.html"),)),
+            report_refs=(ReportRef(kind="scope", ref=ResourceUri(f"file://{d1}/report.html")),)),
         _jr("s2", "e", status=Status.PASSED,
-            report_refs=(ReportRef(kind="scope", ref=f"file://{d2}/report.html"),)),
+            report_refs=(ReportRef(kind="scope", ref=ResourceUri(f"file://{d2}/report.html")),)),
     ], status=Status.PASSED)
     store = LocalReportStore(tmp_path / "reports")
     store.write(run.run_id, run, materialize=True)
@@ -219,7 +229,7 @@ def test_materialize_percent_encoded_path(tmp_path: Path):
     from urllib.parse import quote
     src = tmp_path / "trajectory 词条页.html"
     src.write_text("traj", encoding="utf-8")
-    ref = "file://" + quote(str(src))  # 路径 percent-encode（空格→%20、中文→%XX）
+    ref = ResourceUri("file://" + quote(str(src)))  # 路径 percent-encode（空格→%20、中文→%XX）
     run = _rr("pe", [
         _jr("s", "novaact", status=Status.PASSED,
             report_refs=(ReportRef(kind="act", ref=ref),)),
@@ -235,7 +245,7 @@ def test_file_uri_with_remote_host_not_copied(tmp_path: Path):
     # file://server/share/x.html（带非 localhost host = 远端/UNC）→ 不当本地拷
     run = _rr("unc", [
         _jr("s", "e", status=Status.PASSED,
-            report_refs=(ReportRef(kind="scope", ref="file://server/share/x.html"),)),
+            report_refs=(ReportRef(kind="scope", ref=ResourceUri("file://server/share/x.html")),)),
     ], status=Status.PASSED)
     store = LocalReportStore(tmp_path / "reports")
     store.write(run.run_id, run, materialize=True)
@@ -247,7 +257,7 @@ def test_remote_ref_not_copied_even_when_materialize(tmp_path: Path):
     # 未来引擎报 https:// 外部 URL：materialize 也不拷贝（不 fetch 远端），href 保持原样
     run = _rr("r", [
         _jr("s", "future", status=Status.PASSED,
-            report_refs=(ReportRef(kind="video", ref="https://example.com/rec.mp4"),)),
+            report_refs=(ReportRef(kind="video", ref=ResourceUri("https://example.com/rec.mp4")),)),
     ], status=Status.PASSED)
     store = LocalReportStore(tmp_path / "reports")
     store.write(run.run_id, run, materialize=True)

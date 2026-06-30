@@ -9,6 +9,7 @@ from core.model import (
     Cost,
     Job,
     ReportRef,
+    ResourceUri,
     Scenario,
     ScenarioDone,
     ScenarioStarted,
@@ -378,7 +379,7 @@ def test_scope_report_refs_reduced():
         StepDone(scenario_id="m:0", step_index=0, status=Status.PASSED),
         ScenarioDone(scenario_id="m:0", status=Status.PASSED),
         ScopeDone(scope_id="m", session_id="sess-1",
-                  report_refs=(ReportRef(kind="scope", ref="file:///midscene_run/report/x.html"),)),
+                  report_refs=(ReportRef(kind="scope", ref=ResourceUri("file:///midscene_run/report/x.html")),)),
     ]
     engine = FakeEngine({"m": events})
     result = schedule(_rm([_job("m")]), FakeResolver(engine), CollectSink())

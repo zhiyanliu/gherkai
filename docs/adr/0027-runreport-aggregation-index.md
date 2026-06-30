@@ -19,9 +19,9 @@
 
 头等约束。保证机制：
 
-- **`ReportRef = {kind: str, ref: str, label: str | None}`**（取代旧 `{granularity: Literal["scope","act"], path}`）：
+- **`ReportRef = {kind: str, ref: ResourceUri, label: str | None}`**（取代旧 `{granularity: Literal["scope","act"], path}`）：
   - `kind` —— **开放字符串**，引擎自报（`scope`/`act`/未来 `video`/`trace`/`har`…）。core/wire/schedule **永不读它的值、永不按它分支**。`scope`/`act` 降为文档化约定常量，非枚举。
-  - `ref` —— **统一指针 URI**，不假定是本地文件。本地产物用 `file://` 前缀；未来可是 `s3://`/`https://`。core/ReportStore **不 stat、不 fetch、不打开** ref，只索引/链接。
+  - `ref` —— **统一指针 `ResourceUri`**，不假定是本地文件。本地产物用 `file://` 前缀；未来可是 `s3://`/`https://`。core/ReportStore **不 stat、不 fetch、不打开** ref，只索引/链接。
   - `label` —— 可选人类可读锚文本；缺省由消费端回落 `kind`。worker 可全部不报。
 - **铁律**：`core/model.py`、`core/wire.py`、`core/schedule.py` 对 `ReportRef` 永久是**不透明搬运**。任何「按 kind 选 `<video>`/`<iframe>`」之类的渲染分支**只允许出现在 cli / WebUI 皮层**，绝不写回 core。
 - 新引擎接入 = 它的 worker 报自己的 `ReportRef`，经 [0024](./0024-worker-core-protocol.md) 协议原样进 `report_refs`，归到 RunReport，**core 一行不改**。
@@ -49,18 +49,20 @@ RunReport 要按引擎标注每条产物。`JobResult` 须能就地拿到 `engin
 
 ```python
 class ReportStore(Protocol):
-    def write(self, run_id: str, result: RunResult, *, created_at: str = "", materialize: bool = False) -> Path:
-        """从 RunResult 归集出 <report_root>/<run_id>/{manifest.json, index.html}，返回 index.html 路径。
+    def write(self, run_id: str, result: RunResult, *, created_at: str = "", materialize: bool = False) -> ResourceUri:
+        """从 RunResult 归集出 <report_root>/<run_id>/{manifest.json, index.html}，返回 index.html 的 ResourceUri。
 
         只读 result 的 report_refs + scope_id/scenario_id/engine/status/时长/成本 做**导航视图**；
         不读 votes/steps 细节、不拿 status 当 CI 判定源（判定真值在 RunResult/ResultStore）。
         """
 ```
 
+- **返回 `ResourceUri` 而非 `Path`**（封版前收口）：`LocalReportStore` 回 `file://…/index.html`，未来 `S3ReportStore` 回 `s3://…/index.html`——**同一签名容两种落点**，否则 S3 adapter 被迫返回 `Path` 包 `s3://`（`Path` 会把 `s3://b/x` 折成 `s3:/b/x`，错）。`ResourceUri = NewType("ResourceUri", str)`（定义在 `core/model.py`）：把这个**本就存在于 `ReportRef.ref` 注释里**的约定提升成命名类型，统一「`ReportRef.ref` 与 `write` 返回值都是带 scheme 的资源指针」。比裸 `str` 多一层意图、又零运行时成本/零依赖（运行时即 `str`）。消费端（cli/WebUI）只当 URI 用、不 stat/open——cli 现把它原样放进 `artifacts.report_index` 并打成可点击的 `file://` 链接。
+  - 实现注意：`LocalReportStore` 内 `index_path.resolve().as_uri()`——`as_uri()` 要求绝对路径，而 cli 默认 `--report-dir` 是相对的（`reports`），不 `resolve()` 会抛 `ValueError`。
 - `materialize=False`（默认）：不拷贝产物，`index.html` 的链接直接指向 `ref`（本地够用；v1.0 定位本地 smoke，[0015](./0015-v1-positioning-smoke-not-regression.md)）。
 - `materialize=True`（opt-in）：按字节把产物拷进 `<run_id>/artifacts/`，链接转相对路径 → 目录自包含、可整体搬走/上 S3/发同事/CI 归档。
   - **默认不拷**是刻意的：本地跑时产物就在本机、手动查目录够用（[0016](./0016-execution-architecture-core-lib-run-model.md)「先散着」）。每 run 拷 N 个 MB 级 html + Nova 多个 trajectory 是纯磁盘放大、零收益——拷贝的价值只在搬运/上云时兑现，故 opt-in，不为想象中的 S3 场景提前盖机器。
-- `LocalReportStore` → 未来 `S3ReportStore` 只换「拷到哪 / 链接前缀」，core 不动。
+- `LocalReportStore` → 未来 `S3ReportStore` 只换「拷到哪 / 链接前缀 / 返回的 URI scheme」，core 不动。
 
 **「生成 RunReport」与「materialize 产物」是两个正交开关，默认值不同（刻意）**：
 - **生成 RunReport = run 的应得产物，cli 默认开**。每次 run 都归集到 `<report-dir>/<run_id>/`

@@ -9,6 +9,7 @@ from core.model import (
     Job,
     JobResult,
     ReportRef,
+    ResourceUri,
     RunMeta,
     RunResult,
     Scenario,
@@ -51,13 +52,13 @@ def _sample_run(run_id: str = "20260629-abc") -> RunResult:
                 total_tokens=10573,
                 duration_ms=11000.0,
                 session_id="sess-1",
-                report_refs=(ReportRef(kind="scope", ref="file:///x.html", label="r"),),
+                report_refs=(ReportRef(kind="scope", ref=ResourceUri("file:///x.html"), label="r"),),
                 scenarios=[
                     ScenarioResult(
                         scenario_id="features/wiki.feature:6",
                         status=Status.PASSED,
                         duration_ms=10000.0,
-                        report_refs=(ReportRef(kind="act", ref="file:///a.html"),),
+                        report_refs=(ReportRef(kind="act", ref=ResourceUri("file:///a.html")),),
                         steps=[
                             StepResult(index=0, status=Status.PASSED, duration_ms=3000.0),
                             StepResult(index=1, status=Status.PASSED, duration_ms=7000.0,

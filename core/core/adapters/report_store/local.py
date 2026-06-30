@@ -21,7 +21,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 from urllib.request import url2pathname
 
-from core.model import RunResult
+from core.model import ResourceUri, RunResult
 
 SCHEMA_VERSION = 1
 
@@ -32,8 +32,12 @@ class LocalReportStore:
     def __init__(self, report_root: str | Path) -> None:
         self._root = Path(report_root)
 
-    def write(self, run_id: str, result: RunResult, *, created_at: str = "", materialize: bool = False) -> Path:
-        """归集出 <root>/<run_id>/{manifest.json, index.html}，返回 index.html 路径。"""
+    def write(self, run_id: str, result: RunResult, *, created_at: str = "", materialize: bool = False) -> ResourceUri:
+        """归集出 <root>/<run_id>/{manifest.json, index.html}，返回 index.html 的 file:// ResourceUri。
+
+        返回 file:// URI（而非裸 Path）以对齐 ReportStore 契约：与未来 S3 adapter 的 s3:// 返回同形（ADR 0027）。
+        resolve() 成绝对路径再 as_uri()——as_uri 要求绝对路径，而 cli 默认 report_dir 是相对的（"reports"）。
+        """
         run_dir = self._root / run_id
         run_dir.mkdir(parents=True, exist_ok=True)
 
@@ -58,7 +62,7 @@ class LocalReportStore:
         # index.html 摘要直接用内存 result（不从 manifest 取——manifest 已不含 result）
         index_path = run_dir / "index.html"
         index_path.write_text(_render_index_html(manifest, result), encoding="utf-8")
-        return index_path
+        return ResourceUri(index_path.resolve().as_uri())
 
     def _collect(self, result: RunResult, run_dir: Path, materialize: bool) -> list[dict]:
         """遍历 result 树，把每个 ReportRef 投影成一条扁平 index 项。

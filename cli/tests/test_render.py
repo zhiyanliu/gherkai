@@ -6,6 +6,7 @@ from core.model import (
     Job,
     JobResult,
     ReportRef,
+    ResourceUri,
     RunMeta,
     RunResult,
     ScenarioResult,
@@ -34,7 +35,7 @@ def _sample_run() -> RunResult:
                 total_tokens=10573,
                 duration_ms=11000.0,
                 session_id="sess-abc",
-                report_refs=(ReportRef(kind="scope", ref="file:///x/report.html", label="Midscene report"),),
+                report_refs=(ReportRef(kind="scope", ref=ResourceUri("file:///x/report.html"), label="Midscene report"),),
                 scenarios=[
                     ScenarioResult(
                         scenario_id="features/demo.feature:6",

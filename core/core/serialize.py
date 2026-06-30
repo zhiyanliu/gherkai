@@ -18,6 +18,7 @@ from core.model import (
     JobResult,
     JobState,
     ReportRef,
+    ResourceUri,
     RunMeta,
     RunResult,
     RunState,
@@ -103,7 +104,8 @@ def _ref_to_dict(rr: ReportRef) -> dict:
 
 
 def _ref_from_dict(d: dict) -> ReportRef:
-    return ReportRef(kind=d["kind"], ref=d["ref"], label=d.get("label"))
+    # ref 包成 ResourceUri 仅为命名意图（带 scheme 的资源指针）；运行时仍是原字符串。
+    return ReportRef(kind=d["kind"], ref=ResourceUri(d["ref"]), label=d.get("label"))
 
 
 def _votes_from_dict(d: dict | None) -> Votes | None:

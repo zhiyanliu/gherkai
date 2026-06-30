@@ -11,10 +11,9 @@ rule-of-three 克制：接口现在定（逼清边界），实现只写 local，
 """
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Iterator, Protocol, runtime_checkable
 
-from core.model import Event, Job, JobResult, RunMeta, RunResult, RunState
+from core.model import Event, Job, JobResult, ResourceUri, RunMeta, RunResult, RunState
 
 
 # ============================================================================
@@ -104,8 +103,12 @@ class ReportStore(Protocol):
     不读 votes/steps 细节、不拿产物内容、不按 kind 分支（不透明搬运）。
     """
 
-    def write(self, run_id: str, result: RunResult, *, created_at: str = "", materialize: bool = False) -> Path:
-        """从 RunResult 归集出 <report_root>/<run_id>/{manifest.json, index.html}，返回 index.html 路径。
+    def write(self, run_id: str, result: RunResult, *, created_at: str = "", materialize: bool = False) -> ResourceUri:
+        """从 RunResult 归集出 <report_root>/<run_id>/{manifest.json, index.html}，返回 index.html 的 ResourceUri。
+
+        返回 ResourceUri 而非 Path：本地 adapter 回 file://…/index.html，未来 S3 adapter 回 s3://…/index.html
+        ——同一签名容两种落点，消费端（cli/WebUI）只当 URI 用（不 stat/open）。这统一了 ReportRef.ref 与
+        本方法返回值的语义：都是「带 scheme 的资源指针」（ADR 0027）。
 
         created_at: 组合根生成的时间戳字符串（core 不取时钟；进 manifest 信封）。
         materialize=False（默认）：不拷贝产物，index.html 链接直接指向各 ReportRef.ref（本地够用）。

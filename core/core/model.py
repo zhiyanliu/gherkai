@@ -7,7 +7,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Literal
+from typing import Literal, NewType
+
+# 资源 URI：带 scheme 的统一资源指针（本地 file://、未来云端 s3://、https://）。
+# 把一个本就存在的约定（见 ReportRef.ref / ReportStore.write）提升成命名类型——比裸 str
+# 多一层意图（「这是带 scheme 的 URI、不是本地路径」），又不像 pathlib.Path 那样会把 s3:// 折坏
+# （Path("s3://b/x") → "s3:/b/x"）。零运行时成本、零依赖：NewType 仅供命名/静态意图，运行时即 str。
+ResourceUri = NewType("ResourceUri", str)
 
 # ============================================================================
 # 输入侧：plan(ADR 0025) 产出、喂给 worker(ADR 0024 输入) 的形状
@@ -115,12 +121,12 @@ class ReportRef:
     不 stat/fetch ref、不按 kind 分支。新引擎报任意 kind 都零改 core（扩展性契约）。
 
     kind:  开放字符串，引擎自报。约定值 "scope"/"act"，未来可 "video"/"trace"/"har"…（非枚举）。
-    ref:   统一指针 URI，不假定是本地文件。本地产物用 file:// 前缀；未来可 s3://、https://。
+    ref:   统一指针 URI（ResourceUri）——不假定是本地文件。本地产物用 file:// 前缀；未来可 s3://、https://。
     label: 可选人类可读锚文本；缺省由消费端（cli/WebUI 皮层）回落 kind。
     """
 
     kind: str
-    ref: str
+    ref: ResourceUri
     label: str | None = None
 
 
