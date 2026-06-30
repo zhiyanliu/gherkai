@@ -343,14 +343,18 @@ class JobState:
 class RunState:
     """一次 run 的**控制面运行态**（status/血缘/起止；执行后产生，ADR 0016 控制面）。
 
-    与 RunMeta（definition）分开：definition 执行前确定、不变；运行态随执行产生。本地同步 cli
-    跑完一次性落；「执行中实时更新」靠 sink 消费 event（本轮不写 status-sink，机制已在，ADR 0026）。
-    started_at/ended_at 本轮留 optional、暂不取时钟（ADR 0016 起止时间字段顺延）。
+    与 RunMeta（definition）分开：definition 执行前确定、不变；运行态随执行产生。实时写下随进度增量更新
+    （ADR 0030：create_run 写初始全 pending → 每 job 完成/起跑刷 jobs[scope_id] → finalize 写总 status）。
+    started_at/ended_at 实时写下按生命周期出现（create_run 填 started、finalize 填 ended）。
+
+    **jobs 是 Map（scope_id → JobState），非 list**（ADR 0030 决定五）：实时按单个 job 刷状态需「按 scope_id
+    定位」，list 只能按下标定位（DDB 更无法按属性值定位 list 元素）。Map 下各 scope 互不干扰、支持单元素更新。
+    内存模型是 Map；落盘 JSON 仍是 list（serialize 负责转换，保 run_state.json 向后兼容）。
     """
 
     run_id: str
     status: Status
-    jobs: tuple[JobState, ...]
+    jobs: dict[str, JobState]  # scope_id → JobState（Map，ADR 0030 决定五）
     started_at: str | None = None
     ended_at: str | None = None
 
@@ -359,13 +363,13 @@ def run_state_from_result(result: RunResult) -> RunState:
     """从 RunResult 投影出控制面运行态（ADR 0016/0027）。
 
     投影的是**运行态**（status/session_id，本就执行后才有），非从结果反推 definition 身份——
-    scope_id 经 jr.job 取（definition 本在 job 里）。
+    scope_id 经 jr.job 取（definition 本在 job 里）。jobs 投影成 Map（scope_id → JobState，ADR 0030）。
     """
     return RunState(
         run_id=result.run_id,
         status=result.status,
-        jobs=tuple(
-            JobState(scope_id=jr.scope_id, status=jr.status, session_id=jr.session_id)
+        jobs={
+            jr.scope_id: JobState(scope_id=jr.scope_id, status=jr.status, session_id=jr.session_id)
             for jr in result.jobs
-        ),
+        },
     )

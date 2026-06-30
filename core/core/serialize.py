@@ -270,21 +270,24 @@ def run_state_to_dict(state: RunState) -> dict:
         d["started_at"] = state.started_at
     if state.ended_at is not None:
         d["ended_at"] = state.ended_at
+    # state.jobs 是 Map（scope_id → JobState，ADR 0030）：落盘 JSON 仍是 list（保 run_state.json 向后兼容）。
+    # 必须 .values() 迭代——直接 `for js in state.jobs` 会迭代 dict 的 key（str）、js.scope_id 即 AttributeError。
     d["jobs"] = [
         {"scope_id": js.scope_id, "status": js.status.value, "session_id": js.session_id}
-        for js in state.jobs
+        for js in state.jobs.values()
     ]
     return d
 
 
 def run_state_from_dict(d: dict) -> RunState:
+    # JSON 里 jobs 是 list；内存模型是 Map（scope_id → JobState，ADR 0030）——读回时按 scope_id 重建 Map。
     return RunState(
         run_id=d["run_id"],
         status=Status(d["status"]),
         started_at=d.get("started_at"),
         ended_at=d.get("ended_at"),
-        jobs=tuple(
-            JobState(scope_id=j["scope_id"], status=Status(j["status"]), session_id=j.get("session_id"))
+        jobs={
+            j["scope_id"]: JobState(scope_id=j["scope_id"], status=Status(j["status"]), session_id=j.get("session_id"))
             for j in d.get("jobs", [])
-        ),
+        },
     )

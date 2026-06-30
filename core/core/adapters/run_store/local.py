@@ -21,7 +21,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from core.model import RunMeta, RunState
+from core.model import JobState, RunMeta, RunState, Status
 from core.serialize import (
     run_meta_from_dict,
     run_meta_to_dict,
@@ -36,15 +36,51 @@ class LocalRunStore:
     def __init__(self, root: str | Path) -> None:
         self._root = Path(root)
 
+    def _write_state(self, state: RunState) -> None:
+        run_dir = self._root / state.run_id
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "run_state.json").write_text(
+            json.dumps(run_state_to_dict(state), ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+
     def save_run(self, meta: RunMeta, state: RunState) -> None:
-        """落 <root>/<run_id>/{run_meta.json, run_state.json}（写面）。"""
+        """落 <root>/<run_id>/{run_meta.json, run_state.json}（一次性写完整态，写面）。"""
         run_dir = self._root / meta.run_id
         run_dir.mkdir(parents=True, exist_ok=True)
         (run_dir / "run_meta.json").write_text(
             json.dumps(run_meta_to_dict(meta), ensure_ascii=False, indent=2), encoding="utf-8"
         )
-        (run_dir / "run_state.json").write_text(
-            json.dumps(run_state_to_dict(state), ensure_ascii=False, indent=2), encoding="utf-8"
+        self._write_state(state)
+
+    # ---- 实时写三段（ADR 0030）----
+    # 注：update_job_state / finalize_run 是「读 run_state.json → 改 → 写回」的 read-modify-write，
+    # **非自身线程安全**——依赖调用方串行（RunPersistence 的单一 store 锁，ADR 0030 决定三）。本地小文件，RMW 开销可忽略。
+
+    def create_run(self, meta: RunMeta, initial_state: RunState) -> None:
+        """run 开始：写 definition（run_meta.json）+ 初始运行态（run_state.json，各 job 一般为 pending）。
+        语义同 save_run，但意图是「生命周期起点」（与 finalize_run 配对）。"""
+        self.save_run(meta, initial_state)
+
+    def update_job_state(self, run_id: str, job_state: JobState) -> None:
+        """按 scope_id 刷单个 job 的运行态（Map upsert）。run_state.json 不存在则报错（须先 create_run）。"""
+        state = self.load_run_state(run_id)
+        if state is None:
+            raise FileNotFoundError(f"update_job_state：run_state 不存在（须先 create_run）：{run_id}")
+        jobs = dict(state.jobs)
+        jobs[job_state.scope_id] = job_state  # Map 定位：各 scope 互不干扰
+        self._write_state(
+            RunState(run_id=state.run_id, status=state.status, jobs=jobs,
+                     started_at=state.started_at, ended_at=state.ended_at)
+        )
+
+    def finalize_run(self, run_id: str, status: Status, ended_at: str) -> None:
+        """commit point：写总 status + ended_at（各 job 态此前已由 update_job_state 刷过）。"""
+        state = self.load_run_state(run_id)
+        if state is None:
+            raise FileNotFoundError(f"finalize_run：run_state 不存在（须先 create_run）：{run_id}")
+        self._write_state(
+            RunState(run_id=state.run_id, status=status, jobs=state.jobs,
+                     started_at=state.started_at, ended_at=ended_at or None)
         )
 
     def load_run_meta(self, run_id: str) -> RunMeta | None:

@@ -13,7 +13,17 @@ from __future__ import annotations
 
 from typing import Iterator, Protocol, runtime_checkable
 
-from core.model import Event, Job, JobResult, ResourceUri, RunMeta, RunResult, RunState
+from core.model import (
+    Event,
+    Job,
+    JobResult,
+    JobState,
+    ResourceUri,
+    RunMeta,
+    RunResult,
+    RunState,
+    Status,
+)
 
 
 # ============================================================================
@@ -85,10 +95,18 @@ class RunStore(Protocol):
     """控制面：一次 run 的 **definition（RunMeta）+ 运行态（RunState）**，不存判定明细（ADR 0016 三层切分）。
 
     definition（run_id/created_at/跑哪些 job）执行前确定；运行态（总 status/各 job status/血缘/起止）
-    执行后产生。本地同步 cli 跑完一次性 save；「执行中实时更新」靠 sink 消费 event（本轮不写，机制已在）。
-    判定明细真值在 ResultStore（不在此）。local adapter = LocalRunStore（落 run_meta.json + run_state.json）。
+    执行后产生。判定明细真值在 ResultStore（不在此）。local adapter = LocalRunStore（落 run_meta.json + run_state.json）。
+
+    实时写（ADR 0030）：run 生命周期按三段落库——create_run（开始：写 definition + 初始全 pending 态）→
+    update_job_state（每 job 起跑/完成：按 scope_id 刷单个 JobState）→ finalize_run（commit point：写总 status + ended_at）。
+    save_run 保留作「一次性写完整态」便捷方法（可由 create_run+finalize 组合）。
     """
 
+    # —— 实时写三段（ADR 0030）——
+    def create_run(self, meta: RunMeta, initial_state: RunState) -> None: ...
+    def update_job_state(self, run_id: str, job_state: JobState) -> None: ...
+    def finalize_run(self, run_id: str, status: Status, ended_at: str) -> None: ...
+    # —— 一次性写便捷方法（保留）——
     def save_run(self, meta: RunMeta, state: RunState) -> None: ...
     def load_run_meta(self, run_id: str) -> RunMeta | None: ...
     def load_run_state(self, run_id: str) -> RunState | None: ...

@@ -8,9 +8,11 @@ from core.serialize import from_dict, job_result_from_dict, job_result_to_dict, 
 from core.model import (
     Job,
     JobResult,
+    JobState,
     ReportRef,
     ResourceUri,
     RunMeta,
+    RunState,
     RunResult,
     Scenario,
     ScenarioResult,
@@ -149,11 +151,13 @@ def test_run_store_save_load(tmp_path: Path):
     meta = store.load_run_meta("run-1")
     assert meta is not None and meta.run_id == "run-1" and meta.created_at == "2026-06-29T00:00:00Z"
     assert len(meta.jobs) == 2 and meta.jobs[0].scope_id == "features/wiki.feature:6"
-    # 运行态读回（status/血缘，不含判定明细）
+    # 运行态读回（status/血缘，不含判定明细）。jobs 是 Map（scope_id → JobState，ADR 0030），按 key 取。
     state = store.load_run_state("run-1")
     assert state is not None and state.status == Status.FAILED
-    assert state.jobs[0].scope_id == "features/wiki.feature:6" and state.jobs[0].session_id == "sess-1"
-    assert state.jobs[0].status == Status.PASSED and state.jobs[1].status == Status.FAILED
+    j0 = state.jobs["features/wiki.feature:6"]
+    j1 = state.jobs["登录场景"]
+    assert j0.scope_id == "features/wiki.feature:6" and j0.session_id == "sess-1"
+    assert j0.status == Status.PASSED and j1.status == Status.FAILED
 
 
 def test_run_store_load_missing_returns_none(tmp_path: Path):
@@ -165,12 +169,11 @@ def test_run_store_load_missing_returns_none(tmp_path: Path):
 def test_run_state_timestamps_round_trip(tmp_path: Path):
     # started_at/ended_at 非 None 时也须经 save/load 完整保留（不止测 None 态）。
     # 本轮 run_state_from_result 不填起止（顺延，ADR 0016），故直接造带时间戳的 RunState 测落盘往返。
-    from core.model import JobState, RunState
     store = LocalRunStore(tmp_path / "runs")
     meta = _sample_run("run-ts").run_meta
     state = RunState(
         run_id="run-ts", status=Status.PASSED,
-        jobs=(JobState(scope_id="features/wiki.feature:6", status=Status.PASSED, session_id="sess-1"),),
+        jobs={"features/wiki.feature:6": JobState(scope_id="features/wiki.feature:6", status=Status.PASSED, session_id="sess-1")},
         started_at="2026-06-29T00:00:00Z", ended_at="2026-06-29T00:05:00Z",
     )
     store.save_run(meta, state)
@@ -222,3 +225,83 @@ def test_result_store_scope_id_not_path_traversal(tmp_path: Path):
     assert len(files) == 1
     assert "/" not in files[0].name.replace(".json", "")  # / 被编码，没造子目录
     assert store.load_job_result("run-3", "a/b/c:9").scope_id == "a/b/c:9"
+
+
+# ---- RunStore 实时写三段（ADR 0030）：create_run → update_job_state×N → finalize_run ----
+def _initial_state(run_id: str, scope_ids: list[str]) -> RunState:
+    """run 开始时的初始态：各 job 摆 pending、总 pending、起止未填。"""
+    return RunState(
+        run_id=run_id, status=Status.PENDING,
+        jobs={sid: JobState(scope_id=sid, status=Status.PENDING) for sid in scope_ids},
+        started_at="2026-07-01T00:00:00Z",
+    )
+
+
+def test_realtime_write_lifecycle(tmp_path: Path):
+    store = LocalRunStore(tmp_path / "runs")
+    meta = _sample_run("rt-run").run_meta
+    scope_ids = ["features/wiki.feature:6", "登录场景"]
+
+    # 1) 开始：写 definition + 全 pending 初始态
+    store.create_run(meta, _initial_state("rt-run", scope_ids))
+    s0 = store.load_run_state("rt-run")
+    assert s0 is not None and s0.status == Status.PENDING
+    assert all(js.status == Status.PENDING for js in s0.jobs.values())
+    assert store.load_run_meta("rt-run") is not None  # definition 也落了
+
+    # 2) 第一个 job 起跑 → running（带血缘）；中途读得到「部分完成态」（pending/running 混存）
+    store.update_job_state("rt-run", JobState("features/wiki.feature:6", Status.RUNNING, session_id="sess-1"))
+    mid = store.load_run_state("rt-run")
+    assert mid is not None
+    assert mid.jobs["features/wiki.feature:6"].status == Status.RUNNING
+    assert mid.jobs["features/wiki.feature:6"].session_id == "sess-1"
+    assert mid.jobs["登录场景"].status == Status.PENDING  # 另一个还没动——Map 单元素更新不互相污染
+    assert mid.status == Status.PENDING  # 总状态还没 finalize
+
+    # 3) 两个 job 各自完成
+    store.update_job_state("rt-run", JobState("features/wiki.feature:6", Status.PASSED, session_id="sess-1"))
+    store.update_job_state("rt-run", JobState("登录场景", Status.FAILED))
+    s2 = store.load_run_state("rt-run")
+    assert s2 is not None
+    assert s2.jobs["features/wiki.feature:6"].status == Status.PASSED
+    assert s2.jobs["登录场景"].status == Status.FAILED
+
+    # 4) finalize（commit point）：写总 status + ended_at；各 job 态保留
+    store.finalize_run("rt-run", Status.FAILED, "2026-07-01T00:05:00Z")
+    final = store.load_run_state("rt-run")
+    assert final is not None
+    assert final.status == Status.FAILED
+    assert final.ended_at == "2026-07-01T00:05:00Z"
+    assert final.started_at == "2026-07-01T00:00:00Z"  # create_run 填的起点保留
+    assert final.jobs["features/wiki.feature:6"].status == Status.PASSED  # job 态没被 finalize 覆盖
+
+
+def test_update_job_state_before_create_raises(tmp_path: Path):
+    # 未 create_run 就 update/finalize → 报错（须先建初始态，不静默吞）
+    import pytest
+    store = LocalRunStore(tmp_path / "runs")
+    with pytest.raises(FileNotFoundError):
+        store.update_job_state("nope", JobState("s", Status.RUNNING))
+    with pytest.raises(FileNotFoundError):
+        store.finalize_run("nope", Status.PASSED, "t")
+
+
+def test_run_state_jobs_map_round_trip(tmp_path: Path):
+    # RunState.jobs 是 Map（ADR 0030）：内存 dict → 落盘 list JSON → 读回仍是等价 Map
+    store = LocalRunStore(tmp_path / "runs")
+    meta = _sample_run("map-run").run_meta
+    state = RunState(
+        run_id="map-run", status=Status.PASSED,
+        jobs={
+            "features/wiki.feature:6": JobState("features/wiki.feature:6", Status.PASSED, session_id="s1"),
+            "登录场景": JobState("登录场景", Status.PASSED),
+        },
+    )
+    store.save_run(meta, state)
+    # 落盘 JSON 仍是 list（向后兼容）
+    raw = json.loads((tmp_path / "runs" / "map-run" / "run_state.json").read_text("utf-8"))
+    assert isinstance(raw["jobs"], list) and len(raw["jobs"]) == 2
+    # 读回是等价 Map
+    got = store.load_run_state("map-run")
+    assert got is not None and got == state
+    assert isinstance(got.jobs, dict)
