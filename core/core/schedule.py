@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 from core.model import (
+    _NON_VERDICT,
     Event,
     Job,
     JobResult,
@@ -134,7 +135,13 @@ class ScheduleOpts:
 
 
 def _aggregate(statuses: list[Status]) -> Status:
-    """状态归约：任一 error→error；任一 failed→failed；否则 passed（空也算 passed）。"""
+    """状态归约：任一 error→error；任一 failed→failed；否则 passed（空也算 passed）。
+
+    入口先滤掉非终态判定（skipped/aborted 派生态 + pending/running 前置态，ADR 0031 决定三）：
+    run 级只看真正出了判定的 job。把正确性钉在函数内、不依赖「skipped 必伴随 error」的外部不变量
+    （防未来引入主动 skip 时全-skipped run 被误判 passed）。scenario 内归约喂的全是 worker 三态，过滤是 no-op。
+    """
+    statuses = [s for s in statuses if s not in _NON_VERDICT]
     if any(s == Status.ERROR for s in statuses):
         return Status.ERROR
     if any(s == Status.FAILED for s in statuses):
@@ -203,11 +210,12 @@ class _Worker:
         # 时长追踪（core 用事件到达时间戳算墙钟，ADR 0024；clock 与超时复用同一注入时钟）：
         timing = _Timing()
 
-        # 起 worker 前先看是否已被 fail-fast 中止（排队中的 job 不该再起、不烧钱）
+        # 起 worker 前先看是否已被 fail-fast 中止（排队中的 job 不该再起、不烧钱）。
+        # worker 从未 spawn → SKIPPED（没执行/没花钱/可无脑重跑，ADR 0031），非 error。
         if self.abort_flag.is_set():
-            result.status = Status.ERROR
-            result.error_type = "engine_error"
-            result.message = "fail-fast：批次已中止，未启动"
+            result.status = Status.SKIPPED
+            result.error_type = None
+            result.message = "fail-fast：批次已中止，未启动（worker 未 spawn）"
             return result, False, saw_step
 
         try:
@@ -238,8 +246,10 @@ class _Worker:
                 if self.abort_flag.is_set():
                     self_stopped = True
                     self._stop()
-                    result.status = Status.ERROR
-                    result.error_type = "engine_error"
+                    # 已 spawn、跑一半被 fail-fast 掐 → ABORTED（有副作用/有现场可查，ADR 0031），非 error。
+                    # 注意与上面 timeout 分支区分：超时仍是 error+timeout，只有 abort_flag 触发的中止才 ABORTED。
+                    result.status = Status.ABORTED
+                    result.error_type = None
                     result.message = "fail-fast：其他 job 失败，本 job 被中止"
                     return result, False, saw_step
 
@@ -258,13 +268,15 @@ class _Worker:
             result.status = Status.ERROR
             # 竞态防护（ADR 0028）：worker 卡在建连退避里不吐事件时，上面的 timeout/abort 分支没机会执行
             # （for-event 阻塞在读），worker 最终退 80 直达此处。故在此**重新判**超时/fail-fast：
-            # 若墙钟已超 / 已被 fail-fast 中止，则这是「主动中止」语义，记 timeout/engine_error、**不重试**
-            # （主动中止优先于 network 重试），不能让超时预算被建连退避绕过。
-            if self_stopped or self.abort_flag.is_set():
-                result.error_type = "engine_error"
-                result.message = f"worker 被主动停止（fail-fast）后以网络码退出：{e}"
+            # 若墙钟已超 / 已被 fail-fast 中止，则这是「主动中止」语义、**不重试**（主动中止优先于 network 重试），
+            # 不能让超时预算被建连退避绕过。**按来源拆开**（ADR 0031）：fail-fast 中止→ABORTED，超时→error+timeout，
+            # 看 abort_flag 而非笼统 self_stopped（self_stopped 被 timeout/fail-fast 共用）；abort 先判，故 abort 优先。
+            if self.abort_flag.is_set():
+                result.status = Status.ABORTED
+                result.error_type = None
+                result.message = f"worker 被 fail-fast 中止后以网络码退出：{e}"
                 return result, False, saw_step
-            if deadline is not None and clock() > deadline:
+            if self_stopped or (deadline is not None and clock() > deadline):
                 result.error_type = "timeout"
                 result.message = f"job 超时（>{self.opts.job_timeout_s}s）——建连退避期间超时"
                 return result, False, saw_step

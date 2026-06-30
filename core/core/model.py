@@ -89,11 +89,45 @@ class Cost:
 
 
 class Status(str, Enum):
-    """scenario/step 三态（ADR 0024）。"""
+    """判定态（ADR 0024 三态）+ core 派生态/前置态（ADR 0031）。
+
+    worker 经 wire 只报前三态（passed/failed/error，ADR 0024）；后四态是 **core 内态、永不进 wire**：
+    - skipped/aborted：fail-fast 派生的 job 级**终态**（ADR 0031 决定一）。
+    - pending/running：实时写的 job 级**生命周期前置态**（ADR 0031 决定一·补），只活在 JobState/RunState，
+      不进 JobResult.status（终态判定只会是 passed/failed/error/skipped/aborted）、不参与 severity 比较。
+    """
 
     PASSED = "passed"  # 测试通过
     FAILED = "failed"  # 断言投票没过 = 测试发现了问题
     ERROR = "error"  # 引擎抛异常 = 没能跑完测试
+    SKIPPED = "skipped"  # core 派生终态：fail-fast 下 worker 从未 spawn。没执行/没花钱/可无脑重跑（ADR 0031）
+    ABORTED = "aborted"  # core 派生终态：fail-fast 下跑一半被掐。有副作用/有现场可查（ADR 0031）
+    PENDING = "pending"  # 前置态：run 开始 create_run 时占位（ADR 0030/0031）
+    RUNNING = "running"  # 前置态：worker 起了、收到 scope_started 后刷（ADR 0030/0031）
+
+
+# severity 数值序（ADR 0031 决定二）：**仅用于终态**的比较/排序/单调聚合。
+# 钉死 'error'<'failed' 字母序反向坑——绝不拿 Status 字符串比大小，一律查这张表。
+# 前置态 pending/running 不在此表（它们不是判定结论，不参与 severity 比较，见 _NON_VERDICT）。
+_STATUS_SEVERITY: dict[Status, int] = {
+    Status.SKIPPED: -1,  # 最轻：没执行，最该被无视
+    Status.PASSED: 0,
+    Status.FAILED: 1,
+    Status.ERROR: 2,
+    Status.ABORTED: 3,  # 最重：有现场，最该被人看
+}
+
+# run 级聚合的过滤名单（ADR 0031 决定三）：终态判定之外的态都不进 run 级聚合。
+# 含 skipped/aborted（派生终态、单写者、必伴随 error 同批，见 ADR 0031）+ pending/running（前置态，
+# 实时增量聚合时一个还在 running 的 job 不能污染 run 级 status）。两路聚合（schedule 返回值 / 实时增量）共用它。
+_NON_VERDICT: frozenset[Status] = frozenset(
+    {Status.SKIPPED, Status.ABORTED, Status.PENDING, Status.RUNNING}
+)
+
+
+def severity(status: Status) -> int:
+    """终态的 severity 数值（ADR 0031）。前置态 pending/running 无 severity，调用即编程错误。"""
+    return _STATUS_SEVERITY[status]
 
 
 # errorType 规范化类别集（ADR 0024，可随真实失败样本扩充）

@@ -140,6 +140,11 @@ def test_fail_fast_batch_errors():
     assert result.status == Status.ERROR  # 确定性：批次报错
     crash_jr = next(jr for jr in result.jobs if jr.scope_id == "crash")
     assert crash_jr.status == Status.ERROR
+    # 被牵连的 slow：协作式中止下结局依时序（已跑完 passed / 跑一半 aborted / 排队没起 skipped 都合法），
+    # 但**绝不该是 error**——被牵连中止不是自身故障（ADR 0031；精确的 skipped/aborted 复现见 test_lifecycle_states）
+    slow_jr = next(jr for jr in result.jobs if jr.scope_id == "slow")
+    assert slow_jr.status in (Status.PASSED, Status.ABORTED, Status.SKIPPED)
+    assert slow_jr.status != Status.ERROR
 
 
 # ---- fail-fast 关闭（默认隔离）对照：crash 崩但 slow 跑完 → ERROR 但 slow passed ----
