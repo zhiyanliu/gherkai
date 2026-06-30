@@ -65,6 +65,14 @@ class Sink(Protocol):
     def __call__(self, event: Event) -> None: ...
 
 
+# JobSink：每个 job 完成时的回调，收 schedule **已归约好的** JobResult（非原始 Event）——供实时落库（ADR 0030 决定一）。
+# 与 Sink 同性质（都是注入回调、可注入 no-op、schedule 不碰 store），但粒度是「整 job 完成」而非「单个事件」。
+# schedule 在 as_completed 主线程串行 fire，故实现无需自己加锁。
+@runtime_checkable
+class JobSink(Protocol):
+    def __call__(self, job: JobResult) -> None: ...
+
+
 # ============================================================================
 # 状态/结果/报告 port（ADR 0016 三层切分）。local adapter 均已建：RunStore 落 RunMeta(definition)+
 # RunState(运行态)；ResultStore 落 JobResult(判定真值)；ReportStore 归集 RunReport(0027)。控制面更野心的

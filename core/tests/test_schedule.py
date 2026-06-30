@@ -466,3 +466,58 @@ def test_network_retry_deadline_not_reset_across_attempts():
     # deadline 跨 attempt 共享：几次 attempt 后墙钟超 2s → 转 timeout，不会用满 network_retry=5
     assert result.status == Status.ERROR
     assert engine.run_count["n"] < 6  # 没用满 5 次重试（被共享 deadline 截断）
+
+
+# ---- on_job_complete 回调（ADR 0030 实时写接缝）----
+def test_on_job_complete_fires_once_per_job_with_final_jobresult():
+    # 每个 job 完成回调一次，传的是已归约好的最终 JobResult（含 status/scope_id）
+    jobs = [_job("a"), _job("b")]
+    engine = FakeEngine({"a": _passing_events("a", "a:0"), "b": _failing_events("b", "b:0")})
+    seen: list[tuple[str, Status]] = []
+    schedule(_rm(jobs), FakeResolver(engine), CollectSink(),
+             opts=ScheduleOpts(max_concurrency=2),
+             on_job_complete=lambda jr: seen.append((jr.scope_id, jr.status)))
+    # 两个 job 各回调一次，且拿到的是终态判定（a passed / b failed）
+    assert len(seen) == 2
+    assert dict(seen) == {"a": Status.PASSED, "b": Status.FAILED}
+
+
+def test_on_job_complete_default_none_is_noop():
+    # 不传回调（默认 None）：行为与从前完全一致（逃生舱，保纯 reducer）
+    engine = FakeEngine({"a": _passing_events("a", "a:0")})
+    result = schedule(_rm([_job("a")]), FakeResolver(engine), CollectSink())  # 不传 on_job_complete
+    assert result.status == Status.PASSED
+
+
+def test_on_job_complete_streams_not_batched():
+    # 流式：job 完成即回调，不是攒到最后一起。用 on_event 钩子让 a 先于 b 完成，
+    # 断言回调到达时 job_results 尚未集齐全部（证明边完成边回调）。
+    fired_at_len: list[int] = []
+    # max_concurrency=1 串行：a 完整跑完→回调→b 才开始。回调发生在 b 尚未完成时。
+    jobs = [_job("a"), _job("b")]
+    engine = FakeEngine({"a": _passing_events("a", "a:0"), "b": _passing_events("b", "b:0")})
+    order: list[str] = []
+    def cb(jr):
+        order.append(jr.scope_id)
+        fired_at_len.append(len(order))
+    schedule(_rm(jobs), FakeResolver(engine), CollectSink(),
+             opts=ScheduleOpts(max_concurrency=1), on_job_complete=cb)
+    # 串行下回调按完成序逐个到达：第一次 fire 时只有 1 个、第二次 2 个（增量，非末尾一次性 2 个）
+    assert fired_at_len == [1, 2]
+    assert len(order) == 2
+
+
+def test_on_job_complete_fires_for_skipped_job():
+    # 关键（ADR 0030/0031）：skipped 的 job 从没 event 流过，但仍必须经回调落库
+    # （否则 ResultStore 缺该 scope 的文件、CI 读单 scope 落空）。
+    jobs = [_job("crash"), _job("queued")]
+    engine = FakeEngine({"crash": _passing_events("crash", "crash:0"),
+                         "queued": _passing_events("queued", "queued:0")},
+                        crash_after={"crash": 0})
+    seen: dict[str, Status] = {}
+    schedule(_rm(jobs), FakeResolver(engine), CollectSink(),
+             opts=ScheduleOpts(max_concurrency=1, fail_fast=True),
+             on_job_complete=lambda jr: seen.__setitem__(jr.scope_id, jr.status))
+    # 两个 job 都回调了——含从未 spawn 的 skipped job
+    assert seen.get("crash") == Status.ERROR
+    assert seen.get("queued") == Status.SKIPPED

@@ -40,7 +40,7 @@ from core.model import (
     StepStarted,
 )
 from core.errors import WorkerNetworkError
-from core.ports import EngineResolver, Sink
+from core.ports import EngineResolver, JobSink, Sink
 
 import queue as _queue
 
@@ -367,6 +367,7 @@ def schedule(
     engines: EngineResolver,
     sink: Sink,
     opts: ScheduleOpts | None = None,
+    on_job_complete: JobSink | None = None,
 ) -> RunResult:
     """跑一次 run（RunMeta = definition）→ RunResult（ADR 0026）。
 
@@ -376,6 +377,10 @@ def schedule(
               schedule 原样把 run_meta 放进 RunResult（definition + 判定的合成），不从结果反推身份。
     engines:  按 job.engine 解析 Engine 的 resolver（schedule 对引擎数/引擎名无知）。
     sink:     接收 ADR 0024 原始流式事件的回调（与 RunResult 是同一事件流的两个视图）。
+    on_job_complete: 每个 job 完成时回调它**已归约好的 JobResult**（ADR 0030 实时写接缝）。schedule 自己
+              不碰任何 store——落库/写序由组合根注入的回调编排（默认 None=no-op，逃生舱：测试/--no-report/
+              纯内存都不传，保 schedule 纯 reducer 与 fake-clock 可测）。**正常路径（产品）总会接 persistence**，
+              None 不是常态。在 as_completed 主线程**串行** fire（非 worker 线程），故回调实现无需自己加锁。
     """
     opts = opts or ScheduleOpts()
     jobs = list(run_meta.jobs)
@@ -392,6 +397,10 @@ def schedule(
         for future in as_completed(future_to_worker):
             jr = future.result()
             job_results.append(jr)
+            # 实时写接缝（ADR 0030）：job 一完成即回调它已归约好的 JobResult，供组合根落库（schedule 不碰 store）。
+            # 主线程串行 fire（无需锁）。默认 None=no-op。回调异常不应吞掉判定结果——让它冒泡（落库失败=真问题）。
+            if on_job_complete is not None:
+                on_job_complete(jr)
             # fail-fast：一个 job 崩（error）→ 中止整批：设 abort + stop 所有在跑 worker（ADR 0026）
             if opts.fail_fast and jr.status == Status.ERROR and not abort_flag.is_set():
                 abort_flag.set()
