@@ -86,7 +86,8 @@ worker **边跑边流式上报**（每行一个事件），core 实时收。选�
 
 **一等字段**（core 要理解/分支）：
 - **`status` 三态**：`passed` / `failed`（断言投票没过 = 测试发现了问题）/ `error`（引擎抛异常 = 没能跑完测试）。`failed` 与 `error` 语义不同，worker 负责区分——前者是测试结论，后者是执行故障。
-- **`votes`**：step 是 AI 断言时才有，记 tally `{yes, total}`——够算抖动率（[0014](./0014-ai-first-assertions.md) 投票治种类A抖动），不记每票细节（两个引擎都拿不到 per-vote thought）。**`votes` 的存在与否即 core 区分「AI 断言 vs 其余」的唯一依据**（取代了原 `kind` 字段）。
+- **`votes`**：step 是 AI 断言时才有，记 tally `{yes, total}`——够算抖动率（[0014](./0014-ai-first-assertions.md) 投票治种类A抖动）。**`votes` 的存在与否即 core 区分「AI 断言 vs 其余」的唯一依据**（取代了原 `kind` 字段）。
+  - **为何只记 tally、不记 per-vote 序列**（澄清，免再纠结）：每票的 **yes/no 是拿得到的**（worker 投票循环里就是逐票布尔，见两个引擎 worker），只是折成 `{yes,total}` 计数。不留逐票序列是因为**投票是无序重复采样**——`[T,F,T]` 相对 `{yes:2,total:3}` 仅多了"顺序"，而顺序无语义，tally 已是全部信息。**真正拿不到的是每票的 thought/reason**（`aiBoolean`/`act_get(BOOL)` 只回布尔、不回"为何这么判"，两个引擎 SDK 皆然）——这才是「留口子不实现」里的「per-vote 细节」所指。
 - **`errorType` + `message`**（规范化失败分类）：`errorType` 取自固定类别集，让 RunResult/未来重试能按类型分支；`message` 是人类可读诊断。**`failed` 与 `error` 两态均可带 `errorType`**（`failed`→`assertion_failed`；`error`→其余执行故障类）。**两个引擎映射**：Nova Act 有丰富异常树（按类映射），Midscene 只抛通用 `Error`（归 `engine_error`）。初始类别集：`assertion_failed`（断言没过）/ `timeout` / `guardrail` / `engine_error`（引擎内部/通用异常）/ `navigation_error` / `network_error`（网络/SSL 建连层瞬时故障,可重试,[0028](./0028-transient-network-ssl-resilience.md)）。类别集可随真实失败样本扩充。**退出码约定（[0028](./0028-transient-network-ssl-resilience.md)）**：建连失败发生在任何事件 emit 之前,worker 无法走事件通道,故约定专用退出码 `EX_WORKER_NETWORK=80` 作 out-of-band 信号；adapter 把它翻成 `WorkerNetworkError` → schedule 记 `network_error`。
 
 **core 不分支的附加信息**（存进 RunReport，不进 core 逻辑分支）：
@@ -141,7 +142,7 @@ core 的 `schedule`/汇总逻辑应能用一个**假 worker**（in-memory adapte
 
 - **现在做（v1.0，已落地）**：上述输入/输出 schema、cost 信封（engine 报原生量 time_worked_s/tokens、core 合计）、三态 status/votes 区分 AI 断言；worker 派发逻辑（确定性注册表 > 内建 URL 导航 > 默认 AI，[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)）；两个引擎对称的 `@deterministic` 注册表（命中走精确 handler、不投票）；两个引擎 worker `get_session_id` 取会话血缘；**两个引擎对称的 reportRefs**——Midscene 取 `agent.reportFile` 报 scope 级（`scope_done`），Nova 设 `logs_directory` 持久化 trajectory、取 `metadata.trajectory_file_path` 报 act 级（`scenario_done`），归集成 RunReport（[0027](./0027-runreport-aggregation-index.md)）。
 - **已实现但粗粒度（留待细化）**：`errorType` —— 建连层瞬时故障已细分为 `network_error`（两个引擎 worker 建连重试 + 退出码约定,[0028](./0028-transient-network-ssl-resilience.md)）；其余执行故障 Nova worker 仍一律归 `engine_error`（`except Exception` 兜底），按 Nova 异常树细分（timeout/guardrail/navigation_error）仍留口子。
-- **留口子不实现**：per-vote 细节；trajectory 内部结构的结构化提取；美元折算（交消费者，框架不做）。
+- **留口子不实现**：per-vote 细节（= 每票的 thought/reason，SDK 拿不到；非 yes/no——见上 `votes` 字段澄清）；trajectory 内部结构的结构化提取；美元折算（交消费者，框架不做）。
 
 ## 重议
 
