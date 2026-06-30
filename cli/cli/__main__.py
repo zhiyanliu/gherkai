@@ -16,8 +16,9 @@ from pathlib import Path
 from core.adapters.report_store.local import LocalReportStore
 from core.adapters.run_store.local import LocalRunStore
 from core.adapters.result_store.local import LocalResultStore
-from core.model import Event, RunMeta, run_state_from_result
+from core.model import Event, RunMeta, Status
 from core.parse import FeatureParseError
+from core.persist import RunPersistence
 from core.scope import PlanConfig, PlanError, plan
 from core.schedule import ScheduleOpts, schedule
 
@@ -191,6 +192,21 @@ def _cmd_run(args, repo: Path) -> int:
     nova_logs_dir = (Path(args.report_dir).resolve() / run_id / "nova-trajectories") if do_report else None
     resolver = compose.make_resolver(compose.build_engines(repo, nova_logs_dir=nova_logs_dir))
 
+    # 3b) 实时写编排（ADR 0030）：组合根注入 store adapter，RunPersistence 负责「随进度落库」的统一编排
+    #     （commit-point 写序 / RUNNING 中间态 / 按 scope_id 增量刷）。--no-report 则不落库（逃生舱），
+    #     此时 persistence=None，schedule 不接 on_job_complete、sink 不装饰（保纯跑、零落盘）。
+    persistence: RunPersistence | None = None
+    if do_report:
+        root = Path(args.report_dir)
+        persistence = RunPersistence(
+            run_id,
+            run_store=LocalRunStore(root),
+            result_store=LocalResultStore(root),
+            report_store=LocalReportStore(root),
+        )
+        # begin 必在 schedule 之前：写 definition + 初始全 pending 态（满足「提交即返回 runId」，ADR 0027）
+        persistence.begin(run_meta, started_at=compose.now_iso())
+
     # 4) sink：逐事件进度 → stderr（诊断；--quiet 静音。不再受 --json 影响——走 stderr 不污染 stdout 数据）
     #    前缀 `[core <scope>:event]` 与 worker 透传行 `[worker <scope>:err]` **同一视觉骨架**
     #    `[producer scope:kind]` 且都顶格——并发跑批时多 scope 的行交错，读者只认一个模式即可分辨来源。
@@ -198,18 +214,24 @@ def _cmd_run(args, repo: Path) -> int:
     #    scenario_id→scope_id 映射，sink 据此把任何事件解析回所属 scope（纯展示，不碰 core/协议）。
     _scenario_to_scope = {sc.id: j.scope_id for j in jobs for sc in j.scenarios}
 
-    def sink(ev: Event) -> None:
+    def progress_sink(ev: Event) -> None:
         if args.quiet:
             return
         scope = getattr(ev, "scope_id", None) or _scenario_to_scope.get(getattr(ev, "scenario_id", None), "?")
         _progress(f"[core {scope}:event] {render.format_event(ev)}")
+
+    # 实时写：persistence.sink 装饰进度 sink（收 ScopeStarted 刷 RUNNING+血缘）；on_job_complete 每 job 完成即落库。
+    # --no-report（persistence=None）则裸跑：sink 不装饰、不接 on_job_complete。
+    sink = persistence.sink(progress_sink) if persistence else progress_sink
+    on_job_complete = persistence.on_job_complete if persistence else None
 
     _progress(
         f"run_id={run_id}  schedule: 起真 worker → 真 AgentCore 会话（烧钱）"
         f"max_concurrency={args.max_concurrency} job_timeout={args.timeout}s ..."
     )
 
-    # 5) schedule：跑 RunMeta（definition）→ RunResult（timeout<=0 → 不超时）
+    # 5) schedule：跑 RunMeta（definition）→ RunResult（timeout<=0 → 不超时）。
+    #    job 一完成即经 on_job_complete 实时落库（数据面判定真值先写，ADR 0030）。
     result = schedule(
         run_meta, resolver, sink,
         ScheduleOpts(
@@ -218,26 +240,16 @@ def _cmd_run(args, repo: Path) -> int:
             job_timeout_s=args.timeout if args.timeout > 0 else None,
             grace_period_s=args.grace,
         ),
+        on_job_complete=on_job_complete,
     )
 
-    # 6) 落盘 + 归集（默认开，run 的应得产物；--no-report 跳过；同 <report-dir>/<run_id>/ 落点）
-    #    先落盘再渲染：--json 模式要把产物落点折进同一个 JSON 文档（见 7），故产物路径需先备好。
+    # 6) commit point（ADR 0030 决定三）：各 job 判定真值已由 on_job_complete 逐个流式落；此处只剩
+    #    finalize（写总 status + ended_at）+ 归集 ReportStore（派生、永远最后）。「finalize 一落 = run 已提交」。
     artifacts: dict[str, str] = {}
-    if do_report:
+    if persistence:
         root = Path(args.report_dir)
-        # 6a) RunStore：definition(RunMeta) + 运行态(RunState) 落盘（控制面，不存判定明细，ADR 0016）
-        #     断「从 RunResult 反推身份」——meta 是组合根先于跑批构造的 definition，state 从 result 投影运行态
-        LocalRunStore(root).save_run(run_meta, run_state_from_result(result))
-        # 6b) ResultStore：每 job 判定追加落盘（数据面判定真值唯一权威，CI 读单 scope，ADR 0016）
-        result_store = LocalResultStore(root)
-        for jr in result.jobs:
-            result_store.save_job_result(run_id, jr)
-        # 6c) ReportStore：归集 RunReport（人看入口 + manifest，软引用 run_id，ADR 0027）
-        index = LocalReportStore(root).write(
-            run_id, result, created_at=compose.now_iso(), materialize=args.materialize
-        )
-        # 三层落点（ADR 0016）：RunResult 不存单一 run.json，分解为 RunStore(run_meta+run_state)
-        # + ResultStore(jobs/) + ReportStore(index/manifest)。
+        index = persistence.finalize(result, ended_at=compose.now_iso(), materialize=args.materialize)
+        # 三层落点（ADR 0016）：RunStore(run_meta+run_state) + ResultStore(jobs/) + ReportStore(index/manifest)。
         artifacts = {
             "report_index": str(index),
             "run_meta": str(root / run_id / "run_meta.json"),
@@ -261,7 +273,9 @@ def _cmd_run(args, repo: Path) -> int:
             f" | 判定明细: {artifacts['jobs_dir']}/"
         )
 
-    return 0 if result.status.value == "passed" else 1
+    # 退出码基于 run 级 status（ADR 0031 决定五）：读 schedule 返回的内存终值（必是终态，不回读落库态）。
+    # PASSED→0，其余（failed/error，含必伴随 error 的 skipped/aborted 批次）→1。对未来新态稳健。
+    return 0 if result.status == Status.PASSED else 1
 
 
 def main(argv: list[str] | None = None) -> int:
