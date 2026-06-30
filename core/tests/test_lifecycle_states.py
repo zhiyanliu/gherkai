@@ -8,6 +8,7 @@ import threading
 
 from core.model import (
     ScenarioStarted,
+    ScopeStarted,
     Status,
     StepDone,
     Votes,
@@ -19,7 +20,7 @@ from core.model import Job, JobResult
 from core.schedule import ScheduleOpts, _aggregate, schedule
 from core.serialize import job_result_from_dict, job_result_to_dict
 from tests.fake_engine import CollectSink, FakeEngine, FakeResolver, FakeWorkerHandle
-from tests.test_schedule import _job, _passing_events, _rm
+from tests.test_schedule import _IncClock, _job, _passing_events, _rm
 
 
 # ---- serialize round-trip 覆盖新态（ADR 0031 touch-point）----
@@ -158,3 +159,94 @@ def test_fail_fast_inflight_job_is_aborted():
     assert victim_jr.error_type is None              # aborted 不带 errorType（不是引擎故障，是被叫停）
     assert victim_jr.status != Status.ERROR          # 关键回归：被牵连中止绝不再记成 error（ADR 0031）
     assert result.status == Status.ERROR             # run 级仍 error（crash 顶上去），aborted 不进 run 级聚合
+
+
+# ---- severity 完整传递序（ADR 0031 决定二）：一行钉死全序，抗中间调换回归 ----
+def test_severity_full_chain():
+    # 现有 test_severity_* 只验两端极值 + 中间三态；这里钉死完整 5 态传递序
+    assert (severity(Status.SKIPPED) < severity(Status.PASSED) < severity(Status.FAILED)
+            < severity(Status.ERROR) < severity(Status.ABORTED))
+
+
+def test_aggregate_running_does_not_pollute_clean_pass():
+    # 干净的 [PASSED, RUNNING]：running 被滤掉、不把结果带偏 → PASSED（ADR 0031 决定三）
+    assert _aggregate([Status.PASSED, Status.RUNNING]) == Status.PASSED
+    # 空集兜底（schedule docstring「空也算 passed」）
+    assert _aggregate([]) == Status.PASSED
+
+
+# ---- WorkerNetworkError 竞态块按 abort_flag 拆分（ADR 0031 决定一，最易回归的坑）----
+# schedule.py 的 except WorkerNetworkError 块有三子分支：abort_flag→ABORTED / 超时→error+timeout / else→network_error。
+# 这是 ADR 用整段文字警告的坑（self_stopped 被 timeout/fail-fast 共用、要看 abort_flag）。现有 network 测试只命中
+# else 分支，timeout 测试命中的是事件循环里的 deadline 而非 network 块里的重判——故专门复现这两条竞态子分支。
+from core.errors import WorkerNetworkError  # noqa: E402
+
+
+class _NetRaiseEngine:
+    """victim job 的 worker：等一个 gate 放行后才抛 WorkerNetworkError（模拟「建连退避期间」被中止/超时后退 80）。
+    crash job：立刻崩，让 schedule set abort_flag（fail-fast 场景用）。"""
+    def __init__(self, gate: threading.Event, set_on_victim_entry: threading.Event | None = None):
+        self.handles: dict = {}
+        self.run_count: dict = {}
+        self._gate = gate
+        self._entered = set_on_victim_entry
+
+    def run_scope(self, job):
+        h = FakeWorkerHandle()
+        self.handles[job.scope_id] = h
+        self.run_count[job.scope_id] = self.run_count.get(job.scope_id, 0) + 1
+        return h, self._gen(job)
+
+    def _gen(self, job):
+        if job.scope_id == "crash":
+            # crash 必须等 victim 先进入事件循环（过了起跑前 abort 检查）才崩——否则 victim 会被判 SKIPPED 而非 ABORTED
+            if self._entered is not None:
+                self._entered.wait(timeout=5)
+            raise RuntimeError("crash 崩 → set abort_flag")
+        # victim：先吐一个事件证明已 spawn、在事件循环里（过了起跑前检查）；宣告 entered；
+        # 再 wait gate（被 fail-fast stop 时放行）→ 抛网络码 → 命中 except WorkerNetworkError 块的 abort 分支。
+        yield ScopeStarted(scope_id="victim", session_id="sess-v")
+        if self._entered is not None:
+            self._entered.set()
+        self._gate.wait(timeout=5)
+        raise WorkerNetworkError("victim 建连失败、以网络码退出")
+
+
+def test_network_error_during_abort_is_aborted_not_network():
+    # 竞态：worker 已在事件循环里、abort_flag 已 set 后才抛 WorkerNetworkError → 走 abort 分支 → ABORTED（非 network_error）
+    gate = threading.Event()
+    entered = threading.Event()
+    engine = _NetRaiseEngine(gate, set_on_victim_entry=entered)
+    # victim 被 stop 时（schedule fail-fast → 调 handle.stop）放行 gate，让它在 abort 已生效后才抛网络码
+    orig_stop = FakeWorkerHandle.stop
+
+    def stop_hook(self, grace_period_s):
+        gate.set()
+        return orig_stop(self, grace_period_s)
+
+    FakeWorkerHandle.stop = stop_hook
+    try:
+        result = schedule(
+            _rm([_job("crash"), _job("victim")]), FakeResolver(engine), CollectSink(),
+            opts=ScheduleOpts(max_concurrency=2, fail_fast=True, grace_period_s=0.1),
+        )
+    finally:
+        FakeWorkerHandle.stop = orig_stop
+    victim_jr = next(jr for jr in result.jobs if jr.scope_id == "victim")
+    assert victim_jr.status == Status.ABORTED          # abort 分支优先：不记成 network_error
+    assert victim_jr.error_type is None                # aborted 不带 errorType
+
+
+def test_network_error_during_timeout_is_timeout_not_aborted():
+    # 竞态：单 job，worker 在建连退避里以网络码退出，但此刻墙钟已过 deadline → 走 timeout 分支 → error+timeout（非 aborted、非 network_error）
+    gate = threading.Event(); gate.set()  # 立刻放行：victim 一进来就抛网络码
+    engine = _NetRaiseEngine(gate)
+    # _IncClock 每读 +10s，job_timeout=5 → schedule 内首次读 clock 建 deadline≈10，网络块重判 clock()>deadline 必真
+    clock = _IncClock(10.0)
+    result = schedule(
+        _rm([_job("victim")]), FakeResolver(engine), CollectSink(),
+        opts=ScheduleOpts(job_timeout_s=5.0, clock=clock, network_retry=0),
+    )
+    victim_jr = result.jobs[0]
+    assert victim_jr.status == Status.ERROR
+    assert victim_jr.error_type == "timeout"           # 超时不被网络码绕过、不归 aborted

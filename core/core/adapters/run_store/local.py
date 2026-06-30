@@ -78,9 +78,11 @@ class LocalRunStore:
         state = self.load_run_state(run_id)
         if state is None:
             raise FileNotFoundError(f"finalize_run：run_state 不存在（须先 create_run）：{run_id}")
+        # ended_at 直传（不写 `or None`）：签名是 str、finalize 语义就是落一个具体 ended_at；
+        # 用 falsy 兜会把合法空串静默吞成 None（omit-when-None 后键消失，已 finalize 的 run 看似未 finalize）。
         self._write_state(
             RunState(run_id=state.run_id, status=status, jobs=state.jobs,
-                     started_at=state.started_at, ended_at=ended_at or None)
+                     started_at=state.started_at, ended_at=ended_at)
         )
 
     def load_run_meta(self, run_id: str) -> RunMeta | None:

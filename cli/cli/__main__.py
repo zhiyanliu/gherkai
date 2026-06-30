@@ -220,9 +220,10 @@ def _cmd_run(args, repo: Path) -> int:
         scope = getattr(ev, "scope_id", None) or _scenario_to_scope.get(getattr(ev, "scenario_id", None), "?")
         _progress(f"[core {scope}:event] {render.format_event(ev)}")
 
-    # 实时写：persistence.sink 装饰进度 sink（收 ScopeStarted 刷 RUNNING+血缘）；on_job_complete 每 job 完成即落库。
-    # --no-report（persistence=None）则裸跑：sink 不装饰、不接 on_job_complete。
-    sink = persistence.sink(progress_sink) if persistence else progress_sink
+    # 实时写（ADR 0030）：sink 始终是纯进度（不再装饰落库）；落库走两个旁路注入——
+    #   on_event（sink_lock 外，收 ScopeStarted 刷 RUNNING+血缘，不阻塞别 worker 进度显示）
+    #   on_job_complete（主线程，每 job 完成落数据面+控制面终态）。--no-report（persistence=None）则裸跑、两者皆 None。
+    on_event = persistence.on_event if persistence else None
     on_job_complete = persistence.on_job_complete if persistence else None
 
     _progress(
@@ -233,7 +234,7 @@ def _cmd_run(args, repo: Path) -> int:
     # 5) schedule：跑 RunMeta（definition）→ RunResult（timeout<=0 → 不超时）。
     #    job 一完成即经 on_job_complete 实时落库（数据面判定真值先写，ADR 0030）。
     result = schedule(
-        run_meta, resolver, sink,
+        run_meta, resolver, progress_sink,
         ScheduleOpts(
             max_concurrency=args.max_concurrency,
             fail_fast=args.fail_fast,
@@ -241,6 +242,7 @@ def _cmd_run(args, repo: Path) -> int:
             grace_period_s=args.grace,
         ),
         on_job_complete=on_job_complete,
+        on_event=on_event,
     )
 
     # 6) commit point（ADR 0030 决定三）：各 job 判定真值已由 on_job_complete 逐个流式落；此处只剩

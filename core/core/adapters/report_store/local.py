@@ -136,7 +136,17 @@ def _materialize(src: Path, run_dir: Path, seq: int) -> str:
 
 # ---- index.html 渲染（纯字符串，无模板引擎；按 kind 不分支，只回显）----
 
-_STATUS_COLOR = {"passed": "#1a7f37", "failed": "#cf222e", "error": "#9a6700"}
+# 终态判定色 + core 派生态/前置态色（ADR 0031 touch point）：每态各配可区分的视觉，否则新态全走兜底灰
+# #57606a，aborted（severity 最高、最该被看）会与 error/兜底混淆。
+_STATUS_COLOR = {
+    "passed": "#1a7f37",   # 绿
+    "failed": "#cf222e",   # 红
+    "error": "#9a6700",    # 琥珀
+    "skipped": "#8c959f",  # 弱化灰（没执行、最该被无视；须与兜底 #57606a 可分）
+    "aborted": "#8250df",  # 紫（有现场、最该被看；与 error 琥珀 + 兜底灰都可区分）
+    "pending": "#0969da",  # 蓝（进行中前置态；当前到不了 report，为未来 RunState 视图兜底）
+    "running": "#0969da",  # 蓝（进行中）
+}
 
 
 def _fmt_ms(ms: float | None) -> str:

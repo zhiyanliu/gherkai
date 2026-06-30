@@ -4,6 +4,8 @@
 """
 from __future__ import annotations
 
+import threading
+
 from core.model import (
     RunMeta,
     Cost,
@@ -521,3 +523,49 @@ def test_on_job_complete_fires_for_skipped_job():
     # 两个 job 都回调了——含从未 spawn 的 skipped job
     assert seen.get("crash") == Status.ERROR
     assert seen.get("queued") == Status.SKIPPED
+
+
+def test_on_job_complete_exception_propagates_not_swallowed():
+    # ADR 0030：回调异常不应被吞——落库失败=真问题，必须冒泡（而非被 ThreadPoolExecutor/as_completed 静默丢）。
+    # 若有人给回调加 try/except 兜底（看似稳健、实则掩盖落库失败），此测试变红。
+    import pytest
+    engine = FakeEngine({"a": _passing_events("a", "a:0")})
+
+    def boom(jr):
+        raise RuntimeError("落库炸了")
+
+    with pytest.raises(RuntimeError, match="落库炸了"):
+        schedule(_rm([_job("a")]), FakeResolver(engine), CollectSink(), on_job_complete=boom)
+
+
+def test_on_job_complete_exception_stops_inflight_workers_before_raise():
+    # review #2：回调抛异常时，冒泡前必须先 stop 所有在跑 worker——否则异常跳出 with、shutdown(wait=True)
+    # 会等在跑 worker 自然跑完（真 AgentCore 会话继续烧钱）。验：异常仍抛 + 在跑 worker 的 handle 被 stop。
+    import pytest
+    slow_started = threading.Event()  # slow 已 spawn 且在事件循环里
+    release_fast = threading.Event()  # 放行 fast 完成（确保 slow 先在跑）
+
+    def slow_stream(scope_id):
+        # slow 先吐一个事件（证明已 spawn、在循环里）→ 宣告 started → 阻塞直到被 stop（handle.stopped 后协作退出）
+        yield ScenarioStarted(scenario_id=f"{scope_id}:0")
+        slow_started.set()
+        for i in range(200):
+            release_fast.wait(timeout=2)
+            yield StepDone(scenario_id=f"{scope_id}:0", step_index=i, status=Status.PASSED, votes=Votes(3, 3))
+
+    def fast_stream(scope_id):
+        slow_started.wait(timeout=2)  # 等 slow 真在跑了，fast 才完成 → 保证 fast 回调抛错时 slow 是 in-flight
+        yield from _passing_events(scope_id, f"{scope_id}:0")
+
+    engine = FakeEngine({"fast": fast_stream("fast"), "slow": slow_stream("slow")})
+
+    def boom_on_fast(jr):
+        if jr.scope_id == "fast":
+            release_fast.set()  # 让 slow 能在被 stop 后从 wait 醒来、看到 handle.stopped 协作退出
+            raise RuntimeError("fast 落库炸了")
+
+    with pytest.raises(RuntimeError, match="fast 落库炸了"):
+        schedule(_rm([_job("fast"), _job("slow")]), FakeResolver(engine), CollectSink(),
+                 opts=ScheduleOpts(max_concurrency=2), on_job_complete=boom_on_fast)
+    # 关键断言：slow 的 worker 在异常冒泡前被 stop（止血，不空烧会话）
+    assert engine.handles["slow"].stopped

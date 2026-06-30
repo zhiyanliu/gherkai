@@ -13,18 +13,21 @@ from cli import __main__ as m
 
 
 def _fake_schedule_factory():
-    """造一个不起 worker 的假 schedule：发事件给 sink（验证进度路由 + RUNNING 刷）+ 每 job fire
-    on_job_complete（验证实时落库路径）+ 把 run_meta 合成 RunResult。"""
+    """造一个不起 worker 的假 schedule：发事件给 sink（进度）+ on_event（persistence 刷 RUNNING）+ 每 job
+    fire on_job_complete（验证实时落库路径）+ 把 run_meta 合成 RunResult。"""
     from core.model import ScopeStarted
 
-    def fake_schedule(run_meta, engines, sink, opts=None, on_job_complete=None):
+    def fake_schedule(run_meta, engines, sink, opts=None, on_job_complete=None, on_event=None):
         results = []
         for j in run_meta.jobs:
-            sink(ScopeStarted(scope_id=j.scope_id))  # 走 sink 路径：进度 [event] + persistence 刷 RUNNING
+            ev = ScopeStarted(scope_id=j.scope_id)
+            sink(ev)                       # 进度 [event] 路由
+            if on_event is not None:
+                on_event(ev)               # 旁路观察者：persistence 刷 RUNNING（sink_lock 外，ADR 0030）
             jr = JobResult(job=j, status=Status.PASSED)
             results.append(jr)
             if on_job_complete is not None:
-                on_job_complete(jr)  # job 完成即回调：persistence 实时落 ResultStore + RunStore
+                on_job_complete(jr)        # job 完成即回调：persistence 实时落 ResultStore + RunStore
         return RunResult(run_meta=run_meta, status=Status.PASSED, jobs=results)
     return fake_schedule
 
@@ -190,7 +193,7 @@ def test_plan_text_argument_hint(tmp_path, capsys):
 # ---- #7 run 退出码 + ScheduleOpts 参数映射 ----
 def _capturing_schedule(status, opts_box):
     """假 schedule：把传入 opts 存进 opts_box、按指定 status 合成 RunResult（验退出码/参数映射）。"""
-    def fake(run_meta, engines, sink, opts=None, on_job_complete=None):
+    def fake(run_meta, engines, sink, opts=None, on_job_complete=None, on_event=None):
         opts_box["opts"] = opts
         results = [JobResult(job=j, status=status) for j in run_meta.jobs]
         if on_job_complete is not None:
@@ -330,10 +333,13 @@ def test_run_state_shows_running_then_final(tmp_path, monkeypatch, capsys):
     from core.model import ScopeStarted
     from core.adapters.run_store.local import LocalRunStore
 
-    def fake_schedule(run_meta, engines, sink, opts=None, on_job_complete=None):
+    def fake_schedule(run_meta, engines, sink, opts=None, on_job_complete=None, on_event=None):
         results = []
         for j in run_meta.jobs:
-            sink(ScopeStarted(scope_id=j.scope_id, session_id="sess-xyz"))  # 刷 RUNNING + 血缘
+            ev = ScopeStarted(scope_id=j.scope_id, session_id="sess-xyz")
+            sink(ev)
+            if on_event:
+                on_event(ev)  # 旁路观察者：persistence 刷 RUNNING + 血缘
             jr = JobResult(job=j, status=Status.PASSED, session_id="sess-xyz")
             results.append(jr)
             if on_job_complete:

@@ -160,6 +160,7 @@ class _Worker:
         sink_lock: threading.Lock,
         opts: ScheduleOpts,
         abort_flag: threading.Event,
+        on_event: Sink | None = None,
     ) -> None:
         self.job = job
         self.engines = engines
@@ -167,6 +168,9 @@ class _Worker:
         self.sink_lock = sink_lock
         self.opts = opts
         self.abort_flag = abort_flag
+        # on_event：每个事件的旁路观察者（实时落库用），在 sink_lock **之外**调（故不把磁盘 RMW 串进进度显示临界区，
+        # ADR 0030 决定三并发不变量；落库自身的线程安全由观察者自持锁保证，如 RunPersistence._lock）。
+        self.on_event = on_event
         self.handle = None  # 暴露给 fail-fast：其他 job 崩时外部可 stop 本 worker
 
     def run(self) -> JobResult:
@@ -262,6 +266,8 @@ class _Worker:
                 if isinstance(event, StepDone):
                     saw_step = True  # 会话已起、有 act 执行 → 封掉 job 级重试（防重复副作用）
                 self._emit(event)
+                if self.on_event is not None:
+                    self.on_event(event)  # 旁路观察者：在 sink_lock 外调（实时落库不阻塞别的 worker 进度显示）
                 self._reduce(event, result, scenario_status, timing, clock())
         except WorkerNetworkError as e:  # 建连失败、重试耗尽（ADR 0028）：可被 job 级重试
             self._stop()
@@ -368,6 +374,7 @@ def schedule(
     sink: Sink,
     opts: ScheduleOpts | None = None,
     on_job_complete: JobSink | None = None,
+    on_event: Sink | None = None,
 ) -> RunResult:
     """跑一次 run（RunMeta = definition）→ RunResult（ADR 0026）。
 
@@ -376,36 +383,48 @@ def schedule(
               纯归约定位；WebUI「提交即返回 runId」也要求 definition 先于跑批存在，ADR 0027）。
               schedule 原样把 run_meta 放进 RunResult（definition + 判定的合成），不从结果反推身份。
     engines:  按 job.engine 解析 Engine 的 resolver（schedule 对引擎数/引擎名无知）。
-    sink:     接收 ADR 0024 原始流式事件的回调（与 RunResult 是同一事件流的两个视图）。
+    sink:     接收 ADR 0024 原始流式事件的回调（与 RunResult 是同一事件流的两个视图）。被 sink_lock 串行化（进度显示）。
     on_job_complete: 每个 job 完成时回调它**已归约好的 JobResult**（ADR 0030 实时写接缝）。schedule 自己
               不碰任何 store——落库/写序由组合根注入的回调编排（默认 None=no-op，逃生舱：测试/--no-report/
               纯内存都不传，保 schedule 纯 reducer 与 fake-clock 可测）。**正常路径（产品）总会接 persistence**，
-              None 不是常态。在 as_completed 主线程**串行** fire（非 worker 线程），故回调实现无需自己加锁。
+              None 不是常态。在 as_completed 主线程**串行** fire（非 worker 线程）。
+    on_event: 每个事件的**旁路观察者**（实时落库 RUNNING 中间态用，ADR 0030）。与 sink 区别：on_event 在
+              **sink_lock 之外**调——故落库的磁盘 RMW 不阻塞别的 worker 的进度显示（决定三并发不变量）。
+              它仍在 worker 线程被调、多 worker 并发，故观察者须自持锁（如 RunPersistence._lock）。默认 None。
     """
     opts = opts or ScheduleOpts()
     jobs = list(run_meta.jobs)
     sink_lock = threading.Lock()
     abort_flag = threading.Event()
     workers = [
-        _Worker(job, engines, sink, sink_lock, opts, abort_flag) for job in jobs
+        _Worker(job, engines, sink, sink_lock, opts, abort_flag, on_event=on_event) for job in jobs
     ]
 
     run_start = opts.clock()  # run 级墙钟起点（整体包住，含并发）
     job_results: list[JobResult] = []
+
+    def _stop_all() -> None:
+        abort_flag.set()
+        for w in workers:
+            w._stop()
+
     with ThreadPoolExecutor(max_workers=max(1, opts.max_concurrency)) as pool:
         future_to_worker = {pool.submit(w.run): w for w in workers}
         for future in as_completed(future_to_worker):
             jr = future.result()
             job_results.append(jr)
             # 实时写接缝（ADR 0030）：job 一完成即回调它已归约好的 JobResult，供组合根落库（schedule 不碰 store）。
-            # 主线程串行 fire（无需锁）。默认 None=no-op。回调异常不应吞掉判定结果——让它冒泡（落库失败=真问题）。
+            # 主线程串行 fire。默认 None=no-op。回调异常仍冒泡（落库失败=真问题），但**冒泡前先 stop 所有在跑
+            # worker**——否则异常跳出 with、shutdown(wait=True) 会等在跑 worker 自然跑完（真 AgentCore 会话继续烧钱）。
             if on_job_complete is not None:
-                on_job_complete(jr)
+                try:
+                    on_job_complete(jr)
+                except BaseException:
+                    _stop_all()  # 止血：掐掉在跑会话，别空烧
+                    raise
             # fail-fast：一个 job 崩（error）→ 中止整批：设 abort + stop 所有在跑 worker（ADR 0026）
             if opts.fail_fast and jr.status == Status.ERROR and not abort_flag.is_set():
-                abort_flag.set()
-                for w in workers:
-                    w._stop()
+                _stop_all()
     run_duration_ms = (opts.clock() - run_start) * 1000.0
 
     # 还原成 jobs 输入顺序（as_completed 是完成序），稳定输出
