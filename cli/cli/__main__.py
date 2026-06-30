@@ -17,6 +17,7 @@ from core.adapters.report_store.local import LocalReportStore
 from core.adapters.run_store.local import LocalRunStore
 from core.adapters.result_store.local import LocalResultStore
 from core.model import Event, RunMeta, run_state_from_result
+from core.parse import FeatureParseError
 from core.scope import PlanConfig, PlanError, plan
 from core.schedule import ScheduleOpts, schedule
 
@@ -118,6 +119,9 @@ def _cmd_plan(args, repo: Path) -> int:
     except PlanError as e:
         _progress(f"plan 失败（配置矛盾，拒绝运行）：{e}")
         return 2
+    except FeatureParseError as e:
+        _progress(f"feature 语法错误（gherkin 解析失败，含行:列）：\n{e}")
+        return 2
 
     # 核心产出 → stdout（与 run 的输出契约一致：--json 单文档 / 否则人看文本）
     if args.json:
@@ -162,6 +166,9 @@ def _cmd_run(args, repo: Path) -> int:
         ))
     except PlanError as e:
         _progress(f"plan 失败（配置矛盾，拒绝运行）：{e}")
+        return 2
+    except FeatureParseError as e:
+        _progress(f"feature 语法错误（gherkin 解析失败，含行:列）：\n{e}")
         return 2
 
     # 进度走 stderr（不再受 --json 开关；stdout 始终只放核心产出）。--quiet 仍可静音逐事件。

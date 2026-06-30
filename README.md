@@ -4,31 +4,36 @@
 
 > 术语与设计决策见 [`CONTEXT.md`](./CONTEXT.md) 和 [`docs/adr/`](./docs/adr/)，外部一手来源见 [`docs/REFERENCES.md`](./docs/REFERENCES.md)。（初始蓝图 `midscene-novaact-prototype-guide.md` 已退役——其内容被 CONTEXT+ADR 全面覆盖且经实测更正。）
 
-## 现状（2026-06，已端到端验证）
+## 现状（v1.0，已端到端验证）
 
-> **本 README 描述 `spike-validated` / v0.x 形态**（双 BDD runner 直跑：cucumber-js + pytest-bdd）。此形态已端到端验证、当前可跑。**v1.0 起架构有重大调整**：核心库自解析 Gherkin + 两个引擎薄 worker 子进程，**退役** cucumber-js/pytest-bdd 及 cucumber 补丁，改为 `core/` + `cli/` + `engines/{midscene,novaact}` 布局——见 ADR 0016（执行架构）/ 0022（BDD runner 退役）/ 0023（核心语言）。下文凡涉双 runner、`cucumber.mjs`、cucumber 补丁处均为 v0.x 形态。
+架构：**核心库 `core/`（Python）自解析 Gherkin → 分组 scope/job → 调度**，每个 scope spawn 一个**薄 worker 子进程**（Midscene=TS / Nova Act=Python），worker 讲统一的 worker↔core 协议（ADR 0024）。`cli/` 是核心库的第一个前端（组合根）。已**退役** v0.x 的 cucumber-js/pytest-bdd 双 runner 直跑（见 ADR 0016 执行架构 / 0022 BDD runner 退役 / 0023 核心语言）。
 
-三层链路的每一层、每个连接点都已在真实 AWS 账号用真实请求验证通过：
+三层链路 + v1.0 核心库均已在真实 AWS 账号端到端验证：
 
-| 里程碑 | 内容                                        | 状态                |
-|--------|---------------------------------------------|---------------------|
-| M1     | 双引擎冒烟（各自 spike 针）                   | ✅                   |
-| M2     | 单一 `.feature` 被两套 runner 驱动          | ✅                   |
-| M3     | Nova Act 接 AgentCore 云端浏览器            | ✅                   |
-| M4     | Midscene 接 AgentCore（一度被视为"最大难关"） | ✅ 实测零坑          |
-| M5     | 报告统一（= RunReport）                      | ✅ v1.0 归集索引（ADR 0027；manifest + index，不融合产物） |
+| 能力 | 内容 | 状态 |
+|------|------|------|
+| 双引擎执行 | 同一份 `.feature` → 两个引擎薄 worker（cli 经 `@engine` tag 路由） | ✅ 端到端真跑 |
+| 云端浏览器 | 两个引擎都接 AgentCore Browser（各自一个会话，CDP 驱动） | ✅ |
+| 核心库 | parse + scope 分组 + schedule 调度 + 4 ports（Engine/Run/Result/ReportStore） | ✅ 测试 core 76 |
+| 投票治理 | AI 断言可配 N 次取多数票（`--assertion-votes`，治抖动，ADR 0014） | ✅ |
+| RunReport | 跨引擎归集索引（manifest + index，不融合产物，ADR 0027） | ✅ |
+| 网络韧性 | 建连两层重试 + network_error 分类 + SIGTERM 会话泄漏根治（ADR 0028） | ✅ |
+
+> **承接 v0.x 顺延项（待真实业务系统）**：≥3 真实用例 QA 零代码验收 + 破例清单（ADR 0016）——当前用骨架用例（wikipedia/example.com）验证方向，真实系统验收顺延。
 
 ## 架构速览
 
 ```
-① 用例层   features/*.feature              ← 共享 Gherkin，两个引擎同读一份（ADR 0005）
-              │  被两套 runner 各自加载（v0.x 形态）
-② 执行层   Midscene(TS)    ┃  Nova Act(Python)   ← 两个独立 AI 引擎，平级
-   runner  cucumber-js     ┃  pytest-bdd
-   大脑    Qwen3-VL@Bedrock ┃  nova-act-latest
-   鉴权    SigV4 自签        ┃  IAM @workflow
+① 用例层   features/*.feature              ← 共享 Gherkin（ADR 0005）
+              │
+② 核心库   core/（Python）：parse → scope 分组 → schedule 调度   ← 窄腰，零引擎依赖（ADR 0016）
+   前端    cli/（run / plan / list-engines）= 组合根，注入引擎
+              │  对每个 scope spawn 一个薄 worker，讲 0024 协议
+③ 执行层   Midscene worker(TS)  ┃  Nova Act worker(Python)   ← 两个独立 AI 引擎，平级
+   大脑    Qwen3-VL@Bedrock     ┃  nova-act-latest
+   鉴权    SigV4 自签            ┃  IAM @workflow
               │  都经 CDP 驱动
-③ 浏览器层 AgentCore Browser（aws.browser.v1，每引擎各一个会话）
+④ 浏览器层 AgentCore Browser（aws.browser.v1，每引擎各一个会话）
 ```
 
 关键约束：**全栈托管在 AWS 内**（ADR 0009）；**范围限英文 UI**（ADR 0001）。
@@ -39,21 +44,18 @@
 yaozhou/
 ├── README.md                  ← 本文件
 ├── CONTEXT.md                 ← 领域术语表（glossary）
-├── docs/adr/                  ← 27 条架构决策记录
-├── features/                  ← 共享 .feature（同一份被两个引擎加载；通用 step 风格）
-│   ├── wikipedia_generic.feature
-│   ├── wikipedia_assertions.feature
-│   ├── wikipedia_robustness.feature
-│   ├── engine_routing.feature
-│   └── deterministic_anchor.feature   ← @deterministic 锚点验证（ADR 0022/0027）
-├── engines/midscene/                  ← Midscene 引擎子工程（TS）
-│   ├── cucumber.mjs           ← cucumber-js 配置（指向根 features/）
-│   ├── lib/agentcore-sigv4.mts ← 共享 SigV4 模块（模型连接 + 浏览器连接/CDP；spike/bdd 共用）
-│   ├── bdd/steps/generic.steps.ts ← Midscene 侧通用 step（QA 不写代码）
-│   └── spikes/ ← 自检 spike（01 模型/02 CDP/03 合体/04 planning/05 负向）+ SIGV4-FETCH-RECIPE.md
-└── engines/novaact/                   ← Nova Act 引擎子工程（Python）
-    ├── bdd/test_generic_steps.py  ← Nova Act 侧通用 step（pytest-bdd）
-    └── spikes/wikipedia_benchmark.py  ← Nova Act 引擎 spike
+├── docs/adr/                  ← 架构决策记录（0001–0028）
+├── features/                  ← 共享 .feature（同一份两个引擎同读；通用 step 风格，QA 零代码）
+│   ├── wikipedia_generic.feature / wikipedia_assertions.feature / wikipedia_robustness.feature
+│   ├── engine_routing.feature              ← @engine tag 路由验证
+│   └── deterministic_anchor.feature        ← @deterministic 锚点验证（ADR 0022）
+├── core/                      ← 窄腰核心库（Python，零引擎依赖，ADR 0016）
+│   └── core/{parse,scope,schedule,model,wire,serialize,ports}.py + adapters/{run,result,report}_store/
+├── cli/                       ← 核心库的第一个前端 = 组合根（ADR 0016）
+│   └── cli/{__main__.py(argparse) · compose.py(引擎注册表) · render.py}
+└── engines/                   ← 两个可插拔引擎，与 core 平级
+    ├── midscene/   ← TS 子工程：worker/run-scope.ts（薄 worker）· worker/deterministic.ts · lib/agentcore-sigv4.mts · spikes/
+    └── novaact/    ← Python 子工程：worker/run_scope.py（薄 worker）· worker/deterministic.py · lib/workflow_setup.py · spikes/
 ```
 
 ## 前置要求
@@ -65,32 +67,35 @@ yaozhou/
 - Nova Act workflow definition（IAM 路径必需）：**代码会自动 create-if-not-exists**（`engines/novaact/lib/workflow_setup.py`），无需手动操作。若想手动预建也可：`aws nova-act create-workflow-definition --region us-east-1 --name spike-wikipedia-benchmark`（见 ADR 0004）。
 - Node 22（midscene）、Python 3.13 + uv（novaact）
 
-## 运行（同一份 .feature，两套引擎，通用 step）
+## 运行（经核心库 cli，一个入口跑两个引擎）
 
-**Midscene 侧（cucumber-js + TS）：**
 ```bash
-cd engines/midscene
-# 跑全部 feature：
-NODE_OPTIONS="--import tsx/esm" AWS_REGION=us-east-1 node_modules/.bin/cucumber-js -c cucumber.mjs
-# 跑子集用 tag（勿再传 feature 路径，会与配置 paths 合并）：... -c cucumber.mjs --tags "@engine:midscene"
-# → 报告：engines/midscene/midscene_run/report/*.html
+cd cli
+uv sync                                            # 装环境（core 作 path 依赖）
+
+# ① 预检（纯本地、不烧钱）：看 .feature 分出哪些 scope/job、engine 路由对不对、校验配置
+uv run python -m cli plan ../features/engine_routing.feature
+
+# ② 真跑（会烧 AWS 钱：模型调用 + AgentCore 会话）。engine 由 @engine tag 选、未标用 --default-engine
+AWS_REGION=us-east-1 uv run python -m cli run ../features/engine_routing.feature
+# 调高投票治抖动 / 放开并发 / JSON 输出：
+AWS_REGION=us-east-1 uv run python -m cli run ../features/wikipedia_generic.feature \
+  --default-engine midscene --assertion-votes 3 --max-concurrency 2 --json
+
+# 列可用引擎（不烧钱）
+uv run python -m cli list-engines
 ```
 
-**Nova Act 侧（pytest-bdd + Python）：**
-```bash
-cd engines/novaact
-AWS_REGION=us-east-1 .venv/bin/python -m pytest bdd/test_generic_steps.py -s
-# → trajectory：$TMPDIR/..._nova_act_logs/<sessionId>/（默认临时目录，见 ADR 0010）
-```
+跑完落 `cli/reports/<run_id>/`：RunReport（`index.html` 人看入口 + `manifest.json`）+ 判定真值（`jobs/`）+ 控制面（`run_meta.json`/`run_state.json`）。详见 [`cli/README.md`](./cli/README.md)。**先 `plan` 后 `run`**——run 真烧钱，plan 是纯本地预检。
 
-两个引擎加载的是**同一份** `features/` 下的 `.feature`（通用 step 风格，QA 只写自然语言）。
+两个引擎读的是**同一份** `features/` 下 `.feature`（通用 step 风格，QA 只写自然语言）。
 
 ### 怎么写 `.feature`（QA 零代码，ADR 0020）
 
 - 动作/断言都写**纯自然语言、无路由关键词**：`When "搜索 OpenAI"` / `Then "进入了 OpenAI 词条页"` → 默认走 AI（动作=aiAct/act；断言=aiBoolean/act_get+投票）。
 - scope/引擎用 **tag**（ADR 0019）：`@scope:login`（共享会话、串行）/ `@engine:midscene|novaact`（选引擎）。
-- **确定性精确检查**（URL/DOM，不容 AI 抖动）：由 test engineer 在 `deterministic.steps.ts` / `deterministic_steps.py` 脚手架按需写（QA 不碰）。
-- Midscene 侧依赖一个本地 cucumber 补丁让裸 `When/Then` 不冲突（ADR 0021，已随 `patches/` + `postinstall` 固化）。
+- **确定性精确检查**（URL/DOM，不容 AI 抖动）：由 test engineer 在 worker 的 `@deterministic` 注册表按需写（`deterministic.ts` / `deterministic.py`；命中走精确 handler、不投票，ADR 0022）（QA 不碰）。
+- **多行参数**：AI 动作/断言 step 可挂 Gherkin DataTable/DocString，worker 拼成附加文本随 step 一起喂 AI（ADR 0024）。
 
 ## Spike（可独立跑的技术验证脚本）
 

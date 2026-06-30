@@ -182,3 +182,57 @@ def test_plan_text_argument_hint(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "+dataTable(2×2)" in out    # 2 行 × 2 列
     assert "+docString(2 行)" in out
+
+
+# ---- #7 run 退出码 + ScheduleOpts 参数映射 ----
+def _capturing_schedule(status, opts_box):
+    """假 schedule：把传入 opts 存进 opts_box、按指定 status 合成 RunResult（验退出码/参数映射）。"""
+    def fake(run_meta, engines, sink, opts=None):
+        opts_box["opts"] = opts
+        return RunResult(run_meta=run_meta, status=status,
+                         jobs=[JobResult(job=j, status=status) for j in run_meta.jobs])
+    return fake
+
+
+def test_run_exit_code_1_on_failed(tmp_path, monkeypatch, capsys):
+    box = {}
+    monkeypatch.setattr(m, "schedule", _capturing_schedule(Status.FAILED, box))
+    rc = m.main(["run", str(_write_feature(tmp_path)), "--no-report"])
+    assert rc == 1  # 跑完但有 failed → 退 1（CI 据此判红）
+
+
+def test_run_exit_code_1_on_error(tmp_path, monkeypatch, capsys):
+    box = {}
+    monkeypatch.setattr(m, "schedule", _capturing_schedule(Status.ERROR, box))
+    rc = m.main(["run", str(_write_feature(tmp_path)), "--no-report"])
+    assert rc == 1
+
+
+def test_run_schedule_opts_mapping(tmp_path, monkeypatch, capsys):
+    box = {}
+    monkeypatch.setattr(m, "schedule", _capturing_schedule(Status.PASSED, box))
+    m.main(["run", str(_write_feature(tmp_path)), "--no-report",
+            "--max-concurrency", "3", "--timeout", "120", "--grace", "7", "--fail-fast"])
+    o = box["opts"]
+    assert o.max_concurrency == 3 and o.fail_fast is True
+    assert o.job_timeout_s == 120.0 and o.grace_period_s == 7.0
+
+
+def test_run_timeout_nonpositive_maps_to_none(tmp_path, monkeypatch, capsys):
+    # --timeout <=0 → job_timeout_s=None（不超时），是有逻辑的转换，护住它
+    box = {}
+    monkeypatch.setattr(m, "schedule", _capturing_schedule(Status.PASSED, box))
+    m.main(["run", str(_write_feature(tmp_path)), "--no-report", "--timeout", "0"])
+    assert box["opts"].job_timeout_s is None
+
+
+# ---- #8 畸形 feature → 友好诊断、退 2、无 traceback ----
+def test_malformed_feature_friendly_diagnostic(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())  # 不该走到 schedule
+    bad = tmp_path / "bad.feature"
+    bad.write_text("this is not gherkin\n  garbage\n", encoding="utf-8")
+    for cmd in ("plan", "run"):
+        rc = m.main([cmd, str(bad), "--no-report"] if cmd == "run" else [cmd, str(bad)])
+        assert rc == 2, f"{cmd} 畸形 feature 应退 2"
+        err = capsys.readouterr().err
+        assert "语法错误" in err and "Traceback" not in err  # 友好诊断、非 Python traceback

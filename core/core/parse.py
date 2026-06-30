@@ -17,8 +17,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from gherkin import Compiler, Parser
+from gherkin.errors import CompositeParserException
 
 from core.model import Scenario, Step, StepArgument
+
+# 自有别名：把 gherkin 的解析异常对外暴露成 core 的 FeatureParseError，使消费层（cli）能捕获
+# 「feature 语法错」而**不直接 import gherkin**（与「gherkin pickle 形状不外泄」同理，ADR 0025）。
+# 异常实例的消息已含行:列定位，消费层直接展示即可。
+FeatureParseError = CompositeParserException
 
 
 @dataclass(frozen=True)
