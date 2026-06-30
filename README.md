@@ -48,7 +48,8 @@ yaozhou/
 ├── features/                  ← 共享 .feature（同一份两个引擎同读；通用 step 风格，QA 零代码）
 │   ├── wikipedia_generic.feature / wikipedia_assertions.feature / wikipedia_robustness.feature
 │   ├── engine_routing.feature              ← @engine tag 路由验证
-│   └── deterministic_anchor.feature        ← @deterministic 锚点验证（ADR 0022）
+│   ├── deterministic_anchor.feature        ← @deterministic 锚点验证（ADR 0022）
+│   └── concurrency_and_scope.feature       ← 手工真跑回归夹具：改调度/会话生命周期后重跑验 ADR 0019
 ├── core/                      ← 窄腰核心库（Python，零引擎依赖，ADR 0016）
 │   └── core/{parse,scope,schedule,model,wire,serialize,ports}.py + adapters/{run,result,report}_store/
 ├── cli/                       ← 核心库的第一个前端 = 组合根（ADR 0016）
