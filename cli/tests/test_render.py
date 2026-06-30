@@ -117,7 +117,9 @@ def test_format_event_single_vote_hides_tally():
     assert "votes=3/3" in render.format_event(ev3)
 
 
-def test_format_event_scope_done():
+def test_format_event_omits_scope_id():
+    # scope_id 不再进事件行——它归调用方的 `[core <scope>:event]` 前缀（见 __main__.py sink），
+    # 行内只留前缀没有的字段，避免 `[core login:event] scope_done scope_id=login` 这种重复。
     s = render.format_event(ScopeDone(scope_id="login", session_id="s1"))
     assert "scope_done" in s
-    assert "scope_id=login" in s
+    assert "scope_id=" not in s  # scope 归前缀，行内不再重复

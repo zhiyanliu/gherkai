@@ -136,6 +136,10 @@ def _progress(*args, **kwargs) -> None:
 
     这样 `cli run … --json > r.json` 拿到纯净 JSON、`cli run … > summary.txt` 拿到纯净文本汇总，
     进度（plan/event/run_id/RunReport 落点）照样在终端可见、不污染被重定向的主输出。
+
+    **不上色（= 终端默认前景色）是有意约定**：默认色专属 cli main/core 的输出（含 `[core …:event]`），
+    与 worker 透传行的调色板物理不相交——worker 调色板有意排除白/默认色（见 subprocess_engine._ANSI_COLORS），
+    故并发跑批时「core 说的」恒默认色、「worker 透传的」恒有色，一眼可分。给 core 输出加色前先想清这条约定。
     """
     kwargs.setdefault("file", sys.stderr)
     print(*args, **kwargs)
@@ -188,9 +192,17 @@ def _cmd_run(args, repo: Path) -> int:
     resolver = compose.make_resolver(compose.build_engines(repo, nova_logs_dir=nova_logs_dir))
 
     # 4) sink：逐事件进度 → stderr（诊断；--quiet 静音。不再受 --json 影响——走 stderr 不污染 stdout 数据）
+    #    前缀 `[core <scope>:event]` 与 worker 透传行 `[worker <scope>:err]` **同一视觉骨架**
+    #    `[producer scope:kind]` 且都顶格——并发跑批时多 scope 的行交错，读者只认一个模式即可分辨来源。
+    #    事件天然带的标识：scope_*=scope_id、scenario_*/step_*=scenario_id；故先从 plan 的 jobs 建
+    #    scenario_id→scope_id 映射，sink 据此把任何事件解析回所属 scope（纯展示，不碰 core/协议）。
+    _scenario_to_scope = {sc.id: j.scope_id for j in jobs for sc in j.scenarios}
+
     def sink(ev: Event) -> None:
-        if not args.quiet:
-            _progress(f"  [event] {render.format_event(ev)}")
+        if args.quiet:
+            return
+        scope = getattr(ev, "scope_id", None) or _scenario_to_scope.get(getattr(ev, "scenario_id", None), "?")
+        _progress(f"[core {scope}:event] {render.format_event(ev)}")
 
     _progress(
         f"run_id={run_id}  schedule: 起真 worker → 真 AgentCore 会话（烧钱）"

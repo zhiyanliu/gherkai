@@ -127,7 +127,12 @@ def _read_events(proc: subprocess.Popen, events_r: int) -> Iterator[Event]:
         raise RuntimeError(f"worker 异常退出 returncode={rc}")
 
 
-# 8 色 ANSI 前景色（按 scope_id 哈希挑一个，保证同一 worker 每次同色）
+# worker 行的 ANSI 前景色调色板（按 scope_id 哈希挑一个，保证同一 worker 每次同色）。
+# 12 色 = 31-36（红/绿/黄/蓝/品/青）+ 91-96（各自亮版）。
+# **有意排除 37/39/97（白/默认/亮白）**：默认前景色保留给 cli main/core 自己的输出
+# （`[core <scope>:event]` 进度、plan:/run_id=/RunReport: 等，它们一律不上色 = 默认色，见 cli/__main__.py
+# 的 _progress）。这样 core 行与 worker 行的颜色域**物理不相交**、并发跑批时一眼能分辨「core 说的」vs
+# 「worker 透传的」。改本调色板时**勿加入 37/39/97**，否则会与 core 的默认色撞、破坏这条约定。
 _ANSI_COLORS = (31, 32, 33, 34, 35, 36, 91, 92, 93, 94, 95, 96)
 
 

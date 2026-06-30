@@ -69,9 +69,10 @@ def test_text_mode_summary_on_stdout_progress_on_stderr(tmp_path, monkeypatch, c
     out, err = captured.out, captured.err
     # 主输出（文本汇总）在 stdout
     assert "RunResult" in out and "总状态" in out
-    # 进度/event/落点提示在 stderr，不污染 stdout
-    assert "plan:" in err and "[event]" in err and "RunReport:" in err
-    assert "plan:" not in out and "[event]" not in out
+    # 进度/event/落点提示在 stderr，不污染 stdout。event 行前缀 `[core <scope>:event]`，与 worker 透传行
+    # `[worker <scope>:err]` 同骨架 `[producer scope:kind]`（并发跑批时区分来源、scope 同列可竖扫）。
+    assert "plan:" in err and ":event]" in err and "RunReport:" in err
+    assert "plan:" not in out and ":event]" not in out
 
 
 def test_run_writes_three_layer_artifacts(tmp_path, monkeypatch, capsys):
