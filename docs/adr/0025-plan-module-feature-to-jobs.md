@@ -30,7 +30,7 @@ Job = {
 - **step 保持 pickle 内顺序 = feature 书写顺序**（见下「step 顺序」语义）。
 - **`keyword` 字段（实测要点，避免踩坑）**：pickle step **不含字面 keyword**，只暴露归一化 `type`（取值 `Context`/`Action`/`Outcome`，And/But 已折叠继承上一条非连接词的类型）。parse 把 `type` 映射成我们领域模型的 `keyword`，**统一取书写词 `Given`/`When`/`Then`**（`Context→Given`、`Action→When`、`Outcome→Then`）与 [0024](./0024-worker-core-protocol.md) 示例一致；worker 只需「是不是 `Then`（断言）」这个类别即足够派发（[0024](./0024-worker-core-protocol.md)），故 And/But 字面丢失无碍。
 - **`index`**：scenario 内 0-based 书写序号，由 parse 合成（pickle step 无此字段），作 [0024](./0024-worker-core-protocol.md) `stepIndex` 的回指键、不参与重排。
-- **`argument`**：承载展开后的 dataTable/docString（有则有、无则缺省）；其内部形状见下「argument 形状」。
+- **`argument`**：承载展开后的 dataTable/docString（有则有、无则缺省）；其内部形状（重映射成自有 `{kind, content/rows}`、不透传 pickle 子 dict）见下「第三方库 seam」节。
 - **行号来源（id 派生依赖）**：pickle **不带 `location`/行号**，只有顶层 `astNodeIds`。parse seam **内部同时持有 AST**，用 pickle 的 `astNodeIds` → AST 节点 `location.line` 回查行号（供下「id 派生」用）；Outline 展开的 example 行号取 `astNodeIds` 中的 Examples 行节点。行号属 seam 内部细节，不外泄。
 
 ### `scope`（tag 分组 + engine 校验）

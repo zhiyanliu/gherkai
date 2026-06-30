@@ -170,10 +170,11 @@ def _run_step(nova, scenario_id: str, step: dict, traj_sink: list[str], votes_n:
 
         if keyword == "Then":
             # AI 断言 + N 次投票（ADR 0014/0024）；votes_n=1 即单次判定（仍发 votes 标记这是 AI 断言）
+            instruction = _instruction(text, step)  # 人话 + 多行参数（DataTable/DocString，ADR 0024）
             votes = []
             last_cost = None
             for _ in range(votes_n):
-                r = nova.act_get(_unquote(text), BOOL_SCHEMA)
+                r = nova.act_get(instruction, BOOL_SCHEMA)
                 votes.append(bool(r.matches_schema and r.parsed_response))
                 last_cost = _cost_from_result(r)
                 _collect_traj(r, traj_sink)
@@ -193,7 +194,7 @@ def _run_step(nova, scenario_id: str, step: dict, traj_sink: list[str], votes_n:
             return "passed" if passed else "failed"
 
         # When / Given（非 URL）→ AI 动作（无 votes）
-        r = nova.act(_unquote(text))
+        r = nova.act(_instruction(text, step))
         _collect_traj(r, traj_sink)
         ev = {"type": "step_done", "scenarioId": scenario_id, "stepIndex": idx, "status": "passed"}
         cost = _cost_from_result(r)
@@ -213,12 +214,51 @@ def _run_step(nova, scenario_id: str, step: dict, traj_sink: list[str], votes_n:
         return "error"
 
 
+# 只剥 ASCII 空白（与 Midscene 的 unquote 同集合）——不用裸 strip()：Python strip 剥 U+001C-1F/U+0085
+# 而 JS trim 不剥、却剥 U+FEFF(BOM)，两腿分叉（BOM 能穿透 gherkin 进 text）。显式同集合保对称。
+_ASCII_WS = " \t\r\n\f\v"
+
+
 def _unquote(text: str) -> str:
     """step 人话外层若整体被引号包裹（QA 写 When "搜索 X"），剥掉外引号喂引擎。"""
-    t = text.strip()
+    t = text.strip(_ASCII_WS)
     if len(t) >= 2 and t[0] == '"' and t[-1] == '"':
         return t[1:-1]
     return t
+
+
+def _clean_cell(c: str) -> str:
+    """单元格清洗（与 Midscene cleanCell 同一规则）：cell 内 | 与换行会破坏 markdown 表格行结构
+    → | 转义成 \\|、换行压成空格，使每个 cell 仍占一格、表格结构忠实。"""
+    return str(c).replace("|", "\\|").replace("\r\n", " ").replace("\r", " ").replace("\n", " ")
+
+
+def _argument_text(arg: dict | None) -> str:
+    """把 step 的多行参数（DataTable/DocString，ADR 0024/0025）拼成附加文本，接在 step 指令后喂 AI。
+
+    - dataTable：rows（二维字符串数组）拼回 markdown 表格（| 分隔，还原 QA 在 .feature 写的样子，LLM 友好）。
+    - docString：content 多行文本原样。
+    两腿（Nova/Midscene）须同一拼法，保同一 feature 行为对称（ADR 0024）。
+    注：rows 单元恒为字符串（core/wire 只发字符串）；_clean_cell 的 str() 仅防御，正常管线不可达非字符串。
+    """
+    if not arg:
+        return ""
+    kind = arg.get("kind")
+    if kind == "dataTable":
+        rows = arg.get("rows") or []
+        if not rows:
+            return ""
+        return "\n".join("| " + " | ".join(_clean_cell(c) for c in row) + " |" for row in rows)
+    if kind == "docString":
+        return arg.get("content") or ""
+    return ""
+
+
+def _instruction(text: str, step: dict) -> str:
+    """喂 AI 的完整指令 = 去引号的 step 人话 + （可选）多行参数（ADR 0024：text(+argument) 一起喂引擎）。"""
+    base = _unquote(text)
+    extra = _argument_text(step.get("argument"))
+    return f"{base}\n{extra}" if extra else base
 
 
 def _aggregate(statuses: list[str]) -> str:

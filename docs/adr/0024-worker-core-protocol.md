@@ -38,7 +38,7 @@
 
 - **`{id, name}` 双标识**：与 scenario 给 QA 的配置心智一致；name 是人写的原值（tag/标题，可含空格/标点），id 是 core 派生的稳定干净 key（用作 RunStore/RunReport 的关联键）。id 派生规则见 [0025](./0025-plan-module-feature-to-jobs.md)。
 - **`assertionVotes`**：AI 断言（`Then`）投票次数（治种类A抖动，[0014](./0014-ai-first-assertions.md)）。worker 对每个 AI 断言跑 N 次取多数票（`yes > N/2`）、回 `votes:{yes,total:N}`。默认 1=单次判定（仍回 `votes` 以标记「这是 AI 断言」——core 靠 votes 存在与否区分 AI 断言 vs 动作/确定性 step）。组合根经 CLI `--assertion-votes` 设、贯穿 plan→Job。
-- **step.`argument`（可选）**：承载展开后的 DataTable/DocString（[0025](./0025-plan-module-feature-to-jobs.md)）；有则有、无则缺省。worker 把它连同 `text` 一起喂引擎。
+- **step.`argument`（可选）**：承载展开后的 DataTable/DocString（[0025](./0025-plan-module-feature-to-jobs.md)）；有则有、无则缺省。worker 把它**拼成附加文本接在 step 人话后**喂 AI（仅 AI 动作/断言路径；确定性 match/URL 导航在裸 `text` 上判，不接 argument）：**dataTable → markdown 表格**（`rows` 用 `|` 拼回、还原 .feature 原貌、LLM 友好）、**docString → `content` 原样**。**两腿同一拼法**（Nova `_argument_text`/`_instruction` ↔ Midscene `argument.ts`，各有对称单测），保同一 feature 行为一致。
 - worker 拿 `keyword` + `text` 决定派发（见下「worker 派发」），拿 `text`(+`argument`) 喂引擎。
 
 ## 输出（worker → core）：流式 JSON Lines

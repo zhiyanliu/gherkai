@@ -25,6 +25,7 @@ import { sigv4Fetch, signCdpUpgrade, BASE_URL, MODEL, REGION } from "../lib/agen
 // 确定性 step 注册表（ADR 0022）+ test engineer 的锚点脚手架。
 // import 脚手架即触发其顶层 deterministic(...) 注册副作用（对称 Nova 腿 import deterministic_steps）。
 import { match as matchDeterministic, DeterministicAssertion } from "./deterministic.js";
+import { buildInstruction } from "./argument.js";
 import "../bdd/steps/deterministic.steps.js";
 
 const BROWSER_ID = "aws.browser.v1";
@@ -80,10 +81,6 @@ interface Step { index: number; keyword: string; text: string; argument?: unknow
 interface Scenario { id: string; name: string; steps: Step[] }
 interface Job { scope: { id: string; name: string }; engine: string; scenarios: Scenario[]; assertionVotes?: number }
 
-function unquote(text: string): string {
-  const t = text.trim();
-  return t.length >= 2 && t.startsWith('"') && t.endsWith('"') ? t.slice(1, -1) : t;
-}
 
 // 报 Midscene/Bedrock 原生量 token（ADR 0024：engine 只报原生量，core 不算美元）。
 // 从 agent._unstableLogContent 取最近一次 AI 调用的 usage.total_tokens；取不到则返回 undefined。
@@ -316,8 +313,9 @@ async function runStep(
     }
     if (keyword === "Then") {
       // AI 断言 + N 次投票（ADR 0014/0024）；votesN=1 即单次判定（仍发 votes 标记这是 AI 断言）
+      const instr = buildInstruction(step.text, step.argument as any);  // 人话 + 多行参数（DataTable/DocString，ADR 0024）
       let yes = 0;
-      for (let i = 0; i < votesN; i++) if (await agent.aiBoolean(unquote(text))) yes++;
+      for (let i = 0; i < votesN; i++) if (await agent.aiBoolean(instr)) yes++;
       const passed = yes > votesN / 2;
       const ev: Record<string, unknown> = {
         type: "step_done", scenarioId, stepIndex: index,
@@ -331,7 +329,7 @@ async function runStep(
       return passed ? "passed" : "failed";
     }
     // When / Given（非 URL）→ AI 动作（无 votes）
-    await agent.aiAct(unquote(text));
+    await agent.aiAct(buildInstruction(step.text, step.argument as any));
     const ev: Record<string, unknown> = { type: "step_done", scenarioId, stepIndex: index, status: "passed" };
     const cost = lastCost(agent);
     if (cost) ev.cost = cost;
