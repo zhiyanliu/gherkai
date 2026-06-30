@@ -7,6 +7,11 @@
   WORKER_MODE=crash  → 吐一个 started 后非零退出（测 worker 崩 → schedule 记 error）
   WORKER_MODE=net    → 不吐任何事件，直接以 EX_WORKER_NETWORK(80) 退出
                        （模拟建连失败先于事件 emit → adapter 翻 WorkerNetworkError → schedule 记 network_error，ADR 0028）
+  WORKER_MODE=silent → 先吐 scope_started（带 sessionId）+ scenario_started，然后**静默死循环不再吐任何事件**
+                       （模拟 act 卡在单次调用内、fd3 无新事件 → 测 adapter 读超时心跳让 schedule 超时能触发 +
+                        session_id 经 scope_started 提前回传，ADR 0028）
+
+EVENTS: 真 worker 的 scope_started 带 sessionId（ADR 0028 血缘随首事件回传），echo 也带，保协议一致。
 """
 import json
 import os
@@ -49,6 +54,17 @@ def main():
         # 建连失败先于任何事件 emit（ADR 0028）：直接以网络专用退出码退出，不吐 scope_started。
         sys.stderr.write("echo_worker: simulated connect failure, exiting EX_WORKER_NETWORK\n")
         sys.exit(80)
+
+    # scope_started 带 sessionId（ADR 0028：血缘随首事件回传，超时/中止 scope_done 缺席时 core 仍记得到）。
+    emit({"type": "scope_started", "scopeId": scope["id"], "sessionId": "echo-sess"})
+
+    if mode == "silent":
+        # 吐 scope_started + scenario_started 后**静默死循环**（不再吐任何事件、不退出）——模拟
+        # act 卡在单次调用内 fd3 无新事件。测 adapter 读超时心跳让 schedule 的 deadline 检查能触发（ADR 0028）。
+        emit({"type": "scenario_started", "scenarioId": job["scenarios"][0]["id"]})
+        while not _stopped:
+            time.sleep(0.05)
+        return
 
     for sc in job["scenarios"]:
         sid = sc["id"]

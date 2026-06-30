@@ -10,8 +10,8 @@ import time
 from pathlib import Path
 
 from core.adapters.subprocess_engine import SubprocessEngine
-from core.model import Job, RunMeta, Scenario, ScopeDone, Status, Step
-from core.schedule import schedule
+from core.model import Job, RunMeta, Scenario, ScopeDone, ScopeStarted, Status, Step
+from core.schedule import schedule, ScheduleOpts
 from tests.fake_engine import CollectSink
 
 _WORKER = str(Path(__file__).parent / "fixtures" / "echo_worker.py")
@@ -44,13 +44,15 @@ def _job(scope_id: str = "s") -> Job:
 def test_adapter_roundtrip_pass():
     engine = _engine("pass")
     handle, events = engine.run_scope(_job("s"))
-    evs = list(events)  # 消费整个流
+    evs = list(events)  # 消费整个流（adapter 是纯 Event，无心跳——心跳在 schedule 层）
     types = [e.type for e in evs]
-    assert types == ["scenario_started", "step_done", "step_done", "step_done", "scenario_done", "scope_done"]
+    assert types == ["scope_started", "scenario_started", "step_done", "step_done", "step_done", "scenario_done", "scope_done"]
     # Then step 带 votes
     then_ev = [e for e in evs if e.type == "step_done"][2]
     assert then_ev.votes is not None and then_ev.votes.yes == 3
-    # scope_done 带 sessionId
+    # scope_started 与 scope_done 都带 sessionId（ADR 0028：血缘随首事件即回传，scope_done 冗余兜底）
+    assert isinstance(evs[0], ScopeStarted)
+    assert evs[0].session_id == "echo-sess"
     scope_done = evs[-1]
     assert isinstance(scope_done, ScopeDone)
     assert scope_done.session_id == "echo-sess"
@@ -103,12 +105,52 @@ def test_adapter_network_error_with_schedule_classified_and_retried():
 def test_adapter_stop_hanging_worker():
     engine = _engine("hang")
     handle, events = engine.run_scope(_job("s"))
-    # 先拿到第一个事件（worker 已起、进入死循环）
+    # 先拿到第一个事件（worker 已起、进入死循环）。adapter 是纯 Event 流，无心跳。
     it = iter(events)
     first = next(it)
-    assert first.type == "scenario_started"
+    assert first.type == "scope_started"  # 首事件现在是 scope_started（带 sessionId，ADR 0028）
     # stop：SIGTERM → worker 的 finally 清理 → 退出（宽限足够）
     t0 = time.monotonic()
     handle.stop(grace_period_s=5.0)
     elapsed = time.monotonic() - t0
     assert elapsed < 5.0  # worker 响应 SIGTERM 优雅退出，没等到宽限超时强杀
+
+
+# ---- #1（ADR 0028）：worker 静默卡死（吐 started 后不再吐事件）→ schedule 的 _heartbeat_wrap 让 job_timeout 能触发 ----
+# 真跨进程验证：silent worker 卡在死循环、fd3 零新事件。adapter 的事件流是纯阻塞读，靠 schedule 层
+# _heartbeat_wrap（后台线程 + queue 超时）周期性醒来查 deadline——否则超时永不触发（曾致 300s 拖到 ~620s）。
+def test_silent_worker_timeout_fires_via_heartbeat():
+    engine = _engine("silent")
+    t0 = time.monotonic()
+    # job_timeout=1s：silent worker 吐完 scope_started/scenario_started 即静默；靠心跳，schedule 应在
+    # ~1s（+ 一个心跳间隔 + grace）内超时杀掉，而非永久挂起。给宽松上限 15s 兜底（仍远小于"永不触发"）。
+    result = schedule(
+        _rm([_job("s")]), lambda name: engine, CollectSink(),
+        opts=ScheduleOpts(job_timeout_s=1.0, grace_period_s=5.0, heartbeat_interval_s=0.2),
+    )
+    elapsed = time.monotonic() - t0
+    assert result.jobs[0].status == Status.ERROR
+    assert result.jobs[0].error_type == "timeout"  # 超时分类（非 engine_error）
+    assert elapsed < 15.0, f"超时应靠心跳准时触发，实际耗时 {elapsed:.1f}s（疑似退回阻塞死等）"
+
+
+# ---- #2（ADR 0028）：session_id 经 scope_started 提前回传 → 超时/中止 scope_done 缺席时仍记得到血缘 ----
+def test_session_id_captured_from_scope_started_on_timeout():
+    engine = _engine("silent")
+    result = schedule(
+        _rm([_job("s")]), lambda name: engine, CollectSink(),
+        opts=ScheduleOpts(job_timeout_s=1.0, grace_period_s=5.0),
+    )
+    # silent worker 超时被杀、从未 emit scope_done——但 session_id 已随 scope_started 落到 result（ADR 0028）
+    assert result.jobs[0].status == Status.ERROR
+    assert result.jobs[0].session_id == "echo-sess", "超时路径下 session_id 应仍从 scope_started 捕获到"
+
+
+# ---- #2 直接验证：scope_started 事件本身带 sessionId（协议层，不经超时）----
+def test_scope_started_carries_session_id():
+    engine = _engine("silent")
+    handle, events = engine.run_scope(_job("s"))
+    first = next(iter(events))  # adapter 事件流是纯 Event（心跳在 schedule 层，不在此）
+    assert isinstance(first, ScopeStarted)
+    assert first.session_id == "echo-sess"
+    handle.stop(grace_period_s=5.0)  # 收尾杀掉 silent worker

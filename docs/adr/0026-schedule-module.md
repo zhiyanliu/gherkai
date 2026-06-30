@@ -50,6 +50,7 @@ opts = {                 // 时间单位统一为秒；代码字段名带 _s 后
 
 - `jobTimeout`（per-job 墙钟，可配，默认 null=不超时）：防一个 job 卡死（AI 死循环 / 网络挂）永久占用并发槽位 + 烧钱。超时 → 优雅终止该 worker（走下文终止契约：停止请求→宽限→强杀）、记 `status:error` + `errorType:timeout`（[0024](./0024-worker-core-protocol.md) status 三态 + 规范化 errorType）。
 - 引擎 SDK 各自也有超时（Midscene/Nova Act 都有），但那只覆盖「引擎调用内」卡住；**进程层面卡死（非引擎调用内）只有 schedule 能兜**，故 schedule 这层超时是必要的外层保险。
+- **静默 worker 的超时如何触发**：超时检查在「每收一个事件后」做。worker 完全静默（卡在单次操作内、事件通道零输出）时，事件循环会阻塞在读上、检查永不触发（曾致 300s 超时拖到 ~620s）。故 schedule 用 `_heartbeat_wrap`（后台 reader 线程把 adapter 的纯 `Iterator[Event]` 喂进队列，主侧 `queue.get(timeout=heartbeat_interval_s)` 超时即注入存活心跳）让循环周期性醒来查超时——**心跳在 schedule 层做一次、对所有 adapter 通用，Engine port 保持纯 `Iterator[Event]`**（机制细节见 [0028](./0028-transient-network-ssl-resilience.md)）。
 
 ### 网络瞬时故障的 job 级重试（[0028](./0028-transient-network-ssl-resilience.md)）
 

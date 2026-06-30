@@ -138,6 +138,9 @@ class ReportRef:
 @dataclass(frozen=True)
 class ScopeStarted:
     scope_id: str
+    # 会话血缘随**首个**事件即回传（不再等 scope_done）——这样超时/SIGTERM 中途打断、scope_done
+    # 从未 emit 时，core 仍能记下 session_id（诊断/计费血缘，ADR 0024/0028）。scope_done 仍带它（冗余兜底）。
+    session_id: str | None = None
     type: Literal["scope_started"] = "scope_started"
 
 

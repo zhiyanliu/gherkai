@@ -409,9 +409,11 @@ def main() -> int:
                 # 关掉后输出干净的逐行日志（think/return/Approx. Time Worked 等有用行保留）。SDK 文档亦推荐非 tty 场景置 False。
                 tty=False,
             ) as nova:
-                # 取真实 AgentCore 会话 id（血缘，进 scope_done → RunStore，ADR 0016/0024）。
+                # 取真实 AgentCore 会话 id（血缘，进 RunStore，ADR 0016/0024）。
                 session_id = nova.get_session_id()
-                emit({"type": "scope_started", "scopeId": scope["id"]})  # 三级时长起点
+                # session_id 随 scope_started 即回传（不只等 scope_done）——超时/SIGTERM 中途打断时
+                # scope_done 不会 emit，但血缘已先随首事件落到 core（ADR 0028 观测缺口修复）。
+                emit({"type": "scope_started", "scopeId": scope["id"], "sessionId": session_id})  # 三级时长起点
                 started = True  # 越过此点 = 会话已起、act 即将跑 → 退出建连重试域（ADR 0028）
                 # scope 内串行跑 scenarios，共享同一会话（ADR 0019/0024）
                 for sc in scenarios:

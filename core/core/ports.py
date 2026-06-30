@@ -45,6 +45,10 @@ class Engine(Protocol):
 
         事件流逐条产出（ADR 0024 流式）；迭代结束 = worker 正常退出。
         句柄供 schedule 在超时/fail-fast 时 stop（ADR 0026）。
+
+        **纯事件流**：adapter 只产领域事件，不掺心跳/哨兵——worker 静默卡死时迭代器自然阻塞在读上，
+        由 schedule 层统一兜底（后台线程 + 超时唤醒查 deadline，ADR 0026/0028）。心跳是消费方策略，
+        不进端口契约，也不必每个 adapter 各实现一遍。
         """
         ...
 

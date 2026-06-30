@@ -7,10 +7,12 @@ schedule 只下逻辑「停」（handle.stop(grace)），不懂信号/进程—�
 同时在跑的 worker 数（= 同时活的 AgentCore 会话数，保护真实成本）。worker 线程内迭代 ADR 0024 事件流、
 转 sink、归约成 JobResult。
 
-超时/fail-fast 用**事件间检查**：每收一个事件后查 (clock.now()-start > jobTimeout) 或 abort_flag，
-命中则 handle.stop(grace) 让 worker 退出。注入 clock 使这两条路径可确定性单测。
-注：完全无事件输出的「死等」由 Engine adapter 的读超时兜底（subprocess pipe read deadline），
-schedule 这层覆盖「有事件但进展过慢」——分层职责（ADR 0026）。
+超时/fail-fast 用**事件间检查**：每收一个事件（或 _heartbeat_wrap 的存活心跳）后查 (clock.now()-start >
+jobTimeout) 或 abort_flag，命中则 handle.stop(grace) 让 worker 退出。注入 clock 使这两条路径可确定性单测。
+注：worker 完全静默（卡在单次操作内、不吐事件）时，靠 _heartbeat_wrap（后台 reader 线程 + queue 超时，
+ADR 0028）周期性 yield `_HEARTBEAT` 让本循环醒来查超时——否则裸 for-event 阻塞在读上、超时永不触发
+（曾致 300s 超时拖到 ~620s 才被外层杀）。心跳在 schedule 层做一次、对所有 adapter 通用，端口保持纯
+`Iterator[Event]`（不渗实现细节，ADR 0026）。心跳不归约、跳过即可。
 """
 from __future__ import annotations
 
@@ -39,6 +41,70 @@ from core.model import (
 from core.errors import WorkerNetworkError
 from core.ports import EngineResolver, Sink
 
+import queue as _queue
+
+
+class _Heartbeat:
+    """存活心跳哨兵（schedule 私有，ADR 0028）：worker 活着但暂时没吐事件时，_heartbeat_wrap 注入它，
+    让 _run_once 的事件循环醒来查 deadline/abort。**不是领域 Event**——不进 model/ports/wire，不归约、不 emit。
+    """
+
+
+_HEARTBEAT = _Heartbeat()
+
+
+def _heartbeat_wrap(events, poll_interval_s, deadline):
+    """把 adapter 的纯 `Iterator[Event]` 包成「事件 + 静默心跳」流（ADR 0026/0028，B 方案）。
+
+    单线程无法在 `next(events)` 阻塞于管道读时被定时器唤醒，故把内层迭代搬到一个**后台 reader 线程**：
+    它 `for ev in events: q.put(ev)`，把事件（及内层抛出的异常）塞进队列；本生成器主侧 `q.get(timeout)`——
+    超时没拿到（worker 静默卡死）就 yield `_HEARTBEAT`，拿到事件就 yield 事件，拿到异常就 raise（透传给
+    schedule 的 except，保 WorkerNetworkError/ValueError 分类不变）。
+
+    **为何在 schedule 层做一次、而非每个 worker/adapter**：心跳是「超时消费方（schedule 持有 deadline）对任何
+    慢/静默流的通用兜底」，与引擎无关；放这里写一次，对子进程/未来 Fargate/内存 FakeEngine 全适用，端口保持
+    纯 `Iterator[Event]`（不渗实现细节）。事件正常流动时 q.get 即时返回、永不注入心跳——故 fake-clock 单测的
+    clock 读取序列不变（reader 线程只搬事件、绝不读 clock）。
+
+    poll_interval_s<=0 或 deadline is None（不超时）时，退化为直接转发内层（不起线程、零开销，保留既有行为）。
+    """
+    # 不需要心跳的场景（无超时上限）：直接转发，省一个线程（也让无 deadline 的既有路径行为完全不变）。
+    if deadline is None or poll_interval_s <= 0:
+        yield from events
+        return
+
+    q: _queue.Queue = _queue.Queue()
+
+    def _reader():
+        try:
+            for ev in events:
+                q.put(("ev", ev))
+        except BaseException as e:  # noqa: BLE001  内层任何异常（含 WorkerNetworkError）透传给主侧重抛
+            q.put(("exc", e))
+            return
+        q.put(("done", None))
+
+    t = threading.Thread(target=_reader, daemon=True)
+    t.start()
+    try:
+        while True:
+            try:
+                kind, payload = q.get(timeout=poll_interval_s)
+            except _queue.Empty:
+                yield _HEARTBEAT  # 静默：让 _run_once 醒来查 deadline/abort（ADR 0028）
+                continue
+            if kind == "ev":
+                yield payload
+            elif kind == "exc":
+                raise payload  # 透传内层异常（schedule 的 except WorkerNetworkError/Exception 据此分类）
+            else:  # done：内层正常迭代完（worker 关了事件通道、proc.wait 已在内层跑完）
+                return
+    finally:
+        # 主侧不再拉取（schedule 主动 stop/超时后放弃本生成器）：reader 线程仍可能阻塞在 next(events) 的管道读上，
+        # 靠 schedule 已调的 handle.stop()（SIGTERM→worker 退出→管道 EOF）解除其阻塞、自然结束。daemon 线程
+        # 不挡进程退出；这里不 join（避免在 stop 尚未生效时阻塞 schedule），与既有「放弃 generator」语义一致。
+        pass
+
 
 @dataclass
 class _Timing:
@@ -61,6 +127,10 @@ class ScheduleOpts:
     # 的 job 重试整批。默认 0=关（本地 smoke 不需要；CI/抖动环境可开）。
     network_retry: int = 0  # 额外重试次数（总尝试 = network_retry + 1）
     retry_sleep: Callable[[float], None] = _time.sleep  # 重试间隔（可注入 no-op，保 fake-clock 单测纯净）
+    # 心跳轮询间隔（秒，ADR 0028）：worker 静默卡死（不吐事件）时，_heartbeat_wrap 每隔这么久让事件循环
+    # 醒一次查 deadline/abort——否则裸迭代阻塞在读上、超时永不触发（曾致 300s 超时拖到 ~620s）。
+    # 0.5s：足够细让 300s 级超时近准时，又不忙轮询。事件正常流动时不触发心跳（queue 即时拿到）。
+    heartbeat_interval_s: float = 0.5
 
 
 def _aggregate(statuses: list[Status]) -> Status:
@@ -142,7 +212,7 @@ class _Worker:
 
         try:
             engine = self.engines(job.engine)
-            self.handle, events = engine.run_scope(job)
+            self.handle, raw_events = engine.run_scope(job)
         except Exception as e:  # 起 worker 失败（spawn 失败等）
             result.status = Status.ERROR
             result.error_type = "engine_error"
@@ -150,6 +220,9 @@ class _Worker:
             return result, False, saw_step
 
         clock = self.opts.clock
+        # 包心跳（ADR 0028）：worker 静默卡死时让下面的事件循环能周期性醒来查 deadline/abort，
+        # 而非永久阻塞在 next(raw_events) 的管道读上。无 deadline 时退化为直接转发（不起线程）。
+        events = _heartbeat_wrap(raw_events, self.opts.heartbeat_interval_s, deadline)
 
         try:
             for event in events:
@@ -169,6 +242,12 @@ class _Worker:
                     result.error_type = "engine_error"
                     result.message = "fail-fast：其他 job 失败，本 job 被中止"
                     return result, False, saw_step
+
+                # _Heartbeat = _heartbeat_wrap 的静默心跳（worker 卡住不吐事件时，让上面的 deadline/abort
+                # 检查能周期性跑，ADR 0028）。不是领域事件、不 emit、不归约——查完超时即跳过，等下一个真事件或心跳。
+                # 用 isinstance（而非 is _HEARTBEAT）使静态类型能把 event 收窄回 Event（消除下面 _emit/_reduce 的告警）。
+                if isinstance(event, _Heartbeat):
+                    continue
 
                 if isinstance(event, StepDone):
                     saw_step = True  # 会话已起、有 act 执行 → 封掉 job 级重试（防重复副作用）
@@ -214,6 +293,11 @@ class _Worker:
         # started 事件：记各级起始时间戳（now = 事件到达 core 的墙钟，ADR 0024）
         if isinstance(event, ScopeStarted):
             timing.scope_start = now
+            # 会话血缘随首事件即落（ADR 0028）：超时/中止时 scope_done 不会到，但 session_id 此刻已记下。
+            # 边界：worker 建连失败（退出码 80、scope_started 从未 emit）时血缘仍为 None——属「会话未起」，
+            # 本就无血缘可记，非缺陷（ADR 0028 当前设计；act 中途超时这类「会话已起」场景已被覆盖）。
+            if event.session_id is not None:
+                result.session_id = event.session_id
         elif isinstance(event, ScenarioStarted):
             timing.scenario_start[event.scenario_id] = now
         elif isinstance(event, StepStarted):
@@ -250,7 +334,9 @@ class _Worker:
                 )
             )
         elif isinstance(event, ScopeDone):
-            result.session_id = event.session_id
+            # 仅在带值时设——别让 scope_done 的 None 覆盖已从 scope_started 捕获的血缘（ADR 0028）。
+            if event.session_id is not None:
+                result.session_id = event.session_id
             if event.report_refs:
                 result.report_refs = result.report_refs + event.report_refs
             if timing.scope_start is not None:

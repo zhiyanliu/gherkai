@@ -98,7 +98,12 @@ class SubprocessEngine:
 
 
 def _read_events(proc: subprocess.Popen, events_r: int) -> Iterator[Event]:
-    """逐行读 fd3（纯 ADR 0024 事件）→ Event。worker 异常退出且 returncode>0 时抛错（schedule 记 error）。"""
+    """逐行读 fd3（纯 ADR 0024 事件）→ Event。worker 异常退出且 returncode>0 时抛错（schedule 记 error）。
+
+    纯阻塞行读、纯 `Iterator[Event]`——**不掺心跳**。worker 静默卡死时本迭代器会阻塞在读上，由
+    schedule 层的 `_heartbeat_wrap`（后台线程 + queue 超时）兜底唤醒并查超时（ADR 0026/0028）。
+    心跳是「schedule 对任何慢/静默流的通用兜底」，不渗进端口契约，也不要每个 adapter 各写一遍。
+    """
     with os.fdopen(events_r, "r", encoding="utf-8") as events:
         for line in events:
             line = line.strip()

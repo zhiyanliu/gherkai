@@ -114,7 +114,7 @@ def event_from_json(d: dict) -> Event:
     """JSON dict（worker stdout 一行）→ model.Event，按 "type" 分派（ADR 0024）。"""
     t = d.get("type")
     if t == "scope_started":
-        return ScopeStarted(scope_id=d["scopeId"])
+        return ScopeStarted(scope_id=d["scopeId"], session_id=d.get("sessionId"))
     if t == "scenario_started":
         return ScenarioStarted(scenario_id=d["scenarioId"])
     if t == "step_started":

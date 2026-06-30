@@ -256,7 +256,9 @@ async function main(): Promise<number> {
     }
     const { page, agent } = conn!;
 
-    emit({ type: "scope_started", scopeId: scope.id });  // 三级时长起点（越过此点不再重试建连）
+    // sessionId 随 scope_started 即回传（不只等 scope_done）——超时/SIGTERM 中途打断时 scope_done 不会 emit，
+    // 但血缘已先随首事件落到 core（ADR 0028 观测缺口修复，对称 Nova）。
+    emit({ type: "scope_started", scopeId: scope.id, sessionId });  // 三级时长起点（越过此点不再重试建连）
     // scope 内串行跑 scenarios，共享同一会话（ADR 0019/0024）
     const votesN = job.assertionVotes ?? 1;  // AI 断言投票次数（ADR 0014/0024）；缺省 1
     for (const sc of job.scenarios) {

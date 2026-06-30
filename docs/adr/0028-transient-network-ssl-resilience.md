@@ -85,6 +85,8 @@ worker **按白名单匹配具体瞬时异常类型**,不用宽基类兜底:
 ## 现在做 / 留口子
 
 - **现在做（v1.0）**:上述两层重试、`network_error` 分类、退出码约定、白名单识别、会话泄漏防护、core job 重试（默认关）、单测。
+- **静默 worker 超时根治（后续轮，真跑暴露）**:worker 卡在**单次操作内**（如 Nova act 内部反复重试 ~10 分钟、fd3 零新事件）时，schedule 的 `job_timeout` 曾**形同虚设**——deadline 检查只在 `for event in events` 循环体内跑，静默 worker 让该循环永久阻塞在读上，超时拖到被外层进程级杀（实测 300s 超时拖到 ~620s）。根治放在 **schedule 层**而非各 adapter：`_heartbeat_wrap` 把 adapter 的纯 `Iterator[Event]` 包成「事件 + 存活心跳」流——内层迭代搬到一个**后台 reader 线程**塞 `queue`，主侧 `queue.get(timeout=heartbeat_interval_s)` 超时没拿到（worker 静默）就 yield 一个 schedule 私有哨兵 `_HEARTBEAT`，让事件循环醒来查 `deadline`/`abort_flag`；拿到事件就转发、拿到内层异常就重抛（保 `WorkerNetworkError`/`ValueError` 分类不变）。**为何在 schedule 层做一次**：心跳是「持有 deadline 的消费方对任何慢/静默流的通用兜底」，与引擎无关——写一次对子进程/未来 Fargate/内存假实现全适用，`Engine` port **保持纯 `Iterator[Event]`**（不把轮询细节渗进契约、不必每个 adapter 各写一遍）。`_HEARTBEAT` 不是领域事件、不进 model/ports/wire、不归约、不 emit。事件正常流动时 `queue.get` 即时返回、永不注入心跳，故 fake-clock 单测的 clock 读取序列不变（reader 线程只搬事件、绝不读 clock）；无 `job_timeout` 时 `_heartbeat_wrap` 退化为直接转发、不起线程。
+- **会话血缘随首事件回传（同轮）**:`session_id` 原仅由 `scope_done` 携带——worker 被超时/SIGTERM 中途打断时 `scope_done` 从不 emit，core 侧 `run_state` 该 job 的 `session_id=null`，**会话明明已起却记不到血缘**（诊断/计费断线，正是上面静默超时场景的伴生缺口）。修复：worker 在 **`scope_started`** 即带 `sessionId` 回传（会话一起就报），schedule 的 `_reduce` 在 `ScopeStarted` 分支也捕获它；`scope_done` 仍带（冗余兜底）。`ScopeStarted` 协议加 optional `session_id` 字段。
 - **Midscene SIGTERM 会话泄漏两窗口已根治（后续轮）**:
   - **重试放大的 in-flight 会话窗口**:会话跟踪从「单一 `sessionId` 快照」重构为**待清理会话集**——每次 `StartBrowserSession` 成功即把 id 入集（含被重试丢弃的中间 attempt 会话），cleanup 遍历集逐个 Stop。彻底解决「重试时 sessionId 被后一 attempt 覆盖/置空 → handler 只能 Stop 当前快照、漏掉在途/已弃会话」。剩余仅「Start 已发 RPC 但 id 未返回」一瞬，由一个在途标记 + 短暂兜底等待覆盖。
   - **`StopBrowserSession` 超 `grace_period`**:每个 Stop 套超时预算（挂死即放弃、记 `cleanupFailed` 让泄漏可观测，不被 SIGKILL 打断到一半）；cleanup **并行** Stop（`Promise.all` 而非串行）——否则重试积累的 N 个泄漏会话串行会把 cleanup 拖过 grace 被 SIGKILL 截断（正是本修复要防的泄漏）。并行后最坏 cleanup 墙钟与会话数无关、< cli 默认 grace。常量值与算术见 `run-scope.ts`（代码为准，ADR 不复制以免漂移）。
@@ -93,6 +95,7 @@ worker **按白名单匹配具体瞬时异常类型**,不用宽基类兜底:
   - **act 中途的瞬时恢复**（长任务执行中 CDP 闪断 → 涉及会话状态恢复,复杂且有副作用风险）——明确 defer。
   - **`ensure_workflow_definition` 自身的 SSL 故障**:它在重试循环外（单次廉价 boto3 调用,SSL 失败面远小于 CDP/websocket 握手——后者才是实测崩的点）。若它 SSL 失败 → 仍归 engine_error。已知小缺陷,可随真实失败样本扩充。
   - core job 重试时 trajectory 覆盖（run_id 不换,同一引擎重试可能覆盖上次 trajectory）——M 小、重试罕见,接受为已知小缺陷。
+  - **超时/中止被杀 scope 的卡死现场 trajectory 不自动归集进 RunReport**：被杀那个 act **从未返回**，worker 经 `_collect_traj` 拿不到它的路径（`_Terminated` 是 `BaseException`、穿透 step 级 `except Exception`，`_collect_traj` 没机会跑），故它进不了 `report_refs`。该 act 的 trajectory **可能留在** `nova-trajectories/<session_id>/`（SDK 在中断清理时 flush 的 `.html`），**且可能不完整**（被中断，配套的 `_trajectory.json`/`session_summary.json` 往往没来得及写——实测被杀 scope 只剩孤零 `.html`）。唯一能自动捞回它的途径是**扫盘**，但不值当为此破 [0027](./0027-runreport-aggregation-index.md)「`report_refs` 是唯一真值、ReportStore 永不 stat/fetch/扫盘」铁律。靠 #2 已记下的 `session_id` 可手动定位该目录查看。**若未来「看卡死现场」成高频需求** → 按已论证的通用解法实现：**worker 经 `scope_started` 自报 `artifactsDir`（产物落点契约，可选字段）+ 执行 adapter 的中断收尾扫盘**——孤儿恢复属 **Engine adapter 的收尾职责**（本地扫目录 / 未来 Fargate 查 S3，因执行基底而异），**不放 ReportStore（不破铁律）、不放 worker 的 SIGTERM 路径（不碰会话清理）**。
 
 ## 重议
 
