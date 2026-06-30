@@ -103,15 +103,17 @@ def _aggregate(statuses):
     return Status.PASSED
 ```
 
-- 过滤名单**含 pending/running**（决定一·补）：实时增量聚合时一个还在 `running` 的 job 不能污染 run 级 status。
+- 过滤名单**含 pending/running**（决定一·补）：是**前向口子**——当前 RunState.status 不做增量聚合（见下），
+  但 `_NON_VERDICT` 含前置态，为未来「实时增量聚合 run 级 status」（WebUI 轮询面）预留正确性兜底：届时一个还在
+  `running` 的 job 不会污染 run 级 status。
 - 不改也「碰巧正确」（有 skipped/aborted 必有 error 同批短路），但 `else: return PASSED` 是脆弱兜底——
   一旦未来引入**非-fail-fast 的 skip**（如主动 `--skip`），「全 skipped 无 error」的 run 会被误判 `passed`。
   入口过滤把正确性钉死在 `_aggregate` 内、不依赖「skipped 必伴随 error」这个外部假设。
-- **schedule 返回值路径** `_aggregate` 喂的是各 job 终态（无 pending/running），过滤名单里那两项是 no-op；但实时增量
-  聚合（[0030](./0030-realtime-persistence-seam.md) 的 RunState.status）喂的可能含前置态，**两路共用这一份过滤名单**才一致。
 - **scenario 内归约路径不改**（喂进去的全是 worker 三态，永不含 skipped/aborted）。
-- 实时增量的 RunState.status（单调只升不降，[0030](./0030-realtime-persistence-seam.md)）与 schedule 返回的
-  RunResult.status **共用同一份 severity 表**，保证两路收敛到同一终值（单一真值）。
+- **当前 run 级 status 只算一次**：`_aggregate` 仅被 schedule 在归约 `RunResult` 时调一次；落库的 `RunState.status`
+  由 `finalize` 从那个已算好的 `result.status` 一次写定（之前一直停在 `pending`，[0030](./0030-realtime-persistence-seam.md)）——
+  **没有「实时增量聚合 RunState.status / severity 单调升级」的运行路径**。`_NON_VERDICT` 含前置态、与未来增量聚合
+  共用同一过滤名单/severity 表收敛到同一终值，是为那条尚未实现的路径留的口子（见上）。
 
 ## 决定四：[0024](./0024-worker-core-protocol.md) 线协议不改，只补一句澄清
 

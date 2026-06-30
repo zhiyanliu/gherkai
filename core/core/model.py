@@ -118,8 +118,9 @@ _STATUS_SEVERITY: dict[Status, int] = {
 }
 
 # run 级聚合的过滤名单（ADR 0031 决定三）：终态判定之外的态都不进 run 级聚合。
-# 含 skipped/aborted（派生终态、单写者、必伴随 error 同批，见 ADR 0031）+ pending/running（前置态，
-# 实时增量聚合时一个还在 running 的 job 不能污染 run 级 status）。两路聚合（schedule 返回值 / 实时增量）共用它。
+# 含 skipped/aborted（派生终态、单写者、必伴随 error 同批，见 ADR 0031）+ pending/running（前置态）。
+# 当前 _aggregate 只被 schedule 调一次（喂各 job 终态、无前置态，过滤是 no-op）；含 pending/running 是**前向口子**——
+# 为未来「实时增量聚合 run 级 status」（WebUI 轮询面）预留：届时 running 的 job 不会污染 run 级 status（ADR 0030/0031）。
 _NON_VERDICT: frozenset[Status] = frozenset(
     {Status.SKIPPED, Status.ABORTED, Status.PENDING, Status.RUNNING}
 )

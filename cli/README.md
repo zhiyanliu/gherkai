@@ -10,13 +10,18 @@ WebUI 将来是另一张皮，**直接调 core、复用 `compose`**，不经本 
 
 ```
 cli/
-├── __main__.py   ← argparse 皮：解析参数 → 调 compose/core → 调 render；定义退出码
+├── __main__.py   ← argparse 皮：解析参数 → 调 compose/core → 注入 RunPersistence 实时落库 → 调 render；定义退出码
 ├── compose.py    ← 组合根：引擎注册表（每个引擎 cmd/cwd）、读 feature、build resolver（WebUI 也复用）
 └── render.py     ← 表层渲染：0024 事件 → 进度行；RunResult → 文本汇总 / JSON
 ```
 
 `compose`（可复用接线）与 `__main__`（命令行皮）分开：前者是任何前端都要的组合根逻辑，
 后者只是 argparse + 标准 IO。
+
+**实时落库（ADR 0030）**：`run` 不是「跑完才一次性落盘」——`__main__` 注入 core 的 `RunPersistence`
+（组合根注入三个本地 Store adapter），run 开始即写 definition + 初始全 pending 态，每个 scope 起跑刷
+RUNNING、完成即落该 scope 判定真值，最后 `finalize` 写总状态（commit point）。`--no-report` 时跳过整条落库
+（裸跑、零落盘逃生舱）。WebUI 换注入 DDB/S3 adapter、复用同一条 `RunPersistence`，cli 这张皮的接线不变。
 
 ## 跑（会烧真 AWS 钱：模型调用 + AgentCore 会话）
 
@@ -85,5 +90,4 @@ scope/job 分组与 engine 路由符合预期、提前暴露 `PlanError`（uri �
 - `index.html` —— 人可导航入口：每个原生产物（Midscene html / Nova trajectory）一行链接，
   点开看**原样**产物。RunReport 只索引/链接、**不解析融合**产物内容；新引擎报任意 `kind` 零改 core。
 
-`--no-report` 跳过（逃生舱）。默认 index 链接指向产物**原位**；`--materialize` 才把产物拷成自包含目录
-（搬走/上 S3/发同事用）。
+默认 index 链接指向产物**原位**；要自包含目录（搬走/上 S3/发同事）见选项表的 `--materialize`、跳过归集见 `--no-report`。

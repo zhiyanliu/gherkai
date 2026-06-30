@@ -7,19 +7,24 @@
 - [0024](../docs/adr/0024-worker-core-protocol.md) worker↔core 协议
 - [0025](../docs/adr/0025-plan-module-feature-to-jobs.md) plan 模块（解析 + scope 分组）
 - [0026](../docs/adr/0026-schedule-module.md) schedule 模块（并发调度）
+- [0027](../docs/adr/0027-runreport-aggregation-index.md) RunReport 归集索引
+- [0030](../docs/adr/0030-realtime-persistence-seam.md) 实时写接缝 / [0031](../docs/adr/0031-job-lifecycle-states-and-severity.md) job 生命周期态 + severity
 
 ## 模块
 
 ```
 core/
-├── model.py      ← 领域模型：Job / Scenario / Step / 6 类事件 / 四层结果 RunResult（纯数据）
+├── model.py      ← 领域模型：Job / Scenario / Step / 6 类事件 / 四层结果 RunResult / Status 七态 / ResourceUri（纯数据）
 ├── parse.py      ← .feature → 领域模型（借 gherkin-official Compiler；库藏在此 seam 后）
 ├── scope.py      ← tag 分组 + engine 校验 → Job[]；对外 plan(features, config) -> Job[]
+├── serialize.py  ← 领域模型↔dict 的单一序列化真理源（store adapter 复用，ADR 0016/0027）
 ├── wire.py       ← Job↔JSON 与 0024 事件↔JSON 的线序列化（worker↔core 协议落地）
-├── ports.py      ← Engine / WorkerHandle / EngineResolver / Sink / RunStore / ResultStore / ReportStore 接口（组合根注入）
-├── schedule.py   ← schedule(jobs, engines, sink, opts) -> RunResult（并发/隔离/超时/优雅停）
+├── ports.py      ← Engine / WorkerHandle / EngineResolver / Sink / JobSink / RunStore / ResultStore / ReportStore 接口（组合根注入）
+├── schedule.py   ← schedule(run_meta, engines, sink, opts, on_job_complete?, on_event?) -> RunResult（并发/隔离/超时/优雅停）
+├── persist.py    ← RunPersistence：编排 Store ports 随进度实时落库（commit-point 写序，ADR 0030）
 └── adapters/
-    └── subprocess_engine.py  ← Engine 唯一实装：spawn worker 子进程 + 读事件流（store adapter 待建）
+    ├── subprocess_engine.py        ← Engine 实装：spawn worker 子进程 + 读事件流
+    └── {run,result,report}_store/local.py  ← 三个 Store 的本地文件 adapter（云端 DDB/S3 adapter 待建）
 ```
 
 ## 跑测试

@@ -63,6 +63,7 @@ class ReportStore(Protocol):
 - `materialize=True`（opt-in）：按字节把产物拷进 `<run_id>/artifacts/`，链接转相对路径 → 目录自包含、可整体搬走/上 S3/发同事/CI 归档。
   - **默认不拷**是刻意的：本地跑时产物就在本机、手动查目录够用（[0016](./0016-execution-architecture-core-lib-run-model.md)「先散着」）。每 run 拷 N 个 MB 级 html + Nova 多个 trajectory 是纯磁盘放大、零收益——拷贝的价值只在搬运/上云时兑现，故 opt-in，不为想象中的 S3 场景提前盖机器。
 - `LocalReportStore` → 未来 `S3ReportStore` 只换「拷到哪 / 链接前缀 / 返回的 URI scheme」，core 不动。
+- **`write` 失败被隔离、不击穿已 commit 的 run**（实时写接缝，[0030](./0030-realtime-persistence-seam.md)）：RunReport 是**纯派生只读视图、可重建、永不作判定源**——故 `RunPersistence.finalize` 在 commit point（`finalize_run`，判定真值已落 ResultStore）之后才调 `ReportStore.write`，且把 write 的异常隔离（吞掉+留痕+返回 None），不让一个「可重建的报告」写失败把整个 run 拖成裸 traceback 退出、CI 拿不到判定输出。
 
 **「生成 RunReport」与「materialize 产物」是两个正交开关，默认值不同（刻意）**：
 - **生成 RunReport = run 的应得产物，cli 默认开**。每次 run 都归集到 `<report-dir>/<run_id>/`

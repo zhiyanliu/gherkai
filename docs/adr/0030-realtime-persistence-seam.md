@@ -38,38 +38,45 @@ v1.1 要「边跑边落库」（WebUI 提交即返回 runId、之后轮询看进
 class JobSink(Protocol):
     def __call__(self, job: JobResult) -> None: ...   # 收已归约的 JobResult（非原始 Event）
 
-# core/schedule.py
-def schedule(run_meta, engines, sink, opts=None, on_job_complete: JobSink | None = None) -> RunResult: ...
+# core/schedule.py —— 两个旁路注入点，都默认 None
+def schedule(run_meta, engines, sink, opts=None,
+             on_job_complete: JobSink | None = None,   # job 完成 fire 已归约 JobResult（主线程串行）
+             on_event: Sink | None = None) -> RunResult: ...  # 每事件 fire（sink_lock 之外，实时刷 RUNNING 用）
 ```
 
-- **`default=None` 的语义是「逃生舱」**：正常路径（产品 / 组合根）**永远接** persistence；只有「单测 / `--no-report` 显式弃权 / 纯内存实验」才不接。None 让纯 reducer 不被一个正交关注点绑死——`test_schedule.py` 20+ 用例、`--no-report` 路径都不必造 no-op 传进去。
-- **不是 keyword-only**（普通参数 + 默认 None），但**调用点用关键字写** `on_job_complete=...` 保自说明。
-- fire 在主线程 `as_completed` 循环里**串行**（非 worker 线程），故回调实现**无需自己加锁**——这点比「回调要线程安全」更准。
+- **`default=None` 的语义是「逃生舱」**：正常路径（产品 / 组合根）**永远接** persistence；只有「单测 / `--no-report` 显式弃权 / 纯内存实验」才不接。None 让纯 reducer 不被一个正交关注点绑死——`test_schedule.py` 用例、`--no-report` 路径都不必造 no-op 传进去。
+- **不是 keyword-only**（普通参数 + 默认 None），但**调用点用关键字写** `on_job_complete=...`/`on_event=...` 保自说明。
+- on_job_complete fire 在主线程 `as_completed` 循环里串行；on_event 在 worker 线程、`sink_lock` **之外** fire（与 sink 分离，见决定三并发不变量）——两者写 store 都经 `RunPersistence` 的单一锁串行。
 
 ## 决定二：落库编排收进 `core/persist.py` 的 `RunPersistence` 应用服务，组合根只注入 adapter
 
-「实时写怎么落」（commit-point 写序、RUNNING 中间态、severity 增量聚合）**对 cli / WebUI / 未来 cron 完全一致，只有注入的 store adapter 不同**。
+「实时写怎么落」（commit-point 写序、RUNNING 中间态、按 scope_id 增量刷 job 态）**对 cli / WebUI / 未来 cron 完全一致，只有注入的 store adapter 不同**。
 让每个组合根各写一遍 → 必漂移。故收成一处 core 应用服务（依赖 Store **ports**、不含具体 adapter、不含 reducer 逻辑）：
 
 ```python
 # core/persist.py —— 编排 Store ports；不在 schedule 里、不碰执行 reducer
 class RunPersistence:
-    def __init__(self, run_store, result_store, report_store=None): ...
+    def __init__(self, run_id, run_store, result_store, report_store=None): ...
     def begin(self, run_meta, *, started_at): ...        # create_run(meta, 初始全 PENDING 的 RunState)
-    def sink(self, inner_sink): ...                       # 装饰：转发进度 sink + 收 ScopeStarted→刷 RUNNING+血缘
-    def on_job_complete(self, jr): ...                    # 每 job：先 save_job_result，后 update_job_state（severity 增量）
+    def on_event(self, event): ...                        # 注入 schedule.on_event：收 ScopeStarted→刷 RUNNING+血缘（sink_lock 外）
+    def on_job_complete(self, jr): ...                    # 每 job：先 save_job_result，后 update_job_state（按 scope_id 刷该 job 终态）
     def finalize(self, result, *, ended_at): ...          # commit point：finalize_run → ReportStore.write
 ```
 
 组合根（任意皮）就只剩注入 + 三调用，**逻辑零重复、只换 adapter**：
 
 ```python
-persistence = RunPersistence(run_store, result_store, report_store)   # ← 唯一差异：哪套 adapter
+persistence = RunPersistence(run_id, run_store, result_store, report_store)   # ← 唯一差异：哪套 adapter
 persistence.begin(run_meta, started_at=now)
-result = schedule(run_meta, resolver, persistence.sink(progress_sink), opts,
-                  on_job_complete=persistence.on_job_complete)
+result = schedule(run_meta, resolver, progress_sink, opts,
+                  on_job_complete=persistence.on_job_complete,   # job 完成落终态（主线程）
+                  on_event=persistence.on_event)                 # 收 ScopeStarted 刷 RUNNING（旁路观察者，sink_lock 外）
 persistence.finalize(result, ended_at=now)
 ```
+
+> **注**：sink（进度显示）与 on_event（实时落 RUNNING）是**两个独立注入点**，不再让 persistence 装饰 sink。
+> 理由是并发不变量（见决定三末）：sink 被 schedule 的 sink_lock 串行化，若把 RUNNING 的磁盘写塞进 sink，会把它串进
+> 所有 worker 的进度显示临界区。故 on_event 独立、在 sink_lock **之外**调。
 
 **架构对位**：`schedule` 编排**执行**（Engine port），`RunPersistence` 编排**存储**（Store ports），两者平级、都在 core、由组合根组合。
 schedule 仍一行不碰 store。这兑现「调 adapter 落库是默认行为、不是每个 client 自己拼」。
@@ -85,25 +92,41 @@ run 开始（schedule 之前）:
 
 每个 job 完成（on_job_complete 串行 fire 已归约的 jr）:
   ① ResultStore.save_job_result(run_id, jr)             ← 数据面判定真值【先】写
-  ② RunStore.update_job_state(run_id, job_state)         ← 控制面 job 态【后】刷（severity 单调，[0031](./0031-job-lifecycle-states-and-severity.md)）
+  ② RunStore.update_job_state(run_id, job_state)         ← 控制面 job 态【后】刷（单写者一次写定该 job 终态，[0031](./0031-job-lifecycle-states-and-severity.md)）
 
-job 进行中（sink 收 ScopeStarted，worker 线程、sink_lock 串行）:
+job 进行中（on_event 收 ScopeStarted，worker 线程、**sink_lock 之外**）:
   RunStore.update_job_state(run_id, JobState(scope_id, RUNNING, session_id))  ← RUNNING 中间态 + 血缘随首事件即落
 
 run 结束（schedule 返回后）:
   RunStore.finalize_run(run_id, result.status, ended_at)  ← commit point：它一落=判定已就绪
-  ReportStore.write(...)                                  ← 派生视图永远最后、从终值 RunResult 派生
+  ReportStore.write(...)                                  ← 派生视图永远最后；**其失败被隔离、不击穿已 commit 的 run**
 ```
+
+> **ReportStore.write 失败隔离**：finalize_run（commit point）一落，判定真值已在 ResultStore 安然无恙；其后的
+> ReportStore.write（派生只读视图）若抛异常（磁盘满等），**不冒泡、不反向击穿已 commit 的 run**——finalize 吞掉它、
+> 留痕诊断、返回 None（报告可后续从 RunResult 重建）。否则一个「可重建的报告」写失败会让整个 run 裸 traceback 退出、
+> CI 拿不到判定输出。finalize_run 本身**不**在隔离范围内（控制面没落=真问题，必须冒泡）。
 
 **commit point 的意义**：数据面（ResultStore 各 job）先逐个落 → 最后才写 RunStore 终态 status。
 「看到 RunStore 终态」即**保证**「所有 job 判定真值已落」。这修正了 v1.0 cli 现在的反序（先写控制面摘要、后写数据面，
 中途崩会留下「说 passed 但详细结果没齐」的假象）。
 
-> **两条写 RunStore 的路径必须共享同一把锁**（实装关键）：RUNNING 中间态刷在 **worker 线程**（经 sink，靠 `sink_lock` 串行）；
-> job 终态刷 + finalize 在 **主线程**（经 on_job_complete，as_completed 串行）。这是**两个不同线程经两套不同串行机制**写同一个
-> RunStore（local adapter 是「读 run_state→改→写回」的整文件 read-modify-write，**非自身线程安全**）。若各跑各的，一个 worker 正刷某 scope 的
-> RUNNING、主线程同时刷另一 scope 的终态，整文件 RMW 会互相覆盖、丢更新。**不变量：所有 `update_job_state`/`create_run`/`finalize_run`
-> 经同一把 store 锁**（`RunPersistence` 内持一把锁，RUNNING 路径与 on_job_complete 路径都走它，而非依赖 sink_lock 与主线程「碰巧不撞」）。
+> **两条写 RunStore 的路径必须共享同一把锁**（实装关键）：RUNNING 中间态刷在 **worker 线程**（经 `on_event`，在
+> `sink_lock` **之外**调）；job 终态刷 + finalize 在 **主线程**（经 on_job_complete，as_completed 串行）。这是**两个不同
+> 线程**写同一个 RunStore（local adapter 是「读 run_state→改→写回」的整文件 read-modify-write，**非自身线程安全**）。
+> 若各跑各的，一个 worker 正刷某 scope 的 RUNNING、主线程同时刷另一 scope 的终态，整文件 RMW 会互相覆盖、丢更新。
+> **不变量：所有 `update_job_state`/`create_run`/`finalize_run` 经同一把 store 锁**（`RunPersistence` 内持一把锁，
+> on_event 与 on_job_complete 路径都走它）。
+>
+> **为何 RUNNING 走 on_event 而非装饰 sink**：sink 被 schedule 的 `sink_lock` 串行化（保进度显示有序）。若让 persistence
+> 装饰 sink，RUNNING 的整文件磁盘 RMW 会被串进 `sink_lock` 临界区——一个 worker 刷 RUNNING 期间，全体 worker 的进度
+> 显示都堵在 `sink_lock` 后。故 schedule 另开一个 `on_event` 旁路观察者、在 `sink_lock` 之外 fire；落库的线程安全由
+> `RunPersistence._lock` 独立保证，与进度显示解耦。
+
+> **回调异常的停机止血**（实装关键）：on_job_complete 在主线程 fire，若它抛异常（如落库磁盘满），schedule **在异常
+> 冒泡前先 stop 所有在跑 worker**（`abort_flag.set()` + 逐个 `_stop()`）再重抛。否则异常跳出 `with ThreadPoolExecutor`，
+> `shutdown(wait=True)` 会等所有在跑 worker 自然跑完——真 AgentCore 会话继续烧钱。异常仍冒泡（落库失败=真问题、要暴露），
+> 只是先掐掉在跑会话。
 
 > **写序的失败语义（残留风险，本地接受）**：若 `save_job_result` 成功但 `update_job_state` 失败，
 > run_state 落后于 jobs/——但 **jobs/*.json 是判定唯一权威、run_state 是可重建摘要**（依据 [0016](./0016-execution-architecture-core-lib-run-model.md)

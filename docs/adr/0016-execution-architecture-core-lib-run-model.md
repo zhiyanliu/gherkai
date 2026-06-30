@@ -50,13 +50,13 @@
 | 层 | 内容 | 何时 | 类型 | store |
 |---|---|---|---|---|
 | **definition（前置身份）** | run_id + created_at + 跑哪些 job（完整 `Job`：scope/engine/scenarios/steps，"要跑什么"） | **执行前**确定（plan 产出 + 组合根生成 run_id） | `RunMeta`（持有 `tuple[Job,...]`，不另造 JobMeta） | `RunStore`（控制面） |
-| **控制面运行态** | 总 status / 各 job status / 会话血缘 sessionId / 起止 | **执行后**产生 | `RunState`（+ `JobState`） | `RunStore`（控制面） |
+| **控制面运行态** | 总 status / 各 job status / 会话血缘 sessionId / 起止 | **执行后**产生（实时写下随进度增量刷，[0030](./0030-realtime-persistence-seam.md)） | `RunState`（`jobs: Map<scope_id, JobState>`，按 scope_id 定位单 job 实时刷；落盘 JSON 仍 list） | `RunStore`（控制面） |
 | **数据面判定明细** | 每 scenario/step 的 pass-fail、投票、cost、报告指针 | **执行后**产生 | `JobResult`→`ScenarioResult`→`StepResult` | `ResultStore`（数据面，判定真值唯一权威） |
 
 - **数据流向单向、不从结果反推**：`features → plan → Job[] → 组合根生成 run_id → RunMeta → schedule(run_meta) → RunResult`。`RunMeta`（definition）是 schedule 的**输入**、不是从 `RunResult` 反抽——run 的身份执行前就定了。`schedule` 把 `run_meta` 原样放进 `RunResult`（合成），并归约出判定。`RunState` 由 `run_state_from_result(result)` 投影（投影**运行态**字段 status/session_id，非反推 definition 身份——scope_id 取自 `jr.job`，本就在 definition 里）。
 - **`RunResult` = `RunMeta` + 判定的显式合成**：`JobResult` **持有 `Job`**（definition）而非重复抄它的 scope_id/scope_name/engine——消除「抄字段抄漏」（旧版抄了 engine 漏了 scope_name），存储唯一、读法经 property 稳定。
 - **status 不进 `RunMeta`**：status 是判定派生（执行后），属控制面运行态/数据面，不是 definition。
-- **「执行中实时更新状态」靠 sink 消费 event，不靠 schedule 持有 store**（ADR 0026「sink 与 RunResult 是同一事件流的两个视图」）：schedule 保持纯归约、不依赖任何 store；要实时进度的消费者（WebUI）挂一个消费 0024 事件、写状态的 sink 即可——本地/云端同机制，与部署无关。本轮不写该 status-sink（本地同步 cli 无轮询消费者），机制（sink）已在、零阻碍。
+- **「执行中实时更新状态」靠 schedule 的旁路注入点（`on_event`/`on_job_complete`）让组合根落库，不靠 schedule 持有 store**：schedule 保持纯归约、不依赖任何 store；落库编排收在组合根注入的 `RunPersistence`（[0030](./0030-realtime-persistence-seam.md)）。**已落地**——cli 经此实时写 RunState（RUNNING 中间态）+ ResultStore（每 job 判定），WebUI 轮询面可直接复用。（早期设计曾设想让落库走 sink，已被 [0030](./0030-realtime-persistence-seam.md) 否决——sink 被 sink_lock 串行化、只留给进度显示，落库走独立的 on_event/on_job_complete。）
 
 **已定 = 概念/层级（上表 + 三层切分）+ 协议层字段（[0024](./0024-worker-core-protocol.md)）**：每 scenario 判定（status 三态）、抖动投票 tally、规范化 errorType、cost 信封、报告产物指针（reportRefs）等 **scenario/scope 级字段已由 worker↔core 协议钉死**——它们是 RunResult/RunReport 的字段来源。**仍未定 = 持久化层 Run/Job 级字段**（runId / jobId(scopeId) / 会话血缘 sessionId / 起止时间 / DDB 表结构 / WebUI 读取面）：有意留到 v1.0 真实跑批逼出（"报告要展示什么、CI 要读什么"届时自然浮现），避免现在纸上列错。（原计划在 v0.x 逼出，但 v0.x 判「方向已证」未做真实用例验收，顺延 v1.0，见下「版本切分」。）
 
@@ -71,7 +71,7 @@
 
 **按关注点拆成独立 port（不揉成上帝 module）**：
 - `Engine` —— 真正跑一个 scope 的地方（名 `Engine`，对齐 CONTEXT 「引擎」术语）。**实装收敛为单个参数化 adapter `SubprocessEngine`**（`core/core/adapters/subprocess_engine.py`）：以 `cmd`/`cwd`/`env` 参数化,既能 spawn Node worker 也能 spawn Python worker——因两个引擎"spawn 子进程 + 讲同一套 0024 协议"的形状本就完全一致（[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)），无需 `MidsceneEngine`/`NovaActEngine` 两个类。哪个引擎由组合根传不同 `cmd` 决定（`EngineResolver` 按 `job.engine` 选）。
-- `RunStore` —— **控制面**：持 **definition（`RunMeta`，执行前确定的身份 + `Job[]`）+ 运行态（`RunState`：status、起止、会话血缘 sessionId）**（频繁读写：轮询/续跑/WebUI 进度）。`save_run(meta, state)` 分别落、`load_run_meta`/`load_run_state` 分别读（definition 与运行态生命周期不同：前者执行前定、后者执行后产，见上「三层切分」）。**这才是未来 DynamoDB 真正要存的东西**（可恢复、可轮询）。
+- `RunStore` —— **控制面**：持 **definition（`RunMeta`，执行前确定的身份 + `Job[]`）+ 运行态（`RunState`：status、起止、会话血缘 sessionId）**（频繁读写：轮询/续跑/WebUI 进度）。读写两套接口：①一次性 `save_run(meta, state)` + `load_run_meta`/`load_run_state`；②实时写三段（[0030](./0030-realtime-persistence-seam.md)）`create_run`（开始：写 definition + 初始全 pending）→ `update_job_state`（按 scope_id 增量刷单 job）→ `finalize_run`（commit point：写总 status + ended_at）。definition 与运行态生命周期不同（前者执行前定、后者执行后产/随进度刷，见上「三层切分」）。**这才是未来 DynamoDB 真正要存的东西**（可恢复、可轮询）。
 - `ResultStore` —— **数据面**：每 scenario 的 pass/fail、投票抖动、原生报告指针（追加为主；CI 读判定真值靠它）。`save_job_result`/`load_job_result`/`load_all` 按 job 粒度读写（判定真值唯一权威）。
 - `ReportStore` —— 把 `RunResult` 归集成 RunReport（manifest + index，派生只读导航视图；local FS → S3）。**已实装** `LocalReportStore`（[0027](./0027-runreport-aggregation-index.md)）。
 - （其余按需，如凭证源；保持各自独立、生命周期不同）
@@ -137,7 +137,7 @@ yaozhou/
   - **决定（边界，务必读）**：**v0.1.0 判「方向已证」，不补真实用例即进 v1.0.0**。理由——① 团队当前**拿不到真实业务用例**（站点登录态等不可得），强等是空等；② 没有真实用例 → 破例无从触发 → **「破例清单」这条验收无法在 v0.x 执行**。故把「真实业务用例验收 + 破例记录」**顺延并入 v1.0.0**：待有真实用例时在 v1.0 里跑出破例、据以校验「QA 零代码」承诺。**已知风险**：v1.0 架构基于「骨架用例都很顺」的乐观假设设计，真实用例的破例（登录 / HITL / 动态内容 flaky）可能反过来要求调整 v1.0 架构——接受此返工风险，因前置条件（真实用例）确实不具备。
   - **报告**：v0.x 原目标含「报告能看」，当时**决定先「散着」**（手动查目录够用），归集形态待要求清晰再定。**v1.0 已落地为 RunReport 归集索引**（[0027](./0027-runreport-aggregation-index.md)）：不重渲染原生产物、只归集成统一清单 + 导航入口——回答了「先散着」时悬而未决的形态问题（索引而非融合）。
 - **v1.0.0（团队 QA 日常可用）— ⏳ 架构设计中（本 ADR + 0022/0023）**：多用例组织、跑批入口（CLI 阻塞跑一批）、scope 调度、抖动治理（投票）落地；本地执行。**承接 v0.x 顺延项**：真实业务用例验收 + 破例清单（RunReport 归集已落地，[0027](./0027-runreport-aggregation-index.md)）。
-- **v1.1.0（云端执行）— ⬜ 留口子不实现**：CLI 提交 → Fargate 跑 → 轮询收集，**job = scope** 粒度（上云时坐实，见 [0017](./0017-cloud-execution-fargate-over-runtime.md)）；外置状态存储（DDB，主要服务 `RunStore`）+ 无状态核心。**= 加 adapter + 组合根换注入，核心不动**（「留口子不实现」= 接口现在定、实现等真需要时填）。
+- **v1.1.0（云端执行）— 🚧 进行中**：CLI 提交 → Fargate 跑 → 轮询收集，**job = scope** 粒度（上云时坐实，见 [0017](./0017-cloud-execution-fargate-over-runtime.md)）；外置状态存储（DDB，主要服务 `RunStore`）+ 无状态核心。**= 加 adapter + 组合根换注入，核心不动**。**已落地：实时写存储接缝**（schedule 的 on_event/on_job_complete 旁路 + `RunPersistence` 编排 + RunStore 三增量方法，[0030](./0030-realtime-persistence-seam.md)）+ job 生命周期态/severity（[0031](./0031-job-lifecycle-states-and-severity.md)）；**待做**：DDB/S3 adapter（local 已验证「换 adapter 核心不动」的命题，云端 adapter 接同一 port）。
 - **v2.0.0（规模化）— ⬜ 留口子不实现**：WebUI 前端（直接调核心）。
 
 ## G1/G2 解析前置（声明语法已定，调度实现待 v1.0）

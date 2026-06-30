@@ -14,7 +14,7 @@
 |------|------|------|
 | 双引擎执行 | 同一份 `.feature` → 两个引擎薄 worker（cli 经 `@engine` tag 路由） | ✅ 端到端真跑 |
 | 云端浏览器 | 两个引擎都接 AgentCore Browser（各自一个会话，CDP 驱动） | ✅ |
-| 核心库 | parse + scope 分组 + schedule 调度 + 4 ports（Engine/Run/Result/ReportStore） | ✅ 测试 core 76 |
+| 核心库 | parse + scope 分组 + schedule 调度 + 4 ports（Engine/Run/Result/ReportStore）+ 实时写编排（RunPersistence，ADR 0030） | ✅ 单测覆盖 |
 | 投票治理 | AI 断言可配 N 次取多数票（`--assertion-votes`，治抖动，ADR 0014） | ✅ |
 | RunReport | 跨引擎归集索引（manifest + index，不融合产物，ADR 0027） | ✅ |
 | 网络韧性 | 建连两层重试 + network_error 分类 + SIGTERM 会话泄漏根治（ADR 0028） | ✅ |
@@ -44,14 +44,14 @@
 yaozhou/
 ├── README.md                  ← 本文件
 ├── CONTEXT.md                 ← 领域术语表（glossary）
-├── docs/adr/                  ← 架构决策记录（0001–0028）
+├── docs/adr/                  ← 架构决策记录（0001–0031）
 ├── features/                  ← 共享 .feature（同一份两个引擎同读；通用 step 风格，QA 零代码）
 │   ├── wikipedia_generic.feature / wikipedia_assertions.feature / wikipedia_robustness.feature
 │   ├── engine_routing.feature              ← @engine tag 路由验证
 │   ├── deterministic_anchor.feature        ← @deterministic 锚点验证（ADR 0022）
 │   └── concurrency_and_scope.feature       ← 手工真跑回归夹具：改调度/会话生命周期后重跑验 ADR 0019
 ├── core/                      ← 窄腰核心库（Python，零引擎依赖，ADR 0016）
-│   └── core/{parse,scope,schedule,model,wire,serialize,ports}.py + adapters/{run,result,report}_store/
+│   └── core/{parse,scope,schedule,persist,model,wire,serialize,ports}.py + adapters/{run,result,report}_store/
 ├── cli/                       ← 核心库的第一个前端 = 组合根（ADR 0016）
 │   └── cli/{__main__.py(argparse) · compose.py(引擎注册表) · render.py}
 └── engines/                   ← 两个可插拔引擎，与 core 平级
@@ -87,7 +87,7 @@ AWS_REGION=us-east-1 uv run python -m cli run ../features/wikipedia_generic.feat
 uv run python -m cli list-engines
 ```
 
-跑完落 `cli/reports/<run_id>/`：RunReport（`index.html` 人看入口 + `manifest.json`）+ 判定真值（`jobs/`）+ 控制面（`run_meta.json`/`run_state.json`）。详见 [`cli/README.md`](./cli/README.md)。**先 `plan` 后 `run`**——run 真烧钱，plan 是纯本地预检。
+落盘到 `cli/reports/<run_id>/`：判定真值（`jobs/`）+ 控制面（`run_meta.json`/`run_state.json`）+ RunReport（`index.html` 人看入口 + `manifest.json`）。**边跑边写**（ADR 0030）：run 开始即落 definition + 初始态，每个 scope 起跑刷 RUNNING、完成即落判定，最后 finalize 总状态——可「提交即返回 runId、之后轮询看进度」。详见 [`cli/README.md`](./cli/README.md)。**先 `plan` 后 `run`**——run 真烧钱，plan 是纯本地预检。
 
 两个引擎读的是**同一份** `features/` 下 `.feature`（通用 step 风格，QA 只写自然语言）。
 

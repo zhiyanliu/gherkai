@@ -5,11 +5,13 @@
 ## 接口（深模块，小）
 
 ```
-schedule(run_meta: RunMeta, engines: EngineResolver, sink: (event) -> void, opts) -> RunResult
+schedule(run_meta: RunMeta, engines: EngineResolver, sink: (event) -> void, opts,
+         on_job_complete?: (JobResult) -> void, on_event?: (event) -> void) -> RunResult
    // RunMeta: 一次 run 的 definition（run_id + created_at + jobs: Job[]），组合根执行前生成/组装（ADR 0016/0027）
    //          schedule 把 run_meta 原样放进 RunResult（合成）+ 归约判定，不自己生成 run_id
    // EngineResolver: (engineName) -> Engine —— 按 job.engine 解析 Engine，schedule 对引擎数/引擎名无知
-   // sink: 接收 0024 原始流式事件的回调（pass-through，供进度/落地）
+   // sink: 接收 0024 原始流式事件的回调（pass-through，仅供进度显示；被 sink_lock 串行化）
+   // on_job_complete/on_event: 实时写接缝的两个旁路注入点（默认空），落库走它们、不走 sink（ADR 0030）
 
 opts = {                 // 时间单位统一为秒；代码字段名带 _s 后缀（job_timeout_s/grace_period_s）
   maxConcurrency = 4,    // 同时在跑的 worker 上限
@@ -22,8 +24,8 @@ opts = {                 // 时间单位统一为秒；代码字段名带 _s 后
 （上为语言中立伪代码；实际实现为 dataclass `ScheduleOpts`，字段 snake_case：`max_concurrency`/`fail_fast`/`job_timeout_s`/`grace_period_s`/`clock`/`network_retry`（默认 0）/`retry_sleep`（[0028](./0028-transient-network-ssl-resilience.md)）。）
 
 - **注入 `engines`（`EngineResolver`：按 `job.engine` 解析 Engine）而非自己 spawn** → 可测（skill：accept dependencies, don't create them）：测试注入假 Engine（吐预设 JSON Lines，[0024](./0024-worker-core-protocol.md)）即可验调度逻辑，无需真起子进程/真连 AgentCore。**schedule 对引擎数/引擎名无知**——焊死 `{midscene, novaact}` 会让第三个引擎到来即改接口；用 resolver 则只动组合根注入。
-- **注入 `sink`**（`(event) -> void` 回调，收流式事件的去处：实时落 ResultStore / CLI 打印进度）→ schedule 边收边转，不自己决定结果存哪（[0016](./0016-execution-architecture-core-lib-run-model.md) ports）。（RunReport **不**走 sink——它由 `ReportStore.write` 从归约后的 `RunResult` 派生，[0027](./0027-runreport-aggregation-index.md)。）
-- **`sink` vs `RunResult` 边界（不是两次独立判定）**：`sink` 收的是 [0024](./0024-worker-core-protocol.md) **原始流式事件**（pass-through，供实时进度/逐条落地）；`RunResult` 是 schedule 对**同一事件流的归约终值**（权威汇总判定，给退出码/CI）。同一份事实的两个视图——流式过程 vs 终态归约，非两套判定来源。
+- **注入 `sink`**（`(event) -> void` 回调，仅供 CLI 打印进度）→ schedule 边收边转，不自己决定结果存哪（[0016](./0016-execution-architecture-core-lib-run-model.md) ports）。**实时落库不走 sink**——走 `on_event`（事件旁路，在 sink_lock 外刷 RUNNING 中间态）/ `on_job_complete`（job 完成落判定真值），由组合根的 `RunPersistence` 编排（[0030](./0030-realtime-persistence-seam.md)）。（RunReport 也不走 sink——它由 `ReportStore.write` 从归约后的 `RunResult` 派生，[0027](./0027-runreport-aggregation-index.md)。）
+- **`sink` vs `RunResult` 边界（不是两次独立判定）**：`sink` 收的是 [0024](./0024-worker-core-protocol.md) **原始流式事件**（pass-through，供实时进度）；`RunResult` 是 schedule 对**同一事件流的归约终值**（权威汇总判定，给退出码/CI）。同一份事实的两个视图——流式过程 vs 终态归约，非两套判定来源。
 - **注入 `clock`**（时间源）→ 超时杀 / grace→kill 这两条 schedule 独有难逻辑可用 fake clock 确定性单测，不靠真实墙钟等待。
 - **返回 `RunResult`**（机器可读汇总判定，给退出码/CI，[0016](./0016-execution-architecture-core-lib-run-model.md)）。
 - **删除测试**：删掉本模块，「并发控制 + worker 生命周期 + 失败隔离 + 超时兜底」会散进 CLI/WebUI 各写一遍 → 它在挣钱。
@@ -72,7 +74,7 @@ opts = {                 // 时间单位统一为秒；代码字段名带 _s 后
 
 - 边收 worker 的流式事件（[0024](./0024-worker-core-protocol.md) JSON Lines，六类：`scope_started`/`scenario_started`/`step_started`/`step_done`/`scenario_done`/`scope_done`）边转给 `sink`；归约成 `RunResult`。
 - 多 worker 并行 → 多路事件流交错，schedule 按 `scopeId`/`scenarioId` 归位（[0024](./0024-worker-core-protocol.md) 标识键）。
-- **status 归约**：scenario → job（任一 error→error / 任一 failed→failed / 全 passed→passed）→ run（同规则跨 job）。
+- **status 归约**：scenario → job（任一 error→error / 任一 failed→failed / 全 passed→passed）→ run（同规则跨 job，但**入口先滤掉非终态判定** skipped/aborted/pending/running，即 `_NON_VERDICT`，run 级只看真正出了判定的 job，见 [0031](./0031-job-lifecycle-states-and-severity.md) 决定三）。job 级除 worker 三态外，core 在 fail-fast 时还会派生 `skipped`（排队没起）/`aborted`（跑一半被掐）终态（[0031](./0031-job-lifecycle-states-and-severity.md)）。
 - **成本归约**：core 只各自合计 engine 报的**原生量**——累加 `step_done.cost` 的 `tokens`/`time_worked_s` 成 `JobResult.total_tokens`/`total_time_worked_s`（scope 级），再跨 job 求和成 `RunResult.total_tokens`/`total_time_worked_s`（run 级）。**core 不折美元**（交消费者），无任何引擎报某量则该量 None、不假装 0（cost 信封见 [0024](./0024-worker-core-protocol.md)）。
 - **墙钟时长归约**（性能指标，与成本正交）：core 用注入的 `clock` 在事件到达时打时间戳，按各级 `*_started`→`*_done` 算 `duration_ms`——step（`StepResult.duration_ms`）、scenario、scope（`JobResult.duration_ms`）、run（`RunResult.duration_ms`，schedule 整体包住、含并发）。core 首次保留 step 级粒度（`StepResult` 层）。
 
