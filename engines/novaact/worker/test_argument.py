@@ -1,7 +1,7 @@
 """step argument（DataTable/DocString）拼接单测（ADR 0024/0025）。
 
-验证 _argument_text / _instruction：多行参数拼成附加文本接在 step 人话后喂 AI。
-两腿（Nova/Midscene）须同一拼法——Midscene 侧对称测见 run-scope.ts 的 node:test。
+验证 _argument_text / _instruction：多行参数拼成附加文本接在 step 自然语言后喂 AI。
+两个引擎（Nova/Midscene）须同一拼法——Midscene 侧对称测见 run-scope.ts 的 node:test。
 """
 import sys
 from pathlib import Path
@@ -33,7 +33,7 @@ def test_no_argument():
     assert rs._argument_text({"kind": "weird"}) == ""
 
 
-# ---- _instruction：人话 + 参数拼接（去引号）----
+# ---- _instruction：自然语言 + 参数拼接（去引号）----
 def test_instruction_appends_argument():
     step = {"text": '"填写注册表单"', "argument": {"kind": "dataTable", "rows": [["字段", "值"], ["用户名", "alice"]]}}
     # 去外引号 + 换行接表格
@@ -50,7 +50,7 @@ def test_instruction_docstring():
     assert rs._instruction(step["text"], step) == "在反馈框填入以下内容\n很满意\n但要暗色模式"
 
 
-# ---- 边界：cell 含 | / 换行（两腿同规则清洗，保表格结构）----
+# ---- 边界：cell 含 | / 换行（两个引擎同规则清洗，保表格结构）----
 def test_cell_with_pipe_escaped():
     arg = {"kind": "dataTable", "rows": [["a|b", "c"]]}
     assert rs._argument_text(arg) == "| a\\|b | c |"  # | 转义，不破坏列结构
@@ -63,7 +63,7 @@ def test_cell_with_newline_flattened():
 
 # ---- 边界：unquote 只剥 ASCII 空白（BOM 不剥，与 Midscene 对称）----
 def test_unquote_ascii_ws_only_keeps_bom():
-    # 尾部 BOM(U+FEFF)：两腿都不剥 → 外引号不成对 → 原样（不会一腿剥一腿不剥造成分叉）
+    # 尾部 BOM(U+FEFF)：两个引擎都不剥 → 外引号不成对 → 原样（不会一个引擎剥一个引擎不剥造成分叉）
     assert rs._unquote('"login"﻿') == '"login"﻿'
     # 纯 ASCII 空白外包裹 → 正常剥 + 去引号
     assert rs._unquote('  "搜索"  ') == "搜索"

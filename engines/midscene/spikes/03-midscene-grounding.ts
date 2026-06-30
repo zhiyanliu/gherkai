@@ -1,7 +1,7 @@
 // 三段式自检 · 第 3 段：合体 —— Midscene(SigV4 自签) + AgentCore 云端浏览器 + 维基用例
 // = 模型连接(01) + 浏览器连接/CDP(02) + Midscene grounding，并产出对标基准数据（ADR 0010）。
 //
-// 用例（与 Nova Act 腿同一个，苹果对苹果）：
+// 用例（与 Nova Act 引擎同一个，苹果对苹果）：
 //   打开 wikipedia.org → 搜 "OpenAI" → 断言进入 OpenAI 词条页。
 // 断言：
 //   A 确定性：page.url() 含 /wiki/OpenAI（Playwright，可复现）
@@ -92,7 +92,7 @@ async function main() {
       avgMs: Math.round(bMs.reduce((a, b) => a + b, 0) / bMs.length),
     };
 
-    console.log("\n\n[03] ===== 对标基准（Midscene 腿）=====");
+    console.log("\n\n[03] ===== 对标基准（Midscene 引擎）=====");
     console.log(JSON.stringify(metrics, null, 2));
     console.log("\n[03] report.html 见 midscene_run/ 目录");
     console.log(actOk && aPass ? "[03] PASS — 合体全通" : "[03] PARTIAL — 见上方 metrics");

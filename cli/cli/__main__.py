@@ -26,7 +26,7 @@ from cli import compose, render
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="yaozhou-run",
-        description="解析 .feature → 分组 scope → 调度两腿 AI 引擎 → 汇总 RunResult（会烧真 AWS 钱）。",
+        description="解析 .feature → 分组 scope → 调度两个引擎 AI 引擎 → 汇总 RunResult（会烧真 AWS 钱）。",
     )
     sub = p.add_subparsers(dest="command")
 

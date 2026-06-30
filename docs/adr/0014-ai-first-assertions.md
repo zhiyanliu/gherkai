@@ -11,14 +11,14 @@
 AI 断言**非确定性、且每次消耗模型调用**。「AI 为主」不等于「无视风险」，必须配：
 
 1. **抖动治理**：AI 断言应可重试 / 多次投票（如 N 次取多数），并**记录抖动率**；CI 里监控抖动趋势。拥抱非确定性 = 必须为它买这份保险。
-   - **两腿用对称的布尔路径做投票**（查证安装源码）：Midscene `aiBoolean(prompt) -> boolean` ↔ Nova Act `act_get(prompt, BOOL_SCHEMA) -> bool`，都「问是非、拿布尔、不抛错」，可直接在布尔值上 N 次投票。**不要**用 Midscene 的 `aiAssert`（抛错黑盒）做投票——它要 catch 异常、机制和 Nova Act 不对称。`aiAssert` 留给"判定即终止"的简单场景。
+   - **两个引擎用对称的布尔路径做投票**（查证安装源码）：Midscene `aiBoolean(prompt) -> boolean` ↔ Nova Act `act_get(prompt, BOOL_SCHEMA) -> bool`，都「问是非、拿布尔、不抛错」，可直接在布尔值上 N 次投票。**不要**用 Midscene 的 `aiAssert`（抛错黑盒）做投票——它要 catch 异常、机制和 Nova Act 不对称。`aiAssert` 留给"判定即终止"的简单场景。
    - Midscene 取结构化全家族可选：`aiBoolean / aiNumber / aiString / aiQuery<T> / aiAsk`。
 2. **确定性逃生舱**：当判定**不可模糊**且确定性手段能精确表达（如 URL、DOM 存在性、精确数值）时，允许用确定性断言作高保真补充。它不是被禁止，是从「默认」降为「按需」。
-3. **持续度量校准**：当前仅 1 个对 AI 友好的用例（维基/OpenAI）两腿各 10 次**零抖动**——这是正面信号但**不足以反推 AI 断言在难场景可靠**（见 [0010](./0010-spike-as-apples-to-apples-benchmark.md)）。需对更难用例（模糊判定 / 动态内容 / 细微差异如禁用态）持续测抖动率，用数据校准「何时该降到确定性逃生舱」。
+3. **持续度量校准**：当前仅 1 个对 AI 友好的用例（维基/OpenAI）两个引擎各 10 次**零抖动**——这是正面信号但**不足以反推 AI 断言在难场景可靠**（见 [0010](./0010-spike-as-apples-to-apples-benchmark.md)）。需对更难用例（模糊判定 / 动态内容 / 细微差异如禁用态）持续测抖动率，用数据校准「何时该降到确定性逃生舱」。
 
 ## 现状与未决
 
 - **已定**：AI 断言为默认方向（本 ADR）。
-- **已定（投票次数 N 可配，v1.0 落地）**：投票次数 = `assertion_votes`，组合根经 CLI `--assertion-votes N` 设、贯穿 plan→Job→worker 协议→两腿 worker（[0024](./0024-worker-core-protocol.md)/[0025](./0025-plan-module-feature-to-jobs.md)/[0026](./0026-schedule-module.md)）。**默认 N=1**（单次判定、不做抖动检测——结果/日志最直观，避免功能未被理解时的噪声）；调高（如 3/5）才启用「N 次取多数票」抖动治理。`total==1` 时渲染隐藏投票 tally、`>1` 才显（机器可读层始终保留完整 votes）。
+- **已定（投票次数 N 可配，v1.0 落地）**：投票次数 = `assertion_votes`，组合根经 CLI `--assertion-votes N` 设、贯穿 plan→Job→worker 协议→两个引擎 worker（[0024](./0024-worker-core-protocol.md)/[0025](./0025-plan-module-feature-to-jobs.md)/[0026](./0026-schedule-module.md)）。**默认 N=1**（单次判定、不做抖动检测——结果/日志最直观，避免功能未被理解时的噪声）；调高（如 3/5）才启用「N 次取多数票」抖动治理。`total==1` 时渲染隐藏投票 tally、`>1` 才显（机器可读层始终保留完整 votes）。
 - **未定（靠数据迭代，不阻塞）**：N 的**推荐缺省值**（何时该把默认从 1 调高）、投票通过**阈值**（当前多数票 `yes > N/2`）、哪些判定类型应强制走确定性逃生舱——待更难用例的抖动数据出来后细化，届时更新本 ADR，不另立。
 - 抖动探测脚手架已在 spike（Midscene `03-midscene-grounding.ts`、Nova Act `wikipedia_benchmark.py` 各含 N=10 抖动），可复用到更难用例。

@@ -1,13 +1,13 @@
 // Midscene 薄 worker（ADR 0022/0024）：读 stdin 的 job JSON → 跑一个 scope → 吐 ADR 0024 事件到事件通道。
 //
 // 不含 BDD runner 装饰器：会话/aiAct/aiBoolean 投票/派发逻辑直接在本进程跑（ADR 0022 薄 worker）。
-// core 经子进程 adapter 起本 worker（ADR 0026 机制层），讲 ADR 0024 协议——与 Nova Act 腿对称。
+// core 经子进程 adapter 起本 worker（ADR 0026 机制层），讲 ADR 0024 协议——与 Nova Act 引擎对称。
 //
 // 三通道分离（ADR 0024）：协议事件吐到 EVENTS_FD 指定的 fd（无则回落 stdout，便于手动直跑调试）；
 // Midscene/SDK 的 stdout 噪声留 stdout；worker 自身诊断走 stderr。
 //
 // cost（ADR 0024）：从 agent._unstableLogContent() 的 executions[].tasks[].usage.total_tokens 取原生
-// token 数，worker 只报 {tokens}；core 合计、美元折算交消费者（不追 Qwen 单价）。两腿对称：都只报原生量。
+// token 数，worker 只报 {tokens}；core 合计、美元折算交消费者（不追 Qwen 单价）。两个引擎对称：都只报原生量。
 //
 // 跑（一般由 core adapter spawn；也可手动）：
 //   echo '<job json>' | AWS_REGION=us-east-1 node --import tsx worker/run-scope.ts
@@ -23,7 +23,7 @@ import {
 import * as fs from "node:fs";
 import { sigv4Fetch, signCdpUpgrade, BASE_URL, MODEL, REGION } from "../lib/agentcore-sigv4.mjs";
 // 确定性 step 注册表（ADR 0022）+ test engineer 的锚点脚手架。
-// import 脚手架即触发其顶层 deterministic(...) 注册副作用（对称 Nova 腿 import deterministic_steps）。
+// import 脚手架即触发其顶层 deterministic(...) 注册副作用（对称 Nova 引擎 import deterministic_steps）。
 import { match as matchDeterministic, DeterministicAssertion } from "./deterministic.js";
 import { buildInstruction } from "./argument.js";
 import "../bdd/steps/deterministic.steps.js";
@@ -313,7 +313,7 @@ async function runStep(
     }
     if (keyword === "Then") {
       // AI 断言 + N 次投票（ADR 0014/0024）；votesN=1 即单次判定（仍发 votes 标记这是 AI 断言）
-      const instr = buildInstruction(step.text, step.argument as any);  // 人话 + 多行参数（DataTable/DocString，ADR 0024）
+      const instr = buildInstruction(step.text, step.argument as any);  // 自然语言 + 多行参数（DataTable/DocString，ADR 0024）
       let yes = 0;
       for (let i = 0; i < votesN; i++) if (await agent.aiBoolean(instr)) yes++;
       const passed = yes > votesN / 2;

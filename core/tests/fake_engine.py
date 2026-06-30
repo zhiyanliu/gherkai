@@ -90,7 +90,7 @@ class CollectSink:
 
 
 class FakeResolver:
-    """EngineResolver：所有腿都返回同一个 FakeEngine（测试不区分腿）。"""
+    """EngineResolver：所有引擎都返回同一个 FakeEngine（测试不区分引擎）。"""
 
     def __init__(self, engine: FakeEngine) -> None:
         self.engine = engine

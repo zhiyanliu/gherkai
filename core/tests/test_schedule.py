@@ -256,7 +256,7 @@ def test_time_worked_aggregation_step_to_job_to_run():
     assert abs(a_jr.total_time_worked_s - 12.0) < 1e-9
     assert abs(b_jr.total_time_worked_s - 5.0) < 1e-9
     assert abs(result.total_time_worked_s - 17.0) < 1e-9  # run 级跨 scope 合计
-    assert result.total_tokens is None  # Nova 腿不报 token
+    assert result.total_tokens is None  # Nova 引擎不报 token
 
 
 def test_token_aggregation():
@@ -281,7 +281,7 @@ def test_cost_none_when_no_cost_data():
 
 
 def test_mixed_legs_each_native_metric_aggregated_separately():
-    # 混腿：nova 报 time_worked_s、midscene 报 tokens → 各自合计、互不污染、都不丢
+    # 混引擎：nova 报 time_worked_s、midscene 报 tokens → 各自合计、互不污染、都不丢
     engine = FakeEngine({
         "nova": _events_with_time("nova:0", [9.0]),
         "mid": _events_with_tokens("mid:0", [2000]),

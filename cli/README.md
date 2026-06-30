@@ -11,7 +11,7 @@ WebUI 将来是另一张皮，**直接调 core、复用 `compose`**，不经本 
 ```
 cli/
 ├── __main__.py   ← argparse 皮：解析参数 → 调 compose/core → 调 render；定义退出码
-├── compose.py    ← 组合根：引擎注册表（每腿 cmd/cwd）、读 feature、build resolver（WebUI 也复用）
+├── compose.py    ← 组合根：引擎注册表（每个引擎 cmd/cwd）、读 feature、build resolver（WebUI 也复用）
 └── render.py     ← 表层渲染：0024 事件 → 进度行；RunResult → 文本汇总 / JSON
 ```
 
@@ -27,7 +27,7 @@ uv sync                                            # 装环境（core 作 path �
 # 跑一个 feature（默认引擎 novaact，默认 max-concurrency=1）
 uv run python -m cli run ../features/wikipedia_generic.feature
 
-# 未标 @engine 的 scope 默认走 Midscene 腿、放开并发、JSON 输出
+# 未标 @engine 的 scope 默认走 Midscene 引擎、放开并发、JSON 输出
 uv run python -m cli run ../features/wikipedia_generic.feature \
   --default-engine midscene --max-concurrency 2 --json
 
@@ -35,7 +35,7 @@ uv run python -m cli run ../features/wikipedia_generic.feature \
 uv run python -m cli list-engines
 ```
 
-未标 `@engine` 的 scope 用 `--default-engine` 指定的默认腿；标了 `@engine:` 的按 tag 走、不受此 flag 影响（ADR 0019）。
+未标 `@engine` 的 scope 用 `--default-engine` 指定的默认引擎；标了 `@engine:` 的按 tag 走、不受此 flag 影响（ADR 0019）。
 
 ## 退出码
 
@@ -70,7 +70,7 @@ uv run python -m cli list-engines
 ### RunReport（每次 run 的应得产物，默认生成）
 
 每次 `run` **默认**把这次执行归集成一份 RunReport（ADR 0027）到 `reports/<run_id>/`：
-- `manifest.json` —— 机器可读（CI/WebUI 消费）：判定/时长/成本 + 各腿原生报告产物的扁平清单。
+- `manifest.json` —— 机器可读（CI/WebUI 消费）：判定/时长/成本 + 各引擎原生报告产物的扁平清单。
 - `index.html` —— 人可导航入口：每个原生产物（Midscene html / Nova trajectory）一行链接，
   点开看**原样**产物。RunReport 只索引/链接、**不解析融合**产物内容；新引擎报任意 `kind` 零改 core。
 

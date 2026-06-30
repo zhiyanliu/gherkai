@@ -1,4 +1,4 @@
-"""确定性 step 注册表（ADR 0022）——Nova 腿。
+"""确定性 step 注册表（ADR 0022）——Nova 引擎。
 
 test engineer 用 `@deterministic(pattern)` 把「正则模式 → handler」登记进一张表。worker 派发
 每个 step 时**先查这张表**：命中走精确 handler（拿 Playwright/CDP 句柄判定、**不投票、可复现**），
@@ -7,7 +7,7 @@ test engineer 用 `@deterministic(pattern)` 把「正则模式 → handler」登
 为什么匹配放 worker 不放 core（ADR 0022）：确定性 handler 是**引擎特定**的（碰 nova.page 这类
 精确 API），匹配表跟着 handler 走最内聚；core 只解析结构 + 调度，对 step 语义无知。
 
-角色边界（ADR 0020）：QA 永远只写人话（默认走 AI）；确定性 step 由 test engineer 在
+角色边界（ADR 0020）：QA 永远只写自然语言（默认走 AI）；确定性 step 由 test engineer 在
 deterministic_steps.py 里注册（QA 不碰）。
 
 handler 约定：

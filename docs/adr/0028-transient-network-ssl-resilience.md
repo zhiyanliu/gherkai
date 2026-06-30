@@ -9,7 +9,7 @@
 
 | 层 | 谁重试 | 重试什么 | 默认 |
 |---|---|---|---|
-| **① worker 内** | 两腿 worker 自己 | **仅建连/开会话段**（幂等、未产生副作用） | 开（4 次尝试） |
+| **① worker 内** | 两个引擎 worker 自己 | **仅建连/开会话段**（幂等、未产生副作用） | 开（4 次尝试） |
 | **② core/schedule** | schedule 对整个 job | 仅 `network_error` 且「会话未起」的 job 重新 spawn worker | **关**（`network_retry=0`） |
 
 两层职责分离:worker 层扛「单进程内的瞬时抖动」（最近故障点、最省）；core 层扛「worker 进程级失败」
@@ -46,7 +46,7 @@ worker **按白名单匹配具体瞬时异常类型**,不用宽基类兜底:
 故用**专用退出码**作 out-of-band 信号:
 
 - **`EX_WORKER_NETWORK = 80`**（避开 POSIX sysexits 64-78 / shell 保留 126-128+n / 信号区）。
-  **两腿 worker 必须用同一值**（各自硬编码 80）;core 的 `subprocess_engine.EX_WORKER_NETWORK = 80` 是单一来源的注释锚点。
+  **两个引擎 worker 必须用同一值**（各自硬编码 80）;core 的 `subprocess_engine.EX_WORKER_NETWORK = 80` 是单一来源的注释锚点。
 - worker 建连重试耗尽 + `scope_started` 未 emit → 退出 `80`。
 - `subprocess_engine._read_events` 把 returncode 80 翻成 `core.errors.WorkerNetworkError`（类型化）;
   `schedule._Worker._run_once` 在 generic `except` **之前**加 `except WorkerNetworkError` → 记 `error_type="network_error"`。
@@ -88,11 +88,11 @@ worker **按白名单匹配具体瞬时异常类型**,不用宽基类兜底:
 - **Midscene SIGTERM 会话泄漏两窗口已根治（后续轮）**:
   - **重试放大的 in-flight 会话窗口**:会话跟踪从「单一 `sessionId` 快照」重构为**待清理会话集**——每次 `StartBrowserSession` 成功即把 id 入集（含被重试丢弃的中间 attempt 会话），cleanup 遍历集逐个 Stop。彻底解决「重试时 sessionId 被后一 attempt 覆盖/置空 → handler 只能 Stop 当前快照、漏掉在途/已弃会话」。剩余仅「Start 已发 RPC 但 id 未返回」一瞬，由一个在途标记 + 短暂兜底等待覆盖。
   - **`StopBrowserSession` 超 `grace_period`**:每个 Stop 套超时预算（挂死即放弃、记 `cleanupFailed` 让泄漏可观测，不被 SIGKILL 打断到一半）；cleanup **并行** Stop（`Promise.all` 而非串行）——否则重试积累的 N 个泄漏会话串行会把 cleanup 拖过 grace 被 SIGKILL 截断（正是本修复要防的泄漏）。并行后最坏 cleanup 墙钟与会话数无关、< cli 默认 grace。常量值与算术见 `run-scope.ts`（代码为准，ADR 不复制以免漂移）。
-  - **Nova 腿不对称（不动，SDK 限制）**:Nova 无 in-flight 窗口（建连在 `with cdp_session` 内、`__exit__` 结构性清理）；但其 `StopBrowserSession` **在 Nova SDK 的 `AgentCoreBrowserSessionProvider.cdp_session().__exit__` 内部**，是 SDK 黑盒——**无法在 worker 层套超时预算**（不像 Midscene 是自己 `cp.send(StopBrowserSessionCommand)`）。硬加 worker 级看门狗 `os._exit` 会跳过 SDK 剩余清理、反而可能更多泄漏。故 Nova 侧依赖 schedule 的 `grace_period`（cli 默认 10s，够 SDK maxAttempts=3）给足释放时间，不强加超时。
+  - **Nova 引擎不对称（不动，SDK 限制）**:Nova 无 in-flight 窗口（建连在 `with cdp_session` 内、`__exit__` 结构性清理）；但其 `StopBrowserSession` **在 Nova SDK 的 `AgentCoreBrowserSessionProvider.cdp_session().__exit__` 内部**，是 SDK 黑盒——**无法在 worker 层套超时预算**（不像 Midscene 是自己 `cp.send(StopBrowserSessionCommand)`）。硬加 worker 级看门狗 `os._exit` 会跳过 SDK 剩余清理、反而可能更多泄漏。故 Nova 侧依赖 schedule 的 `grace_period`（cli 默认 10s，够 SDK maxAttempts=3）给足释放时间，不强加超时。
 - **留口子不实现**:
   - **act 中途的瞬时恢复**（长任务执行中 CDP 闪断 → 涉及会话状态恢复,复杂且有副作用风险）——明确 defer。
   - **`ensure_workflow_definition` 自身的 SSL 故障**:它在重试循环外（单次廉价 boto3 调用,SSL 失败面远小于 CDP/websocket 握手——后者才是实测崩的点）。若它 SSL 失败 → 仍归 engine_error。已知小缺陷,可随真实失败样本扩充。
-  - core job 重试时 trajectory 覆盖（run_id 不换,同腿重试可能覆盖上次 trajectory）——M 小、重试罕见,接受为已知小缺陷。
+  - core job 重试时 trajectory 覆盖（run_id 不换,同一引擎重试可能覆盖上次 trajectory）——M 小、重试罕见,接受为已知小缺陷。
 
 ## 重议
 

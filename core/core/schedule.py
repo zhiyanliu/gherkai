@@ -276,7 +276,7 @@ def schedule(
               产出 jobs 后构造传入（schedule 不自己生成 id、不取时钟——保 fake-clock 可确定性单测的
               纯归约定位；WebUI「提交即返回 runId」也要求 definition 先于跑批存在，ADR 0027）。
               schedule 原样把 run_meta 放进 RunResult（definition + 判定的合成），不从结果反推身份。
-    engines:  按 job.engine 解析 Engine 的 resolver（schedule 对腿数/腿名无知）。
+    engines:  按 job.engine 解析 Engine 的 resolver（schedule 对引擎数/引擎名无知）。
     sink:     接收 ADR 0024 原始流式事件的回调（与 RunResult 是同一事件流的两个视图）。
     """
     opts = opts or ScheduleOpts()
@@ -307,7 +307,7 @@ def schedule(
 
     run_status = _aggregate([jr.status for jr in job_results])
     # 成本归约（ADR 0024）：core 只各自合计 engine 报的原生量，不算美元、不判可信度。
-    #   total_tokens / total_time_worked_s = 跨 job 求和；None=无腿报这个量（不假装 0）。
+    #   total_tokens / total_time_worked_s = 跨 job 求和；None=无引擎报这个量（不假装 0）。
     tok = [jr.total_tokens for jr in job_results if jr.total_tokens is not None]
     tw = [jr.total_time_worked_s for jr in job_results if jr.total_time_worked_s is not None]
     return RunResult(

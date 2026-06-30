@@ -60,13 +60,13 @@ Given("打开 {string}", async function (this: W, url: string) {
   await this.page!.goto(url, { waitUntil: "domcontentloaded", timeout: 60_000 });
 });
 
-// 默认 AI 动作（ADR 0020）：无关键词的 When "{自然语言}" → aiAct。QA 写人话，不需路由关键词。
+// 默认 AI 动作（ADR 0020）：无关键词的 When "{自然语言}" → aiAct。QA 写自然语言，不需路由关键词。
 When("{string}", async function (this: W, instruction: string) {
   await this.agent!.aiAct(instruction);
 });
 
 // 默认 AI 判断（ADR 0020）：无关键词的 Then "{自然语言}" → AI 布尔判断 + N 次投票取多数
-// （ADR 0014 对称布尔路径；治种类A抖动）。QA 写人话——含**否定**陈述（如"页面没有出现服务器错误"），
+// （ADR 0014 对称布尔路径；治种类A抖动）。QA 写自然语言——含**否定**陈述（如"页面没有出现服务器错误"），
 // AI 能直接判否定，无需专门的否定 step。
 Then("{string}", async function (this: W, claim: string) {
   const votes: boolean[] = [];
@@ -79,5 +79,5 @@ Then("{string}", async function (this: W, claim: string) {
 
 // 注：① 确定性锚点（不走 AI 的精确 URL/DOM 查）见 deterministic.steps.ts 脚手架（ADR 0020，按需自建）。
 //     ② 不设「否定断言」「取数/取文本」「AI 确认/AI 执行」等带关键词的专用 step——
-//        一律走无关键词的 When/Then "{人话}"（ADR 0020：QA 零预设、默认走 AI）。
+//        一律走无关键词的 When/Then "{自然语言}"（ADR 0020：QA 零预设、默认走 AI）。
 // 若将来确需精确数值核对，走确定性锚点（ADR 0015），而非新增 AI 取数原语。

@@ -1,6 +1,6 @@
 // step argument（DataTable/DocString）拼接单测（ADR 0024/0025）。
 // 跑：node --import tsx --test worker/argument.test.ts
-// 与 Nova 腿 worker/test_argument.py **对称**——同一拼法、同一断言，保两腿同一 feature 行为一致。
+// 与 Nova 引擎 worker/test_argument.py **对称**——同一拼法、同一断言，保两个引擎同一 feature 行为一致。
 import { test } from "node:test";
 import assert from "node:assert";
 import { argumentText, unquote, buildInstruction } from "./argument.ts";
@@ -28,7 +28,7 @@ test("无 argument / 未知 kind → 空串", () => {
   assert.equal(argumentText({ kind: "weird" }), "");
 });
 
-// ---- buildInstruction：人话 + 参数拼接（去引号）----
+// ---- buildInstruction：自然语言 + 参数拼接（去引号）----
 test("buildInstruction 接上 dataTable", () => {
   const arg = { kind: "dataTable", rows: [["字段", "值"], ["用户名", "alice"]] };
   assert.equal(buildInstruction('"填写注册表单"', arg), "填写注册表单\n| 字段 | 值 |\n| 用户名 | alice |");

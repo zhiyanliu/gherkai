@@ -9,7 +9,7 @@ schedule 只下逻辑指令（run_scope / handle.stop），对信号/进程无�
 - worker stderr 实时透传到本进程 stderr（日志/调试）。
 
 引擎无关：cmd 决定起哪个 worker（Nova Act 的 python worker / 未来 Midscene 的 node worker）。
-同一个 adapter 类，靠不同 cmd 服务不同腿——符合「两 adapter 形状一致」（ADR 0024）。
+同一个 adapter 类，靠不同 cmd 服务不同引擎——符合「两 adapter 形状一致」（ADR 0024）。
 """
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ from core.wire import event_from_line, job_to_line
 
 # worker 网络专用退出码（ADR 0028）：worker 建连失败、重试耗尽时以此码退出，作 out-of-band 信号
 # （建连失败发生在任何事件 emit 之前，无法走事件通道）。值避开 POSIX sysexits(64-78)/signal 保留区。
-# **两腿 worker 必须用同一个值**（Nova run_scope.py / Midscene run-scope.ts 各自硬编码 80）。
+# **两个引擎 worker 必须用同一个值**（Nova run_scope.py / Midscene run-scope.ts 各自硬编码 80）。
 EX_WORKER_NETWORK = 80
 
 
@@ -113,7 +113,7 @@ def _read_events(proc: subprocess.Popen, events_r: int) -> Iterator[Event]:
         # 即 return、放弃此 generator（GeneratorExit 在 yield 处冒出，不到这里），故主动停的退出码不经此。
         # 0 = 正常；负 = 被 SIGKILL 强杀（grace 超时，schedule 主动停的尾路径，不到此检查）；
         # 正非零 = worker 自行异常退出（崩溃/会话清理失败 exit 1 / 网络码 80）→ 抛错让 schedule 记 error。
-        # 注：两腿 worker 与 echo_worker 均自装 SIGTERM handler 后 process.exit/sys.exit（正码），
+        # 注：两个引擎 worker 与 echo_worker 均自装 SIGTERM handler 后 process.exit/sys.exit（正码），
         # 故「负码=SIGTERM」不成立——负码只来自 SIGKILL，且那条路径不经此检查（见上）。
         if rc == EX_WORKER_NETWORK:
             # worker 以网络专用退出码退出（建连失败、重试耗尽，ADR 0028）：抛类型化异常，

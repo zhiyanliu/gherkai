@@ -1,4 +1,4 @@
-"""第二根穿刺针 · Nova Act 腿 —— 对标 Midscene 腿（ADR 0010 苹果对苹果）。
+"""第二根穿刺针 · Nova Act 引擎 —— 对标 Midscene 引擎（ADR 0010 苹果对苹果）。
 
 用例（与 Midscene 同）：打开 wikipedia.org → 搜 "OpenAI" → 断言进入 OpenAI 词条页。
 鉴权：纯 IAM，经 @workflow 装饰器（ADR 0004），不用 NOVA_ACT_API_KEY。
@@ -93,7 +93,7 @@ def run() -> None:
                 "avgMs": sum(b_ms) // len(b_ms),
             }
 
-            print("\n\n[NA] ===== 对标基准（Nova Act 腿）=====")
+            print("\n\n[NA] ===== 对标基准（Nova Act 引擎）=====")
             print(json.dumps(metrics, indent=2, ensure_ascii=False))
             print("[NA] PASS — 合体全通" if (act_ok and a_pass) else "[NA] PARTIAL — 见 metrics")
 

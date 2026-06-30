@@ -8,7 +8,7 @@
 本模块，顶层的 @deterministic 副作用把锚点登记进表。
 
 角色边界（ADR 0020）：
-  - 本文件由 test engineer 维护；QA 永远只在 .feature 写人话（默认走 AI，见 test_generic_steps.py）。
+  - 本文件由 test engineer 维护；QA 永远只在 .feature 写自然语言（默认走 AI，见 test_generic_steps.py）。
   - 仅当某断言确需精确、不能容忍 AI 非确定性时，test engineer 在此加一个项目专属锚点。
 
 handler 约定（见 worker/deterministic.py）：
@@ -28,7 +28,7 @@ from deterministic import deterministic
 def url_matches(ctx, pattern: str) -> None:
     """确定性 URL 断言：当前页 URL 须匹配给定正则（精确、不走 AI）。
 
-    .feature 写法（test engineer 约定的带关键词措辞，与 QA 的纯人话 Then 区分）：
+    .feature 写法（test engineer 约定的带关键词措辞，与 QA 的纯自然语言 Then 区分）：
         Then 页面地址匹配 "/wiki/OpenAI"
     """
     url = ctx.page.url

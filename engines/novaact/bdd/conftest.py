@@ -1,6 +1,6 @@
-"""Nova Act 侧引擎路由（G2，ADR 0019）：只跑属于本腿的 scenario。
+"""Nova Act 侧引擎路由（G2，ADR 0019）：只跑属于本引擎的 scenario。
 
-规则：scenario 标了 @engine:novaact、或整组未标 engine（默认） → 本腿跑；
+规则：scenario 标了 @engine:novaact、或整组未标 engine（默认） → 本引擎跑；
       标了 @engine:midscene → 跳过（交给 Midscene runner）。
 
 pytest-bdd 默认把每个 tag 转 pytest.mark.<tag>，但带冒号的 @engine:novaact 不是合法 marker 名、
@@ -39,7 +39,7 @@ def _engine_of(node) -> str | None:
 
 @pytest.fixture(autouse=True)
 def _route_by_engine(request):
-    """非本腿的 scenario 直接 skip（本腿 = novaact 或未标 engine=默认）。"""
+    """非本引擎的 scenario 直接 skip（本引擎 = novaact 或未标 engine=默认）。"""
     engine = _engine_of(request.node)
     if engine is not None and engine != THIS_ENGINE:
-        pytest.skip(f"scenario @engine:{engine} 非本腿（{THIS_ENGINE}），跳过")
+        pytest.skip(f"scenario @engine:{engine} 非本引擎（{THIS_ENGINE}），跳过")

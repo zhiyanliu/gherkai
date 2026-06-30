@@ -1,4 +1,4 @@
-// A · 负向用例（expect-failure 探针）：验证"该红能红"——Midscene 腿。
+// A · 负向用例（expect-failure 探针）：验证"该红能红"——Midscene 引擎。
 // 断言信任的命门：一个"永远绿"的测试框架比没有还危险。这里故意造必假断言，
 // 验证 aiBoolean/aiNumber/aiString 在"不符"时确实给出 false / 不匹配的值（→ 上层会判失败）。
 // 一次性证伪探针，验完即可丢。

@@ -52,7 +52,7 @@ def test_outline_expands_and_distinguishable():
     names = sorted(j.scenarios[0].name for j in jobs)
     texts = sorted(j.scenarios[0].steps[0].text for j in jobs)
     ids = [j.scenarios[0].id for j in jobs]
-    assert texts == ['"以 admin 登录"', '"以 user 登录"']  # 占位符已插值（引号是 step 人话写法的一部分）
+    assert texts == ['"以 admin 登录"', '"以 user 登录"']  # 占位符已插值（引号是 step 自然语言写法的一部分）
     assert all("admin" in n or "user" in n for n in names)  # name 含 example 标识，可区分
     assert len(set(ids)) == 2  # id 各自不同（example 行号消歧）
 

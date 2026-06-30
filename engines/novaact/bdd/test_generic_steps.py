@@ -1,6 +1,6 @@
-"""Nova Act 侧 *通用 step*（v0.x：验证通用 step 跨两腿对称成立）。
+"""Nova Act 侧 *通用 step*（v0.x：验证通用 step 跨两个引擎对称成立）。
 
-加载与 Midscene 腿**同一份** features/wikipedia_generic.feature（ADR 0005：一份 .feature 双引擎）。
+加载与 Midscene 引擎**同一份** features/wikipedia_generic.feature（ADR 0005：一份 .feature 双引擎）。
 通用 step 对标 midscene/bdd/steps/generic.steps.ts（措辞见 ADR 0020）：
   Given 打开 "url" → go_to_url
   When "{自然语言}" → act
@@ -35,7 +35,7 @@ MODEL_ID = "nova-act-latest"
 WORKFLOW_DEF = "spike-wikipedia-benchmark"
 VOTES = 3  # AI 断言投票次数（治种类A抖动，ADR 0014）；取多数
 
-# 与 Midscene 腿共享 features/ 下全部通用 step feature（一份份共享，ADR 0005）
+# 与 Midscene 引擎共享 features/ 下全部通用 step feature（一份份共享，ADR 0005）
 # 本文件在 engines/novaact/bdd/，上溯 3 级到仓库根：bdd → novaact → engines → 根，故 parents[3]
 FEATURES_DIR = Path(__file__).resolve().parents[3] / "features"
 scenarios(str(FEATURES_DIR))
@@ -69,14 +69,14 @@ def _open(nova_ctx, url):
     nova_ctx.go_to_url(url)
 
 
-# 默认 AI 动作（ADR 0020）：无关键词的 When "{自然语言}" → act。QA 写人话，不需路由关键词。
+# 默认 AI 动作（ADR 0020）：无关键词的 When "{自然语言}" → act。QA 写自然语言，不需路由关键词。
 @when(parsers.parse('"{instruction}"'))
 def _act(nova_ctx, instruction):
     nova_ctx.act(instruction)
 
 
 # 默认 AI 判断（ADR 0020）：无关键词的 Then "{自然语言}" → AI 布尔判断 + N 次投票取多数。
-# 与 Midscene 的 Then "{string}" 对齐；QA 写人话——含**否定**陈述（如"页面没有出现服务器错误"），
+# 与 Midscene 的 Then "{string}" 对齐；QA 写自然语言——含**否定**陈述（如"页面没有出现服务器错误"），
 # AI 能直接判否定，无需专门的否定 step。
 @then(parsers.parse('"{claim}"'))
 def _ai_confirm(nova_ctx, claim):
@@ -90,4 +90,4 @@ def _ai_confirm(nova_ctx, claim):
 
 # 注：① 确定性锚点（不走 AI 的精确 URL/DOM 查）见 deterministic_steps.py 脚手架（ADR 0020，按需自建）。
 #     ② 不设「否定断言」「取数/取文本」「AI 确认/AI 执行」等带关键词的专用 step——
-#        一律走无关键词的 When/Then "{人话}"（ADR 0020：QA 零预设、默认走 AI）。
+#        一律走无关键词的 When/Then "{自然语言}"（ADR 0020：QA 零预设、默认走 AI）。

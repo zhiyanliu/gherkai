@@ -224,7 +224,7 @@ class JobResult:
     status: Status  # 汇总：任一 scenario error→error；任一 failed→failed；全 passed→passed
     scenarios: list[ScenarioResult] = field(default_factory=list)
     session_id: str | None = None
-    # 成本：core 只各自合计 engine 报的原生量（None=该腿没报这个量）。美元折算交消费者。
+    # 成本：core 只各自合计 engine 报的原生量（None=该引擎没报这个量）。美元折算交消费者。
     total_tokens: int | None = None  # scope 级 token 合计（如 Midscene）
     total_time_worked_s: float | None = None  # scope 级 agent 工作时长合计（如 Nova）
     duration_ms: float | None = None  # scope 墙钟时长（scope_started→scope_done；性能指标，与成本正交）
@@ -253,15 +253,15 @@ class RunResult:
     RunResult 是 schedule 对事件流的归约终值；sink 收的是同一事件流的原始流式视图（ADR 0026）。
 
     成本（ADR 0024）：core 不算、不折美元——只各自合计 engine 报的**原生量**
-    （token 用量 / agent 工作时长）。哪个有值取决于哪些腿报了它（Nova 报时长、Midscene 报 token）；
-    美元折算交给消费者（用自己 AWS 账户的真实费率）。None=无任何腿报这个量。
+    （token 用量 / agent 工作时长）。哪个有值取决于哪些引擎报了它（Nova 报时长、Midscene 报 token）；
+    美元折算交给消费者（用自己 AWS 账户的真实费率）。None=无任何引擎报这个量。
     """
 
     run_meta: RunMeta  # 这次 run 的 definition（run_id/created_at/jobs；执行前确定，不从结果反推）
     status: Status  # 总判定：任一 job error→error；任一 failed→failed；全 passed→passed
     jobs: list[JobResult] = field(default_factory=list)
-    total_tokens: int | None = None  # 跨 job 的 token 合计（None=无腿报 token）
-    total_time_worked_s: float | None = None  # 跨 job 的 agent 工作时长合计（None=无腿报时长）
+    total_tokens: int | None = None  # 跨 job 的 token 合计（None=无引擎报 token）
+    total_time_worked_s: float | None = None  # 跨 job 的 agent 工作时长合计（None=无引擎报时长）
     duration_ms: float | None = None  # 整个 run 的墙钟时长（schedule 整体包住；含并发，≠ 各 scope 时长之和）
 
     @property

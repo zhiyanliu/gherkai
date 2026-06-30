@@ -1,6 +1,6 @@
 # 核心↔worker 协议：流式 JSON 契约 + 成本信封（engine 只报原生量、core 只合计）
 
-定义核心库（`core/`）与引擎 worker 子进程之间的**唯一契约**：core 喂什么、worker 回什么。这是 v1.0 的「窄腰中的窄腰」——`parse`/`schedule`/两腿 worker/RunReport 全依赖它，设计错则全线返工。它同时兑现 [0016](./0016-execution-architecture-core-lib-run-model.md) 一直 defer 的「数据模型字段级 schema」（协议字段 = RunResult/RunReport 的字段来源）。执行形态（两腿都子进程、B1 薄 worker）见 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)。
+定义核心库（`core/`）与引擎 worker 子进程之间的**唯一契约**：core 喂什么、worker 回什么。这是 v1.0 的「窄腰中的窄腰」——`parse`/`schedule`/两个引擎 worker/RunReport 全依赖它，设计错则全线返工。它同时兑现 [0016](./0016-execution-architecture-core-lib-run-model.md) 一直 defer 的「数据模型字段级 schema」（协议字段 = RunResult/RunReport 的字段来源）。执行形态（两个引擎都子进程、B1 薄 worker）见 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)。
 
 ## 设计原则：深模块、小接口
 
@@ -8,7 +8,7 @@
 - **一等字段** = core 要理解/分支的跨引擎概念（status、votes、cost 原生量、errorType、reportRefs）。删了它们域价值就消失（删除测试）。
 - **引擎特定细节 / core 不分支的信息** = 收进带标签的子对象（reportRefs 的 `kind` 开放标签等），core 存但不解析、不分支。引擎差异与派发细节不抬进顶层接口。
 
-> 反面（被拒）：把每个引擎的富返回值（Midscene 的 token/dump、Nova 的 metadata）摊平进协议顶层 → 宽接口、浅模块、消费者要按引擎特例化。实查证实两腿返回形状高度非对称（见下「实查依据」），更要靠分层把非对称收进子对象。
+> 反面（被拒）：把每个引擎的富返回值（Midscene 的 token/dump、Nova 的 metadata）摊平进协议顶层 → 宽接口、浅模块、消费者要按引擎特例化。实查证实两个引擎返回形状高度非对称（见下「实查依据」），更要靠分层把非对称收进子对象。
 >
 > **删除测试逼出的收窄**（深模块审计 2026-06）：`kind` 字段从顶层删——core 对一个 step 唯一在乎的是「有没有 `votes`」（=是不是 AI 断言，影响抖动汇总）；`navigate/ai_act/deterministic` 之间的区别是 **worker 的派发细节**，core 不消费（对齐 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)「core 对 step 语义无知」）。（cost 信封同样几经收窄——最终砍成「engine 只报原生量、core 只合计」，见下「成本信封」。）
 
@@ -38,7 +38,7 @@
 
 - **`{id, name}` 双标识**：与 scenario 给 QA 的配置心智一致；name 是人写的原值（tag/标题，可含空格/标点），id 是 core 派生的稳定干净 key（用作 RunStore/RunReport 的关联键）。id 派生规则见 [0025](./0025-plan-module-feature-to-jobs.md)。
 - **`assertionVotes`**：AI 断言（`Then`）投票次数（治种类A抖动，[0014](./0014-ai-first-assertions.md)）。worker 对每个 AI 断言跑 N 次取多数票（`yes > N/2`）、回 `votes:{yes,total:N}`。默认 1=单次判定（仍回 `votes` 以标记「这是 AI 断言」——core 靠 votes 存在与否区分 AI 断言 vs 动作/确定性 step）。组合根经 CLI `--assertion-votes` 设、贯穿 plan→Job。
-- **step.`argument`（可选）**：承载展开后的 DataTable/DocString（[0025](./0025-plan-module-feature-to-jobs.md)）；有则有、无则缺省。worker 把它**拼成附加文本接在 step 人话后**喂 AI（仅 AI 动作/断言路径；确定性 match/URL 导航在裸 `text` 上判，不接 argument）：**dataTable → markdown 表格**（`rows` 用 `|` 拼回、还原 .feature 原貌、LLM 友好）、**docString → `content` 原样**。**两腿同一拼法**（Nova `_argument_text`/`_instruction` ↔ Midscene `argument.ts`，各有对称单测），保同一 feature 行为一致。
+- **step.`argument`（可选）**：承载展开后的 DataTable/DocString（[0025](./0025-plan-module-feature-to-jobs.md)）；有则有、无则缺省。worker 把它**拼成附加文本接在 step 自然语言后**喂 AI（仅 AI 动作/断言路径；确定性 match/URL 导航在裸 `text` 上判，不接 argument）：**dataTable → markdown 表格**（`rows` 用 `|` 拼回、还原 .feature 原貌、LLM 友好）、**docString → `content` 原样**。**两个引擎同一拼法**（Nova `_argument_text`/`_instruction` ↔ Midscene `argument.ts`，各有对称单测），保同一 feature 行为一致。
 - worker 拿 `keyword` + `text` 决定派发（见下「worker 派发」），拿 `text`(+`argument`) 喂引擎。
 
 ## 输出（worker → core）：流式 JSON Lines
@@ -86,17 +86,17 @@ worker **边跑边流式上报**（每行一个事件），core 实时收。选�
 
 **一等字段**（core 要理解/分支）：
 - **`status` 三态**：`passed` / `failed`（断言投票没过 = 测试发现了问题）/ `error`（引擎抛异常 = 没能跑完测试）。`failed` 与 `error` 语义不同，worker 负责区分——前者是测试结论，后者是执行故障。
-- **`votes`**：step 是 AI 断言时才有，记 tally `{yes, total}`——够算抖动率（[0014](./0014-ai-first-assertions.md) 投票治种类A抖动），不记每票细节（两腿都拿不到 per-vote thought）。**`votes` 的存在与否即 core 区分「AI 断言 vs 其余」的唯一依据**（取代了原 `kind` 字段）。
-- **`errorType` + `message`**（规范化失败分类）：`errorType` 取自固定类别集，让 RunResult/未来重试能按类型分支；`message` 是人类可读诊断。**`failed` 与 `error` 两态均可带 `errorType`**（`failed`→`assertion_failed`；`error`→其余执行故障类）。**两腿映射**：Nova Act 有丰富异常树（按类映射），Midscene 只抛通用 `Error`（归 `engine_error`）。初始类别集：`assertion_failed`（断言没过）/ `timeout` / `guardrail` / `engine_error`（引擎内部/通用异常）/ `navigation_error` / `network_error`（网络/SSL 建连层瞬时故障,可重试,[0028](./0028-transient-network-ssl-resilience.md)）。类别集可随真实失败样本扩充。**退出码约定（[0028](./0028-transient-network-ssl-resilience.md)）**：建连失败发生在任何事件 emit 之前,worker 无法走事件通道,故约定专用退出码 `EX_WORKER_NETWORK=80` 作 out-of-band 信号；adapter 把它翻成 `WorkerNetworkError` → schedule 记 `network_error`。
+- **`votes`**：step 是 AI 断言时才有，记 tally `{yes, total}`——够算抖动率（[0014](./0014-ai-first-assertions.md) 投票治种类A抖动），不记每票细节（两个引擎都拿不到 per-vote thought）。**`votes` 的存在与否即 core 区分「AI 断言 vs 其余」的唯一依据**（取代了原 `kind` 字段）。
+- **`errorType` + `message`**（规范化失败分类）：`errorType` 取自固定类别集，让 RunResult/未来重试能按类型分支；`message` 是人类可读诊断。**`failed` 与 `error` 两态均可带 `errorType`**（`failed`→`assertion_failed`；`error`→其余执行故障类）。**两个引擎映射**：Nova Act 有丰富异常树（按类映射），Midscene 只抛通用 `Error`（归 `engine_error`）。初始类别集：`assertion_failed`（断言没过）/ `timeout` / `guardrail` / `engine_error`（引擎内部/通用异常）/ `navigation_error` / `network_error`（网络/SSL 建连层瞬时故障,可重试,[0028](./0028-transient-network-ssl-resilience.md)）。类别集可随真实失败样本扩充。**退出码约定（[0028](./0028-transient-network-ssl-resilience.md)）**：建连失败发生在任何事件 emit 之前,worker 无法走事件通道,故约定专用退出码 `EX_WORKER_NETWORK=80` 作 out-of-band 信号；adapter 把它翻成 `WorkerNetworkError` → schedule 记 `network_error`。
 
 **core 不分支的附加信息**（存进 RunReport，不进 core 逻辑分支）：
-- **`reportRefs`**：list，每项 `{kind, ref, label?}`（`kind` 开放字符串如 `scope`/`act`/未来 `video`，`ref` 统一 URI、本地用 `file://`，`label` 可选锚文本）。两腿报告粒度不同（Midscene 1 个 html/worker = `scope` 级，由 `scope_done` 带；Nova 每 act 一个 trajectory = `act` 级，由 `scenario_done` 带，[0010](./0010-spike-as-apples-to-apples-benchmark.md)），core **永不读 `kind` 值、不解释 `ref`**——不透明搬运、原样归进 RunReport（[0027](./0027-runreport-aggregation-index.md)）。**当前实现**：两腿均已填（Midscene scope 级 html；Nova act 级 trajectory，worker 设 `logs_directory` 持久化）。`ReportRef` 形态详见 [0027](./0027-runreport-aggregation-index.md)。
+- **`reportRefs`**：list，每项 `{kind, ref, label?}`（`kind` 开放字符串如 `scope`/`act`/未来 `video`，`ref` 统一 URI、本地用 `file://`，`label` 可选锚文本）。两个引擎报告粒度不同（Midscene 1 个 html/worker = `scope` 级，由 `scope_done` 带；Nova 每 act 一个 trajectory = `act` 级，由 `scenario_done` 带，[0010](./0010-spike-as-apples-to-apples-benchmark.md)），core **永不读 `kind` 值、不解释 `ref`**——不透明搬运、原样归进 RunReport（[0027](./0027-runreport-aggregation-index.md)）。**当前实现**：两个引擎均已填（Midscene scope 级 html；Nova act 级 trajectory，worker 设 `logs_directory` 持久化）。`ReportRef` 形态详见 [0027](./0027-runreport-aggregation-index.md)。
 
-**worker 派发（不进协议，仅说明 worker 内部如何把 step 变成引擎调用）**：worker 收到 `(keyword, text)` 后按优先级派发——① 命中 test engineer 的确定性注册表（[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)）→ 精确判定、无 votes；② 否则若 step 文本含 URL 字面量（引号内 `https?://…`）→ 内建确定性导航（code 抽 URL 直接 goto/go_to_url，不浪费 AI、不跑偏），动词随意（"打开/访问/前往…"皆可，对齐 [0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md) 纯人话）；③ 否则 `When` → AI 动作（aiAct/act，无 votes）、`Then` → AI 断言（aiBoolean/act_get + 投票，带 votes）。这些区别 core 不消费，故不出现在协议字段中。
+**worker 派发（不进协议，仅说明 worker 内部如何把 step 变成引擎调用）**：worker 收到 `(keyword, text)` 后按优先级派发——① 命中 test engineer 的确定性注册表（[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)）→ 精确判定、无 votes；② 否则若 step 文本含 URL 字面量（引号内 `https?://…`）→ 内建确定性导航（code 抽 URL 直接 goto/go_to_url，不浪费 AI、不跑偏），动词随意（"打开/访问/前往…"皆可，对齐 [0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md) 纯自然语言）；③ 否则 `When` → AI 动作（aiAct/act，无 votes）、`Then` → AI 断言（aiBoolean/act_get + 投票，带 votes）。这些区别 core 不消费，故不出现在协议字段中。
 
 ## 成本信封（cost）：engine 只报原生量，core 只合计，不算美元
 
-**原则：core 不算、不折美元、不判可信度——engine 提供什么原生量就报什么，core 各自合计。** 实查（见下「实查依据」）证实两腿计费轴根本不同：**Nova Act 按 agent 工作时长**（SDK 原生给 `time_worked_s`）；**Midscene 按 LLM token**（Bedrock 原生给 token 用量）。两腿的**原生信号本就不同**，统一成美元需要一个费率——而费率（尤其 Midscene 的 Qwen token 单价）随 region/协商/版本变、billed 到用户账户，框架不该追那张会过期的单价表。**故 core 只如实搬运 + 合计原生量，美元折算交给消费者（用自己 AWS 账户的真实费率）。**
+**原则：core 不算、不折美元、不判可信度——engine 提供什么原生量就报什么，core 各自合计。** 实查（见下「实查依据」）证实两个引擎计费轴根本不同：**Nova Act 按 agent 工作时长**（SDK 原生给 `time_worked_s`）；**Midscene 按 LLM token**（Bedrock 原生给 token 用量）。两个引擎的**原生信号本就不同**，统一成美元需要一个费率——而费率（尤其 Midscene 的 Qwen token 单价）随 region/协商/版本变、billed 到用户账户，框架不该追那张会过期的单价表。**故 core 只如实搬运 + 合计原生量，美元折算交给消费者（用自己 AWS 账户的真实费率）。**
 
 `cost` 是**平铺、各 optional 的原生量**（无 `cost_usd`/`precision`/`basis`/`costRate`——这些都已删）：
 
@@ -109,8 +109,8 @@ worker **边跑边流式上报**（每行一个事件），core 实时收。选�
 ```
 
 - **`cost` 的字段全 optional**：`tokens`（LLM token 用量）/ `time_worked_s`（agent 工作时长秒）。engine 报哪个就有哪个——**哪个量有值，本身就说明该 engine 按什么计费**，不需要额外的 `basis` 判别器或 `precision` 可信度标签。
-- **core 只各自合计、不交叉、不折算**：`StepDone.cost.tokens` → `JobResult.total_tokens` → `RunResult.total_tokens`；`time_worked_s` 同理 → `total_time_worked_s`。语义「无腿报这个量则 None、不假装 0」。混腿跑批时两个原生量**各自合计、互不污染、都不丢**。
-- **连 Nova 也不自折美元**：Nova 的 `$4.75/agent-hour` 虽是公开统一费率可硬编码，但为「两腿对称、不维护会过期的费率」起见仍只报 `time_worked_s`——core 退回纯搬运的薄管道，美元折算权完全归消费者（用自己账户费率）。
+- **core 只各自合计、不交叉、不折算**：`StepDone.cost.tokens` → `JobResult.total_tokens` → `RunResult.total_tokens`；`time_worked_s` 同理 → `total_time_worked_s`。语义「无引擎报这个量则 None、不假装 0」。混引擎跑批时两个原生量**各自合计、互不污染、都不丢**。
+- **连 Nova 也不自折美元**：Nova 的 `$4.75/agent-hour` 虽是公开统一费率可硬编码，但为「两个引擎对称、不维护会过期的费率」起见仍只报 `time_worked_s`——core 退回纯搬运的薄管道，美元折算权完全归消费者（用自己账户费率）。
 - **扩展**：未来新引擎若有新计费轴（如「按请求数」），`cost` 加一个 optional 原生量字段、`RunResult` 加一个对应合计即可，顶层不破坏。
 
 ## 实查依据（2026-06，读已装源码 + 线上核实，经对抗核验）
@@ -130,17 +130,17 @@ core 的 `schedule`/汇总逻辑应能用一个**假 worker**（in-memory adapte
 
 - **逻辑层（协议顶层）：schedule 经 worker 句柄请求「停」**（`handle.stop(gracePeriod)`；`handle` 由 `engine.run_scope(job)` 返回、schedule 持有，见 [0026](./0026-schedule-module.md)）。schedule 只表达逻辑意图，**不懂信号/进程**。（`Engine` port 只有 `run_scope`，**不挂 stop**——句柄自己知道怎么停，无需把 handle 反传回 engine。）
 - **机制层（Engine adapter / WorkerHandle）：把「停」翻成具体机制**——**子进程 adapter**：`SIGTERM` → 等 `gracePeriod`（默认 5s）→ 未退 `SIGKILL` 兜底；**未来 Fargate adapter**：`StopTask`。信号/进程是 adapter 的「进程世界」知识（[0016](./0016-execution-architecture-core-lib-run-model.md) ports&adapters），不渗进 schedule/协议顶层。
-- **worker 层：worker 必须捕获 `SIGTERM` 做会话清理**（防泄漏继续烧钱）。两腿机制不同、殊途同归释放会话：
+- **worker 层：worker 必须捕获 `SIGTERM` 做会话清理**（防泄漏继续烧钱）。两个引擎机制不同、殊途同归释放会话：
   - **Nova worker**：handler `raise` 一个 `BaseException` 子类（`_Terminated`；继承 `BaseException` 而非 `Exception` 以穿透 step 级 `except Exception`）→ 触发三层 `with`（Workflow / `cdp_session` / `NovaAct`）的 `__exit__` 解栈，由 `cdp_session` 内 `with browser_session` 的 `__exit__` 间接释放会话。**不在 handler 里 `sys.exit`**（那会跳过 `__exit__`、泄漏会话，是已修的真实 bug）。
   - **Midscene worker**：handler 走**有序显式 cleanup**——**先 `StopBrowserSession` 释放会话**（最重要、优先）、再 `browser.close()` 套超时，不让易挂起的 close 挟持会话释放；`StopBrowserSession` 失败不静默吞 → 置 `cleanupFailed` → worker **非 0 退出**（让 schedule 记 error、泄漏可观测）。
-  - 两腿都遵循「会话释放优先、失败可观测」。SIGKILL 兜底（grace 超时）时会话清理可能落空（已知代价）。
+  - 两个引擎都遵循「会话释放优先、失败可观测」。SIGKILL 兜底（grace 超时）时会话清理可能落空（已知代价）。
 - **会话清理归 worker，schedule/adapter 不碰 AgentCore**：schedule 只下逻辑「停」、adapter 只发信号杀进程——**StopBrowserSession 只由 worker 调**（Nova 经 `with browser_session` 间接、Midscene 显式调）。
 - **未来演进（控制流，记路标不实现）**：若 core 需要对运行中 worker 下达「停」之外的指令（暂停 / 取消单个 scenario / 动态调度 / WebUI 交互），届时引入**显式 core→worker 控制通道**（双向消息流），另立 ADR。当前唯一控制指令是「停」，为一条指令建通用双向协议属过度工程（删除测试）。
 
 ## 现在做 / 留口子
 
-- **现在做（v1.0，已落地）**：上述输入/输出 schema、cost 信封（engine 报原生量 time_worked_s/tokens、core 合计）、三态 status/votes 区分 AI 断言；worker 派发逻辑（确定性注册表 > 内建 URL 导航 > 默认 AI，[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)）；两腿对称的 `@deterministic` 注册表（命中走精确 handler、不投票）；两腿 worker `get_session_id` 取会话血缘；**两腿对称的 reportRefs**——Midscene 取 `agent.reportFile` 报 scope 级（`scope_done`），Nova 设 `logs_directory` 持久化 trajectory、取 `metadata.trajectory_file_path` 报 act 级（`scenario_done`），归集成 RunReport（[0027](./0027-runreport-aggregation-index.md)）。
-- **已实现但粗粒度（留待细化）**：`errorType` —— 建连层瞬时故障已细分为 `network_error`（两腿 worker 建连重试 + 退出码约定,[0028](./0028-transient-network-ssl-resilience.md)）；其余执行故障 Nova worker 仍一律归 `engine_error`（`except Exception` 兜底），按 Nova 异常树细分（timeout/guardrail/navigation_error）仍留口子。
+- **现在做（v1.0，已落地）**：上述输入/输出 schema、cost 信封（engine 报原生量 time_worked_s/tokens、core 合计）、三态 status/votes 区分 AI 断言；worker 派发逻辑（确定性注册表 > 内建 URL 导航 > 默认 AI，[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)）；两个引擎对称的 `@deterministic` 注册表（命中走精确 handler、不投票）；两个引擎 worker `get_session_id` 取会话血缘；**两个引擎对称的 reportRefs**——Midscene 取 `agent.reportFile` 报 scope 级（`scope_done`），Nova 设 `logs_directory` 持久化 trajectory、取 `metadata.trajectory_file_path` 报 act 级（`scenario_done`），归集成 RunReport（[0027](./0027-runreport-aggregation-index.md)）。
+- **已实现但粗粒度（留待细化）**：`errorType` —— 建连层瞬时故障已细分为 `network_error`（两个引擎 worker 建连重试 + 退出码约定,[0028](./0028-transient-network-ssl-resilience.md)）；其余执行故障 Nova worker 仍一律归 `engine_error`（`except Exception` 兜底），按 Nova 异常树细分（timeout/guardrail/navigation_error）仍留口子。
 - **留口子不实现**：per-vote 细节；trajectory 内部结构的结构化提取；美元折算（交消费者，框架不做）。
 
 ## 重议

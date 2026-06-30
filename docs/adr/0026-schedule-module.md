@@ -8,7 +8,7 @@
 schedule(run_meta: RunMeta, engines: EngineResolver, sink: (event) -> void, opts) -> RunResult
    // RunMeta: 一次 run 的 definition（run_id + created_at + jobs: Job[]），组合根执行前生成/组装（ADR 0016/0027）
    //          schedule 把 run_meta 原样放进 RunResult（合成）+ 归约判定，不自己生成 run_id
-   // EngineResolver: (engineName) -> Engine —— 按 job.engine 解析 Engine，schedule 对腿数/腿名无知
+   // EngineResolver: (engineName) -> Engine —— 按 job.engine 解析 Engine，schedule 对引擎数/引擎名无知
    // sink: 接收 0024 原始流式事件的回调（pass-through，供进度/落地）
 
 opts = {                 // 时间单位统一为秒；代码字段名带 _s 后缀（job_timeout_s/grace_period_s）
@@ -21,7 +21,7 @@ opts = {                 // 时间单位统一为秒；代码字段名带 _s 后
 ```
 （上为语言中立伪代码；实际实现为 dataclass `ScheduleOpts`，字段 snake_case：`max_concurrency`/`fail_fast`/`job_timeout_s`/`grace_period_s`/`clock`/`network_retry`（默认 0）/`retry_sleep`（[0028](./0028-transient-network-ssl-resilience.md)）。）
 
-- **注入 `engines`（`EngineResolver`：按 `job.engine` 解析 Engine）而非自己 spawn** → 可测（skill：accept dependencies, don't create them）：测试注入假 Engine（吐预设 JSON Lines，[0024](./0024-worker-core-protocol.md)）即可验调度逻辑，无需真起子进程/真连 AgentCore。**schedule 对腿数/腿名无知**——焊死 `{midscene, novaact}` 会让第三个引擎到来即改接口；用 resolver 则只动组合根注入。
+- **注入 `engines`（`EngineResolver`：按 `job.engine` 解析 Engine）而非自己 spawn** → 可测（skill：accept dependencies, don't create them）：测试注入假 Engine（吐预设 JSON Lines，[0024](./0024-worker-core-protocol.md)）即可验调度逻辑，无需真起子进程/真连 AgentCore。**schedule 对引擎数/引擎名无知**——焊死 `{midscene, novaact}` 会让第三个引擎到来即改接口；用 resolver 则只动组合根注入。
 - **注入 `sink`**（`(event) -> void` 回调，收流式事件的去处：实时落 ResultStore / CLI 打印进度）→ schedule 边收边转，不自己决定结果存哪（[0016](./0016-execution-architecture-core-lib-run-model.md) ports）。（RunReport **不**走 sink——它由 `ReportStore.write` 从归约后的 `RunResult` 派生，[0027](./0027-runreport-aggregation-index.md)。）
 - **`sink` vs `RunResult` 边界（不是两次独立判定）**：`sink` 收的是 [0024](./0024-worker-core-protocol.md) **原始流式事件**（pass-through，供实时进度/逐条落地）；`RunResult` 是 schedule 对**同一事件流的归约终值**（权威汇总判定，给退出码/CI）。同一份事实的两个视图——流式过程 vs 终态归约，非两套判定来源。
 - **注入 `clock`**（时间源）→ 超时杀 / grace→kill 这两条 schedule 独有难逻辑可用 fake clock 确定性单测，不靠真实墙钟等待。
@@ -62,7 +62,7 @@ opts = {                 // 时间单位统一为秒；代码字段名带 _s 后
 三层各司其职，「怎么停」的具体机制**不在 schedule**：
 - **schedule → WorkerHandle**：只调逻辑指令 `handle.stop(gracePeriod)`（「请停这个 worker」）。`handle` 由 `engine.run_scope(job)` 返回、schedule 持有；`Engine` port **只有 `run_scope`、不挂 stop**（句柄自己知道怎么停）。schedule **不懂** SIGTERM/进程/StopTask——只知道「下停止指令、等归约」。
 - **WorkerHandle（adapter 内）→ worker**：把逻辑「停」翻成具体机制——**子进程 handle**：`SIGTERM` → 等 `gracePeriod`（默认 5s）→ 未退则 `SIGKILL` 兜底；**未来 Fargate**：翻成 `StopTask`。这是 adapter 该藏的「进程/云」知识（[0016](./0016-execution-architecture-core-lib-run-model.md) ports&adapters），**故「上云只换 adapter」成立**（见下「留口子」），schedule 一行不改。
-- **worker 内部**：收到 `SIGTERM` 做会话清理，两腿机制不同、殊途同归释放会话（详见 [0024](./0024-worker-core-protocol.md) 终止契约 + [0028](./0028-transient-network-ssl-resilience.md) Midscene 会话集清理）。
+- **worker 内部**：收到 `SIGTERM` 做会话清理，两个引擎机制不同、殊途同归释放会话（详见 [0024](./0024-worker-core-protocol.md) 终止契约 + [0028](./0028-transient-network-ssl-resilience.md) Midscene 会话集清理）。
 - **会话清理归 worker，schedule/adapter 不碰 AgentCore**：schedule 下逻辑指令、adapter 发机制信号——**StopBrowserSession 只由 worker 调**（Nova 经 `with browser_session` 间接、Midscene 显式调），schedule/adapter 保持对 AgentCore 无知。
 
 > **进程拓扑（澄清「几个地方」）**：实际是 **2 进程 + 1 远程 + 1 seam**——①core/schedule 进程；②`Engine` adapter（在 core 进程内，但它是通向「进程/云」世界的 seam，「怎么停」知识归这里）；③worker 子进程（engine SDK 是**进程内的库**、非独立进程）；④远程 AgentCore 浏览器会话（云端、worker 经 CDP 连）。engine SDK 拆除 + 会话停止都在 worker 进程内完成。
@@ -72,7 +72,7 @@ opts = {                 // 时间单位统一为秒；代码字段名带 _s 后
 - 边收 worker 的流式事件（[0024](./0024-worker-core-protocol.md) JSON Lines，六类：`scope_started`/`scenario_started`/`step_started`/`step_done`/`scenario_done`/`scope_done`）边转给 `sink`；归约成 `RunResult`。
 - 多 worker 并行 → 多路事件流交错，schedule 按 `scopeId`/`scenarioId` 归位（[0024](./0024-worker-core-protocol.md) 标识键）。
 - **status 归约**：scenario → job（任一 error→error / 任一 failed→failed / 全 passed→passed）→ run（同规则跨 job）。
-- **成本归约**：core 只各自合计 engine 报的**原生量**——累加 `step_done.cost` 的 `tokens`/`time_worked_s` 成 `JobResult.total_tokens`/`total_time_worked_s`（scope 级），再跨 job 求和成 `RunResult.total_tokens`/`total_time_worked_s`（run 级）。**core 不折美元**（交消费者），无任何腿报某量则该量 None、不假装 0（cost 信封见 [0024](./0024-worker-core-protocol.md)）。
+- **成本归约**：core 只各自合计 engine 报的**原生量**——累加 `step_done.cost` 的 `tokens`/`time_worked_s` 成 `JobResult.total_tokens`/`total_time_worked_s`（scope 级），再跨 job 求和成 `RunResult.total_tokens`/`total_time_worked_s`（run 级）。**core 不折美元**（交消费者），无任何引擎报某量则该量 None、不假装 0（cost 信封见 [0024](./0024-worker-core-protocol.md)）。
 - **墙钟时长归约**（性能指标，与成本正交）：core 用注入的 `clock` 在事件到达时打时间戳，按各级 `*_started`→`*_done` 算 `duration_ms`——step（`StepResult.duration_ms`）、scenario、scope（`JobResult.duration_ms`）、run（`RunResult.duration_ms`，schedule 整体包住、含并发）。core 首次保留 step 级粒度（`StepResult` 层）。
 
 ## 治理旋钮 = 注入参数 + 保守默认（贯穿原则）

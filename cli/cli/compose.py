@@ -1,6 +1,6 @@
 """组合根：把抽象的 core 接线到具体的引擎子进程（ADR 0016）。
 
-core 只认 `EngineResolver`（按 engine 名给一个 `Engine`）；这里 new 出每条腿的
+core 只认 `EngineResolver`（按 engine 名给一个 `Engine`）；这里 new 出每个引擎的
 `SubprocessEngine`（cmd 指向各自语言的 worker），core 永不 import 引擎、不知 worker 是子进程。
 
 WebUI 的 bootstrap 将来复用本模块——组合根逻辑（引擎注册表、读 feature）与命令行皮（argparse、
@@ -44,9 +44,9 @@ def repo_root(start: Path | None = None) -> Path:
 
 
 def build_engines(repo: Path, *, nova_logs_dir: str | Path | None = None) -> dict[str, Engine]:
-    """每条腿一个 SubprocessEngine（cmd 不同，core 引擎无关，ADR 0026）。
+    """每个引擎一个 SubprocessEngine（cmd 不同，core 引擎无关，ADR 0026）。
 
-    两腿"spawn 子进程 + 讲同一套 ADR 0024 协议"形状一致，故都是同一个 SubprocessEngine 类、
+    两个引擎"spawn 子进程 + 讲同一套 ADR 0024 协议"形状一致，故都是同一个 SubprocessEngine 类、
     只是 cmd/cwd 不同——无需两个具名 adapter 类。
 
     nova_logs_dir：给 Nova worker 的 trajectory 持久落点（经环境变量 NOVA_LOGS_DIR 传，ADR 0027）。
@@ -60,7 +60,7 @@ def build_engines(repo: Path, *, nova_logs_dir: str | Path | None = None) -> dic
         # 故必须显式带上 os.environ。
         nova_env = {**os.environ, "NOVA_LOGS_DIR": str(nova_logs_dir)}
     return {
-        # Nova Act 腿：novaact venv 的 python 跑 worker
+        # Nova Act 引擎：novaact venv 的 python 跑 worker
         "novaact": SubprocessEngine(
             cmd=[
                 str(novaact_dir / ".venv" / "bin" / "python"),
@@ -69,7 +69,7 @@ def build_engines(repo: Path, *, nova_logs_dir: str | Path | None = None) -> dic
             cwd=str(novaact_dir),
             env=nova_env,
         ),
-        # Midscene 腿：node --import tsx 跑 TS worker。
+        # Midscene 引擎：node --import tsx 跑 TS worker。
         # 用 `--import tsx`（不是 tsx 二进制、也不是 `tsx/esm`）：tsx loader 加载进**同一个** node
         # 进程，不 spawn 子-node——否则 EVENTS_FD（经 pass_fds 继承）只到 tsx 包装器、传不到真正跑
         # worker 的子进程 → fd3 EBADF（实测踩过）。`--import tsx` 既继承 fd、又能跑 .ts。
@@ -81,7 +81,7 @@ def build_engines(repo: Path, *, nova_logs_dir: str | Path | None = None) -> dic
 
 
 def make_resolver(engines: dict[str, Engine]):
-    """dict → core 要的 EngineResolver（按 job.engine 取 Engine；未知腿报错）。"""
+    """dict → core 要的 EngineResolver（按 job.engine 取 Engine；未知引擎报错）。"""
 
     def resolver(engine_name: str) -> Engine:
         try:

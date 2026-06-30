@@ -1,6 +1,6 @@
 # Midscene→Bedrock 鉴权：统一走 SigV4 自签（进程内），不用 bearer key
 
-承接 [0003](./0003-midscene-grounding-qwen3vl-bedrock.md)。两条腿统一在纯 SigV4 / IAM 上，**不引入任何长期或短期 bearer key**。
+承接 [0003](./0003-midscene-grounding-qwen3vl-bedrock.md)。两个引擎统一在纯 SigV4 / IAM 上，**不引入任何长期或短期 bearer key**。
 
 经核实 `@midscene/core 1.9.8` 源码：Midscene 有公开、带类型的逃生舱 **`createOpenAIClient`**，service-caller 会采纳你返回的 OpenAI client（`service-caller/index.mjs:154-157`），底层 OpenAI SDK v6.3.0 支持自定义 `fetch`。`fetch` 能拿到每次请求的 method+url+headers+body——足以在进程内自签 AWS SigV4。因此「Midscene 只能发静态 bearer」这一限制只对 env-var 路径成立，代码路径下可自签。
 

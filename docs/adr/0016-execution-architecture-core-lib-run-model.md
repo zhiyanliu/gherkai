@@ -9,9 +9,9 @@
         └──────┬──────┘
           执行核心库 core/（窄腰：解析 .feature → 分组 scope → 调度 → 收集结果；零引擎依赖）
                 │  Engine port：run_scope(job) → 0024 事件流
-        ┌───────┴───────┐                ← 同一个 SubprocessEngine，两腿只是 cmd 不同（形状本就一致）
+        ┌───────┴───────┐                ← 同一个 SubprocessEngine，两个引擎只是 cmd 不同（形状本就一致）
    spawn Node worker  spawn Python worker   按 job.engine 经 EngineResolver 选 cmd，讲同一套 0024 协议
-   (midscene 腿)       (novaact 腿)
+   (midscene 引擎)       (novaact 引擎)
         │                 │
    AgentCore 会话A    AgentCore 会话B      ← 会话生命周期在 worker 内（已验证）
 ```
@@ -20,13 +20,13 @@
 - CI / AI-skill 通过 CLI 这个皮间接用核心；都契合"调命令→等结果→看退出码"。
 - **阻塞 vs 非阻塞是调用方的选择，不是核心的属性**：CLI 可轮询到完成（像阻塞）；WebUI 提交即返回 runId、之后轮询。同一核心两种皮都满足。
 
-### 核心语言 & 两腿都子进程（见 [0023](./0023-novaact-acting-python-locked-no-ts-core.md)）
+### 核心语言 & 两个引擎都子进程（见 [0023](./0023-novaact-acting-python-locked-no-ts-core.md)）
 
-两个引擎各自语言锁死（Midscene 锁 TS、Nova Act acting 锁 Python，[0023](./0023-novaact-acting-python-locked-no-ts-core.md) 证伪了「全 TS 核心」），故**无论核心用哪个语言，必有一腿跨进程**——这是「双语言裂缝」（[0006](./0006-form-a-two-subprojects-no-orchestrator.md)）的必然。
+两个引擎各自语言锁死（Midscene 锁 TS、Nova Act acting 锁 Python，[0023](./0023-novaact-acting-python-locked-no-ts-core.md) 证伪了「全 TS 核心」），故**无论核心用哪个语言，必有一个引擎跨进程**——这是「双语言裂缝」（[0006](./0006-form-a-two-subprojects-no-orchestrator.md)）的必然。
 
-**决定：两腿都作为子进程 worker，核心不 import 任何引擎；核心语言选 Python。**
-- **两腿都子进程**（而非一腿进程内）：两个 `Engine` adapter 形状**完全一致**（spawn worker + 讲同一套 JSON 协议），核心不碰任一引擎 API，AgentCore 会话生命周期留在各自 worker（即现 `generic.steps.ts` Before/After、`nova_ctx` fixture 已跑通处）。这才是对称 `Engine` port 最干净的形态；一腿进程内会让 adapter 出现两种形状、核心 venv 被引擎依赖树绑死。
-- **核心语言 = Python**：两腿都子进程后，核心是无重型引擎依赖的薄编排层，语言成为低风险自由选择；选 Python 因 boto3 生态成熟（便于未来云 adapter）+ 官方 `gherkin-official` 解析。
+**决定：两个引擎都作为子进程 worker，核心不 import 任何引擎；核心语言选 Python。**
+- **两个引擎都子进程**（而非一个引擎进程内）：两个 `Engine` adapter 形状**完全一致**（spawn worker + 讲同一套 JSON 协议），核心不碰任一引擎 API，AgentCore 会话生命周期留在各自 worker（即现 `generic.steps.ts` Before/After、`nova_ctx` fixture 已跑通处）。这才是对称 `Engine` port 最干净的形态；一个引擎进程内会让 adapter 出现两种形状、核心 venv 被引擎依赖树绑死。
+- **核心语言 = Python**：两个引擎都子进程后，核心是无重型引擎依赖的薄编排层，语言成为低风险自由选择；选 Python 因 boto3 生态成熟（便于未来云 adapter）+ 官方 `gherkin-official` 解析。
 - **核心自解析 Gherkin + 薄 worker（B1）**：核心拥有解析（单一事实源），worker 只派发 step → act/assert，**退役 cucumber 补丁与 pytest-bdd 路由 hack**。详见 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)。
 
 ## 数据模型（现在钉死；耐久，决定 DDB 表 / WebUI / 报告）
@@ -41,7 +41,7 @@
 | **Run** | 一次执行，封装多个 job | `runId`、总状态、起止、墙钟时长、**RunResult**、**RunReport** |
 
 - **RunResult** = 机器可读汇总判定（退出码 / CI / WebUI 状态）= **definition（`run_meta`）+ 判定（`jobs`）的显式合成**（见下「三层切分」）。字段构成：`run_meta` + status 三态 + 各 job 结果 + `total_tokens`/`total_time_worked_s` 两个原生量各自跨 scope 合计 + `duration_ms` 总墙钟。其下 `JobResult` → `ScenarioResult` → `StepResult` 三层结果（core 保留 step 级粒度），各级带 `duration_ms` 墙钟时长（性能指标，与成本的 `time_worked_s` **正交**，见 [0024](./0024-worker-core-protocol.md)）。
-- **RunReport** = 人看的归集报告（把两腿割裂的 Midscene html / Nova trajectory 归到一处）。**这是原 M5「报告统一」的归宿**——**v1.0 已实现（[0027](./0027-runreport-aggregation-index.md)）**：定为**跨腿归集索引**（`manifest.json` 机器可读 + `index.html` 人可导航入口），**只索引/链接原生产物、不解析融合其内容**；新引擎报任意 `kind` 零改 core。由 `ReportStore` 从 `RunResult` 一次归集（cli 每次 run **默认生成**，`--no-report` 跳过）。
+- **RunReport** = 人看的归集报告（把两个引擎割裂的 Midscene html / Nova trajectory 归到一处）。**这是原 M5「报告统一」的归宿**——**v1.0 已实现（[0027](./0027-runreport-aggregation-index.md)）**：定为**跨引擎归集索引**（`manifest.json` 机器可读 + `index.html` 人可导航入口），**只索引/链接原生产物、不解析融合其内容**；新引擎报任意 `kind` 零改 core。由 `ReportStore` 从 `RunResult` 一次归集（cli 每次 run **默认生成**，`--no-report` 跳过）。
 
 ### 三层切分：definition / 控制面运行态 / 数据面判定（数据流向不从结果反推）
 
@@ -62,7 +62,7 @@
 
 ## 引擎选择 & 并发（已定）
 
-- 用例可配"用哪条腿"（默认单腿），经 `@engine:` tag 选腿（ADR 0019）。**双腿交叉验证 v1.0 不做**（价值可疑、复杂度高，见 ADR 0019）；未来若需，在跑批层展开两次独立运行。
+- 用例可配"用哪个引擎"（默认单引擎），经 `@engine:` tag 选引擎（ADR 0019）。**双引擎交叉验证 v1.0 不做**（价值可疑、复杂度高，见 ADR 0019）；未来若需，在跑批层展开两次独立运行。
 - 并发：**scope 内串行**（上下文依赖），**scope 间并行**（互相独立）。
 
 ## 留口子：Ports & Adapters（六边形架构），组合根注入
@@ -70,7 +70,7 @@
 可替换的外部依赖不散落成 `run_scope` 的一堆参数，而是收成一个 **ports 层**（类比 DAO 层）：导出稳定接口，核心只依赖接口、不知实现是谁。
 
 **按关注点拆成独立 port（不揉成上帝 module）**：
-- `Engine` —— 真正跑一个 scope 的地方（名 `Engine`，对齐 CONTEXT 「引擎」术语）。**实装收敛为单个参数化 adapter `SubprocessEngine`**（`core/core/adapters/subprocess_engine.py`）：以 `cmd`/`cwd`/`env` 参数化,既能 spawn Node worker 也能 spawn Python worker——因两腿"spawn 子进程 + 讲同一套 0024 协议"的形状本就完全一致（[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)），无需 `MidsceneEngine`/`NovaActEngine` 两个类。哪条腿由组合根传不同 `cmd` 决定（`EngineResolver` 按 `job.engine` 选）。
+- `Engine` —— 真正跑一个 scope 的地方（名 `Engine`，对齐 CONTEXT 「引擎」术语）。**实装收敛为单个参数化 adapter `SubprocessEngine`**（`core/core/adapters/subprocess_engine.py`）：以 `cmd`/`cwd`/`env` 参数化,既能 spawn Node worker 也能 spawn Python worker——因两个引擎"spawn 子进程 + 讲同一套 0024 协议"的形状本就完全一致（[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)），无需 `MidsceneEngine`/`NovaActEngine` 两个类。哪个引擎由组合根传不同 `cmd` 决定（`EngineResolver` 按 `job.engine` 选）。
 - `RunStore` —— **控制面**：持 **definition（`RunMeta`，执行前确定的身份 + `Job[]`）+ 运行态（`RunState`：status、起止、会话血缘 sessionId）**（频繁读写：轮询/续跑/WebUI 进度）。`save_run(meta, state)` 分别落、`load_run_meta`/`load_run_state` 分别读（definition 与运行态生命周期不同：前者执行前定、后者执行后产，见上「三层切分」）。**这才是未来 DynamoDB 真正要存的东西**（可恢复、可轮询）。
 - `ResultStore` —— **数据面**：每 scenario 的 pass/fail、投票抖动、原生报告指针（追加为主；CI 读判定真值靠它）。`save_job_result`/`load_job_result`/`load_all` 按 job 粒度读写（判定真值唯一权威）。
 - `ReportStore` —— 把 `RunResult` 归集成 RunReport（manifest + index，派生只读导航视图；local FS → S3）。**已实装** `LocalReportStore`（[0027](./0027-runreport-aggregation-index.md)）。
@@ -102,7 +102,7 @@ core/
 
 ## 工程布局：core / cli / engines 三者平级对标
 
-**当前实装态（v1.0 进行中）**标在各行右侧 ✅/⬜：core/ 已建、cli/ 已建、engines/ 已迁、两腿 worker 已落地。
+**当前实装态（v1.0 进行中）**标在各行右侧 ✅/⬜：core/ 已建、cli/ 已建、engines/ 已迁、两个引擎 worker 已落地。
 
 ```
 yaozhou/
@@ -133,7 +133,7 @@ yaozhou/
 - **v0.1.0（核心假设验证）— ✅ 方向已证，正式验收顺延 v1.0.0（见下决定）**：糙、小范围、本地执行。
   - **核心假设（可证伪）**：QA **只写 `.feature`、零 step 代码**，靠通用 step（`When {自然语言} → aiAct`）即可跑通用例。
   - **原验收标准**：≥3 个**真实业务用例**（含不同动作类型）全部 QA 零 step 代码跑通；每处破例写代码记为反证；破例过多 → 假设不成立。
-  - **实际达成**：用**骨架用例**（wikipedia / example.com，见 CONTEXT「骨架验证用例」）覆盖了单步/多步复合/开放动作/AI 布尔·否定·取数·取串断言/主观判定/tag 路由，**全程 QA 零代码**，两腿都跑通——可行性**方向已证**。
+  - **实际达成**：用**骨架用例**（wikipedia / example.com，见 CONTEXT「骨架验证用例」）覆盖了单步/多步复合/开放动作/AI 布尔·否定·取数·取串断言/主观判定/tag 路由，**全程 QA 零代码**，两个引擎都跑通——可行性**方向已证**。
   - **决定（边界，务必读）**：**v0.1.0 判「方向已证」，不补真实用例即进 v1.0.0**。理由——① 团队当前**拿不到真实业务用例**（站点登录态等不可得），强等是空等；② 没有真实用例 → 破例无从触发 → **「破例清单」这条验收无法在 v0.x 执行**。故把「真实业务用例验收 + 破例记录」**顺延并入 v1.0.0**：待有真实用例时在 v1.0 里跑出破例、据以校验「QA 零代码」承诺。**已知风险**：v1.0 架构基于「骨架用例都很顺」的乐观假设设计，真实用例的破例（登录 / HITL / 动态内容 flaky）可能反过来要求调整 v1.0 架构——接受此返工风险，因前置条件（真实用例）确实不具备。
   - **报告**：v0.x 原目标含「报告能看」，当时**决定先「散着」**（手动查目录够用），归集形态待要求清晰再定。**v1.0 已落地为 RunReport 归集索引**（[0027](./0027-runreport-aggregation-index.md)）：不重渲染原生产物、只归集成统一清单 + 导航入口——回答了「先散着」时悬而未决的形态问题（索引而非融合）。
 - **v1.0.0（团队 QA 日常可用）— ⏳ 架构设计中（本 ADR + 0022/0023）**：多用例组织、跑批入口（CLI 阻塞跑一批）、scope 调度、抖动治理（投票）落地；本地执行。**承接 v0.x 顺延项**：真实业务用例验收 + 破例清单（RunReport 归集已落地，[0027](./0027-runreport-aggregation-index.md)）。
@@ -144,14 +144,14 @@ yaozhou/
 
 G1/G2 是 v1.0 核心库 `.feature` 解析的前置——其声明语法**现已定（ADR 0019）**：
 
-- **G1 — session scope 声明**：✅ `@scope:<name>` tag（相同值同 scope、串行共享会话；不同值并行；未标各自独立）。tag 两腿可读已验证。
-- **G2 — 引擎选择**：✅ `@engine:<x>` tag 选腿（scope 级属性、容错缺省、冲突报错）；v1.0 只选腿不交叉。两腿路由已验证。
+- **G1 — session scope 声明**：✅ `@scope:<name>` tag（相同值同 scope、串行共享会话；不同值并行；未标各自独立）。tag 两个引擎可读已验证。
+- **G2 — 引擎选择**：✅ `@engine:<x>` tag 选引擎（scope 级属性、容错缺省、冲突报错）；v1.0 只选引擎不交叉。两个引擎路由已验证。
 - 声明语法已定，但**调度实现**（scope 串/并行、会话共享、冲突校验）仍待 v1.0 核心库。
 
 ## 现在做 / 现在不做
 
 - **现在做（v1.0）**：核心库 `core/` 可被调用（逻辑不焊死在 CLI main 里）；钉死上面数据模型；定义 ports 接口（`Engine`/`RunStore`/`ResultStore`/`ReportStore`）+ 组合根注入；核心自解析 Gherkin + 薄 worker（[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)）。模块设计：worker↔core 协议见 [0024](./0024-worker-core-protocol.md)；plan 模块见 [0025](./0025-plan-module-feature-to-jobs.md)；schedule 模块见 [0026](./0026-schedule-module.md)。
-  - **ports 落地状态**：四个 port 的 local adapter 均已建（详见上「留口子：Ports & Adapters」节）。**两腿 worker 均已落地**（`engines/{novaact,midscene}/worker/`），两腿对称、同讲 0024 协议。
+  - **ports 落地状态**：四个 port 的 local adapter 均已建（详见上「留口子：Ports & Adapters」节）。**两个引擎 worker 均已落地**（`engines/{novaact,midscene}/worker/`），两个引擎对称、同讲 0024 协议。
 - **现在不做**：DynamoDB / S3 / Fargate adapter / 无状态机制 / WebUI ——接口已留好，等云端真需要时填 adapter + 组合根换注入。**避免为想象中的云端预先盖机器。**
 - **G1/G2 声明语法已定**（ADR 0019）；其**调度实现**（scope 串/并行、会话共享、engine 冲突校验）由 v1.0 核心库落地。
 - **多用例组织**（feature 分目录/命名约定、跑批入口、跑批层选择 feature/tag）同样由 v1.0 核心库落地——它依赖核心库的调度层，在 bdd 直跑层做是临时的、核心库会重做。当前 `features/` 下多个文件仅是 v0.x 打磨产物，未做有意组织。（旧的 cucumber `--tags` 选子集约定随 BDD runner 一并退役，见 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)；选子集改由核心调度层据 tag 实现。）

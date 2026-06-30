@@ -38,7 +38,7 @@ class WorkerHandle(Protocol):
 class Engine(Protocol):
     """执行引擎 port（ADR 0016）。
 
-    schedule 经此起 worker；adapter 形状一致（spawn node / spawn python / 未来 Fargate），schedule 对腿无知。
+    schedule 经此起 worker；adapter 形状一致（spawn node / spawn python / 未来 Fargate），schedule 对引擎无知。
     """
 
     def run_scope(self, job: Job) -> tuple[WorkerHandle, Iterator[Event]]:
@@ -50,7 +50,7 @@ class Engine(Protocol):
         ...
 
 
-# EngineResolver：按 job.engine 解析出 Engine（schedule 对腿数/腿名无知，ADR 0026）
+# EngineResolver：按 job.engine 解析出 Engine（schedule 对引擎数/引擎名无知，ADR 0026）
 @runtime_checkable
 class EngineResolver(Protocol):
     def __call__(self, engine_name: str) -> Engine: ...

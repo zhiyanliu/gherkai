@@ -1,6 +1,6 @@
 # Nova Act 的 acting 锁死在 Python：全 TS 核心被证伪，核心语言不为「对称」而赌
 
-为核心库（v1.0）选语言时，曾设想：若 Nova Act 也能用 TypeScript 驱动，则核心可全 TS、两腿在进程内对称（最工整的理想形态）。本 ADR 记录对这条路径的**实查证伪**，关闭它，免得后人重走。它直接闭合 [0006](./0006-form-a-two-subprojects-no-orchestrator.md) 与 [0013](./0013-cross-engine-sharing-boundary.md) 当年留下的「medium 置信、未验证」备用路径。
+为核心库（v1.0）选语言时，曾设想：若 Nova Act 也能用 TypeScript 驱动，则核心可全 TS、两个引擎在进程内对称（最工整的理想形态）。本 ADR 记录对这条路径的**实查证伪**，关闭它，免得后人重走。它直接闭合 [0006](./0006-form-a-two-subprojects-no-orchestrator.md) 与 [0013](./0013-cross-engine-sharing-boundary.md) 当年留下的「medium 置信、未验证」备用路径。
 
 ## 候选路径
 
@@ -23,13 +23,13 @@
   1. **`CallResultContent` 联合类型文档里只有 `text` 成员**，没有 image/screenshot。Nova Act 命门是「看截图+DOM 来操作」——若 REST 回传通道真只能回文本，视觉 grounding 会比 Python SDK 弱（中置信：文档没写≠一定没有，但是红灯）。
   2. `@aws-sdk/client-nova-act` 本次未独立核实成（npm 403、AWS v3 文档页空壳）；其存在记录于 [0006](./0006-form-a-two-subprojects-no-orchestrator.md)（含 `apiVersion 2025-08-22`、`endpointPrefix nova-act`），不是本次抓到的页面。
 
-**为「两腿对称」这个美学收益，去赌一条未验证的 TS-acting 链路 + 自造引擎工作量 + 视觉降级风险——不值。**
+**为「两个引擎对称」这个美学收益，去赌一条未验证的 TS-acting 链路 + 自造引擎工作量 + 视觉降级风险——不值。**
 
 ## 由此定下的核心语言原则（落地见 [0016](./0016-execution-architecture-core-lib-run-model.md)）
 
-两个引擎各自语言锁死（Midscene 锁 TS、Nova Act 锁 Python）是**物理约束**。无论核心用哪个语言，**必有一腿跨进程**——这是「双语言裂缝」（[0006](./0006-form-a-two-subprojects-no-orchestrator.md)）的必然。本可让另一腿进程内（核心挨着它），但此处决定**两腿都子进程**（见下），刻意消除这种不对称。
+两个引擎各自语言锁死（Midscene 锁 TS、Nova Act 锁 Python）是**物理约束**。无论核心用哪个语言，**必有一个引擎跨进程**——这是「双语言裂缝」（[0006](./0006-form-a-two-subprojects-no-orchestrator.md)）的必然。本可让另一个引擎进程内（核心挨着它），但此处决定**两个引擎都子进程**（见下），刻意消除这种不对称。
 
-**决定：两腿都作为子进程 worker，核心不 import 任何引擎。** 这让「核心语言」从「必须挨着某条腿」的被迫选择，变成**低风险的自由选择**（核心是无重型引擎依赖的薄编排层）。核心选 **Python**（boto3 生态成熟，便于未来云端 adapter；Gherkin 解析有官方 `gherkin-official`）。详见 [0016](./0016-execution-architecture-core-lib-run-model.md)。
+**决定：两个引擎都作为子进程 worker，核心不 import 任何引擎。** 这让「核心语言」从「必须挨着某个引擎」的被迫选择，变成**低风险的自由选择**（核心是无重型引擎依赖的薄编排层）。核心选 **Python**（boto3 生态成熟，便于未来云端 adapter；Gherkin 解析有官方 `gherkin-official`）。详见 [0016](./0016-execution-architecture-core-lib-run-model.md)。
 
 ## 重议
 

@@ -1,4 +1,4 @@
-"""A · 负向用例（expect-failure 探针）：验证"该红能红"——Nova Act 腿。
+"""A · 负向用例（expect-failure 探针）：验证"该红能红"——Nova Act 引擎。
 
 对标 midscene/spikes/05-negative-assertions.ts：故意造必假断言，
 验证 act_get(各 schema) 在"不符"时给出 false / 不匹配的值（→ 上层会判失败），

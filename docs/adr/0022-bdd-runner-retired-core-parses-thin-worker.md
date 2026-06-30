@@ -1,6 +1,6 @@
-# BDD runner 退役：核心库自解析 Gherkin + 两腿薄 worker（确定性 step = worker 注册表）
+# BDD runner 退役：核心库自解析 Gherkin + 两个引擎薄 worker（确定性 step = worker 注册表）
 
-核心库（v1.0）落地执行形态时的关键转向：**不再让每条腿跑整个 BDD runner（cucumber-js / pytest-bdd），而是核心库自己解析 `.feature`、把每个 step 派发给一个薄 worker 子进程。** 本 ADR 记录这个转向（代号 B1）、它退役了哪些 hack、确定性 step 怎么扩展、以及对 [0019](./0019-feature-tags-scope-and-engine.md)/[0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md)/[0021](./0021-local-cucumber-patch-step-keyword-disambiguation.md) 的影响。执行架构总成见 [0016](./0016-execution-architecture-core-lib-run-model.md)。
+核心库（v1.0）落地执行形态时的关键转向：**不再让每个引擎跑整个 BDD runner（cucumber-js / pytest-bdd），而是核心库自己解析 `.feature`、把每个 step 派发给一个薄 worker 子进程。** 本 ADR 记录这个转向（代号 B1）、它退役了哪些 hack、确定性 step 怎么扩展、以及对 [0019](./0019-feature-tags-scope-and-engine.md)/[0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md)/[0021](./0021-local-cucumber-patch-step-keyword-disambiguation.md) 的影响。执行架构总成见 [0016](./0016-execution-architecture-core-lib-run-model.md)。
 
 ## 两个候选
 
@@ -37,9 +37,9 @@
 
 ## 确定性 step 怎么扩展（test engineer 的扩展点）
 
-> **实现状态（v1.0 当前）**：下述 `@deterministic` 注册表**已落地**，两腿对称——Nova `engines/novaact/worker/deterministic.py`（`@deterministic` 装饰器 + `match()`）、Midscene `engines/midscene/worker/deterministic.ts`（`deterministic()` + `match()`）。worker 派发每个 step 时**先查注册表**（命中走精确 handler、不投票、可复现），未命中才落 ②内建 URL 导航 / ③AI catch-all。脚手架（`bdd/.../deterministic*`）现各注册一个真实 URL 锚点（`页面地址匹配 "<正则>"`）。命中后：成功→`passed`（无 votes）；handler 抛 `AssertionError`→`failed`/`assertion_failed`；抛其它→`error`；命中多条→`DeterministicConflict`（ADR 0022 最多命中一条）。各有注册表单测背书。
+> **实现状态（v1.0 当前）**：下述 `@deterministic` 注册表**已落地**，两个引擎对称——Nova `engines/novaact/worker/deterministic.py`（`@deterministic` 装饰器 + `match()`）、Midscene `engines/midscene/worker/deterministic.ts`（`deterministic()` + `match()`）。worker 派发每个 step 时**先查注册表**（命中走精确 handler、不投票、可复现），未命中才落 ②内建 URL 导航 / ③AI catch-all。脚手架（`bdd/.../deterministic*`）现各注册一个真实 URL 锚点（`页面地址匹配 "<正则>"`）。命中后：成功→`passed`（无 votes）；handler 抛 `AssertionError`→`failed`/`assertion_failed`；抛其它→`error`；命中多条→`DeterministicConflict`（ADR 0022 最多命中一条）。各有注册表单测背书。
 
-**扩展点 = 对应 worker 里的一张 step 注册表**（`(模式 → handler)`）。延续 [0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md) 的脚手架定位与角色边界（QA 永远只写人话、不碰确定性 step）：
+**扩展点 = 对应 worker 里的一张 step 注册表**（`(模式 → handler)`）。延续 [0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md) 的脚手架定位与角色边界（QA 永远只写自然语言、不碰确定性 step）：
 
 ```python
 # novaact worker 内（midscene worker 是对称的 TS 版）
@@ -57,7 +57,7 @@ def color_is(ctx, sel, hex):
 
 - **几乎零写法变化**：现 `deterministic.steps.ts` / `deterministic_steps.py` 那两个空脚手架的归宿——从「被 BDD runner 自动收集」变成「被 worker 注册表收集」，test engineer 还是写个带模式的函数，只把 `@when/@then` 换成我们的 `@deterministic`。
 - **匹配放 worker，不放核心**：核心只发原始 step 文本；worker 先查自己的确定性表、未命中再走 AI。确定性 handler 是**引擎特定**的（要碰 Playwright 句柄、CDP eval），匹配表跟着 handler 走最内聚；核心保持对 step 语义无知（只管解析结构 + 调度）。
-- **两腿对称但各自语言**：确定性检查天然依赖引擎/CDP 的精确能力，**本就该写在对应 worker 里**（midscene=TS+Playwright，nova=Python）。这不是缺陷，是确定性检查的本质（它碰具体引擎精确 API，不像 AI step 引擎无关）。
+- **两个引擎对称但各自语言**：确定性检查天然依赖引擎/CDP 的精确能力，**本就该写在对应 worker 里**（midscene=TS+Playwright，nova=Python）。这不是缺陷，是确定性检查的本质（它碰具体引擎精确 API，不像 AI step 引擎无关）。
 - **冲突规则自定**（如「最多命中一条，多条报错」），比 cucumber 的 pattern 歧义可控得多——这正是 B1 退役补丁的同源好处。
 
 ## 退役清单（B1 真正删除/作废的东西）
@@ -76,7 +76,7 @@ def color_is(ctx, sel, hex):
 ## 对既有 ADR 的影响
 
 - **[0021](./0021-local-cucumber-patch-step-keyword-disambiguation.md)（cucumber 补丁）→ 基本作废**：补丁是「BDD runner 入口 + pattern-only 匹配」的产物；B1 下核心从 AST 知关键字，问题消失。0021 作为决策史保留（记录我们曾用 patch-package 解歧义、为何、后来为何退役）。
-- **[0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md)（默认 AI / 少数派显式）→ 语义保留，实现层转移**：「裸 `When/Then` 人话→默认 AI；确定性=脚手架」的语义不变；落地从「cucumber 补丁 + pytest-bdd 原生区分」转为「核心解析关键字 + worker catch-all/注册表派发」。0020 里「Midscene 靠补丁」那段被本 ADR 取代。
+- **[0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md)（默认 AI / 少数派显式）→ 语义保留，实现层转移**：「裸 `When/Then` 自然语言→默认 AI；确定性=脚手架」的语义不变；落地从「cucumber 补丁 + pytest-bdd 原生区分」转为「核心解析关键字 + worker catch-all/注册表派发」。0020 里「Midscene 靠补丁」那段被本 ADR 取代。
 - **[0019](./0019-feature-tags-scope-and-engine.md)（scope/engine tag）→ 语义保留，实现层转移**：tag 语义不变；tag 的读取/路由/scope 调度从「两套 runner 各自方言（cucumber `--tags` / pytest-bdd conftest marker）」统一为「核心解析 tag + 调度」。0019 留待核心库的「调度实现」即由本转向落地。
 - **[0016](./0016-execution-architecture-core-lib-run-model.md)**：本 ADR 是其「核心解析→分组→调度」与 `Engine` port 的具体落地形态。
 

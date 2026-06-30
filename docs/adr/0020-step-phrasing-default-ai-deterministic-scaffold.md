@@ -1,6 +1,6 @@
 # Step 措辞：默认 AI 判断（QA 零预设）+ 确定性锚点脚手架（工程角色按需自建）
 
-> **状态：语义保留，实现层已转移（见 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)）。** 「裸 `When/Then` 人话→默认 AI；确定性=脚手架、test engineer 按需建、QA 零代码」的语义**不变**。但落地从「cucumber 补丁 + pytest-bdd 原生区分关键字」转为「核心库解析关键字 + worker 的 catch-all/确定性注册表派发」——下文「实现（改造清单）」与「Midscene 靠补丁」相关段落被 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md) 取代；确定性锚点的落点从脚手架文件改为 worker 注册表。
+> **状态：语义保留，实现层已转移（见 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)）。** 「裸 `When/Then` 自然语言→默认 AI；确定性=脚手架、test engineer 按需建、QA 零代码」的语义**不变**。但落地从「cucumber 补丁 + pytest-bdd 原生区分关键字」转为「核心库解析关键字 + worker 的 catch-all/确定性注册表派发」——下文「实现（改造清单）」与「Midscene 靠补丁」相关段落被 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md) 取代；确定性锚点的落点从脚手架文件改为 worker 注册表。
 
 断言类 step 的措辞设计，使「AI 柔性主导」([0014](./0014-ai-first-assertions.md)/[0015](./0015-v1-positioning-smoke-not-regression.md)) 落到 QA 的真实书写体验上。
 
@@ -13,32 +13,32 @@
 **让最常用的写法最省事，特例才需要标注**：
 
 1. **默认 AI 判断**：QA 写 `When "{自然语言}"` / `Then "{自然语言}"`——**不带任何关键词**，框架默认喂给 AI（动作 `aiAct`/`act`；断言 `aiBoolean` ↔ `act_get(BOOL_SCHEMA)` + 投票）。这是 ~90% 的情况。
-   - **两腿匹配机制不同**（已实测）：**Nova Act/pytest-bdd 原生区分 `@when`/`@then`**，裸字符串 step 直接可用。**Midscene/cucumber-js 不区分关键字、仅按 pattern**，故 `When "{string}"` 与 `Then "{string}"` 同 pattern → ambiguous → **靠本地补丁解决**（按 PickleStepType 收窄到关键字，见 [0021](./0021-local-cucumber-patch-step-keyword-disambiguation.md)）。**vanilla cucumber 跑不通裸字符串双 step；补丁是 Midscene 侧此设计的前提。**
+   - **两个引擎匹配机制不同**（已实测）：**Nova Act/pytest-bdd 原生区分 `@when`/`@then`**，裸字符串 step 直接可用。**Midscene/cucumber-js 不区分关键字、仅按 pattern**，故 `When "{string}"` 与 `Then "{string}"` 同 pattern → ambiguous → **靠本地补丁解决**（按 PickleStepType 收窄到关键字，见 [0021](./0021-local-cucumber-patch-step-keyword-disambiguation.md)）。**vanilla cucumber 跑不通裸字符串双 step；补丁是 Midscene 侧此设计的前提。**
 
 2. **确定性锚点 = 脚手架，不预置**：少数"必须精确、不容 AI 抖动"的断言（URL/DOM 精确查），做成**空脚手架文件** `deterministic.steps.ts`（Midscene）/ 对应 Python（Nova Act），与 `generic.steps` 同级，内含**说明注释**教 test engineer 怎么加、怎么和 `.feature` 呼应。
    - **不预置任何具体确定性锚点 step**（连 `页面地址包含` 也不预置）——预置就等于要求 QA 学措辞，违背"QA 零预设"。锚点按真实需求自建（避免过度设计，同 [0018](./0018-generic-steps-capability.md) 删"取数原语"的教训）。
-   - 两腿脚手架对齐。
+   - 两个引擎脚手架对齐。
 
 3. **URL 形态自动分流（导航不写死动词）**：QA 写到 URL 时（如 `Given 打开 "https://..."` / `访问 "https://..."` / `前往 "https://..."`），框架**按 step 文本里有没有 URL 字面量**（引号内 `https?://…`）自动分流，**不锁动词**：
-   - **含 URL → 内建确定性导航**（code 抽出 URL 直接 `goto`/`go_to_url`，精确、不浪费 AI、不会被理解成"搜索"而跑偏）。动词随便写，QA 不必记固定措辞——对齐本 ADR"QA 只写人话"。
+   - **含 URL → 内建确定性导航**（code 抽出 URL 直接 `goto`/`go_to_url`，精确、不浪费 AI、不会被理解成"搜索"而跑偏）。动词随便写，QA 不必记固定措辞——对齐本 ADR"QA 只写自然语言"。
    - **不含 URL → 回落默认 AI**（如 `访问 OpenAI 的维基页` / `回到首页` → `aiAct`/`act`，让引擎自己导航）。
    - 这是 A（确定性）+ B（AI）的组合：URL 已知时享受精确，未知时享受柔性。**退路**：若 URL 检测出现误伤（句中只是提及 URL、并非要导航），把 code 路退化成全 AI（B）。
    - **落点 = worker 的派发逻辑**（不在 core，对齐 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)「core 对 step 语义无知」；协议形态见 [0024](./0024-worker-core-protocol.md)）。取代了早先 `Given 打开 "{url}"` 的固定措辞写法。
 
 ## 角色边界（关键）
 
-- **QA**：永远只写 `.feature` 纯人话 → 默认走 AI。**"零代码"对 QA 成立。**
+- **QA**：永远只写 `.feature` 纯自然语言 → 默认走 AI。**"零代码"对 QA 成立。**
 - **Test engineer**（会写代码）：偶尔需精确锚点时，在 `deterministic.steps` 写一小段 Playwright 查询 step。这是 BDD 原本的角色分工，**不破坏 QA 零代码**。
 
 ## 删除的过时措辞
 
 - `AI 确认 "..."` → 改为无关键词 `Then "..."`。
 - `页面地址包含 "..."` 等**预置确定性 step → 删除**（移入脚手架的"示例/按需自建"，不在 generic 预置）。
-- 早先"显式断言锚点=QA 点名让 AI 看"（[0015](./0015-v1-positioning-smoke-not-regression.md) 原措辞）澄清：QA 点名仍走默认 AI 层（写人话）；确定性锚点是工程角色的另一套，不混。
+- 早先"显式断言锚点=QA 点名让 AI 看"（[0015](./0015-v1-positioning-smoke-not-regression.md) 原措辞）澄清：QA 点名仍走默认 AI 层（写自然语言）；确定性锚点是工程角色的另一套，不混。
 
 ## 实现（改造清单，v0.x bdd 层；实现层已随 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md) 转移）
 
 - Midscene `generic.steps.ts`：`AI 确认 {string}` → `{string}`（默认 AI）；删 `页面地址包含`；新建 `deterministic.steps.ts` 脚手架。
 - Nova Act `test_generic_steps.py`：对齐；新建确定性锚点脚手架。
-- `features/*.feature`：断言改为无关键词 `Then "{人话}"`。
+- `features/*.feature`：断言改为无关键词 `Then "{自然语言}"`。
 - 否定断言 `确认页面没有 "..."`：保留（它是通用 AI 否定断言，非绑场景；但措辞可后续也归一，暂留）。
