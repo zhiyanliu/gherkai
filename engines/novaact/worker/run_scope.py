@@ -207,9 +207,15 @@ def _run_step(nova, scenario_id: str, step: dict, traj_sink: list[str], votes_n:
         # 失败的 act 最需要看 trajectory——Nova 的 ActError 也带 metadata.trajectory_file_path
         # （SDK 在 finally 已写盘），同一 helper 收集（ADR 0027：失败 act 的产物不丢）。
         _collect_traj(e, traj_sink)
+        # 诊断分类细化（ADR 0028）：act 中途若是网络瞬时故障（CDP 闪断等），标 network_error 比笼统
+        # engine_error 更准——便于排查"是网络抖动还是 AI 真出错"。**仅分类、不触发重试/恢复**：act 不幂等，
+        # schedule 的 job 级重试要求「会话未起（零 step_done）」，而此处 step_started 早已 emit、saw_step=True，
+        # 双条件 AND 天然不满足；且本失败走 step_done 事件流（非退出码 80），core 侧 is_network=False。
+        # 故"act 中途恢复"仍是 defer（ADR 0028），这里只把失败原因记准。
+        err_type = "network_error" if _is_transient_network(e) else "engine_error"
         emit({
             "type": "step_done", "scenarioId": scenario_id, "stepIndex": idx,
-            "status": "error", "errorType": "engine_error", "message": f"{type(e).__name__}: {e}",
+            "status": "error", "errorType": err_type, "message": f"{type(e).__name__}: {e}",
         })
         return "error"
 
@@ -285,8 +291,9 @@ _BACKOFF_S = [0.5, 1.0, 2.0]  # attempt 失败后的退避；±20% jitter 由调
 def _is_transient_network(e: BaseException) -> bool:
     """是否网络/SSL 瞬时故障（可重试，ADR 0028）。
 
-    白名单匹配**具体**瞬时类型，不用宽 OSError 兜底——ssl.SSLError 与 socket.gaierror（DNS 永久错）
-    都继承 OSError，宽匹配会把永久错也当瞬时重试。gaierror 明确排除。
+    白名单匹配**具体**瞬时类型，不用宽 OSError 兜底——ssl.SSLError 与 socket.gaierror 都继承 OSError，
+    宽匹配会把永久错也当瞬时重试。gaierror 按 errno 细分：EAI_AGAIN(临时) 当瞬时、其余(EAI_NONAME 等永久) 否决
+    （对齐 Midscene 的 EAI_AGAIN 白名单，保两腿对 DNS 临时抖动恢复力对称，ADR 0028）。
 
     **遍历异常链**（__cause__/__context__）：Nova/boto SDK 常把底层 ssl.SSLError 包成自有异常
     （BrowserAuthError 等），只看最外层会漏判——任一层命中白名单即判瞬时（用 id 集防环）。
@@ -307,8 +314,10 @@ def _is_transient_network(e: BaseException) -> bool:
     cur: BaseException | None = e
     while cur is not None and id(cur) not in seen:
         seen.add(id(cur))
-        if isinstance(cur, socket.gaierror):  # DNS 解析失败 = 永久错，不重试（此层直接否决）
-            return False
+        if isinstance(cur, socket.gaierror):
+            # DNS 解析失败：按 errno 细分（gaierror 同时覆盖临时与永久，不能一律否决）——
+            # EAI_AGAIN(临时，可重试，对齐 Midscene 的 EAI_AGAIN 白名单) → 瞬时；其余(EAI_NONAME 等永久) → 否决。
+            return cur.args[0] == socket.EAI_AGAIN if cur.args else False
         if isinstance(cur, transient):
             return True
         cur = cur.__cause__ or cur.__context__

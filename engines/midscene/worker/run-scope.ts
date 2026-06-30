@@ -336,9 +336,14 @@ async function runStep(
     emit(ev);
     return "passed";
   } catch (e) {
+    // 诊断分类细化（ADR 0028，对称 Nova）：act 中途网络瞬时故障（CDP 闪断等）标 network_error 比笼统
+    // engine_error 更准。**仅分类、不触发重试/恢复**：act 不幂等，schedule job 级重试要求「会话未起（零
+    // step_done）」，此处 step_started 早已 emit、saw_step=True，双条件 AND 天然不满足；本失败走 step_done
+    // 事件流（非退出码 80），core 侧 is_network=False。"act 中途恢复"仍 defer，这里只把失败原因记准。
+    const errorType = isTransientNetwork(e) ? "network_error" : "engine_error";
     emit({
       type: "step_done", scenarioId, stepIndex: index,
-      status: "error", errorType: "engine_error", message: `${(e as Error).name}: ${(e as Error).message}`,
+      status: "error", errorType, message: `${(e as Error).name}: ${(e as Error).message}`,
     });
     return "error";
   }

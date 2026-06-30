@@ -51,7 +51,7 @@ worker **按白名单匹配具体瞬时异常类型**,不用宽基类兜底:
 - `subprocess_engine._read_events` 把 returncode 80 翻成 `core.errors.WorkerNetworkError`（类型化）;
   `schedule._Worker._run_once` 在 generic `except` **之前**加 `except WorkerNetworkError` → 记 `error_type="network_error"`。
 - **`WorkerNetworkError` 定义在 `core/errors.py`,不在 adapter**——否则 schedule 反依赖 adapter（违反 ports 六边形）。
-- 会话已起后的瞬时网络错（罕见）仍走 `step_done`/`scope_done` 的 `errorType` 字段,不用退出码。
+- 会话已起后的瞬时网络错（罕见）仍走 `step_done`/`scope_done` 的 `errorType` 字段,不用退出码。**已兑现**：act 中途失败时两个引擎 worker 复用 `_is_transient_network`/`isTransientNetwork` 判定，网络瞬时 → 标 `network_error`（否则 `engine_error`）——**仅诊断分类、不触发重试/恢复**（act 不幂等；且 `saw_step=True` + 走 step_done 非退出码 80，schedule 双条件 AND 天然不重试）。"act 中途恢复"仍 defer（见下）。
 
 ## worker 层退避
 
