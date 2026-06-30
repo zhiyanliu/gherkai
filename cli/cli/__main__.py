@@ -69,6 +69,19 @@ def _build_parser() -> argparse.ArgumentParser:
         help="归集时把本地原生产物按字节拷进 <run_id>/artifacts/（自包含、可搬运/上 S3；默认只链接不拷）",
     )
 
+    # plan 预检（dry-run）：纯本地解析 + 分组，不起 worker、不连 AWS、不烧钱。
+    pl = sub.add_parser("plan", help="预检 .feature：看 scope/job 分组 + 校验配置，不真跑（不烧钱）")
+    pl.add_argument("features", nargs="+", type=Path, help="一个或多个 .feature 路径")
+    pl.add_argument(
+        "--default-engine", default="novaact",
+        help="未标 @engine 的 scope 用的默认引擎（默认 novaact）——影响分组结果，故预检也可设",
+    )
+    pl.add_argument(
+        "--assertion-votes", type=int, default=1, metavar="N",
+        help="AI 断言投票次数（默认 1）——影响 plan 产出的 Job.assertion_votes，故预检也可设",
+    )
+    pl.add_argument("--json", action="store_true", help="输出机器可读 JSON（scope/job 分组）")
+
     sub.add_parser("list-engines", help="列出可用引擎及其 spawn 命令")
     return p
 
@@ -80,6 +93,37 @@ def _cmd_list_engines(repo: Path) -> int:
         eng = engines[name]
         cmd = " ".join(getattr(eng, "cmd", []))  # SubprocessEngine 持有 cmd
         print(f"  - {name}: {cmd}")
+    return 0
+
+
+def _cmd_plan(args, repo: Path) -> int:
+    """plan 预检：读 feature → plan → 渲染 scope/job 分组。**不起 worker、不连 AWS、不烧钱**。
+
+    与 _cmd_run 的 1)2) 步同源（同样的 load_feature + plan + PlanConfig），但到此为止——
+    省钱验证 feature 写法、看分组、暴露 PlanError。退出码与 run 一致（0 ok / 2 配置错）。
+    """
+    if args.assertion_votes < 1:
+        _progress(f"--assertion-votes 必须 ≥ 1（收到 {args.assertion_votes}）")
+        return 2
+    try:
+        features = [compose.load_feature(f, repo) for f in args.features]
+    except FileNotFoundError as e:
+        _progress(f"读 feature 失败：{e}")
+        return 2
+    try:
+        jobs = plan(features, PlanConfig(
+            default_engine=args.default_engine,
+            default_assertion_votes=args.assertion_votes,
+        ))
+    except PlanError as e:
+        _progress(f"plan 失败（配置矛盾，拒绝运行）：{e}")
+        return 2
+
+    # 核心产出 → stdout（与 run 的输出契约一致：--json 单文档 / 否则人看文本）
+    if args.json:
+        print(json.dumps(render.plan_to_dict(jobs, args.default_engine), ensure_ascii=False, indent=2))
+    else:
+        print(render.render_plan_text(jobs, args.default_engine))
     return 0
 
 
@@ -208,6 +252,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "list-engines":
         return _cmd_list_engines(repo)
+    if args.command == "plan":
+        return _cmd_plan(args, repo)
     if args.command == "run":
         return _cmd_run(args, repo)
 

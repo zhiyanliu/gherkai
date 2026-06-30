@@ -125,3 +125,60 @@ def test_assertion_votes_below_one_rejected(tmp_path, monkeypatch, capsys):
     assert called["n"] == 0  # schedule 从未被调用——坏值在入口就被拦，没白起 worker
     err = capsys.readouterr().err
     assert "必须 ≥ 1" in err
+
+
+# ---- plan 预检（dry-run）：纯本地、不连 AWS、不烧钱 ----
+
+def test_plan_text_shows_scope_grouping(tmp_path, capsys):
+    # plan 子命令：读 feature → 渲染 scope/job 分组，不起 worker（无需 monkeypatch schedule）。
+    feat = tmp_path / "demo.feature"
+    feat.write_text(
+        "@scope:s @engine:midscene\nFeature: F\n  Scenario: a\n    When \"做事\"\n    Then \"对吗\"\n",
+        encoding="utf-8",
+    )
+    rc = m.main(["plan", str(feat)])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "plan（预检，未真跑）" in out
+    assert "1 job(scope)" in out
+    assert "engine=midscene" in out          # @engine tag 生效
+    assert "Then" in out and "对吗" in out    # step 预览
+
+
+def test_plan_json_shape(tmp_path, capsys):
+    feat = tmp_path / "demo.feature"
+    feat.write_text("Feature: F\n  Scenario: a\n    When \"做事\"\n", encoding="utf-8")
+    rc = m.main(["plan", str(feat), "--default-engine", "midscene", "--json"])
+    assert rc == 0
+    doc = json.loads(capsys.readouterr().out)   # 单一 JSON 文档
+    assert doc["job_count"] == 1 and doc["scenario_count"] == 1
+    assert doc["default_engine"] == "midscene"
+    assert doc["jobs"][0]["engine"] == "midscene"   # 未标 @engine → 用 default
+
+
+def test_plan_rejects_engine_conflict(tmp_path, capsys):
+    # 同 scope 多 engine → PlanError，预检在真跑前拦截、退 2（省钱）
+    feat = tmp_path / "conflict.feature"
+    feat.write_text(
+        "@scope:x @engine:midscene\nFeature: F\n  Scenario: a\n    When \"x\"\n"
+        "  @scope:x @engine:novaact\n  Scenario: b\n    When \"y\"\n",
+        encoding="utf-8",
+    )
+    rc = m.main(["plan", str(feat)])
+    assert rc == 2
+    assert "多个 @engine" in capsys.readouterr().err   # 错误走 stderr
+
+
+def test_plan_text_argument_hint(tmp_path, capsys):
+    # 文本模式对 DataTable/DocString 标注尺寸（保持紧凑；完整内容走 --json）
+    feat = tmp_path / "arg.feature"
+    feat.write_text(
+        "Feature: F\n  Scenario: a\n    When 填表\n      | k | v |\n      | 用户名 | alice |\n"
+        "    Then 反馈\n      \"\"\"\n      行1\n      行2\n      \"\"\"\n",
+        encoding="utf-8",
+    )
+    rc = m.main(["plan", str(feat)])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "+dataTable(2×2)" in out    # 2 行 × 2 列
+    assert "+docString(2 行)" in out

@@ -4,7 +4,7 @@ core 产出纯数据（RunResult、Event）；怎么展示是皮的事，故渲�
 """
 from __future__ import annotations
 
-from core.model import Event, RunResult
+from core.model import Event, Job, RunResult
 from core.serialize import to_dict  # 单一真理源（ADR 0027）：cli --json 与 manifest 共用
 
 
@@ -71,5 +71,50 @@ def render_text(result: RunResult) -> str:
     return "\n".join(out)
 
 
+# ---- plan 预检（dry-run）渲染：纯本地、不烧钱，展示 .feature → scope/job 分组 ----
+
+def render_plan_text(jobs: list[Job], default_engine: str) -> str:
+    """plan 产出 Job[] → 人看的多行预检视图（scope/engine/scenario/step，不真跑）。"""
+    n_scenarios = sum(len(j.scenarios) for j in jobs)
+    out: list[str] = [
+        "", "===== plan（预检，未真跑）=====",
+        f"  {len(jobs)} job(scope)  ·  {n_scenarios} scenario  ·  default_engine={default_engine}",
+    ]
+    for j in jobs:
+        votes = f"  votes={j.assertion_votes}" if j.assertion_votes != 1 else ""
+        out.append(f"  job scope={j.scope_id!r} (name={j.scope_name!r}) engine={j.engine}{votes}")
+        for sc in j.scenarios:
+            out.append(f"    scenario {sc.id!r}  ({len(sc.steps)} step)")
+            for st in sc.steps:
+                out.append(f"      [{st.index}] {st.keyword} {st.text}{_arg_hint(st.argument)}")
+    return "\n".join(out)
+
+
+def _arg_hint(arg) -> str:
+    """step 多行参数的轻量标注（文本视图保持紧凑；完整 content/rows 用 --json 看）。
+    dataTable → +dataTable(行×列)；docString → +docString(N 行)。"""
+    if arg is None:
+        return ""
+    if arg.kind == "dataTable":
+        rows = arg.rows or ()
+        cols = len(rows[0]) if rows else 0
+        return f"  +dataTable({len(rows)}×{cols})"
+    if arg.kind == "docString":
+        n = len((arg.content or "").splitlines())
+        return f"  +docString({n} 行)"
+    return f"  +{arg.kind}"
+
+
+def plan_to_dict(jobs: list[Job], default_engine: str) -> dict:
+    """plan 产出 → 机器可读 dict（--json）。复用 core.serialize 的 job 序列化保单一真理源。"""
+    from core.serialize import job_to_dict
+    return {
+        "default_engine": default_engine,
+        "job_count": len(jobs),
+        "scenario_count": sum(len(j.scenarios) for j in jobs),
+        "jobs": [job_to_dict(j) for j in jobs],
+    }
+
+
 # to_dict 已移入 core.serialize（单一真理源，cli 与 manifest 共用），从那里 re-export。
-__all__ = ["format_event", "render_text", "to_dict"]
+__all__ = ["format_event", "render_text", "render_plan_text", "plan_to_dict", "to_dict"]

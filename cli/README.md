@@ -31,9 +31,20 @@ uv run python -m cli run ../features/wikipedia_generic.feature
 uv run python -m cli run ../features/wikipedia_generic.feature \
   --default-engine midscene --max-concurrency 2 --json
 
+# 预检 .feature（不烧钱）：看 scope/job 分组、校验配置（@scope/@engine 冲突等），不真跑
+uv run python -m cli plan ../features/wikipedia_generic.feature
+uv run python -m cli plan ../features/*.feature --json     # 机器可读分组
+
 # 列可用引擎及其 spawn 命令（不烧钱）
 uv run python -m cli list-engines
 ```
+
+**先 `plan` 后 `run`**：`run` 每次真烧 AWS 钱，`plan` 是纯本地预检——验证 feature 写法、确认
+scope/job 分组与 engine 路由符合预期、提前暴露 `PlanError`（uri 冲突 / 同 scope 多 engine 等），
+都不连云、不花钱。退出码 0=可跑 / 2=配置错。
+
+> 文本模式对 DataTable/DocString 多行参数只标注尺寸（`+dataTable(行×列)` / `+docString(N 行)`）保持紧凑；
+> 要核对参数**完整内容**用 `--json`（携带 content/rows 全文）。
 
 未标 `@engine` 的 scope 用 `--default-engine` 指定的默认引擎；标了 `@engine:` 的按 tag 走、不受此 flag 影响（ADR 0019）。
 
