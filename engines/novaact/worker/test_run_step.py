@@ -73,7 +73,7 @@ def _done(evts):
 # ---- 派发分支 ----
 def test_given_url_goes_to_nav_no_ai(captured):
     nova = _FakeNova()
-    r = rs._run_step(nova, "sc:0", _step("Given", '打开 "https://example.com"'), [], 1)
+    r = rs._run_step(nova, "sc:0", _step("Given", '打开 "https://example.com"'), 1)
     assert r == "passed"
     assert nova.calls == [("go_to_url", "https://example.com")]  # 不浪费 AI
     assert _done(captured).get("votes") is None  # 确定性导航无 votes
@@ -81,7 +81,7 @@ def test_given_url_goes_to_nav_no_ai(captured):
 
 def test_when_natural_language_goes_to_act(captured):
     nova = _FakeNova()
-    r = rs._run_step(nova, "sc:0", _step("When", '"搜索 OpenAI"'), [], 1)
+    r = rs._run_step(nova, "sc:0", _step("When", '"搜索 OpenAI"'), 1)
     assert r == "passed"
     assert nova.calls[0][0] == "act"
     assert _done(captured).get("votes") is None  # 动作步无 votes
@@ -90,21 +90,21 @@ def test_when_natural_language_goes_to_act(captured):
 # ---- 投票多数票数学（ADR 0014 边界）----
 def test_then_votes1_single_yes_passed(captured):
     nova = _FakeNova(bool_seq=[True])
-    r = rs._run_step(nova, "sc:0", _step("Then", '"对吗"'), [], 1)
+    r = rs._run_step(nova, "sc:0", _step("Then", '"对吗"'), 1)
     assert r == "passed"
     assert _done(captured)["votes"] == {"yes": 1, "total": 1}
 
 
 def test_then_votes3_majority_2of3_passed(captured):
     nova = _FakeNova(bool_seq=[True, False, True])
-    r = rs._run_step(nova, "sc:0", _step("Then", '"对吗"'), [], 3)
+    r = rs._run_step(nova, "sc:0", _step("Then", '"对吗"'), 3)
     assert r == "passed"  # yes=2 > 3/2=1.5
     assert _done(captured)["votes"] == {"yes": 2, "total": 3}
 
 
 def test_then_votes3_only_1of3_failed(captured):
     nova = _FakeNova(bool_seq=[True, False, False])
-    r = rs._run_step(nova, "sc:0", _step("Then", '"对吗"'), [], 3)
+    r = rs._run_step(nova, "sc:0", _step("Then", '"对吗"'), 3)
     assert r == "failed"  # yes=1 不 > 1.5
     ev = _done(captured)
     assert ev["status"] == "failed" and ev["errorType"] == "assertion_failed"
@@ -112,7 +112,7 @@ def test_then_votes3_only_1of3_failed(captured):
 
 def test_then_votes2_tie_failed(captured):
     nova = _FakeNova(bool_seq=[True, False])
-    r = rs._run_step(nova, "sc:0", _step("Then", '"对吗"'), [], 2)
+    r = rs._run_step(nova, "sc:0", _step("Then", '"对吗"'), 2)
     assert r == "failed"  # yes=1 不 > 2/2=1，平票算失败（对称 Midscene，ADR 0028 有意设计）
 
 
@@ -120,20 +120,20 @@ def test_then_votes2_tie_failed(captured):
 def test_act_transient_network_is_network_error(captured):
     import socket
     nova = _FakeNova(act_raises=ConnectionError("reset"))
-    r = rs._run_step(nova, "sc:0", _step("When", '"做事"'), [], 1)
+    r = rs._run_step(nova, "sc:0", _step("When", '"做事"'), 1)
     assert r == "error"
     ev = _done(captured)
     assert ev["status"] == "error" and ev["errorType"] == "network_error"
     # gaierror EAI_AGAIN 也算瞬时（对齐建连路径分类）
     nova2 = _FakeNova(act_raises=socket.gaierror(socket.EAI_AGAIN, "temp"))
     captured.clear()
-    assert rs._run_step(nova2, "sc:0", _step("When", '"做事"'), [], 1) == "error"
+    assert rs._run_step(nova2, "sc:0", _step("When", '"做事"'), 1) == "error"
     assert _done(captured)["errorType"] == "network_error"
 
 
 def test_act_non_network_is_engine_error(captured):
     nova = _FakeNova(act_raises=ValueError("AI boom"))
-    r = rs._run_step(nova, "sc:0", _step("When", '"做事"'), [], 1)
+    r = rs._run_step(nova, "sc:0", _step("When", '"做事"'), 1)
     assert r == "error"
     assert _done(captured)["errorType"] == "engine_error"
 
@@ -166,6 +166,51 @@ def test_classify_unknown_falls_back_engine_error():
 # ---- time_worked_s 成本：多票按累加合计全 N 票（对称 Midscene，修只算最后一票的欠计）----
 def test_then_votes3_cost_sums_all_votes(captured):
     nova = _FakeNova(bool_seq=[True, True, True], tw_seq=[1.0, 2.0, 3.0])  # 三票各 1/2/3 秒
-    rs._run_step(nova, "sc:0", _step("Then", '"对吗"'), [], 3)
+    rs._run_step(nova, "sc:0", _step("Then", '"对吗"'), 3)
     ev = _done(captured)
     assert ev["cost"] == {"time_worked_s": 6.0}  # 1+2+3，非旧逻辑的 3.0（只算最后一票）
+
+
+# ---- step 级 trajectory reportRefs（ADR 0027 下沉）：本 step 的 act 轨迹挂进该 step 的 step_done ----
+class _TrajResult:
+    """带 trajectory_file_path 的 fake result（.html 不存在 → _collect_traj 回退用 json 路径本身）。"""
+    def __init__(self, value, path):
+        self.matches_schema = True
+        self.parsed_response = value
+        self.metadata = type("M", (), {"time_worked_s": None, "trajectory_file_path": path})()
+
+
+class _TrajNova:
+    def __init__(self, paths):
+        self._paths = list(paths)
+        self._i = 0
+    def act_get(self, instr, schema):
+        p = self._paths[self._i]; self._i += 1
+        return _TrajResult(True, p)
+    def act(self, instr):
+        return _TrajResult(True, self._paths[0])
+
+
+def test_step_done_carries_step_level_trajectory_refs(captured):
+    # AI 动作步：本 step 的 act 轨迹挂进 step_done.reportRefs（kind=trajectory）
+    nova = _TrajNova(["/logs/sess/act_0_trajectory.json"])
+    rs._run_step(nova, "sc:0", _step("When", '"做事"'), 1)
+    ev = _done(captured)
+    assert ev["reportRefs"][0]["kind"] == "trajectory"
+    assert ev["reportRefs"][0]["ref"] == "file:///logs/sess/act_0_trajectory.json"  # .html 不存在→回退 json
+
+
+def test_then_votes_multiple_trajectories_on_one_step(captured):
+    # N 票 AI 断言：每票一个 act 轨迹，都挂本 step（一个 step 多个 trajectory，label 编号）
+    nova = _TrajNova(["/logs/act_0_trajectory.json", "/logs/act_1_trajectory.json", "/logs/act_2_trajectory.json"])
+    rs._run_step(nova, "sc:0", _step("Then", '"对吗"'), 3)
+    refs = _done(captured)["reportRefs"]
+    assert len(refs) == 3  # 三票三个轨迹，都挂这一个 step
+    assert refs[0]["label"] == "trajectory 1" and refs[2]["label"] == "trajectory 3"
+
+
+def test_deterministic_and_url_steps_have_no_traj_refs(captured):
+    # 确定性导航步不调 act → 无 trajectory、step_done 不带 reportRefs
+    nova = _FakeNova()
+    rs._run_step(nova, "sc:0", _step("Given", '打开 "https://example.com"'), 1)
+    assert "reportRefs" not in _done(captured)

@@ -271,10 +271,10 @@ async function main(): Promise<number> {
     }
 
     // 归集原生报告（ADR 0027 reportRefs）：destroy 后 reportFile finalize，Midscene 出 1 个 html/worker（scope 级）
-    // ref 用 file:// URI（ADR 0027：本地产物统一前缀）；agent.reportFile 是绝对路径。
+    // kind=report（产物类型；粒度由挂在 scope_done 表达，ADR 0027）；ref 用 file:// URI；agent.reportFile 是绝对路径。
     await agent.destroy().catch(() => {});
     if (agent.reportFile) {
-      reportRefs.push({ kind: "scope", ref: `file://${agent.reportFile}`, label: "Midscene report" });
+      reportRefs.push({ kind: "report", ref: `file://${agent.reportFile}`, label: "Midscene report" });
     }
   } catch (e) {
     await cleanup();

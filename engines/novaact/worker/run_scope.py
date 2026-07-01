@@ -99,13 +99,13 @@ def _cost_from_result(r) -> dict | None:
     return {"time_worked_s": tw}
 
 
-def _collect_traj(r, traj_sink: list[str]) -> None:
+def _collect_traj(r, sink: list[str]) -> None:
     """从 act/act_get 结果的 metadata 收集本次 act 的 trajectory **HTML** 路径（ADR 0027）。
 
     Nova 每次 act 出一对产物：`act_<id>_<prompt>_trajectory.json`（数据）+ `act_<id>_<prompt>.html`
     （人看的轨迹页）。metadata.trajectory_file_path 给的是 .json；归集索引要指向人能看的 .html，
     故从 json 路径推导 html（去 `_trajectory.json` 加 `.html`）。html 不存在则回退 json。
-    收集进 traj_sink，scenario_done 边界聚合成 act 级 reportRefs（对称 Midscene 的 scope 级）。
+    收集进 sink（=本 step 的累积器）；step_done 边界报成 step 级 reportRefs（kind=trajectory，下沉，ADR 0027）。
     """
     md = getattr(r, "metadata", None)
     p = getattr(md, "trajectory_file_path", None) if md else None
@@ -118,14 +118,28 @@ def _collect_traj(r, traj_sink: list[str]) -> None:
             p = html
     # 绝对化兜底：reportRef 是 file://<path>，相对路径会成坏 URI（host 被当成路径首段）且跨进程
     # cwd 歧义。SDK 通常已回绝对路径（cli 传绝对 NOVA_LOGS_DIR）；此处再 abspath 一道，防御相对漏网。
-    traj_sink.append(os.path.abspath(p))
+    sink.append(os.path.abspath(p))
 
 
-def _run_step(nova, scenario_id: str, step: dict, traj_sink: list[str], votes_n: int) -> str:
-    """派发执行一个 step，吐 step_done 事件，返回该 step 的 status（passed/failed/error）。
+def _traj_refs(step_traj: list[str]) -> list[dict]:
+    """本 step 收集的 trajectory 路径 → step 级 reportRefs（kind=trajectory，ADR 0027 下沉）。
 
-    traj_sink：本 scenario 的 trajectory 路径累积器（每次 AI act 收一个，ADR 0027）。
+    一个 step 可能多次 act（尤其 N 票 AI 断言）→ 多个 trajectory；label 仅在多个时编号。空列表 → 空。
+    """
+    n = len(step_traj)
+    return [
+        {"kind": "trajectory", "ref": f"file://{p}",
+         "label": (f"trajectory {i + 1}" if n > 1 else "trajectory")}
+        for i, p in enumerate(step_traj)
+    ]
+
+
+def _run_step(nova, scenario_id: str, step: dict, votes_n: int) -> str:
+    """派发执行一个 step，吐 step_done 事件（带本 step 的 trajectory reportRefs），返回 status。
+
     votes_n：AI 断言（Then）投票次数（来自 job.assertionVotes，ADR 0014）；1=不抖动检测。
+    trajectory 收集在**本 step 局部**（每次 AI act 一个），随该 step 的 step_done 报出 step 级 reportRefs
+    （ADR 0027 下沉：act 挂到其所属 step，不再聚合到 scenario 级）。确定性命中/URL 导航步不调 act、无 trajectory。
 
     派发优先级（ADR 0022/0020/0024）：
       ① 确定性注册表命中（test engineer 注册的精确 handler，不投票、可复现）
@@ -135,6 +149,7 @@ def _run_step(nova, scenario_id: str, step: dict, traj_sink: list[str], votes_n:
     idx = step["index"]
     keyword = step["keyword"]
     text = step["text"]
+    step_traj: list[str] = []  # 本 step 的 trajectory 路径（act 逐个收进来）
 
     emit({"type": "step_started", "scenarioId": scenario_id, "stepIndex": idx})  # step 时长起点
     try:
@@ -179,7 +194,7 @@ def _run_step(nova, scenario_id: str, step: dict, traj_sink: list[str], votes_n:
                 c = _cost_from_result(r)  # 每票各自的原生量（Nova 每 act 独立报，对称累加而非覆盖）
                 if c and c.get("time_worked_s") is not None:
                     tw_total += c["time_worked_s"]
-                _collect_traj(r, traj_sink)
+                _collect_traj(r, step_traj)  # N 票各一个 trajectory，都挂本 step
             yes = sum(votes)
             passed = yes > votes_n / 2
             ev = {
@@ -189,6 +204,8 @@ def _run_step(nova, scenario_id: str, step: dict, traj_sink: list[str], votes_n:
             }
             if tw_total > 0:
                 ev["cost"] = {"time_worked_s": tw_total}  # 全 N 票合计
+            if step_traj:
+                ev["reportRefs"] = _traj_refs(step_traj)  # step 级 trajectory（ADR 0027 下沉）
             if not passed:
                 ev["errorType"] = "assertion_failed"
                 ev["message"] = f"AI 断言未过多数票（{yes}/{votes_n}）：{text}"
@@ -197,27 +214,32 @@ def _run_step(nova, scenario_id: str, step: dict, traj_sink: list[str], votes_n:
 
         # When / Given（非 URL）→ AI 动作（无 votes）
         r = nova.act(_instruction(text, step))
-        _collect_traj(r, traj_sink)
+        _collect_traj(r, step_traj)
         ev = {"type": "step_done", "scenarioId": scenario_id, "stepIndex": idx, "status": "passed"}
         cost = _cost_from_result(r)
         if cost:
             ev["cost"] = cost
+        if step_traj:
+            ev["reportRefs"] = _traj_refs(step_traj)  # step 级 trajectory（ADR 0027 下沉）
         emit(ev)
         return "passed"
 
     except Exception as e:
         # 失败的 act 最需要看 trajectory——Nova 的 ActError 也带 metadata.trajectory_file_path
         # （SDK 在 finally 已写盘），同一 helper 收集（ADR 0027：失败 act 的产物不丢）。
-        _collect_traj(e, traj_sink)
+        _collect_traj(e, step_traj)
         # 诊断分类细化（ADR 0028）：act 中途若是网络瞬时故障（CDP 闪断等），标 network_error 比笼统
         # engine_error 更准——便于排查"是网络抖动还是 AI 真出错"。**仅分类、不触发重试/恢复**：act 不幂等，
         # schedule 的 job 级重试要求「会话未起（零 step_done）」，而此处 step_started 早已 emit、saw_step=True，
         # 双条件 AND 天然不满足；且本失败走 step_done 事件流（非退出码 80），core 侧 is_network=False。
         # 故"act 中途恢复"仍是 defer（ADR 0028），这里只把失败原因记准。
-        emit({
+        ev = {
             "type": "step_done", "scenarioId": scenario_id, "stepIndex": idx,
             "status": "error", "errorType": _classify_act_error(e), "message": f"{type(e).__name__}: {e}",
-        })
+        }
+        if step_traj:
+            ev["reportRefs"] = _traj_refs(step_traj)  # 失败 act 的 trajectory 最该留（ADR 0027/0028）
+        emit(ev)
         return "error"
 
 
@@ -419,17 +441,10 @@ def main() -> int:
                 for sc in scenarios:
                     sid = sc["id"]
                     emit({"type": "scenario_started", "scenarioId": sid})
-                    traj: list[str] = []  # 本 scenario 的 trajectory 路径累积（ADR 0027）
-                    statuses = [_run_step(nova, sid, st, traj, votes_n) for st in sc["steps"]]
-                    # act 级 reportRefs：每个 trajectory 一条，经 scenario_done 回传（对称 Midscene scope 级）
-                    report_refs = [
-                        {"kind": "act", "ref": f"file://{p}", "label": f"trajectory {i + 1}"}
-                        for i, p in enumerate(traj)
-                    ]
-                    emit({
-                        "type": "scenario_done", "scenarioId": sid,
-                        "status": _aggregate(statuses), "reportRefs": report_refs,
-                    })
+                    # trajectory 现由每个 _run_step 挂进各自 step_done 的 step 级 reportRefs（ADR 0027 下沉）——
+                    # 不再在 scenario 级聚合；scenario_done 不带 reportRefs（协议字段保留、向后兼容）。
+                    statuses = [_run_step(nova, sid, st, votes_n) for st in sc["steps"]]
+                    emit({"type": "scenario_done", "scenarioId": sid, "status": _aggregate(statuses)})
 
     try:
         with wf:
@@ -465,7 +480,20 @@ def main() -> int:
         log("worker: connect retries exhausted, exiting with network code")
         return EX_WORKER_NETWORK
 
-    emit({"type": "scope_done", "scopeId": scope["id"], "sessionId": session_id})
+    # scope 级 reportRef：Nova SDK 落的 session_summary.json（session_id/time_worked_s/act_count 等）作
+    # kind=summary（引擎特有富信息载体、非人看报告，经不透明指针给 agent，ADR 0027）。SDK 把它落在
+    # NOVA_LOGS_DIR/<session_id>/session_summary.json（多拼一层 session_id 子目录），且仅 act_count>0 时写——
+    # 故文件存在才带（纯确定性/零耗时 scope 不写）。用 os.environ 重取 base（logs_dir 是 _run_session 局部）。
+    scope_refs: list[dict] = []
+    base = os.environ.get("NOVA_LOGS_DIR")
+    if base and session_id:
+        summary = os.path.abspath(os.path.join(base, session_id, "session_summary.json"))
+        if os.path.exists(summary):
+            scope_refs.append({"kind": "summary", "ref": f"file://{summary}", "label": "Nova session summary"})
+    ev = {"type": "scope_done", "scopeId": scope["id"], "sessionId": session_id}
+    if scope_refs:
+        ev["reportRefs"] = scope_refs
+    emit(ev)
     return 0
 
 
