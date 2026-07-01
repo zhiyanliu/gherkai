@@ -184,11 +184,23 @@ Map 形状下 `update_job_state` 各 scope 互不干扰、天然支持单元素�
 
 **boto3 依赖 = optional extra（方案 A）**：boto3 进 `[project.optional-dependencies].aws`（core 主依赖仍只 gherkin，缺 boto3 时只有云端 adapter 用起来失败、core 主体可轻量 import）——守 [0016](./0016-execution-architecture-core-lib-run-model.md) 窄腰。
 
+## 决定七：cli 接线 cloud 后端（offloader 生产默认挂载 + 失败退出码分层）
+
+cli `--backend {local,cloud}` 的组合根装配（local 分支留 `__main__`、cloud 下沉 `compose`、两种 boto3 句柄、单桶复用 report-dir、artifacts URI 化）见 [0016](./0016-execution-architecture-core-lib-run-model.md)「cli backend 选择」节。这里只记两条与实时写落库形态强相关的决策：
+
+**offloader 生产默认挂载、不做可选关闭 flag**：cloud 后端下 `S3StepArgumentOffloader` 默认挂（复用同一 `--s3-bucket`）。DDB 400KB 是协议**硬限**、不是调优空间——决定六把 offloader 设成「可选注入（`None`→内联）」是为 **core 单测省一层 S3 + 旧 run 兼容**，**不是给生产用户选「要不要正确」**。不引入 `--no-offload`：真出现「明确不带大 argument、想省一次 S3 往返」再纯加法加。**trade-off**：牺牲「小 run 省一次 S3 往返」换「大 docString/dataTable 不静默撞 400KB 崩」。
+
+**cloud 失败退出码分层——切分线 = run 是否已真正开跑**（对齐现有 `0 passed / 1 failed|error / 2 配置错` 约定，全走 stderr、绝不裸 traceback）：
+- **退 2（还没开跑就拒绝，与 `assertion_votes<1` 同类）**：缺 table/bucket（入口显式校验非空——否则 `None` 流进 adapter 到运行时才 botocore 报错）；缺 boto3（`build_cloud_stores` 的 `import boto3` 抛 ImportError → 提示装 `core[aws]`）；`begin()`（schedule 前第一处真实云端写）抛 botocore 异常（表/桶不存在、凭证/region 缺）。**不做主动预检**（`head_bucket`/`describe_table` 多一次往返，且预检权限≠写权限会造假信号）——以 `begin` 为天然预检点（它早于起 worker、不烧钱）。
+- **退 1（run 已开跑，error 级）**：`schedule()` 运行期内 `on_event`/`on_job_complete` 抛 botocore 异常（跑到一半 DDB/S3 挂）。决定三已定 `on_job_complete` 抛异常时 schedule 先 stop 所有 worker 再重抛，故会冒泡出 `schedule()`；cli 在 `need_cloud` 时给单一 `schedule()` 调用点包一层 `except (ClientError, BotoCoreError)`（**不复制两份调用**，避免回调/opts 透传漂移弄坏参数映射测试）。
+- **已知不一致（接受、不加预检消除）**：桶名打错时——若该 run 有 docString/dataTable（offloader 在 `begin` 就写 S3）则 `begin` 即暴露→退 2；若无 offload 内容，S3 首次写在运行期首个 `save_job_result`→退 1。即「同一桶名错」因是否有 offload 内容分裂成退 2/退 1。`begin` 只保证「DDB 可达 + 有 offload 内容时 S3 可达」，不是对纯 S3 的完整预检点。
+
 ## 现在做 / 留口子
 
 - **决定一~五（实时写接缝，已落地）**：`JobSink` port + `schedule.on_job_complete`/`on_event`；`core/persist.py` 的
   `RunPersistence`（单一 store 锁）；RunStore 三增量方法的 local adapter；`RunState.jobs` 改 Map；cli 接 `RunPersistence`（含 RUNNING 中间态）。
 - **决定六（云端 adapter）— 已实装**：`DynamoDBRunStore` + `S3ResultStore` + `S3ReportStore` + `S3StepArgumentOffloader`，落库形态如上，moto 全程 mock 单测、行为对拍 local——坐实「换后端 core 不动」。尚未接进组合根（cli `--backend` 分片）。
+- **决定七（cli 接线 cloud）**：`--backend {local,cloud}` 组合根装配 + offloader 生产默认挂载 + 失败退出码分层（详见本节 + [0016](./0016-execution-architecture-core-lib-run-model.md)）。
 - **留口子不做**：多写者 owner/lease（当前 run_id 由组合根独立生成、提交即新，单写者，无并发同 run 写）；续跑/部分重跑的 attempt 维度（save_job_result 整行覆盖，未来在 SK/属性引入 version）。
 
 ## 重议

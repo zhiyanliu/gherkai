@@ -111,6 +111,30 @@ core/
 
 这样无状态化、上云、WebUI 接入都成了"加 adapter + 组合根换注入"，核心与接口不动。
 
+### cli `--backend {local,cloud}`：组合根按开关注入两套 store（兑现「换 adapter 核心不动」）
+
+云端 store adapter（DDB/S3，[0030](./0030-realtime-persistence-seam.md) 决定六）落地后，cli 加 `--backend {local,cloud}`（默认 `local`，仅 `run` 子命令——`plan` 纯本地不落库）在组合根按开关选注入哪套 adapter。`RunPersistence`/`schedule` 只认 Store **port**，local↔cloud 切换**零改** core——这正是本 ADR「选实现=组合根注入」的第一次真实兑现。
+
+**单一开关换齐三层、第一版不开混搭**：cloud 一次把 RunStore→DDB、ResultStore/ReportStore→S3（+ 挂 offloader）全换。理由：三层后端不对等（上文已证不存在 `S3RunStore`/`DDBReportStore`），无有意义的混搭矩阵；「Local store + Fargate worker」是 **store⊥worker 正交轴**（上文「worker 产物 ⊥ store」）、非 store 层内部混搭，不需要 `--run-backend`/`--result-backend` 拆开（那是提前盖机器 + 组合爆炸测试负担）。
+
+**装配落点分裂（被测试护栏逼出的务实取舍，非纯度选择）**：
+- **local 分支留在 `__main__`**：直接 new 模块级 `LocalRunStore/LocalResultStore/LocalReportStore`（签名 `(root)→store`）。这三个名字是既定的**测试注入点**（cli 测试 `monkeypatch m.Local*` 注入 fake 验实时写序）；若把 local 分支挪进 `compose`，闭包绑到 compose 自己的 import、patch 打不中，且 `__main__`→`compose` 反向引用成循环依赖。
+- **cloud 分支下沉 `compose.build_cloud_stores`**：`import boto3` 惰性收在函数体内（cli 主依赖不含 boto3，走 `cli[aws]→core[aws]` extra；纯 local 路径绝不触发 import）。造 boto3 句柄抽成可 patch 的小钩子，cli 测试**只验接线层**（backend=cloud 构造了正确 adapter + 参数正确 + offloader 已挂），不引 moto——adapter 行为已由 core 包 moto 全覆盖，cli 再测是重复且破窄腰。
+- **注入点约定**：local patch `m.Local*`、cloud patch `compose` 的 boto3 钩子——两皮各测各的注入点。
+- **两种 boto3 句柄别混**（静默出错高危）：`DynamoDBRunStore` 吃 `resource.Table`（内部 `self._table.put_item`/`.meta.client`），三个 S3 件套（ResultStore/ReportStore/offloader）**共享一个** `client`。喂错句柄类型运行时才 AttributeError、moto/cli 都测不到。
+- **trade-off**：local 分支不能迁进 compose（否则失 monkeypatch 命中）牺牲了「组合根装配全在 compose」的语义纯度，换零回归——接受。
+
+**cloud 配置来源 + 落点语义**：
+- 表/桶经参数注入（`--ddb-table` 兜底 `AWS_DDB_TABLE`、`--s3-bucket` 兜底 `AWS_S3_BUCKET`）；region/凭证/profile **代码零介入**，走 boto3 默认解析链（组合根不持 IAM 知识、不硬编码凭证；约束已定 us-east-1 + default profile）。adapter 假定表/桶已存在（建表建桶归 IaC）。（`AWS_DDB_TABLE`/`AWS_S3_BUCKET` 与集成测试 `tests/README.md` 用的同名——语义一致「哪张表/哪个桶」、不同进程不冲突。）
+- **单 S3 桶 + `--report-dir` 复用为 key 前缀**：Result(`jobs/`)、Report(`index.html`)、offloader(`args/`) 三者 key 前缀天然不撞，共用一个桶最简；不新增 `--s3-prefix`——local 的 `<report-dir>/<run_id>/…` 与 cloud 的 `s3://bucket/<report-dir>/<run_id>/…` 布局工整对应。**分隔符规范化**：`--report-dir` 默认 `reports`（无尾 `/`），组合根在传给 S3 adapter 前补 `/`（非空且不以 `/` 结尾则补），否则 `S3*Store` 拼 `f"{prefix}{run_id}"` 会静默生成粘连 key `reports<run_id>/…`。真需分桶（report 公开 serve vs result 私有的生命周期策略）再拆，加法不返工。
+- **`--backend cloud --no-report` 合法**：`--no-report` 既有语义=零落盘裸跑、与 backend 正交；所有云端校验/import/异常 gated 在 `need_cloud = do_report and cloud`，此组合跳过一切云端检查（保「三个 store 一次不构造」的逃生舱）。
+
+**artifacts 落点指针按 backend 分支组装、全 URI 化（不硬编码本地路径「说谎」）**：`--json` 的 `artifacts` dict（`report_index`/`run_meta`/`run_state`/`jobs_dir`）现状硬编码本地文件路径，cloud 下这些数据落 DDB/S3、本地路径不存在——必须按 backend 分支：
+- local：四项均 `file://` 完整路径（从裸路径升级为 URI，与 cloud 同形工整）。
+- cloud：`report_index`（取 `finalize()` 返回值）/`jobs_dir` = `s3://…`；`run_meta`/`run_state` = 自造 `ddb://<table>/<run_id>#META|#STATE` 诊断指针（与 s3:// 同形、纯展示、不被任何代码解析）。
+- 指针由 `compose.build_cloud_stores` 连同三个 store 实例一起返回（已知 table/bucket/prefix），`_cmd_run` 直接填——**不给 Store port 加 `describe_artifacts`**（凭空扩接口面、6 个 adapter 全要实现，过度设计）。
+- `finalize()` 返回 None（`S3ReportStore.write` 失败被 `RunPersistence` 隔离，[0030](./0030-realtime-persistence-seam.md) 决定三）时 `report_index` 键不放裸 `'None'`——省略该键、可选把 `_report_error` 打一行 stderr。
+
 ## 工程布局：core / cli / engines 三者平级对标
 
 **当前实装态（v1.0 进行中）**标在各行右侧 ✅/⬜：core/ 已建、cli/ 已建、engines/ 已迁、两个引擎 worker 已落地。
