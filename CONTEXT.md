@@ -44,8 +44,8 @@ _Avoid_: 把某一引擎专属的 spike/文档/代码放到根级或另一引擎
 _Avoid_: 把 AI 断言当成"无需治理就可信"——它为主，但必须配抖动监控。
 
 **报告产物模型 (Report artifact model)**:
-两个引擎的报告形态根本不同：**Midscene 出单一 `report.html`**（含每步截图+AI 决策+坐标，= scope 级）；**Nova Act 出多个分散的 trajectory HTML**（每次 `act`/`act_get` 一个，= act 级）。worker 经 0024 协议把产物**指针**报回 core（`reportRefs.ref`，core 内类型 `ResourceUri`＝带 scheme 的统一资源指针：本地 `file://`、未来云端 `s3://`/`https://`，故非裸本地路径；字段形状见 ADR 0024），core **不透明搬运**（不 stat/不 fetch/不打开 ref）。同一 `ResourceUri` 也是 `ReportStore.write` 的返回类型（统一"资源指针"概念，ADR 0027）。**RunReport（ADR 0027）= 跨引擎归集索引**：`ReportStore` 把 `RunResult` 归集成 `manifest.json`（机器可读）+ `index.html`（人可导航入口），**不解析/不融合原生产物内容**，只索引/链接（cli 每次 run **默认生成**，`--no-report` 跳过、`--materialize` 拷成自包含目录）。新引擎报任意 `kind` 零改 core（永不按 kind 分支）。
-_Avoid_: 笼统说「两个引擎都出报告」而忽略其形态/落点/粒度（scope vs act）的根本不同；把 RunReport 当成「解析两个引擎 html 融合成一个大报告」（它只归集索引、不碰产物内容）；以为 core 会按 `kind`/引擎分支处理产物（永不——扩展性契约，ADR 0027）。
+两个引擎的报告形态根本不同：**Midscene 出单一 `report.html`**（含每步截图+AI 决策+坐标，整 scope 一份，`kind=report`、挂 scope 级）；**Nova Act 每次 `act`/`act_get` 出一个 trajectory HTML**（`kind=trajectory`、挂到其所属 **step** 级）+ 一份 `session_summary.json` 数字汇总（`kind=summary`、挂 scope 级）。worker 经 0024 协议把产物**指针**报回 core（`reportRefs.ref`，core 内类型 `ResourceUri`＝带 scheme 的统一资源指针：本地 `file://`、未来云端 `s3://`/`https://`，故非裸本地路径；字段形状见 ADR 0024），core **不透明搬运**（不 stat/不 fetch/不打开 ref）。**`kind` 表产物类型（report/trajectory/summary/未来 video/trace），粒度由 report_ref 挂在 step/scenario/scope 哪级表达——二者正交**。同一 `ResourceUri` 也是 `ReportStore.write` 的返回类型（统一"资源指针"概念，ADR 0027）。**RunReport（ADR 0027）= 跨引擎归集索引**：`ReportStore` 把 `RunResult` 归集成 `manifest.json`（机器可读）+ `index.html`（人可导航入口），**不解析/不融合原生产物内容**，只索引/链接（cli 每次 run **默认生成**，`--no-report` 跳过、`--materialize` 拷成自包含目录）。新引擎报任意 `kind` 零改 core（永不按 kind 分支）。
+_Avoid_: 笼统说「两个引擎都出报告」而忽略其形态/落点的根本不同；把 `kind` 当粒度维度（它是产物类型，粒度由挂载层级表达）；把 RunReport 当成「解析两个引擎 html 融合成一个大报告」（它只归集索引、不碰产物内容）；以为 core 会按 `kind`/引擎分支处理产物（永不——扩展性契约，ADR 0027）。
 
 ## 产品形态（v1.0）
 

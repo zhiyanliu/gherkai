@@ -4,7 +4,7 @@
 
 ## 决定：RunReport = 归集索引，不是内容融合
 
-两个引擎的**原生**报告形态根本不同且不可统一（[0010](./0010-spike-as-apples-to-apples-benchmark.md) / CONTEXT「报告产物模型」）：Midscene 出单个 `report.html`（scope 级），Nova 出多个 trajectory（act 级）；未来引擎可能是录屏、外部 URL、JSON trace。
+两个引擎的**原生**报告形态根本不同且不可统一（[0010](./0010-spike-as-apples-to-apples-benchmark.md) / CONTEXT「报告产物模型」）：Midscene 出单个 `report.html`（整 scope 一份），Nova 每次 act 出一个 trajectory（挂到其所属 step）+ 一份 session 汇总；未来引擎可能是录屏、外部 URL、JSON trace。
 
 **RunReport 不试图解析/重渲染这些产物**——那等于给每个引擎写一个 HTML 解析器，既脆又把 core 锁死到具体引擎。RunReport 是一份**跨引擎、跨产物的统一目录 + 导航入口**：
 
@@ -20,7 +20,7 @@
 头等约束。保证机制：
 
 - **`ReportRef = {kind: str, ref: ResourceUri, label: str | None}`**（取代旧 `{granularity: Literal["scope","act"], path}`）：
-  - `kind` —— **开放字符串**，引擎自报（`scope`/`act`/未来 `video`/`trace`/`har`…）。core/wire/schedule **永不读它的值、永不按它分支**。`scope`/`act` 降为文档化约定常量，非枚举。
+  - `kind` —— **产物类型**（开放字符串，引擎自报）：`report`（完整报告页）/ `trajectory`（轨迹页）/ `summary`（数字汇总）/ 未来 `video`/`trace`/`har`…。core/wire/schedule **永不读它的值、永不按它分支**，是文档化约定常量、非枚举。**「粒度」不由 kind 表达，而由 report_ref 挂在哪一级表达**——`StepResult.report_refs`=step 级、`ScenarioResult.report_refs`=scenario 级、`JobResult.report_refs`=scope 级。（旧值 `scope`/`act` 把粒度混进了 kind——`scope` 是粒度、`act` 是引擎内部动作类型；归正为纯类型维度，粒度交给挂载层级，二者正交、不重复不撞名。）
   - `ref` —— **统一指针 `ResourceUri`**，不假定是本地文件。本地产物用 `file://` 前缀；未来可是 `s3://`/`https://`。core/ReportStore **不 stat、不 fetch、不打开** ref，只索引/链接。
   - `label` —— 可选人类可读锚文本；缺省由消费端回落 `kind`。worker 可全部不报。
 - **铁律**：`core/model.py`、`core/wire.py`、`core/schedule.py` 对 `ReportRef` 永久是**不透明搬运**。任何「按 kind 选 `<video>`/`<iframe>`」之类的渲染分支**只允许出现在 cli / WebUI 皮层**，绝不写回 core。
@@ -107,13 +107,13 @@ class ReportStore(Protocol):
   "run_id": "...",               // 软引用那次 run；完整判定真值在 ResultStore（jobs/*.json），按此 id 取
   "created_at": "...",           // 组合根生成的时间戳（字符串，由调用方传入）
   "report_index": [              // 扁平投影，便于 CI/WebUI 直接遍历
-    { "scope_id": "...", "scenario_id": "..."|null, "engine": "...", "kind": "...",
+    { "scope_id": "...", "scenario_id": "..."|null, "step_index": N|null, "engine": "...", "kind": "...",
       "ref": "...", "href": "...", "label": "..." }
   ]
 }
 ```
 
-- `report_index` 从内存 `RunResult` 树一次投影（含全部 report_refs，**不走逐条 append**）；`scenario_id=null` 表 scope 级 ref。
+- `report_index` 从内存 `RunResult` 树一次投影（含全部 report_refs 三级，**不走逐条 append**）；**粒度由 `scenario_id`/`step_index` 是否为 null 表达**：`scenario_id=null` = scope 级；`scenario_id` 非空且 `step_index=null` = scenario 级；两者都非空 = step 级（同 scenario 多 trajectory 靠 step_index 区分）。
 - 每条含 `ref`（原始不透明指针，原样保留）与 `href`（index.html 实际导航用的链接）：`materialize=False` 时 `href == ref`；`materialize=True` 时 `href` 是拷进 `artifacts/` 的相对路径（`ref` 仍留原值）。
 - index.html 的 run 摘要（status/时长/成本/各 job 上色）**直接用内存 `RunResult`** 渲染，不从 manifest 读（manifest 已不含 result）。
 - **manifest 不内嵌 `to_dict(result)`**（曾考虑、否决）：那会让派生视图承载判定真值副本（与 `ResultStore`/`RunStore` 冗余）；改为软引用 run_id 消除冗余。`serialize` 仍是单一序列化真理源（cli `--json` 与各 store 共用），只是不塞进 manifest。
@@ -129,13 +129,18 @@ class ReportStore(Protocol):
 - 三态上色用内联 `<style>`。
 - **空态**：无任何 report_ref 时仍生成有效的「空报告」index.html（标注本次无原生产物），不报错。
 
-## act 级 reportRef 的回传与归属（Nova 引擎补对称）
+## Nova reportRef 的回传与归属（trajectory 下沉 step 级 + session 汇总）
 
-Nova trajectory 此前落系统临时目录（会被清理）、worker 不报。本轮一起补：
+Nova worker 设 `NovaAct(logs_directory=<run 专属持久目录>)`，act/act_get 的 trajectory 落到那里。两类产物、两级归属：
 
-- Nova worker 设 `NovaAct(logs_directory=<run 专属持久目录>)`，act/act_get 的 trajectory 落到那里。
-- worker 在 **`scenario_done`** 边界聚合本 scenario 的 act 产物，报 act 级 `ReportRef`（`kind="act"`，`ref=file://...`）——经 [0024](./0024-worker-core-protocol.md) `ScenarioDone.report_refs`（协议已支持）回传。
-- 与 Midscene 的 scope 级（`scope_done.report_refs`）对称：两个引擎都报、kind 各异、core 不分支。
+- **trajectory 下沉到 step 级**（`kind=trajectory`，经 [0024](./0024-worker-core-protocol.md) `StepDone.report_refs` 回传）：worker 在**每个 step 内**收集本 step 触发的 act 产物（一个 step 可能多次 act → 多个 trajectory），随该 step 的 `step_done` 报出，归到 `StepResult.report_refs`。**为何下沉到 step 而非 scenario**：`act` 是引擎内部动作粒度、比 step 还细,但 step 是 domain 有效概念——把 act 轨迹挂到它所属的 step 下,信息最全（agent 能精确追溯「step N 这次判定 → 这几个 act 轨迹」）,而聚合到 scenario 级会丢失 act↔step 归属。（下沉后 Nova 不再填 `scenario_done.report_refs`——该字段保留、协议向后兼容。）
+- **session 汇总作 scope 级**（`kind=summary`，经 `ScopeDone.report_refs` 回传）：Nova SDK 落的 `session_summary.json`（session_id/time_worked_s/**act_count** 等）作 scope 级 report_ref。它**不是人看报告、是数字汇总**——作为「引擎特有富信息」的载体经不透明指针带给 agent（见下「引擎特有量不进 model」）。
+
+**Midscene 保持 scope 级**（`kind=report`，`scope_done.report_refs`，1 个 report html/worker）。两引擎产物形态/粒度不同（[0010](./0010-spike-as-apples-to-apples-benchmark.md)），core 不分支、不透明搬运——这正是「引擎自报粒度、core 不规定每级都得有」。
+
+### 引擎特有量不进 model：判据是「domain 是否有效」，不是「引擎套不套得上」
+
+`act_count`（scope 内 AI 动作次数）等 **不进 model 通用字段**——判据不是「Midscene 套不上」（那类「某引擎给不出→null」的量如 `time_worked_s` 照样进 model），而是 **`act` 是 Nova 引擎内部实现粒度、非我们 domain 的有效概念**（domain 有效的是 step；一个 step 展开成几次 act 是引擎内部细节）。model 只收 domain 有效的通用概念，引擎特有的内部量留在产物文件（session_summary.json）里、经 `kind=summary` 的不透明指针带出给 agent——这样 model 保持引擎无关的通用契约不被撑破，富信息也不丢。
 
 ## 纯确定性用例 → 空 report_index（已知、合理、非缺陷）
 
@@ -158,7 +163,7 @@ URL、断言了什么」都不落痕（只有 pass/fail 进 result 树）。大�
 
 ## 现在做 / 留口子
 
-- **现在做（v1.0）**：上述 `ReportRef` 改造、`run_id`（归位进 `RunMeta` definition）+ 组合根生成、`JobResult` 经持有的 `Job` 取 `engine`、`ReportStore.write` 接口 + `LocalReportStore`（manifest + index，默认不 materialize）、**两引擎产物对称归位到 run 目录**（Nova `NOVA_LOGS_DIR`→trajectory、Midscene `MIDSCENE_RUN_DIR`→report.html）+ act 级 reportRefs、cli 默认生成 RunReport（`--no-report` 跳过、`--report-dir` 配落点、`--materialize` opt-in）、单测 + 两个引擎真 e2e。
+- **现在做（v1.0）**：上述 `ReportRef` 改造、`run_id`（归位进 `RunMeta` definition）+ 组合根生成、`JobResult` 经持有的 `Job` 取 `engine`、`ReportStore.write` 接口 + `LocalReportStore`（manifest + index，默认不 materialize）、**两引擎产物对称归位到 run 目录**（Nova `NOVA_LOGS_DIR`→trajectory、Midscene `MIDSCENE_RUN_DIR`→report.html）+ reportRefs（Midscene `kind=report` scope 级 / Nova `kind=trajectory` 下沉 step 级 + `kind=summary` scope 级）、cli 默认生成 RunReport（`--no-report` 跳过、`--report-dir` 配落点、`--materialize` opt-in）、单测 + 两个引擎真 e2e。
 - **留口子不实现**：
   - **确定性 step 产物可观测性**：让 `@deterministic` handler 可选地产一个轻量产物（当时 URL / 截图 / 检查描述），使纯确定性用例的 RunReport 也有内容可看。本轮判定真值在 result 树已够；产物可观测另开一轮（与 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md) 确定性 step 设计一并演进）。
   - **S3 materialize 的完整实现**（把产物拉进 `s3://…/<run_id>/artifacts/` 求自包含）：`S3ReportStore` 本体 v1.1 已建，但其 `materialize` 第一版当 no-op（`href==ref`，目标语义见 [0029](./0029-fargate-engine-artifacts-to-s3.md)）；完整 materialize 待后续。按 `kind` 的富渲染（`<video>`/`<iframe>`，皮层将来做）；trajectory 内部结构化提取。
