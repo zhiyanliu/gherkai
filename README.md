@@ -10,19 +10,19 @@
 
 三层链路 + v1.0 核心库均已在真实 AWS 账号端到端验证：
 
-| 能力 | 内容 | 状态 |
-|------|------|------|
-| 双引擎执行 | 同一份 `.feature` → 两个引擎薄 worker（cli 经 `@engine` tag 路由） | ✅ 端到端真跑 |
-| 云端浏览器 | 两个引擎都接 AgentCore Browser（各自一个会话，CDP 驱动） | ✅ |
-| 核心库 | parse + scope 分组 + schedule 调度 + 4 ports（Engine/Run/Result/ReportStore）+ 实时写编排（RunPersistence，ADR 0030） | ✅ 单测覆盖 |
-| 云端 store | RunStore→DynamoDB、Result/ReportStore→S3（+ StepArgument offload 解 DDB 400KB 限），boto3 走可选 `core[aws]`（ADR 0030 决定六） | ✅ moto 单测（对拍 local，未接 cli）|
-| 投票治理 | AI 断言可配 N 次取多数票（`--assertion-votes`，治抖动，ADR 0014） | ✅ |
-| RunReport | 跨引擎归集索引（manifest + index，不融合产物，ADR 0027） | ✅ |
-| 网络韧性 | 建连两层重试 + network_error 分类 + SIGTERM 会话泄漏根治（ADR 0028） | ✅ |
+| 能力       | 内容                                                                                                    | 状态                                                            |
+|------------|---------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------|
+| 双引擎执行 | 同一份 `.feature` → 两个引擎薄 worker（cli 经 `@engine` tag 路由）                                        | ✅ 端到端真跑                                                    |
+| 云端浏览器 | 两个引擎都接 AgentCore Browser（各自一个会话，CDP 驱动）                                                   | ✅                                                               |
+| 核心库     | parse + scope 分组 + schedule 调度 + 4 ports（Engine/Run/Result/ReportStore）+ 实时写编排（RunPersistence） | ✅ 单测覆盖                                                      |
+| 云端 store | 状态落 DynamoDB、判定结果与报告落 S3（+ StepArgument offload 解 DDB 400KB 限），boto3 走可选 `core[aws]`    | ✅ 已接 cli（`--backend cloud`）、真 AWS 端到端；moto 单测对拍 local |
+| 投票治理   | AI 断言可配 N 次取多数票（`--assertion-votes`，治抖动）                                                    | ✅                                                               |
+| RunReport  | 跨引擎归集索引（manifest + index，不融合产物）                                                             | ✅                                                               |
+| 网络韧性   | 建连两层重试 + network_error 分类 + SIGTERM 会话泄漏根治                                                | ✅                                                               |
 
-> **承接 v0.x 顺延项（待真实业务系统）**：≥3 真实用例 QA 零代码验收 + 破例清单（ADR 0016）——当前用骨架用例（wikipedia/example.com）验证方向，真实系统验收顺延。
+> **承接 v0.x 顺延项（待真实业务系统）**：≥3 真实用例 QA 零代码验收 + 破例清单——当前用骨架用例（wikipedia/example.com）验证方向，真实系统验收顺延。
 
-> **v1.1 云端进行中**：云端 store adapter（DynamoDB/S3）已建、moto 全程 mock 单测、行为对拍 local（ADR 0030 决定六）——尚未接进 cli（`--backend` 是独立分片）、未连真 AWS 端到端。执行面 Fargate/ECS 待建（ADR 0017 倾向）。
+> **v1.1 云端进行中**：云端 store adapter（DynamoDB/S3）已建、已接进 cli（`--backend {local,cloud}`）、真 AWS 端到端跑通（判定真值落 DynamoDB+S3、错误分层已验），moto 单测行为对拍 local。配置与退出码分层见 [`cli/README.md`](./cli/README.md)。执行面 Fargate/ECS 仍待建。
 
 ## 架构速览
 
@@ -31,7 +31,7 @@
               │
 ② 核心库   core/（Python）：parse → scope 分组 → schedule 调度   ← 窄腰，零引擎依赖（ADR 0016）
    前端    cli/（run / plan / list-engines）= 组合根，注入引擎
-              │  对每个 scope spawn 一个薄 worker，讲 0024 协议
+              │  对每个 scope spawn 一个薄 worker，讲协议（ADR 0024）
 ③ 执行层   Midscene worker(TS)  ┃  Nova Act worker(Python)   ← 两个独立 AI 引擎，平级
    大脑    Qwen3-VL@Bedrock     ┃  nova-act-latest
    鉴权    SigV4 自签            ┃  IAM @workflow
@@ -88,9 +88,16 @@ AWS_REGION=us-east-1 uv run python -m cli run ../features/wikipedia_generic.feat
 
 # 列可用引擎（不烧钱）
 uv run python -m cli list-engines
+
+# ③ 云端落库（可选）：状态落 DynamoDB、判定真值与报告落 S3（表/桶需预先建好）
+AWS_REGION=us-east-1 uv run python -m cli run ../features/engine_routing.feature \
+  --backend cloud --ddb-table <你的表> --s3-bucket <你的桶>
 ```
 
-落盘到 `cli/reports/<run_id>/`：判定真值（`jobs/`）+ 控制面（`run_meta.json`/`run_state.json`）+ RunReport（`index.html` 人看入口 + `manifest.json`）。**边跑边写**（ADR 0030）：run 开始即落 definition + 初始态，每个 scope 起跑刷 RUNNING、完成即落判定，最后 finalize 总状态——可「提交即返回 runId、之后轮询看进度」。详见 [`cli/README.md`](./cli/README.md)。**先 `plan` 后 `run`**——run 真烧钱，plan 是纯本地预检。
+**默认 local**：落盘到 `cli/reports/<run_id>/`：判定真值（`jobs/`）+ 控制面（`run_meta.json`/`run_state.json`）+ RunReport（`index.html` 人看入口 + `manifest.json`）。
+**边跑边写**：run 开始即落 definition + 初始态，每个 scope 起跑刷 RUNNING、完成即落判定，最后 finalize 总状态——可「提交即返回 runId、之后轮询看进度」。详见 [`cli/README.md`](./cli/README.md)。
+**先 `plan` 后 `run`**——run 真烧钱，plan 是纯本地预检。
+**`--backend cloud`**（可选）：把上面这套落到 DynamoDB（状态）+ S3（判定真值与报告）而非本地目录。表/桶需先用你的 IaC / `aws` cli 建好（框架假定已存在）；不给 `--ddb-table/--s3-bucket` 可用 `AWS_DDB_TABLE/AWS_S3_BUCKET` 兜底；凭证/region 走 boto3 默认链（可加 `--profile/--region`）。云端配置、退出码分层、建表建桶命令见 [`cli/README.md`](./cli/README.md)。
 
 两个引擎读的是**同一份** `features/` 下 `.feature`（通用 step 风格，QA 只写自然语言）。
 

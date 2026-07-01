@@ -202,8 +202,8 @@ cli `--backend {local,cloud}` 的组合根装配（两后端都下沉 `compose` 
 
 - **决定一~五（实时写接缝，已落地）**：`JobSink` port + `schedule.on_job_complete`/`on_event`；`core/persist.py` 的
   `RunPersistence`（单一 store 锁）；RunStore 三增量方法的 local adapter；`RunState.jobs` 改 Map；cli 接 `RunPersistence`（含 RUNNING 中间态）。
-- **决定六（云端 adapter）— 已实装**：`DynamoDBRunStore` + `S3ResultStore` + `S3ReportStore` + `S3StepArgumentOffloader`，落库形态如上，moto 全程 mock 单测、行为对拍 local——坐实「换后端 core 不动」。尚未接进组合根（cli `--backend` 分片）。
-- **决定七（cli 接线 cloud）**：`--backend {local,cloud}` 组合根装配 + offloader 生产默认挂载 + 失败退出码分层（详见本节 + [0016](./0016-execution-architecture-core-lib-run-model.md)）。
+- **决定六（云端 adapter）— 已实装**：`DynamoDBRunStore` + `S3ResultStore` + `S3ReportStore` + `S3StepArgumentOffloader`，落库形态如上，moto 全程 mock 单测、行为对拍 local——坐实「换后端 core 不动」。组合根接线见决定七。
+- **决定七（cli 接线 cloud）— 已实装**：`--backend {local,cloud}` 组合根装配（两后端下沉 `compose`，详见 [0016](./0016-execution-architecture-core-lib-run-model.md)「cli backend 选择」节）+ preflight 探活反转（begin 前探表/桶，配置错一律退 2）+ offloader 生产默认挂载 + 失败退出码分层（退 2 未开跑 / 退 1 运行期）。真跑通 local↔cloud 端到端。
 - **留口子不做**：多写者 owner/lease（当前 run_id 由组合根独立生成、提交即新，单写者，无并发同 run 写）；续跑/部分重跑的 attempt 维度（save_job_result 整行覆盖，未来在 SK/属性引入 version）。
 
 ## 重议
