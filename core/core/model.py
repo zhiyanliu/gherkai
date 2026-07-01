@@ -155,7 +155,9 @@ class ReportRef:
     """原生报告产物指针（ADR 0027/0024/0010）。core 永远是**不透明搬运**——不读 kind 值、
     不 stat/fetch ref、不按 kind 分支。新引擎报任意 kind 都零改 core（扩展性契约）。
 
-    kind:  开放字符串，引擎自报。约定值 "scope"/"act"，未来可 "video"/"trace"/"har"…（非枚举）。
+    kind:  **产物类型**（开放字符串，引擎自报）。约定值 "report"（完整报告页）/"trajectory"（轨迹页）/
+           "summary"（数字汇总），未来可 "video"/"trace"/"har"…（非枚举）。**粒度不由 kind 表达**，而由
+           report_ref 挂在 StepResult/ScenarioResult/JobResult 哪一级表达（二者正交，ADR 0027）。
     ref:   统一指针 URI（ResourceUri）——不假定是本地文件。本地产物用 file:// 前缀；未来可 s3://、https://。
     label: 可选人类可读锚文本；缺省由消费端（cli/WebUI 皮层）回落 kind。
     """
@@ -201,6 +203,7 @@ class StepDone:
     cost: Cost | None = None
     error_type: str | None = None  # ErrorType；failed/error 两态均可带
     message: str | None = None
+    report_refs: tuple[ReportRef, ...] = ()  # step 级原生产物（Nova：本 step 的 act 轨迹，kind=trajectory，ADR 0027）
     type: Literal["step_done"] = "step_done"
 
 
@@ -242,6 +245,7 @@ class StepResult:
     duration_ms: float | None = None  # 墙钟时长（性能指标，与 cost 的 time_worked_s 正交）
     votes: Votes | None = None
     error_type: str | None = None
+    report_refs: tuple[ReportRef, ...] = ()  # step 级原生产物指针（Nova：本 step 的 act 轨迹，kind=trajectory，ADR 0027）
 
 
 @dataclass
