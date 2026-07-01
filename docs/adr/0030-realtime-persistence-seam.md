@@ -179,6 +179,7 @@ Map 形状下 `update_job_state` 各 scope 互不干扰、天然支持单元素�
 - **位置区分、非值探测**（关键决策）：offload 后 argument dict 出现 `content_ref`/`rows_ref`（原 `content`/`rows` 键**缺席**），读端按「哪个键在」分支——**绝不**靠「值是不是 s3 协议开头」猜内联/指针（值 sniff 脆：docString 正文本身可能以该前缀开头）。
 - **S3 key 含 step_index**：`<run_id>/args/<quote(scope_id)>/<quote(scenario_id)>/<step_index>/<kind>.json`——否则同 scenario 多 docString 撞 key、静默串值。
 - **对 core 透明**：offload/fetch 是 DdbRunStore 内部对 `serialize` 产物的加工（写端 to_dict 后换指针、读端交 serialize 前消解回内联），serialize/model 零感知；只挂 RunMeta 写/读路径，`update_job_state`/`finalize_run`/`load_run_state` 零 S3 依赖（RunState 无 argument）。
+- **offloader 是可选注入的协作者**（组合根抉择）：DdbRunStore 收一个可选 offloader，`None`（默认）→ argument 原样内联进 `meta_json`（小 run / 单测省一层 S3、少一个桶依赖）；注入 → 搬 S3。读端按「`content_ref`/`rows_ref` 键在不在」分支消解——**不依赖当前是否配了 offloader**，故「配了 offloader 的 store 读无 offloader 写的旧 run」天然兼容（无 `_ref` 键 = 内联，直接透传）。
 - 粒度「一律 offload」（无 size 阈值）；size 阈值是未来的纯加法优化，不预置。
 
 **boto3 依赖 = optional extra（方案 A）**：boto3 进 `[project.optional-dependencies].aws`（core 主依赖仍只 gherkin，缺 boto3 时只有云端 adapter 用起来失败、core 主体可轻量 import）——守 [0016](./0016-execution-architecture-core-lib-run-model.md) 窄腰。

@@ -65,19 +65,29 @@ def _state_scalars(state: RunState) -> dict:
 class DynamoDBRunStore:
     """RunStore 的 DynamoDB 实装（组合根注入 boto3 表资源 + 表名）。行为对拍 LocalRunStore。"""
 
-    def __init__(self, table) -> None:
-        """table：boto3 dynamodb.Table 资源（组合根注入；建表责任在 IaC，adapter 假定已存在）。"""
+    def __init__(self, table, arg_offloader=None) -> None:
+        """table：boto3 dynamodb.Table 资源（组合根注入；建表责任在 IaC，adapter 假定已存在）。
+
+        arg_offloader：可选 S3StepArgumentOffloader（ADR 0030 决定六）。注入则 RunMeta 深树里的
+        docString/dataTable 正文搬 S3、META item 只留指针（解 DDB 400KB 限）；None（默认）则 argument
+        原样内联进 meta_json（小 run / 单测省一层 S3）。只挂 RunMeta 写/读路径，RunState 无 argument、不涉及。
+        """
         _require_boto3()
         self._table = table
+        self._arg_offloader = arg_offloader
 
     # ---- 实时写三段（ADR 0030 决定六）----
 
     def create_run(self, meta: RunMeta, initial_state: RunState) -> None:
         """run 开始：写 META（definition，JSON 字符串）+ STATE（初始运行态，jobs 原生 Map）两 item。"""
+        meta_dict = run_meta_to_dict(meta)
+        if self._arg_offloader is not None:
+            # docString/dataTable 正文搬 S3、META 只留指针（解 DDB 400KB 限，ADR 0030 决定六）
+            meta_dict = self._arg_offloader.offload(meta_dict, meta.run_id)
         self._table.put_item(Item={
             "run_id": meta.run_id,
             "sk": _META_SK,
-            "meta_json": json.dumps(run_meta_to_dict(meta), ensure_ascii=False),
+            "meta_json": json.dumps(meta_dict, ensure_ascii=False),
         })
         self._table.put_item(Item={
             "run_id": initial_state.run_id,
@@ -128,7 +138,11 @@ class DynamoDBRunStore:
         item = resp.get("Item")
         if item is None:
             return None
-        return run_meta_from_dict(json.loads(item["meta_json"]))
+        meta_dict = json.loads(item["meta_json"])
+        if self._arg_offloader is not None:
+            # content_ref/rows_ref 取回、消解回内联，再交 serialize（对 core 透明，ADR 0030 决定六）
+            meta_dict = self._arg_offloader.restore(meta_dict, run_id)
+        return run_meta_from_dict(meta_dict)
 
     def load_run_state(self, run_id: str) -> RunState | None:
         """读回运行态（从 STATE item，jobs 原生 Map → dict[scope_id, JobState]）；不存在返回 None。

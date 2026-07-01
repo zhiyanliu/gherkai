@@ -87,3 +87,19 @@ def s3_report_store(aws):
     from core.adapters.report_store.s3 import S3ReportStore
 
     return S3ReportStore(aws["s3"], aws["bucket"])
+
+
+@pytest.fixture
+def arg_offloader(aws):
+    """配好的 S3StepArgumentOffloader（注入 aws fixture 建好的桶），供 StepArgument offload 测试。"""
+    from core.adapters.run_store.arg_offload import S3StepArgumentOffloader
+
+    return S3StepArgumentOffloader(aws["s3"], aws["bucket"])
+
+
+@pytest.fixture
+def ddb_run_store_offload(aws, arg_offloader):
+    """挂了 S3 offload 的 DynamoDBRunStore：RunMeta 的 docString/dataTable 搬 S3、META 只留指针。"""
+    from core.adapters.run_store.ddb import DynamoDBRunStore
+
+    return DynamoDBRunStore(aws["ddb"].Table(aws["table_name"]), arg_offloader=arg_offloader)
