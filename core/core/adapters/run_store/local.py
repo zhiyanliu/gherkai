@@ -98,3 +98,6 @@ class LocalRunStore:
         if not path.exists():
             return None
         return run_state_from_dict(json.loads(path.read_text(encoding="utf-8")))
+
+    def preflight(self) -> None:
+        """探活 no-op（ADR 0030 决定七）：本地文件后端无「表不存在」问题，目录随写随建。"""

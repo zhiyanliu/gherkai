@@ -64,6 +64,9 @@ class LocalReportStore:
         index_path.write_text(_render_index_html(manifest, result), encoding="utf-8")
         return ResourceUri(index_path.resolve().as_uri())
 
+    def preflight(self) -> None:
+        """探活 no-op（ADR 0030 决定七）：本地文件后端无「桶不存在」问题，目录随写随建。"""
+
     def _collect(self, result: RunResult, run_dir: Path, materialize: bool) -> list[dict]:
         """遍历 result 树，把每个 ReportRef 投影成一条扁平 index 项。
 

@@ -117,6 +117,14 @@ class DynamoDBRunStore:
         except self._table.meta.client.exceptions.ConditionalCheckFailedException as e:
             raise FileNotFoundError(f"finalize_run：STATE 不存在（须先 create_run）：{run_id}") from e
 
+    def preflight(self) -> None:
+        """探活（ADR 0030 决定七）：begin 前探表可达，表不存在/无权限即抛（cli 接住→退 2）。
+
+        用 `table.load()`（= DescribeTable）——轻量、只读、不写数据；表不存在抛 ResourceNotFoundException、
+        无权限抛 AccessDenied，都原样冒泡由组合根 gated except 归到退 2。
+        """
+        self._table.load()
+
     # ---- 一次性写便捷方法（保留，对拍 local）----
 
     def save_run(self, meta: RunMeta, state: RunState) -> None:

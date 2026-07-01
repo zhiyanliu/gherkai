@@ -141,7 +141,7 @@ def event_from_json(d: dict) -> Event:
             session_id=d.get("sessionId"),
             report_refs=_report_refs_from_json(d.get("reportRefs")),
         )
-    raise ValueError(f"未知事件 type: {t!r}（不符合 ADR 0024 协议）")
+    raise ValueError(f"未知事件 type: {t!r}（不符合 worker↔core 协议）")
 
 
 def event_from_line(line: str) -> Event:

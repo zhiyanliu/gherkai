@@ -57,10 +57,14 @@ class RunPersistence:
         self._report_error: str | None = None  # finalize 时 ReportStore.write 失败留痕（派生视图失败不击穿 run）
 
     def begin(self, run_meta: RunMeta, *, started_at: str) -> None:
-        """run 开始（schedule 之前）：写 definition + 初始全 pending 运行态。
+        """run 开始（schedule 之前）：先探活三个 store，再写 definition + 初始全 pending 运行态。
 
         满足 ADR 0027「提交即返回 runId」——definition 必先于跑批存在。各 job 摆 PENDING、总 PENDING、
         started_at 填、ended_at 缺席（finalize 时填）。
+
+        **create_run 前先 preflight（ADR 0030 决定七）**：探底层可达（云端探表/桶，local no-op）。桶/表名错
+        一律在此暴露（不管有无 offload 内容），组合根 gated except 归到退 2——消除「桶名错因是否有 offload
+        内容分裂成退 2/退 1」的不一致。探活在 create_run（真写）之前、早于起 worker，不烧引擎钱。
         """
         initial = RunState(
             run_id=self._run_id,
@@ -72,6 +76,11 @@ class RunPersistence:
             started_at=started_at,
         )
         with self._lock:
+            # 探活先于任何写：三个 store 各探自己的后端（云端探表/桶失败即抛，local no-op）
+            self._run_store.preflight()
+            self._result_store.preflight()
+            if self._report_store is not None:
+                self._report_store.preflight()
             self._run_store.create_run(run_meta, initial)
 
     def on_event(self, event: Event) -> None:

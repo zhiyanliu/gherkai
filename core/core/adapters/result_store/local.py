@@ -48,3 +48,6 @@ class LocalResultStore:
         if not jobs_dir.is_dir():
             return []
         return [job_result_from_dict(json.loads(p.read_text(encoding="utf-8"))) for p in sorted(jobs_dir.glob("*.json"))]
+
+    def preflight(self) -> None:
+        """探活 no-op（ADR 0030 决定七）：本地文件后端无「桶不存在」问题，目录随写随建。"""

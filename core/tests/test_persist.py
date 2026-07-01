@@ -36,14 +36,17 @@ def _recording():
     calls: list = []
 
     class FakeRunStore:
+        def preflight(self): calls.append(("run", "preflight", None))
         def create_run(self, meta, initial_state): calls.append(("run", "create_run", initial_state))
         def update_job_state(self, run_id, js): calls.append(("run", "update_job_state", js))
         def finalize_run(self, run_id, status, ended_at): calls.append(("run", "finalize_run", (status, ended_at)))
 
     class FakeResultStore:
+        def preflight(self): calls.append(("result", "preflight", None))
         def save_job_result(self, run_id, jr): calls.append(("result", "save_job_result", jr.scope_id))
 
     class FakeReportStore:
+        def preflight(self): calls.append(("report", "preflight", None))
         def write(self, run_id, result, *, created_at="", materialize=False):
             calls.append(("report", "write", None))
             return f"file:///fake/{run_id}/index.html"
@@ -106,6 +109,7 @@ def test_finalize_isolates_report_write_failure(tmp_path):
     from core.adapters.result_store.local import LocalResultStore
 
     class BoomReportStore:
+        def preflight(self): pass  # 探活 no-op（真 LocalRunStore/ResultStore 已带 preflight）
         def write(self, run_id, result, *, created_at="", materialize=False):
             raise OSError("磁盘满，报告写不下")
 

@@ -83,3 +83,7 @@ class S3ReportStore:
             ContentType="text/html; charset=utf-8",
         )
         return ResourceUri(f"s3://{self._bucket}/{base}/index.html")
+
+    def preflight(self) -> None:
+        """探活（ADR 0030 决定七）：begin 前探桶可达，桶不存在/无权限即抛（cli 接住→退 2）。"""
+        self._s3.head_bucket(Bucket=self._bucket)

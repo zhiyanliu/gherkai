@@ -77,3 +77,7 @@ class S3ResultStore:
             body = self._s3.get_object(Bucket=self._bucket, Key=key)["Body"].read()
             results.append(job_result_from_dict(json.loads(body)))
         return results
+
+    def preflight(self) -> None:
+        """探活（ADR 0030 决定七）：begin 前探桶可达，桶不存在/无权限即抛（cli 接住→退 2）。"""
+        self._s3.head_bucket(Bucket=self._bucket)
