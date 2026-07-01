@@ -125,23 +125,31 @@ class _AbortProbeEngine:
         if job.scope_id == "crash":
             self.victim_started.wait(timeout=5)  # 先让 victim 起来、吐出首事件，保证它"已 spawn 有现场"
             raise RuntimeError("crash 立刻崩")    # schedule 收到→记 error→set abort_flag
-        # victim：吐首事件（建立现场）→ 等 crash 崩 + abort 生效 → 再吐一个事件，触发事件间 abort 检查
+        # victim：吐首事件（建立现场）→ 等 crash 崩 + abort 生效 → 之后**持续**吐事件（不因 handle.stopped
+        # 提前收尾）。关键（去 flake）：schedule 的 abort 检查在**事件间**（下一次迭代的循环顶），故 abort 生效后
+        # 必须还有下一个事件被 next() 拉出来、触发那次检查 → 命中 abort 分支 → ABORTED。若像原来只吐一个 StepDone
+        # 就自然结束（或一醒来见 stopped 就 return），for 可能在 abort 检查前 StopIteration 正常收尾 → 误判 PASSED。
+        # schedule 命中 abort 分支后 return、不再 next() 本生成器，故不会真跑满 range（1000 只是防御性上限）。
         yield ScenarioStarted(scenario_id="victim:0")
         self.victim_started.set()
         self.crashed.wait(timeout=5)
-        yield StepDone(scenario_id="victim:0", step_index=0, status=Status.PASSED, votes=Votes(3, 3))
+        for i in range(1000):
+            yield StepDone(scenario_id="victim:0", step_index=i, status=Status.PASSED, votes=Votes(3, 3))
 
 
 def test_fail_fast_inflight_job_is_aborted():
     engine = _AbortProbeEngine()
     jobs = [_job("crash"), _job("victim")]
 
-    # 在 schedule 的 sink 路径上侦测 crash 崩后 abort_flag 已 set，再放行 victim 继续吐事件。
-    # crash 崩 → schedule set abort_flag → 但我们没有直接句柄；改用：victim 的 stop 被调用即证明 abort 生效。
+    # 放行信号必须精确对应「abort_flag 已 set」。踩过的坑：crash 崩溃时 schedule 会 self._stop() 停**它自己**的
+    # handle（schedule.py except 分支），这早于主线程 _stop_all() 的 abort_flag.set()——若见任意 stop 就放行，
+    # victim 会在 abort_flag 还是 False 时醒来吐事件、一路查到 False → 误判 PASSED（flaky 根因）。
+    # 正解：只在 **victim 自己的 handle** 被 stop 时才放行——victim 的 handle 只由 _stop_all() 停，那时 abort_flag 必已 set。
     orig_stop = FakeWorkerHandle.stop
 
     def stop_hook(self, grace_period_s):
-        engine.crashed.set()  # victim 的 worker 被 schedule 优雅停 = abort 已生效，放行它再吐一个事件
+        if self is engine.handles.get("victim"):  # 只认 victim 被停（= _stop_all，abort_flag 已 set），不认 crash 自停
+            engine.crashed.set()
         return orig_stop(self, grace_period_s)
 
     FakeWorkerHandle.stop = stop_hook

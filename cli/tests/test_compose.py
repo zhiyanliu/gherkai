@@ -52,3 +52,23 @@ def test_repo_root_contains_core_and_engines():
     repo = compose.repo_root()
     assert (repo / "core").is_dir()
     assert (repo / "engines").is_dir()
+
+
+def test_build_engines_injects_artifact_dirs_symmetrically(tmp_path: Path):
+    # 两引擎对称：产物落点经环境变量注入各自 worker 的 env（ADR 0027 产物归位）。
+    repo = compose.repo_root()
+    nova_dir = tmp_path / "r1" / "nova-trajectories"
+    mid_dir = tmp_path / "r1" / "midscene-run"
+    engines = compose.build_engines(repo, nova_logs_dir=nova_dir, midscene_run_dir=mid_dir)
+    assert engines["novaact"]._env["NOVA_LOGS_DIR"] == str(nova_dir)
+    assert engines["midscene"]._env["MIDSCENE_RUN_DIR"] == str(mid_dir)
+    # 完整继承 os.environ（叠加而非替换）——否则 worker 丢 AWS 凭证等
+    import os
+    assert engines["midscene"]._env.get("PATH") == os.environ.get("PATH")
+
+
+def test_build_engines_no_dirs_leaves_env_none(tmp_path: Path):
+    # 不传落点（如 --no-report）：env 保持 None，SubprocessEngine 回落继承 os.environ（不硬替换）。
+    engines = compose.build_engines(compose.repo_root())
+    assert engines["novaact"]._env is None
+    assert engines["midscene"]._env is None

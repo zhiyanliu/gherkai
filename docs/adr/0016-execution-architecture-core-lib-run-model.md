@@ -72,11 +72,22 @@
 **按关注点拆成独立 port（不揉成上帝 module）**：
 - `Engine` —— 真正跑一个 scope 的地方（名 `Engine`，对齐 CONTEXT 「引擎」术语）。**实装收敛为单个参数化 adapter `SubprocessEngine`**（`core/core/adapters/subprocess_engine.py`）：以 `cmd`/`cwd`/`env` 参数化,既能 spawn Node worker 也能 spawn Python worker——因两个引擎"spawn 子进程 + 讲同一套 0024 协议"的形状本就完全一致（[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)），无需 `MidsceneEngine`/`NovaActEngine` 两个类。哪个引擎由组合根传不同 `cmd` 决定（`EngineResolver` 按 `job.engine` 选）。
 - `RunStore` —— **控制面**：持 **definition（`RunMeta`，执行前确定的身份 + `Job[]`）+ 运行态（`RunState`：status、起止、会话血缘 sessionId）**（频繁读写：轮询/续跑/WebUI 进度）。读写两套接口：①一次性 `save_run(meta, state)` + `load_run_meta`/`load_run_state`；②实时写三段（[0030](./0030-realtime-persistence-seam.md)）`create_run`（开始：写 definition + 初始全 pending）→ `update_job_state`（按 scope_id 增量刷单 job）→ `finalize_run`（commit point：写总 status + ended_at）。definition 与运行态生命周期不同（前者执行前定、后者执行后产/随进度刷，见上「三层切分」）。**这才是未来 DynamoDB 真正要存的东西**（可恢复、可轮询）。
-- `ResultStore` —— **数据面**：每 scenario 的 pass/fail、投票抖动、原生报告指针（追加为主；CI 读判定真值靠它）。`save_job_result`/`load_job_result`/`load_all` 按 job 粒度读写（判定真值唯一权威）。
-- `ReportStore` —— 把 `RunResult` 归集成 RunReport（manifest + index，派生只读导航视图；local FS → S3）。**已实装** `LocalReportStore`（[0027](./0027-runreport-aggregation-index.md)）。
+- `ResultStore` —— **数据面**：每 scenario 的 pass/fail、投票抖动、原生报告指针（追加为主；CI 读判定真值靠它）。`save_job_result`/`load_job_result`/`load_all` 按 job 粒度读写（判定真值唯一权威）。云端后端**待定**（DDB or S3，按 CI 读模式定，见下三层 store 选型）。
+- `ReportStore` —— 把 `RunResult` 归集成 RunReport（manifest + index，派生只读导航视图；文件型 → 云端 **S3**）。**已实装** `LocalReportStore`（[0027](./0027-runreport-aggregation-index.md)）。
 - （其余按需，如凭证源；保持各自独立、生命周期不同）
 
 > **`RunStore` 与 `ResultStore` 分立的理由**：控制面（状态/血缘，频繁读写、撑轮询续跑）与数据面（结果落地，追加为主）访问模式与生命周期不同，拆成两个 port 更内聚——也让「DDB 存什么」清晰（DDB 主要服务 `RunStore`）。
+
+> **三层 store 后端不对等——按访问模式各选、不建全网格**（v1.1 云端选型的定调）：三个 store 存的数据性质不同，天然后端也不同，**不是**每层都配 Local/DDB/S3 三个 adapter 的笛卡尔网格。
+> - **`RunStore`（记录型：小、频繁更新 pending→running→终态、要轮询/查询）→ DDB**。不会有 `S3RunStore`（S3 不适合频繁更新的小记录）。
+> - **`ReportStore`（文件型：manifest + `index.html`，给人看/serve/下载）→ S3**（静态托管 / presigned URL）。不会有 `DDBReportStore`（DDB 存 HTML 页荒谬）。
+> - **`ResultStore`（每 scope 的 `JobResult` JSON）→ 后端待定**：它两可——既像「记录」（`run_id`+`scope_id` 键、CI 按键读）又像「文件」（自包含 JSON blob）。**真做第五刀时按 CI 到底怎么读判定定**：只按键取单个 → S3 对象足够；要跨 scope 查询/过滤 → DDB。现在不预先拍。
+> 即云端 adapter 是「Run→DDB、Report→S3、Result 两选一」，而非九宫格。
+
+> **worker 产物持久化 ⊥ store（两条正交轴，别混）**：
+> - **worker 模式**（subprocess：产物落本地、报 `file://` ref / 未来 Fargate：产物**由 worker 自己上传 S3**、报 `s3://` ref，[0029](./0029-fargate-engine-artifacts-to-s3.md)）——**产物怎么持久化是 per-worker by-design 的事，不归 store**。
+> - **store adapter**（Local/DDB/S3）——只持久化 **core 自己的序列化数据**（RunMeta/RunState/JobResult/RunReport），并**不透明搬运** worker 报的 `ref`（`ResourceUri`，[0027](./0027-runreport-aggregation-index.md)）。store **不上传 worker 产物**。
+> - 二者是**矩阵不是绑定**：如 Local store + Fargate worker 合法（core 数据落本地、worker 产物在 S3）。`ReportStore.write(materialize=...)` 决定「要不要把 worker 产物拉进 report 自包含」——与 worker 把产物放哪正交（materialize 语义见 [0027](./0027-runreport-aggregation-index.md)）。
 
 **adapters 按 port 分子目录的目标布局**（多后端时不按后端混放）——下为**目标态**，当前实装更扁平（见图后说明）：
 

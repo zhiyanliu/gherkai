@@ -356,3 +356,43 @@ def test_run_state_shows_running_then_final(tmp_path, monkeypatch, capsys):
     assert state is not None and state.status == Status.PASSED
     js = next(iter(state.jobs.values()))
     assert js.status == Status.PASSED and js.session_id == "sess-xyz"
+
+
+def test_run_wires_artifact_dirs_to_build_engines(tmp_path, monkeypatch, capsys):
+    # fail-fast 护栏（ADR 0027 产物归位）：钉住 __main__ 把两引擎产物落点算成 <report_dir>/<run_id>/<engine-dir>
+    # 并传给 build_engines。防止将来改坏 __main__ 那几行接线（否则产物落错地方，只有真跑 AWS 才发现）。
+    box = {}
+    real_build = m.compose.build_engines
+
+    def spy_build(repo, **kwargs):
+        box["kwargs"] = kwargs
+        return real_build(repo)  # 不带落点：拿真 engines（cmd 正确），落点断言看 box
+
+    monkeypatch.setattr(m.compose, "build_engines", spy_build)
+    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
+    report_dir = tmp_path / "reports"
+    rc = m.main(["run", str(_write_feature(tmp_path)), "--report-dir", str(report_dir)])
+    assert rc == 0
+
+    nova = box["kwargs"]["nova_logs_dir"]
+    mid = box["kwargs"]["midscene_run_dir"]
+    # 落点 = <report_dir 绝对化>/<run_id>/<engine 子目录>，两引擎对称、run_id 一致
+    assert nova is not None and mid is not None
+    assert str(nova).endswith("/nova-trajectories") and str(mid).endswith("/midscene-run")
+    assert Path(nova).parent == Path(mid).parent          # 同一 <report_dir>/<run_id> 下
+    assert Path(mid).parent.parent == report_dir.resolve()  # 绝对化的 report_dir（避 worker cwd 歧义）
+
+
+def test_run_no_report_passes_no_artifact_dirs(tmp_path, monkeypatch, capsys):
+    # --no-report：不算落点、传 None（裸跑，两引擎都回落 SDK 默认）
+    box = {}
+    real_build = m.compose.build_engines
+
+    def spy_build(repo, **kwargs):
+        box.update(kwargs)
+        return real_build(repo)
+
+    monkeypatch.setattr(m.compose, "build_engines", spy_build)
+    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
+    m.main(["run", str(_write_feature(tmp_path)), "--no-report"])
+    assert box.get("nova_logs_dir") is None and box.get("midscene_run_dir") is None

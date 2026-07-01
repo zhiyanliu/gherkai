@@ -43,22 +43,30 @@ def repo_root(start: Path | None = None) -> Path:
     return Path(__file__).resolve().parents[2]
 
 
-def build_engines(repo: Path, *, nova_logs_dir: str | Path | None = None) -> dict[str, Engine]:
+def build_engines(
+    repo: Path,
+    *,
+    nova_logs_dir: str | Path | None = None,
+    midscene_run_dir: str | Path | None = None,
+) -> dict[str, Engine]:
     """每个引擎一个 SubprocessEngine（cmd 不同，core 引擎无关，ADR 0026）。
 
     两个引擎"spawn 子进程 + 讲同一套 ADR 0024 协议"形状一致，故都是同一个 SubprocessEngine 类、
     只是 cmd/cwd 不同——无需两个具名 adapter 类。
 
-    nova_logs_dir：给 Nova worker 的 trajectory 持久落点（经环境变量 NOVA_LOGS_DIR 传，ADR 0027）。
-      None 时 worker 用 Nova SDK 默认临时目录（会被系统清理）。
+    产物持久落点（两引擎对称，经环境变量传给 SDK，ADR 0027）——None 时各自用 SDK 默认（相对 worker cwd
+    的固定目录 / 系统临时目录，会被清理或每 run 覆盖）：
+    - nova_logs_dir → `NOVA_LOGS_DIR` → Nova SDK `logs_directory`，trajectory 落这里。
+    - midscene_run_dir → `MIDSCENE_RUN_DIR` → Midscene SDK 的 run 根目录（report/dump/log 全在其下），
+      report.html 落这里。**必须传绝对路径**：SDK 用 `path.resolve(process.cwd(), MIDSCENE_RUN_DIR)`
+      相对 worker cwd 解析，相对路径会落错地方（与 Nova trajectory 早期踩的 cwd 歧义同源）。
     """
     novaact_dir = repo / "engines" / "novaact"
     midscene_dir = repo / "engines" / "midscene"
-    nova_env = None
-    if nova_logs_dir is not None:
-        # 完整继承当前环境（AWS 凭证等）再叠加 NOVA_LOGS_DIR——SubprocessEngine 传 env 会整体替换，
-        # 故必须显式带上 os.environ。
-        nova_env = {**os.environ, "NOVA_LOGS_DIR": str(nova_logs_dir)}
+
+    # 完整继承当前环境（AWS 凭证等）再叠加产物落点——SubprocessEngine 的 env 非 None 时整体替换，故须带 os.environ。
+    nova_env = {**os.environ, "NOVA_LOGS_DIR": str(nova_logs_dir)} if nova_logs_dir is not None else None
+    midscene_env = {**os.environ, "MIDSCENE_RUN_DIR": str(midscene_run_dir)} if midscene_run_dir is not None else None
     return {
         # Nova Act 引擎：novaact venv 的 python 跑 worker
         "novaact": SubprocessEngine(
@@ -76,6 +84,7 @@ def build_engines(repo: Path, *, nova_logs_dir: str | Path | None = None) -> dic
         "midscene": SubprocessEngine(
             cmd=["node", "--import", "tsx", str(midscene_dir / "worker" / "run-scope.ts")],
             cwd=str(midscene_dir),
+            env=midscene_env,
         ),
     }
 

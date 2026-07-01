@@ -60,9 +60,17 @@ class ReportStore(Protocol):
 - **返回 `ResourceUri` 而非 `Path`**（封版前收口）：`LocalReportStore` 回 `file://…/index.html`，未来 `S3ReportStore` 回 `s3://…/index.html`——**同一签名容两种落点**，否则 S3 adapter 被迫返回 `Path` 包 `s3://`（`Path` 会把 `s3://b/x` 折成 `s3:/b/x`，错）。`ResourceUri = NewType("ResourceUri", str)`（定义在 `core/model.py`）：把这个**本就存在于 `ReportRef.ref` 注释里**的约定提升成命名类型，统一「`ReportRef.ref` 与 `write` 返回值都是带 scheme 的资源指针」。比裸 `str` 多一层意图、又零运行时成本/零依赖（运行时即 `str`）。消费端（cli/WebUI）只当 URI 用、不 stat/open——cli 现把它原样放进 `artifacts.report_index` 并打成可点击的 `file://` 链接。
   - 实现注意：`LocalReportStore` 内 `index_path.resolve().as_uri()`——`as_uri()` 要求绝对路径，而 cli 默认 `--report-dir` 是相对的（`reports`），不 `resolve()` 会抛 `ValueError`。
 - `materialize=False`（默认）：不拷贝产物，`index.html` 的链接直接指向 `ref`（本地够用；v1.0 定位本地 smoke，[0015](./0015-v1-positioning-smoke-not-regression.md)）。
-- `materialize=True`（opt-in）：按字节把产物拷进 `<run_id>/artifacts/`，链接转相对路径 → 目录自包含、可整体搬走/上 S3/发同事/CI 归档。
-  - **默认不拷**是刻意的：本地跑时产物就在本机、手动查目录够用（[0016](./0016-execution-architecture-core-lib-run-model.md)「先散着」）。每 run 拷 N 个 MB 级 html + Nova 多个 trajectory 是纯磁盘放大、零收益——拷贝的价值只在搬运/上云时兑现，故 opt-in，不为想象中的 S3 场景提前盖机器。
-- `LocalReportStore` → 未来 `S3ReportStore` 只换「拷到哪 / 链接前缀 / 返回的 URI scheme」，core 不动。
+- `materialize=True`（opt-in）：把产物**拉进 report 让其自包含**——拷进 `<run_id>/artifacts/`、链接转相对路径 → 目录可整体搬走/发同事/CI 归档。
+  - **默认不拷**是刻意的：本地跑时产物就在本机、手动查目录够用（[0016](./0016-execution-architecture-core-lib-run-model.md)「先散着」）。每 run 拷 N 个 MB 级 html + Nova 多个 trajectory 是纯磁盘放大、零收益——拷贝的价值只在搬运/归档时兑现，故 opt-in。
+
+> **`ref` 由 worker 定、`materialize` 与 worker 产物放哪正交（关键边界，别混）**：
+> - `ReportRef.ref` 指向**哪**是 **worker** 决定的——subprocess worker 产物落本地、报 `file://`；未来 Fargate worker **自己上传 S3**、报 `s3://`（[0029](./0029-fargate-engine-artifacts-to-s3.md)）。**ReportStore 不上传 worker 产物、不碰其持久化**（那是 per-worker by-design 的事，[0016](./0016-execution-architecture-core-lib-run-model.md)「worker⊥store」），只**不透明搬运**这个 ref。
+> - `materialize` 是**正交的另一件事**：「要不要把产物拉进 report 让其自包含」。它随 ref 的 scheme 决定怎么拉：
+>   - `file://` ref + materialize → **按字节拷**本地文件进 `artifacts/`（**当前唯一实装**）。
+>   - `s3://` ref + materialize → **从 S3 下载**到 core 本地 `artifacts/`、ref 重指向本地（**尚未实现的扩展**——当前 materialize **只拷 `file://`**，`s3://`/`https://` ref 一律不动、报告直接引原 URI，见 `test_remote_ref_not_copied_even_when_materialize`）。
+>   - materialize=False → 报告直接引 worker 报的 ref（`file://` 或 `s3://`），不拉。
+> - 故 materialize **不会被「产物归位到 run 目录」抽空**：归位只改 subprocess 模式下本地产物落哪；materialize 管的是「产物是否进 report 自包含」，跨 worker 模式独立存在（尤其 Fargate 下的「s3→local 下载」是其真正的未来价值）。
+- `LocalReportStore` → 未来 `S3ReportStore` 只换「manifest+index 这些 **core 派生数据**落哪 / 返回的 URI scheme」，core 不动。（注意区分：`S3ReportStore` 是把 **RunReport 自身**（manifest/index.html）写到 S3，与「worker 把自己的产物上传 S3」是两回事。）
 - **`write` 失败被隔离、不击穿已 commit 的 run**（实时写接缝，[0030](./0030-realtime-persistence-seam.md)）：RunReport 是**纯派生只读视图、可重建、永不作判定源**——故 `RunPersistence.finalize` 在 commit point（`finalize_run`，判定真值已落 ResultStore）之后才调 `ReportStore.write`，且把 write 的异常隔离（吞掉+留痕+返回 None），不让一个「可重建的报告」写失败把整个 run 拖成裸 traceback 退出、CI 拿不到判定输出。
 
 **「生成 RunReport」与「materialize 产物」是两个正交开关，默认值不同（刻意）**：
@@ -74,15 +82,17 @@ class ReportStore(Protocol):
   多 trajectory），价值只在搬运/上云/发同事时兑现，故按需开。两者独立：默认「生成 index 但不拷产物」
   （index 链接指向产物原位）。
 
-**默认（不 materialize）两个引擎产物落点不对称——已知、接受**：
-- **Nova**：trajectory **直接落在 `reports/<run_id>/nova-trajectories/`（report 目录内）**——cli 把
-  `NOVA_LOGS_DIR` 设到那里，Nova SDK 直接写，不经拷贝。
-- **Midscene**：`report.html` 由其 SDK 写死生成在 **`engines/midscene/midscene_run/report/`（report
-  目录外、引擎子工程内）**，cli 控制不了其落点，默认只 `file://` 链接过去、不动它。
-- 故默认 RunReport **非自包含**：index 链接一半指向目录内（Nova）、一半指向目录外（Midscene），
-  本机都能点开，但整个 `reports/<run_id>/` 不能原样搬走（Midscene 链接到另一台机器会断）。
-- **要自包含 → `--materialize`**：把两个引擎产物都按字节收进 `artifacts/`、链接转相对。本地 smoke
-  （[0015](./0015-v1-positioning-smoke-not-regression.md)）默认不强行统一落点是务实取舍——不为本地够用的场景付每 run 拷 MB 的代价。
+**默认（不 materialize）两个引擎产物都归位到 run 目录内——落点对称**：cli 经环境变量把两个 SDK 的产物
+落点都设到 `reports/<run_id>/` 下（[0016](./0016-execution-architecture-core-lib-run-model.md) 组合根注入）：
+- **Nova**：`NOVA_LOGS_DIR` → SDK `logs_directory`，trajectory 落 `reports/<run_id>/nova-trajectories/`。
+- **Midscene**：`MIDSCENE_RUN_DIR` → SDK run 根目录，`report.html` 落 `reports/<run_id>/midscene-run/report/`。
+  （SDK 用 `path.resolve(cwd, MIDSCENE_RUN_DIR)`，cli 传**绝对路径**避 worker cwd 歧义。）
+- 故默认 RunReport 的产物**都在 `reports/<run_id>/` 树内**，index 的 `file://` 绝对链接本机可点、目录整体
+  在本机可查。**唯一残留**：`file://` 是绝对路径，把 `reports/<run_id>/` 拷到**另一台机器**后链接会断——
+  此时才需 `--materialize`（收进 `artifacts/`、转相对链接）。故 materialize 从「统一落点」降级为「跨机器/归档
+  自包含」这个更窄的 opt-in（本地够用场景不付每 run 拷 MB 的代价，[0015](./0015-v1-positioning-smoke-not-regression.md)）。
+- **归位的另一收益**：产物不再落相对 worker cwd 的固定 `midscene_run/`（每 run 覆盖、与 run 无关），
+  而是 run 专属目录——为 v1.1 云端归集/上传（[0016](./0016-execution-architecture-core-lib-run-model.md) worker⊥store）铺路，两引擎落点对称、处理一致。
 
 **职责边界（三 port 正交，[0016](./0016-execution-architecture-core-lib-run-model.md)）**：`RunStore`=控制面（definition `RunMeta` + 运行态 `RunState`：status/血缘）、`ResultStore`=数据面（判定真值唯一权威）、`ReportStore`=**纯派生只读导航视图**（可从 `RunResult` 完全重建、永不作 CI 判定源）。`ResultStore` 旧 docstring「RunReport 归集靠它」一句删除——归集职责移交 `ReportStore`。
 
@@ -147,7 +157,7 @@ URL、断言了什么」都不落痕（只有 pass/fail 进 result 树）。大�
 
 ## 现在做 / 留口子
 
-- **现在做（v1.0）**：上述 `ReportRef` 改造、`run_id`（归位进 `RunMeta` definition）+ 组合根生成、`JobResult` 经持有的 `Job` 取 `engine`、`ReportStore.write` 接口 + `LocalReportStore`（manifest + index，默认不 materialize）、Nova trajectory 持久化 + act 级 reportRefs、cli 默认生成 RunReport（`--no-report` 跳过、`--report-dir` 配落点、`--materialize` opt-in）、单测 + 两个引擎真 e2e。
+- **现在做（v1.0）**：上述 `ReportRef` 改造、`run_id`（归位进 `RunMeta` definition）+ 组合根生成、`JobResult` 经持有的 `Job` 取 `engine`、`ReportStore.write` 接口 + `LocalReportStore`（manifest + index，默认不 materialize）、**两引擎产物对称归位到 run 目录**（Nova `NOVA_LOGS_DIR`→trajectory、Midscene `MIDSCENE_RUN_DIR`→report.html）+ act 级 reportRefs、cli 默认生成 RunReport（`--no-report` 跳过、`--report-dir` 配落点、`--materialize` opt-in）、单测 + 两个引擎真 e2e。
 - **留口子不实现**：
   - **确定性 step 产物可观测性**：让 `@deterministic` handler 可选地产一个轻量产物（当时 URL / 截图 / 检查描述），使纯确定性用例的 RunReport 也有内容可看。本轮判定真值在 result 树已够；产物可观测另开一轮（与 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md) 确定性 step 设计一并演进）。
   - `materialize` 的 S3 后端；按 `kind` 的富渲染（`<video>`/`<iframe>`，皮层将来做）；trajectory 内部结构化提取。

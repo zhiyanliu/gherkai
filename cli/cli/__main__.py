@@ -186,11 +186,16 @@ def _cmd_run(args, repo: Path) -> int:
     run_id = compose.new_run_id()
     run_meta = RunMeta(run_id=run_id, created_at=compose.now_iso(), jobs=tuple(jobs))
     do_report = not args.no_report  # RunReport 默认生成；--no-report 跳过（逃生舱）
-    # 归集时让 Nova trajectory 落到 run 专属持久目录（否则用 SDK 默认临时目录，会被清理）。
-    # **必须传绝对路径**：worker 是另起的子进程、cwd 与 cli 不同（cli=cli/，nova worker=engines/novaact/），
-    # 相对路径会被两进程各自的 cwd 解析到不同位置 → trajectory 落错地方、且 worker 产出的 file://<相对> 是坏 URI。
-    nova_logs_dir = (Path(args.report_dir).resolve() / run_id / "nova-trajectories") if do_report else None
-    resolver = compose.make_resolver(compose.build_engines(repo, nova_logs_dir=nova_logs_dir))
+    # 归集时让两个引擎的产物都落到 run 专属持久目录（否则用 SDK 默认：Nova 临时目录会被清理、Midscene
+    # 落相对 worker cwd 的固定 midscene_run/ 每 run 覆盖）。两引擎对称落 reports/<run_id>/ 下（ADR 0027）。
+    # **必须传绝对路径**：worker 是另起的子进程、cwd 与 cli 不同（cli=cli/，worker=engines/*/），相对路径
+    # 会被两进程各自的 cwd 解析到不同位置 → 产物落错地方、且 worker 产出的 file://<相对> 是坏 URI。
+    report_root = Path(args.report_dir).resolve()
+    nova_logs_dir = (report_root / run_id / "nova-trajectories") if do_report else None
+    midscene_run_dir = (report_root / run_id / "midscene-run") if do_report else None
+    resolver = compose.make_resolver(
+        compose.build_engines(repo, nova_logs_dir=nova_logs_dir, midscene_run_dir=midscene_run_dir)
+    )
 
     # 3b) 实时写编排（ADR 0030）：组合根注入 store adapter，RunPersistence 负责「随进度落库」的统一编排
     #     （commit-point 写序 / RUNNING 中间态 / 按 scope_id 增量刷）。--no-report 则不落库（逃生舱），
