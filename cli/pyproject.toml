@@ -9,6 +9,11 @@ dependencies = [
     "core",
 ]
 
+# 云端后端（--backend cloud）走可选 extra（ADR 0016「cli backend 选择」）：cli 主依赖不含 boto3，
+# `pip install cli[aws]` 才拉 core[aws]（= boto3）；纯 local 路径绝不 import boto3。
+[project.optional-dependencies]
+aws = ["core[aws]"]
+
 [project.scripts]
 # 安装后可直接 `yaozhou-run <feature>`；开发期用 `uv run python -m cli`
 yaozhou-run = "cli.__main__:main"
@@ -19,6 +24,8 @@ core = { path = "../core", editable = true }
 [dependency-groups]
 dev = [
     "pytest>=8.0.0",
+    # cloud 接线层测试需 botocore 造真异常类型验退出码分层（ADR 0030 决定七）——只测接线不引 moto。
+    "boto3>=1.34",
 ]
 
 [build-system]

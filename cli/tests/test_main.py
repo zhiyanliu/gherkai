@@ -249,22 +249,35 @@ def test_malformed_feature_friendly_diagnostic(tmp_path, monkeypatch, capsys):
 
 # ---- 第四刀：实时写 commit-point 写序（ADR 0030）----
 # 用 fake store 记录调用序（共享一个有序 log），注入真 RunPersistence 编排——测真实写序、非 mock 行为。
-def _recording_stores(calls: list):
-    """返回 (run_store_factory, result_store_factory, report_store_factory)，三者把调用追加进共享 calls。"""
+# 注入点 = patch compose.build_local_stores（ADR 0016：local 装配下沉 compose 后的注入锚，取代旧的 m.Local*）。
+def _recording_build_local_stores(calls: list):
+    """返回一个替换 compose.build_local_stores 的 fake：产出三个记录调用的 fake store + make_artifacts。"""
     class FakeRunStore:
+        def preflight(self): calls.append(("run", "preflight", None))
         def create_run(self, meta, initial_state): calls.append(("run", "create_run", None))
         def update_job_state(self, run_id, js): calls.append(("run", "update_job_state", js.scope_id))
         def finalize_run(self, run_id, status, ended_at): calls.append(("run", "finalize_run", None))
 
     class FakeResultStore:
+        def preflight(self): calls.append(("result", "preflight", None))
         def save_job_result(self, run_id, jr): calls.append(("result", "save_job_result", jr.scope_id))
 
     class FakeReportStore:
+        def preflight(self): calls.append(("report", "preflight", None))
         def write(self, run_id, result, *, created_at="", materialize=False):
             calls.append(("report", "write", None))
             return f"file:///fake/{run_id}/index.html"
 
-    return (lambda root: FakeRunStore(), lambda root: FakeResultStore(), lambda root: FakeReportStore())
+    def fake_build(*, report_dir):
+        def make_artifacts(run_id, report_index):
+            d = {"run_meta": f"file:///{run_id}/run_meta.json", "run_state": f"file:///{run_id}/run_state.json",
+                 "jobs_dir": f"file:///{run_id}/jobs"}
+            if report_index is not None:
+                d["report_index"] = str(report_index)
+            return d
+        return FakeRunStore(), FakeResultStore(), FakeReportStore(), make_artifacts
+
+    return fake_build
 
 
 def _two_scope_feature(tmp_path: Path) -> Path:
@@ -280,22 +293,24 @@ def _two_scope_feature(tmp_path: Path) -> Path:
 
 def test_realtime_commit_point_write_order(tmp_path, monkeypatch, capsys):
     calls: list = []
-    run_f, result_f, report_f = _recording_stores(calls)
-    # 注入 fake store（cli 构造它们 → 喂给真 RunPersistence）
-    monkeypatch.setattr(m, "LocalRunStore", run_f)
-    monkeypatch.setattr(m, "LocalResultStore", result_f)
-    monkeypatch.setattr(m, "LocalReportStore", report_f)
+    # 注入 fake（patch compose.build_local_stores：cli 调它拿三 store → 喂给真 RunPersistence）
+    monkeypatch.setattr(m.compose, "build_local_stores", _recording_build_local_stores(calls))
     monkeypatch.setattr(m, "schedule", _fake_schedule_factory())  # 每 job fire on_job_complete
 
     rc = m.main(["run", str(_two_scope_feature(tmp_path)), "--report-dir", str(tmp_path / "r"), "--quiet"])
     assert rc == 0
 
     methods = [(s, mth) for (s, mth, _) in calls]
-    # ① create_run 必是第一个 RunStore 调用、且在所有 save_job_result 之前（definition 先写）
-    assert methods[0] == ("run", "create_run")
+    # ① create_run 是第一个**写**（preflight 探活在它之前、但那是探底不是写）；create_run 在所有 save_job_result 之前
+    writes = [(s, mth) for (s, mth) in methods if mth != "preflight"]
+    assert writes[0] == ("run", "create_run")
     first_save = next(i for i, (s, mth) in enumerate(methods) if mth == "save_job_result")
     create_idx = methods.index(("run", "create_run"))
     assert create_idx < first_save
+    # ①b preflight（三个 store 各一次）全在 create_run 之前（ADR 0030 决定七：begin 先探活再写）
+    last_preflight = max(i for i, (s, mth) in enumerate(methods) if mth == "preflight")
+    assert last_preflight < create_idx
+    assert sum(1 for (s, mth) in methods if mth == "preflight") == 3
     # ② commit point：finalize_run 在所有 save_job_result 之后（数据面先、控制面摘要后）
     last_save = max(i for i, (s, mth) in enumerate(methods) if mth == "save_job_result")
     finalize_idx = methods.index(("run", "finalize_run"))
@@ -313,14 +328,13 @@ def test_realtime_commit_point_write_order(tmp_path, monkeypatch, capsys):
 
 
 def test_no_report_skips_persistence_entirely(tmp_path, monkeypatch, capsys):
-    # --no-report：persistence=None，三个 store 一次都不该被构造（裸跑、零落盘逃生舱）
+    # --no-report：persistence=None，store 装配一次都不该被调（裸跑、零落盘逃生舱）
     constructed = {"n": 0}
-    def boom(root):
+    def boom(**kwargs):
         constructed["n"] += 1
-        raise AssertionError("--no-report 不该构造任何 store")
-    monkeypatch.setattr(m, "LocalRunStore", boom)
-    monkeypatch.setattr(m, "LocalResultStore", boom)
-    monkeypatch.setattr(m, "LocalReportStore", boom)
+        raise AssertionError("--no-report 不该装配任何 store")
+    monkeypatch.setattr(m.compose, "build_local_stores", boom)
+    monkeypatch.setattr(m.compose, "build_cloud_stores", boom)
     monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
     rc = m.main(["run", str(_write_feature(tmp_path)), "--no-report"])
     assert rc == 0

@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from core.adapters.subprocess_engine import SubprocessEngine
-from core.ports import Engine
+from core.ports import Engine, ReportStore, ResultStore, RunStore
 from core.scope import FeatureSource
 
 
@@ -101,6 +101,101 @@ def make_resolver(engines: dict[str, Engine]):
             ) from None
 
     return resolver
+
+
+# ============================================================================
+# Store 装配（ADR 0016「cli backend 选择」/ 0030 决定六·七）：两个后端对称、都在 compose 可复用
+# （cli 是第一个调用者，WebUI 直接复用这两个函数、不经 cli）。各返回：
+#   (run_store, result_store, report_store, make_artifacts)
+# make_artifacts(run_id, report_index) -> dict：把 --json 的 artifacts 落点指针按后端组装、全 URI 化
+#   （local file:// / cloud s3://+ddb://）；report_index=None（report 写失败被隔离）则省略该键、不放裸 'None'。
+# ============================================================================
+
+
+def _normalize_prefix(prefix: str) -> str:
+    """S3 key 前缀分隔符规范化：非空且不以 / 结尾则补 /（否则 S3*Store 拼 f'{prefix}{run_id}' 生成粘连 key）。"""
+    return prefix + "/" if prefix and not prefix.endswith("/") else prefix
+
+
+def build_local_stores(*, report_dir: str | Path):
+    """本地文件三层 store + local artifacts descriptor（file:// 完整路径）。
+
+    落 <report_dir>/<run_id>/：RunStore(run_meta+run_state) + ResultStore(jobs/) + ReportStore(index/manifest)。
+    """
+    from core.adapters.report_store.local import LocalReportStore
+    from core.adapters.result_store.local import LocalResultStore
+    from core.adapters.run_store.local import LocalRunStore
+
+    root = Path(report_dir)
+    run_store: RunStore = LocalRunStore(root)
+    result_store: ResultStore = LocalResultStore(root)
+    report_store: ReportStore = LocalReportStore(root)
+
+    def make_artifacts(run_id: str, report_index) -> dict:
+        # 全 file:// URI（与 cloud s3:// 同形工整）；run_meta/run_state/jobs_dir 是本地落点、report_index 取 finalize 返回
+        run_dir = (root / run_id).resolve()
+        d = {
+            "run_meta": run_dir.joinpath("run_meta.json").as_uri(),
+            "run_state": run_dir.joinpath("run_state.json").as_uri(),
+            "jobs_dir": run_dir.joinpath("jobs").as_uri(),
+        }
+        if report_index is not None:  # None = report 写失败被隔离（ADR 0030 决定三），省略键、不放裸 'None'
+            d["report_index"] = str(report_index)
+        return d
+
+    return run_store, result_store, report_store, make_artifacts
+
+
+# —— 造 boto3 句柄的两个钩子（抽出来供 cli 测试 monkeypatch，验接线而不连真 AWS）——
+def _make_ddb_table(table: str, *, region, profile):
+    """boto3 dynamodb.Table 资源（DDB adapter 吃 resource.Table，非 client）。region/profile 走 Session。"""
+    import boto3
+    session = boto3.session.Session(profile_name=profile, region_name=region)
+    return session.resource("dynamodb").Table(table)
+
+
+def _make_s3_client(*, region, profile):
+    """boto3 s3 client（三个 S3 件套 ResultStore/ReportStore/offloader 共享同一个）。"""
+    import boto3
+    session = boto3.session.Session(profile_name=profile, region_name=region)
+    return session.client("s3")
+
+
+def build_cloud_stores(*, table: str, bucket: str, prefix: str = "",
+                       region: str | None = None, profile: str | None = None):
+    """云端三层 store（RunStore→DDB、Result/ReportStore→S3）+ cloud artifacts descriptor（s3://+ddb://）。
+
+    DDB 吃 `resource.Table`、三个 S3 件套（ResultStore/ReportStore/offloader）**共享一个 client**（喂错句柄
+    类型运行时才 AttributeError，ADR 0016）。offloader 生产默认挂载（解 DDB 400KB 限，ADR 0030 决定七）。
+    `import boto3` 惰性在 _make_* 钩子里（cli 主依赖不含 boto3，走 cli[aws]→core[aws] extra；缺 boto3 抛
+    ImportError 由 cli 归到退 2）。prefix 分隔符规范化避粘连 key。
+    """
+    from core.adapters.report_store.s3 import S3ReportStore
+    from core.adapters.result_store.s3 import S3ResultStore
+    from core.adapters.run_store.arg_offload import S3StepArgumentOffloader
+    from core.adapters.run_store.ddb import DynamoDBRunStore
+
+    pfx = _normalize_prefix(prefix)
+    ddb_table = _make_ddb_table(table, region=region, profile=profile)
+    s3 = _make_s3_client(region=region, profile=profile)  # 一个 client 注入三个 S3 件套
+
+    offloader = S3StepArgumentOffloader(s3, bucket, pfx)
+    run_store: RunStore = DynamoDBRunStore(ddb_table, arg_offloader=offloader)
+    result_store: ResultStore = S3ResultStore(s3, bucket, pfx)
+    report_store: ReportStore = S3ReportStore(s3, bucket, pfx)
+
+    def make_artifacts(run_id: str, report_index) -> dict:
+        # jobs_dir=s3://（对拍 S3ResultStore key 布局）；run_meta/run_state=ddb:// 诊断指针（纯展示、不被解析）
+        d = {
+            "run_meta": f"ddb://{table}/{run_id}#META",
+            "run_state": f"ddb://{table}/{run_id}#STATE",
+            "jobs_dir": f"s3://{bucket}/{pfx}{run_id}/jobs/",
+        }
+        if report_index is not None:  # None = report 写失败被隔离，省略键
+            d["report_index"] = str(report_index)
+        return d
+
+    return run_store, result_store, report_store, make_artifacts
 
 
 def load_feature(path: Path, repo: Path) -> FeatureSource:

@@ -10,12 +10,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
-from core.adapters.report_store.local import LocalReportStore
-from core.adapters.run_store.local import LocalRunStore
-from core.adapters.result_store.local import LocalResultStore
 from core.model import Event, RunMeta, Status
 from core.parse import FeatureParseError
 from core.persist import RunPersistence
@@ -40,7 +38,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     run.add_argument(
         "--assertion-votes", type=int, default=1, metavar="N",
-        help="AI 断言（Then）投票次数（默认 1=单次判定）；调高（如 3/5）启用抖动检测：跑 N 次取多数票（ADR 0014）",
+        help="AI 断言（Then）投票次数（默认 1=单次判定）；调高（如 3/5）启用抖动检测：跑 N 次取多数票",
     )
     run.add_argument(
         "--max-concurrency", type=int, default=1,
@@ -60,7 +58,7 @@ def _build_parser() -> argparse.ArgumentParser:
     # RunReport 是 run 的应得产物：默认总归集（manifest.json + index.html）到 <report-dir>/<run_id>/。
     run.add_argument(
         "--report-dir", default="reports", metavar="DIR",
-        help="RunReport 归集落点（默认 reports/；每次 run 落 DIR/<run_id>/，ADR 0027）",
+        help="RunReport 归集落点（默认 reports/；每次 run 落 DIR/<run_id>/）",
     )
     run.add_argument(
         "--no-report", action="store_true",
@@ -69,6 +67,28 @@ def _build_parser() -> argparse.ArgumentParser:
     run.add_argument(
         "--materialize", action="store_true",
         help="归集时把本地原生产物按字节拷进 <run_id>/artifacts/（自包含、可搬运/上 S3；默认只链接不拷）",
+    )
+    # backend 选择（ADR 0016「cli backend 选择」/ 0030 决定七）：local=文件落盘（默认）；cloud=DDB/S3。
+    # 仅 run 加（plan 纯本地不落库、不连 AWS，不加）。cloud 一次换齐三层（RunStore→DDB、Result/Report→S3）。
+    run.add_argument(
+        "--backend", choices=["local", "cloud"], default="local",
+        help="落库后端：local=文件落 --report-dir（默认）；cloud=状态落 DynamoDB、结果与报告落 S3",
+    )
+    run.add_argument(
+        "--ddb-table", default=None, metavar="NAME",
+        help="[--backend cloud] DynamoDB 表名（分区键 run_id + 排序键 sk）；兜底环境变量 AWS_DDB_TABLE。表需预先建好",
+    )
+    run.add_argument(
+        "--s3-bucket", default=None, metavar="NAME",
+        help="[--backend cloud] S3 桶名（存判定结果与报告）；兜底 AWS_S3_BUCKET。桶需预先建好",
+    )
+    run.add_argument(
+        "--region", default=None, metavar="R",
+        help="[--backend cloud] AWS region（不给走 boto3 默认链：AWS_REGION/profile 的 config）",
+    )
+    run.add_argument(
+        "--profile", default=None, metavar="P",
+        help="[--backend cloud] AWS profile（不给用 default）；注意 profile 没配 region 时仍需 --region",
     )
 
     # plan 预检（dry-run）：纯本地解析 + 分组，不起 worker、不连 AWS、不烧钱。
@@ -80,7 +100,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     pl.add_argument(
         "--assertion-votes", type=int, default=1, metavar="N",
-        help="AI 断言投票次数（默认 1）——影响 plan 产出的 Job.assertion_votes，故预检也可设",
+        help="AI 断言投票次数（默认 1）——影响分组产出的投票次数，故预检也可设",
     )
     pl.add_argument("--json", action="store_true", help="输出机器可读 JSON（scope/job 分组）")
 
@@ -146,6 +166,19 @@ def _progress(*args, **kwargs) -> None:
     print(*args, **kwargs)
 
 
+def _is_botocore_error(exc: BaseException) -> bool:
+    """是否 botocore 异常（云端不可达/权限/凭证/region 等）。
+
+    惰性 import botocore（cli 主依赖不含 boto3，顶层 import 会在纯 local 环境炸；且只在 --backend cloud
+    路径才会调到这里）。缺 botocore（不该发生，能走到 cloud 就装了 boto3）时保守返回 False。
+    """
+    try:
+        from botocore.exceptions import BotoCoreError, ClientError
+    except ImportError:  # pragma: no cover
+        return False
+    return isinstance(exc, (BotoCoreError, ClientError))
+
+
 def _cmd_run(args, repo: Path) -> int:
     use_json = args.json
 
@@ -197,20 +230,46 @@ def _cmd_run(args, repo: Path) -> int:
         compose.build_engines(repo, nova_logs_dir=nova_logs_dir, midscene_run_dir=midscene_run_dir)
     )
 
-    # 3b) 实时写编排（ADR 0030）：组合根注入 store adapter，RunPersistence 负责「随进度落库」的统一编排
-    #     （commit-point 写序 / RUNNING 中间态 / 按 scope_id 增量刷）。--no-report 则不落库（逃生舱），
-    #     此时 persistence=None，schedule 不接 on_job_complete、sink 不装饰（保纯跑、零落盘）。
+    # 3b) 实时写编排（ADR 0030）：组合根按 --backend 注入 local/cloud 两套 store adapter，RunPersistence
+    #     负责「随进度落库」的统一编排（commit-point 写序 / RUNNING 中间态 / 按 scope_id 增量刷）。
+    #     --no-report 则不落库（逃生舱）：persistence=None，schedule 不接回调、零落盘。
+    #     **need_cloud gated**（ADR 0030 决定七）：所有云端校验/import/异常只在 do_report and backend==cloud 时生效——
+    #     --backend cloud --no-report 是合法逃生舱（跳过一切云端检查、三个 store 一次不构造）。
+    need_cloud = do_report and args.backend == "cloud"
     persistence: RunPersistence | None = None
+    make_artifacts = None  # compose 返回的 artifacts 落点组装器（按 backend URI 化）
     if do_report:
-        root = Path(args.report_dir)
+        if args.backend == "cloud":
+            # cloud 定位参数：flag > 环境变量兜底（ADR 0016）。缺任一 → 入口退 2（否则 None 流进 adapter 运行时才炸）
+            table = args.ddb_table or os.environ.get("AWS_DDB_TABLE")
+            bucket = args.s3_bucket or os.environ.get("AWS_S3_BUCKET")
+            missing = [n for n, v in (("--ddb-table/AWS_DDB_TABLE", table), ("--s3-bucket/AWS_S3_BUCKET", bucket)) if not v]
+            if missing:
+                _progress(f"--backend cloud 缺必需配置：{', '.join(missing)}（表/桶需预先建好）")
+                return 2
+            try:
+                # cloud 装配下沉 compose（可复用）；import boto3 惰性在 _make_* 钩子里，缺 boto3 抛 ImportError
+                run_store, result_store, report_store, make_artifacts = compose.build_cloud_stores(
+                    table=table, bucket=bucket, prefix=args.report_dir,
+                    region=args.region, profile=args.profile,
+                )
+            except ImportError as e:
+                _progress(f"--backend cloud 需要 boto3：{e}")
+                return 2
+        else:
+            run_store, result_store, report_store, make_artifacts = compose.build_local_stores(report_dir=args.report_dir)
         persistence = RunPersistence(
-            run_id,
-            run_store=LocalRunStore(root),
-            result_store=LocalResultStore(root),
-            report_store=LocalReportStore(root),
+            run_id, run_store=run_store, result_store=result_store, report_store=report_store,
         )
-        # begin 必在 schedule 之前：写 definition + 初始全 pending 态（满足「提交即返回 runId」，ADR 0027）
-        persistence.begin(run_meta, started_at=compose.now_iso())
+        # begin 必在 schedule 之前：先 preflight 探活（云端探表/桶失败即抛）再写 definition + 初始全 pending 态
+        # （满足「提交即返回 runId」，ADR 0027）。cloud 探活失败 → 下面 gated except 归到退 2。
+        try:
+            persistence.begin(run_meta, started_at=compose.now_iso())
+        except Exception as e:
+            if need_cloud and _is_botocore_error(e):
+                _progress(f"--backend cloud 云端不可达（表/桶不存在或无权限/凭证·region 缺）：{e}")
+                return 2
+            raise
 
     # 4) sink：逐事件进度 → stderr（诊断；--quiet 静音。不再受 --json 影响——走 stderr 不污染 stdout 数据）
     #    前缀 `[core <scope>:event]` 与 worker 透传行 `[worker <scope>:err]` **同一视觉骨架**
@@ -238,31 +297,40 @@ def _cmd_run(args, repo: Path) -> int:
 
     # 5) schedule：跑 RunMeta（definition）→ RunResult（timeout<=0 → 不超时）。
     #    job 一完成即经 on_job_complete 实时落库（数据面判定真值先写，ADR 0030）。
-    result = schedule(
-        run_meta, resolver, progress_sink,
-        ScheduleOpts(
-            max_concurrency=args.max_concurrency,
-            fail_fast=args.fail_fast,
-            job_timeout_s=args.timeout if args.timeout > 0 else None,
-            grace_period_s=args.grace,
-        ),
-        on_job_complete=on_job_complete,
-        on_event=on_event,
-    )
+    #    **cloud 运行期兜底（ADR 0030 决定七）**：run 已开跑，落库回调（on_event/on_job_complete）中途抛 botocore
+    #    异常（如桶被删）——schedule 会先 stop 所有 worker 再冒泡；need_cloud 时接住归到退 1（error 级）。
+    #    单一 schedule 调用点 + 条件 try（不复制两份，避免回调/opts 透传漂移）。
+    def _run_schedule():
+        return schedule(
+            run_meta, resolver, progress_sink,
+            ScheduleOpts(
+                max_concurrency=args.max_concurrency,
+                fail_fast=args.fail_fast,
+                job_timeout_s=args.timeout if args.timeout > 0 else None,
+                grace_period_s=args.grace,
+            ),
+            on_job_complete=on_job_complete,
+            on_event=on_event,
+        )
+
+    if need_cloud:
+        try:
+            result = _run_schedule()
+        except Exception as e:
+            if _is_botocore_error(e):
+                _progress(f"--backend cloud 运行期落库失败（DDB/S3 中途不可达，run 已开跑）：{e}")
+                return 1
+            raise
+    else:
+        result = _run_schedule()
 
     # 6) commit point（ADR 0030 决定三）：各 job 判定真值已由 on_job_complete 逐个流式落；此处只剩
     #    finalize（写总 status + ended_at）+ 归集 ReportStore（派生、永远最后）。「finalize 一落 = run 已提交」。
+    #    artifacts 落点指针由 compose 的 make_artifacts 按 backend URI 化组装（local file:// / cloud s3://+ddb://）。
     artifacts: dict[str, str] = {}
     if persistence:
-        root = Path(args.report_dir)
         index = persistence.finalize(result, ended_at=compose.now_iso(), materialize=args.materialize)
-        # 三层落点（ADR 0016）：RunStore(run_meta+run_state) + ResultStore(jobs/) + ReportStore(index/manifest)。
-        artifacts = {
-            "report_index": str(index),
-            "run_meta": str(root / run_id / "run_meta.json"),
-            "run_state": str(root / run_id / "run_state.json"),
-            "jobs_dir": str(root / run_id / "jobs"),
-        }
+        artifacts = make_artifacts(run_id, index)  # report_index=None（report 写失败被隔离）时该键省略
 
     # 7) 核心产出 → stdout（--json：单一 JSON 文档，把产物落点折进同一对象保可解析；否则人看文本汇总）。
     #    产物落点提示属诊断 → stderr（不论模式），不污染被重定向的 stdout 主输出。
@@ -274,10 +342,12 @@ def _cmd_run(args, repo: Path) -> int:
     else:
         print(render.render_text(result))
     if artifacts:
-        _progress(f"\nRunReport: {artifacts['report_index']}")
+        # report_index 键可能缺席（report 写失败被隔离，ADR 0030 决定三）——缺则提示写失败、不打裸值
+        report_line = artifacts.get("report_index", "<报告写入失败，已跳过；判定结果不受影响、仍已落库>")
+        _progress(f"\nRunReport: {report_line}")
         _progress(
-            f"RunStore: {artifacts['run_meta']} + run_state.json"
-            f" | 判定明细: {artifacts['jobs_dir']}/"
+            f"RunStore: {artifacts['run_meta']} + run_state"
+            f" | 判定明细: {artifacts['jobs_dir']}"
         )
 
     # 退出码基于 run 级 status（ADR 0031 决定五）：读 schedule 返回的内存终值（必是终态，不回读落库态）。
