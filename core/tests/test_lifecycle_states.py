@@ -190,14 +190,27 @@ def test_aggregate_running_does_not_pollute_clean_pass():
 from core.errors import WorkerNetworkError  # noqa: E402
 
 
+# 死锁逃生用的宽松超时（秒）：远大于正常执行（~0.01s），仅防「gate 因逻辑 bug 永不放行」时测试永久挂死。
+# **正常路径绝不该触及它**——测试后置断言会校验 gate 确被放行（返回 True），超时（返回 False）视为测试失败，
+# 绝不让超时静默退化成「abort_flag 未 set → network_error 误判」（那正是本测试曾有的残留 flaky 根源）。
+_DEADLOCK_ESCAPE_S = 30.0
+
+
 class _NetRaiseEngine:
     """victim job 的 worker：等一个 gate 放行后才抛 WorkerNetworkError（模拟「建连退避期间」被中止/超时后退 80）。
-    crash job：立刻崩，让 schedule set abort_flag（fail-fast 场景用）。"""
+    crash job：立刻崩，让 schedule set abort_flag（fail-fast 场景用）。
+
+    **确定性同步（去 flake 关键）**：victim 对 gate 用**接近无限**的等待（_DEADLOCK_ESCAPE_S，仅作死锁逃生），
+    **不用短超时兜底**——短超时会打破「被放行 ⟺ abort_flag 已 set」的耦合：极端调度饥饿下 wait 超时先于
+    _stop_all 返回，victim 带 abort_flag=False 往下抛 → 误落 network_error（实测 ~0.8% 残留 flaky，对抗验证
+    暴露）。改无限等 + 后置断言 gate 确被放行后，「被放行」与「abort_flag 已 set」由 _stop_all 的程序序
+    （先 set 后 stop）刚性耦合，无超时旁路。crash 的 entered.wait 同理放宽。gate_released 记录放行事实供断言。"""
     def __init__(self, gate: threading.Event, set_on_victim_entry: threading.Event | None = None):
         self.handles: dict = {}
         self.run_count: dict = {}
         self._gate = gate
         self._entered = set_on_victim_entry
+        self.gate_released = False  # victim 是否被真正放行（True）而非死锁逃生超时（False）——供测试后置断言
 
     def run_scope(self, job):
         h = FakeWorkerHandle()
@@ -209,14 +222,15 @@ class _NetRaiseEngine:
         if job.scope_id == "crash":
             # crash 必须等 victim 先进入事件循环（过了起跑前 abort 检查）才崩——否则 victim 会被判 SKIPPED 而非 ABORTED
             if self._entered is not None:
-                self._entered.wait(timeout=5)
+                self._entered.wait(timeout=_DEADLOCK_ESCAPE_S)
             raise RuntimeError("crash 崩 → set abort_flag")
         # victim：先吐一个事件证明已 spawn、在事件循环里（过了起跑前检查）；宣告 entered；
         # 再 wait gate（被 fail-fast stop 时放行）→ 抛网络码 → 命中 except WorkerNetworkError 块的 abort 分支。
         yield ScopeStarted(scope_id="victim", session_id="sess-v")
         if self._entered is not None:
             self._entered.set()
-        self._gate.wait(timeout=5)
+        # 接近无限等（仅死锁逃生）：正常必被 gate.set() 唤醒。记录是否真放行（非超时）供断言。
+        self.gate_released = self._gate.wait(timeout=_DEADLOCK_ESCAPE_S)
         raise WorkerNetworkError("victim 建连失败、以网络码退出")
 
 
@@ -225,11 +239,15 @@ def test_network_error_during_abort_is_aborted_not_network():
     gate = threading.Event()
     entered = threading.Event()
     engine = _NetRaiseEngine(gate, set_on_victim_entry=entered)
-    # victim 被 stop 时（schedule fail-fast → 调 handle.stop）放行 gate，让它在 abort 已生效后才抛网络码
+    # victim 被 stop 时（schedule fail-fast → 调 handle.stop）放行 gate，让它在 abort 已生效后才抛网络码。
+    # **只认 victim 自己的 handle.stop**——否则 crash 崩溃时它 except 里的 self._stop() 也会触发本 hook、
+    # 提前 set gate（那发生在主线程 _stop_all 的 abort_flag.set() 之前），victim 会在 abort_flag 未 set 时
+    # 就抛 WorkerNetworkError → 误落 network_error 分支（曾致本测试 ~44% 误判，根因是共享 gate 被计划外路径放行）。
     orig_stop = FakeWorkerHandle.stop
 
     def stop_hook(self, grace_period_s):
-        gate.set()
+        if self is engine.handles.get("victim"):  # 仅 victim 的 stop（fail-fast 真正掐 victim 时，此刻 abort_flag 必已 set）放行
+            gate.set()
         return orig_stop(self, grace_period_s)
 
     FakeWorkerHandle.stop = stop_hook
@@ -240,6 +258,9 @@ def test_network_error_during_abort_is_aborted_not_network():
         )
     finally:
         FakeWorkerHandle.stop = orig_stop
+    # 前置校验：victim 确被真正放行（gate.set()），而非死锁逃生超时——后者意味着「被放行 ⟺ abort_flag 已 set」
+    # 的耦合被超时旁路打破，此时下面的 ABORTED 断言即便偶然通过也不可信。钉死这一条，杜绝超时静默退化。
+    assert engine.gate_released, "victim 未被真正放行（gate 超时），耦合被打破——测试环境异常，非有效断言"
     victim_jr = next(jr for jr in result.jobs if jr.scope_id == "victim")
     assert victim_jr.status == Status.ABORTED          # abort 分支优先：不记成 network_error
     assert victim_jr.error_type is None                # aborted 不带 errorType
