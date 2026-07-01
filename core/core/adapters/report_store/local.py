@@ -68,25 +68,32 @@ class LocalReportStore:
         """探活 no-op（ADR 0030 决定七）：本地文件后端无「桶不存在」问题，目录随写随建。"""
 
     def _collect(self, result: RunResult, run_dir: Path, materialize: bool) -> list[dict]:
-        """遍历 result 树，把每个 ReportRef 投影成一条扁平 index 项。
+        """遍历 result 树，把每个 ReportRef 投影成一条扁平 index 项（三级，ADR 0027）。
 
-        scenario_id=None 表 scope 级 ref（来自 scope_done）；否则是 scenario 级（来自 scenario_done）。
+        粒度由 scenario_id/step_index 是否为 None 表达：都 None=scope 级；仅 step_index None=scenario 级；
+        两者都非 None=step 级（Nova trajectory 下沉，同 scenario 多 trajectory 靠 step_index 区分）。
         """
         entries: list[dict] = []
         seq = 0  # 单调序号：materialize 时给 artifact 目标名加前缀去碰撞（不同源目录同 basename 不互相覆盖）
         for jr in result.jobs:
-            for rr in jr.report_refs:
-                entries.append(self._entry(jr.scope_id, None, jr.engine, rr, run_dir, materialize, seq))
+            for rr in jr.report_refs:  # scope 级（Midscene report / Nova session summary）
+                entries.append(self._entry(jr.scope_id, None, None, jr.engine, rr, run_dir, materialize, seq))
                 seq += 1
             for sr in jr.scenarios:
-                for rr in sr.report_refs:
+                for rr in sr.report_refs:  # scenario 级（当前引擎均不填，留作扩展）
                     entries.append(
-                        self._entry(jr.scope_id, sr.scenario_id, jr.engine, rr, run_dir, materialize, seq)
+                        self._entry(jr.scope_id, sr.scenario_id, None, jr.engine, rr, run_dir, materialize, seq)
                     )
                     seq += 1
+                for st in sr.steps:
+                    for rr in st.report_refs:  # step 级（Nova trajectory 下沉）
+                        entries.append(
+                            self._entry(jr.scope_id, sr.scenario_id, st.index, jr.engine, rr, run_dir, materialize, seq)
+                        )
+                        seq += 1
         return entries
 
-    def _entry(self, scope_id, scenario_id, engine, rr, run_dir: Path, materialize: bool, seq: int) -> dict:
+    def _entry(self, scope_id, scenario_id, step_index, engine, rr, run_dir: Path, materialize: bool, seq: int) -> dict:
         href = rr.ref
         if materialize:
             local = _local_path(rr.ref)
@@ -95,6 +102,7 @@ class LocalReportStore:
         return {
             "scope_id": scope_id,
             "scenario_id": scenario_id,
+            "step_index": step_index,  # None=scope/scenario 级；非 None=step 级（同 scenario 多 trajectory 区分）
             "engine": engine,
             "kind": rr.kind,
             "ref": rr.ref,            # 原始 ref（不透明，原样保留）
@@ -230,9 +238,11 @@ def _render_index_html(manifest: dict, result: RunResult) -> str:
     for e in manifest["report_index"]:
         anchor = e.get("label") or e["kind"]
         scen = f" · {esc(e['scenario_id'])}" if e.get("scenario_id") else ""
+        # step 级 trajectory：拼 step[N]，否则同 scenario 多 trajectory 在导航里无法区分
+        step = f" · step[{e['step_index']}]" if e.get("step_index") is not None else ""
         rows.append(
             f'<li>{_dot(job_status.get(e["scope_id"], ""))}'
-            f'<code>{esc(e["scope_id"])}{scen}</code> '
+            f'<code>{esc(e["scope_id"])}{scen}{step}</code> '
             f'<span class="eng">{esc(e.get("engine") or "")}</span> '
             f'<span class="kind">[{esc(e["kind"])}]</span> '
             f'<a href="{esc(e["href"])}">{esc(anchor)}</a></li>'

@@ -57,14 +57,14 @@ def test_manifest_shape(s3_report_store, aws, tmp_path):
     assert "tool" not in m
     # 纯派生视图：不内嵌 result 真值副本（靠 run_id 软引用，[0027]/[0016]）
     assert "result" not in m
-    # report_index 扁平投影：scope 级（scenario_id=None）+ act 级各一条
+    # report_index 扁平投影：scope 级 report（scenario_id=None）+ step 级 trajectory 各一条（对拍 local，ADR 0027）
     idx = m["report_index"]
     assert len(idx) == 2
-    scope_entry = next(e for e in idx if e["kind"] == "scope")
-    act_entry = next(e for e in idx if e["kind"] == "act")
-    assert scope_entry["scenario_id"] is None
-    assert scope_entry["engine"] == "midscene"
-    assert act_entry["scenario_id"] == "features/wiki.feature:6"
+    report_entry = next(e for e in idx if e["kind"] == "report")
+    traj_entry = next(e for e in idx if e["kind"] == "trajectory")
+    assert report_entry["scenario_id"] is None and report_entry["step_index"] is None
+    assert report_entry["engine"] == "midscene"
+    assert traj_entry["scenario_id"] == "features/wiki.feature:6" and traj_entry["step_index"] == 0
 
 
 # ---- index.html 链接 + 判定明细（对拍 test_index_html_links_and_summary）----
@@ -76,7 +76,7 @@ def test_index_html_links_and_summary(s3_report_store, aws, tmp_path):
     assert "passed" in txt.lower()
     assert "midscene" in txt
     assert "Midscene report" in txt          # label 作锚文本
-    assert "[scope]" in txt and "[act]" in txt
+    assert "[report]" in txt and "[trajectory]" in txt
     assert "判定明细" in txt
     assert "features/wiki.feature:6" in txt   # scenario_id
     assert "step[0]" in txt                   # step 级判定

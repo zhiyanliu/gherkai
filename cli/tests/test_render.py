@@ -35,7 +35,7 @@ def _sample_run() -> RunResult:
                 total_tokens=10573,
                 duration_ms=11000.0,
                 session_id="sess-abc",
-                report_refs=(ReportRef(kind="scope", ref=ResourceUri("file:///x/report.html"), label="Midscene report"),),
+                report_refs=(ReportRef(kind="report", ref=ResourceUri("file:///x/report.html"), label="Midscene report"),),
                 scenarios=[
                     ScenarioResult(
                         scenario_id="features/demo.feature:6",
@@ -63,10 +63,33 @@ def test_render_text_nests_and_shows_cost_and_duration():
     assert "10573 tokens" in txt
     assert "总墙钟时长: 12.0s" in txt
     assert "scope 墙钟: 11.0s" in txt
-    assert "step[1]: passed (7.0s) 投票 3/3" in txt  # 多票 step 显 tally（与 format_event/index.html 一致）
-    assert "step[0]: passed (3.0s)" in txt and "投票" not in txt.split("step[0]")[1].split("step[1]")[0]  # step0 无 votes 不显
-    assert "sessionId: sess-abc" in txt
-    assert "report[scope]: file:///x/report.html" in txt
+    assert "step 1: passed (7.0s) 投票 3/3" in txt  # 多票 step 显 tally（与 format_event/index.html 一致）
+    assert "step 0: passed (3.0s)" in txt and "投票" not in txt.split("step 0")[1].split("step 1")[0]  # step0 无 votes 不显
+    assert "session id: sess-abc" in txt
+    assert "report（Midscene report）: file:///x/report.html" in txt  # label 作锚文本、缺则回落 kind
+
+
+def test_render_text_shows_step_level_report_refs():
+    # 回归：Nova trajectory 挂 step 级 report_refs（下沉，ADR 0027）——文本汇总必须打 step 级，
+    # 否则 Nova 报告静默漏掉（曾漏打过；一个 step 可多个 trajectory）。
+    from core.model import StepResult
+    job = Job(scope_id="s", scope_name="s", engine="novaact", scenarios=())
+    run = RunResult(
+        run_meta=RunMeta(run_id="r", created_at="", jobs=(job,)),
+        status=Status.PASSED,
+        jobs=[JobResult(job=job, status=Status.PASSED, scenarios=[
+            ScenarioResult(scenario_id="s:0", status=Status.PASSED, steps=[
+                StepResult(index=0, status=Status.PASSED, report_refs=(
+                    ReportRef(kind="trajectory", ref=ResourceUri("file:///t/act_0.html"), label=None),
+                    ReportRef(kind="trajectory", ref=ResourceUri("file:///t/act_1.html"), label="trajectory 2"),
+                )),
+            ]),
+        ])],
+    )
+    txt = render.render_text(run)
+    # step 级 ref 都被渲染：label 缺 → 回落 kind "trajectory"；有 label → 用 label
+    assert "report（trajectory）: file:///t/act_0.html" in txt
+    assert "report（trajectory 2）: file:///t/act_1.html" in txt
 
 
 def test_to_dict_shape_and_no_dollar():
@@ -83,7 +106,7 @@ def test_to_dict_shape_and_no_dollar():
     assert "engine" not in job and "scope_name" not in job
     assert d["run_meta"]["jobs"][0]["engine"] == "midscene"   # def 真值在 run_meta
     assert job["report_refs"] == [
-        {"kind": "scope", "ref": "file:///x/report.html", "label": "Midscene report"}
+        {"kind": "report", "ref": "file:///x/report.html", "label": "Midscene report"}
     ]
     step1 = job["scenarios"][0]["steps"][1]
     assert step1["votes"] == {"yes": 3, "total": 3}

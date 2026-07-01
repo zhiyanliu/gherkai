@@ -50,14 +50,15 @@ def _run_with_refs(tmp: Path) -> RunResult:
                 status=Status.PASSED,
                 total_tokens=10573,
                 duration_ms=11000.0,
-                report_refs=(ReportRef(kind="scope", ref=ResourceUri(f"file://{html}"), label="Midscene report"),),
+                # scope 级 ref（Midscene report，kind=report，ADR 0027）
+                report_refs=(ReportRef(kind="report", ref=ResourceUri(f"file://{html}"), label="Midscene report"),),
                 scenarios=[
                     ScenarioResult(
                         scenario_id="features/wiki.feature:6",
                         status=Status.PASSED,
-                        steps=[StepResult(index=0, status=Status.PASSED)],
-                        # scenario 级 ref（act 粒度，对称 Nova）
-                        report_refs=(ReportRef(kind="act", ref=ResourceUri("file:///tmp/traj/act_0.html")),),
+                        # step 级 ref（Nova trajectory 下沉，kind=trajectory，ADR 0027）
+                        steps=[StepResult(index=0, status=Status.PASSED,
+                                          report_refs=(ReportRef(kind="trajectory", ref=ResourceUri("file:///tmp/traj/act_0.html")),))],
                     )
                 ],
             )
@@ -93,14 +94,15 @@ def test_manifest_shape(tmp_path: Path):
     assert "tool" not in m  # 不硬编码不确定的产品名进对外契约（删，无聚合多工具需求）
     # manifest 是纯派生视图：不内嵌 result 真值副本（靠 run_id 软引用，判定真值在 ResultStore，ADR 0027/0016）
     assert "result" not in m
-    # report_index 扁平投影：scope 级（scenario_id=None）+ act 级各一条
+    # report_index 扁平投影：scope 级（scenario_id=None）report + step 级 trajectory 各一条（ADR 0027）
     idx = m["report_index"]
     assert len(idx) == 2
-    scope_entry = next(e for e in idx if e["kind"] == "scope")
-    act_entry = next(e for e in idx if e["kind"] == "act")
-    assert scope_entry["scenario_id"] is None
-    assert scope_entry["engine"] == "midscene"
-    assert act_entry["scenario_id"] == "features/wiki.feature:6"
+    report_entry = next(e for e in idx if e["kind"] == "report")
+    traj_entry = next(e for e in idx if e["kind"] == "trajectory")
+    assert report_entry["scenario_id"] is None and report_entry["step_index"] is None  # scope 级
+    assert report_entry["engine"] == "midscene"
+    # step 级：scenario_id + step_index 都非空（粒度由挂载层级表达，非 kind）
+    assert traj_entry["scenario_id"] == "features/wiki.feature:6" and traj_entry["step_index"] == 0
 
 
 def test_index_html_links_and_summary(tmp_path: Path):
@@ -112,7 +114,8 @@ def test_index_html_links_and_summary(tmp_path: Path):
     assert "passed" in txt.lower()
     assert "midscene" in txt
     assert "Midscene report" in txt  # label 作锚文本
-    assert "[scope]" in txt and "[act]" in txt  # kind 原样回显（不分支）
+    assert "[report]" in txt and "[trajectory]" in txt  # kind 原样回显（不分支）
+    assert "step[0]" in txt  # step 级 trajectory 在导航里带 step[N]（同 scenario 多 trajectory 区分）
     # 判定明细块：scope_id / scenario_id / step / sessionId 直接呈现在页上（不止产物导航）
     assert "判定明细" in txt
     assert "features/wiki.feature:6" in txt   # scenario_id
@@ -177,9 +180,9 @@ def test_materialize_copies_local_artifact(tmp_path: Path):
     run_dir = tmp_path / "reports" / "20260629-abc123"
     # 本地 file:// 产物被按字节拷进 artifacts/（带 seq 前缀去碰撞）
     m = json.loads((run_dir / "manifest.json").read_text("utf-8"))
-    scope_entry = next(e for e in m["report_index"] if e["kind"] == "scope")
-    assert scope_entry["href"].startswith("artifacts/") and scope_entry["href"].endswith("_x.html")
-    copied = run_dir / scope_entry["href"]
+    report_entry = next(e for e in m["report_index"] if e["kind"] == "report")
+    assert report_entry["href"].startswith("artifacts/") and report_entry["href"].endswith("_x.html")
+    copied = run_dir / report_entry["href"]
     assert copied.exists() and copied.read_text("utf-8") == "<html>原生报告</html>"
 
 
@@ -190,8 +193,8 @@ def test_default_no_materialize_keeps_ref(tmp_path: Path):
     run_dir = tmp_path / "reports" / "20260629-abc123"
     assert not (run_dir / "artifacts").exists()
     m = json.loads((run_dir / "manifest.json").read_text("utf-8"))
-    scope_entry = next(e for e in m["report_index"] if e["kind"] == "scope")
-    assert scope_entry["href"] == scope_entry["ref"]  # 不拷贝时 href == ref
+    report_entry = next(e for e in m["report_index"] if e["kind"] == "report")
+    assert report_entry["href"] == report_entry["ref"]  # 不拷贝时 href == ref
 
 
 def test_empty_report_refs_still_valid_index(tmp_path: Path):
@@ -211,9 +214,9 @@ def test_materialize_same_basename_no_collision(tmp_path: Path):
     d2 = tmp_path / "b"; d2.mkdir(); (d2 / "report.html").write_text("BBB", encoding="utf-8")
     run = _rr("collide", [
         _jr("s1", "e", status=Status.PASSED,
-            report_refs=(ReportRef(kind="scope", ref=ResourceUri(f"file://{d1}/report.html")),)),
+            report_refs=(ReportRef(kind="report", ref=ResourceUri(f"file://{d1}/report.html")),)),
         _jr("s2", "e", status=Status.PASSED,
-            report_refs=(ReportRef(kind="scope", ref=ResourceUri(f"file://{d2}/report.html")),)),
+            report_refs=(ReportRef(kind="report", ref=ResourceUri(f"file://{d2}/report.html")),)),
     ], status=Status.PASSED)
     store = LocalReportStore(tmp_path / "reports")
     store.write(run.run_id, run, materialize=True)
@@ -232,7 +235,7 @@ def test_materialize_percent_encoded_path(tmp_path: Path):
     ref = ResourceUri("file://" + quote(str(src)))  # 路径 percent-encode（空格→%20、中文→%XX）
     run = _rr("pe", [
         _jr("s", "novaact", status=Status.PASSED,
-            report_refs=(ReportRef(kind="act", ref=ref),)),
+            report_refs=(ReportRef(kind="trajectory", ref=ref),)),
     ], status=Status.PASSED)
     store = LocalReportStore(tmp_path / "reports")
     store.write(run.run_id, run, materialize=True)

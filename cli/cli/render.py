@@ -43,8 +43,13 @@ def _ms(duration_ms: float | None) -> str:
 
 
 def render_text(result: RunResult) -> str:
-    """RunResult → 人看的多行汇总（嵌套 job/scenario/step + 时长 + 成本 + 报告指针）。"""
-    out: list[str] = ["", "===== RunResult =====", f"  总状态: {result.status.value}"]
+    """RunResult → 人看的多行汇总（嵌套 job/scenario/step + 时长 + 成本 + 报告指针）。
+
+    面向人的文本模式：用自然的词、不用变量名式术语（RunResult/sessionId/step[0] 这类）；
+    但 job/scenario/step/scope 是领域概念（用户写 feature/看 plan 都在用），保留原词。JSON 模式（to_dict）是
+    机器读的、字段名照旧。
+    """
+    out: list[str] = ["", "===== 运行结果 =====", f"  总状态: {result.status.value}"]
     if result.duration_ms is not None:
         out.append(f"  总墙钟时长: {_ms(result.duration_ms)}")
     cost_bits = _cost_bits(result.total_tokens, result.total_time_worked_s)
@@ -64,11 +69,19 @@ def render_text(result: RunResult) -> str:
             for st in sr.steps:
                 # total>1 才显投票 tally（与 format_event/index.html 一致；1/1 无抖动意义，不显）
                 v = f" 投票 {st.votes.yes}/{st.votes.total}" if st.votes and st.votes.total > 1 else ""
-                out.append(f"      step[{st.index}]: {st.status.value} ({_ms(st.duration_ms)}){v}")
+                out.append(f"      step {st.index}: {st.status.value} ({_ms(st.duration_ms)}){v}")
+                # step 级原生报告产物（Nova trajectory 挂这层，来自 step_done 下沉，ADR 0027）——缩进深一级
+                for rr in st.report_refs:
+                    out.append(f"        report（{rr.label or rr.kind}）: {rr.ref}")
+            # scenario 级原生报告产物：当前引擎均不填（Nova 已下沉 step 级、Midscene 报 scope 级），
+            # 保留作扩展兜底——未来引擎若在 scenario_done 报 report_refs 仍能显示（不透明搬运哲学，ADR 0027）
+            for rr in sr.report_refs:
+                out.append(f"      report（{rr.label or rr.kind}）: {rr.ref}")
         if jr.session_id:
-            out.append(f"    sessionId: {jr.session_id}")
+            out.append(f"    session id: {jr.session_id}")
+        # scope 级原生报告产物（Midscene report.html 挂这层，来自 scope_done）
         for rr in jr.report_refs:
-            out.append(f"    report[{rr.kind}]: {rr.ref}")
+            out.append(f"    report（{rr.label or rr.kind}）: {rr.ref}")
     return "\n".join(out)
 
 

@@ -25,11 +25,12 @@ from core.model import ReportRef, ResourceUri, RunResult
 from core.adapters.report_store.local import SCHEMA_VERSION, _render_index_html
 
 
-def _index_entry(scope_id: str, scenario_id: str | None, engine: str, rr: ReportRef) -> dict:
+def _index_entry(scope_id: str, scenario_id: str | None, step_index: int | None, engine: str, rr: ReportRef) -> dict:
     """report_index 一条扁平项（materialize=no-op：href==ref，不拷贝产物）。形状对拍 LocalReportStore._entry。"""
     return {
         "scope_id": scope_id,
         "scenario_id": scenario_id,
+        "step_index": step_index,  # None=scope/scenario 级；非 None=step 级（对拍 local，ADR 0027）
         "engine": engine,
         "kind": rr.kind,
         "ref": rr.ref,
@@ -55,14 +56,17 @@ class S3ReportStore:
         materialize 当 no-op（第一版，见模块 docstring）——收到 True 也忽略、不报错。
         """
         base = f"{self._prefix}{run_id}"
-        # report_index 顺序对拍 LocalReportStore._collect：每 job 内先 scope 级（scenario_id=None）后 scenario 级
+        # report_index 顺序对拍 LocalReportStore._collect：每 job 内 scope 级 → scenario 级 → step 级（三级，ADR 0027）
         index_entries: list[dict] = []
         for jr in result.jobs:
-            for rr in jr.report_refs:
-                index_entries.append(_index_entry(jr.scope_id, None, jr.engine, rr))
+            for rr in jr.report_refs:  # scope 级
+                index_entries.append(_index_entry(jr.scope_id, None, None, jr.engine, rr))
             for sr in jr.scenarios:
-                for rr in sr.report_refs:
-                    index_entries.append(_index_entry(jr.scope_id, sr.scenario_id, jr.engine, rr))
+                for rr in sr.report_refs:  # scenario 级（当前引擎均不填）
+                    index_entries.append(_index_entry(jr.scope_id, sr.scenario_id, None, jr.engine, rr))
+                for st in sr.steps:
+                    for rr in st.report_refs:  # step 级（Nova trajectory 下沉）
+                        index_entries.append(_index_entry(jr.scope_id, sr.scenario_id, st.index, jr.engine, rr))
 
         # manifest = 纯派生导航视图（同 Local，[0027]）：不内嵌 result 真值，靠 run_id 软引用
         manifest = {
