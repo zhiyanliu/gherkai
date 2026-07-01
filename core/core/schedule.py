@@ -337,7 +337,8 @@ class _Worker:
             dur_ms = (now - st) * 1000.0 if st is not None else None
             timing.steps.setdefault(event.scenario_id, []).append(
                 StepResult(index=event.step_index, status=event.status,
-                           duration_ms=dur_ms, votes=event.votes, error_type=event.error_type)
+                           duration_ms=dur_ms, votes=event.votes, error_type=event.error_type,
+                           report_refs=event.report_refs)  # step 级 trajectory 原样搬入（ADR 0027 下沉）
             )
         elif isinstance(event, ScenarioDone):
             scenario_status[event.scenario_id] = event.status

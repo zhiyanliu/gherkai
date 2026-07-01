@@ -113,17 +113,39 @@ def test_event_step_done_failed():
     assert ev.error_type == "assertion_failed"
 
 
+def test_event_step_done_with_report_refs():
+    # step 级 trajectory 下沉（ADR 0027）：wire 读 step_done 的 reportRefs（kind=trajectory）
+    ev = event_from_json({
+        "type": "step_done", "scenarioId": "s:0", "stepIndex": 1, "status": "passed",
+        "reportRefs": [
+            {"kind": "trajectory", "ref": "file:///tmp/act_0.html", "label": "trajectory 1"},
+            {"kind": "trajectory", "ref": "file:///tmp/act_1.html", "label": "trajectory 2"},
+        ],
+    })
+    assert isinstance(ev, StepDone)
+    assert len(ev.report_refs) == 2  # 一个 step 可多个 act
+    assert ev.report_refs[0].kind == "trajectory"
+    assert ev.report_refs[1].ref == "file:///tmp/act_1.html"
+
+
+def test_event_step_done_no_report_refs_defaults_empty():
+    # 无 reportRefs 的 step_done（确定性/导航步）→ 空 tuple（向后兼容）
+    ev = event_from_json({"type": "step_done", "scenarioId": "s:0", "stepIndex": 0, "status": "passed"})
+    assert ev.report_refs == ()
+
+
 def test_event_scope_done():
+    # scope 级 report_ref：Midscene report / Nova session summary（kind=summary，scope 级新语义）
     ev = event_from_json({
         "type": "scope_done", "scopeId": "login", "sessionId": "sess-123",
-        "reportRefs": [{"kind": "act", "ref": "file:///tmp/x.html", "label": "trajectory 1"}],
+        "reportRefs": [{"kind": "summary", "ref": "file:///tmp/session_summary.json", "label": "Nova session summary"}],
     })
     assert isinstance(ev, ScopeDone)
     assert ev.scope_id == "login"
     assert ev.session_id == "sess-123"
-    assert ev.report_refs[0].kind == "act"
-    assert ev.report_refs[0].ref == "file:///tmp/x.html"
-    assert ev.report_refs[0].label == "trajectory 1"
+    assert ev.report_refs[0].kind == "summary"
+    assert ev.report_refs[0].ref == "file:///tmp/session_summary.json"
+    assert ev.report_refs[0].label == "Nova session summary"
 
 
 # ---- 从行解析（worker stdout 一行）----

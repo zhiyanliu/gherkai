@@ -54,15 +54,15 @@ def _sample_run(run_id: str = "20260629-abc") -> RunResult:
                 total_tokens=10573,
                 duration_ms=11000.0,
                 session_id="sess-1",
-                report_refs=(ReportRef(kind="scope", ref=ResourceUri("file:///x.html"), label="r"),),
+                report_refs=(ReportRef(kind="report", ref=ResourceUri("file:///x.html"), label="r"),),
                 scenarios=[
                     ScenarioResult(
                         scenario_id="features/wiki.feature:6",
                         status=Status.PASSED,
                         duration_ms=10000.0,
-                        report_refs=(ReportRef(kind="act", ref=ResourceUri("file:///a.html")),),
                         steps=[
-                            StepResult(index=0, status=Status.PASSED, duration_ms=3000.0),
+                            StepResult(index=0, status=Status.PASSED, duration_ms=3000.0,
+                                       report_refs=(ReportRef(kind="trajectory", ref=ResourceUri("file:///a.html")),)),
                             StepResult(index=1, status=Status.PASSED, duration_ms=7000.0,
                                        votes=Votes(yes=3, total=3)),
                         ],
@@ -95,9 +95,10 @@ def test_serialize_round_trip():
     assert j0.job.scenarios[0].steps[1].text == "搜索 OpenAI"  # definition 完整重建（护 round-trip）
     assert j0.job.assertion_votes == 3  # assertion_votes 经 round-trip 不丢
     assert j0.session_id == "sess-1"
-    assert j0.report_refs[0].kind == "scope" and j0.report_refs[0].label == "r"
+    assert j0.report_refs[0].kind == "report" and j0.report_refs[0].label == "r"
     sr = j0.scenarios[0]
-    assert sr.report_refs[0].kind == "act"
+    assert sr.steps[0].report_refs[0].kind == "trajectory"  # step 级 trajectory 经 round-trip 不丢
+    assert sr.report_refs == ()  # 不再聚合到 scenario 级
     assert sr.steps[1].votes.yes == 3 and sr.steps[1].votes.total == 3
     assert sr.steps[0].duration_ms == 3000.0
     j1 = r2.jobs[1]

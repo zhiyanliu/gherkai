@@ -151,6 +151,7 @@ def job_result_to_dict(jr: JobResult, *, include_job: bool = True) -> dict:
                         "duration_ms": st.duration_ms,
                         "votes": ({"yes": st.votes.yes, "total": st.votes.total} if st.votes else None),
                         "error_type": st.error_type,
+                        "report_refs": [_ref_to_dict(rr) for rr in st.report_refs],  # step 级 trajectory（ADR 0027）
                     }
                     for st in sr.steps
                 ],
@@ -190,6 +191,7 @@ def job_result_from_dict(d: dict, *, job: Job | None = None) -> JobResult:
                         duration_ms=st.get("duration_ms"),
                         votes=_votes_from_dict(st.get("votes")),
                         error_type=st.get("error_type"),
+                        report_refs=tuple(_ref_from_dict(r) for r in st.get("report_refs", [])),  # 向后兼容：旧落盘无此键
                     )
                     for st in s.get("steps", [])
                 ],

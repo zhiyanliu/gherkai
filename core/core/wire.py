@@ -128,6 +128,7 @@ def event_from_json(d: dict) -> Event:
             cost=_cost_from_json(d.get("cost")),
             error_type=d.get("errorType"),
             message=d.get("message"),
+            report_refs=_report_refs_from_json(d.get("reportRefs")),  # step 级 trajectory（ADR 0027 下沉）
         )
     if t == "scenario_done":
         return ScenarioDone(

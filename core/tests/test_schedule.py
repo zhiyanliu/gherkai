@@ -379,21 +379,42 @@ def test_durations_none_without_started_events():
     )  # 无 step_started → step 时长 None（且本流无 step_started，step 也没被记）
 
 
-# ---- scope 级 reportRefs 从 scope_done 归约进 JobResult（Midscene 报告归集，ADR 0024）----
+# ---- scope 级 reportRefs 从 scope_done 归约进 JobResult（Midscene report，ADR 0024）----
 def test_scope_report_refs_reduced():
     events = [
         ScenarioStarted(scenario_id="m:0"),
         StepDone(scenario_id="m:0", step_index=0, status=Status.PASSED),
         ScenarioDone(scenario_id="m:0", status=Status.PASSED),
         ScopeDone(scope_id="m", session_id="sess-1",
-                  report_refs=(ReportRef(kind="scope", ref=ResourceUri("file:///midscene_run/report/x.html")),)),
+                  report_refs=(ReportRef(kind="report", ref=ResourceUri("file:///midscene_run/report/x.html")),)),
     ]
     engine = FakeEngine({"m": events})
     result = schedule(_rm([_job("m")]), FakeResolver(engine), CollectSink())
     jr = result.jobs[0]
     assert len(jr.report_refs) == 1
-    assert jr.report_refs[0].kind == "scope"
+    assert jr.report_refs[0].kind == "report"
     assert jr.report_refs[0].ref == "file:///midscene_run/report/x.html"
+
+
+# ---- step 级 reportRefs 从 step_done 归约进 StepResult（Nova trajectory 下沉，ADR 0027）----
+def test_step_report_refs_reduced():
+    events = [
+        ScenarioStarted(scenario_id="n:0"),
+        StepDone(scenario_id="n:0", step_index=0, status=Status.PASSED, report_refs=(
+            ReportRef(kind="trajectory", ref=ResourceUri("file:///t/act_0.html"), label="trajectory 1"),
+            ReportRef(kind="trajectory", ref=ResourceUri("file:///t/act_1.html"), label="trajectory 2"),
+        )),
+        StepDone(scenario_id="n:0", step_index=1, status=Status.PASSED),  # 无 trajectory（如确定性步）
+        ScenarioDone(scenario_id="n:0", status=Status.PASSED),
+        ScopeDone(scope_id="n", session_id="sess-n"),
+    ]
+    engine = FakeEngine({"n": events})
+    result = schedule(_rm([_job("n")]), FakeResolver(engine), CollectSink())
+    steps = result.jobs[0].scenarios[0].steps
+    # step 0 挂两个 trajectory、原样搬入不聚合到 scenario 级
+    assert len(steps[0].report_refs) == 2 and steps[0].report_refs[0].kind == "trajectory"
+    assert steps[1].report_refs == ()  # 无产物步为空
+    assert result.jobs[0].scenarios[0].report_refs == ()  # 不再聚合到 scenario 级
 
 
 # ---- 网络瞬时故障的 job 级重试（ADR 0028）----
