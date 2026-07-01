@@ -33,12 +33,33 @@
 worker **按白名单匹配具体瞬时异常类型**,不用宽基类兜底:
 
 - **Python（Nova）**:`ssl.SSLError`（含 `SSLEOFError`）、`ConnectionError`、`TimeoutError`、`socket.timeout`、
-  botocore `EndpointConnectionError`/`ConnectionClosedError`、urllib3 `ProtocolError`。
+  botocore `EndpointConnectionError`/`ConnectionClosedError`/**`ConnectTimeoutError`/`ReadTimeoutError`**、urllib3 `ProtocolError`。
   **明确排除 `socket.gaierror`（DNS 永久错）**——它与 `ssl.SSLError` 都继承 `OSError`,用宽 `OSError`
   兜底会把永久错也当瞬时重试,故只匹配具体类型。
+- **botocore `ClientError`（服务端瞬时故障，按错误码/HTTP 状态码细分，非整类）**:AgentCore 起会话
+  （`start_browser_session`）是 boto3 调用,服务端瞬时不可用/限流时抛 `ClientError`——它**直接继承 `Exception`、
+  混着永久错**（`ValidationException`/`AccessDenied`）,**不能整类当瞬时**,须按码细分:
+  - 读 `e.response["Error"]["Code"]` ∈ **瞬时码集**（`RequestTimeout`/`RequestTimeoutException`/`PriorRequestNotComplete`）
+    **或节流码集**（`Throttling`/`ThrottlingException`/`ThrottledException`/`TooManyRequestsException`/`RequestLimitExceeded`/
+    `SlowDown`/`ServiceUnavailable` 等）→ 瞬时;
+  - 或读 `e.response["ResponseMetadata"]["HTTPStatusCode"]` ∈ **{500,502,503,504}** → 瞬时;
+  - 其余 `ClientError`（4xx 客户端错、`ValidationException`/`AccessDeniedException` 等永久错）→ **不归 network_error**。
+  - **码集对齐 botocore 权威常量**（`TransientRetryableChecker._TRANSIENT_ERROR_CODES`/`_TRANSIENT_STATUS_CODES`
+    + `ThrottledRetryableChecker._THROTTLED_ERROR_CODES`）——**借判据、不借 API**:不硬构造 botocore 内部
+    `RetryContext` 去调它的 `is_retryable()`（那要 http_response/parsed_response 等请求栈内部对象、跨版本脆，
+    且我们 catch 到的是被 Nova SDK 包了两层的异常、根本没有 RetryContext）,而是把它那张稳定的码/状态码表**内联**成
+    自己的白名单,判定对齐、无内部 API 依赖。**注意 SIGTERM 穿透仍靠我们的手写退避**（见上「worker 层退避」）——
+    只借 botocore 的分类判据,绝不借它的重试执行（`time.sleep` 吞信号）。
+- **穿透 Nova SDK 的两层包装靠异常链遍历（纠正旧猜测）**:AgentCore 会话建立失败时,底层 exc 被 Nova SDK
+  包成 `BrowserAuthError(...) from exc`、再包成 `StartFailed(...) from e`（`agentcore_session_provider.py`/
+  `nova_act.py`,**每层都带 `from`**）。故**不需要识别 `BrowserAuthError`/`StartFailed` 类本身**——
+  `_is_transient_network` 遍历 `__cause__/__context__` 链能穿透到底层 exc 命中白名单。**真正的盲区是底层 exc 的
+  类型/码没被白名单覆盖**（boto `ClientError` 节流/5xx、`ConnectTimeoutError`/`ReadTimeoutError`）,本次补齐。
 - **Node（Midscene）**:error code `ECONNRESET`/`ECONNREFUSED`/`ETIMEDOUT`/`EPIPE`/`EAI_AGAIN`/`ECONNABORTED`
-  + TLS/握手类 message 匹配。**排除 `ENOTFOUND`（DNS 永久）**。
-- **拿不准 → 不归 network_error**（归 engine_error、不重试）。明确非 network 的:鉴权失败、4xx、配置错、DNS 永久失败。
+  + TLS/握手类 message 匹配;**AWS SDK v3 服务端瞬时**——`error.name` ∈ 节流集（`ThrottlingException`/
+  `TooManyRequestsException`/`ServiceUnavailable` 等）或 `error.$metadata?.httpStatusCode` ∈ **{500,502,503,504}**
+  或 `error.$retryable?.throttling===true`。**排除 `ENOTFOUND`（DNS 永久）**、4xx 客户端错。
+- **拿不准 → 不归 network_error**（归 engine_error、不重试）。明确非 network 的:鉴权失败、4xx、配置错、DNS 永久失败、`ValidationException`。
 
 > **已知欠账：两腿对"导航 SSL 失败"的分类不对称**（真跑暴露、本轮 defer 不改）。同一瞬时 SSL 故障（如握手被 `UNEXPECTED_EOF` 打断）：**Nova** 腿 `go_to_url` 抛异常，异常链底层含 `ssl.SSLError`/`SSLEOFError`，`_is_transient_network` 遍历 `__cause__/__context__` 命中 → `network_error`（准）。**Midscene** 腿 `page.goto` 抛的是 Chromium 的 `net::ERR_CERT_*`（如 `ERR_CERT_AUTHORITY_INVALID`），其 message 文案**不含** `isTransientNetwork` 的 message 正则关键词（`ssl/tls/handshake/UNEXPECTED_EOF`）、也无对应 error code → 落 `engine_error`。**本轮不盲改** Midscene 分类：因为 Chromium 把"瞬时握手中断"与"真证书错（过期/自签/域名不符，永久）"**都归成同一个 `net::ERR_CERT_*`、丢了区分**——盲目把 `ERR_CERT_*` 当瞬时会误判真证书错为可重试、无意义重试 N 次。**要真修需先用真 Midscene SSL 样本**（访问自签/过期证书站点真跑）确认 Chromium 到底报什么 code/message、能否区分瞬时 vs 真证书错，再决定分类。**注意**：这条分类不对称**不影响 step 短路**（[0031](./0031-job-lifecycle-states-and-severity.md) 决定六，现已实现）——短路判据锁 `status==error`（不看 error_type），两腿 error 都触发、行为对称；分类不对称只影响用户看到的 errorType 文案。
 

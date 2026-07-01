@@ -76,6 +76,40 @@ test("isTransientNetwork: 遍历 cause 链识别底层瞬时", async () => {
   assert.equal(isTransientNetwork(outer), true);
 });
 
+// ---- AWS SDK v3 服务端瞬时（AgentCore 起会话节流/5xx，ADR 0028，对称 Nova ClientError 细分）----
+test("isTransientNetwork: AWS 节流 name（ThrottlingException 等）→ true", async () => {
+  const { isTransientNetwork } = await importMod();
+  for (const name of ["ThrottlingException", "TooManyRequestsException", "SlowDown", "ServiceUnavailable"]) {
+    assert.equal(isTransientNetwork({ name }), true, name);
+  }
+});
+
+test("isTransientNetwork: AWS 5xx $metadata.httpStatusCode → true", async () => {
+  const { isTransientNetwork } = await importMod();
+  for (const httpStatusCode of [500, 502, 503, 504]) {
+    assert.equal(isTransientNetwork({ $metadata: { httpStatusCode } }), true, String(httpStatusCode));
+  }
+});
+
+test("isTransientNetwork: AWS $retryable.throttling → true", async () => {
+  const { isTransientNetwork } = await importMod();
+  assert.equal(isTransientNetwork({ $retryable: { throttling: true } }), true);
+});
+
+test("isTransientNetwork: AWS 永久错（ValidationException / 4xx）→ false", async () => {
+  const { isTransientNetwork } = await importMod();
+  assert.equal(isTransientNetwork({ name: "ValidationException", $metadata: { httpStatusCode: 400 } }), false);
+  assert.equal(isTransientNetwork({ name: "AccessDeniedException", $metadata: { httpStatusCode: 403 } }), false);
+});
+
+test("isTransientNetwork: AgentCore 起会话节流错在 cause 链里（穿透包装）→ true", async () => {
+  // 对称 Nova：底层 AWS 节流错被外层包裹，遍历 cause 链须穿透命中
+  const { isTransientNetwork } = await importMod();
+  const outer: any = new Error("Failed to start browser session");
+  outer.cause = { name: "ThrottlingException", $metadata: { httpStatusCode: 429 } };
+  assert.equal(isTransientNetwork(outer), true);
+});
+
 // ---- aggregate：error > failed > passed ----
 test("aggregate 优先级 error>failed>passed", async () => {
   const { aggregate } = await importMod();

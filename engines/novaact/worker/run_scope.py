@@ -336,20 +336,55 @@ _CONNECT_ATTEMPTS = 4
 _BACKOFF_S = [0.5, 1.0, 2.0]  # attempt 失败后的退避；±20% jitter 由调用处加（这里固定，本地 smoke 够用）
 
 
+# boto ClientError 的瞬时/节流错误码集（ADR 0028）——**对齐 botocore 权威常量、借判据不借 API**：
+# = TransientRetryableChecker._TRANSIENT_ERROR_CODES + ThrottledRetryableChecker._THROTTLED_ERROR_CODES。
+# AgentCore 起会话（start_browser_session）是 boto3 调用，服务端瞬时不可用/限流抛 ClientError（直接继承
+# Exception、混着永久错），故按码细分、不整类当瞬时。内联这张稳定的码表而非硬构造 botocore RetryContext 去
+# 调它的 is_retryable（那要请求栈内部对象、跨版本脆，且我们 catch 到的是被 Nova SDK 包两层的异常、没有 RetryContext）。
+_BOTO_TRANSIENT_CODES = frozenset({
+    "RequestTimeout", "RequestTimeoutException", "PriorRequestNotComplete",  # 瞬时
+    "Throttling", "ThrottlingException", "ThrottledException", "RequestThrottledException",  # 节流
+    "TooManyRequestsException", "ProvisionedThroughputExceededException", "TransactionInProgressException",
+    "RequestLimitExceeded", "BandwidthLimitExceeded", "LimitExceededException", "RequestThrottled",
+    "SlowDown", "EC2ThrottledException", "ServiceUnavailable", "ServiceUnavailableException",
+})
+_BOTO_TRANSIENT_STATUS = frozenset({500, 502, 503, 504})
+
+
+def _is_transient_client_error(e: BaseException) -> bool:
+    """boto ClientError 是否服务端瞬时（按错误码/HTTP 状态码细分，ADR 0028）。非 ClientError 返回 False。"""
+    try:
+        from botocore.exceptions import ClientError
+    except ImportError:
+        return False
+    if not isinstance(e, ClientError):
+        return False
+    resp = getattr(e, "response", None) or {}
+    code = (resp.get("Error") or {}).get("Code")
+    if code in _BOTO_TRANSIENT_CODES:
+        return True
+    status = (resp.get("ResponseMetadata") or {}).get("HTTPStatusCode")
+    return status in _BOTO_TRANSIENT_STATUS  # 5xx（500/502/503/504）；4xx 客户端错/其余 → 永久
+
+
 def _is_transient_network(e: BaseException) -> bool:
     """是否网络/SSL 瞬时故障（可重试，ADR 0028）。
 
     白名单匹配**具体**瞬时类型，不用宽 OSError 兜底——ssl.SSLError 与 socket.gaierror 都继承 OSError，
     宽匹配会把永久错也当瞬时重试。gaierror 按 errno 细分：EAI_AGAIN(临时) 当瞬时、其余(EAI_NONAME 等永久) 否决
     （对齐 Midscene 的 EAI_AGAIN 白名单，保两腿对 DNS 临时抖动恢复力对称，ADR 0028）。
+    boto `ClientError` 按错误码/HTTP 状态码细分（节流/5xx 瞬时、4xx/ValidationException 永久，见 _is_transient_client_error）。
 
-    **遍历异常链**（__cause__/__context__）：Nova/boto SDK 常把底层 ssl.SSLError 包成自有异常
-    （BrowserAuthError 等），只看最外层会漏判——任一层命中白名单即判瞬时（用 id 集防环）。
+    **遍历异常链**（__cause__/__context__）：Nova/boto SDK 常把底层瞬时错包成自有异常
+    （AgentCore 会话建立失败 → BrowserAuthError ← ClientError，每层带 from），只看最外层会漏判——
+    任一层命中白名单即判瞬时（用 id 集防环）。
     """
     transient: tuple[type[BaseException], ...] = (ssl.SSLError, ConnectionError, TimeoutError, socket.timeout)
     try:
-        from botocore.exceptions import EndpointConnectionError, ConnectionClosedError
-        transient += (EndpointConnectionError, ConnectionClosedError)
+        from botocore.exceptions import (
+            EndpointConnectionError, ConnectionClosedError, ConnectTimeoutError, ReadTimeoutError,
+        )
+        transient += (EndpointConnectionError, ConnectionClosedError, ConnectTimeoutError, ReadTimeoutError)
     except ImportError:
         pass
     try:
@@ -364,8 +399,10 @@ def _is_transient_network(e: BaseException) -> bool:
         seen.add(id(cur))
         if isinstance(cur, socket.gaierror):
             # DNS 解析失败：按 errno 细分（gaierror 同时覆盖临时与永久，不能一律否决）——
-            # EAI_AGAIN(临时，可重试，对齐 Midscene 的 EAI_AGAIN 白名单) → 瞬时；其余(EAI_NONAME 等永久) → 否决。
+            # EAI_AGAIN(临时，可重试，对齐 Midscene 的 EAI_AGAIN 白名单) → 瞬时；其余(EAI_NONAME 等永久) 否决。
             return cur.args[0] == socket.EAI_AGAIN if cur.args else False
+        if _is_transient_client_error(cur):  # boto ClientError 节流/5xx（AgentCore 起会话瞬时故障，ADR 0028）
+            return True
         if isinstance(cur, transient):
             return True
         cur = cur.__cause__ or cur.__context__

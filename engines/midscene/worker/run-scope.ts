@@ -45,16 +45,33 @@ const STOP_SESSION_BUDGET_MS = 3000;
 // 服务端可能已建会话但客户端没拿到 id。给一小段时间让 Start 的 await 返回、id 落进待清理集，再 cleanup。
 const INFLIGHT_SETTLE_MS = 1500;
 
-// 是否网络/SSL 瞬时故障（可重试，ADR 0028）。Node 侧按 error code / TLS 错识别瞬时类。
-// 遍历 error.cause 链：SDK 常把底层 socket/TLS 错包成自有 Error，只看最外层会漏判（防环：限 8 层）。
+// AWS SDK v3 服务端瞬时故障的节流错误 name 集（ADR 0028）——对齐 botocore 节流码集（保两腿对称）。
+// AgentCore 起会话（StartBrowserSessionCommand）是 AWS SDK v3 调用，服务端瞬时不可用/限流时抛的 error
+// 带 name（如 ThrottlingException）+ $metadata.httpStatusCode + 可选 $retryable。
+const AWS_THROTTLE_NAMES = new Set([
+  "ThrottlingException", "Throttling", "ThrottledException", "RequestThrottledException",
+  "TooManyRequestsException", "ProvisionedThroughputExceededException", "RequestLimitExceeded",
+  "SlowDown", "LimitExceededException", "ServiceUnavailable", "ServiceUnavailableException",
+]);
+const AWS_TRANSIENT_STATUS = new Set([500, 502, 503, 504]);
+
+// 是否网络/SSL 瞬时故障（可重试，ADR 0028）。Node 侧按 error code / TLS 错 / AWS SDK v3 服务端瞬时识别。
+// 遍历 error.cause 链：SDK 常把底层 socket/TLS 错、或 AWS 服务端错包成自有 Error，只看最外层会漏判（防环：限 8 层）。
 function isTransientNetwork(e: unknown): boolean {
-  let cur = e as { code?: string; message?: string; cause?: unknown } | undefined;
+  let cur = e as {
+    code?: string; name?: string; message?: string; cause?: unknown;
+    $metadata?: { httpStatusCode?: number }; $retryable?: { throttling?: boolean };
+  } | undefined;
   for (let depth = 0; cur && depth < 8; depth++) {
     const code = cur.code ?? "";
     if (code === "ENOTFOUND") return false; // DNS 未找到（永久），此层直接否决
     if (["ECONNRESET", "ECONNREFUSED", "ETIMEDOUT", "EPIPE", "EAI_AGAIN", "ECONNABORTED"].includes(code)) {
       return true; // EAI_AGAIN = DNS 临时失败，当瞬时
     }
+    // AWS SDK v3 服务端瞬时（AgentCore 起会话节流/5xx，ADR 0028）：name 节流集 / 5xx 状态 / $retryable.throttling
+    if (cur.name && AWS_THROTTLE_NAMES.has(cur.name)) return true;
+    if (cur.$metadata?.httpStatusCode != null && AWS_TRANSIENT_STATUS.has(cur.$metadata.httpStatusCode)) return true;
+    if (cur.$retryable?.throttling === true) return true;
     const msg = cur.message ?? "";
     if (/\b(socket hang up|ssl|tls|econnreset|epipe|timeout|handshake|UNEXPECTED_EOF)\b/i.test(msg)) return true;
     cur = cur.cause as typeof cur;
