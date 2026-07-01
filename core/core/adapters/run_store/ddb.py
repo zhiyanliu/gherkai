@@ -3,12 +3,13 @@
 对拍 `LocalRunStore` 的行为（同一批 round-trip/生命周期/报错语义），只换落点为 DDB。**云端 adapter，需 boto3**
 （`core[aws]` optional extra，缺它 import 本模块不崩、构造时才友好报错，守 [0016] 窄腰）。
 
-表 schema（决定六）：`PK=run_id`，`SK='META' | 'STATE'`——RunMeta 与 RunState **分两 item**：
-- **META item**：`{run_id, sk='META', meta_json=<json.dumps(run_meta_to_dict)>}`。RunMeta 是 definition，
+表 schema（决定六）：单表、分区键字段 `run_id` + 排序键字段 `item_type`（取值 `'META'`/`'STATE'`）——
+RunMeta 与 RunState **分两 item**（同 run_id、item_type 各异；同分区键下一次 Query 可原子捞回该 run 全部）：
+- **META item**：`{run_id, item_type='META', meta_json=<json.dumps(run_meta_to_dict)>}`。RunMeta 是 definition，
   **write-once（create_run）/ read-whole（load_run_meta）**，从不单元素更新——故整体存 JSON 字符串最简、
   且躲开 DDB 原生 Map 对空串/嵌套 list 的挑剔（DataTable rows 常含空 cell）。第 4 步 offload 在 `json.dumps`
   **前**对 dict 里的 docString/dataTable 换指针，不需要 META 是原生 Map。
-- **STATE item**：`{run_id, sk='STATE', status, started_at?, ended_at?, jobs=<原生 Map>}`。jobs **必须原生 Map**
+- **STATE item**：`{run_id, item_type='STATE', status, started_at?, ended_at?, jobs=<原生 Map>}`。jobs **必须原生 Map**
   才能 `SET jobs.#sid=:js` 按 scope_id 单元素刷（决定六）；其 entry 全是 str（无 float），原生 Map 无 Decimal 顾虑。
 
 字段仍源于 `serialize`（单一真理源）：META 直接 `json.dumps(run_meta_to_dict)`；STATE 的标量 + jobs 各 entry
@@ -27,8 +28,10 @@ from core.serialize import (
     run_meta_to_dict,
 )
 
-_META_SK = "META"
-_STATE_SK = "STATE"
+# 排序键字段名（区分同一 run 的 definition/运行态 item，见决定六）——用 item_type 不用缩写 sk
+_ITEM_TYPE_ATTR = "item_type"
+_META = "META"    # item_type 取值：definition item
+_STATE = "STATE"  # item_type 取值：运行态 item
 
 
 def _job_state_to_item(js: JobState) -> dict:
@@ -77,12 +80,12 @@ class DynamoDBRunStore:
             meta_dict = self._arg_offloader.offload(meta_dict, meta.run_id)
         self._table.put_item(Item={
             "run_id": meta.run_id,
-            "sk": _META_SK,
+            _ITEM_TYPE_ATTR: _META,
             "meta_json": json.dumps(meta_dict, ensure_ascii=False),
         })
         self._table.put_item(Item={
             "run_id": initial_state.run_id,
-            "sk": _STATE_SK,
+            _ITEM_TYPE_ATTR: _STATE,
             **_state_scalars(initial_state),
             "jobs": {sid: _job_state_to_item(js) for sid, js in initial_state.jobs.items()},
         })
@@ -95,7 +98,7 @@ class DynamoDBRunStore:
         """
         try:
             self._table.update_item(
-                Key={"run_id": run_id, "sk": _STATE_SK},
+                Key={"run_id": run_id, _ITEM_TYPE_ATTR: _STATE},
                 UpdateExpression="SET jobs.#sid = :js",
                 ExpressionAttributeNames={"#sid": job_state.scope_id},
                 ExpressionAttributeValues={":js": _job_state_to_item(job_state)},
@@ -108,7 +111,7 @@ class DynamoDBRunStore:
         """commit point：写总 status + ended_at（各 job 态此前已刷）。STATE 不存在则报错。"""
         try:
             self._table.update_item(
-                Key={"run_id": run_id, "sk": _STATE_SK},
+                Key={"run_id": run_id, _ITEM_TYPE_ATTR: _STATE},
                 UpdateExpression="SET #st = :s, ended_at = :e",
                 ExpressionAttributeNames={"#st": "status"},  # status 是 DDB 保留字
                 ExpressionAttributeValues={":s": status.value, ":e": ended_at},
@@ -133,7 +136,7 @@ class DynamoDBRunStore:
 
     def load_run_meta(self, run_id: str) -> RunMeta | None:
         """读回 definition（从 META item 的 meta_json）；不存在返回 None。"""
-        resp = self._table.get_item(Key={"run_id": run_id, "sk": _META_SK}, ConsistentRead=True)
+        resp = self._table.get_item(Key={"run_id": run_id, _ITEM_TYPE_ATTR: _META}, ConsistentRead=True)
         item = resp.get("Item")
         if item is None:
             return None
@@ -148,7 +151,7 @@ class DynamoDBRunStore:
 
         ConsistentRead=True：commit-point「finalize 后立刻读」的强一致（决定六）。
         """
-        resp = self._table.get_item(Key={"run_id": run_id, "sk": _STATE_SK}, ConsistentRead=True)
+        resp = self._table.get_item(Key={"run_id": run_id, _ITEM_TYPE_ATTR: _STATE}, ConsistentRead=True)
         item = resp.get("Item")
         if item is None:
             return None

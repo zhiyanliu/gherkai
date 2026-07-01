@@ -54,7 +54,7 @@ uv run python -m cli run ../features/wikipedia_generic.feature \
 # 凭证/region 走 boto3 默认链；可加 --profile / --region 覆盖
 ```
 
-> 一次性建表/建桶命令（`aws dynamodb create-table` / `aws s3 mb`，分区键 run_id + 排序键 sk、按量计费）见
+> 一次性建表/建桶命令（`aws dynamodb create-table` / `aws s3 mb`，分区键 run_id + 排序键 item_type、按量计费）见
 > [`core/tests/README.md`](../core/tests/README.md) 的「一次性：建真表 + 真桶」一节——cli 云端后端与集成测试用同一套表/桶 schema。
 
 **先 `plan` 后 `run`**：`run` 每次真烧 AWS 钱，`plan` 是纯本地预检——验证 feature 写法、确认
@@ -98,7 +98,7 @@ scope/job 分组与 engine 路由符合预期、提前暴露 `PlanError`（uri �
 | `--no-report` | off | 跳过 RunReport 归集（逃生舱：CI 只看退出码/JSON、或调试不想落盘） |
 | `--materialize` | off | 归集时把本地原生产物按字节拷进 `<run_id>/artifacts/`（自包含、可搬运/上 S3；默认只链接不拷） |
 | `--backend {local,cloud}` | `local` | 落库后端：local=文件落 `--report-dir`；cloud=状态落 DynamoDB、判定结果与报告落 S3（表/桶需预先建好） |
-| `--ddb-table` | — | [cloud] DynamoDB 表名（分区键 run_id + 排序键 sk）；兜底环境变量 `AWS_DDB_TABLE` |
+| `--ddb-table` | — | [cloud] DynamoDB 表名（分区键 run_id + 排序键 item_type）；兜底环境变量 `AWS_DDB_TABLE` |
 | `--s3-bucket` | — | [cloud] S3 桶名（存判定结果与报告）；兜底 `AWS_S3_BUCKET` |
 | `--region` | — | [cloud] AWS region（不给走 boto3 默认链：`AWS_REGION` / profile 配置） |
 | `--profile` | — | [cloud] AWS profile（不给用 default；profile 没配 region 时仍需 `--region`） |

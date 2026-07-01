@@ -18,8 +18,8 @@ def test_fake_creds_hard_isolation():
 def test_ddb_table_and_s3_bucket_ready(aws):
     # DDB 表按 schema 建好（PK=run_id + SK），put/get 一条走内存 mock 通
     table = aws["ddb"].Table(aws["table_name"])
-    table.put_item(Item={"run_id": "r1", "sk": "META", "probe": "ok"})
-    got = table.get_item(Key={"run_id": "r1", "sk": "META"})["Item"]
+    table.put_item(Item={"run_id": "r1", "item_type": "META", "probe": "ok"})
+    got = table.get_item(Key={"run_id": "r1", "item_type": "META"})["Item"]
     assert got["probe"] == "ok"
 
     # S3 桶建好，put/get 一个对象通
@@ -32,21 +32,21 @@ def test_ddb_native_map_single_element_update(aws):
     # 预验 ADR 决定六的关键机制：DDB 原生 Map 按 key 单元素刷（SET jobs.#sid=:js），
     # scope_id 含 / : 中文作 Map key 安全（ExpressionAttributeNames 绕开特殊字符）。
     table = aws["ddb"].Table(aws["table_name"])
-    table.put_item(Item={"run_id": "r1", "sk": "STATE", "jobs": {}})
+    table.put_item(Item={"run_id": "r1", "item_type": "STATE", "jobs": {}})
     scope_id = "features/wiki.feature:6"  # 含 / :
     table.update_item(
-        Key={"run_id": "r1", "sk": "STATE"},
+        Key={"run_id": "r1", "item_type": "STATE"},
         UpdateExpression="SET jobs.#sid = :js",
         ExpressionAttributeNames={"#sid": scope_id},
         ExpressionAttributeValues={":js": {"status": "running", "session_id": "s1"}},
     )
     # 中文 scope_id 同样安全
     table.update_item(
-        Key={"run_id": "r1", "sk": "STATE"},
+        Key={"run_id": "r1", "item_type": "STATE"},
         UpdateExpression="SET jobs.#sid = :js",
         ExpressionAttributeNames={"#sid": "登录场景"},
         ExpressionAttributeValues={":js": {"status": "pending"}},
     )
-    jobs = table.get_item(Key={"run_id": "r1", "sk": "STATE"})["Item"]["jobs"]
+    jobs = table.get_item(Key={"run_id": "r1", "item_type": "STATE"})["Item"]["jobs"]
     assert jobs["features/wiki.feature:6"]["status"] == "running"
     assert jobs["登录场景"]["status"] == "pending"   # 两个 scope 各刷各的、互不覆盖

@@ -231,7 +231,7 @@ def test_offload_unblocks_oversized_docstring_real(real_aws):
 
     # 强断言：读原始 META item，证正文确实搬走（含 content_ref / s3://）且 META 远 <400KB（非仅"写成功"）
     raw = real_aws["ddb"].Table(real_aws["table_name"]).get_item(
-        Key={"run_id": rid_b, "sk": "META"}, ConsistentRead=True)["Item"]
+        Key={"run_id": rid_b, "item_type": "META"}, ConsistentRead=True)["Item"]
     meta_json = raw["meta_json"]
     assert "content_ref" in meta_json and "s3://" in meta_json
     assert len(meta_json.encode("utf-8")) < 400 * 1024, "META 应因 offload 远小于 400KB"

@@ -169,7 +169,12 @@ Map 形状下 `update_job_state` 各 scope 互不干扰、天然支持单元素�
 
 三层后端不对等、按访问模式各选（三层选型见 [0016](./0016-execution-architecture-core-lib-run-model.md)）：RunStore→DDB、ResultStore/ReportStore→S3。以下是各后端落库形态的**决策**（怎么实现/怎么测是实现细节，不在此）。
 
-**DDB 表 schema —— RunMeta 与 RunState 分两 item**：`PK=run_id`，`SK='META' | 'STATE'`。理由：`update_job_state` 高频只碰 STATE、与 RunMeta 深树（可触 400KB）大小解耦；offload 只作用 META、边界干净；`load_run_meta`/`load_run_state` 各自独立取。读用 `ConsistentRead=True`（RunStore 是控制面小记录，强一致的 commit-point 正确性收益 >> RCU 成本）。**建表责任在 IaC/组合根、非 adapter**——adapter 假定表已存在（同 [0016](./0016-execution-architecture-core-lib-run-model.md) 窄腰：adapter 不持 schema/IAM 建表权知识）。
+**DDB 表 schema —— 单表、RunMeta 与 RunState 分两 item**：**分区键**字段 = `run_id`；**排序键**字段命名为 **`item_type`**（取值 `'META'` = definition / `'STATE'` = 运行态），一个 run 落两个 item（同 `run_id`、`item_type` 各异）。
+
+- **为何分两 item（而非合成一个）**：`update_job_state` 高频只碰 STATE、与 RunMeta 深树（可触 400KB）大小解耦——合一则每次刷一个 job 状态都要重写整个含 definition 深树的 item，WCU 爆炸且更易撞 400KB；offload 只作用 META、边界干净；`load_run_meta`/`load_run_state` 各自独立取（轮询进度高频读小 STATE，不必带上大 definition）。
+- **为何同一张表（而非两张表）—— DDB single-table design（AWS 官方推荐）**：两 item 同属一个 run、共享 `run_id`，同分区键下一次 `Query`（按 run_id）即可**原子捞回该 run 全部 item**（强一致快照）；两张表则要两次跨表请求 + 自己保证一致性、运维翻倍（两套容量/IAM/备份/监控）。未来加 attempt（续跑，见「留口子」）/ per-scope 维度只需在同 `run_id` 下加新 `item_type` 值、同表零改。**多表是 RDBMS 范式直觉**——搬到 DDB 会丢分区局部性、放大成本。
+- **排序键字段名用 `item_type` 而非 DDB 圈惯用缩写 `sk`**：`item_type` 自描述其真实语义（区分同一 run 的 definition/运行态 item），避免 `sk` 被误读成 scenario/step key 或 DDB secondary index。
+- 读用 `ConsistentRead=True`（RunStore 是控制面小记录，强一致的 commit-point 正确性收益 >> RCU 成本）。**建表责任在 IaC/组合根、非 adapter**——adapter 假定表已存在（同 [0016](./0016-execution-architecture-core-lib-run-model.md) 窄腰：adapter 不持 schema/IAM 建表权知识）。
 
 **RunState.jobs 落 DDB 用原生 Map（M 型）、非 JSON blob**：`update_job_state` 要按 scope_id 单元素刷（`SET jobs.#sid=:js`），blob 无法单元素刷、退化成整 item RMW、违背决定四/五。**字段仍源于 serialize（单一真理源），只是 jobs 的容器形状在 adapter 层从 list 特化成 Map**——这是「DDB adapter 对 jobs 容器的落库层特化」，非第二真理源。**RunStore 侧无 float**（RunMeta/RunState 全 str/int/Status，float 只在 JobResult/RunResult→ResultStore），故原生 Map 无 float→Decimal 顾虑。未 create 就 update/finalize 须复刻 local「报错」语义（条件写）；session_id=None 沿用 omit-when-None（不写该键、读回得 None）。
 

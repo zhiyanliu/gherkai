@@ -35,11 +35,11 @@ moto 是模拟实现，与真 DDB/S3 在若干边界可能不一致（DDB 空串
 集成测试**假定表/桶已存在**（建表建桶归 IaC，adapter 不自建——ADR 0016/0030 决定六）。用你自己的测试账号建一次（us-east-1、default profile；名字自取，下面用示例名）。可在会话里用 `!` 前缀直接跑：
 
 ```bash
-# DDB 表：PK=run_id (HASH, S) + SK=sk (RANGE, S)，按量计费（省钱）
+# DDB 表：分区键 run_id (HASH, S) + 排序键 item_type (RANGE, S)，按量计费（省钱）
 ! aws dynamodb create-table \
     --table-name ui-test-runs \
-    --attribute-definitions AttributeName=run_id,AttributeType=S AttributeName=sk,AttributeType=S \
-    --key-schema AttributeName=run_id,KeyType=HASH AttributeName=sk,KeyType=RANGE \
+    --attribute-definitions AttributeName=run_id,AttributeType=S AttributeName=item_type,AttributeType=S \
+    --key-schema AttributeName=run_id,KeyType=HASH AttributeName=item_type,KeyType=RANGE \
     --billing-mode PAY_PER_REQUEST \
     --region us-east-1
 

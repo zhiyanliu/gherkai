@@ -17,7 +17,7 @@ from core.model import Job, RunMeta, RunState, Scenario, Status, Step, StepArgum
 def _meta_json(aws, run_id: str) -> dict:
     """取回 DDB META item 里 meta_json（解成 dict，验其形态）。"""
     item = aws["ddb"].Table(aws["table_name"]).get_item(
-        Key={"run_id": run_id, "sk": "META"}, ConsistentRead=True
+        Key={"run_id": run_id, "item_type": "META"}, ConsistentRead=True
     )["Item"]
     return json.loads(item["meta_json"])
 

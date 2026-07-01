@@ -76,7 +76,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     run.add_argument(
         "--ddb-table", default=None, metavar="NAME",
-        help="[--backend cloud] DynamoDB 表名（分区键 run_id + 排序键 sk）；兜底环境变量 AWS_DDB_TABLE。表需预先建好",
+        help="[--backend cloud] DynamoDB 表名（分区键 run_id + 排序键 item_type）；兜底环境变量 AWS_DDB_TABLE。表需预先建好",
     )
     run.add_argument(
         "--s3-bucket", default=None, metavar="NAME",

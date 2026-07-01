@@ -9,7 +9,7 @@
   `_fake_aws_creds` 对它**让路**（不覆盖真凭证）；`real_aws` fixture 读 `AWS_DDB_TABLE`/`AWS_S3_BUCKET` 环境变量拿真表/桶名，
   没设就 skip（不误连、不报错）。用真凭证（default profile）。见 `real_aws` fixture 与 tests/README.md。
 
-DDB 表 schema 见 ADR 0030 决定六：PK=run_id（HASH）、SK（RANGE，值 'META'/'STATE'）。建表责任在
+DDB 表 schema 见 ADR 0030 决定六：分区键 run_id（HASH）、排序键 item_type（RANGE，值 'META'/'STATE'）。建表责任在
 IaC/组合根、adapter 假定表已存在——单测由 fixture 建（moto 内存表），集成测试假定真表/桶已由你预建（见 README）。
 """
 from __future__ import annotations
@@ -21,7 +21,7 @@ import pytest
 # moto 5.x：统一入口 mock_aws（旧的 mock_dynamodb/mock_s3 已废）
 from moto import mock_aws
 
-_TABLE_NAME = "yaozhou-runs"   # RunStore 表（PK=run_id, SK=META|STATE）
+_TABLE_NAME = "yaozhou-runs"   # RunStore 表（分区键 run_id + 排序键 item_type=META|STATE）
 _BUCKET_NAME = "yaozhou-artifacts"  # ResultStore/ReportStore 对象桶
 
 # 集成测试读的环境变量名（真表/真桶名由你建好后经它们传入；没设 → 集成测试 skip）
@@ -51,8 +51,8 @@ def _fake_aws_creds(request, monkeypatch):
 def aws(_fake_aws_creds):
     """在 moto mock 下建好 DDB 表 + S3 桶，产出 (boto3 resource/client, 名字) 供云端 adapter 测试注入。
 
-    表 schema 按 ADR 0030 决定六：PK=run_id(S,HASH) + SK(S,RANGE)。云端 adapter 假定表/桶已存在
-    （建表建桶归 IaC/测试 fixture，非 adapter）。
+    表 schema 按 ADR 0030 决定六：分区键 run_id(S,HASH) + 排序键 item_type(S,RANGE)。云端 adapter 假定表/桶
+    已存在（建表建桶归 IaC/测试 fixture，非 adapter）。
     """
     import boto3
 
@@ -62,11 +62,11 @@ def aws(_fake_aws_creds):
             TableName=_TABLE_NAME,
             KeySchema=[
                 {"AttributeName": "run_id", "KeyType": "HASH"},
-                {"AttributeName": "sk", "KeyType": "RANGE"},
+                {"AttributeName": "item_type", "KeyType": "RANGE"},
             ],
             AttributeDefinitions=[
                 {"AttributeName": "run_id", "AttributeType": "S"},
-                {"AttributeName": "sk", "AttributeType": "S"},
+                {"AttributeName": "item_type", "AttributeType": "S"},
             ],
             BillingMode="PAY_PER_REQUEST",
         )
@@ -168,9 +168,9 @@ def real_aws():
         # 自清理：删本次用例写进真表/真桶的数据（尽力而为，逐个吞异常不影响其它清理）
         table = ddb.Table(table_name)
         for rid in run_ids:
-            for sk in ("META", "STATE"):
+            for item_type in ("META", "STATE"):
                 try:
-                    table.delete_item(Key={"run_id": rid, "sk": sk})
+                    table.delete_item(Key={"run_id": rid, "item_type": item_type})
                 except Exception:  # noqa: BLE001  清理尽力而为
                     pass
         for prefix in prefixes:
