@@ -141,7 +141,7 @@ core/
 **当前实装态（v1.0 进行中）**标在各行右侧 ✅/⬜：core/ 已建、cli/ 已建、engines/ 已迁、两个引擎 worker 已落地。
 
 ```
-yaozhou/
+./
 ├── core/                ← 窄腰：纯编排，零引擎依赖                          ✅ 已建
 │   ├── model.py · parse.py · scope.py · schedule.py · wire.py · serialize.py · ports.py · errors.py  ✅
 │   │     （wire.py=worker 协议单向序列化；serialize.py=领域模型双向持久化的单一真理源，二者分工不同）

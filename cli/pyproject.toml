@@ -15,8 +15,8 @@ dependencies = [
 aws = ["core[aws]"]
 
 [project.scripts]
-# 安装后可直接 `yaozhou-run <feature>`；开发期用 `uv run python -m cli`
-yaozhou-run = "cli.__main__:main"
+# 安装后可直接 `gherkai <feature>`；开发期用 `uv run python -m cli`
+gherkai = "cli.__main__:main"
 
 [tool.uv.sources]
 core = { path = "../core", editable = true }

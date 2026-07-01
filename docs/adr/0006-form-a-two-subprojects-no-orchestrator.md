@@ -1,6 +1,6 @@
 # 采用形态 A（两个独立子工程并列），暂不上统一编排器
 
-monorepo（git 根在 `yaozhou/`）下并列两个引擎子工程：`engines/novaact/`（Python）+ `engines/midscene/`（TS），根级放共享的 `features/` 与可丢弃的 `spikes/`。两套 Gherkin runner（`pytest-bdd` / `cucumber-js`）各自加载根级 `.feature`、各出报告。**不**设统一编排入口。
+monorepo（单个 git 仓库根）下并列两个引擎子工程：`engines/novaact/`（Python）+ `engines/midscene/`（TS），根级放共享的 `features/` 与可丢弃的 `spikes/`。两套 Gherkin runner（`pytest-bdd` / `cucumber-js`）各自加载根级 `.feature`、各出报告。**不**设统一编排入口。
 
 **为什么不是「一个统一入口」（读者最可能问的）**：两个引擎的 SDK 语言不同且不可换——Nova Act 是 Python（pip `nova-act`），Midscene 是 TS（npm `@midscene/web`）。step definition 必须调引擎 API、因而必须跟着分语言；没有任何单一 Gherkin runner 能在同一进程里既跑 Python step 又跑 TS step（两个解释器/运行时）。这是「双语言裂缝」，物理约束，非设计选择。
 

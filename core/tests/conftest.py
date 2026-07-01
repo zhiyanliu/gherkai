@@ -21,8 +21,8 @@ import pytest
 # moto 5.x：统一入口 mock_aws（旧的 mock_dynamodb/mock_s3 已废）
 from moto import mock_aws
 
-_TABLE_NAME = "yaozhou-runs"   # RunStore 表（分区键 run_id + 排序键 item_type=META|STATE）
-_BUCKET_NAME = "yaozhou-artifacts"  # ResultStore/ReportStore 对象桶
+_TABLE_NAME = "gherkai-runs"   # RunStore 表（分区键 run_id + 排序键 item_type=META|STATE）
+_BUCKET_NAME = "gherkai-artifacts"  # ResultStore/ReportStore 对象桶
 
 # 集成测试读的环境变量名（真表/真桶名由你建好后经它们传入；没设 → 集成测试 skip）
 _IT_TABLE_ENV = "AWS_DDB_TABLE"

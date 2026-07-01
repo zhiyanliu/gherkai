@@ -1,4 +1,4 @@
-"""yaozhou-run：执行核心库的命令行皮（ADR 0016）。
+"""gherkai：执行核心库的命令行皮（ADR 0016）。
 
 皮做四件事：解析参数 → 读 feature（compose）→ 注入引擎 resolver 跑 schedule → 渲染结果。
 逻辑全在 core；这里只接线 + 表层 IO。WebUI 是另一张皮，复用 compose、不经本文件。
@@ -25,7 +25,7 @@ from cli import compose, render
 
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog="yaozhou-run",
+        prog="gherkai",
         description="解析 .feature → 分组 scope → 调度两个引擎 AI 引擎 → 汇总 RunResult（会烧真 AWS 钱）。",
     )
     sub = p.add_subparsers(dest="command")
