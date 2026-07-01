@@ -186,14 +186,17 @@ Map 形状下 `update_job_state` 各 scope 互不干扰、天然支持单元素�
 
 ## 决定七：cli 接线 cloud 后端（offloader 生产默认挂载 + 失败退出码分层）
 
-cli `--backend {local,cloud}` 的组合根装配（local 分支留 `__main__`、cloud 下沉 `compose`、两种 boto3 句柄、单桶复用 report-dir、artifacts URI 化）见 [0016](./0016-execution-architecture-core-lib-run-model.md)「cli backend 选择」节。这里只记两条与实时写落库形态强相关的决策：
+cli `--backend {local,cloud}` 的组合根装配（两后端都下沉 `compose` 的 `build_local_stores`/`build_cloud_stores`、两种 boto3 句柄、单桶复用 report-dir、`--region`/`--profile`、artifacts URI 化）见 [0016](./0016-execution-architecture-core-lib-run-model.md)「cli backend 选择」节。这里记三条与实时写落库形态强相关的决策：
 
 **offloader 生产默认挂载、不做可选关闭 flag**：cloud 后端下 `S3StepArgumentOffloader` 默认挂（复用同一 `--s3-bucket`）。DDB 400KB 是协议**硬限**、不是调优空间——决定六把 offloader 设成「可选注入（`None`→内联）」是为 **core 单测省一层 S3 + 旧 run 兼容**，**不是给生产用户选「要不要正确」**。不引入 `--no-offload`：真出现「明确不带大 argument、想省一次 S3 往返」再纯加法加。**trade-off**：牺牲「小 run 省一次 S3 往返」换「大 docString/dataTable 不静默撞 400KB 崩」。
 
+**Store port 增 `preflight()`——begin 前探活，配置错一律 begin 退 2（体验+实现统一）**：三个 Store port（Run/Result/Report）各加 `preflight() -> None`——DDB 探表（`describe_table`/一次条件读）、S3 探桶（`head_bucket`），**local adapter 是 no-op**（本地无「桶/表不存在」问题，一行 `pass`）。`RunPersistence.begin` 在 `create_run` **之前**调三个 store 的 `preflight()`：探活失败抛的 botocore 异常由 cli 的 `need_cloud` gated except 接住 → 退 2。
+
+**为何从「不做主动预检」反转为「做 preflight」**（推翻早先决策，记明理由）：早先图省一次往返、以 `begin` 的真实写为天然预检点，但那留了个**不一致**——桶名打错时，有 offload 内容的 run（offloader 在 begin 写 S3）会 begin 退 2、无 offload 内容的 run 拖到运行期首个 `save_job_result` 才 S3 报错退 1，**同一个「桶名错」因是否有大 argument 分裂成退 2/退 1**。加 `preflight()` 后：桶/表不存在或无访问权**一律在 begin 探活时暴露→退 2**（不管有无 offload 内容），消除该分裂。**权衡**：begin 多几次探活往返（DDB describe + S3 head×2），但 begin 早于起 worker、不烧引擎钱，几百 ms 可忽略——换体验+实现统一，值得。preflight 归 Store 自己（各后端最懂怎么探活、内聚），不外泄到组合根。
+
 **cloud 失败退出码分层——切分线 = run 是否已真正开跑**（对齐现有 `0 passed / 1 failed|error / 2 配置错` 约定，全走 stderr、绝不裸 traceback）：
-- **退 2（还没开跑就拒绝，与 `assertion_votes<1` 同类）**：缺 table/bucket（入口显式校验非空——否则 `None` 流进 adapter 到运行时才 botocore 报错）；缺 boto3（`build_cloud_stores` 的 `import boto3` 抛 ImportError → 提示装 `core[aws]`）；`begin()`（schedule 前第一处真实云端写）抛 botocore 异常（表/桶不存在、凭证/region 缺）。**不做主动预检**（`head_bucket`/`describe_table` 多一次往返，且预检权限≠写权限会造假信号）——以 `begin` 为天然预检点（它早于起 worker、不烧钱）。
-- **退 1（run 已开跑，error 级）**：`schedule()` 运行期内 `on_event`/`on_job_complete` 抛 botocore 异常（跑到一半 DDB/S3 挂）。决定三已定 `on_job_complete` 抛异常时 schedule 先 stop 所有 worker 再重抛，故会冒泡出 `schedule()`；cli 在 `need_cloud` 时给单一 `schedule()` 调用点包一层 `except (ClientError, BotoCoreError)`（**不复制两份调用**，避免回调/opts 透传漂移弄坏参数映射测试）。
-- **已知不一致（接受、不加预检消除）**：桶名打错时——若该 run 有 docString/dataTable（offloader 在 `begin` 就写 S3）则 `begin` 即暴露→退 2；若无 offload 内容，S3 首次写在运行期首个 `save_job_result`→退 1。即「同一桶名错」因是否有 offload 内容分裂成退 2/退 1。`begin` 只保证「DDB 可达 + 有 offload 内容时 S3 可达」，不是对纯 S3 的完整预检点。
+- **退 2（还没开跑就拒绝，与 `assertion_votes<1` 同类）**：缺 table/bucket（入口显式校验非空——否则 `None` 流进 adapter 到运行时才 botocore 报错）；缺 boto3（`build_cloud_stores` 的 `import boto3` 抛 ImportError → 提示装 `core[aws]`）；`begin()` 的 `preflight()` 或 `create_run` 抛 botocore 异常（表/桶不存在、无权限、凭证/region 缺）。preflight 是主动探活点，兜住「纯 S3 桶名错也在 begin 暴露」。
+- **退 1（run 已开跑，error 级）**：`schedule()` 运行期内 `on_event`/`on_job_complete` 抛 botocore 异常（跑到一半 DDB/S3 挂，如桶被删）。决定三已定 `on_job_complete` 抛异常时 schedule 先 stop 所有 worker 再重抛，故会冒泡出 `schedule()`；cli 在 `need_cloud` 时给单一 `schedule()` 调用点包一层 `except (ClientError, BotoCoreError)`（**不复制两份调用**，避免回调/opts 透传漂移弄坏参数映射测试）。这是运行期兜底——preflight 只保证 begin 那刻可达，长 job 中途桶被删仍会在此退 1。
 
 ## 现在做 / 留口子
 
