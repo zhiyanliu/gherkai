@@ -18,20 +18,11 @@ from __future__ import annotations
 
 import json
 
+from core.adapters._boto import require_boto3
 from core.model import ReportRef, ResourceUri, RunResult
 
 # 复用 report 渲染的单一真理源（index.html 拼装 + schema 版本）——S3 与 Local 出一致的 report
 from core.adapters.report_store.local import SCHEMA_VERSION, _render_index_html
-
-
-def _require_boto3():
-    """云端 adapter 缺 boto3 时友好提示（模块 import 不崩、构造时才检；守 [0016] 窄腰、方案 A）。"""
-    try:
-        import botocore.exceptions  # noqa: F401
-    except ImportError as e:  # pragma: no cover
-        raise ImportError(
-            "S3ReportStore 需要 boto3——请装云端依赖：`pip install core[aws]`（或 uv 装 aws extra）"
-        ) from e
 
 
 def _index_entry(scope_id: str, scenario_id: str | None, engine: str, rr: ReportRef) -> dict:
@@ -53,7 +44,7 @@ class S3ReportStore:
     def __init__(self, s3_client, bucket: str, prefix: str = "") -> None:
         """s3_client：boto3 s3 client（组合根注入；建桶责任在 IaC，adapter 假定桶已存在）。
         prefix：可选 key 前缀（如 'runs/'），默认空。"""
-        _require_boto3()
+        require_boto3("S3ReportStore")
         self._s3 = s3_client
         self._bucket = bucket
         self._prefix = prefix
@@ -83,6 +74,7 @@ class S3ReportStore:
         self._s3.put_object(
             Bucket=self._bucket, Key=f"{base}/manifest.json",
             Body=json.dumps(manifest, ensure_ascii=False, indent=2).encode("utf-8"),
+            ContentType="application/json; charset=utf-8",  # 与 index.html 一致，presigned 浏览器直开不被当二进制
         )
         # index.html 复用 Local 的渲染（单一真理源）——两 adapter 出一致的入口页
         self._s3.put_object(

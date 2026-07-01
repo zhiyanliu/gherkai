@@ -125,3 +125,30 @@ def test_no_argument_run_offload_is_inert(ddb_run_store_offload, aws):
     # 没往 args/ 前缀写任何对象
     listed = aws["s3"].list_objects_v2(Bucket=aws["bucket"], Prefix="noarg/args/")
     assert listed.get("KeyCount", 0) == 0
+
+
+# ---- restore 按 s3:// URI 自解析、不依赖当前 prefix（核心承诺的回归锚）----
+def test_restore_uses_uri_not_current_prefix(aws):
+    # offloader 的 s3:// 指针是自描述的：restore 应直接解析 URI 取回，不用 self._prefix 重算 key。
+    # 若有人回归成 restore 用 self._prefix 拼 key，同 prefix 测试仍全绿、但换了 prefix 就 NoSuchKey 炸。
+    # 故这里用「写端 prefix='writer/' 、读端 prefix='reader/'」的两个 offloader 验：读端仍逐字节还原。
+    from core.adapters.run_store.arg_offload import S3StepArgumentOffloader
+    from core.serialize import run_meta_from_dict, run_meta_to_dict
+
+    writer = S3StepArgumentOffloader(aws["s3"], aws["bucket"], prefix="writer/")
+    reader = S3StepArgumentOffloader(aws["s3"], aws["bucket"], prefix="reader/")
+
+    job = Job(scope_id="s", scope_name="s", engine="midscene", scenarios=(
+        Scenario(id="s:1", name="sc", steps=(
+            Step(0, "When", "填表", StepArgument(kind="dataTable", rows=(("k", "v"), ("", "空")))),
+            Step(1, "Then", "看", StepArgument(kind="docString", content="多行\n正文X")),
+        )),
+    ))
+    meta = RunMeta(run_id="xp", created_at="t", jobs=(job,))
+
+    offloaded = writer.offload(run_meta_to_dict(meta), "xp")   # 指针带 writer/ 前缀
+    restored = run_meta_from_dict(reader.restore(offloaded, "xp"))  # 读端 prefix 不同，仍应还原
+    arg0 = restored.jobs[0].scenarios[0].steps[0].argument
+    arg1 = restored.jobs[0].scenarios[0].steps[1].argument
+    assert arg0.rows == (("k", "v"), ("", "空"))
+    assert arg1.content == "多行\n正文X"

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 
+from core.adapters._boto import require_boto3
 from core.model import JobState, RunMeta, RunState, Status
 from core.serialize import (
     run_meta_from_dict,
@@ -28,16 +29,6 @@ from core.serialize import (
 
 _META_SK = "META"
 _STATE_SK = "STATE"
-
-
-def _require_boto3():
-    """云端 adapter 缺 boto3 时给友好提示（模块 import 不崩、构造时才检；守 [0016] 窄腰、方案 A）。"""
-    try:
-        import botocore.exceptions  # noqa: F401
-    except ImportError as e:  # pragma: no cover
-        raise ImportError(
-            "DynamoDBRunStore 需要 boto3——请装云端依赖：`pip install core[aws]`（或 uv 装 aws extra）"
-        ) from e
 
 
 def _job_state_to_item(js: JobState) -> dict:
@@ -72,7 +63,7 @@ class DynamoDBRunStore:
         docString/dataTable 正文搬 S3、META item 只留指针（解 DDB 400KB 限）；None（默认）则 argument
         原样内联进 meta_json（小 run / 单测省一层 S3）。只挂 RunMeta 写/读路径，RunState 无 argument、不涉及。
         """
-        _require_boto3()
+        require_boto3("DynamoDBRunStore")
         self._table = table
         self._arg_offloader = arg_offloader
 

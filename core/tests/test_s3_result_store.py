@@ -74,3 +74,31 @@ def test_prefix_isolates_runs(aws):
     # 前缀确实进了 key
     listed = aws["s3"].list_objects_v2(Bucket=aws["bucket"], Prefix="tenantX/rA/jobs/")
     assert listed["KeyCount"] == 1
+
+
+def test_load_all_paginates_beyond_1000(s3_result_store):
+    # 回归守护：list_objects_v2 单页硬上限 1000，一次 run 可 >1000 scope。load_all 必须翻页收全部，
+    # 否则静默截断丢判定真值——ResultStore 是判定真值唯一权威（ADR 0016）、CI 据 load_all 判退出码，
+    # 截断会让本该红的 run 误判全绿。对拍 LocalResultStore.load_all（glob 无上限）。
+    n = 1200  # 跨过 1000 单页边界
+    for i in range(n):
+        sid = f"scope-{i:05d}"
+        s3_result_store.save_job_result("big", JobResult(job=_job_def(sid, sid, "midscene"), status=Status.PASSED))
+    got = s3_result_store.load_all("big")
+    assert len(got) == n, f"load_all 应翻页收全部 {n} 个，实际 {len(got)}（单页截断=丢判定）"
+    # 且仍是全量、稳定序（不是"返回某 1000 个"）
+    assert [jr.scope_id for jr in got] == sorted(f"scope-{i:05d}" for i in range(n))
+
+
+def test_load_all_paginated_preserves_failed_verdict(s3_result_store):
+    # 截断的危害具体化：若唯一的 FAILED job 的 key 落在字典序尾段（第 1000+ 个），单页截断会把它丢掉、
+    # 消费端只见 PASSED → 误判全绿放行。翻页后该 FAILED 必须在结果里。
+    n = 1100
+    for i in range(n):
+        sid = f"scope-{i:05d}"
+        # 让 scope-01099（字典序最后）是唯一 FAILED
+        st = Status.FAILED if i == n - 1 else Status.PASSED
+        s3_result_store.save_job_result("verdict", JobResult(job=_job_def(sid, sid, "midscene"), status=st))
+    got = s3_result_store.load_all("verdict")
+    failed = [jr for jr in got if jr.status == Status.FAILED]
+    assert len(failed) == 1 and failed[0].scope_id == "scope-01099", "尾段 FAILED 判定不得被分页截断丢弃"

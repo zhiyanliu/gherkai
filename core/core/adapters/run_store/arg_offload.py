@@ -18,15 +18,7 @@ from __future__ import annotations
 import json
 from urllib.parse import quote, urlparse
 
-
-def _require_boto3():
-    """云端 adapter 缺 boto3 时友好提示（模块 import 不崩、构造时才检；守 [0016] 窄腰、方案 A）。"""
-    try:
-        import botocore.exceptions  # noqa: F401
-    except ImportError as e:  # pragma: no cover
-        raise ImportError(
-            "StepArgument S3 offload 需要 boto3——请装云端依赖：`pip install core[aws]`（或 uv 装 aws extra）"
-        ) from e
+from core.adapters._boto import require_boto3
 
 
 def _iter_arguments(meta_dict: dict):
@@ -49,7 +41,7 @@ class S3StepArgumentOffloader:
 
     def __init__(self, s3_client, bucket: str, prefix: str = "") -> None:
         """s3_client：boto3 s3 client（组合根注入；建桶责任在 IaC）。prefix：可选 key 前缀。"""
-        _require_boto3()
+        require_boto3("StepArgument S3 offload")
         self._s3 = s3_client
         self._bucket = bucket
         self._prefix = prefix
