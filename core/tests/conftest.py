@@ -63,3 +63,11 @@ def aws(_fake_aws_creds):
             "s3": s3,
             "bucket": _BUCKET_NAME,
         }
+
+
+@pytest.fixture
+def ddb_run_store(aws):
+    """配好的 DynamoDBRunStore（注入 aws fixture 建好的表），供 RunStore 对拍测试。"""
+    from core.adapters.run_store.ddb import DynamoDBRunStore
+
+    return DynamoDBRunStore(aws["ddb"].Table(aws["table_name"]))
