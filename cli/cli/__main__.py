@@ -26,7 +26,7 @@ from cli import compose, render
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="gherkai",
-        description="解析 .feature → 分组 scope → 调度两个引擎 AI 引擎 → 汇总 RunResult（会烧真 AWS 钱）。",
+        description="解析 .feature → 分组 scope → 调度两个 AI 引擎 → 汇总运行结果（会烧真 AWS 钱）。",
     )
     sub = p.add_subparsers(dest="command")
 
@@ -58,11 +58,11 @@ def _build_parser() -> argparse.ArgumentParser:
     # RunReport 是 run 的应得产物：默认总归集（manifest.json + index.html）到 <report-dir>/<run_id>/。
     run.add_argument(
         "--report-dir", default="reports", metavar="DIR",
-        help="RunReport 归集落点（默认 reports/；每次 run 落 DIR/<run_id>/）",
+        help="归集报告落点（默认 reports/；每次 run 落 DIR/<run_id>/）",
     )
     run.add_argument(
         "--no-report", action="store_true",
-        help="跳过 RunReport 归集（CI 只看退出码/JSON、或调试时不想落盘的逃生舱）",
+        help="跳过报告归集（CI 只看退出码/JSON、或调试时不想落盘的逃生舱）",
     )
     run.add_argument(
         "--materialize", action="store_true",
@@ -344,11 +344,9 @@ def _cmd_run(args, repo: Path) -> int:
     if artifacts:
         # report_index 键可能缺席（report 写失败被隔离，ADR 0030 决定三）——缺则提示写失败、不打裸值
         report_line = artifacts.get("report_index", "<报告写入失败，已跳过；判定结果不受影响、仍已落库>")
-        _progress(f"\nRunReport: {report_line}")
-        _progress(
-            f"RunStore: {artifacts['run_meta']} + run_state"
-            f" | 判定明细: {artifacts['jobs_dir']}"
-        )
+        _progress(f"\n报告: {report_line}")
+        _progress(f"运行元信息: {artifacts['run_meta']}、{artifacts['run_state']}")
+        _progress(f"判定明细: {artifacts['jobs_dir']}")
 
     # 退出码基于 run 级 status（ADR 0031 决定五）：读 schedule 返回的内存终值（必是终态，不回读落库态）。
     # PASSED→0，其余（failed/error，含必伴随 error 的 skipped/aborted 批次）→1。对未来新态稳健。
