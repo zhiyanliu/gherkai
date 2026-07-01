@@ -39,10 +39,18 @@ dependencies = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "gherkin-official", specifier = ">=31.0.0" }]
+requires-dist = [
+    { name = "boto3", marker = "extra == 'aws'", specifier = ">=1.34" },
+    { name = "gherkin-official", specifier = ">=31.0.0" },
+]
+provides-extras = ["aws"]
 
 [package.metadata.requires-dev]
-dev = [{ name = "pytest", specifier = ">=8.0.0" }]
+dev = [
+    { name = "boto3", specifier = ">=1.34" },
+    { name = "moto", extras = ["dynamodb", "s3"], specifier = ">=5.0" },
+    { name = "pytest", specifier = ">=8.0.0" },
+]
 
 [[package]]
 name = "gherkin-official"

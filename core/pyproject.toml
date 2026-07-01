@@ -10,9 +10,18 @@ dependencies = [
     "gherkin-official>=31.0.0",
 ]
 
+# 云端 store adapter（DDB/S3）的依赖走 optional extra（方案 A，ADR 0030 决定六）：core 主依赖仍只 gherkin，
+# `pip install core[aws]` 才拉 boto3；缺它时只有云端 adapter 用起来失败、core 主体可轻量 import（守窄腰）。
+[project.optional-dependencies]
+aws = ["boto3>=1.34"]
+
 [dependency-groups]
 dev = [
     "pytest>=8.0.0",
+    # 云端 adapter 单测用：boto3（也在 aws extra，此处显式列以保 `uv run pytest` 裸命令绿）+ moto 内存 mock
+    # （只装 dynamodb/s3 后端，不拉全量 AWS 服务依赖）。全程 mock、绝不连真 AWS（见 tests/conftest.py 硬隔离）。
+    "boto3>=1.34",
+    "moto[dynamodb,s3]>=5.0",
 ]
 
 [build-system]
