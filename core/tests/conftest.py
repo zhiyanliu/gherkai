@@ -79,3 +79,11 @@ def s3_result_store(aws):
     from core.adapters.result_store.s3 import S3ResultStore
 
     return S3ResultStore(aws["s3"], aws["bucket"])
+
+
+@pytest.fixture
+def s3_report_store(aws):
+    """配好的 S3ReportStore（注入 aws fixture 建好的桶），供 ReportStore 对拍测试。"""
+    from core.adapters.report_store.s3 import S3ReportStore
+
+    return S3ReportStore(aws["s3"], aws["bucket"])
