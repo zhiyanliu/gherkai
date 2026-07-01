@@ -165,16 +165,29 @@ Map 形状下 `update_job_state` 各 scope 互不干扰、天然支持单元素�
   - （**澄清**：`report_store/local.py` 的 index.html 渲染的是 `RunResult.jobs`、cli 也只 `run_state_from_result` **写**、从不**读** `RunState.jobs`——故那两处不是 RunState 消费点，真正会被打破的是上面的 serialize 迭代与 test_stores 下标。）
 - skipped 的 job 也要进 Map（它是 definition 的一部分，缺了会让 RunState 的 job 集与 RunMeta.jobs 对不齐）。各新态的 `session_id` 取值规则见 [0031](./0031-job-lifecycle-states-and-severity.md) 决定一；aborted 留 `session_id`（有现场可查）正是 Map 形状的受益场景。
 
+## 决定六：云端 adapter 的落库形态（DDB/S3）
+
+三层后端不对等、按访问模式各选（三层选型见 [0016](./0016-execution-architecture-core-lib-run-model.md)）：RunStore→DDB、ResultStore/ReportStore→S3。以下是各后端落库形态的**决策**（怎么实现/怎么测是实现细节，不在此）。
+
+**DDB 表 schema —— RunMeta 与 RunState 分两 item**：`PK=run_id`，`SK='META' | 'STATE'`。理由：`update_job_state` 高频只碰 STATE、与 RunMeta 深树（可触 400KB）大小解耦；offload 只作用 META、边界干净；`load_run_meta`/`load_run_state` 各自独立取。读用 `ConsistentRead=True`（RunStore 是控制面小记录，强一致的 commit-point 正确性收益 >> RCU 成本）。**建表责任在 IaC/组合根、非 adapter**——adapter 假定表已存在（同 [0016](./0016-execution-architecture-core-lib-run-model.md) 窄腰：adapter 不持 schema/IAM 建表权知识）。
+
+**RunState.jobs 落 DDB 用原生 Map（M 型）、非 JSON blob**：`update_job_state` 要按 scope_id 单元素刷（`SET jobs.#sid=:js`），blob 无法单元素刷、退化成整 item RMW、违背决定四/五。**字段仍源于 serialize（单一真理源），只是 jobs 的容器形状在 adapter 层从 list 特化成 Map**——这是「DDB adapter 对 jobs 容器的落库层特化」，非第二真理源。**RunStore 侧无 float**（RunMeta/RunState 全 str/int/Status，float 只在 JobResult/RunResult→ResultStore），故原生 Map 无 float→Decimal 顾虑。未 create 就 update/finalize 须复刻 local「报错」语义（条件写）；session_id=None 沿用 omit-when-None（不写该键、读回得 None）。
+
+**ResultStore 后端 = S3**（坐实 [0016](./0016-execution-architecture-core-lib-run-model.md) 原「待定」）：每 job 一 S3 对象，key = `<prefix>/<run_id>/jobs/<quote(scope_id)>.json`（`quote` 编码——scope_id 含 `/`:中文原样嵌会让 `load_all` 的 prefix 反解歧义）。**赌 CI 按 run_id+scope_id 键取判定**；将来若需跨 scope 查询/过滤，加 DDB 索引层（加法不返工）。
+
+**StepArgument offload —— docString/dataTable 存 S3 指针**（DdbRunStore 内部钩子，解 DDB 400KB 限）：RunMeta 深树里**只有 docString/dataTable 两类 argument** 换 S3 指针，其余 JSON 照常在 DDB META item。
+- **位置区分、非值探测**（关键决策）：offload 后 argument dict 出现 `content_ref`/`rows_ref`（原 `content`/`rows` 键**缺席**），读端按「哪个键在」分支——**绝不**靠「值是不是 s3 协议开头」猜内联/指针（值 sniff 脆：docString 正文本身可能以该前缀开头）。
+- **S3 key 含 step_index**：`<run_id>/args/<quote(scope_id)>/<quote(scenario_id)>/<step_index>/<kind>.json`——否则同 scenario 多 docString 撞 key、静默串值。
+- **对 core 透明**：offload/fetch 是 DdbRunStore 内部对 `serialize` 产物的加工（写端 to_dict 后换指针、读端交 serialize 前消解回内联），serialize/model 零感知；只挂 RunMeta 写/读路径，`update_job_state`/`finalize_run`/`load_run_state` 零 S3 依赖（RunState 无 argument）。
+- 粒度「一律 offload」（无 size 阈值）；size 阈值是未来的纯加法优化，不预置。
+
+**boto3 依赖 = optional extra（方案 A）**：boto3 进 `[project.optional-dependencies].aws`（core 主依赖仍只 gherkin，缺 boto3 时只有云端 adapter 用起来失败、core 主体可轻量 import）——守 [0016](./0016-execution-architecture-core-lib-run-model.md) 窄腰。
+
 ## 现在做 / 留口子
 
-- **现在做（cli-first 第一阶段，本批）**：`JobSink` port + `schedule.on_job_complete`（default=None）；`core/persist.py` 的
-  `RunPersistence`（持单一 store 锁，见决定三并发不变量）；RunStore 三新方法的 **local adapter** 实现；`RunState.jobs` 改 Map（含决定五列的 serialize/test 改动点）；cli 接 `RunPersistence`（含 RUNNING 中间态）。
-  用 fake store 单测断言调用序（create_run 先于所有 save_job_result；每 save_job_result 早于 finalize；finalize 是最后一个 RunStore 调用 = commit point；save_job_result 与 ScopeStarted 交错 = 流式非批量）。
-  **同步更新 [0016](./0016-execution-architecture-core-lib-run-model.md)**：RunStore 契约段补 create_run/update_job_state/finalize_run 三 additive 方法 + commit-point 写序指针；三层切分表里 `RunState.jobs` 形态注明改为 Map<scope_id, JobState>（与 [0031](./0031-job-lifecycle-states-and-severity.md) 补 0024/0026 对称）。
-- **下一阶段（DDB adapter）**：`DdbRunStore`/`DdbResultStore`（`SET jobs.#sid` Map 定位 + finalize 条件更新单调 severity）；
-  **RunMeta definition 深树里的 step `StepArgument`（docString/dataTable）offload S3**——DDB 只存指针，adapter 内 `to_dict` 前 / `from_dict` 后钩子，不碰 serialize/model；**local 不 offload**（无 400KB 限）。
-  > 注意此 offload 的对象是 **RunMeta definition 深树里的 step 参数**（控制面 definition 写 DDB 的 size 规避），与「引擎产物（trajectory/report.html）上传 S3、报 `s3://` 进 `report_refs`」是**两类不同对象、不同路径**（后者是数据面产物、属未来 Fargate 远程执行模式的事），别混。
-  用 moto 测嵌套 map 单元素更新 + 部分完成态可读。
+- **决定一~五（实时写接缝，已落地）**：`JobSink` port + `schedule.on_job_complete`/`on_event`；`core/persist.py` 的
+  `RunPersistence`（单一 store 锁）；RunStore 三增量方法的 local adapter；`RunState.jobs` 改 Map；cli 接 `RunPersistence`（含 RUNNING 中间态）。
+- **决定六（云端 adapter）**：`DynamoDBRunStore` + `S3ResultStore` + `S3ReportStore` + StepArgument offload，落库形态如上，local adapter 已验证「换后端 core 不动」。
 - **留口子不做**：多写者 owner/lease（当前 run_id 由组合根独立生成、提交即新，单写者，无并发同 run 写）；续跑/部分重跑的 attempt 维度（save_job_result 整行覆盖，未来在 SK/属性引入 version）。
 
 ## 重议

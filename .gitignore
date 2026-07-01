@@ -57,5 +57,4 @@ tmp/
 
 # Claude 工作流工具（个人/工作流，非本项目框架代码）
 .claude/
-CLAUDE.md
 skills-lock.json

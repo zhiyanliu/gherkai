@@ -69,7 +69,8 @@ class ReportStore(Protocol):
 >   - `file://` ref + materialize → **按字节拷**本地文件进 `artifacts/`（**当前唯一实装**）。
 >   - `s3://` ref + materialize → **从 S3 下载**到 core 本地 `artifacts/`、ref 重指向本地（**尚未实现的扩展**——当前 materialize **只拷 `file://`**，`s3://`/`https://` ref 一律不动、报告直接引原 URI，见 `test_remote_ref_not_copied_even_when_materialize`）。
 >   - materialize=False → 报告直接引 worker 报的 ref（`file://` 或 `s3://`），不拉。
-> - 故 materialize **不会被「产物归位到 run 目录」抽空**：归位只改 subprocess 模式下本地产物落哪；materialize 管的是「产物是否进 report 自包含」，跨 worker 模式独立存在（尤其 Fargate 下的「s3→local 下载」是其真正的未来价值）。
+> - 故 materialize **不会被「产物归位到 run 目录」抽空**：归位只改 subprocess 模式下本地产物落哪；materialize 管的是「产物是否进 report 自包含」，跨 worker 模式独立存在。
+> - 以上是 **`LocalReportStore`** 的 materialize 语义（report 存本地）。**`S3ReportStore`** 的 materialize 目标语义（产物收拢进 `s3://…/<run_id>/artifacts/`、对称 Local）+ v1.1 第一版当 no-op 的取舍，见 [0029](./0029-fargate-engine-artifacts-to-s3.md)。
 - `LocalReportStore` → 未来 `S3ReportStore` 只换「manifest+index 这些 **core 派生数据**落哪 / 返回的 URI scheme」，core 不动。（注意区分：`S3ReportStore` 是把 **RunReport 自身**（manifest/index.html）写到 S3，与「worker 把自己的产物上传 S3」是两回事。）
 - **`write` 失败被隔离、不击穿已 commit 的 run**（实时写接缝，[0030](./0030-realtime-persistence-seam.md)）：RunReport 是**纯派生只读视图、可重建、永不作判定源**——故 `RunPersistence.finalize` 在 commit point（`finalize_run`，判定真值已落 ResultStore）之后才调 `ReportStore.write`，且把 write 的异常隔离（吞掉+留痕+返回 None），不让一个「可重建的报告」写失败把整个 run 拖成裸 traceback 退出、CI 拿不到判定输出。
 
