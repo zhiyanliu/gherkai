@@ -14,7 +14,7 @@
 
 ```
 core/
-├── model.py      ← 领域模型：Job / Scenario / Step / 6 类事件 / 四层结果 RunResult / Status 七态 / ResourceUri（纯数据）
+├── model.py      ← 领域模型：Job / Scenario / Step / 7 类事件（含 step_skipped 短路）/ 四层结果 RunResult / Status 七态 / ResourceUri（纯数据）
 ├── parse.py      ← .feature → 领域模型（借 gherkin-official Compiler；库藏在此 seam 后）
 ├── scope.py      ← tag 分组 + engine 校验 → Job[]；对外 plan(features, config) -> Job[]
 ├── serialize.py  ← 领域模型↔dict 的单一序列化真理源（store adapter 复用，ADR 0016/0027）

@@ -162,6 +162,57 @@ test("runStep: aiAct 抛非网络异常 → error/engine_error", async () => {
   assert.equal(events().find((e) => e.type === "step_done").errorType, "engine_error");
 });
 
+// ---- scope 内 step 短路（ADR 0031 决定六 / 0028，对称 Nova test_run_step）----
+// fake agent：aiAct 抛异常模拟 step error；记 aiAct/aiBoolean 调用数（验证短路后不再调）。
+function shortcircuitAgent(navRaises: Error) {
+  let aiActCalls = 0;
+  let aiBooleanCalls = 0;
+  const agent = {
+    aiAct: async () => { aiActCalls++; throw navRaises; },  // 上游动作抛错 → step error
+    aiBoolean: async () => { aiBooleanCalls++; return true; },
+  } as any;
+  return { agent, counts: () => ({ aiActCalls, aiBooleanCalls }) };
+}
+
+test("runScenario: 上游 step error 后短路后续、发 step_skipped、不再调 AI", async () => {
+  const { runScenario } = await importMod();
+  const { agent, counts } = shortcircuitAgent(new Error("SSL boom"));
+  const steps = [
+    step("When", '"在页面上操作"', 0),   // aiAct 抛错 → error
+    step("When", '"再操作"', 1),          // 应被短路（不调 aiAct）
+    step("Then", '"页面有预期内容"', 2),   // 应被短路（不调 aiBoolean）
+  ];
+  const statuses = await runScenario(agent, fakePage, "sc:0", steps, 1);
+  // 上游 error 后：只调了 1 次 aiAct（那个失败的），后续 AI 一次没调
+  assert.equal(counts().aiActCalls, 1);
+  assert.equal(counts().aiBooleanCalls, 0);
+  // step 1/2 发 step_skipped（独立事件、无 status）
+  const skipped = events().filter((e) => e.type === "step_skipped");
+  assert.deepEqual(skipped.map((e) => e.stepIndex), [1, 2]);
+  assert.ok(skipped.every((e) => e.status === undefined));
+  // 被短路步不进 statuses → scenario 判定由那个 error step 决定
+  assert.deepEqual(statuses, ["error"]);
+});
+
+test("runScenario: 全 passed 时不短路、无 step_skipped", async () => {
+  const { runScenario } = await importMod();
+  const { agent } = fakeAgent([true]);  // Then 单票 yes
+  const steps = [step("When", '"做事"', 0), step("Then", '"对吗"', 1)];
+  const statuses = await runScenario(agent, fakePage, "sc:0", steps, 1);
+  assert.deepEqual(statuses, ["passed", "passed"]);
+  assert.equal(events().filter((e) => e.type === "step_skipped").length, 0);
+});
+
+test("runScenario: failed 不触发短路（判据锁 error，非 failed）", async () => {
+  // failed 是业务结论、环境没坏，后续步该照跑——只有 error（执行故障）才短路。
+  const { runScenario } = await importMod();
+  const { agent } = fakeAgent([false, true]);  // 第一个 Then failed，第二个 Then passed
+  const steps = [step("Then", '"对吗A"', 0), step("Then", '"对吗B"', 1)];
+  const statuses = await runScenario(agent, fakePage, "sc:0", steps, 1);
+  assert.deepEqual(statuses, ["failed", "passed"]);  // failed 不短路，第二步照跑
+  assert.equal(events().filter((e) => e.type === "step_skipped").length, 0);
+});
+
 // ---- token 成本：多票断言按增量合计全 N 票（修 lastCost 只算最后一票的欠计）----
 // fake agent：_unstableLogContent().executions 累积——每次 aiBoolean 追加一个带 usage 的 task。
 function costAgent(perCallTokens: number[]) {

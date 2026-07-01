@@ -263,10 +263,8 @@ async function main(): Promise<number> {
     const votesN = job.assertionVotes ?? 1;  // AI 断言投票次数（ADR 0014/0024）；缺省 1
     for (const sc of job.scenarios) {
       emit({ type: "scenario_started", scenarioId: sc.id });
-      const statuses: string[] = [];
-      for (const step of sc.steps) {
-        statuses.push(await runStep(agent, page, sc.id, step, votesN));
-      }
+      // scope 内 step 短路在 runScenario 内（上游 error 跳过后续、发 step_skipped，ADR 0031 决定六）。
+      const statuses = await runScenario(agent, page, sc.id, sc.steps, votesN);
       emit({ type: "scenario_done", scenarioId: sc.id, status: aggregate(statuses) });
     }
 
@@ -291,6 +289,29 @@ async function main(): Promise<number> {
   emit({ type: "scope_done", scopeId: scope.id, sessionId: sessionId ?? null, reportRefs });
   // 正常路径若会话释放失败 → 非 0 退出，让 schedule 记 error、泄漏可观测（审计窗口 C，对照 Nova）
   return cleanupFailed ? 1 : 0;
+}
+
+// scope 内串行跑一个 scenario 的 steps，上游 error 后**短路**后续 step（ADR 0031 决定六 / 0028，对称 Nova）。
+// 短路：本 scenario 内一旦某 step status==error（导航 SSL 失败等），后续 step 不再调 AI——① 省钱；
+// ② 不在损坏环境（SSL 错误页）上跑出误导性假失败。被跳过的 step 发独立 step_skipped 事件（非 step_done；
+// core 据此本地赋 StepResult(SKIPPED, shortcircuited=True)）。判据锁 status==error（不看 errorType）；
+// **只短路本 scenario**（下一 scenario 可能导航新页恢复，独立用例不牵连；跨 job 是 fail-fast 职责，正交）。
+// 返回各步 status——被跳过步**不进** statuses，故不参与 aggregate（scenario 判定由那个 error step 决定）。
+async function runScenario(
+  agent: PlaywrightAgent, page: import("playwright").Page, scenarioId: string, steps: Step[], votesN: number,
+): Promise<string[]> {
+  const statuses: string[] = [];
+  let shortcircuit = false;
+  for (const step of steps) {
+    if (shortcircuit) {
+      emit({ type: "step_skipped", scenarioId, stepIndex: step.index });
+      continue;
+    }
+    const status = await runStep(agent, page, scenarioId, step, votesN);
+    statuses.push(status);
+    if (status === "error") shortcircuit = true;  // 本 scenario 后续 step 短路
+  }
+  return statuses;
 }
 
 async function runStep(
@@ -371,8 +392,8 @@ function aggregate(statuses: string[]): string {
   return "passed";
 }
 
-// 测试可见（对称 Nova：Nova worker 靠 if __name__ 守卫使 _run_step/_is_transient_network 可 import 测）。
-export { runStep, isTransientNetwork, aggregate };
+// 测试可见（对称 Nova：Nova worker 靠 if __name__ 守卫使 _run_step/_run_scenario/_is_transient_network 可 import 测）。
+export { runStep, runScenario, isTransientNetwork, aggregate };
 
 // 仅作为入口被直接运行时才跑 main（对称 Nova 的 `if __name__ == "__main__"`）——
 // 被测试 import 时不触发 main，使 runStep/isTransientNetwork 可注 fake agent 单测。

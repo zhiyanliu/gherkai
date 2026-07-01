@@ -67,9 +67,9 @@ _Avoid_: 以为"不点名也能抓变更"；把它与 A/B 两种不确定性混�
 A = 同一页面 AI 判断飘忽（随机噪声）→ **投票可治**；B = 页面真变了但 AI 柔性照样跑过、不报警（灵敏度不足）→ **投票治不了**，v1.0 接受为已知边界（ADR 0015）。
 _Avoid_: 以为"投票能带来确定性"——它只压 A，给不了对变更的灵敏度（B）。
 
-**连锁失败读法 (error → 后续 failed 的因果)**:
-scope 内 step 串行，**上一 step `error`（如导航 SSL/网络故障）不会短路后续 step**（当前无 step 级短路，ADR 0028 记为已知边界）——后续 step 在**已损坏的环境**（如停在 SSL 错误页）上继续跑，AI 断言忠实报告"页面没有预期内容" → `failed`(`assertion_failed`)。故读结果时：**同 scenario 内 `error` 之后的 `failed`，很可能是上游故障的连锁果、不是独立的业务失败**（不是"页面真的少了那段文案"，而是"页面根本没正常加载"）。cli 文本汇总与 RunReport index.html 对这种"error 后的 failed"加了视觉旁注提示。core 忠实并列记录各 step 实际所见、不臆断因果（纯 reducer，ADR 0026）——因果解读留给消费层/人。
-_Avoid_: 把 `error` 之后并列的 `failed` 当成两件独立的问题（多数是一件事的连锁）；把连锁 `failed` 误读成业务断言真没过。
+**连锁失败读法 (error → 后续 step 短路跳过)**:
+scope 内 step 串行，**上一 step `error`（如导航 SSL/网络故障）会短路本 scenario 后续 step**（ADR 0031 决定六 / 0028）——worker 不再对后续 step 调 AI（① 省钱；② 不在**已损坏的环境**（如停在 SSL 错误页）上跑出误导性假失败），而是为每个被跳过的 step 发独立 `step_skipped` 事件；core 据此本地赋 `StepResult(status=skipped, shortcircuited=True)`。**判据锁 `status==error`（不看 error_type）**——两腿对称、network/engine 错都触发；**只短路本 scenario**（下一 scenario 可能导航新页恢复，独立用例不牵连；跨 job 是 fail-fast 职责，正交）。`shortcircuited` 是与判定轴（status）正交的第二维（"为什么 skipped"），cli 文本汇总与 RunReport index.html 据此加视觉旁注"因前置 step error 被跳过"。**短路是 worker 行为**（因果只存在于 worker 的串行循环）；core 仍是纯 reducer（ADR 0026）——忠实归约 `step_skipped`、不臆断因果。**skipped 两级同名不同层**：job 级 skipped（fail-fast 整个 job 没 spawn、无 step 明细）vs step 级 shortcircuited（job 跑了一半、剩余 step 被短路、有 step 明细），语义都是"没跑"、层级不同。历史：早期无 step 短路时，"error 后的 failed"曾靠"按 status 顺序猜"加旁注（渲染层缓解）；现已升级为执行层短路 + 读 `shortcircuited` 精确判定。
+_Avoid_: 把 step 级 `shortcircuited`（scope 内短路）与 job 级 `skipped`（fail-fast 没 spawn）混为一谈；以为短路跨 scenario（只短路本 scenario）；以为 core 会臆断因果（短路判据在 worker，core 只归约）。
 
 **成本可观测 (Cost observability)**:
 产品价值之一：一次跑批花了多少（ADR 0024）。**原则——engine 只报原生量、core 只各自合计、不折美元**：两个引擎计费轴不同（Nova 按 agent 工作时长 `time_worked_s`、Midscene 按 LLM token），core 各自累加成 `total_time_worked_s` / `total_tokens`（step→scope→run，无引擎报则 None）。**美元折算交消费者**（用自己 AWS 账户的真实费率）——框架不内置费率常量（避免追会过期的单价表）。与**墙钟时长** `duration_ms`（性能）正交：`time_worked_s` 是 Nova 计费量、`duration_ms` 是 core 测的执行墙钟，两个数不同。

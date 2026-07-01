@@ -72,9 +72,10 @@ opts = {                 // 时间单位统一为秒；代码字段名带 _s 后
 
 ### 事件归集（status + 原生量成本 + 墙钟时长 三级归约）
 
-- 边收 worker 的流式事件（[0024](./0024-worker-core-protocol.md) JSON Lines，六类：`scope_started`/`scenario_started`/`step_started`/`step_done`/`scenario_done`/`scope_done`）边转给 `sink`；归约成 `RunResult`。
+- 边收 worker 的流式事件（[0024](./0024-worker-core-protocol.md) JSON Lines，七类：`scope_started`/`scenario_started`/`step_started`/`step_done`/`step_skipped`/`scenario_done`/`scope_done`；`step_skipped` = scope 内短路，见下 status 归约与 [0031](./0031-job-lifecycle-states-and-severity.md) 决定六）边转给 `sink`；归约成 `RunResult`。
 - 多 worker 并行 → 多路事件流交错，schedule 按 `scopeId`/`scenarioId` 归位（[0024](./0024-worker-core-protocol.md) 标识键）。
 - **status 归约**：scenario → job（任一 error→error / 任一 failed→failed / 全 passed→passed）→ run（同规则跨 job，但**入口先滤掉非终态判定** skipped/aborted/pending/running，即 `_NON_VERDICT`，run 级只看真正出了判定的 job，见 [0031](./0031-job-lifecycle-states-and-severity.md) 决定三）。job 级除 worker 三态外，core 在 fail-fast 时还会派生 `skipped`（排队没起）/`aborted`（跑一半被掐）终态（[0031](./0031-job-lifecycle-states-and-severity.md)）。
+- **`step_skipped` 归约（scope 内短路，不臆断因果的守法方式，[0031](./0031-job-lifecycle-states-and-severity.md) 决定六）**：worker 上游 step `error` 后短路后续 step、为每个发 `step_skipped`；core 归约成 `StepResult(status=skipped, shortcircuited=True)` 记进 step 明细，**但绝不把它写进 scenario 判定累加器**——scenario/job/run 判定只由那个上游 `error` step 决定，与"后面短路了几步"无关（step 级 skipped 零污染 scenario 归约/severity）。因果（"谁因谁短路"）只存在于 worker 的串行循环，core 作为纯 reducer 物理上看不到、也不臆断——它只忠实归约 worker 发来的 `step_skipped`，把"某步没跑"如实记进 `StepResult`。
 - **成本归约**：core 只各自合计 engine 报的**原生量**——累加 `step_done.cost` 的 `tokens`/`time_worked_s` 成 `JobResult.total_tokens`/`total_time_worked_s`（scope 级），再跨 job 求和成 `RunResult.total_tokens`/`total_time_worked_s`（run 级）。**core 不折美元**（交消费者），无任何引擎报某量则该量 None、不假装 0（cost 信封见 [0024](./0024-worker-core-protocol.md)）。
 - **墙钟时长归约**（性能指标，与成本正交）：core 用注入的 `clock` 在事件到达时打时间戳，按各级 `*_started`→`*_done` 算 `duration_ms`——step（`StepResult.duration_ms`）、scenario、scope（`JobResult.duration_ms`）、run（`RunResult.duration_ms`，schedule 整体包住、含并发）。core 首次保留 step 级粒度（`StepResult` 层）。
 

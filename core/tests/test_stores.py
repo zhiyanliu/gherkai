@@ -65,6 +65,9 @@ def _sample_run(run_id: str = "20260629-abc") -> RunResult:
                                        report_refs=(ReportRef(kind="trajectory", ref=ResourceUri("file:///a.html")),)),
                             StepResult(index=1, status=Status.PASSED, duration_ms=7000.0,
                                        votes=Votes(yes=3, total=3)),
+                            # 被短路的 step（ADR 0031 决定六）：SKIPPED + shortcircuited=True，护 round-trip
+                            # 不丢该字段（默认 False，若序列化漏了会假绿——故这里显式非默认值）。
+                            StepResult(index=2, status=Status.SKIPPED, shortcircuited=True),
                         ],
                     )
                 ],
@@ -101,6 +104,10 @@ def test_serialize_round_trip():
     assert sr.report_refs == ()  # 不再聚合到 scenario 级
     assert sr.steps[1].votes.yes == 3 and sr.steps[1].votes.total == 3
     assert sr.steps[0].duration_ms == 3000.0
+    # 被短路 step 的 shortcircuited=True 经 round-trip 不丢（ADR 0031 决定六）——
+    # 显式验证非默认值往返，防"序列化漏字段但默认 False 恰好相等"的假绿。
+    assert sr.steps[2].status == Status.SKIPPED and sr.steps[2].shortcircuited is True
+    assert sr.steps[0].shortcircuited is False  # 正常步默认 False 也正确往返
     j1 = r2.jobs[1]
     assert j1.scope_id == "登录场景" and j1.error_type == "assertion_failed" and j1.message == "没过"
 

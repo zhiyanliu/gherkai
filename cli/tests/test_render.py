@@ -92,8 +92,9 @@ def test_render_text_shows_step_level_report_refs():
     assert "report（trajectory 2）: file:///t/act_1.html" in txt
 
 
-def test_render_text_taints_failed_after_error_in_same_scenario():
-    # 连锁失败读法（ADR 0028）：同 scenario 内 error 之后的 failed 加旁注；error 之前的 failed / 无 error 时不加。
+def test_render_text_annotates_shortcircuited_step():
+    # 连锁失败旁注（ADR 0031 决定六）：被 scope 内短路的 step（shortcircuited=True，status=skipped）加旁注
+    # "因前置 step error 被跳过"；上游 error 步本身不加。判据读 shortcircuited 布尔（不再按 status 顺序猜）。
     from core.model import StepResult
     job = Job(scope_id="s", scope_name="s", engine="novaact", scenarios=())
     run = RunResult(
@@ -102,7 +103,7 @@ def test_render_text_taints_failed_after_error_in_same_scenario():
         jobs=[JobResult(job=job, status=Status.ERROR, scenarios=[
             ScenarioResult(scenario_id="s:0", status=Status.ERROR, steps=[
                 StepResult(index=0, status=Status.ERROR, error_type="network_error"),   # 上游 error
-                StepResult(index=1, status=Status.FAILED, error_type="assertion_failed"),  # 连锁果 → 加旁注
+                StepResult(index=1, status=Status.SKIPPED, shortcircuited=True),          # 被短路 → 加旁注
             ]),
         ])],
     )
@@ -110,12 +111,14 @@ def test_render_text_taints_failed_after_error_in_same_scenario():
     lines = txt.splitlines()
     step1 = next(l for l in lines if "step 1:" in l)
     step0 = next(l for l in lines if "step 0:" in l)
-    assert "可能不可信" in step1     # error 之后的 failed 加旁注
-    assert "可能不可信" not in step0  # error 步本身不加
+    assert "被跳过" in step1          # 被短路的 step 加旁注
+    assert "skipped" in step1         # 显 skipped 态
+    assert "被跳过" not in step0      # 上游 error 步本身不加
 
 
-def test_render_text_no_taint_when_failed_before_error():
-    # 反向护栏：failed 在 error 之前（无上游 error）不该加旁注——避免误伤正常业务失败
+def test_render_text_no_annotation_on_plain_failed():
+    # 反向护栏（ADR 0031 决定六）：普通 failed（shortcircuited=False，含"error 后的 failed"）不加旁注——
+    # 判据迁到 shortcircuited 后，只有真被短路的 step 才加旁注，避免误伤正常业务失败。
     from core.model import StepResult
     job = Job(scope_id="s", scope_name="s", engine="novaact", scenarios=())
     run = RunResult(
@@ -123,14 +126,13 @@ def test_render_text_no_taint_when_failed_before_error():
         status=Status.ERROR,
         jobs=[JobResult(job=job, status=Status.ERROR, scenarios=[
             ScenarioResult(scenario_id="s:0", status=Status.ERROR, steps=[
-                StepResult(index=0, status=Status.FAILED, error_type="assertion_failed"),  # 独立业务失败，无前置 error
-                StepResult(index=1, status=Status.ERROR, error_type="network_error"),
+                StepResult(index=0, status=Status.ERROR, error_type="network_error"),
+                StepResult(index=1, status=Status.FAILED, error_type="assertion_failed"),  # 普通 failed，非短路
             ]),
         ])],
     )
     txt = render.render_text(run)
-    step0 = next(l for l in txt.splitlines() if "step 0:" in l)
-    assert "可能不可信" not in step0  # error 之前的 failed 不加旁注
+    assert "被跳过" not in txt         # 无 shortcircuited step → 全程无旁注
 
 
 def test_to_dict_shape_and_no_dollar():

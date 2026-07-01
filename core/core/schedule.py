@@ -37,6 +37,7 @@ from core.model import (
     Status,
     StepDone,
     StepResult,
+    StepSkipped,
     StepStarted,
 )
 from core.errors import WorkerNetworkError
@@ -339,6 +340,19 @@ class _Worker:
                 StepResult(index=event.step_index, status=event.status,
                            duration_ms=dur_ms, votes=event.votes, error_type=event.error_type,
                            report_refs=event.report_refs)  # step 级 trajectory 原样搬入（ADR 0027 下沉）
+            )
+        elif isinstance(event, StepSkipped):
+            # scope 内短路（ADR 0031 决定六）：上游 error 后 worker 跳过本 step、没调 AI。
+            # 本地构造 StepResult(status=SKIPPED, shortcircuited=True)——SKIPPED 复用既有枚举，在 StepResult 层
+            # 直观表「没跑」。**关键不变量：绝不写 scenario_status**——scenario/job 判定由上游那个 error step 决定，
+            # 与"后面短路了几个 step"无关；不喂进 scenario 归约/_aggregate（severity 零污染，ADR 0031 决定六）。
+            # 墙钟：被短路的 step 没起跑，worker 不发 step_started → duration_ms 恒 None（没跑=无墙钟，语义正确）。
+            # 仍用 .get 兜底（不假定 timing 里没有此键），健壮不脆。
+            st = timing.step_start.get((event.scenario_id, event.step_index))
+            dur_ms = (now - st) * 1000.0 if st is not None else None
+            timing.steps.setdefault(event.scenario_id, []).append(
+                StepResult(index=event.step_index, status=Status.SKIPPED,
+                           duration_ms=dur_ms, shortcircuited=True)
             )
         elif isinstance(event, ScenarioDone):
             scenario_status[event.scenario_id] = event.status

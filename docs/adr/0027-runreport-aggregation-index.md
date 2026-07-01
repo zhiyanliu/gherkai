@@ -52,8 +52,9 @@ class ReportStore(Protocol):
     def write(self, run_id: str, result: RunResult, *, created_at: str = "", materialize: bool = False) -> ResourceUri:
         """从 RunResult 归集出 <report_root>/<run_id>/{manifest.json, index.html}，返回 index.html 的 ResourceUri。
 
-        只读 result 的 report_refs + scope_id/scenario_id/engine/status/时长/成本 做**导航视图**；
-        不读 votes/steps 细节、不拿 status 当 CI 判定源（判定真值在 RunResult/ResultStore）。
+        读 result 的 report_refs + 各级 status/时长/成本 + step 级 votes/error_type/shortcircuited，
+        渲染成「判定明细树 + 产物导航」的**人看视图**（明细树见下「index.html 形态」）；
+        **但不拿 status 当 CI 判定源**（判定真值在 RunResult/ResultStore，index.html 只是派生人看视图）。
         """
 ```
 
@@ -115,19 +116,20 @@ class ReportStore(Protocol):
 
 - `report_index` 从内存 `RunResult` 树一次投影（含全部 report_refs 三级，**不走逐条 append**）；**粒度由 `scenario_id`/`step_index` 是否为 null 表达**：`scenario_id=null` = scope 级；`scenario_id` 非空且 `step_index=null` = scenario 级；两者都非空 = step 级（同 scenario 多 trajectory 靠 step_index 区分）。
 - 每条含 `ref`（原始不透明指针，原样保留）与 `href`（index.html 实际导航用的链接）：`materialize=False` 时 `href == ref`；`materialize=True` 时 `href` 是拷进 `artifacts/` 的相对路径（`ref` 仍留原值）。
-- index.html 的 run 摘要（status/时长/成本/各 job 上色）**直接用内存 `RunResult`** 渲染，不从 manifest 读（manifest 已不含 result）。
+- index.html 的 run 摘要 + 整棵判定明细树（job→scenario→step，各级上色 + step 级 votes/error_type/shortcircuited 旁注）**直接用内存 `RunResult`** 渲染，不从 manifest 读（manifest 已不含 result）。
 - **manifest 不内嵌 `to_dict(result)`**（曾考虑、否决）：那会让派生视图承载判定真值副本（与 `ResultStore`/`RunStore` 冗余）；改为软引用 run_id 消除冗余。`serialize` 仍是单一序列化真理源（cli `--json` 与各 store 共用），只是不塞进 manifest。
 - `to_dict` 含 `job.engine`、`scenario.report_refs`（序列化补齐项）。
 - manifest **不冗余 status 当判定源**——`result` 里已有，CI 读 `result.status`，不读信封。
 
 ## index.html 形态
 
-最小「带状态摘要的链接清单」：纯 Python 字符串拼装 + `html.escape()`，**无模板引擎、无外链 JS/CSS、单文件**（对齐 `wire.py`「手写映射、显式稳定」与 core「薄编排层无重型依赖」）。
+纯 Python 字符串拼装 + `html.escape()`，**无模板引擎、无外链 JS/CSS、单文件**（对齐 `wire.py`「手写映射、显式稳定」与 core「薄编排层无重型依赖」）。**两大块**（皆从内存 `RunResult` 渲染）：
 
 - 顶部一行 run 摘要（run_id + 总 status + duration + 原生量成本）。
-- 一个列表，每条 report_ref 一行：job.status 三态上色 + scope_id + engine + `[kind]` + 指向 `ref` 的 `<a>`（`label` 或回落 `kind` 作锚文本）。
-- 三态上色用内联 `<style>`。
-- **空态**：无任何 report_ref 时仍生成有效的「空报告」index.html（标注本次无原生产物），不报错。
+- **① 判定明细树**：job→scenario→step，逐级上色（含派生态 skipped/aborted、前置态 pending/running 各自配色，非兜底灰，见 [0031](./0031-job-lifecycle-states-and-severity.md)）+ step 级 status/votes tally/error_type/时长。**被 scope 内短路的 step 显 `skipped` 态 + 读 `shortcircuited` 布尔加「⚠ 因前置 step error 被跳过」旁注**（连锁失败旁注，判据是 shortcircuited 而非「按 status 顺序猜」，见 [0031](./0031-job-lifecycle-states-and-severity.md) 决定六）。让纯确定性 run（无原生产物）也一眼看懂结果。**但不拿它当 CI 判定源**（判定真值在 ResultStore）。
+- **② 原生报告产物导航清单**：每条 report_ref 一行——job.status 上色 + scope_id（+ scenario_id/step[N] 表粒度）+ engine + `[kind]` + 指向 `ref` 的 `<a>`（`label` 或回落 `kind` 作锚文本）。
+- 上色用内联 `<style>`。
+- **空态**：无任何 report_ref 时②仍生成有效的「空报告」清单（标注本次无原生产物）、①判定明细树照常渲染，不报错。
 
 ## Nova reportRef 的回传与归属（trajectory 下沉 step 级 + session 汇总）
 

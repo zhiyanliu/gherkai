@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 from urllib.parse import urlparse
 
-from core.model import Status
+from core.model import ScenarioResult, Status, StepResult
 from tests.test_report_store import _jr, _rr, _run_with_refs
 
 
@@ -80,6 +80,23 @@ def test_index_html_links_and_summary(s3_report_store, aws, tmp_path):
     assert "判定明细" in txt
     assert "features/wiki.feature:6" in txt   # scenario_id
     assert "step[0]" in txt                   # step 级判定
+
+
+# ---- 连锁失败旁注在 S3 index.html 对称（复用 local 渲染，ADR 0031 决定六）----
+def test_index_html_taints_shortcircuited_step(s3_report_store, aws):
+    # S3 版复用 local 的 _render_index_html，taint 行为应自动对称——显式锚住，防未来 S3 分叉出独立渲染。
+    run = _rr(
+        "chain",
+        [_jr("s", "novaact", status=Status.ERROR, scenarios=[
+            ScenarioResult(scenario_id="s:0", status=Status.ERROR, steps=[
+                StepResult(index=0, status=Status.ERROR, error_type="network_error"),
+                StepResult(index=1, status=Status.SKIPPED, shortcircuited=True),  # 被短路 → 旁注
+            ]),
+        ])],
+        status=Status.ERROR,
+    )
+    txt = _read_s3(aws, s3_report_store.write(run.run_id, run))
+    assert "被跳过" in txt and "skipped" in txt
 
 
 # ---- S3 专属：materialize 当 no-op，href 恒等 ref（对拍/反向 test_default_no_materialize_keeps_ref）----

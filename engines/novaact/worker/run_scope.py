@@ -290,6 +290,31 @@ def _instruction(text: str, step: dict) -> str:
     return f"{base}\n{extra}" if extra else base
 
 
+def _run_scenario(nova, scenario_id: str, steps: list[dict], votes_n: int) -> list[str]:
+    """scope 内串行跑一个 scenario 的 steps，上游 error 后**短路**后续 step（ADR 0031 决定六 / 0028）。
+
+    短路：scenario 内一旦某 step `status==error`（导航 SSL 失败等），后续 step 不再调 AI——
+    ① 省钱（不烧后续 AI 断言）；② 不在损坏环境（SSL 错误页）上跑出误导性假失败。被跳过的 step 发独立
+    `step_skipped` 事件（非 step_done；core 据此本地赋 StepResult(SKIPPED, shortcircuited=True)）。
+    判据锁 `status==error`（不看 error_type）——两腿对称、network/engine 错都触发。
+
+    **短路只作用于本 scenario**（不跨 scenario：下一 scenario 可能导航到新页恢复，独立测试用例不该被牵连；
+    跨 job 的中止是 fail-fast 的职责，两者正交，ADR 0031 决定六）。返回各步 status——被跳过步**不进** statuses，
+    故不参与 _aggregate；scenario 判定由那个 error step 决定（与后面短路了几步无关）。
+    """
+    statuses: list[str] = []
+    shortcircuit = False
+    for st in steps:
+        if shortcircuit:
+            emit({"type": "step_skipped", "scenarioId": scenario_id, "stepIndex": st["index"]})
+            continue
+        status = _run_step(nova, scenario_id, st, votes_n)
+        statuses.append(status)
+        if status == "error":
+            shortcircuit = True  # 本 scenario 后续 step 短路（不跨 scenario）
+    return statuses
+
+
 def _aggregate(statuses: list[str]) -> str:
     if any(s == "error" for s in statuses):
         return "error"
@@ -443,7 +468,8 @@ def main() -> int:
                     emit({"type": "scenario_started", "scenarioId": sid})
                     # trajectory 现由每个 _run_step 挂进各自 step_done 的 step 级 reportRefs（ADR 0027 下沉）——
                     # 不再在 scenario 级聚合；scenario_done 不带 reportRefs（协议字段保留、向后兼容）。
-                    statuses = [_run_step(nova, sid, st, votes_n) for st in sc["steps"]]
+                    # scope 内 step 短路（上游 error 跳过后续、发 step_skipped，ADR 0031 决定六）在 _run_scenario 内。
+                    statuses = _run_scenario(nova, sid, sc["steps"], votes_n)
                     emit({"type": "scenario_done", "scenarioId": sid, "status": _aggregate(statuses)})
 
     try:

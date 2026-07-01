@@ -45,7 +45,7 @@
 
 worker **边跑边流式上报**（每行一个事件），core 实时收。选流式而非「跑完整 scope 一次性回整块」（**本 ADR 新决策**——[0016](./0016-execution-architecture-core-lib-run-model.md) 的 `Engine port: runScope(scope) → JSON 结果` 措辞偏向单次返回，此处细化为流式增量）的理由：① 跑批时能看进度；② worker 中途崩溃仍有部分结果；③ 为未来 WebUI 实时进度铺路。代价（实现略复杂）可接受。
 
-**事件三级 started/done 对齐**（接口的一部分，core 假定有序、乱序为 worker 违约）：每级都有配对的起止事件——`scope_started`…`scope_done`（最外，scope_started 首条、scope_done 末条）⊃ `scenario_started`…`scenario_done` ⊃ `step_started`…`step_done`。worker 在每级开始前发 `*_started`、结束后发 `*_done`。
+**事件三级 started/done 对齐**（接口的一部分，core 假定有序、乱序为 worker 违约）：每级都有配对的起止事件——`scope_started`…`scope_done`（最外，scope_started 首条、scope_done 末条）⊃ `scenario_started`…`scenario_done` ⊃ `step_started`…`step_done`。worker 在每级开始前发 `*_started`、结束后发 `*_done`。**例外：被 scope 内短路跳过的 step 既不发 `step_started` 也不发 `step_done`，只发一条 `step_skipped`**（它根本没起跑，无起止可配对；core 归约时 `duration_ms=None`，见下 `step_skipped` 事件段 + [0031](./0031-job-lifecycle-states-and-severity.md) 决定六）。
 
 **三级执行时长**（性能指标，与成本正交）：core 用**事件到达的墙钟时间戳**（注入的 `clock`，与超时复用同一时钟）算各级时长——`step/scenario/scope` 各 = 其 `*_done` 到达 − `*_started` 到达；`run` 级 = schedule 整体包住（含并发，≠ 各 scope 之和）。落在 `StepResult.duration_ms` / `ScenarioResult.duration_ms` / `JobResult.duration_ms` / `RunResult.duration_ms`。**这是墙钟时长，不是成本**——与 cost 的 `time_worked_s`（Nova 计费量）正交；测的是 core 收到事件的时刻，含微秒级 IPC 传输延迟（worker 发→core 读），对性能诊断够用。worker 只发 `*_started`/`*_done` 信号、不算时长（worker 报事件、core 算指标）。
 
@@ -74,6 +74,21 @@ worker **边跑边流式上报**（每行一个事件），core 实时收。选�
    "reportRefs":[{"kind":"report","ref":"file:///.../midscene_run/report/xxx.html","label":"Midscene report"}]}
 ```
 
+**`step_skipped` 事件（scope 内短路，[0031](./0031-job-lifecycle-states-and-severity.md) 决定六）**：当 scope 内某 step `error` 后，worker
+短路后续 step（不调 AI），为每个被跳过的 step 发一条 `step_skipped`——**独立事件、平行于 step_done，不是 step_done 的第 4 个 status**：
+
+```jsonc
+// 上游 step error → worker 不再对后续 step 调 AI（省钱），逐个发 step_skipped（无 status/votes/cost）
+{"type":"step_done","scenarioId":"...","stepIndex":0,"status":"error","errorType":"network_error"}
+{"type":"step_skipped","scenarioId":"...","stepIndex":1}
+```
+
+- **为何独立事件而非 status 第 4 态**：wire 严格三态（status 只 passed/failed/error）。「这步没跑」是执行事实、非判定结论，
+  故不塞进 `step_done.status`。core 收到 `step_skipped` → 本地构造 `StepResult(status=SKIPPED, shortcircuited=True)`——
+  `Status.SKIPPED` 复用（在 StepResult 层直观表「没跑」），但**由 core 本地赋、不经 wire**（同 skipped/aborted 的 core 派生态性质）。
+- **短路判据锁 `status==error`（不看 errorType）**：两腿对称、network_error/engine_error 都触发。**scope 内**行为
+  （只短路同 scenario/scope 后续 step，不跨 job——跨 job 是 fail-fast 职责）。承载与不变量详见 [0031](./0031-job-lifecycle-states-and-severity.md) 决定六。
+
 - **`cost` 只挂 `step_done`**；scenario/scope/run 级合计由 **core 累加 step 的原生量得出**（token / time_worked_s 各自合计），事件不重复携带（避免双重真相源）。详见下「成本信封」。**多票 AI 断言（assertionVotes>1）的 `step_done.cost` 是该 step 全 N 票之和**——worker 按增量/累加算（Midscene 取累计 token 差、Nova 累加每票 time_worked_s），不是只算最后一票（否则欠计 (N-1)/N）。
 - **`scopeId`**（= 输入 `scope.id`，RunStore/RunReport 关联键）随 `scope_done` 回；`sessionId` 是语义不同的 AgentCore 会话血缘——**随 `scope_started` 首先回传（会话一起就报），`scope_done` 仍带作冗余兜底**。提前到 `scope_started` 是因为超时/SIGTERM 中途打断时 `scope_done` 从不 emit，会话却已起——血缘必须先随首事件落到 core（[0028](./0028-transient-network-ssl-resilience.md)）。core 的 `_reduce` 在 `scope_started`/`scope_done` 两处都取（仅在非 None 时设，后者不覆盖前者已捕获的值）。
 - step 不再带 `kind` 字段：core 靠 `votes` 的**存在与否**区分「AI 断言（纳入抖动汇总）vs 其余」即足够；worker 内部如何派发（导航/动作/确定性）是其实现细节，不进协议（见上「删除测试逼出的两处收窄」②）。
@@ -86,7 +101,7 @@ worker **边跑边流式上报**（每行一个事件），core 实时收。选�
 - **`sessionId`**：AgentCore 会话 id（血缘，进 RunStore 控制面，[0016](./0016-execution-architecture-core-lib-run-model.md)）；与 `scopeId` 语义不同。
 
 **一等字段**（core 要理解/分支）：
-- **`status` 三态**：`passed` / `failed`（断言投票没过 = 测试发现了问题）/ `error`（引擎抛异常 = 没能跑完测试）。`failed` 与 `error` 语义不同，worker 负责区分——前者是测试结论，后者是执行故障。**wire 只传这三态**——`skipped`/`aborted`（fail-fast 派生终态）与 `pending`/`running`（实时写前置态）是 **core 内态、不进 wire**（worker 没起或已被掐时由 schedule 本地赋，见 [0031](./0031-job-lifecycle-states-and-severity.md)）。
+- **`status` 三态**：`passed` / `failed`（断言投票没过 = 测试发现了问题）/ `error`（引擎抛异常 = 没能跑完测试）。`failed` 与 `error` 语义不同，worker 负责区分——前者是测试结论，后者是执行故障。**wire 只传这三态**——`skipped`/`aborted`（fail-fast 派生终态）与 `pending`/`running`（实时写前置态）是 **core 内态、不进 wire**（worker 没起或已被掐时由 schedule 本地赋，见 [0031](./0031-job-lifecycle-states-and-severity.md)）。**scope 内短路的 step 也不经 status 上报**——走独立 `step_skipped` 事件（见上「输出」段 + [0031](./0031-job-lifecycle-states-and-severity.md) 决定六），core 据此本地赋 `StepResult(status=SKIPPED, shortcircuited=True)`。
 - **`votes`**：step 是 AI 断言时才有，记 tally `{yes, total}`——够算抖动率（[0014](./0014-ai-first-assertions.md) 投票治种类A抖动）。**`votes` 的存在与否即 core 区分「AI 断言 vs 其余」的唯一依据**（取代了原 `kind` 字段）。
   - **为何只记 tally、不记 per-vote 序列**（澄清，免再纠结）：每票的 **yes/no 是拿得到的**（worker 投票循环里就是逐票布尔，见两个引擎 worker），只是折成 `{yes,total}` 计数。不留逐票序列是因为**投票是无序重复采样**——`[T,F,T]` 相对 `{yes:2,total:3}` 仅多了"顺序"，而顺序无语义，tally 已是全部信息。**真正拿不到的是每票的 thought/reason**（`aiBoolean`/`act_get(BOOL)` 只回布尔、不回"为何这么判"，两个引擎 SDK 皆然）——这才是「留口子不实现」里的「per-vote 细节」所指。
 - **`errorType` + `message`**（规范化失败分类）：`errorType` 取自固定类别集，让 RunResult/未来重试能按类型分支；`message` 是人类可读诊断。**`failed` 与 `error` 两态均可带 `errorType`**（`failed`→`assertion_failed`；`error`→其余执行故障类）。**两个引擎映射**：Nova Act 有丰富异常树（按类映射），Midscene 只抛通用 `Error`（归 `engine_error`）。初始类别集：`assertion_failed`（断言没过）/ `timeout` / `guardrail` / `engine_error`（引擎内部/通用异常）/ `navigation_error` / `network_error`（网络/SSL 建连层瞬时故障,可重试,[0028](./0028-transient-network-ssl-resilience.md)）。类别集可随真实失败样本扩充。**退出码约定（[0028](./0028-transient-network-ssl-resilience.md)）**：建连失败发生在任何事件 emit 之前,worker 无法走事件通道,故约定专用退出码 `EX_WORKER_NETWORK=80` 作 out-of-band 信号；adapter 把它翻成 `WorkerNetworkError` → schedule 记 `network_error`。

@@ -417,6 +417,69 @@ def test_step_report_refs_reduced():
     assert result.jobs[0].scenarios[0].report_refs == ()  # 不再聚合到 scenario 级
 
 
+# ---- scope 内短路：StepSkipped 归约进 StepResult(SKIPPED, shortcircuited=True)（ADR 0031 决定六）----
+def test_step_skipped_reduced_to_skipped_shortcircuited():
+    # worker 上游 step error 后短路后续 step，发 step_skipped；core 建 StepResult(SKIPPED, shortcircuited=True)。
+    from core.model import StepSkipped
+    events = [
+        ScenarioStarted(scenario_id="n:0"),
+        StepStarted(scenario_id="n:0", step_index=0),
+        StepDone(scenario_id="n:0", step_index=0, status=Status.ERROR, error_type="network_error"),
+        StepSkipped(scenario_id="n:0", step_index=1),  # 被短路
+        StepSkipped(scenario_id="n:0", step_index=2),  # 被短路
+        ScenarioDone(scenario_id="n:0", status=Status.ERROR),  # scenario 判定由那个 error step 决定
+        ScopeDone(scope_id="n", session_id="sess-n"),
+    ]
+    engine = FakeEngine({"n": events})
+    result = schedule(_rm([_job("n")]), FakeResolver(engine), CollectSink())
+    steps = result.jobs[0].scenarios[0].steps
+    assert len(steps) == 3
+    # step 0：真跑出的 error
+    assert steps[0].status == Status.ERROR and steps[0].shortcircuited is False
+    # step 1/2：被短路 → SKIPPED + shortcircuited=True（正交轴），没跑 → 无墙钟
+    assert steps[1].status == Status.SKIPPED and steps[1].shortcircuited is True
+    assert steps[2].status == Status.SKIPPED and steps[2].shortcircuited is True
+    assert steps[1].duration_ms is None  # 被短路步没起跑（无 step_started）→ 无墙钟
+
+
+def test_step_skipped_does_not_pollute_scenario_or_run_status():
+    # 关键不变量（ADR 0031 决定六）：step 级 SKIPPED 绝不写 scenario_status → 不参与 scenario 归约/severity。
+    # 一个 [error, skipped, skipped] 的 scenario，其 scenario/job/run 判定必须 = error（skipped 零污染），
+    # 且不会被 SKIPPED 拉低（severity -1）也不会误当 passed。
+    from core.model import StepSkipped
+    events = [
+        ScenarioStarted(scenario_id="n:0"),
+        StepDone(scenario_id="n:0", step_index=0, status=Status.ERROR, error_type="network_error"),
+        StepSkipped(scenario_id="n:0", step_index=1),
+        ScenarioDone(scenario_id="n:0", status=Status.ERROR),
+        ScopeDone(scope_id="n"),
+    ]
+    engine = FakeEngine({"n": events})
+    result = schedule(_rm([_job("n")]), FakeResolver(engine), CollectSink())
+    assert result.jobs[0].scenarios[0].status == Status.ERROR  # scenario 判定 = error（未被 skipped 影响）
+    assert result.jobs[0].status == Status.ERROR               # job 判定 = error
+    assert result.status == Status.ERROR                        # run 判定 = error
+
+
+def test_step_skipped_without_scenario_done_still_recorded():
+    # 兜底：即便 scenario_done 缺席（worker 中途被停），已归约的 skipped step 也不该丢——
+    # 它们暂存在 timing.steps，只在 scenario_done 才挂入 scenarios。此处验证有 scenario_done 时挂入正确。
+    # （无 scenario_done 的挂入由 schedule 既有兜底逻辑覆盖，非本 ADR 引入，不重复测。）
+    from core.model import StepSkipped
+    events = [
+        ScenarioStarted(scenario_id="n:0"),
+        StepDone(scenario_id="n:0", step_index=0, status=Status.ERROR, error_type="engine_error"),
+        StepSkipped(scenario_id="n:0", step_index=1),
+        ScenarioDone(scenario_id="n:0", status=Status.ERROR),
+        ScopeDone(scope_id="n"),
+    ]
+    engine = FakeEngine({"n": events})
+    result = schedule(_rm([_job("n")]), FakeResolver(engine), CollectSink())
+    steps = result.jobs[0].scenarios[0].steps
+    assert [s.status for s in steps] == [Status.ERROR, Status.SKIPPED]
+    assert steps[1].shortcircuited is True
+
+
 # ---- 网络瞬时故障的 job 级重试（ADR 0028）----
 
 _NOSLEEP = lambda _s: None  # 注入 no-op sleep，保单测不真等

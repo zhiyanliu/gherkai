@@ -33,7 +33,7 @@
 
 | 概念 | 是什么 | 产出 |
 |---|---|---|
-| **Step** | scenario 内单步 | pass/fail/error、投票 tally、墙钟时长（`StepResult`，core 首次保留 step 级粒度） |
+| **Step** | scenario 内单步 | pass/fail/error（+ scope 内短路的 `skipped`，带正交 `shortcircuited` 标记，见 [0031](./0031-job-lifecycle-states-and-severity.md) 决定六）、投票 tally、墙钟时长（`StepResult`，core 首次保留 step 级粒度） |
 | **Scenario** | Gherkin 单个 `Scenario:` | pass/fail、A/B 断言、抖动数据（投票）、原生报告引用、墙钟时长 |
 | **Feature**（`.feature`） | 含 1..N scenario | **组织轴**（正交，非执行单元） |
 | **Scope**（session scope） | 共享操作上下文的 scenario 分组 | **执行单元**：scope 内串行、scope 间并行；产出原生量成本合计 + 墙钟时长 |

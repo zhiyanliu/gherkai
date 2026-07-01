@@ -172,9 +172,9 @@ def test_index_html_shows_verdict_even_without_report_refs(tmp_path: Path):
     assert "本页不解析其内容" not in txt        # 已移除的底注
 
 
-def test_index_html_taints_failed_after_error(tmp_path: Path):
-    # 连锁失败读法（ADR 0028）：index.html 判定明细里，同 scenario 内 error 之后的 failed step 加视觉旁注；
-    # error 之前的 failed 不加（判据只看 status 顺序、不改判定）。
+def test_index_html_taints_shortcircuited_step(tmp_path: Path):
+    # 连锁失败旁注（ADR 0031 决定六）：index.html 判定明细里，被 scope 内短路的 step（shortcircuited=True，
+    # status=skipped）加视觉旁注"因前置 step error 被跳过"。判据读 shortcircuited 布尔（不再按 status 顺序猜）。
     run = _rr(
         "chain",
         [_jr(
@@ -182,8 +182,8 @@ def test_index_html_taints_failed_after_error(tmp_path: Path):
             scenarios=[ScenarioResult(
                 scenario_id="s:0", status=Status.ERROR,
                 steps=[
-                    StepResult(index=0, status=Status.ERROR, error_type="network_error"),   # 上游 error
-                    StepResult(index=1, status=Status.FAILED, error_type="assertion_failed"),  # 连锁果 → 加旁注
+                    StepResult(index=0, status=Status.ERROR, error_type="network_error"),   # 上游 error（不加旁注）
+                    StepResult(index=1, status=Status.SKIPPED, shortcircuited=True),          # 被短路 → 加旁注
                 ],
             )],
         )],
@@ -191,10 +191,33 @@ def test_index_html_taints_failed_after_error(tmp_path: Path):
     )
     store = LocalReportStore(tmp_path / "reports")
     txt = _uri_to_path(store.write(run.run_id, run)).read_text("utf-8")
-    assert "可能不可信" in txt                     # error 之后的 failed 有旁注
-    # 旁注只挂 step[1]（failed），不挂 step[0]（error 本身）——用 taint CSS class 精确定位
-    assert txt.count("taint") >= 2                 # 至少 CSS 定义 + 一处 span（不误挂到 error 步）
-    assert "归集索引（ADR" not in txt
+    assert "被跳过" in txt                          # 被短路的 step 有旁注
+    assert "skipped" in txt                         # 短路 step 显 skipped 态
+    # 旁注只挂 step[1]（shortcircuited），不挂 step[0]（error 本身）——用 taint CSS class 精确定位
+    assert txt.count("taint") >= 2                  # 至少 CSS 定义 + 一处 span（不误挂到 error 步）
+
+
+def test_index_html_no_taint_on_plain_failed(tmp_path: Path):
+    # 反向护栏（ADR 0031 决定六）：普通 failed（非短路、shortcircuited=False）不加旁注——
+    # 避免误伤正常业务失败。判据迁到 shortcircuited 后，"error 后的 failed"若非短路态就不该再加旁注。
+    run = _rr(
+        "plain",
+        [_jr(
+            "s", "novaact", status=Status.ERROR,
+            scenarios=[ScenarioResult(
+                scenario_id="s:0", status=Status.ERROR,
+                steps=[
+                    StepResult(index=0, status=Status.ERROR, error_type="network_error"),
+                    StepResult(index=1, status=Status.FAILED, error_type="assertion_failed"),  # 普通 failed，非短路
+                ],
+            )],
+        )],
+        status=Status.ERROR,
+    )
+    store = LocalReportStore(tmp_path / "reports")
+    txt = _uri_to_path(store.write(run.run_id, run)).read_text("utf-8")
+    assert "被跳过" not in txt                       # 无 shortcircuited step → 无旁注 span
+    assert txt.count("taint") == 1                  # 只剩 CSS 定义那一处，无 span
 
 
 def test_materialize_copies_local_artifact(tmp_path: Path):

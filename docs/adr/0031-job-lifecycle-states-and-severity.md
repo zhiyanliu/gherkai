@@ -48,7 +48,8 @@ class Status(str, Enum):
   即全链路自然识别。新开 enum 会让 `JobResult.status` 变 `Union`，serialize/render/html 全要分两套分支，破坏「status 单一类型」的深模块性质。
 - **它们是 core 在 fail-fast 路径派生赋的 job 级态，不是 worker 上报态**：worker 只在 `*_done` 事件报三态
   （`passed`/`failed`/`error`，[0024](./0024-worker-core-protocol.md)）；skipped/aborted 由 `schedule` 在 worker 没起 / 已被掐时
-  本地构造 `JobResult` 时赋。故**它们只活在 job 级（scope 级），永不出现在 StepDone/ScenarioDone.status**。
+  本地构造 `JobResult` 时赋。故 aborted **只活在 job 级（scope 级）**；**skipped 后来下探到 step 级**（scope 内短路，见决定六），
+  但两级的 SKIPPED **都由 core 本地构造、永不经 `StepDone.status` 上报**（`step_skipped` 是独立事件、非 step_done 的 status 值）。
 
 ## 决定一·补：`pending` / `running` —— 生命周期前置态，非判定态
 
@@ -129,6 +130,43 @@ cli 退出码从「`status.value == 'passed'` 才 0」改为**基于 run 级 sev
 - 当前结果不变：含 aborted/skipped 的 run 必伴随 error → run=error → 退 1（CI 红）。aborted 有副作用、skipped 因别人崩才没跑，整批确实失败，退非 0 正确。
 - 改成基于 severity 而非字符串相等，**对未来新态更稳健、可读性更好**（判断点收敛到一处）。
 
+## 决定六：step 级短路——SKIPPED 下探到 step 级 + 正交 `shortcircuited` 布尔
+
+[0028](./0028-transient-network-ssl-resilience.md) 记过一个真跑暴露的空白：scope 内 step 串行，**上游 step `error` 不短路下游** →
+下游在损坏环境（如 SSL 错误页）上跑出误导性 `failed`。本决定兑现 0028 记的「首选路线」：**worker 在 scope 内短路**——
+上游 step `status==error` 后，不再对后续 step 调 AI（省钱、报告干净），而是为每个被跳过的 step 发一个 `step_skipped` 事件。
+
+**这引出一个新问题：被短路的 step 用什么态？** 定下如下承载方式（三条硬约束，别踩）：
+
+- **载体是独立 `step_skipped` 事件，不是 `step_done` 的第 4 个 status 值**。理由：wire 严格三态（决定四），
+  worker 报判定只能是 passed/failed/error。「这步没跑」不是判定结论、是执行事实，故走**平行于 step_done 的独立事件**
+  （`{type:"step_skipped", scenarioId, stepIndex}`，无 status/votes/cost 字段），[0024](./0024-worker-core-protocol.md) wire 相应加此事件。
+- **core 收到 `step_skipped` → 本地构造 `StepResult(status=Status.SKIPPED, shortcircuited=True)`**。复用既有 `Status.SKIPPED`
+  枚举值（它已在 severity 表 = -1、已被 `_NON_VERDICT` 覆盖）——**在 StepResult 层，SKIPPED 直观表达「这步没跑」**，
+  人/AI 一眼可读。**但它由 core 本地赋、不经 wire**（同 job 级 skipped/aborted 的性质：core 派生态、非 worker 上报态）。
+- **`shortcircuited: bool` 是与判定轴正交的第二维**：status 轴回答「跑出什么结论」（passed/failed/error/skipped），
+  shortcircuited 轴回答「为什么 skipped」（True=因上游短路而被跳过）。渲染层的连锁失败旁注**改读 shortcircuited**
+  （见 [0028](./0028-transient-network-ssl-resilience.md) 从「error 后 failed」迁到「被短路的 step」），比原「按 status 顺序猜」更精确、判据单一。
+
+**关键不变量：step 级 SKIPPED 绝不写进 `scenario_status`**（守 severity/`_aggregate` 零污染）。`_reduce` 处理 `step_skipped`
+时只把 StepResult 暂存待挂（同 step_done 的暂存路径），**不碰 scenario_status**——故它不参与 scenario 归约、不进 `_aggregate`
+（决定三的 `_NON_VERDICT` 已含 SKIPPED，是双重保险；但真正的保证是「压根不喂进去」）。scenario/job 的判定态由「上游那个 error step」
+决定，与「后面短路了几个 step」无关。
+
+**job 级 skipped（决定一）与 step 级 shortcircuited 是两个不同层次，别混**：
+
+| | 谁 skip | 有 StepResult 吗 | 承载 |
+|---|---|---|---|
+| **job 级 fail-fast skip**（决定一） | 整个 job 从未 spawn | **无**（`JobResult.scenarios=[]`） | `JobResult.status = SKIPPED`（session_id 必 None、没花钱） |
+| **step 级短路**（本决定） | job 起了、scope 内上游 error 后跳过后续 step | **有**（worker 发 step_skipped、core 建 StepResult） | `StepResult(status=SKIPPED, shortcircuited=True)`（会话已起、花过钱） |
+
+前者是「job 根本没跑」（无 step 明细）；后者是「job 跑了一半、剩下的 step 被主动跳过」（有 step 明细，标 shortcircuited）。
+两级都复用 `Status.SKIPPED` 表「没跑」，语义一致、只是层级不同；`shortcircuited` 布尔进一步标出 step 级「为什么没跑」。
+
+**判据锁 `status==error`（不看 error_type）**：无论哪腿、network_error 还是 engine_error 都触发短路，两腿对称——
+这也回避了 [0028](./0028-transient-network-ssl-resilience.md) 记的「两腿 SSL 分类不对称」欠账对短路的影响（那只影响 errorType 文案、不影响 error 这个 status）。
+短路是 **scope 内**行为（上游 error 只短路**同 scenario/同 scope**的后续 step，不跨 job——跨 job 是 fail-fast 的职责，两者正交）。
+
 ## touch points（实装清单）
 
 - `core/model.py`：`Status` 加 SKIPPED/ABORTED（判定派生态）+ PENDING/RUNNING（生命周期前置态），注释标明 core 内态、非 wire；新增 `_STATUS_SEVERITY` 表（仅终态）+ `_NON_VERDICT` 过滤名单 + 比较辅助。
@@ -143,6 +181,14 @@ cli 退出码从「`status.value == 'passed'` 才 0」改为**基于 run 级 sev
 - `docs/adr/0024`：「status 三态」处补澄清指针（决定四）。
 - `docs/adr/0026`：line 75「status 归约 scenario→job→run 同规则」段补指针——job 级判定态扩为含 skipped/aborted、run 级 `_aggregate` 入口过滤 `_NON_VERDICT` 再取三态 max（见本 ADR 决定二/三）。
 - `docs/adr/0016`：协议/RunResult 字段处「status 三态」措辞补「job 级另有 core 派生态 skipped/aborted + 前置态 pending/running，见 0031」指针。
+- **决定六（step 级短路）实装**：
+  - `core/model.py`：加 `StepSkipped` 事件（frozen dataclass：`scenario_id`/`step_index`，无 status/votes/cost）并入 `Event` Union；`StepResult` 加 `shortcircuited: bool = False`（正交布尔）。
+  - `core/wire.py`：`event_from_json` 加 `step_skipped` 分支（加法，不碰 step_done 三态解析）。
+  - `core/schedule.py`：`_reduce` 加 `StepSkipped` 分支 → 暂存 `StepResult(status=SKIPPED, shortcircuited=True)`（被短路 step 无 `step_started`，`duration_ms` 恒 None——没跑=无墙钟）；**绝不写 `scenario_status`**。
+  - `core/serialize.py`：StepResult to/from_dict 加 `shortcircuited`（`.get` 默认 False，向后兼容旧落盘）。
+  - `cli/cli/render.py` + `core/adapters/report_store/local.py`：连锁失败旁注判据从「error 后 failed」迁到读 `shortcircuited`；被短路 step 显 skipped 态 + 旁注。
+  - `engines/novaact/worker/run_scope.py` + `engines/midscene/worker/run-scope.ts`：scope 内上游 `status==error` 后短路后续 step、发 `step_skipped`（不调 AI）。
+  - `docs/adr/0024`（wire 加 step_skipped 事件）/ `docs/adr/0028`（defer 转实现，判据/承载）。
 
 ## 重议 / 留口子
 

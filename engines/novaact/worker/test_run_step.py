@@ -214,3 +214,59 @@ def test_deterministic_and_url_steps_have_no_traj_refs(captured):
     nova = _FakeNova()
     rs._run_step(nova, "sc:0", _step("Given", '打开 "https://example.com"'), 1)
     assert "reportRefs" not in _done(captured)
+
+
+# ---- scope 内 step 短路（ADR 0031 决定六 / 0028）：_run_scenario 上游 error 后跳过后续、发 step_skipped ----
+class _NavErrorNova:
+    """go_to_url 抛异常（模拟导航 SSL 失败 → step error）；act/act_get 记调用（验证短路后不再被调）。"""
+    def __init__(self, nav_raises):
+        self._nav_raises = nav_raises
+        self.act_calls = 0
+        self.act_get_calls = 0
+    def go_to_url(self, url):
+        raise self._nav_raises
+    def act(self, instr):
+        self.act_calls += 1
+        return _FakeResult(True)
+    def act_get(self, instr, schema):
+        self.act_get_calls += 1
+        return _FakeResult(True)
+
+
+def test_run_scenario_shortcircuits_after_error(captured):
+    # 上游 step（导航）error → 后续 step 不调 AI（省钱）、发 step_skipped。判据锁 status==error。
+    nova = _NavErrorNova(ConnectionError("SSL reset"))
+    steps = [
+        _step("Given", '打开 "https://broken.example"', 0),  # 导航失败 → error
+        _step("When", '"在页面上操作"', 1),                    # 应被短路（不调 act）
+        _step("Then", '"页面有预期内容"', 2),                   # 应被短路（不调 act_get）
+    ]
+    statuses = rs._run_scenario(nova, "sc:0", steps, votes_n=1)
+    # 上游 error 后：AI 一次没调（省钱、不在损坏环境上跑）
+    assert nova.act_calls == 0 and nova.act_get_calls == 0
+    # step 1/2 发 step_skipped（独立事件，非 step_done）
+    skipped = [e for e in captured if e["type"] == "step_skipped"]
+    assert [e["stepIndex"] for e in skipped] == [1, 2]
+    assert all("status" not in e for e in skipped)  # step_skipped 无 status 字段
+    # 被短路步不进 statuses → 不参与 _aggregate；scenario 判定由那个 error step 决定
+    assert statuses == ["error"]
+    assert rs._aggregate(statuses) == "error"
+
+
+def test_run_scenario_no_shortcircuit_when_all_pass(captured):
+    # 反向护栏：无 error 时不短路——每步照跑、无 step_skipped 事件。
+    nova = _FakeNova(bool_seq=[True])
+    steps = [_step("When", '"做事A"', 0), _step("Then", '"对吗"', 1)]
+    statuses = rs._run_scenario(nova, "sc:0", steps, votes_n=1)
+    assert statuses == ["passed", "passed"]
+    assert [e for e in captured if e["type"] == "step_skipped"] == []
+
+
+def test_run_scenario_failed_does_not_shortcircuit(captured):
+    # 判据锁 status==error（不是 failed）：一个 failed 的断言步**不**短路后续——
+    # failed 是业务结论、环境没坏，后续步该照跑（只有 error=执行故障才短路）。
+    nova = _FakeNova(bool_seq=[False, True])  # 第一个 Then failed，第二个 Then passed
+    steps = [_step("Then", '"对吗A"', 0), _step("Then", '"对吗B"', 1)]
+    statuses = rs._run_scenario(nova, "sc:0", steps, votes_n=1)
+    assert statuses == ["failed", "passed"]  # failed 不触发短路，第二步照跑
+    assert [e for e in captured if e["type"] == "step_skipped"] == []

@@ -27,6 +27,7 @@ from core.model import (
     Step,
     StepArgument,
     StepDone,
+    StepSkipped,
     StepStarted,
     Votes,
 )
@@ -130,6 +131,10 @@ def event_from_json(d: dict) -> Event:
             message=d.get("message"),
             report_refs=_report_refs_from_json(d.get("reportRefs")),  # step 级 trajectory（ADR 0027 下沉）
         )
+    if t == "step_skipped":
+        # scope 内短路（ADR 0031 决定六 / 0024）：独立事件、无 status/votes/cost——加法解析，
+        # 不碰上面 step_done 的三态 Status(d["status"]) 分支。core 据此本地赋 StepResult(SKIPPED, shortcircuited=True)。
+        return StepSkipped(scenario_id=d["scenarioId"], step_index=d["stepIndex"])
     if t == "scenario_done":
         return ScenarioDone(
             scenario_id=d["scenarioId"],

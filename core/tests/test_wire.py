@@ -13,6 +13,7 @@ from core.model import (
     Step,
     StepArgument,
     StepDone,
+    StepSkipped,
 )
 from core.wire import event_from_json, event_from_line, job_to_json
 
@@ -132,6 +133,25 @@ def test_event_step_done_no_report_refs_defaults_empty():
     # 无 reportRefs 的 step_done（确定性/导航步）→ 空 tuple（向后兼容）
     ev = event_from_json({"type": "step_done", "scenarioId": "s:0", "stepIndex": 0, "status": "passed"})
     assert ev.report_refs == ()
+
+
+def test_event_step_skipped():
+    # scope 内短路（ADR 0031 决定六）：step_skipped 独立事件、无 status/votes/cost——
+    # 加法解析，不碰 step_done 三态。core 据此本地赋 StepResult(SKIPPED, shortcircuited=True)。
+    ev = event_from_json({"type": "step_skipped", "scenarioId": "s:0", "stepIndex": 2})
+    assert isinstance(ev, StepSkipped)
+    assert ev.scenario_id == "s:0"
+    assert ev.step_index == 2
+    # 没有 status 字段（不是 step_done 的第 4 态；不参与判定/severity）
+    assert not hasattr(ev, "status")
+
+
+def test_event_step_done_parse_unaffected_by_step_skipped():
+    # 回归护栏：step_skipped 分支是加法——step_done 的三态解析（Status(d["status"])）不受影响。
+    ev = event_from_json({"type": "step_done", "scenarioId": "s:0", "stepIndex": 0, "status": "error",
+                          "errorType": "network_error"})
+    assert isinstance(ev, StepDone)
+    assert ev.status == Status.ERROR
 
 
 def test_event_scope_done():

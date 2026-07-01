@@ -208,6 +208,21 @@ class StepDone:
 
 
 @dataclass(frozen=True)
+class StepSkipped:
+    """scope 内短路事件（ADR 0031 决定六 / 0024）：上游 step error 后，worker 跳过本 step、不调 AI。
+
+    **独立事件、平行于 StepDone，不是 status 第 4 态**——wire 严格三态（ADR 0024），「这步没跑」是
+    执行事实、非判定结论，故不塞进 StepDone.status。无 status/votes/cost 字段（没跑，无从谈判定/成本）。
+    core 收到它 → 本地构造 StepResult(status=SKIPPED, shortcircuited=True)：SKIPPED 复用既有枚举（在
+    StepResult 层直观表「没跑」），但由 core 本地赋、不经 wire（同 job 级 skipped/aborted 的 core 派生态性质）。
+    """
+
+    scenario_id: str
+    step_index: int
+    type: Literal["step_skipped"] = "step_skipped"
+
+
+@dataclass(frozen=True)
 class ScenarioDone:
     scenario_id: str
     status: Status
@@ -224,7 +239,7 @@ class ScopeDone:
 
 
 Event = (
-    ScopeStarted | ScenarioStarted | StepStarted | StepDone | ScenarioDone | ScopeDone
+    ScopeStarted | ScenarioStarted | StepStarted | StepDone | StepSkipped | ScenarioDone | ScopeDone
 )
 
 
@@ -246,6 +261,9 @@ class StepResult:
     votes: Votes | None = None
     error_type: str | None = None
     report_refs: tuple[ReportRef, ...] = ()  # step 级原生产物指针（Nova：本 step 的 act 轨迹，kind=trajectory，ADR 0027）
+    # 与判定轴（status）正交的第二维（ADR 0031 决定六）：True = 本 step 因上游 error 被 scope 内短路而跳过、没跑。
+    # 仅在 status==SKIPPED（由 step_skipped 事件派生）时为 True；渲染层的连锁失败旁注据此判定（比"按 status 顺序猜"精确）。
+    shortcircuited: bool = False
 
 
 @dataclass
