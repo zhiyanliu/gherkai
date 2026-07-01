@@ -67,6 +67,10 @@ _Avoid_: 以为"不点名也能抓变更"；把它与 A/B 两种不确定性混�
 A = 同一页面 AI 判断飘忽（随机噪声）→ **投票可治**；B = 页面真变了但 AI 柔性照样跑过、不报警（灵敏度不足）→ **投票治不了**，v1.0 接受为已知边界（ADR 0015）。
 _Avoid_: 以为"投票能带来确定性"——它只压 A，给不了对变更的灵敏度（B）。
 
+**连锁失败读法 (error → 后续 failed 的因果)**:
+scope 内 step 串行，**上一 step `error`（如导航 SSL/网络故障）不会短路后续 step**（当前无 step 级短路，ADR 0028 记为已知边界）——后续 step 在**已损坏的环境**（如停在 SSL 错误页）上继续跑，AI 断言忠实报告"页面没有预期内容" → `failed`(`assertion_failed`)。故读结果时：**同 scenario 内 `error` 之后的 `failed`，很可能是上游故障的连锁果、不是独立的业务失败**（不是"页面真的少了那段文案"，而是"页面根本没正常加载"）。cli 文本汇总与 RunReport index.html 对这种"error 后的 failed"加了视觉旁注提示。core 忠实并列记录各 step 实际所见、不臆断因果（纯 reducer，ADR 0026）——因果解读留给消费层/人。
+_Avoid_: 把 `error` 之后并列的 `failed` 当成两件独立的问题（多数是一件事的连锁）；把连锁 `failed` 误读成业务断言真没过。
+
 **成本可观测 (Cost observability)**:
 产品价值之一：一次跑批花了多少（ADR 0024）。**原则——engine 只报原生量、core 只各自合计、不折美元**：两个引擎计费轴不同（Nova 按 agent 工作时长 `time_worked_s`、Midscene 按 LLM token），core 各自累加成 `total_time_worked_s` / `total_tokens`（step→scope→run，无引擎报则 None）。**美元折算交消费者**（用自己 AWS 账户的真实费率）——框架不内置费率常量（避免追会过期的单价表）。与**墙钟时长** `duration_ms`（性能）正交：`time_worked_s` 是 Nova 计费量、`duration_ms` 是 core 测的执行墙钟，两个数不同。
 _Avoid_: 以为框架算美元（不折美元、只报原生量，美元交消费者）；混淆成本 `time_worked_s` 与性能 `duration_ms`。

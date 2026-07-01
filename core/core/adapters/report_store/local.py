@@ -206,6 +206,7 @@ def _render_index_html(manifest: dict, result: RunResult) -> str:
         scen_blocks = []
         for sr in jr.scenarios:
             step_rows = []
+            saw_error = False  # 本 scenario 内是否已出现 error step（连锁失败读法，ADR 0028）
             for st in sr.steps:
                 # total>1 才显投票 tally（1/1 无抖动意义，不显，避免噪声）
                 votes = (
@@ -213,10 +214,18 @@ def _render_index_html(manifest: dict, result: RunResult) -> str:
                     if st.votes and st.votes.total > 1 else ""
                 )
                 serr = f' <span class="err">{esc(st.error_type)}</span>' if st.error_type else ""
+                # 同 scenario 内 error 之后的 failed：很可能是上游故障的连锁果（环境已损坏），非独立业务失败。
+                # 判据只看 status（不看 error_type、不改判定）——对"error 之后 failed"这个可观测顺序事实的视觉旁注。
+                taint = (
+                    ' <span class="taint">⚠ 前置 step 已 error，此判定可能不可信</span>'
+                    if (saw_error and st.status.value == "failed") else ""
+                )
                 step_rows.append(
                     f'<li>{_dot(st.status.value)}<span class="stp">step[{st.index}]</span> '
-                    f'{esc(st.status.value)} <span class="t">{_fmt_ms(st.duration_ms)}</span>{votes}{serr}</li>'
+                    f'{esc(st.status.value)} <span class="t">{_fmt_ms(st.duration_ms)}</span>{votes}{serr}{taint}</li>'
                 )
+                if st.status.value == "error":
+                    saw_error = True
             steps_html = ("<ul class=\"steps\">" + "".join(step_rows) + "</ul>") if step_rows else ""
             scen_blocks.append(
                 f'<li>{_dot(sr.status.value)}<span class="scn">{esc(sr.scenario_id)}</span> '
@@ -272,6 +281,7 @@ def _render_index_html(manifest: dict, result: RunResult) -> str:
   .t {{ color: #8c959f; font-size: .85em; }}
   .votes {{ color: #0969da; font-size: .85em; }}
   .err {{ color: #cf222e; font-size: .85em; }}
+  .taint {{ color: #9a6700; font-size: .85em; }}
   ul.refs {{ list-style: none; padding: 0; }}
   ul.refs li {{ padding: .35rem 0; border-bottom: 1px solid #eee; }}
   .dot {{ display: inline-block; width: .6rem; height: .6rem; border-radius: 50%; margin-right: .5rem; vertical-align: middle; }}

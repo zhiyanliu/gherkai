@@ -66,10 +66,16 @@ def render_text(result: RunResult) -> str:
         for sr in jr.scenarios:
             dur = f"  ({_ms(sr.duration_ms)})" if sr.duration_ms is not None else ""
             out.append(f"    scenario {sr.scenario_id!r}: {sr.status.value}{dur}")
+            saw_error = False  # 本 scenario 内是否已出现 error step（连锁失败读法，ADR 0028）
             for st in sr.steps:
                 # total>1 才显投票 tally（与 format_event/index.html 一致；1/1 无抖动意义，不显）
                 v = f" 投票 {st.votes.yes}/{st.votes.total}" if st.votes and st.votes.total > 1 else ""
-                out.append(f"      step {st.index}: {st.status.value} ({_ms(st.duration_ms)}){v}")
+                # 同 scenario 内 error 之后的 failed：很可能是上游故障的连锁果（环境已损坏），非独立业务失败。
+                # 判据只看 status（不看 error_type、不改判定/severity）——对"error 之后的 failed"这个可观测顺序事实的旁注。
+                taint = "  ⚠ 前置 step 已 error，此判定可能不可信" if (saw_error and st.status.value == "failed") else ""
+                out.append(f"      step {st.index}: {st.status.value} ({_ms(st.duration_ms)}){v}{taint}")
+                if st.status.value == "error":
+                    saw_error = True
                 # step 级原生报告产物（Nova trajectory 挂这层，来自 step_done 下沉，ADR 0027）——缩进深一级
                 for rr in st.report_refs:
                     out.append(f"        report（{rr.label or rr.kind}）: {rr.ref}")

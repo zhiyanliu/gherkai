@@ -170,6 +170,30 @@ def test_index_html_shows_verdict_even_without_report_refs(tmp_path: Path):
     # 产物区为空但有意义提示，且不再含已移除的内部设计语
     assert "无原生报告产物" in txt
     assert "本页不解析其内容" not in txt        # 已移除的底注
+
+
+def test_index_html_taints_failed_after_error(tmp_path: Path):
+    # 连锁失败读法（ADR 0028）：index.html 判定明细里，同 scenario 内 error 之后的 failed step 加视觉旁注；
+    # error 之前的 failed 不加（判据只看 status 顺序、不改判定）。
+    run = _rr(
+        "chain",
+        [_jr(
+            "s", "novaact", status=Status.ERROR,
+            scenarios=[ScenarioResult(
+                scenario_id="s:0", status=Status.ERROR,
+                steps=[
+                    StepResult(index=0, status=Status.ERROR, error_type="network_error"),   # 上游 error
+                    StepResult(index=1, status=Status.FAILED, error_type="assertion_failed"),  # 连锁果 → 加旁注
+                ],
+            )],
+        )],
+        status=Status.ERROR,
+    )
+    store = LocalReportStore(tmp_path / "reports")
+    txt = _uri_to_path(store.write(run.run_id, run)).read_text("utf-8")
+    assert "可能不可信" in txt                     # error 之后的 failed 有旁注
+    # 旁注只挂 step[1]（failed），不挂 step[0]（error 本身）——用 taint CSS class 精确定位
+    assert txt.count("taint") >= 2                 # 至少 CSS 定义 + 一处 span（不误挂到 error 步）
     assert "归集索引（ADR" not in txt
 
 
