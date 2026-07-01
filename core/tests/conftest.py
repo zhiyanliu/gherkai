@@ -1,14 +1,20 @@
-"""云端 adapter 测试基建（ADR 0030 决定六）：moto 内存 mock，全程**绝不连真 AWS**。
+"""云端 adapter 测试基建（ADR 0030 决定六）。
 
-两道保障：
-1. `_fake_aws_creds`（autouse）：在**任何** boto3 client 创建前把 AWS 凭证/region 环境变量覆盖成假值——
-   即便 CI 机器上有真凭证也被盖掉，且给定 region 避免 NoRegionError。这是「不烧真 AWS」的硬隔离点。
-2. `mock_aws`（moto）：拦截所有 AWS 调用到内存后端，不出网。
+**两类测试、两套 fixture**（见 tests/README.md）：
+- **单测（默认）**：moto 内存 mock，全程**绝不连真 AWS**。两道保障——
+  1. `_fake_aws_creds`（autouse）：任何 boto3 client 创建前把 AWS 凭证/region 覆盖成假值，即便机器有真凭证也盖掉、
+     且给 region 避免 NoRegionError。「不烧真 AWS」的硬隔离点。
+  2. `mock_aws`（moto）：拦截所有 AWS 调用到内存后端，不出网。
+- **集成测试（`@pytest.mark.integration`，默认 deselect）**：连**真** DDB/S3，专测 moto 抓不到的真语义。
+  `_fake_aws_creds` 对它**让路**（不覆盖真凭证）；`real_aws` fixture 读 `AWS_DDB_TABLE`/`AWS_S3_BUCKET` 环境变量拿真表/桶名，
+  没设就 skip（不误连、不报错）。用真凭证（default profile）。见 `real_aws` fixture 与 tests/README.md。
 
 DDB 表 schema 见 ADR 0030 决定六：PK=run_id（HASH）、SK（RANGE，值 'META'/'STATE'）。建表责任在
-IaC/组合根、adapter 假定表已存在——故测试里由 fixture 建表（不由 adapter 自建）。
+IaC/组合根、adapter 假定表已存在——单测由 fixture 建（moto 内存表），集成测试假定真表/桶已由你预建（见 README）。
 """
 from __future__ import annotations
+
+import os
 
 import pytest
 
@@ -18,10 +24,20 @@ from moto import mock_aws
 _TABLE_NAME = "yaozhou-runs"   # RunStore 表（PK=run_id, SK=META|STATE）
 _BUCKET_NAME = "yaozhou-artifacts"  # ResultStore/ReportStore 对象桶
 
+# 集成测试读的环境变量名（真表/真桶名由你建好后经它们传入；没设 → 集成测试 skip）
+_IT_TABLE_ENV = "AWS_DDB_TABLE"
+_IT_BUCKET_ENV = "AWS_S3_BUCKET"
+
 
 @pytest.fixture(autouse=True)
-def _fake_aws_creds(monkeypatch):
-    """硬隔离：设假凭证 + 固定 region，绝不误连真 AWS（moto 官方推荐套装）。autouse=每个测试都先生效。"""
+def _fake_aws_creds(request, monkeypatch):
+    """硬隔离：设假凭证 + 固定 region，绝不误连真 AWS（moto 官方推荐套装）。autouse=每个测试都先生效。
+
+    **对 `@pytest.mark.integration` 让路**：集成测试要连真 AWS，若给它盖假凭证会连不上——故检测到
+    integration 标记就直接返回、不覆盖凭证（让真 default profile 生效）。单测无此标记，照旧硬隔离。
+    """
+    if request.node.get_closest_marker("integration") is not None:
+        return  # 集成测试：不盖凭证，用真 default profile
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "testing")
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "testing")
     monkeypatch.setenv("AWS_SECURITY_TOKEN", "testing")
@@ -103,3 +119,65 @@ def ddb_run_store_offload(aws, arg_offloader):
     from core.adapters.run_store.ddb import DynamoDBRunStore
 
     return DynamoDBRunStore(aws["ddb"].Table(aws["table_name"]), arg_offloader=arg_offloader)
+
+
+# ============================================================================
+# 集成测试 fixture（连真 DDB/S3，@pytest.mark.integration；默认 deselect，见 pyproject addopts）
+# ============================================================================
+
+
+@pytest.fixture
+def real_aws():
+    """连真 DDB/S3 的句柄（真表/桶名读环境变量），供集成测试。**没设环境变量就 skip**（不误连、不报错）。
+
+    需你先建好真表 + 真桶（见 tests/README.md），把名字经 `AWS_DDB_TABLE`/`AWS_S3_BUCKET`
+    传入。用真凭证（default profile，`_fake_aws_creds` 对 integration 标记让路）。region 取 AWS_REGION/
+    AWS_DEFAULT_REGION，默认 us-east-1。
+
+    产出 dict：{ddb, table_name, s3, bucket}——与单测 `aws` fixture 同形，故集成用例可复用单测的构造逻辑。
+    **自清理**：yield 后删本次用例经 adapter 写进真表/真桶的所有条目（按 run_id / key 前缀），不留垃圾。
+    整批清理 key 由用例登记进返回 dict 的 `_cleanup_run_ids` / `_cleanup_prefixes`（helper 见下）。
+    """
+    table_name = os.environ.get(_IT_TABLE_ENV)
+    bucket = os.environ.get(_IT_BUCKET_ENV)
+    if not table_name or not bucket:
+        pytest.skip(
+            f"集成测试需设 {_IT_TABLE_ENV} + {_IT_BUCKET_ENV}（真 DDB 表 + S3 桶名）——见 tests/README.md。未设，跳过。"
+        )
+
+    import boto3
+
+    region = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION") or "us-east-1"
+    ddb = boto3.resource("dynamodb", region_name=region)
+    s3 = boto3.client("s3", region_name=region)
+
+    run_ids: list[str] = []   # 用例登记：清理时按 run_id 删 DDB 两 item（META/STATE）
+    prefixes: list[str] = []  # 用例登记：清理时按 key 前缀清 S3 对象
+
+    ctx = {
+        "ddb": ddb,
+        "table_name": table_name,
+        "s3": s3,
+        "bucket": bucket,
+        "cleanup_run_id": run_ids.append,     # 用例调它登记要清的 run_id
+        "cleanup_prefix": prefixes.append,    # 用例调它登记要清的 S3 前缀
+    }
+    try:
+        yield ctx
+    finally:
+        # 自清理：删本次用例写进真表/真桶的数据（尽力而为，逐个吞异常不影响其它清理）
+        table = ddb.Table(table_name)
+        for rid in run_ids:
+            for sk in ("META", "STATE"):
+                try:
+                    table.delete_item(Key={"run_id": rid, "sk": sk})
+                except Exception:  # noqa: BLE001  清理尽力而为
+                    pass
+        for prefix in prefixes:
+            try:
+                resp = s3.list_objects_v2(Bucket=bucket, Prefix=prefix)
+                objs = [{"Key": o["Key"]} for o in resp.get("Contents", [])]
+                if objs:
+                    s3.delete_objects(Bucket=bucket, Delete={"Objects": objs})
+            except Exception:  # noqa: BLE001  清理尽力而为
+                pass

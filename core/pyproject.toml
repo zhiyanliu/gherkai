@@ -33,3 +33,9 @@ packages = ["core"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# 默认只跑单测（纯 moto/本地、绝不连真 AWS）——integration 标记的用例默认 deselect。
+# 连真 AWS 的集成测试须显式 `-m integration`（且设 YAOZHOU_IT_* 环境变量，否则 skip）。见 tests/README.md。
+addopts = "-m 'not integration'"
+markers = [
+    "integration: 连真 AWS（DDB/S3）的集成测试，默认不跑；须 -m integration + 设 YAOZHOU_IT_DDB_TABLE/YAOZHOU_IT_S3_BUCKET",
+]
