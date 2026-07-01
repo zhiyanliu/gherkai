@@ -103,6 +103,13 @@ def test_fail_fast_queued_job_is_skipped():
     assert result.status == Status.ERROR            # run 级仍 error（crash 顶上去），skipped 不污染
 
 
+# 死锁逃生用的宽松超时（秒）：远大于正常执行（~0.01s），仅防「放行信号因逻辑 bug 永不到来」时测试永久挂死。
+# **正常路径绝不该触及它**——用它的两个夹具（_AbortProbeEngine / _NetRaiseEngine）都配了后置断言校验确被真正
+# 放行（gate_released=True），超时（False）视为测试失败，绝不让超时静默退化成误判（本文件两个 fail-fast 夹具
+# 曾各有一条此类残留 flaky：短超时兜底打破「被放行 ⟺ abort_flag 已 set」耦合，对抗验证暴露后统一改无限等 + 断言）。
+_DEADLOCK_ESCAPE_S = 30.0
+
+
 # ---- fail-fast：跑一半被掐 → ABORTED（已 spawn、有现场）----
 # 标准 FakeEngine 在被 stop 时「协作式干净返回」→偏向 passed，且并发下 victim 常在 crash 崩之前/之后被
 # SKIPPED，无法确定性命中 ABORTED 分支。故用一个小专用 engine 确定性复现「已 spawn、跑到一半、收到 stop
@@ -114,6 +121,7 @@ class _AbortProbeEngine:
         self.run_count: dict[str, int] = {}
         self.crashed = threading.Event()   # crash 已崩并（由 schedule）set 了 abort_flag
         self.victim_started = threading.Event()  # victim 已吐过首个事件（已有现场）
+        self.gate_released = False  # victim 是否被真正放行（True）而非死锁逃生超时（False）——供测试后置断言
 
     def run_scope(self, job):
         h = FakeWorkerHandle()
@@ -123,7 +131,7 @@ class _AbortProbeEngine:
 
     def _gen(self, job, handle):
         if job.scope_id == "crash":
-            self.victim_started.wait(timeout=5)  # 先让 victim 起来、吐出首事件，保证它"已 spawn 有现场"
+            self.victim_started.wait(timeout=_DEADLOCK_ESCAPE_S)  # 先让 victim 起来、吐出首事件，保证它"已 spawn 有现场"
             raise RuntimeError("crash 立刻崩")    # schedule 收到→记 error→set abort_flag
         # victim：吐首事件（建立现场）→ 等 crash 崩 + abort 生效 → 之后**持续**吐事件（不因 handle.stopped
         # 提前收尾）。关键（去 flake）：schedule 的 abort 检查在**事件间**（下一次迭代的循环顶），故 abort 生效后
@@ -132,7 +140,11 @@ class _AbortProbeEngine:
         # schedule 命中 abort 分支后 return、不再 next() 本生成器，故不会真跑满 range（1000 只是防御性上限）。
         yield ScenarioStarted(scenario_id="victim:0")
         self.victim_started.set()
-        self.crashed.wait(timeout=5)
+        # 接近无限等（_DEADLOCK_ESCAPE_S 仅死锁逃生）：**不用短超时兜底**——短超时会打破「被放行 ⟺ abort_flag
+        # 已 set」的耦合：极端饥饿下 wait 超时先于 _stop_all 返回，victim 带 abort_flag=False 继续吐 StepDone →
+        # abort 检查读 False → 一路吐完自然收尾 → 误判 PASSED（与姊妹测试 test_network_error_during_abort 同源的
+        # 残留 flaky，对抗验证暴露）。gate_released 记录是否真放行（非超时逃生）供测试后置断言，杜绝超时静默退化。
+        self.gate_released = self.crashed.wait(timeout=_DEADLOCK_ESCAPE_S)
         for i in range(1000):
             yield StepDone(scenario_id="victim:0", step_index=i, status=Status.PASSED, votes=Votes(3, 3))
 
@@ -161,6 +173,9 @@ def test_fail_fast_inflight_job_is_aborted():
     finally:
         FakeWorkerHandle.stop = orig_stop
 
+    # 前置校验：victim 确被真正放行（crashed.set()，= _stop_all 已 abort_flag.set()），而非死锁逃生超时——
+    # 后者意味着「被放行 ⟺ abort_flag 已 set」耦合被超时旁路打破，此时 ABORTED 断言即便偶过也不可信。
+    assert engine.gate_released, "victim 未被真正放行（crashed 超时），耦合被打破——测试环境异常，非有效断言"
     victim_jr = next(jr for jr in result.jobs if jr.scope_id == "victim")
     assert engine.run_count.get("victim") == 1     # 已 spawn（区别于 skipped 的从未 spawn）
     assert victim_jr.status == Status.ABORTED        # 跑一半被 fail-fast 掐
@@ -188,12 +203,6 @@ def test_aggregate_running_does_not_pollute_clean_pass():
 # 这是 ADR 用整段文字警告的坑（self_stopped 被 timeout/fail-fast 共用、要看 abort_flag）。现有 network 测试只命中
 # else 分支，timeout 测试命中的是事件循环里的 deadline 而非 network 块里的重判——故专门复现这两条竞态子分支。
 from core.errors import WorkerNetworkError  # noqa: E402
-
-
-# 死锁逃生用的宽松超时（秒）：远大于正常执行（~0.01s），仅防「gate 因逻辑 bug 永不放行」时测试永久挂死。
-# **正常路径绝不该触及它**——测试后置断言会校验 gate 确被放行（返回 True），超时（返回 False）视为测试失败，
-# 绝不让超时静默退化成「abort_flag 未 set → network_error 误判」（那正是本测试曾有的残留 flaky 根源）。
-_DEADLOCK_ESCAPE_S = 30.0
 
 
 class _NetRaiseEngine:
