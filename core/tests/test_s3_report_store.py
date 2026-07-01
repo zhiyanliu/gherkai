@@ -118,7 +118,7 @@ def test_empty_report_refs_still_valid_index(s3_report_store, aws):
     idx = s3_report_store.write(run.run_id, run)
     txt = _read_s3(aws, idx)
     assert "empty-run" in txt
-    assert "无原生报告产物" in txt          # 空态有效页
+    assert "无引擎报告产物" in txt          # 空态有效页
     m = _read_manifest(aws, "empty-run")
     assert m["report_index"] == []
 

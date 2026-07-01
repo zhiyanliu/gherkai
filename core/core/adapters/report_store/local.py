@@ -177,6 +177,46 @@ def _render_index_html(manifest: dict, result: RunResult) -> str:
     status = result.status.value
     color = _STATUS_COLOR.get(status, "#57606a")
 
+    # 判定明细树 ↔ 原生产物列表的**结构关联**（锚点双向链接）：产物列表是平铺的，但判定明细树有 job→scenario→
+    # step 层级；用锚点把每条产物和它所属的树节点互相链上，读者点 📎 从树跳到产物、点 ↑ 从产物跳回树节点。
+    # 关联键 = 产物挂载层级的 (scope_id, scenario_id, step_index) 三元组（None 表该级为止，对齐 report_index 投影）。
+    # node_anchor：把三元组编成 html-safe 的稳定 id（不含任意 UTF-8——scope_id 可能是中文/带 : 的路径，直接进
+    # id/#fragment 易踩坑，故用层级前缀 + 在 report_index 里的序号，纯 ASCII、稳定、两边一致）。
+    def _node_anchor(scope_id: str, scenario_id, step_index) -> str:
+        # 用该节点在 result.jobs 里的位置编号（job i / scenario j / step k），纯 ASCII、确定性、树与列表共用同一算法。
+        ji = _job_pos.get(scope_id)
+        if ji is None:
+            return ""
+        if scenario_id is None:
+            return f"node-j{ji}"
+        si = _scen_pos.get((scope_id, scenario_id))
+        if si is None:
+            return ""
+        if step_index is None:
+            return f"node-j{ji}-s{si}"
+        return f"node-j{ji}-s{si}-t{step_index}"
+
+    _job_pos = {jr.scope_id: i for i, jr in enumerate(result.jobs)}
+    _scen_pos: dict[tuple, int] = {}
+    for jr in result.jobs:
+        for j, sr in enumerate(jr.scenarios):
+            _scen_pos[(jr.scope_id, sr.scenario_id)] = j
+
+    # 每个树节点挂了哪些产物（按 report_index 序号）：树里据此渲染 📎（可多个）链到列表锚点 ref-{seq}。
+    _node_refs: dict[str, list[int]] = {}
+    for seq, e in enumerate(manifest["report_index"]):
+        a = _node_anchor(e["scope_id"], e.get("scenario_id"), e.get("step_index"))
+        if a:
+            _node_refs.setdefault(a, []).append(seq)
+
+    def _paperclips(anchor: str) -> str:
+        # 树节点行尾的 📎 角标：链到该节点在产物列表里的条目（多个产物 → 📎×N，链到首个）。
+        seqs = _node_refs.get(anchor)
+        if not seqs:
+            return ""
+        n = f"×{len(seqs)}" if len(seqs) > 1 else ""
+        return f' <a class="clip" href="#ref-{seqs[0]}" title="{len(seqs)} 个引擎报告产物">📎{n}</a>'
+
     dur_s = _fmt_ms(result.duration_ms)
     cost_bits = []
     if result.total_tokens is not None:
@@ -220,36 +260,45 @@ def _render_index_html(manifest: dict, result: RunResult) -> str:
                     ' <span class="taint">⚠ 因前置 step error 被跳过（未执行）</span>'
                     if st.shortcircuited else ""
                 )
+                st_anchor = _node_anchor(jr.scope_id, sr.scenario_id, st.index)
                 step_rows.append(
-                    f'<li>{_dot(st.status.value)}<span class="stp">step[{st.index}]</span> '
-                    f'{esc(st.status.value)} <span class="t">{_fmt_ms(st.duration_ms)}</span>{votes}{serr}{taint}</li>'
+                    f'<li id="{st_anchor}">{_dot(st.status.value)}<span class="stp">step[{st.index}]</span> '
+                    f'{esc(st.status.value)} <span class="t">{_fmt_ms(st.duration_ms)}</span>'
+                    f'{votes}{serr}{taint}{_paperclips(st_anchor)}</li>'
                 )
             steps_html = ("<ul class=\"steps\">" + "".join(step_rows) + "</ul>") if step_rows else ""
+            sc_anchor = _node_anchor(jr.scope_id, sr.scenario_id, None)
             scen_blocks.append(
-                f'<li>{_dot(sr.status.value)}<span class="scn">{esc(sr.scenario_id)}</span> '
-                f'{esc(sr.status.value)} <span class="t">{_fmt_ms(sr.duration_ms)}</span>{steps_html}</li>'
+                f'<li id="{sc_anchor}">{_dot(sr.status.value)}<span class="scn">{esc(sr.scenario_id)}</span> '
+                f'{esc(sr.status.value)} <span class="t">{_fmt_ms(sr.duration_ms)}</span>'
+                f'{_paperclips(sc_anchor)}{steps_html}</li>'
             )
         scen_html = ("<ul class=\"scns\">" + "".join(scen_blocks) + "</ul>") if scen_blocks else ""
+        job_anchor = _node_anchor(jr.scope_id, None, None)
         job_blocks.append(
-            f'<div class="job">'
+            f'<div class="job" id="{job_anchor}">'
             f'<div class="jobhd">{_dot(jr.status.value)}'
-            f'<code>{esc(jr.scope_id)}</code> <b>{esc(jr.status.value)}</b>{err}'
+            f'<code>{esc(jr.scope_id)}</code> <b>{esc(jr.status.value)}</b>{err}{_paperclips(job_anchor)}'
             f'<div class="jobmeta">{" · ".join(meta_bits)}</div></div>'
             f'{scen_html}</div>'
         )
     jobs_html = "\n".join(job_blocks) if job_blocks else '<p class="empty">本次 run 无 job。</p>'
 
-    # ② 报告产物导航（report_index 扁平投影）
+    # ② 报告产物导航（report_index 扁平投影）——每条带 id=ref-{seq} 锚点 + ↑ 链回判定明细树里所属节点，
+    # 与树节点行尾的 📎 构成双向关联：读者一眼知道这个产物属于哪个 job/scenario/step（结构由树表达，见上）。
     job_status = {j.scope_id: j.status.value for j in result.jobs}
     rows = []
-    for e in manifest["report_index"]:
+    for seq, e in enumerate(manifest["report_index"]):
         anchor = e.get("label") or e["kind"]
         scen = f" · {esc(e['scenario_id'])}" if e.get("scenario_id") else ""
         # step 级 trajectory：拼 step[N]，否则同 scenario 多 trajectory 在导航里无法区分
         step = f" · step[{e['step_index']}]" if e.get("step_index") is not None else ""
+        # ↑ 回链：跳到判定明细树里该产物所属的节点（scope/scenario/step 级各自的锚点）
+        node = _node_anchor(e["scope_id"], e.get("scenario_id"), e.get("step_index"))
+        backlink = f' <a class="uplink" href="#{node}" title="定位到判定明细">↑</a>' if node else ""
         rows.append(
-            f'<li>{_dot(job_status.get(e["scope_id"], ""))}'
-            f'<code>{esc(e["scope_id"])}{scen}{step}</code> '
+            f'<li id="ref-{seq}">{_dot(job_status.get(e["scope_id"], ""))}'
+            f'<code>{esc(e["scope_id"])}{scen}{step}</code>{backlink} '
             f'<span class="eng">{esc(e.get("engine") or "")}</span> '
             f'<span class="kind">[{esc(e["kind"])}]</span> '
             f'<a href="{esc(e["href"])}">{esc(anchor)}</a></li>'
@@ -257,11 +306,11 @@ def _render_index_html(manifest: dict, result: RunResult) -> str:
     if rows:
         refs_body = "<ul class=\"refs\">\n" + "\n".join(rows) + "\n</ul>"
     else:
-        refs_body = '<p class="empty">本次 run 无原生报告产物（纯确定性步骤不产引擎报告；判定明细见上）。</p>'
+        refs_body = '<p class="empty">本次 run 无引擎报告产物（纯确定性步骤不产引擎报告；判定明细见上）。</p>'
 
     return f"""<!doctype html>
 <html lang="zh"><head><meta charset="utf-8">
-<title>RunReport {esc(run_id)}</title>
+<title>运行报告 {esc(run_id)}</title>
 <style>
   body {{ font: 14px/1.5 -apple-system, system-ui, sans-serif; margin: 2rem; color: #1f2328; }}
   h1 {{ font-size: 1.2rem; }}
@@ -287,16 +336,22 @@ def _render_index_html(manifest: dict, result: RunResult) -> str:
   .kind {{ color: #8250df; font-size: .85em; }}
   code {{ background: #eff1f3; padding: .1rem .3rem; border-radius: 4px; }}
   .empty {{ color: #57606a; }}
+  /* 判定明细树 ↔ 产物列表的双向关联：📎（树→产物）、↑（产物→树），点击平滑滚动 + 高亮落点 */
+  .clip, .uplink {{ text-decoration: none; font-size: .85em; }}
+  .clip {{ color: #8250df; }}
+  .uplink {{ color: #57606a; }}
+  html {{ scroll-behavior: smooth; }}
+  :target {{ background: #fff8c5; border-radius: 4px; box-shadow: 0 0 0 4px #fff8c5; }}
 </style></head>
 <body>
-<h1>RunReport</h1>
+<h1>运行报告</h1>
 <div class="summary">
   <div>run_id: <code>{esc(run_id)}</code></div>
   <div>总状态: <span class="status">{esc(status)}</span> · 墙钟 {esc(dur_s)} · 成本 {esc(cost)}</div>
 </div>
 <h2>判定明细（{len(result.jobs)} job）</h2>
 {jobs_html}
-<h2>原生报告产物（{len(manifest["report_index"])}）</h2>
+<h2>引擎报告产物（{len(manifest["report_index"])}）</h2>
 {refs_body}
 </body></html>
 """

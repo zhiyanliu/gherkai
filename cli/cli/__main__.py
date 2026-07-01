@@ -291,7 +291,7 @@ def _cmd_run(args, repo: Path) -> int:
     on_job_complete = persistence.on_job_complete if persistence else None
 
     _progress(
-        f"run_id={run_id}  schedule: 起真 worker → 真 AgentCore 会话（烧钱）"
+        f"run_id={run_id}  schedule: 启动 worker 建立 AgentCore 云端浏览器会话（将产生 AWS 费用）  "
         f"max_concurrency={args.max_concurrency} job_timeout={args.timeout}s ..."
     )
 

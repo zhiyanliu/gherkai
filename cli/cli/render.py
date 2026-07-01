@@ -54,7 +54,7 @@ def render_text(result: RunResult) -> str:
         out.append(f"  总墙钟时长: {_ms(result.duration_ms)}")
     cost_bits = _cost_bits(result.total_tokens, result.total_time_worked_s)
     if cost_bits:
-        out.append(f"  成本原生量合计: {' + '.join(cost_bits)}（美元折算用各自 AWS 账户费率）")
+        out.append(f"  成本原生量合计: {' + '.join(cost_bits)}")
 
     for jr in result.jobs:
         jbits = _cost_bits(jr.total_tokens, jr.total_time_worked_s)

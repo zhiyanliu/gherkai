@@ -142,7 +142,7 @@ def test_index_html_votes_tally_shown_only_when_multi_vote(tmp_path: Path):
 
 
 def test_index_html_shows_verdict_even_without_report_refs(tmp_path: Path):
-    # 用户痛点护栏：纯确定性 run（无原生产物 report_refs=[]）的 index.html 也要能看懂结果——
+    # 用户痛点护栏：纯确定性 run（无引擎报告产物 report_refs=[]）的 index.html 也要能看懂结果——
     # 判定明细（job/scenario/step status + 时长 + sessionId）直接渲染，不再是一张白纸。
     run = _rr(
         "det-run",
@@ -168,7 +168,7 @@ def test_index_html_shows_verdict_even_without_report_refs(tmp_path: Path):
     assert "step[0]" in txt and "step[1]" in txt
     assert "01KW9DSK" in txt                   # sessionId 呈现（会话血缘可追）
     # 产物区为空但有意义提示，且不再含已移除的内部设计语
-    assert "无原生报告产物" in txt
+    assert "无引擎报告产物" in txt
     assert "本页不解析其内容" not in txt        # 已移除的底注
 
 
@@ -250,7 +250,7 @@ def test_empty_report_refs_still_valid_index(tmp_path: Path):
     idx = store.write(run.run_id, run)
     txt = _uri_to_path(idx).read_text("utf-8")
     assert "empty-run" in txt
-    assert "无原生报告产物" in txt  # 空态有效页
+    assert "无引擎报告产物" in txt  # 空态有效页
     m = json.loads((tmp_path / "reports" / "empty-run" / "manifest.json").read_text("utf-8"))
     assert m["report_index"] == []
 
