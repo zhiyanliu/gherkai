@@ -57,7 +57,7 @@ class ReportStore(Protocol):
         """
 ```
 
-- **返回 `ResourceUri` 而非 `Path`**（封版前收口）：`LocalReportStore` 回 `file://…/index.html`，未来 `S3ReportStore` 回 `s3://…/index.html`——**同一签名容两种落点**，否则 S3 adapter 被迫返回 `Path` 包 `s3://`（`Path` 会把 `s3://b/x` 折成 `s3:/b/x`，错）。`ResourceUri = NewType("ResourceUri", str)`（定义在 `core/model.py`）：把这个**本就存在于 `ReportRef.ref` 注释里**的约定提升成命名类型，统一「`ReportRef.ref` 与 `write` 返回值都是带 scheme 的资源指针」。比裸 `str` 多一层意图、又零运行时成本/零依赖（运行时即 `str`）。消费端（cli/WebUI）只当 URI 用、不 stat/open——cli 现把它原样放进 `artifacts.report_index` 并打成可点击的 `file://` 链接。
+- **返回 `ResourceUri` 而非 `Path`**（封版前收口）：`LocalReportStore` 回 `file://…/index.html`，`S3ReportStore` 回 `s3://…/index.html`（v1.1 已建，ADR 0030 决定六）——**同一签名容两种落点**，否则 S3 adapter 被迫返回 `Path` 包 `s3://`（`Path` 会把 `s3://b/x` 折成 `s3:/b/x`，错）。`ResourceUri = NewType("ResourceUri", str)`（定义在 `core/model.py`）：把这个**本就存在于 `ReportRef.ref` 注释里**的约定提升成命名类型，统一「`ReportRef.ref` 与 `write` 返回值都是带 scheme 的资源指针」。比裸 `str` 多一层意图、又零运行时成本/零依赖（运行时即 `str`）。消费端（cli/WebUI）只当 URI 用、不 stat/open——cli 现把它原样放进 `artifacts.report_index` 并打成可点击的 `file://` 链接。S3ReportStore 落地时零改本签名，验证了这层收口。
   - 实现注意：`LocalReportStore` 内 `index_path.resolve().as_uri()`——`as_uri()` 要求绝对路径，而 cli 默认 `--report-dir` 是相对的（`reports`），不 `resolve()` 会抛 `ValueError`。
 - `materialize=False`（默认）：不拷贝产物，`index.html` 的链接直接指向 `ref`（本地够用；v1.0 定位本地 smoke，[0015](./0015-v1-positioning-smoke-not-regression.md)）。
 - `materialize=True`（opt-in）：把产物**拉进 report 让其自包含**——拷进 `<run_id>/artifacts/`、链接转相对路径 → 目录可整体搬走/发同事/CI 归档。
@@ -71,7 +71,7 @@ class ReportStore(Protocol):
 >   - materialize=False → 报告直接引 worker 报的 ref（`file://` 或 `s3://`），不拉。
 > - 故 materialize **不会被「产物归位到 run 目录」抽空**：归位只改 subprocess 模式下本地产物落哪；materialize 管的是「产物是否进 report 自包含」，跨 worker 模式独立存在。
 > - 以上是 **`LocalReportStore`** 的 materialize 语义（report 存本地）。**`S3ReportStore`** 的 materialize 目标语义（产物收拢进 `s3://…/<run_id>/artifacts/`、对称 Local）+ v1.1 第一版当 no-op 的取舍，见 [0029](./0029-fargate-engine-artifacts-to-s3.md)。
-- `LocalReportStore` → 未来 `S3ReportStore` 只换「manifest+index 这些 **core 派生数据**落哪 / 返回的 URI scheme」，core 不动。（注意区分：`S3ReportStore` 是把 **RunReport 自身**（manifest/index.html）写到 S3，与「worker 把自己的产物上传 S3」是两回事。）
+- `LocalReportStore` → `S3ReportStore`（v1.1 已建）只换「manifest+index 这些 **core 派生数据**落哪 / 返回的 URI scheme」，core 不动、且复用同一份 `_render_index_html`（单一渲染真理源）——落地验证了这条。（注意区分：`S3ReportStore` 是把 **RunReport 自身**（manifest/index.html）写到 S3，与「worker 把自己的产物上传 S3」是两回事。）
 - **`write` 失败被隔离、不击穿已 commit 的 run**（实时写接缝，[0030](./0030-realtime-persistence-seam.md)）：RunReport 是**纯派生只读视图、可重建、永不作判定源**——故 `RunPersistence.finalize` 在 commit point（`finalize_run`，判定真值已落 ResultStore）之后才调 `ReportStore.write`，且把 write 的异常隔离（吞掉+留痕+返回 None），不让一个「可重建的报告」写失败把整个 run 拖成裸 traceback 退出、CI 拿不到判定输出。
 
 **「生成 RunReport」与「materialize 产物」是两个正交开关，默认值不同（刻意）**：
@@ -161,7 +161,7 @@ URL、断言了什么」都不落痕（只有 pass/fail 进 result 树）。大�
 - **现在做（v1.0）**：上述 `ReportRef` 改造、`run_id`（归位进 `RunMeta` definition）+ 组合根生成、`JobResult` 经持有的 `Job` 取 `engine`、`ReportStore.write` 接口 + `LocalReportStore`（manifest + index，默认不 materialize）、**两引擎产物对称归位到 run 目录**（Nova `NOVA_LOGS_DIR`→trajectory、Midscene `MIDSCENE_RUN_DIR`→report.html）+ act 级 reportRefs、cli 默认生成 RunReport（`--no-report` 跳过、`--report-dir` 配落点、`--materialize` opt-in）、单测 + 两个引擎真 e2e。
 - **留口子不实现**：
   - **确定性 step 产物可观测性**：让 `@deterministic` handler 可选地产一个轻量产物（当时 URL / 截图 / 检查描述），使纯确定性用例的 RunReport 也有内容可看。本轮判定真值在 result 树已够；产物可观测另开一轮（与 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md) 确定性 step 设计一并演进）。
-  - `materialize` 的 S3 后端；按 `kind` 的富渲染（`<video>`/`<iframe>`，皮层将来做）；trajectory 内部结构化提取。
+  - **S3 materialize 的完整实现**（把产物拉进 `s3://…/<run_id>/artifacts/` 求自包含）：`S3ReportStore` 本体 v1.1 已建，但其 `materialize` 第一版当 no-op（`href==ref`，目标语义见 [0029](./0029-fargate-engine-artifacts-to-s3.md)）；完整 materialize 待后续。按 `kind` 的富渲染（`<video>`/`<iframe>`，皮层将来做）；trajectory 内部结构化提取。
   （注：store 读回面**已落地**——`RunStore.load_run_meta`/`load_run_state` + `ResultStore.load_job_result`/`load_all`，靠 `serialize` 完整重建，[0016](./0016-execution-architecture-core-lib-run-model.md)。）
 
 ## 重议

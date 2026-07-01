@@ -15,11 +15,14 @@
 | 双引擎执行 | 同一份 `.feature` → 两个引擎薄 worker（cli 经 `@engine` tag 路由） | ✅ 端到端真跑 |
 | 云端浏览器 | 两个引擎都接 AgentCore Browser（各自一个会话，CDP 驱动） | ✅ |
 | 核心库 | parse + scope 分组 + schedule 调度 + 4 ports（Engine/Run/Result/ReportStore）+ 实时写编排（RunPersistence，ADR 0030） | ✅ 单测覆盖 |
+| 云端 store | RunStore→DynamoDB、Result/ReportStore→S3（+ StepArgument offload 解 DDB 400KB 限），boto3 走可选 `core[aws]`（ADR 0030 决定六） | ✅ moto 单测（对拍 local，未接 cli）|
 | 投票治理 | AI 断言可配 N 次取多数票（`--assertion-votes`，治抖动，ADR 0014） | ✅ |
 | RunReport | 跨引擎归集索引（manifest + index，不融合产物，ADR 0027） | ✅ |
 | 网络韧性 | 建连两层重试 + network_error 分类 + SIGTERM 会话泄漏根治（ADR 0028） | ✅ |
 
 > **承接 v0.x 顺延项（待真实业务系统）**：≥3 真实用例 QA 零代码验收 + 破例清单（ADR 0016）——当前用骨架用例（wikipedia/example.com）验证方向，真实系统验收顺延。
+
+> **v1.1 云端进行中**：云端 store adapter（DynamoDB/S3）已建、moto 全程 mock 单测、行为对拍 local（ADR 0030 决定六）——尚未接进 cli（`--backend` 是独立分片）、未连真 AWS 端到端。执行面 Fargate/ECS 待建（ADR 0017 倾向）。
 
 ## 架构速览
 
@@ -51,7 +54,7 @@ yaozhou/
 │   ├── deterministic_anchor.feature        ← @deterministic 锚点验证（ADR 0022）
 │   └── concurrency_and_scope.feature       ← 手工真跑回归夹具：改调度/会话生命周期后重跑验 ADR 0019
 ├── core/                      ← 窄腰核心库（Python，零引擎依赖，ADR 0016）
-│   └── core/{parse,scope,schedule,persist,model,wire,serialize,ports}.py + adapters/{run,result,report}_store/
+│   └── core/{parse,scope,schedule,persist,model,wire,serialize,ports}.py + adapters/{run,result,report}_store/{local,ddb|s3}.py（本地 + 云端）
 ├── cli/                       ← 核心库的第一个前端 = 组合根（ADR 0016）
 │   └── cli/{__main__.py(argparse) · compose.py(引擎注册表) · render.py}
 └── engines/                   ← 两个可插拔引擎，与 core 平级

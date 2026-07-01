@@ -2,11 +2,11 @@
 
 把「一次 run 的判定/状态**随进度实时落库**」做成正交接缝：执行编排（`schedule`，[0026](./0026-schedule-module.md)）只管跑、
 不碰存储；存储编排（新 `core/persist.py` 的 `RunPersistence`）依赖 Store ports、由组合根注入具体 adapter。
-这是 v1.1 云端（DDB/S3）的前置：先在 local adapter 上把「实时写 + commit-point 写序」跑通，DDB 仅作新 adapter 接入。
+这是 v1.1 云端（DDB/S3）的前置：先在 local adapter 上把「实时写 + commit-point 写序」跑通，云端 DDB/S3 adapter 作新 adapter 接入（决定六，已实装）。
 
 **定位**：本 ADR 解决「**怎么把实时落库接进来而不污染 reducer / 不让每个组合根各写一遍**」。
 job 生命周期态（`skipped`/`aborted`/`pending`/`running`/severity）见 [0031](./0031-job-lifecycle-states-and-severity.md)；
-DDB 的并发一致性（Map<scope_id> 按 key 定位、条件更新）见未来 DDB adapter ADR。
+DDB 的并发一致性（Map<scope_id> 按 key 定位、条件更新）见下「决定六」（云端 adapter 落库形态，已实装）。
 
 > **本文出现的 `pending`/`running`/`skipped`/`aborted` 这些状态值，定义与 severity 归属全在 [0031](./0031-job-lifecycle-states-and-severity.md)**；本篇只用它们描述时序，不定义。
 
@@ -148,7 +148,7 @@ class RunStore(Protocol):
 ```
 
 - **新增三方法是 additive**：`save_run` 不删（`test_stores.py` 中 3 个 RunStore save/load 往返用例——`test_run_store_save_load` / `test_run_state_timestamps_round_trip` / `test_run_state_omits_null_timestamps`——仍用它；一次性写场景也仍用）。新方法只是把它的职责按生命周期拆成「开始/逐 job/结束」三段。
-- `update_job_state` 按 **scope_id 定位单个 job**：local adapter 是「读 run_state→改该 scope_id→写回」的 read-modify-write（**非自身线程安全**，靠 `RunPersistence` 的单一 store 锁串行，见决定三的并发不变量）；DDB adapter 用 `SET jobs.#sid=:js`（Map 按 key 路径，见未来 DDB ADR）。这要求 `RunState.jobs` 用 **Map<scope_id> 形状**（见决定五）。
+- `update_job_state` 按 **scope_id 定位单个 job**：local adapter 是「读 run_state→改该 scope_id→写回」的 read-modify-write（**非自身线程安全**，靠 `RunPersistence` 的单一 store 锁串行，见决定三的并发不变量）；DDB adapter 用 `SET jobs.#sid=:js`（Map 按 key 路径，见下决定六）。这要求 `RunState.jobs` 用 **Map<scope_id> 形状**（见决定五）。
 
 ## 决定五：`RunState.jobs` 改 Map<scope_id> 形状（core model 一次到位）
 
@@ -188,7 +188,7 @@ Map 形状下 `update_job_state` 各 scope 互不干扰、天然支持单元素�
 
 - **决定一~五（实时写接缝，已落地）**：`JobSink` port + `schedule.on_job_complete`/`on_event`；`core/persist.py` 的
   `RunPersistence`（单一 store 锁）；RunStore 三增量方法的 local adapter；`RunState.jobs` 改 Map；cli 接 `RunPersistence`（含 RUNNING 中间态）。
-- **决定六（云端 adapter）**：`DynamoDBRunStore` + `S3ResultStore` + `S3ReportStore` + StepArgument offload，落库形态如上，local adapter 已验证「换后端 core 不动」。
+- **决定六（云端 adapter）— 已实装**：`DynamoDBRunStore` + `S3ResultStore` + `S3ReportStore` + `S3StepArgumentOffloader`，落库形态如上，moto 全程 mock 单测、行为对拍 local——坐实「换后端 core 不动」。尚未接进组合根（cli `--backend` 分片）。
 - **留口子不做**：多写者 owner/lease（当前 run_id 由组合根独立生成、提交即新，单写者，无并发同 run 写）；续跑/部分重跑的 attempt 维度（save_job_result 整行覆盖，未来在 SK/属性引入 version）。
 
 ## 重议

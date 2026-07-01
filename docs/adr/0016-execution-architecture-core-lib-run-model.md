@@ -107,7 +107,7 @@ core/
 - 接口定义在 `ports`；**具体 adapter 由调用方（CLI 的 main / WebUI 的 bootstrap = 组合根）在启动时注入**给核心。核心只认接口。
 - **禁止** ports module 内部用全局单例 + `env`-sniff 自选实现——那正是本项目踩过的 Midscene `GlobalConfigManager` 反模式（import 时缓存 env、运行时改不动、难测）。注入式可测、无隐藏全局。
 
-**rule-of-three 克制**：接口现在定（廉价，还逼清边界），但**只写 local adapter**；DDB/S3/Fargate adapter 等云端真需要时再填。
+**rule-of-three 克制**：接口 v1.0 先定（廉价，还逼清边界）、只写 local adapter；v1.1 云端真需要时填云端 adapter——**store 层（RunStore→DDB、Result/ReportStore→S3）已填**（第五刀，[0030](./0030-realtime-persistence-seam.md) 决定六），执行面 Fargate adapter 仍待填。
 
 这样无状态化、上云、WebUI 接入都成了"加 adapter + 组合根换注入"，核心与接口不动。
 
@@ -148,7 +148,7 @@ yaozhou/
   - **决定（边界，务必读）**：**v0.1.0 判「方向已证」，不补真实用例即进 v1.0.0**。理由——① 团队当前**拿不到真实业务用例**（站点登录态等不可得），强等是空等；② 没有真实用例 → 破例无从触发 → **「破例清单」这条验收无法在 v0.x 执行**。故把「真实业务用例验收 + 破例记录」**顺延并入 v1.0.0**：待有真实用例时在 v1.0 里跑出破例、据以校验「QA 零代码」承诺。**已知风险**：v1.0 架构基于「骨架用例都很顺」的乐观假设设计，真实用例的破例（登录 / HITL / 动态内容 flaky）可能反过来要求调整 v1.0 架构——接受此返工风险，因前置条件（真实用例）确实不具备。
   - **报告**：v0.x 原目标含「报告能看」，当时**决定先「散着」**（手动查目录够用），归集形态待要求清晰再定。**v1.0 已落地为 RunReport 归集索引**（[0027](./0027-runreport-aggregation-index.md)）：不重渲染原生产物、只归集成统一清单 + 导航入口——回答了「先散着」时悬而未决的形态问题（索引而非融合）。
 - **v1.0.0（团队 QA 日常可用）— ⏳ 架构设计中（本 ADR + 0022/0023）**：多用例组织、跑批入口（CLI 阻塞跑一批）、scope 调度、抖动治理（投票）落地；本地执行。**承接 v0.x 顺延项**：真实业务用例验收 + 破例清单（RunReport 归集已落地，[0027](./0027-runreport-aggregation-index.md)）。
-- **v1.1.0（云端执行）— 🚧 进行中**：CLI 提交 → Fargate 跑 → 轮询收集，**job = scope** 粒度（上云时坐实，见 [0017](./0017-cloud-execution-fargate-over-runtime.md)）；外置状态存储（DDB，主要服务 `RunStore`）+ 无状态核心。**= 加 adapter + 组合根换注入，核心不动**。**已落地：实时写存储接缝**（schedule 的 on_event/on_job_complete 旁路 + `RunPersistence` 编排 + RunStore 三增量方法，[0030](./0030-realtime-persistence-seam.md)）+ job 生命周期态/severity（[0031](./0031-job-lifecycle-states-and-severity.md)）；**待做**：DDB/S3 adapter（local 已验证「换 adapter 核心不动」的命题，云端 adapter 接同一 port）。
+- **v1.1.0（云端执行）— 🚧 进行中**：CLI 提交 → Fargate 跑 → 轮询收集，**job = scope** 粒度（上云时坐实，见 [0017](./0017-cloud-execution-fargate-over-runtime.md)）；外置状态存储（DDB，主要服务 `RunStore`）+ 无状态核心。**= 加 adapter + 组合根换注入，核心不动**。**已落地**：实时写存储接缝（schedule 的 on_event/on_job_complete 旁路 + `RunPersistence` 编排 + RunStore 三增量方法，[0030](./0030-realtime-persistence-seam.md)）+ job 生命周期态/severity（[0031](./0031-job-lifecycle-states-and-severity.md)）+ **云端 store adapter（DynamoDBRunStore + S3ResultStore + S3ReportStore + StepArgument offload，moto 单测对拍 local，[0030](./0030-realtime-persistence-seam.md) 决定六）**——坐实了「换 adapter 核心不动」。**待做**：把云端 adapter 接进组合根（cli `--backend` 分片）+ Fargate 执行 adapter + 无状态跑批。
 - **v2.0.0（规模化）— ⬜ 留口子不实现**：WebUI 前端（直接调核心）。
 
 ## G1/G2 解析前置（声明语法已定，调度实现待 v1.0）
@@ -163,6 +163,6 @@ G1/G2 是 v1.0 核心库 `.feature` 解析的前置——其声明语法**现已
 
 - **现在做（v1.0）**：核心库 `core/` 可被调用（逻辑不焊死在 CLI main 里）；钉死上面数据模型；定义 ports 接口（`Engine`/`RunStore`/`ResultStore`/`ReportStore`）+ 组合根注入；核心自解析 Gherkin + 薄 worker（[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)）。模块设计：worker↔core 协议见 [0024](./0024-worker-core-protocol.md)；plan 模块见 [0025](./0025-plan-module-feature-to-jobs.md)；schedule 模块见 [0026](./0026-schedule-module.md)。
   - **ports 落地状态**：四个 port 的 local adapter 均已建（详见上「留口子：Ports & Adapters」节）。**两个引擎 worker 均已落地**（`engines/{novaact,midscene}/worker/`），两个引擎对称、同讲 0024 协议。
-- **现在不做**：DynamoDB / S3 / Fargate adapter / 无状态机制 / WebUI ——接口已留好，等云端真需要时填 adapter + 组合根换注入。**避免为想象中的云端预先盖机器。**
+- **现在不做**：Fargate 执行 adapter / 无状态机制 / WebUI ——接口已留好，等云端真需要时填 adapter + 组合根换注入。**避免为想象中的云端预先盖机器。**（**已越过**：DynamoDB/S3 store adapter 在 v1.1 第五刀已填，[0030](./0030-realtime-persistence-seam.md) 决定六。）
 - **G1/G2 声明语法已定**（ADR 0019）；其**调度实现**（scope 串/并行、会话共享、engine 冲突校验）由 v1.0 核心库落地。
 - **多用例组织**（feature 分目录/命名约定、跑批入口、跑批层选择 feature/tag）同样由 v1.0 核心库落地——它依赖核心库的调度层，在 bdd 直跑层做是临时的、核心库会重做。当前 `features/` 下多个文件仅是 v0.x 打磨产物，未做有意组织。（旧的 cucumber `--tags` 选子集约定随 BDD runner 一并退役，见 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)；选子集改由核心调度层据 tag 实现。）

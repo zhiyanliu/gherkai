@@ -24,8 +24,14 @@ core/
 ├── persist.py    ← RunPersistence：编排 Store ports 随进度实时落库（commit-point 写序，ADR 0030）
 └── adapters/
     ├── subprocess_engine.py        ← Engine 实装：spawn worker 子进程 + 读事件流
-    └── {run,result,report}_store/local.py  ← 三个 Store 的本地文件 adapter（云端 DDB/S3 adapter 待建）
+    ├── _boto.py                    ← 云端 adapter 共享的 boto3 依赖守卫（缺 boto3 友好报错，ADR 0016 窄腰）
+    ├── run_store/{local,ddb}.py    ← RunStore：本地文件 + DynamoDB（+ arg_offload.py：StepArgument→S3 指针，解 DDB 400KB 限）
+    ├── result_store/{local,s3}.py  ← ResultStore：本地文件 + S3（每 job 一对象）
+    └── report_store/{local,s3}.py  ← ReportStore：本地文件 + S3（manifest+index）
 ```
+
+云端 adapter（DDB/S3）已建，行为对拍 local、moto 全程 mock 单测（ADR 0030 决定六）；boto3 是可选依赖 `core[aws]`。
+组合根按 backend 注入哪套 adapter（cli `--backend` 接线是独立分片）。
 
 ## 跑测试
 
