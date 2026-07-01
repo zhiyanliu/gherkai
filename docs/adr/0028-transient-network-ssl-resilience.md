@@ -121,6 +121,10 @@ worker **按白名单匹配具体瞬时异常类型**,不用宽基类兜底:
 - **留口子不实现**:
   - **act 中途的瞬时恢复**（长任务执行中 CDP 闪断 → 涉及会话状态恢复,复杂且有副作用风险）——明确 defer。
   - **`ensure_workflow_definition` 自身的 SSL 故障**:它在重试循环外（单次廉价 boto3 调用,SSL 失败面远小于 CDP/websocket 握手——后者才是实测崩的点）。若它 SSL 失败 → 仍归 engine_error。已知小缺陷,可随真实失败样本扩充。
+  - **成功重试对 RunResult 完全透明——「本轮抖了多少」不可观测（已知边界，真跑暴露）**：worker 层建连重试**成功**后（如实测 r1 连撞 3 次瞬时故障、第 4 次成功），最终 `JobResult` 就是干净的 `passed`——**重试次数、每次失败原因都只在 worker 的 stderr 日志里，不进 RunResult/RunReport**（成功重试=不记 error，是本 ADR 开头「务实止血、非 enterprise resilience」定位的有意取舍）。两个衍生的不可观测面：
+    - **重试次数**：「本轮环境抖了几次自愈」这个环境健康度信号丢失。跨 run 统计「近期建连失败率」需另抓 stderr、无结构化出口。
+    - **重试/建连耗时**：`JobResult.duration_ms` 是 `scope_started→scope_done` 墙钟（[0024](./0024-worker-core-protocol.md)），**建连+重试全发生在 `scope_started` 之前**，故这段耗时既不进任何 scope 墙钟、也不单列——只隐没在 `RunResult.duration_ms`（run 总墙钟）里。实测：r1 3 次重试（光 attempt 1 的 CDP 超时就 30s）+ Nova 会话建立固有延迟（~40s）使总墙钟 249s 远大于两 scope 墙钟之和 67s，读者看「跑了 4 分钟但 scope 才 1 分钟」会困惑，却无处解释这 ~182s 去哪了。
+    - **不影响正确性**（判定/成本/血缘都对），纯可观测性缺口。**增强方向**（真需要时做）：worker 经 `scope_started` 自报 `connectAttempts`（重试次数，可选字段）+ core 用「首个 worker 事件到达 − worker spawn」测「建连墙钟」落进 `JobResult`（新增 optional 字段，与 scope 墙钟正交）；两者都进 RunResult → RunReport 可展示「本轮 N 次自愈重试、建连耗时 Xs」。重议闸门见下。
   - core job 重试时 trajectory 覆盖（run_id 不换,同一引擎重试可能覆盖上次 trajectory）——M 小、重试罕见,接受为已知小缺陷。
   - **超时/中止被杀 scope 的卡死现场 trajectory 不自动归集进 RunReport**：被杀那个 act **从未返回**，worker 经 `_collect_traj` 拿不到它的路径（`_Terminated` 是 `BaseException`、穿透 step 级 `except Exception`，`_collect_traj` 没机会跑），故它进不了 `report_refs`。该 act 的 trajectory **可能留在** `nova-trajectories/<session_id>/`（SDK 在中断清理时 flush 的 `.html`），**且可能不完整**（被中断，配套的 `_trajectory.json`/`session_summary.json` 往往没来得及写——实测被杀 scope 只剩孤零 `.html`）。唯一能自动捞回它的途径是**扫盘**，但不值当为此破 [0027](./0027-runreport-aggregation-index.md)「`report_refs` 是唯一真值、ReportStore 永不 stat/fetch/扫盘」铁律。靠 #2 已记下的 `session_id` 可手动定位该目录查看。**若未来「看卡死现场」成高频需求** → 按已论证的通用解法实现：**worker 经 `scope_started` 自报 `artifactsDir`（产物落点契约，可选字段）+ 执行 adapter 的中断收尾扫盘**——孤儿恢复属 **Engine adapter 的收尾职责**（本地扫目录 / 未来 Fargate 查 S3，因执行基底而异），**不放 ReportStore（不破铁律）、不放 worker 的 SIGTERM 路径（不碰会话清理）**。
 
@@ -128,3 +132,4 @@ worker **按白名单匹配具体瞬时异常类型**,不用宽基类兜底:
 
 - 若持续性网络故障频发、乘积打满成真实痛点 → 引 circuit-breaker / 全局退避。
 - 若 act 中途断连成为高频场景 → 另立 ADR 设计会话状态恢复。
+- **若「环境抖动率/建连耗时」成为需要跨 run 监控的运维信号**（如 CI 里频繁自愈重试拖慢批次、或需按环境健康度告警）→ 兑现上面「成功重试对 RunResult 透明」条记的增强：`connectAttempts` + 建连墙钟进 RunResult/RunReport。当前只单点真跑暴露、无监控需求，defer。
