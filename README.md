@@ -44,7 +44,7 @@
 ## 目录结构
 
 ```
-yaozhou/
+./
 ├── README.md                  ← 本文件
 ├── CONTEXT.md                 ← 领域术语表（glossary）
 ├── docs/adr/                  ← 架构决策记录（0001–0031）
