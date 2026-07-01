@@ -71,3 +71,11 @@ def ddb_run_store(aws):
     from core.adapters.run_store.ddb import DynamoDBRunStore
 
     return DynamoDBRunStore(aws["ddb"].Table(aws["table_name"]))
+
+
+@pytest.fixture
+def s3_result_store(aws):
+    """配好的 S3ResultStore（注入 aws fixture 建好的桶），供 ResultStore 对拍测试。"""
+    from core.adapters.result_store.s3 import S3ResultStore
+
+    return S3ResultStore(aws["s3"], aws["bucket"])
