@@ -1,5 +1,7 @@
 # Planning 角色用 Qwen3-VL 兼任，不引入独立纯文本 planner
 
+> **Status:** Accepted
+
 Midscene 的 planning（把高层意图拆解成动作步骤）角色，**继续用 grounding 同款的 Qwen3-VL**，不配置独立的 `MIDSCENE_PLANNING_MODEL_*`。
 
 ## 为什么不是"用一个强推理纯文本模型做 planner"（实测推翻的直觉）

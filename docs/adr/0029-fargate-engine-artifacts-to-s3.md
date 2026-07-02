@@ -1,9 +1,8 @@
 # Fargate Engine adapter 的 artifact→S3：worker 上传、core 不透明搬运（前瞻 draft）
 
-> **状态：draft / proposed（前瞻，未实现）。** Fargate Engine adapter 尚未编码；本 ADR 是一次 SDK 调查
-> 的**决策暂存**——把"远程执行模式下 artifact 怎么到 S3"的责任划分先定下来、把调查证据与未决点记牢，
-> 待真做 Fargate adapter 时落地（届时本 ADR 转正、补实测结论）。当前 v1.0/v1.1 仍是本地子进程模式
-> （[0026](./0026-schedule-module.md) 子进程 adapter），artifact 写本地盘、报 `file://`，不涉及本 ADR。
+> **Status:** Draft —— Fargate Engine adapter 尚未编码，本 ADR 是决策暂存，待真做时转正（详见下文）。
+
+**这是前瞻 draft**：Fargate Engine adapter 尚未编码；本 ADR 是一次 SDK 调查的**决策暂存**——把"远程执行模式下 artifact 怎么到 S3"的责任划分先定、把调查证据与未决点记牢，待真做 Fargate adapter 时落地（届时转正、补实测结论）。当前 v1.0/v1.1 仍是本地子进程模式（[0026](./0026-schedule-module.md)），artifact 写本地盘、报 `file://`，不涉及本 ADR。
 
 ## 背景：共享文件系统假设在 Fargate 下断了
 
@@ -12,7 +11,7 @@
 `report_refs`（`file://` URI）报给 core，core 不透明搬运、归集成 RunReport（[0027](./0027-runreport-aggregation-index.md)）。
 **这成立的前提是 worker 与 core 同机、共享文件系统**——core 直接读得到 worker 写的盘。
 
-未来 Fargate 模式（[0017](./0017-fargate-execution.md) 倾向）：worker 在远程 ECS 容器跑，**容器盘不与 core 共享、且容器停即销毁**。
+未来 Fargate 模式（[0017](./0017-cloud-execution-fargate-over-runtime.md) 倾向）：worker 在远程 ECS 容器跑，**容器盘不与 core 共享、且容器停即销毁**。
 于是核心问题：**这些 artifact 怎么从容器临时盘到持久的 S3？谁负责上传？**
 
 ## 决定：artifact→S3 是 **worker（容器内）** 的职责，core/ReportStore 一行不改

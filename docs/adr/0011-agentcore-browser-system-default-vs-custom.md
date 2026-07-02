@@ -1,5 +1,7 @@
 # AgentCore 浏览器层：spike 用系统默认，接内网真实系统时切自建 custom browser
 
+> **Status:** Accepted
+
 AgentCore Browser 有两类，选哪类取决于被测系统在公网还是内网。
 
 **两类（2026-06 本账号实查确认）**：

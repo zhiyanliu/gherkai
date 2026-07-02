@@ -1,6 +1,6 @@
 # Step 措辞：默认 AI 判断（QA 零预设）+ 确定性锚点脚手架（工程角色按需自建）
 
-> **状态：语义保留，实现层已转移（见 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)）。** 「裸 `When/Then` 自然语言→默认 AI；确定性=脚手架、test engineer 按需建、QA 零代码」的语义**不变**。但落地从「cucumber 补丁 + pytest-bdd 原生区分关键字」转为「核心库解析关键字 + worker 的 catch-all/确定性注册表派发」——下文「实现（改造清单）」与「Midscene 靠补丁」相关段落被 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md) 取代；确定性锚点的落点从脚手架文件改为 worker 注册表。
+> **Status:** Partially-superseded-by 0022 —— 「裸 `When/Then`→默认 AI；确定性=脚手架、test engineer 按需建、QA 零代码」核心语义**不变**；落地机制被反转（从「cucumber 补丁 + pytest-bdd 原生区分」转为「核心库解析关键字 + worker catch-all/确定性注册表派发」，确定性锚点落点从脚手架文件迁进 worker 注册表）。下文「实现（改造清单）」「Midscene 靠补丁」段属被取代的 v0.x 形态。
 
 断言类 step 的措辞设计，使「AI 柔性主导」([0014](./0014-ai-first-assertions.md)/[0015](./0015-v1-positioning-smoke-not-regression.md)) 落到 QA 的真实书写体验上。
 
@@ -15,8 +15,9 @@
 1. **默认 AI 判断**：QA 写 `When "{自然语言}"` / `Then "{自然语言}"`——**不带任何关键词**，框架默认喂给 AI（动作 `aiAct`/`act`；断言 `aiBoolean` ↔ `act_get(BOOL_SCHEMA)` + 投票）。这是 ~90% 的情况。
    - **两个引擎匹配机制不同**（已实测）：**Nova Act/pytest-bdd 原生区分 `@when`/`@then`**，裸字符串 step 直接可用。**Midscene/cucumber-js 不区分关键字、仅按 pattern**，故 `When "{string}"` 与 `Then "{string}"` 同 pattern → ambiguous → **靠本地补丁解决**（按 PickleStepType 收窄到关键字，见 [0021](./0021-local-cucumber-patch-step-keyword-disambiguation.md)）。**vanilla cucumber 跑不通裸字符串双 step；补丁是 Midscene 侧此设计的前提。**
 
-2. **确定性锚点 = 脚手架，不预置**：少数"必须精确、不容 AI 抖动"的断言（URL/DOM 精确查），做成**空脚手架文件** `deterministic.steps.ts`（Midscene）/ 对应 Python（Nova Act），与 `generic.steps` 同级，内含**说明注释**教 test engineer 怎么加、怎么和 `.feature` 呼应。
-   - **不预置任何具体确定性锚点 step**（连 `页面地址包含` 也不预置）——预置就等于要求 QA 学措辞，违背"QA 零预设"。锚点按真实需求自建（避免过度设计，同 [0018](./0018-generic-steps-capability.md) 删"取数原语"的教训）。
+2. **确定性锚点 = 脚手架，QA 零预设**：少数"必须精确、不容 AI 抖动"的断言（URL/DOM 精确查），做成脚手架文件 `deterministic.steps.ts`（Midscene）/ 对应 Python（Nova Act），与 `generic.steps` 同级，内含**说明注释**教 test engineer 怎么加、怎么和 `.feature` 呼应。
+   - **对 QA 零预设**：QA 永不碰确定性锚点、不学任何措辞——锚点由 **test-engineer 角色**按真实需求维护（避免过度设计，同 [0018](./0018-generic-steps-capability.md) 删"取数原语"的教训）。
+   - **落地现状（[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md) 决定，非当初"空脚手架"）**：脚手架现由 test-engineer 各内置**一个**演示/验证用 URL 锚点 `页面地址(?:精确)?匹配 "<正则>"`（`features/deterministic_anchor.feature` 实跑验证），迁进 worker 注册表——它由 test-engineer 维护、非 QA 预设，故不违背"QA 零预设"。当初"空脚手架、零具体锚点"的设想已被此演示锚点取代。
    - 两个引擎脚手架对齐。
 
 3. **URL 形态自动分流（导航不写死动词）**：QA 写到 URL 时（如 `Given 打开 "https://..."` / `访问 "https://..."` / `前往 "https://..."`），框架**按 step 文本里有没有 URL 字面量**（引号内 `https?://…`）自动分流，**不锁动词**：
@@ -41,4 +42,4 @@
 - Midscene `generic.steps.ts`：`AI 确认 {string}` → `{string}`（默认 AI）；删 `页面地址包含`；新建 `deterministic.steps.ts` 脚手架。
 - Nova Act `test_generic_steps.py`：对齐；新建确定性锚点脚手架。
 - `features/*.feature`：断言改为无关键词 `Then "{自然语言}"`。
-- 否定断言 `确认页面没有 "..."`：保留（它是通用 AI 否定断言，非绑场景；但措辞可后续也归一，暂留）。
+- 否定断言 `确认页面没有 "..."`：**已归一为无关键词** `Then "{自然语言}"`（AI 直接判否定陈述，如 `features/wikipedia_assertions.feature` 的 `"页面没有出现服务器错误"`）——与本节 35 行「`AI 确认`→无关键词」的归一决定一致，未保留该关键词 step。

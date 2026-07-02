@@ -1,5 +1,7 @@
 # 网络/SSL 瞬时错误的鲁棒性：两层重试 + network_error 分类（务实加固，非 enterprise resilience）
 
+> **Status:** Accepted
+
 实测中 worker 建连（开 AgentCore 会话 / SigV4 握手 / CDP 连接）常遇 `ssl.SSLEOFError`（UNEXPECTED_EOF）
 等**网络瞬时故障**——一次抖动就让烧了钱的 job 直接废（worker returncode=1 → core 记 engine_error，零重试）。
 本 ADR 加两层重试 + 一个 `network_error` 分类止血。**定位:对齐 [0015](./0015-v1-positioning-smoke-not-regression.md) 本地 smoke
@@ -34,8 +36,9 @@ worker **按白名单匹配具体瞬时异常类型**,不用宽基类兜底:
 
 - **Python（Nova）**:`ssl.SSLError`（含 `SSLEOFError`）、`ConnectionError`、`TimeoutError`、`socket.timeout`、
   botocore `EndpointConnectionError`/`ConnectionClosedError`/**`ConnectTimeoutError`/`ReadTimeoutError`**、urllib3 `ProtocolError`。
-  **明确排除 `socket.gaierror`（DNS 永久错）**——它与 `ssl.SSLError` 都继承 `OSError`,用宽 `OSError`
-  兜底会把永久错也当瞬时重试,故只匹配具体类型。
+  **`socket.gaierror` 按 errno 细分（不整类当永久）**——`EAI_AGAIN`（DNS 临时抖动）判瞬时/可重试
+  （对齐 Midscene 的 `EAI_AGAIN` 白名单，保两腿对 DNS 临时故障恢复力对称），其余 errno（`EAI_NONAME` 等永久）否决。
+  不用宽 `OSError` 兜底（它与 `ssl.SSLError` 同继承 `OSError`、会把永久错也当瞬时），只匹配具体类型 + gaierror 按 errno 判。
 - **botocore `ClientError`（服务端瞬时故障，按错误码/HTTP 状态码细分，非整类）**:AgentCore 起会话
   （`start_browser_session`）是 boto3 调用,服务端瞬时不可用/限流时抛 `ClientError`——它**直接继承 `Exception`、
   混着永久错**（`ValidationException`/`AccessDenied`）,**不能整类当瞬时**,须按码细分:

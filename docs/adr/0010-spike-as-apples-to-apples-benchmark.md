@@ -1,5 +1,7 @@
 # 两个引擎的 spike 做成「苹果对苹果」对标基准
 
+> **Status:** Accepted
+
 两根穿刺针（Midscene 引擎、Nova Act 引擎）刻意用**同一用例、同一断言策略、同一度量**，使其不只是各自「证活着」，而是产出一份双引擎**对比基准**。
 
 **决定（三者必须对齐才能比）**：
@@ -13,36 +15,15 @@
 
 **注意**：维基用例是英文（合 [0001](./0001-scope-limited-to-english-ui.md)）、无登录（合 [0007](./0007-programmatic-login-hitl-as-escape-hatch.md) 的 spike 不碰认证）。断言哲学 A/B 的最终取舍，由这份基准的抖动数据决定（见 CONTEXT「确定性断言 vs AI 断言」），本 ADR 只固定「怎么测得可比」，不预判结论。
 
-## 基准数据（陆续填入）
+## 对标结论（两个引擎，单用例 wikipedia/OpenAI，2026-06-23，AgentCore 云端）
 
-**Midscene 引擎（2026-06-23，AgentCore 云端 + Qwen3-VL，用例 wikipedia/OpenAI）**：
-| 指标 | 值 |
-|---|---|
-| 动作（aiAct 搜 OpenAI 进词条）成功 | ✅，58.9s |
-| A 确定性断言（url 含 /wiki/OpenAI） | pass |
-| B AI 断言 ×10 | 10/10 pass，**抖动率 0%** |
-| A/B 一致 | ✅ |
-| B 平均耗时 | 10.45s/次 |
-
-初步信号：本用例下 Midscene 的 AI 断言**零抖动**、与确定性断言完全一致——对「AI 断言是否可信」是正面信号，但样本仅 1 个用例、需 Nova Act 引擎数据与更多用例对标后才能定断言哲学。
-
-**Nova Act 引擎（2026-06-23，AgentCore 云端 + nova-act-latest，纯 IAM Workflow，同用例）**：
-| 指标 | 值 |
-|---|---|
-| 动作（act 搜 OpenAI 进词条）成功 | ✅，33.5s |
-| A 确定性断言（url 含 /wiki/OpenAI） | pass |
-| B AI 断言（act_get + BOOL_SCHEMA）×10 | 10/10 pass，**抖动率 0%** |
-| A/B 一致 | ✅ |
-| B 平均耗时 | 13.2s/次 |
-
-## 对标结论（两个引擎，单用例 wikipedia/OpenAI）
-
-| | Midscene (Qwen3-VL) | Nova Act (nova-act-latest) |
+| | Midscene (Qwen3-VL, SigV4) | Nova Act (nova-act-latest, 纯 IAM Workflow) |
 |---|---|---|
-| 动作成功/耗时 | ✅ 58.9s | ✅ 33.5s |
-| A 确定性断言 | pass | pass |
+| 动作成功/耗时（搜 OpenAI 进词条） | ✅ 58.9s | ✅ 33.5s |
+| A 确定性断言（url 含 /wiki/OpenAI） | pass | pass |
 | B AI 断言 ×10 | 10/10，抖动 0% | 10/10，抖动 0% |
-| B 平均耗时 | 10.45s | 13.2s |
+| A/B 一致 | ✅ | ✅ |
+| B 平均耗时/次 | 10.45s | 13.2s |
 
 **信号**：两个引擎在本（简单、确定性强）用例上 AI 断言均零抖动、与确定性断言完全一致——对「AI 断言可信度」是双边正面信号。**但样本仅 1 个用例**，断言哲学的最终取舍仍需更多/更难（动态内容、多候选、模糊判定）的用例才能定。本表为基准的起点，非结论。
 

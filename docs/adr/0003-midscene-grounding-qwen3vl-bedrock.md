@@ -1,5 +1,7 @@
 # Midscene 主力视觉定位模型用 Bedrock 上的 Qwen3-VL
 
+> **Status:** Accepted
+
 承接 [0002](./0002-midscene-not-driven-by-gpt55.md)：Midscene 的主力 grounding 大脑选 **Qwen3-VL 235B**（`qwen.qwen3-vl-235b-a22b`），托管在 **AWS Bedrock 原生**（serverless ON_DEMAND，在 `us-east-1`/`us-west-2` 均可用）。**项目统一用 `us-east-1`**（默认 region，且 AgentCore 会话与 qwen3-vl chat-completions 均在此实测过）。下方历史实测记录中的 `us-west-2` 是当时核实所用，不影响该统一决定。
 
 **为什么是它**：经实测发包确认，它在 `bedrock-runtime.{region}.amazonaws.com/openai/v1/chat/completions` 上以 OpenAI **chat-completions** 协议返回真实**文本**应答（HTTP 200），且 **image_url 字段被端点接受并进入图像解析**——而 Midscene 的 service-caller 硬走 `openai.chat.completions.create`、无任何 Responses 代码路径。这是它与 GPT-5.5 的决定性区别：协议对得上、接受图像输入、可被 Midscene 直接驱动。它是唯一同时满足「开源 / chat-completions / AWS 托管 / 英文 UI」四项约束的选项。
@@ -9,7 +11,7 @@
 
 **接线要点（与文档/直觉相悖，务必照抄）**：
 - 路径用 `bedrock-runtime` 的 `/openai/v1`，**不是**裸 `/v1`，**不是** `bedrock-mantle`。
-- `MIDSCENE_MODEL_FAMILY=qwen3-vl`。
+- `MIDSCENE_USE_QWEN3_VL=true`（等价于 modelFamily=qwen3-vl；代码与 `SIGV4-FETCH-RECIPE.md` 实际用的是这个 legacy 开关，非 `MIDSCENE_MODEL_FAMILY`）。
 - gpt-5.5 连可选 planner 都当不了（Midscene 无 Responses 路径），**直接弃用**，别留在任何 `MIDSCENE_*_MODEL_*` 槽位。
 
 **已在本账号实测（2026-06-22）**：用 IAM/SigV4 凭证向 `bedrock-runtime.us-west-2.amazonaws.com/openai/v1/chat/completions` 发真实请求，`qwen.qwen3-vl-235b-a22b` 返回 HTTP 200。证实：模型访问已授予、chat-completions 协议可用、在本账号 region 可达。

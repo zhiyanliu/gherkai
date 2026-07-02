@@ -1,6 +1,6 @@
 # `.feature` 用 Gherkin tag 声明 scope 与 engine（G1/G2）
 
-> **状态：tag 语义保留，实现层已转移（见 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)）。** `@scope:`/`@engine:` 的语义**不变**。但其读取/路由/调度从「两套 runner 各自方言（cucumber `--tags` 过滤 / pytest-bdd conftest 把带值 tag 转 marker + skip）」统一为「核心库解析 tag + 调度层据 tag 分组/选引擎」。下文「已验证」段描述的两套 runner 消费机制是 v0.x 形态；本 ADR 留待核心库的「调度实现」即由 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md) 落地。
+> **Status:** Partially-superseded-by 0022 —— `@scope:`/`@engine:` tag **语义不变**（仍是当前权威）；其读取/路由/调度实现从「两套 runner 各自方言（cucumber `--tags` 过滤 / pytest-bdd conftest 把带值 tag 转 marker + skip）」统一为「核心库解析 tag + 调度层据 tag 分组/选引擎」。下文「已验证」段描述的两套 runner 消费机制是 v0.x 形态；核心库「调度实现」由 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md) 落地。
 
 QA 在 `.feature` 里用 **Gherkin 原生 tag** 声明两类配置元信息：会话作用域（scope，G1）与引擎选择（engine，G2）。配置走结构化 tag、测试意图走自然语言 step——各司其职。
 

@@ -1,5 +1,7 @@
 # 核心↔worker 协议：流式 JSON 契约 + 成本信封（engine 只报原生量、core 只合计）
 
+> **Status:** Accepted
+
 定义核心库（`core/`）与引擎 worker 子进程之间的**唯一契约**：core 喂什么、worker 回什么。这是 v1.0 的「窄腰中的窄腰」——`parse`/`schedule`/两个引擎 worker/RunReport 全依赖它，设计错则全线返工。它同时兑现 [0016](./0016-execution-architecture-core-lib-run-model.md) 一直 defer 的「数据模型字段级 schema」（协议字段 = RunResult/RunReport 的字段来源）。执行形态（两个引擎都子进程、B1 薄 worker）见 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)。
 
 ## 设计原则：深模块、小接口
@@ -156,7 +158,7 @@ core 的 `schedule`/汇总逻辑应能用一个**假 worker**（in-memory adapte
 
 ## 现在做 / 留口子
 
-- **现在做（v1.0，已落地）**：上述输入/输出 schema、cost 信封（engine 报原生量 time_worked_s/tokens、core 合计）、三态 status/votes 区分 AI 断言；worker 派发逻辑（确定性注册表 > 内建 URL 导航 > 默认 AI，[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)）；两个引擎对称的 `@deterministic` 注册表（命中走精确 handler、不投票）；两个引擎 worker `get_session_id` 取会话血缘——**随 `scope_started` 即回传 `sessionId`（会话一起就报），`scope_done` 仍带作冗余兜底；core `_reduce` 两处都取（非 None 才设），保超时/SIGTERM 中途打断、`scope_done` 缺席时仍记得到血缘**（[0028](./0028-transient-network-ssl-resilience.md)）；**两个引擎的 reportRefs（kind=产物类型、粒度由挂载层级表达）**——Midscene 取 `agent.reportFile` 报 `kind=report` 于 `scope_done`（scope 级）；Nova 设 `logs_directory` 持久化 trajectory、取 `metadata.trajectory_file_path` 报 `kind=trajectory` **下沉到 `step_done`**（step 级，本 step 的 act 都挂该 step）+ session 汇总报 `kind=summary` 于 `scope_done`，归集成 RunReport（[0027](./0027-runreport-aggregation-index.md)）。
+- **现在做（v1.0，已落地）**：上述输入/输出 schema、cost 信封（engine 报原生量 time_worked_s/tokens、core 合计）、三态 status/votes 区分 AI 断言；worker 派发逻辑（确定性注册表 > 内建 URL 导航 > 默认 AI，[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)）；两个引擎对称的 `@deterministic` 注册表（命中走精确 handler、不投票）；两个引擎 worker `get_session_id` 取会话血缘、随 `scope_started` 首传、`scope_done` 兜底（机制见上「字段语义·`sessionId`」，[0028](./0028-transient-network-ssl-resilience.md)）；**两个引擎的 reportRefs（kind=产物类型、粒度由挂载层级表达）**——Midscene 取 `agent.reportFile` 报 `kind=report` 于 `scope_done`（scope 级）；Nova 设 `logs_directory` 持久化 trajectory、取 `metadata.trajectory_file_path` 报 `kind=trajectory` **下沉到 `step_done`**（step 级，本 step 的 act 都挂该 step）+ session 汇总报 `kind=summary` 于 `scope_done`，归集成 RunReport（[0027](./0027-runreport-aggregation-index.md)）。
 - **`errorType` 分类（已细化）**：建连层瞬时故障 → `network_error`（两个引擎 worker 建连重试 + 退出码约定,[0028](./0028-transient-network-ssl-resilience.md)）；act 中途失败 Nova worker 经 `_classify_act_error` 按 SDK 异常树细分——网络瞬时→`network_error`、`ActTimeoutError`→`timeout`、`ActGuardrailsError`/`ActStateGuardrailError`→`guardrail`、其余→`engine_error` 兜底（**仅诊断分类、不触发重试/恢复**，[0028](./0028-transient-network-ssl-resilience.md)）。`navigation_error` 暂无对应 SDK 类、留空槽位；Midscene 只抛通用 `Error`，act 中途仅区分 network_error vs engine_error。
 - **留口子不实现**：per-vote 细节（= 每票的 thought/reason，SDK 拿不到；非 yes/no——见上 `votes` 字段澄清）；trajectory 内部结构的结构化提取；美元折算（交消费者，框架不做）。
 

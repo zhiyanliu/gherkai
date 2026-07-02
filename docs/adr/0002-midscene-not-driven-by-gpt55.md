@@ -1,5 +1,7 @@
 # Midscene 主力大脑不用 Bedrock GPT-5.5
 
+> **Status:** Accepted
+
 原型指导文档 §3 指定 Midscene 用 Bedrock 上的 OpenAI GPT-5.5 做大脑。经核实，此方案行不通，**放弃**。
 
 ## 核心事实（2026-06-23 本账号实测，AWS 直接报错坐实）

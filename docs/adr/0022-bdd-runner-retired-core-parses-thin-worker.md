@@ -1,5 +1,7 @@
 # BDD runner 退役：核心库自解析 Gherkin + 两个引擎薄 worker（确定性 step = worker 注册表）
 
+> **Status:** Accepted
+
 核心库（v1.0）落地执行形态时的关键转向：**不再让每个引擎跑整个 BDD runner（cucumber-js / pytest-bdd），而是核心库自己解析 `.feature`、把每个 step 派发给一个薄 worker 子进程。** 本 ADR 记录这个转向（代号 B1）、它退役了哪些 hack、确定性 step 怎么扩展、以及对 [0019](./0019-feature-tags-scope-and-engine.md)/[0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md)/[0021](./0021-local-cucumber-patch-step-keyword-disambiguation.md) 的影响。执行架构总成见 [0016](./0016-execution-architecture-core-lib-run-model.md)。
 
 ## 两个候选
@@ -60,9 +62,11 @@ def color_is(ctx, sel, hex):
 - **两个引擎对称但各自语言**：确定性检查天然依赖引擎/CDP 的精确能力，**本就该写在对应 worker 里**（midscene=TS+Playwright，nova=Python）。这不是缺陷，是确定性检查的本质（它碰具体引擎精确 API，不像 AI step 引擎无关）。
 - **冲突规则自定**（如「最多命中一条，多条报错」），比 cucumber 的 pattern 歧义可控得多——这正是 B1 退役补丁的同源好处。
 
-## 退役清单（B1 真正删除/作废的东西）
+## 退役清单（B1 删除/作废的东西）
 
-真删的只有 4 样「BDD runner 入口管道」，**spike、sigv4 recipe、workflow_setup、step 逻辑一个都不删**：
+> **状态（截至当前分支）**：worker + 注册表已落地（见上「实现状态」），但下列 4 个 v0.x BDD 入口文件 + `generic.steps`/`test_generic_steps` **仍与 worker 物理并存**——退役是**已决策、尚未执行的下一步施工**（清理 v0.x 层）。此清单是「该删什么」的决策，非「已删」的事实。
+
+要删的只有 4 样「BDD runner 入口管道」，**spike、sigv4 recipe、workflow_setup、step 逻辑一个都不删**：
 
 | 退役 | 原因 |
 |---|---|

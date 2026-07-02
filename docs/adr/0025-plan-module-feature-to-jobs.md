@@ -1,5 +1,7 @@
 # plan 模块：`.feature` → job 列表（解析 + scope 分组）
 
+> **Status:** Accepted
+
 核心库把一组 `.feature` 变成可调度的 **job 列表**的模块。它兑现 [0019](./0019-feature-tags-scope-and-engine.md)/[0016](./0016-execution-architecture-core-lib-run-model.md) 一直 defer 到核心库的「scope 分组 + engine 冲突校验 + Gherkin 解析」。输出的 Job 正是 [0024](./0024-worker-core-protocol.md) worker↔core 协议的输入形状。下一块 `schedule`（scope 串/并行调度）以本模块输出为输入，另立。
 
 ## 接口（深模块，小）

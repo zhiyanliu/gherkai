@@ -54,7 +54,7 @@
 │   ├── deterministic_anchor.feature        ← @deterministic 锚点验证（ADR 0022）
 │   └── concurrency_and_scope.feature       ← 手工真跑回归夹具：改调度/会话生命周期后重跑验 ADR 0019
 ├── core/                      ← 窄腰核心库（Python，零引擎依赖，ADR 0016）
-│   └── core/{parse,scope,schedule,persist,model,wire,serialize,ports}.py + adapters/{run,result,report}_store/{local,ddb|s3}.py（本地 + 云端）
+│   └── core/{parse,scope,schedule,persist,model,wire,serialize,ports,errors}.py + adapters/{run,result,report}_store/{local,ddb|s3}.py（本地 + 云端）
 ├── cli/                       ← 核心库的第一个前端 = 组合根（ADR 0016）
 │   └── cli/{__main__.py(argparse) · compose.py(引擎注册表) · render.py}
 └── engines/                   ← 两个可插拔引擎，与 core 平级
@@ -111,7 +111,7 @@ AWS_REGION=us-east-1 uv run python -m cli run ../features/engine_routing.feature
 ## Spike（可独立跑的技术验证脚本）
 
 ```bash
-# Midscene 引擎三段式自检（隔离验证：模型连接 / 浏览器连接(CDP) / 合体）
+# Midscene 引擎三段隔离自检（模型连接 / 浏览器连接(CDP) / 合体；另有 04 planning 探针 / 05 负向断言，见 engines/midscene/README.md）
 cd engines/midscene && AWS_REGION=us-east-1 node_modules/.bin/tsx spikes/01-model-sigv4.ts
 # 02-agentcore-cdp.ts / 03-midscene-grounding.ts 同理
 

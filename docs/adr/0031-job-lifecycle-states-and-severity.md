@@ -1,5 +1,7 @@
 # job 生命周期态：skipped / aborted + severity 数值序
 
+> **Status:** Accepted
+
 给 `Status` 加两个 **core 派生态**——`skipped`（排队没起）与 `aborted`（跑一半被掐）——并定义一套
 **severity 数值序**，解决「`'error' < 'failed'` 字母序与严重度反向」的坑、并把 fail-fast 中止的 job 从
 被误记成 `error` 区分出来。
@@ -69,9 +71,6 @@ class Status(str, Enum):
 ## 决定二：severity 数值序，两层分清
 
 severity **只用于终态**（passed/failed/error/skipped/aborted）的排序/着色/聚合；前置态 pending/running 不在此表（见决定一·补）。
-`Status` 是字符串，按字母序比大小是**错的**（`'error' < 'failed' < 'passed'` 字母序与严重度**正好反**）。
-故定义一张 severity 数值表，比较/单调升级一律用它、绝不拿字符串比：
-
 `Status` 是字符串，按字母序比大小是**错的**（`'error' < 'failed' < 'passed'` 字母序与严重度**正好反**）。
 故定义一张 severity 数值表，比较/单调升级一律用它、绝不拿字符串比：
 
@@ -179,7 +178,7 @@ cli 退出码从「`status.value == 'passed'` 才 0」改为**基于 run 级 sev
 - `core/adapters/report_store/local.py`：`_STATUS_COLOR` 现含 passed(绿`#1a7f37`)/failed(红`#cf222e`)/error(琥珀`#9a6700`)、其余走兜底灰`#57606a`。新增：skipped（弱化灰）、aborted（比 error 更扎眼，如紫/深红，别和兜底灰混）、pending/running（「进行中」灰/蓝）。否则新态全走兜底灰、aborted 看不出严重。
 - `cli/cli/__main__.py`：退出码改基于 severity，读 `RunResult.status`（见决定五数据源）。
 - `docs/adr/0024`：「status 三态」处补澄清指针（决定四）。
-- `docs/adr/0026`：line 75「status 归约 scenario→job→run 同规则」段补指针——job 级判定态扩为含 skipped/aborted、run 级 `_aggregate` 入口过滤 `_NON_VERDICT` 再取三态 max（见本 ADR 决定二/三）。
+- `docs/adr/0026`：「status 归约 scenario→job→run」段补指针——job 级判定态扩为含 skipped/aborted、run 级 `_aggregate` 入口过滤 `_NON_VERDICT` 再取三态 max（见本 ADR 决定二/三）。
 - `docs/adr/0016`：协议/RunResult 字段处「status 三态」措辞补「job 级另有 core 派生态 skipped/aborted + 前置态 pending/running，见 0031」指针。
 - **决定六（step 级短路）实装**：
   - `core/model.py`：加 `StepSkipped` 事件（frozen dataclass：`scenario_id`/`step_index`，无 status/votes/cost）并入 `Event` Union；`StepResult` 加 `shortcircuited: bool = False`（正交布尔）。

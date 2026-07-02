@@ -1,5 +1,7 @@
 # 云端执行倾向 Fargate/ECS 而非 AgentCore Runtime（批处理 shape-fit）
 
+> **Status:** Accepted
+
 当执行面搬上云（v1.x+，见 [0016](./0016-execution-architecture-core-lib-run-model.md)），**倾向 Fargate/ECS（ECS RunTask）而非 AgentCore Runtime**。这是**倾向性结论**，上云时以实测复核为准——非现在锁死。
 
 ## 决定性理由：workload shape 是批处理

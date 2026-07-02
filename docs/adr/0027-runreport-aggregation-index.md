@@ -1,5 +1,7 @@
 # RunReport：跨引擎归集索引（不融合原生产物内容）
 
+> **Status:** Accepted
+
 兑现 [0016](./0016-execution-architecture-core-lib-run-model.md) 一直 deferred 的「报告统一」（原里程碑 M5）。本 ADR 定 **RunReport 的语义、形态与扩展性契约**，并落地 `ReportStore` 的 local adapter。
 
 ## 决定：RunReport = 归集索引，不是内容融合

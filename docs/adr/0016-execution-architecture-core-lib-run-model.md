@@ -1,5 +1,7 @@
 # 执行架构：核心库（窄腰）+ Run 数据模型 + 留好状态存储的口子
 
+> **Status:** Accepted
+
 界定 v0.x/v1.0 起、并向云端无缝演进的执行架构。本 ADR 是多轮形态讨论的总成，约束 lib 的设计，确保本地与云端、CLI 与 WebUI 不埋返工雷。
 
 ## 分层：核心库是窄腰，CLI/WebUI 是可替换前端
@@ -25,7 +27,7 @@
 两个引擎各自语言锁死（Midscene 锁 TS、Nova Act acting 锁 Python，[0023](./0023-novaact-acting-python-locked-no-ts-core.md) 证伪了「全 TS 核心」），故**无论核心用哪个语言，必有一个引擎跨进程**——这是「双语言裂缝」（[0006](./0006-form-a-two-subprojects-no-orchestrator.md)）的必然。
 
 **决定：两个引擎都作为子进程 worker，核心不 import 任何引擎；核心语言选 Python。**
-- **两个引擎都子进程**（而非一个引擎进程内）：两个 `Engine` adapter 形状**完全一致**（spawn worker + 讲同一套 JSON 协议），核心不碰任一引擎 API，AgentCore 会话生命周期留在各自 worker（即现 `generic.steps.ts` Before/After、`nova_ctx` fixture 已跑通处）。这才是对称 `Engine` port 最干净的形态；一个引擎进程内会让 adapter 出现两种形状、核心 venv 被引擎依赖树绑死。
+- **两个引擎都子进程**（而非一个引擎进程内）：两个 `Engine` adapter 形状**完全一致**（spawn worker + 讲同一套 JSON 协议），核心不碰任一引擎 API，AgentCore 会话生命周期留在各自 worker（现 `engines/novaact/worker/run_scope.py` 三层 `with NovaAct/cdp_session/workflow` / `engines/midscene/worker/run-scope.ts`；早期在 BDD 的 `generic.steps.ts` Before/After、`nova_ctx` fixture 验证过，BDD 直跑层已由 0022 退役）。这才是对称 `Engine` port 最干净的形态；一个引擎进程内会让 adapter 出现两种形状、核心 venv 被引擎依赖树绑死。
 - **核心语言 = Python**：两个引擎都子进程后，核心是无重型引擎依赖的薄编排层，语言成为低风险自由选择；选 Python 因 boto3 生态成熟（便于未来云 adapter）+ 官方 `gherkin-official` 解析。
 - **核心自解析 Gherkin + 薄 worker（B1）**：核心拥有解析（单一事实源），worker 只派发 step → act/assert，**退役 cucumber 补丁与 pytest-bdd 路由 hack**。详见 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)。
 
@@ -93,12 +95,12 @@
 
 ```
 core/
-├── ports.py                 ← 接口定义（Engine / WorkerHandle / EngineResolver / Sink / RunStore / ResultStore / ReportStore）
+├── ports.py                 ← 接口定义（Engine / WorkerHandle / EngineResolver / Sink / JobSink（0030）/ RunStore / ResultStore / ReportStore）
 └── adapters/
     ├── subprocess_engine.py              ← Engine 实装：单个参数化 adapter（spawn node / python 皆可）✅ 已建
-    ├── report_store/local.py             ← RunReport 归集（manifest+index；未来 s3.py）✅ 已建（0027）
-    ├── run_store/local.py                ← 控制面；（未来 ddb.py）        ✅ 已建
-    └── result_store/local.py             ← 数据面；（未来对象存储）        ✅ 已建
+    ├── report_store/{local.py, s3.py}    ← RunReport 归集（manifest+index）✅ 已建（0027；s3 见 0030）
+    ├── run_store/{local.py, ddb.py, arg_offload.py}  ← 控制面（ddb=DynamoDBRunStore、arg_offload=S3StepArgumentOffloader）✅ 已建（0030）
+    └── result_store/{local.py, s3.py}    ← 数据面（s3=S3ResultStore）✅ 已建（0030）
 ```
 
 **当前实装**：四个 port 的 local adapter **均已建**（`subprocess_engine.py` / `run_store/` / `result_store/` / `report_store/`，方法签名以代码与上「按关注点拆 port」节的契约描述为准）。判定结果不再仅在内存，cli 跑完落 `<report-dir>/<run_id>/`（`run_meta.json` + `run_state.json` + `jobs/` + RunReport）。**克制**：store adapter 只忠实持久化已成形的 `RunMeta`/`RunState`/`JobResult`（复用 `serialize` 单一序列化真理源），**未发明** jobId/DDB 表/轮询续跑读取面那些字段——它们仍 defer，待真实续跑/轮询/WebUI 需求逼出（见上「数据模型」节字段级 schema 顺延）。云端再填 DDB/S3/Fargate。
@@ -118,8 +120,8 @@ core/
 **单一开关换齐三层、第一版不开混搭**：cloud 一次把 RunStore→DDB、ResultStore/ReportStore→S3（+ 挂 offloader）全换。理由：三层后端不对等（上文已证不存在 `S3RunStore`/`DDBReportStore`），无有意义的混搭矩阵；「Local store + Fargate worker」是 **store⊥worker 正交轴**（上文「worker 产物 ⊥ store」）、非 store 层内部混搭，不需要 `--run-backend`/`--result-backend` 拆开（那是提前盖机器 + 组合爆炸测试负担）。
 
 **装配两个后端都下沉 compose（对称、可复用）**：`build_local_stores` + `build_cloud_stores` 都放 `compose.py`——组合根装配是任何前端（cli / 未来 WebUI）都要的逻辑，收在 compose 让两个后端都能被复用（cli 只是第一个调用者，WebUI 直接复用同两个函数、不经 cli）。这兑现「compose = 可复用组合根」的定位。
-- **`build_local_stores(*, report_dir) -> (run_store, result_store, report_store, artifacts_descriptor)`**：new 三个 `Local*Store(root)`，返回三 store + local 的 `file://` artifacts 指针 descriptor。
-- **`build_cloud_stores(*, table, bucket, prefix, region=None, profile=None) -> (run_store, result_store, report_store, artifacts_descriptor)`**：`import boto3` 惰性收在函数体内（cli 主依赖不含 boto3，走 `cli[aws]→core[aws]` extra；纯 local 路径绝不触发 import）。造 boto3 句柄抽成可 patch 的小钩子。返回三 store + cloud 的 `s3://`/`ddb://` 指针 descriptor。
+- **`build_local_stores(*, report_dir) -> (run_store, result_store, report_store, make_artifacts)`**：new 三个 `Local*Store(root)`，返回三 store + `make_artifacts` 工厂函数（见下第四返回值说明）。
+- **`build_cloud_stores(*, table, bucket, prefix, region=None, profile=None) -> (run_store, result_store, report_store, make_artifacts)`**：`import boto3` 惰性收在函数体内（cli 主依赖不含 boto3，走 `cli[aws]→core[aws]` extra；纯 local 路径绝不触发 import）。造 boto3 句柄抽成可 patch 的小钩子。返回三 store + cloud 的 `make_artifacts` 工厂。
 - **两种 boto3 句柄别混**（静默出错高危）：`DynamoDBRunStore` 吃 `resource.Table`（内部 `self._table.put_item`/`.meta.client`），三个 S3 件套（ResultStore/ReportStore/offloader）**共享一个** `client`。喂错句柄类型运行时才 AttributeError、moto/cli 都测不到。
 - **测试注入点随之迁移**：原 cli 测试 `monkeypatch m.LocalRunStore/...`（模块级名字）改为 patch `compose.build_local_stores`（或其内部构造钩子）——注入点从「__main__ 模块级 Local* 名字」迁到「compose 的 build 函数」，验的东西不变（写序 / --no-report 不构造 / running→final），只换注入锚。cloud 同理 patch `compose` 的 boto3 钩子。cli 测试**只验接线层**（backend 选对了、构造了正确 adapter + 参数对 + offloader 挂了），不引 moto——adapter 行为已由 core 包 moto 全覆盖，cli 再测是重复且破窄腰。
 - **trade-off**：把 local 装配从 `__main__` 迁进 `compose` 要改现有 3 个 `monkeypatch m.Local*` 测试的注入点——换来 compose 两后端对称可复用（WebUI 两路都能直接复用），值得。
@@ -133,7 +135,7 @@ core/
 **artifacts 落点指针按 backend 分支组装、全 URI 化（不硬编码本地路径「说谎」）**：`--json` 的 `artifacts` dict（`report_index`/`run_meta`/`run_state`/`jobs_dir`）现状硬编码本地文件路径，cloud 下这些数据落 DDB/S3、本地路径不存在——必须按 backend 分支：
 - local：四项均 `file://` 完整路径（从裸路径升级为 URI，与 cloud 同形工整）。
 - cloud：`report_index`（取 `finalize()` 返回值）/`jobs_dir` = `s3://…`；`run_meta`/`run_state` = 自造 `ddb://<table>/<run_id>#META|#STATE` 诊断指针（与 s3:// 同形、纯展示、不被任何代码解析）。
-- 指针由 `build_local_stores`/`build_cloud_stores` 连同三个 store 实例一起返回（各自最懂自己的落点/前缀），`_cmd_run` 直接填 artifacts——**不给 Store port 加 `describe_artifacts`**（凭空扩接口面、6 个 adapter 全要实现，过度设计）。
+- 第四返回值是 **`make_artifacts(run_id, report_index) -> dict` 工厂函数**（非现成 descriptor）——须在 finalize 拿到 `run_id` 与 `report_index` 后才能组装（`report_index` 可能因 write 失败被隔离而为 None，此时省略 `report_index` 键）；由 `build_local_stores`/`build_cloud_stores` 各自返回（各自最懂按 backend URI 化组装落点/前缀），`_cmd_run` 调它填 artifacts——**不给 Store port 加 `describe_artifacts`**（凭空扩接口面、6 个 adapter 全要实现，过度设计）。
 - `finalize()` 返回 None（`S3ReportStore.write` 失败被 `RunPersistence` 隔离，[0030](./0030-realtime-persistence-seam.md) 决定三）时 `report_index` 键不放裸 `'None'`——省略该键、可选把 `_report_error` 打一行 stderr。
 
 ## 工程布局：core / cli / engines 三者平级对标

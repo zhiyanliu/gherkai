@@ -1,5 +1,7 @@
 # 用例描述层用单一共享的 .feature 文件
 
+> **Status:** Accepted
+
 `.feature`（Gherkin 文本）是整条链路上**唯一**语言无关、可共享的一层。两侧的 runner（Python 的 `pytest-bdd`、TS 的 `cucumber-js`）与 step 实现必然各自一套——这是「双语言裂缝」的物理后果，不是设计选择。
 
 **决定**：被两套 runner 加载的 `.feature` 做成**物理同一个文件**（放 git 根的 `features/`），而非两份各自维护、靠纪律保持一致。这样它是真正的单一事实源——改一次两边都变。
@@ -9,6 +11,8 @@
 **承受的代价（已知）**：两套 runner 对 Gherkin 方言/step 匹配语法支持不完全一致（cucumber-js 用 Cucumber Expressions/正则；pytest-bdd 用自己的 parser + `parsers.parse`/`re`），step 措辞需取两者交集。这个约束本身有价值：它逼迫 step 措辞保持中立、不绑定某引擎的能力。
 
 ## ✅ 已实测（M2 起）：同一份 .feature 双 runner 加载，均通过
+
+> **演进（v1.0）**：下述「双 runner 各自加载」的 runner 层（cucumber-js `cucumber.mjs` + pytest-bdd `scenarios()` + `{type:module}` + cucumber patch）已退役（[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)）；现由核心 `core/parse.py` 自解析同一份 `.feature`、派发薄 worker（`engines/*/worker/run_scope.*`）执行。**「单一物理共享 .feature」的核心决定不变**——只是加载方从双 runner 变成了核心。下述 M2 实测是当时的验证脉络，保留。
 
 同一份 `.feature` 被两套 runner 各自加载、各驱动一个引擎，都通过：
 - **Midscene 侧**：`engines/midscene/` 的 cucumber-js（配置 `cucumber.mjs` 的 `paths` 指 `../../features/`）。

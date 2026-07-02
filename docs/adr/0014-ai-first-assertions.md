@@ -1,5 +1,7 @@
 # 断言哲学：AI 断言为主，配套可靠性纪律
 
+> **Status:** Accepted
+
 测试用例的断言**默认走 AI**（Midscene `aiAssert` / Nova Act `act_get`+schema），让框架忠于其立身之本——「用 AI 引擎做自动化测试」。确定性断言（底层 Playwright `page`）退为**高保真补充与逃生舱**，而非默认。
 
 ## 为什么 AI 为主（价值取向，非实测结论）

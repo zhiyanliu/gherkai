@@ -1,5 +1,7 @@
 # Nova Act 用纯 IAM 鉴权（经 Workflow 构造），不用 NOVA_ACT_API_KEY
 
+> **Status:** Accepted
+
 为契合「统一走 AWS、不引入额外凭证」，Nova Act 引擎用本账号已有的 IAM 凭证鉴权，**不**申请/设置 `NOVA_ACT_API_KEY`。
 
 经核实 nova-act 3.4.187.0 源码，IAM 可同时覆盖两个鉴权关注点，但有一个反直觉的前提：
