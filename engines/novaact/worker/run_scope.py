@@ -366,7 +366,7 @@ def _is_transient_client_error(e: BaseException) -> bool:
     return status in _BOTO_TRANSIENT_STATUS  # 5xx（500/502/503/504）；4xx 客户端错/其余 → 永久
 
 
-def _is_transient_network(e: BaseException) -> bool:
+def _is_transient_network(e: BaseException, *, connecting: bool = False) -> bool:
     """是否网络/SSL 瞬时故障（可重试，ADR 0028）。
 
     白名单匹配**具体**瞬时类型，不用宽 OSError 兜底——ssl.SSLError 与 socket.gaierror 都继承 OSError，
@@ -377,6 +377,13 @@ def _is_transient_network(e: BaseException) -> bool:
     **遍历异常链**（__cause__/__context__）：Nova/boto SDK 常把底层瞬时错包成自有异常
     （AgentCore 会话建立失败 → BrowserAuthError ← ClientError，每层带 from），只看最外层会漏判——
     任一层命中白名单即判瞬时（用 id 集防环）。
+
+    **connecting=True（仅建连阶段传，ADR 0028）**：额外把 Playwright `TargetClosedError`
+    （`CDPSession.send: Target ... has been closed`）判瞬时。它是 CDP/websocket 连接被网络断掉后的
+    **下游症状**异常——Playwright 把底层 socket 故障吞掉、只抛这个不继承 OSError/__cause__ 为 None 的“干净”异常，
+    白名单无从穿透（真跑 r2 复现：会话已起、`with NovaAct.__enter__` 内撞网络断）。因它语义模糊
+    （网络断/会话正常关/浏览器真崩同报一句），**只在建连阶段认**（scope_started 未 emit、act 无副作用、重试安全，
+    是已有重试域的物理边界）；act 中途（connecting=False）不认，守“拿不准→不归 network”铁律。
     """
     transient: tuple[type[BaseException], ...] = (ssl.SSLError, ConnectionError, TimeoutError, socket.timeout)
     try:
@@ -391,6 +398,18 @@ def _is_transient_network(e: BaseException) -> bool:
         transient += (ProtocolError,)
     except ImportError:
         pass
+    if connecting:  # 建连阶段额外认 Playwright 连接被关（下游症状，见 docstring）
+        # 精确匹配 TargetClosedError（不用其基类 Error——那会把参数错/协议错等永久错也当瞬时，违背不宽兜底）。
+        # 私有路径 _impl._errors（sync_api 未顶层导出它）；导入失败则按类名兜底（防 SDK 版本挪位）。
+        try:
+            from playwright._impl._errors import TargetClosedError as _PWClosed
+            transient += (_PWClosed,)
+        except ImportError:
+            _pw_closed_by_name = True
+        else:
+            _pw_closed_by_name = False
+        if _pw_closed_by_name and type(e).__name__ == "TargetClosedError":
+            return True
 
     seen: set[int] = set()
     cur: BaseException | None = e
@@ -522,7 +541,9 @@ def main() -> int:
                     except _Terminated:
                         raise  # SIGTERM：交三层 with 清理，不重试
                     except BaseException as e:  # noqa: BLE001
-                        if started or not _is_transient_network(e):
+                        # connecting=True：本分支即建连域（started=True 时下句直接 raise，走不到判定），
+                        # 故额外认 Playwright TargetClosedError（连接被网络断的下游症状，ADR 0028）。
+                        if started or not _is_transient_network(e, connecting=True):
                             raise  # 会话已起 / 非瞬时网络错 → 不重试，原样冒泡
                         if attempt >= _CONNECT_ATTEMPTS - 1:
                             log(f"worker: 建连重试耗尽（{attempt + 1} 次），网络/SSL 瞬时故障：{e}")

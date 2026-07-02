@@ -110,6 +110,26 @@ test("isTransientNetwork: AgentCore 起会话节流错在 cause 链里（穿透�
   assert.equal(isTransientNetwork(outer), true);
 });
 
+// ---- Playwright "has been closed" 按阶段判定（对称 Nova TargetClosedError，ADR 0028）----
+test('isTransientNetwork: "has been closed" 仅建连阶段（connecting=true）→ true', async () => {
+  const { isTransientNetwork } = await importMod();
+  const err = new Error("Target page, context or browser has been closed");
+  assert.equal(isTransientNetwork(err, true), true);   // 建连阶段：认作瞬时→重试
+});
+
+test('isTransientNetwork: "has been closed" 默认/act 中途（connecting=false）→ false', async () => {
+  const { isTransientNetwork } = await importMod();
+  const err = new Error("Target page, context or browser has been closed");
+  assert.equal(isTransientNetwork(err), false);        // 默认不认——守「拿不准→不归 network」铁律
+  assert.equal(isTransientNetwork(err, false), false);
+});
+
+test("isTransientNetwork: connecting=true 不放宽真永久错（ValidationException）→ 仍 false", async () => {
+  // connecting 只额外认 "has been closed"，不是放宽一切
+  const { isTransientNetwork } = await importMod();
+  assert.equal(isTransientNetwork({ name: "ValidationException", $metadata: { httpStatusCode: 400 } }, true), false);
+});
+
 // ---- aggregate：error > failed > passed ----
 test("aggregate 优先级 error>failed>passed", async () => {
   const { aggregate } = await importMod();

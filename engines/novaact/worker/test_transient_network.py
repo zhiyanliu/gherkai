@@ -119,3 +119,41 @@ def test_agentcore_permanent_wrapping_chain_not_transient():
     browser_auth = RuntimeError("browser auth"); browser_auth.__cause__ = boto_err
     start_failed = RuntimeError("start failed"); start_failed.__cause__ = browser_auth
     assert rs._is_transient_network(start_failed) is False
+
+
+# ---- Playwright TargetClosedError 按阶段判定（ADR 0028：CDP 连接被网络断的下游症状）----
+# 真跑 r2 复现：会话已 start_browser_session 成功，with NovaAct.__enter__ 内 CDPSession.send 撞网络断，
+# Playwright 抛 TargetClosedError（不继承 OSError、__cause__ 为 None，白名单无从穿透）→ 曾误判 engine_error。
+def _target_closed():
+    from playwright._impl._errors import TargetClosedError
+    return TargetClosedError("CDPSession.send: Target page, context or browser has been closed")
+
+
+def test_target_closed_transient_only_when_connecting():
+    # 建连阶段（connecting=True）：认作瞬时 → 触发建连重试
+    assert rs._is_transient_network(_target_closed(), connecting=True) is True
+
+
+def test_target_closed_not_transient_by_default():
+    # 默认（act 中途分类 _classify_act_error 走此路径）：不认——守「拿不准→不归 network」铁律，
+    # 避免把会话正常关/浏览器真崩误判为可重试。
+    assert rs._is_transient_network(_target_closed()) is False
+    assert rs._is_transient_network(_target_closed(), connecting=False) is False
+
+
+def test_target_closed_wrapped_chain_transient_when_connecting():
+    # 真实包装链：TargetClosedError ← StartFailed ← BrowserAuthError（每层 from），建连阶段遍历链命中
+    inner = _target_closed()
+    start_failed = RuntimeError("Failed to start and initialize Playwright"); start_failed.__cause__ = inner
+    browser_auth = RuntimeError("Failed to manage AgentCore browser session"); browser_auth.__cause__ = start_failed
+    assert rs._is_transient_network(browser_auth, connecting=True) is True
+    # 反向：同一条链在非建连阶段不认（TargetClosedError 语义模糊，只建连期安全）
+    assert rs._is_transient_network(browser_auth, connecting=False) is False
+
+
+def test_connecting_flag_does_not_widen_permanent_errors():
+    # connecting=True 不是"放宽一切"：真永久错（ValidationException）即便建连阶段仍判永久
+    assert rs._is_transient_network(_client_error(code="ValidationException"), connecting=True) is False
+    # 普通 Playwright Error（非 TargetClosedError，如参数/协议错）建连阶段也不当瞬时（精确匹配 TargetClosedError）
+    from playwright._impl._errors import Error as PWError
+    assert rs._is_transient_network(PWError("some protocol error"), connecting=True) is False

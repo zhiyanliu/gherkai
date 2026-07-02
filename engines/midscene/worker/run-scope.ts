@@ -57,7 +57,13 @@ const AWS_TRANSIENT_STATUS = new Set([500, 502, 503, 504]);
 
 // 是否网络/SSL 瞬时故障（可重试，ADR 0028）。Node 侧按 error code / TLS 错 / AWS SDK v3 服务端瞬时识别。
 // 遍历 error.cause 链：SDK 常把底层 socket/TLS 错、或 AWS 服务端错包成自有 Error，只看最外层会漏判（防环：限 8 层）。
-function isTransientNetwork(e: unknown): boolean {
+//
+// connecting=true（仅建连阶段传，ADR 0028）：额外认 Playwright TargetClosedError 的 message
+// "...has been closed"——CDP 连接被网络断掉后的下游症状（Playwright 把底层 socket 故障吞掉、只留这句）。
+// 与 Nova 侧对称（Nova SDK 建连时主动 CDPSession.send 会撞出它；Midscene connectOverCDP 通常招 websocket
+// TLS 错、已被下面正则命中，故此路径 Midscene 实际少见——防御性对称）。因语义模糊（网络断/会话正常关/浏览器真崩
+// 同报一句），**只建连阶段认**（此阶段 act 无副作用、重试安全）；act 中途（connecting=false）不认，守铁律。
+function isTransientNetwork(e: unknown, connecting = false): boolean {
   let cur = e as {
     code?: string; name?: string; message?: string; cause?: unknown;
     $metadata?: { httpStatusCode?: number }; $retryable?: { throttling?: boolean };
@@ -74,6 +80,9 @@ function isTransientNetwork(e: unknown): boolean {
     if (cur.$retryable?.throttling === true) return true;
     const msg = cur.message ?? "";
     if (/\b(socket hang up|ssl|tls|econnreset|epipe|timeout|handshake|UNEXPECTED_EOF)\b/i.test(msg)) return true;
+    // 建连阶段额外认 Playwright 连接被关（下游症状）——精确匹配 "has been closed"（TargetClosedError），
+    // 不用宽 "closed"（正常关闭也含）。TS Playwright 无稳定异常类可 instanceof，故按 message。
+    if (connecting && /has been closed/i.test(msg)) return true;
     cur = cur.cause as typeof cur;
   }
   return false;
@@ -256,8 +265,9 @@ async function main(): Promise<number> {
         const sid = sessionId; sessionId = undefined; // 清血缘：失败 attempt 的 id 不该进 scope_done
         cleanedUp = false; // 重置守卫：留给后续 attempt 成功后的 final cleanup（否则被本次置 true 永久跳过）
         if (terminated) throw e;  // 已收 SIGTERM → 不重试
-        if (!isTransientNetwork(e) || attempt >= CONNECT_ATTEMPTS - 1) {
-          if (isTransientNetwork(e)) { networkExhausted = true; log(`worker: 建连重试耗尽（${attempt + 1} 次）：${(e as Error).message}`); }
+        // connecting=true：本分支即建连域，额外认 Playwright "has been closed"（连接被网络断的下游症状，ADR 0028，对称 Nova）
+        if (!isTransientNetwork(e, true) || attempt >= CONNECT_ATTEMPTS - 1) {
+          if (isTransientNetwork(e, true)) { networkExhausted = true; log(`worker: 建连重试耗尽（${attempt + 1} 次）：${(e as Error).message}`); }
           throw e; // 非瞬时 / 重试耗尽 → 冒泡
         }
         log(`worker: 建连失败（attempt ${attempt + 1}, session=${sid ?? "—"}），重试：${(e as Error).message}`);
