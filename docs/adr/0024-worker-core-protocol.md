@@ -156,6 +156,49 @@ core 的 `schedule`/汇总逻辑应能用一个**假 worker**（in-memory adapte
 - **会话清理归 worker，schedule/adapter 不碰 AgentCore**：schedule 只下逻辑「停」、adapter 只发信号杀进程——**StopBrowserSession 只由 worker 调**（Nova 经 `with browser_session` 间接、Midscene 显式调）。
 - **未来演进（控制流，记路标不实现）**：若 core 需要对运行中 worker 下达「停」之外的指令（暂停 / 取消单个 scenario / 动态调度 / WebUI 交互），届时引入**显式 core→worker 控制通道**（双向消息流），另立 ADR。当前唯一控制指令是「停」，为一条指令建通用双向协议属过度工程（删除测试）。
 
+## 远程传输演进（Fargate：port 抽象活、pipe 传输死；记路标不实现）
+
+> 前瞻 draft 性质的一节：Fargate 执行 adapter 尚未编码。这里钉的是**已想清、不会变**的边界（哪些 survive、哪些必改），供真做时照做；具体传输选型（HTTP/队列/CloudWatch）留到那时定，不在此焊死。产物→S3 是**正交的另一条边**，见 [0029](./0029-fargate-engine-artifacts-to-s3.md)。
+
+当前传输是**OS 管道**：core 是 worker 父进程，job 写 worker stdin、事件读 worker 的 `EVENTS_FD` fd、退出码经 `proc.wait()`。搬到 Fargate（[0017](./0017-cloud-execution-fargate-over-runtime.md)），core 不再是 worker 父进程，**管道语义（父子进程 / fd 继承 / EOF / stdin）全无对等物**。核实（AWS 文档 + 本仓 code，2026-07）的结论分两层：
+
+**① `Engine` port 抽象 survive。** port 是 `run_scope(job) → (WorkerHandle, Iterator[Event])` + JSON-Lines 线格式这个**抽象契约**，本就与传输解耦——「协议是测试面」的 in-memory 假 worker（见上节）即证明 core/schedule/wire/model 不关心"事件行从哪来"。Fargate 化**不改** core/schedule/wire/model、不改 port 签名、不改线格式。
+
+**② pipe 传输实现 die，worker 的 I/O 边缘必改（引擎逻辑不动）。** 三路各自要换（`FargateEngine` adapter 侧换传输、worker 侧换 I/O 边缘）：
+
+| 通道 | 当前（管道） | Fargate | worker 要改的 I/O 边缘 |
+|---|---|---|---|
+| **job 入口** | 写 stdin → 关 stdin | RunTask **无 stdin**；overrides 有 8192 字符硬上限，含 feature 的 job 塞不下 → core 先 `PutObject` 整 job 到 S3、RunTask 经 env 只传小指针（`JOB_S3_URI`） | `sys.stdin.readline()`/`process.stdin` → 读 env 指针 + `GetObject` 拉 job |
+| **事件出口** | worker 写 `EVENTS_FD` fd，core 读端逐行 `event_from_line` | 无 fd 继承。**【关键坑】事件走专用 fd、不在 stdout（三通道分离，见上），故 awslogs/CloudWatch 抓不到事件**——不能"tail stdout 重建"（要么抓不到、要么把事件挪回 stdout 重新引入被三通道分离修掉的 SDK 噪声污染）。改成 worker `SendMessage` 到 SQS（见下「SQS 作 events-out 传输」） | `emit()` 的 sink 从"写 fd"改成"`SendMessage` 到注入的 SQS 队列" |
+| **停 / 退出码** | `handle.stop`=SIGTERM→grace→SIGKILL；管道 EOF + `proc.wait()` 同步读退出码 80 | `StopTask`（grace 变成 task-def 期常量 `stopTimeout`、Fargate 上限 120s、**不能逐次传**）；退出码经 `DescribeTasks` 读 `containers[].exitCode`（须等 `lastStatus==STOPPED`，STOPPED 前常 null） | **worker 不改**——照样 `exit 80`；只是 adapter 读取从 `proc.wait()` 换成 `DescribeTasks` |
+
+**架构结论（贯穿产物半 [0029](./0029-fargate-engine-artifacts-to-s3.md) 与传输半）**：**worker 的引擎逻辑（派发/投票/短路/产物生成）不按执行环境分；worker 的 I/O 边缘（job 入口、事件 sink、产物落点）本质是传输/落点，应抽象成可注入接口**——subprocess 注入"读 stdin / 写 fd / 报 `file://`"，fargate 注入"读 S3 / `SendMessage` 到 SQS / 报 `s3://`"。这与 core 侧已有的 `Engine` adapter（subprocess/fargate 两种传输实现）对称。**worker 永远是事件的 producer/client，不是 server**——短命、跑完即退的 worker 不该 listen 等长驻 core 来连；换成队列后**两端都不 listen**（见下）。这条兑现 [0016](./0016-execution-architecture-core-lib-run-model.md)「组合根注入」+「worker 引擎逻辑不按执行环境分」。
+
+### SQS 作 events-out 传输（不自建 relay）
+
+远程场景（Fargate worker 与 core/cli/WebUI 跨机器）需要一个 server 端中转事件。**不自建**——`--backend cloud` 已锁定 = AWS（DDB/S3/Fargate/AgentCore 全在用），自建一个"要部署、要做保序/背压/续传/鉴权"的 http-relay 就是**重新发明消息队列，且多半不如 SQS**。故 events-out 走 **SQS FIFO**。
+
+**SQS FIFO 恰好就是「0024-无关的有序帧传输、只读 envelope、payload 不透明」这个抽象的 managed 实现**——分界设计仍成立，只是 server 端由 SQS 充当：
+
+| 归属 | 内容 |
+|---|---|
+| **core（通用、单一事实源）** | 0024 事件模型 + 线格式（不变）+ **SQS 编解码**：worker 侧 `encode(event)→SendMessage`、adapter 侧 `ReceiveMessage→decode→yield Event`。纯逻辑、无 server，不破"core 纯库"；adapter(decode) 与 Python worker(encode) 复用，TS worker 按同一 spec 各写（本 ADR「各语言各写」） |
+| **SQS（managed，非我方代码）** | 队列本身：持久、保序、可见性超时/重投、DLQ、背压。message body=0024 JSON line（**SQS 从不解析 body**）；`MessageGroupId`/去重 id=envelope（SQS 只用它路由+保序，不看 payload 语义） |
+
+- **保序粒度天生匹配**：本仓顺序要求是"**scope 内保序、scope 间并行**"（[0016](./0016-execution-architecture-core-lib-run-model.md)）。SQS FIFO 保序粒度正是 **per-`MessageGroupId`**——令 **`MessageGroupId = scope_id`**，同 scope 事件严格保序、不同 scope 并行消费。FIFO 的 MessageGroupId 天生就是这个抽象，不必自己实现"按 scope 分组保序"。
+- **拓扑：两端都不 listen**。worker `SendMessage`（producer push）、core 侧 adapter `ReceiveMessage` 长轮询（consumer pull）。这消解了自建方案绕不开的"谁 listen"难题（worker 短命不能 listen、cli 本地无公网入口不能 listen）。时间解耦恰配 Fargate run-to-exit：worker 跑完即退，事件留队列等 core 消费。
+- **只管 events-out，不管 job-in**：SQS 是队列非 request/response，job（可能含大 feature）不塞 SQS——**job-in 仍走 S3**（见上表 job 入口行）。传输不对称（job-in→S3、events-out→SQS）是两者方向/性质不同的自然结果，非缺陷。
+- **控制面不走 SQS**：`stop`=StopTask、退出码=DescribeTasks 都是 ECS 控制面，adapter 直连 AWS（worker 的 SIGTERM 处理不变）。将来若真要承载「停」之外的双向控制指令 → 即上「未来演进（控制流）」记的那条 core→worker 通道路标。
+- **环境契约**：容器内 boto3/aws-sdk + SQS 发送权限（ECS task role）；core 侧 SQS 接收权限；队列由 IaC 建。moto 可 mock（与现 DDB/S3 单测策略一致）。
+
+**换传输后受威胁的不变量 / 残留风险**（真做时必须守）：
+
+- **顺序**（本 ADR「core 假定有序、乱序=worker 违约」不变量）：OS 管道天然保序；**SQS FIFO 按 `MessageGroupId=scope_id` 保序**满足"scope 内保序"（scope 间本就该并行）。不用 SQS standard（不保序）。
+- **消息大小**：0024 事件极少超 SQS 单消息 256KB（reportRefs 是指针非内容）；真超了用 SQS extended client（body offload 到 S3，本仓已有 S3）。
+- **延迟**：管道近实时（微秒级 IPC）；SQS 长轮询通常亚秒级（消息一到即返回、不等满），比 CloudWatch tail 轻，但仍非 IPC 级——会略退化 [0030](./0030-realtime-persistence-seam.md) 实时落库时效。
+- **存活判定迁移**（关键）：Fargate 下 **worker 卡死不再靠"事件流沉默"判**（[0026](./0026-schedule-module.md) 心跳机制）——事件经 SQS，队列静默≠worker 死。云端 worker 存活改由 ECS `DescribeTasks` task 状态判。心跳/超时的判据从"事件流"迁到"ECS task 状态"。
+- **grace 不对称**：`handle.stop(grace_period_s)` 现在是运行期传参（cli Nova 10s / schedule 5s）；Fargate `stopTimeout` 是 task-def 期常量、≤120s、不能逐次变——叠加容器盘停即销毁的 artifact 丢失（[0029](./0029-fargate-engine-artifacts-to-s3.md) 头号待解项）。
+
 ## 现在做 / 留口子
 
 - **现在做（v1.0，已落地）**：上述输入/输出 schema、cost 信封（engine 报原生量 time_worked_s/tokens、core 合计）、三态 status/votes 区分 AI 断言；worker 派发逻辑（确定性注册表 > 内建 URL 导航 > 默认 AI，[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)）；两个引擎对称的 `@deterministic` 注册表（命中走精确 handler、不投票）；两个引擎 worker `get_session_id` 取会话血缘、随 `scope_started` 首传、`scope_done` 兜底（机制见上「字段语义·`sessionId`」，[0028](./0028-transient-network-ssl-resilience.md)）；**两个引擎的 reportRefs（kind=产物类型、粒度由挂载层级表达）**——Midscene 取 `agent.reportFile` 报 `kind=report` 于 `scope_done`（scope 级）；Nova 设 `logs_directory` 持久化 trajectory、取 `metadata.trajectory_file_path` 报 `kind=trajectory` **下沉到 `step_done`**（step 级，本 step 的 act 都挂该 step）+ session 汇总报 `kind=summary` 于 `scope_done`，归集成 RunReport（[0027](./0027-runreport-aggregation-index.md)）。
