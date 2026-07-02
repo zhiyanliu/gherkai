@@ -89,7 +89,7 @@
 > **worker 产物持久化 ⊥ store（两条正交轴，别混）**：
 > - **worker 产物落点**：由**组合根注入的 S3 落点配置**驱动（有→worker 上传 S3 报 `s3://`、无→报 `file://`），落点**跟 `--backend cloud` 走、不跟"worker 在哪跑"走**（[0029](./0029-fargate-engine-artifacts-to-s3.md)）——subprocess+cloud 也上传（fargate 的预演）、subprocess+local 报 `file://`。**产物怎么持久化是 per-worker by-design 的事，不归 store**。
 > - **store adapter**（Local/DDB/S3）——只持久化 **core 自己的序列化数据**（RunMeta/RunState/JobResult/RunReport），并**不透明搬运** worker 报的 `ref`（`ResourceUri`，[0027](./0027-runreport-aggregation-index.md)）。store **不上传 worker 产物**。
-> - 二者是**矩阵不是绑定**：如 Local store + Fargate worker 合法（core 数据落本地、worker 产物在 S3）。`ReportStore.write(materialize=...)` 决定「要不要把 worker 产物拉进 report 自包含」——与 worker 把产物放哪正交（materialize 语义见 [0027](./0027-runreport-aggregation-index.md)）。
+> - 二者是**矩阵不是绑定**：如 Local store + Fargate worker 合法（core 数据落本地、worker 产物在 S3）。报告的自包含/可移植由 `index.html` 的 `href` 相对化达成（不拷贝产物；产物拷贝式 materialize 已否决，见 [0027](./0027-runreport-aggregation-index.md)「被拒方案」）——与 worker 把产物放哪正交。
 
 **adapters 按 port 分子目录的目标布局**（多后端时不按后端混放）——下为**目标态**，当前实装更扁平（见图后说明）：
 

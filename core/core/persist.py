@@ -106,7 +106,7 @@ class RunPersistence:
                 JobState(scope_id=jr.scope_id, status=jr.status, session_id=jr.session_id),
             )
 
-    def finalize(self, result: RunResult, *, ended_at: str, materialize: bool = False) -> str | None:
+    def finalize(self, result: RunResult, *, ended_at: str) -> str | None:
         """run 结束（schedule 返回后）：commit point。
 
         写总 status + ended_at（finalize_run = commit point，它一落 run 即已提交、判定就绪）；
@@ -122,9 +122,7 @@ class RunPersistence:
             if self._report_store is None:
                 return None
             try:
-                return self._report_store.write(
-                    self._run_id, result, created_at=ended_at, materialize=materialize
-                )
+                return self._report_store.write(self._run_id, result, created_at=ended_at)
             except Exception:
                 # 派生视图写失败不击穿已 commit 的 run（判定真值在 ResultStore）；返回 None，报告可从 RunResult 重建。
                 # 不留痕：曾存 traceback 到 _report_error 供"可选读取"，但生产端（cli）从不消费——删悬空字段（代码 review）。

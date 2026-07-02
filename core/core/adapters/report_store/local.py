@@ -6,8 +6,10 @@
   可删可重建、永不作判定源，ADR 0027/0016）。
 - index.html = 最小人可导航入口：每条报告产物一行链接，点开看**原样的**原生产物。摘要直接用内存 RunResult。
 
-不透明搬运（ADR 0027）：对 ReportRef 只「算一个链接（+可选按字节拷贝）」，绝不解析/重写/抽内容、
-不按 kind 分支。materialize=False（默认）不拷贝、链接直指 ref；=True 拷进 artifacts/ 求自包含。
+不透明搬运（ADR 0027）：对 ReportRef 只「算一个链接」，绝不解析/重写/抽内容、不按 kind 分支。
+href 是 core 自算的导航链接（不受不透明铁律约束，铁律圈的是 ref）：local 把落在 run 树内的
+file:// 产物相对化（目录可整体搬走、链接不断），否则 href==ref；ref 永远原样保留、不改写。
+（产物拷贝式 materialize 已否决——见 ADR 0027「被拒方案」；自包含由 href 相对化零成本达成。）
 
 无重型依赖：index.html 纯 Python 字符串拼装 + html.escape，单文件、零外链 JS/CSS
 （对齐 core 薄编排层定位）。
@@ -16,7 +18,6 @@ from __future__ import annotations
 
 import html
 import json
-import shutil
 from pathlib import Path
 from typing import Callable
 from urllib.parse import urlparse
@@ -27,31 +28,27 @@ from core.model import ReportRef, ResourceUri, RunResult
 SCHEMA_VERSION = 1
 
 
-def collect_report_index(result: RunResult, *, make_href: Callable[[ReportRef, int], str]) -> list[dict]:
+def collect_report_index(result: RunResult, *, make_href: Callable[[ReportRef], str]) -> list[dict]:
     """遍历 result 树，把每个 ReportRef 投影成一条扁平 index 项（三级，ADR 0027）——**local/s3 共享的单一真理源**。
 
     粒度由 scenario_id/step_index 是否为 None 表达：都 None=scope 级；仅 step_index None=scenario 级；
     两者都非 None=step 级（Nova trajectory 下沉，同 scenario 多 trajectory 靠 step_index 区分）。
     遍历顺序（每 job：scope 级 report_refs → 各 scenario 级 → 各 step 级）两 adapter 必须一致，故抽此共享函数。
 
-    href 差异由 make_href(rr, seq) 回调注入：Local materialize 时可拷贝转相对路径、否则 ==ref；S3 恒 ==ref。
-    seq 是单调序号（materialize 给 artifact 目标名加前缀去碰撞：不同源目录同 basename 不互相覆盖）。
+    href（导航链接）由 make_href(rr) 回调注入：Local 把 run 树内 file:// 产物相对化、否则 ==ref；S3 恒 ==ref。
+    **注意**：投影只产 href（导航用），不产 ref——原始 ref 的权威落盘处是 jobs/*.json（ResultStore 判定真值）
+    与内存 RunResult，manifest（派生视图）不留 ref（无人读 + href 相对后 ref 会成绝对泄漏，ADR 0027）。
     """
     entries: list[dict] = []
-    seq = 0
 
     def _entry(scope_id: str, scenario_id: str | None, step_index: int | None, engine: str, rr: ReportRef) -> dict:
-        nonlocal seq
-        href = make_href(rr, seq)
-        seq += 1
         return {
             "scope_id": scope_id,
             "scenario_id": scenario_id,
             "step_index": step_index,  # None=scope/scenario 级；非 None=step 级（同 scenario 多 trajectory 区分）
             "engine": engine,
             "kind": rr.kind,
-            "ref": rr.ref,            # 原始 ref（不透明，原样保留）
-            "href": href,             # 导航用链接（materialize 时可为相对路径，否则 == ref）
+            "href": make_href(rr),    # 导航用链接（Local 相对化 / S3 恒 ==ref）；原始 ref 不进 manifest
             "label": rr.label,
         }
 
@@ -73,7 +70,7 @@ class LocalReportStore:
     def __init__(self, report_root: str | Path) -> None:
         self._root = Path(report_root)
 
-    def write(self, run_id: str, result: RunResult, *, created_at: str = "", materialize: bool = False) -> ResourceUri:
+    def write(self, run_id: str, result: RunResult, *, created_at: str = "") -> ResourceUri:
         """归集出 <root>/<run_id>/{manifest.json, index.html}，返回 index.html 的 file:// ResourceUri。
 
         返回 file:// URI（而非裸 Path）以对齐 ReportStore 契约：与未来 S3 adapter 的 s3:// 返回同形（ADR 0027）。
@@ -83,8 +80,8 @@ class LocalReportStore:
         run_dir.mkdir(parents=True, exist_ok=True)
 
         # 扁平投影 report_index：从 result 树一次遍历（result 已含全部 report_refs，不逐条 append）。
-        # materialize=True 时顺带把本地产物按字节拷进 artifacts/，并把 ref 改成相对链接。
-        index_entries = self._collect(result, run_dir, materialize)
+        # href 把 run 树内的 file:// 产物相对化（目录可整体搬走、链接不断，ADR 0027）；不拷贝产物。
+        index_entries = self._collect(result, run_dir)
 
         # manifest = **纯派生导航视图**（ADR 0027）：不内嵌 result 真值副本——靠 run_id 软引用那次 run。
         # 判定真值由 ResultStore（jobs/*.json / 未来对象存储）持有，运行态/身份由 RunStore（run_meta.json
@@ -108,19 +105,35 @@ class LocalReportStore:
     def preflight(self) -> None:
         """探活 no-op（ADR 0030 决定七）：本地文件后端无「桶不存在」问题，目录随写随建。"""
 
-    def _collect(self, result: RunResult, run_dir: Path, materialize: bool) -> list[dict]:
+    def _collect(self, result: RunResult, run_dir: Path) -> list[dict]:
         """遍历 result 树投影 report_index（复用共享 collect_report_index）。
 
-        href 差异靠 make_href 回调注入：materialize=True 且 ref 是存在的本地文件 → 拷进 artifacts/ 返相对路径；
-        否则 href==ref。（S3ReportStore 传自己的 make_href：href 恒==ref，见 s3.py。）
+        make_href：把落在 run 树内的本地产物相对化（→ index.html 所在 run_dir 的相对路径，目录可整体
+        搬走、链接不断）；远端（s3/http…）或落在树外的产物回落 ==ref（绝对，该条不可移植）。ref 全程不改写
+        （不透明铁律圈的是 ref、不是 href，ADR 0027）。（S3ReportStore 传自己的 make_href：href 恒==ref，见 s3.py。）
+
+        run_dir.resolve() 循环外算一次（run 期间不变）——避免逐 ref 重复同一系统调用（review #5）。
         """
-        def make_href(rr: ReportRef, seq: int) -> str:
-            if materialize:
-                local = _local_path(rr.ref)
-                if local is not None and local.exists():
-                    return _materialize(local, run_dir, seq)
-            return rr.ref
-        return collect_report_index(result, make_href=make_href)
+        resolved_run_dir = run_dir.resolve()
+        return collect_report_index(result, make_href=lambda rr: _relative_href(rr.ref, resolved_run_dir))
+
+
+def _relative_href(ref: str, resolved_run_dir: Path) -> str:
+    """把 run 树内的本地产物 ref 转成相对 run_dir 的 href；否则原样返回 ref（ADR 0027 href 相对化）。
+
+    只对本地文件（file:// 或裸本地路径，见 _local_path）相对化，远端 scheme（s3/http…）原样——
+    **只按 scheme 分支、绝不按 kind 分支**。产物路径 resolve() 后与已解析的 run_dir 算相对：防 macOS
+    /tmp↔/private/tmp 等 symlink 造假 ValueError → 误回落绝对（resolved_run_dir 已由调用方 resolve）。
+    产物落在 run_dir 树外（worker 没吃到落点环境变量、落了 SDK 临时目录）→ relative_to 抛错 → 回落 ref（绝对，不可移植）。
+    """
+    local = _local_path(ref)
+    if local is None:
+        return ref  # 非本地文件（s3/http…）：无相对概念，原样
+    try:
+        rel = local.resolve().relative_to(resolved_run_dir)
+    except (ValueError, OSError):
+        return ref  # 落在 run 树外 / 解析失败：回落绝对（该条不可移植，已知取舍）
+    return rel.as_posix()  # 相对 run_dir（index.html 所在目录）；POSIX 分隔符，URL/跨平台友好
 
 
 def _local_path(ref: str) -> Path | None:
@@ -128,33 +141,16 @@ def _local_path(ref: str) -> Path | None:
 
     用 url2pathname 正确还原 file:// URI：解 percent-encoding（如 %20→空格——Nova trajectory
     文件名含中文/空格会被编码），并把 netloc(host) 并回路径。带非 localhost host 的（远端/UNC）→ None。
+    裸路径（无 scheme）当本地文件——生产不会出现（ADR 0024 保证 worker 报的 ref 恒带 scheme），是防御性分支。
     """
     parsed = urlparse(ref)
-    if parsed.scheme == "":  # 裸路径（无 scheme），原样
+    if parsed.scheme == "":  # 裸路径（无 scheme）：当本地文件（防御性，生产 ref 恒带 scheme）
         return Path(ref)
     if parsed.scheme == "file":
         if parsed.netloc not in ("", "localhost"):
-            return None  # file://host/... 远端/UNC，不当本地拷
+            return None  # file://host/... 远端/UNC，不当本地文件
         return Path(url2pathname(parsed.path))  # 解 percent-encoding
-    return None  # http/https/s3… 远端，不拷贝
-
-
-def _materialize(src: Path, run_dir: Path, seq: int) -> str:
-    """把本地产物按字节拷进 <run_dir>/artifacts/，返回相对 run_dir 的链接（不解析内容）。
-
-    目标名加 seq 前缀去碰撞：一次 run 内不同源目录的同 basename 产物不会互相覆盖（数据丢失）。
-    """
-    artifacts = run_dir / "artifacts"
-    artifacts.mkdir(exist_ok=True)
-    name = f"{seq:03d}_{src.name}"
-    dest = artifacts / name
-    if src.is_dir():
-        if dest.exists():
-            shutil.rmtree(dest)
-        shutil.copytree(src, dest)
-    else:
-        shutil.copy2(src, dest)
-    return f"artifacts/{name}"
+    return None  # http/https/s3… 远端
 
 
 # ---- index.html 渲染（纯字符串，无模板引擎；按 kind 不分支，只回显）----

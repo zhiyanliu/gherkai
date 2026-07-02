@@ -64,10 +64,6 @@ def _build_parser() -> argparse.ArgumentParser:
         "--no-report", action="store_true",
         help="跳过报告归集（CI 只看退出码/JSON、或调试时不想落盘的逃生舱）",
     )
-    run.add_argument(
-        "--materialize", action="store_true",
-        help="归集时把本地原生产物按字节拷进 <run_id>/artifacts/（自包含、可搬运/上 S3；默认只链接不拷）",
-    )
     # backend 选择（ADR 0016「cli backend 选择」/ 0030 决定七）：local=文件落盘（默认）；cloud=DDB/S3。
     # 仅 run 加（plan 纯本地不落库、不连 AWS，不加）。cloud 一次换齐三层（RunStore→DDB、Result/Report→S3）。
     run.add_argument(
@@ -322,7 +318,7 @@ def _cmd_run(args, repo: Path) -> int:
     #    artifacts 落点指针由 compose 的 make_artifacts 按 backend URI 化组装（local file:// / cloud s3://+ddb://）。
     artifacts: dict[str, str] = {}
     if persistence:
-        index = persistence.finalize(result, ended_at=compose.now_iso(), materialize=args.materialize)
+        index = persistence.finalize(result, ended_at=compose.now_iso())
         artifacts = make_artifacts(run_id, index)  # report_index=None（report 写失败被隔离）时该键省略
 
     # 7) 核心产出 → stdout（--json：单一 JSON 文档，把产物落点折进同一对象保可解析；否则人看文本汇总）。

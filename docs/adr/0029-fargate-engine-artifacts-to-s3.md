@@ -31,7 +31,7 @@ Fargate 化牵动两条**正交**的边：① **产物落点**（trajectory/repo
 
 **为何 worker 上传、而非 core 去拉**：① "谁产出、谁知落点、谁上传"——worker 在容器内、最知道文件在哪/何时写完（与"产物落点自报"同源，[0028](./0028-transient-network-ssl-resilience.md) 留口子节）；② 让 core 去容器拉文件再传 S3，会把 ECS 卷/容器生命周期/S3 client 知识泄进核心，违背窄腰（[0016](./0016-execution-architecture-core-lib-run-model.md)）；③ 兑现 [0027](./0027-runreport-aggregation-index.md)「新引擎/新落点零改 core」契约——`s3://` 正是 `ResourceUri` 当初留的形态。
 
-**core 不改的代码级依据**（调查已逐行核实）：`ReportRef.ref`/`ReportStore.write` 为 `ResourceUri`（`core/model.py` NewType）；`LocalReportStore._local_path` 对非 `file://` scheme 返回 `None` → `s3://` ref 在归集时走 `href==ref` 原样保留，连 `materialize=True` 也不去碰它（`_local_path` None → 不拷）；`index.html` 渲染只 `escape(href)` 拼 `<a>`，不 stat/open。
+**core 不改的代码级依据**（调查已逐行核实）：`ReportRef.ref`/`ReportStore.write` 为 `ResourceUri`（`core/model.py` NewType）；`make_href` 对非 `file://` scheme（含 `s3://`）恒 `href==ref` 原样保留（只 `file://` 且落 run 树内才相对化，[0027](./0027-runreport-aggregation-index.md)「href 相对化」）；`index.html` 渲染只 `escape(href)` 拼 `<a>`，不 stat/open。
 
 ## 两引擎不对称：统一在 core/协议层，分头在 worker 上传实现层——但**都是"写本地→传→删本地"，无一方直写 S3**
 
@@ -82,14 +82,12 @@ SDK 调查证实两引擎产物形态/上传能力不对称，"上传那一小�
 
 - **上传时机**（Fargate 头号项，第一期不涉及）：act/step 粒度即时上传 vs 结束批量；与 grace 预算、上传幂等/续传一起定。需真容器发 SIGTERM 实测。
 - **S3 key 命名 ↔ `ResourceUri` `s3://` 形态**（第一期即可坐实）：`S3Writer` 默认 key=`<prefix><session_id>/<相对路径>`，与本仓 `reports/<run_id>/scope/scenario` 归集语义不同——需定"prefix 怎么编码 run_id/scope_id"+"worker 报的 `s3://` ref 与实际上传 key 逐字一致"（否则 index 链接断）。**这条正是第一期要验的主目标。**
-- **`materialize` 在 `S3ReportStore` 下的目标语义（已定，实现分两步）**：目标**对标 Local**——Local 的 `materialize=True` 把产物收拢进 `reports/<run_id>/artifacts/`、链接转相对求自包含；S3 版对称地把产物收拢进 **`s3://bucket/<prefix>/<run_id>/artifacts/`**、链接转相对（同一概念换存储介质，非新范式）。产物**原位**可能 `file://`（subprocess+local worker 本地）或 `s3://`（subprocess+cloud / Fargate worker 已传，本 ADR 路径），故 S3 materialize 要处理两种源：`file://` 源 → upload 到 report 前缀；`s3://` 源 → `copy_object` 到 report 前缀（「materialize 语义跨 worker 模式/backend」的体现）。
-  - **v1.1 第一版 `S3ReportStore`：`materialize` 当 no-op**（收到 `True` 也忽略、**不报错**——cli 会透传 `--materialize`，报错会炸）。第一版只把核心事做对：**把 RunReport 自身（manifest.json + index.html）写上 S3、返回 `s3://…/index.html` 的 `ResourceUri`**，`href==ref`。产物收拢到 S3 `artifacts/` 的自包含实现留后续（目标已定如上，不再纠结）。
-  - 交付的是「链接可能不完全可点」的 S3 RunReport（`file://` 链接跨机器断、`s3://` 链接待 presign）——**已知、接受**的第一版取舍。确认不反向逼 core 改 `_collect`/`_entry`（S3ReportStore 复用现有 `_render_index_html`、只换落点与返回 scheme）。
-- **S3 上传错误的分类**：`S3Writer` 构造期预检失败 / 上传失败，算 `network_error` 还是 `engine_error`、是否进 worker 建连重试域（[0028](./0028-transient-network-ssl-resilience.md)）——待定。
+- **~~`materialize` 在 `S3ReportStore` 下的目标语义~~（已废——materialize 整体移除，[0027](./0027-runreport-aggregation-index.md)）**：曾计划 S3 版 materialize 把产物 `copy_object` 收拢进 `s3://…/<run_id>/artifacts/` 求自包含（对标 Local 的 `artifacts/` 拷贝）。**现已废弃**：① cloud 报告决定用 `s3://` 绝对链接（不 presign、`href==ref`）——`s3://` 全局可寻址、拷/分享不断，`copy_object` 进 `artifacts/` 零收益；② materialize 概念整体移除（[0027](./0027-runreport-aggregation-index.md)「被拒方案」）。故 `S3ReportStore` 只把 RunReport 自身（manifest+index）写 S3、`href==ref`（`s3://`），不做任何产物拷贝——这从「第一版 no-op 的临时取舍」转正为「终态设计」。
+- **S3 上传错误的分类**：worker 上传（`S3Writer`/`PutObject`）构造期预检失败 / 上传失败，算 `network_error` 还是 `engine_error`、是否进 worker 建连重试域（[0028](./0028-transient-network-ssl-resilience.md)）——待定（第一期实现时定）。
 - **botocore/aws-sdk 默认 retry 与 grace 冲突**：上传走 SDK 默认 retry，退化网络下可能吃光 grace 被 SIGKILL 截断（[0028](./0028-transient-network-ssl-resilience.md) 建连段已为此手写退避不用 botocore retry）；上传路径是否也要手写超时/退避预算，需实测。
 - **AgentCore 后端下产物真实落点（已由真跑证实）**：源码看 `logs_directory`/`reportFile` 都在 worker 进程本地盘（SDK 进程本地 `open`/`appendFile`），截图数据虽经 CDP 从云浏览器回传，但**文件确落 worker 本地盘**——`--backend cloud` 真跑（subprocess worker）产物落在本地 `cli/reports/<run_id>/{nova-trajectories,midscene-run}/`，report+run 元信息才上 S3/DDB。故"worker 上传其本地盘文件"前提成立（Fargate 下即容器盘）。
 
 ## 重议
 
-- 若 `S3ReportStore`（materialize/归档语义）需求逼出更多结构 → 它是新增 adapter，按 [0027](./0027-runreport-aggregation-index.md) 预期实现，不改 core 逻辑。
+- 若 `S3ReportStore` 需求逼出更多结构 → 它是新增 adapter，按 [0027](./0027-runreport-aggregation-index.md) 预期实现，不改 core 逻辑。
 - 若中断丢失即时上传仍挡不住高频丢产物 → 另议（如云浏览器侧落盘 / 边录边传的流式 sink）。

@@ -10,8 +10,8 @@
 
 **RunReport 不试图解析/重渲染这些产物**——那等于给每个引擎写一个 HTML 解析器，既脆又把 core 锁死到具体引擎。RunReport 是一份**跨引擎、跨产物的统一目录 + 导航入口**：
 
-- **`manifest.json`** —— 机器可读（CI / WebUI 消费）：一次 run 的判定/时长/成本（复用 `RunResult`）+ 一份扁平的报告产物清单（每条指向哪个 scope·scenario、哪个引擎、什么 kind、产物在哪）。
-- **`index.html`** —— 人可导航：一个最小的单文件入口，每个产物一行链接，点开看**原样的**原生产物。
+- **`manifest.json`** —— 机器可读（CI / WebUI 消费）：**薄信封**（schema_version/run_id/created_at）+ 一份扁平的报告产物清单（report_index，每条指向哪个 scope·scenario、哪个引擎、什么 kind、产物在哪）。**不内嵌判定/时长/成本**——那是 `RunResult` 真值、靠 `run_id` 软引用到 `ResultStore` 取（详见下「manifest.json 形态」）。
+- **`index.html`** —— 人可导航：一个最小的单文件入口，判定明细树（判定/时长/成本从内存 `RunResult` 渲染）+ 每个产物一行链接，点开看**原样的**原生产物。
 
 原生产物保持原样（各引擎自己最懂怎么呈现），RunReport 只**索引/链接**它们。
 
@@ -51,7 +51,7 @@ RunReport 要按引擎标注每条产物。`JobResult` 须能就地拿到 `engin
 
 ```python
 class ReportStore(Protocol):
-    def write(self, run_id: str, result: RunResult, *, created_at: str = "", materialize: bool = False) -> ResourceUri:
+    def write(self, run_id: str, result: RunResult, *, created_at: str = "") -> ResourceUri:
         """从 RunResult 归集出 <report_root>/<run_id>/{manifest.json, index.html}，返回 index.html 的 ResourceUri。
 
         读 result 的 report_refs + 各级 status/时长/成本 + step 级 votes/error_type/shortcircuited，
@@ -60,43 +60,38 @@ class ReportStore(Protocol):
         """
 ```
 
+（无 `materialize` 参数——产物拷贝式的 materialize 已否决，见下「被拒方案」。）
+
 - **返回 `ResourceUri` 而非 `Path`**（封版前收口）：`LocalReportStore` 回 `file://…/index.html`，`S3ReportStore` 回 `s3://…/index.html`（v1.1 已建，ADR 0030 决定六）——**同一签名容两种落点**，否则 S3 adapter 被迫返回 `Path` 包 `s3://`（`Path` 会把 `s3://b/x` 折成 `s3:/b/x`，错）。`ResourceUri = NewType("ResourceUri", str)`（定义在 `core/model.py`）：把这个**本就存在于 `ReportRef.ref` 注释里**的约定提升成命名类型，统一「`ReportRef.ref` 与 `write` 返回值都是带 scheme 的资源指针」。比裸 `str` 多一层意图、又零运行时成本/零依赖（运行时即 `str`）。消费端（cli/WebUI）只当 URI 用、不 stat/open——cli 现把它原样放进 `artifacts.report_index` 并打成可点击的 `file://` 链接。S3ReportStore 落地时零改本签名，验证了这层收口。
   - 实现注意：`LocalReportStore` 内 `index_path.resolve().as_uri()`——`as_uri()` 要求绝对路径，而 cli 默认 `--report-dir` 是相对的（`reports`），不 `resolve()` 会抛 `ValueError`。
-- `materialize=False`（默认）：不拷贝产物，`index.html` 的链接直接指向 `ref`（本地够用；v1.0 定位本地 smoke，[0015](./0015-v1-positioning-smoke-not-regression.md)）。
-- `materialize=True`（opt-in）：把产物**拉进 report 让其自包含**——拷进 `<run_id>/artifacts/`、链接转相对路径 → 目录可整体搬走/发同事/CI 归档。
-  - **默认不拷**是刻意的：本地跑时产物就在本机、手动查目录够用（[0016](./0016-execution-architecture-core-lib-run-model.md)「先散着」）。每 run 拷 N 个 MB 级 html + Nova 多个 trajectory 是纯磁盘放大、零收益——拷贝的价值只在搬运/归档时兑现，故 opt-in。
+- **`index.html` 链接（`href`）指向产物原位**：不拷贝、不搬运产物。`href` 是 core 自己生成的**导航链接**（`index.html` 的 `<a href>`），local 相对化、cloud 恒等于 `ref`（见下「href 相对化」）。
 
-> **`ref` 由 worker 定、`materialize` 与 worker 产物放哪正交（关键边界，别混）**：
-> - `ReportRef.ref` 指向**哪**是 **worker** 决定的——subprocess worker 产物落本地、报 `file://`；未来 Fargate worker **自己上传 S3**、报 `s3://`（[0029](./0029-fargate-engine-artifacts-to-s3.md)）。**ReportStore 不上传 worker 产物、不碰其持久化**（那是 per-worker by-design 的事，[0016](./0016-execution-architecture-core-lib-run-model.md)「worker⊥store」），只**不透明搬运**这个 ref。
-> - `materialize` 是**正交的另一件事**：「要不要把产物拉进 report 让其自包含」。它随 ref 的 scheme 决定怎么拉：
->   - `file://` ref + materialize → **按字节拷**本地文件进 `artifacts/`（**当前唯一实装**）。
->   - `s3://` ref + materialize → **从 S3 下载**到 core 本地 `artifacts/`、ref 重指向本地（**尚未实现的扩展**——当前 materialize **只拷 `file://`**，`s3://`/`https://` ref 一律不动、报告直接引原 URI，见 `test_remote_ref_not_copied_even_when_materialize`）。
->   - materialize=False → 报告直接引 worker 报的 ref（`file://` 或 `s3://`），不拉。
-> - 故 materialize **不会被「产物归位到 run 目录」抽空**：归位只改 subprocess 模式下本地产物落哪；materialize 管的是「产物是否进 report 自包含」，跨 worker 模式独立存在。
-> - 以上是 **`LocalReportStore`** 的 materialize 语义（report 存本地）。**`S3ReportStore`** 的 materialize 目标语义（产物收拢进 `s3://…/<run_id>/artifacts/`、对称 Local）+ v1.1 第一版当 no-op 的取舍，见 [0029](./0029-fargate-engine-artifacts-to-s3.md)。
-- `LocalReportStore` → `S3ReportStore`（v1.1 已建）只换「manifest+index 这些 **core 派生数据**落哪 / 返回的 URI scheme」，core 不动、且复用同一份 `_render_index_html`（单一渲染真理源）——落地验证了这条。（注意区分：`S3ReportStore` 是把 **RunReport 自身**（manifest/index.html）写到 S3，与「worker 把自己的产物上传 S3」是两回事。）
+> **`ref` 由 worker 定，`href` 由 core 算——铁律圈的是 `ref`，不是 `href`（关键边界，别混）**：
+> - `ReportRef.ref` 指向**哪**是 **worker** 决定的——subprocess+local worker 产物落本地、报 `file://`；subprocess+cloud / Fargate worker **自己上传 S3**、报 `s3://`（[0029](./0029-fargate-engine-artifacts-to-s3.md)，落点由组合根注入的 S3 配置驱动、跟 `--backend cloud` 走）。**ReportStore 不上传 worker 产物、不碰其持久化**（per-worker by-design，[0016](./0016-execution-architecture-core-lib-run-model.md)「worker⊥store」），只**不透明搬运**这个 `ref`（不 stat/fetch/open/**改写**——包括绝不把 `ref` 从绝对改成相对）。
+> - `href` 是**正交的另一件事、且不受铁律约束**：它是 core 为 `index.html` 导航自算的链接，本就允许 core 生成/改写（「算一个链接」是 ReportStore 的本分）。local 把 `href` 相对化（指向产物在 run 树内原位，如 `nova-trajectories/<s>/act_0.html`）→ 报告目录整拷到别的机器链接不断；cloud 下 `s3://` 全局可寻址、无相对必要，`href==ref`。
+> - `LocalReportStore` → `S3ReportStore`（v1.1 已建）只换「manifest+index 这些 **core 派生数据**落哪 / 返回的 URI scheme / `href` 相对化策略」，core 不动、且复用同一份 `_render_index_html` 与 `collect_report_index`（单一渲染真理源）。（注意区分：`S3ReportStore` 是把 **RunReport 自身**（manifest/index.html）写到 S3，与「worker 把自己的产物上传 S3」是两回事。）
+
 - **`write` 失败被隔离、不击穿已 commit 的 run**（实时写接缝，[0030](./0030-realtime-persistence-seam.md)）：RunReport 是**纯派生只读视图、可重建、永不作判定源**——故 `RunPersistence.finalize` 在 commit point（`finalize_run`，判定真值已落 ResultStore）之后才调 `ReportStore.write`，且把 write 的异常隔离（吞掉+留痕+返回 None），不让一个「可重建的报告」写失败把整个 run 拖成裸 traceback 退出、CI 拿不到判定输出。
 
-**「生成 RunReport」与「materialize 产物」是两个正交开关，默认值不同（刻意）**：
-- **生成 RunReport = run 的应得产物，cli 默认开**。每次 run 都归集到 `<report-dir>/<run_id>/`
-  （`--report-dir` 配落点，默认 `reports/`）；`--no-report` 是逃生舱（CI 只看退出码/JSON、或调试不想落盘）。
-  理由：manifest+index 仅几 KB（不拷产物时），却给出「这次 run 结果在哪、各引擎报告在哪」的统一入口——
-  一个跑完不知结果在哪的工具是不完整的，不该要用户记得加 flag。
-- **materialize = 把产物拷成自包含目录，opt-in（默认关）**。它代价大（每 run 拷 MB 级 html + Nova
-  多 trajectory），价值只在搬运/上云/发同事时兑现，故按需开。两者独立：默认「生成 index 但不拷产物」
-  （index 链接指向产物原位）。
+> **被拒方案：不做「materialize」式的产物拷贝**（别重新进坑）。曾有过一个 opt-in「把产物按字节拷进 `<run_id>/artifacts/` 求自包含」的开关，已否决——报告自包含由 `href` 相对化零成本达成（产物本就在 run 树内），而拷贝是「拷一份已在树里的东西」的纯磁盘放大；云端用 `s3://` 绝对链接（全局可寻址、拷/分享不断），拷贝亦零收益。**取舍**：报告「半可移植」——`index.html`/`manifest.json` 相对 `href` 可整目录搬走，`jobs/*.json` 的 `ref` 保持绝对（判定真值/provenance）拷机器后其产物链接仍断；跨机器分享用 `index.html` 或 `--backend cloud`（全在 S3）即可，不为此付全量拷贝代价。
 
-**默认（不 materialize）两个引擎产物都归位到 run 目录内——落点对称**：cli 经环境变量把两个 SDK 的产物
+**「生成 RunReport」cli 默认开**：每次 run 都归集到 `<report-dir>/<run_id>/`（`--report-dir` 配落点，默认 `reports/`）；`--no-report` 是逃生舱（CI 只看退出码/JSON、或调试不想落盘）。理由：manifest+index 仅几 KB，却给出「这次 run 结果在哪、各引擎报告在哪」的统一入口——一个跑完不知结果在哪的工具是不完整的，不该要用户记得加 flag。
+
+**两个引擎产物都归位到 run 目录内——落点对称**：cli 经环境变量把两个 SDK 的产物
 落点都设到 `reports/<run_id>/` 下（[0016](./0016-execution-architecture-core-lib-run-model.md) 组合根注入）：
 - **Nova**：`NOVA_LOGS_DIR` → SDK `logs_directory`，trajectory 落 `reports/<run_id>/nova-trajectories/`。
 - **Midscene**：`MIDSCENE_RUN_DIR` → SDK run 根目录，`report.html` 落 `reports/<run_id>/midscene-run/report/`。
   （SDK 用 `path.resolve(cwd, MIDSCENE_RUN_DIR)`，cli 传**绝对路径**避 worker cwd 歧义。）
-- 故默认 RunReport 的产物**都在 `reports/<run_id>/` 树内**，index 的 `file://` 绝对链接本机可点、目录整体
-  在本机可查。**唯一残留**：`file://` 是绝对路径，把 `reports/<run_id>/` 拷到**另一台机器**后链接会断——
-  此时才需 `--materialize`（收进 `artifacts/`、转相对链接）。故 materialize 从「统一落点」降级为「跨机器/归档
-  自包含」这个更窄的 opt-in（本地够用场景不付每 run 拷 MB 的代价，[0015](./0015-v1-positioning-smoke-not-regression.md)）。
+- 故 RunReport 的产物**都在 `reports/<run_id>/` 树内**。**正因产物就在树内**，`index.html` 的 `href` 相对化（相对 run 目录）即让整个 `reports/<run_id>/` 目录可原样搬走、链接不断——这正是移除 materialize 的底气（无需拷贝即自包含）。
 - **归位的另一收益**：产物不再落相对 worker cwd 的固定 `midscene_run/`（每 run 覆盖、与 run 无关），
   而是 run 专属目录——为 v1.1 云端归集/上传（[0016](./0016-execution-architecture-core-lib-run-model.md) worker⊥store）铺路，两引擎落点对称、处理一致。
+
+### href 相对化（local 相对 / cloud 恒等 ref）
+
+`collect_report_index` 经 `make_href(rr)` 回调算每条 `href`（`ref` 永远原样保留、不改写）：
+- **local**：`ref` 是本地文件（`file://` 或裸本地路径）且解析出的路径落在 run 目录树内 → `href` = 相对 run 目录的路径（`resolve()` 后再 `relative_to`，防 macOS `/tmp`↔`/private/tmp` symlink 造假 `ValueError`）；否则（远端 scheme `s3`/`http` / 落在树外，如 worker 没吃到落点环境变量而落 SDK 临时目录）→ `href` 回落 = `ref`（绝对，该条不可移植，有测试覆盖 + 文档注明「非所有 local href 都相对」）。
+- **cloud（S3）**：`href` 恒 = `ref`（`s3://` 全局可寻址、无相对必要）。
+- **只按 scheme 分支（`file://` 相对、其余 identity），绝不按 `kind` 分支**——后者才是铁律点名禁止的。为算相对 href 而 `urlparse` 解析 `ref` 字符串**不越铁律**：铁律「禁止解析」的宾语是产物**内容**（HTML/trajectory 字节），非 `ref` 指针串；「算一个链接」本就要读 `ref`。
 
 **职责边界（三 port 正交，[0016](./0016-execution-architecture-core-lib-run-model.md)）**：`RunStore`=控制面（definition `RunMeta` + 运行态 `RunState`：status/血缘）、`ResultStore`=数据面（判定真值唯一权威）、`ReportStore`=**纯派生只读导航视图**（可从 `RunResult` 完全重建、永不作 CI 判定源）。`ResultStore` 旧 docstring「RunReport 归集靠它」一句删除——归集职责移交 `ReportStore`。
 
@@ -111,13 +106,13 @@ class ReportStore(Protocol):
   "created_at": "...",           // 组合根生成的时间戳（字符串，由调用方传入）
   "report_index": [              // 扁平投影，便于 CI/WebUI 直接遍历
     { "scope_id": "...", "scenario_id": "..."|null, "step_index": N|null, "engine": "...", "kind": "...",
-      "ref": "...", "href": "...", "label": "..." }
+      "href": "...", "label": "..." }   // 只有 href（导航链接）——原始 ref 不进 manifest，见下
   ]
 }
 ```
 
 - `report_index` 从内存 `RunResult` 树一次投影（含全部 report_refs 三级，**不走逐条 append**）；**粒度由 `scenario_id`/`step_index` 是否为 null 表达**：`scenario_id=null` = scope 级；`scenario_id` 非空且 `step_index=null` = scenario 级；两者都非空 = step 级（同 scenario 多 trajectory 靠 step_index 区分）。
-- 每条含 `ref`（原始不透明指针，原样保留）与 `href`（index.html 实际导航用的链接）：`materialize=False` 时 `href == ref`；`materialize=True` 时 `href` 是拷进 `artifacts/` 的相对路径（`ref` 仍留原值）。
+- **每条只含 `href`（导航链接），不含 `ref`**（曾有 `ref` 字段，随 materialize 一并移除）。理由：① manifest 是**纯派生导航视图**，`href` 承担全部导航语义、无人读 `ref`（index.html 渲染只用 `href`；全仓无生产代码回读 manifest.json）；② 若保留 `ref`，`href` 相对化后 `ref` 因铁律必须留绝对（不能相对化它）→ 变成一条**无人读却泄漏机器路径的绝对 `file://`**。删 `ref` 既消冗余又消泄漏。**原始不透明指针 `ref` 的权威落盘处收敛到 `jobs/*.json`（ResultStore 判定真值）+ 内存 `RunResult`**——未来 WebUI/CI 要原始指针应去 ResultStore 取（判定真值），不向派生 report 视图要，这反而强化了三层分层。（这是 manifest schema 契约变更，本仓无 in-repo 消费者故低风险，仍记为契约变更防漂移。）
 - index.html 的 run 摘要 + 整棵判定明细树（job→scenario→step，各级上色 + step 级 votes/error_type/shortcircuited 旁注）**直接用内存 `RunResult`** 渲染，不从 manifest 读（manifest 已不含 result）。
 - **manifest 不内嵌 `to_dict(result)`**（曾考虑、否决）：那会让派生视图承载判定真值副本（与 `ResultStore`/`RunStore` 冗余）；改为软引用 run_id 消除冗余。`serialize` 仍是单一序列化真理源（cli `--json` 与各 store 共用），只是不塞进 manifest。
 - `to_dict` 含 `job.engine`、`scenario.report_refs`（序列化补齐项）。
@@ -129,7 +124,7 @@ class ReportStore(Protocol):
 
 - 顶部一行 run 摘要（run_id + 总 status + duration + 原生量成本）。
 - **① 判定明细树**：job→scenario→step，逐级上色（含派生态 skipped/aborted、前置态 pending/running 各自配色，非兜底灰，见 [0031](./0031-job-lifecycle-states-and-severity.md)）+ step 级 status/votes tally/error_type/时长。**被 scope 内短路的 step 显 `skipped` 态 + 读 `shortcircuited` 布尔加「⚠ 因前置 step error 被跳过」旁注**（连锁失败旁注，判据是 shortcircuited 而非「按 status 顺序猜」，见 [0031](./0031-job-lifecycle-states-and-severity.md) 决定六）。让纯确定性 run（无原生产物）也一眼看懂结果。**但不拿它当 CI 判定源**（判定真值在 ResultStore）。
-- **② 原生报告产物导航清单**：每条 report_ref 一行——job.status 上色 + scope_id（+ scenario_id/step[N] 表粒度）+ engine + `[kind]` + 指向 `ref` 的 `<a>`（`label` 或回落 `kind` 作锚文本）。
+- **② 原生报告产物导航清单**：每条 report_ref 一行——job.status 上色 + scope_id（+ scenario_id/step[N] 表粒度）+ engine + `[kind]` + 指向 `href` 的 `<a>`（`label` 或回落 `kind` 作锚文本）。`href` 由 `make_href` 算（local 相对 / cloud 恒等 ref，见上「href 相对化」）。
 - 上色用内联 `<style>`。
 - **空态**：无任何 report_ref 时②仍生成有效的「空报告」清单（标注本次无原生产物）、①判定明细树照常渲染，不报错。
 
@@ -167,13 +162,13 @@ URL、断言了什么」都不落痕（只有 pass/fail 进 result 树）。大�
 
 ## 现在做 / 留口子
 
-- **现在做（v1.0）**：上述 `ReportRef` 改造、`run_id`（归位进 `RunMeta` definition）+ 组合根生成、`JobResult` 经持有的 `Job` 取 `engine`、`ReportStore.write` 接口 + `LocalReportStore`（manifest + index，默认不 materialize）、**两引擎产物对称归位到 run 目录**（Nova `NOVA_LOGS_DIR`→trajectory、Midscene `MIDSCENE_RUN_DIR`→report.html）+ reportRefs（Midscene `kind=report` scope 级 / Nova `kind=trajectory` 下沉 step 级 + `kind=summary` scope 级）、cli 默认生成 RunReport（`--no-report` 跳过、`--report-dir` 配落点、`--materialize` opt-in）、单测 + 两个引擎真 e2e。
+- **现在做（v1.0）**：上述 `ReportRef` 改造、`run_id`（归位进 `RunMeta` definition）+ 组合根生成、`JobResult` 经持有的 `Job` 取 `engine`、`ReportStore.write` 接口 + `LocalReportStore`（manifest + index）、**两引擎产物对称归位到 run 目录**（Nova `NOVA_LOGS_DIR`→trajectory、Midscene `MIDSCENE_RUN_DIR`→report.html）+ reportRefs（Midscene `kind=report` scope 级 / Nova `kind=trajectory` 下沉 step 级 + `kind=summary` scope 级）、cli 默认生成 RunReport（`--no-report` 跳过、`--report-dir` 配落点）、`href` 相对化（local 相对 / cloud 恒等 ref）、单测 + 两个引擎真 e2e。
 - **留口子不实现**：
   - **确定性 step 产物可观测性**：让 `@deterministic` handler 可选地产一个轻量产物（当时 URL / 截图 / 检查描述），使纯确定性用例的 RunReport 也有内容可看。本轮判定真值在 result 树已够；产物可观测另开一轮（与 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md) 确定性 step 设计一并演进）。
-  - **S3 materialize 的完整实现**（把产物拉进 `s3://…/<run_id>/artifacts/` 求自包含）：`S3ReportStore` 本体 v1.1 已建，但其 `materialize` 第一版当 no-op（`href==ref`，目标语义见 [0029](./0029-fargate-engine-artifacts-to-s3.md)）；完整 materialize 待后续。按 `kind` 的富渲染（`<video>`/`<iframe>`，皮层将来做）；trajectory 内部结构化提取。
+  - 按 `kind` 的富渲染（`<video>`/`<iframe>`，皮层将来做）；trajectory 内部结构化提取。
   （注：store 读回面**已落地**——`RunStore.load_run_meta`/`load_run_state` + `ResultStore.load_job_result`/`load_all`，靠 `serialize` 完整重建，[0016](./0016-execution-architecture-core-lib-run-model.md)。）
 
 ## 重议
 
-- 若出现「报告必须自包含搬运」的硬需求成为默认 → 重议 `materialize` 默认值。
+- 若 `jobs/*.json` 的绝对 `ref` 跨机器不可移植成为真实痛点（当前判定 CI 不解引用 ref、影响低）→ 重议是否需要某种真值层可移植机制（但不回退到 materialize 那种全量拷贝）。
 - 若 CI/WebUI 消费 manifest 逼出更多结构化字段 → 扩 `report_index`（加字段，不改 `ReportRef` 三元组语义）。

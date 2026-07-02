@@ -264,7 +264,7 @@ def _recording_build_local_stores(calls: list):
 
     class FakeReportStore:
         def preflight(self): calls.append(("report", "preflight", None))
-        def write(self, run_id, result, *, created_at="", materialize=False):
+        def write(self, run_id, result, *, created_at=""):
             calls.append(("report", "write", None))
             return f"file:///fake/{run_id}/index.html"
 

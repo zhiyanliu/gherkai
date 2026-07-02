@@ -7,10 +7,9 @@
 **注意区分**（[0027]/[0029]）：S3ReportStore 是把 **RunReport 自身**（core 派生的 manifest/index）写 S3，
 与「worker 把**自己的产物**（trajectory/report.html）上传 S3」是两回事（后者是 per-worker by-design、[0029]）。
 
-**materialize v1.1 当 no-op**（[0029]）：第一版只把核心事做对——写 manifest+index 上 S3、`href==ref`
-（index 里链接原样指向 worker 报的 ref）。产物收拢进 `s3://…/<run_id>/artifacts/` 求自包含的目标语义已定
-（对标 Local，见 [0029]），但第一版**收到 materialize=True 也忽略、不报错**（cli 会透传 --materialize，报错会炸）。
-交付的是「链接可能不完全可点」的 S3 RunReport（file:// 链接跨机器断、s3:// 链接待 presign）——已知、接受的取舍。
+**href 恒 ==ref（[0027]/[0029]）**：cloud 报告用 `s3://` 绝对链接——`s3://` 全局可寻址、拷/分享不断，
+无相对化必要（不 presign、不做产物拷贝）。故 make_href 恒返 rr.ref。（产物拷贝式 materialize 已否决，
+见 [0027]「被拒方案」——曾计划 S3 版 copy_object 进 artifacts/，因 s3:// 已可移植而零收益。）
 
 复用 LocalReportStore 的渲染真理源（`_render_index_html`/`SCHEMA_VERSION`）——不重写、两 adapter 同一份 index 渲染。
 """
@@ -36,15 +35,12 @@ class S3ReportStore:
         self._bucket = bucket
         self._prefix = prefix
 
-    def write(self, run_id: str, result: RunResult, *, created_at: str = "", materialize: bool = False) -> ResourceUri:
-        """把 manifest.json + index.html 写到 `s3://bucket/<prefix><run_id>/`，返回 index.html 的 s3:// ResourceUri。
-
-        materialize 当 no-op（第一版，见模块 docstring）——收到 True 也忽略、不报错。
-        """
+    def write(self, run_id: str, result: RunResult, *, created_at: str = "") -> ResourceUri:
+        """把 manifest.json + index.html 写到 `s3://bucket/<prefix><run_id>/`，返回 index.html 的 s3:// ResourceUri。"""
         base = f"{self._prefix}{run_id}"
         # report_index：复用共享三级投影（与 Local 同一真理源，形状/顺序不再靠人肉同步）。
-        # materialize 当 no-op（第一版取舍，[0029]）→ make_href 恒返 ref，href==ref、不拷贝产物。
-        index_entries = collect_report_index(result, make_href=lambda rr, seq: rr.ref)
+        # href 恒 ==ref：s3:// 全局可寻址、无相对化必要（见模块 docstring）。
+        index_entries = collect_report_index(result, make_href=lambda rr: rr.ref)
 
         # manifest = 纯派生导航视图（同 Local，[0027]）：不内嵌 result 真值，靠 run_id 软引用
         manifest = {

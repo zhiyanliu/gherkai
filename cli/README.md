@@ -96,7 +96,6 @@ scope/job 分组与 engine 路由符合预期、提前暴露 `PlanError`（uri �
 | `--quiet` | off | 不打逐事件进度（仍打文本汇总） |
 | `--report-dir` | `reports` | RunReport 归集落点；每次 run 落 `DIR/<run_id>/` |
 | `--no-report` | off | 跳过 RunReport 归集（逃生舱：CI 只看退出码/JSON、或调试不想落盘） |
-| `--materialize` | off | 归集时把本地原生产物按字节拷进 `<run_id>/artifacts/`（自包含、可搬运/上 S3；默认只链接不拷） |
 | `--backend {local,cloud}` | `local` | 落库后端：local=文件落 `--report-dir`；cloud=状态落 DynamoDB、判定结果与报告落 S3（表/桶需预先建好） |
 | `--ddb-table` | — | [cloud] DynamoDB 表名（分区键 run_id + 排序键 item_type）；兜底环境变量 `AWS_DDB_TABLE` |
 | `--s3-bucket` | — | [cloud] S3 桶名（存判定结果与报告）；兜底 `AWS_S3_BUCKET` |
@@ -109,8 +108,9 @@ scope/job 分组与 engine 路由符合预期、提前暴露 `PlanError`（uri �
 ### RunReport（每次 run 的应得产物，默认生成）
 
 每次 `run` **默认**把这次执行归集成一份 RunReport 到 `reports/<run_id>/`：
-- `manifest.json` —— 机器可读（CI/WebUI 消费）：判定/时长/成本 + 各引擎原生报告产物的扁平清单。
-- `index.html` —— 人可导航入口：每个原生产物（Midscene html / Nova trajectory）一行链接，
+- `manifest.json` —— 机器可读（CI/WebUI 消费）：薄信封（run_id 等）+ 各引擎原生报告产物的扁平清单。
+  判定/时长/成本**不在此**——用 `run_id` 到 `ResultStore`（`jobs/*.json`）取判定真值；`index.html` 才含判定明细。
+- `index.html` —— 人可导航入口：判定明细树 + 每个原生产物（Midscene html / Nova trajectory）一行链接，
   点开看**原样**产物。RunReport 只索引/链接、**不解析融合**产物内容；新引擎报任意 `kind` 零改 core。
 
-默认 index 链接指向产物**原位**；要自包含目录（搬走/上 S3/发同事）见选项表的 `--materialize`、跳过归集见 `--no-report`。
+index 链接指向产物**原位**（local 相对链接——产物就在 `reports/<run_id>/` 树内、目录可整体搬走/发同事；cloud 为 `s3://`）；跳过归集见 `--no-report`。

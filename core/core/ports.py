@@ -129,17 +129,18 @@ class ReportStore(Protocol):
     不读 votes/steps 细节、不拿产物内容、不按 kind 分支（不透明搬运）。
     """
 
-    def write(self, run_id: str, result: RunResult, *, created_at: str = "", materialize: bool = False) -> ResourceUri:
+    def write(self, run_id: str, result: RunResult, *, created_at: str = "") -> ResourceUri:
         """从 RunResult 归集出 <report_root>/<run_id>/{manifest.json, index.html}，返回 index.html 的 ResourceUri。
 
-        返回 ResourceUri 而非 Path：本地 adapter 回 file://…/index.html，未来 S3 adapter 回 s3://…/index.html
+        返回 ResourceUri 而非 Path：本地 adapter 回 file://…/index.html，S3 adapter 回 s3://…/index.html
         ——同一签名容两种落点，消费端（cli/WebUI）只当 URI 用（不 stat/open）。这统一了 ReportRef.ref 与
         本方法返回值的语义：都是「带 scheme 的资源指针」（ADR 0027）。
 
         created_at: 组合根生成的时间戳字符串（core 不取时钟；进 manifest 信封）。
-        materialize=False（默认）：不拷贝产物，index.html 链接直接指向各 ReportRef.ref（本地够用）。
-        materialize=True（opt-in）：按字节把产物拷进 <run_id>/artifacts/，链接转相对 → 目录自包含
-          （可整体搬走/上 S3）。按字节拷贝/移动允许；解析/重写/合并产物内容禁止（ADR 0027）。
+
+        index.html 的导航链接（href）指向产物原位、不拷贝产物：local adapter 把 run 树内的 file:// 产物
+        相对化（目录可整体搬走、链接不断）、否则 ==ref；S3 adapter 恒 ==ref。href 是 core 自算的导航链接、
+        不受不透明铁律约束；ref 永远原样保留（铁律圈的是 ref，ADR 0027）。（产物拷贝式 materialize 已否决。）
         """
         ...
 

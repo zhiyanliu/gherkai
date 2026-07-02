@@ -1,5 +1,6 @@
 """LocalReportStore 单测（ADR 0027）：归集 manifest + index，纯本地、不连引擎。"""
 import json
+import os
 from pathlib import Path
 from urllib.parse import urlparse
 from urllib.request import url2pathname
@@ -36,14 +37,23 @@ def _rr(run_id: str, jobs: list[JobResult], **kw) -> RunResult:
     return RunResult(run_meta=meta, jobs=jobs, **kw)
 
 
+_RUN_ID = "20260629-abc123"
+
+
 def _run_with_refs(tmp: Path) -> RunResult:
-    # 造一个真实 html 文件供 materialize 测试
-    art = tmp / "midscene_run" / "report"
-    art.mkdir(parents=True)
-    html = art / "x.html"
+    # 造真实产物文件，落在 **run 树内**（reports/<run_id>/ 下，对齐真实用法：cli 把 SDK 落点设进 run 目录，
+    # ADR 0027）——使 href 相对化命中；相对 run_dir 后 href 应是 "midscene-run/report/x.html" 这类树内相对路径。
+    run_dir = tmp / "reports" / _RUN_ID
+    report = run_dir / "midscene-run" / "report"
+    report.mkdir(parents=True)
+    html = report / "x.html"
     html.write_text("<html>原生报告</html>", encoding="utf-8")
+    traj = run_dir / "nova-trajectories" / "sess"
+    traj.mkdir(parents=True)
+    traj_html = traj / "act_0.html"
+    traj_html.write_text("<html>traj</html>", encoding="utf-8")
     return _rr(
-        "20260629-abc123",
+        _RUN_ID,
         [
             _jr(
                 "features/wiki.feature:6", "midscene",
@@ -58,7 +68,7 @@ def _run_with_refs(tmp: Path) -> RunResult:
                         status=Status.PASSED,
                         # step 级 ref（Nova trajectory 下沉，kind=trajectory，ADR 0027）
                         steps=[StepResult(index=0, status=Status.PASSED,
-                                          report_refs=(ReportRef(kind="trajectory", ref=ResourceUri("file:///tmp/traj/act_0.html")),))],
+                                          report_refs=(ReportRef(kind="trajectory", ref=ResourceUri(f"file://{traj_html}")),))],
                     )
                 ],
             )
@@ -103,6 +113,11 @@ def test_manifest_shape(tmp_path: Path):
     assert report_entry["engine"] == "midscene"
     # step 级：scenario_id + step_index 都非空（粒度由挂载层级表达，非 kind）
     assert traj_entry["scenario_id"] == "features/wiki.feature:6" and traj_entry["step_index"] == 0
+    # manifest 每条只含 href（导航链接），不含 ref（原始指针随 materialize 一并移除——无人读 + 会成绝对泄漏，ADR 0027）
+    assert "href" in report_entry and "ref" not in report_entry
+    # href 相对化：产物在 run 树内 → 相对 run_dir 的 POSIX 路径（目录可整体搬走、链接不断）
+    assert report_entry["href"] == "midscene-run/report/x.html"
+    assert traj_entry["href"] == "nova-trajectories/sess/act_0.html"
 
 
 def test_index_html_links_and_summary(tmp_path: Path):
@@ -220,28 +235,123 @@ def test_index_html_no_taint_on_plain_failed(tmp_path: Path):
     assert txt.count("taint") == 1                  # 只剩 CSS 定义那一处，无 span
 
 
-def test_materialize_copies_local_artifact(tmp_path: Path):
+def test_href_relativized_for_artifact_in_run_tree(tmp_path: Path):
+    # href 相对化（ADR 0027）：产物在 run 树内 → href 是相对 run_dir 的 POSIX 路径（目录可整拷、链接不断）；
+    # 不拷贝产物（无 artifacts/ 目录）、不改写 ref（manifest 已不含 ref）。
     run = _run_with_refs(tmp_path)
     store = LocalReportStore(tmp_path / "reports")
-    store.write(run.run_id, run, materialize=True)
-    run_dir = tmp_path / "reports" / "20260629-abc123"
-    # 本地 file:// 产物被按字节拷进 artifacts/（带 seq 前缀去碰撞）
+    store.write(run.run_id, run)
+    run_dir = tmp_path / "reports" / _RUN_ID
+    assert not (run_dir / "artifacts").exists()  # 不再拷贝产物
     m = json.loads((run_dir / "manifest.json").read_text("utf-8"))
     report_entry = next(e for e in m["report_index"] if e["kind"] == "report")
-    assert report_entry["href"].startswith("artifacts/") and report_entry["href"].endswith("_x.html")
-    copied = run_dir / report_entry["href"]
-    assert copied.exists() and copied.read_text("utf-8") == "<html>原生报告</html>"
+    assert report_entry["href"] == "midscene-run/report/x.html"  # 相对 run_dir
+    # href 相对链接从 run_dir 出发解析得回原文件（验证"目录可整体搬走"）
+    assert (run_dir / report_entry["href"]).read_text("utf-8") == "<html>原生报告</html>"
 
 
-def test_default_no_materialize_keeps_ref(tmp_path: Path):
-    run = _run_with_refs(tmp_path)
+def test_href_falls_back_absolute_for_artifact_outside_run_tree(tmp_path: Path):
+    # 产物落在 run 树外（worker 没吃到 NOVA_LOGS_DIR/MIDSCENE_RUN_DIR、落 SDK 临时目录）→ relative_to 抛错
+    # → href 回落绝对 file://（该条不可移植，已知取舍，ADR 0027）。非"所有 local href 都相对"。
+    outside = tmp_path / "elsewhere"; outside.mkdir()
+    html = outside / "x.html"; html.write_text("out", encoding="utf-8")
+    run = _rr("outside-run", [
+        _jr("s", "midscene", status=Status.PASSED,
+            report_refs=(ReportRef(kind="report", ref=ResourceUri(f"file://{html}")),)),
+    ], status=Status.PASSED)
     store = LocalReportStore(tmp_path / "reports")
-    store.write(run.run_id, run)  # materialize=False 默认
-    run_dir = tmp_path / "reports" / "20260629-abc123"
-    assert not (run_dir / "artifacts").exists()
+    store.write(run.run_id, run)
+    m = json.loads((tmp_path / "reports" / "outside-run" / "manifest.json").read_text("utf-8"))
+    entry = m["report_index"][0]
+    assert entry["href"] == f"file://{html}"  # 回落绝对（树外，不可相对化）
+
+
+def test_href_relativized_percent_encoded_path(tmp_path: Path):
+    # ref 含空格/中文 → file:// URI 会 percent-encode；相对化须能 url2pathname 还原、算出正确相对 href。
+    from urllib.parse import quote
+    run_dir = tmp_path / "reports" / "pe"
+    sub = run_dir / "nova-trajectories"; sub.mkdir(parents=True)
+    src = sub / "trajectory 词条页.html"
+    src.write_text("traj", encoding="utf-8")
+    ref = ResourceUri("file://" + quote(str(src)))  # 路径 percent-encode（空格→%20、中文→%XX）
+    run = _rr("pe", [
+        _jr("s", "novaact", status=Status.PASSED,
+            report_refs=(ReportRef(kind="trajectory", ref=ref),)),
+    ], status=Status.PASSED)
+    store = LocalReportStore(tmp_path / "reports")
+    store.write(run.run_id, run)
     m = json.loads((run_dir / "manifest.json").read_text("utf-8"))
-    report_entry = next(e for e in m["report_index"] if e["kind"] == "report")
-    assert report_entry["href"] == report_entry["ref"]  # 不拷贝时 href == ref
+    entry = m["report_index"][0]
+    assert entry["href"] == "nova-trajectories/trajectory 词条页.html"  # 相对、已解码
+    assert (run_dir / entry["href"]).read_text("utf-8") == "traj"
+
+
+def test_file_uri_with_remote_host_kept_as_ref(tmp_path: Path):
+    # file://server/share/x.html（带非 localhost host = 远端/UNC）→ 不当本地文件、href 原样 ==ref
+    run = _rr("unc", [
+        _jr("s", "e", status=Status.PASSED,
+            report_refs=(ReportRef(kind="report", ref=ResourceUri("file://server/share/x.html")),)),
+    ], status=Status.PASSED)
+    store = LocalReportStore(tmp_path / "reports")
+    store.write(run.run_id, run)
+    m = json.loads((tmp_path / "reports" / "unc" / "manifest.json").read_text("utf-8"))
+    assert m["report_index"][0]["href"] == "file://server/share/x.html"  # 原样、不相对化
+
+
+def test_remote_ref_kept_as_ref(tmp_path: Path):
+    # 未来引擎报 https:// / s3:// 外部 URL：不相对化（只 file:// 相对化，只按 scheme 分支），href 原样。
+    run = _rr("r", [
+        _jr("s", "future", status=Status.PASSED,
+            report_refs=(ReportRef(kind="video", ref=ResourceUri("https://example.com/rec.mp4")),)),
+    ], status=Status.PASSED)
+    store = LocalReportStore(tmp_path / "reports")
+    store.write(run.run_id, run)
+    m = json.loads((tmp_path / "reports" / "r" / "manifest.json").read_text("utf-8"))
+    entry = m["report_index"][0]
+    assert entry["kind"] == "video"  # 新 kind 零改 core
+    assert entry["href"] == "https://example.com/rec.mp4"  # 远端不相对、原样
+
+
+def test_href_relativized_through_symlinked_run_dir(tmp_path: Path):
+    # 锚住 _relative_href 里 run_dir.resolve() 的 symlink 防御（review #3：否则 macOS /tmp↔/private/tmp
+    # 或任何 symlinked 落点下，run_dir(经 symlink) 与 ref(已规范化绝对) 不一致 → relative_to 抛 ValueError →
+    # 误回落绝对 href、报告失可移植性）。用真 os.symlink 构造：run_dir 经软链传入，产物 ref 用规范化绝对路径。
+    real_base = tmp_path / "real"; real_base.mkdir()
+    link_base = tmp_path / "link"
+    os.symlink(real_base, link_base)  # link_base → real_base
+    # 产物落在（经软链看到的）run_dir 树内，但 ref 用规范化绝对路径（模拟 worker 报 file://<resolved>）
+    run_id = "sym-run"
+    art = real_base / run_id / "midscene-run" / "report"
+    art.mkdir(parents=True)
+    html = art / "x.html"; html.write_text("<html>s</html>", encoding="utf-8")
+    ref = ResourceUri(f"file://{html.resolve()}")  # 规范化绝对（不含软链段）
+    run = _rr(run_id, [
+        _jr("s", "midscene", status=Status.PASSED,
+            report_refs=(ReportRef(kind="report", ref=ref),)),
+    ], status=Status.PASSED)
+    # store 的 root 经软链传入 → run_dir = link/<run_id>（含软链段），与 ref（已规范化）字面不一致
+    store = LocalReportStore(link_base)
+    store.write(run.run_id, run)
+    m = json.loads((real_base / run_id / "manifest.json").read_text("utf-8"))
+    # 两侧都 resolve 后才能算相对 → href 仍是树内相对路径（去掉任一 resolve 会回落绝对 file://，测试即红）
+    assert m["report_index"][0]["href"] == "midscene-run/report/x.html"
+
+
+def test_href_relativized_for_bare_path_ref(tmp_path: Path):
+    # 裸路径 ref（无 scheme）当本地文件相对化（review #6：_local_path 的防御性分支，钉住行为）。
+    # 生产 ref 恒带 scheme（ADR 0024），此为防御分支——显式测，避免它悄悄失效或被误删。
+    run_dir = tmp_path / "reports" / "bare"
+    sub = run_dir / "nova-trajectories"; sub.mkdir(parents=True)
+    src = sub / "act_0.html"; src.write_text("bare", encoding="utf-8")
+    ref = ResourceUri(str(src.resolve()))  # 裸绝对路径，无 file:// 前缀
+    run = _rr("bare", [
+        _jr("s", "novaact", status=Status.PASSED,
+            report_refs=(ReportRef(kind="trajectory", ref=ref),)),
+    ], status=Status.PASSED)
+    store = LocalReportStore(tmp_path / "reports")
+    store.write(run.run_id, run)
+    m = json.loads((run_dir / "manifest.json").read_text("utf-8"))
+    assert m["report_index"][0]["href"] == "nova-trajectories/act_0.html"  # 裸本地路径也相对化
 
 
 def test_empty_report_refs_still_valid_index(tmp_path: Path):
@@ -253,65 +363,3 @@ def test_empty_report_refs_still_valid_index(tmp_path: Path):
     assert "无引擎报告产物" in txt  # 空态有效页
     m = json.loads((tmp_path / "reports" / "empty-run" / "manifest.json").read_text("utf-8"))
     assert m["report_index"] == []
-
-
-def test_materialize_same_basename_no_collision(tmp_path: Path):
-    # 两个不同目录、同 basename 的本地产物：materialize 不能互相覆盖（数据丢失回归）
-    d1 = tmp_path / "a"; d1.mkdir(); (d1 / "report.html").write_text("AAA", encoding="utf-8")
-    d2 = tmp_path / "b"; d2.mkdir(); (d2 / "report.html").write_text("BBB", encoding="utf-8")
-    run = _rr("collide", [
-        _jr("s1", "e", status=Status.PASSED,
-            report_refs=(ReportRef(kind="report", ref=ResourceUri(f"file://{d1}/report.html")),)),
-        _jr("s2", "e", status=Status.PASSED,
-            report_refs=(ReportRef(kind="report", ref=ResourceUri(f"file://{d2}/report.html")),)),
-    ], status=Status.PASSED)
-    store = LocalReportStore(tmp_path / "reports")
-    store.write(run.run_id, run, materialize=True)
-    art = tmp_path / "reports" / "collide" / "artifacts"
-    copied = sorted(art.iterdir())
-    assert len(copied) == 2, f"两个同名产物都应保留，实际 {copied}"
-    contents = {p.read_text("utf-8") for p in copied}
-    assert contents == {"AAA", "BBB"}  # 都没丢
-
-
-def test_materialize_percent_encoded_path(tmp_path: Path):
-    # ref 含空格/中文 → file:// URI 会 percent-encode；materialize 须能 url2pathname 还原找到文件
-    from urllib.parse import quote
-    src = tmp_path / "trajectory 词条页.html"
-    src.write_text("traj", encoding="utf-8")
-    ref = ResourceUri("file://" + quote(str(src)))  # 路径 percent-encode（空格→%20、中文→%XX）
-    run = _rr("pe", [
-        _jr("s", "novaact", status=Status.PASSED,
-            report_refs=(ReportRef(kind="trajectory", ref=ref),)),
-    ], status=Status.PASSED)
-    store = LocalReportStore(tmp_path / "reports")
-    store.write(run.run_id, run, materialize=True)
-    art = tmp_path / "reports" / "pe" / "artifacts"
-    copied = list(art.iterdir())
-    assert len(copied) == 1 and copied[0].read_text("utf-8") == "traj"
-
-
-def test_file_uri_with_remote_host_not_copied(tmp_path: Path):
-    # file://server/share/x.html（带非 localhost host = 远端/UNC）→ 不当本地拷
-    run = _rr("unc", [
-        _jr("s", "e", status=Status.PASSED,
-            report_refs=(ReportRef(kind="scope", ref=ResourceUri("file://server/share/x.html")),)),
-    ], status=Status.PASSED)
-    store = LocalReportStore(tmp_path / "reports")
-    store.write(run.run_id, run, materialize=True)
-    # 不拷贝 → 无 artifacts，href 保持原 ref
-    assert not (tmp_path / "reports" / "unc" / "artifacts").exists()
-
-
-def test_remote_ref_not_copied_even_when_materialize(tmp_path: Path):
-    # 未来引擎报 https:// 外部 URL：materialize 也不拷贝（不 fetch 远端），href 保持原样
-    run = _rr("r", [
-        _jr("s", "future", status=Status.PASSED,
-            report_refs=(ReportRef(kind="video", ref=ResourceUri("https://example.com/rec.mp4")),)),
-    ], status=Status.PASSED)
-    store = LocalReportStore(tmp_path / "reports")
-    store.write(run.run_id, run, materialize=True)
-    m = json.loads((tmp_path / "reports" / "r" / "manifest.json").read_text("utf-8"))
-    entry = m["report_index"][0]
-    assert entry["kind"] == "video"  # 新 kind 零改 core
-    assert entry["href"] == "https://example.com/rec.mp4"  # 远端不拷、原样

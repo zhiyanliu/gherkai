@@ -3,8 +3,9 @@
 对拍**后端无关的行为契约**（manifest 形态 = 纯派生视图不内嵌 result、report_index 扁平投影、index.html 渲染判定明细+链接、
 空态有效页）——即 test_report_store.py 里那批。物理落点断言从「文件系统路径」换成「S3 对象 get」。
 
-**S3 专属差异 = materialize 当 no-op**（[0029] 第一版取舍）：Local 的 materialize=True 会把本地产物拷进 artifacts/、
-改写 href；S3 版收到 materialize=True 也忽略、`href` 恒等 `ref`（不拷贝、不报错）。这条**反向**断言正是本文件的重点。
+**S3 专属差异 = href 恒等原始 ref（[0027]/[0029]）**：Local 把 run 树内的 file:// 产物相对化 href；S3 版
+**不相对化**（`s3://` 全局可寻址、无相对必要，只按 scheme 分支且 file:// 也不由 S3 store 相对化）——href 恒
+== worker 报的原始 ref。不拷贝产物（无 artifacts/ 对象）。这条对照 Local 的相对化，是本文件的 S3 专属重点。
 
 复用 test_report_store 的 _run_with_refs/_rr/_jr 造数据（同一份 fixture 真理源）。
 """
@@ -99,15 +100,17 @@ def test_index_html_taints_shortcircuited_step(s3_report_store, aws):
     assert "被跳过" in txt and "skipped" in txt
 
 
-# ---- S3 专属：materialize 当 no-op，href 恒等 ref（对拍/反向 test_default_no_materialize_keeps_ref）----
-def test_materialize_is_noop_href_equals_ref(s3_report_store, aws, tmp_path):
+# ---- S3 专属：href 恒等原始 ref、不相对化（对照 Local 的相对化，[0027]/[0029]）----
+def test_s3_href_not_relativized_kept_as_ref(s3_report_store, aws, tmp_path):
+    # fixture 的产物是 file:// 绝对 ref。Local 会把它相对化成 "midscene-run/report/x.html"；
+    # S3 store **不相对化**——href 恒等原始 ref（此处仍是绝对 file://，证明 S3 未碰 href 相对化）。
     run = _run_with_refs(tmp_path)
-    # 即便传 materialize=True，也不拷贝、不报错，href 仍等于 ref（第一版取舍，[0029]）
-    s3_report_store.write(run.run_id, run, materialize=True)
+    s3_report_store.write(run.run_id, run)
     m = _read_manifest(aws, "20260629-abc123")
     for entry in m["report_index"]:
-        assert entry["href"] == entry["ref"], f"materialize 应为 no-op，href 不应改写：{entry}"
-    # 没有产生 artifacts/ 前缀的对象（没拷贝任何产物）
+        # href 保持绝对 file://（未被相对化）——与 Local 的相对 "midscene-run/..." 形成对照
+        assert entry["href"].startswith("file://"), f"S3 不应相对化 href：{entry}"
+    # 没有产生 artifacts/ 前缀的对象（不拷贝任何产物）
     listed = aws["s3"].list_objects_v2(Bucket=aws["bucket"], Prefix="20260629-abc123/artifacts/")
     assert listed.get("KeyCount", 0) == 0
 

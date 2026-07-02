@@ -47,7 +47,7 @@ def _recording():
 
     class FakeReportStore:
         def preflight(self): calls.append(("report", "preflight", None))
-        def write(self, run_id, result, *, created_at="", materialize=False):
+        def write(self, run_id, result, *, created_at=""):
             calls.append(("report", "write", None))
             return f"file:///fake/{run_id}/index.html"
 
@@ -110,7 +110,7 @@ def test_finalize_isolates_report_write_failure(tmp_path):
 
     class BoomReportStore:
         def preflight(self): pass  # 探活 no-op（真 LocalRunStore/ResultStore 已带 preflight）
-        def write(self, run_id, result, *, created_at="", materialize=False):
+        def write(self, run_id, result, *, created_at=""):
             raise OSError("磁盘满，报告写不下")
 
     run_store = LocalRunStore(tmp_path)
