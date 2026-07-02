@@ -15,8 +15,8 @@
 //   - 签名 (ctx, groups) => void | Promise<void>：ctx.page = Playwright Page；groups = 正则具名组。
 //   - 判定失败抛 DeterministicAssertion（或 node:assert AssertionError）→ step 记 failed；抛其它 → error。
 //
-// Nova Act 侧的对齐脚手架见 engines/novaact/bdd/deterministic_steps.py。
-import { deterministic, DeterministicAssertion } from "../../worker/deterministic.js";
+// Nova Act 侧的对齐脚手架见 engines/novaact/worker/deterministic_steps.py。
+import { deterministic, DeterministicAssertion } from "./deterministic.js";
 
 // 确定性 URL 断言：当前页 URL 须匹配给定正则（精确、不走 AI）。
 // .feature 写法（test engineer 约定的带关键词措辞，与 QA 的纯自然语言 Then 区分）：

@@ -38,11 +38,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # novaact/ 根，�
 from lib.workflow_setup import ensure_workflow_definition
 from lib.constants import MODEL_ID, WORKFLOW_DEF  # 共享常量（单一真理源，与 spike 共用）
 
-# 确定性 step 注册表（ADR 0022）+ test engineer 的锚点脚手架。
+# 确定性 step 注册表（ADR 0022）+ test engineer 的锚点脚手架（均在 worker/ 同目录）。
 # 先 import 注册机制（提供 @deterministic 装饰器），再 import 脚手架——脚手架顶层的
 # @deterministic 在 import 时执行，把锚点登记进 _deterministic._REGISTRY。
 import deterministic as _deterministic  # noqa: E402
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bdd"))  # 便于 import deterministic_steps
 import deterministic_steps  # noqa: E402,F401  仅为触发注册（其顶层 @deterministic 副作用）
 
 REGION = os.environ.get("AWS_REGION", "us-east-1")

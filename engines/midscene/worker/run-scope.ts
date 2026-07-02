@@ -27,7 +27,7 @@ import { sigv4Fetch, signCdpUpgrade, BASE_URL, MODEL, REGION } from "../lib/agen
 // import 脚手架即触发其顶层 deterministic(...) 注册副作用（对称 Nova 引擎 import deterministic_steps）。
 import { match as matchDeterministic, DeterministicAssertion } from "./deterministic.js";
 import { buildInstruction } from "./argument.js";
-import "../bdd/steps/deterministic.steps.js";
+import "./deterministic.steps.js";  // 脚手架同目录（ADR 0022 退役 bdd 层后迁入 worker/）
 
 const BROWSER_ID = "aws.browser.v1";
 // AI 断言投票次数由 job.assertionVotes 决定（ADR 0014/0024，组合根经 --assertion-votes 设）。

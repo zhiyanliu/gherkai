@@ -1,5 +1,5 @@
 // 共享：Midscene → Bedrock/AgentCore 的两套 SigV4 签名场景。
-// 被 spike（tsx 直跑）和 bdd step（cucumber ESM）共用。
+// 被 spike（tsx 直跑）和 worker（run-scope）共用。
 // 用 .mts 扩展名强制 ESM，绕开 midscene 子工程根的 commonjs 设定。
 //
 // 两套签名 service code 不同（CONTEXT「AgentCore 浏览器会话」已警示别混）：

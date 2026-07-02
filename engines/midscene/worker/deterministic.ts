@@ -8,7 +8,7 @@
 // 跟着 handler 走最内聚；core 只解析结构 + 调度，对 step 语义无知。
 //
 // 角色边界（ADR 0020）：QA 永远只写自然语言（默认走 AI）；确定性 step 由 test engineer 在
-// bdd/steps/deterministic.steps.ts 注册（QA 不碰）。
+// worker/deterministic.steps.ts 注册（QA 不碰）。
 //
 // handler 约定：
 //   - 签名 (ctx, groups) => void | Promise<void>：ctx.page = Playwright Page；

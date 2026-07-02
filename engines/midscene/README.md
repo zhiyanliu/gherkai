@@ -13,15 +13,14 @@ Midscene.js (TypeScript) 侧的执行引擎。用 **Qwen3-VL 235B on Bedrock** �
 - 接线：经 Midscene `createOpenAIClient` 注入带 SigV4 签名的自定义 `fetch`
 - 配方与失败模式：`spikes/SIGV4-FETCH-RECIPE.md`
 
-## 跑 BDD（cucumber-js，加载根 `features/`）
+## 执行形态：薄 worker（cucumber 已退役）
 
-> v0.x 形态：v1.0 起 cucumber-js 退役，改由根 `core/` 自解析 `.feature` +
-> 本子工程的 `worker/run-scope.ts` 薄 worker 执行（见根 ADR 0022）。下方
-> cucumber 跑法仅 v0.x 适用，`cucumber.mjs` 仍保留。
+本引擎的执行入口是 `worker/run-scope.ts`——被根 `core/` spawn 的薄 worker（core 自解析 `.feature`、
+把每个 step 经 0024 协议派发进来，ADR 0022）。**cucumber-js 入口（`cucumber.mjs` + patch）已随 v0.x BDD 层退役删除**。
+正常经 cli 跑（根 `cli/`）；worker 也可手动直跑调试：
 
 ```bash
-NODE_OPTIONS="--import tsx/esm" AWS_REGION=us-east-1 \
-  node_modules/.bin/cucumber-js -c cucumber.mjs
+echo '<job json>' | AWS_REGION=us-east-1 node --import tsx worker/run-scope.ts
 ```
 
 ## 跑 spike（五段式自检，可独立跑）
@@ -36,5 +35,5 @@ AWS_REGION=us-east-1 node_modules/.bin/tsx spikes/05-negative-assertions.ts # �
 
 ## 注意
 
-- 本子工程是 `commonjs`；`bdd/` 下有局部 `package.json` 标 `type:module` 使 step 走 ESM。
+- 本子工程是 `commonjs`；`worker/*.ts` 经 `--import tsx` 运行（无需 ESM 包配置——cucumber ESM 入口已退役）。
 - 依赖全在本地 `node_modules`，不污染全局。

@@ -64,18 +64,18 @@ def color_is(ctx, sel, hex):
 
 ## 退役清单（B1 删除/作废的东西）
 
-> **状态（截至当前分支）**：worker + 注册表已落地（见上「实现状态」），但下列 4 个 v0.x BDD 入口文件 + `generic.steps`/`test_generic_steps` **仍与 worker 物理并存**——退役是**已决策、尚未执行的下一步施工**（清理 v0.x 层）。此清单是「该删什么」的决策，非「已删」的事实。
+> **状态（已执行）**：v0.x BDD 层**已物理删除**——下列入口文件 + `generic.steps`/`test_generic_steps` 副本已删，`bdd/` 目录连同 `midscene/patches/` 已移除；确定性脚手架 `deterministic_steps`/`deterministic.steps.ts`（worker 活依赖）已**迁入 `worker/`**（见下「迁移」）。cucumber/patch-package 依赖 + `postinstall` 从 `midscene/package.json` 删除。全 novaact 目录测试无 collection error（曾因 bdd 层 sys.path 脆弱报错）。
 
-要删的只有 4 样「BDD runner 入口管道」，**spike、sigv4 recipe、workflow_setup、step 逻辑一个都不删**：
+删除的「BDD runner 入口管道」，**spike、sigv4 recipe、workflow_setup、step 逻辑一个都不删**：
 
-| 退役 | 原因 |
+| 已删 | 原因 |
 |---|---|
 | `engines/midscene/cucumber.mjs` | worker 形态不需要 cucumber 入口 |
-| `engines/midscene/patches/@cucumber+cucumber+13.0.0.patch` + `postinstall` | **B1 核心红利**：核心从 AST 直接知道关键字，When/Then 歧义消失（[0021](./0021-local-cucumber-patch-step-keyword-disambiguation.md) 那个 pattern-only 匹配问题不复存在） |
+| `engines/midscene/patches/@cucumber+cucumber+13.0.0.patch` + `package.json` 的 `postinstall`/`patch-package` 依赖 + `@cucumber/cucumber` 依赖 | **B1 核心红利**：核心从 AST 直接知道关键字，When/Then 歧义消失（[0021](./0021-local-cucumber-patch-step-keyword-disambiguation.md) 那个 pattern-only 匹配问题不复存在） |
 | `engines/novaact/bdd/conftest.py`（tag 路由 hook） | engine 路由改由核心调度层做（[0019](./0019-feature-tags-scope-and-engine.md)） |
-| `engines/midscene/bdd/package.json`（`{type:module}`） | 折叠进 worker 工程配置 |
+| `engines/midscene/bdd/package.json`（`{type:module}`）+ `bdd/steps/generic.steps.ts` + `novaact/bdd/test_generic_steps.py` | cucumber/pytest-bdd 工程配置 + 已迁进 worker 的 step 逻辑副本 |
 
-**存活/迁移（不删）**：`agentcore-sigv4.mts`、`workflow_setup.py`（worker 进程内直接用）；`generic.steps` / `test_generic_steps` 的**逻辑**（开会话/act/投票，迁入 worker，脱装饰器）；`deterministic.steps` / `deterministic_steps`（迁入 worker 注册表）；全部 spike 与 `SIGV4-FETCH-RECIPE.md`（独立可跑的证据，[0010](./0010-spike-as-apples-to-apples-benchmark.md)，保留在 `spike-validated` tag 与各引擎 `spikes/`）。
+**迁移（不删，位置搬到 `worker/`）**：`agentcore-sigv4.mts`、`workflow_setup.py`（worker 进程内直接用）；`generic.steps`/`test_generic_steps` 的**逻辑**早已在 worker 派发实现（其 bdd 副本本次删）；**确定性脚手架 `deterministic_steps.py`/`deterministic.steps.ts` 迁入 `worker/`**——注意这是**实装偏差纠正**：原 ADR 说"确定性 step 迁入 worker 注册表"，但实现是 **worker 反向 import 脚手架**（触发 `@deterministic` 顶层注册副作用），故脚手架是 worker 的**活依赖**、非可删副本；退役 bdd 时把它从 `bdd/` 移到 `worker/` 同目录（`novaact/worker/deterministic_steps.py`、`midscene/worker/deterministic.steps.ts`），worker import 路径相应改为同目录。全部 spike 与 `SIGV4-FETCH-RECIPE.md`（独立可跑的证据，[0010](./0010-spike-as-apples-to-apples-benchmark.md)）保留在各引擎 `spikes/`。
 
 ## 对既有 ADR 的影响
 
