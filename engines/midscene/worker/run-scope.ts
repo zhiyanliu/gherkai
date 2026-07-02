@@ -103,25 +103,23 @@ interface Job { scope: { id: string; name: string }; engine: string; scenarios: 
 // Midscene/Bedrock 原生量 token 累计（ADR 0024：engine 只报原生量，core 不算美元）。
 // _unstableLogContent().executions 是**整个 agent 会话累积**的——故按 step 取 token 必须用"增量"：
 // step 跑前记一次累计、跑后再记一次、差值才是本 step 的 token。否则：取末次 usage 会少报（多票断言只
-// 算最后一票，欠计 (N-1)/N）；或求和全部会双计（把前面 step 的也算进来）。返回 [task 数, token 累计和]。
-function cumulativeTokens(agent: PlaywrightAgent): [number, number] {
+// 算最后一票，欠计 (N-1)/N）；或求和全部会双计（把前面 step 的也算进来）。返回 token 累计和。
+function cumulativeTokens(agent: PlaywrightAgent): number {
   try {
     const execs = (agent as any)._unstableLogContent?.()?.executions ?? [];
-    let count = 0;
     let tokens = 0;
     for (const ex of execs) for (const task of ex.tasks ?? []) {
-      count++;
       if (task.usage?.total_tokens != null) tokens += task.usage.total_tokens;
     }
-    return [count, tokens];
+    return tokens;
   } catch {
-    return [0, 0];
+    return 0;
   }
 }
 
 // 本 step 的 token 成本 = 跑后累计 − 跑前累计（增量）。增量 0（无新 usage）→ undefined（不假装 0）。
 function stepCost(beforeTokens: number, agent: PlaywrightAgent): Record<string, unknown> | undefined {
-  const [, after] = cumulativeTokens(agent);
+  const after = cumulativeTokens(agent);
   const delta = after - beforeTokens;
   return delta > 0 ? { tokens: delta } : undefined;
 }
@@ -366,7 +364,7 @@ async function runStep(
     if (keyword === "Then") {
       // AI 断言 + N 次投票（ADR 0014/0024）；votesN=1 即单次判定（仍发 votes 标记这是 AI 断言）
       const instr = buildInstruction(step.text, step.argument as any);  // 自然语言 + 多行参数（DataTable/DocString，ADR 0024）
-      const [, tokBefore] = cumulativeTokens(agent);  // 投票前累计 → 用增量算本 step 全 N 票成本（不少报）
+      const tokBefore = cumulativeTokens(agent);  // 投票前累计 → 用增量算本 step 全 N 票成本（不少报）
       let yes = 0;
       for (let i = 0; i < votesN; i++) if (await agent.aiBoolean(instr)) yes++;
       const passed = yes > votesN / 2;
@@ -382,7 +380,7 @@ async function runStep(
       return passed ? "passed" : "failed";
     }
     // When / Given（非 URL）→ AI 动作（无 votes）
-    const [, tokBefore] = cumulativeTokens(agent);  // 动作前累计 → 增量算本 step 成本
+    const tokBefore = cumulativeTokens(agent);  // 动作前累计 → 增量算本 step 成本
     await agent.aiAct(buildInstruction(step.text, step.argument as any));
     const ev: Record<string, unknown> = { type: "step_done", scenarioId, stepIndex: index, status: "passed" };
     const cost = stepCost(tokBefore, agent);

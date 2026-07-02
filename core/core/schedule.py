@@ -200,7 +200,7 @@ class _Worker:
             )
             if not retriable:
                 return result
-        return last  # 重试耗尽，返回最后一次（network_error）
+        return last  # 不可达：循环末次迭代 retriable 必 False → 上面必 return；此处仅供类型收窄（否则视为可能隐式 return None）
 
     def _run_once(self, deadline: float | None) -> tuple[JobResult, bool, bool]:
         """单次执行 job。返回 (JobResult, 是否 network_error, 是否 emit 过 step_done)。
@@ -322,10 +322,9 @@ class _Worker:
         elif isinstance(event, StepStarted):
             timing.step_start[(event.scenario_id, event.step_index)] = now
         elif isinstance(event, StepDone):
-            # 兜底：若某 scenario 有 step error 但无 scenario_done，仍记一笔（取最严重）
-            cur = scenario_status.get(event.scenario_id)
-            if event.status == Status.ERROR or (event.status == Status.FAILED and cur != Status.ERROR):
-                scenario_status[event.scenario_id] = event.status
+            # scenario 判定**只由 ScenarioDone 决定**（见下分支，无条件覆盖 scenario_status）——step 级 status
+            # 不独立参与 scenario 归约（守 ADR 0026 归约语义：worker 每 scenario 必发 scenario_done 带 aggregate；
+            # 中途崩无 scenario_done 时走 except 分支直接 job=ERROR、不读 scenario_status）。故此处不写 scenario_status。
             # 累加 step 成本到 scope 级（ADR 0024）：core 只合计 engine 报的原生量、不算美元。
             cost = event.cost
             if cost is not None:

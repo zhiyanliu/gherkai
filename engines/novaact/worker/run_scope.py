@@ -36,6 +36,7 @@ from nova_act.types.workflow import set_current_workflow, get_current_workflow
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # novaact/ 根，便于 import lib
 from lib.workflow_setup import ensure_workflow_definition
+from lib.constants import MODEL_ID, WORKFLOW_DEF  # 共享常量（单一真理源，与 spike 共用）
 
 # 确定性 step 注册表（ADR 0022）+ test engineer 的锚点脚手架。
 # 先 import 注册机制（提供 @deterministic 装饰器），再 import 脚手架——脚手架顶层的
@@ -45,8 +46,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bdd"))  # 便于 i
 import deterministic_steps  # noqa: E402,F401  仅为触发注册（其顶层 @deterministic 副作用）
 
 REGION = os.environ.get("AWS_REGION", "us-east-1")
-MODEL_ID = "nova-act-latest"
-WORKFLOW_DEF = "spike-wikipedia-benchmark"
+# MODEL_ID / WORKFLOW_DEF 移入 lib/constants.py（与 spike 共享单一真理源，见上 import）
 # AI 断言投票次数由 job.assertionVotes 决定（ADR 0014/0024，组合根经 --assertion-votes 设）。
 # 默认 1（不抖动检测，结果直观）；调高才跑 N 次取多数票。
 

@@ -18,12 +18,53 @@ import html
 import json
 import shutil
 from pathlib import Path
+from typing import Callable
 from urllib.parse import urlparse
 from urllib.request import url2pathname
 
-from core.model import ResourceUri, RunResult
+from core.model import ReportRef, ResourceUri, RunResult
 
 SCHEMA_VERSION = 1
+
+
+def collect_report_index(result: RunResult, *, make_href: Callable[[ReportRef, int], str]) -> list[dict]:
+    """遍历 result 树，把每个 ReportRef 投影成一条扁平 index 项（三级，ADR 0027）——**local/s3 共享的单一真理源**。
+
+    粒度由 scenario_id/step_index 是否为 None 表达：都 None=scope 级；仅 step_index None=scenario 级；
+    两者都非 None=step 级（Nova trajectory 下沉，同 scenario 多 trajectory 靠 step_index 区分）。
+    遍历顺序（每 job：scope 级 report_refs → 各 scenario 级 → 各 step 级）两 adapter 必须一致，故抽此共享函数。
+
+    href 差异由 make_href(rr, seq) 回调注入：Local materialize 时可拷贝转相对路径、否则 ==ref；S3 恒 ==ref。
+    seq 是单调序号（materialize 给 artifact 目标名加前缀去碰撞：不同源目录同 basename 不互相覆盖）。
+    """
+    entries: list[dict] = []
+    seq = 0
+
+    def _entry(scope_id: str, scenario_id: str | None, step_index: int | None, engine: str, rr: ReportRef) -> dict:
+        nonlocal seq
+        href = make_href(rr, seq)
+        seq += 1
+        return {
+            "scope_id": scope_id,
+            "scenario_id": scenario_id,
+            "step_index": step_index,  # None=scope/scenario 级；非 None=step 级（同 scenario 多 trajectory 区分）
+            "engine": engine,
+            "kind": rr.kind,
+            "ref": rr.ref,            # 原始 ref（不透明，原样保留）
+            "href": href,             # 导航用链接（materialize 时可为相对路径，否则 == ref）
+            "label": rr.label,
+        }
+
+    for jr in result.jobs:
+        for rr in jr.report_refs:  # scope 级（Midscene report / Nova session summary）
+            entries.append(_entry(jr.scope_id, None, None, jr.engine, rr))
+        for sr in jr.scenarios:
+            for rr in sr.report_refs:  # scenario 级（当前引擎均不填，留作扩展）
+                entries.append(_entry(jr.scope_id, sr.scenario_id, None, jr.engine, rr))
+            for st in sr.steps:
+                for rr in st.report_refs:  # step 级（Nova trajectory 下沉）
+                    entries.append(_entry(jr.scope_id, sr.scenario_id, st.index, jr.engine, rr))
+    return entries
 
 
 class LocalReportStore:
@@ -68,47 +109,18 @@ class LocalReportStore:
         """探活 no-op（ADR 0030 决定七）：本地文件后端无「桶不存在」问题，目录随写随建。"""
 
     def _collect(self, result: RunResult, run_dir: Path, materialize: bool) -> list[dict]:
-        """遍历 result 树，把每个 ReportRef 投影成一条扁平 index 项（三级，ADR 0027）。
+        """遍历 result 树投影 report_index（复用共享 collect_report_index）。
 
-        粒度由 scenario_id/step_index 是否为 None 表达：都 None=scope 级；仅 step_index None=scenario 级；
-        两者都非 None=step 级（Nova trajectory 下沉，同 scenario 多 trajectory 靠 step_index 区分）。
+        href 差异靠 make_href 回调注入：materialize=True 且 ref 是存在的本地文件 → 拷进 artifacts/ 返相对路径；
+        否则 href==ref。（S3ReportStore 传自己的 make_href：href 恒==ref，见 s3.py。）
         """
-        entries: list[dict] = []
-        seq = 0  # 单调序号：materialize 时给 artifact 目标名加前缀去碰撞（不同源目录同 basename 不互相覆盖）
-        for jr in result.jobs:
-            for rr in jr.report_refs:  # scope 级（Midscene report / Nova session summary）
-                entries.append(self._entry(jr.scope_id, None, None, jr.engine, rr, run_dir, materialize, seq))
-                seq += 1
-            for sr in jr.scenarios:
-                for rr in sr.report_refs:  # scenario 级（当前引擎均不填，留作扩展）
-                    entries.append(
-                        self._entry(jr.scope_id, sr.scenario_id, None, jr.engine, rr, run_dir, materialize, seq)
-                    )
-                    seq += 1
-                for st in sr.steps:
-                    for rr in st.report_refs:  # step 级（Nova trajectory 下沉）
-                        entries.append(
-                            self._entry(jr.scope_id, sr.scenario_id, st.index, jr.engine, rr, run_dir, materialize, seq)
-                        )
-                        seq += 1
-        return entries
-
-    def _entry(self, scope_id, scenario_id, step_index, engine, rr, run_dir: Path, materialize: bool, seq: int) -> dict:
-        href = rr.ref
-        if materialize:
-            local = _local_path(rr.ref)
-            if local is not None and local.exists():
-                href = _materialize(local, run_dir, seq)
-        return {
-            "scope_id": scope_id,
-            "scenario_id": scenario_id,
-            "step_index": step_index,  # None=scope/scenario 级；非 None=step 级（同 scenario 多 trajectory 区分）
-            "engine": engine,
-            "kind": rr.kind,
-            "ref": rr.ref,            # 原始 ref（不透明，原样保留）
-            "href": href,             # 导航用链接（materialize 时为相对路径，否则 == ref）
-            "label": rr.label,
-        }
+        def make_href(rr: ReportRef, seq: int) -> str:
+            if materialize:
+                local = _local_path(rr.ref)
+                if local is not None and local.exists():
+                    return _materialize(local, run_dir, seq)
+            return rr.ref
+        return collect_report_index(result, make_href=make_href)
 
 
 def _local_path(ref: str) -> Path | None:

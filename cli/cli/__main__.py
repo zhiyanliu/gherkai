@@ -118,22 +118,26 @@ def _cmd_list_engines(repo: Path) -> int:
     return 0
 
 
-def _cmd_plan(args, repo: Path) -> int:
-    """plan 预检：读 feature → plan → 渲染 scope/job 分组。**不起 worker、不连 AWS、不烧钱**。
+def _load_and_plan(args, repo: Path) -> "list | int":
+    """plan 与 run 的共享前置装配：votes 校验 → 读 feature → plan。
 
-    与 _cmd_run 的 1)2) 步同源（同样的 load_feature + plan + PlanConfig），但到此为止——
-    省钱验证 feature 写法、看分组、暴露 PlanError。退出码与 run 一致（0 ok / 2 配置错）。
+    成功返回 `Job[]`；任一前置失败返回**退出码 2**（配置矛盾/读不到/语法错，均"没开跑就被拒"，
+    对齐 cli/README 退出码分层）。_cmd_plan 与 _cmd_run 都调它，避免两份手抄的前置逻辑漂移（N10）。
     """
+    # 0) 校验：assertion_votes 必须 ≥1。否则 worker 跑 0 次 AI 断言——votes=0 全判失败（假阴性）、
+    #    votes<0 更危险：0 > 负数/2 = True → **零 AI 调用却全绿**（假阳性）。入口拦截，不让坏值流进 worker。
     if args.assertion_votes < 1:
-        _progress(f"--assertion-votes 必须 ≥ 1（收到 {args.assertion_votes}）")
+        _progress(f"--assertion-votes 必须 ≥ 1（收到 {args.assertion_votes}）：投票次数 <1 会让 AI 断言不被执行")
         return 2
+    # 1) 读 feature（组合根的事，core 不碰 FS）→ FeatureSource[]
     try:
         features = [compose.load_feature(f, repo) for f in args.features]
     except FileNotFoundError as e:
         _progress(f"读 feature 失败：{e}")
         return 2
+    # 2) plan：.feature → Job[]（uri 互异/engine 冲突等违约 → PlanError；gherkin 语法错 → FeatureParseError）
     try:
-        jobs = plan(features, PlanConfig(
+        return plan(features, PlanConfig(
             default_engine=args.default_engine,
             default_assertion_votes=args.assertion_votes,
         ))
@@ -143,6 +147,17 @@ def _cmd_plan(args, repo: Path) -> int:
     except FeatureParseError as e:
         _progress(f"feature 语法错误（gherkin 解析失败，含行:列）：\n{e}")
         return 2
+
+
+def _cmd_plan(args, repo: Path) -> int:
+    """plan 预检：读 feature → plan → 渲染 scope/job 分组。**不起 worker、不连 AWS、不烧钱**。
+
+    与 _cmd_run 共用 `_load_and_plan`（votes 校验 + load_feature + plan），但到此为止——
+    省钱验证 feature 写法、看分组、暴露 PlanError。退出码与 run 一致（0 ok / 2 配置错）。
+    """
+    jobs = _load_and_plan(args, repo)
+    if isinstance(jobs, int):  # 前置失败 → 退出码
+        return jobs
 
     # 核心产出 → stdout（与 run 的输出契约一致：--json 单文档 / 否则人看文本）
     if args.json:
@@ -182,32 +197,10 @@ def _is_botocore_error(exc: BaseException) -> bool:
 def _cmd_run(args, repo: Path) -> int:
     use_json = args.json
 
-    # 0) 校验配置：assertion_votes 必须 ≥1。否则 worker 跑 0 次 AI 断言——votes=0 全判失败（假阴性）、
-    #    votes<0 更危险：判定 0 > 负数/2 = True → **零 AI 调用却全绿**（假阳性），且 1/1 隐藏渲染看不出。
-    #    在入口拦截（退出码 2，与 plan 配置矛盾一致），不让坏值流进 worker 白烧会话。
-    if args.assertion_votes < 1:
-        _progress(f"--assertion-votes 必须 ≥ 1（收到 {args.assertion_votes}）：投票次数 <1 会让 AI 断言不被执行")
-        return 2
-
-    # 1) 读 feature（组合根的事，core 不碰 FS）→ FeatureSource[]
-    try:
-        features = [compose.load_feature(f, repo) for f in args.features]
-    except FileNotFoundError as e:
-        _progress(f"读 feature 失败：{e}")
-        return 2
-
-    # 2) plan：.feature → Job[]（uri 互异/engine 冲突等违约 → PlanError）
-    try:
-        jobs = plan(features, PlanConfig(
-            default_engine=args.default_engine,
-            default_assertion_votes=args.assertion_votes,
-        ))
-    except PlanError as e:
-        _progress(f"plan 失败（配置矛盾，拒绝运行）：{e}")
-        return 2
-    except FeatureParseError as e:
-        _progress(f"feature 语法错误（gherkin 解析失败，含行:列）：\n{e}")
-        return 2
+    # 0/1/2) votes 校验 + 读 feature + plan（与 _cmd_plan 共享；前置失败返回退出码 2，见 _load_and_plan）
+    jobs = _load_and_plan(args, repo)
+    if isinstance(jobs, int):
+        return jobs
 
     # 进度走 stderr（不再受 --json 开关；stdout 始终只放核心产出）。--quiet 仍可静音逐事件。
     _progress(f"plan: {len(jobs)} job(s)  (default_engine={args.default_engine})")

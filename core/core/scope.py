@@ -122,7 +122,7 @@ def plan(features: list[FeatureSource], config: PlanConfig) -> list[Job]:
             key = scenario_id  # 未标 scope：自成单元素 scope，键 = scenario_id（ADR 0025）
             group_is_named[key] = False
         groups.setdefault(key, []).append(parsed)
-        group_uris.setdefault(key, set()).add(_uri_of(scenario_id))
+        group_uris.setdefault(key, set()).add(parsed.uri)  # 权威 uri（parse 时已知），不从 id 有损反解
 
     # 3) 跨文件合并 warning（ADR 0025）：一个 named scope 跨多个 uri
     for key, uris in group_uris.items():
@@ -155,15 +155,3 @@ def plan(features: list[FeatureSource], config: PlanConfig) -> list[Job]:
             )
         )
     return jobs
-
-
-def _uri_of(scenario_id: str) -> str:
-    """从 scenario_id（<uri>:<line>[:<example>]）取回 uri 部分。
-
-    uri 本身可能含冒号（如 URL），故从右侧剥 1~2 段纯数字行号。
-    """
-    parts = scenario_id.split(":")
-    # 从右往左剥掉连续的纯数字段（行号 / example 行号）
-    while len(parts) > 1 and parts[-1].isdigit():
-        parts.pop()
-    return ":".join(parts)

@@ -57,6 +57,44 @@ def test_outline_expands_and_distinguishable():
     assert len(set(ids)) == 2  # id 各自不同（example 行号消歧）
 
 
+# ---- Rule 嵌套场景：id 不塌成 :None、不撞名（ADR 0025，回归 parse._index_ast_lines 只遍历顶层的 bug）----
+def test_rule_nested_scenarios_get_distinct_ids():
+    # gherkin Compiler 把 Rule 下 scenario 完全展开成真 pickle（真 job）；其 astNodeIds 指向 Rule 内节点。
+    # 曾 bug：_index_ast_lines 只遍历 feature 顶层、不下钻 rule → Rule 内 scenario 回查行号得 None →
+    # id 塌成 "t.feature:None"、多个 Rule 场景静默撞名（ADR 0025 撞名=静默灾难）。此测护住递归下钻。
+    jobs = _plan(
+        """Feature: F
+  Rule: R1
+    Scenario: r1s1
+      When "做事A"
+  Rule: R2
+    Scenario: r2s1
+      When "做事B"
+"""
+    )
+    assert len(jobs) == 2  # 两个 Rule 各一 scenario → 两个独立 job（未标 scope、不该塌成一个）
+    ids = [j.scenarios[0].id for j in jobs]
+    assert all(":None" not in i for i in ids), f"id 不该含 :None（行号回查失败），实际 {ids}"
+    assert len(set(ids)) == 2, f"两个 Rule 场景 id 必须各异（不撞名），实际 {ids}"
+
+
+def test_rule_nested_scenario_id_has_real_line():
+    # 更强：Rule 内 scenario 的 id 尾部是真实行号（不是 None）
+    jobs = _plan(
+        """Feature: F
+  Rule: R
+    Scenario: rs
+      When "做事"
+""",
+        uri="x.feature",
+    )
+    assert len(jobs) == 1
+    sid = jobs[0].scenarios[0].id
+    # 形如 x.feature:<行号>，行号是正整数
+    prefix, _, line = sid.rpartition(":")
+    assert prefix == "x.feature" and line.isdigit(), f"sid 应为 x.feature:<行号>，实际 {sid}"
+
+
 # ---- DataTable / DocString 进 step argument ----
 def test_datatable_and_docstring_argument():
     jobs = _plan(

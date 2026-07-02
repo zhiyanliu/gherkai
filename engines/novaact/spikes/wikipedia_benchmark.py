@@ -26,10 +26,9 @@ from nova_act import (
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # novaact/ 根，便于 import lib
 from lib.workflow_setup import ensure_workflow_definition
+from lib.constants import MODEL_ID, WORKFLOW_DEF  # 共享常量（与生产 worker 共用单一真理源）
 
 REGION = "us-east-1"
-MODEL_ID = "nova-act-latest"
-WORKFLOW_DEF = "spike-wikipedia-benchmark"
 N_FLAKE = 10
 
 

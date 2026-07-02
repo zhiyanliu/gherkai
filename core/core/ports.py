@@ -11,7 +11,7 @@ rule-of-three 克制：接口现在定（逼清边界），实现只写 local，
 """
 from __future__ import annotations
 
-from typing import Iterator, Protocol, runtime_checkable
+from typing import Iterator, Protocol
 
 from core.model import (
     Event,
@@ -31,7 +31,6 @@ from core.model import (
 # ============================================================================
 
 
-@runtime_checkable
 class WorkerHandle(Protocol):
     """一个在跑的 worker 的句柄（schedule 持有，用于 stop）。
 
@@ -43,7 +42,6 @@ class WorkerHandle(Protocol):
         ...
 
 
-@runtime_checkable
 class Engine(Protocol):
     """执行引擎 port（ADR 0016）。
 
@@ -64,13 +62,11 @@ class Engine(Protocol):
 
 
 # EngineResolver：按 job.engine 解析出 Engine（schedule 对引擎数/引擎名无知，ADR 0026）
-@runtime_checkable
 class EngineResolver(Protocol):
     def __call__(self, engine_name: str) -> Engine: ...
 
 
 # Sink：接收 ADR 0024 原始流式事件的回调（pass-through，供进度/落地；与 RunResult 是同一事件流的两个视图，ADR 0026）
-@runtime_checkable
 class Sink(Protocol):
     def __call__(self, event: Event) -> None: ...
 
@@ -78,7 +74,6 @@ class Sink(Protocol):
 # JobSink：每个 job 完成时的回调，收 schedule **已归约好的** JobResult（非原始 Event）——供实时落库（ADR 0030 决定一）。
 # 与 Sink 同性质（都是注入回调、可注入 no-op、schedule 不碰 store），但粒度是「整 job 完成」而非「单个事件」。
 # schedule 在 as_completed 主线程串行 fire，故实现无需自己加锁。
-@runtime_checkable
 class JobSink(Protocol):
     def __call__(self, job: JobResult) -> None: ...
 
@@ -90,7 +85,6 @@ class JobSink(Protocol):
 # ============================================================================
 
 
-@runtime_checkable
 class RunStore(Protocol):
     """控制面：一次 run 的 **definition（RunMeta）+ 运行态（RunState）**，不存判定明细（ADR 0016 三层切分）。
 
@@ -115,7 +109,6 @@ class RunStore(Protocol):
     def preflight(self) -> None: ...
 
 
-@runtime_checkable
 class ResultStore(Protocol):
     """数据面：每 job(=scope) 判定真值，追加为主（**判定真值唯一权威**；CI 读判定靠它，ADR 0016）。
 
@@ -128,7 +121,6 @@ class ResultStore(Protocol):
     def preflight(self) -> None: ...  # 探活（ADR 0030 决定七）：云端探桶、local no-op
 
 
-@runtime_checkable
 class ReportStore(Protocol):
     """归集报告产物为一份**派生只读导航视图**（RunReport，ADR 0027）：manifest.json + index.html。
 

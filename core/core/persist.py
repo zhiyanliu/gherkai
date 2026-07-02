@@ -20,8 +20,6 @@ from __future__ import annotations
 
 import threading
 
-import traceback
-
 from core.model import (
     Event,
     JobResult,
@@ -54,7 +52,6 @@ class RunPersistence:
         self._result_store = result_store
         self._report_store = report_store
         self._lock = threading.Lock()  # 单一 store 锁：串行所有写 store 的入口（RUNNING 刷 + 终态刷，跨线程）
-        self._report_error: str | None = None  # finalize 时 ReportStore.write 失败留痕（派生视图失败不击穿 run）
 
     def begin(self, run_meta: RunMeta, *, started_at: str) -> None:
         """run 开始（schedule 之前）：先探活三个 store，再写 definition + 初始全 pending 运行态。
@@ -129,6 +126,6 @@ class RunPersistence:
                     self._run_id, result, created_at=ended_at, materialize=materialize
                 )
             except Exception:
-                # 派生视图写失败不击穿已 commit 的 run（判定真值在 ResultStore）；返回 None，报告可重建。
-                self._report_error = traceback.format_exc()  # 留痕供调用方诊断（可选读取）
+                # 派生视图写失败不击穿已 commit 的 run（判定真值在 ResultStore）；返回 None，报告可从 RunResult 重建。
+                # 不留痕：曾存 traceback 到 _report_error 供"可选读取"，但生产端（cli）从不消费——删悬空字段（代码 review）。
                 return None

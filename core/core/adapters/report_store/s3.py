@@ -19,24 +19,10 @@ from __future__ import annotations
 import json
 
 from core.adapters._boto import require_boto3
-from core.model import ReportRef, ResourceUri, RunResult
+from core.model import ResourceUri, RunResult
 
-# 复用 report 渲染的单一真理源（index.html 拼装 + schema 版本）——S3 与 Local 出一致的 report
-from core.adapters.report_store.local import SCHEMA_VERSION, _render_index_html
-
-
-def _index_entry(scope_id: str, scenario_id: str | None, step_index: int | None, engine: str, rr: ReportRef) -> dict:
-    """report_index 一条扁平项（materialize=no-op：href==ref，不拷贝产物）。形状对拍 LocalReportStore._entry。"""
-    return {
-        "scope_id": scope_id,
-        "scenario_id": scenario_id,
-        "step_index": step_index,  # None=scope/scenario 级；非 None=step 级（对拍 local，ADR 0027）
-        "engine": engine,
-        "kind": rr.kind,
-        "ref": rr.ref,
-        "href": rr.ref,   # no-op：链接原样指向 worker 报的 ref（第一版取舍，[0029]）
-        "label": rr.label,
-    }
+# 复用 report 的单一真理源：index.html 渲染 + schema 版本 + report_index 三级投影（S3 与 Local 出一致的 report）
+from core.adapters.report_store.local import SCHEMA_VERSION, _render_index_html, collect_report_index
 
 
 class S3ReportStore:
@@ -56,17 +42,9 @@ class S3ReportStore:
         materialize 当 no-op（第一版，见模块 docstring）——收到 True 也忽略、不报错。
         """
         base = f"{self._prefix}{run_id}"
-        # report_index 顺序对拍 LocalReportStore._collect：每 job 内 scope 级 → scenario 级 → step 级（三级，ADR 0027）
-        index_entries: list[dict] = []
-        for jr in result.jobs:
-            for rr in jr.report_refs:  # scope 级
-                index_entries.append(_index_entry(jr.scope_id, None, None, jr.engine, rr))
-            for sr in jr.scenarios:
-                for rr in sr.report_refs:  # scenario 级（当前引擎均不填）
-                    index_entries.append(_index_entry(jr.scope_id, sr.scenario_id, None, jr.engine, rr))
-                for st in sr.steps:
-                    for rr in st.report_refs:  # step 级（Nova trajectory 下沉）
-                        index_entries.append(_index_entry(jr.scope_id, sr.scenario_id, st.index, jr.engine, rr))
+        # report_index：复用共享三级投影（与 Local 同一真理源，形状/顺序不再靠人肉同步）。
+        # materialize 当 no-op（第一版取舍，[0029]）→ make_href 恒返 ref，href==ref、不拷贝产物。
+        index_entries = collect_report_index(result, make_href=lambda rr, seq: rr.ref)
 
         # manifest = 纯派生导航视图（同 Local，[0027]）：不内嵌 result 真值，靠 run_id 软引用
         manifest = {

@@ -37,6 +37,8 @@ class ParsedScenario:
 
     scenario: Scenario
     tags: tuple[str, ...]  # 已合并 feature 级 + scenario 级（gherkin Compiler 合并，ADR 0025）
+    uri: str  # 该 scenario 所属 .feature 的 uri（权威值，parse 时本就已知）——供 scope 跨文件合并 warning 分组，
+    # 免得 scope 从 scenario_id 有损反解（scenario_id 含冒号/数字端口时反解会错，见 scope.group_uris）
 
 # pickle step type → 我们的 keyword（And/But 已被 Compiler 折叠继承上一条非连接词的类型）
 _TYPE_TO_KEYWORD = {"Context": "Given", "Action": "When", "Outcome": "Then"}
@@ -45,7 +47,9 @@ _TYPE_TO_KEYWORD = {"Context": "Given", "Action": "When", "Outcome": "Then"}
 def _index_ast_lines(gherkin_document: dict) -> dict[str, int]:
     """建 AST 节点 id → location.line 的索引，供 pickle 的 astNodeIds 回查行号。
 
-    遍历 feature.children 下的 background/scenario 及其 steps、scenario.examples 的 tableBody 行。
+    遍历 feature 及 **Rule 下**（Compiler 把 Rule 场景完全展开成真实 pickle，其 astNodeIds 指向 Rule 内节点，
+    ADR 0025）的 background/scenario 及其 steps、scenario.examples 的 tableBody 行。**必须下钻 rule**——
+    否则 Rule 内 scenario 回查行号得 None → sid 塌成 `<uri>:None`、多个 Rule 场景静默撞名（ADR 0025 撞名=静默灾难）。
     """
     lines: dict[str, int] = {}
 
@@ -53,21 +57,29 @@ def _index_ast_lines(gherkin_document: dict) -> dict[str, int]:
         if node and "id" in node and "location" in node:
             lines[node["id"]] = node["location"]["line"]
 
+    def record_children(children: list) -> None:
+        """处理一个 children 列表（feature 顶层 / Rule 内层同构）：记 background/scenario 及其 step/examples 行。"""
+        for child in children:
+            for key in ("background", "scenario"):
+                node = child.get(key)
+                if not node:
+                    continue
+                record(node)
+                for step in node.get("steps", []):
+                    record(step)
+                # Scenario Outline 的 Examples 表行（pickle astNodeIds 末项指向它，用于区分展开后的多个 scenario）
+                for ex in node.get("examples", []):
+                    for row in ex.get("tableBody", []):
+                        record(row)
+            # 下钻 Rule：其 children 与 feature 顶层同构（Compiler 展开 Rule 场景为真实 pickle，ADR 0025）
+            rule = child.get("rule")
+            if rule:
+                record_children(rule.get("children", []))
+
     feature = gherkin_document.get("feature")
     if not feature:
         return lines
-    for child in feature.get("children", []):
-        for key in ("background", "scenario"):
-            node = child.get(key)
-            if not node:
-                continue
-            record(node)
-            for step in node.get("steps", []):
-                record(step)
-            # Scenario Outline 的 Examples 表行（pickle astNodeIds 末项指向它，用于区分展开后的多个 scenario）
-            for ex in node.get("examples", []):
-                for row in ex.get("tableBody", []):
-                    record(row)
+    record_children(feature.get("children", []))
     return lines
 
 
@@ -137,6 +149,7 @@ def parse_feature(uri: str, text: str) -> list[ParsedScenario]:
             ParsedScenario(
                 scenario=Scenario(id=sid, name=name, steps=steps),
                 tags=tuple(t["name"] for t in pickle.get("tags", [])),
+                uri=uri,
             )
         )
     return parsed

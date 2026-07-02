@@ -123,7 +123,8 @@ def test_finalize_isolates_report_write_failure(tmp_path):
     # commit point 仍落了：run_state 终态 = PASSED + ended_at（finalize_run 不在隔离范围内）
     state = run_store.load_run_state("r")
     assert state is not None and state.status == Status.PASSED and state.ended_at == "t9"
-    assert p._report_error is not None and "磁盘满" in p._report_error  # 失败留痕供诊断
+    # 核心不变量：ReportStore.write 抛异常被隔离、run 照常 commit（返回 None + 控制面终态已落），
+    # 不抛出击穿。（曾断言 _report_error 留痕，该字段生产端无人消费、已删，见代码 review N7。）
 
 
 # ---- 决定二：begin 写初始全 pending 态，jobs Map 与 run_meta 对齐 ----
