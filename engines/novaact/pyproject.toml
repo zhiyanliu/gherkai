@@ -7,7 +7,6 @@ requires-python = ">=3.13"
 dependencies = [
     "nova-act>=3.4.187.0",
     "pytest>=9.1.1",
-    "pytest-bdd>=8.1.0",
 ]
 
 [tool.pytest.ini_options]
