@@ -158,7 +158,7 @@ core 的 `schedule`/汇总逻辑应能用一个**假 worker**（in-memory adapte
 
 ## 远程传输演进（Fargate：port 抽象活、pipe 传输死；记路标不实现）
 
-> 前瞻 draft 性质的一节：Fargate 执行 adapter 尚未编码。这里钉的是**已想清、不会变**的边界（哪些 survive、哪些必改），供真做时照做；具体传输选型（HTTP/队列/CloudWatch）留到那时定，不在此焊死。产物→S3 是**正交的另一条边**，见 [0029](./0029-fargate-engine-artifacts-to-s3.md)。
+> 前瞻 draft 性质的一节：Fargate 执行 adapter 尚未编码。这里钉的是**已想清、不会变**的边界（哪些 survive、哪些必改），供真做时照做；具体传输选型（HTTP/队列/CloudWatch）留到那时定，不在此焊死。产物→S3 是**正交的另一条边**，见 [0029](./0029-engine-artifacts-to-s3.md)。
 
 当前传输是**OS 管道**：core 是 worker 父进程，job 写 worker stdin、事件读 worker 的 `EVENTS_FD` fd、退出码经 `proc.wait()`。搬到 Fargate（[0017](./0017-cloud-execution-fargate-over-runtime.md)），core 不再是 worker 父进程，**管道语义（父子进程 / fd 继承 / EOF / stdin）全无对等物**。核实（AWS 文档 + 本仓 code，2026-07）的结论分两层：
 
@@ -172,7 +172,7 @@ core 的 `schedule`/汇总逻辑应能用一个**假 worker**（in-memory adapte
 | **事件出口** | worker 写 `EVENTS_FD` fd，core 读端逐行 `event_from_line` | 无 fd 继承。**【关键坑】事件走专用 fd、不在 stdout（三通道分离，见上），故 awslogs/CloudWatch 抓不到事件**——不能"tail stdout 重建"（要么抓不到、要么把事件挪回 stdout 重新引入被三通道分离修掉的 SDK 噪声污染）。改成 worker `SendMessage` 到 SQS（见下「SQS 作 events-out 传输」） | `emit()` 的 sink 从"写 fd"改成"`SendMessage` 到注入的 SQS 队列" |
 | **停 / 退出码** | `handle.stop`=SIGTERM→grace→SIGKILL；管道 EOF + `proc.wait()` 同步读退出码 80 | `StopTask`（grace 变成 task-def 期常量 `stopTimeout`、Fargate 上限 120s、**不能逐次传**）；退出码经 `DescribeTasks` 读 `containers[].exitCode`（须等 `lastStatus==STOPPED`，STOPPED 前常 null） | **worker 不改**——照样 `exit 80`；只是 adapter 读取从 `proc.wait()` 换成 `DescribeTasks` |
 
-**架构结论（贯穿产物半 [0029](./0029-fargate-engine-artifacts-to-s3.md) 与传输半）**：**worker 的引擎逻辑（派发/投票/短路/产物生成）不按执行环境分；worker 的 I/O 边缘（job 入口、事件 sink、产物落点）本质是传输/落点，应抽象成可注入接口**——subprocess 注入"读 stdin / 写 fd / 报 `file://`"，fargate 注入"读 S3 / `SendMessage` 到 SQS / 报 `s3://`"。这与 core 侧已有的 `Engine` adapter（subprocess/fargate 两种传输实现）对称。**worker 永远是事件的 producer/client，不是 server**——短命、跑完即退的 worker 不该 listen 等长驻 core 来连；换成队列后**两端都不 listen**（见下）。这条兑现 [0016](./0016-execution-architecture-core-lib-run-model.md)「组合根注入」+「worker 引擎逻辑不按执行环境分」。
+**架构结论（贯穿产物半 [0029](./0029-engine-artifacts-to-s3.md) 与传输半）**：**worker 的引擎逻辑（派发/投票/短路/产物生成）不按执行环境分；worker 的 I/O 边缘（job 入口、事件 sink、产物落点）本质是传输/落点，应抽象成可注入接口**——subprocess 注入"读 stdin / 写 fd / 报 `file://`"，fargate 注入"读 S3 / `SendMessage` 到 SQS / 报 `s3://`"。这与 core 侧已有的 `Engine` adapter（subprocess/fargate 两种传输实现）对称。**worker 永远是事件的 producer/client，不是 server**——短命、跑完即退的 worker 不该 listen 等长驻 core 来连；换成队列后**两端都不 listen**（见下）。这条兑现 [0016](./0016-execution-architecture-core-lib-run-model.md)「组合根注入」+「worker 引擎逻辑不按执行环境分」。
 
 ### SQS 作 events-out 传输（不自建 relay）
 
@@ -197,7 +197,7 @@ core 的 `schedule`/汇总逻辑应能用一个**假 worker**（in-memory adapte
 - **消息大小**：0024 事件极少超 SQS 单消息 256KB（reportRefs 是指针非内容）；真超了用 SQS extended client（body offload 到 S3，本仓已有 S3）。
 - **延迟**：管道近实时（微秒级 IPC）；SQS 长轮询通常亚秒级（消息一到即返回、不等满），比 CloudWatch tail 轻，但仍非 IPC 级——会略退化 [0030](./0030-realtime-persistence-seam.md) 实时落库时效。
 - **存活判定迁移**（关键）：Fargate 下 **worker 卡死不再靠"事件流沉默"判**（[0026](./0026-schedule-module.md) 心跳机制）——事件经 SQS，队列静默≠worker 死。云端 worker 存活改由 ECS `DescribeTasks` task 状态判。心跳/超时的判据从"事件流"迁到"ECS task 状态"。
-- **grace 不对称**：`handle.stop(grace_period_s)` 现在是运行期传参（cli Nova 10s / schedule 5s）；Fargate `stopTimeout` 是 task-def 期常量、≤120s、不能逐次变——叠加容器盘停即销毁的 artifact 丢失（[0029](./0029-fargate-engine-artifacts-to-s3.md) 头号待解项）。
+- **grace 不对称**：`handle.stop(grace_period_s)` 现在是运行期传参（cli Nova 10s / schedule 5s）；Fargate `stopTimeout` 是 task-def 期常量、≤120s、不能逐次变——叠加容器盘停即销毁的 artifact 丢失（[0032](./0032-fargate-execution-environment.md) 头号待解项）。
 
 ## 现在做 / 留口子
 
