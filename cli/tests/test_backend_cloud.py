@@ -225,3 +225,43 @@ def test_cloud_artifacts_are_s3_and_ddb_uris(tmp_path, monkeypatch, capsys):
     assert art["run_meta"].startswith("ddb://T/") and art["run_meta"].endswith("#META")
     assert art["run_state"].endswith("#STATE")
     assert art["report_index"].startswith("s3://B/")  # S3ReportStore.write 返回的 s3:// index
+
+
+# ---- cloud 把产物 S3 上传落点（artifact_s3）注入 build_engines（ADR 0029 第一期接线）----
+def test_cloud_injects_artifact_s3_to_engines(tmp_path, monkeypatch):
+    record: list = []
+    _patch_cloud_handles(monkeypatch, record)
+    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
+    box = {}
+    real_build = m.compose.build_engines
+
+    def spy_build(repo, **kwargs):
+        box.update(kwargs)
+        return real_build(repo)  # 真 engines（无落点），只截获注入的 kwargs
+
+    monkeypatch.setattr(m.compose, "build_engines", spy_build)
+    rc = m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud",
+                 "--ddb-table", "T", "--s3-bucket", "mybkt", "--report-dir", "runs",
+                 "--region", "us-east-1", "--quiet", "--json"])
+    assert rc == 0
+    # artifact_s3=(bucket, "<report_dir>/<run_id>/")：跟 --backend cloud 走、prefix 规范化补尾 /（ADR 0029）
+    art = box.get("artifact_s3")
+    assert art is not None, "cloud 应把 artifact_s3 注入 build_engines"
+    assert art[0] == "mybkt"
+    assert art[1].startswith("runs/") and art[1].endswith("/")
+
+
+def test_local_does_not_inject_artifact_s3(tmp_path, monkeypatch):
+    # local 模式不注入 artifact_s3（worker 报 file://、不上传）——ADR 0029 零行为变化
+    box = {}
+    real_build = m.compose.build_engines
+
+    def spy_build(repo, **kwargs):
+        box.update(kwargs)
+        return real_build(repo)
+
+    monkeypatch.setattr(m.compose, "build_engines", spy_build)
+    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
+    rc = m.main(["run", str(_write_feature(tmp_path)), "--report-dir", str(tmp_path / "r"), "--quiet"])
+    assert rc == 0
+    assert box.get("artifact_s3") is None  # local 不注入

@@ -76,7 +76,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     run.add_argument(
         "--s3-bucket", default=None, metavar="NAME",
-        help="[--backend cloud] S3 桶名（存判定结果与报告）；兜底 AWS_S3_BUCKET。桶需预先建好",
+        help="[--backend cloud] S3 桶名（存判定结果、报告与引擎产物）；兜底 AWS_S3_BUCKET。桶需预先建好",
     )
     run.add_argument(
         "--region", default=None, metavar="R",
@@ -177,6 +177,21 @@ def _progress(*args, **kwargs) -> None:
     print(*args, **kwargs)
 
 
+def _prune_empty_dirs(root: Path) -> None:
+    """自底向上删 root 下的空目录（含 root 自身若最终空）——只删空的（ADR 0029 cloud 清理本地空壳）。
+
+    非空目录（残留产物/文件）自然保留（rmdir 抛 OSError → 吞掉），与 worker「上传失败保留本地」护栏自洽。
+    root 不存在则 no-op。用于 cloud 模式清 worker 用完的本地产物暂存区空壳。
+    """
+    if not root.exists():
+        return
+    for d, _subdirs, _files in os.walk(root, topdown=False):
+        try:
+            os.rmdir(d)  # 只删空目录；非空 → OSError → 吞掉、保留
+        except OSError:
+            pass
+
+
 def _is_botocore_error(exc: BaseException) -> bool:
     """是否 botocore 异常（云端不可达/权限/凭证/region 等）。
 
@@ -215,9 +230,10 @@ def _cmd_run(args, repo: Path) -> int:
     report_root = Path(args.report_dir).resolve()
     nova_logs_dir = (report_root / run_id / "nova-trajectories") if do_report else None
     midscene_run_dir = (report_root / run_id / "midscene-run") if do_report else None
-    resolver = compose.make_resolver(
-        compose.build_engines(repo, nova_logs_dir=nova_logs_dir, midscene_run_dir=midscene_run_dir)
-    )
+    # engines 的 resolver 延后到 store 装配之后构造——cloud 时要把 S3 上传落点（bucket + <report_dir>/<run_id>/
+    # 前缀）注入给 worker（ADR 0029 第一期），而 bucket 在下面 cloud 分支才确定。artifact_s3 默认 None（local
+    # / --no-report → worker 报 file://、不上传）。
+    artifact_s3: tuple[str, str] | None = None
 
     # 3b) 实时写编排（ADR 0030）：组合根按 --backend 注入 local/cloud 两套 store adapter，RunPersistence
     #     负责「随进度落库」的统一编排（commit-point 写序 / RUNNING 中间态 / 按 scope_id 增量刷）。
@@ -245,6 +261,11 @@ def _cmd_run(args, repo: Path) -> int:
             except ImportError as e:
                 _progress(f"--backend cloud 需要 boto3：{e}")
                 return 2
+            # 产物 S3 上传落点（ADR 0029 第一期）：跟 --backend cloud 走。prefix 与 S3ReportStore/ResultStore
+            # 同规范化（compose._normalize_prefix，补尾 /），再拼 <run_id>/ → worker 上传 key 与 report 同前缀、
+            # 镜像本地 run 树（worker 拼 s3://<bucket>/<prefix><产物相对 run 树路径>）。
+            assert bucket  # 上面 missing 校验已保证非 None（收窄类型）
+            artifact_s3 = (bucket, f"{compose._normalize_prefix(args.report_dir)}{run_id}/")
         else:
             run_store, result_store, report_store, make_artifacts = compose.build_local_stores(report_dir=args.report_dir)
         persistence = RunPersistence(
@@ -259,6 +280,13 @@ def _cmd_run(args, repo: Path) -> int:
                 _progress(f"--backend cloud 云端不可达（表/桶不存在或无权限/凭证·region 缺）：{e}")
                 return 2
             raise
+
+    # 组合根注入引擎 resolver（延后到此：cloud 时 artifact_s3 已在上面确定，一并注入给 worker，ADR 0029）。
+    resolver = compose.make_resolver(
+        compose.build_engines(
+            repo, nova_logs_dir=nova_logs_dir, midscene_run_dir=midscene_run_dir, artifact_s3=artifact_s3,
+        )
+    )
 
     # 4) sink：逐事件进度 → stderr（诊断；--quiet 静音。不再受 --json 影响——走 stderr 不污染 stdout 数据）
     #    前缀 `[core <scope>:event]` 与 worker 透传行 `[worker <scope>:err]` **同一视觉骨架**
@@ -320,6 +348,14 @@ def _cmd_run(args, repo: Path) -> int:
     if persistence:
         index = persistence.finalize(result, ended_at=compose.now_iso())
         artifacts = make_artifacts(run_id, index)  # report_index=None（report 写失败被隔离）时该键省略
+
+    # cloud 模式：清理本地 run 根的空壳（ADR 0029）。cloud 下 <report_dir>/<run_id>/ 只是 worker 写产物的临时
+    # 暂存区——产物已上传 S3、worker 已 rmtree 各自子目录（nova-trajectories/midscene-run），只剩空目录。
+    # 只删空目录（若某腿整目录 flush 失败保留了产物、其目录非空则自然不删，与 worker「上传失败保留本地」护栏自洽）。
+    # 这是 cli 组合根清自己算出的本地落点——core 对本地文件系统无知（0016 窄腰），不该由 core/store 删。
+    # local 模式不清（产物就该留本地当最终落点）。
+    if args.backend == "cloud":
+        _prune_empty_dirs(report_root / run_id)
 
     # 7) 核心产出 → stdout（--json：单一 JSON 文档，把产物落点折进同一对象保可解析；否则人看文本汇总）。
     #    产物落点提示属诊断 → stderr（不论模式），不污染被重定向的 stdout 主输出。

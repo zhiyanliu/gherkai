@@ -48,6 +48,7 @@ def build_engines(
     *,
     nova_logs_dir: str | Path | None = None,
     midscene_run_dir: str | Path | None = None,
+    artifact_s3: tuple[str, str] | None = None,
 ) -> dict[str, Engine]:
     """每个引擎一个 SubprocessEngine（cmd 不同，core 引擎无关，ADR 0026）。
 
@@ -60,13 +61,35 @@ def build_engines(
     - midscene_run_dir → `MIDSCENE_RUN_DIR` → Midscene SDK 的 run 根目录（report/dump/log 全在其下），
       report.html 落这里。**必须传绝对路径**：SDK 用 `path.resolve(process.cwd(), MIDSCENE_RUN_DIR)`
       相对 worker cwd 解析，相对路径会落错地方（与 Nova trajectory 早期踩的 cwd 歧义同源）。
+
+    产物 S3 上传落点（ADR 0029「第一期实现定论」）——`artifact_s3=(bucket, prefix)` 非 None 时（跟
+    `--backend cloud` 走、由组合根注入、非 env-sniff）给两腿 worker 叠加 `ARTIFACT_S3_BUCKET`/
+    `ARTIFACT_S3_PREFIX` env：worker 据此上传产物→报 `s3://`→删本地。**None（local）→ 不注入 → worker
+    走原 `file://` 路径、零行为变化**。worker 只认"有没有这组 env"，对"我在哪跑"无知（ADR 0016 注入红线）。
+    prefix 约定 = `<report_dir>/<run_id>/`（与 S3ReportStore/ResultStore 同前缀，key 镜像本地 run 树）。
     """
     novaact_dir = repo / "engines" / "novaact"
     midscene_dir = repo / "engines" / "midscene"
 
     # 完整继承当前环境（AWS 凭证等）再叠加产物落点——SubprocessEngine 的 env 非 None 时整体替换，故须带 os.environ。
-    nova_env = {**os.environ, "NOVA_LOGS_DIR": str(nova_logs_dir)} if nova_logs_dir is not None else None
-    midscene_env = {**os.environ, "MIDSCENE_RUN_DIR": str(midscene_run_dir)} if midscene_run_dir is not None else None
+    # S3 上传 env（cloud 时注入两腿共用）：worker 拼 s3://<bucket>/<prefix><产物在 run 树内相对路径>（ADR 0029）。
+    s3_env = (
+        {"ARTIFACT_S3_BUCKET": artifact_s3[0], "ARTIFACT_S3_PREFIX": artifact_s3[1]}
+        if artifact_s3 is not None else {}
+    )
+
+    def _env(local_dir: str | Path | None, local_key: str) -> dict | None:
+        # local 落点 env + 可选 S3 上传 env。两者都无 → None（worker 全用 SDK 默认、报 file://）。
+        if local_dir is None and not s3_env:
+            return None
+        env = {**os.environ}
+        if local_dir is not None:
+            env[local_key] = str(local_dir)
+        env.update(s3_env)
+        return env
+
+    nova_env = _env(nova_logs_dir, "NOVA_LOGS_DIR")
+    midscene_env = _env(midscene_run_dir, "MIDSCENE_RUN_DIR")
     return {
         # Nova Act 引擎：novaact venv 的 python 跑 worker
         "novaact": SubprocessEngine(

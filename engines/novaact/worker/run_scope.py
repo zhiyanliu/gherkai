@@ -43,8 +43,13 @@ from lib.constants import MODEL_ID, WORKFLOW_DEF  # 共享常量（单一真理�
 # @deterministic 在 import 时执行，把锚点登记进 _deterministic._REGISTRY。
 import deterministic as _deterministic  # noqa: E402
 import deterministic_steps  # noqa: E402,F401  仅为触发注册（其顶层 @deterministic 副作用）
+from lib.artifact_upload import ArtifactUploader  # noqa: E402  产物 S3 上传（ADR 0029；无落点 env 时 no-op 报 file://）
 
 REGION = os.environ.get("AWS_REGION", "us-east-1")
+
+# 产物上传器（ADR 0029 第一期）：从组合根注入的 env（ARTIFACT_S3_BUCKET/PREFIX）造——cloud 时上传 S3+删本地+
+# 报 s3://，local/未注入时 no-op 报 file://。模块级单例（对称 emit/_events_out 的模块级模式；worker 单进程单 run）。
+_uploader = ArtifactUploader.from_env()
 # MODEL_ID / WORKFLOW_DEF 移入 lib/constants.py（与 spike 共享单一真理源，见上 import）
 # AI 断言投票次数由 job.assertionVotes 决定（ADR 0014/0024，组合根经 --assertion-votes 设）。
 # 默认 1（不抖动检测，结果直观）；调高才跑 N 次取多数票。
@@ -124,10 +129,11 @@ def _traj_refs(step_traj: list[str]) -> list[dict]:
     """本 step 收集的 trajectory 路径 → step 级 reportRefs（kind=trajectory，ADR 0027 下沉）。
 
     一个 step 可能多次 act（尤其 N 票 AI 断言）→ 多个 trajectory；label 仅在多个时编号。空列表 → 空。
+    ref 经 `_uploader.to_report_ref` 得：cloud 上传 S3+删本地报 `s3://`，local no-op 报 `file://`（ADR 0029）。
     """
     n = len(step_traj)
     return [
-        {"kind": "trajectory", "ref": f"file://{p}",
+        {"kind": "trajectory", "ref": _uploader.to_report_ref(p),
          "label": (f"trajectory {i + 1}" if n > 1 else "trajectory")}
         for i, p in enumerate(step_traj)
     ]
@@ -237,7 +243,13 @@ def _run_step(nova, scenario_id: str, step: dict, votes_n: int) -> str:
             "status": "error", "errorType": _classify_act_error(e), "message": f"{type(e).__name__}: {e}",
         }
         if step_traj:
-            ev["reportRefs"] = _traj_refs(step_traj)  # 失败 act 的 trajectory 最该留（ADR 0027/0028）
+            # 失败 act 的 trajectory 最该留（ADR 0027/0028）。但 _traj_refs 会经 uploader 上传——若**上传本身**
+            # 是这次的失败源（S3 抛），重建 reportRefs 会再抛。**保护 emit 必发**：上传再失败也只是丢 reportRefs
+            # 链接，绝不吞掉 engine_error step_done 事件（否则降级成裸 traceback，ADR 0029 review #4）。
+            try:
+                ev["reportRefs"] = _traj_refs(step_traj)
+            except Exception:  # noqa: BLE001  重建 ref 时 upload 再失败：跳过 reportRefs、但 engine_error 事件照发
+                pass
         emit(ev)
         return "error"
 
@@ -572,11 +584,17 @@ def main() -> int:
     if base and session_id:
         summary = os.path.abspath(os.path.join(base, session_id, "session_summary.json"))
         if os.path.exists(summary):
-            scope_refs.append({"kind": "summary", "ref": f"file://{summary}", "label": "Nova session summary"})
+            # ref 经 uploader：cloud 上传 S3+删本地报 s3://，local no-op 报 file://（ADR 0029）。
+            scope_refs.append({"kind": "summary", "ref": _uploader.to_report_ref(summary), "label": "Nova session summary"})
     ev = {"type": "scope_done", "scopeId": scope["id"], "sessionId": session_id}
     if scope_refs:
         ev["reportRefs"] = scope_refs
     emit(ev)
+    # scope 末：整目录 flush 剩余产物（trajectory .json / log 等，已实时传的 reportRef 文件跳过）+ 全成功删本地
+    # （ADR 0029）。no-op（local/未注入落点）时直接返回、不碰本地。仅正常完成路径走到此；SIGTERM/网络耗尽的
+    # 中途 return 不 flush——中断产物保留本地（0028 #3 兜底）。
+    if base:
+        _uploader.flush_and_cleanup(base)
     return 0
 
 

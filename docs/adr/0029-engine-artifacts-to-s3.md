@@ -1,6 +1,6 @@
 # engine artifact→S3：worker 上传、由组合根注入的 S3 落点驱动（落点跟 `--backend cloud`，非绑执行环境）
 
-> **Status:** Accepted —— 决策已定：上传由组合根注入的 S3 落点驱动、跟 `--backend cloud` 走（非绑 Fargate）；第一期 `subprocess+cloud` 上传按「第一期实现定论」节落地（进行中）。**Fargate 执行环境特有的**中断丢失/grace/即时上传见 [0032](./0032-fargate-execution-environment.md)；远程事件传输见 [0024](./0024-worker-core-protocol.md)「远程传输演进」。
+> **Status:** Accepted —— 决策已定：上传由组合根注入的 S3 落点驱动、跟 `--backend cloud` 走（非绑 Fargate）；第一期 `subprocess+cloud` 上传按「第一期实现定论」节**已实现**。**Fargate 执行环境特有的**中断丢失/grace/即时上传见 [0032](./0032-fargate-execution-environment.md)；远程事件传输见 [0024](./0024-worker-core-protocol.md)「远程传输演进」。
 
 ## 本 ADR 只管一件事：engine 产物怎么到 S3（执行环境/传输层剥离）
 
@@ -25,11 +25,11 @@
 
 **worker 写本地产物 →（若拿到注入的 S3 落点配置）上传 S3、报 `s3://` ref，否则报 `file://`；core/ReportStore 对 ref 不透明搬运（不 stat/不 fetch/不打开），原样归进 RunReport。** 责任划分：
 
-| 角色 | 职责 |
-|---|---|
-| **worker** | 写产物到本地路径 →（**拿到注入的 S3 落点配置时**）上传 S3、报 `s3://<bucket>/<prefix>/...` 作 `report_refs.ref`（经 [0024](./0024-worker-core-protocol.md)）；未注入落点则报 `file://`。上传成功后**删本地**（见下「删本地」）。worker 对"我在哪跑"无知——只认落点配置有没有 |
-| **组合根（compose.py）** | 决定注入不注入 S3 落点（bucket/prefix/run_id）——**跟 `--backend cloud` 走**：cloud→注入（subprocess/fargate worker 都上传）、local→不注入（同机可读）。对称现在经 `NOVA_LOGS_DIR`/`MIDSCENE_RUN_DIR` 注入本地目录 |
-| **core / ReportStore / wire / schedule / model** | **一行不改**。`ReportRef.ref` 与 `ReportStore.write` 已是 `ResourceUri`（带 scheme 的统一指针，[0027](./0027-runreport-aggregation-index.md) 封版补丁所立——当时即为 S3 收口）；`s3://` ref 天然穿透 |
+| 角色                                             | 职责                                                                                                                                                                                                                                                            |
+|--------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **worker**                                       | 写产物到本地路径 →（**拿到注入的 S3 落点配置时**）上传 S3、报 `s3://<bucket>/<prefix>/...` 作 `report_refs.ref`（经 [0024](./0024-worker-core-protocol.md)）；未注入落点则报 `file://`。上传成功后**删本地**（见下「删本地」）。worker 对"我在哪跑"无知——只认落点配置有没有 |
+| **组合根（compose.py / cli `__main__`）**            | ① 决定注入不注入 S3 落点（bucket/prefix/run_id）——**跟 `--backend cloud` 走**：cloud→注入（subprocess/fargate worker 都上传）、local→不注入（同机可读）。对称现在经 `NOVA_LOGS_DIR`/`MIDSCENE_RUN_DIR` 注入本地目录。② **cloud 收尾清 run 根空壳**：finalize 后 `_prune_empty_dirs` 只删空目录（worker 已删产物子目录、run 根剩空壳），不碰 `--report-dir` 根（见下「删本地」cli 半）——本地落点是 cli 领地，core 对 FS 无知（[0016](./0016-execution-architecture-core-lib-run-model.md)） |
+| **core / ReportStore / wire / schedule / model** | **一行不改**。`ReportRef.ref` 与 `ReportStore.write` 已是 `ResourceUri`（带 scheme 的统一指针，[0027](./0027-runreport-aggregation-index.md) 封版补丁所立——当时即为 S3 收口）；`s3://` ref 天然穿透                                                                  |
 
 （注：Fargate Engine adapter「怎么起 worker/怎么停/事件怎么回」属传输/执行环境，见 [0024](./0024-worker-core-protocol.md)/[0032](./0032-fargate-execution-environment.md)——它注入 S3 落点的动作与 subprocess adapter 对称、无特殊性，不在本 ADR。）
 
@@ -39,14 +39,14 @@
 
 ## 两引擎不对称：统一在 core/协议层，分头在 worker 上传实现层——但**都是"写本地→传→删本地"，无一方直写 S3**
 
-SDK 调查证实两引擎产物形态/上传能力不对称，"上传那一小段"没法共用一份代码——但这本就是 [0024](./0024-worker-core-protocol.md)「协议形状一致、各语言各写」的现实，非新增分裂。**关键澄清**：两个引擎**都做不到"SDK 直写 S3"**——SDK 都只写本地盘，上传是**写完之后**的一步（Nova 靠 stop-hook、Midscene 靠手动 PutObject），故两腿其实**同构**：写本地 → 上传 S3 → 删本地。终态是 S3 单份（"不多传一份"），但路径上都要过一次本地盘（SDK 使然）。
+SDK 调查证实两引擎产物形态/上传能力不对称，"上传那一小段"没法共用一份代码——但这本就是 [0024](./0024-worker-core-protocol.md)「协议形状一致、各语言各写」的现实，非新增分裂。**关键澄清**：两个引擎**都做不到"SDK 直写 S3"**——SDK 都只写本地盘，上传是**写完之后**的一步（第一期两腿**都 worker 手动上传**：Nova `boto3 upload_file`、Midscene `PutObject`——不用 Nova SDK 的 `S3Writer` stop-hook，见「第一期实现定论」），故两腿其实**同构**：写本地 → 上传 S3 → 删本地。终态是 S3 单份（"不多传一份"），但路径上都要过一次本地盘（SDK 使然）。
 
-| | Nova Act（Python） | Midscene（TS） |
-|---|---|---|
-| 产物形态 | **每 act 一组文件**（`.html`+`_trajectory.json`+`_traces.json`），落 `logs_directory/<session_id>/`；session 末补 `session_summary.json` | **单文件** `report.html`（默认 `single-html`，截图 inline base64、自包含） |
-| SDK 能否**直写** S3 | **不能**。`logs_directory` 只接已存在的本地目录（`validate_path` 用 `os.path.isdir`，`s3://` 直接被拒）——SDK 必须写本地。官方给的是**写完再传**的通道 `S3Writer`（实现 `StopHook`），session 停止时 `os.walk` 本地目录逐文件 `upload_file` | **不能**，且无任何 S3 能力（落点写死 `getMidsceneRunSubDir('report')`，仅 `MIDSCENE_RUN_DIR`/`reportFileName`/`outputFormat` 可调，无 sink） |
-| 上传做法 | 给 NovaAct 注册 `S3Writer`（或自写 `StopHook`），传完报 `s3://`。是"写本地、停时上传"——**非 SDK 直写** | worker 手动：`destroy()` 后从 `agent.reportFile` 读单 html → `@aws-sdk/client-s3 PutObject` → 报 `s3://`。建议显式设 `MIDSCENE_RUN_DIR=/tmp/midscene_run` 使落点可控 |
-| 删本地 | 上传成功确认后删 `logs_directory/<session_id>/`（subprocess+cloud 下 `NOVA_LOGS_DIR` 是持久目录、不删会残留；fargate 下容器销毁自然清，为对称/预演一致仍主动删） | 上传成功确认后删 `agent.reportFile` |
+|                     | Nova Act（Python）                                                                                                                                                                                                                   | Midscene（TS）                                                                                                                                                       |
+|---------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 产物形态            | **每 act 一组文件**（`.html`+`_trajectory.json`+`_traces.json`），落 `logs_directory/<session_id>/`；session 末补 `session_summary.json`                                                                                               | **单文件** `report.html`（默认 `single-html`，截图 inline base64、自包含）                                                                                             |
+| SDK 能否**直写** S3 | **不能**。`logs_directory` 只接已存在的本地目录（`validate_path` 用 `os.path.isdir`，`s3://` 直接被拒）——SDK 必须写本地。官方给的是**写完再传**的通道 `S3Writer`（实现 `StopHook`），session 停止时 `os.walk` 本地目录逐文件 `upload_file` | **不能**，且无任何 S3 能力（落点写死 `getMidsceneRunSubDir('report')`，仅 `MIDSCENE_RUN_DIR`/`reportFileName`/`outputFormat` 可调，无 sink）                            |
+| 上传做法（第一期）   | worker 手动 `boto3 upload_file`，传完报 `s3://`（**不用**官方 `S3Writer` stop-hook——与 Midscene 对称、时序可控、错误可观测，见「第一期实现定论」；S3Writer 仅作调查记录见下） | worker 手动：`destroy()` 后从 `agent.reportFile` 读单 html → `@aws-sdk/client-s3 PutObject` → 报 `s3://`。建议显式设 `MIDSCENE_RUN_DIR=/tmp/midscene_run` 使落点可控 |
+| 删本地              | scope 末**整目录**上传成功后删整个 `NOVA_LOGS_DIR`（含 `.html`/`.json`/`log`，不按文件挑——抗 SDK 升级）；任一上传失败则保留（见下「上传时机/删本地」）                                                                                 | 同左：scope 末整目录上传成功后删整个 `MIDSCENE_RUN_DIR`（含 `report/`、`log/`）；失败保留                                                                            |
 
 **共享的环境契约**（两引擎都需要）：进程内有 boto3/aws-sdk + S3 写权限（subprocess+cloud=本地 AWS 凭证 / fargate=ECS task role）+ 一个 run/scope 维度的 S3 key 前缀约定。
 
@@ -79,9 +79,16 @@ SDK 调查证实两引擎产物形态/上传能力不对称，"上传那一小�
 
 - **注入机制（组合根，非 env-sniff）**：cloud 时 `compose.build_engines` 给 worker 多注入一组 S3 落点 env——`ARTIFACT_S3_BUCKET` + `ARTIFACT_S3_PREFIX`（=`<report_dir>/<run_id>/`），对称现有 `NOVA_LOGS_DIR`/`MIDSCENE_RUN_DIR`。**local 不注入 → worker 走原 `file://` 路径、零行为变化**。worker 只认"有没有这组 env"，对"我在哪跑（subprocess/fargate）"无知（[0016](./0016-execution-architecture-core-lib-run-model.md) 注入红线）。
 - **两腿都 worker 手动上传（boto3 / @aws-sdk/client-s3）**：Nova 不用官方 `S3Writer` stop-hook，改 worker 手动 `upload_file`——与 Midscene 手动 `PutObject` 对称、时序完全可控（先确认上传成功再删本地）、上传错误直接可观测（不被 SDK 静默吞）。
-- **S3 key 镜像本地 run 树**：产物 key = `ARTIFACT_S3_PREFIX` + 产物在本地 run 树内的相对路径（如 `<report_dir>/<run_id>/nova-trajectories/<session>/act_0.html`、`.../midscene-run/report/x.html`）。**与 index.html/manifest 同前缀**（`S3ReportStore` 也写在 `<prefix>/<run_id>/` 下），布局工整、为将来 cloud href 相对化留一致结构。**worker 报的 `s3://bucket/<key>` ref 必须与实际上传 key 逐字一致**（否则 index 链接断）——这是第一期主验目标。
-- **上传时机 = 结束批量**（非 act 粒度即时）：scope 末一次性上传该 scope 产生的所有产物。**subprocess 本地盘不销毁、无中断丢失压力**，批量最简够用；act 粒度即时上传是第二期（Fargate 容器盘停即销毁）才需要的，第一期不做。
-- **删本地 = 上传成功确认后删**：`upload_file`/`PutObject` 成功返回后才删对应本地文件（达成"S3 单份"）；**上传失败绝不删**（守上节「删本地」两条护栏，避免双丢）。
+- **上传逻辑抽成对称的 uploader 组件（结构约束）**：每腿把"注入解析 + 上传 + 删本地 + 报 ref"的一整套逻辑**封装进一个 uploader**（Nova 一个 Python 模块、Midscene 一个 TS 模块，各语言各写、[0024](./0024-worker-core-protocol.md)），worker 只调它、不内联上传细节。**这是刻意的结构决策，不是随手实现**——理由：① 这套逻辑（no-op 退回 `file://` / key 镜像 run 树 / 实时传 + `flush` 整目录 / 幂等去重 / 删本地护栏）**同一套语义必须两腿一致**，散在 worker 内联会漂移（一腿改了另一腿忘改）；封装成组件让"对称"由结构保证、review 时逐点对齐。② worker 引擎逻辑（派发/投票/短路）与"产物落哪/怎么传"解耦——uploader 是 worker 的**可注入 I/O 边缘**（对齐 [0024](./0024-worker-core-protocol.md)「worker I/O 边缘可注入」，为 Fargate 换传输铺路）。**接口形状（两腿对称、语义契约，非逐字签名）**：`from_env()` 从注入的 env 造（无 `ARTIFACT_S3_BUCKET` → no-op 实例、报 `file://`）；`to_report_ref(path)` reportRef 文件实时上传（幂等：已传直接返 `s3://`、不重传；失败抛→可观测）；`flush(dir)` scope 末整目录传剩余 + 全成功删整目录。**红线**：uploader 只认注入的落点配置、对"我在哪跑"无知（[0016](./0016-execution-architecture-core-lib-run-model.md)）；boto3/aws-sdk 惰性建（no-op 路径不 import/不 new client）。（具体类名/文件路径属实现、以 code 为准，不在此焊死以免漂移。）
+- **S3 key 镜像本地 run 树**：任一产物 key = `ARTIFACT_S3_PREFIX` + 产物在本地 run 树内的相对路径（如 `<report_dir>/<run_id>/nova-trajectories/<session>/act_0.html`、`.../midscene-run/report/x.html`）。**与 index.html/manifest 同前缀**（`S3ReportStore` 也写在 `<prefix>/<run_id>/` 下），布局工整、为将来 cloud href 相对化留一致结构。**worker 报的 `s3://bucket/<key>` ref 必须与实际上传 key 逐字一致**（否则 index 链接断）——这是第一期主验目标。key 是**确定性纯路径计算**（镜像 run 树），不依赖上传是否完成，故 ref 可在上传前先算好、实时报出。
+- **上传范围 = 整个产物目录，不按文件类型/名字挑**（关键，抗 SDK 升级）：把整个 `NOVA_LOGS_DIR` / `MIDSCENE_RUN_DIR` 目录**递归**上传（含 trajectory 的 `.json` 数据、SDK 的 `log/` 等一切）。**不区分"哪些文件是产物"**——那个区分会随引擎 SDK 升级（改文件名/加 `.trace`/`.har`）失效、埋雷；整目录一股脑传则本地清理不损耗任何产物、不受 SDK 版本影响。reportRef 报的 `s3://` 只是目录里某些文件的**引用**（key 镜像 → 那些 key 天然在整目录上传集合内、链接必有效）。
+- **上传时机 = reportRef 文件实时传（不删）+ 剩余文件 scope 末批量 flush**（混合、两级失败语义）：
+  - **reportRef 指向的文件**（Nova 的 `.html` 轨迹页/`summary`、Midscene 的 `report.html`）：报 ref 那一刻**实时上传**（不删本地，留到最后整目录删）。**失败 → 报错、worker 非 0 退出**（`engine_error`、可观测）——这些是报告链接强保证，悬空=报告坏。
+  - **剩余文件**（trajectory `.json`、`log/…` 等未被 reportRef 引用的）：**scope 末批量** flush（walk 整目录、已实时传的**跳过**、传剩余）。**失败 → 吞掉、run 照常**——报告链接不依赖它们（reportRef 文件已实时传成功、链接有效），"有一份总比没有强"。
+  - 这与 Fargate 为对抗中断丢失做的 **act 粒度即时抢传**（[0032](./0032-fargate-execution-environment.md)）不同：此处 subprocess 本地盘不销毁、无中断丢失压力，两级时机纯为"链接强保证 vs 剩余尽力"的语义分层。
+- **删本地 = 整目录删，全部上传成功才删（分两段：worker 半 + cli 半）**：
+  - **worker 半**：reportRef 实时传 + 剩余批量 flush **都成功** → `rmtree` 各自**产物子目录**（`NOVA_LOGS_DIR` / `MIDSCENE_RUN_DIR`，即 `<run 根>/nova-trajectories`、`<run 根>/midscene-run`），本地零残留（含 `log/`、`.json`——"本地清理不损耗任何产物、不按文件区分"）。**任一环失败 → 该子目录保留不删**（守「上传失败绝不删」护栏：剩余文件不丢，reportRef 文件本地留一份=与 S3 双份、失败降级可接受）。
+  - **cli 半（cloud 模式收尾）**：worker 只删自己的产物子目录，**run 根 `<report_dir>/<run_id>/` 空壳**还在——cli 组合根在 `finalize` 后调 `_prune_empty_dirs(report_root/<run_id>)` **只删空目录**（自底向上 `rmdir`，非空则 `OSError` 吞掉→保留，与上「失败保留」护栏自洽：某腿 flush 失败留了产物则其目录非空、自然不删）。**只对 `report_root/<run_id>` 调用、不碰 `--report-dir` 根**（那是下次 run 的落点容器，不误删）。**清理归 cli 组合根、不归 core/store**——core 对本地文件系统无知（[0016](./0016-execution-architecture-core-lib-run-model.md) 窄腰），本地落点本就是 cli 的领地。**local 模式不清**（产物即最终落点、`file://` 就地引用）。
 - **上传错误分类 = `engine_error`、不进重试域**：第一期上传失败归 `engine_error`（act 不幂等、网络重试是第二期 Fargate 才细化的，[0028](./0028-transient-network-ssl-resilience.md)）；上传失败让 worker 可观测（报 error / 非 0 退出），不静默吞。
 - **core / ReportStore 一行不改**：`s3://` ref 天然穿透（[0027](./0027-runreport-aggregation-index.md)，a 已验 `href==ref` for s3://）。
 
@@ -90,7 +97,7 @@ SDK 调查证实两引擎产物形态/上传能力不对称，"上传那一小�
 - **~~S3 key 命名 ↔ `ResourceUri` `s3://` 形态~~（第一期已定，见上「第一期实现定论」）**：定为「S3 key 镜像本地 run 树、与 report 同 `<prefix>/<run_id>/` 前缀、worker 报的 `s3://` ref 与上传 key 逐字一致」。不沿用 `S3Writer` 默认的 `<prefix><session_id>/` 布局（那与 report 的 `<run_id>/` 归集语义不匹配）。
 - **~~S3 上传错误的分类~~（第一期已定，见上）**：第一期=`engine_error`、不进重试域、可观测（不静默吞）。是否细分 `network_error`/进重试域待 Fargate（[0032](./0032-fargate-execution-environment.md)，与 grace 预算一起定）。
 - **~~`materialize` 在 `S3ReportStore` 下的目标语义~~（已废——materialize 整体移除，[0027](./0027-runreport-aggregation-index.md)）**：曾计划 S3 版 materialize 把产物 `copy_object` 收拢进 `s3://…/<run_id>/artifacts/` 求自包含（对标 Local 的 `artifacts/` 拷贝）。**现已废弃**：① cloud 报告决定用 `s3://` 绝对链接（不 presign、`href==ref`）——`s3://` 全局可寻址、拷/分享不断，`copy_object` 进 `artifacts/` 零收益；② materialize 概念整体移除（[0027](./0027-runreport-aggregation-index.md)「被拒方案」）。故 `S3ReportStore` 只把 RunReport 自身（manifest+index）写 S3、`href==ref`（`s3://`），不做任何产物拷贝——这从「第一版 no-op 的临时取舍」转正为「终态设计」。
-- **上传时机 / botocore retry vs grace / 中断即时上传**（Fargate 特有）：这些是容器盘停即销毁逼出的，移到 [0032](./0032-fargate-execution-environment.md)——第一期 subprocess+cloud 走结束批量、本地盘不销毁，不涉及。
+- **act 粒度即时抢传 / botocore retry vs grace / 中断韧性**（Fargate 特有）：这些是容器盘停即销毁逼出的，移到 [0032](./0032-fargate-execution-environment.md)——第一期 subprocess+cloud 混合两级上传（reportRef 实时 + 剩余 scope 末批量，见「上传时机」）、本地盘不销毁，不涉及。
 - **AgentCore 后端下产物真实落点（已由真跑证实）**：源码看 `logs_directory`/`reportFile` 都在 worker 进程本地盘（SDK 进程本地 `open`/`appendFile`），截图数据虽经 CDP 从云浏览器回传，但**文件确落 worker 本地盘**——`--backend cloud` 真跑（subprocess worker）产物落在本地 `cli/reports/<run_id>/{nova-trajectories,midscene-run}/`，report+run 元信息才上 S3/DDB。故"worker 上传其本地盘文件"前提成立（Fargate 下即容器盘）。
 
 ## 重议

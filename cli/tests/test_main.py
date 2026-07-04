@@ -410,3 +410,30 @@ def test_run_no_report_passes_no_artifact_dirs(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
     m.main(["run", str(_write_feature(tmp_path)), "--no-report"])
     assert box.get("nova_logs_dir") is None and box.get("midscene_run_dir") is None
+
+
+# ---- _prune_empty_dirs（cloud 清本地空壳，ADR 0029）：只删空目录、非空保留 ----
+def test_prune_empty_dirs_removes_empty_tree(tmp_path):
+    # worker 上传后 rmtree 了子目录，run 根只剩空壳（含空中间目录）→ 整个删掉
+    run_dir = tmp_path / "reports" / "rid"
+    (run_dir / "nova-trajectories" / "sess").mkdir(parents=True)  # 全空
+    (run_dir / "midscene-run" / "report").mkdir(parents=True)     # 全空
+    m._prune_empty_dirs(run_dir)
+    assert not run_dir.exists()  # 空壳整个清掉
+
+
+def test_prune_empty_dirs_keeps_nonempty(tmp_path):
+    # 某腿 flush 失败保留了产物（目录非空）→ 该目录及其祖先保留（护栏：不误删产物）
+    run_dir = tmp_path / "reports" / "rid"
+    kept = run_dir / "nova-trajectories" / "sess"
+    kept.mkdir(parents=True)
+    (kept / "act_0.html").write_text("残留产物")           # 非空
+    (run_dir / "midscene-run").mkdir(parents=True)          # 空
+    m._prune_empty_dirs(run_dir)
+    assert run_dir.exists()                                  # 因含非空子树而保留
+    assert (kept / "act_0.html").exists()                   # 产物没被误删
+    assert not (run_dir / "midscene-run").exists()           # 空的那支仍被清
+
+
+def test_prune_empty_dirs_noop_when_missing(tmp_path):
+    m._prune_empty_dirs(tmp_path / "nonexistent")  # 不存在 → no-op、不抛

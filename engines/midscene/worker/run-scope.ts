@@ -21,8 +21,10 @@ import {
   StopBrowserSessionCommand,
 } from "@aws-sdk/client-bedrock-agentcore";
 import * as fs from "node:fs";
+import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 import { sigv4Fetch, signCdpUpgrade, BASE_URL, MODEL, REGION } from "../lib/agentcore-sigv4.mjs";
+import { ArtifactUploader } from "../lib/artifact-upload.mjs";  // 产物 S3 上传（ADR 0029；无落点 env 时 no-op 报 file://）
 // 确定性 step 注册表（ADR 0022）+ test engineer 的锚点脚手架。
 // import 脚手架即触发其顶层 deterministic(...) 注册副作用（对称 Nova 引擎 import deterministic_steps）。
 import { match as matchDeterministic, DeterministicAssertion } from "./deterministic.js";
@@ -221,6 +223,8 @@ async function main(): Promise<number> {
   });
 
   const reportRefs: Array<{ kind: string; ref: string; label?: string }> = [];
+  // 产物 S3 上传器（ADR 0029，对称 Nova 的模块级 _uploader）：cloud 上传+删本地报 s3://，local no-op 报 file://。
+  const uploader = ArtifactUploader.fromEnv();
   let networkExhausted = false; // 建连重试耗尽（ADR 0028）→ 退 EX_WORKER_NETWORK
 
   // 建连段（ADR 0028）：StartBrowserSession → CDP 握手 → connectOverCDP → PlaywrightAgent。
@@ -294,10 +298,12 @@ async function main(): Promise<number> {
     }
 
     // 归集原生报告（ADR 0027 reportRefs）：destroy 后 reportFile finalize，Midscene 出 1 个 html/worker（scope 级）
-    // kind=report（产物类型；粒度由挂在 scope_done 表达，ADR 0027）；ref 用 file:// URI；agent.reportFile 是绝对路径。
+    // kind=report（产物类型；粒度由挂在 scope_done 表达，ADR 0027）；agent.reportFile 是绝对路径。
+    // ref 经 uploader：cloud 上传 S3+删本地报 s3://，local no-op 报 file://（ADR 0029，对称 Nova）。
     await agent.destroy().catch(() => {});
     if (agent.reportFile) {
-      reportRefs.push({ kind: "report", ref: `file://${agent.reportFile}`, label: "Midscene report" });
+      const ref = await uploader.toReportRef(agent.reportFile);  // 实时上传（不删，留到 flush 整目录删）
+      reportRefs.push({ kind: "report", ref, label: "Midscene report" });
     }
   } catch (e) {
     await cleanup();
@@ -312,6 +318,11 @@ async function main(): Promise<number> {
   }
 
   emit({ type: "scope_done", scopeId: scope.id, sessionId: sessionId ?? null, reportRefs });
+  // scope 末：整目录 flush 剩余产物（report.html 已实时传、跳过；log/ 等一并传）+ 全成功删整目录（ADR 0029）。
+  // no-op（local/未注入落点）时直接返回、不碰本地。仅正常完成路径走到此；异常/网络耗尽的 catch 内 return 不 flush
+  // ——中断产物保留本地（对称 Nova）。
+  const runRoot = process.env.MIDSCENE_RUN_DIR;
+  if (runRoot) await uploader.flushAndCleanup(path.resolve(runRoot));
   // 正常路径若会话释放失败 → 非 0 退出，让 schedule 记 error、泄漏可观测（审计窗口 C，对照 Nova）
   return cleanupFailed ? 1 : 0;
 }
