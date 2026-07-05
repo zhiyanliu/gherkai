@@ -58,3 +58,5 @@ tmp/
 # Claude 工作流工具（个人/工作流，非本项目框架代码）
 .claude/
 skills-lock.json
+# MCP server 个人本地配置（可能含 API KEY 等密钥）
+.mcp.json
