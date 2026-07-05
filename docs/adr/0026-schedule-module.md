@@ -66,7 +66,7 @@ opts = {                 // 时间单位统一为秒；代码字段名带 _s 后
 
 「怎么停」的具体机制**不在 schedule**——本模块只负责下逻辑指令，机制/会话清理归 adapter 与 worker（三层完整机制见 [0024](./0024-worker-core-protocol.md) 终止契约节，此处只钉本模块边界，不复述以免漂移）：
 - **schedule → WorkerHandle**（本模块职责）：只调逻辑指令 `handle.stop(gracePeriod)`（「请停这个 worker」）。`handle` 由 `engine.run_scope(job)` 返回、schedule 持有；`Engine` port **只有 `run_scope`、不挂 stop**（句柄自己知道怎么停）。schedule **不懂** SIGTERM/进程/StopTask——只知道「下停止指令、等归约」。
-- **机制层与会话清理**（转指针）：adapter 把逻辑「停」翻成具体机制（子进程 SIGTERM+宽限+SIGKILL / 未来 Fargate `StopTask`）、会话清理（`StopBrowserSession`）归 worker——**故「上云只换 adapter」成立**（见下「留口子」），schedule 一行不改。机制细节 + 两引擎会话释放见 [0024](./0024-worker-core-protocol.md) 终止契约 + [0028](./0028-transient-network-ssl-resilience.md) Midscene 会话集清理。
+- **机制层与会话清理**（转指针）：adapter 把逻辑「停」翻成具体机制（子进程 SIGTERM+宽限+SIGKILL / 未来 Fargate `StopTask`）、会话清理（`StopBrowserSession`）归 worker——**故「上云只换 adapter」成立**（见下「留口子」），schedule 一行不改。机制细节 + 两引擎会话释放见 [0024](./0024-worker-core-protocol.md) 终止契约 + [0028](./0028-transient-network-ssl-resilience.md) Midscene 会话集清理。（SIGKILL 硬杀致会话释放落空的低频泄漏由 AgentCore session TTL 兜底、**不引入 core reaper**，见 [0024](./0024-worker-core-protocol.md) 终止契约「已接受代价」——schedule/core 纯度不变。）
 
 > **进程拓扑（澄清「几个地方」）**：实际是 **2 进程 + 1 远程 + 1 seam**——①core/schedule 进程；②`Engine` adapter（在 core 进程内，但它是通向「进程/云」世界的 seam，「怎么停」知识归这里）；③worker 子进程（engine SDK 是**进程内的库**、非独立进程）；④远程 AgentCore 浏览器会话（云端、worker 经 CDP 连）。engine SDK 拆除 + 会话停止都在 worker 进程内完成。
 

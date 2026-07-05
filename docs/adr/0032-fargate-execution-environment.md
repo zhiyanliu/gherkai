@@ -13,7 +13,7 @@
 **这是 SDK 调查比"能不能传"更要紧的发现。** [0029](./0029-engine-artifacts-to-s3.md) 的上传（第一期=结束批量）挂在"干净结束"路径——Fargate 下 SIGTERM 中途被杀、容器盘随即销毁，产物直接丢：
 
 - **Nova**：per-act 文件在 `_act()` 的 `finally`→`RunInfoCompiler.compile()` 即写盘（非批量、非原子——`.html`/`.json` 分多次 `open` 顺序写，中断可留"孤零 `.html`"）；结束批量上传若在 SIGTERM 后来不及跑完 → 未上传部分随容器盘销毁而丢。
-- **Midscene**：report 边跑边 `appendFile`（每 task flush），中断时盘上已是"含已完成 task 的部分有效 html"；但现 SIGTERM handler 只做会话 cleanup + `process.exit`、**根本不碰 report** → 中断产物 100% 丢。
+- **Midscene**：report 边跑边 `appendFile`（每 task flush），中断时盘上已是"含已完成 task 的部分有效 html"；但 SIGTERM handler **只做会话 cleanup、不触达 report**（不上传中途 report）→ 中断产物随容器盘销毁而丢。补救（把抢传提前到 step 安全点）见 [0029](./0029-engine-artifacts-to-s3.md) 及 Journey 0001「Midscene 补救方向」。
 
 **结论倾向**：Fargate 模式**不能纯靠 [0029](./0029-engine-artifacts-to-s3.md) 的"结束批量上传"**，需 **act/step 粒度即时上传**缩小丢失窗口（Nova 无 per-act 写盘后 hook，只能 worker 在每 act 返回后立即自传该 act 文件；Midscene 可在中断路径读当前 `reportFile` 抢传），并要求 Fargate `stopTimeout`(grace) 足够长 + 上传幂等/可续传。**这是真做 Fargate 前的头号待解项。**
 

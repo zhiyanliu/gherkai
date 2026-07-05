@@ -124,6 +124,11 @@ class ScheduleOpts:
     fail_fast: bool = False  # 任一 job 崩是否中止整批
     job_timeout_s: float | None = None  # per-job 墙钟超时（None=不超时）
     grace_period_s: float = 5.0  # 停止请求后等 worker 优雅退出的宽限秒
+    # grace 下限（引擎无关的纯数，ADR 0024 grace 硬约束）：调用方（组合根）声明「本 run 的 grace 至少要这么大」，
+    # schedule 起 worker 前 enforce grace_period_s >= min_grace_s。**core 不认这个下限从何而来**（引擎特定的
+    # 「Nova 需 ≥act_timeout+余量」由组合根算好传入）——core 只校验「传入 grace ≥ 声明下限」这个引擎无关的关系，
+    # 保 core 纯 reducer/引擎无知（ADR 0016/0026）。默认 0.0=无下限（不破现有直接构造 ScheduleOpts 的调用方）。
+    min_grace_s: float = 0.0
     clock: Callable[[], float] = _time.monotonic  # 时间源（可注入 fake clock 测超时/grace 路径）
     # 网络瞬时故障的 job 级重试（ADR 0028）：仅对 error_type==network_error 且「会话未起（零 step_done）」
     # 的 job 重试整批。默认 0=关（本地 smoke 不需要；CI/抖动环境可开）。
@@ -407,6 +412,13 @@ def schedule(
               它仍在 worker 线程被调、多 worker 并发，故观察者须自持锁（如 RunPersistence._lock）。默认 None。
     """
     opts = opts or ScheduleOpts()
+    # grace 硬约束（ADR 0024）：起任何 worker 前 enforce grace 合法且 ≥ 调用方声明的下限。
+    # 引擎无关的纯关系校验——core 不认下限从何而来（组合根按引擎算好传入 min_grace_s）。任何前端都受此护栏。
+    if opts.grace_period_s <= 0 or opts.grace_period_s < opts.min_grace_s:
+        raise ValueError(
+            f"grace_period_s={opts.grace_period_s} 非法：须 > 0 且 ≥ min_grace_s={opts.min_grace_s}"
+            "（grace < 单 act 时长会致 SIGKILL 先于会话释放、软停失效、会话泄漏，ADR 0024 grace 硬约束）"
+        )
     jobs = list(run_meta.jobs)
     sink_lock = threading.Lock()
     abort_flag = threading.Event()

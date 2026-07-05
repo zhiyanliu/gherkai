@@ -49,8 +49,9 @@ def _build_parser() -> argparse.ArgumentParser:
         help="单 job 墙钟超时秒（默认 300；<=0 表示不超时）",
     )
     run.add_argument(
-        "--grace", type=float, default=10.0,
-        help="停止请求后等 worker 优雅退出的宽限秒（默认 10）",
+        "--grace", type=float, default=None,
+        help="停止后等 worker 优雅退出的宽限秒（默认按本 run 引擎推导：Nova≈act_timeout+余量、"
+             "确保 grace≥单 act 时长否则会话泄漏，ADR 0024；显式给过小值会被拒退 2）",
     )
     run.add_argument("--fail-fast", action="store_true", help="任一 job 崩则中止整批")
     run.add_argument("--json", action="store_true", help="只输出机器可读 JSON（不打进度/文本汇总）")
@@ -312,6 +313,19 @@ def _cmd_run(args, repo: Path) -> int:
         f"max_concurrency={args.max_concurrency} job_timeout={args.timeout}s ..."
     )
 
+    # grace 硬约束（ADR 0024）：按本 run 各引擎的下限取 max（grace 是 run 级单值）。引擎特定下限住组合根。
+    min_grace = max((compose.engine_min_grace(j.engine) for j in jobs), default=0.0)
+    # --grace 哨兵默认（None）→ 跟随本 run 引擎推导（Nova run 自然 ≥act_timeout+余量；midscene-only 回到小值）。
+    grace = args.grace if args.grace is not None else max(min_grace, ScheduleOpts.grace_period_s)
+    # 显式给了过小 grace → 入口友好拒绝（对齐 votes 校验惯例，退 2「没开跑就被拒」）。core 侧还有 enforce 兜底
+    # （任何前端都受同一护栏），此处只为在 cli 给出清晰诊断、避免 core ValueError 冒到用户面。
+    if args.grace is not None and (args.grace <= 0 or args.grace < min_grace):
+        _progress(
+            f"--grace={args.grace} 太小：须 > 0 且 ≥ {min_grace}s（Nova act_timeout+余量；grace < 单 act 时长会致"
+            "会话泄漏、软停失效，ADR 0024 grace 硬约束）"
+        )
+        return 2
+
     # 5) schedule：跑 RunMeta（definition）→ RunResult（timeout<=0 → 不超时）。
     #    job 一完成即经 on_job_complete 实时落库（数据面判定真值先写，ADR 0030）。
     #    **cloud 运行期兜底（ADR 0030 决定七）**：run 已开跑，落库回调（on_event/on_job_complete）中途抛 botocore
@@ -324,7 +338,8 @@ def _cmd_run(args, repo: Path) -> int:
                 max_concurrency=args.max_concurrency,
                 fail_fast=args.fail_fast,
                 job_timeout_s=args.timeout if args.timeout > 0 else None,
-                grace_period_s=args.grace,
+                grace_period_s=grace,
+                min_grace_s=min_grace,  # core enforce grace ≥ 此下限（引擎无关关系，ADR 0024）
             ),
             on_job_complete=on_job_complete,
             on_event=on_event,

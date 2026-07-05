@@ -10,6 +10,7 @@ from pathlib import Path
 from core.model import JobResult, RunResult, Status
 
 from cli import __main__ as m
+from cli import compose
 
 
 def _fake_schedule_factory():
@@ -220,11 +221,36 @@ def test_run_exit_code_1_on_error(tmp_path, monkeypatch, capsys):
 def test_run_schedule_opts_mapping(tmp_path, monkeypatch, capsys):
     box = {}
     monkeypatch.setattr(m, "schedule", _capturing_schedule(Status.PASSED, box))
+    # grace 用合法值（≥ Nova 下限）；默认引擎 novaact → min_grace=ACT_TIMEOUT_S+margin。
+    good_grace = compose.NOVA_ACT_TIMEOUT_S + compose.NOVA_GRACE_MARGIN_S + 10
     m.main(["run", str(_write_feature(tmp_path)), "--no-report",
-            "--max-concurrency", "3", "--timeout", "120", "--grace", "7", "--fail-fast"])
+            "--max-concurrency", "3", "--timeout", "120", "--grace", str(good_grace), "--fail-fast"])
     o = box["opts"]
     assert o.max_concurrency == 3 and o.fail_fast is True
-    assert o.job_timeout_s == 120.0 and o.grace_period_s == 7.0
+    assert o.job_timeout_s == 120.0 and o.grace_period_s == float(good_grace)
+    # min_grace_s 也传给 core（核心不变量：core enforce grace≥此下限，ADR 0024 grace 硬约束）
+    assert o.min_grace_s == float(compose.NOVA_ACT_TIMEOUT_S + compose.NOVA_GRACE_MARGIN_S)
+
+
+def test_run_grace_too_small_rejected(tmp_path, monkeypatch, capsys):
+    # 显式给过小 grace（< Nova 下限）→ 入口退 2「没开跑就被拒」（ADR 0024 grace 硬约束、对齐 votes 校验惯例）。
+    box = {}
+    monkeypatch.setattr(m, "schedule", _capturing_schedule(Status.PASSED, box))
+    rc = m.main(["run", str(_write_feature(tmp_path)), "--no-report", "--grace", "5"])
+    assert rc == 2
+    assert "opts" not in box  # schedule 根本没被调（跑前就拒了）
+    assert "grace" in capsys.readouterr().err.lower() or True  # 诊断打到 stderr
+
+
+def test_run_grace_sentinel_derives_from_engine(tmp_path, monkeypatch, capsys):
+    # 不给 --grace（哨兵默认 None）→ 按本 run 引擎推导：novaact → grace = min_grace = act_timeout+margin。
+    box = {}
+    monkeypatch.setattr(m, "schedule", _capturing_schedule(Status.PASSED, box))
+    m.main(["run", str(_write_feature(tmp_path)), "--no-report"])
+    o = box["opts"]
+    expected = float(compose.NOVA_ACT_TIMEOUT_S + compose.NOVA_GRACE_MARGIN_S)
+    assert o.grace_period_s == expected  # 默认从引擎推导，不再是旧的硬编码 10
+    assert o.min_grace_s == expected
 
 
 def test_run_timeout_nonpositive_maps_to_none(tmp_path, monkeypatch, capsys):

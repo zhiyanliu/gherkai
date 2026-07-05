@@ -116,6 +116,26 @@ def test_adapter_stop_hanging_worker():
     assert elapsed < 5.0  # worker 响应 SIGTERM 优雅退出，没等到宽限超时强杀
 
 
+# ---- worker 无视 SIGTERM → adapter grace 超时 → SIGKILL 兜底（terminate→wait 超时→proc.kill 分支）----
+def test_adapter_sigkill_backstop_on_deaf_worker():
+    # deaf worker 装 SIG_IGN 忽略 SIGTERM、死循环不退——逼 SubprocessWorkerHandle.stop 走
+    # TimeoutExpired→proc.kill() 兜底（其余 mode 都优雅退、不踩这条尾路径，本测试专补它）。
+    engine = _engine("deaf")
+    handle, events = engine.run_scope(_job("s"))
+    it = iter(events)
+    assert next(it).type == "scope_started"  # worker 已起、进入忽略信号的死循环
+    # stop：SIGTERM 被忽略 → 等满 grace → SIGKILL 强杀。用短 grace 让测试快。
+    t0 = time.monotonic()
+    handle.stop(grace_period_s=0.5)
+    elapsed = time.monotonic() - t0
+    assert elapsed >= 0.5  # 确实等满了 grace（SIGTERM 没生效、走到超时）
+    assert elapsed < 3.0   # 但 SIGKILL 后随即返回、不会永远挂着
+    # 进程确被强杀：adapter 的 proc.kill() 是异步 SIGKILL、不 wait，故给 OS 一点回收时间再确认终止。
+    proc = handle._proc  # type: ignore[attr-defined]
+    assert proc.wait(timeout=3.0) is not None  # 已终止（SIGKILL 下 returncode 为负 signal，非 None）
+    assert proc.returncode != 0  # 被信号杀（非协作退 0）——SIGKILL 惯例 -9
+
+
 # ---- #1（ADR 0028）：worker 静默卡死（吐 started 后不再吐事件）→ schedule 的 _heartbeat_wrap 让 job_timeout 能触发 ----
 # 真跨进程验证：silent worker 卡在死循环、fd3 零新事件。adapter 的事件流是纯阻塞读，靠 schedule 层
 # _heartbeat_wrap（后台线程 + queue 超时）周期性醒来查 deadline——否则超时永不触发（曾致 300s 拖到 ~620s）。

@@ -40,14 +40,16 @@ class _FakeNova:
     def go_to_url(self, url):
         self.calls.append(("go_to_url", url))
 
-    def act(self, instr):
+    def act(self, instr, timeout=None):  # timeout：ADR 0024 act 有界返回（worker 传 ACT_TIMEOUT_S）
         self.calls.append(("act", instr))
+        self.last_timeout = timeout
         if self._act_raises:
             raise self._act_raises
         return _FakeResult(True)
 
-    def act_get(self, instr, schema):
+    def act_get(self, instr, schema, timeout=None):  # timeout：同上
         self.calls.append(("act_get", instr))
+        self.last_timeout = timeout
         v = self._seq[self._i] if self._i < len(self._seq) else False
         tw = self._tw[self._i] if self._tw and self._i < len(self._tw) else None
         self._i += 1
@@ -184,10 +186,10 @@ class _TrajNova:
     def __init__(self, paths):
         self._paths = list(paths)
         self._i = 0
-    def act_get(self, instr, schema):
+    def act_get(self, instr, schema, timeout=None):
         p = self._paths[self._i]; self._i += 1
         return _TrajResult(True, p)
-    def act(self, instr):
+    def act(self, instr, timeout=None):
         return _TrajResult(True, self._paths[0])
 
 
@@ -225,10 +227,10 @@ class _NavErrorNova:
         self.act_get_calls = 0
     def go_to_url(self, url):
         raise self._nav_raises
-    def act(self, instr):
+    def act(self, instr, timeout=None):
         self.act_calls += 1
         return _FakeResult(True)
-    def act_get(self, instr, schema):
+    def act_get(self, instr, schema, timeout=None):
         self.act_get_calls += 1
         return _FakeResult(True)
 

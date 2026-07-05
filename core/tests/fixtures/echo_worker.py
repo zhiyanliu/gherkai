@@ -10,6 +10,9 @@
   WORKER_MODE=silent → 先吐 scope_started（带 sessionId）+ scenario_started，然后**静默死循环不再吐任何事件**
                        （模拟 act 卡在单次调用内、fd3 无新事件 → 测 adapter 读超时心跳让 schedule 超时能触发 +
                         session_id 经 scope_started 提前回传，ADR 0028）
+  WORKER_MODE=deaf   → **忽略 SIGTERM**（SIG_IGN），吐 scope_started 后死循环不退——模拟 worker 无视优雅停
+                       （如真卡死、handler 失效）。测 adapter 的 terminate→grace 超时→**SIGKILL 兜底**分支
+                       （SubprocessWorkerHandle.stop 的 TimeoutExpired→proc.kill()），这条尾路径其余 mode 都不踩。
 
 EVENTS: 真 worker 的 scope_started 带 sessionId（ADR 0028 血缘随首事件回传），echo 也带，保协议一致。
 """
@@ -45,10 +48,15 @@ def emit(obj):
 
 
 def main():
-    signal.signal(signal.SIGTERM, _on_sigterm)
     job = json.loads(sys.stdin.readline())
     mode = os.environ.get("WORKER_MODE", "pass")
     scope = job["scope"]
+
+    if mode == "deaf":
+        # 忽略 SIGTERM（模拟无视优雅停/handler 失效）→ 逼 adapter 走 grace 超时 → SIGKILL 兜底。
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    else:
+        signal.signal(signal.SIGTERM, _on_sigterm)
 
     if mode == "net":
         # 建连失败先于任何事件 emit（ADR 0028）：直接以网络专用退出码退出，不吐 scope_started。
@@ -57,6 +65,11 @@ def main():
 
     # scope_started 带 sessionId（ADR 0028：血缘随首事件回传，超时/中止 scope_done 缺席时 core 仍记得到）。
     emit({"type": "scope_started", "scopeId": scope["id"], "sessionId": "echo-sess"})
+
+    if mode == "deaf":
+        # 吐 scope_started 后死循环、**不响应 SIGTERM**（SIG_IGN）→ adapter grace 超时后 SIGKILL 强杀。
+        while True:
+            time.sleep(0.05)
 
     if mode == "silent":
         # 吐 scope_started + scenario_started 后**静默死循环**（不再吐任何事件、不退出）——模拟

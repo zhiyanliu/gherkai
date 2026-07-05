@@ -67,11 +67,18 @@ def test_build_engines_injects_artifact_dirs_symmetrically(tmp_path: Path):
     assert engines["midscene"]._env.get("PATH") == os.environ.get("PATH")
 
 
-def test_build_engines_no_dirs_leaves_env_none(tmp_path: Path):
-    # 不传落点（如 --no-report）：env 保持 None，SubprocessEngine 回落继承 os.environ（不硬替换）。
+def test_build_engines_no_dirs_midscene_env_none(tmp_path: Path):
+    # 不传落点（如 --no-report）：midscene env 保持 None，SubprocessEngine 回落继承 os.environ（不硬替换）。
     engines = compose.build_engines(compose.repo_root())
-    assert engines["novaact"]._env is None
     assert engines["midscene"]._env is None
+
+
+def test_build_engines_nova_always_has_act_timeout(tmp_path: Path):
+    # Nova env **恒非 None**：即便无产物落点，组合根也要注入 NOVA_ACT_TIMEOUT_S（双端同源，ADR 0024 grace 硬约束）——
+    # worker 读它作 act timeout、组合根用同一常量算 grace 下限，消除两处独立 120 的漂移。
+    engines = compose.build_engines(compose.repo_root())
+    assert engines["novaact"]._env is not None
+    assert engines["novaact"]._env["NOVA_ACT_TIMEOUT_S"] == str(compose.NOVA_ACT_TIMEOUT_S)
 
 
 def test_build_engines_injects_artifact_s3_env_symmetrically(tmp_path: Path):

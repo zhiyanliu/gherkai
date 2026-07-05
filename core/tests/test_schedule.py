@@ -653,3 +653,38 @@ def test_on_job_complete_exception_stops_inflight_workers_before_raise():
                  opts=ScheduleOpts(max_concurrency=2), on_job_complete=boom_on_fast)
     # 关键断言：slow 的 worker 在异常冒泡前被 stop（止血，不空烧会话）
     assert engine.handles["slow"].stopped
+
+
+# ---- grace 硬约束 enforce（ADR 0024）：schedule 起 worker 前校验 grace 合法且 ≥ min_grace_s ----
+def test_grace_below_min_grace_raises():
+    # grace < 声明下限 → 起任何 worker 前就 raise ValueError（引擎无关的关系校验，core 不认下限从何而来）。
+    import pytest
+    engine = FakeEngine({"a": _passing_events("a", "a:0")})
+    with pytest.raises(ValueError, match="grace"):
+        schedule(_rm([_job("a")]), FakeResolver(engine), CollectSink(),
+                 opts=ScheduleOpts(grace_period_s=5.0, min_grace_s=180.0))
+    # 起 worker 前就拒 → 引擎根本没被 run（无副作用、不烧会话）
+    assert "a" not in engine.handles
+
+
+def test_grace_nonpositive_raises():
+    import pytest
+    engine = FakeEngine({"a": _passing_events("a", "a:0")})
+    with pytest.raises(ValueError, match="grace"):
+        schedule(_rm([_job("a")]), FakeResolver(engine), CollectSink(),
+                 opts=ScheduleOpts(grace_period_s=0.0))
+
+
+def test_grace_at_or_above_min_grace_ok():
+    # grace == min_grace（边界）与 grace > min_grace 都放行（正常跑完）。
+    engine = FakeEngine({"a": _passing_events("a", "a:0")})
+    result = schedule(_rm([_job("a")]), FakeResolver(engine), CollectSink(),
+                      opts=ScheduleOpts(grace_period_s=180.0, min_grace_s=180.0))
+    assert result.status == Status.PASSED
+
+
+def test_default_opts_no_min_grace_backcompat():
+    # 默认 min_grace_s=0.0 → 不破直接构造 ScheduleOpts 的调用方（默认 grace 5.0 > 0 且 ≥ 0，放行）。
+    engine = FakeEngine({"a": _passing_events("a", "a:0")})
+    result = schedule(_rm([_job("a")]), FakeResolver(engine), CollectSink())
+    assert result.status == Status.PASSED

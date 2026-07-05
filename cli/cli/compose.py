@@ -18,6 +18,28 @@ from core.ports import Engine, ReportStore, ResultStore, RunStore
 from core.scope import FeatureSource
 
 
+# Nova 单 act 时间上界（ADR 0024 act 有界返回）——**组合根持单一真值**，同时派生两端（消除漂移）：
+# ① 注入 worker 的 NOVA_ACT_TIMEOUT_S env（worker run_scope.py 读它，缺省也是 120、此处显式注入使两端同源）；
+# ② 算 Nova 的 grace 下限（见 engine_min_grace）。env 可覆盖（真跑标定/调优）。
+NOVA_ACT_TIMEOUT_S = int(os.environ.get("NOVA_ACT_TIMEOUT_S", "120"))  # SDK 允许 [2,1800]
+# grace 余量（ADR 0024/0028 grace 硬约束的 margin）：单 step 最坏耗时 + 会话释放 + 余量。**有界的待真跑标定量**，
+# 保守起点 60s（→ Nova grace 下限 ≈ 180s）。标定完改这一处。
+NOVA_GRACE_MARGIN_S = int(os.environ.get("NOVA_GRACE_MARGIN_S", "60"))
+
+
+def engine_min_grace(engine_name: str) -> float:
+    """按引擎给 grace 下限（ADR 0024 grace 硬约束）——**引擎特定值住在组合根**（core 不认）。
+
+    Nova：`ACT_TIMEOUT_S + margin`（SIGTERM 落长 act 中途须等 act 有界返回才协作退释放会话）。
+    其余引擎（Midscene 无 worker 可控 act timeout 概念）：0.0=无下限。
+    组合根算好后作 `ScheduleOpts.min_grace_s` 传给 core，core 只 enforce「grace ≥ 此下限」的引擎无关关系。
+    （未来更干净：引擎经 Engine port 自声明 min_grace，替代这里的 engine_name 分支，ADR 0024 记为 defer。）
+    """
+    if engine_name == "novaact":
+        return float(NOVA_ACT_TIMEOUT_S + NOVA_GRACE_MARGIN_S)
+    return 0.0
+
+
 def new_run_id() -> str:
     """生成一个 run_id（组合根职责，ADR 0027）。
 
@@ -90,6 +112,12 @@ def build_engines(
 
     nova_env = _env(nova_logs_dir, "NOVA_LOGS_DIR")
     midscene_env = _env(midscene_run_dir, "MIDSCENE_RUN_DIR")
+    # Nova 的 act timeout **双端同源**（ADR 0024 grace 硬约束）：组合根持 NOVA_ACT_TIMEOUT_S 单一真值，
+    # 显式注入给 worker（消除「worker 私有默认 120」与「组合根 grace 下限」两处独立 120 的漂移）。
+    # nova_env 为 None（无产物落点，如 --no-report）时也要建一份注入——故补一个继承 os.environ 的 env。
+    if nova_env is None:
+        nova_env = {**os.environ}
+    nova_env["NOVA_ACT_TIMEOUT_S"] = str(NOVA_ACT_TIMEOUT_S)
     return {
         # Nova Act 引擎：novaact venv 的 python 跑 worker
         "novaact": SubprocessEngine(

@@ -8,7 +8,10 @@ core 经子进程 adapter 起本 worker（ADR 0026 机制层），讲 ADR 0024 �
 
 一生（ADR 0024）：
   读 stdin job → 开 AgentCore 会话 → 按 scope 串行跑 scenarios（每 step 派发）→ 逐事件吐事件通道
-  → scope_done → 退出。SIGTERM：handler raise _Terminated → 三层 with 解栈释放会话（终止契约）。
+  → scope_done → 退出。SIGTERM/SIGINT（ADR 0024 flag-only）：handler 只置 _stop 标志、绝不 raise；
+  主流程在 act 边界安全点检测 → 正常 return 退出三层 with 释放会话（with 正常退出即触发 __exit__，
+  不靠异常穿透——避免异步 raise 撞 playwright greenlet 切换区致死循环卡死，Journey 0001 发现 #2）。
+  单 act 套 timeout=ACT_TIMEOUT_S 使 in-flight act 有界返回，标志位总能在有限时间被检测。
 
 派发（ADR 0020/0024）：
   step.text 含 URL 字面量（引号内 https?://）→ 内建确定性导航 go_to_url（不浪费 AI）
@@ -29,6 +32,7 @@ import os
 import re
 import signal
 import sys
+import threading
 from pathlib import Path
 
 from nova_act import NovaAct, AgentCoreBrowserSessionProvider, BOOL_SCHEMA, Workflow
@@ -46,6 +50,16 @@ import deterministic_steps  # noqa: E402,F401  仅为触发注册（其顶层 @d
 from lib.artifact_upload import ArtifactUploader  # noqa: E402  产物 S3 上传（ADR 0029；无落点 env 时 no-op 报 file://）
 
 REGION = os.environ.get("AWS_REGION", "us-east-1")
+
+# 停止标志（ADR 0024 flag-only 中断模型）：SIGTERM/SIGINT handler 只 set 它、绝不 raise——避免异步异常
+# 落进 playwright greenlet 切换关键区致死循环卡死（Journey 0001 发现 #2）。主流程在 act 边界安全点检测、
+# 正常 return 退出三层 with 释放会话（with 正常退出即触发 __exit__，不靠异常穿透）。模块级单例（对称 _uploader）。
+_stop = threading.Event()
+
+# 单 act 时间上界（ADR 0024「act 有界返回」）：给每个 act/act_get 设 timeout，到点 SDK 在 step 边界安全点抛
+# 可 catch 的 ActTimeoutError（非 greenlet 切换区）——使 in-flight act 有界返回、标志位总能在有限时间被检测。
+# 值：真跑标定的折中（够长不误杀正常 act、且 grace ≥ act_timeout+释放耗时，见 ADR 0028 grace 上调）。
+ACT_TIMEOUT_S = int(os.environ.get("NOVA_ACT_TIMEOUT_S", "120"))  # SDK 允许 [2,1800]；默认 120s
 
 # 产物上传器（ADR 0029 第一期）：从组合根注入的 env（ARTIFACT_S3_BUCKET/PREFIX）造——cloud 时上传 S3+删本地+
 # 报 s3://，local/未注入时 no-op 报 file://。模块级单例（对称 emit/_events_out 的模块级模式；worker 单进程单 run）。
@@ -90,6 +104,19 @@ def emit(obj: dict) -> None:
 def log(msg: str) -> None:
     sys.stderr.write(f"{msg}\n")
     sys.stderr.flush()
+
+
+def _on_signal(signum, frame):
+    """SIGTERM/SIGINT 的 flag-only handler（ADR 0024 终止契约）：只置停止标志、**绝不 raise**。
+
+    绝不 raise——避免异步异常落进 playwright greenlet 切换关键区致死循环卡死（Journey 0001 发现 #2）。
+    主流程在 act 边界安全点检测 `_stop`、正常 return 退出三层 with 释放会话（with 正常退出即触发 __exit__，
+    不靠异常穿透）。SIGTERM/SIGINT 共用（Ctrl-C 亦协作停）。
+    **模块级函数（非 main 内闭包）**：只引用模块级 `_stop`/`log`，提到模块级使 `test_interrupt_process.py`
+    的 fixture worker 能 import 并装**这同一个真 handler**——回退 raise 模型时进程级测试真变红（review S2）。
+    """
+    log(f"worker: signal {signum} received, requesting cooperative stop")
+    _stop.set()
 
 
 def _cost_from_result(r) -> dict | None:
@@ -194,12 +221,21 @@ def _run_step(nova, scenario_id: str, step: dict, votes_n: int) -> str:
             votes = []
             tw_total = 0.0  # N 票 time_worked_s 累加（修：原 last_cost 只算最后一票，votes>1 时欠计 (N-1)/N）
             for _ in range(votes_n):
-                r = nova.act_get(instruction, BOOL_SCHEMA)
+                if _stop.is_set():
+                    break  # 停止信号（ADR 0024 flag-only）：多票途中收到 → 不再投后续票
+                # act 套 timeout（ADR 0024 act 有界返回）：到点抛 ActTimeoutError（可 catch、归 timeout）
+                r = nova.act_get(instruction, BOOL_SCHEMA, timeout=ACT_TIMEOUT_S)
                 votes.append(bool(r.matches_schema and r.parsed_response))
                 c = _cost_from_result(r)  # 每票各自的原生量（Nova 每 act 独立报，对称累加而非覆盖）
                 if c and c.get("time_worked_s") is not None:
                     tw_total += c["time_worked_s"]
                 _collect_traj(r, step_traj)  # N 票各一个 trajectory，都挂本 step
+            if _stop.is_set():
+                # 被外部中止（投票没跑完 N 票）→ **不 emit 带 verdict 的 step_done**（review S1）：
+                # 用部分票 + 完整 votes_n 分母算 passed 会把「外部中止」误标成确定的断言判定（如 1/3→failed、
+                # 甚至 0/1），污染中止 run 的 RunReport。对齐 _run_scenario 停止语义「停止是外部中止、非执行事实、
+                # worker 不越权标注」——直接 return，交上层安全点协作退出、未跑完的 step 由 core 按派生态处理。
+                return "aborted"
             yes = sum(votes)
             passed = yes > votes_n / 2
             ev = {
@@ -218,7 +254,8 @@ def _run_step(nova, scenario_id: str, step: dict, votes_n: int) -> str:
             return "passed" if passed else "failed"
 
         # When / Given（非 URL）→ AI 动作（无 votes）
-        r = nova.act(_instruction(text, step))
+        # act 套 timeout（ADR 0024 act 有界返回）：到点抛 ActTimeoutError（可 catch、归 timeout）
+        r = nova.act(_instruction(text, step), timeout=ACT_TIMEOUT_S)
         _collect_traj(r, step_traj)
         ev = {"type": "step_done", "scenarioId": scenario_id, "stepIndex": idx, "status": "passed"}
         cost = _cost_from_result(r)
@@ -316,10 +353,17 @@ def _run_scenario(nova, scenario_id: str, steps: list[dict], votes_n: int) -> li
     statuses: list[str] = []
     shortcircuit = False
     for st in steps:
+        if _stop.is_set():
+            break  # 停止信号（ADR 0024 flag-only）：不再跑后续 step，交上层协作式退出释放会话。
+            # 不发 step_skipped（那是 error 短路的语义、表"因上游故障跳过"）；停止是外部中止、非执行事实，
+            # 未跑的 step 由 core 侧按 aborted/pending 派生态处理（wire 不传，ADR 0031），worker 不越权标注。
         if shortcircuit:
             emit({"type": "step_skipped", "scenarioId": scenario_id, "stepIndex": st["index"]})
             continue
         status = _run_step(nova, scenario_id, st, votes_n)
+        if status == "aborted":
+            break  # step 被外部中止（投票途中收到 _stop，review S1）：不进 statuses、不参与 _aggregate，
+            # 与循环顶 _stop 检查同语义（外部中止非执行事实）。下轮循环顶的 _stop 检查也会 break，这里提前收。
         statuses.append(status)
         if status == "error":
             shortcircuit = True  # 本 scenario 后续 step 短路（不跨 scenario）
@@ -336,7 +380,6 @@ def _aggregate(statuses: list[str]) -> str:
 
 import socket
 import ssl
-import time
 
 # 网络专用退出码（ADR 0028）：与 core/adapters/subprocess_engine.py 的 EX_WORKER_NETWORK 同值。
 EX_WORKER_NETWORK = 80
@@ -345,6 +388,17 @@ EX_WORKER_NETWORK = 80
 # 否则 SIGTERM 穿不透）；总退避预算 ~3.5s < schedule 默认 grace 5s。
 _CONNECT_ATTEMPTS = 4
 _BACKOFF_S = [0.5, 1.0, 2.0]  # attempt 失败后的退避；±20% jitter 由调用处加（这里固定，本地 smoke 够用）
+
+
+def _backoff_interrupted(attempt: int) -> bool:
+    """建连重试的退避（ADR 0028 + 0024 flag-only）。返回 True=退避中收到停止信号（应停止重连）。
+
+    用 `_stop.wait(backoff)` 而非 `time.sleep(backoff)`：SIGTERM/SIGINT handler `set` 标志后 wait 立即
+    返回 True（flag-only 下 time.sleep 不被打断、会睡满，PEP 475）——使建连退避期间收到信号能即时协作停。
+    抽成模块级函数供单测直驱（review S3：原 test 只测 stdlib Event.wait、不碰本退避路径，是假绿）。
+    """
+    backoff = _BACKOFF_S[min(attempt, len(_BACKOFF_S) - 1)]
+    return _stop.wait(backoff)
 
 
 # boto ClientError 的瞬时/节流错误码集（ADR 0028）——**对齐 botocore 权威常量、借判据不借 API**：
@@ -462,41 +516,17 @@ def _classify_act_error(e: BaseException) -> str:
     return "engine_error"  # 其余执行故障（含未细分的 ActError 子类）仍归 engine_error
 
 
-class _NetworkExhausted(BaseException):
-    """建连重试耗尽（ADR 0028）。
-
-    在重试循环里 raise——此时本次失败 attempt 的 `with cdp_session`/`with NovaAct`（在 _run_session 内）
-    **已随该次异常解栈、__exit__ 已跑**（释放了本次可能部分建起的会话），故 raise 点已无会话级 with 在身上。
-    继承 BaseException（同 _Terminated）使它穿过外层 `with wf` 的 finally（恢复 workflow contextvar）
-    冒泡到 main 顶层 `except _NetworkExhausted` → `return EX_WORKER_NETWORK`。不在 with 内裸 sys.exit。
-    """
-
-
-class _Terminated(BaseException):
-    """SIGTERM 转成的异常（ADR 0024 终止契约）。
-
-    继承 BaseException 而非 Exception——这样它不会被 _run_step 的 `except Exception` 误吞，
-    而是穿透 step 级 catch、向上冒泡，触发三层 with（NovaAct / cdp_session / workflow）的
-    __exit__ 按序跑完整清理链。AgentCore 会话释放在 cdp_session 内的 `with browser_session`
-    那层（实测 agentcore_session_provider.cdp_session），靠它的 __exit__ 真正关会话——
-    手动 nova.close() 只关 Playwright 连接、关不掉 AgentCore 会话（会继续烧钱）。
-    """
-
-
 def main() -> int:
     job = json.loads(sys.stdin.readline())
     scope = job["scope"]
     scenarios = job["scenarios"]
     votes_n = int(job.get("assertionVotes", 1))  # AI 断言投票次数（ADR 0014/0024）；缺省 1
     session_id = None
+    network_exhausted = False  # 建连重试耗尽（ADR 0028）：置位 + 正常退出 with → return EX_WORKER_NETWORK
 
-    def _on_sigterm(signum, frame):
-        # 不在这里 sys.exit（那样会跳过 with 的 __exit__、泄漏 AgentCore 会话）；
-        # 而是 raise，让异常冒泡触发三层 with 的自然清理（ADR 0024）。
-        log("worker: SIGTERM received, unwinding for clean session shutdown")
-        raise _Terminated()
-
-    signal.signal(signal.SIGTERM, _on_sigterm)
+    # flag-only handler 是模块级 _on_signal（见上）——SIGTERM/SIGINT 共用，只置 _stop、绝不 raise（ADR 0024）。
+    signal.signal(signal.SIGTERM, _on_signal)
+    signal.signal(signal.SIGINT, _on_signal)  # Ctrl-C 也走 flag-only（原走默认 KeyboardInterrupt 同样撞 greenlet）
 
     ensure_workflow_definition(WORKFLOW_DEF, region=REGION, description="Nova Act worker (ADR 0024)")
     wf = Workflow(model_id=MODEL_ID, boto_session_kwargs={"region_name": REGION}, workflow_definition_name=WORKFLOW_DEF)
@@ -505,8 +535,14 @@ def main() -> int:
     started = False
 
     def _run_session() -> None:
-        """建连 + 跑完所有 scenarios。建连段异常可被外层重试；scope_started emit 后不可。"""
+        """建连 + 跑完所有 scenarios。建连段异常可被外层重试；scope_started emit 后不可。
+
+        停止（_stop）在此协作式生效：scenario 循环顶检测 → 正常 return 出本函数 → `with NovaAct`/
+        `with cdp_session` 正常退出触发 __exit__ 释放会话（ADR 0024 flag-only，不靠异常穿透）。
+        """
         nonlocal session_id, started
+        if _stop.is_set():
+            return  # 建连前已收到停止信号（含发现 #1：Workflow() 构造期到达的 SIGTERM）→ 干净退、不建连
         provider = AgentCoreBrowserSessionProvider(region=REGION)
         with provider.cdp_session() as (ws_url, headers):
             # logs_directory：trajectory 落到 run 专属持久目录（ADR 0027）。cli 经环境变量
@@ -531,6 +567,8 @@ def main() -> int:
                 started = True  # 越过此点 = 会话已起、act 即将跑 → 退出建连重试域（ADR 0028）
                 # scope 内串行跑 scenarios，共享同一会话（ADR 0019/0024）
                 for sc in scenarios:
+                    if _stop.is_set():
+                        return  # 停止信号（ADR 0024 flag-only）：正常 return 出本函数 → with __exit__ 释放会话
                     sid = sc["id"]
                     emit({"type": "scenario_started", "scenarioId": sid})
                     # trajectory 现由每个 _run_step 挂进各自 step_done 的 step 级 reportRefs（ADR 0027 下沉）——
@@ -539,39 +577,40 @@ def main() -> int:
                     statuses = _run_scenario(nova, sid, sc["steps"], votes_n)
                     emit({"type": "scenario_done", "scenarioId": sid, "status": _aggregate(statuses)})
 
-    try:
-        with wf:
-            outer = get_current_workflow()
-            set_current_workflow(wf)
-            try:
-                # 建连重试循环（ADR 0028）：仅裹建连段；scope_started 一 emit 即 started=True、跳出重试。
-                # 每次 attempt 用全新 provider/cdp_session/NovaAct，with __exit__ 清掉本次部分建起的会话。
-                for attempt in range(_CONNECT_ATTEMPTS):
-                    try:
-                        _run_session()
-                        break  # 成功（跑完）
-                    except _Terminated:
-                        raise  # SIGTERM：交三层 with 清理，不重试
-                    except BaseException as e:  # noqa: BLE001
-                        # connecting=True：本分支即建连域（started=True 时下句直接 raise，走不到判定），
-                        # 故额外认 Playwright TargetClosedError（连接被网络断的下游症状，ADR 0028）。
-                        if started or not _is_transient_network(e, connecting=True):
-                            raise  # 会话已起 / 非瞬时网络错 → 不重试，原样冒泡
-                        if attempt >= _CONNECT_ATTEMPTS - 1:
-                            log(f"worker: 建连重试耗尽（{attempt + 1} 次），网络/SSL 瞬时故障：{e}")
-                            raise _NetworkExhausted() from e
-                        backoff = _BACKOFF_S[min(attempt, len(_BACKOFF_S) - 1)]
-                        log(f"worker: 建连失败（attempt {attempt + 1}），{backoff}s 后重试：{e}")
-                        time.sleep(backoff)  # 手写退避：SIGTERM handler raise 可中途打断（_Terminated 冒泡）
-            finally:
-                set_current_workflow(outer)
-    except _Terminated:
-        # SIGTERM：三层 with 的 __exit__ 已在冒泡过程中跑完（会话已释放）。干净退出，不吐 scope_done。
-        log("worker: session shutdown complete after SIGTERM")
+    with wf:
+        outer = get_current_workflow()
+        set_current_workflow(wf)
+        try:
+            # 建连重试循环（ADR 0028）：仅裹建连段；scope_started 一 emit 即 started=True、跳出重试。
+            # 每次 attempt 用全新 provider/cdp_session/NovaAct，with __exit__ 清掉本次部分建起的会话。
+            for attempt in range(_CONNECT_ATTEMPTS):
+                if _stop.is_set():
+                    break  # 停止信号（ADR 0024 flag-only）：不再重试建连 → 干净退（下方按 _stop 返回 0）
+                try:
+                    _run_session()
+                    break  # 成功（跑完，或 _run_session 内因 _stop 协作式 return）
+                except Exception as e:  # noqa: BLE001  建连域异常（_run_session 内 with __exit__ 已清本次部分会话）
+                    # connecting=True：本分支即建连域（started=True 时下句直接 raise，走不到判定），
+                    # 故额外认 Playwright TargetClosedError（连接被网络断的下游症状，ADR 0028）。
+                    if started or not _is_transient_network(e, connecting=True):
+                        raise  # 会话已起 / 非瞬时网络错 → 不重试，原样冒泡
+                    if attempt >= _CONNECT_ATTEMPTS - 1:
+                        log(f"worker: 建连重试耗尽（{attempt + 1} 次），网络/SSL 瞬时故障：{e}")
+                        network_exhausted = True  # 置位 + 跳出 → 正常退出 with 后 return EX_WORKER_NETWORK（不 raise 穿透）
+                        break
+                    log(f"worker: 建连失败（attempt {attempt + 1}），退避后重试：{e}")
+                    # 手写退避（ADR 0028 + 0024 flag-only）：_backoff_interrupted 用 _stop.wait，收到信号即唤醒。
+                    if _backoff_interrupted(attempt):
+                        break  # 退避中收到停止信号 → 不再重连
+        finally:
+            set_current_workflow(outer)
+
+    # 停止信号（ADR 0024 flag-only）：三层 with 已正常退出（__exit__ 释放了会话）。干净退、不吐 scope_done、不 flush。
+    if _stop.is_set():
+        log("worker: session shutdown complete after cooperative stop")
         return 0
-    except _NetworkExhausted:
-        # 建连重试耗尽（ADR 0028）：三层 with __exit__ 已清理。以网络专用退出码退出，
-        # core 据此记 network_error 并可选择性重试整 job。不吐 scope_done。
+    if network_exhausted:
+        # 建连重试耗尽（ADR 0028）：with __exit__ 已清理。以网络专用退出码退出，core 据此记 network_error。不吐 scope_done。
         log("worker: connect retries exhausted, exiting with network code")
         return EX_WORKER_NETWORK
 
@@ -591,8 +630,8 @@ def main() -> int:
         ev["reportRefs"] = scope_refs
     emit(ev)
     # scope 末：整目录 flush 剩余产物（trajectory .json / log 等，已实时传的 reportRef 文件跳过）+ 全成功删本地
-    # （ADR 0029）。no-op（local/未注入落点）时直接返回、不碰本地。仅正常完成路径走到此；SIGTERM/网络耗尽的
-    # 中途 return 不 flush——中断产物保留本地（0028 #3 兜底）。
+    # （ADR 0029）。no-op（local/未注入落点）时直接返回、不碰本地。仅正常完成路径走到此；停止信号/网络耗尽的
+    # 提前 return（见上）不 flush——中断产物保留本地（0028 #3 兜底）。
     if base:
         _uploader.flush_and_cleanup(base)
     return 0
