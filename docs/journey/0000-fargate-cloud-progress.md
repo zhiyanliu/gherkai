@@ -21,10 +21,10 @@
 |---|---|---|---|
 | **WP-S** | 中断丢失实测预演 + 抢传验证（Fargate 中断韧性的事实前置） | ✅ 完成 | [journey/0001](./0001-wps-interruption-loss-spike.md)（5 发现、8 格数据、抢传验证、Midscene 补救方向） |
 | **#7** | 修 Nova SIGTERM 中断模型（flag-only + act timeout + grace enforce）——WP0 入口条件、独立现有生产 bug | ✅ 完成（commit `7404bba`） | ADR 0024 终止契约 / 0028 / 0026 / 0032；证据 0001。三层测试 + 真跑验证 hung=false |
-| **WP0** | worker I/O 边缘抽象成可注入接口（job source 读 stdin↔S3、event sink 写 EVENTS_FD↔SQS）；纯重构、零行为变化；对称已有 ArtifactUploader | ⬜ 待做（#7 已铺干净中断模型地基） | 依赖 #7✅ |
+| **WP0** | worker I/O 边缘抽象成可注入接口（JobSource 读 stdin↔S3、EventSink 写 EVENTS_FD↔SQS）；纯重构、零行为变化；对称已有 ArtifactUploader。emit 合理不对称：Midscene async（为 SQS 预留）/ Nova 同步（greenlet+boto3、不撞 0024 asyncio 否决） | 🟡 实现+单测+两腿真跑验证完成，待两轮 review→commit（未 commit） | ADR 0024「I/O 边缘可注入接口」条；范本 ArtifactUploader（0029）；真跑：Midscene(wikipedia)/Nova(example.com) baseline 完整事件流+scope_done+exit 0+三通道分离；依赖 #7✅ |
 | **WP1** | Fargate 传输层：core SQS encode/decode + FargateEngine adapter（RunTask/StopTask/DescribeTasks）+ worker 注入 S3/SQS + schedule 存活判定迁移（事件流沉默→DescribeTasks） | ⬜ 待做 | ADR 0024「远程传输演进」（Draft）；依赖 WP0 接口定型 |
 | **WP2** | 基础设施：Docker 镜像 + ECS task-def + IAM task role + SQS FIFO + cluster + IaC（全仓从零）+ 组合根 build_engines 补 Fargate 分支（当前 --backend cloud 仍返回 SubprocessEngine） | ⬜ 待做 | 依赖 WP1 接口定型 |
-| **WP3-A** | 中断抢传落生产：两腿 act 边界即时上传（Nova 抢配套 trajectory.json / Midscene 提前 report 抢传）+ Midscene scenario 边界 log 抢传（第四级）+ 两腿上传套超时（退出时间有界护栏）——**不依赖 Fargate**（ADR 0029、subprocess+cloud 就做、Fargate 忠实预演），和 #7 中断主题连续 | 🟡 实现+单测+真跑验证完成，待两轮 review→commit | ADR 0029（上传时机四级 + 固有残余 + 超时）；真跑验证：Nova trajectory 救回、Midscene report+scenario log 救回（多 scenario 中断落 scenario2、scenario1 log 已进 S3）；证据 0001 |
+| **WP3-A** | 中断抢传落生产：两腿 act 边界即时上传（Nova 抢配套 trajectory.json / Midscene 提前 report 抢传）+ Midscene scenario 边界 log 抢传（第四级）+ 两腿上传套超时（退出时间有界护栏）——**不依赖 Fargate**（ADR 0029、subprocess+cloud 就做、Fargate 忠实预演），和 #7 中断主题连续 | ✅ 完成（commit `aaeb2e8` 起 5 个：核心 + harness + 文档校准 + CLAUDE.md 纪律；两轮对抗 review 已过） | ADR 0029（上传时机四级 + 固有残余 + 超时）；真跑验证：Nova trajectory 救回、Midscene report+scenario log 救回（多 scenario 中断落 scenario2、scenario1 log 已进 S3）；证据 0001 |
 | **WP3-B** | Fargate 特有韧性：grace/stopTimeout 真校准 + botocore retry vs grace 实测 + 错误分类升级 + 孤儿产物恢复（Fargate 查 S3）——**必须等真 Fargate** | ⬜ 待做 | ADR 0032（Draft）；依赖 WP1+WP2 真容器 |
 
 ## 已冻结的关键设计（ADR 索引，真做各 WP 前必读对应条）

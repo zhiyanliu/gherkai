@@ -186,6 +186,20 @@ core 的 `schedule`/汇总逻辑应能用一个**假 worker**（in-memory adapte
 
 **架构结论（贯穿产物半 [0029](./0029-engine-artifacts-to-s3.md) 与传输半）**：**worker 的引擎逻辑（派发/投票/短路/产物生成）不按执行环境分；worker 的 I/O 边缘（job 入口、事件 sink、产物落点）本质是传输/落点，应抽象成可注入接口**——subprocess 注入"读 stdin / 写 fd / 报 `file://`"，fargate 注入"读 S3 / `SendMessage` 到 SQS / 报 `s3://`"。这与 core 侧已有的 `Engine` adapter（subprocess/fargate 两种传输实现）对称。**worker 永远是事件的 producer/client，不是 server**——短命、跑完即退的 worker 不该 listen 等长驻 core 来连；换成队列后**两端都不 listen**（见下）。这条兑现 [0016](./0016-execution-architecture-core-lib-run-model.md)「组合根注入」+「worker 引擎逻辑不按执行环境分」。
 
+### I/O 边缘可注入接口（第一期：subprocess 实现，对称 [0029](./0029-engine-artifacts-to-s3.md) 的 ArtifactUploader）
+
+上条把三条 I/O 边缘作**同一决策**钉死；**产物落点半已实现**（[0029](./0029-engine-artifacts-to-s3.md) 的 `ArtifactUploader`，subprocess+cloud 就做、Fargate 忠实预演）。**job 入口 + 事件 sink 半对称落地**：抽成两个可注入组件 `JobSource` / `EventSink`（每腿一个 Python 模块 + 一个 TS 模块，各语言各写、语义契约对称——同 ArtifactUploader 的结构约束）。**第一期只实现 subprocess 态**（读 stdin / 写 `EVENTS_FD` fd），S3/SQS 态属 Fargate 化（见下「远程传输演进」节的「job 入口/事件出口」表 + 「SQS 作 events-out」已定契约，此处接口形状**须能容纳但不实现**）。
+
+**接口契约（两腿对称的语义，非逐字签名——以 code 为准，防漂移）**：
+
+- **`JobSource`**：`from_env()` 从注入 env 造（唯一读 env 处——`JOB_S3_URI` 有→S3 态、无→stdin 态）；`read() → job`（返回**已解析的 job 对象**，非流/句柄——否则"从哪读"漏进 worker 主流程，S3/stdin 两态就无法对主流程同形）。subprocess 态：Nova `json.loads(sys.stdin.readline())`（同步读首行、**不等 EOF**）、Midscene `JSON.parse((await readStdin()).split("\n")[0])`（读到 EOF 再切首行）——两腿机制不同、语义等价（都取首行 JSON）。**无"回落调试"分支**：stdin 本就是手动直跑入口，subprocess 态即调试态。
+- **`EventSink`**：`from_env()` 造（`EVENTS_SQS_URL` 等有→SQS 态、无→fd 态，含 **`EVENTS_FD` 无 / 非法 → 回落 stdout** 的既有调试兜底）；`emit(event)` worker 主流程唯一出口。subprocess 态：Nova `_events_out.write(json+"\n"); flush()`（每条 flush 保序、`ensure_ascii=False` 保中文）、Midscene `fs.writeSync(fd, json+"\n")`（裸 fd 同步写保序）。
+  - **`emit` 同步性是合理不对称（关键，非"该对称却漏"）**：**Midscene `emit` 为 `async`**（Node 事件循环 + Fargate 化后的 aws-sdk-js `SendMessage` 本就 async，预留免二次改签名）；**Nova `emit` 保持同步**——Nova worker 是**同步 + greenlet 模型、全链路零 async**（`_run_step`/`_run_scenario`/`_run_session` 皆同步 `def`），强行 async 化 = 本 ADR「终止契约」被拒方案记的 **asyncio 化**（~5x 代价 + 建连侧 SDK 无 async provider 根不掉），且 Fargate 化后 Nova 用 **boto3（同步 SDK）`send_message`**、同步 emit 天然容纳、无需 async。根源=语言/SDK 执行模型差异，与 ArtifactUploader 超时落点（py `_s3()` Config vs ts `AbortSignal`）、抢传接口（Nova 复用 `to_report_ref` vs Midscene 加 `snapshot`）同族。
+
+**红线（引指针、不复述 [0016](./0016-execution-architecture-core-lib-run-model.md)）**：① `from_env` 只认注入 env、不 sniff"我在哪跑"（判据是有没有 `JOB_S3_URI`/`EVENTS_SQS_URL`，非"是否 Fargate"）；② 外部 client（boto3/aws-sdk）惰性建——subprocess 态不 import；③ worker 是 producer/client、**不 listen**（`EventSink` 无 `receive/listen`，"停"走 SIGTERM out-of-band、不经此接口）；④ **`EventSink` 只暴露 `emit`、绝不暴露底层 fd/stdout 句柄、绝不把事件挪回 stdout**——守三通道分离（事件出 stdout 会重引入被隔离掉的 SDK 噪声污染）；⑤ **`log()`（stderr 诊断）不属这三条 I/O 边、不收进 `EventSink`**（协议传输面 vs 诊断面，物理隔离）。sink/source 作**参数注入** `run_step`/`run_scenario`（两腿统一，用结构化窄接口如 `{emit}`，对称 uploader 传参），使测试可注 fake——顺带补上 emit 此前"模块级闭包、无法打桩"的测试缺口。
+
+**core / adapter 一行不改**：`Engine` port 签名、JSON-Lines 线格式、`wire`/`model`/`schedule`、`subprocess_engine.py`（注 `EVENTS_FD`/`pass_fds`/写 stdin）全不动——这套抽象是 worker 内部重构（对称 [0029](./0029-engine-artifacts-to-s3.md)「core 一行不改」）。
+
 ### SQS 作 events-out 传输（不自建 relay）
 
 远程场景（Fargate worker 与 core/cli/WebUI 跨机器）需要一个 server 端中转事件。**不自建**——`--backend cloud` 已锁定 = AWS（DDB/S3/Fargate/AgentCore 全在用），自建一个"要部署、要做保序/背压/续传/鉴权"的 http-relay 就是**重新发明消息队列，且多半不如 SQS**。故 events-out 走 **SQS FIFO**。
