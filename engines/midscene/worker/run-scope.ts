@@ -46,6 +46,11 @@ const STOP_SESSION_BUDGET_MS = 3000;
 // StartBrowserSession 已发出 RPC 但 sessionId 未返回的在途窗口兜底（ADR 0028）：SIGTERM 落在这一瞬时
 // 服务端可能已建会话但客户端没拿到 id。给一小段时间让 Start 的 await 返回、id 落进待清理集，再 cleanup。
 const INFLIGHT_SETTLE_MS = 1500;
+// scenario 边界 log 抢传的总墙钟预算（ADR 0029「第四级：scenario 边界抢传」）：单个 log 上传已被
+// uploadOne 的 AbortSignal.timeout(10s) 封顶，但一个 scenario 边界要传多个 log，退化网络下串行累加会拖住
+// 下一 scenario、并叠进 grace。给整次快照套此总预算：超预算即放弃剩余（best-effort，scope 末 flush 兜底）。
+// 抢传跑在主流程（scenario 之间、非 SIGTERM handler），此预算限的是「延迟下一 scenario 的墙钟」，非 grace。
+const SCENARIO_LOG_SNAPSHOT_BUDGET_MS = 8000;
 
 // AWS SDK v3 服务端瞬时故障的节流错误 name 集（ADR 0028）——对齐 botocore 节流码集（保两腿对称）。
 // AgentCore 起会话（StartBrowserSessionCommand）是 AWS SDK v3 调用，服务端瞬时不可用/限流时抛的 error
@@ -104,6 +109,55 @@ function emit(obj: unknown): void {
 }
 function log(msg: string): void {
   process.stderr.write(msg + "\n");
+}
+
+// 中断兜底抢传（ADR 0029「act 边界抢传」的 handler 兜底，为 Fargate 预演）——从 onSignal 提出为可测纯函数
+// （对称 Nova 把 _on_signal 提到模块级、供 test_interrupt_model/process 测；否则 main() 内闭包无法单测，是
+// 「该对称却漏」的测试缺口）。**调用点在 onSignal 里必须排在 cleanup 之后**（会话释放优先铁律，ADR 0024）——
+// 本函数只管「抢传那一步」的决策，不含 cleanup/退出，顺序由调用方保证。
+// 决策：① reportFile 空窗（首个 AI task 前未置）→ 跳过（无 report 可抢）；② 有 → best-effort 抢传（读盘上那份
+// 增量 report）、**失败吞+log、绝不抛**（抢传是保险、不该影响退出码/退出流程；no-op local 下 snapshotReport 自返回）。
+// 救的是「首个/当前 act 中途、无 prior step_done」这格：主流程卡在 await aiAct、step_done 抢传从未触发、S3 一无
+// 所有，而盘上已有截至最后一个已返回 AI 调用的一致 report。Node handler 是事件循环回调、能安全 await 读盘上传
+// （Nova 因 greenlet 做不到、Midscene 能——关键不对称）。
+async function interruptSnapshot(
+  uploader: { snapshotReport: (p: string) => Promise<void> },
+  reportFile: string | null | undefined,
+  logFn: (m: string) => void = log,
+): Promise<void> {
+  if (!reportFile) return;  // 空窗：无 report 可抢
+  try {
+    await uploader.snapshotReport(reportFile);
+  } catch (e) {
+    logFn(`worker: 中断兜底抢传 report 失败（best-effort、忽略）：${(e as Error).message}`);
+  }
+}
+
+// SIGTERM/SIGINT 收尾序列（ADR 0024 终止契约 + 0029 中断兜底抢传）——从 onSignal 提出为可测函数（依赖注入），
+// 对称 Nova 把 _on_signal 提到模块级供 test_interrupt_model/process 测。**锁住关键顺序不变量**：
+//   会话释放（cleanup）**必须先于**中断兜底抢传（interruptSnapshot）——ADR 0024「会话释放优先」铁律，
+//   抢传是 best-effort、绝不延迟会话释放（退化网络下抢传挂 10s 也不该让会话多泄漏 10s）。
+// 返回该退出的码（cleanupFailed→1 让泄漏可观测、否则 0）；不自己 process.exit（交调用方，便于测试不真退进程）。
+// deps 全注入（cleanup/getCleanupFailed/uploader/reportFile...）→ 单测可传 spy 断言调用序列，无需真信号/真进程。
+interface ShutdownDeps {
+  inflightPending: () => boolean;      // startInFlight && pendingSessions.size===0：在途窗口兜底是否需等
+  settleMs: number;                    // 在途兜底等待（INFLIGHT_SETTLE_MS）
+  sleep: (ms: number) => Promise<void>;
+  cleanup: () => Promise<void>;        // 释放会话（**先跑**）
+  uploader: { snapshotReport: (p: string) => Promise<void> };
+  reportFile: () => string | null | undefined;  // 惰性读（agentRef 可能收尾时才有值）
+  getCleanupFailed: () => boolean;     // cleanup 内部副作用写的泄漏标记
+  logFn?: (m: string) => void;
+}
+async function shutdownSequence(deps: ShutdownDeps): Promise<number> {
+  const logFn = deps.logFn ?? log;
+  logFn("worker: signal received, releasing AgentCore session(s)");
+  if (deps.inflightPending()) await deps.sleep(deps.settleMs);  // 在途窗口兜底（ADR 0028）
+  await deps.cleanup();                                          // ① 会话释放优先（ADR 0024 铁律）
+  await interruptSnapshot(deps.uploader, deps.reportFile());     // ② 抢传排其后（best-effort、不延迟①）
+  const failed = deps.getCleanupFailed();
+  logFn(`worker: session shutdown complete after signal${failed ? " (WITH FAILURE)" : ""}`);
+  return failed ? 1 : 0;
 }
 
 interface Step { index: number; keyword: string; text: string; argument?: unknown }
@@ -203,24 +257,31 @@ async function main(): Promise<number> {
     }
   }
 
-  // SIGTERM：清理会话再退（防 AgentCore 会话泄漏继续烧钱）。
+  // SIGTERM/SIGINT：清理会话再退（防 AgentCore 会话泄漏继续烧钱）。
   let terminated = false;
-  let onTerminate: (() => void) | undefined;  // 重试退避用：SIGTERM 到达即 resolve、打断退避（对称 Nova 的 sleep 被信号打断）
-  process.on("SIGTERM", async () => {
+  let onTerminate: (() => void) | undefined;  // 重试退避用：信号到达即 resolve、打断退避（对称 Nova 的 sleep 被信号打断）
+  // agent 引用上提到 handler 可见（ADR 0029 中断抢传：handler 里读 agent.reportFile 抢传那份增量 report）。
+  // connect 成功后赋值（见下 `agentRef = agent`）；handler/uploader 靠闭包捕获（执行时 uploader 已初始化）。
+  let agentRef: PlaywrightAgent | undefined;
+  const onSignal = async () => {
     if (terminated) return;
     terminated = true;
     onTerminate?.();  // 立即唤醒正在退避的重试循环，使其尽快停（不再 reconnect/跑 act）
-    log("worker: SIGTERM received, releasing AgentCore session(s)");
-    // 在途窗口兜底（ADR 0028）：SIGTERM 落在 StartBrowserSession 已发 RPC 但 id 未返回的一瞬（startInFlight）时，
-    // 待清理集还空但服务端可能已建会话。给一小段时间让 Start 的 await 返回、id 落进 pendingSessions，再 cleanup。
-    // 重试循环每 attempt 的 id 一返回即入集（见 connect），故此处只需覆盖「Start 在途未返回」这一瞬。
-    if (startInFlight && pendingSessions.size === 0) {
-      await new Promise<void>((r) => setTimeout(r, INFLIGHT_SETTLE_MS));
-    }
-    await cleanup();
-    log(`worker: session shutdown complete after SIGTERM${cleanupFailed ? " (WITH FAILURE)" : ""}`);
-    process.exit(cleanupFailed ? 1 : 0);
-  });
+    // 收尾序列提出为可测的 shutdownSequence（cleanup 先于抢传的顺序不变量在那里被单测锁住）；此处只做
+    // 「守卫去重 + 唤醒退避 + 真 process.exit」这层 handler 外壳（进程副作用，不进纯函数）。
+    const code = await shutdownSequence({
+      inflightPending: () => startInFlight && pendingSessions.size === 0,
+      settleMs: INFLIGHT_SETTLE_MS,
+      sleep: (ms) => new Promise<void>((r) => setTimeout(r, ms)),
+      cleanup,
+      uploader,
+      reportFile: () => agentRef?.reportFile,
+      getCleanupFailed: () => cleanupFailed,
+    });
+    process.exit(code);
+  };
+  process.on("SIGTERM", onSignal);
+  process.on("SIGINT", onSignal);  // Ctrl-C 也走同一路径（抢传+释放会话），对称 Nova 已纳入 SIGINT
 
   const reportRefs: Array<{ kind: string; ref: string; label?: string }> = [];
   // 产物 S3 上传器（ADR 0029，对称 Nova 的模块级 _uploader）：cloud 上传+删本地报 s3://，local no-op 报 file://。
@@ -284,17 +345,36 @@ async function main(): Promise<number> {
       }
     }
     const { page, agent } = conn!;
+    agentRef = agent;  // 上提给 SIGTERM/SIGINT handler（中断兜底抢传 agent.reportFile，ADR 0029）
 
     // sessionId 随 scope_started 即回传（不只等 scope_done）——超时/SIGTERM 中途打断时 scope_done 不会 emit，
     // 但血缘已先随首事件落到 core（ADR 0028 观测缺口修复，对称 Nova）。
     emit({ type: "scope_started", scopeId: scope.id, sessionId });  // 三级时长起点（越过此点不再重试建连）
     // scope 内串行跑 scenarios，共享同一会话（ADR 0019/0024）
     const votesN = job.assertionVotes ?? 1;  // AI 断言投票次数（ADR 0014/0024）；缺省 1
+    // report 抢传的 mtime 去重状态：**scope 级共享**（单份 report.html 跨 scenario 累积增长，共享才准）。
+    const snapState = { mtime: -1 };
+    // scenario 边界 log 抢传的 per-file mtime 去重表（ADR 0029「第四级」）：**scope 级共享**（log append-only
+    // 单调增长、跨 scenario 累积，只传真变过的 topic 文件、不重发未变 log）。log 落 `<MIDSCENE_RUN_DIR>/log/`。
+    const logSeen = new Map<string, number>();
+    const logDir = process.env.MIDSCENE_RUN_DIR ? path.join(path.resolve(process.env.MIDSCENE_RUN_DIR), "log") : undefined;
     for (const sc of job.scenarios) {
       emit({ type: "scenario_started", scenarioId: sc.id });
-      // scope 内 step 短路在 runScenario 内（上游 error 跳过后续、发 step_skipped，ADR 0031 决定六）。
-      const statuses = await runScenario(agent, page, sc.id, sc.steps, votesN);
+      // scope 内 step 短路在 runScenario 内（上游 error 跳过后续、发 step_skipped，ADR 0031 决定六）；
+      // act 边界抢传（report snapshot）也在 runScenario 内 step_done 安全点（ADR 0029，为 Fargate 预演）。
+      const statuses = await runScenario(agent, page, sc.id, sc.steps, votesN, uploader, snapState);
       emit({ type: "scenario_done", scenarioId: sc.id, status: aggregate(statuses) });
+      // scenario 边界抢传诊断 log（ADR 0029「第四级」，Midscene 单腿、为 Fargate 预演）：把该 scenario 期间已在盘、
+      // 未传的 log/*.log 抢进 S3，收窄 log 丢失窗口从「整个 run」到「当前正在跑的 scenario」。best-effort：失败吞、
+      // 不阻塞下一 scenario（对齐 report 抢传）。per-file mtime 去重 + 总墙钟预算在 snapshotLogs 内（退化网络护栏）。
+      // no-op（local）下 snapshotLogs 直接返回。report 已由 runScenario 内 step_done 抢传覆盖，此处只补 log。
+      if (logDir) {
+        try {
+          await uploader.snapshotLogs(logDir, logSeen, SCENARIO_LOG_SNAPSHOT_BUDGET_MS);
+        } catch (e) {
+          log(`worker: scenario 边界 log 抢传失败（best-effort、忽略、scope 末 flush 兜底）：${(e as Error).message}`);
+        }
+      }
     }
 
     // 归集原生报告（ADR 0027 reportRefs）：destroy 后 reportFile finalize，Midscene 出 1 个 html/worker（scope 级）
@@ -335,6 +415,7 @@ async function main(): Promise<number> {
 // 返回各步 status——被跳过步**不进** statuses，故不参与 aggregate（scenario 判定由那个 error step 决定）。
 async function runScenario(
   agent: PlaywrightAgent, page: import("playwright").Page, scenarioId: string, steps: Step[], votesN: number,
+  uploader: ArtifactUploader, snapState: { mtime: number },
 ): Promise<string[]> {
   const statuses: string[] = [];
   let shortcircuit = false;
@@ -345,6 +426,21 @@ async function runScenario(
     }
     const status = await runStep(agent, page, scenarioId, step, votesN);
     statuses.push(status);
+    // act 边界抢传（ADR 0029，为 Fargate 预演）：step_done 安全点（act 已返回、SDK onTaskUpdate 已 await flush，
+    // 盘上 report 一致无半写），把增量增长的单份 report.html 用 snapshotReport overwrite 同 key 抢传。
+    // 在 error 短路判定**之前**——损坏那步的 report 最该留。mtime 去重（仅 report 变了才传，确定性/导航步不写
+    // report → mtime 不变 → 跳过）；空窗跳过（首个 AI task 前 agent.reportFile 未置）；失败吞（best-effort、不打断）。
+    if (agent.reportFile) {
+      try {
+        const mt = fs.statSync(agent.reportFile).mtimeMs;
+        if (mt !== snapState.mtime) {
+          await uploader.snapshotReport(agent.reportFile);
+          snapState.mtime = mt;
+        }
+      } catch (e) {
+        log(`worker: report 抢传失败（best-effort、忽略、下步重试）：${(e as Error).message}`);
+      }
+    }
     if (status === "error") shortcircuit = true;  // 本 scenario 后续 step 短路
   }
   return statuses;
@@ -429,7 +525,7 @@ function aggregate(statuses: string[]): string {
 }
 
 // 测试可见（对称 Nova：Nova worker 靠 if __name__ 守卫使 _run_step/_run_scenario/_is_transient_network 可 import 测）。
-export { runStep, runScenario, isTransientNetwork, aggregate };
+export { runStep, runScenario, isTransientNetwork, aggregate, interruptSnapshot, shutdownSequence };
 
 // 仅作为入口被直接运行时才跑 main（对称 Nova 的 `if __name__ == "__main__"`）——
 // 被测试 import 时不触发 main，使 runStep/isTransientNetwork 可注 fake agent 单测。

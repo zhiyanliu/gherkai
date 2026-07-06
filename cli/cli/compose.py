@@ -26,17 +26,31 @@ NOVA_ACT_TIMEOUT_S = int(os.environ.get("NOVA_ACT_TIMEOUT_S", "120"))  # SDK 允
 # 保守起点 60s（→ Nova grace 下限 ≈ 180s）。标定完改这一处。
 NOVA_GRACE_MARGIN_S = int(os.environ.get("NOVA_GRACE_MARGIN_S", "60"))
 
+# Midscene 的 grace 下限（ADR 0024 grace 硬约束）：Midscene worker 无「可控 act timeout」概念（不像 Nova 的
+# ACT_TIMEOUT_S），但它的 **SIGTERM onSignal 收尾路径本身有确定的超时预算**，grace 必须够它跑完、否则会被
+# SIGKILL 打断到一半（会话释放虽由「先释放会话再抢传」的排序 + Stop 预算保住不泄漏，但 worker 退不干净、
+# 中断兜底 report 抢传被截断）。下限 = onSignal 最坏串行路径的超时预算之和 + 余量，各段与 worker 常量同源：
+#   inflight settle(INFLIGHT_SETTLE_MS≈1.5s) + 会话 Stop(STOP_SESSION_BUDGET_MS≈3s) + browser.close race(≈3s)
+#   + 中断兜底 snapshotReport 上传(UPLOAD_TIMEOUT_MS≈10s) ≈ 17.5s，取 25s 留余量。**有界的待真跑标定量**，
+# 可 env 覆盖。（历史：曾为 0.0=无下限，导致 midscene-only run 默认 grace 回落 ScheduleOpts 的 5s < 上传超时
+# 10s，SIGTERM 时 worker 可能被 SIGKILL、兜底抢传截断——见 ADR 0024 grace 硬约束条。）
+MIDSCENE_GRACE_MIN_S = int(os.environ.get("MIDSCENE_GRACE_MIN_S", "25"))
+
 
 def engine_min_grace(engine_name: str) -> float:
     """按引擎给 grace 下限（ADR 0024 grace 硬约束）——**引擎特定值住在组合根**（core 不认）。
 
     Nova：`ACT_TIMEOUT_S + margin`（SIGTERM 落长 act 中途须等 act 有界返回才协作退释放会话）。
-    其余引擎（Midscene 无 worker 可控 act timeout 概念）：0.0=无下限。
+    Midscene：`MIDSCENE_GRACE_MIN_S`（无可控 act timeout，但 onSignal 收尾路径的超时预算之和须 < grace，
+    否则 worker 被 SIGKILL、中断兜底抢传截断——见该常量注释）。
     组合根算好后作 `ScheduleOpts.min_grace_s` 传给 core，core 只 enforce「grace ≥ 此下限」的引擎无关关系。
+    混引擎 run 由调用方取各引擎下限的 max（grace 是 run 级单值）。
     （未来更干净：引擎经 Engine port 自声明 min_grace，替代这里的 engine_name 分支，ADR 0024 记为 defer。）
     """
     if engine_name == "novaact":
         return float(NOVA_ACT_TIMEOUT_S + NOVA_GRACE_MARGIN_S)
+    if engine_name == "midscene":
+        return float(MIDSCENE_GRACE_MIN_S)
     return 0.0
 
 

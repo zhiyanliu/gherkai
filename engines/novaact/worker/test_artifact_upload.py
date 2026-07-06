@@ -143,3 +143,15 @@ def test_from_env_noop_when_no_bucket(monkeypatch):
     monkeypatch.delenv("ARTIFACT_S3_BUCKET", raising=False)
     u = ArtifactUploader.from_env()
     assert u.enabled is False
+
+
+# ---- boto client 超时/重试契约（ADR 0029「上传必须套超时」/退出时间有界）：真建 client 查 meta.config，
+# 不 mock（别的测试都塞 mock _client、绕过 _s3()，故这些护栏值零覆盖——绿≠对，见 CLAUDE.md）。不连真 AWS。----
+def test_s3_client_has_bounded_timeouts_and_no_retry():
+    u = ArtifactUploader(bucket="bkt", prefix="reports/rid/", run_dir=Path("/tmp/rid"))
+    cfg = u._s3().meta.config  # 真建 boto3 client（本地构造、不发请求）
+    assert cfg.connect_timeout == 5
+    assert cfg.read_timeout == 10
+    # max_attempts=0 → botocore 归一化 total_max_attempts=1（真单次、零重试、零退避——「快速失败」意图）。
+    # 若误写 max_attempts=1 会变成 total=2（1 重试 + 退避 sleep），此断言会红——锁住 C1 修复。
+    assert cfg.retries["total_max_attempts"] == 1

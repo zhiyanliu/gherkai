@@ -109,3 +109,33 @@ def test_build_engines_no_artifact_s3_env_has_no_s3_keys(tmp_path: Path):
     nova_dir = tmp_path / "rid" / "nova-trajectories"
     engines = compose.build_engines(compose.repo_root(), nova_logs_dir=nova_dir)
     assert "ARTIFACT_S3_BUCKET" not in engines["novaact"]._env
+
+
+# ---- engine_min_grace：按引擎给 grace 下限（ADR 0024 grace 硬约束）----
+def test_engine_min_grace_nova_covers_act_timeout_plus_margin():
+    # 断言语义关系而非重述公式（否则同义反复、测不出常量漂移）：Nova 下限须**严格大于**单 act 上界——
+    # 才留得出会话释放余量（SIGTERM 落长 act 中途须等 act 有界返回才协作退释放会话，ADR 0024）。
+    # 若 margin 误设为 0（违 ADR「grace 须留会话释放余量」红线），下限=act_timeout，此断言会红。
+    g = compose.engine_min_grace("novaact")
+    assert g > compose.NOVA_ACT_TIMEOUT_S, "Nova grace 下限须 > 单 act 上界（留会话释放余量）"
+    assert compose.NOVA_GRACE_MARGIN_S > 0, "margin 须 > 0（ADR 0024 会话释放余量红线）"
+
+
+def test_engine_min_grace_midscene_nonzero_covers_onsignal_budget():
+    # Midscene 下限 = MIDSCENE_GRACE_MIN_S（非零）：onSignal 收尾路径超时预算之和须 < grace，否则 worker 被
+    # SIGKILL、中断兜底 report 抢传截断（ADR 0024 grace 硬约束；曾为 0.0 致 midscene-only run grace 回落 5s < 上传 10s）。
+    assert compose.engine_min_grace("midscene") == float(compose.MIDSCENE_GRACE_MIN_S)
+    assert compose.engine_min_grace("midscene") > 0.0
+    # 必须够 onSignal 最坏串行路径（会话 Stop + browser.close + 中断兜底上传超时），且 > Midscene 上传超时 10s。
+    assert compose.MIDSCENE_GRACE_MIN_S >= 10
+
+
+def test_engine_min_grace_unknown_engine_zero():
+    # 未知引擎无下限（0.0）——保守：core enforce grace > 0 仍兜底。
+    assert compose.engine_min_grace("unknown") == 0.0
+
+
+def test_engine_min_grace_mixed_run_takes_max():
+    # 混引擎 run 的 min_grace = 各引擎下限的 max（grace 是 run 级单值，__main__ 取 max）——Nova 下限最大、支配。
+    legs = ["novaact", "midscene"]
+    assert max(compose.engine_min_grace(e) for e in legs) == compose.engine_min_grace("novaact")

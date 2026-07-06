@@ -236,7 +236,8 @@ test("runScenario: 上游 step error 后短路后续、发 step_skipped、不再
     step("When", '"再操作"', 1),          // 应被短路（不调 aiAct）
     step("Then", '"页面有预期内容"', 2),   // 应被短路（不调 aiBoolean）
   ];
-  const statuses = await runScenario(agent, fakePage, "sc:0", steps, 1);
+  const statuses = await runScenario(agent, fakePage, "sc:0", steps, 1,
+    { snapshotReport: async () => {} } as any, { mtime: -1 });  // 抢传 no-op（这些 fake agent 无 reportFile、抢传跳过）
   // 上游 error 后：只调了 1 次 aiAct（那个失败的），后续 AI 一次没调
   assert.equal(counts().aiActCalls, 1);
   assert.equal(counts().aiBooleanCalls, 0);
@@ -252,7 +253,8 @@ test("runScenario: 全 passed 时不短路、无 step_skipped", async () => {
   const { runScenario } = await importMod();
   const { agent } = fakeAgent([true]);  // Then 单票 yes
   const steps = [step("When", '"做事"', 0), step("Then", '"对吗"', 1)];
-  const statuses = await runScenario(agent, fakePage, "sc:0", steps, 1);
+  const statuses = await runScenario(agent, fakePage, "sc:0", steps, 1,
+    { snapshotReport: async () => {} } as any, { mtime: -1 });  // 抢传 no-op（这些 fake agent 无 reportFile、抢传跳过）
   assert.deepEqual(statuses, ["passed", "passed"]);
   assert.equal(events().filter((e) => e.type === "step_skipped").length, 0);
 });
@@ -262,7 +264,8 @@ test("runScenario: failed 不触发短路（判据锁 error，非 failed）", as
   const { runScenario } = await importMod();
   const { agent } = fakeAgent([false, true]);  // 第一个 Then failed，第二个 Then passed
   const steps = [step("Then", '"对吗A"', 0), step("Then", '"对吗B"', 1)];
-  const statuses = await runScenario(agent, fakePage, "sc:0", steps, 1);
+  const statuses = await runScenario(agent, fakePage, "sc:0", steps, 1,
+    { snapshotReport: async () => {} } as any, { mtime: -1 });  // 抢传 no-op（这些 fake agent 无 reportFile、抢传跳过）
   assert.deepEqual(statuses, ["failed", "passed"]);  // failed 不短路，第二步照跑
   assert.equal(events().filter((e) => e.type === "step_skipped").length, 0);
 });
@@ -297,4 +300,156 @@ test("runStep: 连续两 step token 各算各的增量（不双计前一 step）
   // 第二 step 只算增量 200，不把 step1 的 100 双计进来
   const ev2 = events().reverse().find((e) => e.type === "step_done" && e.stepIndex === 1);
   assert.deepEqual(ev2.cost, { tokens: 200 });
+});
+
+
+// ---- act 边界抢传（ADR 0029，为 Fargate 预演）：runScenario 每 step_done 后 snapshot report + mtime 去重 + 空窗跳过 ----
+// fail=true：snapshotReport 抛错（模拟上传失败）——验 worker 层 try/catch 吞错、best-effort 不打断主流程。
+function spyUploader(fail = false) {
+  const snaps: string[] = [];
+  return {
+    snaps,
+    uploader: {
+      snapshotReport: async (p: string) => { snaps.push(p); if (fail) throw new Error("snapshot boom"); },
+    } as any,
+  };
+}
+
+test("runScenario: 每变化 step 后抢传 report（snapshot overwrite）", async () => {
+  const { runScenario } = await importMod();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "snaptest-"));
+  const rf = path.join(dir, "report.html");
+  fs.writeFileSync(rf, "v0");
+  // fake agent：每 aiAct 改一次 reportFile 内容+mtime（模拟 SDK 增量写），reportFile 从首个 act 起有值
+  let i = 0;
+  const agent = {
+    get reportFile() { return i > 0 ? rf : undefined; },  // 空窗：首个 act 前 undefined
+    aiAct: async () => { i++; fs.writeFileSync(rf, "v" + i); const t = Date.now() / 1000 + i; fs.utimesSync(rf, t, t); },
+  } as any;
+  const { snaps, uploader } = spyUploader();
+  const steps = [step("When", '"a"', 0), step("When", '"b"', 1)];
+  await runScenario(agent, fakePage, "sc:0", steps, 1, uploader, { mtime: -1 });
+  assert.equal(snaps.length, 2, "两个 AI step 各抢传一次（report 每步都变）");
+  assert.ok(snaps.every((p) => p === rf), "抢传的都是同一 reportFile（overwrite 同 key）");
+});
+
+test("runScenario: 抢传失败（snapshotReport 抛）被吞、不打断 step 循环（best-effort 不变量）", async () => {
+  // 验 run-scope.ts 里 runScenario 的 try{snapshotReport}catch{log} 分工：lib 抛→worker 吞、继续跑完剩余 step。
+  // 若有人误删该 catch 或改 rethrow，本测试会红（抢传失败会打断 step 循环、statuses 不全）。
+  const { runScenario } = await importMod();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "snapfail-"));
+  const rf = path.join(dir, "report.html");
+  let i = 0;
+  const agent = {
+    get reportFile() { return rf; },  // 恒有 reportFile → 每 step 都试抢传
+    aiAct: async () => { i++; fs.writeFileSync(rf, "v" + i); const t = Date.now() / 1000 + i; fs.utimesSync(rf, t, t); },
+  } as any;
+  const { snaps, uploader } = spyUploader(true);  // snapshotReport 每次抛
+  const steps = [step("When", '"a"', 0), step("When", '"b"', 1), step("When", '"c"', 2)];
+  const statuses = await runScenario(agent, fakePage, "sc:0", steps, 1, uploader, { mtime: -1 });
+  // 抢传每步都抛，但被吞：三步全跑完、全 passed（statuses 完整），抢传也每步都试过（snaps 三次）
+  assert.deepEqual(statuses, ["passed", "passed", "passed"], "抢传失败不影响 step 执行结果");
+  assert.equal(snaps.length, 3, "每步都试了抢传（虽都抛，被吞后继续）");
+});
+
+test("runScenario: reportFile 空窗（首步未置）→ 跳过抢传", async () => {
+  const { runScenario } = await importMod();
+  const agent = {
+    reportFile: undefined,  // 全程无 reportFile（如纯确定性步、AI 未产 report）
+    aiAct: async () => {},
+  } as any;
+  const { snaps, uploader } = spyUploader();
+  await runScenario(agent, fakePage, "sc:0", [step("When", '"a"', 0)], 1, uploader, { mtime: -1 });
+  assert.equal(snaps.length, 0, "reportFile 空 → 不抢传");
+});
+
+test("runScenario: report mtime 不变（确定性步不写 report）→ 不重复抢传", async () => {
+  const { runScenario } = await importMod();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "snaptest2-"));
+  const rf = path.join(dir, "report.html");
+  fs.writeFileSync(rf, "fixed");
+  const t = Date.now() / 1000; fs.utimesSync(rf, t, t);  // mtime 固定、不再变
+  const agent = { reportFile: rf, aiAct: async () => {} } as any;  // aiAct 不改 report（mtime 不变）
+  const { snaps, uploader } = spyUploader();
+  const steps = [step("When", '"a"', 0), step("When", '"b"', 1)];
+  await runScenario(agent, fakePage, "sc:0", steps, 1, uploader, { mtime: -1 });
+  assert.equal(snaps.length, 1, "首步抢传一次；第二步 mtime 未变 → 去重跳过");
+});
+
+
+// ---- 中断兜底抢传（interruptSnapshot，ADR 0029 handler 兜底；对称 Nova test_interrupt_model 把 handler 提出可测）----
+// 从 onSignal 提出的可测纯函数：锁住「空窗跳过 / 成功抢传 / 失败吞不抛」——这是 WP3-A 核心交付、ADR 强调的
+// 「Node 能在 handler 里 await 抢传、Nova greenlet 不能」关键不对称，此前是 main() 内闭包、零测试（该对称却漏）。
+test("interruptSnapshot: reportFile 空窗（首个 act 前未置）→ 跳过、不调 snapshotReport", async () => {
+  const { interruptSnapshot } = await importMod();
+  const { snaps, uploader } = spyUploader();
+  await interruptSnapshot(uploader, undefined);
+  await interruptSnapshot(uploader, null);
+  assert.deepEqual(snaps, [], "无 reportFile → 无从抢传");
+});
+
+test("interruptSnapshot: 有 reportFile → 抢传该份 report", async () => {
+  const { interruptSnapshot } = await importMod();
+  const { snaps, uploader } = spyUploader();
+  await interruptSnapshot(uploader, "/tmp/run/report.html");
+  assert.deepEqual(snaps, ["/tmp/run/report.html"], "读盘上那份增量 report 抢传");
+});
+
+test("interruptSnapshot: 抢传失败 → 吞掉、不抛（best-effort，不影响 handler 后续退出流程）", async () => {
+  const { interruptSnapshot } = await importMod();
+  const { snaps, uploader } = spyUploader(true);  // snapshotReport 抛
+  const logs: string[] = [];
+  // 不抛才对：若 rethrow，onSignal 的 process.exit 会被跳过、worker 退不干净——本断言锁住 catch 不被误删。
+  await interruptSnapshot(uploader, "/tmp/run/report.html", (m) => logs.push(m));
+  assert.equal(snaps.length, 1, "试过抢传");
+  assert.ok(logs.some((m) => m.includes("中断兜底抢传 report 失败")), "失败被 log（吞、不抛）");
+});
+
+
+// ---- shutdownSequence（SIGTERM 收尾序列，ADR 0024 会话释放优先铁律）：锁住 cleanup 先于抢传的顺序不变量 ----
+// 造带 order 记录的 spy deps；断言 cleanup 在 snapshotReport 之前调用（会话释放优先，抢传 best-effort 不延迟它）。
+function shutdownSpy(opts: { cleanupFailed?: boolean; reportFile?: string | null; inflight?: boolean } = {}) {
+  const order: string[] = [];
+  // 用 "reportFile" in opts 区分「未传→默认有 report」vs「显式传 null→空窗」（?? 对 null 也回退、会吞掉空窗意图）
+  const rf = "reportFile" in opts ? opts.reportFile : "/tmp/run/report.html";
+  const deps = {
+    inflightPending: () => opts.inflight ?? false,
+    settleMs: 1,
+    sleep: async (_ms: number) => { order.push("sleep"); },
+    cleanup: async () => { order.push("cleanup"); },
+    uploader: { snapshotReport: async (_p: string) => { order.push("snapshot"); } },
+    reportFile: () => rf,
+    getCleanupFailed: () => opts.cleanupFailed ?? false,
+    logFn: () => {},
+  };
+  return { order, deps };
+}
+
+test("shutdownSequence: cleanup 先于中断抢传（会话释放优先铁律，ADR 0024）", async () => {
+  const { shutdownSequence } = await importMod();
+  const { order, deps } = shutdownSpy();
+  const code = await shutdownSequence(deps);
+  // 核心不变量：会话释放（cleanup）必须排在抢传（snapshot）之前——退化网络下抢传挂也不该延迟会话释放。
+  assert.deepEqual(order, ["cleanup", "snapshot"], "顺序须 cleanup→snapshot，绝不可颠倒");
+  assert.equal(code, 0, "cleanup 未失败 → 退 0");
+});
+
+test("shutdownSequence: 在途窗口兜底 → sleep 在 cleanup 之前", async () => {
+  const { shutdownSequence } = await importMod();
+  const { order, deps } = shutdownSpy({ inflight: true });
+  await shutdownSequence(deps);
+  assert.deepEqual(order, ["sleep", "cleanup", "snapshot"], "inflight → 先等在途 settle，再 cleanup，再抢传");
+});
+
+test("shutdownSequence: cleanupFailed → 退出码 1（泄漏可观测）", async () => {
+  const { shutdownSequence } = await importMod();
+  const { deps } = shutdownSpy({ cleanupFailed: true });
+  assert.equal(await shutdownSequence(deps), 1, "会话释放失败 → 退 1");
+});
+
+test("shutdownSequence: reportFile 空窗 → cleanup 照跑、抢传跳过", async () => {
+  const { shutdownSequence } = await importMod();
+  const { order, deps } = shutdownSpy({ reportFile: null });
+  await shutdownSequence(deps);
+  assert.deepEqual(order, ["cleanup"], "无 reportFile：只 cleanup，interruptSnapshot 内部跳过 snapshot");
 });

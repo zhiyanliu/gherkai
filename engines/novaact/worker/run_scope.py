@@ -166,6 +166,27 @@ def _traj_refs(step_traj: list[str]) -> list[dict]:
     ]
 
 
+def _presend_act_siblings(step_traj: list[str]) -> None:
+    """act 边界抢传（ADR 0029「act 边界抢传」，为 Fargate 预演）：在 step_done 安全点，把本 step 各 act 的
+    配套 `_trajectory.json`（数据文件，非 reportRef 指向的 .html）也即时上传，**不等 scope 末 flush**。
+
+    否则中断落在 flush 前时这些 json 随容器盘销毁而丢（Fargate；subprocess 下留本地盘、非真丢）。
+    `step_traj` 存的是 .html 路径（`_collect_traj` 已把 json 推成 html）——此处反推配套 json 抢传。
+    复用幂等 `to_report_ref`（distinct key、记 `_uploaded` → scope 末 flush 自动跳过、不重传）；
+    no-op（local/未注入落点）时 `to_report_ref` 原样返回不上传。**best-effort：失败吞掉**——抢传是保险，
+    报告链接强保证仍锚在 `_traj_refs`（.html 实时传，失败抛→可观测），不下放到抢传。
+    """
+    for html in step_traj:
+        if not html.endswith(".html"):
+            continue
+        js = html[: -len(".html")] + "_trajectory.json"
+        if os.path.exists(js):
+            try:
+                _uploader.to_report_ref(os.path.abspath(js))  # 幂等上传+记账；返回值丢弃（json 不进 reportRefs）
+            except Exception as e:  # noqa: BLE001  抢传 best-effort，失败不打断 step
+                log(f"act 边界抢传 json 失败（忽略、scope 末 flush 兜底）：{e}")
+
+
 def _run_step(nova, scenario_id: str, step: dict, votes_n: int) -> str:
     """派发执行一个 step，吐 step_done 事件（带本 step 的 trajectory reportRefs），返回 status。
 
@@ -246,6 +267,7 @@ def _run_step(nova, scenario_id: str, step: dict, votes_n: int) -> str:
             if tw_total > 0:
                 ev["cost"] = {"time_worked_s": tw_total}  # 全 N 票合计
             if step_traj:
+                _presend_act_siblings(step_traj)  # act 边界抢传配套 json（ADR 0029，为 Fargate 预演）
                 ev["reportRefs"] = _traj_refs(step_traj)  # step 级 trajectory（ADR 0027 下沉）
             if not passed:
                 ev["errorType"] = "assertion_failed"
@@ -262,6 +284,7 @@ def _run_step(nova, scenario_id: str, step: dict, votes_n: int) -> str:
         if cost:
             ev["cost"] = cost
         if step_traj:
+            _presend_act_siblings(step_traj)  # act 边界抢传配套 json（ADR 0029，为 Fargate 预演）
             ev["reportRefs"] = _traj_refs(step_traj)  # step 级 trajectory（ADR 0027 下沉）
         emit(ev)
         return "passed"
@@ -284,6 +307,7 @@ def _run_step(nova, scenario_id: str, step: dict, votes_n: int) -> str:
             # 是这次的失败源（S3 抛），重建 reportRefs 会再抛。**保护 emit 必发**：上传再失败也只是丢 reportRefs
             # 链接，绝不吞掉 engine_error step_done 事件（否则降级成裸 traceback，ADR 0029 review #4）。
             try:
+                _presend_act_siblings(step_traj)  # 失败 act 的配套 json 也抢传（ADR 0029；自身已吞错，此 try 双保险）
                 ev["reportRefs"] = _traj_refs(step_traj)
             except Exception:  # noqa: BLE001  重建 ref 时 upload 再失败：跳过 reportRefs、但 engine_error 事件照发
                 pass
