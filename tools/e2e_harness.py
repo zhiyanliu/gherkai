@@ -1,10 +1,13 @@
 #!/usr/bin/env python
-"""中断韧性集成验证 harness（ADR 0024 终止契约 / 0029 act 边界抢传；跨引擎）。
+"""worker 端到端真跑验证 harness（ADR 0024 worker↔core 协议 / 终止契约 / 0029 act 边界抢传；跨引擎）。
 
-**这是 opt-in 手动集成验证脚本，不进 pytest 默认套件**——它真 spawn worker、真开 AgentCore 会话、
-真写 S3（**烧真 AWS 钱、需网络/凭证、单次 ~1-2min**）。中断韧性的纯逻辑回归已由各引擎的单测覆盖
-（Nova worker/test_interrupt_model.py / test_antetheft.py、core tests/test_subprocess_engine.py 等）；
-本 harness 补的是「真 greenlet / 真会话 / 真中断丢失量」这类单测覆盖不到、只能真跑的端到端验证。
+**这是 opt-in 手动端到端验证脚本，不进 pytest 默认套件**——它真 spawn worker、真喂 job（stdin）、真收
+事件流（EVENTS_FD）、真开 AgentCore 会话、真写 S3（**烧真 AWS 钱、需网络/凭证、单次 ~1-2min**）。它补的是
+单测的 mock 覆盖不到、只能真跑的那层（对齐 CLAUDE.md「绿≠对」）：真 greenlet / 真会话 / 真进程退出码 /
+真事件流字节 / 真中断丢失量。纯逻辑回归仍由各引擎单测覆盖（Nova worker/test_*.py、core tests/ 等）。
+
+**中断只是能力之一**（--interrupt）：--interrupt none 的 baseline 可验「事件流端到端正常 + 三通道分离 +
+零行为变化」（如 worker I/O 边缘重构后的回归）；--interrupt <时机> 才验中断韧性。
 
 忠实复现 SubprocessEngine adapter 的 spawn 环境（自建 events pipe + EVENTS_FD、注入产物落点 env +
 S3 上传 env），起真 worker 跑一个 scope，按事件时机外部 SIGTERM 命中中断点，中断后快照：
@@ -15,14 +18,14 @@ S3 上传 env），起真 worker 跑一个 scope，按事件时机外部 SIGTERM
 
 用法（需 AWS 凭证 + region us-east-1）：
   # 从仓库根跑：
-  BUCKET=<你的可写桶> PYTHONPATH=core core/.venv/bin/python tools/interrupt_harness.py \\
+  HARNESS_S3_BUCKET=<你的可写桶> PYTHONPATH=core core/.venv/bin/python tools/e2e_harness.py \\
       --engine novaact --feature wikipedia_assertions --interrupt scope_end --run-id verify-1
   # --interrupt: connect(建连中) / act(act 跑一半) / between(step 边界) / scenario(第一个 scenario 完成后、
   #              下一 scenario 运行中——验 scenario 边界 log 抢传，需多 scenario feature) / scope_end(flush 前) /
   #              none(baseline 不中断)
   # 桶经环境变量 HARNESS_S3_BUCKET 传（勿硬编码；跑完自行清理桶内 <prefix>）。
 
-历史：WP-S 中断丢失预演、Nova flag-only 改造验证、WP3-A 抢传验证都用它（见 docs/journey/0001）。
+历史：中断丢失预演、Nova 中断模型改造验证、抢传验证都用它（历次实测见 docs/journey/0001）。
 """
 from __future__ import annotations
 
@@ -47,11 +50,16 @@ _TMP = Path(os.environ.get("CLAUDE_JOB_DIR", "/tmp")) / "harness-runs"
 
 
 def build_job(feature: str, engine: str, votes: int):
-    """复用真实 plan 链路生成 job（不手搓 JSON，防 schema 漂移）。取第一个 job 作靶子。"""
+    """复用真实 plan 链路生成 job（不手搓 JSON，防 schema 漂移）。
+
+    取**匹配 `--engine` 的第一个 job** 作靶子（回退 jobs[0]）——否则混引擎 feature（如 engine_routing 用
+    @engine: tag 把 scenario 分到不同引擎）下 jobs[0] 可能是另一引擎的 job，会拿它喂错引擎的 worker（worker
+    不看 engine tag、照跑，但语义错乱）。单引擎 feature 下 jobs 全同引擎、此选择 = jobs[0]，行为不变。
+    """
     txt = (REPO / "features" / f"{feature}.feature").read_text(encoding="utf-8")
     fs = FeatureSource(uri=f"features/{feature}.feature", text=txt)
     jobs = plan([fs], PlanConfig(default_engine=engine, default_assertion_votes=votes))
-    return jobs[0]
+    return next((j for j in jobs if j.engine == engine), jobs[0])
 
 
 def worker_cmd(engine: str) -> tuple[list[str], str]:
@@ -237,7 +245,7 @@ def run(engine: str, feature: str, votes: int, interrupt: str, run_id: str, grac
 
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser(description="中断韧性集成验证 harness（opt-in、烧真 AWS）")
+    ap = argparse.ArgumentParser(description="worker 端到端真跑验证 harness（opt-in、烧真 AWS；中断只是能力之一）")
     ap.add_argument("--engine", choices=["novaact", "midscene"], default="novaact")
     ap.add_argument("--feature", default="wikipedia_assertions")
     ap.add_argument("--votes", type=int, default=1)

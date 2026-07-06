@@ -1,16 +1,16 @@
-# interrupt_harness 使用说明
+# e2e_harness 使用说明（worker 端到端真跑验证）
 
-> **读者：** 后续接手中断韧性验证的 AI tool（也含人）。**这是操作手册**——怎么调用、怎么判读结果、有哪些真跑陷阱。
-> **机制原理**（harness 如何忠实复现 adapter spawn 环境、三通道、grace 测量）见 `interrupt_harness.py` 顶部 docstring，不在此复述（单一事实源）。
-> **相关设计：** ADR 0024（终止契约 / grace）、ADR 0029（产物→S3 / act·scenario 边界抢传 / 固有残余）、journey 0001（历次实测数据）、journey 0000（WP 进度）。
+> **读者：** 后续接手 worker 端到端验证的 AI tool（也含人）。**这是操作手册**——怎么调用、怎么判读结果、有哪些真跑陷阱。
+> **机制原理**（harness 如何忠实复现 adapter spawn 环境、三通道、grace 测量）见 `e2e_harness.py` 顶部 docstring，不在此复述（单一事实源）。
+> **相关设计：** ADR 0024（worker↔core 协议 / 终止契约 / grace / I/O 边缘可注入接口）、ADR 0029（产物→S3 / act·scenario 边界抢传 / 固有残余）、journey 0001（历次实测数据）、journey 0000（WP 进度）。
 
 ## 这是什么 / 什么时候用
 
-`interrupt_harness.py` 是 **opt-in 手动集成验证脚本，不进 pytest 默认套件**。它真 spawn worker、真开 AgentCore 会话、真写 S3——**烧真 AWS 钱、需网络+凭证、单次 ~1-2min**。
+`e2e_harness.py` 是 **opt-in 手动端到端验证脚本，不进 pytest 默认套件**。它真 spawn worker、真喂 job（stdin）、真收事件流（`EVENTS_FD`）、真开 AgentCore 会话、真写 S3——**烧真 AWS 钱、需网络+凭证、单次 ~1-2min**。它验的是**单测的 mock 覆盖不到、只能真跑**的那一层（对齐 CLAUDE.md「绿≠对：识别结论的证据边界」）：真 greenlet / 真会话 / 真进程退出码 / 真 grace 秒数 / 真事件流字节 / 真中断丢失量。
 
-**中断韧性的纯逻辑回归已由各引擎单测覆盖**（Nova `worker/test_interrupt_model.py` / `test_antetheft.py`、Midscene `worker/*.test.ts`、core `tests/test_subprocess_engine.py`）。本 harness 补的是**单测覆盖不到、只能真跑**的那一层：真 greenlet / 真会话 / 真中断丢失量 / 真 grace 秒数 / worker 是否 hung。
+**中断只是它的能力之一**（`--interrupt`）——它同样能跑 `--interrupt none` 的 baseline 验「事件流端到端正常 + 三通道分离 + 零行为变化」（如 worker I/O 重构后的回归）。纯逻辑回归仍由各引擎单测覆盖（Nova `worker/test_*.py`、Midscene `worker/*.test.ts`、core `tests/test_subprocess_engine.py`）。
 
-**用它的场景**：改了 worker 中断路径、会话清理、grace、抢传逻辑、上传超时后，想确认"承重假设没塌"。日常改逻辑请优先跑单测；只有涉及上面这些"只能真跑验证"的面才动 harness。
+**用它的场景**：改了 worker 的中断路径 / 会话清理 / grace / 抢传 / 上传超时 / **job 入口·事件出口（I/O 边缘）**后，想真跑确认「承重假设没塌」。日常改逻辑先跑单测；只有涉及上面这些"只能真跑验证"的真实边界才动 harness。
 
 ## 前置条件
 
@@ -23,7 +23,7 @@
 
 ```bash
 # 从仓库根：
-HARNESS_S3_BUCKET=<你的可写桶> PYTHONPATH=core core/.venv/bin/python tools/interrupt_harness.py \
+HARNESS_S3_BUCKET=<你的可写桶> PYTHONPATH=core core/.venv/bin/python tools/e2e_harness.py \
     --engine <novaact|midscene> \
     --feature <feature 名，不含 .feature 后缀> \
     --interrupt <none|connect|act|between|scenario|scope_end> \
@@ -77,7 +77,7 @@ harness 结尾打印 `=== HARNESS_REPORT_JSON ===` + 一段 JSON。关键字段�
 
 ## 真跑陷阱（历史踩过，务必避开）
 
-1. **plan 按 `@scope:` tag 分组，不是"一 feature 一 scope"**（ADR 0025）。未标 `@scope:` 的 scenario **各自独立成单 scenario scope**。harness 取 `jobs[0]` 作靶子。
+1. **plan 按 `@scope:` tag 分组，不是"一 feature 一 scope"**（ADR 0025）。未标 `@scope:` 的 scenario **各自独立成单 scenario scope**。harness 取**匹配 `--engine` 的第一个 job**（单引擎 feature 下即 `jobs[0]`；混引擎 feature 如 engine_routing 靠 `@engine:` tag 分腿时，取本次 `--engine` 那腿的 job）作靶子。
    - **验 `scenario` 时机必须用多 scenario 归一个 scope 的 feature**，否则 `jobs[0]` 只有 1 个 scenario、`scenario` 时机的 `n_scen>1` 条件不满足、SIGTERM 不发出、跑成完整 baseline。
    - **现成可用**：`features/concurrency_and_scope.feature` 的 `@scope:browse`（2 个 scenario 共享会话，`jobs[0]`）。跑前可用 `core.scope.plan` 确认 `jobs[0]` 的 scenario 数：
      ```bash
