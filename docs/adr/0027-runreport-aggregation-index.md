@@ -157,14 +157,14 @@ Nova worker 设 `NovaAct(logs_directory=<run 专属持久目录>)`，act/act_get
 
 **但这暴露一个上游缺口**（非本 ADR 范围）：确定性 step **不产任何可观测产物**——连「检查了哪个
 URL、断言了什么」都不落痕（只有 pass/fail 进 result 树）。大量用确定性锚点的团队，其 RunReport
-人看部分会长期空。这是「确定性 step 产物可观测性」问题，留待后续（见下「留口子」），本轮 RunReport
+人看部分会长期空。这是「确定性 step 产物可观测性」问题，留待后续（见下「留口子」），本 ADR 的 RunReport
 只负责归集**已有的**产物。
 
 ## 现在做 / 留口子
 
 - **现在做（v1.0）**：上述 `ReportRef` 改造、`run_id`（归位进 `RunMeta` definition）+ 组合根生成、`JobResult` 经持有的 `Job` 取 `engine`、`ReportStore.write` 接口 + `LocalReportStore`（manifest + index）、**两引擎产物对称归位到 run 目录**（Nova `NOVA_LOGS_DIR`→trajectory、Midscene `MIDSCENE_RUN_DIR`→report.html）+ reportRefs（Midscene `kind=report` scope 级 / Nova `kind=trajectory` 下沉 step 级 + `kind=summary` scope 级）、cli 默认生成 RunReport（`--no-report` 跳过、`--report-dir` 配落点）、`href` 相对化（local 相对 / cloud 恒等 ref）、单测 + 两个引擎真 e2e。
 - **留口子不实现**：
-  - **确定性 step 产物可观测性**：让 `@deterministic` handler 可选地产一个轻量产物（当时 URL / 截图 / 检查描述），使纯确定性用例的 RunReport 也有内容可看。本轮判定真值在 result 树已够；产物可观测另开一轮（与 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md) 确定性 step 设计一并演进）。
+  - **确定性 step 产物可观测性**：让 `@deterministic` handler 可选地产一个轻量产物（当时 URL / 截图 / 检查描述），使纯确定性用例的 RunReport 也有内容可看。判定真值在 result 树已够；产物可观测另开一轮（与 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md) 确定性 step 设计一并演进）。
   - 按 `kind` 的富渲染（`<video>`/`<iframe>`，皮层将来做）；trajectory 内部结构化提取。
   （注：store 读回面**已落地**——`RunStore.load_run_meta`/`load_run_state` + `ResultStore.load_job_result`/`load_all`，靠 `serialize` 完整重建，[0016](./0016-execution-architecture-core-lib-run-model.md)。）
 

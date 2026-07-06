@@ -24,7 +24,8 @@
 | **WP0** | worker I/O 边缘抽象成可注入接口（job source 读 stdin↔S3、event sink 写 EVENTS_FD↔SQS）；纯重构、零行为变化；对称已有 ArtifactUploader | ⬜ 待做（#7 已铺干净中断模型地基） | 依赖 #7✅ |
 | **WP1** | Fargate 传输层：core SQS encode/decode + FargateEngine adapter（RunTask/StopTask/DescribeTasks）+ worker 注入 S3/SQS + schedule 存活判定迁移（事件流沉默→DescribeTasks） | ⬜ 待做 | ADR 0024「远程传输演进」（Draft）；依赖 WP0 接口定型 |
 | **WP2** | 基础设施：Docker 镜像 + ECS task-def + IAM task role + SQS FIFO + cluster + IaC（全仓从零）+ 组合根 build_engines 补 Fargate 分支（当前 --backend cloud 仍返回 SubprocessEngine） | ⬜ 待做 | 依赖 WP1 接口定型 |
-| **WP3** | Fargate 中断韧性：act 粒度即时上传（抢传，两腿不对称见 0001）+ grace/stopTimeout 预算 + botocore retry vs grace + 错误分类升级 + 孤儿产物恢复 | ⬜ 待做 | ADR 0032（Draft，收 Fargate 特有）；WP-S 预演数据 0001；依赖 WP1+WP2 |
+| **WP3-A** | 中断抢传落生产：两腿 act 边界即时上传（Nova 抢配套 trajectory.json / Midscene 提前 report 抢传）+ Midscene scenario 边界 log 抢传（第四级）+ 两腿上传套超时（退出时间有界护栏）——**不依赖 Fargate**（ADR 0029、subprocess+cloud 就做、Fargate 忠实预演），和 #7 中断主题连续 | 🟡 实现+单测+真跑验证完成，待两轮 review→commit | ADR 0029（上传时机四级 + 固有残余 + 超时）；真跑验证：Nova trajectory 救回、Midscene report+scenario log 救回（多 scenario 中断落 scenario2、scenario1 log 已进 S3）；证据 0001 |
+| **WP3-B** | Fargate 特有韧性：grace/stopTimeout 真校准 + botocore retry vs grace 实测 + 错误分类升级 + 孤儿产物恢复（Fargate 查 S3）——**必须等真 Fargate** | ⬜ 待做 | ADR 0032（Draft）；依赖 WP1+WP2 真容器 |
 
 ## 已冻结的关键设计（ADR 索引，真做各 WP 前必读对应条）
 
@@ -41,6 +42,10 @@
 - **孤儿会话不做 core reaper**，靠 AgentCore 原生 session TTL（sessionTimeoutSeconds，默认 1h、可收紧）兜底——ADR 0024「已接受代价」。
 - **Midscene 无 greenlet 卡死风险**（Node 单线程事件循环），#7 只改 Nova——ADR 0024 终止契约。
 - **两腿抢传不对称**：Nova 每 act 独立 trajectory（distinct key 幂等）；Midscene 单份增长 report（overwrite 同 key、带宽/粒度取舍 + uploader 幂等守卫冲突 + agent 引用上提）——WP3 须单独设计，见 0001。
+
+## backlog（已评估、暂不做、留触发条件防未来重新推导）
+
+- **Nova act 边界抢传类型无关化**：现 `_presend_act_siblings` 靠**硬编码文件名反推**（`.html`→`_trajectory.json`），对同 act 目录的第三个兄弟 `_traces.json`、及未来 SDK 新增的任何 per-act 文件**天生瞎**。治本 = 从 `trajectory_file_path` 取 act 目录、walk 全兄弟抢传（对齐 scope 末 flush「不按类型挑、抗 SDK 升级」）。**暂不做**：`_traces.json` 在 AgentCore backend 恒不产（`step.trace=None`）、眼下救 0 字节（YAGNI）。**触发条件**：换非-AgentCore backend、或 SDK 升级填了 `step.trace` / 新增 per-act 文件时再做。详见 ADR 0029「固有残余」条 `act_*_traces.json` 细目。
 
 ## 工作节奏（约定）
 
