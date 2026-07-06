@@ -41,6 +41,8 @@ from nova_act.types.workflow import set_current_workflow, get_current_workflow
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # novaact/ 根，便于 import lib
 from lib.workflow_setup import ensure_workflow_definition
 from lib.constants import MODEL_ID, WORKFLOW_DEF  # 共享常量（单一真理源，与 spike 共用）
+from lib.event_sink import EventSink  # 事件出口（ADR 0024 I/O 边缘可注入接口，第一期 subprocess 态）
+from lib.job_source import JobSource  # job 入口（同上）
 
 # 确定性 step 注册表（ADR 0022）+ test engineer 的锚点脚手架（均在 worker/ 同目录）。
 # 先 import 注册机制（提供 @deterministic 装饰器），再 import 脚手架——脚手架顶层的
@@ -85,22 +87,10 @@ class _DeterministicCtx:
     def page(self):
         return self._nova.page
 
-# 三通道分离（ADR 0024）：协议事件走专用 fd（core adapter 读这个），与 SDK 打到 stdout 的进度噪声、
-# worker 自己的诊断（stderr）物理隔离。adapter 经环境变量 EVENTS_FD 告知该 fd 号（pass_fds 继承，号不固定）。
-# 无 EVENTS_FD（手动直跑、无 adapter）时回落 stdout，便于调试（`echo job | worker` 仍能看事件）。
-_events_fd = os.environ.get("EVENTS_FD")
-try:
-    _events_out = os.fdopen(int(_events_fd), "w", encoding="utf-8") if _events_fd else sys.stdout
-except (OSError, ValueError):
-    _events_out = sys.stdout
-
-
-def emit(obj: dict) -> None:
-    """吐一条 ADR 0024 事件到事件通道（fd3，JSON Lines，字段名 camelCase 与 core/wire.py 一致）。"""
-    _events_out.write(json.dumps(obj, ensure_ascii=False) + "\n")
-    _events_out.flush()
-
-
+# 事件 sink（ADR 0024「I/O 边缘可注入接口」第一期）：worker 主流程唯一事件出口，抽进 lib/event_sink.py
+# （对称 _uploader、可注入、可测；subprocess 态写 EVENTS_FD fd、无则回落 stdout 调试）。emit 作参数注入
+# _run_step/_run_scenario（两腿统一打桩机制），不再是模块级函数——三通道分离/保序/中文由 EventSink 保。
+# log（stderr 诊断）**不属那三条 I/O 边、不进 sink**（协议传输面 vs 诊断面物理隔离，ADR 0024），保模块级。
 def log(msg: str) -> None:
     sys.stderr.write(f"{msg}\n")
     sys.stderr.flush()
@@ -187,8 +177,10 @@ def _presend_act_siblings(step_traj: list[str]) -> None:
                 log(f"act 边界抢传 json 失败（忽略、scope 末 flush 兜底）：{e}")
 
 
-def _run_step(nova, scenario_id: str, step: dict, votes_n: int) -> str:
+def _run_step(nova, scenario_id: str, step: dict, votes_n: int, sink: EventSink) -> str:
     """派发执行一个 step，吐 step_done 事件（带本 step 的 trajectory reportRefs），返回 status。
+
+    sink：事件出口（ADR 0024 I/O 边缘可注入接口，参数注入使测试可注 fake）——本函数所有事件经 sink.emit 吐。
 
     votes_n：AI 断言（Then）投票次数（来自 job.assertionVotes，ADR 0014）；1=不抖动检测。
     trajectory 收集在**本 step 局部**（每次 AI act 一个），随该 step 的 step_done 报出 step 级 reportRefs
@@ -204,7 +196,7 @@ def _run_step(nova, scenario_id: str, step: dict, votes_n: int) -> str:
     text = step["text"]
     step_traj: list[str] = []  # 本 step 的 trajectory 路径（act 逐个收进来）
 
-    emit({"type": "step_started", "scenarioId": scenario_id, "stepIndex": idx})  # step 时长起点
+    sink.emit({"type": "step_started", "scenarioId": scenario_id, "stepIndex": idx})  # step 时长起点
     try:
         # ① 确定性注册表（ADR 0022）：命中走精确 handler、不投票；AssertionError→failed，其它→error
         hit = _deterministic.match(text)
@@ -220,20 +212,20 @@ def _run_step(nova, scenario_id: str, step: dict, votes_n: int) -> str:
                         f"确定性 handler 不能是 async（Nova 引擎同步执行）：{getattr(handler, '__name__', handler)!r}"
                     )
             except AssertionError as ae:
-                emit({
+                sink.emit({
                     "type": "step_done", "scenarioId": scenario_id, "stepIndex": idx,
                     "status": "failed", "errorType": "assertion_failed",
                     "message": str(ae) or f"确定性断言未过：{text}",
                 })
                 return "failed"
-            emit({"type": "step_done", "scenarioId": scenario_id, "stepIndex": idx, "status": "passed"})
+            sink.emit({"type": "step_done", "scenarioId": scenario_id, "stepIndex": idx, "status": "passed"})
             return "passed"
 
         url_match = _URL_IN_QUOTES.search(text)
         if url_match:
             # ② 内建确定性导航（ADR 0020）：抽 URL 直接 go_to_url，不浪费 AI
             nova.go_to_url(url_match.group(1))
-            emit({"type": "step_done", "scenarioId": scenario_id, "stepIndex": idx, "status": "passed"})
+            sink.emit({"type": "step_done", "scenarioId": scenario_id, "stepIndex": idx, "status": "passed"})
             return "passed"
 
         if keyword == "Then":
@@ -272,7 +264,7 @@ def _run_step(nova, scenario_id: str, step: dict, votes_n: int) -> str:
             if not passed:
                 ev["errorType"] = "assertion_failed"
                 ev["message"] = f"AI 断言未过多数票（{yes}/{votes_n}）：{text}"
-            emit(ev)
+            sink.emit(ev)
             return "passed" if passed else "failed"
 
         # When / Given（非 URL）→ AI 动作（无 votes）
@@ -286,7 +278,7 @@ def _run_step(nova, scenario_id: str, step: dict, votes_n: int) -> str:
         if step_traj:
             _presend_act_siblings(step_traj)  # act 边界抢传配套 json（ADR 0029，为 Fargate 预演）
             ev["reportRefs"] = _traj_refs(step_traj)  # step 级 trajectory（ADR 0027 下沉）
-        emit(ev)
+        sink.emit(ev)
         return "passed"
 
     except Exception as e:
@@ -311,7 +303,7 @@ def _run_step(nova, scenario_id: str, step: dict, votes_n: int) -> str:
                 ev["reportRefs"] = _traj_refs(step_traj)
             except Exception:  # noqa: BLE001  重建 ref 时 upload 再失败：跳过 reportRefs、但 engine_error 事件照发
                 pass
-        emit(ev)
+        sink.emit(ev)
         return "error"
 
 
@@ -362,7 +354,7 @@ def _instruction(text: str, step: dict) -> str:
     return f"{base}\n{extra}" if extra else base
 
 
-def _run_scenario(nova, scenario_id: str, steps: list[dict], votes_n: int) -> list[str]:
+def _run_scenario(nova, scenario_id: str, steps: list[dict], votes_n: int, sink: EventSink) -> list[str]:
     """scope 内串行跑一个 scenario 的 steps，上游 error 后**短路**后续 step（ADR 0031 决定六 / 0028）。
 
     短路：scenario 内一旦某 step `status==error`（导航 SSL 失败等），后续 step 不再调 AI——
@@ -382,9 +374,9 @@ def _run_scenario(nova, scenario_id: str, steps: list[dict], votes_n: int) -> li
             # 不发 step_skipped（那是 error 短路的语义、表"因上游故障跳过"）；停止是外部中止、非执行事实，
             # 未跑的 step 由 core 侧按 aborted/pending 派生态处理（wire 不传，ADR 0031），worker 不越权标注。
         if shortcircuit:
-            emit({"type": "step_skipped", "scenarioId": scenario_id, "stepIndex": st["index"]})
+            sink.emit({"type": "step_skipped", "scenarioId": scenario_id, "stepIndex": st["index"]})
             continue
-        status = _run_step(nova, scenario_id, st, votes_n)
+        status = _run_step(nova, scenario_id, st, votes_n, sink)
         if status == "aborted":
             break  # step 被外部中止（投票途中收到 _stop，review S1）：不进 statuses、不参与 _aggregate，
             # 与循环顶 _stop 检查同语义（外部中止非执行事实）。下轮循环顶的 _stop 检查也会 break，这里提前收。
@@ -541,7 +533,9 @@ def _classify_act_error(e: BaseException) -> str:
 
 
 def main() -> int:
-    job = json.loads(sys.stdin.readline())
+    # I/O 边缘可注入接口（ADR 0024）：job 入口 / 事件出口从内联收进 lib 组件，subprocess 态=读 stdin / 写 EVENTS_FD。
+    job = JobSource.from_env().read()
+    sink = EventSink.from_env()  # main 级单例（对称 _uploader）；作参数注入 _run_scenario/_run_step
     scope = job["scope"]
     scenarios = job["scenarios"]
     votes_n = int(job.get("assertionVotes", 1))  # AI 断言投票次数（ADR 0014/0024）；缺省 1
@@ -587,19 +581,19 @@ def main() -> int:
                 session_id = nova.get_session_id()
                 # session_id 随 scope_started 即回传（不只等 scope_done）——超时/SIGTERM 中途打断时
                 # scope_done 不会 emit，但血缘已先随首事件落到 core（ADR 0028 观测缺口修复）。
-                emit({"type": "scope_started", "scopeId": scope["id"], "sessionId": session_id})  # 三级时长起点
+                sink.emit({"type": "scope_started", "scopeId": scope["id"], "sessionId": session_id})  # 三级时长起点
                 started = True  # 越过此点 = 会话已起、act 即将跑 → 退出建连重试域（ADR 0028）
                 # scope 内串行跑 scenarios，共享同一会话（ADR 0019/0024）
                 for sc in scenarios:
                     if _stop.is_set():
                         return  # 停止信号（ADR 0024 flag-only）：正常 return 出本函数 → with __exit__ 释放会话
                     sid = sc["id"]
-                    emit({"type": "scenario_started", "scenarioId": sid})
+                    sink.emit({"type": "scenario_started", "scenarioId": sid})
                     # trajectory 现由每个 _run_step 挂进各自 step_done 的 step 级 reportRefs（ADR 0027 下沉）——
                     # 不再在 scenario 级聚合；scenario_done 不带 reportRefs（协议字段保留、向后兼容）。
                     # scope 内 step 短路（上游 error 跳过后续、发 step_skipped，ADR 0031 决定六）在 _run_scenario 内。
-                    statuses = _run_scenario(nova, sid, sc["steps"], votes_n)
-                    emit({"type": "scenario_done", "scenarioId": sid, "status": _aggregate(statuses)})
+                    statuses = _run_scenario(nova, sid, sc["steps"], votes_n, sink)
+                    sink.emit({"type": "scenario_done", "scenarioId": sid, "status": _aggregate(statuses)})
 
     with wf:
         outer = get_current_workflow()
@@ -652,7 +646,7 @@ def main() -> int:
     ev = {"type": "scope_done", "scopeId": scope["id"], "sessionId": session_id}
     if scope_refs:
         ev["reportRefs"] = scope_refs
-    emit(ev)
+    sink.emit(ev)
     # scope 末：整目录 flush 剩余产物（trajectory .json / log 等，已实时传的 reportRef 文件跳过）+ 全成功删本地
     # （ADR 0029）。no-op（local/未注入落点）时直接返回、不碰本地。仅正常完成路径走到此；停止信号/网络耗尽的
     # 提前 return（见上）不 flush——中断产物保留本地（0028 #3 兜底）。

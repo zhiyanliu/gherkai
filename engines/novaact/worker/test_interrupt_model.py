@@ -27,11 +27,24 @@ def _reset_stop():
     rs._stop.clear()
 
 
+class _FakeSink:
+    """假 EventSink（ADR 0024 I/O 边缘可注入接口）：emit 收集事件、list-like 供断言——作 sink 参数注入。"""
+    def __init__(self):
+        self._evts = []
+    def emit(self, obj):
+        self._evts.append(obj)
+    def __iter__(self):
+        return iter(self._evts)
+    def __getitem__(self, i):
+        return self._evts[i]
+    def __len__(self):
+        return len(self._evts)
+
+
 @pytest.fixture
-def captured(monkeypatch):
-    evts = []
-    monkeypatch.setattr(rs, "emit", lambda obj: evts.append(obj))
-    return evts
+def captured():
+    """假 sink：收集 _run_step/_run_scenario 经 sink.emit 吐的事件供断言（作 sink 参数注入）。"""
+    return _FakeSink()
 
 
 def _step(keyword, text, index=0):
@@ -77,13 +90,11 @@ class _RecordNova:
 
 # ---- handler flag-only：只置标志、绝不 raise（发现 #2 根治核心）----
 def test_signal_handler_only_sets_flag_never_raises():
-    # 复刻 main() 里装的 handler 语义：拿到模块级 _on_signal 不方便（闭包内），改测契约——
-    # 装一个和 main 同形的 flag-only handler，确认它只 set、不 raise（raise 会撞 greenlet，发现 #2）。
-    # 直接验证「_stop.set() 不抛」这个不变量 + handler 注册不报错。
+    # 直接调**真** handler rs._on_signal（模块级函数、可 import 调，非闭包）：验它只置 _stop、绝不 raise
+    # （raise 会撞 greenlet 切换区、发现 #2 的根因）。signal handler 签名 (signum, frame)。
     assert not rs._stop.is_set()
-    # 模拟 handler 体：只置标志
-    rs._stop.set()
-    assert rs._stop.is_set()  # 置位成功、无异常
+    rs._on_signal(signal.SIGTERM, None)  # 真调 handler，不抛
+    assert rs._stop.is_set()             # handler 置了标志
 
 
 def test_sigterm_and_sigint_both_installed_as_flag_only(monkeypatch):
@@ -114,13 +125,13 @@ def test_sigterm_and_sigint_both_installed_as_flag_only(monkeypatch):
 # ---- act 有界返回：worker 给每个 act/act_get 传 timeout=ACT_TIMEOUT_S ----
 def test_act_called_with_timeout(captured):
     nova = _RecordNova()
-    rs._run_step(nova, "sc:0", _step("When", '"做事"'), 1)
+    rs._run_step(nova, "sc:0", _step("When", '"做事"'), 1, captured)
     assert nova.act_timeouts == [rs.ACT_TIMEOUT_S]  # 动作 act 传了 timeout
 
 
 def test_act_get_called_with_timeout(captured):
     nova = _RecordNova(bool_seq=[True, True, True])
-    rs._run_step(nova, "sc:0", _step("Then", '"对吗"'), 3)  # 3 票
+    rs._run_step(nova, "sc:0", _step("Then", '"对吗"'), 3, captured)  # 3 票
     assert nova.act_get_timeouts == [rs.ACT_TIMEOUT_S] * 3  # 每票都传 timeout
 
 
@@ -128,7 +139,7 @@ def test_act_get_called_with_timeout(captured):
 def test_vote_loop_stops_before_any_vote(captured):
     nova = _RecordNova(bool_seq=[True, True, True])
     rs._stop.set()  # 进 _run_step 前已置位 → 投票循环第一轮顶部即 break
-    r = rs._run_step(nova, "sc:0", _step("Then", '"对吗"'), 3)
+    r = rs._run_step(nova, "sc:0", _step("Then", '"对吗"'), 3, captured)
     assert nova.act_get_calls == 0          # 一票都没投（停止信号在循环顶生效）
     assert r == "aborted"                   # 返回 aborted（非 passed/failed）
     # 关键（S1 修复）：**不 emit 任何 step_done**——否则会把「从未执行的断言」误标成 failed(0/3)、污染 RunReport
@@ -147,7 +158,7 @@ def test_vote_loop_stops_midway_no_bogus_verdict(captured):
         return r
     nova.act_get = _act_get_then_stop
 
-    r = rs._run_step(nova, "sc:0", _step("Then", '"对吗"'), 3)
+    r = rs._run_step(nova, "sc:0", _step("Then", '"对吗"'), 3, captured)
     assert nova.act_get_calls == 1          # 只投了 1 票（第二轮顶部 _stop break）
     assert r == "aborted"                   # 不是 failed——中止非断言判定
     assert not any(e["type"] == "step_done" for e in captured)  # 不 emit bogus 的 assertion_failed(1/3)
@@ -158,7 +169,7 @@ def test_run_scenario_stops_on_flag_no_step_skipped(captured):
     nova = _RecordNova()
     rs._stop.set()  # 置位 → scenario 循环第一 step 前即 break
     steps = [_step("When", '"a"', 0), _step("When", '"b"', 1)]
-    statuses = rs._run_scenario(nova, "sc:0", steps, 1)
+    statuses = rs._run_scenario(nova, "sc:0", steps, 1, captured)
     assert statuses == []  # 一步没跑
     assert nova.act_timeouts == []  # 确认没调 act
     assert not any(e["type"] == "step_skipped" for e in captured)  # 停止不发 step_skipped（那是 error 短路语义）
@@ -172,15 +183,15 @@ def test_run_scenario_stops_midway(captured):
     orig = rs._run_step
     calls = []
 
-    def _wrap(n, sid, st, v):
+    def _wrap(n, sid, st, v, sink):
         calls.append(st["index"])
-        r = orig(n, sid, st, v)
+        r = orig(n, sid, st, v, sink)
         rs._stop.set()  # 第一步跑完就置位
         return r
 
     import unittest.mock as m
     with m.patch.object(rs, "_run_step", _wrap):
-        rs._run_scenario(nova, "sc:0", steps, 1)
+        rs._run_scenario(nova, "sc:0", steps, 1, captured)
     assert calls == [0]  # 只跑了第一步，第二步被 _stop break 掉
     assert not any(e["type"] == "step_skipped" for e in captured)
 

@@ -2,7 +2,8 @@
 
 与 Midscene 腿 run-scope.test.ts **对称**：纯逻辑、注 fake nova、不连 AWS、不烧钱。
 覆盖 v1.0 最核心、最易回归的派发逻辑——四条互斥分支 + 投票判定 yes>votes_n/2 + 异常网络分类。
-emit 是模块级函数，monkeypatch 成捕获器读回事件。
+事件经注入的 fake sink（_FakeSink，fixture `captured`）收集读回——sink 作参数注入 _run_step/_run_scenario
+（对称 Midscene testSink；ADR 0024 I/O 边缘可注入接口，此前 emit 是模块级、迁移后可注 fake 打桩）。
 """
 import sys
 from pathlib import Path
@@ -56,12 +57,27 @@ class _FakeNova:
         return _FakeResult(v, tw=tw)
 
 
+class _FakeSink:
+    """假 EventSink（ADR 0024 I/O 边缘可注入接口，参数注入使测试可注 fake）：emit 收集事件、且 list-like
+    （__iter__/索引/clear）——作 sink 传进 _run_step/_run_scenario，同时供 `_done(sink)`/`for e in sink` 断言。"""
+    def __init__(self):
+        self._evts = []
+    def emit(self, obj):
+        self._evts.append(obj)
+    def __iter__(self):
+        return iter(self._evts)
+    def __getitem__(self, i):
+        return self._evts[i]
+    def __len__(self):
+        return len(self._evts)
+    def clear(self):
+        self._evts.clear()
+
+
 @pytest.fixture
-def captured(monkeypatch):
-    """monkeypatch 模块级 emit，收集事件到 list 供断言。"""
-    evts = []
-    monkeypatch.setattr(rs, "emit", lambda obj: evts.append(obj))
-    return evts
+def captured():
+    """假 sink：收集 _run_step/_run_scenario 经 sink.emit 吐的事件供断言（作 sink 参数注入，对称 Midscene）。"""
+    return _FakeSink()
 
 
 def _step(keyword, text, index=0):
@@ -75,7 +91,7 @@ def _done(evts):
 # ---- 派发分支 ----
 def test_given_url_goes_to_nav_no_ai(captured):
     nova = _FakeNova()
-    r = rs._run_step(nova, "sc:0", _step("Given", '打开 "https://example.com"'), 1)
+    r = rs._run_step(nova, "sc:0", _step("Given", '打开 "https://example.com"'), 1, captured)
     assert r == "passed"
     assert nova.calls == [("go_to_url", "https://example.com")]  # 不浪费 AI
     assert _done(captured).get("votes") is None  # 确定性导航无 votes
@@ -83,7 +99,7 @@ def test_given_url_goes_to_nav_no_ai(captured):
 
 def test_when_natural_language_goes_to_act(captured):
     nova = _FakeNova()
-    r = rs._run_step(nova, "sc:0", _step("When", '"搜索 OpenAI"'), 1)
+    r = rs._run_step(nova, "sc:0", _step("When", '"搜索 OpenAI"'), 1, captured)
     assert r == "passed"
     assert nova.calls[0][0] == "act"
     assert _done(captured).get("votes") is None  # 动作步无 votes
@@ -92,21 +108,21 @@ def test_when_natural_language_goes_to_act(captured):
 # ---- 投票多数票数学（ADR 0014 边界）----
 def test_then_votes1_single_yes_passed(captured):
     nova = _FakeNova(bool_seq=[True])
-    r = rs._run_step(nova, "sc:0", _step("Then", '"对吗"'), 1)
+    r = rs._run_step(nova, "sc:0", _step("Then", '"对吗"'), 1, captured)
     assert r == "passed"
     assert _done(captured)["votes"] == {"yes": 1, "total": 1}
 
 
 def test_then_votes3_majority_2of3_passed(captured):
     nova = _FakeNova(bool_seq=[True, False, True])
-    r = rs._run_step(nova, "sc:0", _step("Then", '"对吗"'), 3)
+    r = rs._run_step(nova, "sc:0", _step("Then", '"对吗"'), 3, captured)
     assert r == "passed"  # yes=2 > 3/2=1.5
     assert _done(captured)["votes"] == {"yes": 2, "total": 3}
 
 
 def test_then_votes3_only_1of3_failed(captured):
     nova = _FakeNova(bool_seq=[True, False, False])
-    r = rs._run_step(nova, "sc:0", _step("Then", '"对吗"'), 3)
+    r = rs._run_step(nova, "sc:0", _step("Then", '"对吗"'), 3, captured)
     assert r == "failed"  # yes=1 不 > 1.5
     ev = _done(captured)
     assert ev["status"] == "failed" and ev["errorType"] == "assertion_failed"
@@ -114,7 +130,7 @@ def test_then_votes3_only_1of3_failed(captured):
 
 def test_then_votes2_tie_failed(captured):
     nova = _FakeNova(bool_seq=[True, False])
-    r = rs._run_step(nova, "sc:0", _step("Then", '"对吗"'), 2)
+    r = rs._run_step(nova, "sc:0", _step("Then", '"对吗"'), 2, captured)
     assert r == "failed"  # yes=1 不 > 2/2=1，平票算失败（对称 Midscene，ADR 0028 有意设计）
 
 
@@ -122,20 +138,20 @@ def test_then_votes2_tie_failed(captured):
 def test_act_transient_network_is_network_error(captured):
     import socket
     nova = _FakeNova(act_raises=ConnectionError("reset"))
-    r = rs._run_step(nova, "sc:0", _step("When", '"做事"'), 1)
+    r = rs._run_step(nova, "sc:0", _step("When", '"做事"'), 1, captured)
     assert r == "error"
     ev = _done(captured)
     assert ev["status"] == "error" and ev["errorType"] == "network_error"
     # gaierror EAI_AGAIN 也算瞬时（对齐建连路径分类）
     nova2 = _FakeNova(act_raises=socket.gaierror(socket.EAI_AGAIN, "temp"))
     captured.clear()
-    assert rs._run_step(nova2, "sc:0", _step("When", '"做事"'), 1) == "error"
+    assert rs._run_step(nova2, "sc:0", _step("When", '"做事"'), 1, captured) == "error"
     assert _done(captured)["errorType"] == "network_error"
 
 
 def test_act_non_network_is_engine_error(captured):
     nova = _FakeNova(act_raises=ValueError("AI boom"))
-    r = rs._run_step(nova, "sc:0", _step("When", '"做事"'), 1)
+    r = rs._run_step(nova, "sc:0", _step("When", '"做事"'), 1, captured)
     assert r == "error"
     assert _done(captured)["errorType"] == "engine_error"
 
@@ -168,7 +184,7 @@ def test_classify_unknown_falls_back_engine_error():
 # ---- time_worked_s 成本：多票按累加合计全 N 票（对称 Midscene，修只算最后一票的欠计）----
 def test_then_votes3_cost_sums_all_votes(captured):
     nova = _FakeNova(bool_seq=[True, True, True], tw_seq=[1.0, 2.0, 3.0])  # 三票各 1/2/3 秒
-    rs._run_step(nova, "sc:0", _step("Then", '"对吗"'), 3)
+    rs._run_step(nova, "sc:0", _step("Then", '"对吗"'), 3, captured)
     ev = _done(captured)
     assert ev["cost"] == {"time_worked_s": 6.0}  # 1+2+3，非旧逻辑的 3.0（只算最后一票）
 
@@ -196,7 +212,7 @@ class _TrajNova:
 def test_step_done_carries_step_level_trajectory_refs(captured):
     # AI 动作步：本 step 的 act 轨迹挂进 step_done.reportRefs（kind=trajectory）
     nova = _TrajNova(["/logs/sess/act_0_trajectory.json"])
-    rs._run_step(nova, "sc:0", _step("When", '"做事"'), 1)
+    rs._run_step(nova, "sc:0", _step("When", '"做事"'), 1, captured)
     ev = _done(captured)
     assert ev["reportRefs"][0]["kind"] == "trajectory"
     assert ev["reportRefs"][0]["ref"] == "file:///logs/sess/act_0_trajectory.json"  # .html 不存在→回退 json
@@ -205,7 +221,7 @@ def test_step_done_carries_step_level_trajectory_refs(captured):
 def test_then_votes_multiple_trajectories_on_one_step(captured):
     # N 票 AI 断言：每票一个 act 轨迹，都挂本 step（一个 step 多个 trajectory，label 编号）
     nova = _TrajNova(["/logs/act_0_trajectory.json", "/logs/act_1_trajectory.json", "/logs/act_2_trajectory.json"])
-    rs._run_step(nova, "sc:0", _step("Then", '"对吗"'), 3)
+    rs._run_step(nova, "sc:0", _step("Then", '"对吗"'), 3, captured)
     refs = _done(captured)["reportRefs"]
     assert len(refs) == 3  # 三票三个轨迹，都挂这一个 step
     assert refs[0]["label"] == "trajectory 1" and refs[2]["label"] == "trajectory 3"
@@ -214,7 +230,7 @@ def test_then_votes_multiple_trajectories_on_one_step(captured):
 def test_deterministic_and_url_steps_have_no_traj_refs(captured):
     # 确定性导航步不调 act → 无 trajectory、step_done 不带 reportRefs
     nova = _FakeNova()
-    rs._run_step(nova, "sc:0", _step("Given", '打开 "https://example.com"'), 1)
+    rs._run_step(nova, "sc:0", _step("Given", '打开 "https://example.com"'), 1, captured)
     assert "reportRefs" not in _done(captured)
 
 
@@ -243,7 +259,7 @@ def test_run_scenario_shortcircuits_after_error(captured):
         _step("When", '"在页面上操作"', 1),                    # 应被短路（不调 act）
         _step("Then", '"页面有预期内容"', 2),                   # 应被短路（不调 act_get）
     ]
-    statuses = rs._run_scenario(nova, "sc:0", steps, votes_n=1)
+    statuses = rs._run_scenario(nova, "sc:0", steps, votes_n=1, sink=captured)
     # 上游 error 后：AI 一次没调（省钱、不在损坏环境上跑）
     assert nova.act_calls == 0 and nova.act_get_calls == 0
     # step 1/2 发 step_skipped（独立事件，非 step_done）
@@ -259,7 +275,7 @@ def test_run_scenario_no_shortcircuit_when_all_pass(captured):
     # 反向护栏：无 error 时不短路——每步照跑、无 step_skipped 事件。
     nova = _FakeNova(bool_seq=[True])
     steps = [_step("When", '"做事A"', 0), _step("Then", '"对吗"', 1)]
-    statuses = rs._run_scenario(nova, "sc:0", steps, votes_n=1)
+    statuses = rs._run_scenario(nova, "sc:0", steps, votes_n=1, sink=captured)
     assert statuses == ["passed", "passed"]
     assert [e for e in captured if e["type"] == "step_skipped"] == []
 
@@ -269,6 +285,6 @@ def test_run_scenario_failed_does_not_shortcircuit(captured):
     # failed 是业务结论、环境没坏，后续步该照跑（只有 error=执行故障才短路）。
     nova = _FakeNova(bool_seq=[False, True])  # 第一个 Then failed，第二个 Then passed
     steps = [_step("Then", '"对吗A"', 0), _step("Then", '"对吗B"', 1)]
-    statuses = rs._run_scenario(nova, "sc:0", steps, votes_n=1)
+    statuses = rs._run_scenario(nova, "sc:0", steps, votes_n=1, sink=captured)
     assert statuses == ["failed", "passed"]  # failed 不触发短路，第二步照跑
     assert [e for e in captured if e["type"] == "step_skipped"] == []

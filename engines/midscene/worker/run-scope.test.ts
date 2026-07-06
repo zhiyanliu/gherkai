@@ -2,29 +2,23 @@
 // 跑：node --import tsx --test worker/run-scope.test.ts（已接入 npm test）。
 // 与 Nova 腿 test_argument.py / test_transient_network.py 对称：纯逻辑、注 fake agent、不连 AWS。
 //
-// emit 走 EVENTS_FD（run-scope.ts:73）：测试把它指向临时文件，跑完读回断言事件序列。
+// 事件经注入的 fake sink 收集（ADR 0024 I/O 边缘可注入接口：emit 从模块级 fd 写改为参数注入的 EventSink，
+// 使测试可注 fake、无需真写 fd 再读回——顺带补上 emit 此前"模块级、无法打桩"的缺口）。testSink 作 sink 参数
+// 传进 runStep/runScenario；events() 读本测试起点之后新收集的事件（beforeEach 记偏移，隔离各测试）。
 import { test, beforeEach } from "node:test";
 import assert from "node:assert";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-// EVENTS_FD 在模块加载时固化（const），故 import 前设好、全程同一 fd、不截断（截断不重置写偏移会留 NUL 空洞）。
-// 隔离靠"按偏移读增量"：每个测试只解析自上次读以来 emit 新追加的内容。
-const evFile = path.join(os.tmpdir(), `ev-runstep-${process.pid}.jsonl`);
-const evFd = fs.openSync(evFile, "w+");
-process.env.EVENTS_FD = String(evFd);
+const _events: any[] = [];
+const testSink = { emit: async (e: unknown) => { _events.push(e); } };  // 注入进 runStep/runScenario
 let readOffset = 0;
 
-beforeEach(() => { readOffset = fs.fstatSync(evFd).size; });  // 记下本测试起点，只读其后追加的事件
-process.on("exit", () => { try { fs.closeSync(evFd); } catch {} try { fs.unlinkSync(evFile); } catch {} });
+beforeEach(() => { readOffset = _events.length; });  // 记下本测试起点，只读其后新增的事件
 
 function events(): any[] {
-  const size = fs.fstatSync(evFd).size;
-  if (size <= readOffset) return [];
-  const buf = Buffer.alloc(size - readOffset);
-  fs.readSync(evFd, buf, 0, buf.length, readOffset);  // 从本测试起点读增量
-  return buf.toString("utf-8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  return _events.slice(readOffset);  // 从本测试起点读增量（对齐旧"按偏移读"隔离语义）
 }
 
 // fake agent：aiBoolean 按预设布尔序列逐票回；aiAct 记录被调。无 _unstableLogContent → lastCost 返 undefined。
@@ -142,7 +136,7 @@ test("aggregate 优先级 error>failed>passed", async () => {
 test("runStep: Given 含引号 URL → 走 page.goto、passed、无 AI 调用", async () => {
   const { runStep } = await importMod();
   const { agent, calls } = fakeAgent();
-  const r = await runStep(agent, fakePage, "sc:0", step("Given", '打开 "https://example.com"'), 1);
+  const r = await runStep(agent, fakePage, "sc:0", step("Given", '打开 "https://example.com"'), 1, testSink);
   assert.equal(r, "passed");
   assert.deepEqual(calls, []);  // 不浪费 AI
   const ev = events().find((e) => e.type === "step_done");
@@ -153,7 +147,7 @@ test("runStep: Given 含引号 URL → 走 page.goto、passed、无 AI 调用", 
 test("runStep: When 自然语言 → 走 aiAct、passed、无 votes", async () => {
   const { runStep } = await importMod();
   const { agent, calls } = fakeAgent();
-  const r = await runStep(agent, fakePage, "sc:0", step("When", '"搜索 OpenAI"'), 1);
+  const r = await runStep(agent, fakePage, "sc:0", step("When", '"搜索 OpenAI"'), 1, testSink);
   assert.equal(r, "passed");
   assert.deepEqual(calls, ["aiAct"]);
   const ev = events().find((e) => e.type === "step_done");
@@ -165,7 +159,7 @@ test("runStep: When 自然语言 → 走 aiAct、passed、无 votes", async () =
 test("runStep: Then votesN=1 单票 yes → passed，带 votes{1,1}", async () => {
   const { runStep } = await importMod();
   const { agent, calls } = fakeAgent([true]);
-  const r = await runStep(agent, fakePage, "sc:0", step("Then", '"对吗"'), 1);
+  const r = await runStep(agent, fakePage, "sc:0", step("Then", '"对吗"'), 1, testSink);
   assert.equal(r, "passed");
   assert.equal(calls.length, 1);
   const ev = events().find((e) => e.type === "step_done");
@@ -175,7 +169,7 @@ test("runStep: Then votesN=1 单票 yes → passed，带 votes{1,1}", async () =
 test("runStep: Then votesN=3 取 2/3 多数 → passed", async () => {
   const { runStep } = await importMod();
   const { agent } = fakeAgent([true, false, true]);
-  const r = await runStep(agent, fakePage, "sc:0", step("Then", '"对吗"'), 3);
+  const r = await runStep(agent, fakePage, "sc:0", step("Then", '"对吗"'), 3, testSink);
   assert.equal(r, "passed");  // yes=2 > 3/2=1.5
   assert.deepEqual(events().find((e) => e.type === "step_done").votes, { yes: 2, total: 3 });
 });
@@ -183,7 +177,7 @@ test("runStep: Then votesN=3 取 2/3 多数 → passed", async () => {
 test("runStep: Then votesN=3 仅 1/3 → failed/assertion_failed", async () => {
   const { runStep } = await importMod();
   const { agent } = fakeAgent([true, false, false]);
-  const r = await runStep(agent, fakePage, "sc:0", step("Then", '"对吗"'), 3);
+  const r = await runStep(agent, fakePage, "sc:0", step("Then", '"对吗"'), 3, testSink);
   assert.equal(r, "failed");  // yes=1 不 > 1.5
   const ev = events().find((e) => e.type === "step_done");
   assert.equal(ev.status, "failed");
@@ -193,7 +187,7 @@ test("runStep: Then votesN=3 仅 1/3 → failed/assertion_failed", async () => {
 test("runStep: Then votesN=2 平票 1/2 → failed（yes>1 不成立，平票算失败）", async () => {
   const { runStep } = await importMod();
   const { agent } = fakeAgent([true, false]);
-  const r = await runStep(agent, fakePage, "sc:0", step("Then", '"对吗"'), 2);
+  const r = await runStep(agent, fakePage, "sc:0", step("Then", '"对吗"'), 2, testSink);
   assert.equal(r, "failed");  // yes=1 不 > 2/2=1 —— 偶数平票算失败（ADR 0028 已记的有意设计）
 });
 
@@ -201,7 +195,7 @@ test("runStep: Then votesN=2 平票 1/2 → failed（yes>1 不成立，平票算
 test("runStep: aiAct 抛网络瞬时异常 → error/network_error（仅分类、不重试）", async () => {
   const { runStep } = await importMod();
   const agent = { aiAct: async () => { const e: any = new Error("reset"); e.code = "ECONNRESET"; throw e; } } as any;
-  const r = await runStep(agent, fakePage, "sc:0", step("When", '"做事"'), 1);
+  const r = await runStep(agent, fakePage, "sc:0", step("When", '"做事"'), 1, testSink);
   assert.equal(r, "error");
   const ev = events().find((e) => e.type === "step_done");
   assert.equal(ev.status, "error");
@@ -211,7 +205,7 @@ test("runStep: aiAct 抛网络瞬时异常 → error/network_error（仅分类�
 test("runStep: aiAct 抛非网络异常 → error/engine_error", async () => {
   const { runStep } = await importMod();
   const agent = { aiAct: async () => { throw new Error("AI boom"); } } as any;
-  const r = await runStep(agent, fakePage, "sc:0", step("When", '"做事"'), 1);
+  const r = await runStep(agent, fakePage, "sc:0", step("When", '"做事"'), 1, testSink);
   assert.equal(r, "error");
   assert.equal(events().find((e) => e.type === "step_done").errorType, "engine_error");
 });
@@ -237,7 +231,7 @@ test("runScenario: 上游 step error 后短路后续、发 step_skipped、不再
     step("Then", '"页面有预期内容"', 2),   // 应被短路（不调 aiBoolean）
   ];
   const statuses = await runScenario(agent, fakePage, "sc:0", steps, 1,
-    { snapshotReport: async () => {} } as any, { mtime: -1 });  // 抢传 no-op（这些 fake agent 无 reportFile、抢传跳过）
+    { snapshotReport: async () => {} } as any, { mtime: -1 }, testSink);  // 抢传 no-op（这些 fake agent 无 reportFile、抢传跳过）
   // 上游 error 后：只调了 1 次 aiAct（那个失败的），后续 AI 一次没调
   assert.equal(counts().aiActCalls, 1);
   assert.equal(counts().aiBooleanCalls, 0);
@@ -254,7 +248,7 @@ test("runScenario: 全 passed 时不短路、无 step_skipped", async () => {
   const { agent } = fakeAgent([true]);  // Then 单票 yes
   const steps = [step("When", '"做事"', 0), step("Then", '"对吗"', 1)];
   const statuses = await runScenario(agent, fakePage, "sc:0", steps, 1,
-    { snapshotReport: async () => {} } as any, { mtime: -1 });  // 抢传 no-op（这些 fake agent 无 reportFile、抢传跳过）
+    { snapshotReport: async () => {} } as any, { mtime: -1 }, testSink);  // 抢传 no-op（这些 fake agent 无 reportFile、抢传跳过）
   assert.deepEqual(statuses, ["passed", "passed"]);
   assert.equal(events().filter((e) => e.type === "step_skipped").length, 0);
 });
@@ -265,7 +259,7 @@ test("runScenario: failed 不触发短路（判据锁 error，非 failed）", as
   const { agent } = fakeAgent([false, true]);  // 第一个 Then failed，第二个 Then passed
   const steps = [step("Then", '"对吗A"', 0), step("Then", '"对吗B"', 1)];
   const statuses = await runScenario(agent, fakePage, "sc:0", steps, 1,
-    { snapshotReport: async () => {} } as any, { mtime: -1 });  // 抢传 no-op（这些 fake agent 无 reportFile、抢传跳过）
+    { snapshotReport: async () => {} } as any, { mtime: -1 }, testSink);  // 抢传 no-op（这些 fake agent 无 reportFile、抢传跳过）
   assert.deepEqual(statuses, ["failed", "passed"]);  // failed 不短路，第二步照跑
   assert.equal(events().filter((e) => e.type === "step_skipped").length, 0);
 });
@@ -285,7 +279,7 @@ function costAgent(perCallTokens: number[]) {
 test("runStep: Then votesN=3 token 成本 = 三票之和（不是只算最后一票）", async () => {
   const { runStep } = await importMod();
   const agent = costAgent([100, 200, 300]);  // 三票各 100/200/300
-  await runStep(agent, fakePage, "sc:0", step("Then", '"对吗"'), 3);
+  await runStep(agent, fakePage, "sc:0", step("Then", '"对吗"'), 3, testSink);
   const ev = events().find((e) => e.type === "step_done");
   assert.deepEqual(ev.cost, { tokens: 600 });  // 100+200+300，非旧逻辑的 300
 });
@@ -293,10 +287,10 @@ test("runStep: Then votesN=3 token 成本 = 三票之和（不是只算最后一
 test("runStep: 连续两 step token 各算各的增量（不双计前一 step）", async () => {
   const { runStep } = await importMod();
   const agent = costAgent([100, 200]);  // step1 用 100，step2 用 200（累积 executions 不清）
-  await runStep(agent, fakePage, "sc:0", step("When", '"做事1"', 0), 1);
+  await runStep(agent, fakePage, "sc:0", step("When", '"做事1"', 0), 1, testSink);
   const ev1 = events().find((e) => e.type === "step_done");
   assert.deepEqual(ev1.cost, { tokens: 100 });
-  await runStep(agent, fakePage, "sc:0", step("When", '"做事2"', 1), 1);
+  await runStep(agent, fakePage, "sc:0", step("When", '"做事2"', 1), 1, testSink);
   // 第二 step 只算增量 200，不把 step1 的 100 双计进来
   const ev2 = events().reverse().find((e) => e.type === "step_done" && e.stepIndex === 1);
   assert.deepEqual(ev2.cost, { tokens: 200 });
@@ -328,7 +322,7 @@ test("runScenario: 每变化 step 后抢传 report（snapshot overwrite）", asy
   } as any;
   const { snaps, uploader } = spyUploader();
   const steps = [step("When", '"a"', 0), step("When", '"b"', 1)];
-  await runScenario(agent, fakePage, "sc:0", steps, 1, uploader, { mtime: -1 });
+  await runScenario(agent, fakePage, "sc:0", steps, 1, uploader, { mtime: -1 }, testSink);
   assert.equal(snaps.length, 2, "两个 AI step 各抢传一次（report 每步都变）");
   assert.ok(snaps.every((p) => p === rf), "抢传的都是同一 reportFile（overwrite 同 key）");
 });
@@ -346,7 +340,7 @@ test("runScenario: 抢传失败（snapshotReport 抛）被吞、不打断 step �
   } as any;
   const { snaps, uploader } = spyUploader(true);  // snapshotReport 每次抛
   const steps = [step("When", '"a"', 0), step("When", '"b"', 1), step("When", '"c"', 2)];
-  const statuses = await runScenario(agent, fakePage, "sc:0", steps, 1, uploader, { mtime: -1 });
+  const statuses = await runScenario(agent, fakePage, "sc:0", steps, 1, uploader, { mtime: -1 }, testSink);
   // 抢传每步都抛，但被吞：三步全跑完、全 passed（statuses 完整），抢传也每步都试过（snaps 三次）
   assert.deepEqual(statuses, ["passed", "passed", "passed"], "抢传失败不影响 step 执行结果");
   assert.equal(snaps.length, 3, "每步都试了抢传（虽都抛，被吞后继续）");
@@ -359,7 +353,7 @@ test("runScenario: reportFile 空窗（首步未置）→ 跳过抢传", async (
     aiAct: async () => {},
   } as any;
   const { snaps, uploader } = spyUploader();
-  await runScenario(agent, fakePage, "sc:0", [step("When", '"a"', 0)], 1, uploader, { mtime: -1 });
+  await runScenario(agent, fakePage, "sc:0", [step("When", '"a"', 0)], 1, uploader, { mtime: -1 }, testSink);
   assert.equal(snaps.length, 0, "reportFile 空 → 不抢传");
 });
 
@@ -372,7 +366,7 @@ test("runScenario: report mtime 不变（确定性步不写 report）→ 不重�
   const agent = { reportFile: rf, aiAct: async () => {} } as any;  // aiAct 不改 report（mtime 不变）
   const { snaps, uploader } = spyUploader();
   const steps = [step("When", '"a"', 0), step("When", '"b"', 1)];
-  await runScenario(agent, fakePage, "sc:0", steps, 1, uploader, { mtime: -1 });
+  await runScenario(agent, fakePage, "sc:0", steps, 1, uploader, { mtime: -1 }, testSink);
   assert.equal(snaps.length, 1, "首步抢传一次；第二步 mtime 未变 → 去重跳过");
 });
 

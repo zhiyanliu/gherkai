@@ -25,6 +25,8 @@ import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 import { sigv4Fetch, signCdpUpgrade, BASE_URL, MODEL, REGION } from "../lib/agentcore-sigv4.mjs";
 import { ArtifactUploader } from "../lib/artifact-upload.mjs";  // 产物 S3 上传（ADR 0029；无落点 env 时 no-op 报 file://）
+import { EventSink } from "../lib/event-sink.mjs";  // 事件出口（ADR 0024 I/O 边缘可注入接口，第一期 subprocess 态）
+import { JobSource } from "../lib/job-source.mjs";  // job 入口（同上）
 // 确定性 step 注册表（ADR 0022）+ test engineer 的锚点脚手架。
 // import 脚手架即触发其顶层 deterministic(...) 注册副作用（对称 Nova 引擎 import deterministic_steps）。
 import { match as matchDeterministic, DeterministicAssertion } from "./deterministic.js";
@@ -102,11 +104,10 @@ const MODEL_CONFIG = {
 };
 const URL_IN_QUOTES = /"(https?:\/\/[^"]+)"/;
 
-// --- 事件通道：写 EVENTS_FD（adapter 经环境变量告知 fd 号，pass_fds 继承）；无则回落 stdout ---
-const EVENTS_FD = process.env.EVENTS_FD ? Number(process.env.EVENTS_FD) : 1;
-function emit(obj: unknown): void {
-  fs.writeSync(EVENTS_FD, JSON.stringify(obj) + "\n"); // 同步写：保证事件按序到达（ADR 0024 顺序不变量）
-}
+// 事件出口抽进 lib/event-sink.mts（ADR 0024「I/O 边缘可注入接口」第一期）：可注入、可测；subprocess 态写
+// EVENTS_FD fd（无则回落 stdout 调试）。emit 为 async（合理不对称：为 WP-Fargate 的 SQS aws-sdk-js 预留；Nova
+// 那腿 emit 同步）+ 作参数注入 runStep/runScenario（两腿统一打桩机制），不再是模块级函数。
+// log（stderr 诊断）**不属那三条 I/O 边、不进 sink**（协议传输面 vs 诊断面物理隔离，ADR 0024），保模块级。
 function log(msg: string): void {
   process.stderr.write(msg + "\n");
 }
@@ -189,14 +190,10 @@ function stepCost(beforeTokens: number, agent: PlaywrightAgent): Record<string, 
   return delta > 0 ? { tokens: delta } : undefined;
 }
 
-async function readStdin(): Promise<string> {
-  const chunks: Buffer[] = [];
-  for await (const c of process.stdin) chunks.push(c as Buffer);
-  return Buffer.concat(chunks).toString("utf-8");
-}
-
 async function main(): Promise<number> {
-  const job: Job = JSON.parse((await readStdin()).split("\n")[0]);
+  // I/O 边缘可注入接口（ADR 0024）：job 入口 / 事件出口从内联收进 lib 组件，subprocess 态=读 stdin / 写 EVENTS_FD。
+  const job = (await JobSource.fromEnv().read()) as Job;
+  const eventSink = EventSink.fromEnv();  // main 级单例（对称 uploader）；作参数注入 runScenario/runStep
   const scope = job.scope;
 
   const cp = new BedrockAgentCoreClient({ region: REGION });
@@ -349,7 +346,7 @@ async function main(): Promise<number> {
 
     // sessionId 随 scope_started 即回传（不只等 scope_done）——超时/SIGTERM 中途打断时 scope_done 不会 emit，
     // 但血缘已先随首事件落到 core（ADR 0028 观测缺口修复，对称 Nova）。
-    emit({ type: "scope_started", scopeId: scope.id, sessionId });  // 三级时长起点（越过此点不再重试建连）
+    await eventSink.emit({ type: "scope_started", scopeId: scope.id, sessionId });  // 三级时长起点（越过此点不再重试建连）
     // scope 内串行跑 scenarios，共享同一会话（ADR 0019/0024）
     const votesN = job.assertionVotes ?? 1;  // AI 断言投票次数（ADR 0014/0024）；缺省 1
     // report 抢传的 mtime 去重状态：**scope 级共享**（单份 report.html 跨 scenario 累积增长，共享才准）。
@@ -359,11 +356,11 @@ async function main(): Promise<number> {
     const logSeen = new Map<string, number>();
     const logDir = process.env.MIDSCENE_RUN_DIR ? path.join(path.resolve(process.env.MIDSCENE_RUN_DIR), "log") : undefined;
     for (const sc of job.scenarios) {
-      emit({ type: "scenario_started", scenarioId: sc.id });
+      await eventSink.emit({ type: "scenario_started", scenarioId: sc.id });
       // scope 内 step 短路在 runScenario 内（上游 error 跳过后续、发 step_skipped，ADR 0031 决定六）；
       // act 边界抢传（report snapshot）也在 runScenario 内 step_done 安全点（ADR 0029，为 Fargate 预演）。
-      const statuses = await runScenario(agent, page, sc.id, sc.steps, votesN, uploader, snapState);
-      emit({ type: "scenario_done", scenarioId: sc.id, status: aggregate(statuses) });
+      const statuses = await runScenario(agent, page, sc.id, sc.steps, votesN, uploader, snapState, eventSink);
+      await eventSink.emit({ type: "scenario_done", scenarioId: sc.id, status: aggregate(statuses) });
       // scenario 边界抢传诊断 log（ADR 0029「第四级」，Midscene 单腿、为 Fargate 预演）：把该 scenario 期间已在盘、
       // 未传的 log/*.log 抢进 S3，收窄 log 丢失窗口从「整个 run」到「当前正在跑的 scenario」。best-effort：失败吞、
       // 不阻塞下一 scenario（对齐 report 抢传）。per-file mtime 去重 + 总墙钟预算在 snapshotLogs 内（退化网络护栏）。
@@ -397,7 +394,7 @@ async function main(): Promise<number> {
     await cleanup();
   }
 
-  emit({ type: "scope_done", scopeId: scope.id, sessionId: sessionId ?? null, reportRefs });
+  await eventSink.emit({ type: "scope_done", scopeId: scope.id, sessionId: sessionId ?? null, reportRefs });
   // scope 末：整目录 flush 剩余产物（report.html 已实时传、跳过；log/ 等一并传）+ 全成功删整目录（ADR 0029）。
   // no-op（local/未注入落点）时直接返回、不碰本地。仅正常完成路径走到此；异常/网络耗尽的 catch 内 return 不 flush
   // ——中断产物保留本地（对称 Nova）。
@@ -416,15 +413,16 @@ async function main(): Promise<number> {
 async function runScenario(
   agent: PlaywrightAgent, page: import("playwright").Page, scenarioId: string, steps: Step[], votesN: number,
   uploader: ArtifactUploader, snapState: { mtime: number },
+  sink: { emit: (e: unknown) => Promise<void> },
 ): Promise<string[]> {
   const statuses: string[] = [];
   let shortcircuit = false;
   for (const step of steps) {
     if (shortcircuit) {
-      emit({ type: "step_skipped", scenarioId, stepIndex: step.index });
+      await sink.emit({ type: "step_skipped", scenarioId, stepIndex: step.index });
       continue;
     }
-    const status = await runStep(agent, page, scenarioId, step, votesN);
+    const status = await runStep(agent, page, scenarioId, step, votesN, sink);
     statuses.push(status);
     // act 边界抢传（ADR 0029，为 Fargate 预演）：step_done 安全点（act 已返回、SDK onTaskUpdate 已 await flush，
     // 盘上 report 一致无半写），把增量增长的单份 report.html 用 snapshotReport overwrite 同 key 抢传。
@@ -448,9 +446,10 @@ async function runScenario(
 
 async function runStep(
   agent: PlaywrightAgent, page: import("playwright").Page, scenarioId: string, step: Step, votesN: number,
+  sink: { emit: (e: unknown) => Promise<void> },
 ): Promise<string> {
   const { index, keyword, text } = step;
-  emit({ type: "step_started", scenarioId, stepIndex: index });  // step 时长起点
+  await sink.emit({ type: "step_started", scenarioId, stepIndex: index });  // step 时长起点
   try {
     // ① 确定性注册表（ADR 0022）：命中走精确 handler、不投票；AssertionError→failed，其它→error
     const hit = matchDeterministic(text);
@@ -459,7 +458,7 @@ async function runStep(
         await hit.handler({ page }, hit.groups);
       } catch (e) {
         if (e instanceof DeterministicAssertion || (e as Error).name === "AssertionError") {
-          emit({
+          await sink.emit({
             type: "step_done", scenarioId, stepIndex: index,
             status: "failed", errorType: "assertion_failed",
             message: (e as Error).message || `确定性断言未过：${text}`,
@@ -468,14 +467,14 @@ async function runStep(
         }
         throw e; // 其它异常 → 落到下面 catch，记 error
       }
-      emit({ type: "step_done", scenarioId, stepIndex: index, status: "passed" });
+      await sink.emit({ type: "step_done", scenarioId, stepIndex: index, status: "passed" });
       return "passed";
     }
     const urlMatch = URL_IN_QUOTES.exec(text);
     if (urlMatch) {
       // ② 内建确定性导航（ADR 0020）：抽 URL 直接 goto，不浪费 AI
       await page.goto(urlMatch[1], { waitUntil: "domcontentloaded", timeout: 60_000 });
-      emit({ type: "step_done", scenarioId, stepIndex: index, status: "passed" });
+      await sink.emit({ type: "step_done", scenarioId, stepIndex: index, status: "passed" });
       return "passed";
     }
     if (keyword === "Then") {
@@ -493,7 +492,7 @@ async function runStep(
       const cost = stepCost(tokBefore, agent);  // N 票 token 增量合计（修：原 lastCost 只算最后一票）
       if (cost) ev.cost = cost;
       if (!passed) { ev.errorType = "assertion_failed"; ev.message = `AI 断言未过多数票（${yes}/${votesN}）：${text}`; }
-      emit(ev);
+      await sink.emit(ev);
       return passed ? "passed" : "failed";
     }
     // When / Given（非 URL）→ AI 动作（无 votes）
@@ -502,7 +501,7 @@ async function runStep(
     const ev: Record<string, unknown> = { type: "step_done", scenarioId, stepIndex: index, status: "passed" };
     const cost = stepCost(tokBefore, agent);
     if (cost) ev.cost = cost;
-    emit(ev);
+    await sink.emit(ev);
     return "passed";
   } catch (e) {
     // 诊断分类细化（ADR 0028，对称 Nova）：act 中途网络瞬时故障（CDP 闪断等）标 network_error 比笼统
@@ -510,7 +509,7 @@ async function runStep(
     // step_done）」，此处 step_started 早已 emit、saw_step=True，双条件 AND 天然不满足；本失败走 step_done
     // 事件流（非退出码 80），core 侧 is_network=False。"act 中途恢复"仍 defer，这里只把失败原因记准。
     const errorType = isTransientNetwork(e) ? "network_error" : "engine_error";
-    emit({
+    await sink.emit({
       type: "step_done", scenarioId, stepIndex: index,
       status: "error", errorType, message: `${(e as Error).name}: ${(e as Error).message}`,
     });
