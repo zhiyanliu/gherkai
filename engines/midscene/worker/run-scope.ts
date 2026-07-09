@@ -23,7 +23,7 @@ import {
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
-import { sigv4Fetch, signCdpUpgrade, BASE_URL, MODEL, REGION } from "../lib/agentcore-sigv4.mjs";
+import { sigv4Fetch, signCdpUpgrade, getBaseUrl, MODEL, getRegion } from "../lib/agentcore-sigv4.mjs";
 import { ArtifactUploader } from "../lib/artifact-upload.mjs";  // 产物 S3 上传（ADR 0029；无落点 env 时 no-op 报 file://）
 import { EventSink } from "../lib/event-sink.mjs";  // 事件出口（ADR 0024 I/O 边缘可注入接口，第一期 subprocess 态）
 import { JobSource } from "../lib/job-source.mjs";  // job 入口（同上）
@@ -96,12 +96,15 @@ function isTransientNetwork(e: unknown, connecting = false): boolean {
   }
   return false;
 }
-const MODEL_CONFIG = {
-  MIDSCENE_MODEL_NAME: MODEL,
-  MIDSCENE_MODEL_BASE_URL: BASE_URL,
-  MIDSCENE_MODEL_API_KEY: "unused",
-  MIDSCENE_USE_QWEN3_VL: "true",
-};
+// 惰性（用 getBaseUrl→getRegion，fail-loud 下沉到 main 用时，非 import 时——见 agentcore-sigv4 注释）。
+function modelConfig() {
+  return {
+    MIDSCENE_MODEL_NAME: MODEL,
+    MIDSCENE_MODEL_BASE_URL: getBaseUrl(),
+    MIDSCENE_MODEL_API_KEY: "unused",
+    MIDSCENE_USE_QWEN3_VL: "true",
+  };
+}
 const URL_IN_QUOTES = /"(https?:\/\/[^"]+)"/;
 
 // 事件出口抽进 lib/event-sink.mts（ADR 0024「I/O 边缘可注入接口」第一期）：可注入、可测；subprocess 态写
@@ -196,7 +199,7 @@ async function main(): Promise<number> {
   const eventSink = EventSink.fromEnv();  // main 级单例（对称 uploader）；作参数注入 runScenario/runStep
   const scope = job.scope;
 
-  const cp = new BedrockAgentCoreClient({ region: REGION });
+  const cp = new BedrockAgentCoreClient({ region: getRegion() });
   // 待清理会话集（ADR 0028 会话跟踪重构）：每次 StartBrowserSession 成功即把 id 加进来——含被重试丢弃的
   // 中间 attempt 会话。SIGTERM handler / cleanup 遍历它逐个 Stop，**不再靠单一 sessionId 快照**（旧实现：
   // 重试时 sessionId 被后一个 attempt 覆盖/置空，handler 只能 Stop 到当前快照 → 在途/已弃的 attempt 会话泄漏）。
@@ -305,8 +308,8 @@ async function main(): Promise<number> {
     const page = ctx.pages()[0] ?? (await ctx.newPage());
     const agent = new PlaywrightAgent(page, {
       generateReport: true,
-      modelConfig: MODEL_CONFIG,
-      createOpenAIClient: async () => new OpenAI({ baseURL: BASE_URL, apiKey: "unused", fetch: sigv4Fetch }) as any,
+      modelConfig: modelConfig(),
+      createOpenAIClient: async () => new OpenAI({ baseURL: getBaseUrl(), apiKey: "unused", fetch: sigv4Fetch }) as any,
     });
     return { page, agent };
   }

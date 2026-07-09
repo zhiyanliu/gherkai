@@ -22,6 +22,10 @@ import { DynamoDBClient, PutItemCommand } from "@aws-sdk/client-dynamodb";
 // aws-sdk-js v3 默认无超时，退化网络下 PutItem 挂起会拖住 worker 退出。硬性封顶、best-effort。
 const PUT_TIMEOUT_MS = 10_000;
 
+// events 表 TTL（ADR 0033 / 0024，对称 Nova _EVENTS_TTL_S）：每条 event item 写 expires_at=now+7d（epoch 秒），
+// IaC 在该属性开 DDB TTL 自动过期。events 是进度脚手架（权威在 RunReport/ResultStore），留 7 天供事后调查。
+const EVENTS_TTL_S = 7 * 24 * 60 * 60;
+
 export class EventSink {
   private fd: number | undefined;         // fd 态：写这个 fd
   private tableName: string | undefined;  // DDB 态：events 表名
@@ -72,6 +76,7 @@ export class EventSink {
             pk: { S: `${this.runId}#${this.scopeId}` },
             seq: { N: String(this.seq) },
             body: { S: line },
+            expires_at: { N: String(Math.floor(Date.now() / 1000) + EVENTS_TTL_S) },  // DDB TTL 自动过期（ADR 0033/0024）
           },
         }),
         { abortSignal: AbortSignal.timeout(PUT_TIMEOUT_MS) },

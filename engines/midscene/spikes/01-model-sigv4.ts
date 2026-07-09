@@ -4,7 +4,9 @@
 //   (b) 视觉：用一张合格的真实 PNG（非 1x1 占位图）证 image_url 能过 Bedrock 图像 sanitize 并返回视觉应答
 // 跑：cd midscene && node_modules/.bin/tsx spikes/midscene-sigv4/01-model-sigv4.ts
 import OpenAI from "openai";
-import { sigv4Fetch, BASE_URL, MODEL, REGION } from "../lib/agentcore-sigv4.mjs";
+import { sigv4Fetch, getBaseUrl, MODEL, getRegion } from "../lib/agentcore-sigv4.mjs";
+// region 改惰性 getter（ADR 0033/0016 决策 C）；spike 直跑带 AWS_REGION=... 前缀，顶层求值 OK。
+const REGION = getRegion(), BASE_URL = getBaseUrl();
 
 // 生成一张 64x64 PNG：左半红、右半蓝（无需图像库，手写 PNG 编码）。
 // 比 1x1 占位图大、有真实色块内容，用来验证 Bedrock 图像 sanitize 不再 400。

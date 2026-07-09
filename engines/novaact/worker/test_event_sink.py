@@ -7,6 +7,7 @@ import io
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -77,6 +78,11 @@ def test_ddb_state_putitem(monkeypatch):
     assert [it["seq"] for it in items] == [1, 2]
     assert json.loads(items[0]["body"])["type"] == "scope_started"
     assert json.loads(items[1]["body"])["type"] == "scope_done"
+    # expires_at = now+7d（epoch 秒，DDB TTL，ADR 0033）：范围断言避时钟脆——落在 [now+7d-60, now+7d+60]
+    now = int(time.time())
+    ttl_7d = 7 * 24 * 60 * 60
+    for it in items:
+        assert now + ttl_7d - 60 <= it["expires_at"] <= now + ttl_7d + 60
 
 
 def test_ddb_state_binds_target_table_name(monkeypatch):

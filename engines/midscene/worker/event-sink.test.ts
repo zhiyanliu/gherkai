@@ -61,6 +61,13 @@ test("DDB 态：EVENTS_DDB_TABLE 注入 → emit = PutItem(PK=run_id#scope_id, S
     assert.equal(JSON.parse(items[0].Item.body.S).type, "scope_started");
     assert.equal(JSON.parse(items[1].Item.body.S).type, "scope_done");
     assert.equal(items[0].TableName, "ev");
+    // expires_at = now+7d（epoch 秒 {N}，DDB TTL，ADR 0033）：范围断言避时钟脆
+    const now = Math.floor(Date.now() / 1000);
+    const ttl7d = 7 * 24 * 60 * 60;
+    for (const i of items) {
+      const exp = Number(i.Item.expires_at.N);
+      assert.ok(exp >= now + ttl7d - 60 && exp <= now + ttl7d + 60, `expires_at ${exp} 应在 now+7d 附近`);
+    }
   } finally {
     for (const [k, v] of [["EVENTS_DDB_TABLE", saved.t], ["RUN_ID", saved.r], ["SCOPE_ID", saved.s]] as const) {
       if (v === undefined) delete process.env[k]; else process.env[k] = v;

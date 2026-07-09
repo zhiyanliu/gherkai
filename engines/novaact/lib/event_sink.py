@@ -21,7 +21,12 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 from typing import TextIO
+
+# events 表 TTL（ADR 0033 / 0024）：每条 event item 写 expires_at=now+7d（epoch 秒），IaC 在该属性开 DDB TTL
+# 自动过期。events 是进度脚手架（权威在 RunReport/ResultStore），留 7 天供事后调查失败 run。
+_EVENTS_TTL_S = 7 * 24 * 60 * 60
 
 
 class EventSink:
@@ -87,6 +92,7 @@ class EventSink:
                 "pk": f"{self._run_id}#{self._scope_id}",
                 "seq": self._seq,
                 "body": line,
+                "expires_at": int(time.time()) + _EVENTS_TTL_S,  # DDB TTL 自动过期（ADR 0033/0024）
             })
             return
         self._out.write(line + "\n")
