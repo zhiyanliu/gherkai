@@ -1,11 +1,13 @@
-"""cli --backend cloud 接线层测试（ADR 0016「cli backend 选择」/ 0030 决定七）。
+"""cli --backend cloud 接线层测试（ADR 0016「cli backend 选择」/ 0030 决定七 / 0033 IaC+接线）。
 
 **只验接线，不引 moto、不连真 AWS**：adapter 行为已由 core 包 moto 全覆盖，cli 再测是重复且破窄腰。
-做法——patch `compose._make_ddb_table`/`_make_s3_client` 返回**记录调用的 fake 句柄**，验证：
-- backend=cloud 构造了正确 adapter：DDB 拿 table 句柄、三个 S3 件套（Result/Report/offloader）**共享同一个** client；
-- offloader 已挂（RunMeta 写走 offload 路径）；
-- 缺 table/bucket → 退 2；缺 boto3（import 失败）→ 退 2；preflight 失败 → 退 2；运行期 botocore 异常 → 退 1；
-- cloud + --no-report → 跳过一切云端（钩子一次不调）；
+做法——patch `compose._make_ddb_table`/`_make_s3_client`（store 句柄）+ `preflight_cloud_resources`（探活）
++ `build_fargate_engines`（cloud 执行）返回**记录调用的 fake**，验证：
+- backend=cloud 构造了正确 store adapter：DDB 拿 table 句柄、三个 S3 件套共享同一个 client、offloader 挂；
+- **prefix 两层命名（ADR 0033）**：--prefix 批量推导默认名（{prefix}runs/artifacts/events/cluster）、单资源 --xxx 覆盖；
+- **preflight fail-fast**：资源不存在退 2 + 错误点名 prefix；
+- **cloud ⇒ FargateEngine（决策 A）**：cloud 走 build_fargate_engines（非 build_engines）；
+- 缺 boto3 → 退 2；运行期 botocore 异常 → 退 1；cloud + --no-report → 跳过一切云端 + 走 subprocess（逃生舱）；
 - artifacts 在 cloud 下是 s3://+ddb:// 形态。
 """
 from __future__ import annotations
@@ -49,7 +51,7 @@ class _FakeTable:
         self.meta = type("Meta", (), {"client": type("C", (), {"exceptions": type("E", (), {
             "ConditionalCheckFailedException": type("CCFE", (Exception,), {})})()})()})()
 
-    def load(self): self._record.append(("ddb", "load"))          # preflight 探表
+    def load(self): self._record.append(("ddb", "load"))          # begin 探活
     def put_item(self, **kw): self._record.append(("ddb", "put_item"))
     def update_item(self, **kw): self._record.append(("ddb", "update_item"))
     def get_item(self, **kw):
@@ -58,7 +60,7 @@ class _FakeTable:
 
 
 class _FakeS3:
-    """假 S3 client：三个件套共享一个；记录 head_bucket（preflight）/put_object。"""
+    """假 S3 client：三个件套共享一个；记录 head_bucket（begin 探活）/put_object。"""
     def __init__(self, record):
         self._record = record
         self.id = id(self)  # 用于断言「三个件套拿的是同一个 client」
@@ -67,10 +69,15 @@ class _FakeS3:
     def put_object(self, **kw): self._record.append(("s3", "put_object"))
 
 
-def _patch_cloud_handles(monkeypatch, record):
-    """patch compose 的两个 boto3 钩子，返回记录调用的 fake（不连真 AWS）。返回创建的 s3 fake 供同一性断言。"""
+def _patch_cloud_handles(monkeypatch, record, *, preflight_err=None):
+    """patch store 钩子 + preflight（默认放行）返回记录调用的 fake（不连真 AWS）。
+
+    preflight_cloud_resources 默认 patch 成返回 preflight_err（None=资源都在、放行）——它自己建 boto client 探活，
+    测试里不真探，只验「接线调它 + 它的返回决定退 2」。返回 (fake_s3, made, preflight_calls)。
+    """
     fake_s3 = _FakeS3(record)
-    made = {"ddb_tables": [], "s3_clients": []}
+    made = {"ddb_tables": [], "s3_clients": [], "fargate": []}
+    preflight_calls = []
 
     def fake_make_ddb(table, *, region, profile):
         record.append(("make", "ddb_table", table, region, profile))
@@ -83,15 +90,29 @@ def _patch_cloud_handles(monkeypatch, record):
         made["s3_clients"].append(fake_s3)
         return fake_s3
 
+    def fake_preflight(**kwargs):
+        preflight_calls.append(kwargs)
+        return preflight_err
+
+    def fake_resolve_network(**kwargs):
+        return {"subnets": ["subnet-x"], "securityGroups": ["sg-x"], "assignPublicIp": "ENABLED"}
+
+    def fake_build_fargate(**kwargs):
+        made["fargate"].append(kwargs)
+        return {"novaact": object(), "midscene": object()}  # 假 engine dict（fake_schedule 不真用）
+
     monkeypatch.setattr(m.compose, "_make_ddb_table", fake_make_ddb)
     monkeypatch.setattr(m.compose, "_make_s3_client", fake_make_s3)
-    return fake_s3, made
+    monkeypatch.setattr(m.compose, "preflight_cloud_resources", fake_preflight)
+    monkeypatch.setattr(m.compose, "resolve_network", fake_resolve_network)
+    monkeypatch.setattr(m.compose, "build_fargate_engines", fake_build_fargate)
+    return fake_s3, made, preflight_calls
 
 
-# ---- backend=cloud 构造正确 adapter + 参数 + offloader 挂 + S3 client 同一性 ----
+# ---- backend=cloud 构造正确 store adapter + 参数 + offloader 挂 + S3 client 同一性 ----
 def test_cloud_wires_stores_with_correct_handles(tmp_path, monkeypatch, capsys):
     record: list = []
-    fake_s3, made = _patch_cloud_handles(monkeypatch, record)
+    fake_s3, made, _ = _patch_cloud_handles(monkeypatch, record)
     monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
 
     rc = m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud",
@@ -104,10 +125,10 @@ def test_cloud_wires_stores_with_correct_handles(tmp_path, monkeypatch, capsys):
     assert ddb_makes == [("make", "ddb_table", "T", "us-east-1", None)]
     assert len(s3_makes) == 1, "S3 client 只该造一次（三个件套共享）"
     assert len(made["s3_clients"]) == 1 and made["s3_clients"][0] is fake_s3
-    # preflight 探活：DDB load + S3 head_bucket 都发生了（begin 先探活）
+    # begin 探活：DDB load + S3 head_bucket 都发生了
     assert ("ddb", "load") in record
     assert ("s3", "head_bucket") in record
-    # 落库真发生（put_item 写 DDB、put_object 写 S3）——证 adapter 真拿到可用句柄
+    # 落库真发生（put_item 写 DDB、put_object 写 S3）——证 store adapter 真拿到可用句柄
     assert ("ddb", "put_item") in record
     assert ("s3", "put_object") in record
 
@@ -123,26 +144,71 @@ def test_cloud_offloader_attached(tmp_path, monkeypatch, capsys):
     rc = m.main(["run", str(feat), "--backend", "cloud", "--ddb-table", "T", "--s3-bucket", "B",
                  "--region", "us-east-1", "--quiet"])
     assert rc == 0
-    # offloader 挂了 → create_run 写 META 前把 docString 搬 S3（args/ 对象），故有 put_object
     assert ("s3", "put_object") in record
 
 
-# ---- 配置缺失 / boto3 缺 → 退 2 ----
-def test_cloud_missing_table_or_bucket_exits_2(tmp_path, monkeypatch, capsys):
+# ---- 两层命名（ADR 0033）：prefix 批量推导默认名 + 单资源覆盖 ----
+def test_cloud_prefix_derives_default_names(tmp_path, monkeypatch, capsys):
+    # 不给 --ddb-table/--s3-bucket/--events-table/--cluster：全走 prefix 推导（默认 gherkai-）。
+    record: list = []
+    _, made, preflight_calls = _patch_cloud_handles(monkeypatch, record)
     monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
     monkeypatch.delenv("AWS_DDB_TABLE", raising=False)
     monkeypatch.delenv("AWS_S3_BUCKET", raising=False)
-    # 缺 bucket
-    rc = m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud", "--ddb-table", "T", "--quiet"])
-    assert rc == 2
-    assert "缺必需配置" in capsys.readouterr().err
-    # 缺 table
-    rc = m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud", "--s3-bucket", "B", "--quiet"])
-    assert rc == 2
+    monkeypatch.delenv("AWS_RESOURCE_PREFIX", raising=False)
+
+    rc = m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud",
+                 "--region", "us-east-1", "--quiet", "--json"])
+    assert rc == 0
+    # RunStore 表 = gherkai-runs（prefix 默认推导）
+    assert ("make", "ddb_table", "gherkai-runs", "us-east-1", None) in record
+    # preflight 拿到全套 prefix 推导名
+    pf = preflight_calls[0]
+    assert pf["prefix"] == "gherkai-"
+    assert pf["runs_table"] == "gherkai-runs"
+    assert pf["events_table"] == "gherkai-events"
+    assert pf["bucket"] == "gherkai-artifacts"
+    assert pf["cluster"] == "gherkai-cluster"
+
+
+def test_cloud_prefix_custom_switches_whole_set(tmp_path, monkeypatch, capsys):
+    # --prefix prod- 一键切整套默认名（多环境）。
+    record: list = []
+    _, _, preflight_calls = _patch_cloud_handles(monkeypatch, record)
+    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
+    monkeypatch.delenv("AWS_DDB_TABLE", raising=False)
+    monkeypatch.delenv("AWS_S3_BUCKET", raising=False)
+
+    rc = m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud", "--prefix", "prod-",
+                 "--region", "us-east-1", "--quiet"])
+    assert rc == 0
+    pf = preflight_calls[0]
+    assert pf["prefix"] == "prod-"
+    assert pf["runs_table"] == "prod-runs" and pf["events_table"] == "prod-events"
+    assert pf["bucket"] == "prod-artifacts" and pf["cluster"] == "prod-cluster"
+
+
+def test_cloud_single_resource_override_beats_prefix(tmp_path, monkeypatch, capsys):
+    # 单资源 --xxx 覆盖：给完整终值，prefix 自然不参与（覆盖不走「拼默认名」路径，无特判）。
+    record: list = []
+    _, _, preflight_calls = _patch_cloud_handles(monkeypatch, record)
+    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
+    monkeypatch.delenv("AWS_DDB_TABLE", raising=False)
+    monkeypatch.delenv("AWS_S3_BUCKET", raising=False)
+
+    rc = m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud", "--prefix", "prod-",
+                 "--ddb-table", "custom-runs", "--events-table", "custom-events",
+                 "--region", "us-east-1", "--quiet"])
+    assert rc == 0
+    pf = preflight_calls[0]
+    assert pf["runs_table"] == "custom-runs"      # 覆盖，非 prod-runs
+    assert pf["events_table"] == "custom-events"  # 覆盖
+    assert pf["bucket"] == "prod-artifacts"       # 未覆盖 → 仍走 prefix
+    assert pf["cluster"] == "prod-cluster"
 
 
 def test_cloud_table_bucket_from_env(tmp_path, monkeypatch, capsys):
-    # 环境变量兜底：AWS_DDB_TABLE/AWS_S3_BUCKET 供值时无需 flag
+    # 环境变量兜底：AWS_DDB_TABLE/AWS_S3_BUCKET 供值时无需 flag（优先级：flag > env > prefix 推导）
     record: list = []
     _patch_cloud_handles(monkeypatch, record)
     monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
@@ -154,25 +220,39 @@ def test_cloud_table_bucket_from_env(tmp_path, monkeypatch, capsys):
 
 
 def test_cloud_missing_boto3_exits_2(tmp_path, monkeypatch, capsys):
-    # 缺 boto3：build_cloud_stores 的钩子 import boto3 抛 ImportError → 退 2 + 提示装 core[aws]
+    # 缺 boto3：preflight 的 import boto3 抛 ImportError → 退 2 + 提示装 core[aws]
     monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
-    def boom_import(*a, **k):
+    def boom_import(**k):
         raise ImportError("No module named 'boto3'")
-    monkeypatch.setattr(m.compose, "_make_ddb_table", boom_import)
+    monkeypatch.setattr(m.compose, "preflight_cloud_resources", boom_import)
     rc = m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud",
-                 "--ddb-table", "T", "--s3-bucket", "B", "--quiet"])
+                 "--ddb-table", "T", "--s3-bucket", "B", "--region", "us-east-1", "--quiet"])
     assert rc == 2
     assert "boto3" in capsys.readouterr().err
 
 
-# ---- preflight 失败（begin 前云端不可达）→ 退 2 ----
-def test_cloud_preflight_failure_exits_2(tmp_path, monkeypatch, capsys):
-    # 桶不存在/无权限：head_bucket 抛 botocore ClientError → begin 的 preflight 暴露 → 退 2
+# ---- preflight fail-fast：资源不存在 → 退 2 + 错误点名 prefix ----
+def test_cloud_preflight_missing_resource_exits_2_names_prefix(tmp_path, monkeypatch, capsys):
+    # preflight 返回非 None（某资源不存在）→ 退 2，错误串含 prefix（引导「prefix 配错/CDK 没部署」）。
+    record: list = []
+    _patch_cloud_handles(monkeypatch, record,
+                         preflight_err="--backend cloud 资源缺失：DynamoDB 表 gherkai-events（用 --prefix='gherkai-' 拼出）不存在——是 --prefix 配错、还是 iac_aws_backend（CDK）未部署？")
+    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
+    rc = m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud",
+                 "--region", "us-east-1", "--quiet"])
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "资源缺失" in err and "--prefix" in err and "CDK" in err
+
+
+# ---- begin 探活失败（store 不可达）→ 退 2 ----
+def test_cloud_begin_probe_failure_exits_2(tmp_path, monkeypatch, capsys):
+    # preflight 放行但 begin 的 head_bucket 抛 botocore（如权限）→ 退 2。
     from botocore.exceptions import ClientError
     record: list = []
-    fake_s3, _ = _patch_cloud_handles(monkeypatch, record)
+    fake_s3, _, _ = _patch_cloud_handles(monkeypatch, record)
     def boom_head(**kw):
-        raise ClientError({"Error": {"Code": "404", "Message": "Not Found"}}, "HeadBucket")
+        raise ClientError({"Error": {"Code": "403", "Message": "Forbidden"}}, "HeadBucket")
     monkeypatch.setattr(fake_s3, "head_bucket", boom_head)
     monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
     rc = m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud",
@@ -183,13 +263,11 @@ def test_cloud_preflight_failure_exits_2(tmp_path, monkeypatch, capsys):
 
 # ---- 运行期 botocore 异常（run 已开跑）→ 退 1 ----
 def test_cloud_runtime_botocore_error_exits_1(tmp_path, monkeypatch, capsys):
-    # schedule 运行期落库回调抛 botocore 异常（如桶被删）→ 退 1（error 级，run 已开跑）
     from botocore.exceptions import ClientError
     record: list = []
     _patch_cloud_handles(monkeypatch, record)
 
     def boom_schedule(run_meta, resolver, sink, opts=None, on_job_complete=None, on_event=None):
-        # 模拟 schedule 内部落库回调抛 botocore 异常后冒泡（决定三：stop worker 后重抛）
         raise ClientError({"Error": {"Code": "NoSuchBucket", "Message": "gone"}}, "PutObject")
     monkeypatch.setattr(m, "schedule", boom_schedule)
     rc = m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud",
@@ -198,15 +276,53 @@ def test_cloud_runtime_botocore_error_exits_1(tmp_path, monkeypatch, capsys):
     assert "运行期落库失败" in capsys.readouterr().err
 
 
-# ---- cloud + --no-report：跳过一切云端（钩子一次不调）----
-def test_cloud_no_report_skips_all_cloud(tmp_path, monkeypatch, capsys):
+# ---- cloud ⇒ FargateEngine（决策 A，ADR 0016/0033）----
+def test_cloud_wires_fargate_engines(tmp_path, monkeypatch, capsys):
+    # cloud 走 build_fargate_engines（非 build_engines）——决策 A 落到 CLI。验注入的参数正确。
     record: list = []
-    _patch_cloud_handles(monkeypatch, record)
+    _, made, _ = _patch_cloud_handles(monkeypatch, record)
     monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
-    rc = m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud", "--no-report", "--quiet"])
+    monkeypatch.delenv("AWS_DDB_TABLE", raising=False)
+    monkeypatch.delenv("AWS_S3_BUCKET", raising=False)
+    rc = m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud", "--prefix", "prod-",
+                 "--report-dir", "runs", "--region", "us-west-2", "--quiet"])
     assert rc == 0
-    # 没有任何云端钩子被调（need_cloud=False）——即便没给 table/bucket 也不报错（逃生舱）
+    assert len(made["fargate"]) == 1, "cloud 应走 build_fargate_engines"
+    fk = made["fargate"][0]
+    assert fk["prefix"] == "prod-"
+    assert fk["cluster"] == "prod-cluster"
+    assert fk["events_table"] == "prod-events"
+    assert fk["bucket"] == "prod-artifacts"
+    assert fk["region"] == "us-west-2"
+    assert fk["network_config"]["subnets"] == ["subnet-x"]  # 来自 resolve_network（fake）
+
+
+def test_local_uses_subprocess_not_fargate(tmp_path, monkeypatch, capsys):
+    # local 不走 build_fargate_engines（走 build_engines/SubprocessEngine）。
+    box = {"fargate": 0}
+    monkeypatch.setattr(m.compose, "build_fargate_engines", lambda **k: box.__setitem__("fargate", box["fargate"] + 1) or {})
+    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
+    rc = m.main(["run", str(_write_feature(tmp_path)), "--report-dir", str(tmp_path / "r"), "--quiet"])
+    assert rc == 0
+    assert box["fargate"] == 0  # local 从不造 FargateEngine
+
+
+# ---- cloud + --no-report：不落库（跳过 store）但**仍 Fargate 执行**（report 与执行正交，ADR 0016 决策 A）----
+def test_cloud_no_report_still_fargate_but_no_store(tmp_path, monkeypatch, capsys):
+    # --no-report 只关不落库、**不碰在哪执行**：--backend cloud --no-report 仍在 Fargate 跑，只是不生成 report。
+    record: list = []
+    _, made, preflight_calls = _patch_cloud_handles(monkeypatch, record)
+    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
+    rc = m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud", "--no-report",
+                 "--region", "us-east-1", "--quiet"])
+    assert rc == 0
+    # 落库轴：不构造任何 store 钩子（need_cloud=False，逃生舱）
     assert not any(r[0] == "make" for r in record)
+    # 执行轴：仍走 Fargate（决策 A：cloud ⇒ Fargate，与 report 正交）
+    assert len(made["fargate"]) == 1, "--no-report --backend cloud 仍应 Fargate 执行"
+    # preflight 探执行资源（events/cluster/桶）但 runs_table=None（不落库、不探 runs 表）
+    assert preflight_calls[0]["runs_table"] is None
+    assert preflight_calls[0]["events_table"] == "gherkai-events"
 
 
 # ---- artifacts cloud 下是 s3://+ddb:// 形态 ----
@@ -220,35 +336,26 @@ def test_cloud_artifacts_are_s3_and_ddb_uris(tmp_path, monkeypatch, capsys):
     assert rc == 0
     doc = json.loads(capsys.readouterr().out)
     art = doc["artifacts"]
-    # jobs_dir/report_index = s3://；run_meta/run_state = ddb:// 诊断指针
     assert art["jobs_dir"].startswith("s3://B/runs/") and art["jobs_dir"].endswith("/jobs/")
     assert art["run_meta"].startswith("ddb://T/") and art["run_meta"].endswith("#META")
     assert art["run_state"].endswith("#STATE")
-    assert art["report_index"].startswith("s3://B/")  # S3ReportStore.write 返回的 s3:// index
+    assert art["report_index"].startswith("s3://B/")
 
 
-# ---- cloud 把产物 S3 上传落点（artifact_s3）注入 build_engines（ADR 0029 第一期接线）----
-def test_cloud_injects_artifact_s3_to_engines(tmp_path, monkeypatch):
+# ---- cloud 把产物 S3 上传落点（artifact_s3）注入 worker（ADR 0029 第一期接线）----
+def test_cloud_injects_artifact_s3_to_fargate(tmp_path, monkeypatch):
+    # cloud 下 artifact_s3 经 build_fargate_engines 的 job_s3（bucket+prefix）到 worker——ADR 0029/0033。
+    # （build_fargate_engines 内部据 bucket+report_dir+run_id 拼 job_s3；此处验 bucket 传对、report_dir 传对。）
     record: list = []
-    _patch_cloud_handles(monkeypatch, record)
+    _, made, _ = _patch_cloud_handles(monkeypatch, record)
     monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
-    box = {}
-    real_build = m.compose.build_engines
-
-    def spy_build(repo, **kwargs):
-        box.update(kwargs)
-        return real_build(repo)  # 真 engines（无落点），只截获注入的 kwargs
-
-    monkeypatch.setattr(m.compose, "build_engines", spy_build)
     rc = m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud",
-                 "--ddb-table", "T", "--s3-bucket", "mybkt", "--report-dir", "runs",
+                 "--s3-bucket", "mybkt", "--report-dir", "runs",
                  "--region", "us-east-1", "--quiet", "--json"])
     assert rc == 0
-    # artifact_s3=(bucket, "<report_dir>/<run_id>/")：跟 --backend cloud 走、prefix 规范化补尾 /（ADR 0029）
-    art = box.get("artifact_s3")
-    assert art is not None, "cloud 应把 artifact_s3 注入 build_engines"
-    assert art[0] == "mybkt"
-    assert art[1].startswith("runs/") and art[1].endswith("/")
+    fk = made["fargate"][0]
+    assert fk["bucket"] == "mybkt"
+    assert fk["report_dir"] == "runs"
 
 
 def test_local_does_not_inject_artifact_s3(tmp_path, monkeypatch):

@@ -240,3 +240,162 @@ def test_engine_min_grace_mixed_run_takes_max():
     # 混引擎 run 的 min_grace = 各引擎下限的 max（grace 是 run 级单值，__main__ 取 max）——Nova 下限最大、支配。
     legs = ["novaact", "midscene"]
     assert max(compose.engine_min_grace(e) for e in legs) == compose.engine_min_grace("novaact")
+
+
+# ---- WP2 两层命名（ADR 0033）：prefix + 基名推导 / task-def / container / SSM 路径 ----
+def test_default_name_prefix_original_concat():
+    # prefix 原样拼基名（含分隔符由用户负责，防粘连——同 S3 prefix 先例）
+    assert compose.default_name("gherkai-", "runs") == "gherkai-runs"
+    assert compose.default_name("prod-", "events") == "prod-events"
+    assert compose.default_name("nodash", "runs") == "nodashruns"  # 无分隔符 → 粘连（用户负责）
+
+
+def test_task_def_and_container_name():
+    # task-def family 带 prefix、按引擎；container 名不带 prefix（随 task-def 走，避冗余）
+    assert compose.task_def_name("prod-", "novaact") == "prod-novaact-worker"
+    assert compose.task_def_name("gherkai-", "midscene") == "gherkai-midscene-worker"
+    assert compose.container_name("novaact") == "novaact-worker"
+    assert compose.container_name("midscene") == "midscene-worker"
+
+
+def test_ssm_path_contains_prefix():
+    # SSM 路径含 prefix（cli 已知 prefix 拼路径读 subnet/sg，无循环——ADR 0033）
+    assert compose.ssm_path("prod-", "subnets") == "/prod-backend/subnets"
+    assert compose.ssm_path("gherkai-", "security-groups") == "/gherkai-backend/security-groups"
+
+
+# ---- resolve_network（ADR 0033）：subnet/sg 覆盖 or 读 SSM ----
+def test_resolve_network_explicit_overrides_skip_ssm():
+    # 显式给 subnet/sg → 不读 SSM（ssm 注入个会炸的哨兵，验它没被调）
+    class _BoomSsm:
+        def get_parameter(self, **kw):
+            raise AssertionError("显式给 subnet/sg 时不该读 SSM")
+    net = compose.resolve_network(
+        prefix="prod-", subnets=["subnet-a", "subnet-b"], security_groups=["sg-1"],
+        assign_public_ip="DISABLED", ssm=_BoomSsm(),
+    )
+    assert net == {"subnets": ["subnet-a", "subnet-b"], "securityGroups": ["sg-1"], "assignPublicIp": "DISABLED"}
+
+
+def test_resolve_network_reads_ssm_when_missing():
+    # 未给 subnet/sg → 读含 prefix 的 SSM 路径（CDK 写的生成 ID，逗号分隔 StringList）
+    reads = []
+
+    class _FakeSsm:
+        def get_parameter(self, Name):
+            reads.append(Name)
+            val = "subnet-x,subnet-y" if Name.endswith("subnets") else "sg-z"
+            return {"Parameter": {"Value": val}}
+
+    net = compose.resolve_network(prefix="prod-", subnets=None, security_groups=None, ssm=_FakeSsm())
+    assert net["subnets"] == ["subnet-x", "subnet-y"]
+    assert net["securityGroups"] == ["sg-z"]
+    assert reads == ["/prod-backend/subnets", "/prod-backend/security-groups"]  # 路径含 prefix
+
+
+def test_resolve_network_partial_override_reads_only_missing():
+    # 只给 subnet、不给 sg → 只读 sg 的 SSM（subnet 用显式）
+    reads = []
+
+    class _FakeSsm:
+        def get_parameter(self, Name):
+            reads.append(Name)
+            return {"Parameter": {"Value": "sg-only"}}
+
+    net = compose.resolve_network(prefix="g-", subnets=["subnet-explicit"], security_groups=None, ssm=_FakeSsm())
+    assert net["subnets"] == ["subnet-explicit"]
+    assert net["securityGroups"] == ["sg-only"]
+    assert reads == ["/g-backend/security-groups"]  # 只读缺的那个
+
+
+# ---- build_fargate_engines（ADR 0033/0016 决策 A/C）：按引擎选 task-def、注 region 不注 profile ----
+def test_build_fargate_engines_per_engine_taskdef_and_region_no_profile(monkeypatch):
+    # 注入 fake FargateEngine 捕获构造参数（不连 AWS、不 require boto3）
+    import core.adapters.fargate_engine as fe
+    captured = []
+
+    class _FakeFargate:
+        def __init__(self, **kwargs):
+            captured.append(kwargs)
+
+    monkeypatch.setattr(fe, "FargateEngine", _FakeFargate)
+    engines = compose.build_fargate_engines(
+        run_id="rid-1", prefix="prod-", cluster="prod-cluster", events_table="prod-events",
+        bucket="prod-artifacts", report_dir="runs", network_config={"subnets": ["subnet-x"]},
+        region="us-west-2", profile="myprof",
+        ecs=object(), s3=object(), ddb_events_table=object(),  # 注入句柄免惰性建
+    )
+    assert set(engines) == {"novaact", "midscene"}
+    by_engine = {k["task_definition"]: k for k in captured}
+    # 按引擎选 task-def（{prefix}{engine}-worker）
+    assert "prod-novaact-worker" in by_engine and "prod-midscene-worker" in by_engine
+    nova = by_engine["prod-novaact-worker"]
+    assert nova["container_name"] == "novaact-worker"
+    assert nova["run_id"] == "rid-1" and nova["cluster"] == "prod-cluster"
+    assert nova["events_table_name"] == "prod-events"
+    assert nova["region"] == "us-west-2"          # region 注入（决策 C）
+    assert "profile" not in nova                    # **profile 不传 FargateEngine**（正确非对称，决策 C）
+    # job_s3 = (bucket, "{report_dir}/{run_id}/jobs/")
+    assert nova["job_s3"] == ("prod-artifacts", "runs/rid-1/jobs/")
+    # artifact_s3 = (bucket, "{report_dir}/{run_id}/")——**cloud 必注入**（否则容器盘销毁产物必丢，ADR 0029）
+    assert nova["artifact_s3"] == ("prod-artifacts", "runs/rid-1/")
+
+
+# ---- preflight_cloud_resources（ADR 0033）：探资源存在性、缺则点名 prefix ----
+class _FakeDdbClient:
+    def __init__(self, existing):
+        self._existing = existing
+    def describe_table(self, TableName):
+        if TableName not in self._existing:
+            from botocore.exceptions import ClientError
+            raise ClientError({"Error": {"Code": "ResourceNotFoundException", "Message": "x"}}, "DescribeTable")
+        return {"Table": {"TableName": TableName}}
+
+
+class _FakeS3Client:
+    def __init__(self, existing):
+        self._existing = existing
+    def head_bucket(self, Bucket):
+        if Bucket not in self._existing:
+            from botocore.exceptions import ClientError
+            raise ClientError({"Error": {"Code": "404", "Message": "x"}}, "HeadBucket")
+
+
+class _FakeEcsClient:
+    def __init__(self, active):
+        self._active = active
+    def describe_clusters(self, clusters):
+        return {"clusters": [{"status": "ACTIVE" if c in self._active else "INACTIVE"} for c in clusters]}
+
+
+def test_preflight_all_present_returns_none():
+    err = compose.preflight_cloud_resources(
+        prefix="gherkai-", runs_table="gherkai-runs", events_table="gherkai-events",
+        bucket="gherkai-artifacts", cluster="gherkai-cluster",
+        ddb=_FakeDdbClient({"gherkai-runs", "gherkai-events"}),
+        s3=_FakeS3Client({"gherkai-artifacts"}),
+        ecs=_FakeEcsClient({"gherkai-cluster"}),
+    )
+    assert err is None
+
+
+def test_preflight_missing_events_table_names_prefix():
+    err = compose.preflight_cloud_resources(
+        prefix="prod-", runs_table="prod-runs", events_table="prod-events",
+        bucket="prod-artifacts", cluster="prod-cluster",
+        ddb=_FakeDdbClient({"prod-runs"}),  # events 表缺
+        s3=_FakeS3Client({"prod-artifacts"}),
+        ecs=_FakeEcsClient({"prod-cluster"}),
+    )
+    assert err is not None
+    assert "prod-events" in err and "--prefix='prod-'" in err and "CDK" in err  # 点名 prefix + 引导
+
+
+def test_preflight_missing_cluster_detected():
+    err = compose.preflight_cloud_resources(
+        prefix="g-", runs_table="g-runs", events_table="g-events", bucket="g-artifacts", cluster="g-cluster",
+        ddb=_FakeDdbClient({"g-runs", "g-events"}),
+        s3=_FakeS3Client({"g-artifacts"}),
+        ecs=_FakeEcsClient(set()),  # cluster 非 ACTIVE
+    )
+    assert err is not None and "g-cluster" in err

@@ -72,12 +72,33 @@ def _build_parser() -> argparse.ArgumentParser:
         help="落库后端：local=文件落 --report-dir（默认）；cloud=状态落 DynamoDB、结果与报告落 S3",
     )
     run.add_argument(
+        "--prefix", default=None, metavar="P",
+        help=f"[--backend cloud] 资源名前缀（默认 {compose.DEFAULT_PREFIX!r}）：批量决定表/桶/cluster/task-def 默认名；"
+             "须与 CDK（iac_aws_backend）部署用的 prefix 一致。多环境切换（prod-/stage-）用它。兜底 AWS_RESOURCE_PREFIX",
+    )
+    run.add_argument(
         "--ddb-table", default=None, metavar="NAME",
-        help="[--backend cloud] DynamoDB 表名（分区键 run_id + 排序键 item_type）；兜底环境变量 AWS_DDB_TABLE。表需预先建好",
+        help="[--backend cloud] RunStore DynamoDB 表名（覆盖 prefix 默认 {prefix}runs）；兜底 AWS_DDB_TABLE",
     )
     run.add_argument(
         "--s3-bucket", default=None, metavar="NAME",
-        help="[--backend cloud] S3 桶名（存判定结果、报告与引擎产物）；兜底 AWS_S3_BUCKET。桶需预先建好",
+        help="[--backend cloud] S3 桶名（覆盖 prefix 默认 {prefix}artifacts）；兜底 AWS_S3_BUCKET",
+    )
+    run.add_argument(
+        "--events-table", default=None, metavar="NAME",
+        help="[--backend cloud] events DynamoDB 表名（覆盖 prefix 默认 {prefix}events）；worker PutItem 目标",
+    )
+    run.add_argument(
+        "--cluster", default=None, metavar="NAME",
+        help="[--backend cloud] ECS cluster 名（覆盖 prefix 默认 {prefix}cluster）",
+    )
+    run.add_argument(
+        "--subnet", action="append", default=None, metavar="ID",
+        help="[--backend cloud] Fargate 子网 ID（可多次；不给则读 SSM /{prefix}backend/subnets——CDK 写的生成 ID）",
+    )
+    run.add_argument(
+        "--security-group", action="append", default=None, metavar="ID",
+        help="[--backend cloud] Fargate 安全组 ID（可多次；不给则读 SSM /{prefix}backend/security-groups）",
     )
     run.add_argument(
         "--region", default=None, metavar="R",
@@ -235,48 +256,83 @@ def _cmd_run(args, repo: Path) -> int:
     # 前缀）注入给 worker（ADR 0029 第一期），而 bucket 在下面 cloud 分支才确定。artifact_s3 默认 None（local
     # / --no-report → worker 报 file://、不上传）。
     artifact_s3: tuple[str, str] | None = None
+    cloud_fargate: dict | None = None  # cloud 分支置值（ADR 0033）：Fargate 执行配置，供 build_fargate_engines；None＝走 subprocess
     # region/profile 解析（ADR 0016 决策 C——region 与 profile 是「正确的非对称」）：
     # - profile：--profile > AWS_PROFILE。仅 subprocess worker 注入（继承本机 ~/.aws、profile 合法）；
     #   **Fargate 绝不注入**（容器无 ~/.aws、用 task role，注入不存在的 profile 名会 ProfileNotFound 盖过 task role）。
     # - region：--region > AWS_REGION > AWS_DEFAULT_REGION > profile config（compose.resolve_region 落实成**具体字符串**）。
     #   profile config 回落是关键：AgentCore validate_region 不吃 profile config、要显式 region 字符串，不落实则 profile-only
-    #   下 worker InvalidRegionError 崩。落实后 subprocess env + store 同源、消除分叉（FargateEngine overrides 同源，但其
-    #   CLI 接线归 WP2——当前 --backend cloud 只换 store、执行仍 subprocess）。
+    #   下 worker InvalidRegionError 崩。落实后 subprocess env + FargateEngine overrides + store 三处同源、消除分叉
+    #   （cloud ⇒ FargateEngine 执行、见下 3a/build_fargate_engines）。
     # 均可为 None＝真无（fail-loud、不硬编码 east，对齐 store 宽容边界）。
     resolved_profile = args.profile or os.environ.get("AWS_PROFILE")
     resolved_region = compose.resolve_region(args.region, resolved_profile)
 
-    # 3b) 实时写编排（ADR 0030）：组合根按 --backend 注入 local/cloud 两套 store adapter，RunPersistence
-    #     负责「随进度落库」的统一编排（commit-point 写序 / RUNNING 中间态 / 按 scope_id 增量刷）。
-    #     --no-report 则不落库（逃生舱）：persistence=None，schedule 不接回调、零落盘。
-    #     **need_cloud gated**（ADR 0030 决定七）：所有云端校验/import/异常只在 do_report and backend==cloud 时生效——
-    #     --backend cloud --no-report 是合法逃生舱（跳过一切云端检查、三个 store 一次不构造）。
+    # cloud 资源名前缀（ADR 0033 两层命名）：prefix（--prefix > AWS_RESOURCE_PREFIX > 默认 gherkai-）批量推导默认名，
+    # 单资源 --xxx 覆盖。须与 CDK（iac_aws_backend）部署用的 prefix 一致（preflight 探活时点名 prefix 引导排错）。
+    prefix = args.prefix or os.environ.get("AWS_RESOURCE_PREFIX") or compose.DEFAULT_PREFIX
+
+    # 3a) 执行轴（ADR 0016 决策 A / 0033）：--backend cloud ⇒ Fargate 执行，**与 report 正交**——`--no-report` 只关
+    #     不落库、不碰「在哪执行」。故 cloud 的 Fargate 执行配置解析在 do_report **之外**：`--no-report --backend cloud`
+    #     仍在 Fargate 跑，只是不生成 report。cloud_fargate 置值 = 下面 resolver 用 FargateEngine（否则 SubprocessEngine）。
+    if args.backend == "cloud":
+        events_table = args.events_table or compose.default_name(prefix, compose._BASE_EVENTS_TABLE)
+        cluster = args.cluster or compose.default_name(prefix, compose._BASE_CLUSTER)
+        bucket = args.s3_bucket or os.environ.get("AWS_S3_BUCKET") or compose.default_name(prefix, compose._BASE_BUCKET)
+        # preflight 执行必需资源（events 表 + cluster；桶=job-in/产物上传也执行需要）——fail-fast 点名 prefix。
+        # runs 表仅落库需要，故只在 do_report 时探（见 3b begin 探活）；此处不探 runs 表（--no-report 下用不到）。
+        try:
+            err = compose.preflight_cloud_resources(
+                prefix=prefix, events_table=events_table, bucket=bucket, cluster=cluster,
+                runs_table=(args.ddb_table or os.environ.get("AWS_DDB_TABLE") or compose.default_name(prefix, compose._BASE_RUNS_TABLE))
+                            if do_report else None,  # runs 表仅 do_report 探（落库需要）
+                region=resolved_region, profile=resolved_profile,
+            )
+        except ImportError as e:
+            _progress(f"--backend cloud 需要 boto3：{e}")
+            return 2
+        if err:
+            _progress(err)
+            return 2
+        # network 解析（subnet/sg：--xxx 覆盖 or 读 SSM）——需 prefix + region/profile 都已定。
+        try:
+            network_config = compose.resolve_network(
+                prefix=prefix, subnets=args.subnet, security_groups=args.security_group,
+                region=resolved_region, profile=resolved_profile,
+            )
+        except Exception as e:
+            if _is_botocore_error(e):
+                _progress(f"--backend cloud 读 subnet/sg SSM 失败（/{prefix}backend/*——CDK 未写或无权限？）：{e}")
+                return 2
+            raise
+        cloud_fargate = {"prefix": prefix, "cluster": cluster, "events_table": events_table,
+                         "bucket": bucket, "network_config": network_config}
+
+    # 3b) 落库轴（ADR 0030）：组合根按 --backend 注入 local/cloud 两套 store adapter，RunPersistence 负责「随进度落库」
+    #     的统一编排（commit-point 写序 / RUNNING 中间态 / 按 scope_id 增量刷）。--no-report 则不落库（逃生舱）：
+    #     persistence=None，schedule 不接回调、零落盘——**但执行仍按 3a 的 backend 走**（report 与执行正交）。
+    #     **need_cloud gated**（ADR 0030 决定七）：云端 store 校验/import/异常只在 do_report and backend==cloud 时生效。
     need_cloud = do_report and args.backend == "cloud"
     persistence: RunPersistence | None = None
     make_artifacts = None  # compose 返回的 artifacts 落点组装器（按 backend URI 化）
     if do_report:
         if args.backend == "cloud":
-            # cloud 定位参数：flag > 环境变量兜底（ADR 0016）。缺任一 → 入口退 2（否则 None 流进 adapter 运行时才炸）
-            table = args.ddb_table or os.environ.get("AWS_DDB_TABLE")
-            bucket = args.s3_bucket or os.environ.get("AWS_S3_BUCKET")
-            missing = [n for n, v in (("--ddb-table/AWS_DDB_TABLE", table), ("--s3-bucket/AWS_S3_BUCKET", bucket)) if not v]
-            if missing:
-                _progress(f"--backend cloud 缺必需配置：{', '.join(missing)}（表/桶需预先建好）")
-                return 2
+            # cloud store 表/桶：table 走 prefix 推导或 --ddb-table 覆盖；bucket 复用 3a 已解析的（cloud_fargate 必已置值，
+            # 因 do_report+cloud ⊆ backend==cloud）——不依赖 3a 的局部 `bucket` 还在作用域（消 possibly-unbound）。
+            table = args.ddb_table or os.environ.get("AWS_DDB_TABLE") or compose.default_name(prefix, compose._BASE_RUNS_TABLE)
+            assert cloud_fargate is not None  # backend==cloud → 3a 已置值（收窄类型）
+            cloud_bucket = cloud_fargate["bucket"]
             try:
                 # cloud 装配下沉 compose（可复用）；import boto3 惰性在 _make_* 钩子里，缺 boto3 抛 ImportError
                 run_store, result_store, report_store, make_artifacts = compose.build_cloud_stores(
-                    table=table, bucket=bucket, prefix=args.report_dir,
+                    table=table, bucket=cloud_bucket, prefix=args.report_dir,
                     region=resolved_region, profile=resolved_profile,
                 )
             except ImportError as e:
                 _progress(f"--backend cloud 需要 boto3：{e}")
                 return 2
-            # 产物 S3 上传落点（ADR 0029 第一期）：跟 --backend cloud 走。prefix 与 S3ReportStore/ResultStore
-            # 同规范化（compose._normalize_prefix，补尾 /），再拼 <run_id>/ → worker 上传 key 与 report 同前缀、
-            # 镜像本地 run 树（worker 拼 s3://<bucket>/<prefix><产物相对 run 树路径>）。
-            assert bucket  # 上面 missing 校验已保证非 None（收窄类型）
-            artifact_s3 = (bucket, f"{compose._normalize_prefix(args.report_dir)}{run_id}/")
+            # 产物 S3 上传落点（ADR 0029 第一期）：跟 --backend cloud 走。prefix 规范化补尾 / 再拼 <run_id>/。
+            artifact_s3 = (cloud_bucket, f"{compose._normalize_prefix(args.report_dir)}{run_id}/")
         else:
             run_store, result_store, report_store, make_artifacts = compose.build_local_stores(report_dir=args.report_dir)
         persistence = RunPersistence(
@@ -293,12 +349,22 @@ def _cmd_run(args, repo: Path) -> int:
             raise
 
     # 组合根注入引擎 resolver（延后到此：cloud 时 artifact_s3 已在上面确定，一并注入给 worker，ADR 0029）。
-    resolver = compose.make_resolver(
-        compose.build_engines(
+    # **决策 A 落到 CLI（ADR 0016/0033）**：cloud ⇒ FargateEngine（云执行）；否则 SubprocessEngine（本地）。
+    # cloud_fargate 只在 do_report and cloud 分支置值——`--backend cloud --no-report`（need_cloud=False、cloud_fargate 仍 None）
+    # 是既有逃生舱：不落库、也不上云执行，仍走 subprocess 裸跑（与 store 侧「三个 store 一次不构造」同逃生舱语义）。
+    if cloud_fargate is not None:
+        engines = compose.build_fargate_engines(
+            run_id=run_id, prefix=cloud_fargate["prefix"], cluster=cloud_fargate["cluster"],
+            events_table=cloud_fargate["events_table"], bucket=cloud_fargate["bucket"],
+            report_dir=args.report_dir, network_config=cloud_fargate["network_config"],
+            region=resolved_region, profile=resolved_profile,
+        )
+    else:
+        engines = compose.build_engines(
             repo, nova_logs_dir=nova_logs_dir, midscene_run_dir=midscene_run_dir, artifact_s3=artifact_s3,
             region=resolved_region, profile=resolved_profile,
         )
-    )
+    resolver = compose.make_resolver(engines)
 
     # 4) sink：逐事件进度 → stderr（诊断；--quiet 静音。不再受 --json 影响——走 stderr 不污染 stdout 数据）
     #    前缀 `[core <scope>:event]` 与 worker 透传行 `[worker <scope>:err]` **同一视觉骨架**

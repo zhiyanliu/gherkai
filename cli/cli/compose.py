@@ -37,6 +37,43 @@ NOVA_GRACE_MARGIN_S = int(os.environ.get("NOVA_GRACE_MARGIN_S", "60"))
 MIDSCENE_GRACE_MIN_S = int(os.environ.get("MIDSCENE_GRACE_MIN_S", "25"))
 
 
+# ============================================================================
+# 两层命名（ADR 0033）：`--prefix`（默认 gherkai-）批量决定所有名字类资源的默认名；单资源 override 给完整终值。
+# **单一事实源**：CDK 部署吃同一 prefix → CDK 建的名 = cli 推导的默认名，不漂移。覆盖时 prefix 自然不参与
+# （覆盖 = 直接给完整名 = 不走「拼默认名」路径，无特判）。prefix 含分隔符、原样拼（用户负责，防粘连——同 S3 prefix 先例）。
+# ============================================================================
+DEFAULT_PREFIX = "gherkai-"
+
+# 各资源的「基名」（prefix 之后的固定部分）——CDK 与 cli 共享的约定（CDK 侧须用同名，否则 preflight 报 prefix 不一致）。
+_BASE_RUNS_TABLE = "runs"
+_BASE_EVENTS_TABLE = "events"
+_BASE_BUCKET = "artifacts"
+_BASE_CLUSTER = "cluster"
+# task-def / container：按 job.engine 拼 `{prefix}{engine}-worker`（对称 EngineResolver 按 engine 选）。
+_ENGINES = ("novaact", "midscene")
+
+
+def default_name(prefix: str, base: str) -> str:
+    """prefix + 基名（原样拼，prefix 含分隔符由用户负责）。CDK 与 cli 共用此推导 → 单一事实源。"""
+    return f"{prefix}{base}"
+
+
+def task_def_name(prefix: str, engine: str) -> str:
+    """引擎的 task-def family 名：`{prefix}{engine}-worker`（按 job.engine 选，对称 EngineResolver）。"""
+    return f"{prefix}{engine}-worker"
+
+
+def container_name(engine: str) -> str:
+    """task-def 里的 container 名（RunTask overrides 指定往哪个 container 注 env）。不带 prefix——container 是
+    task-def 内部名、随 task-def 走（task-def 已带 prefix），再叠 prefix 冗余。固定 `{engine}-worker`。"""
+    return f"{engine}-worker"
+
+
+def ssm_path(prefix: str, key: str) -> str:
+    """subnet/sg 的 SSM 参数路径（含 prefix，cli 已知 prefix 拼路径读，无循环——ADR 0033）。"""
+    return f"/{prefix}backend/{key}"
+
+
 def engine_min_grace(engine_name: str) -> float:
     """按引擎给 grace 下限（ADR 0024 grace 硬约束）——**引擎特定值住在组合根**（core 不认）。
 
@@ -111,10 +148,10 @@ def build_engines(
     显式写进注入 env（`AWS_REGION`/`AWS_PROFILE`）覆盖继承值——使 `--region`/`--profile` 真贯通到 subprocess worker
     （EventSink/JobSource/ArtifactUploader/Nova Workflow/Midscene fromNodeProviderChain 建 client 都读它们）、与 core store
     同源、消除分叉。None＝不写（真无值、fail-loud，对齐 store 宽容）。**subprocess 两腿都注入**（Nova/Midscene 补建路径见下）。
-    注意：**FargateEngine 侧只注入 region、不注入 profile**（容器用 task role，profile 是本机 `~/.aws` 概念、注入会
-    ProfileNotFound 盖过 task role——正确的非对称，ADR 0016 决策 C）。**FargateEngine 尚未在本组合根接线**（`--backend
-    cloud` 当前只换 store、执行仍走下面两个 SubprocessEngine；FargateEngine 接进来归 WP2）——其 region 注入语义已在
-    adapter 内实装（有单测），此处描述的是 WP2 接线后的设计意图。
+    注意：本函数**只建 subprocess 两腿**（local 执行）。cloud 执行由 `build_fargate_engines` 接管——组合根
+    （`__main__`）按 `--backend` 分流：cloud ⇒ `build_fargate_engines`（FargateEngine）、否则本函数（SubprocessEngine）。
+    **FargateEngine 侧只注入 region、不注入 profile**（容器用 task role，profile 是本机 `~/.aws` 概念、注入会
+    ProfileNotFound 盖过 task role——正确的非对称，ADR 0016 决策 C）。
     """
     novaact_dir = repo / "engines" / "novaact"
     midscene_dir = repo / "engines" / "midscene"
@@ -307,6 +344,133 @@ def build_cloud_stores(*, table: str, bucket: str, prefix: str = "",
         return d
 
     return run_store, result_store, report_store, make_artifacts
+
+
+# ============================================================================
+# Fargate 执行接线（ADR 0033 / 0016 决策 A/C）：--backend cloud 时用 FargateEngine 替代 SubprocessEngine。
+# boto3 句柄钩子抽出供测试 monkeypatch（同 store 侧 _make_* 惯例）；import boto3 惰性收在钩子内。
+# ============================================================================
+def _make_ecs_client(*, region, profile):
+    """boto3 ecs client（FargateEngine RunTask/StopTask/DescribeTasks）。"""
+    import boto3
+    return boto3.session.Session(profile_name=profile, region_name=region).client("ecs")
+
+
+def _make_ssm_client(*, region, profile):
+    """boto3 ssm client（读 subnet/sg 的确定性路径参数）。"""
+    import boto3
+    return boto3.session.Session(profile_name=profile, region_name=region).client("ssm")
+
+
+def _read_ssm_list(ssm, path: str) -> list[str]:
+    """读一个 SSM StringList 参数 → list[str]（subnet/sg 的 ID 列表，CDK 写、cli 读，ADR 0033）。"""
+    resp = ssm.get_parameter(Name=path)
+    return [v for v in resp["Parameter"]["Value"].split(",") if v]
+
+
+def resolve_network(
+    *, prefix: str, subnets: list[str] | None, security_groups: list[str] | None,
+    assign_public_ip: str = "ENABLED", region=None, profile=None, ssm=None,
+) -> dict:
+    """Fargate awsvpcConfiguration（ADR 0033）：subnet/sg 未显式给 → 读含 prefix 的 SSM 路径（CDK 写的生成 ID）；
+    给了则用字面覆盖。ssm client 可注入（测试）；未注入且需读时惰性建。返回 FargateEngine 的 network_config 形状。"""
+    if subnets is None or security_groups is None:
+        if ssm is None:
+            ssm = _make_ssm_client(region=region, profile=profile)
+        if subnets is None:
+            subnets = _read_ssm_list(ssm, ssm_path(prefix, "subnets"))
+        if security_groups is None:
+            security_groups = _read_ssm_list(ssm, ssm_path(prefix, "security-groups"))
+    return {"subnets": subnets, "securityGroups": security_groups, "assignPublicIp": assign_public_ip}
+
+
+def build_fargate_engines(
+    *, run_id: str, prefix: str, cluster: str, events_table: str, bucket: str, report_dir: str,
+    network_config: dict, region: str | None = None, profile: str | None = None,
+    ecs=None, s3=None, ddb_events_table=None,
+) -> dict[str, Engine]:
+    """每引擎一个 FargateEngine（对称 build_engines 的 SubprocessEngine dict；core 引擎无关，ADR 0026）。
+
+    `--backend cloud` 用它替代 build_engines——决策 A（cloud ⇒ Fargate 执行）从设计落到 CLI 的动作点。
+    按 job.engine 选 task-def（`{prefix}{engine}-worker`）；boto3 句柄组合根注入（adapter 不自建，ADR 0016）。
+    - run_id：拼 events PK（`new_run_id()` 后注入，对称 store）。
+    - **profile 不传给 FargateEngine**（正确的非对称，ADR 0016 决策 C）：容器用 task role；region 传（已落实成
+      具体字符串、经 RunTask overrides 注入 worker）。
+    - job-in 落点 = (bucket, `{prefix_key}<run_id>/jobs/`)、artifact 上传落点 = (bucket, `{prefix_key}<run_id>/`)——
+      与 ResultStore/report 同前缀镜像 run 树。**artifact_s3 必注入**（对称 subprocess build_engines 的 s3_env）：否则
+      Fargate 容器盘停即销毁、引擎产物（trajectory/report）必丢（ADR 0029「cloud 注入不是可选」/0032）。
+    句柄可注入（测试 monkeypatch），未注入则惰性建（区分 ecs/s3/ddb resource）。
+    """
+    from core.adapters.fargate_engine import FargateEngine
+
+    if ecs is None:
+        ecs = _make_ecs_client(region=region, profile=profile)
+    if s3 is None:
+        s3 = _make_s3_client(region=region, profile=profile)
+    if ddb_events_table is None:
+        ddb_events_table = _make_ddb_table(events_table, region=region, profile=profile)
+
+    pfx = _normalize_prefix(report_dir)
+    job_s3 = (bucket, f"{pfx}{run_id}/jobs/")
+    # 产物上传落点（ADR 0029）：prefix = <report_dir>/<run_id>/（run 树根，worker 拼产物相对路径；与 job/report 同前缀镜像
+    # run 树）。**cloud 必注入**——否则容器盘停即销毁、产物必丢（ADR 0029「cloud 注入不是可选」）。对称 build_engines 的 s3_env。
+    artifact_s3 = (bucket, f"{pfx}{run_id}/")
+
+    def _engine(engine: str) -> Engine:
+        return FargateEngine(
+            ecs_client=ecs, s3_client=s3, ddb_events_table=ddb_events_table,
+            run_id=run_id, cluster=cluster, task_definition=task_def_name(prefix, engine),
+            network_config=network_config, job_s3=job_s3, events_table_name=events_table,
+            container_name=container_name(engine), artifact_s3=artifact_s3, region=region,  # profile 不传（决策 C 非对称）
+        )
+
+    return {engine: _engine(engine) for engine in _ENGINES}
+
+
+def preflight_cloud_resources(
+    *, prefix: str, events_table: str, bucket: str, cluster: str, runs_table: str | None = None,
+    region=None, profile=None, ecs=None, s3=None, ddb=None,
+) -> str | None:
+    """fail-fast 探 cloud 资源存在性（ADR 0033）——用已解析 prefix 拼出的名去探，不存在返回一句**点名 prefix**
+    的错误串（调用方退 2），全在返回 None。别跑到一半才因资源缺炸；错误要能指向「prefix 配错 / CDK 没部署」。
+
+    探**执行必需**（events 表 + cluster + 桶）恒探；**runs 表仅落库需要**——`runs_table=None`（`--no-report`）时不探
+    （report 与执行正交，ADR 0016 决策 A：`--no-report --backend cloud` 仍 Fargate 跑、不落库、故不碰 runs 表）。
+    句柄可注入（测试）；未注入惰性建。探法：DDB DescribeTable、S3 HeadBucket、ECS DescribeClusters。
+    任一 botocore 异常都翻成「资源 X 不存在——是 --prefix 配错、还是 iac_aws_backend（CDK）未部署？」。
+    """
+    import boto3
+    from botocore.exceptions import ClientError, BotoCoreError
+
+    sess = boto3.session.Session(profile_name=profile, region_name=region)
+    ddb = ddb or sess.client("dynamodb")
+    s3 = s3 or sess.client("s3")
+    ecs = ecs or sess.client("ecs")
+
+    def _hint(resource_desc: str) -> str:
+        return (f"--backend cloud 资源缺失：{resource_desc}（用 --prefix={prefix!r} 拼出）不存在——"
+                f"是 --prefix 配错、还是 iac_aws_backend（CDK）未部署到本 region/账户？")
+
+    if runs_table is not None:  # 仅落库需要；--no-report 下 None、不探
+        try:
+            ddb.describe_table(TableName=runs_table)
+        except (ClientError, BotoCoreError):
+            return _hint(f"DynamoDB 表 {runs_table}")
+    try:
+        ddb.describe_table(TableName=events_table)
+    except (ClientError, BotoCoreError):
+        return _hint(f"DynamoDB 表 {events_table}")
+    try:
+        s3.head_bucket(Bucket=bucket)
+    except (ClientError, BotoCoreError):
+        return _hint(f"S3 桶 {bucket}")
+    try:
+        resp = ecs.describe_clusters(clusters=[cluster])
+        if not resp.get("clusters") or resp["clusters"][0].get("status") != "ACTIVE":
+            return _hint(f"ECS cluster {cluster}")
+    except (ClientError, BotoCoreError):
+        return _hint(f"ECS cluster {cluster}")
+    return None
 
 
 def load_feature(path: Path, repo: Path) -> FeatureSource:
