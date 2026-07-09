@@ -9,8 +9,14 @@ from __future__ import annotations
 import boto3
 
 
-def ensure_workflow_definition(name: str, *, region: str = "us-east-1", description: str | None = None) -> str:
-    """确保名为 `name` 的 workflow definition 存在；返回 'exists' 或 'created'。"""
+def ensure_workflow_definition(name: str, *, region: str | None = None, description: str | None = None) -> str:
+    """确保名为 `name` 的 workflow definition 存在；返回 'exists' 或 'created'。
+
+    region=None（不再硬编码 us-east-1，ADR 0016 决策 C）→ boto3 nova-act client 走默认链/profile config 解析 region；
+    真无 region（全 miss）→ NoRegionError（fail-loud、别静默跑错区）。注：本函数的 nova-act client **会**查 profile config，
+    但同 worker 的 AgentCore 腿（AgentCoreBrowserSessionProvider.validate_region）**不查**、要显式字符串——故正常路径靠
+    组合根 `resolve_region` 把 region 落实成具体字符串再注入（见 run_scope.py REGION 注释 / ADR 0016 决策 C）。
+    """
     client = boto3.client("nova-act", region_name=region)
     try:
         client.get_workflow_definition(workflowDefinitionName=name)

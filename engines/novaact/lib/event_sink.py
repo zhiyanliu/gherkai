@@ -8,11 +8,13 @@
 （pass_fds 继承、号不固定）。无 EVENTS_FD（手动直跑、无 adapter）时回落 stdout，便于调试（`echo job | worker` 仍见事件）。
 
 **emit 同步（合理不对称，ADR 0024）**：Nova worker 是同步 + greenlet 模型、全链路零 async，emit 同步；
-Midscene 那腿 emit 为 async（Node 事件循环 + 未来 SQS aws-sdk-js 本就 async）。WP-Fargate 时 Nova 用 boto3
-（同步 SDK）send_message、同步 emit 天然容纳，无需 async 化（那是本 ADR 终止契约被拒的 asyncio 路）。
+Midscene 那腿 emit 为 async（Node 事件循环 + Fargate 化后 aws-sdk-js DDB PutItem 本就 async）。Fargate 化后
+Nova 用 boto3（同步 SDK）put_item、同步 emit 天然容纳，无需 async 化（那是本 ADR 终止契约被拒的 asyncio 路）。
 
-第一期只实现 subprocess 态（写 EVENTS_FD fd）；S3/SQS 态（SendMessage、MessageGroupId=scope_id）属
-WP-Fargate、本组件形状须能容纳但不实现（判据=有没有注入 EVENTS_SQS_URL 等，非「是否 Fargate」）。
+**两态（ADR 0024「DynamoDB 作 events-out」）**：
+- **fd 态（subprocess）**：写 EVENTS_FD fd（无/非法 → 回落 stdout 调试）。
+- **DDB 态（Fargate 化）**：`EVENTS_DDB_TABLE`+`RUN_ID`+`SCOPE_ID` 注入 → PutItem 到 events 表（PK=run_id#scope_id、
+  SK=进程内自增 seq、body=JSON line）。判据=有没有注入 `EVENTS_DDB_TABLE`，非「是否 Fargate」（ADR 0016 红线）。
 """
 from __future__ import annotations
 
@@ -23,27 +25,37 @@ from typing import TextIO
 
 
 class EventSink:
-    """按注入的 env 把 ADR 0024 事件写到事件通道。subprocess 态：写 EVENTS_FD fd（无/非法 → 回落 stdout）。
+    """按注入的 env 把 ADR 0024 事件写到事件通道。fd 态：写 EVENTS_FD fd；DDB 态：PutItem 到 events 表。
 
     worker 是事件的 producer/client、不 listen（无 receive/listen）——「停」走 SIGTERM out-of-band、不经本 sink。
     只暴露 emit：**绝不暴露底层 fd/stdout 句柄、绝不把事件挪回 stdout**（守三通道分离，事件出 stdout 会重引入
     被隔离掉的 SDK 噪声污染）。
     """
 
-    def __init__(self, *, out: TextIO) -> None:
-        # 私有构造只吃已解析好的输出流（对称 ArtifactUploader.__init__ 只吃解析值、不碰 env）。
+    def __init__(self, *, out: TextIO | None = None, table_name: str | None = None,
+                 run_id: str | None = None, scope_id: str | None = None) -> None:
+        # 私有构造只吃已解析好的值（对称 ArtifactUploader.__init__ 不碰 env）。out 有=fd 态；table_name 有=DDB 态。
         self._out = out
+        self._table_name = table_name
+        self._run_id = run_id
+        self._scope_id = scope_id
+        self._client = None   # 惰性建 boto3 dynamodb client（仅 DDB 态、首次 emit 时）
+        self._seq = 0         # DDB 态：scope 内单调自增序号（SK）——单进程串行 emit 天然单调，无需协调
 
     @classmethod
     def from_env(cls) -> "EventSink":
-        """从注入的 env 造（唯一读 env 处）。EVENTS_FD 无 / int() 失败 / fdopen 失败 → 回落 stdout（调试直跑）。
+        """从注入的 env 造（唯一读 env 处）。EVENTS_DDB_TABLE 非空 → DDB 态；否则 fd 态（EVENTS_FD 无/非法 → 回落 stdout）。
 
-        SQS 态（Fargate 化，未实现）fail-loud（对称 JobSource 的 JOB_S3_URI 守卫）：注入了 EVENTS_SQS_URL 却
-        跑到这 = 配置错，显式报错、不静默走 fd/stdout（否则 Fargate 事件会写进无人读的 fd、静默丢）。实现时
-        惰性建 SQS client + SendMessage(MessageGroupId=scopeId)。空串统一当「未注入」（对称 EVENTS_FD `or None`）。
+        DDB 态判据 = 有没有注入 `EVENTS_DDB_TABLE`（非「是否 Fargate」，ADR 0016 红线）；空串当未注入（`or None`）。
+        DDB 态还需 `RUN_ID`+`SCOPE_ID` 拼 PK=run_id#scope_id（组合根/FargateEngine RunTask overrides 注入）。
         """
-        if os.environ.get("EVENTS_SQS_URL") or None:
-            raise NotImplementedError("EventSink: SQS 态未实现（注入了 EVENTS_SQS_URL）——属 Fargate 化")
+        table_name = os.environ.get("EVENTS_DDB_TABLE") or None
+        if table_name is not None:
+            return cls(
+                table_name=table_name,
+                run_id=os.environ.get("RUN_ID") or None,
+                scope_id=os.environ.get("SCOPE_ID") or None,
+            )
         events_fd = os.environ.get("EVENTS_FD")
         try:
             out = os.fdopen(int(events_fd), "w", encoding="utf-8") if events_fd else sys.stdout
@@ -51,10 +63,31 @@ class EventSink:
             out = sys.stdout
         return cls(out=out)
 
+    def _ddb(self):
+        # 惰性建 boto3 dynamodb resource + 超时（对称 ArtifactUploader._s3 的 Config：快速失败、退出有界，ADR 0024）。
+        if self._client is None:
+            import boto3
+            from botocore.config import Config
+            cfg = Config(connect_timeout=5, read_timeout=10, retries={"max_attempts": 0})
+            self._client = boto3.resource(
+                "dynamodb", region_name=os.environ.get("AWS_REGION"), config=cfg
+            ).Table(self._table_name)
+        return self._client
+
     def emit(self, event: dict) -> None:
         """吐一条 ADR 0024 事件（JSON Lines，字段名 camelCase 与 core/wire.py 一致）。
 
-        每条 flush 保序（ADR 0024 顺序不变量）；ensure_ascii=False 保中文（与旧内联 emit 逐字节一致）。
+        fd 态：write+flush（每条 flush 保序、ensure_ascii=False 保中文，与旧内联逐字节一致）。
+        DDB 态：PutItem(PK=run_id#scope_id, SK=自增 seq, body=JSON line)——SK 单调自增（scope 内串行、无需协调）。
         """
-        self._out.write(json.dumps(event, ensure_ascii=False) + "\n")
+        line = json.dumps(event, ensure_ascii=False)
+        if self._table_name is not None:
+            self._seq += 1
+            self._ddb().put_item(Item={
+                "pk": f"{self._run_id}#{self._scope_id}",
+                "seq": self._seq,
+                "body": line,
+            })
+            return
+        self._out.write(line + "\n")
         self._out.flush()

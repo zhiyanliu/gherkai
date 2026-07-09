@@ -29,13 +29,35 @@ test("read reads to EOF then takes only first line (尾随行不干扰)", async 
   assert.equal(job.scope.id, "s:0");  // 只解析首行
 });
 
-test("JOB_S3_URI 注入 → read() fail-loud throw（不静默走 stdin 挂 for await）", async () => {
-  // S3 态守卫（Fargate 化未实现）：注入 JOB_S3_URI → throw、不静默走 stdin（否则 Fargate 无 stdin 挂 for await）。
-  // 锁死守卫不被误删。对称 Nova test_job_source.py。
+test("S3 态：JOB_S3_URI 注入 → read() = GetObject + 解析首行 JSON（注入 fake client，不连真 AWS）", async () => {
+  // S3 态（Fargate 化，ADR 0024）：mock S3 client send（对称 artifact-upload.test 惯例）；验 s3:// URI 解析 + 首行 JSON。
   const saved = process.env.JOB_S3_URI;
-  process.env.JOB_S3_URI = "s3://bucket/job.json";
+  process.env.JOB_S3_URI = "s3://bkt/run-1/jobs/browse.json";
+  const captured: any = {};
+  const fakeClient = {
+    send: async (cmd: any) => {
+      captured.Bucket = cmd.input.Bucket;
+      captured.Key = cmd.input.Key;
+      const line = JSON.stringify({ scope: { id: "browse", name: "B" }, engine: "midscene", scenarios: [], assertionVotes: 3 }) + "\n";
+      return { Body: { transformToString: async (_enc: string) => line } };
+    },
+  };
   try {
-    await assert.rejects(() => JobSource.fromEnv().read(), /S3 态未实现/);
+    const job = await JobSource.fromEnv().read(fakeClient);
+    assert.equal(captured.Bucket, "bkt");
+    assert.equal(captured.Key, "run-1/jobs/browse.json");  // s3:// URI 解析正确
+    assert.equal(job.scope.id, "browse");
+    assert.equal(job.assertionVotes, 3);
+  } finally {
+    if (saved === undefined) delete process.env.JOB_S3_URI; else process.env.JOB_S3_URI = saved;
+  }
+});
+
+test("JOB_S3_URI 非 s3:// → throw（配置错、fail-loud）", async () => {
+  const saved = process.env.JOB_S3_URI;
+  process.env.JOB_S3_URI = "http://not-s3/job.json";
+  try {
+    await assert.rejects(() => JobSource.fromEnv().read({ send: async () => ({}) }), /s3:\/\//);
   } finally {
     if (saved === undefined) delete process.env.JOB_S3_URI; else process.env.JOB_S3_URI = saved;
   }

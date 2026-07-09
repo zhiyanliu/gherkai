@@ -105,8 +105,8 @@ const MODEL_CONFIG = {
 const URL_IN_QUOTES = /"(https?:\/\/[^"]+)"/;
 
 // 事件出口抽进 lib/event-sink.mts（ADR 0024「I/O 边缘可注入接口」第一期）：可注入、可测；subprocess 态写
-// EVENTS_FD fd（无则回落 stdout 调试）。emit 为 async（合理不对称：为 WP-Fargate 的 SQS aws-sdk-js 预留；Nova
-// 那腿 emit 同步）+ 作参数注入 runStep/runScenario（两腿统一打桩机制），不再是模块级函数。
+// EVENTS_FD fd（无则回落 stdout 调试）。emit 为 async（合理不对称：为 Fargate 化的 DDB PutItem（aws-sdk-js）
+// 预留；Nova 那腿 emit 同步）+ 作参数注入 runStep/runScenario（两腿统一打桩机制），不再是模块级函数。
 // log（stderr 诊断）**不属那三条 I/O 边、不进 sink**（协议传输面 vs 诊断面物理隔离，ADR 0024），保模块级。
 function log(msg: string): void {
   process.stderr.write(msg + "\n");

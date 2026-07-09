@@ -27,12 +27,35 @@ def test_read_takes_only_first_line_not_eof(monkeypatch):
     assert job["scope"]["id"] == "s:0"  # 只解析首行，尾随行不干扰
 
 
-def test_s3_uri_injected_raises_not_silently_stdin(monkeypatch):
-    # S3 态守卫（Fargate 化未实现）：注入 JOB_S3_URI → read() fail-loud 抛，不静默走 stdin（否则 Fargate 无
-    # stdin 会挂在 readline）。锁死守卫不被误删。
+def test_s3_state_getobject(monkeypatch):
+    # S3 态（Fargate 化，ADR 0024）：注入 JOB_S3_URI → read() = GetObject + 解析首行 JSON（不走 stdin）。
+    # mock boto3.client（不加 moto 依赖——对称 test_artifact_upload.py 惯例）；验解析出 bucket/key + 首行 JSON。
+    from unittest.mock import MagicMock
+    import io as _io
+    import boto3
+
+    monkeypatch.setenv("JOB_S3_URI", "s3://bkt/run-1/jobs/browse.json")
+    captured = {}
+    fake_s3 = MagicMock()
+
+    def _get_object(Bucket, Key):
+        captured["Bucket"], captured["Key"] = Bucket, Key
+        body = b'{"scope": {"id": "browse"}, "scenarios": [], "assertionVotes": 3}\n'
+        return {"Body": _io.BytesIO(body)}
+
+    fake_s3.get_object.side_effect = _get_object
+    monkeypatch.setattr(boto3, "client", lambda *a, **k: fake_s3)
+    job = JobSource.from_env().read()
+    assert captured["Bucket"] == "bkt" and captured["Key"] == "run-1/jobs/browse.json"  # s3:// URI 解析正确
+    assert job["scope"]["id"] == "browse"
+    assert job["assertionVotes"] == 3
+
+
+def test_s3_uri_must_be_s3_scheme(monkeypatch):
+    # JOB_S3_URI 非 s3:// → ValueError（配置错、fail-loud）
     import pytest
-    monkeypatch.setenv("JOB_S3_URI", "s3://bucket/job.json")
-    with pytest.raises(NotImplementedError, match="S3 态未实现"):
+    monkeypatch.setenv("JOB_S3_URI", "http://not-s3/job.json")
+    with pytest.raises(ValueError, match="s3://"):
         JobSource.from_env().read()
 
 

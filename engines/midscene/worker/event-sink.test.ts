@@ -43,13 +43,38 @@ test("fromEnv 回落 fd 1 (stdout) when no EVENTS_FD; emit 不抛", async () => 
   await assert.doesNotReject(async () => { await sink.emit({ type: "scope_started" }); });
 });
 
-test("EVENTS_SQS_URL 注入 → fromEnv fail-loud throw（不静默走 fd）", () => {
-  // SQS 态守卫（Fargate 化未实现，对称 JobSource）：注入 EVENTS_SQS_URL → throw、不静默走 fd/stdout。锁死守卫。
-  const saved = process.env.EVENTS_SQS_URL;
-  process.env.EVENTS_SQS_URL = "https://sqs.us-east-1.amazonaws.com/x/q.fifo";
+test("DDB 态：EVENTS_DDB_TABLE 注入 → emit = PutItem(PK=run_id#scope_id, SK=自增 seq, body)", async () => {
+  // DDB 态（Fargate 化，ADR 0024）：mock DynamoDBClient send（塞 client、不连真 AWS——对称 artifact-upload.test 惯例）。
+  const saved = { t: process.env.EVENTS_DDB_TABLE, r: process.env.RUN_ID, s: process.env.SCOPE_ID };
+  process.env.EVENTS_DDB_TABLE = "ev";
+  process.env.RUN_ID = "run-1";
+  process.env.SCOPE_ID = "browse";
   try {
-    assert.throws(() => EventSink.fromEnv(), /SQS 态未实现/);
+    const sink = EventSink.fromEnv();
+    const items: any[] = [];
+    (sink as any).client = { send: async (cmd: any) => { items.push(cmd.input); return {}; } };  // 绕惰性建
+    await sink.emit({ type: "scope_started", scopeId: "browse" });
+    await sink.emit({ type: "scope_done", scopeId: "browse" });
+    // 两条、PK=run_id#scope_id、SK 自增 1/2、body 原样 json line（DDB attribute 形态 {S}/{N}）
+    assert.deepEqual(items.map((i) => i.Item.pk.S), ["run-1#browse", "run-1#browse"]);
+    assert.deepEqual(items.map((i) => i.Item.seq.N), ["1", "2"]);
+    assert.equal(JSON.parse(items[0].Item.body.S).type, "scope_started");
+    assert.equal(JSON.parse(items[1].Item.body.S).type, "scope_done");
+    assert.equal(items[0].TableName, "ev");
   } finally {
-    if (saved === undefined) delete process.env.EVENTS_SQS_URL; else process.env.EVENTS_SQS_URL = saved;
+    for (const [k, v] of [["EVENTS_DDB_TABLE", saved.t], ["RUN_ID", saved.r], ["SCOPE_ID", saved.s]] as const) {
+      if (v === undefined) delete process.env[k]; else process.env[k] = v;
+    }
+  }
+});
+
+test("空串 EVENTS_DDB_TABLE 当作未注入（|| undefined）→ 走 fd 态（回落 fd 1）", () => {
+  const saved = process.env.EVENTS_DDB_TABLE;
+  process.env.EVENTS_DDB_TABLE = "";
+  delete process.env.EVENTS_FD;
+  try {
+    assert.equal((EventSink.fromEnv() as any).fd, 1, "空串 → 未注入 → fd 态回落 fd 1");
+  } finally {
+    if (saved === undefined) delete process.env.EVENTS_DDB_TABLE; else process.env.EVENTS_DDB_TABLE = saved;
   }
 });

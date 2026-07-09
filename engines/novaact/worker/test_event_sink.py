@@ -58,20 +58,50 @@ def test_from_env_falls_back_to_stdout_on_bad_fd_number(monkeypatch, capsys):
     assert '"scope_done"' in capsys.readouterr().out
 
 
-def test_sqs_url_injected_raises_not_silently_fd(monkeypatch):
-    # SQS 态守卫（Fargate 化未实现，对称 JobSource）：注入 EVENTS_SQS_URL → from_env fail-loud 抛，不静默走
-    # fd/stdout（否则 Fargate 事件写进无人读的 fd、静默丢）。锁死守卫不被误删。
-    import pytest
-    monkeypatch.setenv("EVENTS_SQS_URL", "https://sqs.us-east-1.amazonaws.com/x/q.fifo")
-    with pytest.raises(NotImplementedError, match="SQS 态未实现"):
-        EventSink.from_env()
+def test_ddb_state_putitem(monkeypatch):
+    # DDB 态（Fargate 化，ADR 0024）：注入 EVENTS_DDB_TABLE+RUN_ID+SCOPE_ID → emit = PutItem(PK=run_id#scope_id,
+    # SK=自增 seq, body=json line)。mock DDB Table（MagicMock，不加 moto 依赖——对称 test_artifact_upload.py 惯例）。
+    from unittest.mock import MagicMock
+
+    monkeypatch.setenv("EVENTS_DDB_TABLE", "ev")
+    monkeypatch.setenv("RUN_ID", "run-1")
+    monkeypatch.setenv("SCOPE_ID", "browse")
+    sink = EventSink.from_env()
+    fake_table = MagicMock()
+    sink._client = fake_table  # 绕惰性 _ddb() 建真 client
+    sink.emit({"type": "scope_started", "scopeId": "browse"})
+    sink.emit({"type": "scope_done", "scopeId": "browse"})
+    items = [c.kwargs["Item"] for c in fake_table.put_item.call_args_list]
+    # 两条、PK=run_id#scope_id、SK 自增 1/2、body 是原样 json line
+    assert [it["pk"] for it in items] == ["run-1#browse", "run-1#browse"]
+    assert [it["seq"] for it in items] == [1, 2]
+    assert json.loads(items[0]["body"])["type"] == "scope_started"
+    assert json.loads(items[1]["body"])["type"] == "scope_done"
 
 
-def test_empty_sqs_url_treated_as_unset(monkeypatch, capsys):
-    # 空串 EVENTS_SQS_URL 当「未注入」（or None）→ 正常走 fd/stdout、不误抛。
-    monkeypatch.setenv("EVENTS_SQS_URL", "")
+def test_ddb_state_binds_target_table_name(monkeypatch):
+    # env→目标表接线（对称 Midscene event-sink.test.ts 断言 TableName=='ev'）：EVENTS_DDB_TABLE 必须真被用作
+    # .Table(name) 的目标。上一条测试绕过了 _ddb()（直塞 _client），故表名接线无覆盖——若 _ddb() 绑错表名/读错
+    # env 仍会绿、只有真跑才炸。这里 mock boto3.resource 让真 _ddb() 跑一遍、断言 .Table 以 "ev" 调用。
+    import boto3
+    from unittest.mock import MagicMock
+
+    monkeypatch.setenv("EVENTS_DDB_TABLE", "ev")
+    monkeypatch.setenv("RUN_ID", "run-1")
+    monkeypatch.setenv("SCOPE_ID", "browse")
+    fake_resource = MagicMock()
+    monkeypatch.setattr(boto3, "resource", lambda *a, **kw: fake_resource)
+    sink = EventSink.from_env()
+    sink.emit({"type": "scope_started", "scopeId": "browse"})  # 走真 _ddb()：boto3.resource(...).Table("ev")
+    fake_resource.Table.assert_called_once_with("ev")          # env 名确实绑成目标表
+    fake_resource.Table.return_value.put_item.assert_called_once()
+
+
+def test_empty_ddb_table_treated_as_unset(monkeypatch, capsys):
+    # 空串 EVENTS_DDB_TABLE 当「未注入」（or None）→ 走 fd/stdout、不误进 DDB 态。
+    monkeypatch.setenv("EVENTS_DDB_TABLE", "")
     monkeypatch.delenv("EVENTS_FD", raising=False)
-    EventSink.from_env().emit({"type": "scope_started"})  # 不抛
+    EventSink.from_env().emit({"type": "scope_started"})  # 不抛、走 stdout
     assert '"scope_started"' in capsys.readouterr().out
 
 

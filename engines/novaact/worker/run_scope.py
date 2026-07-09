@@ -51,7 +51,12 @@ import deterministic as _deterministic  # noqa: E402
 import deterministic_steps  # noqa: E402,F401  仅为触发注册（其顶层 @deterministic 副作用）
 from lib.artifact_upload import ArtifactUploader  # noqa: E402  产物 S3 上传（ADR 0029；无落点 env 时 no-op 报 file://）
 
-REGION = os.environ.get("AWS_REGION", "us-east-1")
+# region 不再硬编码兜底（ADR 0016 决策 C）：None 时不再抢在 profile config 前跑错区。**正常路径由组合根落实**——
+# compose.resolve_region 把 `--region > AWS_REGION > AWS_DEFAULT_REGION > profile config` 落实成具体字符串、经 AWS_REGION
+# env 注入 worker，故这里通常拿到具体 region。真无 region（全 miss）→ None → fail-loud：boto client 抛 NoRegionError；
+# 尤其 AgentCore 腿（下方 AgentCoreBrowserSessionProvider）的 validate_region **不吃 profile config、要显式字符串**，
+# region=None 直接 InvalidRegionError——这正是组合根须在注入前把 profile-region 落实成字符串的原因（别静默跑错区）。
+REGION = os.environ.get("AWS_REGION")
 
 # 停止标志（ADR 0024 flag-only 中断模型）：SIGTERM/SIGINT handler 只 set 它、绝不 raise——避免异步异常
 # 落进 playwright greenlet 切换关键区致死循环卡死（Journey 0001 发现 #2）。主流程在 act 边界安全点检测、
