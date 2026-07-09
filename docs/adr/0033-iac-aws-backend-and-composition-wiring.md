@@ -1,0 +1,142 @@
+# iac_aws_backend：`--backend cloud` 的 AWS 资源 IaC（Python CDK）+ 组合根接 FargateEngine
+
+> **Status:** Draft —— 组合根接线已编码（`build_fargate_engines` + `--backend cloud` 切执行）、**CDK 工程本体尚未编码**。本 ADR 定 **IaC 工程定位/资源清单/命名契约/preflight** 与 **组合根把 `FargateEngine` 接进 `--backend cloud`** 的稳定决策。执行环境特有的中断/grace 韧性见 [0032](./0032-fargate-execution-environment.md)（真容器校准）；region/profile 贯通见 [0016](./0016-execution-architecture-core-lib-run-model.md) 决策 C；events-out/job-in 传输见 [0024](./0024-worker-core-protocol.md)；产物→S3 见 [0029](./0029-engine-artifacts-to-s3.md)。
+
+## 定位：一个 CDK 工程建齐「`--backend cloud` 需要的全部 AWS 资源」
+
+`--backend cloud` 按 [0016](./0016-execution-architecture-core-lib-run-model.md) 决策 A = **存储上云（DDB/S3）+ Fargate 执行**（单旋钮）。这两半的 AWS 资源此前一律「假定已存在、建表归 IaC」（[0030](./0030-realtime-persistence-seam.md) 决定六：adapter 不持 schema/建表权知识），生产侧从无建表建桶代码——只在 moto 单测 fixture（`core/tests/conftest.py`）里程序化建出。**本 ADR 决定把这些 fixture 里的建表建桶动作固化成真 CDK。**
+
+**决策：新建顶层工程 `iac_aws_backend/`（Python CDK），与 `core/`/`cli/`/`engines/` 平级。**
+
+- **命名**：`iac_` 前缀对齐「工程」定位；`aws_backend` 精确覆盖它建的东西 = 「`--backend cloud` 这个 backend 所需的 aws 资源」——含**存储**（DDB/S3）**与执行**（Fargate/ECR），不窄化成只有存储。（与决策 A「backend=存储+执行单旋钮」呼应。）
+- **语言 = Python CDK**（aws-cdk-lib）。理由：与 core/cli 同语言（团队心智一致、CI 复用 uv 工具链）；不引入第二语言/Terraform HCL。
+- **统一一个工程建齐、不拆散**：存储资源（含现在已有 adapter 的 RunStore 表 / S3 桶）也**收编进本 IaC**——此前它们「假定已存在」是收编前的遗留态，本 ADR 让「`--backend cloud` 的每一个 AWS 依赖」都有 IaC 出处、单一部署入口。
+
+## 资源清单（CDK 建什么）
+
+一套 CDK stack（可按 prefix 多实例化，见「两层命名」）建：
+
+**DynamoDB（2 张表，均 `PAY_PER_REQUEST`；schema 权威源 = `core/tests/conftest.py` fixture，CDK 照抄）：**
+1. `{prefix}runs`（控制面 / RunStore，已有 adapter，本 ADR 纳入统一 IaC）：PK=`run_id`(S)、SK=`item_type`(S，值 `META`/`STATE`）。
+2. `{prefix}events`（events-out，本 ADR 新增）：PK=`pk`(S，值 `run_id#scope_id`)、SK=`seq`(N)；非键属性 `body`(S) 不进 AttributeDefinitions。**独立于 runs 表、绝不合表**（[0024](./0024-worker-core-protocol.md)：两种访问模式——runs 点读/单元素刷、events 大量追加+范围 Query；合表会踩 run_id 热分区、破 [0030](./0030-realtime-persistence-seam.md) 单写者不变量）。
+
+**S3（1 个桶）：**
+3. `{prefix}artifacts`：承 RunStore-offload（DDB 400KB 溢出）+ ResultStore（`jobs/`）+ ReportStore（`index/manifest`）+ job-in（`{prefix_key}<scope_id>.json`）+ artifact-upload（trajectory/report/log），全部按 key 前缀 `<report_dir>/<run_id>/` 分片。（job 桶与 artifact 桶合一，权限按 prefix 分组。）
+
+**ECS / Fargate：**
+4. ECS cluster `{prefix}cluster`。
+5. **每引擎一个 task definition + 一个容器镜像（2 个，见「2 镜像」节）**：task-def family = `{prefix}{engine}-worker`（`engine`=引擎规范名 `novaact`/`midscene`，即 `{prefix}novaact-worker` / `{prefix}midscene-worker`——须与 cli `compose.task_def_name` 逐字一致）。Fargate 兼容、`networkMode=awsvpc`、含 `stopTimeout`（≤120s；Nova grace 冲突见 [0032](./0032-fargate-execution-environment.md) 真容器校准）。**task-def 内 container 元素名 = `{engine}-worker`（不带 prefix，见下「container 名约定」）**。**task-def 不设 `AWS_REGION`/`AWS_PROFILE`**（见「task-def 不焊 region/凭证」）。
+6. ECR 仓库（2 个，各承一镜像）。
+7. VPC 网络：subnet(s) + security group(s)（`awsvpcConfiguration` 用；ID 走 SSM，见「subnet/sg 走 SSM」）。
+
+**IAM：**
+8. **task role**（容器内凭证链 `AWS_CONTAINER_CREDENTIALS_RELATIVE_URI` 解析目标）——**最小权限**（见「IAM 最小权限」）。
+9. **task execution role**（拉 ECR 镜像 / 写 CloudWatch 日志的标准 Fargate execution role）。
+
+**SSM：**
+10. subnet/sg 的 ID 写进确定性路径的 SSM 参数（cli 读，见「subnet/sg 走 SSM」）。
+
+**（编排进程角色**——跑 core/cli 的机器需 `ecs:RunTask`/`StopTask`/`DescribeTasks` + `dynamodb:Query`/`PutItem` + store 读写 + `s3:PutObject`（job 上传）——若编排也在 AWS 上跑则一并建；本地跑则用本地凭证，不在本 stack 强制。）
+
+## 两层命名：`--prefix` 批量默认 + 单资源覆盖（正交、无特判）
+
+**问题**：一个 AWS 账户下可能有**多套**环境（prod/stage）；逐个资源改名不可维护。
+
+**决策：两层命名，正交组合。**
+
+- **prefix 层**（`--prefix`，默认 `gherkai-`）：批量决定**所有名字类资源**的默认名——`{prefix}runs`/`{prefix}events`/`{prefix}artifacts`/`{prefix}cluster`/`{prefix}novaact-worker`/`{prefix}midscene-worker` 等（task-def 用引擎规范名 `novaact`，非 `nova`）。**CDK 部署吃同一 prefix**（`cdk deploy -c prefix=prod-`），故 CDK 建的名 = cli 推导的默认名 → **单一事实源、不漂移**。`--prefix prod-` 一键切整套。
+- **单资源覆盖层**（`--ddb-table`/`--s3-bucket`/… 给完整终值）：直接用给定值。
+
+**关键自洽点（无特判逻辑）**：覆盖时 prefix **自然不参与**——因为 prefix 只在「生成默认名」这条路径上拼，而覆盖 = 直接给完整 family name = 根本不走生成路径。两层在不同代码路径、正交解耦，不需要 `if override: strip_prefix` 之类的特判。
+
+**护栏（双层方案的固有耦合点，必记）：**
+- **CDK↔cli prefix 必须一致**：prefix 是 CDK 与 cli 的**共享约定**。若 `cdk deploy -c prefix=prod-` 但 cli 跑时用默认 `gherkai-`，cli 会拼出 `gherkai-events` 去连——那张表不存在。这不是缺陷，是双层方案的固有耦合；靠 preflight（见下）在启动时探出并**报错点名 prefix**，不静默跑到一半炸。
+- **prefix 含分隔符、原样拼**：默认 `gherkai-` 自带连字符 → 名 `gherkai-runs`。用户给 `--prefix prod`（无连字符）会拼成 `prodruns`——**分隔符由用户负责**（对齐 [0016](./0016-execution-architecture-core-lib-run-model.md) S3 prefix 的粘连 key 先例：组合根不猜、不补，原样拼、文档写明）。
+- **被拒方案：把 prefix 写进 SSM 让 cli「发现」**——否决。prefix 是 cli 定位资源的**钥匙**，不能又是它要去发现的输出：SSM 路径固定则多环境互相覆盖，路径含 prefix 则「要先知道 prefix 才能读 prefix」= 循环依赖。多环境的区分标识（prod/stage）本身就是 prefix，没有「先于 prefix」的东西定位它。故 prefix 只能是**输入**（`--prefix` / 默认）。
+
+## subnet/sg 走 SSM（AWS 生成 ID，无字面默认）
+
+subnet/sg 不是「名字」，是 **AWS 建 VPC 时生成的 ID**（`subnet-0abc…`/`sg-0def…`）——不可预测、无法写字面默认，是两层命名方案唯一套不上的资源。
+
+**决策：CDK 把生成的 subnet/sg ID 写进含 prefix 的 SSM 参数路径（如 `/{prefix}backend/subnets`、`/{prefix}backend/security-groups`）；cli 的 `--subnet`/`--security-group` 未显式给时读该 SSM 路径，给了则用字面值覆盖。**
+
+- **无循环**（与 prefix 不同）：读 SSM 的时机，prefix **已在手**（cli 已从 `--prefix`/默认解析出）→ 用它拼 SSM 路径去读 subnet/sg，正常的「IaC 输出 → 运行时读」模式。
+- 这是标准 AWS 「IaC 产出、运行时消费」模式。代价：组合根需 `ssm:GetParameter`（只读、低风险 IAM）+ 一次 boto 调用（仅未显式给 subnet/sg 时触发）。
+- 覆盖仍可给字面 ID（对称单资源覆盖层）。
+
+## preflight fail-fast：用已解析 prefix 探全部资源存在性，错误点名 prefix
+
+**目标**：别跑到一半才因「表/桶/cluster 不存在」炸；启动即探、报错要能指向 prefix 配错/CDK 没部署。
+
+**决策：扩展现有 preflight**（`cli/cli/__main__.py` 的 `persistence.begin()` 已对 store 探活失败退 2），**不引入 SSM 存 prefix**。
+
+- cli 用**已解析的 prefix** 拼出 cloud 资源名，启动时探存在性（`DescribeTable`/`HeadBucket`/`DescribeClusters`）。
+- 不存在 → fail-fast 退 2，**错误信息带上 prefix**：如「用 `--prefix=gherkai-` 拼出的表 `gherkai-events` 不存在——是 prefix 配错、还是 CDK（`iac_aws_backend`）未部署？」。
+- **preflight 按轴分层探（report ⊥ 执行，见下「组合根接线」）**：执行必需资源（events 表 + cluster + 桶）**恒探**（只要 `--backend cloud`）；**runs 表仅落库需要**——`--no-report` 时不探（`runs_table=None`）。即 `--backend cloud --no-report` **仍探执行资源、仍 Fargate 跑**，只是不落库、不探 runs 表。
+- **task-def 存在性暂不 preflight（护栏）**：preflight 现探表/桶/cluster，**不探 task-def**（`DescribeTaskDefinition`）。故 task-def 名维度的 prefix 配错会漏到 RunTask 才炸（退 1、不点名 prefix）。**有意暂缺**——CDK 本体未编码、task-def 尚不存在，此刻加探无对象；task-def 名已与 code 对齐（`{prefix}{engine}-worker`、container 名护栏见上）。**CDK 落地后**评估把 task-def 纳入「执行必需恒探」档（journey backlog 记）。
+
+## 2 镜像：Nova / Midscene 各一（依赖环境本质不同）
+
+**决策：两个容器镜像 + 两个 task-def，不合并。** 两腿 worker 运行时依赖差异大、合并镜像既臃肿又耦合升级：
+
+- **Nova 镜像**：Python 3.13 + `nova-act`（含 boto3 / bedrock-agentcore / playwright）+ **Playwright chromium 二进制 + 系统依赖库**（`nova.page` 是 Playwright Page）。入口 `python worker/run_scope.py`。
+- **Midscene 镜像**：Node ≥20（代码用 `AbortSignal.timeout`/`fs recursive`/`Dirent.parentPath`）+ `tsx` + `@midscene/web` + Playwright chromium + 全部 `@aws-sdk/*` + `openai`。入口 `node --import tsx worker/run-scope.ts`。
+  - **构建陷阱（必记）**：Midscene 把运行时真需要的 SDK（`@midscene/web`/playwright/bedrock-agentcore/signature-v4/openai）大多放在 **devDependencies**，只有 `client-dynamodb`/`client-s3` 在 dependencies。Dockerfile **不能用 `npm install --production`**（会漏装）——须装全部依赖，或构建前把它们提到 dependencies。
+
+镜像入口 CMD = 现有 subprocess cmd 去掉 stdin/fd 传输（job 走 S3、events 走 DDB，[0024](./0024-worker-core-protocol.md)）——worker 引擎逻辑不因执行环境变（[0016](./0016-execution-architecture-core-lib-run-model.md)）。
+
+## container 名约定：`{engine}-worker`（不带 prefix）—— CDK↔cli 硬契约
+
+**CDK 建 task-def 时，其内部 container 元素名必须恰为 `{engine}-worker`（`novaact-worker` / `midscene-worker`，不带 prefix）。** 这是 cli 侧硬假定的契约（`compose.container_name`），CDK 侧必须兑现，否则 cloud 每个 run 都炸：
+
+- **为什么不带 prefix**：container 是 **task-def 内部**名、随已带 prefix 的 task-def 走（task-def family 已是 `{prefix}{engine}-worker`），再叠 prefix 冗余。故 container 名只用引擎规范名 `{engine}-worker`。
+- **为什么是硬契约**：cli 的 `FargateEngine` RunTask 用 `overrides.containerOverrides[].name = {engine}-worker` 把 `JOB_S3_URI`/`EVENTS_DDB_TABLE`/`RUN_ID`/`SCOPE_ID`/`AWS_REGION`/`ARTIFACT_S3_*` 注进容器。ECS 要求该 name 与 task-def 里的 container 元素名**逐字匹配**，否则 RunTask 报 `container ... does not exist in task definition`——env 注入全落空、worker 拿不到 job/events/落点。
+- **单一事实源**：与 task-def family 名（`{prefix}{engine}-worker`）、prefix 一致护栏同理——CDK 作者读本 ADR、须照此建。
+
+## task-def 不焊 region/凭证（决策 C 的非对称落到 IaC）
+
+- **task-def 不设 `AWS_REGION`**：region 每 run 可能不同，由组合根经 **RunTask overrides 的 `containerOverrides.environment`** 注入（[0016](./0016-execution-architecture-core-lib-run-model.md) 决策 C：组合根 `resolve_region` 落实成具体字符串再注入；真无 region → 不注入、worker fail-loud）。
+- **task-def 不设 `AWS_PROFILE`**：Fargate 容器用 **task role** 凭证链（`AWS_CONTAINER_CREDENTIALS_RELATIVE_URI` 由平台自动注）；注入 profile 名会 `ProfileNotFound` 盖过 task role（[0016](./0016-execution-architecture-core-lib-run-model.md) 决策 C 的正确非对称——profile 只对 subprocess 有意义）。
+- 凭证一律经 task role，不在镜像/task-def 里放任何 access key。
+
+## IAM 最小权限（安全最佳实践）
+
+**task role**（容器内 worker 的凭证）——按动作 × 目标资源收窄，不给通配：
+
+| 动作 | 目标资源 | 腿 |
+|---|---|---|
+| `dynamodb:PutItem` | events 表 ARN（`{prefix}events`）——**不给 runs 表**（worker 绝不碰 RunState，[0024](./0024-worker-core-protocol.md)/[0030](./0030-realtime-persistence-seam.md) 单写者）| 两腿 |
+| `s3:GetObject` | artifacts 桶 job 前缀（`arn:…:{prefix}artifacts/*`）| 两腿 |
+| `s3:PutObject` | artifacts 桶 产物前缀——**不给 DeleteObject**（worker 只上传+删本地，S3 侧只 Put，[0029](./0029-engine-artifacts-to-s3.md)）| 两腿 |
+| `bedrock-agentcore:StartBrowserSession` / `StopBrowserSession` | AgentCore browser | 两腿 |
+| `nova-act:GetWorkflowDefinition` / `CreateWorkflowDefinition` / `CreateWorkflowRun` + 模型推理 | workflow definition + Nova 模型 | Nova |
+| `bedrock:InvokeModel` | Qwen3-VL（`qwen.qwen3-vl-235b-a22b`）| Midscene |
+| `ssm:GetParameter` | `/{prefix}backend/*`（读 subnet/sg）——**属编排进程角色、非 task role**（列此防漏）| 编排 |
+
+- **两腿 task role 可分立**（Nova 需 nova-act:*、Midscene 需 bedrock:InvokeModel，各给各的最小集），也可合并成一个含并集的 role——**倾向分立**（最小权限、一腿被攻破不波及另一腿的模型权限）；CDK 实现时定，以「每腿只拿它真调的动作」为准。
+- **task execution role** 用 AWS 托管的 `AmazonECSTaskExecutionRolePolicy`（拉 ECR + 写日志）即可，与 task role 分开（execution role 是平台拉镜像用、task role 是容器内应用用，职责不同）。
+- workflow definition：worker 首跑 create-if-not-exists（`workflow_setup.py`）。**倾向 IaC 预建 + task role 收紧到只读**（`Get`，去掉 `Create`）——预建更干净、权限更小；若 IaC 不预建则 task role 需 `Create` 权限。CDK 实现时定。
+
+## 组合根接线（非 IaC，已编码）
+
+`cli/cli/compose.py` 的 `build_engines` 只产 `SubprocessEngine`（两腿，local 执行）。新增 `build_fargate_engines`，`--backend cloud` 用它替代：
+
+- **`build_fargate_engines`（对称 `build_engines` 的 dict）**：按 `job.engine` 造 `FargateEngine`（`new_run_id()` 后把 run_id + cluster + 按引擎选的 task-def + network（读 SSM）+ events 表名 + container-name + job-s3 + region 一起注入构造，对称已有 store 注入；**不传 profile**——决策 C 非对称）。
+- **按引擎选 task-def**：`job.engine` → `{prefix}{engine}-worker`（对称 `EngineResolver` 按 engine 选 cmd）。
+- **Fargate 配置参数**：`--prefix`/`--cluster`/`--subnet`/`--security-group`/`--events-table` 等走 CLI 参数、默认 = prefix 推导 / SSM 读、可覆盖（决策 C，[0016](./0016-execution-architecture-core-lib-run-model.md)）。
+- **`--backend cloud` 切执行引擎**：决策 A 从设计落到 CLI 的动作点——cloud ⇒ FargateEngine 而非 SubprocessEngine。
+- **report ⊥ 执行（关键，别耦合）**：`--backend` 定**执行环境**（cloud⇒Fargate）、`--no-report` 定**落不落库**，两轴正交。故组合根把「Fargate 执行配置解析 + 切 FargateEngine」放在 `do_report` **之外**（只看 `--backend cloud`）——`--backend cloud --no-report` = **Fargate 执行 + 不落库**（不是退回 subprocess）。`--no-report` 的逃生舱只跳过 store 落库（`persistence=None`），绝不改执行环境。（被拒的错误接线：把 FargateEngine 切换塞进 `if do_report` 分支——会让 `--no-report` 意外把执行退回 subprocess，违背决策 A 的「cloud=Fargate 与 report 无关」。）
+
+## 已定的两项（原开放项，已编码）
+
+- **Midscene region 全可配（修硬编码，不接受 east 固定）**：Midscene 的 AgentCore + Bedrock 模型连接此前用硬编码 `REGION="us-east-1"`（`engines/midscene/lib/agentcore-sigv4.mts` + `run-scope.ts` 的 `BedrockAgentCoreClient({region})`）——注入 `AWS_REGION=us-west-2` 时其 events/job/artifact 走 west、但浏览器会话+模型仍走 east（半贯通）。**决策：改成惰性读 `process.env.AWS_REGION`**（`getRegion()`/`getBaseUrl()`，与 I/O 边缘同源），使 region 真正全可配、与 Nova 侧一致（Nova 全程读同一 env、无此问题）。这样 Midscene task role 的 AgentCore/Bedrock 权限**不锁死 east**、跟注入的 region 走。（region=None 时的 fail-loud 语义随之统一，对齐 [0016](./0016-execution-architecture-core-lib-run-model.md) 决策 C。）
+- **events 表开 TTL（worker 写时间戳）**：worker emit 时给每条 event item 多写一个 `expires_at`（epoch **秒**，= 写入时刻 + **7 天**），CDK 在该属性上开 DynamoDB TTL。**7 天的理由**：events 是协调/进度脚手架，权威数据在 RunReport/ResultStore（events 归约完即死重）——但留 7 天窗口供事后调查失败 run（如「worker 到底 emit 没 emit scope_done」），几天后仍可查、又自动清、免手工清理。属性名 `expires_at`（DDB TTL 惯例、epoch 秒）；两腿 worker 对称写（Nova put_item / Midscene PutItemCommand 的 `{N}`）。**FargateEngine 读端不受影响**——它只认 `pk`/`seq`/`body`（[0024](./0024-worker-core-protocol.md)），多一个属性无害、不进 Query 投影约束。TTL 是**最终清理、非精确**（DDB 可能延迟至 48h 才删过期项）——无碍，因为读端从不依赖过期项存在。
+
+## 留待（defer）
+
+- **真容器 grace/中断校准、镜像瘦身、CI 构建推 ECR**：属施工 / [0032](./0032-fargate-execution-environment.md) 真容器 grace/中断校准，不在本 ADR 决策面。
+
+## 重议
+
+- 若多环境需求超出「prefix 切名」（如跨账户、跨 region 多活）→ prefix 单层不够，重议是否引入 CDK context/环境配置文件。
+- 若编排进程也上云（WebUI 后端跑在 AWS）→ 编排进程角色需正式建，届时并入本 stack。

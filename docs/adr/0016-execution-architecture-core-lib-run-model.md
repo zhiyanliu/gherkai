@@ -109,7 +109,7 @@ core/
 - 接口定义在 `ports`；**具体 adapter 由调用方（CLI 的 main / WebUI 的 bootstrap = 组合根）在启动时注入**给核心。核心只认接口。
 - **禁止** ports module 内部用全局单例 + `env`-sniff 自选实现——那正是本项目踩过的 Midscene `GlobalConfigManager` 反模式（import 时缓存 env、运行时改不动、难测）。注入式可测、无隐藏全局。
 
-**rule-of-three 克制**：接口 v1.0 先定（廉价，还逼清边界）、只写 local adapter；v1.1 云端真需要时填云端 adapter——**store 层（RunStore→DDB、Result/ReportStore→S3）已填**（第五刀，[0030](./0030-realtime-persistence-seam.md) 决定六）；执行面 `FargateEngine` adapter 已实装（events-out 走 DDB events 表、job-in 走 S3，见 [0024](./0024-worker-core-protocol.md)/[0032](./0032-fargate-execution-environment.md)），**组合根接线（`build_engines` 接 `FargateEngine` + Fargate CLI 参数 + `--backend cloud` 切执行引擎）仍待填**——填完后 `--backend cloud` 即绑定 Fargate 执行（决策 A）。
+**rule-of-three 克制**：接口 v1.0 先定（廉价，还逼清边界）、只写 local adapter；v1.1 云端真需要时填云端 adapter——**store 层（RunStore→DDB、Result/ReportStore→S3）已填**（第五刀，[0030](./0030-realtime-persistence-seam.md) 决定六）；执行面 `FargateEngine` adapter 已实装（events-out 走 DDB events 表、job-in 走 S3，见 [0024](./0024-worker-core-protocol.md)/[0032](./0032-fargate-execution-environment.md)），**组合根接线（`build_engines` 接 `FargateEngine` + Fargate CLI 参数 + `--backend cloud` 切执行引擎）+ 建资源的 IaC 见 [0033](./0033-iac-aws-backend-and-composition-wiring.md)**——填完后 `--backend cloud` 即绑定 Fargate 执行（决策 A）。
 
 这样无状态化、上云、WebUI 接入都成了"加 adapter + 组合根换注入"，核心与接口不动。
 

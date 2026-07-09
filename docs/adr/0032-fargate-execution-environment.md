@@ -1,6 +1,6 @@
 # Fargate 执行环境：容器盘停即销毁逼出的中断丢失、grace、即时上传（前瞻 draft）
 
-> **Status:** Draft —— `FargateEngine` 执行 adapter 已实装（job-in 走 S3、events-out 走 DDB events 表），**组合根接线 + 真容器 grace/中断校准未做**。**决策 A（[0016](./0016-execution-architecture-core-lib-run-model.md)）下 Fargate = `--backend cloud` 的执行实态、非可选增强**——用户侧云端档就是跑在 Fargate。本 ADR 收「Fargate/ECS 执行环境**特有**」的问题：容器盘停即销毁的 artifact 中断丢失、grace/stopTimeout 预算、act 粒度即时上传。上传机制本身见 [0029](./0029-engine-artifacts-to-s3.md)（由注入驱动、不绑执行环境、已在 subprocess 预演环境实现，[0016](./0016-execution-architecture-core-lib-run-model.md) 决策 B）；远程事件传输见 [0024](./0024-worker-core-protocol.md)「远程传输演进」；为何倾向 Fargate 见 [0017](./0017-cloud-execution-fargate-over-runtime.md)。
+> **Status:** Draft —— `FargateEngine` 执行 adapter 已实装（job-in 走 S3、events-out 走 DDB events 表）；**组合根接线 + IaC 归 [0033](./0033-iac-aws-backend-and-composition-wiring.md)（WP2）**，本 ADR 只余**真容器 grace/中断校准**（WP3-B、须真 Fargate）。**决策 A（[0016](./0016-execution-architecture-core-lib-run-model.md)）下 Fargate = `--backend cloud` 的执行实态、非可选增强**——用户侧云端档就是跑在 Fargate。本 ADR 收「Fargate/ECS 执行环境**特有**」的问题：容器盘停即销毁的 artifact 中断丢失、grace/stopTimeout 预算、act 粒度即时上传。上传机制本身见 [0029](./0029-engine-artifacts-to-s3.md)（由注入驱动、不绑执行环境、已在 subprocess 预演环境实现，[0016](./0016-execution-architecture-core-lib-run-model.md) 决策 B）；远程事件传输见 [0024](./0024-worker-core-protocol.md)「远程传输演进」；为何倾向 Fargate 见 [0017](./0017-cloud-execution-fargate-over-runtime.md)。
 
 ## 定位：只收「执行环境特有」的一条边
 

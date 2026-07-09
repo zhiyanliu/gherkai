@@ -229,7 +229,8 @@ core 的 `schedule`/汇总逻辑应能用一个**假 worker**（in-memory adapte
 - **红线：worker 只直写 events 表、绝不碰 RunState**（[0030](./0030-realtime-persistence-seam.md) 单写者不变量）。RunState 仍由编排进程 `RunPersistence` 单写：core 从 events 表 Query → schedule 归约 → 写 RunStore。events-out 是**新增**「原始事件留底」一层，**不取代** RunState 落库写序链（[0030](./0030-realtime-persistence-seam.md) commit-point）；合并价值 = 「事件传输 + 事件留底」合一（未来 WebUI 事件时间线可直接 Query events 表），非省掉 `RunPersistence`。
 - **独立 events 表、不混入 RunStore 表**：RunStore 表 `PK=run_id / SK=item_type`（META/STATE 两值）是控制面小记录、点读/单元素刷；events 是 `PK=run_id#scope_id` 大量追加 + 范围 Query，两种访问模式。混表会踩 run_id 热分区、破坏 [0030](./0030-realtime-persistence-seam.md) 决定六「STATE 与深树解耦」不变量。独立表复用同一 `_make_ddb_table` 注入范式 + moto 基建，只是多建一张表（[0030](./0030-realtime-persistence-seam.md) 建表责任在 IaC）。
 - **run_id 注入 worker**：worker 拼 PK 需 run_id，但当前 job line 只传 `scope.{id,name}`（无 run_id）——组合根须把 run_id 注入 worker（经 env，同 `JOB_S3_URI`/产物落点 env 的注入路径），worker `EventSink` 读它拼 PK。这是本传输的一个接线点。
-- **环境契约**：容器内 boto3/aws-sdk + events 表写权限（ECS task role）；core 侧读权限；表由 IaC 建、可设 TTL 自动过期旧事件。moto 可 mock（与现 DDB/S3 单测策略一致）。
+- **TTL 自动过期（已定，[0033](./0033-iac-aws-backend-and-composition-wiring.md)）**：worker emit 每条 event item 多写一个 **`expires_at`（epoch 秒 = 写入时刻 + 7 天）**，IaC 在该属性上开 DDB TTL。7 天＝events 是协调/进度脚手架（权威在 RunReport/ResultStore、归约完即死重），留窗口供事后调查失败 run，之后自动清、免手工。两腿 worker 对称写（Nova `put_item` int / Midscene `PutItemCommand {N}`）。**读端不受影响**——`FargateEngine` 只认 `pk`/`seq`/`body`，多一属性无害；TTL 是最终清理（可延迟至 48h 删）、读端从不依赖过期项存在。
+- **环境契约**：容器内 boto3/aws-sdk + events 表写权限（ECS task role）；core 侧读权限；表由 IaC 建、开 TTL（见上条）。moto 可 mock（与现 DDB/S3 单测策略一致）。
 
 **被拒方案护栏**（[CLAUDE.md](../../CLAUDE.md) 文档纪律：移除方案留「被拒+为什么」防重进坑）：
 - **SQS per-run 队列**：`ReceiveMessage` 不能按 group 过滤 receive → 多短命消费者抢共享队列必须自建 dispatcher demux；叠加动态队列建删 + at-least-once 幂等去重 + 泄漏 sweeper，共 4 个活动部件。DDB `Query by PK` 天然定向、Query 非破坏读天然幂等、共享表免建删、TTL 免 sweeper——全消掉。SQS 唯一优势（长轮询即时唤醒 vs DDB 吃一个 poll 周期）不足翻盘（延迟在实时进度阀内）。
