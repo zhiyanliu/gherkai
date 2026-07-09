@@ -11,7 +11,7 @@
 
 ## 两条正交轴（贯穿全局，勿混）
 
-- **Engine adapter**（按执行环境分）：SubprocessEngine（现有）/ FargateEngine（待建）。
+- **Engine adapter**（按执行环境分）：SubprocessEngine（现有）/ FargateEngine（WP1 已建 adapter，组合根接线归 WP2）。
 - **Engine worker**（按 AI 引擎分）：novaact（Python）/ midscene（TS）。
 - **worker 引擎逻辑不按执行环境分**；worker 的 **I/O 边缘**（job 入口 / 事件 sink / 产物落点）才是随执行环境变的、应抽象成可注入接口（ADR 0016 组合根注入 / 0024 远程传输演进）。
 
@@ -21,18 +21,18 @@
 |---|---|---|---|
 | **WP-S** | 中断丢失实测预演 + 抢传验证（Fargate 中断韧性的事实前置） | ✅ 完成 | [journey/0001](./0001-wps-interruption-loss-spike.md)（5 发现、8 格数据、抢传验证、Midscene 补救方向） |
 | **#7** | 修 Nova SIGTERM 中断模型（flag-only + act timeout + grace enforce）——WP0 入口条件、独立现有生产 bug | ✅ 完成（commit `7404bba`） | ADR 0024 终止契约 / 0028 / 0026 / 0032；证据 0001。三层测试 + 真跑验证 hung=false |
-| **WP0** | worker I/O 边缘抽象成可注入接口（JobSource 读 stdin↔S3、EventSink 写 EVENTS_FD↔SQS）；纯重构、零行为变化；对称已有 ArtifactUploader。emit 合理不对称：Midscene async（为 SQS 预留）/ Nova 同步（greenlet+boto3、不撞 0024 asyncio 否决） | 🟡 实现+单测+两腿真跑验证完成，待两轮 review→commit（未 commit） | ADR 0024「I/O 边缘可注入接口」条；范本 ArtifactUploader（0029）；真跑：Midscene(wikipedia)/Nova(example.com) baseline 完整事件流+scope_done+exit 0+三通道分离；依赖 #7✅ |
-| **WP1** | Fargate 传输层：core SQS encode/decode + FargateEngine adapter（RunTask/StopTask/DescribeTasks）+ worker 注入 S3/SQS + schedule 存活判定迁移（事件流沉默→DescribeTasks） | ⬜ 待做 | ADR 0024「远程传输演进」（Draft）；依赖 WP0 接口定型 |
-| **WP2** | 基础设施：Docker 镜像 + ECS task-def + IAM task role + SQS FIFO + cluster + IaC（全仓从零）+ 组合根 build_engines 补 Fargate 分支（当前 --backend cloud 仍返回 SubprocessEngine） | ⬜ 待做 | 依赖 WP1 接口定型 |
+| **WP0** | worker I/O 边缘抽象成可注入接口（JobSource 读 stdin↔S3、EventSink 写 EVENTS_FD↔events-out）；纯重构、零行为变化；对称已有 ArtifactUploader。emit 合理不对称：Midscene async（为 aws-sdk-js 预留）/ Nova 同步（greenlet+boto3、不撞 0024 asyncio 否决） | ✅ 完成（commit `452d6bc`，两轮 review 已过） | ADR 0024「I/O 边缘可注入接口」条；范本 ArtifactUploader（0029）；真跑：Midscene(wikipedia)/Nova(example.com) baseline 完整事件流+scope_done+exit 0+三通道分离；依赖 #7✅ |
+| **WP1** | Fargate 传输层：**events-out 定为 DynamoDB**（worker PutItem / core Query 轮询，非 SQS/MSK——选型经三方案查证收敛、ADR 0024 已改）。切分 4 子步：**S1**✅ events 表 schema + wire（PK=run_id#scope_id/SK=seq，并进 S2）→ **S2**✅ FargateEngine adapter（PutObject job + RunTask/StopTask/DescribeTasks + Query 增量迭代器 + 强一致终读；moto 编排测 + 退出码纯单测）→ **S3**✅ 两腿 worker EventSink DDB 态（PutItem，替 WP0 的 SQS 守卫）+ JobSource S3 态；run_id 经 RunTask overrides 注入 worker（adapter 侧）→ **S4**✅ schedule 零改（存活/退出码在 adapter 迭代器里）、仅 2 处注释校准为 engine 无关。**组合根接线（build_engines 接 FargateEngine + run_id/task 配置构造注入）归 WP2**。3 决策（A cloud=Fargate 执行 / B subprocess+注入云存储 降内部预演 / C Fargate 配置走 CLI 参数）落 ADR 0016 | 🟡 S2/S3/S4 代码完成+测试绿（core/nova/midscene 全绿）；3 决策已落 ADR 0016/校准 0024/0027/0029/0032；待两轮 review→commit | ADR 0024（events-out=DDB + 被拒护栏）+ 0016（3 决策权威声明「cli backend 选择」节）；code：core/core/adapters/fargate_engine.py + test_fargate_engine.py、两腿 lib/event_sink+job_source；依赖 WP0✅ |
+| **WP2** | 基础设施：Docker 镜像 + ECS task-def + IAM task role + **events DynamoDB 表（PK=run_id#scope_id/SK=seq/TTL，独立于 RunStore 表，ADR 0024/0030）** + cluster + IaC（全仓从零）。**组合根接线**（WP1 已把 adapter 备好、接线归此）：① build_engines 接 FargateEngine（注入 ecs/s3/ddb client + run_id + cluster/task-def/network + events 表名 + container-name）；② 加 Fargate CLI 参数（`--cluster`/`--task-def`/`--subnet`/`--security-group`/`--events-table` 等，对称 `--table`，决策 C）；③ `--backend cloud` 切到 FargateEngine（决策 A 落到 CLI，当前 cloud 仍返回 SubprocessEngine） | ⬜ 待做 | 依赖 WP1 接口定型；ADR 0016 决策 A/C「cli backend 选择」节 |
 | **WP3-A** | 中断抢传落生产：两腿 act 边界即时上传（Nova 抢配套 trajectory.json / Midscene 提前 report 抢传）+ Midscene scenario 边界 log 抢传（第四级）+ 两腿上传套超时（退出时间有界护栏）——**不依赖 Fargate**（ADR 0029、subprocess+cloud 就做、Fargate 忠实预演），和 #7 中断主题连续 | ✅ 完成（commit `aaeb2e8` 起 5 个：核心 + harness + 文档校准 + CLAUDE.md 纪律；两轮对抗 review 已过） | ADR 0029（上传时机四级 + 固有残余 + 超时）；真跑验证：Nova trajectory 救回、Midscene report+scenario log 救回（多 scenario 中断落 scenario2、scenario1 log 已进 S3）；证据 0001 |
 | **WP3-B** | Fargate 特有韧性：grace/stopTimeout 真校准 + botocore retry vs grace 实测 + 错误分类升级 + 孤儿产物恢复（Fargate 查 S3）——**必须等真 Fargate** | ⬜ 待做 | ADR 0032（Draft）；依赖 WP1+WP2 真容器 |
 
 ## 已冻结的关键设计（ADR 索引，真做各 WP 前必读对应条）
 
-- **ADR 0024**「远程传输演进」：port 抽象 survive、pipe 传输 die；job-in→S3、events-out→SQS FIFO（MessageGroupId=scope_id 保序）、stop→StopTask、退出码→DescribeTasks。**终止契约**：两腿会话释放契约 + Nova flag-only（#7 已实现）+ act 有界返回 + grace 硬约束（core enforce）+ 两条被拒护栏（raise 模型 / asyncio 化）。
+- **ADR 0024**「远程传输演进」：port 抽象 survive、pipe 传输 die；job-in→S3（RunTask overrides 8192 上限塞不下，传 `JOB_S3_URI` 小指针）、**events-out→DynamoDB events 表**（worker PutItem / core Query PK=run_id#scope_id 轮询增量拉，**非 SQS/MSK**——选型经三方案查证收敛，被拒护栏在该 ADR）、stop→StopTask、退出码→DescribeTasks。**终止契约**：两腿会话释放契约 + Nova flag-only（#7 已实现）+ act 有界返回 + grace 硬约束（core enforce）+ 两条被拒护栏（raise 模型 / asyncio 化）。
 - **ADR 0032**（Draft）：Fargate 执行环境特有——容器盘停即销毁的中断丢失、grace/stopTimeout 预算、act 粒度即时抢传。头号待解项=中断丢失（WP-S 已量化，见 0001）。
-- **ADR 0029**（Accepted）：产物→S3 上传，subprocess+cloud 已实现、是 Fargate 忠实预演。Midscene 抢传补救方向见 0001。
-- **ADR 0016**：core 纯库/窄腰/组合根注入/worker 引擎逻辑不按执行环境分——所有 WP 的架构红线。
+- **ADR 0029**（Accepted）：产物→S3 上传，由注入驱动、已在 subprocess 预演环境实现、是 Fargate 忠实预演（预演定位=决策 B）。Midscene 抢传补救方向见 0001。
+- **ADR 0016**：core 纯库/窄腰/组合根注入/worker 引擎逻辑不按执行环境分——所有 WP 的架构红线。**3 决策权威声明在「cli backend 选择」节**：A `--backend cloud`=存储上云+Fargate 执行（单旋钮、不暴露正交，含被拒护栏）/ B subprocess+注入云存储 降为内部预演（e2e_harness、非用户档）/ C Fargate 配置走 CLI 参数（对称 `--table`）。
 - **ADR 0026**：schedule 纯 reducer、对引擎无知。
 
 ## 已确立的重要事实/取舍（防重新调研）
@@ -44,6 +44,21 @@
 - **两腿抢传不对称**：Nova 每 act 独立 trajectory（distinct key 幂等）；Midscene 单份增长 report（overwrite 同 key、带宽/粒度取舍 + uploader 幂等守卫冲突 + agent 引用上提）——WP3 须单独设计，见 0001。
 
 ## backlog（已评估、暂不做、留触发条件防未来重新推导）
+
+- **~~WP0 的 EventSink `EVENTS_SQS_URL` 守卫待改 DDB~~（✅ WP1-S3 已兑现）**：WP0 曾给两腿 EventSink 留 `EVENTS_SQS_URL` fail-loud 占位守卫。WP1-S3 已把两腿（Nova/Midscene 各 lib + test）换成 DDB 态真实现（`PutItem`、判据 `EVENTS_DDB_TABLE`+`RUN_ID`/`SCOPE_ID`），JobSource 同步换成 S3 态（`JOB_S3_URI`+GetObject）。grep 全净、无 SQS 残留（run-scope.ts 一处 SQS 注释也随手改掉了）。
+
+- **events DynamoDB 表 IaC 归 WP2**：events 表（PK=run_id#scope_id/SK=seq/可选 TTL，独立于 RunStore 控制面表）建表责任在 IaC（对齐 ADR 0030「建表归 IaC」），WP2 交付。FargateEngine 与两腿 worker 均假定表已存在。**触发 = WP2 IaC。**
+
+- **Fargate job-in 的 S3 对象生命周期未定**：`FargateEngine.run_scope` 每 scope `PutObject` 一个 `{prefix}{scope_id}.json` job 指针对象（因 RunTask overrides 8192 上限塞不下含 feature 的 job），**当前无清理**。对称 ADR 0029 的 cloud 收尾 `_prune_empty_dirs`，这些 job 对象应有归宿。倾向 **S3 lifecycle/TTL 自动过期**（免 core 碰清理、对齐 events 表 TTL 心智），而非组合根收尾删。**触发 = WP2 真接线时定。**
+
+- **两腿 EventSink DDB 态的「超时真封顶退出」跨真实边界未真跑核验**（绿≠对）：现单测（Nova MagicMock 塞 `_client`、Midscene 塞 `client`）只验 PutItem 的 Item 形状（pk/seq/body）——mock 内够。**剩两条**依赖 mock 之外的真实网络时序、绿测试不构成证据：① Midscene `AbortSignal.timeout(PUT_TIMEOUT_MS)` 是否真 abort 在途 PutItem；② Nova boto `Config(connect/read/max_attempts=0)` 是否真快速失败封顶。moto 立即返回、永不触发超时，测不了。**触发 = e2e_harness 扩展驱动真 DDB emit + 注入慢/退化网络（或 WP3-B 真容器）**——本项目亲历「退出被慢上传拖住」正是这类。（**原第③条「跨 API 层编组同构」已 fix**：`test_read_events_midscene_lowlevel_marshalling_and_numeric_seq_order` 用 Midscene 低层 `{N:String(seq)}` 线格式写 events 表、验 core Query 数值保序读出——探针证实 moto 对 DDB Number 排序/比较+跨层编组保真，属可 moto 真验、非被 mock 掉的时序。）
+
+- **`--region`/`--profile` 贯通 worker 已实现（ADR 0016 决策 C，region 与 profile 是「正确的非对称」）**：
+  - **region**：组合根 `compose.resolve_region` 落实成**具体字符串**（`--region`>`AWS_REGION`>`AWS_DEFAULT_REGION`>**profile config**）→ subprocess env + `FargateEngine` overrides + store 三处同源。**profile config 回落是关键**——Nova worker 的 AgentCore `validate_region` 不吃 profile config、要显式 region 字符串，不落实则 profile-only 用户 worker `InvalidRegionError` 崩（每 run 必经）。Nova `REGION` 去硬编码 east → None 时 fail-loud。
+  - **profile**：`--profile`>`AWS_PROFILE`，**仅 subprocess 注入**（继承本机 `~/.aws`、profile 名合法）；**`FargateEngine` 绝不注入**——容器无 `~/.aws`/用 task role，注入 profile 名会 `ProfileNotFound` 盖过 task role（真跑证实，非「无害」）。这是二次 review 抓出的两个 major（profile 注 Fargate 致命 + AgentCore region=None 崩）修正后的定论。
+  - 单测已锁：compose（override_env / none_preserve / 两腿补建对称 / midscene 不补建边界 / `resolve_region` 4 级链含 profile-config 回落）+ fargate（注 region 从不注 profile / None 不注）。
+  - **待 e2e 真验**（绿≠对，单测锁不住的跨真实边界）：① profile-only 场景 worker 真 respect profile-region（依赖 boto Session 真解析——`resolve_region` 单测用 fake Session 锁了逻辑，真 profile config 读取待真跑）；② Fargate 容器内 task role 凭证真生效（不注 profile 后）。**触发 = e2e_harness 扩展 / WP2 真容器**。
+  - **待补覆盖（minor）**：`__main__` 的 `resolved_profile = --profile or AWS_PROFILE` 优先级链无经 `main()` 的 e2e 断言（region 链已由 `resolve_region` 单测覆盖；profile 那行是 trivial `or`、且 `resolved_profile` 下游喂 store/worker 都测了）——**触发 = WP2 组合根接线时顺带补**。
 
 - **Nova act 边界抢传类型无关化**：现 `_presend_act_siblings` 靠**硬编码文件名反推**（`.html`→`_trajectory.json`），对同 act 目录的第三个兄弟 `_traces.json`、及未来 SDK 新增的任何 per-act 文件**天生瞎**。治本 = 从 `trajectory_file_path` 取 act 目录、walk 全兄弟抢传（对齐 scope 末 flush「不按类型挑、抗 SDK 升级」）。**暂不做**：`_traces.json` 在 AgentCore backend 恒不产（`step.trace=None`）、眼下救 0 字节（YAGNI）。**触发条件**：换非-AgentCore backend、或 SDK 升级填了 `step.trace` / 新增 per-act 文件时再做。详见 ADR 0029「固有残余」条 `act_*_traces.json` 细目。
 

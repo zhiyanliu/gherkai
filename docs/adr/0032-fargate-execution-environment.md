@@ -1,10 +1,10 @@
 # Fargate 执行环境：容器盘停即销毁逼出的中断丢失、grace、即时上传（前瞻 draft）
 
-> **Status:** Draft —— Fargate 执行 adapter 尚未编码。本 ADR 收「Fargate/ECS 执行环境**特有**」的问题：容器盘停即销毁的 artifact 中断丢失、grace/stopTimeout 预算、act 粒度即时上传。上传机制本身见 [0029](./0029-engine-artifacts-to-s3.md)（不绑执行环境、subprocess+cloud 已实现）；远程事件传输见 [0024](./0024-worker-core-protocol.md)「远程传输演进」；为何倾向 Fargate 见 [0017](./0017-cloud-execution-fargate-over-runtime.md)。
+> **Status:** Draft —— `FargateEngine` 执行 adapter 已实装（job-in 走 S3、events-out 走 DDB events 表），**组合根接线 + 真容器 grace/中断校准未做**。**决策 A（[0016](./0016-execution-architecture-core-lib-run-model.md)）下 Fargate = `--backend cloud` 的执行实态、非可选增强**——用户侧云端档就是跑在 Fargate。本 ADR 收「Fargate/ECS 执行环境**特有**」的问题：容器盘停即销毁的 artifact 中断丢失、grace/stopTimeout 预算、act 粒度即时上传。上传机制本身见 [0029](./0029-engine-artifacts-to-s3.md)（由注入驱动、不绑执行环境、已在 subprocess 预演环境实现，[0016](./0016-execution-architecture-core-lib-run-model.md) 决策 B）；远程事件传输见 [0024](./0024-worker-core-protocol.md)「远程传输演进」；为何倾向 Fargate 见 [0017](./0017-cloud-execution-fargate-over-runtime.md)。
 
 ## 定位：只收「执行环境特有」的一条边
 
-云端化的三条正交边（[0029](./0029-engine-artifacts-to-s3.md) 已划）里，本 ADR 只管 **③ Fargate 执行环境特有**——即"worker 从本地子进程搬进 ECS 容器"这一步**新引入**的问题。**不重述**上传机制（[0029](./0029-engine-artifacts-to-s3.md)：worker 手动上传、key 镜像 run 树、删本地——subprocess+cloud 已做，Fargate 直接复用）与远程传输（[0024](./0024-worker-core-protocol.md)：job-in 走 S3、events-out 走 SQS、stop→StopTask、退出码→DescribeTasks）。
+云端化的三条正交边（[0029](./0029-engine-artifacts-to-s3.md) 已划；此处「正交」=关注点分解，非用户 CLI 旋钮——用户只有 `--backend` 一个旋钮，[0016](./0016-execution-architecture-core-lib-run-model.md) 决策 A）里，本 ADR 只管 **③ Fargate 执行环境特有**——即"worker 从本地子进程搬进 ECS 容器"这一步**新引入**的问题。**不重述**上传机制（[0029](./0029-engine-artifacts-to-s3.md)：worker 手动上传、key 镜像 run 树、删本地——已在 subprocess 预演环境做好，Fargate 直接复用）与远程传输（[0024](./0024-worker-core-protocol.md)：job-in 走 S3、events-out 走 DDB events 表（PutItem/Query）、stop→StopTask、退出码→DescribeTasks）。
 
 **核心差异**：subprocess 模式 worker 死了产物还在本地盘（[0028](./0028-transient-network-ssl-resilience.md)「留口子」『卡死现场 trajectory 不自动归集』条：超时被杀 scope 的 trajectory 至少"留在磁盘"、靠 `session_id` 可手动找）；**Fargate 容器盘停即销毁**——这把"干净结束才上传成功"的脆弱性从"可手动补救"升级成"直接丢"。
 

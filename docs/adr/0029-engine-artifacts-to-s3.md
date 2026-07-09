@@ -1,25 +1,25 @@
-# engine artifact→S3：worker 上传、由组合根注入的 S3 落点驱动（落点跟 `--backend cloud`，非绑执行环境）
+# engine artifact→S3：worker 上传、由组合根注入的 S3 落点驱动（注入驱动、worker 对执行环境无知）
 
-> **Status:** Accepted —— 决策已定：上传由组合根注入的 S3 落点驱动、跟 `--backend cloud` 走（非绑 Fargate）；第一期 `subprocess+cloud` 上传按「第一期实现定论」节**已实现**。**Fargate 执行环境特有的**中断丢失/grace/即时上传见 [0032](./0032-fargate-execution-environment.md)；远程事件传输见 [0024](./0024-worker-core-protocol.md)「远程传输演进」。
+> **Status:** Accepted —— 决策已定：上传由组合根注入的 S3 落点配置驱动、worker 对"我在哪跑"无知（**机制上由注入驱动、非 env-sniff**，[0016](./0016-execution-architecture-core-lib-run-model.md) 决策 C）。面向用户 `--backend cloud` = Fargate 执行（[0016](./0016-execution-architecture-core-lib-run-model.md) 决策 A），强制注入 S3 落点；`subprocess + 注入 S3 落点` 降为 e2e_harness/开发**内部预演**（[0016](./0016-execution-architecture-core-lib-run-model.md) 决策 B），上传能力按「第一期实现定论」节**已在该预演环境实现并验证**。**Fargate 执行环境特有的**中断丢失/grace/即时上传见 [0032](./0032-fargate-execution-environment.md)；远程事件传输见 [0024](./0024-worker-core-protocol.md)「远程传输演进」。
 
 ## 本 ADR 只管一件事：engine 产物怎么到 S3（执行环境/传输层剥离）
 
-云端化牵动三条**正交**的边，本 ADR **只管 ①**：
+云端化牵动三条**正交**的边（此处「正交」=**工程关注点的分解**，哪条边归哪个 ADR，非「面向用户的 CLI 旋钮正交」——用户旋钮只有 `--backend` 一个，见 [0016](./0016-execution-architecture-core-lib-run-model.md) 决策 A），本 ADR **只管 ①**：
 - ① **产物落点**（trajectory/report 怎么持久化到 S3）——本 ADR。
 - ② **传输层**（core 怎么把 job 喂给远程 worker、怎么收事件流）——见 [0024](./0024-worker-core-protocol.md)「远程传输演进」。
 - ③ **Fargate 执行环境特有**（容器盘停即销毁的中断丢失、grace/stopTimeout、即时上传粒度）——见 [0032](./0032-fargate-execution-environment.md)。
 
-**产物落点与执行环境正交**：上传能力**不绑 Fargate**——`subprocess worker + --backend cloud` 也上传 S3（是 Fargate 的忠实预演）。故本 ADR 讲的"上传"现在（subprocess+cloud）就做，不必等 Fargate。
+**产物落点由注入驱动、机制上不依赖执行环境**：上传能力由「组合根有没有注入 S3 落点」触发、worker 对"我在哪跑"无知——故面向用户 `--backend cloud`=Fargate（[0016](./0016-execution-architecture-core-lib-run-model.md) 决策 A）会走这条上传链，而 `subprocess + 注入 S3 落点`（**e2e_harness/开发内部预演**，[0016](./0016-execution-architecture-core-lib-run-model.md) 决策 B）也能真跑验证**同一条**上传链、作 Fargate 忠实预演。故本 ADR 讲的"上传"现在就能在预演环境验证，不必等 Fargate——忠实预演论证不变。
 
 ## 决策核心：上传由注入的 S3 落点驱动，不由"worker 在哪跑"决定
 
-产物落点该由**组合根注入的 S3 落点配置**决定（有 → 传 S3 报 `s3://`，无 → 报 `file://`），而**不是**由执行环境（subprocess/fargate）决定（[0016](./0016-execution-architecture-core-lib-run-model.md)「注入、非 env-sniff」）。落点配置**跟 `--backend cloud` 走**。于是：
+产物落点该由**组合根注入的 S3 落点配置**决定（有 → 传 S3 报 `s3://`，无 → 报 `file://`），而**不是**由执行环境（subprocess/fargate）决定（[0016](./0016-execution-architecture-core-lib-run-model.md)「注入、非 env-sniff」= 决策 C）。落点由**注入驱动**。落到用户档与内部预演三态：
 
-- **`subprocess worker + --backend cloud`**：worker 也上传 S3、报 `s3://`——它是 `fargate + cloud` 的**忠实预演**（唯一差别是 worker 进程在本地还是容器，而那对报告链接正确性无影响）。**现在就能端到端验证** worker 报的 ref ↔ `S3ReportStore` 归集 ↔ index.html 链接可点这整条链，不必等 Fargate。
-- **`subprocess worker + --backend local`**：worker 与 core 同机、共享盘，core 直接读得到 → 报 `file://`、不传（不注入 S3 落点）。
-- **`fargate worker`**：容器盘停即销毁、core 读不到 → **组合根必须注入 S3 落点**（否则产物必丢，故 fargate 下注入不是可选）。
+- **`--backend cloud`（= Fargate worker，[0016](./0016-execution-architecture-core-lib-run-model.md) 决策 A）**：容器盘停即销毁、core 读不到 → **组合根强制注入 S3 落点**，worker 上传 S3、报 `s3://`（否则产物必丢，故 cloud 下注入不是可选）。这是用户侧云端档的实态。
+- **`--backend local`（= subprocess worker）**：worker 与 core 同机、共享盘，core 直接读得到 → 报 `file://`、不传（不注入 S3 落点）。
+- **`subprocess worker + 注入 S3 落点`（内部预演路径 / e2e_harness，[0016](./0016-execution-architecture-core-lib-run-model.md) 决策 B，非用户档；**旧称 `subprocess+cloud`**——下文实测/论证记录沿用该简称，均指此预演环境）**：worker 也上传 S3、报 `s3://`——它是 Fargate 的**忠实预演**（唯一差别是 worker 进程在本地还是容器，而那对报告链接正确性无影响）。**现在就能端到端验证** worker 报的 ref ↔ `S3ReportStore` 归集 ↔ index.html 链接可点这整条链，不必等 Fargate。
 
-即：**触发上传的判据始终只有一个**——组合根有没有注入 S3 落点。worker 对"我在哪跑"无知。变的只是**组合根按什么注入**：cloud backend → 注入（subprocess/fargate 都传）；local backend + subprocess → 不注入（同机可读）；fargate → 强制注入（无论 backend，盘会销毁）。这正是 [0016](./0016-execution-architecture-core-lib-run-model.md)「组合根注入」与「worker 引擎逻辑不按执行环境分」的兑现。
+即：**触发上传的判据始终只有一个**——组合根有没有注入 S3 落点。worker 对"我在哪跑"无知。变的只是**组合根按什么注入**：用户侧 `--backend cloud`(Fargate) 强制注入（盘会销毁）、`--backend local`(subprocess) 不注入（同机可读）；`subprocess + 注入落点` 作内部预演也走注入路径。这正是 [0016](./0016-execution-architecture-core-lib-run-model.md)「组合根注入」与「worker 引擎逻辑不按执行环境分」的兑现。
 
 ## 决定：artifact→S3 是 **worker** 的职责，由注入的 S3 落点配置驱动；core/ReportStore 一行不改
 
@@ -28,7 +28,7 @@
 | 角色                                             | 职责                                                                                                                                                                                                                                                            |
 |--------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | **worker**                                       | 写产物到本地路径 →（**拿到注入的 S3 落点配置时**）上传 S3、报 `s3://<bucket>/<prefix>/...` 作 `report_refs.ref`（经 [0024](./0024-worker-core-protocol.md)）；未注入落点则报 `file://`。上传成功后**删本地**（见下「删本地」）。worker 对"我在哪跑"无知——只认落点配置有没有 |
-| **组合根（compose.py / cli `__main__`）**            | ① 决定注入不注入 S3 落点（bucket/prefix/run_id）——**跟 `--backend cloud` 走**：cloud→注入（subprocess/fargate worker 都上传）、local→不注入（同机可读）。对称现在经 `NOVA_LOGS_DIR`/`MIDSCENE_RUN_DIR` 注入本地目录。② **cloud 收尾清 run 根空壳**：finalize 后 `_prune_empty_dirs` 只删空目录（worker 已删产物子目录、run 根剩空壳），不碰 `--report-dir` 根（见下「删本地」cli 半）——本地落点是 cli 领地，core 对 FS 无知（[0016](./0016-execution-architecture-core-lib-run-model.md)） |
+| **组合根（compose.py / cli `__main__`）**            | ① 决定注入不注入 S3 落点（bucket/prefix/run_id）——用户侧 `--backend cloud`(Fargate)→强制注入、`--backend local`(subprocess)→不注入（同机可读）；`subprocess + 注入落点` 作内部预演（[0016](./0016-execution-architecture-core-lib-run-model.md) 决策 B）也注入。对称现在经 `NOVA_LOGS_DIR`/`MIDSCENE_RUN_DIR` 注入本地目录。② **cloud 收尾清 run 根空壳**：finalize 后 `_prune_empty_dirs` 只删空目录（worker 已删产物子目录、run 根剩空壳），不碰 `--report-dir` 根（见下「删本地」cli 半）——本地落点是 cli 领地，core 对 FS 无知（[0016](./0016-execution-architecture-core-lib-run-model.md)） |
 | **core / ReportStore / wire / schedule / model** | **一行不改**。`ReportRef.ref` 与 `ReportStore.write` 已是 `ResourceUri`（带 scheme 的统一指针，[0027](./0027-runreport-aggregation-index.md) 封版补丁所立——当时即为 S3 收口）；`s3://` ref 天然穿透                                                                  |
 
 （注：Fargate Engine adapter「怎么起 worker/怎么停/事件怎么回」属传输/执行环境，见 [0024](./0024-worker-core-protocol.md)/[0032](./0032-fargate-execution-environment.md)——它注入 S3 落点的动作与 subprocess adapter 对称、无特殊性，不在本 ADR。）
@@ -66,14 +66,14 @@ SDK 调查证实两引擎产物形态/上传能力不对称，"上传那一小�
 - **Nova 写盘时机**：per-act 文件在 `_act()` 的 `finally`→`RunInfoCompiler.compile()` 即写（非批量，非原子——`.html`/`.json` 分多次 `open` 顺序写，故中断可留"孤零 `.html`"）；`session_summary.json` 仅 `_stop()` 写一次。
 - **Midscene 落点写死本地**：`@midscene/core` `report-generator.js` `getMidsceneRunSubDir('report')`=`cwd/MIDSCENE_RUN_DIR/report/`；无 S3/sink；`agent.reportFile` 构造后即有绝对路径（不必等 destroy）。report 边跑边 `appendFile`（每 task flush），中断时盘上已是"含已完成 task 的部分有效 html"。
 
-## 分期：上传第一期（subprocess+cloud，现在做）/ Fargate 增强（未来）
+## 分期：上传第一期（subprocess 预演环境落地，现在做）/ Fargate 增强（未来）
 
 上传能力从执行环境解绑后，实现分两期：
 
-- **第一期（本 ADR，subprocess+cloud，不依赖 Fargate）**：`subprocess worker + --backend cloud` 下上传 S3、报 `s3://`、删本地。这一期就能**端到端验证云端报告链接闭环**（worker 报的 `s3://` ref ↔ `S3ReportStore` 归集 ↔ index.html 链接可点），把「S3 key 命名」「上传错误分类」等未决点**提前坐实**（见下「第一期实现定论」）。它**不涉及**中断丢失升级（subprocess 本地盘仍在，只是"删本地"守两条护栏）、也不涉及传输层改造（走现有管道）。
+- **第一期（本 ADR，在 subprocess 预演环境落地、不依赖 Fargate）**：`subprocess worker + 注入 S3 落点`（e2e_harness/开发内部预演，[0016](./0016-execution-architecture-core-lib-run-model.md) 决策 B，非用户档）下上传 S3、报 `s3://`、删本地。这一期就能**端到端验证云端报告链接闭环**（worker 报的 `s3://` ref ↔ `S3ReportStore` 归集 ↔ index.html 链接可点），把「S3 key 命名」「上传错误分类」等未决点**提前坐实**（见下「第一期实现定论」）。它**不涉及**中断丢失升级（subprocess 本地盘仍在，只是"删本地"守两条护栏）、也不涉及传输层改造（走现有管道）。
 - **Fargate 增强（[0032](./0032-fargate-execution-environment.md)，未来）**：远程执行下容器盘停即销毁逼出的中断丢失、grace/stopTimeout 预算、act 粒度即时上传——这些是**执行环境**特有的，subprocess 预演不到，属 [0032](./0032-fargate-execution-environment.md)；远程事件传输见 [0024](./0024-worker-core-protocol.md)。
 
-## 第一期实现定论（subprocess+cloud，已敲定）
+## 第一期实现定论（subprocess 预演环境敲定，已实现）
 
 第一期真做时把下面几点从"待定"钉死（原"留口子"里对应项标状态）：
 

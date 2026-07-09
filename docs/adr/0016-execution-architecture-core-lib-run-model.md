@@ -87,9 +87,9 @@
 > 即云端 adapter 是「Run→DDB、Report→S3、Result 两选一」，而非九宫格。
 
 > **worker 产物持久化 ⊥ store（两条正交轴，别混）**：
-> - **worker 产物落点**：由**组合根注入的 S3 落点配置**驱动（有→worker 上传 S3 报 `s3://`、无→报 `file://`），落点**跟 `--backend cloud` 走、不跟"worker 在哪跑"走**（[0029](./0029-engine-artifacts-to-s3.md)）——subprocess+cloud 也上传（fargate 的预演）、subprocess+local 报 `file://`。**产物怎么持久化是 per-worker by-design 的事，不归 store**。
+> - **worker 产物落点**：由**组合根注入的 S3 落点配置**驱动（有→worker 上传 S3 报 `s3://`、无→报 `file://`），落点由**注入驱动、不跟"worker 在哪跑"走**（[0029](./0029-engine-artifacts-to-s3.md)）——用户侧 `--backend cloud`=Fargate 强制注入（上传）、`--backend local`=subprocess 不注入（报 `file://`）；`subprocess + 注入 S3 落点` 也上传（**内部预演路径 / e2e_harness，Fargate 忠实预演**，非用户档，见下决策 B）。**产物怎么持久化是 per-worker by-design 的事，不归 store**。
 > - **store adapter**（Local/DDB/S3）——只持久化 **core 自己的序列化数据**（RunMeta/RunState/JobResult/RunReport），并**不透明搬运** worker 报的 `ref`（`ResourceUri`，[0027](./0027-runreport-aggregation-index.md)）。store **不上传 worker 产物**。
-> - 二者是**矩阵不是绑定**：如 Local store + Fargate worker 合法（core 数据落本地、worker 产物在 S3）。报告的自包含/可移植由 `index.html` 的 `href` 相对化达成（不拷贝产物；产物拷贝式 materialize 已否决，见 [0027](./0027-runreport-aggregation-index.md)「被拒方案」）——与 worker 把产物放哪正交。
+> - 二者是**矩阵不是绑定**：如 Local store + Fargate worker 合法（core 数据落本地、worker 产物在 S3）。**注意这是组合根内部/e2e 可拼的矩阵、非用户 CLI 旋钮**——面向用户 `--backend` 一个开关同时定 store 与执行（决策 A：cloud⇒Fargate 执行+云存储），不把这层正交暴露成用户旋钮。报告的自包含/可移植由 `index.html` 的 `href` 相对化达成（不拷贝产物；产物拷贝式 materialize 已否决，见 [0027](./0027-runreport-aggregation-index.md)「被拒方案」）——与 worker 把产物放哪正交。
 
 **adapters 按 port 分子目录的目标布局**（多后端时不按后端混放）——下为**目标态**，当前实装更扁平（见图后说明）：
 
@@ -109,15 +109,45 @@ core/
 - 接口定义在 `ports`；**具体 adapter 由调用方（CLI 的 main / WebUI 的 bootstrap = 组合根）在启动时注入**给核心。核心只认接口。
 - **禁止** ports module 内部用全局单例 + `env`-sniff 自选实现——那正是本项目踩过的 Midscene `GlobalConfigManager` 反模式（import 时缓存 env、运行时改不动、难测）。注入式可测、无隐藏全局。
 
-**rule-of-three 克制**：接口 v1.0 先定（廉价，还逼清边界）、只写 local adapter；v1.1 云端真需要时填云端 adapter——**store 层（RunStore→DDB、Result/ReportStore→S3）已填**（第五刀，[0030](./0030-realtime-persistence-seam.md) 决定六），执行面 Fargate adapter 仍待填。
+**rule-of-three 克制**：接口 v1.0 先定（廉价，还逼清边界）、只写 local adapter；v1.1 云端真需要时填云端 adapter——**store 层（RunStore→DDB、Result/ReportStore→S3）已填**（第五刀，[0030](./0030-realtime-persistence-seam.md) 决定六）；执行面 `FargateEngine` adapter 已实装（events-out 走 DDB events 表、job-in 走 S3，见 [0024](./0024-worker-core-protocol.md)/[0032](./0032-fargate-execution-environment.md)），**组合根接线（`build_engines` 接 `FargateEngine` + Fargate CLI 参数 + `--backend cloud` 切执行引擎）仍待填**——填完后 `--backend cloud` 即绑定 Fargate 执行（决策 A）。
 
 这样无状态化、上云、WebUI 接入都成了"加 adapter + 组合根换注入"，核心与接口不动。
 
-### cli `--backend {local,cloud}`：组合根按开关注入两套 store（兑现「换 adapter 核心不动」）
+### cli `--backend {local,cloud}`：组合根按开关注入 store + 执行引擎（兑现「换 adapter 核心不动」）
 
 云端 store adapter（DDB/S3，[0030](./0030-realtime-persistence-seam.md) 决定六）落地后，cli 加 `--backend {local,cloud}`（默认 `local`，仅 `run` 子命令——`plan` 纯本地不落库）在组合根按开关选注入哪套 adapter。`RunPersistence`/`schedule` 只认 Store **port**，local↔cloud 切换**零改** core——这正是本 ADR「选实现=组合根注入」的第一次真实兑现。
 
-**单一开关换齐三层、第一版不开混搭**：cloud 一次把 RunStore→DDB、ResultStore/ReportStore→S3（+ 挂 offloader）全换。理由：三层后端不对等（上文已证不存在 `S3RunStore`/`DDBReportStore`），无有意义的混搭矩阵；「Local store + Fargate worker」是 **store⊥worker 正交轴**（上文「worker 产物 ⊥ store」）、非 store 层内部混搭，不需要 `--run-backend`/`--result-backend` 拆开（那是提前盖机器 + 组合爆炸测试负担）。
+**单一开关换齐存储三层 + 执行引擎、第一版不开混搭**：`--backend cloud` 一次把 RunStore→DDB、ResultStore/ReportStore→S3（+ 挂 offloader）三层存储全换，**并把执行引擎从 `SubprocessEngine` 换成 `FargateEngine`**（见下「决策 A：`--backend cloud` = 存储上云 + Fargate 执行（单旋钮）」）。理由：三层存储后端不对等（上文已证不存在 `S3RunStore`/`DDBReportStore`），无有意义的混搭矩阵；「Local store + Fargate worker」是 **store⊥worker 正交轴**（上文「worker 产物 ⊥ store」）、是**组合根内部/e2e 可拼的矩阵、非用户 CLI 旋钮**，不需要 `--run-backend`/`--result-backend` 拆开（那是提前盖机器 + 组合爆炸测试负担）。
+
+#### 决策 A：`--backend cloud` = 存储上云 + Fargate 执行（单旋钮，不暴露正交）
+
+**面向用户，`--backend cloud` 是一个旋钮，同时定存储（DDB/S3）与执行（Fargate）**——不把「执行环境（subprocess/fargate）」与「存储 backend（local/cloud）」拆成两个正交旋钮暴露给用户。用户档只有两档：
+
+- **`--backend local`** = subprocess 执行 + 本地盘存储（`Local*Store`）；
+- **`--backend cloud`** = Fargate 执行（`FargateEngine`）+ 云存储（DDB/S3）。
+
+**为何不暴露正交**：技术上执行环境与存储确实正交（组合根内部/e2e 能任意拼，见上 store⊥worker 与下决策 B），但把四象限（subprocess/fargate × local/cloud）全摆给用户会**参数爆炸、增加理解负担**，且用户实际只需要「本地跑 / 云上跑」两个心智档。故 CLI 只暴露 `--backend` 一个旋钮，`cloud ⇒ Fargate 执行 + 云存储`绑定。
+
+> **被拒方案护栏（防未来重复进坑）**：曾考虑让**执行环境 ⊥ 存储 backend 完全正交**、用户可任意组合（如 `subprocess + cloud`、`fargate + local` 都作为面向用户的 CLI 档）。**否决**——参数爆炸 + 用户困惑，收益（灵活性）用户实际不需要。**内部矩阵仍正交**（组合根/e2e 可拼），只是 CLI 不把这层正交暴露成用户旋钮。若未来有人再提「为什么不让用户自由组合执行×存储」——答案在此：不是技术做不到，是用户体验刻意收窄。
+
+#### 决策 B：`subprocess + 注入云存储` 降为内部预演/测试手段（非用户档）
+
+`subprocess worker + 注入 S3 落点/DDB events`（旧称「subprocess+cloud」）**不再是面向用户的 CLI 档**（决策 A 下 `--backend cloud` = Fargate），而是**内部预演/测试手段**——即 `tools/e2e_harness.py` 与开发验证用的路径：本地 subprocess worker 注入云存储落点，真跑验证上传链/events 链/S3 key 等，为 Fargate 忠实预演，不必等真容器。
+
+**关键：这只是重定位「谁来用、是不是用户档」，不删预演的价值论证**——「上传/抢传能力提前在 subprocess 环境建好并验证、为 Fargate 铺路」这套论证（见 [0029](./0029-engine-artifacts-to-s3.md)/[0032](./0032-fargate-execution-environment.md)）完全成立、一字不动，只是承载它的 `subprocess + 注入云存储` 从「CLI 用户可选一档」标注为「e2e_harness/开发预演手段」。
+
+#### 决策 C：Fargate 执行配置走 CLI 参数注入（对称 `--ddb-table`/`--s3-bucket`）
+
+Fargate 执行环境配置（cluster / task-def / subnet / security-group / events 表名 / container-name 等）**走 CLI 参数注入 `FargateEngine` 构造**，与 `--ddb-table`/`--s3-bucket`/`--region`/`--profile` 同一「组合根注入、非 adapter sniff env」模式（见下「cloud 配置来源」补充 + 注入红线）。**不走 adapter 内部读 env**——那是本 ADR「禁止 ports module 内部 env-sniff」红线点名的反模式。（决策 C 的「注入、非 env-sniff」内核本就是本 ADR 注入红线 + [0024](./0024-worker-core-protocol.md)「run_id 注入 worker」的既有决策，`FargateEngine` 构造签名已兑现；此处只补齐「Fargate 那批参数也走 `--xxx` CLI 面、对称 `--table`」这个面向用户的接口决策。）
+
+**`--region`/`--profile` 必须真正贯通到 worker（不止 store 侧）——但 region 与 profile 是「正确的非对称」，不是机械对称**：worker 侧建 boto3/aws-sdk client（EventSink DDB / JobSource S3 / ArtifactUploader / Nova `Workflow`+`AgentCoreBrowserSessionProvider`）都靠 `AWS_REGION`/boto 默认凭证链（读 `AWS_PROFILE`）解析 region/凭证。**旧接线断裂**：`--region`/`--profile` 此前只喂给 `build_cloud_stores`（core 侧 store 显式 `Session(profile_name=…, region_name=…)`），而 subprocess worker 靠 `env={**os.environ}` **裸继承**父进程 env、Fargate worker 更无继承——于是 `--region us-west-2` 但 shell `AWS_REGION=us-east-1` 时 **store 与 worker 分叉**（core 落 west、worker 走 east），`--profile` 同理。
+
+**决策（region 与 profile 分开处理，因两者的 worker 环境本质不同）**：
+
+- **region — 组合根落实成具体字符串、两路（subprocess + FargateEngine）都注入**：解析链 `--region` 显式 > `AWS_REGION` > `AWS_DEFAULT_REGION` > **`boto3.Session(profile_name=<解析 profile>).region_name`（profile config 兜底）**。**最后这一环是关键**：Nova worker 的 `AgentCoreBrowserSessionProvider`/`BrowserClient.__init__` 调 `validate_region(region)`，**要求显式合法 region 字符串、根本不查 boto 默认链/profile config**——若组合根只解析到 env（不回落 profile config）、profile-only 用户下 worker region=None 会直接 `InvalidRegionError` 崩（每个 run 必经 AgentCore 建连）。故组合根必须把「profile config 里的 region」在**注入前**解析成具体字符串（用 boto3 Session），使 store 与 worker 真正同区、AgentCore 拿到合法 region。解析出的 region 非 None 时写进 subprocess 的 env 与 FargateEngine 的 overrides；仍可为 **None＝真无 region（无 --region/env/profile-region）→ 不写入 → worker fail-loud（`NoRegionError`/`InvalidRegionError`），不硬编码 east**（对齐 store 的宽容边界）。
+- **profile — 仅 subprocess 注入，Fargate 绝不注入**：解析 `--profile` 显式 > `AWS_PROFILE`。**subprocess worker 继承本机 `~/.aws`、profile 名合法** → 注入 `AWS_PROFILE` 让 `--profile` 真覆盖。**但 Fargate 容器没有 `~/.aws`、用 task role 凭证链**——注入一个容器内不存在的 profile 名会让 boto3 在 **client 创建期**直接抛 `ProfileNotFound`（真跑证实，非「无害忽略」），且 `ProfileNotFound` **盖过 task role 凭证链**（profile 优先级高于 `AWS_CONTAINER_CREDENTIALS_RELATIVE_URI`）→ worker 起不来。故 **FargateEngine 不接收、不注入 profile**——这不是遗漏，是 subprocess 与容器凭证环境本质不同的**正确非对称**：region 两路都要（容器也需显式 region），profile 只 subprocess 要（容器用 task role、profile 是本机概念）。
+
+- **worker 侧「Nova region 去硬编码」（配合上面 region 落实）**：Nova worker 曾用 `REGION = os.environ.get("AWS_REGION", "us-east-1")` 的**硬编码 `us-east-1` 兜底**——会在 profile-only 时抢在 profile config 前跑错区（与 store 不一致）。改为 `os.environ.get("AWS_REGION")`（可为 None）：组合根已把 profile-region 落实进 `AWS_REGION` 注入，故正常路径 worker 拿到具体 region；真无 region 时 None→fail-loud（`NoRegionError`，或 AgentCore 腿的 `InvalidRegionError`——**AgentCore `validate_region` 不吃 profile config、要求显式 region 字符串**，这正是组合根须在注入前落实 region 的原因）。**代价**：裸跑（无 env 无 profile region）不再兜 east、fail-loud——对齐 store，别静默跑错区。
 
 **装配两个后端都下沉 compose（对称、可复用）**：`build_local_stores` + `build_cloud_stores` 都放 `compose.py`——组合根装配是任何前端（cli / 未来 WebUI）都要的逻辑，收在 compose 让两个后端都能被复用（cli 只是第一个调用者，WebUI 直接复用同两个函数、不经 cli）。这兑现「compose = 可复用组合根」的定位。
 - **`build_local_stores(*, report_dir) -> (run_store, result_store, report_store, make_artifacts)`**：new 三个 `Local*Store(root)`，返回三 store + `make_artifacts` 工厂函数（见下第四返回值说明）。
@@ -128,6 +158,7 @@ core/
 
 **cloud 配置来源 + 落点语义**：
 - 表/桶经参数注入（`--ddb-table` 兜底 `AWS_DDB_TABLE`、`--s3-bucket` 兜底 `AWS_S3_BUCKET`）；adapter 假定表/桶已存在（建表建桶归 IaC）。（`AWS_DDB_TABLE`/`AWS_S3_BUCKET` 与集成测试 `tests/README.md` 用的同名——语义一致「哪张表/哪个桶」、不同进程不冲突。）
+- **Fargate 执行配置也走 CLI 参数注入（决策 C，与表/桶同模式）**：`--backend cloud` 换 `FargateEngine` 后，其执行环境配置（ECS cluster / task-def / subnet(s) / security-group(s) / assign-public-ip / events 表名 / container-name 等）同样经 CLI 参数注入 `FargateEngine` 构造，**与 `--ddb-table`/`--s3-bucket` 是同一注入模式**（组合根注入、adapter 不 sniff env）。这批参数具体形状（哪些必填、默认值、兜底 env）随 Fargate adapter 接线落地时定、以 code 为准，不在此焊死以免漂移；**接线点在 `compose.build_engines`**——组合根在 `new_run_id()` 后把 run_id + 这批 task 配置一起传进 `FargateEngine()`（run_id 是拼 events 表 PK 所需，对称 artifact 落点注入）。adapter 假定 cluster/task-def/events 表已存在（建表建 task-def 归 IaC）。
 - **`--region`/`--profile` 可选**：都传给 `boto3.session.Session(profile_name=..., region_name=...)`（都为 None = 默认行为，不显式介入）。**凭证仍不硬编码**——profile/region 是运维配置（选哪个 AWS 账户/区域），不是把 access key 写进代码，不违背「组合根不持 IAM 知识」。region 解析链：`--region` 显式 > `AWS_REGION`/`AWS_DEFAULT_REGION` > profile 的 config `region` 字段——故**给了 `--profile` 但该 profile 没配 region 时仍需 `--region`**（否则 `NoRegionError`）；两者都可选、各自独立兜底。
 - **单 S3 桶 + `--report-dir` 复用为 key 前缀**：Result(`jobs/`)、Report(`index.html`)、offloader(`args/`) 三者 key 前缀天然不撞，共用一个桶最简；不新增 `--s3-prefix`——local 的 `<report-dir>/<run_id>/…` 与 cloud 的 `s3://bucket/<report-dir>/<run_id>/…` 布局工整对应。**分隔符规范化**：`--report-dir` 默认 `reports`（无尾 `/`），组合根在传给 S3 adapter 前补 `/`（非空且不以 `/` 结尾则补），否则 `S3*Store` 拼 `f"{prefix}{run_id}"` 会静默生成粘连 key `reports<run_id>/…`。真需分桶（report 公开 serve vs result 私有的生命周期策略）再拆，加法不返工。
 - **`--backend cloud --no-report` 合法**：`--no-report` 既有语义=零落盘裸跑、与 backend 正交；所有云端校验/import/异常 gated 在 `need_cloud = do_report and cloud`，此组合跳过一切云端检查（保「三个 store 一次不构造」的逃生舱）。
@@ -175,7 +206,7 @@ core/
   - **决定（边界，务必读）**：**v0.1.0 判「方向已证」，不补真实用例即进 v1.0.0**。理由——① 团队当前**拿不到真实业务用例**（站点登录态等不可得），强等是空等；② 没有真实用例 → 破例无从触发 → **「破例清单」这条验收无法在 v0.x 执行**。故把「真实业务用例验收 + 破例记录」**顺延并入 v1.0.0**：待有真实用例时在 v1.0 里跑出破例、据以校验「QA 零代码」承诺。**已知风险**：v1.0 架构基于「骨架用例都很顺」的乐观假设设计，真实用例的破例（登录 / HITL / 动态内容 flaky）可能反过来要求调整 v1.0 架构——接受此返工风险，因前置条件（真实用例）确实不具备。
   - **报告**：v0.x 原目标含「报告能看」，当时**决定先「散着」**（手动查目录够用），归集形态待要求清晰再定。**v1.0 已落地为 RunReport 归集索引**（[0027](./0027-runreport-aggregation-index.md)）：不重渲染原生产物、只归集成统一清单 + 导航入口——回答了「先散着」时悬而未决的形态问题（索引而非融合）。
 - **v1.0.0（团队 QA 日常可用）— ⏳ 架构设计中（本 ADR + 0022/0023）**：多用例组织、跑批入口（CLI 阻塞跑一批）、scope 调度、抖动治理（投票）落地；本地执行。**承接 v0.x 顺延项**：真实业务用例验收 + 破例清单（RunReport 归集已落地，[0027](./0027-runreport-aggregation-index.md)）。
-- **v1.1.0（云端执行）— 🚧 进行中**：CLI 提交 → Fargate 跑 → 轮询收集，**job = scope** 粒度（上云时坐实，见 [0017](./0017-cloud-execution-fargate-over-runtime.md)）；外置状态存储（DDB，主要服务 `RunStore`）+ 无状态核心。**= 加 adapter + 组合根换注入，核心不动**。**已落地**：实时写存储接缝（schedule 的 on_event/on_job_complete 旁路 + `RunPersistence` 编排 + RunStore 三增量方法，[0030](./0030-realtime-persistence-seam.md)）+ job 生命周期态/severity（[0031](./0031-job-lifecycle-states-and-severity.md)）+ **云端 store adapter（DynamoDBRunStore + S3ResultStore + S3ReportStore + StepArgument offload，moto 单测对拍 local，[0030](./0030-realtime-persistence-seam.md) 决定六）**——坐实了「换 adapter 核心不动」+ **cli `--backend {local,cloud}` 组合根接线**（本 ADR「cli backend 选择」节 + [0030](./0030-realtime-persistence-seam.md) 决定七）——真跑通 local↔cloud 端到端。**待做**：Fargate 执行 adapter + 无状态跑批（[0017](./0017-cloud-execution-fargate-over-runtime.md)）。
+- **v1.1.0（云端执行）— 🚧 进行中**：CLI 提交 → Fargate 跑 → 轮询收集，**job = scope** 粒度（上云时坐实，见 [0017](./0017-cloud-execution-fargate-over-runtime.md)）；外置状态存储（DDB，主要服务 `RunStore`）+ 无状态核心。**= 加 adapter + 组合根换注入，核心不动**。**决策 A：`--backend cloud` = 存储上云 + Fargate 执行绑定**（单旋钮、不暴露 subprocess×cloud 等正交用户档，见上「cli backend 选择」节）。**已落地**：实时写存储接缝（schedule 的 on_event/on_job_complete 旁路 + `RunPersistence` 编排 + RunStore 三增量方法，[0030](./0030-realtime-persistence-seam.md)）+ job 生命周期态/severity（[0031](./0031-job-lifecycle-states-and-severity.md)）+ **云端 store adapter（DynamoDBRunStore + S3ResultStore + S3ReportStore + StepArgument offload，moto 单测对拍 local，[0030](./0030-realtime-persistence-seam.md) 决定六）** + **`FargateEngine` 执行 adapter**（job-in 走 S3、events-out 走 DDB events 表，[0024](./0024-worker-core-protocol.md)/[0032](./0032-fargate-execution-environment.md)）——坐实了「换 adapter 核心不动」+ **cli `--backend {local,cloud}` store 接线**（本 ADR「cli backend 选择」节 + [0030](./0030-realtime-persistence-seam.md) 决定七）——真跑通 local↔cloud 端到端。**待做**：组合根把 `FargateEngine` 接进 `build_engines` + Fargate CLI 参数（决策 C）+ `--backend cloud` 切执行引擎（决策 A 落到 CLI）+ 无状态跑批 + IaC（[0017](./0017-cloud-execution-fargate-over-runtime.md)）。
 - **v2.0.0（规模化）— ⬜ 留口子不实现**：WebUI 前端（直接调核心）。
 
 ## G1/G2 解析前置（声明语法已定，调度实现待 v1.0）

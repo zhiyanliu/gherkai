@@ -67,7 +67,7 @@ class ReportStore(Protocol):
 - **`index.html` 链接（`href`）指向产物原位**：不拷贝、不搬运产物。`href` 是 core 自己生成的**导航链接**（`index.html` 的 `<a href>`），local 相对化、cloud 恒等于 `ref`（见下「href 相对化」）。
 
 > **`ref` 由 worker 定，`href` 由 core 算——铁律圈的是 `ref`，不是 `href`（关键边界，别混）**：
-> - `ReportRef.ref` 指向**哪**是 **worker** 决定的——subprocess+local worker 产物落本地、报 `file://`；subprocess+cloud / Fargate worker **自己上传 S3**、报 `s3://`（[0029](./0029-engine-artifacts-to-s3.md)，落点由组合根注入的 S3 配置驱动、跟 `--backend cloud` 走）。**ReportStore 不上传 worker 产物、不碰其持久化**（per-worker by-design，[0016](./0016-execution-architecture-core-lib-run-model.md)「worker⊥store」），只**不透明搬运**这个 `ref`（不 stat/fetch/open/**改写**——包括绝不把 `ref` 从绝对改成相对）。
+> - `ReportRef.ref` 指向**哪**是 **worker** 决定的——`--backend local`(subprocess) worker 产物落本地、报 `file://`；`--backend cloud`(Fargate) worker（或 subprocess+注入落点的内部预演路径，[0016](./0016-execution-architecture-core-lib-run-model.md) 决策 B）**自己上传 S3**、报 `s3://`（[0029](./0029-engine-artifacts-to-s3.md)，落点由组合根注入的 S3 配置驱动、注入即上传）。**ReportStore 不上传 worker 产物、不碰其持久化**（per-worker by-design，[0016](./0016-execution-architecture-core-lib-run-model.md)「worker⊥store」），只**不透明搬运**这个 `ref`（不 stat/fetch/open/**改写**——包括绝不把 `ref` 从绝对改成相对）。
 > - `href` 是**正交的另一件事、且不受铁律约束**：它是 core 为 `index.html` 导航自算的链接，本就允许 core 生成/改写（「算一个链接」是 ReportStore 的本分）。local 把 `href` 相对化（指向产物在 run 树内原位，如 `nova-trajectories/<s>/act_0.html`）→ 报告目录整拷到别的机器链接不断；cloud 下 `s3://` 全局可寻址、无相对必要，`href==ref`。
 > - `LocalReportStore` → `S3ReportStore`（v1.1 已建）只换「manifest+index 这些 **core 派生数据**落哪 / 返回的 URI scheme / `href` 相对化策略」，core 不动、且复用同一份 `_render_index_html` 与 `collect_report_index`（单一渲染真理源）。（注意区分：`S3ReportStore` 是把 **RunReport 自身**（manifest/index.html）写到 S3，与「worker 把自己的产物上传 S3」是两回事。）
 
