@@ -121,6 +121,88 @@ def ddb_run_store_offload(aws, arg_offloader):
     return DynamoDBRunStore(aws["ddb"].Table(aws["table_name"]), arg_offloader=arg_offloader)
 
 
+# events 表（ADR 0024「DynamoDB 作 events-out」）：PK=run_id#scope_id、SK=seq（Number）。FargateEngine 测试用。
+_EVENTS_TABLE_NAME = "gherkai-events"
+
+
+@pytest.fixture
+def fargate(_fake_aws_creds):
+    """moto mock 下建全 FargateEngine 依赖：EC2 网络 + ECS FARGATE cluster/task-def + events 表 + S3 桶。
+
+    **moto 5.2.2 ECS Fargate 坑规避（实测逼近所得，纯 setup、无 monkeypatch）**：
+    - VPC 必开 `EnableDnsHostnames`，否则 run_task 建 ENI 时 `AttributeError: private_dns_name`；
+    - task-def 顶层 + 每 container 都给整数 cpu/memory，否则 `TypeError: int += NoneType`；
+    - awsvpcConfiguration 必显式给 securityGroups，否则 `KeyError`；
+    - **pin `ecs::task` transition**，否则每次 `describe_tasks` 都把 lastStatus 推进一格（RUNNING→…→STOPPED），
+      测试非确定。teardown `unset_transition` 还原（该配置全局、不随 mock_aws 退出复位，须手动还原防污染后续测试）。
+
+    **moto ECS 状态机失真（绿≠对，务必知）**：container `exitCode` 恒 0、`lastStatus` 恒 PENDING、task.lastStatus
+    由 describe 次数驱动——**退出码/容器终止语义 moto 测不了**，FargateEngine 的退出码解析（`_task_exit_code`/
+    `_raise_for_exit`）用**构造 describe 响应 dict** 的纯单测锁逻辑，真实时序 defer 真跑（WP3-B）。moto 只忠实测
+    run_task/stop_task 编排 + DDB Query 迭代器。
+    """
+    import boto3
+    from moto.moto_api import state_manager
+
+    region = "us-east-1"
+    with mock_aws():
+        state_manager.set_transition("ecs::task", {"progression": "manual", "times": 10**9})
+        try:
+            ec2 = boto3.client("ec2", region_name=region)
+            ecs = boto3.client("ecs", region_name=region)
+            ddb = boto3.resource("dynamodb", region_name=region)
+            s3 = boto3.client("s3", region_name=region)
+
+            vpc = ec2.create_vpc(CidrBlock="10.0.0.0/16")["Vpc"]["VpcId"]
+            ec2.modify_vpc_attribute(VpcId=vpc, EnableDnsHostnames={"Value": True})
+            ec2.modify_vpc_attribute(VpcId=vpc, EnableDnsSupport={"Value": True})
+            subnet = ec2.create_subnet(
+                VpcId=vpc, CidrBlock="10.0.1.0/24", AvailabilityZone=f"{region}a")["Subnet"]["SubnetId"]
+            sg = ec2.create_security_group(
+                GroupName="fargate-sg", Description="fargate sg", VpcId=vpc)["GroupId"]
+            cluster = ecs.create_cluster(clusterName="test-cluster")["cluster"]["clusterArn"]
+            task_def = ecs.register_task_definition(
+                family="test-task",
+                requiresCompatibilities=["FARGATE"],
+                networkMode="awsvpc",
+                cpu="256", memory="512",
+                containerDefinitions=[{
+                    "name": "worker", "image": "busybox:latest",
+                    "cpu": 256, "memory": 512, "essential": True,
+                }],
+            )["taskDefinition"]["taskDefinitionArn"]
+
+            # events 表：PK=pk(run_id#scope_id, S) + SK=seq(N)
+            ddb.create_table(
+                TableName=_EVENTS_TABLE_NAME,
+                KeySchema=[
+                    {"AttributeName": "pk", "KeyType": "HASH"},
+                    {"AttributeName": "seq", "KeyType": "RANGE"},
+                ],
+                AttributeDefinitions=[
+                    {"AttributeName": "pk", "AttributeType": "S"},
+                    {"AttributeName": "seq", "AttributeType": "N"},
+                ],
+                BillingMode="PAY_PER_REQUEST",
+            )
+            s3.create_bucket(Bucket=_BUCKET_NAME)
+
+            yield {
+                "ec2": ec2, "ecs": ecs, "ddb": ddb, "s3": s3,
+                "cluster": cluster, "task_def": task_def,
+                "subnet": subnet, "sg": sg,
+                "events_table": ddb.Table(_EVENTS_TABLE_NAME),
+                "events_table_name": _EVENTS_TABLE_NAME,
+                "bucket": _BUCKET_NAME,
+                "container_name": "worker",
+                "network_config": {
+                    "subnets": [subnet], "securityGroups": [sg], "assignPublicIp": "ENABLED",
+                },
+            }
+        finally:
+            state_manager.unset_transition("ecs::task")  # 还原全局，防污染后续测试
+
+
 # ============================================================================
 # 集成测试 fixture（连真 DDB/S3，@pytest.mark.integration；默认 deselect，见 pyproject addopts）
 # ============================================================================
