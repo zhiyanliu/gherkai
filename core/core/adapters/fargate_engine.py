@@ -96,6 +96,8 @@ class FargateEngine:
         job_s3: tuple[str, str],   # (bucket, prefix)：job 对象落 s3://bucket/prefix<scope_id>.json
         events_table_name: str,    # 注入 worker 的 events 表名（worker PutItem 目标）
         container_name: str,       # RunTask overrides 要指定往哪个 container 注 env
+        artifact_s3: tuple[str, str] | None = None,  # (bucket, prefix)：worker 产物上传落点（ADR 0029）——注入 worker 的
+                                   # ARTIFACT_S3_BUCKET/PREFIX，否则容器盘停即销毁、产物必丢（ADR 0029「cloud 下注入不是可选」）。None=不上传
         region: str | None = None, # 注入 worker 的 AWS_REGION（组合根已落实成具体字符串，ADR 0016 决策 C）；None＝真无 region、worker fail-loud
         poll_interval_s: float = 0.5,
     ) -> None:
@@ -110,6 +112,7 @@ class FargateEngine:
         self._job_bucket, self._job_prefix = job_s3
         self._events_table_name = events_table_name
         self._container = container_name
+        self._artifact_s3 = artifact_s3  # (bucket, prefix) or None——注入 worker 产物上传落点（ADR 0029）
         self._region = region
         # 不存 profile：Fargate 用 task role，注入 profile 名会 ProfileNotFound 盖过 task role（ADR 0016 决策 C 的非对称）。
         self._poll = poll_interval_s
@@ -129,6 +132,11 @@ class FargateEngine:
             {"name": "RUN_ID", "value": self._run_id},
             {"name": "SCOPE_ID", "value": job.scope_id},
         ]
+        # 产物上传落点（ADR 0029）：非 None 时注入 ARTIFACT_S3_BUCKET/PREFIX，worker ArtifactUploader 据此上传→报 s3://→删本地。
+        # **cloud 下必注入**——否则 worker no-op 报 file://、产物写容器临时盘、STOPPED 后盘销毁必丢（ADR 0029「cloud 注入不是可选」/0032）。
+        if self._artifact_s3 is not None:
+            env.append({"name": "ARTIFACT_S3_BUCKET", "value": self._artifact_s3[0]})
+            env.append({"name": "ARTIFACT_S3_PREFIX", "value": self._artifact_s3[1]})
         # region 与 core store 同源注入（ADR 0016 决策 C）：Fargate 容器不继承本地 env、也不吃 profile config，非 None 时
         # 显式传（组合根已落实成具体字符串），否则 worker region_name=None → NoRegionError/AgentCore InvalidRegionError。
         # **不注入 AWS_PROFILE**：容器用 task role，注入 profile 名会 ProfileNotFound 盖过 task role（正确的非对称）。

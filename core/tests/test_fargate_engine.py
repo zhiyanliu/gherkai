@@ -40,13 +40,14 @@ def _put_event(events_table, run_id: str, scope_id: str, seq: int, event: dict) 
     })
 
 
-def _engine(fargate, run_id: str = _RUN_ID, region: str | None = None) -> FargateEngine:
+def _engine(fargate, run_id: str = _RUN_ID, region: str | None = None,
+            artifact_s3: tuple[str, str] | None = None) -> FargateEngine:
     return FargateEngine(
         ecs_client=fargate["ecs"], s3_client=fargate["s3"], ddb_events_table=fargate["events_table"],
         run_id=run_id, cluster=fargate["cluster"], task_definition=fargate["task_def"],
         network_config=fargate["network_config"], job_s3=(fargate["bucket"], f"{run_id}/jobs/"),
         events_table_name=fargate["events_table_name"], container_name=fargate["container_name"],
-        region=region, poll_interval_s=0.01,  # 测试快轮询（FargateEngine 不接 profile——容器用 task role，ADR 0016 决策 C）
+        artifact_s3=artifact_s3, region=region, poll_interval_s=0.01,  # 测试快轮询（不接 profile——容器用 task role）
     )
 
 
@@ -115,6 +116,21 @@ def test_run_scope_omits_region_when_none(fargate, monkeypatch):
     env = _spy_run_task_env(fargate, monkeypatch, _engine(fargate, region=None))
     assert "AWS_REGION" not in env
     assert "AWS_PROFILE" not in env
+
+
+def test_run_scope_injects_artifact_s3_env(fargate, monkeypatch):
+    # artifact_s3 非 None（cloud 必注入，ADR 0029）→ overrides env 注入 ARTIFACT_S3_BUCKET/PREFIX，worker
+    # ArtifactUploader 据此上传→报 s3://→删本地。**不注入则容器盘停即销毁、产物必丢**（ADR 0029/0032）——这条守卫防回归。
+    env = _spy_run_task_env(fargate, monkeypatch, _engine(fargate, artifact_s3=("bkt", "reports/rid-1/")))
+    assert env["ARTIFACT_S3_BUCKET"] == "bkt"
+    assert env["ARTIFACT_S3_PREFIX"] == "reports/rid-1/"
+
+
+def test_run_scope_omits_artifact_s3_when_none(fargate, monkeypatch):
+    # artifact_s3=None（不上传，如无 report 落点）→ 不注入 ARTIFACT_S3_*（worker no-op 报 file://）。
+    env = _spy_run_task_env(fargate, monkeypatch, _engine(fargate, artifact_s3=None))
+    assert "ARTIFACT_S3_BUCKET" not in env
+    assert "ARTIFACT_S3_PREFIX" not in env
 
 
 # ---- Query 迭代器：增量拉 + 保序 + scope_done 终止（moto DDB 忠实）----
