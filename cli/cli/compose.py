@@ -85,6 +85,8 @@ def build_engines(
     nova_logs_dir: str | Path | None = None,
     midscene_run_dir: str | Path | None = None,
     artifact_s3: tuple[str, str] | None = None,
+    region: str | None = None,
+    profile: str | None = None,
 ) -> dict[str, Engine]:
     """每个引擎一个 SubprocessEngine（cmd 不同，core 引擎无关，ADR 0026）。
 
@@ -103,6 +105,16 @@ def build_engines(
     `ARTIFACT_S3_PREFIX` env：worker 据此上传产物→报 `s3://`→删本地。**None（local）→ 不注入 → worker
     走原 `file://` 路径、零行为变化**。worker 只认"有没有这组 env"，对"我在哪跑"无知（ADR 0016 注入红线）。
     prefix 约定 = `<report_dir>/<run_id>/`（与 S3ReportStore/ResultStore 同前缀，key 镜像本地 run 树）。
+
+    region/profile（ADR 0016 决策 C）——组合根解析后的 AWS region（已由 `resolve_region` 落实成具体字符串：`--region` >
+    `AWS_REGION` > `AWS_DEFAULT_REGION` > profile config）与 profile（`--profile` > `AWS_PROFILE`）：非 None 时经 `_inject_aws`
+    显式写进注入 env（`AWS_REGION`/`AWS_PROFILE`）覆盖继承值——使 `--region`/`--profile` 真贯通到 subprocess worker
+    （EventSink/JobSource/ArtifactUploader/Nova Workflow/Midscene fromNodeProviderChain 建 client 都读它们）、与 core store
+    同源、消除分叉。None＝不写（真无值、fail-loud，对齐 store 宽容）。**subprocess 两腿都注入**（Nova/Midscene 补建路径见下）。
+    注意：**FargateEngine 侧只注入 region、不注入 profile**（容器用 task role，profile 是本机 `~/.aws` 概念、注入会
+    ProfileNotFound 盖过 task role——正确的非对称，ADR 0016 决策 C）。**FargateEngine 尚未在本组合根接线**（`--backend
+    cloud` 当前只换 store、执行仍走下面两个 SubprocessEngine；FargateEngine 接进来归 WP2）——其 region 注入语义已在
+    adapter 内实装（有单测），此处描述的是 WP2 接线后的设计意图。
     """
     novaact_dir = repo / "engines" / "novaact"
     midscene_dir = repo / "engines" / "midscene"
@@ -114,6 +126,15 @@ def build_engines(
         if artifact_s3 is not None else {}
     )
 
+    def _inject_aws(env: dict) -> None:
+        # --region/--profile 解析值覆盖继承的 AWS_REGION/AWS_PROFILE（None＝不写、留 boto 默认链/profile config
+        # 兜底，ADR 0016 决策 C）。subprocess worker 的 EventSink/JobSource/ArtifactUploader/Nova Workflow 都读
+        # 这两个 env 建 client——显式写入使 `--region`/`--profile` 真生效、与 core store 侧同源、消除分叉。
+        if region is not None:
+            env["AWS_REGION"] = region
+        if profile is not None:
+            env["AWS_PROFILE"] = profile
+
     def _env(local_dir: str | Path | None, local_key: str) -> dict | None:
         # local 落点 env + 可选 S3 上传 env。两者都无 → None（worker 全用 SDK 默认、报 file://）。
         if local_dir is None and not s3_env:
@@ -122,6 +143,7 @@ def build_engines(
         if local_dir is not None:
             env[local_key] = str(local_dir)
         env.update(s3_env)
+        _inject_aws(env)
         return env
 
     nova_env = _env(nova_logs_dir, "NOVA_LOGS_DIR")
@@ -131,7 +153,14 @@ def build_engines(
     # nova_env 为 None（无产物落点，如 --no-report）时也要建一份注入——故补一个继承 os.environ 的 env。
     if nova_env is None:
         nova_env = {**os.environ}
+        _inject_aws(nova_env)  # 补建路径也须叠加 --region/--profile（Nova Workflow 的 nova-act client 读 AWS_REGION/凭证）
     nova_env["NOVA_ACT_TIMEOUT_S"] = str(NOVA_ACT_TIMEOUT_S)
+    # Midscene 补建同理（对称，ADR 0016 决策 C）：midscene_env 为 None（--no-report 无 dirs/无 s3）且 --region/--profile
+    # 有值时也须建 env 注入——否则 midscene worker 继承 os.environ、拿不到 --profile 覆盖，而它经 fromNodeProviderChain()
+    # 消费凭证做 AgentCore/Bedrock 鉴权（真消费、非无害）。仅在有值时补建（无值则继承 os.environ 本就够、免无谓拷贝）。
+    if midscene_env is None and (region is not None or profile is not None):
+        midscene_env = {**os.environ}
+        _inject_aws(midscene_env)
     return {
         # Nova Act 引擎：novaact venv 的 python 跑 worker
         "novaact": SubprocessEngine(
@@ -209,6 +238,23 @@ def build_local_stores(*, report_dir: str | Path):
         return d
 
     return run_store, result_store, report_store, make_artifacts
+
+
+def resolve_region(explicit_region: str | None, profile: str | None) -> str | None:
+    """把 region 解析成**具体字符串**（ADR 0016 决策 C）：--region > AWS_REGION > AWS_DEFAULT_REGION > profile config。
+
+    **profile config 回落是关键**：Nova worker 的 AgentCore `validate_region` 要求显式合法 region 字符串、不查 boto
+    默认链/profile config——若不在此把 profile 里的 region 落实成字符串，profile-only 用户下 worker region=None 会
+    `InvalidRegionError` 崩。用 `boto3.Session(profile).region_name` 读 profile config 的 region（探针证实：有则返回、
+    无则 None）。boto3 惰性 import（仅前三级都 miss 时才触发，纯 local 无 profile 路径不引入 boto3 依赖）。
+    真无 region（全 miss）→ 返回 None＝fail-loud（worker 报错、不硬编码 east，对齐 store 宽容边界）。
+    """
+    r = explicit_region or os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
+    if r:
+        return r
+    # 前三级 miss：回落 profile config（--profile 或 AWS_PROFILE 指向的 profile 的 region 字段）。
+    import boto3
+    return boto3.session.Session(profile_name=profile).region_name
 
 
 # —— 造 boto3 句柄的两个钩子（抽出来供 cli 测试 monkeypatch，验接线而不连真 AWS）——

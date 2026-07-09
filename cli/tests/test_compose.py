@@ -111,6 +111,107 @@ def test_build_engines_no_artifact_s3_env_has_no_s3_keys(tmp_path: Path):
     assert "ARTIFACT_S3_BUCKET" not in engines["novaact"]._env
 
 
+def test_build_engines_region_profile_override_env(tmp_path: Path, monkeypatch):
+    # ADR 0016 决策 C：--region/--profile 解析值**覆盖**继承的 AWS_REGION/AWS_PROFILE（参数 > env），使二者真贯通到
+    # worker（EventSink/JobSource/ArtifactUploader/Nova Workflow 建 client 都读它们），与 core store 同源、消除分叉。
+    monkeypatch.setenv("AWS_REGION", "us-east-1")   # shell 里是 east
+    monkeypatch.setenv("AWS_PROFILE", "shell-prof")  # shell 里是另一个 profile
+    nova_dir = tmp_path / "rid" / "nova-trajectories"
+    mid_dir = tmp_path / "rid" / "midscene-run"
+    engines = compose.build_engines(
+        compose.repo_root(), nova_logs_dir=nova_dir, midscene_run_dir=mid_dir,
+        region="us-west-2", profile="cli-prof",  # --region west / --profile cli-prof
+    )
+    for eng in ("novaact", "midscene"):
+        assert engines[eng]._env["AWS_REGION"] == "us-west-2"    # 参数覆盖 env，非继承的 east
+        assert engines[eng]._env["AWS_PROFILE"] == "cli-prof"    # profile 同理覆盖
+
+
+def test_build_engines_region_profile_none_preserve_inherited(tmp_path: Path, monkeypatch):
+    # region/profile=None（未给参数、__main__ 解析出 None）：不干预，保留继承的 env（若 shell 有）——
+    # 组合根不硬写、留 env/boto 默认链/profile config 兜底（现有宽容）。
+    monkeypatch.setenv("AWS_REGION", "eu-central-1")
+    monkeypatch.setenv("AWS_PROFILE", "inherited-prof")
+    nova_dir = tmp_path / "rid" / "nova-trajectories"
+    engines = compose.build_engines(compose.repo_root(), nova_logs_dir=nova_dir, region=None, profile=None)
+    assert engines["novaact"]._env["AWS_REGION"] == "eu-central-1"      # 原样继承、未被抹掉
+    assert engines["novaact"]._env["AWS_PROFILE"] == "inherited-prof"
+
+
+def test_build_engines_region_profile_injected_on_rebuild_path_both_legs(tmp_path: Path, monkeypatch):
+    # 补建路径（无产物落点、如 --no-report → _env 返回 None）：region/profile 须在**两腿**补建路径都注入——
+    # Nova 恒补建（塞 NOVA_ACT_TIMEOUT_S，_inject_aws 搭便车）；Midscene 在 region/profile 有值时也补建（否则 --no-report
+    # 下 midscene worker 继承 os.environ、拿不到 --profile 覆盖，而它经 fromNodeProviderChain 消费 profile 做 AgentCore/
+    # Bedrock 鉴权——真消费、非无害，ADR 0016 决策 C）。
+    monkeypatch.setenv("AWS_REGION", "us-east-1")
+    monkeypatch.delenv("AWS_PROFILE", raising=False)
+    engines = compose.build_engines(
+        compose.repo_root(), region="ap-southeast-1", profile="cli-prof",  # 无 dirs、无 artifact_s3 → 两腿走补建
+    )
+    for eng in ("novaact", "midscene"):
+        assert engines[eng]._env["AWS_REGION"] == "ap-southeast-1"  # 补建路径也覆盖生效
+        assert engines[eng]._env["AWS_PROFILE"] == "cli-prof"
+
+
+def test_build_engines_midscene_no_rebuild_when_no_region_profile(tmp_path: Path, monkeypatch):
+    # 对称边界：--no-report 且 region/profile 均 None 时 Midscene **不**补建（env=None、继承 os.environ 本就够，
+    # 免无谓拷贝）——补建只为 region/profile 覆盖，无值则不建。Nova 仍补建（NOVA_ACT_TIMEOUT_S 恒需）。
+    monkeypatch.delenv("AWS_REGION", raising=False)
+    monkeypatch.delenv("AWS_DEFAULT_REGION", raising=False)
+    engines = compose.build_engines(compose.repo_root(), region=None, profile=None)  # 无 dirs、无 s3、无 region/profile
+    assert engines["midscene"]._env is None       # 不补建
+    assert engines["novaact"]._env is not None     # Nova 恒补建（timeout）
+
+
+# ---- resolve_region：region 落实成具体字符串（ADR 0016 决策 C，修 AgentCore profile-only 崩）----
+def test_resolve_region_explicit_wins(monkeypatch):
+    # --region 显式最高优先，不碰 env/profile
+    monkeypatch.setenv("AWS_REGION", "us-east-1")
+    monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-2")
+    assert compose.resolve_region("us-west-2", "some-prof") == "us-west-2"
+
+
+def test_resolve_region_env_chain(monkeypatch):
+    # 无 --region：AWS_REGION > AWS_DEFAULT_REGION
+    monkeypatch.delenv("AWS_REGION", raising=False)
+    monkeypatch.setenv("AWS_DEFAULT_REGION", "ap-south-1")
+    assert compose.resolve_region(None, None) == "ap-south-1"
+    monkeypatch.setenv("AWS_REGION", "eu-west-1")
+    assert compose.resolve_region(None, None) == "eu-west-1"  # AWS_REGION 优先于 DEFAULT
+
+
+def test_resolve_region_falls_back_to_profile_config(monkeypatch):
+    # 关键（修 #2）：--region/env 全 miss → 回落 boto3.Session(profile).region_name 读 profile config 的 region。
+    # 不落实则 profile-only 用户下 worker AgentCore validate_region(None) → InvalidRegionError 崩。
+    monkeypatch.delenv("AWS_REGION", raising=False)
+    monkeypatch.delenv("AWS_DEFAULT_REGION", raising=False)
+    captured = {}
+
+    class _FakeSession:
+        def __init__(self, profile_name=None):
+            captured["profile"] = profile_name
+            self.region_name = "eu-west-2"  # 模拟 profile config 里 region=eu-west-2
+
+    import boto3
+    monkeypatch.setattr(boto3.session, "Session", _FakeSession)
+    assert compose.resolve_region(None, "myprofile") == "eu-west-2"
+    assert captured["profile"] == "myprofile"  # 确实按解析出的 profile 读 config
+
+
+def test_resolve_region_none_when_all_miss(monkeypatch):
+    # 全 miss（无 --region/env、profile config 也无 region）→ None＝fail-loud（worker 报错、不硬编码 east）。
+    monkeypatch.delenv("AWS_REGION", raising=False)
+    monkeypatch.delenv("AWS_DEFAULT_REGION", raising=False)
+
+    class _NoRegionSession:
+        def __init__(self, profile_name=None):
+            self.region_name = None  # profile 无 region 字段
+
+    import boto3
+    monkeypatch.setattr(boto3.session, "Session", _NoRegionSession)
+    assert compose.resolve_region(None, None) is None
+
+
 # ---- engine_min_grace：按引擎给 grace 下限（ADR 0024 grace 硬约束）----
 def test_engine_min_grace_nova_covers_act_timeout_plus_margin():
     # 断言语义关系而非重述公式（否则同义反复、测不出常量漂移）：Nova 下限须**严格大于**单 act 上界——

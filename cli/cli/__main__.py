@@ -81,11 +81,11 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     run.add_argument(
         "--region", default=None, metavar="R",
-        help="[--backend cloud] AWS region（不给走 boto3 默认链：AWS_REGION/profile 的 config）",
+        help="AWS region（解析链 --region > AWS_REGION > AWS_DEFAULT_REGION > profile config；喂 store + worker）",
     )
     run.add_argument(
         "--profile", default=None, metavar="P",
-        help="[--backend cloud] AWS profile（不给用 default）；注意 profile 没配 region 时仍需 --region",
+        help="AWS profile（--profile > AWS_PROFILE）；喂 store + subprocess worker（其 region 字段也作 --region 兜底）",
     )
 
     # plan 预检（dry-run）：纯本地解析 + 分组，不起 worker、不连 AWS、不烧钱。
@@ -235,6 +235,16 @@ def _cmd_run(args, repo: Path) -> int:
     # 前缀）注入给 worker（ADR 0029 第一期），而 bucket 在下面 cloud 分支才确定。artifact_s3 默认 None（local
     # / --no-report → worker 报 file://、不上传）。
     artifact_s3: tuple[str, str] | None = None
+    # region/profile 解析（ADR 0016 决策 C——region 与 profile 是「正确的非对称」）：
+    # - profile：--profile > AWS_PROFILE。仅 subprocess worker 注入（继承本机 ~/.aws、profile 合法）；
+    #   **Fargate 绝不注入**（容器无 ~/.aws、用 task role，注入不存在的 profile 名会 ProfileNotFound 盖过 task role）。
+    # - region：--region > AWS_REGION > AWS_DEFAULT_REGION > profile config（compose.resolve_region 落实成**具体字符串**）。
+    #   profile config 回落是关键：AgentCore validate_region 不吃 profile config、要显式 region 字符串，不落实则 profile-only
+    #   下 worker InvalidRegionError 崩。落实后 subprocess env + store 同源、消除分叉（FargateEngine overrides 同源，但其
+    #   CLI 接线归 WP2——当前 --backend cloud 只换 store、执行仍 subprocess）。
+    # 均可为 None＝真无（fail-loud、不硬编码 east，对齐 store 宽容边界）。
+    resolved_profile = args.profile or os.environ.get("AWS_PROFILE")
+    resolved_region = compose.resolve_region(args.region, resolved_profile)
 
     # 3b) 实时写编排（ADR 0030）：组合根按 --backend 注入 local/cloud 两套 store adapter，RunPersistence
     #     负责「随进度落库」的统一编排（commit-point 写序 / RUNNING 中间态 / 按 scope_id 增量刷）。
@@ -257,7 +267,7 @@ def _cmd_run(args, repo: Path) -> int:
                 # cloud 装配下沉 compose（可复用）；import boto3 惰性在 _make_* 钩子里，缺 boto3 抛 ImportError
                 run_store, result_store, report_store, make_artifacts = compose.build_cloud_stores(
                     table=table, bucket=bucket, prefix=args.report_dir,
-                    region=args.region, profile=args.profile,
+                    region=resolved_region, profile=resolved_profile,
                 )
             except ImportError as e:
                 _progress(f"--backend cloud 需要 boto3：{e}")
@@ -286,6 +296,7 @@ def _cmd_run(args, repo: Path) -> int:
     resolver = compose.make_resolver(
         compose.build_engines(
             repo, nova_logs_dir=nova_logs_dir, midscene_run_dir=midscene_run_dir, artifact_s3=artifact_s3,
+            region=resolved_region, profile=resolved_profile,
         )
     )
 
