@@ -162,8 +162,8 @@ cli 退出码从「`status.value == 'passed'` 才 0」改为**基于 run 级 sev
 前者是「job 根本没跑」（无 step 明细）；后者是「job 跑了一半、剩下的 step 被主动跳过」（有 step 明细，标 shortcircuited）。
 两级都复用 `Status.SKIPPED` 表「没跑」，语义一致、只是层级不同；`shortcircuited` 布尔进一步标出 step 级「为什么没跑」。
 
-**判据锁 `status==error`（不看 error_type）**：无论哪腿、network_error 还是 engine_error 都触发短路，两腿对称——
-这也回避了 [0028](./0028-transient-network-ssl-resilience.md) 记的「两腿 SSL 分类不对称」欠账对短路的影响（那只影响 errorType 文案、不影响 error 这个 status）。
+**判据锁 `status==error`（不看 error_type）**：无论哪个引擎、network_error 还是 engine_error 都触发短路，两个引擎对称——
+这也回避了 [0028](./0028-transient-network-ssl-resilience.md) 记的「两个引擎 SSL 分类不对称」欠账对短路的影响（那只影响 errorType 文案、不影响 error 这个 status）。
 短路是 **scope 内**行为（上游 error 只短路**同 scenario/同 scope**的后续 step，不跨 job——跨 job 是 fail-fast 的职责，两者正交）。
 
 ## touch points（实装清单）

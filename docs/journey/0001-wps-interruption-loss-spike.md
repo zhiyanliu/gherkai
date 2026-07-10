@@ -1,4 +1,4 @@
-# WP-S 中断丢失实测预演：Nova greenlet 卡死 + 两腿产物丢失
+# WP-S 中断丢失实测预演：Nova greenlet 卡死 + 两个引擎产物丢失
 
 > **类型：** Journey / 调查证据（**非 ADR**）。记"我们实测发现了什么、证据是什么、结论指向哪"，供后续处理这些问题时作单一事实源。**不记决策**——决策待真处理时落进相应 ADR（候选：0024 终止契约、0032 中断韧性）。
 > **日期：** 2026-07-04　**背景：** Fargate 化 breakdown 的 WP-S（中断丢失实测预演），见任务 WP-S。
@@ -49,14 +49,14 @@ baseline（不中断，Nova）：5 step 全跑完 → scope 末 flush 上传 9 �
 
 **"grace 够不够"在此场景无意义**：卡死是无限循环，任何有限 grace 只决定"白等多久再 SIGKILL"，终点恒为 SIGKILL + 会话泄漏。
 
-### 发现 #3 / #4：两腿都有严重中断丢失，但形态不同
+### 发现 #3 / #4：两个引擎都有严重中断丢失，但形态不同
 
 - **Nova（#3）**：reportRef 文件（act `.html`）实时传（step_done 那刻），**剩余 `_trajectory.json` 全靠 scope 末 flush**。中断落 flush 前 → 全部 trajectory.json 丢（实测 scope_end 丢 930KB，全是 `.json` 数据载体；`.html` 渲染页活着）。
 - **Midscene（#4）**：report 是**增量写盘**（跑中已在盘上），但 `uploader.toReportRef(agent.reportFile)` 只在 `agent.destroy()` 之后调一次。中断落 destroy 前 → **整个 `playwright-*.html` 报告丢**。**关键校准（盘上残留实测印证）**：中断时盘上**已有截至最后一个已返回 AI 调用的合法可打开报告**（act-midway 中断实测 2094271 字节，为 5 步跑完版 4.68MB 的约一半——1 步 vs 5 步）——即"report 早就在盘上、只是不全"，丢的原因**不是"没生成"，而是"上传点（destroy 后）太晚"**。补救方向（与 Nova 对称、把抢传点提前到 step 安全点）见下「Midscene 补救方向」节。
 
 subprocess 下这些"没传的"还留本地（[ADR 0028](../adr/0028-transient-network-ssl-resilience.md) #3 可手动找）；**Fargate 盘销毁 = 直接丢**。这就是 [ADR 0032](../adr/0032-fargate-execution-environment.md) 头号待解项的量化证据。
 
-### 发现 #5：两腿中断模型根本不同（对 WP3 设计是核心输入）
+### 发现 #5：两个引擎中断模型根本不同（对 WP3 设计是核心输入）
 
 - **Nova = 同步 raise**：`_on_sigterm` 直接 `raise _Terminated()`（BaseException 穿透 `except Exception`），指望冒泡触发三层 with `__exit__`。**抢占正在跑的主流程**——正因如此才会撞 greenlet 关键区卡死。
 - **Midscene = 异步软停**：`process.on("SIGTERM", async …)` 不打断正在跑的 `main()`，主流程自然跑完（destroy→传 report→scope_done）后 handler 才收尾。**不抢占、不卡死**，但"软"意味着 mid-act 的 kill 要等当前 act 跑完（实测 scope_end 格 kill 后主流程又跑了 3s 才停）。
@@ -102,7 +102,7 @@ subprocess 下这些"没传的"还留本地（[ADR 0028](../adr/0028-transient-n
 2. **uploader 幂等守卫直接冲突**：`toReportRef` 的 `uploaded` 守卫（`artifact-upload.mts:74`）专挡"同路径重传"，与增量抢传相悖 → WP3 须加一条绕守卫的 snapshot 上传路径（暴露 `uploadOne`/独立方法，S3 同 key 覆盖）；**不能复用 `flushAndCleanup`**——它成功后 `rmSync` 删整目录，中途抢传会误删本地/打断在跑的 main。
 3. **agent 引用作用域 + reportFile 空窗**：`agent` 是 `main()` 局部，模块级 handler 看不到；须上提引用，并处理 `reportFile` 在首个 task 更新前为 `undefined` 的窗口。
 
-（对称心智：两腿都是"上传锚 step 安全点、不等结束"；不对称点全在 Midscene 的"单份大文件增量"性质。）
+（对称心智：两个引擎都是"上传锚 step 安全点、不等结束"；不对称点全在 Midscene 的"单份大文件增量"性质。）
 
 ## 待进一步验证
 

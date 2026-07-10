@@ -82,7 +82,7 @@ def test_build_engines_nova_always_has_act_timeout(tmp_path: Path):
 
 
 def test_build_engines_injects_artifact_s3_env_symmetrically(tmp_path: Path):
-    # artifact_s3=(bucket, prefix) → 两腿 worker 都拿到 ARTIFACT_S3_BUCKET/PREFIX env（worker from_env 真正读的东西，
+    # artifact_s3=(bucket, prefix) → 两个引擎 worker 都拿到 ARTIFACT_S3_BUCKET/PREFIX env（worker from_env 真正读的东西，
     # ADR 0029）。跨越"__main__ 算元组 → compose 翻成 env"这道缝，防键名写错/合并漏掉时静默退回 file://（review #5）。
     repo = compose.repo_root()
     nova_dir = tmp_path / "rid" / "nova-trajectories"
@@ -139,14 +139,14 @@ def test_build_engines_region_profile_none_preserve_inherited(tmp_path: Path, mo
 
 
 def test_build_engines_region_profile_injected_on_rebuild_path_both_legs(tmp_path: Path, monkeypatch):
-    # 补建路径（无产物落点、如 --no-report → _env 返回 None）：region/profile 须在**两腿**补建路径都注入——
+    # 补建路径（无产物落点、如 --no-report → _env 返回 None）：region/profile 须在**两个引擎**补建路径都注入——
     # Nova 恒补建（塞 NOVA_ACT_TIMEOUT_S，_inject_aws 搭便车）；Midscene 在 region/profile 有值时也补建（否则 --no-report
     # 下 midscene worker 继承 os.environ、拿不到 --profile 覆盖，而它经 fromNodeProviderChain 消费 profile 做 AgentCore/
     # Bedrock 鉴权——真消费、非无害，ADR 0016 决策 C）。
     monkeypatch.setenv("AWS_REGION", "us-east-1")
     monkeypatch.delenv("AWS_PROFILE", raising=False)
     engines = compose.build_engines(
-        compose.repo_root(), region="ap-southeast-1", profile="cli-prof",  # 无 dirs、无 artifact_s3 → 两腿走补建
+        compose.repo_root(), region="ap-southeast-1", profile="cli-prof",  # 无 dirs、无 artifact_s3 → 两个引擎走补建
     )
     for eng in ("novaact", "midscene"):
         assert engines[eng]._env["AWS_REGION"] == "ap-southeast-1"  # 补建路径也覆盖生效
@@ -335,10 +335,14 @@ def test_build_fargate_engines_per_engine_taskdef_and_region_no_profile(monkeypa
     assert nova["events_table_name"] == "prod-events"
     assert nova["region"] == "us-west-2"          # region 注入（决策 C）
     assert "profile" not in nova                    # **profile 不传 FargateEngine**（正确非对称，决策 C）
-    # job_s3 = (bucket, "{report_dir}/{run_id}/jobs/")
-    assert nova["job_s3"] == ("prod-artifacts", "runs/rid-1/jobs/")
+    # job_s3 = (bucket, "{report_dir}/{run_id}/jobs-in/")——**jobs-in/ 非 jobs/**（避与 ResultStore 判定 key 撞，真跑暴露）
+    assert nova["job_s3"] == ("prod-artifacts", "runs/rid-1/jobs-in/")
     # artifact_s3 = (bucket, "{report_dir}/{run_id}/")——**cloud 必注入**（否则容器盘销毁产物必丢，ADR 0029）
     assert nova["artifact_s3"] == ("prod-artifacts", "runs/rid-1/")
+    # SDK 产物落点 env（按引擎、容器内路径）——**uploader 靠它算 run_dir，缺它 no-op 报 file://、产物丢**（真跑暴露）。
+    assert nova["sdk_artifact_dir_env"] == {"NOVA_LOGS_DIR": "/tmp/gherkai-run/rid-1/nova-trajectories"}
+    mid = by_engine["prod-midscene-worker"]
+    assert mid["sdk_artifact_dir_env"] == {"MIDSCENE_RUN_DIR": "/tmp/gherkai-run/rid-1/midscene-run"}
 
 
 # ---- preflight_cloud_resources（ADR 0033）：探资源存在性、缺则点名 prefix ----

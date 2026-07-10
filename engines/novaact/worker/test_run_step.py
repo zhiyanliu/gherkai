@@ -1,6 +1,6 @@
 """_run_step 派发分支 + 投票多数票数学单测（ADR 0024/0014/0028）。
 
-与 Midscene 腿 run-scope.test.ts **对称**：纯逻辑、注 fake nova、不连 AWS、不烧钱。
+与 Midscene 引擎 run-scope.test.ts **对称**：纯逻辑、注 fake nova、不连 AWS、不烧钱。
 覆盖 v1.0 最核心、最易回归的派发逻辑——四条互斥分支 + 投票判定 yes>votes_n/2 + 异常网络分类。
 事件经注入的 fake sink（_FakeSink，fixture `captured`）收集读回——sink 作参数注入 _run_step/_run_scenario
 （对称 Midscene testSink；ADR 0024 I/O 边缘可注入接口，此前 emit 是模块级、迁移后可注 fake 打桩）。

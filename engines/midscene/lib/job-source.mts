@@ -1,6 +1,6 @@
 // job 入口（Midscene worker，ADR 0024「I/O 边缘可注入接口」第一期）：worker 主流程唯一的 job 读入口。
 //
-// 对称 Nova 的 lib/job_source.py（各语言各写、语义契约对称，ADR 0024）+ 对称本腿 ArtifactUploader 结构骨架
+// 对称 Nova 的 lib/job_source.py（各语言各写、语义契约对称，ADR 0024）+ 对称本引擎 ArtifactUploader 结构骨架
 // （fromEnv 唯一读 env、退化态是同类实例、外部 client 惰性建）。
 //
 // read() 返回**已解析的 job 对象**（非流/句柄）——否则「从哪读」漏进 worker 主流程，S3/stdin 两态就无法对

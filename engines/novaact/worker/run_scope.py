@@ -54,7 +54,7 @@ from lib.artifact_upload import ArtifactUploader  # noqa: E402  产物 S3 上传
 # region 不再硬编码兜底（ADR 0016 决策 C）：None 时不再抢在 profile config 前跑错区。**正常路径由组合根落实**——
 # compose.resolve_region 把 `--region > AWS_REGION > AWS_DEFAULT_REGION > profile config` 落实成具体字符串、经 AWS_REGION
 # env 注入 worker，故这里通常拿到具体 region。真无 region（全 miss）→ None → fail-loud：boto client 抛 NoRegionError；
-# 尤其 AgentCore 腿（下方 AgentCoreBrowserSessionProvider）的 validate_region **不吃 profile config、要显式字符串**，
+# 尤其 AgentCore 那条路径（下方 AgentCoreBrowserSessionProvider）的 validate_region **不吃 profile config、要显式字符串**，
 # region=None 直接 InvalidRegionError——这正是组合根须在注入前把 profile-region 落实成字符串的原因（别静默跑错区）。
 REGION = os.environ.get("AWS_REGION")
 
@@ -94,7 +94,7 @@ class _DeterministicCtx:
 
 # 事件 sink（ADR 0024「I/O 边缘可注入接口」第一期）：worker 主流程唯一事件出口，抽进 lib/event_sink.py
 # （对称 _uploader、可注入、可测；subprocess 态写 EVENTS_FD fd、无则回落 stdout 调试）。emit 作参数注入
-# _run_step/_run_scenario（两腿统一打桩机制），不再是模块级函数——三通道分离/保序/中文由 EventSink 保。
+# _run_step/_run_scenario（两个引擎统一打桩机制），不再是模块级函数——三通道分离/保序/中文由 EventSink 保。
 # log（stderr 诊断）**不属那三条 I/O 边、不进 sink**（协议传输面 vs 诊断面物理隔离，ADR 0024），保模块级。
 def log(msg: str) -> None:
     sys.stderr.write(f"{msg}\n")
@@ -365,7 +365,7 @@ def _run_scenario(nova, scenario_id: str, steps: list[dict], votes_n: int, sink:
     短路：scenario 内一旦某 step `status==error`（导航 SSL 失败等），后续 step 不再调 AI——
     ① 省钱（不烧后续 AI 断言）；② 不在损坏环境（SSL 错误页）上跑出误导性假失败。被跳过的 step 发独立
     `step_skipped` 事件（非 step_done；core 据此本地赋 StepResult(SKIPPED, shortcircuited=True)）。
-    判据锁 `status==error`（不看 error_type）——两腿对称、network/engine 错都触发。
+    判据锁 `status==error`（不看 error_type）——两个引擎对称、network/engine 错都触发。
 
     **短路只作用于本 scenario**（不跨 scenario：下一 scenario 可能导航到新页恢复，独立测试用例不该被牵连；
     跨 job 的中止是 fail-fast 的职责，两者正交，ADR 0031 决定六）。返回各步 status——被跳过步**不进** statuses，
@@ -458,7 +458,7 @@ def _is_transient_network(e: BaseException, *, connecting: bool = False) -> bool
 
     白名单匹配**具体**瞬时类型，不用宽 OSError 兜底——ssl.SSLError 与 socket.gaierror 都继承 OSError，
     宽匹配会把永久错也当瞬时重试。gaierror 按 errno 细分：EAI_AGAIN(临时) 当瞬时、其余(EAI_NONAME 等永久) 否决
-    （对齐 Midscene 的 EAI_AGAIN 白名单，保两腿对 DNS 临时抖动恢复力对称，ADR 0028）。
+    （对齐 Midscene 的 EAI_AGAIN 白名单，保两个引擎对 DNS 临时抖动恢复力对称，ADR 0028）。
     boto `ClientError` 按错误码/HTTP 状态码细分（节流/5xx 瞬时、4xx/ValidationException 永久，见 _is_transient_client_error）。
 
     **遍历异常链**（__cause__/__context__）：Nova/boto SDK 常把底层瞬时错包成自有异常

@@ -11,7 +11,7 @@ import { HttpRequest } from "@aws-sdk/protocol-http";
 import { Sha256 } from "@aws-crypto/sha256-js";
 import { fromNodeProviderChain } from "@aws-sdk/credential-providers";
 
-// region 读 AWS_REGION（ADR 0033 / 0016 决策 C：Midscene region 全可配，不再硬编码 us-east-1）——与本腿 I/O 边缘
+// region 读 AWS_REGION（ADR 0033 / 0016 决策 C：Midscene region 全可配，不再硬编码 us-east-1）——与本引擎 I/O 边缘
 // （EventSink/JobSource/ArtifactUploader 的 process.env.AWS_REGION）同源，使组合根注入的 region 真正贯通到 AgentCore/
 // Bedrock 模型连接（此前硬编码 east、只贯通一半）。
 //

@@ -77,7 +77,7 @@ harness 结尾打印 `=== HARNESS_REPORT_JSON ===` + 一段 JSON。关键字段�
 
 ## 真跑陷阱（历史踩过，务必避开）
 
-1. **plan 按 `@scope:` tag 分组，不是"一 feature 一 scope"**（ADR 0025）。未标 `@scope:` 的 scenario **各自独立成单 scenario scope**。harness 取**匹配 `--engine` 的第一个 job**（单引擎 feature 下即 `jobs[0]`；混引擎 feature 如 engine_routing 靠 `@engine:` tag 分腿时，取本次 `--engine` 那腿的 job）作靶子。
+1. **plan 按 `@scope:` tag 分组，不是"一 feature 一 scope"**（ADR 0025）。未标 `@scope:` 的 scenario **各自独立成单 scenario scope**。harness 取**匹配 `--engine` 的第一个 job**（单引擎 feature 下即 `jobs[0]`；混引擎 feature 如 engine_routing 靠 `@engine:` tag 分引擎时，取本次 `--engine` 那个引擎的 job）作靶子。
    - **验 `scenario` 时机必须用多 scenario 归一个 scope 的 feature**，否则 `jobs[0]` 只有 1 个 scenario、`scenario` 时机的 `n_scen>1` 条件不满足、SIGTERM 不发出、跑成完整 baseline。
    - **现成可用**：`features/concurrency_and_scope.feature` 的 `@scope:browse`（2 个 scenario 共享会话，`jobs[0]`）。跑前可用 `core.scope.plan` 确认 `jobs[0]` 的 scenario 数：
      ```bash

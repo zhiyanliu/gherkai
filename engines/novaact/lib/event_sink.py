@@ -1,6 +1,6 @@
 """事件 sink（Nova worker，ADR 0024「I/O 边缘可注入接口」第一期）：worker 主流程唯一的事件出口。
 
-对称 Midscene 的 lib/event-sink.mts（各语言各写、语义契约对称，ADR 0024）+ 对称本腿 ArtifactUploader
+对称 Midscene 的 lib/event-sink.mts（各语言各写、语义契约对称，ADR 0024）+ 对称本引擎 ArtifactUploader
 的结构骨架（from_env 唯一读 env、退化态是同类实例非 None/分支、外部 client 惰性建）。
 
 三通道分离（ADR 0024）：协议事件走专用 fd（core adapter 读这个），与 SDK 打到 stdout 的进度噪声、worker
@@ -8,7 +8,7 @@
 （pass_fds 继承、号不固定）。无 EVENTS_FD（手动直跑、无 adapter）时回落 stdout，便于调试（`echo job | worker` 仍见事件）。
 
 **emit 同步（合理不对称，ADR 0024）**：Nova worker 是同步 + greenlet 模型、全链路零 async，emit 同步；
-Midscene 那腿 emit 为 async（Node 事件循环 + Fargate 化后 aws-sdk-js DDB PutItem 本就 async）。Fargate 化后
+Midscene 那个引擎 emit 为 async（Node 事件循环 + Fargate 化后 aws-sdk-js DDB PutItem 本就 async）。Fargate 化后
 Nova 用 boto3（同步 SDK）put_item、同步 emit 天然容纳，无需 async 化（那是本 ADR 终止契约被拒的 asyncio 路）。
 
 **两态（ADR 0024「DynamoDB 作 events-out」）**：

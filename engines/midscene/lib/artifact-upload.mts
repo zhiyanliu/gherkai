@@ -92,7 +92,7 @@ export class ArtifactUploader {
 
   // act 边界抢传单文件快照（ADR 0029「act 边界抢传」，为 Fargate 预演）：供 worker 在每个 step_done 安全点
   // 反复抢传**增量增长的单份 report.html**（Midscene report 边跑边 append，中断落 destroy 前会整份丢）。
-  // 与 toReportRef 三点区别（Midscene 单腿增补、Nova 无需——见 ADR 0029 uploader 接口条）：
+  // 与 toReportRef 三点区别（Midscene 单引擎增补、Nova 无需——见 ADR 0029 uploader 接口条）：
   //   ① **绕 uploaded 幂等守卫**：每次都真传（同 keyFor → S3 同 key overwrite），overwrite-latest 最新即最全；
   //   ② **不记 uploaded**：故 scope 末 toReportRef(reportFile) 仍传 destroy 后 finalize 的权威完整版、
   //      flushAndCleanup 仍按 uploaded 正确跳过——快照只是中途保险，不篡改两级上传账本；
@@ -105,7 +105,7 @@ export class ArtifactUploader {
     await this.uploadOne(path.resolve(localPath));  // 同 keyFor → overwrite；不查/不加 uploaded
   }
 
-  // scenario 边界抢传诊断 log（ADR 0029「第四级：scenario 边界抢传」，Midscene 单腿、为 Fargate 预演）：
+  // scenario 边界抢传诊断 log（ADR 0029「第四级：scenario 边界抢传」，Midscene 单引擎、为 Fargate 预演）：
   // 供 worker 在每个 scenario_done 安全点抢传该 scenario 期间**已在盘、尚未传**的 log/*.log——把 log 丢失窗口
   // 从「整个 run」收窄到「当前正在跑的 scenario」。log 边跑边 createWriteStream append 写（`<MIDSCENE_RUN_DIR>/log/`），
   // scenario 边界截至已完成 scenario 的字节已在盘、可抢。承 snapshotReport 的「绕 uploaded 幂等守卫 + 不记 uploaded」

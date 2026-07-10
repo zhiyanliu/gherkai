@@ -41,13 +41,14 @@ def _put_event(events_table, run_id: str, scope_id: str, seq: int, event: dict) 
 
 
 def _engine(fargate, run_id: str = _RUN_ID, region: str | None = None,
-            artifact_s3: tuple[str, str] | None = None) -> FargateEngine:
+            artifact_s3: tuple[str, str] | None = None, sdk_artifact_dir_env: dict | None = None) -> FargateEngine:
     return FargateEngine(
         ecs_client=fargate["ecs"], s3_client=fargate["s3"], ddb_events_table=fargate["events_table"],
         run_id=run_id, cluster=fargate["cluster"], task_definition=fargate["task_def"],
         network_config=fargate["network_config"], job_s3=(fargate["bucket"], f"{run_id}/jobs/"),
         events_table_name=fargate["events_table_name"], container_name=fargate["container_name"],
-        artifact_s3=artifact_s3, region=region, poll_interval_s=0.01,  # 测试快轮询（不接 profile——容器用 task role）
+        artifact_s3=artifact_s3, sdk_artifact_dir_env=sdk_artifact_dir_env, region=region,
+        poll_interval_s=0.01,  # 测试快轮询（不接 profile——容器用 task role）
     )
 
 
@@ -78,6 +79,19 @@ def test_run_scope_puts_job_to_s3(fargate):
     obj = fargate["s3"].get_object(Bucket=fargate["bucket"], Key=f"{_RUN_ID}/jobs/browse.json")
     body = obj["Body"].read().decode("utf-8").strip()
     assert json.loads(body)["scope"]["id"] == "browse"
+
+
+def test_run_scope_job_key_quotes_scope_id(fargate):
+    # scope_id 含 `/`:（如 feature 路径 features/x.feature:7）→ job key 用 quote(safe='')：/ 编码成 %2F、: 成 %3A，
+    # 不造 S3 假子前缀、与 S3ResultStore（同 quote）一致（真跑暴露的一致性缺陷回归守卫）。
+    from urllib.parse import quote
+    eng = _engine(fargate)
+    sid = "features/deterministic_anchor.feature:7"
+    handle, _events = eng.run_scope(_job(sid))
+    expected_key = f"{_RUN_ID}/jobs/{quote(sid, safe='')}.json"  # features%2Fdeterministic_anchor.feature%3A7.json
+    obj = fargate["s3"].get_object(Bucket=fargate["bucket"], Key=expected_key)  # 能取到＝key 用了 quote
+    assert json.loads(obj["Body"].read().decode("utf-8"))["scope"]["id"] == sid
+    assert "%2F" in expected_key and "%3A" in expected_key  # 确认 / 和 : 都被编码（不造子前缀）
 
 
 def test_run_scope_runtask_injects_env(fargate, monkeypatch):
@@ -133,6 +147,14 @@ def test_run_scope_omits_artifact_s3_when_none(fargate, monkeypatch):
     assert "ARTIFACT_S3_PREFIX" not in env
 
 
+def test_run_scope_injects_sdk_artifact_dir_env(fargate, monkeypatch):
+    # SDK 产物落点 env（NOVA_LOGS_DIR 等）也须注入——**否则 worker ArtifactUploader run_dir=None→no-op→产物随容器盘销毁丢**
+    # （真跑暴露：只注 ARTIFACT_S3_* 不够，uploader 还要 SDK 落点 env 算 run_dir/相对 key）。这条守卫防回归。
+    env = _spy_run_task_env(fargate, monkeypatch,
+                            _engine(fargate, sdk_artifact_dir_env={"NOVA_LOGS_DIR": "/tmp/gherkai-run/rid/nova-trajectories"}))
+    assert env["NOVA_LOGS_DIR"] == "/tmp/gherkai-run/rid/nova-trajectories"
+
+
 # ---- Query 迭代器：增量拉 + 保序 + scope_done 终止（moto DDB 忠实）----
 def test_read_events_yields_in_seq_order_until_scope_done(fargate):
     eng = _engine(fargate)
@@ -182,12 +204,12 @@ def test_read_events_incremental_across_polls(fargate):
 
 
 def test_read_events_midscene_lowlevel_marshalling_and_ascending_read(fargate):
-    # 跨腿编组同构 + 升序读（ADR 0024）：Midscene 那腿走**低层** PutItemCommand（attribute 显式 {N:String(seq)}/{S}），
-    # Nova 那腿走 resource.put_item（原生 int）——两条不同 API 层，都须落成 core Query 能读的**同构** item。现有测试的
+    # 跨引擎编组同构 + 升序读（ADR 0024）：Midscene 那个引擎走**低层** PutItemCommand（attribute 显式 {N:String(seq)}/{S}），
+    # Nova 那个引擎走 resource.put_item（原生 int）——两条不同 API 层，都须落成 core Query 能读的**同构** item。现有测试的
     # _put_event 走 resource（=Nova 形态），此处补 Midscene 低层形态：直接经低层 client 写 {N:"..."}。
     # **本测试真正锁住的（诚实边界，勿夸大）**：
     #   ① 跨层编组同构——低层 client 写的 {N}/{S} item，core 的 resource.Table Query 能读出（len==11、类型对）。
-    #      若两腿编组不兼容（如 Midscene 误写 {S} 进 N-key），moto 直接 ClientError 拒；core 读不出则 len≠11。
+    #      若两个引擎编组不兼容（如 Midscene 误写 {S} 进 N-key），moto 直接 ClientError 拒；core 读不出则 len≠11。
     #   ② 升序读——引擎若误用 ScanIndexForward=False（降序）本测试会红（实测变异确认）。
     # **不锁的**：① 「漏 ScanIndexForward」不会红——moto 默认即按 sort-key 升序返回（本测试预写也是升序），故这条
     #   决策靠此测试守不住（记账诚实，别声称锁了跨 9/10 数值重排）；② 「seq 误存 String」不由本测试兜——它全程手写
@@ -247,6 +269,39 @@ def test_read_events_stopped_without_scope_done_drains_then_raises(fargate):
     # 先 yield 出 scope_started（主循环）+ 末尾 step_done（_final_drain 强一致补），再抛 —— 次序不可颠倒、drain 不可漏
     assert [type(e).__name__ for e in got] == ["ScopeStarted", "StepDone"]
     assert state["describe_calls"] >= 1  # 确实走了 STOPPED 兜底、非 scope_done 主判
+
+
+def test_final_drain_paginates_across_last_evaluated_key():
+    """_final_drain 终读须翻页：>1MB 尾部 DDB Query 分页返回 LastEvaluatedKey，不循环 ExclusiveStartKey 会丢事件。
+
+    构造假 events table（query 按有无 ExclusiveStartKey 返回不同页）——moto 难造 >1MB 分页，此处精确验
+    「首页带 LastEvaluatedKey → 续 ExclusiveStartKey 拉次页 → 拉全所有 item」的分页语义。
+    """
+    pk = f"{_RUN_ID}#browse"
+
+    def _line(seq: int) -> str:
+        return json.dumps({"type": "step_done", "scenarioId": "sc:0", "stepIndex": seq, "status": "passed"})
+
+    class _PagingTable:
+        def __init__(self):
+            self.calls = []  # 记录每次 query 是否带 ExclusiveStartKey
+
+        def query(self, **kw):
+            self.calls.append(kw)
+            if "ExclusiveStartKey" not in kw:
+                # 首页：seq 2,3 + LastEvaluatedKey（模拟 1MB 单页截断）
+                return {"Items": [{"seq": 2, "body": _line(2)}, {"seq": 3, "body": _line(3)}],
+                        "LastEvaluatedKey": {"pk": pk, "seq": 3}}
+            # 次页（带 ExclusiveStartKey）：seq 4,5，无 LastEvaluatedKey（末页）
+            return {"Items": [{"seq": 4, "body": _line(4)}, {"seq": 5, "body": _line(5)}]}
+
+    eng = FargateEngine.__new__(FargateEngine)
+    eng._events = _PagingTable()
+    got = list(eng._final_drain(pk, last_seq=1))
+    # 两页全拉出（不因单次 query 只返首页而丢 seq 4,5）——分页守卫防回归
+    assert [e.step_index for e in got] == [2, 3, 4, 5]
+    assert len(eng._events.calls) == 2  # 翻了第二页
+    assert eng._events.calls[1]["ExclusiveStartKey"] == {"pk": pk, "seq": 3}  # 用首页 LastEvaluatedKey 续读
 
 
 def test_read_events_stopped_clean_exit_zero_terminates_without_raise(fargate):

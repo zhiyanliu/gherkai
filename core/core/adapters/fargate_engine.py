@@ -25,6 +25,7 @@ from __future__ import annotations
 import json
 import time
 from typing import Iterator
+from urllib.parse import quote
 
 from core.adapters._boto import require_boto3
 from core.errors import WorkerNetworkError
@@ -98,6 +99,9 @@ class FargateEngine:
         container_name: str,       # RunTask overrides 要指定往哪个 container 注 env
         artifact_s3: tuple[str, str] | None = None,  # (bucket, prefix)：worker 产物上传落点（ADR 0029）——注入 worker 的
                                    # ARTIFACT_S3_BUCKET/PREFIX，否则容器盘停即销毁、产物必丢（ADR 0029「cloud 下注入不是可选」）。None=不上传
+        sdk_artifact_dir_env: dict | None = None,  # 按引擎的 SDK 产物落点 env（如 {"NOVA_LOGS_DIR": "/容器内/…/nova-trajectories"}）——
+                                   # worker ArtifactUploader 用其父级算 run_dir/相对 key。**缺它 uploader run_dir=None→no-op 报 file://→产物丢**
+                                   # （真跑暴露：只注 ARTIFACT_S3_* 不够，SDK 落点 env 也必注）。引擎无关：由组合根按引擎算好、本 adapter 只转发。
         region: str | None = None, # 注入 worker 的 AWS_REGION（组合根已落实成具体字符串，ADR 0016 决策 C）；None＝真无 region、worker fail-loud
         poll_interval_s: float = 0.5,
     ) -> None:
@@ -113,6 +117,7 @@ class FargateEngine:
         self._events_table_name = events_table_name
         self._container = container_name
         self._artifact_s3 = artifact_s3  # (bucket, prefix) or None——注入 worker 产物上传落点（ADR 0029）
+        self._sdk_artifact_dir_env = sdk_artifact_dir_env or {}  # 按引擎 SDK 落点 env（NOVA_LOGS_DIR/MIDSCENE_RUN_DIR）
         self._region = region
         # 不存 profile：Fargate 用 task role，注入 profile 名会 ProfileNotFound 盖过 task role（ADR 0016 决策 C 的非对称）。
         self._poll = poll_interval_s
@@ -120,7 +125,11 @@ class FargateEngine:
     def run_scope(self, job: Job) -> tuple[FargateWorkerHandle, Iterator[Event]]:
         """起一个 Fargate task 跑 job，返回 (句柄, DDB events 事件流迭代器)。对称 SubprocessEngine.run_scope。"""
         # ① job-in 走 S3（ADR 0024 A3）：整 job 序列化（复用 wire.job_to_line）PutObject，env 只传小指针 JOB_S3_URI。
-        job_key = f"{self._job_prefix}{job.scope_id}.json"
+        # scope_id 用 quote(safe='')：/ 也编码成 %2F——否则 scope_id 里的 `/`（如 feature 路径）在 job_prefix 下
+        # 造 S3 假子前缀（jobs-in/features%2F… 被拆成多级"目录"）。job-in 落 **独立前缀 jobs-in/**（组合根
+        # build_fargate_engines 注入、与 ResultStore 的 jobs/ 物理隔离、不撞 key）；worker 经 JOB_S3_URI 全指针
+        # GetObject 读、不 list/unquote 枚举，故 quote 的唯一作用是避假子前缀（编码沿用 ResultStore 的 quote(safe='') 惯例）。
+        job_key = f"{self._job_prefix}{quote(job.scope_id, safe='')}.json"
         self._s3.put_object(Bucket=self._job_bucket, Key=job_key, Body=(job_to_line(job) + "\n").encode("utf-8"))
         job_s3_uri = f"s3://{self._job_bucket}/{job_key}"
 
@@ -137,6 +146,10 @@ class FargateEngine:
         if self._artifact_s3 is not None:
             env.append({"name": "ARTIFACT_S3_BUCKET", "value": self._artifact_s3[0]})
             env.append({"name": "ARTIFACT_S3_PREFIX", "value": self._artifact_s3[1]})
+        # SDK 产物落点 env（NOVA_LOGS_DIR/MIDSCENE_RUN_DIR，组合根按引擎算好的容器内路径）：worker ArtifactUploader
+        # 用其父级算 run_dir/相对 key——**缺它 uploader run_dir=None→no-op→产物丢**（真跑暴露；只注 ARTIFACT_S3_* 不够）。
+        for name, value in self._sdk_artifact_dir_env.items():
+            env.append({"name": name, "value": value})
         # region 与 core store 同源注入（ADR 0016 决策 C）：Fargate 容器不继承本地 env、也不吃 profile config，非 None 时
         # 显式传（组合根已落实成具体字符串），否则 worker region_name=None → NoRegionError/AgentCore InvalidRegionError。
         # **不注入 AWS_PROFILE**：容器用 task role，注入 profile 名会 ProfileNotFound 盖过 task role（正确的非对称）。
@@ -206,16 +219,28 @@ class FargateEngine:
                 time.sleep(self._poll)  # task 还在跑、暂无新事件 → 等一个轮询周期再拉（延迟 vs 读放大，ADR 0024）
 
     def _final_drain(self, pk: str, last_seq: int) -> Iterator[Event]:
-        """task STOPPED 后的终读：强一致 Query 补最终一致可能还没看到的末尾事件（ADR 0024 读一致性条）。"""
+        """task STOPPED 后的终读：强一致 Query 补最终一致可能还没看到的末尾事件（ADR 0024 读一致性条）。
+
+        **必须翻页**（与主循环不同）：主循环靠逐轮 `SK>last_seq` re-query 天然跨 1MB 单页上限；但终读是
+        「最后一次、之后 `_raise_for_exit`+return、不再 query」，单次 query 遇上 >1MB 尾部（DDB Query 单页
+        上限）会返回 `LastEvaluatedKey` 并把余下 item 留在下一页——不循环 `ExclusiveStartKey` 就静默丢弃，
+        与本函数「反映所有在先成功写」的强一致承诺相悖。故 while 循环拉全所有页。
+        """
         from boto3.dynamodb.conditions import Key
 
-        resp = self._events.query(
-            KeyConditionExpression=Key(_PK_ATTR).eq(pk) & Key(_SK_ATTR).gt(last_seq),
-            ScanIndexForward=True,
-            ConsistentRead=True,  # 强一致：反映所有在先成功写（2× RRU，成本忽略；防永久漏最后几条）
-        )
-        for it in resp.get("Items", []):
-            yield event_from_line(it[_BODY_ATTR])
+        kwargs = {
+            "KeyConditionExpression": Key(_PK_ATTR).eq(pk) & Key(_SK_ATTR).gt(last_seq),
+            "ScanIndexForward": True,
+            "ConsistentRead": True,  # 强一致：反映所有在先成功写（2× RRU，成本忽略；防永久漏最后几条）
+        }
+        while True:
+            resp = self._events.query(**kwargs)
+            for it in resp.get("Items", []):
+                yield event_from_line(it[_BODY_ATTR])
+            last_key = resp.get("LastEvaluatedKey")
+            if not last_key:
+                break  # 无更多页 → 拉全
+            kwargs["ExclusiveStartKey"] = last_key  # 续下一页（>1MB 尾部才触发）
 
     def _task_exit_code(self, task_arn: str) -> int | None:
         """DescribeTasks 查退出码：lastStatus==STOPPED 才有 exitCode（STOPPED 前常 null）。未 STOPPED → None（继续轮询）。"""

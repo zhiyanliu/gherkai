@@ -449,7 +449,7 @@ def test_prune_empty_dirs_removes_empty_tree(tmp_path):
 
 
 def test_prune_empty_dirs_keeps_nonempty(tmp_path):
-    # 某腿 flush 失败保留了产物（目录非空）→ 该目录及其祖先保留（护栏：不误删产物）
+    # 某个引擎 flush 失败保留了产物（目录非空）→ 该目录及其祖先保留（护栏：不误删产物）
     run_dir = tmp_path / "reports" / "rid"
     kept = run_dir / "nova-trajectories" / "sess"
     kept.mkdir(parents=True)

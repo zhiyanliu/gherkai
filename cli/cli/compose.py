@@ -138,7 +138,7 @@ def build_engines(
       相对 worker cwd 解析，相对路径会落错地方（与 Nova trajectory 早期踩的 cwd 歧义同源）。
 
     产物 S3 上传落点（ADR 0029「第一期实现定论」）——`artifact_s3=(bucket, prefix)` 非 None 时（跟
-    `--backend cloud` 走、由组合根注入、非 env-sniff）给两腿 worker 叠加 `ARTIFACT_S3_BUCKET`/
+    `--backend cloud` 走、由组合根注入、非 env-sniff）给两个引擎 worker 叠加 `ARTIFACT_S3_BUCKET`/
     `ARTIFACT_S3_PREFIX` env：worker 据此上传产物→报 `s3://`→删本地。**None（local）→ 不注入 → worker
     走原 `file://` 路径、零行为变化**。worker 只认"有没有这组 env"，对"我在哪跑"无知（ADR 0016 注入红线）。
     prefix 约定 = `<report_dir>/<run_id>/`（与 S3ReportStore/ResultStore 同前缀，key 镜像本地 run 树）。
@@ -147,8 +147,8 @@ def build_engines(
     `AWS_REGION` > `AWS_DEFAULT_REGION` > profile config）与 profile（`--profile` > `AWS_PROFILE`）：非 None 时经 `_inject_aws`
     显式写进注入 env（`AWS_REGION`/`AWS_PROFILE`）覆盖继承值——使 `--region`/`--profile` 真贯通到 subprocess worker
     （EventSink/JobSource/ArtifactUploader/Nova Workflow/Midscene fromNodeProviderChain 建 client 都读它们）、与 core store
-    同源、消除分叉。None＝不写（真无值、fail-loud，对齐 store 宽容）。**subprocess 两腿都注入**（Nova/Midscene 补建路径见下）。
-    注意：本函数**只建 subprocess 两腿**（local 执行）。cloud 执行由 `build_fargate_engines` 接管——组合根
+    同源、消除分叉。None＝不写（真无值、fail-loud，对齐 store 宽容）。**subprocess 两个引擎都注入**（Nova/Midscene 补建路径见下）。
+    注意：本函数**只建 subprocess 两个引擎**（local 执行）。cloud 执行由 `build_fargate_engines` 接管——组合根
     （`__main__`）按 `--backend` 分流：cloud ⇒ `build_fargate_engines`（FargateEngine）、否则本函数（SubprocessEngine）。
     **FargateEngine 侧只注入 region、不注入 profile**（容器用 task role，profile 是本机 `~/.aws` 概念、注入会
     ProfileNotFound 盖过 task role——正确的非对称，ADR 0016 决策 C）。
@@ -157,7 +157,7 @@ def build_engines(
     midscene_dir = repo / "engines" / "midscene"
 
     # 完整继承当前环境（AWS 凭证等）再叠加产物落点——SubprocessEngine 的 env 非 None 时整体替换，故须带 os.environ。
-    # S3 上传 env（cloud 时注入两腿共用）：worker 拼 s3://<bucket>/<prefix><产物在 run 树内相对路径>（ADR 0029）。
+    # S3 上传 env（cloud 时注入两个引擎共用）：worker 拼 s3://<bucket>/<prefix><产物在 run 树内相对路径>（ADR 0029）。
     s3_env = (
         {"ARTIFACT_S3_BUCKET": artifact_s3[0], "ARTIFACT_S3_PREFIX": artifact_s3[1]}
         if artifact_s3 is not None else {}
@@ -396,9 +396,10 @@ def build_fargate_engines(
     - run_id：拼 events PK（`new_run_id()` 后注入，对称 store）。
     - **profile 不传给 FargateEngine**（正确的非对称，ADR 0016 决策 C）：容器用 task role；region 传（已落实成
       具体字符串、经 RunTask overrides 注入 worker）。
-    - job-in 落点 = (bucket, `{prefix_key}<run_id>/jobs/`)、artifact 上传落点 = (bucket, `{prefix_key}<run_id>/`)——
-      与 ResultStore/report 同前缀镜像 run 树。**artifact_s3 必注入**（对称 subprocess build_engines 的 s3_env）：否则
-      Fargate 容器盘停即销毁、引擎产物（trajectory/report）必丢（ADR 0029「cloud 注入不是可选」/0032）。
+    - job-in 落点 = (bucket, `{prefix_key}<run_id>/jobs-in/`)——**jobs-in/ 非 jobs/**（ResultStore 判定真值占 jobs/、
+      load_all 枚举它；job-in 独立前缀避撞 key + 误读）。artifact 上传落点 = (bucket, `{prefix_key}<run_id>/`)——与
+      report 同前缀镜像 run 树。**artifact_s3 必注入**（对称 subprocess build_engines 的 s3_env）：否则 Fargate 容器
+      盘停即销毁、引擎产物（trajectory/report）必丢（ADR 0029「cloud 注入不是可选」/0032）。
     句柄可注入（测试 monkeypatch），未注入则惰性建（区分 ecs/s3/ddb resource）。
     """
     from core.adapters.fargate_engine import FargateEngine
@@ -411,17 +412,29 @@ def build_fargate_engines(
         ddb_events_table = _make_ddb_table(events_table, region=region, profile=profile)
 
     pfx = _normalize_prefix(report_dir)
-    job_s3 = (bucket, f"{pfx}{run_id}/jobs/")
-    # 产物上传落点（ADR 0029）：prefix = <report_dir>/<run_id>/（run 树根，worker 拼产物相对路径；与 job/report 同前缀镜像
+    # job-in 落点用 **jobs-in/**（**不是 jobs/**）：ResultStore 判定真值写在 <run_id>/jobs/<quote(scope_id)>.json、
+    # 且 load_all 用 `list jobs/ + unquote basename` 枚举判定——job-in（输入）与 ResultStore（输出判定）scope_id 编码
+    # 相同、若共用 jobs/ 前缀会撞 key（互相覆盖）+ 被 load_all 误当判定读。故 job-in 独立前缀 jobs-in/。（真跑暴露。）
+    job_s3 = (bucket, f"{pfx}{run_id}/jobs-in/")
+    # 产物上传落点（ADR 0029）：prefix = <report_dir>/<run_id>/（run 树根，worker 拼产物相对路径；与 report 同前缀镜像
     # run 树）。**cloud 必注入**——否则容器盘停即销毁、产物必丢（ADR 0029「cloud 注入不是可选」）。对称 build_engines 的 s3_env。
     artifact_s3 = (bucket, f"{pfx}{run_id}/")
+    # SDK 产物落点 env（容器内路径）——**uploader 靠它算 run_dir/相对 key，缺它 no-op 报 file://、产物丢**（真跑暴露）。
+    # 容器内固定 run 根 /tmp/gherkai-run/<run_id>/，按引擎子目录（对称 subprocess 侧 nova-trajectories/midscene-run）：
+    # uploader run_dir=父级=<run 根>，S3 key = ARTIFACT_S3_PREFIX(<report_dir>/<run_id>/) + 相对路径 → 与 subprocess 镜像一致。
+    container_run_root = f"/tmp/gherkai-run/{run_id}"
+    sdk_env_by_engine = {
+        "novaact": {"NOVA_LOGS_DIR": f"{container_run_root}/nova-trajectories"},
+        "midscene": {"MIDSCENE_RUN_DIR": f"{container_run_root}/midscene-run"},
+    }
 
     def _engine(engine: str) -> Engine:
         return FargateEngine(
             ecs_client=ecs, s3_client=s3, ddb_events_table=ddb_events_table,
             run_id=run_id, cluster=cluster, task_definition=task_def_name(prefix, engine),
             network_config=network_config, job_s3=job_s3, events_table_name=events_table,
-            container_name=container_name(engine), artifact_s3=artifact_s3, region=region,  # profile 不传（决策 C 非对称）
+            container_name=container_name(engine), artifact_s3=artifact_s3,
+            sdk_artifact_dir_env=sdk_env_by_engine.get(engine, {}), region=region,  # profile 不传（决策 C 非对称）
         )
 
     return {engine: _engine(engine) for engine in _ENGINES}

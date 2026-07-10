@@ -1,6 +1,6 @@
 // run-scope worker 单测（ADR 0024/0014/0028）——派发分支 + 投票多数票数学 + 网络瞬时分类。
 // 跑：node --import tsx --test worker/run-scope.test.ts（已接入 npm test）。
-// 与 Nova 腿 test_argument.py / test_transient_network.py 对称：纯逻辑、注 fake agent、不连 AWS。
+// 与 Nova 引擎 test_argument.py / test_transient_network.py 对称：纯逻辑、注 fake agent、不连 AWS。
 //
 // 事件经注入的 fake sink 收集（ADR 0024 I/O 边缘可注入接口：emit 从模块级 fd 写改为参数注入的 EventSink，
 // 使测试可注 fake、无需真写 fd 再读回——顺带补上 emit 此前"模块级、无法打桩"的缺口）。testSink 作 sink 参数

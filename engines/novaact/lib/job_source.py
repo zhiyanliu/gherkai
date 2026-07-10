@@ -1,6 +1,6 @@
 """job 入口（Nova worker，ADR 0024「I/O 边缘可注入接口」第一期）：worker 主流程唯一的 job 读入口。
 
-对称 Midscene 的 lib/job-source.mts（各语言各写、语义契约对称，ADR 0024）+ 对称本腿 ArtifactUploader
+对称 Midscene 的 lib/job-source.mts（各语言各写、语义契约对称，ADR 0024）+ 对称本引擎 ArtifactUploader
 的结构骨架（from_env 唯一读 env、退化态是同类实例、外部 client 惰性建）。
 
 `read()` 返回**已解析的 job dict**（非流/句柄）——否则「从哪读」漏进 worker 主流程，S3/stdin 两态就无法
@@ -29,7 +29,7 @@ class JobSource:
         """从注入的 env 造（唯一读 env 处）。JOB_S3_URI 非空 → S3 态；无/空串 → stdin 态。
 
         `or None`：空串统一当「未注入」（对称 Midscene `|| undefined`、ArtifactUploader `bucket or None`）——
-        避免两腿对「注入了空串」给出相反语义。
+        避免两个引擎对「注入了空串」给出相反语义。
         """
         return cls(uri=os.environ.get("JOB_S3_URI") or None)
 

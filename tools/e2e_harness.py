@@ -190,7 +190,7 @@ def run(engine: str, feature: str, votes: int, interrupt: str, run_id: str, grac
                 do_kill("between_steps")
         elif et == "scenario_done":
             scen_done += 1
-            # scenario 边界抢传验证时机（ADR 0029「第四级」，Midscene 单腿）：第一个 scenario 完成后延迟 kill——
+            # scenario 边界抢传验证时机（ADR 0029「第四级」，Midscene 单引擎）：第一个 scenario 完成后延迟 kill——
             # 让 scenario1 的 snapshotLogs 在其 scenario_done 后跑完（log 进 S3）、scenario2 起来，SIGTERM 落在
             # scenario2 运行中。验证：S3 应已有 scenario1 期间的 log（对照单 scenario scope_end 中断 S3 log=0）。
             # 需 jobs[0] 有 >1 scenario——即**多 scenario 归一个 @scope 的 feature**（如 concurrency_and_scope

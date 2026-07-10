@@ -350,8 +350,9 @@ def _cmd_run(args, repo: Path) -> int:
 
     # 组合根注入引擎 resolver（延后到此：cloud 时 artifact_s3 已在上面确定，一并注入给 worker，ADR 0029）。
     # **决策 A 落到 CLI（ADR 0016/0033）**：cloud ⇒ FargateEngine（云执行）；否则 SubprocessEngine（本地）。
-    # cloud_fargate 只在 do_report and cloud 分支置值——`--backend cloud --no-report`（need_cloud=False、cloud_fargate 仍 None）
-    # 是既有逃生舱：不落库、也不上云执行，仍走 subprocess 裸跑（与 store 侧「三个 store 一次不构造」同逃生舱语义）。
+    # cloud_fargate 在 3a 的 `backend=='cloud'` 分支**无条件置值**（与 do_report 正交，report⊥执行）——故
+    # `--backend cloud --no-report` 仍走 Fargate（cloud_fargate 非 None），只是不落库、不生成 report。
+    # `--no-report` 的逃生舱只作用于 store 轴（persistence=None、不构造三个 store），绝不改执行环境（见 3a 注释 + ADR 0016 决策 A）。
     if cloud_fargate is not None:
         engines = compose.build_fargate_engines(
             run_id=run_id, prefix=cloud_fargate["prefix"], cluster=cloud_fargate["cluster"],
@@ -443,7 +444,7 @@ def _cmd_run(args, repo: Path) -> int:
 
     # cloud 模式：清理本地 run 根的空壳（ADR 0029）。cloud 下 <report_dir>/<run_id>/ 只是 worker 写产物的临时
     # 暂存区——产物已上传 S3、worker 已 rmtree 各自子目录（nova-trajectories/midscene-run），只剩空目录。
-    # 只删空目录（若某腿整目录 flush 失败保留了产物、其目录非空则自然不删，与 worker「上传失败保留本地」护栏自洽）。
+    # 只删空目录（若某个引擎整目录 flush 失败保留了产物、其目录非空则自然不删，与 worker「上传失败保留本地」护栏自洽）。
     # 这是 cli 组合根清自己算出的本地落点——core 对本地文件系统无知（0016 窄腰），不该由 core/store 删。
     # local 模式不清（产物就该留本地当最终落点）。
     if args.backend == "cloud":

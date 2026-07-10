@@ -54,7 +54,7 @@ const INFLIGHT_SETTLE_MS = 1500;
 // 抢传跑在主流程（scenario 之间、非 SIGTERM handler），此预算限的是「延迟下一 scenario 的墙钟」，非 grace。
 const SCENARIO_LOG_SNAPSHOT_BUDGET_MS = 8000;
 
-// AWS SDK v3 服务端瞬时故障的节流错误 name 集（ADR 0028）——对齐 botocore 节流码集（保两腿对称）。
+// AWS SDK v3 服务端瞬时故障的节流错误 name 集（ADR 0028）——对齐 botocore 节流码集（保两个引擎对称）。
 // AgentCore 起会话（StartBrowserSessionCommand）是 AWS SDK v3 调用，服务端瞬时不可用/限流时抛的 error
 // 带 name（如 ThrottlingException）+ $metadata.httpStatusCode + 可选 $retryable。
 const AWS_THROTTLE_NAMES = new Set([
@@ -109,7 +109,7 @@ const URL_IN_QUOTES = /"(https?:\/\/[^"]+)"/;
 
 // 事件出口抽进 lib/event-sink.mts（ADR 0024「I/O 边缘可注入接口」第一期）：可注入、可测；subprocess 态写
 // EVENTS_FD fd（无则回落 stdout 调试）。emit 为 async（合理不对称：为 Fargate 化的 DDB PutItem（aws-sdk-js）
-// 预留；Nova 那腿 emit 同步）+ 作参数注入 runStep/runScenario（两腿统一打桩机制），不再是模块级函数。
+// 预留；Nova 那个引擎 emit 同步）+ 作参数注入 runStep/runScenario（两个引擎统一打桩机制），不再是模块级函数。
 // log（stderr 诊断）**不属那三条 I/O 边、不进 sink**（协议传输面 vs 诊断面物理隔离，ADR 0024），保模块级。
 function log(msg: string): void {
   process.stderr.write(msg + "\n");
@@ -364,7 +364,7 @@ async function main(): Promise<number> {
       // act 边界抢传（report snapshot）也在 runScenario 内 step_done 安全点（ADR 0029，为 Fargate 预演）。
       const statuses = await runScenario(agent, page, sc.id, sc.steps, votesN, uploader, snapState, eventSink);
       await eventSink.emit({ type: "scenario_done", scenarioId: sc.id, status: aggregate(statuses) });
-      // scenario 边界抢传诊断 log（ADR 0029「第四级」，Midscene 单腿、为 Fargate 预演）：把该 scenario 期间已在盘、
+      // scenario 边界抢传诊断 log（ADR 0029「第四级」，Midscene 单引擎、为 Fargate 预演）：把该 scenario 期间已在盘、
       // 未传的 log/*.log 抢进 S3，收窄 log 丢失窗口从「整个 run」到「当前正在跑的 scenario」。best-effort：失败吞、
       // 不阻塞下一 scenario（对齐 report 抢传）。per-file mtime 去重 + 总墙钟预算在 snapshotLogs 内（退化网络护栏）。
       // no-op（local）下 snapshotLogs 直接返回。report 已由 runScenario 内 step_done 抢传覆盖，此处只补 log。
