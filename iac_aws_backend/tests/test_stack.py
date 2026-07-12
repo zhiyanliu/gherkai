@@ -10,12 +10,13 @@ import json
 
 import aws_cdk as cdk
 from aws_cdk.assertions import Template, Match
+import pytest
 
 from stack import BackendStack
 
 
-def _template(prefix: str = "gherkai-") -> Template:
-    app = cdk.App()
+def _template(prefix: str = "gherkai-", context: dict | None = None) -> Template:
+    app = cdk.App(context=context)
     stack = BackendStack(app, "T", prefix=prefix,
                          env=cdk.Environment(account="000000000000", region="us-east-1"))
     return Template.from_stack(stack)
@@ -136,3 +137,75 @@ def test_execution_role_and_two_task_roles():
     # 3 role：1 execution role（共享）+ 2 task role（每引擎分立，最小权限，ADR 0033）。
     t = _template()
     t.resource_count_is("AWS::IAM::Role", 3)
+
+
+# ---- stopTimeout（WP3-B grace 校准入口，ADR 0032）----
+def test_stop_timeout_defaults_to_120s():
+    # 默认 stopTimeout = 120s（贴 Fargate 上限），两个 task-def 的 container 都带（SIGTERM→SIGKILL 宽限）。
+    t = _template()
+    for engine in ("novaact", "midscene"):
+        t.has_resource_properties("AWS::ECS::TaskDefinition", {
+            "Family": f"gherkai-{engine}-worker",
+            "ContainerDefinitions": Match.array_with([
+                Match.object_like({"Name": f"{engine}-worker", "StopTimeout": 120}),
+            ]),
+        })
+
+
+def test_stop_timeout_context_override():
+    # -c stop_timeout=90 覆盖默认，落到 container StopTimeout（WP3-B 迭代试值免改 code）。
+    # 用 str "90"（非 int 90）——真实 CDK `-c stop_timeout=90` 恒传字符串，测真实路径（避免测试与 CLI 分叉）。
+    t = _template(context={"stop_timeout": "90"})
+    t.has_resource_properties("AWS::ECS::TaskDefinition", {
+        "ContainerDefinitions": Match.array_with([Match.object_like({"StopTimeout": 90})]),
+    })
+
+
+def test_stop_timeout_accepts_upper_boundary_120():
+    # **上界含 120**（=Fargate 硬上限、=默认值）：走**校验路径**（显式 context "120"，非默认路径的 raw is None 短路）
+    # 才真正锁住 `<= 120` 的「等于」一侧——off-by-one 改成 `< 120` 时本测试会红（默认路径测不到，见 dim test-coverage）。
+    t = _template(context={"stop_timeout": "120"})
+    t.has_resource_properties("AWS::ECS::TaskDefinition", {
+        "ContainerDefinitions": Match.array_with([Match.object_like({"StopTimeout": 120})]),
+    })
+
+
+def test_stop_timeout_accepts_lower_boundary_1():
+    # 下界含 1：锁 `1 <=` 的「等于」一侧（改成 `1 <` 时本测试红）。
+    t = _template(context={"stop_timeout": "1"})
+    t.has_resource_properties("AWS::ECS::TaskDefinition", {
+        "ContainerDefinitions": Match.array_with([Match.object_like({"StopTimeout": 1})]),
+    })
+
+
+def test_stop_timeout_rejects_just_over_cap_121():
+    # **刚越上界 121** fail-fast：钉死上限 = 120（区分 <=120 / <=119 / <=130——180 太远、区分不了边界）。
+    with pytest.raises(ValueError, match="Fargate"):
+        _template(context={"stop_timeout": "121"})
+
+
+def test_stop_timeout_rejects_over_fargate_cap():
+    # 远越界（180=Nova grace 下限）也拒——错误信息点名 Fargate 硬上限 + ADR 0032 冲突。
+    with pytest.raises(ValueError, match="Fargate"):
+        _template(context={"stop_timeout": "180"})
+
+
+def test_stop_timeout_rejects_zero_and_negative():
+    # 下界外（0 / 负数）fail-fast——stopTimeout 须 ≥1。
+    for bad in ("0", "-1"):
+        with pytest.raises(ValueError, match="Fargate"):
+            _template(context={"stop_timeout": bad})
+
+
+def test_stop_timeout_rejects_non_integer():
+    # 非整数 context 值 fail-fast（笔误如 -c stop_timeout=abc）。
+    with pytest.raises(ValueError, match="整数秒"):
+        _template(context={"stop_timeout": "abc"})
+
+
+def test_stop_timeout_rejects_bool_and_float_typed_context():
+    # cdk.json/编程式 context 可给原生 bool/float（非 CLI str）：True→int 子类、90.5→截断会绕过「须整数秒」意图。
+    # 收紧后经 str() 归一，二者均 fail-fast（与 CLI str 路径同行为，见 _resolve_stop_timeout 注释）。
+    for bad in (True, 90.5):
+        with pytest.raises(ValueError, match="整数秒"):
+            _template(context={"stop_timeout": bad})

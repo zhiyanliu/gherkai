@@ -16,6 +16,7 @@ from aws_cdk import (
     Stack,
     RemovalPolicy,
     CfnOutput,
+    Duration,
     aws_dynamodb as dynamodb,
     aws_s3 as s3,
     aws_ec2 as ec2,
@@ -31,15 +32,47 @@ import names
 
 
 class BackendStack(Stack):
+    # Fargate 平台对 container stopTimeout 的硬上限（SIGTERM→SIGKILL 宽限）。ECS 部署期会拒 >120s（对 EC2 launch
+    # type 无此限、对 Fargate 有）；此常量供 synth 期 fail-fast，别等 deploy 才炸（WP3-B Nova 180s>120s 冲突的根源）。
+    FARGATE_STOP_TIMEOUT_MAX_S = 120
+    DEFAULT_STOP_TIMEOUT_S = 120  # WP3-B 校准中的起点：贴 Fargate 上限（尽量给 worker 会话释放+抢传预算），可 -c stop_timeout= 覆盖
+
     def __init__(self, scope: Construct, construct_id: str, *, prefix: str, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
         self.prefix = prefix
+        self.stop_timeout_s = self._resolve_stop_timeout()
 
         vpc = self._network()
         self._storage()          # DDB ×2 + S3 ×1
         self._cluster(vpc)       # {prefix}cluster（RunTask 时 cli 按名指定，task-def 不绑 cluster）
         self._task_definitions()  # 2 引擎：ECR + task-def + task role
         self._ssm_network(vpc)   # 写 subnet/sg ID 供 cli 读
+
+    # ---- stopTimeout 解析（WP3-B grace 校准入口，ADR 0032）----
+    def _resolve_stop_timeout(self) -> int:
+        """container stopTimeout（秒）：`-c stop_timeout=N` 覆盖，默认 120s。
+
+        WP3-B grace 真容器校准的**唯一落点**（`FargateWorkerHandle.stop` 忽略运行期 grace 参数，真实宽限由 task-def
+        期这个常量决定，见 ADR 0024/0032）。做成 context 可配是为 WP3-B 迭代试不同值免改 code。
+        **synth 期 fail-fast**：Fargate 硬上限 120s，>120 部署期必被 ECS 拒——早报错、点明是 Fargate 限制而非笔误。
+        （Nova grace 下限 180s>120s 的冲突正卡在这条硬上限上，WP3-B 真跑标定后定解法，见 ADR 0032 grace 预算条。）
+        """
+        raw = self.node.try_get_context("stop_timeout")
+        if raw is None:
+            return self.DEFAULT_STOP_TIMEOUT_S
+        # 显式收紧类型再转：CLI `-c stop_timeout=` 恒给 str，但 cdk.json / 编程式 context 可给原生 bool/float——
+        # 直接 int(raw) 会静默把 True→1、90.5→90（bool 是 int 子类、float 截断），绕过「须为整数秒」意图。故先经
+        # str() 归一：str(True)='True' / str(90.5)='90.5' 都会让 int() 抛 ValueError，与 CLI str 路径行为一致。
+        try:
+            seconds = int(str(raw))
+        except (TypeError, ValueError):
+            raise ValueError(f"stop_timeout context 须为整数秒，得到 {raw!r}")
+        if not 1 <= seconds <= self.FARGATE_STOP_TIMEOUT_MAX_S:
+            raise ValueError(
+                f"stop_timeout={seconds}s 越界：Fargate 要求 1..{self.FARGATE_STOP_TIMEOUT_MAX_S}s"
+                f"（>120s 部署期会被 ECS 拒；这正是 Nova 180s grace 冲突的硬上限，见 ADR 0032）"
+            )
+        return seconds
 
     # ---- DynamoDB ×2 + S3 ×1（ADR 0033 资源清单；schema 与 core/tests/conftest.py fixture 一致）----
     def _storage(self) -> None:
@@ -123,7 +156,8 @@ class BackendStack(Stack):
         self._grant_task_role(task_role, engine)
 
         # Nova 需更大 cpu/memory（playwright+chromium）；Midscene 亦跑 chromium。取 1vCPU/2GB 起步（真跑标定，
-        # 属运维配置）。stopTimeout ≤120s（ADR 0024/0032；真容器 grace 校准 defer 0032）。
+        # 属运维配置）。stopTimeout（SIGTERM→SIGKILL 宽限）= self.stop_timeout_s（默认 120s、-c stop_timeout= 覆盖，
+        # Fargate ≤120s 硬上限——WP3-B grace 校准中，见 _resolve_stop_timeout / ADR 0032）。
         task_def = ecs.FargateTaskDefinition(
             self, f"TaskDef{engine.capitalize()}",
             family=names.task_def_name(self.prefix, engine),
@@ -144,7 +178,7 @@ class BackendStack(Stack):
                 ),
             ),
             # 不设 AWS_REGION/AWS_PROFILE（ADR 0033 决策 C）：region 每 run 经 RunTask overrides 注入、凭证靠 task role。
-            stop_timeout=None,  # 用 task-def 默认；真容器 grace 校准 defer 0032（Nova 180s>120s 冲突）
+            stop_timeout=Duration.seconds(self.stop_timeout_s),  # WP3-B 校准中，默认 120s、-c stop_timeout= 覆盖（见 _resolve_stop_timeout）
         )
 
     def _grant_task_role(self, role: iam.Role, engine: str) -> None:

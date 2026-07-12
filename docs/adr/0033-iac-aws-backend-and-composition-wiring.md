@@ -25,7 +25,7 @@
 
 **ECS / Fargate：**
 4. ECS cluster `{prefix}cluster`。
-5. **每引擎一个 task definition + 一个容器镜像（2 个，见「2 镜像」节）**：task-def family = `{prefix}{engine}-worker`（`engine`=引擎规范名 `novaact`/`midscene`，即 `{prefix}novaact-worker` / `{prefix}midscene-worker`——须与 cli `compose.task_def_name` 逐字一致）。Fargate 兼容、`networkMode=awsvpc`。**`stopTimeout` 当前不显式设**（`stop_timeout=None`、用 ECS 默认 30s）——Fargate 平台上限 ≤120s，而 Nova grace 下限可达 180s 的真冲突整体 defer [0032](./0032-fargate-execution-environment.md) 真容器校准（`FargateEngine.stop` 现忽略 grace 只发 StopTask，当前值不影响本批行为）。**task-def 内 container 元素名 = `{engine}-worker`（不带 prefix，见下「container 名约定」）**。**task-def 不设 `AWS_REGION`/`AWS_PROFILE`**（见「task-def 不焊 region/凭证」）。
+5. **每引擎一个 task definition + 一个容器镜像（2 个，见「2 镜像」节）**：task-def family = `{prefix}{engine}-worker`（`engine`=引擎规范名 `novaact`/`midscene`，即 `{prefix}novaact-worker` / `{prefix}midscene-worker`——须与 cli `compose.task_def_name` 逐字一致）。Fargate 兼容、`networkMode=awsvpc`。**`stopTimeout` 显式设为 120s（`stack._resolve_stop_timeout`，贴 Fargate ≤120s 平台上限）、可经 CDK context `-c stop_timeout=N` 覆盖**（synth 期对非整数/越界 `[1,120]` fail-fast）——做成可配是为 WP3-B 迭代试不同 grace 值免改 code。**仍 defer [0032](./0032-fargate-execution-environment.md) 的是 grace 预算解法**（Nova grace 下限可达 180s > 120s 硬上限的真冲突，须真容器标定后定压 margin/act_timeout 的取向），**不是 stopTimeout 是否设值**（`FargateWorkerHandle.stop` 忽略运行期 grace 只发 StopTask，真实宽限由此 task-def 期 `stopTimeout` 决定）。**task-def 内 container 元素名 = `{engine}-worker`（不带 prefix，见下「container 名约定」）**。**task-def 不设 `AWS_REGION`/`AWS_PROFILE`**（见「task-def 不焊 region/凭证」）。
 6. ECR 仓库（2 个，各承一镜像）。
 7. VPC 网络：subnet(s) + security group(s)（`awsvpcConfiguration` 用；ID 走 SSM，见「subnet/sg 走 SSM」）。**VPC 来源三档可指定**（CDK context，见下「VPC 来源」）——默认建新，但支持复用现有/默认 VPC 避 NAT 成本。
 
