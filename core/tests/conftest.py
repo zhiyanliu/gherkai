@@ -138,7 +138,7 @@ def fargate(_fake_aws_creds):
 
     **moto ECS 状态机失真（绿≠对，务必知）**：container `exitCode` 恒 0、`lastStatus` 恒 PENDING、task.lastStatus
     由 describe 次数驱动——**退出码/容器终止语义 moto 测不了**，FargateEngine 的退出码解析（`_task_exit_code`/
-    `_raise_for_exit`）用**构造 describe 响应 dict** 的纯单测锁逻辑，真实时序 defer 真跑（WP3-B）。moto 只忠实测
+    `_raise_for_exit`）用**构造 describe 响应 dict** 的纯单测锁逻辑，真实时序已由真容器校准覆盖（见 ADR 0032「真容器校准结论」）。moto 只忠实测
     run_task/stop_task 编排 + DDB Query 迭代器。
     """
     import boto3

@@ -10,11 +10,13 @@
 零 AWS、零 greenlet、零 chromium、~秒级——默认单测跑（无 marker）。
 
 **这个哨兵护的是「rs._on_signal 保持 flag-only 协作语义」**：fixture 装的是真 `rs._on_signal`，故若有人把
-它从「只 _stop.set()」改回「raise」（Journey 0001 发现 #2 的 raise 模型根因），信号在 fixture 主循环里
-raise 未捕获异常 → 进程非 0 退出 / 行为改变 → 本测试 rc==0 断言失败、可见（review S2 修复：原先 fixture 装
-手抄副本、改真 handler 测试也不红、是假哨兵）。**边界诚实说明**：fixture 跑的是无 greenlet 的 fake act
-循环，故它验的是「handler 语义 + 协作退范式」，**不复现真 greenlet 卡死本身**（那概率性、不宜断言，见
-Journey 0001）；真 greenlet 环境的干净退已由 WP-S 一次性真跑验证（归 Journey 0001）。scenario/投票循环的
+它从「只 _stop.set()」改回「raise」（即撞 playwright greenlet 切换区致死循环卡死的 raise 模型根因，见 ADR 0024 被拒方案），信号在 fixture 主循环里
+raise 未捕获异常 → 进程非 0 退出 / 行为改变 → 本测试 rc==0 断言失败、可见（此哨兵的关键设计：原先 fixture 装
+手抄副本、改真 handler 测试也不红、是假哨兵；改装真 `rs._on_signal` 才有护栏效力）。**边界诚实说明**：fixture 跑的是无 greenlet 的 fake act
+循环，故它验的是「handler 语义 + 协作退范式」，**不复现真 greenlet 卡死本身**（signal-raise 撞
+greenlet 切换区致死循环那条路概率性触发、不宜断言，机制见 ADR 0024 被拒方案）；真 greenlet 环境的
+干净退（flag-only 改造）已由真 spawn worker + 真 chromium/greenlet 的一次性真跑验证（见 ADR 0024
+终止契约）。scenario/投票循环的
 _stop 检查回归由 test_interrupt_model.py 的单测覆盖，不靠本进程测试。
 """
 import signal

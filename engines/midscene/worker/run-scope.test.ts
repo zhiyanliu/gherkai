@@ -372,7 +372,7 @@ test("runScenario: report mtime 不变（确定性步不写 report）→ 不重�
 
 
 // ---- 中断兜底抢传（interruptSnapshot，ADR 0029 handler 兜底；对称 Nova test_interrupt_model 把 handler 提出可测）----
-// 从 onSignal 提出的可测纯函数：锁住「空窗跳过 / 成功抢传 / 失败吞不抛」——这是 WP3-A 核心交付、ADR 强调的
+// 从 onSignal 提出的可测纯函数：锁住「空窗跳过 / 成功抢传 / 失败吞不抛」——正是 ADR 强调的
 // 「Node 能在 handler 里 await 抢传、Nova greenlet 不能」关键不对称，此前是 main() 内闭包、零测试（该对称却漏）。
 test("interruptSnapshot: reportFile 空窗（首个 act 前未置）→ 跳过、不调 snapshotReport", async () => {
   const { interruptSnapshot } = await importMod();

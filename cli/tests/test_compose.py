@@ -83,7 +83,7 @@ def test_build_engines_nova_always_has_act_timeout(tmp_path: Path):
 
 def test_build_engines_injects_artifact_s3_env_symmetrically(tmp_path: Path):
     # artifact_s3=(bucket, prefix) → 两个引擎 worker 都拿到 ARTIFACT_S3_BUCKET/PREFIX env（worker from_env 真正读的东西，
-    # ADR 0029）。跨越"__main__ 算元组 → compose 翻成 env"这道缝，防键名写错/合并漏掉时静默退回 file://（review #5）。
+    # ADR 0029）。跨越"__main__ 算元组 → compose 翻成 env"这道缝，防键名写错/合并漏掉时静默退回 file://。
     repo = compose.repo_root()
     nova_dir = tmp_path / "rid" / "nova-trajectories"
     mid_dir = tmp_path / "rid" / "midscene-run"
@@ -181,7 +181,7 @@ def test_resolve_region_env_chain(monkeypatch):
 
 
 def test_resolve_region_falls_back_to_profile_config(monkeypatch):
-    # 关键（修 #2）：--region/env 全 miss → 回落 boto3.Session(profile).region_name 读 profile config 的 region。
+    # 关键（profile-only region 落实）：--region/env 全 miss → 回落 boto3.Session(profile).region_name 读 profile config 的 region。
     # 不落实则 profile-only 用户下 worker AgentCore validate_region(None) → InvalidRegionError 崩。
     monkeypatch.delenv("AWS_REGION", raising=False)
     monkeypatch.delenv("AWS_DEFAULT_REGION", raising=False)
@@ -242,7 +242,7 @@ def test_engine_min_grace_mixed_run_takes_max():
     assert max(compose.engine_min_grace(e) for e in legs) == compose.engine_min_grace("novaact")
 
 
-# ---- WP2 两层命名（ADR 0033）：prefix + 基名推导 / task-def / container / SSM 路径 ----
+# ---- 两层命名（ADR 0033）：prefix + 基名推导 / task-def / container / SSM 路径 ----
 def test_default_name_prefix_original_concat():
     # prefix 原样拼基名（含分隔符由用户负责，防粘连——同 S3 prefix 先例）
     assert compose.default_name("gherkai-", "runs") == "gherkai-runs"

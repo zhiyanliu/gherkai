@@ -1,10 +1,10 @@
-"""FargateEngine adapter 单测（ADR 0024「DynamoDB 作 events-out」/ WP1-S2）。
+"""FargateEngine adapter 单测（ADR 0024「DynamoDB 作 events-out」）。
 
 **证据边界分流（CLAUDE.md「绿≠对」；moto ECS 状态机失真已实测确认，见 conftest.fargate docstring）**：
 - **moto 忠实、用 `fargate` fixture 测**：run_scope 调对 RunTask（env 注入 JOB_S3_URI/events 表/run_id/scope_id）+
   PutObject job 到 S3；Query 迭代器增量拉 + last_seq 游标 + scope_done 终止；stop→StopTask。
 - **moto 失真（exitCode 恒 0、lastStatus 由 describe 次数驱动）→ 退出码语义用「构造 describe 响应 dict」的纯单测**测
-  `_task_exit_code`/`_raise_for_exit`（不经 moto、可造任意 exitCode）；真实 ECS 时序标定 defer WP3-B 真跑。
+  `_task_exit_code`/`_raise_for_exit`（不经 moto、可造任意 exitCode）；真实 ECS 时序标定见 ADR 0032 真容器校准。
 
 对拍 test_subprocess_engine.py：同一 Engine port、同一 (WorkerHandle, Iterator[Event]) 形状。
 """
@@ -239,7 +239,7 @@ def test_read_events_midscene_lowlevel_marshalling_and_ascending_read(fargate):
 
 # ---- STOPPED 兜底终止 + _final_drain（worker 崩溃没发 scope_done）----
 # 这条兜底路径（DescribeTasks STOPPED → _final_drain 强一致补末尾 → _raise_for_exit）不依赖真实 ECS 时序、
-# 全是确定性控制流 + 强一致 DDB Query（moto 可测），故**不在** defer WP3-B 之列，须锁住「先 drain 后 raise」次序。
+# 全是确定性控制流 + 强一致 DDB Query（moto 可测），故**不在**真实 ECS 时序标定（ADR 0032 真容器校准）之列，须锁住「先 drain 后 raise」次序。
 # moto fargate fixture 的 ecs 被 pin 成 lastStatus 恒不推进（见 conftest），故这里用可控假 ecs 造 RUNNING→STOPPED 时序。
 def test_read_events_stopped_without_scope_done_drains_then_raises(fargate):
     """worker 崩溃没发 scope_done：迭代器读完已落事件 → 见 STOPPED → 强一致 drain 补末尾 → raise 非零退出。"""

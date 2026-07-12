@@ -1,8 +1,10 @@
-"""flag-only 中断模型单测（ADR 0024 终止契约，修 Journey 0001 发现 #1+#2）。
+"""flag-only 中断模型单测（ADR 0024 终止契约）。
+
+锁两条曾致命的中断反模式的修复（见 ADR 0024 被拒方案）：建连早期 SIGTERM 误报 engine_error；signal handler raise 撞 playwright greenlet 切换区致死循环卡死。
 
 与 test_run_step.py 同风格：纯逻辑、注 fake nova、不连 AWS、不烧钱、不真起子进程。
 覆盖 flag-only 改造引入的新行为，防回归到会撞 greenlet 卡死的 raise 模型：
-- handler 只置 _stop 标志、绝不 raise（发现 #2 根因是 handler raise 撞 greenlet 切换区）。
+- handler 只置 _stop 标志、绝不 raise（根因：handler raise 撞 playwright greenlet 切换区致死循环卡死，见 ADR 0024 被拒方案）。
 - SIGTERM/SIGINT 共用同一 flag-only handler（Ctrl-C 也协作式停）。
 - act/act_get 传 timeout=ACT_TIMEOUT_S（act 有界返回，让标志位有限时间被检测）。
 - scenario 循环 / 投票循环收到 _stop → 协作式停（正常 break/return，不 raise 穿透）。
@@ -88,10 +90,10 @@ class _RecordNova:
         return _FakeResult(v)
 
 
-# ---- handler flag-only：只置标志、绝不 raise（发现 #2 根治核心）----
+# ---- handler flag-only：只置标志、绝不 raise（根治 handler raise 撞 greenlet 切换区致死循环卡死，见 ADR 0024 被拒方案）----
 def test_signal_handler_only_sets_flag_never_raises():
     # 直接调**真** handler rs._on_signal（模块级函数、可 import 调，非闭包）：验它只置 _stop、绝不 raise
-    # （raise 会撞 greenlet 切换区、发现 #2 的根因）。signal handler 签名 (signum, frame)。
+    # （raise 会撞 playwright greenlet 切换区致死循环卡死，见 ADR 0024 被拒方案）。signal handler 签名 (signum, frame)。
     assert not rs._stop.is_set()
     rs._on_signal(signal.SIGTERM, None)  # 真调 handler，不抛
     assert rs._stop.is_set()             # handler 置了标志
@@ -135,20 +137,20 @@ def test_act_get_called_with_timeout(captured):
     assert nova.act_get_timeouts == [rs.ACT_TIMEOUT_S] * 3  # 每票都传 timeout
 
 
-# ---- 投票循环 _stop 检查：中途收到停止信号 → 不再投后续票、且不 emit 误导性 step_done（review S1）----
+# ---- 投票循环 _stop 检查：中途收到停止信号 → 不再投后续票、且不 emit 误导性 step_done ----
 def test_vote_loop_stops_before_any_vote(captured):
     nova = _RecordNova(bool_seq=[True, True, True])
     rs._stop.set()  # 进 _run_step 前已置位 → 投票循环第一轮顶部即 break
     r = rs._run_step(nova, "sc:0", _step("Then", '"对吗"'), 3, captured)
     assert nova.act_get_calls == 0          # 一票都没投（停止信号在循环顶生效）
     assert r == "aborted"                   # 返回 aborted（非 passed/failed）
-    # 关键（S1 修复）：**不 emit 任何 step_done**——否则会把「从未执行的断言」误标成 failed(0/3)、污染 RunReport
+    # 关键：**不 emit 任何 step_done**——否则会把「从未执行的断言」误标成 failed(0/3)、污染 RunReport
     assert not any(e["type"] == "step_done" for e in captured)
 
 
 def test_vote_loop_stops_midway_no_bogus_verdict(captured):
     # votes_n=3、投了 1 票(True)后置位 → 若旧逻辑会用 votes=[True]/分母3 算出 failed(1/3) 并 emit——那是把
-    # 外部中止伪装成断言失败（review S1 的核心 failure_scenario）。修复后应：不 emit step_done、返回 aborted。
+    # 外部中止伪装成断言失败（核心 failure_scenario）。修复后应：不 emit step_done、返回 aborted。
     nova = _RecordNova(bool_seq=[True, True, True])
 
     orig_act_get = nova.act_get
@@ -196,9 +198,9 @@ def test_run_scenario_stops_midway(captured):
     assert not any(e["type"] == "step_skipped" for e in captured)
 
 
-# ---- 建连退避 _backoff_interrupted：收到停止信号即唤醒返回 True（驱动 run_scope 真退避路径，review S3）----
+# ---- 建连退避 _backoff_interrupted：收到停止信号即唤醒返回 True（驱动 run_scope 真退避路径）----
 def test_backoff_interrupted_wakes_on_stop():
-    # 驱动 run_scope 的**真** _backoff_interrupted（内部 _stop.wait）——非 stdlib Event.wait 同义反复（S3 修复）：
+    # 驱动 run_scope 的**真** _backoff_interrupted（内部 _stop.wait）——非 stdlib Event.wait 同义反复：
     # 若有人把它改回 time.sleep(backoff)，set 标志后本函数会睡满 backoff、dt 不会 <1s，本测试红。
     import threading
     rs._stop.clear()

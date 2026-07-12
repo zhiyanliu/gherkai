@@ -18,7 +18,7 @@ run_id 组合根构造期注入本 adapter（对称已有 artifact_s3 落点注�
 
 **证据边界（CLAUDE.md「绿≠对」）**：moto 能验接线/RunTask 调对/Query 增量/退出码翻异常；但 moto 对 ECS `lastStatus`
 状态机（STOPPED 前 exitCode=null 时序）、DDB 最终一致读的真实时序**保真度存疑**——轮询节奏/STOPPED 滞后/终读一致性的
-真行为须真容器标定（defer WP3-B）。
+真行为已由真容器校准厘清（见 ADR 0032 真容器校准结论）。
 """
 from __future__ import annotations
 
@@ -72,8 +72,8 @@ class FargateEngine:
     组合根构造期注入（对称 __main__ 在 new_run_id 后 build_engines 注入 artifact_s3 落点）：
     - ecs/s3/ddb client：boto3 句柄（adapter 不自建，ADR 0016）。
     - run_id：拼 events 表 PK 用（每 run 一个 engine 实例，run_id 构造期已生成）。
-    - task_config：cluster / task_definition / network（subnet/security-group/assign-public-ip）——**真值由 WP2
-      IaC 产出、组合根注入**；本 adapter 只认字段、不知真 ARN（moto 测用假值验接线）。
+    - task_config：cluster / task_definition / network（subnet/security-group/assign-public-ip）——**真值由 iac_aws_backend
+      （ADR 0033）产出、组合根注入**；本 adapter 只认字段、不知真 ARN（moto 测用假值验接线）。
     - job_s3：(bucket, prefix) job 对象落点；events_table_name：events 表名（worker PutItem 目标）。
     - region：组合根**落实成具体字符串**的 AWS region（`--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > profile config，
       ADR 0016 决策 C）——非 None 时经 RunTask overrides 注入 worker 的 `AWS_REGION`，使 worker 建 boto3/aws-sdk client
