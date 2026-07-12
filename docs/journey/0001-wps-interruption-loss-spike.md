@@ -106,12 +106,12 @@ subprocess 下这些"没传的"还留本地（[ADR 0028](../adr/0028-transient-n
 
 （对称心智：两个引擎都是"上传锚 step 安全点、不等结束"；不对称点全在 Midscene 的"单份大文件增量"性质。）
 
-## 待进一步验证
+## 待进一步验证（**均已闭合/moot，回填 spike 当时的开放问题**）
 
-- **greenlet 卡死触发率**：每次 mid-act SIGTERM 命中关键区的概率（决定泄漏频度/紧急度）。当前只确认"可复现、结构性反复"，未统计命中率。
-- **Midscene 增量抢传带宽实测**：方向 A 每步重传整份增长 report 的累计 egress（几十步 scope 可能几十 MB）——粒度/节流取舍待真做时量。
-- **act 边界抢传的有效性**：WP-S 抢传验证改测"act 返回后即传"能否把 scope_end 那批 trajectory.json / Midscene report 救回（原计划的"中断路径抢传"已被机制判定走不通、放弃）。
-- **Ctrl-C（SIGINT）**：机制同类（BaseException 异步 raise），需实测确认 SIGINT 直达 worker + 默认处理 mid-act unwind 是否同样撞 greenlet 陷阱。
+- **greenlet 卡死触发率**：**已 moot**——触发率是「旧 raise 模型」下的风险度量；flag-only 改造后 raise 模型已删（ADR 0024 被拒方案），该 greenlet 卡死路径生产上不再触发，「触发率」失去意义。
+- **Midscene 增量抢传带宽实测**：**已吸收进设计**（ADR 0029「act 边界抢传」/「scenario 边界抢传」）——粒度/节流取舍已落定为 mtime 去重「变了才传」+ scenario 边界总墙钟预算护栏。精确 egress 数字是运维观测量、非阻塞设计，带宽敏感时降粒度（ADR 0029 已记）。
+- **act 边界抢传的有效性**：**已验证闭合**——WP-S 抢传验证（本文「抢传验证」节，SIGKILL 卡死场景仍零丢失）+ 真 Fargate 复验（trajectory/report 中断后救回）已证实，结论落 ADR 0032「抢传能力」+ 0029。
+- **Ctrl-C（SIGINT）**：**已闭合**——SIGINT 已纳入 flag-only handler（ADR 0024「SIGINT 一并纳入」），SIGTERM/SIGINT 共用、都不 raise、不撞 greenlet。
 
 ## 证据出处
 

@@ -127,16 +127,9 @@
 
 （其余非阻塞 prework：③错误分类可纯 code+单测；④orphan 恢复设计+moto+task role 加 `s3:ListBucket`；回校 ADR 0032:28 的 botocore 漂移——都可等真跑后或穿插做。）
 
-## 8. 当前精确进度
+## 8. 完成总结
 
-> **WP3-B grace 主线已收尾**——本 journey 使命基本达成，决策已全部吸收进 ADR 0032（Accepted），可考虑归档/清理。
-
-- **prework 三项完成 + 两轮对抗 review**（commit `a30e918`）；ADR 0016/0024 doc-health 回校（`36fd83f`）。
-- **stopTimeout=120 已真 deploy**（`BackendStack-gherkai` UPDATE_COMPLETE，两 task-def rev 2 带 `stopTimeout:120`，已 describe-task-definition 核实）。
-- **4 次真跑全完成**（run-1 baseline + run-2 简单 act 中断 + run-3a/3b 复合 act 中断 + run-4 Midscene 中断，结果见 §6.5）。
-- **grace 解法已落定 + 落回 ADR 0032**：margin 60→30（下限 150）、stopTimeout=120、ACT_TIMEOUT_S/Midscene 25 不动；候选 B 明确否决；「~12s 尾巴 = ECS 记录滞后非 worker 耗时」已拆定。经对抗 review（12 CONFIRMED 全修，含结论 4 从「不同层不冲突」纠正为「Fargate 侧结构性接受 D+TTL」）。相关 commit 见 git log（`f0eac6a` 起）。
-- **剩余（非阻塞 backlog，均记 ADR 0032「留口子」）**：退化网络下超时封顶实测、孤儿产物主动扫盘（task role 缺 `s3:ListBucket`）、上传错误分类升级、CI 推 ECR。
-- 编排脚本 `run2_orchestrator.py` 在 job tmp（`$CLAUDE_JOB_DIR/tmp`）——一次性实验脚手架、非长期工具（依赖 events step_started 抢窗口的时序）；随 job tmp 清理即可，无需固化。
+**WP3-B grace 主线已收尾**——4 次真跑（run-1 baseline + run-2/3a/3b Nova act 中断 + run-4 Midscene）标定完成，grace 解法（margin 60→30/下限 150、stopTimeout=120、候选 B 否决、Fargate 侧 D+TTL）+ 中断韧性结论**已全部吸收进 ADR 0032（Accepted）**，过程/commit 见 git log。剩余均为非阻塞 backlog（记 ADR 0032「留口子」：退化网络超时实测、孤儿主动扫盘、错误分类升级、CI 推 ECR）。本 journey 使命达成、待删。
 
 ## 9. 相关文件精确指针
 
