@@ -5,14 +5,14 @@
 = 180s，见 cli/cli/compose.py），头号问题是「180 是否过保守」。答它需要**单 act 墙钟分布**的实测——而
 events 表的每条 item 恰好带 `expires_at`（worker emit 时写 `int(time.time())+7d`，见 engines/*/lib/event_sink），
 减去 7d TTL 常量即还原 **worker emit 的 epoch 秒**（1s 分辨率、跨机一致、不受 core 侧 0.5s 轮询 + DDB 最终
-一致抖动污染——不像 `RunResult.StepResult.duration_ms` 含轮询噪声，见 docs/journey/0002 §4）。
+一致抖动污染——不像 `RunResult.StepResult.duration_ms` 含轮询噪声）。
 
 **单 act 墙钟** = 同一 scope（pk）内、同一 (scenario_id, step_index) 的 `step_done.emit - step_started.emit`。
 **硬约束**：`--assertion-votes 1` 才能拆出单 act——votes>1 时 worker 把 N 次 act 合进一个 step_done（见
 run_scope.py 的 tw_total 累加），墙钟会是 N 个 act 之和、拆不出单 act。跑 run-1 时务必 votes=1。
 
 **1s 分辨率的坑**：emit epoch 只到秒。act 耗时 <1s 或跨秒边界会显示 0s/1s——本脚本对 wall≤1s 打
-`coarse` 标记（勿把 0s 误读成「act 瞬时完成」，见 docs/journey/0002 §7.3）。真实 act（连模型）通常数秒~数十秒。
+`coarse` 标记（勿把 0s 误读成「act 瞬时完成」）。真实 act（连模型）通常数秒~数十秒。
 
 用法（需 AWS 凭证）：
   PYTHONPATH=core core/.venv/bin/python tools/events_wallclock.py \\
@@ -135,7 +135,7 @@ def _acts_from_scope(pk: str, items: list[dict]) -> list[dict]:
                 "wall_s": wall,
                 "time_worked_s": cost.get("time_worked_s"),
                 "votes_total": votes_total,
-                # 1s 分辨率坑：wall≤1 打 coarse（勿把 0s 误读成瞬时；见 docstring / journey 0002 §7.3）
+                # 1s 分辨率坑：wall≤1 打 coarse（勿把 0s 误读成瞬时；见本文件 docstring「1s 分辨率的坑」）
                 "coarse": wall is not None and wall <= 1,
                 # votes>1：wall 是 N 个 act 合计、非单 act——排除出分位数 + 告警（硬约束违反）
                 "multi_act": multi_act,

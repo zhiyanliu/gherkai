@@ -50,8 +50,24 @@ aws ecr get-login-password --region us-east-1 | docker login --username AWS \
   --password-stdin <account>.dkr.ecr.us-east-1.amazonaws.com
 ```
 
+## 清理（destroy）
+
+```bash
+uv run cdk destroy -c use_default_vpc=true          # 或与 deploy 时相同的 -c prefix=/vpc 档
+```
+
+**数据资源不随 destroy 删**（表/桶 `RemovalPolicy.RETAIN`、防误删，见 ADR 0033）——`cdk destroy` 后 2 张 DDB 表 + artifacts 桶**残留、需手动删**：
+
+```bash
+aws dynamodb delete-table --table-name gherkai-runs
+aws dynamodb delete-table --table-name gherkai-events
+aws s3 rb s3://gherkai-artifacts --force            # 桶非空需 --force
+```
+
+不手动删则同 prefix 重新 deploy 会因表/桶已存在而冲突。（cluster/task-def/ECR/SSM/日志组随 stack 销毁、无需手动。）
+
 ## 待做（真部署时）
 
-- `cdk bootstrap`（首次）、真 `deploy`、镜像 build & push ECR、CI 流水线。
-- 真容器 grace/中断校准见 [ADR 0032](../docs/adr/0032-fargate-execution-environment.md)。
+- `cdk bootstrap`（首次）、CI build & push ECR 流水线（现手动）。
+- ~~真容器 grace/中断校准~~ **已完成**（4 次真跑标定，见 [ADR 0032](../docs/adr/0032-fargate-execution-environment.md) 真容器校准结论）。
 - task role 的 `bedrock-agentcore`/`nova-act`/`bedrock` 资源 ARN 当前用 `*`，真跑标定后收窄。

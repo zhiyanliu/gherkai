@@ -1,5 +1,7 @@
 # WP-S 中断丢失实测预演：Nova greenlet 卡死 + 两个引擎产物丢失
 
+> **⚠️ 状态：内容已全部吸收进 ADR，本文件待删（保留仅为审计过渡）。** 结论/证据/被拒方案吸收落点：greenlet 卡死+被拒 raise/asyncio → [0024](../adr/0024-worker-core-protocol.md)「终止契约」；两引擎中断模型不对称 → 0024；act 边界抢传有效+Midscene snapshot+被拒方向 D → [0029](../adr/0029-engine-artifacts-to-s3.md)「act 边界抢传」；中断丢失量级（930KB/2.0MB/154B）+ Fargate 加重 → [0032](../adr/0032-fargate-execution-environment.md)「最大风险」；建连早期误报 engine_error → 0024。剩深层 greenlet C++ 机制/业界旁证（nice-to-have）未内联、可随删弃或转 REFERENCES。
+>
 > **类型：** Journey / 调查证据（**非 ADR**）。记"我们实测发现了什么、证据是什么、结论指向哪"，供后续处理这些问题时作单一事实源。**不记决策**——决策待真处理时落进相应 ADR（候选：0024 终止契约、0032 中断韧性）。
 > **日期：** 2026-07-04　**背景：** Fargate 化 breakdown 的 WP-S（中断丢失实测预演），见任务 WP-S。
 > **栈：** subprocess+cloud（真 AgentCore 会话 + 真 S3），是 Fargate 的忠实预演（[ADR 0029](../adr/0029-engine-artifacts-to-s3.md)）。

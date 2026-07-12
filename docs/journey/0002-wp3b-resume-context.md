@@ -1,3 +1,5 @@
+> **⚠️ 状态：WP3-B 主线已收尾、内容已全部吸收进 ADR，本文件待删（保留仅为审计过渡）。** 真跑数据表 + grace 校准结论 + ~12s=ECS 记录滞后 + 候选解法 A/B/C/D → [0032](../adr/0032-fargate-execution-environment.md)「真容器校准结论」；观测方法学 → `tools/events_wallclock.py`/`ecs_task_timing.py` docstring（自包含）；组合根接线/region-profile → [0016](../adr/0016-execution-architecture-core-lib-run-model.md) 决策 C / [0033](../adr/0033-iac-aws-backend-and-composition-wiring.md)。§6.6 是决策草稿（保留作演进史，以 ADR 0032 为准）。剩 §0-3/6-8 多为过程流水账（会话恢复上下文/施工进度），随删弃。
+>
 > 类型：会话恢复上下文（临时 staging；WP3-B 推进到稳定态后即删）
 > 用途：因主循环反复出现「持续输出 court」故障，reset 新 session 时**第一件事加载本文件**，完整恢复上下文后继续 WP3-B。
 

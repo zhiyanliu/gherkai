@@ -38,6 +38,8 @@
 
 **（编排进程角色**——跑 core/cli 的机器需 `ecs:RunTask`/`StopTask`/`DescribeTasks` + `dynamodb:Query`/`PutItem` + store 读写 + `s3:PutObject`（job 上传）——若编排也在 AWS 上跑则一并建；本地跑则用本地凭证，不在本 stack 强制。）
 
+**数据资源保护 = `RemovalPolicy.RETAIN`（表/桶，防误删）**：2 张 DDB 表 + artifacts 桶都设 `RETAIN`——`cdk destroy` **不带走它们**（承载 run 数据/产物，误删代价高）。可随 stack 销毁的非数据资源（cluster/task-def/ECR/SSM/日志组）用默认/`DESTROY`。**代价（运维须知）**：`cdk destroy` 后表/桶**残留、需手动删**（`aws dynamodb delete-table` / `aws s3 rb --force`）；否则同 prefix 重新 deploy 会因表/桶已存在而处理为导入/冲突。清理 runbook 见 `iac_aws_backend/README`。
+
 ## 两层命名：`--prefix` 批量默认 + 单资源覆盖（正交、无特判）
 
 **问题**：一个 AWS 账户下可能有**多套**环境（prod/stage）；逐个资源改名不可维护。
@@ -75,6 +77,7 @@ subnet/sg 不是「名字」，是 **AWS 建 VPC 时生成的 ID**（`subnet-0ab
 - **无循环**（与 prefix 不同）：读 SSM 的时机，prefix **已在手**（cli 已从 `--prefix`/默认解析出）→ 用它拼 SSM 路径去读 subnet/sg，正常的「IaC 输出 → 运行时读」模式。
 - 这是标准 AWS 「IaC 产出、运行时消费」模式。代价：组合根需 `ssm:GetParameter`（只读、低风险 IAM）+ 一次 boto 调用（仅未显式给 subnet/sg 时触发）。
 - 覆盖仍可给字面 ID（对称单资源覆盖层）。
+- **`_read_ssm_list` 空值静默产出空 subnets/sg（判不可达、暂不加固）**：`_read_ssm_list` 用 `[v for v in value.split(",") if v]`，对空串 → `[]` → `resolve_network` 返回空 subnets → 一路漏到 RunTask 才被 ECS 拒（不点名 prefix，破 preflix fail-fast 惯例）。**判不可达**：真实 SSM StringList 强制参数值最小长度 1、写入期拒空，CDK 空 StringList 部署期即被拒——空 SSM 值这个前提本身进不来。**触发 = 若真遇到「读了却空」**：顺手在 `_read_ssm_list`/`resolve_network` 对空补 fail-fast 点名 prefix（对齐 preflight 惯例）。低频、非阻塞。
 
 ## preflight fail-fast：用已解析 prefix 探全部资源存在性，错误点名 prefix
 
@@ -86,6 +89,7 @@ subnet/sg 不是「名字」，是 **AWS 建 VPC 时生成的 ID**（`subnet-0ab
 - 不存在 → fail-fast 退 2，**错误信息带上 prefix**：如「用 `--prefix=gherkai-` 拼出的表 `gherkai-events` 不存在——是 prefix 配错、还是 CDK（`iac_aws_backend`）未部署？」。
 - **preflight 按轴分层探（report ⊥ 执行，见下「组合根接线」）**：执行必需资源（events 表 + cluster + 桶）**恒探**（只要 `--backend cloud`）；**runs 表仅落库需要**——`--no-report` 时不探（`runs_table=None`）。即 `--backend cloud --no-report` **仍探执行资源、仍 Fargate 跑**，只是不落库、不探 runs 表。
 - **task-def 存在性暂不 preflight（护栏）**：preflight 现探表/桶/cluster，**不探 task-def**（`DescribeTaskDefinition`）。故 task-def 名维度的 prefix 配错会漏到 RunTask 才炸（退 1、不点名 prefix）。**CDK 已落地、task-def 已在 stack.py 定义并部署**——本 ADR 自设的「CDK 落地后评估纳入」复议触发点已达，但 preflight 至今仍只探表/桶/cluster、未纳入 task-def（一个已到期未执行的加固项）。评估方向：把 task-def 纳入「执行必需恒探」档（对齐 events 表/cluster），或确认 RunTask 失败信息够用。
+- **job-in S3 指针对象的生命周期未定（open decision，倾向 S3 lifecycle）**：`FargateEngine.run_scope` 每 scope `PutObject` 一个 `jobs-in/<quote(scope_id)>.json` 指针对象（因 RunTask overrides 8192 上限塞不下含 feature 的 job），**当前无任何清理**——桶只有 `RemovalPolicy=RETAIN`（管 stack 销毁、非对象过期），无 lifecycle rule；且 [0029](./0029-engine-artifacts-to-s3.md) 的清理全在 worker 侧（上传后删本地 / 孤儿扫盘），**不覆盖 core 写的这些 S3 job-in 对象**（机制不对称：core 写、清理逻辑却都在 worker）。**倾向 S3 lifecycle/TTL 自动过期**（免 core 碰清理、对齐 events 表 TTL 心智），而非组合根收尾 `DeleteObject`。**未落地**：属可加的运维加固（未清理的 job-in 对象小、只占存储、不影响正确性），触发 = 存储堆积成本可感 / 顺手加 lifecycle 时。
 
 ## 2 镜像：Nova / Midscene 各一（依赖环境本质不同）
 

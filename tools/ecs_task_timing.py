@@ -6,7 +6,7 @@
 字段**（够判定即可）。WP3-B 要的是 SIGTERM→退出的**真实墙钟预算**（`stoppingAt`/`executionStoppedAt`/`stoppedAt`
 的差），属一次性标定、非运行期判定；混进 `_task_exit_code` 会污染其单一职责、且改产品路径需回归。故独立脚本纯读。
 
-**测什么**（DescribeTasks 的时间字段，task STOPPED 后才全，见 docs/journey/0002 §4）：
+**测什么**（DescribeTasks 的时间字段，task STOPPED 后才全）：
 - `createdAt`：RunTask 收到请求。
 - `startedAt`：容器进入 RUNNING。
 - `stoppingAt`：ECS 开始停（发 SIGTERM 的锚点）。

@@ -25,7 +25,7 @@ S3 上传 env），起真 worker 跑一个 scope，按事件时机外部 SIGTERM
   #              none(baseline 不中断)
   # 桶经环境变量 HARNESS_S3_BUCKET 传（勿硬编码；跑完自行清理桶内 <prefix>）。
 
-历史：中断丢失预演、Nova 中断模型改造验证、抢传验证都用它（历次实测见 docs/journey/0001）。
+历史：中断丢失预演、Nova 中断模型改造验证、抢传验证都用它（实测结论/量级已内联 ADR 0024 终止契约 / 0029 抢传 / 0032 中断丢失量级）。
 """
 from __future__ import annotations
 
@@ -215,7 +215,7 @@ def run(engine: str, feature: str, votes: int, interrupt: str, run_id: str, grac
     # 样本有效性（防假阳性）：`n_lost=0` 只在**确实产生过可丢的产物**时才有意义。若盘和 S3 都空——中断落得
     # 太早（产物还没写盘、S3 也没抢传），此时 n_lost=0 是「没东西可丢」而非「抢传救回了」，**不构成有效的
     # 丢失/抢传测量样本**。判据：盘或 S3 上有产物 = 有效样本（实测踩过：Midscene act 时机中断太早、盘空、
-    # n_lost=0 曾被误读成抢传生效，实为无效样本——见 docs/journey/0001）。
+    # n_lost=0 曾被误读成抢传生效，实为无效样本）。
     produced = bool(disk) or bool(s3)
     sample_valid = produced
     if not produced:

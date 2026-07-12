@@ -2,7 +2,7 @@
 
 > **读者：** 后续接手 worker 端到端验证的 AI tool（也含人）。**这是操作手册**——怎么调用、怎么判读结果、有哪些真跑陷阱。
 > **机制原理**（harness 如何忠实复现 adapter spawn 环境、三通道、grace 测量）见 `e2e_harness.py` 顶部 docstring，不在此复述（单一事实源）。
-> **相关设计：** ADR 0024（worker↔core 协议 / 终止契约 / grace / I/O 边缘可注入接口）、ADR 0029（产物→S3 / act·scenario 边界抢传 / 固有残余）、journey 0001（历次实测数据）、journey 0000（WP 进度）。
+> **相关设计：** ADR 0024（worker↔core 协议 / 终止契约 / grace / I/O 边缘可注入接口）、ADR 0029（产物→S3 / act·scenario 边界抢传 / 固有残余）、ADR 0032（Fargate 中断丢失量级 + 真容器 grace 校准）。
 
 ## 这是什么 / 什么时候用
 
@@ -71,7 +71,7 @@ harness 结尾打印 `=== HARNESS_REPORT_JSON ===` + 一段 JSON。关键字段�
 
 ### 判读要点（易误判，务必照做）
 
-- **先看 `sample_valid`，再看 `n_lost`**。`n_lost=0` 在 `sample_valid=false` 时毫无意义——历史踩过：Midscene `act` 时机中断太早、盘空、`n_lost=0` 被误读成"抢传生效"，实为无效样本（见 journey 0001）。
+- **先看 `sample_valid`，再看 `n_lost`**。`n_lost=0` 在 `sample_valid=false` 时毫无意义——历史踩过：Midscene `act` 时机中断太早、盘空、`n_lost=0` 被误读成"抢传生效"，实为无效样本。
 - **`n_lost=0` 不等于"零残余"**。harness 的 lost 判据是**文件名**"盘有 S3 无"。若某文件名已在 S3（被早先抢传过）、但盘上是更大的版本（后续又 append 了），`n_lost` 记 0，但存在**字节级增量残余**。要验抢传"救了多少"，需**逐文件对比 disk vs S3 的 size**（scenario 抢传验证就是这么坐实的：scenario1 的 log 进了 S3，scenario2 的增量 disk>S3）。
 - **验"抢传因果"要交叉核对时序**：`scope_done_emitted=false` + worker stderr 有 `signal received`/`session shutdown` 但**无 flush 日志** = 确实走了中断退出、没走 scope 末 flush。这样才能证明 S3 里的产物只可能来自**边界抢传**、而非退出路径顺带传的。
 
