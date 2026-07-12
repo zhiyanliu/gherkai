@@ -30,20 +30,20 @@
 | act 正常完成墙钟 | 4~11s（p99=10.8，run-1 baseline） | — | 对照 `NOVA_ACT_TIMEOUT_S`=120 |
 | **SIGTERM→退出**（`stopping→executionStopped`） | 14 / 21.3 / 20.5s | 12.4s | 对照 `stopTimeout`=120 |
 | 会话释放（`signal received`→`session shutdown complete`） | 1.6 / 9.0 / 7.2s | **0.2s** | 随 act 复杂度 / 引擎模型变 |
-| 进程收尾固定尾巴 | ~12s | ~12s | ECS 记录 + 进程退出的引擎无关开销 |
+| ECS 记录延迟（`shutdown complete`→`executionStopped`） | ~11.5s | ~11s | 平台固定滞后、非 worker 耗时（跨 4 样本恒定 11.06~11.54s、跨引擎一致 → 测量滞后，见结论 2） |
 | 退出码 / stopCode | 全 exit 0 / UserInitiated | exit 0 / UserInitiated | 干净退出、无 SIGKILL、无泄漏 |
 
 **四条稳定结论：**
 
 1. **flag-only 软停契约在真 Fargate 成立**：4 次中断真跑（Nova×3+Midscene×1）4/4 干净退出（exit 0、CloudWatch 均见 `signal received`→`session shutdown complete`）——无一被 stopTimeout 补的 SIGKILL 截断、无会话泄漏。[0024](./0024-worker-core-protocol.md) 终止契约得真容器复验。
 
-2. **机制不对称得实测印证**（[0024](./0024-worker-core-protocol.md)「Midscene worker」条预言）：Midscene 会话释放 0.2s（Node 事件循环、signal handler 回调即时跑），Nova 1.6~9s（greenlet 不能被打断、须等 act 到安全点才检测 flag）。SIGTERM→退出的可变部分 = 会话释放段，随 act 复杂度线性增长；固定 ~12s 尾巴两引擎一致、与 act 无关。
+2. **机制不对称得实测印证**（[0024](./0024-worker-core-protocol.md)「Midscene worker」条预言）：Midscene 会话释放 0.2s（Node 事件循环、signal handler 回调即时跑），Nova 1.6~9s（greenlet 不能被打断、须等 act 到安全点才检测 flag）。SIGTERM→退出的可变部分 = 会话释放段，随 act 复杂度线性增长。**`stopping→executionStopped` 里另有 ~11s 与 act/引擎均无关的固定段**：CloudWatch 证实它是 `shutdown complete`（worker 最后一行日志）之后的**纯静默**（worker 已退），且跨 4 样本恒定 11.06~11.54s、Nova/Midscene 一致——**坐实为 ECS/Fargate 记录 `executionStoppedAt` 的平台侧固有滞后、非 worker teardown**。故 `stopping→executionStopped` 是 worker 真实退出耗时的**上界（含测量滞后）**，真实退出更快。
 
 3. **`stopTimeout=120` 校准落定、保留**：最坏实测 SIGTERM→退出 21s ≪ 120，有 ~5x 余量。**做成 CDK context `-c stop_timeout=N` 可配**（`stack._resolve_stop_timeout`，默认 120、synth 期越界 `[1,120]` fail-fast），便于未来再标定；`FargateWorkerHandle.stop` 忽略运行期 grace、真实宽限即由此常量决定。
 
 4. **grace 下限 vs stopTimeout 的冲突：subprocess 侧解决、Fargate 侧对最坏长 act 结构性接受（D+TTL 兜底）**。组合根 `engine_min_grace` 给 Nova 的 grace 下限 = `ACT_TIMEOUT_S+margin`。**要区分两条执行路径**（不能混为「不同层所以不冲突」——那只对 subprocess 成立）：
 
-   - **subprocess 路径（local）**：`SubprocessWorkerHandle.stop` **真用** grace（SIGTERM→等 grace→SIGKILL），core 等满 grace 下限才杀。压 margin 60→30 后下限 = 120+30 = **150s**，满足 [0024](./0024-worker-core-protocol.md) 不变量 `grace ≥ act_timeout + margin`——最坏长 act（跑满 `ACT_TIMEOUT_S`=120s 才到安全点）+ 会话释放(~9s) + 固定尾巴(~12s) ≈ 141s < 150s，能容纳、不泄漏。
+   - **subprocess 路径（local）**：`SubprocessWorkerHandle.stop` **真用** grace（SIGTERM→等 grace→SIGKILL，退出经 `proc.wait()`、无 ECS 的 ~11s 记录滞后）。压 margin 60→30 后下限 = 120+30 = **150s**，满足 [0024](./0024-worker-core-protocol.md) 不变量 `grace ≥ act_timeout + margin`——最坏长 act（跑满 `ACT_TIMEOUT_S`=120s 才到安全点）+ 会话释放(~9s) ≈ 129s < 150s，能容纳、不泄漏（比 Fargate 侧更宽裕，因无平台记录滞后）。
 
    - **Fargate 路径（cloud）**：`FargateWorkerHandle.stop` **忽略** grace，真实宽限 = task-def 期 `stopTimeout`、Fargate 平台硬顶 **120s**。这里 `stopTimeout=120 = ACT_TIMEOUT_S`、**margin=0**，**结构上不满足** `grace ≥ act_timeout + margin`。**关键：`ACT_TIMEOUT_S` 是「单次 `nova.act()`/`act_get()` 调用」的墙钟上界，非 step 上界**——flag-only 软停下，SIGTERM 只需等**命中时那一次 in-flight act 调用**跑到安全点（投票 step 的循环每圈顶检测 `_stop` 即 break、不跑完剩余票，见 `run_scope.py`，故不叠加成 N×120）。**故最坏情形 = SIGTERM 落在一次刚开始、会跑满 `ACT_TIMEOUT_S`(120s) 才返回的 act 早期**：Fargate 会在 120s 补 SIGKILL、此时该 act 尚未到安全点 → `cdp_session.__exit__` 跑不完 → 会话释放落空（泄漏，靠 AgentCore `sessionTimeoutSeconds` TTL 兜底，[0024](./0024-worker-core-protocol.md)「已接受代价」）+ act 边界抢传被截断（产物丢，归下「孤儿产物恢复」backlog）。这本质是**候选解法 D（接受 120 硬顶 + 最坏长 act 的 SIGKILL）**，非「无冲突」。
 

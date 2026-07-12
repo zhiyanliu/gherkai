@@ -71,7 +71,7 @@
 - **有效样本时间线**（中断落 step 1 第一个 AI act in-flight，`stopCode=UserInitiated`、`exitCode=0` 干净退出、无 SIGKILL、无泄漏）：
   - StopTask→SIGTERM 送达容器 ≈ **1.1s**（ECS 调度延迟；`stoppingAt` 16:24:03.128 → `signal 15 received` 16:24:04.191）
   - **会话释放（`signal received`→`session shutdown complete`）= 1.65s**（act 到安全点 + 三层 with `__exit__` 释放 AgentCore 会话；CloudWatch 毫秒锚点 08:24:04.191→08:24:05.840）
-  - shutdown complete→`executionStoppedAt`(进程真停) ≈ **11.3s**（Nova SDK teardown + 最后上传 + Python 进程收尾）
+  - shutdown complete→`executionStoppedAt` ≈ **11.3s**（**ECS 记录滞后、非 worker 耗时**——worker 在 shutdown complete 已退，见 §6.5「~12s 尾巴构成已拆定」）
   - **`stopping→executionStopped`（SIGTERM→退出真实耗时，stopTimeout 校准核心量）= 14.03s**
 - **结论**：SIGTERM 落 act 中途，worker 干净退出 **≈14s ≪ stopTimeout=120 ≪ grace 下限 180**。
 
@@ -84,10 +84,11 @@
 | run-3b | 复合多步 act（延迟 2s 中断） | 20.5s | 7.15s | UserInitiated/0 |
 
 - **worker 3/3 干净退出**（exitCode=0、UserInitiated、无一 SIGKILL、无会话泄漏、CloudWatch 均见 `signal received`→`session shutdown complete`）——**ADR 0024 flag-only 软停契约在真 Fargate 下成立**。
-- **SIGTERM→退出耗时 = 14~21s，两段构成**：① **会话释放（随 act 复杂度变）= 1.6~9s**（act 从中断点跑到安全点 + 三层 with `__exit__` 释放 AgentCore 会话；复合 act 更长）；② **进程收尾尾巴（稳定）≈ 11~12s**（`shutdown complete` 日志后到 `executionStoppedAt` 的静默——worker Python 逻辑已在 shutdown complete 打完最后一行、含 SDK atexit/boto 连接池关闭 + **ECS agent 记录 executionStoppedAt 的固有延迟**，与 act 无关的固定开销）。
+- **SIGTERM→退出耗时 = 14~21s，两段构成**：① **会话释放（随 act 复杂度变）= 1.6~9s**（act 从中断点跑到安全点 + 三层 with `__exit__` 释放 AgentCore 会话；复合 act 更长）；② **ECS 记录延迟（平台固定，非 worker 耗时）≈ 11~12s**（`shutdown complete` 日志后到 `executionStoppedAt` 的静默——**已坐实是 ECS/Fargate 平台侧从「容器进程退出」到「记录 executionStoppedAt」的固有滞后，不是 worker teardown**，见下证据边界①的结论）。**故真实 SIGTERM→worker 退出比 `stopping→executionStopped` 显示的更快**（worker 在 shutdown complete 那刻已退）。
 - **最坏实测 21.3s ≪ 120 ≪ 180**——**候选解法 C（证伪 180）得强支持**。
 - **孤儿产物验证（run-3a scope `:9` 中断）**：中断落 step 1 复合 act 中途，worker 到安全点时 step 1 恰好完成（step_done passed）→ **act 边界抢传把 step 1 的 trajectory + trajectory.json 完整救回 S3**（363KB+377KB，ADR 0029 抢传在真 Fargate 下生效）；漏的只有 step 2（断言，未开始）+ `session_summary.json`（scope 末产物、中断时未到）——正是 ADR 0032 记的「固有残余」，可接受。**另一旁证**：中断 scope `:9` 的 worker 后，core schedule 照常起了 scope `:16` 的新 task 跑完（events scopes=2）——**单 scope worker 被停不影响其他 scope**（job=scope 粒度设计成立）。
-- **证据边界（残留）**：① 未测「数十秒级超长 act」（如慢网/复杂 SPA）——但会话释放随 act 线性增长、加固定 12s 尾巴，即便 act 到安全点要 30s 也才 ~42s，仍 ≪120；② 那 ~12s 尾巴的精确构成（SDK teardown vs ECS 记录延迟）未拆到底——非阻塞（不影响 120 够用的结论），若要把 grace 压到极限值得深挖。
+- **~12s 尾巴构成已拆定 = ECS 记录延迟（非 worker teardown）**：CloudWatch 交叉验证——① `shutdown complete`（worker 最后一行 Python 日志）之后到 `executionStoppedAt` 之间**零 worker 日志**（worker 逻辑已跑完）；② 该静默段时长跨 4 样本高度恒定 **11.32 / 11.54 / 11.53 / 11.06s**，且**跨引擎**（Nova Python worker vs Midscene Node worker，teardown 路径完全不同）都 ~11s——若是 worker 自身 teardown（SDK atexit/boto 连接池），两引擎不可能都恰好 ~11s。**唯一解释 = 与 worker 无关的平台侧固定延迟**（ECS agent 检测容器退出并写时间戳的轮询/机制滞后）。故它是**测量滞后、非真实退出耗时**，真实退出更快、余量更大。
+- **证据边界（残留）**：① 未测「数十秒级超长 act」（如慢网/复杂 SPA）——但会话释放随 act 线性增长、加固定 ~12s ECS 记录延迟，即便 act 到安全点要 30s 也才 ~42s，仍 ≪120（且这 ~12s 是测量滞后、真实退出更快）。
 
 **run-4（Midscene 引擎中断，补全两引擎对称，`wikipedia_assertions --default-engine midscene`）**：
 
@@ -95,16 +96,18 @@
 |---|---|---|
 | SIGTERM→退出 | **12.4s** | 14~21s |
 | 会话释放（signal→shutdown） | **0.2s** | 1.6~9s |
-| 固定尾巴（shutdown→executionStopped） | ~12s | ~12s |
+| ECS 记录延迟（shutdown→executionStopped） | ~11s | ~11.5s |
 | stopCode/exit | UserInitiated/0 | UserInitiated/0 |
-| grace 下限 | `MIDSCENE_GRACE_MIN_S`=25s | 180s |
+| grace 下限 | `MIDSCENE_GRACE_MIN_S`=25s | 150s |
 
 - **会话释放 0.2s**（vs Nova 1.6~9s）——**印证 ADR 0024 机制不对称**：Midscene Node 单线程事件循环、无 greenlet，`process.on(signal)` handler 作为回调排进事件循环，会话 Stop 几乎瞬时；Nova 要等 act 到安全点（greenlet 不能被打断）故更慢。
-- **~12s 固定尾巴两引擎一致**——**证实那段是 ECS 记录 executionStoppedAt + 进程收尾的引擎无关固定开销**（非 SDK 特有）。
+- **~11s ECS 记录延迟跨引擎一致**（Nova 11.32~11.54 / Midscene 11.06）——**坐实是平台侧记录 executionStoppedAt 的固有滞后、非 worker teardown**（若是 SDK teardown，Nova/Midscene 完全不同的 teardown 路径不可能都恰好 ~11s；且 shutdown complete 后零 worker 日志）。故它是测量滞后、worker 真实退出更快。
 - **孤儿验证（Midscene report 抢传）**：中断落 step 1 之后，report（2.3MB）已被 step_done 安全点抢传上传 S3（ADR 0029 主路径生效）——中断在 step_done 之后故未触发 handler 兜底 snapshot 路径（那只在「首个/当前 act 中途、无 prior step_done」才需要，本次未落那格）。
 - **Midscene grace 下限 25s vs 实测 12.4s → 25s 够用、有 ~2x 余量**，无需动。
 
-## 6.6 WP3-B grace 解法决策（据 run-1/2/3 实测，待落回 ADR 0032）
+## 6.6 WP3-B grace 解法决策（决策草稿，已落定 → 最终版见 ADR 0032 结论 4）
+
+> **本节是决策推演草稿、保留作演进史,勿再据它维护**。最终结论已吸收进 ADR 0032「真容器校准结论」结论 4,并经对抗 review 修正了本草稿两处:① 下方 line 114「不同层→冲突不触发」的论证**被 review 推翻**（真相:subprocess 侧满足不变量、Fargate 侧对最坏长 act 结构性接受 SIGKILL+TTL 兜底,非「不冲突」）;② 「固定尾巴」实为 **ECS 记录滞后、非 worker 耗时**（见 §6.5）。以 ADR 0032 为准。
 
 **采候选解法 C（证伪 180）为主 + 温和 A（压 margin）**：
 - **`stopTimeout=120` 保留**（已 deploy）——实测最坏 21s，120 有 ~5x 余量，无需动。
@@ -124,11 +127,14 @@
 
 ## 8. 当前精确进度
 
-- **prework 三项完成 + 两轮对抗 review + commit `a30e918`**；ADR 0016/0024 doc-health 回校 commit `36fd83f`。
+> **WP3-B grace 主线已收尾**——本 journey 使命基本达成，决策已全部吸收进 ADR 0032（Accepted），可考虑归档/清理。
+
+- **prework 三项完成 + 两轮对抗 review**（commit `a30e918`）；ADR 0016/0024 doc-health 回校（`36fd83f`）。
 - **stopTimeout=120 已真 deploy**（`BackendStack-gherkai` UPDATE_COMPLETE，两 task-def rev 2 带 `stopTimeout:120`，已 describe-task-definition 核实）。
-- **run-1（baseline）+ run-2（act 中途中断）已跑完**，结果见 §6.5。核心结论：SIGTERM 落 act 中途 worker 干净退出 ≈14s ≪ 120 ≪ 180，**候选解法 C（证伪 180）得实测支持**——但仅单样本 + 轻交互短 act，需 run-3 补分布/长 act。
-- **下一步**：**run-3**——① 取多样本（跑数次中断，看 SIGTERM→退出的分布/P99，非单点）；② 试更长 act 用例（复杂页/慢网，看「act 到安全点」尾巴会不会拉长）；③ 拆那 11.3s「进程收尾」构成（SDK teardown 可否压）；④ 顺带孤儿产物验证。然后据 run-3 定最终压 margin/act_timeout 数值 → 落回 ADR 0032（grace 预算解法）。
-- 编排脚本 `run2_orchestrator.py` 在 job tmp（`$CLAUDE_JOB_DIR/tmp`）——一次性编排、非长期工具；若 run-3 复用可考虑固化进 `tools/`（但它依赖 events step_started 抢窗口的时序，属实验脚手架）。
+- **4 次真跑全完成**（run-1 baseline + run-2 简单 act 中断 + run-3a/3b 复合 act 中断 + run-4 Midscene 中断，结果见 §6.5）。
+- **grace 解法已落定 + 落回 ADR 0032**：margin 60→30（下限 150）、stopTimeout=120、ACT_TIMEOUT_S/Midscene 25 不动；候选 B 明确否决；「~12s 尾巴 = ECS 记录滞后非 worker 耗时」已拆定。经对抗 review（12 CONFIRMED 全修，含结论 4 从「不同层不冲突」纠正为「Fargate 侧结构性接受 D+TTL」）。相关 commit 见 git log（`f0eac6a` 起）。
+- **剩余（非阻塞 backlog，均记 ADR 0032「留口子」）**：退化网络下超时封顶实测、孤儿产物主动扫盘（task role 缺 `s3:ListBucket`）、上传错误分类升级、CI 推 ECR。
+- 编排脚本 `run2_orchestrator.py` 在 job tmp（`$CLAUDE_JOB_DIR/tmp`）——一次性实验脚手架、非长期工具（依赖 events step_started 抢窗口的时序）；随 job tmp 清理即可，无需固化。
 
 ## 9. 相关文件精确指针
 
