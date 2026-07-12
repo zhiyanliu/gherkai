@@ -1,15 +1,15 @@
 #!/usr/bin/env python
-"""events 表单 act 墙钟分析（WP3-B grace 校准数据前置，ADR 0032 / 0024「DynamoDB 作 events-out」）。
+"""events 表单 act 墙钟分析（Fargate grace 校准数据前置，ADR 0032 / 0024「DynamoDB 作 events-out」）。
 
-**为何存在**：WP3-B 要压 Nova grace 的两个保守估计（`NOVA_ACT_TIMEOUT_S=120` + `NOVA_GRACE_MARGIN_S=60`
-= 180s，见 cli/cli/compose.py），头号问题是「180 是否过保守」。答它需要**单 act 墙钟分布**的实测——而
+**为何存在**：Nova grace 下限 = `NOVA_ACT_TIMEOUT_S` + `NOVA_GRACE_MARGIN_S`（见 cli/cli/compose.py），
+margin 的取值需实测「单 act 正常墙钟」与「act 中途中断退出耗时」来标定（是否过保守）。答它需要**单 act 墙钟分布**的实测——而
 events 表的每条 item 恰好带 `expires_at`（worker emit 时写 `int(time.time())+7d`，见 engines/*/lib/event_sink），
 减去 7d TTL 常量即还原 **worker emit 的 epoch 秒**（1s 分辨率、跨机一致、不受 core 侧 0.5s 轮询 + DDB 最终
 一致抖动污染——不像 `RunResult.StepResult.duration_ms` 含轮询噪声）。
 
 **单 act 墙钟** = 同一 scope（pk）内、同一 (scenario_id, step_index) 的 `step_done.emit - step_started.emit`。
 **硬约束**：`--assertion-votes 1` 才能拆出单 act——votes>1 时 worker 把 N 次 act 合进一个 step_done（见
-run_scope.py 的 tw_total 累加），墙钟会是 N 个 act 之和、拆不出单 act。跑 run-1 时务必 votes=1。
+run_scope.py 的 tw_total 累加），墙钟会是 N 个 act 之和、拆不出单 act。测单 act 墙钟时务必 votes=1。
 
 **1s 分辨率的坑**：emit epoch 只到秒。act 耗时 <1s 或跨秒边界会显示 0s/1s——本脚本对 wall≤1s 打
 `coarse` 标记（勿把 0s 误读成「act 瞬时完成」）。真实 act（连模型）通常数秒~数十秒。
@@ -23,7 +23,7 @@ run_scope.py 的 tw_total 累加），墙钟会是 N 个 act 之和、拆不出�
   --json：吐机读 JSON（默认吐人读表格 + 分位数摘要）。
 
 输出：每 act 一行（scope / scenario / step / wall_s / time_worked_s / seq 区间 / 标记），末尾 wall_s 的
-min/p50/p90/p99/max 摘要——直接回答「180 过不过保守」（对照 NOVA_ACT_TIMEOUT_S=120）。
+min/p50/p90/p99/max 摘要——直接回答「grace margin 是否过保守」（对照 NOVA_ACT_TIMEOUT_S，默认 120）。
 """
 from __future__ import annotations
 
@@ -224,13 +224,13 @@ def _print_human(result: dict) -> None:
               f"{f'，已排除 {n_multi} 个 MULTI-ACT' if n_multi else ''}）===")
         print(f"min={s['min']}  p50={s['p50']}  p90={s['p90']}  p99={s['p99']}  max={s['max']}")
         print(f"对照 NOVA_ACT_TIMEOUT_S=120：p99={s['p99']}s → "
-              f"{'180 grace 看似过保守，可压 act_timeout/margin（run-1 定）' if s['p99'] < 120 else '有 act 逼近/超 120，act_timeout 不宜降'}")
+              f"{'单 act 远低于 act_timeout，grace margin 有压缩空间' if s['p99'] < 120 else '有 act 逼近/超 120，act_timeout 不宜降'}")
     elif n_multi:
         print("\n（无干净单 act 可算分布——全部 votes>1 被排除。--assertion-votes 1 重跑。）")
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="events 表单 act 墙钟分析（WP3-B grace 校准，ADR 0032）")
+    ap = argparse.ArgumentParser(description="events 表单 act 墙钟分析（Fargate grace 校准，ADR 0032）")
     ap.add_argument("--events-table", required=True, help="events 表名（如 gherkai-events）")
     g = ap.add_mutually_exclusive_group(required=True)
     g.add_argument("--run-id", help="Scan 圈本 run 全 scope（test 表低量可接受）")

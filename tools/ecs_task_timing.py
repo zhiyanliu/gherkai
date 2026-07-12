@@ -1,9 +1,9 @@
 #!/usr/bin/env python
-"""ECS task 生命周期时间字段抓取（WP3-B SIGTERM→退出耗时标定，ADR 0032 / 0024）。
+"""ECS task 生命周期时间字段抓取（Fargate SIGTERM→退出耗时标定，ADR 0032 / 0024）。
 
 **为何独立成脚本、不改 fargate_engine**：`FargateEngine._task_exit_code`（core/core/adapters/fargate_engine.py）
 是产品热路径，返回 `int|None` 供 `_read_events` 轮询判定存活/退出——它**只读 lastStatus/exitCode、丢弃时间
-字段**（够判定即可）。WP3-B 要的是 SIGTERM→退出的**真实墙钟预算**（`stoppingAt`/`executionStoppedAt`/`stoppedAt`
+字段**（够判定即可）。grace/stopTimeout 校准要的是 SIGTERM→退出的**真实墙钟预算**（`stoppingAt`/`executionStoppedAt`/`stoppedAt`
 的差），属一次性标定、非运行期判定；混进 `_task_exit_code` 会污染其单一职责、且改产品路径需回归。故独立脚本纯读。
 
 **测什么**（DescribeTasks 的时间字段，task STOPPED 后才全）：
@@ -11,7 +11,7 @@
 - `startedAt`：容器进入 RUNNING。
 - `stoppingAt`：ECS 开始停（发 SIGTERM 的锚点）。
 - `executionStoppedAt`：容器进程实际停（worker 退出的锚点）。**stoppingAt→executionStoppedAt = SIGTERM→退出真实耗时**
-  ——这是校准 stopTimeout 的核心量（对照当前 -c stop_timeout=120 / Nova grace 下限 180 的冲突，见 ADR 0032）。
+  ——这是校准 stopTimeout 的核心量（对照生效 stopTimeout；grace 下限 vs stopTimeout 的关系见 ADR 0032 结论 4）。
 - `stoppedAt`：task 完全 STOPPED（清理完）。
 - `stopCode` / `stoppedReason`：停因（`TaskFailedToStart` / `EssentialContainerExited` / `UserInitiated`(StopTask) 等）。
   SIGTERM→SIGKILL 被 stopTimeout 截断时 stopCode 仍是 UserInitiated，但 executionStoppedAt-stoppingAt ≈ stopTimeout
@@ -144,7 +144,7 @@ def _print_human(r: dict) -> None:
         print(f"--- container {c['name']} ---  exitCode={c['exit_code']} reason={c['reason']}")
     ste = d["stopping_to_execution_stopped"]
     if ste is not None:
-        # 判 SIGKILL 截断的阈值 = **实际生效的 stopTimeout**（--stop-timeout 告知），非写死 120——WP3-B 本就会试不同
+        # 判 SIGKILL 截断的阈值 = **实际生效的 stopTimeout**（--stop-timeout 告知），非写死 120——校准时本就会试不同
         # stop_timeout 值，写死 120 会在 -c stop_timeout=60 时把「达 60 被 SIGKILL」误判成「远低于 120、过保守」（方向反）。
         # 未告知则回落 Fargate 上限 120（保守）。再交叉 exitCode（137≈128+9=SIGKILL）辅助消歧。
         # 用 `is not None`（非 `or`）判在场：--stop-timeout 已在 main() 校验 [1,120]（0/负被拒），此处不会遇非法值；
@@ -158,12 +158,12 @@ def _print_human(r: dict) -> None:
         if near_cap:
             verdict = f"逼近/达生效 stopTimeout({cap}s)，疑被 SIGKILL 截断、worker 没在宽限内退干净{killed_hint}"
         else:
-            verdict = f"明显低于生效 stopTimeout({cap}s)，grace 有余量；对照 Nova grace 下限 180 看该值是否过保守"
+            verdict = f"明显低于生效 stopTimeout({cap}s)，grace 有余量；对照本 run 引擎的 grace 下限看是否过保守"
         print(f"\n对照生效 stopTimeout（{cap_src}）：SIGTERM→退出={ste}s → {verdict}")
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="ECS task 生命周期时间字段抓取（WP3-B SIGTERM→退出标定，ADR 0032）")
+    ap = argparse.ArgumentParser(description="ECS task 生命周期时间字段抓取（Fargate SIGTERM→退出标定，ADR 0032）")
     ap.add_argument("--cluster", required=True, help="ECS cluster 名（如 gherkai-cluster）")
     ap.add_argument("--task", required=True, help="task ARN 或 id")
     ap.add_argument("--region", default=None, help="AWS region（默认走 boto 默认链）")
