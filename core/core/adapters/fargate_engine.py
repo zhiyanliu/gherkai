@@ -39,6 +39,11 @@ _PK_ATTR = "pk"
 _SK_ATTR = "seq"
 _BODY_ATTR = "body"  # 0024 事件的 JSON line 原样（DDB 不解析 body）
 
+# _task_exit_code 的三态哨兵：STOPPED 但 exitCode 尚为 null（DescribeTasks 的 lastStatus 翻转与 exitCode 落值非原子，
+# STOPPED 瞬间 exitCode 可能短暂 null，AWS 有记录的时序，ADR 0024「exitCode 落值延迟」）。区别于 None（未 STOPPED）
+# 与 int（已落值）——_await_exit_code 据此对 null 有界多等几拍（防把干净退出误报 error），超限才落定异常码 1。
+_STOPPED_EXIT_PENDING = object()
+
 
 def events_pk(run_id: str, scope_id: str) -> str:
     """events 表分区键 = run_id#scope_id（复合，防重复跑撞键）。worker/adapter 各自本地拼、须逐字一致。"""
@@ -105,6 +110,8 @@ class FargateEngine:
                                    # （真跑暴露：只注 ARTIFACT_S3_* 不够，SDK 落点 env 也必注）。引擎无关：由组合根按引擎算好、本 adapter 只转发。
         region: str | None = None, # 注入 worker 的 AWS_REGION（组合根已落实成具体字符串，ADR 0016 决策 C）；None＝真无 region、worker fail-loud
         poll_interval_s: float = 0.5,
+        null_exit_grace_polls: int = 5,  # STOPPED 但 exitCode 尚 null 时的有界宽限拍数（ADR 0024「exitCode 落值延迟」）——
+                                   # 多等这么多拍等落值，超限才落定异常码 1（防把落值延迟误报 error）。5×0.5s≈2.5s，远大于落值瞬时窗口。
     ) -> None:
         require_boto3("FargateEngine")
         self._ecs = ecs_client
@@ -122,6 +129,7 @@ class FargateEngine:
         self._region = region
         # 不存 profile：Fargate 用 task role，注入 profile 名会 ProfileNotFound 盖过 task role（ADR 0016 决策 C 的非对称）。
         self._poll = poll_interval_s
+        self._null_exit_grace_polls = null_exit_grace_polls
 
     def run_scope(self, job: Job) -> tuple[FargateWorkerHandle, Iterator[Event]]:
         """起一个 Fargate task 跑 job，返回 (句柄, DDB events 事件流迭代器)。对称 SubprocessEngine.run_scope。"""
@@ -220,11 +228,13 @@ class FargateEngine:
 
             # 无新事件（或未见 scope_done）：查 task 是否已 STOPPED（兜底：worker 崩溃没发 scope_done）
             if not items:
-                exit_code = self._task_exit_code(task_arn)
-                if exit_code is not None:
+                probe = self._task_exit_code(task_arn)
+                if probe is not None:  # 已 STOPPED（含 exitCode 尚 null 的 PENDING）——task 到终态、别再拉事件
                     # task 已 STOPPED。终读一次强一致 Query 补末尾（防最终一致还没看到最后几条 PutItem，ADR 0024 读一致性条）。
                     yield from self._final_drain(pk, last_seq)
-                    self._raise_for_exit(exit_code)
+                    # 拿确定退出码：_await_exit_code 处理「exitCode 尚 null」的有界宽限（ADR 0024「exitCode 落值延迟」）——
+                    # 与 scope_done 路径复用同一读码逻辑（此刻已 STOPPED、几乎立即返回，除非撞落值延迟窗口）。
+                    self._raise_for_exit(self._await_exit_code(task_arn))
                     return
                 time.sleep(self._poll)  # task 还在跑、暂无新事件 → 等一个轮询周期再拉（延迟 vs 读放大，ADR 0024）
 
@@ -252,32 +262,51 @@ class FargateEngine:
                 break  # 无更多页 → 拉全
             kwargs["ExclusiveStartKey"] = last_key  # 续下一页（>1MB 尾部才触发）
 
-    def _task_exit_code(self, task_arn: str) -> int | None:
-        """DescribeTasks 查退出码：lastStatus==STOPPED 才有 exitCode（STOPPED 前常 null）。未 STOPPED → None（继续轮询）。"""
+    def _task_exit_code(self, task_arn: str):
+        """DescribeTasks 查退出码，**三态**（ADR 0024「exitCode 落值延迟」）：
+        - `None`：未 STOPPED（继续轮询等 STOPPED）。
+        - `_STOPPED_EXIT_PENDING`：已 STOPPED 但 `exitCode` 尚 null——lastStatus 翻转与 exitCode 落值非原子，
+          STOPPED 瞬间可能短暂 null（AWS 时序）。调用方（_await_exit_code）据此**有界多等几拍**、别当异常。
+        - `int`：已 STOPPED 且 exitCode 落值（0 正常 / 正非零异常，见 _raise_for_exit）。
+        """
         resp = self._ecs.describe_tasks(cluster=self._cluster, tasks=[task_arn])
         tasks = resp.get("tasks", [])
         if not tasks or tasks[0].get("lastStatus") != "STOPPED":
-            return None
+            return None  # 未 STOPPED
         containers = tasks[0].get("containers", [])
-        # 找本 worker container 的 exitCode；缺省当异常（0 才是正常，见 _raise_for_exit）。
+        # 找本 worker container 的 exitCode；缺 container / exitCode 尚 null → PENDING（落值延迟，非"当异常"）。
         for c in containers:
             if c.get("name") == self._container:
-                return c.get("exitCode", 1) if c.get("exitCode") is not None else 1
-        return containers[0].get("exitCode", 1) if containers else 1
+                return c["exitCode"] if c.get("exitCode") is not None else _STOPPED_EXIT_PENDING
+        if not containers:
+            return _STOPPED_EXIT_PENDING
+        return containers[0]["exitCode"] if containers[0].get("exitCode") is not None else _STOPPED_EXIT_PENDING
 
     def _await_exit_code(self, task_arn: str) -> int:
-        """轮询 DescribeTasks 直到 task STOPPED，返回 exitCode——scope_done 后读退出码用（ADR 0024「事件流结束信号」）。
+        """轮询 DescribeTasks 直到拿到确定的 exitCode——scope_done 后读退出码用（ADR 0024「事件流结束信号」）。
 
         scope_done 只表示事件流内容完整、非进程终态；等 STOPPED 读码才能捕获「worker 发完 scope_done 又会话释放失败
         非 0 退出」（Midscene cleanupFailed→exit 1），与 subprocess 无条件 proc.wait() 同构。阻塞期 = worker 会话释放
         + ECS 记录 executionStoppedAt 平台滞后（~11s，ADR 0032 结论 2）；轮询静默时由 schedule _heartbeat_wrap/deadline
         兜底唤醒（同主循环兜底路径的 sleep 轮询，不会真无限——worker 已在退出路径、很快 STOPPED）。
+
+        **STOPPED 但 exitCode 尚 null**（ADR 0024「exitCode 落值延迟」）：不立即当异常（否则把干净退出误报 error），
+        **有界**多等 `_null_exit_grace_polls` 拍等落值；超限仍 null 才落定为 1（容器真被强杀/没报码，非落值延迟）。
         """
+        pending_polls = 0
         while True:
             exit_code = self._task_exit_code(task_arn)
-            if exit_code is not None:
-                return exit_code
-            time.sleep(self._poll)
+            if exit_code is None:  # 未 STOPPED
+                time.sleep(self._poll)
+                continue
+            if exit_code is _STOPPED_EXIT_PENDING:  # STOPPED 但 exitCode 尚 null：有界多等几拍等落值
+                if pending_polls >= self._null_exit_grace_polls:
+                    return 1  # 超宽限仍 null → 落定异常（容器没报码，非落值延迟）
+                pending_polls += 1
+                time.sleep(self._poll)
+                continue
+            assert isinstance(exit_code, int)  # 排除 None（未 STOPPED）/ PENDING（尚 null）后必是落值 int
+            return exit_code  # STOPPED 且落值
 
     def _raise_for_exit(self, rc: int) -> None:
         """退出码翻异常（复刻 subprocess_engine._read_events:116-127）：80→网络错、>0→RuntimeError、0→正常。"""

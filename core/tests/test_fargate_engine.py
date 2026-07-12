@@ -462,10 +462,15 @@ def test_task_exit_code_reads_stopped_exit_code():
     assert eng2._task_exit_code("arn") == 137
 
 
-def test_task_exit_code_null_exitcode_treated_as_error():
-    # STOPPED 但 exitCode=null（容器没正常报退出码）→ 当异常（1），不当成功
+def test_task_exit_code_null_exitcode_returns_pending_not_error():
+    # STOPPED 但 exitCode=null（lastStatus 翻转与 exitCode 落值非原子，STOPPED 瞬间可能短暂 null，ADR 0024「exitCode 落值延迟」）
+    # → 返回三态哨兵 _STOPPED_EXIT_PENDING（**不立即当异常 1**）；调用方 _await_exit_code 据此有界多等几拍等落值。
+    from core.adapters.fargate_engine import _STOPPED_EXIT_PENDING
     eng = _engine_with_fake_ecs({"tasks": [{"lastStatus": "STOPPED", "containers": [{"name": "worker", "exitCode": None}]}]})
-    assert eng._task_exit_code("arn") == 1
+    assert eng._task_exit_code("arn") is _STOPPED_EXIT_PENDING
+    # 未 STOPPED 仍是 None（区别于 PENDING）——三态不混
+    eng2 = _engine_with_fake_ecs({"tasks": [{"lastStatus": "RUNNING", "containers": [{"name": "worker"}]}]})
+    assert eng2._task_exit_code("arn") is None
 
 
 def test_raise_for_exit_maps_codes():
@@ -475,3 +480,50 @@ def test_raise_for_exit_maps_codes():
         eng._raise_for_exit(80)  # 网络专用码（ADR 0028）
     with pytest.raises(RuntimeError):
         eng._raise_for_exit(1)   # 其余正非零
+
+
+# ---- _await_exit_code 对「STOPPED 但 exitCode 尚 null」的有界宽限（ADR 0024「exitCode 落值延迟」）----
+class _SeqEcs:
+    """按序返回 describe_tasks 响应的假 ecs（模拟 STOPPED 翻转后 exitCode 落值时序）。"""
+    def __init__(self, responses):
+        self._responses = list(responses)
+        self._i = 0
+    def describe_tasks(self, **kw):
+        r = self._responses[min(self._i, len(self._responses) - 1)]
+        self._i += 1
+        return r
+
+
+def _await_engine(responses, grace_polls=5, container_name="worker") -> FargateEngine:
+    eng = FargateEngine.__new__(FargateEngine)
+    eng._ecs = _SeqEcs(responses)
+    eng._cluster = "c"
+    eng._container = container_name
+    eng._poll = 0.0  # 不真睡
+    eng._null_exit_grace_polls = grace_polls
+    return eng
+
+
+def _stopped_resp(exit_code):
+    c = {"name": "worker"}
+    if exit_code is not None:
+        c["exitCode"] = exit_code
+    return {"tasks": [{"lastStatus": "STOPPED", "containers": [c]}]}
+
+
+def test_await_exit_code_waits_out_null_then_reads_landed_code():
+    # STOPPED 但 exitCode 前 3 拍 null（落值延迟）、第 4 拍落值 0 → _await_exit_code 有界多等、读到落值 0（**不误报** error）。
+    eng = _await_engine([_stopped_resp(None)] * 3 + [_stopped_resp(0)], grace_polls=5)
+    assert eng._await_exit_code("arn") == 0  # 等到落值、非落定 1
+
+
+def test_await_exit_code_null_beyond_grace_settles_as_error():
+    # STOPPED 但 exitCode 恒 null 超过宽限拍数（容器真没报码，非落值延迟）→ 落定为 1（异常），不无限轮询。
+    eng = _await_engine([_stopped_resp(None)] * 50, grace_polls=3)
+    assert eng._await_exit_code("arn") == 1  # 超 grace_polls=3 仍 null → 落定 1
+
+
+def test_await_exit_code_null_then_nonzero_landed_preserved():
+    # 落值延迟后落到**非 0**（cleanupFailed→1、或 137 等）→ 如实返回该码（宽限不吞掉真实非 0 退出）。
+    eng = _await_engine([_stopped_resp(None), _stopped_resp(137)], grace_polls=5)
+    assert eng._await_exit_code("arn") == 137
