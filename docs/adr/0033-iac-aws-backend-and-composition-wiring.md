@@ -1,6 +1,6 @@
 # iac_aws_backend：`--backend cloud` 的 AWS 资源 IaC（Python CDK）+ 组合根接 FargateEngine
 
-> **Status:** Accepted —— 组合根接线（`build_fargate_engines` + `--backend cloud` 切执行）与 **CDK 工程本体（`iac_aws_backend/`）均已编码 + 真部署真跑验证**（两个引擎 ×（确定性+AI）跑通、产出物三处核对）。本 ADR 定 **IaC 工程定位/资源清单/命名契约/preflight** 与 **组合根把 `FargateEngine` 接进 `--backend cloud`** 的稳定决策。执行环境特有的中断/grace 韧性见 [0032](./0032-fargate-execution-environment.md)（真容器校准，仍待真 Fargate）；region/profile 贯通见 [0016](./0016-execution-architecture-core-lib-run-model.md) 决策 C；events-out/job-in 传输见 [0024](./0024-worker-core-protocol.md)；产物→S3 见 [0029](./0029-engine-artifacts-to-s3.md)。
+> **Status:** Accepted —— 组合根接线（`build_fargate_engines` + `--backend cloud` 切执行）与 **CDK 工程本体（`iac_aws_backend/`）均已编码 + 真部署真跑验证**（两个引擎 ×（确定性+AI）跑通、产出物三处核对）。本 ADR 定 **IaC 工程定位/资源清单/命名契约/preflight** 与 **组合根把 `FargateEngine` 接进 `--backend cloud`** 的稳定决策。执行环境特有的中断/grace 韧性见 [0032](./0032-fargate-execution-environment.md)（Accepted，grace/stopTimeout + 中断韧性已真容器标定）；region/profile 贯通见 [0016](./0016-execution-architecture-core-lib-run-model.md) 决策 C；events-out/job-in 传输见 [0024](./0024-worker-core-protocol.md)；产物→S3 见 [0029](./0029-engine-artifacts-to-s3.md)。
 
 ## 定位：一个 CDK 工程建齐「`--backend cloud` 需要的全部 AWS 资源」
 
@@ -25,7 +25,7 @@
 
 **ECS / Fargate：**
 4. ECS cluster `{prefix}cluster`。
-5. **每引擎一个 task definition + 一个容器镜像（2 个，见「2 镜像」节）**：task-def family = `{prefix}{engine}-worker`（`engine`=引擎规范名 `novaact`/`midscene`，即 `{prefix}novaact-worker` / `{prefix}midscene-worker`——须与 cli `compose.task_def_name` 逐字一致）。Fargate 兼容、`networkMode=awsvpc`。**`stopTimeout` 显式设为 120s（`stack._resolve_stop_timeout`，贴 Fargate ≤120s 平台上限）、可经 CDK context `-c stop_timeout=N` 覆盖**（synth 期对非整数/越界 `[1,120]` fail-fast）——做成可配是为 WP3-B 迭代试不同 grace 值免改 code。**仍 defer [0032](./0032-fargate-execution-environment.md) 的是 grace 预算解法**（Nova grace 下限可达 180s > 120s 硬上限的真冲突，须真容器标定后定压 margin/act_timeout 的取向），**不是 stopTimeout 是否设值**（`FargateWorkerHandle.stop` 忽略运行期 grace 只发 StopTask，真实宽限由此 task-def 期 `stopTimeout` 决定）。**task-def 内 container 元素名 = `{engine}-worker`（不带 prefix，见下「container 名约定」）**。**task-def 不设 `AWS_REGION`/`AWS_PROFILE`**（见「task-def 不焊 region/凭证」）。
+5. **每引擎一个 task definition + 一个容器镜像（2 个，见「2 镜像」节）**：task-def family = `{prefix}{engine}-worker`（`engine`=引擎规范名 `novaact`/`midscene`，即 `{prefix}novaact-worker` / `{prefix}midscene-worker`——须与 cli `compose.task_def_name` 逐字一致）。Fargate 兼容、`networkMode=awsvpc`。**`stopTimeout` 显式设为 120s（`stack._resolve_stop_timeout`，贴 Fargate ≤120s 平台上限）、可经 CDK context `-c stop_timeout=N` 覆盖**（synth 期对非整数/越界 `[1,120]` fail-fast）——做成可配是为 WP3-B 迭代试不同 grace 值免改 code。**grace 预算解法归 [0032](./0032-fargate-execution-environment.md)、已真容器标定**（曾担心 Nova grace 下限 > 120s 硬上限的冲突，0032 结论 4 实测厘清：subprocess 侧压 margin 60→30 后下限 150 满足不变量、Fargate 侧对最坏长 act 结构性接受 SIGKILL+TTL 兜底；`ACT_TIMEOUT_S` 不动），**不是 stopTimeout 是否设值**（`FargateWorkerHandle.stop` 忽略运行期 grace 只发 StopTask，真实宽限由此 task-def 期 `stopTimeout` 决定）。**task-def 内 container 元素名 = `{engine}-worker`（不带 prefix，见下「container 名约定」）**。**task-def 不设 `AWS_REGION`/`AWS_PROFILE`**（见「task-def 不焊 region/凭证」）。
 6. ECR 仓库（2 个，各承一镜像）。
 7. VPC 网络：subnet(s) + security group(s)（`awsvpcConfiguration` 用；ID 走 SSM，见「subnet/sg 走 SSM」）。**VPC 来源三档可指定**（CDK context，见下「VPC 来源」）——默认建新，但支持复用现有/默认 VPC 避 NAT 成本。
 
@@ -85,7 +85,7 @@ subnet/sg 不是「名字」，是 **AWS 建 VPC 时生成的 ID**（`subnet-0ab
 - cli 用**已解析的 prefix** 拼出 cloud 资源名，启动时探存在性（`DescribeTable`/`HeadBucket`/`DescribeClusters`）。
 - 不存在 → fail-fast 退 2，**错误信息带上 prefix**：如「用 `--prefix=gherkai-` 拼出的表 `gherkai-events` 不存在——是 prefix 配错、还是 CDK（`iac_aws_backend`）未部署？」。
 - **preflight 按轴分层探（report ⊥ 执行，见下「组合根接线」）**：执行必需资源（events 表 + cluster + 桶）**恒探**（只要 `--backend cloud`）；**runs 表仅落库需要**——`--no-report` 时不探（`runs_table=None`）。即 `--backend cloud --no-report` **仍探执行资源、仍 Fargate 跑**，只是不落库、不探 runs 表。
-- **task-def 存在性暂不 preflight（护栏）**：preflight 现探表/桶/cluster，**不探 task-def**（`DescribeTaskDefinition`）。故 task-def 名维度的 prefix 配错会漏到 RunTask 才炸（退 1、不点名 prefix）。**CDK 已落地、task-def 已在 stack.py 定义并部署**——本 ADR 自设的「CDK 落地后评估纳入」复议触发点已达，但 preflight 至今仍只探表/桶/cluster、未纳入 task-def（一个已到期未执行的加固项，journey backlog 记）。评估方向：把 task-def 纳入「执行必需恒探」档（对齐 events 表/cluster），或确认 RunTask 失败信息够用。
+- **task-def 存在性暂不 preflight（护栏）**：preflight 现探表/桶/cluster，**不探 task-def**（`DescribeTaskDefinition`）。故 task-def 名维度的 prefix 配错会漏到 RunTask 才炸（退 1、不点名 prefix）。**CDK 已落地、task-def 已在 stack.py 定义并部署**——本 ADR 自设的「CDK 落地后评估纳入」复议触发点已达，但 preflight 至今仍只探表/桶/cluster、未纳入 task-def（一个已到期未执行的加固项）。评估方向：把 task-def 纳入「执行必需恒探」档（对齐 events 表/cluster），或确认 RunTask 失败信息够用。
 
 ## 2 镜像：Nova / Midscene 各一（依赖环境本质不同）
 
@@ -151,7 +151,7 @@ subnet/sg 不是「名字」，是 **AWS 建 VPC 时生成的 ID**（`subnet-0ab
 
 ## 留待（defer）
 
-- **真容器 grace/中断校准、镜像瘦身、CI 构建推 ECR**：属施工 / [0032](./0032-fargate-execution-environment.md) 真容器 grace/中断校准，不在本 ADR 决策面。
+- **镜像瘦身、CI 构建推 ECR**：属施工，不在本 ADR 决策面。（真容器 grace/中断校准已完成，归 [0032](./0032-fargate-execution-environment.md) Accepted。）
 
 ## 重议
 

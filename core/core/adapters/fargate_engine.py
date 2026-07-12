@@ -7,7 +7,7 @@
 |---|---|---|
 | job-in | 写 worker stdin | `PutObject` 整 job 到 S3、RunTask overrides 经 env 传 `JOB_S3_URI` 小指针（RunTask overrides 8192 上限塞不下含 feature 的 job） |
 | events-out | 读 `EVENTS_FD` fd 逐行 | worker `PutItem` 到 DDB events 表；本 adapter `Query PK=run_id#scope_id AND SK>last_seq` 轮询增量拉 → `event_from_line` → yield（events-out=DDB，非 SQS/MSK，见 ADR 0024「DynamoDB 作 events-out」+ 三方案被拒护栏） |
-| stop | SIGTERM→grace→SIGKILL | `StopTask`（grace 由 task-def 期 `stopTimeout` 决定、≤120s、不逐次传——Nova 180s>120s 真冲突 defer WP3-B） |
+| stop | SIGTERM→grace→SIGKILL | `StopTask`（grace 由 task-def 期 `stopTimeout` 决定、≤120s、不逐次传——Nova 下限 150s>120s，真容器标定后 Fargate 侧对最坏长 act 接受 SIGKILL，ADR 0032 结论 4） |
 | 退出码 | `proc.wait()` returncode | `DescribeTasks` 轮询到 `lastStatus==STOPPED` → `containers[0].exitCode`（STOPPED 前常 null）→ 同 subprocess 翻异常 |
 
 **红线（ADR 0016/0024/0026）**：boto3 client 由组合根注入、adapter 不自建（`require_boto3` 首行守卫）；schedule 仍纯归约、
@@ -59,7 +59,9 @@ class FargateWorkerHandle:
 
         **grace_period_s 在 Fargate 上无法逐次传**（ADR 0024/0032）：容器 SIGTERM→SIGKILL 的宽限由 task-def 期
         常量 `stopTimeout`（≤120s）决定、StopTask 不收运行期 grace 参数。故此处忽略入参、只发 StopTask——
-        Nova grace 下限 180s > stopTimeout 上限 120s 的真冲突 defer WP3-B（真容器标定）。参数保留是为 port 对称。
+        Nova grace 下限 150s > stopTimeout 上限 120s：真容器标定（ADR 0032 结论 4）已厘清——subprocess 侧
+        150 满足不变量、Fargate 侧对最坏长 act（跑满 act_timeout）结构性接受 SIGKILL + AgentCore TTL 兜底。
+        参数保留是为 port 对称。
         """
         self._ecs.stop_task(cluster=self._cluster, task=self._task_arn, reason="core requested stop")
 

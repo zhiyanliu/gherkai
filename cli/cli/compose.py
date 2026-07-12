@@ -22,9 +22,11 @@ from core.scope import FeatureSource
 # ① 注入 worker 的 NOVA_ACT_TIMEOUT_S env（worker run_scope.py 读它，缺省也是 120、此处显式注入使两端同源）；
 # ② 算 Nova 的 grace 下限（见 engine_min_grace）。env 可覆盖（真跑标定/调优）。
 NOVA_ACT_TIMEOUT_S = int(os.environ.get("NOVA_ACT_TIMEOUT_S", "120"))  # SDK 允许 [2,1800]
-# grace 余量（ADR 0024/0028 grace 硬约束的 margin）：单 step 最坏耗时 + 会话释放 + 余量。**有界的待真跑标定量**，
-# 保守起点 60s（→ Nova grace 下限 ≈ 180s）。标定完改这一处。
-NOVA_GRACE_MARGIN_S = int(os.environ.get("NOVA_GRACE_MARGIN_S", "60"))
+# grace 余量（ADR 0024/0028 grace 硬约束的 margin）：单 step 最坏耗时 + 会话释放 + 余量。→ Nova grace 下限 ≈
+# ACT_TIMEOUT_S + margin。**已真容器标定**（ADR 0032「真容器校准结论」）：4 次真跑实测 SIGTERM 落 act 中途 →
+# worker 干净退出最坏 21s（会话释放 ≤9s + ~12s 进程收尾固定尾巴），远低于旧保守值。故 margin 60→30（grace 下限
+# 180→150），留 ~1.5x 余量。env 可覆盖（再标定/调优）。
+NOVA_GRACE_MARGIN_S = int(os.environ.get("NOVA_GRACE_MARGIN_S", "30"))
 
 # Midscene 的 grace 下限（ADR 0024 grace 硬约束）：Midscene worker 无「可控 act timeout」概念（不像 Nova 的
 # ACT_TIMEOUT_S），但它的 **SIGTERM onSignal 收尾路径本身有确定的超时预算**，grace 必须够它跑完、否则会被
