@@ -398,6 +398,21 @@ def _aggregate(statuses: list[str]) -> str:
     return "passed"
 
 
+def _emit_scenario_done_unless_stopped(sink: EventSink, scenario_id: str, statuses: list[str]) -> bool:
+    """scenario 跑完后的 scenario_done 出口 + 中止护栏（模块级、供单测直驱）。
+
+    返回 True＝中止（调用方应停止本 session、不再跑后续 scenario）。**中止时绝不 emit scenario_done**：
+    scenario 中途收到 _stop 时 `_run_scenario` 返回**部分 statuses**，用它算判定会把没跑完的 scenario 标成
+    确定 passed（假阳性——`_aggregate([])`/`_aggregate(["passed"])` 都 == "passed"），违反「停止是外部中止、
+    非执行事实、worker 不越权标注」（ADR 0031/0024）；未完成 scenario 交 core 按派生态处理。对称 step 级投票
+    中止（不 emit 带 verdict 的 step_done）+ scenario 循环顶护栏（不发 step_skipped）。
+    """
+    if _stop.is_set():
+        return True
+    sink.emit({"type": "scenario_done", "scenarioId": scenario_id, "status": _aggregate(statuses)})
+    return False
+
+
 import socket
 import ssl
 
@@ -597,13 +612,10 @@ def main() -> int:
                     # 不再在 scenario 级聚合；scenario_done 不带 reportRefs（协议字段保留、向后兼容）。
                     # scope 内 step 短路（上游 error 跳过后续、发 step_skipped，ADR 0031 决定六）在 _run_scenario 内。
                     statuses = _run_scenario(nova, sid, sc["steps"], votes_n, sink)
-                    # 中止护栏（对称 step 级投票中止 + 循环顶护栏）：scenario 中途收到 _stop 时 _run_scenario 返回
-                    # 部分 statuses，用它算 scenario_done 判定会把「没跑完的 scenario」标成确定 passed（假阳性，
-                    # _aggregate([])/_aggregate(["passed"]) 都==passed）——违反「停止是外部中止、非执行事实、worker
-                    # 不越权标注」（ADR 0031/0024）。故中止时**不 emit scenario_done**，未完成 scenario 交 core 派生态。
-                    if _stop.is_set():
+                    # scenario_done 出口 + 中止护栏（模块级 _emit_scenario_done_unless_stopped，供单测直驱）：
+                    # 中途中止时不 emit（部分 statuses 会算出假 passed），返 True → 停本 session。
+                    if _emit_scenario_done_unless_stopped(sink, sid, statuses):
                         return
-                    sink.emit({"type": "scenario_done", "scenarioId": sid, "status": _aggregate(statuses)})
 
     with wf:
         outer = get_current_workflow()

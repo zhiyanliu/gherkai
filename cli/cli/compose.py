@@ -285,14 +285,20 @@ def resolve_region(explicit_region: str | None, profile: str | None) -> str | No
     **profile config 回落是关键**：Nova worker 的 AgentCore `validate_region` 要求显式合法 region 字符串、不查 boto
     默认链/profile config——若不在此把 profile 里的 region 落实成字符串，profile-only 用户下 worker region=None 会
     `InvalidRegionError` 崩。用 `boto3.Session(profile).region_name` 读 profile config 的 region（探针证实：有则返回、
-    无则 None）。boto3 惰性 import（仅前三级都 miss 时才触发，纯 local 无 profile 路径不引入 boto3 依赖）。
-    真无 region（全 miss）→ 返回 None＝fail-loud（worker 报错、不硬编码 east，对齐 store 宽容边界）。
+    无则 None）。boto3 惰性 import（仅前三级都 miss 时才触发）——**缺 boto3（纯 local 未装 aws extra）也不硬依赖**：
+    catch ImportError → 返回 None（等价于「无 region」，与真无 region 同走 fail-loud），保住「纯 local 路径绝不
+    依赖 boto3」不变量（否则纯 local + 无 region env 的用户跑会撞未捕获 ImportError，而非优雅 fail-loud）。
+    真无 region（全 miss / 或缺 boto3 读不到 profile config）→ 返回 None＝fail-loud（worker 报错、不硬编码 east，对齐 store 宽容边界）。
     """
     r = explicit_region or os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
     if r:
         return r
     # 前三级 miss：回落 profile config（--profile 或 AWS_PROFILE 指向的 profile 的 region 字段）。
-    import boto3
+    # 缺 boto3（纯 local 未装 aws extra）→ 当作读不到 → None fail-loud（不让纯 local 硬依赖 boto3）。
+    try:
+        import boto3
+    except ImportError:
+        return None
     return boto3.session.Session(profile_name=profile).region_name
 
 

@@ -22,14 +22,13 @@ run_id 组合根构造期注入本 adapter（对称已有 artifact_s3 落点注�
 """
 from __future__ import annotations
 
-import json
 import time
 from typing import Iterator
 from urllib.parse import quote
 
 from core.adapters._boto import require_boto3
 from core.errors import WorkerNetworkError
-from core.model import Event, Job
+from core.model import Event, Job, ScopeDone
 from core.wire import event_from_line, job_to_line
 
 # worker 网络专用退出码（ADR 0028）：与 subprocess_engine.py 同值（两引擎 worker 硬编码 80）。
@@ -205,7 +204,7 @@ class FargateEngine:
                 last_seq = int(it[_SK_ATTR])
                 event = event_from_line(it[_BODY_ATTR])
                 yield event  # 解析失败抛 ValueError，schedule 记 error（同 subprocess）
-                if _is_scope_done(it[_BODY_ATTR]):
+                if isinstance(event, ScopeDone):  # 终止判据：scope_done 是最后一条（复用已解析 event、不重复解析 body）
                     saw_scope_done = True
             if saw_scope_done:
                 break  # 主判：scope_done 是最后一条，正常终止
@@ -263,11 +262,3 @@ class FargateEngine:
             raise WorkerNetworkError(f"worker 建连失败（网络/SSL 瞬时故障），退出码 {rc}")
         if rc > 0:
             raise RuntimeError(f"worker 异常退出 exitCode={rc}")
-
-
-def _is_scope_done(body: str) -> bool:
-    """peek 事件 body 的 type 是否 scope_done（终止判据）——只读 type、不重复 event_from_line 的完整解析。"""
-    try:
-        return json.loads(body).get("type") == "scope_done"
-    except (ValueError, AttributeError):
-        return False

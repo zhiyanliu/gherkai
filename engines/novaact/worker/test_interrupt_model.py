@@ -198,6 +198,32 @@ def test_run_scenario_stops_midway(captured):
     assert not any(e["type"] == "step_skipped" for e in captured)
 
 
+# ---- scenario_done 出口 + 中止护栏：中途 _stop → 不 emit（不把没跑完的 scenario 标成假 passed）----
+def test_scenario_done_emitted_when_not_stopped(captured):
+    # 正常完成（_stop 未置）：emit scenario_done、带聚合判定；返 False（继续跑后续 scenario）。
+    aborted = rs._emit_scenario_done_unless_stopped(captured, "sc:0", ["passed", "passed"])
+    assert aborted is False
+    done = [e for e in captured if e["type"] == "scenario_done"]
+    assert len(done) == 1 and done[0]["status"] == "passed" and done[0]["scenarioId"] == "sc:0"
+
+
+def test_scenario_done_suppressed_when_stopped(captured):
+    # 中途中止（_stop 置位，statuses 只含中止前的部分 step）：**不 emit** scenario_done（否则 _aggregate(["passed"])
+    # 会把没跑完的 scenario 标成确定 passed，假阳性），返 True 让 _run_session 停。（ADR 0031/0024「worker 不越权标注」）
+    rs._stop.set()
+    aborted = rs._emit_scenario_done_unless_stopped(captured, "sc:0", ["passed"])
+    assert aborted is True
+    assert not any(e["type"] == "scenario_done" for e in captured)  # 关键：中止不留假 verdict
+
+
+def test_scenario_done_suppressed_even_with_zero_statuses(captured):
+    # 极端：中止发生在首 step 前（statuses=[]）→ _aggregate([])=="passed" 更是纯假阳性 → 同样不 emit。
+    rs._stop.set()
+    aborted = rs._emit_scenario_done_unless_stopped(captured, "sc:0", [])
+    assert aborted is True
+    assert not any(e["type"] == "scenario_done" for e in captured)
+
+
 # ---- 建连退避 _backoff_interrupted：收到停止信号即唤醒返回 True（驱动 run_scope 真退避路径）----
 def test_backoff_interrupted_wakes_on_stop():
     # 驱动 run_scope 的**真** _backoff_interrupted（内部 _stop.wait）——非 stdlib Event.wait 同义反复：

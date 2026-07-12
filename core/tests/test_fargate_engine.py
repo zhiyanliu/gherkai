@@ -15,7 +15,7 @@ import json
 import boto3
 import pytest
 
-from core.adapters.fargate_engine import FargateEngine, FargateWorkerHandle, events_pk, _is_scope_done
+from core.adapters.fargate_engine import FargateEngine, FargateWorkerHandle, events_pk
 from core.errors import WorkerNetworkError
 from core.model import Job, Scenario, Step, ScopeStarted, StepDone, ScopeDone, Status
 
@@ -384,10 +384,3 @@ def test_raise_for_exit_maps_codes():
         eng._raise_for_exit(80)  # 网络专用码（ADR 0028）
     with pytest.raises(RuntimeError):
         eng._raise_for_exit(1)   # 其余正非零
-
-
-# ---- _is_scope_done：终止判据 ----
-def test_is_scope_done():
-    assert _is_scope_done('{"type": "scope_done", "scopeId": "x"}') is True
-    assert _is_scope_done('{"type": "step_done", "scenarioId": "sc:0", "stepIndex": 0, "status": "passed"}') is False
-    assert _is_scope_done("not json") is False

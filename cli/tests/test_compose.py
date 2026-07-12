@@ -212,6 +212,24 @@ def test_resolve_region_none_when_all_miss(monkeypatch):
     assert compose.resolve_region(None, None) is None
 
 
+def test_resolve_region_no_boto3_returns_none_not_crash(monkeypatch):
+    # 纯 local 不依赖 boto3：--region/env 全 miss 需回落 profile config，但**缺 boto3（未装 aws extra）时**
+    # 不能抛未捕获 ImportError——catch → None fail-loud（等价「无 region」）。绿≠对：dev 装了 boto3 恒绿掩盖此路径，
+    # 故拦截 `import boto3` 抛 ImportError 真验。守「纯 local 路径绝不依赖 boto3」不变量（ADR 0016 决策 C / cli[aws] extra）。
+    monkeypatch.delenv("AWS_REGION", raising=False)
+    monkeypatch.delenv("AWS_DEFAULT_REGION", raising=False)
+    import builtins
+    _orig_import = builtins.__import__
+
+    def _no_boto3(name, *a, **k):
+        if name == "boto3":
+            raise ImportError("simulated pure-local: boto3 not installed")
+        return _orig_import(name, *a, **k)
+
+    monkeypatch.setattr(builtins, "__import__", _no_boto3)
+    assert compose.resolve_region(None, "someprofile") is None  # 缺 boto3 读不到 profile config → None、不崩
+
+
 # ---- engine_min_grace：按引擎给 grace 下限（ADR 0024 grace 硬约束）----
 def test_engine_min_grace_nova_covers_act_timeout_plus_margin():
     # 断言语义关系而非重述公式（否则同义反复、测不出常量漂移）：Nova 下限须**严格大于**单 act 上界——
