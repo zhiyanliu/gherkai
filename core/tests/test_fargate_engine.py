@@ -52,6 +52,39 @@ def _engine(fargate, run_id: str = _RUN_ID, region: str | None = None,
     )
 
 
+def _stopped_ecs(container_name: str, exit_code: int = 0):
+    """假 ecs：describe_tasks 恒返回 STOPPED + 给定 exitCode——scope_done 路径读退出码用。
+
+    **必须换假 ecs（否则测试挂死）**：选「scope_done 后等 STOPPED 读码」（ADR 0024「事件流结束信号」，与 subprocess
+    无条件 proc.wait() 同构）后，_read_events 见 scope_done 会调 _await_exit_code 轮询 DescribeTasks 直到 STOPPED；
+    而 fargate fixture 把 moto `ecs::task` transition pin 成不推进（恒不 STOPPED，见 conftest），真 moto ecs 会令
+    _await_exit_code 死循环。故 run_scope（真 moto ecs 发 RunTask）后换假 ecs 供 STOPPED/exitCode。"""
+    class _StoppedEcs:
+        def describe_tasks(self, **kw):
+            return {"tasks": [{"lastStatus": "STOPPED",
+                               "containers": [{"name": container_name, "exitCode": exit_code}]}]}
+    return _StoppedEcs()
+
+
+def _delayed_stopped_ecs(container_name: str, running_polls: int, exit_code: int = 0):
+    """假 ecs：前 running_polls 次 describe_tasks 返回 RUNNING（exitCode 尚 null），之后才 STOPPED。
+
+    **模拟真实时序**（ADR 0032 结论 2：scope_done 先于 ECS 记录 executionStoppedAt ~11s）：worker 已 emit
+    scope_done、但 task 还没到 STOPPED——_task_exit_code 返回 None → _await_exit_code 须 sleep 轮询等到 STOPPED。
+    `_stopped_ecs`（首次即 STOPPED）把这 ~11s 滞后塌缩为 0、测不出「轮询等 STOPPED」这个 option-c 定义行为
+    （变异：把循环退化成单次读退出码，_stopped_ecs 下仍绿、但真 Fargate 每 scope 收尾 _raise_for_exit(None) 崩）。"""
+    class _DelayedEcs:
+        def __init__(self):
+            self.calls = 0  # 供断言真的轮询了 running_polls+1 次
+        def describe_tasks(self, **kw):
+            self.calls += 1
+            if self.calls <= running_polls:
+                return {"tasks": [{"lastStatus": "RUNNING", "containers": [{"name": container_name}]}]}  # exitCode null
+            return {"tasks": [{"lastStatus": "STOPPED",
+                               "containers": [{"name": container_name, "exitCode": exit_code}]}]}
+    return _DelayedEcs()
+
+
 def _spy_run_task_env(fargate, monkeypatch, eng) -> dict:
     """跑 run_scope、拦 run_task 抓 overrides env → 返回 {name: value} dict。"""
     real = fargate["ecs"].run_task
@@ -165,7 +198,8 @@ def test_read_events_yields_in_seq_order_until_scope_done(fargate):
     _put_event(fargate["events_table"], _RUN_ID, "browse", 3, {"type": "step_done", "scenarioId": "sc:0", "stepIndex": 0, "status": "passed"})
     _put_event(fargate["events_table"], _RUN_ID, "browse", 4, {"type": "scope_done", "scopeId": "browse", "sessionId": "s-1"})
     _, events = eng.run_scope(job)
-    got = list(events)  # scope_done 终止迭代（不必等 STOPPED）
+    eng._ecs = _stopped_ecs(fargate["container_name"])  # scope_done 后等 STOPPED 读码（干净退出 exit 0），见 _stopped_ecs docstring
+    got = list(events)  # scope_done（内容完整）+ STOPPED exit 0（终止）→ 迭代正常终止
     assert [type(e).__name__ for e in got] == ["ScopeStarted", "StepStarted", "StepDone", "ScopeDone"]
     assert isinstance(got[0], ScopeStarted) and got[0].session_id == "s-1"
     assert isinstance(got[2], StepDone) and got[2].status == Status.PASSED
@@ -181,6 +215,7 @@ def test_read_events_only_this_scope_not_other(fargate):
     _put_event(fargate["events_table"], _RUN_ID, "search", 1, {"type": "scope_started", "scopeId": "search"})
     _put_event(fargate["events_table"], _RUN_ID, "search", 2, {"type": "scope_done", "scopeId": "search"})
     _, events = eng.run_scope(_job("browse"))
+    eng._ecs = _stopped_ecs(fargate["container_name"])  # scope_done 后等 STOPPED 读码（见 _stopped_ecs docstring）
     got = list(events)
     # 只拿到 browse 的（scope_started + scope_done 各一），无 search 的。强断言：每条 scope_id 都是 browse
     # （ScopeStarted/ScopeDone 都带 scope_id；直接断言值，不用 getattr 默认+hasattr 过滤那种自我豁免的弱断言）。
@@ -198,9 +233,10 @@ def test_read_events_incremental_across_polls(fargate):
     assert isinstance(next(it), ScopeStarted)  # 拿到第一批
     # 轮询间隙 worker 写了 scope_done
     _put_event(fargate["events_table"], _RUN_ID, "browse", 2, {"type": "scope_done", "scopeId": "browse"})
-    assert isinstance(next(it), ScopeDone)  # 下一轮 Query SK>1 拿到它、终止
+    assert isinstance(next(it), ScopeDone)  # 下一轮 Query SK>1 拿到它、yield 出（此刻挂在 yield，尚未走到读退出码）
+    eng._ecs = _stopped_ecs(fargate["container_name"])  # 下个 next() 走 if saw_scope_done→_await_exit_code，须 STOPPED/exit 0
     with pytest.raises(StopIteration):
-        next(it)
+        next(it)  # 等 STOPPED 读 exit 0 → 正常终止
 
 
 def test_read_events_midscene_lowlevel_marshalling_and_ascending_read(fargate):
@@ -230,7 +266,9 @@ def test_read_events_midscene_lowlevel_marshalling_and_ascending_read(fargate):
         "body": {"S": json.dumps({"type": "scope_done", "scopeId": "browse"})},
     })
     eng = _engine(fargate)
-    got = list(eng.run_scope(_job("browse"))[1])
+    _, events = eng.run_scope(_job("browse"))
+    eng._ecs = _stopped_ecs(fargate["container_name"])  # scope_done 后等 STOPPED 读码（见 _stopped_ecs docstring）
+    got = list(events)
     # 11 条全读出（低层写的 item core 能 Query＝跨层编组同构）、升序（step 0..9 依次——引擎误用降序读会红）
     assert len(got) == 11
     assert [type(e).__name__ for e in got] == ["StepDone"] * 10 + ["ScopeDone"]
@@ -317,6 +355,59 @@ def test_read_events_stopped_clean_exit_zero_terminates_without_raise(fargate):
     eng._ecs = _StoppedCleanEcs()
     got = list(events)  # 不抛：exit 0 → _raise_for_exit 放行 → return
     assert [type(e).__name__ for e in got] == ["ScopeStarted"]
+
+
+# ---- scope_done 后仍读退出码（ADR 0024「事件流结束信号」，与 subprocess 无条件 proc.wait() 同构）----
+# **本组是本次改动（scope_done 非终态、等 STOPPED 读码）的核心守卫**：worker 可发完 scope_done 又在会话释放阶段
+# 非 0 退出（Midscene cleanupFailed→exit 1），若「读到 scope_done 即 break、不读码」则该退出被吞、job 误报 PASSED、
+# 会话泄漏不可观测（违 ADR 0024「会话释放失败可观测」）。这正是能一开始就抓住那个 bug 的回归守卫。
+def test_read_events_scope_done_then_nonzero_exit_raises(fargate):
+    """worker 发完 scope_done 又非 0 退出（会话释放失败，Midscene cleanupFailed→exit 1）：
+    scope_done 后等 STOPPED 读到 exit 1 → 抛 RuntimeError（泄漏可观测），**不因见 scope_done 就吞掉退出码**。"""
+    eng = _engine(fargate)
+    _put_event(fargate["events_table"], _RUN_ID, "browse", 1, {"type": "scope_started", "scopeId": "browse"})
+    _put_event(fargate["events_table"], _RUN_ID, "browse", 2, {"type": "scope_done", "scopeId": "browse"})
+    _, events = eng.run_scope(_job("browse"))
+    eng._ecs = _stopped_ecs(fargate["container_name"], exit_code=1)  # 发完 scope_done 又 exit 1（会话释放失败）
+    got = []
+    with pytest.raises(RuntimeError, match=r"exitCode=1\b") as ei:  # 非 0 退出必抛——与 subprocess 无条件 proc.wait()+rc 检查同构
+        for e in events:
+            got.append(e)
+    assert not isinstance(ei.value, WorkerNetworkError)  # exit 1 走 RuntimeError、非网络码 80（锁分类，别混进 WorkerNetworkError 子类）
+    # scope_done 已 yield（内容完整）、但终止判定读到 exit 1 → 抛（不吞、不误报 PASSED）
+    assert [type(e).__name__ for e in got] == ["ScopeStarted", "ScopeDone"]
+
+
+def test_read_events_scope_done_waits_for_stopped_before_reading_exit(fargate, monkeypatch):
+    """**option-c 定义行为的核心守卫**：scope_done 先于 ECS STOPPED ~11s 到达（ADR 0032 结论 2），_await_exit_code
+    须**轮询等到 STOPPED** 才读 exitCode——不能读到 scope_done 就立刻读码（那时 _task_exit_code 返回 None →
+    _raise_for_exit(None) → TypeError，真 Fargate 每 scope 收尾崩）。
+
+    **前几个 assert 塌缩不了这个滞后**（其余 scope_done 测试用 _stopped_ecs 首次即 STOPPED、把滞后压成 0，故
+    「等 STOPPED」的轮询循环零覆盖——变异把循环退化成单次读退出码仍全绿，见对抗 review）。本测试用 _delayed_stopped_ecs
+    造「前 2 次 RUNNING（exitCode null）、第 3 次才 STOPPED」的真实时序，锁死轮询：把 time.sleep 打桩计数（不真睡）。"""
+    sleeps = []
+    monkeypatch.setattr("core.adapters.fargate_engine.time.sleep", lambda s: sleeps.append(s))
+    eng = _engine(fargate)
+    _put_event(fargate["events_table"], _RUN_ID, "browse", 1, {"type": "scope_started", "scopeId": "browse"})
+    _put_event(fargate["events_table"], _RUN_ID, "browse", 2, {"type": "scope_done", "scopeId": "browse"})
+    _, events = eng.run_scope(_job("browse"))
+    ecs = _delayed_stopped_ecs(fargate["container_name"], running_polls=2, exit_code=0)  # 前 2 次 RUNNING、第 3 次 STOPPED
+    eng._ecs = ecs
+    got = list(events)  # scope_done 后轮询等 STOPPED、读到 exit 0 → 正常终止
+    assert [type(e).__name__ for e in got] == ["ScopeStarted", "ScopeDone"]
+    assert ecs.calls == 3          # 真轮询了 3 次（2 次 RUNNING→None + 1 次 STOPPED）——非首次即读
+    assert sleeps == [eng._poll] * 2  # 2 次 None 各 sleep 一个轮询周期（若循环退化成单次读，sleeps==[] → 本断言红）
+
+
+def test_read_events_scope_done_then_network_exit_raises_network_error(fargate):
+    """scope_done 后 exit 80（网络专用码，ADR 0028）→ 翻 WorkerNetworkError（与 subprocess/STOPPED 兜底同一分类）。"""
+    eng = _engine(fargate)
+    _put_event(fargate["events_table"], _RUN_ID, "browse", 1, {"type": "scope_done", "scopeId": "browse"})
+    _, events = eng.run_scope(_job("browse"))
+    eng._ecs = _stopped_ecs(fargate["container_name"], exit_code=80)
+    with pytest.raises(WorkerNetworkError):
+        list(events)
 
 
 # ---- run_task 放置失败（failures 非空）→ 明确异常，非裸 IndexError ----

@@ -185,8 +185,12 @@ class FargateEngine:
 
         **纯事件流、不掺心跳**（Engine port 铁律）：静默时本迭代器阻塞在轮询上，schedule 的 _heartbeat_wrap 兜底唤醒查超时。
 
-        **终止信号**（ADR 0024）：主判 = 读到本 scope 的 scope_done（最大 seq、最后一条）；兜底 = DescribeTasks STOPPED
-        （worker 崩溃没发 scope_done）。SQS 长轮询靠空 receive+STOPPED，DDB 靠 Query 空+STOPPED，同构。
+        **终止 = 内容完整 + 进程终止两件事、都要**（ADR 0024「事件流结束信号」，与 subprocess「fd EOF + 无条件
+        proc.wait()」严格同构）：① 内容完整判据 = 读到本 scope 的 scope_done（最大 seq、最后一条），或 worker 崩溃没发；
+        ② **无论哪种，都等 DescribeTasks STOPPED 读 exitCode 再翻异常**——scope_done 非终态，worker 可发完它又在会话
+        释放阶段非 0 退出（Midscene cleanupFailed→exit 1），"读到 scope_done 即 break、不读码"会吞掉它、job 误报
+        PASSED（违「会话释放失败可观测」不变量）。代价 = 每 scope 收尾等 ~11s（ECS 记录 executionStoppedAt 平台滞后，
+        ADR 0032 结论 2）；一次性、事件早经 Query yield、不影响流式期进度。
         """
         from boto3.dynamodb.conditions import Key
 
@@ -207,7 +211,12 @@ class FargateEngine:
                 if isinstance(event, ScopeDone):  # 终止判据：scope_done 是最后一条（复用已解析 event、不重复解析 body）
                     saw_scope_done = True
             if saw_scope_done:
-                break  # 主判：scope_done 是最后一条，正常终止
+                # 内容完整（scope_done 是最后一条）；但终止仍须等 STOPPED 读 exitCode——与 subprocess「fd EOF 后无条件
+                # proc.wait()」同构：捕获「worker 发完 scope_done 又会话释放失败非 0 退出」（Midscene cleanupFailed→exit 1）。
+                # exit>0 抛（schedule 记 error、泄漏可观测）、exit==0 正常终止（ADR 0024「事件流结束信号」）。
+                # 不 _final_drain：scope_done 是最大 seq、已读到，SK>last_seq 必空（drain 只为「靠 STOPPED 兜底」路径补最终一致漏读）。
+                self._raise_for_exit(self._await_exit_code(task_arn))
+                return
 
             # 无新事件（或未见 scope_done）：查 task 是否已 STOPPED（兜底：worker 崩溃没发 scope_done）
             if not items:
@@ -255,6 +264,20 @@ class FargateEngine:
             if c.get("name") == self._container:
                 return c.get("exitCode", 1) if c.get("exitCode") is not None else 1
         return containers[0].get("exitCode", 1) if containers else 1
+
+    def _await_exit_code(self, task_arn: str) -> int:
+        """轮询 DescribeTasks 直到 task STOPPED，返回 exitCode——scope_done 后读退出码用（ADR 0024「事件流结束信号」）。
+
+        scope_done 只表示事件流内容完整、非进程终态；等 STOPPED 读码才能捕获「worker 发完 scope_done 又会话释放失败
+        非 0 退出」（Midscene cleanupFailed→exit 1），与 subprocess 无条件 proc.wait() 同构。阻塞期 = worker 会话释放
+        + ECS 记录 executionStoppedAt 平台滞后（~11s，ADR 0032 结论 2）；轮询静默时由 schedule _heartbeat_wrap/deadline
+        兜底唤醒（同主循环兜底路径的 sleep 轮询，不会真无限——worker 已在退出路径、很快 STOPPED）。
+        """
+        while True:
+            exit_code = self._task_exit_code(task_arn)
+            if exit_code is not None:
+                return exit_code
+            time.sleep(self._poll)
 
     def _raise_for_exit(self, rc: int) -> None:
         """退出码翻异常（复刻 subprocess_engine._read_events:116-127）：80→网络错、>0→RuntimeError、0→正常。"""

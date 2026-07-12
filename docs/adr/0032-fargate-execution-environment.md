@@ -39,7 +39,7 @@
 
 1. **flag-only 软停契约在真 Fargate 成立**：4 次中断真跑（Nova×3+Midscene×1）4/4 干净退出（exit 0、CloudWatch 均见 `signal received`→`session shutdown complete`）——无一被 stopTimeout 补的 SIGKILL 截断、无会话泄漏。[0024](./0024-worker-core-protocol.md) 终止契约得真容器复验。
 
-2. **机制不对称得实测印证**（[0024](./0024-worker-core-protocol.md)「Midscene worker」条预言）：Midscene 会话释放 0.2s（Node 事件循环、signal handler 回调即时跑），Nova 1.6~9s（greenlet 不能被打断、须等 act 到安全点才检测 flag）。SIGTERM→退出的可变部分 = 会话释放段，随 act 复杂度线性增长。**`stopping→executionStopped` 里另有 ~11s 与 act/引擎均无关的固定段**：CloudWatch 证实它是 `shutdown complete`（worker 最后一行日志）之后的**纯静默**（worker 已退），且跨 4 样本恒定 11.06~11.54s、Nova/Midscene 一致——**坐实为 ECS/Fargate 记录 `executionStoppedAt` 的平台侧固有滞后、非 worker teardown**。故 `stopping→executionStopped` 是 worker 真实退出耗时的**上界（含测量滞后）**，真实退出更快。
+2. **机制不对称得实测印证**（[0024](./0024-worker-core-protocol.md)「Midscene worker」条预言）：Midscene 会话释放 0.2s（Node 事件循环、signal handler 回调即时跑），Nova 1.6~9s（greenlet 不能被打断、须等 act 到安全点才检测 flag）。SIGTERM→退出的可变部分 = 会话释放段，随 act 复杂度线性增长。**`stopping→executionStopped` 里另有 ~11s 与 act/引擎均无关的固定段**：CloudWatch 证实它是 `shutdown complete`（worker 最后一行日志）之后的**纯静默**（worker 已退），且跨 4 样本恒定 11.06~11.54s、Nova/Midscene 一致——**坐实为 ECS/Fargate 记录 `executionStoppedAt` 的平台侧固有滞后、非 worker teardown**。故 `stopping→executionStopped` 是 worker 真实退出耗时的**上界（含测量滞后）**，真实退出更快。**此 ~11s 滞后是 `FargateEngine._read_events` 每 scope 收尾要吃的固定成本**：读到 scope_done 后仍须等 `DescribeTasks` STOPPED 读 `exitCode`（[0024](./0024-worker-core-protocol.md)「事件流结束信号」条——退出码正确性优先于收尾延迟，「scope_done 即 break 省 11s」被否决），这 ~11s 是收尾一次性延迟、不影响流式期进度（事件早经 Query yield）。
 
 3. **`stopTimeout=120` 校准落定、保留**：最坏实测 SIGTERM→退出 21s ≪ 120，有 ~5x 余量。**做成 CDK context `-c stop_timeout=N` 可配**（`stack._resolve_stop_timeout`，默认 120、synth 期越界 `[1,120]` fail-fast），便于未来再标定；`FargateWorkerHandle.stop` 忽略运行期 grace、真实宽限即由此常量决定。
 

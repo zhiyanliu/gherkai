@@ -22,6 +22,10 @@ dev = [
     # （只装 dynamodb/s3 后端，不拉全量 AWS 服务依赖）。全程 mock、绝不连真 AWS（见 tests/conftest.py 硬隔离）。
     "boto3>=1.34",
     "moto[dynamodb,s3]>=5.0",
+    # 全局挂死安全网：FargateEngine 的等-STOPPED 轮询（_await_exit_code/主循环兜底）是 while-True+sleep；
+    # 若某测试消费到 scope_done/STOPPED 兜底路径却忘把 moto ecs（fixture pin 成恒不 STOPPED）换成假 STOPPED ecs，
+    # 会无限轮询挂死。timeout 让它快速 fail（报 Timeout），而非 CI 无限挂。见 test_fargate_engine._stopped_ecs docstring。
+    "pytest-timeout>=2.3",
 ]
 
 [build-system]
@@ -35,7 +39,9 @@ packages = ["core"]
 testpaths = ["tests"]
 # 默认只跑单测（纯 moto/本地、绝不连真 AWS）——integration 标记的用例默认 deselect。
 # 连真 AWS 的集成测试须显式 `-m integration`（且设 AWS_DDB_TABLE/AWS_S3_BUCKET 环境变量，否则 skip）。见 tests/README.md。
-addopts = "-m 'not integration'"
+# timeout=60：挂死安全网（见 dev group 的 pytest-timeout 注）。任何单测 >60s = 异常（真实单测 ~3s、集成测试另设）——
+# 尤其防 FargateEngine 等-STOPPED 轮询在忘换 moto ecs 时无限挂：60s 后 pytest 报 Timeout、CI 快速 fail 而非无限挂。
+addopts = "-m 'not integration' --timeout=60"
 markers = [
     "integration: 连真 AWS（DDB/S3）的集成测试，默认不跑；须 -m integration + 设 AWS_DDB_TABLE/AWS_S3_BUCKET",
 ]
