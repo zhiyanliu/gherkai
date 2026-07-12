@@ -60,6 +60,60 @@
 - **run-2**：AI feature votes=1，**先改 stop_timeout=120 并 deploy**；起 worker→监听 events 表 step_started 出现（act in-flight）→手动 `aws ecs stop-task`，测会话释放墙钟 + DescribeTasks 时间字段。
 - **run-3**：最坏档（step_started 后立即 StopTask，逼近 act 起点中断）+ 孤儿验证（`aws s3 ls` 对比应传产物，确认 session_summary.json 154B 等残留）。
 
+## 6.5 真跑实测结果（run-1 + run-2 已跑，2026-07-12，账户 000000000000/us-east-1、stopTimeout 已 deploy=120）
+
+**观测方法学已验证**：events 表 `expires_at-7d` 还原的单 act 墙钟，与 Nova SDK 独立报的 `time_worked_s` **逐 act 吻合**（run-1：墙钟 4/5/11/5s vs worked 4.0/4.6/10.7/5.1s，差 ~0.3-1s=轮询+编组开销）——旁路信号可信、不受 core 轮询污染。`tools/events_wallclock.py`（含 votes>1 MULTI-ACT 检测）+ `tools/ecs_task_timing.py`（DescribeTasks 时间字段派生）真数据上工作正常。
+
+**run-1（baseline，无中断，`wikipedia_assertions --assertion-votes 1` novaact）**：单 act 墙钟分布 **min=4 / p50=5 / p90=9 / p99=10.8 / max=11s**（n=5 干净单 act）。→ **act 正常完成远低于 `NOVA_ACT_TIMEOUT_S=120`（差一个数量级），180 grace 高度过保守**。但这是「顺利路径」样本，非 grace 要覆盖的最坏（act 中途中断），最坏由 run-2 测。
+
+**run-2（SIGTERM 落 AI act 中途，编排脚本自动抢 step_started 窗口）**：
+- **关键教训**：act 仅 4-11s，**手动 StopTask 绝对抢不进 act 窗口**（第一次手动尝试落在 scope 已跑完之后，`stopCode=EssentialContainerExited`/exitCode=0/派生负数=无效样本）——必须 events step_started 出现的**毫秒级自动 StopTask**（`run2_orchestrator.py`，job tmp 里）。
+- **有效样本时间线**（中断落 step 1 第一个 AI act in-flight，`stopCode=UserInitiated`、`exitCode=0` 干净退出、无 SIGKILL、无泄漏）：
+  - StopTask→SIGTERM 送达容器 ≈ **1.1s**（ECS 调度延迟；`stoppingAt` 16:24:03.128 → `signal 15 received` 16:24:04.191）
+  - **会话释放（`signal received`→`session shutdown complete`）= 1.65s**（act 到安全点 + 三层 with `__exit__` 释放 AgentCore 会话；CloudWatch 毫秒锚点 08:24:04.191→08:24:05.840）
+  - shutdown complete→`executionStoppedAt`(进程真停) ≈ **11.3s**（Nova SDK teardown + 最后上传 + Python 进程收尾）
+  - **`stopping→executionStopped`（SIGTERM→退出真实耗时，stopTimeout 校准核心量）= 14.03s**
+- **结论**：SIGTERM 落 act 中途，worker 干净退出 **≈14s ≪ stopTimeout=120 ≪ grace 下限 180**。
+
+**run-3（3 个中断样本汇总，覆盖简单 act + 复合多步 act）**：
+
+| 样本 | act 类型 | SIGTERM→退出 | 会话释放(signal→shutdown) | stopCode/exit |
+|---|---|---|---|---|
+| run-2b | 简单断言 act（中断早） | 14.0s | 1.65s | UserInitiated/0 |
+| run-3a | 复合多步 act（`搜索并打开词条`） | 21.3s | 8.96s | UserInitiated/0 |
+| run-3b | 复合多步 act（延迟 2s 中断） | 20.5s | 7.15s | UserInitiated/0 |
+
+- **worker 3/3 干净退出**（exitCode=0、UserInitiated、无一 SIGKILL、无会话泄漏、CloudWatch 均见 `signal received`→`session shutdown complete`）——**ADR 0024 flag-only 软停契约在真 Fargate 下成立**。
+- **SIGTERM→退出耗时 = 14~21s，两段构成**：① **会话释放（随 act 复杂度变）= 1.6~9s**（act 从中断点跑到安全点 + 三层 with `__exit__` 释放 AgentCore 会话；复合 act 更长）；② **进程收尾尾巴（稳定）≈ 11~12s**（`shutdown complete` 日志后到 `executionStoppedAt` 的静默——worker Python 逻辑已在 shutdown complete 打完最后一行、含 SDK atexit/boto 连接池关闭 + **ECS agent 记录 executionStoppedAt 的固有延迟**，与 act 无关的固定开销）。
+- **最坏实测 21.3s ≪ 120 ≪ 180**——**候选解法 C（证伪 180）得强支持**。
+- **孤儿产物验证（run-3a scope `:9` 中断）**：中断落 step 1 复合 act 中途，worker 到安全点时 step 1 恰好完成（step_done passed）→ **act 边界抢传把 step 1 的 trajectory + trajectory.json 完整救回 S3**（363KB+377KB，ADR 0029 抢传在真 Fargate 下生效）；漏的只有 step 2（断言，未开始）+ `session_summary.json`（scope 末产物、中断时未到）——正是 ADR 0032 记的「固有残余」，可接受。**另一旁证**：中断 scope `:9` 的 worker 后，core schedule 照常起了 scope `:16` 的新 task 跑完（events scopes=2）——**单 scope worker 被停不影响其他 scope**（job=scope 粒度设计成立）。
+- **证据边界（残留）**：① 未测「数十秒级超长 act」（如慢网/复杂 SPA）——但会话释放随 act 线性增长、加固定 12s 尾巴，即便 act 到安全点要 30s 也才 ~42s，仍 ≪120；② 那 ~12s 尾巴的精确构成（SDK teardown vs ECS 记录延迟）未拆到底——非阻塞（不影响 120 够用的结论），若要把 grace 压到极限值得深挖。
+
+**run-4（Midscene 引擎中断，补全两引擎对称，`wikipedia_assertions --default-engine midscene`）**：
+
+| 指标 | Midscene（run-4） | 对照 Nova |
+|---|---|---|
+| SIGTERM→退出 | **12.4s** | 14~21s |
+| 会话释放（signal→shutdown） | **0.2s** | 1.6~9s |
+| 固定尾巴（shutdown→executionStopped） | ~12s | ~12s |
+| stopCode/exit | UserInitiated/0 | UserInitiated/0 |
+| grace 下限 | `MIDSCENE_GRACE_MIN_S`=25s | 180s |
+
+- **会话释放 0.2s**（vs Nova 1.6~9s）——**印证 ADR 0024 机制不对称**：Midscene Node 单线程事件循环、无 greenlet，`process.on(signal)` handler 作为回调排进事件循环，会话 Stop 几乎瞬时；Nova 要等 act 到安全点（greenlet 不能被打断）故更慢。
+- **~12s 固定尾巴两引擎一致**——**证实那段是 ECS 记录 executionStoppedAt + 进程收尾的引擎无关固定开销**（非 SDK 特有）。
+- **孤儿验证（Midscene report 抢传）**：中断落 step 1 之后，report（2.3MB）已被 step_done 安全点抢传上传 S3（ADR 0029 主路径生效）——中断在 step_done 之后故未触发 handler 兜底 snapshot 路径（那只在「首个/当前 act 中途、无 prior step_done」才需要，本次未落那格）。
+- **Midscene grace 下限 25s vs 实测 12.4s → 25s 够用、有 ~2x 余量**，无需动。
+
+## 6.6 WP3-B grace 解法决策（据 run-1/2/3 实测，待落回 ADR 0032）
+
+**采候选解法 C（证伪 180）为主 + 温和 A（压 margin）**：
+- **`stopTimeout=120` 保留**（已 deploy）——实测最坏 21s，120 有 ~5x 余量，无需动。
+- **`NOVA_GRACE_MARGIN_S` 60 可压**：实测「会话释放 + 固定尾巴」最坏 ~21s（含 12s 与 act 无关的固定开销 + ~9s 会话释放）。当前 grace 下限 = `act_timeout(120) + margin(60) = 180`，其中 margin 本意涵盖「单 step 最坏 + 会话释放 + 余量」——实测会话释放侧最坏仅 ~21s，**margin 60→30 都绰绰有余**（留 ~1.5x 余量）。→ grace 下限可从 180 降到 ~150。
+- **`NOVA_ACT_TIMEOUT_S=120` 不动**（候选 B 不采）：它是「单 act 允许跑多久」的上界、与中断退出无关；压它会牺牲长 act 容忍度，而实测正常 act 才 4-12s、离 120 很远，没必要动。
+- **净效果**：grace 下限 180→150，仍 > stopTimeout 上限 120——**冲突本质未消除**（grace 下限仍 > 120），但 ① 实测证明真实退出只需 21s，120 的 stopTimeout 足够 worker 干净退（SIGKILL 不会触发）；② core 侧 grace enforce 的 150 是「core 等 worker 的耐心」、Fargate 侧 120 是「ECS 补 SIGKILL 的时限」，两者语义不同层——core 等 150 而 Fargate 120 就 SIGKILL，但**实测 worker 21s 就退了、两个阈值都够**，冲突是理论的、非实际触发。**这条要在 ADR 0032 讲清楚**：不是把两个数调到相等，而是实测证明「真实退出 ≪ 两个阈值」使冲突不触发。
+- **Midscene 侧（run-4 已验）**：`MIDSCENE_GRACE_MIN_S=25` vs 实测 SIGTERM→退出 12.4s（会话释放仅 0.2s + 12s 固定尾巴）→ **25s 够用、有 ~2x 余量，不动**。压 Nova margin 与 midscene 逻辑正交（`engine_min_grace` 按引擎分支、各取各的），互不影响。
+- **仍 defer**：把 Nova `NOVA_GRACE_MARGIN_S` 60→30 的 code 改动 + ADR 0032 落定，作为 WP3-B 收尾的下一步。两引擎中断证据已齐（Nova 3 样本 + Midscene 1 样本），可支撑该决策。
+
 ## 7. 不烧钱 prework（三项均已完成 + 两轮对抗 review，见 §8）
 
 1. **【必做·阻塞中断真跑】✅** `stop_timeout` 改成可配：`stack._resolve_stop_timeout`（默认 120、`-c stop_timeout=N` 覆盖、synth 期非整数/越界 `[1,120]` fail-fast）。测试 18 个（含边界 1/120/121/0/负/bool/float）全绿、synth 验证过。**尚未 `cdk deploy`**（改动在工作树、待 commit 后连真跑时一起 deploy）。
@@ -70,9 +124,11 @@
 
 ## 8. 当前精确进度
 
-- **三项 prework 全部完成 + 两轮对抗 review 已过**（workflow 分维度 finder + 对抗验证；round-1 9 CONFIRMED 全修）。改动：`iac_aws_backend/stack.py`+`tests/test_stack.py`（stop_timeout 可配 + 18 测试）、`tools/ecs_task_timing.py`、`tools/events_wallclock.py`（新），文档回校 `docs/adr/0033`（stopTimeout 现状）。
-- **待 commit**（尚未提交；最新 commit 仍是 WP2 的 `6e21448`）。
-- **下一步**：commit prework → 跑 **run-1**（`wikipedia_assertions --assertion-votes 1 --interrupt none` baseline，见 §6）。run-1 前需先 `cd iac_aws_backend && uv run cdk deploy -c use_default_vpc=true`（把可配的 stopTimeout=120 部署上去；碰真 AWS、用户已授权 deploy）。
+- **prework 三项完成 + 两轮对抗 review + commit `a30e918`**；ADR 0016/0024 doc-health 回校 commit `36fd83f`。
+- **stopTimeout=120 已真 deploy**（`BackendStack-gherkai` UPDATE_COMPLETE，两 task-def rev 2 带 `stopTimeout:120`，已 describe-task-definition 核实）。
+- **run-1（baseline）+ run-2（act 中途中断）已跑完**，结果见 §6.5。核心结论：SIGTERM 落 act 中途 worker 干净退出 ≈14s ≪ 120 ≪ 180，**候选解法 C（证伪 180）得实测支持**——但仅单样本 + 轻交互短 act，需 run-3 补分布/长 act。
+- **下一步**：**run-3**——① 取多样本（跑数次中断，看 SIGTERM→退出的分布/P99，非单点）；② 试更长 act 用例（复杂页/慢网，看「act 到安全点」尾巴会不会拉长）；③ 拆那 11.3s「进程收尾」构成（SDK teardown 可否压）；④ 顺带孤儿产物验证。然后据 run-3 定最终压 margin/act_timeout 数值 → 落回 ADR 0032（grace 预算解法）。
+- 编排脚本 `run2_orchestrator.py` 在 job tmp（`$CLAUDE_JOB_DIR/tmp`）——一次性编排、非长期工具；若 run-3 复用可考虑固化进 `tools/`（但它依赖 events step_started 抢窗口的时序，属实验脚手架）。
 
 ## 9. 相关文件精确指针
 
