@@ -19,12 +19,12 @@
 
 - 工作目录：`/Users/lzy/workspace/yaozhou/core`（git 仓库根是 `/Users/lzy/workspace/yaozhou`）。分支 `feat/v1.1-cloud`。
 - 大目标：UI 测试框架**执行面上云**——worker 从本地 subprocess → AWS Fargate/ECS 容器。
-- WP 进度：WP-S✅ → #7✅ → WP3-A✅ → WP0✅ → WP1✅ → **WP2✅（已 commit `6e21448`）** → **WP3-B（进行中，本文件主题）**。
+- WP 进度：WP-S✅ → #7✅ → WP3-A✅ → WP0✅ → WP1✅ → **WP2✅（commit `6e21448`）** → **WP3-B✅（本文件主题，已收尾——见 banner/§8）**。
 - 导航总纲：`docs/journey/0000-fargate-cloud-progress.md`（第一份该读的进度文件）。
 
 ## 2. 当前任务：WP3-B（Fargate 特有韧性真容器校准）
 
-**设计冻结 ADR = `docs/adr/0032-fargate-execution-environment.md`（Draft）。** 四个待解项：
+**设计冻结 ADR = `docs/adr/0032-fargate-execution-environment.md`（现 Accepted、已真容器校准）。** 四个（曾）待解项：
 - ① grace/stopTimeout 真实预算校准（**头号**，必须真跑烧钱标定）
 - ② botocore retry vs grace 冲突（**已被 ADR 0029 超前解决**：上传/events 两路都 `max_attempts=0`+短超时，不再吃 grace；ADR 0032:28 描述已漂移待回校）
 - ③ 上传错误分类升级 engine_error→network_error（**本质是诊断分类精度**：上传都在 scope_started 之后、越过重试域边界，升级也不会触发重试）

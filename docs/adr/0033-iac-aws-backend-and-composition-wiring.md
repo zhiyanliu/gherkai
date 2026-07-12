@@ -38,7 +38,7 @@
 
 **（编排进程角色**——跑 core/cli 的机器需 `ecs:RunTask`/`StopTask`/`DescribeTasks` + `dynamodb:Query`/`PutItem` + store 读写 + `s3:PutObject`（job 上传）——若编排也在 AWS 上跑则一并建；本地跑则用本地凭证，不在本 stack 强制。）
 
-**数据资源保护 = `RemovalPolicy.RETAIN`（表/桶，防误删）**：2 张 DDB 表 + artifacts 桶都设 `RETAIN`——`cdk destroy` **不带走它们**（承载 run 数据/产物，误删代价高）。可随 stack 销毁的非数据资源（cluster/task-def/ECR/SSM/日志组）用默认/`DESTROY`。**代价（运维须知）**：`cdk destroy` 后表/桶**残留、需手动删**（`aws dynamodb delete-table` / `aws s3 rb --force`）；否则同 prefix 重新 deploy 会因表/桶已存在而处理为导入/冲突。清理 runbook 见 `iac_aws_backend/README`。
+**`RemovalPolicy.RETAIN` = 表/桶/ECR（防误删），其余随 stack 销毁**：2 张 DDB 表 + artifacts 桶设 `RETAIN`（承载 run 数据/产物，误删代价高）；**ECR repo 也设 `RETAIN`**（保住已 push 的镜像，且非空 repo `cdk destroy` 本就删不掉）。可随 stack 销毁的（cluster/task-def/SSM/日志组）用默认/`DESTROY`。**代价（运维须知）**：`cdk destroy` 后表/桶/ECR **残留、需手动删**（`aws dynamodb delete-table` / `aws s3 rb --force` / `aws ecr delete-repository --force`）；否则同 prefix 重新 deploy 会因资源已存在而处理为导入/冲突。清理 runbook 见 `iac_aws_backend/README`。
 
 ## 两层命名：`--prefix` 批量默认 + 单资源覆盖（正交、无特判）
 

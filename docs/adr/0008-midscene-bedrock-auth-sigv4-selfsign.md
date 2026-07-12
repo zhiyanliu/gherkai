@@ -7,7 +7,7 @@
 经核实 `@midscene/core 1.9.8` 源码：Midscene 有公开、带类型的逃生舱 **`createOpenAIClient`**，service-caller 会采纳你返回的 OpenAI client（`service-caller/index.mjs:154-157`），底层 OpenAI SDK v6.3.0 支持自定义 `fetch`。`fetch` 能拿到每次请求的 method+url+headers+body——足以在进程内自签 AWS SigV4。因此「Midscene 只能发静态 bearer」这一限制只对 env-var 路径成立，代码路径下可自签。
 
 **决定**：
-- **必须用代码初始化 Agent**（不能纯靠 env-var）：Midscene 经 `createOpenAIClient` 返回一个 OpenAI client，其自定义 `fetch` 用 `@aws-sdk/signature-v4` + 默认凭证链对请求做 SigV4 签名（service `bedrock`，region `us-east-1`，base URL 指 `bedrock-runtime.us-east-1.amazonaws.com/openai/v1`）。**SigV4 fetch 只能代码注入——env-var 路径（`MIDSCENE_MODEL_INIT_CONFIG_JSON` 的静态 headers）无法做逐请求签名。**
+- **必须用代码初始化 Agent**（不能纯靠 env-var）：Midscene 经 `createOpenAIClient` 返回一个 OpenAI client，其自定义 `fetch` 用 `@aws-sdk/signature-v4` + 默认凭证链对请求做 SigV4 签名（service `bedrock`，region 由注入的 `AWS_REGION` 决定——`getRegion()`/`getBaseUrl()` 惰性读、不硬编码 east，见 [0033](./0033-iac-aws-backend-and-composition-wiring.md)；base URL = `bedrock-runtime.<region>.amazonaws.com/openai/v1`。spike 当时用 `us-east-1`）。**SigV4 fetch 只能代码注入——env-var 路径（`MIDSCENE_MODEL_INIT_CONFIG_JSON` 的静态 headers）无法做逐请求签名。**
 - 模型名/family 仍可经 env 配：`MIDSCENE_MODEL_NAME=qwen.qwen3-vl-235b-a22b`、`MIDSCENE_USE_QWEN3_VL=true`（承载 qwen3-vl family 的 legacy 开关，实际 MODEL_CONFIG 与 `SIGV4-FETCH-RECIPE.md` 用的是它；这两个是静态值，env 可承载；只有 fetch/鉴权必须代码）。
 - 凭证走 AWS 默认链（本机 IAM user `zhiyan` 的静态密钥；已实测默认链可解析）。**零长期/短期 bearer key。**
 - **spike 与生产同路**——不再走「spike 先用兜底 key」。

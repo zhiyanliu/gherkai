@@ -22,7 +22,7 @@
 
 > **承接 v0.x 顺延项（待真实业务系统）**：≥3 真实用例 QA 零代码验收 + 破例清单——当前用骨架用例（wikipedia/example.com）验证方向，真实系统验收顺延。
 
-> **v1.1 云端进行中**：云端 store adapter（DynamoDB/S3）已建、已接进 cli（`--backend {local,cloud}`）、真 AWS 端到端跑通（判定真值落 DynamoDB+S3、错误分层已验），moto 单测行为对拍 local。配置与退出码分层见 [`cli/README.md`](./cli/README.md)。执行面 Fargate/ECS 仍待建。
+> **v1.1 云端**：云端 store adapter（DynamoDB/S3）+ **执行面 Fargate/ECS 均已建成 + 真部署真跑**——`--backend cloud` 一个旋钮同时切「存储上云 + worker 跑 Fargate 容器」（`FargateEngine` adapter + `iac_aws_backend` CDK 工程，ADR 0032/0033）。配置与退出码分层见 [`cli/README.md`](./cli/README.md)。待做：无状态跑批（提交→轮询→脱离 run，ADR 0017）。
 
 ## 架构速览
 
@@ -47,14 +47,14 @@
 ./
 ├── README.md                  ← 本文件
 ├── CONTEXT.md                 ← 领域术语表（glossary）
-├── docs/adr/                  ← 架构决策记录（0001–0031）
+├── docs/adr/                  ← 架构决策记录（0001–0033）
 ├── features/                  ← 共享 .feature（同一份两个引擎同读；通用 step 风格，QA 零代码）
 │   ├── wikipedia_generic.feature / wikipedia_assertions.feature / wikipedia_robustness.feature
 │   ├── engine_routing.feature              ← @engine tag 路由验证
 │   ├── deterministic_anchor.feature        ← @deterministic 锚点验证（ADR 0022）
 │   └── concurrency_and_scope.feature       ← 手工真跑回归夹具：改调度/会话生命周期后重跑验 ADR 0019
 ├── core/                      ← 窄腰核心库（Python，零引擎依赖，ADR 0016）
-│   └── core/{parse,scope,schedule,persist,model,wire,serialize,ports,errors}.py + adapters/{run,result,report}_store/{local,ddb|s3}.py（本地 + 云端）
+│   └── core/{parse,scope,schedule,persist,model,wire,serialize,ports,errors}.py + adapters/{subprocess,fargate}_engine.py（Engine：local/cloud）+ adapters/{run,result,report}_store/{local,ddb|s3}.py（本地 + 云端）
 ├── cli/                       ← 核心库的第一个前端 = 组合根（ADR 0016）
 │   └── cli/{__main__.py(argparse) · compose.py(引擎注册表) · render.py}
 └── engines/                   ← 两个可插拔引擎，与 core 平级
@@ -105,7 +105,7 @@ AWS_REGION=us-east-1 uv run python -m cli run ../features/engine_routing.feature
 
 - 动作/断言都写**纯自然语言、无路由关键词**：`When "搜索 OpenAI"` / `Then "进入了 OpenAI 词条页"` → 默认走 AI（动作=aiAct/act；断言=aiBoolean/act_get+投票）。
 - scope/引擎用 **tag**（ADR 0019）：`@scope:login`（共享会话、串行）/ `@engine:midscene|novaact`（选引擎）。
-- **确定性精确检查**（URL/DOM，不容 AI 抖动）：由 test engineer 在 worker 的 `@deterministic` 注册表按需写（`deterministic.ts` / `deterministic.py`；命中走精确 handler、不投票，ADR 0022）（QA 不碰）。
+- **确定性精确检查**（URL/DOM，不容 AI 抖动）：由 test engineer 在 worker 的 `@deterministic` 注册表按需写（`deterministic.steps.ts` / `deterministic_steps.py`；命中走精确 handler、不投票，ADR 0022）（QA 不碰）。
 - **多行参数**：AI 动作/断言 step 可挂 Gherkin DataTable/DocString，worker 拼成附加文本随 step 一起喂 AI（ADR 0024）。
 
 ## Spike（可独立跑的技术验证脚本）

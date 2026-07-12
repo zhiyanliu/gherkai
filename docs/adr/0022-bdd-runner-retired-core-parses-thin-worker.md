@@ -1,6 +1,6 @@
 # BDD runner 退役：核心库自解析 Gherkin + 两个引擎薄 worker（确定性 step = worker 注册表）
 
-> **Status:** Accepted
+> **Status:** Accepted —— 与 [0016](./0016-execution-architecture-core-lib-run-model.md) 一并**部分取代 [0006](./0006-form-a-two-subprojects-no-orchestrator.md)**（反转其「两套 runner 各自加载 / 不设统一编排入口」操作立场：BDD runner 退役、核心库自解析 + 组合根统一入口；0006「两子工程并列 + 双语言裂缝」核心结论仍成立）。
 
 核心库（v1.0）落地执行形态时的关键转向：**不再让每个引擎跑整个 BDD runner（cucumber-js / pytest-bdd），而是核心库自己解析 `.feature`、把每个 step 派发给一个薄 worker 子进程。** 本 ADR 记录这个转向（代号 B1）、它退役了哪些 hack、确定性 step 怎么扩展、以及对 [0019](./0019-feature-tags-scope-and-engine.md)/[0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md)/[0021](./0021-local-cucumber-patch-step-keyword-disambiguation.md) 的影响。执行架构总成见 [0016](./0016-execution-architecture-core-lib-run-model.md)。
 

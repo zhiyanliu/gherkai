@@ -62,9 +62,11 @@ uv run cdk destroy -c use_default_vpc=true          # 或与 deploy 时相同的
 aws dynamodb delete-table --table-name gherkai-runs
 aws dynamodb delete-table --table-name gherkai-events
 aws s3 rb s3://gherkai-artifacts --force            # 桶非空需 --force
+aws ecr delete-repository --repository-name gherkai-novaact-worker --force   # ECR 也 RETAIN
+aws ecr delete-repository --repository-name gherkai-midscene-worker --force
 ```
 
-不手动删则同 prefix 重新 deploy 会因表/桶已存在而冲突。（cluster/task-def/ECR/SSM/日志组随 stack 销毁、无需手动。）
+不手动删则同 prefix 重新 deploy 会因资源已存在而冲突。（cluster/task-def/SSM/日志组随 stack 销毁、无需手动。）
 
 ## 待做（真部署时）
 

@@ -24,7 +24,8 @@ core/
 ├── schedule.py   ← schedule(run_meta, engines, sink, opts, on_job_complete?, on_event?) -> RunResult（并发/隔离/超时/优雅停）
 ├── persist.py    ← RunPersistence：编排 Store ports 随进度实时落库（commit-point 写序，ADR 0030）
 └── adapters/
-    ├── subprocess_engine.py        ← Engine 实装：spawn worker 子进程 + 读事件流
+    ├── subprocess_engine.py        ← Engine 实装（local）：spawn worker 子进程 + 读事件流
+    ├── fargate_engine.py           ← Engine 实装（cloud）：RunTask 起 Fargate 容器 + job-in 走 S3 / events-out 走 DDB / stop→StopTask（ADR 0024/0032）
     ├── _boto.py                    ← 云端 adapter 共享的 boto3 依赖守卫（缺 boto3 友好报错，ADR 0016 窄腰）
     ├── run_store/{local,ddb}.py    ← RunStore：本地文件 + DynamoDB（+ arg_offload.py：StepArgument→S3 指针，解 DDB 400KB 限）
     ├── result_store/{local,s3}.py  ← ResultStore：本地文件 + S3（每 job 一对象）

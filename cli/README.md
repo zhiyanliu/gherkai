@@ -70,7 +70,7 @@ scope/job 分组与 engine 路由符合预期、提前暴露 `PlanError`（uri �
 
 - `0` —— RunResult 总状态 passed
 - `1` —— 跑完了但有 failed/error（断言没过 / 引擎异常）；`--backend cloud` 下若 run 已开跑、中途 DynamoDB/S3 不可达（如桶被删）也退 `1`
-- `2` —— 没跑成：feature 读不到、plan 配置矛盾（PlanError）、参数非法（如 `--assertion-votes < 1`）、或无子命令；`--backend cloud` 还没开跑就被拒（缺 `--ddb-table/--s3-bucket`、缺 boto3、或表/桶不存在·无权限·凭证/region 缺——运行前探活即失败）
+- `2` —— 没跑成：feature 读不到、plan 配置矛盾（PlanError）、参数非法（如 `--assertion-votes < 1`）、或无子命令；`--backend cloud` 还没开跑就被拒（缺 boto3、或 `--prefix` 拼出的表/桶/cluster/task-def 不存在·无权限·凭证/region 缺——运行前 preflight 点名 prefix fail-fast）
 
 > cloud 失败分层的切分线 = run 是否已真正开跑：起 worker 前的配置/可达问题退 `2`，跑到一半的云端故障退 `1`。
 

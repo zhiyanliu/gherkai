@@ -23,7 +23,7 @@ opts = {                 // 时间单位统一为秒；代码字段名带 _s 后
   clock,                 // 时间源（可注入 fake clock 单测超时/grace 路径；默认 monotonic，抗系统时钟回拨）
 }
 ```
-（上为语言中立伪代码；实际实现为 dataclass `ScheduleOpts`，字段 snake_case：`max_concurrency`/`fail_fast`/`job_timeout_s`/`grace_period_s`/`clock`/`network_retry`（默认 0）/`retry_sleep`/`heartbeat_interval_s`（默认 0.5，静默 worker 超时兜底轮询间隔，见下「静默 worker 的超时如何触发」）（[0028](./0028-transient-network-ssl-resilience.md)）。）
+（上为语言中立伪代码；实际实现为 dataclass `ScheduleOpts`，字段 snake_case：`max_concurrency`/`fail_fast`/`job_timeout_s`/`grace_period_s`/`min_grace_s`（默认 0.0，grace 下限，引擎无关纯数、组合根按引擎算好传入，schedule enforce `grace ≥ min_grace_s`，见 [0024](./0024-worker-core-protocol.md) grace 硬约束）/`clock`/`network_retry`（默认 0）/`retry_sleep`/`heartbeat_interval_s`（默认 0.5，静默 worker 超时兜底轮询间隔，见下「静默 worker 的超时如何触发」）（[0028](./0028-transient-network-ssl-resilience.md)）。）
 
 - **注入 `engines`（`EngineResolver`：按 `job.engine` 解析 Engine）而非自己 spawn** → 可测（skill：accept dependencies, don't create them）：测试注入假 Engine（吐预设 JSON Lines，[0024](./0024-worker-core-protocol.md)）即可验调度逻辑，无需真起子进程/真连 AgentCore。**schedule 对引擎数/引擎名无知**——焊死 `{midscene, novaact}` 会让第三个引擎到来即改接口；用 resolver 则只动组合根注入。
 - **注入 `sink`**（`(event) -> void` 回调，仅供 CLI 打印进度）→ schedule 边收边转，不自己决定结果存哪（[0016](./0016-execution-architecture-core-lib-run-model.md) ports）。**实时落库不走 sink**——走 `on_event`（事件旁路，在 sink_lock 外刷 RUNNING 中间态）/ `on_job_complete`（job 完成落判定真值），由组合根的 `RunPersistence` 编排（[0030](./0030-realtime-persistence-seam.md)）。（RunReport 也不走 sink——它由 `ReportStore.write` 从归约后的 `RunResult` 派生，[0027](./0027-runreport-aggregation-index.md)。）

@@ -105,7 +105,7 @@ core/
 
 **当前实装**：四个 port 的 local adapter **均已建**（`subprocess_engine.py` / `run_store/` / `result_store/` / `report_store/`，方法签名以代码与上「按关注点拆 port」节的契约描述为准）。判定结果不再仅在内存，cli 跑完落 `<report-dir>/<run_id>/`（`run_meta.json` + `run_state.json` + `jobs/` + RunReport）。**克制**：store adapter 只忠实持久化已成形的 `RunMeta`/`RunState`/`JobResult`（复用 `serialize` 单一序列化真理源），**未发明** jobId/DDB 表/轮询续跑读取面那些字段——它们仍 defer，待真实续跑/轮询/WebUI 需求逼出（见上「数据模型」节字段级 schema 顺延）。云端再填 DDB/S3/Fargate。
 
-**选实现 = 组合根注入，不是 module 自选**（关键，避开本会话踩过的坑）：
+**选实现 = 组合根注入，不是 module 自选**（关键，避开 env-sniff 全局单例反模式——见下 `GlobalConfigManager` 条）：
 - 接口定义在 `ports`；**具体 adapter 由调用方（CLI 的 main / WebUI 的 bootstrap = 组合根）在启动时注入**给核心。核心只认接口。
 - **禁止** ports module 内部用全局单例 + `env`-sniff 自选实现——那正是本项目踩过的 Midscene `GlobalConfigManager` 反模式（import 时缓存 env、运行时改不动、难测）。注入式可测、无隐藏全局。
 
