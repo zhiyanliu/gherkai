@@ -27,7 +27,6 @@ cost（ADR 0024）：Nova SDK 原生给 time_worked_s，worker 只报该原生�
 from __future__ import annotations
 
 import inspect
-import json
 import os
 import re
 import signal
@@ -598,6 +597,12 @@ def main() -> int:
                     # 不再在 scenario 级聚合；scenario_done 不带 reportRefs（协议字段保留、向后兼容）。
                     # scope 内 step 短路（上游 error 跳过后续、发 step_skipped，ADR 0031 决定六）在 _run_scenario 内。
                     statuses = _run_scenario(nova, sid, sc["steps"], votes_n, sink)
+                    # 中止护栏（对称 step 级投票中止 + 循环顶护栏）：scenario 中途收到 _stop 时 _run_scenario 返回
+                    # 部分 statuses，用它算 scenario_done 判定会把「没跑完的 scenario」标成确定 passed（假阳性，
+                    # _aggregate([])/_aggregate(["passed"]) 都==passed）——违反「停止是外部中止、非执行事实、worker
+                    # 不越权标注」（ADR 0031/0024）。故中止时**不 emit scenario_done**，未完成 scenario 交 core 派生态。
+                    if _stop.is_set():
+                        return
                     sink.emit({"type": "scenario_done", "scenarioId": sid, "status": _aggregate(statuses)})
 
     with wf:

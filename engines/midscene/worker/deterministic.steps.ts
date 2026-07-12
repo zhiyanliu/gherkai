@@ -8,7 +8,7 @@
 // import 本模块，顶层的 deterministic(...) 副作用把锚点登记进表。
 //
 // 角色边界（ADR 0020）：
-//   - 本文件由 test engineer 维护；QA 永远只在 .feature 写自然语言（默认走 AI，见 generic.steps.ts）。
+//   - 本文件由 test engineer 维护；QA 永远只在 .feature 写自然语言（默认走 AI——派发逻辑在 worker run-scope.ts）。
 //   - 仅当某断言确需精确、不能容忍 AI 非确定性时，test engineer 在此加一个项目专属锚点。
 //
 // handler 约定（见 worker/deterministic.ts）：

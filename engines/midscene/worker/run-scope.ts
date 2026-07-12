@@ -43,7 +43,7 @@ const CONNECT_ATTEMPTS = 4; // 建连重试上限（ADR 0028）；退避 [0.5,1,
 const CONNECT_BACKOFF_MS = [500, 1000, 2000];
 // SIGTERM cleanup 里单个 StopBrowserSession 的超时预算（ADR 0028）：退化网络下 Stop 可能挂很久
 // （共享 client maxAttempts=3、无显式超时），超过 schedule grace 会被 SIGKILL 打断到一半 → 会话泄漏。
-// 套这个预算：挂死时及时放弃，至少让 worker 干净退出、不被强杀。须 < grace（schedule 默认 5s，cli 10s）。
+// 套这个预算：挂死时及时放弃，至少让 worker 干净退出、不被强杀。须 < grace（组合根按引擎推导的下限，midscene-only ≈ MIDSCENE_GRACE_MIN_S=25s）。
 const STOP_SESSION_BUDGET_MS = 3000;
 // StartBrowserSession 已发出 RPC 但 sessionId 未返回的在途窗口兜底（ADR 0028）：SIGTERM 落在这一瞬时
 // 服务端可能已建会话但客户端没拿到 id。给一小段时间让 Start 的 await 返回、id 落进待清理集，再 cleanup。

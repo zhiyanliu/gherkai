@@ -252,9 +252,9 @@ def _cmd_run(args, repo: Path) -> int:
     report_root = Path(args.report_dir).resolve()
     nova_logs_dir = (report_root / run_id / "nova-trajectories") if do_report else None
     midscene_run_dir = (report_root / run_id / "midscene-run") if do_report else None
-    # engines 的 resolver 延后到 store 装配之后构造——cloud 时要把 S3 上传落点（bucket + <report_dir>/<run_id>/
-    # 前缀）注入给 worker（ADR 0029 第一期），而 bucket 在下面 cloud 分支才确定。artifact_s3 默认 None（local
-    # / --no-report → worker 报 file://、不上传）。
+    # artifact_s3 = 产物 S3 上传落点，仅 local（subprocess）路径经 build_engines 注入给 worker（ADR 0029）：
+    # 默认 None（local / --no-report → worker 报 file://、不上传）。**cloud（Fargate）路径不走这里**——其产物落点
+    # 由 build_fargate_engines 内部按 (bucket, <report_dir>/<run_id>/) 自算并注入 FargateEngine（见下 resolver 分流）。
     artifact_s3: tuple[str, str] | None = None
     cloud_fargate: dict | None = None  # cloud 分支置值（ADR 0033）：Fargate 执行配置，供 build_fargate_engines；None＝走 subprocess
     # region/profile 解析（ADR 0016 决策 C——region 与 profile 是「正确的非对称」）：
@@ -331,8 +331,6 @@ def _cmd_run(args, repo: Path) -> int:
             except ImportError as e:
                 _progress(f"--backend cloud 需要 boto3：{e}")
                 return 2
-            # 产物 S3 上传落点（ADR 0029 第一期）：跟 --backend cloud 走。prefix 规范化补尾 / 再拼 <run_id>/。
-            artifact_s3 = (cloud_bucket, f"{compose._normalize_prefix(args.report_dir)}{run_id}/")
         else:
             run_store, result_store, report_store, make_artifacts = compose.build_local_stores(report_dir=args.report_dir)
         persistence = RunPersistence(
@@ -348,8 +346,8 @@ def _cmd_run(args, repo: Path) -> int:
                 return 2
             raise
 
-    # 组合根注入引擎 resolver（延后到此：cloud 时 artifact_s3 已在上面确定，一并注入给 worker，ADR 0029）。
-    # **决策 A 落到 CLI（ADR 0016/0033）**：cloud ⇒ FargateEngine（云执行）；否则 SubprocessEngine（本地）。
+    # 组合根注入引擎 resolver（延后到此：需 run_id + store 装配后）。
+    # **决策 A 落到 CLI（ADR 0016/0033）**：cloud ⇒ FargateEngine（云执行，产物落点内部自算）；否则 SubprocessEngine（本地，注入 artifact_s3）。
     # cloud_fargate 在 3a 的 `backend=='cloud'` 分支**无条件置值**（与 do_report 正交，report⊥执行）——故
     # `--backend cloud --no-report` 仍走 Fargate（cloud_fargate 非 None），只是不落库、不生成 report。
     # `--no-report` 的逃生舱只作用于 store 轴（persistence=None、不构造三个 store），绝不改执行环境（见 3a 注释 + ADR 0016 决策 A）。

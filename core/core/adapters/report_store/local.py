@@ -112,7 +112,7 @@ class LocalReportStore:
         搬走、链接不断）；远端（s3/http…）或落在树外的产物回落 ==ref（绝对，该条不可移植）。ref 全程不改写
         （不透明铁律圈的是 ref、不是 href，ADR 0027）。（S3ReportStore 传自己的 make_href：href 恒==ref，见 s3.py。）
 
-        run_dir.resolve() 循环外算一次（run 期间不变）——避免逐 ref 重复同一系统调用（review #5）。
+        run_dir.resolve() 循环外算一次（run 期间不变）——避免逐 ref 重复同一系统调用。
         """
         resolved_run_dir = run_dir.resolve()
         return collect_report_index(result, make_href=lambda rr: _relative_href(rr.ref, resolved_run_dir))

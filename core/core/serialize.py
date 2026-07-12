@@ -266,9 +266,10 @@ def run_meta_from_dict(d: dict) -> RunMeta:
 
 
 def run_state_to_dict(state: RunState) -> dict:
-    # started_at/ended_at 用 omit-when-None：本轮同步 cli 不取时钟、两字段恒 None，
+    # started_at/ended_at 用 omit-when-None：无值时（如 --no-report 裸跑不取时钟、或未来续跑的部分态）
     # 写成永远的 "null" 是噪音（读者会当 bug）。键缺失语义（=未取时钟）比 null（=取了为空）更诚实；
-    # 未来真支持异步/续跑填了值，键自然出现（from_dict 用 .get 容忍缺失，round-trip 不破）。
+    # 有值时（正常 run 经 RunPersistence.begin/finalize 落 started_at/ended_at，ADR 0030）键自然出现
+    # （from_dict 用 .get 容忍缺失，round-trip 不破）。
     d: dict = {"run_id": state.run_id, "status": state.status.value}
     if state.started_at is not None:
         d["started_at"] = state.started_at

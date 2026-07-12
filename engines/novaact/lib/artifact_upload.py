@@ -80,7 +80,7 @@ class ArtifactUploader:
         p = Path(local_path)
         key = self._key_for(p)
         # 幂等短路：已成功传过（同一文件被 except 重建 reportRefs 再调，或多次引用）→ 直接返 s3:// ref、不重传
-        # （key 确定性可算）。消除对已传兄弟的冗余 PutObject（ADR 0029 review #4）。
+        # （key 确定性可算）。消除对已传兄弟的冗余 PutObject（ADR 0029 幂等去重）。
         if str(p.resolve()) in self._uploaded:
             return f"s3://{self._bucket}/{key}"
         self._s3().upload_file(str(p), self._bucket, key)  # 实时上传（失败抛 → 可观测、不删）
