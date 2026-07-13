@@ -12,7 +12,7 @@
 
 ## ✅ 已实测（M2 起）：同一份 .feature 双 runner 加载，均通过
 
-> **演进（v1.0）**：下述「双 runner 各自加载」的 runner 层（cucumber-js `cucumber.mjs` + pytest-bdd `scenarios()` + `{type:module}` + cucumber patch）已退役（[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)）；现由核心 `core/parse.py` 自解析同一份 `.feature`、派发薄 worker（`engines/*/worker/run_scope.*`）执行。**「单一物理共享 .feature」的核心决定不变**——只是加载方从双 runner 变成了核心。下述 M2 实测是当时的验证脉络，保留。
+> **演进（v1.0）**：下述「双 runner 各自加载」的 runner 层（cucumber-js `cucumber.mjs` + pytest-bdd `scenarios()` + `{type:module}` + cucumber patch）已退役（[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)）；现由核心 `core/parse.py` 自解析同一份 `.feature`、派发薄 worker（Nova `engines/novaact/worker/run_scope.py` / Midscene `engines/midscene/worker/run-scope.ts`）执行。**「单一物理共享 .feature」的核心决定不变**——只是加载方从双 runner 变成了核心。下述 M2 实测是当时的验证脉络，保留。
 
 同一份 `.feature` 被两套 runner 各自加载、各驱动一个引擎，都通过：
 - **Midscene 侧**：`engines/midscene/` 的 cucumber-js（配置 `cucumber.mjs` 的 `paths` 指 `../../features/`）。

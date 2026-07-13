@@ -97,10 +97,15 @@ scope/job 分组与 engine 路由符合预期、提前暴露 `PlanError`（uri �
 | `--report-dir` | `reports` | RunReport 归集落点；每次 run 落 `DIR/<run_id>/` |
 | `--no-report` | off | 跳过 RunReport 归集（逃生舱：CI 只看退出码/JSON、或调试不想落盘） |
 | `--backend {local,cloud}` | `local` | 落库后端：local=文件落 `--report-dir`；cloud=状态落 DynamoDB、判定结果与报告落 S3（表/桶需预先建好） |
-| `--ddb-table` | — | [cloud] DynamoDB 表名（分区键 run_id + 排序键 item_type）；兜底环境变量 `AWS_DDB_TABLE` |
-| `--s3-bucket` | — | [cloud] S3 桶名（存判定结果与报告）；兜底 `AWS_S3_BUCKET` |
-| `--region` | — | [cloud] AWS region（不给走 boto3 默认链：`AWS_REGION` / profile 配置） |
-| `--profile` | — | [cloud] AWS profile（不给用 default；profile 没配 region 时仍需 `--region`） |
+| `--prefix` | `gherkai-` | [cloud] 资源名前缀：批量决定表/桶/cluster/task-def 默认名，**须与 CDK（`iac_aws_backend`）部署用的 prefix 一致**；多环境（prod-/stage-）切换用它。兜底 `AWS_RESOURCE_PREFIX` |
+| `--ddb-table` | `{prefix}runs` | [cloud] RunStore DynamoDB 表名（分区键 run_id + 排序键 item_type）；覆盖 prefix 默认；兜底 `AWS_DDB_TABLE` |
+| `--s3-bucket` | `{prefix}artifacts` | [cloud] S3 桶名（存判定结果与报告）；覆盖 prefix 默认；兜底 `AWS_S3_BUCKET` |
+| `--events-table` | `{prefix}events` | [cloud] events DynamoDB 表名（worker PutItem 目标，events-out）；覆盖 prefix 默认 |
+| `--cluster` | `{prefix}cluster` | [cloud] ECS cluster 名（Fargate 执行）；覆盖 prefix 默认 |
+| `--subnet` | SSM | [cloud] Fargate 子网 ID（可多次给）；不给则读 SSM `/{prefix}backend/subnets`（CDK 写的生成 ID） |
+| `--security-group` | SSM | [cloud] Fargate 安全组 ID（可多次给）；不给则读 SSM `/{prefix}backend/security-groups` |
+| `--region` | — | AWS region（local+cloud 均用；解析链 `--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > profile 配置；喂 store + worker） |
+| `--profile` | — | AWS profile（local+cloud 均用；`--profile` > `AWS_PROFILE`；喂 store + subprocess worker） |
 
 > `--backend cloud` 需 boto3（可选 extra，纯 local 不装）：`uv sync --extra aws`（或 `pip install cli[aws]`）。
 > cloud 下缺配置 / 缺 boto3 / 表桶预检失败 → 退出码 `2`；run 已开跑后 DynamoDB/S3 中途不可达 → 退出码 `1`。

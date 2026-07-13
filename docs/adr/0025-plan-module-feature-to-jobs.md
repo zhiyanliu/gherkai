@@ -7,10 +7,10 @@
 ## 接口（深模块，小）
 
 ```
-plan(features: [{uri, text}], config: {defaultEngine}) -> Job[]
+plan(features: [{uri, text}], config: {defaultEngine, defaultAssertionVotes}) -> Job[]
 
 Job = {
-  scopeId, scopeName, engine,
+  scopeId, scopeName, engine, assertionVotes,   // votes 维度语义权威在 ADR 0014，本模块只透传
   scenarios: [
     { id, name, steps: [ { index, keyword, text, argument? } ] }
   ]

@@ -106,7 +106,7 @@ run 结束（schedule 返回后）:
 
 > **ReportStore.write 失败隔离**：finalize_run（commit point）一落，判定真值已在 ResultStore 安然无恙；其后的
 > ReportStore.write（派生只读视图）若抛异常（磁盘满等），**不冒泡、不反向击穿已 commit 的 run**——finalize 吞掉它、
-> 留痕诊断、返回 None（报告可后续从 RunResult 重建）。否则一个「可重建的报告」写失败会让整个 run 裸 traceback 退出、
+> 返回 None（报告可后续从 RunResult 重建）。否则一个「可重建的报告」写失败会让整个 run 裸 traceback 退出、
 > CI 拿不到判定输出。finalize_run 本身**不**在隔离范围内（控制面没落=真问题，必须冒泡）。
 
 **commit point 的意义**：数据面（ResultStore 各 job）先逐个落 → 最后才写 RunStore 终态 status。

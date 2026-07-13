@@ -2,7 +2,7 @@
 
 > **Status:** Partially-superseded-by 0016/0022 —— 「两子工程并列 + 双语言裂缝物理约束」核心结论仍成立；「不设统一编排入口 / 两套 runner 各自加载」操作立场已被 v1.0 反转（详见下文「演进」）。
 
-monorepo（单个 git 仓库根）下并列两个引擎子工程：`engines/novaact/`（Python）+ `engines/midscene/`（TS），根级放共享的 `features/` 与可丢弃的 `spikes/`。两套 Gherkin runner（`pytest-bdd` / `cucumber-js`）各自加载根级 `.feature`、各出报告。**不**设统一编排入口。
+monorepo（单个 git 仓库根）下并列两个引擎子工程：`engines/novaact/`（Python）+ `engines/midscene/`（TS），根级放共享的 `features/`；可丢弃的 spike 分置各引擎子工程内（`engines/*/spikes/`）。两套 Gherkin runner（`pytest-bdd` / `cucumber-js`）各自加载根级 `.feature`、各出报告。**不**设统一编排入口。
 
 **为什么不是「一个统一入口」（读者最可能问的）**：两个引擎的 SDK 语言不同且不可换——Nova Act 是 Python（pip `nova-act`），Midscene 是 TS（npm `@midscene/web`）。step definition 必须调引擎 API、因而必须跟着分语言；没有任何单一 Gherkin runner 能在同一进程里既跑 Python step 又跑 TS step（两个解释器/运行时）。这是「双语言裂缝」，物理约束，非设计选择。
 

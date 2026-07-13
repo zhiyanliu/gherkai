@@ -89,8 +89,8 @@ _Avoid_: 把逻辑焊死在 CLI `main()` 里；以为"WebUI 要包 CLI"；把"�
 （版本演进 spike→v0.x→v1.0→v1.x→v2.0 见 ADR 0016。）
 
 **执行引擎 port (Engine port)**:
-核心库之下真正跑一个 scope 的地方，是一个 **port**（`Engine`，对齐「引擎」术语，ADR 0016），由组合根注入。v1.0 实装为**单个参数化 `SubprocessEngine`**（`cmd`/`cwd`/`env` 参数化即可 spawn Node 或 Python worker——两个引擎"spawn 子进程 + 讲同一套 0024 协议"形状本就一致，无需两个具名 adapter 类；经 `EngineResolver` 按 `job.engine` 选）。演进：v1.0 本地进程（浏览器仍在云端 AgentCore Browser）→ 云端倾向 Fargate/ECS（批处理 shape-fit，ADR 0017；非 AgentCore Runtime）。
-_Avoid_: 混淆"浏览器在云端"（spike 已验证）与"执行进程也在云端"（>v1.0）；把它当成"核心 import 引擎"——核心永不 import 引擎，只 spawn worker。
+核心库之下真正跑一个 scope 的地方，是一个 **port**（`Engine`，对齐「引擎」术语，ADR 0016），由组合根注入。v1.0 实装为**单个参数化 `SubprocessEngine`**（`cmd`/`cwd`/`env` 参数化即可 spawn Node 或 Python worker——两个引擎"spawn 子进程 + 讲同一套 0024 协议"形状本就一致，无需两个具名 adapter 类；经 `EngineResolver` 按 `job.engine` 选）。演进：v1.0 本地进程（`SubprocessEngine`，浏览器仍在云端 AgentCore Browser）；执行进程上云已实装——`FargateEngine` + `iac_aws_backend`，`--backend cloud` 同时切 Fargate/ECS 执行（批处理 shape-fit 优于 AgentCore Runtime，ADR 0017；已建成真部署，ADR 0032/0033）。
+_Avoid_: 混淆"浏览器在云端"（spike 已验证）与"执行进程也在云端"（Fargate，已建成）——两者现皆在云、但仍是两件事；把它当成"核心 import 引擎"——核心永不 import 引擎，只 spawn worker。
 
 **两个引擎都子进程 + 薄 worker (Both-legs-subprocess + thin worker)**:
 两引擎语言锁死（Midscene 锁 TS、Nova Act acting 锁 Python，ADR 0023 证伪了全 TS 核心），故核心（Python）**对每个 scope spawn 一个 worker 子进程**——两个引擎对称、核心零引擎依赖。worker = 被 spawn 的进程，一生 = 开 AgentCore 会话 → 按 scope 串行跑 scenarios（每 step 派发成 act/assert）→ 回 JSON → 退出（一次调用 = 一个 job = 一个 scope）。**核心自解析 Gherkin**（单一事实源），worker 只派发不解析——故 cucumber 补丁与 pytest-bdd 路由 hack 退役（ADR 0022）。

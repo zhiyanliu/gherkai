@@ -75,7 +75,7 @@ def color_is(ctx, sel, hex):
 | `engines/novaact/bdd/conftest.py`（tag 路由 hook） | engine 路由改由核心调度层做（[0019](./0019-feature-tags-scope-and-engine.md)） |
 | `engines/midscene/bdd/package.json`（`{type:module}`）+ `bdd/steps/generic.steps.ts` + `novaact/bdd/test_generic_steps.py` | cucumber/pytest-bdd 工程配置 + 已迁进 worker 的 step 逻辑副本 |
 
-**迁移（不删，位置搬到 `worker/`）**：`agentcore-sigv4.mts`、`workflow_setup.py`（worker 进程内直接用）；`generic.steps`/`test_generic_steps` 的**逻辑**早已在 worker 派发实现（其 bdd 副本已随 B1 退役删除）；**确定性脚手架 `deterministic_steps.py`/`deterministic.steps.ts` 迁入 `worker/`**——注意这是**实装偏差纠正**：原 ADR 说"确定性 step 迁入 worker 注册表"，但实现是 **worker 反向 import 脚手架**（触发 `@deterministic` 顶层注册副作用），故脚手架是 worker 的**活依赖**、非可删副本；退役 bdd 时把它从 `bdd/` 移到 `worker/` 同目录（`novaact/worker/deterministic_steps.py`、`midscene/worker/deterministic.steps.ts`），worker import 路径相应改为同目录。全部 spike 与 `SIGV4-FETCH-RECIPE.md`（独立可跑的证据，[0010](./0010-spike-as-apples-to-apples-benchmark.md)）保留在各引擎 `spikes/`。
+**迁移（不删，改落 `lib/` 或 `worker/`）**：`agentcore-sigv4.mts`、`workflow_setup.py` 落各引擎 `lib/`（`midscene/lib/`、`novaact/lib/`，worker 进程内直接 import）；`generic.steps`/`test_generic_steps` 的**逻辑**早已在 worker 派发实现（其 bdd 副本已随 B1 退役删除）；**确定性脚手架 `deterministic_steps.py`/`deterministic.steps.ts` 迁入 `worker/`**——注意这是**实装偏差纠正**：原 ADR 说"确定性 step 迁入 worker 注册表"，但实现是 **worker 反向 import 脚手架**（触发 `@deterministic` 顶层注册副作用），故脚手架是 worker 的**活依赖**、非可删副本；退役 bdd 时把它从 `bdd/` 移到 `worker/` 同目录（`novaact/worker/deterministic_steps.py`、`midscene/worker/deterministic.steps.ts`），worker import 路径相应改为同目录。全部 spike 与 `SIGV4-FETCH-RECIPE.md`（独立可跑的证据，[0010](./0010-spike-as-apples-to-apples-benchmark.md)）保留在各引擎 `spikes/`。
 
 ## 对既有 ADR 的影响
 

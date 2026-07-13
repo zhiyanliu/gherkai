@@ -21,7 +21,7 @@
 ```
 aws nova-act create-workflow-definition --region us-east-1 --name "<name>"
 ```
-**但已做成代码端到端闭环（2026-06，实证）**：boto3 有等价的 `create_workflow_definition`/`get_workflow_definition`，故用 create-if-not-exists 的 `ensure_workflow_definition()`（见 `engines/novaact/lib/workflow_setup.py`）——首次自动建、之后探测到即跳过，幂等。bdd fixture 与 spike 都已接入，**无需手动 CLI 前置**。已实证：删掉 definition 后代码能从零自动建回。
+**但已做成代码端到端闭环（2026-06，实证）**：boto3 有等价的 `create_workflow_definition`/`get_workflow_definition`，故用 create-if-not-exists 的 `ensure_workflow_definition()`（见 `engines/novaact/lib/workflow_setup.py`）——首次自动建、之后探测到即跳过，幂等。worker（`run_scope.py`）与 spike 都已接入，**无需手动 CLI 前置**。已实证：删掉 definition 后代码能从零自动建回。
 本项目用的 definition 名：`spike-wikipedia-benchmark`。生产化时也可改由 IaC / 部署脚本统一管理。
 
 **退路**：若某账号/region IAM 路径不可用，退回 `NOVA_ACT_API_KEY`（从 nova.amazon.com/act 生成）。
