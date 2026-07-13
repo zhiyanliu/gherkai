@@ -4,7 +4,7 @@
 - **moto 忠实、用 `fargate` fixture 测**：run_scope 调对 RunTask（env 注入 JOB_S3_URI/events 表/run_id/scope_id）+
   PutObject job 到 S3；Query 迭代器增量拉 + last_seq 游标 + scope_done 终止；stop→StopTask。
 - **moto 失真（exitCode 恒 0、lastStatus 由 describe 次数驱动）→ 退出码语义用「构造 describe 响应 dict」的纯单测**测
-  `_task_exit_code`/`_raise_for_exit`（不经 moto、可造任意 exitCode）；真实 ECS 时序标定见 ADR 0032 真容器校准。
+  `_probe_task`/`_raise_for_exit`（不经 moto、可造任意 exitCode）；真实 ECS 时序标定见 ADR 0032 真容器校准。
 
 对拍 test_subprocess_engine.py：同一 Engine port、同一 (WorkerHandle, Iterator[Event]) 形状。
 """
@@ -70,7 +70,7 @@ def _delayed_stopped_ecs(container_name: str, running_polls: int, exit_code: int
     """假 ecs：前 running_polls 次 describe_tasks 返回 RUNNING（exitCode 尚 null），之后才 STOPPED。
 
     **模拟真实时序**（ADR 0032 结论 2：scope_done 先于 ECS 记录 executionStoppedAt ~11s）：worker 已 emit
-    scope_done、但 task 还没到 STOPPED——_task_exit_code 返回 None → _await_exit_code 须 sleep 轮询等到 STOPPED。
+    scope_done、但 task 还没到 STOPPED——_probe_task 返回 (stopped=False, ...) → _await_exit_code 须 sleep 轮询等到 STOPPED。
     `_stopped_ecs`（首次即 STOPPED）把这 ~11s 滞后塌缩为 0、测不出「轮询等 STOPPED」这个 option-c 定义行为
     （变异：把循环退化成单次读退出码，_stopped_ecs 下仍绿、但真 Fargate 每 scope 收尾 _raise_for_exit(None) 崩）。"""
     class _DelayedEcs:
@@ -380,8 +380,8 @@ def test_read_events_scope_done_then_nonzero_exit_raises(fargate):
 
 def test_read_events_scope_done_waits_for_stopped_before_reading_exit(fargate, monkeypatch):
     """**option-c 定义行为的核心守卫**：scope_done 先于 ECS STOPPED ~11s 到达（ADR 0032 结论 2），_await_exit_code
-    须**轮询等到 STOPPED** 才读 exitCode——不能读到 scope_done 就立刻读码（那时 _task_exit_code 返回 None →
-    _raise_for_exit(None) → TypeError，真 Fargate 每 scope 收尾崩）。
+    须**轮询等到 STOPPED** 才读 exitCode——不能读到 scope_done 就立刻读码（那时 _probe_task 返回 stopped=False、
+    还没退出码，若立即读会拿不到码，真 Fargate 每 scope 收尾崩）。
 
     **前几个 assert 塌缩不了这个滞后**（其余 scope_done 测试用 _stopped_ecs 首次即 STOPPED、把滞后压成 0，故
     「等 STOPPED」的轮询循环零覆盖——变异把循环退化成单次读退出码仍全绿，见对抗 review）。本测试用 _delayed_stopped_ecs
@@ -441,7 +441,7 @@ class _FakeEcs:
 
 
 def _engine_with_fake_ecs(describe_response, container_name="worker") -> FargateEngine:
-    # 只测 _task_exit_code/_raise_for_exit，不跑 run_scope；其余注入 None（不触及）
+    # 只测 _probe_task/_raise_for_exit，不跑 run_scope；其余注入 None（不触及）
     eng = FargateEngine.__new__(FargateEngine)
     eng._ecs = _FakeEcs(describe_response)
     eng._cluster = "c"
@@ -449,28 +449,27 @@ def _engine_with_fake_ecs(describe_response, container_name="worker") -> Fargate
     return eng
 
 
-def test_task_exit_code_none_when_not_stopped():
-    # 未 STOPPED → None（继续轮询）
+def test_probe_task_not_stopped():
+    # 未 STOPPED → (stopped=False, exit_code=None)（调用方继续轮询等终态）
     eng = _engine_with_fake_ecs({"tasks": [{"lastStatus": "RUNNING", "containers": [{"name": "worker"}]}]})
-    assert eng._task_exit_code("arn") is None
+    assert eng._probe_task("arn") == (False, None)
 
 
-def test_task_exit_code_reads_stopped_exit_code():
+def test_probe_task_stopped_with_exit_code():
     eng = _engine_with_fake_ecs({"tasks": [{"lastStatus": "STOPPED", "containers": [{"name": "worker", "exitCode": 0}]}]})
-    assert eng._task_exit_code("arn") == 0
+    assert eng._probe_task("arn") == (True, 0)
     eng2 = _engine_with_fake_ecs({"tasks": [{"lastStatus": "STOPPED", "containers": [{"name": "worker", "exitCode": 137}]}]})
-    assert eng2._task_exit_code("arn") == 137
+    assert eng2._probe_task("arn") == (True, 137)
 
 
-def test_task_exit_code_null_exitcode_returns_pending_not_error():
+def test_probe_task_stopped_but_exit_code_null():
     # STOPPED 但 exitCode=null（lastStatus 翻转与 exitCode 落值非原子，STOPPED 瞬间可能短暂 null，ADR 0024「exitCode 落值延迟」）
-    # → 返回三态哨兵 _STOPPED_EXIT_PENDING（**不立即当异常 1**）；调用方 _await_exit_code 据此有界多等几拍等落值。
-    from core.adapters.fargate_engine import _STOPPED_EXIT_PENDING
+    # → (stopped=True, exit_code=None)：**两事实各自命名、不揉进单值**；调用方 _await_exit_code 据此有界多等几拍等落值、别当异常。
     eng = _engine_with_fake_ecs({"tasks": [{"lastStatus": "STOPPED", "containers": [{"name": "worker", "exitCode": None}]}]})
-    assert eng._task_exit_code("arn") is _STOPPED_EXIT_PENDING
-    # 未 STOPPED 仍是 None（区别于 PENDING）——三态不混
-    eng2 = _engine_with_fake_ecs({"tasks": [{"lastStatus": "RUNNING", "containers": [{"name": "worker"}]}]})
-    assert eng2._task_exit_code("arn") is None
+    assert eng._probe_task("arn") == (True, None)
+    # STOPPED 但整个 containers 空（更极端的落值延迟）→ 同样 (True, None)、不崩
+    eng2 = _engine_with_fake_ecs({"tasks": [{"lastStatus": "STOPPED", "containers": []}]})
+    assert eng2._probe_task("arn") == (True, None)
 
 
 def test_raise_for_exit_maps_codes():
