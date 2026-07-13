@@ -47,7 +47,12 @@
 ./
 ├── README.md                  ← 本文件
 ├── CONTEXT.md                 ← 领域术语表（glossary）
-├── docs/adr/                  ← 架构决策记录（0001–0033）
+├── CLAUDE.md                  ← 项目约定（沟通/文档纪律/代码纪律/工作方式）——给 AI coding agent 与人
+├── docs/                      ← 架构决策与过程记录
+│   ├── adr/                   ← 架构决策记录（0001–0033）
+│   ├── journey/               ← 任务推进 staging 区（过程产物，吸收进 ADR/code 后可清，见 CLAUDE.md）
+│   ├── REFERENCES.md          ← 外部一手来源
+│   └── {doc,code}-health-review.md  ← 文档/代码健康度复盘方法
 ├── features/                  ← 共享 .feature（同一份两个引擎同读；通用 step 风格，QA 零代码）
 │   ├── wikipedia_generic.feature / wikipedia_assertions.feature / wikipedia_robustness.feature
 │   ├── engine_routing.feature              ← @engine tag 路由验证
@@ -57,9 +62,11 @@
 │   └── core/{parse,scope,schedule,persist,model,wire,serialize,ports,errors}.py + adapters/{subprocess,fargate}_engine.py（Engine：local/cloud）+ adapters/{run,result,report}_store/{local,ddb|s3}.py（本地 + 云端）
 ├── cli/                       ← 核心库的第一个前端 = 组合根（ADR 0016）
 │   └── cli/{__main__.py(argparse) · compose.py(引擎注册表) · render.py}
-└── engines/                   ← 两个可插拔引擎，与 core 平级
-    ├── midscene/   ← TS 子工程：worker/run-scope.ts（薄 worker）· worker/deterministic.ts · lib/agentcore-sigv4.mts · spikes/
-    └── novaact/    ← Python 子工程：worker/run_scope.py（薄 worker）· worker/deterministic.py · lib/workflow_setup.py · spikes/
+├── engines/                   ← 两个可插拔引擎，与 core 平级
+│   ├── midscene/   ← TS 子工程：worker/run-scope.ts（薄 worker）· worker/deterministic.ts · lib/agentcore-sigv4.mts · spikes/
+│   └── novaact/    ← Python 子工程：worker/run_scope.py（薄 worker）· worker/deterministic.py · lib/workflow_setup.py · spikes/
+├── iac_aws_backend/           ← `--backend cloud` 的 AWS 资源 IaC（Python CDK：DDB/S3/ECS/ECR/IAM/VPC，ADR 0033）
+└── tools/                     ← 复用工具库（端到端真跑 / 跨真实边界验证 / 时序诊断；长期资产，见 CLAUDE.md「工作方式」）
 ```
 
 ## 前置要求
