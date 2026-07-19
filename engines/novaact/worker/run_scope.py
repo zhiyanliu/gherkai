@@ -664,7 +664,15 @@ def main() -> int:
         summary = os.path.abspath(os.path.join(base, session_id, "session_summary.json"))
         if os.path.exists(summary):
             # ref 经 uploader：cloud 上传 S3+删本地报 s3://，local no-op 报 file://（ADR 0029）。
-            scope_refs.append({"kind": "summary", "ref": _uploader.to_report_ref(summary), "label": "Nova session summary"})
+            # **scope 级 summary 上传 best-effort：失败吞+log、不带 summary ref、不拖垮 scope_done**（ADR 0032）——
+            # session_summary 是"锦上添花的数字汇总"（引擎特有富信息、非人看报告，ADR 0027），此刻 scope 判定
+            # 已 emit 完，不该因它上传失败（多为 S3 网络瞬时）把已跑完的 scope 拖成裸 traceback/engine_error。
+            # 对齐同文件抢传/flush 的 best-effort。**与 step 内 trajectory 的强保证不同**：trajectory 是判定现场
+            # 证据（`to_report_ref` 失败抛、可观测）、summary 只是数字汇总，故此处降级、不动 to_report_ref 本身。
+            try:
+                scope_refs.append({"kind": "summary", "ref": _uploader.to_report_ref(summary), "label": "Nova session summary"})
+            except Exception as e:  # noqa: BLE001
+                log(f"scope 级 session summary 上传失败（best-effort、忽略、不带 summary ref）：{type(e).__name__}: {e}")
     ev = {"type": "scope_done", "scopeId": scope["id"], "sessionId": session_id}
     if scope_refs:
         ev["reportRefs"] = scope_refs

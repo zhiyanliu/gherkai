@@ -382,8 +382,15 @@ async function main(): Promise<number> {
     // ref 经 uploader：cloud 上传 S3+删本地报 s3://，local no-op 报 file://（ADR 0029，对称 Nova）。
     await agent.destroy().catch(() => {});
     if (agent.reportFile) {
-      const ref = await uploader.toReportRef(agent.reportFile);  // 实时上传（不删，留到 flush 整目录删）
-      reportRefs.push({ kind: "report", ref, label: "Midscene report" });
+      // **scope 级 report 上传 best-effort：失败吞+log、不带 report ref、不 throw**（ADR 0032，对称 Nova summary）——
+      // 此刻 scope 判定已 emit 完，report 上传失败（多为 S3 网络瞬时）不该 throw→main().catch→fatal exit(1)、
+      // 把已跑完的 scope 毁成 worker fatal。对齐同文件 interruptSnapshot/snapshotLogs 抢传的 best-effort。
+      try {
+        const ref = await uploader.toReportRef(agent.reportFile);  // 实时上传（不删，留到 flush 整目录删）
+        reportRefs.push({ kind: "report", ref, label: "Midscene report" });
+      } catch (e) {
+        log(`worker: scope 级 report 上传失败（best-effort、忽略、不带 report ref）：${(e as Error).message}`);
+      }
     }
   } catch (e) {
     await cleanup();
