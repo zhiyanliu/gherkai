@@ -120,6 +120,61 @@ def test_task_role_has_events_putitem_not_runs():
             assert "gherkai-runs" not in res, f"task role 不应含指向 runs 表的权限：{stmt}"
 
 
+def test_task_role_resource_arns_narrowed():
+    """IAM 资源 ARN 已收窄（ADR 0033）——回归护栏：防将来改回 * 或踩 account=aws 陷阱。
+
+    收窄依据 = AWS SAR resource_types + IAM 策略模拟器实证。此测试钉死 CDK 生成的 ARN 形态。
+    """
+    t = _template()
+    # 收集所有 IAM policy 的所有 statement（Resource 统一序列化后搜，容 str/list/Fn::Join）
+    stmts = []
+    for policy in t.find_resources("AWS::IAM::Policy").values():
+        for st in policy["Properties"]["PolicyDocument"]["Statement"]:
+            acts = st.get("Action")
+            acts = acts if isinstance(acts, list) else [acts]
+            stmts.append((acts, json.dumps(st.get("Resource", ""), ensure_ascii=False)))
+
+    def res_for(action_substr: str) -> list[str]:
+        return [res for acts, res in stmts if any(action_substr in a for a in acts)]
+
+    # ① bedrock InvokeModel → 单一 foundation-model ARN（region 通配、model-id pin；account 段空）。不得是裸 *。
+    invoke = res_for("bedrock:InvokeModel")
+    assert invoke, "缺 bedrock:InvokeModel 权限"
+    for r in invoke:
+        assert "foundation-model/qwen.qwen3-vl-235b-a22b" in r, f"InvokeModel 未收窄到 Qwen 模型 ARN：{r}"
+        assert r != '"*"', "InvokeModel 不应是裸 *"
+
+    # ② nova-act → 收窄到 workflow-definition/* 通配（definition 名段 *，不 pin 具体名——避免 IaC 跨工程耦合
+    #    worker 运行期常量）；仍锁死 service/account/region，不得是裸 *。且 **不含 GetAct**（非真实 action，已删）。
+    nova = res_for("nova-act:")
+    assert nova, "缺 nova-act 权限"
+    for r in nova:
+        assert "nova-act" in r and "workflow-definition" in r, f"nova-act 未收窄到 workflow-definition ARN：{r}"
+        assert r != '"*"', "nova-act 不应是裸 *"
+        # 不该 pin 具体 definition 名（那是 worker 运行期概念、不该泄进 IAM）
+        assert "spike-wikipedia-benchmark" not in r, f"nova-act 不应 pin 具体 definition 名（应用 * 通配）：{r}"
+    all_nova_actions = {a for acts, _ in stmts for a in acts if a.startswith("nova-act:")}
+    assert "nova-act:GetAct" not in all_nova_actions, "GetAct 非真实 IAM action，应已删除"
+
+    # ③ bedrock-agentcore Start/Stop/Get/Save → 具体 ARN（含系统 browser 的 account=aws 陷阱段）。
+    #    系统 browser ARN 的 account 段必须是字面量 aws（非客户账户 000000000000——模拟器实证填客户账户会 implicitDeny）。
+    sys_browser_seen = any("browser/aws.browser.v1" in res for _, res in stmts)
+    assert sys_browser_seen, "缺系统 browser ARN"
+    for acts, res in stmts:
+        if any(a in ("bedrock-agentcore:StartBrowserSession", "bedrock-agentcore:StopBrowserSession",
+                     "bedrock-agentcore:GetBrowserProfile", "bedrock-agentcore:SaveBrowserSessionProfile") for a in acts):
+            assert res != '"*"', f"agentcore 可收窄动作不应是裸 *：{acts}"
+            if "browser/aws.browser.v1" in res:
+                # 系统 browser 段的 account 必须是 aws、绝不是客户账户（copy-account 陷阱护栏）
+                assert ":aws:browser/aws.browser.v1" in res, f"系统 browser account 段应为字面量 aws：{res}"
+                assert "000000000000:browser/aws.browser.v1" not in res, "踩了 copy-account 陷阱（系统 browser 用了客户账户）"
+    # ④ List/Create/Connect×2 结构上不支持 resource-level，诚实保留 *（不因收窄而误删这条 * statement）
+    for action in ("bedrock-agentcore:ListBrowserProfiles", "bedrock-agentcore:CreateBrowserProfile",
+                   "bedrock-agentcore:ConnectBrowserAutomationStream", "bedrock-agentcore:ConnectBrowserLiveViewStream"):
+        rs = res_for(action)
+        assert rs and all(r == '"*"' for r in rs), f"{action} 应保留 *（SAR 不支持 resource-level）：{rs}"
+
+
 def test_prefix_switches_whole_set():
     # 两层命名核心：-c prefix=prod- 切整套名，container 名仍不带 prefix。
     t = _template(prefix="prod-")

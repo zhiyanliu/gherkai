@@ -18,6 +18,14 @@ BASE_CLUSTER = "cluster"
 
 ENGINES = ("novaact", "midscene")  # 引擎规范名（与 core model / cli compose._ENGINES 一致）
 
+# IAM 资源 ARN 收窄用的稳定段（ADR 0033 IAM 表）：
+# QWEN_MODEL_ID 是**模型标识（部署期稳定、非运行期概念）**，故可安全 pin 进 IAM——**须与
+# `engines/midscene/lib/agentcore-sigv4.mts` 的 `MODEL` 逐字一致**（Midscene InvokeModel 的 foundation-model
+# ARN pin 到它）。裸 id、无跨区前缀（不走 inference profile）。
+# （对比：nova-act 的 workflow-definition 名是 worker 运行期概念、不 pin——IAM 用 workflow-definition/* 通配，
+#  避免 IaC 跨工程耦合 worker 常量，见 stack.py nova-act 权限注释。）
+QWEN_MODEL_ID = "qwen.qwen3-vl-235b-a22b"
+
 
 def default_name(prefix: str, base: str) -> str:
     """prefix + 基名（原样拼）。对齐 cli `compose.default_name`。"""

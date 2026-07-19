@@ -202,46 +202,72 @@ class BackendStack(Stack):
             actions=["s3:GetObject", "s3:PutObject", "s3:AbortMultipartUpload"],
             resources=[f"arn:aws:s3:::{bucket}/*"],
         ))
-        # 两个引擎共享：AgentCore 浏览器会话（Start/Stop）+ browser profile（Create/管理会话配置）。
-        # CreateBrowserProfile 由真跑暴露（Nova SDK 起会话前 _resolve_or_create_profile 会建 profile）——grep 未及。
+        # 两个引擎共享：AgentCore 浏览器会话（Start/Stop）+ browser profile。资源 ARN 已按 SAR resource_types
+        # 收窄（ADR 0033；SAR + IAM 策略模拟器对本账户实证）——拆两条 statement：
+        # 系统默认 browser（aws.browser.v1，非自建 custom，ADR 0011）的 ARN **account 段是字面量 `aws`**（非客户账户！
+        # 官方人读文档误写成 <account_id>，实测 get-browser 返回 aws、模拟器验证填客户账户会 implicitDeny——copy-account 陷阱）。
+        # browser-profile 是客户自建资源（account=客户账户，profileId 运行期生成 → * 通配）。
+        _sys_browser = f"arn:aws:bedrock-agentcore:{region}:aws:browser/aws.browser.v1"
+        _browser_profiles = f"arn:aws:bedrock-agentcore:{region}:{acct}:browser-profile/*"
         role.add_to_policy(iam.PolicyStatement(
             actions=[
-                "bedrock-agentcore:StartBrowserSession", "bedrock-agentcore:StopBrowserSession",
-                # profile 解析 = List/Get 找已存在的、没有才 Create（真跑暴露：缺 List 会误走 Create → 已存在则 ConflictException）
-                "bedrock-agentcore:ListBrowserProfiles", "bedrock-agentcore:GetBrowserProfile",
+                "bedrock-agentcore:StartBrowserSession",  # 触及 browser + profile
+                "bedrock-agentcore:StopBrowserSession",   # 只触及 browser（SAR 无 profile 资源类型）
+                "bedrock-agentcore:GetBrowserProfile",    # 只触及 profile
+            ],
+            resources=[_sys_browser, _browser_profiles],
+        ))
+        # 以下 4 个动作 SAR resource_types 为空、不支持 resource-level（模拟器实证：scope 到任何具体 ARN 均 implicitDeny，
+        # 只在 Resource:"*" 下才授权），诚实保留 *（非"待标定"，是**结构上只能** *）：
+        # - List/CreateBrowserProfile：控制面 List 枚举 / Write create（资源尚不存在，无 ARN 可 scope）。
+        #   List 真跑暴露（缺它误走 Create→已存在则 ConflictException）；Create 真跑暴露（SDK _resolve_or_create_profile）。
+        # - Connect{Automation,LiveView}Stream：数据面 CDP/live-view 流连接（无资源实体、无 data-event CloudTrail）。
+        #   真跑暴露（connect_over_cdp 到 browser-streams WebSocket 403 Forbidden 定位）。
+        role.add_to_policy(iam.PolicyStatement(
+            actions=[
+                "bedrock-agentcore:ListBrowserProfiles",
                 "bedrock-agentcore:CreateBrowserProfile",
-                # 连 CDP 自动化流的数据面权限（真跑暴露：connect_over_cdp 到 browser-streams WebSocket 403 Forbidden——
-                # 控制面 Start/StopSession 之外还需数据面 stream 连接权限）。
                 "bedrock-agentcore:ConnectBrowserAutomationStream",
                 "bedrock-agentcore:ConnectBrowserLiveViewStream",
             ],
-            resources=["*"],  # AgentCore browser/profile 资源 ARN 形态待真跑标定，先 *（属可收窄的运维加固项）
+            resources=["*"],  # SAR resource_types 为空——结构上不支持 resource-level（非可收窄项）
         ))
         # 各引擎特有模型权限
         if engine == "novaact":
-            # Nova：nova-act workflow definition + run 生命周期（Create/Update）+ 模型推理。
-            # UpdateWorkflowRun 由真跑暴露（Workflow __exit__ 更新 run 状态）——grep 未及。
+            # Nova：nova-act workflow definition + run 生命周期 + 会话/act。资源 ARN 已收窄（ADR 0033；AWS Service
+            # Reference v1.4 权威列 resource_types）——nova-act 只有 workflow-definition / workflow-run 两个 IAM 资源类型，
+            # session/act 非独立资源（IAM 鉴权只到 workflow-run 层）。
+            # **definition 名段用 `*`（不 pin 具体名）**：definition 名（worker create-if-not-exists 的那个）是 worker
+            # 运行期概念、住在 worker code（engines/novaact/lib/constants.py），**不该泄进 IAM 层让 IaC 跨工程耦合它**。
+            # 用「锁死 service+account+region、放开 definition 名段」换掉耦合——仍远窄于全 *（只该账户/region 的 nova-act
+            # workflow-definition 资源）。两条 ARN 覆盖全部动作：① definition 层（Get/Create/CreateWorkflowRun 只认父）；
+            # ② run 通配（Update{WorkflowRun}/CreateSession/Create/UpdateAct/InvokeActStep，runId 亦运行期变量）。
+            _wf = f"arn:aws:nova-act:{region}:{acct}:workflow-definition"
             role.add_to_policy(iam.PolicyStatement(
                 actions=[
                     "nova-act:GetWorkflowDefinition", "nova-act:CreateWorkflowDefinition",
                     "nova-act:CreateWorkflowRun", "nova-act:UpdateWorkflowRun",
                     "nova-act:CreateSession",  # 起 AgentCore 会话（真跑暴露；SDK NovaAct.start → CreateSession）
-                    # AI act 生命周期（真跑 AI step 逐个暴露；确定性用例不触发）：Create→Update→Get→InvokeActStep（判定核心调用）。
-                    "nova-act:CreateAct", "nova-act:UpdateAct", "nova-act:GetAct", "nova-act:InvokeActStep",
+                    # AI act 生命周期（真跑 AI step 逐个暴露；确定性用例不触发）。**删 GetAct**——AWS Service Reference
+                    # v1.4 全动作集无 GetAct（此前误授一个不存在的 action，非资源维度问题）；实调是 Create→Update→InvokeActStep。
+                    "nova-act:CreateAct", "nova-act:UpdateAct", "nova-act:InvokeActStep",
                 ],
-                resources=["*"],  # workflow definition ARN 形态待标定
+                resources=[f"{_wf}/*", f"{_wf}/*/workflow-run/*"],
             ))
             # AgentCore 保存会话 profile（真跑暴露：Nova 会话结束想存 profile 优化下次；缺它只 WARNING、非致命，
-            # 但最小权限该有）。与上面 profile List/Get/Create 同族（profile 生命周期完整）。
+            # 但最小权限该有）。SAR resource_types = browser + browser-profile：触及来源系统 browser（account=aws）+ 目标 profile。
             role.add_to_policy(iam.PolicyStatement(
                 actions=["bedrock-agentcore:SaveBrowserSessionProfile"],
-                resources=["*"],
+                resources=[_sys_browser, _browser_profiles],
             ))
         elif engine == "midscene":
-            # Midscene：Bedrock InvokeModel（Qwen3-VL）
+            # Midscene：Bedrock InvokeModel（Qwen3-VL）。收窄到该 foundation-model 单一 ARN（ADR 0033；文档格式 +
+            # CloudTrail 样本 + code 实际 modelId 三方对上）。foundation-model ARN 的 **account 段为空**（AWS 惯例）；
+            # region 段用 `*`——region 是 code 可配运行期变量（AWS_REGION 注入，ADR 0016 决策 C），model-id 才是稳定段，
+            # 故 pin model-id、通配 region（无跨区 inference profile：裸 modelId 直连 ON_DEMAND，该模型不支持 profile）。
             role.add_to_policy(iam.PolicyStatement(
                 actions=["bedrock:InvokeModel"],
-                resources=["*"],  # 模型 ARN 待标定（qwen.qwen3-vl-235b-a22b）
+                resources=[f"arn:aws:bedrock:*::foundation-model/{names.QWEN_MODEL_ID}"],
             ))
 
     # ---- SSM：subnet/sg ID 写进含 prefix 路径（cli resolve_network 读，ADR 0033）----

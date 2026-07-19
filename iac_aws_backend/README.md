@@ -72,4 +72,4 @@ aws ecr delete-repository --repository-name gherkai-midscene-worker --force
 
 - `cdk bootstrap`（首次）、CI build & push ECR 流水线（现手动）。
 - ~~真容器 grace/中断校准~~ **已完成**（4 次真跑标定，见 [ADR 0032](../docs/adr/0032-fargate-execution-environment.md) 真容器校准结论）。
-- task role 的 `bedrock-agentcore`/`nova-act`/`bedrock` 资源 ARN 当前用 `*`，真跑标定后收窄。
+- ~~task role 的 `bedrock-agentcore`/`nova-act`/`bedrock` 资源 ARN 用 `*`~~ **已收窄**（动作+资源两维度都最小）：三处从 `*` 收到具体 ARN（bedrock 单 foundation-model / nova-act definition+run/* / agentcore 系统 browser+profile/*），另 4 个结构上只能 `*` 的诚实保留；收窄后真部署真跑验证无 AccessDenied。依据/踩坑（copy-account 陷阱）/回归护栏见 [ADR 0033](../docs/adr/0033-iac-aws-backend-and-composition-wiring.md) IAM 表 + `tests/test_stack.py::test_task_role_resource_arns_narrowed`。
