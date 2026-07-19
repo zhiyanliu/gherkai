@@ -21,7 +21,7 @@
 
 **抢传能力已提前在 subprocess+cloud 建好并实测验证（为 Fargate 忠实预演，见 [0029](./0029-engine-artifacts-to-s3.md)「act 边界抢传」）**——**主路径锚在每个 step_done 安全点**（act 已返回，不在信号 handler 内跑抢传：中断路径对 Nova 会撞 greenlet、见 [0024](./0024-worker-core-protocol.md)，故 Nova 抢传**只**在安全点）：Nova 每 act 返回后传配套 `_trajectory.json`（distinct key 幂等）；Midscene 每 step_done 对增量增长的单份 report.html 做 `snapshot`（overwrite 同 key + mtime 去重）。**Midscene 额外在 SIGTERM handler 里追加一次 best-effort `snapshot`（cleanup 之后、会话释放优先）**——这是「首个/当前 act 中途、无 prior step_done」这格唯一救得回 report 的路径；**Node 事件循环回调能安全 await 一次读盘上传，Nova 因 greenlet 做不到——关键不对称（见 [0024](./0024-worker-core-protocol.md)「Midscene worker」条）**。实测（subprocess+cloud 预演 + 真 Fargate 复验）：安全点抢传 + handler 兜底组合下，scope_end 中断（甚至 SIGKILL 卡死）下 per-act `trajectory.json`/report 丢失归零。仍余 `session_summary.json` 这一 scope 末产物无法被 act 边界抢传覆盖——判定为可接受残余，理由与措辞见 [0029](./0029-engine-artifacts-to-s3.md)「act 边界抢传」条『固有残余』，不在此复述。
 
-**真 Fargate 校准（`stopTimeout`/grace 预算 + 中断抢传 + 干净退出）已完成**（4 次真跑，见下「真容器校准结论」）。**抢传能力与真 Fargate 校准分开——抢传已在 subprocess+cloud 预演，真 Fargate 已复验生效。** 仍留待的只剩：孤儿产物恢复的**主动扫盘实现**（Fargate 查 S3 已传哪些 vs subprocess 本地扫目录——当前靠 act 边界抢传缩小窗口，未做主动 reaper）。（**退化网络下「超时快速失败、不拖爆 grace」已真验 ✅**，见下「重议」botocore retry 条。）
+**真 Fargate 校准（`stopTimeout`/grace 预算 + 中断抢传 + 干净退出）已完成**（4 次真跑，见下「真容器校准结论」）。**抢传能力与真 Fargate 校准分开——抢传已在 subprocess+cloud 预演，真 Fargate 已复验生效。** 孤儿产物主动扫盘 reaper **经分析否决**（Fargate 下物理不成立——没传 S3 的残余随容器盘销毁、查 S3 捞不回，详见下「重议」孤儿 reaper 条）；**退化网络下「超时快速失败、不拖爆 grace」已真验 ✅**（见下「重议」botocore retry 条）。至此 Fargate 特有韧性 backlog 全部收敛（做/真验/否决各有归属）。
 
 ## 真容器校准结论（4 次真跑，2026-07-12，账户 000000000000/us-east-1、stopTimeout=120 已 deploy）
 
@@ -63,7 +63,13 @@
 - **上传失败处理（已实现 ✅，两层）**：原记「上传失败=`engine_error`、诊断精度是否升级 `network_error`」。摸清后落地为两层：
   - **层1 分类（Nova step 内已顺带解决）**：`_run_step` 内 trajectory reportRef 上传失败被其 `except` 捕获、经 `_classify_act_error`→`_is_transient_network` 判——**S3 网络失败（ConnectTimeout/ReadTimeout/EndpointConnection/5xx/ConnectionError）已判 `network_error`**（[0028](./0028-transient-network-ssl-resilience.md) 白名单扩容顺带覆盖，实测确认），只 AccessDenied 这类真配置错才 `engine_error`。上传越过重试域边界（scope_started 之后），升级仅诊断、不触发重试。
   - **层2 降级（本次实现，两腿对称）**：**scope 级 report/summary 上传失败改 best-effort——吞+log、不带该 reportRef、不拖垮已判定的 scope**（Nova `session_summary` 的 `to_report_ref` 调用点 try、Midscene `toReportRef(reportFile)` 调用点 try→不 `throw`→不 fatal exit）。理由：此刻 scope 判定已 emit 完，report/summary 是「锦上添花」（summary 是数字汇总、report 是人看视图），不该因其上传失败（多为 S3 网络瞬时）把已跑完的 scope 拖成 `engine_error`/worker fatal。对齐同文件抢传/flush 的 best-effort，也对齐 [0029](./0029-engine-artifacts-to-s3.md)「判定真值 > 报告产物」的优先级。**与 step 内 trajectory 的强保证不同**（trajectory 是判定现场证据、`to_report_ref` 失败仍抛可观测），故只降级 scope 级两处调用点、不动 `to_report_ref`/`toReportRef` 本身。
-- **孤儿产物恢复（**主动扫盘未实现**）**：当前靠 act 边界抢传缩小丢失窗口（真跑验证残余仅 `session_summary.json` + 未开始的后续 step；另**最坏长 act 被 Fargate SIGKILL** 时的 in-flight act 产物截断亦归此，见结论 4）。[0028](./0028-transient-network-ssl-resilience.md)「留口子」『卡死现场 trajectory 不自动归集』条记的"中断收尾扫盘"在 Fargate 下变成"查 S3 已传哪些"——属 Engine adapter 的中断收尾职责，**尚零实现**，且 task role 缺 `s3:ListBucket`。
+- **孤儿产物主动扫盘 reaper（**经分析不实现——Fargate 下物理不成立**，护栏防重进坑）**：曾设想「Engine adapter 中断收尾主动扫盘、Fargate 查 S3 已传哪些、捞回中断残余」。**分析后否决——不是成本问题，是 Fargate 下捞不回**：
+  - **物理约束**：Fargate 容器盘**停即销毁**（本 ADR 头号差异）。worker 没传 S3 的残余随盘一起没了——「查 S3」只能确认**已传的**、**捞不回没传的**（S3 上根本不存在、容器盘也销毁了）。reaper 在真会丢的场景（Fargate）里无物可捞。
+  - **能传的已不需要 reaper**：Nova trajectory / Midscene report（MB 大头）已被 **act 边界抢传实时传 S3**（真跑验证归零），中断时也在 S3——不靠 reaper。
+  - **真正"没传的"残余物理够不着**：`session_summary.json`（~154B，仅 `_stop()` 写、中断时可能连盘都没写）+ 最坏长 act 被 SIGKILL 截断的 in-flight 产物——都是「没传 S3 + 盘销毁」= 物理消失，reaper 无从捞。
+  - **subprocess 侧残余留本地盘、能扫回，但那本就不算丢**（[0028](./0028-transient-network-ssl-resilience.md)「留口子」『卡死现场 trajectory』条：留盘、靠 `session_id` 可手动找），不"需要"自动 reaper。
+  - **已有兜底足够**：act 边界抢传缩小窗口（大头归零）+ 会话 TTL + `session_id` 手动定位。**故不实现，也不为它扩 task role 的 `s3:ListBucket`**（与 IAM 最小权限收窄一致，[0033](./0033-iac-aws-backend-and-composition-wiring.md)）。
+  - **重议闸门**：若未来把 worker 产物落点从「容器盘」改为「持久卷（EFS）/ 实时流式传」使中断残余不随盘销毁 → 那时残余可被事后扫回，reaper 才有物可捞、才重议。当前容器盘模型下，reaper 是伪需求。
 
 ## 重议
 
