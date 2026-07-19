@@ -1,6 +1,6 @@
 # 实时写存储接缝：per-job 完成回调 + RunPersistence 应用服务 + RunStore 增量 port
 
-> **Status:** Accepted
+> **Status:** Accepted —— 本 ADR「重议」条预告的「编排进程外的多写者 → 需 owner/lease + 条件更新、另立 ADR」已由 [0034](./0034-detached-batch-reconciler.md)（无状态跑批，reconciler 直写 RunState）落地：`RunState` 投影带 `high_water_mark` 条件写、finalize 单独条件写（见下「重议」条反向链）。本 ADR 描述的**单编排进程内 `RunPersistence._lock` 串行写序**仍是同步 `run` 路径的机制、不变。
 
 把「一次 run 的判定/状态**随进度实时落库**」做成正交接缝：执行编排（`schedule`，[0026](./0026-schedule-module.md)）只管跑、
 不碰存储；存储编排（新 `core/persist.py` 的 `RunPersistence`）依赖 Store ports、由组合根注入具体 adapter。
@@ -124,6 +124,8 @@ run 结束（schedule 返回后）:
 > 装饰 sink，RUNNING 的整文件磁盘 RMW 会被串进 `sink_lock` 临界区——一个 worker 刷 RUNNING 期间，全体 worker 的进度
 > 显示都堵在 `sink_lock` 后。故 schedule 另开一个 `on_event` 旁路观察者、在 `sink_lock` 之外 fire；落库的线程安全由
 > `RunPersistence._lock` 独立保证，与进度显示解耦。
+>
+> **⚠️ 此把进程内锁只在「单编排进程」拓扑成立**（同步 `run`）：[0034](./0034-detached-batch-reconciler.md) 无状态跑批下 reconciler 是**跨进程/跨 Lambda 的并发实例**（DDB Stream 按 PK 分片触发多实例，实测并发度 2），进程内 `_lock` 不复存在——改由 `RunState` 的 `high_water_mark` 条件写跨实例挡 stale 覆盖（「我处理到的 seq ≥ 库中 seq 才写」）、finalize 单独条件写保 commit 恰一次。这是本 ADR「重议」条预告的落地（见下）。
 
 > **回调异常的停机止血**（实装关键）：on_job_complete 在主线程 fire，若它抛异常（如落库磁盘满），schedule **在异常
 > 冒泡前先 stop 所有在跑 worker**（`abort_flag.set()` + 逐个 `_stop()`）再重抛。否则异常跳出 `with ThreadPoolExecutor`，
@@ -211,8 +213,8 @@ cli `--backend {local,cloud}` 的组合根装配（两后端都下沉 `compose` 
   `RunPersistence`（单一 store 锁）；RunStore 三增量方法的 local adapter；`RunState.jobs` 改 Map；cli 接 `RunPersistence`（含 RUNNING 中间态）。
 - **决定六（云端 adapter）— 已实装**：`DynamoDBRunStore` + `S3ResultStore` + `S3ReportStore` + `S3StepArgumentOffloader`，落库形态如上，moto 全程 mock 单测、行为对拍 local——坐实「换后端 core 不动」。组合根接线见决定七。
 - **决定七（cli 接线 cloud）— 已实装**：`--backend {local,cloud}` 组合根装配（两后端下沉 `compose`，详见 [0016](./0016-execution-architecture-core-lib-run-model.md)「cli backend 选择」节）+ preflight 探活反转（begin 前探表/桶，配置错一律退 2）+ offloader 生产默认挂载 + 失败退出码分层（退 2 未开跑 / 退 1 运行期）。真跑通 local↔cloud 端到端。
-- **留口子不做**：多写者 owner/lease（当前 run_id 由组合根独立生成、提交即新，单写者，无并发同 run 写）；续跑/部分重跑的 attempt 维度（save_job_result 整行覆盖，未来在 SK/属性引入 version）。
+- **留口子不做 → 决定八（多写者，已在 [0034](./0034-detached-batch-reconciler.md) 设计定稿、尚未落 code）**：无状态跑批下 reconciler 跨进程/跨 Lambda 并发直写 `RunState`，此「留口子」被兑现——用 `high_water_mark` 条件写（非 owner/lease，更轻：单调 seq 守卫即可挡 stale 覆盖）+ finalize 单独条件写保 commit 恰一次。续跑/部分重跑的 attempt 维度仍留口子（0034 未涉及）。
 
 ## 重议
 
-- 若未来「编排进程外的写者」出现（远程 worker/task 自己直写 DDB，而非把事件流回传编排进程）——当前拓扑是 worker 把事件流回传、`schedule`+`RunPersistence` 始终在单个编排进程内、单写者；若改成 task 直写，则 `update_job_state` 进入真多写者，需 owner/lease + 条件更新，另立 ADR。
+- ~~若未来「编排进程外的写者」出现……需 owner/lease + 条件更新，另立 ADR~~ **→ 已落地为 [0034](./0034-detached-batch-reconciler.md)**（无状态跑批：CLI 脱离后 reconciler（Lambda/per-run 进程）替代编排进程、直接从 events 表推演并写 `RunState`，正是「编排进程外的多写者」）。落地方案比当初预告的「owner/lease」更轻：**用 `high_water_mark` 条件写**（`RunState` 带已处理 max seq，写时 `:hwm >= 库中 hwm` 才成功，stale 实例的写被 `ConditionalCheckFailedException` 挡）+ finalize 单独条件写（状态机非终态→终态），无需 lease 租约。真 DDB 实测挡住了 stale 快照把 `passed` 刷回 `running` 的 lost-update（[0034](./0034-detached-batch-reconciler.md) 机制三 + 地基实测）。

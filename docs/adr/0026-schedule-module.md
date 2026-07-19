@@ -1,6 +1,6 @@
 # schedule 模块：job 间并发调度 + 失败隔离 + 优雅终止
 
-> **Status:** Accepted
+> **Status:** Partially-superseded-by 0034 —— 纯 reducer 红线仍守（副作用仍在 adapter/组合根、core 不 import boto3）、同步 `run` 路径的 schedule 驱动循环不变；仅「上云只换 adapter、schedule 一行不改」对**异步 submit（CLI 脱离）路径**不成立、被 [0034](./0034-detached-batch-reconciler.md) 纠正（见下 L69/L89 的 ⚠️ 注）：该路径把同步驱动循环解体为无状态事件驱动 reconciler、抽出纯 `project`/`plan_next`。
 
 核心库把 plan 产出的 **job 列表**（[0025](./0025-plan-module-feature-to-jobs.md)）实际跑起来的模块：决定哪些 job 并行、控并发、起 worker、收流式事件、隔离失败、超时兜底。它兑现 [0016](./0016-execution-architecture-core-lib-run-model.md)/[0019](./0019-feature-tags-scope-and-engine.md) 留给核心库的「scope 串/并行调度、会话共享」。它是 v1.0 核心三模块的最后一块（协议 [0024](./0024-worker-core-protocol.md) → plan [0025](./0025-plan-module-feature-to-jobs.md) → schedule 本 ADR）。
 
@@ -66,7 +66,7 @@ opts = {                 // 时间单位统一为秒；代码字段名带 _s 后
 
 「怎么停」的具体机制**不在 schedule**——本模块只负责下逻辑指令，机制/会话清理归 adapter 与 worker（三层完整机制见 [0024](./0024-worker-core-protocol.md) 终止契约节，此处只钉本模块边界，不复述以免漂移）：
 - **schedule → WorkerHandle**（本模块职责）：只调逻辑指令 `handle.stop(gracePeriod)`（「请停这个 worker」）。`handle` 由 `engine.run_scope(job)` 返回、schedule 持有；`Engine` port **只有 `run_scope`、不挂 stop**（句柄自己知道怎么停）。schedule **不懂** SIGTERM/进程/StopTask——只知道「下停止指令、等归约」。
-- **机制层与会话清理**（转指针）：adapter 把逻辑「停」翻成具体机制（子进程 SIGTERM+宽限+SIGKILL / 未来 Fargate `StopTask`）、会话清理（`StopBrowserSession`）归 worker——**故「上云只换 adapter」成立**（见下「留口子」），schedule 一行不改。机制细节 + 两引擎会话释放见 [0024](./0024-worker-core-protocol.md) 终止契约 + [0028](./0028-transient-network-ssl-resilience.md) Midscene 会话集清理。（SIGKILL 硬杀致会话释放落空的低频泄漏由 AgentCore session TTL 兜底、**不引入 core reaper**，见 [0024](./0024-worker-core-protocol.md) 终止契约「已接受代价」——schedule/core 纯度不变。）
+- **机制层与会话清理**（转指针）：adapter 把逻辑「停」翻成具体机制（子进程 SIGTERM+宽限+SIGKILL / 未来 Fargate `StopTask`）、会话清理（`StopBrowserSession`）归 worker——**故「停止机制上云只换 adapter」成立**（见下「留口子」），schedule 一行不改。机制细节 + 两引擎会话释放见 [0024](./0024-worker-core-protocol.md) 终止契约 + [0028](./0028-transient-network-ssl-resilience.md) Midscene 会话集清理。（**⚠️ 此处「一行不改」限于「停止机制」这一层**——[0034](./0034-detached-batch-reconciler.md) 无状态跑批动的是**驱动循环整体**：CLI 脱离后 `ThreadPoolExecutor`/`as_completed` 同步循环在异步路径解体为事件驱动 reconciler，那不是「换 adapter」能覆盖的，见下 L89 ⚠️ 注。停止机制层与驱动循环层是两回事，本条只管前者。）（SIGKILL 硬杀致会话释放落空的低频泄漏由 AgentCore session TTL 兜底、**不引入 core reaper**，见 [0024](./0024-worker-core-protocol.md) 终止契约「已接受代价」——schedule/core 纯度不变。）
 
 > **进程拓扑（澄清「几个地方」）**：实际是 **2 进程 + 1 远程 + 1 seam**——①core/schedule 进程；②`Engine` adapter（在 core 进程内，但它是通向「进程/云」世界的 seam，「怎么停」知识归这里）；③worker 子进程（engine SDK 是**进程内的库**、非独立进程）；④远程 AgentCore 浏览器会话（云端、worker 经 CDP 连）。engine SDK 拆除 + 会话停止都在 worker 进程内完成。
 
@@ -86,7 +86,7 @@ opts = {                 // 时间单位统一为秒；代码字段名带 _s 后
 ## 现在做 / 留口子
 
 - **现在做（v1.0）**：上述接口、job 间并发（上限+排队）、失败隔离（默认隔离/可配 fail-fast）、超时兜底、优雅终止（schedule 调 `handle.stop(grace)`；子进程 handle 内 SIGTERM+宽限+SIGKILL）、事件归集成 RunResult（status + 原生量成本 + 墙钟时长 三级归约）。
-- **留口子不实现**：core→worker 控制流（暂停/取消单 scenario/动态调度，等真需求，见 [0024](./0024-worker-core-protocol.md) 终止契约节）；跨 job 的智能调度（按成本/优先级排序，现 FIFO 排队即可）；云端分布式调度（v1.1 Fargate，[0017](./0017-cloud-execution-fargate-over-runtime.md)，那时「起 worker」从 spawn 子进程换成提交 Fargate task、`handle.stop` 从发信号换成 StopTask，**均在 Engine adapter / WorkerHandle 内部，schedule 接口/旋钮不变**）。
+- **留口子不实现**：core→worker 控制流（暂停/取消单 scenario/动态调度，等真需求，见 [0024](./0024-worker-core-protocol.md) 终止契约节）；跨 job 的智能调度（按成本/优先级排序，现 FIFO 排队即可）；云端分布式调度（v1.1 Fargate，[0017](./0017-cloud-execution-fargate-over-runtime.md)，那时「起 worker」从 spawn 子进程换成提交 Fargate task、`handle.stop` 从发信号换成 StopTask，**均在 Engine adapter / WorkerHandle 内部，schedule 接口/旋钮不变**——**这一层已由 [0033](./0033-iac-aws-backend-and-composition-wiring.md) FargateEngine 真部署真跑证实**）。**⚠️ 但「schedule 一行不改」只覆盖「执行 adapter 替换」、未预见「CLI 脱离」这一步**（[0034](./0034-detached-batch-reconciler.md) v1.2 纠正）：无状态 `submit`（提交即走）要求把 schedule 当前的**同步驱动循环本身**（`ThreadPoolExecutor` 起全部 worker 线程 + `as_completed` 收敛 + `abort_flag`/fail-fast `_stop_all` 进程内并发闸）解体——因为 CLI 一退，这个循环没人驱动了。异步路径把它换成**无状态事件驱动 reconciler**（被事件唤醒、读全量 events 重放、CAS 推进），并从 schedule 抽出纯 `project(events)→RunState`/`plan_next(RunState)→actions` 供 Lambda/per-run 两宿主复用。**存活的是纯归约器、消失的是同步驱动循环**；纯 reducer 红线仍守（CAS/RunTask/PutItem 副作用仍在 adapter/组合根、core 不 import boto3）。同步 `run` 路径仍用现驱动循环——两种驱动模型按命令并存。故此条「schedule 接口/旋钮不变」对无状态跑批**不成立**，见 [0034](./0034-detached-batch-reconciler.md)。
 
 ## 重议
 

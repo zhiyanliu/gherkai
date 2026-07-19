@@ -1,0 +1,160 @@
+# 无状态跑批：CLI 提交 → 事件驱动推进 → 轮询收集（CQRS + reconciler）
+
+> **Status:** Accepted —— 设计定稿、地基已真容器实测（见下「地基实测」）；**尚未落 code**（本 ADR 先于实现，遵「不实现≠不设计」）。纠正 [0016](./0016-execution-architecture-core-lib-run-model.md)「无状态化=加 adapter+换注入、核心不动」对本能力的过强断言（见下「对 0016 的纠正」；0016/0026 Status 头已同步标 Partially-superseded-by 本 ADR）。
+
+`--backend cloud` 现状是**「CLI 阻塞跑一批」**：组合根同进程 `schedule()` 持 `ThreadPoolExecutor`、`as_completed` 收敛到全批完成才返回。产品线唯一未做的**产品项**（非加固）= **「CLI 提交完就走、异步收集」**（[0016](./0016-execution-architecture-core-lib-run-model.md) v1.1「待做」+ [0017](./0017-cloud-execution-fargate-over-runtime.md) batch shape）。本 ADR 定这套无状态跑批的架构、数据模型、并发/写序不变量与被拒方案护栏。
+
+## 定位：产品价值，非加固
+
+- **产品价值**：CI/用户 `submit` 一批用例即可离场（关笔记本、断开），run 在云上自跑到完成、结果异步收集；对照当前必须让 CLI 全程阻塞守着。
+- **不做**：常驻调度服务 / WebUI（接口留好，真需要时加 adapter）；跨 run 的批队列编排（每 run 独立）。
+
+## 核心思想：CQRS + 无状态 reconciler
+
+把「CLI 进程持有线程池、阻塞跑完整批」换成「**events 表是唯一真值日志，一个幂等函数被事件唤醒着把整批推完**」：
+
+- **写模型** = events 表（append-only 真值日志，[0024](./0024-worker-core-protocol.md)）。
+- **读模型** = `RunState`（物化视图；**外部消费者只读它**）。
+- **reconciler**（投影器 + 推进器）= 纯从 events 推演 `RunState` + 决定启下一个 job。**无状态、幂等**：谁触发、何时触发、并发触发都安全，进程内不留任何调度态。
+
+**单一读接口不变量**：外部（`status` / 未来 WebUI）**永远只从 `RunState` 读状态**；`events → RunState` 的推演**只在 reconciler 一处**，不散落到各消费者（否则多份推演逻辑必漂移）。这是本设计的骨架原则。
+
+## 数据模型三件套（职责分明）
+
+| | 是什么 | 谁写 | 谁读 |
+|---|---|---|---|
+| **events 表** | 真值日志 | worker（执行事件）+ **退出观察者**（退出事件） | reconciler |
+| **`RunState`** | 物化读视图 | **唯一写者 = reconciler** | 外部（`status`/WebUI）**只读** |
+| **RunReport** | 派生产物（永远最后） | reconciler 在 `finalize` 时聚合（[0027](./0027-runreport-aggregation-index.md)） | 人 |
+
+## 命令形态
+
+```
+gherkai submit <features> --backend cloud
+   → plan → 写 RunMeta + 全 job pending 到 RunStore → 首批 RunTask → 打印 run_id → 退出(0)
+gherkai status <run_id> [--wait]
+   → 不带 --wait：读 RunState 渲染一次；带 --wait：循环 tick + 读到终态 → 收尾
+gherkai run <features>    # 原阻塞皮 = submit + 同进程 status --wait，行为不变
+```
+
+`run` 是 `submit`+`status --wait` 的**组合皮、非另一套代码**——兑现 [0016](./0016-execution-architecture-core-lib-run-model.md)「阻塞 vs 非阻塞是调用方的选择、同一核心两种皮」。三命令共享同一 reconciler。
+
+**退出码语义分层**（演进 [0031](./0031-job-lifecycle-states-and-severity.md) 决定五「退出码读内存终值」）：`submit` 退出码 = **提交成功与否**（0=已提交、run_id 已返回；≠run 判定）；判定退出码（PASSED→0 / 其余→1）由 `status --wait` 读到终态时给出。CLI 脱离后不再有「内存 RunResult 终值」，判定退出码只能来自读回的 `RunState`。
+
+## 端到端流程
+
+### cloud（事件驱动，idle 零成本）
+
+```
+1. submit(CLI)：plan → 写 RunMeta+全 pending → 首批 min(max_concurrency, |jobs|) 个 RunTask
+                → task ARN+running 写 RunState → CLI 退出（run_id 已在手）
+2. worker 云上跑（CLI 退出不杀 task，已实测）：PutItem 执行事件(seq 递增)→events 表；上传产物→S3
+3. task STOPPED → ECS 自动发 "Task State Change: STOPPED" 事件 → EventBridge
+     → [退出观察者 Lambda]：从事件 payload 读 exitCode（实测 4/4 都带，含 SIGKILL=137）
+       → PutItem 一条 task_exited 事件(独立键空间 + exitCode) 到 events 表
+4. events 表变化 → DynamoDB Stream → [reconciler Lambda]：
+     ① 读该 run 全量 events → 纯推演完整 RunState
+     ② HWM 条件写落 RunState（挡 stale 覆盖）
+     ③ running<max_concurrency 且有 pending：CAS(pending→running) 抢一个 → RunTask 启下一个
+     ④ 全 job 终态：finalize(写总 status) + 聚合 RunReport
+5. 级联：下一 task STOPPED → 再触发 3-4 → … 直到全 done
+```
+
+**idle 时零成本**：无 task 状态变化 = 无事件 = reconciler 零调用（EventBridge/Stream 事件驱动，非定时轮询——[CLAUDE.md「工作方式」：交付物运行成本是设计约束](../../CLAUDE.md)）。
+
+### local（对称，无 ECS/Lambda）
+
+```
+submit(CLI) → setsid fork per-run 进程 → CLI 退出
+per-run 进程（观察者+reconciler 三合一）：spawn worker 子进程
+   · worker 写本地持久 events sink（SQLite，替易失 FD3 pipe）
+   · proc.wait() 拿 exitcode 写 task_exited · 推演写本地 RunState · 启下一个 · 全 done 自退
+```
+
+**同一份 core 推演码，两个宿主（Lambda / per-run 进程）各注入自己的 adapter**——local/cloud 对称落到 events 通道：两侧 worker 都写持久 events 存储、两侧 reconciler 都从持久 events 重放推演，**唯一差别是存储介质**（DDB 表 vs 本地 SQLite），是可注入的 `EventSink`/存储 adapter 差异，不碰 core 推演、不碰 worker 业务。
+
+## 推进的三个触发源（都幂等、并发安全）
+
+1. **主力**：cloud=DDB Stream 事件 / local=per-run 进程——正常一路推完。
+2. **兜底/接力**：`status --wait`——per-run 进程崩、或 Stream 偶发断链时，人来查即接力推（状态全持久、tick 幂等，断点续）。
+3. 三者同时触发也无害——靠下面 CAS + HWM 条件写。**`status` 是可选的查看+崩溃兜底，不是推进链条的必需环**。
+
+## 四个关键机制（机制二/三/四有地基实测支撑；机制一是从 [0024](./0024-worker-core-protocol.md) seq 不变量推导的设计约束，无独立实测）
+
+### 机制一：`task_exited` 用独立键空间（不入 worker 数值 seq 段）
+
+退出观察者**不持有** worker 的 seq 计数器（[0024](./0024-worker-core-protocol.md)：seq 单进程串行自增、无分布式协调）。若 `task_exited` 塞进 worker 的连续数值 seq 段，DDB 最终一致读会算错 max seq → 撞号**覆盖 `scope_done`**（裸 PutItem 无条件写），或造空号让 adapter 断号检测死循环。**故 `task_exited` 用独立键空间**（SK 前缀 `exit#` 或独立 item_type），adapter 的单调 seq/断号检测只跑 worker 的连续 seq 段，退出事件旁挂不入流。worker「每 PK 单写者、seq 单进程自增」不变量**原样保留**——events 表只是多了一个**独立键空间**的第二写者（演进 [0024](./0024-worker-core-protocol.md)，见下）。
+
+### 机制二：退出事件由平台侧观察者提供，从事件 payload 读 exitCode
+
+**退出绝不能 worker 自报**：worker 可能被 SIGKILL 硬杀、或发完 `scope_done` 才在会话释放时非 0 退出——它**没机会**再 PutItem 报告自己的退出。故「进程干净终止」的信号只有平台/父进程看得见：cloud = ECS Task STOPPED 事件；local = per-run 进程 `proc.wait()`。观察者从该信号取 exitCode 写 `task_exited`。
+
+**「两件都要」（[0024](./0024-worker-core-protocol.md) 终止契约）在 reconciler 里成为对事件日志的纯谓词**：job 终态 ⟺ `scope_done` 存在（内容完整）∧ `task_exited` 存在且 exitCode 表明干净终止（进程终止）。只有 `scope_done` 不够——会吞掉「发完 scope_done 又非 0 退出」的误报 PASSED。
+
+**exitCode 落值延迟兜底（防御性冗余）**：[0024](./0024-worker-core-protocol.md) 记 `lastStatus==STOPPED` 与 exitCode 落值非原子、`(True,None)` 是有界宽限态。**但 STOPPED 事件锚在 `stoppedAt`（task 完全清理完、已过 exitCode 落值窗口），故观察者从事件 payload 读 exitCode 可靠——实测见下 H1/H2**（数字集中在地基实测节，不在此复述）。仍保留一条廉价兜底（payload 缺 exitCode 则短暂重查 DescribeTasks / 重试）防未来平台行为变——**留而不依赖**，非 load-bearing。
+
+### 机制三：`RunState` 投影写带 HWM 条件写（防并发 lost-update）
+
+reconciler 逻辑上是「唯一写者」，**物理上是并发实例**（实测：DDB Stream 按 PK 分片、多 job 触发 2 个并发 Lambda 实例；叠加 `status --wait` 是额外触发源）。并发实例读快照时点不同：实例 A 读到 seq=10 推演 `{running}`，实例 B 读到 seq=20 推演 `{passed}` 先写，A 用旧快照后写会**覆盖终态**（把 `passed` 刷回 `running`，外部看到非单调）。全量重放保证**派生逻辑**幂等、抗乱序，但**不保证跨实例写序**。
+
+**解法 = 两道条件写，各管一类回退，不能只用 HWM**：
+
+- **① HWM 挡 worker 执行事件段内的 stale 覆盖**：`RunState` 带 `high_water_mark`（已处理的 worker 段 max seq）；投影写条件含 `attribute_not_exists OR :hwm >= hwm`，读到更少 worker 事件的 stale 实例写被 `ConditionalCheckFailedException` 挡掉。这管的是「A 读到 seq=10、B 读到 seq=20，A 迟到写覆盖 B」这类**数值 seq 可比**的回退。
+- **② 状态机单调条件写挡终态回退（HWM 挡不住的边界，必须单列）**：`task_exited` 走独立键空间、**不带数值 seq**（机制一），故「被 `scope_done`（末 seq=5）触发的投影」与「被 `task_exited` 触发的投影」携带**相同 HWM(=5)**——`task_exited` 恰是把 job 翻终态的那条事件，单靠 HWM(`5>=5` 成立) **挡不住** stale 的 `scope_done` 投影把已 `passed` 的 job 刷回 `running`。**故 job 状态与 run 总 status 的终态转移另加一道单调状态机条件写**：`status ∈ 非终态集` 才允许写（`ConditionExpression` 断言当前非终态；终态 `passed/failed/error` 不可被任何后到的写覆盖）。finalize（run 总 status）同理单独条件写，保证 commit 恰一次、RunReport 触发幂等。
+
+两道条件缺一不可：HWM 管 seq 可比的进度回退，状态机单调管「跨独立键空间事件（task_exited 无 seq）的终态回退」——后者正是 `scope_done`/`task_exited` 这个 finalize 边界的关键守卫。这是 [0030](./0030-realtime-persistence-seam.md)「重议」条预告的「进程外多写者需条件更新」的落地（见下反向链）。local SQLite 用 `UPDATE...WHERE hwm <= :hwm AND status NOT IN (终态)` 复刻两道条件。**被拒 owner/lease 分布式锁**：0030 曾预告用 lease 保唯一写者——拒，lease 有状态、需续租/故障接管；无状态的 HWM + 状态机乐观条件写即够（写失败即整体重放重试，天然幂等），更轻。
+
+### 机制四：CAS(pending→running) 控严格并发
+
+严格 `max_concurrency` 的执行点从 core 内 `ThreadPoolExecutor`（进程内、无 store）**迁到 store 的 CAS 条件写**：起一个 job 前 `CAS(status: pending→running)`，多个触发源并发看到同一 pending job 都想启，**只有条件写成功的那个去 RunTask/spawn**，其余被拒跳过。稳态并发恒 = max_concurrency，不靠任何常驻进程 hold 线程池。core 的 `plan_next` 只**提议**动作，真正的并发闸是 adapter 的 CAS。
+
+## core 拆分（守 [0026](./0026-schedule-module.md)/[0016](./0016-execution-architecture-core-lib-run-model.md) 窄腰红线）
+
+```
+core（纯函数，不 import boto3，local/cloud 共用）：
+   project(events) → RunState/RunResult          # 纯归约，全量重放，幂等抗乱序
+   plan_next(RunState, max_concurrency) → [Action]  # 纯决策：该启哪些 pending、是否 finalize
+adapter/组合根（Lambda handler / per-run 进程，注入具体 client）：
+   CAS 写 / RunTask / PutItem(task_exited/finalize) / RunState 落库   # 所有副作用在此层
+```
+
+**core 只吐「当前状态」与「建议动作」，绝不持 store、不 import boto3、不依赖执行环境。** Lambda handler 是 cloud 组合根（cold-start 读 env 造 adapter 注入纯 reconciler——**仍是组合根注入，不是 ports 内部 env-sniff 全局单例**，[0016](./0016-execution-architecture-core-lib-run-model.md) 禁的 GlobalConfigManager 反模式要在评审时守住别退化成它）；per-run 进程是 local 组合根。归约码作纯 core 函数被两宿主 import 复用 = 「不复制归约逻辑」的正解。
+
+## Engine port 演进：pull-iterate → 增出 fire-and-forget
+
+当前 `Engine.run_scope(job) → (WorkerHandle, Iterator[Event])` 是 **pull 式**（调用方线程迭代事件流；FargateEngine 现为满足 `Iterator` 而在线程内轮询 DDB）。无状态路径是 **fire-and-forget**：worker 自写持久 sink、观察者补 `task_exited`、reconciler 读表——不再有「调用方持续迭代」。故 Engine port 可能需增出 `start_task(job) → task_ref`（只启不迭代）形状，与现有 `run_scope`（同步 `run` 路径仍用）并存。**起 task 的能力（subprocess spawn / ECS RunTask）收进注入的 port，core 绝不 import boto3/ecs。** 具体 port 形状施工时定（本 ADR 不预铸接口签名，避免纸上定错）。
+
+## 对 [0016](./0016-execution-architecture-core-lib-run-model.md) 的纠正：「核心不动」是过强断言
+
+[0016](./0016-execution-architecture-core-lib-run-model.md) 三处（L114/210/225）断言「无状态化 = 加 adapter + 组合根换注入，核心与接口不动」。**本 ADR 纠正为分层两真值**：
+
+- **(a) store/engine 后端替换**（local↔DDB/S3、subprocess↔Fargate）= 注入、核心不动——[0033](./0033-iac-aws-backend-and-composition-wiring.md) 已真部署真跑证实，**保留**。
+- **(b) 无状态提交-收集**（本 ADR）= **驱动模型演进**：同步 `ThreadPoolExecutor` 循环解体为无状态事件驱动 tick、抽纯 `project()`/`plan_next()` 供两宿主复用、可能增 Engine port 形状、严格并发从进程内线程池迁到 store CAS——**核心与接口要动**。这比「只换 adapter」大得多，[0016](./0016-execution-architecture-core-lib-run-model.md)/[0026](./0026-schedule-module.md) 把 (a)(b) 混为一谈、over-claim 了。
+
+存活的是**纯归约器**（`project`），消失的是**同步驱动循环**（ThreadPool/as_completed/abort_flag/fail-fast `_stop_all`/进程内并发闸）——后者在无状态路径重新宿主为 reconciler。同步 `run` 路径仍用现驱动循环（两种驱动模型并存，按命令分流）。
+
+## 地基实测（2026-07-19，账户 000000000000/us-east-1；6 个真 Fargate task——其中 4 个构成 H1 退出场景矩阵——+ 真 DDB Streams/条件写；临时 PoC 脚手架验后即清、未入库）
+
+moto 立即返回测不到事件投递/并发时序，健康网真跑不触发这些路径——故下列是「绿≠对」边界的唯一有效证据（临时 PoC 脚手架验后即清、未入库）：
+
+- **H1 事件 payload 带 exitCode（4/4，含最硬的 SIGKILL 截断）**：正常退出 exitCode=0→payload 带 0；缺 job 非 0 退出=1→带 1；StopTask 软停=0→带 0；**忽略 SIGTERM 的 sleeper 被 SIGKILL 硬杀=137→payload 仍带 137**。结论：观察者从 STOPPED 事件读 exitCode 可靠（事件锚在 `stoppedAt`、已过 exitCode 落值窗口）→ 机制二「极薄观察者」成立、机制二兜底降为防御性冗余。
+- **H2 延迟**：EventBridge→Lambda 投递 **0.6s**（近瞬时）；但端到端「worker 真停(`executionStoppedAt`)→可归约」= **~27s**，瓶颈全在 ECS 平台 `executionStoppedAt→stoppedAt` 清理开销（STOPPED 事件锚在 `stoppedAt`）。放大了 [0032](./0032-fargate-execution-environment.md) 记的 ~11s 平台滞后。**级联每步有 ~20-30s 固有尾延迟**——对异步跑批可接受，`status --wait` 会有此尾延迟，属已知特性。
+- **H3/机制三/四 并发写序（真 DDB）**：HWM 条件写——B 写终态(hwm=20)后 A 用旧快照(hwm=10)迟到写被 `ConditionalCheckFailedException` 挡、终态未被刷回 running；同 hwm 重复写幂等。**DDB Streams 并发度=2**（4 job 触发 2 个并发 Lambda 实例）→ 坐实「并发 reconciler」前提真实、HWM 条件写用得上；**同 PK 严格保序**（每 job seq `[1..5]` 按序到达）。
+
+**实测未覆盖（诚实标定）**：`status --wait` 断点续接力、`setsid` local 脱离真验、level Stream 偶发丢投/断链——留施工期真验（见下重议闸门）。
+
+## 被拒方案（护栏，防未来重踩）
+
+- **让 worker 自报退出事件**（省掉平台侧观察者）：拒——worker 可能 SIGKILL/崩溃/发完 scope_done 才退，没机会自报；「进程干净终止」本质只有平台/父进程可见（机制二）。
+- **`task_exited` 共享 worker 数值 seq 段**：拒——观察者无 worker 的 seq 计数器，Query-max-then-write 撞号覆盖 `scope_done` / 造空号破断号检测（机制一）。
+- **reconciler 靠全量重放天然幂等、投影写不加版本守卫**：拒——并发实例 stale 快照 lost-update 能把 finalized run 刷回 running；全量重放只保证派生幂等、不保证跨实例写序（机制三）。
+- **把 CAS+RunTask+PutItem 与归约合成单一 core reconciler 组件**：拒——逼 core 持 store + 依赖执行环境、Engine port 长出启 task 职责，破 [0026](./0026-schedule-module.md) 纯 reducer（core 拆分节）。
+- **让每个消费者各自 `project(events)→RunState`（绕过单一 reconciler 写者、如为求新鲜度让 `status` 直接投演 events）**：拒——多份推演逻辑必漂移（同一 events 在 status/WebUI/reconciler 各推一版、口径迟早分叉）；且各消费者写 RunState 会破单写者与 HWM/状态机条件写前提。外部只读 RunState、推演只在 reconciler 一处（「核心思想」单一读接口不变量）。
+- **定时器轮询推进**（EventBridge scheduled rule 每 N 秒 tick）：拒——idle 也 fire、空转烧钱，且要权衡「间隔短=延迟低但费 / 间隔长=省但收尾慢」这个不该存在的取舍。改用 ECS Task State Change + DDB Stream 事件驱动，idle 零调用（端到端流程 cloud）。
+- **per-run 推进器也给 cloud**：拒（用户定）——cloud「扣笔记本下班」场景只靠 IaC 部署的事件驱动链，本机不留常驻推进器；per-run 仅 local 用。
+
+## 重议闸门
+
+- **level Stream/事件偶发丢投致级联断裂成真痛点** → 加安全网：submit 时 enable、finalize 时 disable 的**动态定时兜底规则**（仅在有活跑批时低频轮询、真 idle 时规则禁用=仍零调用），比常开定时器省。当前靠 `status --wait` 接力兜底，先不做。
+- **常驻调度服务 / WebUI 真需要** → RunState 读模型 + reconciler 已就位，加 adapter/宿主即可（[0016](./0016-execution-architecture-core-lib-run-model.md)「加 adapter + 换注入」在 (a) 类仍成立）。
+- **本地 events sink 选型**：定 **SQLite**（表结构镜像 DDB events：PK=scope_id/SK=seq；`UPDATE...WHERE` 让 local 复刻 HWM 条件写、与 cloud 心智对称）。被拒 append-only JSONL——虽最简无依赖，但并发读写只能靠 append 原子性 + 容忍半行，无事务保证、无法复刻条件写逻辑。
