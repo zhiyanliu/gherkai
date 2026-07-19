@@ -162,7 +162,8 @@ subnet/sg 不是「名字」，是 **AWS 建 VPC 时生成的 ID**（`subnet-0ab
 
 ## 留待（defer）
 
-- **镜像瘦身、CI 构建推 ECR**：属施工，不在本 ADR 决策面。（真容器 grace/中断校准已完成，归 [0032](./0032-fargate-execution-environment.md) Accepted。）
+- **镜像瘦身**：属施工，不在本 ADR 决策面。（真容器 grace/中断校准已完成，归 [0032](./0032-fargate-execution-environment.md) Accepted。）
+- **build & push ECR 的自动化程度**：手动步骤已由 `tools/build_push_workers.py` 固化（ECR 登录 + 两引擎 `docker build --platform linux/amd64` + push 一条命令，`--platform` 硬编码防 arm64 Fargate 启动挂死）——消除手敲错，本地可真跑。**全自动 CI**（GitHub Actions + OIDC 免密钥 assume role、push/改 Dockerfile 触发）仍待建：需先定远端仓库托管 + CI 凭证方案（OIDC provider/role 又是一处 IaC + 需 org/repo 信息），非本地能闭环，故 defer 到有明确 CI 需求 + 仓库托管确定时。
 
 ## 重议
 

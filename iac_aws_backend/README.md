@@ -34,20 +34,26 @@ uv run cdk deploy -c prefix=gherkai-
 uv run cdk deploy -c prefix=prod-          # 另一套环境
 ```
 
-镜像构建（CDK 不做，见各引擎 Dockerfile）：
+镜像构建（CDK 不做、只建 ECR repo，见各引擎 Dockerfile）——**用 `tools/build_push_workers.py` 固化**
+（ECR 登录 + 两引擎 `docker build --platform linux/amd64` + push，一条命令；`--platform` 已硬编码保证、
+免手敲漏它致 arm64 Fargate 启动挂死）：
 
 ```bash
-# 从 engines/novaact/ 或 engines/midscene/
-# **必须 --platform linux/amd64**：Fargate task-def 默认 X86_64 runtime；arm Mac（M 系列）不加则 build 出
-# arm64 镜像、Fargate 容器启动期 `exec format error` 挂死（且错误在启动期、不易一眼看出是架构问题）。
-docker build --platform linux/amd64 -t <ecr-repo>:latest .
-docker push <ecr-repo>:latest              # repo 名 = {prefix}{engine}-worker
+# 从仓库根：
+python tools/build_push_workers.py                     # 两引擎都 build&push（tag=latest, prefix=gherkai-）
+python tools/build_push_workers.py --engine novaact    # 只一个
+python tools/build_push_workers.py --tag v2 --prefix prod-
+python tools/build_push_workers.py --dry-run           # 只打印命令、不真跑
 ```
 
-登录 ECR（push 前）：
+底层命令（脚本封装的，供参考/排障）——repo 名 = `{prefix}{engine}-worker`，build context = `engines/{engine}/`：
 ```bash
 aws ecr get-login-password --region us-east-1 | docker login --username AWS \
-  --password-stdin <account>.dkr.ecr.us-east-1.amazonaws.com
+  --password-stdin <account>.dkr.ecr.us-east-1.amazonaws.com   # 登录（push 前）
+# **必须 --platform linux/amd64**：Fargate task-def 默认 X86_64；arm Mac 不加则 build 出 arm64、
+# 容器启动期 `exec format error` 挂死（错误在启动期、不易一眼看出是架构问题）。
+docker build --platform linux/amd64 -t <account>.dkr.ecr.us-east-1.amazonaws.com/<prefix><engine>-worker:latest .
+docker push <account>.dkr.ecr.us-east-1.amazonaws.com/<prefix><engine>-worker:latest
 ```
 
 ## 清理（destroy）
@@ -70,6 +76,7 @@ aws ecr delete-repository --repository-name gherkai-midscene-worker --force
 
 ## 待做（真部署时）
 
-- `cdk bootstrap`（首次）、CI build & push ECR 流水线（现手动）。
+- `cdk bootstrap`（首次）。
+- **CI build & push ECR 流水线**：手动步骤已由 `tools/build_push_workers.py` 固化（本地一条命令）；**全自动 CI**（GitHub Actions + OIDC 免密钥 assume role、push/改 Dockerfile 时触发）仍待建——需先定远端仓库托管 + 凭证方案（ADR 0033 记为待做）。
 - ~~真容器 grace/中断校准~~ **已完成**（4 次真跑标定，见 [ADR 0032](../docs/adr/0032-fargate-execution-environment.md) 真容器校准结论）。
 - ~~task role 的 `bedrock-agentcore`/`nova-act`/`bedrock` 资源 ARN 用 `*`~~ **已收窄**（动作+资源两维度都最小）：三处从 `*` 收到具体 ARN（bedrock 单 foundation-model / nova-act definition+run/* / agentcore 系统 browser+profile/*），另 4 个结构上只能 `*` 的诚实保留；收窄后真部署真跑验证无 AccessDenied。依据/踩坑（copy-account 陷阱）/回归护栏见 [ADR 0033](../docs/adr/0033-iac-aws-backend-and-composition-wiring.md) IAM 表 + `tests/test_stack.py::test_task_role_resource_arns_narrowed`。
