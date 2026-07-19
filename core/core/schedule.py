@@ -19,7 +19,7 @@ from __future__ import annotations
 import threading
 import time as _time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Callable
 
 from core.model import (
@@ -29,19 +29,12 @@ from core.model import (
     JobResult,
     RunMeta,
     RunResult,
-    ScenarioDone,
-    ScenarioResult,
-    ScenarioStarted,
-    ScopeDone,
-    ScopeStarted,
     Status,
     StepDone,
-    StepResult,
-    StepSkipped,
-    StepStarted,
 )
 from core.errors import WorkerNetworkError
 from core.ports import EngineResolver, JobSink, Sink
+from core.project import Timing as _Timing, reduce_event
 
 import queue as _queue
 
@@ -110,16 +103,6 @@ def _heartbeat_wrap(events, poll_interval_s, deadline):
         # 管道 EOF；Fargate：StopTask→DescribeTasks STOPPED→迭代器停）。daemon 线程不挡进程退出；这里不 join
         # （避免在 stop 尚未生效时阻塞 schedule），与既有「放弃 generator」语义一致。engine 无关（ADR 0026）。
         pass
-
-
-@dataclass
-class _Timing:
-    """单个 worker 跑批中各级起始时间戳 + 暂存的 step 结果（core 算墙钟时长用，ADR 0024）。"""
-
-    scope_start: float | None = None
-    scenario_start: dict[str, float] = field(default_factory=dict)
-    step_start: dict[tuple[str, int], float] = field(default_factory=dict)
-    steps: dict[str, list[StepResult]] = field(default_factory=dict)  # scenario_id → 暂存 StepResult
 
 
 @dataclass
@@ -318,70 +301,9 @@ class _Worker:
         self, event: Event, result: JobResult, scenario_status: dict[str, Status],
         timing: "_Timing", now: float,
     ) -> None:
-        # started 事件：记各级起始时间戳（now = 事件到达 core 的墙钟，ADR 0024）
-        if isinstance(event, ScopeStarted):
-            timing.scope_start = now
-            # 会话血缘随首事件即落（ADR 0028）：超时/中止时 scope_done 不会到，但 session_id 此刻已记下。
-            # 边界：worker 建连失败（退出码 80、scope_started 从未 emit）时血缘仍为 None——属「会话未起」，
-            # 本就无血缘可记，非缺陷（ADR 0028 当前设计；act 中途超时这类「会话已起」场景已被覆盖）。
-            if event.session_id is not None:
-                result.session_id = event.session_id
-        elif isinstance(event, ScenarioStarted):
-            timing.scenario_start[event.scenario_id] = now
-        elif isinstance(event, StepStarted):
-            timing.step_start[(event.scenario_id, event.step_index)] = now
-        elif isinstance(event, StepDone):
-            # scenario 判定**只由 ScenarioDone 决定**（见下分支，无条件覆盖 scenario_status）——step 级 status
-            # 不独立参与 scenario 归约（守 ADR 0026 归约语义：worker 每 scenario 必发 scenario_done 带 aggregate；
-            # 中途崩无 scenario_done 时走 except 分支直接 job=ERROR、不读 scenario_status）。故此处不写 scenario_status。
-            # 累加 step 成本到 scope 级（ADR 0024）：core 只合计 engine 报的原生量、不算美元。
-            cost = event.cost
-            if cost is not None:
-                if cost.tokens is not None:
-                    result.total_tokens = (result.total_tokens or 0) + cost.tokens
-                if cost.time_worked_s is not None:
-                    result.total_time_worked_s = (result.total_time_worked_s or 0.0) + cost.time_worked_s
-            # step 墙钟时长（step_started→此刻）+ 暂存 StepResult，待 scenario_done 挂入
-            st = timing.step_start.get((event.scenario_id, event.step_index))
-            dur_ms = (now - st) * 1000.0 if st is not None else None
-            timing.steps.setdefault(event.scenario_id, []).append(
-                StepResult(index=event.step_index, status=event.status,
-                           duration_ms=dur_ms, votes=event.votes, error_type=event.error_type,
-                           report_refs=event.report_refs)  # step 级 trajectory 原样搬入（ADR 0027 下沉）
-            )
-        elif isinstance(event, StepSkipped):
-            # scope 内短路（ADR 0031 决定六）：上游 error 后 worker 跳过本 step、没调 AI。
-            # 本地构造 StepResult(status=SKIPPED, shortcircuited=True)——SKIPPED 复用既有枚举，在 StepResult 层
-            # 直观表「没跑」。**关键不变量：绝不写 scenario_status**——scenario/job 判定由上游那个 error step 决定，
-            # 与"后面短路了几个 step"无关；不喂进 scenario 归约/_aggregate（severity 零污染，ADR 0031 决定六）。
-            # 墙钟：被短路的 step 没起跑，worker 不发 step_started → duration_ms 恒 None（没跑=无墙钟，语义正确）。
-            # 仍用 .get 兜底（不假定 timing 里没有此键），健壮不脆。
-            st = timing.step_start.get((event.scenario_id, event.step_index))
-            dur_ms = (now - st) * 1000.0 if st is not None else None
-            timing.steps.setdefault(event.scenario_id, []).append(
-                StepResult(index=event.step_index, status=Status.SKIPPED,
-                           duration_ms=dur_ms, shortcircuited=True)
-            )
-        elif isinstance(event, ScenarioDone):
-            scenario_status[event.scenario_id] = event.status
-            ss = timing.scenario_start.get(event.scenario_id)
-            result.scenarios.append(
-                ScenarioResult(
-                    scenario_id=event.scenario_id,
-                    status=event.status,
-                    steps=timing.steps.get(event.scenario_id, []),
-                    duration_ms=(now - ss) * 1000.0 if ss is not None else None,
-                    report_refs=event.report_refs,
-                )
-            )
-        elif isinstance(event, ScopeDone):
-            # 仅在带值时设——别让 scope_done 的 None 覆盖已从 scope_started 捕获的血缘（ADR 0028）。
-            if event.session_id is not None:
-                result.session_id = event.session_id
-            if event.report_refs:
-                result.report_refs = result.report_refs + event.report_refs
-            if timing.scope_start is not None:
-                result.duration_ms = (now - timing.scope_start) * 1000.0
+        # 归约逻辑提炼到 core.project.reduce_event（同步 run 与无状态 submit 两路径共用一份，ADR 0034）。
+        # 本方法保留为薄 delegate，不改行为（现有 test_schedule 为护栏）。
+        reduce_event(event, result, scenario_status, timing, now)
 
     def _stop(self) -> None:
         if self.handle is not None:

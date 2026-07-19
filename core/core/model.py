@@ -381,6 +381,11 @@ class RunState:
     jobs: dict[str, JobState]  # scope_id → JobState（Map，ADR 0030 决定五）
     started_at: str | None = None
     ended_at: str | None = None
+    # 无状态跑批的并发写守卫（ADR 0034 机制三）：reconciler 跨进程/跨 Lambda 并发投影写 RunState 时，
+    # high_water_mark = 本次投影已处理的 worker 段 max seq。RunStore 条件写「我处理到的 seq ≥ 库中记录的才写」，
+    # 挡 stale 实例的 lost-update（把 passed 刷回 running）。仅无状态路径（submit/reconciler）用；同步 run
+    # 路径单进程内 RunPersistence._lock 串行、不并发写，此字段留 None（不参与、不落盘键，向后兼容旧 run_state.json）。
+    high_water_mark: int | None = None
 
 
 def run_state_from_result(result: RunResult) -> RunState:

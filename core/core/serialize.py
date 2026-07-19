@@ -275,6 +275,10 @@ def run_state_to_dict(state: RunState) -> dict:
         d["started_at"] = state.started_at
     if state.ended_at is not None:
         d["ended_at"] = state.ended_at
+    # high_water_mark：仅无状态跑批投影写时有值（ADR 0034 机制三）；同步 run 路径为 None。
+    # omit-when-None（同 started_at/ended_at）——旧 run_state.json 无此键、from_dict .get 容忍，round-trip 不破。
+    if state.high_water_mark is not None:
+        d["high_water_mark"] = state.high_water_mark
     # state.jobs 是 Map（scope_id → JobState，ADR 0030）：落盘 JSON 仍是 list（保 run_state.json 向后兼容）。
     # 必须 .values() 迭代——直接 `for js in state.jobs` 会迭代 dict 的 key（str）、js.scope_id 即 AttributeError。
     d["jobs"] = [
@@ -291,6 +295,7 @@ def run_state_from_dict(d: dict) -> RunState:
         status=Status(d["status"]),
         started_at=d.get("started_at"),
         ended_at=d.get("ended_at"),
+        high_water_mark=d.get("high_water_mark"),  # 向后兼容：旧落盘无此键 → None（ADR 0034 机制三）
         jobs={
             j["scope_id"]: JobState(scope_id=j["scope_id"], status=Status(j["status"]), session_id=j.get("session_id"))
             for j in d.get("jobs", [])
