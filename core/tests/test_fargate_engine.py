@@ -127,6 +127,18 @@ def test_run_scope_job_key_quotes_scope_id(fargate):
     assert "%2F" in expected_key and "%3A" in expected_key  # 确认 / 和 : 都被编码（不造子前缀）
 
 
+def test_run_scope_job_in_tagged_for_lifecycle(fargate):
+    # job-in 对象打 tag gherkai=job-in，供桶按 tag 挂 S3 lifecycle 过期清理（ADR 0033；tag 而非 key 前缀，
+    # 因 run_id 在 key 中间、前缀 filter 框不住且会误伤 jobs/reports）。回归守卫：防将来漏打 tag → lifecycle 收不到、job-in 堆积。
+    eng = _engine(fargate)
+    sid = "features/x.feature:1"
+    eng.run_scope(_job(sid))
+    from urllib.parse import quote
+    key = f"{_RUN_ID}/jobs/{quote(sid, safe='')}.json"
+    tags = fargate["s3"].get_object_tagging(Bucket=fargate["bucket"], Key=key)["TagSet"]
+    assert {"Key": "gherkai", "Value": "job-in"} in tags, f"job-in 对象缺 gherkai=job-in tag：{tags}"
+
+
 def test_run_scope_runtask_injects_env(fargate, monkeypatch):
     # 拦 ecs.run_task 记录 env 注入（验 JOB_S3_URI/EVENTS_DDB_TABLE/RUN_ID/SCOPE_ID 都传对）
     real_run_task = fargate["ecs"].run_task

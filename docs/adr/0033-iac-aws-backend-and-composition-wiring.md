@@ -89,7 +89,12 @@ subnet/sg 不是「名字」，是 **AWS 建 VPC 时生成的 ID**（`subnet-0ab
 - 不存在 → fail-fast 退 2，**错误信息带上 prefix**：如「用 `--prefix=gherkai-` 拼出的表 `gherkai-events` 不存在——是 prefix 配错、还是 CDK（`iac_aws_backend`）未部署？」。
 - **preflight 按轴分层探（report ⊥ 执行，见下「组合根接线」）**：执行必需资源（events 表 + cluster + 桶）**恒探**（只要 `--backend cloud`）；**runs 表仅落库需要**——`--no-report` 时不探（`runs_table=None`）。即 `--backend cloud --no-report` **仍探执行资源、仍 Fargate 跑**，只是不落库、不探 runs 表。
 - **task-def 存在性暂不 preflight（护栏）**：preflight 现探表/桶/cluster，**不探 task-def**（`DescribeTaskDefinition`）。故 task-def 名维度的 prefix 配错会漏到 RunTask 才炸（退 1、不点名 prefix）。**CDK 已落地、task-def 已在 stack.py 定义并部署**——本 ADR 自设的「CDK 落地后评估纳入」复议触发点已达，但 preflight 至今仍只探表/桶/cluster、未纳入 task-def（一个已到期未执行的加固项）。评估方向：把 task-def 纳入「执行必需恒探」档（对齐 events 表/cluster），或确认 RunTask 失败信息够用。
-- **job-in S3 指针对象的生命周期未定（open decision，倾向 S3 lifecycle）**：`FargateEngine.run_scope` 每 scope `PutObject` 一个 `jobs-in/<quote(scope_id)>.json` 指针对象（因 RunTask overrides 8192 上限塞不下含 feature 的 job），**当前无任何清理**——桶只有 `RemovalPolicy=RETAIN`（管 stack 销毁、非对象过期），无 lifecycle rule；且 [0029](./0029-engine-artifacts-to-s3.md) 的清理全在 worker 侧（上传后删本地 / 孤儿扫盘），**不覆盖 core 写的这些 S3 job-in 对象**（机制不对称：core 写、清理逻辑却都在 worker）。**倾向 S3 lifecycle/TTL 自动过期**（免 core 碰清理、对齐 events 表 TTL 心智），而非组合根收尾 `DeleteObject`。**未落地**：属可加的运维加固（未清理的 job-in 对象小、只占存储、不影响正确性），触发 = 存储堆积成本可感 / 顺手加 lifecycle 时。
+- **job-in S3 对象生命周期（已定 + 已实现 + 真跑验证）**：`FargateEngine.run_scope` 每 scope `PutObject` 一个 `jobs-in/<quote(scope_id)>.json` 对象（因 RunTask overrides 8192 上限塞不下含 feature 的 job）——喂 worker 的一次性输入、worker `GetObject` 读完即无用，无清理会随 run 堆积。**决策：S3 lifecycle 自动过期（7 天），按对象 tag `gherkai=job-in` 过滤——不用 key 前缀**。
+  - **为何 tag 而非前缀**：job-in 落 `<report_dir>/<run_id>/jobs-in/`（run_id 在 key 中间），S3 lifecycle 的 filter 是**纯前缀**、框不住中间的 run_id；且同 `<run_id>/` 前缀下还有判定真值 `jobs/` 与报告 `index/manifest`（长期保留、误删代价高），前缀规则会误伤。tag 精确只框 job-in——`FargateEngine.put_object` 打 `Tagging="gherkai=job-in"`、CDK 桶挂 `LifecycleRule(tag_filters={"gherkai":"job-in"}, expiration=7d)`。判定真值/报告不打此 tag、不受影响。
+  - **7 天**：对齐 events 表 TTL 心智（输入/协调类脚手架，留窗口供事后调查失败 run，之后自动清）。
+  - **打 tag 在编排进程、非 worker**：`put_object` 在 `FargateEngine`（组合根注入的 s3_client、运维凭证）上跑，worker 只 `GetObject` 读——故**无需给 worker task role 加 `s3:PutObjectTagging`**（避免为清理反而扩 task role 权限，与「IAM 最小权限」一致）。
+  - **真跑验证**：cloud job 真跑后核实真 S3——job-in 对象带 `gherkai=job-in` tag、判定真值 `jobs/` 无 tag（lifecycle 精确不误伤）、桶 lifecycle rule 生效。护栏：core `test_run_scope_job_in_tagged_for_lifecycle` + iac `test_artifacts_bucket_job_in_lifecycle`（含「不得用 Prefix filter」负向护栏）。
+  - **已知边界（历史遗留、可接受）**：部署此 lifecycle **之前**写的旧 job-in 对象无 tag、不被本规则清理，永久残留（就地几十个小 json、属历史）。要清需一次性手动删（`aws s3api list-objects-v2 ... jobs-in/ | delete`），非本规则职责。
 
 ## 2 镜像：Nova / Midscene 各一（依赖环境本质不同）
 

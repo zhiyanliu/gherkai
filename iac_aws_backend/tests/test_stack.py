@@ -67,6 +67,28 @@ def test_artifacts_bucket_private():
     })
 
 
+def test_artifacts_bucket_job_in_lifecycle():
+    # job-in 对象生命周期（ADR 0033）：桶按 tag gherkai=job-in 过期（7 天），非 key 前缀（run_id 在 key 中间、
+    # 前缀 filter 框不住且会误伤 jobs/reports）。回归守卫：防误删规则 / 改成前缀过滤（会误删判定真值）/ 漏 tag filter。
+    t = _template()
+    t.has_resource_properties("AWS::S3::Bucket", {
+        "LifecycleConfiguration": {
+            "Rules": Match.array_with([
+                Match.object_like({
+                    "Status": "Enabled",
+                    "ExpirationInDays": 7,
+                    "TagFilters": [{"Key": "gherkai", "Value": "job-in"}],
+                }),
+            ]),
+        },
+    })
+    # 负向护栏：该规则**不得**用 Prefix filter（前缀会误删同 <run_id>/ 下的判定真值 jobs/ 与报告 reports/）。
+    for bkt in t.find_resources("AWS::S3::Bucket").values():
+        for rule in bkt["Properties"].get("LifecycleConfiguration", {}).get("Rules", []):
+            if rule.get("Id") == "expire-job-in":
+                assert "Prefix" not in rule, f"job-in 过期规则不应用 Prefix（会误删 jobs/reports）：{rule}"
+
+
 def test_two_task_defs_container_name_without_prefix():
     # **container 名 = {engine}-worker（不带 prefix）**——cli RunTask containerOverrides[].name 逐字匹配（ADR 0033 硬契约）。
     t = _template()

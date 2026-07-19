@@ -147,7 +147,16 @@ class FargateEngine:
         # build_fargate_engines 注入、与 ResultStore 的 jobs/ 物理隔离、不撞 key）；worker 经 JOB_S3_URI 全指针
         # GetObject 读、不 list/unquote 枚举，故 quote 的唯一作用是避假子前缀（编码沿用 ResultStore 的 quote(safe='') 惯例）。
         job_key = f"{self._job_prefix}{quote(job.scope_id, safe='')}.json"
-        self._s3.put_object(Bucket=self._job_bucket, Key=job_key, Body=(job_to_line(job) + "\n").encode("utf-8"))
+        # 打 tag `gherkai=job-in`：job-in 是喂 worker 的一次性输入（worker GetObject 读完即无用），桶按此 tag
+        # 挂 S3 lifecycle 过期清理（ADR 0033）。**用 tag 而非 key 前缀过滤**——job-in 落 `<prefix><run_id>/jobs-in/`，
+        # run_id 在中间，lifecycle 的纯前缀 filter 框不住它、且不能误伤同前缀下的判定真值(jobs/)/报告；tag 精确只框 job-in。
+        # Tagging 是 URL-encoded 查询串格式（`k=v`）。**打 tag 的是编排进程**（本 put_object 在 FargateEngine=组合根注入的
+        # s3_client 上跑、用运维凭证），非 worker task role（后者只 GetObject 读 job-in），故无需给 task role 加 PutObjectTagging。
+        self._s3.put_object(
+            Bucket=self._job_bucket, Key=job_key,
+            Body=(job_to_line(job) + "\n").encode("utf-8"),
+            Tagging="gherkai=job-in",
+        )
         job_s3_uri = f"s3://{self._job_bucket}/{job_key}"
 
         # ② RunTask：env 注入 worker 的 I/O 边缘落点（JOB_S3_URI / events 表 / run_id / scope_id）——worker 的

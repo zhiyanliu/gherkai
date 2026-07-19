@@ -104,6 +104,19 @@ class BackendStack(Stack):
             block_public_access=s3.BlockPublicAccess.BLOCK_ALL,  # 安全：私有桶
             encryption=s3.BucketEncryption.S3_MANAGED,
             removal_policy=RemovalPolicy.RETAIN,
+            # job-in 对象生命周期（ADR 0033）：FargateEngine 写的 job-in 是喂 worker 的一次性输入（读完即无用），
+            # 无清理会随 run 堆积。**按对象 tag `gherkai=job-in` 过期、非 key 前缀**——job-in 落 `<prefix><run_id>/jobs-in/`
+            # （run_id 在中间），lifecycle 纯前缀 filter 框不住、且会误伤同前缀下的判定真值(jobs/)/报告；tag 精确只框 job-in。
+            # 7 天：对齐 events 表 TTL 心智（协调/输入类脚手架，留窗口供事后调查失败 run，之后自动清）。判定真值(jobs/)、
+            # 报告(reports/)不打此 tag、不受影响（长期保留，误删代价高，同 RETAIN 精神）。
+            lifecycle_rules=[
+                s3.LifecycleRule(
+                    id="expire-job-in",
+                    enabled=True,
+                    tag_filters={"gherkai": "job-in"},
+                    expiration=Duration.days(7),
+                ),
+            ],
         )
 
     # ---- VPC（Fargate awsvpc 用）：三档 context 可指定（ADR 0033），默认建新 ----
