@@ -66,6 +66,8 @@ Fargate awsvpc 模式要 VPC 的 subnet/sg。**VPC 从哪来是部署决策、�
 
 **三档统一走公有子网 + `assignPublicIp=ENABLED` 出网、零 NAT 成本**：worker **只出不入**（连 AgentCore/Bedrock/S3/DDB），公有子网 + 公网 IP 即够、无需 NAT Gateway（常驻计费 ~$32/月）。subnet 选取（`_ssm_network`）：优先 VPC 的公有子网、无则回落私有。`assignPublicIp` 由 cli `resolve_network` 默认 `ENABLED`，与公有子网配套。**为何默认建新而非默认复用**：建新自包含、无外部假设（不依赖账户已有 VPC 的存在/形态），且零 NAT 后无常驻成本代价。
 
+- **cli 读 SSM 空值 fail-fast（低频加固）**：`compose._read_ssm_list` 读到空列表（SSM 参数值空串 / 纯逗号，`split(",")` 过滤后 `[]`）时**就地报错、点名是哪个 SSM 路径空了**，不把空 subnet/sg 列表传到 `awsvpcConfiguration` 拖到 **RunTask 才炸**（那时错误不直观）。正常路径 CDK 一定写非空（subnet 取 `vpc.public_subnets or private_subnets`、sg 写默认 SG id），空值**几乎不可达**——只可能来自配置异常（参数被改空）；这条把不可达但代价高的静默失败挡在源头，与「preflight fail-fast 点名 prefix」同风格。
+
 - **被拒（曾经的建新档）：`nat_gateways=1` + 私有子网出网**——曾想让建新档做「私有子网隔离」，但 `_ssm_network` 恒优先公有子网、cli `assignPublicIp` 恒 ENABLED，NAT 会被建却从不承载 worker 流量（空转计费 + 隔离承诺落空）。故建新档也走公有子网、零 NAT。**真私有隔离留 backlog**：需同步 `_ssm_network` 选私有子网 + cli `assignPublicIp=DISABLED`（跨组件联动），届时再作第四档或改建新档语义。
 
 ## subnet/sg 走 SSM（AWS 生成 ID，无字面默认）

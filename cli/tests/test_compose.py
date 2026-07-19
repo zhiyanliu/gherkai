@@ -326,6 +326,27 @@ def test_resolve_network_partial_override_reads_only_missing():
     assert reads == ["/g-backend/security-groups"]  # 只读缺的那个
 
 
+def test_resolve_network_empty_ssm_fails_fast():
+    # 空值 fail-fast（低频加固，ADR 0033）：SSM 参数空（值空串 → split 过滤后 []）→ 就地报错点名路径，
+    # 不把空列表传到 awsvpcConfiguration、拖到 RunTask 才炸。空串 / 纯逗号 两种空形态都拦。
+    import pytest
+
+    class _EmptySsm:
+        def __init__(self, val): self._val = val
+        def get_parameter(self, Name):
+            return {"Parameter": {"Value": self._val}}
+
+    for empty_val in ("", ",", ",,"):  # 空串 / 逗号无值——过滤后都是 []
+        with pytest.raises(ValueError, match="为空"):
+            compose.resolve_network(prefix="g-", subnets=None, security_groups=None, ssm=_EmptySsm(empty_val))
+    # 错误须点名是哪个 SSM 路径（subnets 先读、先炸）
+    try:
+        compose.resolve_network(prefix="g-", subnets=None, security_groups=None, ssm=_EmptySsm(""))
+        assert False, "应 fail-fast"
+    except ValueError as e:
+        assert "/g-backend/subnets" in str(e)  # 点名路径，便于排障
+
+
 # ---- build_fargate_engines（ADR 0033/0016 决策 A/C）：按引擎选 task-def、注 region 不注 profile ----
 def test_build_fargate_engines_per_engine_taskdef_and_region_no_profile(monkeypatch):
     # 注入 fake FargateEngine 捕获构造参数（不连 AWS、不 require boto3）

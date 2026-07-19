@@ -371,9 +371,22 @@ def _make_ssm_client(*, region, profile):
 
 
 def _read_ssm_list(ssm, path: str) -> list[str]:
-    """读一个 SSM StringList 参数 → list[str]（subnet/sg 的 ID 列表，CDK 写、cli 读，ADR 0033）。"""
+    """读一个 SSM StringList 参数 → list[str]（subnet/sg 的 ID 列表，CDK 写、cli 读，ADR 0033）。
+
+    **空值 fail-fast（低频加固，ADR 0033）**：正常路径 CDK 一定写非空（subnet 取自 `vpc.public_subnets or
+    private_subnets`、sg 写默认 SG id，均非空），故空值**几乎不可达**——只可能来自配置异常（参数被改空 / 值为空串）。
+    但若不拦，空列表会一路传到 `awsvpcConfiguration` 的 subnets/securityGroups、拖到 **RunTask 才炸**且错误
+    不直观（不像"SSM 参数空"那么明确）。故在此就地 fail-fast、点名是哪个 SSM 路径空了，把不可达但代价高的
+    静默失败挡在源头（对齐本项目 preflight fail-fast 点名 prefix 的加固风格）。
+    """
     resp = ssm.get_parameter(Name=path)
-    return [v for v in resp["Parameter"]["Value"].split(",") if v]
+    values = [v for v in resp["Parameter"]["Value"].split(",") if v]
+    if not values:
+        raise ValueError(
+            f"SSM 参数 {path!r} 为空（split 逗号过滤后无值）——预期 CDK 写入非空的 subnet/sg ID 列表。"
+            f"检查 iac_aws_backend 是否已 deploy 且该参数未被改空。"
+        )
+    return values
 
 
 def resolve_network(
