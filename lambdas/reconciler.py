@@ -104,12 +104,20 @@ def _finalize_artifacts(run_id, meta, event_log, result_store, report_store) -> 
 
 
 def _run_ids_from_runs_stream(event) -> set[str]:
-    """从 runs 表 Stream records 提取 run_id 集（runs 表 PK=run_id，非复合，直接取）。启动器用（冷启动）。"""
+    """提取启动器要 tick 的 run_id 集。两种 event 源（启动器同时服务两者）：
+
+    ① runs 表 Stream（冷启动主路径）：`Records[].dynamodb.Keys.run_id`（runs 表 PK=run_id，非复合、直接取）。
+    ② 直接 invoke 的「踢一脚」（cloud `status --wait` 接力兜底，ADR 0034）：payload `{"run_id": "..."}`——
+       Stream 丢投卡 pending 时 status --wait 绕过 Stream 直接 invoke 启动器，故须认此格式（否则空转、救不了）。
+    """
     run_ids: set[str] = set()
-    for rec in event.get("Records", []):
+    for rec in event.get("Records", []):  # ① Stream
         rid = rec.get("dynamodb", {}).get("Keys", {}).get("run_id", {}).get("S")
         if rid:
             run_ids.add(rid)
+    rid = event.get("run_id")  # ② 直接 invoke 踢一脚
+    if rid:
+        run_ids.add(rid)
     return run_ids
 
 

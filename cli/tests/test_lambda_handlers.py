@@ -92,3 +92,32 @@ def test_run_ids_scope_with_colon_not_hash():
     """scope_id 含 : （feature:行号）但不含 #——rsplit('#',1) 正确只切 run_id#scope 的分隔。"""
     event = {"Records": [_stream_record("20260719T04Z-abc#features/deterministic_anchor.feature:7")]}
     assert reconciler._run_ids_from_stream(event) == {"20260719T04Z-abc"}
+
+
+# ---------- 启动器 _run_ids_from_runs_stream（两种 event 源，ADR 0034 status --wait 接力 bug 回归）----------
+
+def _runs_stream_record(run_id):
+    return {"dynamodb": {"Keys": {"run_id": {"S": run_id}, "item_type": {"S": "META"}}}}
+
+
+def test_starter_run_ids_from_runs_stream():
+    """① runs 表 Stream：从 Keys.run_id 提取（runs PK=run_id 非复合）。"""
+    event = {"Records": [_runs_stream_record("run-1"), _runs_stream_record("run-2")]}
+    assert reconciler._run_ids_from_runs_stream(event) == {"run-1", "run-2"}
+
+
+def test_starter_run_ids_from_direct_kick():
+    """② 直接 invoke 踢一脚（status --wait 接力）：payload {"run_id": ...}——真测抓到的 bug：
+    原启动器只认 Stream records、忽略此格式 → status --wait invoke 空转救不了卡 pending 的 run。"""
+    assert reconciler._run_ids_from_runs_stream({"run_id": "run-x"}) == {"run-x"}
+
+
+def test_starter_run_ids_both_sources():
+    """Stream records + 直接 run_id 并存时都提取（健壮）。"""
+    event = {"Records": [_runs_stream_record("run-1")], "run_id": "run-2"}
+    assert reconciler._run_ids_from_runs_stream(event) == {"run-1", "run-2"}
+
+
+def test_starter_run_ids_empty_when_neither():
+    """既无 Records 又无 run_id（如错误 payload）→ 空集（启动器 no-op、不崩）。"""
+    assert reconciler._run_ids_from_runs_stream({"test": "kick"}) == set()

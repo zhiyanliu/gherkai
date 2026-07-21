@@ -450,8 +450,10 @@ def _status_cloud(args) -> int:
             if lam is None:
                 lam = compose._make_lambda_client(region=resolved_region, profile=resolved_profile)
             try:
-                lam.invoke(FunctionName=starter_fn, InvocationType="Event",  # 异步 invoke（踢一脚即可、不等返回）
-                           Payload=json.dumps({"_status_wait_kick": args.run_id}).encode())
+                # payload {"run_id": ...}：启动器 _run_ids_from_runs_stream 认此「直接踢一脚」格式（区别于 Stream
+                # records），对该 run tick 起首批。异步 invoke（Event，踢一脚不等返回）。
+                lam.invoke(FunctionName=starter_fn, InvocationType="Event",
+                           Payload=json.dumps({"run_id": args.run_id}).encode())
             except Exception as e:
                 if not _is_botocore_error(e):
                     raise  # 非 AWS 错才抛；invoke 失败（如无权限）不致命——下轮重试/靠云端链
