@@ -1,8 +1,8 @@
 # 无状态跑批：CLI 提交 → 事件驱动推进 → 轮询收集（CQRS + reconciler）
 
-> **Status:** Accepted —— 设计定稿、地基已真容器实测（见下「地基实测」）；**尚未落 code**（本 ADR 先于实现，遵「不实现≠不设计」）。纠正 [0016](./0016-execution-architecture-core-lib-run-model.md)「无状态化=加 adapter+换注入、核心不动」对本能力的过强断言（见下「对 0016 的纠正」；0016/0026 Status 头已同步标 Partially-superseded-by 本 ADR）。
+> **Status:** Accepted —— **已全部实装、local+cloud 两路端到端真部署真跑通**（core `project`/`reconcile` + cli `submit`/`status`/`detached` + `lambdas/` 三 Lambda + `iac_aws_backend` Stream/EventBridge 均落 code；账户 000000000000/us-east-1 真跑：local submit→per-run 推进→passed，cloud submit→kicker 冷启动→事件驱动链→passed，含卡死救活真验）。纠正 [0016](./0016-execution-architecture-core-lib-run-model.md)「无状态化=加 adapter+换注入、核心不动」对本能力的过强断言（见下「对 0016 的纠正」；0016/0024/0026/0031 已同步标 Partially-superseded-by 本 ADR，0030 标其「重议」条已由本 ADR 落地）。
 
-`--backend cloud` 现状是**「CLI 阻塞跑一批」**：组合根同进程 `schedule()` 持 `ThreadPoolExecutor`、`as_completed` 收敛到全批完成才返回。产品线唯一未做的**产品项**（非加固）= **「CLI 提交完就走、异步收集」**（[0016](./0016-execution-architecture-core-lib-run-model.md) v1.1「待做」+ [0017](./0017-cloud-execution-fargate-over-runtime.md) batch shape）。本 ADR 定这套无状态跑批的架构、数据模型、并发/写序不变量与被拒方案护栏。
+同步 `run` 是**「CLI 阻塞跑一批」**：组合根同进程 `schedule()` 持 `ThreadPoolExecutor`、`as_completed` 收敛到全批完成才返回。本 ADR 落地的产品项（曾是产品线唯一未做项、非加固）= **「CLI 提交完就走、异步收集」**（[0016](./0016-execution-architecture-core-lib-run-model.md) v1.2 已完成 + [0017](./0017-cloud-execution-fargate-over-runtime.md) batch shape）——新增 `submit`/`status` 命令、同步 `run` 保留不变。本 ADR 定这套无状态跑批的架构、数据模型、并发/写序不变量与被拒方案护栏。
 
 ## 定位：产品价值，非加固
 
@@ -97,7 +97,7 @@ per-run 进程（观察者+reconciler 三合一）：spawn worker 子进程
    - **一句话**：cloud「kickoff即可离场」/ local「本机必须跑到底」。根因在**主推进器位置**（cloud 云端 Lambda / local 本机进程，见 1.）——三触发源「齐备」是表层对称，「本机是否必须跑到底」才是里层不对称。
 3. 三者同时触发也无害——靠下面 CAS + HWM 条件写。**`status` 对 cloud 是可选的查看+崩溃kickoff（非推进链必需环，云端链才是）；对 local，per-run 崩后 status --wait 是唯一本机推进者、此时反而是必需环**。
 
-## 四个关键机制（机制二/三/四有地基实测支撑；机制一是从 [0024](./0024-worker-core-protocol.md) seq 不变量推导的设计约束，无独立实测）
+## 四个关键机制（均已实装：机制二/三/四有地基实测支撑，机制一从 [0024](./0024-worker-core-protocol.md) seq 不变量推导、独立键空间存取由单测覆盖 `test_sqlite_event_log`/`test_cloud_reconcile`）
 
 ### 机制一：`task_exited` 用独立键空间（不入 worker 数值 seq 段）
 
@@ -149,9 +149,9 @@ adapter/组合根（Lambda handler / per-run 进程，注入具体 client）：
 
 **core 只吐「当前状态」与「建议动作」，绝不持 store、不 import boto3、不依赖执行环境。** Lambda handler 是 cloud 组合根（cold-start 读 env 造 adapter 注入纯 reconciler——**仍是组合根注入，不是 ports 内部 env-sniff 全局单例**，[0016](./0016-execution-architecture-core-lib-run-model.md) 禁的 GlobalConfigManager 反模式要在评审时守住别退化成它）；per-run 进程是 local 组合根。归约码作纯 core 函数被两宿主 import 复用 = 「不复制归约逻辑」的正解。
 
-## Engine port 演进：pull-iterate → 增出 fire-and-forget
+## Engine port 演进：pull-iterate → 增出 fire-and-forget（已实装）
 
-当前 `Engine.run_scope(job) → (WorkerHandle, Iterator[Event])` 是 **pull 式**（调用方线程迭代事件流；FargateEngine 现为满足 `Iterator` 而在线程内轮询 DDB）。无状态路径是 **fire-and-forget**：worker 自写持久 sink、观察者补 `task_exited`、reconciler 读表——不再有「调用方持续迭代」。故 Engine port 可能需增出 `start_task(job) → task_ref`（只启不迭代）形状，与现有 `run_scope`（同步 `run` 路径仍用）并存。**起 task 的能力（subprocess spawn / ECS RunTask）收进注入的 port，core 绝不 import boto3/ecs。** 具体 port 形状施工时定（本 ADR 不预铸接口签名，避免纸上定错）。
+`Engine.run_scope(job) → (WorkerHandle, Iterator[Event])` 是 **pull 式**（调用方线程迭代事件流；FargateEngine 为满足 `Iterator` 而在线程内轮询 DDB），**同步 `run` 路径仍用它、不变**。无状态路径是 **fire-and-forget**：worker 自写持久 sink、观察者补 `task_exited`、reconciler 读表——不再有「调用方持续迭代」。**实装形态**：`FargateEngine` 增出 `start_scope(job) → task_arn`（只 PutObject job + RunTask、不返事件迭代器）；`run_scope` 与 `start_scope` 共用抽出的 `_put_job_and_run_task`（起 task 单一真源）。**未改 `Engine` Protocol 本身**——`reconcile.Launcher` 是无状态路径专用的注入口（local=`SubprocessLauncher` 起子进程旁路落 SQLite / cloud=`CloudLauncher` 经 resolver 选 FargateEngine 调 `start_scope`），故 core 的 `reconcile.tick` 只认 `Launcher.launch(job)`、对「怎么起」无知，不必给 `Engine` Protocol 强加 `start_task`。**起 task 的能力（subprocess spawn / ECS RunTask）收进注入的 Launcher/Engine，core 绝不 import boto3/ecs**（reconcile.py 只 import core.model/ports/project）。
 
 ## 对 [0016](./0016-execution-architecture-core-lib-run-model.md) 的纠正：「核心不动」是过强断言
 
@@ -170,7 +170,7 @@ moto 立即返回测不到事件投递/并发时序，健康网真跑不触发�
 - **H2 延迟**：EventBridge→Lambda 投递 **0.6s**（近瞬时）；但端到端「worker 真停(`executionStoppedAt`)→可归约」= **~27s**，瓶颈全在 ECS 平台 `executionStoppedAt→stoppedAt` 清理开销（STOPPED 事件锚在 `stoppedAt`）。放大了 [0032](./0032-fargate-execution-environment.md) 记的 ~11s 平台滞后。**级联每步有 ~20-30s 固有尾延迟**——对异步跑批可接受，`status --wait` 会有此尾延迟，属已知特性。
 - **H3/机制三/四 并发写序（真 DDB）**：HWM 条件写——B 写终态(hwm=20)后 A 用旧快照(hwm=10)迟到写被 `ConditionalCheckFailedException` 挡、终态未被刷回 running；同 hwm 重复写幂等。**DDB Streams 并发度=2**（4 job 触发 2 个并发 Lambda 实例）→ 坐实「并发 reconciler」前提真实、HWM 条件写用得上；**同 PK 严格保序**（每 job seq `[1..5]` 按序到达）。
 
-**实测未覆盖（诚实标定）**：`status --wait` 断点续接力、`setsid` local 脱离真验、level Stream 偶发丢投/断链——留施工期真验（见下重议闸门）。
+**施工期已补真验（原「地基实测」时未覆盖的）**：`status --wait` 接力 + Stream 丢投 → **已真验**（禁用 kicker 的 runs-Stream mapping 确定性造卡 pending → status --wait invoke kicker kickoff → 救活 passed，见「重议闸门」丢投条）；`setsid` local 脱离 → **已真验**（local submit → per-run 进程脱离 CLI 后台推进 → CLI 退出后 status 读到 running/passed）；四机制 → core 单测（`test_reconcile.py`/`test_cloud_reconcile.py`/`test_project.py`）+ local/cloud 端到端真跑覆盖。仍留未做项见下「重议闸门」（如 level Stream 长期丢失率的量化、动态定时兜底规则）。
 
 ## 被拒方案（护栏，防未来重踩）
 

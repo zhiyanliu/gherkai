@@ -4,7 +4,8 @@
 `new` 出具体的引擎子进程 adapter 注入给 core、把 `RunResult` 渲染给人或 CI 看。
 WebUI 将来是另一张皮，**直接调 core、复用 `compose`**，不经本 cli。
 
-设计见 [ADR 0016](../docs/adr/0016-execution-architecture-core-lib-run-model.md)（执行架构 / 组合根注入）。
+设计见 [ADR 0016](../docs/adr/0016-execution-architecture-core-lib-run-model.md)（执行架构 / 组合根注入）；
+无状态跑批（`submit`/`status` 的「提交完就走 → 事件驱动推进 → 轮询收集」）见 [ADR 0034](../docs/adr/0034-detached-batch-reconciler.md)。
 
 ## 模块
 
@@ -66,6 +67,33 @@ scope/job 分组与 engine 路由符合预期、提前暴露 `PlanError`（uri �
 
 未标 `@engine` 的 scope 用 `--default-engine` 指定的默认引擎；标了 `@engine:` 的按 tag 走、不受此 flag 影响。
 
+## 无状态跑批：submit（提交完就走）+ status（轮询/接力收集）
+
+`run` 是同步阻塞（起 worker → 守着推进 → 跑完才退，CLI 全程在线）。`submit`/`status` 把这条拆成两截
+（提交完就走 → 事件驱动推进 → 事后轮询收集），CLI 不必守着：见 [ADR 0034](../docs/adr/0034-detached-batch-reconciler.md)。
+
+```bash
+cd cli
+
+# ── local：submit 立即返回 run_id（后台 per-run 进程推进），事后再来收 ──
+RUN_ID=$(uv run python -m cli submit ../features/wikipedia_generic.feature --max-concurrency 2)
+# submit 提交完就走：本机 fork 一个脱离 CLI 的 per-run 进程跑推进循环，CLI 打完 run_id 即退
+
+uv run python -m cli status "$RUN_ID"                # 查一次进度/结果（只读，不推进）
+uv run python -m cli status "$RUN_ID" --wait         # 轮询到终态才返回（per-run 进程崩了/慢了，本命令接力推进到底）
+uv run python -m cli status "$RUN_ID" --wait --json  # 同上，输出机器可读 RunState
+
+# ── cloud：submit 只把 definition 落 DDB，之后云端 Lambda 链推进（提交完真关机也跑完）──
+RUN_ID=$(uv run python -m cli submit ../features/wikipedia_generic.feature --backend cloud --prefix gherkai-)
+uv run python -m cli status "$RUN_ID" --backend cloud --prefix gherkai- --wait
+# cloud --wait 检测到卡住（连续几轮状态不变）才 invoke kicker Lambda 踢一脚接力，正常推进时不打扰
+```
+
+**为何拆**：`run` 要求 CLI 全程在线（网断/关机即中止）；`submit` 提交完就走——local 由脱离 CLI 的 per-run 进程推进、
+cloud 由云端 Lambda 事件驱动链推进（submit 机器零 ECS 权限、可立即关机）。`status` 事后查/收集：`--wait` 是三个推进触发源
+之一（人来查即接力），保证「推进即使中断、也能被查询者续到底」（ADR 0034）。`status` 的 `--backend`/`--report-dir`/`--prefix`
+须与提交时的 `submit` 一致（否则查不到）。
+
 ## 退出码
 
 - `0` —— RunResult 总状态 passed
@@ -73,6 +101,21 @@ scope/job 分组与 engine 路由符合预期、提前暴露 `PlanError`（uri �
 - `2` —— 没跑成：feature 读不到、plan 配置矛盾（PlanError）、参数非法（如 `--assertion-votes < 1`）、或无子命令；`--backend cloud` 还没开跑就被拒（缺 boto3、或 `--prefix` 拼出的表/桶/cluster/task-def 不存在·无权限·凭证/region 缺——运行前 preflight 点名 prefix fail-fast）
 
 > cloud 失败分层的切分线 = run 是否已真正开跑：起 worker 前的配置/可达问题退 `2`，跑到一半的云端故障退 `1`。
+
+### submit / status 的退出码分层（无状态跑批，ADR 0034）
+
+`submit` 与 `status` 各自的退出码衡量的是**不同的事**——`run` 一条命令里揉在一起的「提交 + 判定」被拆开了：
+
+- **`submit`：退出码 = 提交成功与否，不是 run 的判定。**
+  - `0` —— 已成功提交（local：per-run 进程已 fork、run_id 已打印；cloud：definition 已落 DDB，云端链接管）。
+  - `2` —— 没提交成：feature 读不到 / plan 配置矛盾（同 `run`）；cloud 还缺 boto3、或表/桶/cluster/events 表 preflight 不过、或 `create_run` 时云端不可达。
+  - 判定结果（PASSED / FAILED / …）**此刻还没出**，要用 `status` 去查。
+- **`status`：查询本身成功即 `0`；判定退出码只在读到终态时给出。**
+  - `0` —— run 达终态 `PASSED`；**或**未达终态（`pending`/`running`）时的一次查询（查到了就算成功，非 `--wait` 不评判）。
+  - `1` —— run 达终态但非 `PASSED`（`failed`/`error`/`skipped`/`aborted`）。配 `--wait` 时即「轮询到终态后按判定给退出码」——CI 想拿 `run` 那样的 0/1 判定码，用 `status --wait`。
+  - `2` —— 查不到该 run（`--report-dir`/`--prefix`/`--ddb-table` 与 `submit` 不一致？）；cloud 读 DDB 时云端不可达。
+
+> 一句话：`submit` 退出码答「提交成功了吗」，`status --wait` 退出码答「这个 run 判定过没过」（PASSED→`0` / 其余终态→`1`）——`run` 的 0/1 判定语义在拆分后落到了 `status --wait` 上。
 
 ## 输出：stdout = 数据 / stderr = 进度
 
@@ -109,6 +152,41 @@ scope/job 分组与 engine 路由符合预期、提前暴露 `PlanError`（uri �
 
 > `--backend cloud` 需 boto3（可选 extra，纯 local 不装）：`uv sync --extra aws`（或 `pip install cli[aws]`）。
 > cloud 下缺配置 / 缺 boto3 / 表桶预检失败 → 退出码 `2`；run 已开跑后 DynamoDB/S3 中途不可达 → 退出码 `1`。
+
+## 选项（`submit`）
+
+提交一批 feature 后台跑、立即返回 run_id（提交完就走，ADR 0034）。云端资源相关 flag（`--prefix`/`--ddb-table`/…）语义同 `run`，此处不复述、见上表。
+
+| flag | 默认 | 说明 |
+|---|---|---|
+| `features...` | — | 一个或多个 `.feature` 路径（位置参数） |
+| `--default-engine` | `novaact` | 未标 `@engine` 的 scope 用的默认引擎 |
+| `--assertion-votes` | `1` | AI 断言（`Then`）投票次数（默认 1=单次判定） |
+| `--max-concurrency` | `1` | 同时在跑的 worker 上限（local：喂给后台 per-run 推进进程） |
+| `--report-dir` | `reports` | [local] 归集报告落点；`status` 查时须给同一路径 |
+| `--backend {local,cloud}` | `local` | local=本机 per-run 进程推进；cloud=Fargate + 云端 Lambda 事件驱动链推进（提交完真关机也跑完） |
+| `--prefix` | `gherkai-` | [cloud] 资源名前缀（须与 CDK 部署一致）；`status` 查时须给同一 prefix。兜底 `AWS_RESOURCE_PREFIX` |
+| `--ddb-table` / `--s3-bucket` / `--events-table` / `--cluster` | `{prefix}…` | [cloud] 覆盖各 prefix 默认名（语义同 `run` 表） |
+| `--subnet` / `--security-group` | SSM | [cloud] Fargate 网络（可多次；不给则读 SSM，同 `run`） |
+| `--region` / `--profile` | — | AWS region/profile（喂 store + worker，同 `run`） |
+
+> `submit` 无 `--json`/`--quiet`/`--wait`——它只把 run_id 打到 stdout 就退；进度/结果留给 `status`（含 `--json`）。
+
+## 选项（`status`）
+
+查一个 run 的进度/结果（`--wait` 轮询到终态再返回）。`--backend`/`--report-dir`(local)/`--prefix`(cloud) 须与 `submit` 时一致，否则查不到（退 `2`）。
+
+| flag | 默认 | 说明 |
+|---|---|---|
+| `run_id` | — | `submit` 返回的 run_id（位置参数） |
+| `--backend {local,cloud}` | `local` | 须与 `submit` 一致 |
+| `--report-dir` | `reports` | [local] run 落点（须与 `submit` 一致） |
+| `--wait` | off | 轮询到 run 达终态再返回：local 本机接力 tick 推进；cloud 检测到卡住才 invoke kicker Lambda 踢一脚接力 |
+| `--max-concurrency` | `1` | [local `--wait`] 接力推进的并发上限 |
+| `--json` | off | 输出机器可读 RunState（不打人读的诊断提示） |
+| `--prefix` | `gherkai-` | [cloud] 资源名前缀（定位 DDB RunState + 推理 kicker Lambda 名）。兜底 `AWS_RESOURCE_PREFIX` |
+| `--ddb-table` | `{prefix}runs` | [cloud] RunStore DDB 表名（覆盖 prefix 默认）；兜底 `AWS_DDB_TABLE` |
+| `--region` / `--profile` | — | AWS region/profile |
 
 ### RunReport（每次 run 的应得产物，默认生成）
 

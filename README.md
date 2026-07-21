@@ -22,7 +22,9 @@
 
 > **承接 v0.x 顺延项（待真实业务系统）**：≥3 真实用例 QA 零代码验收 + 破例清单——当前用骨架用例（wikipedia/example.com）验证方向，真实系统验收顺延。
 
-> **v1.1 云端**：云端 store adapter（DynamoDB/S3）+ **执行面 Fargate/ECS 均已建成 + 真部署真跑**——`--backend cloud` 一个旋钮同时切「存储上云 + worker 跑 Fargate 容器」（`FargateEngine` adapter + `iac_aws_backend` CDK 工程，ADR 0032/0033）。配置与退出码分层见 [`cli/README.md`](./cli/README.md)。待做：无状态跑批（提交→轮询→脱离 run，ADR 0017）。
+> **v1.1 云端**：云端 store adapter（DynamoDB/S3）+ **执行面 Fargate/ECS 均已建成 + 真部署真跑**——`--backend cloud` 一个旋钮同时切「存储上云 + worker 跑 Fargate 容器」（`FargateEngine` adapter + `iac_aws_backend` CDK 工程，ADR 0032/0033）。配置与退出码分层见 [`cli/README.md`](./cli/README.md)。
+
+> **v1.2 无状态跑批**（已实装，ADR 0034）：`submit` 提交完就走、返回 run_id，`status [--wait]` 轮询/接力收集——CLI 不必守着 run。local 档起 per-run 后台进程（setsid 脱离 CLI）+ SQLite events 推进；cloud 档三 Lambda 事件驱动链（kicker 冷启动 / reconciler 主推进 / 退出观察者）由 DDB Stream + EventBridge 驱动，submit 机器权限收窄到「提交那一下」。同步 `run` 命令保留不变。
 
 ## 架构速览
 
@@ -30,7 +32,7 @@
 ① 用例层   features/*.feature              ← 共享 Gherkin（ADR 0005）
               │
 ② 核心库   core/（Python）：parse → scope 分组 → schedule 调度   ← 窄腰，零引擎依赖（ADR 0016）
-   前端    cli/（run / plan / list-engines）= 组合根，注入引擎
+   前端    cli/（run / submit / status / plan / list-engines）= 组合根，注入引擎
               │  对每个 scope spawn 一个薄 worker，讲协议（ADR 0024）
 ③ 执行层   Midscene worker(TS)  ┃  Nova Act worker(Python)   ← 两个独立 AI 引擎，平级
    大脑    Qwen3-VL@Bedrock     ┃  nova-act-latest
@@ -49,7 +51,7 @@
 ├── CONTEXT.md                 ← 领域术语表（glossary）
 ├── CLAUDE.md                  ← 项目约定（沟通/文档纪律/代码纪律/工作方式）——给 AI coding agent 与人
 ├── docs/                      ← 架构决策与过程记录
-│   ├── adr/                   ← 架构决策记录（0001–0033）
+│   ├── adr/                   ← 架构决策记录（0001–0034）
 │   ├── journey/               ← 任务推进 staging 区（过程产物，吸收进 ADR/code 后可清，见 CLAUDE.md）
 │   ├── REFERENCES.md          ← 外部一手来源
 │   └── {doc,code}-health-review.md  ← 文档/代码健康度复盘方法
@@ -102,7 +104,7 @@ AWS_REGION=us-east-1 uv run python -m cli run ../features/engine_routing.feature
 ```
 
 **默认 local**：落盘到 `cli/reports/<run_id>/`：判定真值（`jobs/`）+ 控制面（`run_meta.json`/`run_state.json`）+ RunReport（`index.html` 人看入口 + `manifest.json`）。
-**边跑边写**：run 开始即落 definition + 初始态，每个 scope 起跑刷 RUNNING、完成即落判定，最后 finalize 总状态——可「提交即返回 runId、之后轮询看进度」。详见 [`cli/README.md`](./cli/README.md)。
+**边跑边写**：run 开始即落 definition + 初始态，每个 scope 起跑刷 RUNNING、完成即落判定，最后 finalize 总状态——「提交即返回 runId、之后轮询看进度」已有真命令：`submit` 提交完就走、`status --wait` 轮询到终态（ADR 0034）。详见 [`cli/README.md`](./cli/README.md)。
 **先 `plan` 后 `run`**——run 真烧钱，plan 是纯本地预检。
 **`--backend cloud`**（可选）：把上面这套落到 DynamoDB（状态）+ S3（判定真值与报告）而非本地目录。表/桶需先用你的 IaC / `aws` cli 建好（框架假定已存在）；不给 `--ddb-table/--s3-bucket` 可用 `AWS_DDB_TABLE/AWS_S3_BUCKET` 兜底；凭证/region 走 boto3 默认链（可加 `--profile/--region`）。云端配置、退出码分层、建表建桶命令见 [`cli/README.md`](./cli/README.md)。
 

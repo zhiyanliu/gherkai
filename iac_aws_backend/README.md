@@ -1,17 +1,30 @@
 # iac_aws_backend
 
-`--backend cloud` 需要的全部 AWS 资源的 IaC（Python CDK）。设计决策见 [ADR 0033](../docs/adr/0033-iac-aws-backend-and-composition-wiring.md)。
+`--backend cloud` 需要的全部 AWS 资源的 IaC（Python CDK）。设计决策见 [ADR 0033](../docs/adr/0033-iac-aws-backend-and-composition-wiring.md)（资源装配）与 [ADR 0034](../docs/adr/0034-detached-batch-reconciler.md)（无状态跑批的事件驱动推进基建）。
 
 ## 建什么
 
 一套 CloudFormation stack（可按 prefix 多实例化，支持 prod-/stage- 多环境并存）：
 
-- **DynamoDB**：`{prefix}runs`（控制面/RunStore）+ `{prefix}events`（events-out，开 `expires_at` TTL）
+- **DynamoDB**：`{prefix}runs`（控制面/RunStore）+ `{prefix}events`（events-out，开 `expires_at` TTL）——**两表均开 DynamoDB Stream（`NEW_IMAGE`）**，作为无状态跑批事件驱动链的触发源（见下「事件驱动推进」，ADR 0034）
 - **S3**：`{prefix}artifacts`（判定结果 / 报告 / offload / job-in / 引擎产物，按 key 前缀分片）
 - **ECS**：`{prefix}cluster` + 2 个 Fargate task-def（`{prefix}novaact-worker` / `{prefix}midscene-worker`）
 - **ECR**：2 个 repo（各承一个 worker 镜像；镜像由 CI/手动 build & push，CDK 只建 repo）
 - **IAM**：每引擎一个最小权限 task role + 共享 execution role
 - **VPC + SSM**：worker 网络（subnet/sg）+ 把它们的 ID 写进 `/{prefix}backend/subnets`、`/{prefix}backend/security-groups`（cli 读）。**VPC 来源三档**（context）：`-c vpc_id=vpc-xxx` 复用现有 / `-c use_default_vpc=true` 用默认 VPC / 都不给则建新——**三档均走公有子网 + 零 NAT**（worker 只出不入，公有子网 + 公网 IP 出网即够；真私有隔离留 backlog，见 ADR 0033）。
+
+### 事件驱动推进（无状态跑批，ADR 0034）
+
+`submit` 提交完即走、进程不驻留，`run` 的推进改由云上事件链自我驱动（`_reconcile_lambdas`）。同步 `run` 路径不消费 Stream、仍走 Query 轮询，与此链解耦（ADR 0024）。
+
+- **三个 Lambda**（同一份打包 asset，`handler` 入口不同——见下「Lambda 打包」）：
+  - `{prefix}kicker`（踢启器）：`{prefix}runs` 表 Stream 的 **INSERT** 触发（`submit` 的 `create_run` 写 definition）→ 冷启动起首批 task；也被 cli `status --wait` 直接 invoke 做 kickoff。handler=`reconciler.kicker_handler`。
+  - `{prefix}reconciler`：`{prefix}events` 表 Stream 触发（worker `PutItem` 执行事件 / 退出观察者写 `task_exited`）→ `reconcile.tick` 推进 + finalize 聚合。handler=`reconciler.handler`。
+  - `{prefix}exit-observer`（退出观察者）：ECS Task `STOPPED` 事件触发 → 写 `task_exited` 事件（薄；只 events 表 `PutItem`）。handler=`exit_observer.handler`。
+  - kicker/reconciler 共享起 task 的全套权限与装配（`RunTask` / `PassRole` / 表桶读写 + `SUBNETS`/`SECURITY_GROUPS`/`MAX_CONCURRENCY`）；分工 = kicker「让 run 动起来」、reconciler「推着走」。
+- **EventBridge rule `{prefix}ecs-stopped`**：按 `source=aws.ecs` + `ECS Task State Change` + `lastStatus=STOPPED` + 本 cluster 的 `clusterArn` 过滤（不误触别的负载）→ 打到 `{prefix}exit-observer`。
+- **Event source mappings**：`{prefix}events` 表 Stream → reconciler；`{prefix}runs` 表 Stream → kicker（**带 `eventName=INSERT` filter**，只让 `create_run` 触发冷启动，reconciler 之后写 runs 表的 `MODIFY` 不自触发放大，见 ADR 0034 被拒方案）。
+- **Lambda 打包（`_build_lambda_asset`）**：三个 Lambda 共用一个 asset = `lambdas/`（handler）+ `core/core`（core 库）+ `cli/cli`（compose，reconciler 复用其 `build_fargate_engines` 单一真源）+ pip 装 `gherkin-official`（core 唯一非 boto3 依赖；boto3 由 runtime 自带、不打）。打到 `.lambda_build/`（gitignore，每次 synth 重建）。
 
 ## prefix 契约（关键）
 
