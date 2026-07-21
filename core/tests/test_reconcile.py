@@ -1,0 +1,127 @@
+"""reconciler tick 测试（ADR 0034 P3）：推进编排 + 幂等 + CAS 起 job + finalize。
+
+用真 SqliteEventLog + LocalRunStore + fake Launcher（记录被 launch 的 job，不起真进程）验证 tick 逻辑：
+- 首 tick 从全 pending 起首批（≤max_concurrency）；
+- worker 事件落 log 后 tick 推进态、起下一个；
+- 全部两件都要齐 → finalize；
+- 幂等：重复 tick 不重复 launch（CAS 挡）。
+纯编排逻辑（launch 被 fake）→ 绿即够；真进程脱离/SQLite 并发是 P3 后半的真跑边界。
+"""
+from __future__ import annotations
+
+from core.adapters.event_log import SqliteEventLog
+from core.adapters.run_store.local import LocalRunStore
+from core.model import Job, JobState, RunMeta, RunState, Scenario, Status, Step
+from core.reconcile import tick
+
+
+class FakeLauncher:
+    def __init__(self) -> None:
+        self.launched: list[str] = []
+
+    def launch(self, job: Job) -> None:
+        self.launched.append(job.scope_id)
+
+
+def _job(sid: str) -> Job:
+    return Job(scope_id=sid, scope_name=sid, engine="novaact",
+               scenarios=(Scenario(id=f"{sid}:1", name="s", steps=(Step(0, "Given", "x"),)),))
+
+
+def _meta(*sids: str) -> RunMeta:
+    return RunMeta(run_id="run-1", created_at="t0", jobs=tuple(_job(s) for s in sids))
+
+
+def _setup(tmp_path, *sids: str):
+    meta = _meta(*sids)
+    log = SqliteEventLog(tmp_path / "e.db")
+    store = LocalRunStore(tmp_path)
+    initial = RunState(run_id="run-1", status=Status.PENDING,
+                       jobs={s: JobState(s, Status.PENDING) for s in sids},
+                       started_at="t0", high_water_mark=0)
+    store.create_run(meta, initial)
+    return meta, log, store
+
+
+def _done_events(log, sid, base=1):
+    """给某 scope 落「跑完 passed + 干净退出」的完整事件序列。"""
+    log.append_event(sid, base, f'{{"type":"scope_started","scopeId":"{sid}","sessionId":"s"}}', 1.0)
+    log.append_event(sid, base + 1, f'{{"type":"scenario_done","scenarioId":"{sid}:1","status":"passed"}}', 2.0)
+    log.append_event(sid, base + 2, f'{{"type":"scope_done","scopeId":"{sid}"}}', 3.0)
+    log.record_exit(sid, 0)
+
+
+def test_first_tick_starts_up_to_concurrency(tmp_path):
+    meta, log, store = _setup(tmp_path, "a", "b", "c")
+    launcher = FakeLauncher()
+    done = tick("run-1", meta, log, store, launcher, max_concurrency=2, now_iso="t1")
+    assert done is False
+    assert len(launcher.launched) == 2  # 起首批 2 个
+    # 被 claim 的两个在 RunStore 里是 running
+    state = store.load_run_state("run-1")
+    running = [s for s, js in state.jobs.items() if js.status == Status.RUNNING]
+    assert len(running) == 2
+
+
+def test_tick_idempotent_no_double_launch(tmp_path):
+    """重复 tick 不重复 launch（CAS 挡已 running，机制四）。"""
+    meta, log, store = _setup(tmp_path, "a", "b")
+    launcher = FakeLauncher()
+    tick("run-1", meta, log, store, launcher, max_concurrency=2, now_iso="t1")
+    n1 = len(launcher.launched)
+    tick("run-1", meta, log, store, launcher, max_concurrency=2, now_iso="t1")  # 再 tick
+    assert len(launcher.launched) == n1  # 没多起（a/b 已 running）
+
+
+def test_tick_starts_next_after_completion(tmp_path):
+    """一个 job 完成（两件都要齐）后，tick 腾出并发位、起下一个 pending。"""
+    meta, log, store = _setup(tmp_path, "a", "b", "c")
+    launcher = FakeLauncher()
+    tick("run-1", meta, log, store, launcher, max_concurrency=2, now_iso="t1")  # 起 a,b
+    # a 跑完
+    _done_events(log, "a")
+    tick("run-1", meta, log, store, launcher, max_concurrency=2, now_iso="t2")
+    # a 完成腾位 → c 被起
+    assert "c" in launcher.launched
+    state = store.load_run_state("run-1")
+    assert state.jobs["a"].status == Status.PASSED
+
+
+def test_tick_finalizes_when_all_done(tmp_path):
+    """全部 job 两件都要齐 → tick 返回 True 且 RunStore finalize 成终态。"""
+    meta, log, store = _setup(tmp_path, "a")
+    launcher = FakeLauncher()
+    tick("run-1", meta, log, store, launcher, max_concurrency=2, now_iso="t1")  # 起 a
+    _done_events(log, "a")
+    done = tick("run-1", meta, log, store, launcher, max_concurrency=2, now_iso="t2")
+    assert done is True
+    state = store.load_run_state("run-1")
+    assert state.status == Status.PASSED
+    assert state.ended_at == "t2"
+
+
+def test_tick_nonzero_exit_finalizes_error(tmp_path):
+    """job 非0退出（机制二）→ 该 job error → run finalize 为 error。"""
+    meta, log, store = _setup(tmp_path, "a")
+    launcher = FakeLauncher()
+    tick("run-1", meta, log, store, launcher, max_concurrency=2, now_iso="t1")
+    # 内容 passed 但进程非干净退出
+    log.append_event("a", 1, '{"type":"scope_started","scopeId":"a","sessionId":"s"}', 1.0)
+    log.append_event("a", 2, '{"type":"scenario_done","scenarioId":"a:1","status":"passed"}', 2.0)
+    log.append_event("a", 3, '{"type":"scope_done","scopeId":"a"}', 3.0)
+    log.record_exit("a", 1)  # 非0
+    done = tick("run-1", meta, log, store, launcher, max_concurrency=2, now_iso="t2")
+    assert done is True
+    assert store.load_run_state("run-1").status == Status.ERROR
+
+
+def test_double_finalize_idempotent(tmp_path):
+    """两个 tick 都见全终态、都想 finalize → 只 commit 一次（机制三），第二个返回 False。"""
+    meta, log, store = _setup(tmp_path, "a")
+    launcher = FakeLauncher()
+    tick("run-1", meta, log, store, launcher, max_concurrency=2, now_iso="t1")
+    _done_events(log, "a")
+    d1 = tick("run-1", meta, log, store, launcher, max_concurrency=2, now_iso="t2")
+    d2 = tick("run-1", meta, log, store, launcher, max_concurrency=2, now_iso="t3")
+    assert d1 is True and d2 is False  # 第二次 finalize 被状态机单调挡
+    assert store.load_run_state("run-1").ended_at == "t2"  # 仍是首次的

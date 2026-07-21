@@ -149,19 +149,32 @@ class DynamoDBRunStore:
             return False
 
     def project_state(self, run_id: str, state: RunState) -> bool:
-        """HWM 条件写整个 STATE：仅当传入 hwm ≥ 库中 hwm 才写（机制三，挡 stale 覆盖）。CCF → stale → False。"""
+        """HWM 条件写整个 STATE：仅当 (传入 hwm ≥ 库中 hwm) 且 (库中未 finalize) 才写（机制三）。CCF → stale/已终态 → False。
+
+        **run 级 status 钳为 running/pending、不落终态**（ADR 0030：终态是 finalize 专属；投影提前落终态会挡住
+        try_finalize）。各 job 态是真实态、只 run 级钳。条件双守：HWM 挡 stale + status 挡「已 finalize 被刷回」。"""
         new_hwm = state.high_water_mark or 0
+        run_status = Status.PENDING.value if state.status == Status.PENDING else Status.RUNNING.value
+        scalars = _state_scalars(state)
+        scalars["status"] = run_status  # 覆盖为钳后的运行态（_state_scalars 里是 project 聚合终态，此处压回 running）
         try:
             self._table.put_item(
                 Item={
                     "run_id": run_id,
                     _ITEM_TYPE_ATTR: _STATE,
-                    **_state_scalars(state),
+                    **scalars,
                     "jobs": {sid: _job_state_to_item(js) for sid, js in state.jobs.items()},
                 },
-                # 库中无 hwm（首次/旧态）或 库中 hwm ≤ 我的 → 允许写；否则（我 stale）CCF
-                ConditionExpression="attribute_not_exists(high_water_mark) OR high_water_mark <= :h",
-                ExpressionAttributeValues={":h": new_hwm},
+                # (STATE 首次不存在) 或 ((库中无 hwm 或 hwm ≤ 我的) 且 库中 status 仍非终态) → 允许写；否则 CCF（stale / 已 finalize）
+                ConditionExpression=(
+                    "attribute_not_exists(run_id) OR "
+                    "((attribute_not_exists(high_water_mark) OR high_water_mark <= :h) "
+                    "AND #st IN (:pending, :running))"
+                ),
+                ExpressionAttributeNames={"#st": "status"},
+                ExpressionAttributeValues={
+                    ":h": new_hwm, ":pending": Status.PENDING.value, ":running": Status.RUNNING.value,
+                },
             )
             return True
         except self._table.meta.client.exceptions.ConditionalCheckFailedException:

@@ -148,13 +148,22 @@ class LocalRunStore:
         return self._locked_rmw(run_id, mutate)
 
     def project_state(self, run_id: str, state: RunState) -> bool:
-        """HWM 条件写整个 RunState：仅当传入 hwm ≥ 库中 hwm 才写（机制三，挡 stale 覆盖）。"""
+        """HWM 条件写整个 RunState：仅当传入 hwm ≥ 库中 hwm 才写（机制三，挡 stale 覆盖）。
+
+        **run 级 status 钳为 RUNNING、不落终态**（ADR 0030：run 级终态是 finalize 的 commit point 专属；
+        若投影提前落终态，try_finalize 会被自己刚写的终态挡住）。各 job 态是真实态（含终态），只 run 级钳。
+        已 finalize（库中 status 已终态）→ 挡（不把终态刷回 running）。"""
         def mutate(cur: RunState):
             cur_hwm = cur.high_water_mark or 0
             new_hwm = state.high_water_mark or 0
             if new_hwm < cur_hwm:
                 return None  # stale：读到的 events 比库里记录的少 → 挡
-            return state  # 整体覆盖（reconciler 全量重放算出的完整 state）
+            if cur.status not in (Status.PENDING, Status.RUNNING):
+                return None  # 已 finalize 终态：不被投影刷回（机制三 finalize 单调的对偶保护）
+            run_status = Status.PENDING if state.status == Status.PENDING else Status.RUNNING
+            return RunState(run_id=state.run_id, status=run_status, jobs=state.jobs,
+                            started_at=state.started_at or cur.started_at,
+                            ended_at=state.ended_at, high_water_mark=state.high_water_mark)
         return self._locked_rmw(run_id, mutate)
 
     def try_finalize(self, run_id: str, status: Status, ended_at: str) -> bool:

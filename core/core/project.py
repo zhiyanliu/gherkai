@@ -162,8 +162,13 @@ class EventRecord:
     exited: TaskExited | None = None  # 仅 kind='exit'
 
 
-def project(meta: RunMeta, records: list[EventRecord]) -> RunState:
+def project(meta: RunMeta, records: list[EventRecord], baseline: RunState | None = None) -> RunState:
     """从某 run 的**全量 events records** 纯推演出 RunState（ADR 0034 reconciler 核心，无 I/O）。
+
+    baseline（可选，当前 RunStore 的 state）：job 态**单调不倒退**的基线。已被 CAS claim 成 RUNNING、但
+    worker 还没吐 scope_started 的 job，events 里看不到它、会被算成 PENDING——若无基线，投影写会把它降回
+    PENDING、reconciler 下轮又重复 claim/launch（真 bug）。故有基线时：job 的投影态与基线态取**较推进者**
+    （pending<running<终态，单调）——events 只推进、claim 的 running 不被降回。无基线（首 tick/纯投影）时全 PENDING 起。
 
     全量重放（非增量）→ 天然幂等、抗乱序、抗重投（ADR 0034 机制三前提）。步骤：
     1. 按 scope_id 分组 records；每组内 kind='event' 的按 seq 升序喂 reduce_event 归约出 JobResult；
@@ -181,9 +186,12 @@ def project(meta: RunMeta, records: list[EventRecord]) -> RunState:
 
     jobs_state: dict[str, JobState] = {}
     hwm = 0
-    # 先给 definition 里每个 job 一个 PENDING 占位（没有任何 record 的 job = 还没起，PENDING）
+    # 占位：有 baseline 用基线态（保留已 claim 的 running——见 docstring），否则 PENDING。
+    base_jobs = baseline.jobs if baseline is not None else {}
     for job in meta.jobs:
-        jobs_state[job.scope_id] = JobState(scope_id=job.scope_id, status=Status.PENDING)
+        base = base_jobs.get(job.scope_id)
+        jobs_state[job.scope_id] = base if base is not None else JobState(
+            scope_id=job.scope_id, status=Status.PENDING)
     job_by_scope: dict[str, Job] = {j.scope_id: j for j in meta.jobs}
 
     for scope_id, recs in by_scope.items():
@@ -213,8 +221,14 @@ def project(meta: RunMeta, records: list[EventRecord]) -> RunState:
         exited = exits[0] if exits else None
 
         status = _job_status(saw_scope_started, saw_scope_done, exited, scenario_status)
+        # 单调合并（不倒退）：events 算出的态与基线态取较推进者。防「已 claim running 但 events 未到」被降回
+        # pending（否则 reconciler 重复 launch，见 test_tick_idempotent）。终态一旦达成不被 running 覆盖。
+        prior = jobs_state.get(scope_id)
+        if prior is not None and _lifecycle_rank(prior.status) > _lifecycle_rank(status):
+            status = prior.status
         jobs_state[scope_id] = JobState(
-            scope_id=scope_id, status=status, session_id=result.session_id,
+            scope_id=scope_id, status=status,
+            session_id=result.session_id or (prior.session_id if prior else None),
         )
 
     run_status = _aggregate([js.status for js in jobs_state.values()])
@@ -250,6 +264,19 @@ def _job_status(
     if exited.exit_code != 0:
         return Status.ERROR  # 进程非干净终止：即使内容完整也判 error（防"发完 scope_done 又非0退出"误报）
     return _aggregate(list(scenario_status.values()))
+
+
+def _lifecycle_rank(status: Status) -> int:
+    """生命周期推进序（ADR 0034，仅用于 project 的单调合并、防态倒退）：pending < running < 任何终态。
+
+    与 severity（ADR 0031，比较终态严重度）正交——这里只关心「推进到哪个阶段」，故所有终态同 rank=2
+    （谁先到终态谁算数、不再被 running 覆盖；终态之间的选择由「两件都要」谓词一次定，不在此比较）。
+    """
+    if status == Status.PENDING:
+        return 0
+    if status == Status.RUNNING:
+        return 1
+    return 2  # 任何终态（passed/failed/error/skipped/aborted）
 
 
 def _aggregate(statuses: list[Status]) -> Status:
