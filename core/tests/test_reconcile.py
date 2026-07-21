@@ -116,12 +116,15 @@ def test_tick_nonzero_exit_finalizes_error(tmp_path):
 
 
 def test_double_finalize_idempotent(tmp_path):
-    """两个 tick 都见全终态、都想 finalize → 只 commit 一次（机制三），第二个返回 False。"""
+    """两个 tick 都见全终态：都返回 done=True（run 确已达终态），但 commit 只一次（机制三，ended_at 仍首次）。
+
+    关键：第二个 tick 也返回 True——不能因「别人抢先 finalize」让接力推进者（status --wait）永远等不到 done
+    （P3b-2 真跑 status --wait 死循环复现的修正）。commit 恰一次由 try_finalize 状态机单调条件写保证。"""
     meta, log, store = _setup(tmp_path, "a")
     launcher = FakeLauncher()
     tick("run-1", meta, log, store, launcher, max_concurrency=2, now_iso="t1")
     _done_events(log, "a")
     d1 = tick("run-1", meta, log, store, launcher, max_concurrency=2, now_iso="t2")
     d2 = tick("run-1", meta, log, store, launcher, max_concurrency=2, now_iso="t3")
-    assert d1 is True and d2 is False  # 第二次 finalize 被状态机单调挡
-    assert store.load_run_state("run-1").ended_at == "t2"  # 仍是首次的
+    assert d1 is True and d2 is True  # 两个都见 run 达终态 → 都 done（接力者不被"别人已 finalize"卡死）
+    assert store.load_run_state("run-1").ended_at == "t2"  # commit 仍恰一次（首次的 t2，未被 t3 覆盖）

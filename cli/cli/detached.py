@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import threading
 import time
+from pathlib import Path
 
 from core.adapters.event_log import SqliteEventLog
 from core.adapters.run_store.local import LocalRunStore
@@ -103,3 +104,53 @@ def run_reconcile_loop(
         if done:
             return
         time.sleep(poll_interval_s)
+
+
+# ============================================================================
+# per-run 进程：从 run_id + 本地落点重建装配、跑 reconcile loop（submit setsid fork 它）
+# ============================================================================
+
+
+def _paths(report_dir: str, run_id: str):
+    """local 无状态跑批的落点：events SQLite 与 RunStore/ResultStore 同在 <report_dir>/<run_id>/。"""
+    root = Path(report_dir)
+    return root, root / run_id / "events.db"
+
+
+def build_local_reconcile(repo, report_dir: str, run_id: str, max_concurrency: int,
+                          region: str | None = None, profile: str | None = None):
+    """从本地落点重建 per-run reconcile 所需的全部（meta 从 RunStore 读回、log/store/launcher 重建）。
+
+    per-run 进程自包含、不依赖父进程内存（fork 后父可退）：definition 已由 submit 的 create_run 落 RunStore，
+    这里 load_run_meta 读回；SqliteEventLog/LocalRunStore 都是文件路径，从 report_dir+run_id 重建即同一份。
+    返回 (meta, log, store, launcher, max_concurrency) 供 run_reconcile_loop。
+    """
+    from cli import compose
+
+    root, db_path = _paths(report_dir, run_id)
+    store = LocalRunStore(root)
+    meta = store.load_run_meta(run_id)
+    if meta is None:
+        raise FileNotFoundError(f"per-run reconcile：run_meta 不存在（submit 未落库？）：{run_id}")
+    log = SqliteEventLog(db_path)
+    # 产物落点 env 注入（同步 run 路径的 build_engines 一致）：nova/midscene 产物落 <report_dir>/<run_id>/ 下。
+    nova_logs_dir = root / run_id / "nova-trajectories"
+    midscene_run_dir = root / run_id / "midscene-run"
+    engines = compose.build_engines(
+        repo, nova_logs_dir=nova_logs_dir, midscene_run_dir=midscene_run_dir,
+        region=region, profile=profile,
+    )
+    resolver = compose.make_resolver(engines)
+    launcher = SubprocessLauncher(resolver, log)
+    return meta, log, store, launcher, max_concurrency
+
+
+def render_run_state(state) -> str:
+    """status 命令的 RunState 人读渲染（轻量；权威判定明细读 jobs/*.json / --json）。"""
+    lines = [f"run {state.run_id}: {state.status.value}"]
+    for sid, js in state.jobs.items():
+        sess = f"  session={js.session_id}" if js.session_id else ""
+        lines.append(f"  - {sid}: {js.status.value}{sess}")
+    if state.ended_at:
+        lines.append(f"ended_at={state.ended_at}")
+    return "\n".join(lines)

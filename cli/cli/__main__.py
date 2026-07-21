@@ -122,6 +122,34 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     pl.add_argument("--json", action="store_true", help="输出机器可读 JSON（scope/job 分组）")
 
+    # ---- 无状态跑批（ADR 0034）：submit 提交完就走 / status 轮询收集 ----
+    # local 档：submit setsid fork 一个 per-run 进程跑 reconcile loop（本机推进，无需常驻），CLI 立即退出。
+    sm = sub.add_parser("submit", help="[无状态跑批] 提交一批 .feature 到后台跑、立即返回 run_id（提交完就走）")
+    sm.add_argument("features", nargs="+", type=Path, help="一个或多个 .feature 路径")
+    sm.add_argument("--default-engine", default="novaact", help="未标 @engine 的 scope 用的默认引擎")
+    sm.add_argument("--assertion-votes", type=int, default=1, metavar="N", help="AI 断言投票次数（默认 1）")
+    sm.add_argument("--max-concurrency", type=int, default=1, help="同时在跑的 worker 上限（默认 1）")
+    sm.add_argument("--report-dir", default="reports", metavar="DIR", help="归集报告落点（默认 reports/）")
+    sm.add_argument("--region", default=None, metavar="R", help="AWS region（喂 worker）")
+    sm.add_argument("--profile", default=None, metavar="P", help="AWS profile（喂 subprocess worker）")
+
+    st = sub.add_parser("status", help="[无状态跑批] 查一个 run 的进度/结果（--wait 轮询到完成）")
+    st.add_argument("run_id", help="submit 返回的 run_id")
+    st.add_argument("--report-dir", default="reports", metavar="DIR", help="run 落点（须与 submit 一致）")
+    st.add_argument("--wait", action="store_true", help="轮询到 run 达终态再返回（接力推进：per-run 进程崩了也能续）")
+    st.add_argument("--max-concurrency", type=int, default=1, help="[--wait] 接力推进时的并发上限（默认 1）")
+    st.add_argument("--json", action="store_true", help="输出机器可读 JSON（RunState）")
+    st.add_argument("--region", default=None, metavar="R")
+    st.add_argument("--profile", default=None, metavar="P")
+
+    # _reconcile：per-run 进程入口（submit setsid fork 它，非用户直接调）。跑 reconcile loop 到全 done。
+    rc = sub.add_parser("_reconcile", help=argparse.SUPPRESS)
+    rc.add_argument("run_id")
+    rc.add_argument("--report-dir", default="reports")
+    rc.add_argument("--max-concurrency", type=int, default=1)
+    rc.add_argument("--region", default=None)
+    rc.add_argument("--profile", default=None)
+
     sub.add_parser("list-engines", help="列出可用引擎及其 spawn 命令")
     return p
 
@@ -225,6 +253,100 @@ def _is_botocore_error(exc: BaseException) -> bool:
     except ImportError:  # pragma: no cover
         return False
     return isinstance(exc, (BotoCoreError, ClientError))
+
+
+def _cmd_submit(args, repo: Path) -> int:
+    """[无状态跑批 local] 提交完就走（ADR 0034）：plan → 写 RunMeta+全 pending → setsid fork per-run 进程
+    跑 reconcile loop → 打印 run_id → 立即退出（退出码=提交成功与否，非 run 判定）。
+
+    per-run 进程本机推进（无需常驻服务/云）；它崩了 `status --wait` 可接力（状态全持久、tick 幂等）。
+    """
+    import subprocess as _sp
+    from core.adapters.event_log import SqliteEventLog
+    from cli import detached
+
+    jobs = _load_and_plan(args, repo)
+    if isinstance(jobs, int):
+        return jobs
+    _progress(f"plan: {len(jobs)} job(s)  (default_engine={args.default_engine})")
+
+    run_id = compose.new_run_id()
+    run_meta = RunMeta(run_id=run_id, created_at=compose.now_iso(), jobs=tuple(jobs))
+    report_root = Path(args.report_dir).resolve()
+
+    # 写 definition + 初始全 pending（RunStore），并建 events SQLite（per-run 进程 + status 共用同一落点）。
+    run_store, _result_store, _report_store, _mk = compose.build_local_stores(report_dir=str(report_root))
+    from core.model import JobState, RunState
+    initial = RunState(
+        run_id=run_id, status=Status.PENDING,
+        jobs={j.scope_id: JobState(scope_id=j.scope_id, status=Status.PENDING) for j in jobs},
+        started_at=compose.now_iso(), high_water_mark=0,
+    )
+    run_store.create_run(run_meta, initial)
+    SqliteEventLog(report_root / run_id / "events.db")  # 建库（schema），per-run/status 共用
+
+    # setsid fork per-run 进程（start_new_session=True = 脱离 CLI 进程组，CLI 退出不带走它，ADR 0034）。
+    cmd = [
+        sys.executable, "-m", "cli", "_reconcile", run_id,
+        "--report-dir", str(report_root), "--max-concurrency", str(args.max_concurrency),
+    ]
+    if args.region:
+        cmd += ["--region", args.region]
+    if args.profile:
+        cmd += ["--profile", args.profile]
+    _sp.Popen(cmd, cwd=str(repo), start_new_session=True,
+              stdin=_sp.DEVNULL, stdout=_sp.DEVNULL, stderr=_sp.DEVNULL)
+
+    _progress(f"已提交（后台推进中，提交完即返回）。查进度：gherkai status {run_id} --report-dir {args.report_dir}")
+    print(run_id)  # stdout：run_id 作核心产出（脚本可捕获）
+    return 0
+
+
+def _cmd_status(args, repo: Path) -> int:
+    """[无状态跑批] 查 run 进度/结果。默认读一次 RunState 渲染；--wait 则接力 tick 到终态（ADR 0034 三触发源之一）。"""
+    from cli import detached
+
+    report_root = Path(args.report_dir).resolve()
+    run_store, _rs, _rp, _mk = compose.build_local_stores(report_dir=str(report_root))
+
+    if args.wait:
+        # 接力推进：per-run 进程崩了/慢了，人来查即自己 tick 到终态（状态全持久、tick 幂等，断点续）。
+        meta, log, store, launcher, mc = detached.build_local_reconcile(
+            repo, str(report_root), args.run_id, args.max_concurrency,
+            region=args.region, profile=args.profile,
+        )
+        detached.run_reconcile_loop(args.run_id, meta, log, store, launcher, mc,
+                                    poll_interval_s=0.5, now_iso_fn=compose.now_iso)
+
+    state = run_store.load_run_state(args.run_id)
+    if state is None:
+        _progress(f"未找到 run：{args.run_id}（--report-dir 是否与 submit 一致？）")
+        return 2
+    if args.json:
+        from core.serialize import run_state_to_dict
+        print(json.dumps(run_state_to_dict(state), ensure_ascii=False, indent=2))
+    else:
+        print(detached.render_run_state(state))
+    # 退出码：达终态按判定（PASSED→0 / 其余→1）；未达终态（还在跑，非 --wait）→ 0（提交/查询本身成功）
+    if state.status == Status.PASSED:
+        return 0
+    if state.status in (Status.PENDING, Status.RUNNING):
+        return 0
+    return 1
+
+
+def _cmd_reconcile(args, repo: Path) -> int:
+    """per-run 进程入口（submit setsid fork 它，非用户直接调）：跑 reconcile loop 到全 done 自退（ADR 0034）。"""
+    from cli import detached
+
+    report_root = Path(args.report_dir).resolve()
+    meta, log, store, launcher, mc = detached.build_local_reconcile(
+        repo, str(report_root), args.run_id, args.max_concurrency,
+        region=args.region, profile=args.profile,
+    )
+    detached.run_reconcile_loop(args.run_id, meta, log, store, launcher, mc,
+                                poll_interval_s=0.5, now_iso_fn=compose.now_iso)
+    return 0
 
 
 def _cmd_run(args, repo: Path) -> int:
@@ -480,6 +602,12 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_plan(args, repo)
     if args.command == "run":
         return _cmd_run(args, repo)
+    if args.command == "submit":
+        return _cmd_submit(args, repo)
+    if args.command == "status":
+        return _cmd_status(args, repo)
+    if args.command == "_reconcile":
+        return _cmd_reconcile(args, repo)
 
     # 无子命令 → 打帮助
     parser.print_help()
