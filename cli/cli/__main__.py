@@ -132,13 +132,26 @@ def _build_parser() -> argparse.ArgumentParser:
     sm.add_argument("--report-dir", default="reports", metavar="DIR", help="归集报告落点（默认 reports/）")
     sm.add_argument("--region", default=None, metavar="R", help="AWS region（喂 worker）")
     sm.add_argument("--profile", default=None, metavar="P", help="AWS profile（喂 subprocess worker）")
+    # backend：local（默认，per-run 进程本机推进）/ cloud（Fargate + 云端 Lambda 事件驱动链推进，ADR 0034）。
+    sm.add_argument("--backend", choices=["local", "cloud"], default="local",
+                    help="local=本机 per-run 进程推进（默认）；cloud=Fargate + 云端 Lambda 事件驱动链推进（提交完真关机也跑完）")
+    sm.add_argument("--prefix", default=None, metavar="P", help="[cloud] 资源名前缀（默认 gherkai-；须与 CDK 一致）")
+    sm.add_argument("--ddb-table", default=None, metavar="NAME", help="[cloud] RunStore DDB 表名")
+    sm.add_argument("--s3-bucket", default=None, metavar="NAME", help="[cloud] S3 桶名")
+    sm.add_argument("--events-table", default=None, metavar="NAME", help="[cloud] events DDB 表名")
+    sm.add_argument("--cluster", default=None, metavar="NAME", help="[cloud] ECS cluster 名")
+    sm.add_argument("--subnet", action="append", default=None, metavar="ID", help="[cloud] Fargate 子网 ID")
+    sm.add_argument("--security-group", action="append", default=None, metavar="ID", help="[cloud] Fargate 安全组 ID")
 
     st = sub.add_parser("status", help="[无状态跑批] 查一个 run 的进度/结果（--wait 轮询到完成）")
     st.add_argument("run_id", help="submit 返回的 run_id")
-    st.add_argument("--report-dir", default="reports", metavar="DIR", help="run 落点（须与 submit 一致）")
-    st.add_argument("--wait", action="store_true", help="轮询到 run 达终态再返回（接力推进：per-run 进程崩了也能续）")
-    st.add_argument("--max-concurrency", type=int, default=1, help="[--wait] 接力推进时的并发上限（默认 1）")
+    st.add_argument("--backend", choices=["local", "cloud"], default="local", help="须与 submit 一致")
+    st.add_argument("--report-dir", default="reports", metavar="DIR", help="[local] run 落点（须与 submit 一致）")
+    st.add_argument("--wait", action="store_true", help="[local] 轮询到 run 达终态再返回（接力推进）")
+    st.add_argument("--max-concurrency", type=int, default=1, help="[local --wait] 接力推进并发上限")
     st.add_argument("--json", action="store_true", help="输出机器可读 JSON（RunState）")
+    st.add_argument("--prefix", default=None, metavar="P", help="[cloud] 资源名前缀（读 DDB RunState）")
+    st.add_argument("--ddb-table", default=None, metavar="NAME", help="[cloud] RunStore DDB 表名")
     st.add_argument("--region", default=None, metavar="R")
     st.add_argument("--profile", default=None, metavar="P")
 
@@ -256,15 +269,13 @@ def _is_botocore_error(exc: BaseException) -> bool:
 
 
 def _cmd_submit(args, repo: Path) -> int:
-    """[无状态跑批 local] 提交完就走（ADR 0034）：plan → 写 RunMeta+全 pending → setsid fork per-run 进程
-    跑 reconcile loop → 打印 run_id → 立即退出（退出码=提交成功与否，非 run 判定）。
+    """[无状态跑批] 提交完就走（ADR 0034）：plan → 写 RunMeta+全 pending → 起首轮推进 → 打印 run_id → 立即退出。
 
-    per-run 进程本机推进（无需常驻服务/云）；它崩了 `status --wait` 可接力（状态全持久、tick 幂等）。
+    - **local**：setsid fork per-run 进程跑 reconcile loop 本机推进（无需常驻服务/云）；崩了 status --wait 接力。
+    - **cloud**：create_run 到 DDB + 首批 RunTask 起 Fargate task（踢首轮）→ 之后云端 Lambda 事件驱动链推进
+      （ECS STOPPED→退出观察者→task_exited→Stream→reconciler），**提交完真关机也跑完**。CLI 不留本机进程。
+    退出码 = 提交成功与否（非 run 判定；判定由 status 查）。
     """
-    import subprocess as _sp
-    from core.adapters.event_log import SqliteEventLog
-    from cli import detached
-
     jobs = _load_and_plan(args, repo)
     if isinstance(jobs, int):
         return jobs
@@ -272,39 +283,123 @@ def _cmd_submit(args, repo: Path) -> int:
 
     run_id = compose.new_run_id()
     run_meta = RunMeta(run_id=run_id, created_at=compose.now_iso(), jobs=tuple(jobs))
-    report_root = Path(args.report_dir).resolve()
-
-    # 写 definition + 初始全 pending（RunStore），并建 events SQLite（per-run 进程 + status 共用同一落点）。
-    run_store, _result_store, _report_store, _mk = compose.build_local_stores(report_dir=str(report_root))
     from core.model import JobState, RunState
     initial = RunState(
         run_id=run_id, status=Status.PENDING,
         jobs={j.scope_id: JobState(scope_id=j.scope_id, status=Status.PENDING) for j in jobs},
         started_at=compose.now_iso(), high_water_mark=0,
     )
+
+    if args.backend == "cloud":
+        return _submit_cloud(args, repo, run_id, run_meta, initial)
+    return _submit_local(args, repo, run_id, run_meta, initial)
+
+
+def _submit_local(args, repo: Path, run_id: str, run_meta, initial) -> int:
+    """local submit：create_run（文件）+ 建 events SQLite + setsid fork per-run 进程推进。"""
+    import subprocess as _sp
+    from core.adapters.event_log import SqliteEventLog
+
+    report_root = Path(args.report_dir).resolve()
+    run_store, _rs, _rp, _mk = compose.build_local_stores(report_dir=str(report_root))
     run_store.create_run(run_meta, initial)
     SqliteEventLog(report_root / run_id / "events.db")  # 建库（schema），per-run/status 共用
 
     # setsid fork per-run 进程（start_new_session=True = 脱离 CLI 进程组，CLI 退出不带走它，ADR 0034）。
-    cmd = [
-        sys.executable, "-m", "cli", "_reconcile", run_id,
-        "--report-dir", str(report_root), "--max-concurrency", str(args.max_concurrency),
-    ]
+    cmd = [sys.executable, "-m", "cli", "_reconcile", run_id,
+           "--report-dir", str(report_root), "--max-concurrency", str(args.max_concurrency)]
     if args.region:
         cmd += ["--region", args.region]
     if args.profile:
         cmd += ["--profile", args.profile]
     _sp.Popen(cmd, cwd=str(repo), start_new_session=True,
               stdin=_sp.DEVNULL, stdout=_sp.DEVNULL, stderr=_sp.DEVNULL)
+    _progress(f"已提交（本机后台推进中）。查进度：gherkai status {run_id} --report-dir {args.report_dir}")
+    print(run_id)
+    return 0
 
-    _progress(f"已提交（后台推进中，提交完即返回）。查进度：gherkai status {run_id} --report-dir {args.report_dir}")
-    print(run_id)  # stdout：run_id 作核心产出（脚本可捕获）
+
+def _submit_cloud(args, repo: Path, run_id: str, run_meta, initial) -> int:
+    """cloud submit：create_run 到 DDB + 首批 RunTask 踢首轮 → 云端 Lambda 事件驱动链接管推进。
+
+    首轮踢一脚（起首批 task）是必需的——纯事件驱动链的冷启动：无 events / 无 STOPPED，Stream/EventBridge
+    都不会触发第一次 reconciler。故 submit 调 reconcile.tick 一次（CAS 抢占起首批 ≤max_concurrency 个 task）；
+    之后首批 task 产 events → Stream → reconciler Lambda 接管（补起后续 / finalize）。CLI 起完首批即退、不留进程。
+    """
+    resolved_profile = args.profile or os.environ.get("AWS_PROFILE")
+    resolved_region = compose.resolve_region(args.region, resolved_profile)
+    prefix = args.prefix or os.environ.get("AWS_RESOURCE_PREFIX") or compose.DEFAULT_PREFIX
+    events_table = args.events_table or compose.default_name(prefix, compose._BASE_EVENTS_TABLE)
+    cluster = args.cluster or compose.default_name(prefix, compose._BASE_CLUSTER)
+    bucket = args.s3_bucket or os.environ.get("AWS_S3_BUCKET") or compose.default_name(prefix, compose._BASE_BUCKET)
+    table = args.ddb_table or os.environ.get("AWS_DDB_TABLE") or compose.default_name(prefix, compose._BASE_RUNS_TABLE)
+
+    # preflight（events 表/cluster/桶/runs 表）——配置错在提交前暴露、退 2。
+    try:
+        err = compose.preflight_cloud_resources(
+            prefix=prefix, events_table=events_table, bucket=bucket, cluster=cluster,
+            runs_table=table, region=resolved_region, profile=resolved_profile,
+        )
+    except ImportError as e:
+        _progress(f"submit --backend cloud 需要 boto3：{e}")
+        return 2
+    if err:
+        _progress(err)
+        return 2
+    try:
+        network_config = compose.resolve_network(
+            prefix=prefix, subnets=args.subnet, security_groups=args.security_group,
+            region=resolved_region, profile=resolved_profile,
+        )
+    except Exception as e:
+        if _is_botocore_error(e):
+            _progress(f"submit --backend cloud 读 subnet/sg SSM 失败：{e}")
+            return 2
+        raise
+
+    # 装配：DDB RunStore（create_run）+ DdbEventLog + CloudLauncher（build_fargate_engines 单一真源）。
+    from core.adapters.event_log import DdbEventLog
+    from core.adapters.cloud_launcher import CloudLauncher
+    from core.reconcile import tick
+
+    run_store, _rs, _rp, _mk = compose.build_cloud_stores(
+        table=table, bucket=bucket, prefix=args.report_dir,
+        region=resolved_region, profile=resolved_profile,
+    )
+    try:
+        run_store.create_run(run_meta, initial)
+    except Exception as e:
+        if _is_botocore_error(e):
+            _progress(f"submit --backend cloud 云端不可达（表/桶/凭证/region）：{e}")
+            return 2
+        raise
+
+    events_tbl = compose._make_ddb_table(events_table, region=resolved_region, profile=resolved_profile)
+    scope_ids = [j.scope_id for j in run_meta.jobs]
+    event_log = DdbEventLog(events_tbl, run_id, scope_ids)
+    engines = compose.build_fargate_engines(
+        run_id=run_id, prefix=prefix, cluster=cluster, events_table=events_table, bucket=bucket,
+        report_dir=args.report_dir, network_config=network_config, region=resolved_region,
+    )
+    launcher = CloudLauncher(compose.make_resolver(engines))
+    # 踢首轮：起首批 ≤max_concurrency 个 task（CAS）。之后云端 Lambda 链接管（首批 task 产 events → Stream → reconciler）。
+    tick(run_id, run_meta, event_log, run_store, launcher, args.max_concurrency, now_iso=compose.now_iso())
+
+    _progress(f"已提交到云端（首批 task 已起，云端 Lambda 链推进中，可关机）。查进度：gherkai status {run_id} --backend cloud --prefix {prefix}")
+    print(run_id)
     return 0
 
 
 def _cmd_status(args, repo: Path) -> int:
-    """[无状态跑批] 查 run 进度/结果。默认读一次 RunState 渲染；--wait 则接力 tick 到终态（ADR 0034 三触发源之一）。"""
+    """[无状态跑批] 查 run 进度/结果。
+
+    - local：读文件 RunState；--wait 则接力 tick 到终态（三触发源之一，per-run 崩了人来查也能续）。
+    - cloud：读 DDB RunState（云端 Lambda 链推进，status 只读、不接力——推进不依赖本机）。
+    """
     from cli import detached
+
+    if args.backend == "cloud":
+        return _status_cloud(args)
 
     report_root = Path(args.report_dir).resolve()
     run_store, _rs, _rp, _mk = compose.build_local_stores(report_dir=str(report_root))
@@ -329,6 +424,39 @@ def _cmd_status(args, repo: Path) -> int:
     else:
         print(detached.render_run_state(state))
     # 退出码：达终态按判定（PASSED→0 / 其余→1）；未达终态（还在跑，非 --wait）→ 0（提交/查询本身成功）
+    if state.status == Status.PASSED:
+        return 0
+    if state.status in (Status.PENDING, Status.RUNNING):
+        return 0
+    return 1
+
+
+def _status_cloud(args) -> int:
+    """cloud status：读 DDB RunState 渲染（云端 Lambda 链推进，只读、不接力）。"""
+    from cli import detached
+
+    resolved_profile = args.profile or os.environ.get("AWS_PROFILE")
+    resolved_region = compose.resolve_region(args.region, resolved_profile)
+    prefix = args.prefix or os.environ.get("AWS_RESOURCE_PREFIX") or compose.DEFAULT_PREFIX
+    table = args.ddb_table or os.environ.get("AWS_DDB_TABLE") or compose.default_name(prefix, compose._BASE_RUNS_TABLE)
+
+    from core.adapters.run_store.ddb import DynamoDBRunStore
+    run_store = DynamoDBRunStore(compose._make_ddb_table(table, region=resolved_region, profile=resolved_profile))
+    try:
+        state = run_store.load_run_state(args.run_id)
+    except Exception as e:
+        if _is_botocore_error(e):
+            _progress(f"status --backend cloud 云端不可达（表/凭证/region）：{e}")
+            return 2
+        raise
+    if state is None:
+        _progress(f"未找到 run：{args.run_id}（--prefix/--ddb-table 是否与 submit 一致？）")
+        return 2
+    if args.json:
+        from core.serialize import run_state_to_dict
+        print(json.dumps(run_state_to_dict(state), ensure_ascii=False, indent=2))
+    else:
+        print(detached.render_run_state(state))
     if state.status == Status.PASSED:
         return 0
     if state.status in (Status.PENDING, Status.RUNNING):
