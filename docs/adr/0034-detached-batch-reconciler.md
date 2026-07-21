@@ -84,7 +84,7 @@ per-run 进程（观察者+reconciler 三合一）：spawn worker 子进程
 ## 推进的三个触发源（都幂等、并发安全）
 
 1. **主力**：cloud=DDB Stream 事件 / local=per-run 进程——正常一路推完。
-2. **兜底/接力**：`status --wait`——per-run 进程崩、或 Stream 偶发断链时，人来查即接力推（状态全持久、tick 幂等，断点续）。
+2. **兜底/接力**：`status --wait`——per-run 进程崩、或 Stream 偶发断链/丢投时，人来查即接力推（状态全持久、tick 幂等，断点续）。**local 接力=本机跑 tick；cloud 接力=每轮 invoke 启动器 Lambda 踢一脚**（保 status 机器零 ECS 权限，Lambda 名从 `--prefix` 推理、用户无感，见「重议闸门」丢投条）。
 3. 三者同时触发也无害——靠下面 CAS + HWM 条件写。**`status` 是可选的查看+崩溃兜底，不是推进链条的必需环**。
 
 ## 四个关键机制（机制二/三/四有地基实测支撑；机制一是从 [0024](./0024-worker-core-protocol.md) seq 不变量推导的设计约束，无独立实测）
@@ -177,6 +177,6 @@ moto 立即返回测不到事件投递/并发时序，健康网真跑不触发�
 ## 重议闸门
 
 - **level Stream/事件偶发丢投致级联断裂成真痛点** → 加安全网：submit 时 enable、finalize 时 disable 的**动态定时兜底规则**（仅在有活跑批时低频轮询、真 idle 时规则禁用=仍零调用），比常开定时器省。当前靠 `status --wait` 接力兜底，先不做。
-  - **cloud 冷启动的丢投更致命（施工 P4d 真跑遇到、记为闸门）**：中途某步事件丢投，`status --wait` 接力能补（events 已在表、重放推得出）；但**首个 runs-INSERT 丢投**（启动器 mapping 初始化窗口 / Stream 偶发漏）会让 run **永卡 pending**——没起任何 task → 无 events → events Stream 永不触发 reconciler，**无第二触发源来踢**（真跑首个 run 撞 mapping 刚 deploy 的初始化窗口、漏投、卡 pending 复现；紧接第二个 run 正常）。当前 cloud `status` 只读不接力（推进本不依赖本机）——故冷启动丢投目前**只能重新 submit**。**闸门**：若成真痛点 → 给 cloud `status --wait` 也加接力 tick（读回 pending 就 tick 一次踢首批，与 local 接力对称，需 submit/status 机器有起 task 权限——与「submit 零 ECS 权限」的收益权衡），或上面的动态定时兜底规则覆盖冷启动。先不做（重新 submit 成本低、mapping 稳定后不复现）。
+  - **cloud 冷启动/中途丢投由 `status --wait` 无感接力兜底（施工 P4d 真跑遇到、已解决）**：任何事件丢投（首个 runs-INSERT 漏 → 卡 pending、无第二触发源踢；或中途 events 丢投 → 级联断）都由 cloud `status --wait` 兜底——**每轮循环读 RunState + invoke 启动器 Lambda 一次踢一脚**，直到读到终态。踢 Lambda（非本机 tick）保「status 机器零 ECS 权限」：起 task 走 Lambda 的角色（有 RunTask/PassRole），status 机器只需 `lambda:InvokeFunction`。**Lambda 名从 `--prefix` 确定性推理**（`{prefix}starter`，复用 `names` 单一命名真源、cli↔IaC 同源，ADR 0033）——用户无需配、无感（体验同 local `status --wait`）。幂等安全：每轮无脑 invoke 启动器，正常在跑时 tick 发现无 pending 即 no-op（CAS 挡重复起 / HWM 挡 stale，P2/P3 真 DDB 验），卡住时救回。故三触发源在 cloud 完整齐备：启动器（冷启动）/ reconciler（events Stream 主推进）/ `status --wait`（人工接力兜底，与 local 对称）。真跑复现的「首个 run 撞 mapping 初始化窗口漏投卡 pending」由此可救、不再只能重 submit。
 - **常驻调度服务 / WebUI 真需要** → RunState 读模型 + reconciler 已就位，加 adapter/宿主即可（[0016](./0016-execution-architecture-core-lib-run-model.md)「加 adapter + 换注入」在 (a) 类仍成立）。
 - **本地 events sink 选型**：定 **SQLite**（表结构镜像 DDB events：PK=scope_id/SK=seq；`UPDATE...WHERE` 让 local 复刻 HWM 条件写、与 cloud 心智对称）。被拒 append-only JSONL——虽最简无依赖，但并发读写只能靠 append 原子性 + 容忍半行，无事务保证、无法复刻条件写逻辑。

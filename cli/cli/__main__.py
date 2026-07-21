@@ -410,23 +410,56 @@ def _cmd_status(args, repo: Path) -> int:
 
 
 def _status_cloud(args) -> int:
-    """cloud status：读 DDB RunState 渲染（云端 Lambda 链推进，只读、不接力）。"""
+    """cloud status：读 DDB RunState 渲染。--wait 则无感接力兜底——每轮 invoke 启动器 Lambda 踢一脚 + 重读，
+    直到终态（ADR 0034 三触发源之一）。
+
+    **接力踢 Lambda（非本机 tick）保 status 机器零 ECS 权限**：起 task 走 Lambda 的角色（有 RunTask/PassRole），
+    status 机器只需 `lambda:InvokeFunction`。Lambda 名 `{prefix}starter` 从 --prefix 确定性推理（compose 单一命名
+    真源、cli↔IaC 同源）——用户无感。幂等安全：每轮无脑 invoke 启动器，正常在跑时 tick 无 pending 即 no-op（CAS/HWM
+    兜底），卡 pending（冷启动丢投）时救回。
+    """
+    import time as _time
     from cli import detached
 
     resolved_profile = args.profile or os.environ.get("AWS_PROFILE")
     resolved_region = compose.resolve_region(args.region, resolved_profile)
     prefix = args.prefix or os.environ.get("AWS_RESOURCE_PREFIX") or compose.DEFAULT_PREFIX
     table = args.ddb_table or os.environ.get("AWS_DDB_TABLE") or compose.default_name(prefix, compose._BASE_RUNS_TABLE)
+    starter_fn = compose.default_name(prefix, compose._BASE_STARTER_LAMBDA)  # {prefix}starter，推理出、无需用户配
 
     from core.adapters.run_store.ddb import DynamoDBRunStore
     run_store = DynamoDBRunStore(compose._make_ddb_table(table, region=resolved_region, profile=resolved_profile))
-    try:
-        state = run_store.load_run_state(args.run_id)
-    except Exception as e:
-        if _is_botocore_error(e):
-            _progress(f"status --backend cloud 云端不可达（表/凭证/region）：{e}")
-            return 2
-        raise
+
+    def _read():
+        try:
+            return run_store.load_run_state(args.run_id)
+        except Exception as e:
+            if _is_botocore_error(e):
+                _progress(f"status --backend cloud 云端不可达（表/凭证/region）：{e}")
+                return 2  # 哨兵：调用方转退出码
+            raise
+
+    _TERMINAL = {Status.PASSED, Status.FAILED, Status.ERROR, Status.SKIPPED, Status.ABORTED}
+    state = _read()
+    if state == 2:
+        return 2
+    if args.wait:
+        # 接力循环：没到终态 → invoke 启动器 Lambda 踢一脚（幂等）→ sleep → 重读，直到终态。
+        lam = None
+        while state is not None and state.status not in _TERMINAL:
+            if lam is None:
+                lam = compose._make_lambda_client(region=resolved_region, profile=resolved_profile)
+            try:
+                lam.invoke(FunctionName=starter_fn, InvocationType="Event",  # 异步 invoke（踢一脚即可、不等返回）
+                           Payload=json.dumps({"_status_wait_kick": args.run_id}).encode())
+            except Exception as e:
+                if not _is_botocore_error(e):
+                    raise  # 非 AWS 错才抛；invoke 失败（如无权限）不致命——下轮重试/靠云端链
+            _time.sleep(3.0)
+            state = _read()
+            if state == 2:
+                return 2
+
     if state is None:
         _progress(f"未找到 run：{args.run_id}（--prefix/--ddb-table 是否与 submit 一致？）")
         return 2

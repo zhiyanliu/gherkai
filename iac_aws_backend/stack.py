@@ -423,7 +423,8 @@ class BackendStack(Stack):
         #    handler=starter_handler、触发源=runs Stream INSERT。故它需要与 reconciler 相同的权限（起 task 等）。
         starter = lambda_.Function(
             self, "StarterFn",
-            function_name=f"{self.prefix}starter",
+            function_name=f"{self.prefix}starter",  # 名与 cli compose._BASE_STARTER_LAMBDA 同源——cli status --wait 据 --prefix 推理出它 invoke 接力（ADR 0034）
+
             runtime=lambda_.Runtime.PYTHON_3_13,
             handler="reconciler.starter_handler",  # 同一 reconciler.py、不同入口
             code=code,
