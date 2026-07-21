@@ -31,9 +31,12 @@
 
 ```
 gherkai submit <features> --backend cloud
-   → plan → 写 RunMeta + 全 job pending 到 RunStore → 首批 RunTask → 打印 run_id → 退出(0)
+   → plan → create_run 写 RunMeta+全 pending → 打印 run_id → 退出(0)
+     （只写 DDB、不起 task——冷启动交启动器 Lambda，见下 cloud 端到端流程；local 则 fork per-run 进程推进）
 gherkai status <run_id> [--wait]
-   → 不带 --wait：读 RunState 渲染一次；带 --wait：循环 tick + 读到终态 → 收尾
+   → 不带 --wait：读 RunState 渲染一次
+   → 带 --wait：轮询到终态；期间接力推进——**local=本机跑 tick 到底 / cloud=invoke 启动器 Lambda 踢一脚**
+     （机制与「本机是否须跑到底」的不对称见下「推进的三个触发源」）
 gherkai run <features>    # 原阻塞皮 = submit + 同进程 status --wait，行为不变
 ```
 
@@ -79,13 +82,16 @@ per-run 进程（观察者+reconciler 三合一）：spawn worker 子进程
 
 **关键：local 的 worker 不改、对 SQLite 无知（施工 P3 校准）**——worker 仍讲 [0024](./0024-worker-core-protocol.md) fd3 协议吐原始 JSON 行（引擎无关、两执行环境同一份 worker），SQLite 落库是 per-run 进程侧 `SubprocessLauncher` 读 fd3 时旁路做的（存原始行 + 按到达序赋 worker 段单调 seq）。故「worker 写持久 events 存储」在 local 的准确表述是「per-run 进程代 worker 写」——worker 业务零改，对称性落在「事件最终进了持久可重放存储」这一层，非「worker 自己写哪」。
 
-**per-run 进程内多 worker 并发写同一 SQLite 的串行化（施工 P3 处理）**：`max_concurrency>1` 时 per-run 进程并发起多个 worker，每个一个 fd3 读线程往同一 SQLite append。SQLite 单写者——多线程 append 靠 **WAL 模式 + 短事务**串行化（写争锁排队、不丢不乱；每条 append 是独立小事务）。这是 per-run 进程内的线程并发（非跨进程），锁竞争轻、可接受。跨进程写并发不在 local 目标内（写者只有 per-run 进程一个；`status --wait` 接力只读 events + 走 RunStore 条件写、不写 events sink）。
+**per-run 进程内多 worker 并发写同一 SQLite 的串行化（施工 P3 处理）**：`max_concurrency>1` 时 per-run 进程并发起多个 worker，每个一个 fd3 读线程往同一 SQLite append。SQLite 单写者——多线程 append 靠 **WAL 模式 + 短事务**串行化（写争锁排队、不丢不乱；每条 append 是独立小事务）。这是 per-run 进程内的线程并发（非跨进程），锁竞争轻、可接受。**跨进程写 events sink 的并发**：正常态只有 per-run 进程一个写者；但 per-run 进程崩后 `status --wait` 接力**会自己 spawn worker、写同一 SQLite events sink**（local 无云端 Lambda 起 worker，接力只能本机顶上——见下「三触发源」的 local/cloud 不对称）。两者不会真并发写（per-run 崩了 status 才顶上、串行接替），且 SQLite WAL 跨进程写锁本就串行化；但设计上假定「同一时刻至多一个本机进程在推 local run」（per-run 或接力的 status，不同时）。
 
 ## 推进的三个触发源（都幂等、并发安全）
 
 1. **主力**：cloud=DDB Stream 事件 / local=per-run 进程——正常一路推完。
-2. **兜底/接力**：`status --wait`——per-run 进程崩、或 Stream 偶发断链/丢投时，人来查即接力推（状态全持久、tick 幂等，断点续）。**local 接力=本机跑 tick；cloud 接力=每轮 invoke 启动器 Lambda 踢一脚**（保 status 机器零 ECS 权限，Lambda 名从 `--prefix` 推理、用户无感，见「重议闸门」丢投条）。
-3. 三者同时触发也无害——靠下面 CAS + HWM 条件写。**`status` 是可选的查看+崩溃兜底，不是推进链条的必需环**。
+2. **兜底/接力**：`status --wait`——per-run 进程崩、或 Stream 偶发断链/丢投时，人来查即接力推（状态全持久、tick 幂等，断点续）。**local 与 cloud 的接力机制本质不对称（关键，勿混）**：
+   - **local 接力 = 本机进程亲自跑 tick**（spawn subprocess worker、读 SQLite、finalize）。**推进全靠这个本机进程**——掐掉即停（local 无云端接管者）。故 local 必须**有本机进程真跑到终态**：要么 submit fork 的 per-run 进程，要么 per-run 崩后 `status --wait` 顶上、且**必须一直 wait 到底**。
+   - **cloud 接力 = 一次异步 fire-and-forget invoke 启动器 Lambda**（`InvocationType=Event`、不等返回）。**踢到第一脚（秒级）即完成救活**——此后即便退出 `status`，云端 Lambda 链（启动器起首批 → events Stream → reconciler）自接管跑完，**不依赖本机 status 进程存活**。`status --wait` 后续每轮再 invoke 只是覆盖「多次/中途丢投」的冗余保险，**非单次救活所必需**。保 status 机器零 ECS 权限（起 task 走 Lambda 角色）；Lambda 名从 `--prefix` 推理、用户无感。
+   - **一句话**：cloud「踢一脚即可离场」/ local「本机必须跑到底」。根因在**主推进器位置**（cloud 云端 Lambda / local 本机进程，见 1.）——三触发源「齐备」是表层对称，「本机是否必须跑到底」才是里层不对称。
+3. 三者同时触发也无害——靠下面 CAS + HWM 条件写。**`status` 对 cloud 是可选的查看+崩溃踢一脚（非推进链必需环，云端链才是）；对 local，per-run 崩后 status --wait 是唯一本机推进者、此时反而是必需环**。
 
 ## 四个关键机制（机制二/三/四有地基实测支撑；机制一是从 [0024](./0024-worker-core-protocol.md) seq 不变量推导的设计约束，无独立实测）
 
@@ -177,6 +183,6 @@ moto 立即返回测不到事件投递/并发时序，健康网真跑不触发�
 ## 重议闸门
 
 - **level Stream/事件偶发丢投致级联断裂成真痛点** → 加安全网：submit 时 enable、finalize 时 disable 的**动态定时兜底规则**（仅在有活跑批时低频轮询、真 idle 时规则禁用=仍零调用），比常开定时器省。当前靠 `status --wait` 接力兜底，先不做。
-  - **cloud 冷启动/中途丢投由 `status --wait` 无感接力兜底（施工 P4d 真跑遇到、已解决）**：任何事件丢投（首个 runs-INSERT 漏 → 卡 pending、无第二触发源踢；或中途 events 丢投 → 级联断）都由 cloud `status --wait` 兜底——**每轮循环读 RunState + invoke 启动器 Lambda 一次踢一脚**，直到读到终态。踢 Lambda（非本机 tick）保「status 机器零 ECS 权限」：起 task 走 Lambda 的角色（有 RunTask/PassRole），status 机器只需 `lambda:InvokeFunction`。**Lambda 名从 `--prefix` 确定性推理**（`{prefix}starter`，复用 `names` 单一命名真源、cli↔IaC 同源，ADR 0033）——用户无需配、无感（体验同 local `status --wait`）。幂等安全：每轮无脑 invoke 启动器，正常在跑时 tick 发现无 pending 即 no-op（CAS 挡重复起 / HWM 挡 stale，P2/P3 真 DDB 验），卡住时救回。故三触发源在 cloud 完整齐备：启动器（冷启动）/ reconciler（events Stream 主推进）/ `status --wait`（人工接力兜底，与 local 对称）。**卡死救活已真验（施工确定性复现）**：临时禁用启动器的 runs-Stream event-source-mapping 模拟丢投 → submit 必卡 pending（启动器收不到 INSERT、无第二触发源）→ `status --wait` invoke 启动器直接踢 → pending→running→passed 救活、`status --wait` 正常返回。此真验还抓出并修了一个真 bug：启动器原只认 Stream records 的 event 格式、忽略直接 invoke 的 `{"run_id":...}` payload → status --wait 的 invoke 空转救不了（`runs:[]`）；修为 `_run_ids_from_runs_stream` 兼容两种 event 源（Stream records + 直接踢一脚）。
+  - **cloud 冷启动/中途丢投由 `status --wait` 无感接力兜底（施工 P4d 真跑遇到、已解决）**：任何事件丢投（首个 runs-INSERT 漏 → 卡 pending、无第二触发源踢；或中途 events 丢投 → 级联断）都由 cloud `status --wait` 兜底——它 invoke 启动器 Lambda 踢一脚（**异步 fire-and-forget、秒级一脚即救活**，之后云端链自接管、可退出 status，见上「三触发源」cloud 侧；后续每轮再踢仅覆盖多次丢投的冗余）。踢 Lambda（非本机 tick）保「status 机器零 ECS 权限」：起 task 走 Lambda 的角色（有 RunTask/PassRole），status 机器只需 `lambda:InvokeFunction`。**Lambda 名从 `--prefix` 确定性推理**（`{prefix}starter`，复用 `names` 单一命名真源、cli↔IaC 同源，ADR 0033）——用户无需配、无感。幂等安全：无脑 invoke 启动器，正常在跑时 tick 发现无 pending 即 no-op（CAS 挡重复起 / HWM 挡 stale，P2/P3 真 DDB 验），卡住时救回。故三触发源在 cloud 完整齐备：启动器（冷启动）/ reconciler（events Stream 主推进）/ `status --wait`（人工接力踢一脚）——**触发源齐备度与 local 对称，但「本机是否必须跑到底」不对称**（cloud 踢完可离场 / local 须本机跑到终态，见上「三触发源」2.）。**卡死救活已真验（施工确定性复现）**：临时禁用启动器的 runs-Stream event-source-mapping 模拟丢投 → submit 必卡 pending（启动器收不到 INSERT、无第二触发源）→ `status --wait` invoke 启动器直接踢 → pending→running→passed 救活、`status --wait` 正常返回。此真验还抓出并修了一个真 bug：启动器原只认 Stream records 的 event 格式、忽略直接 invoke 的 `{"run_id":...}` payload → status --wait 的 invoke 空转救不了（`runs:[]`）；修为 `_run_ids_from_runs_stream` 兼容两种 event 源（Stream records + 直接踢一脚）。
 - **常驻调度服务 / WebUI 真需要** → RunState 读模型 + reconciler 已就位，加 adapter/宿主即可（[0016](./0016-execution-architecture-core-lib-run-model.md)「加 adapter + 换注入」在 (a) 类仍成立）。
 - **本地 events sink 选型**：定 **SQLite**（表结构镜像 DDB events：PK=scope_id/SK=seq；`UPDATE...WHERE` 让 local 复刻 HWM 条件写、与 cloud 心智对称）。被拒 append-only JSONL——虽最简无依赖，但并发读写只能靠 append 原子性 + 容忍半行，无事务保证、无法复刻条件写逻辑。
