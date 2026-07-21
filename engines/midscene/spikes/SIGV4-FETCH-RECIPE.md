@@ -1,7 +1,7 @@
 # Midscene → Bedrock qwen3-vl 经 /openai/v1 的 SigV4 自签 fetch 配方
 
-> spike 实现笔记（非 ADR）。决策见 [ADR 0008](../../docs/adr/0008-midscene-bedrock-auth-sigv4-selfsign.md)。
-> 来源：核实 smithy-typescript signature-v4 + openai-node v6.3.0 源码。**尚未端到端跑通——这是 spike 的任务。**
+> spike 实现笔记（非 ADR）。决策见 [ADR 0008](../../../docs/adr/0008-midscene-bedrock-auth-sigv4-selfsign.md)。
+> 来源：核实 smithy-typescript signature-v4 + openai-node v6.3.0 源码。**已端到端跑通**（HTTP 200 + 视觉识别 + 整条 Midscene 引擎全绿、断言 10/10，见 §6/§7；ADR 0008/0003 承重未知均已关闭）。
 
 ## 1. 代码（注入 Midscene `createOpenAIClient`）
 
@@ -12,7 +12,7 @@ import { HttpRequest } from "@aws-sdk/protocol-http";   // 漏这个 import = Re
 import { Sha256 } from "@aws-crypto/sha256-js";          // 传 CLASS，不是实例
 import { fromNodeProviderChain } from "@aws-sdk/credential-providers";
 
-const REGION = "us-east-1";   // 统一用 us-east-1：默认 region，且 AgentCore 会话 + qwen3-vl 200 均在此实测过
+const REGION = "us-east-1";   // ⚠️ spike 期硬编码；**生产已改惰性 getRegion()**（读 AWS_REGION、fail-loud、不硬编码 east——见 lib/agentcore-sigv4.mts / ADR 0033/0016 决策 C）。此处保留 spike 原样、勿照抄当现状
 const HOST = `bedrock-runtime.${REGION}.amazonaws.com`;
 const BASE_URL = `https://${HOST}/openai/v1`;            // 保持 /openai/v1（裸 /v1 会 404）
 

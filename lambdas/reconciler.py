@@ -1,4 +1,4 @@
-"""reconciler Lambda（ADR 0034 P4b）：DDB events 表 Stream 变化 → reconcile.tick 推进一步。
+"""reconciler Lambda（ADR 0034）：DDB events 表 Stream 变化 → reconcile.tick 推进一步。
 
 events 表开 Stream（NEW_IMAGE），worker PutItem 执行事件 / 退出观察者写 task_exited → Stream 触发本 handler。
 它从 Stream records 提取涉及的 run_id 集（去重），对每个 run 调 core.reconcile.tick 推进一步（读全量重放 →
@@ -10,7 +10,7 @@ project → 条件写 → plan_next → CAS 抢占起下一个 job / finalize）
 此处每次 handler 显式构造、无隐式全局态）。core 一行不为 cloud 改（同 local，只换注入的 EventLog/Launcher/RunStore）。
 
 打包：本文件 + core 进 Lambda zip。env（IaC 部署配）：RUNS_TABLE / EVENTS_TABLE / ARTIFACTS_BUCKET / CLUSTER /
-CONTAINER_NAME / SUBNETS / SECURITY_GROUPS / MAX_CONCURRENCY / REPORT_DIR / REGION。
+PREFIX / SUBNETS / SECURITY_GROUPS / ASSIGN_PUBLIC_IP / MAX_CONCURRENCY / REPORT_DIR / REGION。
 """
 from __future__ import annotations
 

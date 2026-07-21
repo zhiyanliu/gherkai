@@ -11,8 +11,9 @@ WebUI 将来是另一张皮，**直接调 core、复用 `compose`**，不经本 
 
 ```
 cli/
-├── __main__.py   ← argparse 皮：解析参数 → 调 compose/core → 注入 RunPersistence 实时落库 → 调 render；定义退出码
-├── compose.py    ← 组合根：引擎注册表（每个引擎 cmd/cwd）、读 feature、build resolver（WebUI 也复用）
+├── __main__.py   ← argparse 皮：run/submit/status/plan/list-engines 解析 → 调 compose/core → 注入 RunPersistence 实时落库 → 调 render；定义退出码
+├── compose.py    ← 组合根：引擎注册表（每个引擎 cmd/cwd）、读 feature、build resolver、build_fargate_engines（WebUI/Lambda 也复用）
+├── detached.py   ← 无状态跑批 local 侧接线（ADR 0034）：SubprocessLauncher（起 worker 旁路落 SQLite + 观察退出）+ per-run reconcile loop
 └── render.py     ← 表层渲染：0024 事件 → 进度行；RunResult → 文本汇总 / JSON
 ```
 

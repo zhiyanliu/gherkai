@@ -78,7 +78,7 @@ def tick(
             # 全 job 达终态（plan_next 只在此时给 finalize 动作）→ run 已 done。
             # try_finalize 状态机单调条件写：True=本实例抢到 commit（负责 report 聚合）；False=别人已 finalize
             # （幂等）。**两种都返回 done=True**——run 确已达终态，不能因「别人抢先 finalize」就让本推进者
-            # （如 status --wait 接力）返回 False 而永远等不到 done（P3b-2 真跑 status --wait 死循环复现）。
+            # （如 status --wait 接力）返回 False 而永远等不到 done（真跑 status --wait 死循环复现）。
             run_store.try_finalize(run_id, state.status, now_iso)
             return True
     return False

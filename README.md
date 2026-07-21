@@ -61,13 +61,14 @@
 │   ├── deterministic_anchor.feature        ← @deterministic 锚点验证（ADR 0022）
 │   └── concurrency_and_scope.feature       ← 手工真跑回归夹具：改调度/会话生命周期后重跑验 ADR 0019
 ├── core/                      ← 窄腰核心库（Python，零引擎依赖，ADR 0016）
-│   └── core/{parse,scope,schedule,persist,model,wire,serialize,ports,errors}.py + adapters/{subprocess,fargate}_engine.py（Engine：local/cloud）+ adapters/{run,result,report}_store/{local,ddb|s3}.py（本地 + 云端）
+│   └── core/{parse,scope,schedule,project,reconcile,persist,model,wire,serialize,ports,errors}.py（project=纯归约投影 / reconcile=无状态推进编排，ADR 0034）+ adapters/{subprocess,fargate}_engine.py + cloud_launcher.py + event_log/{sqlite,ddb}.py（无状态跑批持久事件通道，ADR 0034）+ adapters/{run,result,report}_store/{local,ddb|s3}.py
 ├── cli/                       ← 核心库的第一个前端 = 组合根（ADR 0016）
 │   └── cli/{__main__.py(argparse) · compose.py(引擎注册表) · render.py}
 ├── engines/                   ← 两个可插拔引擎，与 core 平级
 │   ├── midscene/   ← TS 子工程：worker/run-scope.ts（薄 worker）· worker/deterministic.ts · lib/agentcore-sigv4.mts · spikes/
 │   └── novaact/    ← Python 子工程：worker/run_scope.py（薄 worker）· worker/deterministic.py · lib/workflow_setup.py · spikes/
-├── iac_aws_backend/           ← `--backend cloud` 的 AWS 资源 IaC（Python CDK：DDB/S3/ECS/ECR/IAM/VPC，ADR 0033）
+├── iac_aws_backend/           ← `--backend cloud` 的 AWS 资源 IaC（Python CDK：DDB/S3/ECS/ECR/IAM/VPC + 无状态跑批的 Stream/Lambda/EventBridge，ADR 0033/0034）
+├── lambdas/                   ← cloud 无状态跑批的三 Lambda 源（kicker/reconciler/exit-observer，ADR 0034；由 iac 打包部署）
 └── tools/                     ← 复用工具库（端到端真跑 / 跨真实边界验证 / 时序诊断；长期资产，见 CLAUDE.md「工作方式」）
 ```
 

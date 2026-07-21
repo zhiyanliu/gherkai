@@ -19,7 +19,7 @@
 - **Nova Act 侧**：`engines/novaact/bdd/` 的 pytest-bdd（`scenarios(str(FEATURES_DIR))`，`FEATURES_DIR` 上溯到根 `features/`）。
 - 同一句自然语言 step 同时驱动了两个不同语言/不同大脑的引擎——本框架立身之本落地。
 
-> 演进（v0.x）：最初的 M2 验证用「专用 step」风格的 `wikipedia_search.feature`（`When I search for "OpenAI"...`，每用例写 step 代码）；v0.x 验证「通用 step」模式成立后，该专用 step 三件套已退役，现以通用 step 版 `features/wikipedia_generic.feature` + `generic.steps.ts` / `test_generic_steps.py` 取代（QA 只写 .feature、零 step 代码）。下述方言/接线结论在两种风格下同样适用。
+> 演进（v0.x）：最初的 M2 验证用「专用 step」风格的 `wikipedia_search.feature`（`When I search for "OpenAI"...`，每用例写 step 代码）；v0.x 验证「通用 step」模式成立后，该专用 step 三件套已退役，改用通用 step 版 `features/wikipedia_generic.feature`（QA 只写 .feature、零 step 代码）。当时的 step 实现 `generic.steps.ts` / `test_generic_steps.py` 已随 BDD runner 一并删除（[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)：core 直接解析、worker 变薄，不再有 step 代码文件）。下述方言/接线结论在两种风格下同样适用。
 
 **方言交集结论（本 ADR 预言的代价，已实证「可行但需注意」）**：
 - `.feature` 文本完全共享、两边都正确匹配。
@@ -28,4 +28,4 @@
 **M2 撞出的接线坑（固化备查）**：
 - TS：tsx 在 Node 22 须 `NODE_OPTIONS="--import tsx/esm"`（非废弃的 `--loader`）；`midscene` 子工程是 commonjs，故 `engines/midscene/bdd/` 加局部 `package.json` 标 `{"type":"module"}`，且 step 内联 SigV4 fetch 不跨目录引 CJS。
 - TS：Midscene `PlaywrightAgent` 的 `.page` 非原始 Playwright Page，导航/确定性断言要单独保存原始 `page`。
-- Python：`with Workflow(...)` 不设 contextvar，AgentCore `provider.cdp_session()` 靠 `get_current_workflow()` 鉴权——须 `@workflow` 装饰器，或在 fixture 内手动 `set_current_workflow(wf)`（见 `test_generic_steps.py`）。
+- Python：`with Workflow(...)` 不设 contextvar，AgentCore `provider.cdp_session()` 靠 `get_current_workflow()` 鉴权——须 `@workflow` 装饰器，或手动 `set_current_workflow(wf)`（当时在 BDD fixture `test_generic_steps.py` 里做，该文件已随 BDD runner 退役删除、[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)；接线要求本身不变，现落在 worker 启动段）。

@@ -9,6 +9,7 @@
 - [0026](../docs/adr/0026-schedule-module.md) schedule 模块（并发调度）
 - [0027](../docs/adr/0027-runreport-aggregation-index.md) RunReport 归集索引
 - [0030](../docs/adr/0030-realtime-persistence-seam.md) 实时写接缝 / [0031](../docs/adr/0031-job-lifecycle-states-and-severity.md) job 生命周期态 + severity
+- [0034](../docs/adr/0034-detached-batch-reconciler.md) 无状态跑批 core 侧拆分（project 纯归约投影 + reconcile 推进编排 + event_log 持久事件通道）
 
 ## 模块
 
@@ -21,13 +22,17 @@ core/
 ├── wire.py       ← Job↔JSON 与 0024 事件↔JSON 的线序列化（worker↔core 协议落地）
 ├── errors.py     ← core 类型化异常：WorkerNetworkError（schedule 据此做 network_error 重试分类，ADR 0028）
 ├── ports.py      ← Engine / WorkerHandle / EngineResolver / Sink / JobSink / RunStore / ResultStore / ReportStore 接口（组合根注入）
-├── schedule.py   ← schedule(run_meta, engines, sink, opts, on_job_complete?, on_event?) -> RunResult（并发/隔离/超时/优雅停）
+├── schedule.py   ← schedule(run_meta, engines, sink, opts, on_job_complete?, on_event?) -> RunResult（同步 run：并发/隔离/超时/优雅停）
+├── project.py    ← 无状态跑批纯归约投影（ADR 0034）：project(events)→RunState/JobResult + plan_next(state)→actions + reduce_event（与 schedule 共用一份归约）
+├── reconcile.py  ← 无状态跑批推进编排（ADR 0034）：tick(run_id, meta, event_log, run_store, launcher, N)——幂等、多触发源、CAS/HWM 条件写；起 job 经注入 Launcher（core 不 import boto3）
 ├── persist.py    ← RunPersistence：编排 Store ports 随进度实时落库（commit-point 写序，ADR 0030）
 └── adapters/
     ├── subprocess_engine.py        ← Engine 实装（local）：spawn worker 子进程 + 读事件流
-    ├── fargate_engine.py           ← Engine 实装（cloud）：RunTask 起 Fargate 容器 + job-in 走 S3 / events-out 走 DDB / stop→StopTask（ADR 0024/0032）
+    ├── fargate_engine.py           ← Engine 实装（cloud）：RunTask 起 Fargate 容器 + job-in 走 S3 / events-out 走 DDB / stop→StopTask + start_scope fire-and-forget（ADR 0024/0032/0034）
+    ├── cloud_launcher.py           ← 无状态跑批 cloud Launcher（ADR 0034）：经 resolver 选 FargateEngine 调 start_scope 起 task（fire-and-forget）
+    ├── event_log/{sqlite,ddb}.py   ← 无状态跑批持久事件通道（ADR 0034）：local=SQLite / cloud=DDB events 表，reconciler 从此全量重放推演
     ├── _boto.py                    ← 云端 adapter 共享的 boto3 依赖守卫（缺 boto3 友好报错，ADR 0016 窄腰）
-    ├── run_store/{local,ddb}.py    ← RunStore：本地文件 + DynamoDB（+ arg_offload.py：StepArgument→S3 指针，解 DDB 400KB 限）
+    ├── run_store/{local,ddb}.py    ← RunStore：本地文件 + DynamoDB（+ arg_offload.py：StepArgument→S3 指针，解 DDB 400KB 限；+ 无状态跑批条件写 try_claim_job/project_state/try_finalize，ADR 0034）
     ├── result_store/{local,s3}.py  ← ResultStore：本地文件 + S3（每 job 一对象）
     └── report_store/{local,s3}.py  ← ReportStore：本地文件 + S3（manifest+index）
 ```

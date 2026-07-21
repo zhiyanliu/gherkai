@@ -1,4 +1,4 @@
-"""退出观察者 Lambda（ADR 0034 P4b，机制二 cloud 落地）：ECS Task STOPPED 事件 → 写 task_exited。
+"""退出观察者 Lambda（ADR 0034，机制二 cloud 落地）：ECS Task STOPPED 事件 → 写 task_exited。
 
 EventBridge rule（detail-type='ECS Task State Change'、lastStatus=STOPPED、本 cluster）触发本 handler。
 它是**平台侧外部观察者**——worker 崩了/被 SIGKILL 也照发（进程干净终止只有平台看得见，机制二）。职责极薄：
@@ -10,7 +10,7 @@ EventBridge rule（detail-type='ECS Task State Change'、lastStatus=STOPPED、�
 极少数缺 exitCode 时写 None（宽限态，project 保守判 running，reconciler 下轮由别的信号补——或 status --wait
 人工兜底）。不在此重查 DescribeTasks（保持 handler 薄、无额外 IAM；真验证明基本不需要）。
 
-打包：本文件 + core 一起进 Lambda zip（部署见 iac_aws_backend + P4d）。boto3 是 Lambda runtime 自带。
+打包：本文件 + core 一起进 Lambda zip（部署见 iac_aws_backend）。boto3 是 Lambda runtime 自带。
 env：EVENTS_TABLE（events 表名）、AWS_REGION（Lambda runtime 自带）。
 """
 from __future__ import annotations

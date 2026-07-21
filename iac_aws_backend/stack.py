@@ -51,7 +51,7 @@ class BackendStack(Stack):
         self._cluster(vpc)       # {prefix}cluster（RunTask 时 cli 按名指定，task-def 不绑 cluster）
         self._task_definitions()  # 2 引擎：ECR + task-def + task role
         self._ssm_network(vpc)   # 写 subnet/sg ID 供 cli 读
-        self._reconcile_lambdas(vpc)  # 无状态跑批（ADR 0034）：退出观察者 + reconciler 两 Lambda + EventBridge + Stream
+        self._reconcile_lambdas(vpc)  # 无状态跑批（ADR 0034）：退出观察者 + reconciler + kicker 三 Lambda + EventBridge + Stream
 
     # ---- stopTimeout 解析（grace 真容器校准落点，ADR 0032）----
     def _resolve_stop_timeout(self) -> int:
@@ -325,12 +325,14 @@ class BackendStack(Stack):
         CfnOutput(self, "Prefix", value=self.prefix)
         CfnOutput(self, "SubnetsSsmPath", value=names.ssm_subnets_path(self.prefix))
 
-    # ---- 无状态跑批（ADR 0034）：退出观察者 + reconciler 两 Lambda + EventBridge + DDB Stream ----
+    # ---- 无状态跑批（ADR 0034）：退出观察者 + reconciler + kicker 三 Lambda + EventBridge + DDB Stream ----
     def _reconcile_lambdas(self, vpc: ec2.IVpc) -> None:
         """事件驱动推进链（ADR 0034 端到端 cloud 流程）：
 
         - **退出观察者 Lambda**：EventBridge ECS Task STOPPED 事件（本 cluster）触发 → 写 task_exited（机制二）。
         - **reconciler Lambda**：events 表 Stream 触发 → reconcile.tick 推进 + finalize 聚合（机制三/四）。
+        - **kicker Lambda**：runs 表 Stream 的 INSERT 触发（submit 写 definition，冷启动起首批）+ cli status --wait
+          直接 invoke kickoff（卡住救活）→ tick 起首批 task。职责『让 run 动起来』（对 reconciler 的『推着走』）。
 
         Lambda 代码 = lambdas/ + core/core + cli/cli 打进一个 asset（gherkin-official 依赖 pip 装入；boto3 是
         runtime 自带）。**复用同步 cloud run 的资源**（runs/events 表、桶、cluster、task-def、task/execution role）——

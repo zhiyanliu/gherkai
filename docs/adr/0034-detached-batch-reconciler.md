@@ -84,9 +84,9 @@ per-run 进程（观察者+reconciler 三合一）：spawn worker 子进程
 
 **同一份 core 推演码，两个宿主（Lambda / per-run 进程）各注入自己的 adapter**——local/cloud 对称落到 events 通道：两侧 reconciler 都从持久 events 重放推演，**唯一差别是存储介质**（DDB 表 vs 本地 SQLite）+ **谁把 worker 事件写进该存储**（cloud=worker 自己 PutItem，[0024]；local=per-run 进程读 worker fd3 后旁路落 SQLite）。
 
-**关键：local 的 worker 不改、对 SQLite 无知（施工 P3 校准）**——worker 仍讲 [0024](./0024-worker-core-protocol.md) fd3 协议吐原始 JSON 行（引擎无关、两执行环境同一份 worker），SQLite 落库是 per-run 进程侧 `SubprocessLauncher` 读 fd3 时旁路做的（存原始行 + 按到达序赋 worker 段单调 seq）。故「worker 写持久 events 存储」在 local 的准确表述是「per-run 进程代 worker 写」——worker 业务零改，对称性落在「事件最终进了持久可重放存储」这一层，非「worker 自己写哪」。
+**关键：local 的 worker 不改、对 SQLite 无知（实装校准）**——worker 仍讲 [0024](./0024-worker-core-protocol.md) fd3 协议吐原始 JSON 行（引擎无关、两执行环境同一份 worker），SQLite 落库是 per-run 进程侧 `SubprocessLauncher` 读 fd3 时旁路做的（存原始行 + 按到达序赋 worker 段单调 seq）。故「worker 写持久 events 存储」在 local 的准确表述是「per-run 进程代 worker 写」——worker 业务零改，对称性落在「事件最终进了持久可重放存储」这一层，非「worker 自己写哪」。
 
-**per-run 进程内多 worker 并发写同一 SQLite 的串行化（施工 P3 处理）**：`max_concurrency>1` 时 per-run 进程并发起多个 worker，每个一个 fd3 读线程往同一 SQLite append。SQLite 单写者——多线程 append 靠 **WAL 模式 + 短事务**串行化（写争锁排队、不丢不乱；每条 append 是独立小事务）。这是 per-run 进程内的线程并发（非跨进程），锁竞争轻、可接受。**跨进程写 events sink 的并发**：正常态只有 per-run 进程一个写者；但 per-run 进程崩后 `status --wait` 接力**会自己 spawn worker、写同一 SQLite events sink**（local 无云端 Lambda 起 worker，接力只能本机顶上——见下「三触发源」的 local/cloud 不对称）。两者不会真并发写（per-run 崩了 status 才顶上、串行接替），且 SQLite WAL 跨进程写锁本就串行化；但设计上假定「同一时刻至多一个本机进程在推 local run」（per-run 或接力的 status，不同时）。
+**per-run 进程内多 worker 并发写同一 SQLite 的串行化（实装处理）**：`max_concurrency>1` 时 per-run 进程并发起多个 worker，每个一个 fd3 读线程往同一 SQLite append。SQLite 单写者——多线程 append 靠 **WAL 模式 + 短事务**串行化（写争锁排队、不丢不乱；每条 append 是独立小事务）。这是 per-run 进程内的线程并发（非跨进程），锁竞争轻、可接受。**跨进程写 events sink 的并发**：正常态只有 per-run 进程一个写者；但 per-run 进程崩后 `status --wait` 接力**会自己 spawn worker、写同一 SQLite events sink**（local 无云端 Lambda 起 worker，接力只能本机顶上——见下「三触发源」的 local/cloud 不对称）。两者不会真并发写（per-run 崩了 status 才顶上、串行接替），且 SQLite WAL 跨进程写锁本就串行化；但设计上假定「同一时刻至多一个本机进程在推 local run」（per-run 或接力的 status，不同时）。
 
 ## 推进的三个触发源（都幂等、并发安全）
 
@@ -107,9 +107,9 @@ per-run 进程（观察者+reconciler 三合一）：spawn worker 子进程
 
 **退出绝不能 worker 自报**：worker 可能被 SIGKILL 硬杀、或发完 `scope_done` 才在会话释放时非 0 退出——它**没机会**再 PutItem 报告自己的退出。故「进程干净终止」的信号只有平台/父进程看得见：cloud = ECS Task STOPPED 事件；local = per-run 进程 `proc.wait()`。观察者从该信号取 exitCode 写 `task_exited`。
 
-**「两件都要」（[0024](./0024-worker-core-protocol.md) 终止契约）在 reconciler 里成为对事件日志的纯谓词**——但**「内容完整（scope_done）」只对声称成功（exit==0）的进程要求**（施工 P3b 真跑 crash worker 逼出的精确化）：
+**「两件都要」（[0024](./0024-worker-core-protocol.md) 终止契约）在 reconciler 里成为对事件日志的纯谓词**——但**「内容完整（scope_done）」只对声称成功（exit==0）的进程要求**（真跑 crash worker 逼出的精确化）：
 
-- **`task_exited` 且 exit≠0（崩溃/网络码 80/SIGKILL）→ ERROR 终态，不等 `scope_done`**：worker 崩了根本没机会发 `scope_done`，此时**进程非干净终止本身就是终态信号**。若仍死等 `scope_done`，crash job 永远 RUNNING、reconciler 死循环（P3b `test_crash_worker` 复现）。这一分支也覆盖「发完 scope_done 又非 0 退出」的误报 PASSED（exit≠0 一律 error，不看内容）。
+- **`task_exited` 且 exit≠0（崩溃/网络码 80/SIGKILL）→ ERROR 终态，不等 `scope_done`**：worker 崩了根本没机会发 `scope_done`，此时**进程非干净终止本身就是终态信号**。若仍死等 `scope_done`，crash job 永远 RUNNING、reconciler 死循环（真跑 crash worker 复现，回归护栏 `core/tests/test_project.py::test_crash_no_scope_done_nonzero_exit_is_error`）。这一分支也覆盖「发完 scope_done 又非 0 退出」的误报 PASSED（exit≠0 一律 error，不看内容）。
 - **`task_exited` 且 exit==0 → 要求 `scope_done`**：干净退出才谈「内容完整」。有 `scope_done` → scenario 归约终态（passed/failed/error）；干净退出却没 `scope_done`（矛盾：进程说成功、内容没发完）→ ERROR（judged error 比死循环安全）。
 - **`task_exited` 且 exitCode 未落值（None，宽限态）→ 保守 RUNNING**（等观察者补 exitCode，机制二兜底、ADR 0032 落值延迟）。
 - **无 `task_exited`（进程还没终止）→ RUNNING（见了 scope_started）/ PENDING（还没起）**。
@@ -129,13 +129,13 @@ reconciler 逻辑上是「唯一写者」，**物理上是并发实例**（实�
 
 两道条件缺一不可：HWM 管 seq 可比的进度回退，状态机单调管「跨独立键空间事件（task_exited 无 seq）的终态回退」——后者正是 `scope_done`/`task_exited` 这个 finalize 边界的关键守卫。这是 [0030](./0030-realtime-persistence-seam.md)「重议」条预告的「进程外多写者需条件更新」的落地（见下反向链）。local SQLite 用 `UPDATE...WHERE hwm <= :hwm AND status NOT IN (终态)` 复刻两道条件。**被拒 owner/lease 分布式锁**：0030 曾预告用 lease 保唯一写者——拒，lease 有状态、需续租/故障接管；无状态的 HWM + 状态机乐观条件写即够（写失败即整体重放重试，天然幂等），更轻。
 
-**投影写 run 级 status 钳为 `running`/`pending`、不落终态（施工 P3a 逼出，衔接 [0030](./0030-realtime-persistence-seam.md) commit point）**：`project` 在全 job 达终态时会聚合出 run 级**终态**，但 `project_state`（投影写）**不能把它落库**——run 级终态是 `try_finalize` 这个 commit point 的**专属**（[0030](./0030-realtime-persistence-seam.md)：finalize 一落=run 已提交）。若投影提前落 run 级终态，紧接着的 `try_finalize`（条件「当前 status ∈ 非终态」）会被**投影自己刚写的终态挡住**、run 永远 finalize 不了。故 `project_state` 落库时把 run 级 status 钳为 `running`（非 `pending` 时）——**各 job 态仍是真实态（含终态，供 `plan_next` 判全终态），只 run 级钳**；run 级终态由 `try_finalize` 用 `project` 聚合出的真实终态一次落定。`project_state` 另加对偶保护：库中已 finalize（run 级终态）则挡投影（不把终态刷回 running）。cloud DDB 与 local SQLite 对称实现此钳制。
+**投影写 run 级 status 钳为 `running`/`pending`、不落终态（实装真跑逼出，衔接 [0030](./0030-realtime-persistence-seam.md) commit point）**：`project` 在全 job 达终态时会聚合出 run 级**终态**，但 `project_state`（投影写）**不能把它落库**——run 级终态是 `try_finalize` 这个 commit point 的**专属**（[0030](./0030-realtime-persistence-seam.md)：finalize 一落=run 已提交）。若投影提前落 run 级终态，紧接着的 `try_finalize`（条件「当前 status ∈ 非终态」）会被**投影自己刚写的终态挡住**、run 永远 finalize 不了。故 `project_state` 落库时把 run 级 status 钳为 `running`（非 `pending` 时）——**各 job 态仍是真实态（含终态，供 `plan_next` 判全终态），只 run 级钳**；run 级终态由 `try_finalize` 用 `project` 聚合出的真实终态一次落定。`project_state` 另加对偶保护：库中已 finalize（run 级终态）则挡投影（不把终态刷回 running）。cloud DDB 与 local SQLite 对称实现此钳制。
 
 ### 机制四：CAS(pending→running) 控严格并发
 
 严格 `max_concurrency` 的执行点从 core 内 `ThreadPoolExecutor`（进程内、无 store）**迁到 store 的 CAS 条件写**：起一个 job 前 `CAS(status: pending→running)`，多个触发源并发看到同一 pending job 都想启，**只有条件写成功的那个去 RunTask/spawn**，其余被拒跳过。稳态并发恒 = max_concurrency，不靠任何常驻进程 hold 线程池。core 的 `plan_next` 只**提议**动作，真正的并发闸是 adapter 的 CAS。
 
-**「claim 了但 events 还没到」的窗口 → `project` 须以 RunStore 态为基线做单调合并（施工 P3a 逼出，补入设计）**：CAS 把 job 置 `running` 后、worker 还没 emit `scope_started` 前有一个窗口——此时 `project` 全量重放 events 里**看不到**该 job（无任何事件），会把它算成 `pending`；若投影写就此把它刷回 `pending`，下一个 tick 的 `plan_next` 又会提议 start、CAS（此刻已是 running？不，被刷回 pending 了）又成功 → **重复 launch 同一 job**（真 bug，P3a `test_tick_idempotent` 复现）。故 `project` 除 events 外**接收当前 RunStore 的 `RunState` 作基线**，job 态按生命周期序（`pending < running < 任何终态`）与基线取**较推进者**、单调不倒退：已 claim 的 `running` 不被 events 的 `pending` 覆盖；终态一旦达成不被 `running` 覆盖。这与「全量重放幂等」不冲突——重放仍是纯推演，基线只提供「已 claim」这一 events 之外、却是 RunStore 权威的事实。`reconcile.tick` 在调 `project` 前 `load_run_state` 取基线传入。
+**「claim 了但 events 还没到」的窗口 → `project` 须以 RunStore 态为基线做单调合并（实装真跑逼出、补入设计）**：CAS 把 job 置 `running` 后、worker 还没 emit `scope_started` 前有一个窗口——此时 `project` 全量重放 events 里**看不到**该 job（无任何事件），会把它算成 `pending`；若投影写就此把它刷回 `pending`，下一个 tick 的 `plan_next` 又会提议 start、CAS（此刻已是 running？不，被刷回 pending 了）又成功 → **重复 launch 同一 job**（真 bug，回归护栏 `core/tests/test_reconcile.py::test_tick_idempotent_no_double_launch`）。故 `project` 除 events 外**接收当前 RunStore 的 `RunState` 作基线**，job 态按生命周期序（`pending < running < 任何终态`）与基线取**较推进者**、单调不倒退：已 claim 的 `running` 不被 events 的 `pending` 覆盖；终态一旦达成不被 `running` 覆盖。这与「全量重放幂等」不冲突——重放仍是纯推演，基线只提供「已 claim」这一 events 之外、却是 RunStore 权威的事实。`reconcile.tick` 在调 `project` 前 `load_run_state` 取基线传入。
 
 ## core 拆分（守 [0026](./0026-schedule-module.md)/[0016](./0016-execution-architecture-core-lib-run-model.md) 窄腰红线）
 
@@ -155,7 +155,7 @@ adapter/组合根（Lambda handler / per-run 进程，注入具体 client）：
 
 ## 对 [0016](./0016-execution-architecture-core-lib-run-model.md) 的纠正：「核心不动」是过强断言
 
-[0016](./0016-execution-architecture-core-lib-run-model.md) 三处（L114/210/225）断言「无状态化 = 加 adapter + 组合根换注入，核心与接口不动」。**本 ADR 纠正为分层两真值**：
+[0016](./0016-execution-architecture-core-lib-run-model.md) 数处（「这样上云…核心与接口不动」条、版本切分 v1.1.0 行、「现在不做」条）断言「无状态化 = 加 adapter + 组合根换注入，核心与接口不动」。**本 ADR 纠正为分层两真值**：
 
 - **(a) store/engine 后端替换**（local↔DDB/S3、subprocess↔Fargate）= 注入、核心不动——[0033](./0033-iac-aws-backend-and-composition-wiring.md) 已真部署真跑证实，**保留**。
 - **(b) 无状态提交-收集**（本 ADR）= **驱动模型演进**：同步 `ThreadPoolExecutor` 循环解体为无状态事件驱动 tick、抽纯 `project()`/`plan_next()` 供两宿主复用、可能增 Engine port 形状、严格并发从进程内线程池迁到 store CAS——**核心与接口要动**。这比「只换 adapter」大得多，[0016](./0016-execution-architecture-core-lib-run-model.md)/[0026](./0026-schedule-module.md) 把 (a)(b) 混为一谈、over-claim 了。
@@ -179,7 +179,7 @@ moto 立即返回测不到事件投递/并发时序，健康网真跑不触发�
 - **reconciler 靠全量重放天然幂等、投影写不加版本守卫**：拒——并发实例 stale 快照 lost-update 能把 finalized run 刷回 running；全量重放只保证派生幂等、不保证跨实例写序（机制三）。
 - **把 CAS+RunTask+PutItem 与归约合成单一 core reconciler 组件**：拒——逼 core 持 store + 依赖执行环境、Engine port 长出启 task 职责，破 [0026](./0026-schedule-module.md) 纯 reducer（core 拆分节）。
 - **让每个消费者各自 `project(events)→RunState`（绕过单一 reconciler 写者、如为求新鲜度让 `status` 直接投演 events）**：拒——多份推演逻辑必漂移（同一 events 在 status/WebUI/reconciler 各推一版、口径迟早分叉）；且各消费者写 RunState 会破单写者与 HWM/状态机条件写前提。外部只读 RunState、推演只在 reconciler 一处（「核心思想」单一读接口不变量）。
-- **cloud submit 由 CLI 直接起首批 task（冷启动）**：拒（施工 P4d 初版这么做、后改）——让 submit 机器背 `ecs:RunTask` 权限，与本设计卖点「提交完就走、只需提交那一下的最小权限」相悖：submit 机器权限面越小越好（受限 CI runner / 临时凭证场景）。改由**kicker Lambda** 冷启动（见下），submit 机器权限收窄到只剩「runs 表写 + preflight」、不碰 ECS。
+- **cloud submit 由 CLI 直接起首批 task（冷启动）**：拒（实装初版这么做、后改）——让 submit 机器背 `ecs:RunTask` 权限，与本设计卖点「提交完就走、只需提交那一下的最小权限」相悖：submit 机器权限面越小越好（受限 CI runner / 临时凭证场景）。改由**kicker Lambda** 冷启动（见下），submit 机器权限收窄到只剩「runs 表写 + preflight」、不碰 ECS。
 - **runs 表 Stream 直接触发 reconciler（复用同一 Lambda 做冷启动）**：拒——**自触发放大**：reconciler 每次推进都写 runs 表（`project_state` 条件写 + `finalize`），若 runs Stream 触发 reconciler，则它写 runs → 又触发自己 → 每个 run 生命周期空转 N 次（tick 幂等使无害、但持续无效唤醒 + 全量重放读放大）。用 Stream `INSERT`-only filter 能压，但那是「用 filter 补救本可避免的耦合」。改用**专用kicker Lambda**（只被 runs Stream 的 INSERT 触发、只起首批、**不写 runs 表**）——职责单一、无自触发，与退出观察者「专用薄 Lambda」同模式。reconciler 只被 events Stream 触发（worker 有进展才推进），两触发源职责不交叉。
 - **定时器轮询推进**（EventBridge scheduled rule 每 N 秒 tick）：拒——idle 也 fire、空转烧钱，且要权衡「间隔短=延迟低但费 / 间隔长=省但收尾慢」这个不该存在的取舍。改用 ECS Task State Change + DDB Stream 事件驱动，idle 零调用（端到端流程 cloud）。
 - **per-run 推进器也给 cloud**：拒（用户定）——cloud「扣笔记本下班」场景只靠 IaC 部署的事件驱动链，本机不留常驻推进器；per-run 仅 local 用。
@@ -187,6 +187,6 @@ moto 立即返回测不到事件投递/并发时序，健康网真跑不触发�
 ## 重议闸门
 
 - **level Stream/事件偶发丢投致级联断裂成真痛点** → 加安全网：submit 时 enable、finalize 时 disable 的**动态定时兜底规则**（仅在有活跑批时低频轮询、真 idle 时规则禁用=仍零调用），比常开定时器省。当前靠 `status --wait` 接力兜底，先不做。
-  - **cloud 冷启动/中途丢投由 `status --wait` 无感接力兜底（施工 P4d 真跑遇到、已解决）**：任何事件丢投（首个 runs-INSERT 漏 → 卡 pending、无第二触发源踢；或中途 events 丢投 → 级联断）都由 cloud `status --wait` 兜底——它**检测卡住（状态连续 K 轮无变化）才** invoke kicker Lambda kickoff（**异步 fire-and-forget、秒级一脚即救活**，之后云端链自接管、可退出 status，见上「三触发源」cloud 侧；正常推进时不踢、避免无效 invoke）。踢 Lambda（非本机 tick）保「status 机器零 ECS 权限」：起 task 走 Lambda 的角色（有 RunTask/PassRole），status 机器只需 `lambda:InvokeFunction`。**kicker 名从 `--prefix` 确定性推理**（`{prefix}kicker`，复用 `names` 单一命名真源、cli↔IaC 同源，ADR 0033）——用户无需配、无感。幂等安全：invoke kicker，正常在跑时 tick 发现无 pending 即 no-op（CAS 挡重复起 / HWM 挡 stale，P2/P3 真 DDB 验），卡住时救回。故三触发源在 cloud 完整齐备：kicker（冷启动）/ reconciler（events Stream 主推进）/ `status --wait`（人工接力 kickoff）——**触发源齐备度与 local 对称，但「本机是否必须跑到底」不对称**（cloud kickoff 完可离场 / local 须本机跑到终态，见上「三触发源」2.）。**卡死救活已真验（施工确定性复现）**：临时禁用 kicker 的 runs-Stream event-source-mapping 模拟丢投 → submit 必卡 pending（kicker 收不到 INSERT、无第二触发源）→ `status --wait` invoke kicker kickoff → pending→running→passed 救活、`status --wait` 正常返回。此真验还抓出并修了一个真 bug：kicker 原只认 Stream records 的 event 格式、忽略直接 invoke 的 `{"run_id":...}` payload → status --wait 的 invoke 空转救不了（`runs:[]`）；修为 `_run_ids_from_runs_stream` 兼容两种 event 源（Stream records + 直接 kickoff）。
+  - **cloud 冷启动/中途丢投由 `status --wait` 无感接力兜底（实装真跑遇到、已解决）**：任何事件丢投（首个 runs-INSERT 漏 → 卡 pending、无第二触发源踢；或中途 events 丢投 → 级联断）都由 cloud `status --wait` 兜底——它**检测卡住（状态连续 K 轮无变化）才** invoke kicker Lambda kickoff（**异步 fire-and-forget、秒级一脚即救活**，之后云端链自接管、可退出 status，见上「三触发源」cloud 侧；正常推进时不踢、避免无效 invoke）。踢 Lambda（非本机 tick）保「status 机器零 ECS 权限」：起 task 走 Lambda 的角色（有 RunTask/PassRole），status 机器只需 `lambda:InvokeFunction`。**kicker 名从 `--prefix` 确定性推理**（`{prefix}kicker`，复用 `names` 单一命名真源、cli↔IaC 同源，ADR 0033）——用户无需配、无感。幂等安全：invoke kicker，正常在跑时 tick 发现无 pending 即 no-op（CAS 挡重复起 / HWM 挡 stale，真 DDB 验过），卡住时救回。故三触发源在 cloud 完整齐备：kicker（冷启动）/ reconciler（events Stream 主推进）/ `status --wait`（人工接力 kickoff）——**触发源齐备度与 local 对称，但「本机是否必须跑到底」不对称**（cloud kickoff 完可离场 / local 须本机跑到终态，见上「三触发源」2.）。**卡死救活已真验（确定性复现）**：临时禁用 kicker 的 runs-Stream event-source-mapping 模拟丢投 → submit 必卡 pending（kicker 收不到 INSERT、无第二触发源）→ `status --wait` invoke kicker kickoff → pending→running→passed 救活、`status --wait` 正常返回。此真验还抓出并修了一个真 bug：kicker 原只认 Stream records 的 event 格式、忽略直接 invoke 的 `{"run_id":...}` payload → status --wait 的 invoke 空转救不了（`runs:[]`）；修为 `_run_ids_from_runs_stream` 兼容两种 event 源（Stream records + 直接 kickoff）。
 - **常驻调度服务 / WebUI 真需要** → RunState 读模型 + reconciler 已就位，加 adapter/宿主即可（[0016](./0016-execution-architecture-core-lib-run-model.md)「加 adapter + 换注入」在 (a) 类仍成立）。
 - **本地 events sink 选型**：定 **SQLite**（表结构镜像 DDB events：PK=scope_id/SK=seq；`UPDATE...WHERE` 让 local 复刻 HWM 条件写、与 cloud 心智对称）。被拒 append-only JSONL——虽最简无依赖，但并发读写只能靠 append 原子性 + 容忍半行，无事务保证、无法复刻条件写逻辑。

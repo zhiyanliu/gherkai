@@ -1,4 +1,4 @@
-"""无状态跑批的 cli 侧接线（ADR 0034 P3b，local 档）：SubprocessLauncher + per-run reconciler 进程。
+"""无状态跑批的 cli 侧接线（ADR 0034，local 档）：SubprocessLauncher + per-run reconciler 进程。
 
 组合根职责（local 执行环境特有）：把 core 的 reconciler（纯编排）接到真 subprocess 世界——
 - **SubprocessLauncher**：机制四 CAS 抢占成功后被 reconciler 调，起一个 worker（复用 SubprocessEngine）、

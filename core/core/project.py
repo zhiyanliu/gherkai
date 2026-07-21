@@ -293,7 +293,7 @@ def _job_status(
 
     「两件都要」的**内容完整（scope_done）要求只对声称成功（exit==0）的进程成立**——exit≠0 时进程非干净
     终止（崩溃/网络码/SIGKILL），scope_done 本就不会来（worker 崩了没机会发），此时进程终止本身即终态信号，
-    不能再等 scope_done（否则 crash job 永远 RUNNING、reconciler 死循环——P3b 真跑 crash worker 复现）。
+    不能再等 scope_done（否则 crash job 永远 RUNNING、reconciler 死循环——真跑 crash worker 复现）。
 
     - 连 scope_started 都没见：
         · 有 task_exited 且 exit≠0 → ERROR（建连前就崩/网络码 80，scope_started 都没发；进程终止=终态）；
