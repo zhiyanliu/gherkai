@@ -17,7 +17,7 @@ import subprocess
 import os
 import sys
 import threading
-from typing import Iterator
+from typing import Callable, Iterator
 
 from core.errors import WorkerNetworkError
 from core.model import Event, Job
@@ -45,6 +45,15 @@ class SubprocessWorkerHandle:
         except subprocess.TimeoutExpired:
             proc.kill()  # SIGKILL 兜底（会话清理可能落空，已知代价，ADR 0026）
 
+    def wait(self) -> int:
+        """阻塞等 worker 退出、返回 returncode（ADR 0034：local 无状态跑批的退出观察者用）。
+
+        per-run 进程的 SubprocessLauncher 消费完 fd3 事件流后调此拿 exitcode 写 task_exited——扮演
+        「平台侧退出观察者」（cloud 对位=ECS STOPPED 事件 payload 的 exitCode）。同步 run 路径不用（那条走
+        schedule 迭代事件流、_read_events 内部 proc.wait）。SIGKILL 硬杀 → 负码（Python subprocess 约定）。
+        """
+        return self._proc.wait()
+
 
 class SubprocessEngine:
     """Engine port 的子进程实现。cmd = 启 worker 的命令行（如 ['uv','run','python','run_scope.py']）。"""
@@ -59,7 +68,9 @@ class SubprocessEngine:
         """启 worker 的命令行（只读，供组合根自省/日志，如 CLI 的 list-engines）。"""
         return list(self._cmd)
 
-    def run_scope(self, job: Job) -> tuple[SubprocessWorkerHandle, Iterator[Event]]:
+    def run_scope(
+        self, job: Job, raw_sink: "Callable[[str], None] | None" = None
+    ) -> tuple[SubprocessWorkerHandle, Iterator[Event]]:
         # 三通道分离（fd3）：
         #   fd3   = 纯 ADR 0024 事件（adapter 读这个）—— 自建管道，写端映射到子进程 fd3
         #   stdout= 引擎 SDK 的进度噪声（adapter 当日志透传，不解析）
@@ -94,21 +105,33 @@ class SubprocessEngine:
         threading.Thread(target=_pump_log, args=(proc.stderr, job.scope_id, "err"), daemon=True).start()
 
         handle = SubprocessWorkerHandle(proc)
-        return handle, _read_events(proc, events_r)
+        return handle, _read_events(proc, events_r, raw_sink)
 
 
-def _read_events(proc: subprocess.Popen, events_r: int) -> Iterator[Event]:
+def _read_events(
+    proc: subprocess.Popen, events_r: int, raw_sink: "Callable[[str], None] | None" = None
+) -> Iterator[Event]:
     """逐行读 fd3（纯 ADR 0024 事件）→ Event。worker 异常退出且 returncode>0 时抛错（schedule 记 error）。
 
     纯阻塞行读、纯 `Iterator[Event]`——**不掺心跳**。worker 静默卡死时本迭代器会阻塞在读上，由
     schedule 层的 `_heartbeat_wrap`（后台线程 + queue 超时）兜底唤醒并查超时（ADR 0026/0028）。
     心跳是「schedule 对任何慢/静默流的通用兜底」，不渗进端口契约，也不要每个 adapter 各写一遍。
+
+    raw_sink（可选，ADR 0034 无状态跑批）：非 None 时，每读到一行**原始 JSON 文本**（event_from_line 解析
+    **之前**）旁路调它一次——供 SubprocessLauncher 把原始行落 SqliteEventLog（存原样、读回复用 event_from_line，
+    零新序列化、不破 wire 单向契约）。同步 run 路径不传（None）→ 零行为变化。sink 异常不打断事件流（吞掉，
+    落库失败不该拖垮执行；reconciler 靠事件持久性推进、丢一条下轮 worker 不会重发，但那是 P4 才需处理的边界）。
     """
     with os.fdopen(events_r, "r", encoding="utf-8") as events:
         for line in events:
             line = line.strip()
             if not line:
                 continue
+            if raw_sink is not None:
+                try:
+                    raw_sink(line)  # 旁路落原始行（无状态跑批），解析前
+                except Exception:
+                    pass
             yield event_from_line(line)  # 解析失败 → 抛 ValueError，schedule 捕获记 error
     # fd3 耗尽 = worker 关了事件通道。等它真正退出，拿 returncode。
     proc.wait()

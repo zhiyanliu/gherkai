@@ -63,11 +63,32 @@ def test_scope_started_but_no_exit_is_running():
     assert state.jobs["a"].session_id == "sess-x"  # 血缘随 scope_started 落
 
 
-def test_scope_started_no_scope_done_is_running():
-    """会话已起（scope_started）但没 scope_done（内容未完整）→ RUNNING，即使 task 已 exit。"""
-    recs = [_ev("a", 1, ScopeStarted(scope_id="a", session_id="s")), _exit("a", 0)]
+def test_scope_started_running_without_exit():
+    """会话已起（scope_started）、进程还没终止（无 task_exited）→ RUNNING（在跑）。"""
+    recs = [_ev("a", 1, ScopeStarted(scope_id="a", session_id="s"))]
     state = project(_meta("a"), recs)
     assert state.jobs["a"].status == Status.RUNNING
+
+
+def test_clean_exit_without_scope_done_is_error():
+    """干净退出（exit=0）却没发完 scope_done（内容不完整）→ ERROR（矛盾态，不死循环，P3b crash 修正）。"""
+    recs = [_ev("a", 1, ScopeStarted(scope_id="a", session_id="s")), _exit("a", 0)]
+    state = project(_meta("a"), recs)
+    assert state.jobs["a"].status == Status.ERROR
+
+
+def test_crash_no_scope_done_nonzero_exit_is_error():
+    """worker 崩溃（吐 scope_started 后非0退出、没 scope_done）→ ERROR（不等 scope_done，P3b 真跑复现的死循环修正）。"""
+    recs = [_ev("a", 1, ScopeStarted(scope_id="a", session_id="s")), _exit("a", 3)]
+    state = project(_meta("a"), recs)
+    assert state.jobs["a"].status == Status.ERROR
+
+
+def test_network_exit_before_scope_started_is_error():
+    """建连失败（退出码 80、scope_started 都没发）→ ERROR（进程终止即终态，不卡 pending）。"""
+    recs = [_exit("a", 80)]
+    state = project(_meta("a"), recs)
+    assert state.jobs["a"].status == Status.ERROR
 
 
 def test_two_things_present_clean_exit_terminal_passed():

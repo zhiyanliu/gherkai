@@ -93,7 +93,14 @@ per-run 进程（观察者+reconciler 三合一）：spawn worker 子进程
 
 **退出绝不能 worker 自报**：worker 可能被 SIGKILL 硬杀、或发完 `scope_done` 才在会话释放时非 0 退出——它**没机会**再 PutItem 报告自己的退出。故「进程干净终止」的信号只有平台/父进程看得见：cloud = ECS Task STOPPED 事件；local = per-run 进程 `proc.wait()`。观察者从该信号取 exitCode 写 `task_exited`。
 
-**「两件都要」（[0024](./0024-worker-core-protocol.md) 终止契约）在 reconciler 里成为对事件日志的纯谓词**：job 终态 ⟺ `scope_done` 存在（内容完整）∧ `task_exited` 存在且 exitCode 表明干净终止（进程终止）。只有 `scope_done` 不够——会吞掉「发完 scope_done 又非 0 退出」的误报 PASSED。
+**「两件都要」（[0024](./0024-worker-core-protocol.md) 终止契约）在 reconciler 里成为对事件日志的纯谓词**——但**「内容完整（scope_done）」只对声称成功（exit==0）的进程要求**（施工 P3b 真跑 crash worker 逼出的精确化）：
+
+- **`task_exited` 且 exit≠0（崩溃/网络码 80/SIGKILL）→ ERROR 终态，不等 `scope_done`**：worker 崩了根本没机会发 `scope_done`，此时**进程非干净终止本身就是终态信号**。若仍死等 `scope_done`，crash job 永远 RUNNING、reconciler 死循环（P3b `test_crash_worker` 复现）。这一分支也覆盖「发完 scope_done 又非 0 退出」的误报 PASSED（exit≠0 一律 error，不看内容）。
+- **`task_exited` 且 exit==0 → 要求 `scope_done`**：干净退出才谈「内容完整」。有 `scope_done` → scenario 归约终态（passed/failed/error）；干净退出却没 `scope_done`（矛盾：进程说成功、内容没发完）→ ERROR（judged error 比死循环安全）。
+- **`task_exited` 且 exitCode 未落值（None，宽限态）→ 保守 RUNNING**（等观察者补 exitCode，机制二兜底、ADR 0032 落值延迟）。
+- **无 `task_exited`（进程还没终止）→ RUNNING（见了 scope_started）/ PENDING（还没起）**。
+
+即：**进程终止（exit≠0）优先于内容完整判终态**；只有干净退出（exit==0）才回到「scope_done ∧ exit」的两件都要（实现见 `core.project._job_status`）。
 
 **exitCode 落值延迟兜底（防御性冗余）**：[0024](./0024-worker-core-protocol.md) 记 `lastStatus==STOPPED` 与 exitCode 落值非原子、`(True,None)` 是有界宽限态。**但 STOPPED 事件锚在 `stoppedAt`（task 完全清理完、已过 exitCode 落值窗口），故观察者从事件 payload 读 exitCode 可靠——实测见下 H1/H2**（数字集中在地基实测节，不在此复述）。仍保留一条廉价兜底（payload 缺 exitCode 则短暂重查 DescribeTasks / 重试）防未来平台行为变——**留而不依赖**，非 load-bearing。
 
