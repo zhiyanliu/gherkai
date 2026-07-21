@@ -346,46 +346,24 @@ def _submit_cloud(args, repo: Path, run_id: str, run_meta, initial) -> int:
     if err:
         _progress(err)
         return 2
-    try:
-        network_config = compose.resolve_network(
-            prefix=prefix, subnets=args.subnet, security_groups=args.security_group,
-            region=resolved_region, profile=resolved_profile,
-        )
-    except Exception as e:
-        if _is_botocore_error(e):
-            _progress(f"submit --backend cloud 读 subnet/sg SSM 失败：{e}")
-            return 2
-        raise
 
-    # 装配：DDB RunStore（create_run）+ DdbEventLog + CloudLauncher（build_fargate_engines 单一真源）。
-    from core.adapters.event_log import DdbEventLog
-    from core.adapters.cloud_launcher import CloudLauncher
-    from core.reconcile import tick
-
+    # **只 create_run 写 definition 到 runs 表**——不起任何 task、不读 SSM 网络、不碰 ECS（ADR 0034）：
+    # 冷启动由启动器 Lambda 做（runs 表 Stream 的 INSERT 触发它 tick 起首批）。submit 机器权限面因此收窄到
+    # 只剩「runs 表写 + preflight（探表/桶/cluster 可达）」——无需 RunTask/PassRole/SSM 读，契合「提交完就走、
+    # 只需提交那一下的最小权限」（受限 CI runner / 临时凭证场景）。之后全程云端 Lambda 链推进、不依赖 submit 机器。
     run_store, _rs, _rp, _mk = compose.build_cloud_stores(
         table=table, bucket=bucket, prefix=args.report_dir,
         region=resolved_region, profile=resolved_profile,
     )
     try:
-        run_store.create_run(run_meta, initial)
+        run_store.create_run(run_meta, initial)  # 写 definition（INSERT）→ runs Stream → 启动器 Lambda 冷启动
     except Exception as e:
         if _is_botocore_error(e):
             _progress(f"submit --backend cloud 云端不可达（表/桶/凭证/region）：{e}")
             return 2
         raise
 
-    events_tbl = compose._make_ddb_table(events_table, region=resolved_region, profile=resolved_profile)
-    scope_ids = [j.scope_id for j in run_meta.jobs]
-    event_log = DdbEventLog(events_tbl, run_id, scope_ids)
-    engines = compose.build_fargate_engines(
-        run_id=run_id, prefix=prefix, cluster=cluster, events_table=events_table, bucket=bucket,
-        report_dir=args.report_dir, network_config=network_config, region=resolved_region,
-    )
-    launcher = CloudLauncher(compose.make_resolver(engines))
-    # 踢首轮：起首批 ≤max_concurrency 个 task（CAS）。之后云端 Lambda 链接管（首批 task 产 events → Stream → reconciler）。
-    tick(run_id, run_meta, event_log, run_store, launcher, args.max_concurrency, now_iso=compose.now_iso())
-
-    _progress(f"已提交到云端（首批 task 已起，云端 Lambda 链推进中，可关机）。查进度：gherkai status {run_id} --backend cloud --prefix {prefix}")
+    _progress(f"已提交到云端（definition 已落库；启动器 Lambda 起首批、云端链推进中，可关机）。查进度：gherkai status {run_id} --backend cloud --prefix {prefix}")
     print(run_id)
     return 0
 

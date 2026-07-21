@@ -103,11 +103,20 @@ def _finalize_artifacts(run_id, meta, event_log, result_store, report_store) -> 
         pass  # 派生视图写失败隔离（ADR 0030 决定三）
 
 
-def handler(event, context):
-    """DDB Stream 入口：对涉及的每个 run tick 一步；done 则聚合收尾。"""
+def _run_ids_from_runs_stream(event) -> set[str]:
+    """从 runs 表 Stream records 提取 run_id 集（runs 表 PK=run_id，非复合，直接取）。启动器用（冷启动）。"""
+    run_ids: set[str] = set()
+    for rec in event.get("Records", []):
+        rid = rec.get("dynamodb", {}).get("Keys", {}).get("run_id", {}).get("S")
+        if rid:
+            run_ids.add(rid)
+    return run_ids
+
+
+def _tick_runs(run_ids: set[str], label: str) -> dict:
+    """对每个 run tick 一步；done 则聚合收尾。reconciler（events Stream）与 starter（runs Stream）共用。"""
     from core.reconcile import tick
 
-    run_ids = _run_ids_from_stream(event)
     for run_id in run_ids:
         built = _build(run_id)
         if built is None:
@@ -116,7 +125,22 @@ def handler(event, context):
         done = tick(run_id, meta, event_log, run_store, launcher, mc, now_iso=_now_iso())
         if done:
             _finalize_artifacts(run_id, meta, event_log, rstore, pstore)
-            print(f"reconciler: run {run_id} done + finalized")
+            print(f"{label}: run {run_id} done + finalized")
         else:
-            print(f"reconciler: run {run_id} advanced (not done)")
+            print(f"{label}: run {run_id} advanced (not done)")
     return {"ok": True, "runs": list(run_ids)}
+
+
+def handler(event, context):
+    """events 表 Stream 入口（reconciler 主推进）：worker PutItem / task_exited 触发 → 对涉及 run tick 续推。"""
+    return _tick_runs(_run_ids_from_stream(event), "reconciler")
+
+
+def starter_handler(event, context):
+    """runs 表 Stream 入口（**仅 INSERT**，冷启动）：submit create_run 写 definition 即触发 → tick 起首批。
+
+    与 reconciler 共用 tick（起首批 = tick 的 CAS start 分支）——四宿主一份 tick（submit-local / starter /
+    reconciler / status 接力）。启动器**只被 runs Stream 的 INSERT 触发**（filter 在 IaC 配），故 reconciler
+    之后写 runs 表（MODIFY）不触发它——无自触发放大（ADR 0034 被拒方案「runs Stream 触发 reconciler」）。
+    """
+    return _tick_runs(_run_ids_from_runs_stream(event), "starter")

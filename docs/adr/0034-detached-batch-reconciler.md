@@ -46,8 +46,12 @@ gherkai run <features>    # 原阻塞皮 = submit + 同进程 status --wait，�
 ### cloud（事件驱动，idle 零成本）
 
 ```
-1. submit(CLI)：plan → 写 RunMeta+全 pending → 首批 min(max_concurrency, |jobs|) 个 RunTask
-                → task ARN+running 写 RunState → CLI 退出（run_id 已在手）
+1. submit(CLI)：plan → create_run 写 RunMeta+全 pending 到 runs 表 → CLI 退出（run_id 已在手）。
+   **只写 DDB、不起任何 task**——submit 机器权限面仅「runs 表写 + preflight」，不碰 ECS RunTask（冷启动由启动器 Lambda 做，见下）。
+1b. runs 表 Stream（**仅 INSERT**）→ [启动器 Lambda]：新 run 的 definition 落库即触发 → tick 起首批
+     min(max_concurrency, |jobs|) 个 task（CAS 抢占）。这是纯事件驱动链的**冷启动**（无此步则无 events/无 STOPPED，
+     events Stream 永不触发第一次 reconciler）。启动器复用同一 `reconcile.tick`（四宿主一份：submit-local / 启动器 /
+     reconciler / status 接力）。
 2. worker 云上跑（CLI 退出不杀 task，已实测）：PutItem 执行事件(seq 递增)→events 表；上传产物→S3
 3. task STOPPED → ECS 自动发 "Task State Change: STOPPED" 事件 → EventBridge
      → [退出观察者 Lambda]：从事件 payload 读 exitCode（实测 4/4 都带，含 SIGKILL=137）
@@ -165,11 +169,14 @@ moto 立即返回测不到事件投递/并发时序，健康网真跑不触发�
 - **reconciler 靠全量重放天然幂等、投影写不加版本守卫**：拒——并发实例 stale 快照 lost-update 能把 finalized run 刷回 running；全量重放只保证派生幂等、不保证跨实例写序（机制三）。
 - **把 CAS+RunTask+PutItem 与归约合成单一 core reconciler 组件**：拒——逼 core 持 store + 依赖执行环境、Engine port 长出启 task 职责，破 [0026](./0026-schedule-module.md) 纯 reducer（core 拆分节）。
 - **让每个消费者各自 `project(events)→RunState`（绕过单一 reconciler 写者、如为求新鲜度让 `status` 直接投演 events）**：拒——多份推演逻辑必漂移（同一 events 在 status/WebUI/reconciler 各推一版、口径迟早分叉）；且各消费者写 RunState 会破单写者与 HWM/状态机条件写前提。外部只读 RunState、推演只在 reconciler 一处（「核心思想」单一读接口不变量）。
+- **cloud submit 由 CLI 直接起首批 task（冷启动）**：拒（施工 P4d 初版这么做、后改）——让 submit 机器背 `ecs:RunTask` 权限，与本设计卖点「提交完就走、只需提交那一下的最小权限」相悖：submit 机器权限面越小越好（受限 CI runner / 临时凭证场景）。改由**启动器 Lambda** 冷启动（见下），submit 机器权限收窄到只剩「runs 表写 + preflight」、不碰 ECS。
+- **runs 表 Stream 直接触发 reconciler（复用同一 Lambda 做冷启动）**：拒——**自触发放大**：reconciler 每次推进都写 runs 表（`project_state` 条件写 + `finalize`），若 runs Stream 触发 reconciler，则它写 runs → 又触发自己 → 每个 run 生命周期空转 N 次（tick 幂等使无害、但持续无效唤醒 + 全量重放读放大）。用 Stream `INSERT`-only filter 能压，但那是「用 filter 补救本可避免的耦合」。改用**专用启动器 Lambda**（只被 runs Stream 的 INSERT 触发、只起首批、**不写 runs 表**）——职责单一、无自触发，与退出观察者「专用薄 Lambda」同模式。reconciler 只被 events Stream 触发（worker 有进展才推进），两触发源职责不交叉。
 - **定时器轮询推进**（EventBridge scheduled rule 每 N 秒 tick）：拒——idle 也 fire、空转烧钱，且要权衡「间隔短=延迟低但费 / 间隔长=省但收尾慢」这个不该存在的取舍。改用 ECS Task State Change + DDB Stream 事件驱动，idle 零调用（端到端流程 cloud）。
 - **per-run 推进器也给 cloud**：拒（用户定）——cloud「扣笔记本下班」场景只靠 IaC 部署的事件驱动链，本机不留常驻推进器；per-run 仅 local 用。
 
 ## 重议闸门
 
 - **level Stream/事件偶发丢投致级联断裂成真痛点** → 加安全网：submit 时 enable、finalize 时 disable 的**动态定时兜底规则**（仅在有活跑批时低频轮询、真 idle 时规则禁用=仍零调用），比常开定时器省。当前靠 `status --wait` 接力兜底，先不做。
+  - **cloud 冷启动的丢投更致命（施工 P4d 真跑遇到、记为闸门）**：中途某步事件丢投，`status --wait` 接力能补（events 已在表、重放推得出）；但**首个 runs-INSERT 丢投**（启动器 mapping 初始化窗口 / Stream 偶发漏）会让 run **永卡 pending**——没起任何 task → 无 events → events Stream 永不触发 reconciler，**无第二触发源来踢**（真跑首个 run 撞 mapping 刚 deploy 的初始化窗口、漏投、卡 pending 复现；紧接第二个 run 正常）。当前 cloud `status` 只读不接力（推进本不依赖本机）——故冷启动丢投目前**只能重新 submit**。**闸门**：若成真痛点 → 给 cloud `status --wait` 也加接力 tick（读回 pending 就 tick 一次踢首批，与 local 接力对称，需 submit/status 机器有起 task 权限——与「submit 零 ECS 权限」的收益权衡），或上面的动态定时兜底规则覆盖冷启动。先不做（重新 submit 成本低、mapping 稳定后不复现）。
 - **常驻调度服务 / WebUI 真需要** → RunState 读模型 + reconciler 已就位，加 adapter/宿主即可（[0016](./0016-execution-architecture-core-lib-run-model.md)「加 adapter + 换注入」在 (a) 类仍成立）。
 - **本地 events sink 选型**：定 **SQLite**（表结构镜像 DDB events：PK=scope_id/SK=seq；`UPDATE...WHERE` 让 local 复刻 HWM 条件写、与 cloud 心智对称）。被拒 append-only JSONL——虽最简无依赖，但并发读写只能靠 append 原子性 + 容忍半行，无事务保证、无法复刻条件写逻辑。
