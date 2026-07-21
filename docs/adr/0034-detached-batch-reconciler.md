@@ -34,7 +34,11 @@ gherkai submit <features> --backend cloud
    → plan → create_run 写 RunMeta+全 pending → 打印 run_id → 退出(0)
      （只写 DDB、不起 task——冷启动交kicker Lambda，见下 cloud 端到端流程；local 则 fork per-run 进程推进）
 gherkai status <run_id> [--wait]
-   → 不带 --wait：读 RunState 渲染一次
+   → 不带 --wait：读 RunState 渲染一次（**纯只读、零副作用、不 kickoff/tick**——保「查看」无惊讶 + 只需读权限）。
+     读到仍 `pending` 时**只打一句诊断提示**「若已提交较久仍 pending，推进可能未启动，可 `status --wait` 接力」
+     ——提示而不自动推进（决定权留用户；救活走 --wait，不给纯查看强加 invoke/起 task 权限）。**local/cloud 两路
+     此渲染+提示+退出码逻辑经共享函数（`_render_status`）同一份实现、行为一致**，只 `--wait` 命令示例按后端异
+     （local 用 `--report-dir` / cloud 用 `--backend cloud --prefix`）。
    → 带 --wait：轮询到终态；期间接力推进——**local=本机跑 tick 到底 / cloud=invoke kicker Lambda kickoff**
      （机制与「本机是否须跑到底」的不对称见下「推进的三个触发源」）
 gherkai run <features>    # 原阻塞皮 = submit + 同进程 status --wait，行为不变

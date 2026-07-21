@@ -369,11 +369,36 @@ def _submit_cloud(args, repo: Path, run_id: str, run_meta, initial) -> int:
     return 0
 
 
+def _render_status(state, args, *, wait_hint: str) -> int:
+    """渲染 RunState + pending 诊断提示 + 退出码——**local/cloud 共享一份**（保两路一致，ADR 0034）。
+
+    state 已确认非 None（调用方先查）。wait_hint = 各自的 `status --wait` 接力命令示例（local 用 --report-dir、
+    cloud 用 --backend cloud --prefix，触发逻辑同、只命令示例异）。--json 机读、不打人读提示。
+    退出码：PASSED→0 / pending·running（未达终态、非 --wait）→0（查询本身成功）/ 其余终态→1。
+    """
+    if args.json:
+        from core.serialize import run_state_to_dict
+        print(json.dumps(run_state_to_dict(state), ensure_ascii=False, indent=2))
+    else:
+        from cli import detached
+        print(detached.render_run_state(state))
+    # 疑似卡住诊断（两路一致）：非 --wait、非 json、仍 pending → 提示 --wait 接力（**只提示、不自动 kickoff/tick**——
+    # 保「查看」纯只读无副作用；救活决定权留用户，走 --wait）。running/终态不提示。
+    if not args.wait and not args.json and state.status == Status.PENDING:
+        _progress(f"提示：run 仍 pending。若已提交较久，推进可能未启动——`{wait_hint}` 可接力推进。")
+    if state.status == Status.PASSED:
+        return 0
+    if state.status in (Status.PENDING, Status.RUNNING):
+        return 0
+    return 1
+
+
 def _cmd_status(args, repo: Path) -> int:
     """[无状态跑批] 查 run 进度/结果。
 
     - local：读文件 RunState；--wait 则本机接力 tick 到终态（三触发源之一，per-run 崩了人来查也能续、须跑到底）。
     - cloud：读 DDB RunState；--wait 则检测卡住时 invoke kicker Lambda 做 kickoff 接力（踢一脚即可、云端链自接管）。
+    渲染+提示+退出码经 _render_status 共享（两路一致，ADR 0034）。
     """
     from cli import detached
 
@@ -397,17 +422,7 @@ def _cmd_status(args, repo: Path) -> int:
     if state is None:
         _progress(f"未找到 run：{args.run_id}（--report-dir 是否与 submit 一致？）")
         return 2
-    if args.json:
-        from core.serialize import run_state_to_dict
-        print(json.dumps(run_state_to_dict(state), ensure_ascii=False, indent=2))
-    else:
-        print(detached.render_run_state(state))
-    # 退出码：达终态按判定（PASSED→0 / 其余→1）；未达终态（还在跑，非 --wait）→ 0（提交/查询本身成功）
-    if state.status == Status.PASSED:
-        return 0
-    if state.status in (Status.PENDING, Status.RUNNING):
-        return 0
-    return 1
+    return _render_status(state, args, wait_hint=f"gherkai status {args.run_id} --report-dir {args.report_dir} --wait")
 
 
 def _status_cloud(args) -> int:
@@ -420,7 +435,6 @@ def _status_cloud(args) -> int:
     避免无效 invoke；卡住（冷启动丢投卡 pending / 中途丢投卡 running）时 kickoff 救回。kickoff 幂等（CAS/HWM 兜底）。
     """
     import time as _time
-    from cli import detached
 
     resolved_profile = args.profile or os.environ.get("AWS_PROFILE")
     resolved_region = compose.resolve_region(args.region, resolved_profile)
@@ -476,16 +490,8 @@ def _status_cloud(args) -> int:
     if state is None:
         _progress(f"未找到 run：{args.run_id}（--prefix/--ddb-table 是否与 submit 一致？）")
         return 2
-    if args.json:
-        from core.serialize import run_state_to_dict
-        print(json.dumps(run_state_to_dict(state), ensure_ascii=False, indent=2))
-    else:
-        print(detached.render_run_state(state))
-    if state.status == Status.PASSED:
-        return 0
-    if state.status in (Status.PENDING, Status.RUNNING):
-        return 0
-    return 1
+    return _render_status(state, args,
+                          wait_hint=f"gherkai status {args.run_id} --backend cloud --prefix {prefix} --wait")
 
 
 def _cmd_reconcile(args, repo: Path) -> int:

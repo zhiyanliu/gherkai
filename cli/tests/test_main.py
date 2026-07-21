@@ -463,3 +463,52 @@ def test_prune_empty_dirs_keeps_nonempty(tmp_path):
 
 def test_prune_empty_dirs_noop_when_missing(tmp_path):
     m._prune_empty_dirs(tmp_path / "nonexistent")  # 不存在 → no-op、不抛
+
+
+# ---- _render_status：local/cloud 共享的渲染+提示+退出码（ADR 0034，两路一致）----
+def _mk_state(status):
+    from core.model import RunState, JobState
+    return RunState(run_id="r", status=status,
+                    jobs={"a": JobState("a", status)}, high_water_mark=0)
+
+
+def _args(wait=False, json_=False):
+    from types import SimpleNamespace
+    return SimpleNamespace(wait=wait, json=json_, run_id="r")
+
+
+def test_render_status_pending_hints_wait(capsys):
+    """pending + 非 --wait + 非 json → 打 --wait 接力提示（提示走 stderr）。退出码 0（查询本身成功）。"""
+    rc = m._render_status(_mk_state(Status.PENDING), _args(), wait_hint="gherkai status r --wait")
+    err = capsys.readouterr().err
+    assert "仍 pending" in err and "gherkai status r --wait" in err
+    assert rc == 0
+
+
+def test_render_status_running_no_hint(capsys):
+    """running → 不提示（在跑、正常）。退出码 0。"""
+    rc = m._render_status(_mk_state(Status.RUNNING), _args(), wait_hint="x")
+    assert "仍 pending" not in capsys.readouterr().err
+    assert rc == 0
+
+
+def test_render_status_terminal_no_hint_and_exitcode(capsys):
+    """终态：passed→0、failed/error→1，均不提示。"""
+    assert m._render_status(_mk_state(Status.PASSED), _args(), wait_hint="x") == 0
+    assert m._render_status(_mk_state(Status.FAILED), _args(), wait_hint="x") == 1
+    assert m._render_status(_mk_state(Status.ERROR), _args(), wait_hint="x") == 1
+    assert "仍 pending" not in capsys.readouterr().err
+
+
+def test_render_status_wait_pending_no_hint(capsys):
+    """--wait 下即使 pending 也不打提示（--wait 本身在接力、提示多余）。"""
+    m._render_status(_mk_state(Status.PENDING), _args(wait=True), wait_hint="x")
+    assert "仍 pending" not in capsys.readouterr().err
+
+
+def test_render_status_json_no_hint(capsys):
+    """--json（机读）：pending 也不打人读提示，且 stdout 是可解析 JSON。"""
+    m._render_status(_mk_state(Status.PENDING), _args(json_=True), wait_hint="x")
+    cap = capsys.readouterr()
+    assert "仍 pending" not in cap.err
+    json.loads(cap.out)  # stdout 是纯 JSON
