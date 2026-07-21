@@ -104,7 +104,7 @@ def test_ddb_multi_scope_records(events_table):
 # ---------- CloudLauncher ----------
 
 def test_cloud_launcher_calls_start_scope():
-    """CloudLauncher.launch → FargateEngine.start_scope（fire-and-forget，不轮询）。"""
+    """CloudLauncher.launch → resolver 选 engine → start_scope（fire-and-forget，不轮询）。"""
     from core.adapters.cloud_launcher import CloudLauncher
 
     class FakeEngine:
@@ -112,7 +112,7 @@ def test_cloud_launcher_calls_start_scope():
         def start_scope(self, job): self.started.append(job.scope_id); return "arn:task/x"
 
     eng = FakeEngine()
-    CloudLauncher(eng).launch(_job("a"))
+    CloudLauncher(lambda name: eng).launch(_job("a"))
     assert eng.started == ["a"]
 
 
@@ -133,7 +133,7 @@ def test_tick_with_ddb_backend(events_table, ddb_run_store):
         def __init__(self): self.started = []
         def start_scope(self, job): self.started.append(job.scope_id)
     eng = FakeEngine()
-    launcher = CloudLauncher(eng)
+    launcher = CloudLauncher(lambda name: eng)
 
     # tick1：起 a（CAS claim + launch）
     tick("run-1", meta, log, ddb_run_store, launcher, 1, now_iso="t1")

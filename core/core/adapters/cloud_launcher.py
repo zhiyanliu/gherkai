@@ -16,12 +16,18 @@ from core.model import Job
 
 
 class CloudLauncher:
-    """cloud Launcher：持一个 FargateEngine，launch=start_scope（fire-and-forget 起 task）。"""
+    """cloud Launcher：按 job.engine 选 FargateEngine（经注入的 resolver），launch=start_scope（fire-and-forget）。
 
-    def __init__(self, fargate_engine) -> None:
-        self._engine = fargate_engine
+    resolver 与 local SubprocessLauncher 的 resolver 同构（按 engine 名产 Engine）——cloud 的由
+    compose.build_fargate_engines + make_resolver 产（cloud FargateEngine 装配的单一真源，不在 launcher 重造），
+    故 job-in 前缀 / artifact 落点 / task-def·container 名 / SDK env 全与同步 cloud run 路径一致、零漂移。
+    """
+
+    def __init__(self, resolver) -> None:
+        self._resolver = resolver
 
     def launch(self, job: Job) -> None:
-        # fire-and-forget：起 task 就返回。task_arn 不在此保留——reconciler 靠 events 表（worker PutItem）+
-        # task_exited（退出观察者 Lambda 写）推进，不靠 launcher 持 task_arn 轮询（对照 local 也不持，一致）。
-        self._engine.start_scope(job)
+        # fire-and-forget：按 engine 取 FargateEngine、start_scope 起 task 就返回。task_arn 不在此保留——
+        # reconciler 靠 events 表（worker PutItem）+ task_exited（退出观察者 Lambda 写）推进，不靠 launcher 轮询。
+        engine = self._resolver(job.engine)
+        engine.start_scope(job)
