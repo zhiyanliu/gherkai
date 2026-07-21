@@ -444,19 +444,29 @@ def _status_cloud(args) -> int:
     if state == 2:
         return 2
     if args.wait:
-        # 接力循环：没到终态 → invoke 启动器 Lambda 踢一脚（幂等）→ sleep → 重读，直到终态。
+        # 接力循环：轮询到终态；**只在检测到「卡住」时才 invoke 启动器踢一脚**（非每轮无脑踢——正常推进时
+        # 云端链自跑、踢了也 no-op 白耗，对齐零空转，ADR 0034 三触发源 cloud 侧）。「卡住」= 状态连续 _STALL_KICK
+        # 轮无变化（记 (status, hwm) 快照比对）。检测纯本地内存比较、零额外 AWS 调用/权限。
+        _STALL_KICK = 3  # 连续 3 轮（约 9s）状态不变判卡住、踢一次（覆盖冷启动丢投卡 pending / 中途丢投卡 running）
         lam = None
+        last_snap = (state.status, state.high_water_mark) if state is not None else None
+        stall = 0
         while state is not None and state.status not in _TERMINAL:
-            if lam is None:
-                lam = compose._make_lambda_client(region=resolved_region, profile=resolved_profile)
-            try:
-                # payload {"run_id": ...}：启动器 _run_ids_from_runs_stream 认此「直接踢一脚」格式（区别于 Stream
-                # records），对该 run tick 起首批。异步 invoke（Event，踢一脚不等返回）。
-                lam.invoke(FunctionName=starter_fn, InvocationType="Event",
-                           Payload=json.dumps({"run_id": args.run_id}).encode())
-            except Exception as e:
-                if not _is_botocore_error(e):
-                    raise  # 非 AWS 错才抛；invoke 失败（如无权限）不致命——下轮重试/靠云端链
+            snap = (state.status, state.high_water_mark)
+            stall = stall + 1 if snap == last_snap else 0  # 有变化即重置（推进中不踢）
+            last_snap = snap
+            if stall >= _STALL_KICK:
+                if lam is None:
+                    lam = compose._make_lambda_client(region=resolved_region, profile=resolved_profile)
+                try:
+                    # payload {"run_id": ...}：启动器 _run_ids_from_runs_stream 认此「直接踢一脚」格式（区别于
+                    # Stream records），对该 run tick 起首批。异步 invoke（Event、不等返回）。
+                    lam.invoke(FunctionName=starter_fn, InvocationType="Event",
+                               Payload=json.dumps({"run_id": args.run_id}).encode())
+                except Exception as e:
+                    if not _is_botocore_error(e):
+                        raise  # 非 AWS 错才抛；invoke 失败（如无权限）不致命——下轮再判/靠云端链
+                stall = 0  # 踢完重置，给云端链时间响应（下一个 _STALL_KICK 窗口再判是否仍卡）
             _time.sleep(3.0)
             state = _read()
             if state == 2:
