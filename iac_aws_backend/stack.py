@@ -25,6 +25,10 @@ from aws_cdk import (
     aws_iam as iam,
     aws_ssm as ssm,
     aws_logs as logs,
+    aws_lambda as lambda_,
+    aws_events as events,
+    aws_events_targets as targets,
+    aws_lambda_event_sources as lambda_sources,
 )
 from constructs import Construct
 
@@ -47,6 +51,7 @@ class BackendStack(Stack):
         self._cluster(vpc)       # {prefix}cluster（RunTask 时 cli 按名指定，task-def 不绑 cluster）
         self._task_definitions()  # 2 引擎：ECR + task-def + task role
         self._ssm_network(vpc)   # 写 subnet/sg ID 供 cli 读
+        self._reconcile_lambdas(vpc)  # 无状态跑批（ADR 0034）：退出观察者 + reconciler 两 Lambda + EventBridge + Stream
 
     # ---- stopTimeout 解析（grace 真容器校准落点，ADR 0032）----
     def _resolve_stop_timeout(self) -> int:
@@ -77,7 +82,7 @@ class BackendStack(Stack):
     # ---- DynamoDB ×2 + S3 ×1（ADR 0033 资源清单；schema 与 core/tests/conftest.py fixture 一致）----
     def _storage(self) -> None:
         # runs 表（控制面/RunStore）：PK=run_id(S) / SK=item_type(S，值 META/STATE）。
-        dynamodb.Table(
+        self._runs_table = dynamodb.Table(
             self, "RunsTable",
             table_name=names.default_name(self.prefix, names.BASE_RUNS_TABLE),
             partition_key=dynamodb.Attribute(name="run_id", type=dynamodb.AttributeType.STRING),
@@ -87,18 +92,21 @@ class BackendStack(Stack):
         )
         # events 表（events-out）：PK=pk(S，run_id#scope_id) / SK=seq(N)；body 非键属性不声明。
         # 开 TTL：expires_at（worker 写 now+7d epoch 秒，ADR 0033/0024）自动过期旧事件。
-        dynamodb.Table(
+        # **开 Stream（NEW_IMAGE，ADR 0034）**：worker PutItem 执行事件 / 退出观察者写 task_exited → Stream 触发
+        # reconciler Lambda 推进（无状态跑批的事件驱动主链；同步 run 路径不消费 Stream，仍走 Query 轮询，ADR 0024）。
+        self._events_table = dynamodb.Table(
             self, "EventsTable",
             table_name=names.default_name(self.prefix, names.BASE_EVENTS_TABLE),
             partition_key=dynamodb.Attribute(name="pk", type=dynamodb.AttributeType.STRING),
             sort_key=dynamodb.Attribute(name="seq", type=dynamodb.AttributeType.NUMBER),
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
             time_to_live_attribute="expires_at",  # DDB TTL（ADR 0033）
+            stream=dynamodb.StreamViewType.NEW_IMAGE,  # ADR 0034：触发 reconciler Lambda
             removal_policy=RemovalPolicy.RETAIN,
         )
         # artifacts 桶：Result(jobs/) + Report(index/manifest) + offload(args/) + job-in + artifact-upload，
         # 全按 key 前缀 <report_dir>/<run_id>/ 分片。
-        s3.Bucket(
+        self._bucket = s3.Bucket(
             self, "ArtifactsBucket",
             bucket_name=names.default_name(self.prefix, names.BASE_BUCKET),
             block_public_access=s3.BlockPublicAccess.BLOCK_ALL,  # 安全：私有桶
@@ -151,6 +159,8 @@ class BackendStack(Stack):
                 iam.ManagedPolicy.from_aws_managed_policy_name("service-role/AmazonECSTaskExecutionRolePolicy"),
             ],
         )
+        self._execution_role = execution_role
+        self._task_roles: list[iam.Role] = []  # 供 reconciler Lambda PassRole（RunTask 传 task/execution role）
         for engine in names.ENGINES:
             self._one_task_def(engine, execution_role)
 
@@ -167,6 +177,7 @@ class BackendStack(Stack):
             assumed_by=iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
         )
         self._grant_task_role(task_role, engine)
+        self._task_roles.append(task_role)  # 供 reconciler Lambda PassRole（RunTask 传它给 worker task）
 
         # Nova 需更大 cpu/memory（playwright+chromium）；Midscene 亦跑 chromium。取 1vCPU/2GB 起步（真跑标定，
         # 属运维配置）。stopTimeout（SIGTERM→SIGKILL 宽限）= self.stop_timeout_s（默认 120s、-c stop_timeout= 覆盖，
@@ -295,6 +306,7 @@ class BackendStack(Stack):
             description=f"{self.prefix}fargate worker sg (egress only)",
             allow_all_outbound=True,
         )
+        self._sg = sg  # 存引用：reconciler Lambda 起 worker task 时用同一 sg（_worker_sg_id）
         ssm.StringListParameter(
             self, "SsmSubnets",
             parameter_name=names.ssm_subnets_path(self.prefix),
@@ -308,3 +320,139 @@ class BackendStack(Stack):
         # 诊断输出（cdk deploy 后打印，便于人工核对 cli --prefix 一致）
         CfnOutput(self, "Prefix", value=self.prefix)
         CfnOutput(self, "SubnetsSsmPath", value=names.ssm_subnets_path(self.prefix))
+
+    # ---- 无状态跑批（ADR 0034）：退出观察者 + reconciler 两 Lambda + EventBridge + DDB Stream ----
+    def _reconcile_lambdas(self, vpc: ec2.IVpc) -> None:
+        """事件驱动推进链（ADR 0034 端到端 cloud 流程）：
+
+        - **退出观察者 Lambda**：EventBridge ECS Task STOPPED 事件（本 cluster）触发 → 写 task_exited（机制二）。
+        - **reconciler Lambda**：events 表 Stream 触发 → reconcile.tick 推进 + finalize 聚合（机制三/四）。
+
+        Lambda 代码 = lambdas/ + core/core + cli/cli 打进一个 asset（gherkin-official 依赖 pip 装入；boto3 是
+        runtime 自带）。**复用同步 cloud run 的资源**（runs/events 表、桶、cluster、task-def、task/execution role）——
+        reconciler 起 worker task 与同步路径同一套（compose.build_fargate_engines 单一真源，见 lambdas/reconciler.py）。
+        """
+        cluster_name = names.default_name(self.prefix, names.BASE_CLUSTER)
+        code = lambda_.Code.from_asset(self._build_lambda_asset())
+        common_env = {
+            "RUNS_TABLE": names.default_name(self.prefix, names.BASE_RUNS_TABLE),
+            "EVENTS_TABLE": names.default_name(self.prefix, names.BASE_EVENTS_TABLE),
+            "ARTIFACTS_BUCKET": names.default_name(self.prefix, names.BASE_BUCKET),
+            "CLUSTER": cluster_name,
+            "PREFIX": self.prefix,
+            "REGION": self.region,
+        }
+
+        # ① 退出观察者 Lambda（薄；只 events 表 PutItem 写 task_exited）
+        exit_observer = lambda_.Function(
+            self, "ExitObserverFn",
+            function_name=f"{self.prefix}exit-observer",
+            runtime=lambda_.Runtime.PYTHON_3_13,
+            handler="exit_observer.handler",
+            code=code,
+            timeout=Duration.seconds(30),
+            environment=common_env,
+        )
+        self._events_table.grant_write_data(exit_observer)  # 写 task_exited（PutItem）
+        # EventBridge rule：本 cluster 的 ECS Task STOPPED → 退出观察者。event pattern 按 cluster 过滤（不误触别的负载）。
+        events.Rule(
+            self, "EcsStoppedRule",
+            rule_name=f"{self.prefix}ecs-stopped",
+            event_pattern=events.EventPattern(
+                source=["aws.ecs"],
+                detail_type=["ECS Task State Change"],
+                detail={
+                    "lastStatus": ["STOPPED"],
+                    "clusterArn": [f"arn:aws:ecs:{self.region}:{self.account}:cluster/{cluster_name}"],
+                },
+            ),
+            targets=[targets.LambdaFunction(exit_observer)],
+        )
+
+        # ② reconciler Lambda（重；读全量重放 + 起 task + finalize 聚合）
+        reconciler = lambda_.Function(
+            self, "ReconcilerFn",
+            function_name=f"{self.prefix}reconciler",
+            runtime=lambda_.Runtime.PYTHON_3_13,
+            handler="reconciler.handler",
+            code=code,
+            timeout=Duration.minutes(2),  # 起 task + 条件写；不等 worker 跑完（fire-and-forget）
+            memory_size=256,
+            environment={
+                **common_env,
+                "SUBNETS": ",".join(s.subnet_id for s in (vpc.public_subnets or vpc.private_subnets)),
+                "SECURITY_GROUPS": self._worker_sg_id,
+                "MAX_CONCURRENCY": "1",  # 稳态并发闸（可后续 context 化；每完成一个才起下一个）
+            },
+        )
+        # reconciler 权限：runs 表读写（RunState 条件写）+ events 表读（重放）+ 桶读写（ResultStore/ReportStore/job-in）
+        self._runs_table.grant_read_write_data(reconciler)
+        self._events_table.grant_read_data(reconciler)
+        self._bucket.grant_read_write(reconciler)
+        # 起 worker task：RunTask + PassRole（把 execution/task role 传给 task）+ DescribeTasks（兜底读退出码）。
+        task_def_arns = [
+            f"arn:aws:ecs:{self.region}:{self.account}:task-definition/{names.task_def_name(self.prefix, e)}:*"
+            for e in names.ENGINES
+        ]
+        reconciler.add_to_role_policy(iam.PolicyStatement(
+            actions=["ecs:RunTask"], resources=task_def_arns,
+        ))
+        reconciler.add_to_role_policy(iam.PolicyStatement(
+            actions=["ecs:DescribeTasks", "ecs:StopTask"],
+            resources=["*"],  # task ARN 运行期生成、无法预知；条件可加 cluster ARN，从简保留 *（只读/停本框架 task）
+        ))
+        # PassRole：RunTask 要把 execution role + 各 task role 传给起的 task——须显式授 iam:PassRole 到这些 role ARN。
+        reconciler.add_to_role_policy(iam.PolicyStatement(
+            actions=["iam:PassRole"],
+            resources=[self._execution_role.role_arn] + [r.role_arn for r in self._task_roles],
+        ))
+        # events 表 Stream → reconciler（NEW_IMAGE；worker PutItem / task_exited 触发推进）。
+        reconciler.add_event_source(lambda_sources.DynamoEventSource(
+            self._events_table,
+            starting_position=lambda_.StartingPosition.LATEST,
+            batch_size=10,
+            retry_attempts=2,
+        ))
+
+        CfnOutput(self, "ReconcilerFnName", value=reconciler.function_name)
+        CfnOutput(self, "ExitObserverFnName", value=exit_observer.function_name)
+
+    def _build_lambda_asset(self) -> str:
+        """把 Lambda 代码打包到一个目录，返回其路径（Code.from_asset 用）。
+
+        内容 = lambdas/*.py（handler）+ core/core（core 库）+ cli/cli（compose，reconciler 复用其
+        build_fargate_engines 单一真源）+ pip 装 gherkin-official（core 的唯一非 boto3 依赖；boto3 是 Lambda
+        runtime 自带、不打）。打到 iac_aws_backend/.lambda_build/（.gitignore；每次 synth 重建保新鲜）。
+        """
+        import os
+        import shutil
+        import subprocess
+
+        here = os.path.dirname(os.path.abspath(__file__))
+        repo = os.path.dirname(here)
+        build = os.path.join(here, ".lambda_build")
+        if os.path.exists(build):
+            shutil.rmtree(build)
+        os.makedirs(build)
+        # handler
+        shutil.copytree(os.path.join(repo, "lambdas"), build, dirs_exist_ok=True,
+                        ignore=shutil.ignore_patterns("__pycache__", ".gitignore", "tests"))
+        # core 库（core/core → build/core）+ cli 皮（cli/cli → build/cli）
+        shutil.copytree(os.path.join(repo, "core", "core"), os.path.join(build, "core"),
+                        ignore=shutil.ignore_patterns("__pycache__"))
+        shutil.copytree(os.path.join(repo, "cli", "cli"), os.path.join(build, "cli"),
+                        ignore=shutil.ignore_patterns("__pycache__"))
+        # 依赖：gherkin-official（core 唯一非 boto3 依赖）。boto3 runtime 自带、不装（省包体）。
+        # uv venv 默认无 pip，优先 `uv pip install --target`（uv 自带）；回退 `python -m pip`（普通 venv）。
+        import sys
+        dep = "gherkin-official>=31.0.0"
+        if shutil.which("uv"):
+            subprocess.run(["uv", "pip", "install", "--quiet", "--target", build, dep], check=True)
+        else:
+            subprocess.run([sys.executable, "-m", "pip", "install", "--quiet", "--target", build, dep], check=True)
+        return build
+
+    @property
+    def _worker_sg_id(self) -> str:
+        """worker 安全组 id——_ssm_network 建的 sg。存引用供 reconciler Lambda 起 task 用同一 sg。"""
+        return self._sg.security_group_id

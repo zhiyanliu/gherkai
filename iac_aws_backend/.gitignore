@@ -7,3 +7,4 @@ __pycache__/
 # 环境特定、非源、含账户信息，不提交；各账户部署时各自 lookup 重建。
 cdk.context.json
 
+.lambda_build/

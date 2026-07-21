@@ -211,9 +211,10 @@ def test_prefix_switches_whole_set():
 
 
 def test_execution_role_and_two_task_roles():
-    # 3 role：1 execution role（共享）+ 2 task role（每引擎分立，最小权限，ADR 0033）。
+    # 5 role：1 execution role（共享）+ 2 task role（每引擎分立，最小权限，ADR 0033）
+    #        + 2 Lambda 执行角色（退出观察者 + reconciler，CDK 自动建，ADR 0034）。
     t = _template()
-    t.resource_count_is("AWS::IAM::Role", 3)
+    t.resource_count_is("AWS::IAM::Role", 5)
 
 
 # ---- stopTimeout（grace 真容器校准入口，ADR 0032）----
@@ -286,3 +287,50 @@ def test_stop_timeout_rejects_bool_and_float_typed_context():
     for bad in (True, 90.5):
         with pytest.raises(ValueError, match="整数秒"):
             _template(context={"stop_timeout": bad})
+
+
+# ---- 无状态跑批事件驱动链（ADR 0034 P4c）----
+def test_reconcile_lambdas_present():
+    # 2 Lambda：退出观察者（ECS STOPPED→task_exited）+ reconciler（DDB Stream→推进+finalize）。
+    t = _template()
+    t.resource_count_is("AWS::Lambda::Function", 2)
+
+
+def test_events_table_has_stream():
+    # events 表开 Stream（NEW_IMAGE）触发 reconciler（ADR 0034）。runs 表不开（无需）。
+    t = _template()
+    t.has_resource_properties("AWS::DynamoDB::Table", {
+        "StreamSpecification": {"StreamViewType": "NEW_IMAGE"},
+    })
+
+
+def test_ecs_stopped_eventbridge_rule():
+    # EventBridge rule 捕本 cluster 的 ECS Task STOPPED（退出观察者触发源，机制二）。
+    t = _template()
+    t.has_resource_properties("AWS::Events::Rule", {
+        "EventPattern": {
+            "source": ["aws.ecs"],
+            "detail-type": ["ECS Task State Change"],
+            "detail": {"lastStatus": ["STOPPED"]},
+        },
+    })
+
+
+def test_stream_event_source_mapping_to_reconciler():
+    # DDB Stream → reconciler 的 event source mapping（无状态跑批推进主链）。
+    t = _template()
+    t.resource_count_is("AWS::Lambda::EventSourceMapping", 1)
+
+
+def test_reconciler_can_runtask_and_passrole():
+    # reconciler 权限含 ecs:RunTask + iam:PassRole（起 worker task + 传 execution/task role）。
+    t = _template()
+    # 找带 RunTask 的 policy（reconciler 起 worker）
+    t.has_resource_properties("AWS::IAM::Policy", Match.object_like({
+        "PolicyDocument": {
+            "Statement": Match.array_with([
+                Match.object_like({"Action": "ecs:RunTask"}),
+                Match.object_like({"Action": "iam:PassRole"}),
+            ]),
+        },
+    }))
