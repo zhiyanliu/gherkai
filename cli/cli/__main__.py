@@ -272,8 +272,9 @@ def _cmd_submit(args, repo: Path) -> int:
     """[无状态跑批] 提交完就走（ADR 0034）：plan → 写 RunMeta+全 pending → 起首轮推进 → 打印 run_id → 立即退出。
 
     - **local**：setsid fork per-run 进程跑 reconcile loop 本机推进（无需常驻服务/云）；崩了 status --wait 接力。
-    - **cloud**：create_run 到 DDB + 首批 RunTask 起 Fargate task（踢首轮）→ 之后云端 Lambda 事件驱动链推进
-      （ECS STOPPED→退出观察者→task_exited→Stream→reconciler），**提交完真关机也跑完**。CLI 不留本机进程。
+    - **cloud**：只 create_run 写 definition 到 DDB（不起 task）→ 之后云端 Lambda 事件驱动链推进
+      （runs Stream INSERT→kicker 起首批→events Stream→reconciler→…→finalize），**提交完真关机也跑完**。
+      CLI 不留本机进程、submit 机器零 ECS 权限。
     退出码 = 提交成功与否（非 run 判定；判定由 status 查）。
     """
     jobs = _load_and_plan(args, repo)
@@ -320,11 +321,11 @@ def _submit_local(args, repo: Path, run_id: str, run_meta, initial) -> int:
 
 
 def _submit_cloud(args, repo: Path, run_id: str, run_meta, initial) -> int:
-    """cloud submit：create_run 到 DDB + 首批 RunTask 踢首轮 → 云端 Lambda 事件驱动链接管推进。
+    """cloud submit：只 create_run 写 definition 到 DDB（不起 task）→ 云端 Lambda 事件驱动链接管推进。
 
-    首轮踢一脚（起首批 task）是必需的——纯事件驱动链的冷启动：无 events / 无 STOPPED，Stream/EventBridge
-    都不会触发第一次 reconciler。故 submit 调 reconcile.tick 一次（CAS 抢占起首批 ≤max_concurrency 个 task）；
-    之后首批 task 产 events → Stream → reconciler Lambda 接管（补起后续 / finalize）。CLI 起完首批即退、不留进程。
+    冷启动由 kicker Lambda 做：create_run 写 definition（INSERT）→ runs 表 Stream 触发 kicker → tick 起首批 →
+    events Stream → reconciler 接管（补起后续 / finalize）。submit 只写 DDB、不碰 ECS——机器权限收窄到只剩
+    「runs 表写 + preflight」（见下正文注释）。CLI 写完即退、不留本机进程。
     """
     resolved_profile = args.profile or os.environ.get("AWS_PROFILE")
     resolved_region = compose.resolve_region(args.region, resolved_profile)
@@ -348,7 +349,7 @@ def _submit_cloud(args, repo: Path, run_id: str, run_meta, initial) -> int:
         return 2
 
     # **只 create_run 写 definition 到 runs 表**——不起任何 task、不读 SSM 网络、不碰 ECS（ADR 0034）：
-    # 冷启动由启动器 Lambda 做（runs 表 Stream 的 INSERT 触发它 tick 起首批）。submit 机器权限面因此收窄到
+    # 冷启动由 kicker Lambda 做（runs 表 Stream 的 INSERT 触发它 tick 起首批）。submit 机器权限面因此收窄到
     # 只剩「runs 表写 + preflight（探表/桶/cluster 可达）」——无需 RunTask/PassRole/SSM 读，契合「提交完就走、
     # 只需提交那一下的最小权限」（受限 CI runner / 临时凭证场景）。之后全程云端 Lambda 链推进、不依赖 submit 机器。
     run_store, _rs, _rp, _mk = compose.build_cloud_stores(
@@ -356,14 +357,14 @@ def _submit_cloud(args, repo: Path, run_id: str, run_meta, initial) -> int:
         region=resolved_region, profile=resolved_profile,
     )
     try:
-        run_store.create_run(run_meta, initial)  # 写 definition（INSERT）→ runs Stream → 启动器 Lambda 冷启动
+        run_store.create_run(run_meta, initial)  # 写 definition（INSERT）→ runs Stream → kicker Lambda 冷启动
     except Exception as e:
         if _is_botocore_error(e):
             _progress(f"submit --backend cloud 云端不可达（表/桶/凭证/region）：{e}")
             return 2
         raise
 
-    _progress(f"已提交到云端（definition 已落库；启动器 Lambda 起首批、云端链推进中，可关机）。查进度：gherkai status {run_id} --backend cloud --prefix {prefix}")
+    _progress(f"已提交到云端（definition 已落库；kicker Lambda 起首批、云端链推进中，可关机）。查进度：gherkai status {run_id} --backend cloud --prefix {prefix}")
     print(run_id)
     return 0
 
@@ -371,8 +372,8 @@ def _submit_cloud(args, repo: Path, run_id: str, run_meta, initial) -> int:
 def _cmd_status(args, repo: Path) -> int:
     """[无状态跑批] 查 run 进度/结果。
 
-    - local：读文件 RunState；--wait 则接力 tick 到终态（三触发源之一，per-run 崩了人来查也能续）。
-    - cloud：读 DDB RunState（云端 Lambda 链推进，status 只读、不接力——推进不依赖本机）。
+    - local：读文件 RunState；--wait 则本机接力 tick 到终态（三触发源之一，per-run 崩了人来查也能续、须跑到底）。
+    - cloud：读 DDB RunState；--wait 则检测卡住时 invoke kicker Lambda 做 kickoff 接力（踢一脚即可、云端链自接管）。
     """
     from cli import detached
 
@@ -410,13 +411,13 @@ def _cmd_status(args, repo: Path) -> int:
 
 
 def _status_cloud(args) -> int:
-    """cloud status：读 DDB RunState 渲染。--wait 则无感接力兜底——每轮 invoke 启动器 Lambda 踢一脚 + 重读，
-    直到终态（ADR 0034 三触发源之一）。
+    """cloud status：读 DDB RunState 渲染。--wait 则无感接力兜底——**检测卡住才** invoke kicker Lambda 做 kickoff
+    + 重读，直到终态（ADR 0034 三触发源之一）。
 
-    **接力踢 Lambda（非本机 tick）保 status 机器零 ECS 权限**：起 task 走 Lambda 的角色（有 RunTask/PassRole），
-    status 机器只需 `lambda:InvokeFunction`。Lambda 名 `{prefix}starter` 从 --prefix 确定性推理（compose 单一命名
-    真源、cli↔IaC 同源）——用户无感。幂等安全：每轮无脑 invoke 启动器，正常在跑时 tick 无 pending 即 no-op（CAS/HWM
-    兜底），卡 pending（冷启动丢投）时救回。
+    **接力 invoke kicker（非本机 tick）保 status 机器零 ECS 权限**：起 task 走 Lambda 的角色（有 RunTask/PassRole），
+    status 机器只需 `lambda:InvokeFunction`。kicker 名 `{prefix}kicker` 从 --prefix 确定性推理（compose 单一命名
+    真源、cli↔IaC 同源）——用户无感。检测卡住（状态连续 K 轮无变化才 kickoff、非每轮无脑踢）：正常推进时不 kickoff、
+    避免无效 invoke；卡住（冷启动丢投卡 pending / 中途丢投卡 running）时 kickoff 救回。kickoff 幂等（CAS/HWM 兜底）。
     """
     import time as _time
     from cli import detached
@@ -425,7 +426,7 @@ def _status_cloud(args) -> int:
     resolved_region = compose.resolve_region(args.region, resolved_profile)
     prefix = args.prefix or os.environ.get("AWS_RESOURCE_PREFIX") or compose.DEFAULT_PREFIX
     table = args.ddb_table or os.environ.get("AWS_DDB_TABLE") or compose.default_name(prefix, compose._BASE_RUNS_TABLE)
-    starter_fn = compose.default_name(prefix, compose._BASE_STARTER_LAMBDA)  # {prefix}starter，推理出、无需用户配
+    kicker_fn = compose.default_name(prefix, compose._BASE_KICKER_LAMBDA)  # {prefix}kicker，推理出、无需用户配
 
     from core.adapters.run_store.ddb import DynamoDBRunStore
     run_store = DynamoDBRunStore(compose._make_ddb_table(table, region=resolved_region, profile=resolved_profile))
@@ -444,8 +445,8 @@ def _status_cloud(args) -> int:
     if state == 2:
         return 2
     if args.wait:
-        # 接力循环：轮询到终态；**只在检测到「卡住」时才 invoke 启动器踢一脚**（非每轮无脑踢——正常推进时
-        # 云端链自跑、踢了也 no-op 白耗，对齐零空转，ADR 0034 三触发源 cloud 侧）。「卡住」= 状态连续 _STALL_KICK
+        # 接力循环：轮询到终态；**只在检测到「卡住」时才 invoke kicker 做 kickoff**（非每轮无脑踢——正常推进时
+        # 云端链自跑、kickoff 也 no-op 白耗，对齐零空转，ADR 0034 三触发源 cloud 侧）。「卡住」= 状态连续 _STALL_KICK
         # 轮无变化（记 (status, hwm) 快照比对）。检测纯本地内存比较、零额外 AWS 调用/权限。
         _STALL_KICK = 3  # 连续 3 轮（约 9s）状态不变判卡住、踢一次（覆盖冷启动丢投卡 pending / 中途丢投卡 running）
         lam = None
@@ -459,14 +460,14 @@ def _status_cloud(args) -> int:
                 if lam is None:
                     lam = compose._make_lambda_client(region=resolved_region, profile=resolved_profile)
                 try:
-                    # payload {"run_id": ...}：启动器 _run_ids_from_runs_stream 认此「直接踢一脚」格式（区别于
+                    # payload {"run_id": ...}：kicker _run_ids_from_runs_stream 认此「直接 kickoff」格式（区别于
                     # Stream records），对该 run tick 起首批。异步 invoke（Event、不等返回）。
-                    lam.invoke(FunctionName=starter_fn, InvocationType="Event",
+                    lam.invoke(FunctionName=kicker_fn, InvocationType="Event",
                                Payload=json.dumps({"run_id": args.run_id}).encode())
                 except Exception as e:
                     if not _is_botocore_error(e):
                         raise  # 非 AWS 错才抛；invoke 失败（如无权限）不致命——下轮再判/靠云端链
-                stall = 0  # 踢完重置，给云端链时间响应（下一个 _STALL_KICK 窗口再判是否仍卡）
+                stall = 0  # kickoff 后重置，给云端链时间响应（下一个 _STALL_KICK 窗口再判是否仍卡）
             _time.sleep(3.0)
             state = _read()
             if state == 2:

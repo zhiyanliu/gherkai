@@ -82,16 +82,16 @@ class BackendStack(Stack):
     # ---- DynamoDB ×2 + S3 ×1（ADR 0033 资源清单；schema 与 core/tests/conftest.py fixture 一致）----
     def _storage(self) -> None:
         # runs 表（控制面/RunStore）：PK=run_id(S) / SK=item_type(S，值 META/STATE）。
-        # **开 Stream（NEW_IMAGE，ADR 0034）**：submit 的 create_run 写 definition（INSERT）→ 触发启动器 Lambda
-        # 冷启动（起首批 task）。启动器只被 INSERT 触发（filter 在 event source mapping），故 reconciler 之后写
-        # runs 表（MODIFY：project_state/finalize）不触发启动器——无自触发放大（ADR 0034 被拒方案）。
+        # **开 Stream（NEW_IMAGE，ADR 0034）**：submit 的 create_run 写 definition（INSERT）→ 触发 kicker Lambda
+        # 冷启动（起首批 task）。kicker 只被 INSERT 触发（filter 在 event source mapping），故 reconciler 之后写
+        # runs 表（MODIFY：project_state/finalize）不触发 kicker——无自触发放大（ADR 0034 被拒方案）。
         self._runs_table = dynamodb.Table(
             self, "RunsTable",
             table_name=names.default_name(self.prefix, names.BASE_RUNS_TABLE),
             partition_key=dynamodb.Attribute(name="run_id", type=dynamodb.AttributeType.STRING),
             sort_key=dynamodb.Attribute(name="item_type", type=dynamodb.AttributeType.STRING),
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
-            stream=dynamodb.StreamViewType.NEW_IMAGE,  # ADR 0034：INSERT 触发启动器 Lambda 冷启动
+            stream=dynamodb.StreamViewType.NEW_IMAGE,  # ADR 0034：INSERT 触发 kicker Lambda 冷启动
             removal_policy=RemovalPolicy.RETAIN,  # 保留数据、防误删（stack 销毁不带走表）
         )
         # events 表（events-out）：PK=pk(S，run_id#scope_id) / SK=seq(N)；body 非键属性不声明。
@@ -418,15 +418,15 @@ class BackendStack(Stack):
             retry_attempts=2,
         ))
 
-        # ③ 启动器 Lambda（冷启动，ADR 0034）：runs 表 Stream 的 **INSERT** 触发（submit create_run 写 definition）
-        #    → tick 起首批 task。复用 reconciler 的 code + 全套装配（同一 build_fargate_engines/tick），只是
-        #    handler=starter_handler、触发源=runs Stream INSERT。故它需要与 reconciler 相同的权限（起 task 等）。
-        starter = lambda_.Function(
-            self, "StarterFn",
-            function_name=f"{self.prefix}starter",  # 名与 cli compose._BASE_STARTER_LAMBDA 同源——cli status --wait 据 --prefix 推理出它 invoke 接力（ADR 0034）
-
+        # ③ kicker（踢启器）Lambda（冷启动 + status --wait kickoff，ADR 0034）：runs 表 Stream 的 **INSERT** 触发
+        #    （submit create_run 写 definition）+ status --wait 直接 invoke kickoff → tick 起首批 task。复用 reconciler
+        #    的 code + 全套装配（同一 build_fargate_engines/tick），只是 handler=kicker_handler、触发源=runs Stream
+        #    INSERT。分工：kicker「让 run 动起来」/ reconciler「推着走」。故它需要与 reconciler 相同的权限（起 task 等）。
+        kicker = lambda_.Function(
+            self, "KickerFn",
+            function_name=f"{self.prefix}kicker",  # 名与 cli compose._BASE_KICKER_LAMBDA 同源——cli status --wait 据 --prefix 推理出它 invoke kickoff（ADR 0034）
             runtime=lambda_.Runtime.PYTHON_3_13,
-            handler="reconciler.starter_handler",  # 同一 reconciler.py、不同入口
+            handler="reconciler.kicker_handler",  # 同一 reconciler.py、不同入口
             code=code,
             timeout=Duration.minutes(2),
             memory_size=256,
@@ -437,19 +437,19 @@ class BackendStack(Stack):
                 "MAX_CONCURRENCY": "1",
             },
         )
-        # 启动器权限 = reconciler 同款（起首批要 RunTask/PassRole/表桶）。
-        self._runs_table.grant_read_write_data(starter)
-        self._events_table.grant_read_data(starter)
-        self._bucket.grant_read_write(starter)
-        starter.add_to_role_policy(iam.PolicyStatement(actions=["ecs:RunTask"], resources=task_def_arns))
-        starter.add_to_role_policy(iam.PolicyStatement(
+        # kicker 权限 = reconciler 同款（起首批要 RunTask/PassRole/表桶）。
+        self._runs_table.grant_read_write_data(kicker)
+        self._events_table.grant_read_data(kicker)
+        self._bucket.grant_read_write(kicker)
+        kicker.add_to_role_policy(iam.PolicyStatement(actions=["ecs:RunTask"], resources=task_def_arns))
+        kicker.add_to_role_policy(iam.PolicyStatement(
             actions=["ecs:DescribeTasks", "ecs:StopTask"], resources=["*"]))
-        starter.add_to_role_policy(iam.PolicyStatement(
+        kicker.add_to_role_policy(iam.PolicyStatement(
             actions=["iam:PassRole"],
             resources=[self._execution_role.role_arn] + [r.role_arn for r in self._task_roles]))
-        # runs 表 Stream → 启动器，**仅 INSERT**（filter）：create_run 写 definition 触发冷启动；reconciler 之后写
+        # runs 表 Stream → kicker，**仅 INSERT**（filter）：create_run 写 definition 触发冷启动；reconciler 之后写
         # runs 表的 MODIFY（project_state/finalize）不触发——无自触发放大（ADR 0034 被拒方案）。
-        starter.add_event_source(lambda_sources.DynamoEventSource(
+        kicker.add_event_source(lambda_sources.DynamoEventSource(
             self._runs_table,
             starting_position=lambda_.StartingPosition.LATEST,
             batch_size=5,
@@ -459,7 +459,7 @@ class BackendStack(Stack):
 
         CfnOutput(self, "ReconcilerFnName", value=reconciler.function_name)
         CfnOutput(self, "ExitObserverFnName", value=exit_observer.function_name)
-        CfnOutput(self, "StarterFnName", value=starter.function_name)
+        CfnOutput(self, "KickerFnName", value=kicker.function_name)
 
     def _build_lambda_asset(self) -> str:
         """把 Lambda 代码打包到一个目录，返回其路径（Code.from_asset 用）。

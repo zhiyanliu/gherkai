@@ -104,25 +104,25 @@ def _finalize_artifacts(run_id, meta, event_log, result_store, report_store) -> 
 
 
 def _run_ids_from_runs_stream(event) -> set[str]:
-    """提取启动器要 tick 的 run_id 集。两种 event 源（启动器同时服务两者）：
+    """提取 kicker 要 tick 的 run_id 集。两种 event 源（kicker 同时服务两者）：
 
     ① runs 表 Stream（冷启动主路径）：`Records[].dynamodb.Keys.run_id`（runs 表 PK=run_id，非复合、直接取）。
-    ② 直接 invoke 的「踢一脚」（cloud `status --wait` 接力兜底，ADR 0034）：payload `{"run_id": "..."}`——
-       Stream 丢投卡 pending 时 status --wait 绕过 Stream 直接 invoke 启动器，故须认此格式（否则空转、救不了）。
+    ② 直接 invoke 的 kickoff（cloud `status --wait` 接力兜底，ADR 0034）：payload `{"run_id": "..."}`——
+       Stream 丢投卡 pending 时 status --wait 绕过 Stream 直接 invoke kicker，故须认此格式（否则空转、救不了）。
     """
     run_ids: set[str] = set()
     for rec in event.get("Records", []):  # ① Stream
         rid = rec.get("dynamodb", {}).get("Keys", {}).get("run_id", {}).get("S")
         if rid:
             run_ids.add(rid)
-    rid = event.get("run_id")  # ② 直接 invoke 踢一脚
+    rid = event.get("run_id")  # ② 直接 invoke kickoff
     if rid:
         run_ids.add(rid)
     return run_ids
 
 
 def _tick_runs(run_ids: set[str], label: str) -> dict:
-    """对每个 run tick 一步；done 则聚合收尾。reconciler（events Stream）与 starter（runs Stream）共用。"""
+    """对每个 run tick 一步；done 则聚合收尾。reconciler（events Stream）与 kicker（runs Stream）共用。"""
     from core.reconcile import tick
 
     for run_id in run_ids:
@@ -144,11 +144,14 @@ def handler(event, context):
     return _tick_runs(_run_ids_from_stream(event), "reconciler")
 
 
-def starter_handler(event, context):
-    """runs 表 Stream 入口（**仅 INSERT**，冷启动）：submit create_run 写 definition 即触发 → tick 起首批。
+def kicker_handler(event, context):
+    """kicker（踢启器）入口——两个触发源：runs 表 Stream 的 **INSERT**（冷启动：submit create_run 写 definition
+    即触发 → tick 起首批）+ status --wait 的直接 invoke kickoff（卡住救活：payload `{"run_id":...}`）。
 
-    与 reconciler 共用 tick（起首批 = tick 的 CAS start 分支）——四宿主一份 tick（submit-local / starter /
-    reconciler / status 接力）。启动器**只被 runs Stream 的 INSERT 触发**（filter 在 IaC 配），故 reconciler
+    与 reconciler 共用 tick（起首批 = tick 的 CAS start 分支）——四宿主一份 tick（submit-local / kicker /
+    reconciler / status 接力）。kicker **只被 runs Stream 的 INSERT 触发**（filter 在 IaC 配），故 reconciler
     之后写 runs 表（MODIFY）不触发它——无自触发放大（ADR 0034 被拒方案「runs Stream 触发 reconciler」）。
+    与 reconciler 的分工：kicker 负责「让 run 动起来」（冷启动第一脚 + 卡住时补 kickoff），reconciler 负责
+    「推着走」（events Stream 持续推进）。
     """
-    return _tick_runs(_run_ids_from_runs_stream(event), "starter")
+    return _tick_runs(_run_ids_from_runs_stream(event), "kicker")

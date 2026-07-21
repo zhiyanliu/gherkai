@@ -51,9 +51,9 @@ _BASE_RUNS_TABLE = "runs"
 _BASE_EVENTS_TABLE = "events"
 _BASE_BUCKET = "artifacts"
 _BASE_CLUSTER = "cluster"
-# 无状态跑批 Lambda 基名（ADR 0034）：CDK 建 `{prefix}starter`（stack.py 用同名），cli status --wait 据 --prefix
-# 推理出它 invoke 接力（Lambda 名单一真源、cli↔IaC 同源）。改这里必同步改 stack.py 的 f"{prefix}starter"。
-_BASE_STARTER_LAMBDA = "starter"
+# 无状态跑批 kicker（踢启器）Lambda 基名（ADR 0034）：CDK 建 `{prefix}kicker`（stack.py 用同名），cli status
+# --wait 据 --prefix 推理出它 invoke 接力 kickoff（Lambda 名单一真源、cli↔IaC 同源）。改这里必同步改 stack.py。
+_BASE_KICKER_LAMBDA = "kicker"
 # task-def / container：按 job.engine 拼 `{prefix}{engine}-worker`（对称 EngineResolver 按 engine 选）。
 _ENGINES = ("novaact", "midscene")
 
@@ -374,7 +374,7 @@ def _make_ssm_client(*, region, profile):
 
 
 def _make_lambda_client(*, region, profile):
-    """boto3 lambda client（cloud status --wait 接力 invoke 启动器 Lambda 踢一脚，ADR 0034）。"""
+    """boto3 lambda client（cloud status --wait 接力 invoke kicker Lambda 做 kickoff，ADR 0034）。"""
     import boto3
     return boto3.session.Session(profile_name=profile, region_name=region).client("lambda")
 

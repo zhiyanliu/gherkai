@@ -32,10 +32,10 @@
 ```
 gherkai submit <features> --backend cloud
    → plan → create_run 写 RunMeta+全 pending → 打印 run_id → 退出(0)
-     （只写 DDB、不起 task——冷启动交启动器 Lambda，见下 cloud 端到端流程；local 则 fork per-run 进程推进）
+     （只写 DDB、不起 task——冷启动交kicker Lambda，见下 cloud 端到端流程；local 则 fork per-run 进程推进）
 gherkai status <run_id> [--wait]
    → 不带 --wait：读 RunState 渲染一次
-   → 带 --wait：轮询到终态；期间接力推进——**local=本机跑 tick 到底 / cloud=invoke 启动器 Lambda 踢一脚**
+   → 带 --wait：轮询到终态；期间接力推进——**local=本机跑 tick 到底 / cloud=invoke kicker Lambda kickoff**
      （机制与「本机是否须跑到底」的不对称见下「推进的三个触发源」）
 gherkai run <features>    # 原阻塞皮 = submit + 同进程 status --wait，行为不变
 ```
@@ -50,10 +50,10 @@ gherkai run <features>    # 原阻塞皮 = submit + 同进程 status --wait，�
 
 ```
 1. submit(CLI)：plan → create_run 写 RunMeta+全 pending 到 runs 表 → CLI 退出（run_id 已在手）。
-   **只写 DDB、不起任何 task**——submit 机器权限面仅「runs 表写 + preflight」，不碰 ECS RunTask（冷启动由启动器 Lambda 做，见下）。
-1b. runs 表 Stream（**仅 INSERT**）→ [启动器 Lambda]：新 run 的 definition 落库即触发 → tick 起首批
+   **只写 DDB、不起任何 task**——submit 机器权限面仅「runs 表写 + preflight」，不碰 ECS RunTask（冷启动由kicker Lambda 做，见下）。
+1b. runs 表 Stream（**仅 INSERT**）→ [kicker Lambda]：新 run 的 definition 落库即触发 → tick 起首批
      min(max_concurrency, |jobs|) 个 task（CAS 抢占）。这是纯事件驱动链的**冷启动**（无此步则无 events/无 STOPPED，
-     events Stream 永不触发第一次 reconciler）。启动器复用同一 `reconcile.tick`（四宿主一份：submit-local / 启动器 /
+     events Stream 永不触发第一次 reconciler）。kicker复用同一 `reconcile.tick`（四宿主一份：submit-local / kicker /
      reconciler / status 接力）。
 2. worker 云上跑（CLI 退出不杀 task，已实测）：PutItem 执行事件(seq 递增)→events 表；上传产物→S3
 3. task STOPPED → ECS 自动发 "Task State Change: STOPPED" 事件 → EventBridge
@@ -89,9 +89,9 @@ per-run 进程（观察者+reconciler 三合一）：spawn worker 子进程
 1. **主力**：cloud=DDB Stream 事件 / local=per-run 进程——正常一路推完。
 2. **兜底/接力**：`status --wait`——per-run 进程崩、或 Stream 偶发断链/丢投时，人来查即接力推（状态全持久、tick 幂等，断点续）。**local 与 cloud 的接力机制本质不对称（关键，勿混）**：
    - **local 接力 = 本机进程亲自跑 tick**（spawn subprocess worker、读 SQLite、finalize）。**推进全靠这个本机进程**——掐掉即停（local 无云端接管者）。故 local 必须**有本机进程真跑到终态**：要么 submit fork 的 per-run 进程，要么 per-run 崩后 `status --wait` 顶上、且**必须一直 wait 到底**。
-   - **cloud 接力 = 检测卡住才异步 fire-and-forget invoke 启动器 Lambda**（`InvocationType=Event`、不等返回）。**踢一脚（秒级）即完成救活**——此后即便退出 `status`，云端 Lambda 链（启动器起首批 → events Stream → reconciler）自接管跑完，**不依赖本机 status 进程存活**。**「检测卡住」= 状态连续 K 轮无变化才踢**（记住上轮 `(status, high_water_mark)`，连续 K 轮不变→判卡住→invoke 一次→重置）——**非每轮无脑踢**：run 正常推进（hwm 在涨/态在变）时一次都不踢，只在真卡住（冷启动丢投卡 pending、或中途丢投卡 running）时踢。避免正常路径下 N 次无效 invoke（启动器 tick 发现无 pending 即 no-op、白白重放读 DDB）——对齐「零空转、只在真需要时动」的事件驱动精神（[CLAUDE.md「工作方式」：交付物运行成本是设计约束]，同否决定时器轮询的理由）。检测是纯客户端内存比较、零额外 AWS 调用/权限。保 status 机器零 ECS 权限（起 task 走 Lambda 角色）；Lambda 名从 `--prefix` 推理、用户无感。
-   - **一句话**：cloud「踢一脚即可离场」/ local「本机必须跑到底」。根因在**主推进器位置**（cloud 云端 Lambda / local 本机进程，见 1.）——三触发源「齐备」是表层对称，「本机是否必须跑到底」才是里层不对称。
-3. 三者同时触发也无害——靠下面 CAS + HWM 条件写。**`status` 对 cloud 是可选的查看+崩溃踢一脚（非推进链必需环，云端链才是）；对 local，per-run 崩后 status --wait 是唯一本机推进者、此时反而是必需环**。
+   - **cloud 接力 = 检测卡住才异步 fire-and-forget invoke kicker Lambda**（`InvocationType=Event`、不等返回）。**kickoff（秒级）即完成救活**——此后即便退出 `status`，云端 Lambda 链（kicker起首批 → events Stream → reconciler）自接管跑完，**不依赖本机 status 进程存活**。**「检测卡住」= 状态连续 K 轮无变化才踢**（记住上轮 `(status, high_water_mark)`，连续 K 轮不变→判卡住→invoke 一次→重置）——**非每轮无脑踢**：run 正常推进（hwm 在涨/态在变）时一次都不踢，只在真卡住（冷启动丢投卡 pending、或中途丢投卡 running）时踢。避免正常路径下 N 次无效 invoke（kicker tick 发现无 pending 即 no-op、白白重放读 DDB）——对齐「零空转、只在真需要时动」的事件驱动精神（[CLAUDE.md「工作方式」：交付物运行成本是设计约束]，同否决定时器轮询的理由）。检测是纯客户端内存比较、零额外 AWS 调用/权限。保 status 机器零 ECS 权限（起 task 走 Lambda 角色）；Lambda 名从 `--prefix` 推理、用户无感。
+   - **一句话**：cloud「kickoff即可离场」/ local「本机必须跑到底」。根因在**主推进器位置**（cloud 云端 Lambda / local 本机进程，见 1.）——三触发源「齐备」是表层对称，「本机是否必须跑到底」才是里层不对称。
+3. 三者同时触发也无害——靠下面 CAS + HWM 条件写。**`status` 对 cloud 是可选的查看+崩溃kickoff（非推进链必需环，云端链才是）；对 local，per-run 崩后 status --wait 是唯一本机推进者、此时反而是必需环**。
 
 ## 四个关键机制（机制二/三/四有地基实测支撑；机制一是从 [0024](./0024-worker-core-protocol.md) seq 不变量推导的设计约束，无独立实测）
 
@@ -175,14 +175,14 @@ moto 立即返回测不到事件投递/并发时序，健康网真跑不触发�
 - **reconciler 靠全量重放天然幂等、投影写不加版本守卫**：拒——并发实例 stale 快照 lost-update 能把 finalized run 刷回 running；全量重放只保证派生幂等、不保证跨实例写序（机制三）。
 - **把 CAS+RunTask+PutItem 与归约合成单一 core reconciler 组件**：拒——逼 core 持 store + 依赖执行环境、Engine port 长出启 task 职责，破 [0026](./0026-schedule-module.md) 纯 reducer（core 拆分节）。
 - **让每个消费者各自 `project(events)→RunState`（绕过单一 reconciler 写者、如为求新鲜度让 `status` 直接投演 events）**：拒——多份推演逻辑必漂移（同一 events 在 status/WebUI/reconciler 各推一版、口径迟早分叉）；且各消费者写 RunState 会破单写者与 HWM/状态机条件写前提。外部只读 RunState、推演只在 reconciler 一处（「核心思想」单一读接口不变量）。
-- **cloud submit 由 CLI 直接起首批 task（冷启动）**：拒（施工 P4d 初版这么做、后改）——让 submit 机器背 `ecs:RunTask` 权限，与本设计卖点「提交完就走、只需提交那一下的最小权限」相悖：submit 机器权限面越小越好（受限 CI runner / 临时凭证场景）。改由**启动器 Lambda** 冷启动（见下），submit 机器权限收窄到只剩「runs 表写 + preflight」、不碰 ECS。
-- **runs 表 Stream 直接触发 reconciler（复用同一 Lambda 做冷启动）**：拒——**自触发放大**：reconciler 每次推进都写 runs 表（`project_state` 条件写 + `finalize`），若 runs Stream 触发 reconciler，则它写 runs → 又触发自己 → 每个 run 生命周期空转 N 次（tick 幂等使无害、但持续无效唤醒 + 全量重放读放大）。用 Stream `INSERT`-only filter 能压，但那是「用 filter 补救本可避免的耦合」。改用**专用启动器 Lambda**（只被 runs Stream 的 INSERT 触发、只起首批、**不写 runs 表**）——职责单一、无自触发，与退出观察者「专用薄 Lambda」同模式。reconciler 只被 events Stream 触发（worker 有进展才推进），两触发源职责不交叉。
+- **cloud submit 由 CLI 直接起首批 task（冷启动）**：拒（施工 P4d 初版这么做、后改）——让 submit 机器背 `ecs:RunTask` 权限，与本设计卖点「提交完就走、只需提交那一下的最小权限」相悖：submit 机器权限面越小越好（受限 CI runner / 临时凭证场景）。改由**kicker Lambda** 冷启动（见下），submit 机器权限收窄到只剩「runs 表写 + preflight」、不碰 ECS。
+- **runs 表 Stream 直接触发 reconciler（复用同一 Lambda 做冷启动）**：拒——**自触发放大**：reconciler 每次推进都写 runs 表（`project_state` 条件写 + `finalize`），若 runs Stream 触发 reconciler，则它写 runs → 又触发自己 → 每个 run 生命周期空转 N 次（tick 幂等使无害、但持续无效唤醒 + 全量重放读放大）。用 Stream `INSERT`-only filter 能压，但那是「用 filter 补救本可避免的耦合」。改用**专用kicker Lambda**（只被 runs Stream 的 INSERT 触发、只起首批、**不写 runs 表**）——职责单一、无自触发，与退出观察者「专用薄 Lambda」同模式。reconciler 只被 events Stream 触发（worker 有进展才推进），两触发源职责不交叉。
 - **定时器轮询推进**（EventBridge scheduled rule 每 N 秒 tick）：拒——idle 也 fire、空转烧钱，且要权衡「间隔短=延迟低但费 / 间隔长=省但收尾慢」这个不该存在的取舍。改用 ECS Task State Change + DDB Stream 事件驱动，idle 零调用（端到端流程 cloud）。
 - **per-run 推进器也给 cloud**：拒（用户定）——cloud「扣笔记本下班」场景只靠 IaC 部署的事件驱动链，本机不留常驻推进器；per-run 仅 local 用。
 
 ## 重议闸门
 
 - **level Stream/事件偶发丢投致级联断裂成真痛点** → 加安全网：submit 时 enable、finalize 时 disable 的**动态定时兜底规则**（仅在有活跑批时低频轮询、真 idle 时规则禁用=仍零调用），比常开定时器省。当前靠 `status --wait` 接力兜底，先不做。
-  - **cloud 冷启动/中途丢投由 `status --wait` 无感接力兜底（施工 P4d 真跑遇到、已解决）**：任何事件丢投（首个 runs-INSERT 漏 → 卡 pending、无第二触发源踢；或中途 events 丢投 → 级联断）都由 cloud `status --wait` 兜底——它**检测卡住（状态连续 K 轮无变化）才** invoke 启动器 Lambda 踢一脚（**异步 fire-and-forget、秒级一脚即救活**，之后云端链自接管、可退出 status，见上「三触发源」cloud 侧；正常推进时不踢、避免无效 invoke）。踢 Lambda（非本机 tick）保「status 机器零 ECS 权限」：起 task 走 Lambda 的角色（有 RunTask/PassRole），status 机器只需 `lambda:InvokeFunction`。**Lambda 名从 `--prefix` 确定性推理**（`{prefix}starter`，复用 `names` 单一命名真源、cli↔IaC 同源，ADR 0033）——用户无需配、无感。幂等安全：无脑 invoke 启动器，正常在跑时 tick 发现无 pending 即 no-op（CAS 挡重复起 / HWM 挡 stale，P2/P3 真 DDB 验），卡住时救回。故三触发源在 cloud 完整齐备：启动器（冷启动）/ reconciler（events Stream 主推进）/ `status --wait`（人工接力踢一脚）——**触发源齐备度与 local 对称，但「本机是否必须跑到底」不对称**（cloud 踢完可离场 / local 须本机跑到终态，见上「三触发源」2.）。**卡死救活已真验（施工确定性复现）**：临时禁用启动器的 runs-Stream event-source-mapping 模拟丢投 → submit 必卡 pending（启动器收不到 INSERT、无第二触发源）→ `status --wait` invoke 启动器直接踢 → pending→running→passed 救活、`status --wait` 正常返回。此真验还抓出并修了一个真 bug：启动器原只认 Stream records 的 event 格式、忽略直接 invoke 的 `{"run_id":...}` payload → status --wait 的 invoke 空转救不了（`runs:[]`）；修为 `_run_ids_from_runs_stream` 兼容两种 event 源（Stream records + 直接踢一脚）。
+  - **cloud 冷启动/中途丢投由 `status --wait` 无感接力兜底（施工 P4d 真跑遇到、已解决）**：任何事件丢投（首个 runs-INSERT 漏 → 卡 pending、无第二触发源踢；或中途 events 丢投 → 级联断）都由 cloud `status --wait` 兜底——它**检测卡住（状态连续 K 轮无变化）才** invoke kicker Lambda kickoff（**异步 fire-and-forget、秒级一脚即救活**，之后云端链自接管、可退出 status，见上「三触发源」cloud 侧；正常推进时不踢、避免无效 invoke）。踢 Lambda（非本机 tick）保「status 机器零 ECS 权限」：起 task 走 Lambda 的角色（有 RunTask/PassRole），status 机器只需 `lambda:InvokeFunction`。**kicker 名从 `--prefix` 确定性推理**（`{prefix}kicker`，复用 `names` 单一命名真源、cli↔IaC 同源，ADR 0033）——用户无需配、无感。幂等安全：invoke kicker，正常在跑时 tick 发现无 pending 即 no-op（CAS 挡重复起 / HWM 挡 stale，P2/P3 真 DDB 验），卡住时救回。故三触发源在 cloud 完整齐备：kicker（冷启动）/ reconciler（events Stream 主推进）/ `status --wait`（人工接力 kickoff）——**触发源齐备度与 local 对称，但「本机是否必须跑到底」不对称**（cloud kickoff 完可离场 / local 须本机跑到终态，见上「三触发源」2.）。**卡死救活已真验（施工确定性复现）**：临时禁用 kicker 的 runs-Stream event-source-mapping 模拟丢投 → submit 必卡 pending（kicker 收不到 INSERT、无第二触发源）→ `status --wait` invoke kicker kickoff → pending→running→passed 救活、`status --wait` 正常返回。此真验还抓出并修了一个真 bug：kicker 原只认 Stream records 的 event 格式、忽略直接 invoke 的 `{"run_id":...}` payload → status --wait 的 invoke 空转救不了（`runs:[]`）；修为 `_run_ids_from_runs_stream` 兼容两种 event 源（Stream records + 直接 kickoff）。
 - **常驻调度服务 / WebUI 真需要** → RunState 读模型 + reconciler 已就位，加 adapter/宿主即可（[0016](./0016-execution-architecture-core-lib-run-model.md)「加 adapter + 换注入」在 (a) 类仍成立）。
 - **本地 events sink 选型**：定 **SQLite**（表结构镜像 DDB events：PK=scope_id/SK=seq；`UPDATE...WHERE` 让 local 复刻 HWM 条件写、与 cloud 心智对称）。被拒 append-only JSONL——虽最简无依赖，但并发读写只能靠 append 原子性 + 容忍半行，无事务保证、无法复刻条件写逻辑。

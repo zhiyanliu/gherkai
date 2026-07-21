@@ -212,7 +212,7 @@ def test_prefix_switches_whole_set():
 
 def test_execution_role_and_two_task_roles():
     # 6 role：1 execution role（共享）+ 2 task role（每引擎分立，最小权限，ADR 0033）
-    #        + 3 Lambda 执行角色（退出观察者 + reconciler + 启动器，CDK 自动建，ADR 0034）。
+    #        + 3 Lambda 执行角色（退出观察者 + reconciler + kicker，CDK 自动建，ADR 0034）。
     t = _template()
     t.resource_count_is("AWS::IAM::Role", 6)
 
@@ -292,7 +292,7 @@ def test_stop_timeout_rejects_bool_and_float_typed_context():
 # ---- 无状态跑批事件驱动链（ADR 0034 P4c）----
 def test_reconcile_lambdas_present():
     # 3 Lambda：退出观察者（ECS STOPPED→task_exited）+ reconciler（events Stream→推进+finalize）
-    #          + 启动器（runs Stream INSERT→冷启动起首批，ADR 0034）。
+    #          + kicker（runs Stream INSERT→冷启动起首批，ADR 0034）。
     t = _template()
     t.resource_count_is("AWS::Lambda::Function", 3)
 
@@ -318,7 +318,7 @@ def test_ecs_stopped_eventbridge_rule():
 
 
 def test_stream_event_source_mapping_to_reconciler():
-    # 2 event source mapping：events Stream→reconciler（推进主链）+ runs Stream INSERT→starter（冷启动，ADR 0034）。
+    # 2 event source mapping：events Stream→reconciler（推进主链）+ runs Stream INSERT→kicker（冷启动，ADR 0034）。
     t = _template()
     t.resource_count_is("AWS::Lambda::EventSourceMapping", 2)
 
@@ -337,18 +337,18 @@ def test_reconciler_can_runtask_and_passrole():
     }))
 
 
-def test_runs_table_has_stream_for_starter():
-    # runs 表开 Stream（冷启动：submit create_run INSERT → 启动器，ADR 0034）。两表都开 Stream。
+def test_runs_table_has_stream_for_kicker():
+    # runs 表开 Stream（冷启动：submit create_run INSERT → kicker，ADR 0034）。两表都开 Stream。
     t = _template()
     t.resource_count_is("AWS::DynamoDB::Table", 2)
-    # 至少一张表（runs）的 Stream 供启动器；events 表 Stream 供 reconciler（前面 test 已验其一）——此处验两张都开
+    # 至少一张表（runs）的 Stream 供kicker；events 表 Stream 供 reconciler（前面 test 已验其一）——此处验两张都开
     streams = [tbl for tbl in t.find_resources("AWS::DynamoDB::Table").values()
                if tbl["Properties"].get("StreamSpecification", {}).get("StreamViewType") == "NEW_IMAGE"]
     assert len(streams) == 2, f"runs+events 两表都应开 Stream，实际 {len(streams)}"
 
 
-def test_starter_mapping_insert_filter():
-    # 启动器的 event source mapping 带 INSERT-only filter（防 reconciler 写 runs 表 MODIFY 自触发放大，ADR 0034）。
+def test_kicker_mapping_insert_filter():
+    # kicker的 event source mapping 带 INSERT-only filter（防 reconciler 写 runs 表 MODIFY 自触发放大，ADR 0034）。
     t = _template()
     mappings = t.find_resources("AWS::Lambda::EventSourceMapping")
     insert_filtered = []
@@ -357,4 +357,4 @@ def test_starter_mapping_insert_filter():
         for f in crit.get("Filters", []):
             if "INSERT" in f.get("Pattern", ""):
                 insert_filtered.append(m)
-    assert len(insert_filtered) == 1, f"应恰有 1 个 INSERT-filter mapping（启动器），实际 {len(insert_filtered)}"
+    assert len(insert_filtered) == 1, f"应恰有 1 个 INSERT-filter mapping（kicker），实际 {len(insert_filtered)}"
