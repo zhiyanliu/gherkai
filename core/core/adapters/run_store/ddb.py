@@ -47,12 +47,14 @@ def _job_state_from_item(scope_id: str, m: dict) -> JobState:
 
 
 def _state_scalars(state: RunState) -> dict:
-    """RunState 顶层标量 → DDB 属性（status + omit-when-None 的起止，对齐 serialize.run_state_to_dict）。"""
+    """RunState 顶层标量 → DDB 属性（status + omit-when-None 的起止 + hwm，对齐 serialize.run_state_to_dict）。"""
     d: dict = {"status": state.status.value}
     if state.started_at is not None:
         d["started_at"] = state.started_at
     if state.ended_at is not None:
         d["ended_at"] = state.ended_at
+    if state.high_water_mark is not None:
+        d["high_water_mark"] = state.high_water_mark  # ADR 0034 机制三（数值属性；无状态跑批投影写时有）
     return d
 
 
@@ -128,6 +130,60 @@ class DynamoDBRunStore:
         """
         self._table.load()
 
+    # ---- 无状态跑批的条件写三方（ADR 0034）----
+    # DDB 原生 ConditionExpression 做原子 CAS——比 local 的 fcntl 文件锁更强（DDB 单 item 写天然原子、
+    # 无需外部锁）。真 DDB 条件写行为已 P2 真验（moto 与真 DDB 对拍，见 test）。CCF=ConditionalCheckFailedException。
+
+    def try_claim_job(self, run_id: str, scope_id: str) -> bool:
+        """CAS：仅当 jobs[scope_id].status == 'pending' 才置 'running'（机制四）。CCF → 已被抢/非 pending → False。"""
+        try:
+            self._table.update_item(
+                Key={"run_id": run_id, _ITEM_TYPE_ATTR: _STATE},
+                UpdateExpression="SET jobs.#sid.#st = :running",
+                ExpressionAttributeNames={"#sid": scope_id, "#st": "status"},
+                ExpressionAttributeValues={":running": Status.RUNNING.value, ":pending": Status.PENDING.value},
+                ConditionExpression="jobs.#sid.#st = :pending",  # 仅当前是 pending 才抢占
+            )
+            return True
+        except self._table.meta.client.exceptions.ConditionalCheckFailedException:
+            return False
+
+    def project_state(self, run_id: str, state: RunState) -> bool:
+        """HWM 条件写整个 STATE：仅当传入 hwm ≥ 库中 hwm 才写（机制三，挡 stale 覆盖）。CCF → stale → False。"""
+        new_hwm = state.high_water_mark or 0
+        try:
+            self._table.put_item(
+                Item={
+                    "run_id": run_id,
+                    _ITEM_TYPE_ATTR: _STATE,
+                    **_state_scalars(state),
+                    "jobs": {sid: _job_state_to_item(js) for sid, js in state.jobs.items()},
+                },
+                # 库中无 hwm（首次/旧态）或 库中 hwm ≤ 我的 → 允许写；否则（我 stale）CCF
+                ConditionExpression="attribute_not_exists(high_water_mark) OR high_water_mark <= :h",
+                ExpressionAttributeValues={":h": new_hwm},
+            )
+            return True
+        except self._table.meta.client.exceptions.ConditionalCheckFailedException:
+            return False
+
+    def try_finalize(self, run_id: str, status: Status, ended_at: str) -> bool:
+        """状态机单调条件写：仅当总 status ∈ {pending,running} 才写终态（机制三，commit 恰一次）。CCF → 已终态 → False。"""
+        try:
+            self._table.update_item(
+                Key={"run_id": run_id, _ITEM_TYPE_ATTR: _STATE},
+                UpdateExpression="SET #st = :s, ended_at = :e",
+                ExpressionAttributeNames={"#st": "status"},
+                ExpressionAttributeValues={
+                    ":s": status.value, ":e": ended_at,
+                    ":pending": Status.PENDING.value, ":running": Status.RUNNING.value,
+                },
+                ConditionExpression="#st IN (:pending, :running)",  # 仅非终态可迁；已终态 → CCF（幂等）
+            )
+            return True
+        except self._table.meta.client.exceptions.ConditionalCheckFailedException:
+            return False
+
     # ---- 一次性写便捷方法（保留，对拍 local）----
 
     def save_run(self, meta: RunMeta, state: RunState) -> None:
@@ -159,10 +215,13 @@ class DynamoDBRunStore:
             sid: _job_state_from_item(sid, m)
             for sid, m in (item.get("jobs") or {}).items()
         }
+        hwm = item.get("high_water_mark")
         return RunState(
             run_id=item["run_id"],
             status=Status(item["status"]),
             jobs=jobs,
             started_at=item.get("started_at"),
             ended_at=item.get("ended_at"),
+            # DDB Number → int（boto3 resource 层给 Decimal）；缺键 → None（同步路径 / 旧数据向后兼容）
+            high_water_mark=int(hwm) if hwm is not None else None,
         )

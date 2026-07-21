@@ -96,7 +96,7 @@ class RunStore(Protocol):
     save_run 保留作「一次性写完整态」便捷方法（可由 create_run+finalize 组合）。
     """
 
-    # —— 实时写三段（ADR 0030）——
+    # —— 实时写三段（ADR 0030，同步 run 路径；单进程内 RunPersistence._lock 串行、不带条件）——
     def create_run(self, meta: RunMeta, initial_state: RunState) -> None: ...
     def update_job_state(self, run_id: str, job_state: JobState) -> None: ...
     def finalize_run(self, run_id: str, status: Status, ended_at: str) -> None: ...
@@ -107,6 +107,33 @@ class RunStore(Protocol):
     # —— 探活（ADR 0030 决定七）：begin 前探底层可达（云端探表/桶），配置错一律 begin 暴露→退 2；
     #    local adapter no-op（本地无「表不存在」问题）。RunPersistence.begin 在 create_run 前调。——
     def preflight(self) -> None: ...
+
+    # —— 无状态跑批的条件写三方（ADR 0034；reconciler 跨进程/跨实例并发调用，靠条件写而非进程内锁）——
+    # 与上面「实时写三段」并存、职责不同：那三段假定单编排进程内锁串行；这三方假定并发多写者、
+    # 每个方法自身是原子条件写、返回是否成功让调用方（reconciler）据此决定要不要 RunTask/收尾。
+    def try_claim_job(self, run_id: str, scope_id: str) -> bool:
+        """CAS 抢占：仅当该 job 当前是 PENDING 才置 RUNNING，成功返回 True（机制四）。
+
+        多个 reconciler 实例并发抢同一 pending job，只有一个 CAS 成功（返回 True）去真 RunTask/spawn，
+        其余返回 False 跳过——严格 max_concurrency 的并发闸（不靠进程内线程池）。job 不存在/已非 pending → False。
+        """
+        ...
+
+    def project_state(self, run_id: str, state: RunState) -> bool:
+        """HWM 条件写整个 RunState：仅当 state.high_water_mark ≥ 库中记录的 hwm 才写，成功 True（机制三）。
+
+        stale 实例（读到更少 events、hwm 更小）的写被挡（返回 False），防把已推进的态覆盖回旧态。
+        state.high_water_mark 为 None 视为「无守卫强写」（不该在 reconciler 路径发生）。
+        """
+        ...
+
+    def try_finalize(self, run_id: str, status: Status, ended_at: str) -> bool:
+        """状态机单调条件写：仅当 run 总 status 当前为非终态（pending/running）才写终态，成功 True（机制三）。
+
+        挡「已 finalize 的 run 被 stale 投影刷回」+ 保 commit 恰一次（多实例同时见全终态、只有一个写成功、
+        触发一次 RunReport 聚合）。已是终态 → False（幂等：别人已 finalize）。
+        """
+        ...
 
 
 class ResultStore(Protocol):

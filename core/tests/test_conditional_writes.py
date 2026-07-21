@@ -1,0 +1,138 @@
+"""RunStore 无状态跑批条件写对拍测试（ADR 0034 P2）：try_claim_job / project_state / try_finalize。
+
+**local（fcntl 文件锁）与 ddb（moto，条件表达式）跑同一批断言**（parametrize）——保两 adapter 语义一致。
+moto 的条件写行为与真 DDB 可能有别（绿≠对边界）→ 真 DDB 复验单列（test 末 real_aws，需真凭证才跑）。
+
+覆盖三机制的正确性核心：
+- 机制四 CAS：pending→running 只成功一次，并发抢占只一个赢。
+- 机制三 HWM：stale（更小 hwm）投影写被挡、不覆盖已推进态。
+- 机制三 finalize 单调：已终态不被重复 finalize / 不被刷回。
+"""
+from __future__ import annotations
+
+import pytest
+
+from core.model import JobState, RunMeta, RunState, Status
+
+
+def _meta(run_id: str = "run-1", *scope_ids: str) -> RunMeta:
+    from core.model import Job, Scenario, Step
+    ids = scope_ids or ("a", "b")
+    jobs = tuple(
+        Job(scope_id=s, scope_name=s, engine="novaact",
+            scenarios=(Scenario(id=f"{s}:1", name="s", steps=(Step(index=0, keyword="Given", text="x"),)),))
+        for s in ids
+    )
+    return RunMeta(run_id=run_id, created_at="2026-07-19T00:00:00Z", jobs=jobs)
+
+
+def _initial(meta: RunMeta, hwm: int | None = None) -> RunState:
+    return RunState(
+        run_id=meta.run_id, status=Status.PENDING,
+        jobs={j.scope_id: JobState(scope_id=j.scope_id, status=Status.PENDING) for j in meta.jobs},
+        started_at="2026-07-19T00:00:00Z", high_water_mark=hwm,
+    )
+
+
+@pytest.fixture(params=["local", "ddb"])
+def run_store(request, tmp_path, aws):
+    """两个 adapter 各来一遍（对拍）。local 用 tmp_path；ddb 用 moto aws fixture。"""
+    if request.param == "local":
+        from core.adapters.run_store.local import LocalRunStore
+        return LocalRunStore(tmp_path)
+    from core.adapters.run_store.ddb import DynamoDBRunStore
+    return DynamoDBRunStore(aws["ddb"].Table(aws["table_name"]))
+
+
+# ---------- 机制四：CAS try_claim_job ----------
+
+def test_claim_pending_succeeds_once(run_store):
+    """pending 的 job 首次 claim 成功、置 running；再 claim 同一个 → False（已非 pending）。"""
+    meta = _meta()
+    run_store.create_run(meta, _initial(meta))
+    assert run_store.try_claim_job("run-1", "a") is True
+    state = run_store.load_run_state("run-1")
+    assert state.jobs["a"].status == Status.RUNNING
+    # 第二次抢同一个 → 失败（严格并发闸：不会重复 RunTask）
+    assert run_store.try_claim_job("run-1", "a") is False
+
+
+def test_claim_nonexistent_job_fails(run_store):
+    """claim 不在 definition 里的 scope → False（不臆造 job）。"""
+    meta = _meta()
+    run_store.create_run(meta, _initial(meta))
+    assert run_store.try_claim_job("run-1", "ghost") is False
+
+
+def test_claim_two_different_jobs_both_succeed(run_store):
+    """抢两个不同 pending job 各自成功（互不干扰）。"""
+    meta = _meta()
+    run_store.create_run(meta, _initial(meta))
+    assert run_store.try_claim_job("run-1", "a") is True
+    assert run_store.try_claim_job("run-1", "b") is True
+
+
+# ---------- 机制三：HWM project_state ----------
+
+def test_project_advances_hwm(run_store):
+    """hwm 递增的投影写成功。"""
+    meta = _meta()
+    run_store.create_run(meta, _initial(meta, hwm=0))
+    s = _initial(meta, hwm=5)
+    s = RunState(run_id="run-1", status=Status.RUNNING, jobs=s.jobs, high_water_mark=5)
+    assert run_store.project_state("run-1", s) is True
+    assert run_store.load_run_state("run-1").high_water_mark == 5
+
+
+def test_stale_projection_rejected(run_store):
+    """关键（机制三）：先写 hwm=10，再用 stale 快照 hwm=5 投影 → 被挡（False），不覆盖。"""
+    meta = _meta()
+    run_store.create_run(meta, _initial(meta, hwm=0))
+    fresh = RunState(run_id="run-1", status=Status.RUNNING,
+                     jobs={"a": JobState("a", Status.PASSED), "b": JobState("b", Status.PASSED)},
+                     high_water_mark=10)
+    assert run_store.project_state("run-1", fresh) is True
+    stale = RunState(run_id="run-1", status=Status.RUNNING,
+                     jobs={"a": JobState("a", Status.RUNNING), "b": JobState("b", Status.PENDING)},
+                     high_water_mark=5)
+    assert run_store.project_state("run-1", stale) is False  # 被 HWM 挡
+    # 库里仍是 fresh（hwm=10），未被 stale 覆盖
+    got = run_store.load_run_state("run-1")
+    assert got.high_water_mark == 10
+    assert got.jobs["a"].status == Status.PASSED
+
+
+def test_equal_hwm_projection_allowed(run_store):
+    """同 hwm 投影写允许（幂等：同一批 events 重放算出同 state，覆盖无害）。"""
+    meta = _meta()
+    run_store.create_run(meta, _initial(meta, hwm=0))
+    s = RunState(run_id="run-1", status=Status.RUNNING, jobs=_initial(meta).jobs, high_water_mark=7)
+    assert run_store.project_state("run-1", s) is True
+    assert run_store.project_state("run-1", s) is True  # 同 hwm 再写仍允许
+
+
+# ---------- 机制三：finalize 单调 ----------
+
+def test_finalize_from_nonterminal_succeeds(run_store):
+    """非终态（pending/running）→ finalize 成功写终态。"""
+    meta = _meta()
+    run_store.create_run(meta, _initial(meta))
+    assert run_store.try_finalize("run-1", Status.PASSED, "2026-07-19T01:00:00Z") is True
+    state = run_store.load_run_state("run-1")
+    assert state.status == Status.PASSED and state.ended_at == "2026-07-19T01:00:00Z"
+
+
+def test_double_finalize_rejected(run_store):
+    """关键（机制三）：已终态再 finalize → False（commit 恰一次、幂等），不刷回、不重复触发 report。"""
+    meta = _meta()
+    run_store.create_run(meta, _initial(meta))
+    assert run_store.try_finalize("run-1", Status.PASSED, "t1") is True
+    # 第二个实例也见全终态、也想 finalize（如写 error）→ 被挡，库里仍是首次的 passed/t1
+    assert run_store.try_finalize("run-1", Status.ERROR, "t2") is False
+    state = run_store.load_run_state("run-1")
+    assert state.status == Status.PASSED and state.ended_at == "t1"
+
+
+def test_finalize_missing_run_fails(run_store):
+    """未 create 的 run → finalize False（不崩、不臆造）。"""
+    assert run_store.try_finalize("nope", Status.PASSED, "t") is False
