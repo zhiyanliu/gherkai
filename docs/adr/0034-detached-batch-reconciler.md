@@ -67,11 +67,15 @@ gherkai run <features>    # 原阻塞皮 = submit + 同进程 status --wait，�
 ```
 submit(CLI) → setsid fork per-run 进程 → CLI 退出
 per-run 进程（观察者+reconciler 三合一）：spawn worker 子进程
-   · worker 写本地持久 events sink（SQLite，替易失 FD3 pipe）
+   · 读 worker 的 fd3 事件流、旁路落本地持久 events sink（SQLite，替易失 FD3 pipe）
    · proc.wait() 拿 exitcode 写 task_exited · 推演写本地 RunState · 启下一个 · 全 done 自退
 ```
 
-**同一份 core 推演码，两个宿主（Lambda / per-run 进程）各注入自己的 adapter**——local/cloud 对称落到 events 通道：两侧 worker 都写持久 events 存储、两侧 reconciler 都从持久 events 重放推演，**唯一差别是存储介质**（DDB 表 vs 本地 SQLite），是可注入的 `EventSink`/存储 adapter 差异，不碰 core 推演、不碰 worker 业务。
+**同一份 core 推演码，两个宿主（Lambda / per-run 进程）各注入自己的 adapter**——local/cloud 对称落到 events 通道：两侧 reconciler 都从持久 events 重放推演，**唯一差别是存储介质**（DDB 表 vs 本地 SQLite）+ **谁把 worker 事件写进该存储**（cloud=worker 自己 PutItem，[0024]；local=per-run 进程读 worker fd3 后旁路落 SQLite）。
+
+**关键：local 的 worker 不改、对 SQLite 无知（施工 P3 校准）**——worker 仍讲 [0024](./0024-worker-core-protocol.md) fd3 协议吐原始 JSON 行（引擎无关、两执行环境同一份 worker），SQLite 落库是 per-run 进程侧 `SubprocessLauncher` 读 fd3 时旁路做的（存原始行 + 按到达序赋 worker 段单调 seq）。故「worker 写持久 events 存储」在 local 的准确表述是「per-run 进程代 worker 写」——worker 业务零改，对称性落在「事件最终进了持久可重放存储」这一层，非「worker 自己写哪」。
+
+**per-run 进程内多 worker 并发写同一 SQLite 的串行化（施工 P3 处理）**：`max_concurrency>1` 时 per-run 进程并发起多个 worker，每个一个 fd3 读线程往同一 SQLite append。SQLite 单写者——多线程 append 靠 **WAL 模式 + 短事务**串行化（写争锁排队、不丢不乱；每条 append 是独立小事务）。这是 per-run 进程内的线程并发（非跨进程），锁竞争轻、可接受。跨进程写并发不在 local 目标内（写者只有 per-run 进程一个；`status --wait` 接力只读 events + 走 RunStore 条件写、不写 events sink）。
 
 ## 推进的三个触发源（都幂等、并发安全）
 
@@ -104,9 +108,13 @@ reconciler 逻辑上是「唯一写者」，**物理上是并发实例**（实�
 
 两道条件缺一不可：HWM 管 seq 可比的进度回退，状态机单调管「跨独立键空间事件（task_exited 无 seq）的终态回退」——后者正是 `scope_done`/`task_exited` 这个 finalize 边界的关键守卫。这是 [0030](./0030-realtime-persistence-seam.md)「重议」条预告的「进程外多写者需条件更新」的落地（见下反向链）。local SQLite 用 `UPDATE...WHERE hwm <= :hwm AND status NOT IN (终态)` 复刻两道条件。**被拒 owner/lease 分布式锁**：0030 曾预告用 lease 保唯一写者——拒，lease 有状态、需续租/故障接管；无状态的 HWM + 状态机乐观条件写即够（写失败即整体重放重试，天然幂等），更轻。
 
+**投影写 run 级 status 钳为 `running`/`pending`、不落终态（施工 P3a 逼出，衔接 [0030](./0030-realtime-persistence-seam.md) commit point）**：`project` 在全 job 达终态时会聚合出 run 级**终态**，但 `project_state`（投影写）**不能把它落库**——run 级终态是 `try_finalize` 这个 commit point 的**专属**（[0030](./0030-realtime-persistence-seam.md)：finalize 一落=run 已提交）。若投影提前落 run 级终态，紧接着的 `try_finalize`（条件「当前 status ∈ 非终态」）会被**投影自己刚写的终态挡住**、run 永远 finalize 不了。故 `project_state` 落库时把 run 级 status 钳为 `running`（非 `pending` 时）——**各 job 态仍是真实态（含终态，供 `plan_next` 判全终态），只 run 级钳**；run 级终态由 `try_finalize` 用 `project` 聚合出的真实终态一次落定。`project_state` 另加对偶保护：库中已 finalize（run 级终态）则挡投影（不把终态刷回 running）。cloud DDB 与 local SQLite 对称实现此钳制。
+
 ### 机制四：CAS(pending→running) 控严格并发
 
 严格 `max_concurrency` 的执行点从 core 内 `ThreadPoolExecutor`（进程内、无 store）**迁到 store 的 CAS 条件写**：起一个 job 前 `CAS(status: pending→running)`，多个触发源并发看到同一 pending job 都想启，**只有条件写成功的那个去 RunTask/spawn**，其余被拒跳过。稳态并发恒 = max_concurrency，不靠任何常驻进程 hold 线程池。core 的 `plan_next` 只**提议**动作，真正的并发闸是 adapter 的 CAS。
+
+**「claim 了但 events 还没到」的窗口 → `project` 须以 RunStore 态为基线做单调合并（施工 P3a 逼出，补入设计）**：CAS 把 job 置 `running` 后、worker 还没 emit `scope_started` 前有一个窗口——此时 `project` 全量重放 events 里**看不到**该 job（无任何事件），会把它算成 `pending`；若投影写就此把它刷回 `pending`，下一个 tick 的 `plan_next` 又会提议 start、CAS（此刻已是 running？不，被刷回 pending 了）又成功 → **重复 launch 同一 job**（真 bug，P3a `test_tick_idempotent` 复现）。故 `project` 除 events 外**接收当前 RunStore 的 `RunState` 作基线**，job 态按生命周期序（`pending < running < 任何终态`）与基线取**较推进者**、单调不倒退：已 claim 的 `running` 不被 events 的 `pending` 覆盖；终态一旦达成不被 `running` 覆盖。这与「全量重放幂等」不冲突——重放仍是纯推演，基线只提供「已 claim」这一 events 之外、却是 RunStore 权威的事实。`reconcile.tick` 在调 `project` 前 `load_run_state` 取基线传入。
 
 ## core 拆分（守 [0026](./0026-schedule-module.md)/[0016](./0016-execution-architecture-core-lib-run-model.md) 窄腰红线）
 
