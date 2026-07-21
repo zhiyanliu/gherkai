@@ -311,12 +311,13 @@ def _cmd_status(args, repo: Path) -> int:
 
     if args.wait:
         # 接力推进：per-run 进程崩了/慢了，人来查即自己 tick 到终态（状态全持久、tick 幂等，断点续）。
-        meta, log, store, launcher, mc = detached.build_local_reconcile(
+        meta, log, store, launcher, mc, rstore, pstore = detached.build_local_reconcile(
             repo, str(report_root), args.run_id, args.max_concurrency,
             region=args.region, profile=args.profile,
         )
         detached.run_reconcile_loop(args.run_id, meta, log, store, launcher, mc,
-                                    poll_interval_s=0.5, now_iso_fn=compose.now_iso)
+                                    poll_interval_s=0.5, now_iso_fn=compose.now_iso,
+                                    result_store=rstore, report_store=pstore)
 
     state = run_store.load_run_state(args.run_id)
     if state is None:
@@ -340,12 +341,13 @@ def _cmd_reconcile(args, repo: Path) -> int:
     from cli import detached
 
     report_root = Path(args.report_dir).resolve()
-    meta, log, store, launcher, mc = detached.build_local_reconcile(
+    meta, log, store, launcher, mc, rstore, pstore = detached.build_local_reconcile(
         repo, str(report_root), args.run_id, args.max_concurrency,
         region=args.region, profile=args.profile,
     )
     detached.run_reconcile_loop(args.run_id, meta, log, store, launcher, mc,
-                                poll_interval_s=0.5, now_iso_fn=compose.now_iso)
+                                poll_interval_s=0.5, now_iso_fn=compose.now_iso,
+                                result_store=rstore, report_store=pstore)
     return 0
 
 

@@ -86,11 +86,17 @@ def run_reconcile_loop(
     *,
     poll_interval_s: float = 0.5,
     now_iso_fn=None,
+    result_store=None,
+    report_store=None,
 ) -> None:
     """per-run 进程的推进循环：反复 tick 直到全 done（ADR 0034 local 主力触发源）。
 
     now_iso_fn：注入时间源（组合根传 compose.now_iso；测试传 fake 保确定性）。tick 幂等——崩了 status --wait
     可接力（状态全持久）。全 done（tick 返回 True）即退出（batch shape：跑完即停、不常驻）。
+
+    result_store/report_store（可选）：done 后聚合收尾——从 events 全量重放 project_full 构造完整 RunResult，
+    落 ResultStore（判定真值 jobs/*.json）+ ReportStore（RunReport index/manifest），与同步 run 路径产物对齐。
+    幂等（从 events 重放、覆盖写同 key）——多个推进者都 done 都聚合无害。注入 None（测试）则跳过收尾。
     """
     import datetime as _dt
 
@@ -102,8 +108,30 @@ def run_reconcile_loop(
     while True:
         done = tick(run_id, meta, event_log, run_store, launcher, max_concurrency, now_iso=_now())
         if done:
+            _finalize_artifacts(run_id, meta, event_log, result_store, report_store, _now())
             return
         time.sleep(poll_interval_s)
+
+
+def _finalize_artifacts(run_id, meta, event_log, result_store, report_store, now_iso) -> None:
+    """done 后聚合判定真值 + RunReport（幂等；ADR 0034 收尾，对齐同步 run 路径产物）。
+
+    tick 的 try_finalize 只写 RunStore 总 status；判定明细（ResultStore）与 RunReport（ReportStore）在此补。
+    从 events 全量重放 project_full → RunResult，逐 job save_job_result + report_store.write。ReportStore 写失败
+    隔离（判定真值已在 ResultStore、report 可从 RunResult 重建，对齐 ADR 0030 决定三）。"""
+    if result_store is None and report_store is None:
+        return
+    from core.project import project_full
+
+    result = project_full(meta, event_log.records())
+    if result_store is not None:
+        for jr in result.jobs:
+            result_store.save_job_result(run_id, jr)
+    if report_store is not None:
+        try:
+            report_store.write(run_id, result, created_at=now_iso)
+        except Exception:
+            pass  # 派生视图写失败不击穿判定真值（ADR 0030 决定三）
 
 
 # ============================================================================
@@ -142,7 +170,12 @@ def build_local_reconcile(repo, report_dir: str, run_id: str, max_concurrency: i
     )
     resolver = compose.make_resolver(engines)
     launcher = SubprocessLauncher(resolver, log)
-    return meta, log, store, launcher, max_concurrency
+    # ResultStore + ReportStore（收尾聚合用，落点与 RunStore 同 <report_dir>/<run_id>/，对齐同步 run 路径）
+    from core.adapters.result_store.local import LocalResultStore
+    from core.adapters.report_store.local import LocalReportStore
+    result_store = LocalResultStore(root)
+    report_store = LocalReportStore(root)
+    return meta, log, store, launcher, max_concurrency, result_store, report_store
 
 
 def render_run_state(state) -> str:

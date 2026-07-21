@@ -19,6 +19,7 @@ from core.model import (
     JobResult,
     JobState,
     RunMeta,
+    RunResult,
     RunState,
     ScenarioDone,
     ScenarioResult,
@@ -198,29 +199,8 @@ def project(meta: RunMeta, records: list[EventRecord], baseline: RunState | None
         job = job_by_scope.get(scope_id)
         if job is None:
             continue  # record 指向 definition 外的 scope（不该发生）——忽略，不臆造 job
-        # 单 scope 归约：worker 段事件按 seq 升序喂 reduce_event
-        evs = sorted([r for r in recs if r.kind == "event" and r.event is not None],
-                     key=lambda r: (r.seq if r.seq is not None else 0))
-        for r in evs:
-            if r.seq is not None:
-                hwm = max(hwm, r.seq)
-        result = JobResult(job=job, status=Status.PENDING)
-        scenario_status: dict[str, Status] = {}
-        timing = Timing()
-        saw_scope_started = False
-        saw_scope_done = False
-        for r in evs:
-            ev = r.event
-            if isinstance(ev, ScopeStarted):
-                saw_scope_started = True
-            if isinstance(ev, ScopeDone):
-                saw_scope_done = True
-            reduce_event(ev, result, scenario_status, timing, r.emit_ts or 0.0)  # type: ignore[arg-type]
-        # 退出记录（机制一/二）：独立键空间、无 seq，单独取
-        exits = [r.exited for r in recs if r.kind == "exit" and r.exited is not None]
-        exited = exits[0] if exits else None
-
-        status = _job_status(saw_scope_started, saw_scope_done, exited, scenario_status)
+        result, status, max_seq = _reduce_scope(job, recs)  # 共用归约（与 project_full 单一真源）
+        hwm = max(hwm, max_seq)
         # 单调合并（不倒退）：events 算出的态与基线态取较推进者。防「已 claim running 但 events 未到」被降回
         # pending（否则 reconciler 重复 launch，见 test_tick_idempotent）。终态一旦达成不被 running 覆盖。
         prior = jobs_state.get(scope_id)
@@ -237,6 +217,69 @@ def project(meta: RunMeta, records: list[EventRecord], baseline: RunState | None
         status=run_status,
         jobs=jobs_state,
         high_water_mark=hwm,
+    )
+
+
+def _reduce_scope(job: Job, recs: list[EventRecord]) -> tuple[JobResult, Status, int]:
+    """单 scope 归约（project / project_full 共用一份，避免归约逻辑双写漂移）：
+
+    events 段按 seq 升序喂 reduce_event 归约出完整 JobResult；退出记录（独立键空间）取 exit_code 判「两件都要」。
+    返回 (完整 JobResult, 派生 status, 该 scope 的 worker 段 max seq)。JobResult.status 会被派生 status 覆盖
+    （reduce 期只累积 scenario 明细，最终 job 态由 _job_status 的「两件都要」谓词定）。
+    """
+    evs = sorted([r for r in recs if r.kind == "event" and r.event is not None],
+                 key=lambda r: (r.seq if r.seq is not None else 0))
+    max_seq = 0
+    for r in evs:
+        if r.seq is not None:
+            max_seq = max(max_seq, r.seq)
+    result = JobResult(job=job, status=Status.PENDING)
+    scenario_status: dict[str, Status] = {}
+    timing = Timing()
+    saw_scope_started = saw_scope_done = False
+    for r in evs:
+        ev = r.event
+        if isinstance(ev, ScopeStarted):
+            saw_scope_started = True
+        if isinstance(ev, ScopeDone):
+            saw_scope_done = True
+        reduce_event(ev, result, scenario_status, timing, r.emit_ts or 0.0)  # type: ignore[arg-type]
+    exits = [r.exited for r in recs if r.kind == "exit" and r.exited is not None]
+    exited = exits[0] if exits else None
+    status = _job_status(saw_scope_started, saw_scope_done, exited, scenario_status)
+    result.status = status
+    return result, status, max_seq
+
+
+def project_full(meta: RunMeta, records: list[EventRecord]) -> RunResult:
+    """从全量 records 推演出**完整 RunResult**（含各 JobResult 明细，ADR 0034）——finalize 收尾用。
+
+    与 `project`（轻量 RunState、供实时投影写/plan_next）共用 `_reduce_scope` 归约；差别只在保留完整明细
+    （scenarios/steps/cost/report_refs）。reconciler finalize 抢到 commit 时用它落 ResultStore（判定真值）+
+    ReportStore（RunReport 聚合），与同步 run 路径的产物对齐。run 级 status 用真实聚合终态（此处是收尾、非投影，
+    可落终态，与 project_state 的钳制不同）。没 record 的 job（未起）不进 RunResult.jobs（同 schedule 只收跑过的）。
+    """
+    by_scope: dict[str, list[EventRecord]] = {}
+    for r in records:
+        by_scope.setdefault(r.scope_id, []).append(r)
+
+    job_results: list[JobResult] = []
+    for job in meta.jobs:  # 按 definition 序（稳定输出）
+        recs = by_scope.get(job.scope_id)
+        if not recs:
+            continue  # 没起过的 job 无明细可落（reconciler 未 launch 或 pending）——不臆造
+        jr, _status, _seq = _reduce_scope(job, recs)
+        job_results.append(jr)
+
+    run_status = _aggregate([jr.status for jr in job_results])
+    tok = [jr.total_tokens for jr in job_results if jr.total_tokens is not None]
+    tw = [jr.total_time_worked_s for jr in job_results if jr.total_time_worked_s is not None]
+    return RunResult(
+        run_meta=meta,
+        status=run_status,
+        jobs=job_results,
+        total_tokens=sum(tok) if tok else None,
+        total_time_worked_s=sum(tw) if tw else None,
     )
 
 
