@@ -5,5 +5,6 @@
 表结构镜像 DDB events：PK=scope_id / SK=seq（worker 段单调）+ 独立键空间的 task_exited 退出记录（机制一）。
 """
 from core.adapters.event_log.sqlite import SqliteEventLog
+from core.adapters.event_log.ddb import DdbEventLog
 
-__all__ = ["SqliteEventLog"]
+__all__ = ["SqliteEventLog", "DdbEventLog"]

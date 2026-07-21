@@ -139,8 +139,17 @@ class FargateEngine:
         self._poll = poll_interval_s
         self._null_exit_grace_polls = null_exit_grace_polls
 
-    def run_scope(self, job: Job) -> tuple[FargateWorkerHandle, Iterator[Event]]:
-        """起一个 Fargate task 跑 job，返回 (句柄, DDB events 事件流迭代器)。对称 SubprocessEngine.run_scope。"""
+    def start_scope(self, job: Job) -> str:
+        """fire-and-forget 起一个 Fargate task 跑 job，返回 task_arn（ADR 0034：无状态跑批的 Engine 增出形状）。
+
+        = run_scope 的前半（PutObject job + RunTask），**不返回事件迭代器、不轮询**——cloud 无状态路径下 worker
+        自 PutItem events 到 DDB、退出观察者 Lambda 补 task_exited、reconciler Lambda 从表重放，没有「调用方持续
+        迭代」（对照 run_scope 的 pull 式，同步 run 路径用）。CloudLauncher 在 reconciler CAS 抢占成功后调它。
+        run_scope 现 delegate 到本方法拿 task_arn，再加事件迭代器（同步路径），保两路径起 task 逻辑单一真源。
+        """
+        return self._put_job_and_run_task(job)
+
+    def _put_job_and_run_task(self, job: Job) -> str:
         # ① job-in 走 S3（ADR 0024 A3）：整 job 序列化（复用 wire.job_to_line）PutObject，env 只传小指针 JOB_S3_URI。
         # scope_id 用 quote(safe='')：/ 也编码成 %2F——否则 scope_id 里的 `/`（如 feature 路径）在 job_prefix 下
         # 造 S3 假子前缀（jobs-in/features%2F… 被拆成多级"目录"）。job-in 落 **独立前缀 jobs-in/**（组合根
@@ -198,7 +207,15 @@ class FargateEngine:
             detail = failures[0].get("detail", "") if failures else ""
             raise RuntimeError(f"RunTask 未起 task（放置失败）：reason={reason} detail={detail}")
         task_arn = tasks[0]["taskArn"]
+        return task_arn
 
+    def run_scope(self, job: Job) -> tuple[FargateWorkerHandle, Iterator[Event]]:
+        """起一个 Fargate task 跑 job，返回 (句柄, DDB events 事件流迭代器)。对称 SubprocessEngine.run_scope。
+
+        同步 run 路径用（schedule pull 式迭代）。delegate 到 _put_job_and_run_task 起 task（与 start_scope
+        单一真源），再包 handle + 事件迭代器。cloud 无状态路径不用它、用 start_scope（fire-and-forget）。
+        """
+        task_arn = self._put_job_and_run_task(job)
         handle = FargateWorkerHandle(self._ecs, self._cluster, task_arn)
         return handle, self._read_events(job.scope_id, task_arn)
 
