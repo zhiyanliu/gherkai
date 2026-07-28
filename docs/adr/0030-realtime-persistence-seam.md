@@ -76,9 +76,8 @@ result = schedule(run_meta, resolver, progress_sink, opts,
 persistence.finalize(result, ended_at=now)
 ```
 
-> **注**：sink（进度显示）与 on_event（实时落 RUNNING）是**两个独立注入点**，不再让 persistence 装饰 sink。
-> 理由是并发不变量（见决定三末）：sink 被 schedule 的 sink_lock 串行化，若把 RUNNING 的磁盘写塞进 sink，会把它串进
-> 所有 worker 的进度显示临界区。故 on_event 独立、在 sink_lock **之外**调。
+> **注**：sink（进度显示）与 on_event（实时落 RUNNING）是**两个独立注入点**，不再让 persistence 装饰 sink——
+> 理由是并发不变量，见决定三末「为何 RUNNING 走 on_event 而非装饰 sink」注。
 
 **架构对位**：`schedule` 编排**执行**（Engine port），`RunPersistence` 编排**存储**（Store ports），两者平级、都在 core、由组合根组合。
 schedule 仍一行不碰 store。这兑现「调 adapter 落库是默认行为、不是每个 client 自己拼」。
@@ -213,7 +212,7 @@ cli `--backend {local,cloud}` 的组合根装配（两后端都下沉 `compose` 
   `RunPersistence`（单一 store 锁）；RunStore 三增量方法的 local adapter；`RunState.jobs` 改 Map；cli 接 `RunPersistence`（含 RUNNING 中间态）。
 - **决定六（云端 adapter）— 已实装**：`DynamoDBRunStore` + `S3ResultStore` + `S3ReportStore` + `S3StepArgumentOffloader`，落库形态如上，moto 全程 mock 单测、行为对拍 local——坐实「换后端 core 不动」。组合根接线见决定七。
 - **决定七（cli 接线 cloud）— 已实装**：`--backend {local,cloud}` 组合根装配（两后端下沉 `compose`，详见 [0016](./0016-execution-architecture-core-lib-run-model.md)「cli backend 选择」节）+ preflight 探活反转（begin 前探表/桶，配置错一律退 2）+ offloader 生产默认挂载 + 失败退出码分层（退 2 未开跑 / 退 1 运行期）。真跑通 local↔cloud 端到端。
-- **留口子不做 → 决定八（多写者，已在 [0034](./0034-detached-batch-reconciler.md) 设计定稿、尚未落 code）**：无状态跑批下 reconciler 跨进程/跨 Lambda 并发直写 `RunState`，此「留口子」被兑现——用 `high_water_mark` 条件写（非 owner/lease，更轻：单调 seq 守卫即可挡 stale 覆盖）+ finalize 单独条件写保 commit 恰一次。续跑/部分重跑的 attempt 维度仍留口子（0034 未涉及）。
+- **留口子不做 → 决定八（多写者，已在 [0034](./0034-detached-batch-reconciler.md) 落地）**：无状态跑批下 reconciler 跨进程/跨 Lambda 并发直写 `RunState`，此「留口子」被兑现——机制（`high_water_mark` 条件写 + finalize 单独条件写）见下「重议」条。续跑/部分重跑的 attempt 维度仍留口子（0034 未涉及）。
 
 ## 重议
 

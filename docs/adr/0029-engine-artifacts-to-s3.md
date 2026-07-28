@@ -19,7 +19,7 @@
 - **`--backend local`（= subprocess worker）**：worker 与 core 同机、共享盘，core 直接读得到 → 报 `file://`、不传（不注入 S3 落点）。
 - **`subprocess worker + 注入 S3 落点`（内部预演路径 / e2e_harness，[0016](./0016-execution-architecture-core-lib-run-model.md) 决策 B，非用户档；**旧称 `subprocess+cloud`**——下文实测/论证记录沿用该简称，均指此预演环境）**：worker 也上传 S3、报 `s3://`——它是 Fargate 的**忠实预演**（唯一差别是 worker 进程在本地还是容器，而那对报告链接正确性无影响）。**现在就能端到端验证** worker 报的 ref ↔ `S3ReportStore` 归集 ↔ index.html 链接可点这整条链，不必等 Fargate。
 
-即：**触发上传的判据始终只有一个**——组合根有没有注入 S3 落点。worker 对"我在哪跑"无知。变的只是**组合根按什么注入**：用户侧 `--backend cloud`(Fargate) 强制注入（盘会销毁）、`--backend local`(subprocess) 不注入（同机可读）；`subprocess + 注入落点` 作内部预演也走注入路径。这正是 [0016](./0016-execution-architecture-core-lib-run-model.md)「组合根注入」与「worker 引擎逻辑不按执行环境分」的兑现。
+即：**触发上传的判据始终只有一个**——组合根有没有注入 S3 落点。worker 对"我在哪跑"无知。变的只是**组合根按什么注入**（见上三态）。这正是 [0016](./0016-execution-architecture-core-lib-run-model.md)「组合根注入」与「worker 引擎逻辑不按执行环境分」的兑现。
 
 ## 决定：artifact→S3 是 **worker** 的职责，由注入的 S3 落点配置驱动；core/ReportStore 一行不改
 

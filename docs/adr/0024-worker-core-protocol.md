@@ -93,7 +93,7 @@ worker **边跑边流式上报**（每行一个事件），core 实时收。选�
 
 - **`cost` 只挂 `step_done`**；scenario/scope/run 级合计由 **core 累加 step 的原生量得出**（token / time_worked_s 各自合计），事件不重复携带（避免双重真相源）。详见下「成本信封」。**多票 AI 断言（assertionVotes>1）的 `step_done.cost` 是该 step 全 N 票之和**——worker 按增量/累加算（Midscene 取累计 token 差、Nova 累加每票 time_worked_s），不是只算最后一票（否则欠计 (N-1)/N）。
 - **`scopeId`**（= 输入 `scope.id`，RunStore/RunReport 关联键）随 `scope_done` 回；`sessionId` 是语义不同的 AgentCore 会话血缘——**随 `scope_started` 首先回传（会话一起就报），`scope_done` 仍带作冗余兜底**。提前到 `scope_started` 是因为超时/SIGTERM 中途打断时 `scope_done` 从不 emit，会话却已起——血缘必须先随首事件落到 core（[0028](./0028-transient-network-ssl-resilience.md)）。core 的 `_reduce` 在 `scope_started`/`scope_done` 两处都取（仅在非 None 时设，后者不覆盖前者已捕获的值）。
-- step 不再带 `kind` 字段：core 靠 `votes` 的**存在与否**区分「AI 断言（纳入抖动汇总）vs 其余」即足够；worker 内部如何派发（导航/动作/确定性）是其实现细节，不进协议（见上「删除测试逼出的两处收窄」②）。
+- step 不再带 `kind` 字段：core 靠 `votes` 的**存在与否**区分「AI 断言（纳入抖动汇总）vs 其余」即足够；worker 内部如何派发（导航/动作/确定性）是其实现细节，不进协议（见上「删除测试逼出的收窄」）。
 
 ### 字段语义
 

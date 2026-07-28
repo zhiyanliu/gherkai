@@ -21,7 +21,7 @@
 
 **抢传能力已提前在 subprocess+cloud 建好并实测验证（为 Fargate 忠实预演，见 [0029](./0029-engine-artifacts-to-s3.md)「act 边界抢传」）**——**主路径锚在每个 step_done 安全点**（act 已返回，不在信号 handler 内跑抢传：中断路径对 Nova 会撞 greenlet、见 [0024](./0024-worker-core-protocol.md)，故 Nova 抢传**只**在安全点）：Nova 每 act 返回后传配套 `_trajectory.json`（distinct key 幂等）；Midscene 每 step_done 对增量增长的单份 report.html 做 `snapshot`（overwrite 同 key + mtime 去重）。**Midscene 额外在 SIGTERM handler 里追加一次 best-effort `snapshot`（cleanup 之后、会话释放优先）**——这是「首个/当前 act 中途、无 prior step_done」这格唯一救得回 report 的路径；**Node 事件循环回调能安全 await 一次读盘上传，Nova 因 greenlet 做不到——关键不对称（见 [0024](./0024-worker-core-protocol.md)「Midscene worker」条）**。实测（subprocess+cloud 预演 + 真 Fargate 复验）：安全点抢传 + handler 兜底组合下，scope_end 中断（甚至 SIGKILL 卡死）下 per-act `trajectory.json`/report 丢失归零。仍余 `session_summary.json` 这一 scope 末产物无法被 act 边界抢传覆盖——判定为可接受残余，理由与措辞见 [0029](./0029-engine-artifacts-to-s3.md)「act 边界抢传」条『固有残余』，不在此复述。
 
-**真 Fargate 校准（`stopTimeout`/grace 预算 + 中断抢传 + 干净退出）已完成**（4 次真跑，见下「真容器校准结论」）。**抢传能力与真 Fargate 校准分开——抢传已在 subprocess+cloud 预演，真 Fargate 已复验生效。** 孤儿产物主动扫盘 reaper **经分析否决**（Fargate 下物理不成立——没传 S3 的残余随容器盘销毁、查 S3 捞不回，详见下「重议」孤儿 reaper 条）；**退化网络下「超时快速失败、不拖爆 grace」已真验 ✅**（见下「重议」botocore retry 条）。至此 Fargate 特有韧性 backlog 全部收敛（做/真验/否决各有归属）。
+**真 Fargate 校准（`stopTimeout`/grace 预算 + 中断抢传 + 干净退出）已完成**（4 次真跑，见下「真容器校准结论」）。**抢传能力与真 Fargate 校准分开——抢传已在 subprocess+cloud 预演，真 Fargate 已复验生效。** 孤儿产物主动扫盘 reaper **经分析否决**（Fargate 下物理不成立——没传 S3 的残余随容器盘销毁、查 S3 捞不回，详见下「Fargate 特有问题：处置结论」孤儿 reaper 条）；**退化网络下「超时快速失败、不拖爆 grace」已真验 ✅**（见下「Fargate 特有问题：处置结论」botocore retry 条）。至此 Fargate 特有韧性 backlog 全部收敛（做/真验/否决各有归属）。
 
 ## 真容器校准结论（4 次真跑，2026-07-12，账户 000000000000/us-east-1、stopTimeout=120 已 deploy）
 
@@ -55,10 +55,8 @@
 
    **据此的 code 决策**：Nova `NOVA_GRACE_MARGIN_S` **60→30**（下限 180→150，主要收益在 subprocess 路径满足不变量 + 留 ~1.5x 余量；Fargate 路径 grace 被忽略、此改动不影响其行为）；**`ACT_TIMEOUT_S=120` 不动**（见上②③）；**Midscene `MIDSCENE_GRACE_MIN_S=25` 不动**（实测 12.4s、~2x 余量；Midscene 无 greenlet、会话释放 0.2s，长 act 下也远快于 Nova）。
 
-## 留口子 / 待真做时定（Fargate 特有）
+## Fargate 特有问题：处置结论
 
-- **~~即时上传粒度~~（✅ 已定 + 真跑复验）**：act 边界即时抢传（主路径锚 step_done 安全点 + Midscene handler 兜底），非结束批量——见上「抢传能力」条。真跑复验：Nova trajectory / Midscene report 中断后均救回 S3（见上「真容器校准结论」孤儿验证）。
-- **~~grace / stopTimeout 预算~~（✅ 已真容器标定）**：见上「真容器校准结论」。`stopTimeout=120`（可配）；Nova grace 下限 margin 60→30（下限 180→150）；Midscene 25 不动。「grace 下限 > stopTimeout 上限」的关系经实测厘清：**subprocess 侧满足不变量、Fargate 侧对最坏长 act 结构性接受（D+TTL 兜底）**（结论 4，非「不同层所以不冲突」）。历史背景：`handle.stop(grace_period_s)` 运行期参数被 Fargate 忽略（`FargateWorkerHandle.stop` 只发 StopTask），真实宽限由 task-def 期 `stopTimeout` 决定（[0024](./0024-worker-core-protocol.md) 已记）。
 - **botocore/aws-sdk 默认 retry 与 grace 冲突（**已解决 + 退化网络真验 ✅**）**：上传/events 两路已 `max_attempts=0`（Midscene `maxAttempts=1`）+短超时（`connect_timeout=5`/`read_timeout=10` / `AbortSignal.timeout(10s)`；[0029](./0029-engine-artifacts-to-s3.md) ArtifactUploader / [0024](./0024-worker-core-protocol.md) EventSink 的 `Config`），不吃 grace、快速失败封顶——不再走 SDK 默认 retry。**退化网络真验（两腿 × 两种退化形态，2026-07）**：直接用两腿各自的超时 Config 造 client、对退化 endpoint 真调掐秒（比跑完整 worker 更聚焦——超时是 boto/Node 层行为、不依赖业务逻辑）：① **connect（黑洞不可路由地址 `10.255.255.1`）**：Nova 5.01s、Midscene 5.02s 快速失败；② **read（本地 TCP 服务器 accept 后不响应）**：Nova 11.00s（read_timeout=10+握手）、Midscene 10.00s（`AbortSignal` 精确 10s）。四条均**快速失败、超时封顶生效、无重试叠加**（`max_attempts=0`/`maxAttempts=1` 生效、非 ×2）、远 < grace(120s)——证「退化网络下不拖爆 grace」（正是本项目亲历「退出被慢上传拖住」要防的）。moto 立即返回测不到此、健康网真跑不触发超时路径，故此真验是该「绿≠对」边界的唯一有效证据。
 - **上传失败处理（已实现 ✅，两层）**：原记「上传失败=`engine_error`、诊断精度是否升级 `network_error`」。摸清后落地为两层：
   - **层1 分类（Nova step 内已顺带解决）**：`_run_step` 内 trajectory reportRef 上传失败被其 `except` 捕获、经 `_classify_act_error`→`_is_transient_network` 判——**S3 网络失败（ConnectTimeout/ReadTimeout/EndpointConnection/5xx/ConnectionError）已判 `network_error`**（[0028](./0028-transient-network-ssl-resilience.md) 白名单扩容顺带覆盖，实测确认），只 AccessDenied 这类真配置错才 `engine_error`。上传越过重试域边界（scope_started 之后），升级仅诊断、不触发重试。

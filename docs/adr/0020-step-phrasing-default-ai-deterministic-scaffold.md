@@ -1,6 +1,6 @@
 # Step 措辞：默认 AI 判断（QA 零预设）+ 确定性锚点脚手架（工程角色按需自建）
 
-> **Status:** Partially-superseded-by 0022 —— 「裸 `When/Then`→默认 AI；确定性=脚手架、test engineer 按需建、QA 零代码」核心语义**不变**；落地机制被反转（从「cucumber 补丁 + pytest-bdd 原生区分」转为「核心库解析关键字 + worker catch-all/确定性注册表派发」，确定性锚点落点从脚手架文件迁进 worker 注册表）。下文「实现（改造清单）」「Midscene 靠补丁」段属被取代的 v0.x 形态。
+> **Status:** Partially-superseded-by 0022 —— 「裸 `When/Then`→默认 AI；确定性=脚手架、test engineer 按需建、QA 零代码」核心语义**不变**；落地机制被反转（从「cucumber 补丁 + pytest-bdd 原生区分」转为「核心库解析关键字 + worker catch-all/确定性注册表派发」，确定性锚点落点从脚手架文件迁进 worker 注册表）。下文「Midscene 靠补丁」段属被取代的 v0.x 形态。
 
 断言类 step 的措辞设计，使「AI 柔性主导」([0014](./0014-ai-first-assertions.md)/[0015](./0015-v1-positioning-smoke-not-regression.md)) 落到 QA 的真实书写体验上。
 
@@ -33,13 +33,6 @@
 
 ## 删除的过时措辞
 
-- `AI 确认 "..."` → 改为无关键词 `Then "..."`。
+- `AI 确认 "..."` → 改为无关键词 `Then "..."`。否定断言 `确认页面没有 "..."` **同归一为无关键词** `Then "{自然语言}"`（AI 直接判否定陈述，如 `features/wikipedia_assertions.feature` 的 `"页面没有出现服务器错误"`），未保留该关键词 step。
 - `页面地址包含 "..."` 等**预置确定性 step → 删除**（移入脚手架的"示例/按需自建"，不在 generic 预置）。
 - 早先"显式断言锚点=QA 点名让 AI 看"（[0015](./0015-v1-positioning-smoke-not-regression.md) 原措辞）澄清：QA 点名仍走默认 AI 层（写自然语言）；确定性锚点是工程角色的另一套，不混。
-
-## 实现（改造清单，v0.x bdd 层；实现层已随 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md) 转移）
-
-- Midscene `generic.steps.ts`：`AI 确认 {string}` → `{string}`（默认 AI）；删 `页面地址包含`；新建 `deterministic.steps.ts` 脚手架。
-- Nova Act `test_generic_steps.py`：对齐；新建确定性锚点脚手架。
-- `features/*.feature`：断言改为无关键词 `Then "{自然语言}"`。
-- 否定断言 `确认页面没有 "..."`：**已归一为无关键词** `Then "{自然语言}"`（AI 直接判否定陈述，如 `features/wikipedia_assertions.feature` 的 `"页面没有出现服务器错误"`）——与本节 35 行「`AI 确认`→无关键词」的归一决定一致，未保留该关键词 step。

@@ -21,8 +21,6 @@
 
 **退路（Option B，仅当自签 fetch 太脆时启用）**：本地跑 `aws-samples/bedrock-access-gateway`，它以 boto3 默认链（纯 IAM）签名转发、把 OpenAI `image_url`→Converse 图块；Midscene 指向 `http://localhost:<port>/v1` 配 dummy bearer。须先在账号+region 开通 `qwen.qwen3-vl-235b-a22b`（ON_DEMAND）否则网关返回 400。
 
-**第一个实验**：写好 SigV4 fetch 后，跑一次真实 Midscene `aiTap`/`aiAssert`（本地琐碎页面），一次绿灯即坐实自签接线全链路可用。
-
 ## ✅ 已实测全通（2026-06-23，`engines/midscene/spikes/`）
 
 三段式自检全绿，本 ADR 的承重未知**已关闭**：

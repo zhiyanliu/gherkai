@@ -79,7 +79,6 @@ subnet/sg 不是「名字」，是 **AWS 建 VPC 时生成的 ID**（`subnet-0ab
 - **无循环**（与 prefix 不同）：读 SSM 的时机，prefix **已在手**（cli 已从 `--prefix`/默认解析出）→ 用它拼 SSM 路径去读 subnet/sg，正常的「IaC 输出 → 运行时读」模式。
 - 这是标准 AWS 「IaC 产出、运行时消费」模式。代价：组合根需 `ssm:GetParameter`（只读、低风险 IAM）+ 一次 boto 调用（仅未显式给 subnet/sg 时触发）。
 - 覆盖仍可给字面 ID（对称单资源覆盖层）。
-- **`_read_ssm_list` 空值静默产出空 subnets/sg（判不可达、暂不加固）**：`_read_ssm_list` 用 `[v for v in value.split(",") if v]`，对空串 → `[]` → `resolve_network` 返回空 subnets → 一路漏到 RunTask 才被 ECS 拒（不点名 prefix，破 preflix fail-fast 惯例）。**判不可达**：真实 SSM StringList 强制参数值最小长度 1、写入期拒空，CDK 空 StringList 部署期即被拒——空 SSM 值这个前提本身进不来。**触发 = 若真遇到「读了却空」**：顺手在 `_read_ssm_list`/`resolve_network` 对空补 fail-fast 点名 prefix（对齐 preflight 惯例）。低频、非阻塞。
 
 ## preflight fail-fast：用已解析 prefix 探全部资源存在性，错误点名 prefix
 

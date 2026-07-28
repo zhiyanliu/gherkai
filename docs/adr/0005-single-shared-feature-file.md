@@ -19,8 +19,6 @@
 - **Nova Act 侧**：`engines/novaact/bdd/` 的 pytest-bdd（`scenarios(str(FEATURES_DIR))`，`FEATURES_DIR` 上溯到根 `features/`）。
 - 同一句自然语言 step 同时驱动了两个不同语言/不同大脑的引擎——本框架立身之本落地。
 
-> 演进（v0.x）：最初的 M2 验证用「专用 step」风格的 `wikipedia_search.feature`（`When I search for "OpenAI"...`，每用例写 step 代码）；v0.x 验证「通用 step」模式成立后，该专用 step 三件套已退役，改用通用 step 版 `features/wikipedia_generic.feature`（QA 只写 .feature、零 step 代码）。当时的 step 实现 `generic.steps.ts` / `test_generic_steps.py` 已随 BDD runner 一并删除（[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)：core 直接解析、worker 变薄，不再有 step 代码文件）。下述方言/接线结论在两种风格下同样适用。
-
 **方言交集结论（本 ADR 预言的代价，已实证「可行但需注意」）**：
 - `.feature` 文本完全共享、两边都正确匹配。
 - 但 **step 定义侧的参数捕获语法不同**：cucumber-js 用 Cucumber Expressions（`{string}`），pytest-bdd 用 `parsers.parse('..."{term}"...')`。同一句 Gherkin 两边都能匹配，只是 step 定义写法各异——符合预期，纪律可控。

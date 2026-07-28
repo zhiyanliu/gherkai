@@ -38,7 +38,4 @@
 
 **③ 两个引擎的 AI「断言」机制**：spike 里用了不对称写法（Midscene `aiAssert` 抛错式 / Nova Act `act_get(BOOL_SCHEMA)` 取布尔再判定）。**但实际可对称**（2026-06 查证安装源码）：Midscene 有 `aiBoolean(prompt) -> Promise<boolean>`，与 Nova Act `act_get(..., BOOL_SCHEMA)` 形态完全一致（问是非、拿布尔、不抛错）。Midscene 取结构化的全家族：`aiBoolean / aiNumber / aiString / aiQuery<T> / aiAsk`（对标 act_get 的标量与通用版）；`aiAssert` 则是 Nova Act 无对应的抛错式断言。→ 抖动治理（ADR 0014）应统一走 `aiBoolean` ↔ `act_get(BOOL_SCHEMA)` 的对称布尔路径，便于两个引擎都在布尔值上做投票。
 
-## backfill 状态（spike 遗留项，v1.0 已落地）
-
-- **断言对称化 — ✅ 已落地**：v1.0 两个引擎 worker 的 AI 断言走对称布尔投票路径——Midscene `aiBoolean` ↔ Nova Act `act_get(BOOL_SCHEMA)`，各做 N 次投票（见 `engines/*/worker/`，ADR 0014/0024）。spike 的 `aiAssert` 抛错式写法未带进 worker。
-- **`logs_directory` 固定 — ✅ 已落地**：RunReport 落地后（ADR 0027），cli 经环境变量 `NOVA_LOGS_DIR` 把 Nova trajectory 持久化到 `reports/<run_id>/nova-trajectories/`（默认归集时）；`reports/` 已 gitignore。无归集时回落 SDK 默认临时目录。
+**spike→生产差异**：worker 未沿用 spike 的 `aiAssert` 抛错式写法，改走对称布尔投票（Midscene `aiBoolean` ↔ Nova `act_get(BOOL_SCHEMA)`，见 ADR 0014/0024）；Nova trajectory 已由临时目录改为持久化归集（`NOVA_LOGS_DIR`，见 ADR 0027）。

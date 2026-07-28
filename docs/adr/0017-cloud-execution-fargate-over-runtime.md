@@ -8,7 +8,7 @@
 
 测试 job 是"跑完一批 → 出报告 → 退出"的**批处理**。ECS RunTask 原生就是这个（AWS 文档原话"a batch job that performs work, and then stops"），跑完即退、计费停止。AgentCore Runtime 是为**长驻 agent 服务**设计的（session/endpoint/invoke），要把批处理塞进去得用 `add_async_task` + `HealthyBusy` ping **对抗它的 15 分钟 idle-kill 计时器**（官方标注的 footgun：ping 线程一阻塞，session 在测试中途被杀）。
 
-## 诚实修正（grilling 挤掉的水分）
+## 诚实修正
 
 初轮调查把 Fargate 的优势框大了，经核对**真正站得住的只有一条半**：
 - ✅ **run-to-exit 原生**：ECS 不用跟 idle 计时器搞保活 plumbing；Runtime 要。这是最硬的。

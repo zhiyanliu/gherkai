@@ -159,7 +159,6 @@ cli 退出码从「`status.value == 'passed'` 才 0」改为**基于 run 级 sev
 | **job 级 fail-fast skip**（决定一） | 整个 job 从未 spawn | **无**（`JobResult.scenarios=[]`） | `JobResult.status = SKIPPED`（session_id 必 None、没花钱） |
 | **step 级短路**（本决定） | job 起了、scope 内上游 error 后跳过后续 step | **有**（worker 发 step_skipped、core 建 StepResult） | `StepResult(status=SKIPPED, shortcircuited=True)`（会话已起、花过钱） |
 
-前者是「job 根本没跑」（无 step 明细）；后者是「job 跑了一半、剩下的 step 被主动跳过」（有 step 明细，标 shortcircuited）。
 两级都复用 `Status.SKIPPED` 表「没跑」，语义一致、只是层级不同；`shortcircuited` 布尔进一步标出 step 级「为什么没跑」。
 
 **判据锁 `status==error`（不看 error_type）**：无论哪个引擎、network_error 还是 engine_error 都触发短路，两个引擎对称——

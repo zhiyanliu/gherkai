@@ -15,7 +15,6 @@ monorepo（单个 git 仓库根）下并列两个引擎子工程：`engines/nova
 **已知备用路径（存档，暂不走；2026-06 核实补充）**：将来若要消除裂缝（上形态 B），有非 Python 入口可探：
 - **开源 pip 包 `nova-act`（本地 Playwright 浏览器自动化 SDK，`nova.act(...)`）确实是 Python-only**——这正是 Nova Act 引擎当前要用的执行能力。
 - **但「Nova Act」还是一个托管 AWS REST 服务**（`endpointPrefix nova-act`、SigV4、apiVersion 2025-08-22），有官方多语言 SDK：TS/JS `@aws-sdk/client-nova-act`（scoped 名）、Go `aws-sdk-go-v2/service/novaact`、Java。理论上 TS 可驱动这个托管服务。
-- ⚠️ **重要不确定性（核实置信度 medium）**：该 REST 服务的能力是否等同于本地 SDK 的 `nova.act()` 自然语言浏览器自动化，**未验证**——很可能是不同抽象层。不要据此认为「TS 能直接平替 Python 版 Nova Act 引擎」。`strands-agents` 已作为依赖在工程内（另一条 MCP/Strands 路径，亦未独立验证）。
-  - **✅ 已实查证伪（2026-06，高置信，见 [0023](./0023-novaact-acting-python-locked-no-ts-core.md)）**：REST 服务（`InvokeActStep` 等）是「客户端驱动的工具调用循环」——服务端发 `browser.*` 指令、客户端自己执行；浏览器驱动胶水只有 Python SDK 有。Strands TS 也无 Nova Act 浏览器 tool。**结论 = NO-STILL-NEEDS-PYTHON**：acting 锁 Python，此备用路径关闭（除非自造 TS 客户端引擎，不值）。
+- **✅ 已实查证伪（2026-06，高置信，见 [0023](./0023-novaact-acting-python-locked-no-ts-core.md)）**：REST 服务（`InvokeActStep` 等）是「客户端驱动的工具调用循环」——服务端发 `browser.*` 指令、客户端自己执行；浏览器驱动胶水只有 Python SDK 有。Strands TS 也无 Nova Act 浏览器 tool。**结论 = NO-STILL-NEEDS-PYTHON**：acting 锁 Python，此备用路径关闭（除非自造 TS 客户端引擎，不值）。
 
 **何时重议**：当团队需要「一键跑全部用例并看统一结果」成为硬需求时，再引入根级协调入口或形态 B 编排器，另立 ADR。

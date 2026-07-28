@@ -27,7 +27,7 @@
 核心**对一个 scope** spawn 一个 worker 子进程。worker 的一生：
 
 1. **启动**：从 stdin/临时文件接收输入——这个 scope 的 scenario 列表（每个含有序 steps：关键字+文本）、引擎配置。
-2. **开会话**：建一个 AgentCore 浏览器会话（**这段就是现 `generic.steps.ts` 的 Before hook / `nova_ctx` fixture 已跑通的代码**，原样搬进 worker 启动段）。
+2. **开会话**：建一个 AgentCore 浏览器会话。
 3. **按 scope 串行跑 scenarios**：对每个 step——
    - 先查 worker 的**确定性 step 注册表** → 命中走 handler（精确 assert、不投票）；
    - 未命中 → 落到 catch-all → 走 AI（When→`act`/`aiAct`；Then→`assert`+多次投票）。
@@ -64,7 +64,7 @@ def color_is(ctx, sel, hex):
 
 ## 退役清单（B1 删除/作废的东西）
 
-> **状态（已执行）**：v0.x BDD 层**已物理删除**——下列入口文件 + `generic.steps`/`test_generic_steps` 副本已删，`bdd/` 目录连同 `midscene/patches/` 已移除；确定性脚手架 `deterministic_steps`/`deterministic.steps.ts`（worker 活依赖）已**迁入 `worker/`**（见下「迁移」）。cucumber/patch-package 依赖 + `postinstall` 从 `midscene/package.json` 删除。全 novaact 目录测试无 collection error（曾因 bdd 层 sys.path 脆弱报错）。
+> **状态**：本清单所列 v0.x BDD 入口层已按此物理删除（`bdd/` + `midscene/patches/` 连同 cucumber/patch-package 依赖），确定性脚手架迁入 `worker/`（见下「迁移」）。
 
 删除的「BDD runner 入口管道」，**spike、sigv4 recipe、workflow_setup、step 逻辑一个都不删**：
 

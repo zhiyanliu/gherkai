@@ -164,13 +164,13 @@ adapter/组合根（Lambda handler / per-run 进程，注入具体 client）：
 
 ## 地基实测（2026-07-19，账户 000000000000/us-east-1；6 个真 Fargate task——其中 4 个构成 H1 退出场景矩阵——+ 真 DDB Streams/条件写；临时 PoC 脚手架验后即清、未入库）
 
-moto 立即返回测不到事件投递/并发时序，健康网真跑不触发这些路径——故下列是「绿≠对」边界的唯一有效证据（临时 PoC 脚手架验后即清、未入库）：
+moto 立即返回测不到事件投递/并发时序，健康网真跑不触发这些路径——故下列是「绿≠对」边界的唯一有效证据：
 
 - **H1 事件 payload 带 exitCode（4/4，含最硬的 SIGKILL 截断）**：正常退出 exitCode=0→payload 带 0；缺 job 非 0 退出=1→带 1；StopTask 软停=0→带 0；**忽略 SIGTERM 的 sleeper 被 SIGKILL 硬杀=137→payload 仍带 137**。结论：观察者从 STOPPED 事件读 exitCode 可靠（事件锚在 `stoppedAt`、已过 exitCode 落值窗口）→ 机制二「极薄观察者」成立、机制二兜底降为防御性冗余。
 - **H2 延迟**：EventBridge→Lambda 投递 **0.6s**（近瞬时）；但端到端「worker 真停(`executionStoppedAt`)→可归约」= **~27s**，瓶颈全在 ECS 平台 `executionStoppedAt→stoppedAt` 清理开销（STOPPED 事件锚在 `stoppedAt`）。放大了 [0032](./0032-fargate-execution-environment.md) 记的 ~11s 平台滞后。**级联每步有 ~20-30s 固有尾延迟**——对异步跑批可接受，`status --wait` 会有此尾延迟，属已知特性。
 - **H3/机制三/四 并发写序（真 DDB）**：HWM 条件写——B 写终态(hwm=20)后 A 用旧快照(hwm=10)迟到写被 `ConditionalCheckFailedException` 挡、终态未被刷回 running；同 hwm 重复写幂等。**DDB Streams 并发度=2**（4 job 触发 2 个并发 Lambda 实例）→ 坐实「并发 reconciler」前提真实、HWM 条件写用得上；**同 PK 严格保序**（每 job seq `[1..5]` 按序到达）。
 
-**施工期已补真验（原「地基实测」时未覆盖的）**：`status --wait` 接力 + Stream 丢投 → **已真验**（禁用 kicker 的 runs-Stream mapping 确定性造卡 pending → status --wait invoke kicker kickoff → 救活 passed，见「重议闸门」丢投条）；`setsid` local 脱离 → **已真验**（local submit → per-run 进程脱离 CLI 后台推进 → CLI 退出后 status 读到 running/passed）；四机制 → core 单测（`test_reconcile.py`/`test_cloud_reconcile.py`/`test_project.py`）+ local/cloud 端到端真跑覆盖。仍留未做项见下「重议闸门」（如 level Stream 长期丢失率的量化、动态定时兜底规则）。
+**已补真验**：`status --wait` 接力 + Stream 丢投 → **已真验**（禁用 kicker 的 runs-Stream mapping 确定性造卡 pending → status --wait invoke kicker kickoff → 救活 passed，见「重议闸门」丢投条）；`setsid` local 脱离 → **已真验**（local submit → per-run 进程脱离 CLI 后台推进 → CLI 退出后 status 读到 running/passed）；四机制 → core 单测（`test_reconcile.py`/`test_cloud_reconcile.py`/`test_project.py`）+ local/cloud 端到端真跑覆盖。仍留未做项见下「重议闸门」（如 level Stream 长期丢失率的量化、动态定时兜底规则）。
 
 ## 被拒方案（护栏，防未来重踩）
 
