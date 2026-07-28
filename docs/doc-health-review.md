@@ -1,6 +1,6 @@
 # 文档健康度复盘（全部项目文档）— 任务说明
 
-> 给执行此任务的 AI agent：本文件是**可复用的任务指令**。读它就按这里的目标与方法做，不要退化成"扫一眼改改错别字"。下面标 **【强制】** 的步骤不可跳过——它们是这套复盘产生价值（而非走过场）的关键，省掉任何一个都会漏掉真问题或误改。
+> 给执行此任务的 AI agent：本文件是**可复用的任务指令**。读它就按这里的目标与方法做，不要退化成"扫一眼改改错别字"。下面标 **【强制】** 的步骤不可跳过——它们是这套复盘产生价值（而非走过场）的关键，省掉任何一个都会漏掉真问题或误改。姊妹任务见 [`code-health-review.md`](./code-health-review.md)（代码复盘）。
 
 ## 为什么做（价值）
 
@@ -49,7 +49,7 @@ ADR/CONTEXT 是随构建**逐步长起来**的：每次在前人文档上叠加�
 - **技术笔记/配方**（如 `engines/midscene/spikes/SIGV4-FETCH-RECIPE.md`）——与代码同居、AI 照它接线，**极易 STALE**（含可运行代码片段 + 踩坑点 + 源码路径）。
 - 未来新增的 docs/ 与子工程根下文档同样纳入（本任务名"文档健康度"、不焊死在某几类上——每次 `find . -name "*.md"` 排除 node_modules/.venv/.pytest_cache 扫一遍，别漏新文件）。
 
-**明确排除**：`.claude/`（skills/commands 是工具配置，非本项目文档，且不提交 git）；`node_modules/`、`.venv/`、`.pytest_cache/`（依赖/缓存）。
+**明确排除**：`.claude/`（skills/commands 是工具配置，非本项目文档，且不提交 git）；`node_modules/`、`.venv/`、`.pytest_cache/`（依赖/缓存）；**repo 内 code 注释/docstring 的引用方向违规归姊妹任务 [`code-health-review.md`](./code-health-review.md)**（本任务只管 `.md`，分工线两侧一致）。
 
 ### 第一层：片内审计（可用 workflow 并行）
 
