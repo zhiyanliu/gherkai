@@ -129,7 +129,7 @@
 
 ## 8. 完成总结
 
-**WP3-B grace 主线已收尾**——4 次真跑（run-1 baseline + run-2/3a/3b Nova act 中断 + run-4 Midscene）标定完成，grace 解法（margin 60→30/下限 150、stopTimeout=120、候选 B 否决、Fargate 侧 D+TTL）+ 中断韧性结论**已全部吸收进 ADR 0032（Accepted）**，过程/commit 见 git log。剩余均为非阻塞 backlog（记 ADR 0032「留口子」：退化网络超时实测、孤儿主动扫盘、错误分类升级、CI 推 ECR）。本 journey 使命达成、待删。
+**WP3-B grace 主线已收尾**——4 次真跑（run-1 baseline + run-2/3a/3b Nova act 中断 + run-4 Midscene）标定完成，grace 解法（margin 60→30/下限 150、stopTimeout=120、候选 B 否决、Fargate 侧 D+TTL）+ 中断韧性结论**已全部吸收进 ADR 0032（Accepted）**，过程/commit 见 git log。剩余项后续已全部收敛（退化网络真验✅/孤儿扫盘否决/错误分类升级——见 ADR 0032「Fargate 特有问题：处置结论」；CI 推 ECR 记 [0033](../adr/0033-iac-aws-backend-and-composition-wiring.md)）。本 journey 使命达成、待删。
 
 ## 9. 相关文件精确指针
 

@@ -39,7 +39,7 @@
 
 ## 确定性 step 怎么扩展（test engineer 的扩展点）
 
-> **实现状态（v1.0 当前）**：下述 `@deterministic` 注册表**已落地**，两个引擎对称——Nova `engines/novaact/worker/deterministic.py`（`@deterministic` 装饰器 + `match()`）、Midscene `engines/midscene/worker/deterministic.ts`（`deterministic()` + `match()`）。worker 派发每个 step 时**先查注册表**（命中走精确 handler、不投票、可复现），未命中才落 ②内建 URL 导航 / ③AI catch-all。脚手架（`bdd/.../deterministic*`）现各注册一个真实 URL 锚点（`页面地址匹配 "<正则>"`）。命中后：成功→`passed`（无 votes）；handler 抛 `AssertionError`→`failed`/`assertion_failed`；抛其它→`error`；命中多条→`DeterministicConflict`（ADR 0022 最多命中一条）。各有注册表单测背书。
+> **实现状态（v1.0 当前）**：下述 `@deterministic` 注册表**已落地**，两个引擎对称——Nova `engines/novaact/worker/deterministic.py`（`@deterministic` 装饰器 + `match()`）、Midscene `engines/midscene/worker/deterministic.ts`（`deterministic()` + `match()`）。worker 派发每个 step 时**先查注册表**（命中走精确 handler、不投票、可复现），未命中才落 ②内建 URL 导航 / ③AI catch-all。脚手架（`worker/` 下 `deterministic.steps.ts`/`deterministic_steps.py`，见下「迁移」）现各注册一个真实 URL 锚点（`页面地址匹配 "<正则>"`）。命中后：成功→`passed`（无 votes）；handler 抛 `AssertionError`→`failed`/`assertion_failed`；抛其它→`error`；命中多条→`DeterministicConflict`（ADR 0022 最多命中一条）。各有注册表单测背书。
 
 **扩展点 = 对应 worker 里的一张 step 注册表**（`(模式 → handler)`）。延续 [0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md) 的脚手架定位与角色边界（QA 永远只写自然语言、不碰确定性 step）：
 

@@ -82,7 +82,7 @@ subprocess 下这些"没传的"还留本地（[ADR 0028](../adr/0028-transient-n
 
 ## 结论指向（**方向判断，非决策**；决策待处理时落 ADR）
 
-> **落实状态（回填）**：下列方向判断中，#2「中断模型改 flag-only」+ act 有界返回 + grace 上调已作为**决策落进 ADR 0024/0028** 并**在 Nova worker 实现**（`run_scope.py` flag-only handler、per-act timeout；两条被拒护栏见 ADR 0024：raise 模型 / asyncio 化）——故 #2 里「拟…待重估」的措辞是调查当时的方向快照，现已闭合。#3 孤儿 reaper **未采纳**（改用 AgentCore session TTL 兜底，见 ADR 0024「已接受代价」）。#1 抢传归 WP3（未做）。以下各条保留为调查当时的方向记录。
+> **落实状态（回填）**：下列方向判断中，#2「中断模型改 flag-only」+ act 有界返回 + grace 上调已作为**决策落进 ADR 0024/0028** 并**在 Nova worker 实现**（`run_scope.py` flag-only handler、per-act timeout；两条被拒护栏见 ADR 0024：raise 模型 / asyncio 化）——故 #2 里「拟…待重估」的措辞是调查当时的方向快照，现已闭合。#3 孤儿 reaper **未采纳**（改用 AgentCore session TTL 兜底，见 ADR 0024「已接受代价」）。#1 抢传已作为 WP3-A 落地（见下实测校正注）。以下各条保留为调查当时的方向记录。
 
 1. **"SIGTERM handler 里抢传"对 Nova 结构性走不通，"act 边界抢传"实测有效**：抢传代码若挂在 raise 之后的 `__exit__`/handler 里，raise 本身卡死就到不了抢传；而锚在 act 边界安全点则在卡死前就完成（上「抢传验证」实测：SIGKILL 卡死场景仍零丢失）。[ADR 0032](../adr/0032-fargate-execution-environment.md) 现在对 Midscene 写的"中断路径读 reportFile 抢传"倾向需据此重估——**抢传动作必须锚在 act 边界的安全点**（两次 act 之间、切换的安全落脚点），不能锚在中断路径。这是"signal handler raise 中断 greenlet 同步调用"这一业界公认反模式的直接后果，**无法靠改 raise 时机/异常类型修复**。
 2. **中断模型倾向**：handler 从"raise 异常"改为"置停止标志（async-signal-safe，可选写自管道）+ 在 act 边界安全点主动检查优雅退出"；单 act 时长上限交给引擎自带 timeout（在切换安全点抛，不经异步信号）；进程级 SIGKILL / StopTask 看门狗保留为"已卡死"的最后兜底（会话泄漏是其固有代价）。**⚠️ 动摇既有 ADR**：[ADR 0024](../adr/0024-worker-core-protocol.md)「终止契约」节现记的 Nova 机制正是"handler `raise _Terminated` → 三层 with `__exit__`"（并把"不在 handler sys.exit"记为反模式），而发现 #2 判定"handler 里 raise"本身是卡死根因——本方向拟以"置停止标志"取代它。真落时须同步更新 0024 该节 + Status 头（此处只标"该决策被本调查动摇、待重估"，不越 scope 记决策，与本文对 0032:18 的处理对称）。
