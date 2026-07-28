@@ -2,7 +2,7 @@
 
 > **Status:** Accepted
 
-为核心库（v1.0）选语言时，曾设想：若 Nova Act 也能用 TypeScript 驱动，则核心可全 TS、两个引擎在进程内对称（最工整的理想形态）。本 ADR 记录对这条路径的**实查证伪**，关闭它，免得后人重走。它直接闭合 [0006](./0006-form-a-two-subprojects-no-orchestrator.md) 与 [0013](./0013-cross-engine-sharing-boundary.md) 当年留下的「medium 置信、未验证」备用路径。
+为核心库（v1.0）选语言时，曾设想：若 Nova Act 也能用 TypeScript 驱动，则核心可全 TS、两个引擎在进程内对称（最工整的理想形态）。本 ADR 记录对这条路径的**实查证伪**，关闭它，免得后人重走。它直接闭合 [0006](./0006-form-a-two-subprojects-no-orchestrator.md) 与 [0013](./0013-cross-engine-sharing-boundary.md) 当年留下的未验证备用路径。
 
 ## 候选路径
 

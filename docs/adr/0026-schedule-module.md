@@ -1,6 +1,6 @@
 # schedule 模块：job 间并发调度 + 失败隔离 + 优雅终止
 
-> **Status:** Partially-superseded-by 0034 —— 纯 reducer 红线仍守（副作用仍在 adapter/组合根、core 不 import boto3）、同步 `run` 路径的 schedule 驱动循环不变；仅「上云只换 adapter、schedule 一行不改」对**异步 submit（CLI 脱离）路径**不成立、被 [0034](./0034-detached-batch-reconciler.md) 纠正（见下 L69/L89 的 ⚠️ 注）：该路径把同步驱动循环解体为无状态事件驱动 reconciler、抽出纯 `project`/`plan_next`。
+> **Status:** Partially-superseded-by 0034 —— 纯 reducer 红线仍守（副作用仍在 adapter/组合根、core 不 import boto3）、同步 `run` 路径的 schedule 驱动循环不变；仅「上云只换 adapter、schedule 一行不改」对**异步 submit（CLI 脱离）路径**不成立、被 [0034](./0034-detached-batch-reconciler.md) 纠正（见下「优雅终止」段与「现在做 / 留口子」段的 ⚠️ 注）：该路径把同步驱动循环解体为无状态事件驱动 reconciler、抽出纯 `project`/`plan_next`。
 
 核心库把 plan 产出的 **job 列表**（[0025](./0025-plan-module-feature-to-jobs.md)）实际跑起来的模块：决定哪些 job 并行、控并发、起 worker、收流式事件、隔离失败、超时兜底。它兑现 [0016](./0016-execution-architecture-core-lib-run-model.md)/[0019](./0019-feature-tags-scope-and-engine.md) 留给核心库的「scope 串/并行调度、会话共享」。它是 v1.0 核心三模块的最后一块（协议 [0024](./0024-worker-core-protocol.md) → plan [0025](./0025-plan-module-feature-to-jobs.md) → schedule 本 ADR）。
 
