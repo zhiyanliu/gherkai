@@ -59,11 +59,16 @@ class EventSink:
         """
         table_name = os.environ.get("EVENTS_DDB_TABLE") or None
         if table_name is not None:
-            return cls(
-                table_name=table_name,
-                run_id=os.environ.get("RUN_ID") or None,
-                scope_id=os.environ.get("SCOPE_ID") or None,
-            )
+            run_id = os.environ.get("RUN_ID") or None
+            scope_id = os.environ.get("SCOPE_ID") or None
+            if run_id is None or scope_id is None:
+                # fail-loud（对齐 JobSource 对残缺配置的态度）：缺其一则 PK 拼成 "None#None"，全部事件
+                # 静默写进无主键空间、adapter 按真 PK Query 永远读不到（无 scope_done → run 永不收敛），
+                # 且多 scope 挤同一假 PK 各自 seq 从 1 起 → 撞号覆盖（破 ADR 0034 机制一「每 PK 单写者」）。
+                raise ValueError(
+                    "EventSink DDB 态：EVENTS_DDB_TABLE 已注入但缺 RUN_ID/SCOPE_ID——组合根装配错误"
+                    f"（RUN_ID={run_id!r} SCOPE_ID={scope_id!r}）")
+            return cls(table_name=table_name, run_id=run_id, scope_id=scope_id)
         events_fd = os.environ.get("EVENTS_FD")
         try:
             out = os.fdopen(int(events_fd), "w", encoding="utf-8") if events_fd else sys.stdout

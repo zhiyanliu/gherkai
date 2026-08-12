@@ -338,10 +338,12 @@ def _lifecycle_rank(status: Status) -> int:
 
 
 def _aggregate(statuses: list[Status]) -> Status:
-    """终态归约（与 schedule._aggregate 同语义，ADR 0031 决定三）：滤非终态判定后，
-    任一 error→error；任一 failed→failed；否则 passed（空/全前置态也算 passed）。
+    """终态归约（唯一一份，schedule 与本模块两路径共用——ADR 0031 决定三 / 0034「不复制归约逻辑」）：
+    滤非终态判定后，任一 error→error；任一 failed→failed；否则 passed（空/全前置态也算 passed）。
 
-    过滤 _NON_VERDICT（skipped/aborted/pending/running）——run 级只看真正出了判定的 job。
+    过滤 _NON_VERDICT（skipped/aborted 派生态 + pending/running 前置态）——run 级只看真正出了判定的
+    job。把正确性钉在函数内、不依赖「skipped 必伴随 error」的外部不变量（防未来引入主动 skip 时
+    全-skipped run 被误判 passed）。scenario 内归约喂的全是 worker 三态，过滤为 no-op。
     """
     verdicts = [s for s in statuses if s not in _NON_VERDICT]
     if any(s == Status.ERROR for s in verdicts):

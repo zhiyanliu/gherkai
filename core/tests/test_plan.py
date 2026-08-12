@@ -262,3 +262,28 @@ def test_assertion_votes_from_config_propagates_to_all_jobs():
     )
     assert len(jobs) == 2
     assert all(j.assertion_votes == 3 for j in jobs)  # 缺省值贯穿到每个 job
+
+
+# ---- 步骤关键字判不出 → fail-fast（ADR 0025：keyword 只决定派发,判不出=拒绝猜）----
+
+
+def test_star_step_keyword_fails_fast():
+    """`*` 步骤 type='Unknown'（gherkin 实测）→ PlanError,不静默兜底成 Given（假绿方向的错标）。"""
+    import pytest
+    from core.errors import PlanError
+    from core.parse import parse_feature
+
+    with pytest.raises(PlanError, match="关键字无法判定"):
+        parse_feature("x.feature", "Feature: t\n  Scenario: s\n    * 页面显示 OpenAI 词条\n")
+
+
+def test_leading_and_keyword_fails_fast():
+    """无前驱非连接词的首条 And 同判不出 → PlanError;有前驱的 And 正常继承不受影响。"""
+    import pytest
+    from core.errors import PlanError
+    from core.parse import parse_feature
+
+    with pytest.raises(PlanError, match="关键字无法判定"):
+        parse_feature("y.feature", "Feature: t\n  Scenario: s\n    And 先看一眼\n")
+    r = parse_feature("z.feature", "Feature: t\n  Scenario: s\n    Given 打开页面\n    And 再看一眼\n")
+    assert [st.keyword for st in r[0].scenario.steps] == ["Given", "Given"]  # 继承前驱,照常

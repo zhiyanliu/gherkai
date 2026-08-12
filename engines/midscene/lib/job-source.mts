@@ -43,6 +43,11 @@ export class JobSource {
     if (!uri.startsWith("s3://")) throw new Error(`JobSource: JOB_S3_URI 须为 s3:// URI，得到 ${uri}`);
     const rest = uri.slice("s3://".length);
     const slash = rest.indexOf("/");
+    if (slash < 0) {
+      // fail-loud（对齐本函数的 s3:// 前缀校验 + Nova job_source.py partition 语义）：无 key 段时
+      // slice(0,-1)/slice(0) 会静默算出错的 bucket/key（当前组合根恒带 key，此为护栏非活 bug）。
+      throw new Error(`JobSource: JOB_S3_URI 缺 key 段（s3://bucket/key），得到 ${uri}`);
+    }
     const bucket = rest.slice(0, slash);
     const key = rest.slice(slash + 1);
     const s3 = client ?? new S3Client({ region: process.env.AWS_REGION });

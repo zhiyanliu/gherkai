@@ -54,13 +54,15 @@ const INFLIGHT_SETTLE_MS = 1500;
 // 抢传跑在主流程（scenario 之间、非 SIGTERM handler），此预算限的是「延迟下一 scenario 的墙钟」，非 grace。
 const SCENARIO_LOG_SNAPSHOT_BUDGET_MS = 8000;
 
-// AWS SDK v3 服务端瞬时故障的节流错误 name 集（ADR 0028）——对齐 botocore 节流码集（保两个引擎对称）。
-// AgentCore 起会话（StartBrowserSessionCommand）是 AWS SDK v3 调用，服务端瞬时不可用/限流时抛的 error
-// 带 name（如 ThrottlingException）+ $metadata.httpStatusCode + 可选 $retryable。
-const AWS_THROTTLE_NAMES = new Set([
-  "ThrottlingException", "Throttling", "ThrottledException", "RequestThrottledException",
-  "TooManyRequestsException", "ProvisionedThroughputExceededException", "RequestLimitExceeded",
-  "SlowDown", "LimitExceededException", "ServiceUnavailable", "ServiceUnavailableException",
+// AWS SDK v3 服务端瞬时故障的错误 name 集（ADR 0028，节流+瞬时超时类）——与 Nova _BOTO_TRANSIENT_CODES
+// 逐字对齐（18 项，保两个引擎对称）。AgentCore 起会话（StartBrowserSessionCommand）是 AWS SDK v3 调用，
+// 服务端瞬时不可用/限流时抛的 error 带 name（如 ThrottlingException）+ $metadata.httpStatusCode + 可选 $retryable。
+const AWS_TRANSIENT_NAMES = new Set([
+  "RequestTimeout", "RequestTimeoutException", "PriorRequestNotComplete",  // 瞬时
+  "ThrottlingException", "Throttling", "ThrottledException", "RequestThrottledException",  // 节流
+  "TooManyRequestsException", "ProvisionedThroughputExceededException", "TransactionInProgressException",
+  "RequestLimitExceeded", "BandwidthLimitExceeded", "LimitExceededException", "RequestThrottled",
+  "SlowDown", "EC2ThrottledException", "ServiceUnavailable", "ServiceUnavailableException",
 ]);
 const AWS_TRANSIENT_STATUS = new Set([500, 502, 503, 504]);
 
@@ -84,7 +86,7 @@ function isTransientNetwork(e: unknown, connecting = false): boolean {
       return true; // EAI_AGAIN = DNS 临时失败，当瞬时
     }
     // AWS SDK v3 服务端瞬时（AgentCore 起会话节流/5xx，ADR 0028）：name 节流集 / 5xx 状态 / $retryable.throttling
-    if (cur.name && AWS_THROTTLE_NAMES.has(cur.name)) return true;
+    if (cur.name && AWS_TRANSIENT_NAMES.has(cur.name)) return true;
     if (cur.$metadata?.httpStatusCode != null && AWS_TRANSIENT_STATUS.has(cur.$metadata.httpStatusCode)) return true;
     if (cur.$retryable?.throttling === true) return true;
     const msg = cur.message ?? "";
@@ -194,6 +196,13 @@ function stepCost(beforeTokens: number, agent: PlaywrightAgent): Record<string, 
 }
 
 async function main(): Promise<number> {
+  // 早期信号护栏（对称 Nova：handler 先于 JobSource.read 装载，ADR 0024）——S3 态下 read 含一次网络往返，
+  // 窗口内 SIGTERM 若走 Node 默认处置会以信号终止（非 0）→ adapter 误归 engine_error。此阶段无会话、无产物，
+  // 直接干净退 0（零事件 + exit 0，core 判 error 不误归因）；真正的 onSignal（抢传+释放会话）建好后替换本 handler。
+  const earlySignal = () => process.exit(0);
+  process.on("SIGTERM", earlySignal);
+  process.on("SIGINT", earlySignal);
+
   // I/O 边缘可注入接口（ADR 0024）：job 入口 / 事件出口从内联收进 lib 组件，subprocess 态=读 stdin / 写 EVENTS_FD。
   const job = (await JobSource.fromEnv().read()) as Job;
   const eventSink = EventSink.fromEnv();  // main 级单例（对称 uploader）；作参数注入 runScenario/runStep
@@ -281,8 +290,13 @@ async function main(): Promise<number> {
     });
     process.exit(code);
   };
+  // 交接：先挂真 handler 再摘早期护栏（顺序不能反——Node 在某信号最后一个 listener 被移除时恢复
+  // 默认处置，先摘会开出「SIGTERM 走内核默认动作→非0退出→误归 engine_error」的窗口；重叠期两个
+  // handler 并存无害：此刻尚未 connect、earlySignal 的 exit(0) 与 onSignal 语义一致）。
   process.on("SIGTERM", onSignal);
   process.on("SIGINT", onSignal);  // Ctrl-C 也走同一路径（抢传+释放会话），对称 Nova 已纳入 SIGINT
+  process.removeListener("SIGTERM", earlySignal);
+  process.removeListener("SIGINT", earlySignal);
 
   const reportRefs: Array<{ kind: string; ref: string; label?: string }> = [];
   // 产物 S3 上传器（ADR 0029，对称 Nova 的模块级 _uploader）：cloud 上传+删本地报 s3://，local no-op 报 file://。

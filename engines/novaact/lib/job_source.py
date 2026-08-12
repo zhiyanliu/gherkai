@@ -49,6 +49,10 @@ class JobSource:
         if not uri.startswith("s3://"):
             raise ValueError(f"JobSource: JOB_S3_URI 须为 s3:// URI，得到 {uri!r}")
         bucket, _, key = uri[len("s3://"):].partition("/")
+        if not bucket or not key:
+            # fail-loud（对称 midscene job-source.mts）：无 key 段的 URI 若放行，会晚一步在 GetObject 报
+            # 模糊参数错——在装配边界把矛盾说清（当前组合根恒带 key，此为护栏非活 bug）。
+            raise ValueError(f"JobSource: JOB_S3_URI 缺 bucket/key 段（s3://bucket/key），得到 {uri}")
         import boto3
         from botocore.config import Config
         cfg = Config(connect_timeout=5, read_timeout=10, retries={"max_attempts": 0})

@@ -120,3 +120,18 @@ def test_emit_flushes_each_event():
     sink.emit({"type": "step_started"})
     sink.emit({"type": "step_done"})
     assert len(flushed) == 2  # 两次 emit 各 flush 一次（不攒 buffer）
+
+
+def test_ddb_mode_missing_run_or_scope_id_fails_loud(monkeypatch):
+    """DDB 态缺 RUN_ID/SCOPE_ID → 装配错误 fail-loud(否则事件静默写进 "None#None" 假 PK,run 永不收敛)。"""
+    import pytest
+
+    monkeypatch.setenv("EVENTS_DDB_TABLE", "t")
+    monkeypatch.delenv("RUN_ID", raising=False)
+    monkeypatch.setenv("SCOPE_ID", "s1")
+    with pytest.raises(ValueError, match="RUN_ID/SCOPE_ID"):
+        EventSink.from_env()
+    monkeypatch.setenv("RUN_ID", "r1")
+    monkeypatch.delenv("SCOPE_ID", raising=False)
+    with pytest.raises(ValueError, match="RUN_ID/SCOPE_ID"):
+        EventSink.from_env()

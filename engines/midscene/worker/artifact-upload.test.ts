@@ -340,3 +340,16 @@ test("snapshotLogs 预算中途耗尽：传部分后 break，未传的仍可下�
   assert.ok(sent >= 1 && sent < 3, `预算中途耗尽应传部分（1~2 个）、非全部，实传 ${sent}`);
   assert.equal(seen.size, sent, "只有真传成功的记 seen，未传的不进 seen（下轮/scope 末 flush 可重试）");
 });
+
+test("半注入（有桶缺 MIDSCENE_RUN_DIR）→ 装配矛盾 fail-loud（ADR 0033：静默 no-op 产物必丢）", () => {
+  const saved = { b: process.env.ARTIFACT_S3_BUCKET, d: process.env.MIDSCENE_RUN_DIR };
+  try {
+    process.env.ARTIFACT_S3_BUCKET = "b";
+    delete process.env.MIDSCENE_RUN_DIR;
+    assert.throws(() => ArtifactUploader.fromEnv(), /MIDSCENE_RUN_DIR/);
+  } finally {
+    for (const [k, v] of [["ARTIFACT_S3_BUCKET", saved.b], ["MIDSCENE_RUN_DIR", saved.d]] as const) {
+      if (v === undefined) delete process.env[k]; else process.env[k] = v;
+    }
+  }
+});

@@ -46,6 +46,12 @@ export class ArtifactUploader {
     const prefix = process.env.ARTIFACT_S3_PREFIX ?? "";
     const runRoot = process.env.MIDSCENE_RUN_DIR;
     const runDir = runRoot ? path.dirname(path.resolve(runRoot)) : undefined;
+    if (bucket !== undefined && runDir === undefined) {
+      // fail-loud（对称 Nova artifact_upload.py）：注入了桶却没给 MIDSCENE_RUN_DIR = 组合根配置矛盾，
+      // 静默 no-op 会让产物报 file:// 且随容器盘销毁必丢（ADR 0033「只注①不注②等于没上传」）。
+      throw new Error(
+        "ArtifactUploader：ARTIFACT_S3_BUCKET 已注入但缺 MIDSCENE_RUN_DIR（runDir 推不出）——组合根装配错误（ADR 0033）");
+    }
     return new ArtifactUploader(bucket, prefix, runDir);
   }
 

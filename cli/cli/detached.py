@@ -18,7 +18,7 @@ from pathlib import Path
 from core.adapters.event_log import SqliteEventLog
 from core.adapters.run_store.local import LocalRunStore
 from core.model import Job, RunMeta
-from core.reconcile import tick
+from core.reconcile import finalize_artifacts, tick
 from core.ports import Engine, EngineResolver
 
 
@@ -108,30 +108,10 @@ def run_reconcile_loop(
     while True:
         done = tick(run_id, meta, event_log, run_store, launcher, max_concurrency, now_iso=_now())
         if done:
-            _finalize_artifacts(run_id, meta, event_log, result_store, report_store, _now())
+            # 收尾聚合走 core 唯一一份（曾在此双写一份、与 lambdas/reconciler.py 漂移风险，已合并）
+            finalize_artifacts(run_id, meta, event_log, result_store, report_store, _now())
             return
         time.sleep(poll_interval_s)
-
-
-def _finalize_artifacts(run_id, meta, event_log, result_store, report_store, now_iso) -> None:
-    """done 后聚合判定真值 + RunReport（幂等；ADR 0034 收尾，对齐同步 run 路径产物）。
-
-    tick 的 try_finalize 只写 RunStore 总 status；判定明细（ResultStore）与 RunReport（ReportStore）在此补。
-    从 events 全量重放 project_full → RunResult，逐 job save_job_result + report_store.write。ReportStore 写失败
-    隔离（判定真值已在 ResultStore、report 可从 RunResult 重建，对齐 ADR 0030 决定三）。"""
-    if result_store is None and report_store is None:
-        return
-    from core.project import project_full
-
-    result = project_full(meta, event_log.records())
-    if result_store is not None:
-        for jr in result.jobs:
-            result_store.save_job_result(run_id, jr)
-    if report_store is not None:
-        try:
-            report_store.write(run_id, result, created_at=now_iso)
-        except Exception:
-            pass  # 派生视图写失败不击穿判定真值（ADR 0030 决定三）
 
 
 # ============================================================================

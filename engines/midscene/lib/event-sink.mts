@@ -47,11 +47,15 @@ export class EventSink {
   static fromEnv(): EventSink {
     const tableName = process.env.EVENTS_DDB_TABLE || undefined;
     if (tableName !== undefined) {
-      return new EventSink({
-        tableName,
-        runId: process.env.RUN_ID || undefined,
-        scopeId: process.env.SCOPE_ID || undefined,
-      });
+      const runId = process.env.RUN_ID || undefined;
+      const scopeId = process.env.SCOPE_ID || undefined;
+      if (runId === undefined || scopeId === undefined) {
+        // fail-loud（对齐 JobSource/Nova event_sink.py）：缺其一则 PK 拼成 "undefined#undefined"，事件
+        // 静默写进无主键空间、adapter 永远读不到（run 永不收敛）+ 多 scope 撞号（破 ADR 0034 机制一）。
+        throw new Error(
+          `EventSink DDB 态：EVENTS_DDB_TABLE 已注入但缺 RUN_ID/SCOPE_ID——组合根装配错误（RUN_ID=${runId} SCOPE_ID=${scopeId}）`);
+      }
+      return new EventSink({ tableName, runId, scopeId });
     }
     return new EventSink({ fd: process.env.EVENTS_FD ? Number(process.env.EVENTS_FD) : 1 });
   }

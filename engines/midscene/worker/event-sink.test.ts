@@ -85,3 +85,20 @@ test("空串 EVENTS_DDB_TABLE 当作未注入（|| undefined）→ 走 fd 态（
     if (saved === undefined) delete process.env.EVENTS_DDB_TABLE; else process.env.EVENTS_DDB_TABLE = saved;
   }
 });
+
+test("DDB 态缺 RUN_ID/SCOPE_ID → 装配错误 fail-loud（否则事件写进 undefined#undefined 假 PK）", () => {
+  const saved = { t: process.env.EVENTS_DDB_TABLE, r: process.env.RUN_ID, s: process.env.SCOPE_ID };
+  try {
+    process.env.EVENTS_DDB_TABLE = "t";
+    delete process.env.RUN_ID;
+    process.env.SCOPE_ID = "s1";
+    assert.throws(() => EventSink.fromEnv(), /RUN_ID\/SCOPE_ID/);
+    process.env.RUN_ID = "r1";
+    delete process.env.SCOPE_ID;
+    assert.throws(() => EventSink.fromEnv(), /RUN_ID\/SCOPE_ID/);
+  } finally {
+    for (const [k, v] of [["EVENTS_DDB_TABLE", saved.t], ["RUN_ID", saved.r], ["SCOPE_ID", saved.s]] as const) {
+      if (v === undefined) delete process.env[k]; else process.env[k] = v;
+    }
+  }
+});

@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from gherkin import Compiler, Parser
 from gherkin.errors import CompositeParserException
 
+from core.errors import PlanError
 from core.model import Scenario, Step, StepArgument
 
 # 自有别名：把 gherkin 的解析异常对外暴露成 core 的 FeatureParseError，使消费层（cli）能捕获
@@ -44,6 +45,22 @@ class ParsedScenario:
 # 例外：无前驱可继承的 `*`/And/But（如 scenario 首步就是 And）Compiler 给 type='Unknown'，落到下面
 # .get 的兜底 "Given"（Unknown 的处置另行决策）。
 _TYPE_TO_KEYWORD = {"Context": "Given", "Action": "When", "Outcome": "Then"}
+
+
+def _step_keyword(pickle_step: dict, scenario_id: str) -> str:
+    """pickle step type → 派发关键字（Given/When/Then）。type='Unknown' 一律 fail-fast。
+
+    Compiler 对 `*` 步骤与「无前驱非连接词」的首条 And/But 给 type='Unknown'（实测 gherkin 41.0）——
+    此时 Given/When/Then 语义**无从判定**，静默兜底成 Given 会把本该是断言的 step 当动作派发、断言
+    永不执行（假绿方向的静默错标）。fail-fast 让用户写明关键字（ADR 0025「keyword 只决定派发」，
+    判不出=拒绝猜）。
+    """
+    kw = _TYPE_TO_KEYWORD.get(pickle_step.get("type", ""))
+    if kw is None:
+        raise PlanError(
+            f"步骤关键字无法判定（scenario {scenario_id}、step 文本 {pickle_step.get('text', '')!r}）："
+            "`*` 或无前驱的 And/But 判不出 Given/When/Then（派发语义），请写明关键字")
+    return kw
 
 
 def _index_ast_lines(gherkin_document: dict) -> dict[str, int]:
@@ -141,7 +158,7 @@ def parse_feature(uri: str, text: str) -> list[ParsedScenario]:
         steps = tuple(
             Step(
                 index=i,
-                keyword=_TYPE_TO_KEYWORD.get(s.get("type", ""), "Given"),
+                keyword=_step_keyword(s, sid),
                 text=s["text"],
                 argument=_map_argument(s.get("argument")),
             )

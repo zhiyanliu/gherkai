@@ -15,16 +15,13 @@ import logging
 from dataclasses import dataclass
 
 from core.model import Job
+from core.errors import PlanError  # re-export（既有 `from core.scope import PlanError` 不变）
 from core.parse import ParsedScenario, parse_feature
 
 logger = logging.getLogger("core.scope")
 
 _SCOPE_PREFIX = "@scope:"
 _ENGINE_PREFIX = "@engine:"
-
-
-class PlanError(ValueError):
-    """配置矛盾，拒绝运行（ADR 0019/0025）：engine 冲突、多 @scope 值等。"""
 
 
 @dataclass(frozen=True)

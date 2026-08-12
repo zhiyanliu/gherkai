@@ -45,6 +45,12 @@ class ArtifactUploader:
         prefix = os.environ.get("ARTIFACT_S3_PREFIX", "")
         logs_dir = os.environ.get("NOVA_LOGS_DIR")
         run_dir = Path(logs_dir).parent if logs_dir else None
+        if bucket is not None and run_dir is None:
+            # fail-loud：注入了桶却没给 SDK 落点（NOVA_LOGS_DIR）= 组合根配置矛盾，非降级档——静默 no-op
+            # 会让产物报 file:// 且随容器盘销毁必丢（ADR 0033 真跑事故「只注①不注②等于没上传」）。
+            raise ValueError(
+                "ArtifactUploader：ARTIFACT_S3_BUCKET 已注入但缺 NOVA_LOGS_DIR（run_dir 推不出）——"
+                "组合根装配错误（产物将随容器盘销毁，ADR 0033）")
         return cls(bucket=bucket, prefix=prefix, run_dir=run_dir)
 
     @property

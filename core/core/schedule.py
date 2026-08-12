@@ -23,7 +23,6 @@ from dataclasses import dataclass
 from typing import Callable
 
 from core.model import (
-    _NON_VERDICT,
     Event,
     Job,
     JobResult,
@@ -35,7 +34,7 @@ from core.model import (
 )
 from core.errors import WorkerNetworkError
 from core.ports import EngineResolver, JobSink, Sink
-from core.project import Timing as _Timing, reduce_event
+from core.project import Timing as _Timing, _aggregate as _project_aggregate, reduce_event
 
 import queue as _queue
 
@@ -128,19 +127,9 @@ class ScheduleOpts:
     heartbeat_interval_s: float = 0.5
 
 
-def _aggregate(statuses: list[Status]) -> Status:
-    """状态归约：任一 error→error；任一 failed→failed；否则 passed（空也算 passed）。
-
-    入口先滤掉非终态判定（skipped/aborted 派生态 + pending/running 前置态，ADR 0031 决定三）：
-    run 级只看真正出了判定的 job。把正确性钉在函数内、不依赖「skipped 必伴随 error」的外部不变量
-    （防未来引入主动 skip 时全-skipped run 被误判 passed）。scenario 内归约喂的全是 worker 三态，过滤是 no-op。
-    """
-    statuses = [s for s in statuses if s not in _NON_VERDICT]
-    if any(s == Status.ERROR for s in statuses):
-        return Status.ERROR
-    if any(s == Status.FAILED for s in statuses):
-        return Status.FAILED
-    return Status.PASSED
+# 状态归约提炼到 core.project._aggregate（同步/无状态两路径共用一份，ADR 0034「不复制归约逻辑」——
+# 同 reduce_event/_Timing 的提炼手法；此别名保 schedule 侧既有引用（含测试）不动）。
+_aggregate = _project_aggregate
 
 
 class _Worker:

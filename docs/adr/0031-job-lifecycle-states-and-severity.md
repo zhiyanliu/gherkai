@@ -90,7 +90,7 @@ run 级（聚合用）：
 
 ## 决定三：`_aggregate` 入口过滤 skipped/aborted（把正确性钉进函数，不靠外部不变量）
 
-run 级聚合（`schedule._aggregate`）改成：**入口先滤掉 skipped/aborted，再走原三态 max 逻辑**。
+run 级聚合（`schedule._aggregate`——真源现居 `core.project._aggregate`、schedule 侧为别名，同步/无状态两路共用一份）改成：**入口先滤掉 skipped/aborted，再走原三态 max 逻辑**。
 
 ```python
 # 入口过滤名单：终态判定之外的态（skipped/aborted 派生态 + pending/running 前置态）都不进 run 级聚合

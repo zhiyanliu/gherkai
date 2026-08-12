@@ -45,6 +45,31 @@ class Launcher(Protocol):
     def launch(self, job: Job) -> None: ...
 
 
+def finalize_artifacts(run_id, meta, event_log, result_store, report_store, now_iso: str) -> None:
+    """done 后聚合判定真值 + RunReport（幂等；ADR 0034 收尾，对齐同步 run 路径产物）。
+
+    tick 的 try_finalize 只写 RunStore 总 status；判定明细（ResultStore）与 RunReport（ReportStore）在此补：
+    从 events 全量重放 project_full → RunResult，逐 job save_job_result + report_store.write。幂等（重放 +
+    覆盖写同 key）——多个推进者都 done 都聚合无害。store 注入 None（测试）则跳过对应半边；ReportStore 写失败
+    隔离（判定真值已在 ResultStore、report 可从 RunResult 重建，ADR 0030 决定三）。
+    **唯一一份**（cloud Lambda / local per-run 两宿主同调此处）——曾双写于 detached.py 与 lambdas/reconciler.py，
+    按「不复制归约/收尾逻辑」合并（ADR 0034 core 拆分）。纯编排：只调 project_full 与注入的 store，不 import boto3。
+    """
+    if result_store is None and report_store is None:
+        return
+    from core.project import project_full
+
+    result = project_full(meta, event_log.records())
+    if result_store is not None:
+        for jr in result.jobs:
+            result_store.save_job_result(run_id, jr)
+    if report_store is not None:
+        try:
+            report_store.write(run_id, result, created_at=now_iso)
+        except Exception:
+            pass  # 派生视图写失败不击穿判定真值（ADR 0030 决定三）
+
+
 def tick(
     run_id: str,
     meta: RunMeta,

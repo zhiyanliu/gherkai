@@ -66,6 +66,7 @@ Job = {
 - worker 拿到的 steps **严格按 feature 书写顺序**，逐条执行；**keyword 不约束顺序、不触发重排**。
 - 合法且要支持乱序：`Given→Then→When→Then`（现有 `features/wikipedia_assertions.feature` 就是真实样本）——Then 在 When 前 = 就在那个时点判定。Gherkin 关键字本不强制 Given/When/Then 顺序，我们忠于此。
 - keyword 的唯一作用 = worker 派发（`When`→AI 动作 / `Then`→AI 断言+投票 / URL 形态→确定性导航 / 命中注册表→确定性，见 [0024](./0024-worker-core-protocol.md)/[0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md)）。core 不消费 keyword 的顺序语义。
+- **keyword 判不出 = 拒绝猜（fail-fast，首轮 code-health 逼出）**：gherkin Compiler 对 `*` 步骤与「无前驱非连接词」的首条 And/But 给 `type='Unknown'`（实测 gherkin 41.0）——此时派发语义无从判定，曾静默兜底成 Given，会把本该是断言的 step 当动作派发、断言永不执行（假绿方向的静默错标）。现抛 `PlanError` 让用户写明关键字；有前驱的 And/But 照常继承、不受影响。回归护栏 `core/tests/test_plan.py` 的 fail-fast 两用例。
 
 ### id 派生（RunStore/RunReport 关联键：稳定 + 可追溯）
 

@@ -40,7 +40,7 @@ def _make_act_pair(tmp_path, name="act_0"):
 def test_presend_uploads_sibling_json(tmp_path, monkeypatch):
     html, js = _make_act_pair(tmp_path)
     spy = _SpyUploader()
-    monkeypatch.setattr(rs, "_uploader", spy)
+    monkeypatch.setattr(rs, "_uploader_singleton", spy)  # 惰性单例:直接注入替身
     rs._presend_act_siblings([html])
     # 配套 json 被抢传（abspath 形式）
     assert any(c.endswith("_trajectory.json") for c in spy.calls)
@@ -51,7 +51,7 @@ def test_presend_uploads_sibling_json(tmp_path, monkeypatch):
 def test_presend_skips_when_no_sibling_json(tmp_path, monkeypatch):
     html = tmp_path / "act_0.html"; html.write_text("<html>x</html>")  # 只有 html、无配套 json
     spy = _SpyUploader()
-    monkeypatch.setattr(rs, "_uploader", spy)
+    monkeypatch.setattr(rs, "_uploader_singleton", spy)  # 惰性单例:直接注入替身
     rs._presend_act_siblings([str(html)])
     assert spy.calls == []  # 无配套 json → 不调
 
@@ -59,7 +59,7 @@ def test_presend_skips_when_no_sibling_json(tmp_path, monkeypatch):
 # ---- 非 .html 路径（防御）→ 跳过 ----
 def test_presend_ignores_non_html(tmp_path, monkeypatch):
     spy = _SpyUploader()
-    monkeypatch.setattr(rs, "_uploader", spy)
+    monkeypatch.setattr(rs, "_uploader_singleton", spy)  # 惰性单例:直接注入替身
     rs._presend_act_siblings(["/logs/act_0_trajectory.json"])  # 传的是 json 本身、非 .html
     assert spy.calls == []
 
@@ -68,7 +68,7 @@ def test_presend_ignores_non_html(tmp_path, monkeypatch):
 def test_presend_swallows_upload_failure(tmp_path, monkeypatch):
     html, js = _make_act_pair(tmp_path)
     spy = _SpyUploader(fail_paths={str(Path(js).resolve()), js})
-    monkeypatch.setattr(rs, "_uploader", spy)
+    monkeypatch.setattr(rs, "_uploader_singleton", spy)  # 惰性单例:直接注入替身
     # 不抛（失败被吞）——若抛则测试 error
     rs._presend_act_siblings([html])
     assert any(c.endswith("_trajectory.json") for c in spy.calls)  # 试过传（即便失败）
@@ -79,7 +79,7 @@ def test_presend_all_act_siblings(tmp_path, monkeypatch):
     h0, j0 = _make_act_pair(tmp_path, "act_0")
     h1, j1 = _make_act_pair(tmp_path, "act_1")
     spy = _SpyUploader()
-    monkeypatch.setattr(rs, "_uploader", spy)
+    monkeypatch.setattr(rs, "_uploader_singleton", spy)  # 惰性单例:直接注入替身
     rs._presend_act_siblings([h0, h1])
     json_calls = [c for c in spy.calls if c.endswith("_trajectory.json")]
     assert len(json_calls) == 2  # 两个 act 的配套 json 都抢传

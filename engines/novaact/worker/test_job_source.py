@@ -65,3 +65,12 @@ def test_empty_s3_uri_treated_as_unset(monkeypatch):
     monkeypatch.setattr(sys, "stdin", io.StringIO('{"scope": {"id": "s:0"}, "scenarios": []}\n'))
     job = JobSource.from_env().read()
     assert job["scope"]["id"] == "s:0"
+
+
+def test_s3_uri_without_key_fails_loud():
+    """s3://bucket(无 key 段)→ fail-loud(对称 midscene;放行会晚一步在 GetObject 报模糊参数错)。"""
+    import pytest
+    from lib.job_source import JobSource
+
+    with pytest.raises(ValueError, match="缺 bucket/key"):
+        JobSource._read_s3("s3://only-bucket")

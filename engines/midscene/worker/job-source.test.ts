@@ -74,3 +74,13 @@ test("空串 JOB_S3_URI 当作未注入（|| undefined）→ 走 stdin、不误�
     if (saved === undefined) delete process.env.JOB_S3_URI; else process.env.JOB_S3_URI = saved;
   }
 });
+
+test("s3://bucket（无 key 段）→ fail-loud（对称 Nova：放行会静默算错 bucket/key）", async () => {
+  const saved = process.env.JOB_S3_URI;
+  try {
+    process.env.JOB_S3_URI = "s3://only-bucket";
+    await assert.rejects(() => JobSource.fromEnv().read(), /缺 key 段/);
+  } finally {
+    if (saved === undefined) delete process.env.JOB_S3_URI; else process.env.JOB_S3_URI = saved;
+  }
+});

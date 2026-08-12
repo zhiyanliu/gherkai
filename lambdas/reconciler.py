@@ -100,19 +100,6 @@ def _build(run_id: str):
     return meta, event_log, run_store, launcher, max_concurrency, result_store, report_store
 
 
-def _finalize_artifacts(run_id, meta, event_log, result_store, report_store) -> None:
-    """done 后聚合判定真值 + RunReport（同 local detached._finalize_artifacts，幂等；ADR 0034 收尾）。"""
-    from core.project import project_full
-
-    result = project_full(meta, event_log.records())
-    for jr in result.jobs:
-        result_store.save_job_result(run_id, jr)
-    try:
-        report_store.write(run_id, result, created_at=_now_iso())
-    except Exception:
-        pass  # 派生视图写失败隔离（ADR 0030 决定三）
-
-
 def _run_ids_from_runs_stream(event) -> set[str]:
     """提取 kicker 要 tick 的 run_id 集。两种 event 源（kicker 同时服务两者）：
 
@@ -142,7 +129,9 @@ def _tick_runs(run_ids: set[str], label: str) -> dict:
         meta, event_log, run_store, launcher, mc, rstore, pstore = built
         done = tick(run_id, meta, event_log, run_store, launcher, mc, now_iso=_now_iso())
         if done:
-            _finalize_artifacts(run_id, meta, event_log, rstore, pstore)
+            # 收尾聚合走 core 唯一一份（曾在此双写、与 cli/detached.py 漂移风险，已合并）
+            from core.reconcile import finalize_artifacts
+            finalize_artifacts(run_id, meta, event_log, rstore, pstore, _now_iso())
             print(f"{label}: run {run_id} done + finalized")
         else:
             print(f"{label}: run {run_id} advanced (not done)")

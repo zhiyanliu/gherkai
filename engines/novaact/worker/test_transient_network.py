@@ -157,3 +157,27 @@ def test_connecting_flag_does_not_widen_permanent_errors():
     # 普通 Playwright Error（非 TargetClosedError，如参数/协议错）建连阶段也不当瞬时（精确匹配 TargetClosedError）
     from playwright._impl._errors import Error as PWError
     assert rs._is_transient_network(PWError("some protocol error"), connecting=True) is False
+
+
+def test_target_closed_by_name_fallback_hits_inside_chain(monkeypatch):
+    """按名兜底（playwright 私有路径 import 失败时）也必须在**链内**命中——曾只查最外层 e,
+    而真实故障链最外层是 BrowserAuthError,兜底形同虚设(私有路径挪位即误判 engine_error 不重试)。"""
+    import builtins
+
+    real_import = builtins.__import__
+
+    def block_pw(name, *a, **kw):
+        if name == "playwright._impl._errors":
+            raise ImportError("模拟 SDK 版本挪位")
+        return real_import(name, *a, **kw)
+
+    monkeypatch.setattr(builtins, "__import__", block_pw)
+
+    class TargetClosedError(Exception):  # 按名匹配的替身(真类 import 不到)
+        pass
+
+    inner = TargetClosedError("closed")
+    start_failed = RuntimeError("StartFailed"); start_failed.__cause__ = inner
+    outer = RuntimeError("BrowserAuthError"); outer.__cause__ = start_failed
+    assert rs._is_transient_network(outer, connecting=True) is True  # 链内按名命中
+    assert rs._is_transient_network(outer, connecting=False) is False  # 非建连期不认(铁律不变)

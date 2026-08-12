@@ -73,8 +73,17 @@ _stop = threading.Event()
 ACT_TIMEOUT_S = int(os.environ.get("NOVA_ACT_TIMEOUT_S", "120"))  # SDK 允许 [2,1800]；默认 120s
 
 # 产物上传器（ADR 0029 第一期）：从组合根注入的 env（ARTIFACT_S3_BUCKET/PREFIX）造——cloud 时上传 S3+删本地+
-# 报 s3://，local/未注入时 no-op 报 file://。模块级单例（对称 emit/_events_out 的模块级模式；worker 单进程单 run）。
-_uploader = ArtifactUploader.from_env()
+# 报 s3://，local/未注入时 no-op 报 file://。**惰性单例**（非 import 期构造）：from_env 对「半注入」fail-loud
+# （ADR 0033），若在 import 期炸则零事件、连诊断都发不出（且测试收集期即崩）——推迟到首次使用（step 事件流
+# 的 try 内），装配矛盾以 error 事件可见。worker 单进程单 run，单例语义不变。
+_uploader_singleton: ArtifactUploader | None = None
+
+
+def _get_uploader() -> ArtifactUploader:
+    global _uploader_singleton
+    if _uploader_singleton is None:
+        _uploader_singleton = ArtifactUploader.from_env()
+    return _uploader_singleton
 # AI 断言投票次数由 job.assertionVotes 决定（ADR 0014/0024，组合根经 --assertion-votes 设）。
 # 默认 1（不抖动检测，结果直观）；调高才跑 N 次取多数票。
 
@@ -154,14 +163,32 @@ def _traj_refs(step_traj: list[str]) -> list[dict]:
     """本 step 收集的 trajectory 路径 → step 级 reportRefs（kind=trajectory，ADR 0027 下沉）。
 
     一个 step 可能多次 act（尤其 N 票 AI 断言）→ 多个 trajectory；label 仅在多个时编号。空列表 → 空。
-    ref 经 `_uploader.to_report_ref` 得：cloud 上传 S3+删本地报 `s3://`，local no-op 报 `file://`（ADR 0029）。
+    ref 经 `_get_uploader().to_report_ref` 得：cloud 上传 S3+删本地报 `s3://`，local no-op 报 `file://`（ADR 0029）。
     """
     n = len(step_traj)
     return [
-        {"kind": "trajectory", "ref": _uploader.to_report_ref(p),
+        {"kind": "trajectory", "ref": _get_uploader().to_report_ref(p),
          "label": (f"trajectory {i + 1}" if n > 1 else "trajectory")}
         for i, p in enumerate(step_traj)
     ]
+
+
+def _attach_traj_refs(ev: dict, step_traj: list, *, protect_emit: bool = False) -> None:
+    """把本 step 的 trajectory 挂上 step_done 事件：抢传配套 json（ADR 0029）+ reportRefs（ADR 0027 下沉）。
+
+    三个 emit 点（Then 投票/When 动作/except 失败）共用一份（曾三处重复、各自漂移风险）。
+    protect_emit=True（失败路径）：上传若是本次失败源，_traj_refs 重建会再抛——吞掉、只丢 reportRefs 链接，
+    绝不让调用方的 engine_error step_done 事件发不出去（否则降级成裸 traceback，ADR 0029）。
+    """
+    if not step_traj:
+        return
+    try:
+        _presend_act_siblings(step_traj)  # act 边界抢传配套 json（ADR 0029，为 Fargate 预演）
+        ev["reportRefs"] = _traj_refs(step_traj)  # step 级 trajectory（ADR 0027 下沉）
+    except Exception:  # noqa: BLE001
+        if not protect_emit:
+            raise
+        # 失败路径：重建 ref 时 upload 再失败 → 跳过 reportRefs、事件照发
 
 
 def _presend_act_siblings(step_traj: list[str]) -> None:
@@ -180,7 +207,7 @@ def _presend_act_siblings(step_traj: list[str]) -> None:
         js = html[: -len(".html")] + "_trajectory.json"
         if os.path.exists(js):
             try:
-                _uploader.to_report_ref(os.path.abspath(js))  # 幂等上传+记账；返回值丢弃（json 不进 reportRefs）
+                _get_uploader().to_report_ref(os.path.abspath(js))  # 幂等上传+记账；返回值丢弃（json 不进 reportRefs）
             except Exception as e:  # noqa: BLE001  抢传 best-effort，失败不打断 step
                 log(f"act 边界抢传 json 失败（忽略、scope 末 flush 兜底）：{e}")
 
@@ -266,9 +293,7 @@ def _run_step(nova, scenario_id: str, step: dict, votes_n: int, sink: EventSink)
             }
             if tw_total > 0:
                 ev["cost"] = {"time_worked_s": tw_total}  # 全 N 票合计
-            if step_traj:
-                _presend_act_siblings(step_traj)  # act 边界抢传配套 json（ADR 0029，为 Fargate 预演）
-                ev["reportRefs"] = _traj_refs(step_traj)  # step 级 trajectory（ADR 0027 下沉）
+            _attach_traj_refs(ev, step_traj)
             if not passed:
                 ev["errorType"] = "assertion_failed"
                 ev["message"] = f"AI 断言未过多数票（{yes}/{votes_n}）：{text}"
@@ -283,9 +308,7 @@ def _run_step(nova, scenario_id: str, step: dict, votes_n: int, sink: EventSink)
         cost = _cost_from_result(r)
         if cost:
             ev["cost"] = cost
-        if step_traj:
-            _presend_act_siblings(step_traj)  # act 边界抢传配套 json（ADR 0029，为 Fargate 预演）
-            ev["reportRefs"] = _traj_refs(step_traj)  # step 级 trajectory（ADR 0027 下沉）
+        _attach_traj_refs(ev, step_traj)
         sink.emit(ev)
         return "passed"
 
@@ -302,15 +325,8 @@ def _run_step(nova, scenario_id: str, step: dict, votes_n: int, sink: EventSink)
             "type": "step_done", "scenarioId": scenario_id, "stepIndex": idx,
             "status": "error", "errorType": _classify_act_error(e), "message": f"{type(e).__name__}: {e}",
         }
-        if step_traj:
-            # 失败 act 的 trajectory 最该留（ADR 0027/0028）。但 _traj_refs 会经 uploader 上传——若**上传本身**
-            # 是这次的失败源（S3 抛），重建 reportRefs 会再抛。**保护 emit 必发**：上传再失败也只是丢 reportRefs
-            # 链接，绝不吞掉 engine_error step_done 事件（否则降级成裸 traceback，见 ADR 0029）。
-            try:
-                _presend_act_siblings(step_traj)  # 失败 act 的配套 json 也抢传（ADR 0029；自身已吞错，此 try 双保险）
-                ev["reportRefs"] = _traj_refs(step_traj)
-            except Exception:  # noqa: BLE001  重建 ref 时 upload 再失败：跳过 reportRefs、但 engine_error 事件照发
-                pass
+        # 失败 act 的 trajectory 最该留（ADR 0027/0028）——protect_emit：上传再失败也绝不吞 engine_error 事件
+        _attach_traj_refs(ev, step_traj, protect_emit=True)
         sink.emit(ev)
         return "error"
 
@@ -506,6 +522,7 @@ def _is_transient_network(e: BaseException, *, connecting: bool = False) -> bool
         transient += (ProtocolError,)
     except ImportError:
         pass
+    _pw_closed_by_name = False
     if connecting:  # 建连阶段额外认 Playwright 连接被关（下游症状，见 docstring）
         # 精确匹配 TargetClosedError（不用其基类 Error——那会把参数错/协议错等永久错也当瞬时，违背不宽兜底）。
         # 私有路径 _impl._errors（sync_api 未顶层导出它）；导入失败则按类名兜底（防 SDK 版本挪位）。
@@ -514,10 +531,6 @@ def _is_transient_network(e: BaseException, *, connecting: bool = False) -> bool
             transient += (_PWClosed,)
         except ImportError:
             _pw_closed_by_name = True
-        else:
-            _pw_closed_by_name = False
-        if _pw_closed_by_name and type(e).__name__ == "TargetClosedError":
-            return True
 
     seen: set[int] = set()
     cur: BaseException | None = e
@@ -530,6 +543,10 @@ def _is_transient_network(e: BaseException, *, connecting: bool = False) -> bool
         if _is_transient_client_error(cur):  # boto ClientError 节流/5xx（AgentCore 起会话瞬时故障，ADR 0028）
             return True
         if isinstance(cur, transient):
+            return True
+        if _pw_closed_by_name and type(cur).__name__ == "TargetClosedError":
+            # 按名兜底也须在**链内**判（真实包装链 TargetClosedError ← StartFailed ← BrowserAuthError，
+            # 最外层不是它——曾只查最外层 e，兜底形同虚设：私有路径一挪位建连 CDP 断连即误判 engine_error 不重试）。
             return True
         cur = cur.__cause__ or cur.__context__
     return False
@@ -559,18 +576,22 @@ def _classify_act_error(e: BaseException) -> str:
 
 
 def main() -> int:
+    # flag-only handler 装在 main() 首句（模块级 _on_signal，SIGTERM/SIGINT 共用，只置 _stop、绝不 raise，
+    # ADR 0024）——必须先于 JobSource.read()：S3 态下 read 含一次网络往返，曾装在其后，窗口内 SIGTERM 走
+    # 默认处置直接杀进程（非 0 退出）→ adapter 误归 engine_error（ADR 0024 已根治场景的残余窗口）。
+    signal.signal(signal.SIGTERM, _on_signal)
+    signal.signal(signal.SIGINT, _on_signal)  # Ctrl-C 也走 flag-only（原走默认 KeyboardInterrupt 同样撞 greenlet）
+
     # I/O 边缘可注入接口（ADR 0024）：job 入口 / 事件出口从内联收进 lib 组件，subprocess 态=读 stdin / 写 EVENTS_FD。
     job = JobSource.from_env().read()
+    if _stop.is_set():
+        return 0  # 读 job 期间已收停（对齐 _run_session 顶的检查）：零事件干净退，core 判 error 不误归因
     sink = EventSink.from_env()  # main 级单例（对称 _uploader）；作参数注入 _run_scenario/_run_step
     scope = job["scope"]
     scenarios = job["scenarios"]
     votes_n = int(job.get("assertionVotes", 1))  # AI 断言投票次数（ADR 0014/0024）；缺省 1
     session_id = None
     network_exhausted = False  # 建连重试耗尽（ADR 0028）：置位 + 正常退出 with → return EX_WORKER_NETWORK
-
-    # flag-only handler 是模块级 _on_signal（见上）——SIGTERM/SIGINT 共用，只置 _stop、绝不 raise（ADR 0024）。
-    signal.signal(signal.SIGTERM, _on_signal)
-    signal.signal(signal.SIGINT, _on_signal)  # Ctrl-C 也走 flag-only（原走默认 KeyboardInterrupt 同样撞 greenlet）
 
     ensure_workflow_definition(WORKFLOW_DEF, region=REGION, description="Nova Act worker (ADR 0024)")
     wf = Workflow(model_id=MODEL_ID, boto_session_kwargs={"region_name": REGION}, workflow_definition_name=WORKFLOW_DEF)
@@ -677,7 +698,7 @@ def main() -> int:
             # 对齐同文件抢传/flush 的 best-effort。**与 step 内 trajectory 的强保证不同**：trajectory 是判定现场
             # 证据（`to_report_ref` 失败抛、可观测）、summary 只是数字汇总，故此处降级、不动 to_report_ref 本身。
             try:
-                scope_refs.append({"kind": "summary", "ref": _uploader.to_report_ref(summary), "label": "Nova session summary"})
+                scope_refs.append({"kind": "summary", "ref": _get_uploader().to_report_ref(summary), "label": "Nova session summary"})
             except Exception as e:  # noqa: BLE001
                 log(f"scope 级 session summary 上传失败（best-effort、忽略、不带 summary ref）：{type(e).__name__}: {e}")
     ev = {"type": "scope_done", "scopeId": scope["id"], "sessionId": session_id}
@@ -688,7 +709,7 @@ def main() -> int:
     # （ADR 0029）。no-op（local/未注入落点）时直接返回、不碰本地。仅正常完成路径走到此；停止信号/网络耗尽的
     # 提前 return（见上）不 flush——中断产物保留本地（见 ADR 0028）。
     if base:
-        _uploader.flush_and_cleanup(base)
+        _get_uploader().flush_and_cleanup(base)
     return 0
 
 
