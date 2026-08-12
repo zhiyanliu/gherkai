@@ -181,3 +181,38 @@ def test_plan_next_not_finalize_while_running():
     state = project(_meta("a", "b"), recs)
     actions = plan_next(state, max_concurrency=2)
     assert not any(a.kind == "finalize" for a in actions)
+
+
+# ---- exit-without-events 真值表（ADR 0034 机制二：task_exited 判定不设 saw_scope_started 前置）----
+
+
+def test_clean_exit_without_any_event_is_error():
+    """零事件 + exit==0（构造期 SIGTERM 干净退出，0024 设计内）→ ERROR，不得判 PENDING。
+
+    若判 PENDING：与已 claim 的 RUNNING 基线单调合并 → 永停 RUNNING → plan_next 空 → run 永不收敛
+    （对抗验证探针复现的死循环）。ERROR（内容不完整但进程说成功=矛盾）比死循环安全。
+    """
+    meta = _meta("a")
+    state = project(meta, [_exit("a", 0)])
+    assert state.jobs["a"].status == Status.ERROR
+
+
+def test_clean_exit_without_events_converges_with_claimed_baseline():
+    """同上,带「已 claim RUNNING」基线也必须收敛到 ERROR(终态 rank > running,单调合并不回退)。"""
+    from core.model import JobState, RunState
+
+    meta = _meta("a")
+    baseline = RunState(run_id="run-1", status=Status.RUNNING,
+                        jobs={"a": JobState("a", Status.RUNNING)}, high_water_mark=0)
+    state = project(meta, [_exit("a", 0)], baseline)
+    assert state.jobs["a"].status == Status.ERROR
+
+
+def test_exit_none_without_events_is_running_grace():
+    """零事件 + exit=None（TaskFailedToStart 的 STOPPED 无 exitCode）→ RUNNING 宽限（等观察者补），非 PENDING。
+
+    判 PENDING 会让 plan_next 重复提议 start（与已 claim 基线合并后则永停）——宽限 RUNNING 是机制二兜底语义。
+    """
+    meta = _meta("a")
+    state = project(meta, [_exit("a", None)])
+    assert state.jobs["a"].status == Status.RUNNING

@@ -297,32 +297,31 @@ def _job_status(
     终止（崩溃/网络码/SIGKILL），scope_done 本就不会来（worker 崩了没机会发），此时进程终止本身即终态信号，
     不能再等 scope_done（否则 crash job 永远 RUNNING、reconciler 死循环——真跑 crash worker 复现）。
 
-    - 连 scope_started 都没见：
-        · 有 task_exited 且 exit≠0 → ERROR（建连前就崩/网络码 80，scope_started 都没发；进程终止=终态）；
-        · 否则 → PENDING（还没起/还没写事件）。
-    - 见了 scope_started：
-        · exited is None（进程还没终止）→ RUNNING（在跑）；
-        · exit_code is None（终止了但 exitCode 未落值，宽限态）→ RUNNING（保守，等观察者补，机制二兜底）；
-        · exit_code != 0 → ERROR（进程非干净终止，不论有无 scope_done——崩溃时它不会来；也防"发完 scope_done
-          又非0退出"的误报 PASSED）；
+    **判定以「有无 task_exited」为一级键，不设 saw_scope_started 前置**（ADR 0034 机制二）——零事件 + exit==0
+    （构造期 SIGTERM 干净退出，0024 设计内）若短路成 PENDING，会与已 claim 的 RUNNING 基线单调合并成永停
+    RUNNING、run 永不收敛（对抗验证探针复现）：
+    - 有 task_exited（进程已终止，退出即终态信号，不论生命周期到哪）：
+        · exit_code != 0 → ERROR（崩溃/网络码/SIGKILL/launch 失败哨兵；也防"发完 scope_done 又非0退出"
+          的误报 PASSED）；
+        · exit_code is None → RUNNING（终止了但 exitCode 未落值，宽限态——含 TaskFailedToStart 的 STOPPED
+          无 exitCode 形态；保守等观察者补，机制二兜底）；
         · exit_code == 0 且 saw_scope_done → scenario 归约的终态（passed/failed/error）；
-        · exit_code == 0 但没 scope_done（干净退出却没发完内容，罕见）→ ERROR（内容不完整但进程说成功=矛盾，
+        · exit_code == 0 但没 scope_done（含零事件干净退出）→ ERROR（内容不完整但进程说成功=矛盾，
           judged as error 比 running 死循环安全）。
+    - 无 task_exited（进程还没终止）：saw_scope_started → RUNNING；否则 PENDING（还没起/还没写事件）。
     """
-    # 进程已非干净终止 → error 终态（不论生命周期到哪、有无 scope_done）。放最前：crash/网络码/SIGKILL 统一收敛。
-    if exited is not None and exited.exit_code is not None and exited.exit_code != 0:
-        return Status.ERROR
-    if not saw_scope_started:
-        # 没起 + 没有（非0）退出信号 → 还是 pending（含 exited 但 exit==0 的怪异情形也留 pending，罕见、下轮补）
-        return Status.PENDING
-    if exited is None:
+    if exited is not None:
+        if exited.exit_code is None:
+            return Status.RUNNING  # 终止了但 exitCode 未落值（宽限态）→ 保守，等观察者补
+        if exited.exit_code != 0:
+            return Status.ERROR  # 进程非干净终止 → 终态（crash/网络码/SIGKILL/launch 失败统一收敛）
+        # 到此 exit_code == 0（干净退出）：内容完整才算数
+        if not saw_scope_done:
+            return Status.ERROR  # 干净退出却没发完 scope_done（含零事件）：矛盾 → error（不死循环）
+        return _aggregate(list(scenario_status.values()))
+    if saw_scope_started:
         return Status.RUNNING  # 会话已起、进程还在跑
-    if exited.exit_code is None:
-        return Status.RUNNING  # 终止了但 exitCode 未落值（宽限态）→ 保守，等观察者补
-    # 到此 exit_code == 0（干净退出）
-    if not saw_scope_done:
-        return Status.ERROR  # 干净退出却没发完 scope_done：内容不完整、进程却说成功=矛盾 → error（不死循环）
-    return _aggregate(list(scenario_status.values()))
+    return Status.PENDING  # 还没起/还没写事件（也无退出信号）
 
 
 def _lifecycle_rank(status: Status) -> int:

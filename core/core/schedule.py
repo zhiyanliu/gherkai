@@ -29,6 +29,7 @@ from core.model import (
     JobResult,
     RunMeta,
     RunResult,
+    ScopeDone,
     Status,
     StepDone,
 )
@@ -203,6 +204,7 @@ class _Worker:
         result = JobResult(job=job, status=Status.PASSED)
         scenario_status: dict[str, Status] = {}
         saw_step = False  # 是否观察到 step_done（会话已起、act 可能有副作用 → 不可 job 级重试，ADR 0028）
+        saw_scope_done = False  # 是否见到 scope_done（内容完整，ADR 0024/0026——EOF 后落归约终态的前提）
         self_stopped = False  # schedule 主动停了本 worker（timeout/fail-fast）→ 其后的退出码不当 network（ADR 0028）
         # 时长追踪（core 用事件到达时间戳算墙钟，ADR 0024；clock 与超时复用同一注入时钟）：
         timing = _Timing()
@@ -258,6 +260,8 @@ class _Worker:
 
                 if isinstance(event, StepDone):
                     saw_step = True  # 会话已起、有 act 执行 → 封掉 job 级重试（防重复副作用）
+                if isinstance(event, ScopeDone):
+                    saw_scope_done = True  # 内容完整信号（ADR 0024/0026：EOF 后落归约终态的前提）
                 self._emit(event)
                 if self.on_event is not None:
                     self.on_event(event)  # 旁路观察者：在 sink_lock 外调（实时落库不阻塞别的 worker 进度显示）
@@ -289,7 +293,27 @@ class _Worker:
             result.message = f"worker 异常：{e}"
             return result, False, saw_step
 
-        # 正常跑完：job 状态 = 各 scenario 归约
+        # 事件流正常 EOF。落归约终态前先校验内容完整（ADR 0024「两件都要」在同步路径的落点，0026）：
+        # worker 被协作停（fail-fast/timeout 的 handle.stop）后按契约不吐 in-flight 的 scenario_done/
+        # scope_done、干净退出（exit 0）→ 流自然 EOF——不校验就直落归约，部分完成的 job 会拿已完成的
+        # scenario 聚合出 PASSED（假绿）。未见 scope_done 按来源分流，对齐 project._job_status 口径。
+        if not saw_scope_done:
+            self._stop()
+            if self.abort_flag.is_set():
+                result.status = Status.ABORTED  # fail-fast 掐停（ADR 0031：跑一半被掐、有现场可查）
+                result.error_type = None
+                result.message = "fail-fast：其他 job 失败，本 job 被中止（worker 收停后干净退出）"
+                return result, False, saw_step
+            result.status = Status.ERROR
+            if deadline is not None and clock() > deadline:
+                result.error_type = "timeout"
+                result.message = f"job 超时（>{self.opts.job_timeout_s}s）——worker 收停后干净退出"
+            else:
+                result.error_type = "engine_error"
+                result.message = "worker 干净退出但未发完 scope_done（内容不完整、进程却说成功=矛盾）"
+            return result, False, saw_step
+
+        # 正常跑完（内容完整）：job 状态 = 各 scenario 归约
         result.status = _aggregate(list(scenario_status.values()))
         return result, False, saw_step
 

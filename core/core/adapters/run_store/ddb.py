@@ -149,36 +149,65 @@ class DynamoDBRunStore:
             return False
 
     def project_state(self, run_id: str, state: RunState) -> bool:
-        """HWM 条件写整个 STATE：仅当 (传入 hwm ≥ 库中 hwm) 且 (库中未 finalize) 才写（机制三）。CCF → stale/已终态 → False。
+        """HWM 条件写 STATE：仅当 (传入 hwm ≥ 库中 hwm) 且 (库中未 finalize) 才写（机制三①）。CCF → stale/已终态 → False。
 
         **run 级 status 钳为 running/pending、不落终态**（ADR 0030：终态是 finalize 专属；投影提前落终态会挡住
-        try_finalize）。各 job 态是真实态、只 run 级钳。条件双守：HWM 挡 stale + status 挡「已 finalize 被刷回」。"""
+        try_finalize）。条件双守：HWM 挡 stale + status 挡「已 finalize 被刷回」。
+
+        **各 job 态逐 job 单调条件写（机制三②的 job 级半边，对拍 local 的逐 job 合并）**：task_exited 无数值
+        seq，两次投影可携带相同 HWM、①挡不住 job 终态被 stale 投影刷回（还会重开 double-launch 窗口，机制四）。
+        DDB put_item 表达不了 per-key 条件 → 拆两步：先 update_item 条件写标量（HWM+status 双守，CCF 即整体
+        stale 返 False），再对每个 job 用 `SET jobs.#sid=:js` + 「当前非更推进态」的单元素条件写，被挡的单个
+        job 静默跳过（库中已更推进，正确态在库、无信息丢失）。两步非原子，但每步各自条件守卫、次序（先标量后
+        jobs）保证中间态只会「标量新、job 旧」= 等价于一次携带旧 job 视图的合法投影，下轮重放收敛。
+        update_item 天然不碰未提及属性——started_at 由 create_run 落、此处不再传（修「put_item 整 item 覆盖把
+        started_at 抹掉」的对拍不一致）。"""
+        from core.project import _lifecycle_rank
+
         new_hwm = state.high_water_mark or 0
         run_status = Status.PENDING.value if state.status == Status.PENDING else Status.RUNNING.value
-        scalars = _state_scalars(state)
-        scalars["status"] = run_status  # 覆盖为钳后的运行态（_state_scalars 里是 project 聚合终态，此处压回 running）
         try:
-            self._table.put_item(
-                Item={
-                    "run_id": run_id,
-                    _ITEM_TYPE_ATTR: _STATE,
-                    **scalars,
-                    "jobs": {sid: _job_state_to_item(js) for sid, js in state.jobs.items()},
-                },
-                # (STATE 首次不存在) 或 ((库中无 hwm 或 hwm ≤ 我的) 且 库中 status 仍非终态) → 允许写；否则 CCF（stale / 已 finalize）
+            self._table.update_item(
+                Key={"run_id": run_id, _ITEM_TYPE_ATTR: _STATE},
+                UpdateExpression="SET #st = :s, high_water_mark = :h",
+                # (库中无 hwm 或 hwm ≤ 我的) 且 库中 status 仍非终态 → 允许；否则 CCF（stale / 已 finalize）
                 ConditionExpression=(
-                    "attribute_not_exists(run_id) OR "
-                    "((attribute_not_exists(high_water_mark) OR high_water_mark <= :h) "
-                    "AND #st IN (:pending, :running))"
+                    "(attribute_not_exists(high_water_mark) OR high_water_mark <= :h) "
+                    "AND #st IN (:pending, :running)"
                 ),
                 ExpressionAttributeNames={"#st": "status"},
                 ExpressionAttributeValues={
-                    ":h": new_hwm, ":pending": Status.PENDING.value, ":running": Status.RUNNING.value,
+                    ":s": run_status, ":h": new_hwm,
+                    ":pending": Status.PENDING.value, ":running": Status.RUNNING.value,
                 },
             )
-            return True
         except self._table.meta.client.exceptions.ConditionalCheckFailedException:
             return False
+        # 机制三② job 级：逐 job 单调条件写。rank 序 pending(0)<running(1)<终态(2)：仅当库中该 job 的 rank
+        # 不高于本次投影才写（同 rank 允许覆盖——running 刷 running 幂等、终态间以本次投影为准）。
+        for sid, js in state.jobs.items():
+            new_rank = _lifecycle_rank(js.status)
+            try:
+                if new_rank >= 2:
+                    # 写终态：库中任何态都可被终态覆盖（终态 rank 最高；job 不存在也允许——补建）
+                    cond, vals = None, {}
+                elif new_rank == 1:
+                    cond, vals = "jobs.#sid.#jst IN (:pending, :running)", {
+                        ":pending": Status.PENDING.value, ":running": Status.RUNNING.value}
+                else:
+                    cond, vals = "jobs.#sid.#jst = :pending", {":pending": Status.PENDING.value}
+                kwargs = dict(
+                    Key={"run_id": run_id, _ITEM_TYPE_ATTR: _STATE},
+                    UpdateExpression="SET jobs.#sid = :js",
+                    ExpressionAttributeNames={"#sid": sid, "#jst": "status"} if cond else {"#sid": sid},
+                    ExpressionAttributeValues={":js": _job_state_to_item(js), **vals},
+                )
+                if cond:
+                    kwargs["ConditionExpression"] = cond
+                self._table.update_item(**kwargs)
+            except self._table.meta.client.exceptions.ConditionalCheckFailedException:
+                continue  # 库中该 job 已更推进（终态/已 claim）→ 保留库中态，不回退
+        return True
 
     def try_finalize(self, run_id: str, status: Status, ended_at: str) -> bool:
         """状态机单调条件写：仅当总 status ∈ {pending,running} 才写终态（机制三，commit 恰一次）。CCF → 已终态 → False。"""

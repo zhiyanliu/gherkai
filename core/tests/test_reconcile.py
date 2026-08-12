@@ -128,3 +128,56 @@ def test_double_finalize_idempotent(tmp_path):
     d2 = tick("run-1", meta, log, store, launcher, max_concurrency=2, now_iso="t3")
     assert d1 is True and d2 is True  # 两个都见 run 达终态 → 都 done（接力者不被"别人已 finalize"卡死）
     assert store.load_run_state("run-1").ended_at == "t2"  # commit 仍恰一次（首次的 t2，未被 t3 覆盖）
+
+
+class BoomLauncher:
+    """launch 必抛的 fake（RunTask 放置失败/task-def 配错/Popen OSError 的抽象）。"""
+
+    def __init__(self) -> None:
+        self.attempts: list[str] = []
+
+    def launch(self, job: Job) -> None:
+        self.attempts.append(job.scope_id)
+        raise RuntimeError(f"boom: {job.scope_id}")
+
+
+def test_launch_failure_does_not_wedge_run(tmp_path):
+    """launch 抛异常 → 补偿记非0退出 → 下轮判 ERROR 收敛，run 不 wedge（ADR 0034 机制二推论）。"""
+    meta, log, store = _setup(tmp_path, "a", "b")
+    boom = BoomLauncher()
+    # tick1：两个 job 都被 claim、launch 都炸——异常不裸穿、补偿落 task_exited
+    done = tick("run-1", meta, log, store, boom, max_concurrency=2, now_iso="t1")
+    assert done is False
+    assert boom.attempts == ["a", "b"]  # 第一个炸不拖垮第二个（失败隔离）
+    # tick2：重放看到 exit≠0 → 两 job ERROR → 全终态 → finalize，run 收敛
+    done = tick("run-1", meta, log, store, boom, max_concurrency=2, now_iso="t2")
+    assert done is True
+    state = store.load_run_state("run-1")
+    assert state.status == Status.ERROR
+    assert all(js.status == Status.ERROR for js in state.jobs.values())
+    assert boom.attempts == ["a", "b"]  # 不重复 launch（已 ERROR、plan_next 不再提议）
+
+
+def test_launch_failure_isolated_other_job_completes(tmp_path):
+    """一个 job 起不来，另一个照常跑完——失败隔离 + 聚合 ERROR。"""
+
+    class HalfBoom:
+        def __init__(self) -> None:
+            self.launched: list[str] = []
+
+        def launch(self, job: Job) -> None:
+            if job.scope_id == "a":
+                raise RuntimeError("boom: a")
+            self.launched.append(job.scope_id)
+
+    meta, log, store = _setup(tmp_path, "a", "b")
+    hb = HalfBoom()
+    tick("run-1", meta, log, store, hb, max_concurrency=2, now_iso="t1")
+    assert hb.launched == ["b"]  # b 照常起
+    _done_events(log, "b")  # b 跑完 passed
+    done = tick("run-1", meta, log, store, hb, max_concurrency=2, now_iso="t2")
+    assert done is True
+    state = store.load_run_state("run-1")
+    assert state.jobs["a"].status == Status.ERROR
+    assert state.jobs["b"].status == Status.PASSED
+    assert state.status == Status.ERROR  # 任一 error → run error（ADR 0031 决定三）

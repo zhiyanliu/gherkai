@@ -148,20 +148,37 @@ class LocalRunStore:
         return self._locked_rmw(run_id, mutate)
 
     def project_state(self, run_id: str, state: RunState) -> bool:
-        """HWM 条件写整个 RunState：仅当传入 hwm ≥ 库中 hwm 才写（机制三，挡 stale 覆盖）。
+        """HWM 条件写 RunState：仅当传入 hwm ≥ 库中 hwm 才写（机制三①，挡 stale 覆盖）。
 
         **run 级 status 钳为 RUNNING、不落终态**（ADR 0030：run 级终态是 finalize 的 commit point 专属；
-        若投影提前落终态，try_finalize 会被自己刚写的终态挡住）。各 job 态是真实态（含终态），只 run 级钳。
-        已 finalize（库中 status 已终态）→ 挡（不把终态刷回 running）。"""
+        若投影提前落终态，try_finalize 会被自己刚写的终态挡住）。已 finalize（库中 status 已终态）→ 挡。
+
+        **各 job 态与库中现态按生命周期序逐 job 单调合并（机制三②的 job 级半边）**：task_exited 走独立
+        键空间、不带数值 seq，「被 scope_done 触发」与「被 task_exited 触发」的投影可携带相同 HWM——
+        ① 挡不住 stale 实例把已终态的 job 刷回 running（并发实例对某 scope 视图旧、对另一 scope 视图新时
+        HWM 相等）。逐 job 取较推进者：终态不被 running/pending 覆盖、running 不被 pending 覆盖（防已
+        claim 被刷回 → 重复 launch，机制四）。"""
+        from core.project import _lifecycle_rank
+
         def mutate(cur: RunState):
             cur_hwm = cur.high_water_mark or 0
             new_hwm = state.high_water_mark or 0
             if new_hwm < cur_hwm:
-                return None  # stale：读到的 events 比库里记录的少 → 挡
+                return None  # stale：读到的 events 比库里记录的少 → 挡（机制三①）
             if cur.status not in (Status.PENDING, Status.RUNNING):
                 return None  # 已 finalize 终态：不被投影刷回（机制三 finalize 单调的对偶保护）
+            # 机制三② job 级：逐 job 与库中现态取较推进者（同 rank 取新值——终态间以本次投影为准）
+            jobs: dict[str, JobState] = {}
+            for sid, js in state.jobs.items():
+                cur_js = cur.jobs.get(sid)
+                if cur_js is not None and _lifecycle_rank(cur_js.status) > _lifecycle_rank(js.status):
+                    jobs[sid] = cur_js  # 库中更推进（已终态/已 claim）→ 保留，不回退
+                else:
+                    jobs[sid] = js if js.session_id else JobState(
+                        scope_id=sid, status=js.status,
+                        session_id=cur_js.session_id if cur_js else None)  # 血缘不丢
             run_status = Status.PENDING if state.status == Status.PENDING else Status.RUNNING
-            return RunState(run_id=state.run_id, status=run_status, jobs=state.jobs,
+            return RunState(run_id=state.run_id, status=run_status, jobs=jobs,
                             started_at=state.started_at or cur.started_at,
                             ended_at=state.ended_at, high_water_mark=state.high_water_mark)
         return self._locked_rmw(run_id, mutate)

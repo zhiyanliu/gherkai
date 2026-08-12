@@ -53,10 +53,12 @@ def _rm(jobs: list[Job], run_id: str = "test-run") -> RunMeta:
 
 
 def _passing_events(scope_id: str, scenario_id: str) -> list:
+    # 末尾必带 scope_done——真实 worker 契约（ADR 0024）：正常完成必发；EOF 落归约终态以它为前提（0026）。
     return [
         ScenarioStarted(scenario_id=scenario_id),
         StepDone(scenario_id=scenario_id, step_index=0, status=Status.PASSED, votes=Votes(3, 3)),
         ScenarioDone(scenario_id=scenario_id, status=Status.PASSED),
+        ScopeDone(scope_id=scope_id),
     ]
 
 
@@ -66,6 +68,7 @@ def _failing_events(scope_id: str, scenario_id: str) -> list:
         StepDone(scenario_id=scenario_id, step_index=0, status=Status.FAILED, votes=Votes(1, 3),
                  error_type="assertion_failed", message="没过多数票"),
         ScenarioDone(scenario_id=scenario_id, status=Status.FAILED),
+        ScopeDone(scope_id=scope_id),
     ]
 
 
@@ -81,8 +84,8 @@ def test_all_pass():
     assert result.status == Status.PASSED
     assert len(result.jobs) == 2
     assert all(jr.status == Status.PASSED for jr in result.jobs)
-    # sink 收到所有事件（2 job × 3 事件）
-    assert len(sink.events) == 6
+    # sink 收到所有事件（2 job × 4 事件，含 scope_done）
+    assert len(sink.events) == 8
 
 
 # ---- 断言失败 → RunResult failed（区别于 error）----
@@ -125,6 +128,7 @@ def test_fail_fast_batch_errors():
         for i in range(50):
             evs.append(StepDone(scenario_id=scenario_id, step_index=i, status=Status.PASSED, votes=Votes(3, 3)))
         evs.append(ScenarioDone(scenario_id=scenario_id, status=Status.PASSED))
+        evs.append(ScopeDone(scope_id=scenario_id.split(":")[0]))  # 完整跑完必带（内容完整前置，0026）
         return evs
 
     jobs = [_job("crash"), _job("slow")]
@@ -143,7 +147,9 @@ def test_fail_fast_batch_errors():
     crash_jr = next(jr for jr in result.jobs if jr.scope_id == "crash")
     assert crash_jr.status == Status.ERROR
     # 被牵连的 slow：协作式中止下结局依时序（已跑完 passed / 跑一半 aborted / 排队没起 skipped 都合法），
-    # 但**绝不该是 error**——被牵连中止不是自身故障（ADR 0031；精确的 skipped/aborted 复现见 test_lifecycle_states）
+    # 但**绝不该是 error**——被牵连中止不是自身故障（ADR 0031；精确的 skipped/aborted 复现见 test_lifecycle_states）。
+    # 注：PASSED 只在「见到 scope_done（真跑完）」时可达——跑一半被掐、流 EOF 无 scope_done 必 ABORTED
+    # （内容完整前置，0026），此断言不再可能掩盖「部分完成聚合成 PASSED」的假绿。
     slow_jr = next(jr for jr in result.jobs if jr.scope_id == "slow")
     assert slow_jr.status in (Status.PASSED, Status.ABORTED, Status.SKIPPED)
     assert slow_jr.status != Status.ERROR
@@ -688,3 +694,67 @@ def test_default_opts_no_min_grace_backcompat():
     engine = FakeEngine({"a": _passing_events("a", "a:0")})
     result = schedule(_rm([_job("a")]), FakeResolver(engine), CollectSink())
     assert result.status == Status.PASSED
+
+
+# ---- 内容完整前置（ADR 0024/0026）：EOF 无 scope_done 不落归约终态,按来源分流 ----
+
+
+def test_partial_completion_without_scope_done_not_passed():
+    """假绿回归（对抗验证探针场景）：worker 干净 EOF 但没发 scope_done → error+engine_error，绝不 PASSED。
+
+    修复前：部分完成的 scenario 聚合出 PASSED（3 个 scenario 只跑完 1 个也报 passed）。
+    """
+    partial = [
+        ScenarioStarted(scenario_id="p:0"),
+        StepDone(scenario_id="p:0", step_index=0, status=Status.PASSED, votes=Votes(3, 3)),
+        ScenarioDone(scenario_id="p:0", status=Status.PASSED),
+        # 无 scope_done：流在此 EOF（协作停/异常截断的形状）
+    ]
+    engine = FakeEngine({"p": partial})
+    result = schedule(_rm([_job("p")]), FakeResolver(engine), CollectSink())
+    jr = result.jobs[0]
+    assert jr.status == Status.ERROR
+    assert jr.error_type == "engine_error"
+    assert result.status == Status.ERROR
+
+
+def test_abort_then_clean_eof_is_aborted_not_passed():
+    """fail-fast 掐停后 worker 干净退出（不吐 scope_done）→ ABORTED（有现场），绝不 PASSED 假绿。
+
+    时序构造：victim 吐完首个 scenario 的事件后，on_event 钩子置 abort_flag（模拟别的 job 崩了触发
+    fail-fast）——victim 下一轮事件间检查看到 abort → stop → FakeEngine 配合 return（EOF 无 scope_done）。
+    """
+    import threading as _th
+
+    crash_now = _th.Event()
+
+    victim_events = [
+        ScenarioStarted(scenario_id="v:0"),
+        StepDone(scenario_id="v:0", step_index=0, status=Status.PASSED, votes=Votes(3, 3)),
+        ScenarioDone(scenario_id="v:0", status=Status.PASSED),
+        ScenarioStarted(scenario_id="v:1"),  # 第二个 scenario 跑到一半被掐
+        StepDone(scenario_id="v:1", step_index=0, status=Status.PASSED, votes=Votes(3, 3)),
+        ScenarioDone(scenario_id="v:1", status=Status.PASSED),
+        ScopeDone(scope_id="v"),
+    ]
+    crash_events = [ScenarioStarted(scenario_id="c:0")]  # 之后崩
+
+    def on_event(scope_id, i):
+        if scope_id == "v" and i == 2:
+            crash_now.set()  # victim 吐完第一个 scenario → 让 crash job 崩
+
+    def crash_gen(job):
+        yield crash_events[0]
+        crash_now.wait(timeout=5)
+        raise RuntimeError("crash job 崩了")
+
+    engine = FakeEngine({"v": victim_events, "c": crash_gen}, on_event=on_event)
+    sink = CollectSink()
+    result = schedule(_rm([_job("c"), _job("v")]), FakeResolver(engine), sink,
+                      opts=ScheduleOpts(max_concurrency=2, fail_fast=True))
+    v_jr = next(jr for jr in result.jobs if jr.scope_id == "v")
+    # victim 结局依时序：真跑完（见 scope_done）→ PASSED 合法；被掐（EOF 无 scope_done）→ ABORTED。
+    # 关键断言：绝不 ERROR（被牵连非自身故障）；PASSED 当且仅当 sink 真收到 v 的 scope_done（内容完整）。
+    assert v_jr.status in (Status.PASSED, Status.ABORTED)
+    v_scope_done_seen = any(isinstance(e, ScopeDone) and e.scope_id == "v" for e in sink.events)
+    assert (v_jr.status == Status.PASSED) == v_scope_done_seen  # 假绿不可能：没内容完整就没有 PASSED

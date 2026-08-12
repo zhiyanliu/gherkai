@@ -21,9 +21,17 @@ from core.project import plan_next, project
 
 
 class EventLog(Protocol):
-    """事件日志读口（reconciler 只读全量 records 重放；写由 Launcher 侧/worker 做）。"""
+    """事件日志口（reconciler 读全量 records 重放；写侧仅 launch 失败补偿的 record_exit——正常路径的
+    events 由 worker/观察者写，reconciler 不写）。"""
 
     def records(self) -> list: ...  # list[EventRecord]（core.project）
+
+    def record_exit(self, scope_id: str, exit_code: int | None) -> None: ...  # 幂等（独立键空间，机制一）
+
+
+# launch 失败补偿的哨兵退出码（机制二推论）：非 0 即走「exit≠0 → ERROR」谓词，值本身不进任何分支判断；
+# 选 255 避开 worker 真实语义码（如网络码 80），只为日志可辨识「这是起不来、不是跑挂」。
+_LAUNCH_FAILED_EXIT = 255
 
 
 class Launcher(Protocol):
@@ -72,8 +80,16 @@ def tick(
             # CAS 抢占：多实例并发提议同一 pending，只有一个成功（机制四严格并发闸）。
             if run_store.try_claim_job(run_id, act.scope_id):
                 job = job_by_scope.get(act.scope_id)
-                if job is not None:
+                if job is None:
+                    continue  # plan_next 从 state.jobs 提议、键集 ⊆ meta.jobs，不该发生；防御跳过
+                try:
                     launcher.launch(job)
+                except Exception:
+                    # launch 失败补偿（ADR 0034 机制二推论）：job 已 CAS 成 RUNNING 却永无 events/
+                    # task_exited（进程没起、平台观察者无从观察）——不补偿则永停 RUNNING、整批 wedge、
+                    # 三触发源都救不回。tick 在此扮演「起不来」时刻的退出观察者：记非 0 退出，下轮
+                    # 重放走「exit≠0 → ERROR」既有谓词收敛。异常不裸穿（失败隔离：别拖垮同批其余 job）。
+                    event_log.record_exit(act.scope_id, _LAUNCH_FAILED_EXIT)
         elif act.kind == "finalize":
             # 全 job 达终态（plan_next 只在此时给 finalize 动作）→ run 已 done。
             # try_finalize 状态机单调条件写：True=本实例抢到 commit（负责 report 聚合）；False=别人已 finalize

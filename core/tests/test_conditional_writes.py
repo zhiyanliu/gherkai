@@ -111,6 +111,50 @@ def test_equal_hwm_projection_allowed(run_store):
     assert run_store.project_state("run-1", s) is True  # 同 hwm 再写仍允许
 
 
+def test_same_hwm_terminal_job_not_regressed(run_store):
+    """关键（机制三②，ADR 0034）：task_exited 无数值 seq → 两投影同 HWM，job 终态不得被 stale 投影刷回。
+
+    场景（对抗验证复现的永久错读模型）：实例 B 见 scope_done+task_exited 写 a=PASSED（hwm=3）；
+    实例 A 对 a 视图旧（只见 scope_started）、对 b 视图新 → 同 hwm=3 投影 a=RUNNING——
+    ① HWM 挡不住（3>=3），必须靠 job 级单调条件写挡。否则 a 被刷回 RUNNING 且若 run 已 finalize
+    则永久错态（run=passed 而 jobs 恒 running）。
+    """
+    meta = _meta()
+    run_store.create_run(meta, _initial(meta, hwm=0))
+    fresh = RunState(run_id="run-1", status=Status.RUNNING,
+                     jobs={"a": JobState("a", Status.PASSED), "b": JobState("b", Status.RUNNING)},
+                     high_water_mark=3)
+    assert run_store.project_state("run-1", fresh) is True
+    stale = RunState(run_id="run-1", status=Status.RUNNING,
+                     jobs={"a": JobState("a", Status.RUNNING), "b": JobState("b", Status.RUNNING)},
+                     high_water_mark=3)  # 同 HWM——① 不挡；靠 job 级 ② 挡
+    run_store.project_state("run-1", stale)  # 整体返回值不限（local 合并写 True / 语义一致即可）
+    got = run_store.load_run_state("run-1")
+    assert got.jobs["a"].status == Status.PASSED  # 终态不回退（机制三② job 级）
+
+
+def test_claimed_running_not_regressed_to_pending_same_hwm(run_store):
+    """机制四护栏：已 CAS claim 的 RUNNING 不被同 HWM 的 pending 视图投影刷回（防 double-launch 窗口重开）。"""
+    meta = _meta()
+    run_store.create_run(meta, _initial(meta, hwm=0))
+    assert run_store.try_claim_job("run-1", "a") is True  # a: pending→running
+    stale = _initial(meta, hwm=0)  # 全 pending 视图、同 hwm=0
+    run_store.project_state("run-1", stale)
+    got = run_store.load_run_state("run-1")
+    assert got.jobs["a"].status == Status.RUNNING  # claim 不被刷回
+
+
+def test_projection_preserves_started_at(run_store):
+    """投影写不抹 create_run 落的 started_at（曾为 ddb put_item 整 item 覆盖之疾，对拍 local）。"""
+    meta = _meta()
+    run_store.create_run(meta, _initial(meta, hwm=0))
+    s = RunState(run_id="run-1", status=Status.RUNNING, jobs=_initial(meta).jobs,
+                 high_water_mark=2)  # project() 产出的 RunState 不带 started_at
+    assert run_store.project_state("run-1", s) is True
+    got = run_store.load_run_state("run-1")
+    assert got.started_at == "2026-07-19T00:00:00Z"  # create_run 落的起点仍在
+
+
 # ---------- 机制三：finalize 单调 ----------
 
 def test_finalize_from_nonterminal_succeeds(run_store):
