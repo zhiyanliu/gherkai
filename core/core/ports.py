@@ -1,13 +1,14 @@
 """ports 层（ADR 0016 六边形架构）：核心只依赖这些接口，具体 adapter 由组合根注入。
 
 四个 port（关注点拆开，不揉成上帝 module）：
-- Engine        —— 真正跑一个 scope（spawn worker、讲 ADR 0024 协议）；adapter = 子进程/未来 Fargate
-- RunStore      —— 控制面：run/job 状态、血缘、起止（频繁读写，撑轮询续跑；未来 DDB 主要服务它）
+- Engine        —— 真正跑一个 scope（spawn worker、讲 ADR 0024 协议）；adapter = 子进程/Fargate
+- RunStore      —— 控制面：run/job 状态、血缘、起止（频繁读写，撑轮询续跑与无状态跑批的条件写）
 - ResultStore   —— 数据面：每 scenario 判定真值、投票（追加为主）
 - ReportStore   —— 归集报告产物为派生只读导航视图（RunReport：manifest + index，ADR 0027）
 
 禁止：port 内部 env-sniff 自选实现（Midscene GlobalConfigManager 反模式）。adapter 一律组合根注入。
-rule-of-three 克制：接口现在定（逼清边界），实现只写 local，云端 adapter 真需要时再填。
+接口先定（逼清边界）；四个 port 的 local + 云端 adapter 均已实装（RunStore: local/ddb、Result/ReportStore:
+local/s3、Engine: subprocess/fargate），组合根按 `--backend` 注入。
 """
 from __future__ import annotations
 
@@ -80,8 +81,8 @@ class JobSink(Protocol):
 
 # ============================================================================
 # 状态/结果/报告 port（ADR 0016 三层切分）。local adapter 均已建：RunStore 落 RunMeta(definition)+
-# RunState(运行态)；ResultStore 落 JobResult(判定真值)；ReportStore 归集 RunReport(0027)。控制面更野心的
-# 字段（jobId/起止时刻/DDB 表/执行中实时更新读取面）仍 defer，待真实续跑/轮询/WebUI 需求逼出（ADR 0016）。
+# RunState(运行态)；ResultStore 落 JobResult(判定真值)；ReportStore 归集 RunReport(0027)。控制面的 jobId
+# 仍 defer（待真实需求逼出）；起止时刻 / DDB 表 / 轮询读取面已由 v1.2 落地（ADR 0016/0034）。
 # ============================================================================
 
 
@@ -123,7 +124,8 @@ class RunStore(Protocol):
         """HWM 条件写整个 RunState：仅当 state.high_water_mark ≥ 库中记录的 hwm 才写，成功 True（机制三）。
 
         stale 实例（读到更少 events、hwm 更小）的写被挡（返回 False），防把已推进的态覆盖回旧态。
-        state.high_water_mark 为 None 视为「无守卫强写」（不该在 reconciler 路径发生）。
+        state.high_water_mark 为 None 按 0 处理（最弱守卫：库中 hwm>0 时必被挡）——reconciler 路径恒带 hwm，
+        不该走到这里。
         """
         ...
 
@@ -152,8 +154,8 @@ class ReportStore(Protocol):
     """归集报告产物为一份**派生只读导航视图**（RunReport，ADR 0027）：manifest.json + index.html。
 
     纯派生：可从 RunResult 完全重建，**永不作 CI 判定源**（判定真值在 RunResult/ResultStore）。
-    只读 result 的 report_refs + scope_id/scenario_id/engine/status/时长/成本做导航，
-    不读 votes/steps 细节、不拿产物内容、不按 kind 分支（不透明搬运）。
+    读 report_refs + 各级 status/时长/成本 + step 级 votes/error_type/shortcircuited 渲染「人看」视图；
+    不拿产物内容、不按 kind 分支（不透明搬运，ADR 0027）。
     """
 
     def write(self, run_id: str, result: RunResult, *, created_at: str = "") -> ResourceUri:

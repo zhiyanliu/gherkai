@@ -31,9 +31,10 @@ import argparse
 import json
 import sys
 
-# events 表 TTL 常量：emit_epoch = expires_at - 此值。须与**两端 worker** TTL 常量一致（各引擎符号名不同）：
+# events 表 TTL 常量：emit_epoch = expires_at - 此值。须与**两端 worker**（写端）TTL 常量一致（各引擎符号名不同）：
 # Nova = engines/novaact/lib/event_sink.py 的 `_EVENTS_TTL_S`；Midscene = engines/midscene/lib/event-sink.mts 的
-# `EVENTS_TTL_S`（无前导下划线）。三端各自硬编码 7d、语义契约对齐（ADR 0033/0024）；此处复刻、改动须同步两端。
+# `EVENTS_TTL_S`（无前导下划线）。另一个读端同样反解：core/core/adapters/event_log/ddb.py 的 `_EVENTS_TTL_S`
+# （`_emit_ts`）。四端各自硬编码 7d、语义契约对齐（ADR 0033/0024）；此处复刻、改动须同步全部解码方。
 _EVENTS_TTL_S = 7 * 24 * 60 * 60
 
 _PK_ATTR = "pk"
@@ -118,8 +119,9 @@ def _acts_from_scope(pk: str, items: list[dict]) -> list[dict]:
             wall = None if (start_emit is None or emit is None) else (emit - start_emit)
             # step_done 的 cost.time_worked_s（Nova SDK 原生量，对照墙钟——含 SDK 内部时间 vs 端到端墙钟差）
             cost = ev.get("cost") or {}
-            # votes.total（AI 断言投票次数，wire.py/run_scope.py:262）：**硬约束检测**——votes>1 时 worker 把 N 次
-            # act 合进一对 step_started/step_done（emit 在 N 票循环之后），此时 wall 是 N 个 act 之和、**不是单 act**。
+            # votes.total（AI 断言投票次数；step_done 的 votes 字段，见 core/core/wire.py 与 Nova worker _run_step
+            # 的投票循环）：**硬约束检测**——votes>1 时 worker 把 N 次 act 合进一对 step_started/step_done
+            # （emit 在 N 票循环之后），此时 wall 是 N 个 act 之和、**不是单 act**。
             # 单 act 墙钟标定要求 --assertion-votes 1；votes 缺省(动作 step 无投票)或 =1 才是干净单 act。打 multi_act
             # 标记，供 _summary/_print_human 把这些排除出分位数 + 醒目告警（否则 p99 被膨胀、误判 grace 过保守）。
             votes = ev.get("votes") or {}
@@ -223,6 +225,8 @@ def _print_human(result: dict) -> None:
         print(f"\n=== 单 act wall_s 分布（n={s['n_acts']}，coarse≤1s={s['n_coarse_le_1s']}"
               f"{f'，已排除 {n_multi} 个 MULTI-ACT' if n_multi else ''}）===")
         print(f"min={s['min']}  p50={s['p50']}  p90={s['p90']}  p99={s['p99']}  max={s['max']}")
+        # 下面的 120 是本脚本自带的对照基线（缺省值副本），**真值住 cli/cli/compose.py 的 NOVA_ACT_TIMEOUT_S**
+        # （可经同名 env 覆盖）——用非缺省 act timeout 跑时，这里的判语只是参考，按真值重读分位数。
         print(f"对照 NOVA_ACT_TIMEOUT_S=120：p99={s['p99']}s → "
               f"{'单 act 远低于 act_timeout，grace margin 有压缩空间' if s['p99'] < 120 else '有 act 逼近/超 120，act_timeout 不宜降'}")
     elif n_multi:

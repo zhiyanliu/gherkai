@@ -1,4 +1,4 @@
-"""job 入口（Nova worker，ADR 0024「I/O 边缘可注入接口」第一期）：worker 主流程唯一的 job 读入口。
+"""job 入口（Nova worker，ADR 0024「I/O 边缘可注入接口」）：worker 主流程唯一的 job 读入口。
 
 对称 Midscene 的 lib/job-source.mts（各语言各写、语义契约对称，ADR 0024）+ 对称本引擎 ArtifactUploader
 的结构骨架（from_env 唯一读 env、退化态是同类实例、外部 client 惰性建）。

@@ -9,8 +9,10 @@ project → 条件写 → plan_next → CAS 抢占起下一个 job / finalize）
 注入纯 reconcile.tick——**是组合根注入、非 ports 内部 env-sniff 全局单例**（[0016] 禁的 GlobalConfigManager 反模式，
 此处每次 handler 显式构造、无隐式全局态）。core 一行不为 cloud 改（同 local，只换注入的 EventLog/Launcher/RunStore）。
 
-打包：本文件 + core 进 Lambda zip。env（IaC 部署配）：RUNS_TABLE / EVENTS_TABLE / ARTIFACTS_BUCKET / CLUSTER /
-PREFIX / SUBNETS / SECURITY_GROUPS / ASSIGN_PUBLIC_IP / MAX_CONCURRENCY / REPORT_DIR / REGION。
+打包：本文件 + core 进 Lambda zip。env：**IaC 注入**（iac_aws_backend/stack.py 的 reconciler/kicker Function）=
+RUNS_TABLE / EVENTS_TABLE / ARTIFACTS_BUCKET / CLUSTER / PREFIX / REGION / SUBNETS / SECURITY_GROUPS /
+MAX_CONCURRENCY；**本文件缺省供给、IaC 不注入** = REPORT_DIR（reports）/ ASSIGN_PUBLIC_IP（ENABLED，与公有子网
+配套）——要改产物落点前缀或走私有子网时才在 IaC 显式给。
 """
 from __future__ import annotations
 
@@ -25,7 +27,7 @@ def _run_ids_from_stream(event) -> set[str]:
         keys = rec.get("dynamodb", {}).get("Keys", {})
         pk = keys.get("pk", {}).get("S")
         if pk and "#" in pk:
-            run_ids.add(pk.rsplit("#", 1)[0])  # rsplit：scope_id 可能含 #？scope_id 不含（run_id#scope_id 复合），稳妥用 rsplit 1
+            run_ids.add(pk.rsplit("#", 1)[0])  # scope_id 不含 #（pk=run_id#scope_id 单层复合），rsplit 1 取前段稳妥
     return run_ids
 
 

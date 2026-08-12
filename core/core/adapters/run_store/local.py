@@ -108,7 +108,7 @@ class LocalRunStore:
     # 与上面 update_job_state/finalize_run（同步 run 路径、依赖 RunPersistence 进程内锁）并存、职责不同：
     # 无状态跑批下多进程并发写（per-run 进程 + status --wait 接力），进程内锁跨不了进程边界，故这三方
     # 用 **fcntl 文件锁**（跨进程互斥）把「读 run_state.json → 判条件 → 写回」整段串成原子 RMW。
-    # local 落地即校验条件写逻辑（P2 单测），cloud DDB 用条件表达式复刻同一语义（P4）。
+    # local 落地即校验条件写逻辑（单测），cloud DDB 用条件表达式复刻同一语义。
 
     def _locked_rmw(self, run_id: str, mutate) -> bool:
         """在 run_state.json 上做跨进程原子 read-modify-write：持文件锁 → 读 state → mutate(state)→

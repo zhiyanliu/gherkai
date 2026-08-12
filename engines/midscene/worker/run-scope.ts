@@ -25,7 +25,7 @@ import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 import { sigv4Fetch, signCdpUpgrade, getBaseUrl, MODEL, getRegion } from "../lib/agentcore-sigv4.mjs";
 import { ArtifactUploader } from "../lib/artifact-upload.mjs";  // 产物 S3 上传（ADR 0029；无落点 env 时 no-op 报 file://）
-import { EventSink } from "../lib/event-sink.mjs";  // 事件出口（ADR 0024 I/O 边缘可注入接口，第一期 subprocess 态）
+import { EventSink } from "../lib/event-sink.mjs";  // 事件出口（ADR 0024「I/O 边缘可注入接口」，两态见该模块头）
 import { JobSource } from "../lib/job-source.mjs";  // job 入口（同上）
 // 确定性 step 注册表（ADR 0022）+ test engineer 的锚点脚手架。
 // import 脚手架即触发其顶层 deterministic(...) 注册副作用（对称 Nova 引擎 import deterministic_steps）。
@@ -107,7 +107,7 @@ function modelConfig() {
 }
 const URL_IN_QUOTES = /"(https?:\/\/[^"]+)"/;
 
-// 事件出口抽进 lib/event-sink.mts（ADR 0024「I/O 边缘可注入接口」第一期）：可注入、可测；subprocess 态写
+// 事件出口抽进 lib/event-sink.mts（ADR 0024「I/O 边缘可注入接口」）：可注入、可测；subprocess 态写
 // EVENTS_FD fd（无则回落 stdout 调试）。emit 为 async（合理不对称：为 Fargate 化的 DDB PutItem（aws-sdk-js）
 // 预留；Nova 那个引擎 emit 同步）+ 作参数注入 runStep/runScenario（两个引擎统一打桩机制），不再是模块级函数。
 // log（stderr 诊断）**不属那三条 I/O 边、不进 sink**（协议传输面 vs 诊断面物理隔离，ADR 0024），保模块级。
@@ -232,11 +232,12 @@ async function main(): Promise<number> {
 
   // 会话清理（ADR 0024 终止契约，对照 Nova 的 with __exit__）：
   //   顺序——**先发 StopBrowserSession 释放会话（最重要、优先）**，再关 browser；
-  //   不让易挂起的 browser.close 挟持会话释放（审计窗口 5）。close 套超时预算，避免耗尽 grace。
+  //   理由——不让易挂起的 browser.close 挟持会话释放。close 套超时预算，避免耗尽 grace。
   //   幂等：cleanedUp 守卫，防 SIGTERM handler 与 finally 双调。
   //   **并行** Stop pendingSessions（每个套超时预算）；任一未确认释放 → cleanupFailed（除非 discardAttempt）。
   //   并行（Promise.all）而非串行：N 个会话累积时墙钟 ≈ 单个预算（3s）而非 N×3s——串行会让重试积累的
-  //   多个泄漏会话把 cleanup 拖过 grace 被 SIGKILL 截断（正是本修复要防的泄漏，ADR 0028）。
+  //   多个泄漏会话把 cleanup 拖过 grace 被 SIGKILL 截断（正是 ADR 0028「重试放大的 in-flight 会话窗口」条
+  //   要防的泄漏）。
   //   discardAttempt=true（丢弃中间建连 attempt 的部分会话，ADR 0028）：Stop 失败只 log、**不点亮
   //   final cleanupFailed**——那个会话本就要丢、与「最终态会话是否泄漏」无关；否则一次中间失败会毒化
   //   后续成功 attempt 的退出码（误报泄漏 → core 当 engine_error）。final cleanup（默认）才管 cleanupFailed。
@@ -410,7 +411,8 @@ async function main(): Promise<number> {
   // ——中断产物保留本地（对称 Nova）。
   const runRoot = process.env.MIDSCENE_RUN_DIR;
   if (runRoot) await uploader.flushAndCleanup(path.resolve(runRoot));
-  // 正常路径若会话释放失败 → 非 0 退出，让 schedule 记 error、泄漏可观测（审计窗口 C，对照 Nova）
+  // 正常路径若会话释放失败 → 非 0 退出，让 schedule 记 error、泄漏可观测
+  // （ADR 0024「会话释放失败可观测」，对照 Nova）
   return cleanupFailed ? 1 : 0;
 }
 

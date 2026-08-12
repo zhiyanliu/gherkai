@@ -168,8 +168,9 @@ cloud 由云端 Lambda 事件驱动链推进（submit 机器零 ECS 权限、可
 | `--backend {local,cloud}` | `local` | local=本机 per-run 进程推进；cloud=Fargate + 云端 Lambda 事件驱动链推进（提交完真关机也跑完） |
 | `--prefix` | `gherkai-` | [cloud] 资源名前缀（须与 CDK 部署一致）；`status` 查时须给同一 prefix。兜底 `AWS_RESOURCE_PREFIX` |
 | `--ddb-table` / `--s3-bucket` / `--events-table` / `--cluster` | `{prefix}…` | [cloud] 覆盖各 prefix 默认名（语义同 `run` 表） |
-| `--subnet` / `--security-group` | SSM | [cloud] Fargate 网络（可多次；不给则读 SSM，同 `run`） |
 | `--region` / `--profile` | — | AWS region/profile（喂 store + worker，同 `run`） |
+
+> `submit` 不收 `--subnet`/`--security-group`——cloud submit 只写 runs 表、不碰 SSM/ECS（ADR 0034）；Fargate 网络由 IaC 注给 reconciler/kicker Lambda 的 env。
 
 > `submit` 无 `--json`/`--quiet`/`--wait`——它只把 run_id 打到 stdout 就退；进度/结果留给 `status`（含 `--json`）。
 

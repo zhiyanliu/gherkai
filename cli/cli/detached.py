@@ -151,7 +151,8 @@ def build_local_reconcile(repo, report_dir: str, run_id: str, max_concurrency: i
 
     per-run 进程自包含、不依赖父进程内存（fork 后父可退）：definition 已由 submit 的 create_run 落 RunStore，
     这里 load_run_meta 读回；SqliteEventLog/LocalRunStore 都是文件路径，从 report_dir+run_id 重建即同一份。
-    返回 (meta, log, store, launcher, max_concurrency) 供 run_reconcile_loop。
+    返回 (meta, log, store, launcher, max_concurrency, result_store, report_store) 供 run_reconcile_loop
+    （后两个是收尾聚合用的落点，与 RunStore 同 <report_dir>/<run_id>/）。
     """
     from cli import compose
 

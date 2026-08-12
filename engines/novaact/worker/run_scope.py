@@ -1,23 +1,27 @@
-"""Nova Act 薄 worker（ADR 0022/0024）：读 stdin 的 job JSON → 跑一个 scope → 吐 ADR 0024 事件到事件通道。
+"""Nova Act 薄 worker（ADR 0022/0024）：读入一个 scope 的 job JSON → 跑这个 scope → 吐 ADR 0024 事件到事件通道。
 
 不含 BDD runner 装饰器：会话/act/投票/派发逻辑直接在本进程跑（ADR 0022 薄 worker）。
-core 经子进程 adapter 起本 worker（ADR 0026 机制层），讲 ADR 0024 协议。
+core 经 adapter 起本 worker（子进程 / Fargate 任务，ADR 0026 机制层），讲 ADR 0024 协议。
 
-三通道分离（ADR 0024）：协议事件吐到 EVENTS_FD 指定的 fd（无则回落 stdout，便于手动直跑调试）；
-引擎 SDK 的进度噪声留 stdout；worker 自身诊断/日志走 stderr。
+I/O 契约两态（判据一律是「注入了哪个 env」、非「是否 Fargate」，ADR 0016 红线）：
+- job 入：stdin 首行 JSON | `JOB_S3_URI` 指针 + GetObject（见 lib/job_source.py）。
+- events 出：`EVENTS_FD` 指定的 fd（无则回落 stdout，便于手动直跑调试）| `EVENTS_DDB_TABLE` PutItem 到
+  events 表（见 lib/event_sink.py）。
+
+三通道分离（ADR 0024）：协议事件只走上面那条事件通道；引擎 SDK 的进度噪声留 stdout；worker 自身诊断/日志走 stderr。
 
 一生（ADR 0024）：
-  读 stdin job → 开 AgentCore 会话 → 按 scope 串行跑 scenarios（每 step 派发）→ 逐事件吐事件通道
+  读 job → 开 AgentCore 会话 → 按 scope 串行跑 scenarios（每 step 派发）→ 逐事件吐事件通道
   → scope_done → 退出。SIGTERM/SIGINT（ADR 0024 flag-only）：handler 只置 _stop 标志、绝不 raise；
   主流程在 act 边界安全点检测 → 正常 return 退出三层 with 释放会话（with 正常退出即触发 __exit__，
   不靠异常穿透——避免异步 raise 撞 playwright greenlet 切换区致死循环卡死；sync-over-greenlet + signal-raise 反模式，见 ADR 0024 被拒方案）。
   单 act 套 timeout=ACT_TIMEOUT_S 使 in-flight act 有界返回，标志位总能在有限时间被检测。
 
-派发（ADR 0020/0024）：
-  step.text 含 URL 字面量（引号内 https?://）→ 内建确定性导航 go_to_url（不浪费 AI）
-  keyword=When → act（AI 动作，无 votes）
-  keyword=Then → act_get(BOOL) + N 次投票（AI 断言，带 votes）
-  keyword=Given 且非 URL → 也走 act（前置动作）
+派发（优先级顺序，ADR 0022/0020/0024）：
+  ① 确定性注册表命中（test engineer 在 worker/deterministic_steps.py 注册的精确 handler，不投票、可复现，ADR 0022）
+  ② step.text 含 URL 字面量（引号内 https?://）→ 内建确定性导航 go_to_url（不浪费 AI）
+  ③ AI catch-all：keyword=Then → act_get(BOOL) + N 次投票（AI 断言，带 votes）；
+     keyword=When / Given 且非 URL → act（AI 动作/前置动作，无 votes）
 
 cost（ADR 0024）：Nova SDK 原生给 time_worked_s，worker 只报该原生量；core 合计、美元折算交消费者（不内置费率）。
 
@@ -40,7 +44,7 @@ from nova_act.types.workflow import set_current_workflow, get_current_workflow
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # novaact/ 根，便于 import lib
 from lib.workflow_setup import ensure_workflow_definition
 from lib.constants import MODEL_ID, WORKFLOW_DEF  # 共享常量（单一真理源，与 spike 共用）
-from lib.event_sink import EventSink  # 事件出口（ADR 0024 I/O 边缘可注入接口，第一期 subprocess 态）
+from lib.event_sink import EventSink  # 事件出口（ADR 0024 I/O 边缘可注入接口；fd 态 / DDB 态两态）
 from lib.job_source import JobSource  # job 入口（同上）
 
 # 确定性 step 注册表（ADR 0022）+ test engineer 的锚点脚手架（均在 worker/ 同目录）。
@@ -54,7 +58,8 @@ from lib.artifact_upload import ArtifactUploader  # noqa: E402  产物 S3 上传
 # compose.resolve_region 把 `--region > AWS_REGION > AWS_DEFAULT_REGION > profile config` 落实成具体字符串、经 AWS_REGION
 # env 注入 worker，故这里通常拿到具体 region。真无 region（全 miss）→ None → fail-loud：boto client 抛 NoRegionError；
 # 尤其 AgentCore 那条路径（下方 AgentCoreBrowserSessionProvider）的 validate_region **不吃 profile config、要显式字符串**，
-# region=None 直接 InvalidRegionError——这正是组合根须在注入前把 profile-region 落实成字符串的原因（别静默跑错区）。
+# region=None 起会话直接失败（实测报 BrowserAuthError: 'You must specify a region.'——文案/异常类随 SDK 版本可变、
+# 别按类名断言）——这正是组合根须在注入前把 profile-region 落实成字符串的原因（别静默跑错区）。
 REGION = os.environ.get("AWS_REGION")
 
 # 停止标志（ADR 0024 flag-only 中断模型）：SIGTERM/SIGINT handler 只 set 它、绝不 raise——避免异步异常
@@ -70,7 +75,6 @@ ACT_TIMEOUT_S = int(os.environ.get("NOVA_ACT_TIMEOUT_S", "120"))  # SDK 允许 [
 # 产物上传器（ADR 0029 第一期）：从组合根注入的 env（ARTIFACT_S3_BUCKET/PREFIX）造——cloud 时上传 S3+删本地+
 # 报 s3://，local/未注入时 no-op 报 file://。模块级单例（对称 emit/_events_out 的模块级模式；worker 单进程单 run）。
 _uploader = ArtifactUploader.from_env()
-# MODEL_ID / WORKFLOW_DEF 移入 lib/constants.py（与 spike 共享单一真理源，见上 import）
 # AI 断言投票次数由 job.assertionVotes 决定（ADR 0014/0024，组合根经 --assertion-votes 设）。
 # 默认 1（不抖动检测，结果直观）；调高才跑 N 次取多数票。
 
@@ -91,7 +95,7 @@ class _DeterministicCtx:
     def page(self):
         return self._nova.page
 
-# 事件 sink（ADR 0024「I/O 边缘可注入接口」第一期）：worker 主流程唯一事件出口，抽进 lib/event_sink.py
+# 事件 sink（ADR 0024「I/O 边缘可注入接口」）：worker 主流程唯一事件出口，抽进 lib/event_sink.py
 # （对称 _uploader、可注入、可测；subprocess 态写 EVENTS_FD fd、无则回落 stdout 调试）。emit 作参数注入
 # _run_step/_run_scenario（两个引擎统一打桩机制），不再是模块级函数——三通道分离/保序/中文由 EventSink 保。
 # log（stderr 诊断）**不属那三条 I/O 边、不进 sink**（协议传输面 vs 诊断面物理隔离，ADR 0024），保模块级。
@@ -422,7 +426,8 @@ EX_WORKER_NETWORK = 80
 # 建连重试参数（ADR 0028）：仅裹幂等的建连段，act 永不重试。退避手写（不用 botocore 内部 retry，
 # 否则 SIGTERM 穿不透）；总退避预算 ~3.5s < schedule 默认 grace 5s。
 _CONNECT_ATTEMPTS = 4
-_BACKOFF_S = [0.5, 1.0, 2.0]  # attempt 失败后的退避；±20% jitter 由调用处加（这里固定，本地 smoke 够用）
+_BACKOFF_S = [0.5, 1.0, 2.0]  # attempt 失败后的退避：固定退避、不加 jitter（本地 smoke 单 worker、无雷群效应；
+                              # 总预算 ~3.5s < grace，见上）
 
 
 def _backoff_interrupted(attempt: int) -> bool:
@@ -437,7 +442,9 @@ def _backoff_interrupted(attempt: int) -> bool:
 
 
 # boto ClientError 的瞬时/节流错误码集（ADR 0028）——**对齐 botocore 权威常量、借判据不借 API**：
-# = TransientRetryableChecker._TRANSIENT_ERROR_CODES + ThrottledRetryableChecker._THROTTLED_ERROR_CODES。
+# 以 TransientRetryableChecker._TRANSIENT_ERROR_CODES + ThrottledRetryableChecker._THROTTLED_ERROR_CODES
+# 为基线，另**有意增补** ServiceUnavailable / ServiceUnavailableException（botocore 那两个常量集里没有——
+# 它靠 _TRANSIENT_STATUS_CODES 的 503 兜；我们照抄了那组状态码，但服务端不带 HTTP 状态只给码时兜不住，故显式补）。
 # AgentCore 起会话（start_browser_session）是 boto3 调用，服务端瞬时不可用/限流抛 ClientError（直接继承
 # Exception、混着永久错），故按码细分、不整类当瞬时。内联这张稳定的码表而非硬构造 botocore RetryContext 去
 # 调它的 is_retryable（那要请求栈内部对象、跨版本脆，且我们 catch 到的是被 Nova SDK 包两层的异常、没有 RetryContext）。

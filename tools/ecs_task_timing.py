@@ -1,10 +1,12 @@
 #!/usr/bin/env python
 """ECS task 生命周期时间字段抓取（Fargate SIGTERM→退出耗时标定，ADR 0032 / 0024）。
 
-**为何独立成脚本、不改 fargate_engine**：`FargateEngine._task_exit_code`（core/core/adapters/fargate_engine.py）
-是产品热路径，返回 `int|None` 供 `_read_events` 轮询判定存活/退出——它**只读 lastStatus/exitCode、丢弃时间
-字段**（够判定即可）。grace/stopTimeout 校准要的是 SIGTERM→退出的**真实墙钟预算**（`stoppingAt`/`executionStoppedAt`/`stoppedAt`
-的差），属一次性标定、非运行期判定；混进 `_task_exit_code` 会污染其单一职责、且改产品路径需回归。故独立脚本纯读。
+**为何独立成脚本、不改产品路径**：产品侧读 task 终态的两条路都**只取 lastStatus/exitCode、丢弃时间字段**（够判定
+即可）——同步态 `FargateEngine._probe_task`/`_await_exit_code`（core/core/adapters/fargate_engine.py）产
+`TaskProbe(stopped, exit_code)` 供 `_read_events` 轮询判存活/退出；detached cloud 态由退出观察者 Lambda 从
+EventBridge 的 ECS STOPPED 事件读 `exitCode` 写 task_exited（ADR 0034 机制二，lambdas/exit_observer.py）。
+grace/stopTimeout 校准要的是 SIGTERM→退出的**真实墙钟预算**（`stoppingAt`/`executionStoppedAt`/`stoppedAt`
+的差），属一次性标定、非运行期判定；混进任一条判定路径都会污染其单一职责、且改产品路径需回归。故独立脚本纯读。
 
 **测什么**（DescribeTasks 的时间字段，task STOPPED 后才全）：
 - `createdAt`：RunTask 收到请求。

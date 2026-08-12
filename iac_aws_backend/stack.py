@@ -384,6 +384,9 @@ class BackendStack(Stack):
             code=code,
             timeout=Duration.minutes(2),  # 起 task + 条件写；不等 worker 跑完（fire-and-forget）
             memory_size=256,
+            # env = common_env + 起 task 所需（SUBNETS/SG/MAX_CONCURRENCY）。lambdas/reconciler.py docstring 的 env
+            # 清单里还有 **REPORT_DIR / ASSIGN_PUBLIC_IP——IaC 有意不注入**，由该文件内缺省供给（reports / ENABLED）；
+            # 改产物落点前缀或走私有子网（NAT 出网、assignPublicIp=DISABLED）时才需在此显式给。
             environment={
                 **common_env,
                 "SUBNETS": ",".join(s.subnet_id for s in (vpc.public_subnets or vpc.private_subnets)),

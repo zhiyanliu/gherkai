@@ -1,4 +1,4 @@
-"""进程级信号测试的 fixture worker（ADR 0024 flag-only 中断模型，P1 回归哨兵）。
+"""进程级信号测试的 fixture worker（ADR 0024 flag-only 中断模型，回归哨兵）。
 
 被 test_interrupt_process.py 真 spawn 成子进程，验证 **run_scope 真实的 flag-only handler**
 在真进程收到真 SIGTERM/SIGINT 时：只置标志、协作式退出、干净退（rc=0），不卡死、不被 SIGKILL。

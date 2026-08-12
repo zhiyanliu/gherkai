@@ -112,7 +112,11 @@ def _report_refs_from_json(items: list | None) -> tuple[ReportRef, ...]:
 
 
 def event_from_json(d: dict) -> Event:
-    """JSON dict（worker stdout 一行）→ model.Event，按 "type" 分派（ADR 0024）。"""
+    """JSON dict（worker 事件通道一行）→ model.Event，按 "type" 分派（ADR 0024）。
+
+    事件通道随形态而异：子进程态 = 专用 fd（号经 EVENTS_FD 传给 worker）；Fargate 态 = DDB events 表
+    记录的 body（ADR 0024 三通道分离）。两态的行内容同一形状，故都归这里反序列化。
+    """
     t = d.get("type")
     if t == "scope_started":
         return ScopeStarted(scope_id=d["scopeId"], session_id=d.get("sessionId"))
@@ -151,5 +155,5 @@ def event_from_json(d: dict) -> Event:
 
 
 def event_from_line(line: str) -> Event:
-    """worker stdout 一行 → model.Event。"""
+    """worker 事件通道一行（子进程态 = EVENTS_FD 的 fd；Fargate 态 = DDB events 表 body）→ model.Event。"""
     return event_from_json(json.loads(line))

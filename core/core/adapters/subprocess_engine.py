@@ -3,10 +3,11 @@
 这是 core 与「进程世界」的 seam——「怎么起 worker、怎么停」的进程/信号知识藏在这里，
 schedule 只下逻辑指令（run_scope / handle.stop），对信号/进程无知（ADR 0026）。
 
-形态：
-- 起 worker：spawn cmd 子进程；把 job JSON 写 stdin、关 stdin；逐行读 stdout → event_from_line → Event 迭代器。
+形态（三通道分离，ADR 0024）：
+- 起 worker：spawn cmd 子进程；把 job JSON 写 stdin、关 stdin；事件走**专用 fd**（自建管道，fd 号经环境变量
+  `EVENTS_FD` 告知 worker）→ 逐行 event_from_line → Event 迭代器。
 - 停 worker：SIGTERM → 等 grace_period → 未退则 SIGKILL（ADR 0024 终止契约的机制实现）。
-- worker stderr 实时透传到本进程 stderr（日志/调试）。
+- worker stdout（引擎 SDK 的进度噪声，不解析）+ stderr（worker 自己的诊断）都实时透传为日志。
 
 引擎无关：cmd 决定起哪个 worker（Nova Act 的 python worker / 未来 Midscene 的 node worker）。
 同一个 adapter 类，靠不同 cmd 服务不同引擎——符合「两 adapter 形状一致」（ADR 0024）。
@@ -120,7 +121,8 @@ def _read_events(
     raw_sink（可选，ADR 0034 无状态跑批）：非 None 时，每读到一行**原始 JSON 文本**（event_from_line 解析
     **之前**）旁路调它一次——供 SubprocessLauncher 把原始行落 SqliteEventLog（存原样、读回复用 event_from_line，
     零新序列化、不破 wire 单向契约）。同步 run 路径不传（None）→ 零行为变化。sink 异常不打断事件流（吞掉，
-    落库失败不该拖垮执行；reconciler 靠事件持久性推进、丢一条下轮 worker 不会重发，但那是 P4 才需处理的边界）。
+    落库失败不该拖垮执行；reconciler 靠事件持久性推进、丢一条下轮 worker 不会重发，但那是 cloud 事件日志（DDB）
+    路径的边界，ADR 0034）。
     """
     with os.fdopen(events_r, "r", encoding="utf-8") as events:
         for line in events:

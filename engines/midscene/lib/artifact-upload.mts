@@ -1,8 +1,9 @@
 // 产物 S3 上传（Midscene worker，ADR 0029 第一期）：整目录上传 → 删本地 → reportRef 报 s3://。
 //
 // 由组合根注入的 S3 落点 env 驱动（ARTIFACT_S3_BUCKET + ARTIFACT_S3_PREFIX，跟 --backend cloud 走）——
-// 未注入（local / --no-report）→ toReportRef 原样报 file://、不上传、不删（零行为变化）。worker 对"我在哪跑"
-// 无知，只认这组 env 有没有（ADR 0016 注入红线）。与 Nova 的 lib/artifact_upload.py 对称（各语言各写，ADR 0024）。
+// **未注入落点（local 路径；或手动直跑/脚手架没给这组 env）→ toReportRef 原样报 file://、不上传、不删**（零行为变化；
+// 与 --no-report 正交——那管要不要渲染报告，不管产物上传落点）。worker 对"我在哪跑"无知，只认这组 env 有没有
+// （ADR 0016 注入红线）。与 Nova 的 lib/artifact_upload.py 对称（各语言各写，ADR 0024）。
 //
 // S3 key 镜像本地 run 树（ADR 0029）：任一产物 key = <prefix><产物相对本地 run 目录的路径>，与 S3ReportStore/
 // ResultStore 同 <prefix> 前缀。本地 run 目录 = 产物落点目录（MIDSCENE_RUN_DIR）的父级。key 确定性纯路径计算、
@@ -20,8 +21,9 @@ import * as path from "node:path";
 
 // 单次 S3 上传超时（ADR 0029「上传必须套超时」）：远大于正常同区上传（亚秒~秒级）、且明显 < grace（worker
 // 优雅停宽限，ADR 0024）——退化网络下上传挂到此即 abort、best-effort 放弃，不拖住退出。**grace 是 run 级、随
-// 引擎组成变**：混引擎 run 取 Nova 下限≈150s，midscene-only run 由组合根 engine_min_grace("midscene")=
-// MIDSCENE_GRACE_MIN_S(≈25s) 保证 > 本超时（曾漏设 midscene 下限 → 回落 5s < 本 10s、致 worker 被 SIGKILL）。
+// 引擎组成变**：混引擎 run 取各引擎下限的 max（Nova 下限最大），midscene-only run 由组合根
+// engine_min_grace("midscene")=MIDSCENE_GRACE_MIN_S 保证 > 本超时——**那两个下限的真值住 cli/cli/compose.py，
+// 此处不复述数字**（曾漏设 midscene 下限 → 回落 ScheduleOpts 默认 grace < 本超时、致 worker 被 SIGKILL）。
 const UPLOAD_TIMEOUT_MS = 10_000;
 
 export class ArtifactUploader {

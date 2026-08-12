@@ -134,7 +134,7 @@ def test_then_votes2_tie_failed(captured):
     assert r == "failed"  # yes=1 不 > 2/2=1，平票算失败（对称 Midscene，ADR 0028 有意设计）
 
 
-# ---- act 中途网络瞬时失败 → error/network_error（本会话刚加分类，对称 Midscene）----
+# ---- act 中途网络瞬时失败 → error/network_error（ADR 0028 act 中途分类，对称 Midscene）----
 def test_act_transient_network_is_network_error(captured):
     import socket
     nova = _FakeNova(act_raises=ConnectionError("reset"))

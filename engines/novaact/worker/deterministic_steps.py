@@ -8,7 +8,8 @@
 本模块，顶层的 @deterministic 副作用把锚点登记进表。
 
 角色边界（ADR 0020）：
-  - 本文件由 test engineer 维护；QA 永远只在 .feature 写自然语言（默认走 AI，见 test_generic_steps.py）。
+  - 本文件由 test engineer 维护；QA 永远只在 .feature 写自然语言（默认走 AI catch-all，见
+    worker/run_scope.py `_run_step` 派发③ / ADR 0024「worker 派发」）。
   - 仅当某断言确需精确、不能容忍 AI 非确定性时，test engineer 在此加一个项目专属锚点。
 
 handler 约定（见 worker/deterministic.py）：

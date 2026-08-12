@@ -1,4 +1,4 @@
-"""JobSource 单测（Nova，ADR 0024 I/O 边缘可注入接口第一期）：subprocess 态读 stdin 首行 JSON。
+"""JobSource 单测（Nova，ADR 0024「I/O 边缘可注入接口」）：subprocess 态读 stdin 首行 JSON。
 
 此前内联在 run_scope main（json.loads(sys.stdin.readline())），无测试覆盖。不连真 AWS、不起子进程。
 """

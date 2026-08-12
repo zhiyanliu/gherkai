@@ -1,4 +1,4 @@
-// EventSink 单测（Midscene，ADR 0024 I/O 边缘可注入接口第一期）：subprocess 态写 EVENTS_FD fd + 回落 + 保序。
+// EventSink 单测（Midscene，ADR 0024「I/O 边缘可注入接口」）：subprocess 态写 EVENTS_FD fd + 回落 + 保序。
 // 此前 emit 内联在 run-scope（模块级、无法打桩、只能真写 fd 1），无测试覆盖。跑：node --import tsx --test。
 import { test } from "node:test";
 import assert from "node:assert";

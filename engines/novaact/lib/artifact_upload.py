@@ -1,8 +1,9 @@
 """产物 S3 上传（Nova worker，ADR 0029 第一期）：整目录上传 → 删本地 → reportRef 报 s3://。
 
 由组合根注入的 S3 落点 env 驱动（`ARTIFACT_S3_BUCKET` + `ARTIFACT_S3_PREFIX`，跟 `--backend cloud` 走）——
-**未注入（local / --no-report）→ `to_report_ref` 原样报 `file://`、不上传、不删**（零行为变化）。worker 对
-"我在哪跑"无知，只认这组 env 有没有（ADR 0016 注入红线）。
+**未注入落点（local 路径；或手动直跑/脚手架没给这组 env）→ `to_report_ref` 原样报 `file://`、不上传、不删**
+（零行为变化）。判据是「有没有注入落点」，与 `--no-report` **正交**——那个 flag 只管落库/渲染报告，不管产物
+上传落点。worker 对"我在哪跑"无知，只认这组 env 有没有（ADR 0016 注入红线）。
 
 S3 key 镜像本地 run 树（ADR 0029）：任一产物 key = `<prefix><产物相对本地 run 目录的路径>`，与 S3ReportStore/
 ResultStore 同 `<prefix>` 前缀。本地 run 目录 = 产物落点目录（`NOVA_LOGS_DIR`）的父级。key 是**确定性纯路径

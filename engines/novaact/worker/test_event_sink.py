@@ -1,4 +1,4 @@
-"""EventSink 单测（Nova，ADR 0024 I/O 边缘可注入接口第一期）：subprocess 态写 EVENTS_FD fd + 回落 + 保序 + 中文。
+"""EventSink 单测（Nova，ADR 0024「I/O 边缘可注入接口」）：subprocess 态写 EVENTS_FD fd + 回落 + 保序 + 中文。
 
 这三条 fd 逻辑此前内联在 run_scope、无测试覆盖（绿≠对：EVENTS_FD 回落/ensure_ascii/每条 flush 保序都没被测）。
 不连真 AWS、不起子进程。

@@ -84,7 +84,7 @@ test("flush uploads rest, skips uploaded, deletes whole dir", async () => {
   assert.ok(!fs.existsSync(msDir));  // 全成功 → 整目录删（本地零残留，含 log/）
 });
 
-// ---- 幂等：已成功传的文件再调 toReportRef → 不重传（对称 Nova，ADR 0029 review #4）----
+// ---- 幂等：已成功传的文件再调 toReportRef → 不重传（对称 Nova，ADR 0029 幂等去重）----
 test("toReportRef idempotent, no re-upload", async () => {
   const root = tmproot();
   const runDir = path.join(root, "reports", "rid");

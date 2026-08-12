@@ -125,5 +125,5 @@ class RunPersistence:
                 return self._report_store.write(self._run_id, result, created_at=ended_at)
             except Exception:
                 # 派生视图写失败不击穿已 commit 的 run（判定真值在 ResultStore）；返回 None，报告可从 RunResult 重建。
-                # 不留痕：曾存 traceback 到 _report_error 供"可选读取"，但生产端（cli）从不消费——删悬空字段（代码 review）。
+                # 不留痕：曾存 traceback 到 _report_error 供"可选读取"，但生产端（cli）从不消费——按悬空字段判据删。
                 return None

@@ -336,7 +336,7 @@ class FargateEngine:
             return probe.exit_code  # STOPPED 且落值
 
     def _raise_for_exit(self, rc: int) -> None:
-        """退出码翻异常（复刻 subprocess_engine._read_events:116-127）：80→网络错、>0→RuntimeError、0→正常。"""
+        """退出码翻异常（与 subprocess_engine._read_events 同语义）：80→网络错、>0→RuntimeError、0→正常。"""
         if rc == EX_WORKER_NETWORK:
             raise WorkerNetworkError(f"worker 建连失败（网络/SSL 瞬时故障），退出码 {rc}")
         if rc > 0:

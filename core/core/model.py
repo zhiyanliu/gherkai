@@ -119,9 +119,9 @@ _STATUS_SEVERITY: dict[Status, int] = {
 
 # run 级聚合的过滤名单（ADR 0031 决定三）：终态判定之外的态都不进 run 级聚合。
 # 含 skipped/aborted（派生终态、单写者、必伴随 error 同批，见 ADR 0031）+ pending/running（前置态）。
-# 当前 _aggregate 在 schedule 两处复用（scenario→job / job→run），喂的都是终态、无前置态，故过滤是 no-op；
-# 含 pending/running 是**前向口子**——为未来「实时增量聚合 run 级 status」（WebUI 轮询面）预留：届时 running 的
-# job 不会污染 run 级 status（ADR 0030/0031）。
+# 两路共用（ADR 0031 决定三 / 0034）：schedule 沿事件流实时聚合，喂的都是终态、过滤是 no-op；
+# project 的无状态投影真实喂入 pending/running（未起/在跑的 job），此处过滤**承重**——否则前置态会污染
+# run 级 status。
 _NON_VERDICT: frozenset[Status] = frozenset(
     {Status.SKIPPED, Status.ABORTED, Status.PENDING, Status.RUNNING}
 )
@@ -132,7 +132,9 @@ def severity(status: Status) -> int:
     return _STATUS_SEVERITY[status]
 
 
-# errorType 规范化类别集（ADR 0024，可随真实失败样本扩充）
+# errorType 规范化类别集（ADR 0024，可随真实失败样本扩充）。
+# 本 Literal 是协议类别集的**单一事实源**（ADR 0024/0028），有意**不作字段注解**——wire 需容忍 worker
+# 报的未知类别（引擎先报、core 后补枚举，不能反序列化即炸），故各 error_type 字段一律标 str | None。
 ErrorType = Literal[
     "assertion_failed",  # failed 态：断言没过
     "timeout",  # error 态：超时

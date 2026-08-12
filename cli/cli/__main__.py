@@ -140,8 +140,8 @@ def _build_parser() -> argparse.ArgumentParser:
     sm.add_argument("--s3-bucket", default=None, metavar="NAME", help="[cloud] S3 桶名")
     sm.add_argument("--events-table", default=None, metavar="NAME", help="[cloud] events DDB 表名")
     sm.add_argument("--cluster", default=None, metavar="NAME", help="[cloud] ECS cluster 名")
-    sm.add_argument("--subnet", action="append", default=None, metavar="ID", help="[cloud] Fargate 子网 ID")
-    sm.add_argument("--security-group", action="append", default=None, metavar="ID", help="[cloud] Fargate 安全组 ID")
+    # 注：submit 不收 --subnet/--security-group——cloud submit 只写 runs 表、不碰 SSM/ECS（ADR 0034），
+    # 网络配置由 IaC 注给 reconciler/kicker Lambda 的 env（曾在此声明过两个从不生效的 flag，已删）。
 
     st = sub.add_parser("status", help="[无状态跑批] 查一个 run 的进度/结果（--wait 轮询到完成）")
     st.add_argument("run_id", help="submit 返回的 run_id")
@@ -408,6 +408,12 @@ def _cmd_status(args, repo: Path) -> int:
     report_root = Path(args.report_dir).resolve()
     run_store, _rs, _rp, _mk = compose.build_local_stores(report_dir=str(report_root))
 
+    # run 存在性检查先于 --wait 接力：不存在的 run 走统一的「退 2 + 提示」，
+    # 别让 build_local_reconcile 的 FileNotFoundError 裸 traceback 退 1（README 契约：查不到 run → 2）。
+    if run_store.load_run_state(args.run_id) is None:
+        _progress(f"未找到 run：{args.run_id}（--report-dir 是否与 submit 一致？）")
+        return 2
+
     if args.wait:
         # 接力推进：per-run 进程崩了/慢了，人来查即自己 tick 到终态（状态全持久、tick 幂等，断点续）。
         meta, log, store, launcher, mc, rstore, pstore = detached.build_local_reconcile(
@@ -419,7 +425,7 @@ def _cmd_status(args, repo: Path) -> int:
                                     result_store=rstore, report_store=pstore)
 
     state = run_store.load_run_state(args.run_id)
-    if state is None:
+    if state is None:  # 不可达（上面已查过），保险分支
         _progress(f"未找到 run：{args.run_id}（--report-dir 是否与 submit 一致？）")
         return 2
     return _render_status(state, args, wait_hint=f"gherkai status {args.run_id} --report-dir {args.report_dir} --wait")
@@ -534,10 +540,9 @@ def _cmd_run(args, repo: Path) -> int:
     report_root = Path(args.report_dir).resolve()
     nova_logs_dir = (report_root / run_id / "nova-trajectories") if do_report else None
     midscene_run_dir = (report_root / run_id / "midscene-run") if do_report else None
-    # artifact_s3 = 产物 S3 上传落点，仅 local（subprocess）路径经 build_engines 注入给 worker（ADR 0029）：
-    # 默认 None（local / --no-report → worker 报 file://、不上传）。**cloud（Fargate）路径不走这里**——其产物落点
-    # 由 build_fargate_engines 内部按 (bucket, <report_dir>/<run_id>/) 自算并注入 FargateEngine（见下 resolver 分流）。
-    artifact_s3: tuple[str, str] | None = None
+    # 产物 S3 落点：cloud（Fargate）由 build_fargate_engines 内部按 (bucket, <report_dir>/<run_id>/) 自算注入；
+    # local（subprocess）CLI 恒不注入（worker 报 file://、不上传）——「subprocess+注入 S3 落点」是内部预演档，
+    # 只有 tools/e2e_harness.py 走（ADR 0016 决策 B / 0029）。
     cloud_fargate: dict | None = None  # cloud 分支置值（ADR 0033）：Fargate 执行配置，供 build_fargate_engines；None＝走 subprocess
     # region/profile 解析（ADR 0016 决策 C——region 与 profile 是「正确的非对称」）：
     # - profile：--profile > AWS_PROFILE。仅 subprocess worker 注入（继承本机 ~/.aws、profile 合法）；
@@ -629,7 +634,7 @@ def _cmd_run(args, repo: Path) -> int:
             raise
 
     # 组合根注入引擎 resolver（延后到此：需 run_id + store 装配后）。
-    # **决策 A 落到 CLI（ADR 0016/0033）**：cloud ⇒ FargateEngine（云执行，产物落点内部自算）；否则 SubprocessEngine（本地，注入 artifact_s3）。
+    # **决策 A 落到 CLI（ADR 0016/0033）**：cloud ⇒ FargateEngine（云执行，产物落点内部自算）；否则 SubprocessEngine（本地，不注入 S3 落点）。
     # cloud_fargate 在 3a 的 `backend=='cloud'` 分支**无条件置值**（与 do_report 正交，report⊥执行）——故
     # `--backend cloud --no-report` 仍走 Fargate（cloud_fargate 非 None），只是不落库、不生成 report。
     # `--no-report` 的逃生舱只作用于 store 轴（persistence=None、不构造三个 store），绝不改执行环境（见 3a 注释 + ADR 0016 决策 A）。
@@ -642,7 +647,7 @@ def _cmd_run(args, repo: Path) -> int:
         )
     else:
         engines = compose.build_engines(
-            repo, nova_logs_dir=nova_logs_dir, midscene_run_dir=midscene_run_dir, artifact_s3=artifact_s3,
+            repo, nova_logs_dir=nova_logs_dir, midscene_run_dir=midscene_run_dir,
             region=resolved_region, profile=resolved_profile,
         )
     resolver = compose.make_resolver(engines)

@@ -49,7 +49,7 @@ _HEARTBEAT = _Heartbeat()
 
 
 def _heartbeat_wrap(events, poll_interval_s, deadline):
-    """把 adapter 的纯 `Iterator[Event]` 包成「事件 + 静默心跳」流（ADR 0026/0028，B 方案）。
+    """把 adapter 的纯 `Iterator[Event]` 包成「事件 + 静默心跳」流（ADR 0026/0028）。
 
     单线程无法在 `next(events)` 阻塞于管道读时被定时器唤醒，故把内层迭代搬到一个**后台 reader 线程**：
     它 `for ev in events: q.put(ev)`，把事件（及内层抛出的异常）塞进队列；本生成器主侧 `q.get(timeout)`——

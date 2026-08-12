@@ -1,4 +1,4 @@
-"""事件 sink（Nova worker，ADR 0024「I/O 边缘可注入接口」第一期）：worker 主流程唯一的事件出口。
+"""事件 sink（Nova worker，ADR 0024「I/O 边缘可注入接口」）：worker 主流程唯一的事件出口。
 
 对称 Midscene 的 lib/event-sink.mts（各语言各写、语义契约对称，ADR 0024）+ 对称本引擎 ArtifactUploader
 的结构骨架（from_env 唯一读 env、退化态是同类实例非 None/分支、外部 client 惰性建）。
@@ -26,6 +26,9 @@ from typing import TextIO
 
 # events 表 TTL（ADR 0033 / 0024）：每条 event item 写 expires_at=now+7d（epoch 秒），IaC 在该属性开 DDB TTL
 # 自动过期。events 是进度脚手架（权威在 RunReport/ResultStore），留 7 天供事后调查失败 run。
+# **改值须同步全部解码方（反向依赖）**：下游把本值当共享常量反解 emit 时刻——core 侧 event_log/ddb.py 的
+# `_emit_ts`（emit_epoch = expires_at − 本值，用于算时长）与 tools/events_wallclock.py 各自硬编码同一个 7d；
+# 只改这里会让它们把 emit 时刻算偏（且无人报错）。
 _EVENTS_TTL_S = 7 * 24 * 60 * 60
 
 

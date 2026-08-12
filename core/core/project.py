@@ -56,7 +56,7 @@ class Timing:
 
 def reduce_event(
     event: Event,
-    result,  # JobResult（就地累积；不标类型避免与 schedule 的循环 import）
+    result: JobResult,  # 就地累积
     scenario_status: dict[str, Status],
     timing: Timing,
     now: float,
@@ -239,11 +239,13 @@ def _reduce_scope(job: Job, recs: list[EventRecord]) -> tuple[JobResult, Status,
     saw_scope_started = saw_scope_done = False
     for r in evs:
         ev = r.event
+        if ev is None:  # evs 已按 kind=='event' 且 event 非 None 过滤，这里显式窄化（类型层面）
+            continue
         if isinstance(ev, ScopeStarted):
             saw_scope_started = True
         if isinstance(ev, ScopeDone):
             saw_scope_done = True
-        reduce_event(ev, result, scenario_status, timing, r.emit_ts or 0.0)  # type: ignore[arg-type]
+        reduce_event(ev, result, scenario_status, timing, r.emit_ts or 0.0)
     exits = [r.exited for r in recs if r.kind == "exit" and r.exited is not None]
     exited = exits[0] if exits else None
     status = _job_status(saw_scope_started, saw_scope_done, exited, scenario_status)

@@ -169,7 +169,7 @@ def job_result_from_dict(d: dict, *, job: Job | None = None) -> JobResult:
     definition 来源（二选一，对应 to_dict 的两种形态）：
     - 自包含形态：dict 内嵌 `job` → 直接重建（ResultStore 单 job 文件走这条）。
     - 聚合形态：dict 无 `job`，由调用方经 `job=` 传入（from_dict(RunResult) 按 scope_id 从 run_meta join）。
-    顶层 scope_id/engine 只是便利冗余，不作 def 来源。
+    顶层 scope_id 仅在【聚合形态】出现、是 join key（非 def 来源）；【自包含形态】顶层无 def 字段。
     """
     from core.model import ScenarioResult  # 局部 import 避免顶层顺序耦合
 

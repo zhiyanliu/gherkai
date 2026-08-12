@@ -191,7 +191,7 @@ test("runStep: Then votesN=2 平票 1/2 → failed（yes>1 不成立，平票算
   assert.equal(r, "failed");  // yes=1 不 > 2/2=1 —— 偶数平票算失败（ADR 0028 已记的有意设计）
 });
 
-// ---- act 中途网络瞬时失败 → error + network_error（本会话刚加的分类，对称 Nova）----
+// ---- act 中途网络瞬时失败 → error + network_error（ADR 0028 act 中途分类，对称 Nova）----
 test("runStep: aiAct 抛网络瞬时异常 → error/network_error（仅分类、不重试）", async () => {
   const { runStep } = await importMod();
   const agent = { aiAct: async () => { const e: any = new Error("reset"); e.code = "ECONNRESET"; throw e; } } as any;

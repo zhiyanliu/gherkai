@@ -82,7 +82,7 @@ def test_flush_uploads_rest_skips_uploaded_and_deletes_dir(tmp_path):
     assert not (run_dir / "nova-trajectories").exists()
 
 
-# ---- 幂等：已成功传的文件再调 to_report_ref → 不重传、直接返 s3:// ref（ADR 0029 review #4）----
+# ---- 幂等：已成功传的文件再调 to_report_ref → 不重传、直接返 s3:// ref（ADR 0029 幂等去重）----
 def test_report_ref_idempotent_no_reupload(tmp_path):
     run_dir = tmp_path / "reports" / "rid"
     art = run_dir / "nova-trajectories" / "sess"

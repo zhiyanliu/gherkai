@@ -1,4 +1,4 @@
-"""DdbEventLog（ADR 0034 P4）：cloud 无状态跑批的 EventLog——从 DDB events 表读全量重放 + 写 task_exited。
+"""DdbEventLog（ADR 0034 cloud 侧）：cloud 无状态跑批的 EventLog——从 DDB events 表读全量重放 + 写 task_exited。
 
 cloud 对位 local 的 SqliteEventLog：reconciler Lambda 经它读某 run 全量 events（worker PutItem 的执行事件
 + 退出观察者写的 task_exited）→ project 重放推演。**worker 侧不改**——worker 仍按 [0024] PutItem 执行事件到
@@ -29,6 +29,10 @@ _BODY_ATTR = "body"
 _EXIT_SK = 10 ** 18
 _ITEM_TYPE_ATTR = "item_type"
 _EXIT_CODE_ATTR = "exit_code"
+# events 表 TTL（[0033] 决定：events 是进度脚手架、只留 7 天）——写端（worker 的 EventSink）给每条 event item
+# 写 `expires_at = emit 时刻 + 本值`，故读端反解 emit 墙钟 = expires_at − 本值（见 _emit_ts）。
+# **与写端同一个数**：写端改 TTL 必须同步这里，否则反解出的墙钟整体偏移。
+_EVENTS_TTL_S = 7 * 24 * 60 * 60
 
 
 class DdbEventLog:
@@ -78,13 +82,13 @@ class DdbEventLog:
     def _emit_ts(item) -> float:
         """从 events item 还原 worker emit 墙钟（reduce_event 的 now，供算时长）。
 
-        worker 写 expires_at=now+7d（[0033]/[0024]）——减 7d TTL 常量即 emit epoch 秒（见 tools/events_wallclock.py
-        同源换算）。缺 expires_at（不该发生）→ 0.0（时长算不准、但不影响判定，判定不依赖墙钟）。
+        写端（worker EventSink）写 `expires_at = emit 时刻 + TTL`（[0033]/[0024]），故减 `_EVENTS_TTL_S` 即 emit
+        epoch 秒。缺 expires_at（不该发生）→ 0.0（时长算不准、但不影响判定，判定不依赖墙钟）。
         """
         exp = item.get("expires_at")
         if exp is None:
             return 0.0
-        return float(exp) - 7 * 24 * 3600
+        return float(exp) - _EVENTS_TTL_S
 
     def record_exit(self, scope_id: str, exit_code: int | None) -> None:
         """退出观察者 Lambda 调：写 task_exited 到保留高位 SK（独立键空间，机制一）。INSERT 幂等（覆盖同键）。

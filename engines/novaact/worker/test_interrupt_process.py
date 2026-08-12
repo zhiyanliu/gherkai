@@ -1,4 +1,4 @@
-"""进程级真信号回归哨兵（ADR 0024 flag-only 中断模型，P1）。
+"""进程级真信号回归哨兵（ADR 0024 flag-only 中断模型）。
 
 补上 test_interrupt_model.py（拦 signal.signal 手调 handler、不发真信号）和 test_subprocess_engine.py
 （用 core 的 echo_worker、非 novaact 真 handler）之间的**唯一空白**：真进程收到真 SIGTERM/SIGINT →

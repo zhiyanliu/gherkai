@@ -1,4 +1,4 @@
-// JobSource 单测（Midscene，ADR 0024 I/O 边缘可注入接口第一期）：subprocess 态读 stdin 到 EOF、切首行 JSON。
+// JobSource 单测（Midscene，ADR 0024「I/O 边缘可注入接口」）：subprocess 态读 stdin 到 EOF、切首行 JSON。
 // 此前内联在 run-scope main（JSON.parse((await readStdin()).split("\n")[0])），无测试覆盖。跑：node --import tsx --test。
 import { test } from "node:test";
 import assert from "node:assert";
