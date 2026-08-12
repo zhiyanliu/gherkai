@@ -55,10 +55,17 @@ gherkai run <features>    # 原阻塞皮 = submit + 同进程 status --wait，�
 ```
 1. submit(CLI)：plan → create_run 写 RunMeta+全 pending 到 runs 表 → CLI 退出（run_id 已在手）。
    **只写 DDB、不起任何 task**——submit 机器权限面仅「runs 表写 + preflight」，不碰 ECS RunTask（冷启动由kicker Lambda 做，见下）。
-1b. runs 表 Stream（**仅 INSERT**）→ [kicker Lambda]：新 run 的 definition 落库即触发 → tick 起首批
-     min(max_concurrency, |jobs|) 个 task（CAS 抢占）。这是纯事件驱动链的**冷启动**（无此步则无 events/无 STOPPED，
-     events Stream 永不触发第一次 reconciler）。kicker复用同一 `reconcile.tick`（四宿主一份：submit-local / kicker /
-     reconciler / status 接力）。
+1b. runs 表 Stream（**仅 INSERT 且带 `detached` 标记**）→ [kicker Lambda]：新 run 的 definition 落库即触发 →
+     tick 起首批 min(max_concurrency, |jobs|) 个 task（CAS 抢占）。这是纯事件驱动链的**冷启动**（无此步则无
+     events/无 STOPPED，events Stream 永不触发第一次 reconciler）。kicker复用同一 `reconcile.tick`（四宿主一份：
+     submit-local / kicker / reconciler / status 接力）。
+     **filter 必须区分写入者（首轮 code-health 对抗验证逼出——只 filter INSERT 不够）**：同步 `run --backend
+     cloud` 的 `RunPersistence.begin → create_run` 同样 INSERT runs 表，会误触发 kicker 对同步 run tick（CAS 抢
+     job、RunTask）——与同步 schedule 的进程内执行**双开推进器**（重复起 task、真站点重复操作，moto 复现）。
+     解法 = **`detached` 由组合根注入、随 create_run 写成 DDB 顶层标记属性**（`submit` 组合根传 detached=True；
+     同步 `run` 不传、item 无此属性），kicker 的 event source filter 匹配 `INSERT ∧ NewImage.detached=true`——
+     同步 run 的 INSERT 不命中、Stream 层直接滤掉（零 Lambda 调用，非进 handler 再判）。标记是执行环境属性、
+     不进 core 模型（RunState/RunMeta 无此字段——它描述「谁推进这个 run」，非 run 状态本身）。
 2. worker 云上跑（CLI 退出不杀 task，已实测）：PutItem 执行事件(seq 递增)→events 表；上传产物→S3
 3. task STOPPED → ECS 自动发 "Task State Change: STOPPED" 事件 → EventBridge
      → [退出观察者 Lambda]：从事件 payload 读 exitCode（实测 4/4 都带，含 SIGKILL=137）

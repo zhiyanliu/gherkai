@@ -124,3 +124,28 @@ def test_started_ended_omit_when_none_round_trip(ddb_run_store):
     ddb_run_store.finalize_run("ts-run", Status.PASSED, "2026-07-01T01:00:00Z")
     got2 = ddb_run_store.load_run_state("ts-run")
     assert got2.ended_at == "2026-07-01T01:00:00Z"
+
+
+def test_detached_flag_on_state_item(aws):
+    """detached 组合根的 create_run 在 STATE item 落 detached=true 标记;默认(同步 run)不落（ADR 0034 kicker filter）。"""
+    from core.adapters.run_store.ddb import DynamoDBRunStore
+    from core.model import Job, JobState, RunMeta, RunState, Scenario, Status, Step
+
+    def _mk(run_id):
+        job = Job(scope_id="s", scope_name="s", engine="novaact", scenarios=(
+            Scenario(id="s:1", name="sc", steps=(Step(0, "Given", "x"),)),))
+        meta = RunMeta(run_id=run_id, created_at="t", jobs=(job,))
+        state = RunState(run_id=run_id, status=Status.PENDING,
+                         jobs={"s": JobState("s", Status.PENDING)}, started_at="t")
+        return meta, state
+
+    table = aws["ddb"].Table(aws["table_name"])
+    meta, state = _mk("det-1")
+    DynamoDBRunStore(table, detached=True).create_run(meta, state)
+    item = table.get_item(Key={"run_id": "det-1", "item_type": "STATE"}, ConsistentRead=True)["Item"]
+    assert item.get("detached") is True  # kicker filter 匹配 {"BOOL": true}
+
+    meta, state = _mk("sync-1")
+    DynamoDBRunStore(table).create_run(meta, state)  # 同步 run 组合根:默认不带
+    item = table.get_item(Key={"run_id": "sync-1", "item_type": "STATE"}, ConsistentRead=True)["Item"]
+    assert "detached" not in item  # 属性缺席 → Stream filter 不命中 → kicker 不触发

@@ -452,14 +452,20 @@ class BackendStack(Stack):
         kicker.add_to_role_policy(iam.PolicyStatement(
             actions=["iam:PassRole"],
             resources=[self._execution_role.role_arn] + [r.role_arn for r in self._task_roles]))
-        # runs 表 Stream → kicker，**仅 INSERT**（filter）：create_run 写 definition 触发冷启动；reconciler 之后写
-        # runs 表的 MODIFY（project_state/finalize）不触发——无自触发放大（ADR 0034 被拒方案）。
+        # runs 表 Stream → kicker，**INSERT ∧ NewImage.detached=true**（filter，ADR 0034）：
+        # - 仅 INSERT：reconciler 之后写 runs 表的 MODIFY（project_state/finalize）不触发——无自触发放大。
+        # - 仅 detached 标记：同步 `run --backend cloud` 的 create_run 同样 INSERT、但由进程内 schedule 推进，
+        #   误触发 kicker 会双开推进器（重复起 task）；submit 组合根写 STATE 时带 detached=true，同步 run 不带，
+        #   Stream 层直接滤掉（零 Lambda 调用）。detached 是 BOOL 属性（DDB Stream NewImage 形态 {"BOOL": true}）。
         kicker.add_event_source(lambda_sources.DynamoEventSource(
             self._runs_table,
             starting_position=lambda_.StartingPosition.LATEST,
             batch_size=5,
             retry_attempts=2,
-            filters=[lambda_.FilterCriteria.filter({"eventName": lambda_.FilterRule.is_equal("INSERT")})],
+            filters=[lambda_.FilterCriteria.filter({
+                "eventName": lambda_.FilterRule.is_equal("INSERT"),
+                "dynamodb": {"NewImage": {"detached": {"BOOL": lambda_.FilterRule.is_equal(True)}}},
+            })],
         ))
 
         CfnOutput(self, "ReconcilerFnName", value=reconciler.function_name)

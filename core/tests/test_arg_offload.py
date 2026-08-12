@@ -152,3 +152,25 @@ def test_restore_uses_uri_not_current_prefix(aws):
     arg1 = restored.jobs[0].scenarios[0].steps[1].argument
     assert arg0.rows == (("k", "v"), ("", "空"))
     assert arg1.content == "多行\n正文X"
+
+
+def test_reader_without_offloader_fails_loud_on_offloaded_meta(ddb_run_store_offload, aws):
+    """跨组合根边界护栏（曾发生:Lambda 组合根漏注入 offloader → 正文静默丢成 None、worker 拿空参数）：
+
+    写侧带 offloader offload 正文后,读侧若没注入 offloader,load_run_meta 必须 fail-loud——
+    静默还原成 None 是「给生产选要不要正确」（ADR 0030 决定七禁止）。
+    """
+    import pytest
+    from core.adapters.run_store.ddb import DynamoDBRunStore
+
+    job = Job(scope_id="s", scope_name="s", engine="midscene", scenarios=(
+        Scenario(id="s:1", name="sc", steps=(
+            Step(0, "Then", "看", StepArgument(kind="docString", content="会被 offload 的正文")),
+        )),
+    ))
+    meta = RunMeta(run_id="noofl", created_at="t", jobs=(job,))
+    ddb_run_store_offload.create_run(meta, RunState(run_id="noofl", status=Status.PENDING, jobs={}))
+
+    reader = DynamoDBRunStore(aws["ddb"].Table(aws["table_name"]))  # 没注入 offloader 的读者（错误装配）
+    with pytest.raises(RuntimeError, match="arg_offloader"):
+        reader.load_run_meta("noofl")

@@ -61,21 +61,29 @@ def _state_scalars(state: RunState) -> dict:
 class DynamoDBRunStore:
     """RunStore 的 DynamoDB 实装（组合根注入 boto3 表资源 + 表名）。行为对拍 LocalRunStore。"""
 
-    def __init__(self, table, arg_offloader=None) -> None:
+    def __init__(self, table, arg_offloader=None, *, detached: bool = False) -> None:
         """table：boto3 dynamodb.Table 资源（组合根注入；建表责任在 IaC，adapter 假定已存在）。
 
         arg_offloader：可选 S3StepArgumentOffloader（ADR 0030 决定六）。注入则 RunMeta 深树里的
         docString/dataTable 正文搬 S3、META item 只留指针（解 DDB 400KB 限）；None（默认）则 argument
         原样内联进 meta_json（小 run / 单测省一层 S3）。只挂 RunMeta 写/读路径，RunState 无 argument、不涉及。
+
+        detached（ADR 0034）：本组合根是否「无状态跑批的 submit」——True 则 create_run 的 STATE item 带
+        `detached=true` 顶层标记，kicker Lambda 的 Stream filter 只认它（同步 `run --backend cloud` 的
+        create_run 无此标记、不触发 kicker——否则双开推进器、重复起 task）。执行环境属性、不进 core 模型。
         """
         require_boto3("DynamoDBRunStore")
         self._table = table
         self._arg_offloader = arg_offloader
+        self._detached = detached
 
     # ---- 实时写三段（ADR 0030 决定六）----
 
     def create_run(self, meta: RunMeta, initial_state: RunState) -> None:
-        """run 开始：写 META（definition，JSON 字符串）+ STATE（初始运行态，jobs 原生 Map）两 item。"""
+        """run 开始：写 META（definition，JSON 字符串）+ STATE（初始运行态，jobs 原生 Map）两 item。
+
+        **写序 META→STATE 是契约**（ADR 0034）：kicker 由 STATE 的 INSERT 触发（detached 标记在 STATE 上），
+        触发时 META 必已在——若标 META，kicker 可能在 STATE 落库前 tick、claim/投影全 CCF 空转。"""
         meta_dict = run_meta_to_dict(meta)
         if self._arg_offloader is not None:
             # docString/dataTable 正文搬 S3、META 只留指针（解 DDB 400KB 限，ADR 0030 决定六）
@@ -88,6 +96,7 @@ class DynamoDBRunStore:
         self._table.put_item(Item={
             "run_id": initial_state.run_id,
             _ITEM_TYPE_ATTR: _STATE,
+            **({"detached": True} if self._detached else {}),  # kicker filter 只认带此标记的 INSERT（ADR 0034）
             **_state_scalars(initial_state),
             "jobs": {sid: _job_state_to_item(js) for sid, js in initial_state.jobs.items()},
         })
@@ -242,6 +251,13 @@ class DynamoDBRunStore:
         if self._arg_offloader is not None:
             # content_ref/rows_ref 取回、消解回内联，再交 serialize（对 core 透明，ADR 0030 决定六）
             meta_dict = self._arg_offloader.restore(meta_dict, run_id)
+        elif '"content_ref"' in item["meta_json"] or '"rows_ref"' in item["meta_json"]:
+            # fail-loud（ADR 0030 决定七「不给生产选要不要正确」）：META 含 offload 指针而本实例没注入
+            # offloader = 组合根装配错误（曾发生：Lambda 组合根漏注入 → 正文静默还原成 None、worker 拿
+            # 空参数跑错）。宁炸不静默降级。
+            raise RuntimeError(
+                f"run {run_id} 的 META 含 offload 指针（content_ref/rows_ref）但 RunStore 未注入 "
+                "arg_offloader——组合根装配错误（ADR 0030 决定七：offloader 生产默认挂载）")
         return run_meta_from_dict(meta_dict)
 
     def load_run_state(self, run_id: str) -> RunState | None:

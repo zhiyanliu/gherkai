@@ -321,7 +321,8 @@ def _make_s3_client(*, region, profile):
 
 
 def build_cloud_stores(*, table: str, bucket: str, prefix: str = "",
-                       region: str | None = None, profile: str | None = None):
+                       region: str | None = None, profile: str | None = None,
+                       detached: bool = False):
     """云端三层 store（RunStore→DDB、Result/ReportStore→S3）+ cloud artifacts descriptor（s3://+ddb://）。
 
     DDB 吃 `resource.Table`、三个 S3 件套（ResultStore/ReportStore/offloader）**共享一个 client**（喂错句柄
@@ -339,7 +340,9 @@ def build_cloud_stores(*, table: str, bucket: str, prefix: str = "",
     s3 = _make_s3_client(region=region, profile=profile)  # 一个 client 注入三个 S3 件套
 
     offloader = S3StepArgumentOffloader(s3, bucket, pfx)
-    run_store: RunStore = DynamoDBRunStore(ddb_table, arg_offloader=offloader)
+    # detached：无状态跑批 submit 传 True → create_run 的 STATE 带 detached 标记、触发 kicker 冷启动；
+    # 同步 run 不传 → 不触发（否则双开推进器，ADR 0034）。
+    run_store: RunStore = DynamoDBRunStore(ddb_table, arg_offloader=offloader, detached=detached)
     result_store: ResultStore = S3ResultStore(s3, bucket, pfx)
     report_store: ReportStore = S3ReportStore(s3, bucket, pfx)
 

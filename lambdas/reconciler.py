@@ -63,7 +63,15 @@ def _build(run_id: str):
     report_dir = os.environ.get("REPORT_DIR", "reports")
     prefix = os.environ.get("PREFIX", compose.DEFAULT_PREFIX)
 
-    run_store = DynamoDBRunStore(runs_table)
+    # arg_offloader 必须注入（ADR 0030 决定七「offloader 生产默认挂载、不给生产选要不要正确」）：
+    # submit 侧（build_cloud_stores）把超限 docString/dataTable 正文 offload 到 S3、META 只留指针——
+    # 此处不注入则 load_run_meta 的 content_ref 分支被跳过、正文静默还原成 None → worker 拿空参数跑错
+    # （moto 复现）。prefix 用 REPORT_DIR 与 submit 侧同源（restore 按绝对 URI 取回、实际不依赖 prefix，
+    # 但写读两侧同构造零漂移）。
+    from core.adapters.run_store.arg_offload import S3StepArgumentOffloader
+
+    offloader = S3StepArgumentOffloader(s3, bucket, compose._normalize_prefix(report_dir))
+    run_store = DynamoDBRunStore(runs_table, arg_offloader=offloader)
     meta = run_store.load_run_meta(run_id)
     if meta is None:
         return None  # definition 不存在（submit 未落库 / 别的 run）——忽略

@@ -355,6 +355,7 @@ def _submit_cloud(args, repo: Path, run_id: str, run_meta, initial) -> int:
     run_store, _rs, _rp, _mk = compose.build_cloud_stores(
         table=table, bucket=bucket, prefix=args.report_dir,
         region=resolved_region, profile=resolved_profile,
+        detached=True,  # STATE 带 detached 标记 → kicker filter 认它冷启动（同步 run 不带，ADR 0034）
     )
     try:
         run_store.create_run(run_meta, initial)  # 写 definition（INSERT）→ runs Stream → kicker Lambda 冷启动
