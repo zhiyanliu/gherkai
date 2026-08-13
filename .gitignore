@@ -52,6 +52,8 @@ playwright-report/
 
 # ── 通用临时 ──
 tmp/
+__pycache__/
+*.pyc
 .tmp/
 *.tmp
 
