@@ -28,7 +28,9 @@ RUN npm install
 # worker 代码 + lib（event-sink/job-source/artifact-upload 的 DDB/S3 态 + agentcore-sigv4）。
 COPY lib/ ./lib/
 COPY worker/ ./worker/
-COPY tsconfig*.json ./
+# 注：无 tsconfig——tsx 跑 .ts/.mts 及其扩展名重写（import .mjs → .mts）零配置即可（本地 run 与
+# npm test 同证）；曾有一行 COPY tsconfig*.json，其文件从未入库、构建只在恰好有本地残留副本的机器
+# 上可过——public 化重 clone 后现形，删除（真需要编译配置时随文件一起入库）。
 
 # region 不焊镜像：AWS_REGION 经 RunTask overrides 注入（agentcore-sigv4 的 getRegion 读它、全可配，ADR 0033/0016 决策 C）；
 # 凭证走 task role（fromNodeProviderChain 解析 AWS_CONTAINER_CREDENTIALS_RELATIVE_URI）。
