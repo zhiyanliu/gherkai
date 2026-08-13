@@ -169,6 +169,9 @@ def test_cloud_prefix_derives_default_names(tmp_path, monkeypatch, capsys):
     assert pf["events_table"] == "gherkai-events"
     assert pf["bucket"] == "gherkai-artifacts"
     assert pf["cluster"] == "gherkai-cluster"
+    # task-def 按本 run 实际用到的引擎探（feature 未标 @engine → default novaact，ADR 0033 preflight 条）
+    assert pf["task_defs"] == ["gherkai-novaact-worker"]
+    assert pf.get("lambda_fns") is None  # 同步 run 进程内推进、不依赖事件驱动链 → 不探 Lambda
 
 
 def test_cloud_prefix_custom_switches_whole_set(tmp_path, monkeypatch, capsys):
@@ -372,3 +375,54 @@ def test_local_does_not_inject_artifact_s3(tmp_path, monkeypatch):
     rc = m.main(["run", str(_write_feature(tmp_path)), "--report-dir", str(tmp_path / "r"), "--quiet"])
     assert rc == 0
     assert box.get("artifact_s3") is None  # local 不注入
+
+
+# ---- submit/status cloud 的 preflight/fail-fast 接线（ADR 0033 preflight 条）----
+
+def test_submit_cloud_preflight_probes_taskdefs_and_lambda_chain(tmp_path, monkeypatch, capsys):
+    """submit cloud 的 preflight 除表/桶/cluster 外还探：本 run 用到引擎的 task-def + 事件驱动链三 Lambda
+    （任一缺 = 提交成功但 run 永不推进/收敛，须挡在提交前）。"""
+    record: list = []
+    _, _, preflight_calls = _patch_cloud_handles(monkeypatch, record)
+    monkeypatch.delenv("AWS_DDB_TABLE", raising=False)
+    monkeypatch.delenv("AWS_S3_BUCKET", raising=False)
+    monkeypatch.delenv("AWS_RESOURCE_PREFIX", raising=False)
+
+    rc = m.main(["submit", str(_write_feature(tmp_path)), "--backend", "cloud", "--region", "us-east-1"])
+    assert rc == 0
+    pf = preflight_calls[0]
+    assert pf["task_defs"] == ["gherkai-novaact-worker"]
+    assert pf["lambda_fns"] == ["gherkai-kicker", "gherkai-reconciler", "gherkai-exit-observer"]
+
+
+def test_submit_cloud_preflight_failure_exits_2(tmp_path, monkeypatch, capsys):
+    """preflight 报资源缺（如链上 Lambda 不存在）→ 提交前退 2、不写任何东西。"""
+    record: list = []
+    _patch_cloud_handles(monkeypatch, record, preflight_err="Lambda 函数 gherkai-kicker 不存在——…")
+    rc = m.main(["submit", str(_write_feature(tmp_path)), "--backend", "cloud", "--region", "us-east-1"])
+    assert rc == 2
+    assert not [r for r in record if r[0] == "table"]  # 没碰 runs 表（挡在 create_run 前）
+
+
+def test_status_wait_cloud_kicker_missing_fails_fast(monkeypatch, capsys):
+    """--wait 接力 invoke 的 kicker 不存在（ResourceNotFound）→ 点名 prefix 退 2，不再吞掉死等
+    （接力对象缺失时轮询永不终止；其他 AWS 瞬时错仍吞、下轮再踢——ADR 0033 preflight 条）。"""
+    from botocore.exceptions import ClientError
+
+    class _PendingTable:
+        def get_item(self, **kw):
+            return {"Item": {"run_id": "r1", "item_type": "STATE", "status": "pending", "jobs": {}}}
+
+    class _NoKickerLambda:
+        def invoke(self, **kw):
+            raise ClientError({"Error": {"Code": "ResourceNotFoundException", "Message": "Function not found"}},
+                              "Invoke")
+
+    monkeypatch.setattr(m.compose, "_make_ddb_table", lambda table, *, region, profile: _PendingTable())
+    monkeypatch.setattr(m.compose, "_make_lambda_client", lambda *, region, profile: _NoKickerLambda())
+    import time as _t
+    monkeypatch.setattr(_t, "sleep", lambda s: None)  # 卡住判定要连续 3 轮，免真等
+    rc = m.main(["status", "r1", "--backend", "cloud", "--region", "us-east-1", "--wait"])
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "gherkai-kicker" in err and "--prefix" in err

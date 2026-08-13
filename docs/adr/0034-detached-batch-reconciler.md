@@ -54,7 +54,7 @@ gherkai run <features>    # 原阻塞皮 = submit + 同进程 status --wait，�
 
 ```
 1. submit(CLI)：plan → create_run 写 RunMeta+全 pending 到 runs 表 → CLI 退出（run_id 已在手）。
-   **只写 DDB、不起任何 task**——submit 机器权限面仅「runs 表写 + preflight」，不碰 ECS RunTask（冷启动由kicker Lambda 做，见下）。
+   **只写 DDB、不起任何 task**——submit 机器权限面仅「runs 表写 + preflight 只读探活（Describe*/Get*/Head*，含 detached 链三 Lambda 存在性，[0033] preflight 条）」，不碰 ECS RunTask（冷启动由kicker Lambda 做，见下）。
 1b. runs 表 Stream（**仅 INSERT 且带 `detached` 标记**）→ [kicker Lambda]：新 run 的 definition 落库即触发 →
      tick 起首批 min(max_concurrency, |jobs|) 个 task（CAS 抢占）。这是纯事件驱动链的**冷启动**（无此步则无
      events/无 STOPPED，events Stream 永不触发第一次 reconciler）。kicker复用同一 `reconcile.tick`（四宿主一份：
@@ -221,7 +221,7 @@ moto 立即返回测不到事件投递/并发时序，健康网真跑不触发�
 - **reconciler 靠全量重放天然幂等、投影写不加版本守卫**：拒——并发实例 stale 快照 lost-update 能把 finalized run 刷回 running；全量重放只保证派生幂等、不保证跨实例写序（机制三）。
 - **把 CAS+RunTask+PutItem 与归约合成单一 core reconciler 组件**：拒——逼 core 持 store + 依赖执行环境、Engine port 长出启 task 职责，破 [0026](./0026-schedule-module.md) 纯 reducer（core 拆分节）。
 - **让每个消费者各自 `project(events)→RunState`（绕过单一 reconciler 写者、如为求新鲜度让 `status` 直接投演 events）**：拒——多份推演逻辑必漂移（同一 events 在 status/WebUI/reconciler 各推一版、口径迟早分叉）；且各消费者写 RunState 会破单写者与 HWM/状态机条件写前提。外部只读 RunState、推演只在 reconciler 一处（「核心思想」单一读接口不变量）。
-- **cloud submit 由 CLI 直接起首批 task（冷启动）**：拒（实装初版这么做、后改）——让 submit 机器背 `ecs:RunTask` 权限，与本设计卖点「提交完就走、只需提交那一下的最小权限」相悖：submit 机器权限面越小越好（受限 CI runner / 临时凭证场景）。改由**kicker Lambda** 冷启动（见下），submit 机器权限收窄到只剩「runs 表写 + preflight」、不碰 ECS。
+- **cloud submit 由 CLI 直接起首批 task（冷启动）**：拒（实装初版这么做、后改）——让 submit 机器背 `ecs:RunTask` 权限，与本设计卖点「提交完就走、只需提交那一下的最小权限」相悖：submit 机器权限面越小越好（受限 CI runner / 临时凭证场景）。改由**kicker Lambda** 冷启动（见下），submit 机器权限收窄到只剩「runs 表写 + preflight 只读探活」、无任何 ECS 写/执行权限。
 - **runs 表 Stream 直接触发 reconciler（复用同一 Lambda 做冷启动）**：拒——**自触发放大**：reconciler 每次推进都写 runs 表（`project_state` 条件写 + `finalize`），若 runs Stream 触发 reconciler，则它写 runs → 又触发自己 → 每个 run 生命周期空转 N 次（tick 幂等使无害、但持续无效唤醒 + 全量重放读放大）。用 Stream `INSERT`-only filter 能压，但那是「用 filter 补救本可避免的耦合」。改用**专用kicker Lambda**（只被 runs Stream 的 INSERT 触发、只起首批、**不写 runs 表**）——职责单一、无自触发，与退出观察者「专用薄 Lambda」同模式。reconciler 只被 events Stream 触发（worker 有进展才推进），两触发源职责不交叉。
 - **定时器轮询推进**（EventBridge scheduled rule 每 N 秒 tick）：拒——idle 也 fire、空转烧钱，且要权衡「间隔短=延迟低但费 / 间隔长=省但收尾慢」这个不该存在的取舍。改用 ECS Task State Change + DDB Stream 事件驱动，idle 零调用（端到端流程 cloud）。
 - **per-run 推进器也给 cloud**：拒（用户定）——cloud「扣笔记本下班」场景只靠 IaC 部署的事件驱动链，本机不留常驻推进器；per-run 仅 local 用。

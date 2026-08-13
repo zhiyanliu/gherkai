@@ -59,6 +59,8 @@ _BASE_EVENTS_TABLE = _names.BASE_EVENTS_TABLE
 _BASE_BUCKET = _names.BASE_BUCKET
 _BASE_CLUSTER = _names.BASE_CLUSTER
 _BASE_KICKER_LAMBDA = _names.BASE_KICKER_LAMBDA
+_BASE_RECONCILER_LAMBDA = _names.BASE_RECONCILER_LAMBDA
+_BASE_EXIT_OBSERVER_LAMBDA = _names.BASE_EXIT_OBSERVER_LAMBDA
 _ENGINES = _names.ENGINES
 
 
@@ -458,14 +460,19 @@ def build_fargate_engines(
 
 def preflight_cloud_resources(
     *, prefix: str, events_table: str, bucket: str, cluster: str, runs_table: str | None = None,
-    region=None, profile=None, ecs=None, s3=None, ddb=None,
+    task_defs: list[str] | None = None, lambda_fns: list[str] | None = None,
+    region=None, profile=None, ecs=None, s3=None, ddb=None, lam=None,
 ) -> str | None:
-    """fail-fast 探 cloud 资源存在性（ADR 0033）——用已解析 prefix 拼出的名去探，不存在返回一句**点名 prefix**
-    的错误串（调用方退 2），全在返回 None。别跑到一半才因资源缺炸；错误要能指向「prefix 配错 / CDK 没部署」。
+    """fail-fast 探 cloud 资源存在性（ADR 0033 preflight 条）——用已解析 prefix 拼出的名去探，不存在返回一句
+    **点名 prefix** 的错误串（调用方退 2），全在返回 None。别跑到一半才因资源缺炸；错误要能指向「prefix 配错 /
+    CDK 没部署」。
 
-    探**执行必需**（events 表 + cluster + 桶）恒探；**runs 表仅落库需要**——`runs_table=None`（`--no-report`）时不探
-    （report 与执行正交，ADR 0016 决策 A：`--no-report --backend cloud` 仍 Fargate 跑、不落库、故不碰 runs 表）。
-    句柄可注入（测试）；未注入惰性建。探法：DDB DescribeTable、S3 HeadBucket、ECS DescribeClusters。
+    探**执行必需**（events 表 + cluster + 桶 + `task_defs`——本 run 用到引擎的 task-def）恒探；**runs 表仅落库
+    需要**——`runs_table=None`（`--no-report`）时不探（report 与执行正交，ADR 0016 决策 A：`--no-report
+    --backend cloud` 仍 Fargate 跑、不落库、故不碰 runs 表）；**`lambda_fns` 仅 detached submit 需要**——事件
+    驱动链三 Lambda（kicker/reconciler/exit-observer），任一缺则提交成功但 run 永不推进/收敛，挡在提交前
+    （同步 run 进程内推进、不依赖链、不传）。句柄可注入（测试）；未注入惰性建。探法全只读：DDB DescribeTable、
+    S3 HeadBucket、ECS DescribeClusters/DescribeTaskDefinition、Lambda GetFunction。
     任一 botocore 异常都翻成「资源 X 不存在——是 --prefix 配错、还是 iac_aws_backend（CDK）未部署？」。
     """
     import boto3
@@ -499,6 +506,18 @@ def preflight_cloud_resources(
             return _hint(f"ECS cluster {cluster}")
     except (ClientError, BotoCoreError):
         return _hint(f"ECS cluster {cluster}")
+    for td in task_defs or []:  # 按本 run 实际用到的引擎探（不探全注册表——没用到的引擎缺 task-def 不该拦）
+        try:
+            ecs.describe_task_definition(taskDefinition=td)
+        except (ClientError, BotoCoreError):
+            return _hint(f"ECS task definition {td}")
+    if lambda_fns:
+        lam = lam or sess.client("lambda")
+        for fn in lambda_fns:
+            try:
+                lam.get_function(FunctionName=fn)
+            except (ClientError, BotoCoreError):
+                return _hint(f"Lambda 函数 {fn}（无状态跑批事件驱动链）")
     return None
 
 

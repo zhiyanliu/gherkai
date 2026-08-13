@@ -351,11 +351,17 @@ def _submit_cloud(args, repo: Path, run_id: str, run_meta, initial) -> int:
     bucket = args.s3_bucket or os.environ.get("AWS_S3_BUCKET") or compose.default_name(prefix, compose._BASE_BUCKET)
     table = args.ddb_table or os.environ.get("AWS_DDB_TABLE") or compose.default_name(prefix, compose._BASE_RUNS_TABLE)
 
-    # preflight（events 表/cluster/桶/runs 表）——配置错在提交前暴露、退 2。
+    # preflight（events 表/cluster/桶/runs 表 + 本 run 用到引擎的 task-def + 事件驱动链三 Lambda）——配置错在
+    # 提交前暴露、退 2。链上任一 Lambda 缺 = 提交成功但 run 永不推进/收敛（kicker 缺=卡 pending、reconciler 缺=
+    # 无人接力、exit-observer 缺=退出信号断链），必须挡在提交前（ADR 0033 preflight 条）。探针全只读，权限收窄不破。
     try:
         err = compose.preflight_cloud_resources(
             prefix=prefix, events_table=events_table, bucket=bucket, cluster=cluster,
-            runs_table=table, region=resolved_region, profile=resolved_profile,
+            runs_table=table,
+            task_defs=[compose.task_def_name(prefix, e) for e in sorted({j.engine for j in run_meta.jobs})],
+            lambda_fns=[compose.default_name(prefix, b) for b in (
+                compose._BASE_KICKER_LAMBDA, compose._BASE_RECONCILER_LAMBDA, compose._BASE_EXIT_OBSERVER_LAMBDA)],
+            region=resolved_region, profile=resolved_profile,
         )
     except ImportError as e:
         _progress(f"submit --backend cloud 需要 boto3：{e}")
@@ -503,7 +509,13 @@ def _status_cloud(args) -> int:
                                Payload=json.dumps({"run_id": args.run_id}).encode())
                 except Exception as e:
                     if not _is_botocore_error(e):
-                        raise  # 非 AWS 错才抛；invoke 失败（如无权限）不致命——下轮再判/靠云端链
+                        raise  # 非 AWS 错才抛
+                    # kicker 不存在 → 接力对象缺失，轮询死等无意义：点名 prefix fail-fast（ADR 0033 preflight 条）。
+                    # 其他 AWS 错（限流/瞬时/无权限）仍吞——不致命，下轮再踢/靠云端链。
+                    if getattr(e, "response", {}).get("Error", {}).get("Code") == "ResourceNotFoundException":
+                        _progress(f"status --wait 接力失败：kicker Lambda {kicker_fn}（用 --prefix={prefix!r} 拼出）"
+                                  f"不存在——是 --prefix 配错、还是 iac_aws_backend（CDK）未部署？")
+                        return 2
                 stall = 0  # kickoff 后重置，给云端链时间响应（下一个 _STALL_KICK 窗口再判是否仍卡）
             _time.sleep(3.0)
             state = _read()
@@ -583,11 +595,13 @@ def _cmd_run(args, repo: Path) -> int:
         events_table = args.events_table or compose.default_name(prefix, compose._BASE_EVENTS_TABLE)
         cluster = args.cluster or compose.default_name(prefix, compose._BASE_CLUSTER)
         bucket = args.s3_bucket or os.environ.get("AWS_S3_BUCKET") or compose.default_name(prefix, compose._BASE_BUCKET)
-        # preflight 执行必需资源（events 表 + cluster；桶=job-in/产物上传也执行需要）——fail-fast 点名 prefix。
-        # runs 表仅落库需要，故只在 do_report 时探（见 3b begin 探活）；此处不探 runs 表（--no-report 下用不到）。
+        # preflight 执行必需资源（events 表 + cluster + 本 run 用到引擎的 task-def；桶=job-in/产物上传也执行
+        # 需要）——fail-fast 点名 prefix。runs 表仅落库需要，故只在 do_report 时探（见 3b begin 探活）；此处
+        # 不探 runs 表（--no-report 下用不到）。不探 Lambda——同步 run 进程内推进、不依赖事件驱动链（ADR 0033）。
         try:
             err = compose.preflight_cloud_resources(
                 prefix=prefix, events_table=events_table, bucket=bucket, cluster=cluster,
+                task_defs=[compose.task_def_name(prefix, e) for e in sorted({j.engine for j in jobs})],
                 runs_table=(args.ddb_table or os.environ.get("AWS_DDB_TABLE") or compose.default_name(prefix, compose._BASE_RUNS_TABLE))
                             if do_report else None,  # runs 表仅 do_report 探（落库需要）
                 region=resolved_region, profile=resolved_profile,

@@ -5,8 +5,8 @@
     "semantic_hash": ""
   },
   "cli/cli/__main__.py": {
-    "mtime": 1786604419.9558172,
-    "ast_hash": "680fda0de4edd1ecf6b8533e0ac45396",
+    "mtime": 1786621274.3537252,
+    "ast_hash": "466f1db2d01f8e759146a80f39f2bee7",
     "semantic_hash": ""
   },
   "cli/cli/render.py": {
@@ -20,9 +20,9 @@
     "semantic_hash": ""
   },
   "cli/tests/test_backend_cloud.py": {
-    "mtime": 1783592119.598602,
-    "ast_hash": "f68bff851dab04385a1a6046880c4608",
-    "semantic_hash": "f68bff851dab04385a1a6046880c4608"
+    "mtime": 1786621466.8913693,
+    "ast_hash": "3fa41092a75a89780217ec43f8838176",
+    "semantic_hash": ""
   },
   "cli/tests/test_main.py": {
     "mtime": 1786604419.9560182,
@@ -531,12 +531,12 @@
   },
   "iac_aws_backend/cdk.json": {
     "mtime": 1783605283.3150134,
-    "ast_hash": "ac4aa3d1664882b56bdd692dad6d6a8e",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "iac_aws_backend/names.py": {
-    "mtime": 1786596831.8154817,
-    "ast_hash": "91beed458a1886f118bbb6857d56380b",
+    "mtime": 1786621231.0608206,
+    "ast_hash": "dc474f28c164e92384edb46843cf394e",
     "semantic_hash": ""
   },
   "iac_aws_backend/pyproject.toml": {
@@ -545,8 +545,8 @@
     "semantic_hash": ""
   },
   "iac_aws_backend/stack.py": {
-    "mtime": 1786608459.2901292,
-    "ast_hash": "52af6a8ec0715ee6d913c7977d2f52fe",
+    "mtime": 1786621231.060995,
+    "ast_hash": "a05f02065215aaecc39977b591f7ebbc",
     "semantic_hash": ""
   },
   "iac_aws_backend/tests/test_stack.py": {
@@ -640,9 +640,9 @@
     "semantic_hash": "69b43bcf6397b8f3827802fbca2adf1f"
   },
   "CLAUDE.md": {
-    "mtime": 1785302197.50295,
-    "ast_hash": "8fad2821ac4a2720467c11404bdce995",
-    "semantic_hash": "8fad2821ac4a2720467c11404bdce995"
+    "mtime": 1786610458.4922652,
+    "ast_hash": "ea8836158612d36934a6eedec2967cc1",
+    "semantic_hash": ""
   },
   "CONTEXT.md": {
     "mtime": 1786598435.130377,
@@ -650,13 +650,13 @@
     "semantic_hash": ""
   },
   "README.md": {
-    "mtime": 1786606757.48202,
-    "ast_hash": "e6f9f2e4df96e3084afb7078fcf1f924",
+    "mtime": 1786609406.2931085,
+    "ast_hash": "43a613d44d595e94ba86035206deffb5",
     "semantic_hash": ""
   },
   "cli/README.md": {
-    "mtime": 1786600686.7129912,
-    "ast_hash": "80b2ce8666a6db198a2cc6438548373b",
+    "mtime": 1786621500.4782584,
+    "ast_hash": "da55552c118fbc1d1a43cb40f98df4a4",
     "semantic_hash": ""
   },
   "docs/adr/0001-scope-limited-to-english-ui.md": {
@@ -790,13 +790,13 @@
     "semantic_hash": ""
   },
   "docs/adr/0033-iac-aws-backend-and-composition-wiring.md": {
-    "mtime": 1786598435.1291707,
-    "ast_hash": "f7420a4b5a047178dba30e36d4c35857",
+    "mtime": 1786621231.0602162,
+    "ast_hash": "0a287edb77fa512e796f8f68c6c8837f",
     "semantic_hash": ""
   },
   "docs/adr/0034-detached-batch-reconciler.md": {
-    "mtime": 1786608459.2910442,
-    "ast_hash": "4140533a51691b5f4ee05c7340bde2cc",
+    "mtime": 1786621231.0604486,
+    "ast_hash": "6fee183056cb1ba99986a39d0cd282ca",
     "semantic_hash": ""
   },
   "docs/doc-health-review.md": {
@@ -830,8 +830,8 @@
     "semantic_hash": ""
   },
   "gherkai/gherkai/compose.py": {
-    "mtime": 1786596605.6182375,
-    "ast_hash": "04c45cffff34ab28f100ecfc9918c7c0",
+    "mtime": 1786621231.0607378,
+    "ast_hash": "fd6843a316f6427fe4ab4c5f24bc137a",
     "semantic_hash": ""
   },
   "gherkai/gherkai/detached.py": {
@@ -840,8 +840,8 @@
     "semantic_hash": ""
   },
   "gherkai/gherkai/names.py": {
-    "mtime": 1786596605.61511,
-    "ast_hash": "08c6b33de883c0f24dcf3ecabaa6ddd8",
+    "mtime": 1786621231.0605447,
+    "ast_hash": "951cad7a1d77c066e8e5001d126483d0",
     "semantic_hash": ""
   },
   "gherkai/pyproject.toml": {
@@ -850,8 +850,8 @@
     "semantic_hash": ""
   },
   "gherkai/tests/test_compose.py": {
-    "mtime": 1786596702.6552637,
-    "ast_hash": "2196f547b69e26f531f964de265adbd5",
+    "mtime": 1786621466.8910217,
+    "ast_hash": "d9e6aadd8e1ea46acc15406e208b3466",
     "semantic_hash": ""
   },
   "gherkai/tests/test_detached_launcher.py": {

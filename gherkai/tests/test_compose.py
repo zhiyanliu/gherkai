@@ -405,10 +405,27 @@ class _FakeS3Client:
 
 
 class _FakeEcsClient:
-    def __init__(self, active):
+    def __init__(self, active, task_defs=()):
         self._active = active
+        self._task_defs = set(task_defs)
     def describe_clusters(self, clusters):
         return {"clusters": [{"status": "ACTIVE" if c in self._active else "INACTIVE"} for c in clusters]}
+    def describe_task_definition(self, taskDefinition):
+        if taskDefinition not in self._task_defs:
+            from botocore.exceptions import ClientError
+            raise ClientError({"Error": {"Code": "ClientException", "Message": "Unable to describe task definition"}},
+                              "DescribeTaskDefinition")
+        return {"taskDefinition": {"family": taskDefinition}}
+
+
+class _FakeLambdaClient:
+    def __init__(self, existing):
+        self._existing = set(existing)
+    def get_function(self, FunctionName):
+        if FunctionName not in self._existing:
+            from botocore.exceptions import ClientError
+            raise ClientError({"Error": {"Code": "ResourceNotFoundException", "Message": "x"}}, "GetFunction")
+        return {"Configuration": {"FunctionName": FunctionName}}
 
 
 def test_preflight_all_present_returns_none():
@@ -432,6 +449,42 @@ def test_preflight_missing_events_table_names_prefix():
     )
     assert err is not None
     assert "prod-events" in err and "--prefix='prod-'" in err and "CDK" in err  # 点名 prefix + 引导
+
+
+def test_preflight_missing_task_def_names_prefix():
+    # task-def 维度的 prefix 配错（原漏到 RunTask 才炸、退 1 不点名）→ 现 preflight 点名 fail-fast（ADR 0033）
+    err = compose.preflight_cloud_resources(
+        prefix="prod-", events_table="prod-events", bucket="prod-artifacts", cluster="prod-cluster",
+        task_defs=["prod-novaact-worker"],
+        ddb=_FakeDdbClient({"prod-events"}), s3=_FakeS3Client({"prod-artifacts"}),
+        ecs=_FakeEcsClient({"prod-cluster"}),  # task-def 集为空 → 缺
+    )
+    assert err is not None
+    assert "prod-novaact-worker" in err and "--prefix='prod-'" in err
+
+
+def test_preflight_missing_chain_lambda_names_prefix():
+    # detached 链三 Lambda 任一缺 = 提交成功但 run 永不推进/收敛 → 挡在提交前（ADR 0033）
+    err = compose.preflight_cloud_resources(
+        prefix="g-", events_table="g-events", bucket="g-artifacts", cluster="g-cluster",
+        lambda_fns=["g-kicker", "g-reconciler", "g-exit-observer"],
+        ddb=_FakeDdbClient({"g-events"}), s3=_FakeS3Client({"g-artifacts"}),
+        ecs=_FakeEcsClient({"g-cluster"}),
+        lam=_FakeLambdaClient({"g-kicker", "g-exit-observer"}),  # reconciler 缺
+    )
+    assert err is not None and "g-reconciler" in err
+
+
+def test_preflight_task_defs_and_lambdas_all_present():
+    err = compose.preflight_cloud_resources(
+        prefix="g-", runs_table="g-runs", events_table="g-events", bucket="g-artifacts", cluster="g-cluster",
+        task_defs=["g-novaact-worker", "g-midscene-worker"],
+        lambda_fns=["g-kicker", "g-reconciler", "g-exit-observer"],
+        ddb=_FakeDdbClient({"g-runs", "g-events"}), s3=_FakeS3Client({"g-artifacts"}),
+        ecs=_FakeEcsClient({"g-cluster"}, task_defs={"g-novaact-worker", "g-midscene-worker"}),
+        lam=_FakeLambdaClient({"g-kicker", "g-reconciler", "g-exit-observer"}),
+    )
+    assert err is None
 
 
 def test_preflight_missing_cluster_detected():

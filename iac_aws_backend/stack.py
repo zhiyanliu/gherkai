@@ -352,7 +352,7 @@ class BackendStack(Stack):
         # ① 退出观察者 Lambda（薄；只 events 表 PutItem 写 task_exited）
         exit_observer = lambda_.Function(
             self, "ExitObserverFn",
-            function_name=f"{self.prefix}exit-observer",
+            function_name=names.default_name(self.prefix, names.BASE_EXIT_OBSERVER_LAMBDA),  # 真同源（gherkai.names）——cli preflight 据 --prefix 拼同名探活（ADR 0033）
             runtime=lambda_.Runtime.PYTHON_3_13,
             handler="exit_observer.handler",
             code=code,
@@ -399,7 +399,7 @@ class BackendStack(Stack):
         # ② reconciler Lambda（重；读全量重放 + 起 task + finalize 聚合）
         reconciler = lambda_.Function(
             self, "ReconcilerFn",
-            function_name=f"{self.prefix}reconciler",
+            function_name=names.default_name(self.prefix, names.BASE_RECONCILER_LAMBDA),  # 真同源（gherkai.names）——cli preflight 据 --prefix 拼同名探活（ADR 0033）
             runtime=lambda_.Runtime.PYTHON_3_13,
             handler="reconciler.handler",
             code=code,

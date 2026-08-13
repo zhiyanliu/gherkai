@@ -89,7 +89,7 @@ uv run python -m cli status "$RUN_ID" --backend cloud --prefix gherkai- --wait
 ```
 
 **为何拆**：`run` 要求 CLI 全程在线（网断/关机即中止）；`submit` 提交完就走——local 由脱离 CLI 的 per-run 进程推进、
-cloud 由云端 Lambda 事件驱动链推进（submit 机器零 ECS 权限、可立即关机）。`status` 事后查/收集：`--wait` 是三个推进触发源
+cloud 由云端 Lambda 事件驱动链推进（submit 机器无 ECS 写/执行权限——仅 preflight 的只读探活，可立即关机）。`status` 事后查/收集：`--wait` 是三个推进触发源
 之一（人来查即接力），保证「推进即使中断、也能被查询者续到底」（ADR 0034）。`status` 的 `--backend`/`--report-dir`/`--prefix`
 须与提交时的 `submit` 一致（否则查不到）。
 
@@ -107,12 +107,12 @@ cloud 由云端 Lambda 事件驱动链推进（submit 机器零 ECS 权限、可
 
 - **`submit`：退出码 = 提交成功与否，不是 run 的判定。**
   - `0` —— 已成功提交（local：per-run 进程已 fork、run_id 已打印；cloud：definition 已落 DDB，云端链接管）。
-  - `2` —— 没提交成：feature 读不到 / plan 配置矛盾（同 `run`）；cloud 还缺 boto3、或表/桶/cluster/events 表 preflight 不过、或 `create_run` 时云端不可达。
+  - `2` —— 没提交成：feature 读不到 / plan 配置矛盾（同 `run`）；cloud 还缺 boto3、或 preflight 不过（表/桶/cluster/本 run 用到引擎的 task-def/事件驱动链三 Lambda——链上任一 Lambda 缺则提交会成功但 run 永不推进，故挡在提交前）、或 `create_run` 时云端不可达。
   - 判定结果（PASSED / FAILED / …）**此刻还没出**，要用 `status` 去查。
 - **`status`：查询本身成功即 `0`；判定退出码只在读到终态时给出。**
   - `0` —— run 达终态 `PASSED`；**或**未达终态（`pending`/`running`）时的一次查询（查到了就算成功，非 `--wait` 不评判）。
   - `1` —— run 达终态但非 `PASSED`（`failed`/`error`/`skipped`/`aborted`）。配 `--wait` 时即「轮询到终态后按判定给退出码」——CI 想拿 `run` 那样的 0/1 判定码，用 `status --wait`。
-  - `2` —— 查不到该 run（`--report-dir`/`--prefix`/`--ddb-table` 与 `submit` 不一致？）；cloud 读 DDB 时云端不可达。
+  - `2` —— 查不到该 run（`--report-dir`/`--prefix`/`--ddb-table` 与 `submit` 不一致？）；cloud 读 DDB 时云端不可达；`--wait` 接力要 invoke 的 kicker Lambda 不存在（prefix 配错/CDK 未部署——接力对象缺失，死等无意义、点名 prefix 退出）。
 
 > 一句话：`submit` 退出码答「提交成功了吗」，`status --wait` 退出码答「这个 run 判定过没过」（PASSED→`0` / 其余终态→`1`）——`run` 的 0/1 判定语义在拆分后落到了 `status --wait` 上。
 

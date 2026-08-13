@@ -15,6 +15,8 @@ BASE_CLUSTER = "cluster"
 # 无状态跑批 kicker（踢启器）Lambda 基名（ADR 0034）：CDK 建 `{prefix}kicker`（stack.py 用同名），cli status
 # --wait 据 --prefix 推理出它 invoke 接力 kickoff（Lambda 名单一真源、cli↔IaC 同源）。
 BASE_KICKER_LAMBDA = "kicker"
+BASE_RECONCILER_LAMBDA = "reconciler"
+BASE_EXIT_OBSERVER_LAMBDA = "exit-observer"
 # task-def / container：按 job.engine 拼 `{prefix}{engine}-worker`（对称 EngineResolver 按 engine 选）。
 ENGINES = ("novaact", "midscene")
 
