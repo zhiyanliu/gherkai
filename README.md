@@ -24,7 +24,7 @@
 
 > **v1.1 云端**：云端 store adapter（DynamoDB/S3）+ **执行面 Fargate/ECS 均已建成 + 真部署真跑**——`--backend cloud` 一个旋钮同时切「存储上云 + worker 跑 Fargate 容器」（`FargateEngine` adapter + `iac_aws_backend` CDK 工程，ADR 0032/0033）。配置与退出码分层见 [`cli/README.md`](./cli/README.md)。
 
-> **v1.2 无状态跑批**（已实装，ADR 0034）：`submit` 提交完就走、返回 run_id，`status [--wait]` 轮询/接力收集——CLI 不必守着 run。local 档起 per-run 后台进程（setsid 脱离 CLI）+ SQLite events 推进；cloud 档三 Lambda 事件驱动链（kicker 冷启动 / reconciler 主推进 / 退出观察者）由 DDB Stream + EventBridge 驱动，submit 机器权限收窄到「提交那一下」。同步 `run` 命令保留不变。
+> **v1.2 无状态跑批**（已实装，ADR 0034）：`submit` 提交完就走、返回 run_id，`status [--wait]` 轮询/接力收集——CLI 不必守着 run。local 档起 per-run 后台进程（setsid 脱离 CLI）+ SQLite events 推进；cloud 档三 Lambda 事件驱动链（kicker 冷启动 / reconciler 主推进 / 退出观察者）由 DDB Stream + EventBridge 驱动，submit 机器权限收窄到「提交那一下」。同步 `run` 命令保留不变。每个 job 有墙钟预算兜底（缺省 300s，`@timeout:` tag 按用例声明）——三路推进器统一 enforce，提交完就走也不怕挂死/无限烧钱。
 
 ## 架构速览
 
@@ -34,7 +34,7 @@ flowchart TD
 
     subgraph L2["② 产品层"]
         CLI["cli/ —— run / submit / status / plan / list-engines<br/>命令行皮（Lambda / 未来 WebUI 是另两张皮）"]
-        G["gherkai/ —— 产品本体 = 组合根<br/>引擎注册表与装配 · 资源命名真源（ADR 0016「演进」节）"]
+        G["gherkai/ —— 产品本体 = 组合根<br/>引擎注册表与装配 · <br/>资源命名真源（ADR 0016「演进」节）"]
         C["core/（Python）—— parse → scope 分组 → schedule 调度<br/>窄腰，零引擎依赖（ADR 0016）"]
         CLI --> G --> C
     end
@@ -102,28 +102,57 @@ flowchart TD
 cd cli && uv sync                                  # cli + core（core 作 path 依赖）
 (cd ../engines/novaact && uv sync)                 # Nova Act worker 的 .venv（Python 3.13）
 (cd ../engines/midscene && npm install)            # Midscene worker 的 node_modules（Node 22）
+```
 
-# ① 预检（纯本地、不烧钱）：看 .feature 分出哪些 scope/job、engine 路由对不对、校验配置
-uv run python -m cli plan ../features/engine_routing.feature
+跑法由**两个正交旋钮**组合出来（四种组合都合法），按需各选一档：
 
-# ② 真跑（会烧 AWS 钱：模型调用 + AgentCore 会话）。engine 由 @engine tag 选、未标用 --default-engine
+- **怎么跑**——前台 `run`（CLI 在线守着，跑完直接给结果）或后台 `submit` + `status`（提交即走，事后查/收）。
+- **跑在哪 / 落在哪**（`--backend`）——`local`（默认：worker 跑本机子进程，结果落本地 `reports/`）或 `cloud`（worker 跑 Fargate 容器，状态落 DynamoDB、结果落 S3；需先部署 [`iac_aws_backend`](./iac_aws_backend/README.md)，一条 `cdk deploy` 建齐全部资源）。
+
+### ① 先预检（纯本地、不烧钱）
+
+```bash
+uv run python -m cli plan ../features/engine_routing.feature   # 看 scope/job 分组、engine 路由、校验配置
+uv run python -m cli list-engines                              # 列可用引擎
+```
+
+**先 `plan` 后跑**——真跑烧钱（模型调用 + AgentCore 会话），plan 是纯本地预检。
+
+### ② 前台跑：`run`
+
+```bash
+# engine 由 @engine tag 选、未标用 --default-engine
 AWS_REGION=us-east-1 uv run python -m cli run ../features/engine_routing.feature
 # 调高投票治抖动 / 放开并发 / JSON 输出：
 AWS_REGION=us-east-1 uv run python -m cli run ../features/wikipedia_generic.feature \
   --default-engine midscene --assertion-votes 3 --max-concurrency 2 --json
-
-# 列可用引擎（不烧钱）
-uv run python -m cli list-engines
-
-# ③ 云端落库（可选）：状态落 DynamoDB、判定真值与报告落 S3（表/桶需预先建好）
-AWS_REGION=us-east-1 uv run python -m cli run ../features/engine_routing.feature \
-  --backend cloud --ddb-table <你的表> --s3-bucket <你的桶>
 ```
 
-**默认 local**：落盘到 `cli/reports/<run_id>/`：判定真值（`jobs/`）+ 控制面（`run_meta.json`/`run_state.json`）+ RunReport（`index.html` 人看入口 + `manifest.json`）。
-**边跑边写**：run 开始即落 definition + 初始态，每个 scope 起跑刷 RUNNING、完成即落判定，最后 finalize 总状态——「提交即返回 runId、之后轮询看进度」已有真命令：`submit` 提交完就走、`status --wait` 轮询到终态（ADR 0034）。详见 [`cli/README.md`](./cli/README.md)。
-**先 `plan` 后 `run`**——run 真烧钱，plan 是纯本地预检。
-**`--backend cloud`**（可选）：把上面这套落到 DynamoDB（状态）+ S3（判定真值与报告）而非本地目录。表/桶需先用你的 IaC / `aws` cli 建好（框架假定已存在）；不给 `--ddb-table/--s3-bucket` 可用 `AWS_DDB_TABLE/AWS_S3_BUCKET` 兜底；凭证/region 走 boto3 默认链（可加 `--profile/--region`）。云端配置、退出码分层、建表建桶命令见 [`cli/README.md`](./cli/README.md)。
+默认（local）落盘到 `cli/reports/<run_id>/`：判定真值（`jobs/`）+ 控制面（`run_meta.json`/`run_state.json`）+ RunReport（`index.html` 人看入口 + `manifest.json`）。**边跑边写**：run 开始即落 definition + 初始态，每个 scope 起跑刷 RUNNING、完成即落判定，最后 finalize 总状态。
+
+加 `--backend cloud` 即同一条命令换云端档：worker 改跑 Fargate 容器、状态落 DynamoDB、判定真值与报告落 S3（`--prefix` 与 `cdk deploy` 时一致即可，表/桶/cluster 名由它批量推导）：
+
+```bash
+AWS_REGION=us-east-1 uv run python -m cli run ../features/engine_routing.feature \
+  --backend cloud --prefix gherkai-
+```
+
+### ③ 后台跑批：`submit` + `status`（提交即走；内部称「无状态跑批」，ADR 0034）
+
+`run` 要求 CLI 全程在线（断网/关终端即中止）。`submit` 提交完立即返回 run_id、推进在别处发生，事后用 `status` 查进度/收结果：
+
+```bash
+# local 档：本机 fork 一个脱离 CLI 的后台进程推进——不必守着终端，但本机需保持开机
+RUN_ID=$(uv run python -m cli submit ../features/wikipedia_generic.feature)
+uv run python -m cli status "$RUN_ID"            # 查一眼进度（只读、不推进）
+uv run python -m cli status "$RUN_ID" --wait     # 等到终态、按判定给退出码——CI 要 0/1 判定用这个
+
+# cloud 档：definition 落 DynamoDB 即返回，之后由云端 Lambda 事件驱动链推进——提交完关机也跑完
+RUN_ID=$(uv run python -m cli submit ../features/wikipedia_generic.feature --backend cloud --prefix gherkai-)
+uv run python -m cli status "$RUN_ID" --backend cloud --prefix gherkai- --wait
+```
+
+提交完就走不等于失控：每个 job 有墙钟预算兜底（缺省 300s；`@timeout:<秒>` tag 按用例声明、`--default-job-timeout` 改缺省）——卡死/超预算的 job 会被自动停掉并判 `error(timeout)`，local 挂死、cloud 无限烧钱都由它止损。`status` 的 `--backend`/`--report-dir`/`--prefix` 须与 `submit` 时一致（否则查不到）。选项全表、退出码分层、submit/status 语义细节见 [`cli/README.md`](./cli/README.md)。
 
 两个引擎读的是**同一份** `features/` 下 `.feature`（通用 step 风格，QA 只写自然语言）。
 
