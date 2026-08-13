@@ -30,15 +30,16 @@ def _echo_resolver(mode: str):
     return lambda _name: engine
 
 
-def _job(sid: str) -> Job:
-    return Job(scope_id=sid, scope_name=sid, engine="novaact",
+def _job(sid: str, timeout_s: float | None = None) -> Job:
+    return Job(scope_id=sid, scope_name=sid, engine="novaact", timeout_s=timeout_s,
                scenarios=(Scenario(id=f"{sid}:0", name="sc", steps=(
                    Step(0, "Given", '打开 "https://x"'), Step(1, "When", "搜索"), Step(2, "Then", "进入"),
                )),))
 
 
-def _setup(tmp_path, mode, *sids):
-    meta = RunMeta(run_id="run-1", created_at="t0", jobs=tuple(_job(s) for s in sids))
+def _setup(tmp_path, mode, *sids, timeout_s: float | None = None):
+    meta = RunMeta(run_id="run-1", created_at="t0",
+                   jobs=tuple(_job(s, timeout_s=timeout_s) for s in sids))
     log = SqliteEventLog(tmp_path / "events.db")
     store = LocalRunStore(tmp_path)
     store.create_run(meta, RunState(run_id="run-1", status=Status.PENDING,
@@ -77,6 +78,40 @@ def test_two_jobs_concurrency_one(tmp_path):
     assert state.status == Status.PASSED
     assert state.jobs["a"].status == Status.PASSED
     assert state.jobs["b"].status == Status.PASSED
+
+
+def test_job_timeout_stops_worker_and_attributes_timeout(tmp_path):
+    """job timeout local enforce 真跑（ADR 0034「job timeout」节）：silent worker 卡死不吐新事件、不自退——
+    launcher 的 deadline timer 到点协作停（SIGTERM→echo 干净退 0）→ task_exited(timed_out=True)
+    → project 判 ERROR + error_type=timeout。**协作退 0 也不误判 passed**（timed_out 短路内容判定）。"""
+    from core.project import project_full
+
+    meta, log, store, launcher = _setup(tmp_path, "silent", "a", timeout_s=0.5)
+    run_reconcile_loop("run-1", meta, log, store, launcher, max_concurrency=1,
+                       poll_interval_s=0.05, now_iso_fn=_now)
+    state = store.load_run_state("run-1")
+    assert state.status == Status.ERROR
+    assert state.jobs["a"].status == Status.ERROR
+    exits = [r for r in log.records() if r.kind == "exit"]
+    assert len(exits) == 1 and exits[0].exited.timed_out is True
+    jr = project_full(meta, log.records()).jobs[0]
+    assert jr.error_type == "timeout"  # 归因链端到端（真进程边界）
+    assert jr.session_id == "echo-sess"  # 血缘仍从 scope_started 捕获（超时不丢会话线索）
+
+
+def test_relay_recovers_foreign_timed_out_claim(tmp_path):
+    """接力恢复（ADR 0034「job timeout」节 claimed_at ①）：他人 claim 的 RUNNING job（owner 进程已死、
+    无 handle 无观察链）超预算 → loop 防御扫直接 record_exit(timed_out=True) 收敛 ERROR，run 不永久 wedge。"""
+    meta, log, store, launcher = _setup(tmp_path, "pass", "a", timeout_s=60.0)
+    # 模拟死 owner 遗留态：a 已被 claim（claimed_at 一小时前）、无退出记录、本 launcher 没起过它
+    assert store.try_claim_job("run-1", "a", claimed_at="2026-07-19T00:00:00Z") is True
+    run_reconcile_loop("run-1", meta, log, store, launcher, max_concurrency=1,
+                       poll_interval_s=0.05, now_iso_fn=lambda: "2026-07-19T01:00:00Z")
+    state = store.load_run_state("run-1")
+    assert state.status == Status.ERROR
+    exits = [r for r in log.records() if r.kind == "exit"]
+    assert len(exits) == 1 and exits[0].exited.timed_out is True
+    assert exits[0].exited.exit_code is None  # 无观察到的退出码——诚实留空（宽限态被 timed_out 短路）
 
 
 def test_crash_worker_finalizes_error(tmp_path):

@@ -168,7 +168,7 @@ reconciler 逻辑上是「唯一写者」，**物理上是并发实例**（实�
 
 **`timed_out` 归因链**：`TaskExited.timed_out`（退出记录新字段，独立键空间内的属性、不动键结构）——local 由 launcher 标志传入；cloud 经 **StopTask 的 `reason` 参数原样出现在 STOPPED 事件 `detail.stoppedReason`** 这条现成通道传递（零新键空间/零新事件类型）。`_job_status` 见 timed_out → ERROR，`_reduce_scope` 归因 `error_type="timeout"`——与同步路径归因语义对齐（超时是主动中止、非引擎故障，但按 [0031](./0031-job-lifecycle-states-and-severity.md) 决定一超时记 error+timeout）。
 
-**`JobState.claimed_at`**（`try_claim_job` 时写，机制四扩展）：① local 接力（per-run 崩后 `status --wait`）据此恢复 deadline（timer 随进程丢，接力时已超时的立即 stop）；② cloud tick 的**防御性顺带扫**——任何 tick 对 running 且 `now-claimed_at > timeout` 的 job 走同一超时处置（Scheduler 的双保险：CreateSchedule 失败/schedule 丢失时，后续任何事件触发的 tick 都能补救）；③ status 可显示已跑时长。timeout 从 claim 起算（含拉镜像等启动开销——简单可预期，文档写明）。
+**`JobState.claimed_at`**（`try_claim_job` 时写，机制四扩展）：① local 接力（per-run 崩后 `status --wait`）据此恢复 deadline——自家新 claim 的 job 有 timer；**他人 claim、无 handle** 的 RUNNING job 超预算（+余量）且无退出记录 → 观察链已死（timer 随 owner 进程丢、worker 因 fd3 断管随之早亡）→ 直接 `record_exit(timed_out=True)` 收敛（不与下方被拒方案「处置者直接写 task_exited」冲突：那条拒的是**有活观察链时**绕过它；若 owner 尚活，其 timer 同一 deadline 早已触发、真退出记录同带 timed_out，后到覆盖归因不变）；② cloud tick 的**防御性顺带扫**——任何 tick 对 running 且 `now-claimed_at > timeout` 的 job 走同一超时处置（Scheduler 的双保险：CreateSchedule 失败/schedule 丢失时，后续任何事件触发的 tick 都能补救）；③ status 可显示已跑时长。timeout 从 claim 起算（含拉镜像等启动开销——简单可预期，文档写明）。
 
 **与「idle 零成本」的关系**：one-time schedule 到点即删、无常驻轮询；**bonus**——到点 invoke 本身是一次强制 tick，等于每个 job 至少在 timeout 时刻被推进一次，顺带部分兜住「事件丢投级联断裂」（重议闸门首条的场景）。**best-effort 边界**：CreateSchedule 失败不阻塞 launch（保护降级为 tick 防御扫 + status --wait，打日志）；schedule 到点时 job 已终态 → tick no-op（幂等）。
 

@@ -795,8 +795,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0034-detached-batch-reconciler.md": {
-    "mtime": 1786603278.2019413,
-    "ast_hash": "0724e52b16adc5c694d0add7d2929ab7",
+    "mtime": 1786605585.5346465,
+    "ast_hash": "1c035d8fd73c6c1e18aed1d0cde30942",
     "semantic_hash": ""
   },
   "docs/doc-health-review.md": {
@@ -835,8 +835,8 @@
     "semantic_hash": ""
   },
   "gherkai/gherkai/detached.py": {
-    "mtime": 1786596702.6553702,
-    "ast_hash": "9a4968f3e86f3eabaf2288df492565fc",
+    "mtime": 1786605541.3954175,
+    "ast_hash": "725d68346cf707048205c5a8eb454b39",
     "semantic_hash": ""
   },
   "gherkai/gherkai/names.py": {
@@ -855,8 +855,8 @@
     "semantic_hash": ""
   },
   "gherkai/tests/test_detached_launcher.py": {
-    "mtime": 1786596702.6550987,
-    "ast_hash": "12c28a57cf537ec34e125c8118294fa5",
+    "mtime": 1786605585.5348098,
+    "ast_hash": "37d03af0a83f14cfeec947840a3de643",
     "semantic_hash": ""
   },
   "gherkai/tests/test_lambda_handlers.py": {
