@@ -96,6 +96,7 @@ dev = [
     { name = "boto3", specifier = ">=1.34" },
     { name = "moto", extras = ["dynamodb", "s3"], specifier = ">=5.0" },
     { name = "pytest", specifier = ">=8.0.0" },
+    { name = "pytest-timeout", specifier = ">=2.3" },
 ]
 
 [[package]]

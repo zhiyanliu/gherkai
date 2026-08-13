@@ -3,6 +3,7 @@
 ## 沟通
 
 - 沟通、讨论一律用中文；思考过程也用中文。
+- 在使用 `graphify` 工具时只用英文。
 
 ## 文档纪律（ADR / CONTEXT 等）
 
@@ -24,4 +25,15 @@
 ## 工作方式
 
 - **`tools/` 是复用工具库，真跑/验证/诊断前先翻一眼、别重造**：做端到端真跑、跨真实边界验证、时序/数据诊断这类活前，先看 `tools/` 有没有现成的（AI 的默认倾向是从头搭脚本、易重复造轮子且可能搭错）。**`tools/` 里的都是长期资产**——真正一次性的脚本/脚手架放 `$CLAUDE_JOB_DIR/tmp`、不入库（入了 `tools/` 即视为长期、注释守文档纪律）。
-- **AWS 资源视为免费（限开发期）**：设计、调研、验证、测试等开发环节按「资源免费」处理——用对任务最有帮助的方式做，省 AWS $ 不是决策变量、更不是不真跑的理由（与「绿≠对·别过度」不冲突：那条省的是 effort，$ 不进「浪费」衡量）。免费≠空转：用完随手停 task/清资源。**交付物的运行成本不免费**：部署到目标环境后持续烧的 AWS 是设计约束，做架构/方案时须纳入权衡。判据=谁持续买单：开发期我们自己为把事做对烧，放开；运行期目标环境为交付物长期付，能省则省。
+- **AWS 资源视为免费（限开发期）**：设计、调研、验证、测试等开发环节按「资源免费」处理——用对任务最有帮助的方式做，省 AWS $ 不是决策变量、更不是不真跑的理由（与「绿≠对·别过度」不冲突：那条省的是 effort，$ 不进「浪费」衡量）。免费≠空转：用完随手停 task/清资源。**交付物的运行成本不免费**：部署到目标环境后持续烧的 AWS 是设计约束，做架构/方案时须纳入权衡。判据=谁持续买单：开发期我们自己为把事做对烧，放开；运行期目标环境为交付物长期付，应省则省。
+
+## graphify
+
+This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
+
+Rules:
+
+- For codebase questions, first run `graphify query "<question>"` when graphify-out/graph.json exists. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for focused concepts. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
+- If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
+- Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
+- After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).

@@ -58,5 +58,18 @@ tmp/
 # Claude 工作流工具（个人/工作流，非本项目框架代码）
 .claude/
 skills-lock.json
+.agents/
 # MCP server 个人本地配置（可能含 API KEY 等密钥）
 .mcp.json
+
+# ── graphify 知识图谱产物 ──
+# 入库三件：GRAPH_REPORT.md（架构文档，人+agent 读）、graph.json（图本体，供
+# graphify query/path/explain 直接用，克隆/CI 无需重跑）、manifest.json（增量
+# 哈希，缺了会让首跑全量重抽语义层、花 API 钱）。
+# 其余是本地缓存与派生品（graph.html 可由 graph.json 重建；日期目录是每次跑
+# 新增的滚动备份，入库会无限膨胀），按「派生品不入库」惯例排除。
+# （**/ 前缀盖住任意子目录的 graphify-out——如在 core/ 里跑 graphify 的残留缓存；白名单以 / 锚定，只放根那份）
+**/graphify-out/*
+!/graphify-out/GRAPH_REPORT.md
+!/graphify-out/graph.json
+!/graphify-out/manifest.json
