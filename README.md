@@ -28,17 +28,28 @@
 
 ## 架构速览
 
-```
-① 用例层   features/*.feature              ← 共享 Gherkin（ADR 0005）
-              │
-② 核心库   core/（Python）：parse → scope 分组 → schedule 调度   ← 窄腰，零引擎依赖（ADR 0016）
-   前端    cli/（run / submit / status / plan / list-engines）= 组合根，注入引擎
-              │  对每个 scope spawn 一个薄 worker，讲协议（ADR 0024）
-③ 执行层   Midscene worker(TS)  ┃  Nova Act worker(Python)   ← 两个独立 AI 引擎，平级
-   大脑    Qwen3-VL@Bedrock     ┃  nova-act-latest
-   鉴权    SigV4 自签            ┃  IAM @workflow
-              │  都经 CDP 驱动
-④ 浏览器层 AgentCore Browser（aws.browser.v1，每引擎各一个会话）
+```mermaid
+flowchart TD
+    F["① 用例层<br/>features/*.feature —— 共享 Gherkin（ADR 0005）"]
+
+    subgraph L2["② 核心库 + 前端"]
+        CLI["cli/ —— run / submit / status / plan / list-engines<br/>组合根：注入引擎（ADR 0016）"]
+        C["core/（Python）—— parse → scope 分组 → schedule 调度<br/>窄腰，零引擎依赖（ADR 0016）"]
+        CLI --> C
+    end
+
+    subgraph L3["③ 执行层 —— 两个独立 AI 引擎，平级"]
+        M["Midscene worker（TS）<br/>大脑：Qwen3-VL@Bedrock<br/>鉴权：SigV4 自签"]
+        N["Nova Act worker（Python）<br/>大脑：nova-act-latest<br/>鉴权：IAM @workflow"]
+    end
+
+    B["④ 浏览器层<br/>AgentCore Browser（aws.browser.v1，每引擎各一个会话）"]
+
+    F --> CLI
+    C -- "对每个 scope spawn 薄 worker<br/>讲 worker↔core 协议（ADR 0024）" --> M
+    C -- " 同一协议 " --> N
+    M -- CDP --> B
+    N -- CDP --> B
 ```
 
 关键约束：**全栈托管在 AWS 内**（ADR 0009）；**范围限英文 UI**（ADR 0001）。
@@ -84,8 +95,10 @@
 ## 运行（经核心库 cli，一个入口跑两个引擎）
 
 ```bash
-cd cli
-uv sync                                            # 装环境（core 作 path 依赖）
+# 首次安装：三个运行环境（互相隔离、不污染全局，见下「注意」）
+cd cli && uv sync                                  # cli + core（core 作 path 依赖）
+(cd ../engines/novaact && uv sync)                 # Nova Act worker 的 .venv（Python 3.13）
+(cd ../engines/midscene && npm install)            # Midscene worker 的 node_modules（Node 22）
 
 # ① 预检（纯本地、不烧钱）：看 .feature 分出哪些 scope/job、engine 路由对不对、校验配置
 uv run python -m cli plan ../features/engine_routing.feature
