@@ -18,12 +18,15 @@ from __future__ import annotations
 import os
 
 
-def _extract(detail: dict) -> tuple[str | None, str | None, int | None]:
-    """从 STOPPED event 的 detail 拿 (run_id, scope_id, exit_code)。
+def _extract(detail: dict) -> tuple[str | None, str | None, int | None, bool]:
+    """从 STOPPED event 的 detail 拿 (run_id, scope_id, exit_code, timed_out)。
 
     run_id/scope_id：RunTask 注入的 env 原样在 detail.overrides.containerOverrides[].environment（真验坐实）。
     exit_code：detail.containers[] 里匹配的 container 的 exitCode（缺 → None，宽限态）。
+    timed_out：detail.stoppedReason 含超时哨兵（reconciler 的超时处置 StopTask(reason) 原样出现在此，
+    ADR 0034「job timeout」节归因链）→ task_exited 带 timed_out=True。
     """
+    from reconciler import TIMEOUT_STOP_SENTINEL
     run_id = scope_id = None
     for co in detail.get("overrides", {}).get("containerOverrides", []):
         for e in co.get("environment", []):
@@ -39,7 +42,8 @@ def _extract(detail: dict) -> tuple[str | None, str | None, int | None]:
             if c.get("exitCode") is not None:
                 exit_code = c["exitCode"]
                 break
-    return run_id, scope_id, exit_code
+    timed_out = TIMEOUT_STOP_SENTINEL in (detail.get("stoppedReason") or "")
+    return run_id, scope_id, exit_code, timed_out
 
 
 def _event_log(run_id: str, scope_id: str):
@@ -56,12 +60,12 @@ def _event_log(run_id: str, scope_id: str):
 def handler(event, context):
     """EventBridge ECS STOPPED 事件入口。写本 task 的 task_exited。"""
     detail = event.get("detail", {})
-    run_id, scope_id, exit_code = _extract(detail)
+    run_id, scope_id, exit_code, timed_out = _extract(detail)
     if not run_id or not scope_id:
         # 非本框架起的 task（同 cluster 别的负载）或 env 缺失 → 忽略（rule 已按 cluster 过滤，此为双保险）
         print(f"exit_observer: 跳过（缺 run_id/scope_id）taskArn={detail.get('taskArn')}")
         return {"skipped": True}
     log = _event_log(run_id, scope_id)
-    log.record_exit(scope_id, exit_code)
-    print(f"exit_observer: task_exited run={run_id} scope={scope_id} exit={exit_code}")
-    return {"ok": True, "run_id": run_id, "scope_id": scope_id, "exit_code": exit_code}
+    log.record_exit(scope_id, exit_code, timed_out=timed_out)
+    print(f"exit_observer: task_exited run={run_id} scope={scope_id} exit={exit_code} timed_out={timed_out}")
+    return {"ok": True, "run_id": run_id, "scope_id": scope_id, "exit_code": exit_code, "timed_out": timed_out}

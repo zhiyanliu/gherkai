@@ -375,6 +375,27 @@ class BackendStack(Stack):
             targets=[targets.LambdaFunction(exit_observer)],
         )
 
+        # job timeout 到点触发器的两件配套（ADR 0034「job timeout」节）：
+        # - Scheduler 执行 role：EventBridge Scheduler 服务 assume 它 invoke kicker。role 侧用**确定性 ARN
+        #   字符串**授权（kicker 显式命名、ARN 可拼）——避免 role↔function 互引成环（kicker env 引 role ARN、
+        #   role policy 若引 kicker 资源则成环）。
+        # - kicker ARN 串：注给两 Lambda env（KICKER_ARN），CreateSchedule 的 Target 用。
+        kicker_name = names.default_name(self.prefix, names.BASE_KICKER_LAMBDA)
+        kicker_arn = f"arn:aws:lambda:{self.region}:{self.account}:function:{kicker_name}"
+        scheduler_role = iam.Role(
+            self, "TimeoutSchedulerRole",
+            role_name=f"{self.prefix}timeout-scheduler",
+            assumed_by=iam.ServicePrincipal("scheduler.amazonaws.com"),
+        )
+        scheduler_role.add_to_policy(iam.PolicyStatement(
+            actions=["lambda:InvokeFunction"], resources=[kicker_arn, f"{kicker_arn}:*"]))
+        timeout_env = {"KICKER_ARN": kicker_arn, "SCHEDULER_ROLE_ARN": scheduler_role.role_arn}
+        # 超时 schedule 的名字空间（default group 下 {prefix}jt-*，见 lambdas/reconciler.py schedule_name）：
+        # CreateSchedule 需随附 DeleteSchedule（ActionAfterCompletion=DELETE 的 IAM 前置）。
+        timeout_schedule_arns = [
+            f"arn:aws:scheduler:{self.region}:{self.account}:schedule/default/{self.prefix}jt-*"
+        ]
+
         # ② reconciler Lambda（重；读全量重放 + 起 task + finalize 聚合）
         reconciler = lambda_.Function(
             self, "ReconcilerFn",
@@ -392,6 +413,7 @@ class BackendStack(Stack):
                 "SUBNETS": ",".join(s.subnet_id for s in (vpc.public_subnets or vpc.private_subnets)),
                 "SECURITY_GROUPS": self._worker_sg_id,
                 "MAX_CONCURRENCY": "1",  # 稳态并发闸（可后续 context 化；每完成一个才起下一个）
+                **timeout_env,  # job timeout 到点触发器（KICKER_ARN/SCHEDULER_ROLE_ARN，ADR 0034）
             },
         )
         # reconciler 权限：runs 表读写（RunState 条件写）+ events 表读（重放）+ 桶读写（ResultStore/ReportStore/job-in）
@@ -407,9 +429,17 @@ class BackendStack(Stack):
             actions=["ecs:RunTask"], resources=task_def_arns,
         ))
         reconciler.add_to_role_policy(iam.PolicyStatement(
-            actions=["ecs:DescribeTasks", "ecs:StopTask"],
+            # ListTasks：job timeout 处置按 startedBy=run_id 定位 task（ADR 0034「job timeout」节）
+            actions=["ecs:DescribeTasks", "ecs:StopTask", "ecs:ListTasks"],
             resources=["*"],  # task ARN 运行期生成、无法预知；条件可加 cluster ARN，从简保留 *（只读/停本框架 task）
         ))
+        # job timeout：CreateSchedule（+ActionAfterCompletion=DELETE 前置的 DeleteSchedule）+ 把 Scheduler
+        # 执行 role 传给 schedule（PassRole）。
+        reconciler.add_to_role_policy(iam.PolicyStatement(
+            actions=["scheduler:CreateSchedule", "scheduler:DeleteSchedule"],
+            resources=timeout_schedule_arns))
+        reconciler.add_to_role_policy(iam.PolicyStatement(
+            actions=["iam:PassRole"], resources=[scheduler_role.role_arn]))
         # PassRole：RunTask 要把 execution role + 各 task role 传给起的 task——须显式授 iam:PassRole 到这些 role ARN。
         reconciler.add_to_role_policy(iam.PolicyStatement(
             actions=["iam:PassRole"],
@@ -429,7 +459,7 @@ class BackendStack(Stack):
         #    INSERT。分工：kicker「让 run 动起来」/ reconciler「推着走」。故它需要与 reconciler 相同的权限（起 task 等）。
         kicker = lambda_.Function(
             self, "KickerFn",
-            function_name=names.default_name(self.prefix, names.BASE_KICKER_LAMBDA),  # 真同源（gherkai.names）——cli status --wait 据 --prefix 推理出它 invoke kickoff（ADR 0034）
+            function_name=kicker_name,  # 真同源（gherkai.names）——cli status --wait 据 --prefix 推理出它 invoke kickoff（ADR 0034）
             runtime=lambda_.Runtime.PYTHON_3_13,
             handler="reconciler.kicker_handler",  # 同一 reconciler.py、不同入口
             code=code,
@@ -440,6 +470,7 @@ class BackendStack(Stack):
                 "SUBNETS": ",".join(s.subnet_id for s in (vpc.public_subnets or vpc.private_subnets)),
                 "SECURITY_GROUPS": self._worker_sg_id,
                 "MAX_CONCURRENCY": "1",
+                **timeout_env,  # kicker 也起 task（首批）→ 同样要武装 timeout schedule
             },
         )
         # kicker 权限 = reconciler 同款（起首批要 RunTask/PassRole/表桶）。
@@ -448,10 +479,15 @@ class BackendStack(Stack):
         self._bucket.grant_read_write(kicker)
         kicker.add_to_role_policy(iam.PolicyStatement(actions=["ecs:RunTask"], resources=task_def_arns))
         kicker.add_to_role_policy(iam.PolicyStatement(
-            actions=["ecs:DescribeTasks", "ecs:StopTask"], resources=["*"]))
+            actions=["ecs:DescribeTasks", "ecs:StopTask", "ecs:ListTasks"], resources=["*"]))
         kicker.add_to_role_policy(iam.PolicyStatement(
             actions=["iam:PassRole"],
             resources=[self._execution_role.role_arn] + [r.role_arn for r in self._task_roles]))
+        kicker.add_to_role_policy(iam.PolicyStatement(
+            actions=["scheduler:CreateSchedule", "scheduler:DeleteSchedule"],
+            resources=timeout_schedule_arns))
+        kicker.add_to_role_policy(iam.PolicyStatement(
+            actions=["iam:PassRole"], resources=[scheduler_role.role_arn]))
         # runs 表 Stream → kicker，**INSERT ∧ NewImage.detached=true**（filter，ADR 0034）：
         # - 仅 INSERT：reconciler 之后写 runs 表的 MODIFY（project_state/finalize）不触发——无自触发放大。
         # - 仅 detached 标记：同步 `run --backend cloud` 的 create_run 同样 INSERT、但由进程内 schedule 推进，

@@ -210,11 +210,35 @@ def test_prefix_switches_whole_set():
     t.has_resource_properties("AWS::SSM::Parameter", {"Name": "/prod-backend/subnets"})
 
 
-def test_execution_role_and_two_task_roles():
-    # 6 role：1 execution role（共享）+ 2 task role（每引擎分立，最小权限，ADR 0033）
-    #        + 3 Lambda 执行角色（退出观察者 + reconciler + kicker，CDK 自动建，ADR 0034）。
+def test_timeout_scheduler_role_and_lambda_perms():
+    # job timeout 配套（ADR 0034「job timeout」节）：
+    # ① Scheduler 执行 role：scheduler.amazonaws.com 可 assume、能 invoke kicker（按确定性 ARN 串授权）。
+    # ② reconciler/kicker：scheduler:CreateSchedule+DeleteSchedule（ActionAfterCompletion=DELETE 前置）
+    #    框在 default group 的 {prefix}jt-* 名字空间；ecs:ListTasks（startedBy=run_id 定位 task）。
     t = _template()
-    t.resource_count_is("AWS::IAM::Role", 6)
+    t.has_resource_properties("AWS::IAM::Role", {
+        "AssumeRolePolicyDocument": Match.object_like({
+            "Statement": Match.array_with([Match.object_like({
+                "Principal": {"Service": "scheduler.amazonaws.com"},
+            })]),
+        }),
+    })
+    t.has_resource_properties("AWS::IAM::Policy", {
+        "PolicyDocument": Match.object_like({
+            "Statement": Match.array_with([Match.object_like({
+                "Action": ["scheduler:CreateSchedule", "scheduler:DeleteSchedule"],
+                "Resource": Match.string_like_regexp(r".*schedule/default/gherkai-jt-\*"),
+            })]),
+        }),
+    })
+
+
+def test_execution_role_and_two_task_roles():
+    # 7 role：1 execution role（共享）+ 2 task role（每引擎分立，最小权限，ADR 0033）
+    #        + 3 Lambda 执行角色（退出观察者 + reconciler + kicker，CDK 自动建，ADR 0034）
+    #        + 1 job timeout 的 Scheduler 执行角色（Scheduler 服务 assume 它 invoke kicker，ADR 0034「job timeout」节）。
+    t = _template()
+    t.resource_count_is("AWS::IAM::Role", 7)
 
 
 # ---- stopTimeout（grace 真容器校准入口，ADR 0032）----

@@ -197,6 +197,9 @@ class FargateEngine:
             networkConfiguration={"awsvpcConfiguration": self._network},
             overrides={"containerOverrides": [{"name": self._container, "environment": env}]},
             count=1,
+            # startedBy=run_id（ADR 0034「job timeout」节）：超时处置用 ListTasks(startedBy=run_id) 定位本 run
+            # 的 task（≤36 字符约束：run_id 形如 20260629T141207Z-a3f9c1 共 23 字符，恒满足）。
+            startedBy=self._run_id,
         )
         # RunTask 的放置失败（容量不足/子网无 IP/资源约束/task-def 校验）是**正常契约**：HTTP 200 + 空 tasks + 填 failures
         # （reason/detail），非抛异常。不检查就直接 resp["tasks"][0] 会抛无信息的裸 IndexError、丢掉 ECS 给的可归因原因。

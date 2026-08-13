@@ -15,8 +15,8 @@ from core.model import Job, JobState, RunMeta, RunState, Scenario, Status, Step
 from core.project import project
 
 
-def _job(sid: str) -> Job:
-    return Job(scope_id=sid, scope_name=sid, engine="novaact",
+def _job(sid: str, timeout_s: float | None = None) -> Job:
+    return Job(scope_id=sid, scope_name=sid, engine="novaact", timeout_s=timeout_s,
                scenarios=(Scenario(id=f"{sid}:1", name="s", steps=(Step(0, "Given", "x"),)),))
 
 
@@ -114,6 +114,51 @@ def test_cloud_launcher_calls_start_scope():
     eng = FakeEngine()
     CloudLauncher(lambda name: eng).launch(_job("a"))
     assert eng.started == ["a"]
+
+
+class _RecorderWatch:
+    def __init__(self, raise_on_arm: bool = False):
+        self.armed: list[tuple] = []
+        self._raise = raise_on_arm
+
+    def arm(self, run_id, scope_id, timeout_s):
+        if self._raise:
+            raise RuntimeError("scheduler down")
+        self.armed.append((run_id, scope_id, timeout_s))
+
+
+class _FakeStartEngine:
+    def __init__(self): self.started = []
+    def start_scope(self, job): self.started.append(job.scope_id)
+
+
+def test_cloud_launcher_arms_timeout_watch():
+    """job.timeout_s 非 None → launch 后 arm(run_id, scope_id, timeout_s)（ADR 0034「job timeout」节 cloud 档）。"""
+    from core.adapters.cloud_launcher import CloudLauncher
+
+    eng, watch = _FakeStartEngine(), _RecorderWatch()
+    CloudLauncher(lambda name: eng, run_id="run-1", timeout_watch=watch).launch(_job("a", timeout_s=60.0))
+    assert eng.started == ["a"]
+    assert watch.armed == [("run-1", "a", 60.0)]
+
+
+def test_cloud_launcher_no_arm_without_timeout():
+    """无预算（timeout_s=None）→ 不建 schedule（idle 零成本：不为不超时的 job 造任何云资源）。"""
+    from core.adapters.cloud_launcher import CloudLauncher
+
+    eng, watch = _FakeStartEngine(), _RecorderWatch()
+    CloudLauncher(lambda name: eng, run_id="run-1", timeout_watch=watch).launch(_job("a"))
+    assert eng.started == ["a"] and watch.armed == []
+
+
+def test_cloud_launcher_arm_failure_does_not_block_launch():
+    """武装失败 best-effort（ADR 0034「job timeout」节边界）：不抛、task 已起——降级 tick 防御扫。"""
+    from core.adapters.cloud_launcher import CloudLauncher
+
+    eng = _FakeStartEngine()
+    CloudLauncher(lambda name: eng, run_id="run-1",
+                  timeout_watch=_RecorderWatch(raise_on_arm=True)).launch(_job("a", timeout_s=60.0))
+    assert eng.started == ["a"]  # launch 完成、异常被兜（日志降级）
 
 
 # ---------- reconcile.tick 用 DDB 后端（与 local 对拍）----------

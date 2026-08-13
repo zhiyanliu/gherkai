@@ -12,7 +12,11 @@ FargateEngine `start_scope` 起一个 Fargate task 就返回（不轮询、不�
 """
 from __future__ import annotations
 
+import logging
+
 from core.model import Job
+
+logger = logging.getLogger("core.adapters.cloud_launcher")
 
 
 class CloudLauncher:
@@ -23,11 +27,29 @@ class CloudLauncher:
     故 job-in 前缀 / artifact 落点 / task-def·container 名 / SDK env 全与同步 cloud run 路径一致、零漂移。
     """
 
-    def __init__(self, resolver) -> None:
+    def __init__(self, resolver, *, run_id: str | None = None, timeout_watch=None) -> None:
         self._resolver = resolver
+        # job timeout 的到点触发器（ADR 0034「job timeout」节 cloud 档，组合根注入；实现= EventBridge Scheduler
+        # one-time schedule，见 lambdas/reconciler.py）。协议：arm(run_id, scope_id, timeout_s)。None=未装配
+        # （旧部署/无 env）——有预算的 job 降级为 tick 防御扫 + status --wait，打日志。
+        self._run_id = run_id
+        self._timeout_watch = timeout_watch
 
     def launch(self, job: Job) -> None:
         # fire-and-forget：按 engine 取 FargateEngine、start_scope 起 task 就返回。task_arn 不在此保留——
         # reconciler 靠 events 表（worker PutItem）+ task_exited（退出观察者 Lambda 写）推进，不靠 launcher 轮询。
         engine = self._resolver(job.engine)
         engine.start_scope(job)
+        if job.timeout_s:
+            if self._timeout_watch is None or self._run_id is None:
+                logger.warning(
+                    "job timeout 未武装（未注入 timeout_watch/run_id）：scope=%s 预算 %ss 降级为 tick 防御扫",
+                    job.scope_id, job.timeout_s)
+            else:
+                # best-effort（ADR 0034「job timeout」节边界）：武装失败不阻塞 launch——保护降级为
+                # tick 防御扫（claimed_at ②）+ status --wait，只打日志。
+                try:
+                    self._timeout_watch.arm(self._run_id, job.scope_id, job.timeout_s)
+                except Exception:
+                    logger.warning("job timeout 武装失败（best-effort 降级 tick 防御扫）：run=%s scope=%s",
+                                   self._run_id, job.scope_id, exc_info=True)

@@ -161,6 +161,16 @@ def test_run_scope_runtask_injects_env(fargate, monkeypatch):
     assert captured["taskDefinition"] == fargate["task_def"]
 
 
+def test_runtask_sets_started_by_run_id(fargate, monkeypatch):
+    # startedBy=run_id（ADR 0034「job timeout」节）：超时处置用 ListTasks(startedBy=run_id) 定位本 run 的
+    # task（≤36 字符：run_id 形如 20260707T120000Z-abc123 共 23 字符）。
+    captured = {}
+    real = fargate["ecs"].run_task
+    monkeypatch.setattr(fargate["ecs"], "run_task", lambda **kw: captured.update(kw) or real(**kw))
+    _engine(fargate).start_scope(_job())
+    assert captured["startedBy"] == _RUN_ID
+
+
 def test_run_scope_injects_region_never_profile(fargate, monkeypatch):
     # region 非 None（组合根落实成具体字符串，ADR 0016 决策 C）→ overrides env 注入 AWS_REGION，与 core store 同源。
     # Fargate 容器不继承本地 env、不吃 profile config，不注入 region 则 worker → NoRegionError/AgentCore InvalidRegionError。
