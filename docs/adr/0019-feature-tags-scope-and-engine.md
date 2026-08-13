@@ -26,6 +26,10 @@ QA 在 `.feature` 里用 **Gherkin 原生 tag** 声明两类配置元信息：�
 - **缺省**：整个 scope 未标 engine → 用默认引擎（单引擎默认，[0016](./0016-execution-architecture-core-lib-run-model.md)）。
 - **双引擎交叉验证 = v1.0 不做**（降级，见下「双引擎的真实价值」）。`@engine:` 在 v1.0 只做**选引擎**（单引擎默认），不内建交叉。
 
+### `@timeout:<N>`（job 墙钟预算——tag 体系的第三个成员，随 [0034](./0034-detached-batch-reconciler.md)「job timeout」节加入）
+- 语义同为 **scope 级属性**：本 scope（=job）最多允许跑 N 秒（墙钟，从推进器 claim 起算、含启动开销）。N 须 >0（声明预算，0/负值无意义 → PlanError）。
+- 声明/冲突/缺省**完全复刻 `@engine:` 的三条**：任一 scenario 标了即整 scope 生效；同 scope 声明不一致 → PlanError（不静默取某个）；未标 → 用 CLI `--default-job-timeout` 兜底（`<=0`=不超时）。设计取舍（两层、命名、载体=definition、三路 enforce）见 [0034](./0034-detached-batch-reconciler.md)「job timeout」节，此处只定 tag 语义。
+
 ## 示例
 
 ```gherkin

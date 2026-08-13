@@ -150,6 +150,35 @@ reconciler 逻辑上是「唯一写者」，**物理上是并发实例**（实�
 
 **「claim 了但 events 还没到」的窗口 → `project` 须以 RunStore 态为基线做单调合并（实装真跑逼出、补入设计）**：CAS 把 job 置 `running` 后、worker 还没 emit `scope_started` 前有一个窗口——此时 `project` 全量重放 events 里**看不到**该 job（无任何事件），会把它算成 `pending`；若投影写就此把它刷回 `pending`，下一个 tick 的 `plan_next` 又会提议 start、CAS（此刻已是 running？不，被刷回 pending 了）又成功 → **重复 launch 同一 job**（真 bug，回归护栏 `core/tests/test_reconcile.py::test_tick_idempotent_no_double_launch`）。故 `project` 除 events 外**接收当前 RunStore 的 `RunState` 作基线**，job 态按生命周期序（`pending < running < 任何终态`）与基线取**较推进者**、单调不倒退：已 claim 的 `running` 不被 events 的 `pending` 覆盖；终态一旦达成不被 `running` 覆盖。这与「全量重放幂等」不冲突——重放仍是纯推演，基线只提供「已 claim」这一 events 之外、却是 RunStore 权威的事实。`reconcile.tick` 在调 `project` 前 `load_run_state` 取基线传入。
 
+## job timeout（产品级设定：两层声明 → definition 载体 → 三路推进器各自 enforce）
+
+**产品语义**：job timeout 是用户对「一个 job 最多跑多久（墙钟，含启动开销）」的预算，属 run 的 definition、与推进方式（同步/detached）无关。此前它只在同步路径实现了一半（`--timeout` 是 ScheduleOpts 运行参数、不进 definition），detached 路径完全没有——local 挂死永 running、cloud task 无限跑无限烧钱（经 grace 校准适用面复盘发现，[0032](./0032-fargate-execution-environment.md)「适用面注记」）。
+
+**两层声明、tag 优先**（复刻 `@engine`/`--default-engine` 同构模式，[0019](./0019-feature-tags-scope-and-engine.md) tag 体系扩展）：feature 层 scope 级 `@timeout:N`（秒，N>0，同 scope 声明不一致 → PlanError——同 `@engine` 冲突先例；用例内容决定预算主体、QA/TE 在用例旁声明）+ CLI 层 `--default-job-timeout`（未标 tag 的 job 用它兜底；`<=0`=不超时）。**flag 命名两个前缀都承重**：`default-` 防「误当强制值、被 tag 覆盖时错愕」；`job-` 消歧对象（act 级 `ACT_TIMEOUT_S`/将来可能的 run 级总预算并存，留 `--default-run-timeout` 对称位）。原 `--timeout` 已改名、未留 alias。**先不做**（防过度设计）：run 级总墙钟预算；「CI 强制收紧压过 tag」层（真实冲突出现再议）。
+
+**载体 = definition**：两层在组合根解析定值后固化进 `Job.timeout_s`（None=不超时），随 RunMeta 持久化——推进器只认它，`ScheduleOpts.job_timeout_s` 退役（缺省解析在组合根一次完成，core 不复制两层逻辑）。worker 不消费 timeout（enforce 全在推进器侧，worker 只需继续守 flag-only 停止契约）。
+
+**enforce 统一形态 =「launch 时挂到点回调；到点若未终态则 stop；stop 后走既有退出观察链收敛」**，三路各自落地：
+
+| 推进器 | 到点回调 | stop | 收敛 |
+|---|---|---|---|
+| 同步 `run`（schedule） | 进程内 per-job deadline（原机制，改读 `job.timeout_s`） | `handle.stop(grace)` | 原路径：error+timeout |
+| local detached（per-run 进程） | `SubprocessLauncher` 起 timer 线程 | `handle.stop(engine_min_grace)` + 置本 scope timed_out 标志 | worker 协作退 → `_pump` 写 `task_exited(timed_out=True)` → project 判 ERROR+timeout |
+| cloud detached | **EventBridge Scheduler one-time schedule**（claim 后 CreateSchedule，`at = claim+timeout`、`ActionAfterCompletion=DELETE` 自动清）→ 到点 invoke kicker（payload 带 `timeout_scope`） | 仍 running 才动手：`ListTasks(cluster, startedBy=run_id)` → `DescribeTasks` 按 overrides env `SCOPE_ID` 匹配（同 exit_observer 提取术）→ `StopTask(reason 含哨兵串 gherkai-job-timeout)` | worker 协作退 → exit_observer 见 `stoppedReason` 哨兵 → `task_exited(timed_out=True)` → 同上 |
+
+**`timed_out` 归因链**：`TaskExited.timed_out`（退出记录新字段，独立键空间内的属性、不动键结构）——local 由 launcher 标志传入；cloud 经 **StopTask 的 `reason` 参数原样出现在 STOPPED 事件 `detail.stoppedReason`** 这条现成通道传递（零新键空间/零新事件类型）。`_job_status` 见 timed_out → ERROR，`_reduce_scope` 归因 `error_type="timeout"`——与同步路径归因语义对齐（超时是主动中止、非引擎故障，但按 [0031](./0031-job-lifecycle-states-and-severity.md) 决定一超时记 error+timeout）。
+
+**`JobState.claimed_at`**（`try_claim_job` 时写，机制四扩展）：① local 接力（per-run 崩后 `status --wait`）据此恢复 deadline（timer 随进程丢，接力时已超时的立即 stop）；② cloud tick 的**防御性顺带扫**——任何 tick 对 running 且 `now-claimed_at > timeout` 的 job 走同一超时处置（Scheduler 的双保险：CreateSchedule 失败/schedule 丢失时，后续任何事件触发的 tick 都能补救）；③ status 可显示已跑时长。timeout 从 claim 起算（含拉镜像等启动开销——简单可预期，文档写明）。
+
+**与「idle 零成本」的关系**：one-time schedule 到点即删、无常驻轮询；**bonus**——到点 invoke 本身是一次强制 tick，等于每个 job 至少在 timeout 时刻被推进一次，顺带部分兜住「事件丢投级联断裂」（重议闸门首条的场景）。**best-effort 边界**：CreateSchedule 失败不阻塞 launch（保护降级为 tick 防御扫 + status --wait，打日志）；schedule 到点时 job 已终态 → tick no-op（幂等）。
+
+**被拒方案（护栏）**：
+- 常驻低频 rate rule 轮询——违「idle 零成本」，且粒度粗、空转扫描多。
+- 动态 enable/disable rate rule（重议闸门预案挪用）——多 run 并发下 disable 有竞态（A finalize 查「无其他 running」与 B 刚 submit 的 enable 无原子性，交错可致规则停在 disabled、B 失去保护），状态管理复杂度不值。
+- 纯 tick 内时长判定（不加时间触发器）——静默 job 无事件 → 永不 tick，盲区恰是最需要超时的场景（卡死）。已作为**防御性补充**保留（见 claimed_at ②），非主机制。
+- `JobState` 存 task ARN 供 StopTask——`startedBy=run_id`（≤36 字符）+ DescribeTasks env 匹配已够、改动更窄；ARN 属执行环境句柄、暂不进读模型（真需要时再议）。
+- 超时时由处置者直接写 task_exited——进程未退、会与 observer 的真退出记录同 key 相互覆盖；stop 后让既有观察链自然收敛才是单一真源。
+
 ## core 拆分（守 [0026](./0026-schedule-module.md)/[0016](./0016-execution-architecture-core-lib-run-model.md) 窄腰红线）
 
 ```
@@ -199,10 +228,6 @@ moto 立即返回测不到事件投递/并发时序，健康网真跑不触发�
 
 ## 重议闸门
 
-- **job timeout 尚未成为产品级设定（留口子，v1.2 后经 grace 校准适用面复盘 + 产品视角校准确认）**：job timeout 是用户对「一个 job 最多跑多久」的预算——**产品概念上属 run 的 definition、与推进方式（同步/detached）无关**。现状它只在同步路径实现了一半：`--timeout` 是 `ScheduleOpts` 运行参数（不进 definition），schedule 进程内 enforce（deadline → `handle.stop(grace)`）；**detached 路径完全没有、代码里零 stop 调用**：local worker 挂死 → `task_exited` 永不来 → run 永 running（靠人工发现）；cloud 无任何组件发 StopTask → **Fargate task 无限跑无限烧钱**（ECS 无自动超时；AgentCore TTL 只兜会话释放、不停 task）。**现状兜底 = worker 自身的有界性**（单 act `ACT_TIMEOUT_S`、建连重试上限+短超时、上传超时——单点挂死大多经 error 退出→task_exited 收敛），但**无总墙钟上界**，未被单点超时覆盖的挂死（如 CDP 底层无限等）会永 running；它也是机制二 launch 失败补偿的残余（record_exit 再失败仍 wedge）的彻底解。**真做时的方向（形态与命名已定，防重议）**：
-  - **两层设定、tag 优先**（复刻 `@engine`/`--default-engine` 同构模式，[0019](./0019-feature-tags-scope-and-engine.md) tag 体系扩展）：feature 层 scope 级 `@timeout:N`（用例内容决定预算主体，QA/TE 在用例旁声明；tag 短因对象自明——同理 `@engine` 不叫 `@job-engine`）+ CLI 层 `--default-job-timeout`（未标 tag 的 job 用它兜底）。**flag 命名两个前缀都承重**：`default-` 防「以为是强制值、被 tag 覆盖时错愕」的误解；`job-` 消歧对象（act 级 `ACT_TIMEOUT_S`/将来可能的 run 级总预算并存，给 `--default-run-timeout` 留对称位）。现有 `--timeout` **已改名 `--default-job-timeout`、未留 alias**（趁零存量用户改干净；tag 层未实装前它即全部 job 的超时,语义前向兼容）。
-  - **载体 = definition**：无论值来自 tag 还是 CLI，submit/run 时固化进 RunMeta（Job 带 timeout），推进器各自 enforce——非给 detached 单独打补丁：同步 schedule 沿用进程内 deadline；cloud 侧 reconciler（或独立巡检）判 job 运行时长超限发 StopTask——**新增 ECS 权限，与「status 机器零 ECS 权限」「Lambda 最小权限」有交互**，须单独设计；local 侧 per-run loop 加 deadline+stop 较轻。
-  - **先不做**（防过度设计）：run 级总墙钟预算；「CI 强制收紧压过 tag」层（真实冲突出现再议）。等真实卡死/烧钱痛点或产品化需求逼出再做。
 - **Stream/事件偶发丢投致级联断裂成真痛点** → 加安全网：submit 时 enable、finalize 时 disable 的**动态定时兜底规则**（仅在有活跑批时低频轮询、真 idle 时规则禁用=仍零调用），比常开定时器省。当前靠 `status --wait` 接力兜底，先不做。
   - **cloud 冷启动/中途丢投由 `status --wait` 无感接力兜底（实装真跑遇到、已解决）**：任何事件丢投（首个 runs-INSERT 漏 → 卡 pending、无第二触发源踢；或中途 events 丢投 → 级联断）都由 cloud `status --wait` 兜底——它**检测卡住（状态连续 K 轮无变化）才** invoke kicker Lambda kickoff（**异步 fire-and-forget、秒级一脚即救活**，之后云端链自接管、可退出 status，见上「三触发源」cloud 侧；正常推进时不踢、避免无效 invoke）。踢 Lambda（非本机 tick）保「status 机器零 ECS 权限」：起 task 走 Lambda 的角色（有 RunTask/PassRole），status 机器只需 `lambda:InvokeFunction`。**kicker 名从 `--prefix` 确定性推理**（`{prefix}kicker`，复用 `names` 单一命名真源、cli↔IaC 同源，ADR 0033）——用户无需配、无感。幂等安全：invoke kicker，正常在跑时 tick 发现无 pending 即 no-op（CAS 挡重复起 / HWM 挡 stale，真 DDB 验过），卡住时救回。故三触发源在 cloud 完整齐备：kicker（冷启动）/ reconciler（events Stream 主推进）/ `status --wait`（人工接力 kickoff）——**触发源齐备度与 local 对称，但「本机是否必须跑到底」不对称**（cloud kickoff 完可离场 / local 须本机跑到终态，见上「三触发源」2.）。**卡死救活已真验（确定性复现）**：临时禁用 kicker 的 runs-Stream event-source-mapping 模拟丢投 → submit 必卡 pending（kicker 收不到 INSERT、无第二触发源）→ `status --wait` invoke kicker kickoff → pending→running→passed 救活、`status --wait` 正常返回。此真验还抓出并修了一个真 bug：kicker 原只认 Stream records 的 event 格式、忽略直接 invoke 的 `{"run_id":...}` payload → status --wait 的 invoke 空转救不了（`runs:[]`）；修为 `_run_ids_from_runs_stream` 兼容两种 event 源（Stream records + 直接 kickoff）。
 - **常驻调度服务 / WebUI 真需要** → RunState 读模型 + reconciler 已就位，加 adapter/宿主即可（[0016](./0016-execution-architecture-core-lib-run-model.md)「加 adapter + 换注入」在 (a) 类仍成立）。
