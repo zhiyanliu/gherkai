@@ -32,10 +32,11 @@
 flowchart TD
     F["① 用例层<br/>features/*.feature —— 共享 Gherkin（ADR 0005）"]
 
-    subgraph L2["② 核心库 + 前端"]
-        CLI["cli/ —— run / submit / status / plan / list-engines<br/>组合根：注入引擎（ADR 0016）"]
+    subgraph L2["② 产品层"]
+        CLI["cli/ —— run / submit / status / plan / list-engines<br/>命令行皮（Lambda / 未来 WebUI 是另两张皮）"]
+        G["gherkai/ —— 产品本体 = 组合根<br/>引擎注册表与装配 · 资源命名真源（ADR 0016「演进」节）"]
         C["core/（Python）—— parse → scope 分组 → schedule 调度<br/>窄腰，零引擎依赖（ADR 0016）"]
-        CLI --> C
+        CLI --> G --> C
     end
 
     subgraph L3["③ 执行层 —— 两个独立 AI 引擎，平级"]
