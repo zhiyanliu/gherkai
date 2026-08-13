@@ -39,12 +39,12 @@ class _IncClock:
         return self.t
 
 
-def _job(scope_id: str, engine: str = "midscene", n_scenarios: int = 1) -> Job:
+def _job(scope_id: str, engine: str = "midscene", n_scenarios: int = 1, timeout_s: float | None = None) -> Job:
     scenarios = tuple(
         Scenario(id=f"{scope_id}:{i}", name=f"sc{i}", steps=(Step(0, "When", "做事"),))
         for i in range(n_scenarios)
     )
-    return Job(scope_id=scope_id, scope_name=scope_id, engine=engine, scenarios=scenarios)
+    return Job(scope_id=scope_id, scope_name=scope_id, engine=engine, scenarios=scenarios, timeout_s=timeout_s)
 
 
 def _rm(jobs: list[Job], run_id: str = "test-run") -> RunMeta:
@@ -185,11 +185,11 @@ def test_timeout_with_fake_clock():
         long_events.append(StepDone(scenario_id="slow:0", step_index=i, status=Status.PASSED, votes=Votes(3, 3)))
     long_events.append(ScenarioDone(scenario_id="slow:0", status=Status.PASSED))
 
-    jobs = [_job("slow")]
+    jobs = [_job("slow", timeout_s=5.0)]
     engine = FakeEngine({"slow": long_events})
     result = schedule(
         _rm(jobs), FakeResolver(engine), CollectSink(),
-        opts=ScheduleOpts(job_timeout_s=5.0, grace_period_s=2.0, clock=fake_clock),
+        opts=ScheduleOpts(grace_period_s=2.0, clock=fake_clock),
     )
     assert result.status == Status.ERROR
     assert result.jobs[0].error_type == "timeout"
@@ -353,7 +353,7 @@ def _full_timed_events(scope_id: str, scenario_id: str, n_steps: int = 2) -> lis
 
 def test_three_level_durations():
     # 递增 clock（每事件到达 +1.0s）+ 完整 started/done 流 → core 算出三级时长。
-    # 无超时（job_timeout_s=None）时 core 每事件只读 1 次 clock，时长可预期且层级嵌套。
+    # 无超时（Job.timeout_s=None）时 core 每事件只读 1 次 clock，时长可预期且层级嵌套。
     engine = FakeEngine({"sc": _full_timed_events("sc", "sc:0", n_steps=2)})
     result = schedule(
         _rm([_job("sc")]), FakeResolver(engine), CollectSink(),
@@ -549,12 +549,12 @@ def test_non_network_crash_not_retried():
 
 
 def test_network_retry_deadline_not_reset_across_attempts():
-    # job_timeout 跨 attempt 不重置（ADR 0028）：用 _IncClock 让时间每次读 +1s，
-    # job_timeout_s=2 → 第一次 attempt 建连崩、重试时 clock 已过 deadline → 记 timeout（不再无限重试）
+    # job timeout 跨 attempt 不重置（ADR 0028）：用 _IncClock 让时间每次读 +1s，
+    # timeout_s=2 → 第一次 attempt 建连崩、重试时 clock 已过 deadline → 记 timeout（不再无限重试）
     engine = FakeEngine({"n": _passing_events("n", "n:0")}, network_crash_after={"n": 0})
     clock = _IncClock(1.0)
-    result = schedule(_rm([_job("n")]), FakeResolver(engine), CollectSink(),
-                      opts=ScheduleOpts(network_retry=5, job_timeout_s=2.0, clock=clock, retry_sleep=_NOSLEEP))
+    result = schedule(_rm([_job("n", timeout_s=2.0)]), FakeResolver(engine), CollectSink(),
+                      opts=ScheduleOpts(network_retry=5, clock=clock, retry_sleep=_NOSLEEP))
     # deadline 跨 attempt 共享：几次 attempt 后墙钟超 2s → 转 timeout，不会用满 network_retry=5
     assert result.status == Status.ERROR
     assert engine.run_count["n"] < 6  # 没用满 5 次重试（被共享 deadline 截断）

@@ -81,6 +81,8 @@ def job_to_dict(job: Job) -> dict:
         "engine": job.engine,
         "scenarios": [_scenario_def_to_dict(sc) for sc in job.scenarios],
         "assertion_votes": job.assertion_votes,
+        # timeout_s：omit-when-None（无预算=键缺失，旧落盘兼容；ADR 0034「job timeout」节）
+        **({"timeout_s": job.timeout_s} if job.timeout_s is not None else {}),
     }
 
 
@@ -91,6 +93,7 @@ def job_from_dict(d: dict) -> Job:
         engine=d["engine"],
         scenarios=tuple(_scenario_def_from_dict(sc) for sc in d.get("scenarios", [])),
         assertion_votes=d.get("assertion_votes", 1),  # 向后兼容旧落盘（无此键 → 默认 1）
+        timeout_s=d.get("timeout_s"),  # 向后兼容：旧落盘无此键 → None=不超时（ADR 0034）
     )
 
 
@@ -282,7 +285,8 @@ def run_state_to_dict(state: RunState) -> dict:
     # state.jobs 是 Map（scope_id → JobState，ADR 0030）：落盘 JSON 仍是 list（保 run_state.json 向后兼容）。
     # 必须 .values() 迭代——直接 `for js in state.jobs` 会迭代 dict 的 key（str）、js.scope_id 即 AttributeError。
     d["jobs"] = [
-        {"scope_id": js.scope_id, "status": js.status.value, "session_id": js.session_id}
+        {"scope_id": js.scope_id, "status": js.status.value, "session_id": js.session_id,
+         **({"claimed_at": js.claimed_at} if js.claimed_at is not None else {})}  # omit-when-None（ADR 0034 job timeout）
         for js in state.jobs.values()
     ]
     return d
@@ -297,7 +301,8 @@ def run_state_from_dict(d: dict) -> RunState:
         ended_at=d.get("ended_at"),
         high_water_mark=d.get("high_water_mark"),  # 向后兼容：旧落盘无此键 → None（ADR 0034 机制三）
         jobs={
-            j["scope_id"]: JobState(scope_id=j["scope_id"], status=Status(j["status"]), session_id=j.get("session_id"))
+            j["scope_id"]: JobState(scope_id=j["scope_id"], status=Status(j["status"]),
+                                    session_id=j.get("session_id"), claimed_at=j.get("claimed_at"))
             for j in d.get("jobs", [])
         },
     )

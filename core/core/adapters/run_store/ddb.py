@@ -35,15 +35,18 @@ _STATE = "STATE"  # item_type 取值：运行态 item
 
 
 def _job_state_to_item(js: JobState) -> dict:
-    """JobState → DDB Map entry（字段集同 serialize；session_id=None 用 omit-when-None，读回 .get 得 None）。"""
+    """JobState → DDB Map entry（字段集同 serialize；session_id/claimed_at 用 omit-when-None，读回 .get 得 None）。"""
     d: dict = {"status": js.status.value}
     if js.session_id is not None:
         d["session_id"] = js.session_id
+    if js.claimed_at is not None:
+        d["claimed_at"] = js.claimed_at
     return d
 
 
 def _job_state_from_item(scope_id: str, m: dict) -> JobState:
-    return JobState(scope_id=scope_id, status=Status(m["status"]), session_id=m.get("session_id"))
+    return JobState(scope_id=scope_id, status=Status(m["status"]),
+                    session_id=m.get("session_id"), claimed_at=m.get("claimed_at"))
 
 
 def _state_scalars(state: RunState) -> dict:
@@ -143,14 +146,22 @@ class DynamoDBRunStore:
     # DDB 原生 ConditionExpression 做原子 CAS——比 local 的 fcntl 文件锁更强（DDB 单 item 写天然原子、
     # 无需外部锁）。真 DDB 条件写行为已真 DDB 实测（moto 与真 DDB 对拍，见 test）。CCF=ConditionalCheckFailedException。
 
-    def try_claim_job(self, run_id: str, scope_id: str) -> bool:
-        """CAS：仅当 jobs[scope_id].status == 'pending' 才置 'running'（机制四）。CCF → 已被抢/非 pending → False。"""
+    def try_claim_job(self, run_id: str, scope_id: str, *, claimed_at: str | None = None) -> bool:
+        """CAS：仅当 jobs[scope_id].status == 'pending' 才置 'running'（机制四）。CCF → 已被抢/非 pending → False。
+
+        随写 claimed_at（timeout 起算点，ADR 0034「job timeout」节）——与 status 同一条原子条件写。
+        """
+        update = "SET jobs.#sid.#st = :running"
+        values = {":running": Status.RUNNING.value, ":pending": Status.PENDING.value}
+        if claimed_at is not None:
+            update += ", jobs.#sid.claimed_at = :ca"
+            values[":ca"] = claimed_at
         try:
             self._table.update_item(
                 Key={"run_id": run_id, _ITEM_TYPE_ATTR: _STATE},
-                UpdateExpression="SET jobs.#sid.#st = :running",
+                UpdateExpression=update,
                 ExpressionAttributeNames={"#sid": scope_id, "#st": "status"},
-                ExpressionAttributeValues={":running": Status.RUNNING.value, ":pending": Status.PENDING.value},
+                ExpressionAttributeValues=values,
                 ConditionExpression="jobs.#sid.#st = :pending",  # 仅当前是 pending 才抢占
             )
             return True

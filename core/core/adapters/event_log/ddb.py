@@ -64,7 +64,8 @@ class DdbEventLog:
                         recs.append(EventRecord(
                             scope_id=scope_id, kind="exit",
                             exited=TaskExited(scope_id=scope_id,
-                                              exit_code=int(ec) if ec is not None else None),
+                                              exit_code=int(ec) if ec is not None else None,
+                                              timed_out=bool(it.get("timed_out", False))),
                         ))
                     else:
                         recs.append(EventRecord(
@@ -90,10 +91,11 @@ class DdbEventLog:
             return 0.0
         return float(exp) - _EVENTS_TTL_S
 
-    def record_exit(self, scope_id: str, exit_code: int | None) -> None:
+    def record_exit(self, scope_id: str, exit_code: int | None, *, timed_out: bool = False) -> None:
         """退出观察者 Lambda 调：写 task_exited 到保留高位 SK（独立键空间，机制一）。INSERT 幂等（覆盖同键）。
 
-        exit_code=None 仅用于「payload 缺 exitCode 的宽限态」（机制二兜底，观察者应尽量带值）。"""
+        exit_code=None 仅用于「payload 缺 exitCode 的宽限态」（机制二兜底，观察者应尽量带值）。
+        timed_out：STOPPED 事件 stoppedReason 含超时哨兵（ADR 0034「job timeout」节归因链）；omit-when-False。"""
         item = {
             _PK_ATTR: events_pk(self._run_id, scope_id),
             _SK_ATTR: _EXIT_SK,
@@ -101,4 +103,6 @@ class DdbEventLog:
         }
         if exit_code is not None:
             item[_EXIT_CODE_ATTR] = exit_code
+        if timed_out:
+            item["timed_out"] = True
         self._table.put_item(Item=item)

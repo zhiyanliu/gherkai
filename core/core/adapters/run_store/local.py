@@ -134,14 +134,15 @@ class LocalRunStore:
             finally:
                 fcntl.flock(lf, fcntl.LOCK_UN)
 
-    def try_claim_job(self, run_id: str, scope_id: str) -> bool:
-        """CAS：仅当 jobs[scope_id] 当前 PENDING 才置 RUNNING（机制四）。"""
+    def try_claim_job(self, run_id: str, scope_id: str, *, claimed_at: str | None = None) -> bool:
+        """CAS：仅当 jobs[scope_id] 当前 PENDING 才置 RUNNING（机制四）；随写 claimed_at（timeout 起算点）。"""
         def mutate(state: RunState):
             js = state.jobs.get(scope_id)
             if js is None or js.status != Status.PENDING:
                 return None  # 不存在 / 已非 pending（别人抢了或已跑）→ 不改
             jobs = dict(state.jobs)
-            jobs[scope_id] = JobState(scope_id=scope_id, status=Status.RUNNING, session_id=js.session_id)
+            jobs[scope_id] = JobState(scope_id=scope_id, status=Status.RUNNING, session_id=js.session_id,
+                                      claimed_at=claimed_at)
             return RunState(run_id=state.run_id, status=state.status, jobs=jobs,
                             started_at=state.started_at, ended_at=state.ended_at,
                             high_water_mark=state.high_water_mark)
@@ -173,10 +174,15 @@ class LocalRunStore:
                 cur_js = cur.jobs.get(sid)
                 if cur_js is not None and _lifecycle_rank(cur_js.status) > _lifecycle_rank(js.status):
                     jobs[sid] = cur_js  # 库中更推进（已终态/已 claim）→ 保留，不回退
+                elif js.session_id and js.claimed_at:
+                    jobs[sid] = js
                 else:
-                    jobs[sid] = js if js.session_id else JobState(
+                    # 血缘/claim 时刻不丢：投影缺的字段回填库中值（claimed_at 只由 try_claim_job 落、
+                    # 事件推演不出——正常经 project 的 baseline 带回，此处兜没带 baseline 的投影）
+                    jobs[sid] = JobState(
                         scope_id=sid, status=js.status,
-                        session_id=cur_js.session_id if cur_js else None)  # 血缘不丢
+                        session_id=js.session_id or (cur_js.session_id if cur_js else None),
+                        claimed_at=js.claimed_at or (cur_js.claimed_at if cur_js else None))
             run_status = Status.PENDING if state.status == Status.PENDING else Status.RUNNING
             return RunState(run_id=state.run_id, status=run_status, jobs=jobs,
                             started_at=state.started_at or cur.started_at,

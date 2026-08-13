@@ -26,7 +26,8 @@ class EventLog(Protocol):
 
     def records(self) -> list: ...  # list[EventRecord]（core.project）
 
-    def record_exit(self, scope_id: str, exit_code: int | None) -> None: ...  # 幂等（独立键空间，机制一）
+    # 幂等（独立键空间，机制一）。timed_out：超时处置的 stop 所致退出（ADR 0034「job timeout」节归因链）。
+    def record_exit(self, scope_id: str, exit_code: int | None, *, timed_out: bool = False) -> None: ...
 
 
 # launch 失败补偿的哨兵退出码（机制二推论）：非 0 即走「exit≠0 → ERROR」谓词，值本身不进任何分支判断；
@@ -103,7 +104,7 @@ def tick(
     for act in actions:
         if act.kind == "start" and act.scope_id is not None:
             # CAS 抢占：多实例并发提议同一 pending，只有一个成功（机制四严格并发闸）。
-            if run_store.try_claim_job(run_id, act.scope_id):
+            if run_store.try_claim_job(run_id, act.scope_id, claimed_at=now_iso):
                 job = job_by_scope.get(act.scope_id)
                 if job is None:
                     continue  # plan_next 从 state.jobs 提议、键集 ⊆ meta.jobs，不该发生；防御跳过

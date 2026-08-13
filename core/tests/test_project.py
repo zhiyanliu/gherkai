@@ -46,6 +46,11 @@ def _passed_events(scope_id: str, base_seq: int = 1):
     ]
 
 
+def _timeout_exit(scope_id: str, code: int | None) -> EventRecord:
+    return EventRecord(scope_id=scope_id, kind="exit",
+                       exited=TaskExited(scope_id=scope_id, exit_code=code, timed_out=True))
+
+
 # ---------- 「两件都要」谓词（机制二）----------
 
 def test_no_records_job_is_pending():
@@ -119,6 +124,30 @@ def test_exit_code_none_is_conservative_running():
     recs = _passed_events("a") + [_exit("a", None)]
     state = project(_meta("a"), recs)
     assert state.jobs["a"].status == Status.RUNNING
+
+
+# ---------- job timeout 归因链（ADR 0034「job timeout」节）----------
+
+def test_timed_out_exit_is_error_regardless_of_exit_code_shape():
+    """超时处置的 stop → ERROR，不论 exit_code 形态（SIGKILL 137 / 协作退 0 / 未落值 None——
+    None 平时是保守 RUNNING 宽限态，timed_out 短路它：处置本身即终态信号）。"""
+    for code in (137, 0, None):
+        recs = [_ev("a", 1, ScopeStarted(scope_id="a", session_id="s")), _timeout_exit("a", code)]
+        state = project(_meta("a"), recs)
+        assert state.jobs["a"].status == Status.ERROR, f"exit_code={code} 应判 ERROR"
+
+
+def test_timed_out_attribution_error_type_timeout():
+    """归因 error_type="timeout"（对齐同步路径，[0031] 决定一）——即使内容完整（scope_done 都到了）
+    也以超时为根因、覆盖 reduce 期归因。"""
+    from core.project import project_full
+
+    recs = _passed_events("a") + [_timeout_exit("a", 137)]
+    result = project_full(_meta("a"), recs)
+    jr = result.jobs[0]
+    assert jr.status == Status.ERROR
+    assert jr.error_type == "timeout"
+    assert "超时" in (jr.message or "")
 
 
 # ---------- HWM（机制三）----------

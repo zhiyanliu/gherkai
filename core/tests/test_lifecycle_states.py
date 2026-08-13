@@ -282,8 +282,8 @@ def test_network_error_during_timeout_is_timeout_not_aborted():
     # _IncClock 每读 +10s，job_timeout=5 → schedule 内首次读 clock 建 deadline≈10，网络块重判 clock()>deadline 必真
     clock = _IncClock(10.0)
     result = schedule(
-        _rm([_job("victim")]), FakeResolver(engine), CollectSink(),
-        opts=ScheduleOpts(job_timeout_s=5.0, clock=clock, network_retry=0),
+        _rm([_job("victim", timeout_s=5.0)]), FakeResolver(engine), CollectSink(),
+        opts=ScheduleOpts(clock=clock, network_retry=0),
     )
     victim_jr = result.jobs[0]
     assert victim_jr.status == Status.ERROR

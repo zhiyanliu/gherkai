@@ -63,6 +63,9 @@ class Job:
     # AI 断言（Then）投票次数（治种类A抖动，ADR 0014）：worker 跑该断言 N 次取多数票。
     # 默认 1（不抖动检测，结果/日志最直观）；调高（如 3/5）才启用抖动治理。组合根经 --assertion-votes 设。
     assertion_votes: int = 1
+    # job 墙钟预算秒（ADR 0034「job timeout」节）：@timeout:N tag 或组合根填充的 --default-job-timeout；
+    # None=不超时。载体=definition（timeout 是「要跑什么」的预算约束），推进器各自 enforce、worker 不消费。
+    timeout_s: float | None = None
 
 
 # ============================================================================
@@ -363,6 +366,9 @@ class JobState:
     scope_id: str
     status: Status
     session_id: str | None = None  # AgentCore 会话血缘
+    # claim（CAS pending→running）时刻 ISO 串（ADR 0034「job timeout」节 claimed_at）：local 接力恢复
+    # deadline / cloud tick 防御性超时扫 / status 显示时长。timeout 从此刻起算（含启动开销）。
+    claimed_at: str | None = None
 
 
 @dataclass(frozen=True)

@@ -72,6 +72,36 @@ def test_claim_two_different_jobs_both_succeed(run_store):
     assert run_store.try_claim_job("run-1", "b") is True
 
 
+def test_claim_writes_claimed_at(run_store):
+    """claim 随写 claimed_at（timeout 起算点，ADR 0034「job timeout」节）；未 claim 的 job 无值。"""
+    meta = _meta()
+    run_store.create_run(meta, _initial(meta))
+    assert run_store.try_claim_job("run-1", "a", claimed_at="2026-08-13T01:02:03Z") is True
+    state = run_store.load_run_state("run-1")
+    assert state.jobs["a"].claimed_at == "2026-08-13T01:02:03Z"
+    assert state.jobs["b"].claimed_at is None
+
+
+def test_projection_preserves_claimed_at(run_store):
+    """投影的整 job 覆盖不抹 claimed_at：claimed_at 只由 claim 落库、事件推演不出——真实 tick 流里
+    project() 经 baseline 带回（ADR 0034「job timeout」节），两 adapter 对拍。"""
+    from core.model import ScopeStarted
+    from core.project import EventRecord, project
+
+    meta = _meta()
+    run_store.create_run(meta, _initial(meta, hwm=0))
+    assert run_store.try_claim_job("run-1", "a", claimed_at="2026-08-13T01:02:03Z") is True
+    baseline = run_store.load_run_state("run-1")
+    recs = [EventRecord(scope_id="a", kind="event", seq=1,
+                        event=ScopeStarted(scope_id="a", session_id="sess-1"), emit_ts=0.0)]
+    projected = project(meta, recs, baseline)
+    assert projected.jobs["a"].claimed_at == "2026-08-13T01:02:03Z"  # 投影经 baseline 带回
+    assert run_store.project_state("run-1", projected) is True
+    got = run_store.load_run_state("run-1")
+    assert got.jobs["a"].claimed_at == "2026-08-13T01:02:03Z"  # 落库后仍在（整 job 覆盖没抹）
+    assert got.jobs["a"].session_id == "sess-1"  # 血缘同机制带回
+
+
 # ---------- 机制三：HWM project_state ----------
 
 def test_project_advances_hwm(run_store):

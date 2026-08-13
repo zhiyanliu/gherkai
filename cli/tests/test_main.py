@@ -196,6 +196,7 @@ def _capturing_schedule(status, opts_box):
     """假 schedule：把传入 opts 存进 opts_box、按指定 status 合成 RunResult（验退出码/参数映射）。"""
     def fake(run_meta, engines, sink, opts=None, on_job_complete=None, on_event=None):
         opts_box["opts"] = opts
+        opts_box["run_meta"] = run_meta
         results = [JobResult(job=j, status=status) for j in run_meta.jobs]
         if on_job_complete is not None:
             for jr in results:
@@ -227,7 +228,9 @@ def test_run_schedule_opts_mapping(tmp_path, monkeypatch, capsys):
             "--max-concurrency", "3", "--default-job-timeout", "120", "--grace", str(good_grace), "--fail-fast"])
     o = box["opts"]
     assert o.max_concurrency == 3 and o.fail_fast is True
-    assert o.job_timeout_s == 120.0 and o.grace_period_s == float(good_grace)
+    assert o.grace_period_s == float(good_grace)
+    # timeout 载体在 definition（ADR 0034「job timeout」节）：--default-job-timeout 填进未标 @timeout 的 Job
+    assert all(j.timeout_s == 120.0 for j in box["run_meta"].jobs)
     # min_grace_s 也传给 core（核心不变量：core enforce grace≥此下限，ADR 0024 grace 硬约束）
     assert o.min_grace_s == float(compose.NOVA_ACT_TIMEOUT_S + compose.NOVA_GRACE_MARGIN_S)
 
@@ -254,11 +257,11 @@ def test_run_grace_sentinel_derives_from_engine(tmp_path, monkeypatch, capsys):
 
 
 def test_run_timeout_nonpositive_maps_to_none(tmp_path, monkeypatch, capsys):
-    # --default-job-timeout <=0 → job_timeout_s=None（不超时），是有逻辑的转换，护住它
+    # --default-job-timeout <=0 → Job.timeout_s=None（不超时），是有逻辑的转换，护住它
     box = {}
     monkeypatch.setattr(m, "schedule", _capturing_schedule(Status.PASSED, box))
     m.main(["run", str(_write_feature(tmp_path)), "--no-report", "--default-job-timeout", "0"])
-    assert box["opts"].job_timeout_s is None
+    assert all(j.timeout_s is None for j in box["run_meta"].jobs)
 
 
 # ---- #8 畸形 feature → 友好诊断、退 2、无 traceback ----

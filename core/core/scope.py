@@ -22,6 +22,7 @@ logger = logging.getLogger("core.scope")
 
 _SCOPE_PREFIX = "@scope:"
 _ENGINE_PREFIX = "@engine:"
+_TIMEOUT_PREFIX = "@timeout:"
 
 
 @dataclass(frozen=True)
@@ -38,6 +39,9 @@ class PlanConfig:
     # AI 断言投票次数缺省（ADR 0014）：无 per-scope 覆盖时所有 job 用它。默认 1（不抖动检测）。
     # 与 default_engine 对称——未来可由 @votes: tag per-scope 覆盖（留口子，现不实现）。
     default_assertion_votes: int = 1
+    # job 墙钟预算秒缺省（ADR 0019 @timeout / ADR 0034「job timeout」节）：未标 @timeout: 的 scope 用它，
+    # 与 default_engine 同构。None=不超时。
+    default_job_timeout_s: float | None = None
 
 
 def _values_with_prefix(tags: tuple[str, ...], prefix: str) -> list[str]:
@@ -79,6 +83,36 @@ def _resolve_engine(scope_id: str, members: list[ParsedScenario], default_engine
             f"同一 scope 跨引擎 = 物理自相矛盾（共享会话又是两个不共享的会话），拒绝运行（ADR 0019）。"
         )
     return engines[0] if engines else default_engine
+
+
+def _resolve_timeout(scope_id: str, members: list[ParsedScenario], default: float | None) -> float | None:
+    """解析一个 scope 的 job 墙钟预算：与 _resolve_engine 同构（ADR 0019 @timeout）。
+
+    缺省用 default；任一标了 @timeout:N 则全 scope 继承；多个不同值 → PlanError（同 scope 一个预算）。
+    N 必须是正数（非数字 / <=0 → PlanError——「标了 tag 但想不超时」不成立，删 tag 走缺省即可）。
+    """
+    raws: list[str] = []
+    for m in members:
+        for v in _values_with_prefix(m.tags, _TIMEOUT_PREFIX):
+            if v not in raws:
+                raws.append(v)
+    if len(raws) > 1:
+        raise PlanError(
+            f"scope {scope_id!r} 出现多个 @timeout 值 {raws}："
+            f"同一 scope（一个 job）只能有一个墙钟预算，拒绝运行（ADR 0019）。"
+        )
+    if not raws:
+        return default
+    raw = raws[0]
+    try:
+        n = float(raw)
+    except ValueError:
+        raise PlanError(f"scope {scope_id!r} 的 @timeout:{raw} 不是数字：须为正数秒（ADR 0019）。") from None
+    if n <= 0:
+        raise PlanError(
+            f"scope {scope_id!r} 的 @timeout:{raw} 须为正数秒（ADR 0019）；不想超时就删掉 tag 走缺省。"
+        )
+    return n
 
 
 def plan(features: list[FeatureSource], config: PlanConfig) -> list[Job]:
@@ -134,6 +168,7 @@ def plan(features: list[FeatureSource], config: PlanConfig) -> list[Job]:
     jobs: list[Job] = []
     for key, members in groups.items():
         engine = _resolve_engine(key, members, config.default_engine)
+        timeout_s = _resolve_timeout(key, members, config.default_job_timeout_s)
         named = group_is_named.get(key, False)
         if named:
             scope_id = key
@@ -149,6 +184,7 @@ def plan(features: list[FeatureSource], config: PlanConfig) -> list[Job]:
                 engine=engine,
                 scenarios=tuple(m.scenario for m in members),  # 丢弃 tags，Scenario 保持纯净
                 assertion_votes=config.default_assertion_votes,  # per-scope 覆盖留口子（@votes:），现统一用缺省
+                timeout_s=timeout_s,
             )
         )
     return jobs

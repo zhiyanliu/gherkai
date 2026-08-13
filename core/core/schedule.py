@@ -109,7 +109,6 @@ def _heartbeat_wrap(events, poll_interval_s, deadline):
 class ScheduleOpts:
     max_concurrency: int = 4  # 同时在跑的 worker 上限（保护真实 AWS 成本/配额）
     fail_fast: bool = False  # 任一 job 崩是否中止整批
-    job_timeout_s: float | None = None  # per-job 墙钟超时（None=不超时）
     grace_period_s: float = 5.0  # 停止请求后等 worker 优雅退出的宽限秒
     # grace 下限（引擎无关的纯数，ADR 0024 grace 硬约束）：调用方（组合根）声明「本 run 的 grace 至少要这么大」，
     # schedule 起 worker 前 enforce grace_period_s >= min_grace_s。**core 不认这个下限从何而来**（引擎特定的
@@ -164,8 +163,9 @@ class _Worker:
         fail_fast/timeout 优先级高于 network 重试（它们已主动中止，不再重跑）。
         """
         # deadline 跨 attempt 共享（ADR 0028）：覆盖所有 attempt 之和，重试不重置——否则 N 次重试
-        # 各拿一整份 job_timeout、绕过超时上限。run 级算一次，所有 _run_once 共用。
-        deadline = (self.opts.clock() + self.opts.job_timeout_s) if self.opts.job_timeout_s else None
+        # 各拿一整份 timeout、绕过超时上限。run 级算一次，所有 _run_once 共用。
+        # 预算载体在 definition（Job.timeout_s，@timeout tag 或组合根缺省填充——ADR 0034「job timeout」节）。
+        deadline = (self.opts.clock() + self.job.timeout_s) if self.job.timeout_s else None
         last: JobResult | None = None
         for attempt in range(self.opts.network_retry + 1):
             if attempt > 0:
@@ -229,7 +229,7 @@ class _Worker:
                     self._stop()
                     result.status = Status.ERROR
                     result.error_type = "timeout"
-                    result.message = f"job 超时（>{self.opts.job_timeout_s}s）"
+                    result.message = f"job 超时（>{self.job.timeout_s}s）"
                     return result, False, saw_step
                 if self.abort_flag.is_set():
                     self_stopped = True
@@ -270,7 +270,7 @@ class _Worker:
                 return result, False, saw_step
             if self_stopped or (deadline is not None and clock() > deadline):
                 result.error_type = "timeout"
-                result.message = f"job 超时（>{self.opts.job_timeout_s}s）——建连退避期间超时"
+                result.message = f"job 超时（>{self.job.timeout_s}s）——建连退避期间超时"
                 return result, False, saw_step
             result.error_type = "network_error"
             result.message = f"worker 建连失败（网络/SSL 瞬时故障）：{e}"
@@ -296,7 +296,7 @@ class _Worker:
             result.status = Status.ERROR
             if deadline is not None and clock() > deadline:
                 result.error_type = "timeout"
-                result.message = f"job 超时（>{self.opts.job_timeout_s}s）——worker 收停后干净退出"
+                result.message = f"job 超时（>{self.job.timeout_s}s）——worker 收停后干净退出"
             else:
                 result.error_type = "engine_error"
                 result.message = "worker 干净退出但未发完 scope_done（内容不完整、进程却说成功=矛盾）"

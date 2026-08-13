@@ -144,6 +144,10 @@ class TaskExited:
 
     scope_id: str
     exit_code: int | None = None
+    # 超时归因（ADR 0034「job timeout」节）：本次退出是否由 timeout 处置的 stop 所致。
+    # local 由 launcher 的 timer 标志传入；cloud 经 StopTask reason → STOPPED 事件 detail.stoppedReason
+    # 哨兵串还原。_job_status 见它 → ERROR，_reduce_scope 归因 error_type="timeout"。
+    timed_out: bool = False
 
 
 @dataclass(frozen=True)
@@ -209,6 +213,9 @@ def project(meta: RunMeta, records: list[EventRecord], baseline: RunState | None
         jobs_state[scope_id] = JobState(
             scope_id=scope_id, status=status,
             session_id=result.session_id or (prior.session_id if prior else None),
+            # claimed_at 只由 try_claim_job 落库、事件推演不出——从 baseline（prior）带回，
+            # 否则 project_state 的整 job 覆盖会把它抹掉（ADR 0034 job timeout 起算点）。
+            claimed_at=prior.claimed_at if prior else None,
         )
 
     run_status = _aggregate([js.status for js in jobs_state.values()])
@@ -250,6 +257,12 @@ def _reduce_scope(job: Job, recs: list[EventRecord]) -> tuple[JobResult, Status,
     exited = exits[0] if exits else None
     status = _job_status(saw_scope_started, saw_scope_done, exited, scenario_status)
     result.status = status
+    if exited is not None and exited.timed_out:
+        # 归因对齐同步路径（[0031] 决定一：超时是主动中止、记 error+timeout）；覆盖 reduce 期可能累积的
+        # 其他归因——stop 是超时处置发起的，超时是根因。
+        result.error_type = "timeout"
+        result.message = (f"job 超时（预算 {job.timeout_s}s，推进器中止）"
+                          if job.timeout_s else "job 超时（推进器中止）")
     return result, status, max_seq
 
 
@@ -311,6 +324,10 @@ def _job_status(
     - 无 task_exited（进程还没终止）：saw_scope_started → RUNNING；否则 PENDING（还没起/还没写事件）。
     """
     if exited is not None:
+        if exited.timed_out:
+            # 超时处置的 stop（ADR 0034「job timeout」节）：不论 exit_code 形态（协作退 0/SIGKILL/未落值），
+            # 处置本身即终态信号——归 ERROR，归因由 _reduce_scope 补 error_type="timeout"。
+            return Status.ERROR
         if exited.exit_code is None:
             return Status.RUNNING  # 终止了但 exitCode 未落值（宽限态）→ 保守，等观察者补
         if exited.exit_code != 0:

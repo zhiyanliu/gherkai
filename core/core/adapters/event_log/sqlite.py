@@ -51,9 +51,15 @@ class SqliteEventLog:
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS exits ("
                 "  scope_id TEXT PRIMARY KEY,"  # 独立键空间（机制一）：退出记录不占 events 的 seq 段
-                "  exit_code INTEGER"           # NULL 表 exitCode 尚未落值（宽限态，机制二兜底）
+                "  exit_code INTEGER,"          # NULL 表 exitCode 尚未落值（宽限态，机制二兜底）
+                "  timed_out INTEGER NOT NULL DEFAULT 0"  # 超时归因（ADR 0034「job timeout」节）
                 ")"
             )
+            # 旧库迁移（加列幂等）：timeout 列引入前建的 exits 表补列；已有列 → OperationalError，忽略
+            try:
+                conn.execute("ALTER TABLE exits ADD COLUMN timed_out INTEGER NOT NULL DEFAULT 0")
+            except sqlite3.OperationalError:
+                pass
 
     def append_event(self, scope_id: str, seq: int, line: str, emit_ts: float) -> None:
         """追加一条 worker 事件（原始 JSON 行）。INSERT OR REPLACE：同 (scope,seq) 幂等（重放/重试无副作用）。"""
@@ -63,12 +69,14 @@ class SqliteEventLog:
                 (scope_id, seq, line, emit_ts),
             )
 
-    def record_exit(self, scope_id: str, exit_code: int | None) -> None:
-        """写平台侧退出记录（per-run 进程 proc.wait() 拿到 exitcode 后调，机制二）。INSERT OR REPLACE 幂等。"""
+    def record_exit(self, scope_id: str, exit_code: int | None, *, timed_out: bool = False) -> None:
+        """写平台侧退出记录（per-run 进程 proc.wait() 拿到 exitcode 后调，机制二）。INSERT OR REPLACE 幂等。
+
+        timed_out：本次退出由超时处置的 stop 所致（launcher timer 标志，ADR 0034「job timeout」节归因链）。"""
         with self._connect() as conn:
             conn.execute(
-                "INSERT OR REPLACE INTO exits (scope_id, exit_code) VALUES (?, ?)",
-                (scope_id, exit_code),
+                "INSERT OR REPLACE INTO exits (scope_id, exit_code, timed_out) VALUES (?, ?, ?)",
+                (scope_id, exit_code, 1 if timed_out else 0),
             )
 
     def records(self) -> list[EventRecord]:
@@ -85,10 +93,12 @@ class SqliteEventLog:
                     scope_id=scope_id, kind="event", seq=seq,
                     event=event_from_line(line), emit_ts=emit_ts,
                 ))
-            for scope_id, exit_code in conn.execute("SELECT scope_id, exit_code FROM exits"):
+            for scope_id, exit_code, timed_out in conn.execute(
+                "SELECT scope_id, exit_code, timed_out FROM exits"
+            ):
                 recs.append(EventRecord(
                     scope_id=scope_id, kind="exit",
-                    exited=TaskExited(scope_id=scope_id, exit_code=exit_code),
+                    exited=TaskExited(scope_id=scope_id, exit_code=exit_code, timed_out=bool(timed_out)),
                 ))
         return recs
 

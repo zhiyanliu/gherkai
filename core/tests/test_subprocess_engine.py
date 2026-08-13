@@ -27,9 +27,9 @@ def _engine(mode: str) -> SubprocessEngine:
     return SubprocessEngine(cmd=[sys.executable, _WORKER], env=env)
 
 
-def _job(scope_id: str = "s") -> Job:
+def _job(scope_id: str = "s", timeout_s: float | None = None) -> Job:
     return Job(
-        scope_id=scope_id, scope_name=scope_id, engine="novaact",
+        scope_id=scope_id, scope_name=scope_id, engine="novaact", timeout_s=timeout_s,
         scenarios=(
             Scenario(id=f"{scope_id}:0", name="sc", steps=(
                 Step(0, "Given", '打开 "https://x"'),
@@ -145,8 +145,8 @@ def test_silent_worker_timeout_fires_via_heartbeat():
     # job_timeout=1s：silent worker 吐完 scope_started/scenario_started 即静默；靠心跳，schedule 应在
     # ~1s（+ 一个心跳间隔 + grace）内超时杀掉，而非永久挂起。给宽松上限 15s 兜底（仍远小于"永不触发"）。
     result = schedule(
-        _rm([_job("s")]), lambda name: engine, CollectSink(),
-        opts=ScheduleOpts(job_timeout_s=1.0, grace_period_s=5.0, heartbeat_interval_s=0.2),
+        _rm([_job("s", timeout_s=1.0)]), lambda name: engine, CollectSink(),
+        opts=ScheduleOpts(grace_period_s=5.0, heartbeat_interval_s=0.2),
     )
     elapsed = time.monotonic() - t0
     assert result.jobs[0].status == Status.ERROR
@@ -158,8 +158,8 @@ def test_silent_worker_timeout_fires_via_heartbeat():
 def test_session_id_captured_from_scope_started_on_timeout():
     engine = _engine("silent")
     result = schedule(
-        _rm([_job("s")]), lambda name: engine, CollectSink(),
-        opts=ScheduleOpts(job_timeout_s=1.0, grace_period_s=5.0),
+        _rm([_job("s", timeout_s=1.0)]), lambda name: engine, CollectSink(),
+        opts=ScheduleOpts(grace_period_s=5.0),
     )
     # silent worker 超时被杀、从未 emit scope_done——但 session_id 已随 scope_started 落到 result（ADR 0028）
     assert result.jobs[0].status == Status.ERROR

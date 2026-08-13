@@ -294,6 +294,31 @@ def test_update_job_state_before_create_raises(tmp_path: Path):
         store.finalize_run("nope", Status.PASSED, "t")
 
 
+def test_job_timeout_s_round_trip():
+    # Job.timeout_s（ADR 0034「job timeout」节）：非 None 经 round-trip 不丢；None 落盘省键（旧数据兼容）
+    from core.serialize import job_from_dict, job_to_dict
+    j = _job_def("s", "s", "midscene")
+    assert "timeout_s" not in job_to_dict(j)  # omit-when-None（旧读端兼容）
+    assert job_from_dict(job_to_dict(j)).timeout_s is None
+    jt = Job(scope_id="t", scope_name="t", engine="midscene", scenarios=j.scenarios, timeout_s=90.0)
+    assert job_from_dict(job_to_dict(jt)).timeout_s == 90.0
+
+
+def test_job_state_claimed_at_round_trip(tmp_path: Path):
+    # JobState.claimed_at（timeout 起算点）：落盘/读回不丢；未 claim 的省键 → None
+    store = LocalRunStore(tmp_path / "runs")
+    meta = _sample_run("ca-run").run_meta
+    sid0, sid1 = meta.jobs[0].scope_id, meta.jobs[1].scope_id
+    state = RunState(run_id="ca-run", status=Status.RUNNING, jobs={
+        sid0: JobState(sid0, Status.RUNNING, claimed_at="2026-08-13T00:00:00Z"),
+        sid1: JobState(sid1, Status.PENDING),
+    })
+    store.save_run(meta, state)
+    got = store.load_run_state("ca-run")
+    assert got.jobs[sid0].claimed_at == "2026-08-13T00:00:00Z"
+    assert got.jobs[sid1].claimed_at is None
+
+
 def test_run_state_jobs_map_round_trip(tmp_path: Path):
     # RunState.jobs 是 Map（ADR 0030）：内存 dict → 落盘 list JSON → 读回仍是等价 Map
     store = LocalRunStore(tmp_path / "runs")

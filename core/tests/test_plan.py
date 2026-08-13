@@ -163,6 +163,64 @@ def test_distinct_uri_ok():
     assert len(jobs) == 2
 
 
+# ---- @timeout tag（ADR 0019，与 @engine 同构）：tag 优先、缺省兜底、冲突/非法值报错 ----
+def test_timeout_tag_sets_job_budget():
+    jobs = _plan(
+        """Feature: F
+  @scope:x @timeout:60
+  Scenario: a
+    When "x"
+"""
+    )
+    assert jobs[0].timeout_s == 60.0
+
+
+def test_timeout_default_fills_untagged_tag_wins():
+    cfg = PlanConfig(default_engine="midscene", default_job_timeout_s=120.0)
+    jobs = _plan(
+        """Feature: F
+  @scope:x @timeout:60
+  Scenario: a
+    When "x"
+  Scenario: b
+    When "y"
+""",
+        cfg=cfg,
+    )
+    by_scope = {j.scope_id: j for j in jobs}
+    assert by_scope["x"].timeout_s == 60.0  # tag 优先于缺省
+    untagged = next(j for sid, j in by_scope.items() if sid != "x")
+    assert untagged.timeout_s == 120.0  # 未标的走缺省
+
+
+def test_timeout_absent_and_no_default_is_none():
+    # 无 tag、无缺省（CFG 的 default_job_timeout_s=None）→ 不超时
+    jobs = _plan('Feature: F\n  Scenario: s\n    When "x"\n')
+    assert jobs[0].timeout_s is None
+
+
+def test_timeout_conflict_errors():
+    with pytest.raises(PlanError, match="多个 @timeout"):
+        _plan(
+            """Feature: F
+  @scope:x @timeout:60
+  Scenario: c1
+    When "x"
+  @scope:x @timeout:90
+  Scenario: c2
+    When "y"
+"""
+        )
+
+
+def test_timeout_invalid_values_error():
+    # 非数字 / 非正数都拒（「标了 tag 但想不超时」不成立——删 tag 走缺省）
+    with pytest.raises(PlanError, match="不是数字"):
+        _plan('Feature: F\n  @scope:x @timeout:abc\n  Scenario: a\n    When "x"\n')
+    with pytest.raises(PlanError, match="正数"):
+        _plan('Feature: F\n  @scope:x @timeout:0\n  Scenario: a\n    When "x"\n')
+
+
 # ---- 同一 scope 多个不同 engine → 报错 ----
 def test_engine_conflict_errors():
     with pytest.raises(PlanError, match="多个 @engine"):

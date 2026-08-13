@@ -112,11 +112,14 @@ class RunStore(Protocol):
     # —— 无状态跑批的条件写三方（ADR 0034；reconciler 跨进程/跨实例并发调用，靠条件写而非进程内锁）——
     # 与上面「实时写三段」并存、职责不同：那三段假定单编排进程内锁串行；这三方假定并发多写者、
     # 每个方法自身是原子条件写、返回是否成功让调用方（reconciler）据此决定要不要 RunTask/收尾。
-    def try_claim_job(self, run_id: str, scope_id: str) -> bool:
+    def try_claim_job(self, run_id: str, scope_id: str, *, claimed_at: str | None = None) -> bool:
         """CAS 抢占：仅当该 job 当前是 PENDING 才置 RUNNING，成功返回 True（机制四）。
 
         多个 reconciler 实例并发抢同一 pending job，只有一个 CAS 成功（返回 True）去真 RunTask/spawn，
         其余返回 False 跳过——严格 max_concurrency 的并发闸（不靠进程内线程池）。job 不存在/已非 pending → False。
+
+        claimed_at（ISO 串，调用方注入时钟）：CAS 成功时随写 JobState.claimed_at——job timeout 的起算点
+        （ADR 0034「job timeout」节：local 接力恢复 deadline / cloud tick 防御性超时扫 / status 显示时长）。
         """
         ...
 

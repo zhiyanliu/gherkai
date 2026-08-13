@@ -48,7 +48,8 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     run.add_argument(
         "--default-job-timeout", type=float, default=300.0, metavar="S",
-        help="job 墙钟超时秒的缺省值（默认 300；<=0 表示不超时）。「缺省」前瞻两层设定：将来 scope 可用 @timeout tag 按用例声明预算、未标的用本值（同 @engine/--default-engine 模式）",
+        help="未标 @timeout 的 scope 用的 job 墙钟超时秒（默认 300；<=0 表示不超时）；"
+             "标了 @timeout:N tag 的按 tag 走（同 @engine/--default-engine 模式）",
     )
     run.add_argument(
         "--grace", type=float, default=None,
@@ -115,6 +116,11 @@ def _build_parser() -> argparse.ArgumentParser:
     pl = sub.add_parser("plan", help="预检 .feature：看 scope/job 分组 + 校验配置，不真跑（不烧钱）")
     pl.add_argument("features", nargs="+", type=Path, help="一个或多个 .feature 路径")
     pl.add_argument(
+        "--default-job-timeout", type=float, default=300.0, metavar="S",
+        help="未标 @timeout 的 scope 用的 job 墙钟超时秒（默认 300；<=0 表示不超时）——与 run/submit 同源，"
+             "让 plan 预检出的 Job 与真跑一致",
+    )
+    pl.add_argument(
         "--default-engine", default="novaact",
         help="未标 @engine 的 scope 用的默认引擎（默认 novaact）——影响分组结果，故预检也可设",
     )
@@ -131,6 +137,10 @@ def _build_parser() -> argparse.ArgumentParser:
     sm.add_argument("--default-engine", default="novaact", help="未标 @engine 的 scope 用的默认引擎")
     sm.add_argument("--assertion-votes", type=int, default=1, metavar="N", help="AI 断言投票次数（默认 1）")
     sm.add_argument("--max-concurrency", type=int, default=1, help="同时在跑的 worker 上限（默认 1）")
+    sm.add_argument(
+        "--default-job-timeout", type=float, default=300.0, metavar="S",
+        help="未标 @timeout 的 scope 用的 job 墙钟超时秒（默认 300；<=0 表示不超时）；标了 @timeout:N 的按 tag 走",
+    )
     sm.add_argument("--report-dir", default="reports", metavar="DIR", help="归集报告落点（默认 reports/）")
     sm.add_argument("--region", default=None, metavar="R", help="AWS region（喂 worker）")
     sm.add_argument("--profile", default=None, metavar="P", help="AWS profile（喂 subprocess worker）")
@@ -201,6 +211,10 @@ def _load_and_plan(args, repo: Path) -> "list | int":
         return plan(features, PlanConfig(
             default_engine=args.default_engine,
             default_assertion_votes=args.assertion_votes,
+            # 两层设定的缺省层（ADR 0019 @timeout / ADR 0034「job timeout」节）：标了 @timeout: 的 scope
+            # 按 tag 走，未标的用本缺省；<=0 → None=不超时。载体在 definition（Job.timeout_s），
+            # 三路推进器（同步 schedule / local per-run / cloud）各自 enforce。
+            default_job_timeout_s=(args.default_job_timeout if args.default_job_timeout > 0 else None),
         ))
     except PlanError as e:
         _progress(f"plan 失败（配置矛盾，拒绝运行）：{e}")
@@ -676,7 +690,7 @@ def _cmd_run(args, repo: Path) -> int:
 
     _progress(
         f"run_id={run_id}  schedule: 启动 worker 建立 AgentCore 云端浏览器会话（将产生 AWS 费用）  "
-        f"max_concurrency={args.max_concurrency} job_timeout={args.default_job_timeout}s ..."
+        f"max_concurrency={args.max_concurrency} default_job_timeout={args.default_job_timeout}s ..."
     )
 
     # grace 硬约束（ADR 0024）：按本 run 各引擎的下限取 max（grace 是 run 级单值）。引擎特定下限住组合根。
@@ -703,7 +717,6 @@ def _cmd_run(args, repo: Path) -> int:
             ScheduleOpts(
                 max_concurrency=args.max_concurrency,
                 fail_fast=args.fail_fast,
-                job_timeout_s=args.default_job_timeout if args.default_job_timeout > 0 else None,
                 grace_period_s=grace,
                 min_grace_s=min_grace,  # core enforce grace ≥ 此下限（引擎无关关系，ADR 0024）
             ),
