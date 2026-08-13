@@ -57,7 +57,7 @@ class EventBridgeTimeoutWatch:
     EventBridge Scheduler **one-time schedule**（at = now+timeout、ActionAfterCompletion=DELETE 到点自动删
     ——无常驻轮询、idle 零成本）→ 到点 invoke kicker（payload {"run_id","timeout_scope"}）走超时处置。
 
-    schedule 名 = {prefix}jt-{sha1(run_id#scope_id)[:20]}：确定性（重复 arm 幂等，ConflictException 视作已武装）、
+    schedule 名 = {prefix}job-timeout-{sha1(run_id#scope_id)[:20]}：确定性（重复 arm 幂等，ConflictException 视作已武装）、
     合法字符集（scope_id 可含中文/路径，不能直接入名）、≤64 字符。best-effort：调用方（CloudLauncher）兜异常。
     """
 
@@ -71,7 +71,7 @@ class EventBridgeTimeoutWatch:
         import hashlib
 
         digest = hashlib.sha1(f"{run_id}#{scope_id}".encode("utf-8")).hexdigest()[:20]
-        return f"{self._prefix}jt-{digest}"
+        return f"{self._prefix}job-timeout-{digest}"
 
     def arm(self, run_id: str, scope_id: str, timeout_s: float) -> None:
         import json

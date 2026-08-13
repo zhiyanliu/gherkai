@@ -151,6 +151,41 @@ def test_cloud_launcher_no_arm_without_timeout():
     assert eng.started == ["a"] and watch.armed == []
 
 
+def test_cloud_launcher_arms_before_start_scope():
+    """武装先于起 task（ADR 0034「job timeout」节 best-effort 边界）：launch 与其失败补偿双失败时，
+    先建的 schedule 到点仍收敛——顺序倒过来（先 start 后 arm）双失败会失去最后兜底。"""
+    from core.adapters.cloud_launcher import CloudLauncher
+
+    order = []
+
+    class OrderWatch:
+        def arm(self, run_id, scope_id, timeout_s): order.append("arm")
+
+    class OrderEngine:
+        def start_scope(self, job): order.append("start")
+
+    CloudLauncher(lambda name: OrderEngine(), run_id="run-1", timeout_watch=OrderWatch()).launch(
+        _job("a", timeout_s=60.0))
+    assert order == ["arm", "start"]
+
+
+def test_cloud_launcher_launch_failure_still_armed_and_raises():
+    """start_scope 抛异常：arm 已先行（schedule 在，双失败兜底生效）、异常照常冒泡（tick 靠它触发
+    launch 失败补偿 record_exit(255)——不许被吞）。"""
+    import pytest
+    from core.adapters.cloud_launcher import CloudLauncher
+
+    watch = _RecorderWatch()
+
+    class BoomEngine:
+        def start_scope(self, job): raise RuntimeError("RunTask placement failure")
+
+    with pytest.raises(RuntimeError, match="placement"):
+        CloudLauncher(lambda name: BoomEngine(), run_id="run-1", timeout_watch=watch).launch(
+            _job("a", timeout_s=60.0))
+    assert watch.armed == [("run-1", "a", 60.0)]  # 武装已完成、不随 launch 失败丢失
+
+
 def test_cloud_launcher_arm_failure_does_not_block_launch():
     """武装失败 best-effort（ADR 0034「job timeout」节边界）：不抛、task 已起——降级 tick 防御扫。"""
     from core.adapters.cloud_launcher import CloudLauncher

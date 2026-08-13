@@ -390,10 +390,10 @@ class BackendStack(Stack):
         scheduler_role.add_to_policy(iam.PolicyStatement(
             actions=["lambda:InvokeFunction"], resources=[kicker_arn, f"{kicker_arn}:*"]))
         timeout_env = {"KICKER_ARN": kicker_arn, "SCHEDULER_ROLE_ARN": scheduler_role.role_arn}
-        # 超时 schedule 的名字空间（default group 下 {prefix}jt-*，见 lambdas/reconciler.py schedule_name）：
+        # 超时 schedule 的名字空间（default group 下 {prefix}job-timeout-*，见 lambdas/reconciler.py schedule_name）：
         # CreateSchedule 需随附 DeleteSchedule（ActionAfterCompletion=DELETE 的 IAM 前置）。
         timeout_schedule_arns = [
-            f"arn:aws:scheduler:{self.region}:{self.account}:schedule/default/{self.prefix}jt-*"
+            f"arn:aws:scheduler:{self.region}:{self.account}:schedule/default/{self.prefix}job-timeout-*"
         ]
 
         # ② reconciler Lambda（重；读全量重放 + 起 task + finalize 聚合）

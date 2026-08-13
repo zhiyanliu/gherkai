@@ -50,8 +50,8 @@
     "semantic_hash": "23c8be26834ecfca9c630f3b0b7e4cd3"
   },
   "core/core/adapters/cloud_launcher.py": {
-    "mtime": 1786606212.8695588,
-    "ast_hash": "c9c4af4b4ff8e53351670124c501ba02",
+    "mtime": 1786608459.2907813,
+    "ast_hash": "2b649cb834d108809d47ea4da716f81a",
     "semantic_hash": ""
   },
   "core/core/adapters/event_log/__init__.py": {
@@ -225,8 +225,8 @@
     "semantic_hash": "851d74f2212a6bd8d5706ec6b95e07ca"
   },
   "core/tests/test_cloud_reconcile.py": {
-    "mtime": 1786606520.289677,
-    "ast_hash": "214dd384be987253adf3af064871aadc",
+    "mtime": 1786608459.291142,
+    "ast_hash": "b5b668c2ec0562e9e39448782e17fcda",
     "semantic_hash": ""
   },
   "core/tests/test_conditional_writes.py": {
@@ -545,13 +545,13 @@
     "semantic_hash": ""
   },
   "iac_aws_backend/stack.py": {
-    "mtime": 1786606361.9923875,
-    "ast_hash": "a461b220b005316171dad980ec7e3895",
+    "mtime": 1786608459.2901292,
+    "ast_hash": "52af6a8ec0715ee6d913c7977d2f52fe",
     "semantic_hash": ""
   },
   "iac_aws_backend/tests/test_stack.py": {
-    "mtime": 1786606455.4947724,
-    "ast_hash": "4d7b2baa3c04c39ee44e4e8648c02df2",
+    "mtime": 1786608459.2902827,
+    "ast_hash": "e571fb73e8241d4bce992b3644f070f3",
     "semantic_hash": ""
   },
   "lambdas/exit_observer.py": {
@@ -560,8 +560,8 @@
     "semantic_hash": ""
   },
   "lambdas/reconciler.py": {
-    "mtime": 1786606317.7369208,
-    "ast_hash": "b7126c7b7d24878e768a7943b116aa8c",
+    "mtime": 1786608459.2898133,
+    "ast_hash": "0f820da21ae59c77e7eefbf3550da715",
     "semantic_hash": ""
   },
   "tools/build_push_workers.py": {
@@ -650,8 +650,8 @@
     "semantic_hash": ""
   },
   "README.md": {
-    "mtime": 1786599664.0948193,
-    "ast_hash": "b999f0fbf8012aae6327aaf596961778",
+    "mtime": 1786606757.48202,
+    "ast_hash": "e6f9f2e4df96e3084afb7078fcf1f924",
     "semantic_hash": ""
   },
   "cli/README.md": {
@@ -795,8 +795,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0034-detached-batch-reconciler.md": {
-    "mtime": 1786605585.5346465,
-    "ast_hash": "1c035d8fd73c6c1e18aed1d0cde30942",
+    "mtime": 1786608459.2910442,
+    "ast_hash": "4140533a51691b5f4ee05c7340bde2cc",
     "semantic_hash": ""
   },
   "docs/doc-health-review.md": {
@@ -860,8 +860,8 @@
     "semantic_hash": ""
   },
   "gherkai/tests/test_lambda_handlers.py": {
-    "mtime": 1786606643.0672395,
-    "ast_hash": "afb5e9f9817aa8447ae2297f5ff36465",
+    "mtime": 1786608459.290588,
+    "ast_hash": "2f4d4fcfe3e15a5c030eb1352c241406",
     "semantic_hash": ""
   },
   "gherkai/README.md": {

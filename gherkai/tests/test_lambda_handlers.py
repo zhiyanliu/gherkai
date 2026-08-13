@@ -168,7 +168,7 @@ def test_timeout_watch_creates_one_time_schedule():
     watch.arm("run-1", "features/x.feature:7", 300.0)
     assert len(client.calls) == 1
     kw = client.calls[0]
-    assert kw["Name"].startswith("gherkai-jt-") and len(kw["Name"]) <= 64  # 哈希名（scope_id 可含非法字符）
+    assert kw["Name"].startswith("gherkai-job-timeout-") and len(kw["Name"]) <= 64  # 哈希名（scope_id 可含非法字符）
     assert kw["ScheduleExpression"].startswith("at(")
     assert kw["ActionAfterCompletion"] == "DELETE"  # 到点自动删（idle 零成本）
     assert kw["FlexibleTimeWindow"] == {"Mode": "OFF"}

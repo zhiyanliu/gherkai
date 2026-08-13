@@ -214,7 +214,7 @@ def test_timeout_scheduler_role_and_lambda_perms():
     # job timeout 配套（ADR 0034「job timeout」节）：
     # ① Scheduler 执行 role：scheduler.amazonaws.com 可 assume、能 invoke kicker（按确定性 ARN 串授权）。
     # ② reconciler/kicker：scheduler:CreateSchedule+DeleteSchedule（ActionAfterCompletion=DELETE 前置）
-    #    框在 default group 的 {prefix}jt-* 名字空间；ecs:ListTasks（startedBy=run_id 定位 task）。
+    #    框在 default group 的 {prefix}job-timeout-* 名字空间；ecs:ListTasks（startedBy=run_id 定位 task）。
     t = _template()
     t.has_resource_properties("AWS::IAM::Role", {
         "AssumeRolePolicyDocument": Match.object_like({
@@ -227,7 +227,7 @@ def test_timeout_scheduler_role_and_lambda_perms():
         "PolicyDocument": Match.object_like({
             "Statement": Match.array_with([Match.object_like({
                 "Action": ["scheduler:CreateSchedule", "scheduler:DeleteSchedule"],
-                "Resource": Match.string_like_regexp(r".*schedule/default/gherkai-jt-\*"),
+                "Resource": Match.string_like_regexp(r".*schedule/default/gherkai-job-timeout-\*"),
             })]),
         }),
     })
