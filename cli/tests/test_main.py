@@ -224,7 +224,7 @@ def test_run_schedule_opts_mapping(tmp_path, monkeypatch, capsys):
     # grace 用合法值（≥ Nova 下限）；默认引擎 novaact → min_grace=ACT_TIMEOUT_S+margin。
     good_grace = compose.NOVA_ACT_TIMEOUT_S + compose.NOVA_GRACE_MARGIN_S + 10
     m.main(["run", str(_write_feature(tmp_path)), "--no-report",
-            "--max-concurrency", "3", "--timeout", "120", "--grace", str(good_grace), "--fail-fast"])
+            "--max-concurrency", "3", "--default-job-timeout", "120", "--grace", str(good_grace), "--fail-fast"])
     o = box["opts"]
     assert o.max_concurrency == 3 and o.fail_fast is True
     assert o.job_timeout_s == 120.0 and o.grace_period_s == float(good_grace)
@@ -254,10 +254,10 @@ def test_run_grace_sentinel_derives_from_engine(tmp_path, monkeypatch, capsys):
 
 
 def test_run_timeout_nonpositive_maps_to_none(tmp_path, monkeypatch, capsys):
-    # --timeout <=0 → job_timeout_s=None（不超时），是有逻辑的转换，护住它
+    # --default-job-timeout <=0 → job_timeout_s=None（不超时），是有逻辑的转换，护住它
     box = {}
     monkeypatch.setattr(m, "schedule", _capturing_schedule(Status.PASSED, box))
-    m.main(["run", str(_write_feature(tmp_path)), "--no-report", "--timeout", "0"])
+    m.main(["run", str(_write_feature(tmp_path)), "--no-report", "--default-job-timeout", "0"])
     assert box["opts"].job_timeout_s is None
 
 

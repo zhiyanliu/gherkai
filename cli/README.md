@@ -131,7 +131,7 @@ cloud 由云端 Lambda 事件驱动链推进（submit 机器零 ECS 权限、可
 | `--default-engine` | `novaact` | 未标 `@engine` 的 scope 用的默认引擎（标了 `@engine:` 的按 tag 走） |
 | `--assertion-votes` | `1` | AI 断言（`Then`）投票次数（默认 1=单次判定）；调高（如 3/5）启用抖动检测：跑 N 次取多数票。须 ≥1 |
 | `--max-concurrency` | `1` | 同时在跑的 worker 上限（护真实成本/配额） |
-| `--timeout` | `300` | 单 job 墙钟超时秒（`<=0` 不超时） |
+| `--default-job-timeout` | `300` | job 墙钟超时秒的缺省值（`<=0` 不超时）。命名前瞻两层设定：将来 scope 可用 `@timeout:N` tag 按用例声明预算、未标的用本缺省（同 `@engine`/`--default-engine` 模式，ADR 0034 留口子——tag 层未实装前本值即全部 job 的超时） |
 | `--grace` | 自动 | 中止 run 时等 worker 收尾（关云端会话、免继续计费）的秒数，超时才强杀。不填按引擎自动取够用值（`novaact` 150s、`midscene` 25s）；填太小会开跑前报错（强杀漏关会话＝烧钱）。 |
 | `--fail-fast` | off | 任一 job 崩则中止整批 |
 | `--json` | off | 只输出机器可读 JSON（CI/WebUI 消费） |

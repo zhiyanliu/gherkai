@@ -47,8 +47,8 @@ def _build_parser() -> argparse.ArgumentParser:
         help="同时在跑的 worker 上限（默认 1，护真实 AWS 成本/配额）",
     )
     run.add_argument(
-        "--timeout", type=float, default=300.0,
-        help="单 job 墙钟超时秒（默认 300；<=0 表示不超时）",
+        "--default-job-timeout", type=float, default=300.0, metavar="S",
+        help="job 墙钟超时秒的缺省值（默认 300；<=0 表示不超时）。「缺省」前瞻两层设定：将来 scope 可用 @timeout tag 按用例声明预算、未标的用本值（同 @engine/--default-engine 模式）",
     )
     run.add_argument(
         "--grace", type=float, default=None,
@@ -676,7 +676,7 @@ def _cmd_run(args, repo: Path) -> int:
 
     _progress(
         f"run_id={run_id}  schedule: 启动 worker 建立 AgentCore 云端浏览器会话（将产生 AWS 费用）  "
-        f"max_concurrency={args.max_concurrency} job_timeout={args.timeout}s ..."
+        f"max_concurrency={args.max_concurrency} job_timeout={args.default_job_timeout}s ..."
     )
 
     # grace 硬约束（ADR 0024）：按本 run 各引擎的下限取 max（grace 是 run 级单值）。引擎特定下限住组合根。
@@ -703,7 +703,7 @@ def _cmd_run(args, repo: Path) -> int:
             ScheduleOpts(
                 max_concurrency=args.max_concurrency,
                 fail_fast=args.fail_fast,
-                job_timeout_s=args.timeout if args.timeout > 0 else None,
+                job_timeout_s=args.default_job_timeout if args.default_job_timeout > 0 else None,
                 grace_period_s=grace,
                 min_grace_s=min_grace,  # core enforce grace ≥ 此下限（引擎无关关系，ADR 0024）
             ),
