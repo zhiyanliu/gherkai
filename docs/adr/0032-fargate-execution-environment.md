@@ -23,9 +23,9 @@
 
 **真 Fargate 校准（`stopTimeout`/grace 预算 + 中断抢传 + 干净退出）已完成**（4 次真跑，见下「真容器校准结论」）。**抢传能力与真 Fargate 校准分开——抢传已在 subprocess+cloud 预演，真 Fargate 已复验生效。** 孤儿产物主动扫盘 reaper **经分析否决**（Fargate 下物理不成立——没传 S3 的残余随容器盘销毁、查 S3 捞不回，详见下「Fargate 特有问题：处置结论」孤儿 reaper 条）；**退化网络下「超时快速失败、不拖爆 grace」已真验 ✅**（见下「Fargate 特有问题：处置结论」botocore retry 条）。至此 Fargate 特有韧性 backlog 全部收敛（做/真验/否决各有归属）。
 
-## 真容器校准结论（4 次真跑，2026-07-12，账户 000000000000/us-east-1、stopTimeout=120 已 deploy）
+## 真容器校准结论（4 次真跑，2026-07-12，真实 AWS 账户/us-east-1、stopTimeout=120 已 deploy）
 
-**实测数据（4 次真跑，2026-07-12，账户 000000000000/us-east-1；`wikipedia_assertions`/`wikipedia_robustness` × Nova/Midscene，`--assertion-votes 1`，编排脚本毫秒级抢 events `step_started` 窗口发 StopTask）：**
+**实测数据（4 次真跑，2026-07-12，真实 AWS 账户/us-east-1；`wikipedia_assertions`/`wikipedia_robustness` × Nova/Midscene，`--assertion-votes 1`，编排脚本毫秒级抢 events `step_started` 窗口发 StopTask）：**
 
 | 量 | Nova（3 中断样本） | Midscene（1 样本） | 校准对象 |
 |---|---|---|---|

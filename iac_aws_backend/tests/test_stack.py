@@ -179,7 +179,7 @@ def test_task_role_resource_arns_narrowed():
     assert "nova-act:GetAct" not in all_nova_actions, "GetAct 非真实 IAM action，应已删除"
 
     # ③ bedrock-agentcore Start/Stop/Get/Save → 具体 ARN（含系统 browser 的 account=aws 陷阱段）。
-    #    系统 browser ARN 的 account 段必须是字面量 aws（非客户账户 000000000000——模拟器实证填客户账户会 implicitDeny）。
+    #    系统 browser ARN 的 account 段必须是字面量 aws（非客户账户——模拟器实证填客户账户会 implicitDeny）。
     sys_browser_seen = any("browser/aws.browser.v1" in res for _, res in stmts)
     assert sys_browser_seen, "缺系统 browser ARN"
     for acts, res in stmts:
@@ -189,7 +189,7 @@ def test_task_role_resource_arns_narrowed():
             if "browser/aws.browser.v1" in res:
                 # 系统 browser 段的 account 必须是 aws、绝不是客户账户（copy-account 陷阱护栏）
                 assert ":aws:browser/aws.browser.v1" in res, f"系统 browser account 段应为字面量 aws：{res}"
-                assert "000000000000:browser/aws.browser.v1" not in res, "踩了 copy-account 陷阱（系统 browser 用了客户账户）"
+                assert "000000000000:browser/aws.browser.v1" not in res, "踩了 copy-account 陷阱（系统 browser 用了客户账户）"  # 000…0=本测试 synth env 的账号（第 21 行）——断言必须用它才抓得到陷阱（曾误用真实账号字面量、synth 产物里不可能出现、断言永真失效）
     # ④ List/Create/Connect×2 结构上不支持 resource-level，诚实保留 *（不因收窄而误删这条 * statement）
     for action in ("bedrock-agentcore:ListBrowserProfiles", "bedrock-agentcore:CreateBrowserProfile",
                    "bedrock-agentcore:ConnectBrowserAutomationStream", "bedrock-agentcore:ConnectBrowserLiveViewStream"):
