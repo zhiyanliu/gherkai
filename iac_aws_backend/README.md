@@ -30,7 +30,7 @@
 
 `--prefix`（CDK context `-c prefix=`，默认 `gherkai-`）**必须与 cli 的 `--prefix` 一致**——CDK 建的资源名 = cli 推导的默认名（`names.py` 复刻 cli `compose.py` 的命名规则）。不一致 → cli 连不上资源、preflight 报错点名 prefix。
 
-命名规则的**单一事实源**分两处、须同步改：CDK 的 `names.py` ↔ cli 的 `cli/cli/compose.py`。
+命名规则**真同源**：`names.py` 直接 re-export 产品本体 `gherkai/names.py`（曾因「CDK 独立工程、不能 import cli」复刻一份、须两处同步改——组合根共享层抽为平级 `gherkai/` 包后复刻消除，ADR 0016「演进」节/0033）。
 
 ## 用
 

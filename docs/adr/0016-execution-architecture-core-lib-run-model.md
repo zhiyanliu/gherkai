@@ -170,7 +170,7 @@ Fargate 执行环境配置（cluster / task-def / subnet / security-group / even
 - 第四返回值是 **`make_artifacts(run_id, report_index) -> dict` 工厂函数**（非现成 descriptor）——须在 finalize 拿到 `run_id` 与 `report_index` 后才能组装（`report_index` 可能因 write 失败被隔离而为 None，此时省略 `report_index` 键）；由 `build_local_stores`/`build_cloud_stores` 各自返回（各自最懂按 backend URI 化组装落点/前缀），`_cmd_run` 调它填 artifacts——**不给 Store port 加 `describe_artifacts`**（凭空扩接口面、6 个 adapter 全要实现，过度设计）。
 - `finalize()` 返回 None（`ReportStore.write` 失败被 `RunPersistence` 隔离，[0030](./0030-realtime-persistence-seam.md) 决定三）时 `report_index` 键不放裸 `'None'`——省略该键。（曾设 `_report_error` 字段留 traceback 供 cli 可选打 stderr，但 cli 从不消费、已删该悬空字段——写失败被静默隔离、报告可从 RunResult 重建。）
 
-## 工程布局：core / cli / engines 三者平级对标
+## 工程布局：core / gherkai / cli / engines 平级对标
 
 **当前实装态（v1.0 进行中）**标在各行右侧 ✅/⬜：core/ 已建、cli/ 已建、engines/ 已迁、两个引擎 worker 已落地。
 

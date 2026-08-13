@@ -152,7 +152,7 @@ subnet/sg 不是「名字」，是 **AWS 建 VPC 时生成的 ID**（`subnet-0ab
 
 ## 组合根接线（非 IaC，已编码）
 
-`cli/cli/compose.py` 的 `build_engines` 只产 `SubprocessEngine`（两个引擎，local 执行）。新增 `build_fargate_engines`，`--backend cloud` 用它替代：
+`gherkai/compose.py`（产品本体，曾居 `cli/`——[0016](./0016-execution-architecture-core-lib-run-model.md)「演进」节）的 `build_engines` 只产 `SubprocessEngine`（两个引擎，local 执行）。新增 `build_fargate_engines`，`--backend cloud` 用它替代：
 
 - **`build_fargate_engines`（对称 `build_engines` 的 dict）**：按 `job.engine` 造 `FargateEngine`（`new_run_id()` 后把 run_id + cluster + 按引擎选的 task-def + network（读 SSM）+ events 表名 + container-name + job-s3 + artifact-s3 + **SDK 产物落点 env** + region 一起注入构造，对称已有 store 注入；**不传 profile**——决策 C 非对称）。
 - **产物上传要注入两组 env、缺一不可（真跑暴露）**：worker `ArtifactUploader` 上传需要 ① `ARTIFACT_S3_BUCKET`/`PREFIX`（S3 落点）**和** ② SDK 产物本地落点 env（`NOVA_LOGS_DIR`/`MIDSCENE_RUN_DIR`，容器内路径，如 `/tmp/gherkai-run/<run_id>/{nova-trajectories,midscene-run}`）——uploader 用后者的父级算 `run_dir`/相对 key，**缺它 `run_dir=None` → uploader no-op → 报 `file://` → 产物写容器盘、STOPPED 后随盘销毁必丢**（ADR [0029](./0029-engine-artifacts-to-s3.md)）。subprocess 侧 `build_engines` 本就注入 SDK 落点 env，Fargate 侧曾漏（只注 S3 落点）——**只注 ①不注②等于没上传**。这两组按引擎不同（Nova `NOVA_LOGS_DIR` / Midscene `MIDSCENE_RUN_DIR`），组合根按引擎算好、`FargateEngine` 引擎无关地转发。
