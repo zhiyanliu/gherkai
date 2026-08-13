@@ -10,7 +10,7 @@ from pathlib import Path
 from core.model import JobResult, RunResult, Status
 
 from cli import __main__ as m
-from cli import compose
+from gherkai import compose
 
 
 def _fake_schedule_factory():

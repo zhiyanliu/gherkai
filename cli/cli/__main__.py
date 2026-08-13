@@ -20,7 +20,9 @@ from core.persist import RunPersistence
 from core.scope import PlanConfig, PlanError, plan
 from core.schedule import ScheduleOpts, schedule
 
-from cli import compose, render
+from gherkai import compose
+
+from cli import render
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -381,7 +383,7 @@ def _render_status(state, args, *, wait_hint: str) -> int:
         from core.serialize import run_state_to_dict
         print(json.dumps(run_state_to_dict(state), ensure_ascii=False, indent=2))
     else:
-        from cli import detached
+        from gherkai import detached
         print(detached.render_run_state(state))
     # 疑似卡住诊断（两路一致）：非 --wait、非 json、仍 pending → 提示 --wait 接力（**只提示、不自动 kickoff/tick**——
     # 保「查看」纯只读无副作用；救活决定权留用户，走 --wait）。running/终态不提示。
@@ -401,7 +403,7 @@ def _cmd_status(args, repo: Path) -> int:
     - cloud：读 DDB RunState；--wait 则检测卡住时 invoke kicker Lambda 做 kickoff 接力（踢一脚即可、云端链自接管）。
     渲染+提示+退出码经 _render_status 共享（两路一致，ADR 0034）。
     """
-    from cli import detached
+    from gherkai import detached
 
     if args.backend == "cloud":
         return _status_cloud(args)
@@ -503,7 +505,7 @@ def _status_cloud(args) -> int:
 
 def _cmd_reconcile(args, repo: Path) -> int:
     """per-run 进程入口（submit setsid fork 它，非用户直接调）：跑 reconcile loop 到全 done 自退（ADR 0034）。"""
-    from cli import detached
+    from gherkai import detached
 
     report_root = Path(args.report_dir).resolve()
     meta, log, store, launcher, mc, rstore, pstore = detached.build_local_reconcile(

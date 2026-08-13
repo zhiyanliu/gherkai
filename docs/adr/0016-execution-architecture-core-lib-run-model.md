@@ -180,8 +180,10 @@ Fargate 执行环境配置（cluster / task-def / subnet / security-group / even
 │   ├── model.py · parse.py · scope.py · schedule.py · wire.py · serialize.py · ports.py · errors.py  ✅
 │   │     （wire.py=worker 协议单向序列化；serialize.py=领域模型双向持久化的单一真理源，二者分工不同）
 │   └── adapters/        ← 按 port 分；现有 subprocess_engine.py（单 adapter 参数化，非 midscene.py/novaact.py 两文件）✅
-├── cli/                 ← 最薄前端 = 组合根（在此 new 出具体 adapter 注入给 core）  ✅ 已建（独立子工程，core 作 path 依赖）
-│   └── cli/{__main__.py（argparse 皮）· compose.py（组合根/引擎注册表，WebUI 复用）· render.py（事件/RunResult 渲染）}
+├── gherkai/             ← 产品本体 = 组合根共享层（见下「演进」节；cli/Lambda/WebUI 的共同地基）
+│   └── gherkai/{compose.py（组合根/引擎注册表）· detached.py（local 无状态跑批宿主）· names.py（资源命名真源）}
+├── cli/                 ← 纯皮：argparse + 渲染（独立子工程，gherkai/core 作 path 依赖）
+│   └── cli/{__main__.py（argparse 皮）· render.py（事件/RunResult 渲染）}
 └── engines/             ← 两个可插拔引擎，与 core 平级对标                  ✅ 已迁
     ├── midscene/        ← 整个 TS 子工程                                  ✅ worker：engines/midscene/worker/run-scope.ts
     │   ├── worker/run-scope.ts · lib/agentcore-sigv4.mts
@@ -194,6 +196,12 @@ Fargate 执行环境配置（cluster / task-def / subnet / security-group / even
 - **`engines/{midscene,novaact}` 提升为与 `core/` 平级**（不再各藏一个 `worker/` 子目录）：引擎子工程必须连同其依赖环境（`node_modules`+`agentcore-sigv4.mts` / `.venv`+`workflow_setup.py`）整体存在，故**整体**移到 `engines/` 下，既对称又不把代码与依赖环境拆开。
 - **目录名用 `engine` 而非 `worker`**：对齐 CONTEXT 「引擎」与 `Engine` port；worker 是运行时角色（被 spawn 的进程），engine 是领域概念——`engines/midscene/` 内**含**一个 worker 入口。
 - **窄腰目录名 `core`、不叫 `lib`**：`lib` 已被各引擎子级占用（`engines/midscene/lib`、`engines/novaact/lib` 放引擎内共享模块），复用会混淆。散文里称「核心库 / core 包」无妨（它确是 cli/未来 WebUI 依赖的可导入库），但**目录**是 `core`。
+
+### 演进：组合根共享层抽为平级产品本体包 `gherkai/`（v1.2 后布局重构）
+
+初版把 `compose.py`（组合根/引擎注册表）放在 `cli/` 包内、以「WebUI 复用 cli.compose」的方式共享——**该安置已被三个非-CLI 消费者的真实代价证伪**：① `lambdas/reconciler.py` 直接 `from cli import compose`，Lambda zip 被迫打包整个 cli 包（含它永远不用的 argparse/render）；② `iac_aws_backend/names.py` 因「CDK 独立工程、不能 import cli」被迫**复刻**命名函数（双写 + ADR 0033 护栏测试防漂移的持续成本）；③ lambda handler 的测试因 `lambdas/` 无依赖闭包而寄居 `cli/tests/`。按本 ADR 自己的 rule-of-three：消费者已 3 个、WebUI 是可预见的第 4 个——到线。
+
+**解法 = 抽平级工程 `gherkai/`（产品本体包，与产品/CLI 同名）**：`compose.py`（引擎注册表/装配）+ `detached.py`（local 无状态跑批宿主）+ `names.py`（资源命名纯函数，从 compose 拆出、零依赖——供 iac 轻依赖消复刻）移入；`cli/` 退成纯皮（argparse + render）。分层语义随之更诚实：**`gherkai/` 知道产品的一切（引擎、云资源、run 生命周期），cli/Lambda/WebUI 只是它的入口皮**。依赖方向：`皮 → gherkai → core`（窄腰红线不动——引擎知识仍不进 core，只是从「寄居 cli」升为「产品本体」）。**命名护栏**：不叫 `composer`（PHP 生态撞名）、不叫 `engine_worker`（与 0024 的 worker 术语撞车且语义反——本层是 worker 的装配者非 worker 本身；且层内一半内容与 engine 无关）。
 
 ## 版本切分（按完成线，非时间；版本号用 SemVer）
 

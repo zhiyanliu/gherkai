@@ -134,7 +134,7 @@ def build_local_reconcile(repo, report_dir: str, run_id: str, max_concurrency: i
     返回 (meta, log, store, launcher, max_concurrency, result_store, report_store) 供 run_reconcile_loop
     （后两个是收尾聚合用的落点，与 RunStore 同 <report_dir>/<run_id>/）。
     """
-    from cli import compose
+    from gherkai import compose
 
     root, db_path = _paths(report_dir, run_id)
     store = LocalRunStore(root)

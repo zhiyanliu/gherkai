@@ -4,21 +4,24 @@ version = "0.1.0"
 description = "执行核心库的最薄前端 = 组合根：读 .feature、new 出具体 Engine adapter 注入给 core、渲染 RunResult（ADR 0016）"
 readme = "README.md"
 requires-python = ">=3.13"
-# 唯一依赖是 core（窄腰库）；引擎不在此声明——引擎是被 spawn 的子进程，cli 只持有起它们的 cmd（ADR 0016/0026）
+# 依赖产品本体 gherkai（组合根共享层，它再依赖 core 窄腰）；引擎不在此声明——引擎是被 spawn 的
+# 子进程，装配 cmd 的知识在 gherkai（ADR 0016「演进」节/0026）
 dependencies = [
     "core",
+    "gherkai",
 ]
 
 # 云端后端（--backend cloud）走可选 extra（ADR 0016「cli backend 选择」）：cli 主依赖不含 boto3，
 # `pip install cli[aws]` 才拉 core[aws]（= boto3）；纯 local 路径绝不 import boto3。
 [project.optional-dependencies]
-aws = ["core[aws]"]
+aws = ["gherkai[aws]"]
 
 [project.scripts]
 # 安装后可直接 `gherkai <feature>`；开发期用 `uv run python -m cli`
 gherkai = "cli.__main__:main"
 
 [tool.uv.sources]
+gherkai = { path = "../gherkai", editable = true }
 core = { path = "../core", editable = true }
 
 [dependency-groups]

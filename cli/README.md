@@ -2,7 +2,7 @@
 
 `core/` 是纯库（零引擎依赖、不碰文件系统）。**cli 是它的第一张皮**：读 `.feature`、
 `new` 出具体的引擎子进程 adapter 注入给 core、把 `RunResult` 渲染给人或 CI 看。
-WebUI 将来是另一张皮，**直接调 core、复用 `compose`**，不经本 cli。
+WebUI 将来是另一张皮，**直接调 core、复用产品本体 `gherkai`（compose 等组合根逻辑所在的平级包，ADR 0016「演进」节）**，不经本 cli。
 
 设计见 [ADR 0016](../docs/adr/0016-execution-architecture-core-lib-run-model.md)（执行架构 / 组合根注入）；
 无状态跑批（`submit`/`status` 的「提交完就走 → 事件驱动推进 → 轮询收集」）见 [ADR 0034](../docs/adr/0034-detached-batch-reconciler.md)。
@@ -11,13 +11,11 @@ WebUI 将来是另一张皮，**直接调 core、复用 `compose`**，不经本 
 
 ```
 cli/
-├── __main__.py   ← argparse 皮：run/submit/status/plan/list-engines 解析 → 调 compose/core → 注入 RunPersistence 实时落库 → 调 render；定义退出码
-├── compose.py    ← 组合根：引擎注册表（每个引擎 cmd/cwd）、读 feature、build resolver、build_fargate_engines（WebUI/Lambda 也复用）
-├── detached.py   ← 无状态跑批 local 侧接线（ADR 0034）：SubprocessLauncher（起 worker 旁路落 SQLite + 观察退出）+ per-run reconcile loop
+├── __main__.py   ← argparse 皮：run/submit/status/plan/list-engines 解析 → 调 gherkai.compose/core → 注入 RunPersistence 实时落库 → 调 render；定义退出码
 └── render.py     ← 表层渲染：0024 事件 → 进度行；RunResult → 文本汇总 / JSON
 ```
 
-`compose`（可复用接线）与 `__main__`（命令行皮）分开：前者是任何前端都要的组合根逻辑，
+组合根逻辑（compose/detached/names）住在平级的产品本体包 `gherkai/`（曾在本包内、被 Lambda/iac 的真实代价逼出抽包，ADR 0016「演进」节）：那是任何前端都要的接线，
 后者只是 argparse + 标准 IO。
 
 **实时落库**：`run` 不是「跑完才一次性落盘」——`__main__` 注入 core 的 `RunPersistence`
@@ -26,13 +24,13 @@ RUNNING、完成即落该 scope 判定真值，最后 `finalize` 写总状态（
 （裸跑、零落盘逃生舱）。
 
 落哪由 `--backend` 定：默认 `local`（文件落 `--report-dir`）；`--backend cloud` 让组合根改注入 DynamoDB/S3
-adapter、复用同一条 `RunPersistence`，把状态落 DynamoDB、判定真值与报告落 S3（表/桶需预先建好）。见下『选项』表与『跑』小节。未来 WebUI 复用同一套 `compose` 装配，cli 这张皮的接线不变。
+adapter、复用同一条 `RunPersistence`，把状态落 DynamoDB、判定真值与报告落 S3（表/桶需预先建好）。见下『选项』表与『跑』小节。未来 WebUI 复用同一套 `gherkai.compose` 装配，cli 这张皮的接线不变。
 
 ## 跑（会烧真 AWS 钱：模型调用 + AgentCore 会话）
 
 ```bash
 cd cli
-uv sync                                            # 装环境（core 作 path 依赖）
+uv sync                                            # 装环境（gherkai/core 作 path 依赖）
 
 # 跑一个 feature（默认引擎 novaact，默认 max-concurrency=1）
 uv run python -m cli run ../features/wikipedia_generic.feature

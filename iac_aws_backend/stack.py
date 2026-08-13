@@ -429,7 +429,7 @@ class BackendStack(Stack):
         #    INSERT。分工：kicker「让 run 动起来」/ reconciler「推着走」。故它需要与 reconciler 相同的权限（起 task 等）。
         kicker = lambda_.Function(
             self, "KickerFn",
-            function_name=f"{self.prefix}kicker",  # 名与 cli compose._BASE_KICKER_LAMBDA 同源——cli status --wait 据 --prefix 推理出它 invoke kickoff（ADR 0034）
+            function_name=names.default_name(self.prefix, names.BASE_KICKER_LAMBDA),  # 真同源（gherkai.names）——cli status --wait 据 --prefix 推理出它 invoke kickoff（ADR 0034）
             runtime=lambda_.Runtime.PYTHON_3_13,
             handler="reconciler.kicker_handler",  # 同一 reconciler.py、不同入口
             code=code,
@@ -475,9 +475,10 @@ class BackendStack(Stack):
     def _build_lambda_asset(self) -> str:
         """把 Lambda 代码打包到一个目录，返回其路径（Code.from_asset 用）。
 
-        内容 = lambdas/*.py（handler）+ core/core（core 库）+ cli/cli（compose，reconciler 复用其
-        build_fargate_engines 单一真源）+ pip 装 gherkin-official（core 的唯一非 boto3 依赖；boto3 是 Lambda
-        runtime 自带、不打）。打到 iac_aws_backend/.lambda_build/（.gitignore；每次 synth 重建保新鲜）。
+        内容 = lambdas/*.py（handler）+ core/core（core 库）+ gherkai/gherkai（产品本体：compose 装配单一
+        真源，reconciler 复用其 build_fargate_engines——不再打包 cli，Lambda 不背 argparse/render，ADR 0016
+        「演进」节）+ pip 装 gherkin-official（core 的唯一非 boto3 依赖；boto3 是 Lambda runtime 自带、不打）。
+        打到 iac_aws_backend/.lambda_build/（.gitignore；每次 synth 重建保新鲜）。
         """
         import os
         import shutil
@@ -492,10 +493,10 @@ class BackendStack(Stack):
         # handler
         shutil.copytree(os.path.join(repo, "lambdas"), build, dirs_exist_ok=True,
                         ignore=shutil.ignore_patterns("__pycache__", ".gitignore", "tests"))
-        # core 库（core/core → build/core）+ cli 皮（cli/cli → build/cli）
+        # core 库（core/core → build/core）+ 产品本体（gherkai/gherkai → build/gherkai）
         shutil.copytree(os.path.join(repo, "core", "core"), os.path.join(build, "core"),
                         ignore=shutil.ignore_patterns("__pycache__"))
-        shutil.copytree(os.path.join(repo, "cli", "cli"), os.path.join(build, "cli"),
+        shutil.copytree(os.path.join(repo, "gherkai", "gherkai"), os.path.join(build, "gherkai"),
                         ignore=shutil.ignore_patterns("__pycache__"))
         # 依赖：gherkin-official（core 唯一非 boto3 依赖）。boto3 runtime 自带、不装（省包体）。
         # uv venv 默认无 pip，优先 `uv pip install --target`（uv 自带）；回退 `python -m pip`（普通 venv）。

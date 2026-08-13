@@ -73,8 +73,10 @@ flowchart TD
 │   └── concurrency_and_scope.feature       ← 手工真跑回归夹具：改调度/会话生命周期后重跑验 ADR 0019
 ├── core/                      ← 窄腰核心库（Python，零引擎依赖，ADR 0016）
 │   └── core/{parse,scope,schedule,project,reconcile,persist,model,wire,serialize,ports,errors}.py（project=纯归约投影 / reconcile=无状态推进编排，ADR 0034）+ adapters/{subprocess,fargate}_engine.py + cloud_launcher.py + event_log/{sqlite,ddb}.py（无状态跑批持久事件通道，ADR 0034）+ adapters/{run,result,report}_store/{local,ddb|s3}.py
-├── cli/                       ← 核心库的第一个前端 = 组合根（ADR 0016）
-│   └── cli/{__main__.py(argparse) · compose.py(引擎注册表) · render.py}
+├── gherkai/                   ← 产品本体 = 组合根共享层（ADR 0016「演进」节；cli/Lambda/WebUI 的共同地基）
+│   └── gherkai/{compose.py(引擎注册表/装配) · detached.py(local 无状态跑批宿主) · names.py(资源命名真源)}
+├── cli/                       ← 命令行皮（ADR 0016）
+│   └── cli/{__main__.py(argparse) · render.py}
 ├── engines/                   ← 两个可插拔引擎，与 core 平级
 │   ├── midscene/   ← TS 子工程：worker/run-scope.ts（薄 worker）· worker/deterministic.ts · lib/agentcore-sigv4.mts · spikes/
 │   └── novaact/    ← Python 子工程：worker/run_scope.py（薄 worker）· worker/deterministic.py · lib/workflow_setup.py · spikes/

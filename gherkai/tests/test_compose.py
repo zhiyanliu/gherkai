@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from cli import compose
+from gherkai import compose
 from core.scope import FeatureSource
 
 

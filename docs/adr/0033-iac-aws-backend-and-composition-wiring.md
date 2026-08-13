@@ -46,7 +46,7 @@
 
 **决策：两层命名，正交组合。**
 
-- **prefix 层**（`--prefix`，默认 `gherkai-`）：批量决定**所有名字类资源**的默认名——`{prefix}runs`/`{prefix}events`/`{prefix}artifacts`/`{prefix}cluster`/`{prefix}novaact-worker`/`{prefix}midscene-worker` 等（task-def 用引擎规范名 `novaact`，非 `nova`）。**CDK 部署吃同一 prefix**（`cdk deploy -c prefix=prod-`），故 CDK 建的名 = cli 推导的默认名 → **单一事实源、不漂移**。`--prefix prod-` 一键切整套。
+- **prefix 层**（`--prefix`，默认 `gherkai-`）：批量决定**所有名字类资源**的默认名——`{prefix}runs`/`{prefix}events`/`{prefix}artifacts`/`{prefix}cluster`/`{prefix}novaact-worker`/`{prefix}midscene-worker` 等（task-def 用引擎规范名 `novaact`，非 `nova`）。**CDK 部署吃同一 prefix**（`cdk deploy -c prefix=prod-`），故 CDK 建的名 = cli 推导的默认名 → **单一事实源、不漂移**。`--prefix prod-` 一键切整套。**命名真源的落位演进**：曾因「CDK 独立工程、不能 import cli」在 `iac_aws_backend/names.py` **复刻**一份命名函数（双写、靠对拍测试防漂移）；组合根共享层抽为平级 `gherkai/` 包后（[0016](./0016-execution-architecture-core-lib-run-model.md)「演进」节），命名纯函数移入零依赖的 `gherkai/names.py`，iac 直接 import——复刻消除、护栏测试转为「真同源」的结构性保证。
 - **单资源覆盖层**（`--ddb-table`/`--s3-bucket`/… 给完整终值）：直接用给定值。
 
 **关键自洽点（无特判逻辑）**：覆盖时 prefix **自然不参与**——因为 prefix 只在「生成默认名」这条路径上拼，而覆盖 = 直接给完整 family name = 根本不走生成路径。两层在不同代码路径、正交解耦，不需要 `if override: strip_prefix` 之类的特判。

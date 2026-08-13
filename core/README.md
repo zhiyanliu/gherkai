@@ -38,7 +38,7 @@ core/
 ```
 
 云端 adapter（DDB/S3）已建，行为对拍 local、moto 全程 mock 单测（ADR 0030 决定六）；boto3 是可选依赖 `core[aws]`。
-组合根按 backend 注入哪套 adapter——cli 已实装 `--backend {local,cloud}`（装配逻辑在 `cli/compose.py` 的 `build_local_stores`/`build_cloud_stores`，未来 WebUI 复用；ADR 0030 决定七）。
+组合根按 backend 注入哪套 adapter——cli 已实装 `--backend {local,cloud}`（装配逻辑在产品本体 `gherkai/compose.py` 的 `build_local_stores`/`build_cloud_stores`，cli/Lambda/未来 WebUI 共用；ADR 0016「演进」节/0030 决定七）。
 
 ## 跑测试
 

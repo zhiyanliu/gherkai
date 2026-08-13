@@ -17,7 +17,7 @@ from core.adapters.run_store.local import LocalRunStore
 from core.adapters.subprocess_engine import SubprocessEngine
 from core.model import Job, JobState, RunMeta, RunState, Scenario, Status, Step
 
-from cli.detached import SubprocessLauncher, run_reconcile_loop
+from gherkai.detached import SubprocessLauncher, run_reconcile_loop
 
 # echo_worker：core 的测试 fixture（真 worker 的假替身，吐 ADR 0024 事件到 fd3）
 _ECHO = str(Path(__file__).resolve().parents[2] / "core" / "tests" / "fixtures" / "echo_worker.py")

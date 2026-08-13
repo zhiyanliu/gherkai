@@ -44,39 +44,22 @@ MIDSCENE_GRACE_MIN_S = int(os.environ.get("MIDSCENE_GRACE_MIN_S", "25"))
 # **单一事实源**：CDK 部署吃同一 prefix → CDK 建的名 = cli 推导的默认名，不漂移。覆盖时 prefix 自然不参与
 # （覆盖 = 直接给完整名 = 不走「拼默认名」路径，无特判）。prefix 含分隔符、原样拼（用户负责，防粘连——同 S3 prefix 先例）。
 # ============================================================================
-DEFAULT_PREFIX = "gherkai-"
+# 资源命名真源已拆到 gherkai.names（零依赖，iac 直接 import）；此处 re-export 保既有引用不动。
+from gherkai.names import (  # noqa: E402
+    DEFAULT_PREFIX,
+    default_name,
+    task_def_name,
+    container_name,
+    ssm_path,
+)
+from gherkai import names as _names  # noqa: E402
 
-# 各资源的「基名」（prefix 之后的固定部分）——CDK 与 cli 共享的约定（CDK 侧须用同名，否则 preflight 报 prefix 不一致）。
-_BASE_RUNS_TABLE = "runs"
-_BASE_EVENTS_TABLE = "events"
-_BASE_BUCKET = "artifacts"
-_BASE_CLUSTER = "cluster"
-# 无状态跑批 kicker（踢启器）Lambda 基名（ADR 0034）：CDK 建 `{prefix}kicker`（stack.py 用同名），cli status
-# --wait 据 --prefix 推理出它 invoke 接力 kickoff（Lambda 名单一真源、cli↔IaC 同源）。改这里必同步改 stack.py。
-_BASE_KICKER_LAMBDA = "kicker"
-# task-def / container：按 job.engine 拼 `{prefix}{engine}-worker`（对称 EngineResolver 按 engine 选）。
-_ENGINES = ("novaact", "midscene")
-
-
-def default_name(prefix: str, base: str) -> str:
-    """prefix + 基名（原样拼，prefix 含分隔符由用户负责）。CDK 与 cli 共用此推导 → 单一事实源。"""
-    return f"{prefix}{base}"
-
-
-def task_def_name(prefix: str, engine: str) -> str:
-    """引擎的 task-def family 名：`{prefix}{engine}-worker`（按 job.engine 选，对称 EngineResolver）。"""
-    return f"{prefix}{engine}-worker"
-
-
-def container_name(engine: str) -> str:
-    """task-def 里的 container 名（RunTask overrides 指定往哪个 container 注 env）。不带 prefix——container 是
-    task-def 内部名、随 task-def 走（task-def 已带 prefix），再叠 prefix 冗余。固定 `{engine}-worker`。"""
-    return f"{engine}-worker"
-
-
-def ssm_path(prefix: str, key: str) -> str:
-    """subnet/sg 的 SSM 参数路径（含 prefix，cli 已知 prefix 拼路径读，无循环——ADR 0033）。"""
-    return f"/{prefix}backend/{key}"
+_BASE_RUNS_TABLE = _names.BASE_RUNS_TABLE
+_BASE_EVENTS_TABLE = _names.BASE_EVENTS_TABLE
+_BASE_BUCKET = _names.BASE_BUCKET
+_BASE_CLUSTER = _names.BASE_CLUSTER
+_BASE_KICKER_LAMBDA = _names.BASE_KICKER_LAMBDA
+_ENGINES = _names.ENGINES
 
 
 def engine_min_grace(engine_name: str) -> float:

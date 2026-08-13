@@ -43,7 +43,7 @@ def _build(run_id: str):
 
     **FargateEngine 装配复用 compose.build_fargate_engines（单一真源，不重造）**——job-in 前缀 / artifact 落点 /
     task-def·container 名 / SDK env 全与同步 cloud run 路径一致、零漂移（ADR 0016：compose 是组合根逻辑、WebUI/
-    Lambda 都复用、不经 cli 主流程）。Lambda 打包带上 cli.compose。
+    Lambda 都复用、不经 cli——组合根共享层即产品本体包）。Lambda 打包带上 gherkai（不再背 argparse/render）。
     """
     import boto3
     from core.adapters.event_log import DdbEventLog
@@ -51,7 +51,7 @@ def _build(run_id: str):
     from core.adapters.run_store.ddb import DynamoDBRunStore
     from core.adapters.result_store.s3 import S3ResultStore
     from core.adapters.report_store.s3 import S3ReportStore
-    from cli import compose
+    from gherkai import compose
 
     region = os.environ.get("REGION") or os.environ.get("AWS_REGION")
     ddb = boto3.resource("dynamodb", region_name=region)
