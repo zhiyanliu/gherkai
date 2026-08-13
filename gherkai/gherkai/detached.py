@@ -202,7 +202,16 @@ def build_local_reconcile(repo, report_dir: str, run_id: str, max_concurrency: i
     返回 (meta, log, store, launcher, max_concurrency, result_store, report_store) 供 run_reconcile_loop
     （后两个是收尾聚合用的落点，与 RunStore 同 <report_dir>/<run_id>/）。
     """
+    import os
+
     from gherkai import compose
+
+    # region/profile 走与前台 run 完全相同的解析链（ADR 0016 决策 C：--region > AWS_REGION > AWS_DEFAULT_REGION >
+    # profile config）——此前原样透传 None：profile-only/config-only 用户下 worker env 不注入 AWS_REGION，
+    # Nova worker 的 AgentCore validate_region 见 None 即崩（exit 1、零事件；detached 真跑复现）。
+    # 单点修在此（而非各调用方）：submit fork 的 per-run / status --wait 接力 / 手动 _reconcile 三路全覆盖。
+    profile = profile or os.environ.get("AWS_PROFILE")
+    region = compose.resolve_region(region, profile)
 
     root, db_path = _paths(report_dir, run_id)
     store = LocalRunStore(root)

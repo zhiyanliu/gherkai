@@ -150,6 +150,27 @@ def test_timed_out_attribution_error_type_timeout():
     assert "超时" in (jr.message or "")
 
 
+def test_error_without_reduce_message_gets_default_attribution():
+    """worker 起来即崩（非 0 退出、零事件）→ message 不再全空——补默认归因指向 worker 日志
+    （detached 真跑教训：error 无任何线索、只能手工复刻排障）。"""
+    from core.project import project_full
+
+    recs = [_exit("a", 1)]  # 零事件 + exit 1
+    jr = project_full(_meta("a"), recs).jobs[0]
+    assert jr.status == Status.ERROR
+    assert jr.message is not None and "exit 1" in jr.message
+
+
+def test_error_clean_exit_incomplete_content_gets_attribution():
+    """exit 0 但无 scope_done（矛盾形态）→ 同样有归因文本（不留空白 error）。"""
+    from core.project import project_full
+
+    recs = [_ev("a", 1, ScopeStarted(scope_id="a", session_id="s")), _exit("a", 0)]
+    jr = project_full(_meta("a"), recs).jobs[0]
+    assert jr.status == Status.ERROR
+    assert jr.message is not None and "scope_done" in jr.message
+
+
 # ---------- HWM（机制三）----------
 
 def test_hwm_is_max_worker_seq():

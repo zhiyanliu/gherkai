@@ -124,3 +124,25 @@ def test_crash_worker_finalizes_error(tmp_path):
     # task_exited 记了真实非 0 退出码
     exits = [r for r in log.records() if r.kind == "exit"]
     assert len(exits) == 1 and exits[0].exited.exit_code != 0
+
+
+def test_build_local_reconcile_resolves_region_like_foreground(tmp_path, monkeypatch):
+    """region 走与前台 run 相同的解析链（ADR 0016 决策 C）：不显式给 --region 时 env/profile config 兜底、
+    落实成字符串注入 worker env——曾原样透传 None：worker 里 AgentCore validate_region 见 None 即崩
+    （exit 1 零事件，detached 真跑复现）。"""
+    from gherkai.detached import build_local_reconcile
+
+    # 造最小 run 落盘（build_local_reconcile 要 load_run_meta 读回）
+    meta = RunMeta(run_id="run-r", created_at="t0", jobs=(_job("a"),))
+    store = LocalRunStore(tmp_path)
+    store.create_run(meta, RunState(run_id="run-r", status=Status.PENDING,
+                                    jobs={"a": JobState("a", Status.PENDING)},
+                                    started_at="t0", high_water_mark=0))
+    monkeypatch.setenv("AWS_REGION", "us-test-9")
+    monkeypatch.delenv("AWS_PROFILE", raising=False)
+    repo = Path(__file__).resolve().parents[2]
+    _m, _l, _s, launcher, _mc, _rs, _rp = build_local_reconcile(
+        repo, str(tmp_path), "run-r", max_concurrency=1, region=None, profile=None)
+    # 解析结果最终注进各引擎 worker 的 spawn env（与前台 run 同一注入面）
+    eng = launcher._resolver("novaact")
+    assert eng._env.get("AWS_REGION") == "us-test-9"

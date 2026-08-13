@@ -263,6 +263,14 @@ def _reduce_scope(job: Job, recs: list[EventRecord]) -> tuple[JobResult, Status,
         result.error_type = "timeout"
         result.message = (f"job 超时（预算 {job.timeout_s}s，推进器中止）"
                           if job.timeout_s else "job 超时（推进器中止）")
+    elif status == Status.ERROR and result.message is None and exited is not None:
+        # 兜底归因（detached 真跑教训：worker 起来即崩 → 零事件、判 error、message 全空——用户无从排障）。
+        # 只补空 message、不覆盖 reduce 期已有归因；诊断细节在 worker stderr（local 落 reconcile.log /
+        # cloud 落 CloudWatch task 日志），这里给指向。
+        if exited.exit_code not in (None, 0):
+            result.message = f"worker 非正常退出（exit {exited.exit_code}；事件流无归因内容——详见 worker 日志）"
+        elif exited.exit_code == 0 and not saw_scope_done:
+            result.message = "worker 干净退出但内容不完整（无 scope_done）——矛盾形态，判 error"
     return result, status, max_seq
 
 

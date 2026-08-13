@@ -5,8 +5,8 @@
     "semantic_hash": ""
   },
   "cli/cli/__main__.py": {
-    "mtime": 1786621274.3537252,
-    "ast_hash": "466f1db2d01f8e759146a80f39f2bee7",
+    "mtime": 1786624030.7162335,
+    "ast_hash": "528166544fc27cfc231808c4a98fdf18",
     "semantic_hash": ""
   },
   "cli/cli/render.py": {
@@ -155,8 +155,8 @@
     "semantic_hash": ""
   },
   "core/core/project.py": {
-    "mtime": 1786604819.585967,
-    "ast_hash": "dfcd70e57eb192824a43a9bbd4a93cf6",
+    "mtime": 1786624030.7163754,
+    "ast_hash": "a0105526f4e3cdf4949e1aebfa72c477",
     "semantic_hash": ""
   },
   "core/core/reconcile.py": {
@@ -260,8 +260,8 @@
     "semantic_hash": ""
   },
   "core/tests/test_project.py": {
-    "mtime": 1786604871.107007,
-    "ast_hash": "1d8aaa602c9919cc8dca5a302a82e3d0",
+    "mtime": 1786624109.306318,
+    "ast_hash": "350647ae28e0a97b9e3a525bbf6cd3d1",
     "semantic_hash": ""
   },
   "core/tests/test_reconcile.py": {
@@ -835,8 +835,8 @@
     "semantic_hash": ""
   },
   "gherkai/gherkai/detached.py": {
-    "mtime": 1786605541.3954175,
-    "ast_hash": "725d68346cf707048205c5a8eb454b39",
+    "mtime": 1786624030.7160158,
+    "ast_hash": "b720783fd69ed0ae6ea2b2870fa5ac07",
     "semantic_hash": ""
   },
   "gherkai/gherkai/names.py": {
@@ -855,8 +855,8 @@
     "semantic_hash": ""
   },
   "gherkai/tests/test_detached_launcher.py": {
-    "mtime": 1786605585.5348098,
-    "ast_hash": "37d03af0a83f14cfeec947840a3de643",
+    "mtime": 1786624109.3061612,
+    "ast_hash": "39dca25267051183b3563b44369e16f3",
     "semantic_hash": ""
   },
   "gherkai/tests/test_lambda_handlers.py": {
