@@ -36,7 +36,7 @@ flowchart TD
 
     subgraph L2["② 产品层"]
         CLI["cli/ —— run / submit / status / plan / list-engines<br/>命令行皮（Lambda / 未来 WebUI 是另两张皮）"]
-        G["gherkai/ —— 产品本体 = 组合根<br/>引擎注册表与装配 · <br/>资源命名真源（ADR 0016「演进」节）"]
+        G["gherkai/ —— 产品本体 = 组合根<br/>引擎注册表与装配 · 资源命名真源 · <br/>隧道口子（ADR 0016「演进」节 / 0035）"]
         C["core/（Python）—— parse → scope 分组 → schedule 调度<br/>窄腰，零引擎依赖（ADR 0016）"]
         CLI --> G --> C
     end
@@ -48,11 +48,15 @@ flowchart TD
 
     B["④ 浏览器层<br/>AgentCore Browser（aws.browser.v1，每引擎各一个会话）"]
 
+    APP["⑤ 被测应用<br/>公网站点；或本机/内网应用经 ngrok 隧道（--expose-local，ADR 0035）"]
+
     F --> CLI
     C -- "对每个 scope spawn 薄 worker<br/>讲 worker↔core 协议（ADR 0024）" --> M
     C -- " 同一协议 " --> N
     M -- CDP --> B
     N -- CDP --> B
+    B -- " 公网直达 " --> APP
+    B -. "ngrok 隧道回本机<br/>（--expose-local）" .-> APP
 ```
 
 关键约束：**全栈托管在 AWS 内**（ADR 0009）；**范围限英文 UI**（ADR 0001）。
