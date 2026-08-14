@@ -133,6 +133,8 @@ cloud 由云端 Lambda 事件驱动链推进（submit 机器无 ECS 写/执行�
 | `--max-concurrency` | `1` | 同时在跑的 worker 上限（护真实成本/配额） |
 | `--default-job-timeout` | `300` | job 墙钟超时秒的缺省值（`<=0` 不超时）。命名前瞻两层设定：将来 scope 可用 `@timeout:N` tag 按用例声明预算、未标的用本缺省（同 `@engine`/`--default-engine` 模式，ADR 0034 留口子——tag 层未实装前本值即全部 job 的超时） |
 | `--grace` | 自动 | 中止 run 时等 worker 收尾（关云端会话、免继续计费）的秒数，超时才强杀。不填按引擎自动取够用值（`novaact` 150s、`midscene` 25s）；填太小会开跑前报错（强杀漏关会话＝烧钱）。 |
+| `--expose-local` | — | 把「本机可达」的被测应用经隧道暴露给云端浏览器（ADR 0035）：值 = feature 中书写的原始 origin（如 `http://localhost:3000`，也可是局域网地址）。框架起隧道并把 job 文本中该前缀替换为公网 URL（含每 run 一换的 basic-auth 凭据，终态即拆）。需已配 ngrok authtoken（`NGROK_AUTHTOKEN`） |
+| `--tunnel` | `ngrok` | `--expose-local` 用的隧道 provider（当前唯一 ngrok；免费层配额 1GB/月+2 万请求/月，重度使用可能碰顶） |
 | `--fail-fast` | off | 任一 job 崩则中止整批 |
 | `--json` | off | 只输出机器可读 JSON（CI/WebUI 消费） |
 | `--quiet` | off | 不打逐事件进度（仍打文本汇总） |
@@ -162,6 +164,7 @@ cloud 由云端 Lambda 事件驱动链推进（submit 机器无 ECS 写/执行�
 | `--default-engine` | `novaact` | 未标 `@engine` 的 scope 用的默认引擎 |
 | `--assertion-votes` | `1` | AI 断言（`Then`）投票次数（默认 1=单次判定） |
 | `--max-concurrency` | `1` | 同时在跑的 worker 上限（local：喂给后台 per-run 推进进程） |
+| `--expose-local` / `--tunnel` | — / `ngrok` | 语义同 `run` 表；submit 后隧道由后台进程持有——local=per-run 进程、cloud=隧道守护进程（轮询终态即拆+TTL 兜底）。**本机需保持开机联网直到 run 终态**（关机=隧道断=测试以导航失败告终，ADR 0035） |
 | `--report-dir` | `reports` | [local] 归集报告落点；`status` 查时须给同一路径 |
 | `--backend {local,cloud}` | `local` | local=本机 per-run 进程推进；cloud=Fargate + 云端 Lambda 事件驱动链推进（提交完真关机也跑完） |
 | `--prefix` | `gherkai-` | [cloud] 资源名前缀（须与 CDK 部署一致）；`status` 查时须给同一 prefix。兜底 `AWS_RESOURCE_PREFIX` |

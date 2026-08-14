@@ -225,6 +225,8 @@ def build_local_reconcile(repo, report_dir: str, run_id: str, max_concurrency: i
     engines = compose.build_engines(
         repo, nova_logs_dir=nova_logs_dir, midscene_run_dir=midscene_run_dir,
         region=region, profile=profile,
+        # 额外请求头随 definition 持久化（ADR 0035：submit 进程算好落 META，per-run 重建端读回注入）
+        extra_http_headers=dict(meta.extra_http_headers) if meta.extra_http_headers else None,
     )
     resolver = compose.make_resolver(engines)
     launcher = SubprocessLauncher(resolver, log, min_grace_fn=compose.engine_min_grace)
@@ -245,3 +247,33 @@ def render_run_state(state) -> str:
     if state.ended_at:
         lines.append(f"ended_at={state.ended_at}")
     return "\n".join(lines)
+
+
+# ============================================================================
+# 隧道收尾（ADR 0035 决策 3）：pid 经 tunnel.json 跨进程交棒（submit 写 → per-run/接力者收）
+# ============================================================================
+
+
+def write_tunnel_file(report_dir: str, run_id: str, info) -> None:
+    """local submit 落隧道收尾凭据：进程对象句柄跨进程传不过去，pid 落盘是唯一通道（ADR 0035）。"""
+    import json as _json
+
+    path = Path(report_dir) / run_id / "tunnel.json"
+    path.write_text(_json.dumps({"pid": info.pid, "url": info.url, "local_origin": info.local_origin},
+                                ensure_ascii=False), encoding="utf-8")
+
+
+def cleanup_tunnel(report_dir: str, run_id: str) -> None:
+    """收尾者（per-run 终态后 / status --wait 接力后）拆隧道：有 tunnel.json 才动作，幂等。"""
+    import json as _json
+
+    from gherkai.tunnel import stop_tunnel
+
+    path = Path(report_dir) / run_id / "tunnel.json"
+    if not path.exists():
+        return
+    try:
+        stop_tunnel(int(_json.loads(path.read_text(encoding="utf-8"))["pid"]))
+        path.unlink()
+    except (OSError, ValueError, KeyError):
+        pass  # 收尾是 best-effort：文件损坏/已被并发收尾者处理 → 不击穿主流程

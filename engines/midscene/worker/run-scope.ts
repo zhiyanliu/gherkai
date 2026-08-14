@@ -320,6 +320,10 @@ async function main(): Promise<number> {
     const headers = await signCdpUpgrade(wsUrl);
     browser = await chromium.connectOverCDP(wsUrl, { headers });
     const ctx = browser.contexts()[0] ?? (await browser.newContext());
+    // 额外请求头（ADR 0035，如 ngrok-skip-browser-warning）：组合根经 env 注入，context 级对所有请求生效。
+    // 纯 CDP Network.setExtraHTTPHeaders，无回调、不涉 route——与 AI 驱动零交互。无 env → 零行为变化。
+    const extraHeaders = process.env.GHERKAI_EXTRA_HTTP_HEADERS;
+    if (extraHeaders) await ctx.setExtraHTTPHeaders(JSON.parse(extraHeaders));
     const page = ctx.pages()[0] ?? (await ctx.newPage());
     const agent = new PlaywrightAgent(page, {
       generateReport: true,

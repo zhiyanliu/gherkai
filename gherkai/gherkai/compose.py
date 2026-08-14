@@ -8,6 +8,7 @@ WebUI 的 bootstrap 将来复用本模块——组合根逻辑（引擎注册表
 """
 from __future__ import annotations
 
+import json
 import os
 import secrets
 from datetime import datetime, timezone
@@ -114,6 +115,7 @@ def build_engines(
     artifact_s3: tuple[str, str] | None = None,
     region: str | None = None,
     profile: str | None = None,
+    extra_http_headers: dict[str, str] | None = None,
 ) -> dict[str, Engine]:
     """每个引擎一个 SubprocessEngine（cmd 不同，core 引擎无关，ADR 0026）。
 
@@ -152,6 +154,12 @@ def build_engines(
         {"ARTIFACT_S3_BUCKET": artifact_s3[0], "ARTIFACT_S3_PREFIX": artifact_s3[1]}
         if artifact_s3 is not None else {}
     )
+    # 浏览器 context 级额外请求头（ADR 0035 决策 4，如 ngrok-skip-browser-warning）：JSON 经 env 注给
+    # 两个 worker，worker 在 browser context 上 setExtraHTTPHeaders（纯 CDP 命令，无回调）。None → 不注入。
+    headers_env = (
+        {"GHERKAI_EXTRA_HTTP_HEADERS": json.dumps(extra_http_headers, ensure_ascii=False)}
+        if extra_http_headers else {}
+    )
 
     def _inject_aws(env: dict) -> None:
         # --region/--profile 解析值覆盖继承的 AWS_REGION/AWS_PROFILE（None＝不写、留 boto 默认链/profile config
@@ -163,13 +171,14 @@ def build_engines(
             env["AWS_PROFILE"] = profile
 
     def _env(local_dir: str | Path | None, local_key: str) -> dict | None:
-        # local 落点 env + 可选 S3 上传 env。两者都无 → None（worker 全用 SDK 默认、报 file://）。
-        if local_dir is None and not s3_env:
+        # local 落点 env + 可选 S3 上传 env + 可选额外请求头。三者都无 → None（worker 全用 SDK 默认）。
+        if local_dir is None and not s3_env and not headers_env:
             return None
         env = {**os.environ}
         if local_dir is not None:
             env[local_key] = str(local_dir)
         env.update(s3_env)
+        env.update(headers_env)
         _inject_aws(env)
         return env
 
@@ -405,6 +414,7 @@ def resolve_network(
 def build_fargate_engines(
     *, run_id: str, prefix: str, cluster: str, events_table: str, bucket: str, report_dir: str,
     network_config: dict, region: str | None = None, profile: str | None = None,
+    extra_http_headers: dict[str, str] | None = None,
     ecs=None, s3=None, ddb_events_table=None,
 ) -> dict[str, Engine]:
     """每引擎一个 FargateEngine（对称 build_engines 的 SubprocessEngine dict；core 引擎无关，ADR 0026）。
@@ -445,6 +455,11 @@ def build_fargate_engines(
         "novaact": {"NOVA_LOGS_DIR": f"{container_run_root}/nova-trajectories"},
         "midscene": {"MIDSCENE_RUN_DIR": f"{container_run_root}/midscene-run"},
     }
+    # 额外请求头（ADR 0035）：对称 build_engines 的 headers_env，经 FargateEngine extra_env 注 RunTask overrides。
+    extra_env = (
+        {"GHERKAI_EXTRA_HTTP_HEADERS": json.dumps(extra_http_headers, ensure_ascii=False)}
+        if extra_http_headers else None
+    )
 
     def _engine(engine: str) -> Engine:
         return FargateEngine(
@@ -452,7 +467,8 @@ def build_fargate_engines(
             run_id=run_id, cluster=cluster, task_definition=task_def_name(prefix, engine),
             network_config=network_config, job_s3=job_s3, events_table_name=events_table,
             container_name=container_name(engine), artifact_s3=artifact_s3,
-            sdk_artifact_dir_env=sdk_env_by_engine.get(engine, {}), region=region,  # profile 不传（决策 C 非对称）
+            sdk_artifact_dir_env=sdk_env_by_engine.get(engine, {}), extra_env=extra_env,
+            region=region,  # profile 不传（决策 C 非对称）
         )
 
     return {engine: _engine(engine) for engine in _ENGINES}

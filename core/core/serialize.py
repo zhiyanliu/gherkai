@@ -257,14 +257,19 @@ def run_meta_to_dict(meta: RunMeta) -> dict:
         "run_id": meta.run_id,
         "created_at": meta.created_at,
         "jobs": [job_to_dict(j) for j in meta.jobs],
+        # extra_http_headers：omit-when-None（旧落盘兼容；ADR 0035 决策 4）。落盘存 dict 形式（可读）。
+        **({"extra_http_headers": dict(meta.extra_http_headers)}
+           if meta.extra_http_headers is not None else {}),
     }
 
 
 def run_meta_from_dict(d: dict) -> RunMeta:
+    hdrs = d.get("extra_http_headers")
     return RunMeta(
         run_id=d["run_id"],
         created_at=d.get("created_at", ""),
         jobs=tuple(job_from_dict(j) for j in d.get("jobs", [])),
+        extra_http_headers=tuple(sorted(hdrs.items())) if hdrs else None,  # 旧落盘无此键 → None
     )
 
 

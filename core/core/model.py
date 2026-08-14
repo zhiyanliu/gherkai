@@ -357,6 +357,10 @@ class RunMeta:
     run_id: str  # 组合根生成（RunReport 主键 / 未来 RunStore PK）
     created_at: str  # 组合根生成的时间戳（core 不取时钟）
     jobs: tuple[Job, ...]  # 这次跑哪些 job（完整 definition，来自 plan 产出）
+    # 浏览器 context 级额外请求头（ADR 0035 决策 4，如 ngrok-skip-browser-warning）：组合根填充、engine
+    # adapter 注 env、worker setExtraHTTPHeaders 消费——core 只搬运不消费语义。tuple pairs 保 frozen 惯例；
+    # None=无（默认路径零变化）。载体=definition：cloud detached 下要跨进程到 Lambda 重建 engine，必须随 META 持久化。
+    extra_http_headers: tuple[tuple[str, str], ...] | None = None
 
 
 @dataclass(frozen=True)

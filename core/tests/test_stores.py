@@ -304,6 +304,18 @@ def test_job_timeout_s_round_trip():
     assert job_from_dict(job_to_dict(jt)).timeout_s == 90.0
 
 
+def test_run_meta_extra_http_headers_round_trip():
+    # RunMeta.extra_http_headers（ADR 0035 决策 4）：非 None 往返不丢；None 省键（旧落盘兼容）
+    from core.serialize import run_meta_from_dict, run_meta_to_dict
+    meta = _sample_run("h-run").run_meta
+    assert "extra_http_headers" not in run_meta_to_dict(meta)  # 默认 None → omit
+    assert run_meta_from_dict(run_meta_to_dict(meta)).extra_http_headers is None
+    import dataclasses
+    meta2 = dataclasses.replace(meta, extra_http_headers=(("ngrok-skip-browser-warning", "1"),))
+    got = run_meta_from_dict(run_meta_to_dict(meta2))
+    assert got.extra_http_headers == (("ngrok-skip-browser-warning", "1"),)
+
+
 def test_job_state_claimed_at_round_trip(tmp_path: Path):
     # JobState.claimed_at（timeout 起算点）：落盘/读回不丢；未 claim 的省键 → None
     store = LocalRunStore(tmp_path / "runs")

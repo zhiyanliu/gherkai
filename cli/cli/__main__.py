@@ -56,6 +56,16 @@ def _build_parser() -> argparse.ArgumentParser:
         help="停止后等 worker 优雅退出的宽限秒（默认按本 run 引擎推导：Nova≈act_timeout+余量、"
              "确保 grace≥单 act 时长否则会话泄漏，ADR 0024；显式给过小值会被拒退 2）",
     )
+    run.add_argument(
+        "--expose-local", default=None, metavar="ORIGIN",
+        help="把「本机可达」的被测应用经隧道暴露给云端浏览器（ADR 0035）：值=feature 中书写的原始 origin"
+             "（如 http://localhost:3000，也可是局域网地址），框架起隧道并把 job 文本中该前缀替换为公网 URL"
+             "（含每 run 一换的 basic-auth 凭据）。需已配 ngrok authtoken（NGROK_AUTHTOKEN）",
+    )
+    run.add_argument(
+        "--tunnel", choices=sorted(_tunnel_providers()), default="ngrok",
+        help="--expose-local 用的隧道 provider（默认 ngrok，当前唯一实现）",
+    )
     run.add_argument("--fail-fast", action="store_true", help="任一 job 崩则中止整批")
     run.add_argument("--json", action="store_true", help="只输出机器可读 JSON（不打进度/文本汇总）")
     run.add_argument("--quiet", action="store_true", help="不打逐事件进度（仍打文本汇总）")
@@ -129,6 +139,10 @@ def _build_parser() -> argparse.ArgumentParser:
         help="AI 断言投票次数（默认 1）——影响分组产出的投票次数，故预检也可设",
     )
     pl.add_argument("--json", action="store_true", help="输出机器可读 JSON（scope/job 分组）")
+    pl.add_argument(
+        "--expose-local", default=None, metavar="ORIGIN",
+        help="仅作标注：plan 显示替换前的原始地址（隧道 URL 是运行时产物，plan 零副作用不起隧道，ADR 0035）",
+    )
 
     # ---- 无状态跑批（ADR 0034）：submit 提交完就走 / status 轮询收集 ----
     # local 档：submit setsid fork 一个 per-run 进程跑 reconcile loop（本机推进，无需常驻），CLI 立即退出。
@@ -140,6 +154,15 @@ def _build_parser() -> argparse.ArgumentParser:
     sm.add_argument(
         "--default-job-timeout", type=float, default=300.0, metavar="S",
         help="未标 @timeout 的 scope 用的 job 墙钟超时秒（默认 300；<=0 表示不超时）；标了 @timeout:N 的按 tag 走",
+    )
+    sm.add_argument(
+        "--expose-local", default=None, metavar="ORIGIN",
+        help="经隧道暴露本机可达的被测应用（语义同 run；submit 后隧道由后台进程持有——local=per-run 进程、"
+             "cloud=隧道守护进程，本机需保持开机联网直到 run 终态，ADR 0035）",
+    )
+    sm.add_argument(
+        "--tunnel", choices=sorted(_tunnel_providers()), default="ngrok",
+        help="--expose-local 用的隧道 provider（默认 ngrok）",
     )
     sm.add_argument("--report-dir", default="reports", metavar="DIR", help="归集报告落点（默认 reports/）")
     sm.add_argument("--region", default=None, metavar="R", help="AWS region（喂 worker）")
@@ -175,8 +198,24 @@ def _build_parser() -> argparse.ArgumentParser:
     rc.add_argument("--region", default=None)
     rc.add_argument("--profile", default=None)
 
+    # _tunnel_watch：cloud submit 的隧道守护进程入口（submit setsid fork 它，非用户直接调，ADR 0035 决策 3）：
+    # 轮询 run 终态即拆隧道；TTL 兜底自杀防泄漏。
+    tw = sub.add_parser("_tunnel_watch", help=argparse.SUPPRESS)
+    tw.add_argument("run_id")
+    tw.add_argument("--tunnel-pid", type=int, required=True)
+    tw.add_argument("--ttl", type=float, default=3600.0)
+    tw.add_argument("--ddb-table", required=True)
+    tw.add_argument("--region", default=None)
+    tw.add_argument("--profile", default=None)
+
     sub.add_parser("list-engines", help="列出可用引擎及其 spawn 命令")
     return p
+
+
+def _tunnel_providers() -> list[str]:
+    from gherkai.tunnel import PROVIDERS
+
+    return list(PROVIDERS)
 
 
 def _cmd_list_engines(repo: Path) -> int:
@@ -224,6 +263,28 @@ def _load_and_plan(args, repo: Path) -> "list | int":
         return 2
 
 
+def _setup_tunnel(args, jobs):
+    """`--expose-local` 时起隧道并映射 jobs（ADR 0035 决策 1/2/4）。
+
+    返回 (jobs, headers, info)——未开隧道时 (jobs, None, None)；隧道起不来返回退出码 2
+    （「没开跑就被拒」层，与 preflight 同级）。headers = 隧道模式恒注入的 ngrok-skip-browser-warning
+    （免费层 interstitial 绕过；付费层带着无害，ADR 0035 决策 4）。
+    """
+    if not getattr(args, "expose_local", None):
+        return jobs, None, None
+    from gherkai import tunnel as _tunnel
+
+    try:
+        provider = _tunnel.make_tunnel(args.tunnel)
+        info = provider.start(args.expose_local)
+    except _tunnel.TunnelError as e:
+        _progress(f"--expose-local 隧道未就绪：{e}")
+        return 2
+    _progress(f"隧道已建立：{args.expose_local} → {info.url}（basic-auth 已启用，凭据每 run 一换、终态即拆）")
+    mapped = _tunnel.map_origin_in_jobs(list(jobs), args.expose_local, info.mapped_base)
+    return mapped, {"ngrok-skip-browser-warning": "1"}, info
+
+
 def _cmd_plan(args, repo: Path) -> int:
     """plan 预检：读 feature → plan → 渲染 scope/job 分组。**不起 worker、不连 AWS、不烧钱**。
 
@@ -239,6 +300,9 @@ def _cmd_plan(args, repo: Path) -> int:
         print(json.dumps(render.plan_to_dict(jobs, args.default_engine), ensure_ascii=False, indent=2))
     else:
         print(render.render_plan_text(jobs, args.default_engine))
+    if getattr(args, "expose_local", None):
+        # 标注而不替换（ADR 0035 决策 2）：隧道 URL 是运行时产物，plan 零副作用、显示原始地址
+        _progress(f"注：{args.expose_local} 将在 run/submit 时经隧道替换为公网 URL（plan 显示原始地址）")
     return 0
 
 
@@ -298,8 +362,16 @@ def _cmd_submit(args, repo: Path) -> int:
         return jobs
     _progress(f"plan: {len(jobs)} job(s)  (default_engine={args.default_engine})")
 
+    # --expose-local：起隧道 + 映射 jobs（ADR 0035）。submit 的隧道生命周期交给后台宿主
+    # （local=per-run 进程、cloud=隧道守护进程）；分流失败（preflight/落库不过）时在此拆掉防泄漏。
+    tunneled = _setup_tunnel(args, jobs)
+    if isinstance(tunneled, int):
+        return tunneled
+    jobs, tunnel_headers, tunnel_info = tunneled
+
     run_id = compose.new_run_id()
-    run_meta = RunMeta(run_id=run_id, created_at=compose.now_iso(), jobs=tuple(jobs))
+    run_meta = RunMeta(run_id=run_id, created_at=compose.now_iso(), jobs=tuple(jobs),
+                       extra_http_headers=tuple(tunnel_headers.items()) if tunnel_headers else None)
     from core.model import JobState, RunState
     initial = RunState(
         run_id=run_id, status=Status.PENDING,
@@ -308,11 +380,17 @@ def _cmd_submit(args, repo: Path) -> int:
     )
 
     if args.backend == "cloud":
-        return _submit_cloud(args, repo, run_id, run_meta, initial)
-    return _submit_local(args, repo, run_id, run_meta, initial)
+        rc_ = _submit_cloud(args, repo, run_id, run_meta, initial, tunnel_info=tunnel_info)
+    else:
+        rc_ = _submit_local(args, repo, run_id, run_meta, initial, tunnel_info=tunnel_info)
+    if rc_ != 0 and tunnel_info is not None:
+        from gherkai.tunnel import stop_tunnel
+
+        stop_tunnel(tunnel_info.pid)  # 提交失败 → 隧道无宿主可交棒，就地拆（成功路径由后台宿主收尾）
+    return rc_
 
 
-def _submit_local(args, repo: Path, run_id: str, run_meta, initial) -> int:
+def _submit_local(args, repo: Path, run_id: str, run_meta, initial, *, tunnel_info=None) -> int:
     """local submit：create_run（文件）+ 建 events SQLite + setsid fork per-run 进程推进。"""
     import subprocess as _sp
     from core.adapters.event_log import SqliteEventLog
@@ -321,6 +399,13 @@ def _submit_local(args, repo: Path, run_id: str, run_meta, initial) -> int:
     run_store, _rs, _rp, _mk = compose.build_local_stores(report_dir=str(report_root))
     run_store.create_run(run_meta, initial)
     SqliteEventLog(report_root / run_id / "events.db")  # 建库（schema），per-run/status 共用
+    if tunnel_info is not None:
+        # 隧道收尾凭据落盘（ADR 0035 决策 3）：pid 经 tunnel.json 交给收尾者（per-run 终态后拆；
+        # per-run 崩了由 status --wait 接力拆）。进程对象句柄跨进程传不过去，落盘是唯一通道。
+        from gherkai.detached import write_tunnel_file
+
+        write_tunnel_file(str(report_root), run_id, tunnel_info)
+        _progress(f"隧道由本机 per-run 进程持有（pid 记录于 {report_root / run_id / 'tunnel.json'}）：run 终态即拆。")
 
     # setsid fork per-run 进程（start_new_session=True = 脱离 CLI 进程组，CLI 退出不带走它，ADR 0034）。
     cmd = [sys.executable, "-m", "cli", "_reconcile", run_id,
@@ -341,7 +426,7 @@ def _submit_local(args, repo: Path, run_id: str, run_meta, initial) -> int:
     return 0
 
 
-def _submit_cloud(args, repo: Path, run_id: str, run_meta, initial) -> int:
+def _submit_cloud(args, repo: Path, run_id: str, run_meta, initial, *, tunnel_info=None) -> int:
     """cloud submit：只 create_run 写 definition 到 DDB（不起 task）→ 云端 Lambda 事件驱动链接管推进。
 
     冷启动由 kicker Lambda 做：create_run 写 definition（INSERT）→ runs 表 Stream 触发 kicker → tick 起首批 →
@@ -392,7 +477,27 @@ def _submit_cloud(args, repo: Path, run_id: str, run_meta, initial) -> int:
             return 2
         raise
 
-    _progress(f"已提交到云端（definition 已落库；kicker Lambda 起首批、云端链推进中，可关机）。查进度：gherkai status {run_id} --backend cloud --prefix {prefix}")
+    if tunnel_info is not None:
+        # 隧道守护进程（ADR 0035 决策 3）：cloud submit 的 CLI 立即退出、本机没有 per-run 进程——fork 一个
+        # 轻量守护持有隧道：轮询 run 终态即拆 + TTL 兜底自杀。日志落系统临时目录（诊断可寻）。
+        import subprocess as _sp
+        import tempfile as _tf
+
+        watch_log = Path(_tf.gettempdir()) / f"gherkai-tunnel-watch-{run_id}.log"
+        cmd = [sys.executable, "-m", "cli", "_tunnel_watch", run_id,
+               "--tunnel-pid", str(tunnel_info.pid), "--ddb-table", table]
+        if resolved_region:
+            cmd += ["--region", resolved_region]
+        if resolved_profile:
+            cmd += ["--profile", resolved_profile]
+        with open(watch_log, "ab") as lf:
+            _sp.Popen(cmd, cwd=str(repo), start_new_session=True,
+                      stdin=_sp.DEVNULL, stdout=lf, stderr=lf)
+        _progress(f"隧道由守护进程持有（日志 {watch_log}）：run 终态即拆、TTL 兜底。"
+                  f"**本机需保持开机联网直到 run 终态**——关机=隧道断=测试将以导航失败告终（ADR 0035）。")
+        _progress(f"已提交到云端（definition 已落库；kicker Lambda 起首批、云端链推进中）。查进度：gherkai status {run_id} --backend cloud --prefix {prefix}")
+    else:
+        _progress(f"已提交到云端（definition 已落库；kicker Lambda 起首批、云端链推进中，可关机）。查进度：gherkai status {run_id} --backend cloud --prefix {prefix}")
     print(run_id)
     return 0
 
@@ -451,6 +556,7 @@ def _cmd_status(args, repo: Path) -> int:
         detached.run_reconcile_loop(args.run_id, meta, log, store, launcher, mc,
                                     poll_interval_s=0.5, now_iso_fn=compose.now_iso,
                                     result_store=rstore, report_store=pstore)
+        detached.cleanup_tunnel(str(report_root), args.run_id)  # 接力者兜底拆隧道（per-run 崩时，ADR 0035）
 
     state = run_store.load_run_state(args.run_id)
     if state is None:  # 不可达（上面已查过），保险分支
@@ -546,6 +652,38 @@ def _cmd_reconcile(args, repo: Path) -> int:
     detached.run_reconcile_loop(args.run_id, meta, log, store, launcher, mc,
                                 poll_interval_s=0.5, now_iso_fn=compose.now_iso,
                                 result_store=rstore, report_store=pstore)
+    detached.cleanup_tunnel(str(report_root), args.run_id)  # 隧道收尾（有 tunnel.json 才动作，ADR 0035）
+    return 0
+
+
+def _cmd_tunnel_watch(args) -> int:
+    """隧道守护进程入口（cloud submit setsid fork 它，非用户直接调，ADR 0035 决策 3）。
+
+    轮询 DDB run 终态 → 拆隧道退出；TTL 到 → 拆隧道自杀（防「run 卡死/查询异常」时 ngrok 进程泄漏）。
+    读库异常不致命（瞬时网络/限流）——继续轮询，TTL 是最终兜底。
+    """
+    import time as _time
+
+    from core.adapters.run_store.ddb import DynamoDBRunStore
+    from gherkai.tunnel import stop_tunnel
+
+    resolved_profile = args.profile or os.environ.get("AWS_PROFILE")
+    resolved_region = compose.resolve_region(args.region, resolved_profile)
+    run_store = DynamoDBRunStore(compose._make_ddb_table(args.ddb_table, region=resolved_region, profile=resolved_profile))
+    _TERMINAL = {Status.PASSED, Status.FAILED, Status.ERROR, Status.SKIPPED, Status.ABORTED}
+    deadline = _time.monotonic() + args.ttl
+    reason = "TTL 兜底"
+    while _time.monotonic() < deadline:
+        try:
+            state = run_store.load_run_state(args.run_id)
+            if state is not None and state.status in _TERMINAL:
+                reason = f"run 终态 {state.status.value}"
+                break
+        except Exception as e:  # 瞬时读库异常不致命——TTL 最终兜底
+            print(f"tunnel-watch: 读 run 状态失败（继续轮询）：{e}")
+        _time.sleep(5.0)
+    stop_tunnel(args.tunnel_pid)
+    print(f"tunnel-watch: 隧道已拆（{reason}）run={args.run_id} pid={args.tunnel_pid}")
     return 0
 
 
@@ -562,10 +700,23 @@ def _cmd_run(args, repo: Path) -> int:
     for j in jobs:
         _progress(f"  - scope={j.scope_id!r} engine={j.engine} scenarios={len(j.scenarios)}")
 
+    # 2b) --expose-local：起隧道 + 把 jobs 文本中的 origin 替换成公网 URL（ADR 0035）。前台 run 的隧道
+    #     跟 CLI 进程走——atexit 拆（正常结束/Ctrl-C 都收；SIGTERM 直杀的极端泄漏由 ngrok 进程可见性兜）。
+    tunneled = _setup_tunnel(args, jobs)
+    if isinstance(tunneled, int):
+        return tunneled
+    jobs, tunnel_headers, tunnel_info = tunneled
+    if tunnel_info is not None:
+        import atexit
+
+        from gherkai.tunnel import stop_tunnel
+        atexit.register(stop_tunnel, tunnel_info.pid)
+
     # 3) 组合根：构造 RunMeta（definition：生成 run_id + now + plan 产出的 jobs，先于跑批，ADR 0016/0027）
     #    + 注入具体引擎 resolver（core 引擎无关）
     run_id = compose.new_run_id()
-    run_meta = RunMeta(run_id=run_id, created_at=compose.now_iso(), jobs=tuple(jobs))
+    run_meta = RunMeta(run_id=run_id, created_at=compose.now_iso(), jobs=tuple(jobs),
+                       extra_http_headers=tuple(tunnel_headers.items()) if tunnel_headers else None)
     do_report = not args.no_report  # RunReport 默认生成；--no-report 跳过（逃生舱）
     # 归集时让两个引擎的产物都落到 run 专属持久目录（否则用 SDK 默认：Nova 临时目录会被清理、Midscene
     # 落相对 worker cwd 的固定 midscene_run/ 每 run 覆盖）。两引擎对称落 reports/<run_id>/ 下（ADR 0027）。
@@ -680,11 +831,13 @@ def _cmd_run(args, repo: Path) -> int:
             events_table=cloud_fargate["events_table"], bucket=cloud_fargate["bucket"],
             report_dir=args.report_dir, network_config=cloud_fargate["network_config"],
             region=resolved_region, profile=resolved_profile,
+            extra_http_headers=tunnel_headers,  # 隧道模式的额外请求头（ADR 0035 决策 4；None=不注入）
         )
     else:
         engines = compose.build_engines(
             repo, nova_logs_dir=nova_logs_dir, midscene_run_dir=midscene_run_dir,
             region=resolved_region, profile=resolved_profile,
+            extra_http_headers=tunnel_headers,  # 同上（ADR 0035）
         )
     resolver = compose.make_resolver(engines)
 
@@ -806,6 +959,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_submit(args, repo)
     if args.command == "status":
         return _cmd_status(args, repo)
+    if args.command == "_tunnel_watch":
+        return _cmd_tunnel_watch(args)
     if args.command == "_reconcile":
         return _cmd_reconcile(args, repo)
 

@@ -31,6 +31,7 @@ cost（ADR 0024）：Nova SDK 原生给 time_worked_s，worker 只报该原生�
 from __future__ import annotations
 
 import inspect
+import json
 import os
 import re
 import signal
@@ -624,6 +625,12 @@ def main() -> int:
                 # 关掉后输出干净的逐行日志（think/return/Approx. Time Worked 等有用行保留）。SDK 文档亦推荐非 tty 场景置 False。
                 tty=False,
             ) as nova:
+                # 额外请求头（ADR 0035，如 ngrok-skip-browser-warning）：组合根经 env 注入，context 级
+                # 对所有请求（含 SDK 之后新开的 page）生效。纯 CDP 命令、无回调——不触碰 SDK 的
+                # route/greenlet 面（nova.page 是 SDK 公开属性，_DeterministicCtx 同源用法）。
+                extra_headers = os.environ.get("GHERKAI_EXTRA_HTTP_HEADERS")
+                if extra_headers:
+                    nova.page.context.set_extra_http_headers(json.loads(extra_headers))
                 # 取真实 AgentCore 会话 id（血缘，进 RunStore，ADR 0016/0024）。
                 session_id = nova.get_session_id()
                 # session_id 随 scope_started 即回传（不只等 scope_done）——超时/SIGTERM 中途打断时

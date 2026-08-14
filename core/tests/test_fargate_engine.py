@@ -161,6 +161,20 @@ def test_run_scope_runtask_injects_env(fargate, monkeypatch):
     assert captured["taskDefinition"] == fargate["task_def"]
 
 
+def test_runtask_injects_extra_env(fargate, monkeypatch):
+    # extra_env（ADR 0035）：组合根算好的通用附加 env（如 GHERKAI_EXTRA_HTTP_HEADERS）逐条注 RunTask overrides
+    eng = FargateEngine(
+        ecs_client=fargate["ecs"], s3_client=fargate["s3"], ddb_events_table=fargate["events_table"],
+        run_id=_RUN_ID, cluster=fargate["cluster"], task_definition=fargate["task_def"],
+        network_config=fargate["network_config"], job_s3=(fargate["bucket"], f"{_RUN_ID}/jobs/"),
+        events_table_name=fargate["events_table_name"], container_name=fargate["container_name"],
+        extra_env={"GHERKAI_EXTRA_HTTP_HEADERS": '{"ngrok-skip-browser-warning": "1"}'},
+        poll_interval_s=0.01,
+    )
+    env = _spy_run_task_env(fargate, monkeypatch, eng)
+    assert env["GHERKAI_EXTRA_HTTP_HEADERS"] == '{"ngrok-skip-browser-warning": "1"}'
+
+
 def test_runtask_sets_started_by_run_id(fargate, monkeypatch):
     # startedBy=run_id（ADR 0034「job timeout」节）：超时处置用 ListTasks(startedBy=run_id) 定位本 run 的
     # task（≤36 字符：run_id 形如 20260707T120000Z-abc123 共 23 字符）。

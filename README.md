@@ -154,6 +154,8 @@ uv run python -m cli status "$RUN_ID" --backend cloud --prefix gherkai- --wait
 
 提交完就走不等于失控：每个 job 有墙钟预算兜底（缺省 300s；`@timeout:<秒>` tag 按用例声明、`--default-job-timeout` 改缺省）——卡死/超预算的 job 会被自动停掉并判 `error(timeout)`，local 挂死、cloud 无限烧钱都由它止损。`status` 的 `--backend`/`--report-dir`/`--prefix` 须与 `submit` 时一致（否则查不到）。选项全表、退出码分层、submit/status 语义细节见 [`cli/README.md`](./cli/README.md)。
 
+**被测应用跑在本机/内网？** 加 `--expose-local http://localhost:3000`（run/submit 均可）：框架自动起 ngrok 隧道把它暴露给云端浏览器——feature 里照写原始地址，框架在提交时替换为公网 URL（带每次一换的 basic-auth 凭据、测完即拆）。前置：配好 ngrok authtoken（`NGROK_AUTHTOKEN`）。设计与边界见 ADR 0035。
+
 两个引擎读的是**同一份** `features/` 下 `.feature`（通用 step 风格，QA 只写自然语言）。
 
 ### 怎么写 `.feature`（QA 零代码，ADR 0020）

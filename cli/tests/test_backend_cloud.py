@@ -426,3 +426,37 @@ def test_status_wait_cloud_kicker_missing_fails_fast(monkeypatch, capsys):
     assert rc == 2
     err = capsys.readouterr().err
     assert "gherkai-kicker" in err and "--prefix" in err
+
+
+def test_submit_cloud_forks_tunnel_watch_daemon(tmp_path, monkeypatch, capsys):
+    """cloud submit --expose-local：fork 隧道守护进程（_tunnel_watch，携带隧道 pid）并明示「本机保持开机」
+    （ADR 0035 决策 3——cloud submit 的 CLI 即退，守护是隧道唯一宿主）。"""
+    import subprocess
+
+    from gherkai import tunnel as gtunnel
+
+    record: list = []
+    _patch_cloud_handles(monkeypatch, record)
+    info = gtunnel.TunnelInfo(url="https://t.ngrok-free.app", auth="u1:p1", pid=777,
+                              local_origin="http://localhost:3000")
+
+    class _Provider:
+        def start(self, origin, **kw):
+            return info
+
+    monkeypatch.setattr(gtunnel, "make_tunnel", lambda name: _Provider())
+    forked = []
+
+    class _FakeProc:
+        pid = 9
+
+    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: forked.append(cmd) or _FakeProc())
+    rc = m.main(["submit", str(_write_feature(tmp_path)), "--backend", "cloud",
+                 "--region", "us-east-1", "--expose-local", "http://localhost:3000"])
+    assert rc == 0
+    watch = [c for c in forked if "_tunnel_watch" in c]
+    assert len(watch) == 1
+    cmd = watch[0]
+    assert cmd[cmd.index("--tunnel-pid") + 1] == "777"
+    assert "--ddb-table" in cmd
+    assert "保持开机" in capsys.readouterr().err  # 明示边界（关机=隧道断）

@@ -217,6 +217,8 @@ def _build(run_id: str):
         run_id=run_id, prefix=prefix, cluster=os.environ["CLUSTER"],
         events_table=os.environ["EVENTS_TABLE"], bucket=bucket, report_dir=report_dir,
         network_config=network, region=region,
+        # 额外请求头从 definition 读回（ADR 0035：submit 落 META、此处重建 engine 时注入 RunTask env）
+        extra_http_headers=dict(meta.extra_http_headers) if meta.extra_http_headers else None,
         ecs=boto3.client("ecs", region_name=region), s3=s3, ddb_events_table=events_table,
     )
     # job timeout 到点触发器（ADR 0034「job timeout」节）：env 齐才装配（KICKER_ARN/SCHEDULER_ROLE_ARN 由

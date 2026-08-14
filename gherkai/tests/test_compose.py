@@ -18,6 +18,23 @@ def test_build_engines_has_both_legs():
     assert any("run-scope.ts" in c for c in engines["midscene"].cmd)
 
 
+def test_build_engines_injects_extra_http_headers_env():
+    """extra_http_headers（ADR 0035 决策 4）→ 两 worker env 注 GHERKAI_EXTRA_HTTP_HEADERS（JSON）；
+    不传则不注入（默认路径零变化）。"""
+    import json as _json
+
+    repo = compose.repo_root()
+    engines = compose.build_engines(repo, extra_http_headers={"ngrok-skip-browser-warning": "1"})
+    for name in ("novaact", "midscene"):
+        env = engines[name]._env
+        assert env is not None, name
+        assert _json.loads(env["GHERKAI_EXTRA_HTTP_HEADERS"]) == {"ngrok-skip-browser-warning": "1"}
+    engines2 = compose.build_engines(repo)
+    for name in ("novaact", "midscene"):
+        env2 = engines2[name]._env
+        assert env2 is None or "GHERKAI_EXTRA_HTTP_HEADERS" not in env2, name
+
+
 def test_resolver_known_and_unknown():
     engines = compose.build_engines(compose.repo_root())
     resolver = compose.make_resolver(engines)

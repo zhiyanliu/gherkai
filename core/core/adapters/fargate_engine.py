@@ -113,6 +113,7 @@ class FargateEngine:
         container_name: str,       # RunTask overrides 要指定往哪个 container 注 env
         artifact_s3: tuple[str, str] | None = None,  # (bucket, prefix)：worker 产物上传落点（ADR 0029）——注入 worker 的
                                    # ARTIFACT_S3_BUCKET/PREFIX，否则容器盘停即销毁、产物必丢（ADR 0029「cloud 下注入不是可选」）。None=不上传
+        extra_env: dict | None = None,  # 通用附加 env（组合根算好，如 GHERKAI_EXTRA_HTTP_HEADERS，ADR 0035）——逐条注 RunTask overrides
         sdk_artifact_dir_env: dict | None = None,  # 按引擎的 SDK 产物落点 env（如 {"NOVA_LOGS_DIR": "/容器内/…/nova-trajectories"}）——
                                    # worker ArtifactUploader 用其父级算 run_dir/相对 key。**缺它 uploader run_dir=None→no-op 报 file://→产物丢**
                                    # （真跑暴露：只注 ARTIFACT_S3_* 不够，SDK 落点 env 也必注）。引擎无关：由组合根按引擎算好、本 adapter 只转发。
@@ -134,6 +135,7 @@ class FargateEngine:
         self._container = container_name
         self._artifact_s3 = artifact_s3  # (bucket, prefix) or None——注入 worker 产物上传落点（ADR 0029）
         self._sdk_artifact_dir_env = sdk_artifact_dir_env or {}  # 按引擎 SDK 落点 env（NOVA_LOGS_DIR/MIDSCENE_RUN_DIR）
+        self._extra_env = extra_env or {}  # 通用附加 env（ADR 0035 extra headers 等；组合根注入、worker 消费）
         self._region = region
         # 不存 profile：Fargate 用 task role，注入 profile 名会 ProfileNotFound 盖过 task role（ADR 0016 决策 C 的非对称）。
         self._poll = poll_interval_s
@@ -184,6 +186,8 @@ class FargateEngine:
         # SDK 产物落点 env（NOVA_LOGS_DIR/MIDSCENE_RUN_DIR，组合根按引擎算好的容器内路径）：worker ArtifactUploader
         # 用其父级算 run_dir/相对 key——**缺它 uploader run_dir=None→no-op→产物丢**（真跑暴露；只注 ARTIFACT_S3_* 不够）。
         for name, value in self._sdk_artifact_dir_env.items():
+            env.append({"name": name, "value": value})
+        for name, value in self._extra_env.items():  # 通用附加 env（如 GHERKAI_EXTRA_HTTP_HEADERS，ADR 0035）
             env.append({"name": name, "value": value})
         # region 与 core store 同源注入（ADR 0016 决策 C）：Fargate 容器不继承本地 env、也不吃 profile config，非 None 时
         # 显式传（组合根已落实成具体字符串），否则 worker region_name=None → NoRegionError/AgentCore InvalidRegionError。
