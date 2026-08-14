@@ -26,6 +26,8 @@
 
 > **v1.2 无状态跑批**（已实装，ADR 0034）：`submit` 提交完就走、返回 run_id，`status [--wait]` 轮询/接力收集——CLI 不必守着 run。local 档起 per-run 后台进程（setsid 脱离 CLI）+ SQLite events 推进；cloud 档三 Lambda 事件驱动链（kicker 冷启动 / reconciler 主推进 / 退出观察者）由 DDB Stream + EventBridge 驱动，submit 机器权限收窄到「提交那一下」。同步 `run` 命令保留不变。每个 job 有墙钟预算兜底（缺省 300s，`@timeout:` tag 按用例声明）——三路推进器统一 enforce，提交完就走也不怕挂死/无限烧钱。
 
+> **v1.3 本地应用测试**（已实装，ADR 0035）：`--expose-local http://localhost:3000`（run/submit 均可）把「跑 CLI 的机器可达」的被测应用经 **ngrok 隧道**暴露给云端浏览器——本地开发中的应用不必发布即可被测。feature 里照写原始地址，框架提交时替换为公网 URL；basic-auth 默认开启（随机凭据每 run 一换、终态即拆、边缘拦截）。四种「跑法×backend」组合全支持（cloud submit 由本机守护进程持有隧道，需保持开机到 run 终态）。
+
 ## 架构速览
 
 ```mermaid
@@ -94,6 +96,7 @@ flowchart TD
   - Nova Act 服务（`nova-act`）+ 模型 `nova-act-latest`
 - Nova Act workflow definition（IAM 路径必需）：**代码会自动 create-if-not-exists**（`engines/novaact/lib/workflow_setup.py`），无需手动操作。若想手动预建也可：`aws nova-act create-workflow-definition --region us-east-1 --name spike-wikipedia-benchmark`（见 ADR 0004）。
 - Node 22（midscene）、Python 3.13 + uv（novaact）
+- （可选，仅 `--expose-local` 本地应用测试需要）[ngrok](https://ngrok.com/download) + authtoken（**注册免费账号即够**，付费账号亦可；`ngrok config add-authtoken <token>`——注意是 dashboard 上的 **Authtoken**，不是 `cr_` 开头的 API key）
 
 ## 运行（经核心库 cli，一个入口跑两个引擎）
 
@@ -154,7 +157,18 @@ uv run python -m cli status "$RUN_ID" --backend cloud --prefix gherkai- --wait
 
 提交完就走不等于失控：每个 job 有墙钟预算兜底（缺省 300s；`@timeout:<秒>` tag 按用例声明、`--default-job-timeout` 改缺省）——卡死/超预算的 job 会被自动停掉并判 `error(timeout)`，local 挂死、cloud 无限烧钱都由它止损。`status` 的 `--backend`/`--report-dir`/`--prefix` 须与 `submit` 时一致（否则查不到）。选项全表、退出码分层、submit/status 语义细节见 [`cli/README.md`](./cli/README.md)。
 
-**被测应用跑在本机/内网？** 加 `--expose-local http://localhost:3000`（run/submit 均可）：框架自动起 ngrok 隧道把它暴露给云端浏览器——feature 里照写原始地址，框架在提交时替换为公网 URL（带每次一换的 basic-auth 凭据、测完即拆）。前置：配好 ngrok authtoken（`NGROK_AUTHTOKEN`）。设计与边界见 ADR 0035。
+### ④ 测本地/内网应用：`--expose-local`
+
+被测应用跑在本机（或 CLI 机器可达的内网机器）、没有公网入口？加一个 flag 即可——框架自动起 ngrok 隧道暴露给云端浏览器，feature 里照写原始地址：
+
+```bash
+# feature 里写的是 http://localhost:3000（原始地址，plan 也显示它）；
+# 框架起隧道后在提交时替换为公网 URL（带每 run 一换的 basic-auth 凭据、终态即拆）
+uv run python -m cli run my_app.feature --expose-local http://localhost:3000
+RUN_ID=$(uv run python -m cli submit my_app.feature --expose-local http://localhost:3000)
+```
+
+前置：装 ngrok + 配 authtoken（见上「前置要求」）。`submit` 后隧道由后台进程持有（cloud 档为守护进程）——**本机需保持开机联网直到 run 终态**。设计与边界见 ADR 0035。
 
 两个引擎读的是**同一份** `features/` 下 `.feature`（通用 step 风格，QA 只写自然语言）。
 
