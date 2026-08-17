@@ -11,7 +11,7 @@ WebUI 将来是另一张皮，**直接调 core、复用产品本体 `gherkai`（
 
 ```
 cli/
-├── __main__.py   ← argparse 皮：run/submit/status/plan/list-engines 解析 → 调 gherkai.compose/core → 注入 RunPersistence 实时落库 → 调 render；定义退出码
+├── __main__.py   ← argparse 皮：run/submit/status/plan/list-engines/list-deterministic 解析 → 调 gherkai.compose/core → 注入 RunPersistence 实时落库 → 调 render；定义退出码
 └── render.py     ← 表层渲染：0024 事件 → 进度行；RunResult → 文本汇总 / JSON
 ```
 
@@ -39,12 +39,17 @@ uv run python -m cli run ../features/wikipedia_generic.feature
 uv run python -m cli run ../features/wikipedia_generic.feature \
   --default-engine midscene --max-concurrency 2 --json
 
-# 预检 .feature（不烧钱）：看 scope/job 分组、校验配置（@scope/@engine 冲突等），不真跑
+# 预检 .feature（不烧钱）：看 scope/job 分组、校验配置（@scope/@engine 冲突等），不真跑。
+# 每个 step 还标注派发预期（← 确定性: … / 默认 AI 不标；worker 自述命中，ADR 0036——
+# 起本地瞬时 worker 子进程做 match 查询，零 AWS 零花费；引擎环境未装则自动降级为无标注）
 uv run python -m cli plan ../features/wikipedia_generic.feature
 uv run python -m cli plan ../features/*.feature --json     # 机器可读分组
 
 # 列可用引擎及其 spawn 命令（不烧钱）
 uv run python -m cli list-engines
+
+# 列指定引擎支持的确定性 step（worker 注册表自述，写 feature 时查询复用；不烧钱，ADR 0036）
+uv run python -m cli list-deterministic --engine midscene      # --json 可选；默认 --engine novaact
 
 # 云端落库：状态 → DynamoDB、判定结果与报告 → S3（表/桶需预先建好；云端后端才需装 boto3）
 uv sync --extra aws                                # 装 boto3（仅 --backend cloud 需要）

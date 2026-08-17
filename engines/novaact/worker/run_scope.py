@@ -577,6 +577,18 @@ def _classify_act_error(e: BaseException) -> str:
 
 
 def main() -> int:
+    # 自述模式（ADR 0036）：dump 确定性注册表即退——不建会话、不读 stdin、不烧钱。
+    # 脚手架已在模块顶 import（副作用注册），此刻注册表即真值。
+    if "--list-deterministic" in sys.argv:
+        print(json.dumps(_deterministic.list_registry(), ensure_ascii=False))
+        return 0
+    # 批量 match 查询（ADR 0036 第二期，plan 命中标注）：stdin 一行 JSON 数组（step 文本）→ stdout
+    # 逐条命中结果。匹配语义留在 worker（CLI 零复刻）；同样不建会话、零 AWS。
+    if "--match-steps" in sys.argv:
+        texts = json.loads(sys.stdin.read())
+        print(json.dumps(_deterministic.match_batch(texts), ensure_ascii=False))
+        return 0
+
     # flag-only handler 装在 main() 首句（模块级 _on_signal，SIGTERM/SIGINT 共用，只置 _stop、绝不 raise，
     # ADR 0024）——必须先于 JobSource.read()：S3 态下 read 含一次网络往返，曾装在其后，窗口内 SIGTERM 走
     # 默认处置直接杀进程（非 0 退出）→ adapter 误归 engine_error（ADR 0024 已根治场景的残余窗口）。

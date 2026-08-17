@@ -512,3 +512,68 @@ def test_preflight_missing_cluster_detected():
         ecs=_FakeEcsClient(set()),  # cluster 非 ACTIVE
     )
     assert err is not None and "g-cluster" in err
+
+
+# ---- query_deterministic（ADR 0036）：spawn worker 自述、fake subprocess ----
+
+def test_query_deterministic_parses_worker_json(monkeypatch):
+    import subprocess
+
+    class _P:
+        returncode = 0
+        stdout = b'[{"pattern": "p", "description": "d", "example": "e"}]'
+        stderr = b""
+
+    captured = {}
+
+    def fake_run(cmd, **kw):
+        captured["cmd"] = cmd
+        captured["cwd"] = kw.get("cwd")
+        return _P()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    got = compose.query_deterministic(compose.repo_root(), "novaact")
+    assert got == [{"pattern": "p", "description": "d", "example": "e"}]
+    assert captured["cmd"][-1] == "--list-deterministic"  # 既有 worker cmd + 自述 flag
+    assert "novaact" in " ".join(captured["cmd"])
+    assert captured["cwd"] is not None  # 在 worker cwd 下 spawn（相对依赖如 .venv 才可达）
+
+
+def test_query_deterministic_unknown_engine():
+    with pytest.raises(ValueError, match="未知引擎"):
+        compose.query_deterministic(compose.repo_root(), "nope")
+
+
+def test_query_deterministic_worker_failure_raises(monkeypatch):
+    import subprocess
+
+    class _P:
+        returncode = 1
+        stdout = b""
+        stderr = "worker exploded".encode()
+
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: _P())
+    with pytest.raises(RuntimeError, match="自述失败"):
+        compose.query_deterministic(compose.repo_root(), "midscene")
+
+
+def test_match_deterministic_feeds_stdin_and_parses(monkeypatch):
+    import subprocess
+
+    class _P:
+        returncode = 0
+        stdout = b'[{"pattern": "p", "description": "d"}, null]'
+        stderr = b""
+
+    captured = {}
+
+    def fake_run(cmd, **kw):
+        captured["cmd"], captured["input"] = cmd, kw.get("input")
+        return _P()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    got = compose.match_deterministic(compose.repo_root(), "midscene", ["a", "b"])
+    assert got == [{"pattern": "p", "description": "d"}, None]
+    assert captured["cmd"][-1] == "--match-steps"
+    import json as _json
+    assert _json.loads(captured["input"].decode()) == ["a", "b"]

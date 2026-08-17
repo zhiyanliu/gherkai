@@ -69,6 +69,11 @@ class SubprocessEngine:
         """启 worker 的命令行（只读，供组合根自省/日志，如 CLI 的 list-engines）。"""
         return list(self._cmd)
 
+    @property
+    def cwd(self) -> str | None:
+        """worker 的工作目录（只读，供组合根自省，如 list-deterministic 的 dump spawn，ADR 0036）。"""
+        return self._cwd
+
     def run_scope(
         self, job: Job, raw_sink: "Callable[[str], None] | None" = None
     ) -> tuple[SubprocessWorkerHandle, Iterator[Event]]:

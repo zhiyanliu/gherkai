@@ -26,7 +26,7 @@
 
 > **v1.2 无状态跑批**（已实装，ADR 0034）：`submit` 提交完就走、返回 run_id，`status [--wait]` 轮询/接力收集——CLI 不必守着 run。local 档起 per-run 后台进程（setsid 脱离 CLI）+ SQLite events 推进；cloud 档三 Lambda 事件驱动链（kicker 冷启动 / reconciler 主推进 / 退出观察者）由 DDB Stream + EventBridge 驱动，submit 机器权限收窄到「提交那一下」。同步 `run` 命令保留不变。每个 job 有墙钟预算兜底（缺省 300s，`@timeout:` tag 按用例声明）——三路推进器统一 enforce，提交完就走也不怕挂死/无限烧钱。
 
-> **v1.3 本地应用测试**（已实装，ADR 0035）：`--expose-local http://localhost:3000`（run/submit 均可）把「跑 CLI 的机器可达」的被测应用经 **ngrok 隧道**暴露给云端浏览器——本地开发中的应用不必发布即可被测。feature 里照写原始地址，框架提交时替换为公网 URL；basic-auth 默认开启（随机凭据每 run 一换、终态即拆、边缘拦截）。四种「跑法×backend」组合全支持（cloud submit 由本机守护进程持有隧道，需保持开机到 run 终态）。
+> **v1.3 本地应用测试**（已实装，ADR 0035）：`--expose-local http://localhost:3000`（run/submit 均可）把「跑 CLI 的机器可达」的被测应用经 **ngrok 隧道**暴露给云端浏览器——本地开发中的应用不必发布即可被测。feature 里照写原始地址，框架提交时替换为公网 URL；basic-auth 默认开启（随机凭据每 run 一换、终态即拆、边缘拦截）。四种「跑法×backend」组合全支持（cloud submit 由本机守护进程持有隧道，需保持开机到 run 终态）。**同版还含确定性能力暴露**（ADR 0036）：`list-deterministic` 按引擎列出可复用的确定性 step（worker 注册表自述，零漂移），`plan` 对每个 step 标注派发预期（命中确定性/走 AI，含冲突预检）——写 feature 的人不再对引擎侧能力两眼一抹黑。
 
 ## 架构速览
 
@@ -35,7 +35,7 @@ flowchart TD
     F["① 用例层<br/>features/*.feature —— 共享 Gherkin（ADR 0005）"]
 
     subgraph L2["② 产品层"]
-        CLI["cli/ —— run / submit / status / plan / list-engines<br/>命令行皮（Lambda / 未来 WebUI 是另两张皮）"]
+        CLI["cli/ —— run / submit / status / plan /<br/>list-engines / list-deterministic<br/>命令行皮（Lambda / 未来 WebUI 是另两张皮）"]
         G["gherkai/ —— 产品本体 = 组合根<br/>引擎注册表与装配 · 资源命名真源 · <br/>隧道口子（ADR 0016「演进」节 / 0035）"]
         C["core/（Python）—— parse → scope 分组 → schedule 调度<br/>窄腰，零引擎依赖（ADR 0016）"]
         CLI --> G --> C
@@ -119,8 +119,20 @@ cd cli && uv sync                                  # cli + core（core 作 path 
 ### ① 先预检（纯本地、不烧钱）
 
 ```bash
-uv run python -m cli plan ../features/engine_routing.feature   # 看 scope/job 分组、engine 路由、校验配置
+uv run python -m cli plan ../features/engine_routing.feature   # 看 scope/job 分组、engine 路由、校验配置；
+                                                               # 每个 step 还标注派发预期：命中确定性锚点的标
+                                                               # 「← 确定性: <说明>」，纯自然语言步走 AI（不标）
 uv run python -m cli list-engines                              # 列可用引擎
+uv run python -m cli list-deterministic --engine midscene      # 列该引擎支持的确定性 step（--json 可选，ADR 0036）
+```
+
+`list-deterministic` 输出示例（写 feature 时查询可复用的精确断言，照 `示例` 一行抄进 feature 即可）：
+
+```
+引擎 midscene 的确定性 step（1 条；test engineer 在 worker 注册表维护，ADR 0022/0036）：
+  - 断言当前页面 URL 匹配给定正则（精确判定，不走 AI、不投票）
+    示例: Then 页面地址匹配 "/wiki/OpenAI"
+    模式: 页面地址(?:精确)?匹配 "(?<pattern>[^"]+)"
 ```
 
 **先 `plan` 后跑**——真跑烧钱（模型调用 + AgentCore 会话），plan 是纯本地预检。
@@ -180,7 +192,7 @@ RUN_ID=$(uv run python -m cli submit my_app.feature --expose-local http://localh
 
 - 动作/断言都写**纯自然语言、无路由关键词**：`When "搜索 OpenAI"` / `Then "进入了 OpenAI 词条页"` → 默认走 AI（动作=aiAct/act；断言=aiBoolean/act_get+投票）。
 - scope/引擎用 **tag**（ADR 0019）：`@scope:login`（共享会话、串行）/ `@engine:midscene|novaact`（选引擎）。
-- **确定性精确检查**（URL/DOM，不容 AI 抖动）：由 test engineer 在 worker 的 `@deterministic` 注册表按需写（`deterministic.steps.ts` / `deterministic_steps.py`；命中走精确 handler、不投票，ADR 0022）（QA 不碰）。
+- **确定性精确检查**（URL/DOM，不容 AI 抖动）：由 test engineer 在 worker 的 `@deterministic` 注册表按需写（`deterministic.steps.ts` / `deterministic_steps.py`；命中走精确 handler、不投票，ADR 0022）（QA 不碰实现，但**可发现可复用**：`list-deterministic` 查当前引擎有哪些、`plan` 看自己写的 step 会不会命中，ADR 0036）。
 - **多行参数**：AI 动作/断言 step 可挂 Gherkin DataTable/DocString，worker 拼成附加文本随 step 一起喂 AI（ADR 0024）。
 
 ## Spike（可独立跑的技术验证脚本）

@@ -219,6 +219,65 @@ def build_engines(
     }
 
 
+def query_deterministic(repo: Path, engine: str, *, timeout_s: float = 60.0) -> list[dict]:
+    """查询某引擎 worker 的确定性能力清单（ADR 0036）：spawn `worker --list-deterministic` 收 JSON。
+
+    真值单一：清单由 worker 注册表代码即时生成（不建会话、不读 stdin、零 AWS）。
+    引擎名非法 → ValueError；worker 起不来/输出非 JSON → RuntimeError 带诊断（调用方归退 2）。
+    """
+    import subprocess
+
+    engines = build_engines(repo)
+    if engine not in engines:
+        raise ValueError(f"未知引擎：{engine!r}（可用：{sorted(engines)}）")
+    eng = engines[engine]
+    cmd = list(eng.cmd) + ["--list-deterministic"]
+    try:
+        proc = subprocess.run(cmd, cwd=eng.cwd, capture_output=True, timeout=timeout_s)
+    except FileNotFoundError as e:
+        raise RuntimeError(f"引擎 {engine} 的 worker 起不来（{e}）——运行环境未装？见 README「首次安装」") from e
+    except subprocess.TimeoutExpired as e:
+        raise RuntimeError(f"引擎 {engine} 的 worker 自述超时（{timeout_s:.0f}s）") from e
+    if proc.returncode != 0:
+        tail = proc.stderr.decode("utf-8", errors="replace")[-400:]
+        raise RuntimeError(f"引擎 {engine} 的 worker 自述失败（exit {proc.returncode}）：{tail}")
+    try:
+        return json.loads(proc.stdout.decode("utf-8"))
+    except ValueError as e:
+        raise RuntimeError(f"引擎 {engine} 的自述输出非 JSON：{proc.stdout[:200]!r}") from e
+
+
+def match_deterministic(repo: Path, engine: str, texts: list[str], *, timeout_s: float = 60.0) -> list[dict | None]:
+    """批量问某引擎 worker「这些 step 文本各命中哪条确定性模式」（ADR 0036 第二期，plan 标注用）。
+
+    spawn `worker --match-steps`、stdin 喂 JSON 文本数组、收逐条结果（None=走 AI /
+    {"pattern","description"}=命中 / {"conflict":[...]}=命中多条——真跑将 error，plan 预检提前暴露）。
+    匹配语义 100% 在 worker（同一注册表同一 search 实现），CLI 零复刻（ADR 0022「匹配放 worker」红线）。
+    异常语义同 query_deterministic（调用方 best-effort 降级）。
+    """
+    import subprocess
+
+    engines = build_engines(repo)
+    if engine not in engines:
+        raise ValueError(f"未知引擎：{engine!r}（可用：{sorted(engines)}）")
+    eng = engines[engine]
+    cmd = list(eng.cmd) + ["--match-steps"]
+    try:
+        proc = subprocess.run(cmd, cwd=eng.cwd, capture_output=True, timeout=timeout_s,
+                              input=json.dumps(texts, ensure_ascii=False).encode("utf-8"))
+    except FileNotFoundError as e:
+        raise RuntimeError(f"引擎 {engine} 的 worker 起不来（{e}）——运行环境未装？见 README「首次安装」") from e
+    except subprocess.TimeoutExpired as e:
+        raise RuntimeError(f"引擎 {engine} 的 match 查询超时（{timeout_s:.0f}s）") from e
+    if proc.returncode != 0:
+        tail = proc.stderr.decode("utf-8", errors="replace")[-400:]
+        raise RuntimeError(f"引擎 {engine} 的 match 查询失败（exit {proc.returncode}）：{tail}")
+    try:
+        return json.loads(proc.stdout.decode("utf-8"))
+    except ValueError as e:
+        raise RuntimeError(f"引擎 {engine} 的 match 输出非 JSON：{proc.stdout[:200]!r}") from e
+
+
 def make_resolver(engines: dict[str, Engine]):
     """dict → core 要的 EngineResolver（按 job.engine 取 Engine；未知引擎报错）。"""
 

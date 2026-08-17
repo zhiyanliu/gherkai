@@ -515,3 +515,98 @@ def test_render_status_json_no_hint(capsys):
     cap = capsys.readouterr()
     assert "仍 pending" not in cap.err
     json.loads(cap.out)  # stdout 是纯 JSON
+
+
+# ---- list-deterministic（ADR 0036）：按引擎查询确定性能力清单 ----
+
+def test_list_deterministic_text_and_json(monkeypatch, capsys):
+    entries = [{"pattern": 'p "(?P<x>[^"]+)"', "description": "断言某事", "example": 'Then p "v"'}]
+    calls = []
+    monkeypatch.setattr(m.compose, "query_deterministic",
+                        lambda repo, engine: calls.append(engine) or entries)
+    assert m.main(["list-deterministic", "--engine", "midscene"]) == 0
+    out = capsys.readouterr().out
+    assert "断言某事" in out and 'Then p "v"' in out and calls == ["midscene"]
+    assert m.main(["list-deterministic", "--json"]) == 0  # 默认 novaact（对齐 run 缺省）
+    doc = json.loads(capsys.readouterr().out)
+    assert doc["engine"] == "novaact" and doc["deterministic_steps"] == entries
+
+
+def test_list_deterministic_worker_failure_exits_2(monkeypatch, capsys):
+    def boom(repo, engine):
+        raise RuntimeError("worker 自述失败（exit 1）：...")
+
+    monkeypatch.setattr(m.compose, "query_deterministic", boom)
+    assert m.main(["list-deterministic"]) == 2
+    assert "自述失败" in capsys.readouterr().err
+
+
+# ---- plan 派发标注（ADR 0036 第二期）----
+
+def _det_feature(tmp_path):
+    f = tmp_path / "det.feature"
+    f.write_text('Feature: d\n  Scenario: s\n    When "做点啥"\n    Then 页面地址匹配 "x"\n', encoding="utf-8")
+    return f
+
+
+def test_plan_annotates_deterministic_hits(tmp_path, monkeypatch, capsys):
+    """plan 标注：worker 自述命中 → 行尾「← 确定性:」；AI step 不标（噪声控制）。"""
+    def fake_match(repo, engine, texts):
+        return [({"pattern": "p", "description": "URL 断言"} if "页面地址" in t else None) for t in texts]
+
+    monkeypatch.setattr(m.compose, "match_deterministic", fake_match)
+    assert m.main(["plan", str(_det_feature(tmp_path))]) == 0
+    out = capsys.readouterr().out
+    assert "← 确定性: URL 断言" in out
+    assert out.count("← 确定性") == 1  # AI step 不标
+
+
+def test_plan_conflict_annotated_and_warned(tmp_path, monkeypatch, capsys):
+    """冲突预检（真跑将 error 的注册表配置错）：行内 ⚠ 标注 + stderr 警告；plan 本体仍 0。"""
+    monkeypatch.setattr(m.compose, "match_deterministic",
+                        lambda repo, engine, texts: [{"conflict": ["p1", "p2"]} for _ in texts])
+    assert m.main(["plan", str(_det_feature(tmp_path))]) == 0
+    captured = capsys.readouterr()
+    assert "⚠ 命中多条确定性模式" in captured.out
+    assert "收紧注册表模式" in captured.err
+
+
+def test_plan_annotation_degrades_gracefully(tmp_path, monkeypatch, capsys):
+    """标注 best-effort：引擎环境未装/查询失败 → 无标注 + stderr 警告，plan 核心输出不受影响。"""
+    def boom(repo, engine, texts):
+        raise RuntimeError("worker 起不来")
+
+    monkeypatch.setattr(m.compose, "match_deterministic", boom)
+    assert m.main(["plan", str(_det_feature(tmp_path))]) == 0
+    captured = capsys.readouterr()
+    assert "页面地址匹配" in captured.out and "← 确定性" not in captured.out
+    assert "标注降级" in captured.err
+
+
+def test_plan_json_carries_deterministic_field(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(m.compose, "match_deterministic",
+                        lambda repo, engine, texts: [({"pattern": "p", "description": "d"} if "页面地址" in t else None)
+                                                     for t in texts])
+    assert m.main(["plan", str(_det_feature(tmp_path)), "--json"]) == 0
+    doc = json.loads(capsys.readouterr().out)
+    steps = doc["jobs"][0]["scenarios"][0]["steps"]
+    assert steps[0]["deterministic"] is None
+    assert steps[1]["deterministic"] == {"pattern": "p", "description": "d"}
+
+
+# ---- 引擎名预检（plan 层拦配置错，防延迟到 run 起 job 才炸）----
+
+def test_unknown_engine_tag_rejected_at_plan(tmp_path, capsys):
+    f = tmp_path / "bad.feature"
+    f.write_text('Feature: t\n  @engine:midsence\n  Scenario: s\n    When "x"\n', encoding="utf-8")
+    assert m.main(["plan", str(f)]) == 2
+    err = capsys.readouterr().err
+    assert "midsence" in err and "可用" in err
+
+
+def test_default_engine_flag_has_choices():
+    # --default-engine 拼错被 argparse 拦（SystemExit 2，最早拦截点 + 报错自带合法值清单）
+    import pytest
+    with pytest.raises(SystemExit) as ei:
+        m.main(["plan", "x.feature", "--default-engine", "midsence"])
+    assert ei.value.code == 2

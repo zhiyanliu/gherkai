@@ -91,8 +91,12 @@ def render_text(result: RunResult) -> str:
 
 # ---- plan 预检（dry-run）渲染：纯本地、不烧钱，展示 .feature → scope/job 分组 ----
 
-def render_plan_text(jobs: list[Job], default_engine: str) -> str:
-    """plan 产出 Job[] → 人看的多行预检视图（scope/engine/scenario/step，不真跑）。"""
+def render_plan_text(jobs: list[Job], default_engine: str, dispatch: dict | None = None) -> str:
+    """plan 产出 Job[] → 人看的多行预检视图（scope/engine/scenario/step，不真跑）。
+
+    dispatch（可选，ADR 0036 第二期）：{(scope_id, scenario_id, step_index): probe}——worker 的命中
+    自述。命中 → 行尾标「← 确定性:」；冲突 → 标 ⚠（真跑该 step 将 error）；None/缺失 → 不标（默认 AI，少噪声）。
+    """
     n_scenarios = sum(len(j.scenarios) for j in jobs)
     out: list[str] = [
         "", "===== plan（预检，未真跑）=====",
@@ -104,8 +108,19 @@ def render_plan_text(jobs: list[Job], default_engine: str) -> str:
         for sc in j.scenarios:
             out.append(f"    scenario {sc.id!r}  ({len(sc.steps)} step)")
             for st in sc.steps:
-                out.append(f"      [{st.index}] {st.keyword} {st.text}{_arg_hint(st.argument)}")
+                out.append(f"      [{st.index}] {st.keyword} {st.text}{_arg_hint(st.argument)}"
+                           f"{_dispatch_hint(dispatch, j.scope_id, sc.id, st.index)}")
     return "\n".join(out)
+
+
+def _dispatch_hint(dispatch: dict | None, scope_id: str, scenario_id: str, step_index: int) -> str:
+    """step 的派发预期标注（ADR 0036）：确定性命中/冲突才标，AI 默认不标（噪声控制）。"""
+    probe = (dispatch or {}).get((scope_id, scenario_id, step_index))
+    if not probe:
+        return ""
+    if "conflict" in probe:
+        return "  ← ⚠ 命中多条确定性模式（真跑该 step 将 error；请工程侧收紧注册表模式）"
+    return f"  ← 确定性: {probe.get('description', probe.get('pattern', ''))}"
 
 
 def _arg_hint(arg) -> str:
@@ -123,14 +138,26 @@ def _arg_hint(arg) -> str:
     return f"  +{arg.kind}"
 
 
-def plan_to_dict(jobs: list[Job], default_engine: str) -> dict:
-    """plan 产出 → 机器可读 dict（--json）。复用 core.serialize 的 job 序列化保单一真理源。"""
+def plan_to_dict(jobs: list[Job], default_engine: str, dispatch: dict | None = None) -> dict:
+    """plan 产出 → 机器可读 dict（--json）。复用 core.serialize 的 job 序列化保单一真理源。
+
+    dispatch 非 None 时给每个 step dict 注入 "deterministic" 键（plan 视图字段、非 definition——
+    值 = worker 自述的命中结果：null / {"pattern","description"} / {"conflict":[...]}，ADR 0036）。
+    """
     from core.serialize import job_to_dict
+    job_dicts = []
+    for j in jobs:
+        d = job_to_dict(j)
+        if dispatch is not None:
+            for sc_j, sc_d in zip(j.scenarios, d["scenarios"]):
+                for st_j, st_d in zip(sc_j.steps, sc_d["steps"]):
+                    st_d["deterministic"] = dispatch.get((j.scope_id, sc_j.id, st_j.index))
+        job_dicts.append(d)
     return {
         "default_engine": default_engine,
         "job_count": len(jobs),
         "scenario_count": sum(len(j.scenarios) for j in jobs),
-        "jobs": [job_to_dict(j) for j in jobs],
+        "jobs": job_dicts,
     }
 
 

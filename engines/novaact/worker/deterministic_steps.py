@@ -25,7 +25,9 @@ import re
 from deterministic import deterministic
 
 
-@deterministic(r'页面地址(?:精确)?匹配 "(?P<pattern>.+)"')
+@deterministic(r'页面地址(?:精确)?匹配 "(?P<pattern>[^"]+)"',  # [^"]+（非 .+）：防第二对引号时贪婪跨引号捕获
+               description="断言当前页面 URL 匹配给定正则（精确判定，不走 AI、不投票）",
+               example='Then 页面地址匹配 "/wiki/OpenAI"')
 def url_matches(ctx, pattern: str) -> None:
     """确定性 URL 断言：当前页 URL 须匹配给定正则（精确、不走 AI）。
 
@@ -38,6 +40,8 @@ def url_matches(ctx, pattern: str) -> None:
 
 # 更多锚点示例（需要时取消注释并改成你的项目所需）：
 #
-# @deterministic(r'元素 "(?P<sel>.+)" 可见')
+# @deterministic(r'元素 "(?P<sel>[^"]+)" 可见',
+#                description="断言选择器命中的元素可见",
+#                example='Then 元素 "#submit" 可见')
 # def element_visible(ctx, sel: str) -> None:
 #     assert ctx.page.locator(sel).is_visible(), f'元素 {sel!r} 应可见'

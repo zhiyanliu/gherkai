@@ -29,7 +29,7 @@ import { EventSink } from "../lib/event-sink.mjs";  // 事件出口（ADR 0024�
 import { JobSource } from "../lib/job-source.mjs";  // job 入口（同上）
 // 确定性 step 注册表（ADR 0022）+ test engineer 的锚点脚手架。
 // import 脚手架即触发其顶层 deterministic(...) 注册副作用（对称 Nova 引擎 import deterministic_steps）。
-import { match as matchDeterministic, DeterministicAssertion } from "./deterministic.js";
+import { match as matchDeterministic, DeterministicAssertion, listRegistry, matchBatch } from "./deterministic.js";
 import { buildInstruction } from "./argument.js";
 import "./deterministic.steps.js";  // 脚手架同目录（ADR 0022 退役 bdd 层后迁入 worker/）
 
@@ -196,6 +196,22 @@ function stepCost(beforeTokens: number, agent: PlaywrightAgent): Record<string, 
 }
 
 async function main(): Promise<number> {
+  // 自述模式（ADR 0036）：dump 确定性注册表即退——不建会话、不读 stdin、不烧钱。
+  // 脚手架已在模块顶 import（副作用注册），此刻注册表即真值。
+  if (process.argv.includes("--list-deterministic")) {
+    process.stdout.write(JSON.stringify(listRegistry()) + "\n");
+    return 0;
+  }
+  // 批量 match 查询（ADR 0036 第二期，plan 命中标注）：stdin 一行 JSON 数组（step 文本）→ stdout 一行
+  // 逐条命中结果。匹配语义留在 worker（CLI 零复刻）；同样不建会话、零 AWS。
+  if (process.argv.includes("--match-steps")) {
+    const chunks: Buffer[] = [];
+    for await (const c of process.stdin) chunks.push(c as Buffer);
+    const texts: string[] = JSON.parse(Buffer.concat(chunks).toString("utf-8"));
+    process.stdout.write(JSON.stringify(matchBatch(texts)) + "\n");
+    return 0;
+  }
+
   // 早期信号护栏（对称 Nova：handler 先于 JobSource.read 装载，ADR 0024）——S3 态下 read 含一次网络往返，
   // 窗口内 SIGTERM 若走 Node 默认处置会以信号终止（非 0）→ adapter 误归 engine_error。此阶段无会话、无产物，
   // 直接干净退 0（零事件 + exit 0，core 判 error 不误归因）；真正的 onSignal（抢传+释放会话）建好后替换本 handler。

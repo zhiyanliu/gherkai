@@ -21,6 +21,7 @@ from core.scope import PlanConfig, PlanError, plan
 from core.schedule import ScheduleOpts, schedule
 
 from gherkai import compose
+from gherkai import names as _names
 
 from cli import render
 
@@ -35,7 +36,7 @@ def _build_parser() -> argparse.ArgumentParser:
     run = sub.add_parser("run", help="跑一个或多个 .feature")
     run.add_argument("features", nargs="+", type=Path, help="一个或多个 .feature 路径")
     run.add_argument(
-        "--default-engine", default="novaact",
+        "--default-engine", choices=sorted(_names.ENGINES), default="novaact",
         help="未标 @engine 的 scope 用的默认引擎（默认 novaact）；标了 @engine: 的 scope 按 tag 走、不受此影响",
     )
     run.add_argument(
@@ -131,7 +132,7 @@ def _build_parser() -> argparse.ArgumentParser:
              "让 plan 预检出的 Job 与真跑一致",
     )
     pl.add_argument(
-        "--default-engine", default="novaact",
+        "--default-engine", choices=sorted(_names.ENGINES), default="novaact",
         help="未标 @engine 的 scope 用的默认引擎（默认 novaact）——影响分组结果，故预检也可设",
     )
     pl.add_argument(
@@ -148,7 +149,8 @@ def _build_parser() -> argparse.ArgumentParser:
     # local 档：submit setsid fork 一个 per-run 进程跑 reconcile loop（本机推进，无需常驻），CLI 立即退出。
     sm = sub.add_parser("submit", help="[无状态跑批] 提交一批 .feature 到后台跑、立即返回 run_id（提交完就走）")
     sm.add_argument("features", nargs="+", type=Path, help="一个或多个 .feature 路径")
-    sm.add_argument("--default-engine", default="novaact", help="未标 @engine 的 scope 用的默认引擎")
+    sm.add_argument("--default-engine", choices=sorted(_names.ENGINES), default="novaact",
+                    help="未标 @engine 的 scope 用的默认引擎")
     sm.add_argument("--assertion-votes", type=int, default=1, metavar="N", help="AI 断言投票次数（默认 1）")
     sm.add_argument("--max-concurrency", type=int, default=1, help="同时在跑的 worker 上限（默认 1）")
     sm.add_argument(
@@ -209,6 +211,12 @@ def _build_parser() -> argparse.ArgumentParser:
     tw.add_argument("--profile", default=None)
 
     sub.add_parser("list-engines", help="列出可用引擎及其 spawn 命令")
+
+    # list-deterministic：按引擎查询确定性 step 能力清单（ADR 0036：worker 自述，feature 作者可发现）
+    ld = sub.add_parser("list-deterministic", help="列出指定引擎支持的确定性 step（供 feature 作者复用；不烧钱）")
+    ld.add_argument("--engine", choices=sorted(_names.ENGINES), default="novaact",
+                    help="查哪个引擎的注册表（默认 novaact，对齐 run 的 --default-engine 缺省）")
+    ld.add_argument("--json", action="store_true", help="输出机器可读 JSON")
     return p
 
 
@@ -216,6 +224,27 @@ def _tunnel_providers() -> list[str]:
     from gherkai.tunnel import PROVIDERS
 
     return list(PROVIDERS)
+
+
+def _cmd_list_deterministic(args, repo: Path) -> int:
+    """按引擎列出确定性 step 清单（ADR 0036）：spawn worker 自述、CLI 只转述——core/CLI 不持有 pattern
+    语义（ADR 0022「匹配放 worker」红线）。纯本地、零 AWS。"""
+    try:
+        entries = compose.query_deterministic(repo, args.engine)
+    except (ValueError, RuntimeError) as e:
+        _progress(f"list-deterministic 失败：{e}")
+        return 2
+    if args.json:
+        print(json.dumps({"engine": args.engine, "deterministic_steps": entries}, ensure_ascii=False, indent=2))
+        return 0
+    print(f"引擎 {args.engine} 的确定性 step（{len(entries)} 条；test engineer 在 worker 注册表维护，ADR 0022/0036）：")
+    if not entries:
+        print("  （空——该引擎当前没有注册任何确定性 step，全部 step 走 AI）")
+    for e in entries:
+        print(f"  - {e.get('description', '（无描述）')}")
+        print(f"    示例: {e.get('example', '')}")
+        print(f"    模式: {e.get('pattern', '')}")
+    return 0
 
 
 def _cmd_list_engines(repo: Path) -> int:
@@ -247,7 +276,7 @@ def _load_and_plan(args, repo: Path) -> "list | int":
         return 2
     # 2) plan：.feature → Job[]（uri 互异/engine 冲突等违约 → PlanError；gherkin 语法错 → FeatureParseError）
     try:
-        return plan(features, PlanConfig(
+        jobs = plan(features, PlanConfig(
             default_engine=args.default_engine,
             default_assertion_votes=args.assertion_votes,
             # 两层设定的缺省层（ADR 0019 @timeout / ADR 0034「job timeout」节）：标了 @timeout: 的 scope
@@ -255,12 +284,46 @@ def _load_and_plan(args, repo: Path) -> "list | int":
             # 三路推进器（同步 schedule / local per-run / cloud）各自 enforce。
             default_job_timeout_s=(args.default_job_timeout if args.default_job_timeout > 0 else None),
         ))
+        # 引擎名预检（配置错在 plan 层即拦、退 2——否则 local run 要到起 job 时 resolver 才炸，已开跑退 1
+        # 且错误形态差）。--default-engine 已被 argparse choices 拦，此处兜的是 @engine tag 拼错。
+        unknown = sorted({j.engine for j in jobs} - set(_names.ENGINES))
+        if unknown:
+            _progress(f"未知引擎 {unknown}（可用：{sorted(_names.ENGINES)}）——@engine tag 拼错？")
+            return 2
+        return jobs
     except PlanError as e:
         _progress(f"plan 失败（配置矛盾，拒绝运行）：{e}")
         return 2
     except FeatureParseError as e:
         _progress(f"feature 语法错误（gherkin 解析失败，含行:列）：\n{e}")
         return 2
+
+
+def _probe_deterministic_dispatch(repo: Path, jobs) -> dict | None:
+    """plan 的派发预期标注（ADR 0036 第二期）：按引擎分组 step 文本、批量问 worker 命中结果。
+
+    返回 {(scope_id, scenario_id, step_index): probe} 或 None（全部引擎都没问成）。match 用**裸 step 文本**
+    ——与 worker 真跑派发的匹配面完全一致（不 unquote、不拼 argument，ADR 0024）。按引擎 best-effort：
+    某引擎查询失败只让该引擎的 job 无标注（stderr 警告），不影响其他引擎与 plan 本体。
+    """
+    by_engine: dict[str, list[tuple[tuple, str]]] = {}
+    for j in jobs:
+        for sc in j.scenarios:
+            for st in sc.steps:
+                by_engine.setdefault(j.engine, []).append(((j.scope_id, sc.id, st.index), st.text))
+    dispatch: dict = {}
+    ok_any = False
+    for engine, items in by_engine.items():
+        try:
+            probes = compose.match_deterministic(repo, engine, [t for _, t in items])
+        except (ValueError, RuntimeError) as e:
+            _progress(f"（标注降级）引擎 {engine} 的确定性命中查询失败，该引擎 step 无派发标注：{e}")
+            continue
+        ok_any = True
+        for (key, _), probe in zip(items, probes):
+            if probe:  # 只记命中/冲突（AI=None 不进表，渲染端缺失即不标）
+                dispatch[key] = probe
+    return dispatch if ok_any else None
 
 
 def _setup_tunnel(args, jobs):
@@ -286,7 +349,8 @@ def _setup_tunnel(args, jobs):
 
 
 def _cmd_plan(args, repo: Path) -> int:
-    """plan 预检：读 feature → plan → 渲染 scope/job 分组。**不起 worker、不连 AWS、不烧钱**。
+    """plan 预检：读 feature → plan → 渲染 scope/job 分组 + 派发预期标注（ADR 0036）。
+    **零 AWS、零花费、零副作用**（标注会起本地瞬时 worker 子进程做 match 自述——非跑 job；失败自动降级）。
 
     与 _cmd_run 共用 `_load_and_plan`（votes 校验 + load_feature + plan），但到此为止——
     省钱验证 feature 写法、看分组、暴露 PlanError。退出码与 run 一致（0 ok / 2 配置错）。
@@ -295,11 +359,17 @@ def _cmd_plan(args, repo: Path) -> int:
     if isinstance(jobs, int):  # 前置失败 → 退出码
         return jobs
 
+    # 派发预期标注（ADR 0036 第二期）：按引擎批量问 worker「哪些 step 命中确定性」。best-effort——
+    # 引擎环境未装/查询失败只降级为无标注+stderr 警告，plan 核心功能保持零依赖（不因标注挂掉）。
+    dispatch = _probe_deterministic_dispatch(repo, jobs)
+
     # 核心产出 → stdout（与 run 的输出契约一致：--json 单文档 / 否则人看文本）
     if args.json:
-        print(json.dumps(render.plan_to_dict(jobs, args.default_engine), ensure_ascii=False, indent=2))
+        print(json.dumps(render.plan_to_dict(jobs, args.default_engine, dispatch), ensure_ascii=False, indent=2))
     else:
-        print(render.render_plan_text(jobs, args.default_engine))
+        print(render.render_plan_text(jobs, args.default_engine, dispatch))
+    if dispatch and any(p_ and "conflict" in p_ for p_ in dispatch.values()):
+        _progress("⚠ 存在命中多条确定性模式的 step（见上标注）：真跑时这些 step 将 error——请工程侧收紧注册表模式（ADR 0022）。")
     if getattr(args, "expose_local", None):
         # 标注而不替换（ADR 0035 决策 2）：隧道 URL 是运行时产物，plan 零副作用、显示原始地址
         _progress(f"注：{args.expose_local} 将在 run/submit 时经隧道替换为公网 URL（plan 显示原始地址）")
@@ -949,6 +1019,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     repo = compose.repo_root()
 
+    if args.command == "list-deterministic":
+        return _cmd_list_deterministic(args, repo)
     if args.command == "list-engines":
         return _cmd_list_engines(repo)
     if args.command == "plan":

@@ -27,31 +27,48 @@ from typing import Callable
 class _Entry:
     pattern: re.Pattern
     handler: Callable
-    raw: str  # 原始模式串（报错/调试用）
+    raw: str  # 原始模式串（报错/调试/自述用）
+    description: str  # 人话元数据（ADR 0036）：这步做什么（给 feature 作者读）
+    example: str  # feature 里怎么写（可直接抄的 step 文本）
 
 
 _REGISTRY: list[_Entry] = []
 
 
-def deterministic(pattern: str) -> Callable:
+def deterministic(pattern: str, *, description: str, example: str) -> Callable:
     """装饰器：把 handler 按正则 pattern 登记进注册表。
 
+    description/example 必填（ADR 0036：注册即暴露——缺元数据的能力不可被 feature 作者发现，fail-loud）。
     用法（与脚手架 deterministic_steps.py 的真实锚点一致）：
-        @deterministic(r'页面地址匹配 "(?P<pattern>.+)"')
+        @deterministic(r'页面地址(?:精确)?匹配 "(?P<pattern>[^"]+)"',
+                       description="断言当前页面 URL 匹配给定正则",
+                       example='Then 页面地址匹配 "/wiki/OpenAI"')
         def url_matches(ctx, pattern):
             assert re.search(pattern, ctx.page.url)
     """
+    if not description or not example:
+        raise ValueError(f"deterministic({pattern!r}) 注册缺 description/example（ADR 0036：能力必须可发现）")
     compiled = re.compile(pattern)
 
     def register(handler: Callable) -> Callable:
-        _REGISTRY.append(_Entry(pattern=compiled, handler=handler, raw=pattern))
+        _REGISTRY.append(_Entry(pattern=compiled, handler=handler, raw=pattern,
+                                description=description, example=example))
         return handler
 
     return register
 
 
+def list_registry() -> list[dict]:
+    """注册表自述（ADR 0036）：worker --list-deterministic 时 dump 成 JSON 给 CLI 转述。"""
+    return [{"pattern": e.raw, "description": e.description, "example": e.example} for e in _REGISTRY]
+
+
 class DeterministicConflict(Exception):
     """一个 step 文本命中多条确定性模式（ADR 0022：最多命中一条，多条是配置错误）。"""
+
+    def __init__(self, message: str, patterns: list[str] | None = None) -> None:
+        super().__init__(message)
+        self.patterns = patterns or []
 
 
 def match(text: str):
@@ -65,10 +82,29 @@ def match(text: str):
     if len(hits) > 1:
         raws = ", ".join(repr(e.raw) for e, _ in hits)
         raise DeterministicConflict(
-            f"step {text!r} 命中多条确定性模式 [{raws}]（ADR 0022：最多命中一条，请收紧模式）"
+            f"step {text!r} 命中多条确定性模式 [{raws}]（ADR 0022：最多命中一条，请收紧模式）",
+            patterns=[e.raw for e, _ in hits],
         )
     entry, m = hits[0]
     return entry.handler, m.groupdict()
+
+
+def match_batch(texts: list[str]) -> list[dict | None]:
+    """批量 match 查询（ADR 0036 第二期）：plan 命中标注用——对每条 step 文本回答「命中哪条 / 冲突 / 未命中」。
+
+    匹配语义与 match() 同一实现面（同一 _REGISTRY、同一 search 语义），冲突不抛、结构化返回
+    （plan 是预检不是执行）。返回元素：None | {"pattern","description"} | {"conflict": [patterns]}。
+    """
+    out: list[dict | None] = []
+    for text in texts:
+        hits = [e for e in _REGISTRY if e.pattern.search(text)]
+        if not hits:
+            out.append(None)
+        elif len(hits) > 1:
+            out.append({"conflict": [e.raw for e in hits]})
+        else:
+            out.append({"pattern": hits[0].raw, "description": hits[0].description})
+    return out
 
 
 def clear() -> None:

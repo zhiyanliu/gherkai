@@ -27,23 +27,43 @@ export type DeterministicHandler = (
   groups: Record<string, string>,
 ) => void | Promise<void>;
 
+/** 人话元数据（ADR 0036）：注册即暴露——缺元数据的能力不可被 feature 作者发现，故必填、fail-loud。 */
+export interface DeterministicMeta {
+  description: string; // 这步做什么（一句话，给 feature 作者读）
+  example: string; // feature 里怎么写（可直接抄的 step 文本）
+}
+
 interface Entry {
   pattern: RegExp;
   handler: DeterministicHandler;
   raw: string;
+  meta: DeterministicMeta;
 }
 
 const REGISTRY: Entry[] = [];
 
-/** 注册：把 handler 按正则 pattern 登记进注册表。pattern 用具名组 (?<name>...) 提取参数。 */
-export function deterministic(pattern: string, handler: DeterministicHandler): void {
-  REGISTRY.push({ pattern: new RegExp(pattern), handler, raw: pattern });
+/** 注册：把 handler 按正则 pattern 登记进注册表。pattern 用具名组 (?<name>...) 提取参数。
+ * meta 必填（ADR 0036：注册契约含人话元数据——description/example 缺失即 fail-loud）。 */
+export function deterministic(pattern: string, handler: DeterministicHandler, meta: DeterministicMeta): void {
+  if (!meta?.description || !meta?.example) {
+    throw new Error(`deterministic(${JSON.stringify(pattern)}) 注册缺 description/example（ADR 0036：能力必须可发现）`);
+  }
+  REGISTRY.push({ pattern: new RegExp(pattern), handler, raw: pattern, meta });
+}
+
+/** 注册表自述（ADR 0036）：worker --list-deterministic 时 dump 成 JSON 给 CLI 转述。 */
+export function listRegistry(): Array<{ pattern: string; description: string; example: string }> {
+  return REGISTRY.map((e) => ({ pattern: e.raw, description: e.meta.description, example: e.meta.example }));
 }
 
 /** 判定失败用的断言错误（handler 也可用 node:assert，两者都被 worker 当作 failed）。 */
 export class DeterministicAssertion extends Error {}
 
-export class DeterministicConflict extends Error {}
+export class DeterministicConflict extends Error {
+  constructor(message: string, public readonly patterns: string[] = []) {
+    super(message);
+  }
+}
 
 export interface Match {
   handler: DeterministicHandler;
@@ -62,9 +82,23 @@ export function match(text: string): Match | null {
     const raws = hits.map((h) => JSON.stringify(h.entry.raw)).join(", ");
     throw new DeterministicConflict(
       `step ${JSON.stringify(text)} 命中多条确定性模式 [${raws}]（ADR 0022：最多命中一条，请收紧模式）`,
+      hits.map((h) => h.entry.raw),
     );
   }
   return { handler: hits[0].entry.handler, groups: hits[0].m.groups ?? {} };
+}
+
+/** 批量 match 查询（ADR 0036 第二期）：plan 命中标注用——对每条 step 文本回答「命中哪条 / 冲突 / 未命中」。
+ * 匹配语义与 match() 同一实现面（同一 REGISTRY、同一 exec 语义），冲突不抛、结构化返回（plan 是预检不是执行）。 */
+export type MatchProbe = null | { pattern: string; description: string } | { conflict: string[] };
+
+export function matchBatch(texts: string[]): MatchProbe[] {
+  return texts.map((text) => {
+    const hits = REGISTRY.filter((e) => e.pattern.exec(text));
+    if (hits.length === 0) return null;
+    if (hits.length > 1) return { conflict: hits.map((e) => e.raw) };
+    return { pattern: hits[0].raw, description: hits[0].meta.description };
+  });
 }
 
 /** 清空注册表（仅供测试隔离用）。 */

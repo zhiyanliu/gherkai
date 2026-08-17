@@ -21,19 +21,26 @@ import { deterministic, DeterministicAssertion } from "./deterministic.js";
 // 确定性 URL 断言：当前页 URL 须匹配给定正则（精确、不走 AI）。
 // .feature 写法（test engineer 约定的带关键词措辞，与 QA 的纯自然语言 Then 区分）：
 //     Then 页面地址匹配 "/wiki/OpenAI"
-deterministic('页面地址(?:精确)?匹配 "(?<pattern>.+)"', ({ page }, { pattern }) => {
-  const url = page.url();
-  if (!new RegExp(pattern).test(url)) {
-    throw new DeterministicAssertion(`URL 应匹配 ${JSON.stringify(pattern)}，实际 ${JSON.stringify(url)}`);
-  }
-});
+deterministic(
+  '页面地址(?:精确)?匹配 "(?<pattern>[^"]+)"', // [^"]+（非 .+）：防 step 里出现第二对引号时贪婪跨引号捕获
+  ({ page }, { pattern }) => {
+    const url = page.url();
+    if (!new RegExp(pattern).test(url)) {
+      throw new DeterministicAssertion(`URL 应匹配 ${JSON.stringify(pattern)}，实际 ${JSON.stringify(url)}`);
+    }
+  },
+  {
+    description: "断言当前页面 URL 匹配给定正则（精确判定，不走 AI、不投票）",
+    example: 'Then 页面地址匹配 "/wiki/OpenAI"',
+  },
+);
 
 // 更多锚点示例（需要时取消注释并改成你的项目所需）：
 //
-// deterministic('元素 "(?<sel>.+)" 可见', async ({ page }, { sel }) => {
+// deterministic('元素 "(?<sel>[^"]+)" 可见', async ({ page }, { sel }) => {
 //   if (!(await page.locator(sel).isVisible())) {
 //     throw new DeterministicAssertion(`元素 ${JSON.stringify(sel)} 应可见`);
 //   }
-// });
+// }, { description: "断言选择器命中的元素可见", example: 'Then 元素 "#submit" 可见' });
 
 export {}; // ESM 模块标记
