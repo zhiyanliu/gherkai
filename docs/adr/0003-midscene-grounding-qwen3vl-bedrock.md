@@ -18,4 +18,6 @@
 
 **鉴权方式**：上述实测走的是 SigV4。Midscene 经 `createOpenAIClient` 自签 SigV4 接入（不用 bearer key），详见 [0008](./0008-midscene-bedrock-auth-sigv4-selfsign.md)；接线配方与账号实测见 `engines/midscene/spikes/SIGV4-FETCH-RECIPE.md`。
 
-**未实测项**：Qwen3-VL 的逐像素定位质量（仅属推断，须 spike 实测；与 UI 语言正交——中文页面单次真跑已通过，见 [0001](./0001-scope-limited-to-english-ui.md)「非英文的真实边界」）；235B MoE 的成本/延迟/配额。若 spike 实测定位质量不达标，按 [0009](./0009-maximize-aws-hard-constraint.md) 在 **AWS 内**寻找改进（换 Bedrock 其他 VL 模型 / SageMaker 自托管 / 调 grounding 策略），**不**以离开 AWS 为出路。
+**未实测项**：Qwen3-VL 的逐像素定位质量（仅属推断，须 spike 实测；与 UI 语言正交——中文页面单次真跑已通过，见 [0001](./0001-scope-limited-to-english-ui.md)「非英文的真实边界」）；235B MoE 的成本/延迟/配额。
+
+**待观察（上游代际）**：Midscene 官方模型表已把 Qwen3-VL 整个 series 标为「旧版本模型，不推荐使用。建议优先使用 Qwen3.x 系列」（定位测评推荐序 Qwen3.7 > Qwen3.5 > Qwen3.6，基于其私有测评集）；但 Bedrock 实查（us-east-1/us-west-2，IMAGE modality）Qwen 视觉模型**有且仅有**本 ADR 所选 `qwen.qwen3-vl-235b-a22b`——[0009](./0009-maximize-aws-hard-constraint.md)「AWS 内托管」约束下暂无升级路径，且装机版 @midscene/core 的 `qwen3-vl` 适配仍在（不推荐 ≠ 移除支持）。**触发条件：Bedrock 上架 Qwen3.x 系视觉模型时，重估本选型**（配置级改动：模型经 env 注入）。若 spike 实测定位质量不达标，按 [0009](./0009-maximize-aws-hard-constraint.md) 在 **AWS 内**寻找改进（换 Bedrock 其他 VL 模型 / SageMaker 自托管 / 调 grounding 策略），**不**以离开 AWS 为出路。
