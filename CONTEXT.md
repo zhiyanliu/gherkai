@@ -13,7 +13,7 @@ _Avoid_: runner（脚本跑测试的工具，含义太窄）、driver（只指�
 _Avoid_: 把「模型」与引擎混为一谈——Nova Act 是引擎不是模型。
 
 **视觉定位 (Grounding)**:
-把屏幕截图解析成可点击坐标的能力，是 Midscene 主力大脑的核心职责。英文 UI、小字、非拉丁文字会显著影响其质量。
+把屏幕截图解析成可点击坐标的能力，是 Midscene 主力大脑的核心职责。质量随所选大脑而异（如小字/非拉丁文字的定位弱项属 GPT-5 系，见 ADR 0002）。
 _Avoid_: 把 grounding 与 planning（规划/推理角色）混用。
 
 **AgentCore 浏览器会话 (AgentCore Browser session)**:

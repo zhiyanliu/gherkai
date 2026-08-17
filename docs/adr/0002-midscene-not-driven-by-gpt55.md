@@ -22,6 +22,6 @@ POST https://bedrock-mantle.us-east-1.api.aws/v1/chat/completions
 
 ## 次要理由（即便接口能通也不选它作主力 grounding）
 
-GPT-5 系被 Midscene 官方点名对小字/非拉丁文字**视觉定位偏弱**，本就不适合当**主力 grounding** 角色（grounding 是 Midscene 大脑的核心职责）。
+GPT-5 系被 Midscene 官方点名对小字/非拉丁文字**视觉定位偏弱**（该弱项是 GPT-5 的 **per-model 属性**、非 Midscene 框架属性——换大脑即换该弱项，见 [0001](./0001-scope-limited-to-english-ui.md)「非英文的真实边界」），本就不适合当**主力 grounding** 角色（grounding 是 Midscene 大脑的核心职责）。
 
 **决定**：Midscene 主力视觉定位大脑改用走 chat-completions 的开源 VL 模型，托管在 AWS 上——即 Qwen3-VL on Bedrock（[0003](./0003-midscene-grounding-qwen3vl-bedrock.md)，已实测 chat-completions + 视觉通道可用）。gpt-5.5 因不支持 chat-completions 而**完全出局**，连可选 planning 角色都当不了（Midscene 无 Responses 代码路径）。
