@@ -1,6 +1,6 @@
 # 0035. 本地应用测试：自动隧道把开发机上的被测应用暴露给云端浏览器
 
-> **Status:** Accepted —— 设计已定（v1.3 主特性）；实现随本分支推进。
+> **Status:** Accepted —— 设计与实现均已落地：`--expose-local` 在 run/plan/submit 三命令 + `gherkai/gherkai/tunnel.py` 的 ngrok provider，四种「跑法 × backend」组合全支持（URL 映射、三形态隧道宿主 + 兜底拆除、额外请求头注入）。
 
 ## 背景与问题
 
@@ -29,15 +29,16 @@
 
 ### 1. `TunnelProvider` 可插拔口子（gherkai 组合根层），首个实现 = ngrok
 
-- 协议形状：`start(local_origin) -> public_url` / `stop()`（+健康探活）。住 `gherkai/`（组合根共享层——cli/未来 WebUI 复用；worker/core 对隧道无知）。
+- 协议形状：`start(local_origin, *, with_auth=True, timeout_s) -> TunnelInfo`（frozen dataclass `url` / `auth` / `pid` / `local_origin`，另有 `mapped_base` 给出凭据内嵌形态——见决策 4）＋**模块级 `stop_tunnel(pid)`**。停止面按 **pid** 而非进程对象/实例方法：收尾者与起隧道者常不在同一进程（决策 3 三形态宿主），进程句柄传不过去，故 `TunnelInfo` 携带 pid、由收尾者 kill。就绪判据 = 轮询 agent 日志到 `started tunnel` 行（见下「拿公网 URL 走日志文件通道」条），**不做持续健康探活**——隧道断的失败形态已够清晰（导航失败，见「边界与不变量」），不值守护复杂度。住 `gherkai/`（组合根共享层——cli/未来 WebUI 复用；worker/core 对隧道无知）。
 - 选择参数：`--tunnel <provider>`（默认 `ngrok`，当前唯一实现）——机制与 flag 同期落，将来加实现零接口变化。
-- **首发只做 ngrok**：认证能力免费（Traffic Policy basic-auth，本期默认开启——见决策 4）、付费可去 interstitial。
+- **首发只做 ngrok**：认证能力免费（Traffic Policy basic-auth，默认开启——见决策 4）、付费可去 interstitial。
+- **本项是对 [0009](./0009-maximize-aws-hard-constraint.md)「最大化用 AWS」的显式例外**（按 0009 要求登记）：ngrok 是 AWS 外的第三方 SaaS，但「开发机 → 云端浏览器」的入站通道在 AWS 内实查无等价物（SSM 端口转发方向相反；IoT Secure Tunneling 两端 localproxy、不产公网 URL；AgentCore Browser VPC 模式够不到开发者笔记本，已评估并缓——见调研结论③与被拒/被缓方案）。例外面压到最小：经 `TunnelProvider` 口子隔离、仅 `--expose-local` 显式启用、数据面只有被测应用自身流量（模型/浏览器/存储/编排仍全在 AWS 内）。
 - **拿公网 URL 走日志文件通道**（`--log <file> --log-format json`，轮询 `msg:"started tunnel"` 行取 `url`）——本地 agent API 在 v3 下对 `ngrok http` 不可配端口（`--web-addr` 是配置文件项、非 flag，真跑暴露 unknown flag；注入需劫持用户 config，多 run 并存还撞默认 4040）。**稳定性权衡**：该日志消息文本严格说非 API 契约，但从 v2 到 v3.39 十余年未变、社区自动化广泛依赖；护栏 = 解析不到 URL 即 fail-loud（超时+日志尾部报错，不静默错），authtoken 配错等诊断天然同在此通道（真验中即靠它报出根因）。若未来真变，备选 =「`ngrok config check` 发现默认 config → `--config` 叠加临时 web_addr → agent API」，经 TunnelProvider 口子替换、不动调用方。**前置：用户需配 authtoken**（免费账号，`NGROK_AUTHTOKEN` 或 ngrok 配置文件）；免费层配额 1GB/月 + 2 万请求/月——页面资源全经隧道，重度使用可能碰顶，报错形态为 ngrok 侧 429/断流（文档预告）。
 
 ### 2. URL 映射：feature 写原始地址，组装 job 时替换
 
 - feature 里自然书写本地地址（如 `http://localhost:3000`）——它是用例的**逻辑事实**，不感知隧道。
-- CLI 加 `--expose-local <origin>`：组合根起隧道拿到公网 URL 后，**在 job 组装（job-in 之前）把 step 文本中的该 origin 前缀替换成隧道 URL**——对 worker/引擎/AI 完全透明（AI 看到的就是可导航的公网地址）。匹配是前缀字符串级：flag 值须与 feature 中书写形式一致（`localhost` vs `127.0.0.1` 不互认，文档写明）。
+- CLI 加 `--expose-local <origin>`：组合根起隧道拿到公网 URL 后，**在 job 组装（job-in 之前）把 step 文本**及其 argument（docString 内容 / dataTable 各单元格——URL 可能出现在任一处）**中的该 origin 前缀替换成隧道 URL**——对 worker/引擎/AI 完全透明（AI 看到的就是可导航的公网地址）。匹配是前缀字符串级：flag 值须与 feature 中书写形式一致（`localhost` vs `127.0.0.1` 不互认，文档写明）。
 - **origin 语义 =「跑 CLI 的机器可达」的任意地址，不限 localhost**：局域网/内网另一台机器上的应用（如 `http://192.168.1.50:3000`）同样支持——ngrok agent 本就是转发器，upstream 可为任意本机可达 host:port；目标机器**零配置**，唯一前提是 CLI 机器 → 目标地址网络可达（隧道宿主始终在 CLI 机器，含 cloud submit 的守护进程——CLI 机器关机即断，同边界）。flag 名中的 "local" 取「CLI 视角的本地网络」义。
 - **`plan` 输出替换前的原始地址**：plan 是纯本地零副作用预检，隧道 URL 是运行时产物（每 run 一条、随机域名），plan 时起隧道既违背「不连外」也无意义。给了 `--expose-local` 时 plan 在输出中**标注**该 origin 将经隧道映射（可见性，零副作用）。
 
@@ -45,17 +46,18 @@
 
 | 组合 | 隧道宿主 | 拆除时机 |
 |---|---|---|
-| 前台 `run`（local/cloud backend） | CLI 进程 | run 结束 finally 拆 |
-| local `submit` | per-run 推进进程 | `run_reconcile_loop` 终态后拆 |
+| 前台 `run`（local/cloud backend） | CLI 进程 | CLI 进程 `atexit` 拆——**有意选 atexit 而非 finally**：正常结束与 Ctrl-C 都收；SIGTERM 直杀的极端泄漏不兜（ngrok agent 是可见的独立进程，人能自行 kill） |
+| local `submit` | per-run 推进进程 | `run_reconcile_loop` 终态后拆；per-run 进程崩溃时由 `status --wait` 接力者据 `tunnel.json` 兜底拆 |
 | cloud `submit` | **隧道守护进程**（setsid fork 脱离 CLI） | 轮询 run 终态即拆 + TTL 兜底自杀（防泄漏） |
 
+- 表外还有一处就地拆：**提交分流失败**（preflight/落库不过）时隧道尚无后台宿主可交棒，由 CLI 当场拆。
 - cloud submit 的语义澄清：「提交完就走」=不阻塞 CLI，**不等于关机**——机器继续开着时本地应用与隧道均可用，云端 Lambda 链驱动的浏览器经隧道访问本机应用完全成立。但**关机=隧道断=测试以导航失败告终**：submit 时打印明示（「隧道已起（守护 pid N）：本机需保持开机联网直到 run 终态」），把例外变成明示边界而非静默失败。
 
 ### 4. `ngrok-skip-browser-warning` 头恒注入（仅隧道模式）
 
 - ngrok 免费层对浏览器返回 interstitial 警告页（对自动化致命）；带任意值的 `ngrok-skip-browser-warning` 头即绕过。付费户带着无害（服务端忽略）→ 不做付费检测、隧道模式下恒注入。
-- 注入通道：组合根经 worker env 传「额外请求头」（通用形状），worker 在 browser context 上 `setExtraHTTPHeaders`——纯 CDP 命令、无回调，**不触碰 Nova 的 route/greenlet 雷区**。两 worker 各几行改动（URL 替换那半边才是 worker 零改动）。
-- **隧道认证（basic-auth）：本期做、默认开启，方案 = URL 内嵌凭据**。框架每 run 生成随机凭据（纯字母数字，规避 URL-encode），经 ngrok Traffic Policy `basic-auth` 在**边缘节点拦截**（不带凭据的请求到不了本机）；URL 替换时嵌成 `https://user:pass@host` 形态——首次导航后凭据进浏览器**按域 auth cache**，同域后续请求（子资源/AI 点击/XHR）自动带，且只发隧道域。安全面从三件套升为四件套：随机 URL + 随机凭据 + 每 run 一换 + 终态即拆。
+- 注入通道（通用形状「额外请求头」，全链路单一事实源在此）：组合根把 header 表填进 **`RunMeta.extra_http_headers`**（definition 层字段，tuple pairs、omit-when-None 随 META 落盘 DDB/文件）→ 推进器（per-run 进程 / reconciler Lambda）据它重建 engine → engine adapter 注 `GHERKAI_EXTRA_HTTP_HEADERS` env → worker 在 browser context 上 `setExtraHTTPHeaders`——纯 CDP 命令、无回调，**不触碰 Nova 的 route/greenlet 雷区**。两 worker 各几行改动（URL 替换那半边才是 worker 零改动）。**载体为什么是 definition 而非只走 env**：cloud detached 下起隧道的 CLI 进程与重建 engine 的 Lambda 不同进程，env 传不过去，header 表必须随 META 持久化。
+- **隧道认证（basic-auth）：本 ADR 范围内即做、默认开启，方案 = URL 内嵌凭据**。框架每 run 生成随机凭据（纯字母数字，规避 URL-encode），经 ngrok Traffic Policy `basic-auth` 在**边缘节点拦截**（不带凭据的请求到不了本机）；URL 替换时嵌成 `https://user:pass@host` 形态——首次导航后凭据进浏览器**按域 auth cache**，同域后续请求（子资源/AI 点击/XHR）自动带，且只发隧道域。安全面从三件套升为四件套：随机 URL + 随机凭据 + 每 run 一换 + 终态即拆。
   已知软性代价（接受）：凭据出现在 job 文本/AI prompt/引擎原生产物（报告里的导航 URL）——皆为短命物，隧道拆除即失效，留存的是死凭据；浏览器的 Referer/地址栏显示会剥离 userinfo，不经这两面外泄。已知小概率分支：AI 重写 URL 时剥掉 `user:pass@` → auth cache 兜底；若首次导航即剥则 401、失败形态清晰（AI 报断言失败）。
   被拒候选（防重复调研）：② extra headers 注 `Authorization`——**全域广播**给页面加载的所有第三方域，泄面严格大于①；③ CDP Fetch 域 authChallenge——需开 Fetch 拦截、`authRequired` 事件同样要 handler 响应，撞 Nova 的 greenlet/node-driver 泵动问题（见上「调研结论①」）。
 
@@ -69,5 +71,5 @@
 ## 边界与不变量
 
 - 隧道仅在 `--expose-local` 显式给出时起——默认路径零新依赖、零出网变化。
-- worker/core 对隧道无知（映射在组合根完成）；额外请求头经既有 env 注入面走，不新增协议事件。
+- worker/core 对隧道无知（映射在组合根完成）；额外请求头**不新增 worker↔core 协议事件**——definition 层加一个 omit-when-None 字段（`RunMeta.extra_http_headers`）+ 复用既有 env 注入面，core 只搬运不解释语义。
 - 本机关机/断网 = 隧道断 = run 以导航失败（AI 报错形态）告终——明示边界，submit 时提示，不做「断线重连恢复」（隧道进程崩溃同理；测试可重跑，不值守护复杂度）。

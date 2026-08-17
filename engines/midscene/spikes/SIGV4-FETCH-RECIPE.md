@@ -64,7 +64,7 @@ export const createOpenAIClient = (BaseOpenAI: typeof OpenAI) =>
 ```
 npm i @aws-sdk/signature-v4 @aws-sdk/protocol-http @aws-crypto/sha256-js @aws-sdk/credential-providers
 ```
-（`openai` v6.3.0 已在；4 个 AWS 包经核实仓库里都没有，须装。）
+（4 个 AWS 包 + `openai` 现均已在 `engines/midscene/package.json`，版本以该文件为准；上面的 `npm i` 保留作从零复现/异地接线的清单。）
 
 ## 3. 失败模式表
 

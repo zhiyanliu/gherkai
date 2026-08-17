@@ -41,15 +41,19 @@
 
 > **实现状态（v1.0 当前）**：下述 `@deterministic` 注册表**已落地**，两个引擎对称——Nova `engines/novaact/worker/deterministic.py`（`@deterministic` 装饰器 + `match()`）、Midscene `engines/midscene/worker/deterministic.ts`（`deterministic()` + `match()`）。worker 派发每个 step 时**先查注册表**（命中走精确 handler、不投票、可复现），未命中才落 ②内建 URL 导航 / ③AI catch-all。脚手架（`worker/` 下 `deterministic.steps.ts`/`deterministic_steps.py`，见下「迁移」）现各注册一个真实 URL 锚点（`页面地址匹配 "<正则>"`）。命中后：成功→`passed`（无 votes）；handler 抛 `AssertionError`→`failed`/`assertion_failed`；抛其它→`error`；命中多条→`DeterministicConflict`（ADR 0022 最多命中一条）。各有注册表单测背书。
 
-**扩展点 = 对应 worker 里的一张 step 注册表**（`(模式 → handler)`）。延续 [0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md) 的脚手架定位与角色边界（QA 永远只写自然语言、不碰确定性 step）：
+**扩展点 = 对应 worker 里的一张 step 注册表**（`(模式 → handler + 人话元数据 description/example)`；元数据必填的理由见 [0036](./0036-deterministic-capability-discovery.md)）。延续 [0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md) 的脚手架定位与角色边界（QA 永远只写自然语言、不碰确定性 step）：
 
 ```python
 # novaact worker 内（midscene worker 是对称的 TS 版）
-@deterministic(r'当前 URL 匹配 "(?P<pattern>.+)"')
+@deterministic(r'当前 URL 匹配 "(?P<pattern>.+)"',
+               description="断言当前页面 URL 匹配给定正则",       # description/example 必填（ADR 0036）
+               example='Then 当前 URL 匹配 "/wiki/OpenAI"')
 def url_matches(ctx, pattern):
     assert re.search(pattern, ctx.page.url)          # 拿会话/CDP 句柄精确判定，不投票
 
-@deterministic(r'元素 "(?P<sel>.+)" 的颜色是 "(?P<hex>#[0-9a-fA-F]{6})"')
+@deterministic(r'元素 "(?P<sel>.+)" 的颜色是 "(?P<hex>#[0-9a-fA-F]{6})"',
+               description="断言选择器命中的元素颜色等于给定十六进制值",
+               example='Then 元素 "#price" 的颜色是 "#00FF7F"')
 def color_is(ctx, sel, hex):
     got = ctx.page.eval(f'getComputedStyle(document.querySelector({sel!r})).color')
     assert to_hex(got) == hex
@@ -57,7 +61,7 @@ def color_is(ctx, sel, hex):
 
 设计要点：
 
-- **几乎零写法变化**：现 `deterministic.steps.ts` / `deterministic_steps.py` 那两个空脚手架的归宿——从「被 BDD runner 自动收集」变成「被 worker 注册表收集」，test engineer 还是写个带模式的函数，只把 `@when/@then` 换成我们的 `@deterministic`。
+- **几乎零写法变化**：当时那两个空脚手架（`deterministic.steps.ts` / `deterministic_steps.py`）的归宿——从「被 BDD runner 自动收集」变成「被 worker 注册表收集」，test engineer 还是写个带模式的函数，只把 `@when/@then` 换成我们的 `@deterministic`（外加一对必填的 description/example，[0036](./0036-deterministic-capability-discovery.md)：注册即暴露）。
 - **匹配放 worker，不放核心**：核心只发原始 step 文本；worker 先查自己的确定性表、未命中再走 AI。确定性 handler 是**引擎特定**的（要碰 Playwright 句柄、CDP eval），匹配表跟着 handler 走最内聚；核心保持对 step 语义无知（只管解析结构 + 调度）。
 - **两个引擎对称但各自语言**：确定性检查天然依赖引擎/CDP 的精确能力，**本就该写在对应 worker 里**（midscene=TS+Playwright，nova=Python）。这不是缺陷，是确定性检查的本质（它碰具体引擎精确 API，不像 AI step 引擎无关）。
 - **冲突规则自定**（如「最多命中一条，多条报错」），比 cucumber 的 pattern 歧义可控得多——这正是 B1 退役补丁的同源好处。

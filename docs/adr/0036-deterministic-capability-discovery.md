@@ -25,7 +25,7 @@ worker argv 带 `--list-deterministic` 时：**不建会话、不读 stdin、不
 
 - **真值单一**：清单直接从注册表代码生成，engine 侧加/改锚点，查询结果即时跟随——零第二事实源。
 - **跨语言被既有架构吸收**：TS/Python 注册表无法被 CLI（Python）直接 import，「spawn 子进程 + 结构化输出」正是本项目 worker 交互的既有形态（[0024](./0024-worker-core-protocol.md)）；dump 模式是 worker 的第二个入口形态（第一个是跑 job），不触碰 job 协议本身。
-- 与 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md):61「匹配放 worker、核心对 step 语义无知」红线相容：core/CLI 仍不持有、不解释 pattern——只是转述 worker 的自述。
+- 与 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)「设计要点」节「匹配放 worker，不放核心」条（核心对 step 语义无知）的红线相容：core/CLI 仍不持有、不解释 pattern——只是转述 worker 的自述。
 
 ### 3. CLI 子命令 `list-deterministic --engine <name>`
 
@@ -35,7 +35,7 @@ worker argv 带 `--list-deterministic` 时：**不建会话、不读 stdin、不
 
 ## plan 命中标注：「我写的这句会不会命中」
 
-清单查询解决「有什么可用」；feature 作者还需要「**我写的这句会不会命中**」——`plan` 预检对每个 step 标注路由预期。**不做 CLI 侧复刻匹配**（TS/Python 正则方言不同：`(?<n>)` vs `(?P<n>)`；复刻匹配语义 = 对 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md):61 的漂移面），机制 = **worker 批量 match 查询**：
+清单查询解决「有什么可用」；feature 作者还需要「**我写的这句会不会命中**」——`plan` 预检对每个 step 标注路由预期。**不做 CLI 侧复刻匹配**（TS/Python 正则方言不同：`(?<n>)` vs `(?P<n>)`；复刻匹配语义 = 对 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)「设计要点」节「匹配放 worker，不放核心」条的漂移面），机制 = **worker 批量 match 查询**：
 
 - worker 第三入口 `--match-steps`：stdin 收 step 文本 JSON 数组，对每条用**同一注册表、同一 search 实现**回答 `null`（走 AI）/ `{pattern, description}`（命中）/ `{conflict:[patterns]}`（命中多条），stdout 一行 JSON 即退——匹配语义 100% 留在 worker。match 用**裸 step 文本**，与真跑派发的匹配面完全一致（不 unquote、不拼 argument，[0024](./0024-worker-core-protocol.md)）。
 - plan 按引擎分组 step、每引擎至多 spawn 一次；文本视图行尾标 `← 确定性: <description>`（AI 不标——噪声控制）、`--json` 给每 step 注 `deterministic` 键（plan 视图字段、非 definition）。
@@ -44,7 +44,7 @@ worker argv 带 `--list-deterministic` 时：**不建会话、不读 stdin、不
 
 ## 被拒方案（护栏）
 
-- **外置清单文件**（engine 侧维护 YAML/JSON、CLI 直接读）——双事实源：代码里的 pattern 与清单必然漂移（本项目文档纪律反复打击的形态）；且违 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md):61（清单文件若被 CLI 用于匹配即"核心懂 step 语义"）。
+- **外置清单文件**（engine 侧维护 YAML/JSON、CLI 直接读）——双事实源：代码里的 pattern 与清单必然漂移（本项目文档纪律反复打击的形态）；且违 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)「设计要点」节「匹配放 worker，不放核心」条（清单文件若被 CLI 用于匹配即"核心懂 step 语义"）。
 - **run 时在协议事件上标记确定性命中**——[0024](./0024-worker-core-protocol.md) 已主动删除 step 的 `kind` 字段（派发细节 core 不消费），为查询反转该收窄不值；且"跑后知道"不解决"写前不知道"。
 - **全量（多引擎聚合）清单**——查询语义按引擎（QA 的 scope 用哪个引擎查哪个）；两引擎对称性审计不为此保留全量模式（查两次 diff 即可）。
 

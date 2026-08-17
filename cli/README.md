@@ -1,7 +1,7 @@
-# cli — 执行核心库的最薄前端 / 组合根
+# cli — 执行核心库的命令行皮（argparse + render）
 
-`core/` 是纯库（零引擎依赖、不碰文件系统）。**cli 是它的第一张皮**：读 `.feature`、
-`new` 出具体的引擎子进程 adapter 注入给 core、把 `RunResult` 渲染给人或 CI 看。
+`core/` 是纯库（零引擎依赖、不碰文件系统）。**cli 是它的第一张皮**：解析参数 → 经产品本体
+`gherkai.compose` 读 `.feature`、装配引擎与 Store adapter 注入给 core → 把 `RunResult` 渲染给人或 CI 看。
 WebUI 将来是另一张皮，**直接调 core、复用产品本体 `gherkai`（compose 等组合根逻辑所在的平级包，ADR 0016「演进」节）**，不经本 cli。
 
 设计见 [ADR 0016](../docs/adr/0016-execution-architecture-core-lib-run-model.md)（执行架构 / 组合根注入）；
@@ -136,7 +136,7 @@ cloud 由云端 Lambda 事件驱动链推进（submit 机器无 ECS 写/执行�
 | `--default-engine` | `novaact` | 未标 `@engine` 的 scope 用的默认引擎（标了 `@engine:` 的按 tag 走） |
 | `--assertion-votes` | `1` | AI 断言（`Then`）投票次数（默认 1=单次判定）；调高（如 3/5）启用抖动检测：跑 N 次取多数票。须 ≥1 |
 | `--max-concurrency` | `1` | 同时在跑的 worker 上限（护真实成本/配额） |
-| `--default-job-timeout` | `300` | job 墙钟超时秒的缺省值（`<=0` 不超时）。命名前瞻两层设定：将来 scope 可用 `@timeout:N` tag 按用例声明预算、未标的用本缺省（同 `@engine`/`--default-engine` 模式，ADR 0034 留口子——tag 层未实装前本值即全部 job 的超时） |
+| `--default-job-timeout` | `300` | job 墙钟超时秒的缺省值（`<=0` 不超时）。两层声明：标了 `@timeout:N` tag 的 scope 按 tag 走（同 scope 声明不一致 → `PlanError`）、未标的用本缺省——同 `@engine`/`--default-engine` 模式。tag 语义见 ADR 0019，两层设计取舍与三路 enforce 见 ADR 0034「job timeout」节 |
 | `--grace` | 自动 | 中止 run 时等 worker 收尾（关云端会话、免继续计费）的秒数，超时才强杀。不填按引擎自动取够用值（`novaact` 150s、`midscene` 25s）；填太小会开跑前报错（强杀漏关会话＝烧钱）。 |
 | `--expose-local` | — | 把「本机可达」的被测应用经隧道暴露给云端浏览器（ADR 0035）：值 = feature 中书写的原始 origin（如 `http://localhost:3000`，也可是局域网地址）。框架起隧道并把 job 文本中该前缀替换为公网 URL（含每 run 一换的 basic-auth 凭据，终态即拆）。需已配 ngrok authtoken（`NGROK_AUTHTOKEN`） |
 | `--tunnel` | `ngrok` | `--expose-local` 用的隧道 provider（当前唯一 ngrok；免费层配额 1GB/月+2 万请求/月，重度使用可能碰顶） |
@@ -169,6 +169,7 @@ cloud 由云端 Lambda 事件驱动链推进（submit 机器无 ECS 写/执行�
 | `--default-engine` | `novaact` | 未标 `@engine` 的 scope 用的默认引擎 |
 | `--assertion-votes` | `1` | AI 断言（`Then`）投票次数（默认 1=单次判定） |
 | `--max-concurrency` | `1` | 同时在跑的 worker 上限（local：喂给后台 per-run 推进进程） |
+| `--default-job-timeout` | `300` | job 墙钟超时秒缺省（`<=0` 不超时）；标了 `@timeout:N` 的 scope 按 tag 走——语义同 `run` 表，「提交完就走」时的挂死/烧钱止损 |
 | `--expose-local` / `--tunnel` | — / `ngrok` | 语义同 `run` 表；submit 后隧道由后台进程持有——local=per-run 进程、cloud=隧道守护进程（轮询终态即拆+TTL 兜底）。**本机需保持开机联网直到 run 终态**（关机=隧道断=测试以导航失败告终，ADR 0035） |
 | `--report-dir` | `reports` | [local] 归集报告落点；`status` 查时须给同一路径 |
 | `--backend {local,cloud}` | `local` | local=本机 per-run 进程推进；cloud=Fargate + 云端 Lambda 事件驱动链推进（提交完真关机也跑完） |

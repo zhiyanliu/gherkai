@@ -1,6 +1,6 @@
 # job 生命周期态：skipped / aborted + severity 数值序
 
-> **Status:** Partially-superseded-by 0034 —— 生命周期态/severity/短路语义均不变；仅决定五「退出码读内存 `RunResult` 终值」对**异步 submit（CLI 脱离）路径**不适用（脱离后无内存终值，判定退出码由 `status --wait` 读回终态 `RunState` 给出），见下决定五数据源的 ⚠️ 注 + [0034](./0034-detached-batch-reconciler.md)。
+> **Status:** Partially-superseded-by 0034 —— 生命周期态/severity/短路语义等**结论均不变**；变的是两处实现细节立场：① 决定五「退出码读内存 `RunResult` 终值」对**异步 submit（CLI 脱离）路径**不适用（脱离后无内存终值，判定退出码由 `status --wait` 读回终态 `RunState` 给出），见下决定五数据源的 ⚠️ 注；② 决定三的「`_aggregate` 只算一次 / 前置态过滤只是前向口子」被反转——无状态投影每轮 tick 全量重放调 `_aggregate`，前置态过滤在该路径**已承重**（决定三的**决策**本身反被印证、非被推翻）。两处均见 [0034](./0034-detached-batch-reconciler.md)。
 
 给 `Status` 加两个 **core 派生态**——`skipped`（排队没起）与 `aborted`（跑一半被掐）——并定义一套
 **severity 数值序**，解决「`'error' < 'failed'` 字母序与严重度反向」的坑、并把 fail-fast 中止的 job 从
@@ -103,17 +103,18 @@ def _aggregate(statuses):
     return Status.PASSED
 ```
 
-- 过滤名单**含 pending/running**（决定一·补）：是**前向口子**——当前 RunState.status 不做增量聚合（见下），
-  但 `_NON_VERDICT` 含前置态，为未来「实时增量聚合 run 级 status」（WebUI 轮询面）预留正确性兜底：届时一个还在
-  `running` 的 job 不会污染 run 级 status。
+- 过滤名单**含 pending/running**（决定一·补）：在 [0034](./0034-detached-batch-reconciler.md) 的无状态投影路径上**已承重**（曾是「为未来增量聚合预留」的前向口子，
+  该未来已到）——`project` 每轮 tick 全量重放推演 `RunState`，`jobs_state` 真实含未起（`pending`）/ 在跑（`running`）
+  的 job 并原样喂进 `_aggregate`；缺这条过滤，前置态会直接污染 run 级 status。
 - 不改也「碰巧正确」（有 skipped/aborted 必有 error 同批短路），但 `else: return PASSED` 是脆弱兜底——
   一旦未来引入**非-fail-fast 的 skip**（如主动 `--skip`），「全 skipped 无 error」的 run 会被误判 `passed`。
   入口过滤把正确性钉死在 `_aggregate` 内、不依赖「skipped 必伴随 error」这个外部假设。
 - **scenario 内归约路径不改**（喂进去的全是 worker 三态，永不含 skipped/aborted）。
-- **当前 run 级 status 只算一次**：`_aggregate` 仅被 schedule 在归约 `RunResult` 时调一次；落库的 `RunState.status`
-  由 `finalize` 从那个已算好的 `result.status` 一次写定（之前一直停在 `pending`，[0030](./0030-realtime-persistence-seam.md)）——
-  **没有「实时增量聚合 RunState.status / severity 单调升级」的运行路径**。`_NON_VERDICT` 含前置态、与未来增量聚合
-  共用同一过滤名单/severity 表收敛到同一终值，是为那条尚未实现的路径留的口子（见上）。
+- **两路调用者、两种喂入**（[0034](./0034-detached-batch-reconciler.md) 落地后的现状）：`_aggregate` 被 ① 同步 `schedule` 归约 `RunResult` 时调一次
+  （喂进的全是终态、前置态过滤是 no-op）② 无状态投影 `project`/`project_full` 调（`project` 每轮 tick 调、真实喂入前置态）
+  两路复用**同一份**——同一过滤名单/severity 表使两路收敛到同一终值（这正是当年留口子的意图）。落库的 `RunState.status`
+  也不再「由 `finalize` 一次写定」：无状态路径下每轮投影写都落 run 级 status（钳在 `pending`/`running`——run 级终态是
+  `finalize` 这个 commit point 的专属，[0030](./0030-realtime-persistence-seam.md) / [0034](./0034-detached-batch-reconciler.md) 机制三），终态仍由 `finalize` 一次落定。
 
 ## 决定四：[0024](./0024-worker-core-protocol.md) 线协议不改，只补一句澄清
 

@@ -51,7 +51,7 @@
 
 | 层 | 内容 | 何时 | 类型 | store |
 |---|---|---|---|---|
-| **definition（前置身份）** | run_id + created_at + 跑哪些 job（完整 `Job`：scope/engine/scenarios/steps，"要跑什么"） | **执行前**确定（plan 产出 + 组合根生成 run_id） | `RunMeta`（持有 `tuple[Job,...]`，不另造 JobMeta） | `RunStore`（控制面） |
+| **definition（前置身份）** | run_id + created_at + 跑哪些 job（完整 `Job`：scope/engine/scenarios/steps + 投票次数 `assertion_votes` + job 墙钟预算 `timeout_s`，"要跑什么"，[0019](./0019-feature-tags-scope-and-engine.md)/[0034](./0034-detached-batch-reconciler.md)「job timeout」节）+ run 级 `extra_http_headers`（隧道等 context 级请求头，[0035](./0035-local-app-testing-via-tunnel.md)；core 只搬运不消费语义） | **执行前**确定（plan 产出 + 组合根生成 run_id） | `RunMeta`（持有 `tuple[Job,...]`，不另造 JobMeta） | `RunStore`（控制面） |
 | **控制面运行态** | 总 status / 各 job status / 会话血缘 sessionId / 起止 | **执行后**产生（实时写下随进度增量刷，[0030](./0030-realtime-persistence-seam.md)） | `RunState`（`jobs: Map<scope_id, JobState>`，按 scope_id 定位单 job 实时刷；落盘 JSON 仍 list） | `RunStore`（控制面） |
 | **数据面判定明细** | 每 scenario/step 的 pass-fail、投票、cost、报告指针 | **执行后**产生 | `JobResult`→`ScenarioResult`→`StepResult` | `ResultStore`（数据面，判定真值唯一权威） |
 
@@ -98,10 +98,16 @@ core/
 ├── ports.py                 ← 接口定义（Engine / WorkerHandle / EngineResolver / Sink / JobSink（0030）/ RunStore / ResultStore / ReportStore）
 └── adapters/
     ├── subprocess_engine.py              ← Engine 实装：单个参数化 adapter（spawn node / python 皆可）✅ 已建
+    ├── fargate_engine.py                 ← Engine 云端实装（job-in 走 S3、events-out 走 DDB events 表）✅ 已建（0024/0032/0033）
     ├── report_store/{local.py, s3.py}    ← RunReport 归集（manifest+index）✅ 已建（0027；s3 见 0030）
     ├── run_store/{local.py, ddb.py, arg_offload.py}  ← 控制面（ddb=DynamoDBRunStore、arg_offload=S3StepArgumentOffloader）✅ 已建（0030）
-    └── result_store/{local.py, s3.py}    ← 数据面（s3=S3ResultStore）✅ 已建（0030）
+    ├── result_store/{local.py, s3.py}    ← 数据面（s3=S3ResultStore）✅ 已建（0030）
+    ├── event_log/{sqlite.py, ddb.py}     ← EventLog port（无状态跑批的写模型：local SQLite / cloud DDB events 表）✅ 已建（0034）
+    ├── cloud_launcher.py                 ← Launcher port cloud 实装（ECS RunTask；对位 gherkai/detached.py 的 SubprocessLauncher）✅ 已建（0034）
+    └── _boto.py                          ← 云端 adapter 共享的 boto3 依赖守卫（非 port 实装，冗余兜底：主拦截在组合根）✅ 已建
 ```
+
+**`EventLog` / `Launcher` 两个 port 定义在 `core/reconcile.py`、不在 `ports.py`**（[0034](./0034-detached-batch-reconciler.md)）：它们只服务无状态推进路径（reconciler 读全量 events 重放 / CAS 抢占成功后起一个 job），与 `ports.py` 那批「同步 `run` 也用」的口生命周期不同；实装各两个（`SqliteEventLog`/`DdbEventLog`、`SubprocessLauncher`（在 `gherkai/detached.py`）/`CloudLauncher`），同样组合根注入。
 
 **当前实装**：四个 port 的 local adapter **均已建**（`subprocess_engine.py` / `run_store/` / `result_store/` / `report_store/`，方法签名以代码与上「按关注点拆 port」节的契约描述为准）。判定结果不再仅在内存，cli 跑完落 `<report-dir>/<run_id>/`（`run_meta.json` + `run_state.json` + `jobs/` + RunReport）。**克制**：store adapter 只忠实持久化已成形的 `RunMeta`/`RunState`/`JobResult`（复用 `serialize` 单一序列化真理源），**未发明** jobId/DDB 表/轮询续跑读取面那些字段——它们仍 defer，待真实续跑/轮询/WebUI 需求逼出（见上「数据模型」节字段级 schema 顺延）。云端再填 DDB/S3/Fargate。
 
@@ -115,7 +121,7 @@ core/
 
 ### cli `--backend {local,cloud}`：组合根按开关注入 store + 执行引擎（兑现「换 adapter 核心不动」）
 
-云端 store adapter（DDB/S3，[0030](./0030-realtime-persistence-seam.md) 决定六）落地后，cli 加 `--backend {local,cloud}`（默认 `local`，仅 `run` 子命令——`plan` 纯本地不落库）在组合根按开关选注入哪套 adapter。`RunPersistence`/`schedule` 只认 Store **port**，local↔cloud 切换**零改** core——这正是本 ADR「选实现=组合根注入」的第一次真实兑现。
+云端 store adapter（DDB/S3，[0030](./0030-realtime-persistence-seam.md) 决定六）落地后，cli 加 `--backend {local,cloud}`（默认 `local`；`run`/`submit`/`status` 三个子命令都有——`submit` 与 `status` 的 backend 须一致，见 [0034](./0034-detached-batch-reconciler.md)；`plan` 纯本地不落库、不加）在组合根按开关选注入哪套 adapter。`RunPersistence`/`schedule` 只认 Store **port**，local↔cloud 切换**零改** core——这正是本 ADR「选实现=组合根注入」的第一次真实兑现。
 
 **单一开关换齐存储三层 + 执行引擎、第一版不开混搭**：`--backend cloud` 一次把 RunStore→DDB、ResultStore/ReportStore→S3（+ 挂 offloader）三层存储全换，**并把执行引擎从 `SubprocessEngine` 换成 `FargateEngine`**（见下「决策 A：`--backend cloud` = 存储上云 + Fargate 执行（单旋钮）」）。理由：三层存储后端不对等（上文已证不存在 `S3RunStore`/`DDBReportStore`），无有意义的混搭矩阵；「Local store + Fargate worker」是 **store⊥worker 正交轴**（上文「worker 产物 ⊥ store」）、是**组合根内部/e2e 可拼的矩阵、非用户 CLI 旋钮**，不需要 `--run-backend`/`--result-backend` 拆开（那是提前盖机器 + 组合爆炸测试负担）。
 
@@ -152,7 +158,7 @@ Fargate 执行环境配置（cluster / task-def / subnet / security-group / even
 
 **装配两个后端都下沉 compose（对称、可复用）**：`build_local_stores` + `build_cloud_stores` 都放 `compose.py`——组合根装配是任何前端（cli / 未来 WebUI）都要的逻辑，收在 compose 让两个后端都能被复用（cli 只是第一个调用者，WebUI 直接复用同两个函数、不经 cli）。这兑现「compose = 可复用组合根」的定位。
 - **`build_local_stores(*, report_dir) -> (run_store, result_store, report_store, make_artifacts)`**：new 三个 `Local*Store(root)`，返回三 store + `make_artifacts` 工厂函数（见下第四返回值说明）。
-- **`build_cloud_stores(*, table, bucket, prefix, region=None, profile=None) -> (run_store, result_store, report_store, make_artifacts)`**：`import boto3` 惰性收在函数体内（cli 主依赖不含 boto3，走 `cli[aws]→core[aws]` extra；纯 local 路径绝不触发 import）。造 boto3 句柄抽成可 patch 的小钩子。返回三 store + cloud 的 `make_artifacts` 工厂。
+- **`build_cloud_stores(*, table, bucket, prefix, region=None, profile=None, detached=False) -> (run_store, result_store, report_store, make_artifacts)`**：`detached` 是行为开关不是可选装饰——**仅 `submit` 传 `True`**（`create_run` 写的 STATE 带 detached 标记 → 触发 cloud kicker 冷启动），同步 `run` 不传（否则双开推进器，[0034](./0034-detached-batch-reconciler.md)）。`import boto3` 惰性收在函数体内（cli 主依赖不含 boto3，走 `cli[aws]→core[aws]` extra；纯 local 路径绝不触发 import）。造 boto3 句柄抽成可 patch 的小钩子。返回三 store + cloud 的 `make_artifacts` 工厂。
 - **两种 boto3 句柄别混**（静默出错高危）：`DynamoDBRunStore` 吃 `resource.Table`（内部 `self._table.put_item`/`.meta.client`），三个 S3 件套（ResultStore/ReportStore/offloader）**共享一个** `client`。喂错句柄类型运行时才 AttributeError、moto/cli 都测不到。
 - **测试注入点随之迁移**：原 cli 测试 `monkeypatch m.LocalRunStore/...`（模块级名字）改为 patch `compose.build_local_stores`（或其内部构造钩子）——注入点从「__main__ 模块级 Local* 名字」迁到「compose 的 build 函数」，验的东西不变（写序 / --no-report 不构造 / running→final），只换注入锚。cloud 同理 patch `compose` 的 boto3 钩子。cli 测试**只验接线层**（backend 选对了、构造了正确 adapter + 参数对 + offloader 挂了），不引 moto——adapter 行为已由 core 包 moto 全覆盖，cli 再测是重复且破窄腰。
 - **trade-off**：把 local 装配从 `__main__` 迁进 `compose` 要改现有 3 个 `monkeypatch m.Local*` 测试的注入点——换来 compose 两后端对称可复用（WebUI 两路都能直接复用），值得。
@@ -172,24 +178,25 @@ Fargate 执行环境配置（cluster / task-def / subnet / security-group / even
 
 ## 工程布局：core / gherkai / cli / engines 平级对标
 
-**当前实装态（v1.0 进行中）**标在各行右侧 ✅/⬜：core/ 已建、cli/ 已建、engines/ 已迁、两个引擎 worker 已落地。
+**当前实装态**标在各行右侧 ✅（本树各行皆已建，无未建项）：core/ 已建、gherkai/ 已抽出（见下「演进」节）、cli/ 已建、engines/ 已迁、两个引擎 worker 已落地。
 
 ```
 ./
 ├── core/                ← 窄腰：纯编排，零引擎依赖                          ✅ 已建
-│   ├── model.py · parse.py · scope.py · schedule.py · wire.py · serialize.py · ports.py · errors.py  ✅
+│   ├── model.py · parse.py · scope.py · schedule.py · project.py · reconcile.py · persist.py · wire.py · serialize.py · ports.py · errors.py  ✅
 │   │     （wire.py=worker 协议单向序列化；serialize.py=领域模型双向持久化的单一真理源，二者分工不同）
-│   └── adapters/        ← 按 port 分；现有 subprocess_engine.py（单 adapter 参数化，非 midscene.py/novaact.py 两文件）✅
+│   │     （project.py=events→RunState/JobResult 的纯归约投影 · reconcile.py=无状态推进 tick（含 EventLog/Launcher 两 port）· persist.py=实时写编排 RunPersistence；见 0030/0034）
+│   └── adapters/        ← 按 port 分（清单见上「adapters 按 port 分子目录」）：subprocess_engine.py（单 adapter 参数化，非 midscene.py/novaact.py 两文件）· fargate_engine.py · cloud_launcher.py · event_log/ · run_store/ · result_store/ · report_store/ · _boto.py ✅
 ├── gherkai/             ← 产品本体 = 组合根共享层（见下「演进」节；cli/Lambda/WebUI 的共同地基）
-│   └── gherkai/{compose.py（组合根/引擎注册表）· detached.py（local 无状态跑批宿主）· names.py（资源命名真源）}
+│   └── gherkai/{compose.py（组合根/引擎注册表）· detached.py（local 无状态跑批宿主）· names.py（资源命名真源）· tunnel.py（`--expose-local` 隧道 provider，0035）}
 ├── cli/                 ← 纯皮：argparse + 渲染（独立子工程，gherkai/core 作 path 依赖）
 │   └── cli/{__main__.py（argparse 皮）· render.py（事件/RunResult 渲染）}
 └── engines/             ← 两个可插拔引擎，与 core 平级对标                  ✅ 已迁
     ├── midscene/        ← 整个 TS 子工程                                  ✅ worker：engines/midscene/worker/run-scope.ts
-    │   ├── worker/run-scope.ts · lib/agentcore-sigv4.mts
+    │   ├── worker/run-scope.ts · worker/deterministic.ts · worker/deterministic.steps.ts · lib/agentcore-sigv4.mts
     │   └── （node_modules / spikes / cucumber 等整体随迁）
     └── novaact/         ← 整个 Python 子工程                              ✅ worker：engines/novaact/worker/run_scope.py
-        ├── worker/run_scope.py                                          ✅（确定性注册表/ai_steps 拆分留口子，见 0022）
+        ├── worker/run_scope.py · worker/deterministic.py · worker/deterministic_steps.py  ✅（确定性注册表已拆出：deterministic.py=注册表+匹配、deterministic_steps.py=脚手架锚点，两引擎对称，见 0022/0036；仅 ai_steps 的进一步拆分仍是留口子）
         └── lib/workflow_setup.py · .venv（整体随迁）
 ```
 
@@ -201,7 +208,7 @@ Fargate 执行环境配置（cluster / task-def / subnet / security-group / even
 
 初版把 `compose.py`（组合根/引擎注册表）放在 `cli/` 包内、以「WebUI 复用 cli.compose」的方式共享——**该安置已被三个非-CLI 消费者的真实代价证伪**：① `lambdas/reconciler.py` 直接 `from cli import compose`，Lambda zip 被迫打包整个 cli 包（含它永远不用的 argparse/render）；② `iac_aws_backend/names.py` 因「CDK 独立工程、不能 import cli」被迫**复刻**命名函数（双写 + ADR 0033 护栏测试防漂移的持续成本）；③ lambda handler 的测试因 `lambdas/` 无依赖闭包而寄居 `cli/tests/`。按本 ADR 自己的 rule-of-three：消费者已 3 个、WebUI 是可预见的第 4 个——到线。
 
-**解法 = 抽平级工程 `gherkai/`（产品本体包，与产品/CLI 同名）**：`compose.py`（引擎注册表/装配）+ `detached.py`（local 无状态跑批宿主）+ `names.py`（资源命名纯函数，从 compose 拆出、零依赖——供 iac 轻依赖消复刻）移入；`cli/` 退成纯皮（argparse + render）。分层语义随之更诚实：**`gherkai/` 知道产品的一切（引擎、云资源、run 生命周期），cli/Lambda/WebUI 只是它的入口皮**。依赖方向：`皮 → gherkai → core`（窄腰红线不动——引擎知识仍不进 core，只是从「寄居 cli」升为「产品本体」）。**命名护栏**：不叫 `composer`（PHP 生态撞名）、不叫 `engine_worker`（与 0024 的 worker 术语撞车且语义反——本层是 worker 的装配者非 worker 本身；且层内一半内容与 engine 无关）。
+**解法 = 抽平级工程 `gherkai/`（产品本体包，与产品/CLI 同名）**：`compose.py`（引擎注册表/装配）+ `detached.py`（local 无状态跑批宿主）+ `names.py`（资源命名纯函数，从 compose 拆出、零依赖——供 iac 轻依赖消复刻）移入；`cli/` 退成纯皮（argparse + render）。此后新增的产品本体知识按同一归属直接落在此层——`tunnel.py`（`--expose-local` 的隧道 provider，[0035](./0035-local-app-testing-via-tunnel.md)）即例：隧道生命周期是产品的事、不是 CLI 皮的事。分层语义随之更诚实：**`gherkai/` 知道产品的一切（引擎、云资源、run 生命周期），cli/Lambda/WebUI 只是它的入口皮**。依赖方向：`皮 → gherkai → core`（窄腰红线不动——引擎知识仍不进 core，只是从「寄居 cli」升为「产品本体」）。**命名护栏**：不叫 `composer`（PHP 生态撞名）、不叫 `engine_worker`（与 0024 的 worker 术语撞车且语义反——本层是 worker 的装配者非 worker 本身；且层内一半内容与 engine 无关）。
 
 ## 版本切分（按完成线，非时间；版本号用 SemVer）
 
@@ -214,23 +221,24 @@ Fargate 执行环境配置（cluster / task-def / subnet / security-group / even
   - **实际达成**：用**骨架用例**（wikipedia / example.com，见 CONTEXT「骨架验证用例」）覆盖了单步/多步复合/开放动作/AI 布尔·否定·取数·取串断言/主观判定/tag 路由，**全程 QA 零代码**，两个引擎都跑通——可行性**方向已证**。
   - **决定（边界，务必读）**：**v0.1.0 判「方向已证」，不补真实用例即进 v1.0.0**。理由——① 团队当前**拿不到真实业务用例**（站点登录态等不可得），强等是空等；② 没有真实用例 → 破例无从触发 → **「破例清单」这条验收无法在 v0.x 执行**。故把「真实业务用例验收 + 破例记录」**顺延并入 v1.0.0**：待有真实用例时在 v1.0 里跑出破例、据以校验「QA 零代码」承诺。**已知风险**：v1.0 架构基于「骨架用例都很顺」的乐观假设设计，真实用例的破例（登录 / HITL / 动态内容 flaky）可能反过来要求调整 v1.0 架构——接受此返工风险，因前置条件（真实用例）确实不具备。
   - **报告**：v0.x 原目标含「报告能看」，当时**决定先「散着」**（手动查目录够用），归集形态待要求清晰再定。**v1.0 已落地为 RunReport 归集索引**（[0027](./0027-runreport-aggregation-index.md)）：不重渲染原生产物、只归集成统一清单 + 导航入口——回答了「先散着」时悬而未决的形态问题（索引而非融合）。
-- **v1.0.0（团队 QA 日常可用）— ⏳ 架构设计中（本 ADR + 0022/0023）**：多用例组织、跑批入口（CLI 阻塞跑一批）、scope 调度、抖动治理（投票）落地；本地执行。**承接 v0.x 顺延项**：真实业务用例验收 + 破例清单（RunReport 归集已落地，[0027](./0027-runreport-aggregation-index.md)）。
+- **v1.0.0（团队 QA 日常可用）— ✅ 完成（架构与实现均已落地，本 ADR + 0022/0023）**：跑批入口（CLI 阻塞跑一批）、scope 调度、抖动治理（投票）落地；本地执行。**唯一未结项 = 承接 v0.x 顺延的「真实业务用例验收 + 破例清单」**——前置条件（可得的真实业务用例）仍不具备，见上 v0.1.0「决定（边界）」条及其已知返工风险；同顺延项里的 RunReport 归集已落地（[0027](./0027-runreport-aggregation-index.md)）。（「多用例组织」中的**按 tag 选子集仍未实现**，见下「现在做 / 现在不做」节。）
 - **v1.1.0（云端执行）— ✅ 完成**：CLI 提交 → Fargate 跑 → 轮询收集，**job = scope** 粒度（上云时坐实，见 [0017](./0017-cloud-execution-fargate-over-runtime.md)）；外置状态存储（DDB，主要服务 `RunStore`）+ 无状态核心。**存储/执行后端替换=加 adapter+换注入、核心不动**（已证）；**但无状态提交-收集是驱动模型演进、核心要动**（[0034](./0034-detached-batch-reconciler.md) 纠正，见上「这样上云…」处的 ⚠️ 分层注）。**决策 A：`--backend cloud` = 存储上云 + Fargate 执行绑定**（单旋钮、不暴露 subprocess×cloud 等正交用户档，见上「cli backend 选择」节）。**已落地**：实时写存储接缝（schedule 的 on_event/on_job_complete 旁路 + `RunPersistence` 编排 + RunStore 三增量方法，[0030](./0030-realtime-persistence-seam.md)）+ job 生命周期态/severity（[0031](./0031-job-lifecycle-states-and-severity.md)）+ **云端 store adapter（DynamoDBRunStore + S3ResultStore + S3ReportStore + StepArgument offload，moto 单测对拍 local，[0030](./0030-realtime-persistence-seam.md) 决定六）** + **`FargateEngine` 执行 adapter**（job-in 走 S3、events-out 走 DDB events 表，[0024](./0024-worker-core-protocol.md)/[0032](./0032-fargate-execution-environment.md)）——坐实了「换 adapter 核心不动」+ **cli `--backend {local,cloud}` store 接线**（本 ADR「cli backend 选择」节 + [0030](./0030-realtime-persistence-seam.md) 决定七）——真跑通 local↔cloud 端到端。**组合根接线 + IaC 亦已落地**（[0033](./0033-iac-aws-backend-and-composition-wiring.md)，Accepted、真部署真跑）：新增 `build_fargate_engines` 产 `FargateEngine`、`--backend cloud` 用它替代 `build_engines`（决策 A 落到 CLI）+ Fargate CLI 参数（决策 C）+ `iac_aws_backend` CDK 工程。Fargate 特有韧性校准（grace/stopTimeout 真容器标定 + 中断抢传 + 上传失败降级 + 孤儿 reaper 否决）**已完成**（[0032](./0032-fargate-execution-environment.md)，4 次真跑标定）。曾是唯一剩项的**无状态跑批（CLI submit → 事件驱动推进 → 轮询收集，job = scope 粒度）已作为 v1.2 完成、真部署真跑通**（见下 v1.2.0 行 + [0034](./0034-detached-batch-reconciler.md)）。
 - **v1.2.0（无状态跑批）— ✅ 完成**：**「CLI 提交完就走、异步收集」**（`submit` 提交即返回 run_id、`status [--wait]` 轮询/接力收集；同步 `run` 保留不变）——CQRS + 无状态事件驱动 reconciler，[0034](./0034-detached-batch-reconciler.md)。**驱动模型演进、非只换 adapter**（见上「这样上云…」处 ⚠️ 分层注的 (b)）：抽纯 `project`/`plan_next`（core，local/cloud 共用）+ `reconcile.tick`（幂等、多触发源、CAS/HWM 条件写）。local=per-run 进程（`setsid` 脱离）+ SQLite events sink；cloud=三 Lambda 事件驱动链（kicker 冷启动 / reconciler 主推进 / 退出观察者）+ DDB Stream + EventBridge（[0033](./0033-iac-aws-backend-and-composition-wiring.md) IaC 扩展）。**真部署真跑通**（真实 AWS 账户 us-east-1：local+cloud 两路 submit→推进→passed，含卡死救活真验）。演进 0016/0024/0026/0031（Partially-superseded-by 0034）+ 0030（重议条落地）。
+- **v1.3.0（本地应用测试 + 能力可发现）— ✅ 完成**：`--expose-local` 经隧道把开发机上的被测应用暴露给云端浏览器（[0035](./0035-local-app-testing-via-tunnel.md)：URL 映射在组合根做、worker/引擎对隧道无知；新增 `gherkai/tunnel.py` + `RunMeta.extra_http_headers` 搬运 context 级请求头）；确定性能力暴露（[0036](./0036-deterministic-capability-discovery.md)：注册即暴露——`@deterministic` 的 description/example 必填，worker 两个自述入口 `--list-deterministic`/`--match-steps`，CLI `list-deterministic --engine` + `plan` 的派发标注与冲突预检；匹配语义仍 100% 在 worker，不复刻进 core/CLI）。
 - **v2.0.0（规模化）— ⬜ 留口子不实现**：WebUI 前端（直接调核心）。
 
-## G1/G2 解析前置（声明语法已定，调度实现待 v1.0）
+## G1/G2 解析前置（声明语法已定，调度实现已落地）
 
 G1/G2 是 v1.0 核心库 `.feature` 解析的前置——其声明语法**现已定（ADR 0019）**：
 
 - **G1 — session scope 声明**：✅ `@scope:<name>` tag（相同值同 scope、串行共享会话；不同值并行；未标各自独立）。tag 两个引擎可读已验证。
 - **G2 — 引擎选择**：✅ `@engine:<x>` tag 选引擎（scope 级属性、容错缺省、冲突报错）；v1.0 只选引擎不交叉。两个引擎路由已验证。
-- 声明语法已定，但**调度实现**（scope 串/并行、会话共享、冲突校验）仍待 v1.0 核心库。
+- 声明语法（[0019](./0019-feature-tags-scope-and-engine.md)）与**调度实现**（scope 串/并行、会话共享、冲突校验）均已落地：scope 分组 + engine/timeout 冲突校验见 [0025](./0025-plan-module-feature-to-jobs.md)（多值直接 `PlanError`），job 间并发/失败隔离/超时兜底见 [0026](./0026-schedule-module.md)；scope 内串行由 worker 消化。
 
 ## 现在做 / 现在不做
 
 - **现在做（v1.0）**：核心库 `core/` 可被调用（逻辑不焊死在 CLI main 里）；钉死上面数据模型；定义 ports 接口（`Engine`/`RunStore`/`ResultStore`/`ReportStore`）+ 组合根注入；核心自解析 Gherkin + 薄 worker（[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)）。模块设计：worker↔core 协议见 [0024](./0024-worker-core-protocol.md)；plan 模块见 [0025](./0025-plan-module-feature-to-jobs.md)；schedule 模块见 [0026](./0026-schedule-module.md)。
   - **ports 落地状态**：四个 port 的 local adapter 均已建（详见上「留口子：Ports & Adapters」节）。**两个引擎 worker 均已落地**（`engines/{novaact,midscene}/worker/`），两个引擎对称、同讲 0024 协议。
 - **现在不做**：无状态机制 / WebUI ——接口已留好，等云端真需要时填 adapter + 组合根换注入。**避免为想象中的云端预先盖机器。**（**已越过**：DynamoDB/S3 store adapter 在 v1.1 第五刀已填，[0030](./0030-realtime-persistence-seam.md) 决定六；**Fargate 执行 adapter + 组合根接线 + IaC 在 v1.1 已填并真部署真跑**，[0033](./0033-iac-aws-backend-and-composition-wiring.md)；**无状态跑批机制 v1.2 已实装真跑通**，[0034](./0034-detached-batch-reconciler.md)——但它**不止「填 adapter」**、是驱动模型演进，故当初「等填 adapter」的乐观预期对它不成立，见上「这样上云…」处的 ⚠️ 分层注。）
-- **G1/G2 声明语法已定**（ADR 0019）；其**调度实现**（scope 串/并行、会话共享、engine 冲突校验）由 v1.0 核心库落地。
-- **多用例组织**（feature 分目录/命名约定、跑批入口、跑批层选择 feature/tag）同样由 v1.0 核心库落地——它依赖核心库的调度层，在 bdd 直跑层做是临时的、核心库会重做。当前 `features/` 下多个文件仅是 v0.x 打磨产物，未做有意组织。（旧的 cucumber `--tags` 选子集约定随 BDD runner 一并退役，见 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)；选子集改由核心调度层据 tag 实现。）
+- **G1/G2 声明语法已定**（ADR 0019）；其**调度实现**（scope 串/并行、会话共享、engine 冲突校验）已由核心库落地（[0025](./0025-plan-module-feature-to-jobs.md)/[0026](./0026-schedule-module.md)，见上「G1/G2 解析前置」节）。
+- **多用例组织**：跑批入口（CLI 按路径跑一批）已落地；**按 tag 选子集仍未实现**——旧的 cucumber `--tags` 选子集约定随 BDD runner 一并退役（见 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)），核心调度层的 tag 过滤至今是留口子（`plan` 只接 feature 路径、无过滤参数；真需要时加 CLI 选择面 + plan 入口过滤，是加法）。**当初把它整体推给核心库的理由仍成立**：选子集依赖核心库的调度层，在（已退役的）bdd 直跑层做只是临时件、核心库终究会重做。`features/` 目前是 v0.x 打磨用例 + v1.0 起补的手工真跑验证夹具（并发/scope 共享、确定性锚点），仍未做目录/命名的有意组织。

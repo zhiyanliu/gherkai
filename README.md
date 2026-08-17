@@ -4,9 +4,9 @@
 
 > 术语与设计决策见 [`CONTEXT.md`](./CONTEXT.md) 和 [`docs/adr/`](./docs/adr/)，外部一手来源见 [`docs/REFERENCES.md`](./docs/REFERENCES.md)。（初始蓝图 `midscene-novaact-prototype-guide.md` 已退役——其内容被 CONTEXT+ADR 全面覆盖且经实测更正。）
 
-## 现状（v1.0，已端到端验证）
+## 现状（已端到端验证）
 
-架构：**核心库 `core/`（Python）自解析 Gherkin → 分组 scope/job → 调度**，每个 scope spawn 一个**薄 worker 子进程**（Midscene=TS / Nova Act=Python），worker 讲统一的 worker↔core 协议（ADR 0024）。`cli/` 是核心库的第一个前端（组合根）。已**退役** v0.x 的 cucumber-js/pytest-bdd 双 runner 直跑（见 ADR 0016 执行架构 / 0022 BDD runner 退役 / 0023 核心语言）。
+架构：**核心库 `core/`（Python）自解析 Gherkin → 分组 scope/job → 调度**，每个 scope spawn 一个**薄 worker 子进程**（Midscene=TS / Nova Act=Python），worker 讲统一的 worker↔core 协议（ADR 0024）。`cli/` 是核心库的第一张前端皮（argparse + render），组合根共享层在 `gherkai/`（ADR 0016「演进」节）。已**退役** v0.x 的 cucumber-js/pytest-bdd 双 runner 直跑（见 ADR 0016 执行架构 / 0022 BDD runner 退役 / 0023 核心语言）。
 
 三层链路 + v1.0 核心库均已在真实 AWS 账号端到端验证：
 
@@ -69,8 +69,7 @@ flowchart TD
 ├── CONTEXT.md                 ← 领域术语表（glossary）
 ├── CLAUDE.md                  ← 项目约定（沟通/文档纪律/代码纪律/工作方式）——给 AI coding agent 与人
 ├── docs/                      ← 架构决策与过程记录
-│   ├── adr/                   ← 架构决策记录（0001–0034）
-│   ├── journey/               ← 任务推进 staging 区（过程产物，吸收进 ADR/code 后可清，见 CLAUDE.md）
+│   ├── adr/                   ← 架构决策记录（0001–0036）
 │   ├── REFERENCES.md          ← 外部一手来源
 │   └── {doc,code}-health-review.md  ← 文档/代码健康度复盘方法
 ├── features/                  ← 共享 .feature（同一份两个引擎同读；通用 step 风格，QA 零代码）
@@ -81,7 +80,7 @@ flowchart TD
 ├── core/                      ← 窄腰核心库（Python，零引擎依赖，ADR 0016）
 │   └── core/{parse,scope,schedule,project,reconcile,persist,model,wire,serialize,ports,errors}.py（project=纯归约投影 / reconcile=无状态推进编排，ADR 0034）+ adapters/{subprocess,fargate}_engine.py + cloud_launcher.py + event_log/{sqlite,ddb}.py（无状态跑批持久事件通道，ADR 0034）+ adapters/{run,result,report}_store/{local,ddb|s3}.py
 ├── gherkai/                   ← 产品本体 = 组合根共享层（ADR 0016「演进」节；cli/Lambda/WebUI 的共同地基）
-│   └── gherkai/{compose.py(引擎注册表/装配) · detached.py(local 无状态跑批宿主) · names.py(资源命名真源)}
+│   └── gherkai/{compose.py(引擎注册表/装配) · detached.py(local 无状态跑批宿主) · names.py(资源命名真源) · tunnel.py(--expose-local 隧道 provider，ADR 0035)}
 ├── cli/                       ← 命令行皮（ADR 0016）
 │   └── cli/{__main__.py(argparse) · render.py}
 ├── engines/                   ← 两个可插拔引擎，与 core 平级
@@ -106,7 +105,7 @@ flowchart TD
 
 ```bash
 # 首次安装：三个运行环境（互相隔离、不污染全局，见下「注意」）
-cd cli && uv sync                                  # cli + core（core 作 path 依赖）
+cd cli && uv sync                                  # cli + gherkai + core（gherkai/core 作 path 依赖）
 (cd ../engines/novaact && uv sync)                 # Nova Act worker 的 .venv（Python 3.13）
 (cd ../engines/midscene && npm install)            # Midscene worker 的 node_modules（Node 22）
 ```
@@ -191,7 +190,7 @@ RUN_ID=$(uv run python -m cli submit my_app.feature --expose-local http://localh
 ### 怎么写 `.feature`（QA 零代码，ADR 0020）
 
 - 动作/断言都写**纯自然语言、无路由关键词**：`When "搜索 OpenAI"` / `Then "进入了 OpenAI 词条页"` → 默认走 AI（动作=aiAct/act；断言=aiBoolean/act_get+投票）。
-- scope/引擎用 **tag**（ADR 0019）：`@scope:login`（共享会话、串行）/ `@engine:midscene|novaact`（选引擎）。
+- scope/引擎/超时预算用 **tag**（ADR 0019）：`@scope:login`（共享会话、串行）/ `@engine:midscene|novaact`（选引擎）/ `@timeout:120`（该 scope 的 job 墙钟预算秒；未标用 `--default-job-timeout` 缺省，同 scope 声明不一致报 PlanError）。
 - **确定性精确检查**（URL/DOM，不容 AI 抖动）：由 test engineer 在 worker 的 `@deterministic` 注册表按需写（`deterministic.steps.ts` / `deterministic_steps.py`；命中走精确 handler、不投票，ADR 0022）（QA 不碰实现，但**可发现可复用**：`list-deterministic` 查当前引擎有哪些、`plan` 看自己写的 step 会不会命中，ADR 0036）。
 - **多行参数**：AI 动作/断言 step 可挂 Gherkin DataTable/DocString，worker 拼成附加文本随 step 一起喂 AI（ADR 0024）。
 

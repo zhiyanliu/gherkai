@@ -22,7 +22,7 @@
 - https://nova.amazon.com/act — API key 生成、Playground
 - 安装的源码：`engines/novaact/.venv/lib/python3.13/site-packages/nova_act/`
   - AgentCore provider：`browser_auth/agentcore_session_provider.py`（`cdp_session()` yield `(ws_url, headers)`）
-  - workflow contextvar：`types/workflow.py`（`@workflow` 设 `set_current_workflow`；`with Workflow` 不设，见 ADR 0004 / bdd 修复）
+  - workflow contextvar：`types/workflow.py`（`@workflow` 设 `set_current_workflow`；`with Workflow` 不设——worker 走 `with Workflow`，故须手动补 `set_current_workflow`，见 `engines/novaact/worker/run_scope.py` / ADR 0004）
 - 多语言 SDK（形态 B 探路，**已证伪**：是客户端驱动的 REST 循环、非 `nova.act()` acting 等价物，acting 锁 Python，见 ADR 0006/0023）：npm `@aws-sdk/client-nova-act`、Go `aws-sdk-go-v2/service/novaact`
 
 ## AWS Bedrock / AgentCore
@@ -37,7 +37,8 @@
 # 列模型 + 过滤（确认账号/region 可用性）
 aws bedrock list-foundation-models --region us-east-1 --query "modelSummaries[?contains(modelId,'qwen')].[modelId,inputModalities]" --output text
 
-# Nova Act IAM 路径必需：注册 workflow definition（一次性，见 ADR 0004）
+# 注册 workflow definition 的等价 CLI（仅作查证/排障参考——生产不需手动跑：代码经
+# lib/workflow_setup.py 的 ensure_workflow_definition() create-if-not-exists，见 ADR 0004）
 aws nova-act create-workflow-definition --region us-east-1 --name <name>
 
 # AgentCore 浏览器会话（数据面）

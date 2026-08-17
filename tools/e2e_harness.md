@@ -16,14 +16,14 @@
 
 - **AWS 凭证 + region us-east-1**（default profile 即可）。
 - **一个可写 S3 桶**，经环境变量 `HARNESS_S3_BUCKET` 传入（**勿硬编码**账号相关值）。跑完自行清理桶内 `harness/<run-id>/` 前缀（见下「清理」）。
-- 从**仓库根**跑，且 `PYTHONPATH=core`（harness 复用真实 `core.scope.plan` 生成 job，防手搓 JSON 漂移）。
+- 用 **`core/.venv/bin/python`** 跑（harness 复用真实 `core.scope.plan` 生成 job，防手搓 JSON 漂移）。**cwd 与 `PYTHONPATH` 都不限**——harness 由 `__file__` 派生仓库根、自己把 `<repo>/core` 插进 `sys.path`，features/engines 路径也全由该根算出。
 - 各引擎的 venv/node_modules 已就绪（harness 用 `engines/novaact/.venv/bin/python` / `node --import tsx` spawn worker）。
 
 ## 调用
 
 ```bash
-# 从仓库根：
-HARNESS_S3_BUCKET=<你的可写桶> PYTHONPATH=core core/.venv/bin/python tools/e2e_harness.py \
+# 下面用相对路径写，故从仓库根键入最省事（cwd 非必需，见「前置条件」）：
+HARNESS_S3_BUCKET=<你的可写桶> core/.venv/bin/python tools/e2e_harness.py \
     --engine <novaact|midscene> \
     --feature <feature 名，不含 .feature 后缀> \
     --interrupt <none|connect|act|between|scenario|scope_end> \

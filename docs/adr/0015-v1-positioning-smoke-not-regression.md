@@ -36,11 +36,11 @@ v1.0 的产品定位锚定在"精确度光谱"的**最左档**：只验证**核�
 - **未点名不抓**（种类 B）：最左档定位的必然代价，接受。
 - 像素级回归见上「定位·不做」（含 Percy 理由）；精确色值/坐标见上「关键澄清」表。
 
-## v1.0 包含（断言三层，按"默认 AI / 逃生舱确定性"分）
+## v1.0 包含（断言两层，按"默认 AI / 逃生舱确定性"分）
 
 1. **默认 AI 判断（QA，零代码）**：QA 在 `.feature` 写纯自然语言断言 `Then "{自然语言}"`，**无需任何路由关键词**，框架默认走 AI 布尔判断（`aiBoolean`/`act_get`）+ 投票。这是绝大多数情况，符合"AI 柔性主导"。
    - "点名精确核对某项"（如"价格是 ¥99"）也走这层——QA 仍只写自然语言，AI 去看那一项。
-2. **确定性锚点（test engineer，逃生舱，按需自建）**：少数"必须精确、不容 AI 抖动"的断言（如 URL 精确、关键 DOM），由 **test engineer**（会写代码的角色）在 `deterministic.steps`（脚手架文件，空架子+说明）里加项目专属 step，用 Playwright 精确查、不走 AI。**不预置任何具体锚点**，不要求 QA 学措辞。
+2. **确定性锚点（test engineer，逃生舱，按需自建）**：少数"必须精确、不容 AI 抖动"的断言（如 URL 精确、关键 DOM），由 **test engineer**（会写代码的角色）在确定性脚手架（`engines/novaact/worker/deterministic_steps.py` / `engines/midscene/worker/deterministic.steps.ts`，含说明注释）里加项目专属 step，用 Playwright 精确查、不走 AI。脚手架各预置一个通用 URL 锚点（`页面地址匹配 "<正则>"`）作范例，**不预置任何项目专属锚点**，不要求 QA 学措辞（QA 也可用 `list-deterministic` 主动查已有锚点，见 [0036](./0036-deterministic-capability-discovery.md)）。
    - 角色边界：QA 永远只写自然语言（"零代码"对 QA 成立）；确定性锚点是工程角色的活（BDD 原本的角色分工，见 [0019](./0019-feature-tags-scope-and-engine.md)/[0018](./0018-generic-steps-capability.md)）。
    - 详见措辞与脚手架设计：ADR 0020。
 

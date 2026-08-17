@@ -32,11 +32,18 @@
 **IAM：**
 8. **task role**（容器内凭证链 `AWS_CONTAINER_CREDENTIALS_RELATIVE_URI` 解析目标）——**最小权限**（见「IAM 最小权限」）。
 9. **task execution role**（拉 ECR 镜像 / 写 CloudWatch 日志的标准 Fargate execution role）。
+10. **3 个 Lambda 执行角色**（随 12. 的各 Function 自动建、**与 task role/execution role 分立**）：exit-observer 只需 events 表写（`PutItem` 写 `task_exited`）；reconciler / kicker 同款——起 worker task（`ecs:RunTask` 按引擎 task-def ARN + `iam:PassRole` 到 execution role 与各 task role）+ `ecs:DescribeTasks`/`StopTask`/`ListTasks`（退出码兜底、超时处置定位与停）+ runs 表读写 + events 表读 + 桶读写 + `scheduler:CreateSchedule`/`DeleteSchedule`（资源域见 15.）。**起 task 的能力集中在这三个角色上**，故 submit/status 机器无需任何 ECS 写/执行权限（[0034](./0034-detached-batch-reconciler.md) 最小权限卖点）。
 
 **SSM：**
-10. subnet/sg 的 ID 写进确定性路径的 SSM 参数（cli 读，见「subnet/sg 走 SSM」）。
+11. subnet/sg 的 ID 写进确定性路径的 SSM 参数（cli 读，见「subnet/sg 走 SSM」）。
 
-**（编排进程角色**——跑 core/cli 的机器需 `ecs:RunTask`/`StopTask`/`DescribeTasks` + `dynamodb:Query`/`PutItem` + store 读写 + `s3:PutObject`（job 上传）——若编排也在 AWS 上跑则一并建；本地跑则用本地凭证，不在本 stack 强制。）
+**无状态跑批的事件驱动链（[0034](./0034-detached-batch-reconciler.md) 引入；机制/为什么归 0034，此处只列资源、命名与触发契约）：**
+12. **3 个 Lambda Function**（同一份 code asset：`lambdas/` + `core/core` + `gherkai/gherkai`，pip 装 gherkin-official；boto3 用 runtime 自带）——`{prefix}kicker`（handler `reconciler.kicker_handler`）/ `{prefix}reconciler`（`reconciler.handler`）/ `{prefix}exit-observer`（`exit_observer.handler`）。名走 prefix 层默认名（基名 `kicker`/`reconciler`/`exit-observer` 在 `gherkai/names.py`），**cli 侧按同一 prefix 拼出同名**去 preflight 探活、`status --wait` 据此 invoke kicker → 与 task-def 同款「单一命名事实源、不漂移」。
+13. **两表 DynamoDB Stream（`NEW_IMAGE`）+ 两个 event source mapping**：events 表 Stream → reconciler；runs 表 Stream → kicker，且**mapping 带 filter `eventName=INSERT ∧ NewImage.detached.BOOL=true`**（同步 `run --backend cloud` 的 create_run 同样 INSERT runs 表，靠 `detached` 标记在 Stream 层滤掉、零 Lambda 调用；标记由 submit 组合根写在 STATE item 上）。这两条触发关系（含 kicker 的 filter）与 container 名同属 CDK↔code 硬契约：filter 写漏 = 同步 run 被双开推进器。
+14. **EventBridge rule `{prefix}ecs-stopped`** → exit-observer：本 cluster 的 `ECS Task State Change` ∧ `lastStatus=STOPPED`（event pattern 按 clusterArn 过滤，不误触账户里别的 ECS 负载）。
+15. **job timeout 到点触发器的两件配套**（[0034](./0034-detached-batch-reconciler.md)「job timeout」节）：Scheduler 执行 role `{prefix}timeout-scheduler`（`scheduler.amazonaws.com` assume、只授 invoke kicker；用**确定性 kicker ARN 字符串**授权以避免 role↔function 互引成环）+ one-time schedule 的名字空间 `schedule/default/{prefix}job-timeout-*`（Lambda 的 Create/DeleteSchedule 资源域；schedule 本身运行期由推进器建、`ActionAfterCompletion=DELETE` 自动清，**非 CDK 建**）。
+
+**（编排进程角色**——跑 core/cli 的机器需：**同步 `run`**（进程内推进、直接起 task）`ecs:RunTask`/`StopTask`/`DescribeTasks` + `dynamodb:Query`/`PutItem` + store 读写 + `s3:PutObject`（job 上传）；**preflight 只读探活**（任何 `--backend cloud`）`dynamodb:DescribeTable` / `s3:HeadBucket` / `ecs:DescribeClusters` / `ecs:DescribeTaskDefinition`，detached `submit` 另需 `lambda:GetFunction`（探链上三 Lambda 存在性）；**`status --wait` 接力 kickoff** `lambda:InvokeFunction`（`{prefix}kicker`）；**读 subnet/sg** `ssm:GetParameter`（`/{prefix}backend/*`）。**detached `submit`/`status` 的机器只需「runs 表读写 + 上述只读探活 + `InvokeFunction`」、无任何 ECS 写/执行权限**（起 task 全走 Lambda 执行角色，见 10.——[0034](./0034-detached-batch-reconciler.md) 最小权限卖点）。若编排也在 AWS 上跑则一并建；本地跑则用本地凭证，不在本 stack 强制。）
 
 **`RemovalPolicy.RETAIN` = 表/桶/ECR（防误删），其余随 stack 销毁**：2 张 DDB 表 + artifacts 桶设 `RETAIN`（承载 run 数据/产物，误删代价高）；**ECR repo 也设 `RETAIN`**（保住已 push 的镜像，且非空 repo `cdk destroy` 本就删不掉）。可随 stack 销毁的（cluster/task-def/SSM/日志组）用默认/`DESTROY`。**代价（运维须知）**：`cdk destroy` 后表/桶/ECR **残留、需手动删**（`aws dynamodb delete-table` / `aws s3 rb --force` / `aws ecr delete-repository --force`）；否则同 prefix 重新 deploy 会因资源已存在而处理为导入/冲突。清理 runbook 见 `iac_aws_backend/README`。
 
@@ -46,7 +53,7 @@
 
 **决策：两层命名，正交组合。**
 
-- **prefix 层**（`--prefix`，默认 `gherkai-`）：批量决定**所有名字类资源**的默认名——`{prefix}runs`/`{prefix}events`/`{prefix}artifacts`/`{prefix}cluster`/`{prefix}novaact-worker`/`{prefix}midscene-worker` 等（task-def 用引擎规范名 `novaact`，非 `nova`）。**CDK 部署吃同一 prefix**（`cdk deploy -c prefix=prod-`），故 CDK 建的名 = cli 推导的默认名 → **单一事实源、不漂移**。`--prefix prod-` 一键切整套。**命名真源的落位演进**：曾因「CDK 独立工程、不能 import cli」在 `iac_aws_backend/names.py` **复刻**一份命名函数（双写、靠对拍测试防漂移）；组合根共享层抽为平级 `gherkai/` 包后（[0016](./0016-execution-architecture-core-lib-run-model.md)「演进」节），命名纯函数移入零依赖的 `gherkai/names.py`，iac 直接 import——复刻消除、护栏测试转为「真同源」的结构性保证。
+- **prefix 层**（`--prefix`，默认 `gherkai-`）：批量决定**所有名字类资源**的默认名——`{prefix}runs`/`{prefix}events`/`{prefix}artifacts`/`{prefix}cluster`/`{prefix}novaact-worker`/`{prefix}midscene-worker`/`{prefix}kicker`/`{prefix}reconciler`/`{prefix}exit-observer` 等（task-def 用引擎规范名 `novaact`，非 `nova`；三个 Lambda 名 cli 侧 preflight/接力也按此拼，见「资源清单」12.）。**CDK 部署吃同一 prefix**（`cdk deploy -c prefix=prod-`），故 CDK 建的名 = cli 推导的默认名 → **单一事实源、不漂移**。`--prefix prod-` 一键切整套。**命名真源的落位演进**：曾因「CDK 独立工程、不能 import cli」在 `iac_aws_backend/names.py` **复刻**一份命名函数（双写、靠对拍测试防漂移）；组合根共享层抽为平级 `gherkai/` 包后（[0016](./0016-execution-architecture-core-lib-run-model.md)「演进」节），命名纯函数移入零依赖的 `gherkai/names.py`，iac 直接 import——复刻消除、护栏测试转为「真同源」的结构性保证。
 - **单资源覆盖层**（`--ddb-table`/`--s3-bucket`/… 给完整终值）：直接用给定值。
 
 **关键自洽点（无特判逻辑）**：覆盖时 prefix **自然不参与**——因为 prefix 只在「生成默认名」这条路径上拼，而覆盖 = 直接给完整 family name = 根本不走生成路径。两层在不同代码路径、正交解耦，不需要 `if override: strip_prefix` 之类的特判。
@@ -137,8 +144,8 @@ subnet/sg 不是「名字」，是 **AWS 建 VPC 时生成的 ID**（`subnet-0ab
 | `bedrock-agentcore:SaveBrowserSessionProfile` | 系统 browser + `browser-profile/*`——**仅 Nova** task role 授（Midscene 不需要；code 在 novaact 分支单授）| Nova |
 | `nova-act:` `GetWorkflowDefinition`/`CreateWorkflowDefinition`/`CreateWorkflowRun`/`UpdateWorkflowRun`/`CreateSession`/`CreateAct`/`UpdateAct`/`InvokeActStep` | `workflow-definition/*` + `.../workflow-run/*`（nova-act IAM 只到 definition/run 两级；session/act 非独立资源。**definition 名段 `*` 不 pin 具体名**——definition 名是 worker 运行期概念，不该泄进 IAM 让 IaC 耦合 worker 常量）| Nova |
 | `bedrock:InvokeModel` | `arn:aws:bedrock:*::foundation-model/qwen.qwen3-vl-235b-a22b`（account 段空、region 通配 model-id pin；裸 modelId 直连 ON_DEMAND、不走 inference profile）| Midscene |
-| `ssm:GetParameter` | `/{prefix}backend/*`（读 subnet/sg）——**属编排进程角色、非 task role**（列此防漏）| 编排 |
 
+- **编排进程角色不在本表**（本表只列 task role，列此防漏）：`ssm:GetParameter`（`/{prefix}backend/*`，读 subnet/sg）连同 preflight 只读探活、`lambda:InvokeFunction` 接力 kickoff 等**属编排进程角色**——完整权限面单列一处，见「资源清单」末段，别在此重复。
 - **两个引擎 task role 分立**（各给各真调的动作、最小权限、一个引擎被攻破不波及另一个引擎）——CDK 已按引擎分立。
 - **上表动作集由真跑逐个暴露、非 grep 推全**（证据边界，绿≠对）：`UpdateWorkflowRun`/`CreateSession`/`CreateAct`/`UpdateAct`/`InvokeActStep`/`CreateBrowserProfile`/`List`/`Get`/`SaveBrowserSessionProfile`/`ConnectBrowserAutomationStream` 全是**真跑 cloud job 逐个报 AccessDenied 才补上**的（SDK 内部调用面远比 lib 里 grep 到的大——每加一个 redeploy+真跑一轮）。
 - **资源 ARN 已收窄（动作 + 资源两维度都最小）**：依据 = AWS Service Authorization Reference 的 `resource_types` + IAM 策略模拟器对本账户实证 + **收窄后真部署真跑验证无 AccessDenied**（两引擎 ×（确定性+AI），Midscene Bedrock 1867 tokens / Nova act 全 passed、产物真上传 S3）。三处从 `*` 收窄，另留 4 个结构上只能 `*` 的（见上表）：
@@ -148,6 +155,7 @@ subnet/sg 不是「名字」，是 **AWS 建 VPC 时生成的 ID**（`subnet-0ab
   - **4 个只能 `*` 的**（List/CreateBrowserProfile/Connect×2）：SAR `resource_types` 为空，模拟器实证 scope 到任何具体 ARN 均 implicitDeny——**结构上不支持 resource-level**，诚实保留 `*`（非"待标定"）。
   - **风险收在两道**：`*` 只在这 4 个结构性动作的资源维度宽；**动作维度全最小 + 两引擎 task role 分立**（一引擎被攻破不波及另一个）。回归护栏见 `iac_aws_backend/tests/test_stack.py::test_task_role_resource_arns_narrowed`（钉死 ARN 形态 + account=aws 陷阱 + GetAct 已删）。
 - **task execution role** 用 AWS 托管的 `AmazonECSTaskExecutionRolePolicy`（拉 ECR + 写日志）即可，与 task role 分开（execution role 是平台拉镜像用、task role 是容器内应用用，职责不同）。
+- **无状态跑批链的 3 个 Lambda 执行角色**与上两者同样**分立**（各随 Function 建）：起 task（`ecs:RunTask` + `iam:PassRole`）、表桶读写、超时 schedule 的 `scheduler:Create|DeleteSchedule` 都收在这里，动作与资源域见「资源清单」10./15.——**worker 的 task role 一个都不含**（worker 绝不起 task、绝不碰 runs 表，[0030](./0030-realtime-persistence-seam.md) 单写者）。
 - workflow definition：**已定 = CDK 不预建、worker 首跑 create-if-not-exists**（`workflow_setup.py`），故 Nova task role 授 `GetWorkflowDefinition` + `CreateWorkflowDefinition` 两者（见上表）。曾倾向「IaC 预建 + task role 收紧到只读 `Get`」（更干净、权限更小），但 CDK 落地时选了不预建（worker 自建闭环、无需 IaC 额外建 workflow definition 资源）——代价是 task role 保留 `Create`。若未来改为 IaC 预建，再把 task role 收紧到 `Get`-only。
 
 ## 组合根接线（非 IaC，已编码）

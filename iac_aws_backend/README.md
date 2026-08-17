@@ -10,7 +10,7 @@
 - **S3**：`{prefix}artifacts`（判定结果 / 报告 / offload / job-in / 引擎产物，按 key 前缀分片）
 - **ECS**：`{prefix}cluster` + 2 个 Fargate task-def（`{prefix}novaact-worker` / `{prefix}midscene-worker`）
 - **ECR**：2 个 repo（各承一个 worker 镜像；镜像由 CI/手动 build & push，CDK 只建 repo）
-- **IAM**：每引擎一个最小权限 task role + 共享 execution role
+- **IAM**：每引擎一个最小权限 task role + 共享 execution role + job timeout 的 Scheduler 执行 role `{prefix}timeout-scheduler`（见下「事件驱动推进」）
 - **VPC + SSM**：worker 网络（subnet/sg）+ 把它们的 ID 写进 `/{prefix}backend/subnets`、`/{prefix}backend/security-groups`（cli 读）。**VPC 来源三档**（context）：`-c vpc_id=vpc-xxx` 复用现有 / `-c use_default_vpc=true` 用默认 VPC / 都不给则建新——**三档均走公有子网 + 零 NAT**（worker 只出不入，公有子网 + 公网 IP 出网即够；真私有隔离留 backlog，见 ADR 0033）。
 
 ### 事件驱动推进（无状态跑批，ADR 0034）
@@ -24,11 +24,12 @@
   - kicker/reconciler 共享起 task 的全套权限与装配（`RunTask` / `PassRole` / 表桶读写 + `SUBNETS`/`SECURITY_GROUPS`/`MAX_CONCURRENCY`）；分工 = kicker「让 run 动起来」、reconciler「推着走」。
 - **EventBridge rule `{prefix}ecs-stopped`**：按 `source=aws.ecs` + `ECS Task State Change` + `lastStatus=STOPPED` + 本 cluster 的 `clusterArn` 过滤（不误触别的负载）→ 打到 `{prefix}exit-observer`。
 - **Event source mappings**：`{prefix}events` 表 Stream → reconciler；`{prefix}runs` 表 Stream → kicker（**带 `eventName=INSERT` filter**，只让 `create_run` 触发冷启动，reconciler 之后写 runs 表的 `MODIFY` 不自触发放大，见 ADR 0034 被拒方案）。
-- **Lambda 打包（`_build_lambda_asset`）**：三个 Lambda 共用一个 asset = `lambdas/`（handler）+ `core/core`（core 库）+ `cli/cli`（compose，reconciler 复用其 `build_fargate_engines` 单一真源）+ pip 装 `gherkin-official`（core 唯一非 boto3 依赖；boto3 由 runtime 自带、不打）。打到 `.lambda_build/`（gitignore，每次 synth 重建）。
+- **job timeout 到点触发器**（ADR 0034「job timeout」节）：IAM role `{prefix}timeout-scheduler`（`scheduler.amazonaws.com` assume、只准 invoke kicker——授权写**确定性 kicker ARN 串**而非资源引用，免 role↔function 互引成环）+ EventBridge Scheduler 的 one-time schedule 名字空间 `{prefix}job-timeout-*`（default group，`ActionAfterCompletion=DELETE` 到点自删、idle 零成本，故 reconciler/kicker 授 `scheduler:CreateSchedule`+`DeleteSchedule`+ 对该 role 的 `PassRole`）+ 注给 reconciler/kicker 的 `KICKER_ARN`/`SCHEDULER_ROLE_ARN` env（起 task 时 arm、到点 Scheduler invoke kicker 走超时处置：停 task + 判 `error(timeout)`）。改 prefix 时这两个名字随之变。
+- **Lambda 打包（`_build_lambda_asset`）**：三个 Lambda 共用一个 asset = `lambdas/`（handler）+ `core/core`（core 库）+ `gherkai/gherkai`（产品本体：compose 装配单一真源，reconciler 复用其 `build_fargate_engines`；**不打 `cli`**——Lambda 不背 argparse/render，ADR 0016「演进」节）+ pip 装 `gherkin-official`（core 唯一非 boto3 依赖；boto3 由 runtime 自带、不打）。打到 `.lambda_build/`（gitignore，每次 synth 重建）。
 
 ## prefix 契约（关键）
 
-`--prefix`（CDK context `-c prefix=`，默认 `gherkai-`）**必须与 cli 的 `--prefix` 一致**——CDK 建的资源名 = cli 推导的默认名（`names.py` 复刻 cli `compose.py` 的命名规则）。不一致 → cli 连不上资源、preflight 报错点名 prefix。
+`--prefix`（CDK context `-c prefix=`，默认 `gherkai-`）**必须与 cli 的 `--prefix` 一致**——CDK 建的资源名 = cli 推导的默认名（`names.py` re-export 产品本体 `gherkai.names`，与 cli 同源）。不一致 → cli 连不上资源、preflight 报错点名 prefix。
 
 命名规则**真同源**：`names.py` 直接 re-export 产品本体 `gherkai/names.py`（曾因「CDK 独立工程、不能 import cli」复刻一份、须两处同步改——组合根共享层抽为平级 `gherkai/` 包后复刻消除，ADR 0016「演进」节/0033）。
 

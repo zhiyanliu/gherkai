@@ -7,10 +7,12 @@
 ## 接口（深模块，小）
 
 ```
-plan(features: [{uri, text}], config: {defaultEngine, defaultAssertionVotes}) -> Job[]
+plan(features: [{uri, text}], config: {defaultEngine, defaultAssertionVotes, defaultJobTimeout}) -> Job[]
 
 Job = {
   scopeId, scopeName, engine, assertionVotes,   // votes 维度语义权威在 ADR 0014，本模块只透传
+  timeoutS,                                     // job 墙钟预算秒（null=不超时）；tag 语义权威在 ADR 0019、
+                                                // 设计取舍与三路 enforce 在 ADR 0034，本模块只解析 + 校验
   scenarios: [
     { id, name, steps: [ { index, keyword, text, argument? } ] }
   ]
@@ -61,6 +63,14 @@ Job = {
 - scope 内任一 scenario 标了 → 全 scope 继承；
 - 同 scope 多个不同 engine 值 → 报错拒运行（物理自相矛盾）。
 
+### timeout 解析（scope 级，规则同 [0019](./0019-feature-tags-scope-and-engine.md)）
+
+本模块兑现 job 墙钟预算（`@timeout:N`）解析的校验实现，与 engine 解析同构；tag 语义权威在 [0019](./0019-feature-tags-scope-and-engine.md)、两层设计取舍与三路 enforce 在 [0034](./0034-detached-batch-reconciler.md)「job timeout」节，本模块只解析定值、填进 `Job.timeoutS`：
+- 整 scope 未标 `@timeout` → 用 `config.defaultJobTimeout`（未给 = 不超时）；
+- scope 内任一 scenario 标了 → 全 scope 继承；
+- 同 scope 多个不同 `@timeout` 值 → 报错拒运行（一个 job = 一个预算，同 engine 冲突先例）；
+- 值非数字或 `<=0` → 报错（「标了 tag 却想不超时」不成立——删 tag 走缺省即可，不静默当无预算）。
+
 ### step 顺序 = 书写顺序，keyword 只决定派发
 
 - worker 拿到的 steps **严格按 feature 书写顺序**，逐条执行；**keyword 不约束顺序、不触发重排**。
@@ -100,6 +110,8 @@ Job = {
 - 同一 scope 多个不同 engine → 报错；
 - 一个 scenario 多个不同 `@scope` 值（feature 级传播 + scenario 级）→ 报错；feature 级 `@scope` 传播（无冲突时）→ 正常归一个 scope；
 - scope 缺省 engine → 用 defaultEngine；
+- 同一 scope 多个不同 `@timeout` → 报错；`@timeout` 非数字 / `<=0` → 报错；
+- timeout 缺省兜底 + tag 优先（同一批里标了 `@timeout` 的 scope 走 tag、未标的走 `defaultJobTimeout`）；无 tag 又无缺省 → 不超时；
 - 未标 scope 的 scenario → 各自独立成 job（含未标 scope 的 Outline → N 个 job 不撞 id）；
 - id 派生稳定可追溯。
 

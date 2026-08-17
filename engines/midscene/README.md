@@ -9,7 +9,7 @@ Midscene.js (TypeScript) 侧的执行引擎。用 **Qwen3-VL 235B on Bedrock** �
 不用 `MIDSCENE_MODEL_API_KEY` bearer，改用进程内 SigV4 自签（复用本机 AWS 默认凭证链）：
 
 - 模型：`qwen.qwen3-vl-235b-a22b`，`MIDSCENE_USE_QWEN3_VL=true`
-- base URL：`https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1`
+- base URL：`https://bedrock-runtime.${AWS_REGION}.amazonaws.com/openai/v1`（region 惰性读 `AWS_REGION`、未设即 fail-loud，不硬编码 east——见 `lib/agentcore-sigv4.mts` 的 `getRegion()`/`getBaseUrl()`、ADR 0033）
 - 接线：经 Midscene `createOpenAIClient` 注入带 SigV4 签名的自定义 `fetch`
 - 配方与失败模式：`spikes/SIGV4-FETCH-RECIPE.md`
 

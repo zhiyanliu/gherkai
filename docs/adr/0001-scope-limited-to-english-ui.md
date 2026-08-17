@@ -31,6 +31,6 @@ Nova 的失败形态**不是读不出中文**：动作步的推理明确读出�
 
 1. 非英文用例做 N 次抖动测量（对齐 [0010](./0010-spike-as-apples-to-apples-benchmark.md)/[0014](./0014-ai-first-assertions.md) 的英文基线），量化两引擎差距；
 2. 若 Nova 的 `act_get` 布尔断言在非英文上系统性不稳：先提高 `--assertion-votes`（[0014](./0014-ai-first-assertions.md) 的抖动治理本为此设计），再考虑对该引擎缩小断言职责；
-3. 视觉定位成为瓶颈时换大脑——Midscene 侧的**配置级**改动（模型经 env 注入，[0003](./0003-midscene-grounding-qwen3vl-bedrock.md)），受 [0009](./0009-maximize-aws-hard-constraint.md)「AWS 内托管」约束限于 Bedrock 可用模型。
+3. 视觉定位成为瓶颈时换大脑——**不需重设计架构**，但也不是纯配置：改 worker 侧模型常量（`agentcore-sigv4.mts` 的 `MODEL` + family 开关）＋改 IaC 里 `bedrock:InvokeModel` 的模型 ARN pin 并重新部署（[0003](./0003-midscene-grounding-qwen3vl-bedrock.md)「待观察（上游代际）」段同口径），受 [0009](./0009-maximize-aws-hard-constraint.md)「AWS 内托管」约束限于 Bedrock 可用模型。
 
 届时**修订本 ADR**（补范围与证据），无需另立取代 ADR。

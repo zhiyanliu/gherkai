@@ -15,15 +15,16 @@ schedule(run_meta: RunMeta, engines: EngineResolver, sink: (event) -> void, opts
    // sink: 接收 0024 原始流式事件的回调（pass-through，仅供进度显示；被 sink_lock 串行化）
    // on_job_complete/on_event: 实时写接缝的两个旁路注入点（默认空），落库走它们、不走 sink（ADR 0030）
 
-opts = {                 // 时间单位统一为秒；代码字段名带 _s 后缀（job_timeout_s/grace_period_s）
+opts = {                 // 时间单位统一为秒；代码字段名带 _s 后缀（grace_period_s/heartbeat_interval_s）
   maxConcurrency = 4,    // 同时在跑的 worker 上限
   failFast = false,      // 任一 job 崩是否中止整批
-  jobTimeout = null,     // per-job 墙钟超时（秒；null=不超时；超时记 status:error + errorType:timeout）
   gracePeriod = 5,       // 停止请求后等 worker 优雅退出的宽限秒，超期强杀
   clock,                 // 时间源（可注入 fake clock 单测超时/grace 路径；默认 monotonic，抗系统时钟回拨）
 }
 ```
-（上为语言中立伪代码；实际实现为 dataclass `ScheduleOpts`，字段 snake_case：`max_concurrency`/`fail_fast`/`job_timeout_s`/`grace_period_s`/`min_grace_s`（默认 0.0，grace 下限，引擎无关纯数、组合根按引擎算好传入，schedule enforce `grace ≥ min_grace_s`，见 [0024](./0024-worker-core-protocol.md) grace 硬约束）/`clock`/`network_retry`（默认 0）/`retry_sleep`/`heartbeat_interval_s`（默认 0.5，静默 worker 超时兜底轮询间隔，见下「静默 worker 的超时如何触发」）（[0028](./0028-transient-network-ssl-resilience.md)）。）
+（上为语言中立伪代码；实际实现为 dataclass `ScheduleOpts`，字段 snake_case：`max_concurrency`/`fail_fast`/`grace_period_s`/`min_grace_s`（默认 0.0，grace 下限，引擎无关纯数、组合根按引擎算好传入，schedule enforce `grace ≥ min_grace_s`，见 [0024](./0024-worker-core-protocol.md) grace 硬约束）/`clock`/`network_retry`（默认 0）/`retry_sleep`/`heartbeat_interval_s`（默认 0.5，静默 worker 超时兜底轮询间隔，见下「静默 worker 的超时如何触发」）（[0028](./0028-transient-network-ssl-resilience.md)）。）
+
+**per-job 墙钟预算不在 `opts`**——载体是 definition 的 `Job.timeout_s`（`@timeout:N` tag / CLI `--default-job-timeout` 在组合根解析定值，见 [0019](./0019-feature-tags-scope-and-engine.md)/[0034](./0034-detached-batch-reconciler.md)），schedule 起 job 时据它算 deadline；`opts` 只留并发/隔离/grace/重试/心跳这些策略旋钮。
 
 - **注入 `engines`（`EngineResolver`：按 `job.engine` 解析 Engine）而非自己 spawn** → 可测（skill：accept dependencies, don't create them）：测试注入假 Engine（吐预设 JSON Lines，[0024](./0024-worker-core-protocol.md)）即可验调度逻辑，无需真起子进程/真连 AgentCore。**schedule 对引擎数/引擎名无知**——焊死 `{midscene, novaact}` 会让第三个引擎到来即改接口；用 resolver 则只动组合根注入。
 - **注入 `sink`**（`(event) -> void` 回调，仅供 CLI 打印进度）→ schedule 边收边转，不自己决定结果存哪（[0016](./0016-execution-architecture-core-lib-run-model.md) ports）。**实时落库不走 sink**——走 `on_event`（事件旁路，在 sink_lock 外刷 RUNNING 中间态）/ `on_job_complete`（job 完成落判定真值），由组合根的 `RunPersistence` 编排（[0030](./0030-realtime-persistence-seam.md)）。（RunReport 也不走 sink——它由 `ReportStore.write` 从归约后的 `RunResult` 派生，[0027](./0027-runreport-aggregation-index.md)。）
@@ -52,7 +53,7 @@ opts = {                 // 时间单位统一为秒；代码字段名带 _s 后
 
 ### 超时兜底
 
-- `jobTimeout`（per-job 墙钟，可配，默认 null=不超时）：防一个 job 卡死（AI 死循环 / 网络挂）永久占用并发槽位 + 烧钱。超时 → 优雅终止该 worker（走下文终止契约：停止请求→宽限→强杀）、记 `status:error` + `errorType:timeout`（[0024](./0024-worker-core-protocol.md) status 三态 + 规范化 errorType）。
+- `Job.timeout_s`（per-job 墙钟预算，由 `@timeout:N` tag / `--default-job-timeout` 声明，见 [0019](./0019-feature-tags-scope-and-engine.md)/[0034](./0034-detached-batch-reconciler.md)；null=不超时）：防一个 job 卡死（AI 死循环 / 网络挂）永久占用并发槽位 + 烧钱。超时 → 优雅终止该 worker（走下文终止契约：停止请求→宽限→强杀）、记 `status:error` + `errorType:timeout`（[0024](./0024-worker-core-protocol.md) status 三态 + 规范化 errorType）。
 - 引擎 SDK 各自也有超时（Midscene/Nova Act 都有），但那只覆盖「引擎调用内」卡住；**进程层面卡死（非引擎调用内）只有 schedule 能兜**，故 schedule 这层超时是必要的外层保险。
 - **静默 worker 的超时如何触发**：超时检查在「每收一个事件后」做。worker 完全静默（卡在单次操作内、事件通道零输出）时，事件循环会阻塞在读上、检查永不触发（曾致 300s 超时拖到 ~620s）。故 schedule 用 `_heartbeat_wrap`（后台 reader 线程把 adapter 的纯 `Iterator[Event]` 喂进队列，主侧 `queue.get(timeout=heartbeat_interval_s)` 超时即注入存活心跳）让循环周期性醒来查超时——**心跳在 schedule 层做一次、对所有 adapter 通用，Engine port 保持纯 `Iterator[Event]`**（机制细节见 [0028](./0028-transient-network-ssl-resilience.md)）。
 
@@ -75,14 +76,14 @@ opts = {                 // 时间单位统一为秒；代码字段名带 _s 后
 - 边收 worker 的流式事件（[0024](./0024-worker-core-protocol.md) JSON Lines，七类：`scope_started`/`scenario_started`/`step_started`/`step_done`/`step_skipped`/`scenario_done`/`scope_done`；`step_skipped` = scope 内短路，见下 status 归约与 [0031](./0031-job-lifecycle-states-and-severity.md) 决定六）边转给 `sink`；归约成 `RunResult`。
 - 多 worker 并行 → 多路事件流交错，schedule 按 `scopeId`/`scenarioId` 归位（[0024](./0024-worker-core-protocol.md) 标识键）。
 - **status 归约**：scenario → job（任一 error→error / 任一 failed→failed / 全 passed→passed）→ run（同规则跨 job，但**入口先滤掉非终态判定** skipped/aborted/pending/running，即 `_NON_VERDICT`，run 级只看真正出了判定的 job，见 [0031](./0031-job-lifecycle-states-and-severity.md) 决定三）。job 级除 worker 三态外，core 在 fail-fast 时还会派生 `skipped`（排队没起）/`aborted`（跑一半被掐）终态（[0031](./0031-job-lifecycle-states-and-severity.md)）。
-- **job 级乐观归约的内容完整前置（[0024](./0024-worker-core-protocol.md)「事件流内容完整与进程终止是两件事、都要」在同步路径的落点；首轮 code-health 对抗验证逼出）**：事件流正常 EOF 后，job 落「scenario 归约终态」**须以见到 `scope_done` 为前提**——worker 被协作停（fail-fast/超时的 `handle.stop`）后按契约**不吐 in-flight 的 scenario_done/scope_done、干净退出**（exit 0），事件流自然 EOF；若不校验内容完整就直落归约，部分完成的 job 会拿「已完成的那几个 scenario」聚合出 PASSED（假绿——判定失真+ABORTED 现场丢失，探针复现：`--timeout 0` 时任意关停时序 100% 假绿、心跳只在特定时序偶然救回）。**未见 scope_done 时按来源分流**（对齐 `core.project._job_status` 的「干净退出无 scope_done → ERROR」口径、消同步/无状态两路判定分叉）：`abort_flag` 已置位 → ABORTED（fail-fast 掐停，[0031](./0031-job-lifecycle-states-and-severity.md) 决定一）；已超 deadline → error+timeout；其余 → error+engine_error（进程说成功、内容没发完=矛盾）。
+- **job 级乐观归约的内容完整前置（[0024](./0024-worker-core-protocol.md)「事件流内容完整与进程终止是两件事、都要」在同步路径的落点；首轮 code-health 对抗验证逼出）**：事件流正常 EOF 后，job 落「scenario 归约终态」**须以见到 `scope_done` 为前提**——worker 被协作停（fail-fast/超时的 `handle.stop`）后按契约**不吐 in-flight 的 scenario_done/scope_done、干净退出**（exit 0），事件流自然 EOF；若不校验内容完整就直落归约，部分完成的 job 会拿「已完成的那几个 scenario」聚合出 PASSED（假绿——判定失真+ABORTED 现场丢失，探针复现：`--default-job-timeout 0` 时任意关停时序 100% 假绿、心跳只在特定时序偶然救回）。**未见 scope_done 时按来源分流**（对齐 `core.project._job_status` 的「干净退出无 scope_done → ERROR」口径、消同步/无状态两路判定分叉）：`abort_flag` 已置位 → ABORTED（fail-fast 掐停，[0031](./0031-job-lifecycle-states-and-severity.md) 决定一）；已超 deadline → error+timeout；其余 → error+engine_error（进程说成功、内容没发完=矛盾）。
 - **`step_skipped` 归约（scope 内短路，不臆断因果的守法方式，[0031](./0031-job-lifecycle-states-and-severity.md) 决定六）**：worker 上游 step `error` 后短路后续 step、为每个发 `step_skipped`；core 归约成 `StepResult(status=skipped, shortcircuited=True)` 记进 step 明细，**但绝不把它写进 scenario 判定累加器**——scenario/job/run 判定只由那个上游 `error` step 决定，与"后面短路了几步"无关（step 级 skipped 零污染 scenario 归约/severity）。因果（"谁因谁短路"）只存在于 worker 的串行循环，core 作为纯 reducer 物理上看不到、也不臆断——它只忠实归约 worker 发来的 `step_skipped`，把"某步没跑"如实记进 `StepResult`。
 - **成本归约**：core 只各自合计 engine 报的**原生量**——累加 `step_done.cost` 的 `tokens`/`time_worked_s` 成 `JobResult.total_tokens`/`total_time_worked_s`（scope 级），再跨 job 求和成 `RunResult.total_tokens`/`total_time_worked_s`（run 级）。**core 不折美元**（交消费者），无任何引擎报某量则该量 None、不假装 0（cost 信封见 [0024](./0024-worker-core-protocol.md)）。
 - **墙钟时长归约**（性能指标，与成本正交）：core 用注入的 `clock` 在事件到达时打时间戳，按各级 `*_started`→`*_done` 算 `duration_ms`——step（`StepResult.duration_ms`）、scenario、scope（`JobResult.duration_ms`）、run（`RunResult.duration_ms`，schedule 整体包住、含并发）。core 首次保留 step 级粒度（`StepResult` 层）。
 
 ## 治理旋钮 = 注入参数 + 保守默认（贯穿原则）
 
-`maxConcurrency` / `failFast` / `jobTimeout` / `gracePeriod` / `clock` 全部是 `opts`/参数注入、带保守默认，**不写死在实现里**——同 [0016](./0016-execution-architecture-core-lib-run-model.md) 组合根注入精神：策略由调用方（CLI/未来 WebUI）定，核心只认参数。
+`maxConcurrency` / `failFast` / `gracePeriod` / `clock` 全部是 `opts`/参数注入、带保守默认，**不写死在实现里**——同 [0016](./0016-execution-architecture-core-lib-run-model.md) 组合根注入精神：策略由调用方（CLI/未来 WebUI）定，核心只认参数。（job 墙钟预算同守此精神、只是载体不同：由组合根按 tag/CLI 缺省解析定值后随 definition 进来，见上「超时兜底」。）
 
 ## 现在做 / 留口子
 
