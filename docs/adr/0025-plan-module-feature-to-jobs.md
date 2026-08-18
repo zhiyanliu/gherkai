@@ -69,7 +69,7 @@ Job = {
 - 整 scope 未标 `@timeout` → 用 `config.defaultJobTimeout`（未给 = 不超时）；
 - scope 内任一 scenario 标了 → 全 scope 继承；
 - 同 scope 多个不同 `@timeout` 值 → 报错拒运行（一个 job = 一个预算，同 engine 冲突先例）；
-- 值非数字或 `<=0` → 报错（「标了 tag 却想不超时」不成立——删 tag 走缺省即可，不静默当无预算）。
+- 值非**有限正数**（非数字 / `<=0` / `nan` / `inf`）→ 报错（「标了 tag 却想不超时」不成立——删 tag 走缺省即可，不静默当无预算）。`nan`/`inf` 须**显式**拒：`float()` 收它们（`nan`/`inf`/`1e400` 都不抛）且都不满足 `<=0`，而三路推进器一律用 `>` 比较 deadline/预算——nan 让比较恒 False、inf 是无穷预算，两者都把「标了 tag」静默变成「永不超时」（校验器用 `math.isfinite` 拦）。
 
 ### step 顺序 = 书写顺序，keyword 只决定派发
 
@@ -110,7 +110,7 @@ Job = {
 - 同一 scope 多个不同 engine → 报错；
 - 一个 scenario 多个不同 `@scope` 值（feature 级传播 + scenario 级）→ 报错；feature 级 `@scope` 传播（无冲突时）→ 正常归一个 scope；
 - scope 缺省 engine → 用 defaultEngine；
-- 同一 scope 多个不同 `@timeout` → 报错；`@timeout` 非数字 / `<=0` → 报错；
+- 同一 scope 多个不同 `@timeout` → 报错；`@timeout` 非数字 / `<=0` / `nan` / `inf`（含 `1e400` 溢出成 inf）→ 报错；
 - timeout 缺省兜底 + tag 优先（同一批里标了 `@timeout` 的 scope 走 tag、未标的走 `defaultJobTimeout`）；无 tag 又无缺省 → 不超时；
 - 未标 scope 的 scenario → 各自独立成 job（含未标 scope 的 Outline → N 个 job 不撞 id）；
 - id 派生稳定可追溯。

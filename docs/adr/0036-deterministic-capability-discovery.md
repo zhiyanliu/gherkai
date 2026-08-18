@@ -33,7 +33,7 @@ worker argv 带 `--list-deterministic` 时：**不建会话、不读 stdin、不
 - `--json` 输出机器可读（stdout 只放核心产出，对齐既有输出契约）；文本模式渲染 description/example/pattern。
 - 纯本地 spawn（秒级）、零 AWS；worker 起不来/输出非 JSON → 退 2 带诊断。
 
-## plan 命中标注：「我写的这句会不会命中」
+### 4. plan 命中标注：「我写的这句会不会命中」
 
 清单查询解决「有什么可用」；feature 作者还需要「**我写的这句会不会命中**」——`plan` 预检对每个 step 标注路由预期。**不做 CLI 侧复刻匹配**（TS/Python 正则方言不同：`(?<n>)` vs `(?P<n>)`；复刻匹配语义 = 对 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)「设计要点」节「匹配放 worker，不放核心」条的漂移面），机制 = **worker 批量 match 查询**：
 

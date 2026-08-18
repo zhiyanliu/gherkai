@@ -12,10 +12,10 @@ WebUI 将来是另一张皮，**直接调 core、复用产品本体 `gherkai`（
 ```
 cli/
 ├── __main__.py   ← argparse 皮：run/submit/status/plan/list-engines/list-deterministic 解析 → 调 gherkai.compose/core → 注入 RunPersistence 实时落库 → 调 render；定义退出码
-└── render.py     ← 表层渲染：0024 事件 → 进度行；RunResult → 文本汇总 / JSON
+└── render.py     ← 表层渲染：0024 事件 → 进度行；RunResult → 文本汇总 / JSON；RunState → status 视图
 ```
 
-组合根逻辑（compose/detached/names）住在平级的产品本体包 `gherkai/`（曾在本包内、被 Lambda/iac 的真实代价逼出抽包，ADR 0016「演进」节）：那是任何前端都要的接线，
+组合根逻辑（compose/detached/names/tunnel/tunnel_host）住在平级的产品本体包 `gherkai/`（曾在本包内、被 Lambda/iac 的真实代价逼出抽包，ADR 0016「演进」节）：那是任何前端都要的接线，
 后者只是 argparse + 标准 IO。
 
 **实时落库**：`run` 不是「跑完才一次性落盘」——`__main__` 注入 core 的 `RunPersistence`
@@ -95,8 +95,8 @@ uv run python -m cli status "$RUN_ID" --backend cloud --prefix gherkai- --wait
 
 **为何拆**：`run` 要求 CLI 全程在线（网断/关机即中止）；`submit` 提交完就走——local 由脱离 CLI 的 per-run 进程推进、
 cloud 由云端 Lambda 事件驱动链推进（submit 机器无 ECS 写/执行权限——仅 preflight 的只读探活，可立即关机）。`status` 事后查/收集：`--wait` 是三个推进触发源
-之一（人来查即接力），保证「推进即使中断、也能被查询者续到底」（ADR 0034）。`status` 的 `--backend`/`--report-dir`/`--prefix`
-须与提交时的 `submit` 一致（否则查不到）。
+之一（人来查即接力），保证「推进即使中断、也能被查询者续到底」（ADR 0034）。`status` 须与 `submit` 用同一组定位参数——
+见下『选项（`status`）』表引言。
 
 ## 退出码
 
@@ -171,7 +171,8 @@ cloud 由云端 Lambda 事件驱动链推进（submit 机器无 ECS 写/执行�
 | `--max-concurrency` | `1` | 同时在跑的 worker 上限（local：喂给后台 per-run 推进进程） |
 | `--default-job-timeout` | `300` | job 墙钟超时秒缺省（`<=0` 不超时）；标了 `@timeout:N` 的 scope 按 tag 走——语义同 `run` 表，「提交完就走」时的挂死/烧钱止损 |
 | `--expose-local` / `--tunnel` | — / `ngrok` | 语义同 `run` 表；submit 后隧道由后台进程持有——local=per-run 进程、cloud=隧道守护进程（轮询终态即拆+TTL 兜底）。**本机需保持开机联网直到 run 终态**（关机=隧道断=测试以导航失败告终，ADR 0035） |
-| `--report-dir` | `reports` | [local] 归集报告落点；`status` 查时须给同一路径 |
+| `--tunnel-ttl` | 按 definition 算 | [cloud + `--expose-local`] 隧道守护进程的兜底 TTL 秒（须 > 0，否则退 2）。默认 = 各 job 预算之和 + 启动余量（submit 会打印生效值）；**调小有风险**——TTL 到点无条件拆隧道，短于实际 run 时长会让剩余 job 在应用不可达下跑成导航失败（ADR 0035 决策 3） |
+| `--report-dir` | `reports` | 归集报告落点；`status` 查时须给同一路径。[cloud] 产物前缀由推进器 Lambda 的 `REPORT_DIR` 决定（IaC 侧配，缺省 `reports`）——给了不一致的值，preflight 直接退 `2` 并点名两侧值（否则跑完了却在你给的前缀下找不到结果） |
 | `--backend {local,cloud}` | `local` | local=本机 per-run 进程推进；cloud=Fargate + 云端 Lambda 事件驱动链推进（提交完真关机也跑完） |
 | `--prefix` | `gherkai-` | [cloud] 资源名前缀（须与 CDK 部署一致）；`status` 查时须给同一 prefix。兜底 `AWS_RESOURCE_PREFIX` |
 | `--ddb-table` / `--s3-bucket` / `--events-table` / `--cluster` | `{prefix}…` | [cloud] 覆盖各 prefix 默认名（语义同 `run` 表） |

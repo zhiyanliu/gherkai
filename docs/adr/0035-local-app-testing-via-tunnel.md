@@ -1,6 +1,6 @@
 # 0035. 本地应用测试：自动隧道把开发机上的被测应用暴露给云端浏览器
 
-> **Status:** Accepted —— 设计与实现均已落地：`--expose-local` 在 run/plan/submit 三命令 + `gherkai/gherkai/tunnel.py` 的 ngrok provider，四种「跑法 × backend」组合全支持（URL 映射、三形态隧道宿主 + 兜底拆除、额外请求头注入）。
+> **Status:** Accepted —— 设计与实现均已落地：`--expose-local` 在 run/plan/submit 三命令 + `gherkai/gherkai/tunnel.py`（ngrok provider + URL 映射）与 `gherkai/gherkai/tunnel_host.py`（宿主编排：起隧道/映射 definition/守护循环与其 TTL），四种「跑法 × backend」组合全支持（URL 映射、三形态隧道宿主 + 兜底拆除、额外请求头注入）。
 
 ## 背景与问题
 
@@ -48,16 +48,22 @@
 |---|---|---|
 | 前台 `run`（local/cloud backend） | CLI 进程 | CLI 进程 `atexit` 拆——**有意选 atexit 而非 finally**：正常结束与 Ctrl-C 都收；SIGTERM 直杀的极端泄漏不兜（ngrok agent 是可见的独立进程，人能自行 kill） |
 | local `submit` | per-run 推进进程 | `run_reconcile_loop` 终态后拆；per-run 进程崩溃时由 `status --wait` 接力者据 `tunnel.json` 兜底拆 |
-| cloud `submit` | **隧道守护进程**（setsid fork 脱离 CLI） | 轮询 run 终态即拆 + TTL 兜底自杀（防泄漏） |
+| cloud `submit` | **隧道守护进程**（setsid fork 脱离 CLI） | 轮询 run 终态即拆 + TTL 兜底自杀（防泄漏），TTL 按 definition 算——见下 |
 
 - 表外还有一处就地拆：**提交分流失败**（preflight/落库不过）时隧道尚无后台宿主可交棒，由 CLI 当场拆。
-- cloud submit 的语义澄清：「提交完就走」=不阻塞 CLI，**不等于关机**——机器继续开着时本地应用与隧道均可用，云端 Lambda 链驱动的浏览器经隧道访问本机应用完全成立。但**关机=隧道断=测试以导航失败告终**：submit 时打印明示（「隧道已起（守护 pid N）：本机需保持开机联网直到 run 终态」），把例外变成明示边界而非静默失败。
+- **隧道 agent 进程自身也 setsid**（spawn 时 `start_new_session=True`）：agent 的存活该由**宿主**决定（上表三形态 + `stop_tunnel(pid)` 这唯一拆除面），不该由终端的信号转发决定。否则 agent 与 CLI 同进程组，`submit` 时 CLI 收到终端广播的 SIGINT/SIGHUP 会**连坐杀掉正要交棒给后台宿主的 agent**——两个后台宿主本身都 setsid、唯独被交棒的 agent 不，交棒链就断在这一环。**已真跑核实（真 spawn + 真 `killpg`，非 mock——进程组归属属「绿测试覆盖不到的真实行为」）**：同组时一发 SIGINT 广播必杀 agent；agent 自成进程组后存活，而前台 `run` 档语义不变（Ctrl-C → `KeyboardInterrupt` → `atexit` 照常拆，见上表首行「有意选 atexit 而非 finally」）。
+- **TTL 按 definition 算，不是一个常数**：`TTL = Σ(各 job 的 timeout_s；无预算者按一个明确上限记账) + 启动/级联余量`（`tunnel_host.compute_watch_ttl_s`；`submit` 算好显式传给守护进程并打印出来，`--tunnel-ttl` 是显式覆盖旋钮）。
+  - **为什么不能拍常数**：TTL 到点**无条件**拆隧道。TTL 短于 run 实际预算时，剩余 job 在被测应用不可达的情况下继续跑、以「AI 报导航失败」的形态**假失败**告终——兜底机制反过来成了失败源。（曾是恒定 1h 且没有任何生产写入者：默认 job 预算 300s 下约 12 个 job 起就超。）而运行预算在 definition 里本就是可算的。
+  - **求和而非取 max**：cloud 档并发由推进器 Lambda 的 `MAX_CONCURRENCY` 定、当前恒 1（[0034](./0034-detached-batch-reconciler.md)），故串行总预算是保守上界；并发若被 IaC 调高，求和只会**高估**——TTL 偏长＝隧道多留一会儿（run 到终态照常提前拆），偏在安全的一侧。
+  - **余量兜什么**：`submit` 只写 runs 表，之后还有 Stream INSERT 投递 → kicker 冷启动 → RunTask → 拉镜像/挂 ENI 才真开跑，job 之间又有云端事件链的固有尾延迟（[0034](./0034-detached-batch-reconciler.md) 实测每步 ~20-30s），末尾还有 finalize；而 job 预算从 claim 起算、不含这些。故余量是必需项、不是保险费。
+  - 无预算的 job（`--default-job-timeout <=0` 且未标 `@timeout` ＝ 执行侧不超时）按一个明确上限**记账**——TTL 必须有限，否则泄漏兜底整体失效。
+- cloud submit 的语义澄清：「提交完就走」=不阻塞 CLI，**不等于关机**——机器继续开着时本地应用与隧道均可用，云端 Lambda 链驱动的浏览器经隧道访问本机应用完全成立。但**关机=隧道断=测试以导航失败告终**：submit 时打印明示（守护进程日志落点 + 生效的 TTL + 「本机需保持开机联网直到 run 终态」），把例外变成明示边界而非静默失败。
 
 ### 4. `ngrok-skip-browser-warning` 头恒注入（仅隧道模式）
 
 - ngrok 免费层对浏览器返回 interstitial 警告页（对自动化致命）；带任意值的 `ngrok-skip-browser-warning` 头即绕过。付费户带着无害（服务端忽略）→ 不做付费检测、隧道模式下恒注入。
-- 注入通道（通用形状「额外请求头」，全链路单一事实源在此）：组合根把 header 表填进 **`RunMeta.extra_http_headers`**（definition 层字段，tuple pairs、omit-when-None 随 META 落盘 DDB/文件）→ 推进器（per-run 进程 / reconciler Lambda）据它重建 engine → engine adapter 注 `GHERKAI_EXTRA_HTTP_HEADERS` env → worker 在 browser context 上 `setExtraHTTPHeaders`——纯 CDP 命令、无回调，**不触碰 Nova 的 route/greenlet 雷区**。两 worker 各几行改动（URL 替换那半边才是 worker 零改动）。**载体为什么是 definition 而非只走 env**：cloud detached 下起隧道的 CLI 进程与重建 engine 的 Lambda 不同进程，env 传不过去，header 表必须随 META 持久化。
-- **隧道认证（basic-auth）：本 ADR 范围内即做、默认开启，方案 = URL 内嵌凭据**。框架每 run 生成随机凭据（纯字母数字，规避 URL-encode），经 ngrok Traffic Policy `basic-auth` 在**边缘节点拦截**（不带凭据的请求到不了本机）；URL 替换时嵌成 `https://user:pass@host` 形态——首次导航后凭据进浏览器**按域 auth cache**，同域后续请求（子资源/AI 点击/XHR）自动带，且只发隧道域。安全面从三件套升为四件套：随机 URL + 随机凭据 + 每 run 一换 + 终态即拆。
+- 注入通道（通用形状「额外请求头」，全链路单一事实源在此）：组合根把 header 表填进 **`RunMeta.extra_http_headers`**（definition 层字段，tuple pairs；落盘为 dict、键序在写端排序规范化，空表与 `None` 同义均省键，随 META 落盘 DDB/文件）→ 推进器（per-run 进程 / reconciler Lambda）据它重建 engine → engine adapter 注 `GHERKAI_EXTRA_HTTP_HEADERS` env → worker 在 browser context 上 `setExtraHTTPHeaders`——纯 CDP 命令、无回调，**不触碰 Nova 的 route/greenlet 雷区**。两 worker 各几行改动（URL 替换那半边才是 worker 零改动）。**载体为什么是 definition 而非只走 env**：cloud detached 下起隧道的 CLI 进程与重建 engine 的 Lambda 不同进程，env 传不过去，header 表必须随 META 持久化。
+- **隧道认证（basic-auth）：本 ADR 范围内即做、默认开启，方案 = URL 内嵌凭据**。框架每 run 生成随机凭据（纯字母数字，规避 URL-encode），经 ngrok Traffic Policy `basic-auth` 在**边缘节点拦截**（不带凭据的请求到不了本机）；URL 替换时嵌成 `https://user:pass@host` 形态——首次导航后凭据进浏览器**按域 auth cache**，同域后续请求（子资源/AI 点击/XHR）自动带，且只发隧道域。安全面四件套：随机 URL + 随机凭据 + 每 run 一换 + 终态即拆。
   已知软性代价（接受）：凭据出现在 job 文本/AI prompt/引擎原生产物（报告里的导航 URL）——皆为短命物，隧道拆除即失效，留存的是死凭据；浏览器的 Referer/地址栏显示会剥离 userinfo，不经这两面外泄。已知小概率分支：AI 重写 URL 时剥掉 `user:pass@` → auth cache 兜底；若首次导航即剥则 401、失败形态清晰（AI 报断言失败）。
   被拒候选（防重复调研）：② extra headers 注 `Authorization`——**全域广播**给页面加载的所有第三方域，泄面严格大于①；③ CDP Fetch 域 authChallenge——需开 Fetch 拦截、`authRequired` 事件同样要 handler 响应，撞 Nova 的 greenlet/node-driver 泵动问题（见上「调研结论①」）。
 

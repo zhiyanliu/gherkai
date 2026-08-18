@@ -21,6 +21,10 @@ Midscene.js (TypeScript) 侧的执行引擎。用 **Qwen3-VL 235B on Bedrock** �
 
 ```bash
 echo '<job json>' | AWS_REGION=us-east-1 node --import tsx worker/run-scope.ts
+
+# 另有两个「自述」入口（不建会话、不跑 job、零 AWS，ADR 0036）——cli 的 list-deterministic / plan 标注即转述它们：
+node --import tsx worker/run-scope.ts --list-deterministic                    # dump 确定性注册表（pattern + description + example）
+echo '["页面地址匹配 \"/wiki/OpenAI\""]' | node --import tsx worker/run-scope.ts --match-steps   # 批量问这些 step 各命中什么
 ```
 
 ## 跑 spike（五段式自检，可独立跑）

@@ -80,7 +80,7 @@ flowchart TD
 ├── core/                      ← 窄腰核心库（Python，零引擎依赖，ADR 0016）
 │   └── core/{parse,scope,schedule,project,reconcile,persist,model,wire,serialize,ports,errors}.py（project=纯归约投影 / reconcile=无状态推进编排，ADR 0034）+ adapters/{subprocess,fargate}_engine.py + cloud_launcher.py + event_log/{sqlite,ddb}.py（无状态跑批持久事件通道，ADR 0034）+ adapters/{run,result,report}_store/{local,ddb|s3}.py
 ├── gherkai/                   ← 产品本体 = 组合根共享层（ADR 0016「演进」节；cli/Lambda/WebUI 的共同地基）
-│   └── gherkai/{compose.py(引擎注册表/装配) · detached.py(local 无状态跑批宿主) · names.py(资源命名真源) · tunnel.py(--expose-local 隧道 provider，ADR 0035)}
+│   └── gherkai/{compose.py(引擎注册表/装配·云目标解析) · detached.py(local 无状态跑批宿主) · names.py(资源命名真源) · tunnel.py(--expose-local 隧道 provider，ADR 0035) · tunnel_host.py(隧道宿主编排+守护 TTL，ADR 0035)}
 ├── cli/                       ← 命令行皮（ADR 0016）
 │   └── cli/{__main__.py(argparse) · render.py}
 ├── engines/                   ← 两个可插拔引擎，与 core 平级

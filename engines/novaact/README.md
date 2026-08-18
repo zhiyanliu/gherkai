@@ -24,6 +24,10 @@ Nova Act (Python) 侧的执行引擎。用 Amazon 自家模型 `nova-act-latest`
 
 ```bash
 echo '<job json>' | AWS_REGION=us-east-1 .venv/bin/python worker/run_scope.py
+
+# 另有两个「自述」入口（不建会话、不跑 job、零 AWS，ADR 0036）——cli 的 list-deterministic / plan 标注即转述它们：
+.venv/bin/python worker/run_scope.py --list-deterministic                    # dump 确定性注册表（pattern + description + example）
+echo '["页面地址匹配 \"/wiki/OpenAI\""]' | .venv/bin/python worker/run_scope.py --match-steps   # 批量问这些 step 各命中什么
 ```
 
 ## 跑 spike（可独立跑）

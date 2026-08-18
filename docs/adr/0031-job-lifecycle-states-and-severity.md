@@ -67,6 +67,13 @@ class Status(str, Enum):
 - **状态机推进 ≠ severity 升级**：job 生命周期是 `pending → running → 终态(passed/failed/error/…)` 的**单向推进**（终态一旦落定不回退）；
   这条「单调」是**生命周期推进**意义上的，与决定二 run 级的「severity max 单调只升」是**两套不同的序**，不可混用。
 - `_STATUS_COLOR` / index.html 给 pending/running 各配一个「进行中」视觉（灰/蓝），别走兜底色。
+- **「终态」有正向真源、定义取补：`core.model.TERMINAL_STATUSES = frozenset(Status) - {PENDING, RUNNING}`**。
+  凡「等到终态 / 是否已终态」的消费方（`status --wait` 轮询、隧道守护的拆除判据、`status` 退出码判定）一律引它，
+  **不各自正列白名单**——正向白名单散写多份时，新增终态漏改哪份、那份就永远判不到终态（`--wait` 无限轮询、
+  隧道守护只能等满 TTL 才拆，均曾真实存在两份逐字副本）。取补而非正列即为此：新增终态自动入集，只有新增**前置态**
+  才需动（届时 `_NON_VERDICT` 同批要改）。**与 `_NON_VERDICT` 是两把不同的刀**：本集按生命周期切（含 skipped/aborted），
+  `_NON_VERDICT` 按 run 级判定切（skipped/aborted 是终态但不算判定结论），两集在这两态上有意重叠；
+  `TERMINAL_STATUSES` 恒等于 `_STATUS_SEVERITY` 的键集（决定二：severity 只给终态定义）。
 
 ## 决定二：severity 数值序，两层分清
 
@@ -82,6 +89,8 @@ job 级（排序 / 着色 / 单调升级用）：
 run 级（聚合用）：
    只比 {passed=0, failed=1, error=2} 三态取 max
 ```
+
+**视觉映射（severity 序在报告着色上的落法）**：每个终态各配一个可区分的颜色、**别走兜底灰**——`aborted` 要**比 error 更扎眼**（severity 最高、有现场最该被人看），且**别和兜底灰混**；`skipped` 用**弱化灰**（最轻、最该被无视），但须与兜底灰可分。否则新态全走兜底灰、aborted 看不出严重。（前置态 pending/running 另配「进行中」视觉，见决定一·补；落点符号见下「touch points」的 `_STATUS_COLOR`。）
 
 **为何 run 级不含 skipped/aborted**（验证过的关键洞察）：skipped/aborted **只在 fail-fast 路径产生**，
 而 fail-fast 的唯一触发条件是「某 job 已经 `error`」——那个 error job 在 run 级聚合里已把 run 顶成 `error`。
@@ -119,8 +128,8 @@ def _aggregate(statuses):
 ## 决定四：[0024](./0024-worker-core-protocol.md) 线协议不改，只补一句澄清
 
 worker↔core 的 JSON 线协议**保持三态**（worker 永远只报 passed/failed/error；skipped/aborted 时 worker 根本没起或已被掐、
-不可能也不需要上报）。skipped/aborted 与线协议**正交**。仅需在 [0024](./0024-worker-core-protocol.md) 的「status 三态」处
-补一句指针：「skipped/aborted 是 core fail-fast 派生态、非 worker 上报态、不进 wire（见 [0031](./0031-job-lifecycle-states-and-severity.md)）」。
+不可能也不需要上报）。skipped/aborted 与线协议**正交**。[0024](./0024-worker-core-protocol.md) 的「`status` 三态」条已带这句澄清：
+skipped/aborted（连同前置态 pending/running）是 core 内态、非 worker 上报态、不进 wire。
 
 ## 决定五：退出码改基于 run 级 severity
 
@@ -166,28 +175,18 @@ cli 退出码从「`status.value == 'passed'` 才 0」改为**基于 run 级 sev
 这也回避了 [0028](./0028-transient-network-ssl-resilience.md) 记的「两个引擎 SSL 分类不对称」欠账对短路的影响（那只影响 errorType 文案、不影响 error 这个 status）。
 短路是 **scope 内**行为（上游 error 只短路**同 scenario/同 scope**的后续 step，不跨 job——跨 job 是 fail-fast 的职责，两者正交）。
 
-## touch points（实装清单）
+## touch points（落点指针）
 
-- `core/model.py`：`Status` 加 SKIPPED/ABORTED（判定派生态）+ PENDING/RUNNING（生命周期前置态），注释标明 core 内态、非 wire；新增 `_STATUS_SEVERITY` 表（仅终态）+ `_NON_VERDICT` 过滤名单 + 比较辅助。
-- `core/schedule.py`：
-  - 起 worker 前 `abort_flag` 已 set 分支 → SKIPPED（worker 从未 spawn）；
-  - 事件循环中因 `abort_flag` 被 stop 分支 + 其 WorkerNetworkError 竞态回填 → ABORTED；
-  - **超时（deadline）分支维持 `error`+`errorType=timeout`，不归 aborted**——回填判断看 `abort_flag` 而非笼统 `self_stopped`（`self_stopped` 被 timeout 与 fail-fast 共用）；
-  - `_aggregate` 入口过滤 `_NON_VERDICT`。
-- `core/serialize.py`：JobResult/RunResult 链路 round-trip 自动支持新值（`Status(str,Enum)` 接受新字符串），补单测覆盖 skipped/aborted。（**注**：`RunState` 链路的 `run_state_to/from_dict` 因 Map 形状还要改，见 [0030](./0030-realtime-persistence-seam.md) touch points，非本 enum 改动。）
-- `core/adapters/report_store/local.py`：`_STATUS_COLOR` 现含 passed(绿`#1a7f37`)/failed(红`#cf222e`)/error(琥珀`#9a6700`)、其余走兜底灰`#57606a`。新增：skipped（弱化灰）、aborted（比 error 更扎眼，如紫/深红，别和兜底灰混）、pending/running（「进行中」灰/蓝）。否则新态全走兜底灰、aborted 看不出严重。
-- `cli/cli/__main__.py`：退出码改基于 severity，读 `RunResult.status`（见决定五数据源）。
-- `docs/adr/0024`：「status 三态」处补澄清指针（决定四）。
-- `docs/adr/0026`：「status 归约 scenario→job→run」段补指针——job 级判定态扩为含 skipped/aborted、run 级 `_aggregate` 入口过滤 `_NON_VERDICT` 再取三态 max（见本 ADR 决定二/三）。
-- `docs/adr/0016`：协议/RunResult 字段处「status 三态」措辞补「job 级另有 core 派生态 skipped/aborted + 前置态 pending/running，见 0031」指针。
-- **决定六（step 级短路）实装**：
-  - `core/model.py`：加 `StepSkipped` 事件（frozen dataclass：`scenario_id`/`step_index`，无 status/votes/cost）并入 `Event` Union；`StepResult` 加 `shortcircuited: bool = False`（正交布尔）。
-  - `core/wire.py`：`event_from_json` 加 `step_skipped` 分支（加法，不碰 step_done 三态解析）。
-  - `core/schedule.py`：`_reduce` 加 `StepSkipped` 分支 → 暂存 `StepResult(status=SKIPPED, shortcircuited=True)`（被短路 step 无 `step_started`，`duration_ms` 恒 None——没跑=无墙钟）；**绝不写 `scenario_status`**。
-  - `core/serialize.py`：StepResult to/from_dict 加 `shortcircuited`（`.get` 默认 False，向后兼容旧落盘）。
-  - `cli/cli/render.py` + `core/adapters/report_store/local.py`：连锁失败旁注判据从「error 后 failed」迁到读 `shortcircuited`；被短路 step 显 skipped 态 + 旁注。
-  - `engines/novaact/worker/run_scope.py` + `engines/midscene/worker/run-scope.ts`：scope 内上游 `status==error` 后短路后续 step、发 `step_skipped`（不调 AI）。
-  - `docs/adr/0024`（wire 加 step_skipped 事件）/ `docs/adr/0028`（defer 转实现，判据/承载）。
+- `core/model.py`：`Status` 的 SKIPPED/ABORTED（判定派生态）+ PENDING/RUNNING（前置态；注释标明 core 内态、非 wire）；`_STATUS_SEVERITY`（仅终态）+ `severity()` 比较辅助；`_NON_VERDICT` 过滤名单；`TERMINAL_STATUSES`（终态真源，取补于 `_PRE_TERMINAL`，决定一·补末条）；`StepSkipped` 事件（frozen dataclass `scenario_id`/`step_index`，无 status/votes/cost）入 `Event` Union + `StepResult.shortcircuited`（正交布尔，决定六）。
+- `core/schedule.py`：job 级 SKIPPED/ABORTED 的赋态点——起 worker 前 `abort_flag` 已 set → SKIPPED（worker 从未 spawn）；事件循环中因 `abort_flag` 被 stop + 其 WorkerNetworkError 竞态回填 → ABORTED；**超时（deadline）分支维持 `error`+`errorType=timeout`、不归 aborted**（回填判断看 `abort_flag` 而非笼统 `self_stopped`——后者被 timeout 与 fail-fast 共用）。
+- `core/project.py`：`_aggregate`（入口过滤 `_NON_VERDICT`；两路共用的真源，`schedule._aggregate` 为其别名，决定三）；`reduce_event` 的 `StepSkipped` 分支 → 暂存 `StepResult(status=SKIPPED, shortcircuited=True)`，**绝不写 `scenario_status`**（被短路 step 无 `step_started`，`duration_ms` 恒 None——没跑=无墙钟）。
+- `core/wire.py`：`event_from_json` 的 `step_skipped` 分支（加法，不碰 step_done 三态解析）。
+- `core/serialize.py`：JobResult/RunResult 链路靠 `Status(str,Enum)` 天然 round-trip 新值（单测覆盖 skipped/aborted）；StepResult to/from_dict 的 `shortcircuited`（`.get` 默认 False，向后兼容旧落盘）。（**注**：`RunState` 链路的 `run_state_to/from_dict` 归 [0030](./0030-realtime-persistence-seam.md) touch points，非本 enum 的落点。）
+- `core/adapters/report_store/local.py`：`_STATUS_COLOR`（每态各一色 + 兜底灰 `#57606a`；着色意图见决定二「视觉映射」）；index.html 的连锁失败旁注读 `shortcircuited`。
+- `cli/cli/render.py`：文本汇总的连锁失败旁注同读 `shortcircuited`（被短路 step 显 skipped 态 + 旁注）。
+- `cli/cli/__main__.py`：同步 `run` 的退出码读内存 `RunResult.status`（决定五数据源）；`status`/`--wait` 的终态判定引 `TERMINAL_STATUSES`。
+- `engines/novaact/worker/run_scope.py` + `engines/midscene/worker/run-scope.ts`：scope 内上游 `status==error` 后短路后续 step、发 `step_skipped`（不调 AI）。
+- 交叉指针落在：[0024](./0024-worker-core-protocol.md)（「`status` 三态」条的 core 内态澄清 + wire 的 `step_skipped` 事件段）/ [0026](./0026-schedule-module.md)（「status 归约」段的 `_NON_VERDICT` 入口过滤与 job 级派生态）/ [0016](./0016-execution-architecture-core-lib-run-model.md)（数据模型表 Step 行的 skipped+`shortcircuited`）/ [0028](./0028-transient-network-ssl-resilience.md)（scope 内短路条：defer 转实现，判据/承载）。
 
 ## 重议 / 留口子
 

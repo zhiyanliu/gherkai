@@ -24,4 +24,6 @@ aws nova-act create-workflow-definition --region us-east-1 --name "<name>"
 **但已做成代码端到端闭环（2026-06，实证）**：boto3 有等价的 `create_workflow_definition`/`get_workflow_definition`，故用 create-if-not-exists 的 `ensure_workflow_definition()`（见 `engines/novaact/lib/workflow_setup.py`）——首次自动建、之后探测到即跳过，幂等。worker（`run_scope.py`）与 spike 都已接入，**无需手动 CLI 前置**。已实证：删掉 definition 后代码能从零自动建回。
 本项目用的 definition 名：`spike-wikipedia-benchmark`。生产化时也可改由 IaC / 部署脚本统一管理。
 
+**幂等必须覆盖并发档**：worker 是**每 scope 一个进程**（本地并发 spawn / 云端多 task 同时起），definition 尚不存在的首跑会让多个进程同时 `get`→404→`create`，赢家外的进程吃 `CreateWorkflowDefinition` 的 `ConflictException`（409，nova-act 服务模型里是该 API 的声明错误之一；`get` 侧没有此错误）。**决定**：把 `ConflictException` 按「已存在」吞掉、归 `exists`——并发赢家已建即目标达成，对外语义仍是 create-if-not-exists。否则裸异常落在**会话尚未起、退出码通道未走**的时点：worker traceback exit 1 → core 归 `engine_error`（既不重试也归错类），且 [0028](./0028-transient-network-ssl-resilience.md) 把本 helper 列为「建连段可安全重放」的幂等依据只在串行下成立。
+
 **退路**：若某账号/region IAM 路径不可用，退回 `NOVA_ACT_API_KEY`（从 nova.amazon.com/act 生成）。

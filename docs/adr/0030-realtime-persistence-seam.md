@@ -150,6 +150,8 @@ class RunStore(Protocol):
     def load_run_meta(...); def load_run_state(...)                                 # 不变
 ```
 
+**接口真值以 `core/core/ports.py` 为准**——上块是本决策期的**增量视图**，不是 `RunStore` 的完整现状：此后还追加了 `preflight`（探活，见下决定七）与条件写三方 `try_claim_job`/`project_state`/`try_finalize`（[0034](./0034-detached-batch-reconciler.md)）。
+
 - **新增三方法是 additive**：`save_run` 不删（`test_stores.py` 中 3 个 RunStore save/load 往返用例——`test_run_store_save_load` / `test_run_state_timestamps_round_trip` / `test_run_state_omits_null_timestamps`——仍用它；一次性写场景也仍用）。新方法只是把它的职责按生命周期拆成「开始/逐 job/结束」三段。
 - `update_job_state` 按 **scope_id 定位单个 job**：local adapter 是「读 run_state→改该 scope_id→写回」的 read-modify-write（**非自身线程安全**，靠 `RunPersistence` 的单一 store 锁串行，见决定三的并发不变量）；DDB adapter 用 `SET jobs.#sid=:js`（Map 按 key 路径，见下决定六）。这要求 `RunState.jobs` 用 **Map<scope_id> 形状**（见决定五）。
 
