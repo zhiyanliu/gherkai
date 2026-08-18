@@ -44,10 +44,11 @@ CDK_DEFAULT_ACCOUNT=<acct> CDK_DEFAULT_REGION=us-east-1 uv run cdk synth
 uv run pytest                              # stack 断言测试（命名/schema/TTL/container 名/prefix 切换）
 
 # 部署（碰真 AWS、按 prefix；首次需先 cdk bootstrap）
-# ⚠️ vpc context 必须每次都带、且与首次部署一致（context 不入 state！漏给 = 走「建新 VPC」档，
-#    diff 表现为新建整套 VPC + 替换 WorkerSg——对已部署环境是危险变更；真跑刷新时踩过，diff 先看）
-uv run cdk deploy -c prefix=gherkai- -c use_default_vpc=true    # 本项目现网即此档
-uv run cdk deploy -c prefix=prod- -c use_default_vpc=true       # 另一套环境（vpc 档按其首次部署）
+# ⚠️ vpc context（上「VPC 来源三档」）不入 stack state——增量 deploy/diff 必须每次重带、且与
+#    首次部署一致；漏给 = 走默认「建新 VPC」档，diff 会出现新建整套 VPC + 替换 WorkerSg。
+#    deploy 前先 cdk diff（带同一组 -c），见到 VPC 级资源变更即停下查 context。
+uv run cdk deploy -c prefix=gherkai-                            # 默认档：建新 VPC
+uv run cdk deploy -c prefix=prod- -c use_default_vpc=true       # 复用默认 VPC 档（此后每次刷新持续带同档）
 ```
 
 镜像构建（CDK 不做、只建 ECR repo，见各引擎 Dockerfile）——**用 `tools/build_push_workers.py` 固化**
