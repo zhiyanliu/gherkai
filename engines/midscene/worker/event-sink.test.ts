@@ -43,6 +43,20 @@ test("fromEnv 回落 fd 1 (stdout) when no EVENTS_FD; emit 不抛", async () => 
   await assert.doesNotReject(async () => { await sink.emit({ type: "scope_started" }); });
 });
 
+test("非法 EVENTS_FD → 回落 fd 1（ADR 0024「无 / 非法 → 回落 stdout」，对称 Nova 的 except OSError/ValueError）", async () => {
+  // 只判「有没有 EVENTS_FD」不够：非法值下第一条 emit（scope_started）直接抛 → 整个 scope 零事件的
+  // engine_error。逐个覆盖非法形态：非数字（writeSync 收 NaN → ERR_OUT_OF_RANGE）、小数、负数、空白串
+  // （Number 会给 0=stdin）、以及号合法但没开着的 fd（writeSync → EBADF）——后者用大号 9999：
+  // 刚 closeSync 的号在同进程可被 Node 内部异步 fs 复用（偶发假红），9999 不会被占、fstat 恒 EBADF。
+  for (const bad of ["abc", "3.7", "-1", " ", "9999"]) {
+    process.env.EVENTS_FD = bad;
+    const sink = EventSink.fromEnv();
+    assert.equal((sink as any).fd, 1, `EVENTS_FD=${JSON.stringify(bad)} → 回落 fd 1（stdout）`);
+    await assert.doesNotReject(async () => { await sink.emit({ type: "scope_started" }); }, `EVENTS_FD=${bad} 的 emit 不该抛`);
+  }
+  delete process.env.EVENTS_FD;
+});
+
 test("DDB 态：EVENTS_DDB_TABLE 注入 → emit = PutItem(PK=run_id#scope_id, SK=自增 seq, body)", async () => {
   // DDB 态（Fargate 化，ADR 0024）：mock DynamoDBClient send（塞 client、不连真 AWS——对称 artifact-upload.test 惯例）。
   const saved = { t: process.env.EVENTS_DDB_TABLE, r: process.env.RUN_ID, s: process.env.SCOPE_ID };

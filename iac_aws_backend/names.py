@@ -19,6 +19,7 @@ from gherkai.names import (  # noqa: F401
     ENGINES,
     container_name,
     default_name,
+    job_timeout_schedule_prefix,
     ssm_path,
     task_def_name,
 )

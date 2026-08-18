@@ -12,6 +12,9 @@ import boto3
 def ensure_workflow_definition(name: str, *, region: str | None = None, description: str | None = None) -> str:
     """确保名为 `name` 的 workflow definition 存在；返回 'exists' 或 'created'。
 
+    并发档也幂等（ADR 0004）：worker 每 scope 一个进程，首跑时多个进程可能同时 get→404→create，
+    赢家外的进程吃 create 的 ConflictException(409) → 按「已存在」归 'exists'（赢家已建即目标达成）。
+
     region=None（不再硬编码 us-east-1，ADR 0016 决策 C）→ boto3 nova-act client 走默认链/profile config 解析 region；
     真无 region（全 miss）→ NoRegionError（fail-loud、别静默跑错区）。注：本函数的 nova-act client **会**查 profile config，
     但同 worker 的 AgentCore 那条路径（AgentCoreBrowserSessionProvider.validate_region）**不查**、要显式字符串——故正常路径靠
@@ -25,5 +28,8 @@ def ensure_workflow_definition(name: str, *, region: str | None = None, descript
         kwargs = {"name": name}
         if description:
             kwargs["description"] = description
-        client.create_workflow_definition(**kwargs)
+        try:
+            client.create_workflow_definition(**kwargs)
+        except client.exceptions.ConflictException:
+            return "exists"  # 并发赢家已建（同名 409）：目标达成，别把它变成裸 traceback exit 1
         return "created"

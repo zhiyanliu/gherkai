@@ -6,9 +6,9 @@
 | 边缘 | subprocess | Fargate（本 adapter） |
 |---|---|---|
 | job-in | 写 worker stdin | `PutObject` 整 job 到 S3、RunTask overrides 经 env 传 `JOB_S3_URI` 小指针（RunTask overrides 8192 上限塞不下含 feature 的 job） |
-| events-out | 读 `EVENTS_FD` fd 逐行 | worker `PutItem` 到 DDB events 表；本 adapter `Query PK=run_id#scope_id AND SK>last_seq` 轮询增量拉 → `event_from_line` → yield（events-out=DDB，非 SQS/MSK，见 ADR 0024「DynamoDB 作 events-out」+ 三方案被拒护栏） |
+| events-out | 读 `EVENTS_FD` fd 逐行 | worker `PutItem` 到 DDB events 表；本 adapter `Query PK=run_id#scope_id AND last_seq<SK<EXIT_SK`（只读 worker seq 段，退出观察者的 `task_exited` 旁挂保留高位 SK、不入流）轮询增量拉 → `event_from_line` → yield（events-out=DDB，非 SQS/MSK，见 ADR 0024「DynamoDB 作 events-out」+ 三方案被拒护栏） |
 | stop | SIGTERM→grace→SIGKILL | `StopTask`（grace 由 task-def 期 `stopTimeout` 决定、≤120s、不逐次传——Nova 下限 150s>120s，真容器标定后 Fargate 侧对最坏长 act 接受 SIGKILL，ADR 0032 结论 4） |
-| 退出码 | `proc.wait()` returncode | `DescribeTasks` 轮询到 `lastStatus==STOPPED` → `containers[0].exitCode`（STOPPED 前常 null）→ 同 subprocess 翻异常 |
+| 退出码 | `proc.wait()` returncode | `DescribeTasks` 轮询到 `lastStatus==STOPPED` → `containers[0].exitCode`（STOPPED 前常 null）→ 交 `wire.raise_for_worker_exit`（与 subprocess 共用同一份码→异常翻译） |
 
 **红线（ADR 0016/0024/0026）**：boto3 client 由组合根注入、adapter 不自建（`require_boto3` 首行守卫）；schedule 仍纯归约、
 对 ECS/DDB 无知（存活/退出码判定藏在本 adapter 的迭代器/handle 内，非 schedule）；port 签名/线格式/wire 一行不改（复用 `event_from_line`/`job_to_line`）。
@@ -27,17 +27,22 @@ from typing import Iterator, NamedTuple
 from urllib.parse import quote
 
 from core.adapters._boto import require_boto3
-from core.errors import WorkerNetworkError
 from core.model import Event, Job, ScopeDone
-from core.wire import event_from_line, job_to_line
+from core.wire import event_from_line, job_to_line, raise_for_worker_exit
 
-# worker 网络专用退出码（ADR 0028）：与 subprocess_engine.py 同值（两引擎 worker 硬编码 80）。
-EX_WORKER_NETWORK = 80
-
-# events 表键字段名（ADR 0024「DynamoDB 作 events-out」）：PK=run_id#scope_id、SK=scope 内单调 seq。
-_PK_ATTR = "pk"
-_SK_ATTR = "seq"
-_BODY_ATTR = "body"  # 0024 事件的 JSON line 原样（DDB 不解析 body）
+# events 表 schema 的**单一事实源**（ADR 0024「DynamoDB 作 events-out」+ ADR 0034 机制一）：PK=run_id#scope_id、
+# SK=scope 内单调 seq。**读写两侧共用**——`DdbEventLog` import 这批常量，别在别处再抄一份（抄一份 = 两处漂移）。
+PK_ATTR = "pk"
+SK_ATTR = "seq"
+BODY_ATTR = "body"  # 0024 事件的 JSON line 原样（DDB 不解析 body）
+# 平台侧退出观察者写的 `task_exited` 的**独立键空间**（ADR 0034 机制一）：DDB SK 是 NUMBER、字符串前缀结构上
+# 不可行，故用保留高位数值 SK（worker seq 从 1 递增、永不到它）+ `item_type` 属性承载，退出记录不入 worker 段。
+# **该 item 没有 body**：读 worker 段的 Query 必须把 SK 上界收在 `EXIT_SK - 1`，否则读到它 → KeyError('body')。
+# 取值 10^18 = 远超任何真实 scope 事件数的大数（DDB Number 精度内；虽超 JSON 安全整数，但 DDB 线上存字符串数值故 OK）。
+EXIT_SK = 10 ** 18
+ITEM_TYPE_ATTR = "item_type"
+EXIT_ITEM_TYPE = "exit"     # item_type 取值：退出记录（worker 事件 item 不带此属性）
+EXIT_CODE_ATTR = "exit_code"
 
 class TaskProbe(NamedTuple):
     """一次 DescribeTasks 探测的结果——**两个正交事实各自命名**（ADR 0024「exitCode 落值延迟」）：
@@ -246,16 +251,18 @@ class FargateEngine:
         last_seq = 0
         pk = events_pk(self._run_id, scope_id)
         while True:
-            # 增量 Query：本 scope、SK>last_seq、SK 升序（保序）。最终一致读（默认）——流式期漏读无害，下轮补齐。
+            # 增量 Query：本 scope 的 **worker 段**、last_seq<SK<EXIT_SK、SK 升序（保序）。最终一致读（默认）——
+            # 流式期漏读无害，下轮补齐。**上界必须收在 EXIT_SK-1**：退出观察者的 task_exited item 挂同 PK 的保留
+            # 高位 SK 且无 body（ADR 0034 机制一），读进 worker 段即 KeyError；ADR 0024 亦定「单调/断号只跑 worker 段」。
             resp = self._events.query(
-                KeyConditionExpression=Key(_PK_ATTR).eq(pk) & Key(_SK_ATTR).gt(last_seq),
+                KeyConditionExpression=Key(PK_ATTR).eq(pk) & Key(SK_ATTR).between(last_seq + 1, EXIT_SK - 1),
                 ScanIndexForward=True,
             )
             items = resp.get("Items", [])
             saw_scope_done = False
             for it in items:
-                last_seq = int(it[_SK_ATTR])
-                event = event_from_line(it[_BODY_ATTR])
+                last_seq = int(it[SK_ATTR])
+                event = event_from_line(it[BODY_ATTR])
                 yield event  # 解析失败抛 ValueError，schedule 记 error（同 subprocess）
                 if isinstance(event, ScopeDone):  # 终止判据：scope_done 是最后一条（复用已解析 event、不重复解析 body）
                     saw_scope_done = True
@@ -264,7 +271,7 @@ class FargateEngine:
                 # proc.wait()」同构：捕获「worker 发完 scope_done 又会话释放失败非 0 退出」（Midscene cleanupFailed→exit 1）。
                 # exit>0 抛（schedule 记 error、泄漏可观测）、exit==0 正常终止（ADR 0024「事件流结束信号」）。
                 # 不 _final_drain：scope_done 是最大 seq、已读到，SK>last_seq 必空（drain 只为「靠 STOPPED 兜底」路径补最终一致漏读）。
-                self._raise_for_exit(self._await_exit_code(task_arn))
+                raise_for_worker_exit(self._await_exit_code(task_arn), code_label="exitCode")
                 return
 
             # 无新事件（或未见 scope_done）：查 task 是否已 STOPPED（兜底：worker 崩溃没发 scope_done）
@@ -274,7 +281,7 @@ class FargateEngine:
                     yield from self._final_drain(pk, last_seq)
                     # 拿确定退出码：_await_exit_code 处理「exitCode 尚 null」的有界宽限（ADR 0024「exitCode 落值延迟」）——
                     # 与 scope_done 路径复用同一读码逻辑（此刻已 STOPPED、几乎立即返回，除非撞落值延迟窗口）。
-                    self._raise_for_exit(self._await_exit_code(task_arn))
+                    raise_for_worker_exit(self._await_exit_code(task_arn), code_label="exitCode")
                     return
                 time.sleep(self._poll)  # task 还在跑、暂无新事件 → 等一个轮询周期再拉（延迟 vs 读放大，ADR 0024）
 
@@ -282,21 +289,22 @@ class FargateEngine:
         """task STOPPED 后的终读：强一致 Query 补最终一致可能还没看到的末尾事件（ADR 0024 读一致性条）。
 
         **必须翻页**（与主循环不同）：主循环靠逐轮 `SK>last_seq` re-query 天然跨 1MB 单页上限；但终读是
-        「最后一次、之后 `_raise_for_exit`+return、不再 query」，单次 query 遇上 >1MB 尾部（DDB Query 单页
+        「最后一次、之后 `raise_for_worker_exit`+return、不再 query」，单次 query 遇上 >1MB 尾部（DDB Query 单页
         上限）会返回 `LastEvaluatedKey` 并把余下 item 留在下一页——不循环 `ExclusiveStartKey` 就静默丢弃，
         与本函数「反映所有在先成功写」的强一致承诺相悖。故 while 循环拉全所有页。
         """
         from boto3.dynamodb.conditions import Key
 
         kwargs = {
-            "KeyConditionExpression": Key(_PK_ATTR).eq(pk) & Key(_SK_ATTR).gt(last_seq),
+            # 与主循环同一段界：只读 worker 段（上界 EXIT_SK-1 排除无 body 的 task_exited item，ADR 0034 机制一）。
+            "KeyConditionExpression": Key(PK_ATTR).eq(pk) & Key(SK_ATTR).between(last_seq + 1, EXIT_SK - 1),
             "ScanIndexForward": True,
             "ConsistentRead": True,  # 强一致：反映所有在先成功写（2× RRU，成本忽略；防永久漏最后几条）
         }
         while True:
             resp = self._events.query(**kwargs)
             for it in resp.get("Items", []):
-                yield event_from_line(it[_BODY_ATTR])
+                yield event_from_line(it[BODY_ATTR])
             last_key = resp.get("LastEvaluatedKey")
             if not last_key:
                 break  # 无更多页 → 拉全
@@ -341,10 +349,3 @@ class FargateEngine:
                 time.sleep(self._poll)
                 continue
             return probe.exit_code  # STOPPED 且落值
-
-    def _raise_for_exit(self, rc: int) -> None:
-        """退出码翻异常（与 subprocess_engine._read_events 同语义）：80→网络错、>0→RuntimeError、0→正常。"""
-        if rc == EX_WORKER_NETWORK:
-            raise WorkerNetworkError(f"worker 建连失败（网络/SSL 瞬时故障），退出码 {rc}")
-        if rc > 0:
-            raise RuntimeError(f"worker 异常退出 exitCode={rc}")

@@ -42,8 +42,8 @@ class ParsedScenario:
     # 免得 scope 从 scenario_id 有损反解（scenario_id 含冒号/数字端口时反解会错，见 scope.group_uris）
 
 # pickle step type → 我们的 keyword（And/But 已被 Compiler 折叠继承上一条非连接词的类型）。
-# 例外：无前驱可继承的 `*`/And/But（如 scenario 首步就是 And）Compiler 给 type='Unknown'，落到下面
-# .get 的兜底 "Given"（Unknown 的处置另行决策）。
+# 例外：无前驱可继承的 `*`/And/But（如 scenario 首步就是 And）Compiler 给 type='Unknown'——**判不出即
+# 拒绝猜**，由下面的 _step_keyword 抛 PlanError（ADR 0025），故本表**不设**默认值。
 _TYPE_TO_KEYWORD = {"Context": "Given", "Action": "When", "Outcome": "Then"}
 
 

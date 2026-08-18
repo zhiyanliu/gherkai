@@ -135,8 +135,9 @@ class TaskExited:
 
     **不是 worker 的 wire 事件**（不在 model.Event union、不进 wire.py 的 worker↔core 协议）——它由
     平台侧观察者产生：cloud = ECS Task STOPPED 事件的极薄 Lambda（从事件 payload 读 exitCode）；
-    local = per-run 进程 `proc.wait()`。走独立键空间（SK 前缀 `exit#`，不占 worker 的连续数值 seq 段），
-    故不参与 adapter 的单调 seq/断号检测（机制一：免撞号覆盖 scope_done）。
+    local = per-run 进程 `proc.wait()`。走独立键空间（cloud = 保留高位数值 SK + 属性 `item_type='exit'`——
+    events 表 SK 是 NUMBER、字符串前缀结构上不可行；local = 独立 `exits` 表；见 ADR 0034 机制一），不占
+    worker 的连续数值 seq 段，故不参与 adapter 的单调 seq/断号检测（机制一：免撞号覆盖 scope_done）。
 
     exit_code=None 仅用于「payload 缺 exitCode 的有界宽限态」（ADR 0032/0034 机制二兜底）——观察者应
     在写 task_exited 前有界等待 exitCode 落值，正常必带值（实测 4/4 含 SIGKILL 都带）。
@@ -177,9 +178,10 @@ def project(meta: RunMeta, records: list[EventRecord], baseline: RunState | None
 
     全量重放（非增量）→ 天然幂等、抗乱序、抗重投（ADR 0034 机制三前提）。步骤：
     1. 按 scope_id 分组 records；每组内 kind='event' 的按 seq 升序喂 reduce_event 归约出 JobResult；
-    2. 「两件都要」纯谓词（机制二）：job 达终态 ⟺ 见到 scope_done（内容完整，reduce 已产出终态判定）
-       ∧ 见到 task_exited 且 exit_code 表明干净终止（进程终止）。缺任一 → 该 job 仍 RUNNING（会话已起）
-       或 PENDING（连 scope_started 都没见）。
+    2. 「两件都要」纯谓词（机制二，谓词全文单一真源 = `_job_status`，别在两处各写一份）：以「有无
+       task_exited」为一级键——有退出记录时进程终止本身即终态信号（exit≠0 → ERROR；exit==0 且见
+       scope_done → scenario 归约终态；exit==0 无 scope_done（含零事件）→ ERROR；exit_code 未落值 →
+       RUNNING 宽限）；无退出记录时见 scope_started → RUNNING、否则 PENDING。
     3. 聚合成 RunState：各 JobState（scope_id→status/session_id）+ run 总 status（_aggregate 终态）+
        high_water_mark（所有 scope 的 worker 段 max seq，机制三条件写用）。
 
@@ -376,6 +378,24 @@ def _aggregate(statuses: list[Status]) -> Status:
     if any(s == Status.FAILED for s in verdicts):
         return Status.FAILED
     return Status.PASSED
+
+
+def projected_run_status(jobs: dict[str, JobState]) -> Status:
+    """投影写该落库的 run 级 status（ADR 0034 机制三）：投影里全 job 仍 pending → `pending`，否则 `running`。
+
+    **投影不能落 `project` 算出的 run 级 status**——那是 `_aggregate` 的终态聚合值（见上：滤掉 pending/
+    running，故连「全 job 还 pending」的 run 也吐 `passed`）；提前落 run 级终态会被 `try_finalize` 的单调
+    条件写认成「已 finalize」而挡住 commit point（ADR 0030），run 永远 finalize 不了。
+
+    **判据只看传入的 job 态、不读库、不看传入的 run 级值**：两个 RunStore adapter 须落同一规则，而 DDB 侧
+    标量条件写发生在 per-job 条件写之前（那一刻库中 job 态还没更新、读它无意义），判据依赖库就没法对拍。
+    真实 tick 流里已 claim 的 job 必在投影中现 `running`（`project` 以 RunStore 态为基线单调合并），故
+    「全 pending」= 这个 run 还没起过任何 job——status 如实显示 `pending` 才有诊断价值（读到仍 pending
+    = 推进可能没启动）。两端取值都是非终态，commit point 的专属性不受影响。
+    """
+    if all(js.status == Status.PENDING for js in jobs.values()):
+        return Status.PENDING
+    return Status.RUNNING
 
 
 # ============================================================================

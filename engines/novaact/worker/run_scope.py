@@ -85,8 +85,7 @@ def _get_uploader() -> ArtifactUploader:
     if _uploader_singleton is None:
         _uploader_singleton = ArtifactUploader.from_env()
     return _uploader_singleton
-# AI 断言投票次数由 job.assertionVotes 决定（ADR 0014/0024，组合根经 --assertion-votes 设）。
-# 默认 1（不抖动检测，结果直观）；调高才跑 N 次取多数票。
+
 
 _URL_IN_QUOTES = re.compile(r'"(https?://[^"]+)"')
 
@@ -279,11 +278,14 @@ def _run_step(nova, scenario_id: str, step: dict, votes_n: int, sink: EventSink)
                 if c and c.get("time_worked_s") is not None:
                     tw_total += c["time_worked_s"]
                 _collect_traj(r, step_traj)  # N 票各一个 trajectory，都挂本 step
-            if _stop.is_set():
-                # 被外部中止（投票没跑完 N 票）→ **不 emit 带 verdict 的 step_done**：
+            if len(votes) < votes_n:
+                # 票没投满（只可能因循环顶 _stop 提前 break）→ **不 emit 带 verdict 的 step_done**：
                 # 用部分票 + 完整 votes_n 分母算 passed 会把「外部中止」误标成确定的断言判定（如 1/3→failed、
                 # 甚至 0/1），污染中止 run 的 RunReport。对齐 _run_scenario 停止语义「停止是外部中止、非执行事实、
                 # worker 不越权标注」——直接 return，交上层安全点协作退出、未跑完的 step 由 core 按派生态处理。
+                # **判据是票不完整、不是此刻 _stop**（ADR 0024「安全点丢弃没跑完的单元的判定，但不丢弃已成的
+                # 执行事实」）：停止信号落在最后一票的 act 期间时该票已带回判定，verdict 与已真实发生的
+                # time_worked_s 都是执行事实，照常 emit（对称 When/Given 分支）、再由上层安全点退出。
                 return "aborted"
             yes = sum(votes)
             passed = yes > votes_n / 2
@@ -426,7 +428,7 @@ def _emit_scenario_done_unless_stopped(sink: EventSink, scenario_id: str, status
     scenario 中途收到 _stop 时 `_run_scenario` 返回**部分 statuses**，用它算判定会把没跑完的 scenario 标成
     确定 passed（假阳性——`_aggregate([])`/`_aggregate(["passed"])` 都 == "passed"），违反「停止是外部中止、
     非执行事实、worker 不越权标注」（ADR 0031/0024）；未完成 scenario 交 core 按派生态处理。对称 step 级投票
-    中止（不 emit 带 verdict 的 step_done）+ scenario 循环顶护栏（不发 step_skipped）。
+    中止（**票没投满**时不 emit 带 verdict 的 step_done）+ scenario 循环顶护栏（不发 step_skipped）。
     """
     if _stop.is_set():
         return True
@@ -437,7 +439,7 @@ def _emit_scenario_done_unless_stopped(sink: EventSink, scenario_id: str, status
 import socket
 import ssl
 
-# 网络专用退出码（ADR 0028）：与 core/adapters/subprocess_engine.py 的 EX_WORKER_NETWORK 同值。
+# 网络专用退出码（ADR 0028）：与 core/wire.py 的 EX_WORKER_NETWORK 同值（协议层单一事实源，两 Engine adapter 共用翻译）。
 EX_WORKER_NETWORK = 80
 
 # 建连重试参数（ADR 0028）：仅裹幂等的建连段，act 永不重试。退避手写（不用 botocore 内部 retry，
@@ -582,7 +584,7 @@ def main() -> int:
     if "--list-deterministic" in sys.argv:
         print(json.dumps(_deterministic.list_registry(), ensure_ascii=False))
         return 0
-    # 批量 match 查询（ADR 0036 第二期，plan 命中标注）：stdin 一行 JSON 数组（step 文本）→ stdout
+    # 批量 match 查询（ADR 0036 决策 4，plan 命中标注）：stdin 一行 JSON 数组（step 文本）→ stdout
     # 逐条命中结果。匹配语义留在 worker（CLI 零复刻）；同样不建会话、零 AWS。
     if "--match-steps" in sys.argv:
         texts = json.loads(sys.stdin.read())

@@ -1,8 +1,8 @@
 // 确定性 step 注册表（ADR 0022）——Midscene 引擎（Nova 引擎 deterministic.py 的对称 TS 版）。
 //
-// test engineer 用 `deterministic(pattern, handler)` 把「正则 → handler」登记进一张表。worker
-// 派发每个 step 时**先查这张表**：命中走精确 handler（拿 Playwright page 判定、**不投票、可复现**），
-// 未命中才落到内建 URL 导航 / AI catch-all（ADR 0020/0024）。
+// test engineer 用 `deterministic(pattern, handler, meta)` 把「正则 → handler」登记进一张表（meta 必填，
+// ADR 0036）。worker 派发每个 step 时**先查这张表**：命中走精确 handler（拿 Playwright page 判定、
+// **不投票、可复现**），未命中才落到内建 URL 导航 / AI catch-all（ADR 0020/0024）。
 //
 // 为什么匹配放 worker 不放 core（ADR 0022）：确定性 handler 引擎特定（碰 Playwright page），匹配表
 // 跟着 handler 走最内聚；core 只解析结构 + 调度，对 step 语义无知。
@@ -59,45 +59,49 @@ export function listRegistry(): Array<{ pattern: string; description: string; ex
 /** 判定失败用的断言错误（handler 也可用 node:assert，两者都被 worker 当作 failed）。 */
 export class DeterministicAssertion extends Error {}
 
-export class DeterministicConflict extends Error {
-  constructor(message: string, public readonly patterns: string[] = []) {
-    super(message);
-  }
-}
+/** 命中多条模式（ADR 0022：最多一条）。冲突模式清单**只内联在 message**（worker 派发侧只取 name/message）；
+ * 结构化冲突清单是 matchBatch 的职责（ADR 0036 `{conflict:[patterns]}`，走 --match-steps、不经异常）。 */
+export class DeterministicConflict extends Error {}
 
 export interface Match {
   handler: DeterministicHandler;
   groups: Record<string, string>;
 }
 
-/** 在注册表里找命中 text 的唯一 handler。返回 Match 或 null（未命中走 AI）。命中多条 → 抛 DeterministicConflict。 */
-export function match(text: string): Match | null {
+/** 扫注册表收**全部**命中——match（真跑派发）与 matchBatch（plan 预检）唯一的扫描实现面。
+ * 两个消费者只在「命中数怎么处置」上分叉，匹配语义本身不复制成两份：ADR 0036 的「同一注册表、同一
+ * exec 实现」由此结构保证，改匹配面（加锚定/归一化/优先级）不会漏改一处让 plan 标注对真跑撒谎。 */
+function scan(text: string): Array<{ entry: Entry; m: RegExpExecArray }> {
   const hits: Array<{ entry: Entry; m: RegExpExecArray }> = [];
   for (const entry of REGISTRY) {
     const m = entry.pattern.exec(text);
     if (m) hits.push({ entry, m });
   }
+  return hits;
+}
+
+/** 在注册表里找命中 text 的唯一 handler。返回 Match 或 null（未命中走 AI）。命中多条 → 抛 DeterministicConflict。 */
+export function match(text: string): Match | null {
+  const hits = scan(text);
   if (hits.length === 0) return null;
   if (hits.length > 1) {
     const raws = hits.map((h) => JSON.stringify(h.entry.raw)).join(", ");
     throw new DeterministicConflict(
-      `step ${JSON.stringify(text)} 命中多条确定性模式 [${raws}]（ADR 0022：最多命中一条，请收紧模式）`,
-      hits.map((h) => h.entry.raw),
-    );
+      `step ${JSON.stringify(text)} 命中多条确定性模式 [${raws}]（ADR 0022：最多命中一条，请收紧模式）`);
   }
   return { handler: hits[0].entry.handler, groups: hits[0].m.groups ?? {} };
 }
 
-/** 批量 match 查询（ADR 0036 第二期）：plan 命中标注用——对每条 step 文本回答「命中哪条 / 冲突 / 未命中」。
- * 匹配语义与 match() 同一实现面（同一 REGISTRY、同一 exec 语义），冲突不抛、结构化返回（plan 是预检不是执行）。 */
+/** 批量 match 查询（ADR 0036 决策 4）：plan 命中标注用——对每条 step 文本回答「命中哪条 / 冲突 / 未命中」。
+ * 与 match() 共用 scan()（同一扫描实现面），冲突不抛、结构化返回（plan 是预检不是执行）。 */
 export type MatchProbe = null | { pattern: string; description: string } | { conflict: string[] };
 
 export function matchBatch(texts: string[]): MatchProbe[] {
   return texts.map((text) => {
-    const hits = REGISTRY.filter((e) => e.pattern.exec(text));
+    const hits = scan(text);
     if (hits.length === 0) return null;
-    if (hits.length > 1) return { conflict: hits.map((e) => e.raw) };
-    return { pattern: hits[0].raw, description: hits[0].meta.description };
+    if (hits.length > 1) return { conflict: hits.map((h) => h.entry.raw) };
+    return { pattern: hits[0].entry.raw, description: hits[0].entry.meta.description };
   });
 }
 

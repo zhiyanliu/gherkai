@@ -1,4 +1,4 @@
-"""无状态跑批的 cli 侧接线（ADR 0034，local 档）：SubprocessLauncher + per-run reconciler 进程。
+"""无状态跑批的 local 执行接线（ADR 0034，local 档）：SubprocessLauncher + per-run reconciler 进程。
 
 组合根职责（local 执行环境特有）：把 core 的 reconciler（纯编排）接到真 subprocess 世界——
 - **SubprocessLauncher**：机制四 CAS 抢占成功后被 reconciler 调，起一个 worker（复用 SubprocessEngine）、
@@ -6,20 +6,22 @@
   拿 exitcode 写 task_exited（扮演平台侧退出观察者，机制二 local 对位）。worker 不改、对 SQLite 无知（0034）。
 - **per-run reconciler 进程**：`submit` 时 setsid fork 出来的轻进程，循环 tick 直到全 done 自退。
 
-守窄腰：core.reconcile 对「怎么起 worker」无知（经 Launcher 注入）；本模块是 cli（组合根）、可 import
-SubprocessEngine/SqliteEventLog。cloud 档的 Launcher（ECS RunTask）是 P4 的另一实现，同一 reconcile.tick。
+守窄腰：core.reconcile 对「怎么起 worker」无知（经 Launcher 注入）；本模块在产品本体 gherkai 层（组合根共享层，
+ADR 0016「演进」节）、可 import SubprocessEngine/SqliteEventLog，core 不可。cloud 档的 Launcher =
+`core.adapters.cloud_launcher.CloudLauncher`（ECS RunTask），与本模块共用同一 `core.reconcile.tick`。
 """
 from __future__ import annotations
 
 import threading
 import time
 from pathlib import Path
+from typing import Callable
 
 from core.adapters.event_log import SqliteEventLog
 from core.adapters.run_store.local import LocalRunStore
+from core.adapters.subprocess_engine import SubprocessEngine
 from core.model import Job, RunMeta, Status
 from core.reconcile import finalize_artifacts, tick
-from core.ports import Engine, EngineResolver
 
 # 接力恢复的判定余量秒（ADR 0034「job timeout」节 claimed_at ①）：超预算这么久才认定 owner 已死。
 # 非正确性参数（误判也收敛正确——owner 尚活时其 timer 同 deadline 早已触发、真退出记录同带 timed_out，
@@ -37,13 +39,16 @@ class SubprocessLauncher:
     同时 enforce job timeout（ADR 0034「job timeout」节 local 档）：job.timeout_s 非 None 时起 deadline
     timer——到点先置 timed_out 标志再 handle.stop(engine grace)（协作停，保会话清理不烧钱），worker 退出后
     _pump 的 record_exit 带上标志，project 按归因链收敛 ERROR+timeout。
+
+    **绑死 SubprocessEngine（不是任意 `Engine`）**：launch 用 `run_scope(job, raw_sink=...)` 拿原始事件行，
+    而 `raw_sink` 是 SubprocessEngine 的扩展形参、**不在 Engine port 契约里**（ADR 0034「Engine port 演进」）。
+    故 resolver 的返回类型在此收窄——喂进别的 adapter 是运行时 TypeError，类型上先说明白。
     """
 
-    def __init__(self, resolver: EngineResolver, event_log: SqliteEventLog, *,
+    def __init__(self, resolver: Callable[[str], SubprocessEngine], event_log: SqliteEventLog, *,
                  min_grace_fn=None) -> None:
         self._resolver = resolver
         self._event_log = event_log
-        self._threads: list[threading.Thread] = []
         # engine→grace 下限（组合根注入 compose.engine_min_grace；None → 缺省 5s）：timeout stop 用它当
         # 协作停宽限（grace < 单 act 时长会致会话泄漏，ADR 0024 grace 硬约束——超时杀也不豁免）。
         self._min_grace_fn = min_grace_fn
@@ -53,7 +58,7 @@ class SubprocessLauncher:
     def launch(self, job: Job) -> None:
         scope_id = job.scope_id
         self.owned_scopes.add(scope_id)
-        engine: Engine = self._resolver(job.engine)
+        engine: SubprocessEngine = self._resolver(job.engine)
         # raw_sink：SubprocessEngine 读 fd3 每行原始 JSON（解析前）旁路调它——落 SQLite 存原样（存原始行、
         # 读回复用 wire.event_from_line，零新序列化）。seq 按到达序单调递增（worker 一个 scope 串行 emit）。
         # 续号：从 SQLite 已有 max_seq 起（重试/续跑幂等）。闭包持 seq，_pump 的线程内单线程递增、无竞态。
@@ -79,12 +84,12 @@ class SubprocessLauncher:
             timer = threading.Timer(job.timeout_s, _on_deadline)
             timer.daemon = True
             timer.start()
-        t = threading.Thread(
+        # 不持线程引用：daemon 线程无人 join（收尾判据是 run_reconcile_loop 的「全 done」= 每 job 都有
+        # _pump 写的退出记录），存下来只会随 job 数单调增长。
+        threading.Thread(
             target=self._pump, args=(scope_id, handle, events, timer, timed_out), daemon=True,
             name=f"launcher-{scope_id}",
-        )
-        t.start()
-        self._threads.append(t)
+        ).start()
 
     def _pump(self, scope_id: str, handle, events, timer=None, timed_out=None) -> None:
         """驱动一个 worker 的 fd3 事件流跑完（落库在 raw_sink 里做）；结束后 handle.wait() 拿 exitcode 写 task_exited。
@@ -118,41 +123,31 @@ def run_reconcile_loop(
     launcher: SubprocessLauncher,
     max_concurrency: int,
     *,
+    now_iso_fn: Callable[[], str],
     poll_interval_s: float = 0.5,
-    now_iso_fn=None,
     result_store=None,
     report_store=None,
 ) -> None:
     """per-run 进程的推进循环：反复 tick 直到全 done（ADR 0034 local 主力触发源）。
 
-    now_iso_fn：注入时间源（组合根传 compose.now_iso；测试传 fake 保确定性）。tick 幂等——崩了 status --wait
-    可接力（状态全持久）。全 done（tick 返回 True）即退出（batch shape：跑完即停、不常驻）。
+    now_iso_fn：**必传**的时间源（组合根传 `compose.now_iso`；测试传 fake 保确定性）——曾有个 strftime 的
+    `…Z` 回落分支，漏传即让同一份 RunState 混两种时间戳格式（见 `compose.now_iso` docstring），故不留缺省。
+    tick 幂等——崩了 status --wait 可接力（状态全持久）。全 done（tick 返回 True）即退出（batch shape：
+    跑完即停、不常驻）。
 
     result_store/report_store（可选）：done 后聚合收尾——从 events 全量重放 project_full 构造完整 RunResult，
     落 ResultStore（判定真值 jobs/*.json）+ ReportStore（RunReport index/manifest），与同步 run 路径产物对齐。
     幂等（从 events 重放、覆盖写同 key）——多个推进者都 done 都聚合无害。注入 None（测试）则跳过收尾。
     """
-    import datetime as _dt
-
-    def _now() -> str:
-        if now_iso_fn is not None:
-            return now_iso_fn()
-        return _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
     while True:
-        done = tick(run_id, meta, event_log, run_store, launcher, max_concurrency, now_iso=_now())
+        done = tick(run_id, meta, event_log, run_store, launcher, max_concurrency,
+                    now_iso=now_iso_fn())
         if done:
             # 收尾聚合走 core 唯一一份（曾在此双写一份、与 lambdas/reconciler.py 漂移风险，已合并）
-            finalize_artifacts(run_id, meta, event_log, result_store, report_store, _now())
+            finalize_artifacts(run_id, meta, event_log, result_store, report_store, now_iso_fn())
             return
-        _recover_timed_out_claims(run_id, meta, event_log, run_store, launcher, _now())
+        _recover_timed_out_claims(run_id, meta, event_log, run_store, launcher, now_iso_fn())
         time.sleep(poll_interval_s)
-
-
-def _parse_iso(s: str):
-    import datetime as _dt
-
-    return _dt.datetime.fromisoformat(s.replace("Z", "+00:00"))
 
 
 def _recover_timed_out_claims(run_id, meta, event_log, run_store, launcher, now_iso: str) -> None:
@@ -165,19 +160,21 @@ def _recover_timed_out_claims(run_id, meta, event_log, run_store, launcher, now_
     已死、直接写是唯一收敛路径。若 owner 其实尚活（余量误判）：其 timer 同一 deadline 早已触发、真退出
     记录同带 timed_out=True，后到覆盖本记录归因不变（INSERT OR REPLACE 同 key）。
     """
+    from gherkai import compose
+
     state = run_store.load_run_state(run_id)
     if state is None:
         return
     job_by_scope = {j.scope_id: j for j in meta.jobs}
     exited_scopes = {r.scope_id for r in event_log.records() if r.kind == "exit"}
-    now = _parse_iso(now_iso)
+    now = compose.parse_iso(now_iso)
     for sid, js in state.jobs.items():
         if js.status != Status.RUNNING or sid in launcher.owned_scopes or sid in exited_scopes:
             continue
         job = job_by_scope.get(sid)
         if job is None or not job.timeout_s or not js.claimed_at:
             continue  # 无预算/无起算点（旧数据）→ 不处置（除超时外无权臆断他人 claim 的死活）
-        elapsed = (now - _parse_iso(js.claimed_at)).total_seconds()
+        elapsed = (now - compose.parse_iso(js.claimed_at)).total_seconds()
         if elapsed > job.timeout_s + _RECOVERY_MARGIN_S:
             event_log.record_exit(sid, None, timed_out=True)  # exit_code=None：无观察到的退出码，诚实留空
 
@@ -236,17 +233,6 @@ def build_local_reconcile(repo, report_dir: str, run_id: str, max_concurrency: i
     result_store = LocalResultStore(root)
     report_store = LocalReportStore(root)
     return meta, log, store, launcher, max_concurrency, result_store, report_store
-
-
-def render_run_state(state) -> str:
-    """status 命令的 RunState 人读渲染（轻量；权威判定明细读 jobs/*.json / --json）。"""
-    lines = [f"run {state.run_id}: {state.status.value}"]
-    for sid, js in state.jobs.items():
-        sess = f"  session={js.session_id}" if js.session_id else ""
-        lines.append(f"  - {sid}: {js.status.value}{sess}")
-    if state.ended_at:
-        lines.append(f"ended_at={state.ended_at}")
-    return "\n".join(lines)
 
 
 # ============================================================================

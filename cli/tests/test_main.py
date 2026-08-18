@@ -441,33 +441,6 @@ def test_run_no_report_passes_no_artifact_dirs(tmp_path, monkeypatch, capsys):
     assert box.get("nova_logs_dir") is None and box.get("midscene_run_dir") is None
 
 
-# ---- _prune_empty_dirs（cloud 清本地空壳，ADR 0029）：只删空目录、非空保留 ----
-def test_prune_empty_dirs_removes_empty_tree(tmp_path):
-    # worker 上传后 rmtree 了子目录，run 根只剩空壳（含空中间目录）→ 整个删掉
-    run_dir = tmp_path / "reports" / "rid"
-    (run_dir / "nova-trajectories" / "sess").mkdir(parents=True)  # 全空
-    (run_dir / "midscene-run" / "report").mkdir(parents=True)     # 全空
-    m._prune_empty_dirs(run_dir)
-    assert not run_dir.exists()  # 空壳整个清掉
-
-
-def test_prune_empty_dirs_keeps_nonempty(tmp_path):
-    # 某个引擎 flush 失败保留了产物（目录非空）→ 该目录及其祖先保留（护栏：不误删产物）
-    run_dir = tmp_path / "reports" / "rid"
-    kept = run_dir / "nova-trajectories" / "sess"
-    kept.mkdir(parents=True)
-    (kept / "act_0.html").write_text("残留产物")           # 非空
-    (run_dir / "midscene-run").mkdir(parents=True)          # 空
-    m._prune_empty_dirs(run_dir)
-    assert run_dir.exists()                                  # 因含非空子树而保留
-    assert (kept / "act_0.html").exists()                   # 产物没被误删
-    assert not (run_dir / "midscene-run").exists()           # 空的那支仍被清
-
-
-def test_prune_empty_dirs_noop_when_missing(tmp_path):
-    m._prune_empty_dirs(tmp_path / "nonexistent")  # 不存在 → no-op、不抛
-
-
 # ---- _render_status：local/cloud 共享的渲染+提示+退出码（ADR 0034，两路一致）----
 def _mk_state(status):
     from core.model import RunState, JobState
@@ -496,11 +469,32 @@ def test_render_status_running_no_hint(capsys):
 
 
 def test_render_status_terminal_no_hint_and_exitcode(capsys):
-    """终态：passed→0、failed/error→1，均不提示。"""
+    """终态：passed→0、其余终态→1（含派生终态 skipped/aborted），均不提示。"""
     assert m._render_status(_mk_state(Status.PASSED), _args(), wait_hint="x") == 0
     assert m._render_status(_mk_state(Status.FAILED), _args(), wait_hint="x") == 1
     assert m._render_status(_mk_state(Status.ERROR), _args(), wait_hint="x") == 1
+    assert m._render_status(_mk_state(Status.SKIPPED), _args(), wait_hint="x") == 1
+    assert m._render_status(_mk_state(Status.ABORTED), _args(), wait_hint="x") == 1
     assert "仍 pending" not in capsys.readouterr().err
+
+
+def test_terminal_status_consumers_use_core_single_source():
+    """终态真源不漂移（ADR 0031 决定一·补末条）：三处消费方全引 `core.model.TERMINAL_STATUSES`、不各写白名单。
+
+    跨 core/cli/gherkai 三栈的结构性护栏（cli 是唯一同时看得见三者的层）——曾有两份逐字副本，
+    新增终态漏改哪份、那份就永远判不到终态（`status --wait` 无限轮询 / 隧道守护只能等满 TTL 才拆）。
+    """
+    from pathlib import Path
+
+    from core.model import TERMINAL_STATUSES
+    from gherkai import tunnel_host
+
+    assert m.TERMINAL_STATUSES is TERMINAL_STATUSES
+    assert tunnel_host.TERMINAL_STATUSES is TERMINAL_STATUSES
+    for mod in (m, tunnel_host):
+        src = Path(mod.__file__).read_text(encoding="utf-8")
+        # 白名单副本的字面特征（正列终态集）——出现即回归
+        assert "Status.PASSED, Status.FAILED" not in src, f"{mod.__name__} 又正列了一份终态白名单"
 
 
 def test_render_status_wait_pending_no_hint(capsys):
@@ -541,7 +535,7 @@ def test_list_deterministic_worker_failure_exits_2(monkeypatch, capsys):
     assert "自述失败" in capsys.readouterr().err
 
 
-# ---- plan 派发标注（ADR 0036 第二期）----
+# ---- plan 派发标注（ADR 0036 决策 4）----
 
 def _det_feature(tmp_path):
     f = tmp_path / "det.feature"

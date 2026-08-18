@@ -1,11 +1,17 @@
 """iac_aws_backend Stack（ADR 0033）：`--backend cloud` 需要的全部 AWS 资源。
 
 一套 stack 建齐（可按 prefix 多实例化，多环境 prod-/stage-）：
-- DynamoDB：{prefix}runs（控制面/RunStore）+ {prefix}events（events-out，开 expires_at TTL）
-- S3：{prefix}artifacts（Result/Report/offload/job-in/artifact-upload，按 prefix key 分片）
+- DynamoDB：{prefix}runs（控制面/RunStore）+ {prefix}events（events-out，开 expires_at TTL）；两表均开
+  Stream（NEW_IMAGE）供事件驱动链
+- S3：{prefix}artifacts（Result/Report/offload/job-in/artifact-upload，按 prefix key 分片）+ lifecycle
+  规则 expire-job-in（按对象 tag gherkai=job-in 7 天过期）
 - ECS：{prefix}cluster + 2 task-def（novaact/midscene，各自镜像/task role）
 - ECR：2 repo（各承一镜像；镜像由 CI build&push，synth 不触发 docker build）
-- IAM：每引擎一个 task role（最小权限）+ 共享 execution role
+- Lambda/事件驱动链（ADR 0034，见 _reconcile_lambdas）：{prefix}exit-observer / {prefix}reconciler /
+  {prefix}kicker 三 Function + EventBridge rule {prefix}ecs-stopped + 两表 Stream 的 event source mapping
+  （kicker 那条带 INSERT ∧ detached filter）
+- IAM：每引擎一个 task role（最小权限）+ 共享 execution role + 3 个 Lambda 执行角色 + job timeout 到点
+  触发器的 Scheduler 执行角色 {prefix}timeout-scheduler
 - VPC + SSM：subnet/sg ID 写进 /{prefix}backend/subnets|security-groups（cli 读）
 
 命名走 names.py（与 cli compose 同源，ADR 0033 护栏）。prefix 从 CDK context 读（cdk deploy -c prefix=prod-）。
@@ -140,10 +146,21 @@ class BackendStack(Stack):
             return ec2.Vpc.from_lookup(self, "BackendVpc", vpc_id=vpc_id)
         if str(self.node.try_get_context("use_default_vpc")).lower() == "true":
             return ec2.Vpc.from_lookup(self, "BackendVpc", is_default=True)
-        # 建新：2-AZ、**零 NAT**（nat_gateways=0）。worker 落公有子网 + 公网 IP 出网，与 _ssm_network 的「公有子网优先」
-        # 及 cli assignPublicIp=ENABLED 一致——不建常驻计费的 NAT。**真私有子网隔离（NAT/VPC endpoint 出网）留 backlog**：
-        # 现三档均公有子网出网，若未来要私有隔离需同步 _ssm_network 选私有子网 + cli assignPublicIp=DISABLED（跨组件联动）。
+        # 建新：2-AZ、**零 NAT**（nat_gateways=0）。worker 落公有子网 + 公网 IP 出网，与 _worker_subnet_ids 的
+        # 「公有子网优先」及 cli assignPublicIp=ENABLED 一致——不建常驻计费的 NAT。**真私有子网隔离（NAT/VPC
+        # endpoint 出网）留 backlog**：现三档均公有子网出网，若未来要私有隔离需同步 _worker_subnet_ids 选私有
+        # 子网 + cli assignPublicIp=DISABLED（跨组件联动）。
         return ec2.Vpc(self, "BackendVpc", max_azs=2, nat_gateways=0)
+
+    def _worker_subnet_ids(self, vpc: ec2.IVpc) -> list[str]:
+        """worker task 落哪些 subnet——「优先公有子网、无则回落私有」这条契约的**唯一落点**（ADR 0033）。
+
+        三个消费者必须恒等（都喂同一个 `awsvpcConfiguration`）：SSM `/{prefix}backend/subnets`（cli
+        resolve_network 读）+ reconciler / kicker Lambda 的 `SUBNETS` env（它们起 worker task）。任一处
+        单独改动 → cli 与 Lambda 起的 task 落在不同子网，且只在 RunTask 时才暴露，故收敛在此一处。
+        公有子网配 `assignPublicIp=ENABLED` 出网（零 NAT）；回落私有时需 NAT/VPC endpoint 出网。
+        """
+        return [s.subnet_id for s in (vpc.public_subnets or vpc.private_subnets)]
 
     # ---- ECS cluster ----
     def _cluster(self, vpc: ec2.IVpc) -> ecs.Cluster:
@@ -300,10 +317,9 @@ class BackendStack(Stack):
 
     # ---- SSM：subnet/sg ID 写进含 prefix 路径（cli resolve_network 读，ADR 0033）----
     def _ssm_network(self, vpc: ec2.IVpc) -> None:
-        # 优先公有子网（assignPublicIp=ENABLED 出网、零 NAT）；无公有则回落私有（需 NAT/VPC endpoint 出网）。
+        # subnet 选取走 _worker_subnet_ids（与两个推进器 Lambda 的 SUBNETS env 同源）。
         # cli FargateEngine 的 assignPublicIp="ENABLED" 与公有子网配套（worker 只出不入连 AgentCore/Bedrock/S3/DDB）。
-        subnets = vpc.public_subnets or vpc.private_subnets
-        subnet_ids = [s.subnet_id for s in subnets]
+        subnet_ids = self._worker_subnet_ids(vpc)
         # Fargate 用的默认安全组（出站全开、入站无——worker 只出不入）。
         sg = ec2.SecurityGroup(
             self, "WorkerSg", vpc=vpc,
@@ -334,9 +350,11 @@ class BackendStack(Stack):
         - **kicker Lambda**：runs 表 Stream 的 INSERT 触发（submit 写 definition，冷启动起首批）+ cli status --wait
           直接 invoke kickoff（卡住救活）→ tick 起首批 task。职责『让 run 动起来』（对 reconciler 的『推着走』）。
 
-        Lambda 代码 = lambdas/ + core/core + cli/cli 打进一个 asset（gherkin-official 依赖 pip 装入；boto3 是
-        runtime 自带）。**复用同步 cloud run 的资源**（runs/events 表、桶、cluster、task-def、task/execution role）——
-        reconciler 起 worker task 与同步路径同一套（compose.build_fargate_engines 单一真源，见 lambdas/reconciler.py）。
+        Lambda 代码打进一个 asset（内容清单见 `_build_lambda_asset`）。**复用同步 cloud run 的资源**（runs/events
+        表、桶、cluster、task-def、task/execution role）——reconciler 起 worker task 与同步路径同一套
+        （compose.build_fargate_engines 单一真源，见 lambdas/reconciler.py）。故三个 handler 都得自己分辨
+        「这个 run 归谁推进」：exit-observer/reconciler 在 handler 里判 detached（触发面滤不掉，ADR 0034
+        端到端 cloud 1b），kicker 靠 Stream filter 滤（见下）——两者判据同一个标记。
         """
         cluster_name = names.default_name(self.prefix, names.BASE_CLUSTER)
         code = lambda_.Code.from_asset(self._build_lambda_asset())
@@ -348,6 +366,8 @@ class BackendStack(Stack):
             "PREFIX": self.prefix,
             "REGION": self.region,
         }
+        # 起 worker task 的 subnet（reconciler/kicker 共用一份；与写给 cli 的 SSM 同源——见 _worker_subnet_ids）
+        subnets_env = ",".join(self._worker_subnet_ids(vpc))
 
         # ① 退出观察者 Lambda（薄；只 events 表 PutItem 写 task_exited）
         exit_observer = lambda_.Function(
@@ -360,6 +380,9 @@ class BackendStack(Stack):
             environment=common_env,
         )
         self._events_table.grant_write_data(exit_observer)  # 写 task_exited（PutItem）
+        # runs 表**只读**：写前判 run 是否 detached（同 cluster 的同步 cloud run 也触发本 Lambda，ADR 0034
+        # 端到端 cloud 1b 的 handler 侧分流）。观察者绝不写 runs 表（RunState 单写者，ADR 0030）。
+        self._runs_table.grant_read_data(exit_observer)
         # EventBridge rule：本 cluster 的 ECS Task STOPPED → 退出观察者。event pattern 按 cluster 过滤（不误触别的负载）。
         events.Rule(
             self, "EcsStoppedRule",
@@ -390,10 +413,13 @@ class BackendStack(Stack):
         scheduler_role.add_to_policy(iam.PolicyStatement(
             actions=["lambda:InvokeFunction"], resources=[kicker_arn, f"{kicker_arn}:*"]))
         timeout_env = {"KICKER_ARN": kicker_arn, "SCHEDULER_ROLE_ARN": scheduler_role.role_arn}
-        # 超时 schedule 的名字空间（default group 下 {prefix}job-timeout-*，见 lambdas/reconciler.py schedule_name）：
+        # 超时 schedule 的名字空间（default group 下 {prefix}job-timeout-*）：名字空间前缀走命名真源
+        # names.job_timeout_schedule_prefix——推进器建名同源推导（ADR 0033「两层命名」，两侧硬契约：
+        # 单侧改名 → CreateSchedule AccessDenied、超时保护静默降级）。
         # CreateSchedule 需随附 DeleteSchedule（ActionAfterCompletion=DELETE 的 IAM 前置）。
         timeout_schedule_arns = [
-            f"arn:aws:scheduler:{self.region}:{self.account}:schedule/default/{self.prefix}job-timeout-*"
+            f"arn:aws:scheduler:{self.region}:{self.account}:schedule/default/"
+            f"{names.job_timeout_schedule_prefix(self.prefix)}*"
         ]
 
         # ② reconciler Lambda（重；读全量重放 + 起 task + finalize 聚合）
@@ -408,9 +434,11 @@ class BackendStack(Stack):
             # env = common_env + 起 task 所需（SUBNETS/SG/MAX_CONCURRENCY）。lambdas/reconciler.py docstring 的 env
             # 清单里还有 **REPORT_DIR / ASSIGN_PUBLIC_IP——IaC 有意不注入**，由该文件内缺省供给（reports / ENABLED）；
             # 改产物落点前缀或走私有子网（NAT 出网、assignPublicIp=DISABLED）时才需在此显式给。
+            # 注：真要改 REPORT_DIR，用户侧 `submit --report-dir` 须跟着改成同值——detached submit 的 preflight
+            # 比对两侧、不一致即退 2（ADR 0033 preflight 条「产物前缀一致性」）。
             environment={
                 **common_env,
-                "SUBNETS": ",".join(s.subnet_id for s in (vpc.public_subnets or vpc.private_subnets)),
+                "SUBNETS": subnets_env,
                 "SECURITY_GROUPS": self._worker_sg_id,
                 "MAX_CONCURRENCY": "1",  # 稳态并发闸（可后续 context 化；每完成一个才起下一个）
                 **timeout_env,  # job timeout 到点触发器（KICKER_ARN/SCHEDULER_ROLE_ARN，ADR 0034）
@@ -467,7 +495,7 @@ class BackendStack(Stack):
             memory_size=256,
             environment={  # 与 reconciler 同装配（起 task 需 SUBNETS/SG/MAX_CONCURRENCY）
                 **common_env,
-                "SUBNETS": ",".join(s.subnet_id for s in (vpc.public_subnets or vpc.private_subnets)),
+                "SUBNETS": subnets_env,
                 "SECURITY_GROUPS": self._worker_sg_id,
                 "MAX_CONCURRENCY": "1",
                 **timeout_env,  # kicker 也起 task（首批）→ 同样要武装 timeout schedule

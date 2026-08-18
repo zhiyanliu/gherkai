@@ -166,6 +166,29 @@ def test_vote_loop_stops_midway_no_bogus_verdict(captured):
     assert not any(e["type"] == "step_done" for e in captured)  # 不 emit bogus 的 assertion_failed(1/3)
 
 
+def test_vote_loop_full_votes_then_stop_still_emits(captured):
+    # 判据是「票不完整」而非「此刻 _stop」（ADR 0024「安全点丢弃没跑完的单元的判定，但不丢弃已成的执行事实」）：
+    # votes_n=1（默认）时最常见的形态就是停止信号落在唯一那次 act_get 期间、而 act 已带回判定——verdict 与
+    # 已真实发生的 time_worked_s（计费量）都是执行事实，须照常 emit（对称 When/Given 分支），交上层安全点退出。
+    # 护栏防回归成「标志位一置就丢弃投满票的判定」：那会让该 step 的 verdict 与时长一起静默消失、run 级合计低报。
+    nova = _RecordNova(bool_seq=[True])
+
+    orig_act_get = nova.act_get
+    def _act_get_then_stop(instr, schema, timeout=None):
+        r = orig_act_get(instr, schema, timeout=timeout)
+        r.metadata.time_worked_s = 3.5  # 这段时长真的烧了，不该随中止蒸发
+        rs._stop.set()                  # 停止信号落在唯一那票的 act 期间（act 正常返回带回判定）
+        return r
+    nova.act_get = _act_get_then_stop
+
+    r = rs._run_step(nova, "sc:0", _step("Then", '"对吗"'), 1, captured)
+    assert r == "passed"                        # 不是 aborted——票已投满，判定是执行事实
+    done = [e for e in captured if e["type"] == "step_done"]
+    assert len(done) == 1
+    assert done[0]["status"] == "passed" and done[0]["votes"] == {"yes": 1, "total": 1}
+    assert done[0]["cost"] == {"time_worked_s": 3.5}  # 真金白银的时长随事件报出
+
+
 # ---- scenario 循环 _stop 检查：正常 break、不发 step_skipped（区别于 error 短路）----
 def test_run_scenario_stops_on_flag_no_step_skipped(captured):
     nova = _RecordNova()

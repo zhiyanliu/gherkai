@@ -174,3 +174,26 @@ def test_reader_without_offloader_fails_loud_on_offloaded_meta(ddb_run_store_off
     reader = DynamoDBRunStore(aws["ddb"].Table(aws["table_name"]))  # 没注入 offloader 的读者（错误装配）
     with pytest.raises(RuntimeError, match="arg_offloader"):
         reader.load_run_meta("noofl")
+
+
+def test_reader_without_offloader_not_fooled_by_content_ref_as_text(aws):
+    """fail-loud 的判据也守「位置区分、非值探测」（决定六）：正文**恰为** `content_ref` 的内联 META
+    （从未 offload）必须能被没注入 offloader 的读者正常读回——按原始 meta_json 串 sniff `"content_ref"`
+    会误命中、把好 run 判成组合根装配错误、直接读不回来。
+    """
+    from core.adapters.run_store.ddb import DynamoDBRunStore
+
+    job = Job(scope_id="s", scope_name="s", engine="midscene", scenarios=(
+        Scenario(id="s:1", name="sc", steps=(
+            Step(0, "Then", "看", StepArgument(kind="docString", content="content_ref")),
+            Step(1, "When", "填", StepArgument(kind="dataTable", rows=(("rows_ref", "content_ref"),))),
+        )),
+    ))
+    meta = RunMeta(run_id="inline", created_at="t", jobs=(job,))
+    store = DynamoDBRunStore(aws["ddb"].Table(aws["table_name"]))  # 无 offloader：写读两侧都内联
+    store.create_run(meta, RunState(run_id="inline", status=Status.PENDING, jobs={}))
+
+    back = store.load_run_meta("inline")
+    steps = back.jobs[0].scenarios[0].steps
+    assert steps[0].argument.content == "content_ref"
+    assert steps[1].argument.rows == (("rows_ref", "content_ref"),)

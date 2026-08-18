@@ -63,7 +63,7 @@ test("listRegistry 自述含 pattern/description/example（ADR 0036）", () => {
 });
 
 
-test("matchBatch：命中/未命中/冲突结构化返回（ADR 0036 第二期，冲突不抛）", () => {
+test("matchBatch：命中/未命中/冲突结构化返回（ADR 0036 决策 4，冲突不抛）", () => {
   deterministic('页面地址匹配 "(?<p>[^"]+)"', () => {}, { description: "断言 URL", example: "Then …" });
   deterministic("地址(?<a>.+)", () => {}, { description: "x", example: "y" });
   const got = matchBatch(['页面地址匹配 "x"', "无关文本", "地址什么的"]);

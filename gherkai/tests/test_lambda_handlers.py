@@ -1,7 +1,8 @@
 """Lambda handler 事件解析测试（ADR 0034 P4b）：退出观察者 _extract + reconciler _run_ids_from_stream。
 
-只测**事件格式解析**（最易错、最该测的纯逻辑）——用 P4 真验抓到的真实 ECS STOPPED event / DDB Stream event 形状。
-handler 的装配部分（造 boto3/core、tick）靠 P4d 真跑验（moto 测不到真 Stream 触发/真 Fargate）。
+主体测**事件格式解析**（最易错、最该测的纯逻辑）——用真验抓到的真实 ECS STOPPED event / DDB Stream event 形状；
+另有一组走 moto 内存表跑真 handler（末尾「只推进 detached run」——组合根侧分流是行为契约，解析测不出来）。
+真 Stream 触发 / 真 Fargate / 真 EventBridge 投递仍是 moto 之外的真跑边界（绿≠对的证据边界）。
 
 lambdas/ 在仓库根，测试经 sys.path 加它（Lambda 部署时 handler + core + cli 打进同一 zip）。
 """
@@ -266,10 +267,34 @@ def test_kicker_routes_timeout_scope_payload(monkeypatch):
     calls = {}
     monkeypatch.setattr(reconciler, "_build", lambda rid: ("BUILT",))
     monkeypatch.setattr(reconciler, "_handle_timeout", lambda rid, sid, built: calls.update(handled=(rid, sid, built)))
-    monkeypatch.setattr(reconciler, "_tick_runs", lambda run_ids, label: calls.update(ticked=(run_ids, label)) or {"ok": True})
+    monkeypatch.setattr(reconciler, "_tick_runs",
+                        lambda run_ids, label, prebuilt=None: calls.update(ticked=(run_ids, label, prebuilt)) or {"ok": True})
     reconciler.kicker_handler({"run_id": "run-1", "timeout_scope": "a"}, None)
     assert calls["handled"] == ("run-1", "a", ("BUILT",))
-    assert calls["ticked"] == ({"run-1"}, "kicker")  # timeout payload 也照常触发 tick
+    # timeout payload 也照常触发 tick，且把处置用的组合根经 prebuilt 交下去（同一 run 只装配一次）
+    assert calls["ticked"] == ({"run-1"}, "kicker", {"run-1": ("BUILT",)})
+
+
+def test_kicker_timeout_path_builds_once(monkeypatch):
+    """超时路径的组合根只装配一次（护栏）：_build 每次造 boto3 client + 读 META（可能连 S3 还原正文），
+    处置与随后的 tick 复用同一个。tick 只 stub 掉 core.reconcile.tick，_tick_runs 走真身取 prebuilt。"""
+    builds = []
+    monkeypatch.setattr(reconciler, "_build", lambda rid: builds.append(rid) or ("BUILT",) * 7)
+    monkeypatch.setattr(reconciler, "_handle_timeout", lambda rid, sid, built: "stopped")
+    import core.reconcile as _cr
+    monkeypatch.setattr(_cr, "tick", lambda *a, **kw: False)
+    monkeypatch.setattr(reconciler, "_scan_overdue_timeouts", lambda rid, built: None)
+    reconciler.kicker_handler({"run_id": "run-1", "timeout_scope": "a"}, None)
+    assert builds == ["run-1"]
+
+
+def test_kicker_timeout_path_skips_tick_when_not_detached(monkeypatch):
+    """_build 判非 detached（返回 None）时也进 prebuilt：tick 不再白装配一次、整体 no-op。"""
+    builds = []
+    monkeypatch.setattr(reconciler, "_build", lambda rid: builds.append(rid) or None)
+    reconciler.kicker_handler({"run_id": "run-1", "timeout_scope": "a"}, None)
+    assert builds == ["run-1"]
+
 
 def test_scan_overdue_timeouts_only_over_budget(tmp_path, monkeypatch):
     """防御扫（claimed_at ②）只处置「超预算+余量」的 RUNNING job：过期的进处置、未到期/无 claimed_at 的不碰。"""
@@ -288,3 +313,115 @@ def test_scan_overdue_timeouts_only_over_budget(tmp_path, monkeypatch):
     built = _timeout_built(tmp_path / "nocl")
     reconciler._scan_overdue_timeouts("run-1", built)
     assert calls == []
+
+
+# ---------- 只推进 detached run（ADR 0034 端到端 cloud 1b 的 handler 侧分流）----------
+# 同步 `run --backend cloud` 与 detached 共用同一张 events 表、同一个 cluster，而 events item / STOPPED 事件里
+# 没有 detached 标记（标记只在 runs 表 STATE item 上）→ Stream/rule 层滤不掉，两个 handler 必须自己判。
+# 这组用 moto 内存表跑真 handler（含真 tick/真 CAS），**正负两面都验**：非 detached 零动作、detached 照常推进
+# （只验前者会放过「is_detached 恒 False」这种把整条链废掉的假绿）。
+
+import pytest  # noqa: E402
+from moto import mock_aws  # noqa: E402
+
+from core.adapters.run_store.ddb import DynamoDBRunStore  # noqa: E402
+
+_RUNS_TABLE = "gherkai-runs"
+_EVENTS_TABLE = "gherkai-events"
+_BUCKET = "gherkai-artifacts"
+
+
+@pytest.fixture
+def cloud_env(monkeypatch):
+    """moto 内存 runs/events 表 + 桶 + 推进器 Lambda 的 env（先盖假凭证、再 mock，绝不连真 AWS）。"""
+    import boto3
+
+    for k, v in {"AWS_ACCESS_KEY_ID": "testing", "AWS_SECRET_ACCESS_KEY": "testing",
+                 "AWS_SESSION_TOKEN": "testing", "AWS_DEFAULT_REGION": "us-east-1"}.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.delenv("AWS_ENDPOINT_URL", raising=False)
+    with mock_aws():
+        ddb = boto3.resource("dynamodb", region_name="us-east-1")
+        runs = ddb.create_table(
+            TableName=_RUNS_TABLE,
+            KeySchema=[{"AttributeName": "run_id", "KeyType": "HASH"},
+                       {"AttributeName": "item_type", "KeyType": "RANGE"}],
+            AttributeDefinitions=[{"AttributeName": "run_id", "AttributeType": "S"},
+                                  {"AttributeName": "item_type", "AttributeType": "S"}],
+            BillingMode="PAY_PER_REQUEST")
+        events = ddb.create_table(
+            TableName=_EVENTS_TABLE,
+            KeySchema=[{"AttributeName": "pk", "KeyType": "HASH"},
+                       {"AttributeName": "seq", "KeyType": "RANGE"}],
+            AttributeDefinitions=[{"AttributeName": "pk", "AttributeType": "S"},
+                                  {"AttributeName": "seq", "AttributeType": "N"}],
+            BillingMode="PAY_PER_REQUEST")
+        boto3.client("s3", region_name="us-east-1").create_bucket(Bucket=_BUCKET)
+        for k, v in {"REGION": "us-east-1", "RUNS_TABLE": _RUNS_TABLE, "EVENTS_TABLE": _EVENTS_TABLE,
+                     "ARTIFACTS_BUCKET": _BUCKET, "CLUSTER": "gherkai-cluster", "PREFIX": "gherkai-",
+                     "SUBNETS": "subnet-1", "SECURITY_GROUPS": "sg-1", "MAX_CONCURRENCY": "1"}.items():
+            monkeypatch.setenv(k, v)
+        yield {"runs": runs, "events": events}
+
+
+def _seed_run(runs_table, *, detached: bool) -> DynamoDBRunStore:
+    """建一个单 job、全 pending 的 run（detached 标记按参数）——同 submit / 同步 cloud run 的 create_run 形态。"""
+    store = DynamoDBRunStore(runs_table, detached=detached)
+    job = Job(scope_id="a", scope_name="a", engine="novaact",
+              scenarios=(Scenario(id="a:1", name="s", steps=(Step(0, "Given", "x"),)),))
+    store.create_run(
+        RunMeta(run_id="run-1", created_at="t0", jobs=(job,)),
+        RunState(run_id="run-1", status=Status.PENDING, jobs={"a": JobState("a", Status.PENDING)},
+                 started_at="t0"))
+    return store
+
+
+def test_reconciler_noop_for_non_detached_run(cloud_env):
+    """同步 cloud run 的 events 触发 reconciler → 零 claim / 零 launch / 零 finalize（否则与进程内 schedule 双开）。"""
+    store = _seed_run(cloud_env["runs"], detached=False)
+    reconciler.handler({"Records": [_stream_record("run-1#a")]}, None)
+    state = store.load_run_state("run-1")
+    assert state.jobs["a"].status == Status.PENDING   # 零 claim（CAS 没抢）
+    assert state.status == Status.PENDING             # 零投影写、零 finalize（仍是 create_run 的初态）
+    # 零 launch：launch 真被调过则 tick 的失败补偿会往 events 表写一条 exit 记录（moto 无 task-def，RunTask 必失败）
+    assert cloud_env["events"].scan()["Count"] == 0
+
+
+def test_reconciler_ticks_detached_run(cloud_env):
+    """对偶（防「gate 恒真」的假绿）：detached run 照常推进——tick 真跑、CAS 抢到那个 pending job。"""
+    store = _seed_run(cloud_env["runs"], detached=True)
+    reconciler.handler({"Records": [_stream_record("run-1#a")]}, None)
+    assert store.load_run_state("run-1").jobs["a"].status == Status.RUNNING
+
+
+def test_exit_observer_skips_non_detached_run(cloud_env):
+    """同步 cloud run 的 task 停 → 不写 task_exited（它无 body 属性，会击穿同步路径的 events Query 读端）。"""
+    _seed_run(cloud_env["runs"], detached=False)
+    r = exit_observer.handler({"detail": _stopped_detail("run-1", "a", 0)}, None)
+    assert r.get("skipped") is True
+    assert cloud_env["events"].scan()["Count"] == 0
+
+
+def test_exit_observer_records_exit_for_detached_run(cloud_env):
+    """对偶：detached run 的 task 停 → 照常写 task_exited（机制二的链不能被分流废掉）。"""
+    _seed_run(cloud_env["runs"], detached=True)
+    r = exit_observer.handler({"detail": _stopped_detail("run-1", "a", 0)}, None)
+    assert r.get("ok") is True
+    items = cloud_env["events"].scan()["Items"]
+    assert len(items) == 1 and items[0]["item_type"] == "exit"
+
+
+def test_reconciler_writes_timestamps_in_compose_clock_format(cloud_env):
+    """推进器 Lambda 落库的时间戳格式 = `compose.now_iso`（三宿主一份时钟，ADR 0034「时钟也只一份」）。
+
+    曾在本文件自带 `_now_iso`（`strftime` 的 `…Z`），与 submit 侧 `compose.now_iso`（`isoformat` 的 `+00:00`）
+    并存 → 同一份 RunState 内 started_at 与 claimed_at 格式不同、`status --json` 机读消费者要兼容两种。
+    """
+    from gherkai import compose
+
+    store = _seed_run(cloud_env["runs"], detached=True)
+    reconciler.handler({"Records": [_stream_record("run-1#a")]}, None)
+    claimed_at = store.load_run_state("run-1").jobs["a"].claimed_at
+    assert claimed_at, "tick 没写 claimed_at，断言会空转"
+    # 逐字比对「解析回来再 isoformat 是否原样」——退回 `…Z` 写法即失败
+    assert claimed_at == compose.parse_iso(claimed_at).isoformat()

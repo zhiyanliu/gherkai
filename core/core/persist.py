@@ -11,10 +11,10 @@
 commit-point 写序（ADR 0030 决定三）：数据面 ResultStore 先逐 job 落 → 控制面 RunStore.finalize 最后写。
 「finalize 一落 = run 已提交、判定就绪」。
 
-并发不变量（ADR 0030 决定三）：两条写 RunStore 的路径——RUNNING 中间态刷在 **worker 线程**（经 sink，
-schedule 的 sink_lock 串行）、job 终态刷在 **主线程**（经 on_job_complete，as_completed 串行）——是两个
-不同线程经两套不同串行机制。local adapter 的 update_job_state 是整文件 read-modify-write、非自身线程安全。
-故本服务**自持一把锁**，所有写 store 的入口都走它，不依赖「sink_lock 与主线程碰巧不撞」。
+并发不变量（ADR 0030 决定三）：两条写 RunStore 的路径——RUNNING 中间态刷在 **worker 线程**（经 on_event，
+在 schedule 的 sink_lock **之外** fire，故落库 RMW 不堵别的 worker 的进度显示）、job 终态刷在 **主线程**
+（经 on_job_complete，as_completed 串行）。local adapter 的 update_job_state 是整文件 read-modify-write、
+非自身线程安全，而 on_event 不受 sink_lock 保护——故本服务**自持一把锁**，所有写 store 的入口都走它。
 """
 from __future__ import annotations
 

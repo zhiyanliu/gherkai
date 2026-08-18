@@ -1,8 +1,12 @@
-"""wire 协议（ADR 0024）：core↔worker 的 JSON 序列化层。
+"""wire 协议（ADR 0024）：core↔worker 的 JSON 序列化层 + 退出码约定。
 
 core 把 Job 序列化成 JSON 喂 worker stdin；worker 逐行吐 ADR 0024 事件到专用事件通道（fd，号经
 EVENTS_FD 传给 worker；非 stdout——stdout 留给引擎 SDK 噪声，ADR 0024 三通道分离），
 core 读行反序列化成 model.Event。这是两端（core 子进程 adapter + 语言无关的 worker）共用的形状约定。
+
+事件行之外，协议还有一条 **out-of-band 通道：worker 退出码**（建连失败早于任何事件 emit，走不了事件
+通道，ADR 0024「退出码约定」/ 0028）——故 `EX_WORKER_NETWORK` 与「退出码 → 异常」的翻译也归这里，
+各 Engine adapter 只负责把自己传输里的码取出来交给它（见文件末段）。
 
 设计：dataclass ↔ plain dict ↔ JSON。事件按 "type" 字段分派回正确的 Event 子类。
 保持手写映射（不靠 dataclasses.asdict 自动），因为 wire 形状是跨语言契约——
@@ -12,6 +16,7 @@ from __future__ import annotations
 
 import json
 
+from core.errors import WorkerNetworkError
 from core.model import (
     Cost,
     Event,
@@ -157,3 +162,30 @@ def event_from_json(d: dict) -> Event:
 def event_from_line(line: str) -> Event:
     """worker 事件通道一行（子进程态 = EVENTS_FD 的 fd；Fargate 态 = DDB events 表 body）→ model.Event。"""
     return event_from_json(json.loads(line))
+
+
+# ============================================================================
+# worker → core：退出码（out-of-band 信号，ADR 0024「退出码约定」/ 0028）
+# ============================================================================
+
+# worker 网络专用退出码：建连失败、重试耗尽时 worker 以此码退出（建连早于任何事件 emit，无法走事件通道）。
+# 值避开 POSIX sysexits(64-78)/shell 保留(126-128+n)/信号区。**两个引擎 worker 各自硬编码同一个值**
+# （Nova 的 run_scope.py / Midscene 的 run-scope.ts——语言边界抄不掉）；core 侧只此一处，Engine adapter 一律
+# import 本常量与下面的翻译函数，别各抄一份（抄一份 = 两处漂移，靠注释维持一致的人工约束）。
+EX_WORKER_NETWORK = 80
+
+
+def raise_for_worker_exit(rc: int, *, code_label: str) -> None:
+    """worker 退出码 → 异常（协议翻译，各 Engine adapter 共用的单一事实源）。
+
+    80 → `WorkerNetworkError`（schedule 记 network_error、可重试整 job，ADR 0028）；其余正非零 →
+    `RuntimeError`（worker 异常退出，schedule 记 error）；0 与负码 → 不抛（正常退出 / 被 SIGKILL 强杀，
+    后者由调用方各自处置）。
+
+    code_label 只进消息文本：各传输的退出码字段名不同（子进程 `returncode` / ECS `exitCode`），诊断行
+    须说该传输的话（也是既有测试匹配的措辞）。
+    """
+    if rc == EX_WORKER_NETWORK:
+        raise WorkerNetworkError(f"worker 建连失败（网络/SSL 瞬时故障），退出码 {rc}")
+    if rc > 0:
+        raise RuntimeError(f"worker 异常退出 {code_label}={rc}")

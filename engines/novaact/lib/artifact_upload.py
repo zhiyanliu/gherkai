@@ -22,6 +22,17 @@ import os
 import shutil
 from pathlib import Path
 
+# 按后缀显式打 Content-Type（与 Midscene uploader 同一规则，ADR 0024 两引擎语义对称）：boto3/s3transfer
+# **不猜** content type，默认落成 binary/octet-stream → presigned/控制台直开 trajectory .html（ADR 0027 选
+# .html 就是为「人能看」）会被当附件下载而非渲染。未列后缀不设（走 S3 默认）。
+_CONTENT_TYPE_BY_SUFFIX = {".html": "text/html; charset=utf-8"}
+
+
+def _extra_args(local_abs: Path) -> dict:
+    """upload_file 的 ExtraArgs（两处上传共用，避免第三处漂移）：仅在有映射时带 ContentType。"""
+    ct = _CONTENT_TYPE_BY_SUFFIX.get(local_abs.suffix.lower())
+    return {"ContentType": ct} if ct else {}
+
 
 class ArtifactUploader:
     """按注入的 S3 落点上传产物、生成 report ref。无落点配置时是 no-op（报 file://、不上传）。
@@ -90,7 +101,7 @@ class ArtifactUploader:
         # （key 确定性可算）。消除对已传兄弟的冗余 PutObject（ADR 0029 幂等去重）。
         if str(p.resolve()) in self._uploaded:
             return f"s3://{self._bucket}/{key}"
-        self._s3().upload_file(str(p), self._bucket, key)  # 实时上传（失败抛 → 可观测、不删）
+        self._s3().upload_file(str(p), self._bucket, key, ExtraArgs=_extra_args(p))  # 实时上传（失败抛 → 可观测、不删）
         self._uploaded.add(str(p.resolve()))               # 记下，flush 时跳过
         return f"s3://{self._bucket}/{key}"
 
@@ -112,7 +123,7 @@ class ArtifactUploader:
             if str(f.resolve()) in self._uploaded:
                 continue  # reportRef 文件已实时传，跳过
             try:
-                self._s3().upload_file(str(f), self._bucket, self._key_for(f))
+                self._s3().upload_file(str(f), self._bucket, self._key_for(f), ExtraArgs=_extra_args(f))
             except Exception:  # noqa: BLE001  剩余文件上传失败：吞掉（报告链接不依赖它），但标记 → 整目录不删
                 self._flush_ok = False
         # 全部成功（实时 + 剩余）才删整目录——本地零残留；任一失败则保留（产物不丢，ADR 0029 护栏）

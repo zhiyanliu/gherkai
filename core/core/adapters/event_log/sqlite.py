@@ -9,8 +9,8 @@ worker 事件（原始 ADR 0024 JSON 行 + worker 段单调 seq）+ 平台侧退
 **表结构镜像 DDB events 表**（[0024]/[0034]）：
 - events 表：(scope_id, seq) 复合主键，line=原始 JSON 行，emit_ts=worker emit 墙钟（reduce_event 的 now）。
   worker 段单调数值 seq——per-run 进程读 fd3 时按到达顺序 1,2,3… 赋（worker 一个 scope 串行 emit）。
-- exits 表：(scope_id) 主键，exit_code。独立表 = 独立键空间（机制一：退出记录不占 worker 数值 seq 段、
-  不参与断号）。
+- exits 表：(scope_id) 主键，exit_code（NULL=exitCode 未落值的宽限态）+ timed_out（超时处置所致退出的归因
+  标志，[0034]「job timeout」节）。独立表 = 独立键空间（机制一：退出记录不占 worker 数值 seq 段、不参与断号）。
 
 并发：per-run 进程写、reconciler 读（同进程内两职责，也可能 status --wait 另进程读）。SQLite WAL 模式 +
 短事务，多读单写足够；跨进程写并发不在 local 目标内（写只有 per-run 进程一个）。
@@ -78,6 +78,12 @@ class SqliteEventLog:
                 "INSERT OR REPLACE INTO exits (scope_id, exit_code, timed_out) VALUES (?, ?, ?)",
                 (scope_id, exit_code, 1 if timed_out else 0),
             )
+
+    def has_exit(self, scope_id: str) -> bool:
+        """单个 scope 有没有退出记录（**只读**，exits 主键点查）——对位 `DdbEventLog.has_exit`，两侧同形。"""
+        with self._connect() as conn:
+            return conn.execute(
+                "SELECT 1 FROM exits WHERE scope_id = ?", (scope_id,)).fetchone() is not None
 
     def records(self) -> list[EventRecord]:
         """读回全量 records（供 project() 全量重放）：worker 事件（解析回 Event）+ 退出记录。

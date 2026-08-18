@@ -36,6 +36,16 @@ def _iter_arguments(meta_dict: dict):
                     yield arg, scope_id, scenario_id, step["index"]
 
 
+def has_pointers(meta_dict: dict) -> bool:
+    """meta_dict 里是否存在 offload 指针（`content_ref`/`rows_ref`）——**按位置查、非整串 sniff**。
+
+    与 `restore` 同一判据（决定六「位置区分、非值探测」）：只看 argument dict 上有没有 `_ref` 键，故
+    docString 正文 / dataTable cell 的值恰好是 `content_ref` 也不误判。`DynamoDBRunStore.load_run_meta`
+    用它做「META 含指针却没注入 offloader」的 fail-loud 检测（决定七）。
+    """
+    return any("content_ref" in arg or "rows_ref" in arg for arg, *_ in _iter_arguments(meta_dict))
+
+
 class S3StepArgumentOffloader:
     """把 RunMeta 里 docString/dataTable 的正文搬 S3（DdbRunStore 注入）。offload/restore 一对，互逆。"""
 

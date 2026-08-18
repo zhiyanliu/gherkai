@@ -64,11 +64,21 @@ def list_registry() -> list[dict]:
 
 
 class DeterministicConflict(Exception):
-    """一个 step 文本命中多条确定性模式（ADR 0022：最多命中一条，多条是配置错误）。"""
+    """一个 step 文本命中多条确定性模式（ADR 0022：最多命中一条，多条是配置错误）。
 
-    def __init__(self, message: str, patterns: list[str] | None = None) -> None:
-        super().__init__(message)
-        self.patterns = patterns or []
+    冲突清单只经 message 传（派发侧只取 `str(e)` 进 step_done.message）；预检要结构化清单走
+    match_batch 的 `{"conflict": [...]}`（ADR 0036），不从异常上挂字段。
+    """
+
+
+def _hits(text: str) -> list[tuple[_Entry, re.Match]]:
+    """扫注册表收**全部**命中——match（真跑派发）与 match_batch（plan 预检）唯一的扫描实现面。
+
+    两个消费者只在「命中数怎么处置」上分叉，匹配语义本身不复制成两份：ADR 0036 的「同一注册表、
+    同一 search 实现」由此结构保证，改匹配面（search→fullmatch、大小写归一、pattern 预处理）不会
+    漏改一处让 plan 标注对真跑撒谎。
+    """
+    return [(e, m) for e in _REGISTRY if (m := e.pattern.search(text))]
 
 
 def match(text: str):
@@ -76,34 +86,34 @@ def match(text: str):
 
     返回 (handler, groups_dict) 或 None（未命中走 AI）。命中多条 → DeterministicConflict。
     """
-    hits = [(e, m) for e in _REGISTRY if (m := e.pattern.search(text))]
+    hits = _hits(text)
     if not hits:
         return None
     if len(hits) > 1:
         raws = ", ".join(repr(e.raw) for e, _ in hits)
         raise DeterministicConflict(
-            f"step {text!r} 命中多条确定性模式 [{raws}]（ADR 0022：最多命中一条，请收紧模式）",
-            patterns=[e.raw for e, _ in hits],
+            f"step {text!r} 命中多条确定性模式 [{raws}]（ADR 0022：最多命中一条，请收紧模式）"
         )
     entry, m = hits[0]
     return entry.handler, m.groupdict()
 
 
 def match_batch(texts: list[str]) -> list[dict | None]:
-    """批量 match 查询（ADR 0036 第二期）：plan 命中标注用——对每条 step 文本回答「命中哪条 / 冲突 / 未命中」。
+    """批量 match 查询（ADR 0036 决策 4）：plan 命中标注用——对每条 step 文本回答「命中哪条 / 冲突 / 未命中」。
 
-    匹配语义与 match() 同一实现面（同一 _REGISTRY、同一 search 语义），冲突不抛、结构化返回
-    （plan 是预检不是执行）。返回元素：None | {"pattern","description"} | {"conflict": [patterns]}。
+    与 match() 共用 `_hits`（同一扫描实现面），冲突不抛、结构化返回（plan 是预检不是执行）。
+    返回元素：None | {"pattern","description"} | {"conflict": [patterns]}。
     """
     out: list[dict | None] = []
     for text in texts:
-        hits = [e for e in _REGISTRY if e.pattern.search(text)]
+        hits = _hits(text)
         if not hits:
             out.append(None)
         elif len(hits) > 1:
-            out.append({"conflict": [e.raw for e in hits]})
+            out.append({"conflict": [e.raw for e, _ in hits]})
         else:
-            out.append({"pattern": hits[0].raw, "description": hits[0].description})
+            entry, _ = hits[0]
+            out.append({"pattern": entry.raw, "description": entry.description})
     return out
 
 

@@ -38,8 +38,11 @@ def test_miss_returns_none():
 def test_multiple_hits_raises_conflict():
     d.deterministic(r"地址(?P<a>.+)", description="测试", example="Then 测试")(lambda ctx, a: None)
     d.deterministic(r"(?P<b>地址.+)", description="测试", example="Then 测试")(lambda ctx, b: None)
-    with pytest.raises(d.DeterministicConflict):
+    with pytest.raises(d.DeterministicConflict) as ei:
         d.match("地址匹配 x")
+    # 冲突清单只经 message 传（派发侧只取 str(e) 落进 step_done.message）→ 撞上的两条模式串都得在 message 里，
+    # 否则 QA 无法定位是哪两条撞了。要结构化清单走 match_batch 的 {"conflict": [...]}（ADR 0036），不挂异常字段。
+    assert r"地址(?P<a>.+)" in str(ei.value) and r"(?P<b>地址.+)" in str(ei.value)
 
 
 def test_handler_assertion_propagates():
@@ -94,7 +97,7 @@ def test_worker_dump_mode_real_subprocess():
 
 
 def test_match_batch_hit_miss_conflict():
-    """match_batch（ADR 0036 第二期）：命中/未命中/冲突结构化返回（冲突不抛——plan 是预检不是执行）。"""
+    """match_batch（ADR 0036 决策 4）：命中/未命中/冲突结构化返回（冲突不抛——plan 是预检不是执行）。"""
     d.deterministic(r'页面地址匹配 "(?P<p>[^"]+)"', description="断言 URL", example="Then …")(lambda ctx, p: None)
     d.deterministic(r"地址(?P<a>.+)", description="x", example="y")(lambda ctx, a: None)
     got = d.match_batch(['页面地址匹配 "x"', "无关文本", "地址什么的"])

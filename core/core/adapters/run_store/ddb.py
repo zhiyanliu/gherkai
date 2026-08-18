@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 
 from core.adapters._boto import require_boto3
+from core.adapters.run_store.arg_offload import has_pointers
 from core.model import JobState, RunMeta, RunState, Status
 from core.serialize import (
     run_meta_from_dict,
@@ -171,8 +172,9 @@ class DynamoDBRunStore:
     def project_state(self, run_id: str, state: RunState) -> bool:
         """HWM 条件写 STATE：仅当 (传入 hwm ≥ 库中 hwm) 且 (库中未 finalize) 才写（机制三①）。CCF → stale/已终态 → False。
 
-        **run 级 status 钳为 running/pending、不落终态**（ADR 0030：终态是 finalize 专属；投影提前落终态会挡住
-        try_finalize）。条件双守：HWM 挡 stale + status 挡「已 finalize 被刷回」。
+        **run 级 status 钳为 pending/running、不落终态**（ADR 0030：终态是 finalize 专属；投影提前落终态会
+        挡住 try_finalize）。取值规则见 `projected_run_status`（与 local adapter 共用一份）。条件双守：
+        HWM 挡 stale + status 挡「已 finalize 被刷回」。
 
         **各 job 态逐 job 单调条件写（机制三②的 job 级半边，对拍 local 的逐 job 合并）**：task_exited 无数值
         seq，两次投影可携带相同 HWM、①挡不住 job 终态被 stale 投影刷回（还会重开 double-launch 窗口，机制四）。
@@ -182,10 +184,13 @@ class DynamoDBRunStore:
         jobs）保证中间态只会「标量新、job 旧」= 等价于一次携带旧 job 视图的合法投影，下轮重放收敛。
         update_item 天然不碰未提及属性——started_at 由 create_run 落、此处不再传（修「put_item 整 item 覆盖把
         started_at 抹掉」的对拍不一致）。"""
-        from core.project import _lifecycle_rank
+        from core.project import _lifecycle_rank, projected_run_status
 
         new_hwm = state.high_water_mark or 0
-        run_status = Status.PENDING.value if state.status == Status.PENDING else Status.RUNNING.value
+        # run 级 status 按投影里的 job 态定（全 pending → pending，否则 running）；传入的 run 级值是终态
+        # 聚合值、一律不用（规则与理由见 projected_run_status）。此处读不到库中 job 态（下面 per-job 条件写
+        # 才碰它们），判据只看投影——与 local 同一规则、可对拍。
+        run_status = projected_run_status(state.jobs).value
         try:
             self._table.update_item(
                 Key={"run_id": run_id, _ITEM_TYPE_ATTR: _STATE},
@@ -262,10 +267,12 @@ class DynamoDBRunStore:
         if self._arg_offloader is not None:
             # content_ref/rows_ref 取回、消解回内联，再交 serialize（对 core 透明，ADR 0030 决定六）
             meta_dict = self._arg_offloader.restore(meta_dict, run_id)
-        elif '"content_ref"' in item["meta_json"] or '"rows_ref"' in item["meta_json"]:
+        elif has_pointers(meta_dict):
             # fail-loud（ADR 0030 决定七「不给生产选要不要正确」）：META 含 offload 指针而本实例没注入
             # offloader = 组合根装配错误（曾发生：Lambda 组合根漏注入 → 正文静默还原成 None、worker 拿
-            # 空参数跑错）。宁炸不静默降级。
+            # 空参数跑错）。宁炸不静默降级。判据走 arg_offload 的**位置遍历**（与 restore 同源，决定六
+            # 「位置区分、非值探测」）——对 meta_json 原始串做 '"content_ref"' 子串 sniff 会被「正文恰为
+            # 该串」的 docString/dataTable cell 误命中，把好 run 判成装配错误、读不回来。
             raise RuntimeError(
                 f"run {run_id} 的 META 含 offload 指针（content_ref/rows_ref）但 RunStore 未注入 "
                 "arg_offloader——组合根装配错误（ADR 0030 决定七：offloader 生产默认挂载）")
@@ -294,3 +301,20 @@ class DynamoDBRunStore:
             # DDB Number → int（boto3 resource 层给 Decimal）；缺键 → None（同步路径 / 旧数据向后兼容）
             high_water_mark=int(hwm) if hwm is not None else None,
         )
+
+    def is_detached(self, run_id: str) -> bool:
+        """STATE item 上有没有 `detached` 标记（ADR 0034）：True = 无状态跑批的 submit 建的 run。
+
+        **adapter-only 只读访问器、不在 RunStore port 上**——detached 是执行环境属性、不进 core 模型
+        （ADR 0034 「filter 必须区分写入者」条），只有云端推进器组合根需要它做「只推进 detached run」的
+        分流：同步 `run --backend cloud` 由进程内 schedule 推进，推进器碰它即双开推进器。
+        STATE 缺失 → False（保守不推进；`create_run` 的写序 META→STATE 保证 detached run 被触发时 STATE 已在）。
+        ProjectionExpression 只取标记（不拖回可能很大的 jobs Map）；`#d` 走 names 以防 DDB 保留字。
+        """
+        resp = self._table.get_item(
+            Key={"run_id": run_id, _ITEM_TYPE_ATTR: _STATE},
+            ConsistentRead=True,
+            ProjectionExpression="#d",
+            ExpressionAttributeNames={"#d": "detached"},
+        )
+        return bool((resp.get("Item") or {}).get("detached"))

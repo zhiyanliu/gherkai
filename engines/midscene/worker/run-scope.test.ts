@@ -10,6 +10,7 @@ import assert from "node:assert";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { spawn } from "node:child_process";  // 自述入口的 stdout 完整性只能真跑子进程验（见文件末那条）
 
 const _events: any[] = [];
 const testSink = { emit: async (e: unknown) => { _events.push(e); } };  // 注入进 runStep/runScenario
@@ -446,4 +447,24 @@ test("shutdownSequence: reportFile 空窗 → cleanup 照跑、抢传跳过", as
   const { order, deps } = shutdownSpy({ reportFile: null });
   await shutdownSequence(deps);
   assert.deepEqual(order, ["cleanup"], "无 reportFile：只 cleanup，interruptSnapshot 内部跳过 snapshot");
+});
+
+
+// ---- 自述入口（ADR 0036）的 stdout payload 完整性：真跑子进程 + 真 pipe ----
+// **必须真跑**：截断只发生在「真 pipe + 真 process.exit + 真 tsx 非阻塞 fd 1」的组合里，注 fake sink 的单测
+// 看不见它（写法看着都对、绿也照绿）。故这条 spawn 真 worker、喂超 64KB（pipe 缓冲）的 payload，断言 stdout
+// 是完整可解析 JSON——护住「写完再退」的机制（见 run-scope.ts writeStdoutFlushed 注释里两种失败写法）。
+test("--match-steps: 超 64KB payload 经 pipe 完整送出（ADR 0036，不被 exit 截断）", async () => {
+  const texts = new Array(2000).fill('页面地址匹配 "/wiki/OpenAI"');  // 命中项，输出 ≈330KB > 64KB
+  const proc = spawn(process.execPath, ["--import", "tsx", path.join(import.meta.dirname, "run-scope.ts"), "--match-steps"],
+    { stdio: ["pipe", "pipe", "pipe"] });
+  proc.stdin.end(JSON.stringify(texts));
+  const out: Buffer[] = [];
+  proc.stdout.on("data", (c) => out.push(c));
+  const code: number = await new Promise((r) => proc.on("close", r));
+  const raw = Buffer.concat(out).toString("utf-8");
+  assert.equal(code, 0, `worker 应退 0，stdout ${raw.length} 字符`);
+  assert.ok(Buffer.byteLength(raw) > 65536, `payload 须超 pipe 缓冲才有意义，实际 ${Buffer.byteLength(raw)} 字节`);
+  const got = JSON.parse(raw);  // 截断时这里抛（rc 仍 0，故只靠退出码守不住）
+  assert.equal(got.length, texts.length, "逐条命中结果不该丢");
 });

@@ -19,7 +19,8 @@ grace/stopTimeout 校准要的是 SIGTERM→退出的**真实墙钟预算**（`s
   SIGTERM→SIGKILL 被 stopTimeout 截断时 stopCode 仍是 UserInitiated，但 executionStoppedAt-stoppingAt ≈ stopTimeout
   即证据（worker 没在 grace 内退干净）。
 
-**run-2/run-3 用法**（协作停止路径：运行中发 StopTask 触发 SIGTERM）：
+**取中断样本的用法**（协作停止路径：运行中发 StopTask 触发 SIGTERM，即 ADR 0032 校准表里的「中断样本」；
+无中断的 baseline 跑不需要这步——它只测 act 正常完成墙钟，见 tools/events_wallclock.py）：
   1. `--backend cloud` 起一个 worker（或 e2e）；从 events 表见 step_started（act in-flight）。
   2. `aws ecs list-tasks --cluster <cluster>` 拿 task ARN，`aws ecs stop-task` 手动停（触发 SIGTERM）。
   3. task STOPPED 后跑本脚本抓时间字段。或直接 `--wait` 让脚本轮询到 STOPPED 再吐（省得手动等）。

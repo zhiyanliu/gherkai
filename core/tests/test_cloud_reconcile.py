@@ -9,8 +9,7 @@ from __future__ import annotations
 import pytest
 
 from core.adapters.event_log import DdbEventLog
-from core.adapters.event_log.ddb import _EXIT_SK
-from core.adapters.fargate_engine import events_pk
+from core.adapters.fargate_engine import EXIT_SK, events_pk
 from core.model import Job, JobState, RunMeta, RunState, Scenario, Status, Step
 from core.project import project
 
@@ -75,8 +74,19 @@ def test_ddb_record_exit_independent_keyspace(events_table):
     # worker events 仍是 3 条（exit 在高位 SK、不混入）
     assert len([r for r in recs if r.kind == "event"]) == 3
     # 底层：exit item 的 SK 是保留高位
-    got = events_table.get_item(Key={"pk": events_pk("run-1", "a"), "seq": _EXIT_SK})
+    got = events_table.get_item(Key={"pk": events_pk("run-1", "a"), "seq": EXIT_SK})
     assert got["Item"]["item_type"] == "exit"
+
+
+def test_ddb_has_exit_single_scope(events_table):
+    """has_exit 只看本 scope 的退出记录（超时处置的「已在即让路」判据，不重放整 run）：有退出记录才 True，
+    只有 worker 事件的 scope / 同 run 别的 scope 都 False。"""
+    _passed_worker_events(events_table, "a")
+    log = DdbEventLog(events_table, "run-1", ["a", "b"])
+    assert log.has_exit("a") is False  # 有 worker 事件但无退出记录
+    log.record_exit("a", 0)
+    assert log.has_exit("a") is True
+    assert log.has_exit("b") is False  # 同 run 别的 scope 不串扰
 
 
 def test_ddb_records_feed_project(events_table):

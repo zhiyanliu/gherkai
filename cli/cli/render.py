@@ -4,7 +4,7 @@ core 产出纯数据（RunResult、Event）；怎么展示是皮的事，故渲�
 """
 from __future__ import annotations
 
-from core.model import Event, Job, RunResult
+from core.model import Event, Job, RunResult, RunState
 from core.serialize import to_dict  # 单一真理源（ADR 0027）：cli --json 与 manifest 共用
 
 
@@ -89,12 +89,26 @@ def render_text(result: RunResult) -> str:
     return "\n".join(out)
 
 
+def render_run_state(state: RunState) -> str:
+    """`status` 的 RunState 人读渲染（轻量；权威判定明细读 jobs/*.json 或 --json）。
+
+    local/cloud 两路共用一份（保两路一致，ADR 0034）——渲染是皮的事，故住这里而非产品本体层。
+    """
+    lines = [f"run {state.run_id}: {state.status.value}"]
+    for sid, js in state.jobs.items():
+        sess = f"  session={js.session_id}" if js.session_id else ""
+        lines.append(f"  - {sid}: {js.status.value}{sess}")
+    if state.ended_at:
+        lines.append(f"ended_at={state.ended_at}")
+    return "\n".join(lines)
+
+
 # ---- plan 预检（dry-run）渲染：纯本地、不烧钱，展示 .feature → scope/job 分组 ----
 
 def render_plan_text(jobs: list[Job], default_engine: str, dispatch: dict | None = None) -> str:
     """plan 产出 Job[] → 人看的多行预检视图（scope/engine/scenario/step，不真跑）。
 
-    dispatch（可选，ADR 0036 第二期）：{(scope_id, scenario_id, step_index): probe}——worker 的命中
+    dispatch（可选，ADR 0036 决策 4）：{(scope_id, scenario_id, step_index): probe}——worker 的命中
     自述。命中 → 行尾标「← 确定性:」；冲突 → 标 ⚠（真跑该 step 将 error）；None/缺失 → 不标（默认 AI，少噪声）。
     """
     n_scenarios = sum(len(j.scenarios) for j in jobs)
@@ -162,4 +176,4 @@ def plan_to_dict(jobs: list[Job], default_engine: str, dispatch: dict | None = N
 
 
 # to_dict 已移入 core.serialize（单一真理源，cli 与 manifest 共用），从那里 re-export。
-__all__ = ["format_event", "render_text", "render_plan_text", "plan_to_dict", "to_dict"]
+__all__ = ["format_event", "render_text", "render_run_state", "render_plan_text", "plan_to_dict", "to_dict"]

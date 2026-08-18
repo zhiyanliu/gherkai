@@ -4,8 +4,9 @@
 // 用底层 Playwright（ctx.page）直接查、**不走 AI、不投票**。这是 ADR 0015 的"确定性逃生舱"。
 //
 // 机制（ADR 0022）：worker 派发每个 step 时**先查确定性注册表**（命中走这里的 handler），
-// 未命中才落 AI catch-all。在此用 `deterministic(正则, handler)` 注册即可——worker 启动时
-// import 本模块，顶层的 deterministic(...) 副作用把锚点登记进表。
+// 未命中才落 AI catch-all。在此用 `deterministic(正则, handler, { description, example })` 注册即可
+// （元数据必填、缺则 fail-loud——ADR 0036「注册即暴露」）——worker 启动时 import 本模块，顶层的
+// deterministic(...) 副作用把锚点登记进表。
 //
 // 角色边界（ADR 0020）：
 //   - 本文件由 test engineer 维护；QA 永远只在 .feature 写自然语言（默认走 AI——派发逻辑在 worker run-scope.ts）。

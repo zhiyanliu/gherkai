@@ -393,6 +393,18 @@ def test_submit_cloud_preflight_probes_taskdefs_and_lambda_chain(tmp_path, monke
     pf = preflight_calls[0]
     assert pf["task_defs"] == ["gherkai-novaact-worker"]
     assert pf["lambda_fns"] == ["gherkai-kicker", "gherkai-reconciler", "gherkai-exit-observer"]
+    # 产物前缀一致性也在提交前比（--report-dir vs 推进器 REPORT_DIR，ADR 0033）——不传则该探针整体失效
+    assert pf["report_dir"] == "reports"
+
+
+def test_submit_cloud_passes_custom_report_dir_to_preflight(tmp_path, monkeypatch, capsys):
+    """非默认 --report-dir 也要交给 preflight 比对（否则提交侧/推进侧前缀静默分裂、结果落别处）。"""
+    record: list = []
+    _, _, preflight_calls = _patch_cloud_handles(monkeypatch, record)
+    rc = m.main(["submit", str(_write_feature(tmp_path)), "--backend", "cloud",
+                 "--region", "us-east-1", "--report-dir", "mine"])
+    assert rc == 0
+    assert preflight_calls[0]["report_dir"] == "mine"
 
 
 def test_submit_cloud_preflight_failure_exits_2(tmp_path, monkeypatch, capsys):
@@ -452,11 +464,42 @@ def test_submit_cloud_forks_tunnel_watch_daemon(tmp_path, monkeypatch, capsys):
 
     monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: forked.append(cmd) or _FakeProc())
     rc = m.main(["submit", str(_write_feature(tmp_path)), "--backend", "cloud",
-                 "--region", "us-east-1", "--expose-local", "http://localhost:3000"])
+                 "--region", "us-east-1", "--expose-local", "http://localhost:3000",
+                 "--default-job-timeout", "450"])
     assert rc == 0
     watch = [c for c in forked if "_tunnel_watch" in c]
     assert len(watch) == 1
     cmd = watch[0]
     assert cmd[cmd.index("--tunnel-pid") + 1] == "777"
     assert "--ddb-table" in cmd
-    assert "保持开机" in capsys.readouterr().err  # 明示边界（关机=隧道断）
+    # TTL 按 definition 算并显式传给守护（ADR 0035 决策 3；曾恒 1h 且无生产写入者 → 与 run 预算脱钩）
+    from gherkai import tunnel_host
+
+    expected = tunnel_host.CLOUD_STARTUP_MARGIN_S + 450.0  # 单 job × --default-job-timeout
+    assert float(cmd[cmd.index("--ttl") + 1]) == expected
+    err = capsys.readouterr().err
+    assert f"{expected:.0f}s" in err  # submit 打印该 TTL（可见性）
+    assert "保持开机" in err  # 明示边界（关机=隧道断）
+
+
+def test_submit_cloud_tunnel_ttl_flag_overrides_computed(tmp_path, monkeypatch, capsys):
+    """`--tunnel-ttl` 给了就用用户值（显式覆盖旋钮，不再走 definition 计算）。"""
+    import subprocess
+
+    from gherkai import tunnel as gtunnel
+
+    record: list = []
+    _patch_cloud_handles(monkeypatch, record)
+    info = gtunnel.TunnelInfo(url="https://t.ngrok-free.app", auth="u1:p1", pid=777,
+                              local_origin="http://localhost:3000")
+    monkeypatch.setattr(gtunnel, "make_tunnel",
+                        lambda name: type("P", (), {"start": lambda self, o, **kw: info})())
+    forked = []
+    monkeypatch.setattr(subprocess, "Popen",
+                        lambda cmd, **kw: forked.append(cmd) or type("P", (), {"pid": 9})())
+    rc = m.main(["submit", str(_write_feature(tmp_path)), "--backend", "cloud",
+                 "--region", "us-east-1", "--expose-local", "http://localhost:3000",
+                 "--tunnel-ttl", "120"])
+    assert rc == 0
+    cmd = [c for c in forked if "_tunnel_watch" in c][0]
+    assert float(cmd[cmd.index("--ttl") + 1]) == 120.0

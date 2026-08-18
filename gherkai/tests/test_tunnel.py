@@ -140,6 +140,36 @@ def test_ngrok_binary_missing_reports_install_hint():
         t.start("http://localhost:3000")
 
 
+def test_ngrok_agent_detaches_from_cli_process_group(tmp_path):
+    """**真 spawn**（不 fake popen）：agent 必须落在自己的会话/进程组里（ADR 0035 决策 3）。
+
+    这条不能用 fake popen 验——「进程组归属」正是 mock 之外的真实行为（CLAUDE.md「绿≠对」）。它承重：
+    同组时 CLI 收终端广播的 SIGINT 会连坐杀掉「还要交棒给后台宿主」的 agent（两个后台宿主本身也 setsid）。
+    用一个假 ngrok（写 started tunnel 行后 sleep）走真 subprocess.Popen 起来，只查 pgid、不碰网络。
+    """
+    import os
+
+    fake = tmp_path / "fake-ngrok"
+    fake.write_text(
+        '#!/bin/sh\n'
+        'while [ $# -gt 0 ]; do\n'
+        '  if [ "$1" = "--log" ]; then LOG="$2"; fi\n'
+        '  shift\n'
+        'done\n'
+        'printf \'%s\\n\' \'{"msg":"started tunnel","url":"https://fake.ngrok-free.app"}\' > "$LOG"\n'
+        'exec sleep 30\n',
+        encoding="utf-8")
+    fake.chmod(0o755)
+
+    info = NgrokTunnel(binary=str(fake), sleep=lambda s: None).start("http://localhost:3000")
+    try:
+        assert info.url == "https://fake.ngrok-free.app"
+        assert os.getpgid(info.pid) != os.getpgid(0)  # 自成进程组 = 不吃终端广播的信号
+        assert os.getpgid(info.pid) == info.pid       # setsid 后自身即组长
+    finally:
+        stop_tunnel(info.pid)  # 宿主按 pid 收尾（唯一拆除面，ADR 0035 决策 1）
+
+
 def test_make_tunnel_unknown_provider():
     with pytest.raises(TunnelError, match="未知隧道 provider"):
         make_tunnel("nope")

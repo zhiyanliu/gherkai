@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import secrets
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -20,7 +21,8 @@ from core.scope import FeatureSource
 
 
 # Nova 单 act 时间上界（ADR 0024 act 有界返回）——**组合根持单一真值**，同时派生两端（消除漂移）：
-# ① 注入 worker 的 NOVA_ACT_TIMEOUT_S env（worker run_scope.py 读它，缺省也是 120、此处显式注入使两端同源）；
+# ① 注入 worker 的 NOVA_ACT_TIMEOUT_S env（worker run_scope.py 读它，缺省也是 120、此处显式注入使两端同源；
+#    subprocess 档见 build_engines、Fargate 档见 build_fargate_engines——两档都注，否则该档的 worker 落回自带字面量）；
 # ② 算 Nova 的 grace 下限（见 engine_min_grace）。env 可覆盖（真跑标定/调优）。
 NOVA_ACT_TIMEOUT_S = int(os.environ.get("NOVA_ACT_TIMEOUT_S", "120"))  # SDK 允许 [2,1800]
 # grace 余量（ADR 0024/0028 grace 硬约束的 margin）：单 step 最坏耗时 + 会话释放 + 余量。→ Nova grace 下限 ≈
@@ -55,15 +57,6 @@ from gherkai.names import (  # noqa: E402
 )
 from gherkai import names as _names  # noqa: E402
 
-_BASE_RUNS_TABLE = _names.BASE_RUNS_TABLE
-_BASE_EVENTS_TABLE = _names.BASE_EVENTS_TABLE
-_BASE_BUCKET = _names.BASE_BUCKET
-_BASE_CLUSTER = _names.BASE_CLUSTER
-_BASE_KICKER_LAMBDA = _names.BASE_KICKER_LAMBDA
-_BASE_RECONCILER_LAMBDA = _names.BASE_RECONCILER_LAMBDA
-_BASE_EXIT_OBSERVER_LAMBDA = _names.BASE_EXIT_OBSERVER_LAMBDA
-_ENGINES = _names.ENGINES
-
 
 def engine_min_grace(engine_name: str) -> float:
     """按引擎给 grace 下限（ADR 0024 grace 硬约束）——**引擎特定值住在组合根**（core 不认）。
@@ -93,14 +86,27 @@ def new_run_id() -> str:
 
 
 def now_iso() -> str:
-    """manifest created_at 时间戳（组合根取时钟，core 不取，ADR 0027）。"""
+    """**唯一的墙钟读取点**（组合根取时钟、core 不取，ADR 0027）：RunState/RunMeta 的一切时间戳走它。
+
+    三个宿主（cli 前台 run / local per-run 进程 / 推进器 Lambda）全调本函数——曾各写一份 `_now_iso`、
+    两种 ISO 格式（`isoformat()` 带微秒+`+00:00` vs `strftime` 的 `…Z`），同一份 RunState 内 started_at 与
+    claimed_at/ended_at 格式不同，`status --json` 的机读消费者要兼容两种（ADR 0016「组合根取时钟」）。
+    """
     return datetime.now(timezone.utc).isoformat()
+
+
+def parse_iso(ts: str) -> datetime:
+    """`now_iso()` 的逆（两宿主共用一份）：解析回 aware datetime，供 claimed_at 超时判定做时间差。
+
+    容 `…Z` 后缀（历史落盘的旧格式，`fromisoformat` 在 3.10 不认它）——读侧宽容，写侧只出 `now_iso()` 一种。
+    """
+    return datetime.fromisoformat(ts.replace("Z", "+00:00"))
 
 
 def repo_root(start: Path | None = None) -> Path:
     """定位仓库根（含 core/ 与 engines/ 的目录）。
 
-    从本文件位置上溯：cli/cli/compose.py → cli/ → 仓库根。允许传入覆盖（测试用）。
+    从本文件位置上溯：gherkai/gherkai/compose.py → gherkai/ → 仓库根（parents[2]）。允许传入覆盖（测试用）。
     """
     if start is not None:
         return start
@@ -112,7 +118,6 @@ def build_engines(
     *,
     nova_logs_dir: str | Path | None = None,
     midscene_run_dir: str | Path | None = None,
-    artifact_s3: tuple[str, str] | None = None,
     region: str | None = None,
     profile: str | None = None,
     extra_http_headers: dict[str, str] | None = None,
@@ -129,11 +134,9 @@ def build_engines(
       report.html 落这里。**必须传绝对路径**：SDK 用 `path.resolve(process.cwd(), MIDSCENE_RUN_DIR)`
       相对 worker cwd 解析，相对路径会落错地方（与 Nova trajectory 早期踩的 cwd 歧义同源）。
 
-    产物 S3 上传落点（ADR 0029「第一期实现定论」）——`artifact_s3=(bucket, prefix)` 非 None 时（跟
-    `--backend cloud` 走、由组合根注入、非 env-sniff）给两个引擎 worker 叠加 `ARTIFACT_S3_BUCKET`/
-    `ARTIFACT_S3_PREFIX` env：worker 据此上传产物→报 `s3://`→删本地。**None（local）→ 不注入 → worker
-    走原 `file://` 路径、零行为变化**。worker 只认"有没有这组 env"，对"我在哪跑"无知（ADR 0016 注入红线）。
-    prefix 约定 = `<report_dir>/<run_id>/`（与 S3ReportStore/ResultStore 同前缀，key 镜像本地 run 树）。
+    **不注入产物 S3 上传落点**（`ARTIFACT_S3_BUCKET`/`PREFIX`）：本函数是 local 档，worker 恒报 `file://`。
+    上传落点由 `build_fargate_engines` 注入（cloud 档，ADR 0029）；`subprocess worker + 注入 S3 落点` 的
+    内部预演由 `tools/e2e_harness.py` 自拼 env 承载（ADR 0016 决策 B），不经本函数。
 
     region/profile（ADR 0016 决策 C）——组合根解析后的 AWS region（已由 `resolve_region` 落实成具体字符串：`--region` >
     `AWS_REGION` > `AWS_DEFAULT_REGION` > profile config）与 profile（`--profile` > `AWS_PROFILE`）：非 None 时经 `_inject_aws`
@@ -149,11 +152,6 @@ def build_engines(
     midscene_dir = repo / "engines" / "midscene"
 
     # 完整继承当前环境（AWS 凭证等）再叠加产物落点——SubprocessEngine 的 env 非 None 时整体替换，故须带 os.environ。
-    # S3 上传 env（cloud 时注入两个引擎共用）：worker 拼 s3://<bucket>/<prefix><产物在 run 树内相对路径>（ADR 0029）。
-    s3_env = (
-        {"ARTIFACT_S3_BUCKET": artifact_s3[0], "ARTIFACT_S3_PREFIX": artifact_s3[1]}
-        if artifact_s3 is not None else {}
-    )
     # 浏览器 context 级额外请求头（ADR 0035 决策 4，如 ngrok-skip-browser-warning）：JSON 经 env 注给
     # 两个 worker，worker 在 browser context 上 setExtraHTTPHeaders（纯 CDP 命令，无回调）。None → 不注入。
     headers_env = (
@@ -171,13 +169,12 @@ def build_engines(
             env["AWS_PROFILE"] = profile
 
     def _env(local_dir: str | Path | None, local_key: str) -> dict | None:
-        # local 落点 env + 可选 S3 上传 env + 可选额外请求头。三者都无 → None（worker 全用 SDK 默认）。
-        if local_dir is None and not s3_env and not headers_env:
+        # local 落点 env + 可选额外请求头。两者都无 → None（worker 全用 SDK 默认）。
+        if local_dir is None and not headers_env:
             return None
         env = {**os.environ}
         if local_dir is not None:
             env[local_key] = str(local_dir)
-        env.update(s3_env)
         env.update(headers_env)
         _inject_aws(env)
         return env
@@ -191,7 +188,7 @@ def build_engines(
         nova_env = {**os.environ}
         _inject_aws(nova_env)  # 补建路径也须叠加 --region/--profile（Nova Workflow 的 nova-act client 读 AWS_REGION/凭证）
     nova_env["NOVA_ACT_TIMEOUT_S"] = str(NOVA_ACT_TIMEOUT_S)
-    # Midscene 补建同理（对称，ADR 0016 决策 C）：midscene_env 为 None（--no-report 无 dirs/无 s3）且 --region/--profile
+    # Midscene 补建同理（对称，ADR 0016 决策 C）：midscene_env 为 None（--no-report 无 dirs）且 --region/--profile
     # 有值时也须建 env 注入——否则 midscene worker 继承 os.environ、拿不到 --profile 覆盖，而它经 fromNodeProviderChain()
     # 消费凭证做 AgentCore/Bedrock 鉴权（真消费、非无害）。仅在有值时补建（无值则继承 os.environ 本就够、免无谓拷贝）。
     if midscene_env is None and (region is not None or profile is not None):
@@ -248,7 +245,7 @@ def query_deterministic(repo: Path, engine: str, *, timeout_s: float = 60.0) -> 
 
 
 def match_deterministic(repo: Path, engine: str, texts: list[str], *, timeout_s: float = 60.0) -> list[dict | None]:
-    """批量问某引擎 worker「这些 step 文本各命中哪条确定性模式」（ADR 0036 第二期，plan 标注用）。
+    """批量问某引擎 worker「这些 step 文本各命中哪条确定性模式」（ADR 0036 决策 4，plan 标注用）。
 
     spawn `worker --match-steps`、stdin 喂 JSON 文本数组、收逐条结果（None=走 AI /
     {"pattern","description"}=命中 / {"conflict":[...]}=命中多条——真跑将 error，plan 预检提前暴露）。
@@ -356,6 +353,63 @@ def resolve_region(explicit_region: str | None, profile: str | None) -> str | No
     except ImportError:
         return None
     return boto3.session.Session(profile_name=profile).region_name
+
+
+@dataclass(frozen=True)
+class CloudTarget:
+    """一次 cloud 调用打到哪儿：prefix + 各资源终名 + region/profile（ADR 0033 两层命名 / 0016 决策 C）。
+
+    产品本体知识（`gherkai` 知道云资源，ADR 0016「演进」节）：入口皮只把已解析的 flag 值交进来，
+    「prefix 怎么推导默认名、哪个资源有 env 兜底、region 怎么落实成字符串」全在 `resolve_cloud_target`。
+    名字类字段一律是**终名**（已叠 prefix / 已被单资源 override 取代），消费者直接用、不再拼。
+    """
+
+    prefix: str
+    region: str | None
+    profile: str | None
+    runs_table: str
+    events_table: str
+    bucket: str
+    cluster: str
+    kicker_lambda: str
+    reconciler_lambda: str
+    exit_observer_lambda: str
+
+    @property
+    def detached_chain_lambdas(self) -> list[str]:
+        """无状态跑批事件驱动链的三 Lambda（ADR 0034）——detached submit 的 preflight 名单，顺序＝链上顺序。"""
+        return [self.kicker_lambda, self.reconciler_lambda, self.exit_observer_lambda]
+
+
+def resolve_cloud_target(
+    *, prefix: str | None = None, region: str | None = None, profile: str | None = None,
+    runs_table: str | None = None, events_table: str | None = None,
+    bucket: str | None = None, cluster: str | None = None,
+) -> CloudTarget:
+    """把入口皮已解析的 flag 值解析成 `CloudTarget`（纯字符串推导 + region 落实，不连 AWS）。
+
+    解析链逐资源不同、**有意非齐整**（保既有 CLI 行为，别为对称乱加 env 兜底）：
+    - prefix：flag > `AWS_RESOURCE_PREFIX` > `DEFAULT_PREFIX`；
+    - runs_table / bucket：flag > `AWS_DDB_TABLE` / `AWS_S3_BUCKET` > prefix 默认名（历史 env 面）；
+    - events_table / cluster / 三 Lambda：flag（Lambda 无 flag）> prefix 默认名，**无 env 兜底**；
+    - profile：flag > `AWS_PROFILE`；region 经 `resolve_region` 落实成具体字符串（见其 docstring）。
+    """
+    profile = profile or os.environ.get("AWS_PROFILE")
+    prefix = prefix or os.environ.get("AWS_RESOURCE_PREFIX") or DEFAULT_PREFIX
+    return CloudTarget(
+        prefix=prefix,
+        region=resolve_region(region, profile),
+        profile=profile,
+        runs_table=(runs_table or os.environ.get("AWS_DDB_TABLE")
+                    or default_name(prefix, _names.BASE_RUNS_TABLE)),
+        events_table=events_table or default_name(prefix, _names.BASE_EVENTS_TABLE),
+        bucket=(bucket or os.environ.get("AWS_S3_BUCKET")
+                or default_name(prefix, _names.BASE_BUCKET)),
+        cluster=cluster or default_name(prefix, _names.BASE_CLUSTER),
+        kicker_lambda=default_name(prefix, _names.BASE_KICKER_LAMBDA),
+        reconciler_lambda=default_name(prefix, _names.BASE_RECONCILER_LAMBDA),
+        exit_observer_lambda=default_name(prefix, _names.BASE_EXIT_OBSERVER_LAMBDA),
+    )
 
 
 # —— 造 boto3 句柄的两个钩子（抽出来供 cli 测试 monkeypatch，验接线而不连真 AWS）——
@@ -485,8 +539,8 @@ def build_fargate_engines(
       具体字符串、经 RunTask overrides 注入 worker）。
     - job-in 落点 = (bucket, `{prefix_key}<run_id>/jobs-in/`)——**jobs-in/ 非 jobs/**（ResultStore 判定真值占 jobs/、
       load_all 枚举它；job-in 独立前缀避撞 key + 误读）。artifact 上传落点 = (bucket, `{prefix_key}<run_id>/`)——与
-      report 同前缀镜像 run 树。**artifact_s3 必注入**（对称 subprocess build_engines 的 s3_env）：否则 Fargate 容器
-      盘停即销毁、引擎产物（trajectory/report）必丢（ADR 0029「cloud 注入不是可选」/0032）。
+      report 同前缀镜像 run 树。**artifact_s3 必注入**（cloud 档唯一的上传落点注入点——local 的 `build_engines`
+      恒不注入）：否则 Fargate 容器盘停即销毁、引擎产物（trajectory/report）必丢（ADR 0029「cloud 注入不是可选」/0032）。
     句柄可注入（测试 monkeypatch），未注入则惰性建（区分 ecs/s3/ddb resource）。
     """
     from core.adapters.fargate_engine import FargateEngine
@@ -504,7 +558,7 @@ def build_fargate_engines(
     # 相同、若共用 jobs/ 前缀会撞 key（互相覆盖）+ 被 load_all 误当判定读。故 job-in 独立前缀 jobs-in/。（真跑暴露。）
     job_s3 = (bucket, f"{pfx}{run_id}/jobs-in/")
     # 产物上传落点（ADR 0029）：prefix = <report_dir>/<run_id>/（run 树根，worker 拼产物相对路径；与 report 同前缀镜像
-    # run 树）。**cloud 必注入**——否则容器盘停即销毁、产物必丢（ADR 0029「cloud 注入不是可选」）。对称 build_engines 的 s3_env。
+    # run 树）。**cloud 必注入**——否则容器盘停即销毁、产物必丢（ADR 0029「cloud 注入不是可选」）。
     artifact_s3 = (bucket, f"{pfx}{run_id}/")
     # SDK 产物落点 env（容器内路径）——**uploader 靠它算 run_dir/相对 key，缺它 no-op 报 file://、产物丢**（真跑暴露）。
     # 容器内固定 run 根 /tmp/gherkai-run/<run_id>/，按引擎子目录（对称 subprocess 侧 nova-trajectories/midscene-run）：
@@ -515,10 +569,15 @@ def build_fargate_engines(
         "midscene": {"MIDSCENE_RUN_DIR": f"{container_run_root}/midscene-run"},
     }
     # 额外请求头（ADR 0035）：对称 build_engines 的 headers_env，经 FargateEngine extra_env 注 RunTask overrides。
-    extra_env = (
+    headers_env = (
         {"GHERKAI_EXTRA_HTTP_HEADERS": json.dumps(extra_http_headers, ensure_ascii=False)}
-        if extra_http_headers else None
+        if extra_http_headers else {}
     )
+    # 引擎特定 env（同 headers 走 extra_env 注 RunTask overrides）：Nova 的 act timeout **双端同源**
+    # （ADR 0024 grace 硬约束）——容器不继承本地 env、RunTask overrides 逐条枚举，故 cloud 档必须显式注，
+    # 否则 worker 落回自带字面量：operator 调 NOVA_ACT_TIMEOUT_S 只抬高了 grace 下限、改不动容器内单 act
+    # 上界，ADR 0032 明写的逃生舱（「要更长 act 就调这个 env」）在云端静默失效、local/cloud 行为分叉。
+    engine_env = {"novaact": {"NOVA_ACT_TIMEOUT_S": str(NOVA_ACT_TIMEOUT_S)}}
 
     def _engine(engine: str) -> Engine:
         return FargateEngine(
@@ -526,16 +585,18 @@ def build_fargate_engines(
             run_id=run_id, cluster=cluster, task_definition=task_def_name(prefix, engine),
             network_config=network_config, job_s3=job_s3, events_table_name=events_table,
             container_name=container_name(engine), artifact_s3=artifact_s3,
-            sdk_artifact_dir_env=sdk_env_by_engine.get(engine, {}), extra_env=extra_env,
+            sdk_artifact_dir_env=sdk_env_by_engine.get(engine, {}),
+            extra_env={**headers_env, **engine_env.get(engine, {})},
             region=region,  # profile 不传（决策 C 非对称）
         )
 
-    return {engine: _engine(engine) for engine in _ENGINES}
+    return {engine: _engine(engine) for engine in _names.ENGINES}
 
 
 def preflight_cloud_resources(
     *, prefix: str, events_table: str, bucket: str, cluster: str, runs_table: str | None = None,
     task_defs: list[str] | None = None, lambda_fns: list[str] | None = None,
+    report_dir: str | None = None,
     region=None, profile=None, ecs=None, s3=None, ddb=None, lam=None,
 ) -> str | None:
     """fail-fast 探 cloud 资源存在性（ADR 0033 preflight 条）——用已解析 prefix 拼出的名去探，不存在返回一句
@@ -549,6 +610,14 @@ def preflight_cloud_resources(
     （同步 run 进程内推进、不依赖链、不传）。句柄可注入（测试）；未注入惰性建。探法全只读：DDB DescribeTable、
     S3 HeadBucket、ECS DescribeClusters/DescribeTaskDefinition、Lambda GetFunction。
     任一 botocore 异常都翻成「资源 X 不存在——是 --prefix 配错、还是 iac_aws_backend（CDK）未部署？」。
+
+    **`report_dir` 非 None 时另比对「推进器的产物前缀」一致性**（存在性之外的唯一语义探针，ADR 0033 preflight 条）：
+    detached cloud 档的产物前缀有**两个独立来源**——提交侧 `--report-dir`（offload 的 args/ 落它）与推进侧
+    Lambda 的 `REPORT_DIR` env（判定真值 jobs/ 与 RunReport 落它，IaC 有意不注入、由 Lambda 内缺省 `reports` 供给）。
+    不一致时提交照样成功、run 照样跑完，但结果落在用户没指定的前缀下（用户在自己给的前缀里找不到报告、
+    提交侧留下一批孤儿 args 对象），是典型「静默分裂」，故挡在提交前。只比 `lambda_fns` 里的**两个推进器**
+    （kicker/reconciler——名按 prefix 从 `names` 真源推出；exit-observer 不读 REPORT_DIR、不比），
+    env 缺该键视作 Lambda 侧缺省 `reports`，两侧都过 `_normalize_prefix` 再比（`reports` 与 `reports/` 不算冲突）。
     """
     import boto3
     from botocore.exceptions import ClientError, BotoCoreError
@@ -588,12 +657,53 @@ def preflight_cloud_resources(
             return _hint(f"ECS task definition {td}")
     if lambda_fns:
         lam = lam or sess.client("lambda")
+        # 读 REPORT_DIR 作一致性比对的只有两个推进器（它们 _build 时用它拼 Result/Report/artifact/job-in 前缀）
+        advancers = {default_name(prefix, _names.BASE_KICKER_LAMBDA),
+                     default_name(prefix, _names.BASE_RECONCILER_LAMBDA)}
         for fn in lambda_fns:
             try:
-                lam.get_function(FunctionName=fn)
+                resp = lam.get_function(FunctionName=fn)  # 返回体已含 Configuration.Environment，无需二次调用
             except (ClientError, BotoCoreError):
                 return _hint(f"Lambda 函数 {fn}（无状态跑批事件驱动链）")
+            if report_dir is None or fn not in advancers:
+                continue
+            env = (resp.get("Configuration", {}).get("Environment") or {}).get("Variables") or {}
+            remote = env.get("REPORT_DIR", "reports")  # 缺键 = Lambda 侧走自己的缺省
+            if _normalize_prefix(remote) != _normalize_prefix(report_dir):
+                return (f"--backend cloud 产物前缀不一致：submit 侧 --report-dir={report_dir!r}，"
+                        f"推进器 {fn} 的 REPORT_DIR={remote!r}。detached 档的判定真值/报告由推进器按它自己的 "
+                        f"REPORT_DIR 落，跑完你会在 --report-dir 下找不到结果。改用 --report-dir={remote!r}，"
+                        f"或在 iac_aws_backend（CDK）给推进器注入 REPORT_DIR={report_dir!r}。")
     return None
+
+
+def is_botocore_error(exc: BaseException) -> bool:
+    """是否 botocore 异常（云端不可达/权限/凭证/region 等）——入口皮据此把云端故障归到自己的退出码层。
+
+    惰性 import botocore（cli 主依赖不含 boto3，顶层 import 会在纯 local 环境炸；且只在 cloud 路径才会调到
+    这里）。缺 botocore（不该发生，能走到 cloud 就装了 boto3）时保守返回 False。
+    """
+    try:
+        from botocore.exceptions import BotoCoreError, ClientError
+    except ImportError:  # pragma: no cover
+        return False
+    return isinstance(exc, (BotoCoreError, ClientError))
+
+
+def prune_empty_dirs(root: Path) -> None:
+    """自底向上删 root 下的空目录（含 root 自身若最终空）——只删空的（ADR 0029 cloud 清理本地空壳）。
+
+    非空目录（残留产物/文件）自然保留（rmdir 抛 OSError → 吞掉），与 worker「上传失败保留本地」护栏自洽。
+    root 不存在则 no-op。用于 cloud 模式清 worker 用完的本地产物暂存区空壳——**本地落点是组合根算出来的、
+    故清理归组合根**；core 对本地文件系统无知（ADR 0016 窄腰），不该由 core/store 删。
+    """
+    if not root.exists():
+        return
+    for d, _subdirs, _files in os.walk(root, topdown=False):
+        try:
+            os.rmdir(d)  # 只删空目录；非空 → OSError → 吞掉、保留
+        except OSError:
+            pass
 
 
 def load_feature(path: Path, repo: Path) -> FeatureSource:

@@ -4,7 +4,7 @@
 - **moto 忠实、用 `fargate` fixture 测**：run_scope 调对 RunTask（env 注入 JOB_S3_URI/events 表/run_id/scope_id）+
   PutObject job 到 S3；Query 迭代器增量拉 + last_seq 游标 + scope_done 终止；stop→StopTask。
 - **moto 失真（exitCode 恒 0、lastStatus 由 describe 次数驱动）→ 退出码语义用「构造 describe 响应 dict」的纯单测**测
-  `_probe_task`/`_raise_for_exit`（不经 moto、可造任意 exitCode）；真实 ECS 时序标定见 ADR 0032 真容器校准。
+  `_probe_task` + 协议翻译 `wire.raise_for_worker_exit`（不经 moto、可造任意 exitCode）；真实 ECS 时序标定见 ADR 0032 真容器校准。
 
 对拍 test_subprocess_engine.py：同一 Engine port、同一 (WorkerHandle, Iterator[Event]) 形状。
 """
@@ -15,7 +15,7 @@ import json
 import boto3
 import pytest
 
-from core.adapters.fargate_engine import FargateEngine, FargateWorkerHandle, events_pk
+from core.adapters.fargate_engine import EXIT_SK, FargateEngine, FargateWorkerHandle, events_pk
 from core.errors import WorkerNetworkError
 from core.model import Job, Scenario, Step, ScopeStarted, StepDone, ScopeDone, Status
 
@@ -72,7 +72,7 @@ def _delayed_stopped_ecs(container_name: str, running_polls: int, exit_code: int
     **模拟真实时序**（ADR 0032 结论 2：scope_done 先于 ECS 记录 executionStoppedAt ~11s）：worker 已 emit
     scope_done、但 task 还没到 STOPPED——_probe_task 返回 (stopped=False, ...) → _await_exit_code 须 sleep 轮询等到 STOPPED。
     `_stopped_ecs`（首次即 STOPPED）把这 ~11s 滞后塌缩为 0、测不出「轮询等 STOPPED」这个 option-c 定义行为
-    （变异：把循环退化成单次读退出码，_stopped_ecs 下仍绿、但真 Fargate 每 scope 收尾 _raise_for_exit(None) 崩）。"""
+    （变异：把循环退化成单次读退出码，_stopped_ecs 下仍绿、但真 Fargate 每 scope 收尾拿 exitCode=None 崩）。"""
     class _DelayedEcs:
         def __init__(self):
             self.calls = 0  # 供断言真的轮询了 running_polls+1 次
@@ -312,7 +312,7 @@ def test_read_events_midscene_lowlevel_marshalling_and_ascending_read(fargate):
 
 
 # ---- STOPPED 兜底终止 + _final_drain（worker 崩溃没发 scope_done）----
-# 这条兜底路径（DescribeTasks STOPPED → _final_drain 强一致补末尾 → _raise_for_exit）不依赖真实 ECS 时序、
+# 这条兜底路径（DescribeTasks STOPPED → _final_drain 强一致补末尾 → raise_for_worker_exit）不依赖真实 ECS 时序、
 # 全是确定性控制流 + 强一致 DDB Query（moto 可测），故**不在**真实 ECS 时序标定（ADR 0032 真容器校准）之列，须锁住「先 drain 后 raise」次序。
 # moto fargate fixture 的 ecs 被 pin 成 lastStatus 恒不推进（见 conftest），故这里用可控假 ecs 造 RUNNING→STOPPED 时序。
 def test_read_events_stopped_without_scope_done_drains_then_raises(fargate):
@@ -343,6 +343,44 @@ def test_read_events_stopped_without_scope_done_drains_then_raises(fargate):
     # 先 yield 出 scope_started（主循环）+ 末尾 step_done（_final_drain 强一致补），再抛 —— 次序不可颠倒、drain 不可漏
     assert [type(e).__name__ for e in got] == ["ScopeStarted", "StepDone"]
     assert state["describe_calls"] >= 1  # 确实走了 STOPPED 兜底、非 scope_done 主判
+
+
+# ---- 退出观察者的 task_exited item 不得混进 worker 段（ADR 0034 机制一独立键空间 / ADR 0024「单调只跑 worker 段」）----
+# 同步 run 路径与 cloud 无状态路径**共用同一张 events 表**：退出观察者 Lambda 由「lastStatus=STOPPED」规则触发、
+# 不分同步/detached，故同步 run 的 task 停下后也会往**同 PK** 写一条 task_exited item（保留高位 SK、**无 body**）。
+# 读端若不把 Query 段界收在 worker 段，`it["body"]` 直接 KeyError('body')、异常穿出迭代器 → 本应 PASSED 的 job 被判
+# engine_error。触发窗口是真竞态：观察者 PutItem 可抢在 adapter 最后一次 Query 之前。
+def _put_exit_item(fargate, scope_id: str, exit_code: int = 0, run_id: str = _RUN_ID) -> None:
+    """预置一条退出观察者形状的 item——**用真写端 DdbEventLog.record_exit 造**（不手抄形状，写端演进本测试自动跟随）。"""
+    from core.adapters.event_log import DdbEventLog
+    DdbEventLog(fargate["events_table"], run_id, [scope_id]).record_exit(scope_id, exit_code)
+
+
+def test_read_events_ignores_exit_item_alongside_worker_events(fargate):
+    """exit item 与 worker 事件同 PK 共存：主循环只读 worker 段、正常产出并按退出码收敛，不碰无 body 的 exit item。"""
+    eng = _engine(fargate)
+    _put_event(fargate["events_table"], _RUN_ID, "browse", 1, {"type": "scope_started", "scopeId": "browse"})
+    _put_event(fargate["events_table"], _RUN_ID, "browse", 2, {"type": "scope_done", "scopeId": "browse"})
+    _put_exit_item(fargate, "browse", exit_code=0)
+    # 前置断言：exit item 真在同 PK 下（否则本测试变空跑、守不住任何东西）
+    assert fargate["events_table"].get_item(
+        Key={"pk": events_pk(_RUN_ID, "browse"), "seq": EXIT_SK})["Item"]["item_type"] == "exit"
+    _, events = eng.run_scope(_job("browse"))
+    eng._ecs = _stopped_ecs(fargate["container_name"])  # scope_done 后等 STOPPED 读码（见 _stopped_ecs docstring）
+    got = list(events)  # 不抛 KeyError('body')
+    assert [type(e).__name__ for e in got] == ["ScopeStarted", "ScopeDone"]
+
+
+def test_read_events_ignores_exit_item_on_stopped_drain_path(fargate):
+    """worker 零事件退出 + exit item 已落：STOPPED 兜底路径（含 _final_drain 强一致终读）同样只读 worker 段。
+
+    主循环首轮 Query 空 → 探到 STOPPED → _final_drain 若不收段界会读到 exit item → KeyError；此处断言正常空收敛。
+    """
+    eng = _engine(fargate)
+    _put_exit_item(fargate, "browse", exit_code=0)
+    _, events = eng.run_scope(_job("browse"))
+    eng._ecs = _stopped_ecs(fargate["container_name"], exit_code=0)
+    assert list(events) == []  # 无 worker 事件、不抛（exit item 不入流）
 
 
 def test_final_drain_paginates_across_last_evaluated_key():
@@ -389,7 +427,7 @@ def test_read_events_stopped_clean_exit_zero_terminates_without_raise(fargate):
 
     _, events = eng.run_scope(_job("browse"))
     eng._ecs = _StoppedCleanEcs()
-    got = list(events)  # 不抛：exit 0 → _raise_for_exit 放行 → return
+    got = list(events)  # 不抛：exit 0 → raise_for_worker_exit 放行 → return
     assert [type(e).__name__ for e in got] == ["ScopeStarted"]
 
 
@@ -477,7 +515,7 @@ class _FakeEcs:
 
 
 def _engine_with_fake_ecs(describe_response, container_name="worker") -> FargateEngine:
-    # 只测 _probe_task/_raise_for_exit，不跑 run_scope；其余注入 None（不触及）
+    # 只测 _probe_task（+ 退出码翻译的接线），不跑 run_scope；其余注入 None（不触及）
     eng = FargateEngine.__new__(FargateEngine)
     eng._ecs = _FakeEcs(describe_response)
     eng._cluster = "c"
@@ -508,13 +546,16 @@ def test_probe_task_stopped_but_exit_code_null():
     assert eng2._probe_task("arn") == (True, None)
 
 
-def test_raise_for_exit_maps_codes():
-    eng = _engine_with_fake_ecs({})
-    eng._raise_for_exit(0)  # 正常，不抛
+def test_raise_for_worker_exit_maps_codes_with_fargate_label():
+    """码→异常的翻译已收进 `wire`（协议级、与 subprocess adapter 共用一份）：这里锁本 adapter 的调法
+    （`code_label="exitCode"` → 诊断行说 ECS 的话）。翻译语义本身的对拍在 test_wire.py。"""
+    from core.wire import raise_for_worker_exit
+
+    raise_for_worker_exit(0, code_label="exitCode")  # 正常，不抛
     with pytest.raises(WorkerNetworkError):
-        eng._raise_for_exit(80)  # 网络专用码（ADR 0028）
-    with pytest.raises(RuntimeError):
-        eng._raise_for_exit(1)   # 其余正非零
+        raise_for_worker_exit(80, code_label="exitCode")  # 网络专用码（ADR 0028）
+    with pytest.raises(RuntimeError, match=r"exitCode=1\b"):
+        raise_for_worker_exit(1, code_label="exitCode")   # 其余正非零
 
 
 # ---- _await_exit_code 对「STOPPED 但 exitCode 尚 null」的有界宽限（ADR 0024「exitCode 落值延迟」）----

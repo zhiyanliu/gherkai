@@ -12,9 +12,9 @@
 **必须 `--platform linux/amd64`（ADR 0033 陷阱，本脚本硬编码保证）**：Fargate task-def 默认 X86_64
 runtime；不加则 arm Mac build 出 arm64、容器启动期挂死（错误在启动期、不易一眼看出是架构问题）。
 
-**repo 名规则** = `{prefix}{engine}-worker`（与 `iac_aws_backend/names.task_def_name` + cli
-`compose.task_def_name` 逐字一致，ADR 0033 硬契约）。此处内联该规则（同 names.py「复刻 cli 规则」
-的做法：跨工程不强行 import，靠注释约束），改命名规则须同步三处。
+**repo 名规则** = `{prefix}{engine}-worker`（ADR 0033 硬契约）。命名真源 = `gherkai/names.py`
+（`task_def_name` / `DEFAULT_PREFIX` / `ENGINES`），cli 与 iac 都直接 import 它（无复刻）。本脚本
+按「零依赖单文件、裸 `python` 跑、不设 PYTHONPATH」内联同一规则——故改命名规则须同步这里。
 
 **build context** = 各引擎目录（`engines/{engine}/`，Dockerfile 在其下）。
 
@@ -33,8 +33,8 @@ import argparse
 import subprocess
 import sys
 
-ENGINES = ("novaact", "midscene")  # 引擎规范名（与 core model / cli compose._ENGINES / iac names.ENGINES 一致）
-DEFAULT_PREFIX = "gherkai-"        # 与 iac names.DEFAULT_PREFIX / cli 一致
+ENGINES = ("novaact", "midscene")  # 引擎规范名（真源 gherkai.names.ENGINES 的内联副本，见 docstring）
+DEFAULT_PREFIX = "gherkai-"        # 真源 gherkai.names.DEFAULT_PREFIX 的内联副本
 DEFAULT_REGION = "us-east-1"
 PLATFORM = "linux/amd64"           # 硬编码：Fargate X86_64，绝不可省（见模块 docstring 陷阱）
 
@@ -44,7 +44,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _repo_name(prefix: str, engine: str) -> str:
-    """ECR repo 名 = {prefix}{engine}-worker（对齐 names.task_def_name，见 docstring）。"""
+    """ECR repo 名 = {prefix}{engine}-worker（对齐 gherkai.names.task_def_name，见 docstring）。"""
     return f"{prefix}{engine}-worker"
 
 

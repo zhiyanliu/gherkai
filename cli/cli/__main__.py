@@ -10,11 +10,10 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from pathlib import Path
 
-from core.model import Event, RunMeta, Status
+from core.model import TERMINAL_STATUSES, Event, RunMeta, Status
 from core.parse import FeatureParseError
 from core.persist import RunPersistence
 from core.scope import PlanConfig, PlanError, plan
@@ -123,7 +122,8 @@ def _build_parser() -> argparse.ArgumentParser:
         help="AWS profile（--profile > AWS_PROFILE）；喂 store + subprocess worker（其 region 字段也作 --region 兜底）",
     )
 
-    # plan 预检（dry-run）：纯本地解析 + 分组，不起 worker、不连 AWS、不烧钱。
+    # plan 预检（dry-run）：纯本地解析 + 分组；**零 AWS、零花费、零副作用**（ADR 0036——派发标注会起本地
+    # 瞬时 worker 自述子进程做 match，不跑 job）。
     pl = sub.add_parser("plan", help="预检 .feature：看 scope/job 分组 + 校验配置，不真跑（不烧钱）")
     pl.add_argument("features", nargs="+", type=Path, help="一个或多个 .feature 路径")
     pl.add_argument(
@@ -152,7 +152,9 @@ def _build_parser() -> argparse.ArgumentParser:
     sm.add_argument("--default-engine", choices=sorted(_names.ENGINES), default="novaact",
                     help="未标 @engine 的 scope 用的默认引擎")
     sm.add_argument("--assertion-votes", type=int, default=1, metavar="N", help="AI 断言投票次数（默认 1）")
-    sm.add_argument("--max-concurrency", type=int, default=1, help="同时在跑的 worker 上限（默认 1）")
+    sm.add_argument("--max-concurrency", type=int, default=1,
+                    help="[local] 同时在跑的 worker 上限（默认 1）；cloud 档由 IaC 给推进器 Lambda 设的 "
+                         "MAX_CONCURRENCY 决定、本 flag 不生效（ADR 0034 已知边界）")
     sm.add_argument(
         "--default-job-timeout", type=float, default=300.0, metavar="S",
         help="未标 @timeout 的 scope 用的 job 墙钟超时秒（默认 300；<=0 表示不超时）；标了 @timeout:N 的按 tag 走",
@@ -166,7 +168,14 @@ def _build_parser() -> argparse.ArgumentParser:
         "--tunnel", choices=sorted(_tunnel_providers()), default="ngrok",
         help="--expose-local 用的隧道 provider（默认 ngrok）",
     )
-    sm.add_argument("--report-dir", default="reports", metavar="DIR", help="归集报告落点（默认 reports/）")
+    sm.add_argument(
+        "--tunnel-ttl", type=float, default=None, metavar="S",
+        help="[cloud + --expose-local] 隧道守护进程的兜底 TTL 秒（默认按 definition 算：各 job 预算之和 + "
+             "启动余量，ADR 0035 决策 3）；给了就用本值。TTL 到点无条件拆隧道，调小可能在 run 未完时断隧道",
+    )
+    sm.add_argument("--report-dir", default="reports", metavar="DIR",
+                    help="归集报告落点（默认 reports/）；cloud 档须与推进器 Lambda 的 REPORT_DIR 一致"
+                         "（preflight 比对，不一致退 2）")
     sm.add_argument("--region", default=None, metavar="R", help="AWS region（喂 worker）")
     sm.add_argument("--profile", default=None, metavar="P", help="AWS profile（喂 subprocess worker）")
     # backend：local（默认，per-run 进程本机推进）/ cloud（Fargate + 云端 Lambda 事件驱动链推进，ADR 0034）。
@@ -184,7 +193,9 @@ def _build_parser() -> argparse.ArgumentParser:
     st.add_argument("run_id", help="submit 返回的 run_id")
     st.add_argument("--backend", choices=["local", "cloud"], default="local", help="须与 submit 一致")
     st.add_argument("--report-dir", default="reports", metavar="DIR", help="[local] run 落点（须与 submit 一致）")
-    st.add_argument("--wait", action="store_true", help="[local] 轮询到 run 达终态再返回（接力推进）")
+    st.add_argument("--wait", action="store_true",
+                    help="轮询到 run 达终态再返回（两路都支持，接力语义异：local=本机 tick 推进；"
+                         "cloud=检测卡住即 invoke kicker Lambda 接力）")
     st.add_argument("--max-concurrency", type=int, default=1, help="[local --wait] 接力推进并发上限")
     st.add_argument("--json", action="store_true", help="输出机器可读 JSON（RunState）")
     st.add_argument("--prefix", default=None, metavar="P", help="[cloud] 资源名前缀（读 DDB RunState）")
@@ -205,7 +216,9 @@ def _build_parser() -> argparse.ArgumentParser:
     tw = sub.add_parser("_tunnel_watch", help=argparse.SUPPRESS)
     tw.add_argument("run_id")
     tw.add_argument("--tunnel-pid", type=int, required=True)
-    tw.add_argument("--ttl", type=float, default=3600.0)
+    # --ttl 必给、无默认：TTL 按 definition 算（submit 侧 tunnel_host.compute_watch_ttl_s，用户可用
+    # submit --tunnel-ttl 覆盖）。给个「没有生产写入者的默认值」正是本 flag 曾恒为 1h 的病根，故不留默认。
+    tw.add_argument("--ttl", type=float, required=True)
     tw.add_argument("--ddb-table", required=True)
     tw.add_argument("--region", default=None)
     tw.add_argument("--profile", default=None)
@@ -261,7 +274,7 @@ def _load_and_plan(args, repo: Path) -> "list | int":
     """plan 与 run 的共享前置装配：votes 校验 → 读 feature → plan。
 
     成功返回 `Job[]`；任一前置失败返回**退出码 2**（配置矛盾/读不到/语法错，均"没开跑就被拒"，
-    对齐 cli/README 退出码分层）。_cmd_plan 与 _cmd_run 都调它，避免两份手抄的前置逻辑漂移（N10）。
+    对齐 cli/README 退出码分层）。_cmd_plan 与 _cmd_run 都调它（曾各手抄一份、会漂移）。
     """
     # 0) 校验：assertion_votes 必须 ≥1。否则 worker 跑 0 次 AI 断言——votes=0 全判失败（假阴性）、
     #    votes<0 更危险：0 > 负数/2 = True → **零 AI 调用却全绿**（假阳性）。入口拦截，不让坏值流进 worker。
@@ -300,7 +313,7 @@ def _load_and_plan(args, repo: Path) -> "list | int":
 
 
 def _probe_deterministic_dispatch(repo: Path, jobs) -> dict | None:
-    """plan 的派发预期标注（ADR 0036 第二期）：按引擎分组 step 文本、批量问 worker 命中结果。
+    """plan 的派发预期标注（ADR 0036 决策 4）：按引擎分组 step 文本、批量问 worker 命中结果。
 
     返回 {(scope_id, scenario_id, step_index): probe} 或 None（全部引擎都没问成）。match 用**裸 step 文本**
     ——与 worker 真跑派发的匹配面完全一致（不 unquote、不拼 argument，ADR 0024）。按引擎 best-effort：
@@ -327,25 +340,25 @@ def _probe_deterministic_dispatch(repo: Path, jobs) -> dict | None:
 
 
 def _setup_tunnel(args, jobs):
-    """`--expose-local` 时起隧道并映射 jobs（ADR 0035 决策 1/2/4）。
+    """`--expose-local` 的 argparse 侧接线：编排在 `gherkai.tunnel_host`（ADR 0035 决策 1/2/4）。
 
-    返回 (jobs, headers, info)——未开隧道时 (jobs, None, None)；隧道起不来返回退出码 2
-    （「没开跑就被拒」层，与 preflight 同级）。headers = 隧道模式恒注入的 ngrok-skip-browser-warning
-    （免费层 interstitial 绕过；付费层带着无害，ADR 0035 决策 4）。
+    返回 (jobs, headers, info)——未给 flag 时 (jobs, None, None)；隧道起不来返回退出码 2
+    （「没开跑就被拒」层，与 preflight 同级）。
     """
     if not getattr(args, "expose_local", None):
         return jobs, None, None
     from gherkai import tunnel as _tunnel
+    from gherkai import tunnel_host
 
     try:
-        provider = _tunnel.make_tunnel(args.tunnel)
-        info = provider.start(args.expose_local)
+        setup = tunnel_host.start_tunnel_for_jobs(
+            jobs, local_origin=args.expose_local, provider=args.tunnel)
     except _tunnel.TunnelError as e:
         _progress(f"--expose-local 隧道未就绪：{e}")
         return 2
-    _progress(f"隧道已建立：{args.expose_local} → {info.url}（basic-auth 已启用，凭据每 run 一换、终态即拆）")
-    mapped = _tunnel.map_origin_in_jobs(list(jobs), args.expose_local, info.mapped_base)
-    return mapped, {"ngrok-skip-browser-warning": "1"}, info
+    _progress(f"隧道已建立：{args.expose_local} → {setup.info.url}"
+              f"（basic-auth 已启用，凭据每 run 一换、终态即拆）")
+    return setup.jobs, setup.extra_http_headers, setup.info
 
 
 def _cmd_plan(args, repo: Path) -> int:
@@ -359,7 +372,7 @@ def _cmd_plan(args, repo: Path) -> int:
     if isinstance(jobs, int):  # 前置失败 → 退出码
         return jobs
 
-    # 派发预期标注（ADR 0036 第二期）：按引擎批量问 worker「哪些 step 命中确定性」。best-effort——
+    # 派发预期标注（ADR 0036 决策 4）：按引擎批量问 worker「哪些 step 命中确定性」。best-effort——
     # 引擎环境未装/查询失败只降级为无标注+stderr 警告，plan 核心功能保持零依赖（不因标注挂掉）。
     dispatch = _probe_deterministic_dispatch(repo, jobs)
 
@@ -390,34 +403,6 @@ def _progress(*args, **kwargs) -> None:
     print(*args, **kwargs)
 
 
-def _prune_empty_dirs(root: Path) -> None:
-    """自底向上删 root 下的空目录（含 root 自身若最终空）——只删空的（ADR 0029 cloud 清理本地空壳）。
-
-    非空目录（残留产物/文件）自然保留（rmdir 抛 OSError → 吞掉），与 worker「上传失败保留本地」护栏自洽。
-    root 不存在则 no-op。用于 cloud 模式清 worker 用完的本地产物暂存区空壳。
-    """
-    if not root.exists():
-        return
-    for d, _subdirs, _files in os.walk(root, topdown=False):
-        try:
-            os.rmdir(d)  # 只删空目录；非空 → OSError → 吞掉、保留
-        except OSError:
-            pass
-
-
-def _is_botocore_error(exc: BaseException) -> bool:
-    """是否 botocore 异常（云端不可达/权限/凭证/region 等）。
-
-    惰性 import botocore（cli 主依赖不含 boto3，顶层 import 会在纯 local 环境炸；且只在 --backend cloud
-    路径才会调到这里）。缺 botocore（不该发生，能走到 cloud 就装了 boto3）时保守返回 False。
-    """
-    try:
-        from botocore.exceptions import BotoCoreError, ClientError
-    except ImportError:  # pragma: no cover
-        return False
-    return isinstance(exc, (BotoCoreError, ClientError))
-
-
 def _cmd_submit(args, repo: Path) -> int:
     """[无状态跑批] 提交完就走（ADR 0034）：plan → 写 RunMeta+全 pending → 起首轮推进 → 打印 run_id → 立即退出。
 
@@ -431,6 +416,15 @@ def _cmd_submit(args, repo: Path) -> int:
     if isinstance(jobs, int):
         return jobs
     _progress(f"plan: {len(jobs)} job(s)  (default_engine={args.default_engine})")
+
+    # --tunnel-ttl 校验（对齐 --grace/--assertion-votes 的入口校验惯例，退 2「没开跑就被拒」）：
+    # <=0 等于隧道刚起就被拆。**必须排在起隧道之前**——早拒才真零副作用（否则配置错也已起 ngrok）。
+    # isfinite 与 @timeout: 校验同一理由（float() 收 nan/inf；nan 使守护的 monotonic()<deadline 首轮即
+    # False → 隧道 submit 后立刻被拆，兜底反成失败源）。
+    import math as _math
+    if args.tunnel_ttl is not None and (not _math.isfinite(args.tunnel_ttl) or args.tunnel_ttl <= 0):
+        _progress(f"--tunnel-ttl={args.tunnel_ttl} 无效：须为有限正数（TTL 到点无条件拆隧道，<=0/nan/inf 均拒）")
+        return 2
 
     # --expose-local：起隧道 + 映射 jobs（ADR 0035）。submit 的隧道生命周期交给后台宿主
     # （local=per-run 进程、cloud=隧道守护进程）；分流失败（preflight/落库不过）时在此拆掉防泄漏。
@@ -503,25 +497,24 @@ def _submit_cloud(args, repo: Path, run_id: str, run_meta, initial, *, tunnel_in
     events Stream → reconciler 接管（补起后续 / finalize）。submit 只写 DDB、不碰 ECS——机器权限收窄到只剩
     「runs 表写 + preflight」（见下正文注释）。CLI 写完即退、不留本机进程。
     """
-    resolved_profile = args.profile or os.environ.get("AWS_PROFILE")
-    resolved_region = compose.resolve_region(args.region, resolved_profile)
-    prefix = args.prefix or os.environ.get("AWS_RESOURCE_PREFIX") or compose.DEFAULT_PREFIX
-    events_table = args.events_table or compose.default_name(prefix, compose._BASE_EVENTS_TABLE)
-    cluster = args.cluster or compose.default_name(prefix, compose._BASE_CLUSTER)
-    bucket = args.s3_bucket or os.environ.get("AWS_S3_BUCKET") or compose.default_name(prefix, compose._BASE_BUCKET)
-    table = args.ddb_table or os.environ.get("AWS_DDB_TABLE") or compose.default_name(prefix, compose._BASE_RUNS_TABLE)
+    target = compose.resolve_cloud_target(
+        prefix=args.prefix, region=args.region, profile=args.profile,
+        runs_table=args.ddb_table, events_table=args.events_table,
+        bucket=args.s3_bucket, cluster=args.cluster,
+    )
 
-    # preflight（events 表/cluster/桶/runs 表 + 本 run 用到引擎的 task-def + 事件驱动链三 Lambda）——配置错在
-    # 提交前暴露、退 2。链上任一 Lambda 缺 = 提交成功但 run 永不推进/收敛（kicker 缺=卡 pending、reconciler 缺=
-    # 无人接力、exit-observer 缺=退出信号断链），必须挡在提交前（ADR 0033 preflight 条）。探针全只读，权限收窄不破。
+    # preflight（events 表/cluster/桶/runs 表 + 本 run 用到引擎的 task-def + 事件驱动链三 Lambda + 推进器
+    # REPORT_DIR 与 --report-dir 一致性）——配置错在提交前暴露、退 2。链上任一 Lambda 缺 = 提交成功但 run 永不
+    # 推进/收敛（kicker 缺=卡 pending、reconciler 缺=无人接力、exit-observer 缺=退出信号断链）；前缀不一致 =
+    # 跑完了但结果落在用户没指定的前缀下。都必须挡在提交前（ADR 0033 preflight 条）。探针全只读，权限收窄不破。
     try:
         err = compose.preflight_cloud_resources(
-            prefix=prefix, events_table=events_table, bucket=bucket, cluster=cluster,
-            runs_table=table,
-            task_defs=[compose.task_def_name(prefix, e) for e in sorted({j.engine for j in run_meta.jobs})],
-            lambda_fns=[compose.default_name(prefix, b) for b in (
-                compose._BASE_KICKER_LAMBDA, compose._BASE_RECONCILER_LAMBDA, compose._BASE_EXIT_OBSERVER_LAMBDA)],
-            region=resolved_region, profile=resolved_profile,
+            prefix=target.prefix, events_table=target.events_table, bucket=target.bucket,
+            cluster=target.cluster, runs_table=target.runs_table,
+            task_defs=[compose.task_def_name(target.prefix, e)
+                       for e in sorted({j.engine for j in run_meta.jobs})],
+            lambda_fns=target.detached_chain_lambdas, report_dir=args.report_dir,
+            region=target.region, profile=target.profile,
         )
     except ImportError as e:
         _progress(f"submit --backend cloud 需要 boto3：{e}")
@@ -535,14 +528,14 @@ def _submit_cloud(args, repo: Path, run_id: str, run_meta, initial, *, tunnel_in
     # 只剩「runs 表写 + preflight（探表/桶/cluster 可达）」——无需 RunTask/PassRole/SSM 读，契合「提交完就走、
     # 只需提交那一下的最小权限」（受限 CI runner / 临时凭证场景）。之后全程云端 Lambda 链推进、不依赖 submit 机器。
     run_store, _rs, _rp, _mk = compose.build_cloud_stores(
-        table=table, bucket=bucket, prefix=args.report_dir,
-        region=resolved_region, profile=resolved_profile,
+        table=target.runs_table, bucket=target.bucket, prefix=args.report_dir,
+        region=target.region, profile=target.profile,
         detached=True,  # STATE 带 detached 标记 → kicker filter 认它冷启动（同步 run 不带，ADR 0034）
     )
     try:
         run_store.create_run(run_meta, initial)  # 写 definition（INSERT）→ runs Stream → kicker Lambda 冷启动
     except Exception as e:
-        if _is_botocore_error(e):
+        if compose.is_botocore_error(e):
             _progress(f"submit --backend cloud 云端不可达（表/桶/凭证/region）：{e}")
             return 2
         raise
@@ -553,21 +546,30 @@ def _submit_cloud(args, repo: Path, run_id: str, run_meta, initial, *, tunnel_in
         import subprocess as _sp
         import tempfile as _tf
 
+        from gherkai import tunnel_host
+
+        # TTL 按 definition 算（tunnel_host.compute_watch_ttl_s）而非拍一个常数——TTL 短于 run 实际预算时
+        # 守护会在 run 还在跑时拆隧道，剩余 job 在被测应用不可达下继续跑、以假失败告终（ADR 0035 决策 3）。
+        # `--tunnel-ttl` 给了就用用户值（显式覆盖旋钮）。
+        ttl_s = (args.tunnel_ttl if args.tunnel_ttl is not None
+                 else tunnel_host.compute_watch_ttl_s(run_meta.jobs))
         watch_log = Path(_tf.gettempdir()) / f"gherkai-tunnel-watch-{run_id}.log"
         cmd = [sys.executable, "-m", "cli", "_tunnel_watch", run_id,
-               "--tunnel-pid", str(tunnel_info.pid), "--ddb-table", table]
-        if resolved_region:
-            cmd += ["--region", resolved_region]
-        if resolved_profile:
-            cmd += ["--profile", resolved_profile]
+               "--tunnel-pid", str(tunnel_info.pid), "--ddb-table", target.runs_table,
+               "--ttl", str(ttl_s)]
+        if target.region:
+            cmd += ["--region", target.region]
+        if target.profile:
+            cmd += ["--profile", target.profile]
         with open(watch_log, "ab") as lf:
             _sp.Popen(cmd, cwd=str(repo), start_new_session=True,
                       stdin=_sp.DEVNULL, stdout=lf, stderr=lf)
-        _progress(f"隧道由守护进程持有（日志 {watch_log}）：run 终态即拆、TTL 兜底。"
+        _progress(f"隧道由守护进程持有（日志 {watch_log}）：run 终态即拆、TTL 兜底 {ttl_s:.0f}s"
+                  f"（= 各 job 预算之和 + 启动余量；`--tunnel-ttl` 可覆盖）。"
                   f"**本机需保持开机联网直到 run 终态**——关机=隧道断=测试将以导航失败告终（ADR 0035）。")
-        _progress(f"已提交到云端（definition 已落库；kicker Lambda 起首批、云端链推进中）。查进度：gherkai status {run_id} --backend cloud --prefix {prefix}")
+        _progress(f"已提交到云端（definition 已落库；kicker Lambda 起首批、云端链推进中）。查进度：gherkai status {run_id} --backend cloud --prefix {target.prefix}")
     else:
-        _progress(f"已提交到云端（definition 已落库；kicker Lambda 起首批、云端链推进中，可关机）。查进度：gherkai status {run_id} --backend cloud --prefix {prefix}")
+        _progress(f"已提交到云端（definition 已落库；kicker Lambda 起首批、云端链推进中，可关机）。查进度：gherkai status {run_id} --backend cloud --prefix {target.prefix}")
     print(run_id)
     return 0
 
@@ -583,15 +585,14 @@ def _render_status(state, args, *, wait_hint: str) -> int:
         from core.serialize import run_state_to_dict
         print(json.dumps(run_state_to_dict(state), ensure_ascii=False, indent=2))
     else:
-        from gherkai import detached
-        print(detached.render_run_state(state))
+        print(render.render_run_state(state))
     # 疑似卡住诊断（两路一致）：非 --wait、非 json、仍 pending → 提示 --wait 接力（**只提示、不自动 kickoff/tick**——
     # 保「查看」纯只读无副作用；救活决定权留用户，走 --wait）。running/终态不提示。
     if not args.wait and not args.json and state.status == Status.PENDING:
         _progress(f"提示：run 仍 pending。若已提交较久，推进可能未启动——`{wait_hint}` 可接力推进。")
     if state.status == Status.PASSED:
         return 0
-    if state.status in (Status.PENDING, Status.RUNNING):
+    if state.status not in TERMINAL_STATUSES:  # 未达终态（查询本身成功，判定退出码留给 --wait）
         return 0
     return 1
 
@@ -646,25 +647,23 @@ def _status_cloud(args) -> int:
     """
     import time as _time
 
-    resolved_profile = args.profile or os.environ.get("AWS_PROFILE")
-    resolved_region = compose.resolve_region(args.region, resolved_profile)
-    prefix = args.prefix or os.environ.get("AWS_RESOURCE_PREFIX") or compose.DEFAULT_PREFIX
-    table = args.ddb_table or os.environ.get("AWS_DDB_TABLE") or compose.default_name(prefix, compose._BASE_RUNS_TABLE)
-    kicker_fn = compose.default_name(prefix, compose._BASE_KICKER_LAMBDA)  # {prefix}kicker，推理出、无需用户配
+    target = compose.resolve_cloud_target(prefix=args.prefix, region=args.region,
+                                          profile=args.profile, runs_table=args.ddb_table)
+    kicker_fn = target.kicker_lambda  # {prefix}kicker，从 prefix 推理出、无需用户配
 
     from core.adapters.run_store.ddb import DynamoDBRunStore
-    run_store = DynamoDBRunStore(compose._make_ddb_table(table, region=resolved_region, profile=resolved_profile))
+    run_store = DynamoDBRunStore(compose._make_ddb_table(
+        target.runs_table, region=target.region, profile=target.profile))
 
     def _read():
         try:
             return run_store.load_run_state(args.run_id)
         except Exception as e:
-            if _is_botocore_error(e):
+            if compose.is_botocore_error(e):
                 _progress(f"status --backend cloud 云端不可达（表/凭证/region）：{e}")
                 return 2  # 哨兵：调用方转退出码
             raise
 
-    _TERMINAL = {Status.PASSED, Status.FAILED, Status.ERROR, Status.SKIPPED, Status.ABORTED}
     state = _read()
     if state == 2:
         return 2
@@ -676,25 +675,25 @@ def _status_cloud(args) -> int:
         lam = None
         last_snap = (state.status, state.high_water_mark) if state is not None else None
         stall = 0
-        while state is not None and state.status not in _TERMINAL:
+        while state is not None and state.status not in TERMINAL_STATUSES:
             snap = (state.status, state.high_water_mark)
             stall = stall + 1 if snap == last_snap else 0  # 有变化即重置（推进中不踢）
             last_snap = snap
             if stall >= _STALL_KICK:
                 if lam is None:
-                    lam = compose._make_lambda_client(region=resolved_region, profile=resolved_profile)
+                    lam = compose._make_lambda_client(region=target.region, profile=target.profile)
                 try:
                     # payload {"run_id": ...}：kicker _run_ids_from_runs_stream 认此「直接 kickoff」格式（区别于
                     # Stream records），对该 run tick 起首批。异步 invoke（Event、不等返回）。
                     lam.invoke(FunctionName=kicker_fn, InvocationType="Event",
                                Payload=json.dumps({"run_id": args.run_id}).encode())
                 except Exception as e:
-                    if not _is_botocore_error(e):
+                    if not compose.is_botocore_error(e):
                         raise  # 非 AWS 错才抛
                     # kicker 不存在 → 接力对象缺失，轮询死等无意义：点名 prefix fail-fast（ADR 0033 preflight 条）。
                     # 其他 AWS 错（限流/瞬时/无权限）仍吞——不致命，下轮再踢/靠云端链。
                     if getattr(e, "response", {}).get("Error", {}).get("Code") == "ResourceNotFoundException":
-                        _progress(f"status --wait 接力失败：kicker Lambda {kicker_fn}（用 --prefix={prefix!r} 拼出）"
+                        _progress(f"status --wait 接力失败：kicker Lambda {kicker_fn}（用 --prefix={target.prefix!r} 拼出）"
                                   f"不存在——是 --prefix 配错、还是 iac_aws_backend（CDK）未部署？")
                         return 2
                 stall = 0  # kickoff 后重置，给云端链时间响应（下一个 _STALL_KICK 窗口再判是否仍卡）
@@ -707,7 +706,7 @@ def _status_cloud(args) -> int:
         _progress(f"未找到 run：{args.run_id}（--prefix/--ddb-table 是否与 submit 一致？）")
         return 2
     return _render_status(state, args,
-                          wait_hint=f"gherkai status {args.run_id} --backend cloud --prefix {prefix} --wait")
+                          wait_hint=f"gherkai status {args.run_id} --backend cloud --prefix {target.prefix} --wait")
 
 
 def _cmd_reconcile(args, repo: Path) -> int:
@@ -729,30 +728,16 @@ def _cmd_reconcile(args, repo: Path) -> int:
 def _cmd_tunnel_watch(args) -> int:
     """隧道守护进程入口（cloud submit setsid fork 它，非用户直接调，ADR 0035 决策 3）。
 
-    轮询 DDB run 终态 → 拆隧道退出；TTL 到 → 拆隧道自杀（防「run 卡死/查询异常」时 ngrok 进程泄漏）。
-    读库异常不致命（瞬时网络/限流）——继续轮询，TTL 是最终兜底。
+    守护主体在 `gherkai.tunnel_host.watch_run_and_stop_tunnel`（产品本体）；此处只接线 + 打印
+    （stdout 已被 submit 重定向到 /tmp 的守护日志，故诊断走 print 而非 _progress 的 stderr 惯例）。
     """
-    import time as _time
+    from gherkai import tunnel_host
 
-    from core.adapters.run_store.ddb import DynamoDBRunStore
-    from gherkai.tunnel import stop_tunnel
-
-    resolved_profile = args.profile or os.environ.get("AWS_PROFILE")
-    resolved_region = compose.resolve_region(args.region, resolved_profile)
-    run_store = DynamoDBRunStore(compose._make_ddb_table(args.ddb_table, region=resolved_region, profile=resolved_profile))
-    _TERMINAL = {Status.PASSED, Status.FAILED, Status.ERROR, Status.SKIPPED, Status.ABORTED}
-    deadline = _time.monotonic() + args.ttl
-    reason = "TTL 兜底"
-    while _time.monotonic() < deadline:
-        try:
-            state = run_store.load_run_state(args.run_id)
-            if state is not None and state.status in _TERMINAL:
-                reason = f"run 终态 {state.status.value}"
-                break
-        except Exception as e:  # 瞬时读库异常不致命——TTL 最终兜底
-            print(f"tunnel-watch: 读 run 状态失败（继续轮询）：{e}")
-        _time.sleep(5.0)
-    stop_tunnel(args.tunnel_pid)
+    reason = tunnel_host.watch_run_and_stop_tunnel(
+        args.run_id, tunnel_pid=args.tunnel_pid, runs_table=args.ddb_table, ttl_s=args.ttl,
+        region=args.region, profile=args.profile,
+        on_warn=lambda msg: print(f"tunnel-watch: {msg}"),
+    )
     print(f"tunnel-watch: 隧道已拆（{reason}）run={args.run_id} pid={args.tunnel_pid}")
     return 0
 
@@ -769,6 +754,21 @@ def _cmd_run(args, repo: Path) -> int:
     _progress(f"plan: {len(jobs)} job(s)  (default_engine={args.default_engine})")
     for j in jobs:
         _progress(f"  - scope={j.scope_id!r} engine={j.engine} scenarios={len(j.scenarios)}")
+
+    # 2a) grace 硬约束（ADR 0024）：按本 run 各引擎的下限取 max（grace 是 run 级单值）。引擎特定下限住组合根。
+    #     显式给了过小 grace → 入口友好拒绝（对齐 votes 校验惯例，退 2「没开跑就被拒」）。core 侧还有 enforce
+    #     兜底（任何前端都受同一护栏），此处只为在 cli 给出清晰诊断、避免 core ValueError 冒到用户面。
+    #     **必须排在起隧道 / cloud preflight / persistence.begin 之前**：只依赖 jobs，早拒才真「零副作用」——
+    #     否则配置错也已起 ngrok、烧掉云端调用、并落下永不 finalize 的半成品 run 记录。
+    min_grace = max((compose.engine_min_grace(j.engine) for j in jobs), default=0.0)
+    if args.grace is not None and (args.grace <= 0 or args.grace < min_grace):
+        _progress(
+            f"--grace={args.grace} 太小：须 > 0 且 ≥ {min_grace}s（Nova act_timeout+余量；grace < 单 act 时长会致"
+            "会话泄漏、软停失效，ADR 0024 grace 硬约束）"
+        )
+        return 2
+    # --grace 哨兵默认（None）→ 跟随本 run 引擎推导（Nova run 自然 ≥act_timeout+余量；midscene-only 回到小值）。
+    grace = args.grace if args.grace is not None else max(min_grace, ScheduleOpts.grace_period_s)
 
     # 2b) --expose-local：起隧道 + 把 jobs 文本中的 origin 替换成公网 URL（ADR 0035）。前台 run 的隧道
     #     跟 CLI 进程走——atexit 拆（正常结束/Ctrl-C 都收；SIGTERM 直杀的极端泄漏由 ngrok 进程可见性兜）。
@@ -796,41 +796,38 @@ def _cmd_run(args, repo: Path) -> int:
     nova_logs_dir = (report_root / run_id / "nova-trajectories") if do_report else None
     midscene_run_dir = (report_root / run_id / "midscene-run") if do_report else None
     # 产物 S3 落点：cloud（Fargate）由 build_fargate_engines 内部按 (bucket, <report_dir>/<run_id>/) 自算注入；
-    # local（subprocess）CLI 恒不注入（worker 报 file://、不上传）——「subprocess+注入 S3 落点」是内部预演档，
-    # 只有 tools/e2e_harness.py 走（ADR 0016 决策 B / 0029）。
+    # local（subprocess）CLI 恒不注入（worker 报 file://、不上传）——「subprocess+注入 S3 落点」是内部预演档
+    # （ADR 0016 决策 B / 0029），由 tools/e2e_harness.py 自拼 worker env 直起 worker 实现，不经 CLI/compose。
     cloud_fargate: dict | None = None  # cloud 分支置值（ADR 0033）：Fargate 执行配置，供 build_fargate_engines；None＝走 subprocess
-    # region/profile 解析（ADR 0016 决策 C——region 与 profile 是「正确的非对称」）：
+    # 目标解析（compose.resolve_cloud_target 一次吐 prefix + 各资源终名 + region/profile，ADR 0033 两层命名）。
+    # **local 档也解析**：region/profile 两路都要（喂 subprocess worker + store），云资源名多算几个纯字符串、不用即弃。
+    # region/profile 是「正确的非对称」（ADR 0016 决策 C）：
     # - profile：--profile > AWS_PROFILE。仅 subprocess worker 注入（继承本机 ~/.aws、profile 合法）；
     #   **Fargate 绝不注入**（容器无 ~/.aws、用 task role，注入不存在的 profile 名会 ProfileNotFound 盖过 task role）。
-    # - region：--region > AWS_REGION > AWS_DEFAULT_REGION > profile config（compose.resolve_region 落实成**具体字符串**）。
-    #   profile config 回落是关键：AgentCore validate_region 不吃 profile config、要显式 region 字符串，不落实则 profile-only
-    #   下 worker InvalidRegionError 崩。落实后 subprocess env + FargateEngine overrides + store 三处同源、消除分叉
-    #   （cloud ⇒ FargateEngine 执行、见下 3a/build_fargate_engines）。
+    # - region：解析链落实成**具体字符串**（见 compose.resolve_region）。profile config 回落是关键：AgentCore
+    #   validate_region 不吃 profile config、要显式 region 字符串，不落实则 profile-only 下 worker InvalidRegionError
+    #   崩。落实后 subprocess env + FargateEngine overrides + store 三处同源、消除分叉。
     # 均可为 None＝真无（fail-loud、不硬编码 east，对齐 store 宽容边界）。
-    resolved_profile = args.profile or os.environ.get("AWS_PROFILE")
-    resolved_region = compose.resolve_region(args.region, resolved_profile)
-
-    # cloud 资源名前缀（ADR 0033 两层命名）：prefix（--prefix > AWS_RESOURCE_PREFIX > 默认 gherkai-）批量推导默认名，
-    # 单资源 --xxx 覆盖。须与 CDK（iac_aws_backend）部署用的 prefix 一致（preflight 探活时点名 prefix 引导排错）。
-    prefix = args.prefix or os.environ.get("AWS_RESOURCE_PREFIX") or compose.DEFAULT_PREFIX
+    target = compose.resolve_cloud_target(
+        prefix=args.prefix, region=args.region, profile=args.profile,
+        runs_table=args.ddb_table, events_table=args.events_table,
+        bucket=args.s3_bucket, cluster=args.cluster,
+    )
 
     # 3a) 执行轴（ADR 0016 决策 A / 0033）：--backend cloud ⇒ Fargate 执行，**与 report 正交**——`--no-report` 只关
     #     不落库、不碰「在哪执行」。故 cloud 的 Fargate 执行配置解析在 do_report **之外**：`--no-report --backend cloud`
     #     仍在 Fargate 跑，只是不生成 report。cloud_fargate 置值 = 下面 resolver 用 FargateEngine（否则 SubprocessEngine）。
     if args.backend == "cloud":
-        events_table = args.events_table or compose.default_name(prefix, compose._BASE_EVENTS_TABLE)
-        cluster = args.cluster or compose.default_name(prefix, compose._BASE_CLUSTER)
-        bucket = args.s3_bucket or os.environ.get("AWS_S3_BUCKET") or compose.default_name(prefix, compose._BASE_BUCKET)
         # preflight 执行必需资源（events 表 + cluster + 本 run 用到引擎的 task-def；桶=job-in/产物上传也执行
         # 需要）——fail-fast 点名 prefix。runs 表仅落库需要，故只在 do_report 时探（见 3b begin 探活）；此处
         # 不探 runs 表（--no-report 下用不到）。不探 Lambda——同步 run 进程内推进、不依赖事件驱动链（ADR 0033）。
         try:
             err = compose.preflight_cloud_resources(
-                prefix=prefix, events_table=events_table, bucket=bucket, cluster=cluster,
-                task_defs=[compose.task_def_name(prefix, e) for e in sorted({j.engine for j in jobs})],
-                runs_table=(args.ddb_table or os.environ.get("AWS_DDB_TABLE") or compose.default_name(prefix, compose._BASE_RUNS_TABLE))
-                            if do_report else None,  # runs 表仅 do_report 探（落库需要）
-                region=resolved_region, profile=resolved_profile,
+                prefix=target.prefix, events_table=target.events_table, bucket=target.bucket,
+                cluster=target.cluster,
+                task_defs=[compose.task_def_name(target.prefix, e) for e in sorted({j.engine for j in jobs})],
+                runs_table=target.runs_table if do_report else None,  # runs 表仅 do_report 探（落库需要）
+                region=target.region, profile=target.profile,
             )
         except ImportError as e:
             _progress(f"--backend cloud 需要 boto3：{e}")
@@ -841,16 +838,17 @@ def _cmd_run(args, repo: Path) -> int:
         # network 解析（subnet/sg：--xxx 覆盖 or 读 SSM）——需 prefix + region/profile 都已定。
         try:
             network_config = compose.resolve_network(
-                prefix=prefix, subnets=args.subnet, security_groups=args.security_group,
-                region=resolved_region, profile=resolved_profile,
+                prefix=target.prefix, subnets=args.subnet, security_groups=args.security_group,
+                region=target.region, profile=target.profile,
             )
         except Exception as e:
-            if _is_botocore_error(e):
-                _progress(f"--backend cloud 读 subnet/sg SSM 失败（/{prefix}backend/*——CDK 未写或无权限？）：{e}")
+            if compose.is_botocore_error(e):
+                _progress(f"--backend cloud 读 subnet/sg SSM 失败（/{target.prefix}backend/*——CDK 未写或无权限？）：{e}")
                 return 2
             raise
-        cloud_fargate = {"prefix": prefix, "cluster": cluster, "events_table": events_table,
-                         "bucket": bucket, "network_config": network_config}
+        cloud_fargate = {"prefix": target.prefix, "cluster": target.cluster,
+                         "events_table": target.events_table, "bucket": target.bucket,
+                         "network_config": network_config}
 
     # 3b) 落库轴（ADR 0030）：组合根按 --backend 注入 local/cloud 两套 store adapter，RunPersistence 负责「随进度落库」
     #     的统一编排（commit-point 写序 / RUNNING 中间态 / 按 scope_id 增量刷）。--no-report 则不落库（逃生舱）：
@@ -861,16 +859,12 @@ def _cmd_run(args, repo: Path) -> int:
     make_artifacts = None  # compose 返回的 artifacts 落点组装器（按 backend URI 化）
     if do_report:
         if args.backend == "cloud":
-            # cloud store 表/桶：table 走 prefix 推导或 --ddb-table 覆盖；bucket 复用 3a 已解析的（cloud_fargate 必已置值，
-            # 因 do_report+cloud ⊆ backend==cloud）——不依赖 3a 的局部 `bucket` 还在作用域（消 possibly-unbound）。
-            table = args.ddb_table or os.environ.get("AWS_DDB_TABLE") or compose.default_name(prefix, compose._BASE_RUNS_TABLE)
-            assert cloud_fargate is not None  # backend==cloud → 3a 已置值（收窄类型）
-            cloud_bucket = cloud_fargate["bucket"]
             try:
                 # cloud 装配下沉 compose（可复用）；import boto3 惰性在 _make_* 钩子里，缺 boto3 抛 ImportError
+                # 表/桶取 target（与 3a 的 preflight/Fargate 配置同一份解析，不再各自重拼）
                 run_store, result_store, report_store, make_artifacts = compose.build_cloud_stores(
-                    table=table, bucket=cloud_bucket, prefix=args.report_dir,
-                    region=resolved_region, profile=resolved_profile,
+                    table=target.runs_table, bucket=target.bucket, prefix=args.report_dir,
+                    region=target.region, profile=target.profile,
                 )
             except ImportError as e:
                 _progress(f"--backend cloud 需要 boto3：{e}")
@@ -885,7 +879,7 @@ def _cmd_run(args, repo: Path) -> int:
         try:
             persistence.begin(run_meta, started_at=compose.now_iso())
         except Exception as e:
-            if need_cloud and _is_botocore_error(e):
+            if need_cloud and compose.is_botocore_error(e):
                 _progress(f"--backend cloud 云端不可达（表/桶不存在或无权限/凭证·region 缺）：{e}")
                 return 2
             raise
@@ -900,13 +894,13 @@ def _cmd_run(args, repo: Path) -> int:
             run_id=run_id, prefix=cloud_fargate["prefix"], cluster=cloud_fargate["cluster"],
             events_table=cloud_fargate["events_table"], bucket=cloud_fargate["bucket"],
             report_dir=args.report_dir, network_config=cloud_fargate["network_config"],
-            region=resolved_region, profile=resolved_profile,
+            region=target.region, profile=target.profile,
             extra_http_headers=tunnel_headers,  # 隧道模式的额外请求头（ADR 0035 决策 4；None=不注入）
         )
     else:
         engines = compose.build_engines(
             repo, nova_logs_dir=nova_logs_dir, midscene_run_dir=midscene_run_dir,
-            region=resolved_region, profile=resolved_profile,
+            region=target.region, profile=target.profile,
             extra_http_headers=tunnel_headers,  # 同上（ADR 0035）
         )
     resolver = compose.make_resolver(engines)
@@ -935,19 +929,6 @@ def _cmd_run(args, repo: Path) -> int:
         f"max_concurrency={args.max_concurrency} default_job_timeout={args.default_job_timeout}s ..."
     )
 
-    # grace 硬约束（ADR 0024）：按本 run 各引擎的下限取 max（grace 是 run 级单值）。引擎特定下限住组合根。
-    min_grace = max((compose.engine_min_grace(j.engine) for j in jobs), default=0.0)
-    # --grace 哨兵默认（None）→ 跟随本 run 引擎推导（Nova run 自然 ≥act_timeout+余量；midscene-only 回到小值）。
-    grace = args.grace if args.grace is not None else max(min_grace, ScheduleOpts.grace_period_s)
-    # 显式给了过小 grace → 入口友好拒绝（对齐 votes 校验惯例，退 2「没开跑就被拒」）。core 侧还有 enforce 兜底
-    # （任何前端都受同一护栏），此处只为在 cli 给出清晰诊断、避免 core ValueError 冒到用户面。
-    if args.grace is not None and (args.grace <= 0 or args.grace < min_grace):
-        _progress(
-            f"--grace={args.grace} 太小：须 > 0 且 ≥ {min_grace}s（Nova act_timeout+余量；grace < 单 act 时长会致"
-            "会话泄漏、软停失效，ADR 0024 grace 硬约束）"
-        )
-        return 2
-
     # 5) schedule：跑 RunMeta（definition）→ RunResult（timeout<=0 → 不超时）。
     #    job 一完成即经 on_job_complete 实时落库（数据面判定真值先写，ADR 0030）。
     #    **cloud 运行期兜底（ADR 0030 决定七）**：run 已开跑，落库回调（on_event/on_job_complete）中途抛 botocore
@@ -970,7 +951,7 @@ def _cmd_run(args, repo: Path) -> int:
         try:
             result = _run_schedule()
         except Exception as e:
-            if _is_botocore_error(e):
+            if compose.is_botocore_error(e):
                 _progress(f"--backend cloud 运行期落库失败（DDB/S3 中途不可达，run 已开跑）：{e}")
                 return 1
             raise
@@ -991,7 +972,7 @@ def _cmd_run(args, repo: Path) -> int:
     # 这是 cli 组合根清自己算出的本地落点——core 对本地文件系统无知（0016 窄腰），不该由 core/store 删。
     # local 模式不清（产物就该留本地当最终落点）。
     if args.backend == "cloud":
-        _prune_empty_dirs(report_root / run_id)
+        compose.prune_empty_dirs(report_root / run_id)
 
     # 7) 核心产出 → stdout（--json：单一 JSON 文档，把产物落点折进同一对象保可解析；否则人看文本汇总）。
     #    产物落点提示属诊断 → stderr（不论模式），不污染被重定向的 stdout 主输出。

@@ -9,7 +9,7 @@ from __future__ import annotations
 class WorkerNetworkError(RuntimeError):
     """worker 以「网络/SSL 瞬时故障」专用退出码退出（建连失败、重试耗尽，ADR 0028）。
 
-    subprocess_engine 把该退出码翻成本异常；schedule 据此把 job 记 error_type="network_error"，
+    `wire.raise_for_worker_exit` 把该退出码翻成本异常（两个 Engine adapter 共用）；schedule 据此把 job 记 error_type="network_error"，
     并在「会话未起（零 step_done）」时选择性重试整个 job。
     """
 

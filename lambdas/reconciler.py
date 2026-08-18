@@ -31,10 +31,6 @@ def _run_ids_from_stream(event) -> set[str]:
     return run_ids
 
 
-def _now_iso() -> str:
-    return _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
 # ============================================================================
 # job timeout（ADR 0034「job timeout」节 cloud 档）：到点触发器 + 超时处置 + 防御扫
 # ============================================================================
@@ -48,17 +44,15 @@ TIMEOUT_STOP_SENTINEL = "gherkai-job-timeout"
 _DEFENSIVE_TIMEOUT_MARGIN_S = 60.0
 
 
-def _parse_iso(ts: str) -> _dt.datetime:
-    return _dt.datetime.fromisoformat(ts.replace("Z", "+00:00"))
-
-
 class EventBridgeTimeoutWatch:
     """job timeout 的云端到点触发器（ADR 0034「job timeout」节）：CloudLauncher 起 task 后 arm 一个
     EventBridge Scheduler **one-time schedule**（at = now+timeout、ActionAfterCompletion=DELETE 到点自动删
     ——无常驻轮询、idle 零成本）→ 到点 invoke kicker（payload {"run_id","timeout_scope"}）走超时处置。
 
-    schedule 名 = {prefix}job-timeout-{sha1(run_id#scope_id)[:20]}：确定性（重复 arm 幂等，ConflictException 视作已武装）、
-    合法字符集（scope_id 可含中文/路径，不能直接入名）、≤64 字符。best-effort：调用方（CloudLauncher）兜异常。
+    schedule 名 = `names.job_timeout_schedule_prefix(prefix)` + sha1(run_id#scope_id)[:20]：确定性（重复 arm
+    幂等，ConflictException 视作已武装）、合法字符集（scope_id 可含中文/路径，不能直接入名）、≤64 字符。
+    名字空间前缀走命名真源 `gherkai.names`——IaC 的 IAM 资源域同源推导（ADR 0033「两层命名」，两侧硬契约）。
+    best-effort：调用方（CloudLauncher）兜异常。
     """
 
     def __init__(self, scheduler_client, *, kicker_arn: str, role_arn: str, prefix: str) -> None:
@@ -69,9 +63,10 @@ class EventBridgeTimeoutWatch:
 
     def schedule_name(self, run_id: str, scope_id: str) -> str:
         import hashlib
+        from gherkai import names
 
         digest = hashlib.sha1(f"{run_id}#{scope_id}".encode("utf-8")).hexdigest()[:20]
-        return f"{self._prefix}job-timeout-{digest}"
+        return f"{names.job_timeout_schedule_prefix(self._prefix)}{digest}"
 
     def arm(self, run_id: str, scope_id: str, timeout_s: float) -> None:
         import json
@@ -111,7 +106,8 @@ def _handle_timeout(run_id: str, scope_id: str, built, ecs_client=None) -> str:
     js = state.jobs.get(scope_id) if state is not None else None
     if js is None or js.status != Status.RUNNING:
         return "noop-not-running"  # 到点时 job 早收敛/未知 → 幂等 no-op（best-effort 边界）
-    if any(r.kind == "exit" and r.scope_id == scope_id for r in event_log.records()):
+    # 只查本 scope（EventLog.has_exit 单点查）——一个 scope 的处置不该逐 scope 重放整 run 的 events。
+    if event_log.has_exit(scope_id):
         return "noop-exit-in-flight"  # 退出记录已在、投影在途 → 让既有链收敛，不动手
     ecs = ecs_client if ecs_client is not None else boto3.client(
         "ecs", region_name=os.environ.get("REGION") or os.environ.get("AWS_REGION"))
@@ -142,18 +138,19 @@ def _scan_overdue_timeouts(run_id: str, built) -> None:
     RUNNING 且 now-claimed_at > timeout+余量 的 job 走同一超时处置——CreateSchedule 失败/schedule 丢失时，
     后续任何事件触发的 tick 都能补救。纯静默 job（无事件→无 tick）的主保障仍是 Scheduler 到点 invoke。"""
     from core.model import Status
+    from gherkai import compose
 
     meta, event_log, run_store, *_ = built
     state = run_store.load_run_state(run_id)
     if state is None:
         return
     job_by_scope = {j.scope_id: j for j in meta.jobs}
-    now = _dt.datetime.now(_dt.timezone.utc)
+    now = _dt.datetime.now(_dt.timezone.utc)  # 纯时间差比较、不落库（落库的时间戳一律 compose.now_iso）
     for sid, js in state.jobs.items():
         job = job_by_scope.get(sid)
         if js.status != Status.RUNNING or not js.claimed_at or job is None or not job.timeout_s:
             continue
-        elapsed = (now - _parse_iso(js.claimed_at)).total_seconds()
+        elapsed = (now - compose.parse_iso(js.claimed_at)).total_seconds()
         if elapsed > job.timeout_s + _DEFENSIVE_TIMEOUT_MARGIN_S:
             print(f"defensive-timeout: run={run_id} scope={sid} elapsed={elapsed:.0f}s > 预算 {job.timeout_s}s+余量")
             _handle_timeout(run_id, sid, built)
@@ -164,6 +161,7 @@ def _build(run_id: str):
 
     返回 (meta, event_log, run_store, launcher, max_concurrency, result_store, report_store)——同 local
     build_local_reconcile 的形状，供 tick + finalize 聚合。meta 从 RunStore 读回（definition）。
+    **None = 本 run 不由云端推进器管**（definition 不在库 / 非 detached，见下）——两个 handler 据此整体 no-op。
 
     **FargateEngine 装配复用 compose.build_fargate_engines（单一真源，不重造）**——job-in 前缀 / artifact 落点 /
     task-def·container 名 / SDK env 全与同步 cloud run 路径一致、零漂移（ADR 0016：compose 是组合根逻辑、WebUI/
@@ -196,9 +194,17 @@ def _build(run_id: str):
 
     offloader = S3StepArgumentOffloader(s3, bucket, compose._normalize_prefix(report_dir))
     run_store = DynamoDBRunStore(runs_table, arg_offloader=offloader)
+    if not run_store.is_detached(run_id):
+        # 只推进 detached run（ADR 0034 端到端 cloud 1b）：同步 `run --backend cloud` 由进程内 schedule 推进，
+        # 推进器碰它就是双开推进器（抢 claim/RunTask/finalize）。kicker 那扇门由 Stream filter 挡，events 表
+        # Stream 这扇门滤不了（events item 无 detached 标记）——同一判据在此判，返回 None = 全 handler no-op。
+        # 判在 load_run_meta **之前**：同步 run 的每条 worker 事件都会触发本 Lambda，先判省掉强一致 META
+        # 读 + offload 正文的 S3 取回，且推进器在断定「不该碰」前不读对方 definition（STATE 缺失同落此支）。
+        print(f"skip: run {run_id} 非 detached（同步 cloud run 由进程内 schedule 推进）")
+        return None
     meta = run_store.load_run_meta(run_id)
     if meta is None:
-        return None  # definition 不存在（submit 未落库 / 别的 run）——忽略
+        return None  # definition 不存在（META 尚未落库的极端窗口 / 别的 run）——忽略
     scope_ids = [j.scope_id for j in meta.jobs]
     event_log = DdbEventLog(events_table, run_id, scope_ids)
 
@@ -255,20 +261,27 @@ def _run_ids_from_runs_stream(event) -> set[str]:
     return run_ids
 
 
-def _tick_runs(run_ids: set[str], label: str) -> dict:
-    """对每个 run tick 一步；done 则聚合收尾。reconciler（events Stream）与 kicker（runs Stream）共用。"""
-    from core.reconcile import tick
+def _tick_runs(run_ids: set[str], label: str, *, prebuilt: dict | None = None) -> dict:
+    """对每个 run tick 一步；done 则聚合收尾。reconciler（events Stream）与 kicker（runs Stream）共用。
 
+    prebuilt：本次 invoke 已装配好的组合根（run_id → `_build` 结果，**含 None**=该 run 不由云端推进器管），
+    有则复用、不重装——超时路径先 `_build` 做处置再落到此处 tick 同一个 run，重装一次是纯重复工作
+    （每次 `_build` 造 4 个 boto3 client + 强一致读 META + 可能的 S3 offload 正文还原）。
+    """
+    from core.reconcile import tick
+    from gherkai import compose  # 时钟走 compose.now_iso 单一真源（同 local/前台两宿主，格式不漂移）
+
+    prebuilt = prebuilt or {}
     for run_id in run_ids:
-        built = _build(run_id)
+        built = prebuilt[run_id] if run_id in prebuilt else _build(run_id)
         if built is None:
             continue
         meta, event_log, run_store, launcher, mc, rstore, pstore = built
-        done = tick(run_id, meta, event_log, run_store, launcher, mc, now_iso=_now_iso())
+        done = tick(run_id, meta, event_log, run_store, launcher, mc, now_iso=compose.now_iso())
         if done:
-            # 收尾聚合走 core 唯一一份（曾在此双写、与 cli/detached.py 漂移风险，已合并）
+            # 收尾聚合走 core 唯一一份（曾在此双写、与 gherkai/detached.py 漂移风险，已合并）
             from core.reconcile import finalize_artifacts
-            finalize_artifacts(run_id, meta, event_log, rstore, pstore, _now_iso())
+            finalize_artifacts(run_id, meta, event_log, rstore, pstore, compose.now_iso())
             print(f"{label}: run {run_id} done + finalized")
         else:
             print(f"{label}: run {run_id} advanced (not done)")
@@ -292,12 +305,15 @@ def kicker_handler(event, context):
     「推着走」（events Stream 持续推进）。
 
     第三触发源（ADR 0034「job timeout」节）：EventBridge Scheduler 的到点 invoke，payload
-    `{"run_id","timeout_scope"}`——先超时处置（仍 running 才 StopTask/收敛），再照常 tick。
+    `{"run_id","timeout_scope"}`——先超时处置（仍 running 才 StopTask/收敛），再照常 tick
+    （处置用的组合根经 prebuilt 交给 tick 复用，同一 run 只装配一次）。
     """
     timeout_scope = event.get("timeout_scope")
     rid = event.get("run_id")
+    prebuilt: dict = {}
     if timeout_scope and rid:
         built = _build(rid)
+        prebuilt[rid] = built  # 含 None（本 run 不该推进）——tick 侧据此也不重装
         if built is not None:
             _handle_timeout(rid, timeout_scope, built)
-    return _tick_runs(_run_ids_from_runs_stream(event), "kicker")
+    return _tick_runs(_run_ids_from_runs_stream(event), "kicker", prebuilt=prebuilt)

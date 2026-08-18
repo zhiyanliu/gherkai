@@ -119,6 +119,34 @@ def test_ssm_params_with_prefix_path():
     })
 
 
+def _joined_refs(value) -> list[str]:
+    """从模板值（Fn::Join）取出被拼接的资源 Ref 序列。SSM StringList 与 Lambda env 的 Join 形态不同
+    （分隔符一个在 Join 首参、一个夹在片段之间）→ 比 Ref 序列、不比 JSON。字面串（如空列表拼出的 ""）→ []。"""
+    if not isinstance(value, dict):
+        return []
+    if "Ref" in value:  # 单个 token（没走 Join）
+        return [value["Ref"]]
+    parts = value["Fn::Join"][1]
+    return [p["Ref"] for p in parts if isinstance(p, dict) and "Ref" in p]
+
+
+def test_worker_subnets_single_source_across_ssm_and_lambda_env():
+    """subnet 选取（公有优先、无则回落私有）只有一处落点 `_worker_subnet_ids`：写给 cli 读的 SSM
+    与 reconciler/kicker 的 `SUBNETS` env 必须**恒等**——三者最终都喂同一个 `awsvpcConfiguration`，
+    漂移只会在 RunTask 时才暴露（cli 与 Lambda 起的 task 落进不同子网）。"""
+    t = _template()
+    ssm = [p["Properties"]["Value"] for p in t.find_resources("AWS::SSM::Parameter").values()
+           if p["Properties"]["Name"] == "/gherkai-backend/subnets"]
+    assert len(ssm) == 1
+    envs = {name: fn["Properties"]["Environment"]["Variables"]["SUBNETS"]
+            for name, fn in t.find_resources("AWS::Lambda::Function").items()
+            if "SUBNETS" in fn["Properties"].get("Environment", {}).get("Variables", {})}
+    assert len(envs) == 2, f"应恰有 reconciler/kicker 两个 Lambda 拿 SUBNETS，实际 {sorted(envs)}"
+    assert _joined_refs(ssm[0]), "SSM subnets 应是 subnet 资源 Ref 拼出来的（空=选取逻辑坏了）"
+    for name, env_val in envs.items():
+        assert _joined_refs(env_val) == _joined_refs(ssm[0]), f"{name} 的 SUBNETS 与 SSM 不同源"
+
+
 def test_task_role_has_events_putitem_not_runs():
     # task role 最小权限：events 表 PutItem，**不给 runs 表**（worker 绝不碰 RunState，ADR 0024/0030 单写者）。
     t = _template()
@@ -313,7 +341,7 @@ def test_stop_timeout_rejects_bool_and_float_typed_context():
             _template(context={"stop_timeout": bad})
 
 
-# ---- 无状态跑批事件驱动链（ADR 0034 P4c）----
+# ---- 无状态跑批事件驱动链（ADR 0034「端到端流程」cloud + 机制一/二）----
 def test_reconcile_lambdas_present():
     # 3 Lambda：退出观察者（ECS STOPPED→task_exited）+ reconciler（events Stream→推进+finalize）
     #          + kicker（runs Stream INSERT→冷启动起首批，ADR 0034）。
@@ -322,7 +350,8 @@ def test_reconcile_lambdas_present():
 
 
 def test_events_table_has_stream():
-    # events 表开 Stream（NEW_IMAGE）触发 reconciler（ADR 0034）。runs 表不开（无需）。
+    # events 表开 Stream（NEW_IMAGE）触发 reconciler（ADR 0034）；runs 表也开 Stream、触发 kicker
+    # （见 test_runs_table_has_stream_for_kicker）——本用例只验 events 这一半。
     t = _template()
     t.has_resource_properties("AWS::DynamoDB::Table", {
         "StreamSpecification": {"StreamViewType": "NEW_IMAGE"},
@@ -382,3 +411,23 @@ def test_kicker_mapping_insert_filter():
             if "INSERT" in f.get("Pattern", ""):
                 insert_filtered.append(m)
     assert len(insert_filtered) == 1, f"应恰有 1 个 INSERT-filter mapping（kicker），实际 {len(insert_filtered)}"
+
+
+def test_exit_observer_can_read_runs_table_only():
+    """退出观察者写 task_exited 前要判 run 是否 detached（ADR 0034 端到端 cloud 1b 的 handler 侧分流）→
+    须能**读** runs 表；且只读——观察者绝不写 RunState（ADR 0030 单写者）。
+    """
+    t = _template()
+    role_policies = [p["Properties"] for p in t.find_resources("AWS::IAM::Policy").values()
+                     if "ExitObserver" in json.dumps(p["Properties"].get("Roles", []))]
+    assert role_policies, "找不到退出观察者的执行角色 policy"
+    runs_actions = []
+    for props in role_policies:
+        for st in props["PolicyDocument"]["Statement"]:
+            if "RunsTable" not in json.dumps(st.get("Resource", "")):
+                continue
+            acts = st.get("Action")
+            runs_actions += acts if isinstance(acts, list) else [acts]
+    assert "dynamodb:GetItem" in runs_actions, f"缺 runs 表读权限（detached 分流会 AccessDenied）：{runs_actions}"
+    writes = [a for a in runs_actions if any(w in a for w in ("PutItem", "UpdateItem", "DeleteItem"))]
+    assert not writes, f"退出观察者不应有 runs 表写权限：{writes}"

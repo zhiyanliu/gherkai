@@ -17,6 +17,9 @@ BASE_CLUSTER = "cluster"
 BASE_KICKER_LAMBDA = "kicker"
 BASE_RECONCILER_LAMBDA = "reconciler"
 BASE_EXIT_OBSERVER_LAMBDA = "exit-observer"
+# job timeout 到点触发器的 one-time schedule 基名（ADR 0034「job timeout」节）：推进器运行期建
+# `{prefix}job-timeout-{摘要}`、IaC 只给这一族名的 IAM 资源域——名字空间前缀见 job_timeout_schedule_prefix。
+BASE_JOB_TIMEOUT_SCHEDULE = "job-timeout"
 # task-def / container：按 job.engine 拼 `{prefix}{engine}-worker`（对称 EngineResolver 按 engine 选）。
 ENGINES = ("novaact", "midscene")
 
@@ -35,6 +38,16 @@ def container_name(engine: str) -> str:
     """task-def 里的 container 名（RunTask overrides 指定往哪个 container 注 env）。不带 prefix——container 是
     task-def 内部名、随 task-def 走（task-def 已带 prefix），再叠 prefix 冗余。固定 `{engine}-worker`。"""
     return f"{engine}-worker"
+
+
+def job_timeout_schedule_prefix(prefix: str) -> str:
+    """job timeout schedule 的名字空间前缀 `{prefix}job-timeout-`（其后接 run+scope 摘要段）。
+
+    **含尾部 `-`**：通配/摘要就从这里起——推进器据它建 schedule 名、IaC 据它拼 IAM 资源域
+    `schedule/default/{此前缀}*`，两侧同源。任一侧单独改名 → CreateSchedule 被 IAM 拒（best-effort
+    只打日志），job timeout 静默降级为防御扫、纯静默 job 彻底失去超时保护（ADR 0034「job timeout」节）。
+    """
+    return f"{default_name(prefix, BASE_JOB_TIMEOUT_SCHEDULE)}-"
 
 
 def ssm_path(prefix: str, key: str) -> str:

@@ -181,3 +181,41 @@ def test_unknown_event_type_raises():
     import pytest
     with pytest.raises(ValueError, match="未知事件 type"):
         event_from_json({"type": "bogus"})
+
+
+# ---- 退出码约定（out-of-band 协议通道，ADR 0024「退出码约定」/ 0028）----
+# 常量与翻译在 wire 一处、两个 Engine adapter 共用（曾各抄一份、靠「两处必须同值」的注释维持）：本组守那份单一事实源。
+def test_ex_worker_network_value_is_protocol_pinned():
+    """80 是跨语言约定值（两个引擎 worker 各自硬编码）——改这个数即改协议，须同步两 worker。"""
+    from core.wire import EX_WORKER_NETWORK
+    assert EX_WORKER_NETWORK == 80
+
+
+def test_raise_for_worker_exit_maps_codes():
+    """码→异常的分类（schedule 按类型分流：WorkerNetworkError→network_error 可重试 / RuntimeError→error）。
+
+    0 与负码不抛：负码只来自 SIGKILL（schedule 主动停 worker 的尾路径），非 worker 自报的故障、不在此翻译。
+    """
+    import pytest
+
+    from core.errors import WorkerNetworkError
+    from core.wire import raise_for_worker_exit
+
+    raise_for_worker_exit(0, code_label="returncode")   # 正常退出
+    raise_for_worker_exit(-9, code_label="returncode")  # SIGKILL 强杀
+    with pytest.raises(WorkerNetworkError):
+        raise_for_worker_exit(80, code_label="returncode")
+
+
+def test_raise_for_worker_exit_label_names_the_transport_field():
+    """两个 adapter 共用同一翻译、只换 code_label：消息说各自传输的字段名（子进程 returncode / ECS exitCode）。"""
+    import pytest
+
+    from core.errors import WorkerNetworkError
+    from core.wire import raise_for_worker_exit
+
+    with pytest.raises(RuntimeError, match=r"returncode=1\b") as sub:
+        raise_for_worker_exit(1, code_label="returncode")
+    assert not isinstance(sub.value, WorkerNetworkError)  # 非 80 不进 network_error 分类
+    with pytest.raises(RuntimeError, match=r"exitCode=137\b"):
+        raise_for_worker_exit(137, code_label="exitCode")

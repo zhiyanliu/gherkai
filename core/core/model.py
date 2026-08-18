@@ -129,6 +129,18 @@ _NON_VERDICT: frozenset[Status] = frozenset(
     {Status.SKIPPED, Status.ABORTED, Status.PENDING, Status.RUNNING}
 )
 
+# 生命周期前置态（ADR 0031 决定一·补）：只这两个，「终态」由此取补。
+_PRE_TERMINAL: frozenset[Status] = frozenset({Status.PENDING, Status.RUNNING})
+
+# **终态集单一真源**（ADR 0031 决定一/一·补）：pending/running 之外的全部 Status。等待循环/退出码判定一律引它，
+# 不各自枚举——正向白名单散写多份时，新增终态漏改哪份，那份就永远判不到终态（死等/假绿）。
+# **定义取补而非正列**：新增终态自动入集（对未来新态稳健，同 `_render_status` 退出码判定的取补立场）；
+# 只有新增**前置态**才需动 `_PRE_TERMINAL`（届时 `_NON_VERDICT` 同批要改，两处紧邻放正为此）。
+# **与 `_NON_VERDICT` 是两把不同的刀，别混**：本集按**生命周期**切（还会不会变 → 不会 = 终态，含
+# skipped/aborted）；`_NON_VERDICT` 按**run 级判定**切（算不算判定结论 → skipped/aborted 是终态但不算），
+# 故两集在 skipped/aborted 上有意重叠。恒等于 `_STATUS_SEVERITY` 的键集（severity 只给终态定义，决定二）。
+TERMINAL_STATUSES: frozenset[Status] = frozenset(Status) - _PRE_TERMINAL
+
 
 def severity(status: Status) -> int:
     """终态的 severity 数值（ADR 0031）。前置态 pending/running 无 severity，调用即编程错误。"""

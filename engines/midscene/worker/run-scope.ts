@@ -36,10 +36,12 @@ import "./deterministic.steps.js";  // 脚手架同目录（ADR 0022 退役 bdd 
 const BROWSER_ID = "aws.browser.v1";
 // AI 断言投票次数由 job.assertionVotes 决定（ADR 0014/0024，组合根经 --assertion-votes 设）。
 // 默认 1（不抖动检测，结果直观）；调高才跑 N 次取多数票。
-// 网络专用退出码（ADR 0028）：与 core/adapters/subprocess_engine.py 的 EX_WORKER_NETWORK 同值。
+// 网络专用退出码（ADR 0028）：与 core/wire.py 的 EX_WORKER_NETWORK 同值（协议层单一事实源，两 Engine adapter 共用翻译）。
 // worker 建连失败、重试耗尽时以此码退出，作 out-of-band 信号（建连失败先于任何事件 emit）。
 const EX_WORKER_NETWORK = 80;
-const CONNECT_ATTEMPTS = 4; // 建连重试上限（ADR 0028）；退避 [0.5,1,2]s，总 ~3.5s < grace 5s
+// 建连重试上限（ADR 0028）；退避 [0.5,1,2]s，总 ~3.5s，远小于组合根按引擎推导的 grace 下限
+// （midscene 见 gherkai/gherkai/compose.py `MIDSCENE_GRACE_MIN_S`；此处不复述会变的数字）。
+const CONNECT_ATTEMPTS = 4;
 const CONNECT_BACKOFF_MS = [500, 1000, 2000];
 // SIGTERM cleanup 里单个 StopBrowserSession 的超时预算（ADR 0028）：退化网络下 Stop 可能挂很久
 // （共享 client maxAttempts=3、无显式超时），超过 schedule grace 会被 SIGKILL 打断到一半 → 会话泄漏。
@@ -195,20 +197,33 @@ function stepCost(beforeTokens: number, agent: PlaywrightAgent): Record<string, 
   return delta > 0 ? { tokens: delta } : undefined;
 }
 
+// 自述入口（--list-deterministic / --match-steps）的 stdout payload 写出（ADR 0036「stdout 一行 JSON 即退」）：
+// **必须等真 flush 完才能退**，否则 pipe 下大 payload 在 64KB 处静默截断且 rc 仍是 0——组合根只能报「输出非
+// JSON」、真因不可见（ADR 0036 的 best-effort 降级把它吞成 plan 无标注）。两种直觉写法都不够：
+//   - `process.stdout.write(s)` 后紧跟 process.exit：pipe 上 stdout 是异步写，exit 不 flush 未写完的尾部；
+//   - `fs.writeSync(1, s)`：worker 跑在 `--import tsx` 下（见文件头「跑」），tsx 把 fd 1 置成非阻塞，
+//     writeSync 对 pipe 只写满内核缓冲就返回 **部分写字节数、且不重试**（真跑实测 1MB 只出 65536）。
+// 故走 write 回调等 libuv 真写完（背压/EAGAIN 交事件循环），再由统一出口 process.exit。
+async function writeStdoutFlushed(s: string): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    process.stdout.write(s, (e) => (e ? reject(e) : resolve()));
+  });
+}
+
 async function main(): Promise<number> {
   // 自述模式（ADR 0036）：dump 确定性注册表即退——不建会话、不读 stdin、不烧钱。
   // 脚手架已在模块顶 import（副作用注册），此刻注册表即真值。
   if (process.argv.includes("--list-deterministic")) {
-    process.stdout.write(JSON.stringify(listRegistry()) + "\n");
+    await writeStdoutFlushed(JSON.stringify(listRegistry()) + "\n");
     return 0;
   }
-  // 批量 match 查询（ADR 0036 第二期，plan 命中标注）：stdin 一行 JSON 数组（step 文本）→ stdout 一行
+  // 批量 match 查询（ADR 0036 决策 4，plan 命中标注）：stdin 一行 JSON 数组（step 文本）→ stdout 一行
   // 逐条命中结果。匹配语义留在 worker（CLI 零复刻）；同样不建会话、零 AWS。
   if (process.argv.includes("--match-steps")) {
     const chunks: Buffer[] = [];
     for await (const c of process.stdin) chunks.push(c as Buffer);
     const texts: string[] = JSON.parse(Buffer.concat(chunks).toString("utf-8"));
-    process.stdout.write(JSON.stringify(matchBatch(texts)) + "\n");
+    await writeStdoutFlushed(JSON.stringify(matchBatch(texts)) + "\n");
     return 0;
   }
 

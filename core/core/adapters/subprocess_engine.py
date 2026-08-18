@@ -20,14 +20,8 @@ import sys
 import threading
 from typing import Callable, Iterator
 
-from core.errors import WorkerNetworkError
 from core.model import Event, Job
-from core.wire import event_from_line, job_to_line
-
-# worker 网络专用退出码（ADR 0028）：worker 建连失败、重试耗尽时以此码退出，作 out-of-band 信号
-# （建连失败发生在任何事件 emit 之前，无法走事件通道）。值避开 POSIX sysexits(64-78)/signal 保留区。
-# **两个引擎 worker 必须用同一个值**（Nova run_scope.py / Midscene run-scope.ts 各自硬编码 80）。
-EX_WORKER_NETWORK = 80
+from core.wire import event_from_line, job_to_line, raise_for_worker_exit
 
 
 class SubprocessWorkerHandle:
@@ -40,7 +34,10 @@ class SubprocessWorkerHandle:
         proc = self._proc
         if proc.poll() is not None:
             return  # 已退出
-        proc.terminate()  # SIGTERM —— worker 捕获后 raise→with __exit__ 解栈停 AgentCore 会话再退（ADR 0024）
+        # SIGTERM —— worker 侧**协作式**响应（ADR 0024 终止契约）：Nova 的 handler 只置停止标志（flag-only、绝不
+        # raise），主流程在 act 边界安全点正常退 with 释放 AgentCore 会话；Midscene 的 handler 跑显式 cleanup 序列
+        # （会话释放优先）后 process.exit。两侧都不靠异常穿透解栈（raise 模型是 ADR 0024 被拒方案）。
+        proc.terminate()
         try:
             proc.wait(timeout=grace_period_s)
         except subprocess.TimeoutExpired:
@@ -87,23 +84,39 @@ class SubprocessEngine:
         # 比硬编码 fd3 更稳、可移植（worker 不假设具体号）。
         child_env = dict(self._env if self._env is not None else os.environ)
         child_env["EVENTS_FD"] = str(events_w)
-        proc = subprocess.Popen(
-            self._cmd,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            cwd=self._cwd,
-            env=child_env,
-            text=True,
-            encoding="utf-8",
-            bufsize=1,  # 行缓冲：worker 每吐一行即可读到（流式，ADR 0024）
-            pass_fds=(events_w,),  # 让子进程继承写端
-        )
+        try:
+            proc = subprocess.Popen(
+                self._cmd,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                cwd=self._cwd,
+                env=child_env,
+                text=True,
+                encoding="utf-8",
+                bufsize=1,  # 行缓冲：worker 每吐一行即可读到（流式，ADR 0024）
+                pass_fds=(events_w,),  # 让子进程继承写端
+            )
+        except BaseException:
+            # 起 worker 失败（cmd 不存在 / cwd 无效 / 其他 OSError）：管道两端是**裸 fd、没有 GC 兜底**，不显式
+            # 关就永久泄漏。调用方（schedule）把「起 worker 失败」吞成本 job 的 error 后继续跑下一个 job，故
+            # worker 命令配错这类「每 job 必炸」的场景会按 job 数累积泄漏 → 撞进程 fd 上限。
+            os.close(events_r)
+            os.close(events_w)
+            raise
         os.close(events_w)  # 父进程不写，关掉写端（否则读端永不 EOF）
-        assert proc.stdin is not None
-        proc.stdin.write(job_to_line(job) + "\n")
-        proc.stdin.flush()
-        proc.stdin.close()
+        try:
+            assert proc.stdin is not None
+            proc.stdin.write(job_to_line(job) + "\n")
+            proc.stdin.flush()
+            proc.stdin.close()
+        except BaseException:
+            # worker 起来即崩（stdin 写入抛 BrokenPipeError）：events_r 同样是裸 fd、子进程也需 reap——
+            # 与上面 Popen 失败支同一「每 job 必炸 → 按 job 数累积泄漏」形态，同样显式收。
+            os.close(events_r)
+            proc.kill()
+            proc.wait()
+            raise
 
         # stdout（SDK 噪声）+ stderr（worker 诊断）都实时透传为日志，单独线程读，避免管道满阻塞 worker。
         # 带 scope_id 前缀，多 worker 并发时区分谁在说话（与领域模型对齐、可追溯）。
@@ -150,11 +163,8 @@ def _read_events(
         # 正非零 = worker 自行异常退出（崩溃/会话清理失败 exit 1 / 网络码 80）→ 抛错让 schedule 记 error。
         # 注：两个引擎 worker 与 echo_worker 均自装 SIGTERM handler 后 process.exit/sys.exit（正码），
         # 故「负码=SIGTERM」不成立——负码只来自 SIGKILL，且那条路径不经此检查（见上）。
-        if rc == EX_WORKER_NETWORK:
-            # worker 以网络专用退出码退出（建连失败、重试耗尽，ADR 0028）：抛类型化异常，
-            # schedule 据此记 network_error 并可选择性重试整 job。
-            raise WorkerNetworkError(f"worker 建连失败（网络/SSL 瞬时故障），退出码 {rc}")
-        raise RuntimeError(f"worker 异常退出 returncode={rc}")
+        # 码→异常的翻译在 wire（协议级，与 Fargate adapter 共用一份，ADR 0024「退出码约定」）。
+        raise_for_worker_exit(rc, code_label="returncode")
 
 
 # worker 行的 ANSI 前景色调色板（按 scope_id 哈希挑一个，保证同一 worker 每次同色）。

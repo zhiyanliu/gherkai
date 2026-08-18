@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass
 
 from core.model import Job
@@ -89,7 +90,9 @@ def _resolve_timeout(scope_id: str, members: list[ParsedScenario], default: floa
     """解析一个 scope 的 job 墙钟预算：与 _resolve_engine 同构（ADR 0019 @timeout）。
 
     缺省用 default；任一标了 @timeout:N 则全 scope 继承；多个不同值 → PlanError（同 scope 一个预算）。
-    N 必须是正数（非数字 / <=0 → PlanError——「标了 tag 但想不超时」不成立，删 tag 走缺省即可）。
+    N 必须是**有限**正数（非数字 / <=0 / nan / inf → PlanError——「标了 tag 但想不超时」不成立，删 tag
+    走缺省即可）。nan/inf 须显式拒：`float()` 收它们（`float("nan")`/`"inf"`/`"1e400"` 都不抛），而下游
+    推进器一律用 `>` 比较 deadline，nan/inf 会让超时保护静默失效（标了 tag 却永不超时）。
     """
     raws: list[str] = []
     for m in members:
@@ -108,7 +111,7 @@ def _resolve_timeout(scope_id: str, members: list[ParsedScenario], default: floa
         n = float(raw)
     except ValueError:
         raise PlanError(f"scope {scope_id!r} 的 @timeout:{raw} 不是数字：须为正数秒（ADR 0019）。") from None
-    if n <= 0:
+    if not math.isfinite(n) or n <= 0:
         raise PlanError(
             f"scope {scope_id!r} 的 @timeout:{raw} 须为正数秒（ADR 0019）；不想超时就删掉 tag 走缺省。"
         )

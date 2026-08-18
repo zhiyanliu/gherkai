@@ -58,6 +58,11 @@ class Engine(Protocol):
         **纯事件流**：adapter 只产领域事件，不掺心跳/哨兵——worker 静默卡死时迭代器自然阻塞在读上，
         由 schedule 层统一兜底（后台线程 + 超时唤醒查 deadline，ADR 0026/0028）。心跳是消费方策略，
         不进端口契约，也不必每个 adapter 各实现一遍。
+
+        **本签名即全部契约**：`SubprocessEngine.run_scope` 另有 `raw_sink`（原始事件行旁路，供无状态路径把
+        未解析的行落持久 events sink）——那是**该 adapter 的扩展形参、不在 port 契约内**（ADR 0034「Engine port
+        演进」；`FargateEngine.run_scope` 不接受它）。要它的调用方须把类型收窄到具体 adapter（local 无状态
+        路径的 `SubprocessLauncher` 即如此），别经 `Engine` 标注调它——那样换 adapter 只在运行时 TypeError。
         """
         ...
 

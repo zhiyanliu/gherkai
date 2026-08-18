@@ -39,6 +39,16 @@ def test_exit_record_independent_keyspace(tmp_path):
     assert log.max_seq("a") == 1
 
 
+def test_has_exit_single_scope(tmp_path):
+    """has_exit 只看本 scope 的退出记录（对位 DdbEventLog.has_exit）：worker 事件不算、别的 scope 不串扰。"""
+    log = _log(tmp_path)
+    log.append_event("a", 1, '{"type":"scope_started","scopeId":"a"}', 1.0)
+    assert log.has_exit("a") is False
+    log.record_exit("a", None)  # exit_code=None（宽限态）也算「退出记录已在」
+    assert log.has_exit("a") is True
+    assert log.has_exit("b") is False
+
+
 def test_exit_code_none_stored(tmp_path):
     """exitCode 宽限态（None）可存（机制二兜底）。"""
     log = _log(tmp_path)

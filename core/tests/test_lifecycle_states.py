@@ -7,6 +7,7 @@ from __future__ import annotations
 import threading
 
 from core.model import (
+    TERMINAL_STATUSES,
     ScenarioStarted,
     ScopeStarted,
     Status,
@@ -61,6 +62,26 @@ def test_non_verdict_filter_set():
     assert _NON_VERDICT == frozenset(
         {Status.SKIPPED, Status.ABORTED, Status.PENDING, Status.RUNNING}
     )
+
+
+# ---- 终态真源（ADR 0031 决定一·补末条）----
+def test_terminal_statuses_is_everything_but_the_two_pre_terminal():
+    # 锁真源集合：新增终态自动入集（取补定义），只有新增前置态才需改——两条都由本断言看住
+    assert TERMINAL_STATUSES == frozenset(
+        {Status.PASSED, Status.FAILED, Status.ERROR, Status.SKIPPED, Status.ABORTED}
+    )
+    assert frozenset(Status) - TERMINAL_STATUSES == frozenset({Status.PENDING, Status.RUNNING})
+
+
+def test_terminal_statuses_equals_severity_table_keys():
+    # 恒等式（决定二：severity 只给终态定义）——漂移则 severity(新终态) KeyError 或前置态被误排序
+    assert TERMINAL_STATUSES == frozenset(_STATUS_SEVERITY)
+
+
+def test_terminal_and_non_verdict_are_two_different_cuts():
+    # 两把刀有意重叠、不可互换：skipped/aborted 是终态但不算 run 级判定结论（别拿 _NON_VERDICT 反推终态）
+    assert {Status.SKIPPED, Status.ABORTED} <= (TERMINAL_STATUSES & _NON_VERDICT)
+    assert TERMINAL_STATUSES != frozenset(Status) - _NON_VERDICT
 
 
 # ---- _aggregate 入口过滤（ADR 0031 决定三）----

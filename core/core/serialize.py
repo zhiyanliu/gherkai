@@ -5,6 +5,9 @@ RunStore（RunMeta/RunState）、ResultStore（JobResult）的落盘都复用这
 手写映射（不靠 dataclasses.asdict/反射）：形状是对外契约（CI/WebUI/manifest 消费），须显式、稳定。
 
 往返一致（round-trip）：`X_to_dict` 与 `X_from_dict` 须保持 from_dict(to_dict(x)) == x——有 round-trip 单测护栏。
+**规范化一律归写端**（读端只忠实还原落盘内容）：这样 to_dict 的产物本身是规范形、往返恒等；反之（读端规范化）
+落盘内容会随内存值的偶然形态漂、且往返把值悄悄变形。唯一带规范化的字段是 `RunMeta.extra_http_headers`
+（无序 header 表、tuple 只是 frozen 载体）：写端按键排序 + 空表当 None，故往返保 mapping 恒等、键序落定字典序。
 
 注：worker 协议的 Job 序列化在 wire.py（单向 Job→JSON 喂 worker，协议形状）；这里的 Job↔dict 是
 **双向持久化**（RunMeta 落盘要能读回完整 Job），用途不同、各自一份、各自被 round-trip 测护。
@@ -257,9 +260,13 @@ def run_meta_to_dict(meta: RunMeta) -> dict:
         "run_id": meta.run_id,
         "created_at": meta.created_at,
         "jobs": [job_to_dict(j) for j in meta.jobs],
-        # extra_http_headers：omit-when-None（旧落盘兼容；ADR 0035 决策 4）。落盘存 dict 形式（可读）。
-        **({"extra_http_headers": dict(meta.extra_http_headers)}
-           if meta.extra_http_headers is not None else {}),
+        # extra_http_headers（ADR 0035 决策 4）：落盘存 dict 形式（可读）、**键序在写端规范化**（sorted）——
+        # 规范化归写端、读端原样保序，from_dict 才是 to_dict 的忠实逆（读同一份落盘恒得同一个 tuple；
+        # 若改成读端 sorted、写端原样，落盘内容就随内存里的键序漂）。
+        # 判真而非 `is not None`：空表与 None 语义合一（都是「不注入额外头」）——省键即可，别落个 {} 让
+        # 读端再 falsy→None 地把 `()` 悄悄变形（往返不恒等）。omit 亦兼容旧落盘无此键。
+        **({"extra_http_headers": dict(sorted(meta.extra_http_headers))}
+           if meta.extra_http_headers else {}),
     }
 
 
@@ -269,7 +276,8 @@ def run_meta_from_dict(d: dict) -> RunMeta:
         run_id=d["run_id"],
         created_at=d.get("created_at", ""),
         jobs=tuple(job_from_dict(j) for j in d.get("jobs", [])),
-        extra_http_headers=tuple(sorted(hdrs.items())) if hdrs else None,  # 旧落盘无此键 → None
+        # 原样保序（键序已由写端规范化）；键缺失/空 → None（旧落盘兼容 + 空表即无）
+        extra_http_headers=tuple(hdrs.items()) if hdrs else None,
     )
 
 

@@ -146,3 +146,28 @@ def test_build_local_reconcile_resolves_region_like_foreground(tmp_path, monkeyp
     # 解析结果最终注进各引擎 worker 的 spawn env（与前台 run 同一注入面）
     eng = launcher._resolver("novaact")
     assert eng._env.get("AWS_REGION") == "us-test-9"
+
+
+def test_run_state_timestamps_share_one_format(tmp_path):
+    """RunState 内时间戳**格式统一**（ADR 0034「时钟也只一份」）：submit 侧写的 started_at 与推进器写的
+    claimed_at/ended_at 出自同一个 `compose.now_iso`——曾各宿主一份 `_now_iso`、两种 ISO 格式并存
+    （`+00:00` vs `…Z`），`status --json` 的机读消费者被迫兼容两种。故本例用真时钟（非 fake），
+    逐字比对「解析回来再 isoformat 是否原样」——任一宿主退回 `strftime` 的 `…Z` 写法即失败。
+    """
+    from gherkai import compose
+
+    meta = RunMeta(run_id="run-1", created_at=compose.now_iso(), jobs=(_job("a"),))
+    log = SqliteEventLog(tmp_path / "events.db")
+    store = LocalRunStore(tmp_path)
+    store.create_run(meta, RunState(run_id="run-1", status=Status.PENDING,
+                                    jobs={"a": JobState("a", Status.PENDING)},
+                                    started_at=compose.now_iso(), high_water_mark=0))
+    launcher = SubprocessLauncher(_echo_resolver("pass"), log)
+    run_reconcile_loop("run-1", meta, log, store, launcher, max_concurrency=1,
+                       poll_interval_s=0.05, now_iso_fn=compose.now_iso)
+    state = store.load_run_state("run-1")
+    stamps = {"created_at": meta.created_at, "started_at": state.started_at,
+              "ended_at": state.ended_at, "claimed_at": state.jobs["a"].claimed_at}
+    assert all(stamps.values()), stamps  # 三个写者都真写了（否则断言空转）
+    for name, ts in stamps.items():
+        assert ts == compose.parse_iso(ts).isoformat(), f"{name}={ts} 与 compose.now_iso 格式不同"

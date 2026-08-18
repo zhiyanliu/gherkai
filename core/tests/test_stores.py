@@ -176,7 +176,7 @@ def test_run_store_load_missing_returns_none(tmp_path: Path):
 
 def test_run_state_timestamps_round_trip(tmp_path: Path):
     # started_at/ended_at 非 None 时也须经 save/load 完整保留（不止测 None 态）。
-    # 本轮 run_state_from_result 不填起止（顺延，ADR 0016），故直接造带时间戳的 RunState 测落盘往返。
+    # run_state_from_result 只投影运行态、不填起止（ADR 0016），故直接造带时间戳的 RunState 测落盘往返。
     store = LocalRunStore(tmp_path / "runs")
     meta = _sample_run("run-ts").run_meta
     state = RunState(
@@ -193,8 +193,9 @@ def test_run_state_timestamps_round_trip(tmp_path: Path):
 
 
 def test_run_state_omits_null_timestamps(tmp_path: Path):
-    # omit-when-None：起止为 None（本轮同步 cli 不取时钟）时，落盘 JSON **不写**这两个键
-    # （不是写 null）——避免"永远 null 的字段被当 bug"的体验噪音。round-trip 仍还原回 None。
+    # omit-when-None：起止为 None（未取时钟的裸跑路径；正常 run 由 RunPersistence.begin/finalize 落起止，
+    # ADR 0030）时，落盘 JSON **不写**这两个键（不是写 null）——避免"永远 null 的字段被当 bug"的体验
+    # 噪音。round-trip 仍还原回 None。
     store = LocalRunStore(tmp_path / "runs")
     r = _sample_run("run-null")  # run_state_from_result 不填起止 → None
     store.save_run(r.run_meta, run_state_from_result(r))
@@ -305,15 +306,45 @@ def test_job_timeout_s_round_trip():
 
 
 def test_run_meta_extra_http_headers_round_trip():
-    # RunMeta.extra_http_headers（ADR 0035 决策 4）：非 None 往返不丢；None 省键（旧落盘兼容）
+    # RunMeta.extra_http_headers（ADR 0035 决策 4）：非空往返不丢；None/空表均省键（旧落盘兼容 + 空即无）
+    import dataclasses
+
     from core.serialize import run_meta_from_dict, run_meta_to_dict
     meta = _sample_run("h-run").run_meta
     assert "extra_http_headers" not in run_meta_to_dict(meta)  # 默认 None → omit
     assert run_meta_from_dict(run_meta_to_dict(meta)).extra_http_headers is None
-    import dataclasses
+    # 空 tuple 与 None 语义合一（都是「不注入额外头」）：同样省键、读回 None，不落 {} 也不变形出 ()
+    empty = dataclasses.replace(meta, extra_http_headers=())
+    assert "extra_http_headers" not in run_meta_to_dict(empty)
+    assert run_meta_from_dict(run_meta_to_dict(empty)).extra_http_headers is None
     meta2 = dataclasses.replace(meta, extra_http_headers=(("ngrok-skip-browser-warning", "1"),))
     got = run_meta_from_dict(run_meta_to_dict(meta2))
     assert got.extra_http_headers == (("ngrok-skip-browser-warning", "1"),)
+
+
+def test_run_meta_extra_http_headers_multiple_normalize_at_write_side():
+    """≥2 个 header：写端按键排序规范化、读端原样保序 → 键值不丢、落盘键序确定，再往返逐字恒等。
+
+    单 header 遮不住的两处：读端若 sorted 则「落盘顺序 ≠ 读回顺序」（from_dict 不是 to_dict 的逆）；
+    写端若原样则落盘内容随内存键序漂（同一份 header 表两种落盘形态）。
+    """
+    import dataclasses
+
+    from core.serialize import run_meta_from_dict, run_meta_to_dict
+    meta = _sample_run("h2-run").run_meta
+    hdrs = (("x-tunnel", "b"), ("ngrok-skip-browser-warning", "1"))  # 非字典序（x- 在前）
+    meta2 = dataclasses.replace(meta, extra_http_headers=hdrs)
+    d = run_meta_to_dict(meta2)
+    assert list(d["extra_http_headers"]) == ["ngrok-skip-browser-warning", "x-tunnel"]  # 写端规范化
+    got = run_meta_from_dict(d)
+    assert dict(got.extra_http_headers) == dict(hdrs)  # 键值不丢
+    assert got.extra_http_headers == (("ngrok-skip-browser-warning", "1"), ("x-tunnel", "b"))  # 读端保落盘序
+    # 规范形上往返逐字恒等（写端规范化 ⇒ 幂等）
+    assert run_meta_from_dict(run_meta_to_dict(got)).extra_http_headers == got.extra_http_headers
+    # 读端忠实还原落盘键序（旧落盘由写端排序前落的、键序未必字典序）——若读端也 sorted，这条即挂
+    legacy = {"run_id": "legacy", "created_at": "", "jobs": [],
+              "extra_http_headers": {"x-tunnel": "b", "ngrok-skip-browser-warning": "1"}}
+    assert run_meta_from_dict(legacy).extra_http_headers == (("x-tunnel", "b"), ("ngrok-skip-browser-warning", "1"))
 
 
 def test_job_state_claimed_at_round_trip(tmp_path: Path):

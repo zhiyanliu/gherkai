@@ -98,34 +98,15 @@ def test_build_engines_nova_always_has_act_timeout(tmp_path: Path):
     assert engines["novaact"]._env["NOVA_ACT_TIMEOUT_S"] == str(compose.NOVA_ACT_TIMEOUT_S)
 
 
-def test_build_engines_injects_artifact_s3_env_symmetrically(tmp_path: Path):
-    # artifact_s3=(bucket, prefix) → 两个引擎 worker 都拿到 ARTIFACT_S3_BUCKET/PREFIX env（worker from_env 真正读的东西，
-    # ADR 0029）。跨越"__main__ 算元组 → compose 翻成 env"这道缝，防键名写错/合并漏掉时静默退回 file://。
-    repo = compose.repo_root()
+def test_build_engines_never_injects_artifact_s3_env(tmp_path: Path):
+    # local 档**恒不注入** S3 上传落点（worker 据「有没有这组 env」决定上传，无 → 报 file://，ADR 0029）：
+    # 上传落点只由 cloud 档的 build_fargate_engines 注入，预演由 e2e_harness 自拼 env（ADR 0016 决策 B）。
     nova_dir = tmp_path / "rid" / "nova-trajectories"
     mid_dir = tmp_path / "rid" / "midscene-run"
-    engines = compose.build_engines(
-        repo, nova_logs_dir=nova_dir, midscene_run_dir=mid_dir, artifact_s3=("bkt", "runs/rid/"),
-    )
+    engines = compose.build_engines(compose.repo_root(), nova_logs_dir=nova_dir, midscene_run_dir=mid_dir)
     for eng in ("novaact", "midscene"):
-        assert engines[eng]._env["ARTIFACT_S3_BUCKET"] == "bkt"
-        assert engines[eng]._env["ARTIFACT_S3_PREFIX"] == "runs/rid/"  # 与 S3ReportStore 同前缀（逐字）
-
-
-def test_build_engines_artifact_s3_alone_makes_env_nonnull(tmp_path: Path):
-    # 只给 artifact_s3、不给 local dir（防御 _env 的 "local_dir is None and not s3_env" 早返回守卫吞掉 s3_env）：
-    # env 必须非 None 且含 S3 落点，否则 worker 拿不到、静默退回 file://。
-    engines = compose.build_engines(compose.repo_root(), artifact_s3=("bkt", "runs/rid/"))
-    for eng in ("novaact", "midscene"):
-        assert engines[eng]._env is not None
-        assert engines[eng]._env["ARTIFACT_S3_BUCKET"] == "bkt"
-
-
-def test_build_engines_no_artifact_s3_env_has_no_s3_keys(tmp_path: Path):
-    # local（不给 artifact_s3）：env 里不含 S3 落点键（worker no-op 报 file://、零行为变化，ADR 0029）。
-    nova_dir = tmp_path / "rid" / "nova-trajectories"
-    engines = compose.build_engines(compose.repo_root(), nova_logs_dir=nova_dir)
-    assert "ARTIFACT_S3_BUCKET" not in engines["novaact"]._env
+        assert "ARTIFACT_S3_BUCKET" not in engines[eng]._env
+        assert "ARTIFACT_S3_PREFIX" not in engines[eng]._env
 
 
 def test_build_engines_region_profile_override_env(tmp_path: Path, monkeypatch):
@@ -163,7 +144,7 @@ def test_build_engines_region_profile_injected_on_rebuild_path_both_legs(tmp_pat
     monkeypatch.setenv("AWS_REGION", "us-east-1")
     monkeypatch.delenv("AWS_PROFILE", raising=False)
     engines = compose.build_engines(
-        compose.repo_root(), region="ap-southeast-1", profile="cli-prof",  # 无 dirs、无 artifact_s3 → 两个引擎走补建
+        compose.repo_root(), region="ap-southeast-1", profile="cli-prof",  # 无 dirs → 两个引擎走补建
     )
     for eng in ("novaact", "midscene"):
         assert engines[eng]._env["AWS_REGION"] == "ap-southeast-1"  # 补建路径也覆盖生效
@@ -175,7 +156,7 @@ def test_build_engines_midscene_no_rebuild_when_no_region_profile(tmp_path: Path
     # 免无谓拷贝）——补建只为 region/profile 覆盖，无值则不建。Nova 仍补建（NOVA_ACT_TIMEOUT_S 恒需）。
     monkeypatch.delenv("AWS_REGION", raising=False)
     monkeypatch.delenv("AWS_DEFAULT_REGION", raising=False)
-    engines = compose.build_engines(compose.repo_root(), region=None, profile=None)  # 无 dirs、无 s3、无 region/profile
+    engines = compose.build_engines(compose.repo_root(), region=None, profile=None)  # 无 dirs、无 region/profile
     assert engines["midscene"]._env is None       # 不补建
     assert engines["novaact"]._env is not None     # Nova 恒补建（timeout）
 
@@ -299,6 +280,94 @@ def test_ssm_path_contains_prefix():
     assert compose.ssm_path("gherkai-", "security-groups") == "/gherkai-backend/security-groups"
 
 
+# ---- resolve_cloud_target：入口皮的 flag/env → 各资源终名 + region/profile（ADR 0033 / 0016 决策 C）----
+def _clear_aws_env(monkeypatch):
+    for k in ("AWS_REGION", "AWS_DEFAULT_REGION", "AWS_PROFILE", "AWS_RESOURCE_PREFIX",
+              "AWS_DDB_TABLE", "AWS_S3_BUCKET"):
+        monkeypatch.delenv(k, raising=False)
+
+
+def test_resolve_cloud_target_derives_all_names_from_prefix(monkeypatch):
+    _clear_aws_env(monkeypatch)
+    t = compose.resolve_cloud_target(prefix="prod-", region="us-west-2")
+    assert (t.prefix, t.region, t.profile) == ("prod-", "us-west-2", None)
+    assert (t.runs_table, t.events_table, t.bucket, t.cluster) == (
+        "prod-runs", "prod-events", "prod-artifacts", "prod-cluster")
+    # 三 Lambda 名同源推导；detached_chain_lambdas 顺序 = 链上顺序（kicker→reconciler→exit-observer）
+    assert t.detached_chain_lambdas == ["prod-kicker", "prod-reconciler", "prod-exit-observer"]
+
+
+def test_resolve_cloud_target_env_fallbacks_are_deliberately_uneven(monkeypatch):
+    _clear_aws_env(monkeypatch)
+    monkeypatch.setenv("AWS_RESOURCE_PREFIX", "stage-")
+    monkeypatch.setenv("AWS_DDB_TABLE", "env-runs")
+    monkeypatch.setenv("AWS_S3_BUCKET", "env-bucket")
+    monkeypatch.setenv("AWS_PROFILE", "env-prof")
+    monkeypatch.setenv("AWS_REGION", "eu-west-1")
+    t = compose.resolve_cloud_target()
+    assert (t.prefix, t.profile, t.region) == ("stage-", "env-prof", "eu-west-1")
+    assert (t.runs_table, t.bucket) == ("env-runs", "env-bucket")  # 这两个有历史 env 面
+    # events 表/cluster **无** env 兜底（保既有 CLI 行为，别为对称乱加）——仍走 prefix 默认名
+    assert (t.events_table, t.cluster) == ("stage-events", "stage-cluster")
+
+
+def test_resolve_cloud_target_flags_win_over_env(monkeypatch):
+    _clear_aws_env(monkeypatch)
+    monkeypatch.setenv("AWS_RESOURCE_PREFIX", "stage-")
+    monkeypatch.setenv("AWS_DDB_TABLE", "env-runs")
+    monkeypatch.setenv("AWS_PROFILE", "env-prof")
+    monkeypatch.setenv("AWS_REGION", "eu-west-1")
+    t = compose.resolve_cloud_target(prefix="prod-", runs_table="flag-runs", bucket="flag-bucket",
+                                     events_table="flag-events", cluster="flag-cluster",
+                                     profile="flag-prof", region="ap-south-1")
+    assert (t.prefix, t.profile, t.region) == ("prod-", "flag-prof", "ap-south-1")
+    assert (t.runs_table, t.bucket, t.events_table, t.cluster) == (
+        "flag-runs", "flag-bucket", "flag-events", "flag-cluster")
+    assert t.kicker_lambda == "prod-kicker"  # 单资源覆盖不影响别的资源仍按 prefix 推导
+
+
+def test_resolve_cloud_target_default_prefix_when_nothing_given(monkeypatch):
+    _clear_aws_env(monkeypatch)
+    monkeypatch.setattr(compose, "resolve_region", lambda r, p: None)  # 不摸真 ~/.aws
+    t = compose.resolve_cloud_target()
+    assert t.prefix == compose.DEFAULT_PREFIX and t.runs_table == f"{compose.DEFAULT_PREFIX}runs"
+    assert t.region is None and t.profile is None  # 真无 → fail-loud，不硬编码 east
+
+
+# ---- prune_empty_dirs（cloud 清本地空壳，ADR 0029）：只删空目录、非空保留 ----
+def test_prune_empty_dirs_removes_empty_tree(tmp_path):
+    # worker 上传后 rmtree 了子目录，run 根只剩空壳（含空中间目录）→ 整个删掉
+    run_dir = tmp_path / "reports" / "rid"
+    (run_dir / "nova-trajectories" / "sess").mkdir(parents=True)  # 全空
+    (run_dir / "midscene-run" / "report").mkdir(parents=True)     # 全空
+    compose.prune_empty_dirs(run_dir)
+    assert not run_dir.exists()  # 空壳整个清掉
+
+
+def test_prune_empty_dirs_keeps_nonempty(tmp_path):
+    # 某个引擎 flush 失败保留了产物（目录非空）→ 该目录及其祖先保留（护栏：不误删产物）
+    run_dir = tmp_path / "reports" / "rid"
+    kept = run_dir / "nova-trajectories" / "sess"
+    kept.mkdir(parents=True)
+    (kept / "act_0.html").write_text("残留产物")           # 非空
+    (run_dir / "midscene-run").mkdir(parents=True)          # 空
+    compose.prune_empty_dirs(run_dir)
+    assert run_dir.exists()                                  # 因含非空子树而保留
+    assert (kept / "act_0.html").exists()                   # 产物没被误删
+    assert not (run_dir / "midscene-run").exists()           # 空的那支仍被清
+
+
+def test_prune_empty_dirs_noop_when_missing(tmp_path):
+    compose.prune_empty_dirs(tmp_path / "nonexistent")  # 不存在 → no-op、不抛
+
+
+def test_is_botocore_error_classifies():
+    from botocore.exceptions import ClientError
+
+    assert compose.is_botocore_error(ClientError({"Error": {"Code": "X"}}, "Op"))
+    assert not compose.is_botocore_error(ValueError("不是云端故障"))
+
+
 # ---- resolve_network（ADR 0033）：subnet/sg 覆盖 or 读 SSM ----
 def test_resolve_network_explicit_overrides_skip_ssm():
     # 显式给 subnet/sg → 不读 SSM（ssm 注入个会炸的哨兵，验它没被调）
@@ -397,8 +466,12 @@ def test_build_fargate_engines_per_engine_taskdef_and_region_no_profile(monkeypa
     assert nova["artifact_s3"] == ("prod-artifacts", "runs/rid-1/")
     # SDK 产物落点 env（按引擎、容器内路径）——**uploader 靠它算 run_dir，缺它 no-op 报 file://、产物丢**（真跑暴露）。
     assert nova["sdk_artifact_dir_env"] == {"NOVA_LOGS_DIR": "/tmp/gherkai-run/rid-1/nova-trajectories"}
+    # Nova act timeout **双端同源**（ADR 0024 grace 硬约束）：cloud 档也须显式注入——容器不继承本地 env，
+    # 缺它则 worker 落回自带字面量、调 NOVA_ACT_TIMEOUT_S 只抬高 grace 下限、改不动容器内单 act 上界。
+    assert nova["extra_env"]["NOVA_ACT_TIMEOUT_S"] == str(compose.NOVA_ACT_TIMEOUT_S)
     mid = by_engine["prod-midscene-worker"]
     assert mid["sdk_artifact_dir_env"] == {"MIDSCENE_RUN_DIR": "/tmp/gherkai-run/rid-1/midscene-run"}
+    assert "NOVA_ACT_TIMEOUT_S" not in mid["extra_env"]  # 引擎特定值只给该引擎（Midscene 无可控 act timeout）
 
 
 # ---- preflight_cloud_resources（ADR 0033）：探资源存在性、缺则点名 prefix ----
@@ -436,13 +509,18 @@ class _FakeEcsClient:
 
 
 class _FakeLambdaClient:
-    def __init__(self, existing):
+    def __init__(self, existing, env_by_fn=None):
         self._existing = set(existing)
+        self._env_by_fn = env_by_fn or {}  # fn → env dict（缺项 = 该 Lambda 没配 env，同真实返回体省略 Environment）
+
     def get_function(self, FunctionName):
         if FunctionName not in self._existing:
             from botocore.exceptions import ClientError
             raise ClientError({"Error": {"Code": "ResourceNotFoundException", "Message": "x"}}, "GetFunction")
-        return {"Configuration": {"FunctionName": FunctionName}}
+        cfg = {"FunctionName": FunctionName}
+        if FunctionName in self._env_by_fn:
+            cfg["Environment"] = {"Variables": dict(self._env_by_fn[FunctionName])}
+        return {"Configuration": cfg}
 
 
 def test_preflight_all_present_returns_none():
@@ -502,6 +580,54 @@ def test_preflight_task_defs_and_lambdas_all_present():
         lam=_FakeLambdaClient({"g-kicker", "g-reconciler", "g-exit-observer"}),
     )
     assert err is None
+
+
+# ---- preflight 的产物前缀一致性（ADR 0033）：--report-dir vs 推进器 REPORT_DIR ----
+_CHAIN = ["g-kicker", "g-reconciler", "g-exit-observer"]
+
+
+def _preflight_report_dir(report_dir, env_by_fn=None):
+    return compose.preflight_cloud_resources(
+        prefix="g-", runs_table="g-runs", events_table="g-events", bucket="g-artifacts",
+        cluster="g-cluster", lambda_fns=_CHAIN, report_dir=report_dir,
+        ddb=_FakeDdbClient({"g-runs", "g-events"}), s3=_FakeS3Client({"g-artifacts"}),
+        ecs=_FakeEcsClient({"g-cluster"}),
+        lam=_FakeLambdaClient(_CHAIN, env_by_fn=env_by_fn),
+    )
+
+
+def test_preflight_report_dir_mismatch_fails_fast_naming_both_sides():
+    # --report-dir 与推进器 REPORT_DIR 分裂 = 跑完但结果落在用户没指定的前缀下（静默分裂）→ 挡在提交前、点名两侧值。
+    # kicker 对上、reconciler 没对上 → 两个推进器都比（不是只看第一个）
+    err = _preflight_report_dir("mine", env_by_fn={"g-kicker": {"REPORT_DIR": "mine"},
+                                                  "g-reconciler": {"REPORT_DIR": "reports"}})
+    assert err is not None
+    assert "'mine'" in err and "'reports'" in err and "g-reconciler" in err
+
+
+def test_preflight_report_dir_mismatch_detected_when_lambda_env_absent():
+    # 推进器没配 REPORT_DIR（IaC 有意不注入、Lambda 内缺省 reports）→ 缺键视作 reports，非默认 --report-dir 仍要拦
+    err = _preflight_report_dir("mine")
+    assert err is not None and "'reports'" in err
+
+
+def test_preflight_report_dir_match_returns_none():
+    # 对偶（防「恒报错」）：两侧一致 → 放行；尾斜杠差异不算冲突（同 S3 前缀规范化）
+    assert _preflight_report_dir("reports") is None
+    assert _preflight_report_dir("reports/") is None
+    assert _preflight_report_dir("mine", env_by_fn={fn: {"REPORT_DIR": "mine"} for fn in _CHAIN}) is None
+
+
+def test_preflight_report_dir_ignores_exit_observer_env():
+    # exit-observer 不读 REPORT_DIR（只写 task_exited）→ 它的 env 不参与比对，别拿它造假冲突
+    assert _preflight_report_dir(
+        "mine", env_by_fn={"g-kicker": {"REPORT_DIR": "mine"}, "g-reconciler": {"REPORT_DIR": "mine"},
+                           "g-exit-observer": {"REPORT_DIR": "reports"}}) is None
+
+
+def test_preflight_report_dir_not_checked_when_not_passed():
+    # 同步 run 不传 report_dir（也不传 lambda_fns）→ 一致性探针整体不生效，只探存在性
+    assert _preflight_report_dir(None, env_by_fn={"g-reconciler": {"REPORT_DIR": "whatever"}}) is None
 
 
 def test_preflight_missing_cluster_detected():

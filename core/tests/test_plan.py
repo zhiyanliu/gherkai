@@ -221,6 +221,14 @@ def test_timeout_invalid_values_error():
         _plan('Feature: F\n  @scope:x @timeout:0\n  Scenario: a\n    When "x"\n')
 
 
+@pytest.mark.parametrize("raw", ["nan", "inf", "1e400"])  # 1e400 溢出成 inf
+def test_timeout_non_finite_values_error(raw: str):
+    # float() 收 nan/inf（不抛 ValueError）且都不满足 <=0 → 须显式拒：下游推进器一律用 `>` 比较 deadline，
+    # nan/inf 会让超时保护静默失效（标了 tag 却永不超时，正是 ADR 0019 声明预算语义要拒的形态）。
+    with pytest.raises(PlanError, match="正数"):
+        _plan(f'Feature: F\n  @scope:x @timeout:{raw}\n  Scenario: a\n    When "x"\n')
+
+
 # ---- 同一 scope 多个不同 engine → 报错 ----
 def test_engine_conflict_errors():
     with pytest.raises(PlanError, match="多个 @engine"):

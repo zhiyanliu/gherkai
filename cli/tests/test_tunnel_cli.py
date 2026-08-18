@@ -108,47 +108,36 @@ def test_submit_local_writes_tunnel_file_for_per_run_cleanup(tmp_path, monkeypat
     assert "u1:p1@t.ngrok-free.app" in json.dumps(meta, ensure_ascii=False)
 
 
-def test_tunnel_watch_stops_on_terminal_state(monkeypatch):
-    """_tunnel_watch 守护：轮询到 run 终态 → 拆隧道退出（ADR 0035 决策 3 cloud 档）。"""
-    stopped = []
+def test_tunnel_watch_entry_wires_argparse_to_host_and_prints(monkeypatch, capsys):
+    """_tunnel_watch 入口：argparse → tunnel_host.watch_run_and_stop_tunnel + 打印拆除原因。
 
-    class _StateTable:
-        def get_item(self, **kw):
-            return {"Item": {"run_id": "r1", "item_type": "STATE", "status": "passed", "jobs": {}}}
+    守护主体（轮询终态 / TTL 兜底）的逻辑归 gherkai/tests/test_tunnel_host.py；此处只锁「皮传对参数」。
+    """
+    from gherkai import tunnel_host
 
-    monkeypatch.setattr(m.compose, "_make_ddb_table", lambda t, *, region, profile: _StateTable())
-    monkeypatch.setattr(gtunnel, "stop_tunnel", lambda pid: stopped.append(pid))
-    import time as _t
+    seen = {}
 
-    monkeypatch.setattr(_t, "sleep", lambda s: None)
-    rc = m.main(["_tunnel_watch", "r1", "--tunnel-pid", "777",
+    def fake_watch(run_id, **kw):
+        seen["run_id"] = run_id
+        seen.update(kw)
+        return "run 终态 passed"
+
+    monkeypatch.setattr(tunnel_host, "watch_run_and_stop_tunnel", fake_watch)
+    rc = m.main(["_tunnel_watch", "r1", "--tunnel-pid", "777", "--ttl", "1500",
                  "--ddb-table", "tbl", "--region", "us-east-1"])
-    assert rc == 0 and stopped == [777]
+    assert rc == 0
+    assert seen["run_id"] == "r1" and seen["tunnel_pid"] == 777
+    assert seen["runs_table"] == "tbl" and seen["ttl_s"] == 1500.0 and seen["region"] == "us-east-1"
+    assert "run 终态 passed" in capsys.readouterr().out
 
 
-def test_tunnel_watch_ttl_fallback(monkeypatch):
-    """run 永不终态（查询一直异常）→ TTL 到点拆隧道自杀（防 ngrok 进程泄漏）。"""
-    stopped = []
+def test_tunnel_watch_requires_explicit_ttl():
+    """--ttl 无默认值（必给）：曾恒 1h 且无任何生产写入者、与 run 预算脱钩（ADR 0035 决策 3），不留幻影默认。"""
+    import pytest
 
-    class _BoomTable:
-        def get_item(self, **kw):
-            raise RuntimeError("ddb down")
-
-    monkeypatch.setattr(m.compose, "_make_ddb_table", lambda t, *, region, profile: _BoomTable())
-    monkeypatch.setattr(gtunnel, "stop_tunnel", lambda pid: stopped.append(pid))
-    import time as _t
-
-    monkeypatch.setattr(_t, "sleep", lambda s: None)
-    clock = {"t": 0.0}
-
-    def mono():
-        clock["t"] += 400.0
-        return clock["t"]
-
-    monkeypatch.setattr(_t, "monotonic", mono)
-    rc = m.main(["_tunnel_watch", "r1", "--tunnel-pid", "777",
-                 "--ddb-table", "tbl", "--region", "us-east-1", "--ttl", "600"])
-    assert rc == 0 and stopped == [777]
+    with pytest.raises(SystemExit) as ei:
+        m.main(["_tunnel_watch", "r1", "--tunnel-pid", "777", "--ddb-table", "tbl"])
+    assert ei.value.code == 2
 
 
 def test_plan_expose_local_annotates_not_replaces(tmp_path, capsys):
@@ -158,3 +147,27 @@ def test_plan_expose_local_annotates_not_replaces(tmp_path, capsys):
     captured = capsys.readouterr()
     assert "http://localhost:3000" in captured.out  # 原始地址（替换前）
     assert "原始地址" in captured.err  # 标注在 stderr（诊断面）
+
+
+def test_submit_rejects_nonpositive_tunnel_ttl_before_starting_tunnel(tmp_path, monkeypatch, capsys):
+    """--tunnel-ttl <=0 → 退 2 且**没起隧道**（早拒才真零副作用，对齐 --grace 的入口校验惯例）。"""
+    calls = []
+    _patch_tunnel(monkeypatch, calls)
+    rc = m.main(["submit", str(_write_feature(tmp_path)), "--backend", "cloud",
+                 "--expose-local", "http://localhost:3000", "--tunnel-ttl", "0"])
+    assert rc == 2
+    assert calls == []  # 隧道一次都没起
+    assert "--tunnel-ttl" in capsys.readouterr().err
+
+
+def test_submit_rejects_nonfinite_tunnel_ttl(tmp_path, monkeypatch, capsys):
+    """--tunnel-ttl nan/inf → 退 2（float() 会收下它们；nan 使守护的 monotonic()<deadline 首轮
+    即 False → 隧道 submit 后立刻被拆——与 @timeout: 的 isfinite 校验同一理由）。"""
+    calls = []
+    _patch_tunnel(monkeypatch, calls)
+    for bad in ("nan", "inf"):
+        rc = m.main(["submit", str(_write_feature(tmp_path)), "--backend", "cloud",
+                     "--expose-local", "http://localhost:3000", "--tunnel-ttl", bad])
+        assert rc == 2, f"--tunnel-ttl {bad} 应被拒"
+        assert calls == []  # 隧道一次都没起
+        assert "--tunnel-ttl" in capsys.readouterr().err

@@ -189,3 +189,27 @@ def test_format_event_omits_scope_id():
     s = render.format_event(ScopeDone(scope_id="login", session_id="s1"))
     assert "scope_done" in s
     assert "scope_id=" not in s  # scope 归前缀，行内不再重复
+
+
+# ---- render_run_state：status 的 RunState 人读渲染（皮的事，从 gherkai 归位到此，ADR 0016「归属清算」条）----
+
+def test_render_run_state_lists_jobs_and_session_lineage():
+    from core.model import JobState, RunState
+
+    state = RunState(run_id="r1", status=Status.RUNNING, high_water_mark=3, jobs={
+        "a": JobState("a", Status.PASSED, session_id="sess-1"),
+        "b": JobState("b", Status.RUNNING),
+    })
+    s = render.render_run_state(state)
+    assert s.splitlines()[0] == "run r1: running"
+    assert "  - a: passed  session=sess-1" in s   # 有会话血缘则显
+    assert "  - b: running" in s and "session=None" not in s  # 无则不显、不打裸 None
+    assert "ended_at" not in s  # 未达终态、无 ended_at 时不打该行
+
+
+def test_render_run_state_shows_ended_at_when_terminal():
+    from core.model import JobState, RunState
+
+    state = RunState(run_id="r1", status=Status.PASSED, high_water_mark=9,
+                     jobs={"a": JobState("a", Status.PASSED)}, ended_at="2026-01-01T00:00:00Z")
+    assert "ended_at=2026-01-01T00:00:00Z" in render.render_run_state(state)

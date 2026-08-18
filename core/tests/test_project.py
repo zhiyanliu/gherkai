@@ -196,6 +196,33 @@ def test_out_of_order_records_reduced_by_seq():
     assert state.jobs["a"].status == Status.PASSED  # 仍正确归约
 
 
+# ---------- 投影写的 run 级 status（机制三，两 RunStore adapter 共用同一规则）----------
+
+def test_projected_run_status_pending_only_while_all_jobs_pending():
+    """全 job pending → pending（run 还没起过任何 job）；任一 job 推进 → running；恒非终态（终态归 finalize）。"""
+    from core.model import JobState
+    from core.project import projected_run_status
+
+    def _jobs(*statuses):
+        return {f"s{i}": JobState(f"s{i}", st) for i, st in enumerate(statuses)}
+
+    assert projected_run_status(_jobs(Status.PENDING, Status.PENDING)) == Status.PENDING
+    assert projected_run_status(_jobs(Status.PENDING, Status.RUNNING)) == Status.RUNNING
+    assert projected_run_status(_jobs(Status.PASSED, Status.PENDING)) == Status.RUNNING
+    # 全终态也只到 running：run 级终态是 try_finalize 这个 commit point 专属（ADR 0030）
+    assert projected_run_status(_jobs(Status.PASSED, Status.FAILED)) == Status.RUNNING
+
+
+def test_projected_run_status_ignores_aggregate_value_from_project():
+    """判据只看 job 态：project() 的 run 级 status 是终态聚合值（零事件的全 pending run 也吐 PASSED），
+    喂它的 jobs 仍得 pending——守「投影写不能沿用传入的 run 级值」。"""
+    from core.project import projected_run_status
+
+    state = project(_meta("a", "b"), [])
+    assert state.status == Status.PASSED  # 前提：聚合值是终态
+    assert projected_run_status(state.jobs) == Status.PENDING
+
+
 # ---------- plan_next（机制四）----------
 
 def test_plan_next_starts_up_to_concurrency():

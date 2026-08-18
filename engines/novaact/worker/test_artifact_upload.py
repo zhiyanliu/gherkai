@@ -15,14 +15,23 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from lib.artifact_upload import ArtifactUploader
 
 
+class _Calls(list):
+    """upload_file 调用记录：list 元素 = (local, bucket, key)，`extra_by_key` 另记 ExtraArgs。"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.extra_by_key: dict = {}
+
+
 def _uploader_with_mock(bucket, prefix, run_dir, *, fail_keys=()):
     """造 uploader + 塞 mock s3 client（记录 upload_file 调用；fail_keys 里的 key 抛错）。"""
     u = ArtifactUploader(bucket=bucket, prefix=prefix, run_dir=Path(run_dir))
     client = MagicMock()
-    calls = []
+    calls = _Calls()
 
-    def _upload(local, bkt, key):
+    def _upload(local, bkt, key, ExtraArgs=None):  # noqa: N803  boto3 的形参名就是驼峰
         calls.append((local, bkt, key))
+        calls.extra_by_key[key] = ExtraArgs
         if key in fail_keys:
             raise RuntimeError(f"s3 fail: {key}")
 
@@ -125,6 +134,34 @@ def test_flush_failure_swallowed_but_dir_kept(tmp_path):
     # 剩余失败被吞（不抛），但整目录**保留不删**（产物不丢）
     assert (run_dir / "nova-trajectories").exists()
     assert html.exists() and js.exists()
+
+
+# ---- Content-Type：.html 显式打 text/html（与 Midscene uploader 同一规则，ADR 0024 两引擎对称）----
+# boto3 不猜 content type：不显式给 → binary/octet-stream → presigned 直开 trajectory 被当附件下载。
+def test_html_gets_text_html_content_type_both_paths(tmp_path):
+    run_dir = tmp_path / "reports" / "rid"
+    art = run_dir / "nova-trajectories" / "sess"
+    art.mkdir(parents=True)
+    ref_html = art / "act_0.html"; ref_html.write_text("traj")        # 实时传（to_report_ref）
+    rest_html = art / "act_1.html"; rest_html.write_text("traj")      # 剩余（flush）
+    js = art / "act_0_trajectory.json"; js.write_text("{}")           # 非 html：不设 ContentType
+    u, calls = _uploader_with_mock("bkt", "reports/rid/", run_dir)
+    u.to_report_ref(str(ref_html))
+    u.flush_and_cleanup(run_dir / "nova-trajectories")
+    ct = "text/html; charset=utf-8"
+    assert calls.extra_by_key["reports/rid/nova-trajectories/sess/act_0.html"] == {"ContentType": ct}
+    assert calls.extra_by_key["reports/rid/nova-trajectories/sess/act_1.html"] == {"ContentType": ct}
+    assert calls.extra_by_key["reports/rid/nova-trajectories/sess/act_0_trajectory.json"] == {}
+
+
+def test_content_type_suffix_match_is_case_insensitive(tmp_path):
+    run_dir = tmp_path / "reports" / "rid"
+    art = run_dir / "nova-trajectories"
+    art.mkdir(parents=True)
+    f = art / "REPORT.HTML"; f.write_text("html")
+    u, calls = _uploader_with_mock("bkt", "reports/rid/", run_dir)
+    u.to_report_ref(str(f))
+    assert calls.extra_by_key["reports/rid/nova-trajectories/REPORT.HTML"] == {"ContentType": "text/html; charset=utf-8"}
 
 
 # ---- from_env：读注入 env，run_dir = NOVA_LOGS_DIR 父级 ----

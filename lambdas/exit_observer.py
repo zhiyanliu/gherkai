@@ -5,13 +5,16 @@ EventBridge rule（detail-type='ECS Task State Change'、lastStatus=STOPPED、�
 从 STOPPED event 拿 run_id/scope_id（RunTask 注入的 env 原样在 detail.overrides，真验证据坐实）+ exitCode
 （detail.containers[].exitCode，真验 4/4 含 SIGKILL=137 都带）→ DdbEventLog.record_exit 写 task_exited
 （保留高位 SK 独立键空间）。写完即返回——reconciler Lambda 由 events 表 Stream 变化触发、接力推进。
+**只为 detached run 写**：同 cluster 的同步 `run --backend cloud` 的 task 同样触发本 handler，写前分流（见
+`_is_detached`；不变量与故障形态见 ADR 0034 端到端 cloud 1b 与机制一）。
 
 **exitCode 落值兜底（机制二）**：STOPPED 事件锚在 stoppedAt（已过 exitCode 落值窗口，真验证实必带值）；
 极少数缺 exitCode 时写 None（宽限态，project 保守判 running，reconciler 下轮由别的信号补——或 status --wait
 人工兜底）。不在此重查 DescribeTasks（保持 handler 薄、无额外 IAM；真验证明基本不需要）。
 
 打包：本文件 + core 一起进 Lambda zip（部署见 iac_aws_backend）。boto3 是 Lambda runtime 自带。
-env：EVENTS_TABLE（events 表名）、AWS_REGION（Lambda runtime 自带）。
+env：EVENTS_TABLE（events 表名）、RUNS_TABLE（判 run 是否 detached，见 `_is_detached`）、
+AWS_REGION（Lambda runtime 自带）。
 """
 from __future__ import annotations
 
@@ -46,6 +49,21 @@ def _extract(detail: dict) -> tuple[str | None, str | None, int | None, bool]:
     return run_id, scope_id, exit_code, timed_out
 
 
+def _is_detached(run_id: str) -> bool:
+    """本 run 是否由云端推进器管（ADR 0034 端到端 cloud 1b：`detached` 标记在 runs 表 STATE item 上）。
+
+    EventBridge rule 只按 cluster+STOPPED 过滤，而同步 `run --backend cloud` 的 task 与 detached 共用一个
+    cluster、必触发本 handler——但同步路径不用 `DdbEventLog`，给它写 `task_exited` 既无人消费、还会让它的
+    events Query 读端撞上「无 `body` 属性的 item」（机制一）。故写前分流，判据与 kicker 的 Stream filter 同源。
+    """
+    import boto3
+    from core.adapters.run_store.ddb import DynamoDBRunStore
+
+    # 只读 STATE 的标记属性，不读 META → 无需注入 arg_offloader（ADR 0030 决定七的 fail-loud 不涉及）
+    table = boto3.resource("dynamodb").Table(os.environ["RUNS_TABLE"])
+    return DynamoDBRunStore(table).is_detached(run_id)
+
+
 def _event_log(run_id: str, scope_id: str):
     """构造 DdbEventLog（Lambda 组合根：读 env 造 boto3 表资源注入 core adapter）。"""
     import boto3
@@ -65,6 +83,9 @@ def handler(event, context):
         # 非本框架起的 task（同 cluster 别的负载）或 env 缺失 → 忽略（rule 已按 cluster 过滤，此为双保险）
         print(f"exit_observer: 跳过（缺 run_id/scope_id）taskArn={detail.get('taskArn')}")
         return {"skipped": True}
+    if not _is_detached(run_id):
+        print(f"exit_observer: 跳过（run {run_id} 非 detached，同步 cloud run 自己观察退出）")
+        return {"skipped": True, "reason": "not-detached"}
     log = _event_log(run_id, scope_id)
     log.record_exit(scope_id, exit_code, timed_out=timed_out)
     print(f"exit_observer: task_exited run={run_id} scope={scope_id} exit={exit_code} timed_out={timed_out}")
