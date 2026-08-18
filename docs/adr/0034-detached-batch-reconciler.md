@@ -15,7 +15,7 @@
 
 - **写模型** = events 表（append-only 真值日志，[0024](./0024-worker-core-protocol.md)）。
 - **读模型** = `RunState`（物化视图；**外部消费者只读它**）。
-- **reconciler**（投影器 + 推进器）= 纯从 events 推演 `RunState` + 决定启下一个 job。**无状态、幂等**：谁触发、何时触发、并发触发都安全，进程内不留任何调度态。
+- **reconciler 机制**（投影 + 推进）= 纯从 events 推演 `RunState` + 决定启下一个 job。**无状态、幂等**：谁触发、何时触发、并发触发都安全，进程内不留任何调度态。（消歧：此处 reconciler 指 CQRS 的机制角色；同名 Lambda 只是它在 cloud 的宿主之一——kicker 与之同 code，local 的 per-run 进程/接力者跑的也是这份机制。这些宿主统称**推进器**，定义见 CONTEXT。）
 
 **单一读接口不变量**：外部（`status` / 未来 WebUI）**永远只从 `RunState` 读状态**；`events → RunState` 的推演**只在 reconciler 一处**，不散落到各消费者（否则多份推演逻辑必漂移）。这是本设计的骨架原则。
 

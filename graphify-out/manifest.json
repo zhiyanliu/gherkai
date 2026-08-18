@@ -5,8 +5,8 @@
     "semantic_hash": "f8709951abd0e0502c200a03e34fea86"
   },
   "cli/cli/__main__.py": {
-    "mtime": 1787033503.5088995,
-    "ast_hash": "fc412c6255bf5f470887f431fdb0812e",
+    "mtime": 1787035848.7452674,
+    "ast_hash": "4b38b0a641dec9f5e541d0d294588b54",
     "semantic_hash": ""
   },
   "cli/cli/render.py": {
@@ -25,8 +25,8 @@
     "semantic_hash": ""
   },
   "cli/tests/test_main.py": {
-    "mtime": 1787033787.9134014,
-    "ast_hash": "fa441fd42d19669f0e69aeb3808d8be6",
+    "mtime": 1787035619.352719,
+    "ast_hash": "c5e878a96411d3f1d380594230d5fae3",
     "semantic_hash": ""
   },
   "cli/tests/test_render.py": {
@@ -175,8 +175,8 @@
     "semantic_hash": ""
   },
   "core/core/serialize.py": {
-    "mtime": 1787033446.9141002,
-    "ast_hash": "ab878a39031de524069e88b757834053",
+    "mtime": 1787034364.6524901,
+    "ast_hash": "99dae6eba6dcf38231fb01c5465869d0",
     "semantic_hash": ""
   },
   "core/core/wire.py": {
@@ -531,7 +531,7 @@
   },
   "iac_aws_backend/cdk.json": {
     "mtime": 1783605283.3150134,
-    "ast_hash": "",
+    "ast_hash": "ac4aa3d1664882b56bdd692dad6d6a8e",
     "semantic_hash": ""
   },
   "iac_aws_backend/names.py": {
@@ -545,13 +545,13 @@
     "semantic_hash": "c6b6cf1be4ab9afb09611f2f98a3ac4c"
   },
   "iac_aws_backend/stack.py": {
-    "mtime": 1787033589.8317719,
-    "ast_hash": "d7436ca8712e9d543f9d1ceca231ef1f",
+    "mtime": 1787036251.004962,
+    "ast_hash": "e9f658711ba73134fc2616449a6b40a5",
     "semantic_hash": ""
   },
   "iac_aws_backend/tests/test_stack.py": {
-    "mtime": 1787033883.6632,
-    "ast_hash": "cf742b2c1b5ac953e6cbeeabd9649570",
+    "mtime": 1787036251.0051243,
+    "ast_hash": "4438b8eb97989b26469d7725634e0d98",
     "semantic_hash": ""
   },
   "lambdas/exit_observer.py": {
@@ -560,8 +560,8 @@
     "semantic_hash": ""
   },
   "lambdas/reconciler.py": {
-    "mtime": 1787033563.6469834,
-    "ast_hash": "c4ac9a7cc71f8305aa3159024d734ab2",
+    "mtime": 1787035862.7514675,
+    "ast_hash": "d0b345f05f142c86bb88557cdbda54bb",
     "semantic_hash": ""
   },
   "tools/build_push_workers.py": {
@@ -650,13 +650,13 @@
     "semantic_hash": ""
   },
   "README.md": {
-    "mtime": 1787026424.4740837,
-    "ast_hash": "5f174a0974260161deb1154762eb8f04",
+    "mtime": 1787036251.005256,
+    "ast_hash": "05f8f3aa17bc51b39b6ebfd29bf96d67",
     "semantic_hash": ""
   },
   "cli/README.md": {
-    "mtime": 1787034027.1518037,
-    "ast_hash": "a9ab49572ded9f1b30af996a6706eec0",
+    "mtime": 1787036316.3768601,
+    "ast_hash": "b89270f3b067aeddfba449a433bdedf2",
     "semantic_hash": ""
   },
   "docs/adr/0001-scope-limited-to-english-ui.md": {
@@ -795,8 +795,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0034-detached-batch-reconciler.md": {
-    "mtime": 1787034196.8084002,
-    "ast_hash": "cf9fb9d0e183580f456133d3588b239f",
+    "mtime": 1787036316.377295,
+    "ast_hash": "adb0d9196b6403c8d084e125b5707271",
     "semantic_hash": ""
   },
   "docs/doc-health-review.md": {
@@ -820,8 +820,8 @@
     "semantic_hash": ""
   },
   "iac_aws_backend/README.md": {
-    "mtime": 1787034176.0162485,
-    "ast_hash": "c4c2a4bf62ca3c212add6e10bcd7f84a",
+    "mtime": 1787036251.0055027,
+    "ast_hash": "211dc363997eeefc703e2259b55bbf57",
     "semantic_hash": ""
   },
   "gherkai/gherkai/__init__.py": {
@@ -830,8 +830,8 @@
     "semantic_hash": "112a5f5e0768c74afbeb75b528c11951"
   },
   "gherkai/gherkai/compose.py": {
-    "mtime": 1787021677.201327,
-    "ast_hash": "92f876ebda7678548a2df21908aedd38",
+    "mtime": 1787035880.4810123,
+    "ast_hash": "043f4eb7e7c9ab18fc71e78b686c9d7a",
     "semantic_hash": ""
   },
   "gherkai/gherkai/detached.py": {
@@ -850,8 +850,8 @@
     "semantic_hash": "50d77cbec313fdf44278bb34fe27ebb5"
   },
   "gherkai/tests/test_compose.py": {
-    "mtime": 1787018996.5475743,
-    "ast_hash": "df98af5ac24f56c65349eac8956f504b",
+    "mtime": 1787035638.0558584,
+    "ast_hash": "ec54911101e2c288904c18d6e7425f4c",
     "semantic_hash": ""
   },
   "gherkai/tests/test_detached_launcher.py": {
@@ -860,8 +860,8 @@
     "semantic_hash": ""
   },
   "gherkai/tests/test_lambda_handlers.py": {
-    "mtime": 1787033869.62062,
-    "ast_hash": "25e6b461953b50ceffc2d57826ecd7f8",
+    "mtime": 1787035654.4079404,
+    "ast_hash": "0b5d141b613ebff13d88fe110b614eaf",
     "semantic_hash": ""
   },
   "gherkai/README.md": {
@@ -910,8 +910,8 @@
     "semantic_hash": ""
   },
   "docs/guides/execution-and-reconciliation.md": {
-    "mtime": 1787034232.500419,
-    "ast_hash": "0f80b5670868a53ae87549604f933665",
+    "mtime": 1787036316.3770661,
+    "ast_hash": "06d8fc4c5c7c6bed5a11cbe91a6c4f1a",
     "semantic_hash": ""
   }
 }
