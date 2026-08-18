@@ -37,6 +37,7 @@ ADR/CONTEXT 是随构建**逐步长起来**的：每次在前人文档上叠加�
 不同类型的文档，主要风险不同、别用一把尺子：
 - **ADR / CONTEXT**：查决策一致性、跨文档矛盾、被取代未标历史、Status 头（见下）、施工叙事沉积（SEDIMENT 类，ADR 是其主战场）、**引用方向合规 + 自包含**（不引用 journey、不用裸 WP 编号；Accepted ADR 须结论连同证据内联、自成一体——见「五类问题」DEADLINK 的引用方向违规条）。
 - **README**：查命令/参数/目录结构过时；保叙事、不激进压缩。
+- **docs/guides/（给人的阅读理解层）**：按 README 同侧判据（保叙事）；主查两样——STALE（派生视图最易随上游漂移，对照 code 与权威 ADR）、**越界复述 why**（决策理由/权衡出现在 guide 正文 = 双源苗头；写作判据在 CLAUDE.md 文档纪律 guides 条，修法 = 压回指针）。
 - **REFERENCES / 技术笔记/配方**（SIGV4-RECIPE 这类）：**没有"决策矛盾"维度，重在"配方/引用还灵不灵"**——代码片段是否还与当前 SDK/实现对得上、踩坑点是否还成立、指向的 ADR/源码路径/外链是否有效。对照 code 核实是主要手段。
 
 ## 执行方法（两轮验证过的最佳路径）
@@ -46,6 +47,7 @@ ADR/CONTEXT 是随构建**逐步长起来**的：每次在前人文档上叠加�
 - `CONTEXT.md`（术语/概念总表）
 - `docs/REFERENCES.md`（外部一手来源 + 源码内点自查资料，AI 用）
 - 全部 README（根 / `cli` / `core` / `core/tests` / `gherkai` / `iac_aws_backend` / `engines/*`，主要给人读）
+- `docs/guides/*.md`（给人的阅读理解层，派生视图——判据侧重见下「按文档类型的复盘侧重」）
 - **技术笔记/配方 + 工具手册**（如 `engines/midscene/spikes/SIGV4-FETCH-RECIPE.md`、`tools/e2e_harness.md`）——与代码同居、AI 照它接线/照它操作，**极易 STALE**（含可运行代码片段 + 命令 + 前置条件 + 踩坑点 + 源码路径）。
 - 未来新增的 docs/ 与子工程根下文档同样纳入（本任务名"文档健康度"、不焊死在某几类上——每次 `find . -name "*.md"` 排除 node_modules/.venv/.pytest_cache 扫一遍，别漏新文件）。
 
