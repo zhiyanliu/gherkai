@@ -373,6 +373,10 @@ class RunMeta:
     # adapter 注 env、worker setExtraHTTPHeaders 消费——core 只搬运不消费语义。tuple pairs 保 frozen 惯例；
     # None=无（默认路径零变化）。载体=definition：cloud detached 下要跨进程到 Lambda 重建 engine，必须随 META 持久化。
     extra_http_headers: tuple[tuple[str, str], ...] | None = None
+    # 本 run 同时在跑的 job 上限（ADR 0034 机制四）：run 级执行参数、载体 definition（推进器与提交进程可能
+    # 分离，必须随 META 持久化才到得了推进器）——core 只搬运不消费，消费者是各推进器组合根（cloud 侧还会
+    # 与部署侧 cap 取 min）。None=旧 definition 无此值（推进器按各自兼容口径回落）。
+    max_concurrency: int | None = None
 
 
 @dataclass(frozen=True)

@@ -11,7 +11,8 @@ project → 条件写 → plan_next → CAS 抢占起下一个 job / finalize）
 
 打包：本文件 + core 进 Lambda zip。env：**IaC 注入**（iac_aws_backend/stack.py 的 reconciler/kicker Function）=
 RUNS_TABLE / EVENTS_TABLE / ARTIFACTS_BUCKET / CLUSTER / PREFIX / REGION / SUBNETS / SECURITY_GROUPS /
-MAX_CONCURRENCY / KICKER_ARN / SCHEDULER_ROLE_ARN（job timeout 到点触发器用，ADR 0034「job timeout」节）；**本文件缺省供给、IaC 不注入** = REPORT_DIR（reports）/ ASSIGN_PUBLIC_IP（ENABLED，与公有子网
+MAX_CONCURRENCY（**部署侧 per-run 并发 cap**、非真源——真源是 definition 的 `RunMeta.max_concurrency`，取
+min，ADR 0034 机制四；数值真源在 IaC 一处，本文件缺省只在 env 漏注时保守回 1、不复制部署值）/ KICKER_ARN / SCHEDULER_ROLE_ARN（job timeout 到点触发器用，ADR 0034「job timeout」节）；**本文件缺省供给、IaC 不注入** = REPORT_DIR（reports）/ ASSIGN_PUBLIC_IP（ENABLED，与公有子网
 配套）——要改产物落点前缀或走私有子网时才在 IaC 显式给。
 """
 from __future__ import annotations
@@ -237,7 +238,14 @@ def _build(run_id: str):
             boto3.client("scheduler", region_name=region),
             kicker_arn=kicker_arn, role_arn=scheduler_role_arn, prefix=prefix)
     launcher = CloudLauncher(compose.make_resolver(engines), run_id=run_id, timeout_watch=timeout_watch)
-    max_concurrency = int(os.environ.get("MAX_CONCURRENCY", "1"))
+    # 并发上限（ADR 0034 机制四）= min(definition 声明, 部署侧 cap)。cap = 本 Lambda 的 MAX_CONCURRENCY env
+    # （IaC 设）：语义是**部署侧 per-run 上限**、非真源——task 跑在部署方 cluster、烧部署方账单，故部署方保留
+    # 总量控制权，提交侧声明再高也钳到 cap。meta 无值（打通前落的旧 definition）按 1，与打通前行为一致；
+    # `or` 顺带把 0 也当无值——0 会让 plan_next 永不提议起 job（run 卡死），按 1 跑是保守可收敛的兜底。
+    # env 漏注（IaC 改坏/手工建的 Lambda）时保守回 **1**：cap 的数值真源在 IaC 一处，code 不复制部署值
+    # （复制 = 两处各一份、IaC 调了 cap 而这里没跟就成隐形漂移）。缺省宁可慢（串行仍收敛），不替部署方放宽闸。
+    cap = int(os.environ.get("MAX_CONCURRENCY", "1"))
+    max_concurrency = min(meta.max_concurrency or 1, cap)
     return meta, event_log, run_store, launcher, max_concurrency, result_store, report_store
 
 

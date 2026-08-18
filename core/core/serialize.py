@@ -267,6 +267,9 @@ def run_meta_to_dict(meta: RunMeta) -> dict:
         # 读端再 falsy→None 地把 `()` 悄悄变形（往返不恒等）。omit 亦兼容旧落盘无此键。
         **({"extra_http_headers": dict(sorted(meta.extra_http_headers))}
            if meta.extra_http_headers else {}),
+        # max_concurrency（ADR 0034 机制四）omit-when-None：`is not None` 判而非判真——0 这类无意义值也须
+        # 忠实往返（不在序列化层悄悄变形成「缺失」，语义把关归组合根/推进器）。省键=旧落盘兼容。
+        **({"max_concurrency": meta.max_concurrency} if meta.max_concurrency is not None else {}),
     }
 
 
@@ -278,6 +281,7 @@ def run_meta_from_dict(d: dict) -> RunMeta:
         jobs=tuple(job_from_dict(j) for j in d.get("jobs", [])),
         # 原样保序（键序已由写端规范化）；键缺失/空 → None（旧落盘兼容 + 空表即无）
         extra_http_headers=tuple(hdrs.items()) if hdrs else None,
+        max_concurrency=d.get("max_concurrency"),  # 键缺失 → None（旧落盘兼容）
     )
 
 

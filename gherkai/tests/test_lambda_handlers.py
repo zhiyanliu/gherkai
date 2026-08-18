@@ -359,18 +359,20 @@ def cloud_env(monkeypatch):
         boto3.client("s3", region_name="us-east-1").create_bucket(Bucket=_BUCKET)
         for k, v in {"REGION": "us-east-1", "RUNS_TABLE": _RUNS_TABLE, "EVENTS_TABLE": _EVENTS_TABLE,
                      "ARTIFACTS_BUCKET": _BUCKET, "CLUSTER": "gherkai-cluster", "PREFIX": "gherkai-",
-                     "SUBNETS": "subnet-1", "SECURITY_GROUPS": "sg-1", "MAX_CONCURRENCY": "1"}.items():
+                     "SUBNETS": "subnet-1", "SECURITY_GROUPS": "sg-1",
+                     # 部署侧 per-run cap（IaC 现值，ADR 0034 机制四）；单 job 的用例照样只起 1 个
+                     "MAX_CONCURRENCY": "4"}.items():
             monkeypatch.setenv(k, v)
         yield {"runs": runs, "events": events}
 
 
-def _seed_run(runs_table, *, detached: bool) -> DynamoDBRunStore:
+def _seed_run(runs_table, *, detached: bool, max_concurrency: int | None = None) -> DynamoDBRunStore:
     """建一个单 job、全 pending 的 run（detached 标记按参数）——同 submit / 同步 cloud run 的 create_run 形态。"""
     store = DynamoDBRunStore(runs_table, detached=detached)
     job = Job(scope_id="a", scope_name="a", engine="novaact",
               scenarios=(Scenario(id="a:1", name="s", steps=(Step(0, "Given", "x"),)),))
     store.create_run(
-        RunMeta(run_id="run-1", created_at="t0", jobs=(job,)),
+        RunMeta(run_id="run-1", created_at="t0", jobs=(job,), max_concurrency=max_concurrency),
         RunState(run_id="run-1", status=Status.PENDING, jobs={"a": JobState("a", Status.PENDING)},
                  started_at="t0"))
     return store
@@ -392,6 +394,38 @@ def test_reconciler_ticks_detached_run(cloud_env):
     store = _seed_run(cloud_env["runs"], detached=True)
     reconciler.handler({"Records": [_stream_record("run-1#a")]}, None)
     assert store.load_run_state("run-1").jobs["a"].status == Status.RUNNING
+
+
+# ---------- 并发上限 = min(meta, 部署侧 cap)（ADR 0034 机制四）----------
+
+def test_build_takes_meta_max_concurrency_under_cap(cloud_env):
+    """definition 声明 ≤ cap → 按 definition 走（打通前 cloud 档静默忽略提交侧声明，是可用性缺陷）。"""
+    _seed_run(cloud_env["runs"], detached=True, max_concurrency=2)  # cap=4（fixture env）
+    assert reconciler._build("run-1")[4] == 2
+
+
+def test_build_clamps_meta_max_concurrency_to_cap(cloud_env, monkeypatch):
+    """definition 声明 > cap → 钳到 cap：task 烧部署方账单，部署侧保留总量控制权（cap 语义）。"""
+    monkeypatch.setenv("MAX_CONCURRENCY", "2")
+    _seed_run(cloud_env["runs"], detached=True, max_concurrency=9)
+    assert reconciler._build("run-1")[4] == 2
+
+
+def test_build_defaults_to_one_when_meta_missing(cloud_env):
+    """meta 无此值（打通前落的旧 definition）→ 按 1，与打通前行为一致（不因 cap 变大把旧 run 提速）。"""
+    _seed_run(cloud_env["runs"], detached=True, max_concurrency=None)
+    assert reconciler._build("run-1")[4] == 1
+
+
+def test_build_cap_defaults_to_one_when_env_absent(cloud_env, monkeypatch):
+    """cap env 漏注（IaC 改坏/手工建的 Lambda）→ 缺省保守回 1，不在 code 里复制部署值。
+
+    **meta 必须声明 >1** 才验得动这条：meta 无值时 min(1, cap) 恒 1，缺省是 1 还是 4 都绿（非判别性断言）；
+    声明 9 时 min 完全由缺省决定——回 1 则 1、若哪天缺省又被写成部署值 4 则 4，断言才真兜住。
+    """
+    monkeypatch.delenv("MAX_CONCURRENCY", raising=False)
+    _seed_run(cloud_env["runs"], detached=True, max_concurrency=9)
+    assert reconciler._build("run-1")[4] == 1
 
 
 def test_exit_observer_skips_non_detached_run(cloud_env):

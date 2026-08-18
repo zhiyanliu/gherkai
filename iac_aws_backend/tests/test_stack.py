@@ -413,6 +413,19 @@ def test_kicker_mapping_insert_filter():
     assert len(insert_filtered) == 1, f"应恰有 1 个 INSERT-filter mapping（kicker），实际 {len(insert_filtered)}"
 
 
+def test_reconcile_lambdas_share_per_run_concurrency_cap():
+    """reconciler/kicker 的 `MAX_CONCURRENCY` = **部署侧 per-run cap**（非并发真源——真源是 definition 的
+    `max_concurrency`，推进器取 min，ADR 0034 机制四）。两个 Lambda 都起 task（kicker 起首批、reconciler 续起），
+    值必须**同**——不同则「首批 N 个、续起 M 个」，同一 run 的并行度随谁触发而变。
+    """
+    t = _template()
+    caps = {name: fn["Properties"]["Environment"]["Variables"]["MAX_CONCURRENCY"]
+            for name, fn in t.find_resources("AWS::Lambda::Function").items()
+            if "MAX_CONCURRENCY" in fn["Properties"].get("Environment", {}).get("Variables", {})}
+    assert len(caps) == 2, f"应恰有 reconciler/kicker 两个 Lambda 拿 cap，实际 {sorted(caps)}"
+    assert set(caps.values()) == {"8"}, f"两侧 cap 应同为 8，实际 {caps}"
+
+
 def test_exit_observer_can_read_runs_table_only():
     """退出观察者写 task_exited 前要判 run 是否 detached（ADR 0034 端到端 cloud 1b 的 handler 侧分流）→
     须能**读** runs 表；且只读——观察者绝不写 RunState（ADR 0030 单写者）。

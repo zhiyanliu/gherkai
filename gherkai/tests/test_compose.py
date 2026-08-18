@@ -630,6 +630,37 @@ def test_preflight_report_dir_not_checked_when_not_passed():
     assert _preflight_report_dir(None, env_by_fn={"g-reconciler": {"REPORT_DIR": "whatever"}}) is None
 
 
+# ---- preflight 的「声明超部署侧 cap」提示（ADR 0034 机制四）：警但不失败 ----
+
+def _preflight_cap(declared, cap_env, warns):
+    """跑一次带 cap 提示的 preflight：推进器 env 给 MAX_CONCURRENCY=cap_env；警告收进 warns。"""
+    return compose.preflight_cloud_resources(
+        prefix="g-", runs_table="g-runs", events_table="g-events", bucket="g-artifacts",
+        cluster="g-cluster", lambda_fns=_CHAIN,
+        declared_max_concurrency=declared, on_warn=warns.append,
+        ddb=_FakeDdbClient({"g-runs", "g-events"}), s3=_FakeS3Client({"g-artifacts"}),
+        ecs=_FakeEcsClient({"g-cluster"}),
+        lam=_FakeLambdaClient(_CHAIN, env_by_fn={fn: {"MAX_CONCURRENCY": cap_env} for fn in _CHAIN}),
+    )
+
+
+def test_preflight_warns_once_when_declared_max_concurrency_exceeds_cap():
+    # 声明 8 > cap 4 → 提交时就告知「本 run 只会按 4 并行」（否则用户以为按 8 跑、只看到莫名慢）。
+    # 但**不构成 preflight 失败**：钳制不改产物落点、run 照跑（对照 REPORT_DIR 分岔的退 2——判据 = 分岔后果）。
+    warns = []
+    err = _preflight_cap(8, "4", warns)
+    assert err is None                       # 只警不拦
+    assert len(warns) == 1                   # 两推进器同值 → 只警一条，不重复噪声
+    assert "8" in warns[0] and "4" in warns[0] and "MAX_CONCURRENCY" in warns[0]
+
+
+def test_preflight_no_cap_warn_when_declared_within_cap():
+    # 对偶（防「恒警」）：声明 2 ≤ cap 4 → 一句不警（提交侧在 cap 以内说了算，没有钳制发生）。
+    warns = []
+    assert _preflight_cap(2, "4", warns) is None
+    assert warns == []
+
+
 def test_preflight_missing_cluster_detected():
     err = compose.preflight_cloud_resources(
         prefix="g-", runs_table="g-runs", events_table="g-events", bucket="g-artifacts", cluster="g-cluster",

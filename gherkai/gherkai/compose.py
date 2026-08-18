@@ -596,7 +596,7 @@ def build_fargate_engines(
 def preflight_cloud_resources(
     *, prefix: str, events_table: str, bucket: str, cluster: str, runs_table: str | None = None,
     task_defs: list[str] | None = None, lambda_fns: list[str] | None = None,
-    report_dir: str | None = None,
+    report_dir: str | None = None, declared_max_concurrency: int | None = None, on_warn=None,
     region=None, profile=None, ecs=None, s3=None, ddb=None, lam=None,
 ) -> str | None:
     """fail-fast 探 cloud 资源存在性（ADR 0033 preflight 条）——用已解析 prefix 拼出的名去探，不存在返回一句
@@ -618,6 +618,12 @@ def preflight_cloud_resources(
     提交侧留下一批孤儿 args 对象），是典型「静默分裂」，故挡在提交前。只比 `lambda_fns` 里的**两个推进器**
     （kicker/reconciler——名按 prefix 从 `names` 真源推出；exit-observer 不读 REPORT_DIR、不比），
     env 缺该键视作 Lambda 侧缺省 `reports`，两侧都过 `_normalize_prefix` 再比（`reports` 与 `reports/` 不算冲突）。
+
+    **`declared_max_concurrency` + `on_warn` 非 None 时另提示「声明超部署侧 cap」**（ADR 0034 机制四）：读同一批
+    推进器的 `MAX_CONCURRENCY` env（缺键视作推进器侧缺省 1），声明 > cap 则经 `on_warn` 警一条（最多一条）、
+    **不构成 preflight 失败**。与上面 REPORT_DIR 退 2 的判据分野 = **分岔的后果**：超 cap 只是被钳制，run 照跑、
+    结果照落用户给的前缀，分岔对产物是 no-op（只是慢），提示即够；REPORT_DIR 分岔会把产物写去别处（用户在自己
+    给的前缀下找不到结果），必须挡在提交前。
     """
     import boto3
     from botocore.exceptions import ClientError, BotoCoreError
@@ -657,17 +663,34 @@ def preflight_cloud_resources(
             return _hint(f"ECS task definition {td}")
     if lambda_fns:
         lam = lam or sess.client("lambda")
-        # 读 REPORT_DIR 作一致性比对的只有两个推进器（它们 _build 时用它拼 Result/Report/artifact/job-in 前缀）
+        # 读 REPORT_DIR / MAX_CONCURRENCY 的只有两个推进器（前者拼 Result/Report/artifact/job-in 前缀，
+        # 后者是部署侧 per-run 并发 cap）——exit-observer 两个都不读，不参与比对/提示。
         advancers = {default_name(prefix, _names.BASE_KICKER_LAMBDA),
                      default_name(prefix, _names.BASE_RECONCILER_LAMBDA)}
+        warned_cap = False
         for fn in lambda_fns:
             try:
                 resp = lam.get_function(FunctionName=fn)  # 返回体已含 Configuration.Environment，无需二次调用
             except (ClientError, BotoCoreError):
                 return _hint(f"Lambda 函数 {fn}（无状态跑批事件驱动链）")
-            if report_dir is None or fn not in advancers:
+            if fn not in advancers:
                 continue
             env = (resp.get("Configuration", {}).get("Environment") or {}).get("Variables") or {}
+            if declared_max_concurrency is not None and on_warn is not None and not warned_cap:
+                # 声明超 cap → 钳制（推进器取 min）。只提示不失败（判据见 docstring：钳制对产物是 no-op）。
+                # 两推进器须同值，故只警一条（都警是重复噪声）；env 值畸形时无从比对，静默跳过——
+                # 提示是锦上添花，不该为它让 preflight 崩（cap 数值真源在 IaC）。
+                try:
+                    cap = int(env.get("MAX_CONCURRENCY", "1"))  # 缺键 = 推进器侧保守缺省
+                except ValueError:
+                    cap = None
+                if cap is not None and declared_max_concurrency > cap:
+                    on_warn(f"提示：--max-concurrency={declared_max_concurrency} 超过部署侧 per-run 上限 "
+                            f"cap={cap}（推进器 Lambda env MAX_CONCURRENCY），本 run 将按 {cap} 并行"
+                            f"——要更高并发改 iac_aws_backend 的 MAX_CONCURRENCY（两 Lambda 须同值）。")
+                    warned_cap = True
+            if report_dir is None:
+                continue
             remote = env.get("REPORT_DIR", "reports")  # 缺键 = Lambda 侧走自己的缺省
             if _normalize_prefix(remote) != _normalize_prefix(report_dir):
                 return (f"--backend cloud 产物前缀不一致：submit 侧 --report-dir={report_dir!r}，"

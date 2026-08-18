@@ -54,7 +54,7 @@
 - **隧道 agent 进程自身也 setsid**（spawn 时 `start_new_session=True`）：agent 的存活该由**宿主**决定（上表三形态 + `stop_tunnel(pid)` 这唯一拆除面），不该由终端的信号转发决定。否则 agent 与 CLI 同进程组，`submit` 时 CLI 收到终端广播的 SIGINT/SIGHUP 会**连坐杀掉正要交棒给后台宿主的 agent**——两个后台宿主本身都 setsid、唯独被交棒的 agent 不，交棒链就断在这一环。**已真跑核实（真 spawn + 真 `killpg`，非 mock——进程组归属属「绿测试覆盖不到的真实行为」）**：同组时一发 SIGINT 广播必杀 agent；agent 自成进程组后存活，而前台 `run` 档语义不变（Ctrl-C → `KeyboardInterrupt` → `atexit` 照常拆，见上表首行「有意选 atexit 而非 finally」）。
 - **TTL 按 definition 算，不是一个常数**：`TTL = Σ(各 job 的 timeout_s；无预算者按一个明确上限记账) + 启动/级联余量`（`tunnel_host.compute_watch_ttl_s`；`submit` 算好显式传给守护进程并打印出来，`--tunnel-ttl` 是显式覆盖旋钮）。
   - **为什么不能拍常数**：TTL 到点**无条件**拆隧道。TTL 短于 run 实际预算时，剩余 job 在被测应用不可达的情况下继续跑、以「AI 报导航失败」的形态**假失败**告终——兜底机制反过来成了失败源。（曾是恒定 1h 且没有任何生产写入者：默认 job 预算 300s 下约 12 个 job 起就超。）而运行预算在 definition 里本就是可算的。
-  - **求和而非取 max**：cloud 档并发由推进器 Lambda 的 `MAX_CONCURRENCY` 定、当前恒 1（[0034](./0034-detached-batch-reconciler.md)），故串行总预算是保守上界；并发若被 IaC 调高，求和只会**高估**——TTL 偏长＝隧道多留一会儿（run 到终态照常提前拆），偏在安全的一侧。
+  - **求和而非取 max**：并发 >1 时各 job 部分重叠、真实墙钟必 < 各预算之和，故串行总预算对**任何**并发取值都是保守上界（并发上限随 definition 走、cloud 再受部署侧 cap 钳制，见 [0034](./0034-detached-batch-reconciler.md) 机制四——TTL 计算不必知道它的取值，这正是取求和的好处）；高估无害——TTL 偏长＝隧道多留一会儿（run 到终态照常提前拆），偏在安全的一侧。
   - **余量兜什么**：`submit` 只写 runs 表，之后还有 Stream INSERT 投递 → kicker 冷启动 → RunTask → 拉镜像/挂 ENI 才真开跑，job 之间又有云端事件链的固有尾延迟（[0034](./0034-detached-batch-reconciler.md) 实测每步 ~20-30s），末尾还有 finalize；而 job 预算从 claim 起算、不含这些。故余量是必需项、不是保险费。
   - 无预算的 job（`--default-job-timeout <=0` 且未标 `@timeout` ＝ 执行侧不超时）按一个明确上限**记账**——TTL 必须有限，否则泄漏兜底整体失效。
 - cloud submit 的语义澄清：「提交完就走」=不阻塞 CLI，**不等于关机**——机器继续开着时本地应用与隧道均可用，云端 Lambda 链驱动的浏览器经隧道访问本机应用完全成立。但**关机=隧道断=测试以导航失败告终**：submit 时打印明示（守护进程日志落点 + 生效的 TTL + 「本机需保持开机联网直到 run 终态」），把例外变成明示边界而非静默失败。

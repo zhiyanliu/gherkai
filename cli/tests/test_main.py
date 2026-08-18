@@ -134,6 +134,38 @@ def test_assertion_votes_below_one_rejected(tmp_path, monkeypatch, capsys):
     assert "必须 ≥ 1" in err
 
 
+def test_run_rejects_max_concurrency_below_one(tmp_path, monkeypatch, capsys):
+    # --max-concurrency < 1 在入口被拒（退 2）：<=0 会让 plan_next 永不提议起 job → run 卡死在 pending
+    # （比「慢一点」严重得多）。**零副作用**：schedule 一次没调、落点目录都没建（拒在读 feature/落库之前）。
+    called = {"n": 0}
+    monkeypatch.setattr(m, "schedule", lambda *a, **k: called.__setitem__("n", called["n"] + 1))
+    feat = _write_feature(tmp_path)
+    report_dir = tmp_path / "reports"
+    for bad in ("0", "-1"):
+        rc = m.main(["run", str(feat), "--max-concurrency", bad, "--report-dir", str(report_dir)])
+        assert rc == 2, f"--max-concurrency {bad} 应退出码 2"
+        assert "--max-concurrency" in capsys.readouterr().err
+    assert called["n"] == 0          # schedule 从未被调用
+    assert not report_dir.exists()   # 落库也没发生（persistence.begin 都没走到）
+
+
+def test_submit_rejects_max_concurrency_below_one(tmp_path, monkeypatch, capsys):
+    # 同上，submit 侧（坏值会随 definition 到达推进器 → 三路推进器全空转）。零副作用 = 没 fork per-run 进程、
+    # 没写 run 目录（对齐 test_tunnel_cli 的「隧道一次都没起」断言风格：早拒才真零副作用）。
+    import subprocess
+
+    forked = []
+    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: forked.append(cmd))
+    feat = _write_feature(tmp_path)
+    report_dir = tmp_path / "reports"
+    for bad in ("0", "-1"):
+        rc = m.main(["submit", str(feat), "--max-concurrency", bad, "--report-dir", str(report_dir)])
+        assert rc == 2, f"--max-concurrency {bad} 应退出码 2"
+        assert "--max-concurrency" in capsys.readouterr().err
+    assert forked == []              # per-run 进程一次没 fork
+    assert not report_dir.exists()   # definition 也没落库
+
+
 # ---- plan 预检（dry-run）：纯本地、不连 AWS、不烧钱 ----
 
 def test_plan_text_shows_scope_grouping(tmp_path, capsys):
@@ -231,6 +263,9 @@ def test_run_schedule_opts_mapping(tmp_path, monkeypatch, capsys):
     assert o.grace_period_s == float(good_grace)
     # timeout 载体在 definition（ADR 0034「job timeout」节）：--default-job-timeout 填进未标 @timeout 的 Job
     assert all(j.timeout_s == 120.0 for j in box["run_meta"].jobs)
+    # max_concurrency 同步落 definition（ADR 0034 机制四）：同步 run 的 ScheduleOpts 仍直用 flag（同进程），
+    # 但 meta 照落——definition 要诚实记「这个 run 声明了几路并行」
+    assert box["run_meta"].max_concurrency == 3
     # min_grace_s 也传给 core（核心不变量：core enforce grace≥此下限，ADR 0024 grace 硬约束）
     assert o.min_grace_s == float(compose.NOVA_ACT_TIMEOUT_S + compose.NOVA_GRACE_MARGIN_S)
 
@@ -604,3 +639,29 @@ def test_default_engine_flag_has_choices():
     with pytest.raises(SystemExit) as ei:
         m.main(["plan", "x.feature", "--default-engine", "midsence"])
     assert ei.value.code == 2
+
+
+# ---- max_concurrency 随 definition 走（ADR 0034 机制四）----
+
+def test_submit_local_writes_max_concurrency_into_definition(tmp_path, monkeypatch):
+    """submit 把 --max-concurrency 落进 definition（推进器读 meta，不靠 flag 通道）。
+
+    fork 出的 per-run 进程仍收 flag（meta 缺值时的回落），但真源是落盘的 meta——推进器与提交进程可能分离
+    （cloud 档在 Lambda、local 接力者是另一个 CLI 调用），flag 到不了它们。
+    """
+    import subprocess
+
+    forked = []
+
+    class _FakeProc:
+        pid = 1
+
+    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: forked.append(cmd) or _FakeProc())
+    reports = tmp_path / "reports"
+    assert m.main(["submit", str(_write_feature(tmp_path)), "--report-dir", str(reports),
+                   "--max-concurrency", "3"]) == 0
+    run_dirs = [d for d in reports.iterdir() if d.is_dir()]
+    assert len(run_dirs) == 1
+    meta = json.loads((run_dirs[0] / "run_meta.json").read_text(encoding="utf-8"))
+    assert meta["max_concurrency"] == 3
+    assert ["--max-concurrency", "3"] == forked[0][-2:]  # per-run 仍带 flag（回落值）

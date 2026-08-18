@@ -56,7 +56,7 @@ def test_start_tunnel_for_jobs_propagates_tunnel_error(monkeypatch):
 # ---- compute_watch_ttl_s：TTL 按 definition 算（不是拍一个常数）----
 
 def test_ttl_sums_job_budgets_plus_margin():
-    """Σ(各 job 预算) + 启动余量——cloud 档并发恒 1（ADR 0034），求和是保守上界。"""
+    """Σ(各 job 预算) + 启动余量——求和对任何并发取值都是保守上界（ADR 0034 机制四）。"""
     jobs = [_job("a", 300.0), _job("b", 600.0), _job("c", 120.0)]
     assert tunnel_host.compute_watch_ttl_s(jobs, startup_margin_s=900.0) == 900.0 + 1020.0
 

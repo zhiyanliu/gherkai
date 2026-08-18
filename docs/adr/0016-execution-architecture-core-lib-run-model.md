@@ -51,7 +51,7 @@
 
 | 层 | 内容 | 何时 | 类型 | store |
 |---|---|---|---|---|
-| **definition（前置身份）** | run_id + created_at + 跑哪些 job（完整 `Job`：scope/engine/scenarios/steps + 投票次数 `assertion_votes` + job 墙钟预算 `timeout_s`，"要跑什么"，[0019](./0019-feature-tags-scope-and-engine.md)/[0034](./0034-detached-batch-reconciler.md)「job timeout」节）+ run 级 `extra_http_headers`（隧道等 context 级请求头，[0035](./0035-local-app-testing-via-tunnel.md)；core 只搬运不消费语义） | **执行前**确定（plan 产出 + 组合根生成 run_id） | `RunMeta`（持有 `tuple[Job,...]`，不另造 JobMeta） | `RunStore`（控制面） |
+| **definition（前置身份）** | run_id + created_at + 跑哪些 job（完整 `Job`：scope/engine/scenarios/steps + 投票次数 `assertion_votes` + job 墙钟预算 `timeout_s`，"要跑什么"，[0019](./0019-feature-tags-scope-and-engine.md)/[0034](./0034-detached-batch-reconciler.md)「job timeout」节）+ run 级执行参数 `extra_http_headers`（隧道等 context 级请求头，[0035](./0035-local-app-testing-via-tunnel.md)）与 `max_concurrency`（本 run 几个 job 并行，[0034](./0034-detached-batch-reconciler.md) 机制四）——两者 core 都只搬运不消费语义，消费者是各推进器组合根 | **执行前**确定（plan 产出 + 组合根生成 run_id） | `RunMeta`（持有 `tuple[Job,...]`，不另造 JobMeta） | `RunStore`（控制面） |
 | **控制面运行态** | 总 status / 各 job status / 会话血缘 sessionId / 起止 | **执行后**产生（实时写下随进度增量刷，[0030](./0030-realtime-persistence-seam.md)） | `RunState`（`jobs: Map<scope_id, JobState>`，按 scope_id 定位单 job 实时刷；落盘 JSON 仍 list） | `RunStore`（控制面） |
 | **数据面判定明细** | 每 scenario/step 的 pass-fail、投票、cost、报告指针 | **执行后**产生 | `JobResult`→`ScenarioResult`→`StepResult` | `ResultStore`（数据面，判定真值唯一权威） |
 

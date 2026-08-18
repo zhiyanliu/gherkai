@@ -148,6 +148,38 @@ def test_build_local_reconcile_resolves_region_like_foreground(tmp_path, monkeyp
     assert eng._env.get("AWS_REGION") == "us-test-9"
 
 
+def _seed_for_build(tmp_path, run_id: str, *, max_concurrency: int | None):
+    """落一个最小 run（单 pending job）供 build_local_reconcile 读回，meta 的 max_concurrency 按参数。"""
+    meta = RunMeta(run_id=run_id, created_at="t0", jobs=(_job("a"),), max_concurrency=max_concurrency)
+    store = LocalRunStore(tmp_path)
+    store.create_run(meta, RunState(run_id=run_id, status=Status.PENDING,
+                                    jobs={"a": JobState("a", Status.PENDING)},
+                                    started_at="t0", high_water_mark=0))
+
+
+def test_build_local_reconcile_prefers_meta_max_concurrency(tmp_path):
+    """并发上限以 definition 为准（ADR 0034 机制四）：入参 flag 与 meta 冲突时用 meta——`status --wait` 接力者
+    的 flag 值可能与 submit 时不同，接力不该悄悄改这个 run 的并行度。"""
+    from gherkai.detached import build_local_reconcile
+
+    _seed_for_build(tmp_path, "run-m", max_concurrency=3)
+    repo = Path(__file__).resolve().parents[2]
+    _m, _l, _s, _launcher, mc, _rs, _rp = build_local_reconcile(
+        repo, str(tmp_path), "run-m", max_concurrency=1, region="us-east-1")
+    assert mc == 3
+
+
+def test_build_local_reconcile_falls_back_to_flag_when_meta_missing(tmp_path):
+    """对偶（防「恒取入参」的假绿反面）：meta 无值（打通前落的旧 definition）→ 回落入参 flag。"""
+    from gherkai.detached import build_local_reconcile
+
+    _seed_for_build(tmp_path, "run-f", max_concurrency=None)
+    repo = Path(__file__).resolve().parents[2]
+    _m, _l, _s, _launcher, mc, _rs, _rp = build_local_reconcile(
+        repo, str(tmp_path), "run-f", max_concurrency=2, region="us-east-1")
+    assert mc == 2
+
+
 def test_run_state_timestamps_share_one_format(tmp_path):
     """RunState 内时间戳**格式统一**（ADR 0034「时钟也只一份」）：submit 侧写的 started_at 与推进器写的
     claimed_at/ended_at 出自同一个 `compose.now_iso`——曾各宿主一份 `_now_iso`、两种 ISO 格式并存

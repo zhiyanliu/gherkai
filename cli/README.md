@@ -135,7 +135,7 @@ cloud 由云端 Lambda 事件驱动链推进（submit 机器无 ECS 写/执行�
 | `features...` | — | 一个或多个 `.feature` 路径（位置参数） |
 | `--default-engine` | `novaact` | 未标 `@engine` 的 scope 用的默认引擎（标了 `@engine:` 的按 tag 走） |
 | `--assertion-votes` | `1` | AI 断言（`Then`）投票次数（默认 1=单次判定）；调高（如 3/5）启用抖动检测：跑 N 次取多数票。须 ≥1 |
-| `--max-concurrency` | `1` | 同时在跑的 worker 上限（护真实成本/配额） |
+| `--max-concurrency` | `1` | 同时在跑的 worker 上限（护真实成本/配额）。须 ≥1（`<=0` 会让 run 永远起不了 job、卡死在 pending，开跑前报错） |
 | `--default-job-timeout` | `300` | job 墙钟超时秒的缺省值（`<=0` 不超时）。两层声明：标了 `@timeout:N` tag 的 scope 按 tag 走（同 scope 声明不一致 → `PlanError`）、未标的用本缺省——同 `@engine`/`--default-engine` 模式。tag 语义见 ADR 0019，两层设计取舍与三路 enforce 见 ADR 0034「job timeout」节 |
 | `--grace` | 自动 | 中止 run 时等 worker 收尾（关云端会话、免继续计费）的秒数，超时才强杀。不填按引擎自动取够用值（`novaact` 150s、`midscene` 25s）；填太小会开跑前报错（强杀漏关会话＝烧钱）。 |
 | `--expose-local` | — | 把「本机可达」的被测应用经隧道暴露给云端浏览器（ADR 0035）：值 = feature 中书写的原始 origin（如 `http://localhost:3000`，也可是局域网地址）。框架起隧道并把 job 文本中该前缀替换为公网 URL（含每 run 一换的 basic-auth 凭据，终态即拆）。需已配 ngrok authtoken（`NGROK_AUTHTOKEN`） |
@@ -168,11 +168,11 @@ cloud 由云端 Lambda 事件驱动链推进（submit 机器无 ECS 写/执行�
 | `features...` | — | 一个或多个 `.feature` 路径（位置参数） |
 | `--default-engine` | `novaact` | 未标 `@engine` 的 scope 用的默认引擎 |
 | `--assertion-votes` | `1` | AI 断言（`Then`）投票次数（默认 1=单次判定） |
-| `--max-concurrency` | `1` | 同时在跑的 worker 上限（local：喂给后台 per-run 推进进程） |
+| `--max-concurrency` | `1` | 同时在跑的 worker 上限。随提交的任务定义（definition）生效，两档都有效：local 喂后台 per-run 进程与 `status --wait` 接力者；cloud 受部署侧上限约束（kicker/reconciler Lambda 的 env `MAX_CONCURRENCY`，IaC 设、当前 8——task 烧部署方账单，故留一道上限；声明超上限时 submit 的 preflight 会提示「本 run 将按上限并行」，不拦提交）。local 无此上限（worker 跑在你自己的机器、烧你自己的凭证）。须 ≥1（同 `run`）|
 | `--default-job-timeout` | `300` | job 墙钟超时秒缺省（`<=0` 不超时）；标了 `@timeout:N` 的 scope 按 tag 走——语义同 `run` 表，「提交完就走」时的挂死/烧钱止损 |
 | `--expose-local` / `--tunnel` | — / `ngrok` | 语义同 `run` 表；submit 后隧道由后台进程持有——local=per-run 进程、cloud=隧道守护进程（轮询终态即拆+TTL 兜底）。**本机需保持开机联网直到 run 终态**（关机=隧道断=测试以导航失败告终，ADR 0035） |
 | `--tunnel-ttl` | 按 definition 算 | [cloud + `--expose-local`] 隧道守护进程的兜底 TTL 秒（须 > 0，否则退 2）。默认 = 各 job 预算之和 + 启动余量（submit 会打印生效值）；**调小有风险**——TTL 到点无条件拆隧道，短于实际 run 时长会让剩余 job 在应用不可达下跑成导航失败（ADR 0035 决策 3） |
-| `--report-dir` | `reports` | 归集报告落点；`status` 查时须给同一路径。[cloud] 产物前缀由推进器 Lambda 的 `REPORT_DIR` 决定（IaC 侧配，缺省 `reports`）——给了不一致的值，preflight 直接退 `2` 并点名两侧值（否则跑完了却在你给的前缀下找不到结果） |
+| `--report-dir` | `reports` | 归集报告落点；`status` 查时须给同一路径。[cloud] 产物前缀由 kicker/reconciler Lambda 的 `REPORT_DIR` 决定（IaC 侧配，缺省 `reports`）——给了不一致的值，preflight 直接退 `2` 并点名两侧值（否则跑完了却在你给的前缀下找不到结果） |
 | `--backend {local,cloud}` | `local` | local=本机 per-run 进程推进；cloud=Fargate + 云端 Lambda 事件驱动链推进（提交完真关机也跑完） |
 | `--prefix` | `gherkai-` | [cloud] 资源名前缀（须与 CDK 部署一致）；`status` 查时须给同一 prefix。兜底 `AWS_RESOURCE_PREFIX` |
 | `--ddb-table` / `--s3-bucket` / `--events-table` / `--cluster` | `{prefix}…` | [cloud] 覆盖各 prefix 默认名（语义同 `run` 表） |
@@ -192,7 +192,7 @@ cloud 由云端 Lambda 事件驱动链推进（submit 机器无 ECS 写/执行�
 | `--backend {local,cloud}` | `local` | 须与 `submit` 一致 |
 | `--report-dir` | `reports` | [local] run 落点（须与 `submit` 一致） |
 | `--wait` | off | 轮询到 run 达终态再返回：local 本机接力 tick 推进；cloud 检测到卡住才 invoke kicker Lambda 踢一脚接力 |
-| `--max-concurrency` | `1` | [local `--wait`] 接力推进的并发上限 |
+| `--max-concurrency` | `1` | [local `--wait`] 接力推进的并发上限**回落值**——run 的 definition 带值时以它为准（接力不改这个 run 的并行度）|
 | `--json` | off | 输出机器可读 RunState（不打人读的诊断提示） |
 | `--prefix` | `gherkai-` | [cloud] 资源名前缀（定位 DDB RunState + 推理 kicker Lambda 名）。兜底 `AWS_RESOURCE_PREFIX` |
 | `--ddb-table` | `{prefix}runs` | [cloud] RunStore DDB 表名（覆盖 prefix 默认）；兜底 `AWS_DDB_TABLE` |

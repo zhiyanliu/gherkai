@@ -153,8 +153,8 @@ def _build_parser() -> argparse.ArgumentParser:
                     help="未标 @engine 的 scope 用的默认引擎")
     sm.add_argument("--assertion-votes", type=int, default=1, metavar="N", help="AI 断言投票次数（默认 1）")
     sm.add_argument("--max-concurrency", type=int, default=1,
-                    help="[local] 同时在跑的 worker 上限（默认 1）；cloud 档由 IaC 给推进器 Lambda 设的 "
-                         "MAX_CONCURRENCY 决定、本 flag 不生效（ADR 0034 已知边界）")
+                    help="同时在跑的 worker 上限（默认 1）；随 definition 到达推进器，cloud 档受部署侧 cap"
+                         "（推进器 Lambda env MAX_CONCURRENCY）钳制")
     sm.add_argument(
         "--default-job-timeout", type=float, default=300.0, metavar="S",
         help="未标 @timeout 的 scope 用的 job 墙钟超时秒（默认 300；<=0 表示不超时）；标了 @timeout:N 的按 tag 走",
@@ -196,7 +196,8 @@ def _build_parser() -> argparse.ArgumentParser:
     st.add_argument("--wait", action="store_true",
                     help="轮询到 run 达终态再返回（两路都支持，接力语义异：local=本机 tick 推进；"
                          "cloud=检测卡住即 invoke kicker Lambda 接力）")
-    st.add_argument("--max-concurrency", type=int, default=1, help="[local --wait] 接力推进并发上限")
+    st.add_argument("--max-concurrency", type=int, default=1,
+                    help="[local --wait] 接力推进并发上限的回落值（meta 带值时以 meta 为准）")
     st.add_argument("--json", action="store_true", help="输出机器可读 JSON（RunState）")
     st.add_argument("--prefix", default=None, metavar="P", help="[cloud] 资源名前缀（读 DDB RunState）")
     st.add_argument("--ddb-table", default=None, metavar="NAME", help="[cloud] RunStore DDB 表名")
@@ -312,6 +313,22 @@ def _load_and_plan(args, repo: Path) -> "list | int":
         return 2
 
 
+def _validate_max_concurrency(args) -> bool:
+    """`--max-concurrency` 入口校验（对齐 `--tunnel-ttl`/`--grace`/`--assertion-votes` 的入口校验惯例）。
+
+    <1 不是「慢一点」而是**永远不动**：并发闸取 min(声明, cap) 后 <=0 会让 `plan_next` 永不提议起 job——
+    三路推进器（同步 schedule / local per-run / cloud 推进器）都空转，run 提交出去却卡死在 pending。
+    入口拦截（退 2「没开跑就被拒」），不让坏值流进 definition。返回 False = 调用方退 2。
+
+    用 getattr 取值：`plan` 子命令没有这个 flag（纯本地不跑 job），取不到就不校验。
+    """
+    mc = getattr(args, "max_concurrency", None)
+    if mc is not None and mc < 1:
+        _progress(f"--max-concurrency={mc} 无效：须 ≥ 1（<=0 会让推进器永不起 job、run 卡死在 pending）")
+        return False
+    return True
+
+
 def _probe_deterministic_dispatch(repo: Path, jobs) -> dict | None:
     """plan 的派发预期标注（ADR 0036 决策 4）：按引擎分组 step 文本、批量问 worker 命中结果。
 
@@ -412,6 +429,8 @@ def _cmd_submit(args, repo: Path) -> int:
       CLI 不留本机进程、submit 机器零 ECS 权限。
     退出码 = 提交成功与否（非 run 判定；判定由 status 查）。
     """
+    if not _validate_max_concurrency(args):  # 最早：读 feature/起隧道/preflight 之前（真零副作用）
+        return 2
     jobs = _load_and_plan(args, repo)
     if isinstance(jobs, int):
         return jobs
@@ -435,7 +454,8 @@ def _cmd_submit(args, repo: Path) -> int:
 
     run_id = compose.new_run_id()
     run_meta = RunMeta(run_id=run_id, created_at=compose.now_iso(), jobs=tuple(jobs),
-                       extra_http_headers=tuple(tunnel_headers.items()) if tunnel_headers else None)
+                       extra_http_headers=tuple(tunnel_headers.items()) if tunnel_headers else None,
+                       max_concurrency=args.max_concurrency)
     from core.model import JobState, RunState
     initial = RunState(
         run_id=run_id, status=Status.PENDING,
@@ -514,6 +534,9 @@ def _submit_cloud(args, repo: Path, run_id: str, run_meta, initial, *, tunnel_in
             task_defs=[compose.task_def_name(target.prefix, e)
                        for e in sorted({j.engine for j in run_meta.jobs})],
             lambda_fns=target.detached_chain_lambdas, report_dir=args.report_dir,
+            # 声明超部署侧 cap 时提示（ADR 0034 机制四）：钳制不改产物落点、run 照跑，故只警不退 2
+            # （对照上面 REPORT_DIR 的退 2——判据是分岔后果：钳制是 no-op，产物写去别处不是）。
+            declared_max_concurrency=args.max_concurrency, on_warn=_progress,
             region=target.region, profile=target.profile,
         )
     except ImportError as e:
@@ -606,6 +629,8 @@ def _cmd_status(args, repo: Path) -> int:
     """
     from gherkai import detached
 
+    if not _validate_max_concurrency(args):  # --wait 接力的回落值同校验（meta 缺值时它就是并发闸）
+        return 2
     if args.backend == "cloud":
         return _status_cloud(args)
 
@@ -713,6 +738,8 @@ def _cmd_reconcile(args, repo: Path) -> int:
     """per-run 进程入口（submit setsid fork 它，非用户直接调）：跑 reconcile loop 到全 done 自退（ADR 0034）。"""
     from gherkai import detached
 
+    if not _validate_max_concurrency(args):  # 回落值同校验（meta 缺值时它就是并发闸）
+        return 2
     report_root = Path(args.report_dir).resolve()
     meta, log, store, launcher, mc, rstore, pstore = detached.build_local_reconcile(
         repo, str(report_root), args.run_id, args.max_concurrency,
@@ -745,6 +772,8 @@ def _cmd_tunnel_watch(args) -> int:
 def _cmd_run(args, repo: Path) -> int:
     use_json = args.json
 
+    if not _validate_max_concurrency(args):  # 最早：读 feature/起隧道/preflight/begin 之前（真零副作用）
+        return 2
     # 0/1/2) votes 校验 + 读 feature + plan（与 _cmd_plan 共享；前置失败返回退出码 2，见 _load_and_plan）
     jobs = _load_and_plan(args, repo)
     if isinstance(jobs, int):
@@ -786,7 +815,8 @@ def _cmd_run(args, repo: Path) -> int:
     #    + 注入具体引擎 resolver（core 引擎无关）
     run_id = compose.new_run_id()
     run_meta = RunMeta(run_id=run_id, created_at=compose.now_iso(), jobs=tuple(jobs),
-                       extra_http_headers=tuple(tunnel_headers.items()) if tunnel_headers else None)
+                       extra_http_headers=tuple(tunnel_headers.items()) if tunnel_headers else None,
+                       max_concurrency=args.max_concurrency)
     do_report = not args.no_report  # RunReport 默认生成；--no-report 跳过（逃生舱）
     # 归集时让两个引擎的产物都落到 run 专属持久目录（否则用 SDK 默认：Nova 临时目录会被清理、Midscene
     # 落相对 worker cwd 的固定 midscene_run/ 每 run 覆盖）。两引擎对称落 reports/<run_id>/ 下（ADR 0027）。

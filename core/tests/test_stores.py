@@ -322,6 +322,26 @@ def test_run_meta_extra_http_headers_round_trip():
     assert got.extra_http_headers == (("ngrok-skip-browser-warning", "1"),)
 
 
+def test_run_meta_max_concurrency_round_trip():
+    # RunMeta.max_concurrency（ADR 0034 机制四）：带值往返不丢；None 省键（旧落盘/旧提交侧无此键即回落）
+    import dataclasses
+
+    from core.serialize import run_meta_from_dict, run_meta_to_dict
+    meta = _sample_run("mc-run").run_meta
+    assert "max_concurrency" not in run_meta_to_dict(meta)  # 默认 None → omit
+    assert run_meta_from_dict(run_meta_to_dict(meta)).max_concurrency is None
+    meta3 = dataclasses.replace(meta, max_concurrency=3)
+    assert run_meta_to_dict(meta3)["max_concurrency"] == 3
+    assert run_meta_from_dict(run_meta_to_dict(meta3)).max_concurrency == 3
+    # 1 也必须落键（判真会把它当 None 省掉是另一码事，但 0 才是判真的真陷阱）：
+    # `is not None` 判 ⇒ 0 忠实往返、不被悄悄变形成 None（语义校验归组合根，序列化层不改值）
+    zero = dataclasses.replace(meta, max_concurrency=0)
+    assert run_meta_to_dict(zero)["max_concurrency"] == 0
+    assert run_meta_from_dict(run_meta_to_dict(zero)).max_concurrency == 0
+    # 旧落盘（无此键）读回 None——推进器据此走各自的兼容回落
+    assert run_meta_from_dict({"run_id": "legacy", "created_at": "", "jobs": []}).max_concurrency is None
+
+
 def test_run_meta_extra_http_headers_multiple_normalize_at_write_side():
     """≥2 个 header：写端按键排序规范化、读端原样保序 → 键值不丢、落盘键序确定，再往返逐字恒等。
 

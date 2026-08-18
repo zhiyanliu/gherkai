@@ -65,9 +65,9 @@ def compute_watch_ttl_s(
 ) -> float:
     """按 definition 算 cloud submit 隧道守护的 TTL 秒数 = Σ(各 job 预算) + 启动/级联余量。
 
-    **求和而非取 max**：cloud 档并发由推进器 Lambda 的 `MAX_CONCURRENCY` 定、当前恒 1（ADR 0034
-    「max_concurrency 真源」条），故串行总预算是保守上界。并发若被 IaC 调高，求和只会**高估**——TTL 偏长
-    ＝隧道多留一会儿（run 终态照常提前拆），偏在安全的一侧；反向（低估）才会造出假失败。
+    **求和而非取 max**：并发 >1 时各 job 部分重叠、真实墙钟 < 各预算之和，故串行总预算对**任何**并发取值
+    都是保守上界（并发随 definition 走、cloud 再受部署侧 cap 钳制，ADR 0034 机制四——此处不必知道取值）。
+    高估无害：TTL 偏长＝隧道多留一会儿（run 终态照常提前拆）；反向（低估）才会造出假失败。
     无预算（执行侧不超时）的 job 按 `unbounded_job_budget_s` 记账——TTL 必须有限。
     """
     return startup_margin_s + sum(

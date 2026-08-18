@@ -440,7 +440,9 @@ class BackendStack(Stack):
                 **common_env,
                 "SUBNETS": subnets_env,
                 "SECURITY_GROUPS": self._worker_sg_id,
-                "MAX_CONCURRENCY": "1",  # 稳态并发闸（可后续 context 化；每完成一个才起下一个）
+                # 部署侧 per-run 并发 cap（**非真源**：真源是 definition 的 max_concurrency，推进器取 min，
+                # ADR 0034 机制四）。task 烧部署方账单，故部署方保留总量控制权、钳住提交侧声明。
+                "MAX_CONCURRENCY": "8",
                 **timeout_env,  # job timeout 到点触发器（KICKER_ARN/SCHEDULER_ROLE_ARN，ADR 0034）
             },
         )
@@ -497,7 +499,7 @@ class BackendStack(Stack):
                 **common_env,
                 "SUBNETS": subnets_env,
                 "SECURITY_GROUPS": self._worker_sg_id,
-                "MAX_CONCURRENCY": "1",
+                "MAX_CONCURRENCY": "8",  # 同 reconciler：部署侧 cap，两侧须同值（kicker 起首批也走这个闸）
                 **timeout_env,  # kicker 也起 task（首批）→ 同样要武装 timeout schedule
             },
         )

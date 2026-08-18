@@ -198,6 +198,8 @@ def build_local_reconcile(repo, report_dir: str, run_id: str, max_concurrency: i
     这里 load_run_meta 读回；SqliteEventLog/LocalRunStore 都是文件路径，从 report_dir+run_id 重建即同一份。
     返回 (meta, log, store, launcher, max_concurrency, result_store, report_store) 供 run_reconcile_loop
     （后两个是收尾聚合用的落点，与 RunStore 同 <report_dir>/<run_id>/）。
+    返回的 max_concurrency 优先取 meta（ADR 0034 机制四：随 definition 走），入参只作 meta 缺值时的回落——
+    per-run 进程与 `status --wait` 接力者同读 meta，接力者不再拿自己那侧的 flag 值覆盖 submit 时的声明。
     """
     import os
 
@@ -232,7 +234,8 @@ def build_local_reconcile(repo, report_dir: str, run_id: str, max_concurrency: i
     from core.adapters.report_store.local import LocalReportStore
     result_store = LocalResultStore(root)
     report_store = LocalReportStore(root)
-    return meta, log, store, launcher, max_concurrency, result_store, report_store
+    effective_mc = meta.max_concurrency if meta.max_concurrency is not None else max_concurrency
+    return meta, log, store, launcher, effective_mc, result_store, report_store
 
 
 # ============================================================================
