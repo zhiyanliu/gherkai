@@ -729,15 +729,13 @@ def prune_empty_dirs(root: Path) -> None:
             pass
 
 
-def load_feature(path: Path, repo: Path) -> FeatureSource:
+def load_feature(path: Path) -> FeatureSource:
     """读 .feature 文件 → core 要的 FeatureSource（uri+text）。
 
-    core 不碰文件系统（ADR 0025）：读文件、推导稳定 uri 是组合根的事。
-    uri 取相对仓库根的路径（稳定可读的 id 前缀）；不在仓库内则退用绝对路径。
+    core 不碰文件系统（ADR 0025）：读文件、推导 uri 是组合根的事。uri 是 `scenario_id`/`scope_id` 的前缀
+    （`<uri>:<line>`，会进报告目录名与 DDB 键），**取用户给出的路径经规范化后原样**——相对给相对、绝对给绝对，
+    不相对任何「根」（ADR 0037 决策 3：分发后没有 repo 根，任何根都随安装位置/CWD 漂移；曾相对仓库根算、
+    仓库外退用绝对路径，wheel 装法下会让 scope_id 形状随安装形态变）。
     """
-    resolved = path.resolve()
-    try:
-        uri = str(resolved.relative_to(repo))
-    except ValueError:
-        uri = str(resolved)
-    return FeatureSource(uri=uri, text=resolved.read_text(encoding="utf-8"))
+    uri = os.path.normpath(str(path))
+    return FeatureSource(uri=uri, text=Path(path).read_text(encoding="utf-8"))

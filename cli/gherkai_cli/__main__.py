@@ -296,7 +296,7 @@ def _load_and_plan(args, repo: Path) -> "list | int":
         return 2
     # 1) 读 feature（组合根的事，core 不碰 FS）→ FeatureSource[]
     try:
-        features = [compose.load_feature(f, repo) for f in args.features]
+        features = [compose.load_feature(f) for f in args.features]
     except FileNotFoundError as e:
         _progress(f"读 feature 失败：{e}")
         return 2
@@ -514,7 +514,8 @@ def _submit_local(args, repo: Path, run_id: str, run_meta, initial, *, tunnel_in
     # detached 排障只能手工复刻 per-run 前台重跑——真实案例：worker region=None 崩、error 无任何线索）。
     # 子进程持有 fd，父进程开完即交给 Popen；append 模式容多次接力追加。
     log_f = open(report_root / run_id / "reconcile.log", "ab")
-    _sp.Popen(cmd, cwd=str(repo), start_new_session=True,
+    # cwd 继承提交进程、不再指向仓库根（分发后没有 repo，ADR 0037 决策 3）；per-run 所需路径都经参数/definition 传。
+    _sp.Popen(cmd, start_new_session=True,
               stdin=_sp.DEVNULL, stdout=log_f, stderr=log_f)
     log_f.close()  # 子进程已持有 fd（Popen 继承），父进程侧句柄即关
     _progress(f"已提交（本机后台推进中）。查进度：gherkai status {run_id} --report-dir {args.report_dir}")
@@ -597,7 +598,7 @@ def _submit_cloud(args, repo: Path, run_id: str, run_meta, initial, *, tunnel_in
         if target.profile:
             cmd += ["--profile", target.profile]
         with open(watch_log, "ab") as lf:
-            _sp.Popen(cmd, cwd=str(repo), start_new_session=True,
+            _sp.Popen(cmd, start_new_session=True,  # cwd 继承提交进程（ADR 0037 决策 3），同 per-run 进程
                       stdin=_sp.DEVNULL, stdout=lf, stderr=lf)
         _progress(f"隧道由守护进程持有（日志 {watch_log}）：run 终态即拆、TTL 兜底 {ttl_s:.0f}s"
                   f"（= 各 job 预算之和 + 启动余量；`--tunnel-ttl` 可覆盖）。"

@@ -43,26 +43,26 @@ def test_resolver_known_and_unknown():
         resolver("nope")
 
 
-def test_load_feature_uri_relative_to_repo(tmp_path: Path):
-    # 仓库内的 feature → uri 是相对仓库根的路径
-    repo = tmp_path
-    feat = repo / "features" / "demo.feature"
+def test_load_feature_uri_is_given_path_normalized(tmp_path: Path, monkeypatch):
+    """uri = 用户给出的路径规范化后原样（ADR 0037 决策 3）：相对给相对（`./` 折掉、`..` 保留），不相对任何根。"""
+    feat = tmp_path / "features" / "demo.feature"
     feat.parent.mkdir(parents=True)
     feat.write_text("Feature: x\n  Scenario: y\n    When \"做点啥\"\n", encoding="utf-8")
-    fs = compose.load_feature(feat, repo)
+    monkeypatch.chdir(tmp_path)
+    fs = compose.load_feature(Path("./features/demo.feature"))
     assert isinstance(fs, FeatureSource)
     assert fs.uri == "features/demo.feature"
     assert "Scenario: y" in fs.text
+    monkeypatch.chdir(tmp_path / "features")
+    assert compose.load_feature(Path("../features/demo.feature")).uri == "../features/demo.feature"
 
 
-def test_load_feature_outside_repo_uses_absolute(tmp_path: Path):
-    # 仓库外的 feature → 退用绝对路径（不崩）
-    repo = tmp_path / "repo"
-    repo.mkdir()
+def test_load_feature_absolute_path_stays_absolute(tmp_path: Path):
+    # 绝对路径给绝对路径（不做 relative_to 任何根、不 resolve 符号链接）
     outside = tmp_path / "other.feature"
     outside.write_text("Feature: z\n", encoding="utf-8")
-    fs = compose.load_feature(outside, repo)
-    assert fs.uri == str(outside.resolve())
+    fs = compose.load_feature(outside)
+    assert fs.uri == str(outside)
 
 
 def test_repo_root_contains_core_and_engines():
