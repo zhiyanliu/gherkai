@@ -15,9 +15,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from core.model import JobResult, RunResult, ScopeStarted, Status
+from gherkai_core.model import JobResult, RunResult, ScopeStarted, Status
 
-from cli import __main__ as m
+from gherkai_cli import __main__ as m
 
 
 def _write_feature(tmp_path: Path) -> Path:
@@ -445,7 +445,7 @@ def test_submit_cloud_forks_tunnel_watch_daemon(tmp_path, monkeypatch, capsys):
     （ADR 0035 决策 3——cloud submit 的 CLI 即退，守护是隧道唯一宿主）。"""
     import subprocess
 
-    from gherkai import tunnel as gtunnel
+    from gherkai_runtime import tunnel as gtunnel
 
     record: list = []
     _patch_cloud_handles(monkeypatch, record)
@@ -473,7 +473,7 @@ def test_submit_cloud_forks_tunnel_watch_daemon(tmp_path, monkeypatch, capsys):
     assert cmd[cmd.index("--tunnel-pid") + 1] == "777"
     assert "--ddb-table" in cmd
     # TTL 按 definition 算并显式传给守护（ADR 0035 决策 3；曾恒 1h 且无生产写入者 → 与 run 预算脱钩）
-    from gherkai import tunnel_host
+    from gherkai_runtime import tunnel_host
 
     expected = tunnel_host.CLOUD_STARTUP_MARGIN_S + 450.0  # 单 job × --default-job-timeout
     assert float(cmd[cmd.index("--ttl") + 1]) == expected
@@ -486,7 +486,7 @@ def test_submit_cloud_tunnel_ttl_flag_overrides_computed(tmp_path, monkeypatch, 
     """`--tunnel-ttl` 给了就用用户值（显式覆盖旋钮，不再走 definition 计算）。"""
     import subprocess
 
-    from gherkai import tunnel as gtunnel
+    from gherkai_runtime import tunnel as gtunnel
 
     record: list = []
     _patch_cloud_handles(monkeypatch, record)

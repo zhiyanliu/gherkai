@@ -2,10 +2,10 @@
 import json
 from pathlib import Path
 
-from core.adapters.run_store.local import LocalRunStore
-from core.adapters.result_store.local import LocalResultStore
-from core.serialize import from_dict, job_result_from_dict, job_result_to_dict, to_dict
-from core.model import (
+from gherkai_core.adapters.run_store.local import LocalRunStore
+from gherkai_core.adapters.result_store.local import LocalResultStore
+from gherkai_core.serialize import from_dict, job_result_from_dict, job_result_to_dict, to_dict
+from gherkai_core.model import (
     Job,
     JobResult,
     JobState,
@@ -297,7 +297,7 @@ def test_update_job_state_before_create_raises(tmp_path: Path):
 
 def test_job_timeout_s_round_trip():
     # Job.timeout_s（ADR 0034「job timeout」节）：非 None 经 round-trip 不丢；None 落盘省键（旧数据兼容）
-    from core.serialize import job_from_dict, job_to_dict
+    from gherkai_core.serialize import job_from_dict, job_to_dict
     j = _job_def("s", "s", "midscene")
     assert "timeout_s" not in job_to_dict(j)  # omit-when-None（旧读端兼容）
     assert job_from_dict(job_to_dict(j)).timeout_s is None
@@ -309,7 +309,7 @@ def test_run_meta_extra_http_headers_round_trip():
     # RunMeta.extra_http_headers（ADR 0035 决策 4）：非空往返不丢；None/空表均省键（旧落盘兼容 + 空即无）
     import dataclasses
 
-    from core.serialize import run_meta_from_dict, run_meta_to_dict
+    from gherkai_core.serialize import run_meta_from_dict, run_meta_to_dict
     meta = _sample_run("h-run").run_meta
     assert "extra_http_headers" not in run_meta_to_dict(meta)  # 默认 None → omit
     assert run_meta_from_dict(run_meta_to_dict(meta)).extra_http_headers is None
@@ -326,7 +326,7 @@ def test_run_meta_max_concurrency_round_trip():
     # RunMeta.max_concurrency（ADR 0034 机制四）：带值往返不丢；None 省键（旧落盘/旧提交侧无此键即回落）
     import dataclasses
 
-    from core.serialize import run_meta_from_dict, run_meta_to_dict
+    from gherkai_core.serialize import run_meta_from_dict, run_meta_to_dict
     meta = _sample_run("mc-run").run_meta
     assert "max_concurrency" not in run_meta_to_dict(meta)  # 默认 None → omit
     assert run_meta_from_dict(run_meta_to_dict(meta)).max_concurrency is None
@@ -350,7 +350,7 @@ def test_run_meta_extra_http_headers_multiple_normalize_at_write_side():
     """
     import dataclasses
 
-    from core.serialize import run_meta_from_dict, run_meta_to_dict
+    from gherkai_core.serialize import run_meta_from_dict, run_meta_to_dict
     meta = _sample_run("h2-run").run_meta
     hdrs = (("x-tunnel", "b"), ("ngrok-skip-browser-warning", "1"))  # 非字典序（x- 在前）
     meta2 = dataclasses.replace(meta, extra_http_headers=hdrs)

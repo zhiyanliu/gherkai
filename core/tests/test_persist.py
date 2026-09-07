@@ -5,7 +5,7 @@ commit-point 写序 / on_event 只对 ScopeStarted 刷 RUNNING / finalize 逃生
 """
 from __future__ import annotations
 
-from core.model import (
+from gherkai_core.model import (
     Job,
     JobResult,
     RunMeta,
@@ -16,7 +16,7 @@ from core.model import (
     Status,
     Votes,
 )
-from core.persist import RunPersistence
+from gherkai_core.persist import RunPersistence
 
 
 def _meta(run_id: str, scope_ids: list[str]) -> RunMeta:
@@ -105,8 +105,8 @@ def test_finalize_with_report_store_returns_uri():
 def test_finalize_isolates_report_write_failure(tmp_path):
     # #1（review）：ReportStore.write 失败不击穿已 commit 的 run——commit point（finalize_run）已落、
     # 判定真值在 ResultStore 安然无恙，故 write 抛异常被隔离：finalize 返回 None、不冒泡（报告可重建）。
-    from core.adapters.run_store.local import LocalRunStore
-    from core.adapters.result_store.local import LocalResultStore
+    from gherkai_core.adapters.run_store.local import LocalRunStore
+    from gherkai_core.adapters.result_store.local import LocalResultStore
 
     class BoomReportStore:
         def preflight(self): pass  # 探活 no-op（真 LocalRunStore/ResultStore 已带 preflight）
@@ -144,8 +144,8 @@ def test_begin_writes_all_pending_initial_state():
 def test_aborted_job_preserves_session_id_through_realtime_write():
     # 用真 LocalRunStore（非 fake）验真覆盖语义：RUNNING 阶段刷了血缘，aborted 终态刷不应清掉它。
     import tempfile
-    from core.adapters.run_store.local import LocalRunStore
-    from core.adapters.result_store.local import LocalResultStore
+    from gherkai_core.adapters.run_store.local import LocalRunStore
+    from gherkai_core.adapters.result_store.local import LocalResultStore
 
     with tempfile.TemporaryDirectory() as d:
         run_store = LocalRunStore(d)
@@ -167,8 +167,8 @@ def test_aborted_with_none_session_does_not_resurrect_but_documents_edge():
     # 此时 update_job_state 会用 None 整体覆盖（local 是整 item 替换）。这是「血缘从未收到」的诚实结果，
     # 非 bug（无法保留从未到达的血缘）。正常 in-flight abort（上一个测试）jr 必带 session_id，不走这条。
     import tempfile
-    from core.adapters.run_store.local import LocalRunStore
-    from core.adapters.result_store.local import LocalResultStore
+    from gherkai_core.adapters.run_store.local import LocalRunStore
+    from gherkai_core.adapters.result_store.local import LocalResultStore
 
     with tempfile.TemporaryDirectory() as d:
         run_store = LocalRunStore(d)
@@ -186,8 +186,8 @@ def test_running_phase_has_no_data_plane_file_until_complete(tmp_path):
     只有 job 完成（on_job_complete）出了判定，jobs/<scope>.json 才落。
     数据面 = 判定真值，RUNNING 的 job 还没判定，故意不写半截——「jobs/ 里出现文件 = 判定已就绪」。"""
     from urllib.parse import quote
-    from core.adapters.run_store.local import LocalRunStore
-    from core.adapters.result_store.local import LocalResultStore
+    from gherkai_core.adapters.run_store.local import LocalRunStore
+    from gherkai_core.adapters.result_store.local import LocalResultStore
 
     run_store = LocalRunStore(tmp_path)
     result_store = LocalResultStore(tmp_path)

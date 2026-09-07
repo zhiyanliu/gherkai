@@ -1,13 +1,13 @@
-"""资源命名（ADR 0033 两层命名）——共享部分**直接 import 产品本体 `gherkai.names`（真同源）**。
+"""资源命名（ADR 0033 两层命名）——共享部分**直接 import 产品本体 `gherkai_runtime.names`（真同源）**。
 
 曾因「CDK 独立工程、不能 import cli」在此复刻命名函数（双写、靠对拍测试防漂移）；组合根共享层抽为
-平级 `gherkai/` 包后（ADR 0016「演进」节），命名纯函数移入零依赖的 `gherkai.names`，本文件退成
+平级 `gherkai/` 包后（ADR 0016「演进」节），命名纯函数移入零依赖的 `gherkai_runtime.names`，本文件退成
 「re-export + IaC 特有常量」的薄壳——复刻消除，护栏测试转为结构性保证。
 """
 from __future__ import annotations
 
 # 共享命名真源（re-export 保 stack.py/tests 既有引用不动）
-from gherkai.names import (  # noqa: F401
+from gherkai_runtime.names import (  # noqa: F401
     BASE_CLUSTER,
     BASE_BUCKET,
     BASE_EVENTS_TABLE,
@@ -24,7 +24,7 @@ from gherkai.names import (  # noqa: F401
     task_def_name,
 )
 
-# ---- IaC 特有（不进 gherkai.names：只有 IAM 收窄用，cli/Lambda 不消费）----
+# ---- IaC 特有（不进 gherkai_runtime.names：只有 IAM 收窄用，cli/Lambda 不消费）----
 
 # IAM 资源 ARN 收窄用的稳定段（ADR 0033 IAM 表）：
 # QWEN_MODEL_ID 是**模型标识（部署期稳定、非运行期概念）**，故可安全 pin 进 IAM——**须与
@@ -36,10 +36,10 @@ QWEN_MODEL_ID = "qwen.qwen3-vl-235b-a22b"
 
 
 def ssm_subnets_path(prefix: str) -> str:
-    """subnet ID 列表的 SSM 路径（= gherkai.names.ssm_path(prefix, "subnets") 的便捷形式）。"""
+    """subnet ID 列表的 SSM 路径（= gherkai_runtime.names.ssm_path(prefix, "subnets") 的便捷形式）。"""
     return ssm_path(prefix, "subnets")
 
 
 def ssm_security_groups_path(prefix: str) -> str:
-    """sg ID 列表的 SSM 路径（= gherkai.names.ssm_path(prefix, "security-groups") 的便捷形式）。"""
+    """sg ID 列表的 SSM 路径（= gherkai_runtime.names.ssm_path(prefix, "security-groups") 的便捷形式）。"""
     return ssm_path(prefix, "security-groups")

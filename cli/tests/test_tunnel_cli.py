@@ -9,9 +9,9 @@ import json
 import subprocess
 from pathlib import Path
 
-import cli.__main__ as m
-from core.model import JobResult, RunResult, Status
-from gherkai import tunnel as gtunnel
+import gherkai_cli.__main__ as m
+from gherkai_core.model import JobResult, RunResult, Status
+from gherkai_runtime import tunnel as gtunnel
 
 INFO = gtunnel.TunnelInfo(url="https://t.ngrok-free.app", auth="u1:p1", pid=777,
                           local_origin="http://localhost:3000")
@@ -113,7 +113,7 @@ def test_tunnel_watch_entry_wires_argparse_to_host_and_prints(monkeypatch, capsy
 
     守护主体（轮询终态 / TTL 兜底）的逻辑归 gherkai/tests/test_tunnel_host.py；此处只锁「皮传对参数」。
     """
-    from gherkai import tunnel_host
+    from gherkai_runtime import tunnel_host
 
     seen = {}
 

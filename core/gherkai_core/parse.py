@@ -1,0 +1,174 @@
+"""parse seam（ADR 0025）：.feature 文本 → 领域模型 Scenario/Step。
+
+藏住第三方库 gherkin-official：Parser().parse() → Compiler().compile() → pickles（完全展开），
+再映射成我们自己的 model.Scenario/Step。Background/Outline/DataTable/DocString 由 Compiler 展开。
+core 其余部分只认 model.*，不见 pickle dict 形状。
+
+实测要点（ADR 0025）：
+- pickle step 不含字面 keyword，只有归一化 type（Context/Action/Outcome）→ 这里映射成 Given/When/Then。
+- pickle 不带行号，只有 astNodeIds；行号需从 AST 节点 location.line 回查（id→node 索引）。
+- argument 在 pickle 里是 {docString:{content}} / {dataTable:{rows:[{cells:[{value}]}]}}，这里重映射成 model.StepArgument。
+
+版本：core 下限 gherkin-official>=31.0.0（实装 41.x）。本模块用顶层导出 `from gherkin import Parser, Compiler`
+——该导出 ≥31.0.0 才有（<31 需走 gherkin.parser / gherkin.pickles.compiler 子模块路径），故下限锁 31。
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from gherkin import Compiler, Parser
+from gherkin.errors import CompositeParserException
+
+from gherkai_core.errors import PlanError
+from gherkai_core.model import Scenario, Step, StepArgument
+
+# 自有别名：把 gherkin 的解析异常对外暴露成 core 的 FeatureParseError，使消费层（cli）能捕获
+# 「feature 语法错」而**不直接 import gherkin**（与「gherkin pickle 形状不外泄」同理，ADR 0025）。
+# 异常实例的消息已含行:列定位，消费层直接展示即可。
+FeatureParseError = CompositeParserException
+
+
+@dataclass(frozen=True)
+class ParsedScenario:
+    """parse → scope 之间的中间结果：纯净 Scenario + 它解析出的 tags。
+
+    tags 是 scope 分组（按 @scope/@engine）的输入，属中间信息，不进最终领域模型 Scenario，
+    故在这里独立承载，scope 分组后丢弃 tags、只把 .scenario 放进 Job（保持 Scenario 纯净）。
+    """
+
+    scenario: Scenario
+    tags: tuple[str, ...]  # 已合并 feature 级 + scenario 级（gherkin Compiler 合并，ADR 0025）
+    uri: str  # 该 scenario 所属 .feature 的 uri（权威值，parse 时本就已知）——供 scope 跨文件合并 warning 分组，
+    # 免得 scope 从 scenario_id 有损反解（scenario_id 含冒号/数字端口时反解会错，见 scope.group_uris）
+
+# pickle step type → 我们的 keyword（And/But 已被 Compiler 折叠继承上一条非连接词的类型）。
+# 例外：无前驱可继承的 `*`/And/But（如 scenario 首步就是 And）Compiler 给 type='Unknown'——**判不出即
+# 拒绝猜**，由下面的 _step_keyword 抛 PlanError（ADR 0025），故本表**不设**默认值。
+_TYPE_TO_KEYWORD = {"Context": "Given", "Action": "When", "Outcome": "Then"}
+
+
+def _step_keyword(pickle_step: dict, scenario_id: str) -> str:
+    """pickle step type → 派发关键字（Given/When/Then）。type='Unknown' 一律 fail-fast。
+
+    Compiler 对 `*` 步骤与「无前驱非连接词」的首条 And/But 给 type='Unknown'（实测 gherkin 41.0）——
+    此时 Given/When/Then 语义**无从判定**，静默兜底成 Given 会把本该是断言的 step 当动作派发、断言
+    永不执行（假绿方向的静默错标）。fail-fast 让用户写明关键字（ADR 0025「keyword 只决定派发」，
+    判不出=拒绝猜）。
+    """
+    kw = _TYPE_TO_KEYWORD.get(pickle_step.get("type", ""))
+    if kw is None:
+        raise PlanError(
+            f"步骤关键字无法判定（scenario {scenario_id}、step 文本 {pickle_step.get('text', '')!r}）："
+            "`*` 或无前驱的 And/But 判不出 Given/When/Then（派发语义），请写明关键字")
+    return kw
+
+
+def _index_ast_lines(gherkin_document: dict) -> dict[str, int]:
+    """建 AST 节点 id → location.line 的索引，供 pickle 的 astNodeIds 回查行号。
+
+    遍历 feature 及 **Rule 下**（Compiler 把 Rule 场景完全展开成真实 pickle，其 astNodeIds 指向 Rule 内节点，
+    ADR 0025）的 background/scenario 及其 steps、scenario.examples 的 tableBody 行。**必须下钻 rule**——
+    否则 Rule 内 scenario 回查行号得 None → sid 塌成 `<uri>:None`、多个 Rule 场景静默撞名（ADR 0025 撞名=静默灾难）。
+    """
+    lines: dict[str, int] = {}
+
+    def record(node: dict | None) -> None:
+        if node and "id" in node and "location" in node:
+            lines[node["id"]] = node["location"]["line"]
+
+    def record_children(children: list) -> None:
+        """处理一个 children 列表（feature 顶层 / Rule 内层同构）：记 background/scenario 及其 step/examples 行。"""
+        for child in children:
+            for key in ("background", "scenario"):
+                node = child.get(key)
+                if not node:
+                    continue
+                record(node)
+                for step in node.get("steps", []):
+                    record(step)
+                # Scenario Outline 的 Examples 表行（pickle astNodeIds 末项指向它，用于区分展开后的多个 scenario）
+                for ex in node.get("examples", []):
+                    for row in ex.get("tableBody", []):
+                        record(row)
+            # 下钻 Rule：其 children 与 feature 顶层同构（Compiler 展开 Rule 场景为真实 pickle，ADR 0025）
+            rule = child.get("rule")
+            if rule:
+                record_children(rule.get("children", []))
+
+    feature = gherkin_document.get("feature")
+    if not feature:
+        return lines
+    record_children(feature.get("children", []))
+    return lines
+
+
+def _map_argument(pickle_arg: dict | None) -> StepArgument | None:
+    """pickle step 的 argument（gherkin 内部形状）→ model.StepArgument（自有形状，不透传 pickle 子 dict）。"""
+    if not pickle_arg:
+        return None
+    if "docString" in pickle_arg:
+        return StepArgument(kind="docString", content=pickle_arg["docString"]["content"])
+    if "dataTable" in pickle_arg:
+        rows = tuple(
+            tuple(cell["value"] for cell in row["cells"])
+            for row in pickle_arg["dataTable"]["rows"]
+        )
+        return StepArgument(kind="dataTable", rows=rows)
+    return None
+
+
+def _scenario_line_and_example_line(
+    ast_node_ids: list[str], ast_lines: dict[str, int]
+) -> tuple[int | None, int | None]:
+    """pickle 顶层 astNodeIds → (scenario 行号, example 行号或 None)。
+
+    普通 scenario: astNodeIds=[scenario_id] → (scenario_line, None)
+    Outline 展开:  astNodeIds=[scenario_id, example_row_id] → (scenario_line, example_line)
+    """
+    if not ast_node_ids:
+        return None, None
+    scenario_line = ast_lines.get(ast_node_ids[0])
+    example_line = ast_lines.get(ast_node_ids[1]) if len(ast_node_ids) > 1 else None
+    return scenario_line, example_line
+
+
+def parse_feature(uri: str, text: str) -> list[ParsedScenario]:
+    """解析一个 .feature 文本 → 展开后的 ParsedScenario 列表（id/行号已派生、带 tags）。
+
+    uri 既是 id 前缀，也是 Compiler 的必填燃料（缺则 KeyError）。
+    """
+    gherkin_document = Parser().parse(text)
+    gherkin_document["uri"] = uri
+    ast_lines = _index_ast_lines(gherkin_document)
+    pickles = Compiler().compile(gherkin_document)
+
+    parsed: list[ParsedScenario] = []
+    for pickle in pickles:
+        scenario_line, example_line = _scenario_line_and_example_line(
+            pickle.get("astNodeIds", []), ast_lines
+        )
+        # scenarioId：<uri>:<行号>[:<example行号>]（Outline 展开的多个靠 example 行号消歧，ADR 0025）
+        sid = f"{uri}:{scenario_line}"
+        name = pickle["name"]
+        if example_line is not None:
+            sid = f"{sid}:{example_line}"
+            # Outline 展开后若标题模板不含占位符会重名 → 追加 Examples 行标识保证可区分（ADR 0025）
+            name = f"{name} [@{example_line}]"
+
+        steps = tuple(
+            Step(
+                index=i,
+                keyword=_step_keyword(s, sid),
+                text=s["text"],
+                argument=_map_argument(s.get("argument")),
+            )
+            for i, s in enumerate(pickle["steps"])
+        )
+        parsed.append(
+            ParsedScenario(
+                scenario=Scenario(id=sid, name=name, steps=steps),
+                tags=tuple(t["name"] for t in pickle.get("tags", [])),
+                uri=uri,
+            )
+        )
+    return parsed

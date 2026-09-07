@@ -1,7 +1,7 @@
 """render（表层渲染）单测：用 fake RunResult/Event，纯字符串/dict 断言，不烧钱。"""
 from __future__ import annotations
 
-from core.model import (
+from gherkai_core.model import (
     Cost,
     Job,
     JobResult,
@@ -17,7 +17,7 @@ from core.model import (
     Votes,
 )
 
-from cli import render
+from gherkai_cli import render
 
 
 def _sample_run() -> RunResult:
@@ -72,7 +72,7 @@ def test_render_text_nests_and_shows_cost_and_duration():
 def test_render_text_shows_step_level_report_refs():
     # 回归：Nova trajectory 挂 step 级 report_refs（下沉，ADR 0027）——文本汇总必须打 step 级，
     # 否则 Nova 报告静默漏掉（曾漏打过；一个 step 可多个 trajectory）。
-    from core.model import StepResult
+    from gherkai_core.model import StepResult
     job = Job(scope_id="s", scope_name="s", engine="novaact", scenarios=())
     run = RunResult(
         run_meta=RunMeta(run_id="r", created_at="", jobs=(job,)),
@@ -95,7 +95,7 @@ def test_render_text_shows_step_level_report_refs():
 def test_render_text_annotates_shortcircuited_step():
     # 连锁失败旁注（ADR 0031 决定六）：被 scope 内短路的 step（shortcircuited=True，status=skipped）加旁注
     # "因前置 step error 被跳过"；上游 error 步本身不加。判据读 shortcircuited 布尔（不再按 status 顺序猜）。
-    from core.model import StepResult
+    from gherkai_core.model import StepResult
     job = Job(scope_id="s", scope_name="s", engine="novaact", scenarios=())
     run = RunResult(
         run_meta=RunMeta(run_id="r", created_at="", jobs=(job,)),
@@ -119,7 +119,7 @@ def test_render_text_annotates_shortcircuited_step():
 def test_render_text_no_annotation_on_plain_failed():
     # 反向护栏（ADR 0031 决定六）：普通 failed（shortcircuited=False，含"error 后的 failed"）不加旁注——
     # 判据迁到 shortcircuited 后，只有真被短路的 step 才加旁注，避免误伤正常业务失败。
-    from core.model import StepResult
+    from gherkai_core.model import StepResult
     job = Job(scope_id="s", scope_name="s", engine="novaact", scenarios=())
     run = RunResult(
         run_meta=RunMeta(run_id="r", created_at="", jobs=(job,)),
@@ -194,7 +194,7 @@ def test_format_event_omits_scope_id():
 # ---- render_run_state：status 的 RunState 人读渲染（皮的事，从 gherkai 归位到此，ADR 0016「归属清算」条）----
 
 def test_render_run_state_lists_jobs_and_session_lineage():
-    from core.model import JobState, RunState
+    from gherkai_core.model import JobState, RunState
 
     state = RunState(run_id="r1", status=Status.RUNNING, high_water_mark=3, jobs={
         "a": JobState("a", Status.PASSED, session_id="sess-1"),
@@ -208,7 +208,7 @@ def test_render_run_state_lists_jobs_and_session_lineage():
 
 
 def test_render_run_state_shows_ended_at_when_terminal():
-    from core.model import JobState, RunState
+    from gherkai_core.model import JobState, RunState
 
     state = RunState(run_id="r1", status=Status.PASSED, high_water_mark=9,
                      jobs={"a": JobState("a", Status.PASSED)}, ended_at="2026-01-01T00:00:00Z")

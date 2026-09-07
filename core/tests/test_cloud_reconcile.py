@@ -8,10 +8,10 @@ from __future__ import annotations
 
 import pytest
 
-from core.adapters.event_log import DdbEventLog
-from core.adapters.fargate_engine import EXIT_SK, events_pk
-from core.model import Job, JobState, RunMeta, RunState, Scenario, Status, Step
-from core.project import project
+from gherkai_core.adapters.event_log import DdbEventLog
+from gherkai_core.adapters.fargate_engine import EXIT_SK, events_pk
+from gherkai_core.model import Job, JobState, RunMeta, RunState, Scenario, Status, Step
+from gherkai_core.project import project
 
 
 def _job(sid: str, timeout_s: float | None = None) -> Job:
@@ -115,7 +115,7 @@ def test_ddb_multi_scope_records(events_table):
 
 def test_cloud_launcher_calls_start_scope():
     """CloudLauncher.launch → resolver 选 engine → start_scope（fire-and-forget，不轮询）。"""
-    from core.adapters.cloud_launcher import CloudLauncher
+    from gherkai_core.adapters.cloud_launcher import CloudLauncher
 
     class FakeEngine:
         def __init__(self): self.started = []
@@ -144,7 +144,7 @@ class _FakeStartEngine:
 
 def test_cloud_launcher_arms_timeout_watch():
     """job.timeout_s 非 None → launch 后 arm(run_id, scope_id, timeout_s)（ADR 0034「job timeout」节 cloud 档）。"""
-    from core.adapters.cloud_launcher import CloudLauncher
+    from gherkai_core.adapters.cloud_launcher import CloudLauncher
 
     eng, watch = _FakeStartEngine(), _RecorderWatch()
     CloudLauncher(lambda name: eng, run_id="run-1", timeout_watch=watch).launch(_job("a", timeout_s=60.0))
@@ -154,7 +154,7 @@ def test_cloud_launcher_arms_timeout_watch():
 
 def test_cloud_launcher_no_arm_without_timeout():
     """无预算（timeout_s=None）→ 不建 schedule（idle 零成本：不为不超时的 job 造任何云资源）。"""
-    from core.adapters.cloud_launcher import CloudLauncher
+    from gherkai_core.adapters.cloud_launcher import CloudLauncher
 
     eng, watch = _FakeStartEngine(), _RecorderWatch()
     CloudLauncher(lambda name: eng, run_id="run-1", timeout_watch=watch).launch(_job("a"))
@@ -164,7 +164,7 @@ def test_cloud_launcher_no_arm_without_timeout():
 def test_cloud_launcher_arms_before_start_scope():
     """武装先于起 task（ADR 0034「job timeout」节 best-effort 边界）：launch 与其失败补偿双失败时，
     先建的 schedule 到点仍收敛——顺序倒过来（先 start 后 arm）双失败会失去最后兜底。"""
-    from core.adapters.cloud_launcher import CloudLauncher
+    from gherkai_core.adapters.cloud_launcher import CloudLauncher
 
     order = []
 
@@ -183,7 +183,7 @@ def test_cloud_launcher_launch_failure_still_armed_and_raises():
     """start_scope 抛异常：arm 已先行（schedule 在，双失败兜底生效）、异常照常冒泡（tick 靠它触发
     launch 失败补偿 record_exit(255)——不许被吞）。"""
     import pytest
-    from core.adapters.cloud_launcher import CloudLauncher
+    from gherkai_core.adapters.cloud_launcher import CloudLauncher
 
     watch = _RecorderWatch()
 
@@ -198,7 +198,7 @@ def test_cloud_launcher_launch_failure_still_armed_and_raises():
 
 def test_cloud_launcher_arm_failure_does_not_block_launch():
     """武装失败 best-effort（ADR 0034「job timeout」节边界）：不抛、task 已起——降级 tick 防御扫。"""
-    from core.adapters.cloud_launcher import CloudLauncher
+    from gherkai_core.adapters.cloud_launcher import CloudLauncher
 
     eng = _FakeStartEngine()
     CloudLauncher(lambda name: eng, run_id="run-1",
@@ -210,8 +210,8 @@ def test_cloud_launcher_arm_failure_does_not_block_launch():
 
 def test_tick_with_ddb_backend(events_table, ddb_run_store):
     """reconcile.tick 用 DdbEventLog + DynamoDBRunStore + CloudLauncher（fake engine）跑通：起 job → 推进 → finalize。"""
-    from core.adapters.cloud_launcher import CloudLauncher
-    from core.reconcile import tick
+    from gherkai_core.adapters.cloud_launcher import CloudLauncher
+    from gherkai_core.reconcile import tick
 
     meta = _meta("a")
     ddb_run_store.create_run(meta, RunState(

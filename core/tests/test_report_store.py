@@ -5,8 +5,8 @@ from pathlib import Path
 from urllib.parse import urlparse
 from urllib.request import url2pathname
 
-from core.adapters.report_store.local import LocalReportStore
-from core.model import (
+from gherkai_core.adapters.report_store.local import LocalReportStore
+from gherkai_core.model import (
     Job,
     JobResult,
     ReportRef,

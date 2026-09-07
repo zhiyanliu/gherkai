@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from urllib.parse import quote
 
-from core.model import JobResult, Status
+from gherkai_core.model import JobResult, Status
 from tests.test_stores import _job_def, _sample_run
 
 
@@ -65,7 +65,7 @@ def test_load_all_stable_order(s3_result_store):
 
 def test_prefix_isolates_runs(aws):
     # 带 key 前缀时不同 run 互不串（load_all 只按本 run 的 prefix 列）
-    from core.adapters.result_store.s3 import S3ResultStore
+    from gherkai_core.adapters.result_store.s3 import S3ResultStore
     store = S3ResultStore(aws["s3"], aws["bucket"], prefix="tenantX/")
     store.save_job_result("rA", JobResult(job=_job_def("s", "s", "midscene"), status=Status.PASSED))
     store.save_job_result("rB", JobResult(job=_job_def("s", "s", "novaact"), status=Status.FAILED))

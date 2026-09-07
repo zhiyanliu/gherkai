@@ -84,7 +84,7 @@ def aws(_fake_aws_creds):
 @pytest.fixture
 def ddb_run_store(aws):
     """配好的 DynamoDBRunStore（注入 aws fixture 建好的表），供 RunStore 对拍测试。"""
-    from core.adapters.run_store.ddb import DynamoDBRunStore
+    from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore
 
     return DynamoDBRunStore(aws["ddb"].Table(aws["table_name"]))
 
@@ -92,7 +92,7 @@ def ddb_run_store(aws):
 @pytest.fixture
 def s3_result_store(aws):
     """配好的 S3ResultStore（注入 aws fixture 建好的桶），供 ResultStore 对拍测试。"""
-    from core.adapters.result_store.s3 import S3ResultStore
+    from gherkai_core.adapters.result_store.s3 import S3ResultStore
 
     return S3ResultStore(aws["s3"], aws["bucket"])
 
@@ -100,7 +100,7 @@ def s3_result_store(aws):
 @pytest.fixture
 def s3_report_store(aws):
     """配好的 S3ReportStore（注入 aws fixture 建好的桶），供 ReportStore 对拍测试。"""
-    from core.adapters.report_store.s3 import S3ReportStore
+    from gherkai_core.adapters.report_store.s3 import S3ReportStore
 
     return S3ReportStore(aws["s3"], aws["bucket"])
 
@@ -108,7 +108,7 @@ def s3_report_store(aws):
 @pytest.fixture
 def arg_offloader(aws):
     """配好的 S3StepArgumentOffloader（注入 aws fixture 建好的桶），供 StepArgument offload 测试。"""
-    from core.adapters.run_store.arg_offload import S3StepArgumentOffloader
+    from gherkai_core.adapters.run_store.arg_offload import S3StepArgumentOffloader
 
     return S3StepArgumentOffloader(aws["s3"], aws["bucket"])
 
@@ -116,7 +116,7 @@ def arg_offloader(aws):
 @pytest.fixture
 def ddb_run_store_offload(aws, arg_offloader):
     """挂了 S3 offload 的 DynamoDBRunStore：RunMeta 的 docString/dataTable 搬 S3、META 只留指针。"""
-    from core.adapters.run_store.ddb import DynamoDBRunStore
+    from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore
 
     return DynamoDBRunStore(aws["ddb"].Table(aws["table_name"]), arg_offloader=arg_offloader)
 

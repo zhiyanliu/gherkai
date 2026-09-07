@@ -1,11 +1,11 @@
-"""core.project 纯投影测试（ADR 0034）：project(records)→RunState 的「两件都要」谓词 + HWM + plan_next。
+"""gherkai_core.project 纯投影测试（ADR 0034）：project(records)→RunState 的「两件都要」谓词 + HWM + plan_next。
 
 纯逻辑、无 I/O、无 mock 外真实行为 → 绿即够（CLAUDE.md「绿≠对·别过度」：mock 内逻辑结论绿即足）。
 reconciler 的执行编排（Stream 触发/CAS 真写/进程脱离）不在此测——那是 P2/P3/P4 的真跑边界。
 """
 from __future__ import annotations
 
-from core.model import (
+from gherkai_core.model import (
     Job,
     RunMeta,
     Scenario,
@@ -15,7 +15,7 @@ from core.model import (
     Status,
     Step,
 )
-from core.project import Action, EventRecord, TaskExited, plan_next, project
+from gherkai_core.project import Action, EventRecord, TaskExited, plan_next, project
 
 
 def _job(scope_id: str, engine: str = "novaact") -> Job:
@@ -140,7 +140,7 @@ def test_timed_out_exit_is_error_regardless_of_exit_code_shape():
 def test_timed_out_attribution_error_type_timeout():
     """归因 error_type="timeout"（对齐同步路径，[0031] 决定一）——即使内容完整（scope_done 都到了）
     也以超时为根因、覆盖 reduce 期归因。"""
-    from core.project import project_full
+    from gherkai_core.project import project_full
 
     recs = _passed_events("a") + [_timeout_exit("a", 137)]
     result = project_full(_meta("a"), recs)
@@ -153,7 +153,7 @@ def test_timed_out_attribution_error_type_timeout():
 def test_error_without_reduce_message_gets_default_attribution():
     """worker 起来即崩（非 0 退出、零事件）→ message 不再全空——补默认归因指向 worker 日志
     （detached 真跑教训：error 无任何线索、只能手工复刻排障）。"""
-    from core.project import project_full
+    from gherkai_core.project import project_full
 
     recs = [_exit("a", 1)]  # 零事件 + exit 1
     jr = project_full(_meta("a"), recs).jobs[0]
@@ -163,7 +163,7 @@ def test_error_without_reduce_message_gets_default_attribution():
 
 def test_error_clean_exit_incomplete_content_gets_attribution():
     """exit 0 但无 scope_done（矛盾形态）→ 同样有归因文本（不留空白 error）。"""
-    from core.project import project_full
+    from gherkai_core.project import project_full
 
     recs = [_ev("a", 1, ScopeStarted(scope_id="a", session_id="s")), _exit("a", 0)]
     jr = project_full(_meta("a"), recs).jobs[0]
@@ -200,8 +200,8 @@ def test_out_of_order_records_reduced_by_seq():
 
 def test_projected_run_status_pending_only_while_all_jobs_pending():
     """全 job pending → pending（run 还没起过任何 job）；任一 job 推进 → running；恒非终态（终态归 finalize）。"""
-    from core.model import JobState
-    from core.project import projected_run_status
+    from gherkai_core.model import JobState
+    from gherkai_core.project import projected_run_status
 
     def _jobs(*statuses):
         return {f"s{i}": JobState(f"s{i}", st) for i, st in enumerate(statuses)}
@@ -216,7 +216,7 @@ def test_projected_run_status_pending_only_while_all_jobs_pending():
 def test_projected_run_status_ignores_aggregate_value_from_project():
     """判据只看 job 态：project() 的 run 级 status 是终态聚合值（零事件的全 pending run 也吐 PASSED），
     喂它的 jobs 仍得 pending——守「投影写不能沿用传入的 run 级值」。"""
-    from core.project import projected_run_status
+    from gherkai_core.project import projected_run_status
 
     state = project(_meta("a", "b"), [])
     assert state.status == Status.PASSED  # 前提：聚合值是终态
@@ -276,7 +276,7 @@ def test_clean_exit_without_any_event_is_error():
 
 def test_clean_exit_without_events_converges_with_claimed_baseline():
     """同上,带「已 claim RUNNING」基线也必须收敛到 ERROR(终态 rank > running,单调合并不回退)。"""
-    from core.model import JobState, RunState
+    from gherkai_core.model import JobState, RunState
 
     meta = _meta("a")
     baseline = RunState(run_id="run-1", status=Status.RUNNING,

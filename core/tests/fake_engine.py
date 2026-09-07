@@ -8,8 +8,8 @@ from __future__ import annotations
 import threading
 from typing import Callable, Iterator
 
-from core.errors import WorkerNetworkError
-from core.model import Event, Job
+from gherkai_core.errors import WorkerNetworkError
+from gherkai_core.model import Event, Job
 
 
 class FakeWorkerHandle:

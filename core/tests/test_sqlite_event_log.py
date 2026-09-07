@@ -5,9 +5,9 @@
 """
 from __future__ import annotations
 
-from core.adapters.event_log import SqliteEventLog
-from core.model import Job, RunMeta, Scenario, Status, Step
-from core.project import project
+from gherkai_core.adapters.event_log import SqliteEventLog
+from gherkai_core.model import Job, RunMeta, Scenario, Status, Step
+from gherkai_core.project import project
 
 
 def _log(tmp_path) -> SqliteEventLog:

@@ -15,9 +15,9 @@ import json
 import boto3
 import pytest
 
-from core.adapters.fargate_engine import EXIT_SK, FargateEngine, FargateWorkerHandle, events_pk
-from core.errors import WorkerNetworkError
-from core.model import Job, Scenario, Step, ScopeStarted, StepDone, ScopeDone, Status
+from gherkai_core.adapters.fargate_engine import EXIT_SK, FargateEngine, FargateWorkerHandle, events_pk
+from gherkai_core.errors import WorkerNetworkError
+from gherkai_core.model import Job, Scenario, Step, ScopeStarted, StepDone, ScopeDone, Status
 
 
 _RUN_ID = "20260707T120000Z-abc123"
@@ -352,7 +352,7 @@ def test_read_events_stopped_without_scope_done_drains_then_raises(fargate):
 # engine_error。触发窗口是真竞态：观察者 PutItem 可抢在 adapter 最后一次 Query 之前。
 def _put_exit_item(fargate, scope_id: str, exit_code: int = 0, run_id: str = _RUN_ID) -> None:
     """预置一条退出观察者形状的 item——**用真写端 DdbEventLog.record_exit 造**（不手抄形状，写端演进本测试自动跟随）。"""
-    from core.adapters.event_log import DdbEventLog
+    from gherkai_core.adapters.event_log import DdbEventLog
     DdbEventLog(fargate["events_table"], run_id, [scope_id]).record_exit(scope_id, exit_code)
 
 
@@ -461,7 +461,7 @@ def test_read_events_scope_done_waits_for_stopped_before_reading_exit(fargate, m
     「等 STOPPED」的轮询循环零覆盖——变异把循环退化成单次读退出码仍全绿，见对抗 review）。本测试用 _delayed_stopped_ecs
     造「前 2 次 RUNNING（exitCode null）、第 3 次才 STOPPED」的真实时序，锁死轮询：把 time.sleep 打桩计数（不真睡）。"""
     sleeps = []
-    monkeypatch.setattr("core.adapters.fargate_engine.time.sleep", lambda s: sleeps.append(s))
+    monkeypatch.setattr("gherkai_core.adapters.fargate_engine.time.sleep", lambda s: sleeps.append(s))
     eng = _engine(fargate)
     _put_event(fargate["events_table"], _RUN_ID, "browse", 1, {"type": "scope_started", "scopeId": "browse"})
     _put_event(fargate["events_table"], _RUN_ID, "browse", 2, {"type": "scope_done", "scopeId": "browse"})
@@ -549,7 +549,7 @@ def test_probe_task_stopped_but_exit_code_null():
 def test_raise_for_worker_exit_maps_codes_with_fargate_label():
     """码→异常的翻译已收进 `wire`（协议级、与 subprocess adapter 共用一份）：这里锁本 adapter 的调法
     （`code_label="exitCode"` → 诊断行说 ECS 的话）。翻译语义本身的对拍在 test_wire.py。"""
-    from core.wire import raise_for_worker_exit
+    from gherkai_core.wire import raise_for_worker_exit
 
     raise_for_worker_exit(0, code_label="exitCode")  # 正常，不抛
     with pytest.raises(WorkerNetworkError):

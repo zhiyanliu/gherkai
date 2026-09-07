@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 
-from core.model import (
+from gherkai_core.model import (
     Job,
     Scenario,
     ScenarioDone,
@@ -15,7 +15,7 @@ from core.model import (
     StepDone,
     StepSkipped,
 )
-from core.wire import event_from_json, event_from_line, job_to_json
+from gherkai_core.wire import event_from_json, event_from_line, job_to_json
 
 
 # ---- Job 序列化：形状符合 ADR 0024 输入示例 ----
@@ -187,7 +187,7 @@ def test_unknown_event_type_raises():
 # 常量与翻译在 wire 一处、两个 Engine adapter 共用（曾各抄一份、靠「两处必须同值」的注释维持）：本组守那份单一事实源。
 def test_ex_worker_network_value_is_protocol_pinned():
     """80 是跨语言约定值（两个引擎 worker 各自硬编码）——改这个数即改协议，须同步两 worker。"""
-    from core.wire import EX_WORKER_NETWORK
+    from gherkai_core.wire import EX_WORKER_NETWORK
     assert EX_WORKER_NETWORK == 80
 
 
@@ -198,8 +198,8 @@ def test_raise_for_worker_exit_maps_codes():
     """
     import pytest
 
-    from core.errors import WorkerNetworkError
-    from core.wire import raise_for_worker_exit
+    from gherkai_core.errors import WorkerNetworkError
+    from gherkai_core.wire import raise_for_worker_exit
 
     raise_for_worker_exit(0, code_label="returncode")   # 正常退出
     raise_for_worker_exit(-9, code_label="returncode")  # SIGKILL 强杀
@@ -211,8 +211,8 @@ def test_raise_for_worker_exit_label_names_the_transport_field():
     """两个 adapter 共用同一翻译、只换 code_label：消息说各自传输的字段名（子进程 returncode / ECS exitCode）。"""
     import pytest
 
-    from core.errors import WorkerNetworkError
-    from core.wire import raise_for_worker_exit
+    from gherkai_core.errors import WorkerNetworkError
+    from gherkai_core.wire import raise_for_worker_exit
 
     with pytest.raises(RuntimeError, match=r"returncode=1\b") as sub:
         raise_for_worker_exit(1, code_label="returncode")

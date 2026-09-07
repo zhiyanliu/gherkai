@@ -5,7 +5,7 @@ import logging
 
 import pytest
 
-from core.scope import FeatureSource, PlanConfig, PlanError, plan
+from gherkai_core.scope import FeatureSource, PlanConfig, PlanError, plan
 
 CFG = PlanConfig(default_engine="midscene")
 
@@ -140,7 +140,7 @@ def test_out_of_order_steps_preserved():
 def test_cross_file_scope_merge_warns(caplog):
     fa = FeatureSource("a.feature", "Feature: A\n  @scope:shared\n  Scenario: a1\n    When \"x\"\n")
     fb = FeatureSource("b.feature", "Feature: B\n  @scope:shared\n  Scenario: b1\n    When \"y\"\n")
-    with caplog.at_level(logging.WARNING, logger="core.scope"):
+    with caplog.at_level(logging.WARNING, logger="gherkai_core.scope"):
         jobs = plan([fa, fb], CFG)
     assert len(jobs) == 1  # 合并成一个 scope
     assert jobs[0].scope_id == "shared"
@@ -336,8 +336,8 @@ def test_assertion_votes_from_config_propagates_to_all_jobs():
 def test_star_step_keyword_fails_fast():
     """`*` 步骤 type='Unknown'（gherkin 实测）→ PlanError,不静默兜底成 Given（假绿方向的错标）。"""
     import pytest
-    from core.errors import PlanError
-    from core.parse import parse_feature
+    from gherkai_core.errors import PlanError
+    from gherkai_core.parse import parse_feature
 
     with pytest.raises(PlanError, match="关键字无法判定"):
         parse_feature("x.feature", "Feature: t\n  Scenario: s\n    * 页面显示 OpenAI 词条\n")
@@ -346,8 +346,8 @@ def test_star_step_keyword_fails_fast():
 def test_leading_and_keyword_fails_fast():
     """无前驱非连接词的首条 And 同判不出 → PlanError;有前驱的 And 正常继承不受影响。"""
     import pytest
-    from core.errors import PlanError
-    from core.parse import parse_feature
+    from gherkai_core.errors import PlanError
+    from gherkai_core.parse import parse_feature
 
     with pytest.raises(PlanError, match="关键字无法判定"):
         parse_feature("y.feature", "Feature: t\n  Scenario: s\n    And 先看一眼\n")

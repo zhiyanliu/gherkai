@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import threading
 
-from core.model import (
+from gherkai_core.model import (
     TERMINAL_STATUSES,
     ScenarioStarted,
     ScopeStarted,
@@ -17,9 +17,9 @@ from core.model import (
     _STATUS_SEVERITY,
     severity,
 )
-from core.model import Job, JobResult
-from core.schedule import ScheduleOpts, _aggregate, schedule
-from core.serialize import job_result_from_dict, job_result_to_dict
+from gherkai_core.model import Job, JobResult
+from gherkai_core.schedule import ScheduleOpts, _aggregate, schedule
+from gherkai_core.serialize import job_result_from_dict, job_result_to_dict
 from tests.fake_engine import CollectSink, FakeEngine, FakeResolver, FakeWorkerHandle
 from tests.test_schedule import _IncClock, _job, _passing_events, _rm
 
@@ -223,7 +223,7 @@ def test_aggregate_running_does_not_pollute_clean_pass():
 # schedule.py 的 except WorkerNetworkError 块有三子分支：abort_flag→ABORTED / 超时→error+timeout / else→network_error。
 # 这是 ADR 用整段文字警告的坑（self_stopped 被 timeout/fail-fast 共用、要看 abort_flag）。现有 network 测试只命中
 # else 分支，timeout 测试命中的是事件循环里的 deadline 而非 network 块里的重判——故专门复现这两条竞态子分支。
-from core.errors import WorkerNetworkError  # noqa: E402
+from gherkai_core.errors import WorkerNetworkError  # noqa: E402
 
 
 class _NetRaiseEngine:

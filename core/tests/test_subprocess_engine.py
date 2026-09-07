@@ -9,9 +9,9 @@ import sys
 import time
 from pathlib import Path
 
-from core.adapters.subprocess_engine import SubprocessEngine
-from core.model import Job, RunMeta, Scenario, ScopeDone, ScopeStarted, Status, Step
-from core.schedule import schedule, ScheduleOpts
+from gherkai_core.adapters.subprocess_engine import SubprocessEngine
+from gherkai_core.model import Job, RunMeta, Scenario, ScopeDone, ScopeStarted, Status, Step
+from gherkai_core.schedule import schedule, ScheduleOpts
 from tests.fake_engine import CollectSink
 
 _WORKER = str(Path(__file__).parent / "fixtures" / "echo_worker.py")
@@ -79,7 +79,7 @@ def test_adapter_crash_is_error():
 # ---- worker 以 EX_WORKER_NETWORK(80) 退出 → adapter 翻 WorkerNetworkError → schedule 记 network_error ----
 # 这是退出码→分类链路唯一的真跨进程 seam（ADR 0028），FakeEngine 直接 raise 绕不过它，必须真 spawn。
 def test_adapter_network_exit_maps_to_network_error():
-    from core.errors import WorkerNetworkError
+    from gherkai_core.errors import WorkerNetworkError
     engine = _engine("net")
     # 直接用 adapter：消费事件流应抛 WorkerNetworkError（returncode 80 翻译）
     handle, events = engine.run_scope(_job("s"))
@@ -92,7 +92,7 @@ def test_adapter_network_exit_maps_to_network_error():
 
 
 def test_adapter_network_error_with_schedule_classified_and_retried():
-    from core.schedule import ScheduleOpts
+    from gherkai_core.schedule import ScheduleOpts
     engine = _engine("net")
     # 经 schedule：记 network_error；开 network_retry=1 → 真重新 spawn worker（净跨进程验证）
     result = schedule(_rm([_job("s")]), lambda name: engine, CollectSink(),

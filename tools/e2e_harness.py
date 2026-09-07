@@ -42,8 +42,8 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "core"))
 
-from core.scope import plan, PlanConfig, FeatureSource  # noqa: E402
-from core.wire import job_to_line  # noqa: E402
+from gherkai_core.scope import plan, PlanConfig, FeatureSource  # noqa: E402
+from gherkai_core.wire import job_to_line  # noqa: E402
 
 BUCKET = os.environ.get("HARNESS_S3_BUCKET")  # 可写桶，经 env 传（勿硬编码账号相关值）
 _TMP = Path(os.environ.get("CLAUDE_JOB_DIR", "/tmp")) / "harness-runs"
@@ -195,7 +195,7 @@ def run(engine: str, feature: str, votes: int, interrupt: str, run_id: str, grac
             # scenario2 运行中。验证：S3 应已有 scenario1 期间的 log（对照单 scenario scope_end 中断 S3 log=0）。
             # 需 jobs[0] 有 >1 scenario——即**多 scenario 归一个 @scope 的 feature**（如 concurrency_and_scope
             # 的 @scope:browse）；无 @scope tag 的 scenario 各自独立成单 scenario scope（ADR 0025）、jobs[0]=1、
-            # 此时机不触发（跑成 baseline、无效样本）。选 feature 前用 core.scope.plan 确认 jobs[0] 的 scenario 数。
+            # 此时机不触发（跑成 baseline、无效样本）。选 feature 前用 gherkai_core.scope.plan 确认 jobs[0] 的 scenario 数。
             if interrupt == "scenario" and scen_done == 1 and n_scen > 1:
                 threading.Timer(3.0, lambda: do_kill("after_scenario1")).start()
             if interrupt == "scope_end" and scen_done == n_scen:

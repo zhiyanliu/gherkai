@@ -33,8 +33,8 @@ import argparse
 import subprocess
 import sys
 
-ENGINES = ("novaact", "midscene")  # 引擎规范名（真源 gherkai.names.ENGINES 的内联副本，见 docstring）
-DEFAULT_PREFIX = "gherkai-"        # 真源 gherkai.names.DEFAULT_PREFIX 的内联副本
+ENGINES = ("novaact", "midscene")  # 引擎规范名（真源 gherkai_runtime.names.ENGINES 的内联副本，见 docstring）
+DEFAULT_PREFIX = "gherkai-"        # 真源 gherkai_runtime.names.DEFAULT_PREFIX 的内联副本
 DEFAULT_REGION = "us-east-1"
 PLATFORM = "linux/amd64"           # 硬编码：Fargate X86_64，绝不可省（见模块 docstring 陷阱）
 
@@ -44,7 +44,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _repo_name(prefix: str, engine: str) -> str:
-    """ECR repo 名 = {prefix}{engine}-worker（对齐 gherkai.names.task_def_name，见 docstring）。"""
+    """ECR repo 名 = {prefix}{engine}-worker（对齐 gherkai_runtime.names.task_def_name，见 docstring）。"""
     return f"{prefix}{engine}-worker"
 
 

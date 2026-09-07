@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 from urllib.parse import urlparse
 
-from core.model import ScenarioResult, Status, StepResult
+from gherkai_core.model import ScenarioResult, Status, StepResult
 from tests.test_report_store import _jr, _rr, _run_with_refs
 
 
@@ -128,7 +128,7 @@ def test_empty_report_refs_still_valid_index(s3_report_store, aws):
 
 # ---- key 前缀隔离（S3 专属：多租户/多环境前缀不串）----
 def test_prefix_lands_under_prefix(aws, tmp_path):
-    from core.adapters.report_store.s3 import S3ReportStore
+    from gherkai_core.adapters.report_store.s3 import S3ReportStore
     store = S3ReportStore(aws["s3"], aws["bucket"], prefix="tenantX/")
     run = _run_with_refs(tmp_path)
     idx = store.write(run.run_id, run, created_at="x")

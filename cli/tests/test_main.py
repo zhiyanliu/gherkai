@@ -7,16 +7,16 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from core.model import JobResult, RunResult, Status
+from gherkai_core.model import JobResult, RunResult, Status
 
-from cli import __main__ as m
-from gherkai import compose
+from gherkai_cli import __main__ as m
+from gherkai_runtime import compose
 
 
 def _fake_schedule_factory():
     """造一个不起 worker 的假 schedule：发事件给 sink（进度）+ on_event（persistence 刷 RUNNING）+ 每 job
     fire on_job_complete（验证实时落库路径）+ 把 run_meta 合成 RunResult。"""
-    from core.model import ScopeStarted
+    from gherkai_core.model import ScopeStarted
 
     def fake_schedule(run_meta, engines, sink, opts=None, on_job_complete=None, on_event=None):
         results = []
@@ -408,8 +408,8 @@ def test_no_report_skips_persistence_entirely(tmp_path, monkeypatch, capsys):
 def test_run_state_shows_running_then_final(tmp_path, monkeypatch, capsys):
     # 实时写真效果（用真 LocalRunStore）：ScopeStarted 刷 RUNNING + 血缘随首事件落。
     # fake schedule 先发 ScopeStarted（带 session_id）→ persistence 刷 RUNNING；再 on_job_complete 刷终态。
-    from core.model import ScopeStarted
-    from core.adapters.run_store.local import LocalRunStore
+    from gherkai_core.model import ScopeStarted
+    from gherkai_core.adapters.run_store.local import LocalRunStore
 
     def fake_schedule(run_meta, engines, sink, opts=None, on_job_complete=None, on_event=None):
         results = []
@@ -478,7 +478,7 @@ def test_run_no_report_passes_no_artifact_dirs(tmp_path, monkeypatch, capsys):
 
 # ---- _render_status：local/cloud 共享的渲染+提示+退出码（ADR 0034，两路一致）----
 def _mk_state(status):
-    from core.model import RunState, JobState
+    from gherkai_core.model import RunState, JobState
     return RunState(run_id="r", status=status,
                     jobs={"a": JobState("a", status)}, high_water_mark=0)
 
@@ -514,15 +514,15 @@ def test_render_status_terminal_no_hint_and_exitcode(capsys):
 
 
 def test_terminal_status_consumers_use_core_single_source():
-    """终态真源不漂移（ADR 0031 决定一·补末条）：三处消费方全引 `core.model.TERMINAL_STATUSES`、不各写白名单。
+    """终态真源不漂移（ADR 0031 决定一·补末条）：三处消费方全引 `gherkai_core.model.TERMINAL_STATUSES`、不各写白名单。
 
     跨 core/cli/gherkai 三栈的结构性护栏（cli 是唯一同时看得见三者的层）——曾有两份逐字副本，
     新增终态漏改哪份、那份就永远判不到终态（`status --wait` 无限轮询 / 隧道守护只能等满 TTL 才拆）。
     """
     from pathlib import Path
 
-    from core.model import TERMINAL_STATUSES
-    from gherkai import tunnel_host
+    from gherkai_core.model import TERMINAL_STATUSES
+    from gherkai_runtime import tunnel_host
 
     assert m.TERMINAL_STATUSES is TERMINAL_STATUSES
     assert tunnel_host.TERMINAL_STATUSES is TERMINAL_STATUSES

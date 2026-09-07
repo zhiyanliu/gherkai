@@ -15,7 +15,7 @@ import itertools
 
 import pytest
 
-from core.model import JobState, RunMeta, RunState, Status
+from gherkai_core.model import JobState, RunMeta, RunState, Status
 from tests.test_stores import _sample_run
 
 pytestmark = pytest.mark.integration  # 本文件全部用例 = 集成测试（默认 deselect）
@@ -30,17 +30,17 @@ def _uniq(prefix: str) -> str:
 
 
 def _ddb_store(real_aws, offloader=None):
-    from core.adapters.run_store.ddb import DynamoDBRunStore
+    from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore
     return DynamoDBRunStore(real_aws["ddb"].Table(real_aws["table_name"]), arg_offloader=offloader)
 
 
 def _s3_result_store(real_aws):
-    from core.adapters.result_store.s3 import S3ResultStore
+    from gherkai_core.adapters.result_store.s3 import S3ResultStore
     return S3ResultStore(real_aws["s3"], real_aws["bucket"])
 
 
 def _offloader(real_aws):
-    from core.adapters.run_store.arg_offload import S3StepArgumentOffloader
+    from gherkai_core.adapters.run_store.arg_offload import S3StepArgumentOffloader
     return S3StepArgumentOffloader(real_aws["s3"], real_aws["bucket"])
 
 
@@ -135,7 +135,7 @@ def test_s3_result_store_round_trip_real(real_aws):
 # ---- StepArgument offload：真 S3 指针往返 ----
 def test_offload_round_trip_real(real_aws):
     """真 S3：DdbRunStore 挂 offloader，docString/dataTable 搬真 S3、META 只留指针、读回逐字节还原。"""
-    from core.model import Job, Scenario, Step, StepArgument
+    from gherkai_core.model import Job, Scenario, Step, StepArgument
 
     store = _ddb_store(real_aws, offloader=_offloader(real_aws))
     rid = _uniq("offload")
@@ -203,7 +203,7 @@ def test_offload_unblocks_oversized_docstring_real(real_aws):
     与「解限」这对因果（真 DDB 逐字节精确计量 + 中文 UTF-8 多字节，moto 近似阈值不对齐）。
     """
     from botocore.exceptions import ClientError
-    from core.model import Job, Scenario, Step, StepArgument
+    from gherkai_core.model import Job, Scenario, Step, StepArgument
 
     huge = "x" * (500 * 1024)  # 远超 400KB（规避 moto 近似阈值歧义，非贴边）
     job = Job(scope_id="s", scope_name="s", engine="midscene", scenarios=(

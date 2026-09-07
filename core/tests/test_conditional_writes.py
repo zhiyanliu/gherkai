@@ -12,11 +12,11 @@ from __future__ import annotations
 
 import pytest
 
-from core.model import JobState, RunMeta, RunState, Status
+from gherkai_core.model import JobState, RunMeta, RunState, Status
 
 
 def _meta(run_id: str = "run-1", *scope_ids: str) -> RunMeta:
-    from core.model import Job, Scenario, Step
+    from gherkai_core.model import Job, Scenario, Step
     ids = scope_ids or ("a", "b")
     jobs = tuple(
         Job(scope_id=s, scope_name=s, engine="novaact",
@@ -38,9 +38,9 @@ def _initial(meta: RunMeta, hwm: int | None = None) -> RunState:
 def run_store(request, tmp_path, aws):
     """两个 adapter 各来一遍（对拍）。local 用 tmp_path；ddb 用 moto aws fixture。"""
     if request.param == "local":
-        from core.adapters.run_store.local import LocalRunStore
+        from gherkai_core.adapters.run_store.local import LocalRunStore
         return LocalRunStore(tmp_path)
-    from core.adapters.run_store.ddb import DynamoDBRunStore
+    from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore
     return DynamoDBRunStore(aws["ddb"].Table(aws["table_name"]))
 
 
@@ -85,8 +85,8 @@ def test_claim_writes_claimed_at(run_store):
 def test_projection_preserves_claimed_at(run_store):
     """投影的整 job 覆盖不抹 claimed_at：claimed_at 只由 claim 落库、事件推演不出——真实 tick 流里
     project() 经 baseline 带回（ADR 0034「job timeout」节），两 adapter 对拍。"""
-    from core.model import ScopeStarted
-    from core.project import EventRecord, project
+    from gherkai_core.model import ScopeStarted
+    from gherkai_core.project import EventRecord, project
 
     meta = _meta()
     run_store.create_run(meta, _initial(meta, hwm=0))
@@ -190,7 +190,7 @@ def test_projection_keeps_pending_while_no_job_started(run_store):
     status 是终态聚合值——连「全 job 还 pending」的 run 它也吐 PASSED——投影写必须整个钳掉它；且此刻
     落库该是 **pending**（还没起过任何 job，status 如实反映「未启动」，ADR 0034 机制三）。
     """
-    from core.project import project
+    from gherkai_core.project import project
 
     meta = _meta()
     run_store.create_run(meta, _initial(meta, hwm=0))
@@ -205,8 +205,8 @@ def test_projection_keeps_pending_while_no_job_started(run_store):
 
 def test_projection_lands_running_once_any_job_advanced(run_store):
     """钳制的 running 半边：任一 job 已推进（running / 终态）→ run 级落 running、不再 pending。"""
-    from core.model import ScopeStarted
-    from core.project import EventRecord, project
+    from gherkai_core.model import ScopeStarted
+    from gherkai_core.project import EventRecord, project
 
     meta = _meta()
     run_store.create_run(meta, _initial(meta, hwm=0))

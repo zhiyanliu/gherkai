@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """events 表单 act 墙钟分析（Fargate grace 校准数据前置，ADR 0032 / 0024「DynamoDB 作 events-out」）。
 
-**为何存在**：Nova grace 下限 = `NOVA_ACT_TIMEOUT_S` + `NOVA_GRACE_MARGIN_S`（见 gherkai/gherkai/compose.py），
+**为何存在**：Nova grace 下限 = `NOVA_ACT_TIMEOUT_S` + `NOVA_GRACE_MARGIN_S`（见 runtime/gherkai_runtime/compose.py），
 margin 的取值需实测「单 act 正常墙钟」与「act 中途中断退出耗时」来标定（是否过保守）。答它需要**单 act 墙钟分布**的实测——而
 events 表的每条 item 恰好带 `expires_at`（worker emit 时写 `int(time.time())+7d`，见 engines/*/lib/event_sink），
 减去 7d TTL 常量即还原 **worker emit 的 epoch 秒**（1s 分辨率、跨机一致、不受 core 侧 0.5s 轮询 + DDB 最终
@@ -33,7 +33,7 @@ import sys
 
 # events 表 TTL 常量：emit_epoch = expires_at - 此值。须与**两端 worker**（写端）TTL 常量一致（各引擎符号名不同）：
 # Nova = engines/novaact/lib/event_sink.py 的 `_EVENTS_TTL_S`；Midscene = engines/midscene/lib/event-sink.mts 的
-# `EVENTS_TTL_S`（无前导下划线）。另一个读端同样反解：core/core/adapters/event_log/ddb.py 的 `_EVENTS_TTL_S`
+# `EVENTS_TTL_S`（无前导下划线）。另一个读端同样反解：core/gherkai_core/adapters/event_log/ddb.py 的 `_EVENTS_TTL_S`
 # （`_emit_ts`）。四端各自硬编码 7d、语义契约对齐（ADR 0033/0024）；此处复刻、改动须同步全部解码方。
 _EVENTS_TTL_S = 7 * 24 * 60 * 60
 
@@ -119,7 +119,7 @@ def _acts_from_scope(pk: str, items: list[dict]) -> list[dict]:
             wall = None if (start_emit is None or emit is None) else (emit - start_emit)
             # step_done 的 cost.time_worked_s（Nova SDK 原生量，对照墙钟——含 SDK 内部时间 vs 端到端墙钟差）
             cost = ev.get("cost") or {}
-            # votes.total（AI 断言投票次数；step_done 的 votes 字段，见 core/core/wire.py 与 Nova worker _run_step
+            # votes.total（AI 断言投票次数；step_done 的 votes 字段，见 core/gherkai_core/wire.py 与 Nova worker _run_step
             # 的投票循环）：**硬约束检测**——votes>1 时 worker 把 N 次 act 合进一对 step_started/step_done
             # （emit 在 N 票循环之后），此时 wall 是 N 个 act 之和、**不是单 act**。
             # 单 act 墙钟标定要求 --assertion-votes 1；votes 缺省(动作 step 无投票)或 =1 才是干净单 act。打 multi_act
@@ -225,7 +225,7 @@ def _print_human(result: dict) -> None:
         print(f"\n=== 单 act wall_s 分布（n={s['n_acts']}，coarse≤1s={s['n_coarse_le_1s']}"
               f"{f'，已排除 {n_multi} 个 MULTI-ACT' if n_multi else ''}）===")
         print(f"min={s['min']}  p50={s['p50']}  p90={s['p90']}  p99={s['p99']}  max={s['max']}")
-        # 下面的 120 是本脚本自带的对照基线（缺省值副本），**真值住 gherkai/gherkai/compose.py 的 NOVA_ACT_TIMEOUT_S**
+        # 下面的 120 是本脚本自带的对照基线（缺省值副本），**真值住 runtime/gherkai_runtime/compose.py 的 NOVA_ACT_TIMEOUT_S**
         # （可经同名 env 覆盖）——用非缺省 act timeout 跑时，这里的判语只是参考，按真值重读分位数。
         print(f"对照 NOVA_ACT_TIMEOUT_S=120：p99={s['p99']}s → "
               f"{'单 act 远低于 act_timeout，grace margin 有压缩空间' if s['p99'] < 120 else '有 act 逼近/超 120，act_timeout 不宜降'}")

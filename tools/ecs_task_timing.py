@@ -2,7 +2,7 @@
 """ECS task 生命周期时间字段抓取（Fargate SIGTERM→退出耗时标定，ADR 0032 / 0024）。
 
 **为何独立成脚本、不改产品路径**：产品侧读 task 终态的两条路都**只取 lastStatus/exitCode、丢弃时间字段**（够判定
-即可）——同步态 `FargateEngine._probe_task`/`_await_exit_code`（core/core/adapters/fargate_engine.py）产
+即可）——同步态 `FargateEngine._probe_task`/`_await_exit_code`（core/gherkai_core/adapters/fargate_engine.py）产
 `TaskProbe(stopped, exit_code)` 供 `_read_events` 轮询判存活/退出；detached cloud 态由退出观察者 Lambda 从
 EventBridge 的 ECS STOPPED 事件读 `exitCode` 写 task_exited（ADR 0034 机制二，lambdas/exit_observer.py）。
 grace/stopTimeout 校准要的是 SIGTERM→退出的**真实墙钟预算**（`stoppingAt`/`executionStoppedAt`/`stoppedAt`

@@ -5,16 +5,16 @@ description = "iac_aws_backend：`--backend cloud` 需要的全部 AWS 资源 Ia
 readme = "README.md"
 requires-python = ">=3.13"
 # CDK Python：aws-cdk-lib（v2 单包，含全部 L1/L2 construct）+ constructs（Construct 基类）。
-# gherkai：命名真源（names.py 薄壳 re-export 它，消复刻，ADR 0016「演进」节/0033）。
+# gherkai-runtime：命名真源（names.py 薄壳 re-export 它，消复刻，ADR 0016「演进」节/0033）。
 # 纯合成/部署工具依赖，不与 core/cli/engines 共享 venv（各工程独立 uv venv）。
 dependencies = [
     "aws-cdk-lib>=2.150.0",
     "constructs>=10.0.0,<11.0.0",
-    "gherkai",
+    "gherkai-runtime",
 ]
 
 [tool.uv.sources]
-gherkai = { path = "../gherkai", editable = true }
+gherkai-runtime = { path = "../runtime", editable = true }
 
 [dependency-groups]
 dev = [

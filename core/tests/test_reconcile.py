@@ -9,10 +9,10 @@
 """
 from __future__ import annotations
 
-from core.adapters.event_log import SqliteEventLog
-from core.adapters.run_store.local import LocalRunStore
-from core.model import Job, JobState, RunMeta, RunState, Scenario, Status, Step
-from core.reconcile import tick
+from gherkai_core.adapters.event_log import SqliteEventLog
+from gherkai_core.adapters.run_store.local import LocalRunStore
+from gherkai_core.model import Job, JobState, RunMeta, RunState, Scenario, Status, Step
+from gherkai_core.reconcile import tick
 
 
 class FakeLauncher:

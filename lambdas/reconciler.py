@@ -1,7 +1,7 @@
 """reconciler Lambda（ADR 0034）：DDB events 表 Stream 变化 → reconcile.tick 推进一步。
 
 events 表开 Stream（NEW_IMAGE），worker PutItem 执行事件 / 退出观察者写 task_exited → Stream 触发本 handler。
-它从 Stream records 提取涉及的 run_id 集（去重），对每个 run 调 core.reconcile.tick 推进一步（读全量重放 →
+它从 Stream records 提取涉及的 run_id 集（去重），对每个 run 调 gherkai_core.reconcile.tick 推进一步（读全量重放 →
 project → 条件写 → plan_next → CAS 抢占起下一个 job / finalize）。tick 幂等 + CAS/HWM 条件写兜底——Stream 按
 分片并发触发多个本 handler 实例、叠加 status --wait 接力，全部安全（机制三/四，真 DDB 已验）。
 
@@ -52,7 +52,7 @@ class EventBridgeTimeoutWatch:
 
     schedule 名 = `names.job_timeout_schedule_prefix(prefix)` + sha1(run_id#scope_id)[:20]：确定性（重复 arm
     幂等，ConflictException 视作已武装）、合法字符集（scope_id 可含中文/路径，不能直接入名）、≤64 字符。
-    名字空间前缀走命名真源 `gherkai.names`——IaC 的 IAM 资源域同源推导（ADR 0033「两层命名」，两侧硬契约）。
+    名字空间前缀走命名真源 `gherkai_runtime.names`——IaC 的 IAM 资源域同源推导（ADR 0033「两层命名」，两侧硬契约）。
     best-effort：调用方（CloudLauncher）兜异常。
     """
 
@@ -64,7 +64,7 @@ class EventBridgeTimeoutWatch:
 
     def schedule_name(self, run_id: str, scope_id: str) -> str:
         import hashlib
-        from gherkai import names
+        from gherkai_runtime import names
 
         digest = hashlib.sha1(f"{run_id}#{scope_id}".encode("utf-8")).hexdigest()[:20]
         return f"{names.job_timeout_schedule_prefix(self._prefix)}{digest}"
@@ -100,7 +100,7 @@ def _handle_timeout(run_id: str, scope_id: str, built, ecs_client=None) -> str:
     返回处置结果串（日志/测试断言用）。
     """
     import boto3
-    from core.model import Status
+    from gherkai_core.model import Status
 
     meta, event_log, run_store, *_ = built
     state = run_store.load_run_state(run_id)
@@ -138,8 +138,8 @@ def _scan_overdue_timeouts(run_id: str, built) -> None:
     """防御性超时扫（ADR 0034「job timeout」节 claimed_at ②，Scheduler 的双保险）：任何 tick 顺带对
     RUNNING 且 now-claimed_at > timeout+余量 的 job 走同一超时处置——CreateSchedule 失败/schedule 丢失时，
     后续任何事件触发的 tick 都能补救。纯静默 job（无事件→无 tick）的主保障仍是 Scheduler 到点 invoke。"""
-    from core.model import Status
-    from gherkai import compose
+    from gherkai_core.model import Status
+    from gherkai_runtime import compose
 
     meta, event_log, run_store, *_ = built
     state = run_store.load_run_state(run_id)
@@ -169,12 +169,12 @@ def _build(run_id: str):
     Lambda 都复用、不经 cli——组合根共享层即产品本体包）。Lambda 打包带上 gherkai（不再背 argparse/render）。
     """
     import boto3
-    from core.adapters.event_log import DdbEventLog
-    from core.adapters.cloud_launcher import CloudLauncher
-    from core.adapters.run_store.ddb import DynamoDBRunStore
-    from core.adapters.result_store.s3 import S3ResultStore
-    from core.adapters.report_store.s3 import S3ReportStore
-    from gherkai import compose
+    from gherkai_core.adapters.event_log import DdbEventLog
+    from gherkai_core.adapters.cloud_launcher import CloudLauncher
+    from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore
+    from gherkai_core.adapters.result_store.s3 import S3ResultStore
+    from gherkai_core.adapters.report_store.s3 import S3ReportStore
+    from gherkai_runtime import compose
 
     region = os.environ.get("REGION") or os.environ.get("AWS_REGION")
     ddb = boto3.resource("dynamodb", region_name=region)
@@ -191,7 +191,7 @@ def _build(run_id: str):
     # 此处不注入则 load_run_meta 的 content_ref 分支被跳过、正文静默还原成 None → worker 拿空参数跑错
     # （moto 复现）。prefix 用 REPORT_DIR 与 submit 侧同源（restore 按绝对 URI 取回、实际不依赖 prefix，
     # 但写读两侧同构造零漂移）。
-    from core.adapters.run_store.arg_offload import S3StepArgumentOffloader
+    from gherkai_core.adapters.run_store.arg_offload import S3StepArgumentOffloader
 
     offloader = S3StepArgumentOffloader(s3, bucket, compose._normalize_prefix(report_dir))
     run_store = DynamoDBRunStore(runs_table, arg_offloader=offloader)
@@ -276,8 +276,8 @@ def _tick_runs(run_ids: set[str], label: str, *, prebuilt: dict | None = None) -
     有则复用、不重装——超时路径先 `_build` 做处置再落到此处 tick 同一个 run，重装一次是纯重复工作
     （每次 `_build` 造 4 个 boto3 client + 强一致读 META + 可能的 S3 offload 正文还原）。
     """
-    from core.reconcile import tick
-    from gherkai import compose  # 时钟走 compose.now_iso 单一真源（同 local/前台两宿主，格式不漂移）
+    from gherkai_core.reconcile import tick
+    from gherkai_runtime import compose  # 时钟走 compose.now_iso 单一真源（同 local/前台两宿主，格式不漂移）
 
     prebuilt = prebuilt or {}
     for run_id in run_ids:
@@ -288,7 +288,7 @@ def _tick_runs(run_ids: set[str], label: str, *, prebuilt: dict | None = None) -
         done = tick(run_id, meta, event_log, run_store, launcher, mc, now_iso=compose.now_iso())
         if done:
             # 收尾聚合走 core 唯一一份（曾在此双写、与 gherkai/detached.py 漂移风险，已合并）
-            from core.reconcile import finalize_artifacts
+            from gherkai_core.reconcile import finalize_artifacts
             finalize_artifacts(run_id, meta, event_log, rstore, pstore, compose.now_iso())
             print(f"{label}: run {run_id} done + finalized")
         else:

@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import threading
 
-from core.model import (
+from gherkai_core.model import (
     RunMeta,
     Cost,
     Job,
@@ -23,7 +23,7 @@ from core.model import (
     StepStarted,
     Votes,
 )
-from core.schedule import ScheduleOpts, schedule
+from gherkai_core.schedule import ScheduleOpts, schedule
 from tests.fake_engine import CollectSink, FakeEngine, FakeResolver
 
 
@@ -426,7 +426,7 @@ def test_step_report_refs_reduced():
 # ---- scope 内短路：StepSkipped 归约进 StepResult(SKIPPED, shortcircuited=True)（ADR 0031 决定六）----
 def test_step_skipped_reduced_to_skipped_shortcircuited():
     # worker 上游 step error 后短路后续 step，发 step_skipped；core 建 StepResult(SKIPPED, shortcircuited=True)。
-    from core.model import StepSkipped
+    from gherkai_core.model import StepSkipped
     events = [
         ScenarioStarted(scenario_id="n:0"),
         StepStarted(scenario_id="n:0", step_index=0),
@@ -452,7 +452,7 @@ def test_step_skipped_does_not_pollute_scenario_or_run_status():
     # 关键不变量（ADR 0031 决定六）：step 级 SKIPPED 绝不写 scenario_status → 不参与 scenario 归约/severity。
     # 一个 [error, skipped, skipped] 的 scenario，其 scenario/job/run 判定必须 = error（skipped 零污染），
     # 且不会被 SKIPPED 拉低（severity -1）也不会误当 passed。
-    from core.model import StepSkipped
+    from gherkai_core.model import StepSkipped
     events = [
         ScenarioStarted(scenario_id="n:0"),
         StepDone(scenario_id="n:0", step_index=0, status=Status.ERROR, error_type="network_error"),
@@ -471,7 +471,7 @@ def test_step_skipped_without_scenario_done_still_recorded():
     # 兜底：即便 scenario_done 缺席（worker 中途被停），已归约的 skipped step 也不该丢——
     # 它们暂存在 timing.steps，只在 scenario_done 才挂入 scenarios。此处验证有 scenario_done 时挂入正确。
     # （无 scenario_done 的挂入由 schedule 既有兜底逻辑覆盖，非本 ADR 引入，不重复测。）
-    from core.model import StepSkipped
+    from gherkai_core.model import StepSkipped
     events = [
         ScenarioStarted(scenario_id="n:0"),
         StepDone(scenario_id="n:0", step_index=0, status=Status.ERROR, error_type="engine_error"),

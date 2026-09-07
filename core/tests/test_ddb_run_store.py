@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from core.model import JobState, Status, run_state_from_result
+from gherkai_core.model import JobState, Status, run_state_from_result
 from tests.test_stores import _initial_state, _sample_run
 
 
@@ -42,7 +42,7 @@ def test_load_missing_returns_none(ddb_run_store):
 def test_run_meta_deep_argument_round_trip(ddb_run_store):
     # META 存 JSON 字符串——含 docString/dataTable（含空 cell）的深 Job 树要逐字节还原。
     # 这是第 4 步 offload 必须保持的基线：不 offload 时 argument 内容原样往返。
-    from core.model import Job, RunMeta, RunState, Scenario, Step, StepArgument, Status
+    from gherkai_core.model import Job, RunMeta, RunState, Scenario, Step, StepArgument, Status
 
     job = Job(scope_id="s", scope_name="s", engine="midscene", scenarios=(
         Scenario(id="s:1", name="sc", steps=(
@@ -128,8 +128,8 @@ def test_started_ended_omit_when_none_round_trip(ddb_run_store):
 
 def test_detached_flag_on_state_item(aws):
     """detached 组合根的 create_run 在 STATE item 落 detached=true 标记;默认(同步 run)不落（ADR 0034 kicker filter）。"""
-    from core.adapters.run_store.ddb import DynamoDBRunStore
-    from core.model import Job, JobState, RunMeta, RunState, Scenario, Status, Step
+    from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore
+    from gherkai_core.model import Job, JobState, RunMeta, RunState, Scenario, Status, Step
 
     def _mk(run_id):
         job = Job(scope_id="s", scope_name="s", engine="novaact", scenarios=(

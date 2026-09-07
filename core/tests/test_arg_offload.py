@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 from urllib.parse import urlparse
 
-from core.model import Job, RunMeta, RunState, Scenario, Status, Step, StepArgument
+from gherkai_core.model import Job, RunMeta, RunState, Scenario, Status, Step, StepArgument
 
 
 def _meta_json(aws, run_id: str) -> dict:
@@ -132,8 +132,8 @@ def test_restore_uses_uri_not_current_prefix(aws):
     # offloader 的 s3:// 指针是自描述的：restore 应直接解析 URI 取回，不用 self._prefix 重算 key。
     # 若有人回归成 restore 用 self._prefix 拼 key，同 prefix 测试仍全绿、但换了 prefix 就 NoSuchKey 炸。
     # 故这里用「写端 prefix='writer/' 、读端 prefix='reader/'」的两个 offloader 验：读端仍逐字节还原。
-    from core.adapters.run_store.arg_offload import S3StepArgumentOffloader
-    from core.serialize import run_meta_from_dict, run_meta_to_dict
+    from gherkai_core.adapters.run_store.arg_offload import S3StepArgumentOffloader
+    from gherkai_core.serialize import run_meta_from_dict, run_meta_to_dict
 
     writer = S3StepArgumentOffloader(aws["s3"], aws["bucket"], prefix="writer/")
     reader = S3StepArgumentOffloader(aws["s3"], aws["bucket"], prefix="reader/")
@@ -161,7 +161,7 @@ def test_reader_without_offloader_fails_loud_on_offloaded_meta(ddb_run_store_off
     静默还原成 None 是「给生产选要不要正确」（ADR 0030 决定七禁止）。
     """
     import pytest
-    from core.adapters.run_store.ddb import DynamoDBRunStore
+    from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore
 
     job = Job(scope_id="s", scope_name="s", engine="midscene", scenarios=(
         Scenario(id="s:1", name="sc", steps=(
@@ -181,7 +181,7 @@ def test_reader_without_offloader_not_fooled_by_content_ref_as_text(aws):
     （从未 offload）必须能被没注入 offloader 的读者正常读回——按原始 meta_json 串 sniff `"content_ref"`
     会误命中、把好 run 判成组合根装配错误、直接读不回来。
     """
-    from core.adapters.run_store.ddb import DynamoDBRunStore
+    from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore
 
     job = Job(scope_id="s", scope_name="s", engine="midscene", scenarios=(
         Scenario(id="s:1", name="sc", steps=(

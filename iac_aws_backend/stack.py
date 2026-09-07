@@ -372,7 +372,7 @@ class BackendStack(Stack):
         # ① 退出观察者 Lambda（薄；只 events 表 PutItem 写 task_exited）
         exit_observer = lambda_.Function(
             self, "ExitObserverFn",
-            function_name=names.default_name(self.prefix, names.BASE_EXIT_OBSERVER_LAMBDA),  # 真同源（gherkai.names）——cli preflight 据 --prefix 拼同名探活（ADR 0033）
+            function_name=names.default_name(self.prefix, names.BASE_EXIT_OBSERVER_LAMBDA),  # 真同源（gherkai_runtime.names）——cli preflight 据 --prefix 拼同名探活（ADR 0033）
             runtime=lambda_.Runtime.PYTHON_3_13,
             handler="exit_observer.handler",
             code=code,
@@ -425,7 +425,7 @@ class BackendStack(Stack):
         # ② reconciler Lambda（重；读全量重放 + 起 task + finalize 聚合）
         reconciler = lambda_.Function(
             self, "ReconcilerFn",
-            function_name=names.default_name(self.prefix, names.BASE_RECONCILER_LAMBDA),  # 真同源（gherkai.names）——cli preflight 据 --prefix 拼同名探活（ADR 0033）
+            function_name=names.default_name(self.prefix, names.BASE_RECONCILER_LAMBDA),  # 真同源（gherkai_runtime.names）——cli preflight 据 --prefix 拼同名探活（ADR 0033）
             runtime=lambda_.Runtime.PYTHON_3_13,
             handler="reconciler.handler",
             code=code,
@@ -489,7 +489,7 @@ class BackendStack(Stack):
         #    INSERT。分工：kicker「让 run 动起来」/ reconciler「推着走」。故它需要与 reconciler 相同的权限（起 task 等）。
         kicker = lambda_.Function(
             self, "KickerFn",
-            function_name=kicker_name,  # 真同源（gherkai.names）——cli status --wait 据 --prefix 推理出它 invoke kickoff（ADR 0034）
+            function_name=kicker_name,  # 真同源（gherkai_runtime.names）——cli status --wait 据 --prefix 推理出它 invoke kickoff（ADR 0034）
             runtime=lambda_.Runtime.PYTHON_3_13,
             handler="reconciler.kicker_handler",  # 同一 reconciler.py、不同入口
             code=code,
@@ -541,7 +541,7 @@ class BackendStack(Stack):
     def _build_lambda_asset(self) -> str:
         """把 Lambda 代码打包到一个目录，返回其路径（Code.from_asset 用）。
 
-        内容 = lambdas/*.py（handler）+ core/core（core 库）+ gherkai/gherkai（产品本体：compose 装配单一
+        内容 = lambdas/*.py（handler）+ core/gherkai_core（core 库）+ runtime/gherkai_runtime（产品本体：compose 装配单一
         真源，reconciler 复用其 build_fargate_engines——不再打包 cli，Lambda 不背 argparse/render，ADR 0016
         「演进」节）+ pip 装 gherkin-official（core 的唯一非 boto3 依赖；boto3 是 Lambda runtime 自带、不打）。
         打到 iac_aws_backend/.lambda_build/（.gitignore；每次 synth 重建保新鲜）。
@@ -559,10 +559,10 @@ class BackendStack(Stack):
         # handler
         shutil.copytree(os.path.join(repo, "lambdas"), build, dirs_exist_ok=True,
                         ignore=shutil.ignore_patterns("__pycache__", ".gitignore", "tests"))
-        # core 库（core/core → build/core）+ 产品本体（gherkai/gherkai → build/gherkai）
-        shutil.copytree(os.path.join(repo, "core", "core"), os.path.join(build, "core"),
+        # core 库（core/gherkai_core → build/core）+ 产品本体（runtime/gherkai_runtime → build/gherkai）
+        shutil.copytree(os.path.join(repo, "core", "gherkai_core"), os.path.join(build, "gherkai_core"),
                         ignore=shutil.ignore_patterns("__pycache__"))
-        shutil.copytree(os.path.join(repo, "gherkai", "gherkai"), os.path.join(build, "gherkai"),
+        shutil.copytree(os.path.join(repo, "runtime", "gherkai_runtime"), os.path.join(build, "gherkai_runtime"),
                         ignore=shutil.ignore_patterns("__pycache__"))
         # 依赖：gherkin-official（core 唯一非 boto3 依赖）。boto3 runtime 自带、不装（省包体）。
         # uv venv 默认无 pip，优先 `uv pip install --target`（uv 自带）；回退 `python -m pip`（普通 venv）。

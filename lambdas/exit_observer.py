@@ -57,7 +57,7 @@ def _is_detached(run_id: str) -> bool:
     events Query 读端撞上「无 `body` 属性的 item」（机制一）。故写前分流，判据与 kicker 的 Stream filter 同源。
     """
     import boto3
-    from core.adapters.run_store.ddb import DynamoDBRunStore
+    from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore
 
     # 只读 STATE 的标记属性，不读 META → 无需注入 arg_offloader（ADR 0030 决定七的 fail-loud 不涉及）
     table = boto3.resource("dynamodb").Table(os.environ["RUNS_TABLE"])
@@ -67,7 +67,7 @@ def _is_detached(run_id: str) -> bool:
 def _event_log(run_id: str, scope_id: str):
     """构造 DdbEventLog（Lambda 组合根：读 env 造 boto3 表资源注入 core adapter）。"""
     import boto3
-    from core.adapters.event_log import DdbEventLog
+    from gherkai_core.adapters.event_log import DdbEventLog
 
     table_name = os.environ["EVENTS_TABLE"]
     table = boto3.resource("dynamodb").Table(table_name)
