@@ -287,7 +287,7 @@ def _tick_runs(run_ids: set[str], label: str, *, prebuilt: dict | None = None) -
         meta, event_log, run_store, launcher, mc, rstore, pstore = built
         done = tick(run_id, meta, event_log, run_store, launcher, mc, now_iso=compose.now_iso())
         if done:
-            # 收尾聚合走 core 唯一一份（曾在此双写、与 gherkai/detached.py 漂移风险，已合并）
+            # 收尾聚合走 core 唯一一份（曾在此双写、与 runtime/gherkai_runtime/detached.py 漂移风险，已合并）
             from gherkai_core.reconcile import finalize_artifacts
             finalize_artifacts(run_id, meta, event_log, rstore, pstore, compose.now_iso())
             print(f"{label}: run {run_id} done + finalized")

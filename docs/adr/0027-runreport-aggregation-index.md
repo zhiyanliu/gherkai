@@ -22,10 +22,10 @@
 头等约束。保证机制：
 
 - **`ReportRef = {kind: str, ref: ResourceUri, label: str | None}`**（取代旧 `{granularity: Literal["scope","act"], path}`）：
-  - `kind` —— **产物类型**（开放字符串，引擎自报）：`report`（完整报告页）/ `trajectory`（轨迹页）/ `summary`（数字汇总）/ 未来 `video`/`trace`/`har`…。core/wire/schedule **永不读它的值、永不按它分支**，是文档化约定常量、非枚举。**「粒度」不由 kind 表达，而由 report_ref 挂在哪一级表达**——`StepResult.report_refs`=step 级、`ScenarioResult.report_refs`=scenario 级、`JobResult.report_refs`=scope 级。（旧值 `scope`/`act` 把粒度混进了 kind——`scope` 是粒度、`act` 是引擎内部动作类型；归正为纯类型维度，粒度交给挂载层级，二者正交、不重复不撞名。）
+  - `kind` —— **产物类型**（开放字符串，引擎自报）：`report`（完整报告页）/ `trajectory`（轨迹页）/ `summary`（数字汇总）/ 未来 `video`/`trace`/`har`…。core/gherkai_core/wire/schedule **永不读它的值、永不按它分支**，是文档化约定常量、非枚举。**「粒度」不由 kind 表达，而由 report_ref 挂在哪一级表达**——`StepResult.report_refs`=step 级、`ScenarioResult.report_refs`=scenario 级、`JobResult.report_refs`=scope 级。（旧值 `scope`/`act` 把粒度混进了 kind——`scope` 是粒度、`act` 是引擎内部动作类型；归正为纯类型维度，粒度交给挂载层级，二者正交、不重复不撞名。）
   - `ref` —— **统一指针 `ResourceUri`**，不假定是本地文件。本地产物用 `file://` 前缀；未来可是 `s3://`/`https://`。core/ReportStore **不 stat、不 fetch、不打开** ref，只索引/链接。
   - `label` —— 可选人类可读锚文本；缺省由消费端回落 `kind`。worker 可全部不报。
-- **铁律**：`core/model.py`、`core/wire.py`、`core/schedule.py` 对 `ReportRef` 永久是**不透明搬运**。任何「按 kind 选 `<video>`/`<iframe>`」之类的渲染分支**只允许出现在 cli / WebUI 皮层**，绝不写回 core。
+- **铁律**：`core/gherkai_core/model.py`、`core/gherkai_core/wire.py`、`core/gherkai_core/schedule.py` 对 `ReportRef` 永久是**不透明搬运**。任何「按 kind 选 `<video>`/`<iframe>`」之类的渲染分支**只允许出现在 cli / WebUI 皮层**，绝不写回 core。
 - 新引擎接入 = 它的 worker 报自己的 `ReportRef`，经 [0024](./0024-worker-core-protocol.md) 协议原样进 `report_refs`，归到 RunReport，**core 一行不改**。
 
 > 旧 `granularity: Literal` 是「核心谎称收窄、wire 实则放行」的假约束——`wire.py` 反序列化时从不校验枚举、Midscene worker 的 TS 类型本就是 `string`。放开成 `str` 是**消除既存不一致**，非新增灵活性。
@@ -62,7 +62,7 @@ class ReportStore(Protocol):
 
 （无 `materialize` 参数——产物拷贝式的 materialize 已否决，见下「被拒方案」。）
 
-- **返回 `ResourceUri` 而非 `Path`**（封版前收口）：`LocalReportStore` 回 `file://…/index.html`，`S3ReportStore` 回 `s3://…/index.html`（v1.1 已建，ADR 0030 决定六）——**同一签名容两种落点**，否则 S3 adapter 被迫返回 `Path` 包 `s3://`（`Path` 会把 `s3://b/x` 折成 `s3:/b/x`，错）。`ResourceUri = NewType("ResourceUri", str)`（定义在 `core/model.py`）：把这个**本就存在于 `ReportRef.ref` 注释里**的约定提升成命名类型，统一「`ReportRef.ref` 与 `write` 返回值都是带 scheme 的资源指针」。比裸 `str` 多一层意图、又零运行时成本/零依赖（运行时即 `str`）。消费端（cli/WebUI）只当 URI 用、不 stat/open。
+- **返回 `ResourceUri` 而非 `Path`**（封版前收口）：`LocalReportStore` 回 `file://…/index.html`，`S3ReportStore` 回 `s3://…/index.html`（v1.1 已建，ADR 0030 决定六）——**同一签名容两种落点**，否则 S3 adapter 被迫返回 `Path` 包 `s3://`（`Path` 会把 `s3://b/x` 折成 `s3:/b/x`，错）。`ResourceUri = NewType("ResourceUri", str)`（定义在 `core/gherkai_core/model.py`）：把这个**本就存在于 `ReportRef.ref` 注释里**的约定提升成命名类型，统一「`ReportRef.ref` 与 `write` 返回值都是带 scheme 的资源指针」。比裸 `str` 多一层意图、又零运行时成本/零依赖（运行时即 `str`）。消费端（cli/WebUI）只当 URI 用、不 stat/open。
   - 实现注意：`LocalReportStore` 内 `index_path.resolve().as_uri()`——`as_uri()` 要求绝对路径，而 cli 默认 `--report-dir` 是相对的（`reports`），不 `resolve()` 会抛 `ValueError`。
 - **`index.html` 链接（`href`）指向产物原位**：不拷贝、不搬运产物。`href` 是 core 自己生成的**导航链接**（`index.html` 的 `<a href>`），local 相对化、cloud 恒等于 `ref`（见下「href 相对化」）。
 

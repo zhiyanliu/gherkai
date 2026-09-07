@@ -1,6 +1,6 @@
 # 0035. 本地应用测试：自动隧道把开发机上的被测应用暴露给云端浏览器
 
-> **Status:** Accepted —— 设计与实现均已落地：`--expose-local` 在 run/plan/submit 三命令 + `gherkai/gherkai/tunnel.py`（ngrok provider + URL 映射）与 `gherkai/gherkai/tunnel_host.py`（宿主编排：起隧道/映射 definition/守护循环与其 TTL），四种「跑法 × backend」组合全支持（URL 映射、三形态隧道宿主 + 兜底拆除、额外请求头注入）。
+> **Status:** Accepted —— 设计与实现均已落地：`--expose-local` 在 run/plan/submit 三命令 + `runtime/gherkai_runtime/tunnel.py`（ngrok provider + URL 映射）与 `runtime/gherkai_runtime/tunnel_host.py`（宿主编排：起隧道/映射 definition/守护循环与其 TTL），四种「跑法 × backend」组合全支持（URL 映射、三形态隧道宿主 + 兜底拆除、额外请求头注入）。
 
 ## 背景与问题
 
@@ -27,9 +27,9 @@
 
 ## 决策
 
-### 1. `TunnelProvider` 可插拔口子（gherkai 组合根层），首个实现 = ngrok
+### 1. `TunnelProvider` 可插拔口子（`gherkai-runtime` 组合根共享层），首个实现 = ngrok
 
-- 协议形状：`start(local_origin, *, with_auth=True, timeout_s) -> TunnelInfo`（frozen dataclass `url` / `auth` / `pid` / `local_origin`，另有 `mapped_base` 给出凭据内嵌形态——见决策 4）＋**模块级 `stop_tunnel(pid)`**。停止面按 **pid** 而非进程对象/实例方法：收尾者与起隧道者常不在同一进程（决策 3 三形态宿主），进程句柄传不过去，故 `TunnelInfo` 携带 pid、由收尾者 kill。就绪判据 = 轮询 agent 日志到 `started tunnel` 行（见下「拿公网 URL 走日志文件通道」条），**不做持续健康探活**——隧道断的失败形态已够清晰（导航失败，见「边界与不变量」），不值守护复杂度。住 `gherkai/`（组合根共享层——cli/未来 WebUI 复用；worker/core 对隧道无知）。
+- 协议形状：`start(local_origin, *, with_auth=True, timeout_s) -> TunnelInfo`（frozen dataclass `url` / `auth` / `pid` / `local_origin`，另有 `mapped_base` 给出凭据内嵌形态——见决策 4）＋**模块级 `stop_tunnel(pid)`**。停止面按 **pid** 而非进程对象/实例方法：收尾者与起隧道者常不在同一进程（决策 3 三形态宿主），进程句柄传不过去，故 `TunnelInfo` 携带 pid、由收尾者 kill。就绪判据 = 轮询 agent 日志到 `started tunnel` 行（见下「拿公网 URL 走日志文件通道」条），**不做持续健康探活**——隧道断的失败形态已够清晰（导航失败，见「边界与不变量」），不值守护复杂度。住 `runtime/gherkai_runtime/`（组合根共享层——cli/未来 WebUI 复用；worker/core 对隧道无知）。
 - 选择参数：`--tunnel <provider>`（默认 `ngrok`，当前唯一实现）——机制与 flag 同期落，将来加实现零接口变化。
 - **首发只做 ngrok**：认证能力免费（Traffic Policy basic-auth，默认开启——见决策 4）、付费可去 interstitial。
 - **本项是对 [0009](./0009-maximize-aws-hard-constraint.md)「最大化用 AWS」的显式例外**（按 0009 要求登记）：ngrok 是 AWS 外的第三方 SaaS，但「开发机 → 云端浏览器」的入站通道在 AWS 内实查无等价物（SSM 端口转发方向相反；IoT Secure Tunneling 两端 localproxy、不产公网 URL；AgentCore Browser VPC 模式够不到开发者笔记本，已评估并缓——见调研结论③与被拒/被缓方案）。例外面压到最小：经 `TunnelProvider` 口子隔离、仅 `--expose-local` 显式启用、数据面只有被测应用自身流量（模型/浏览器/存储/编排仍全在 AWS 内）。

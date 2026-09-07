@@ -439,7 +439,7 @@ def _emit_scenario_done_unless_stopped(sink: EventSink, scenario_id: str, status
 import socket
 import ssl
 
-# 网络专用退出码（ADR 0028）：与 core/wire.py 的 EX_WORKER_NETWORK 同值（协议层单一事实源，两 Engine adapter 共用翻译）。
+# 网络专用退出码（ADR 0028）：与 core/gherkai_core/wire.py 的 EX_WORKER_NETWORK 同值（协议层单一事实源，两 Engine adapter 共用翻译）。
 EX_WORKER_NETWORK = 80
 
 # 建连重试参数（ADR 0028）：仅裹幂等的建连段，act 永不重试。退避手写（不用 botocore 内部 retry，

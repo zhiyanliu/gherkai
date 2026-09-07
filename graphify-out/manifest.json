@@ -700,8 +700,8 @@
     "semantic_hash": ""
   },
   "cli/gherkai_cli/__main__.py": {
-    "mtime": 1788766801.9958842,
-    "ast_hash": "ac6513352f8f97e84bec3e5168e85d92",
+    "mtime": 1788767253.1556358,
+    "ast_hash": "03b18c19e6c26111fa3690bad040c75b",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/render.py": {
@@ -870,8 +870,8 @@
     "semantic_hash": ""
   },
   "runtime/gherkai_runtime/compose.py": {
-    "mtime": 1788766077.6193986,
-    "ast_hash": "856bd21f11db164be0ca00e060768ed6",
+    "mtime": 1788767253.15489,
+    "ast_hash": "2f9e77b6ed000992f4a3b2b1f191439f",
     "semantic_hash": ""
   },
   "runtime/gherkai_runtime/detached.py": {
@@ -900,8 +900,8 @@
     "semantic_hash": ""
   },
   "runtime/tests/test_compose.py": {
-    "mtime": 1788766077.621668,
-    "ast_hash": "983ca1243d5e7fdb66d68f690f718683",
+    "mtime": 1788767253.155789,
+    "ast_hash": "2f992919b709b15753553d1430d0cd4a",
     "semantic_hash": ""
   },
   "runtime/tests/test_detached_launcher.py": {
@@ -925,8 +925,8 @@
     "semantic_hash": ""
   },
   "docs/journey/0001-\u5206\u53d1\u4e0e\u6253\u5305\u65bd\u5de5\u8fdb\u5ea6\u603b\u7eb2.md": {
-    "mtime": 1788766912.3583353,
-    "ast_hash": "e287254a7015aede17bb1dd9ff749c83",
+    "mtime": 1788767304.4201577,
+    "ast_hash": "7a78a37e3f6f7e6ed2661a98bd5e721a",
     "semantic_hash": ""
   },
   "runtime/README.md": {

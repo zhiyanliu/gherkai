@@ -15,7 +15,7 @@ run_scope.py 的 tw_total 累加），墙钟会是 N 个 act 之和、拆不出�
 `coarse` 标记（勿把 0s 误读成「act 瞬时完成」）。真实 act（连模型）通常数秒~数十秒。
 
 用法（需 AWS 凭证）：
-  PYTHONPATH=core core/.venv/bin/python tools/events_wallclock.py \\
+  uv run python tools/events_wallclock.py \\
       --events-table gherkai-events --run-id <run_id> [--region us-east-1] [--json]
 
   --run-id：Scan events 表、按 `begins_with(pk, "<run_id>#")` 圈出本 run 所有 scope（test 表低量、Scan 可接受）。

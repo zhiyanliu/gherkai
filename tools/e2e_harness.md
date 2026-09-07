@@ -8,7 +8,7 @@
 
 `e2e_harness.py` 是 **opt-in 手动端到端验证脚本，不进 pytest 默认套件**。它真 spawn worker、真喂 job（stdin）、真收事件流（`EVENTS_FD`）、真开 AgentCore 会话、真写 S3——**烧真 AWS 钱、需网络+凭证、单次 ~1-2min**。它验的是**单测的 mock 覆盖不到、只能真跑**的那一层（对齐 CLAUDE.md「绿≠对：识别结论的证据边界」）：真 greenlet / 真会话 / 真进程退出码 / 真 grace 秒数 / 真事件流字节 / 真中断丢失量。
 
-**中断只是它的能力之一**（`--interrupt`）——它同样能跑 `--interrupt none` 的 baseline 验「事件流端到端正常 + 三通道分离 + 零行为变化」（如 worker I/O 重构后的回归）。纯逻辑回归仍由各引擎单测覆盖（Nova `worker/test_*.py`、Midscene `worker/*.test.ts`、core `tests/test_subprocess_engine.py`）。
+**中断只是它的能力之一**（`--interrupt`）——它同样能跑 `--interrupt none` 的 baseline 验「事件流端到端正常 + 三通道分离 + 零行为变化」（如 worker I/O 重构后的回归）。纯逻辑回归仍由各引擎单测覆盖（Nova `worker/test_*.py`、Midscene `worker/*.test.ts`、`core/tests/test_subprocess_engine.py`）。
 
 **用它的场景**：改了 worker 的中断路径 / 会话清理 / grace / 抢传 / 上传超时 / **job 入口·事件出口（I/O 边缘）**后，想真跑确认「承重假设没塌」。日常改逻辑先跑单测；只有涉及上面这些"只能真跑验证"的真实边界才动 harness。
 
@@ -16,14 +16,14 @@
 
 - **AWS 凭证 + region us-east-1**（default profile 即可）。
 - **一个可写 S3 桶**，经环境变量 `HARNESS_S3_BUCKET` 传入（**勿硬编码**账号相关值）。跑完自行清理桶内 `harness/<run-id>/` 前缀（见下「清理」）。
-- 用 **`core/.venv/bin/python`** 跑（harness 复用真实 `core.scope.plan` 生成 job，防手搓 JSON 漂移）。**cwd 与 `PYTHONPATH` 都不限**——harness 由 `__file__` 派生仓库根、自己把 `<repo>/core` 插进 `sys.path`，features/engines 路径也全由该根算出。
+- 用**仓库根的 workspace venv** 跑（`uv run python …`，等价 `.venv/bin/python`）——harness 复用真实 `gherkai_core.scope.plan` 生成 job，防手搓 JSON 漂移；根 `uv sync` 已把 `gherkai_core` 装成 editable（ADR 0037 决策 2）。**cwd 与 `PYTHONPATH` 都不限**——harness 由 `__file__` 派生仓库根、自己把 `<repo>/core` 插进 `sys.path`，features/engines 路径也全由该根算出。
 - 各引擎的 venv/node_modules 已就绪（harness 用 `engines/novaact/.venv/bin/python` / `node --import tsx` spawn worker）。
 
 ## 调用
 
 ```bash
-# 下面用相对路径写，故从仓库根键入最省事（cwd 非必需，见「前置条件」）：
-HARNESS_S3_BUCKET=<你的可写桶> core/.venv/bin/python tools/e2e_harness.py \
+# 下面用相对路径写、且 `uv run` 须在 workspace 内，故从仓库根键入（harness 自身不依赖 cwd，见「前置条件」）：
+HARNESS_S3_BUCKET=<你的可写桶> uv run python tools/e2e_harness.py \
     --engine <novaact|midscene> \
     --feature <feature 名，不含 .feature 后缀> \
     --interrupt <none|connect|act|between|scenario|scope_end> \
@@ -79,9 +79,9 @@ harness 结尾打印 `=== HARNESS_REPORT_JSON ===` + 一段 JSON。关键字段�
 
 1. **plan 按 `@scope:` tag 分组，不是"一 feature 一 scope"**（ADR 0025）。未标 `@scope:` 的 scenario **各自独立成单 scenario scope**。harness 取**匹配 `--engine` 的第一个 job**（单引擎 feature 下即 `jobs[0]`；混引擎 feature 如 engine_routing 靠 `@engine:` tag 分引擎时，取本次 `--engine` 那个引擎的 job）作靶子。
    - **验 `scenario` 时机必须用多 scenario 归一个 scope 的 feature**，否则 `jobs[0]` 只有 1 个 scenario、`scenario` 时机的 `n_scen>1` 条件不满足、SIGTERM 不发出、跑成完整 baseline。
-   - **现成可用**：`features/concurrency_and_scope.feature` 的 `@scope:browse`（2 个 scenario 共享会话，`jobs[0]`）。跑前可用 `core.scope.plan` 确认 `jobs[0]` 的 scenario 数：
+   - **现成可用**：`features/concurrency_and_scope.feature` 的 `@scope:browse`（2 个 scenario 共享会话，`jobs[0]`）。跑前可用 `gherkai_core.scope.plan` 确认 `jobs[0]` 的 scenario 数：
      ```bash
-     PYTHONPATH=core core/.venv/bin/python -c "from core.scope import plan,PlanConfig,FeatureSource; from pathlib import Path; f='features/concurrency_and_scope.feature'; print([len(j.scenarios) for j in plan([FeatureSource(uri=f,text=Path(f).read_text())],PlanConfig(default_engine='midscene',default_assertion_votes=1))])"
+     uv run python -c "from gherkai_core.scope import plan,PlanConfig,FeatureSource; from pathlib import Path; f='features/concurrency_and_scope.feature'; print([len(j.scenarios) for j in plan([FeatureSource(uri=f,text=Path(f).read_text())],PlanConfig(default_engine='midscene',default_assertion_votes=1))])"
      ```
 2. **wikipedia SSL 环境坑（Nova 尤甚）**：某些网络下到 `www.wikipedia.org` 的 SSL 握手会挂（`SSLEOFError`，Nova SDK 本地 strict cert verify）。**Midscene 走 AgentCore 云浏览器、不受本地 SSL 影响**；Nova SDK 在本地建 CDP 时可能撞。若 Nova 全场景 SSL 失败，先直连测握手确认是环境问题，可临时用简单站点 feature 绕。
 3. **scenario 抢传只 Midscene 有**（Nova 侧 `session_summary.json` 在 scenario 边界不存在、无赔付对象——ADR 0029）。别期待 Nova 的 `scenario` 时机验出 log 抢传。
@@ -92,7 +92,7 @@ harness 结尾打印 `=== HARNESS_REPORT_JSON ===` + 一段 JSON。关键字段�
 harness 不自动清桶。每个 run 在 `harness/<run-id>/` 前缀下留对象，跑完清理：
 
 ```bash
-AWS_REGION=us-east-1 core/.venv/bin/python -c "
+AWS_REGION=us-east-1 uv run python -c "
 import boto3
 s3=boto3.client('s3',region_name='us-east-1')
 b='<你的桶>'; p='harness/<run-id>/'

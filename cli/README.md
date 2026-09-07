@@ -1,8 +1,10 @@
 # cli — 执行核心库的命令行皮（argparse + render）
 
+发行名 `gherkai` / import 名 `gherkai_cli` / 命令 `gherkai`（ADR 0037 决策 2a「三名分离」）。
+
 `core/` 是纯库（零引擎依赖、不碰文件系统）。**cli 是它的第一张皮**：解析参数 → 经产品本体
-`gherkai.compose` 读 `.feature`、装配引擎与 Store adapter 注入给 core → 把 `RunResult` 渲染给人或 CI 看。
-WebUI 将来是另一张皮，**直接调 core、复用产品本体 `gherkai`（compose 等组合根逻辑所在的平级包，ADR 0016「演进」节）**，不经本 cli。
+`gherkai_runtime.compose` 读 `.feature`、装配引擎与 Store adapter 注入给 core → 把 `RunResult` 渲染给人或 CI 看。
+WebUI 将来是另一张皮，**直接调 core、复用产品本体 `gherkai_runtime`（compose 等组合根逻辑所在的平级包 `runtime/`，ADR 0016「演进」节）**，不经本 cli。
 
 设计见 [ADR 0016](../docs/adr/0016-execution-architecture-core-lib-run-model.md)（执行架构 / 组合根注入）；
 无状态跑批（`submit`/`status` 的「提交完就走 → 事件驱动推进 → 轮询收集」）见 [ADR 0034](../docs/adr/0034-detached-batch-reconciler.md)。
@@ -10,12 +12,12 @@ WebUI 将来是另一张皮，**直接调 core、复用产品本体 `gherkai`（
 ## 模块
 
 ```
-cli/
-├── __main__.py   ← argparse 皮：run/submit/status/plan/list-engines/list-deterministic 解析 → 调 gherkai.compose/core → 注入 RunPersistence 实时落库 → 调 render；定义退出码
+cli/gherkai_cli/
+├── __main__.py   ← argparse 皮：run/submit/status/plan/list-engines/list-deterministic 解析 → 调 gherkai_runtime.compose/gherkai_core → 注入 RunPersistence 实时落库 → 调 render；定义退出码
 └── render.py     ← 表层渲染：0024 事件 → 进度行；RunResult → 文本汇总 / JSON；RunState → status 视图
 ```
 
-组合根逻辑（compose/detached/names/tunnel/tunnel_host）住在平级的产品本体包 `gherkai/`（曾在本包内、被 Lambda/iac 的真实代价逼出抽包，ADR 0016「演进」节）：那是任何前端都要的接线，
+组合根逻辑（compose/detached/names/tunnel/tunnel_host）住在平级的产品本体包 `runtime/gherkai_runtime/`（曾在本包内、被 Lambda/iac 的真实代价逼出抽包，ADR 0016「演进」节）：那是任何前端都要的接线，
 后者只是 argparse + 标准 IO。
 
 **实时落库**：`run` 不是「跑完才一次性落盘」——`__main__` 注入 core 的 `RunPersistence`
@@ -24,36 +26,36 @@ RUNNING、完成即落该 scope 判定真值，最后 `finalize` 写总状态（
 （裸跑、零落盘逃生舱）。
 
 落哪由 `--backend` 定：默认 `local`（文件落 `--report-dir`）；`--backend cloud` 让组合根改注入 DynamoDB/S3
-adapter、复用同一条 `RunPersistence`，把状态落 DynamoDB、判定真值与报告落 S3（表/桶需预先建好）。见下『选项』表与『跑』小节。未来 WebUI 复用同一套 `gherkai.compose` 装配，cli 这张皮的接线不变。
+adapter、复用同一条 `RunPersistence`，把状态落 DynamoDB、判定真值与报告落 S3（表/桶需预先建好）。见下『选项』表与『跑』小节。未来 WebUI 复用同一套 `gherkai_runtime.compose` 装配，cli 这张皮的接线不变。
 
 ## 跑（会烧真 AWS 钱：模型调用 + AgentCore 会话）
 
+下面都从**仓库根**键入（feature 路径相对当前目录解析）：
+
 ```bash
-cd cli
-uv sync                                            # 装环境（gherkai/core 作 path 依赖）
+uv sync                                            # 一次装齐 core/runtime/cli 三个 workspace 成员（editable，单一根 uv.lock）
 
 # 跑一个 feature（默认引擎 novaact，默认 max-concurrency=1）
-uv run python -m cli run ../features/wikipedia_generic.feature
+uv run gherkai run features/wikipedia_generic.feature
 
 # 未标 @engine 的 scope 默认走 Midscene 引擎、放开并发、JSON 输出
-uv run python -m cli run ../features/wikipedia_generic.feature \
+uv run gherkai run features/wikipedia_generic.feature \
   --default-engine midscene --max-concurrency 2 --json
 
 # 预检 .feature（不烧钱）：看 scope/job 分组、校验配置（@scope/@engine 冲突等），不真跑。
 # 每个 step 还标注派发预期（← 确定性: … / 默认 AI 不标；worker 自述命中，ADR 0036——
 # 起本地瞬时 worker 子进程做 match 查询，零 AWS 零花费；引擎环境未装则自动降级为无标注）
-uv run python -m cli plan ../features/wikipedia_generic.feature
-uv run python -m cli plan ../features/*.feature --json     # 机器可读分组
+uv run gherkai plan features/wikipedia_generic.feature
+uv run gherkai plan features/*.feature --json     # 机器可读分组
 
 # 列可用引擎及其 spawn 命令（不烧钱）
-uv run python -m cli list-engines
+uv run gherkai list-engines
 
 # 列指定引擎支持的确定性 step（worker 注册表自述，写 feature 时查询复用；不烧钱，ADR 0036）
-uv run python -m cli list-deterministic --engine midscene      # --json 可选；默认 --engine novaact
+uv run gherkai list-deterministic --engine midscene      # --json 可选；默认 --engine novaact
 
-# 云端落库：状态 → DynamoDB、判定结果与报告 → S3（表/桶需预先建好；云端后端才需装 boto3）
-uv sync --extra aws                                # 装 boto3（仅 --backend cloud 需要）
-uv run python -m cli run ../features/wikipedia_generic.feature \
+# 云端落库：状态 → DynamoDB、判定结果与报告 → S3（表/桶需预先建好；boto3 随 CLI 一起装，无额外步骤）
+uv run gherkai run features/wikipedia_generic.feature \
   --backend cloud --ddb-table ui-test-runs --s3-bucket ui-test-artifacts-<你的后缀>
 # 兜底：也可用 AWS_DDB_TABLE / AWS_S3_BUCKET 环境变量代替这两个 flag
 # 凭证/region 走 boto3 默认链；可加 --profile / --region 覆盖
@@ -77,19 +79,17 @@ scope/job 分组与 engine 路由符合预期、提前暴露 `PlanError`（uri �
 （提交完就走 → 事件驱动推进 → 事后轮询收集），CLI 不必守着：见 [ADR 0034](../docs/adr/0034-detached-batch-reconciler.md)。
 
 ```bash
-cd cli
-
 # ── local：submit 立即返回 run_id（后台 per-run 进程推进），事后再来收 ──
-RUN_ID=$(uv run python -m cli submit ../features/wikipedia_generic.feature --max-concurrency 2)
+RUN_ID=$(uv run gherkai submit features/wikipedia_generic.feature --max-concurrency 2)
 # submit 提交完就走：本机 fork 一个脱离 CLI 的 per-run 进程跑推进循环，CLI 打完 run_id 即退
 
-uv run python -m cli status "$RUN_ID"                # 查一次进度/结果（只读，不推进）
-uv run python -m cli status "$RUN_ID" --wait         # 轮询到终态才返回（per-run 进程崩了/慢了，本命令接力推进到底）
-uv run python -m cli status "$RUN_ID" --wait --json  # 同上，输出机器可读 RunState
+uv run gherkai status "$RUN_ID"                # 查一次进度/结果（只读，不推进）
+uv run gherkai status "$RUN_ID" --wait         # 轮询到终态才返回（per-run 进程崩了/慢了，本命令接力推进到底）
+uv run gherkai status "$RUN_ID" --wait --json  # 同上，输出机器可读 RunState
 
 # ── cloud：submit 只把 definition 落 DDB，之后云端 Lambda 链推进（提交完真关机也跑完）──
-RUN_ID=$(uv run python -m cli submit ../features/wikipedia_generic.feature --backend cloud --prefix gherkai-)
-uv run python -m cli status "$RUN_ID" --backend cloud --prefix gherkai- --wait
+RUN_ID=$(uv run gherkai submit features/wikipedia_generic.feature --backend cloud --prefix gherkai-)
+uv run gherkai status "$RUN_ID" --backend cloud --prefix gherkai- --wait
 # cloud --wait 检测到卡住（连续几轮状态不变）才 invoke kicker Lambda 踢一脚接力，正常推进时不打扰
 ```
 
@@ -125,8 +125,8 @@ cloud 由云端 Lambda 事件驱动链推进（submit 机器无 ECS 写/执行�
 
 遵循 Unix 惯例：**stdout 只放该命令的核心产出**（`--json` 的 JSON 文档 / 人看的文本汇总 / `list-engines` 列表），**stderr 放所有进度诊断**（plan、逐事件、run_id、RunReport 落点、worker 透传日志）。故：
 
-- `cli run … --json > r.json` —— `r.json` 是纯净 JSON（进度仍在终端可见、不污染文件）
-- `cli run … > summary.txt` —— `summary.txt` 是纯净文本汇总
+- `gherkai run … --json > r.json` —— `r.json` 是纯净 JSON（进度仍在终端可见、不污染文件）
+- `gherkai run … > summary.txt` —— `summary.txt` 是纯净文本汇总
 
 ## 选项（`run`）
 
@@ -156,8 +156,11 @@ cloud 由云端 Lambda 事件驱动链推进（submit 机器无 ECS 写/执行�
 | `--region` | — | AWS region（local+cloud 均用；解析链 `--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > profile 配置；喂 store + worker） |
 | `--profile` | — | AWS profile（local+cloud 均用；`--profile` > `AWS_PROFILE`；喂 store + subprocess worker） |
 
-> `--backend cloud` 需 boto3（可选 extra，纯 local 不装）：`uv sync --extra aws`（或 `pip install cli[aws]`）。
-> cloud 下缺配置 / 缺 boto3 / 表桶预检失败 → 退出码 `2`；run 已开跑后 DynamoDB/S3 中途不可达 → 退出码 `1`。
+> `--backend cloud` 需 boto3——**装 CLI 即已带**：发行包 `gherkai` 硬依赖 `gherkai-runtime[aws]`
+> （已被 ADR 0037 决策 2c 反转：原为「cli 主依赖不含 boto3、cloud 走可选 extra」，库层 `gherkai-core[aws]` /
+> `gherkai-runtime[aws]` extra 保留给库消费者），故无须额外安装步骤。code 层不变量不变：**local 路径绝不
+> import boto3**（惰性 import 收在 compose 的 `_make_*` 钩子里）。
+> cloud 下缺配置 / 缺 boto3（只单装库层、未带 `[aws]` 时才可能）/ 表桶预检失败 → 退出码 `2`；run 已开跑后 DynamoDB/S3 中途不可达 → 退出码 `1`。
 
 ## 选项（`submit`）
 

@@ -12,7 +12,7 @@
 **必须 `--platform linux/amd64`（ADR 0033 陷阱，本脚本硬编码保证）**：Fargate task-def 默认 X86_64
 runtime；不加则 arm Mac build 出 arm64、容器启动期挂死（错误在启动期、不易一眼看出是架构问题）。
 
-**repo 名规则** = `{prefix}{engine}-worker`（ADR 0033 硬契约）。命名真源 = `gherkai/names.py`
+**repo 名规则** = `{prefix}{engine}-worker`（ADR 0033 硬契约）。命名真源 = `runtime/gherkai_runtime/names.py`
 （`task_def_name` / `DEFAULT_PREFIX` / `ENGINES`），cli 与 iac 都直接 import 它（无复刻）。本脚本
 按「零依赖单文件、裸 `python` 跑、不设 PYTHONPATH」内联同一规则——故改命名规则须同步这里。
 

@@ -3,7 +3,7 @@
 皮做四件事：解析参数 → 读 feature（compose）→ 注入引擎 resolver 跑 schedule → 渲染结果。
 逻辑全在 core；这里只接线 + 表层 IO。WebUI 是另一张皮，复用 compose、不经本文件。
 
-跑（开发期）：cd cli && uv run python -m cli <feature> [--default-engine novaact] [...]
+跑（开发期，仓库根）：uv run gherkai run <feature> [--default-engine novaact] [...]；装后直接 `gherkai run …`
 真跑会烧 AWS 钱（模型调用 + AgentCore 会话）。
 """
 from __future__ import annotations

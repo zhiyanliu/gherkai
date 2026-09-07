@@ -25,18 +25,21 @@
 - **EventBridge rule `{prefix}ecs-stopped`**：按 `source=aws.ecs` + `ECS Task State Change` + `lastStatus=STOPPED` + 本 cluster 的 `clusterArn` 过滤（不误触别的负载）→ 打到 `{prefix}exit-observer`。
 - **Event source mappings**：`{prefix}events` 表 Stream → reconciler；`{prefix}runs` 表 Stream → kicker（**带 `eventName=INSERT` filter**，只让 `create_run` 触发冷启动，reconciler 之后写 runs 表的 `MODIFY` 不自触发放大，见 ADR 0034 被拒方案）。
 - **job timeout 到点触发器**（ADR 0034「job timeout」节）：IAM role `{prefix}timeout-scheduler`（`scheduler.amazonaws.com` assume、只准 invoke kicker——授权写**确定性 kicker ARN 串**而非资源引用，免 role↔function 互引成环）+ EventBridge Scheduler 的 one-time schedule 名字空间 `{prefix}job-timeout-*`（default group，`ActionAfterCompletion=DELETE` 到点自删、idle 零成本，故 reconciler/kicker 授 `scheduler:CreateSchedule`+`DeleteSchedule`+ 对该 role 的 `PassRole`）+ 注给 reconciler/kicker 的 `KICKER_ARN`/`SCHEDULER_ROLE_ARN` env（起 task 时 arm、到点 Scheduler invoke kicker 走超时处置：停 task + 判 `error(timeout)`）。改 prefix 时这两个名字随之变。
-- **Lambda 打包（`_build_lambda_asset`）**：三个 Lambda 共用一个 asset = `lambdas/`（handler）+ `core/core`（core 库）+ `gherkai/gherkai`（产品本体：compose 装配单一真源，reconciler 复用其 `build_fargate_engines`；**不打 `cli`**——Lambda 不背 argparse/render，ADR 0016「演进」节）+ pip 装 `gherkin-official`（core 唯一非 boto3 依赖；boto3 由 runtime 自带、不打）。打到 `.lambda_build/`（gitignore，每次 synth 重建）。
+- **Lambda 打包（`_build_lambda_asset`）**：三个 Lambda 共用一个 asset = `lambdas/`（handler）+ `core/gherkai_core`（core 库）+ `runtime/gherkai_runtime`（产品本体：compose 装配单一真源，reconciler 复用其 `build_fargate_engines`；**不打 `cli/gherkai_cli`**——Lambda 不背 argparse/render，ADR 0016「演进」节）+ pip 装 `gherkin-official`（core 唯一非 boto3 依赖；boto3 由 Lambda runtime 自带、不打）。打到 `.lambda_build/`（gitignore，每次 synth 重建）。
 
 ## prefix 契约（关键）
 
-`--prefix`（CDK context `-c prefix=`，默认 `gherkai-`）**必须与 cli 的 `--prefix` 一致**——CDK 建的资源名 = cli 推导的默认名（`names.py` re-export 产品本体 `gherkai.names`，与 cli 同源）。不一致 → cli 连不上资源、preflight 报错点名 prefix。
+`--prefix`（CDK context `-c prefix=`，默认 `gherkai-`）**必须与 cli 的 `--prefix` 一致**——CDK 建的资源名 = cli 推导的默认名（`names.py` re-export 产品本体 `gherkai_runtime.names`，与 cli 同源）。不一致 → cli 连不上资源、preflight 报错点名 prefix。
 
-命名规则**真同源**：`names.py` 直接 re-export 产品本体 `gherkai/names.py`（曾因「CDK 独立工程、不能 import cli」复刻一份、须两处同步改——组合根共享层抽为平级 `gherkai/` 包后复刻消除，ADR 0016「演进」节/0033）。
+命名规则**真同源**：`names.py` 直接 re-export 产品本体 `runtime/gherkai_runtime/names.py`（曾因「CDK 独立工程、不能 import cli」复刻一份、须两处同步改——组合根共享层抽为平级的产品本体包后复刻消除，ADR 0016「演进」节/0033）。
 
 ## 用
 
+本工程**不是**根 uv workspace 的成员——它有自己的 venv 与 `uv.lock`（CDK 依赖重、与三个发行包无关），
+下面的命令都在 `iac_aws_backend/` 目录下键入。依赖里的 `gherkai-runtime`（命名真源）走 path 源 `../runtime`。
+
 ```bash
-uv sync                                    # 建 venv、装 CDK
+uv sync                                    # 建 venv、装 CDK（+ path 源的 gherkai-runtime）
 
 # 合成 CloudFormation 模板（纯本地、不碰 AWS）——CI/改动后的验证边界
 CDK_DEFAULT_ACCOUNT=<acct> CDK_DEFAULT_REGION=us-east-1 uv run cdk synth

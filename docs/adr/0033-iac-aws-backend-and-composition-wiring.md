@@ -38,10 +38,10 @@
 11. subnet/sg 的 ID 写进确定性路径的 SSM 参数（cli 读，见「subnet/sg 走 SSM」）。
 
 **无状态跑批的事件驱动链（[0034](./0034-detached-batch-reconciler.md) 引入；机制/为什么归 0034，此处只列资源、命名与触发契约）：**
-12. **3 个 Lambda Function**（同一份 code asset：`lambdas/` + `core/core` + `gherkai/gherkai`，pip 装 gherkin-official；boto3 用 runtime 自带）——`{prefix}kicker`（handler `reconciler.kicker_handler`）/ `{prefix}reconciler`（`reconciler.handler`）/ `{prefix}exit-observer`（`exit_observer.handler`）。名走 prefix 层默认名（基名 `kicker`/`reconciler`/`exit-observer` 在 `gherkai/names.py`），**cli 侧按同一 prefix 拼出同名**去 preflight 探活、`status --wait` 据此 invoke kicker → 与 task-def 同款「单一命名事实源、不漂移」。
+12. **3 个 Lambda Function**（同一份 code asset：`lambdas/` + `core/gherkai_core` + `runtime/gherkai_runtime`，pip 装 gherkin-official；boto3 用 runtime 自带）——`{prefix}kicker`（handler `reconciler.kicker_handler`）/ `{prefix}reconciler`（`reconciler.handler`）/ `{prefix}exit-observer`（`exit_observer.handler`）。名走 prefix 层默认名（基名 `kicker`/`reconciler`/`exit-observer` 在 `runtime/gherkai_runtime/names.py`），**cli 侧按同一 prefix 拼出同名**去 preflight 探活、`status --wait` 据此 invoke kicker → 与 task-def 同款「单一命名事实源、不漂移」。
 13. **两表 DynamoDB Stream（`NEW_IMAGE`）+ 两个 event source mapping**：events 表 Stream → reconciler；runs 表 Stream → kicker，且**mapping 带 filter `eventName=INSERT ∧ NewImage.detached.BOOL=true`**（同步 `run --backend cloud` 的 create_run 同样 INSERT runs 表，靠 `detached` 标记在 Stream 层滤掉、零 Lambda 调用；标记由 submit 组合根写在 STATE item 上）。这两条触发关系（含 kicker 的 filter）与 container 名同属 CDK↔code 硬契约：filter 写漏 = 同步 run 被双开推进器。**events 表 Stream 这一条滤不了、只能在 handler 里判**：events item 上没有 `detached` 标记（标记只在 runs 表 STATE item 上），且同步 `run --backend cloud` 与 detached 共用同一张 events 表 —— 故 reconciler（与同 cluster 触发的 exit-observer，见 14.）在动手前自己查 run 是否 detached、非 detached 即 no-op（分流机制与不变量见 [0034](./0034-detached-batch-reconciler.md) 端到端 cloud 1b）。
 14. **EventBridge rule `{prefix}ecs-stopped`** → exit-observer：本 cluster 的 `ECS Task State Change` ∧ `lastStatus=STOPPED`（event pattern 按 clusterArn 过滤，不误触账户里别的 ECS 负载）。
-15. **job timeout 到点触发器的两件配套**（[0034](./0034-detached-batch-reconciler.md)「job timeout」节）：Scheduler 执行 role `{prefix}timeout-scheduler`（`scheduler.amazonaws.com` assume、只授 invoke kicker；用**确定性 kicker ARN 字符串**授权以避免 role↔function 互引成环）+ one-time schedule 的名字空间 `schedule/default/{prefix}job-timeout-*`（Lambda 的 Create/DeleteSchedule 资源域；schedule 本身运行期由推进器建、`ActionAfterCompletion=DELETE` 自动清，**非 CDK 建**）。名字空间前缀走 prefix 层默认名（基名 `job-timeout` 在 `gherkai/names.py`，`job_timeout_schedule_prefix()` 纯函数）——**IaC 的 IAM 资源域与推进器的建名同源推导**，同 Lambda 名那款「单一命名事实源」：单侧硬编码改名 → CreateSchedule 撞资源域 AccessDenied，而 arm 是 best-effort（只打日志），job timeout 会静默降级成只剩 tick 防御扫、纯静默 job 彻底失去超时保护。
+15. **job timeout 到点触发器的两件配套**（[0034](./0034-detached-batch-reconciler.md)「job timeout」节）：Scheduler 执行 role `{prefix}timeout-scheduler`（`scheduler.amazonaws.com` assume、只授 invoke kicker；用**确定性 kicker ARN 字符串**授权以避免 role↔function 互引成环）+ one-time schedule 的名字空间 `schedule/default/{prefix}job-timeout-*`（Lambda 的 Create/DeleteSchedule 资源域；schedule 本身运行期由推进器建、`ActionAfterCompletion=DELETE` 自动清，**非 CDK 建**）。名字空间前缀走 prefix 层默认名（基名 `job-timeout` 在 `runtime/gherkai_runtime/names.py`，`job_timeout_schedule_prefix()` 纯函数）——**IaC 的 IAM 资源域与推进器的建名同源推导**，同 Lambda 名那款「单一命名事实源」：单侧硬编码改名 → CreateSchedule 撞资源域 AccessDenied，而 arm 是 best-effort（只打日志），job timeout 会静默降级成只剩 tick 防御扫、纯静默 job 彻底失去超时保护。
 
 **（编排进程角色**——跑 core/cli 的机器需：**同步 `run`**（进程内推进、直接起 task）`ecs:RunTask`/`StopTask`/`DescribeTasks` + `dynamodb:Query`/`PutItem` + store 读写 + `s3:PutObject`（job 上传）；**preflight 只读探活**（任何 `--backend cloud`）`dynamodb:DescribeTable` / `s3:HeadBucket` / `ecs:DescribeClusters` / `ecs:DescribeTaskDefinition`，detached `submit` 另需 `lambda:GetFunction`（探链上三 Lambda 存在性）；**`status --wait` 接力 kickoff** `lambda:InvokeFunction`（`{prefix}kicker`）；**读 subnet/sg** `ssm:GetParameter`（`/{prefix}backend/*`）。**detached `submit`/`status` 的机器只需「runs 表读写 + 上述只读探活 + `InvokeFunction`」、无任何 ECS 写/执行权限**（起 task 全走 Lambda 执行角色，见 10.——[0034](./0034-detached-batch-reconciler.md) 最小权限卖点）。若编排也在 AWS 上跑则一并建；本地跑则用本地凭证，不在本 stack 强制。）
 
@@ -53,7 +53,7 @@
 
 **决策：两层命名，正交组合。**
 
-- **prefix 层**（`--prefix`，默认 `gherkai-`）：批量决定**所有名字类资源**的默认名——`{prefix}runs`/`{prefix}events`/`{prefix}artifacts`/`{prefix}cluster`/`{prefix}novaact-worker`/`{prefix}midscene-worker`/`{prefix}kicker`/`{prefix}reconciler`/`{prefix}exit-observer` 等（task-def 用引擎规范名 `novaact`，非 `nova`；三个 Lambda 名 cli 侧 preflight/接力也按此拼，见「资源清单」12.）。**CDK 部署吃同一 prefix**（`cdk deploy -c prefix=prod-`），故 CDK 建的名 = cli 推导的默认名 → **单一事实源、不漂移**。`--prefix prod-` 一键切整套。**命名真源的落位演进**：曾因「CDK 独立工程、不能 import cli」在 `iac_aws_backend/names.py` **复刻**一份命名函数（双写、靠对拍测试防漂移）；组合根共享层抽为平级 `gherkai/` 包后（[0016](./0016-execution-architecture-core-lib-run-model.md)「演进」节），命名纯函数移入零依赖的 `gherkai/names.py`，iac 直接 import——复刻消除、护栏测试转为「真同源」的结构性保证。
+- **prefix 层**（`--prefix`，默认 `gherkai-`）：批量决定**所有名字类资源**的默认名——`{prefix}runs`/`{prefix}events`/`{prefix}artifacts`/`{prefix}cluster`/`{prefix}novaact-worker`/`{prefix}midscene-worker`/`{prefix}kicker`/`{prefix}reconciler`/`{prefix}exit-observer` 等（task-def 用引擎规范名 `novaact`，非 `nova`；三个 Lambda 名 cli 侧 preflight/接力也按此拼，见「资源清单」12.）。**CDK 部署吃同一 prefix**（`cdk deploy -c prefix=prod-`），故 CDK 建的名 = cli 推导的默认名 → **单一事实源、不漂移**。`--prefix prod-` 一键切整套。**命名真源的落位演进**：曾因「CDK 独立工程、不能 import `gherkai_cli`」在 `iac_aws_backend/names.py` **复刻**一份命名函数（双写、靠对拍测试防漂移）；组合根共享层抽为平级包（今 `runtime/gherkai_runtime`）后（[0016](./0016-execution-architecture-core-lib-run-model.md)「演进」节），命名纯函数移入零依赖的 `runtime/gherkai_runtime/names.py`，iac 直接 import（其 `pyproject.toml` 依赖 `gherkai-runtime`，path 源 `../runtime`）——复刻消除、护栏测试转为「真同源」的结构性保证。
 - **单资源覆盖层**（`--ddb-table`/`--s3-bucket`/… 给完整终值）：直接用给定值。
 
 **关键自洽点（无特判逻辑）**：覆盖时 prefix **自然不参与**——因为 prefix 只在「生成默认名」这条路径上拼，而覆盖 = 直接给完整 family name = 根本不走生成路径。两层在不同代码路径、正交解耦，不需要 `if override: strip_prefix` 之类的特判。
@@ -91,7 +91,7 @@ subnet/sg 不是「名字」，是 **AWS 建 VPC 时生成的 ID**（`subnet-0ab
 
 **目标**：别跑到一半才因「表/桶/cluster 不存在」炸；启动即探、报错要能指向 prefix 配错/CDK 没部署。
 
-**决策：扩展现有 preflight**（`cli/cli/__main__.py` 的 `persistence.begin()` 已对 store 探活失败退 2），**不引入 SSM 存 prefix**。
+**决策：扩展现有 preflight**（`cli/gherkai_cli/__main__.py` 的 `persistence.begin()` 已对 store 探活失败退 2），**不引入 SSM 存 prefix**。
 
 - cli 用**已解析的 prefix** 拼出 cloud 资源名，启动时探存在性（`DescribeTable`/`HeadBucket`/`DescribeClusters`）。
 - 不存在 → fail-fast 退 2，**错误信息带上 prefix**：如「用 `--prefix=gherkai-` 拼出的表 `gherkai-events` 不存在——是 prefix 配错、还是 CDK（`iac_aws_backend`）未部署？」。
@@ -161,7 +161,7 @@ subnet/sg 不是「名字」，是 **AWS 建 VPC 时生成的 ID**（`subnet-0ab
 
 ## 组合根接线（非 IaC，已编码）
 
-`gherkai/compose.py`（产品本体，曾居 `cli/`——[0016](./0016-execution-architecture-core-lib-run-model.md)「演进」节）的 `build_engines` 只产 `SubprocessEngine`（两个引擎，local 执行）。新增 `build_fargate_engines`，`--backend cloud` 用它替代：
+`runtime/gherkai_runtime/compose.py`（产品本体，曾居 `cli/`——[0016](./0016-execution-architecture-core-lib-run-model.md)「演进」节）的 `build_engines` 只产 `SubprocessEngine`（两个引擎，local 执行）。新增 `build_fargate_engines`，`--backend cloud` 用它替代：
 
 - **`build_fargate_engines`（对称 `build_engines` 的 dict）**：按 `job.engine` 造 `FargateEngine`（`new_run_id()` 后把 run_id + cluster + 按引擎选的 task-def + network（读 SSM）+ events 表名 + container-name + job-s3 + artifact-s3 + **SDK 产物落点 env** + region 一起注入构造，对称已有 store 注入；**不传 profile**——决策 C 非对称）。
 - **产物上传要注入两组 env、缺一不可（真跑暴露）**：worker `ArtifactUploader` 上传需要 ① `ARTIFACT_S3_BUCKET`/`PREFIX`（S3 落点）**和** ② SDK 产物本地落点 env（`NOVA_LOGS_DIR`/`MIDSCENE_RUN_DIR`，容器内路径，如 `/tmp/gherkai-run/<run_id>/{nova-trajectories,midscene-run}`）——uploader 用后者的父级算 `run_dir`/相对 key，**缺它 `run_dir=None` → uploader no-op → 报 `file://` → 产物写容器盘、STOPPED 后随盘销毁必丢**（ADR [0029](./0029-engine-artifacts-to-s3.md)）。subprocess 侧 `build_engines` 本就注入 SDK 落点 env，Fargate 侧曾漏（只注 S3 落点）——**只注 ①不注②等于没上传**。这两组按引擎不同（Nova `NOVA_LOGS_DIR` / Midscene `MIDSCENE_RUN_DIR`），组合根按引擎算好、`FargateEngine` 引擎无关地转发。

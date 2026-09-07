@@ -6,7 +6,7 @@
 
 ## 现状（已端到端验证）
 
-架构：**核心库 `core/`（Python）自解析 Gherkin → 分组 scope/job → 调度**，每个 scope spawn 一个**薄 worker 子进程**（Midscene=TS / Nova Act=Python），worker 讲统一的 worker↔core 协议（ADR 0024）。`cli/` 是核心库的第一张前端皮（argparse + render），组合根共享层在 `gherkai/`（ADR 0016「演进」节）。已**退役** v0.x 的 cucumber-js/pytest-bdd 双 runner 直跑（见 ADR 0016 执行架构 / 0022 BDD runner 退役 / 0023 核心语言）。
+架构：**核心库 `core/`（Python）自解析 Gherkin → 分组 scope/job → 调度**，每个 scope spawn 一个**薄 worker 子进程**（Midscene=TS / Nova Act=Python），worker 讲统一的 worker↔core 协议（ADR 0024）。`cli/` 是核心库的第一张前端皮（argparse + render），组合根共享层在 `runtime/`（ADR 0016「演进」节）。已**退役** v0.x 的 cucumber-js/pytest-bdd 双 runner 直跑（见 ADR 0016 执行架构 / 0022 BDD runner 退役 / 0023 核心语言）。
 
 三层链路 + v1.0 核心库均已在真实 AWS 账号端到端验证：
 
@@ -15,7 +15,7 @@
 | 双引擎执行 | 同一份 `.feature` → 两个引擎薄 worker（cli 经 `@engine` tag 路由）                                        | ✅ 端到端真跑                                                    |
 | 云端浏览器 | 两个引擎都接 AgentCore Browser（各自一个会话，CDP 驱动）                                                   | ✅                                                               |
 | 核心库     | parse + scope 分组 + schedule 调度 + 4 ports（Engine/Run/Result/ReportStore）+ 实时写编排（RunPersistence） | ✅ 单测覆盖                                                      |
-| 云端 store | 状态落 DynamoDB、判定结果与报告落 S3（+ StepArgument offload 解 DDB 400KB 限），boto3 走可选 `core[aws]`    | ✅ 已接 cli（`--backend cloud`）、真 AWS 端到端；moto 单测对拍 local |
+| 云端 store | 状态落 DynamoDB、判定结果与报告落 S3（+ StepArgument offload 解 DDB 400KB 限），boto3 只在云端路径懒加载（库层 extra `gherkai-core[aws]` / `gherkai-runtime[aws]`；CLI 发行包 `gherkai` 硬依赖 `gherkai-runtime[aws]`，ADR 0037）    | ✅ 已接 cli（`--backend cloud`）、真 AWS 端到端；moto 单测对拍 local |
 | 投票治理   | AI 断言可配 N 次取多数票（`--assertion-votes`，治抖动）                                                    | ✅                                                               |
 | RunReport  | 跨引擎归集索引（manifest + index，不融合产物）                                                             | ✅                                                               |
 | 网络韧性   | 建连两层重试 + network_error 分类 + SIGTERM 会话泄漏根治                                                | ✅                                                               |
@@ -36,7 +36,7 @@ flowchart TD
 
     subgraph L2["② 产品层"]
         CLI["cli/ —— run / submit / status / plan /<br/>list-engines / list-deterministic<br/>命令行皮（Lambda / 未来 WebUI 是另两张皮）"]
-        G["gherkai/ —— 产品本体 = 组合根<br/>引擎注册表与装配 · 资源命名真源 · <br/>隧道口子（ADR 0016「演进」节 / 0035）"]
+        G["runtime/ —— 产品本体 = 组合根<br/>引擎注册表与装配 · 资源命名真源 · <br/>隧道口子（ADR 0016「演进」节 / 0035）"]
         C["core/（Python）—— parse → scope 分组 → schedule 调度<br/>窄腰，零引擎依赖（ADR 0016）"]
         CLI --> G --> C
     end
@@ -68,9 +68,11 @@ flowchart TD
 ├── README.md                  ← 本文件
 ├── CONTEXT.md                 ← 领域术语表（glossary）
 ├── CLAUDE.md                  ← 项目约定（沟通/文档纪律/代码纪律/工作方式）——给 AI coding agent 与人
+├── pyproject.toml / uv.lock   ← uv workspace 根（成员 = core / runtime / cli 三个发行包）：单一 lock + 共用 dev 依赖与 pytest 配置（ADR 0037）
 ├── docs/                      ← 架构决策与过程记录
 │   ├── adr/                   ← 架构决策记录（0001–0038）
 │   ├── guides/                ← 给人的阅读理解文档（机制解读/横切合成等，只讲 how、权威在 ADR）
+│   ├── journey/               ← 任务推进的 staging 区（过程产物，吸收进 ADR/code 后即删，见 CLAUDE.md「文档纪律」）
 │   ├── REFERENCES.md          ← 外部一手来源
 │   └── {doc,code}-health-review.md  ← 文档/代码健康度复盘方法
 ├── features/                  ← 共享 .feature（同一份两个引擎同读；通用 step 风格，QA 零代码）
@@ -78,12 +80,12 @@ flowchart TD
 │   ├── engine_routing.feature              ← @engine tag 路由验证
 │   ├── deterministic_anchor.feature        ← @deterministic 锚点验证（ADR 0022）
 │   └── concurrency_and_scope.feature       ← 手工真跑回归夹具：改调度/会话生命周期后重跑验 ADR 0019
-├── core/                      ← 窄腰核心库（Python，零引擎依赖，ADR 0016）
-│   └── core/{parse,scope,schedule,project,reconcile,persist,model,wire,serialize,ports,errors}.py（project=纯归约投影 / reconcile=无状态推进编排，ADR 0034）+ adapters/{subprocess,fargate}_engine.py + cloud_launcher.py + event_log/{sqlite,ddb}.py（无状态跑批持久事件通道，ADR 0034）+ adapters/{run,result,report}_store/{local,ddb|s3}.py
-├── gherkai/                   ← 产品本体 = 组合根共享层（ADR 0016「演进」节；cli/Lambda/WebUI 的共同地基）
-│   └── gherkai/{compose.py(引擎注册表/装配·云目标解析) · detached.py(local 无状态跑批宿主) · names.py(资源命名真源) · tunnel.py(--expose-local 隧道 provider，ADR 0035) · tunnel_host.py(隧道宿主编排+守护 TTL，ADR 0035)}
-├── cli/                       ← 命令行皮（ADR 0016）
-│   └── cli/{__main__.py(argparse) · render.py}
+├── core/                      ← 窄腰核心库（发行名 gherkai-core，Python，零引擎依赖，ADR 0016）
+│   └── gherkai_core/{parse,scope,schedule,project,reconcile,persist,model,wire,serialize,ports,errors}.py（project=纯归约投影 / reconcile=无状态推进编排，ADR 0034）+ adapters/{subprocess,fargate}_engine.py + adapters/cloud_launcher.py + adapters/event_log/{sqlite,ddb}.py（无状态跑批持久事件通道，ADR 0034）+ adapters/{run,result,report}_store/{local,ddb|s3}.py
+├── runtime/                   ← 产品本体 = 组合根共享层（发行名 gherkai-runtime；ADR 0016「演进」节；cli/Lambda/WebUI 的共同地基）
+│   └── gherkai_runtime/{compose.py(引擎注册表/装配·云目标解析) · detached.py(local 无状态跑批宿主) · names.py(资源命名真源) · tunnel.py(--expose-local 隧道 provider，ADR 0035) · tunnel_host.py(隧道宿主编排+守护 TTL，ADR 0035)}
+├── cli/                       ← 命令行皮（发行名 gherkai，命令 gherkai；ADR 0016）
+│   └── gherkai_cli/{__main__.py(argparse) · render.py}
 ├── engines/                   ← 两个可插拔引擎，与 core 平级
 │   ├── midscene/   ← TS 子工程：worker/run-scope.ts（薄 worker）· worker/deterministic.ts · lib/agentcore-sigv4.mts · spikes/
 │   └── novaact/    ← Python 子工程：worker/run_scope.py（薄 worker）· worker/deterministic.py · lib/workflow_setup.py · spikes/
@@ -99,17 +101,19 @@ flowchart TD
   - AgentCore Browser（`bedrock-agentcore` 服务）
   - Nova Act 服务（`nova-act`）+ 模型 `nova-act-latest`
 - Nova Act workflow definition（IAM 路径必需）：**代码会自动 create-if-not-exists**（`engines/novaact/lib/workflow_setup.py`），无需手动操作。若想手动预建也可：`aws nova-act create-workflow-definition --region us-east-1 --name spike-wikipedia-benchmark`（见 ADR 0004）。
-- Node 22（midscene）、Python 3.13 + uv（novaact）
+- Node 22（midscene）、Python 3.13 + uv（core/runtime/cli 三包 + novaact worker）
 - （可选，仅 `--expose-local` 本地应用测试需要）[ngrok](https://ngrok.com/download) + authtoken（**注册免费账号即够**，付费账号亦可；`ngrok config add-authtoken <token>`——注意是 dashboard 上的 **Authtoken**，不是 `cr_` 开头的 API key）
 
 ## 运行（经核心库 cli，一个入口跑两个引擎）
 
 ```bash
-# 首次安装：三个运行环境（互相隔离、不污染全局，见下「注意」）
-cd cli && uv sync                                  # cli + gherkai + core（gherkai/core 作 path 依赖）
-(cd ../engines/novaact && uv sync)                 # Nova Act worker 的 .venv（Python 3.13）
-(cd ../engines/midscene && npm install)            # Midscene worker 的 node_modules（Node 22）
+# 首次安装：三个运行环境（互相隔离、不污染全局，见下「注意」）——三条都在仓库根执行
+uv sync                                            # cli + runtime + core 三包一次装齐（uv workspace，共用根 .venv/）
+(cd engines/novaact && uv sync)                    # Nova Act worker 的 .venv（Python 3.13）
+(cd engines/midscene && npm install)               # Midscene worker 的 node_modules（Node 22）
 ```
+
+第一条 `uv sync` 把 `core/`、`runtime/`、`cli/` 三个发行包（`gherkai-core` / `gherkai-runtime` / `gherkai`）以 editable 装进仓库根的同一个 `.venv/`（ADR 0037：单一 workspace、单一 `uv.lock`）。此后**在仓库根**敲：`uv run gherkai <子命令>` 跑 CLI（`gherkai` 是安装出来的命令），`uv run pytest` 跑三包的全部单测。
 
 跑法由**两个正交旋钮**组合出来（四种组合都合法），按需各选一档：
 
@@ -119,11 +123,11 @@ cd cli && uv sync                                  # cli + gherkai + core（gher
 ### ① 先预检（纯本地、不烧钱）
 
 ```bash
-uv run python -m cli plan ../features/engine_routing.feature   # 看 scope/job 分组、engine 路由、校验配置；
-                                                               # 每个 step 还标注派发预期：命中确定性锚点的标
-                                                               # 「← 确定性: <说明>」，纯自然语言步走 AI（不标）
-uv run python -m cli list-engines                              # 列可用引擎
-uv run python -m cli list-deterministic --engine midscene      # 列该引擎支持的确定性 step（--json 可选，ADR 0036）
+uv run gherkai plan features/engine_routing.feature   # 看 scope/job 分组、engine 路由、校验配置；
+                                                      # 每个 step 还标注派发预期：命中确定性锚点的标
+                                                      # 「← 确定性: <说明>」，纯自然语言步走 AI（不标）
+uv run gherkai list-engines                           # 列可用引擎
+uv run gherkai list-deterministic --engine midscene   # 列该引擎支持的确定性 step（--json 可选，ADR 0036）
 ```
 
 `list-deterministic` 输出示例（写 feature 时查询可复用的精确断言，照 `示例` 一行抄进 feature 即可）：
@@ -141,18 +145,18 @@ uv run python -m cli list-deterministic --engine midscene      # 列该引擎支
 
 ```bash
 # engine 由 @engine tag 选、未标用 --default-engine
-AWS_REGION=us-east-1 uv run python -m cli run ../features/engine_routing.feature
+AWS_REGION=us-east-1 uv run gherkai run features/engine_routing.feature
 # 调高投票治抖动 / 放开并发 / JSON 输出：
-AWS_REGION=us-east-1 uv run python -m cli run ../features/wikipedia_generic.feature \
+AWS_REGION=us-east-1 uv run gherkai run features/wikipedia_generic.feature \
   --default-engine midscene --assertion-votes 3 --max-concurrency 2 --json
 ```
 
-默认（local）落盘到 `cli/reports/<run_id>/`：判定真值（`jobs/`）+ 控制面（`run_meta.json`/`run_state.json`）+ RunReport（`index.html` 人看入口 + `manifest.json`）。**边跑边写**：run 开始即落 definition + 初始态，每个 scope 起跑刷 RUNNING、完成即落判定，最后 finalize 总状态。
+默认（local）落盘到当前目录下的 `reports/<run_id>/`（`--report-dir` 可改）：判定真值（`jobs/`）+ 控制面（`run_meta.json`/`run_state.json`）+ RunReport（`index.html` 人看入口 + `manifest.json`）。**边跑边写**：run 开始即落 definition + 初始态，每个 scope 起跑刷 RUNNING、完成即落判定，最后 finalize 总状态。
 
 加 `--backend cloud` 即同一条命令换云端档：worker 改跑 Fargate 容器、状态落 DynamoDB、判定真值与报告落 S3（`--prefix` 与 `cdk deploy` 时一致即可，表/桶/cluster 名由它批量推导）：
 
 ```bash
-AWS_REGION=us-east-1 uv run python -m cli run ../features/engine_routing.feature \
+AWS_REGION=us-east-1 uv run gherkai run features/engine_routing.feature \
   --backend cloud --prefix gherkai-
 ```
 
@@ -162,13 +166,13 @@ AWS_REGION=us-east-1 uv run python -m cli run ../features/engine_routing.feature
 
 ```bash
 # local 档：本机 fork 一个脱离 CLI 的后台进程推进——不必守着终端，但本机需保持开机
-RUN_ID=$(uv run python -m cli submit ../features/wikipedia_generic.feature)
-uv run python -m cli status "$RUN_ID"            # 查一眼进度（只读、不推进）
-uv run python -m cli status "$RUN_ID" --wait     # 等到终态、按判定给退出码——CI 要 0/1 判定用这个
+RUN_ID=$(uv run gherkai submit features/wikipedia_generic.feature)
+uv run gherkai status "$RUN_ID"            # 查一眼进度（只读、不推进）
+uv run gherkai status "$RUN_ID" --wait     # 等到终态、按判定给退出码——CI 要 0/1 判定用这个
 
 # cloud 档：definition 落 DynamoDB 即返回，之后由云端 Lambda 事件驱动链推进——提交完关机也跑完
-RUN_ID=$(uv run python -m cli submit ../features/wikipedia_generic.feature --backend cloud --prefix gherkai-)
-uv run python -m cli status "$RUN_ID" --backend cloud --prefix gherkai- --wait
+RUN_ID=$(uv run gherkai submit features/wikipedia_generic.feature --backend cloud --prefix gherkai-)
+uv run gherkai status "$RUN_ID" --backend cloud --prefix gherkai- --wait
 ```
 
 提交完就走不等于失控：每个 job 有墙钟预算兜底（缺省 300s；`@timeout:<秒>` tag 按用例声明、`--default-job-timeout` 改缺省）——卡死/超预算的 job 会被自动停掉并判 `error(timeout)`，local 挂死、cloud 无限烧钱都由它止损。`status` 的 `--backend`/`--report-dir`/`--prefix` 须与 `submit` 时一致（否则查不到）。选项全表、退出码分层、submit/status 语义细节见 [`cli/README.md`](./cli/README.md)。
@@ -180,8 +184,8 @@ uv run python -m cli status "$RUN_ID" --backend cloud --prefix gherkai- --wait
 ```bash
 # feature 里写的是 http://localhost:3000（原始地址，plan 也显示它）；
 # 框架起隧道后在提交时替换为公网 URL（带每 run 一换的 basic-auth 凭据、终态即拆）
-uv run python -m cli run my_app.feature --expose-local http://localhost:3000
-RUN_ID=$(uv run python -m cli submit my_app.feature --expose-local http://localhost:3000)
+uv run gherkai run my_app.feature --expose-local http://localhost:3000
+RUN_ID=$(uv run gherkai submit my_app.feature --expose-local http://localhost:3000)
 ```
 
 前置：装 ngrok + 配 authtoken（见上「前置要求」）。`submit` 后隧道由后台进程持有（cloud 档为守护进程）——**本机需保持开机联网直到 run 终态**。设计与边界见 ADR 0035。
@@ -209,4 +213,4 @@ cd engines/novaact && AWS_REGION=us-east-1 .venv/bin/python spikes/wikipedia_ben
 ## 注意
 
 - 运行会真实消耗 AWS 费用（模型调用 + AgentCore 会话）。
-- 环境隔离：TS 依赖在 `engines/midscene/node_modules`，Python 依赖在 `engines/novaact/.venv`，均不污染全局。
+- 环境隔离：三个 Python 发行包（core/runtime/cli）的依赖装在仓库根 `.venv`（uv workspace 单一 `uv.lock`），Nova Act worker 另有独立的 `engines/novaact/.venv`，Midscene worker 的 TS 依赖在 `engines/midscene/node_modules`——均不污染全局。

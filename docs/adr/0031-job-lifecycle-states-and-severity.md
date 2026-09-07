@@ -177,14 +177,14 @@ cli 退出码从「`status.value == 'passed'` 才 0」改为**基于 run 级 sev
 
 ## touch points（落点指针）
 
-- `core/model.py`：`Status` 的 SKIPPED/ABORTED（判定派生态）+ PENDING/RUNNING（前置态；注释标明 core 内态、非 wire）；`_STATUS_SEVERITY`（仅终态）+ `severity()` 比较辅助；`_NON_VERDICT` 过滤名单；`TERMINAL_STATUSES`（终态真源，取补于 `_PRE_TERMINAL`，决定一·补末条）；`StepSkipped` 事件（frozen dataclass `scenario_id`/`step_index`，无 status/votes/cost）入 `Event` Union + `StepResult.shortcircuited`（正交布尔，决定六）。
-- `core/schedule.py`：job 级 SKIPPED/ABORTED 的赋态点——起 worker 前 `abort_flag` 已 set → SKIPPED（worker 从未 spawn）；事件循环中因 `abort_flag` 被 stop + 其 WorkerNetworkError 竞态回填 → ABORTED；**超时（deadline）分支维持 `error`+`errorType=timeout`、不归 aborted**（回填判断看 `abort_flag` 而非笼统 `self_stopped`——后者被 timeout 与 fail-fast 共用）。
-- `core/project.py`：`_aggregate`（入口过滤 `_NON_VERDICT`；两路共用的真源，`schedule._aggregate` 为其别名，决定三）；`reduce_event` 的 `StepSkipped` 分支 → 暂存 `StepResult(status=SKIPPED, shortcircuited=True)`，**绝不写 `scenario_status`**（被短路 step 无 `step_started`，`duration_ms` 恒 None——没跑=无墙钟）。
-- `core/wire.py`：`event_from_json` 的 `step_skipped` 分支（加法，不碰 step_done 三态解析）。
-- `core/serialize.py`：JobResult/RunResult 链路靠 `Status(str,Enum)` 天然 round-trip 新值（单测覆盖 skipped/aborted）；StepResult to/from_dict 的 `shortcircuited`（`.get` 默认 False，向后兼容旧落盘）。（**注**：`RunState` 链路的 `run_state_to/from_dict` 归 [0030](./0030-realtime-persistence-seam.md) touch points，非本 enum 的落点。）
-- `core/adapters/report_store/local.py`：`_STATUS_COLOR`（每态各一色 + 兜底灰 `#57606a`；着色意图见决定二「视觉映射」）；index.html 的连锁失败旁注读 `shortcircuited`。
-- `cli/cli/render.py`：文本汇总的连锁失败旁注同读 `shortcircuited`（被短路 step 显 skipped 态 + 旁注）。
-- `cli/cli/__main__.py`：同步 `run` 的退出码读内存 `RunResult.status`（决定五数据源）；`status`/`--wait` 的终态判定引 `TERMINAL_STATUSES`。
+- `core/gherkai_core/model.py`：`Status` 的 SKIPPED/ABORTED（判定派生态）+ PENDING/RUNNING（前置态；注释标明 core 内态、非 wire）；`_STATUS_SEVERITY`（仅终态）+ `severity()` 比较辅助；`_NON_VERDICT` 过滤名单；`TERMINAL_STATUSES`（终态真源，取补于 `_PRE_TERMINAL`，决定一·补末条）；`StepSkipped` 事件（frozen dataclass `scenario_id`/`step_index`，无 status/votes/cost）入 `Event` Union + `StepResult.shortcircuited`（正交布尔，决定六）。
+- `core/gherkai_core/schedule.py`：job 级 SKIPPED/ABORTED 的赋态点——起 worker 前 `abort_flag` 已 set → SKIPPED（worker 从未 spawn）；事件循环中因 `abort_flag` 被 stop + 其 WorkerNetworkError 竞态回填 → ABORTED；**超时（deadline）分支维持 `error`+`errorType=timeout`、不归 aborted**（回填判断看 `abort_flag` 而非笼统 `self_stopped`——后者被 timeout 与 fail-fast 共用）。
+- `core/gherkai_core/project.py`：`_aggregate`（入口过滤 `_NON_VERDICT`；两路共用的真源，`schedule._aggregate` 为其别名，决定三）；`reduce_event` 的 `StepSkipped` 分支 → 暂存 `StepResult(status=SKIPPED, shortcircuited=True)`，**绝不写 `scenario_status`**（被短路 step 无 `step_started`，`duration_ms` 恒 None——没跑=无墙钟）。
+- `core/gherkai_core/wire.py`：`event_from_json` 的 `step_skipped` 分支（加法，不碰 step_done 三态解析）。
+- `core/gherkai_core/serialize.py`：JobResult/RunResult 链路靠 `Status(str,Enum)` 天然 round-trip 新值（单测覆盖 skipped/aborted）；StepResult to/from_dict 的 `shortcircuited`（`.get` 默认 False，向后兼容旧落盘）。（**注**：`RunState` 链路的 `run_state_to/from_dict` 归 [0030](./0030-realtime-persistence-seam.md) touch points，非本 enum 的落点。）
+- `core/gherkai_core/adapters/report_store/local.py`：`_STATUS_COLOR`（每态各一色 + 兜底灰 `#57606a`；着色意图见决定二「视觉映射」）；index.html 的连锁失败旁注读 `shortcircuited`。
+- `cli/gherkai_cli/render.py`：文本汇总的连锁失败旁注同读 `shortcircuited`（被短路 step 显 skipped 态 + 旁注）。
+- `cli/gherkai_cli/__main__.py`：同步 `run` 的退出码读内存 `RunResult.status`（决定五数据源）；`status`/`--wait` 的终态判定引 `TERMINAL_STATUSES`。
 - `engines/novaact/worker/run_scope.py` + `engines/midscene/worker/run-scope.ts`：scope 内上游 `status==error` 后短路后续 step、发 `step_skipped`（不调 AI）。
 - 交叉指针落在：[0024](./0024-worker-core-protocol.md)（「`status` 三态」条的 core 内态澄清 + wire 的 `step_skipped` 事件段）/ [0026](./0026-schedule-module.md)（「status 归约」段的 `_NON_VERDICT` 入口过滤与 job 级派生态）/ [0016](./0016-execution-architecture-core-lib-run-model.md)（数据模型表 Step 行的 skipped+`shortcircuited`）/ [0028](./0028-transient-network-ssl-resilience.md)（scope 内短路条：defer 转实现，判据/承载）。
 

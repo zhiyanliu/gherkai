@@ -1,5 +1,7 @@
 # core — 执行核心库（窄腰）
 
+发行名 `gherkai-core` / import 名 `gherkai_core`（ADR 0037 决策 2a「三名分离」）。
+
 解析 `.feature` → 分组 scope → 调度 → 收集结果。**零引擎依赖**：核心不 import Midscene / Nova Act，引擎跑在 worker 子进程里，靠 worker↔core JSON 协议通信。
 
 设计见 ADR：
@@ -14,7 +16,7 @@
 ## 模块
 
 ```
-core/
+core/gherkai_core/
 ├── model.py      ← 领域模型：Job / Scenario / Step / 7 类事件（含 step_skipped 短路）/ 四层结果 RunResult / Status 七态 / ResourceUri（纯数据）
 ├── parse.py      ← .feature → 领域模型（借 gherkin-official Compiler；库藏在此 seam 后）
 ├── scope.py      ← tag 分组 + engine 校验 → Job[]；对外 plan(features, config) -> Job[]
@@ -37,14 +39,14 @@ core/
     └── report_store/{local,s3}.py  ← ReportStore：本地文件 + S3（manifest+index）
 ```
 
-云端 adapter（DDB/S3）已建，行为对拍 local、moto 全程 mock 单测（ADR 0030 决定六）；boto3 是可选依赖 `core[aws]`。
-组合根按 backend 注入哪套 adapter——cli 已实装 `--backend {local,cloud}`（装配逻辑在产品本体 `gherkai/compose.py` 的 `build_local_stores`/`build_cloud_stores`，cli/Lambda/未来 WebUI 共用；ADR 0016「演进」节/0030 决定七）。
+云端 adapter（DDB/S3）已建，行为对拍 local、moto 全程 mock 单测（ADR 0030 决定六）；boto3 是可选依赖 `gherkai-core[aws]`（库消费者按需装；CLI 发行包 `gherkai` 已硬依赖 `gherkai-runtime[aws]`、装它即带 boto3，ADR 0037 决策 2c）。
+组合根按 backend 注入哪套 adapter——cli 已实装 `--backend {local,cloud}`（装配逻辑在产品本体 `runtime/gherkai_runtime/compose.py` 的 `build_local_stores`/`build_cloud_stores`，cli/Lambda/未来 WebUI 共用；ADR 0016「演进」节/0030 决定七）。
 
 ## 跑测试
 
 ```bash
-cd core
-uv run pytest
+uv run pytest          # 仓库根：跑三个 workspace 成员的全部单测
+cd core && uv run pytest   # 只跑 core 的（cwd 决定收集范围）
 ```
 
 ## 实际执行（跑 .feature）
@@ -53,6 +55,6 @@ core 是库，不自带可执行入口。用 [`cli/`](../cli/README.md) 这张�
 feature、注入引擎 adapter、渲染结果）：
 
 ```bash
-cd cli && uv run python -m cli run ../features/wikipedia_generic.feature
+uv run gherkai run features/wikipedia_generic.feature      # 仓库根
 ```
 

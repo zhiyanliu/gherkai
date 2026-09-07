@@ -213,7 +213,9 @@ def test_resolve_region_none_when_all_miss(monkeypatch):
 def test_resolve_region_no_boto3_returns_none_not_crash(monkeypatch):
     # 纯 local 不依赖 boto3：--region/env 全 miss 需回落 profile config，但**缺 boto3（未装 aws extra）时**
     # 不能抛未捕获 ImportError——catch → None fail-loud（等价「无 region」）。绿≠对：dev 装了 boto3 恒绿掩盖此路径，
-    # 故拦截 `import boto3` 抛 ImportError 真验。守「纯 local 路径绝不依赖 boto3」不变量（ADR 0016 决策 C / cli[aws] extra）。
+    # 故拦截 `import boto3` 抛 ImportError 真验。守「纯 local 路径绝不依赖 boto3」不变量（ADR 0016 决策 C；
+    # boto3 走库层 `gherkai-core[aws]` extra——CLI 发行包 gherkai 已硬依赖它（ADR 0037 决策 2c），但本不变量
+    # 与安装期装没装 boto3 无关）。
     monkeypatch.delenv("AWS_REGION", raising=False)
     monkeypatch.delenv("AWS_DEFAULT_REGION", raising=False)
     import builtins

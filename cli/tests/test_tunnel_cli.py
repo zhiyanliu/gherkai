@@ -111,7 +111,7 @@ def test_submit_local_writes_tunnel_file_for_per_run_cleanup(tmp_path, monkeypat
 def test_tunnel_watch_entry_wires_argparse_to_host_and_prints(monkeypatch, capsys):
     """_tunnel_watch 入口：argparse → tunnel_host.watch_run_and_stop_tunnel + 打印拆除原因。
 
-    守护主体（轮询终态 / TTL 兜底）的逻辑归 gherkai/tests/test_tunnel_host.py；此处只锁「皮传对参数」。
+    守护主体（轮询终态 / TTL 兜底）的逻辑归 runtime/tests/test_tunnel_host.py；此处只锁「皮传对参数」。
     """
     from gherkai_runtime import tunnel_host
 

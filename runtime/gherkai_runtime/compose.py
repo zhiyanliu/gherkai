@@ -106,7 +106,7 @@ def parse_iso(ts: str) -> datetime:
 def repo_root(start: Path | None = None) -> Path:
     """定位仓库根（含 core/ 与 engines/ 的目录）。
 
-    从本文件位置上溯：runtime/gherkai_runtime/compose.py → gherkai/ → 仓库根（parents[2]）。允许传入覆盖（测试用）。
+    从本文件位置上溯：runtime/gherkai_runtime/compose.py → runtime/ → 仓库根（parents[2]）。允许传入覆盖（测试用）。
     """
     if start is not None:
         return start
@@ -434,8 +434,10 @@ def build_cloud_stores(*, table: str, bucket: str, prefix: str = "",
 
     DDB 吃 `resource.Table`、三个 S3 件套（ResultStore/ReportStore/offloader）**共享一个 client**（喂错句柄
     类型运行时才 AttributeError，ADR 0016）。offloader 生产默认挂载（解 DDB 400KB 限，ADR 0030 决定七）。
-    `import boto3` 惰性在 _make_* 钩子里（cli 主依赖不含 boto3，走 cli[aws]→core[aws] extra；缺 boto3 抛
-    ImportError 由 cli 归到退 2）。prefix 分隔符规范化避粘连 key。
+    `import boto3` 惰性在 _make_* 钩子里（**纯 local 路径绝不触发 import**；「cli 主依赖不含 boto3，走
+    cli[aws]→core[aws] extra」已被 ADR 0037 决策 2c 反转：CLI 发行包 gherkai 硬依赖 `gherkai-runtime[aws]`、
+    自带 boto3，库层 `gherkai-core[aws]`/`gherkai-runtime[aws]` extra 保留给库消费者；缺 boto3 抛 ImportError
+    由 cli 归到退 2）。prefix 分隔符规范化避粘连 key。
     """
     from gherkai_core.adapters.report_store.s3 import S3ReportStore
     from gherkai_core.adapters.result_store.s3 import S3ResultStore

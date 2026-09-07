@@ -25,7 +25,7 @@ grace/stopTimeout 校准要的是 SIGTERM→退出的**真实墙钟预算**（`s
   2. `aws ecs list-tasks --cluster <cluster>` 拿 task ARN，`aws ecs stop-task` 手动停（触发 SIGTERM）。
   3. task STOPPED 后跑本脚本抓时间字段。或直接 `--wait` 让脚本轮询到 STOPPED 再吐（省得手动等）。
 
-  PYTHONPATH=core core/.venv/bin/python tools/ecs_task_timing.py \\
+  uv run python tools/ecs_task_timing.py \\
       --cluster gherkai-cluster --task <task_arn> [--region us-east-1] [--wait] [--stop-timeout 120] [--json]
 
   --wait：轮询 DescribeTasks 直到 lastStatus==STOPPED（时间字段才全）再吐；默认单次快照（可能字段未齐）。

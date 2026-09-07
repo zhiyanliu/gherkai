@@ -1,7 +1,7 @@
 """S3ResultStore（ADR 0030 决定六 / 0016 三层选型）：ResultStore port 的 S3 实装。
 
 数据面判定真值——每个 job(=scope) 一个 S3 对象。对拍 `LocalResultStore` 行为（save/load/load_all round-trip、
-scope_id 不透明编码），只把落点从本地文件换成 S3 对象。**云端 adapter，需 boto3**（`core[aws]` extra，缺它
+scope_id 不透明编码），只把落点从本地文件换成 S3 对象。**云端 adapter，需 boto3**（`gherkai-core[aws]` extra，缺它
 import 本模块不崩、构造时才友好报错，守 [0016] 窄腰）。
 
 **这坐实 ADR 里原「待定」的 ResultStore 后端 = S3**：赌 CI 按 run_id+scope_id 键取判定（key 直接算得出、

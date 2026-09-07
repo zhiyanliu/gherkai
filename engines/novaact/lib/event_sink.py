@@ -88,7 +88,7 @@ class EventSink:
         return self._client
 
     def emit(self, event: dict) -> None:
-        """吐一条 ADR 0024 事件（JSON Lines，字段名 camelCase 与 core/wire.py 一致）。
+        """吐一条 ADR 0024 事件（JSON Lines，字段名 camelCase 与 core/gherkai_core/wire.py 一致）。
 
         fd 态：write+flush（每条 flush 保序、ensure_ascii=False 保中文，与旧内联逐字节一致）。
         DDB 态：PutItem(PK=run_id#scope_id, SK=自增 seq, body=JSON line)——SK 单调自增（scope 内串行、无需协调）。

@@ -2,7 +2,7 @@
 
 把一次 run 的 RunReport（manifest.json + index.html）**本体**写到 S3，返回 `s3://…/index.html` 的 ResourceUri。
 对拍 `LocalReportStore` 的产出（manifest 形态、index 渲染），只换落点为 S3。**云端 adapter，需 boto3**
-（`core[aws]` extra，缺它 import 本模块不崩、构造时才友好报错，守 [0016] 窄腰）。
+（`gherkai-core[aws]` extra，缺它 import 本模块不崩、构造时才友好报错，守 [0016] 窄腰）。
 
 **注意区分**（[0027]/[0029]）：S3ReportStore 是把 **RunReport 自身**（core 派生的 manifest/index）写 S3，
 与「worker 把**自己的产物**（trajectory/report.html）上传 S3」是两回事（后者是 per-worker by-design、[0029]）。

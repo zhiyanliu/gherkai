@@ -85,7 +85,7 @@ export class EventSink {
     return this.client;
   }
 
-  // 吐一条 ADR 0024 事件（JSON Lines，字段名 camelCase 与 core/wire.py 一致）。
+  // 吐一条 ADR 0024 事件（JSON Lines，字段名 camelCase 与 core/gherkai_core/wire.py 一致）。
   // fd 态：fs.writeSync 裸 fd 同步写保序（与旧内联逐字节一致）。
   // DDB 态：PutItem(PK=run_id#scope_id, SK=自增 seq, body=JSON line)，套 AbortSignal.timeout 封顶（退出有界，ADR 0024）。
   // **只暴露 emit、绝不暴露底层 fd/stdout 句柄、绝不把事件挪回 stdout**（守三通道分离）。worker 是 producer/client、不 listen。

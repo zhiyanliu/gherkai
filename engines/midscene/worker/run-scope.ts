@@ -36,7 +36,7 @@ import "./deterministic.steps.js";  // 脚手架同目录（ADR 0022 退役 bdd 
 const BROWSER_ID = "aws.browser.v1";
 // AI 断言投票次数由 job.assertionVotes 决定（ADR 0014/0024，组合根经 --assertion-votes 设）。
 // 默认 1（不抖动检测，结果直观）；调高才跑 N 次取多数票。
-// 网络专用退出码（ADR 0028）：与 core/wire.py 的 EX_WORKER_NETWORK 同值（协议层单一事实源，两 Engine adapter 共用翻译）。
+// 网络专用退出码（ADR 0028）：与 core/gherkai_core/wire.py 的 EX_WORKER_NETWORK 同值（协议层单一事实源，两 Engine adapter 共用翻译）。
 // worker 建连失败、重试耗尽时以此码退出，作 out-of-band 信号（建连失败先于任何事件 emit）。
 const EX_WORKER_NETWORK = 80;
 // 建连重试上限（ADR 0028）；退避 [0.5,1,2]s，总 ~3.5s，远小于组合根按引擎推导的 grace 下限

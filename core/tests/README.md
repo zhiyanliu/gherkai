@@ -13,9 +13,12 @@
 
 ## 单元测试（默认）
 
+pytest 配置在**仓库根** `pyproject.toml`（uv workspace 三成员共用一份，ADR 0037 决策 2）；根目录跑收集三成员的 `tests/`，
+在 `core/` 目录下跑只收集 core 的（cwd 决定收集范围）：
+
 ```bash
-cd core
-uv run pytest              # 只跑单测；集成测试被 deselect（-m 'not integration'，见 pyproject）
+uv run pytest              # 仓库根：只跑单测；集成测试被 deselect（-m 'not integration'，见根 pyproject）
+cd core && uv run pytest   # 只跑 core 的单测
 uv run pytest -q           # 安静模式
 ```
 
@@ -52,7 +55,7 @@ moto 是模拟实现，与真 DDB/S3 在若干边界可能不一致（DDB 空串
 ### 跑集成测试
 
 ```bash
-cd core
+# 仓库根（或 core/ 目录下，只收集 core）
 export AWS_DDB_TABLE=ui-test-runs
 export AWS_S3_BUCKET=ui-test-artifacts-<你的后缀>
 # （凭证走 default profile；region 取 AWS_REGION/AWS_DEFAULT_REGION，默认 us-east-1）
@@ -70,6 +73,6 @@ uv run pytest                           # 仍只跑单测（集成默认 deselec
 
 ## 三重保险：`uv run pytest` 永远不连真 AWS
 
-1. `pyproject` 的 `addopts = -m 'not integration' --timeout=60`：`-m 'not integration'` 默认命令 deselect 掉所有集成测试（`--timeout=60` 与连不连 AWS 无关，是挂死安全网——FargateEngine 等-STOPPED 轮询若测试忘换假 ecs 会无限轮询，60s 后 pytest-timeout 报错而非 CI 无限挂）。
+1. **根** `pyproject.toml` 的 `addopts = -m 'not integration' --timeout=60`：`-m 'not integration'` 默认命令 deselect 掉所有集成测试（`--timeout=60` 与连不连 AWS 无关，是挂死安全网——FargateEngine 等-STOPPED 轮询若测试忘换假 ecs 会无限轮询，60s 后 pytest-timeout 报错而非 CI 无限挂）。
 2. `real_aws` fixture：没设 `AWS_DDB_TABLE`/`AWS_S3_BUCKET` 环境变量就 `skip`。
 3. `_fake_aws_creds`（autouse）：对**非** integration 标记的测试盖假凭证——单测即便误发网络请求也连不上真 AWS。

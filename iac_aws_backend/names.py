@@ -1,8 +1,8 @@
 """资源命名（ADR 0033 两层命名）——共享部分**直接 import 产品本体 `gherkai_runtime.names`（真同源）**。
 
-曾因「CDK 独立工程、不能 import cli」在此复刻命名函数（双写、靠对拍测试防漂移）；组合根共享层抽为
-平级 `gherkai/` 包后（ADR 0016「演进」节），命名纯函数移入零依赖的 `gherkai_runtime.names`，本文件退成
-「re-export + IaC 特有常量」的薄壳——复刻消除，护栏测试转为结构性保证。
+曾因「CDK 独立工程、不能 import 当时的 `cli` 包（今 `gherkai_cli`）」在此复刻命名函数（双写、靠对拍测试防漂移）；组合根共享层
+抽为平级包（今 `runtime/gherkai_runtime`）后（ADR 0016「演进」节），命名纯函数移入零依赖的
+`gherkai_runtime.names`，本文件退成「re-export + IaC 特有常量」的薄壳——复刻消除，护栏测试转为结构性保证。
 """
 from __future__ import annotations
 

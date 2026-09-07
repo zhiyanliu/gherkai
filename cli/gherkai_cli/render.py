@@ -10,7 +10,7 @@ from gherkai_core.serialize import to_dict  # 单一真理源（ADR 0027）：cl
 
 def format_event(ev: Event) -> str:
     """单个 ADR 0024 事件 → 一行进度文本（不含 scope_id——scope 归调用方的 `[core <scope>:event]` 前缀，
-    见 cli/__main__.py 的 sink；行内只留前缀没有的 scenario_id/step_index/status/votes/cost）。"""
+    见 cli/gherkai_cli/__main__.py 的 sink；行内只留前缀没有的 scenario_id/step_index/status/votes/cost）。"""
     parts: list[str] = [ev.type]
     for attr in ("scenario_id", "step_index", "status"):
         v = getattr(ev, attr, None)

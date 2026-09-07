@@ -35,7 +35,7 @@
 
 **为何 worker 上传、而非 core 去拉**：① "谁产出、谁知落点、谁上传"——worker 在容器内、最知道文件在哪/何时写完（与"产物落点自报"同源，[0028](./0028-transient-network-ssl-resilience.md) 留口子节）；② 让 core 去容器拉文件再传 S3，会把 ECS 卷/容器生命周期/S3 client 知识泄进核心，违背窄腰（[0016](./0016-execution-architecture-core-lib-run-model.md)）；③ 兑现 [0027](./0027-runreport-aggregation-index.md)「新引擎/新落点零改 core」契约——`s3://` 正是 `ResourceUri` 当初留的形态。
 
-**core 不改的代码级依据**（调查已逐行核实）：`ReportRef.ref`/`ReportStore.write` 为 `ResourceUri`（`core/model.py` NewType）；`make_href` 对非 `file://` scheme（含 `s3://`）恒 `href==ref` 原样保留（只 `file://` 且落 run 树内才相对化，[0027](./0027-runreport-aggregation-index.md)「href 相对化」）；`index.html` 渲染只 `escape(href)` 拼 `<a>`，不 stat/open。
+**core 不改的代码级依据**（调查已逐行核实）：`ReportRef.ref`/`ReportStore.write` 为 `ResourceUri`（`core/gherkai_core/model.py` NewType）；`make_href` 对非 `file://` scheme（含 `s3://`）恒 `href==ref` 原样保留（只 `file://` 且落 run 树内才相对化，[0027](./0027-runreport-aggregation-index.md)「href 相对化」）；`index.html` 渲染只 `escape(href)` 拼 `<a>`，不 stat/open。
 
 ## 两引擎不对称：统一在 core/协议层，分头在 worker 上传实现层——但**都是"写本地→传→删本地"，无一方直写 S3**
 
@@ -101,7 +101,7 @@ SDK 调查证实两引擎产物形态/上传能力不对称，"上传那一小�
     **触发条件总纲（实际影响面）**：上述残余**同时满足三条**才是「真丢」——① **中断**（正常完成走 scope 末 flush、零残余）；② 且 **Fargate 执行环境**（subprocess+cloud/local 下残余留本地盘、`session_id` 可手动定位、**非真丢**，[0028](./0028-transient-network-ssl-resilience.md)）；③ 且中断档位落在该残余的「已写盘、未被抢传」窗口内（summary=`__exit__` 后 early-return 前；Midscene log=当前正跑 scenario；`traces.json` 再叠加「非-AgentCore backend / SDK 升级」）。**SIGKILL/卡死**是更严重的独立档（`__exit__`/handler 跑不全、产物本身可能只写一半），非抢传能覆盖，归终止契约（[0024](./0024-worker-core-protocol.md)）+ adapter 孤儿恢复。故当前（subprocess+cloud）真实影响面 = **0 真丢**（全留本地）；抢传各级是为 Fargate 预建的能力，届时把「真丢窗口」收窄到上述结构固有的最后一格。
 - **删本地 = 整目录删，全部上传成功才删（分两段：worker 半 + cli 半）**：
   - **worker 半**：reportRef 实时传 + 剩余批量 flush **都成功** → `rmtree` 各自**产物子目录**（`NOVA_LOGS_DIR` / `MIDSCENE_RUN_DIR`，即 `<run 根>/nova-trajectories`、`<run 根>/midscene-run`），本地零残留（含 `log/`、`.json`——"本地清理不损耗任何产物、不按文件区分"）。**任一环失败 → 该子目录保留不删**（守「上传失败绝不删」护栏：剩余文件不丢，reportRef 文件本地留一份=与 S3 双份、失败降级可接受）。
-  - **组合根半（cloud 模式收尾）**：worker 只删自己的产物子目录，**run 根 `<report_dir>/<run_id>/` 空壳**还在——入口皮在 `finalize` 后调 `compose.prune_empty_dirs(report_root/<run_id>)` **只删空目录**（自底向上 `rmdir`，非空则 `OSError` 吞掉→保留，与上「失败保留」护栏自洽：某个引擎 flush 失败留了产物则其目录非空、自然不删）。**只对 `report_root/<run_id>` 调用、不碰 `--report-dir` 根**（那是下次 run 的落点容器，不误删）。**清理归组合根、不归 core/store**——core 对本地文件系统无知（[0016](./0016-execution-architecture-core-lib-run-model.md) 窄腰），本地落点本就是组合根算出来的（函数住 `gherkai/compose.py`，见 0016「归属清算」条）。**local 模式不清**（产物即最终落点、`file://` 就地引用）。
+  - **组合根半（cloud 模式收尾）**：worker 只删自己的产物子目录，**run 根 `<report_dir>/<run_id>/` 空壳**还在——入口皮在 `finalize` 后调 `compose.prune_empty_dirs(report_root/<run_id>)` **只删空目录**（自底向上 `rmdir`，非空则 `OSError` 吞掉→保留，与上「失败保留」护栏自洽：某个引擎 flush 失败留了产物则其目录非空、自然不删）。**只对 `report_root/<run_id>` 调用、不碰 `--report-dir` 根**（那是下次 run 的落点容器，不误删）。**清理归组合根、不归 core/store**——core 对本地文件系统无知（[0016](./0016-execution-architecture-core-lib-run-model.md) 窄腰），本地落点本就是组合根算出来的（函数住 `runtime/gherkai_runtime/compose.py`，见 0016「归属清算」条）。**local 模式不清**（产物即最终落点、`file://` 就地引用）。
 - **上传错误分类 = `engine_error`、不进重试域**：第一期上传失败归 `engine_error`（act 不幂等、网络重试是第二期 Fargate 才细化的，[0028](./0028-transient-network-ssl-resilience.md)）；上传失败让 worker 可观测（报 error / 非 0 退出），不静默吞。
 - **core / ReportStore 一行不改**：`s3://` ref 天然穿透（[0027](./0027-runreport-aggregation-index.md)，已核实 `href==ref` for `s3://`，见上「core 不改的代码级依据」条）。
 

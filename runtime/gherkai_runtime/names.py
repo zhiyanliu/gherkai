@@ -1,7 +1,7 @@
-"""资源命名真源（gherkai 产品本体，ADR 0033「两层命名」）：cli / IaC / Lambda 共用的纯字符串推导。
+"""资源命名真源（`gherkai-runtime` 产品本体，ADR 0033「两层命名」）：cli / IaC / Lambda 共用的纯字符串推导。
 
 **零依赖**（不 import core/boto3）——`iac_aws_backend` 直接 import 本模块拿命名，依赖面最小
-（曾因「CDK 独立工程、不能 import cli」在 iac 侧复刻一份、靠对拍测试防漂移，抽入本模块后复刻消除、真同源）。
+（曾因「CDK 独立工程、不能 import 当时的 `cli` 包（今 `gherkai_cli`）」在 iac 侧复刻一份、靠对拍测试防漂移，抽入本模块后复刻消除、真同源）。
 """
 from __future__ import annotations
 

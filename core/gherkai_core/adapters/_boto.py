@@ -14,10 +14,11 @@ from __future__ import annotations
 
 
 def require_boto3(component: str) -> None:
-    """缺 boto3 时抛带组件名的友好 ImportError（`pip install core[aws]`）；模块 import 不崩、构造时才检。"""
+    """缺 boto3 时抛带组件名的友好 ImportError（`pip install 'gherkai-core[aws]'`）；模块 import 不崩、构造时才检。"""
     try:
         import boto3  # noqa: F401
     except ImportError as e:  # pragma: no cover  # 主拦截在组合根；此处仅冗余兜底
         raise ImportError(
-            f"{component} 需要 boto3——请装云端依赖：`pip install core[aws]`（或 uv 装 aws extra）"
+            f"{component} 需要 boto3——库消费者请装云端 extra：`pip install 'gherkai-core[aws]'`"
+            "（CLI 发行包 gherkai 已硬依赖 gherkai-runtime[aws]、自带 boto3；见此错多半是直接用库）"
         ) from e

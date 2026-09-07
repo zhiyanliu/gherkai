@@ -6,8 +6,8 @@
 
 这个框架跑一个 run 有**两种驱动模型**，按命令分流：
 
-- **同步驱动（`run`，下称前台）**：CLI 进程内的 `schedule()`（`core/schedule.py`）全程在线——起 worker、消费事件流、判超时、收结果，一个循环干到底。local 下 CLI 关掉即中止（worker 随事件管道断开而早亡）；cloud 下关掉 CLI 只是放弃收结果——已在跑的 Fargate task 无人 StopTask，会继续跑完并继续计费。
-- **无状态驱动（`submit` + `status`，下称后台/后台跑批）**：没有常驻的「调度进程」。核心是一个**纯编排步骤 `reconcile.tick`**（`core/reconcile.py`；判定与决策是 `core.project` 的纯函数，副作用全经注入的 EventLog/RunStore/Launcher）：读全量事件重放 → 算出当前该干什么 → 条件写落库 → 抢占式起下一个 job。**谁都可以来调它推一步**，它自己不记状态、不假设上一步是谁推的——这就是「无状态」的含义。
+- **同步驱动（`run`，下称前台）**：CLI 进程内的 `schedule()`（`core/gherkai_core/schedule.py`）全程在线——起 worker、消费事件流、判超时、收结果，一个循环干到底。local 下 CLI 关掉即中止（worker 随事件管道断开而早亡）；cloud 下关掉 CLI 只是放弃收结果——已在跑的 Fargate task 无人 StopTask，会继续跑完并继续计费。
+- **无状态驱动（`submit` + `status`，下称后台/后台跑批）**：没有常驻的「调度进程」。核心是一个**纯编排步骤 `reconcile.tick`**（`core/gherkai_core/reconcile.py`；判定与决策是 `gherkai_core.project` 的纯函数，副作用全经注入的 EventLog/RunStore/Launcher）：读全量事件重放 → 算出当前该干什么 → 条件写落库 → 抢占式起下一个 job。**谁都可以来调它推一步**，它自己不记状态、不假设上一步是谁推的——这就是「无状态」的含义。
 
 不管哪种驱动，worker→`core` 的话语只有两条：**事件流**（`scope_started`/`step_done`/… 的逐条事件）＋ **进程退出信号**（退出码——不是 worker「说」的，是父进程/平台观察到的；[ADR 0024](../adr/0024-worker-core-protocol.md) 协议）。判定「两件都要」：事件内容完整 ∧ 进程干净终止（防假绿）。两种驱动的差别本质是**有没有人在线守着听**——前台有：schedule 全程在线、听完即用，退出信号由 Engine adapter 当场观察；后台没有常驻听者：事件流被持久化、退出信号也被翻成 `task_exited` 记进同一份日志，于是谁来推进都能纯靠重放这份日志（各组合的物理通道见 §5）。
 
@@ -157,7 +157,7 @@ events 表里有**两个键空间**：worker 的连续 seq 段（事件本体—
 | local submit | per-run 进程 launcher 的到点计时器（deadline timer；进程若中断，由接力恢复重建计时）                                                                                       | 同 local `handle.stop(grace)`                                                                                                                                                                |
 | cloud submit | 起 task 时给该 job **定一个一次性到点闹钟**（EventBridge Scheduler one-time；与 §4b exit-observer 的 EventBridge **rule** 同名不同物——那是事件总线订阅、这是独立定时服务） | 到点由 kicker 处置，整条链见下图；另有任意 `tick` 的防御扫作双保险                                                                                                                             |
 
-cloud 路径的超时处置是一条多跳链，时序如下。那个「闹钟」（ADR/code 里叫 arm/武装一个 one-time schedule）是 per-(run,scope) 的短命资源：schedule 名 = `{prefix}job-timeout-<sha1(run_id#scope_id) 摘要>`（前缀走 `gherkai.names` 命名真源、IaC 的 IAM 资源域同源推导），到点触发即自动删——所以控制台里平时看不到它：
+cloud 路径的超时处置是一条多跳链，时序如下。那个「闹钟」（ADR/code 里叫 arm/武装一个 one-time schedule）是 per-(run,scope) 的短命资源：schedule 名 = `{prefix}job-timeout-<sha1(run_id#scope_id) 摘要>`（前缀走 `gherkai_runtime.names` 命名真源、IaC 的 IAM 资源域同源推导），到点触发即自动删——所以控制台里平时看不到它：
 
 ```mermaid
 sequenceDiagram
@@ -199,4 +199,4 @@ sequenceDiagram
 | Fargate 执行面（停止宽限 grace/中断韧性）                         | [ADR 0032](../adr/0032-fargate-execution-environment.md)             |
 | 实时持久化接缝（终态提交点 commit point/条件写）                  | [ADR 0030](../adr/0030-realtime-persistence-seam.md)                 |
 | 云资源 IaC/命名/提交前探活（preflight）                           | [ADR 0033](../adr/0033-iac-aws-backend-and-composition-wiring.md)    |
-| 分层总纲（core/gherkai/cli/engines）                              | [ADR 0016](../adr/0016-execution-architecture-core-lib-run-model.md) |
+| 分层总纲（core/runtime/cli/engines）                              | [ADR 0016](../adr/0016-execution-architecture-core-lib-run-model.md) |

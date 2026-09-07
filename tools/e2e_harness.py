@@ -18,7 +18,7 @@ S3 上传 env），起真 worker 跑一个 scope，按事件时机外部 SIGTERM
 
 用法（需 AWS 凭证 + region us-east-1）：
   # 从仓库根跑：
-  HARNESS_S3_BUCKET=<你的可写桶> PYTHONPATH=core core/.venv/bin/python tools/e2e_harness.py \\
+  HARNESS_S3_BUCKET=<你的可写桶> uv run python tools/e2e_harness.py \\
       --engine novaact --feature wikipedia_assertions --interrupt scope_end --run-id verify-1
   # --interrupt: connect(建连中) / act(act 跑一半) / between(step 边界) / scenario(第一个 scenario 完成后、
   #              下一 scenario 运行中——验 scenario 边界 log 抢传，需多 scenario feature) / scope_end(flush 前) /

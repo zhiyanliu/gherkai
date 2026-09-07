@@ -3,7 +3,7 @@
 > **Status:** Accepted —— 本 ADR「重议」条预告的「编排进程外的多写者 → 需 owner/lease + 条件更新、另立 ADR」已由 [0034](./0034-detached-batch-reconciler.md)（无状态跑批，reconciler 直写 RunState）落地：`RunState` 投影带 `high_water_mark` 条件写、finalize 单独条件写（见下「重议」条反向链）。本 ADR 描述的**单编排进程内 `RunPersistence._lock` 串行写序**仍是同步 `run` 路径的机制、不变。
 
 把「一次 run 的判定/状态**随进度实时落库**」做成正交接缝：执行编排（`schedule`，[0026](./0026-schedule-module.md)）只管跑、
-不碰存储；存储编排（新 `core/persist.py` 的 `RunPersistence`）依赖 Store ports、由组合根注入具体 adapter。
+不碰存储；存储编排（新 `core/gherkai_core/persist.py` 的 `RunPersistence`）依赖 Store ports、由组合根注入具体 adapter。
 这是 v1.1 云端（DDB/S3）的前置：先在 local adapter 上把「实时写 + commit-point 写序」跑通，云端 DDB/S3 adapter 作新 adapter 接入（决定六，已实装）。
 
 **定位**：本 ADR 解决「**怎么把实时落库接进来而不污染 reducer / 不让每个组合根各写一遍**」。
@@ -36,11 +36,11 @@ v1.1 要「边跑边落库」（WebUI 提交即返回 runId、之后轮询看进
 ### 回调的形态：`default=None` 是逃生舱，不是常态
 
 ```python
-# core/ports.py
+# core/gherkai_core/ports.py
 class JobSink(Protocol):
     def __call__(self, job: JobResult) -> None: ...   # 收已归约的 JobResult（非原始 Event）
 
-# core/schedule.py —— 两个旁路注入点，都默认 None
+# core/gherkai_core/schedule.py —— 两个旁路注入点，都默认 None
 def schedule(run_meta, engines, sink, opts=None,
              on_job_complete: JobSink | None = None,   # job 完成 fire 已归约 JobResult（主线程串行）
              on_event: Sink | None = None) -> RunResult: ...  # 每事件 fire（sink_lock 之外，实时刷 RUNNING 用）
@@ -50,13 +50,13 @@ def schedule(run_meta, engines, sink, opts=None,
 - **不是 keyword-only**（普通参数 + 默认 None），但**调用点用关键字写** `on_job_complete=...`/`on_event=...` 保自说明。
 - on_job_complete fire 在主线程 `as_completed` 循环里串行；on_event 在 worker 线程、`sink_lock` **之外** fire（与 sink 分离，见决定三并发不变量）——两者写 store 都经 `RunPersistence` 的单一锁串行。
 
-## 决定二：落库编排收进 `core/persist.py` 的 `RunPersistence` 应用服务，组合根只注入 adapter
+## 决定二：落库编排收进 `core/gherkai_core/persist.py` 的 `RunPersistence` 应用服务，组合根只注入 adapter
 
 「实时写怎么落」（commit-point 写序、RUNNING 中间态、按 scope_id 增量刷 job 态）**对 cli / WebUI / 未来 cron 完全一致，只有注入的 store adapter 不同**。
 让每个组合根各写一遍 → 必漂移。故收成一处 core 应用服务（依赖 Store **ports**、不含具体 adapter、不含 reducer 逻辑）：
 
 ```python
-# core/persist.py —— 编排 Store ports；不在 schedule 里、不碰执行 reducer
+# core/gherkai_core/persist.py —— 编排 Store ports；不在 schedule 里、不碰执行 reducer
 class RunPersistence:
     def __init__(self, run_id, run_store, result_store, report_store=None): ...
     def begin(self, run_meta, *, started_at): ...        # create_run(meta, 初始全 PENDING 的 RunState)
@@ -150,7 +150,7 @@ class RunStore(Protocol):
     def load_run_meta(...); def load_run_state(...)                                 # 不变
 ```
 
-**接口真值以 `core/core/ports.py` 为准**——上块是本决策期的**增量视图**，不是 `RunStore` 的完整现状：此后还追加了 `preflight`（探活，见下决定七）与条件写三方 `try_claim_job`/`project_state`/`try_finalize`（[0034](./0034-detached-batch-reconciler.md)）。
+**接口真值以 `core/gherkai_core/ports.py` 为准**——上块是本决策期的**增量视图**，不是 `RunStore` 的完整现状：此后还追加了 `preflight`（探活，见下决定七）与条件写三方 `try_claim_job`/`project_state`/`try_finalize`（[0034](./0034-detached-batch-reconciler.md)）。
 
 - **新增三方法是 additive**：`save_run` 不删（`test_stores.py` 中 3 个 RunStore save/load 往返用例——`test_run_store_save_load` / `test_run_state_timestamps_round_trip` / `test_run_state_omits_null_timestamps`——仍用它；一次性写场景也仍用）。新方法只是把它的职责按生命周期拆成「开始/逐 job/结束」三段。
 - `update_job_state` 按 **scope_id 定位单个 job**：local adapter 是「读 run_state→改该 scope_id→写回」的 read-modify-write（**非自身线程安全**，靠 `RunPersistence` 的单一 store 锁串行，见决定三的并发不变量）；DDB adapter 用 `SET jobs.#sid=:js`（Map 按 key 路径，见下决定六）。这要求 `RunState.jobs` 用 **Map<scope_id> 形状**（见决定五）。
@@ -205,12 +205,12 @@ cli `--backend {local,cloud}` 的组合根装配（两后端都下沉 `compose` 
 **为何从「不做主动预检」反转为「做 preflight」**（推翻早先决策，记明理由）：早先图省一次往返、以 `begin` 的真实写为天然预检点，但那留了个**不一致**——桶名打错时，有 offload 内容的 run（offloader 在 begin 写 S3）会 begin 退 2、无 offload 内容的 run 拖到运行期首个 `save_job_result` 才 S3 报错退 1，**同一个「桶名错」因是否有大 argument 分裂成退 2/退 1**。加 `preflight()` 后：桶/表不存在或无访问权**一律在 begin 探活时暴露→退 2**（不管有无 offload 内容），消除该分裂。**权衡**：begin 多几次探活往返（DDB describe + S3 head×2），但 begin 早于起 worker、不烧引擎钱，几百 ms 可忽略——换体验+实现统一，值得。preflight 归 Store 自己（各后端最懂怎么探活、内聚），不外泄到组合根。
 
 **cloud 失败退出码分层——切分线 = run 是否已真正开跑**（对齐现有 `0 passed / 1 failed|error / 2 配置错` 约定，全走 stderr、绝不裸 traceback）：
-- **退 2（还没开跑就拒绝，与 `assertion_votes<1` 同类）**：缺 table/bucket（入口显式校验非空——否则 `None` 流进 adapter 到运行时才 botocore 报错）；缺 boto3（`build_cloud_stores` 的 `import boto3` 抛 ImportError → 提示装 `core[aws]`）；`begin()` 的 `preflight()` 或 `create_run` 抛 botocore 异常（表/桶不存在、无权限、凭证/region 缺）。preflight 是主动探活点，兜住「纯 S3 桶名错也在 begin 暴露」。
+- **退 2（还没开跑就拒绝，与 `assertion_votes<1` 同类）**：缺 table/bucket（入口显式校验非空——否则 `None` 流进 adapter 到运行时才 botocore 报错）；缺 boto3（`build_cloud_stores` 的 `import boto3` 抛 ImportError → 提示装 `gherkai-core[aws]`）；`begin()` 的 `preflight()` 或 `create_run` 抛 botocore 异常（表/桶不存在、无权限、凭证/region 缺）。preflight 是主动探活点，兜住「纯 S3 桶名错也在 begin 暴露」。
 - **退 1（run 已开跑，error 级）**：`schedule()` 运行期内 `on_event`/`on_job_complete` 抛 botocore 异常（跑到一半 DDB/S3 挂，如桶被删）。决定三已定 `on_job_complete` 抛异常时 schedule 先 stop 所有 worker 再重抛，故会冒泡出 `schedule()`；cli 在 `need_cloud` 时给单一 `schedule()` 调用点包一层 `except (ClientError, BotoCoreError)`（**不复制两份调用**，避免回调/opts 透传漂移弄坏参数映射测试）。这是运行期兜底——preflight 只保证 begin 那刻可达，长 job 中途桶被删仍会在此退 1。
 
 ## 现在做 / 留口子
 
-- **决定一~五（实时写接缝，已落地）**：`JobSink` port + `schedule.on_job_complete`/`on_event`；`core/persist.py` 的
+- **决定一~五（实时写接缝，已落地）**：`JobSink` port + `schedule.on_job_complete`/`on_event`；`core/gherkai_core/persist.py` 的
   `RunPersistence`（单一 store 锁）；RunStore 三增量方法的 local adapter；`RunState.jobs` 改 Map；cli 接 `RunPersistence`（含 RUNNING 中间态）。
 - **决定六（云端 adapter）— 已实装**：`DynamoDBRunStore` + `S3ResultStore` + `S3ReportStore` + `S3StepArgumentOffloader`，落库形态如上，moto 全程 mock 单测、行为对拍 local——坐实「换后端 core 不动」。组合根接线见决定七。
 - **决定七（cli 接线 cloud）— 已实装**：`--backend {local,cloud}` 组合根装配（两后端下沉 `compose`，详见 [0016](./0016-execution-architecture-core-lib-run-model.md)「cli backend 选择」节）+ preflight 探活反转（begin 前探表/桶，配置错一律退 2）+ offloader 生产默认挂载 + 失败退出码分层（退 2 未开跑 / 退 1 运行期）。真跑通 local↔cloud 端到端。

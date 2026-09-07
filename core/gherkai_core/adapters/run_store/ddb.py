@@ -1,7 +1,7 @@
 """DynamoDBRunStore（ADR 0030 决定六）：RunStore port 的 DynamoDB 实装。
 
 对拍 `LocalRunStore` 的行为（同一批 round-trip/生命周期/报错语义），只换落点为 DDB。**云端 adapter，需 boto3**
-（`core[aws]` optional extra，缺它 import 本模块不崩、构造时才友好报错，守 [0016] 窄腰）。
+（`gherkai-core[aws]` optional extra，缺它 import 本模块不崩、构造时才友好报错，守 [0016] 窄腰）。
 
 表 schema（决定六）：单表、分区键字段 `run_id` + 排序键字段 `item_type`（取值 `'META'`/`'STATE'`）——
 RunMeta 与 RunState **分两 item**（同 run_id、item_type 各异；同分区键下一次 Query 可原子捞回该 run 全部）：

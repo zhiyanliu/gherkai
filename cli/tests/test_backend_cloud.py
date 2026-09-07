@@ -223,7 +223,8 @@ def test_cloud_table_bucket_from_env(tmp_path, monkeypatch, capsys):
 
 
 def test_cloud_missing_boto3_exits_2(tmp_path, monkeypatch, capsys):
-    # 缺 boto3：preflight 的 import boto3 抛 ImportError → 退 2 + 提示装 core[aws]
+    # 缺 boto3：preflight 的 import boto3 抛 ImportError → 退 2 + 报错点名 boto3（CLI 只转述 ImportError；
+    # 库消费者装 `gherkai-core[aws]` extra 补，ADR 0037 决策 2c 起 CLI 发行包自带）
     monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
     def boom_import(**k):
         raise ImportError("No module named 'boto3'")
