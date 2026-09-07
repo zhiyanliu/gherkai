@@ -69,7 +69,7 @@ flowchart TD
 ├── CONTEXT.md                 ← 领域术语表（glossary）
 ├── CLAUDE.md                  ← 项目约定（沟通/文档纪律/代码纪律/工作方式）——给 AI coding agent 与人
 ├── docs/                      ← 架构决策与过程记录
-│   ├── adr/                   ← 架构决策记录（0001–0036）
+│   ├── adr/                   ← 架构决策记录（0001–0038）
 │   ├── guides/                ← 给人的阅读理解文档（机制解读/横切合成等，只讲 how、权威在 ADR）
 │   ├── REFERENCES.md          ← 外部一手来源
 │   └── {doc,code}-health-review.md  ← 文档/代码健康度复盘方法
