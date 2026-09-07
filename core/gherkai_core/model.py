@@ -377,6 +377,13 @@ class RunMeta:
     # 分离，必须随 META 持久化才到得了推进器）——core 只搬运不消费，消费者是各推进器组合根（cloud 侧还会
     # 与部署侧 cap 取 min）。None=旧 definition 无此值（推进器按各自兼容口径回落）。
     max_concurrency: int | None = None
+    # 使用方确定性 step 目录的绝对路径（ADR 0037 决策 4）：提交侧（run/submit 的 CLI 进程）按
+    # `--steps-dir` > env `GHERKAI_STEPS_DIR` > 默认 `./steps`（存在才用）解析成绝对路径后填这里，
+    # 所有起 worker 的宿主（同步 run / local per-run 进程 / status --wait 接力者）从 definition 读回、
+    # 经 env 注给 worker——三宿主 CWD 各不相同（ADR 0034），只有随 definition 走才对三者一致，且
+    # 「用到哪套确定性 step」影响判定可复现性、本就属 run 定义。core 只搬运不消费（约定逻辑在组合根）。
+    # None=无使用方 step（worker 只有内建脚手架注册）；cloud 档恒 None（steps 烙在定制镜像里，ADR 0038）。
+    steps_dir: str | None = None
 
 
 @dataclass(frozen=True)

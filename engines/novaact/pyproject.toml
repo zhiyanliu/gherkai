@@ -1,17 +1,48 @@
 [project]
-name = "novaact"
-version = "0.1.0"
-description = "Nova Act (Python) engine — AI UI-automation test runner"
+name = "gherkai-worker-novaact"
+dynamic = ["version"]
+description = "gherkai 的 Nova Act 引擎 worker：讲 ADR 0024 协议的被 spawn 子进程（fd/DDB 两态），纯 IAM 鉴权。发行名 gherkai-worker-novaact / import 名 gherkai_worker_novaact / console script gherkai-worker-novaact（ADR 0037 决策 3）"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Zhi Yan Liu" }]
 requires-python = ">=3.13"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Operating System :: OS Independent",
+    "Topic :: Software Development :: Testing",
+]
+# worker 零 core 依赖（讲协议，ADR 0024/0037）；boto3 直接 import 就直接声明、不靠 nova-act 传递（ADR 0037 决策 2c）。
 dependencies = [
     "nova-act>=3.4.187.0",
-    "pytest>=9.1.1",
+    "boto3>=1.34",
 ]
 
-[tool.pytest.ini_options]
-# 精准屏蔽第三方库 bedrock_agentcore 内部的 Pydantic 旧式 class Config 弃用警告
-# （非我方代码、无法修；只过滤这一条，其它警告照常显示，不掩盖自身问题）
-filterwarnings = [
-    "ignore:Support for class-based `config` is deprecated:DeprecationWarning:bedrock_agentcore.runtime.context",
-]
+[project.scripts]
+# 定位链第三级（PATH 可执行）的供给方；第二级是同 venv 的 `python -m gherkai_worker_novaact`（ADR 0037 决策 3）
+gherkai-worker-novaact = "gherkai_worker_novaact.__main__:main"
+
+[project.urls]
+Homepage = "https://github.com/zhiyanliu/gherkai"
+Repository = "https://github.com/zhiyanliu/gherkai"
+Changelog = "https://github.com/zhiyanliu/gherkai/releases"
+
+[build-system]
+requires = ["hatchling", "uv-dynamic-versioning>=0.7.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "uv-dynamic-versioning"
+
+# 与 core/runtime/cli 同一份配置（ADR 0037 决策 2b）
+[tool.uv-dynamic-versioning]
+vcs = "git"
+style = "pep440"
+strict = true
+dirty = true
+metadata = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["gherkai_worker_novaact"]

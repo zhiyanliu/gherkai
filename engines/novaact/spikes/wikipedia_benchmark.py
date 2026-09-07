@@ -8,14 +8,12 @@
   B AI 断言：nova.act("...", schema=BOOL_SCHEMA) 跑 N=10 次测抖动
 度量：动作成功率、A/B 是否一致、B 的 10 次抖动率、各步耗时。
 
-跑：cd novaact && AWS_REGION=us-east-1 .venv/bin/python spikes/wikipedia_benchmark.py
+跑（从 repo 根，worker 包已在根 venv 里）：AWS_REGION=us-east-1 uv run python engines/novaact/spikes/wikipedia_benchmark.py
 """
 from __future__ import annotations
 
 import json
-import sys
 import time
-from pathlib import Path
 
 from nova_act import (
     NovaAct,
@@ -24,9 +22,8 @@ from nova_act import (
     workflow,
 )
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # novaact/ 根，便于 import lib
-from lib.workflow_setup import ensure_workflow_definition
-from lib.constants import MODEL_ID, WORKFLOW_DEF  # 共享常量（与生产 worker 共用单一真理源）
+from gherkai_worker_novaact.lib.workflow_setup import ensure_workflow_definition
+from gherkai_worker_novaact.lib.constants import MODEL_ID, WORKFLOW_DEF  # 共享常量（与生产 worker 共用单一真理源）
 
 REGION = "us-east-1"
 N_FLAKE = 10

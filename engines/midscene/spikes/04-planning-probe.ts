@@ -4,7 +4,7 @@
 // 复用已验证的 SigV4 自签（service "bedrock"，与 grounding 同源）。
 // 跑：cd midscene && AWS_REGION=us-east-1 node_modules/.bin/tsx spikes/midscene-sigv4/04-planning-probe.ts
 import OpenAI from "openai";
-import { sigv4Fetch, getBaseUrl } from "../lib/agentcore-sigv4.mjs";
+import { sigv4Fetch, getBaseUrl } from "../src/lib/agentcore-sigv4.mjs";
 // region 改惰性 getter（ADR 0033/0016 决策 C）；spike 直跑带 AWS_REGION=... 前缀，顶层求值 OK。
 const BASE_URL = getBaseUrl();
 

@@ -87,8 +87,8 @@ flowchart TD
 ├── cli/                       ← 命令行皮（发行名 gherkai，命令 gherkai；ADR 0016）
 │   └── gherkai_cli/{__main__.py(argparse) · render.py}
 ├── engines/                   ← 两个可插拔引擎，与 core 平级
-│   ├── midscene/   ← TS 子工程：worker/run-scope.ts（薄 worker）· worker/deterministic.ts · lib/agentcore-sigv4.mts · spikes/
-│   └── novaact/    ← Python 子工程：worker/run_scope.py（薄 worker）· worker/deterministic.py · lib/workflow_setup.py · spikes/
+│   ├── midscene/   ← npm 包 @gherkai/worker-midscene（ESM）：src/bin.mts（入口）· src/worker/run-scope.mts（薄 worker）· src/worker/deterministic.mts · src/lib/agentcore-sigv4.mts · spikes/
+│   └── novaact/    ← 发行包 gherkai-worker-novaact：gherkai_worker_novaact/{run_scope.py（薄 worker）· deterministic.py · user_steps.py · lib/workflow_setup.py} · spikes/
 ├── iac_aws_backend/           ← `--backend cloud` 的 AWS 资源 IaC（Python CDK：DDB/S3/ECS/ECR/IAM/VPC + 无状态跑批的 Stream/Lambda/EventBridge，ADR 0033/0034）
 ├── lambdas/                   ← cloud 无状态跑批的三 Lambda 源（kicker/reconciler/exit-observer，ADR 0034；由 iac 打包部署）
 └── tools/                     ← 复用工具库（端到端真跑 / 跨真实边界验证 / 时序诊断；长期资产，见 CLAUDE.md「工作方式」）
@@ -100,17 +100,18 @@ flowchart TD
   - Bedrock 模型访问：`qwen.qwen3-vl-235b-a22b`（Midscene 大脑）
   - AgentCore Browser（`bedrock-agentcore` 服务）
   - Nova Act 服务（`nova-act`）+ 模型 `nova-act-latest`
-- Nova Act workflow definition（IAM 路径必需）：**代码会自动 create-if-not-exists**（`engines/novaact/lib/workflow_setup.py`），无需手动操作。若想手动预建也可：`aws nova-act create-workflow-definition --region us-east-1 --name spike-wikipedia-benchmark`（见 ADR 0004）。
+- Nova Act workflow definition（IAM 路径必需）：**代码会自动 create-if-not-exists**（`engines/novaact/gherkai_worker_novaact/lib/workflow_setup.py`），无需手动操作。若想手动预建也可：`aws nova-act create-workflow-definition --region us-east-1 --name spike-wikipedia-benchmark`（见 ADR 0004）。
 - Node 22（midscene）、Python 3.13 + uv（core/runtime/cli 三包 + novaact worker）
 - （可选，仅 `--expose-local` 本地应用测试需要）[ngrok](https://ngrok.com/download) + authtoken（**注册免费账号即够**，付费账号亦可；`ngrok config add-authtoken <token>`——注意是 dashboard 上的 **Authtoken**，不是 `cr_` 开头的 API key）
 
 ## 运行（经核心库 cli，一个入口跑两个引擎）
 
 ```bash
-# 首次安装：三个运行环境（互相隔离、不污染全局，见下「注意」）——三条都在仓库根执行
-uv sync                                            # cli + runtime + core 三包一次装齐（uv workspace，共用根 .venv/）
-(cd engines/novaact && uv sync)                    # Nova Act worker 的 .venv（Python 3.13）
-(cd engines/midscene && npm install)               # Midscene worker 的 node_modules（Node 22）
+# 首次安装：两条都在仓库根执行（见下「注意」）
+uv sync                                            # cli + runtime + core 三包 + novaact worker（[local] extra）一次装齐（uv workspace，共用根 .venv/）
+(cd engines/midscene && npm ci && npm run build)   # Midscene worker（npm 包，Node 22）：装依赖 + 编译到 dist/
+# dev 态让 CLI 用本仓库的 midscene worker（发布后用户走 `npm i -g @gherkai/worker-midscene`，不需此步）：
+export GHERKAI_WORKER_MIDSCENE_CMD="node $PWD/engines/midscene/dist/bin.mjs"
 ```
 
 第一条 `uv sync` 把 `core/`、`runtime/`、`cli/` 三个发行包（`gherkai-core` / `gherkai-runtime` / `gherkai`）以 editable 装进仓库根的同一个 `.venv/`（ADR 0037：单一 workspace、单一 `uv.lock`）。此后**在仓库根**敲：`uv run gherkai <子命令>` 跑 CLI（`gherkai` 是安装出来的命令），`uv run pytest` 跑三包的全部单测。
@@ -196,7 +197,7 @@ RUN_ID=$(uv run gherkai submit my_app.feature --expose-local http://localhost:30
 
 - 动作/断言都写**纯自然语言、无路由关键词**：`When "搜索 OpenAI"` / `Then "进入了 OpenAI 词条页"` → 默认走 AI（动作=aiAct/act；断言=aiBoolean/act_get+投票）。
 - scope/引擎/超时预算用 **tag**（ADR 0019）：`@scope:login`（共享会话、串行）/ `@engine:midscene|novaact`（选引擎）/ `@timeout:120`（该 scope 的 job 墙钟预算秒；未标用 `--default-job-timeout` 缺省，同 scope 声明不一致报 PlanError）。
-- **确定性精确检查**（URL/DOM，不容 AI 抖动）：由 test engineer 在 worker 的 `@deterministic` 注册表按需写（`deterministic.steps.ts` / `deterministic_steps.py`；命中走精确 handler、不投票，ADR 0022）（QA 不碰实现，但**可发现可复用**：`list-deterministic` 查当前引擎有哪些、`plan` 看自己写的 step 会不会命中，ADR 0036）。
+- **确定性精确检查**（URL/DOM，不容 AI 抖动）：由 test engineer 在**自己项目的 `steps/` 目录**写 `@deterministic` 注册（Python 侧 `*.py` 给 novaact、TS 侧 `*.mts` 给 midscene，同一正则两侧对称；命中走精确 handler、不投票，ADR 0022）。CLI 按 `--steps-dir` > env `GHERKAI_STEPS_DIR` > `./steps` 找到该目录、注给 worker（ADR 0037 决策 4）；任一文件加载失败即拒绝运行（fail-loud）。QA 不碰实现，但**可发现可复用**：`list-deterministic` 查当前引擎有哪些（含定制）、`plan` 看自己写的 step 会不会命中（ADR 0036）。
 - **多行参数**：AI 动作/断言 step 可挂 Gherkin DataTable/DocString，worker 拼成附加文本随 step 一起喂 AI（ADR 0024）。
 
 ## Spike（可独立跑的技术验证脚本）
@@ -207,10 +208,10 @@ cd engines/midscene && AWS_REGION=us-east-1 node_modules/.bin/tsx spikes/01-mode
 # 02-agentcore-cdp.ts / 03-midscene-grounding.ts 同理
 
 # Nova Act 引擎对标 spike
-cd engines/novaact && AWS_REGION=us-east-1 .venv/bin/python spikes/wikipedia_benchmark.py
+AWS_REGION=us-east-1 uv run python engines/novaact/spikes/wikipedia_benchmark.py   # 用仓库根 .venv（novaact 无独立 venv）
 ```
 
 ## 注意
 
 - 运行会真实消耗 AWS 费用（模型调用 + AgentCore 会话）。
-- 环境隔离：三个 Python 发行包（core/runtime/cli）的依赖装在仓库根 `.venv`（uv workspace 单一 `uv.lock`），Nova Act worker 另有独立的 `engines/novaact/.venv`，Midscene worker 的 TS 依赖在 `engines/midscene/node_modules`——均不污染全局。
+- 环境隔离：三个 Python 发行包（core/runtime/cli）与 Nova Act worker（`gherkai-worker-novaact`，经 CLI 的 `[local]` extra）都装在仓库根 `.venv`（uv workspace 单一 `uv.lock`；worker 与 CLI 同 venv 是设计——`python -m gherkai_worker_novaact` 无包装层、fd 直达，ADR 0037 决策 3），Midscene worker 的 TS 依赖在 `engines/midscene/node_modules`——均不污染全局。

@@ -10,10 +10,13 @@ node_modules/
 .yarn/install-state.gz
 
 # ── Build output ──
+# dist/ 是 tsc 产物、发布物（package.json 的 files 白名单里；npm pack 不受本文件影响，已真跑核实）
 dist/
 build/
 out/
 *.tsbuildinfo
+# npm pack 的本地产物（基底镜像本地态 build 用，不入库）——注：.gitignore 无行尾注释，故单独一行
+*.tgz
 
 # ── Package manager debug logs ──
 npm-debug.log*

@@ -48,11 +48,13 @@ uv run gherkai run features/wikipedia_generic.feature \
 uv run gherkai plan features/wikipedia_generic.feature
 uv run gherkai plan features/*.feature --json     # 机器可读分组
 
-# 列可用引擎及其 spawn 命令（不烧钱）
+# 列可用引擎、它们的 spawn 命令与命中的定位链级别（不烧钱；某引擎未装则原地打安装指引，ADR 0037 决策 3）
 uv run gherkai list-engines
 
 # 列指定引擎支持的确定性 step（worker 注册表自述，写 feature 时查询复用；不烧钱，ADR 0036）
 uv run gherkai list-deterministic --engine midscene      # --json 可选；默认 --engine novaact
+# 清单/标注都含**你自己的** step：自述入口同样加载 steps 目录（默认 ./steps，或 --steps-dir 指定）
+uv run gherkai list-deterministic --steps-dir ./my-steps
 
 # 云端落库：状态 → DynamoDB、判定结果与报告 → S3（表/桶需预先建好；boto3 随 CLI 一起装，无额外步骤）
 uv run gherkai run features/wikipedia_generic.feature \
@@ -102,7 +104,7 @@ cloud 由云端 Lambda 事件驱动链推进（submit 机器无 ECS 写/执行�
 
 - `0` —— RunResult 总状态 passed
 - `1` —— 跑完了但有 failed/error（断言没过 / 引擎异常）；`--backend cloud` 下若 run 已开跑、中途 DynamoDB/S3 不可达（如桶被删）也退 `1`
-- `2` —— 没跑成：feature 读不到、plan 配置矛盾（PlanError）、参数非法（如 `--assertion-votes < 1`）、或无子命令；`--backend cloud` 还没开跑就被拒（缺 boto3、或 `--prefix` 拼出的表/桶/cluster/task-def 不存在·无权限·凭证/region 缺——运行前 preflight 点名 prefix fail-fast）
+- `2` —— 没跑成：feature 读不到、plan 配置矛盾（PlanError）、参数非法（如 `--assertion-votes < 1`）、或无子命令；**本 run 用到的引擎的 worker 运行时定位不到**（四级定位链全 miss，报错自带该引擎的安装命令，ADR 0037 决策 3）、或 **`steps/` 目录里有文件加载失败**（worker 自述入口非零退出，CLI 转述其诊断；`plan`/`run`/`submit` 一律在起任何 job 前拒，ADR 0037 决策 4——`submit` 同样在提交前拒，不会让你「提交成功」后每个 job 都 error）；`--steps-dir` / env `GHERKAI_STEPS_DIR` 指的目录不存在；`--backend cloud` 还没开跑就被拒（缺 boto3、或 `--prefix` 拼出的表/桶/cluster/task-def 不存在·无权限·凭证/region 缺——运行前 preflight 点名 prefix fail-fast）
 
 > cloud 失败分层的切分线 = run 是否已真正开跑：起 worker 前的配置/可达问题退 `2`，跑到一半的云端故障退 `1`。
 
@@ -144,7 +146,8 @@ cloud 由云端 Lambda 事件驱动链推进（submit 机器无 ECS 写/执行�
 | `--json` | off | 只输出机器可读 JSON（CI/WebUI 消费） |
 | `--quiet` | off | 不打逐事件进度（仍打文本汇总） |
 | `--report-dir` | `reports` | RunReport 归集落点；每次 run 落 `DIR/<run_id>/` |
-| `--no-report` | off | 跳过 RunReport 归集（逃生舱：CI 只看退出码/JSON、或调试不想落盘） |
+| `--no-report` | off | 跳过 RunReport 归集（逃生舱：CI 只看退出码/JSON、或调试不想落盘）。**只是不归集、不销毁产物**：引擎原生产物（trajectory / midscene report）改落系统临时目录下本次 run 专属目录（`<tmp>/gherkai/<run_id>/`，路径照样打印、可点开），由系统临时目录的生命周期回收 |
+| `--steps-dir` | `./steps`（存在才用） | 你自己的确定性 step 目录（ADR 0037 决策 4）：worker 启动时排序递归加载其中的 step 定义文件、注册进确定性注册表（两引擎扫同一目录，各取自己的扩展名：`.py` / `.mts`·`.mjs`）。解析顺序 `--steps-dir` > env `GHERKAI_STEPS_DIR` > `./steps`；**显式给的目录不存在直接退 2**（静默跳过等于把这些 step 悄悄换成 AI 判定）。值绝对化后写进 run 的 definition，本机后台推进/接力的进程读回同一份。[cloud] 不生效——云端 worker 的 steps 烙在定制镜像里（给了只警告、不拦） |
 | `--backend {local,cloud}` | `local` | 落库后端：local=文件落 `--report-dir`；cloud=状态落 DynamoDB、判定结果与报告落 S3（表/桶需预先建好） |
 | `--prefix` | `gherkai-` | [cloud] 资源名前缀：批量决定表/桶/cluster/task-def 默认名，**须与 CDK（`iac_aws_backend`）部署用的 prefix 一致**；多环境（prod-/stage-）切换用它。兜底 `AWS_RESOURCE_PREFIX` |
 | `--ddb-table` | `{prefix}runs` | [cloud] RunStore DynamoDB 表名（分区键 run_id + 排序键 item_type）；覆盖 prefix 默认；兜底 `AWS_DDB_TABLE` |
@@ -175,6 +178,7 @@ cloud 由云端 Lambda 事件驱动链推进（submit 机器无 ECS 写/执行�
 | `--default-job-timeout` | `300` | job 墙钟超时秒缺省（`<=0` 不超时）；标了 `@timeout:N` 的 scope 按 tag 走——语义同 `run` 表，「提交完就走」时的挂死/烧钱止损 |
 | `--expose-local` / `--tunnel` | — / `ngrok` | 语义同 `run` 表；submit 后隧道由后台进程持有——local=per-run 进程、cloud=隧道守护进程（轮询终态即拆+TTL 兜底）。**本机需保持开机联网直到 run 终态**（关机=隧道断=测试以导航失败告终，ADR 0035） |
 | `--tunnel-ttl` | 按 definition 算 | [cloud + `--expose-local`] 隧道守护进程的兜底 TTL 秒（须 > 0，否则退 2）。默认 = 各 job 预算之和 + 启动余量（submit 会打印生效值）；**调小有风险**——TTL 到点无条件拆隧道，短于实际 run 时长会让剩余 job 在应用不可达下跑成导航失败（ADR 0035 决策 3） |
+| `--steps-dir` | `./steps`（存在才用） | 语义同 `run` 表。**值随 definition 走**：后台 per-run 进程与 `status --wait` 接力者从 definition 读回（它们的当前目录与你提交时不同，不会重新去猜 `./steps`），故同一个 run 三个推进者用的是同一套确定性 step |
 | `--report-dir` | `reports` | 归集报告落点；`status` 查时须给同一路径。[cloud] 产物前缀由 kicker/reconciler Lambda 的 `REPORT_DIR` 决定（IaC 侧配，缺省 `reports`）——给了不一致的值，preflight 直接退 `2` 并点名两侧值（否则跑完了却在你给的前缀下找不到结果） |
 | `--backend {local,cloud}` | `local` | local=本机 per-run 进程推进；cloud=Fargate + 云端 Lambda 事件驱动链推进（提交完真关机也跑完） |
 | `--prefix` | `gherkai-` | [cloud] 资源名前缀（须与 CDK 部署一致）；`status` 查时须给同一 prefix。兜底 `AWS_RESOURCE_PREFIX` |

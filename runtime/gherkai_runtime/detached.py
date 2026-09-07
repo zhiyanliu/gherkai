@@ -190,7 +190,7 @@ def _paths(report_dir: str, run_id: str):
     return root, root / run_id / "events.db"
 
 
-def build_local_reconcile(repo, report_dir: str, run_id: str, max_concurrency: int,
+def build_local_reconcile(report_dir: str, run_id: str, max_concurrency: int,
                           region: str | None = None, profile: str | None = None):
     """从本地落点重建 per-run reconcile 所需的全部（meta 从 RunStore 读回、log/store/launcher 重建）。
 
@@ -200,6 +200,8 @@ def build_local_reconcile(repo, report_dir: str, run_id: str, max_concurrency: i
     （后两个是收尾聚合用的落点，与 RunStore 同 <report_dir>/<run_id>/）。
     返回的 max_concurrency 优先取 meta（ADR 0034 机制四：随 definition 走），入参只作 meta 缺值时的回落——
     per-run 进程与 `status --wait` 接力者同读 meta，接力者不再拿自己那侧的 flag 值覆盖 submit 时的声明。
+    worker cmd 走定位链（ADR 0037 决策 3，不再由仓库结构推导，故本函数不收 repo）；env 覆写对两宿主自然可见
+    （per-run 继承提交进程 env、接力者用自己的 env）。
     """
     import os
 
@@ -222,10 +224,14 @@ def build_local_reconcile(repo, report_dir: str, run_id: str, max_concurrency: i
     nova_logs_dir = root / run_id / "nova-trajectories"
     midscene_run_dir = root / run_id / "midscene-run"
     engines = compose.build_engines(
-        repo, nova_logs_dir=nova_logs_dir, midscene_run_dir=midscene_run_dir,
+        nova_logs_dir=nova_logs_dir, midscene_run_dir=midscene_run_dir,
         region=region, profile=profile,
         # 额外请求头随 definition 持久化（ADR 0035：submit 进程算好落 META，per-run 重建端读回注入）
         extra_http_headers=dict(meta.extra_http_headers) if meta.extra_http_headers else None,
+        # 使用方 step 目录同理随 definition 走（ADR 0037 决策 4）：**读回、绝不在此重解析 `./steps`**——
+        # 本函数的两个宿主（per-run 进程 / `status --wait` 接力者）CWD 与提交进程各不相同（ADR 0034），
+        # 重解析必让同一个 run 在三个宿主下用到不同的确定性 step 集，判定不可复现。
+        steps_dir=meta.steps_dir,
     )
     resolver = compose.make_resolver(engines)
     launcher = SubprocessLauncher(resolver, log, min_grace_fn=compose.engine_min_grace)

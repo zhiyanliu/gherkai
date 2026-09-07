@@ -442,9 +442,9 @@ def test_run_wires_artifact_dirs_to_build_engines(tmp_path, monkeypatch, capsys)
     box = {}
     real_build = m.compose.build_engines
 
-    def spy_build(repo, **kwargs):
+    def spy_build(**kwargs):
         box["kwargs"] = kwargs
-        return real_build(repo)  # 不带落点：拿真 engines（cmd 正确），落点断言看 box
+        return real_build()  # 不带落点：拿真 engines（cmd 正确），落点断言看 box
 
     monkeypatch.setattr(m.compose, "build_engines", spy_build)
     monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
@@ -461,19 +461,30 @@ def test_run_wires_artifact_dirs_to_build_engines(tmp_path, monkeypatch, capsys)
     assert Path(mid).parent.parent == report_dir.resolve()  # 绝对化的 report_dir（避 worker cwd 歧义）
 
 
-def test_run_no_report_passes_no_artifact_dirs(tmp_path, monkeypatch, capsys):
-    # --no-report：不算落点、传 None（裸跑，两引擎都回落 SDK 默认）
+def test_run_no_report_uses_temp_absolute_artifact_dirs(tmp_path, monkeypatch, capsys):
+    """`--no-report` 也注入落点，只是落系统临时目录下 run 专属的**绝对**路径（ADR 0037 决策 3）。
+
+    语义护栏：`--no-report` = 跳过 RunReport 归集 ≠ 销毁产物。worker 已无专属 cwd，不注入落点会让 SDK
+    默认相对目录写进**用户 CWD**（midscene 曾落 engines/midscene/midscene_run/）——故必须注入、且必须绝对。
+    """
+    import tempfile
+
     box = {}
     real_build = m.compose.build_engines
 
-    def spy_build(repo, **kwargs):
+    def spy_build(**kwargs):
         box.update(kwargs)
-        return real_build(repo)
+        return real_build()
 
     monkeypatch.setattr(m.compose, "build_engines", spy_build)
     monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
     m.main(["run", str(_write_feature(tmp_path)), "--no-report"])
-    assert box.get("nova_logs_dir") is None and box.get("midscene_run_dir") is None
+    nova, mid = Path(box["nova_logs_dir"]), Path(box["midscene_run_dir"])
+    assert nova.is_absolute() and mid.is_absolute()
+    tmp_root = Path(tempfile.gettempdir()) / "gherkai"
+    assert nova.parent == mid.parent and nova.parent.parent == tmp_root  # <tmp>/gherkai/<run_id>/
+    assert nova.name == "nova-trajectories" and mid.name == "midscene-run"
+    assert not nova.exists()  # 组合根只算路径、不预建（更不主动清；交给临时目录生命周期）
 
 
 # ---- _render_status：local/cloud 共享的渲染+提示+退出码（ADR 0034，两路一致）----
@@ -552,7 +563,7 @@ def test_list_deterministic_text_and_json(monkeypatch, capsys):
     entries = [{"pattern": 'p "(?P<x>[^"]+)"', "description": "断言某事", "example": 'Then p "v"'}]
     calls = []
     monkeypatch.setattr(m.compose, "query_deterministic",
-                        lambda repo, engine: calls.append(engine) or entries)
+                        lambda engine, steps_dir=None: calls.append(engine) or entries)
     assert m.main(["list-deterministic", "--engine", "midscene"]) == 0
     out = capsys.readouterr().out
     assert "断言某事" in out and 'Then p "v"' in out and calls == ["midscene"]
@@ -562,7 +573,7 @@ def test_list_deterministic_text_and_json(monkeypatch, capsys):
 
 
 def test_list_deterministic_worker_failure_exits_2(monkeypatch, capsys):
-    def boom(repo, engine):
+    def boom(engine, steps_dir=None):
         raise RuntimeError("worker 自述失败（exit 1）：...")
 
     monkeypatch.setattr(m.compose, "query_deterministic", boom)
@@ -580,7 +591,7 @@ def _det_feature(tmp_path):
 
 def test_plan_annotates_deterministic_hits(tmp_path, monkeypatch, capsys):
     """plan 标注：worker 自述命中 → 行尾「← 确定性:」；AI step 不标（噪声控制）。"""
-    def fake_match(repo, engine, texts):
+    def fake_match(engine, texts, steps_dir=None):
         return [({"pattern": "p", "description": "URL 断言"} if "页面地址" in t else None) for t in texts]
 
     monkeypatch.setattr(m.compose, "match_deterministic", fake_match)
@@ -593,7 +604,7 @@ def test_plan_annotates_deterministic_hits(tmp_path, monkeypatch, capsys):
 def test_plan_conflict_annotated_and_warned(tmp_path, monkeypatch, capsys):
     """冲突预检（真跑将 error 的注册表配置错）：行内 ⚠ 标注 + stderr 警告；plan 本体仍 0。"""
     monkeypatch.setattr(m.compose, "match_deterministic",
-                        lambda repo, engine, texts: [{"conflict": ["p1", "p2"]} for _ in texts])
+                        lambda engine, texts, steps_dir=None: [{"conflict": ["p1", "p2"]} for _ in texts])
     assert m.main(["plan", str(_det_feature(tmp_path))]) == 0
     captured = capsys.readouterr()
     assert "⚠ 命中多条确定性模式" in captured.out
@@ -602,7 +613,7 @@ def test_plan_conflict_annotated_and_warned(tmp_path, monkeypatch, capsys):
 
 def test_plan_annotation_degrades_gracefully(tmp_path, monkeypatch, capsys):
     """标注 best-effort：引擎环境未装/查询失败 → 无标注 + stderr 警告，plan 核心输出不受影响。"""
-    def boom(repo, engine, texts):
+    def boom(engine, texts, steps_dir=None):
         raise RuntimeError("worker 起不来")
 
     monkeypatch.setattr(m.compose, "match_deterministic", boom)
@@ -614,8 +625,8 @@ def test_plan_annotation_degrades_gracefully(tmp_path, monkeypatch, capsys):
 
 def test_plan_json_carries_deterministic_field(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(m.compose, "match_deterministic",
-                        lambda repo, engine, texts: [({"pattern": "p", "description": "d"} if "页面地址" in t else None)
-                                                     for t in texts])
+                        lambda engine, texts, steps_dir=None: [({"pattern": "p", "description": "d"}
+                                                                if "页面地址" in t else None) for t in texts])
     assert m.main(["plan", str(_det_feature(tmp_path)), "--json"]) == 0
     doc = json.loads(capsys.readouterr().out)
     steps = doc["jobs"][0]["scenarios"][0]["steps"]
@@ -677,3 +688,280 @@ def test_version_flag_prints_dist_version(capsys):
     assert ei.value.code == 0
     out = capsys.readouterr().out.strip()
     assert out.startswith("gherkai ") and len(out.split()) == 2, out
+
+
+# ---- worker 定位链的 miss 语义**按调用点分叉**（ADR 0037 决策 3）----
+
+def _miss(engine: str = "novaact"):
+    """定位链全 miss 的结构化异常（带该引擎安装指引），仿 compose.resolve_worker_cmd 的抛出物。"""
+    hint = {"novaact": "装法：uv tool install 'gherkai[local]'",
+            "midscene": "装法：npm i -g @gherkai/worker-midscene"}[engine]
+    return compose.WorkerNotFoundError(engine, f"引擎 {engine} 的 worker 运行时未找到。{hint}")
+
+
+def test_run_exits_2_before_spawn_when_worker_runtime_missing(tmp_path, monkeypatch, capsys):
+    """run 的分叉：定位链 miss → 打安装指引 + 退 2，**且在 spawn/落库之前**——不进 job 级 engine_error
+    （「运行时没装」属「没开跑就被拒」层；否则用户拿到一批 error 的 job 结果而非一句能照做的指引）。"""
+    monkeypatch.setattr(m.compose, "resolve_worker_cmd", lambda engine, **kw: (_ for _ in ()).throw(_miss(engine)))
+    started = []
+    monkeypatch.setattr(m, "schedule", lambda *a, **k: started.append(1))
+    reports = tmp_path / "reports"
+    rc = m.main(["run", str(_write_feature(tmp_path)), "--report-dir", str(reports)])
+    assert rc == 2
+    assert "uv tool install" in capsys.readouterr().err
+    assert started == []            # 没开跑
+    assert not reports.exists()     # 也没落库（拒在 persistence.begin 之前，不留半成品 run）
+
+
+def test_run_unused_engine_miss_does_not_block(tmp_path, monkeypatch, capsys):
+    """miss 只连坐**用到它**的 run：novaact-only 的 run 在 midscene 未装（dev 常态）下照跑退 0。
+
+    preflight 只查本次 plan 用到的引擎；未用到那条腿即便 miss 也只是「一用即报错」的空腿。
+    """
+    real = m.compose.resolve_worker_cmd
+    asked = []
+
+    def spy(engine, **kw):
+        asked.append(engine)
+        if engine == "midscene":
+            raise _miss("midscene")
+        return real(engine, **kw)
+
+    monkeypatch.setattr(m.compose, "resolve_worker_cmd", spy)
+    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
+    rc = m.main(["run", str(_write_feature(tmp_path)), "--report-dir", str(tmp_path / "r"), "--quiet"])
+    assert rc == 0 and "novaact" in asked
+
+
+def test_submit_local_exits_2_when_worker_runtime_missing(tmp_path, monkeypatch, capsys):
+    """submit local 同 run（per-run 进程在本机 spawn worker）：提交前退 2、不 fork、不落库——否则「提交成功」
+    之后后台每个 job 都 engine_error，用户要去翻 reconcile.log 才知道是没装 worker。"""
+    import subprocess
+
+    forked = []
+    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: forked.append(cmd))
+    monkeypatch.setattr(m.compose, "resolve_worker_cmd", lambda engine, **kw: (_ for _ in ()).throw(_miss(engine)))
+    reports = tmp_path / "reports"
+    rc = m.main(["submit", str(_write_feature(tmp_path)), "--report-dir", str(reports)])
+    assert rc == 2 and forked == []
+    assert not reports.exists()
+    assert "uv tool install" in capsys.readouterr().err
+
+
+def test_list_deterministic_worker_not_found_exits_2(monkeypatch, capsys):
+    # list-deterministic 的分叉：退 2、消息带安装指引（自述查不了就是查不了，无降级余地）
+    def boom(engine, steps_dir=None):
+        raise _miss(engine)
+
+    monkeypatch.setattr(m.compose, "query_deterministic", boom)
+    assert m.main(["list-deterministic"]) == 2
+    assert "uv tool install" in capsys.readouterr().err
+
+
+def test_plan_degrades_when_worker_runtime_missing(tmp_path, monkeypatch, capsys):
+    """plan 的分叉与 run/submit **相反**（ADR 0037 决策 3 明示 + ADR 0036 决策 4）：保持 best-effort 降级——
+    只丢该引擎的派发标注 + stderr 警告，plan 本体照出、退 0（feature 作者没装引擎运行时也该能预检写法）。"""
+    def boom(engine, texts, steps_dir=None):
+        raise _miss("midscene")
+
+    monkeypatch.setattr(m.compose, "match_deterministic", boom)
+    assert m.main(["plan", str(_det_feature(tmp_path))]) == 0
+    cap = capsys.readouterr()
+    assert "页面地址匹配" in cap.out and "← 确定性" not in cap.out
+    assert "标注降级" in cap.err
+
+
+# ---- steps/ 定制面（ADR 0037 决策 4）：解析在组合根、随 definition 持久化、worker 只认 env ----
+
+def _spy_build_engines(monkeypatch):
+    """记录 build_engines 收到的 kwargs（仍调真身，保 cmd/env 接线真实）。"""
+    box = {}
+    real = m.compose.build_engines
+
+    def spy(**kwargs):
+        box.update(kwargs)
+        return real(**kwargs)
+
+    monkeypatch.setattr(m.compose, "build_engines", spy)
+    return box
+
+
+def _spy_run_meta(monkeypatch):
+    """记录 definition 构造入参（RunMeta 落库前的真值，cloud 档不落本地文件也验得到）。"""
+    box = {}
+    real = m.RunMeta
+
+    def spy(**kwargs):
+        box.update(kwargs)
+        return real(**kwargs)
+
+    monkeypatch.setattr(m, "RunMeta", spy)
+    return box
+
+
+def test_run_steps_dir_flag_resolves_absolute_and_persists(tmp_path, monkeypatch):
+    """`--steps-dir` → ①绝对化后注给 worker（build_engines 的 steps_dir → env GHERKAI_STEPS_DIR）
+    ②写进 definition（`RunMeta.steps_dir`）。
+
+    绝对化：worker 是 cwd 与 CLI 不同的子进程；随 definition 走：本机后台推进/接力宿主的 CWD 与提交进程
+    不同（ADR 0034），只有读回同一个值三宿主才用同一套确定性 step、判定才可复现。
+    """
+    steps = tmp_path / "mysteps"
+    steps.mkdir()
+    box = _spy_build_engines(monkeypatch)
+    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
+    monkeypatch.delenv("GHERKAI_STEPS_DIR", raising=False)
+    monkeypatch.chdir(tmp_path)
+    reports = tmp_path / "reports"
+    assert m.main(["run", str(_write_feature(tmp_path)), "--report-dir", str(reports),
+                   "--steps-dir", "mysteps", "--quiet"]) == 0  # 相对给的 flag
+    assert box["steps_dir"] == str(steps.resolve())            # 组合根侧已绝对化
+    meta = json.loads(next(reports.iterdir()).joinpath("run_meta.json").read_text(encoding="utf-8"))
+    assert meta["steps_dir"] == str(steps.resolve())
+
+
+def test_run_steps_dir_env_and_flag_precedence(tmp_path, monkeypatch):
+    # 解析顺序：--steps-dir > env GHERKAI_STEPS_DIR（两者都是显式意图，flag 更近）
+    (tmp_path / "from-env").mkdir()
+    (tmp_path / "from-flag").mkdir()
+    monkeypatch.setenv("GHERKAI_STEPS_DIR", str(tmp_path / "from-env"))
+    box = _spy_build_engines(monkeypatch)
+    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
+    assert m.main(["run", str(_write_feature(tmp_path)), "--report-dir", str(tmp_path / "r1"), "--quiet"]) == 0
+    assert box["steps_dir"] == str(tmp_path / "from-env")      # 无 flag → 用 env
+    assert m.main(["run", str(_write_feature(tmp_path)), "--report-dir", str(tmp_path / "r2"),
+                   "--steps-dir", str(tmp_path / "from-flag"), "--quiet"]) == 0
+    assert box["steps_dir"] == str(tmp_path / "from-flag")     # flag 压 env
+
+
+def test_run_default_steps_dir_used_only_when_it_exists(tmp_path, monkeypatch):
+    """末级默认 `./steps`（相对**提交时** CWD）：存在才用、不存在则 None（「没这个目录」是多数项目的常态）。
+
+    None 时 definition 省该键（omit-when-None）——worker 只有内建脚手架注册。
+    """
+    box = _spy_build_engines(monkeypatch)
+    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
+    monkeypatch.delenv("GHERKAI_STEPS_DIR", raising=False)
+    monkeypatch.chdir(tmp_path)
+    reports = tmp_path / "r1"
+    assert m.main(["run", str(_write_feature(tmp_path)), "--report-dir", str(reports), "--quiet"]) == 0
+    assert box["steps_dir"] is None
+    meta = json.loads(next(reports.iterdir()).joinpath("run_meta.json").read_text(encoding="utf-8"))
+    assert "steps_dir" not in meta
+    (tmp_path / "steps").mkdir()  # 同一 CWD 下建出约定目录 → 下一次 run 自动用上
+    assert m.main(["run", str(_write_feature(tmp_path)), "--report-dir", str(tmp_path / "r2"), "--quiet"]) == 0
+    assert box["steps_dir"] == str((tmp_path / "steps").resolve())
+
+
+def test_steps_dir_explicit_but_missing_exits_2(tmp_path, monkeypatch, capsys):
+    """显式给的（flag/env）不是目录 → 退 2，**不静默忽略**：忽略等于把该目录里的确定性 step 悄悄换成
+    AI 判定、run 还可能「通过」（假绿），是本项目最忌的静默降级（ADR 0037 决策 4 fail-loud 同源）。"""
+    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
+    monkeypatch.delenv("GHERKAI_STEPS_DIR", raising=False)
+    feat = str(_write_feature(tmp_path))
+    assert m.main(["run", feat, "--report-dir", str(tmp_path / "r"), "--steps-dir", str(tmp_path / "nope")]) == 2
+    assert "--steps-dir" in capsys.readouterr().err
+    monkeypatch.setenv("GHERKAI_STEPS_DIR", str(tmp_path / "nope"))
+    assert m.main(["plan", feat]) == 2
+    assert "GHERKAI_STEPS_DIR" in capsys.readouterr().err
+    assert m.main(["list-deterministic"]) == 2
+
+
+def test_submit_local_persists_steps_dir_into_definition(tmp_path, monkeypatch):
+    """submit 侧同 run：解析一次写进 definition——per-run 进程/接力者从 definition 读回（**不**收 flag，
+    也不重解析 `./steps`），三宿主才一致（ADR 0037 决策 4）。"""
+    import subprocess
+
+    class _FakeProc:
+        pid = 1
+
+    forked = []
+    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: forked.append(cmd) or _FakeProc())
+    # 提交侧预检会以自述入口探 worker（ADR 0037 决策 4）；本测只验持久化通道，把探测桩掉（上面的假 Popen 会让
+    # subprocess.run 拿到假对象）。
+    monkeypatch.setattr(m.compose, "query_deterministic", lambda engine, *, steps_dir=None, timeout_s=60.0: [])
+    steps = tmp_path / "steps"
+    steps.mkdir()
+    monkeypatch.delenv("GHERKAI_STEPS_DIR", raising=False)
+    monkeypatch.chdir(tmp_path)
+    reports = tmp_path / "reports"
+    assert m.main(["submit", str(_write_feature(tmp_path)), "--report-dir", str(reports)]) == 0
+    meta = json.loads(next(reports.iterdir()).joinpath("run_meta.json").read_text(encoding="utf-8"))
+    assert meta["steps_dir"] == str(steps.resolve())
+    assert "--steps-dir" not in forked[0]  # per-run 不收 flag：值只经 definition 传（单一通道）
+
+
+def test_plan_and_list_deterministic_pass_steps_dir_to_worker(tmp_path, monkeypatch, capsys):
+    """三个自述入口同样加载 steps 目录（ADR 0037 决策 4）→ plan 标注与 list-deterministic 清单反映定制 step。"""
+    steps = tmp_path / "steps"
+    steps.mkdir()
+    monkeypatch.delenv("GHERKAI_STEPS_DIR", raising=False)
+    monkeypatch.chdir(tmp_path)
+    seen = {}
+    monkeypatch.setattr(m.compose, "match_deterministic",
+                        lambda engine, texts, steps_dir=None: seen.update(match=steps_dir) or [None] * len(texts))
+    monkeypatch.setattr(m.compose, "query_deterministic",
+                        lambda engine, steps_dir=None: seen.update(query=steps_dir) or [])
+    assert m.main(["plan", str(_det_feature(tmp_path))]) == 0
+    assert m.main(["list-deterministic"]) == 0
+    assert seen["match"] == str(steps.resolve()) and seen["query"] == str(steps.resolve())
+
+
+def _steps_dir_with_file(tmp_path: Path) -> Path:
+    d = tmp_path / "steps"
+    d.mkdir()
+    (d / "demo.py").write_text("# placeholder\n", encoding="utf-8")
+    return d
+
+
+def _fake_worker_cmd(engine: str, **kw):
+    return compose.WorkerCmd(cmd=["python", "-m", "x"], cwd=None, source="test")
+
+
+def test_plan_exits_2_when_user_steps_fail_to_load(tmp_path, monkeypatch, capsys):
+    """steps 文件加载失败（worker 自述非零退出）→ plan 退 2、不降级成「无标注」（ADR 0037 决策 4 提交侧前置）。"""
+    feat = tmp_path / "t.feature"
+    feat.write_text('Feature: t\n  Scenario: s\n    When "做点啥"\n', encoding="utf-8")
+    steps = _steps_dir_with_file(tmp_path)
+
+    def boom(engine, texts, *, steps_dir=None, timeout_s=60.0):
+        raise compose.WorkerSelfDescribeError(engine, 2, "demo.py：SyntaxError", "确定性命中查询")
+
+    monkeypatch.setattr(compose, "match_deterministic", boom)
+    rc = m.main(["plan", str(feat), "--steps-dir", str(steps)])
+    assert rc == 2
+    assert "steps 加载失败" in capsys.readouterr().err
+
+
+def test_plan_degrades_when_worker_missing(tmp_path, monkeypatch, capsys):
+    """对照：定位链 miss（运行时没装）plan 仍降级退 0（ADR 0036 决策 4 / 0037 决策 3 的分叉保留）。"""
+    feat = tmp_path / "t.feature"
+    feat.write_text('Feature: t\n  Scenario: s\n    When "做点啥"\n', encoding="utf-8")
+
+    def missing(engine, texts, *, steps_dir=None, timeout_s=60.0):
+        raise compose.WorkerNotFoundError(engine, "装法：…")
+
+    monkeypatch.setattr(compose, "match_deterministic", missing)
+    rc = m.main(["plan", str(feat)])
+    assert rc == 0
+    assert "标注降级" in capsys.readouterr().err
+
+
+def test_run_and_submit_exit_2_before_spawn_when_user_steps_fail(tmp_path, monkeypatch, capsys):
+    """run / submit：steps 目录已解析时先以自述入口探一次，worker 非零退出 → 起任何 job 之前退 2（不进 job 级 error）。"""
+    feat = tmp_path / "t.feature"
+    feat.write_text('Feature: t\n  Scenario: s\n    When "做点啥"\n', encoding="utf-8")
+    steps = _steps_dir_with_file(tmp_path)
+    monkeypatch.setattr(compose, "resolve_worker_cmd", _fake_worker_cmd)
+
+    def boom(engine, *, steps_dir=None, timeout_s=60.0):
+        raise compose.WorkerSelfDescribeError(engine, 2, "demo.py：SyntaxError", "确定性能力查询")
+
+    monkeypatch.setattr(compose, "query_deterministic", boom)
+    spawned = {"n": 0}
+    monkeypatch.setattr(m, "schedule", lambda *a, **k: spawned.__setitem__("n", spawned["n"] + 1))
+    assert m.main(["run", str(feat), "--no-report", "--steps-dir", str(steps)]) == 2
+    assert spawned["n"] == 0
+    assert m.main(["submit", str(feat), "--report-dir", str(tmp_path / "r"), "--steps-dir", str(steps)]) == 2
+    assert "steps 加载失败" in capsys.readouterr().err
+    assert not (tmp_path / "r").exists() or not any((tmp_path / "r").iterdir())  # 没落任何 run 记录

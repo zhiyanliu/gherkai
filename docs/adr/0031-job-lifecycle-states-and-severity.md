@@ -185,7 +185,7 @@ cli 退出码从「`status.value == 'passed'` 才 0」改为**基于 run 级 sev
 - `core/gherkai_core/adapters/report_store/local.py`：`_STATUS_COLOR`（每态各一色 + 兜底灰 `#57606a`；着色意图见决定二「视觉映射」）；index.html 的连锁失败旁注读 `shortcircuited`。
 - `cli/gherkai_cli/render.py`：文本汇总的连锁失败旁注同读 `shortcircuited`（被短路 step 显 skipped 态 + 旁注）。
 - `cli/gherkai_cli/__main__.py`：同步 `run` 的退出码读内存 `RunResult.status`（决定五数据源）；`status`/`--wait` 的终态判定引 `TERMINAL_STATUSES`。
-- `engines/novaact/worker/run_scope.py` + `engines/midscene/worker/run-scope.ts`：scope 内上游 `status==error` 后短路后续 step、发 `step_skipped`（不调 AI）。
+- `engines/novaact/gherkai_worker_novaact/run_scope.py` + `engines/midscene/src/worker/run-scope.mts`：scope 内上游 `status==error` 后短路后续 step、发 `step_skipped`（不调 AI）。
 - 交叉指针落在：[0024](./0024-worker-core-protocol.md)（「`status` 三态」条的 core 内态澄清 + wire 的 `step_skipped` 事件段）/ [0026](./0026-schedule-module.md)（「status 归约」段的 `_NON_VERDICT` 入口过滤与 job 级派生态）/ [0016](./0016-execution-architecture-core-lib-run-model.md)（数据模型表 Step 行的 skipped+`shortcircuited`）/ [0028](./0028-transient-network-ssl-resilience.md)（scope 内短路条：defer 转实现，判据/承载）。
 
 ## 重议 / 留口子

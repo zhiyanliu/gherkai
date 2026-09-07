@@ -4,19 +4,17 @@
 验证 act_get(各 schema) 在"不符"时给出 false / 不匹配的值（→ 上层会判失败），
 并带一个对照正向（防"全假"假象）。一次性证伪探针。
 
-跑：cd novaact && AWS_REGION=us-east-1 .venv/bin/python spikes/negative_assertions.py
+跑（从 repo 根，worker 包已在根 venv 里）：AWS_REGION=us-east-1 uv run python engines/novaact/spikes/negative_assertions.py
 """
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 
 from nova_act import NovaAct, AgentCoreBrowserSessionProvider, BOOL_SCHEMA, STRING_SCHEMA, Workflow
 from nova_act.types.workflow import set_current_workflow, get_current_workflow
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from lib.workflow_setup import ensure_workflow_definition
-from lib.constants import MODEL_ID, WORKFLOW_DEF  # 共享常量（与生产 worker 共用单一真理源）
+from gherkai_worker_novaact.lib.workflow_setup import ensure_workflow_definition
+from gherkai_worker_novaact.lib.constants import MODEL_ID, WORKFLOW_DEF  # 共享常量（与生产 worker 共用单一真理源）
 
 REGION = "us-east-1"
 

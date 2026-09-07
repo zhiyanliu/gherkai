@@ -140,9 +140,8 @@ def test_build_local_reconcile_resolves_region_like_foreground(tmp_path, monkeyp
                                     started_at="t0", high_water_mark=0))
     monkeypatch.setenv("AWS_REGION", "us-test-9")
     monkeypatch.delenv("AWS_PROFILE", raising=False)
-    repo = Path(__file__).resolve().parents[2]
     _m, _l, _s, launcher, _mc, _rs, _rp = build_local_reconcile(
-        repo, str(tmp_path), "run-r", max_concurrency=1, region=None, profile=None)
+        str(tmp_path), "run-r", max_concurrency=1, region=None, profile=None)
     # 解析结果最终注进各引擎 worker 的 spawn env（与前台 run 同一注入面）
     eng = launcher._resolver("novaact")
     assert eng._env.get("AWS_REGION") == "us-test-9"
@@ -163,9 +162,8 @@ def test_build_local_reconcile_prefers_meta_max_concurrency(tmp_path):
     from gherkai_runtime.detached import build_local_reconcile
 
     _seed_for_build(tmp_path, "run-m", max_concurrency=3)
-    repo = Path(__file__).resolve().parents[2]
     _m, _l, _s, _launcher, mc, _rs, _rp = build_local_reconcile(
-        repo, str(tmp_path), "run-m", max_concurrency=1, region="us-east-1")
+        str(tmp_path), "run-m", max_concurrency=1, region="us-east-1")
     assert mc == 3
 
 
@@ -174,10 +172,44 @@ def test_build_local_reconcile_falls_back_to_flag_when_meta_missing(tmp_path):
     from gherkai_runtime.detached import build_local_reconcile
 
     _seed_for_build(tmp_path, "run-f", max_concurrency=None)
-    repo = Path(__file__).resolve().parents[2]
     _m, _l, _s, _launcher, mc, _rs, _rp = build_local_reconcile(
-        repo, str(tmp_path), "run-f", max_concurrency=2, region="us-east-1")
+        str(tmp_path), "run-f", max_concurrency=2, region="us-east-1")
     assert mc == 2
+
+
+def test_build_local_reconcile_reads_steps_dir_from_definition(tmp_path, monkeypatch):
+    """使用方 step 目录随 definition 走（ADR 0037 决策 4）：宿主从 RunStore 读回 meta.steps_dir、
+    经 env 注给 worker，**绝不重解析 `./steps`**——per-run 进程与 `status --wait` 接力者的 CWD 与提交进程
+    各不相同（ADR 0034），重解析会让同一个 run 在三个宿主下用到不同的确定性 step 集、判定不可复现。
+    """
+    from gherkai_runtime.detached import build_local_reconcile
+
+    meta = RunMeta(run_id="run-s", created_at="t0", jobs=(_job("a"),), steps_dir="/abs/user/steps")
+    store = LocalRunStore(tmp_path)
+    store.create_run(meta, RunState(run_id="run-s", status=Status.PENDING,
+                                    jobs={"a": JobState("a", Status.PENDING)},
+                                    started_at="t0", high_water_mark=0))
+    # 宿主 CWD 下另有一个 ./steps：必须**不被**用上（definition 是唯一真源）
+    (tmp_path / "steps").mkdir()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("GHERKAI_STEPS_DIR", raising=False)
+    _m, _l, _s, launcher, _mc, _rs, _rp = build_local_reconcile(
+        str(tmp_path), "run-s", max_concurrency=1, region="us-east-1")
+    assert launcher._resolver("novaact")._env["GHERKAI_STEPS_DIR"] == "/abs/user/steps"
+
+
+def test_build_local_reconcile_no_steps_dir_when_definition_has_none(tmp_path, monkeypatch):
+    """对偶（防「恒注入」假绿）：definition 无 steps_dir（未给/旧落盘/cloud 档）→ 宿主不注入该 env，
+    即便宿主 CWD 下恰好有个 `./steps`（宿主不重解析约定）。"""
+    from gherkai_runtime.detached import build_local_reconcile
+
+    _seed_for_build(tmp_path, "run-n", max_concurrency=1)
+    (tmp_path / "steps").mkdir()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("GHERKAI_STEPS_DIR", raising=False)
+    _m, _l, _s, launcher, _mc, _rs, _rp = build_local_reconcile(
+        str(tmp_path), "run-n", max_concurrency=1, region="us-east-1")
+    assert "GHERKAI_STEPS_DIR" not in launcher._resolver("novaact")._env
 
 
 def test_run_state_timestamps_share_one_format(tmp_path):

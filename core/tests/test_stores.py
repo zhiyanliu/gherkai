@@ -342,6 +342,29 @@ def test_run_meta_max_concurrency_round_trip():
     assert run_meta_from_dict({"run_id": "legacy", "created_at": "", "jobs": []}).max_concurrency is None
 
 
+def test_run_meta_steps_dir_round_trip():
+    """RunMeta.steps_dir（ADR 0037 决策 4）：带值往返不丢；None 省键（旧落盘 / cloud 档不写该字段）。
+
+    载体在 definition 的理由：起 worker 的三个 local 宿主（同步 run / per-run 进程 / `status --wait` 接力者）
+    CWD 各不相同，只有随 definition 走才对三者一致（core 只搬运、不消费语义）。
+    """
+    import dataclasses
+
+    from gherkai_core.serialize import run_meta_from_dict, run_meta_to_dict
+    meta = _sample_run("sd-run").run_meta
+    assert "steps_dir" not in run_meta_to_dict(meta)  # 默认 None → omit
+    assert run_meta_from_dict(run_meta_to_dict(meta)).steps_dir is None
+    meta2 = dataclasses.replace(meta, steps_dir="/abs/project/steps")
+    assert run_meta_to_dict(meta2)["steps_dir"] == "/abs/project/steps"
+    assert run_meta_from_dict(run_meta_to_dict(meta2)).steps_dir == "/abs/project/steps"
+    # `is not None` 判（同 max_concurrency）：空串这类无意义值也忠实往返、不在序列化层悄悄变形成「缺失」
+    blank = dataclasses.replace(meta, steps_dir="")
+    assert run_meta_to_dict(blank)["steps_dir"] == ""
+    assert run_meta_from_dict(run_meta_to_dict(blank)).steps_dir == ""
+    # 旧落盘（无此键）读回 None——宿主据此不注入 GHERKAI_STEPS_DIR
+    assert run_meta_from_dict({"run_id": "legacy", "created_at": "", "jobs": []}).steps_dir is None
+
+
 def test_run_meta_extra_http_headers_multiple_normalize_at_write_side():
     """≥2 个 header：写端按键排序规范化、读端原样保序 → 键值不丢、落盘键序确定，再往返逐字恒等。
 

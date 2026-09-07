@@ -270,6 +270,9 @@ def run_meta_to_dict(meta: RunMeta) -> dict:
         # max_concurrency（ADR 0034 机制四）omit-when-None：`is not None` 判而非判真——0 这类无意义值也须
         # 忠实往返（不在序列化层悄悄变形成「缺失」，语义把关归组合根/推进器）。省键=旧落盘兼容。
         **({"max_concurrency": meta.max_concurrency} if meta.max_concurrency is not None else {}),
+        # steps_dir（ADR 0037 决策 4）omit-when-None，同 max_concurrency 的判据：`is not None`——空串这类
+        # 无意义值也忠实往返，语义把关归组合根（提交侧解析）。省键=旧落盘兼容（读端 .get → None）。
+        **({"steps_dir": meta.steps_dir} if meta.steps_dir is not None else {}),
     }
 
 
@@ -282,6 +285,7 @@ def run_meta_from_dict(d: dict) -> RunMeta:
         # 原样保序（键序已由写端规范化）；键缺失/空 → None（旧落盘兼容 + 空表即无）
         extra_http_headers=tuple(hdrs.items()) if hdrs else None,
         max_concurrency=d.get("max_concurrency"),  # 键缺失 → None（旧落盘兼容）
+        steps_dir=d.get("steps_dir"),  # 键缺失 → None（旧落盘 / cloud 档不写此键，ADR 0037 决策 4）
     )
 
 

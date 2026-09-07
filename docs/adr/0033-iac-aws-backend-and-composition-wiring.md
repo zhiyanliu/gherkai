@@ -109,8 +109,8 @@ subnet/sg 不是「名字」，是 **AWS 建 VPC 时生成的 ID**（`subnet-0ab
 
 **决策：两个容器镜像 + 两个 task-def，不合并。** 两个引擎 worker 运行时依赖差异大、合并镜像既臃肿又耦合升级：
 
-- **Nova 镜像**：Python 3.13 + `nova-act`（含 boto3 / bedrock-agentcore / **playwright 库**）。入口 `python worker/run_scope.py`。
-- **Midscene 镜像**：Node ≥20（代码用 `AbortSignal.timeout`/`fs recursive`/`Dirent.parentPath`）+ `tsx` + `@midscene/web` + **playwright 库** + 全部 `@aws-sdk/*` + `openai`。入口 `node --import tsx worker/run-scope.ts`。
+- **Nova 镜像**：Python 3.13 + `nova-act`（含 boto3 / bedrock-agentcore / **playwright 库**）。入口 `python -m gherkai_worker_novaact`。
+- **Midscene 镜像**：Node ≥20（代码用 `AbortSignal.timeout`/`fs recursive`/`Dirent.parentPath`）+ `tsx` + `@midscene/web` + **playwright 库** + 全部 `@aws-sdk/*` + `openai`。入口 `node dist/bin.mjs`。
 - **不装 chromium 二进制（真跑证实）**：两个引擎 worker 都用 `connect_over_cdp` 连 **AgentCore 云浏览器**（浏览器跑在云端），playwright 只作 **CDP 客户端库**、**不 launch 本地 chromium**——故只需 playwright 库（pip/npm 已装）、**不需 `playwright install chromium` 的二进制 + 系统库**（省几百 MB、build 快得多）。真跑核实：去掉二进制后 worker 走到 `connect_over_cdp` 那步（连 AgentCore WebSocket），从不报缺 chromium。
 - **构建平台 `--platform linux/amd64`（必记坑）**：Fargate task-def 默认 `X86_64` runtime；arm Mac（M 系列）build 不加则出 arm64 镜像、Fargate 容器启动期 `exec format error` 挂死（错误在启动期、不易一眼看出是架构问题）。
   - **构建陷阱（必记）**：Midscene 把运行时真需要的 SDK（`@midscene/web`/playwright/bedrock-agentcore/signature-v4/openai）大多放在 **devDependencies**，只有 `client-dynamodb`/`client-s3` 在 dependencies。Dockerfile **不能用 `npm install --production`**（会漏装）——须装全部依赖，或构建前把它们提到 dependencies。
@@ -151,7 +151,7 @@ subnet/sg 不是「名字」，是 **AWS 建 VPC 时生成的 ID**（`subnet-0ab
 - **上表动作集由真跑逐个暴露、非 grep 推全**（证据边界，绿≠对）：`UpdateWorkflowRun`/`CreateSession`/`CreateAct`/`UpdateAct`/`InvokeActStep`/`CreateBrowserProfile`/`List`/`Get`/`SaveBrowserSessionProfile`/`ConnectBrowserAutomationStream` 全是**真跑 cloud job 逐个报 AccessDenied 才补上**的（SDK 内部调用面远比 lib 里 grep 到的大——每加一个 redeploy+真跑一轮）。
 - **资源 ARN 已收窄（动作 + 资源两维度都最小）**：依据 = AWS Service Authorization Reference 的 `resource_types` + IAM 策略模拟器对本账户实证 + **收窄后真部署真跑验证无 AccessDenied**（两引擎 ×（确定性+AI），Midscene Bedrock 1867 tokens / Nova act 全 passed、产物真上传 S3）。三处从 `*` 收窄，另留 4 个结构上只能 `*` 的（见上表）：
   - **`bedrock:InvokeModel`** → 单一 foundation-model ARN（收窄幅度最大）。
-  - **`nova-act`（8 动作）** → 两条 ARN（`workflow-definition/*` + `.../workflow-run/*`）覆盖全部。**definition 名段用 `*`、不 pin 具体名**：definition 名是 worker 运行期概念（`engines/novaact/lib/constants.py` 的 `WORKFLOW_DEF`），若 pin 进 IAM 会让 IaC 跨工程耦合 worker 常量、靠"人肉注释保持一致"（改 worker 忘改 IaC → 静默 AccessDenied）。用 `*` 通配 definition 名换掉耦合——仍锁死 service/account/region，远窄于全 `*`。**顺带删了误授的 `nova-act:GetAct`**——AWS Service Reference v1.4 全动作集无此 action（此前多授一个不存在的动作，真跑删后照跑通）。
+  - **`nova-act`（8 动作）** → 两条 ARN（`workflow-definition/*` + `.../workflow-run/*`）覆盖全部。**definition 名段用 `*`、不 pin 具体名**：definition 名是 worker 运行期概念（`engines/novaact/gherkai_worker_novaact/lib/constants.py` 的 `WORKFLOW_DEF`），若 pin 进 IAM 会让 IaC 跨工程耦合 worker 常量、靠"人肉注释保持一致"（改 worker 忘改 IaC → 静默 AccessDenied）。用 `*` 通配 definition 名换掉耦合——仍锁死 service/account/region，远窄于全 `*`。**顺带删了误授的 `nova-act:GetAct`**——AWS Service Reference v1.4 全动作集无此 action（此前多授一个不存在的动作，真跑删后照跑通）。
   - **`bedrock-agentcore` 可收窄的 4 个**（Start/Stop/GetProfile/Save）→ 系统 browser + `browser-profile/*`。**踩坑记录（copy-account 陷阱）**：系统默认 browser（`aws.browser.v1`）的 ARN **account 段是字面量 `aws`、不是客户账户**——AWS 官方人读文档（browser-profiles.html）误写成 `<account_id>`，实测 `get-browser` 返回 `aws`、模拟器验证填客户账户会 implicitDeny（下次部署必挂）。browser-profile 才是客户自建资源（account=客户账户、profileId 用 `*`）。两类 account 段方向相反，勿混。
   - **4 个只能 `*` 的**（List/CreateBrowserProfile/Connect×2）：SAR `resource_types` 为空，模拟器实证 scope 到任何具体 ARN 均 implicitDeny——**结构上不支持 resource-level**，诚实保留 `*`（非"待标定"）。
   - **风险收在两道**：`*` 只在这 4 个结构性动作的资源维度宽；**动作维度全最小 + 两引擎 task role 分立**（一引擎被攻破不波及另一个）。回归护栏见 `iac_aws_backend/tests/test_stack.py::test_task_role_resource_arns_narrowed`（钉死 ARN 形态 + account=aws 陷阱 + GetAct 已删）。
@@ -172,7 +172,7 @@ subnet/sg 不是「名字」，是 **AWS 建 VPC 时生成的 ID**（`subnet-0ab
 
 ## 已定的两项（原开放项，已编码）
 
-- **Midscene region 全可配（修硬编码，不接受 east 固定）**：Midscene 的 AgentCore + Bedrock 模型连接此前用硬编码 `REGION="us-east-1"`（`engines/midscene/lib/agentcore-sigv4.mts` + `run-scope.ts` 的 `BedrockAgentCoreClient({region})`）——注入 `AWS_REGION=us-west-2` 时其 events/job/artifact 走 west、但浏览器会话+模型仍走 east（半贯通）。**决策：改成惰性读 `process.env.AWS_REGION`**（`getRegion()`/`getBaseUrl()`，与 I/O 边缘同源），使 region 真正全可配、与 Nova 侧一致（Nova 全程读同一 env、无此问题）。这样 Midscene task role 的 AgentCore/Bedrock 权限**不锁死 east**、跟注入的 region 走。（region=None 时的 fail-loud 语义随之统一，对齐 [0016](./0016-execution-architecture-core-lib-run-model.md) 决策 C。）
+- **Midscene region 全可配（修硬编码，不接受 east 固定）**：Midscene 的 AgentCore + Bedrock 模型连接此前用硬编码 `REGION="us-east-1"`（`engines/midscene/src/lib/agentcore-sigv4.mts` + `run-scope.ts` 的 `BedrockAgentCoreClient({region})`）——注入 `AWS_REGION=us-west-2` 时其 events/job/artifact 走 west、但浏览器会话+模型仍走 east（半贯通）。**决策：改成惰性读 `process.env.AWS_REGION`**（`getRegion()`/`getBaseUrl()`，与 I/O 边缘同源），使 region 真正全可配、与 Nova 侧一致（Nova 全程读同一 env、无此问题）。这样 Midscene task role 的 AgentCore/Bedrock 权限**不锁死 east**、跟注入的 region 走。（region=None 时的 fail-loud 语义随之统一，对齐 [0016](./0016-execution-architecture-core-lib-run-model.md) 决策 C。）
 - **events 表开 TTL（worker 写时间戳）**：worker emit 时给每条 event item 多写一个 `expires_at`（epoch **秒**，= 写入时刻 + **7 天**），CDK 在该属性上开 DynamoDB TTL。**7 天的理由**：events 是协调/进度脚手架，权威数据在 RunReport/ResultStore（events 归约完即死重）——但留 7 天窗口供事后调查失败 run（如「worker 到底 emit 没 emit scope_done」），几天后仍可查、又自动清、免手工清理。属性名 `expires_at`（DDB TTL 惯例、epoch 秒）；两个引擎 worker 对称写（Nova put_item / Midscene PutItemCommand 的 `{N}`）。**FargateEngine 读端不受影响**——它只认 `pk`/`seq`/`body`（[0024](./0024-worker-core-protocol.md)），多一个属性无害、不进 Query 投影约束。TTL 是**最终清理、非精确**（DDB 可能延迟至 48h 才删过期项）——无碍，因为读端从不依赖过期项存在。
 
 ## 留待（defer）

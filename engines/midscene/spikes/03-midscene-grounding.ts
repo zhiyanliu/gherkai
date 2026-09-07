@@ -17,7 +17,7 @@ import {
   StartBrowserSessionCommand,
   StopBrowserSessionCommand,
 } from "@aws-sdk/client-bedrock-agentcore";
-import { sigv4Fetch, signCdpUpgrade, getBaseUrl, MODEL, getRegion } from "../lib/agentcore-sigv4.mjs";
+import { sigv4Fetch, signCdpUpgrade, getBaseUrl, MODEL, getRegion } from "../src/lib/agentcore-sigv4.mjs";
 // region 改惰性 getter（ADR 0033/0016 决策 C）；spike 直跑带 AWS_REGION=... 前缀，顶层求值 OK。
 const REGION = getRegion(), BASE_URL = getBaseUrl();
 

@@ -4,7 +4,7 @@
 //   (b) 视觉：用一张合格的真实 PNG（非 1x1 占位图）证 image_url 能过 Bedrock 图像 sanitize 并返回视觉应答
 // 跑：cd midscene && node_modules/.bin/tsx spikes/midscene-sigv4/01-model-sigv4.ts
 import OpenAI from "openai";
-import { sigv4Fetch, getBaseUrl, MODEL, getRegion } from "../lib/agentcore-sigv4.mjs";
+import { sigv4Fetch, getBaseUrl, MODEL, getRegion } from "../src/lib/agentcore-sigv4.mjs";
 // region 改惰性 getter（ADR 0033/0016 决策 C）；spike 直跑带 AWS_REGION=... 前缀，顶层求值 OK。
 const REGION = getRegion(), BASE_URL = getBaseUrl();
 

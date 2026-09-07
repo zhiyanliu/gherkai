@@ -4,17 +4,18 @@ version = "0.0.0"
 description = "uv workspace 根（不发行）：gherkai-core / gherkai-runtime / gherkai 三个发行包共用单 lock 与开发入口（ADR 0037）。根自身无发行物。"
 requires-python = ">=3.13"
 # 根只依赖 CLI 发行包（它再拉 runtime → core），使 `uv sync` 一次装齐三个成员（editable）。
-dependencies = ["gherkai"]
+dependencies = ["gherkai[local]"]  # [local] = novaact worker 装进同一 venv（ADR 0037 决策 3）
 
 [tool.uv]
 package = false  # 虚拟根：不构建、不安装自身
 
 [tool.uv.workspace]
 # 成员 = 目录 = 发行包（ADR 0037「工程布局」）。deploy_aws 与 engines/novaact 随后续阶段包化时加入。
-members = ["core", "runtime", "cli"]
+members = ["core", "runtime", "cli", "engines/novaact"]  # engines/midscene 是 npm 包、不在此；deploy_aws 随阶段 4 加入
 
 [tool.uv.sources]
 gherkai = { workspace = true }
+gherkai-worker-novaact = { workspace = true }
 
 [dependency-groups]
 # 三个成员共用的开发依赖（moto 只装 dynamodb/s3 后端；pytest-timeout 是挂死安全网，见根 pytest 配置）。
@@ -27,7 +28,7 @@ dev = [
 
 [tool.pytest.ini_options]
 # 根跑全部成员的单测；各成员目录下 `uv run pytest` 也可（cwd 决定收集范围）。
-testpaths = ["core/tests", "runtime/tests", "cli/tests"]
+testpaths = ["core/tests", "runtime/tests", "cli/tests", "engines/novaact/tests"]
 # 默认只跑单测（纯 moto/本地、绝不连真 AWS）——integration 标记默认 deselect；须显式 `-m integration` +
 # 设 AWS_DDB_TABLE/AWS_S3_BUCKET（见 core/tests/README.md）。timeout=60 是挂死安全网：任何单测 >60s = 异常
 # （尤其防 FargateEngine 等-STOPPED 轮询在忘换 moto ecs 时无限挂）。

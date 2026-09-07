@@ -32,7 +32,7 @@ import json
 import sys
 
 # events 表 TTL 常量：emit_epoch = expires_at - 此值。须与**两端 worker**（写端）TTL 常量一致（各引擎符号名不同）：
-# Nova = engines/novaact/lib/event_sink.py 的 `_EVENTS_TTL_S`；Midscene = engines/midscene/lib/event-sink.mts 的
+# Nova = engines/novaact/gherkai_worker_novaact/lib/event_sink.py 的 `_EVENTS_TTL_S`；Midscene = engines/midscene/src/lib/event-sink.mts 的
 # `EVENTS_TTL_S`（无前导下划线）。另一个读端同样反解：core/gherkai_core/adapters/event_log/ddb.py 的 `_EVENTS_TTL_S`
 # （`_emit_ts`）。四端各自硬编码 7d、语义契约对齐（ADR 0033/0024）；此处复刻、改动须同步全部解码方。
 _EVENTS_TTL_S = 7 * 24 * 60 * 60

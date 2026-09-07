@@ -5,9 +5,11 @@
 `cli` / `lambdas` / 未来 WebUI 的**共同地基**（ADR 0016「演进」节）：这里知道产品的一切（有哪两个引擎、
 云资源怎么命名、run 怎么装配推进），各入口只是它的皮。依赖方向：`皮 → gherkai_runtime → gherkai_core`（窄腰红线不变）。
 
-- `compose.py` —— 组合根/引擎注册表：`build_engines` / `build_fargate_engines` / `build_local_stores` /
-  `build_cloud_stores` / `resolve_cloud_target`（云资源终名 + region/profile 一处解析）/ grace 推导 /
-  run_id·时钟
+- `compose.py` —— 组合根/引擎注册表：`resolve_worker_cmd`（worker 四级定位链，ADR 0037 决策 3——env 覆写 >
+  同 venv `-m` > PATH bin > uvx/npx 兜底；全 miss 抛 `WorkerNotFoundError` 交调用点分叉）/ `build_engines` /
+  `build_fargate_engines` / `build_local_stores` / `build_cloud_stores` / `resolve_cloud_target`（云资源终名 +
+  region/profile 一处解析）/ 确定性能力自述（`query_deterministic` / `match_deterministic`，ADR 0036）/
+  grace 推导 / run_id·时钟
 - `detached.py` —— local 无状态跑批宿主（ADR 0034）：SubprocessLauncher + per-run reconcile loop
 - `names.py` —— 资源命名真源（零依赖；`iac_aws_backend/names.py` 直接 re-export，消复刻）
 - `tunnel.py` —— 隧道 provider（ADR 0035）：`--expose-local` 起/拆 ngrok（basic-auth 凭据每 run 一换、按

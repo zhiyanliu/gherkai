@@ -1,6 +1,7 @@
 """compose（组合根逻辑）单测：不起任何子进程、不烧钱。"""
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -9,34 +10,211 @@ from gherkai_runtime import compose
 from gherkai_core.scope import FeatureSource
 
 
-def test_build_engines_has_both_legs():
-    repo = compose.repo_root()
-    engines = compose.build_engines(repo)
+# dev 环境里 midscene 恒走定位链第一级（env 覆写）——它没有已安装的 npm 包、也没有 PATH 上的 bin
+# （ADR 0037 决策 3「contributor 代价点」）。build_engines 的 env 注入类断言要两条腿都是真 SubprocessEngine，
+# 故这些用例统一用本 fixture 给 midscene 一个假 cmd（不 spawn，只查接线）。
+@pytest.fixture
+def midscene_env_cmd(monkeypatch):
+    monkeypatch.setenv("GHERKAI_WORKER_MIDSCENE_CMD", "node /fake/midscene-worker.mjs")
+    monkeypatch.delenv("GHERKAI_WORKER_MIDSCENE_CWD", raising=False)
+    return "node /fake/midscene-worker.mjs"
+
+
+# ---- worker 定位链（ADR 0037 决策 3）：四级顺序 + miss 语义 ----
+
+def test_chain_level1_env_cmd_wins_with_optional_cwd(monkeypatch):
+    """第一级 env 覆写最高优先（shlex 拆分）+ 可选配套 _CWD：contributor 指向 repo 内源码/自建 worker 走这里。"""
+    monkeypatch.setenv("GHERKAI_WORKER_NOVAACT_CMD", "python -m my.worker --flag 'a b'")
+    monkeypatch.setenv("GHERKAI_WORKER_NOVAACT_CWD", "/tmp/somewhere")
+    wc = compose.resolve_worker_cmd("novaact")
+    assert wc.cmd == ["python", "-m", "my.worker", "--flag", "a b"]  # shlex：带引号的整体是一个 arg
+    assert wc.cwd == "/tmp/somewhere"
+    assert "GHERKAI_WORKER_NOVAACT_CMD" in wc.source
+
+
+def test_chain_level1_env_cmd_without_cwd_gives_none(monkeypatch):
+    # _CWD 是**可选**配套：不给则 cwd=None＝继承调用者 CWD（worker 不再有专属 cwd）
+    monkeypatch.setenv("GHERKAI_WORKER_MIDSCENE_CMD", "node worker.mjs")
+    monkeypatch.delenv("GHERKAI_WORKER_MIDSCENE_CWD", raising=False)
+    assert compose.resolve_worker_cmd("midscene").cwd is None
+
+
+def test_chain_level1_blank_env_falls_through(monkeypatch):
+    # 空/纯空白的 env 值不算覆写（shlex 拆出空表）——否则 `export ...CMD=` 会把定位链整条掐死、只报 miss
+    monkeypatch.setenv("GHERKAI_WORKER_NOVAACT_CMD", "   ")
+    wc = compose.resolve_worker_cmd("novaact")
+    assert wc.cmd == [sys.executable, "-m", "gherkai_worker_novaact"]  # 落到第二级
+
+
+def test_chain_level1_unparsable_env_fails_loud(monkeypatch):
+    """第一级 env 值 shlex 解析不了（引号不配对）→ **不静默落下一级**，报 miss 并点名该 env。
+
+    悄悄换用别的 worker（或报「没装」）是最难查的错：用户明确指了一个，就该告诉他这一个哪儿不对。
+    """
+    monkeypatch.setenv("GHERKAI_WORKER_NOVAACT_CMD", 'python -m "unclosed')
+    with pytest.raises(compose.WorkerNotFoundError, match="GHERKAI_WORKER_NOVAACT_CMD"):
+        compose.resolve_worker_cmd("novaact")
+
+
+def test_chain_level2_same_venv_module_no_wrapper(monkeypatch):
+    """第二级（仅 Python 引擎）：find_spec 命中 → `sys.executable -m <import 名>`、cwd=None。
+
+    **无包装层**是硬要求：EVENTS_FD 经 pass_fds 只到被直接 spawn 的那个进程（ADR 0024 三通道）——
+    故这一级恒是 `python -m`，不是任何脚本/wrapper。
+    """
+    monkeypatch.delenv("GHERKAI_WORKER_NOVAACT_CMD", raising=False)
+    wc = compose.resolve_worker_cmd("novaact")
+    assert wc.cmd == [sys.executable, "-m", "gherkai_worker_novaact"]
+    assert wc.cwd is None and "gherkai_worker_novaact" in wc.source
+
+
+def test_chain_level3_path_executable(monkeypatch):
+    # 第二级 miss（非 Python 引擎 / 包没装）→ 第三级 PATH 可执行 `gherkai-worker-<engine>`
+    monkeypatch.delenv("GHERKAI_WORKER_MIDSCENE_CMD", raising=False)
+    monkeypatch.setattr(compose.shutil, "which",
+                        lambda n: "/usr/local/bin/gherkai-worker-midscene" if n == "gherkai-worker-midscene" else None)
+    wc = compose.resolve_worker_cmd("midscene")
+    assert wc.cmd == ["/usr/local/bin/gherkai-worker-midscene"] and wc.cwd is None
+    assert "PATH" in wc.source
+
+
+def test_chain_level2_skipped_when_module_missing(monkeypatch):
+    # Python 引擎的第二级只在 find_spec 命中时用（否则继续往下）——防「包没装也拼 -m」拼出必崩的 cmd
+    monkeypatch.delenv("GHERKAI_WORKER_NOVAACT_CMD", raising=False)
+    monkeypatch.setattr(compose, "_find_worker_spec", lambda mod: False)
+    monkeypatch.setattr(compose.shutil, "which",
+                        lambda n: "/opt/bin/gherkai-worker-novaact" if n == "gherkai-worker-novaact" else None)
+    assert compose.resolve_worker_cmd("novaact").cmd == ["/opt/bin/gherkai-worker-novaact"]
+
+
+def test_chain_level4_uvx_npx_on_pure_release(monkeypatch):
+    # 第四级兜底拉起：版本是纯发行版 + 拉起器在 PATH → uvx/npx 按 CLI 版本 pin（worker 与 CLI lockstep）
+    monkeypatch.delenv("GHERKAI_WORKER_NOVAACT_CMD", raising=False)
+    monkeypatch.delenv("GHERKAI_WORKER_MIDSCENE_CMD", raising=False)
+    monkeypatch.setattr(compose, "_find_worker_spec", lambda mod: False)
+    monkeypatch.setattr(compose.shutil, "which", lambda n: f"/bin/{n}" if n in ("uvx", "npx") else None)
+    nova = compose.resolve_worker_cmd("novaact", version="1.4.0")
+    assert nova.cmd == ["uvx", "gherkai-worker-novaact==1.4.0"]
+    mid = compose.resolve_worker_cmd("midscene", version="1.4.0")
+    assert mid.cmd == ["npx", "-y", "@gherkai/worker-midscene@1.4.0"]
+
+
+@pytest.mark.parametrize("dev_version", ["1.4.0.post10.dev0+abc123.dirty", "1.4.0.dev1", "1.4.0.post3",
+                                         "1.4.0+local.1"])
+def test_chain_level4_skipped_on_non_release_version(monkeypatch, dev_version):
+    """dev/post/本地段版本**不在 PyPI/npm 上**（ADR 0037 决策 2b 的派生形态）→ 第四级跳过、直接 miss 报安装指引。
+
+    否则 contributor 在 dev 版下会拿到「uvx 解析不到这个版本」的难懂网络错误，而不是「worker 没装、这样装」。
+    """
+    monkeypatch.delenv("GHERKAI_WORKER_MIDSCENE_CMD", raising=False)
+    monkeypatch.setattr(compose, "_find_worker_spec", lambda mod: False)
+    # 只有 uvx/npx 在 PATH（worker bin 不在）→ 前三级全 miss，第四级是否成立全看版本
+    monkeypatch.setattr(compose.shutil, "which", lambda n: f"/bin/{n}" if n in ("uvx", "npx") else None)
+    with pytest.raises(compose.WorkerNotFoundError):
+        compose.resolve_worker_cmd("midscene", version=dev_version)
+
+
+def test_chain_level4_skipped_when_launcher_absent(monkeypatch):
+    # 第二条件：拉起器不在 PATH（无 uvx/npx 的机器）→ 跳过第四级、报安装指引
+    monkeypatch.delenv("GHERKAI_WORKER_MIDSCENE_CMD", raising=False)
+    monkeypatch.setattr(compose.shutil, "which", lambda n: None)
+    with pytest.raises(compose.WorkerNotFoundError):
+        compose.resolve_worker_cmd("midscene", version="1.4.0")
+
+
+def test_chain_all_miss_raises_with_install_hint(monkeypatch):
+    """四级全 miss → WorkerNotFoundError 带引擎名 + 该引擎的安装指引 + env 覆写指引（退码交调用点）。"""
+    monkeypatch.delenv("GHERKAI_WORKER_MIDSCENE_CMD", raising=False)
+    monkeypatch.setattr(compose.shutil, "which", lambda n: None)
+    monkeypatch.setattr(compose, "_runtime_version", lambda: None)
+    with pytest.raises(compose.WorkerNotFoundError) as ei:
+        compose.resolve_worker_cmd("midscene")
+    e = ei.value
+    assert e.engine == "midscene"
+    assert "npm i -g @gherkai/worker-midscene" in str(e) and "Node ≥ 22" in str(e)
+    assert "GHERKAI_WORKER_MIDSCENE_CMD" in str(e)
+    assert isinstance(e, RuntimeError)  # 既有「worker 起不来→RuntimeError」的调用点语义自动涵盖它
+
+
+def test_chain_novaact_miss_hint_is_python_side(monkeypatch):
+    # 安装指引按引擎分（两种语言两个地盘）：novaact 指 uv tool install 'gherkai[local]'
+    monkeypatch.delenv("GHERKAI_WORKER_NOVAACT_CMD", raising=False)
+    monkeypatch.setattr(compose, "_find_worker_spec", lambda mod: False)
+    monkeypatch.setattr(compose.shutil, "which", lambda n: None)
+    monkeypatch.setattr(compose, "_runtime_version", lambda: None)
+    with pytest.raises(compose.WorkerNotFoundError, match=r"gherkai\[local\]"):
+        compose.resolve_worker_cmd("novaact")
+
+
+def test_resolve_worker_cmd_unknown_engine():
+    with pytest.raises(ValueError, match="未知引擎"):
+        compose.resolve_worker_cmd("nope")
+
+
+def test_pure_release_predicate():
+    # 第四级门槛的判据（PEP 440）：纯发行版才可能在 PyPI/npm 上
+    assert compose._is_pure_release("1.4.0") and compose._is_pure_release("1.4.0rc1")
+    assert not compose._is_pure_release("1.4.0.dev1")
+    assert not compose._is_pure_release("1.3.0.post10.dev0+f2efc49.dirty")
+    assert not compose._is_pure_release("1.4.0+dirty")
+    assert not compose._is_pure_release("not-a-version")
+
+
+# ---- build_engines：cmd/cwd 走定位链 + env 注入 ----
+
+def test_build_engines_has_both_legs(midscene_env_cmd):
+    engines = compose.build_engines()
     assert set(engines) == {"novaact", "midscene"}
-    # cmd 指向各自 worker（不实际起进程，只查接线）
-    assert any("run_scope.py" in c for c in engines["novaact"].cmd)
-    assert any("run-scope.ts" in c for c in engines["midscene"].cmd)
+    # cmd 来自定位链（不实际起进程，只查接线）：novaact 在 dev 命中第二级、midscene 命中 env 覆写
+    assert engines["novaact"].cmd == [sys.executable, "-m", "gherkai_worker_novaact"]
+    assert engines["midscene"].cmd == ["node", "/fake/midscene-worker.mjs"]
 
 
-def test_build_engines_injects_extra_http_headers_env():
+def test_build_engines_miss_leg_does_not_break_the_other(monkeypatch):
+    """某引擎定位链 miss **不连坐**另一条腿（ADR 0037 决策 3）：dev 下 midscene 未装是常态，
+    novaact-only 的 run 必须照跑；miss 的那条腿一用即抛 WorkerNotFoundError（带安装指引），
+    **不是** resolver 的「未知引擎」（那会把「没装」误导成「拼错名」）。"""
+    monkeypatch.delenv("GHERKAI_WORKER_MIDSCENE_CMD", raising=False)
+    monkeypatch.setattr(compose.shutil, "which", lambda n: None)
+    monkeypatch.setattr(compose, "_runtime_version", lambda: None)
+    engines = compose.build_engines()
+    assert set(engines) == {"novaact", "midscene"}  # 引擎名恒在册
+    assert engines["novaact"].cmd[-1] == "gherkai_worker_novaact"
+    with pytest.raises(compose.WorkerNotFoundError, match="npm i -g"):
+        engines["midscene"].run_scope(object())
+
+
+def test_build_engines_injects_extra_http_headers_env(midscene_env_cmd):
     """extra_http_headers（ADR 0035 决策 4）→ 两 worker env 注 GHERKAI_EXTRA_HTTP_HEADERS（JSON）；
     不传则不注入（默认路径零变化）。"""
     import json as _json
 
-    repo = compose.repo_root()
-    engines = compose.build_engines(repo, extra_http_headers={"ngrok-skip-browser-warning": "1"})
+    engines = compose.build_engines(extra_http_headers={"ngrok-skip-browser-warning": "1"})
     for name in ("novaact", "midscene"):
         env = engines[name]._env
         assert env is not None, name
         assert _json.loads(env["GHERKAI_EXTRA_HTTP_HEADERS"]) == {"ngrok-skip-browser-warning": "1"}
-    engines2 = compose.build_engines(repo)
+    engines2 = compose.build_engines()
     for name in ("novaact", "midscene"):
         env2 = engines2[name]._env
         assert env2 is None or "GHERKAI_EXTRA_HTTP_HEADERS" not in env2, name
 
 
-def test_resolver_known_and_unknown():
-    engines = compose.build_engines(compose.repo_root())
+def test_build_engines_injects_steps_dir_env_both_legs(tmp_path: Path, midscene_env_cmd):
+    """steps_dir（ADR 0037 决策 4）→ **两个** worker 都注 GHERKAI_STEPS_DIR（两引擎扫同一目录、各取自己的
+    扩展名）；不传则不注入（worker 只有内建脚手架注册）。worker 只认这个 env，约定逻辑不进 worker。"""
+    steps = tmp_path / "steps"
+    engines = compose.build_engines(steps_dir=steps)
+    for name in ("novaact", "midscene"):
+        assert engines[name]._env["GHERKAI_STEPS_DIR"] == str(steps), name
+    engines2 = compose.build_engines()
+    for name in ("novaact", "midscene"):
+        env2 = engines2[name]._env
+        assert env2 is None or "GHERKAI_STEPS_DIR" not in env2, name
+
+
+def test_resolver_known_and_unknown(midscene_env_cmd):
+    engines = compose.build_engines()
     resolver = compose.make_resolver(engines)
     assert resolver("novaact") is engines["novaact"]
     with pytest.raises(ValueError, match="未知引擎"):
@@ -65,18 +243,22 @@ def test_load_feature_absolute_path_stays_absolute(tmp_path: Path):
     assert fs.uri == str(outside)
 
 
-def test_repo_root_contains_core_and_engines():
-    repo = compose.repo_root()
-    assert (repo / "core").is_dir()
-    assert (repo / "engines").is_dir()
+def test_no_repo_root_consumer_remains():
+    """`repo_root()` 已整体退役（ADR 0037 决策 3）：分发后没有 repo，任何靠仓库结构的隐式行为都是漂移面。
+
+    结构性护栏——名字回来（连同「从本文件上溯几层」的推导）就是回归，且这种回归在单测里天然隐形
+    （dev 树下上溯恰好成立、wheel 用户才炸）。
+    """
+    assert not hasattr(compose, "repo_root")
+    src = Path(compose.__file__).read_text(encoding="utf-8")
+    assert "parents[2]" not in src, "compose 又出现了上溯仓库根的推导"
 
 
-def test_build_engines_injects_artifact_dirs_symmetrically(tmp_path: Path):
+def test_build_engines_injects_artifact_dirs_symmetrically(tmp_path: Path, midscene_env_cmd):
     # 两引擎对称：产物落点经环境变量注入各自 worker 的 env（ADR 0027 产物归位）。
-    repo = compose.repo_root()
     nova_dir = tmp_path / "r1" / "nova-trajectories"
     mid_dir = tmp_path / "r1" / "midscene-run"
-    engines = compose.build_engines(repo, nova_logs_dir=nova_dir, midscene_run_dir=mid_dir)
+    engines = compose.build_engines(nova_logs_dir=nova_dir, midscene_run_dir=mid_dir)
     assert engines["novaact"]._env["NOVA_LOGS_DIR"] == str(nova_dir)
     assert engines["midscene"]._env["MIDSCENE_RUN_DIR"] == str(mid_dir)
     # 完整继承 os.environ（叠加而非替换）——否则 worker 丢 AWS 凭证等
@@ -84,32 +266,32 @@ def test_build_engines_injects_artifact_dirs_symmetrically(tmp_path: Path):
     assert engines["midscene"]._env.get("PATH") == os.environ.get("PATH")
 
 
-def test_build_engines_no_dirs_midscene_env_none(tmp_path: Path):
-    # 不传落点（如 --no-report）：midscene env 保持 None，SubprocessEngine 回落继承 os.environ（不硬替换）。
-    engines = compose.build_engines(compose.repo_root())
+def test_build_engines_no_dirs_midscene_env_none(midscene_env_cmd):
+    # 不传落点、也无共注 env：midscene env 保持 None，SubprocessEngine 回落继承 os.environ（不硬替换）。
+    engines = compose.build_engines()
     assert engines["midscene"]._env is None
 
 
-def test_build_engines_nova_always_has_act_timeout(tmp_path: Path):
+def test_build_engines_nova_always_has_act_timeout(midscene_env_cmd):
     # Nova env **恒非 None**：即便无产物落点，组合根也要注入 NOVA_ACT_TIMEOUT_S（双端同源，ADR 0024 grace 硬约束）——
     # worker 读它作 act timeout、组合根用同一常量算 grace 下限，消除两处独立 120 的漂移。
-    engines = compose.build_engines(compose.repo_root())
+    engines = compose.build_engines()
     assert engines["novaact"]._env is not None
     assert engines["novaact"]._env["NOVA_ACT_TIMEOUT_S"] == str(compose.NOVA_ACT_TIMEOUT_S)
 
 
-def test_build_engines_never_injects_artifact_s3_env(tmp_path: Path):
+def test_build_engines_never_injects_artifact_s3_env(tmp_path: Path, midscene_env_cmd):
     # local 档**恒不注入** S3 上传落点（worker 据「有没有这组 env」决定上传，无 → 报 file://，ADR 0029）：
     # 上传落点只由 cloud 档的 build_fargate_engines 注入，预演由 e2e_harness 自拼 env（ADR 0016 决策 B）。
     nova_dir = tmp_path / "rid" / "nova-trajectories"
     mid_dir = tmp_path / "rid" / "midscene-run"
-    engines = compose.build_engines(compose.repo_root(), nova_logs_dir=nova_dir, midscene_run_dir=mid_dir)
+    engines = compose.build_engines(nova_logs_dir=nova_dir, midscene_run_dir=mid_dir)
     for eng in ("novaact", "midscene"):
         assert "ARTIFACT_S3_BUCKET" not in engines[eng]._env
         assert "ARTIFACT_S3_PREFIX" not in engines[eng]._env
 
 
-def test_build_engines_region_profile_override_env(tmp_path: Path, monkeypatch):
+def test_build_engines_region_profile_override_env(tmp_path: Path, monkeypatch, midscene_env_cmd):
     # ADR 0016 决策 C：--region/--profile 解析值**覆盖**继承的 AWS_REGION/AWS_PROFILE（参数 > env），使二者真贯通到
     # worker（EventSink/JobSource/ArtifactUploader/Nova Workflow 建 client 都读它们），与 core store 同源、消除分叉。
     monkeypatch.setenv("AWS_REGION", "us-east-1")   # shell 里是 east
@@ -117,7 +299,7 @@ def test_build_engines_region_profile_override_env(tmp_path: Path, monkeypatch):
     nova_dir = tmp_path / "rid" / "nova-trajectories"
     mid_dir = tmp_path / "rid" / "midscene-run"
     engines = compose.build_engines(
-        compose.repo_root(), nova_logs_dir=nova_dir, midscene_run_dir=mid_dir,
+        nova_logs_dir=nova_dir, midscene_run_dir=mid_dir,
         region="us-west-2", profile="cli-prof",  # --region west / --profile cli-prof
     )
     for eng in ("novaact", "midscene"):
@@ -125,38 +307,36 @@ def test_build_engines_region_profile_override_env(tmp_path: Path, monkeypatch):
         assert engines[eng]._env["AWS_PROFILE"] == "cli-prof"    # profile 同理覆盖
 
 
-def test_build_engines_region_profile_none_preserve_inherited(tmp_path: Path, monkeypatch):
+def test_build_engines_region_profile_none_preserve_inherited(tmp_path: Path, monkeypatch, midscene_env_cmd):
     # region/profile=None（未给参数、__main__ 解析出 None）：不干预，保留继承的 env（若 shell 有）——
     # 组合根不硬写、留 env/boto 默认链/profile config 兜底（现有宽容）。
     monkeypatch.setenv("AWS_REGION", "eu-central-1")
     monkeypatch.setenv("AWS_PROFILE", "inherited-prof")
     nova_dir = tmp_path / "rid" / "nova-trajectories"
-    engines = compose.build_engines(compose.repo_root(), nova_logs_dir=nova_dir, region=None, profile=None)
+    engines = compose.build_engines(nova_logs_dir=nova_dir, region=None, profile=None)
     assert engines["novaact"]._env["AWS_REGION"] == "eu-central-1"      # 原样继承、未被抹掉
     assert engines["novaact"]._env["AWS_PROFILE"] == "inherited-prof"
 
 
-def test_build_engines_region_profile_injected_on_rebuild_path_both_legs(tmp_path: Path, monkeypatch):
-    # 补建路径（无产物落点、如 --no-report → _env 返回 None）：region/profile 须在**两个引擎**补建路径都注入——
-    # Nova 恒补建（塞 NOVA_ACT_TIMEOUT_S，_inject_aws 搭便车）；Midscene 在 region/profile 有值时也补建（否则 --no-report
-    # 下 midscene worker 继承 os.environ、拿不到 --profile 覆盖，而它经 fromNodeProviderChain 消费 profile 做 AgentCore/
-    # Bedrock 鉴权——真消费、非无害，ADR 0016 决策 C）。
+def test_build_engines_region_profile_injected_on_rebuild_path_both_legs(monkeypatch, midscene_env_cmd):
+    # 补建路径（无产物落点、无共注 env → _env 返回 None）：region/profile 须在**两个引擎**补建路径都注入——
+    # Nova 恒补建（塞 NOVA_ACT_TIMEOUT_S，_inject_aws 搭便车）；Midscene 在 region/profile 有值时也补建（否则
+    # midscene worker 继承 os.environ、拿不到 --profile 覆盖，而它经 fromNodeProviderChain 消费 profile 做
+    # AgentCore/Bedrock 鉴权——真消费、非无害，ADR 0016 决策 C）。
     monkeypatch.setenv("AWS_REGION", "us-east-1")
     monkeypatch.delenv("AWS_PROFILE", raising=False)
-    engines = compose.build_engines(
-        compose.repo_root(), region="ap-southeast-1", profile="cli-prof",  # 无 dirs → 两个引擎走补建
-    )
+    engines = compose.build_engines(region="ap-southeast-1", profile="cli-prof")  # 无 dirs → 两个引擎走补建
     for eng in ("novaact", "midscene"):
         assert engines[eng]._env["AWS_REGION"] == "ap-southeast-1"  # 补建路径也覆盖生效
         assert engines[eng]._env["AWS_PROFILE"] == "cli-prof"
 
 
-def test_build_engines_midscene_no_rebuild_when_no_region_profile(tmp_path: Path, monkeypatch):
-    # 对称边界：--no-report 且 region/profile 均 None 时 Midscene **不**补建（env=None、继承 os.environ 本就够，
-    # 免无谓拷贝）——补建只为 region/profile 覆盖，无值则不建。Nova 仍补建（NOVA_ACT_TIMEOUT_S 恒需）。
+def test_build_engines_midscene_no_rebuild_when_no_region_profile(monkeypatch, midscene_env_cmd):
+    # 对称边界：无落点、无共注 env 且 region/profile 均 None 时 Midscene **不**补建（env=None、继承 os.environ
+    # 本就够，免无谓拷贝）——补建只为 region/profile 覆盖，无值则不建。Nova 仍补建（NOVA_ACT_TIMEOUT_S 恒需）。
     monkeypatch.delenv("AWS_REGION", raising=False)
     monkeypatch.delenv("AWS_DEFAULT_REGION", raising=False)
-    engines = compose.build_engines(compose.repo_root(), region=None, profile=None)  # 无 dirs、无 region/profile
+    engines = compose.build_engines(region=None, profile=None)
     assert engines["midscene"]._env is None       # 不补建
     assert engines["novaact"]._env is not None     # Nova 恒补建（timeout）
 
@@ -673,9 +853,18 @@ def test_preflight_missing_cluster_detected():
     assert err is not None and "g-cluster" in err
 
 
-# ---- query_deterministic（ADR 0036）：spawn worker 自述、fake subprocess ----
+# ---- 自述入口（ADR 0036）：spawn worker 收 JSON、fake subprocess ----
 
-def test_query_deterministic_parses_worker_json(monkeypatch):
+@pytest.fixture
+def novaact_env_cmd(monkeypatch):
+    """定位链第一级钉死一个假 novaact cmd：自述用例只验「组合根怎么拼命令/收结果」，不依赖本机装了什么。"""
+    monkeypatch.setenv("GHERKAI_WORKER_NOVAACT_CMD", "/fake/novaact-worker")
+    monkeypatch.setenv("GHERKAI_WORKER_MIDSCENE_CMD", "/fake/midscene-worker")
+    monkeypatch.delenv("GHERKAI_WORKER_NOVAACT_CWD", raising=False)
+    monkeypatch.delenv("GHERKAI_WORKER_MIDSCENE_CWD", raising=False)
+
+
+def test_query_deterministic_parses_worker_json(monkeypatch, novaact_env_cmd):
     import subprocess
 
     class _P:
@@ -688,22 +877,41 @@ def test_query_deterministic_parses_worker_json(monkeypatch):
     def fake_run(cmd, **kw):
         captured["cmd"] = cmd
         captured["cwd"] = kw.get("cwd")
+        captured["env"] = kw.get("env")
         return _P()
 
     monkeypatch.setattr(subprocess, "run", fake_run)
-    got = compose.query_deterministic(compose.repo_root(), "novaact")
+    got = compose.query_deterministic("novaact")
     assert got == [{"pattern": "p", "description": "d", "example": "e"}]
-    assert captured["cmd"][-1] == "--list-deterministic"  # 既有 worker cmd + 自述 flag
-    assert "novaact" in " ".join(captured["cmd"])
-    assert captured["cwd"] is not None  # 在 worker cwd 下 spawn（相对依赖如 .venv 才可达）
+    assert captured["cmd"] == ["/fake/novaact-worker", "--list-deterministic"]  # 定位链 cmd + 自述 flag
+    assert captured["cwd"] is None      # 定位链未给 cwd → 继承本进程 CWD（worker 无专属 cwd，ADR 0037 决策 3）
+    assert captured["env"] is None      # 无 steps_dir → 不动 env（worker 继承本进程环境）
+
+
+def test_query_deterministic_injects_steps_dir_env(monkeypatch, novaact_env_cmd, tmp_path):
+    """自述入口同样加载 steps 目录（ADR 0037 决策 4）→ steps_dir 经 env 注入，故 list-deterministic 的清单
+    含使用方定制 step。注入是叠加（保 os.environ，否则 worker 丢 PATH/凭证）。"""
+    import os
+    import subprocess
+
+    class _P:
+        returncode = 0
+        stdout = b"[]"
+        stderr = b""
+
+    captured = {}
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: captured.update(kw) or _P())
+    compose.query_deterministic("novaact", steps_dir=tmp_path / "steps")
+    assert captured["env"]["GHERKAI_STEPS_DIR"] == str(tmp_path / "steps")
+    assert captured["env"].get("PATH") == os.environ.get("PATH")
 
 
 def test_query_deterministic_unknown_engine():
     with pytest.raises(ValueError, match="未知引擎"):
-        compose.query_deterministic(compose.repo_root(), "nope")
+        compose.query_deterministic("nope")
 
 
-def test_query_deterministic_worker_failure_raises(monkeypatch):
+def test_query_deterministic_worker_failure_raises(monkeypatch, novaact_env_cmd):
     import subprocess
 
     class _P:
@@ -713,10 +921,22 @@ def test_query_deterministic_worker_failure_raises(monkeypatch):
 
     monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: _P())
     with pytest.raises(RuntimeError, match="自述失败"):
-        compose.query_deterministic(compose.repo_root(), "midscene")
+        compose.query_deterministic("midscene")
 
 
-def test_match_deterministic_feeds_stdin_and_parses(monkeypatch):
+def test_self_describe_miss_raises_worker_not_found(monkeypatch):
+    """定位链 miss 时自述入口抛 WorkerNotFoundError（而非「起不来」的通用 RuntimeError）——
+    调用点据此分叉：list-deterministic 退 2 打安装指引、plan 降级。"""
+    monkeypatch.delenv("GHERKAI_WORKER_MIDSCENE_CMD", raising=False)
+    monkeypatch.setattr(compose.shutil, "which", lambda n: None)
+    monkeypatch.setattr(compose, "_runtime_version", lambda: None)
+    with pytest.raises(compose.WorkerNotFoundError):
+        compose.query_deterministic("midscene")
+    with pytest.raises(compose.WorkerNotFoundError):
+        compose.match_deterministic("midscene", ["a"])
+
+
+def test_match_deterministic_feeds_stdin_and_parses(monkeypatch, novaact_env_cmd):
     import subprocess
 
     class _P:
@@ -731,7 +951,7 @@ def test_match_deterministic_feeds_stdin_and_parses(monkeypatch):
         return _P()
 
     monkeypatch.setattr(subprocess, "run", fake_run)
-    got = compose.match_deterministic(compose.repo_root(), "midscene", ["a", "b"])
+    got = compose.match_deterministic("midscene", ["a", "b"])
     assert got == [{"pattern": "p", "description": "d"}, None]
     assert captured["cmd"][-1] == "--match-steps"
     import json as _json

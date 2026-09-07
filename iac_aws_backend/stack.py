@@ -283,7 +283,7 @@ class BackendStack(Stack):
             # Reference v1.4 权威列 resource_types）——nova-act 只有 workflow-definition / workflow-run 两个 IAM 资源类型，
             # session/act 非独立资源（IAM 鉴权只到 workflow-run 层）。
             # **definition 名段用 `*`（不 pin 具体名）**：definition 名（worker create-if-not-exists 的那个）是 worker
-            # 运行期概念、住在 worker code（engines/novaact/lib/constants.py），**不该泄进 IAM 层让 IaC 跨工程耦合它**。
+            # 运行期概念、住在 worker code（engines/novaact/gherkai_worker_novaact/lib/constants.py），**不该泄进 IAM 层让 IaC 跨工程耦合它**。
             # 用「锁死 service+account+region、放开 definition 名段」换掉耦合——仍远窄于全 *（只该账户/region 的 nova-act
             # workflow-definition 资源）。两条 ARN 覆盖全部动作：① definition 层（Get/Create/CreateWorkflowRun 只认父）；
             # ② run 通配（Update{WorkflowRun}/CreateSession/Create/UpdateAct/InvokeActStep，runId 亦运行期变量）。

@@ -12,7 +12,7 @@ import { HttpRequest } from "@aws-sdk/protocol-http";   // 漏这个 import = Re
 import { Sha256 } from "@aws-crypto/sha256-js";          // 传 CLASS，不是实例
 import { fromNodeProviderChain } from "@aws-sdk/credential-providers";
 
-const REGION = "us-east-1";   // ⚠️ spike 期硬编码；**生产已改惰性 getRegion()**（读 AWS_REGION、fail-loud、不硬编码 east——见 lib/agentcore-sigv4.mts / ADR 0033/0016 决策 C）。此处保留 spike 原样、勿照抄当现状
+const REGION = "us-east-1";   // ⚠️ spike 期硬编码；**生产已改惰性 getRegion()**（读 AWS_REGION、fail-loud、不硬编码 east——见 src/lib/agentcore-sigv4.mts / ADR 0033/0016 决策 C）。此处保留 spike 原样、勿照抄当现状
 const HOST = `bedrock-runtime.${REGION}.amazonaws.com`;
 const BASE_URL = `https://${HOST}/openai/v1`;            // 保持 /openai/v1（裸 /v1 会 404）
 

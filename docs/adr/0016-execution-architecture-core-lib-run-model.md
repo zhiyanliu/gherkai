@@ -27,7 +27,7 @@
 两个引擎各自语言锁死（Midscene 锁 TS、Nova Act acting 锁 Python，[0023](./0023-novaact-acting-python-locked-no-ts-core.md) 证伪了「全 TS 核心」），故**无论核心用哪个语言，必有一个引擎跨进程**——这是「双语言裂缝」（[0006](./0006-form-a-two-subprojects-no-orchestrator.md)）的必然。
 
 **决定：两个引擎都作为子进程 worker，核心不 import 任何引擎；核心语言选 Python。**
-- **两个引擎都子进程**（而非一个引擎进程内）：两个 `Engine` adapter 形状**完全一致**（spawn worker + 讲同一套 JSON 协议），核心不碰任一引擎 API，AgentCore 会话生命周期留在各自 worker（现 `engines/novaact/worker/run_scope.py` 三层 `with NovaAct/cdp_session/workflow` / `engines/midscene/worker/run-scope.ts`；早期在 BDD 的 `generic.steps.ts` Before/After、`nova_ctx` fixture 验证过，BDD 直跑层已由 0022 退役）。这才是对称 `Engine` port 最干净的形态；一个引擎进程内会让 adapter 出现两种形状、核心 venv 被引擎依赖树绑死。
+- **两个引擎都子进程**（而非一个引擎进程内）：两个 `Engine` adapter 形状**完全一致**（spawn worker + 讲同一套 JSON 协议），核心不碰任一引擎 API，AgentCore 会话生命周期留在各自 worker（现 `engines/novaact/gherkai_worker_novaact/run_scope.py` 三层 `with NovaAct/cdp_session/workflow` / `engines/midscene/src/worker/run-scope.mts`；早期在 BDD 的 `generic.steps.ts` Before/After、`nova_ctx` fixture 验证过，BDD 直跑层已由 0022 退役）。这才是对称 `Engine` port 最干净的形态；一个引擎进程内会让 adapter 出现两种形状、核心 venv 被引擎依赖树绑死。
 - **核心语言 = Python**：两个引擎都子进程后，核心是无重型引擎依赖的薄编排层，语言成为低风险自由选择；选 Python 因 boto3 生态成熟（便于未来云 adapter）+ 官方 `gherkin-official` 解析。
 - **核心自解析 Gherkin + 薄 worker（B1）**：核心拥有解析（单一事实源），worker 只派发 step → act/assert，**退役 cucumber 补丁与 pytest-bdd 路由 hack**。详见 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)。
 
@@ -199,12 +199,12 @@ Fargate 执行环境配置（cluster / task-def / subnet / security-group / even
 ├── cli/                 ← 发行包 gherkai：纯皮 argparse + 渲染（workspace 成员；对兄弟包的依赖在 build 时渲染成 `==` lockstep pin，[0037](./0037-distribution-and-packaging.md) 决策 2）
 │   └── gherkai_cli/{__main__.py（argparse 皮）· render.py（事件/RunResult/RunState 渲染）}
 └── engines/             ← 两个可插拔引擎，与 core 平级对标                  ✅ 已迁
-    ├── midscene/        ← 整个 TS 子工程                                  ✅ worker：engines/midscene/worker/run-scope.ts
-    │   ├── worker/run-scope.ts · worker/deterministic.ts · worker/deterministic.steps.ts · lib/agentcore-sigv4.mts
-    │   └── （node_modules / spikes / cucumber 等整体随迁）
-    └── novaact/         ← 整个 Python 子工程                              ✅ worker：engines/novaact/worker/run_scope.py
-        ├── worker/run_scope.py · worker/deterministic.py · worker/deterministic_steps.py  ✅（确定性注册表已拆出：deterministic.py=注册表+匹配、deterministic_steps.py=脚手架锚点，两引擎对称，见 0022/0036；仅 ai_steps 的进一步拆分仍是留口子）
-        └── lib/workflow_setup.py · .venv（整体随迁）
+    ├── midscene/        ← npm 包 @gherkai/worker-midscene（ESM，0037 决策 3）        ✅ worker：engines/midscene/src/worker/run-scope.mts
+    │   ├── src/bin.mts（入口：进程内注册 tsx 与 resolve hook）· src/index.mts（使用方 step 文件的 import 面）· src/worker/{run-scope,deterministic,deterministic.steps,user-steps}.mts · src/lib/agentcore-sigv4.mts
+    │   └── （node_modules / dist / spikes 随迁；tsconfig 入库）
+    └── novaact/         ← 发行包 gherkai-worker-novaact（0037 决策 3）              ✅ worker：engines/novaact/gherkai_worker_novaact/run_scope.py
+        ├── gherkai_worker_novaact/{run_scope.py · deterministic.py · deterministic_steps.py · user_steps.py · __main__.py}  ✅（确定性注册表已拆出：deterministic.py=注册表+匹配、deterministic_steps.py=内建脚手架锚点、user_steps.py=加载使用方 steps/ 目录，两引擎对称，见 0022/0036/0037；仅 ai_steps 的进一步拆分仍是留口子）
+        └── gherkai_worker_novaact/lib/workflow_setup.py · tests/（无独立 venv：随 CLI 的 [local] extra 装进根 .venv）
 ```
 
 - **`engines/{midscene,novaact}` 提升为与 `core/` 平级**（不再各藏一个 `worker/` 子目录）：引擎子工程必须连同其依赖环境（`node_modules`+`agentcore-sigv4.mts` / `.venv`+`workflow_setup.py`）整体存在，故**整体**移到 `engines/` 下，既对称又不把代码与依赖环境拆开。

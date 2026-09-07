@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+import tempfile
 from pathlib import Path
 
 from gherkai_core.model import TERMINAL_STATUSES, Event, RunMeta, Status
@@ -34,6 +36,13 @@ def _dist_version() -> str:
         return version("gherkai")
     except PackageNotFoundError:
         return "0+unknown"
+
+
+# `--steps-dir` 的公共 help（run/plan/submit/list-deterministic 四处共用，措辞单点维护、不抄四份）
+_STEPS_DIR_HELP = (
+    "使用方确定性 step 目录（默认 ./steps 存在即用；亦可 env GHERKAI_STEPS_DIR）：worker 启动时排序递归"
+    "加载其中的 step 定义文件、注册进自己的确定性注册表（ADR 0037 决策 4）"
+)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -89,6 +98,11 @@ def _build_parser() -> argparse.ArgumentParser:
     run.add_argument(
         "--no-report", action="store_true",
         help="跳过报告归集（CI 只看退出码/JSON、或调试时不想落盘的逃生舱）",
+    )
+    run.add_argument(
+        "--steps-dir", default=None, metavar="DIR",
+        help=_STEPS_DIR_HELP + "。值随 definition 走，本机后台推进/接力的宿主都读回同一份；"
+             "[--backend cloud] 不生效（云端 worker 的 steps 烙在定制镜像里，警告不拦）",
     )
     # backend 选择（ADR 0016「cli backend 选择」/ 0030 决定七）：local=文件落盘（默认）；cloud=DDB/S3。
     # 仅 run 加（plan 纯本地不落库、不连 AWS，不加）。cloud 一次换齐三层（RunStore→DDB、Result/Report→S3）。
@@ -153,6 +167,10 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     pl.add_argument("--json", action="store_true", help="输出机器可读 JSON（scope/job 分组）")
     pl.add_argument(
+        "--steps-dir", default=None, metavar="DIR",
+        help=_STEPS_DIR_HELP + "——预检的派发标注据此反映使用方定制 step（ADR 0036 决策 4）",
+    )
+    pl.add_argument(
         "--expose-local", default=None, metavar="ORIGIN",
         help="仅作标注：plan 显示替换前的原始地址（隧道 URL 是运行时产物，plan 零副作用不起隧道，ADR 0035）",
     )
@@ -188,6 +206,11 @@ def _build_parser() -> argparse.ArgumentParser:
     sm.add_argument("--report-dir", default="reports", metavar="DIR",
                     help="归集报告落点（默认 reports/）；cloud 档须与推进器 Lambda 的 REPORT_DIR 一致"
                          "（preflight 比对，不一致退 2）")
+    sm.add_argument(
+        "--steps-dir", default=None, metavar="DIR",
+        help=_STEPS_DIR_HELP + "。值随 definition 走，本机后台推进/接力的宿主都读回同一份；"
+             "[--backend cloud] 不生效（云端 worker 的 steps 烙在定制镜像里，警告不拦）",
+    )
     sm.add_argument("--region", default=None, metavar="R", help="AWS region（喂 worker）")
     sm.add_argument("--profile", default=None, metavar="P", help="AWS profile（喂 subprocess worker）")
     # backend：local（默认，per-run 进程本机推进）/ cloud（Fargate + 云端 Lambda 事件驱动链推进，ADR 0034）。
@@ -243,6 +266,10 @@ def _build_parser() -> argparse.ArgumentParser:
     ld.add_argument("--engine", choices=sorted(_names.ENGINES), default="novaact",
                     help="查哪个引擎的注册表（默认 novaact，对齐 run 的 --default-engine 缺省）")
     ld.add_argument("--json", action="store_true", help="输出机器可读 JSON")
+    ld.add_argument(
+        "--steps-dir", default=None, metavar="DIR",
+        help=_STEPS_DIR_HELP + "——清单据此含使用方定制 step（自述入口同样加载该目录）",
+    )
     return p
 
 
@@ -252,12 +279,81 @@ def _tunnel_providers() -> list[str]:
     return list(PROVIDERS)
 
 
-def _cmd_list_deterministic(args, repo: Path) -> int:
+def _resolve_steps_dir(args) -> "str | int | None":
+    """解析使用方确定性 step 目录（ADR 0037 决策 4）：`--steps-dir` > env `GHERKAI_STEPS_DIR` > 默认 `./steps`
+    （相对**本进程** CWD、存在才用）→ 绝对路径，或 None（无使用方 step，worker 只有内建脚手架）。
+
+    解析只在提交侧做一次（值随 definition 走给起 worker 的宿主，见 `RunMeta.steps_dir`）；**绝对化是硬要求**
+    ——worker 是 cwd 与 CLI 不同的子进程（定位链后多为继承调用者 CWD，ADR 0037 决策 3），相对路径两侧解析不同。
+
+    **显式给的（flag / env）不是目录 → 退 2**：静默忽略等于把该目录里的确定性 step 悄悄换成 AI catch-all、
+    run 还可能「通过」——本项目最忌的静默降级（与 ADR 0037 决策 4「加载失败 fail-loud」同源立场）。默认
+    `./steps` 不同：「没这个目录」是多数项目的常态、不是错，故只在存在时才用。
+    返回 int（2）时调用方原样返回（同 `_load_and_plan`/`_setup_tunnel` 的失败即退出码惯例）。
+    """
+    for value, origin in ((getattr(args, "steps_dir", None), "--steps-dir"),
+                          (os.environ.get("GHERKAI_STEPS_DIR"), "env GHERKAI_STEPS_DIR")):
+        if value:
+            if not Path(value).is_dir():
+                _progress(f"{origin}={value!r} 不是目录：其中的确定性 step 一条都加载不了。"
+                          "静默跳过等于把这些 step 悄悄换成 AI 判定（可能假绿），故拒绝运行")
+                return 2
+            return str(Path(value).resolve())
+    default = Path("steps")
+    return str(default.resolve()) if default.is_dir() else None
+
+
+def _resolve_steps_dir_for_backend(args) -> str | int | None:
+    """`_resolve_steps_dir` + cloud 档清零（ADR 0037 决策 4）：cloud 档 steps 烙在定制镜像里（0038），definition
+    里的本机路径对云端 worker 无意义 → 不写该字段；用户显式给了则警告不拦（no-op，不改产物落点）。run/submit 共用。"""
+    steps_dir = _resolve_steps_dir(args)
+    if isinstance(steps_dir, int) or args.backend != "cloud":
+        return steps_dir
+    if args.steps_dir:
+        _progress("注：--backend cloud 下 --steps-dir 不生效——云端 worker 的确定性 step 烙在定制镜像里"
+                  "（构建镜像时 COPY steps/，ADR 0037 决策 4 / 0038），本机目录进不了容器")
+    return None
+
+
+def _preflight_worker_runtimes(jobs, steps_dir: str | None) -> int | None:
+    """本次 plan 用到的各引擎：worker 运行时能否定位 + （给了 steps 目录时）能否完成自述（ADR 0037 决策 3/4）。
+
+    - 定位链四级全 miss → 打安装指引 + **退 2**：「运行时没装」是环境/配置问题，属「没开跑就被拒」层，
+      不该变成一批 job 级 `engine_error`（更不该跑掉一半才发现）。
+    - steps 目录已解析 → 以 `--list-deterministic` 自述入口探一次：worker 非零退出（典型 = 使用方 steps 文件
+      加载失败，fail-loud）→ 转述其诊断 + **退 2**。否则 `submit` 会「提交成功」后逐 job error、诊断只落
+      reconcile.log——那是静默降级（ADR 0037 决策 4「提交侧同样前置」）。
+    **只查本次用到的引擎**——另一个引擎没装不连坐（dev 下 midscene 常态未装）。返回 2 或 None。
+    cloud 执行档不调用本函数：那档 worker 在 Fargate 容器里跑，本机定位链无关。
+    """
+    for engine in sorted({j.engine for j in jobs}):
+        try:
+            compose.resolve_worker_cmd(engine)
+        except compose.WorkerNotFoundError as e:
+            _progress(f"引擎运行时缺失，拒绝运行：{e}")
+            return 2
+        if steps_dir is None:
+            continue
+        try:
+            compose.query_deterministic(engine, steps_dir=steps_dir)
+        except compose.WorkerSelfDescribeError as e:
+            _progress(f"使用方 steps 加载失败（引擎 {engine}），拒绝运行：{e}")
+            return 2
+        except (ValueError, RuntimeError) as e:  # 超时/输出非 JSON：worker 连自述都做不到，跑 job 也没戏
+            _progress(f"引擎 {engine} 的 worker 自述失败，拒绝运行：{e}")
+            return 2
+    return None
+
+
+def _cmd_list_deterministic(args) -> int:
     """按引擎列出确定性 step 清单（ADR 0036）：spawn worker 自述、CLI 只转述——core/CLI 不持有 pattern
     语义（ADR 0022「匹配放 worker」红线）。纯本地、零 AWS。"""
+    steps_dir = _resolve_steps_dir(args)  # 自述入口同样加载 steps 目录 → 清单含定制 step（ADR 0037 决策 4）
+    if isinstance(steps_dir, int):
+        return steps_dir
     try:
-        entries = compose.query_deterministic(repo, args.engine)
-    except (ValueError, RuntimeError) as e:
+        entries = compose.query_deterministic(args.engine, steps_dir=steps_dir)
+    except (ValueError, RuntimeError) as e:  # 含 WorkerNotFoundError（定位链 miss，其消息自带安装指引）
         _progress(f"list-deterministic 失败：{e}")
         return 2
     if args.json:
@@ -273,17 +369,26 @@ def _cmd_list_deterministic(args, repo: Path) -> int:
     return 0
 
 
-def _cmd_list_engines(repo: Path) -> int:
-    engines = compose.build_engines(repo)
-    print(f"可用引擎（仓库根 {repo}）：")
-    for name in sorted(engines):
-        eng = engines[name]
-        cmd = " ".join(getattr(eng, "cmd", []))  # SubprocessEngine 持有 cmd
-        print(f"  - {name}: {cmd}")
+def _cmd_list_engines() -> int:
+    """列出各引擎 worker 的拉起命令 + 命中的定位链级别（ADR 0037 决策 3 的自省口）；miss 则打安装指引。
+
+    **恒退 0**：本命令是「告诉我这台机器上环境什么样」的诊断，某引擎没装正是要展示的信息、不是命令失败
+    （要判「装了没」的脚本请看具体引擎那行，或用 run/list-deterministic 的退 2）。
+    """
+    print("可用引擎（worker 定位链解析结果，ADR 0037 决策 3）：")
+    for name in sorted(_names.ENGINES):
+        try:
+            wc = compose.resolve_worker_cmd(name)
+        except compose.WorkerNotFoundError as e:
+            print(f"  - {name}: <未定位到 worker 运行时>")
+            print(f"    {e}")
+            continue
+        print(f"  - {name}: {' '.join(wc.cmd)}")
+        print(f"    来源: {wc.source}" + (f"    cwd: {wc.cwd}" if wc.cwd else ""))
     return 0
 
 
-def _load_and_plan(args, repo: Path) -> "list | int":
+def _load_and_plan(args) -> "list | int":
     """plan 与 run 的共享前置装配：votes 校验 → 读 feature → plan。
 
     成功返回 `Job[]`；任一前置失败返回**退出码 2**（配置矛盾/读不到/语法错，均"没开跑就被拒"，
@@ -341,12 +446,16 @@ def _validate_max_concurrency(args) -> bool:
     return True
 
 
-def _probe_deterministic_dispatch(repo: Path, jobs) -> dict | None:
+def _probe_deterministic_dispatch(jobs, steps_dir: str | None) -> dict | None:
     """plan 的派发预期标注（ADR 0036 决策 4）：按引擎分组 step 文本、批量问 worker 命中结果。
 
     返回 {(scope_id, scenario_id, step_index): probe} 或 None（全部引擎都没问成）。match 用**裸 step 文本**
     ——与 worker 真跑派发的匹配面完全一致（不 unquote、不拼 argument，ADR 0024）。按引擎 best-effort：
-    某引擎查询失败只让该引擎的 job 无标注（stderr 警告），不影响其他引擎与 plan 本体。
+    某引擎查询失败只让该引擎的 job 无标注（stderr 警告），不影响其他引擎与 plan 本体——**含定位链 miss**
+    （该引擎运行时没装，ADR 0037 决策 3 明确 plan 保持本降级、不像 run/submit 那样退 2）。**例外**：worker
+    起来了但自述非零退出（WorkerSelfDescribeError，典型 = 使用方 steps 加载失败）原样抛出、由 `_cmd_plan` 退 2
+    ——那是使用方代码错误，降级成无标注等于静默把定制 step 换成 AI（ADR 0037 决策 4）。
+    steps_dir 透传给 worker 自述入口，使标注反映使用方定制 step（ADR 0037 决策 4）。
     """
     by_engine: dict[str, list[tuple[tuple, str]]] = {}
     for j in jobs:
@@ -357,7 +466,9 @@ def _probe_deterministic_dispatch(repo: Path, jobs) -> dict | None:
     ok_any = False
     for engine, items in by_engine.items():
         try:
-            probes = compose.match_deterministic(repo, engine, [t for _, t in items])
+            probes = compose.match_deterministic(engine, [t for _, t in items], steps_dir=steps_dir)
+        except compose.WorkerSelfDescribeError:
+            raise  # 使用方 steps 加载失败：不降级、由 _cmd_plan 退 2（ADR 0037 决策 4「提交侧同样前置」）
         except (ValueError, RuntimeError) as e:
             _progress(f"（标注降级）引擎 {engine} 的确定性命中查询失败，该引擎 step 无派发标注：{e}")
             continue
@@ -390,20 +501,27 @@ def _setup_tunnel(args, jobs):
     return setup.jobs, setup.extra_http_headers, setup.info
 
 
-def _cmd_plan(args, repo: Path) -> int:
+def _cmd_plan(args) -> int:
     """plan 预检：读 feature → plan → 渲染 scope/job 分组 + 派发预期标注（ADR 0036）。
     **零 AWS、零花费、零副作用**（标注会起本地瞬时 worker 子进程做 match 自述——非跑 job；失败自动降级）。
 
     与 _cmd_run 共用 `_load_and_plan`（votes 校验 + load_feature + plan），但到此为止——
     省钱验证 feature 写法、看分组、暴露 PlanError。退出码与 run 一致（0 ok / 2 配置错）。
     """
-    jobs = _load_and_plan(args, repo)
+    jobs = _load_and_plan(args)
     if isinstance(jobs, int):  # 前置失败 → 退出码
         return jobs
+    steps_dir = _resolve_steps_dir(args)
+    if isinstance(steps_dir, int):
+        return steps_dir
 
     # 派发预期标注（ADR 0036 决策 4）：按引擎批量问 worker「哪些 step 命中确定性」。best-effort——
     # 引擎环境未装/查询失败只降级为无标注+stderr 警告，plan 核心功能保持零依赖（不因标注挂掉）。
-    dispatch = _probe_deterministic_dispatch(repo, jobs)
+    try:
+        dispatch = _probe_deterministic_dispatch(jobs, steps_dir)
+    except compose.WorkerSelfDescribeError as e:
+        _progress(f"使用方 steps 加载失败，plan 拒绝出结果（否则标注静默缺失 = 定制 step 被悄悄换成 AI）：{e}")
+        return 2
 
     # 核心产出 → stdout（与 run 的输出契约一致：--json 单文档 / 否则人看文本）
     if args.json:
@@ -432,7 +550,7 @@ def _progress(*args, **kwargs) -> None:
     print(*args, **kwargs)
 
 
-def _cmd_submit(args, repo: Path) -> int:
+def _cmd_submit(args) -> int:
     """[无状态跑批] 提交完就走（ADR 0034）：plan → 写 RunMeta+全 pending → 起首轮推进 → 打印 run_id → 立即退出。
 
     - **local**：setsid fork per-run 进程跑 reconcile loop 本机推进（无需常驻服务/云）；崩了 status --wait 接力。
@@ -443,10 +561,22 @@ def _cmd_submit(args, repo: Path) -> int:
     """
     if not _validate_max_concurrency(args):  # 最早：读 feature/起隧道/preflight 之前（真零副作用）
         return 2
-    jobs = _load_and_plan(args, repo)
+    jobs = _load_and_plan(args)
     if isinstance(jobs, int):
         return jobs
     _progress(f"plan: {len(jobs)} job(s)  (default_engine={args.default_engine})")
+
+    # worker 运行时 preflight（ADR 0037 决策 3 miss 分叉）：**仅 local 档**——per-run 进程在本机 spawn worker，
+    # 定位链 miss 要在提交前退 2（否则提交成功、后台每个 job 都 engine_error）。cloud 档 worker 在 Fargate，
+    # 本机没有也正常（cloud 的镜像/task-def 由 _submit_cloud 的 preflight 探）。**排在起隧道之前**（零副作用）。
+    # 使用方确定性 step 目录（ADR 0037 决策 4）：提交侧解析一次、随 definition 走给 per-run/接力宿主。
+    steps_dir = _resolve_steps_dir_for_backend(args)
+    if isinstance(steps_dir, int):
+        return steps_dir
+    if args.backend != "cloud":
+        miss = _preflight_worker_runtimes(jobs, steps_dir)
+        if miss is not None:
+            return miss
 
     # --tunnel-ttl 校验（对齐 --grace/--assertion-votes 的入口校验惯例，退 2「没开跑就被拒」）：
     # <=0 等于隧道刚起就被拆。**必须排在起隧道之前**——早拒才真零副作用（否则配置错也已起 ngrok）。
@@ -467,7 +597,8 @@ def _cmd_submit(args, repo: Path) -> int:
     run_id = compose.new_run_id()
     run_meta = RunMeta(run_id=run_id, created_at=compose.now_iso(), jobs=tuple(jobs),
                        extra_http_headers=tuple(tunnel_headers.items()) if tunnel_headers else None,
-                       max_concurrency=args.max_concurrency)
+                       max_concurrency=args.max_concurrency,
+                       steps_dir=steps_dir)  # cloud 档恒 None（上面已置），local 档随 definition 到达宿主
     from gherkai_core.model import JobState, RunState
     initial = RunState(
         run_id=run_id, status=Status.PENDING,
@@ -476,9 +607,9 @@ def _cmd_submit(args, repo: Path) -> int:
     )
 
     if args.backend == "cloud":
-        rc_ = _submit_cloud(args, repo, run_id, run_meta, initial, tunnel_info=tunnel_info)
+        rc_ = _submit_cloud(args, run_id, run_meta, initial, tunnel_info=tunnel_info)
     else:
-        rc_ = _submit_local(args, repo, run_id, run_meta, initial, tunnel_info=tunnel_info)
+        rc_ = _submit_local(args, run_id, run_meta, initial, tunnel_info=tunnel_info)
     if rc_ != 0 and tunnel_info is not None:
         from gherkai_runtime.tunnel import stop_tunnel
 
@@ -486,7 +617,7 @@ def _cmd_submit(args, repo: Path) -> int:
     return rc_
 
 
-def _submit_local(args, repo: Path, run_id: str, run_meta, initial, *, tunnel_info=None) -> int:
+def _submit_local(args, run_id: str, run_meta, initial, *, tunnel_info=None) -> int:
     """local submit：create_run（文件）+ 建 events SQLite + setsid fork per-run 进程推进。"""
     import subprocess as _sp
     from gherkai_core.adapters.event_log import SqliteEventLog
@@ -523,7 +654,7 @@ def _submit_local(args, repo: Path, run_id: str, run_meta, initial, *, tunnel_in
     return 0
 
 
-def _submit_cloud(args, repo: Path, run_id: str, run_meta, initial, *, tunnel_info=None) -> int:
+def _submit_cloud(args, run_id: str, run_meta, initial, *, tunnel_info=None) -> int:
     """cloud submit：只 create_run 写 definition 到 DDB（不起 task）→ 云端 Lambda 事件驱动链接管推进。
 
     冷启动由 kicker Lambda 做：create_run 写 definition（INSERT）→ runs 表 Stream 触发 kicker → tick 起首批 →
@@ -633,7 +764,7 @@ def _render_status(state, args, *, wait_hint: str) -> int:
     return 1
 
 
-def _cmd_status(args, repo: Path) -> int:
+def _cmd_status(args) -> int:
     """[无状态跑批] 查 run 进度/结果。
 
     - local：读文件 RunState；--wait 则本机接力 tick 到终态（三触发源之一，per-run 崩了人来查也能续、须跑到底）。
@@ -659,7 +790,7 @@ def _cmd_status(args, repo: Path) -> int:
     if args.wait:
         # 接力推进：per-run 进程崩了/慢了，人来查即自己 tick 到终态（状态全持久、tick 幂等，断点续）。
         meta, log, store, launcher, mc, rstore, pstore = detached.build_local_reconcile(
-            repo, str(report_root), args.run_id, args.max_concurrency,
+            str(report_root), args.run_id, args.max_concurrency,
             region=args.region, profile=args.profile,
         )
         detached.run_reconcile_loop(args.run_id, meta, log, store, launcher, mc,
@@ -747,15 +878,20 @@ def _status_cloud(args) -> int:
                           wait_hint=f"gherkai status {args.run_id} --backend cloud --prefix {target.prefix} --wait")
 
 
-def _cmd_reconcile(args, repo: Path) -> int:
-    """per-run 进程入口（submit setsid fork 它，非用户直接调）：跑 reconcile loop 到全 done 自退（ADR 0034）。"""
+def _cmd_reconcile(args) -> int:
+    """per-run 进程入口（submit setsid fork 它，非用户直接调）：跑 reconcile loop 到全 done 自退（ADR 0034）。
+
+    **无 `--steps-dir` flag**：使用方 step 目录随 definition 走（`RunMeta.steps_dir`），由
+    `build_local_reconcile` 从 RunStore 读回——本进程 CWD 与提交进程不同，重解析 `./steps` 必分叉
+    （ADR 0037 决策 4）。
+    """
     from gherkai_runtime import detached
 
     if not _validate_max_concurrency(args):  # 回落值同校验（meta 缺值时它就是并发闸）
         return 2
     report_root = Path(args.report_dir).resolve()
     meta, log, store, launcher, mc, rstore, pstore = detached.build_local_reconcile(
-        repo, str(report_root), args.run_id, args.max_concurrency,
+        str(report_root), args.run_id, args.max_concurrency,
         region=args.region, profile=args.profile,
     )
     detached.run_reconcile_loop(args.run_id, meta, log, store, launcher, mc,
@@ -782,13 +918,13 @@ def _cmd_tunnel_watch(args) -> int:
     return 0
 
 
-def _cmd_run(args, repo: Path) -> int:
+def _cmd_run(args) -> int:
     use_json = args.json
 
     if not _validate_max_concurrency(args):  # 最早：读 feature/起隧道/preflight/begin 之前（真零副作用）
         return 2
     # 0/1/2) votes 校验 + 读 feature + plan（与 _cmd_plan 共享；前置失败返回退出码 2，见 _load_and_plan）
-    jobs = _load_and_plan(args, repo)
+    jobs = _load_and_plan(args)
     if isinstance(jobs, int):
         return jobs
 
@@ -796,6 +932,18 @@ def _cmd_run(args, repo: Path) -> int:
     _progress(f"plan: {len(jobs)} job(s)  (default_engine={args.default_engine})")
     for j in jobs:
         _progress(f"  - scope={j.scope_id!r} engine={j.engine} scenarios={len(j.scenarios)}")
+
+    # worker 运行时 preflight（ADR 0037 决策 3 miss 分叉）：**仅 local 执行档**（cloud 档 worker 在 Fargate，
+    # 本机定位链无关）。定位链 miss → 退 2，**在 spawn 前**、不进 job 级 engine_error。排在起隧道/preflight/
+    # begin 之前（只依赖 jobs，早拒才真零副作用——同 votes/grace 校验的位置理由）。
+    # 使用方确定性 step 目录（ADR 0037 决策 4）：解析一次 → 写进 definition + 注给本进程起的 worker。
+    steps_dir = _resolve_steps_dir_for_backend(args)
+    if isinstance(steps_dir, int):
+        return steps_dir
+    if args.backend != "cloud":
+        miss = _preflight_worker_runtimes(jobs, steps_dir)
+        if miss is not None:
+            return miss
 
     # 2a) grace 硬约束（ADR 0024）：按本 run 各引擎的下限取 max（grace 是 run 级单值）。引擎特定下限住组合根。
     #     显式给了过小 grace → 入口友好拒绝（对齐 votes 校验惯例，退 2「没开跑就被拒」）。core 侧还有 enforce
@@ -829,15 +977,21 @@ def _cmd_run(args, repo: Path) -> int:
     run_id = compose.new_run_id()
     run_meta = RunMeta(run_id=run_id, created_at=compose.now_iso(), jobs=tuple(jobs),
                        extra_http_headers=tuple(tunnel_headers.items()) if tunnel_headers else None,
-                       max_concurrency=args.max_concurrency)
+                       max_concurrency=args.max_concurrency,
+                       steps_dir=steps_dir)  # cloud 档恒 None（上面已置）
     do_report = not args.no_report  # RunReport 默认生成；--no-report 跳过（逃生舱）
-    # 归集时让两个引擎的产物都落到 run 专属持久目录（否则用 SDK 默认：Nova 临时目录会被清理、Midscene
-    # 落相对 worker cwd 的固定 midscene_run/ 每 run 覆盖）。两引擎对称落 reports/<run_id>/ 下（ADR 0027）。
-    # **必须传绝对路径**：worker 是另起的子进程、cwd 与 cli 不同（cli=cli/，worker=engines/*/），相对路径
-    # 会被两进程各自的 cwd 解析到不同位置 → 产物落错地方、且 worker 产出的 file://<相对> 是坏 URI。
+    # 两个引擎的产物都落到**本次 run 专属的绝对路径**目录（ADR 0027/0037 决策 3）：
+    # - 归集档（默认）：落 <report_dir>/<run_id>/ 下，与 RunReport 同处、长期留存。
+    # - `--no-report` 档：落 <系统临时目录>/gherkai/<run_id>/ 下，**不主动清**、交给临时目录的生命周期。
+    #   `--no-report` 的语义是「跳过 RunReport 归集」而非「销毁产物」（RunResult 无条件打印 report_ref
+    #   路径、产物可点开是调试用途），故不是「不注入落点」——worker 已无专属 cwd（定位链后 cwd 多为继承
+    #   调用者，ADR 0037 决策 3），不注入就会落进**用户 CWD**（midscene 曾落 engines/midscene/midscene_run/）。
+    # **必须绝对路径**：worker 是 cwd 与 cli 不同的子进程，相对路径两侧解析到不同位置 → 产物落错地方，
+    # 且 worker 产出的 file://<相对> 是坏 URI。
     report_root = Path(args.report_dir).resolve()
-    nova_logs_dir = (report_root / run_id / "nova-trajectories") if do_report else None
-    midscene_run_dir = (report_root / run_id / "midscene-run") if do_report else None
+    artifact_root = (report_root / run_id) if do_report else (Path(tempfile.gettempdir()) / "gherkai" / run_id)
+    nova_logs_dir = artifact_root / "nova-trajectories"
+    midscene_run_dir = artifact_root / "midscene-run"
     # 产物 S3 落点：cloud（Fargate）由 build_fargate_engines 内部按 (bucket, <report_dir>/<run_id>/) 自算注入；
     # local（subprocess）CLI 恒不注入（worker 报 file://、不上传）——「subprocess+注入 S3 落点」是内部预演档
     # （ADR 0016 决策 B / 0029），由 tools/e2e_harness.py 自拼 worker env 直起 worker 实现，不经 CLI/compose。
@@ -942,9 +1096,10 @@ def _cmd_run(args, repo: Path) -> int:
         )
     else:
         engines = compose.build_engines(
-            repo, nova_logs_dir=nova_logs_dir, midscene_run_dir=midscene_run_dir,
+            nova_logs_dir=nova_logs_dir, midscene_run_dir=midscene_run_dir,
             region=target.region, profile=target.profile,
             extra_http_headers=tunnel_headers,  # 同上（ADR 0035）
+            steps_dir=steps_dir,  # 使用方确定性 step 目录（ADR 0037 决策 4；与写进 definition 的同一个值）
         )
     resolver = compose.make_resolver(engines)
 
@@ -1041,24 +1196,23 @@ def _cmd_run(args, repo: Path) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
-    repo = compose.repo_root()
 
     if args.command == "list-deterministic":
-        return _cmd_list_deterministic(args, repo)
+        return _cmd_list_deterministic(args)
     if args.command == "list-engines":
-        return _cmd_list_engines(repo)
+        return _cmd_list_engines()
     if args.command == "plan":
-        return _cmd_plan(args, repo)
+        return _cmd_plan(args)
     if args.command == "run":
-        return _cmd_run(args, repo)
+        return _cmd_run(args)
     if args.command == "submit":
-        return _cmd_submit(args, repo)
+        return _cmd_submit(args)
     if args.command == "status":
-        return _cmd_status(args, repo)
+        return _cmd_status(args)
     if args.command == "_tunnel_watch":
         return _cmd_tunnel_watch(args)
     if args.command == "_reconcile":
-        return _cmd_reconcile(args, repo)
+        return _cmd_reconcile(args)
 
     # 无子命令 → 打帮助
     parser.print_help()

@@ -9,7 +9,7 @@ import {
   StartBrowserSessionCommand,
   StopBrowserSessionCommand,
 } from "@aws-sdk/client-bedrock-agentcore";
-import { signCdpUpgrade, getRegion } from "../lib/agentcore-sigv4.mjs";
+import { signCdpUpgrade, getRegion } from "../src/lib/agentcore-sigv4.mjs";
 const REGION = getRegion();  // region 改惰性 getter（ADR 0033/0016 决策 C）；spike 带 AWS_REGION=... 前缀
 
 const BROWSER_ID = "aws.browser.v1"; // 系统默认 browser（ADR 0011）

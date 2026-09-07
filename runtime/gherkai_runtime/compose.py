@@ -8,11 +8,17 @@ WebUI 的 bootstrap 将来复用本模块——组合根逻辑（引擎注册表
 """
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import secrets
+import shlex
+import shutil
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _dist_version
 from pathlib import Path
 
 from gherkai_core.adapters.subprocess_engine import SubprocessEngine
@@ -103,36 +109,201 @@ def parse_iso(ts: str) -> datetime:
     return datetime.fromisoformat(ts.replace("Z", "+00:00"))
 
 
-def repo_root(start: Path | None = None) -> Path:
-    """定位仓库根（含 core/ 与 engines/ 的目录）。
+# ============================================================================
+# worker 定位链（ADR 0037 决策 3）：**安装与拉起正交**——四级顺序解析「用什么命令 spawn 某引擎 worker」。
+# dev 与分发**同一条链、不设 dev 模式特判**：分发后没有 repo，任何靠 repo 结构的隐式行为都是漂移面
+# （这条链取代了曾经上溯定位仓库根、把 cmd 焊在 `engines/*/` 上的 `repo_root()`——它已全部消费点退役）。
+# 四级全 miss → WorkerNotFoundError，**退码语义按调用点分叉、不在链里统一退码**：`run`/`submit` 在 spawn 前
+# 退 2（不进 job 级 engine_error）、`list-deterministic` 退 2、`plan` 保持 ADR 0036 决策 4 的 best-effort 降级。
+# ============================================================================
 
-    从本文件位置上溯：runtime/gherkai_runtime/compose.py → runtime/ → 仓库根（parents[2]）。允许传入覆盖（测试用）。
+# 各级的引擎特定供给方（引擎特定值住组合根，core 不认）：
+_WORKER_PY_MODULE = {"novaact": "gherkai_worker_novaact"}   # ② 同 venv import 名（仅 Python 引擎有此级）
+_WORKER_BIN = {  # ③ PATH 上的可执行名（Python 侧由 console script 提供、Node 侧由 npm i -g 提供）
+    "novaact": "gherkai-worker-novaact",
+    "midscene": "gherkai-worker-midscene",
+}
+# ④ 兜底拉起：(拉起器, 拼命令)——拉起器须在 PATH 且版本须是纯发行版，见 resolve_worker_cmd。
+_WORKER_FALLBACK = {
+    "novaact": ("uvx", lambda v: ["uvx", f"gherkai-worker-novaact=={v}"]),
+    "midscene": ("npx", lambda v: ["npx", "-y", f"@gherkai/worker-midscene@{v}"]),
+}
+# 全 miss 时给用户的安装指引（每引擎一条，两种语言的地盘不同）。
+_WORKER_INSTALL_HINT = {
+    "novaact": "装法：uv tool install 'gherkai[local]'（worker 与 CLI 同一个 venv，离线可用）",
+    "midscene": "装法：npm i -g @gherkai/worker-midscene（需 Node ≥ 22）",
+}
+
+
+@dataclass(frozen=True)
+class WorkerCmd:
+    """一个引擎 worker 的拉起方式 = 定位链的解析结果（ADR 0037 决策 3）。
+
+    cmd/cwd 直接喂 `SubprocessEngine`；**cwd 恒可为 None＝继承当前进程 CWD**——worker 不再有专属 cwd
+    （故 local 档产物落点必须是绝对路径，见 build_engines）。source 是人读的命中级别描述，只供
+    `list-engines` 自省/诊断，**不参与任何分支判断**（别按它做逻辑，否则级别措辞成了隐式契约）。
     """
-    if start is not None:
-        return start
-    return Path(__file__).resolve().parents[2]
+
+    cmd: list[str]
+    cwd: str | None
+    source: str
+
+
+class WorkerSelfDescribeError(RuntimeError):
+    """worker **起来了但自述失败**（非零退出）——与「定位不到」（WorkerNotFoundError）是两回事：最常见成因是使用方
+    `steps/` 目录里的文件加载失败（ADR 0037 决策 4 的 fail-loud），属使用方代码错误，调用点一律退 2、不降级
+    （`plan` 对 miss 降级，对本错误不降级：静默无标注 = 把定制 step 悄悄换成 AI 判定）。"""
+
+    def __init__(self, engine: str, returncode: int, stderr_tail: str, what: str):
+        self.engine, self.returncode, self.stderr_tail = engine, returncode, stderr_tail
+        super().__init__(f"引擎 {engine} 的 {what}失败（exit {returncode}）：{stderr_tail}")
+
+
+class WorkerNotFoundError(RuntimeError):
+    """定位链四级全 miss（ADR 0037 决策 3）：带引擎名 + 该引擎的安装指引，退码交调用点。
+
+    **继承 RuntimeError 是有意的**：既有「worker 起不来 → RuntimeError」的调用点语义
+    （`list-deterministic` 退 2、`plan` best-effort 降级）自动涵盖它；`run`/`submit` 另在 spawn 前
+    显式 catch 本类型做 preflight（退 2，不进 job 级 engine_error）。
+    """
+
+    def __init__(self, engine: str, hint: str) -> None:
+        self.engine = engine
+        self.hint = hint
+        super().__init__(hint)
+
+
+class _UnavailableEngine:
+    """定位链 miss 的引擎腿（`build_engines` 的兜底，ADR 0037 决策 3）：一用即抛 WorkerNotFoundError。
+
+    存在的理由：`build_engines` 恒建两条腿，而一次 run 往往只用一个引擎——某引擎运行时没装**不该连坐**
+    （dev 下 midscene 无已安装 npm 包即常态，须走定位链第一级 env 覆写）。装一条空腿保住「引擎名恒在册」
+    （resolver / list-engines 语义不变），把 miss 的爆点挪到真要 spawn 它那一刻，且爆的是带安装指引的
+    结构化异常——而非 resolver 的「未知引擎」（那会把「没装」误导成「名字拼错」）。
+    正门仍是调用点 preflight：`run`/`submit` 先对本次 plan 用到的引擎 `resolve_worker_cmd`、miss 即退 2。
+    """
+
+    def __init__(self, miss: WorkerNotFoundError) -> None:
+        self._miss = miss
+
+    def run_scope(self, job, raw_sink=None):
+        raise self._miss
+
+
+def _is_pure_release(v: str) -> bool:
+    """版本是否「纯发行版」（PEP 440：无 .dev / .post / 本地段）——定位链第四级的门槛之一。
+
+    dev/post/本地段版本**不可能存在于 PyPI/npm**（它们由 uv-dynamic-versioning 从 tag 之后的 commit 派生，
+    ADR 0037 决策 2b），拿它 uvx/npx 只会解析失败——把「worker 没装」的清晰指引换成难懂的网络/解析错误。
+    """
+    from packaging.version import InvalidVersion, Version
+
+    try:
+        pv = Version(v)
+    except InvalidVersion:
+        return False
+    return not (pv.is_devrelease or pv.is_postrelease or pv.local)
+
+
+def resolve_worker_cmd(engine: str, *, version: str | None = None) -> WorkerCmd:
+    """按四级定位链解析某引擎 worker 的拉起命令（ADR 0037 决策 3）。
+
+    1. env `GHERKAI_WORKER_<ENGINE>_CMD`（`shlex` 拆分）+ 可选配套 `GHERKAI_WORKER_<ENGINE>_CWD`——显式覆写：
+       contributor 指向 repo 内源码、调试、自建 worker 都走这里。**cwd 配套存在的理由**：`node --import tsx`
+       的裸 specifier `tsx` 按 cwd 上溯 `node_modules` 解析，实测在无关目录下直接 `Cannot find package 'tsx'`。
+    2. 同 venv 入口（**仅 Python 引擎**）：`find_spec` 命中 → `[sys.executable, "-m", <import 名>]`。
+       **无包装层是硬要求**——EVENTS_FD 经 `pass_fds` 只到**被直接 spawn 的那个进程**（ADR 0024 三通道），
+       包装进程会吞 fd3（midscene 换 `--import tsx` 那次踩过：tsx 二进制再 spawn 子-node → fd3 EBADF）。
+    3. PATH 上的可执行 `gherkai-worker-<engine>`（Python 侧 console script / Node 侧 `npm i -g`）。
+    4. 兜底拉起 `uvx <发行名>==<版本>` / `npx -y <包名>@<版本>`，**双条件**：①版本是纯发行版
+       （见 `_is_pure_release`）；②拉起器在 PATH。任一不成立即跳过本级（直接判 miss，报安装指引更有用）。
+       **注意本级仍是条件项**：uvx/npx 是包装进程，是否吞 fd3（见第 2 级）**待真跑预演**——预演不过则本级
+       降为「报错 + 安装指引」，届时删掉本级即可、前三级不受影响（ADR 0037 决策 3）。
+    version：第四级 pin 的版本，缺省取本包（gherkai-runtime）版本——worker 与 CLI `==` lockstep
+    （ADR 0037 决策 2b），未装成包（源码直跑）时取不到 → 第四级跳过。
+    """
+    if engine not in _names.ENGINES:
+        raise ValueError(f"未知引擎：{engine!r}（可用：{sorted(_names.ENGINES)}）")
+    env_key = f"GHERKAI_WORKER_{engine.upper()}_CMD"
+    raw = os.environ.get(env_key)
+    if raw and raw.strip():
+        try:
+            argv = shlex.split(raw)
+        except ValueError as e:
+            # 引号不配对之类：**不静默落到下一级**——用户明确指了一个 worker，悄悄换成别的（或报「没装」）
+            # 是最难查的那种错。点名 env 让他修（miss 语义走同一条分叉：调用点退 2 / plan 降级）。
+            raise WorkerNotFoundError(
+                engine, f"env {env_key} 的值无法解析（{e}）：{raw!r}——修正引号或 unset 它，"
+                        f"再让定位链走后续级别（ADR 0037 决策 3）") from e
+        return WorkerCmd(cmd=argv, cwd=os.environ.get(f"GHERKAI_WORKER_{engine.upper()}_CWD"),
+                         source=f"env {env_key}")
+    module = _WORKER_PY_MODULE.get(engine)
+    if module is not None and _find_worker_spec(module):
+        # cwd=None：同 venv 的 `-m` 入口不依赖任何相对路径，继承调用者 CWD 即可（也让相对 `steps/` 等
+        # 用户视角的路径不被 worker 侧的隐式 cwd 扭曲——落点/steps 一律绝对路径注入）。
+        return WorkerCmd(cmd=[sys.executable, "-m", module], cwd=None, source=f"同 venv 模块 {module}")
+    bin_name = _WORKER_BIN[engine]
+    found = shutil.which(bin_name)
+    if found:
+        return WorkerCmd(cmd=[found], cwd=None, source=f"PATH 可执行 {bin_name}")
+    launcher, build = _WORKER_FALLBACK[engine]
+    v = version if version is not None else _runtime_version()
+    if v is not None and _is_pure_release(v) and shutil.which(launcher):
+        return WorkerCmd(cmd=build(v), cwd=None, source=f"{launcher} 兜底拉起（版本 {v}）")
+    raise WorkerNotFoundError(
+        engine,
+        f"引擎 {engine} 的 worker 运行时未找到（定位链四级全 miss，ADR 0037 决策 3）。"
+        f"{_WORKER_INSTALL_HINT[engine]}；或用 env {env_key}（+ 可选 "
+        f"GHERKAI_WORKER_{engine.upper()}_CWD）显式指向自建/仓库内 worker",
+    )
+
+
+def _find_worker_spec(module: str) -> bool:
+    """`find_spec` 的容错壳：模块不在即 False，import 系统自身报错（坏 .pth / 半装）也当 miss、不击穿定位链。"""
+    try:
+        return importlib.util.find_spec(module) is not None
+    except (ImportError, ValueError):
+        return False
+
+
+def _runtime_version() -> str | None:
+    """本包（`gherkai-runtime`）的发行版本：定位链第四级的 pin 值。未装成包（源码直跑）→ None。"""
+    try:
+        return _dist_version("gherkai-runtime")
+    except PackageNotFoundError:
+        return None
 
 
 def build_engines(
-    repo: Path,
     *,
     nova_logs_dir: str | Path | None = None,
     midscene_run_dir: str | Path | None = None,
     region: str | None = None,
     profile: str | None = None,
     extra_http_headers: dict[str, str] | None = None,
+    steps_dir: str | Path | None = None,
 ) -> dict[str, Engine]:
     """每个引擎一个 SubprocessEngine（cmd 不同，core 引擎无关，ADR 0026）。
 
     两个引擎"spawn 子进程 + 讲同一套 ADR 0024 协议"形状一致，故都是同一个 SubprocessEngine 类、
     只是 cmd/cwd 不同——无需两个具名 adapter 类。
 
-    产物持久落点（两引擎对称，经环境变量传给 SDK，ADR 0027）——None 时各自用 SDK 默认（相对 worker cwd
-    的固定目录 / 系统临时目录，会被清理或每 run 覆盖）：
+    **cmd/cwd 来自 `resolve_worker_cmd` 的四级定位链**（ADR 0037 决策 3），不再由仓库结构推导；
+    某引擎 miss 只让那条腿变成「一用即报错」（见 `_UnavailableEngine`），不连坐另一条。
+
+    产物持久落点（两引擎对称，经环境变量传给 SDK，ADR 0027）——**调用方应恒给绝对路径、不给 None**：
+    worker 已无专属 cwd（定位链后 cwd 多为 None＝继承调用者 CWD，ADR 0037 决策 3），落 SDK 默认相对目录
+    会写进用户 CWD，故 `--no-report` 档也由 CLI 注入系统临时目录下 run 专属的绝对落点。None 仅为兼容
+    「真不关心产物落哪」的调用者（回落 SDK 默认，行为随 CWD 漂）：
     - nova_logs_dir → `NOVA_LOGS_DIR` → Nova SDK `logs_directory`，trajectory 落这里。
     - midscene_run_dir → `MIDSCENE_RUN_DIR` → Midscene SDK 的 run 根目录（report/dump/log 全在其下），
       report.html 落这里。**必须传绝对路径**：SDK 用 `path.resolve(process.cwd(), MIDSCENE_RUN_DIR)`
       相对 worker cwd 解析，相对路径会落错地方（与 Nova trajectory 早期踩的 cwd 歧义同源）。
+
+    steps_dir（ADR 0037 决策 4）：使用方确定性 step 目录的**绝对路径**，经 env `GHERKAI_STEPS_DIR` 注给
+    **两个** worker（worker 启动时排序递归加载、注册进自己那张注册表）。约定解析（flag > env > `./steps`）
+    在提交侧、值随 definition（`RunMeta.steps_dir`）走——本函数只搬运读回的值，**不自己解析 `./steps`**
+    （三个宿主 CWD 各不相同，重解析必分叉，ADR 0034）。None＝无使用方 step（worker 只有内建脚手架）。
 
     **不注入产物 S3 上传落点**（`ARTIFACT_S3_BUCKET`/`PREFIX`）：本函数是 local 档，worker 恒报 `file://`。
     上传落点由 `build_fargate_engines` 注入（cloud 档，ADR 0029）；`subprocess worker + 注入 S3 落点` 的
@@ -148,16 +319,16 @@ def build_engines(
     **FargateEngine 侧只注入 region、不注入 profile**（容器用 task role，profile 是本机 `~/.aws` 概念、注入会
     ProfileNotFound 盖过 task role——正确的非对称，ADR 0016 决策 C）。
     """
-    novaact_dir = repo / "engines" / "novaact"
-    midscene_dir = repo / "engines" / "midscene"
-
     # 完整继承当前环境（AWS 凭证等）再叠加产物落点——SubprocessEngine 的 env 非 None 时整体替换，故须带 os.environ。
-    # 浏览器 context 级额外请求头（ADR 0035 决策 4，如 ngrok-skip-browser-warning）：JSON 经 env 注给
-    # 两个 worker，worker 在 browser context 上 setExtraHTTPHeaders（纯 CDP 命令，无回调）。None → 不注入。
-    headers_env = (
-        {"GHERKAI_EXTRA_HTTP_HEADERS": json.dumps(extra_http_headers, ensure_ascii=False)}
-        if extra_http_headers else {}
-    )
+    # 两引擎共注的附加 env（都是「有值才注、无值零变化」）：
+    # - 浏览器 context 级额外请求头（ADR 0035 决策 4，如 ngrok-skip-browser-warning）：JSON 经 env 注给
+    #   两个 worker，worker 在 browser context 上 setExtraHTTPHeaders（纯 CDP 命令，无回调）。
+    # - 使用方确定性 step 目录（ADR 0037 决策 4）：worker 只认这个 env，绝对路径、约定逻辑不进 worker。
+    common_env: dict[str, str] = {}
+    if extra_http_headers:
+        common_env["GHERKAI_EXTRA_HTTP_HEADERS"] = json.dumps(extra_http_headers, ensure_ascii=False)
+    if steps_dir is not None:
+        common_env["GHERKAI_STEPS_DIR"] = str(steps_dir)
 
     def _inject_aws(env: dict) -> None:
         # --region/--profile 解析值覆盖继承的 AWS_REGION/AWS_PROFILE（None＝不写、留 boto 默认链/profile config
@@ -169,13 +340,13 @@ def build_engines(
             env["AWS_PROFILE"] = profile
 
     def _env(local_dir: str | Path | None, local_key: str) -> dict | None:
-        # local 落点 env + 可选额外请求头。两者都无 → None（worker 全用 SDK 默认）。
-        if local_dir is None and not headers_env:
+        # local 落点 env + 共注附加 env（headers / steps_dir）。全无 → None（worker 全用继承 env + SDK 默认）。
+        if local_dir is None and not common_env:
             return None
         env = {**os.environ}
         if local_dir is not None:
             env[local_key] = str(local_dir)
-        env.update(headers_env)
+        env.update(common_env)
         _inject_aws(env)
         return env
 
@@ -183,96 +354,89 @@ def build_engines(
     midscene_env = _env(midscene_run_dir, "MIDSCENE_RUN_DIR")
     # Nova 的 act timeout **双端同源**（ADR 0024 grace 硬约束）：组合根持 NOVA_ACT_TIMEOUT_S 单一真值，
     # 显式注入给 worker（消除「worker 私有默认 120」与「组合根 grace 下限」两处独立 120 的漂移）。
-    # nova_env 为 None（无产物落点，如 --no-report）时也要建一份注入——故补一个继承 os.environ 的 env。
+    # nova_env 为 None（调用方未给产物落点）时也要建一份注入——故补一个继承 os.environ 的 env。
     if nova_env is None:
         nova_env = {**os.environ}
         _inject_aws(nova_env)  # 补建路径也须叠加 --region/--profile（Nova Workflow 的 nova-act client 读 AWS_REGION/凭证）
     nova_env["NOVA_ACT_TIMEOUT_S"] = str(NOVA_ACT_TIMEOUT_S)
-    # Midscene 补建同理（对称，ADR 0016 决策 C）：midscene_env 为 None（--no-report 无 dirs）且 --region/--profile
+    # Midscene 补建同理（对称，ADR 0016 决策 C）：midscene_env 为 None（未给落点、无共注 env）且 --region/--profile
     # 有值时也须建 env 注入——否则 midscene worker 继承 os.environ、拿不到 --profile 覆盖，而它经 fromNodeProviderChain()
     # 消费凭证做 AgentCore/Bedrock 鉴权（真消费、非无害）。仅在有值时补建（无值则继承 os.environ 本就够、免无谓拷贝）。
     if midscene_env is None and (region is not None or profile is not None):
         midscene_env = {**os.environ}
         _inject_aws(midscene_env)
-    return {
-        # Nova Act 引擎：novaact venv 的 python 跑 worker
-        "novaact": SubprocessEngine(
-            cmd=[
-                str(novaact_dir / ".venv" / "bin" / "python"),
-                str(novaact_dir / "worker" / "run_scope.py"),
-            ],
-            cwd=str(novaact_dir),
-            env=nova_env,
-        ),
-        # Midscene 引擎：node --import tsx 跑 TS worker。
-        # 用 `--import tsx`（不是 tsx 二进制、也不是 `tsx/esm`）：tsx loader 加载进**同一个** node
-        # 进程，不 spawn 子-node——否则 EVENTS_FD（经 pass_fds 继承）只到 tsx 包装器、传不到真正跑
-        # worker 的子进程 → fd3 EBADF（实测踩过）。`--import tsx` 既继承 fd、又能跑 .ts。
-        "midscene": SubprocessEngine(
-            cmd=["node", "--import", "tsx", str(midscene_dir / "worker" / "run-scope.ts")],
-            cwd=str(midscene_dir),
-            env=midscene_env,
-        ),
-    }
+
+    def _leg(engine: str, env: dict | None) -> Engine:
+        # 定位链解析（ADR 0037 决策 3）。**per-engine 容错**：本函数恒建两条腿、一次 run 却可能只用一个
+        # 引擎，故 miss 不连坐——装成一用即报错的空腿（爆点挪到真 spawn 时，带安装指引）。
+        # 「worker 必须是被直接 spawn 的那个进程」（fd3 经 pass_fds 继承，ADR 0024）是定位链的不变量，
+        # 由各级供给方保证（见 resolve_worker_cmd 第 2 级注释）——本处只转发 cmd/cwd。
+        try:
+            wc = resolve_worker_cmd(engine)
+        except WorkerNotFoundError as miss:
+            return _UnavailableEngine(miss)
+        return SubprocessEngine(cmd=wc.cmd, cwd=wc.cwd, env=env)
+
+    return {"novaact": _leg("novaact", nova_env), "midscene": _leg("midscene", midscene_env)}
 
 
-def query_deterministic(repo: Path, engine: str, *, timeout_s: float = 60.0) -> list[dict]:
-    """查询某引擎 worker 的确定性能力清单（ADR 0036）：spawn `worker --list-deterministic` 收 JSON。
+def _ask_worker(engine: str, flag: str, *, what: str, steps_dir: str | Path | None = None,
+                timeout_s: float = 60.0, payload: bytes | None = None) -> list:
+    """spawn 一次某引擎 worker 的**自述入口**、收一行 JSON（ADR 0036 决策 2/4 的共同机制）。
 
-    真值单一：清单由 worker 注册表代码即时生成（不建会话、不读 stdin、零 AWS）。
-    引擎名非法 → ValueError；worker 起不来/输出非 JSON → RuntimeError 带诊断（调用方归退 2）。
+    自述入口不建会话、不读 job、零 AWS，秒级返回。两个自述入口（`--list-deterministic` /
+    `--match-steps`）只差 flag、stdin 与错误措辞，故共用本体（曾各抄一份 spawn+诊断，会漂移）。
+    - worker cmd 走定位链（ADR 0037 决策 3）：miss → WorkerNotFoundError（RuntimeError 子类，调用点分叉）。
+    - steps_dir（ADR 0037 决策 4）经 env 注入：三个自述入口同样加载 steps 目录，故 `list-deterministic`
+      与 `plan` 标注反映使用方定制 step（注册表 = 内建脚手架 + 加载的使用方模块）。
+    引擎名非法 → ValueError；worker 非 0 退出 → WorkerSelfDescribeError（如 steps 加载失败，调用点退 2 不降级）；
+    起不来/超时/输出非 JSON → RuntimeError 带诊断。
     """
     import subprocess
 
-    engines = build_engines(repo)
-    if engine not in engines:
-        raise ValueError(f"未知引擎：{engine!r}（可用：{sorted(engines)}）")
-    eng = engines[engine]
-    cmd = list(eng.cmd) + ["--list-deterministic"]
+    wc = resolve_worker_cmd(engine)  # 引擎名非法 → ValueError（定位链里查一次即够，此处不复刻校验）
+    cmd = list(wc.cmd) + [flag]
+    env = {**os.environ, "GHERKAI_STEPS_DIR": str(steps_dir)} if steps_dir is not None else None
     try:
-        proc = subprocess.run(cmd, cwd=eng.cwd, capture_output=True, timeout=timeout_s)
+        proc = subprocess.run(cmd, cwd=wc.cwd, env=env, capture_output=True,
+                              timeout=timeout_s, input=payload)
     except FileNotFoundError as e:
-        raise RuntimeError(f"引擎 {engine} 的 worker 起不来（{e}）——运行环境未装？见 README「首次安装」") from e
+        raise RuntimeError(
+            f"引擎 {engine} 的 worker 起不来（{e}）——定位链命中「{wc.source}」但该命令不可执行？"
+        ) from e
     except subprocess.TimeoutExpired as e:
-        raise RuntimeError(f"引擎 {engine} 的 worker 自述超时（{timeout_s:.0f}s）") from e
+        raise RuntimeError(f"引擎 {engine} 的 {what}超时（{timeout_s:.0f}s）") from e
     if proc.returncode != 0:
         tail = proc.stderr.decode("utf-8", errors="replace")[-400:]
-        raise RuntimeError(f"引擎 {engine} 的 worker 自述失败（exit {proc.returncode}）：{tail}")
+        raise WorkerSelfDescribeError(engine, proc.returncode, tail, what)
     try:
         return json.loads(proc.stdout.decode("utf-8"))
     except ValueError as e:
-        raise RuntimeError(f"引擎 {engine} 的自述输出非 JSON：{proc.stdout[:200]!r}") from e
+        raise RuntimeError(f"引擎 {engine} 的 {what}输出非 JSON：{proc.stdout[:200]!r}") from e
 
 
-def match_deterministic(repo: Path, engine: str, texts: list[str], *, timeout_s: float = 60.0) -> list[dict | None]:
+def query_deterministic(engine: str, *, steps_dir: str | Path | None = None,
+                        timeout_s: float = 60.0) -> list[dict]:
+    """查询某引擎 worker 的确定性能力清单（ADR 0036）：spawn `worker --list-deterministic` 收 JSON。
+
+    真值单一：清单由 worker 注册表代码即时生成（内建脚手架 + steps_dir 加载的使用方模块，ADR 0037 决策 4）。
+    异常语义见 `_ask_worker`（调用方 `list-deterministic` 归退 2）。
+    """
+    return _ask_worker(engine, "--list-deterministic", what="worker 自述",
+                       steps_dir=steps_dir, timeout_s=timeout_s)
+
+
+def match_deterministic(engine: str, texts: list[str], *, steps_dir: str | Path | None = None,
+                        timeout_s: float = 60.0) -> list[dict | None]:
     """批量问某引擎 worker「这些 step 文本各命中哪条确定性模式」（ADR 0036 决策 4，plan 标注用）。
 
     spawn `worker --match-steps`、stdin 喂 JSON 文本数组、收逐条结果（None=走 AI /
     {"pattern","description"}=命中 / {"conflict":[...]}=命中多条——真跑将 error，plan 预检提前暴露）。
     匹配语义 100% 在 worker（同一注册表同一 search 实现），CLI 零复刻（ADR 0022「匹配放 worker」红线）。
-    异常语义同 query_deterministic（调用方 best-effort 降级）。
+    异常语义同 query_deterministic（调用方 plan 做 best-effort 降级）。
     """
-    import subprocess
-
-    engines = build_engines(repo)
-    if engine not in engines:
-        raise ValueError(f"未知引擎：{engine!r}（可用：{sorted(engines)}）")
-    eng = engines[engine]
-    cmd = list(eng.cmd) + ["--match-steps"]
-    try:
-        proc = subprocess.run(cmd, cwd=eng.cwd, capture_output=True, timeout=timeout_s,
-                              input=json.dumps(texts, ensure_ascii=False).encode("utf-8"))
-    except FileNotFoundError as e:
-        raise RuntimeError(f"引擎 {engine} 的 worker 起不来（{e}）——运行环境未装？见 README「首次安装」") from e
-    except subprocess.TimeoutExpired as e:
-        raise RuntimeError(f"引擎 {engine} 的 match 查询超时（{timeout_s:.0f}s）") from e
-    if proc.returncode != 0:
-        tail = proc.stderr.decode("utf-8", errors="replace")[-400:]
-        raise RuntimeError(f"引擎 {engine} 的 match 查询失败（exit {proc.returncode}）：{tail}")
-    try:
-        return json.loads(proc.stdout.decode("utf-8"))
-    except ValueError as e:
-        raise RuntimeError(f"引擎 {engine} 的 match 输出非 JSON：{proc.stdout[:200]!r}") from e
+    return _ask_worker(engine, "--match-steps", what="match 查询", steps_dir=steps_dir,
+                       timeout_s=timeout_s, payload=json.dumps(texts, ensure_ascii=False).encode("utf-8"))
 
 
 def make_resolver(engines: dict[str, Engine]):

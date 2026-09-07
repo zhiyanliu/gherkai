@@ -62,12 +62,14 @@ def build_job(feature: str, engine: str, votes: int):
     return next((j for j in jobs if j.engine == engine), jobs[0])
 
 
-def worker_cmd(engine: str) -> tuple[list[str], str]:
-    if engine == "novaact":
-        d = REPO / "engines" / "novaact"
-        return [str(d / ".venv" / "bin" / "python"), str(d / "worker" / "run_scope.py")], str(d)
-    d = REPO / "engines" / "midscene"
-    return ["node", "--import", "tsx", str(d / "worker" / "run-scope.ts")], str(d)
+def worker_cmd(engine: str) -> tuple[list[str], str | None]:
+    """worker 拉起命令走 `gherkai_runtime.compose.resolve_worker_cmd` 的定位链（ADR 0037 决策 3）——与 CLI 同一真源，
+    不再按仓库布局拼路径（曾直指 engines/*/.venv 与 worker/ 脚本，包化后全部失效）。miss → WorkerNotFoundError 带安装指引。
+    dev 下 midscene 用 env GHERKAI_WORKER_MIDSCENE_CMD 指向本仓库 `node engines/midscene/dist/bin.mjs`。"""
+    from gherkai_runtime.compose import resolve_worker_cmd  # noqa: E402  harness 与 CLI 同 venv
+
+    wc = resolve_worker_cmd(engine)
+    return list(wc.cmd), wc.cwd
 
 
 def snapshot_disk(run_dir: Path) -> list[tuple[str, int]]:

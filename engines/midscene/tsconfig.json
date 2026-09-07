@@ -1,0 +1,32 @@
+{
+  // 编译配置（ADR 0037 决策 3）：包化后 `dist/` 由 tsc 产出，**tsconfig 必须入库**——
+  // 早先刻意不带 tsconfig、靠 tsx 运行期扩展名重写的形态只在「repo 内直跑」下成立，
+  // 作为被 npm 消费的包不再成立（消费者拿到的是 dist/*.mjs，没有 tsx 转译源码这一步）。
+  //
+  // 源码统一 `.mts`、产物统一 `.mjs`：模块体系不依赖 package.json#type（决策 3
+  // 「使用方目录多半没有 package.json、`.ts` 会落进 CJS 域」同一条理由的自用版）。
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "types": ["node"],
+    "rootDir": "src",
+    "outDir": "dist",
+    // `strict` 全开（含 useUnknownInCatchVariables）——现有 worker code 实测能过：`as any` 只用在桥接
+    // SDK 未导出的内部形状（agent._unstableLogContent）处，协议事件的 omit-when-None 用可选属性表达。
+    "strict": true,
+    // strict 之外的这一项显式关：AWS SDK v3 的 config 类型（`region?: string | Provider<string>`，不含
+    // undefined）与本包「env 缺失即传 undefined 让 SDK 走默认解析」的写法不兼容，开了要么给每个 client
+    // 造条件展开、要么把 region 解析逻辑搬进类型层——收益为零。显式写出边界，别让后人以为是漏配。
+    "exactOptionalPropertyTypes": false,
+    "declaration": true,
+    "sourceMap": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  // 只编译 src；测试与 spikes 不进 dist（测试 colocate 在 src 内，故按 glob 排除）。
+  "include": ["src/**/*.mts"],
+  "exclude": ["src/**/*.test.mts", "node_modules", "dist"]
+}

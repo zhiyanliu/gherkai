@@ -35,8 +35,8 @@ _Avoid_: 把骨架验证用例当成最终交付的业务测试。
 **穿刺脚本落点（by-engine）**:
 spike 脚本**紧贴各自引擎的语言/依赖环境**，放在对应子工程内、诚实标记可丢弃：
 - Midscene（TS）→ `engines/midscene/spikes/`，复用 `engines/midscene/node_modules`（含其配方笔记 `SIGV4-FETCH-RECIPE.md`，与代码同居）。
-- Nova Act（Python）→ `engines/novaact/spikes/`，用 `engines/novaact/.venv`。
-不设 git 根级 `spikes/`，spike 紧贴各自引擎子工程。**引擎内**复用的代码（如 Midscene 的 SigV4，仅 Midscene 的 spike 与 bdd 共用）抽到该引擎的 `lib/`（见 `engines/midscene/lib/agentcore-sigv4.mts`）；这不是跨引擎共享——SigV4 是 Midscene 专属，Nova Act 走 IAM/Workflow 不碰它。跨引擎真正共享的是 `features/`（用例），见 [跨引擎共享边界](./docs/adr/0013-cross-engine-sharing-boundary.md)（ADR 0013）。
+- Nova Act（Python）→ `engines/novaact/spikes/`，用仓库根 workspace 的 `.venv`（`uv run python engines/novaact/spikes/…`；novaact worker 已包化、无独立 venv，ADR 0037）。
+不设 git 根级 `spikes/`，spike 紧贴各自引擎子工程。**引擎内**复用的代码（如 Midscene 的 SigV4，仅 Midscene 的 spike 与 bdd 共用）抽到该引擎的 `lib/`（见 `engines/midscene/src/lib/agentcore-sigv4.mts`）；这不是跨引擎共享——SigV4 是 Midscene 专属，Nova Act 走 IAM/Workflow 不碰它。跨引擎真正共享的是 `features/`（用例），见 [跨引擎共享边界](./docs/adr/0013-cross-engine-sharing-boundary.md)（ADR 0013）。
 _Avoid_: 把某一引擎专属的 spike/文档/代码放到根级或另一引擎目录下；也别误以为引擎内的 `lib/` 是两个引擎共享。
 
 **确定性断言 vs AI 断言 (Deterministic vs AI assertion)**:
@@ -60,7 +60,7 @@ _Avoid_: 把它当精确/像素级回归工具用。
 **点名检查 (Explicit check) vs 确定性锚点 (Deterministic anchor)**:
 两个不同层（ADR 0020）：
 - **点名检查**：QA 想精确核对某项时，直接写**纯自然语言** `Then "价格是 ¥99"`——仍走**默认 AI 判断**（QA 零代码、无路由关键词）。「能否抓某类变更」取决于 QA 点没点名，不是做不到。
-- **确定性锚点**：少数"不容 AI 抖动"的精确检查（URL/DOM），由 **test engineer** 在 `deterministic.steps` 脚手架里写 Playwright 查询，不走 AI、不预置（QA 不碰）。
+- **确定性锚点**：少数"不容 AI 抖动"的精确检查（URL/DOM），由 **test engineer** 在使用方项目的 `steps/` 目录写 `@deterministic` 注册（Playwright 查询；worker 包内的 `deterministic_steps` 脚手架只留内建示例），不走 AI、不预置（QA 不碰；ADR 0037 决策 4）。
 _Avoid_: 以为"不点名也能抓变更"；把它与 A/B 两种不确定性混为一谈；以为 QA 要学特殊措辞（QA 永远只写自然语言）。
 
 **两种不确定性 (A: flakiness / B: 柔性吞变更)**:
@@ -121,11 +121,11 @@ _Avoid_: 把它当运行参数（曾是 `ScheduleOpts` 参数、不进 definitio
 _Avoid_: 用裸通用词作发行名或 import 名（`core`/`cli`——前者 PyPI 已被占、后者与他人同名顶层包静默合并/互删）；把「发行名 ≠ import 名」当异常（`gherkin-official` 的 import 名就是 `gherkin`，是常态）；为兄弟包写 `>=` 范围依赖（装出未测混搭）。
 
 **worker 定位链 (worker locate chain)**:
-（设计已定、施工未启，ADR 0037 Draft；当前仍是 `compose.repo_root()` 上溯定位 + cwd=引擎目录。）组合根解析「用什么命令 spawn 某引擎 worker」的四级顺序：① env `GHERKAI_WORKER_<ENGINE>_CMD`（+ 可选 `_CWD`）显式覆写 → ② 同 venv 入口（Python 引擎：`sys.executable -m gherkai_worker_novaact`，经 CLI extra `[local]` 装进 CLI 自己的 venv）→ ③ PATH 上的可执行（`gherkai-worker-<engine>`，midscene 由 `npm i -g @gherkai/worker-midscene` 提供）→ ④ `uvx`/`npx` 按 CLI 版本拉起兜底（存废待实测）。四级全 miss 抛结构化异常、由调用点分叉处置（`run`/`submit`/`list-deterministic` 退 2，`plan` 保持 best-effort 降级）。dev 与分发**同一条链**、不设 dev 模式特判（ADR 0037 决策 3）。
+（已落地：`repo_root()` 已整体退役，ADR 0037 决策 3；第四级 uvx/npx 的 fd 预演仍待做、发布前定存废。）组合根解析「用什么命令 spawn 某引擎 worker」的四级顺序：① env `GHERKAI_WORKER_<ENGINE>_CMD`（+ 可选 `_CWD`）显式覆写 → ② 同 venv 入口（Python 引擎：`sys.executable -m gherkai_worker_novaact`，经 CLI extra `[local]` 装进 CLI 自己的 venv）→ ③ PATH 上的可执行（`gherkai-worker-<engine>`，midscene 由 `npm i -g @gherkai/worker-midscene` 提供）→ ④ `uvx`/`npx` 按 CLI 版本拉起兜底（存废待实测）。四级全 miss 抛结构化异常、由调用点分叉处置（`run`/`submit`/`list-deterministic` 退 2，`plan` 保持 best-effort 降级）。dev 与分发**同一条链**、不设 dev 模式特判（ADR 0037 决策 3）。
 _Avoid_: 让 worker 定位依赖 repo 目录结构（分发后没有 repo）；把「安装」与「拉起」绑在一起（二者正交：`[local]` 负责装、定位链负责起）；给 worker 定专属 cwd（产物落点一律经绝对路径 env 注入，`--no-report` 档也注入临时绝对落点）；在定位链里统一退码（`plan` 的降级契约是 ADR 0036 已定行为）。
 
 **steps 目录 / 定制面 (steps dir / customization surface)**:
-（设计已定、施工未启，ADR 0037 Draft；当前「定制」= 直接改 repo 内 `worker/deterministic_steps.py` / `worker/deterministic.steps.ts`。）使用方放确定性 step 定义文件的目录（默认项目内 `steps/`，`--steps-dir` / env `GHERKAI_STEPS_DIR` 覆写），是**使用方的地盘**、与 features 同处。提交侧解析成绝对路径**随 definition 持久化**（`RunMeta.steps_dir`），所有起 worker 的宿主从 definition 读回、经 env 注给 worker；worker 启动时排序递归加载（Python `*.py` 顶层 `@deterministic` 副作用注册 / TS 只认 `.mts`/`.mjs`——模块体系不依赖使用方目录的 `package.json#type`——动态 import，裸 specifier `@gherkai/worker-midscene` 由 worker 随 dist 发布的 resolve hook 解析到自身同一 URL），**任一文件加载失败即 fail-loud 退出（两侧）；midscene 侧另有「加载后零注册即退出」的双实例护栏**，三个自述入口同样加载，故 `list-deterministic`/`plan` 标注反映定制。cloud 档：steps 烙进定制镜像（`COPY steps/` + `ENV`），镜像里的 steps 是否最新由使用方管理、preflight 不比对，想区分就换 variant（ADR 0037 决策 4、ADR 0038）。
+（已落地，ADR 0037 决策 4；worker 包内的 `deterministic_steps.py` / `deterministic.steps.mts` 只留内建示例。）使用方放确定性 step 定义文件的目录（默认项目内 `steps/`，`--steps-dir` / env `GHERKAI_STEPS_DIR` 覆写），是**使用方的地盘**、与 features 同处。提交侧解析成绝对路径**随 definition 持久化**（`RunMeta.steps_dir`），所有起 worker 的宿主从 definition 读回、经 env 注给 worker；worker 启动时排序递归加载（Python `*.py` 顶层 `@deterministic` 副作用注册 / TS 只认 `.mts`/`.mjs`——模块体系不依赖使用方目录的 `package.json#type`——动态 import，裸 specifier `@gherkai/worker-midscene` 由 worker 随 dist 发布的 resolve hook 解析到自身同一 URL），**任一文件加载失败即 fail-loud 退出（两侧）；midscene 侧另有「加载后零注册即退出」的双实例护栏**，三个自述入口同样加载，故 `list-deterministic`/`plan` 标注反映定制。cloud 档：steps 烙进定制镜像（`COPY steps/` + `ENV`），镜像里的 steps 是否最新由使用方管理、preflight 不比对，想区分就换 variant（ADR 0037 决策 4、ADR 0038）。
 _Avoid_: 把「定制」理解为改 worker 包源码（那是 fork 模式，PyPI 化后不成立）；让约定逻辑进 worker（worker 只认 env）；加载失败静默跳过（确定性 step 会被静默换成 AI catch-all）；引入「使用方覆盖内建」优先级（撞 pattern 按 ADR 0036 conflict 语义处理）。
 
 **worker 镜像：基底 / variant / 默认指针 (worker image: base / variant / default pointer)**:

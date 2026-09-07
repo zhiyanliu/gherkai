@@ -367,9 +367,9 @@ def test_local_does_not_inject_artifact_s3(tmp_path, monkeypatch):
     box = {}
     real_build = m.compose.build_engines
 
-    def spy_build(repo, **kwargs):
+    def spy_build(**kwargs):
         box.update(kwargs)
-        return real_build(repo)
+        return real_build()
 
     monkeypatch.setattr(m.compose, "build_engines", spy_build)
     monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
@@ -504,3 +504,75 @@ def test_submit_cloud_tunnel_ttl_flag_overrides_computed(tmp_path, monkeypatch, 
     assert rc == 0
     cmd = [c for c in forked if "_tunnel_watch" in c][0]
     assert float(cmd[cmd.index("--ttl") + 1]) == 120.0
+
+
+# ---- cloud 档与 worker 定位链 / steps 定制面的边界（ADR 0037 决策 3/4）----
+
+def _spy_run_meta(monkeypatch):
+    """记录 definition 构造入参（cloud 档只写 DDB、不落本地文件，故从构造处取真值）。"""
+    box = {}
+    real = m.RunMeta
+
+    def spy(**kwargs):
+        box.update(kwargs)
+        return real(**kwargs)
+
+    monkeypatch.setattr(m, "RunMeta", spy)
+    return box
+
+
+def test_cloud_run_does_not_consult_local_worker_chain(tmp_path, monkeypatch, capsys):
+    """cloud 执行档**不查本机 worker 定位链**（ADR 0037 决策 3 的 miss preflight 只管 local 执行）。
+
+    cloud 的 worker 在 Fargate 容器里跑（镜像/task-def 由 cloud preflight 探），提交机器压根不必装 worker
+    运行时——若在此也 preflight，纯 cloud 用户会被本机环境无理由挡住。
+    """
+    record: list = []
+    _patch_cloud_handles(monkeypatch, record)
+    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
+    monkeypatch.setattr(m.compose, "resolve_worker_cmd",
+                        lambda engine, **kw: (_ for _ in ()).throw(
+                            m.compose.WorkerNotFoundError(engine, "本机没装 worker 运行时")))
+    rc = m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud",
+                 "--ddb-table", "T", "--s3-bucket", "B", "--region", "us-east-1", "--quiet"])
+    assert rc == 0
+    rc = m.main(["submit", str(_write_feature(tmp_path)), "--backend", "cloud",
+                 "--ddb-table", "T", "--region", "us-east-1"])
+    assert rc == 0
+
+
+def test_cloud_omits_steps_dir_and_warns_when_given(tmp_path, monkeypatch, capsys):
+    """cloud 档：definition **不写** steps_dir（本机路径对云端 worker 无意义——steps 烙在定制镜像里，
+    ADR 0037 决策 4 / 0038）；用户显式给了 `--steps-dir` 则**警告不拦**（run 照跑，只是这个 flag 无效）。"""
+    record: list = []
+    _patch_cloud_handles(monkeypatch, record)
+    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
+    steps = tmp_path / "steps"
+    steps.mkdir()
+    box = _spy_run_meta(monkeypatch)
+    rc = m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud", "--steps-dir", str(steps),
+                 "--ddb-table", "T", "--s3-bucket", "B", "--region", "us-east-1", "--quiet"])
+    assert rc == 0                     # 警告不拦
+    assert box["steps_dir"] is None    # definition 不带该字段（serialize 侧 omit-when-None）
+    assert "--steps-dir 不生效" in capsys.readouterr().err
+    rc = m.main(["submit", str(_write_feature(tmp_path)), "--backend", "cloud", "--steps-dir", str(steps),
+                 "--ddb-table", "T", "--region", "us-east-1"])
+    assert rc == 0
+    assert box["steps_dir"] is None
+    assert "--steps-dir 不生效" in capsys.readouterr().err
+
+
+def test_cloud_ignores_default_steps_dir_silently(tmp_path, monkeypatch, capsys):
+    """默认 `./steps` 恰好存在时 cloud 档也不写、且**不警告**——用户没主动要什么，警告是噪声
+    （警告只针对显式给了 --steps-dir 的「你以为生效了」误解）。"""
+    record: list = []
+    _patch_cloud_handles(monkeypatch, record)
+    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
+    monkeypatch.delenv("GHERKAI_STEPS_DIR", raising=False)
+    (tmp_path / "steps").mkdir()
+    monkeypatch.chdir(tmp_path)
+    box = _spy_run_meta(monkeypatch)
+    rc = m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud",
+                 "--ddb-table", "T", "--s3-bucket", "B", "--region", "us-east-1", "--quiet"])
+    assert rc == 0 and box["steps_dir"] is None
+    assert "--steps-dir" not in capsys.readouterr().err
