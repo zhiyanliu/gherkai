@@ -1,26 +1,58 @@
 [project]
 name = "gherkai-runtime"
-version = "0.1.0"
+# version 与依赖均动态：兄弟包 pin 由 uv-dynamic-versioning 的 metadata hook 在 build 时渲染成
+# `gherkai-core=={{ version }}`（ADR 0037 决策 2b「== lockstep pin」）。启用该 hook 后 dependencies /
+# optional-dependencies 必须整体搬进 hook 表、此处不得再写静态清单（静态与动态不能共存）。
+dynamic = ["version", "dependencies", "optional-dependencies"]
 description = "gherkai 产品本体 = 组合根共享层：引擎注册表/装配 + local 无状态跑批宿主 + 资源命名真源（ADR 0016「演进」节）。cli/Lambda/WebUI 都是它的入口皮。发行名 gherkai-runtime / import 名 gherkai_runtime（ADR 0037）"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Zhi Yan Liu" }]
 requires-python = ">=3.13"
-# 依赖窄腰 core；引擎不在此声明——引擎是被 spawn 的子进程，本包只持有起它们的 cmd（ADR 0016/0026）。
-# packaging：preflight 的版本 skew 比较（ADR 0037 决策 7），生产路径直接 import、直接声明。
-dependencies = [
-    "gherkai-core",
-    "packaging>=24",
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Operating System :: OS Independent",
+    "Topic :: Software Development :: Testing",
 ]
 
+[project.urls]
+Homepage = "https://github.com/zhiyanliu/gherkai"
+Repository = "https://github.com/zhiyanliu/gherkai"
+Changelog = "https://github.com/zhiyanliu/gherkai/releases"
+
+[tool.hatch.metadata.hooks.uv-dynamic-versioning]
+# 依赖窄腰 core（同版本 lockstep）；引擎不在此声明——引擎是被 spawn 的子进程，本包只持有起它们的 cmd
+# （ADR 0016/0026）。packaging：preflight 的版本 skew 比较（ADR 0037 决策 7），生产路径直接 import、直接声明。
+dependencies = [
+    "gherkai-core=={{ version }}",
+    "packaging>=24",
+]
 # 云端装配（build_cloud_stores/build_fargate_engines）走可选 extra：主依赖不含 boto3（ADR 0016/0030）。
-[project.optional-dependencies]
-aws = ["gherkai-core[aws]"]
+optional-dependencies = { aws = ["gherkai-core[aws]=={{ version }}"] }
 
 [tool.uv.sources]
 gherkai-core = { workspace = true }
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "uv-dynamic-versioning>=0.7.0"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "uv-dynamic-versioning"
+
+# 版本唯一真源 = git tag vX.Y.Z（ADR 0037 决策 2b）。四项显式钉死、不靠默认值：
+# style=pep440（镜像 tag 归一化与 skew 比较都建立在 PEP 440 形态上）；strict=true（无 tag 即 build 失败，
+# 不静默回落 0.0.0）；dirty=true + metadata=true（任何非纯净发行状态都带 + 本地段——默认下 tag commit 上带
+# 未提交改动构建出的版本与正式发行版逐字节相同，skew 的「非纯净版本跳过」就不会触发）。
+[tool.uv-dynamic-versioning]
+vcs = "git"
+style = "pep440"
+strict = true
+dirty = true
+metadata = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["gherkai_runtime"]

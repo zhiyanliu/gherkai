@@ -25,11 +25,23 @@ from gherkai_runtime import names as _names
 from gherkai_cli import render
 
 
+def _dist_version() -> str:
+    """发行版本字符串（唯一真源 = git tag，经 uv-dynamic-versioning 写进包元数据，ADR 0037 决策 2b；
+    代码内不复制版本号）。未以包形式安装（如直接以源码路径运行）时给可辨识的占位、不抛。"""
+    from importlib.metadata import PackageNotFoundError, version
+
+    try:
+        return version("gherkai")
+    except PackageNotFoundError:
+        return "0+unknown"
+
+
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="gherkai",
         description="解析 .feature → 分组 scope → 调度两个 AI 引擎 → 汇总运行结果（会烧真 AWS 钱）。",
     )
+    p.add_argument("--version", action="version", version=f"%(prog)s {_dist_version()}")
     sub = p.add_subparsers(dest="command")
 
     run = sub.add_parser("run", help="跑一个或多个 .feature")

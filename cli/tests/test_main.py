@@ -665,3 +665,15 @@ def test_submit_local_writes_max_concurrency_into_definition(tmp_path, monkeypat
     meta = json.loads((run_dirs[0] / "run_meta.json").read_text(encoding="utf-8"))
     assert meta["max_concurrency"] == 3
     assert ["--max-concurrency", "3"] == forked[0][-2:]  # per-run 仍带 flag（回落值）
+
+
+def test_version_flag_prints_dist_version(capsys):
+    """--version 打印「gherkai <发行版本>」并退 0——版本真源是包元数据（git tag → uv-dynamic-versioning），
+    代码内不复制版本号（ADR 0037 决策 2b）。"""
+    import pytest
+
+    with pytest.raises(SystemExit) as ei:
+        m.main(["--version"])
+    assert ei.value.code == 0
+    out = capsys.readouterr().out.strip()
+    assert out.startswith("gherkai ") and len(out.split()) == 2, out

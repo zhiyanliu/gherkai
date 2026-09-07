@@ -1,9 +1,19 @@
 [project]
 name = "gherkai-core"
-version = "0.1.0"
+dynamic = ["version"]
 description = "gherkai 执行核心库（窄腰）：解析 .feature → 分组 scope → 调度 → 收集结果。零引擎依赖（ADR 0016）。发行名 gherkai-core / import 名 gherkai_core（ADR 0037）"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Zhi Yan Liu" }]
 requires-python = ">=3.13"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Operating System :: OS Independent",
+    "Topic :: Software Development :: Testing",
+]
 # 仅 Gherkin 解析依赖——核心不 import 任何引擎（ADR 0023/0024：引擎跑在 worker 子进程里）
 # 下限 31.0.0：parse.py 用顶层导出 `from gherkin import Parser, Compiler`，该导出 ≥31.0.0 才有（ADR 0025）
 dependencies = [
@@ -16,9 +26,28 @@ dependencies = [
 [project.optional-dependencies]
 aws = ["boto3>=1.34"]
 
+[project.urls]
+Homepage = "https://github.com/zhiyanliu/gherkai"
+Repository = "https://github.com/zhiyanliu/gherkai"
+Changelog = "https://github.com/zhiyanliu/gherkai/releases"
+
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "uv-dynamic-versioning>=0.7.0"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "uv-dynamic-versioning"
+
+# 版本唯一真源 = git tag vX.Y.Z（ADR 0037 决策 2b）。四项显式钉死、不靠默认值：
+# style=pep440（镜像 tag 归一化与 skew 比较都建立在 PEP 440 形态上）；strict=true（无 tag 即 build 失败，
+# 不静默回落 0.0.0）；dirty=true + metadata=true（任何非纯净发行状态都带 + 本地段——默认下 tag commit 上带
+# 未提交改动构建出的版本与正式发行版逐字节相同，skew 的「非纯净版本跳过」就不会触发）。
+[tool.uv-dynamic-versioning]
+vcs = "git"
+style = "pep440"
+strict = true
+dirty = true
+metadata = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["gherkai_core"]

@@ -310,7 +310,6 @@ wheels = [
 
 [[package]]
 name = "gherkai"
-version = "0.1.0"
 source = { editable = "cli" }
 dependencies = [
     { name = "gherkai-runtime", extra = ["aws"] },
@@ -321,7 +320,6 @@ requires-dist = [{ name = "gherkai-runtime", extras = ["aws"], editable = "runti
 
 [[package]]
 name = "gherkai-core"
-version = "0.1.0"
 source = { editable = "core" }
 dependencies = [
     { name = "gherkin-official" },
@@ -341,7 +339,6 @@ provides-extras = ["aws"]
 
 [[package]]
 name = "gherkai-runtime"
-version = "0.1.0"
 source = { editable = "runtime" }
 dependencies = [
     { name = "gherkai-core" },
