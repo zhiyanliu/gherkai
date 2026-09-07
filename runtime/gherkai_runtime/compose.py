@@ -282,8 +282,13 @@ def build_engines(
     profile: str | None = None,
     extra_http_headers: dict[str, str] | None = None,
     steps_dir: str | Path | None = None,
+    no_artifacts: bool = False,
 ) -> dict[str, Engine]:
     """每个引擎一个 SubprocessEngine（cmd 不同，core 引擎无关，ADR 0026）。
+
+    no_artifacts（`--no-report`，ADR 0037 决策 3）：经 env `GHERKAI_NO_ARTIFACTS=1` 告知 worker **不生成、不上报**引擎
+    原生产物（Midscene 关 generateReport；Nova SDK 无关闭开关、不传 logs_directory 让它写进自己 mkdtemp 的临时目录），
+    此时两个落点参数应为 None——「真不生成」而非「落临时目录」。
 
     两个引擎"spawn 子进程 + 讲同一套 ADR 0024 协议"形状一致，故都是同一个 SubprocessEngine 类、
     只是 cmd/cwd 不同——无需两个具名 adapter 类。
@@ -329,6 +334,8 @@ def build_engines(
         common_env["GHERKAI_EXTRA_HTTP_HEADERS"] = json.dumps(extra_http_headers, ensure_ascii=False)
     if steps_dir is not None:
         common_env["GHERKAI_STEPS_DIR"] = str(steps_dir)
+    if no_artifacts:
+        common_env["GHERKAI_NO_ARTIFACTS"] = "1"
 
     def _inject_aws(env: dict) -> None:
         # --region/--profile 解析值覆盖继承的 AWS_REGION/AWS_PROFILE（None＝不写、留 boto 默认链/profile config
@@ -695,6 +702,7 @@ def build_fargate_engines(
     network_config: dict, region: str | None = None, profile: str | None = None,
     extra_http_headers: dict[str, str] | None = None,
     ecs=None, s3=None, ddb_events_table=None,
+    no_artifacts: bool = False,
 ) -> dict[str, Engine]:
     """每引擎一个 FargateEngine（对称 build_engines 的 SubprocessEngine dict；core 引擎无关，ADR 0026）。
 
@@ -739,6 +747,8 @@ def build_fargate_engines(
         {"GHERKAI_EXTRA_HTTP_HEADERS": json.dumps(extra_http_headers, ensure_ascii=False)}
         if extra_http_headers else {}
     )
+    if no_artifacts:  # `--backend cloud --no-report`：worker 不生成/不上报原生产物 → 也就不会有 S3 上传（ADR 0037 决策 3）
+        headers_env = {**headers_env, "GHERKAI_NO_ARTIFACTS": "1"}
     # 引擎特定 env（同 headers 走 extra_env 注 RunTask overrides）：Nova 的 act timeout **双端同源**
     # （ADR 0024 grace 硬约束）——容器不继承本地 env、RunTask overrides 逐条枚举，故 cloud 档必须显式注，
     # 否则 worker 落回自带字面量：operator 调 NOVA_ACT_TIMEOUT_S 只抬高了 grace 下限、改不动容器内单 act

@@ -461,14 +461,9 @@ def test_run_wires_artifact_dirs_to_build_engines(tmp_path, monkeypatch, capsys)
     assert Path(mid).parent.parent == report_dir.resolve()  # 绝对化的 report_dir（避 worker cwd 歧义）
 
 
-def test_run_no_report_uses_temp_absolute_artifact_dirs(tmp_path, monkeypatch, capsys):
-    """`--no-report` 也注入落点，只是落系统临时目录下 run 专属的**绝对**路径（ADR 0037 决策 3）。
-
-    语义护栏：`--no-report` = 跳过 RunReport 归集 ≠ 销毁产物。worker 已无专属 cwd，不注入落点会让 SDK
-    默认相对目录写进**用户 CWD**（midscene 曾落 engines/midscene/midscene_run/）——故必须注入、且必须绝对。
-    """
-    import tempfile
-
+def test_no_report_disables_artifacts_instead_of_tempdir(tmp_path, monkeypatch):
+    """`--no-report` = 真不生成（ADR 0037 决策 3）：不注入任何落点、并以 no_artifacts 告知 worker 不产生/不上报
+    引擎原生产物——而不是「落系统临时目录」（曾如此、被否）。"""
     box = {}
     real_build = m.compose.build_engines
 
@@ -479,12 +474,25 @@ def test_run_no_report_uses_temp_absolute_artifact_dirs(tmp_path, monkeypatch, c
     monkeypatch.setattr(m.compose, "build_engines", spy_build)
     monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
     m.main(["run", str(_write_feature(tmp_path)), "--no-report"])
+    assert box["nova_logs_dir"] is None and box["midscene_run_dir"] is None
+    assert box["no_artifacts"] is True
+
+
+def test_report_run_passes_absolute_artifact_dirs_and_no_flag(tmp_path, monkeypatch):
+    """对照：默认归集档落 <report_dir>/<run_id>/ 下的绝对路径、no_artifacts=False。"""
+    box = {}
+    real_build = m.compose.build_engines
+
+    def spy_build(**kwargs):
+        box.update(kwargs)
+        return real_build()
+
+    monkeypatch.setattr(m.compose, "build_engines", spy_build)
+    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
+    m.main(["run", str(_write_feature(tmp_path)), "--report-dir", str(tmp_path / "reports")])
     nova, mid = Path(box["nova_logs_dir"]), Path(box["midscene_run_dir"])
-    assert nova.is_absolute() and mid.is_absolute()
-    tmp_root = Path(tempfile.gettempdir()) / "gherkai"
-    assert nova.parent == mid.parent and nova.parent.parent == tmp_root  # <tmp>/gherkai/<run_id>/
-    assert nova.name == "nova-trajectories" and mid.name == "midscene-run"
-    assert not nova.exists()  # 组合根只算路径、不预建（更不主动清；交给临时目录生命周期）
+    assert nova.is_absolute() and nova.parent == mid.parent and nova.parent.parent == (tmp_path / "reports").resolve()
+    assert box["no_artifacts"] is False
 
 
 # ---- _render_status：local/cloud 共享的渲染+提示+退出码（ADR 0034，两路一致）----

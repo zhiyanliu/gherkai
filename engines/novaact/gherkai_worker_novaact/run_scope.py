@@ -152,6 +152,8 @@ def _collect_traj(r, sink: list[str]) -> None:
     故从 json 路径推导 html（去 `_trajectory.json` 加 `.html`）。html 不存在则回退 json。
     收集进 sink（=本 step 的累积器）；step_done 边界报成 step 级 reportRefs（kind=trajectory，下沉，ADR 0027）。
     """
+    if _no_artifacts():
+        return  # --no-report：不收集、不上报（SDK 仍会写进自己的临时目录，那是 SDK 内部行为）
     md = getattr(r, "metadata", None)
     p = getattr(md, "trajectory_file_path", None) if md else None
     if not p:
@@ -164,6 +166,13 @@ def _collect_traj(r, sink: list[str]) -> None:
     # 绝对化兜底：reportRef 是 file://<path>，相对路径会成坏 URI（host 被当成路径首段）且跨进程
     # cwd 歧义。SDK 通常已回绝对路径（cli 传绝对 NOVA_LOGS_DIR）；此处再 abspath 一道，防御相对漏网。
     sink.append(os.path.abspath(p))
+
+
+def _no_artifacts() -> bool:
+    """`--no-report` 档（组合根经 env `GHERKAI_NO_ARTIFACTS=1` 告知，ADR 0037 决策 3）：**不生成、不上报**引擎原生产物。
+    Nova Act SDK 没有关闭 trajectory 的开关——不传 logs_directory 时它写进自己 mkdtemp 的临时目录，那是 SDK 内部
+    行为、不进项目；本 worker 此时不收集 trajectory、不带 summary、不发任何 reportRef。"""
+    return os.environ.get("GHERKAI_NO_ARTIFACTS") == "1"
 
 
 def _traj_refs(step_traj: list[str]) -> list[dict]:
@@ -647,7 +656,7 @@ def main() -> int:
             # logs_directory：trajectory 落到 run 专属持久目录（ADR 0027）。cli 经环境变量
             # NOVA_LOGS_DIR 传入 reports/<run_id>/nova-trajectories；无则用 SDK 默认临时目录
             # （会被系统清理）。Nova 的 validate_path 要求该目录**已存在**，故先 mkdir。
-            logs_dir = os.environ.get("NOVA_LOGS_DIR") or None
+            logs_dir = None if _no_artifacts() else (os.environ.get("NOVA_LOGS_DIR") or None)
             if logs_dir:
                 os.makedirs(logs_dir, exist_ok=True)
             with NovaAct(
@@ -727,7 +736,7 @@ def main() -> int:
     # NOVA_LOGS_DIR/<session_id>/session_summary.json（多拼一层 session_id 子目录），且仅 act_count>0 时写——
     # 故文件存在才带（纯确定性/零耗时 scope 不写）。用 os.environ 重取 base（logs_dir 是 _run_session 局部）。
     scope_refs: list[dict] = []
-    base = os.environ.get("NOVA_LOGS_DIR")
+    base = None if _no_artifacts() else os.environ.get("NOVA_LOGS_DIR")
     if base and session_id:
         summary = os.path.abspath(os.path.join(base, session_id, "session_summary.json"))
         if os.path.exists(summary):

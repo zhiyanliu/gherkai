@@ -116,7 +116,7 @@ uv 缺 Python 时自动下载托管 CPython，对 uv-first 受众近乎免费；
   3. PATH 上的可执行 `gherkai-worker-novaact` / `gherkai-worker-midscene`（`shutil.which`）；
   4. 兜底拉起：`uvx gherkai-worker-novaact==<CLI 版本>` / `npx -y @gherkai/worker-midscene@<CLI 版本>`——**条件项**：包装进程是否吞 fd3 须真跑预演；预演不过则此级降为「报错 + 安装指引」。
 - **miss 语义按调用点分叉，不在定位链里统一退码**：定位链四级全 miss → 抛结构化异常（引擎名 + 该引擎的安装指引：novaact → `uv tool install 'gherkai[local]'`；midscene → `npm i -g @gherkai/worker-midscene` + Node ≥22），由调用点处置——`run`/`submit` 在 spawn 前退 2（不再进 job 级 `engine_error`）、`list-deterministic` 退 2、**`plan` 保持 [0036](./0036-deterministic-capability-discovery.md) 决策 4 的 best-effort 降级**（只丢该引擎标注 + stderr 警告，plan 本体照出）。
-- **worker 不再有专属 cwd，local 档产物落点恒为绝对路径**（本条只管 local subprocess 档；cloud 档落点由 `build_fargate_engines` 注 S3、不涉本机目录）：当前有 report 的档经 `NOVA_LOGS_DIR` / `MIDSCENE_RUN_DIR` 绝对路径注入（compose 既有约束），但 `--no-report` 档不注入、产物回落 SDK 相对 worker cwd 的默认目录（midscene 落 `engines/midscene/midscene_run/`）——去掉专属 cwd 后这条路会落进用户 CWD。故组合根在 `--no-report` 档注入**系统临时目录下本次 run 专属的绝对落点**（如 `<tmp>/gherkai/<run_id>/`），**不主动清**、交给系统临时目录的生命周期：`--no-report` 的既有语义是「跳过 RunReport 归集」而非「销毁产物」（RunResult 渲染无条件打印 `report_ref` 路径，产物可点开是调试用途），本 ADR 不改这层语义，只把落点从「引擎目录」换成「临时目录」。
+- **worker 不再有专属 cwd；`--no-report` = 真不生成产物**（本条只管 local subprocess 档的落点；cloud 档落点由 `build_fargate_engines` 注 S3）：归集档产物经 `NOVA_LOGS_DIR` / `MIDSCENE_RUN_DIR` 落 `<report_dir>/<run_id>/` 绝对路径（compose 既有约束）。`--no-report` 档**不注入落点**，并经 env `GHERKAI_NO_ARTIFACTS=1` 令 worker **不生成、不上报**引擎原生产物：Midscene 关 agent 的 `generateReport`、不抢传 log、不带 report ref；Nova Act SDK 没有关闭 trajectory 的开关，此时不传 `logs_directory`、由 SDK 写进自己 `mkdtemp` 的临时目录（SDK 内部行为、不进项目），worker 不收集 trajectory、不带 summary、不发任何 reportRef；Midscene SDK 即便不出 report 也可能往 `./midscene_run`（相对 cwd）写 log/dump，`--no-report` 且无 `MIDSCENE_RUN_DIR` 时 worker 自己把它导到一次性临时目录。cloud 档 `--no-report` 同样注 `GHERKAI_NO_ARTIFACTS`，于是也没有 S3 上传。去掉专属 cwd 前，`--no-report` 档产物曾落引擎目录；曾一度改为「落系统临时目录、不清」，被否——`--no-report` 的含义就是不生成 report，用户不该在临时目录里收到一堆产物。
 - **`repo_root()` 的另两类消费点一并退役**（否则 wheel 用户的行为随安装位置漂移）：①**子进程 cwd**——`_submit_local` 的 per-run 进程与 `--expose-local` 的 tunnel-watch 都改为继承提交进程的 CWD；②**feature uri 基准**——`load_feature` 当前把路径相对 repo 算 uri（`scenario_id`/`scope_id` = `<uri>:<line>`），改为**用户给出的路径经规范化后原样**（相对给相对、绝对给绝对，不再相对任何「根」）。已知影响：scope_id 形状变化 → local report 目录名与 DDB 键随之；run 是短命数据、无跨版本读取需求，接受。
 - **contributor 代价点（明示）**：dev 态 novaact 是 workspace 成员、editable 装进同 venv，定位链第二级直接命中；midscene 无已安装 npm 包，须走第一级 env 覆写（cmd + cwd 两个 env，可放 `.envrc` / uv env-file 一次配好），比当前多一步。
 
@@ -248,7 +248,7 @@ worker 内容 = 框架脚手架 + 使用方确定性 step，属业界分类里�
 - **使用方 steps 允许 `.ts`/`.js`**：模块体系取决于使用方目录的 `package.json#type`，无 package.json 的裸目录落 CJS 域、tsx ESM register 不生效、`import` 直接 SyntaxError；收敛到 `.mts`/`.mjs`。
 - **midscene 使用方 steps 靠 Node 默认解析找 `@gherkai/worker-midscene`**：全局装/npx 形态下必 `ERR_MODULE_NOT_FOUND`；resolve hook（或退到依赖注入）。
 - **steps 文件加载失败静默跳过**：把确定性 step 静默换成 AI catch-all、run 可能假通过；fail-loud。
-- **`--no-report` 档临时落点 run 后即清**：RunResult 渲染无条件打印 `report_ref` 路径，即清会让 CLI 报出刚删掉的路径、且抹掉「产物可点开」的调试价值；不清、交系统临时目录生命周期。
+- **`--no-report` 档产物落系统临时目录（清或不清）**：两种都是「还是生成了、只是换个地方」，与 `--no-report` 的字面含义相悖；改为不注入落点 + 令 worker 不生成/不上报（能关的关、Nova SDK 关不掉的留在其自身临时目录）。RunResult 因无 reportRef 也不再打印任何产物路径。
 - **feature uri 继续相对某个「根」**：分发后没有 repo 根，任何根都随安装位置/CWD 漂移；用用户给出的路径原样。
 - **手写 `==` 版本 pin / release 脚本改写 pyproject**：双真源、易漂移；hook 渲染一处解决。
 - **npm 逐名防御占位**：scope 是原生命名空间；空壳可被争议转让。

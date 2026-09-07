@@ -146,7 +146,7 @@ cloud 由云端 Lambda 事件驱动链推进（submit 机器无 ECS 写/执行�
 | `--json` | off | 只输出机器可读 JSON（CI/WebUI 消费） |
 | `--quiet` | off | 不打逐事件进度（仍打文本汇总） |
 | `--report-dir` | `reports` | RunReport 归集落点；每次 run 落 `DIR/<run_id>/` |
-| `--no-report` | off | 跳过 RunReport 归集（逃生舱：CI 只看退出码/JSON、或调试不想落盘）。**只是不归集、不销毁产物**：引擎原生产物（trajectory / midscene report）改落系统临时目录下本次 run 专属目录（`<tmp>/gherkai/<run_id>/`，路径照样打印、可点开），由系统临时目录的生命周期回收 |
+| `--no-report` | off | 跳过 RunReport 归集，且**不生成引擎原生产物**（Midscene 不出 report；Nova SDK 的 trajectory 关不掉、由 SDK 写进其自身临时目录、不上报），RunResult 里也不会出现任何产物路径——真「不生成 report」（ADR 0037 决策 3）。逃生舱：CI 只看退出码/JSON、或调试不想落盘。 |
 | `--steps-dir` | `./steps`（存在才用） | 你自己的确定性 step 目录（ADR 0037 决策 4）：worker 启动时排序递归加载其中的 step 定义文件、注册进确定性注册表（两引擎扫同一目录，各取自己的扩展名：`.py` / `.mts`·`.mjs`）。解析顺序 `--steps-dir` > env `GHERKAI_STEPS_DIR` > `./steps`；**显式给的目录不存在直接退 2**（静默跳过等于把这些 step 悄悄换成 AI 判定）。值绝对化后写进 run 的 definition，本机后台推进/接力的进程读回同一份。[cloud] 不生效——云端 worker 的 steps 烙在定制镜像里（给了只警告、不拦） |
 | `--backend {local,cloud}` | `local` | 落库后端：local=文件落 `--report-dir`；cloud=状态落 DynamoDB、判定结果与报告落 S3（表/桶需预先建好） |
 | `--prefix` | `gherkai-` | [cloud] 资源名前缀：批量决定表/桶/cluster/task-def 默认名，**须与 CDK（`iac_aws_backend`）部署用的 prefix 一致**；多环境（prod-/stage-）切换用它。兜底 `AWS_RESOURCE_PREFIX` |

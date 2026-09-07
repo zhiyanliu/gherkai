@@ -25,6 +25,7 @@ import {
 } from "@aws-sdk/client-bedrock-agentcore";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import * as os from "node:os";
 import { sigv4Fetch, signCdpUpgrade, getBaseUrl, MODEL, getRegion } from "../lib/agentcore-sigv4.mjs";
 import { ArtifactUploader } from "../lib/artifact-upload.mjs";  // 产物 S3 上传（ADR 0029；无落点 env 时 no-op 报 file://）
 import { EventSink } from "../lib/event-sink.mjs";  // 事件出口（ADR 0024「I/O 边缘可注入接口」，两态见该模块头）
@@ -213,7 +214,15 @@ async function writeStdoutFlushed(s: string): Promise<void> {
   });
 }
 
+// `--no-report` 档（组合根经 env GHERKAI_NO_ARTIFACTS=1 告知，ADR 0037 决策 3）：**不生成、不上报**引擎原生产物——
+// 关 agent 的 generateReport、不抢传 log、不带 report ref。Midscene SDK 即便不出 report 也可能往 run 目录写 log/dump
+// （相对 cwd 的 ./midscene_run），故此档下若无 MIDSCENE_RUN_DIR 就把它导到一次性临时目录、不进用户 CWD（SDK 内部行为，不上报）。
+const NO_ARTIFACTS = process.env.GHERKAI_NO_ARTIFACTS === "1";
+
 export async function main(): Promise<number> {
+  if (NO_ARTIFACTS && !process.env.MIDSCENE_RUN_DIR) {
+    process.env.MIDSCENE_RUN_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "gherkai-midscene-"));
+  }
   // 使用方 steps/ 目录的注册（ADR 0037 决策 4）：**内建脚手架之后**（模块顶 import 已注册完）、
   // **三个自述入口与 job 循环之前**——故 --list-deterministic / --match-steps / plan 标注都反映使用方定制
   // （ADR 0036「真值单一」不变：注册表 = 内建 + 使用方）。加载失败 fail-loud（抛 → bin 一行 stderr + 非零退出）。
@@ -365,7 +374,7 @@ export async function main(): Promise<number> {
     if (extraHeaders) await ctx.setExtraHTTPHeaders(JSON.parse(extraHeaders));
     const page = ctx.pages()[0] ?? (await ctx.newPage());
     const agent = new PlaywrightAgent(page, {
-      generateReport: true,
+      generateReport: !NO_ARTIFACTS,  // --no-report：不出 report.html（ADR 0037 决策 3）
       modelConfig: modelConfig(),
       createOpenAIClient: async () => new OpenAI({ baseURL: getBaseUrl(), apiKey: "unused", fetch: sigv4Fetch }) as any,
     });
@@ -415,7 +424,7 @@ export async function main(): Promise<number> {
     // scenario 边界 log 抢传的 per-file mtime 去重表（ADR 0029「第四级」）：**scope 级共享**（log append-only
     // 单调增长、跨 scenario 累积，只传真变过的 topic 文件、不重发未变 log）。log 落 `<MIDSCENE_RUN_DIR>/log/`。
     const logSeen = new Map<string, number>();
-    const logDir = process.env.MIDSCENE_RUN_DIR ? path.join(path.resolve(process.env.MIDSCENE_RUN_DIR), "log") : undefined;
+    const logDir = (!NO_ARTIFACTS && process.env.MIDSCENE_RUN_DIR) ? path.join(path.resolve(process.env.MIDSCENE_RUN_DIR), "log") : undefined;
     for (const sc of job.scenarios) {
       await eventSink.emit({ type: "scenario_started", scenarioId: sc.id });
       // scope 内 step 短路在 runScenario 内（上游 error 跳过后续、发 step_skipped，ADR 0031 决定六）；
@@ -439,7 +448,7 @@ export async function main(): Promise<number> {
     // kind=report（产物类型；粒度由挂在 scope_done 表达，ADR 0027）；agent.reportFile 是绝对路径。
     // ref 经 uploader：cloud 上传 S3+删本地报 s3://，local no-op 报 file://（ADR 0029，对称 Nova）。
     await agent.destroy().catch(() => {});
-    if (agent.reportFile) {
+    if (agent.reportFile && !NO_ARTIFACTS) {
       // **scope 级 report 上传 best-effort：失败吞+log、不带 report ref、不 throw**（ADR 0032，对称 Nova summary）——
       // 此刻 scope 判定已 emit 完，report 上传失败（多为 S3 网络瞬时）不该 throw→冒泡到 bin.mts 的统一 catch→worker fatal + exit(1)、
       // 把已跑完的 scope 毁成 worker fatal。对齐同文件 interruptSnapshot/snapshotLogs 抢传的 best-effort。

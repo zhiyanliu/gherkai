@@ -980,18 +980,20 @@ def _cmd_run(args) -> int:
                        max_concurrency=args.max_concurrency,
                        steps_dir=steps_dir)  # cloud 档恒 None（上面已置）
     do_report = not args.no_report  # RunReport 默认生成；--no-report 跳过（逃生舱）
-    # 两个引擎的产物都落到**本次 run 专属的绝对路径**目录（ADR 0027/0037 决策 3）：
-    # - 归集档（默认）：落 <report_dir>/<run_id>/ 下，与 RunReport 同处、长期留存。
-    # - `--no-report` 档：落 <系统临时目录>/gherkai/<run_id>/ 下，**不主动清**、交给临时目录的生命周期。
-    #   `--no-report` 的语义是「跳过 RunReport 归集」而非「销毁产物」（RunResult 无条件打印 report_ref
-    #   路径、产物可点开是调试用途），故不是「不注入落点」——worker 已无专属 cwd（定位链后 cwd 多为继承
-    #   调用者，ADR 0037 决策 3），不注入就会落进**用户 CWD**（midscene 曾落 engines/midscene/midscene_run/）。
-    # **必须绝对路径**：worker 是 cwd 与 cli 不同的子进程，相对路径两侧解析到不同位置 → 产物落错地方，
-    # 且 worker 产出的 file://<相对> 是坏 URI。
+    # 两个引擎的产物落点（ADR 0027/0037 决策 3）：
+    # - 归集档（默认）：落 <report_dir>/<run_id>/ 下**本次 run 专属的绝对路径**目录，与 RunReport 同处、长期留存。
+    #   **必须绝对路径**：worker 是 cwd 与 cli 不同的子进程，相对路径两侧解析到不同位置 → 产物落错地方，
+    #   且 worker 产出的 file://<相对> 是坏 URI。
+    # - `--no-report` 档：**真不生成**——不注入落点，并经 no_artifacts 令 worker 不产生/不上报引擎原生产物
+    #   （Midscene 关 generateReport；Nova SDK 无关闭开关、不给目录时写进自己 mkdtemp 的临时目录、不上报）。
+    #   曾一度改为「落系统临时目录、不清」，被否：用户要的 --no-report 就是不生成 report。
     report_root = Path(args.report_dir).resolve()
-    artifact_root = (report_root / run_id) if do_report else (Path(tempfile.gettempdir()) / "gherkai" / run_id)
-    nova_logs_dir = artifact_root / "nova-trajectories"
-    midscene_run_dir = artifact_root / "midscene-run"
+    if do_report:
+        artifact_root = report_root / run_id
+        nova_logs_dir: Path | None = artifact_root / "nova-trajectories"
+        midscene_run_dir: Path | None = artifact_root / "midscene-run"
+    else:
+        nova_logs_dir = midscene_run_dir = None
     # 产物 S3 落点：cloud（Fargate）由 build_fargate_engines 内部按 (bucket, <report_dir>/<run_id>/) 自算注入；
     # local（subprocess）CLI 恒不注入（worker 报 file://、不上传）——「subprocess+注入 S3 落点」是内部预演档
     # （ADR 0016 决策 B / 0029），由 tools/e2e_harness.py 自拼 worker env 直起 worker 实现，不经 CLI/compose。
@@ -1088,6 +1090,7 @@ def _cmd_run(args) -> int:
     # `--no-report` 的逃生舱只作用于 store 轴（persistence=None、不构造三个 store），绝不改执行环境（见 3a 注释 + ADR 0016 决策 A）。
     if cloud_fargate is not None:
         engines = compose.build_fargate_engines(
+            no_artifacts=not do_report,  # --no-report：worker 不生成/不上报原生产物（ADR 0037 决策 3）
             run_id=run_id, prefix=cloud_fargate["prefix"], cluster=cloud_fargate["cluster"],
             events_table=cloud_fargate["events_table"], bucket=cloud_fargate["bucket"],
             report_dir=args.report_dir, network_config=cloud_fargate["network_config"],
@@ -1096,6 +1099,7 @@ def _cmd_run(args) -> int:
         )
     else:
         engines = compose.build_engines(
+            no_artifacts=not do_report,  # --no-report：worker 不生成/不上报原生产物（ADR 0037 决策 3）
             nova_logs_dir=nova_logs_dir, midscene_run_dir=midscene_run_dir,
             region=target.region, profile=target.profile,
             extra_http_headers=tunnel_headers,  # 同上（ADR 0035）
