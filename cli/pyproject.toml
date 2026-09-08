@@ -2,7 +2,7 @@
 name = "gherkai"
 # version 与依赖均动态：`gherkai-runtime[aws]=={{ version }}` 由 metadata hook 在 build 时渲染（ADR 0037 决策 2b）。
 dynamic = ["version", "dependencies", "optional-dependencies"]
-description = "gherkai CLI：执行核心库的最薄前端 = 组合根——读 .feature、new 出具体 Engine adapter 注入给 core、渲染 RunResult（ADR 0016）。发行名 gherkai / import 名 gherkai_cli / 命令 gherkai（ADR 0037）"
+description = "gherkai 命令行：用 Gherkin .feature 驱动 AI 浏览器测试（Nova Act / Midscene），本机或 AWS 云端执行"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -61,6 +61,9 @@ strict = true
 dirty = true
 # metadata 不显式开（用 dunamai 默认「非 tag commit / 脏树才带 +local」）：显式 true 会让**干净 tag commit** 也算出
 # `X.Y.Z+<sha>`，发布 gate（版本==tag）必败、PyPI 也拒收本地段——真跑验过；ADR 0037 决策 2b。
+
+[tool.hatch.build.targets.sdist]
+exclude = ["DEVELOPMENT.md"]  # contributor 文档不进发行包（wheel 本就不含；sdist 默认全收）
 
 [tool.hatch.build.targets.wheel]
 packages = ["gherkai_cli"]

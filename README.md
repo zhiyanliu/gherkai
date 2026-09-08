@@ -188,7 +188,7 @@ RUN_ID=$(uv run gherkai submit features/wikipedia_generic.feature --backend clou
 uv run gherkai status "$RUN_ID" --backend cloud --prefix gherkai- --wait
 ```
 
-提交完就走不等于失控：每个 job 有墙钟预算兜底（缺省 300s；`@timeout:<秒>` tag 按用例声明、`--default-job-timeout` 改缺省）——卡死/超预算的 job 会被自动停掉并判 `error(timeout)`，local 挂死、cloud 无限烧钱都由它止损。`status` 的 `--backend`/`--report-dir`/`--prefix` 须与 `submit` 时一致（否则查不到）。选项全表、退出码分层、submit/status 语义细节见 [`cli/README.md`](./cli/README.md)。
+提交完就走不等于失控：每个 job 有墙钟预算兜底（缺省 300s；`@timeout:<秒>` tag 按用例声明、`--default-job-timeout` 改缺省）——卡死/超预算的 job 会被自动停掉并判 `error(timeout)`，local 挂死、cloud 无限烧钱都由它止损。`status` 的 `--backend`/`--report-dir`/`--prefix` 须与 `submit` 时一致（否则查不到）。常用选项、退出码分层、submit/status 语义见 [`cli/README.md`](./cli/README.md)（全部选项以 `gherkai <命令> --help` 为准）。
 
 ### ④ 测本地/内网应用：`--expose-local`
 
@@ -215,7 +215,7 @@ RUN_ID=$(uv run gherkai submit my_app.feature --expose-local http://localhost:30
 ## Spike（可独立跑的技术验证脚本）
 
 ```bash
-# Midscene 引擎三段隔离自检（模型连接 / 浏览器连接(CDP) / 合体；另有 04 planning 探针 / 05 负向断言，见 engines/midscene/README.md）
+# Midscene 引擎三段隔离自检（模型连接 / 浏览器连接(CDP) / 合体；另有 04 planning 探针 / 05 负向断言，见 engines/midscene/DEVELOPMENT.md）
 cd engines/midscene && AWS_REGION=us-east-1 node_modules/.bin/tsx spikes/01-model-sigv4.ts
 # 02-agentcore-cdp.ts / 03-midscene-grounding.ts 同理
 
@@ -241,5 +241,6 @@ CI（push `main` / PR）跑三件：全成员 `pytest`、midscene 的 `npm ci &&
 
 ## 注意
 
+- 各包目录另有 `DEVELOPMENT.md`（contributor 向：模块布局、从 checkout 跑、跑测试、ADR 指针）；各包的 `README.md` 是发行包页面（逐字上 PyPI/npm），只写使用者内容。
 - 运行会真实消耗 AWS 费用（模型调用 + AgentCore 会话）。
 - 环境隔离：三个 Python 发行包（core/runtime/cli）与 Nova Act worker（`gherkai-worker-novaact`，经 CLI 的 `[local]` extra）都装在仓库根 `.venv`（uv workspace 单一 `uv.lock`；worker 与 CLI 同 venv 是设计——`python -m gherkai_worker_novaact` 无包装层、fd 直达，ADR 0037 决策 3），Midscene worker 的 TS 依赖在 `engines/midscene/node_modules`——均不污染全局。

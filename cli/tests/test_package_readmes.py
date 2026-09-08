@@ -56,3 +56,18 @@ def test_every_package_dir_has_a_development_md():
     """contributor 内容有明确去处（不是被删掉）：每个包目录一份 DEVELOPMENT.md。"""
     missing = [pkg for pkg in PY_PACKAGES + NPM_PACKAGES if not (REPO / pkg / "DEVELOPMENT.md").is_file()]
     assert not missing, f"缺 DEVELOPMENT.md：{missing}"
+
+
+def test_package_summaries_are_for_users_only():
+    """pyproject `description` / package.json `description` = PyPI/npm 页顶的 Summary 一行，同属包页面。"""
+    hits = []
+    for pkg in PY_PACKAGES:
+        meta = tomllib.loads((REPO / pkg / "pyproject.toml").read_text(encoding="utf-8"))
+        d = meta["project"].get("description", "")
+        if FORBIDDEN.search(d):
+            hits.append(f"{pkg}/pyproject.toml description: {d[:100]}")
+    for pkg in NPM_PACKAGES:
+        d = json.loads((REPO / pkg / "package.json").read_text(encoding="utf-8")).get("description", "")
+        if FORBIDDEN.search(d):
+            hits.append(f"{pkg}/package.json description: {d[:100]}")
+    assert not hits, "包 Summary 不得含内部指代：\n" + "\n".join(hits)

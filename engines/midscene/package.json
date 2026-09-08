@@ -1,7 +1,7 @@
 {
   "name": "@gherkai/worker-midscene",
   "version": "0.0.0-dev",
-  "description": "gherkai Midscene worker —— Qwen3-VL on Bedrock（SigV4 自签）驱动的视觉 UI 自动化执行引擎",
+  "description": "gherkai 的 Midscene 引擎 worker：由 gherkai 命令行拉起，用 Bedrock 上的 Qwen3-VL 做视觉 UI 自动化",
   "license": "MIT",
   "type": "module",
   "repository": {

@@ -1,95 +1,107 @@
-# novaact (Python 引擎子工程)
+# gherkai-worker-novaact
 
-Nova Act (Python) 侧的执行引擎。用 Amazon 自家模型 `nova-act-latest`，**纯 IAM 鉴权（经 `@workflow`）**，浏览器跑在 **AgentCore 云端**。
+gherkai 的 **Nova Act 执行引擎**：把 `.feature` 里的每个 step 在**云端浏览器**（Amazon Bedrock AgentCore Browser）上真跑一遍——自然语言 step 交给 Amazon 的 `nova-act-latest` 模型看图操作，你自己写的确定性 step 用 Playwright 精确判定。
 
-> 目录故意叫 `novaact`（无下划线），避开与 pip 包 `import nova_act` 撞名。
->
-> 本目录即发行包 **`gherkai-worker-novaact`**（import 名 `gherkai_worker_novaact`、命令名 `gherkai-worker-novaact`，ADR 0037 决策 3）：worker 代码住在 `gherkai_worker_novaact/`，`spikes/` 与 `tests/` 不随包发行。
+它是一个被 `gherkai` CLI 拉起并驱动的 **worker 进程**：日常你敲的是 `gherkai run` / `gherkai submit`，**不用直接调用本包的命令**。装上它 = 让 `gherkai` 能在本机用 novaact 引擎跑起来。
 
-## 鉴权（纯 IAM，不用 NOVA_ACT_API_KEY）
-
-复用本机 AWS 凭证，经 Nova Act 的 `Workflow` 构造（见 ADR 0004）：
-
-- `model_id="nova-act-latest"`，`boto_session_kwargs={"region_name": <AWS_REGION>}`（region 不硬编码：由组合根落实后经 `AWS_REGION` 注入，见 `gherkai_worker_novaact/run_scope.py` 的 `REGION`；ADR 0016 决策 C / 0033）
-- workflow definition：**代码自动 create-if-not-exists**（`gherkai_worker_novaact/lib/workflow_setup.py` 的 `ensure_workflow_definition()`，worker 与 spike 已接入），无需手动 CLI。boto3 与 `aws nova-act create-workflow-definition` 等价。
-- 注意：`provider.cdp_session()` 靠 contextvar 识别 workflow；用 `@workflow` 装饰器，或手动 `set_current_workflow(wf)`（见 `gherkai_worker_novaact/run_scope.py` 的 `with wf` + `set_current_workflow`）。
-
-## 环境
-
-**本目录不再有自己的 `.venv`**：它是 repo 根 uv workspace 的一个成员，worker 装进**与 CLI 同一个 venv**（ADR 0037 决策 3——「安装」与「拉起」正交，同 venv 让组合根用 `[sys.executable, "-m", "gherkai_worker_novaact"]` 直接拉起、无包装进程、EVENTS_FD 经 `pass_fds` 直达）。
+## 安装
 
 ```bash
-uv sync            # 在 repo 根跑一次，core/runtime/cli + 本 worker 一并装好（editable）
+uv tool install 'gherkai[local]'      # CLI 与本 worker 装进同一个环境（推荐）
 ```
 
-## 执行形态：薄 worker（pytest-bdd 已退役）
+CLI 按这个顺序找 worker，命中即用：① 环境变量 `GHERKAI_WORKER_NOVAACT_CMD`（+ 可选 `GHERKAI_WORKER_NOVAACT_CWD`）显式指定——给了就用它，自建或调试时用 → ② 与 CLI 同一个 Python 环境（上面那条装法的结果）→ ③ PATH 上的 `gherkai-worker-novaact` 命令 → ④ 前三级都没有、且 CLI 是正式发行版本、机器上有 `uvx` 时，临时拉起与 CLI 同版本的 `gherkai-worker-novaact`（本引擎独有）。worker 与 CLI 版本同号锁定；四级都没命中时 `gherkai run` / `gherkai list-deterministic` 退 2 并打印装法。
 
-执行入口是包入口 `python -m gherkai_worker_novaact`（= `gherkai_worker_novaact/run_scope.py` 的 `main()`）——被组合根 spawn 的薄 worker（core 自解析 `.feature`、
-把每个 step 经 ADR 0024 协议派发进来，ADR 0022）。**pytest-bdd 入口（`bdd/` 层）已随 v0.x BDD 层退役删除**。
-正常经 `gherkai` CLI 跑；worker 也可手动直跑调试（下列命令从 repo 根跑）：
+## AWS 前置
 
-```bash
-echo '<job json>' | AWS_REGION=us-east-1 uv run python -m gherkai_worker_novaact
+- **纯 IAM 鉴权**：走本机 AWS 默认凭证链（profile / 环境变量 / 实例角色皆可）。**不需要 `NOVA_ACT_API_KEY`**——本引擎不用 API key。
+- **region 必须显式给**：`AWS_REGION`，或 `gherkai run --region <R>`；未设即报错，不猜默认 region。
+- 该 region 下账号需可用：**Nova Act 服务**（`nova-act`）+ 模型 `nova-act-latest`，以及 **AgentCore Browser**（`bedrock-agentcore`）。浏览器跑在云端，本机**不需要装 Chromium**。
+- Nova Act 的 workflow definition 由 worker **自动按需创建**（幂等，已存在即跳过），不必手工预建。
 
-# 另有两个「自述」入口（不建会话、不跑 job、零 AWS，ADR 0036）——cli 的 list-deterministic / plan 标注即转述它们：
-uv run gherkai-worker-novaact --list-deterministic                    # dump 确定性注册表（pattern + description + example）
-echo '["页面地址匹配 \"/wiki/OpenAI\""]' | uv run python -m gherkai_worker_novaact --match-steps   # 批量问这些 step 各命中什么
-```
+## 写确定性 step（`steps/*.py`）
 
-> `python -m gherkai_worker_novaact` 与 console script `gherkai-worker-novaact` 是**同一个 `main()`**（定位链的第二、三级，ADR 0037 决策 3），行为逐字一致。
-
-## 确定性 step：内建脚手架 vs 使用方的 `steps/`
-
-确定性注册表 = **本包内建脚手架**（`gherkai_worker_novaact/deterministic_steps.py`，一条 URL 锚点作范例）
-**+ 使用方项目里的 `steps/` 目录**（ADR 0037 决策 4）。使用方**不改包内文件**（那是发行内容、改它等于 fork），
-而是在自己项目里写 `steps/*.py`：
+自然语言 step 默认交给 AI；「必须精确、不容抖动」的判定（URL、关键 DOM……）写成确定性 step——命中即走你的函数，不问 AI、可复现。写在你**自己项目**的 `steps/` 目录里（不改本包文件）：
 
 ```python
 # steps/login.py
 from gherkai_worker_novaact.deterministic import deterministic
 
 
-@deterministic(r'以 "(?P<user>[^"]+)" 登录', description="确定性登录", example='Given 以 "alice" 登录')
+@deterministic(r'以 "(?P<user>[^"]+)" 登录',
+               description="确定性填表登录（不走 AI）",
+               example='Given 以 "alice" 登录')
 def login(ctx, user):
-    ctx.page.fill("#user", user)
+    ctx.page.fill("#user", user)      # ctx.page 就是 Playwright 的 Page
+    ctx.page.click("#submit")
 ```
 
-worker **只认一个环境变量 `GHERKAI_STEPS_DIR`**——`--steps-dir` flag / 默认 `./steps` / 随 run definition 持久化
-全由 CLI 侧（组合根）解析后注入，worker 不猜路径（ADR 0037 决策 4）。故日常用 `gherkai run --steps-dir …`
-就够；手动直跑 worker 时自己给 env：
+- 签名 `handler(ctx, **groups)`：`groups` = 正则里的具名组 `(?P<name>...)`（无具名组则只收 `ctx`）；`ctx.page` 是 Playwright `Page`。
+- `description` / `example` **必填**——它们就是 `gherkai list-deterministic` 与 `gherkai plan` 打给用例作者看的那两行，缺了启动即报错。
+- 抛 `AssertionError` → 该 step 记 **failed**（断言没过）；抛其它异常 → 记 **error**。确定性 step 不投票。
+- 目录**排序递归**遍历 `*.py`；跳过 `_*.py`（你自己的辅助模块，供相对 import 用）与 `test_*.py`（你自己的测试）。
+- 本包内建一条示范锚点 `页面地址匹配 "<正则>"`，装上即可在 `.feature` 里直接写 `Then 页面地址匹配 "/wiki/OpenAI"`。
+
+目录怎么告诉 CLI：`gherkai run --steps-dir ./steps`（`run` / `submit` / `plan` / `list-deterministic` 四处都有此选项），缺省 `./steps`。
+
+### 用错了会怎样（一律响亮失败，绝不静默降级）
+
+| 情况 | 表现 |
+|---|---|
+| 注册时缺 `description` / `example` | 启动即报错退出，点名那条 pattern |
+| `steps/` 下某个文件 import 失败（语法错、缺依赖……） | 退 **2**，stderr 点名文件与异常——**不跳过**（跳过等于把确定性判定悄悄换回 AI，run 还可能「通过」） |
+| `--steps-dir`（或 `GHERKAI_STEPS_DIR`）指的目录不存在 | 直接退 **2** 并说明：明确指了一个地方而那里没东西 = 配置错。（缺省的 `./steps` 不存在**不算错**——多数项目本就没有确定性 step） |
+| 一个 step 文本命中多条 pattern | 该 step 记 error 并列出撞上的 pattern；`gherkai plan` 会提前把冲突暴露出来 |
+
+## 查有哪些确定性 step
 
 ```bash
-GHERKAI_STEPS_DIR=$PWD/steps uv run gherkai-worker-novaact --list-deterministic   # 清单含使用方 step
+gherkai list-deterministic --engine novaact --steps-dir ./steps   # 人读清单（pattern + 说明 + 可抄的示例）
+gherkai list-deterministic --engine novaact --json                # 机器可读
+gherkai plan features/                                            # 每个 step 会走确定性还是 AI
 ```
 
-加载规则（`gherkai_worker_novaact/user_steps.py`）：排序递归遍历 `*.py`；跳过 `_*.py`（供相对 import 的辅助模块）
-与 `test_*.py`（使用方自己的测试）；**任一文件 import 失败或目录不存在即非 0 退出并指名文件**（绝不静默跳过——
-跳过等于把确定性 step 悄悄换成 AI catch-all）；steps 根**不进 `sys.path`**（使用方一个 `json.py` 也不会遮蔽标准库）。
-云端档的 steps 烙进定制镜像（ADR 0038），不经此 env。
+两者都不建浏览器会话、不调模型，**不烧 AWS**。
 
-## 跑测试
+## 把 steps 带到云端
 
-从 **repo 根**跑（本目录不再有独立 venv）：
+`--backend cloud` 时 worker 跑在 Fargate 容器里、读不到你本机的 `steps/`——把它烙进一个定制镜像（三行）：
+
+```dockerfile
+FROM ghcr.io/zhiyanliu/gherkai-worker-novaact:<你的 CLI 版本>
+COPY steps/ /app/steps
+ENV GHERKAI_STEPS_DIR=/app/steps
+```
 
 ```bash
-uv run pytest -q engines/novaact/tests     # 只跑本引擎
-uv run pytest -q                           # 跑全 workspace（根 testpaths 已含本目录）
+docker build --platform linux/amd64 -t acme-novaact:login .
 ```
 
-## 跑 spike（可独立跑，不随包发行）
+> ⚠️ **必须 `--platform linux/amd64`**：在 arm Mac 上漏了会 build 出 arm64 镜像，容器**启动期** `exec format error` 挂死，现象离原因很远。
 
-```bash
-AWS_REGION=us-east-1 uv run python engines/novaact/spikes/wikipedia_benchmark.py    # 对标基准（维基百科端到端）
-AWS_REGION=us-east-1 uv run python engines/novaact/spikes/negative_assertions.py    # 负向断言（"该红能红"，对标 midscene 05）
-```
+推送、选用（`--worker-variant`）与默认指针见部署方文档 https://github.com/zhiyanliu/gherkai/blob/HEAD/deploy_aws/README.md 。
 
-## 报告
+## 报告与产物
 
-Nova Act 每次 `act`/`act_get` 各出一个 trajectory HTML。落点分两种：
+Nova Act 每次 `act` / `act_get` 各出一份 trajectory HTML（截图 + 模型的判断轨迹）：
 
-- **正常经 cli 跑**：组合根经环境变量 `NOVA_LOGS_DIR` 注入 run 专属持久目录 `reports/<run_id>/nova-trajectories`，worker 原样交给 `NovaAct(logs_directory=...)`（ADR 0027；scope 级 `session_summary.json` 落同一 base）；产物再经 `ArtifactUploader` 传 S3（ADR 0029）。
-- **手动直跑 worker / 跑 spike**（不设 `NOVA_LOGS_DIR`）：回落 SDK 默认的系统临时目录 `$TMPDIR/..._nova_act_logs/`（会被系统清理），要持久化就自己给 `NovaAct(logs_directory=...)`（见 ADR 0010）。
+- `--backend local`：落 `reports/<run_id>/nova-trajectories/`，run 报告里带引用。
+- `--backend cloud`：随 run 传到 S3，`gherkai status` 给出引用。
+- `--no-report`：**不生成、不上报**引擎原生产物（引擎自己可能写的临时文件落一次性临时目录，不进你的工作目录）。
 
-## 容器镜像
+## 退出码与常见错误
 
-`Dockerfile` = Fargate 档的 worker 基底镜像（`COPY gherkai_worker_novaact/` + `PYTHONPATH=/app` + `CMD python -m gherkai_worker_novaact`，**零使用方内容**）。必须 `--platform linux/amd64`，理由与定制层模板见 ADR 0033 / 0037 决策 5 / 0038。
+日常看 CLI 的退出码即可；直接跑 worker 时：`0` 正常、`2` steps 目录/文件加载失败（见上表）、`80` 连云端浏览器的重试耗尽（网络或额度问题——换 region 或稍后重试）。
+
+| 你看到 | 怎么办 |
+|---|---|
+| `engine_error: 起 worker 失败` | worker 没装或版本与 CLI 不一致：`uv tool install 'gherkai[local]'` |
+| `AccessDenied` / `ValidationException` 提到 `nova-act` | 该 region 未开通 Nova Act，或凭证缺 `nova-act` / `bedrock-agentcore` 权限 |
+| 启动即抱怨 region 未设 | 设 `AWS_REGION`（或给 `--region`）——本引擎不猜默认 region |
+| 明明写了 `steps/` 却全走 AI | 确认 `--steps-dir` 指对，并用 `gherkai list-deterministic --steps-dir …` 看清单里有没有你那条 |
+
+## 帮助
+
+用法、装法与命令全景见项目主页 https://github.com/zhiyanliu/gherkai#readme ；问题请提 issue：https://github.com/zhiyanliu/gherkai/issues 。
+
+设计文档（架构决策记录）见 https://github.com/zhiyanliu/gherkai/tree/HEAD/docs/adr 。

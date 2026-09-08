@@ -1,130 +1,111 @@
-# @gherkai/worker-midscene（Midscene TS 引擎 worker）
+# @gherkai/worker-midscene
 
-gherkai 的 Midscene.js (TypeScript) 侧执行引擎，以 **npm 包**分发（ADR 0037 决策 3）。用 **Qwen3-VL 235B on Bedrock** 做视觉定位大脑，经 **SigV4 自签** 接入，浏览器跑在 **AgentCore 云端**。
+gherkai 的 **Midscene 执行引擎**：把 `.feature` 里的每个 step 在**云端浏览器**（Amazon Bedrock AgentCore Browser）上真跑一遍——自然语言 step 交给 **Qwen3-VL 235B on Bedrock** 看图定位并操作，你自己写的确定性 step 用 Playwright 精确判定。
 
-| | |
-|---|---|
-| 发行名 | `@gherkai/worker-midscene`（npm，public） |
-| 命令名 | `gherkai-worker-midscene`（bin = `dist/bin.mjs`） |
-| 运行时 | Node ≥ 22，统一 ESM（`"type": "module"`，源码 `.mts` → 产物 `.mjs`） |
-| 版本 | 与 CLI（`gherkai`）lockstep；仓库里是占位 `0.0.0-dev`，发行版本由 CI 在 publish 时写入 |
+它是一个被 `gherkai` CLI 拉起并驱动的 **worker 进程**：日常你敲的是 `gherkai run` / `gherkai submit`，**不用直接调用本包的命令**。装上它 = 让 `gherkai` 能在本机用 midscene 引擎跑起来。
 
-使用方（测试工程师）一般**不直接跑它**：装上之后由 `gherkai` CLI 按 worker 定位链拉起（ADR 0037 决策 3）。
+## 安装
 
 ```bash
-npm i -g @gherkai/worker-midscene     # 或让 CLI 走 npx 兜底
+npm i -g @gherkai/worker-midscene      # 需 Node ≥ 22
 ```
 
-> ⚠️ 早期 README 曾写"用 Bedrock GPT-5.5 / `MIDSCENE_MODEL_FAMILY=gpt-5`"——**已废弃**。实测 Bedrock 上的 gpt-5.5 不支持 chat-completions（见根目录 ADR 0002）。当前大脑见 ADR 0003，鉴权见 ADR 0008。
+CLI 在 PATH 上找 `gherkai-worker-midscene` 命令（`npm i -g` 的结果）；要指向自建或本地构建，用环境变量 `GHERKAI_WORKER_MIDSCENE_CMD`（+ 可选 `GHERKAI_WORKER_MIDSCENE_CWD`）显式覆写。本 worker 与 CLI 版本同号锁定，**必须真装**（没有临时拉起的兜底）；没装时 `gherkai run` / `gherkai list-deterministic` 退 2 并打印装法。
 
-## 模型 / 鉴权（无需任何 API key）
+## AWS 前置
 
-不用 `MIDSCENE_MODEL_API_KEY` bearer，改用进程内 SigV4 自签（复用本机 AWS 默认凭证链）：
+- **纯 IAM 鉴权**：进程内 SigV4 自签，复用本机 AWS 默认凭证链（profile / 环境变量 / 实例角色皆可）。**不需要任何 API key**（无 bearer token）。
+- **region 必须显式给**：`AWS_REGION`，或 `gherkai run --region <R>`；未设即报错，不猜默认 region。
+- 该 region 下账号需可用：**Bedrock 模型** `qwen.qwen3-vl-235b-a22b`（视觉定位大脑），以及 **AgentCore Browser**（`bedrock-agentcore`）。浏览器跑在云端，本机**不需要装 Chromium**。
 
-- 模型：`qwen.qwen3-vl-235b-a22b`，`MIDSCENE_USE_QWEN3_VL=true`
-- base URL：`https://bedrock-runtime.${AWS_REGION}.amazonaws.com/openai/v1`（region 惰性读 `AWS_REGION`、未设即 fail-loud，不硬编码 east——见 `src/lib/agentcore-sigv4.mts` 的 `getRegion()`/`getBaseUrl()`、ADR 0033）
-- 接线：经 Midscene `createOpenAIClient` 注入带 SigV4 签名的自定义 `fetch`
-- 配方与失败模式：`spikes/SIGV4-FETCH-RECIPE.md`
+## 写确定性 step（`steps/*.mts`）
 
-## 布局
-
-```
-src/
-├── bin.mts            ← 唯一入口（npm bin + 容器 CMD）：装 tsx loader + 注册 resolve hook + 调 worker main
-├── index.mts          ← 包的公开 API：使用方 step 文件 import 的 { deterministic, DeterministicAssertion, 类型 }
-├── resolve-hook.mts   ← 裸 specifier "@gherkai/worker-midscene" → worker 自身安装位置（随 dist 发布的独立入口）
-├── worker/            ← 薄 worker：run-scope（派发/会话/事件）、确定性注册表、内建脚手架、使用方 steps 加载
-└── lib/               ← I/O 边缘组件：job 入口 / 事件出口 / 产物上传 / SigV4
-dist/                  ← tsc 产物（*.mjs + *.d.mts），发布物；不入库
-spikes/                ← 五段式自检脚本（不进包、不编译）
-```
-
-测试与源码同处（`src/**/*.test.mts`），不进 `dist`。
-
-## 执行形态：薄 worker（cucumber 已退役）
-
-进程入口是 `src/bin.mts`——**它本身就是 worker 进程**：装好 loader 与 resolve hook 后直接调 `src/worker/run-scope.mts` 的 `main`，**不 spawn 子 node**（core 用 `pass_fds` 把事件通道 fd 继承给它直接起的那个进程，中间多一层包装就把 fd3 吞了，ADR 0024 三通道）。core 自解析 `.feature`、把每个 step 经 ADR 0024 协议派发进来（ADR 0022），cucumber-js 入口已随 v0.x BDD 层退役删除。
-
-正常经 `gherkai` CLI 跑；也可手动直跑调试（`npm ci && npm run build` 之后）：
-
-```bash
-echo '<job json>' | AWS_REGION=us-east-1 node dist/bin.mjs
-
-# 另有两个「自述」入口（不建会话、不跑 job、零 AWS，ADR 0036）——cli 的 list-deterministic / plan 标注即转述它们：
-node dist/bin.mjs --list-deterministic                    # dump 确定性注册表（pattern + description + example）
-echo '["页面地址匹配 \"/wiki/OpenAI\""]' | node dist/bin.mjs --match-steps   # 批量问这些 step 各命中什么
-```
-
-## 确定性 step 的定制：使用方 `steps/` 目录
-
-「必须精确、不容 AI 抖动」的判定写成确定性 step（ADR 0015 逃生舱 / 0020 角色边界：由 test engineer 写，QA 只写自然语言）。**定制面在使用方自己的项目里**，不改本包源码（ADR 0037 决策 4）：
-
-```
-<你的项目>/
-├── features/          ← QA 的 .feature
-└── steps/             ← 确定性 step（本引擎取 *.mts / *.mjs；Nova 引擎取 *.py）
-    └── login.mts
-```
+自然语言 step 默认交给 AI；「必须精确、不容抖动」的判定（URL、关键 DOM……）写成确定性 step——命中即走你的函数，不问 AI、可复现。写在你**自己项目**的 `steps/` 目录里（不改本包源码）：
 
 ```ts
 // steps/login.mts
 import { deterministic, DeterministicAssertion } from "@gherkai/worker-midscene";
 
 deterministic(
-  '页面地址匹配 "(?<pattern>[^"]+)"',           // 具名组 (?<name>...) = handler 的 groups
-  ({ page }, { pattern }) => {                   // ctx.page = Playwright Page；不投票、可复现
-    if (!new RegExp(pattern).test(page.url())) {
-      throw new DeterministicAssertion(`URL 应匹配 ${pattern}，实际 ${page.url()}`);
+  '元素 "(?<sel>[^"]+)" 可见',                    // 具名组 (?<name>...) = handler 收到的 groups
+  async ({ page }, { sel }) => {                  // page = Playwright Page；不投票、可复现
+    if (!(await page.locator(sel).isVisible())) {
+      throw new DeterministicAssertion(`元素 ${sel} 应可见，实际没找到或不可见`);
     }
   },
-  { description: "断言当前页面 URL 匹配给定正则", example: 'Then 页面地址匹配 "/wiki/OpenAI"' },
+  { description: "断言选择器命中的元素可见（精确判定，不走 AI）", example: 'Then 元素 "#submit" 可见' },
 );
 ```
 
-要点：
+- 签名 `(ctx, groups) => void | Promise<void>`：`ctx.page` 是 Playwright `Page`，`groups` = 正则具名组的对象。
+- **扩展名只认 `.mts` / `.mjs`**：这两个恒为 ESM，与你项目里有没有 `package.json`、`type` 写什么无关（`.ts` / `.js` 会落进 CJS 域、`import` 直接 SyntaxError）。
+- `description` / `example` **必填**——它们就是 `gherkai list-deterministic` 与 `gherkai plan` 打给用例作者看的那两行，缺了启动即报错。
+- 判定失败抛 `DeterministicAssertion`（或 `node:assert` 的 `AssertionError`）→ 该 step 记 **failed**；抛其它 → 记 **error**。
+- 目录**排序递归**遍历，`*.test.*` 跳过。
+- 本包内建一条示范锚点 `页面地址匹配 "<正则>"`，装上即可在 `.feature` 里直接写 `Then 页面地址匹配 "/wiki/OpenAI"`。撞上同一 pattern **不做覆盖**，按冲突处理（见下表）。
 
-- **扩展名只认 `.mts` / `.mjs`**：这两个恒为 ESM，与你的项目目录里有没有 `package.json`、`type` 写什么无关（`.ts`/`.js` 会落进 CJS 域、`import` 直接 SyntaxError）。脚手架与文档统一用 `.mts`。
-- **`description` / `example` 必填**（ADR 0036「注册即暴露」）：缺则启动即报错——`gherkai list-deterministic` / `plan` 的标注就是从这张表生成的。
-- 目录**排序递归**遍历，`*.test.*` 跳过；`gherkai run/submit` 的 `--steps-dir` flag > env `GHERKAI_STEPS_DIR` > 默认 `./steps` 由 CLI 解析、随 run 定义传给 worker（worker 只认 env `GHERKAI_STEPS_DIR`）。
-- **加载失败 fail-loud**：任一文件 import 出错、或某文件一条都没注册 → worker 立刻非零退出并点名该文件。**绝不静默跳过**——跳过等于把确定性判定悄悄换成 AI 兜底、run 可能"通过"。「一条都没注册」多半意味着 `import` 的不是本包（解析到了第二份副本），这条检查把它从静默降级变成显式失败。
-- 内建脚手架 step（URL 匹配那条）留在包内；使用方 step 与内建**撞 pattern 不做覆盖**，按 ADR 0036 的 conflict 语义在 `plan` 预检暴露。
+目录怎么告诉 CLI：`gherkai run --steps-dir ./steps`（`run` / `submit` / `plan` / `list-deterministic` 四处都有此选项），缺省 `./steps`。
 
-## contributor：从本 checkout 跑
+### 用错了会怎样（一律响亮失败，绝不静默降级）
 
-```bash
-npm ci              # 装依赖（含 devDeps 里的 typescript——build 期需要）
-npm run build       # tsc → dist/*.mjs
-npm test            # node --import tsx --test "src/**/*.test.mts"
-```
+| 情况 | 表现 |
+|---|---|
+| 注册时缺 `description` / `example` | 启动即报错退出，点名那条 pattern |
+| 某个 step 文件 import 失败（语法错、缺依赖、用了 `.ts`……） | worker 非 0 退出并点名该文件——**不跳过**（跳过等于把确定性判定悄悄换回 AI，run 还可能「通过」） |
+| 某个 step 文件**一条都没注册** | 同样非 0 退出并点名。多半是它 `import` 的不是本包（解析到了第二份副本）——检查你项目里有没有另一份 `@gherkai/worker-midscene` |
+| `--steps-dir`（或 `GHERKAI_STEPS_DIR`）指的目录不存在 | 直接退 **2** 并说明：明确指了一个地方而那里没东西 = 配置错。（缺省的 `./steps` 不存在**不算错**） |
+| 一个 step 文本命中多条 pattern | 该 step 记 error 并列出撞上的 pattern；`gherkai plan` 会提前把冲突暴露出来 |
 
-让 CLI 指向本 checkout（dev 态没有已安装的 npm 包，走 worker 定位链**第一级** env 覆写，ADR 0037 决策 3）：
-
-```bash
-export GHERKAI_WORKER_MIDSCENE_CMD="node $(pwd)/dist/bin.mjs"
-# 配套的 GHERKAI_WORKER_MIDSCENE_CWD 一般不需要：bin 在进程内注册 tsx，
-# 不再靠 cwd 上溯 node_modules 解析裸 specifier（旧的 `node --import tsx …` 形态才需要）。
-```
-
-免 build 的快速迭代形态（改完源码直接跑，验证过）：
+## 查有哪些确定性 step
 
 ```bash
-GHERKAI_WORKER_MIDSCENE_CMD="node $(pwd)/src/bin.mts"     # 需 Node ≥ 22.18（原生 type stripping）
+gherkai list-deterministic --engine midscene --steps-dir ./steps   # 人读清单（pattern + 说明 + 可抄的示例）
+gherkai list-deterministic --engine midscene --json                # 机器可读
+gherkai plan features/                                             # 每个 step 会走确定性还是 AI
 ```
 
-**不要用 `node --import tsx src/bin.mts`**：`tsx` 是裸 specifier，按**进程 cwd** 上溯 `node_modules` 解析——CLI 从别处起 worker 时直接 `Cannot find package 'tsx'`（实测）。`node src/bin.mts` 没这个问题（bin 自己 import tsx，按文件位置解析）。
+两者都不建浏览器会话、不调模型，**不烧 AWS**。
 
-## 跑 spike（五段式自检，可独立跑）
+## 把 steps 带到云端
+
+`--backend cloud` 时 worker 跑在 Fargate 容器里、读不到你本机的 `steps/`——把它烙进一个定制镜像（三行）：
+
+```dockerfile
+FROM ghcr.io/zhiyanliu/gherkai-worker-midscene:<你的 CLI 版本>
+COPY steps/ /app/steps
+ENV GHERKAI_STEPS_DIR=/app/steps
+```
 
 ```bash
-AWS_REGION=us-east-1 node_modules/.bin/tsx spikes/01-model-sigv4.ts        # 模型连接（SigV4）
-AWS_REGION=us-east-1 node_modules/.bin/tsx spikes/02-agentcore-cdp.ts      # 浏览器连接（CDP）
-AWS_REGION=us-east-1 node_modules/.bin/tsx spikes/03-midscene-grounding.ts # 合体（grounding）
-AWS_REGION=us-east-1 node_modules/.bin/tsx spikes/04-planning-probe.ts     # planning 候选探针（纯文本模型能否当 planner）
-AWS_REGION=us-east-1 node_modules/.bin/tsx spikes/05-negative-assertions.ts # 负向断言（"该红能红"，防永远绿）
+docker build --platform linux/amd64 -t acme-midscene:login .
 ```
 
-## 注意
+> ⚠️ **必须 `--platform linux/amd64`**：在 arm Mac 上漏了会 build 出 arm64 镜像，容器**启动期** `exec format error` 挂死，现象离原因很远。
 
-- **运行时依赖全在 `dependencies`**（`@midscene/web`、`@playwright/test`、`playwright`、各 `@aws-sdk/*`、`openai`、`tsx`）：npm 包的消费者只会装 `dependencies`，留在 `devDependencies` 里的运行时依赖必崩（ADR 0033 记的「不能 `--production`」陷阱在包化后变成必然）。`devDependencies` 只剩 build/类型（`typescript`、`@types/node`）。
-- `@playwright/test` 是 `@midscene/web` 声明为 optional peer、但 `@midscene/web/playwright` 子入口**无条件 import** 的包——故它也是运行时依赖（真跑打包安装才暴露）。
-- 容器镜像见 `Dockerfile`（基底镜像，ADR 0037 决策 5 / 0038）：`npm ci` → `npm run build` → `CMD ["node", "dist/bin.mjs"]`。
+推送、选用（`--worker-variant`）与默认指针见部署方文档 https://github.com/zhiyanliu/gherkai/blob/HEAD/deploy_aws/README.md 。
+
+## 报告与产物
+
+Midscene 每个 worker 出一份 `report.html`（可视化回放：每步的截图、定位框与模型判断）：
+
+- `--backend local`：落 `reports/<run_id>/midscene-run/`，run 报告里带引用。
+- `--backend cloud`：随 run 传到 S3（中途被打断也会尽力抢传已写出的那份），`gherkai status` 给出引用。
+- `--no-report`：**不生成、不上报**引擎原生产物（引擎自己可能写的 log/dump 落一次性临时目录，不进你的工作目录）。
+
+## 退出码与常见错误
+
+日常看 CLI 的退出码即可；直接跑 worker 时：`0` 正常、非 0 表示装配/执行失败（steps 加载失败即在此列）、`80` 连云端浏览器的重试耗尽（网络或额度问题——换 region 或稍后重试）。
+
+| 你看到 | 怎么办 |
+|---|---|
+| `engine_error: 起 worker 失败` | worker 没装或版本与 CLI 不一致：`npm i -g @gherkai/worker-midscene`（Node ≥ 22） |
+| `import` 你的 step 文件时 `SyntaxError` | 文件扩展名改成 `.mts` / `.mjs`（`.ts` / `.js` 会被当 CJS） |
+| `AccessDenied` / 模型不可用 | 该 region 未开通 `qwen.qwen3-vl-235b-a22b`，或凭证缺 Bedrock / `bedrock-agentcore` 权限 |
+| 启动即抱怨 region 未设 | 设 `AWS_REGION`（或给 `--region`）——本引擎不猜默认 region |
+| 明明写了 `steps/` 却全走 AI | 确认 `--steps-dir` 指对，并用 `gherkai list-deterministic --steps-dir …` 看清单里有没有你那条 |
+
+## 帮助
+
+用法、装法与命令全景见项目主页 https://github.com/zhiyanliu/gherkai#readme ；问题请提 issue：https://github.com/zhiyanliu/gherkai/issues 。
+
+设计文档（架构决策记录）见 https://github.com/zhiyanliu/gherkai/tree/HEAD/docs/adr 。

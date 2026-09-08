@@ -1,7 +1,7 @@
 [project]
 name = "gherkai-worker-novaact"
 dynamic = ["version"]
-description = "gherkai 的 Nova Act 引擎 worker：讲 ADR 0024 协议的被 spawn 子进程（fd/DDB 两态），纯 IAM 鉴权。发行名 gherkai-worker-novaact / import 名 gherkai_worker_novaact / console script gherkai-worker-novaact（ADR 0037 决策 3）"
+description = "gherkai 的 Nova Act 引擎 worker：由 gherkai 命令行拉起，在 AgentCore 云浏览器里执行 .feature 步骤"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -44,6 +44,9 @@ strict = true
 dirty = true
 # metadata 不显式开（用 dunamai 默认「非 tag commit / 脏树才带 +local」）：显式 true 会让**干净 tag commit** 也算出
 # `X.Y.Z+<sha>`，发布 gate（版本==tag）必败、PyPI 也拒收本地段——真跑验过；ADR 0037 决策 2b。
+
+[tool.hatch.build.targets.sdist]
+exclude = ["DEVELOPMENT.md"]  # contributor 文档不进发行包（wheel 本就不含；sdist 默认全收）
 
 [tool.hatch.build.targets.wheel]
 packages = ["gherkai_worker_novaact"]

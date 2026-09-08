@@ -1,60 +1,67 @@
-# core — 执行核心库（窄腰）
+# gherkai-core
 
-发行名 `gherkai-core` / import 名 `gherkai_core`（ADR 0037 决策 2a「三名分离」）。
+gherkai 的执行核心库：把 `.feature` 解析成领域模型 → 按 tag 分组成可并发的 job → 并发调度 → 收集成结构化结果。
+核心逻辑**不带任何 AI 引擎依赖、不碰文件系统、也不 import boto3**——AI 引擎跑在被 spawn 的 worker 子进程里、讲一套
+JSON 协议，落盘/云服务/起进程都在你注入的接口实现里（本包顺带提供了几个现成实现，见下）。想直接跑测试的人要的是命令行工具
+[`gherkai`](https://github.com/zhiyanliu/gherkai#readme)；本包是给要把这套执行模型**嵌进自己程序**
+（WebUI、调度服务、CI 插件）的人。
 
-解析 `.feature` → 分组 scope → 调度 → 收集结果。**零引擎依赖**：核心不 import Midscene / Nova Act，引擎跑在 worker 子进程里，靠 worker↔core JSON 协议通信。
-
-设计见 ADR：
-- [0016](../docs/adr/0016-execution-architecture-core-lib-run-model.md) 执行架构 / Run 数据模型 / ports
-- [0024](../docs/adr/0024-worker-core-protocol.md) worker↔core 协议
-- [0025](../docs/adr/0025-plan-module-feature-to-jobs.md) plan 模块（解析 + scope 分组）
-- [0026](../docs/adr/0026-schedule-module.md) schedule 模块（并发调度）
-- [0027](../docs/adr/0027-runreport-aggregation-index.md) RunReport 归集索引
-- [0030](../docs/adr/0030-realtime-persistence-seam.md) 实时写接缝 / [0031](../docs/adr/0031-job-lifecycle-states-and-severity.md) job 生命周期态 + severity
-- [0034](../docs/adr/0034-detached-batch-reconciler.md) 无状态跑批 core 侧拆分（project 纯归约投影 + reconcile 推进编排 + event_log 持久事件通道）
-
-## 模块
-
-```
-core/gherkai_core/
-├── model.py      ← 领域模型：Job / Scenario / Step / 7 类事件（含 step_skipped 短路）/ 四层结果 RunResult / RunMeta（definition，含 worker_variant·worker_task_defs，ADR 0038）/ Status 七态 / ResourceUri（纯数据）
-├── parse.py      ← .feature → 领域模型（借 gherkin-official Compiler；库藏在此 seam 后）
-├── scope.py      ← tag 分组 + engine 校验 → Job[]；对外 plan(features, config) -> Job[]
-├── serialize.py  ← 领域模型↔dict 的单一序列化真理源（store adapter 复用，ADR 0016/0027）
-├── wire.py       ← Job↔JSON 与 0024 事件↔JSON 的线序列化 + 退出码约定 EX_WORKER_NETWORK/raise_for_worker_exit（两 Engine adapter 共用一份，ADR 0024/0028）——worker↔core 协议落地
-├── errors.py     ← core 类型化异常：WorkerNetworkError（network_error 重试分类，ADR 0028）/ PlanError（feature 写法与配置违约，parse/scope 共用，ADR 0019/0025）
-├── ports.py      ← Engine / WorkerHandle / EngineResolver / Sink / JobSink / RunStore / ResultStore / ReportStore 接口（组合根注入）
-├── schedule.py   ← schedule(run_meta, engines, sink, opts, on_job_complete?, on_event?) -> RunResult（同步 run：并发/隔离/超时/优雅停）
-├── project.py    ← 无状态跑批纯归约投影（ADR 0034）：project(events)→RunState/JobResult + plan_next(state)→actions + reduce_event（与 schedule 共用一份归约）+ projected_run_status（投影写该落的 run 级 status，两 RunStore adapter 共用）
-├── reconcile.py  ← 无状态跑批推进编排（ADR 0034）：tick(run_id, meta, event_log, run_store, launcher, N)——幂等、多触发源、CAS/HWM 条件写；起 job 经注入 Launcher（core 不 import boto3）+ finalize_artifacts(...)（done 后聚合收尾，cloud Lambda/local per-run 两宿主共用）
-├── persist.py    ← RunPersistence：编排 Store ports 随进度实时落库（commit-point 写序，ADR 0030）
-└── adapters/
-    ├── subprocess_engine.py        ← Engine 实装（local）：spawn worker 子进程 + 读事件流
-    ├── fargate_engine.py           ← Engine 实装（cloud）：RunTask 起 Fargate 容器（task-def 恒为组合根注入的**显式 revision ARN**、绝不 family 名，ADR 0038）+ job-in 走 S3 / events-out 走 DDB / stop→StopTask + start_scope fire-and-forget（ADR 0024/0032/0034）
-    ├── cloud_launcher.py           ← 无状态跑批 cloud Launcher（ADR 0034）：经 resolver 选 FargateEngine 调 start_scope 起 task（fire-and-forget）
-    ├── event_log/{sqlite,ddb}.py   ← 无状态跑批持久事件通道（ADR 0034）：local=SQLite / cloud=DDB events 表，reconciler 从此全量重放推演
-    ├── _boto.py                    ← 云端 adapter 共享的 boto3 依赖守卫（缺 boto3 友好报错，ADR 0016 窄腰）
-    ├── run_store/{local,ddb}.py    ← RunStore：本地文件 + DynamoDB（+ arg_offload.py：StepArgument→S3 指针，解 DDB 400KB 限；+ 无状态跑批条件写 try_claim_job/project_state/try_finalize，ADR 0034；+ STATE 顶层 worker_task_def_arns 供清理 pass 的在跑 run 安全阀，ADR 0038）
-    ├── result_store/{local,s3}.py  ← ResultStore：本地文件 + S3（每 job 一对象）
-    └── report_store/{local,s3}.py  ← ReportStore：本地文件 + S3（manifest+index）
-```
-
-云端 adapter（DDB/S3）已建，行为对拍 local、moto 全程 mock 单测（ADR 0030 决定六）；boto3 是可选依赖 `gherkai-core[aws]`（库消费者按需装；CLI 发行包 `gherkai` 已硬依赖 `gherkai-runtime[aws]`、装它即带 boto3，ADR 0037 决策 2c）。
-组合根按 backend 注入哪套 adapter——cli 已实装 `--backend {local,cloud}`（装配逻辑在产品本体 `runtime/gherkai_runtime/compose.py` 的 `build_local_stores`/`build_cloud_stores`，cli/Lambda/未来 WebUI 共用；ADR 0016「演进」节/0030 决定七）。
-
-## 跑测试
+## 安装
 
 ```bash
-uv run pytest          # 仓库根：跑全部 workspace 成员（core/runtime/cli/engines/novaact/deploy_aws）的单测
-cd core && uv run pytest   # 只跑 core 的（cwd 决定收集范围）
+uv add gherkai-core            # 或 pip install gherkai-core
+uv add 'gherkai-core[aws]'     # 顺带 DynamoDB / S3 那组实现（拉 boto3）
 ```
 
-## 实际执行（跑 .feature）
+需要 Python ≥ 3.13。装了 `gherkai` 命令行的人不用单独装它。
 
-core 是库，不自带可执行入口。用 [`cli/`](../cli/README.md) 这张皮来跑（它是组合根：读
-feature、注入引擎 adapter、渲染结果）：
+## 最小用法
 
-```bash
-uv run gherkai run features/wikipedia_generic.feature      # 仓库根
+```python
+from gherkai_core.model import RunMeta
+from gherkai_core.schedule import ScheduleOpts, schedule
+from gherkai_core.scope import FeatureSource, PlanConfig, plan
+
+jobs = plan(
+    [FeatureSource(uri="checkout.feature", text=feature_text)],   # 内容，不是路径
+    PlanConfig(default_engine="novaact", default_job_timeout_s=300),
+)
+meta = RunMeta(run_id="r-1", created_at="2026-01-01T00:00:00Z", jobs=tuple(jobs), max_concurrency=2)
+result = schedule(meta, engine_resolver, progress_sink, ScheduleOpts(max_concurrency=2))
+print(result.status)          # passed / failed / error / …
 ```
 
+- `plan(features, config)` 按 `@scope` / `@engine` / `@timeout:` tag 分组、校验冲突，产出 `Job[]`。
+- `schedule(...)` 同步跑完一批：并发上限、失败隔离、墙钟超时、优雅停都在里面。`RunResult` 是四层结构
+  （run → job → scenario → step），每层带判定与时长。
+- 想要「提交完就走、谁来查谁接力」那种跑法，用 `reconcile.tick(...)`：它从一条持久事件流重放推演出下一步动作，
+  可以由任何宿主（后台进程、云函数、下一次查询）反复调用而不重复起 job。
+
+## 你要注入什么（`gherkai_core.ports`）
+
+| 接口 | 你提供 |
+|---|---|
+| `Engine` / `WorkerHandle` / `EngineResolver` | 怎么起一个引擎 worker、怎么读它的事件流、怎么停它 |
+| `Sink` / `JobSink` | 进度事件、每个 job 完成时的判定结果回调（进度显示、实时落库） |
+| `RunStore` / `ResultStore` / `ReportStore` | 运行状态、判定真值、报告分别落在哪 |
+
+`gherkai_core.adapters` 里已有一组现成实现：本机子进程引擎 / Fargate 引擎、本地文件 store / DynamoDB + S3 store、
+SQLite / DynamoDB 事件流。**不想自己接线**就用 [`gherkai-runtime`](https://pypi.org/project/gherkai-runtime/)，
+它把这些组装好了（命令行工具用的就是它）。
+
+## 异常
+
+| 异常 | 什么时候 |
+|---|---|
+| `errors.PlanError` | feature 写法或配置违约（同一个 scope 标了多个引擎、uri 冲突…）——在起任何 job 之前抛 |
+| `errors.WorkerNetworkError` | 引擎 worker 报的网络类故障，已归好类，由你决定要不要重试 |
+| `parse.FeatureParseError` | Gherkin 语法错 |
+
+判定态是 `model.Status`：worker 只报 `passed` / `failed` / `error`，`skipped` / `aborted` 是快速失败下的派生终态，
+`pending` / `running` 只出现在运行中的状态视图里、不会成为终态判定。
+
+## 相关
+
+主页与问题反馈：https://github.com/zhiyanliu/gherkai#readme ｜ https://github.com/zhiyanliu/gherkai/issues
+
+设计文档（架构决策记录）见 https://github.com/zhiyanliu/gherkai/tree/HEAD/docs/adr
