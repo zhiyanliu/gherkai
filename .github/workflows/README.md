@@ -45,14 +45,8 @@ build（gate + uv build --all-packages + 产物校验 + 上传 artifact）
 
 七个名字各真传一版 `0.0.0` 占位 sdist——**pending publisher 不占名**（他人先注册即失效，ADR 0037 决策 8）。
 
-现状（2026-09 核对 `https://pypi.org/pypi/<name>/json`）：
-
-| 名字 | 角色 | 状态 |
-|---|---|---|
-| `gherkai` | CLI，用户敲的那个名 | **未占**（404）——最要紧的一个 |
-| `gherkai-worker-novaact` | novaact worker | **未占**（404） |
-| `gherkai-worker-midscene` | 防混淆占位，永不发真内容 | **未占**（404） |
-| `gherkai-runtime` / `gherkai-core` / `gherkai-deploy-aws` / `gherkai-cli` | 产品本体 / 窄腰 / AWS 供给 / 防混淆占位 | 已占（`0.0.0` 占位版，owner `Zhi Yan Liu`） |
+现状（2026-09-08 核对 `https://pypi.org/pypi/<name>/json`）：**七名全部已占**（各一版 `0.0.0` 占位，owner `Zhi Yan Liu`）——
+`gherkai` / `gherkai-runtime` / `gherkai-core` / `gherkai-worker-novaact` / `gherkai-deploy-aws`（真发行）、`gherkai-cli` / `gherkai-worker-midscene`（防混淆占位，永不发真内容）。
 
 npm 侧已占：`@gherkai/worker-midscene@0.0.0` 与非 scoped 的 `gherkai@0.0.0`（maintainer `liuzhiyan`）。
 
