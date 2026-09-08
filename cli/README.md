@@ -129,7 +129,7 @@ uv run gherkai deploy --vpc default --prefix gherkai-
 uv run gherkai deploy --synth-only ./out --vpc default
 
 # 拆掉（表/桶/ECR 是 RETAIN、不随之删，见 ADR 0033）
-uv run gherkai destroy --vpc default --prefix gherkai-
+uv run gherkai destroy --vpc default --prefix gherkai-   # 非交互/脚本加 --yes（cdk 在无 TTY 时拒绝无确认销毁）
 ```
 
 `--diff` / `--synth-only DIR` / `--bootstrap` 三者互斥，都不给 = 真部署。命令面还有 `--require-approval MODE`

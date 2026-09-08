@@ -686,3 +686,31 @@ def test_context_cache_is_per_prefix(monkeypatch, tmp_path):
     _cache_env(monkeypatch, tmp_path)
     assert provider_cli.context_cache_path("a-") != provider_cli.context_cache_path("b-")
     assert provider_cli.context_cache_path("a-").name == "a-cdk.context.json"
+
+
+# ---------------------------------------------------------------- destroy --yes（非交互销毁）
+
+def _parse_destroy(*argv: str) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(prog="gherkai destroy", conflict_handler="resolve")
+    parser.add_argument("--allow-vpc-change", action="store_true")
+    parser.add_argument("--require-approval", default=None, metavar="MODE")
+    Provider().add_arguments(parser)
+    args = parser.parse_args(argv)
+    args.version = VERSION
+    return args
+
+
+def test_destroy_yes_passes_force_to_cdk_and_is_off_by_default(cdk):
+    """cdk destroy 在非 TTY 下拒绝无确认的销毁（真跑撞到）；`--yes` = `--force`，不给则让 cdk 自己问。"""
+    Provider().destroy(_parse_destroy("--vpc", "default", "--region", "us-east-1"))
+    assert "--force" not in _argv(cdk)
+    cdk.calls.clear()
+    Provider().destroy(_parse_destroy("--vpc", "default", "--region", "us-east-1", "--yes"))
+    argv = _argv(cdk)
+    assert argv[1] == "destroy" and "--force" in argv
+
+
+def test_yes_is_destroy_only():
+    deploy = argparse.ArgumentParser(prog="gherkai deploy", conflict_handler="resolve")
+    Provider().add_arguments(deploy)
+    assert "--yes" not in {o for a in deploy._actions for o in a.option_strings}

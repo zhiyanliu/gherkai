@@ -224,12 +224,24 @@ class Provider:
         # --region/--profile 归 provider（AWS 概念）：CLI 皮不在本子命令上声明，见模块头接缝契约。
         parser.add_argument("--region", default=None, metavar="R", help="AWS region（默认走 AWS_REGION/profile 配置）")
         parser.add_argument("--profile", default=None, metavar="P", help="AWS profile（默认 AWS_PROFILE）")
+        if self._is_destroy_parser(parser):
+            # destroy 专属：cdk destroy 在非 TTY 下**拒绝**无确认的销毁（「terminal (TTY) is not attached」退 1，真跑撞到）。
+            # 默认保留 cdk 的交互确认（销毁不可逆，两道确认不多）；脚本/跳板机 nohup 这类非交互场景显式 --yes。
+            parser.add_argument(
+                "--yes", action="store_true",
+                help="不再询问确认（= cdk destroy --force）；非交互/脚本用，交互终端下默认由 cdk 询问一次",
+            )
         # worker 镜像子动词（ADR 0038 命令族）——**只贴在 deploy 上**，见 `_declares_worker_subverbs`。
         if self._declares_worker_subverbs(parser):
             # deploy 自己也消费容器引擎（第 2 步同步基底 pull/push）——flag 贴在 deploy 上，子动词 push-worker 再贴
             # 一份（子 parser 是独立 namespace，SUPPRESS 默认值让「deploy --container-engine X push-worker …」不被覆写）。
             self._add_container_engine_flag(parser)
             self._add_worker_subverbs(parser)
+
+    @staticmethod
+    def _is_destroy_parser(parser: argparse.ArgumentParser) -> bool:
+        """这个 parser 是 **destroy** 的那个吗（`prog` 末段判，同 `_declares_worker_subverbs` 的口径）。"""
+        return (parser.prog or "").split()[-1:] == ["destroy"]
 
     # ---- worker 镜像子动词（ADR 0038「命令族」；接缝 = 皮先看 args._deploy_verb，见模块头/皮的契约块）----
     @staticmethod
@@ -363,7 +375,8 @@ class Provider:
         missing = self._require_vpc(args)
         if missing is not None:
             return missing
-        return self._run_cdk("destroy", args)
+        extra = ["--force"] if getattr(args, "yes", False) else []  # 见 add_arguments 的 --yes
+        return self._run_cdk("destroy", args, extra=extra)
 
     def diff(self, args) -> int:
         """只呈变更集（不改任何东西）。**它是 VPC 档三态的指定核对手段**，故自身不做三态比对——

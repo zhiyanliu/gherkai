@@ -93,7 +93,7 @@ gherkai deploy --vpc new --require-approval broadening      # 新建整套 VPC�
 gherkai deploy --synth-only ./out --vpc default
 
 # 拆栈（RETAIN 语义见下）
-gherkai destroy --vpc default --prefix gherkai-
+gherkai destroy --vpc default --prefix gherkai-          # 交互终端下 cdk 会再问一次；脚本/非 TTY 加 --yes
 
 # worker 镜像子命令（见下「worker 镜像」）——deploy 的子动词，不是独立命令
 gherkai deploy push-worker acme-novaact:login --engine novaact --variant login
