@@ -61,7 +61,11 @@ def test_worker_cooperative_stop_on_signal(sig):
         return  # unreachable（pytest.fail 必抛）；仅为静态分析确定 rc 已绑定
     elapsed = time.monotonic() - t0
     # flag-only 协作退 = rc 0；被 SIGKILL 强杀会是 -9，默认信号处置会是 -sig。
-    assert rc == 0, f"期望协作干净退(rc=0)，实得 rc={rc}（负值=被信号杀，非协作退）"
+    # 失败时带上 worker 的 stdout/stderr：rc=1 是「未捕获异常」的形状，没有 traceback 就无从判因
+    # （CI runner 上曾出现本机复现不了的 rc=1）。
+    out, err = proc.communicate(timeout=5)
+    assert rc == 0, (f"期望协作干净退(rc=0)，实得 rc={rc}（负值=被信号杀，非协作退）\n"
+                     f"--- worker stderr ---\n{err}\n--- worker stdout ---\n{out}")
     assert elapsed < _GRACE, "worker 应即时响应信号、远早于 grace 上限"
 
 
