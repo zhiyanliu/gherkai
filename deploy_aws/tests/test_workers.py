@@ -316,6 +316,20 @@ def test_orphan_revision_is_reused_instead_of_registered(aws):
     assert "复用" in text
 
 
+def test_same_digest_under_another_variant_is_not_reused(aws):
+    """同 digest 但**另一个 variant** 的 revision 不复用（真跑抓到：probe 复用了 base 正在用的 revision，之后 base
+    换 digest 重推会把它退休、满静默期清掉，probe 的映射悬空）。每个 variant 自己一个 revision。"""
+    seed_backend(aws)
+    digest = "sha256:" + "a" * 64
+    rc, _ = _push(aws, FakeContainer(digests=[digest]), variant="base")
+    assert rc == 0
+    base_rev = _mapping(aws, "novaact", "base")["revision_arn"]
+    rc, text = _push(aws, FakeContainer(digests=[digest]), variant="login")
+    assert rc == 0, text
+    assert _mapping(aws, "novaact", "login")["revision_arn"] != base_rev
+    assert "复用" not in text
+
+
 def test_retired_orphan_is_not_reused(aws):
     """已打退休 tag 的 revision **不复用**（它已被判下岗，抢回来只会让清理语义混乱）→ 注册一个干净的。"""
     templates = seed_backend(aws)
@@ -416,10 +430,23 @@ def test_cleanup_deletes_after_quiet_period_when_unreferenced(aws):
     seed_backend(aws)
     _push(aws, FakeContainer())
     arn = _mapping(aws, "novaact", "login")["revision_arn"]
+    aws.ssm.delete_parameter(Name=names.ssm_path(PREFIX, names.worker_image_key("novaact", "1.4.0-login")))
     _retire_now(aws, arn, NOW)
     outcome, _ = _cleanup(aws, NOW + timedelta(hours=2))
     assert outcome.deleted == (arn,), outcome
     assert arn not in _revisions(aws, "novaact")
+
+
+def test_cleanup_keeps_a_retired_revision_still_referenced_by_a_mapping(aws):
+    """退休 tag 只是「某次替换判它下岗」；若任何映射仍指着它（曾被另一 variant 共用的历史状态），删了就悬空——留着。"""
+    seed_backend(aws)
+    _push(aws, FakeContainer())
+    arn = _mapping(aws, "novaact", "login")["revision_arn"]
+    _retire_now(aws, arn, NOW - timedelta(hours=3))
+    outcome, _ = _cleanup(aws, NOW)
+    assert arn not in outcome.deleted
+    assert any(a == arn and "映射引用" in why for a, why in outcome.kept)
+    assert arn in _revisions(aws, "novaact")
 
 
 def test_cleanup_keeps_when_a_pending_run_references_it(aws):
@@ -430,6 +457,7 @@ def test_cleanup_keeps_when_a_pending_run_references_it(aws):
     seed_backend(aws)
     _push(aws, FakeContainer())
     arn = _mapping(aws, "novaact", "login")["revision_arn"]
+    aws.ssm.delete_parameter(Name=names.ssm_path(PREFIX, names.worker_image_key("novaact", "1.4.0-login")))
     _retire_now(aws, arn, NOW)
     aws.ddb.put_item(TableName=names.default_name(PREFIX, names.BASE_RUNS_TABLE), Item={
         "run_id": {"S": "r1"}, "item_type": {"S": "STATE"}, "status": {"S": "pending"},
@@ -445,6 +473,7 @@ def test_cleanup_deletes_when_the_referencing_run_is_terminal(aws):
     seed_backend(aws)
     _push(aws, FakeContainer())
     arn = _mapping(aws, "novaact", "login")["revision_arn"]
+    aws.ssm.delete_parameter(Name=names.ssm_path(PREFIX, names.worker_image_key("novaact", "1.4.0-login")))
     _retire_now(aws, arn, NOW)
     aws.ddb.put_item(TableName=names.default_name(PREFIX, names.BASE_RUNS_TABLE), Item={
         "run_id": {"S": "r1"}, "item_type": {"S": "STATE"}, "status": {"S": "passed"},

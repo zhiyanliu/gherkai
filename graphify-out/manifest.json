@@ -275,8 +275,8 @@
     "semantic_hash": ""
   },
   "cli/README.md": {
-    "mtime": 1788842310.5853853,
-    "ast_hash": "f229f6da5f941ea5ef84376227d3751b",
+    "mtime": 1788848586.5010145,
+    "ast_hash": "335d61ac999aa2bc711dece8f8c38855",
     "semantic_hash": ""
   },
   "docs/adr/0001-scope-limited-to-english-ui.md": {
@@ -460,8 +460,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0037-distribution-and-packaging.md": {
-    "mtime": 1788845747.3527296,
-    "ast_hash": "9f771eabe2e2b29b54449f5aeb69d3ee",
+    "mtime": 1788848586.5012846,
+    "ast_hash": "51e466a76528522ff7d6f8dc0a18b76a",
     "semantic_hash": ""
   },
   "docs/adr/0038-worker-image-delivery.md": {
@@ -695,8 +695,8 @@
     "semantic_hash": ""
   },
   "docs/journey/0001-\u5206\u53d1\u4e0e\u6253\u5305\u65bd\u5de5\u8fdb\u5ea6\u603b\u7eb2.md": {
-    "mtime": 1788845747.353485,
-    "ast_hash": "e49189cf2084c5fe188f5cb41d1a0a9b",
+    "mtime": 1788847274.9759908,
+    "ast_hash": "4dd0b5351b0eb3e99317f3e7f16ecd1c",
     "semantic_hash": ""
   },
   "runtime/README.md": {
@@ -950,8 +950,8 @@
     "semantic_hash": ""
   },
   "deploy_aws/README.md": {
-    "mtime": 1788845304.8846426,
-    "ast_hash": "81bcf77e24d58dc61a29d3717c0fa3cb",
+    "mtime": 1788848586.5008266,
+    "ast_hash": "5491d583a8450dd59db32cdb48b2ac77",
     "semantic_hash": ""
   },
   ".github/scripts/check_dist_metadata.py": {
@@ -980,8 +980,8 @@
     "semantic_hash": ""
   },
   "deploy_aws/gherkai_deploy_aws/cli.py": {
-    "mtime": 1788845304.8841212,
-    "ast_hash": "54718cc421281011fa943dd24122d227",
+    "mtime": 1788848524.0066617,
+    "ast_hash": "f482d836d7219d365a9cded1656f0096",
     "semantic_hash": ""
   },
   "deploy_aws/gherkai_deploy_aws/lambdas/exit_observer.py": {
@@ -1015,8 +1015,8 @@
     "semantic_hash": ""
   },
   "deploy_aws/tests/test_provider.py": {
-    "mtime": 1788845436.655876,
-    "ast_hash": "253940e68be3ec205aaba1510f362d89",
+    "mtime": 1788848586.5004747,
+    "ast_hash": "57a52b535e7d103d54cbdb478394b931",
     "semantic_hash": ""
   },
   "deploy_aws/tests/test_stack.py": {

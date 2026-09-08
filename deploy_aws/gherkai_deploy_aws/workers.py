@@ -430,6 +430,11 @@ def cleanup_pass(*, prefix: str, engines, ssm, ecs, ddb, now: datetime, out=prin
             continue
         for rev in revisions:
             retired_at, reason = rev.retired_at, "已退休"
+            if retired_at is not None and rev.arn in referenced_by_ssm:
+                # 退休 tag 只说明「某次替换判它下岗」；若任何版本的某个映射仍指着它（历史上曾被另一 variant 共用），
+                # 删了就让那条映射悬空——留着，直到映射也不再引用。**安全阀之一，与在跑 run 引用并列。**
+                kept.append((rev.arn, "已退休，但仍被某个 worker-image 映射引用"))
+                continue
             if retired_at is None:
                 if not rev.has_lineage or rev.arn in referenced_by_ssm:
                     continue  # 模板/手工 revision，或仍被某版本的映射引用 → 不是候选
@@ -597,11 +602,11 @@ def _push_one(image: str, *, engine: str, variant: str, prefix: str, version: st
         return PushOutcome(engine=engine, variant=variant, tag=tag, digest=digest,
                            revision_arn=mapping.revision_arn, template_arn=template_arn,
                            action="unchanged", previous_digest=previous_digest)
-    reuse = _find_reusable(aws.ecs, prefix=prefix, engine=engine,
+    reuse = _find_reusable(aws.ecs, prefix=prefix, engine=engine, variant=variant,
                            template_arn=template_arn, digest=digest)
     if reuse is not None:
         revision_arn, action = reuse, "reused"
-        out(f"{engine}/{variant}：family 里已有同（模板，digest）且未退休的 revision "
+        out(f"{engine}/{variant}：family 里已有本 variant 同（模板，digest）且未退休的 revision "
             f"{_short_arn(revision_arn)} → 复用（上次中断在注册与写 SSM 之间留下的孤儿）")
     else:
         # 步 6：从模板注册新 revision（镜像栏按 digest 引用）
@@ -626,15 +631,20 @@ def _push_one(image: str, *, engine: str, variant: str, prefix: str, version: st
                        previous_digest=previous_digest, retired_arn=retired)
 
 
-def _find_reusable(ecs, *, prefix: str, engine: str, template_arn: str, digest: str) -> str | None:
-    """family 里有没有同（模板 ARN、digest）、ACTIVE、**未退休**的 revision（ADR 0038 步 5 的孤儿复用）。
+def _find_reusable(ecs, *, prefix: str, engine: str, variant: str, template_arn: str, digest: str) -> str | None:
+    """family 里有没有**本 variant** 同（模板 ARN、digest）、ACTIVE、**未退休**的 revision（ADR 0038 步 5 的孤儿复用）。
 
+    **限定同 variant**：复用的语义是「捡回上次中断留下的自己的孤儿」，不是「凡 digest 相同就共用」。真跑踩过：
+    variant B 推的镜像 digest 恰与 A 相同，复用了 A 正在用的 revision → 之后 A 换 digest 重推会把它退休、
+    满静默期被清理，B 的映射悬空。每个 variant 自己一个 revision（ECR 层共享、多一条 task-def 而已），
+    退休与清理才能按 variant 独立判。
     为何不复用已退休的：退休 tag 说的是「有人决定它下岗」，复用它等于把它从清理 pass 手里抢回来、语义混乱；
     重新注册一个干净的 revision 更便宜（ECR 镜像层一个字节不动）。
     """
     for rev in scan_family(ecs, names.task_def_name(prefix, engine)):
         if (rev.tags.get(names.TAG_TEMPLATE) == template_arn
                 and rev.tags.get(names.TAG_DIGEST) == digest
+                and rev.tags.get(names.TAG_VARIANT) == variant
                 and not rev.tags.get(names.TAG_RETIRED_AT)):
             return rev.arn
     return None
@@ -894,10 +904,11 @@ def list_workers(*, prefix: str, cli_version: str | None, engines=None, region=N
             if not mappings:
                 out("  （本版本还没有任何 variant——`gherkai deploy` 会同步基底，或 push-worker 推一个）")
             else:
-                out("  " + _cell("variant", 16) + _cell("tag", 28) + _cell("digest", 20)
+                tag_w = max(28, max(len(m.tag) for m in mappings) + 2)  # dev 版 tag 很长，列宽随内容
+                out("  " + _cell("variant", 16) + _cell("tag", tag_w) + _cell("digest", 20)
                     + _cell("推送时间", 28) + "revision")
                 for m in mappings:
-                    out("  " + _cell(m.variant, 16) + _cell(m.tag, 28)
+                    out("  " + _cell(m.variant, 16) + _cell(m.tag, tag_w)
                         + _cell(names.short_digest(m.digest), 20) + _cell(m.pushed_at or "-", 28)
                         + _short_arn(m.revision_arn))
             _print_pending_cleanup(aws, family=family, mapped=mapped, out=out)
