@@ -21,7 +21,7 @@
 ```
 build（gate + uv build --all-packages + 产物校验 + 上传 artifact）
  ├─▶ pypi   （download artifact → attest-action 生成 PEP 740 → uv publish，OIDC 免密）
- ├─▶ npm    （npm version <tag> → npm ci → build → npm publish --provenance）
+ ├─▶ npm    （npm version <tag> → npm ci → build → npm publish，trusted publishing、provenance 自动）
  │
  └─▶ images （needs: build + pypi + npm；matrix novaact/midscene → GHCR）
       └─▶ release（GitHub Release，作 changelog 锚点）
