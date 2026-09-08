@@ -166,16 +166,15 @@ jobs:
     if: github.repository == 'zhiyanliu/gherkai'
     runs-on: ubuntu-latest
     permissions:
-      id-token: write # npm provenance 用 OIDC 签
+      id-token: write # npm trusted publishing（OIDC）：免 token，provenance 自动附带
       contents: read
     defaults:
       run:
         working-directory: engines/midscene
-    env:
-      # 整个 job 都带上：setup-node 写的 .npmrc 里是 `${NODE_AUTH_TOKEN}` 占位，变量不存在时 npm 会以
-      # "Failed to replace env in config" 报错——连只读的 `npm view` 都跑不了（那样下面的幂等判断会
-      # 误判成「未发行」）。
-      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+    # **无 token、无 secret**：npm 侧走 trusted publishing——包在 npmjs.com 上登记了本仓库 + `release.yml`
+    # 作 trusted publisher，npm CLI 用 GitHub 的 OIDC token 换发布授权（一次性人工前置见 workflows/README.md）。
+    # 故这里**不**给 setup-node 配 registry-url：它会往 .npmrc 写 `${NODE_AUTH_TOKEN}` 占位，变量不存在时
+    # 连只读的 `npm view` 都会以 "Failed to replace env in config" 报错。
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -184,10 +183,14 @@ jobs:
       - uses: actions/setup-node@v7.0.0
         with:
           node-version: ${{ env.NODE_VERSION }}
-          # 写 .npmrc 并让 npm 从 env.NODE_AUTH_TOKEN 取凭据（token 是 npm 侧唯一必需的 secret）。
-          registry-url: https://registry.npmjs.org
           cache: npm
           cache-dependency-path: engines/midscene/package-lock.json
+
+      - name: npm ≥ 11.5.1（trusted publishing 的下限；Node 22 自带的是 10.x）
+        run: |
+          set -euo pipefail
+          npm install -g npm@^11.5.1
+          npm --version
 
       - name: 已发行则跳过（本 job 可重跑）
         id: check
@@ -211,8 +214,9 @@ jobs:
           npm version "${VERSION}" --no-git-tag-version
           npm ci
           npm run build
-          # --provenance 走 OIDC 签发行溯源；--access public 是 scope 包首发必需（`@gherkai` 默认 restricted）。
-          npm publish --provenance --access public
+          # trusted publishing 下 provenance 自动生成、不必 --provenance；--access public 是 scope 包首发必需
+          # （`@gherkai` 默认 restricted）。
+          npm publish --access public
           echo "已发布到 npm：@gherkai/worker-midscene@${VERSION}" >> "$GITHUB_STEP_SUMMARY"
         env:
           VERSION: ${{ needs.build.outputs.version }}

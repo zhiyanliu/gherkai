@@ -64,16 +64,20 @@ npm 侧已占：`@gherkai/worker-midscene@0.0.0` 与非 scoped 的 `gherkai@0.0.
 
 两个防混淆占位名（`gherkai-cli` / `gherkai-worker-midscene`）**不配** publisher：它们永不由 CI 发布。
 
-### 3. npm token → repo secret `NPM_TOKEN`
+### 3. npm trusted publisher（免 token，无 secret）
 
-npmjs.com → *Access Tokens* → 建 **Automation** 类型 token（绕开 2FA 的交互，专给 CI），
-存成仓库 secret，名字必须是 **`NPM_TOKEN`**（`release.yml` 的 `npm` job 按此名取）。
+在 npmjs.com 进 **`@gherkai/worker-midscene`**（release.yml 发的就是它；非 scoped 的 `gherkai` 是防混淆占位、CI 永不发）
+的 *Settings → Trusted Publisher* 添加 GitHub Actions publisher：
 
-- token 权限需覆盖 `@gherkai` scope 的 publish。
-- `--provenance` 还要求：仓库**公开**、`package.json` 的 `repository.url` 与实际仓库一致（已满足）、
-  runner 是 GitHub 托管的（已满足）。
-- 可选的去 token 路线：npm 自己也支持 trusted publishing（OIDC），但要求 runner 上 npm ≥ 11.5.1
-  （Node 22 自带的是 10.x），得多一步 `npm i -g npm@^11.5.1`。当前**没接**，接了可以删掉这个 secret。
+- Organization or user：`zhiyanliu`；Repository：`gherkai`；Workflow filename：`release.yml`（只填文件名）；
+  Environment name：**留空**（job 没声明 environment）。
+- Permissions：勾 **npm publish**（`npm stage publish` 恒允许；release.yml 是直接 `npm publish`，不走 staging）。
+- Publishing access：「Require two-factor authentication or a granular access token with bypass 2fa enabled」与
+  「Require two-factor authentication and disallow tokens」都**不影响** trusted publishing（OIDC 不是 token）；
+  npm 建议后者更严——只有你本人还需要用 token 发这个包时才保留前者。
+- 运行时要求（release.yml 已满足）：`id-token: write`、GitHub 托管 runner、npm CLI ≥ 11.5.1（Node 22 自带 10.x，
+  job 里多一步 `npm i -g npm@^11.5.1`）、Node ≥ 22.14。provenance 自动生成，不必 `--provenance`。
+- 仍需：仓库**公开**、`package.json` 的 `repository.url` 与实际仓库一致（已满足）。
 
 ### 4. GHCR：首次推送后把两个 package 改成 public
 
