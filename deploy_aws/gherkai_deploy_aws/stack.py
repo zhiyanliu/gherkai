@@ -1,12 +1,13 @@
 """BackendStack（ADR 0033）：`--backend cloud` 需要的全部 AWS 资源。
 
 一套 stack 建齐（可按 prefix 多实例化，多环境 prod-/stage-）：
-- DynamoDB：{prefix}runs（控制面/RunStore）+ {prefix}events（events-out，开 expires_at TTL）；两表均开
-  Stream（NEW_IMAGE）供事件驱动链
+- DynamoDB：{prefix}runs（控制面/RunStore，带按 status 的稀疏 GSI status-index 供 worker revision 清理安全阀，
+  ADR 0038）+ {prefix}events（events-out，开 expires_at TTL）；两表均开 Stream（NEW_IMAGE）供事件驱动链
 - S3：{prefix}artifacts（Result/Report/offload/job-in/artifact-upload，按 prefix key 分片）+ lifecycle
   规则 expire-job-in（按对象 tag gherkai=job-in 7 天过期）
 - ECS：{prefix}cluster + 2 task-def（novaact/midscene，各自镜像/task role）
-- ECR：2 repo（各承一镜像；镜像由部署方 build&push，synth 不触发 docker build）
+- ECR：2 repo（承各 variant 的 worker 镜像；由 `gherkai deploy push-worker` 推，synth 不触发 docker build；
+  **无 lifecycle 规则**，见 _one_task_def）
 - Lambda/事件驱动链（ADR 0034，见 _reconcile_lambdas）：{prefix}exit-observer / {prefix}reconciler /
   {prefix}kicker 三 Function + EventBridge rule {prefix}ecs-stopped + 两表 Stream 的 event source mapping
   （kicker 那条带 INSERT ∧ detached filter）
@@ -56,10 +57,6 @@ class BackendStack(Stack):
     # type 无此限、对 Fargate 有）；此常量供 synth 期 fail-fast，别等 deploy 才炸（Nova grace 下限 150s>120s 冲突的根源，见 ADR 0032）。
     FARGATE_STOP_TIMEOUT_MAX_S = 120
     DEFAULT_STOP_TIMEOUT_S = 120  # 默认贴 Fargate 上限：尽量给 worker 会话释放+抢传预算（grace 真容器校准见 ADR 0032），可 -c stop_timeout= 覆盖
-
-    # 模板 revision ARN 注给两个推进器 Lambda 的 env 名（ADR 0033「推进器 env 加模板 revision ARN」/ 0038）。
-    # 值形态 = `engine=arn` 逗号串（同 SUBNETS 的逗号串惯例；一个 env 位容纳全部引擎、加引擎不改 env 面）。
-    WORKER_TEMPLATE_ARNS_ENV = "WORKER_TEMPLATE_ARNS"
 
     def __init__(self, scope: Construct, construct_id: str, *, prefix: str, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
@@ -143,6 +140,20 @@ class BackendStack(Stack):
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
             stream=dynamodb.StreamViewType.NEW_IMAGE,  # ADR 0034：INSERT 触发 kicker Lambda 冷启动
             removal_policy=RemovalPolicy.RETAIN,  # 保留数据、防误删（stack 销毁不带走表）
+        )
+        # **按 `status` 的稀疏 GSI**（ADR 0038「不变量·清理 pass」）：worker revision 的清理安全阀要查
+        # 「有没有未到终态的 run 还引用这个 revision」，走 `Query` 非终态状态 + `contains` 过滤。
+        # - **稀疏是构造出来的**：只有 STATE item 带顶层 `status`（META item 没有），故索引里天然只有 STATE。
+        # - **projection = INCLUDE `worker_task_def_arns`**：过滤表达式 `contains(worker_task_def_arns, :arn)`
+        #   作用在**索引投影出的属性**上，不投影则恒不匹配、安全阀静默失效（会删掉在跑 run 手里的 revision）。
+        #   不用 ALL：runs 表 STATE 的 `jobs` Map 随 job 数增长，全投影等于给每个 run 存第二份。
+        # - **必须有索引、不能 Scan**：runs 表 `RETAIN`、无 TTL、随历史单调增长，Scan 成本无上界
+        #   （ADR 0038 被拒方案「清理靠全表 Scan runs 表」）。
+        self._runs_table.add_global_secondary_index(
+            index_name=names.RUNS_STATUS_GSI,
+            partition_key=dynamodb.Attribute(name="status", type=dynamodb.AttributeType.STRING),
+            projection_type=dynamodb.ProjectionType.INCLUDE,
+            non_key_attributes=[names.STATE_WORKER_TASK_DEF_ARNS_ATTR],
         )
         # events 表（events-out）：PK=pk(S，run_id#scope_id) / SK=seq(N)；body 非键属性不声明。
         # 开 TTL：expires_at（worker 写 now+7d epoch 秒，ADR 0033/0024）自动过期旧事件。
@@ -238,16 +249,18 @@ class BackendStack(Stack):
         )
         self._execution_role = execution_role
         self._task_roles: list[iam.Role] = []  # 供 reconciler Lambda PassRole（RunTask 传 task/execution role）
-        # 引擎 → 模板 revision ARN（ADR 0038 四步第 1 步）：写 SSM + 注推进器 env，两处同一份、见 _one_task_def。
-        self._worker_template_arns: dict[str, str] = {}
         for engine in names.ENGINES:
             self._one_task_def(engine, execution_role)
 
     def _one_task_def(self, engine: str, execution_role: iam.Role) -> None:
-        # ECR repo（镜像由 CI build&push；synth 不触发 docker build——from_ecr_repository 只引用 repo）。
+        # ECR repo（镜像由部署方 `gherkai deploy push-worker` 推；synth 不触发 docker build——from_ecr_repository
+        # 只引用 repo）。**不设任何 lifecycle 规则**（ADR 0038 护栏「ECR 加 untagged 过期 lifecycle」被拒）：
+        # 重推同名 variant 会把旧 tag 顶成 untagged，而在跑 run 的旧 task-def revision 正按 digest 指着那一层
+        # ——untagged 过期规则会静默删掉它、让在跑 run 的后续 job 拉不到镜像。代价（每次重推永久留一层 untagged
+        # 存储）是记在案的已知运行期成本，回收与 `delete-worker` 同批设计（ADR 0038 重议闸门）。
         repo = ecr.Repository(
             self, f"Ecr{engine.capitalize()}",
-            repository_name=names.task_def_name(self.prefix, engine),  # repo 名复用 task-def family 名（同 prefix 心智）
+            repository_name=names.ecr_repo_name(self.prefix, engine),  # repo 名 == task-def family 名（命名真源，ADR 0038）
             removal_policy=RemovalPolicy.RETAIN,
         )
         # task role（容器内 worker 凭证）——**最小权限、按引擎分立**（ADR 0033：一个引擎被攻破不波及另一个引擎模型权限）。
@@ -293,7 +306,6 @@ class BackendStack(Stack):
             parameter_name=names.ssm_worker_template_path(self.prefix, engine),
             string_value=task_def.task_definition_arn,
         )
-        self._worker_template_arns[engine] = task_def.task_definition_arn
 
     def _grant_task_role(self, role: iam.Role, engine: str) -> None:
         """task role 最小权限（ADR 0033 IAM 表，按动作×资源收窄）。两个引擎共享的 + 各引擎特有的。"""
@@ -459,18 +471,18 @@ class BackendStack(Stack):
         }
         # 起 worker task 的 subnet（reconciler/kicker 共用一份；与写给 cli 的 SSM 同源——见 _worker_subnet_ids）
         subnets_env = ",".join(self._worker_subnet_ids(vpc))
-        # 模板 revision ARN 注给两个推进器（`engine=arn` 逗号串；ARN 是 CDK token、由 Fn::Join 落值）。
-        # **与 SSM `worker-template/<engine>` 同一份值、同一个事务**（见 _one_task_def）——env 只是省掉推进器
-        # 冷启动的一次 SSM 读，不是第二个真源。
-        # **前向口子**：ADR 0038「运行时与 preflight」把「definition 里带显式 revision」定为不变量，读侧兼容口径
-        # （旧 definition 无 `worker_task_defs` 字段）与 variant 解析随 0038 的 push-worker 批次落地；当前两个
-        # handler 尚未消费本 env（起 task 仍传 family），**故意先由 stack 侧就位**——它属于部署事务（ADR 0033
-        # 「推进器 env 加模板 revision ARN」），与镜像族命令解耦、不该等到那批才补。
-        template_env = {
-            self.WORKER_TEMPLATE_ARNS_ENV: ",".join(
-                f"{engine}={arn}" for engine, arn in self._worker_template_arns.items()
-            ),
-        }
+        # **模板 revision ARN 不注给推进器**（ADR 0038 被拒方案「缺字段时回落模板 revision」）：模板的镜像栏是
+        # `latest` 占位、在从未推过 `latest` 的全新 prefix 上根本拉不到，回落它只会把错误拖到 Fargate 启动期。
+        # 推进器遇上没有 `worker_task_defs` 的旧 definition 时**按后端默认指针解析**（读 SSM `worker-default`
+        # + `worker-image/<engine>/<后端版本>-<默认 variant>`，权限见下 `ssm_read`）——故推进器一侧不需要模板 ARN，
+        # 曾短暂注入过的 `WORKER_TEMPLATE_ARNS` env 随本决策撤掉。模板 ARN 只经 SSM 给部署方的 `push-worker`
+        # 复制母本用（见 `_one_task_def`）。
+        # 推进器读 SSM：兼容回落要读默认指针与 worker-image 映射（ADR 0038「权限面增量·云端推进器」）。
+        # 资源域 = 本 prefix 的参数子树（路径形态走 `names.ssm_path`，别在此复刻 `/{prefix}backend/` 串）。
+        ssm_read = iam.PolicyStatement(
+            actions=["ssm:GetParameter", "ssm:GetParametersByPath"],
+            resources=[f"arn:aws:ssm:{self.region}:{self.account}:parameter{names.ssm_path(self.prefix, '*')}"],
+        )
 
         # ① 退出观察者 Lambda（薄；只 events 表 PutItem 写 task_exited）
         exit_observer = lambda_.Function(
@@ -547,7 +559,6 @@ class BackendStack(Stack):
                 # ADR 0034 机制四）。task 烧部署方账单，故部署方保留总量控制权、钳住提交侧声明。
                 "MAX_CONCURRENCY": "8",
                 **timeout_env,  # job timeout 到点触发器（KICKER_ARN/SCHEDULER_ROLE_ARN，ADR 0034）
-                **template_env,  # worker task-def 模板 revision ARN（ADR 0038 读侧口子，见上）
             },
         )
         # reconciler 权限：runs 表读写（RunState 条件写）+ events 表读（重放）+ 桶读写（ResultStore/ReportStore/job-in）
@@ -574,6 +585,7 @@ class BackendStack(Stack):
             resources=timeout_schedule_arns))
         reconciler.add_to_role_policy(iam.PolicyStatement(
             actions=["iam:PassRole"], resources=[scheduler_role.role_arn]))
+        reconciler.add_to_role_policy(ssm_read)  # 兼容回落读默认指针 + worker-image 映射（ADR 0038）
         # PassRole：RunTask 要把 execution role + 各 task role 传给起的 task——须显式授 iam:PassRole 到这些 role ARN。
         reconciler.add_to_role_policy(iam.PolicyStatement(
             actions=["iam:PassRole"],
@@ -605,7 +617,6 @@ class BackendStack(Stack):
                 "SECURITY_GROUPS": self._worker_sg_id,
                 "MAX_CONCURRENCY": "8",  # 同 reconciler：部署侧 cap，两侧须同值（kicker 起首批也走这个闸）
                 **timeout_env,  # kicker 也起 task（首批）→ 同样要武装 timeout schedule
-                **template_env,  # 同 reconciler：两侧须同值（kicker 起首批也照模板起）
             },
         )
         # kicker 权限 = reconciler 同款（起首批要 RunTask/PassRole/表桶）。
@@ -623,6 +634,7 @@ class BackendStack(Stack):
             resources=timeout_schedule_arns))
         kicker.add_to_role_policy(iam.PolicyStatement(
             actions=["iam:PassRole"], resources=[scheduler_role.role_arn]))
+        kicker.add_to_role_policy(ssm_read)  # 同 reconciler：兼容回落读 SSM（两个推进器同权限面）
         # runs 表 Stream → kicker，**INSERT ∧ NewImage.detached=true**（filter，ADR 0034）：
         # - 仅 INSERT：reconciler 之后写 runs 表的 MODIFY（project_state/finalize）不触发——无自触发放大。
         # - 仅 detached 标记：同步 `run --backend cloud` 的 create_run 同样 INSERT、但由进程内 schedule 推进，

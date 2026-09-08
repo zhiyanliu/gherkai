@@ -9,8 +9,11 @@ RunMeta 与 RunState **分两 item**（同 run_id、item_type 各异；同分区
   **write-once（create_run）/ read-whole（load_run_meta）**，从不单元素更新——故整体存 JSON 字符串最简、
   且躲开 DDB 原生 Map 对空串/嵌套 list 的挑剔（DataTable rows 常含空 cell）。第 4 步 offload 在 `json.dumps`
   **前**对 dict 里的 docString/dataTable 换指针，不需要 META 是原生 Map。
-- **STATE item**：`{run_id, item_type='STATE', status, started_at?, ended_at?, jobs=<原生 Map>}`。jobs **必须原生 Map**
-  才能 `SET jobs.#sid=:js` 按 scope_id 单元素刷（决定六）；其 entry 全是 str（无 float），原生 Map 无 Decimal 顾虑。
+- **STATE item**：`{run_id, item_type='STATE', status, started_at?, ended_at?, jobs=<原生 Map>}`，另有两个
+  **可选顶层标记**：`detached`（ADR 0034，kicker 的 Stream filter 认它）与 `worker_task_def_arns`（ADR 0038，
+  清理 pass 的在跑 run 安全阀按它 Query + `contains`）——两者都是「DDB 侧要查得动」才摊到顶层的。
+  jobs **必须原生 Map** 才能 `SET jobs.#sid=:js` 按 scope_id 单元素刷（决定六）；其 entry 全是 str（无 float），
+  原生 Map 无 Decimal 顾虑。
 
 字段仍源于 `serialize`（单一真理源）：META 直接 `json.dumps(run_meta_to_dict)`；STATE 的标量 + jobs 各 entry
 的字段集取自 `run_state_to_dict`，只是 jobs 的**容器形状**在本 adapter 从 list 特化成 Map（非第二真理源）。
@@ -33,6 +36,13 @@ from gherkai_core.serialize import (
 _ITEM_TYPE_ATTR = "item_type"
 _META = "META"    # item_type 取值：definition item
 _STATE = "STATE"  # item_type 取值：运行态 item
+
+# STATE item 顶层属性：本 run 用到的 worker task-def revision ARN 列表（ADR 0038「不变量」清理 pass 的
+# 在跑 run 安全阀按它判引用——definition 里也有同一批 ARN，但那在 meta_json 字符串内、DDB 查不动，故**同时**
+# 摊平成顶层属性，沿用 `detached` 顶层标记先例）。
+# **写端在此、读端的命名真源在 `gherkai_runtime.names.STATE_WORKER_TASK_DEF_ARNS_ATTR`**：core 是窄腰下层、
+# 不 import 组合根共享层，故字面量两处各有；漂移由 runtime 侧的对拍测试挡（那里能同时 import 两边）。
+_WORKER_TASK_DEF_ARNS_ATTR = "worker_task_def_arns"
 
 
 def _job_state_to_item(js: JobState) -> dict:
@@ -101,6 +111,12 @@ class DynamoDBRunStore:
             "run_id": initial_state.run_id,
             _ITEM_TYPE_ATTR: _STATE,
             **({"detached": True} if self._detached else {}),  # kicker filter 只认带此标记的 INSERT（ADR 0034）
+            # worker revision ARN 摊平进 STATE（ADR 0038）：omit-when-None/空 —— local 档与旧 definition
+            # 无此值时不落属性（清理 pass 的 `contains` 过滤对缺属性的 item 天然不匹配，语义即「未引用」）。
+            # 值取 definition 的 worker_task_defs，**去重后排序**成 list：属性只服务「有没有引用某 ARN」的
+            # 存在性判定，稳定顺序让 item 可比对（两引擎共用同一 revision 时不留重复项）。
+            **({_WORKER_TASK_DEF_ARNS_ATTR: sorted(set(meta.worker_task_defs.values()))}
+               if meta.worker_task_defs else {}),
             **_state_scalars(initial_state),
             "jobs": {sid: _job_state_to_item(js) for sid, js in initial_state.jobs.items()},
         })

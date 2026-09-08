@@ -140,7 +140,7 @@ worker 内容 = 框架脚手架 + 使用方确定性 step，属业界分类里�
 - **基底镜像**（维护者 CI 发布）：`ghcr.io/zhiyanliu/gherkai-worker-novaact:X.Y.Z` / `…-midscene:X.Y.Z`，内容 = 同版本 worker 包 + SDK 运行时 + 协议层，**零使用方内容**；**linux/amd64 单架构**（ARM64 被拒，理由与将来的路在 [0038](./0038-worker-image-delivery.md)）；tag = immutable `X.Y.Z` + 移动 `latest`（只跟随最新 tag；文档一律 `FROM …:X.Y.Z`）。Dockerfile 两态（与 Lambda asset 同源）：CI 态按版本从 PyPI / npm 装已发行包；本地态经 `--build-arg` 指向本地 `uv build` wheel / `npm pack` tarball（dev 版不在 PyPI，contributor 才造得出基底）。
 - **为什么 GHCR 而非 ECR Public / Docker Hub**：运行时拉的是使用方私有 ECR 里的镜像，GHCR 只在使用方 `docker build` 与 deploy 同步基底时各被拉一次，ECR Public 的免流量/免认证优势碰不到；Docker Hub 匿名限额是负项；GHCR 与 repo 同屋檐、`GITHUB_TOKEN` 推送零配置。
 - **定制镜像由使用方在本地 build，gherkai 不拥有构建**：Dockerfile 模板（唯一真源）见 [0038](./0038-worker-image-delivery.md)「概念模型」节；必须 `--platform linux/amd64`，push-worker 推送前校验。**推送、注册、选择、清理、权限**全部在 [0038](./0038-worker-image-delivery.md)：variant 命名、默认指针、按（引擎，variant）注册 digest 引用的 task-def revision、`gherkai deploy push-worker` / `list-workers` / `delete-worker`、容器引擎口子、preflight 的 variant 解析。
-- `tools/build_push_workers.py` 随 0038 落地退役。
+- `tools/build_push_workers.py` 已随 0038 落地退役（`gherkai deploy push-worker` 取代）。
 
 ## 决策 6：部署 = `gherkai deploy`——命令 provider 中立，分发单元带 provider
 
@@ -187,7 +187,7 @@ worker 内容 = 框架脚手架 + 使用方确定性 step，属业界分类里�
 ├── engines/
 │   ├── novaact/            ← dist gherkai-worker-novaact · import gherkai_worker_novaact · console script 同名 · Dockerfile = 基底镜像（今 worker/ + lib/ 收进包）
 │   └── midscene/           ← npm @gherkai/worker-midscene · Dockerfile = 基底镜像（ESM + tsc dist/，tsconfig 入库，tsx 留 dependency，resolve hook 随 dist/）
-├── features/ · tools/ · docs/   ← 不分发（tools/build_push_workers.py 随 0038 落地退役）
+├── features/ · tools/ · docs/   ← 不分发（tools/build_push_workers.py 已随 0038 退役）
 ```
 
 - 一个目录 = 一个 workspace 成员 = 一个 lock（根 `uv.lock`），当前五处各自的 `uv.lock` 合一；`uv run gherkai …`、`uv run pytest`（根跑全部）、`uv build --package <name>`。**单 lock 要求全员依赖共解**（已实测通过）；将来某成员升版引入冲突时用 `tool.uv.conflicts` 声明或把该成员移出 workspace，不回退到多 lock。
@@ -227,7 +227,7 @@ worker 内容 = 框架脚手架 + 使用方确定性 step，属业界分类里�
 1. `uv-dynamic-versioning` 在 workspace 内：三种 git 状态各算出什么版本、`=={{ version }}` 与 `uv sync`/`uv run` 的解析行为；hook 接管 dependencies 后 extras 的渲染正确。（**已验**：三项显式配置 + metadata 默认下，干净 tag → `X.Y.Z`、脏树 → `+dirty`、离 tag → `.postN.dev0+<sha>`；五个 wheel 的 `==` pin 与 extras 渲染正确、`uv sync` 解析通过；反例——显式 `metadata = true` 在干净 tag 上出 `+<sha>`，gate 失败。）
 2. `sys.executable -m gherkai_worker_novaact` 下 EVENTS_FD `pass_fds` 继承与三通道分离真跑（**前半已验**：真管道经 `pass_fds` 收到 worker 写出的事件、中文不转义；`--match-steps` 挂起时 `pgrep -P` 无子进程，Python 与 midscene 的 `dist/bin.mjs`、全局装 bin 三种形态皆然）；`uvx`/`npx` 兜底路径的 fd 继承预演 → 定第四级存废（**待做**，首发前）。
 3. midscene 以**最终发布形态**（ESM dist + 运行期 `tsx/esm/api` 注册 + 随 dist 的 resolve hook）安装到 **repo 外干净目录**，变量维度 = 安装形态（全局装 / npx）× 使用方目录（无 package.json / `type=commonjs` / `type=module`）× 扩展（`.mts`/`.mjs`），验证使用方 step 能加载、裸 specifier 解析到 worker 自身同一 URL（注册进同一张表）、零注册 fail-loud 真触发——在 repo 内预演会被 repo 自己的 `node_modules` 掩盖成假绿。（**已验**：`npm pack` → `npm i -g --prefix <tmp>` 与 `npx --package <tgz>` 两形态，在无 `node_modules`/无 `package.json` 及 `type=commonjs`/`module` 的使用方目录下，`.mts`+`.mjs`（含子目录）均注册进同一张表；使用方目录另装一份副本时 hook 仍解析到运行中那一份；import 另一安装位置的 `dist/index.mjs` 触发双实例守卫退出；语法错/零注册/目录不存在三者 rc≠0 且点名文件。发布形态分支只有真跑证据，自动化测试只覆盖源码形态 bin。）
-4. `gherkai deploy` 内嵌 cdk：`npx -y aws-cdk@2` 与 jsii 的 Node 版本兼容；asset 从 site-packages 复制后 Lambda 冷启动 import 正常（含 `packaging`）；SSM `version`/`vpc` 参数随 stack 事务写入、destroy 随删；VPC 档三态（含「参数缺失 ∧ stack 已存在」的迁移档）与 skew 三态各一次真跑。（**无凭证下已验**：命令真调 `npx aws-cdk@2` 真合成——模板含 6 个 SSM 参数（version / vpc / worker-template×2 / subnets / security-groups）、kicker 与 reconciler env 带 `WORKER_TEMPLATE_ARNS`；asset 在剥掉 site-packages 的解释器里真 import 通过（抓出 `typing_extensions` 漏项）；`--synth-only` 相对路径导出、`--bootstrap` 不带 `--vpc` 直达凭证解析。**待真账户**：deploy/destroy、SSM 真落值、三态与 skew 各一次。）
+4. `gherkai deploy` 内嵌 cdk：`npx -y aws-cdk@2` 与 jsii 的 Node 版本兼容；asset 从 site-packages 复制后 Lambda 冷启动 import 正常（含 `packaging`）；SSM `version`/`vpc` 参数随 stack 事务写入、destroy 随删；VPC 档三态（含「参数缺失 ∧ stack 已存在」的迁移档）与 skew 三态各一次真跑。（**无凭证下已验**：命令真调 `npx aws-cdk@2` 真合成——模板含 6 个 SSM 参数（version / vpc / worker-template×2 / subnets / security-groups）；asset 在剥掉 site-packages 的解释器里真 import 通过（抓出 `typing_extensions` 漏项）；`--synth-only` 相对路径导出、`--bootstrap` 不带 `--vpc` 直达凭证解析。**待真账户**：deploy/destroy、SSM 真落值、三态与 skew 各一次。）
 5. 完整 release 链一次真跑（TestPyPI 先行）：`fetch-depth: 0` + 版本==tag gate → attest-action → `uv publish` → npm provenance → 等索引可见后基底进 GHCR，含镜像 job 对已发行版本单独重跑且不动 `latest`。（**推 tag 前已验**：两个 workflow YAML/actionlint 静态通过、gate 脚本正反例真跑、gate 演练在干净克隆通过；两态 Dockerfile 的 **local 态**在本机 Docker 真 build（`--platform linux/amd64`，novaact wheel / midscene tarball），`--list-deterministic` 冒烟通过、包装进 site-packages/全局 node_modules 不靠 PYTHONPATH——踩出「pip 不接受改名的 wheel 文件名」；**index 态与 GHCR 推送只能在首个真 tag 后验**。）
 - worker 镜像子系统的实测项在 [0038](./0038-worker-image-delivery.md)。
 

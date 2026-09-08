@@ -13,6 +13,7 @@ import json
 import os
 import sys
 import tempfile
+from dataclasses import replace
 from pathlib import Path
 
 from gherkai_core.model import TERMINAL_STATUSES, Event, RunMeta, Status
@@ -37,6 +38,19 @@ def _dist_version() -> str:
         return version("gherkai")
     except PackageNotFoundError:
         return "0+unknown"
+
+
+def _installed_version() -> "str | None":
+    """给**契约比对**用的版本（skew 三态 / worker variant 解析 / 交 provider 写版本戳，ADR 0037 决策 7、0038）：
+    未装成包 → None（让产品本体按「取不到自身版本」分叉：skew 跳过、variant 解析 fail-loud 说「装成包后再提交」），
+    **不给占位串**——`_dist_version()` 的 `0+unknown` 是给 `--version` 显示用的，喂进契约会被 `image_tag` 归一化成
+    `0.unknown-<variant>`、把「你没装成包」误报成「镜像没推」。"""
+    from importlib.metadata import PackageNotFoundError, version
+
+    try:
+        return version("gherkai")
+    except PackageNotFoundError:
+        return None
 
 
 # `--steps-dir` 的公共 help（run/plan/submit/list-deterministic 四处共用，措辞单点维护、不抄四份）
@@ -164,6 +178,14 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
         help="[--backend cloud] ECS cluster 名（覆盖 prefix 默认 {prefix}cluster）",
     )
     run.add_argument(
+        "--worker-variant", default=None, metavar="NAME",
+        help="[--backend cloud] 云端 worker 镜像 variant（= 一套具名的确定性 step 集烙成的定制镜像，ADR 0038）："
+             "缺省用部署的默认指针（`gherkai deploy` 初始化为 base）。提交侧 preflight 把它解析成本 run 各引擎的"
+             "精确 task-def revision 写进 definition（一个 run 内镜像固定，别人重推同名 variant 不影响在跑的 run）；"
+             "某引擎缺该 variant 即退 2、不回落默认。推送归部署方（`gherkai deploy push-worker`）。"
+             "local 后端忽略（那边的确定性 step 直接从 --steps-dir 读、不经镜像）",
+    )
+    run.add_argument(
         "--subnet", action="append", default=None, metavar="ID",
         help="[--backend cloud] Fargate 子网 ID（可多次；不给则读 SSM /{prefix}backend/subnets——CDK 写的生成 ID）",
     )
@@ -253,6 +275,11 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     sm.add_argument("--s3-bucket", default=None, metavar="NAME", help="[cloud] S3 桶名")
     sm.add_argument("--events-table", default=None, metavar="NAME", help="[cloud] events DDB 表名")
     sm.add_argument("--cluster", default=None, metavar="NAME", help="[cloud] ECS cluster 名")
+    sm.add_argument(
+        "--worker-variant", default=None, metavar="NAME",
+        help="[cloud] 云端 worker 镜像 variant（语义同 run）：缺省用部署的默认指针；提交侧 preflight 解析成各引擎的"
+             "精确 task-def revision 写进 definition（云端推进器照 definition 起 task）。local 后端忽略",
+    )
     # 注：submit 不收 --subnet/--security-group——cloud submit 只写 runs 表、不碰 SSM/ECS（ADR 0034），
     # 网络配置由 IaC 注给 reconciler/kicker Lambda 的 env（曾在此声明过两个从不生效的 flag，已删）。
 
@@ -306,7 +333,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     # [部署方] 云端后端的供给面（ADR 0037 决策 6）：命令面在皮、IaC 在 provider 包（`gherkai[deploy-aws]`）。
     # 皮绝不 import aws_cdk——只发现 provider、贴它的 flag、分派动作（契约见 gherkai_cli/deploy.py 顶部）。
     _deploy.add_parsers(sub, provider=provider, provider_error=provider_error,
-                        cli_version=_dist_version())
+                        cli_version=_installed_version())
     return p
 
 
@@ -483,6 +510,31 @@ def _validate_max_concurrency(args) -> bool:
     return True
 
 
+def _validate_worker_variant(args) -> bool:
+    """`--worker-variant` 入口校验 + local 档提示（对齐 `--max-concurrency` 的入口校验惯例，ADR 0038）。
+
+    **校验点复用 `names.image_tag`**：variant 名最终要拼进 ECR/docker 镜像 tag，字符集与归一化由那一处单点
+    持有（ADR 0038「tag 命名 = 单一真源、同时是单一校验点」）——此处拿本 CLI 自己的版本试拼一次，坏名字在
+    「没开跑就被拒」层退 2，而不是拖到 preflight 读 SSM 后报一句绕远的「该 variant 没有映射」。
+    **local 档只提示不校验**：该 flag 在 local 完全不参与（确定性 step 直接从 steps 目录读、不经镜像），
+    对一个从不消费的值做硬校验没有意义——同 cloud 档遇到 `--steps-dir` 时「警告不拦」的口径。
+    用 getattr 取值：`plan` 等子命令没有这个 flag（也没有 `--backend`），取不到就不校验。返回 False = 调用方退 2。
+    """
+    variant = getattr(args, "worker_variant", None)
+    if variant is None:
+        return True
+    if getattr(args, "backend", None) != "cloud":
+        _progress("--worker-variant 不生效：worker 镜像 variant 只作用于 --backend cloud"
+                  "（local 档的确定性 step 直接从 steps 目录读、不经镜像，ADR 0038）")
+        return True
+    try:
+        _names.image_tag(_dist_version(), variant)
+    except ValueError as e:
+        _progress(f"--worker-variant 无效：{e}")
+        return False
+    return True
+
+
 def _probe_deterministic_dispatch(jobs, steps_dir: str | None) -> dict | None:
     """plan 的派发预期标注（ADR 0036 决策 4）：按引擎分组 step 文本、批量问 worker 命中结果。
 
@@ -598,6 +650,8 @@ def _cmd_submit(args) -> int:
     """
     if not _validate_max_concurrency(args):  # 最早：读 feature/起隧道/preflight 之前（真零副作用）
         return 2
+    if not _validate_worker_variant(args):   # 同上层（入口校验，ADR 0038）；local 档在此只打一行「不生效」
+        return 2
     jobs = _load_and_plan(args)
     if isinstance(jobs, int):
         return jobs
@@ -691,33 +745,94 @@ def _submit_local(args, run_id: str, run_meta, initial, *, tunnel_info=None) -> 
     return 0
 
 
-def _cloud_skew_gate(target) -> "int | None":
-    """cloud 路径的**第一道闸**：CLI 与后端的版本 skew 三态（ADR 0037 决策 7）。放行 → None；拦下 → 2。
+def _cloud_skew_gate(target) -> "tuple[int | None, str | None]":
+    """cloud 路径的**第一道闸**：CLI 与后端的版本 skew 三态（ADR 0037 决策 7）。
+    返回 `(退出码 or None, 后端版本戳 or None)`——放行 = `(None, 戳)`，拦下 = `(2, …)`。
 
     **必须先于资源 preflight**（决策 7 的次序）：skew 的修复动作是部署方跑一次 `gherkai deploy`，而那一步同时
     把资源建齐/补齐——先报「表/task-def 不存在」只会把人引去查 `--prefix`，绕一圈回到同一个动作。
     三个不拦的档（戳缺失 / CLI 偏旧 / 任一侧 dev 版）只打一行提示；**block 无放行 flag**（决策 7 明拒）。
 
-    读戳 + 判定住产品本体（`compose.check_backend_skew`，WebUI/推进器同调），本函数只把 verdict 翻成退出码。
-    比的是**本 CLI 自己的**版本（`_dist_version()`，而非产品本体包的）——`gherkai deploy` 往 SSM 写的戳就是它，
-    它也是写任务定义的那一方；两者靠 `==` lockstep 恒同版本，显式传免得读者去猜哪个。
+    **戳一并返回、全程只读一次**：worker variant 解析（ADR 0038「运行时与 preflight」）要拿同一个戳给出
+    skew 感知的提示语（与后端同版本 → 指向 `push-worker`；CLI 偏旧 → 指向升级 CLI，不引导去推一个旧版本
+    tag 的镜像）。读戳 + 判定住产品本体（`compose.check_backend_skew`，第三元即戳；WebUI/推进器同调，措辞单点），
+    本函数只把 verdict 翻成退出码。
+    比的是**本 CLI 自己的**版本（`_installed_version()`，而非产品本体包的）——`gherkai deploy` 往 SSM 写的戳就是它，
+    它也是写任务定义的那一方；两者靠 `==` lockstep 恒同版本，显式传免得读者去猜哪个；未装成包 → None → 跳过。
     读戳与 subnet/sg 同一条 session/region 解析，且戳落在已授的 `/{prefix}backend/*` 通配内、不新增授权。
     """
     try:
-        verdict, msg = compose.check_backend_skew(prefix=target.prefix, cli_version=_dist_version(),
-                                                 region=target.region, profile=target.profile)
+        verdict, msg, backend_version = compose.check_backend_skew(
+            prefix=target.prefix, cli_version=_installed_version(), region=target.region, profile=target.profile)
+    except ImportError as e:
+        _progress(f"--backend cloud 需要 boto3：{e}")
+        return 2, None
+    except Exception as e:
+        if compose.is_botocore_error(e):
+            _progress(f"--backend cloud 读版本戳失败（SSM /{target.prefix}backend/version"
+                      f"——凭证/region/权限？）：{e}")
+            return 2, None
+        raise
+    if msg:
+        _progress(msg)
+    return (2 if verdict == compose.SKEW_BLOCK else None), backend_version
+
+
+def _cloud_worker_variant_gate(args, target, engines, *, backend_version) -> "int | dict":
+    """cloud preflight 的**第三道闸**：把 `--worker-variant`（缺省 = 部署级默认指针）解析成本 run 用到的
+    每个引擎的 task-def revision（ADR 0038「运行时与 preflight」）。放行 → `{engine: WorkerResolution}`；拦下 → 2。
+
+    **次序 = 版本 skew → 资源 preflight → 本闸**（ADR 0038 明写）：skew 的修复动作（`gherkai deploy`）本身就是
+    镜像重推的前置，反过来先报「variant 没推」会让用户白推一轮（推完还得因 skew 重来）。
+    **engines 只含本 run 真用到的引擎**——对齐既有 task-def 判据「不探全注册表，没用到的引擎不该拦」：单引擎
+    团队不必为另一个引擎凭空推镜像。
+    **严格退 2、不回落默认**：静默换一套确定性 step 集与「不判 steps 内容」的分工矛盾（ADR 0038 被拒方案）；
+    提示语（含「同版本 → push-worker」/「CLI 偏旧 → 升级 CLI」的分叉）由 `WorkerVariantError` 自带，此处原样转述。
+    """
+    try:
+        resolutions = compose.resolve_worker_variant(
+            prefix=target.prefix, variant=getattr(args, "worker_variant", None),
+            engines=engines, cli_version=_installed_version(), backend_version=backend_version,
+            region=target.region, profile=target.profile,
+        )
+    except compose.WorkerVariantError as e:
+        _progress(str(e))
+        return 2
+    except ValueError as e:
+        # `names.image_tag` 的字符集校验（唯一 ValueError 来源）。显式给的 `--worker-variant` 已在入口拦过，
+        # 走到这里只剩「后端默认指针本身是个非法名」——部署侧写坏的值，同样是可修的配置错、不该冒 traceback。
+        _progress(f"--backend cloud 的 worker variant 名不合法（若未给 --worker-variant，检查后端默认指针 "
+                  f"SSM /{target.prefix}backend/{_names.WORKER_DEFAULT_KEY}）：{e}")
+        return 2
     except ImportError as e:
         _progress(f"--backend cloud 需要 boto3：{e}")
         return 2
     except Exception as e:
         if compose.is_botocore_error(e):
-            _progress(f"--backend cloud 读版本戳失败（SSM /{target.prefix}backend/version"
-                      f"——凭证/region/权限？）：{e}")
+            _progress(f"--backend cloud 解析 worker 镜像 variant 失败（读 SSM /{target.prefix}backend/worker-* "
+                      f"或探 ECS/ECR——凭证/region/权限？）：{e}")
             return 2
         raise
-    if msg:
-        _progress(msg)
-    return 2 if verdict == compose.SKEW_BLOCK else None
+    if not getattr(args, "quiet", False):  # submit 没有 --quiet（恒打印，同它其它进度行）
+        for engine in sorted(resolutions):
+            r = resolutions[engine]
+            _progress(f"{engine}: variant {r.variant} · digest {_names.short_digest(r.digest)} · revision {r.revision_arn}")
+    return resolutions
+
+
+def _worker_meta_fields(resolutions: dict) -> dict:
+    """variant 解析结果 → definition 字段（ADR 0038）：人读的 variant 名 + 引擎 → revision ARN。
+
+    variant 名取任一条解析结果——「**一个 run 一个 variant 名、跨引擎同名**」是 ADR 0038 的不变量
+    （某引擎缺该 variant 时上面那道闸已退 2），故各条 resolution 的 variant 恒同。
+    空 dict（理论上不会有：plan 至少产一个 job）→ 两个字段都 None，走 serialize 的 omit-when-None。
+    """
+    if not resolutions:
+        return {"worker_variant": None, "worker_task_defs": None}
+    return {
+        "worker_variant": next(iter(resolutions.values())).variant,
+        "worker_task_defs": {e: r.revision_arn for e, r in resolutions.items()},
+    }
 
 
 def _submit_cloud(args, run_id: str, run_meta, initial, *, tunnel_info=None) -> int:
@@ -733,7 +848,8 @@ def _submit_cloud(args, run_id: str, run_meta, initial, *, tunnel_info=None) -> 
         bucket=args.s3_bucket, cluster=args.cluster,
     )
 
-    skew_rc = _cloud_skew_gate(target)  # 版本 skew 先于资源 preflight（ADR 0037 决策 7 的次序）
+    # 版本 skew 先于资源 preflight（ADR 0037 决策 7 的次序）；戳一并拿回，供下面的 variant 解析（ADR 0038）
+    skew_rc, backend_version = _cloud_skew_gate(target)
     if skew_rc is not None:
         return skew_rc
 
@@ -759,6 +875,14 @@ def _submit_cloud(args, run_id: str, run_meta, initial, *, tunnel_info=None) -> 
     if err:
         _progress(err)
         return 2
+
+    # worker 镜像 variant 解析（ADR 0038）：**在资源 preflight 之后**，把 variant 落成各引擎的精确 revision ARN
+    # 写进 definition——云端推进器（kicker/reconciler）照 definition 起 task，故不写进去就到不了它们。
+    resolutions = _cloud_worker_variant_gate(
+        args, target, sorted({j.engine for j in run_meta.jobs}), backend_version=backend_version)
+    if isinstance(resolutions, int):
+        return resolutions
+    run_meta = replace(run_meta, **_worker_meta_fields(resolutions))
 
     # **只 create_run 写 definition 到 runs 表**——不起任何 task、不读 SSM 网络、不碰 ECS（ADR 0034）：
     # 冷启动由 kicker Lambda 做（runs 表 Stream 的 INSERT 触发它 tick 起首批）。submit 机器权限面因此收窄到
@@ -890,7 +1014,9 @@ def _status_cloud(args) -> int:
                                           profile=args.profile, runs_table=args.ddb_table)
     kicker_fn = target.kicker_lambda  # {prefix}kicker，从 prefix 推理出、无需用户配
 
-    skew_rc = _cloud_skew_gate(target)  # 版本 skew 先于任何云端读（ADR 0037 决策 7 的次序）
+    # 版本 skew 先于任何云端读（ADR 0037 决策 7 的次序）。**status 不解析 variant**（ADR 0038）：它只读运行态、
+    # 不起 task，definition 里的 revision 是提交时定死的，重解析既无用又会把「镜像已退休」误报成查询失败。
+    skew_rc, _backend_version = _cloud_skew_gate(target)
     if skew_rc is not None:
         return skew_rc
 
@@ -997,6 +1123,8 @@ def _cmd_run(args) -> int:
 
     if not _validate_max_concurrency(args):  # 最早：读 feature/起隧道/preflight/begin 之前（真零副作用）
         return 2
+    if not _validate_worker_variant(args):   # 同上层（入口校验，ADR 0038）；local 档在此只打一行「不生效」
+        return 2
     # 0/1/2) votes 校验 + 读 feature + plan（与 _cmd_plan 共享；前置失败返回退出码 2，见 _load_and_plan）
     jobs = _load_and_plan(args)
     if isinstance(jobs, int):
@@ -1091,7 +1219,8 @@ def _cmd_run(args) -> int:
     #     不落库、不碰「在哪执行」。故 cloud 的 Fargate 执行配置解析在 do_report **之外**：`--no-report --backend cloud`
     #     仍在 Fargate 跑，只是不生成 report。cloud_fargate 置值 = 下面 resolver 用 FargateEngine（否则 SubprocessEngine）。
     if args.backend == "cloud":
-        skew_rc = _cloud_skew_gate(target)  # 版本 skew 先于资源 preflight（ADR 0037 决策 7 的次序）
+        # 版本 skew 先于资源 preflight（ADR 0037 决策 7 的次序）；戳一并拿回，供下面的 variant 解析（ADR 0038）
+        skew_rc, backend_version = _cloud_skew_gate(target)
         if skew_rc is not None:
             return skew_rc
         # preflight 执行必需资源（events 表 + cluster + 本 run 用到引擎的 task-def；桶=job-in/产物上传也执行
@@ -1111,6 +1240,14 @@ def _cmd_run(args) -> int:
         if err:
             _progress(err)
             return 2
+        # worker 镜像 variant 解析（ADR 0038）：**在资源 preflight 之后**（次序理由见 _cloud_worker_variant_gate）。
+        # 同步 run 的 FargateEngine 也一律照 definition 里的显式 revision 起 task（不用 family 取最新）。
+        resolutions = _cloud_worker_variant_gate(
+            args, target, sorted({j.engine for j in jobs}), backend_version=backend_version)
+        if isinstance(resolutions, int):
+            return resolutions
+        worker_meta = _worker_meta_fields(resolutions)
+        run_meta = replace(run_meta, **worker_meta)  # 落进 definition（下面 persistence.begin 写它）
         # network 解析（subnet/sg：--xxx 覆盖 or 读 SSM）——需 prefix + region/profile 都已定。
         try:
             network_config = compose.resolve_network(
@@ -1124,7 +1261,9 @@ def _cmd_run(args) -> int:
             raise
         cloud_fargate = {"prefix": target.prefix, "cluster": target.cluster,
                          "events_table": target.events_table, "bucket": target.bucket,
-                         "network_config": network_config}
+                         "network_config": network_config,
+                         # 引擎 → 显式 revision ARN（ADR 0038 不变量：永不用 family 取最新）
+                         "worker_task_defs": worker_meta["worker_task_defs"] or {}}
 
     # 3b) 落库轴（ADR 0030）：组合根按 --backend 注入 local/cloud 两套 store adapter，RunPersistence 负责「随进度落库」
     #     的统一编排（commit-point 写序 / RUNNING 中间态 / 按 scope_id 增量刷）。--no-report 则不落库（逃生舱）：
@@ -1171,6 +1310,8 @@ def _cmd_run(args) -> int:
             run_id=run_id, prefix=cloud_fargate["prefix"], cluster=cloud_fargate["cluster"],
             events_table=cloud_fargate["events_table"], bucket=cloud_fargate["bucket"],
             report_dir=args.report_dir, network_config=cloud_fargate["network_config"],
+            # 每引擎的显式 task-def revision ARN（ADR 0038）：preflight 解析出的那一批，与写进 definition 的同源
+            worker_task_defs=cloud_fargate["worker_task_defs"],
             region=target.region, profile=target.profile,
             extra_http_headers=tunnel_headers,  # 隧道模式的额外请求头（ADR 0035 决策 4；None=不注入）
         )

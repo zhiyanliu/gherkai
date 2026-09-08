@@ -155,3 +155,48 @@ def test_detached_flag_on_state_item(aws):
     assert reader.is_detached("det-1") is True
     assert reader.is_detached("sync-1") is False
     assert reader.is_detached("没这个 run") is False
+
+
+def test_worker_task_def_arns_on_state_item(aws):
+    """create_run 把 definition 的 worker revision ARN 摊平成 STATE 顶层属性（ADR 0038 清理 pass 安全阀）。
+
+    为什么必须摊平：同一批 ARN 也在 definition 里，但那在 META 的 `meta_json` 字符串内、DDB 查不动；清理 pass
+    要按 `status` GSI Query 非终态 run + `contains` 过滤引用，只有顶层属性做得到（沿用 `detached` 顶层标记先例）。
+    未设 → 属性缺席（`contains` 对缺属性天然不匹配，语义即「未引用」）——不落空 list。
+    """
+    from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore
+    from gherkai_core.model import Job, JobState, RunMeta, RunState, Scenario, Status, Step
+
+    # 属性名写死在此（**不 import `gherkai_runtime.names`**：core 是窄腰下层，其测试也不该反向依赖组合根
+    # 共享层）。与读端命名真源 `names.STATE_WORKER_TASK_DEF_ARNS_ATTR` 的逐字一致由 runtime 侧的对拍测试
+    # `runtime/tests/test_names_worker.py` 守——那里能同时看见两边。
+    ATTR = "worker_task_def_arns"
+
+    def _mk(run_id, worker_task_defs=None):
+        job = Job(scope_id="s", scope_name="s", engine="novaact", scenarios=(
+            Scenario(id="s:1", name="sc", steps=(Step(0, "Given", "x"),)),))
+        meta = RunMeta(run_id=run_id, created_at="t", jobs=(job,),
+                       worker_task_defs=worker_task_defs)
+        state = RunState(run_id=run_id, status=Status.PENDING,
+                         jobs={"s": JobState("s", Status.PENDING)}, started_at="t")
+        return meta, state
+
+    table = aws["ddb"].Table(aws["table_name"])
+    nova = "arn:aws:ecs:us-east-1:1:task-definition/gherkai-novaact-worker:7"
+    mid = "arn:aws:ecs:us-east-1:1:task-definition/gherkai-midscene-worker:3"
+    meta, state = _mk("wk-1", {"novaact": nova, "midscene": mid})
+    DynamoDBRunStore(table).create_run(meta, state)
+    item = table.get_item(Key={"run_id": "wk-1", "item_type": "STATE"}, ConsistentRead=True)["Item"]
+    assert item[ATTR] == sorted([nova, mid])  # list of ARN、稳定排序（item 可比对）
+
+    # 两引擎共用同一 revision（同一 variant 名跨引擎、极端下 ARN 相同）→ 去重，不留重复项
+    meta, state = _mk("wk-dup", {"novaact": nova, "midscene": nova})
+    DynamoDBRunStore(table).create_run(meta, state)
+    item = table.get_item(Key={"run_id": "wk-dup", "item_type": "STATE"}, ConsistentRead=True)["Item"]
+    assert item[ATTR] == [nova]
+
+    # 旧 definition / local 档（无该字段）→ 属性缺席
+    meta, state = _mk("wk-none")
+    DynamoDBRunStore(table).create_run(meta, state)
+    item = table.get_item(Key={"run_id": "wk-none", "item_type": "STATE"}, ConsistentRead=True)["Item"]
+    assert ATTR not in item

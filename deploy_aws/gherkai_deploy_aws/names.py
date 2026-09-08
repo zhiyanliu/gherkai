@@ -20,11 +20,24 @@ from gherkai_runtime.names import (  # noqa: F401
     BASE_RUNS_TABLE,
     DEFAULT_PREFIX,
     ENGINES,
+    RUNS_STATUS_GSI,
+    STATE_WORKER_TASK_DEF_ARNS_ATTR,
+    TAG_DIGEST,
+    TAG_RETIRED_AT,
+    TAG_TEMPLATE,
+    TAG_VARIANT,
+    TAG_VERSION,
+    WORKER_DEFAULT_KEY,
     container_name,
     default_name,
+    ecr_repo_name,
+    image_tag,
+    short_digest,
     job_timeout_schedule_prefix,
     ssm_path,
     task_def_name,
+    worker_image_key,
+    worker_template_key,
 )
 
 # ---- provider 特有（不进 gherkai_runtime.names：只有 IAM 收窄 / CloudFormation 层用，cli/Lambda 不消费）----
@@ -87,4 +100,4 @@ def ssm_worker_template_path(prefix: str, engine: str) -> str:
     `taskDefinition.taskDefinitionArn`（`AWS::ECS::TaskDefinition` 的 `Ref` 返回带 revision 的 ARN）。
     `push-worker` 永远从它复制模板，不抄「最近一次」revision。
     """
-    return ssm_path(prefix, f"worker-template/{engine}")
+    return ssm_path(prefix, worker_template_key(engine))

@@ -13,10 +13,10 @@
 
 一套 CloudFormation stack，stack 名 `BackendStack-<prefix 去尾横线>`（可按 prefix 多实例化，支持 prod-/stage- 多环境并存）：
 
-- **DynamoDB**：`{prefix}runs`（控制面/RunStore）+ `{prefix}events`（events-out，开 `expires_at` TTL）——**两表均开 DynamoDB Stream（`NEW_IMAGE`）**，作为无状态跑批事件驱动链的触发源（见下「事件驱动推进」，ADR 0034）
+- **DynamoDB**：`{prefix}runs`（控制面/RunStore，带按 `status` 的**稀疏 GSI `status-index`**——只有 STATE item 有顶层 `status`，投影含 `worker_task_def_arns`，供 worker revision 清理的「在跑 run 安全阀」`Query`，ADR [0038](../docs/adr/0038-worker-image-delivery.md)）+ `{prefix}events`（events-out，开 `expires_at` TTL）——**两表均开 DynamoDB Stream（`NEW_IMAGE`）**，作为无状态跑批事件驱动链的触发源（见下「事件驱动推进」，ADR 0034）
 - **S3**：`{prefix}artifacts`（判定结果 / 报告 / offload / job-in / 引擎产物，按 key 前缀分片）+ lifecycle 规则 `expire-job-in`（**按对象 tag `gherkai=job-in`** 7 天过期——job-in 的 key 里 `run_id` 在中间，纯前缀 filter 框不住且会误伤判定真值与报告）
 - **ECS**：`{prefix}cluster` + 2 个 Fargate task-def（`{prefix}novaact-worker` / `{prefix}midscene-worker`）
-- **ECR**：2 个 repo（repo 名复用 task-def family 名；镜像由部署方 build & push，CDK 只建 repo、synth 不触发 docker build）
+- **ECR**：2 个 repo（repo 名 == task-def family 名，`names.ecr_repo_name`；镜像由部署方 `gherkai deploy push-worker` 推，CDK 只建 repo、synth 不触发 docker build）。**不设任何 lifecycle 规则**——重推同名 variant 会把旧 tag 顶成 untagged，而在跑 run 的旧 task-def revision 正按 digest 指着那一层，untagged 过期规则会静默删掉它（ADR 0038 护栏；代价是永久留一层 untagged，回收与 `delete-worker` 同批设计）
 - **IAM**：每引擎一个最小权限 task role + 共享 execution role + 3 个 Lambda 执行角色 + job timeout 的 Scheduler 执行 role `{prefix}timeout-scheduler`
 - **VPC + SSM 网络**：worker 网络（subnet/sg）+ 把它们的 ID 写进 `/{prefix}backend/subnets`、`/{prefix}backend/security-groups`（cli 读）
 - **SSM 部署戳**（都是 **stack 资源**、不是命令事后 `put_parameter`——与部署事务同生死、回滚不留错值，ADR 0037 决策 6）：
@@ -32,8 +32,8 @@
   - `{prefix}kicker`（踢启器）：`{prefix}runs` 表 Stream 的 **INSERT** 触发（`submit` 的 `create_run` 写 definition）→ 冷启动起首批 task；也被 cli `status --wait` 直接 invoke 做 kickoff。handler=`reconciler.kicker_handler`。
   - `{prefix}reconciler`：`{prefix}events` 表 Stream 触发（worker `PutItem` 执行事件 / 退出观察者写 `task_exited`）→ `reconcile.tick` 推进 + finalize 聚合。handler=`reconciler.handler`。
   - `{prefix}exit-observer`（退出观察者）：ECS Task `STOPPED` 事件触发 → 写 `task_exited` 事件（薄；只 events 表 `PutItem`）。handler=`exit_observer.handler`。
-  - kicker/reconciler 共享起 task 的全套权限与装配（`RunTask` / `PassRole` / 表桶读写 + `SUBNETS` / `SECURITY_GROUPS` / `MAX_CONCURRENCY` / `WORKER_TEMPLATE_ARNS`）；分工 = kicker「让 run 动起来」、reconciler「推着走」。`MAX_CONCURRENCY`（当前 `8`，两侧须同值）是**部署侧 per-run 并发 cap**、不是真源——每个 run 并行几个 job 由提交侧的 `submit --max-concurrency` 随 definition 声明，kicker/reconciler 取 `min(声明, cap)`；cap 在此是因为 task 烧的是部署方账单，local 档无 cap（ADR 0034 机制四）。
-  - `WORKER_TEMPLATE_ARNS`（`engine=arn` 逗号串）与 SSM `worker-template/<engine>` **同一份值同一个事务**，是 ADR 0038 读侧兼容口径的前向口子——当前 handler 尚未消费它（起 task 仍传 family），variant 解析随 0038 的 `push-worker` 批次落地。
+  - kicker/reconciler 共享起 task 的全套权限与装配（`RunTask` / `PassRole` / 表桶读写 + `SUBNETS` / `SECURITY_GROUPS` / `MAX_CONCURRENCY`，另加 `ssm:GetParameter*` 于 `/{prefix}backend/*`）；分工 = kicker「让 run 动起来」、reconciler「推着走」。`MAX_CONCURRENCY`（当前 `8`，两侧须同值）是**部署侧 per-run 并发 cap**、不是真源——每个 run 并行几个 job 由提交侧的 `submit --max-concurrency` 随 definition 声明，kicker/reconciler 取 `min(声明, cap)`；cap 在此是因为 task 烧的是部署方账单，local 档无 cap（ADR 0034 机制四）。
+  - 两个推进器起 task 用的是 **definition 里解析好的显式 task-def revision**（不是 family 最新 ACTIVE——那会让任何一次 push 劫持别人的 variant）。没有该字段的旧 definition（升级窗口内在跑的 run / 旧 CLI 提交的 run）走**兼容回落**：读 SSM `worker-default` + `worker-image/<engine>/<后端版本>-<默认 variant>` 解析 revision——这就是它们要 SSM 读权限的原因。**不回落模板 revision**：模板的镜像栏是 `latest` 占位，全新 prefix 上根本拉不到（ADR 0038 被拒方案）。
 - **EventBridge rule `{prefix}ecs-stopped`**：按 `source=aws.ecs` + `ECS Task State Change` + `lastStatus=STOPPED` + 本 cluster 的 `clusterArn` 过滤（不误触别的负载）→ 打到 `{prefix}exit-observer`。
 - **Event source mappings**：`{prefix}events` 表 Stream → reconciler；`{prefix}runs` 表 Stream → kicker（**带 `eventName=INSERT` ∧ `detached=true` filter**，只让 detached 的 `create_run` 触发冷启动；reconciler 之后写 runs 表的 `MODIFY` 不自触发放大，见 ADR 0034 被拒方案）。
 - **job timeout 到点触发器**（ADR 0034「job timeout」节）：IAM role `{prefix}timeout-scheduler`（`scheduler.amazonaws.com` assume、只准 invoke kicker——授权写**确定性 kicker ARN 串**而非资源引用，免 role↔function 互引成环）+ EventBridge Scheduler 的 one-time schedule 名字空间 `{prefix}job-timeout-*`（default group，`ActionAfterCompletion=DELETE` 到点自删、idle 零成本）+ 注给 reconciler/kicker 的 `KICKER_ARN` / `SCHEDULER_ROLE_ARN` env。改 prefix 时这两个名字随之变。
@@ -94,29 +94,83 @@ gherkai deploy --synth-only ./out --vpc default
 
 # 拆栈（RETAIN 语义见下）
 gherkai destroy --vpc default --prefix gherkai-
+
+# worker 镜像子命令（见下「worker 镜像」）——deploy 的子动词，不是独立命令
+gherkai deploy push-worker acme-novaact:login --engine novaact --variant login
+gherkai deploy list-workers
 ```
 
-`--region` / `--profile` 与 `run`/`submit` 同名同义（region 解析链 `--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > profile config，ADR 0016 决策 C）。退出码：`0` 成功；`2` 前置/校验失败（Node 缺失、VPC 档不符、读后端失败）；其余为 cdk CLI 自己的返回码（原样透传）。
+`--region` / `--profile` 与 `run`/`submit` 同名同义（region 解析链 `--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > profile config，ADR 0016 决策 C）。退出码：`0` 成功；`2` 前置/校验失败（Node 缺失、VPC 档不符、读后端失败、容器引擎名不认、`push-worker` 的架构/版本 skew 拦截）；`1` **cdk 已成功而 worker 镜像四步失败**（账户已被改动，重跑 `gherkai deploy` 幂等收敛）；其余为 cdk CLI 自己的返回码（原样透传）。
 
 `--stop-timeout N` 标定 worker container 的 SIGTERM→SIGKILL 宽限（默认 120s）。**Fargate 硬上限就是 120s**，>120 会在部署期被 ECS 拒——命令/synth 期就 fail-fast、点名这是平台限制而非笔误（Nova 的 grace 下限 150s > 120s 这个冲突正卡在这条硬上限上，见 ADR [0032](../docs/adr/0032-fargate-execution-environment.md)）。
 
 ### 本地验证（不碰 AWS）
 
 ```bash
-uv run pytest deploy_aws/tests -q   # stack 合成断言 + Provider + Lambda asset（纯本地）
+uv run pytest deploy_aws/tests -q   # stack 合成断言 + Provider + Lambda asset + worker 镜像族（纯本地）
 ```
 
-## worker 镜像
+worker 镜像族的测试分两层：`tests/test_workers.py` 用 moto（SSM/ECS/ECR/DDB）+ 假容器引擎验**编排**（步序、幂等查重、血缘 tags、清理两道闸）；`tests/test_container.py` 末尾三条用**真 docker** 验 mock 不出来的引擎事实（本地未推送镜像 `RepoDigests` 为空、arm64 镜像被架构判据拒），无 docker 时自动 skip。真 ECR push / RunTask 拉起注册出来的 revision 需要真账号，不在单测里。
 
-CDK 只建 ECR repo、不 build 镜像。当前仍用 `tools/build_push_workers.py`（ECR 登录 + 两引擎 `docker build --platform linux/amd64` + push，一条命令）；ADR [0038](../docs/adr/0038-worker-image-delivery.md) 落地后由 `gherkai deploy push-worker` 取代，`tools/build_push_workers.py` 随之退役。
+## worker 镜像：基底 / variant / 默认指针（ADR [0038](../docs/adr/0038-worker-image-delivery.md)）
+
+CDK 只建 ECR repo 与 **模板 task-def revision**，镜像与 variant 的注册归 `gherkai deploy` 族命令。三个概念：
+
+| 概念 | 是什么 | 谁写 |
+|---|---|---|
+| **基底** | `ghcr.io/zhiyanliu/gherkai-worker-<engine>:X.Y.Z`，linux/amd64，零使用方内容 | 维护者 CI |
+| **variant** | 一套具名的确定性 step 集 = 一个定制镜像，落 ECR tag `<CLI 版本>-<variant>`，并对应一个 task-def revision（镜像按 `repo@sha256:<digest>` 引用） | 部署方 `push-worker` |
+| **默认指针** | 提交时不给 `--worker-variant` 用哪个 variant（SSM，部署级一个） | `gherkai deploy` 初始化为 `base`；`push-worker --set-default` 改指 |
+
+`gherkai deploy` 本身跑四步（全部幂等，重跑收敛）：① 登记模板 revision ARN 到 SSM（随 cdk 事务）→ ② 从 GHCR 同步当前版本基底、推成 `<版本>-base` → ③ 默认指针缺失则初始化为 `base`（**已存在则不动**——它记的是团队意图）→ ④ 模板变了就用新模板 + 已记录的 digest 重派生既有 variant，末尾跑一次清理 pass。**这一期 deploy 机器需要容器引擎**（②要 pull/push）；cdk 成功而后三步失败 → 退 1、提示重跑幂等收敛。
+
+### 定制镜像模板（三行，gherkai 不拥有构建）
+
+```dockerfile
+FROM ghcr.io/zhiyanliu/gherkai-worker-novaact:1.4.0
+COPY steps/ /app/steps
+ENV GHERKAI_STEPS_DIR=/app/steps
+```
 
 ```bash
-python tools/build_push_workers.py                     # 两引擎都 build&push（tag=latest, prefix=gherkai-）
-python tools/build_push_workers.py --engine novaact --prefix prod-
-python tools/build_push_workers.py --dry-run           # 只打印命令
+docker build --platform linux/amd64 -t acme-novaact:login .
 ```
 
-> ⚠️ **必须 `--platform linux/amd64`**：Fargate task-def 默认 `X86_64`；arm Mac 上不加会 build 出 arm64，容器**启动期** `exec format error` 挂死——错误发生在启动期、不易一眼看出是架构问题。脚本已硬编码保证；手敲底层命令时别漏。（ADR 0038 让 `push-worker` 在推送前校验架构、提前 fail-loud。）
+> ⚠️ **必须 `--platform linux/amd64`**：Fargate task-def 固定 `X86_64`（ARM64 是被拒方案）；arm Mac 上不加会 build 出 arm64，容器**启动期** `exec format error` 挂死——错误发生在启动期、不易一眼看出是架构问题。**`push-worker` 会在推送前 `inspect` 校验架构、不匹配即退 2**，把这个坑从 Fargate 启动期提前到推送前。
+
+### 推送与查看
+
+```bash
+# 推一个本地镜像成某引擎的一个 variant（一次一个引擎；两个引擎跑两次）
+gherkai deploy push-worker acme-novaact:login --engine novaact --variant login --prefix gherkai-
+gherkai deploy push-worker acme-midscene:login --engine midscene --variant login
+
+# 顺手把默认指针指过去（该 variant 在另一引擎还没有 → 只警告不拦）
+gherkai deploy push-worker acme-novaact:common --engine novaact --variant common --set-default
+
+# 看当前版本有哪些 variant、默认是谁、哪些 revision 待清理
+gherkai deploy list-workers
+
+# 提交时选 variant（缺省 = 默认指针）
+gherkai submit features/ --backend cloud --worker-variant login
+```
+
+`push-worker` 做的事（细节与理由见 ADR 0038「push-worker 流程」）：版本 skew 前置（CLI **新于**后端 → 退 2，无放行口）→ `inspect` 校验存在与架构 → ECR 登录 → tag + push → **推送后**再 `inspect` 取 digest（本地未推送的镜像没有 registry digest，`.Id` 是 config digest、注册能过而 RunTask 才 `manifest unknown`）→ 按（模板 ARN、digest）查重 / 复用孤儿 / 否则从模板注册新 revision（血缘 tags：`gherkai:variant|version|digest|template`）→ 写 SSM 映射 → 旧 revision 打 `gherkai:retired-at` + 跑一次清理 pass。
+
+- **tag 可变**：重推同名 variant 直接放行，只打印「原 digest → 新 digest」。在跑 run 手里的旧 revision 按 digest 指着旧镜像层、不受影响（run 内镜像一致靠 revision，不靠 tag）。
+- **清理 pass 是机会式的**（挂在 `push-worker` / `deploy` 末尾，无定时任务）：退休或对账出的孤儿 revision，只在**退休满 1 小时**且**无未到终态的 run 引用**时才 deregister + delete；否则留到下次。滞留无害。
+- **`--container-engine`**（或 env `GHERKAI_CONTAINER_ENGINE`；`deploy` 与 `push-worker` 都收）：这一期只实装 `docker`，别的名字退 2（不静默回落）。
+- **`delete-worker`** 是留的口子：退 2 并说明押后的是回收策略（旧版本 variant 的 ECR tag / untagged 层），见 ADR 0038 重议闸门。
+
+SSM 里因此多三族参数（都在 `/{prefix}backend/*` 下）：`worker-template/<engine>`（stack 写）、`worker-image/<engine>/<版本>-<variant>`（JSON：`template_arn` / `revision_arn` / `digest` / `pushed_at`，`push-worker` 写）、`worker-default`（默认 variant 名）。退休时刻与血缘**不进 SSM**，以 task-def 的 tags 承载（与 revision 同生死、清理对账只看一处）。
+
+### 版本升级时的镜像半边（ADR 0037 决策 7「升级即三步」的 ②③）
+
+1. `uv tool upgrade gherkai` —— CLI 升到新版本。
+2. `gherkai deploy` —— 新 stack + 新版本 `base` 同步进 ECR + 对新版本已有的 variant 重派生（升级当下通常没有）。
+3. 有自定义 variant 的：从**新版本基底**重新 build 各引擎镜像，`push-worker` 推上去（tag 含 CLI 版本，故新版本的 variant 是一套新 tag）。
+
+**默认指针不重置**：若默认是 `common` 而 `1.5.0-common` 还没推，提交侧 preflight 会退 2 并提示「`push-worker … --variant common`，或临时 `--worker-variant base`」；推上去即恢复，不必再 `--set-default`。variant **按版本隔离**（键含版本），旧版本的留在 ECR/SSM 作历史、不参与当前版本解析。
 
 ## 清理（destroy 之后还要手动删）
 

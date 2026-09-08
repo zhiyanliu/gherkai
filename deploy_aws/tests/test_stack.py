@@ -109,6 +109,53 @@ def test_two_ecr_repos():
         t.has_resource_properties("AWS::ECR::Repository", {"RepositoryName": f"gherkai-{engine}-worker"})
 
 
+def test_runs_table_has_the_sparse_status_gsi_for_worker_cleanup():
+    """runs 表按 `status` 的 GSI（ADR 0038 清理安全阀）：**投影必须含 `worker_task_def_arns`**。
+
+    过滤表达式 `contains(worker_task_def_arns, :arn)` 作用在**索引投影出的属性**上——不投影则恒不匹配、
+    安全阀静默失效（会删掉在跑 run 手里的 revision，detached run 的剩余 job 全起不来）。
+    稀疏是构造出来的：只有 STATE item 带顶层 `status`。不用 ALL：STATE 的 `jobs` Map 随 job 数增长。
+    """
+    t = _template()
+    t.has_resource_properties("AWS::DynamoDB::Table", {
+        "TableName": "gherkai-runs",
+        "AttributeDefinitions": Match.array_with([{"AttributeName": "status", "AttributeType": "S"}]),
+        "GlobalSecondaryIndexes": [{
+            "IndexName": "status-index",
+            "KeySchema": [{"AttributeName": "status", "KeyType": "HASH"}],
+            "Projection": {"ProjectionType": "INCLUDE", "NonKeyAttributes": ["worker_task_def_arns"]},
+        }],
+    })
+    # 索引名与属性名都是**跨组件契约**（清理 pass 按它们查）——比字面量，防两侧各改一处
+    from gherkai_deploy_aws import names as _names
+    assert (_names.RUNS_STATUS_GSI, _names.STATE_WORKER_TASK_DEF_ARNS_ATTR) == (
+        "status-index", "worker_task_def_arns")
+
+
+def test_events_table_has_no_gsi():
+    """GSI 只加在 runs 表上（events 表按 pk/seq 读，加索引白花钱）——枚举型护栏，防将来顺手加错表。"""
+    t = _template()
+    for res in t.find_resources("AWS::DynamoDB::Table").values():
+        if res["Properties"]["TableName"] == "gherkai-events":
+            assert "GlobalSecondaryIndexes" not in res["Properties"]
+
+
+def test_ecr_repos_have_no_lifecycle_rules_and_are_retained():
+    """ECR **不设任何 lifecycle 规则**（ADR 0038 护栏，被拒方案「ECR 加 untagged 过期 lifecycle」）。
+
+    重推同名 variant 会把旧 tag 顶成 untagged，而在跑 run 的旧 task-def revision 正按 digest 指着那一层——
+    untagged 过期规则会静默删掉它，run 的后续 job 拉不到镜像。代价（永久留一层 untagged）是记在案的
+    已知运行期成本，回收与 `delete-worker` 同批设计。`RETAIN` 则是防误删（destroy 不带走镜像）。
+    """
+    t = _template()
+    repos = t.find_resources("AWS::ECR::Repository")
+    assert len(repos) == 2
+    for logical, res in repos.items():
+        assert "LifecyclePolicy" not in res["Properties"], f"{logical} 被加了 lifecycle 规则：{res['Properties']}"
+        assert res.get("DeletionPolicy") == "Retain", f"{logical} 不是 RETAIN：{res.get('DeletionPolicy')}"
+        assert res.get("UpdateReplacePolicy") == "Retain", logical
+
+
 def test_ssm_params_with_prefix_path():
     t = _template()
     t.has_resource_properties("AWS::SSM::Parameter", {
@@ -199,38 +246,45 @@ def test_ssm_worker_template_arn_per_engine_refs_task_def():
         assert props["Value"]["Ref"] in task_defs, f"{engine} 模板参数未指向本 stack 的 task-def：{props}"
 
 
-def test_worker_template_arns_env_on_both_advancers_only():
-    """模板 ARN 注给**两个推进器**（reconciler/kicker）的 env，且两侧同值——它们都起 task，形态分叉会让
-    「首批用一套模板、续起用另一套」（同 MAX_CONCURRENCY 两侧须同值的道理）。
+def test_worker_template_arn_is_not_injected_into_any_lambda_env():
+    """模板 revision ARN **不进任何 Lambda 的 env**（ADR 0038 被拒方案「缺字段时回落模板 revision」）。
 
-    退出观察者**不该有**：它只写 task_exited、从不起 task（薄，ADR 0034 机制二）——多注一份 env 是把
-    「谁起 task」这条职责边界糊掉。
+    曾短暂注入过 `WORKER_TEMPLATE_ARNS`（0037 那批的前向口子）。撤掉的理由：模板的镜像栏是 `latest` 占位，
+    在从未推过 `latest` 的全新 prefix 上根本拉不到——回落它只把错误拖到 Fargate 启动期。推进器遇上没有
+    `worker_task_defs` 的旧 definition 时按**后端默认指针**解析（读 SSM，权限见下一条）。
+    模板 ARN 只留在 SSM 里给部署方的 push-worker 当复制母本。
     """
     t = _template()
-    env_of = {name: fn["Properties"].get("Environment", {}).get("Variables", {})
-              for name, fn in t.find_resources("AWS::Lambda::Function").items()}
-    with_arns = {name: v[BackendStack.WORKER_TEMPLATE_ARNS_ENV] for name, v in env_of.items()
-                 if BackendStack.WORKER_TEMPLATE_ARNS_ENV in v}
-    assert len(with_arns) == 2, f"应恰有 reconciler/kicker 两个 Lambda 拿模板 ARN，实际 {sorted(with_arns)}"
-    values = list(with_arns.values())
-    assert values[0] == values[1], f"两个推进器的模板 ARN env 应同值：{with_arns}"
-    # 形态：`engine=arn` 逗号串，两个引擎都在，ARN 是 task-def 的 Ref（部署期落值）
-    joined = json.dumps(values[0], ensure_ascii=False)
-    for engine in ("novaact", "midscene"):
-        assert f"{engine}=" in joined, f"缺 {engine} 的模板 ARN：{values[0]}"
-    assert _joined_refs(values[0]), f"模板 ARN env 应由 task-def Ref 拼出：{values[0]}"
+    for name, fn in t.find_resources("AWS::Lambda::Function").items():
+        env = fn["Properties"].get("Environment", {}).get("Variables", {})
+        assert "WORKER_TEMPLATE_ARNS" not in env, f"{name} 又被注了模板 ARN"
+        joined = json.dumps(env, ensure_ascii=False)
+        assert "worker-template" not in joined, f"{name} 的 env 里出现了模板参数路径：{env}"
 
 
-def test_worker_template_arns_env_matches_ssm_values():
-    """env 与 SSM `worker-template/<engine>` **同一份值**（env 只是省掉推进器冷启动的一次 SSM 读、不是第二个
-    真源）。比 Ref 序列：两处 Join 形态不同（一处纯 token、一处夹在 `engine=` 之间），比 JSON 会假红。"""
+def test_advancers_can_read_backend_ssm_params_for_the_compat_fallback():
+    """两个推进器（reconciler/kicker）都要能读 `/{prefix}backend/*`（ADR 0038「权限面增量·云端推进器」）：
+    没有 `worker_task_defs` 的旧 definition 靠读默认指针 + worker-image 映射解析 revision。
+
+    退出观察者**不该有**：它只写 task_exited、从不起 task，多授一份读权限是把职责边界糊掉。
+    """
     t = _template()
-    params = _ssm_params(t)
-    ssm_refs = [params[f"/gherkai-backend/worker-template/{e}"]["Value"]["Ref"] for e in ("novaact", "midscene")]
-    env_value = next(v["Properties"]["Environment"]["Variables"][BackendStack.WORKER_TEMPLATE_ARNS_ENV]
-                     for v in t.find_resources("AWS::Lambda::Function").values()
-                     if BackendStack.WORKER_TEMPLATE_ARNS_ENV in v["Properties"].get("Environment", {}).get("Variables", {}))
-    assert _joined_refs(env_value) == ssm_refs, f"env 与 SSM 的模板 ARN 不同源：{env_value} vs {ssm_refs}"
+    with_ssm = {}
+    for name, policy in t.find_resources("AWS::IAM::Policy").items():
+        for stmt in policy["Properties"]["PolicyDocument"]["Statement"]:
+            actions = stmt["Action"] if isinstance(stmt["Action"], list) else [stmt["Action"]]
+            if "ssm:GetParameter" not in actions:
+                continue
+            assert "ssm:GetParametersByPath" in actions, f"枚举映射要 GetParametersByPath：{stmt}"
+            with_ssm[name] = (stmt["Resource"], json.dumps(policy["Properties"]["Roles"]))
+    assert len(with_ssm) == 2, f"应恰有 reconciler/kicker 两个角色拿到 SSM 读，实际 {sorted(with_ssm)}"
+    roles = [r for _res, r in with_ssm.values()]
+    # 按角色归属断言（不只数个数——数对了也可能是「exit-observer 多了、reconciler 少了」）
+    assert any("Reconciler" in r for r in roles) and any("Kicker" in r for r in roles), roles
+    assert not any("ExitObserver" in r for r in roles), roles
+    for name, (resource, _roles) in with_ssm.items():
+        arn = json.dumps(resource, ensure_ascii=False)
+        assert "parameter/gherkai-backend/*" in arn, f"{name} 的 SSM 资源域不是本 prefix 的参数子树：{resource}"
 
 
 def _joined_refs(value) -> list[str]:

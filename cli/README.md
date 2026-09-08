@@ -179,11 +179,33 @@ deploy 会把自己的版本写成后端的版本戳，`run`/`submit`/`status --
 [ADR 0037](../docs/adr/0037-distribution-and-packaging.md) 决策 6/7；资源清单与命名契约见
 [ADR 0033](../docs/adr/0033-iac-aws-backend-and-composition-wiring.md)。
 
+## worker 镜像 variant：云端跑哪套确定性 step 集
+
+local 档的确定性 step 就在你机器上（`--steps-dir`）；cloud 档的 worker 跑在 Fargate 容器里，**step 烙在镜像里**。
+一个 **variant** = 一套具名的 step 集 = 一个定制镜像（名字自取：`base`/`login`/`checkout-v2`），提交时用
+`--worker-variant <名>` 选；不给就用**部署级的默认指针**（`gherkai deploy` 初始化为 `base` = 零 step 的基底）。
+多人共用一个后端时各推各的 variant、互不覆盖。
+
+```bash
+uv run gherkai run    features/x.feature --backend cloud --worker-variant login
+uv run gherkai submit features/x.feature --backend cloud --worker-variant login   # 缺省 = 默认指针
+```
+
+提交侧 preflight 会把这个名字解析成**本 run 用到的每个引擎**的精确 task-def revision，写进这个 run 的
+definition——所以一个 run 内镜像固定（期间别人重推同名 variant 不影响在跑的 run），并在放行时每引擎打一行
+`<engine>: variant … · digest … · revision …`（`--quiet` 静音）。**次序是刻意的：版本 skew → 资源存在性 →
+variant 解析**（skew 的修复动作 `gherkai deploy` 本身就是重推镜像的前置，反过来先报「variant 没推」会让人白推一轮）。
+某引擎缺该 variant 就退 `2` 并给出修复命令，**不静默回落到默认**（那等于替你换掉一套 step 集）。
+
+**镜像的 build 与推送不在这张皮里**：build 是你自己的容器活（三行 Dockerfile 模板），推送与注册归部署方
+（`gherkai deploy push-worker`）——见 [`deploy_aws/README.md`](../deploy_aws/README.md)，设计与被拒方案见
+[ADR 0038](../docs/adr/0038-worker-image-delivery.md)。
+
 ## 退出码
 
 - `0` —— RunResult 总状态 passed
 - `1` —— 跑完了但有 failed/error（断言没过 / 引擎异常）；`--backend cloud` 下若 run 已开跑、中途 DynamoDB/S3 不可达（如桶被删）也退 `1`
-- `2` —— 没跑成：feature 读不到、plan 配置矛盾（PlanError）、参数非法（如 `--assertion-votes < 1`）、或无子命令；**本 run 用到的引擎的 worker 运行时定位不到**（四级定位链全 miss，报错自带该引擎的安装命令，ADR 0037 决策 3）、或 **`steps/` 目录里有文件加载失败**（worker 自述入口非零退出，CLI 转述其诊断；`plan`/`run`/`submit` 一律在起任何 job 前拒，ADR 0037 决策 4——`submit` 同样在提交前拒，不会让你「提交成功」后每个 job 都 error）；`--steps-dir` / env `GHERKAI_STEPS_DIR` 指的目录不存在；`--backend cloud` 还没开跑就被拒（缺 boto3、**版本 skew 判 block**（CLI 新于后端，无放行口，见上『部署』节）、或 `--prefix` 拼出的表/桶/cluster/task-def 不存在·无权限·凭证/region 缺——运行前 preflight 点名 prefix fail-fast）；`deploy`/`destroy` 的没有可用部署 provider（没装 `gherkai[deploy-aws]` / 装了但加载失败）、或 **VPC 档与后端记录不符**（见上『部署』节）
+- `2` —— 没跑成：feature 读不到、plan 配置矛盾（PlanError）、参数非法（如 `--assertion-votes < 1`）、或无子命令；**本 run 用到的引擎的 worker 运行时定位不到**（四级定位链全 miss，报错自带该引擎的安装命令，ADR 0037 决策 3）、或 **`steps/` 目录里有文件加载失败**（worker 自述入口非零退出，CLI 转述其诊断；`plan`/`run`/`submit` 一律在起任何 job 前拒，ADR 0037 决策 4——`submit` 同样在提交前拒，不会让你「提交成功」后每个 job 都 error）；`--steps-dir` / env `GHERKAI_STEPS_DIR` 指的目录不存在；`--backend cloud` 还没开跑就被拒（缺 boto3、**版本 skew 判 block**（CLI 新于后端，无放行口，见上『部署』节）、`--prefix` 拼出的表/桶/cluster/task-def 不存在·无权限·凭证/region 缺——运行前 preflight 点名 prefix fail-fast、或 **worker 镜像 variant 解析不了**（请求的 variant 在本 run 某个引擎上没推过 / 后端没有默认指针 / 解析到的 revision 已退休或镜像被删 / `--worker-variant` 名字不合镜像 tag 字符集——见上『worker 镜像 variant』节，**不回落默认**））；`deploy`/`destroy` 的没有可用部署 provider（没装 `gherkai[deploy-aws]` / 装了但加载失败）、或 **VPC 档与后端记录不符**（见上『部署』节）
 
 > cloud 失败分层的切分线 = run 是否已真正开跑：起 worker 前的配置/可达问题退 `2`，跑到一半的云端故障退 `1`。
 
@@ -193,7 +215,7 @@ deploy 会把自己的版本写成后端的版本戳，`run`/`submit`/`status --
 
 - **`submit`：退出码 = 提交成功与否，不是 run 的判定。**
   - `0` —— 已成功提交（local：per-run 进程已 fork、run_id 已打印；cloud：definition 已落 DDB，云端链接管）。
-  - `2` —— 没提交成：feature 读不到 / plan 配置矛盾（同 `run`）；cloud 还缺 boto3、或 preflight 不过（表/桶/cluster/本 run 用到引擎的 task-def/事件驱动链三 Lambda——链上任一 Lambda 缺则提交会成功但 run 永不推进，故挡在提交前）、或 `create_run` 时云端不可达。
+  - `2` —— 没提交成：feature 读不到 / plan 配置矛盾（同 `run`）；cloud 还缺 boto3、或 preflight 不过（表/桶/cluster/本 run 用到引擎的 task-def/事件驱动链三 Lambda——链上任一 Lambda 缺则提交会成功但 run 永不推进，故挡在提交前；**worker 镜像 variant 解析不了**同理挡在提交前——definition 里没有 revision 云端推进器就起不了 task）、或 `create_run` 时云端不可达。
   - 判定结果（PASSED / FAILED / …）**此刻还没出**，要用 `status` 去查。
 - **`status`：查询本身成功即 `0`；判定退出码只在读到终态时给出。**
   - `0` —— run 达终态 `PASSED`；**或**未达终态（`pending`/`running`）时的一次查询（查到了就算成功，非 `--wait` 不评判）。
@@ -226,13 +248,14 @@ deploy 会把自己的版本写成后端的版本戳，`run`/`submit`/`status --
 | `--quiet` | off | 不打逐事件进度（仍打文本汇总） |
 | `--report-dir` | `reports` | RunReport 归集落点；每次 run 落 `DIR/<run_id>/` |
 | `--no-report` | off | 跳过 RunReport 归集，且**不生成引擎原生产物**（Midscene 不出 report；Nova SDK 的 trajectory 关不掉、由 SDK 写进其自身临时目录、不上报），RunResult 里也不会出现任何产物路径——真「不生成 report」（ADR 0037 决策 3）。逃生舱：CI 只看退出码/JSON、或调试不想落盘。 |
-| `--steps-dir` | `./steps`（存在才用） | 你自己的确定性 step 目录（ADR 0037 决策 4）：worker 启动时排序递归加载其中的 step 定义文件、注册进确定性注册表（两引擎扫同一目录，各取自己的扩展名：`.py` / `.mts`·`.mjs`）。解析顺序 `--steps-dir` > env `GHERKAI_STEPS_DIR` > `./steps`；**显式给的目录不存在直接退 2**（静默跳过等于把这些 step 悄悄换成 AI 判定）。值绝对化后写进 run 的 definition，本机后台推进/接力的进程读回同一份。[cloud] 不生效——云端 worker 的 steps 烙在定制镜像里（给了只警告、不拦） |
+| `--steps-dir` | `./steps`（存在才用） | 你自己的确定性 step 目录（ADR 0037 决策 4）：worker 启动时排序递归加载其中的 step 定义文件、注册进确定性注册表（两引擎扫同一目录，各取自己的扩展名：`.py` / `.mts`·`.mjs`）。解析顺序 `--steps-dir` > env `GHERKAI_STEPS_DIR` > `./steps`；**显式给的目录不存在直接退 2**（静默跳过等于把这些 step 悄悄换成 AI 判定）。值绝对化后写进 run 的 definition，本机后台推进/接力的进程读回同一份。[cloud] 不生效——云端 worker 的 steps 烙在定制镜像里（给了只警告、不拦；云端选哪套 step 用下面的 `--worker-variant`） |
 | `--backend {local,cloud}` | `local` | 落库后端：local=文件落 `--report-dir`；cloud=状态落 DynamoDB、判定结果与报告落 S3（表/桶需预先建好） |
 | `--prefix` | `gherkai-` | [cloud] 资源名前缀：批量决定表/桶/cluster/task-def 默认名，**须与 `gherkai deploy --prefix` 一致**；多环境（prod-/stage-）切换用它。兜底 `AWS_RESOURCE_PREFIX` |
 | `--ddb-table` | `{prefix}runs` | [cloud] RunStore DynamoDB 表名（分区键 run_id + 排序键 item_type）；覆盖 prefix 默认；兜底 `AWS_DDB_TABLE` |
 | `--s3-bucket` | `{prefix}artifacts` | [cloud] S3 桶名（存判定结果与报告）；覆盖 prefix 默认；兜底 `AWS_S3_BUCKET` |
 | `--events-table` | `{prefix}events` | [cloud] events DynamoDB 表名（worker PutItem 目标，events-out）；覆盖 prefix 默认 |
 | `--cluster` | `{prefix}cluster` | [cloud] ECS cluster 名（Fargate 执行）；覆盖 prefix 默认 |
+| `--worker-variant` | 部署级默认指针 | [cloud] 云端 worker 镜像 variant（= 一套具名的确定性 step 集，见上『worker 镜像 variant』节）。不给则用后端的默认指针（`gherkai deploy` 初始化为 `base`）；提交侧 preflight 解析成各引擎的精确 task-def revision 写进 definition，缺映射即退 `2`、不回落。名字须合镜像 tag 字符集（字母数字下划线开头，其后可含 `.` `-`），不合法在开跑前就报错。local 忽略（给了打一行提示） |
 | `--subnet` | SSM | [cloud] Fargate 子网 ID（可多次给）；不给则读 SSM `/{prefix}backend/subnets`（`gherkai deploy` 写的生成 ID） |
 | `--security-group` | SSM | [cloud] Fargate 安全组 ID（可多次给）；不给则读 SSM `/{prefix}backend/security-groups` |
 | `--region` | — | AWS region（local+cloud 均用；解析链 `--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > profile 配置；喂 store + worker） |
@@ -262,6 +285,7 @@ deploy 会把自己的版本写成后端的版本戳，`run`/`submit`/`status --
 | `--backend {local,cloud}` | `local` | local=本机 per-run 进程推进；cloud=Fargate + 云端 Lambda 事件驱动链推进（提交完真关机也跑完） |
 | `--prefix` | `gherkai-` | [cloud] 资源名前缀（须与 `gherkai deploy --prefix` 一致）；`status` 查时须给同一 prefix。兜底 `AWS_RESOURCE_PREFIX` |
 | `--ddb-table` / `--s3-bucket` / `--events-table` / `--cluster` | `{prefix}…` | [cloud] 覆盖各 prefix 默认名（语义同 `run` 表） |
+| `--worker-variant` | 部署级默认指针 | [cloud] 语义同 `run` 表。**值随 definition 走**：解析出的各引擎 revision 写进 definition，云端推进器（kicker/reconciler）照它起 task ⇒ 整个 run 期间镜像固定 |
 | `--region` / `--profile` | — | AWS region/profile（喂 store + worker，同 `run`） |
 
 > `submit` 不收 `--subnet`/`--security-group`——cloud submit 只写 runs 表、不碰 SSM/ECS（ADR 0034）；Fargate 网络由 IaC 注给 reconciler/kicker Lambda 的 env。

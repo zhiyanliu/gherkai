@@ -26,10 +26,19 @@ cdk CLI 调用、VPC 档三态比对、Node 前置检查。
 以后贴的（本类）为准——两层不是重复真源，是「中立占位 + provider 精确化」。本类另经 `getattr` 容忍它们
 彻底缺席（别的皮）：缺 `--allow-vpc-change` = 一律不放行（fail-closed）、缺 `--require-approval` = 交给 cdk 默认。
 
+## worker 镜像子动词（ADR 0038 命令族）
+
+`add_arguments(deploy_parser)` 里自贴 `push-worker` / `list-workers` / `delete-worker` 三个子动词，各自
+`set_defaults(_deploy_verb=<本类方法>)`——皮的分派**先看 `_deploy_verb`**（皮一行不改，见其契约块）。
+云端写操作（推 ECR、注册 task-def revision、写 SSM 指针）全属部署变更，故住本包、不住 CLI 本体；实现在
+`workers.py`，容器引擎在 `container.py`。子动词只挂 deploy、不挂 destroy（理由见 `_declares_worker_subverbs`）。
+
 ## 退出码
 
-`0` 成功；`2` **前置/校验失败**（Node 缺失、VPC 档不符或无记录、读后端失败——用户可修，对齐 CLI 既有
-preflight 退 2 的口径）；其余 = cdk CLI 自己的返回码（原样透传，别把 cdk 的失败压成自己的码）。
+`0` 成功；`2` **前置/校验失败**（Node 缺失、VPC 档不符或无记录、读后端失败、容器引擎名不认、push-worker
+的架构/skew 拦截——用户可修，对齐 CLI 既有 preflight 退 2 的口径）；**`1`** = cdk 已成功而 worker 镜像四步失败
+（账户已被改动，重跑 `gherkai deploy` 幂等收敛，ADR 0038）；其余 = cdk CLI 自己的返回码（原样透传，
+别把 cdk 的失败压成自己的码）。
 """
 from __future__ import annotations
 
@@ -210,6 +219,95 @@ class Provider:
         # --region/--profile 归 provider（AWS 概念）：CLI 皮不在本子命令上声明，见模块头接缝契约。
         parser.add_argument("--region", default=None, metavar="R", help="AWS region（默认走 AWS_REGION/profile 配置）")
         parser.add_argument("--profile", default=None, metavar="P", help="AWS profile（默认 AWS_PROFILE）")
+        # worker 镜像子动词（ADR 0038 命令族）——**只贴在 deploy 上**，见 `_declares_worker_subverbs`。
+        if self._declares_worker_subverbs(parser):
+            # deploy 自己也消费容器引擎（第 2 步同步基底 pull/push）——flag 贴在 deploy 上，子动词 push-worker 再贴
+            # 一份（子 parser 是独立 namespace，SUPPRESS 默认值让「deploy --container-engine X push-worker …」不被覆写）。
+            self._add_container_engine_flag(parser)
+            self._add_worker_subverbs(parser)
+
+    # ---- worker 镜像子动词（ADR 0038「命令族」；接缝 = 皮先看 args._deploy_verb，见模块头/皮的契约块）----
+    @staticmethod
+    def _declares_worker_subverbs(parser: argparse.ArgumentParser) -> bool:
+        """这个 parser 是 **deploy** 的那个吗？
+
+        皮对 deploy 与 destroy **各调一次** `add_arguments`（两者共用 provider 的 context 旋钮）。子动词只能挂
+        deploy：挂上 destroy 的后果不是「多个没用的命令」而是**危险**——皮的 destroy 分派根本不看
+        `_deploy_verb`，于是 `gherkai destroy push-worker …` 会解析通过、然后**去拆栈**。
+        判据取 `prog` 末段（皮建的是 `sub.add_parser("deploy")` → prog = `<皮> deploy`）；认不出就不贴，
+        降级是安全的（子动词本来也只经 deploy 这条路可达）。
+        """
+        return (parser.prog or "").split()[-1:] == ["deploy"]
+
+    def _add_worker_subverbs(self, parser: argparse.ArgumentParser) -> None:
+        """`push-worker` / `list-workers` / `delete-worker` 三个子动词（ADR 0038）。
+
+        **`required=False`（argparse 默认）是硬约束**：deploy 的默认动作是真部署，裸 `gherkai deploy` 必须照样
+        解析得过（皮的契约块明写）。每个子动词 `set_defaults(_deploy_verb=<绑定方法>)`，皮据此优先分派。
+        """
+        sub = parser.add_subparsers(
+            title="worker 镜像子命令（ADR 0038；不给则本命令 = 部署/更新后端）", metavar="[子命令]",
+        )
+        push = sub.add_parser(
+            "push-worker", help="[部署方] 推一个本地镜像并注册为某引擎的一个 variant",
+            description="推送一个**已 build 好**的本地镜像到本 prefix 的 ECR，并把它注册成该引擎的一个 variant "
+                        "（一个 task-def revision，镜像按 digest 引用）。一次一个引擎；两个引擎跑两次。"
+                        "镜像构建不归 gherkai——三行定制镜像模板见 deploy_aws/README.md。",
+        )
+        push.add_argument("image", metavar="<本地镜像>", help="本地镜像名（任何名字，如 acme-novaact:login）")
+        push.add_argument("--engine", required=True, choices=names.ENGINES, help="这个镜像是哪个引擎的 worker")
+        push.add_argument("--variant", required=True, metavar="名",
+                          help="variant 名（一套具名的确定性 step 集，自取：login / checkout-v2；"
+                               "ECR tag = <CLI 版本>-<名>）")
+        push.add_argument("--set-default", action="store_true",
+                          help="同时把默认指针指向这个 variant（提交时不给 --worker-variant 就用它）")
+        self._add_container_engine_flag(push)
+        self._add_locator_flags(push)
+        push.set_defaults(_deploy_verb=self.push_worker)
+
+        listing = sub.add_parser(
+            "list-workers", help="[部署方] 列各引擎当前版本的 variant / digest / 默认指针 / 待清理 revision",
+            description="按引擎列出**当前版本**（= 本 CLI 自身版本）的 variant、digest、推送时间与 revision，"
+                        "加上默认指针，以及已退休待清理与孤儿 revision。",
+        )
+        self._add_locator_flags(listing)
+        listing.set_defaults(_deploy_verb=self.list_workers)
+
+        delete = sub.add_parser(
+            "delete-worker", help="[部署方] （尚未提供）删一个 variant 及其 ECR/SSM 残留",
+            description="尚未提供：落地时套 push-worker 同一套清理语义（退休 tag + 静默期 + 在跑 run 安全阀），"
+                        "并连带清旧版本 variant 的 ECR tag / untagged 层与 SSM 映射。",
+        )
+        self._add_locator_flags(delete)
+        delete.set_defaults(_deploy_verb=self.delete_worker)
+
+    @staticmethod
+    def _add_container_engine_flag(parser: argparse.ArgumentParser) -> None:
+        """`--container-engine`（ADR 0038「容器引擎口子」）：这一期只 docker，别的名字退 2、不静默回落。"""
+        from gherkai_deploy_aws.container import (
+            CONTAINER_ENGINE_ENV,
+            DEFAULT_CONTAINER_ENGINE,
+            SUPPORTED_ENGINES,
+        )
+
+        parser.add_argument(
+            "--container-engine", default=argparse.SUPPRESS, metavar="名",
+            help=f"用哪个容器引擎（默认 {DEFAULT_CONTAINER_ENGINE}，或 env {CONTAINER_ENGINE_ENV}）；"
+                 f"这一期只实装 {'/'.join(SUPPORTED_ENGINES)}",
+        )
+
+    @staticmethod
+    def _add_locator_flags(parser: argparse.ArgumentParser) -> None:
+        """子动词也收 `--prefix` / `--region` / `--profile`。
+
+        **`default=SUPPRESS` 是必须的**：argparse 的子 parser 在**新 namespace** 里解析、再整体覆盖回父
+        namespace——带普通默认值（None）会把父层已经解析到的 `deploy --prefix prod- push-worker …` 覆写成 None
+        （argparse 的经典坑）。SUPPRESS = 子层没给就不产出这个属性、父层的值自然留住，两处给法都成立。
+        """
+        parser.add_argument("--prefix", default=argparse.SUPPRESS, metavar="P",
+                            help="资源名前缀（须与 `gherkai deploy` / run/submit 的 --prefix 一致）")
+        parser.add_argument("--region", default=argparse.SUPPRESS, metavar="R", help="AWS region")
+        parser.add_argument("--profile", default=argparse.SUPPRESS, metavar="P", help="AWS profile")
 
     # ---- 命令面（CLI 皮据它自己的 flag 选调；每个方法自成一次完整调用）----
     def deploy(self, args) -> int:
@@ -220,9 +318,22 @@ class Provider:
         if node_error:
             print(node_error, file=sys.stderr)
             return EXIT_PRECONDITION
+        # 容器引擎的两类问题也在这一档处置（本地、不花网络、不要凭证——这一期 deploy 机器需要容器引擎，
+        # 同步基底要 pull/push，ADR 0038「容器引擎口子」）：
+        # - **名字不认**（env/flag 给了 podman）→ 纯参数问题，退 2、绝不动账户；
+        # - **装了但不可用 / 没装** → 只警告：退码语义归 cdk 之后的四步（账户已改 → 退 1、重跑幂等收敛）。
+        #   仍要提前说一声——cdk deploy 是分钟级动作，让人跑完才知道「还差个 docker」是白等。
+        engine = self._container_engine(args)
+        if engine is None:
+            return EXIT_PRECONDITION
         missing = self._require_vpc(args)
         if missing is not None:
             return missing
+        # 探活警告放在 `--vpc` 校验之后：缺 `--vpc` 会直接退 2，先打两行 docker 警告只会盖住真因。
+        probe = engine.probe()
+        if probe:
+            print(f"警告：{probe}\n     stack 会照常部署，但之后的 worker 镜像步骤（同步基底）会失败"
+                  f"（退 1）；装好容器引擎后重跑 `gherkai deploy` 幂等收敛。", file=sys.stderr)
         blocked = self._guard_vpc_spec(args)
         if blocked is not None:
             return blocked
@@ -234,7 +345,9 @@ class Provider:
             print("提示：cdk deploy 失败原因见上方 cdk 输出。首次在某账户/region 部署最常见的一种是环境未 bootstrap"
                   "——若报错提到 bootstrap，先跑 `gherkai deploy --bootstrap`（同 --profile/--region）。",
                   file=sys.stderr)
-        return rc
+            return rc
+        # cdk 成功 → worker 镜像四步（ADR 0038）。第 1 步（登记模板）已随 cdk 事务落地。
+        return self._worker_image_steps(args)
 
     def destroy(self, args) -> int:
         """销毁 stack。**表/桶/ECR 是 `RETAIN`、不随之删**（防误删，ADR 0033）——残留清单见 README。
@@ -310,6 +423,78 @@ class Provider:
             except FileNotFoundError as exc:
                 print(f"起不动 cdk CLI：{exc}", file=sys.stderr)
                 return EXIT_PRECONDITION
+
+    # ---- 命令面（worker 镜像族，ADR 0038；皮经 args._deploy_verb 分派到这三个）----
+    def push_worker(self, args) -> int:
+        """`gherkai deploy push-worker <镜像> --engine … --variant …`（八步见 `workers.push_worker`）。"""
+        from gherkai_deploy_aws import workers
+
+        engine = self._container_engine(args)
+        if engine is None:
+            return EXIT_PRECONDITION
+        target = self._resolve_target(args)
+        return workers.push_worker(
+            args.image, engine=args.engine, variant=args.variant,
+            set_default=bool(getattr(args, "set_default", False)),
+            # tag 用的版本 = **CLI 自身版本**（与写进 SSM 的戳同一个，ADR 0038「preflight」按它解析）
+            cli_version=self._resolve_version(args),
+            prefix=target.prefix, region=target.region, profile=target.profile, container=engine,
+        )
+
+    def list_workers(self, args) -> int:
+        """`gherkai deploy list-workers`——只读（SSM + ECS describe），不碰容器引擎。"""
+        from gherkai_deploy_aws import workers
+
+        target = self._resolve_target(args)
+        return workers.list_workers(prefix=target.prefix, cli_version=self._resolve_version(args),
+                                    region=target.region, profile=target.profile)
+
+    def delete_worker(self, args) -> int:
+        """留的口子（ADR 0038「命令族」）：**尚未提供**，退 2 说清为什么与将来怎么落。
+
+        为何占位而不干脆不给这个子命令：不给的话用户敲了只会得到 argparse 的「invalid choice」，读不出
+        「这件事是被想过、押后了」——而它押后的是**回收策略**（ECR untagged 层、旧版本 variant），不是忘了。
+        """
+        print("`delete-worker` 尚未提供。\n"
+              "它要连带定回收策略（旧版本 variant 的 ECR tag / 重推顶掉的 untagged 层 / SSM 映射），"
+              "并套 push-worker 同一套清理语义（退休 tag + 静默期 + 在跑 run 安全阀）——属 ADR 0038 重议闸门。\n"
+              "当前可用的：`gherkai deploy list-workers` 看有哪些 variant 与待清理 revision；"
+              "重推同名 variant 直接覆盖，无需先删。", file=sys.stderr)
+        return EXIT_PRECONDITION
+
+    # ---- 内部：容器引擎（ADR 0038「容器引擎口子」）----
+    @staticmethod
+    def _container_engine(args, *, quiet: bool = False):
+        """解析 `--container-engine` / env → 引擎对象；本期未实装的名字 → 打诊断并返回 None（调用点退 2）。
+
+        **只解析、不探活**：探活（`probe()`）归真要用它的那一步——push-worker 在 skew 前置之后探（skew 拦下的
+        人不该先被要求装 docker），deploy 的四步在 cdk 之后探（见 `_worker_image_steps`）。
+        """
+        from gherkai_deploy_aws.container import UnsupportedContainerEngine, resolve_container_engine
+
+        try:
+            return resolve_container_engine(getattr(args, "container_engine", None))
+        except UnsupportedContainerEngine as exc:
+            if not quiet:
+                print(str(exc), file=sys.stderr)
+            return None
+
+    def _worker_image_steps(self, args) -> int:
+        """cdk 成功之后的 worker 镜像第 2/3/4 步 + 清理 pass（第 1 步是 stack 资源、随 cdk 事务）。
+
+        **不做版本 skew 前置**：deploy 就是改戳的那个动作（ADR 0038）。失败退 1（不是 2）——账户已经被 cdk
+        改过了，压成「前置失败」会让人以为什么都没发生。
+        """
+        from gherkai_deploy_aws import workers
+
+        engine = self._container_engine(args)
+        if engine is None:  # `--container-engine podman` 一类：stack 已生效，但这是参数问题、指向重议闸门
+            return workers.EXIT_FAILED
+        target = self._resolve_target(args)
+        return workers.run_deploy_steps(
+            prefix=target.prefix, version=self._resolve_version(args), container=engine,
+            region=target.region, profile=target.profile,
+        )
 
     @staticmethod
     def _require_vpc(args) -> int | None:

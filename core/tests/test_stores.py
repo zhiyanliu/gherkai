@@ -365,6 +365,45 @@ def test_run_meta_steps_dir_round_trip():
     assert run_meta_from_dict({"run_id": "legacy", "created_at": "", "jobs": []}).steps_dir is None
 
 
+def test_run_meta_worker_fields_round_trip():
+    """RunMeta.worker_variant / worker_task_defs（ADR 0038）：带值往返不丢；None 省键（local 档 / 旧落盘）。
+
+    载体在 definition 的理由与 max_concurrency 同源（ADR 0034「随 definition 走、宿主只读回」）：起 task 的宿主
+    （同步 run 的 FargateEngine / kicker / reconciler）与提交进程分离，只有随 META 持久化才到得了推进器；
+    且「用的是哪套确定性 step 集」影响判定可复现性、本就属 run 定义。
+    """
+    import dataclasses
+
+    from gherkai_core.serialize import run_meta_from_dict, run_meta_to_dict
+    meta = _sample_run("wk-run").run_meta
+    d0 = run_meta_to_dict(meta)
+    assert "worker_variant" not in d0 and "worker_task_defs" not in d0  # 默认 None → 双双 omit
+    got0 = run_meta_from_dict(d0)
+    assert got0.worker_variant is None and got0.worker_task_defs is None
+
+    arns = {"novaact": "arn:aws:ecs:us-east-1:1:task-definition/gherkai-novaact-worker:7",
+            "midscene": "arn:aws:ecs:us-east-1:1:task-definition/gherkai-midscene-worker:3"}
+    meta2 = dataclasses.replace(meta, worker_variant="login", worker_task_defs=arns)
+    d2 = run_meta_to_dict(meta2)
+    assert d2["worker_variant"] == "login" and d2["worker_task_defs"] == arns
+    got2 = run_meta_from_dict(d2)
+    assert got2.worker_variant == "login" and got2.worker_task_defs == arns
+    assert got2 == meta2  # 逐字段恒等（往返忠实）
+
+    # 各自独立 omit（序列化层不替语义层做「有 A 必有 B」的把关）
+    only_variant = dataclasses.replace(meta, worker_variant="base")
+    assert run_meta_to_dict(only_variant) .get("worker_variant") == "base"
+    assert "worker_task_defs" not in run_meta_to_dict(only_variant)
+
+    # 旧落盘（引入本 ADR 前提交的 definition，两键皆无）读回 None——宿主据此走默认指针兼容路径
+    legacy = run_meta_from_dict({"run_id": "legacy", "created_at": "", "jobs": []})
+    assert legacy.worker_variant is None and legacy.worker_task_defs is None
+    # `is not None` 判（同 steps_dir）：空 dict 也忠实往返、不被悄悄变形成「缺失」
+    empty = dataclasses.replace(meta, worker_task_defs={})
+    assert run_meta_to_dict(empty)["worker_task_defs"] == {}
+    assert run_meta_from_dict(run_meta_to_dict(empty)).worker_task_defs == {}
+
+
 def test_run_meta_extra_http_headers_multiple_normalize_at_write_side():
     """≥2 个 header：写端按键排序规范化、读端原样保序 → 键值不丢、落盘键序确定，再往返逐字恒等。
 

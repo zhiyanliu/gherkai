@@ -273,6 +273,11 @@ def run_meta_to_dict(meta: RunMeta) -> dict:
         # steps_dir（ADR 0037 决策 4）omit-when-None，同 max_concurrency 的判据：`is not None`——空串这类
         # 无意义值也忠实往返，语义把关归组合根（提交侧解析）。省键=旧落盘兼容（读端 .get → None）。
         **({"steps_dir": meta.steps_dir} if meta.steps_dir is not None else {}),
+        # worker_variant / worker_task_defs（ADR 0038）omit-when-None，同 steps_dir 的判据。两者成对出现但
+        # **各自独立 omit**：序列化层不替语义层做「有 A 必有 B」的把关（那是提交侧组合根的事），忠实往返优先。
+        **({"worker_variant": meta.worker_variant} if meta.worker_variant is not None else {}),
+        **({"worker_task_defs": dict(meta.worker_task_defs)}
+           if meta.worker_task_defs is not None else {}),
     }
 
 
@@ -286,6 +291,9 @@ def run_meta_from_dict(d: dict) -> RunMeta:
         extra_http_headers=tuple(hdrs.items()) if hdrs else None,
         max_concurrency=d.get("max_concurrency"),  # 键缺失 → None（旧落盘兼容）
         steps_dir=d.get("steps_dir"),  # 键缺失 → None（旧落盘 / cloud 档不写此键，ADR 0037 决策 4）
+        worker_variant=d.get("worker_variant"),  # 键缺失 → None（旧落盘 / local 档，ADR 0038）
+        # dict 原样复制（键=engine 名，值=revision ARN）；键缺失 → None ⇒ 宿主走默认指针兼容路径
+        worker_task_defs=(dict(wtd) if (wtd := d.get("worker_task_defs")) is not None else None),
     )
 
 

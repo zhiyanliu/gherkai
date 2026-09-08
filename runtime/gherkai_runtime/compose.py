@@ -17,6 +17,7 @@ import shutil
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import Iterable, Mapping
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _dist_version
 from pathlib import Path
@@ -174,23 +175,31 @@ class WorkerNotFoundError(RuntimeError):
 
 
 class _UnavailableEngine:
-    """定位链 miss 的引擎腿（`build_engines` 的兜底，ADR 0037 决策 3）：一用即抛 WorkerNotFoundError。
+    """某引擎这次装配不出来时的「一用即抛」空腿——两档共用（local: ADR 0037 决策 3；cloud: ADR 0038）。
 
-    存在的理由：`build_engines` 恒建两条腿，而一次 run 往往只用一个引擎——某引擎运行时没装**不该连坐**
-    （dev 下 midscene 无已安装 npm 包即常态，须走定位链第一级 env 覆写）。装一条空腿保住「引擎名恒在册」
-    （resolver / list-engines 语义不变），把 miss 的爆点挪到真要 spawn 它那一刻，且爆的是带安装指引的
-    结构化异常——而非 resolver 的「未知引擎」（那会把「没装」误导成「名字拼错」）。
-    正门仍是调用点 preflight：`run`/`submit` 先对本次 plan 用到的引擎 `resolve_worker_cmd`、miss 即退 2。
+    存在的理由：两个 builder 都恒建两条腿，而一次 run 往往只用一个引擎——某引擎装配不出**不该连坐**
+    （local 档 dev 下 midscene 无已安装 npm 包即常态，须走定位链第一级 env 覆写；cloud 档则是「本 run 没用到
+    该引擎、故 definition 里也没解析它的 worker revision」，是正常态）。装一条空腿保住「引擎名恒在册」
+    （resolver / list-engines 语义不变），把 miss 的爆点挪到真要起它那一刻，且爆的是带修复指引的
+    结构化异常——而非 resolver 的「未知引擎」（那会把「没装/未解析」误导成「名字拼错」）。
+    正门仍是调用点 preflight：`run`/`submit` 先对本次 plan 用到的引擎 `resolve_worker_cmd`（local）/
+    解析 worker variant（cloud）、miss 即退 2。
+
+    **`run_scope` 与 `start_scope` 都抛**：两档的宿主入口不同（同步 run 走 `run_scope`、无状态推进器的
+    CloudLauncher 走 `start_scope`），只堵一个会让另一档退化成 `AttributeError`（丢掉带指引的异常）。
     """
 
-    def __init__(self, miss: WorkerNotFoundError) -> None:
+    def __init__(self, miss: Exception) -> None:
         self._miss = miss
 
     def run_scope(self, job, raw_sink=None):
         raise self._miss
 
+    def start_scope(self, job):
+        raise self._miss
 
-def _is_pure_release(v: str) -> bool:
+
+def is_pure_release(v: str) -> bool:
     """版本是否「纯发行版」（PEP 440：无 .dev / .post / 本地段）——定位链第四级的门槛之一。
 
     dev/post/本地段版本**不可能存在于 PyPI/npm**（它们由 uv-dynamic-versioning 从 tag 之后的 commit 派生，
@@ -203,6 +212,9 @@ def _is_pure_release(v: str) -> bool:
     except InvalidVersion:
         return False
     return not (pv.is_devrelease or pv.is_postrelease or pv.local)
+
+
+_is_pure_release = is_pure_release  # 模块内旧名（定位链/skew 判据处仍用）；跨包（deploy 的基底同步）用公开名
 
 
 def resolve_worker_cmd(engine: str, *, version: str | None = None) -> WorkerCmd:
@@ -699,7 +711,8 @@ def resolve_network(
 
 def build_fargate_engines(
     *, run_id: str, prefix: str, cluster: str, events_table: str, bucket: str, report_dir: str,
-    network_config: dict, region: str | None = None, profile: str | None = None,
+    network_config: dict, worker_task_defs: Mapping[str, str],
+    region: str | None = None, profile: str | None = None,
     extra_http_headers: dict[str, str] | None = None,
     ecs=None, s3=None, ddb_events_table=None,
     no_artifacts: bool = False,
@@ -707,7 +720,16 @@ def build_fargate_engines(
     """每引擎一个 FargateEngine（对称 build_engines 的 SubprocessEngine dict；core 引擎无关，ADR 0026）。
 
     `--backend cloud` 用它替代 build_engines——决策 A（cloud ⇒ Fargate 执行）从设计落到 CLI 的动作点。
-    按 job.engine 选 task-def（`{prefix}{engine}-worker`）；boto3 句柄组合根注入（adapter 不自建，ADR 0016）。
+    boto3 句柄组合根注入（adapter 不自建，ADR 0016）。
+
+    **`worker_task_defs`（引擎 → task-def **revision** ARN）必给、无缺省**（ADR 0038 不变量「运行时只用
+    definition 里的显式 revision，永不用 family 取最新」）：传 family 名会让 ECS 取该 family 最新 ACTIVE
+    revision——多 variant 下任何一次 `push-worker` 都会劫持在跑的 run（中途换 step 集）。**故意不给缺省值**：
+    缺省成 family 名就是把这条不变量做成「忘了传就静默破」，改成必给关键字 → 漏传即 `TypeError`，在装配点
+    就炸。真值来源两条（都在调用方，本函数只认 ARN）：definition 的 `RunMeta.worker_task_defs`（正常路径，
+    提交侧 preflight 解析）、`resolve_default_worker_task_defs`（旧 definition 的兼容路径）。
+    映射里**没有的引擎装一条 `_UnavailableEngine` 空腿**（一用即抛、点名该引擎）——本 run 没用到的引擎不该
+    连坐，而真去起它时爆的是带指引的异常、不是 `KeyError`。
     - run_id：拼 events PK（`new_run_id()` 后注入，对称 store）。
     - **profile 不传给 FargateEngine**（正确的非对称，ADR 0016 决策 C）：容器用 task role；region 传（已落实成
       具体字符串、经 RunTask overrides 注入 worker）。
@@ -756,9 +778,18 @@ def build_fargate_engines(
     engine_env = {"novaact": {"NOVA_ACT_TIMEOUT_S": str(NOVA_ACT_TIMEOUT_S)}}
 
     def _engine(engine: str) -> Engine:
+        revision_arn = worker_task_defs.get(engine)
+        if revision_arn is None:
+            # 本 run 没解析该引擎的 worker revision（正常态：没用到它）——空腿，真去起才抛（见 _UnavailableEngine）。
+            return _UnavailableEngine(WorkerVariantError(
+                f"引擎 {engine!r} 的 worker task-def revision 未随本 run 解析——definition 的 worker_task_defs "
+                f"只覆盖 {sorted(worker_task_defs) or '（空）'}。若本 run 真要跑该引擎，重新提交（提交侧 preflight "
+                f"会按本 run 用到的引擎逐个解析 variant）。",
+                engine=engine))
         return FargateEngine(
             ecs_client=ecs, s3_client=s3, ddb_events_table=ddb_events_table,
-            run_id=run_id, cluster=cluster, task_definition=task_def_name(prefix, engine),
+            # 显式 revision ARN（ADR 0038 不变量）——**绝不传 family 名**。
+            run_id=run_id, cluster=cluster, task_definition=revision_arn,
             network_config=network_config, job_s3=job_s3, events_table_name=events_table,
             container_name=container_name(engine), artifact_s3=artifact_s3,
             sdk_artifact_dir_env=sdk_env_by_engine.get(engine, {}),
@@ -812,6 +843,23 @@ def _release_key(v: str) -> tuple[int, ...]:
     return Version(v).release
 
 
+def _release_cmp(a: str, b: str) -> int | None:
+    """比两个版本的 **release 段**：`a<b` → -1、相等 → 0、`a>b` → 1；**任一侧非纯发行版 → None（无从比较）**。
+
+    两侧位数不同（`1.4` vs `1.4.0`）时补零再比，避免元组字典序把 `1.4` 判成小于 `1.4.0`。
+    抽成一处是因为有两个消费者——`check_version_skew` 的三态判定与 worker variant 解析失败时的提示语分叉
+    （ADR 0038：CLI 与后端同版本 → 引导去 push-worker；CLI 旧于后端 → 引导升级 CLI）。补零/纯净判据在两处
+    各写一遍必漂。
+    """
+    if not (a and b and _is_pure_release(a) and _is_pure_release(b)):
+        return None
+    ra, rb = _release_key(a), _release_key(b)
+    n = max(len(ra), len(rb))
+    ra += (0,) * (n - len(ra))
+    rb += (0,) * (n - len(rb))
+    return (ra > rb) - (ra < rb)
+
+
 def check_version_skew(ssm_version: str | None, cli_version: str | None) -> tuple[str, str]:
     """比 CLI 版本与后端版本戳 → `(verdict, message)`，verdict ∈ ok/warn/block/skip（ADR 0037 决策 7）。
 
@@ -839,18 +887,15 @@ def check_version_skew(ssm_version: str | None, cli_version: str | None) -> tupl
         )
     if not mine:
         return SKEW_SKIP, "提示：跳过版本比对——本机未以包形式安装（源码直跑），取不到自身版本。"
-    if not (_is_pure_release(mine) and _is_pure_release(ssm_version)):
+    cmp = _release_cmp(mine, ssm_version)  # None = 任一侧非纯发行版（判序 3）；补零比较在 _release_cmp
+    if cmp is None:
         return SKEW_SKIP, (
             f"提示：跳过版本比对——CLI {mine} / 后端 {ssm_version} 中有非纯发行版本"
             f"（.dev/.post/本地段，逐提交前进，逐字比会把每次都判成 skew）。"
         )
-    r_mine, r_backend = _release_key(mine), _release_key(ssm_version)
-    n = max(len(r_mine), len(r_backend))  # 两侧位数不同则补零后比（见 docstring 判序 4）
-    r_mine += (0,) * (n - len(r_mine))
-    r_backend += (0,) * (n - len(r_backend))
-    if r_mine == r_backend:
+    if cmp == 0:
         return SKEW_OK, ""
-    if r_mine > r_backend:
+    if cmp > 0:
         return SKEW_BLOCK, (
             f"版本 skew：本机 CLI {mine} 新于后端 {ssm_version}——拒绝执行（ADR 0037 决策 7，无放行口：新 CLI "
             f"写的任务定义由旧后端读是真风险）。两条出路：\n"
@@ -864,15 +909,253 @@ def check_version_skew(ssm_version: str | None, cli_version: str | None) -> tupl
 
 
 def check_backend_skew(*, prefix: str, cli_version: str | None, region=None, profile=None,
-                       ssm=None) -> tuple[str, str]:
+                       ssm=None) -> tuple[str, str, str | None]:
     """读后端版本戳 + 判 skew 一步到位（ADR 0037 决策 7）——**编排住产品本体、不住入口皮**：CLI / WebUI /
     推进器任何组合根要做「自己 vs 后端」比对都调这一处，判据、措辞与「戳缺失→警告不拦」的分叉单点维护。
     **调用次序约定：先于 `preflight_cloud_resources`**——skew 的修复动作是部署方跑一次 `gherkai deploy`，那一步
     同时把资源建齐/补齐；先报「表不存在」只会把人引去查 `--prefix`、绕一圈回到同一个动作。
     读戳的异常（凭证/region/权限）原样抛，由调用方归到自己的退出码层（与 `read_backend_version` 一致）。
+    **戳一并返回**（第三元）：调用方后续的 worker variant 解析（ADR 0038）要拿同一个戳给出 skew 感知的提示语，
+    全程只读一次 SSM、不让调用方为了拿戳绕开本函数自己读一遍。
     """
     stamp = read_backend_version(prefix=prefix, region=region, profile=profile, ssm=ssm)
-    return check_version_skew(stamp, cli_version)
+    verdict, message = check_version_skew(stamp, cli_version)
+    return verdict, message, stamp
+
+
+# ============================================================================
+# worker variant 解析（ADR 0038）：variant 名 → 各引擎的 task-def **revision** ARN。
+# **住产品本体、不住入口皮**：提交侧 preflight（严格退 2 + 打印）与云端推进器的兼容回落读的是同一批 SSM
+# 参数、同一套 miss 判据、同一套提示语分叉——两处各写一遍必漂（同 names 抽包、同 check_backend_skew 的理由）。
+# ============================================================================
+
+
+@dataclass(frozen=True)
+class WorkerResolution:
+    """一个引擎的 worker variant 解析结果（ADR 0038「运行时与 preflight」）。
+
+    `revision_arn` 是**唯一进 RunTask 的字段**（不变量：显式 revision、永不 family）；`digest` / `template_arn`
+    供 preflight 打印与 `list-workers` 展示「这次跑的到底是哪份镜像、从哪个模板派生」——「用的是哪份可见、可查」
+    是本 ADR 要解的问题之一，故一起带回来、不让调用方二次读 SSM。
+    """
+
+    engine: str
+    variant: str
+    revision_arn: str
+    digest: str
+    template_arn: str
+
+
+class WorkerVariantError(Exception):
+    """worker variant 解析失败（ADR 0038）——**消息本身即给用户看的整句**（含修复动作），调用点直接打印后退 2。
+
+    `engine` / `variant` 供调用点做分组/结构化展示（如「哪个引擎缺」）；两者都可能是 None——默认指针本身缺失
+    时还没轮到任何引擎、也没有 variant 名可言。
+    **绝不在任何 miss 分支回落**（默认指针 / family 最新 ACTIVE / 模板 revision 都不回落，见 ADR 0038 被拒方案）：
+    回落是静默换 step 集，与「不判 steps 内容、用哪份由使用方声明」这条直接矛盾。
+    """
+
+    def __init__(self, message: str, *, engine: str | None = None, variant: str | None = None) -> None:
+        super().__init__(message)
+        self.engine = engine
+        self.variant = variant
+
+
+def _make_ecr_client(*, region, profile):
+    """boto3 ecr client（按 digest `describe_images` 核镜像还在，ADR 0038 preflight「存在性」一项）。"""
+    import boto3
+    return boto3.session.Session(profile_name=profile, region_name=region).client("ecr")
+
+
+def _ssm_get(ssm, path: str) -> str | None:
+    """读一个 SSM String 参数 → 值（strip 后空串视作缺失）；**`ParameterNotFound` → None，其余异常照抛**。
+
+    把「参数不在」与「凭证/权限/网络坏了」分开：前者是本 ADR 各 miss 分支要翻成带指引提示的正常态，后者该
+    原样冒泡给入口皮归到自己的退出码层（对齐 `read_backend_version` 的处理）。
+    """
+    try:
+        resp = ssm.get_parameter(Name=path)
+    except Exception as e:
+        err = getattr(e, "response", None)
+        code = (err or {}).get("Error", {}).get("Code") if isinstance(err, dict) else None
+        if code == "ParameterNotFound":
+            return None
+        raise
+    return (resp["Parameter"]["Value"] or "").strip() or None
+
+
+def read_worker_default(*, prefix: str, region=None, profile=None, ssm=None) -> str | None:
+    """读部署级默认 variant 指针（SSM `worker-default`，ADR 0038）。缺失 → None（调用方决定怎么报）。
+
+    单独公开是因为有三个消费者：两个解析函数（variant 缺省档）与推进器的兼容路径日志（要点名解析到了哪个
+    variant——「用的是哪份」必须在日志里可见）。
+    """
+    if ssm is None:
+        ssm = _make_ssm_client(region=region, profile=profile)
+    return _ssm_get(ssm, ssm_path(prefix, _names.WORKER_DEFAULT_KEY))
+
+
+def _no_default_pointer_error(prefix: str) -> WorkerVariantError:
+    return WorkerVariantError(
+        f"后端没有 worker 默认 variant 指针（SSM {ssm_path(prefix, _names.WORKER_DEFAULT_KEY)}）——"
+        f"这个部署还没走过 worker 镜像交付的初始化。请部署方跑一次 `gherkai deploy`（会把基底同步成 "
+        f"`base` 并把默认指针初始化为它），或提交时用 `--worker-variant <名>` 显式指定。"
+    )
+
+
+def _read_worker_image_record(ssm, *, prefix: str, engine: str, tag: str) -> dict | None:
+    """读 `worker-image/<engine>/<tag>` 的 JSON 记录 → dict；参数不在 → None。
+
+    JSON 畸形（人手改坏参数）翻成 `WorkerVariantError`——不让 `json.JSONDecodeError` 裸奔到入口皮（那条
+    错误看不出是哪个 SSM 参数坏了）。
+    """
+    import json as _json
+
+    path = ssm_path(prefix, _names.worker_image_key(engine, tag))
+    raw = _ssm_get(ssm, path)
+    if raw is None:
+        return None
+    try:
+        rec = _json.loads(raw)
+    except ValueError as e:
+        raise WorkerVariantError(
+            f"SSM 参数 {path!r} 的值不是合法 JSON（{e}）——预期 `push-worker` 写入的 "
+            f"{{template_arn, revision_arn, digest, pushed_at}} 记录。重推该 variant 可覆盖修复。",
+            engine=engine) from e
+    if not isinstance(rec, dict) or not rec.get("revision_arn") or not rec.get("digest"):
+        raise WorkerVariantError(
+            f"SSM 参数 {path!r} 的记录缺 revision_arn/digest——重推该 variant 可覆盖修复。", engine=engine)
+    return rec
+
+
+def _variant_miss_hint(*, engine: str, variant: str, tag: str, what: str,
+                       cli_version: str, backend_version: str | None) -> str:
+    """variant 某一环 miss 时的整句提示——**按版本 skew 分叉**（ADR 0038「preflight」条）。
+
+    CLI **旧于**后端（决策 7 里「警告不拦」的那一档）时不能引导去 `push-worker`：那会让人推一个**旧版本
+    命名空间**的 tag，推完提交侧还是解析不到当前后端版本的映射、原地绕圈。此档一律引导升级 CLI。
+    其余档（同版本 / 无从比较 / 无戳）引导 push-worker——这是真正缺镜像时的修复动作。
+    """
+    if _release_cmp(cli_version, backend_version or "") == -1:
+        return (f"引擎 {engine} 的 worker variant {variant!r} 解析失败（{what}）：本机 CLI {cli_version} "
+                f"旧于后端 {backend_version}，你看到的是后端版本命名空间下没有这份镜像。"
+                f"先把 CLI 升到后端版本（uv tool upgrade gherkai，或 uvx --from 'gherkai=={backend_version}' gherkai …）"
+                f"再提交——**别**照旧版本推镜像（推的 tag 后端不解析）。")
+    return (f"引擎 {engine} 的 worker variant {variant!r} 解析失败（{what}，镜像 tag {tag}）。"
+            f"让部署方推上去：gherkai deploy push-worker <本地镜像> --engine {engine} --variant {variant}"
+            f"（镜像按 ADR 0038 的三行模板 build，必须带 --platform linux/amd64）。")
+
+
+def resolve_worker_variant(
+    *, prefix: str, variant: str | None, engines: Iterable[str], cli_version: str,
+    backend_version: str | None, region=None, profile=None, ssm=None, ecs=None, ecr=None,
+) -> dict[str, WorkerResolution]:
+    """把 variant 名解析成**本 run 用到的每个引擎**的 revision ARN（ADR 0038「运行时与 preflight」）。
+
+    提交侧 preflight 的正门：解析成功 → 调用方把结果写进 definition（`RunMeta.worker_variant` /
+    `worker_task_defs`）；任一环 miss → 抛 `WorkerVariantError`（调用点退 2）、**绝不回落默认/family/模板**。
+
+    三环校验，全是存在性与一致性、**不判 steps 内容**（越权替使用方判断，见 ADR 0038 被拒方案）：
+    ① SSM `worker-image/<engine>/<image_tag(cli_version, variant)>` 有映射；② 其 `revision_arn` 经
+    `DescribeTaskDefinition` 仍 `ACTIVE`（退休清理可能已把它注销）；③ 其 `digest` 经 ECR
+    `describe_images` 仍在（有人手工删过镜像 → RunTask 会拖到 Fargate 启动期才炸 `manifest unknown`）。
+
+    **只按 `engines` 判**（= 本 run 实际用到的引擎），对齐既有 task-def preflight 的判据「不探全注册表——
+    没用到的引擎不该拦」：单引擎团队不必为另一个引擎凭空推镜像。
+    `variant=None` → 取部署级默认指针（缺失即抛，提示跑 `gherkai deploy`）。tag 由 `names.image_tag`
+    单点拼（推送方与本函数同一个函数，键不会两边算法不同而对不上）；`cli_version` 取不到（源码直跑）时
+    无从拼 tag，也抛——fail-loud 好过静默解析成别的版本。
+    句柄可注入（测试/复用同一 session）；未注入则惰性建。
+    """
+    if not cli_version:
+        raise WorkerVariantError(
+            "取不到本机 CLI 版本（未以包形式安装、源码直跑）——worker 镜像 tag 含 CLI 版本，无从解析。"
+            "装成包（uv tool install gherkai / uvx）后再提交 cloud 档。")
+    if ssm is None:
+        ssm = _make_ssm_client(region=region, profile=profile)
+    if variant is None:
+        variant = read_worker_default(prefix=prefix, ssm=ssm)
+        if variant is None:
+            raise _no_default_pointer_error(prefix)
+    tag = _names.image_tag(cli_version, variant)  # 非法 variant 名在此抛 ValueError（校验单点）
+    if ecs is None:
+        ecs = _make_ecs_client(region=region, profile=profile)
+    if ecr is None:
+        ecr = _make_ecr_client(region=region, profile=profile)
+
+    def _miss(engine: str, what: str) -> WorkerVariantError:
+        return WorkerVariantError(
+            _variant_miss_hint(engine=engine, variant=variant, tag=tag, what=what,
+                               cli_version=cli_version, backend_version=backend_version),
+            engine=engine, variant=variant)
+
+    out: dict[str, WorkerResolution] = {}
+    for engine in sorted(set(engines)):
+        rec = _read_worker_image_record(ssm, prefix=prefix, engine=engine, tag=tag)
+        if rec is None:
+            raise _miss(engine, "SSM 里没有这个（引擎，variant）的镜像映射")
+        revision_arn, digest = rec["revision_arn"], rec["digest"]
+        try:
+            td = ecs.describe_task_definition(taskDefinition=revision_arn)
+        except Exception as e:
+            if is_botocore_error(e):
+                raise _miss(engine, f"task-def revision {revision_arn} 已不可 Describe（可能已被清理删除）") from e
+            raise
+        if (td.get("taskDefinition", {}).get("status") or "").upper() != "ACTIVE":
+            raise _miss(engine, f"task-def revision {revision_arn} 不是 ACTIVE（已退休/注销，不能再起新 task）")
+        repo = _names.ecr_repo_name(prefix, engine)
+        try:
+            resp = ecr.describe_images(repositoryName=repo, imageIds=[{"imageDigest": digest}])
+        except Exception as e:
+            if is_botocore_error(e):
+                raise _miss(engine, f"ECR 仓库 {repo} 里按 digest {digest} 找不到镜像") from e
+            raise
+        if not resp.get("imageDetails"):
+            raise _miss(engine, f"ECR 仓库 {repo} 里按 digest {digest} 找不到镜像")
+        out[engine] = WorkerResolution(
+            engine=engine, variant=variant, revision_arn=revision_arn, digest=digest,
+            template_arn=rec.get("template_arn", ""))
+    return out
+
+
+def resolve_default_worker_task_defs(
+    *, prefix: str, engines: Iterable[str], backend_version: str | None,
+    region=None, profile=None, ssm=None,
+) -> dict[str, str]:
+    """**宿主的兼容路径**（ADR 0038「读侧兼容口径」）：definition 里没有 `worker_task_defs` 的 run，按**后端
+    当前默认指针**解析出引擎 → revision ARN。解析不出即抛，**绝不回落 family 最新 ACTIVE、绝不回落模板 revision**。
+
+    这样的 run 有两个来源：引入本机制的那次升级前提交、升级窗口内仍在跑的 run；以及旧 CLI 提交到新后端的 run
+    （ADR 0037 决策 7「CLI 旧于后端 → 警告不拦」允许）。用**后端**版本拼 tag（不是提交方 CLI 版本——definition
+    里根本没记，且后端只解析自己版本命名空间下的映射）。
+
+    比 `resolve_worker_variant` 少两环（不 Describe revision、不查 ECR digest）是有意的：这里跑在推进器
+    Lambda 的热路径上，而**它拿到的 ARN 立刻要交给 RunTask** ——revision 被注销/镜像被删的话 RunTask 自己就会
+    报，多两次 API 调用只是把同一个错误提前一点、换不来新信息。提交侧 preflight 的三环校验是为了「别让用户
+    提交完才发现」，宿主没有这个动机。
+    """
+    if ssm is None:
+        ssm = _make_ssm_client(region=region, profile=profile)
+    if not backend_version:
+        raise WorkerVariantError(
+            f"兼容路径无从解析 worker 镜像：读不到后端版本戳（SSM {ssm_path(prefix, 'version')}）——"
+            f"镜像 tag 含版本。请部署方跑一次 `gherkai deploy` 把戳写上（ADR 0037 决策 7）。")
+    variant = read_worker_default(prefix=prefix, ssm=ssm)
+    if variant is None:
+        raise _no_default_pointer_error(prefix)
+    tag = _names.image_tag(backend_version, variant)
+    out: dict[str, str] = {}
+    for engine in sorted(set(engines)):
+        rec = _read_worker_image_record(ssm, prefix=prefix, engine=engine, tag=tag)
+        if rec is None:
+            raise WorkerVariantError(
+                f"兼容路径解析失败：引擎 {engine} 在后端版本 {backend_version} 下没有默认 variant {variant!r} "
+                f"的镜像映射（SSM {ssm_path(prefix, _names.worker_image_key(engine, tag))}）。"
+                f"部署方跑 `gherkai deploy`（同步基底并初始化默认指针），或推上这个 variant："
+                f"`gherkai deploy push-worker <本地镜像> --engine {engine} --variant {variant}`。",
+                engine=engine, variant=variant)
+        out[engine] = rec["revision_arn"]
+    return out
 
 
 def preflight_cloud_resources(

@@ -615,7 +615,11 @@ def test_resolve_network_empty_ssm_fails_fast():
         assert "/g-backend/subnets" in str(e)  # 点名路径，便于排障
 
 
-# ---- build_fargate_engines（ADR 0033/0016 决策 A/C）：按引擎选 task-def、注 region 不注 profile ----
+# ---- build_fargate_engines（ADR 0033/0016 决策 A/C + 0038 显式 revision）----
+_REV = {"novaact": "arn:aws:ecs:us-west-2:1:task-definition/prod-novaact-worker:7",
+        "midscene": "arn:aws:ecs:us-west-2:1:task-definition/prod-midscene-worker:3"}
+
+
 def test_build_fargate_engines_per_engine_taskdef_and_region_no_profile(monkeypatch):
     # 注入 fake FargateEngine 捕获构造参数（不连 AWS、不 require boto3）
     import gherkai_core.adapters.fargate_engine as fe
@@ -629,14 +633,14 @@ def test_build_fargate_engines_per_engine_taskdef_and_region_no_profile(monkeypa
     engines = compose.build_fargate_engines(
         run_id="rid-1", prefix="prod-", cluster="prod-cluster", events_table="prod-events",
         bucket="prod-artifacts", report_dir="runs", network_config={"subnets": ["subnet-x"]},
-        region="us-west-2", profile="myprof",
+        worker_task_defs=_REV, region="us-west-2", profile="myprof",
         ecs=object(), s3=object(), ddb_events_table=object(),  # 注入句柄免惰性建
     )
     assert set(engines) == {"novaact", "midscene"}
     by_engine = {k["task_definition"]: k for k in captured}
-    # 按引擎选 task-def（{prefix}{engine}-worker）
-    assert "prod-novaact-worker" in by_engine and "prod-midscene-worker" in by_engine
-    nova = by_engine["prod-novaact-worker"]
+    # **显式 revision ARN**（ADR 0038 不变量：永不传 family 名——family 取最新 ACTIVE 会被任何一次 push 劫持）
+    assert set(by_engine) == set(_REV.values())
+    nova = by_engine[_REV["novaact"]]
     assert nova["container_name"] == "novaact-worker"
     assert nova["run_id"] == "rid-1" and nova["cluster"] == "prod-cluster"
     assert nova["events_table_name"] == "prod-events"
@@ -651,7 +655,7 @@ def test_build_fargate_engines_per_engine_taskdef_and_region_no_profile(monkeypa
     # Nova act timeout **双端同源**（ADR 0024 grace 硬约束）：cloud 档也须显式注入——容器不继承本地 env，
     # 缺它则 worker 落回自带字面量、调 NOVA_ACT_TIMEOUT_S 只抬高 grace 下限、改不动容器内单 act 上界。
     assert nova["extra_env"]["NOVA_ACT_TIMEOUT_S"] == str(compose.NOVA_ACT_TIMEOUT_S)
-    mid = by_engine["prod-midscene-worker"]
+    mid = by_engine[_REV["midscene"]]
     assert mid["sdk_artifact_dir_env"] == {"MIDSCENE_RUN_DIR": "/tmp/gherkai-run/rid-1/midscene-run"}
     assert "NOVA_ACT_TIMEOUT_S" not in mid["extra_env"]  # 引擎特定值只给该引擎（Midscene 无可控 act timeout）
 
@@ -1062,15 +1066,16 @@ def test_skew_cli_version_is_mandatory_no_runtime_fallback():
 def test_check_backend_skew_reads_stamp_then_judges():
     """读戳 + 判定一步到位（编排住产品本体，入口皮只翻退出码）。"""
     ssm = _StampSsm("1.3.0")
-    verdict, msg = compose.check_backend_skew(prefix="prod-", cli_version="1.4.0", ssm=ssm)
+    verdict, msg, stamp = compose.check_backend_skew(prefix="prod-", cli_version="1.4.0", ssm=ssm)
     assert verdict == compose.SKEW_BLOCK and "gherkai deploy" in msg
+    assert stamp == "1.3.0"  # 戳一并返回：调用方的 variant 解析复用，不二次读 SSM
     assert ssm.reads == ["/prod-backend/version"]
 
 
 def test_check_backend_skew_missing_stamp_warns_not_raises():
     ssm = _StampSsm(None, error=_client_error("ParameterNotFound"))
-    verdict, msg = compose.check_backend_skew(prefix="g-", cli_version="1.4.0", ssm=ssm)
-    assert verdict == compose.SKEW_WARN and "gherkai deploy" in msg
+    verdict, msg, stamp = compose.check_backend_skew(prefix="g-", cli_version="1.4.0", ssm=ssm)
+    assert verdict == compose.SKEW_WARN and "gherkai deploy" in msg and stamp is None
 
 
 def test_check_backend_skew_propagates_read_errors():

@@ -369,13 +369,25 @@ def cloud_env(monkeypatch):
         yield {"runs": runs, "events": events}
 
 
-def _seed_run(runs_table, *, detached: bool, max_concurrency: int | None = None) -> DynamoDBRunStore:
+# 提交侧 preflight 解析出的 novaact worker revision ARN（ADR 0038）——**显式 revision、非 family 名**。
+# 绝大多数用例只关心「推进器认不认 definition 里的这一份」，故 _seed_run 默认带上它（= 打通后的正常形态）；
+# 兼容路径（definition 缺该字段）由下面专门那组用例显式置 None 来验。
+_WORKER_REV = "arn:aws:ecs:us-east-1:000000000000:task-definition/gherkai-novaact-worker:7"
+_SENTINEL = object()
+
+
+def _seed_run(runs_table, *, detached: bool, max_concurrency: int | None = None,
+              worker_task_defs=_SENTINEL) -> DynamoDBRunStore:
     """建一个单 job、全 pending 的 run（detached 标记按参数）——同 submit / 同步 cloud run 的 create_run 形态。"""
     store = DynamoDBRunStore(runs_table, detached=detached)
     job = Job(scope_id="a", scope_name="a", engine="novaact",
               scenarios=(Scenario(id="a:1", name="s", steps=(Step(0, "Given", "x"),)),))
+    if worker_task_defs is _SENTINEL:
+        worker_task_defs = {"novaact": _WORKER_REV}
     store.create_run(
-        RunMeta(run_id="run-1", created_at="t0", jobs=(job,), max_concurrency=max_concurrency),
+        RunMeta(run_id="run-1", created_at="t0", jobs=(job,), max_concurrency=max_concurrency,
+                worker_variant="base" if worker_task_defs else None,
+                worker_task_defs=worker_task_defs),
         RunState(run_id="run-1", status=Status.PENDING, jobs={"a": JobState("a", Status.PENDING)},
                  started_at="t0"))
     return store
@@ -462,3 +474,87 @@ def test_reconciler_writes_timestamps_in_compose_clock_format(cloud_env):
     assert claimed_at, "tick 没写 claimed_at，断言会空转"
     # 逐字比对「解析回来再 isoformat 是否原样」——退回 `…Z` 写法即失败
     assert claimed_at == compose.parse_iso(claimed_at).isoformat()
+
+
+# ---------- worker task-def revision：definition 优先，缺则按后端默认指针兼容（ADR 0038）----------
+# 不变量「运行时只用 definition 里的显式 revision，永不用 family 取最新」的 handler 侧落点。**正负两面都验**：
+# 只验兼容路径会放过「恒走兼容路径、无视 definition」（等于让在跑的 run 中途换 step 集）。
+# 真 RunTask 吃这个 ARN 起得来要真账号，是 moto 之外的边界（ADR 0038「实测项」）。
+
+def _seed_worker_ssm(*, version: str = "1.4.0", variant: str = "base", engine: str = "novaact",
+                     revision_arn: str = "arn:compat-rev:1"):
+    """把「后端版本戳 + 默认指针 + (引擎,tag)→revision 映射」落进 moto SSM（= deploy 四步走完的稳态）。"""
+    import json
+
+    import boto3
+    from gherkai_runtime import names
+
+    ssm = boto3.client("ssm", region_name="us-east-1")
+    ssm.put_parameter(Name=names.ssm_path("gherkai-", "version"), Value=version,
+                      Type="String", Overwrite=True)
+    ssm.put_parameter(Name=names.ssm_path("gherkai-", names.WORKER_DEFAULT_KEY), Value=variant,
+                      Type="String", Overwrite=True)
+    ssm.put_parameter(
+        Name=names.ssm_path("gherkai-", names.worker_image_key(engine, names.image_tag(version, variant))),
+        Value=json.dumps({"template_arn": "arn:tpl:1", "revision_arn": revision_arn,
+                          "digest": "sha256:" + "a" * 64, "pushed_at": "2026-09-08T00:00:00Z"}),
+        Type="String", Overwrite=True)
+    return revision_arn
+
+
+def test_build_uses_definition_worker_task_defs_verbatim(cloud_env):
+    """definition 带 worker_task_defs → **原样用**，不看 SSM 默认指针（一个 run 内镜像固定）。
+
+    SSM 里故意放一个**不同**的 revision：若实现悄悄走了兼容路径，断言会立刻抓到。
+    """
+    _seed_worker_ssm(revision_arn="arn:should-not-be-used:1")
+    _seed_run(cloud_env["runs"], detached=True)
+    engines = reconciler._build("run-1")[3]._resolver("novaact")
+    assert engines._task_def == _WORKER_REV
+
+
+def test_build_falls_back_to_default_pointer_for_legacy_definition(cloud_env, capsys):
+    """definition 缺 worker_task_defs（旧 CLI / 升级前提交）→ 按后端默认指针解析，并点名兼容路径 + variant。"""
+    compat_rev = _seed_worker_ssm(variant="login", revision_arn="arn:compat-rev:9")
+    _seed_run(cloud_env["runs"], detached=True, worker_task_defs=None)
+    engine = reconciler._build("run-1")[3]._resolver("novaact")
+    assert engine._task_def == compat_rev
+    out = capsys.readouterr().out
+    assert "worker-compat" in out and "login" in out  # 「用的是哪份」必须在日志里可见
+
+
+def test_build_raises_when_legacy_definition_unresolvable(cloud_env):
+    """缺字段且 SSM 也解析不出 → 抛，**不回落 family 最新 ACTIVE、不回落模板 revision**（ADR 0038 被拒方案）。"""
+    from gherkai_runtime.compose import WorkerVariantError
+
+    _seed_run(cloud_env["runs"], detached=True, worker_task_defs=None)  # SSM 全空
+    with pytest.raises(WorkerVariantError):
+        reconciler._build("run-1")
+
+
+def test_kicker_uses_definition_worker_task_defs(cloud_env):
+    """kicker 与 reconciler 共用 `_build` → 同一条解析（不在 kicker 侧另起一套）。"""
+    _seed_worker_ssm(revision_arn="arn:should-not-be-used:1")
+    store = _seed_run(cloud_env["runs"], detached=True)
+    reconciler.kicker_handler({"run_id": "run-1"}, None)
+    assert store.load_run_state("run-1").jobs["a"].status == Status.RUNNING  # 真 tick 跑到 CAS 抢占
+
+
+def test_tick_runs_isolates_a_run_whose_worker_revision_cannot_be_resolved(monkeypatch, capsys):
+    """兼容路径解析不出的 run 只跳过它自己、不连坐同批其它 run：events Stream 一个 batch 含多个 run，抛出去
+    = ESM 重试后整批丢弃、别的 run 事件永久丢失。「不回落 family/模板」不变——拒的是换镜像、不是拒隔离。"""
+    from gherkai_runtime.compose import WorkerVariantError
+
+    built_for = []
+
+    def fake_build(rid):
+        if rid == "bad":
+            raise WorkerVariantError("默认 variant 在 novaact 无映射", engine="novaact", variant="base")
+        built_for.append(rid)
+        return None  # None = 非 detached / 本批无事可做
+
+    monkeypatch.setattr(reconciler, "_build", fake_build)
+    out = reconciler._tick_runs({"bad", "good"}, "t")
+    assert out["ok"] and set(out["runs"]) == {"bad", "good"} and built_for == ["good"]
+    printed = capsys.readouterr().out
+    assert "bad" in printed and "解析失败" in printed

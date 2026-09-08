@@ -127,6 +127,71 @@ def test_contributed_flag_surface_is_exactly_the_provider_specific_set():
                        "--allow-vpc-change", "--require-approval"}
 
 
+def test_worker_subverb_surface_is_exactly_three_and_only_on_deploy():
+    """子动词全集钉死（枚举型护栏）+ **只挂 deploy**。
+
+    挂到 destroy 上不是「多个没用的命令」而是危险：皮的 destroy 分派不看 `_deploy_verb`，
+    `gherkai destroy push-worker …` 会解析通过、然后去拆栈（见 `Provider._declares_worker_subverbs`）。
+    """
+    def _verbs(prog: str) -> set[str] | None:
+        parser = argparse.ArgumentParser(prog=prog)
+        Provider().add_arguments(parser)
+        subs = [a for a in parser._actions if isinstance(a, argparse._SubParsersAction)]
+        return set(subs[0].choices) if subs else None
+
+    assert _verbs("gherkai deploy") == {"push-worker", "list-workers", "delete-worker"}
+    assert _verbs("gherkai destroy") is None
+    assert _verbs("gherkai") is None  # 认不出就不贴（降级安全：子动词只经 deploy 可达）
+
+
+def test_bare_deploy_still_parses_with_subverbs_present():
+    """子动词 subparser **不可 required=True**：deploy 的默认动作是真部署，裸 `gherkai deploy` 必须照样过。"""
+    args = _parse("--vpc", "default")
+    assert getattr(args, "_deploy_verb", None) is None
+    assert args.vpc == "default"
+
+
+def test_push_worker_subverb_parses_and_binds_the_verb():
+    args = _parse("push-worker", "acme-novaact:login", "--engine", "novaact", "--variant", "login",
+                  "--set-default")
+    assert args._deploy_verb.__func__ is Provider.push_worker
+    assert (args.image, args.engine, args.variant, args.set_default) == (
+        "acme-novaact:login", "novaact", "login", True)
+    assert getattr(args, "container_engine", None) is None  # SUPPRESS 默认：不给则属性缺席，父层的值不被覆写
+
+
+def test_push_worker_requires_engine_and_variant():
+    for argv in (("push-worker", "img"), ("push-worker", "img", "--engine", "novaact"),
+                 ("push-worker", "img", "--variant", "v"),
+                 ("push-worker", "img", "--engine", "nope", "--variant", "v")):
+        with pytest.raises(SystemExit):
+            _parse(*argv)
+
+
+def test_locator_flags_work_on_either_side_of_the_subverb():
+    """`--prefix` 在子动词**前**给也必须留住——子 parser 在新 namespace 里解析后整体覆盖回父层，
+    普通默认值（None）会把父层已解析的值覆写掉（argparse 的经典坑，故子层用 `SUPPRESS`）。"""
+    before = _parse("--prefix", "prod-", "push-worker", "img", "--engine", "novaact", "--variant", "v")
+    assert before.prefix == "prod-"
+    after = _parse("push-worker", "img", "--engine", "novaact", "--variant", "v", "--prefix", "prod-")
+    assert after.prefix == "prod-"
+    neither = _parse("list-workers")
+    assert neither.prefix is None  # 父层默认仍在（解析链自己兜 AWS_RESOURCE_PREFIX）
+
+
+def test_list_and_delete_worker_bind_their_verbs():
+    assert _parse("list-workers")._deploy_verb.__func__ is Provider.list_workers
+    assert _parse("delete-worker")._deploy_verb.__func__ is Provider.delete_worker
+
+
+def test_delete_worker_is_a_documented_placeholder(capsys):
+    """留口子：退 2 并说清「押后的是回收策略」，而不是让人只看到 argparse 的 invalid choice。"""
+    rc = Provider().delete_worker(_parse("delete-worker"))
+    assert rc == EXIT_PRECONDITION
+    err = capsys.readouterr().err
+    assert "尚未提供" in err and "list-workers" in err
+
+
 def test_provider_name_is_aws():
     # entry point group `gherkai.deploy` 里的名字（多 provider 时 `--provider aws` 选它）
     assert Provider().name == "aws"
@@ -324,19 +389,41 @@ class _Recorder:
     def __init__(self, returncode: int = 0) -> None:
         self.returncode = returncode
         self.calls: list[dict] = []
+        self.worker_steps: list = []  # `Provider._worker_image_steps` 的调用记录（见 `cdk` 夹具）
 
     def __call__(self, argv, **kwargs):
         self.calls.append({"argv": list(argv), "cwd": kwargs.get("cwd"), "env": kwargs.get("env")})
         return type("R", (), {"returncode": self.returncode})()
 
 
+class _FakeEngine:
+    """容器引擎替身（`probe()` 说「可用」）——deploy 前的容器引擎前置不该在单测里真跑 docker。"""
+
+    name = "docker"
+
+    def probe(self):
+        return None
+
+
 @pytest.fixture
 def cdk(monkeypatch) -> _Recorder:
-    """把 Node 前置与 cdk 定位打桩掉，只留「拼出的 argv/env」这一层给断言。"""
+    """把 Node 前置、cdk 定位、容器引擎与 worker 镜像四步都打桩掉，只留「拼出的 argv/env」这一层给断言。
+
+    **四步必须打桩**：`deploy` 在 cdk 成功后会去连真 SSM/ECR/ECS 并 `docker pull` 基底（ADR 0038）——单测里
+    那是「不碰 AWS」这条底线的破口（真跑过一次：测试直奔 NoCredentialsError 且真拉了一次 GHCR 镜像）。
+    调用次数记在 `rec.worker_steps` 上，供「cdk 成功才跑四步」那两条断言。
+    """
     rec = _Recorder()
     monkeypatch.setattr(provider_cli, "check_node", lambda: None)
     monkeypatch.setattr(provider_cli, "cdk_command", lambda: ["cdk-stub"])
     monkeypatch.setattr(provider_cli.subprocess, "run", rec)
+    monkeypatch.setattr(Provider, "_container_engine", staticmethod(lambda args, quiet=False: _FakeEngine()))
+
+    def _steps(self, args):
+        rec.worker_steps.append(args)
+        return 0
+
+    monkeypatch.setattr(Provider, "_worker_image_steps", _steps)
     return rec
 
 
@@ -401,6 +488,38 @@ def test_deploy_blocked_by_vpc_guard_never_invokes_cdk(cdk, monkeypatch, capsys)
     rc = Provider().deploy(_parse("--vpc", "default", "--region", "us-east-1"))
     assert rc == EXIT_PRECONDITION
     assert cdk.calls == [], "被三态拦下时绝不能已经调过 cdk"
+
+
+def test_deploy_runs_the_worker_image_steps_after_a_successful_cdk(cdk, monkeypatch):
+    """cdk 成功 → 接着跑 worker 镜像第 2/3/4 步（第 1 步随 cdk 事务，ADR 0038）。"""
+    _stub_backend(monkeypatch, stack_exists=False, stored=None)
+    assert Provider().deploy(_parse("--vpc", "default", "--region", "us-east-1")) == 0
+    assert len(cdk.worker_steps) == 1
+
+
+def test_deploy_skips_the_worker_image_steps_when_cdk_fails(cdk, monkeypatch):
+    """cdk 失败 → 不碰镜像（stack 没生效，推上去的 revision 会指着不存在的模板）。退码透传 cdk 自己的。"""
+    cdk.returncode = 7
+    _stub_backend(monkeypatch, stack_exists=False, stored=None)
+    assert Provider().deploy(_parse("--vpc", "default", "--region", "us-east-1")) == 7
+    assert cdk.worker_steps == []
+
+
+def test_deploy_rejects_an_unimplemented_container_engine_before_touching_the_account(monkeypatch, capsys):
+    """`GHERKAI_CONTAINER_ENGINE=podman` → 退 2 且**不调 cdk**：纯参数问题，账户一个字节都不该动
+    （区别于「docker 没装」——那只警告，退码归 cdk 之后的四步）。
+
+    位置与 Node 前置同一档（本地、不花网络、不要凭证）——**先于** VPC 档比对：给错引擎名的人不该先被要求
+    配好 AWS 凭证才看到「这个引擎本期没实装」（同 `deploy` 里 check_node 先于三态比对的理由）。
+    """
+    rec = _Recorder()
+    monkeypatch.setattr(provider_cli, "check_node", lambda: None)
+    monkeypatch.setattr(provider_cli, "cdk_command", lambda: ["cdk-stub"])
+    monkeypatch.setattr(provider_cli.subprocess, "run", rec)
+    monkeypatch.setenv("GHERKAI_CONTAINER_ENGINE", "podman")
+    assert Provider().deploy(_parse("--vpc", "default", "--region", "us-east-1")) == EXIT_PRECONDITION
+    assert rec.calls == []
+    assert "podman" in capsys.readouterr().err
 
 
 def test_destroy_invokes_cdk_destroy_with_same_context(cdk):

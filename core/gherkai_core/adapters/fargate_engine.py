@@ -91,6 +91,10 @@ class FargateEngine:
     - run_id：拼 events 表 PK 用（每 run 一个 engine 实例，run_id 构造期已生成）。
     - task_config：cluster / task_definition / network（subnet/security-group/assign-public-ip）——**真值由后端 stack（`gherkai-deploy-aws`）
       （ADR 0033）产出、组合根注入**；本 adapter 只认字段、不知真 ARN（moto 测用假值验接线）。
+      **`task_definition` 是一个显式 revision ARN、不是 family 名**（ADR 0038 不变量「运行时只用 definition 里的
+      显式 revision，永不用 family 取最新」）：family 名下 ECS 取该 family 最新 ACTIVE revision，多 variant 并存时
+      任何一次 `push-worker` 都会劫持在跑的 run（中途换 step 集）。选哪个 revision 是组合根的事（`compose` 按
+      definition 的 `worker_variant` 解析），本 adapter 原样传给 RunTask、不做任何名字推导。
     - job_s3：(bucket, prefix) job 对象落点；events_table_name：events 表名（worker PutItem 目标）。
     - region：组合根**落实成具体字符串**的 AWS region（`--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > profile config，
       ADR 0016 决策 C）——非 None 时经 RunTask overrides 注入 worker 的 `AWS_REGION`，使 worker 建 boto3/aws-sdk client
@@ -111,7 +115,7 @@ class FargateEngine:
         ddb_events_table,          # boto3 dynamodb.Table 资源（events 表；建表责任 IaC）
         run_id: str,
         cluster: str,
-        task_definition: str,
+        task_definition: str,  # **显式 revision ARN**（`…:task-definition/{family}:{N}`），绝不 family 名——ADR 0038 不变量
         network_config: dict,      # {"subnets":[...], "securityGroups":[...], "assignPublicIp":"ENABLED"/"DISABLED"}
         job_s3: tuple[str, str],   # (bucket, prefix)：job 对象落 s3://bucket/prefix<scope_id>.json
         events_table_name: str,    # 注入 worker 的 events 表名（worker PutItem 目标）

@@ -17,7 +17,7 @@
 
 ```
 core/gherkai_core/
-├── model.py      ← 领域模型：Job / Scenario / Step / 7 类事件（含 step_skipped 短路）/ 四层结果 RunResult / Status 七态 / ResourceUri（纯数据）
+├── model.py      ← 领域模型：Job / Scenario / Step / 7 类事件（含 step_skipped 短路）/ 四层结果 RunResult / RunMeta（definition，含 worker_variant·worker_task_defs，ADR 0038）/ Status 七态 / ResourceUri（纯数据）
 ├── parse.py      ← .feature → 领域模型（借 gherkin-official Compiler；库藏在此 seam 后）
 ├── scope.py      ← tag 分组 + engine 校验 → Job[]；对外 plan(features, config) -> Job[]
 ├── serialize.py  ← 领域模型↔dict 的单一序列化真理源（store adapter 复用，ADR 0016/0027）
@@ -30,11 +30,11 @@ core/gherkai_core/
 ├── persist.py    ← RunPersistence：编排 Store ports 随进度实时落库（commit-point 写序，ADR 0030）
 └── adapters/
     ├── subprocess_engine.py        ← Engine 实装（local）：spawn worker 子进程 + 读事件流
-    ├── fargate_engine.py           ← Engine 实装（cloud）：RunTask 起 Fargate 容器 + job-in 走 S3 / events-out 走 DDB / stop→StopTask + start_scope fire-and-forget（ADR 0024/0032/0034）
+    ├── fargate_engine.py           ← Engine 实装（cloud）：RunTask 起 Fargate 容器（task-def 恒为组合根注入的**显式 revision ARN**、绝不 family 名，ADR 0038）+ job-in 走 S3 / events-out 走 DDB / stop→StopTask + start_scope fire-and-forget（ADR 0024/0032/0034）
     ├── cloud_launcher.py           ← 无状态跑批 cloud Launcher（ADR 0034）：经 resolver 选 FargateEngine 调 start_scope 起 task（fire-and-forget）
     ├── event_log/{sqlite,ddb}.py   ← 无状态跑批持久事件通道（ADR 0034）：local=SQLite / cloud=DDB events 表，reconciler 从此全量重放推演
     ├── _boto.py                    ← 云端 adapter 共享的 boto3 依赖守卫（缺 boto3 友好报错，ADR 0016 窄腰）
-    ├── run_store/{local,ddb}.py    ← RunStore：本地文件 + DynamoDB（+ arg_offload.py：StepArgument→S3 指针，解 DDB 400KB 限；+ 无状态跑批条件写 try_claim_job/project_state/try_finalize，ADR 0034）
+    ├── run_store/{local,ddb}.py    ← RunStore：本地文件 + DynamoDB（+ arg_offload.py：StepArgument→S3 指针，解 DDB 400KB 限；+ 无状态跑批条件写 try_claim_job/project_state/try_finalize，ADR 0034；+ STATE 顶层 worker_task_def_arns 供清理 pass 的在跑 run 安全阀，ADR 0038）
     ├── result_store/{local,s3}.py  ← ResultStore：本地文件 + S3（每 job 一对象）
     └── report_store/{local,s3}.py  ← ReportStore：本地文件 + S3（manifest+index）
 ```

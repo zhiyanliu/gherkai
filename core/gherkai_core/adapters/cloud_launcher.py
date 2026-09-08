@@ -24,7 +24,8 @@ class CloudLauncher:
 
     resolver 与 local SubprocessLauncher 的 resolver 同构（按 engine 名产 Engine）——cloud 的由
     compose.build_fargate_engines + make_resolver 产（cloud FargateEngine 装配的单一真源，不在 launcher 重造），
-    故 job-in 前缀 / artifact 落点 / task-def·container 名 / SDK env 全与同步 cloud run 路径一致、零漂移。
+    故 job-in 前缀 / artifact 落点 / container 名 / worker task-def revision / SDK env 全与同步 cloud run 路径
+    一致、零漂移（**revision 是组合根按 definition 解析出的显式 ARN**，本 launcher 对它无知——ADR 0038）。
     """
 
     def __init__(self, resolver, *, run_id: str | None = None, timeout_watch=None) -> None:
