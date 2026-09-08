@@ -74,6 +74,7 @@ REGION = os.environ.get("AWS_REGION")
 # 落进 playwright greenlet 切换关键区致死循环卡死（sync-over-greenlet + signal-raise 反模式，见 ADR 0024 被拒方案）。主流程在 act 边界安全点检测、
 # 正常 return 退出三层 with 释放会话（with 正常退出即触发 __exit__，不靠异常穿透）。模块级单例（对称 _uploader）。
 _stop = threading.Event()
+_stop_signum: int | None = None  # 触发协作停的信号号（handler 只记录；日志由安全点补打，见 _on_signal）
 
 # 单 act 时间上界（ADR 0024「act 有界返回」）：给每个 act/act_get 设 timeout，到点 SDK 在 step 边界安全点抛
 # 可 catch 的 ActTimeoutError（非 greenlet 切换区）——使 in-flight act 有界返回、标志位总能在有限时间被检测。
@@ -126,10 +127,15 @@ def _on_signal(signum, frame):
     绝不 raise——避免异步异常落进 playwright greenlet 切换关键区致死循环卡死（sync-over-greenlet + signal-raise 反模式，见 ADR 0024 被拒方案）。
     主流程在 act 边界安全点检测 `_stop`、正常 return 退出三层 with 释放会话（with 正常退出即触发 __exit__，
     不靠异常穿透）。SIGTERM/SIGINT 共用（Ctrl-C 亦协作停）。
-    **模块级函数（非 main 内闭包）**：只引用模块级 `_stop`/`log`，提到模块级使 `test_interrupt_process.py`
+    **handler 内不做任何 I/O（含 stderr 日志）**：信号可能落在主线程正在 `sys.stderr.write` 的瞬间，handler 里再写
+    stderr 会撞 Python BufferedWriter 的非重入锁——`RuntimeError: reentrant call inside <_io.BufferedWriter name='<stderr>'>`
+    从 handler 抛出、直接把主流程打崩（rc=1）；worker 常态大量写诊断，这不是理论风险（CI runner 上真跑抓到）。
+    故这里只记信号号 + 置标志，「收到信号」的日志由主流程在安全点补打（见 main 末尾与读 job 早退处）。
+    **模块级函数（非 main 内闭包）**：只引用模块级 `_stop`/`_stop_signum`，提到模块级使 `test_interrupt_process.py`
     的 fixture worker 能 import 并装**这同一个真 handler**——回退 raise 模型时进程级测试真变红。
     """
-    log(f"worker: signal {signum} received, requesting cooperative stop")
+    global _stop_signum
+    _stop_signum = signum
     _stop.set()
 
 
@@ -628,6 +634,7 @@ def main() -> int:
     # I/O 边缘可注入接口（ADR 0024）：job 入口 / 事件出口从内联收进 lib 组件，subprocess 态=读 stdin / 写 EVENTS_FD。
     job = JobSource.from_env().read()
     if _stop.is_set():
+        log(f"worker: signal {_stop_signum} received before job start, cooperative stop")
         return 0  # 读 job 期间已收停（对齐 _run_session 顶的检查）：零事件干净退，core 判 error 不误归因
     sink = EventSink.from_env()  # main 级单例（对称 _uploader）；作参数注入 _run_scenario/_run_step
     scope = job["scope"]
@@ -724,7 +731,7 @@ def main() -> int:
 
     # 停止信号（ADR 0024 flag-only）：三层 with 已正常退出（__exit__ 释放了会话）。干净退、不吐 scope_done、不 flush。
     if _stop.is_set():
-        log("worker: session shutdown complete after cooperative stop")
+        log(f"worker: signal {_stop_signum} received, cooperative stop — session shutdown complete")
         return 0
     if network_exhausted:
         # 建连重试耗尽（ADR 0028）：with __exit__ 已清理。以网络专用退出码退出，core 据此记 network_error。不吐 scope_done。

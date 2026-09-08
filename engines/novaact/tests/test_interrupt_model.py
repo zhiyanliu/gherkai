@@ -272,3 +272,20 @@ def test_backoff_interrupted_times_out_without_stop():
 def test_raise_model_classes_removed():
     assert not hasattr(rs, "_Terminated"), "flag-only 后不应再有 _Terminated（raise 模型已废弃，见 ADR 0024 被拒方案）"
     assert not hasattr(rs, "_NetworkExhausted"), "flag-only 后不应再有 _NetworkExhausted"
+
+
+def test_on_signal_does_no_io_even_if_stderr_is_locked(monkeypatch):
+    """handler 里绝不做 I/O：信号落在主线程正写 stderr 的瞬间，handler 再写 stderr 会撞 BufferedWriter 的非重入锁
+    （`RuntimeError: reentrant call inside <_io.BufferedWriter>`）、从 handler 抛出把主流程打崩（rc=1）——CI runner
+    真跑抓到。把 log 与 sys.stderr.write 都换成一碰就炸的替身：handler 仍须只置标志、记信号号、不抛。"""
+    import sys
+
+    def boom(*_a, **_k):
+        raise RuntimeError("reentrant call inside <_io.BufferedWriter name='<stderr>'>")
+
+    monkeypatch.setattr(rs, "log", boom)
+    monkeypatch.setattr(sys.stderr, "write", boom)
+    rs._stop.clear()
+    rs._on_signal(signal.SIGTERM, None)  # 不抛
+    assert rs._stop.is_set() and rs._stop_signum == signal.SIGTERM
+    rs._stop.clear()
