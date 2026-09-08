@@ -87,16 +87,19 @@ def test_chain_level2_skipped_when_module_missing(monkeypatch):
     assert compose.resolve_worker_cmd("novaact").cmd == ["/opt/bin/gherkai-worker-novaact"]
 
 
-def test_chain_level4_uvx_npx_on_pure_release(monkeypatch):
-    # 第四级兜底拉起：版本是纯发行版 + 拉起器在 PATH → uvx/npx 按 CLI 版本 pin（worker 与 CLI lockstep）
+def test_chain_level4_uvx_only_on_pure_release(monkeypatch):
+    """第四级兜底拉起只有 novaact/uvx：版本是纯发行版 + uvx 在 PATH → 按 CLI 版本 pin（worker 与 CLI lockstep）。
+    midscene **没有第四级**——fd 预演实测 npx 把 EVENTS_FD 换成 npm 自己的 FIFO（写即 EBADF、事件全丢），
+    即使 npx 在 PATH、版本纯净，也直接 miss 报安装指引（ADR 0037 决策 3「预演不过则降为报错 + 安装指引」）。"""
     monkeypatch.delenv("GHERKAI_WORKER_NOVAACT_CMD", raising=False)
     monkeypatch.delenv("GHERKAI_WORKER_MIDSCENE_CMD", raising=False)
     monkeypatch.setattr(compose, "_find_worker_spec", lambda mod: False)
     monkeypatch.setattr(compose.shutil, "which", lambda n: f"/bin/{n}" if n in ("uvx", "npx") else None)
     nova = compose.resolve_worker_cmd("novaact", version="1.4.0")
     assert nova.cmd == ["uvx", "gherkai-worker-novaact==1.4.0"]
-    mid = compose.resolve_worker_cmd("midscene", version="1.4.0")
-    assert mid.cmd == ["npx", "-y", "@gherkai/worker-midscene@1.4.0"]
+    with pytest.raises(compose.WorkerNotFoundError) as ei:
+        compose.resolve_worker_cmd("midscene", version="1.4.0")
+    assert "npm i -g @gherkai/worker-midscene" in str(ei.value)
 
 
 @pytest.mark.parametrize("dev_version", ["1.4.0.post10.dev0+abc123.dirty", "1.4.0.dev1", "1.4.0.post3",
@@ -106,20 +109,21 @@ def test_chain_level4_skipped_on_non_release_version(monkeypatch, dev_version):
 
     否则 contributor 在 dev 版下会拿到「uvx 解析不到这个版本」的难懂网络错误，而不是「worker 没装、这样装」。
     """
-    monkeypatch.delenv("GHERKAI_WORKER_MIDSCENE_CMD", raising=False)
+    monkeypatch.delenv("GHERKAI_WORKER_NOVAACT_CMD", raising=False)
     monkeypatch.setattr(compose, "_find_worker_spec", lambda mod: False)
-    # 只有 uvx/npx 在 PATH（worker bin 不在）→ 前三级全 miss，第四级是否成立全看版本
-    monkeypatch.setattr(compose.shutil, "which", lambda n: f"/bin/{n}" if n in ("uvx", "npx") else None)
+    # 只有 uvx 在 PATH（worker bin 不在）→ 前三级全 miss，第四级是否成立全看版本
+    monkeypatch.setattr(compose.shutil, "which", lambda n: f"/bin/{n}" if n == "uvx" else None)
     with pytest.raises(compose.WorkerNotFoundError):
-        compose.resolve_worker_cmd("midscene", version=dev_version)
+        compose.resolve_worker_cmd("novaact", version=dev_version)
 
 
 def test_chain_level4_skipped_when_launcher_absent(monkeypatch):
-    # 第二条件：拉起器不在 PATH（无 uvx/npx 的机器）→ 跳过第四级、报安装指引
-    monkeypatch.delenv("GHERKAI_WORKER_MIDSCENE_CMD", raising=False)
+    # 第二条件：uvx 不在 PATH → 跳过第四级、报安装指引
+    monkeypatch.delenv("GHERKAI_WORKER_NOVAACT_CMD", raising=False)
+    monkeypatch.setattr(compose, "_find_worker_spec", lambda mod: False)
     monkeypatch.setattr(compose.shutil, "which", lambda n: None)
     with pytest.raises(compose.WorkerNotFoundError):
-        compose.resolve_worker_cmd("midscene", version="1.4.0")
+        compose.resolve_worker_cmd("novaact", version="1.4.0")
 
 
 def test_chain_all_miss_raises_with_install_hint(monkeypatch):

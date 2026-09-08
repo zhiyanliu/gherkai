@@ -125,9 +125,11 @@ _WORKER_BIN = {  # ③ PATH 上的可执行名（Python 侧由 console script �
     "midscene": "gherkai-worker-midscene",
 }
 # ④ 兜底拉起：(拉起器, 拼命令)——拉起器须在 PATH 且版本须是纯发行版，见 resolve_worker_cmd。
+# **只有 novaact/uvx**：fd 预演实测 uvx 把 EVENTS_FD 原样传给子进程（同一 pipe inode、事件到达）且转发 SIGTERM；
+# npx **不**穿透——node 子进程里 EVENTS_FD 号上是 npm 自己的另一条 FIFO、写即 EBADF，事件全丢——故 midscene 无第四级，
+# 前三级全 miss 直接报安装指引（ADR 0037 决策 3「预演不过则降为报错 + 安装指引」）。
 _WORKER_FALLBACK = {
     "novaact": ("uvx", lambda v: ["uvx", f"gherkai-worker-novaact=={v}"]),
-    "midscene": ("npx", lambda v: ["npx", "-y", f"@gherkai/worker-midscene@{v}"]),
 }
 # 全 miss 时给用户的安装指引（每引擎一条，两种语言的地盘不同）。
 _WORKER_INSTALL_HINT = {
@@ -227,10 +229,11 @@ def resolve_worker_cmd(engine: str, *, version: str | None = None) -> WorkerCmd:
        **无包装层是硬要求**——EVENTS_FD 经 `pass_fds` 只到**被直接 spawn 的那个进程**（ADR 0024 三通道），
        包装进程会吞 fd3（midscene 换 `--import tsx` 那次踩过：tsx 二进制再 spawn 子-node → fd3 EBADF）。
     3. PATH 上的可执行 `gherkai-worker-<engine>`（Python 侧 console script / Node 侧 `npm i -g`）。
-    4. 兜底拉起 `uvx <发行名>==<版本>` / `npx -y <包名>@<版本>`，**双条件**：①版本是纯发行版
-       （见 `_is_pure_release`）；②拉起器在 PATH。任一不成立即跳过本级（直接判 miss，报安装指引更有用）。
-       **注意本级仍是条件项**：uvx/npx 是包装进程，是否吞 fd3（见第 2 级）**待真跑预演**——预演不过则本级
-       降为「报错 + 安装指引」，届时删掉本级即可、前三级不受影响（ADR 0037 决策 3）。
+    4. 兜底拉起 `uvx <发行名>==<版本>`（**仅 novaact**），**双条件**：①版本是纯发行版（见 `_is_pure_release`）；
+       ②`uvx` 在 PATH。任一不成立即跳过本级（直接判 miss，报安装指引更有用）。
+       uvx 是包装进程但**实测不吞 fd3**：子进程里 EVENTS_FD 与父侧同一 pipe inode、事件到达，SIGTERM 也转发。
+       midscene **没有本级**：`npx -y <包>@<版本>` 实测把 fd 换掉（node 里该号上是 npm 自己的 FIFO、写即 EBADF），
+       事件全丢，按「预演不过则降为报错 + 安装指引」处置（ADR 0037 决策 3）。
     version：第四级 pin 的版本，缺省取本包（gherkai-runtime）版本——worker 与 CLI `==` lockstep
     （ADR 0037 决策 2b），未装成包（源码直跑）时取不到 → 第四级跳过。
     """
@@ -258,9 +261,10 @@ def resolve_worker_cmd(engine: str, *, version: str | None = None) -> WorkerCmd:
     found = shutil.which(bin_name)
     if found:
         return WorkerCmd(cmd=[found], cwd=None, source=f"PATH 可执行 {bin_name}")
-    launcher, build = _WORKER_FALLBACK[engine]
+    fallback = _WORKER_FALLBACK.get(engine)  # midscene 无第四级（见 _WORKER_FALLBACK 注）
     v = version if version is not None else _runtime_version()
-    if v is not None and _is_pure_release(v) and shutil.which(launcher):
+    if fallback is not None and v is not None and _is_pure_release(v) and shutil.which(fallback[0]):
+        launcher, build = fallback
         return WorkerCmd(cmd=build(v), cwd=None, source=f"{launcher} 兜底拉起（版本 {v}）")
     raise WorkerNotFoundError(
         engine,

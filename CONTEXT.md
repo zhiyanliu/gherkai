@@ -121,7 +121,7 @@ _Avoid_: 把它当运行参数（曾是 `ScheduleOpts` 参数、不进 definitio
 _Avoid_: 用裸通用词作发行名或 import 名（`core`/`cli`——前者 PyPI 已被占、后者与他人同名顶层包静默合并/互删）；把「发行名 ≠ import 名」当异常（`gherkin-official` 的 import 名就是 `gherkin`，是常态）；为兄弟包写 `>=` 范围依赖（装出未测混搭）。
 
 **worker 定位链 (worker locate chain)**:
-（已落地：`repo_root()` 已整体退役，ADR 0037 决策 3；第四级 uvx/npx 的 fd 预演仍待做、发布前定存废。）组合根解析「用什么命令 spawn 某引擎 worker」的四级顺序：① env `GHERKAI_WORKER_<ENGINE>_CMD`（+ 可选 `_CWD`）显式覆写 → ② 同 venv 入口（Python 引擎：`sys.executable -m gherkai_worker_novaact`，经 CLI extra `[local]` 装进 CLI 自己的 venv）→ ③ PATH 上的可执行（`gherkai-worker-<engine>`，midscene 由 `npm i -g @gherkai/worker-midscene` 提供）→ ④ `uvx`/`npx` 按 CLI 版本拉起兜底（存废待实测）。四级全 miss 抛结构化异常、由调用点分叉处置（`run`/`submit`/`list-deterministic` 退 2，`plan` 保持 best-effort 降级）。dev 与分发**同一条链**、不设 dev 模式特判（ADR 0037 决策 3）。
+（已落地：`repo_root()` 已整体退役，ADR 0037 决策 3；第四级 fd 预演已做——uvx 穿透、保留给 novaact；npx 不穿透、midscene 无第四级。）组合根解析「用什么命令 spawn 某引擎 worker」的四级顺序：① env `GHERKAI_WORKER_<ENGINE>_CMD`（+ 可选 `_CWD`）显式覆写 → ② 同 venv 入口（Python 引擎：`sys.executable -m gherkai_worker_novaact`，经 CLI extra `[local]` 装进 CLI 自己的 venv）→ ③ PATH 上的可执行（`gherkai-worker-<engine>`，midscene 由 `npm i -g @gherkai/worker-midscene` 提供）→ ④ 兜底拉起 `uvx gherkai-worker-novaact==<CLI 版本>`（仅 novaact、仅纯发行版本；npx 实测不穿透 fd3，midscene 无此级）。四级全 miss 抛结构化异常、由调用点分叉处置（`run`/`submit`/`list-deterministic` 退 2，`plan` 保持 best-effort 降级）。dev 与分发**同一条链**、不设 dev 模式特判（ADR 0037 决策 3）。
 _Avoid_: 让 worker 定位依赖 repo 目录结构（分发后没有 repo）；把「安装」与「拉起」绑在一起（二者正交：`[local]` 负责装、定位链负责起）；给 worker 定专属 cwd（产物落点一律经绝对路径 env 注入；`--no-report` 档不注入落点并经 `GHERKAI_NO_ARTIFACTS` 令 worker 不生成/不上报产物）；在定位链里统一退码（`plan` 的降级契约是 ADR 0036 已定行为）。
 
 **steps 目录 / 定制面 (steps dir / customization surface)**:
