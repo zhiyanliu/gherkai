@@ -1,0 +1,344 @@
+name: release
+
+# 推 tag `vX.Y.Z` = 发布全链（ADR 0037 决策 8）：一个 git tag 派生五个 wheel 的版本、npm 包版本、
+# 基底镜像 tag、GitHub Release——版本单旋钮（ADR 0037 决策 2b/7）。
+# 顺序与失败语义按 ADR 0037 决策 8：gate（tag 形态 + 算出的版本==tag）→ ① PyPI（build → attest → publish）
+# → ② npm → ③ GHCR 基底镜像（依赖 ①② 索引可见）→ ④ GitHub Release。
+# 一次性人工前置（PyPI trusted publisher / npm token / GHCR 包可见性）见 .github/workflows/README.md。
+on:
+  push:
+    tags: ["v*"]
+
+# 同一 tag 的重跑不互相取消：镜像 job 对已发行版本单独重跑是「半发布态」的修复动作（ADR 0037 决策 8）。
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+# 默认零权限，逐 job 显式给（publish 用 OIDC、GHCR 用 packages、Release 用 contents）。
+permissions: {}
+
+env:
+  # uv 版本显式钉住：发布路径要可复现，且 `uv publish` 上传 PEP 740 attestation 需 ≥0.9.12。
+  # 升级是有意动作（改这一行，CI 与本地同步验一遍）。
+  UV_VERSION: "0.12.3"
+  PYTHON_VERSION: "3.13"
+  NODE_VERSION: "22"
+
+jobs:
+  build:
+    # gate + 构建一次成型：产物在这里定稿，下游只搬不重建——避免「gate 过的与发出去的不是同一批」。
+    name: gate + build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.tag.outputs.version }}
+      is-latest: ${{ steps.gate.outputs.is-latest }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          # 必须整仓：uv-dynamic-versioning 底下的 Dunamai 在**浅仓库**上直接拒算版本
+          # （实测报错 "This is a shallow repository, so Dunamai may not produce the correct version."），
+          # 且 `--depth 1` + `git fetch --tags` 之后 `.git/shallow` 仍在、照样报同一个错——
+          # 故 `fetch-tags: true` 不是 `fetch-depth: 0` 的替代品。
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+          # enable-cache 默认 'auto' 在 tag push 事件下**不开缓存**；发布链每次都装同一批 build 依赖
+          # （hatchling / uv-dynamic-versioning），显式开更快。
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: tag 形态检查（最前面 fail fast）
+        id: tag
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          version="${tag#v}"
+          # 只认正式发行 tag。预发行（`v1.4.0rc1` 这种）在此**直接拦**：它是合法 PEP 440、
+          # 却不是合法 semver（npm 要 `1.4.0-rc.1`），而 ADR 0037 决策 2b 明确不做 PEP 440→semver
+          # 的转换件——放它进来就是 PyPI 发成功、npm job 挂在 `npm version` 上的半发布态。
+          # 顺带也挡住「本地演练 tag 被误 push 上来触发真发布」（演练走 TestPyPI，见 workflows/README.md）。
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::tag $tag 不是 vX.Y.Z 形态。发布链只支持正式发行；预发行/演练 tag 别 push 到本仓库"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: uv build --all-packages
+        run: uv build --all-packages --out-dir dist
+
+      - name: gate：版本 == tag、成员齐、兄弟包 pin 已渲染
+        id: gate
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          version="${VERSION}"
+
+          # 产物校验（版本==tag / workspace 成员齐 / 兄弟包 `==` lockstep pin 已渲染）。
+          # 用 uv 带的 3.13 跑脚本，不依赖 runner 自带 python3 的版本（脚本用 tomllib，需 ≥3.11）。
+          uv run --no-project python .github/scripts/check_dist_metadata.py \
+            --dist dist --expect-version "$version"
+
+          # `latest` 只跟随最新 tag（ADR 0037 决策 8）：重跑旧版本时不许把 latest 拽回去——
+          # 判据 = 本 tag 就是全仓库按版本序最大的那个 tag（重跑旧 tag 时不成立）。
+          # `|| true` 防 grep 无匹配撞上 pipefail。
+          newest="$(git tag --list 'v*' --sort=version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | tail -n1 || true)"
+          if [ "$newest" = "$tag" ]; then
+            is_latest=true
+          else
+            is_latest=false
+          fi
+
+          echo "is-latest=$is_latest" >> "$GITHUB_OUTPUT"
+          {
+            echo "### release $tag"
+            echo ""
+            echo "- 版本：\`$version\`（仓库最新正式发行 tag：\`$newest\`）"
+            echo "- 镜像/Release 打 latest：\`$is_latest\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
+
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+          # 同一 run 内重跑本 job 时允许覆盖（否则第二次上传撞名直接失败）。
+          overwrite: true
+
+  pypi:
+    # ① PyPI：attest（生成 PEP 740 attestation）→ uv publish（trusted publishing，OIDC 免密）。
+    # `uv publish` **自己不生成** attestation，只上传已存在的 `*.publish.attestation`——漏 attest 这步
+    # 就是静默发出无证物件（ADR 0037 决策 8）。
+    name: publish PyPI
+    needs: build
+    if: github.repository == 'zhiyanliu/gherkai'  # fork 推 tag 不往公共索引发
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # trusted publishing + attest-action 都要 OIDC
+      contents: read
+    steps:
+      # 只为让 `uv publish --index <name>` 能读到 pyproject 的 `[[tool.uv.index]]`（TestPyPI 演练路径，
+      # 见 .github/workflows/README.md）；正式发行走默认 PyPI upload URL 时其实不需要 checkout。
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          name: dist
+          path: dist
+
+      # 上游建议构建与发布分 job（构建不进拿着 id-token 的那个 job），本工作流照此分：
+      # build job 无 OIDC 权限，产物经 artifact 搬过来。
+      - uses: astral-sh/attest-action@v0.0.6
+        with:
+          paths: dist/*
+
+      - name: uv publish
+        run: |
+          set -euo pipefail
+          # --check-url：已存在且逐字节相同的文件跳过上传 → 本 job 对同一 tag 可重跑（半发布态的修复动作）；
+          #             同名但内容不同则报错，不静默覆盖。
+          # --trusted-publishing always：没拿到 OIDC 就失败，不回落去找用户名密码（fail-loud）。
+          uv publish \
+            --trusted-publishing always \
+            --check-url https://pypi.org/simple/
+          echo "已发布到 PyPI：${VERSION}" >> "$GITHUB_STEP_SUMMARY"
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+
+  npm:
+    # ② npm：`@gherkai/worker-midscene`（midscene worker 是 Node 地盘，pip extra 够不到，ADR 0037 决策 3）。
+    # package.json 常驻占位 `0.0.0-dev`，版本由 CI 从 tag 写入（ADR 0037 决策 2b）。
+    name: publish npm
+    needs: build
+    if: github.repository == 'zhiyanliu/gherkai'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # npm provenance 用 OIDC 签
+      contents: read
+    defaults:
+      run:
+        working-directory: engines/midscene
+    env:
+      # 整个 job 都带上：setup-node 写的 .npmrc 里是 `${NODE_AUTH_TOKEN}` 占位，变量不存在时 npm 会以
+      # "Failed to replace env in config" 报错——连只读的 `npm view` 都跑不了（那样下面的幂等判断会
+      # 误判成「未发行」）。
+      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          # 写 .npmrc 并让 npm 从 env.NODE_AUTH_TOKEN 取凭据（token 是 npm 侧唯一必需的 secret）。
+          registry-url: https://registry.npmjs.org
+          cache: npm
+          cache-dependency-path: engines/midscene/package-lock.json
+
+      - name: 已发行则跳过（本 job 可重跑）
+        id: check
+        run: |
+          set -euo pipefail
+          if npm view "@gherkai/worker-midscene@${VERSION}" version >/dev/null 2>&1; then
+            echo "::notice::@gherkai/worker-midscene@${VERSION} 已在 registry 上，跳过 publish（npm 不允许重发同版本）"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+
+      - name: version + build + publish
+        if: steps.check.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          # --no-git-tag-version：只改 package.json / package-lock.json，不 commit 不打 tag
+          # （tag 已经是触发源，版本真源在 git tag 上，ADR 0037 决策 2b）。
+          npm version "${VERSION}" --no-git-tag-version
+          npm ci
+          npm run build
+          # --provenance 走 OIDC 签发行溯源；--access public 是 scope 包首发必需（`@gherkai` 默认 restricted）。
+          npm publish --provenance --access public
+          echo "已发布到 npm：@gherkai/worker-midscene@${VERSION}" >> "$GITHUB_STEP_SUMMARY"
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+
+  images:
+    # ③ worker 基底镜像 → GHCR（ADR 0037 决策 5 两层分工；单架构 linux/amd64——ARM64 是被拒方案，ADR 0038）。
+    # 依赖 ①② 已发行**且索引可见**：基底的 CI 形态按版本装已发行的 worker 包（ADR 0037 决策 5「两态」），
+    # 索引传播窗口内 build 会随机失败，故先等（下面 wait_for_index.sh 里写了完整理由）。
+    name: base image ${{ matrix.engine }}
+    needs: [build, pypi, npm]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write # 推 GHCR 用 GITHUB_TOKEN，无需额外 secret
+    strategy:
+      fail-fast: false # 一个引擎失败不拖累另一个（各自可单独重跑）
+      matrix:
+        include:
+          - engine: novaact
+            context: engines/novaact
+            index: pypi
+            package: gherkai-worker-novaact
+          - engine: midscene
+            context: engines/midscene
+            index: npm
+            package: "@gherkai/worker-midscene"
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: 等索引可见
+        # 走 `bash <脚本>`，不靠可执行位（脚本进 git 时 mode 丢了也不会变成 permission denied）
+        run: bash .github/scripts/wait_for_index.sh "${{ matrix.index }}" "${{ matrix.package }}" "${VERSION}"
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+
+      - name: 算镜像 tag
+        id: meta
+        run: |
+          set -euo pipefail
+          owner="${GITHUB_REPOSITORY_OWNER,,}" # registry 路径必须全小写
+          image="ghcr.io/${owner}/gherkai-worker-${ENGINE}"
+          tags="${image}:${VERSION}"
+          if [ "${IS_LATEST}" = "true" ]; then
+            tags="${tags}"$'\n'"${image}:latest"
+          else
+            echo "::notice::本 tag 不是最新正式发行，不动 ${image}:latest"
+          fi
+          {
+            echo "image=$image"
+            echo "tags<<__TAGS__"
+            echo "$tags"
+            echo "__TAGS__"
+          } >> "$GITHUB_OUTPUT"
+        env:
+          ENGINE: ${{ matrix.engine }}
+          VERSION: ${{ needs.build.outputs.version }}
+          IS_LATEST: ${{ needs.build.outputs.is-latest }}
+
+      - uses: docker/setup-buildx-action@v4.3.0
+
+      - uses: docker/login-action@v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v7.3.0
+        id: push
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.context }}/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          # 两态 Dockerfile 的 CI 态（ADR 0037 决策 5）：按 tag 版本从 PyPI/npm 装已发行的 worker 包——
+          # 这就是上面「等索引可见」一步存在的原因（本 job 真消费索引）。
+          build-args: |
+            WORKER_SOURCE=index
+            WORKER_VERSION=${{ needs.build.outputs.version }}
+          # 关掉 provenance/sbom attestation：开着会把推上去的东西变成带 unknown/unknown 附属 manifest
+          # 的 image index，而基底镜像下游要被 `gherkai deploy` pull 下来、重推进使用方 ECR、再按
+          # `RepoDigests` 取 manifest digest 注册 task-def，并做「架构必须是 linux/amd64」的 inspect 校验
+          # （ADR 0038）——那条路径要的是一个干净的单 manifest 单架构镜像。
+          provenance: false
+          sbom: false
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.version=${{ needs.build.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.licenses=MIT
+
+      - name: 记 digest
+        run: |
+          {
+            echo "- \`${IMAGE}:${VERSION}\` → \`${DIGEST}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+        env:
+          IMAGE: ${{ steps.meta.outputs.image }}
+          VERSION: ${{ needs.build.outputs.version }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+
+  release:
+    # ④ GitHub Release 作 changelog 锚点（各包 pyproject 的 `[project.urls] Changelog` 指 /releases）。
+    name: GitHub Release
+    needs: [build, pypi, npm, images]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # 建 Release
+    steps:
+      - uses: softprops/action-gh-release@v3.0.3
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          generate_release_notes: true # 自动 changelog；下面 body 会前置在它上面
+          make_latest: ${{ needs.build.outputs.is-latest }}
+          body: |
+            ```bash
+            uv tool install 'gherkai[local]==${{ needs.build.outputs.version }}'          # CLI + 本地 novaact worker
+            npm i -g @gherkai/worker-midscene@${{ needs.build.outputs.version }}          # 本地 midscene worker
+            uv tool install 'gherkai[deploy-aws]==${{ needs.build.outputs.version }}'     # 部署方：另装 AWS 供给包
+            ```
+
+            worker 基底镜像（linux/amd64）：
+            `ghcr.io/${{ github.repository_owner }}/gherkai-worker-novaact:${{ needs.build.outputs.version }}`
+            · `ghcr.io/${{ github.repository_owner }}/gherkai-worker-midscene:${{ needs.build.outputs.version }}`
+
+            升级是三步（CLI → `gherkai deploy` → 重推自定义 variant），见 ADR 0037 决策 7。

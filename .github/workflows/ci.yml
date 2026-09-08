@@ -1,0 +1,111 @@
+name: ci
+
+# push/PR 的常规检查。与 release.yml 的关系：这里跑的 `uv build --all-packages` smoke 用的是
+# **同一份**产物校验脚本（.github/scripts/check_dist_metadata.py），发布链上那道 gate 因此不会是
+# 「第一次跑」——打包元数据/metadata hook 的回归在日常提交就炸，不必等推 tag。
+on:
+  push:
+    branches: [main] # tag push 不进这里（branches 过滤已排除），发布链见 release.yml
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # 与 release.yml 同一组版本旋钮（改动请两边一起改，发布路径与 CI 路径不该分叉）。
+  UV_VERSION: "0.12.3"
+  PYTHON_VERSION: "3.13"
+  NODE_VERSION: "22"
+
+jobs:
+  python:
+    name: pytest（全 workspace 成员）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          # 必须整仓：`uv sync` 要 build 各成员（editable），而 uv-dynamic-versioning 在浅仓库上
+          # 直接拒算版本（strict=true，ADR 0037 决策 2b）——浅 clone 下 CI 第一步就崩。
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: uv sync（单 lock 装齐全成员）
+        # --locked：uv.lock 与 pyproject 不一致就失败，别让 CI 悄悄用一份现算的解（ADR 0037「工程布局」单 lock）。
+        run: uv sync --locked
+
+      - name: pytest
+        # 根 pytest 配置的 testpaths 覆盖全部成员（core / runtime / cli / engines/novaact / deploy_aws，
+        # 后者含 CDK synth 测试）；integration 标记默认 deselect（要连真 AWS，见根 pyproject 注释）。
+        run: uv run --frozen pytest -q
+
+  node:
+    name: midscene worker（npm）
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: engines/midscene
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }} # 与 package.json engines.node 下限、基底镜像 node:22-slim 同源
+          cache: npm
+          cache-dependency-path: engines/midscene/package-lock.json
+
+      - run: npm ci
+
+      - name: tsc → dist/
+        # 发布形态是 tsc 产的 ESM dist/（ADR 0037 决策 3）：编译失败即发不出去，先在 CI 拦住。
+        run: npm run build
+
+      - run: npm test
+
+  build-smoke:
+    name: uv build --all-packages（打包元数据 smoke）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0 # 同上：浅仓库算不出版本
+
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - run: uv build --all-packages --out-dir dist
+
+      - name: 产物校验（成员齐 / 版本一致 / 兄弟包 pin 已渲染）
+        # 不传 --expect-version：日常提交上算出的是 `X.Y.Z.postN.devM+<sha>` 这类非纯净版本
+        # （ADR 0037 决策 2b：非 tag commit / 脏树带 `+` 本地段），与 tag 无从比对；这里只校内部一致性。
+        run: uv run --no-project python .github/scripts/check_dist_metadata.py --dist dist
+
+      - name: 发布 gate 演练（本地临时 tag，不 push）
+        # 在干净 checkout 上打一个**本地** annotated tag 再 build：算出的版本必须逐字等于 tag——这正是
+        # release.yml 的 gate。日常 CI 由此照出「干净 tag commit 也算出带 +local 版本」这类回归（曾因 pyproject
+        # 显式 `metadata = true` 埋下、只有推真 tag 才会炸，ADR 0037 决策 2b），不必等到发布日。
+        # 产物落 /tmp：落仓库内会被 dunamai 判成脏树（未跟踪文件也算）、版本带 +dirty、演练假失败。
+        run: |
+          set -euo pipefail
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "::error::工作树不干净，gate 演练无意义："; git status --porcelain; exit 1
+          fi
+          git -c user.email=ci@localhost -c user.name=ci tag -a v99.0.0 -m "ci gate rehearsal (local only)"
+          uv build --all-packages --out-dir /tmp/dist-rehearsal
+          uv run --no-project python .github/scripts/check_dist_metadata.py \
+            --dist /tmp/dist-rehearsal --expect-version 99.0.0
+          git tag -d v99.0.0
