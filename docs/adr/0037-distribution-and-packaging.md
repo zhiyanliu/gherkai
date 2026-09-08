@@ -1,6 +1,6 @@
 # 0037. 分发与打包：PyPI 多包 workspace（uv-first）+ `gherkai deploy` 进 wheel
 
-> **Status:** Draft —— 决策已对齐；**施工态**：决策 1–4 已落地（发行重组、worker 交付），决策 6/7/8 已实装（`gherkai deploy`/`destroy` + provider 发现、skew 三态、CI 发布链文件、两态基底 Dockerfile），实测项 4（真账户 deploy）/ 5（真 tag 发布链）未清、PyPI 首发未落。**翻 Accepted 的门槛**：①下「实测项」清零；②发行重组 + PyPI 首发落地；③校准清单逐条完成——[0016](./0016-execution-architecture-core-lib-run-model.md) 布局图/`build_cloud_stores` 条 extra 表述、[0033](./0033-iac-aws-backend-and-composition-wiring.md) IaC/VPC 表述（两者 Status 头已反向链）、本 ADR 自身的现状快照（「背景与问题」「现状实测」表、决策 2a 表「当前」列改为历史表述）、以及下「对既有文档与 code 注释的影响」节列出的各项；④去掉 0016 Status 头与 0033 Status 头里**属于本 ADR 的那一处**「（Draft，决策已对齐、未实装）」标注（0033 头里 0038 的那一处由 0038 自己翻牌时去掉）。**worker 镜像的交付**（基底/variant/推送注册）是独立子系统，另立 [0038](./0038-worker-image-delivery.md)，本 ADR 只定两层分工与基底 registry、其余全部指向它。
+> **Status:** Accepted（2026-09-08，随 v1.4.0 首发翻牌）—— 决策 1–8 全部实装：uv workspace 五包 + 三名分离 + git tag 版本 + `==` lockstep；worker 交付（novaact 包 / `@gherkai/worker-midscene` / 四级定位链——第四级经 fd 预演定为 uvx 保留、npx 废弃）；`steps/` 定制面；两态基底 Dockerfile + GHCR；`gherkai deploy`（provider 发现、VPC 三态、版本戳、asset 从已安装包、CDK 查询缓存）；skew 三态；CI 发布链。**实测项已清零**（首个真 tag 全链一次全绿，发行版 CLI 在真账户完成部署升级 + 云端 run）。「背景与问题」「现状实测」两节是**施工前快照、历史叙述**。worker 镜像交付的独立子系统见 [0038](./0038-worker-image-delivery.md)（仍 Draft，剩需长 run 的实测）。
 
 ## 背景与问题
 
@@ -8,7 +8,7 @@
 
 当前（施工前）唯一的安装路径 = clone repo，在 repo 内建**四套**隔离环境（`cd cli && uv sync`、`engines/novaact` 下 `uv sync`、`engines/midscene` 下 `npm install`、云端部署再到 `iac_aws_backend` 下 `uv sync`），从 `cli/` 目录 `uv run python -m cli …`。README 与各子工程 README 都只教这一条；`cli/pyproject.toml` 声明了 console script `gherkai`、`cli/README.md` 有一处 `pip install cli[aws]` 的口吻，但没有任何文档教用户走到「安装后」那一步，且这条路**当前走不通**（下）。
 
-### 现状实测（本 ADR 的证据基座，均可复现；施工后成为历史快照）
+### 施工前现状实测（历史快照——本 ADR 的证据基座；下列每一条今已被决策 1–8 改变）
 
 | 实测 | 结果 |
 |---|---|
@@ -193,7 +193,7 @@ worker 内容 = 框架脚手架 + 使用方确定性 step，属业界分类里�
 - 一个目录 = 一个 workspace 成员 = 一个 lock（根 `uv.lock`），当前五处各自的 `uv.lock` 合一；`uv run gherkai …`、`uv run pytest`（根跑全部）、`uv build --package <name>`。**单 lock 要求全员依赖共解**（已实测通过）；将来某成员升版引入冲突时用 `tool.uv.conflicts` 声明或把该成员移出 workspace，不回退到多 lock。
 - **contributor 体验净变好**：一次 `uv sync` 替代四处安装中的三处（midscene 仍 `npm install`）；console script 直接可用；部署与用户同一条 `uv run gherkai deploy --vpc default --prefix …`，context 坑对 contributor 也消失。代价见决策 3 末条。
 
-## 对既有 ADR 的影响（反向链已落 Status 头，带「（Draft，决策已对齐、未实装）」标注、随本 ADR 翻 Accepted 时去掉）
+## 对既有 ADR 的影响（反向链已落各 Status 头；本 ADR 翻 Accepted 时标注已同步）
 
 - **[0016](./0016-execution-architecture-core-lib-run-model.md)（Partially-superseded-by 本 ADR）**：反转「cli backend 选择」节 `build_cloud_stores` 条的「cli 主依赖不含 boto3、走 `cli[aws]→core[aws]` extra」（CLI 发行包硬依赖 `gherkai-runtime[aws]`；库层 extra 保留）；「工程布局」树 `cli/` 行的「gherkai/core 作 path 依赖」→ uv workspace + build 时 `==` pin；工程布局的目录名/发行名/import 名重排；「数据模型」节 definition 行的 run 级字段枚举（已逐字段带 ADR 指针）落地时补 `steps_dir` → 本 ADR（扩展，属校准）。分层、窄腰、注入红线、决策 A/B/C **全部不动**。
 - **[0033](./0033-iac-aws-backend-and-composition-wiring.md)（Partially-superseded-by 本 ADR 与 0038）**：本 ADR 取代的部分——`iac_aws_backend/` 独立工程 + 裸 `cdk deploy` → 包化进 `gherkai-deploy-aws`、经 `gherkai deploy`（`prefix`/`vpc_id`/`use_default_vpc`/`stop_timeout` 四个 context 旋钮升为三个 flag，能力不减，另加 SSM 档比对）；Lambda asset 现场 copytree repo 相对路径 + 联网装 gherkin → 从已安装包取；「留待」CI 条闭环；SSM 参数族加 `version`、`vpc`。镜像/task-def/ECR/权限相关的取代见 [0038](./0038-worker-image-delivery.md)。两个镜像的容器入口随 worker 包化改为 `python -m gherkai_worker_novaact` 与 `node dist/bin.mjs`（决策 3）；资源清单/命名契约不动；preflight 加版本 skew 一项（variant 解析那项归 0038）。
@@ -205,7 +205,7 @@ worker 内容 = 框架脚手架 + 使用方确定性 step，属业界分类里�
 - **[0024](./0024-worker-core-protocol.md) / [0026](./0026-schedule-module.md)**：worker↔core 协议、`SubprocessEngine` 参数化 cmd 不动；只是 cmd 的**来源**从 `repo_root()` 变定位链。
 - **[0009](./0009-maximize-aws-hard-constraint.md)**：`-aws` 后缀入名是「不用当前的命名把门关死」，**不是**对全栈 AWS 硬约束的反转——两个引擎本身绑在 AWS 服务上（Nova Act、Bedrock、AgentCore Browser），非 AWS 后端意味着引擎层也要重铺、距离很远。
 
-## 对既有文档与 code 注释的影响（校准清单，Draft→Accepted 门槛的一部分；各条到期点见括注）
+## 对既有文档与 code 注释的影响（校准清单，翻 Accepted 时已逐条完成；括注是当时的到期点，路径名为当时的路径）
 
 - **README.md**：「首次安装：三个运行环境」节与**全部** `uv run python -m cli …` 调用示例 → `uvx gherkai …` / `uv tool install`（发行重组落地时）；「环境隔离：Python 依赖在 `engines/novaact/.venv`、不污染全局」条**被决策 3 反转**（worker 装进 CLI 同 venv；`[local]` 落地时）；目录树（布局落地时）；「boto3 走可选 `core[aws]`」句（发行重组落地时）；两处 `cdk deploy` 提法（`--backend` 说明与云端档示例）→ `gherkai deploy --vpc … --prefix …`（**已校准**）。
 - **cli/README.md**（`uv sync --extra aws` / `pip install cli[aws]`）、**core/README.md**（`core[aws]`）、**gherkai/README.md**（`cd gherkai && uv sync`）→ 发行重组落地时。
@@ -222,7 +222,7 @@ worker 内容 = 框架脚手架 + 使用方确定性 step，属业界分类里�
 4. **`gherkai deploy`**（依赖 1、3）：`gherkai-deploy-aws` 收编 IaC 与 handler、provider 发现、asset 从已安装包、三 flag（四旋钮）+ SSM `version`/`vpc` 两参数各三态 + skew 检查、CI release 全链一次真跑；其 worker 镜像尾部步骤随 0038 落地。
 - **期外/按需**：worker `--capabilities` 自述入口（运行配置有效性 engine × browser 后端 × backend 走 worker 自述、非安装期 extras——等本地 browser 这类真实需求触发，[0036](./0036-deterministic-capability-discovery.md) 形态延伸）；去 Node 部署路线。
 
-## 实测项（Draft → Accepted 前必清；「绿≠对」——每条都依赖 mock 之外的真实行为）
+## 实测项（**已清零**；「绿≠对」——每条都依赖 mock 之外的真实行为，证据内联于各条）
 
 1. `uv-dynamic-versioning` 在 workspace 内：三种 git 状态各算出什么版本、`=={{ version }}` 与 `uv sync`/`uv run` 的解析行为；hook 接管 dependencies 后 extras 的渲染正确。（**已验**：三项显式配置 + metadata 默认下，干净 tag → `X.Y.Z`、脏树 → `+dirty`、离 tag → `.postN.dev0+<sha>`；五个 wheel 的 `==` pin 与 extras 渲染正确、`uv sync` 解析通过；反例——显式 `metadata = true` 在干净 tag 上出 `+<sha>`，gate 失败。）
 2. `sys.executable -m gherkai_worker_novaact` 下 EVENTS_FD `pass_fds` 继承与三通道分离真跑（**前半已验**：真管道经 `pass_fds` 收到 worker 写出的事件、中文不转义；`--match-steps` 挂起时 `pgrep -P` 无子进程，Python 与 midscene 的 `dist/bin.mjs`、全局装 bin 三种形态皆然）；`uvx`/`npx` 兜底路径的 fd 继承预演 → 定第四级存废（**已做**：uvx 穿透 fd3 + 转发 SIGTERM → novaact 保留；npx 不穿透 → midscene 第四级废弃，见决策 3 第 4 级）。

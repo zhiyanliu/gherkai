@@ -104,10 +104,22 @@ flowchart TD
 - Node ≥22（midscene worker；`gherkai deploy` 的 CDK/cdk CLI 同一下限）、Python 3.13 + uv（五个 workspace 成员）
 - （可选，仅 `--expose-local` 本地应用测试需要）[ngrok](https://ngrok.com/download) + authtoken（**注册免费账号即够**，付费账号亦可；`ngrok config add-authtoken <token>`——注意是 dashboard 上的 **Authtoken**，不是 `cr_` 开头的 API key）
 
+## 安装（使用者：PyPI / npm 发行版，ADR 0037）
+
+```bash
+uv tool install gherkai                     # 只提交云端 run 的人：CLI 本体（含 AWS 依赖）
+uv tool install 'gherkai[local]'            # 本机跑 novaact worker（--backend local）
+npm i -g @gherkai/worker-midscene           # 本机跑 midscene worker（Node ≥22；CLI 按 PATH 定位）
+uv tool install 'gherkai[deploy-aws]'       # 部署方：gherkai deploy / push-worker（另需 Node ≥22、docker）
+uvx gherkai --version                       # 或免安装临时跑（uvx --from 'gherkai[local]' gherkai run …）
+```
+
+版本由 git tag 派生、五个 Python 包 `==` 同号锁定；CLI 与已部署后端的版本 skew 在 `--backend cloud` 预检时比对（细节见 [`cli/README.md`](./cli/README.md)）。
+
 ## 运行（经核心库 cli，一个入口跑两个引擎）
 
 ```bash
-# 首次安装：两条都在仓库根执行（见下「注意」）
+# 开发者（仓库内）首次安装：两条都在仓库根执行（见下「注意」）；使用者装发行版见上节
 uv sync                                            # 五个 workspace 成员（core/runtime/cli + novaact worker + deploy-aws provider）一次装齐（uv workspace，共用根 .venv/）
 (cd engines/midscene && npm ci && npm run build)   # Midscene worker（npm 包，Node 22）：装依赖 + 编译到 dist/
 # dev 态让 CLI 用本仓库的 midscene worker（发布后用户走 `npm i -g @gherkai/worker-midscene`，不需此步）：
