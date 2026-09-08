@@ -21,7 +21,7 @@ import { fromNodeProviderChain } from "@aws-sdk/credential-providers";
 // region=None→NoRegionError；组合根 resolve_region 落实后经 env 注入；spike 直跑须 AWS_REGION=... 前缀）。
 export function getRegion(): string {
   const r = process.env.AWS_REGION;
-  if (!r) throw new Error("Midscene worker: AWS_REGION 未设——AgentCore/Bedrock 连接需显式 region（ADR 0033/0016 决策 C）");
+  if (!r) throw new Error("Midscene worker: AWS_REGION 未设——连 AgentCore/Bedrock 需显式 region");
   return r;
 }
 export function getBaseUrl(): string {

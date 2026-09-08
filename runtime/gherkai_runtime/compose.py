@@ -245,8 +245,8 @@ def resolve_worker_cmd(engine: str, *, version: str | None = None) -> WorkerCmd:
             # 引号不配对之类：**不静默落到下一级**——用户明确指了一个 worker，悄悄换成别的（或报「没装」）
             # 是最难查的那种错。点名 env 让他修（miss 语义走同一条分叉：调用点退 2 / plan 降级）。
             raise WorkerNotFoundError(
-                engine, f"env {env_key} 的值无法解析（{e}）：{raw!r}——修正引号或 unset 它，"
-                        f"再让定位链走后续级别（ADR 0037 决策 3）") from e
+                engine, f"env {env_key} 的值无法解析（{e}）：{raw!r}——修正引号，"
+                        f"或 unset 它改用已安装的 worker") from e
         return WorkerCmd(cmd=argv, cwd=os.environ.get(f"GHERKAI_WORKER_{engine.upper()}_CWD"),
                          source=f"env {env_key}")
     module = _WORKER_PY_MODULE.get(engine)
@@ -264,7 +264,7 @@ def resolve_worker_cmd(engine: str, *, version: str | None = None) -> WorkerCmd:
         return WorkerCmd(cmd=build(v), cwd=None, source=f"{launcher} 兜底拉起（版本 {v}）")
     raise WorkerNotFoundError(
         engine,
-        f"引擎 {engine} 的 worker 运行时未找到（定位链四级全 miss，ADR 0037 决策 3）。"
+        f"引擎 {engine} 的 worker 运行时未找到。"
         f"{_WORKER_INSTALL_HINT[engine]}；或用 env {env_key}（+ 可选 "
         f"GHERKAI_WORKER_{engine.upper()}_CWD）显式指向自建/仓库内 worker",
     )
@@ -421,7 +421,7 @@ def _ask_worker(engine: str, flag: str, *, what: str, steps_dir: str | Path | No
                               timeout=timeout_s, input=payload)
     except FileNotFoundError as e:
         raise RuntimeError(
-            f"引擎 {engine} 的 worker 起不来（{e}）——定位链命中「{wc.source}」但该命令不可执行？"
+            f"引擎 {engine} 的 worker 起不来（{e}）——用的是「{wc.source}」，该命令不可执行？"
         ) from e
     except subprocess.TimeoutExpired as e:
         raise RuntimeError(f"引擎 {engine} 的 {what}超时（{timeout_s:.0f}s）") from e
@@ -883,7 +883,7 @@ def check_version_skew(ssm_version: str | None, cli_version: str | None) -> tupl
     if not ssm_version:
         return SKEW_WARN, (
             "提示：后端没有版本戳（SSM /<prefix>backend/version）——这个部署早于版本戳机制，本次不比对版本、不拦。"
-            "请部署方跑一次 `gherkai deploy` 把戳写上（ADR 0037 决策 7）。"
+            "请部署方跑一次 `gherkai deploy` 把戳写上。"
         )
     if not mine:
         return SKEW_SKIP, "提示：跳过版本比对——本机未以包形式安装（源码直跑），取不到自身版本。"
@@ -897,8 +897,8 @@ def check_version_skew(ssm_version: str | None, cli_version: str | None) -> tupl
         return SKEW_OK, ""
     if cmp > 0:
         return SKEW_BLOCK, (
-            f"版本 skew：本机 CLI {mine} 新于后端 {ssm_version}——拒绝执行（ADR 0037 决策 7，无放行口：新 CLI "
-            f"写的任务定义由旧后端读是真风险）。两条出路：\n"
+            f"版本 skew：本机 CLI {mine} 新于后端 {ssm_version}——拒绝执行（无放行口：新 CLI 写的"
+            f"任务定义由旧后端读是真风险）。两条出路：\n"
             f"  ① 部署方把后端升上来：gherkai deploy（升到 {mine}）\n"
             f"  ② 临时用与后端同版本的 CLI、不动本机安装：uvx --from 'gherkai=={ssm_version}' gherkai …"
         )
@@ -1043,7 +1043,7 @@ def _variant_miss_hint(*, engine: str, variant: str, tag: str, what: str,
                 f"再提交——**别**照旧版本推镜像（推的 tag 后端不解析）。")
     return (f"引擎 {engine} 的 worker variant {variant!r} 解析失败（{what}，镜像 tag {tag}）。"
             f"让部署方推上去：gherkai deploy push-worker <本地镜像> --engine {engine} --variant {variant}"
-            f"（镜像按 ADR 0038 的三行模板 build，必须带 --platform linux/amd64）。")
+            f"（build 镜像时必须带 --platform linux/amd64）。")
 
 
 def resolve_worker_variant(
@@ -1139,7 +1139,7 @@ def resolve_default_worker_task_defs(
     if not backend_version:
         raise WorkerVariantError(
             f"兼容路径无从解析 worker 镜像：读不到后端版本戳（SSM {ssm_path(prefix, 'version')}）——"
-            f"镜像 tag 含版本。请部署方跑一次 `gherkai deploy` 把戳写上（ADR 0037 决策 7）。")
+            f"镜像 tag 含版本。请部署方跑一次 `gherkai deploy` 把戳写上。")
     variant = read_worker_default(prefix=prefix, ssm=ssm)
     if variant is None:
         raise _no_default_pointer_error(prefix)

@@ -85,7 +85,8 @@ def test_unsupported_engine_is_rejected_not_silently_downgraded():
     """`--container-engine podman` **不静默回落 docker**：回落会让人以为自己验过 podman 路径（ADR 0038）。"""
     with pytest.raises(UnsupportedContainerEngine) as exc:
         resolve_container_engine("podman")
-    assert "podman" in str(exc.value) and "重议闸门" in str(exc.value)
+    # 文案是产品面（不带内部机制名，判据见 CLAUDE.md「产品面文案不带内部指代」）——断言点名了引擎与「未实装」。
+    assert "podman" in str(exc.value) and "未实装" in str(exc.value)
 
 
 # ---------------------------------------------------------------- digest 挑选（正确性支点）

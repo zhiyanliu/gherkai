@@ -355,8 +355,8 @@ def schedule(
     # 引擎无关的纯关系校验——core 不认下限从何而来（组合根按引擎算好传入 min_grace_s）。任何前端都受此护栏。
     if opts.grace_period_s <= 0 or opts.grace_period_s < opts.min_grace_s:
         raise ValueError(
-            f"grace_period_s={opts.grace_period_s} 非法：须 > 0 且 ≥ min_grace_s={opts.min_grace_s}"
-            "（grace < 单 act 时长会致 SIGKILL 先于会话释放、软停失效、会话泄漏，ADR 0024 grace 硬约束）"
+            f"停止宽限 grace={opts.grace_period_s}s 非法：须 > 0 且 ≥ {opts.min_grace_s}s"
+            "（宽限短于单步操作耗时会让 worker 被强杀在释放浏览器会话之前，软停失效、会话泄漏）"
         )
     jobs = list(run_meta.jobs)
     sink_lock = threading.Lock()

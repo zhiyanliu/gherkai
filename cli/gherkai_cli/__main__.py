@@ -53,10 +53,11 @@ def _installed_version() -> "str | None":
         return None
 
 
-# `--steps-dir` 的公共 help（run/plan/submit/list-deterministic 四处共用，措辞单点维护、不抄四份）
+# `--steps-dir` 的公共 help（run/plan/submit/list-deterministic 四处共用，措辞单点维护、不抄四份）。
+# 文案是产品面（不带 ADR/内部机制名）；定制 step 的解析与 fail-loud 判据见 ADR 0037 决策 4。
 _STEPS_DIR_HELP = (
-    "使用方确定性 step 目录（默认 ./steps 存在即用；亦可 env GHERKAI_STEPS_DIR）：worker 启动时排序递归"
-    "加载其中的 step 定义文件、注册进自己的确定性注册表（ADR 0037 决策 4）"
+    "你自己的确定性 step 目录（默认 ./steps 存在即用；亦可 env GHERKAI_STEPS_DIR）：worker 启动时排序递归"
+    "加载其中的 step 定义文件、注册进它的确定性注册表"
 )
 
 
@@ -118,14 +119,16 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
         help="未标 @timeout 的 scope 用的 job 墙钟超时秒（默认 300；<=0 表示不超时）；"
              "标了 @timeout:N tag 的按 tag 走（同 @engine/--default-engine 模式）",
     )
+    # 下限判据（Nova 的 act_timeout + 余量、为何必须 ≥ 单个 act 时长）见 ADR 0024；help 只讲怎么用。
     run.add_argument(
         "--grace", type=float, default=None,
-        help="停止后等 worker 优雅退出的宽限秒（默认按本 run 引擎推导：Nova≈act_timeout+余量、"
-             "确保 grace≥单 act 时长否则会话泄漏，ADR 0024；显式给过小值会被拒退 2）",
+        help="停止后等 worker 优雅退出的宽限秒（默认按本 run 引擎推导：Nova≈act_timeout+余量）；"
+             "小于单个 act 的时长会让浏览器会话泄漏，给过小值直接退 2",
     )
+    # 隧道暴露本机应用的整套机制（凭据轮换、生命周期、谁负责拆）见 ADR 0035。
     run.add_argument(
         "--expose-local", default=None, metavar="ORIGIN",
-        help="把「本机可达」的被测应用经隧道暴露给云端浏览器（ADR 0035）：值=feature 中书写的原始 origin"
+        help="把「本机可达」的被测应用经隧道暴露给云端浏览器：值=feature 中书写的原始 origin"
              "（如 http://localhost:3000，也可是局域网地址），框架起隧道并把 job 文本中该前缀替换为公网 URL"
              "（含每 run 一换的 basic-auth 凭据）。需已配 ngrok authtoken（NGROK_AUTHTOKEN）",
     )
@@ -179,8 +182,8 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     )
     run.add_argument(
         "--worker-variant", default=None, metavar="NAME",
-        help="[--backend cloud] 云端 worker 镜像 variant（= 一套具名的确定性 step 集烙成的定制镜像，ADR 0038）："
-             "缺省用部署的默认指针（`gherkai deploy` 初始化为 base）。提交侧 preflight 把它解析成本 run 各引擎的"
+        help="[--backend cloud] 云端 worker 镜像 variant（= 一套具名的确定性 step 集烙成的定制镜像）："
+             "缺省用部署的默认指针（`gherkai deploy` 初始化为 base）。提交时把它解析成本 run 各引擎的"
              "精确 task-def revision 写进 definition（一个 run 内镜像固定，别人重推同名 variant 不影响在跑的 run）；"
              "某引擎缺该 variant 即退 2、不回落默认。推送归部署方（`gherkai deploy push-worker`）。"
              "local 后端忽略（那边的确定性 step 直接从 --steps-dir 读、不经镜像）",
@@ -222,11 +225,11 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     pl.add_argument("--json", action="store_true", help="输出机器可读 JSON（scope/job 分组）")
     pl.add_argument(
         "--steps-dir", default=None, metavar="DIR",
-        help=_STEPS_DIR_HELP + "——预检的派发标注据此反映使用方定制 step（ADR 0036 决策 4）",
+        help=_STEPS_DIR_HELP + "——预检的派发标注据此反映你自己的 step",
     )
     pl.add_argument(
         "--expose-local", default=None, metavar="ORIGIN",
-        help="仅作标注：plan 显示替换前的原始地址（隧道 URL 是运行时产物，plan 零副作用不起隧道，ADR 0035）",
+        help="仅作标注：plan 显示替换前的原始地址（plan 不起隧道、零副作用；公网 URL 只在真跑时才有）",
     )
 
     # ---- 无状态跑批（ADR 0034）：submit 提交完就走 / status 轮询收集 ----
@@ -246,7 +249,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     sm.add_argument(
         "--expose-local", default=None, metavar="ORIGIN",
         help="经隧道暴露本机可达的被测应用（语义同 run；submit 后隧道由后台进程持有——local=per-run 进程、"
-             "cloud=隧道守护进程，本机需保持开机联网直到 run 终态，ADR 0035）",
+             "cloud=隧道守护进程，本机需保持开机联网直到 run 终态）",
     )
     sm.add_argument(
         "--tunnel", choices=sorted(_tunnel_providers()), default="ngrok",
@@ -254,8 +257,8 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     )
     sm.add_argument(
         "--tunnel-ttl", type=float, default=None, metavar="S",
-        help="[cloud + --expose-local] 隧道守护进程的兜底 TTL 秒（默认按 definition 算：各 job 预算之和 + "
-             "启动余量，ADR 0035 决策 3）；给了就用本值。TTL 到点无条件拆隧道，调小可能在 run 未完时断隧道",
+        help="[cloud + --expose-local] 隧道守护进程的兜底 TTL 秒（默认 = 本批各 job 预算之和 + 启动余量）；"
+             "给了就用本值。TTL 到点无条件拆隧道，调小可能在 run 未完时断隧道",
     )
     sm.add_argument("--report-dir", default="reports", metavar="DIR",
                     help="归集报告落点（默认 reports/）；cloud 档须与推进器 Lambda 的 REPORT_DIR 一致"
@@ -277,7 +280,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     sm.add_argument("--cluster", default=None, metavar="NAME", help="[cloud] ECS cluster 名")
     sm.add_argument(
         "--worker-variant", default=None, metavar="NAME",
-        help="[cloud] 云端 worker 镜像 variant（语义同 run）：缺省用部署的默认指针；提交侧 preflight 解析成各引擎的"
+        help="[cloud] 云端 worker 镜像 variant（语义同 run）：缺省用部署的默认指针；提交时解析成各引擎的"
              "精确 task-def revision 写进 definition（云端推进器照 definition 起 task）。local 后端忽略",
     )
     # 注：submit 不收 --subnet/--security-group——cloud submit 只写 runs 表、不碰 SSM/ECS（ADR 0034），
@@ -375,7 +378,7 @@ def _resolve_steps_dir_for_backend(args) -> str | int | None:
         return steps_dir
     if args.steps_dir:
         _progress("注：--backend cloud 下 --steps-dir 不生效——云端 worker 的确定性 step 烙在定制镜像里"
-                  "（构建镜像时 COPY steps/，ADR 0037 决策 4 / 0038），本机目录进不了容器")
+                  "（构建镜像时 COPY steps/），本机目录进不了容器")
     return None
 
 
@@ -423,7 +426,7 @@ def _cmd_list_deterministic(args) -> int:
     if args.json:
         print(json.dumps({"engine": args.engine, "deterministic_steps": entries}, ensure_ascii=False, indent=2))
         return 0
-    print(f"引擎 {args.engine} 的确定性 step（{len(entries)} 条；test engineer 在 worker 注册表维护，ADR 0022/0036）：")
+    print(f"引擎 {args.engine} 的确定性 step（{len(entries)} 条；由该引擎 worker 的注册表维护）：")
     if not entries:
         print("  （空——该引擎当前没有注册任何确定性 step，全部 step 走 AI）")
     for e in entries:
@@ -439,7 +442,7 @@ def _cmd_list_engines() -> int:
     **恒退 0**：本命令是「告诉我这台机器上环境什么样」的诊断，某引擎没装正是要展示的信息、不是命令失败
     （要判「装了没」的脚本请看具体引擎那行，或用 run/list-deterministic 的退 2）。
     """
-    print("可用引擎（worker 定位链解析结果，ADR 0037 决策 3）：")
+    print("可用引擎（本机 worker 运行时的探测结果）：")
     for name in sorted(_names.ENGINES):
         try:
             wc = compose.resolve_worker_cmd(name)
@@ -525,7 +528,7 @@ def _validate_worker_variant(args) -> bool:
         return True
     if getattr(args, "backend", None) != "cloud":
         _progress("--worker-variant 不生效：worker 镜像 variant 只作用于 --backend cloud"
-                  "（local 档的确定性 step 直接从 steps 目录读、不经镜像，ADR 0038）")
+                  "（local 档的确定性 step 直接从 steps 目录读、不经镜像）")
         return True
     try:
         _names.image_tag(_dist_version(), variant)
@@ -618,7 +621,9 @@ def _cmd_plan(args) -> int:
     else:
         print(render.render_plan_text(jobs, args.default_engine, dispatch))
     if dispatch and any(p_ and "conflict" in p_ for p_ in dispatch.values()):
-        _progress("⚠ 存在命中多条确定性模式的 step（见上标注）：真跑时这些 step 将 error——请工程侧收紧注册表模式（ADR 0022）。")
+        # 「一条 step 最多命中一条模式」是注册表侧的硬约束（判据见 ADR 0022）；下面这句是产品面文案。
+        _progress("⚠ 存在命中多条确定性模式的 step（见上标注）：真跑时这些 step 将 error——"
+                  "请收紧注册表模式，让每条 step 只命中一条。")
     if getattr(args, "expose_local", None):
         # 标注而不替换（ADR 0035 决策 2）：隧道 URL 是运行时产物，plan 零副作用、显示原始地址
         _progress(f"注：{args.expose_local} 将在 run/submit 时经隧道替换为公网 URL（plan 显示原始地址）")
@@ -927,7 +932,7 @@ def _submit_cloud(args, run_id: str, run_meta, initial, *, tunnel_info=None) -> 
                       stdin=_sp.DEVNULL, stdout=lf, stderr=lf)
         _progress(f"隧道由守护进程持有（日志 {watch_log}）：run 终态即拆、TTL 兜底 {ttl_s:.0f}s"
                   f"（= 各 job 预算之和 + 启动余量；`--tunnel-ttl` 可覆盖）。"
-                  f"**本机需保持开机联网直到 run 终态**——关机=隧道断=测试将以导航失败告终（ADR 0035）。")
+                  f"**本机需保持开机联网直到 run 终态**——关机=隧道断=测试将以导航失败告终。")
         _progress(f"已提交到云端（definition 已落库；kicker Lambda 起首批、云端链推进中）。查进度：gherkai status {run_id} --backend cloud --prefix {target.prefix}")
     else:
         _progress(f"已提交到云端（definition 已落库；kicker Lambda 起首批、云端链推进中，可关机）。查进度：gherkai status {run_id} --backend cloud --prefix {target.prefix}")
@@ -1155,8 +1160,8 @@ def _cmd_run(args) -> int:
     min_grace = max((compose.engine_min_grace(j.engine) for j in jobs), default=0.0)
     if args.grace is not None and (args.grace <= 0 or args.grace < min_grace):
         _progress(
-            f"--grace={args.grace} 太小：须 > 0 且 ≥ {min_grace}s（Nova act_timeout+余量；grace < 单 act 时长会致"
-            "会话泄漏、软停失效，ADR 0024 grace 硬约束）"
+            f"--grace={args.grace} 太小：须 > 0 且 ≥ {min_grace}s"
+            "（Nova act_timeout+余量；小于单个 act 的时长会让软停失效、浏览器会话泄漏）"
         )
         return 2
     # --grace 哨兵默认（None）→ 跟随本 run 引擎推导（Nova run 自然 ≥act_timeout+余量；midscene-only 回到小值）。

@@ -47,7 +47,8 @@ const REGISTRY: Entry[] = [];
  * meta 必填（ADR 0036：注册契约含人话元数据——description/example 缺失即 fail-loud）。 */
 export function deterministic(pattern: string, handler: DeterministicHandler, meta: DeterministicMeta): void {
   if (!meta?.description || !meta?.example) {
-    throw new Error(`deterministic(${JSON.stringify(pattern)}) 注册缺 description/example（ADR 0036：能力必须可发现）`);
+    throw new Error(`deterministic(${JSON.stringify(pattern)}) 注册缺 description/example：`
+      + `两者必填——缺了这条 step 不会出现在能力清单里，feature 作者发现不了它`);
   }
   REGISTRY.push({ pattern: new RegExp(pattern), handler, raw: pattern, meta });
 }
@@ -94,7 +95,7 @@ export function match(text: string): Match | null {
   if (hits.length > 1) {
     const raws = hits.map((h) => JSON.stringify(h.entry.raw)).join(", ");
     throw new DeterministicConflict(
-      `step ${JSON.stringify(text)} 命中多条确定性模式 [${raws}]（ADR 0022：最多命中一条，请收紧模式）`);
+      `step ${JSON.stringify(text)} 命中多条确定性模式 [${raws}]：一个 step 只能命中一条，请收紧模式`);
   }
   return { handler: hits[0].entry.handler, groups: hits[0].m.groups ?? {} };
 }

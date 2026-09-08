@@ -66,8 +66,8 @@ class EventSink:
                 # 静默写进无主键空间、adapter 按真 PK Query 永远读不到（无 scope_done → run 永不收敛），
                 # 且多 scope 挤同一假 PK 各自 seq 从 1 起 → 撞号覆盖（破 ADR 0034 机制一「每 PK 单写者」）。
                 raise ValueError(
-                    "EventSink DDB 态：EVENTS_DDB_TABLE 已注入但缺 RUN_ID/SCOPE_ID——组合根装配错误"
-                    f"（RUN_ID={run_id!r} SCOPE_ID={scope_id!r}）")
+                    "已注入 EVENTS_DDB_TABLE 但缺 RUN_ID/SCOPE_ID：事件写不到本次运行名下"
+                    f"（起 worker 的一方须同时注入三者；RUN_ID={run_id!r} SCOPE_ID={scope_id!r}）")
             return cls(table_name=table_name, run_id=run_id, scope_id=scope_id)
         events_fd = os.environ.get("EVENTS_FD")
         try:

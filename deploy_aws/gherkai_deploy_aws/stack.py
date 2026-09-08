@@ -93,8 +93,7 @@ class BackendStack(Stack):
             raise ValueError(f"stop_timeout context 须为整数秒，得到 {raw!r}")
         if not 1 <= seconds <= self.FARGATE_STOP_TIMEOUT_MAX_S:
             raise ValueError(
-                f"stop_timeout={seconds}s 越界：Fargate 要求 1..{self.FARGATE_STOP_TIMEOUT_MAX_S}s"
-                f"（>120s 部署期会被 ECS 拒；这正是 Nova grace 下限>120s 冲突的硬上限，见 ADR 0032）"
+                f"stop_timeout={seconds}s 越界：Fargate 要求 1..{self.FARGATE_STOP_TIMEOUT_MAX_S}s（硬上限，部署期会被 ECS 拒）"
             )
         return seconds
 
@@ -112,7 +111,7 @@ class BackendStack(Stack):
         raw = self.node.try_get_context("version")
         if not raw:
             raise ValueError(
-                "缺 version context：后端版本戳无隐式默认（ADR 0037 决策 6/7）。"
+                "缺 version context：后端版本戳无隐式默认。"
                 "正式路径是 `gherkai deploy`（它传自己的版本）；手工合成请显式 -c version=<PEP 440 版本>"
             )
         version = str(raw)
@@ -121,8 +120,8 @@ class BackendStack(Stack):
             Version(version)
         except InvalidVersion as exc:
             raise ValueError(
-                f"version context 非合法 PEP 440 版本：{version!r}——preflight 的 skew 比对按 PEP 440 解析"
-                f"（ADR 0037 决策 7），非法戳会让每个提交者的 preflight 炸。原因：{exc}"
+                f"version context 非合法 PEP 440 版本：{version!r}——提交侧的版本比对按 PEP 440 解析，"
+                f"非法戳会让每个提交者的 preflight 炸。原因：{exc}"
             ) from exc
         return version
 
@@ -725,8 +724,8 @@ class BackendStack(Stack):
             return spec.origin
         raise RuntimeError(
             f"Lambda asset 缺依赖 {import_name!r}：当前 venv 里定位不到它。"
-            f"部署须在装了 `gherkai[deploy-aws]` 的同一个环境里跑——asset 从已安装包复制"
-            f"（ADR 0037 决策 6），漏一项的后果是 Lambda 运行期 ImportError、要到真起 run 才暴露"
+            f"部署须在装了 `gherkai[deploy-aws]` 的同一个环境里跑——asset 从已安装包复制，"
+            f"漏一项的后果是 Lambda 运行期 ImportError、要到真起 run 才暴露"
         )
 
     @property

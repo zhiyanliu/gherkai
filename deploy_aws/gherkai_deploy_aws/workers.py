@@ -307,13 +307,13 @@ def _register_revision(ecs, *, template_arn: str, engine: str, image_ref: str, d
     """
     td, _ = _describe_revision(ecs, template_arn)
     payload = {k: v for k, v in td.items() if k not in _READ_ONLY_TASK_DEF_KEYS}
-    wanted = names.container_name(engine)
+    wanted = names.container_name(engine)  # container 名是 RunTask 逐字匹配的硬契约（ADR 0033）
     containers = payload.get("containerDefinitions") or []
     hit = [c for c in containers if c.get("name") == wanted]
     if not hit:
         raise WorkerCommandError(
             f"模板 revision {template_arn} 里没有名为 {wanted!r} 的 container——container 名是 RunTask 逐字匹配的"
-            f"硬契约（ADR 0033）。模板不该被手工改过；重跑 `gherkai deploy` 让 stack 重建模板。"
+            f"硬契约。模板不该被手工改过；重跑 `gherkai deploy` 让 stack 重建模板。"
         )
     for c in hit:
         c["image"] = image_ref  # `repo@sha256:<digest>`——按 digest 引用（被拒方案「revision 按 tag 引用镜像」）
@@ -544,7 +544,8 @@ def _template_arn(aws: Aws, *, prefix: str, engine: str) -> str:
         raise WorkerCommandError(
             f"读不到 {engine} 的 worker task-def 模板（SSM {path}）："
             f"这个参数由 stack 随 `gherkai deploy` 的 cdk 事务写入。\n"
-            f"出路：先跑 `gherkai deploy --prefix {prefix} …`（本 prefix 的后端可能还没部署，或部署早于 ADR 0038）。"
+            f"出路：先跑 `gherkai deploy --prefix {prefix} …`（本 prefix 的后端可能还没部署，"
+            f"或上次部署用的 CLI 版本还没有 worker 镜像机制）。"
         )
     return arn
 
@@ -564,13 +565,12 @@ def _push_one(image: str, *, engine: str, variant: str, prefix: str, version: st
     info = container.inspect(image)
     if not info.exists:
         raise WorkerCommandError(
-            f"本地找不到镜像 {image!r}：push-worker 只推**已 build 好**的镜像，不替你 build（ADR 0038）。\n"
-            f"定制镜像三行模板见 deploy_aws/README.md。"
+            f"本地找不到镜像 {image!r}：push-worker 只推**已 build 好**的镜像，不替你 build。\n"
+            f"定制镜像的三行 Dockerfile 模板见 deploy_aws/README.md。"
         )
     if not info.matches_target_platform():
         raise WorkerCommandError(
-            f"镜像 {image!r} 的平台是 {info.platform}，worker 固定 linux/amd64（Fargate 模板的 runtimePlatform ="
-            f" X86_64，ADR 0038）。\n"
+            f"镜像 {image!r} 的平台是 {info.platform}，worker 固定 linux/amd64（云端 worker 任务是 X86_64）。\n"
             f"重 build 时带上平台：docker build --platform linux/amd64 -t {image} .\n"
             f"（arm Mac 上漏 `--platform` 的后果本来要拖到 Fargate **启动期** `exec format error` 才暴露，"
             f"这里提前拦下。）"
@@ -588,8 +588,7 @@ def _push_one(image: str, *, engine: str, variant: str, prefix: str, version: st
     if not digest:
         raise WorkerCommandError(
             f"推送后在 {target} 上取不到本仓库（{repo_uri}）的 digest。digest 只能推送后取（本地 build 的镜像"
-            f"没有 registry digest，`.Id` 是 config digest、不是 manifest digest，ADR 0038 步 2/4）——"
-            f"确认 push 真的成功了。"
+            f"没有 registry digest）——确认 push 真的成功了。"
         )
     if previous_digest and previous_digest != digest:
         out(f"tag {tag} 原已存在：原 digest {names.short_digest(previous_digest)} → 新 digest {names.short_digest(digest)}"
@@ -684,7 +683,7 @@ def push_worker(image: str, *, engine: str, variant: str, set_default: bool = Fa
     except Exception as exc:  # 凭证/权限/region/网络：对用户是「先修凭证」，与前置同一档、不该抛 traceback
         out(f"AWS 调用失败：{exc}\n需要部署方权限（ECR 推送域 + ecr:GetAuthorizationToken/DescribeImages、"
             f"ecs:RegisterTaskDefinition/ListTaskDefinitions/DescribeTaskDefinition/TagResource、iam:PassRole、"
-            f"SSM 读写 /{prefix}backend/*、runs 表 Query），以及可用的凭证/region（ADR 0038「权限面增量」）。")
+            f"SSM 读写 /{prefix}backend/*、runs 表 Query），以及可用的凭证/region。")
         return EXIT_PRECONDITION
     cleanup_pass(prefix=prefix, engines=names.ENGINES, ssm=aws.ssm, ecs=aws.ecs, ddb=aws.ddb,
                  now=now, out=out)
@@ -769,8 +768,8 @@ def sync_base(*, prefix: str, engines, version: str, container, aws: Aws, now: d
             container.pull(ref, platform="linux/amd64")
         except ContainerError as exc:
             raise WorkerCommandError(
-                f"{exc}\n拉不到基底 {ref}：PyPI 已发、镜像 job 尚未跑完的半发布态是已知情形"
-                f"（ADR 0037 决策 8）——等镜像 job 重跑后再 `gherkai deploy`（幂等收敛）。"
+                f"{exc}\n拉不到基底 {ref}：PyPI 已发、镜像还没发完的半发布态是已知情形——"
+                f"等镜像发布完成后再 `gherkai deploy`（幂等收敛）。"
             ) from exc
         results.append(_push_one(ref, engine=engine, variant=BASE_VARIANT, prefix=prefix, version=version,
                                  container=container, aws=aws, now=now, out=out))
@@ -854,11 +853,11 @@ def run_deploy_steps(*, prefix: str, version: str, container, engines=None, regi
 
     # 容器引擎只有第 2 步（同步基底 pull/push）用；非纯发行版本步会整步跳过（见 `sync_base`），此时不探活——
     # contributor 在没装 docker 的机器上 deploy dev 版，第 3/4 步照样收敛，不为用不到的东西退 1。
+    # （纯发行版则 deploy 的机器必须有容器引擎；「免容器引擎的 registry 直拷」是 ADR 0038 重议闸门里的加法。）
     if compose.is_pure_release(version):
         probe = container.probe()
         if probe:
-            out(f"{probe}\nstack 已生效，但 worker 镜像步骤（同步基底）需要容器引擎——"
-                f"这一期 deploy 机器必须有一个（ADR 0038「容器引擎口子」；免容器引擎的 registry 直拷是重议闸门里的加法）。\n"
+            out(f"{probe}\nstack 已生效，但同步基底镜像要 pull/push——deploy 的机器需要容器引擎。\n"
                 f"装好后重跑 `gherkai deploy`（幂等收敛，不会重复注册）。")
             return EXIT_FAILED
     try:
@@ -867,7 +866,7 @@ def run_deploy_steps(*, prefix: str, version: str, container, engines=None, regi
         init_default_pointer(prefix=prefix, aws=aws, out=out)
         rederive_variants(prefix=prefix, engines=engines, version=version, aws=aws, now=now, out=out)
     except Exception as exc:  # 含 AWS 侧异常：cdk 已改过账户，一律归「四步失败」这一档、不抛 traceback
-        out(f"{exc}\nstack 已生效；worker 镜像步骤未完成——重跑 `gherkai deploy` 幂等收敛（ADR 0038）。")
+        out(f"{exc}\nstack 已生效；worker 镜像步骤未完成——重跑 `gherkai deploy` 幂等收敛。")
         return EXIT_FAILED
     cleanup_pass(prefix=prefix, engines=engines, ssm=aws.ssm, ecs=aws.ecs, ddb=aws.ddb, now=now, out=out)
     return EXIT_OK

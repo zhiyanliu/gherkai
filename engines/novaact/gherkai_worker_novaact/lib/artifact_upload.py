@@ -60,8 +60,8 @@ class ArtifactUploader:
             # fail-loud：注入了桶却没给 SDK 落点（NOVA_LOGS_DIR）= 组合根配置矛盾，非降级档——静默 no-op
             # 会让产物报 file:// 且随容器盘销毁必丢（ADR 0033 真跑事故「只注①不注②等于没上传」）。
             raise ValueError(
-                "ArtifactUploader：ARTIFACT_S3_BUCKET 已注入但缺 NOVA_LOGS_DIR（run_dir 推不出）——"
-                "组合根装配错误（产物将随容器盘销毁，ADR 0033）")
+                "产物上传：已注入 ARTIFACT_S3_BUCKET 但缺 NOVA_LOGS_DIR，算不出产物落点、无法上传"
+                "（起 worker 的一方须同时注入两者，否则产物随容器盘销毁）")
         return cls(bucket=bucket, prefix=prefix, run_dir=run_dir)
 
     @property

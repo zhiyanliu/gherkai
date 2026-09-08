@@ -70,7 +70,7 @@ docker build --platform linux/amd64 -t acme-novaact:login .
 3. **初始化默认指针**：缺失 → `base`；存在 → **不动**（升级不重置，见「与版本升级的交互」）。
 4. **重派生 + 清理**：对 SSM 里**当前版本**的每个 variant，若其记录的模板 ARN ≠ 新模板 → 用新模板 + 该 variant 已记录的 digest 重新注册 revision（血缘 tags 同上）、更新映射、旧 revision 打 `gherkai:retired-at`；相同则跳过。原因：revision 是不可变快照、无继承，deploy 调了 cpu 后旧 variant 会一直跑旧 cpu 直到有人重推；重派生让所有 variant 与模板同步而镜像一个字节不动。重派生**保留原 `pushed_at`**（记的是镜像推上去的时刻）；repo URI 从模板容器的镜像栏反推（模板即 `<repo-uri>:latest` 占位）——重派生不登录 registry。随后跑一次清理 pass（不变量）。
 
-**四步的失败语义**：cdk 已成功而后三步任一失败 → 退 1，提示「stack 已生效；重跑 `gherkai deploy` 幂等收敛」；基底 pull 因 GHCR 上缺该版本镜像失败（[0037](./0037-distribution-and-packaging.md) 决策 8 承认的「PyPI 已发、镜像缺失」半发布态）→ 提示等镜像 job 重跑后再 `gherkai deploy`。
+**四步的失败语义**：cdk 已成功而后三步任一失败 → 退 1，提示「stack 已生效；重跑 `gherkai deploy` 幂等收敛」；基底 pull 因 GHCR 上缺该版本镜像失败（[0037](./0037-distribution-and-packaging.md) 决策 8 承认的「PyPI 已发、镜像缺失」半发布态）→ 提示等镜像发布完成后再 `gherkai deploy`。
 
 ## 不变量
 

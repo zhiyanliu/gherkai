@@ -66,7 +66,7 @@ def _scope_key(parsed: ParsedScenario) -> tuple[str | None, str]:
         raise PlanError(
             f"scenario {parsed.scenario.id!r} 解析出多个 @scope 值 {scope_values}："
             f"一个 scenario 只能属一个 scope（会话边界）。"
-            f"检查 feature 级 @scope 传播是否与 scenario 级 @scope 冲突（ADR 0025）。"
+            f"检查 feature 级 @scope 传播是否与 scenario 级 @scope 冲突。"
         )
     return (scope_values[0] if scope_values else None), parsed.scenario.id
 
@@ -81,7 +81,7 @@ def _resolve_engine(scope_id: str, members: list[ParsedScenario], default_engine
     if len(engines) > 1:
         raise PlanError(
             f"scope {scope_id!r} 出现多个 @engine 值 {engines}："
-            f"同一 scope 跨引擎 = 物理自相矛盾（共享会话又是两个不共享的会话），拒绝运行（ADR 0019）。"
+            f"同一 scope 跨引擎 = 物理自相矛盾（共享会话又是两个不共享的会话），拒绝运行。"
         )
     return engines[0] if engines else default_engine
 
@@ -102,7 +102,7 @@ def _resolve_timeout(scope_id: str, members: list[ParsedScenario], default: floa
     if len(raws) > 1:
         raise PlanError(
             f"scope {scope_id!r} 出现多个 @timeout 值 {raws}："
-            f"同一 scope（一个 job）只能有一个墙钟预算，拒绝运行（ADR 0019）。"
+            f"同一 scope（一个 job）只能有一个墙钟预算，拒绝运行。"
         )
     if not raws:
         return default
@@ -110,10 +110,10 @@ def _resolve_timeout(scope_id: str, members: list[ParsedScenario], default: floa
     try:
         n = float(raw)
     except ValueError:
-        raise PlanError(f"scope {scope_id!r} 的 @timeout:{raw} 不是数字：须为正数秒（ADR 0019）。") from None
+        raise PlanError(f"scope {scope_id!r} 的 @timeout:{raw} 不是数字：须为正数秒。") from None
     if not math.isfinite(n) or n <= 0:
         raise PlanError(
-            f"scope {scope_id!r} 的 @timeout:{raw} 须为正数秒（ADR 0019）；不想超时就删掉 tag 走缺省。"
+            f"scope {scope_id!r} 的 @timeout:{raw} 须为正数秒；不想超时就删掉 tag 走缺省。"
         )
     return n
 
@@ -163,7 +163,7 @@ def plan(features: list[FeatureSource], config: PlanConfig) -> list[Job]:
         if group_is_named.get(key) and len(uris) > 1:
             logger.warning(
                 "scope %r 跨 %d 个 feature 文件合并（%s）：这些文件的 scenario 将串行共享同一会话。"
-                "若非有意，检查是否 @scope 撞名（ADR 0025）。",
+                "若非有意，检查是否 @scope 撞名。",
                 key, len(uris), ", ".join(sorted(uris)),
             )
 

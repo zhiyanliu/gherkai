@@ -334,7 +334,7 @@ def _tick_runs(run_ids: set[str], label: str, *, prebuilt: dict | None = None) -
         try:
             built = prebuilt[run_id] if run_id in prebuilt else _build(run_id)
         except WorkerVariantError as exc:
-            print(f"{label}: run {run_id} 本批跳过——worker revision 解析失败（兼容路径，ADR 0038）：{exc}")
+            print(f"{label}: run {run_id} 本批跳过——worker revision 解析失败：{exc}")
             continue
         if built is None:
             continue

@@ -624,14 +624,16 @@ def test_sync_base_skips_non_pure_release_but_deploy_continues(aws):
                                  )["Parameter"]["Value"] == "base", "第 3 步照跑"
 
 
-def test_sync_base_pull_failure_points_at_the_images_job(aws):
+def test_sync_base_pull_failure_points_at_the_half_published_state(aws):
     seed_backend(aws)
     c = FakeContainer()
     c.pull_fails = True
     out, text = _out()
     rc = workers.run_deploy_steps(prefix=PREFIX, version=VERSION, container=c, aws=aws, now=NOW, out=out)
     assert rc == 1, "cdk 已成功而后续步骤失败 → 退 1"
-    assert "镜像 job" in text() and "stack 已生效" in text()
+    # 断言用户能据以行动的两句：状态（stack 已生效）+ 重跑哪个命令。
+    assert "拉不到基底" in text() and "半发布态" in text()  # sync_base 自己那条（不是四步兜底行）
+    assert "stack 已生效" in text() and "gherkai deploy" in text()
 
 
 def test_rederive_registers_from_the_new_template_and_retires_the_old(aws):

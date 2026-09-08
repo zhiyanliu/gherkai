@@ -636,7 +636,7 @@ def main() -> int:
     session_id = None
     network_exhausted = False  # 建连重试耗尽（ADR 0028）：置位 + 正常退出 with → return EX_WORKER_NETWORK
 
-    ensure_workflow_definition(WORKFLOW_DEF, region=REGION, description="Nova Act worker (ADR 0024)")
+    ensure_workflow_definition(WORKFLOW_DEF, region=REGION, description="Nova Act worker")
     wf = Workflow(model_id=MODEL_ID, boto_session_kwargs={"region_name": REGION}, workflow_definition_name=WORKFLOW_DEF)
     # 建连重试状态（ADR 0028）：started 一旦 True（scope_started 已 emit、会话已起），
     # 任何后续异常都不再当「可重试建连失败」——act 已可能跑、有副作用，绝不重试。

@@ -290,8 +290,8 @@ class DynamoDBRunStore:
             # 「位置区分、非值探测」）——对 meta_json 原始串做 '"content_ref"' 子串 sniff 会被「正文恰为
             # 该串」的 docString/dataTable cell 误命中，把好 run 判成装配错误、读不回来。
             raise RuntimeError(
-                f"run {run_id} 的 META 含 offload 指针（content_ref/rows_ref）但 RunStore 未注入 "
-                "arg_offloader——组合根装配错误（ADR 0030 决定七：offloader 生产默认挂载）")
+                f"run {run_id} 的 step 参数有外置副本，但本进程的 RunStore 读不回来"
+                "（配置缺失：起 RunStore 的地方须注入 arg_offloader）")
         return run_meta_from_dict(meta_dict)
 
     def load_run_state(self, run_id: str) -> RunState | None:

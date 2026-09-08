@@ -64,7 +64,7 @@ def resolve_provider(name: str | None) -> tuple[object | None, str | None]:
     if not eps:
         return None, (
             "没有可用的部署 provider：装 `gherkai[deploy-aws]`（AWS 后端；带 Python CDK，另需 Node ≥22 在 PATH）。"
-            "只有**部署方**需要装它——只提交 run 的人不必（ADR 0037 决策 6）。"
+            "只有**部署方**需要装它——只提交 run 的人不必。"
         )
     names = ", ".join(ep.name for ep in eps)
     if name is None:
@@ -108,8 +108,8 @@ def add_parsers(sub, *, provider: object | None = None, provider_error: str | No
               if provider is None and provider_error else None)
     dp = sub.add_parser(
         "deploy", conflict_handler="resolve", epilog=epilog,
-        help="[部署方] 部署/更新云端后端（IaC 住 provider 包，ADR 0037 决策 6）",
-        description="部署/更新云端后端（表/桶/cluster/task-def/Lambda 链/VPC 等，ADR 0033）。"
+        help="[部署方] 部署/更新云端后端",
+        description="部署/更新云端后端（表/桶/cluster/task-def/Lambda 链/VPC 等）。"
                     "IaC 由 provider 包供给（装 `gherkai[deploy-aws]`；需 Node ≥22 在 PATH）。"
                     "默认动作 = 真部署；下面三个 flag 各自换成一个只读/准备动作。",
     )
@@ -136,16 +136,16 @@ def add_parsers(sub, *, provider: object | None = None, provider_error: str | No
     )
     dp.add_argument(
         "--allow-vpc-change", action="store_true",
-        help="放行 VPC 档比对（provider 侧记着上次生效的档）：档不一致、或档缺失而 stack 已存在时，"
-             "deploy 退 2 要求先 `--diff` 核对变更集，核对完带本 flag 放行一次——漏 context 合成"
-             "「新建整套 VPC + 替换安全组」的危险变更集是真踩过的坑（ADR 0037 决策 6）",
+        help="放行 VPC 档变更：本次的档与后端记着的上次生效档不一致、或没给档而 stack 已存在时，deploy 退 2、"
+             "要你先 `--diff` 核对变更集；核对完带本 flag 放行一次——漏给 VPC 档会合成"
+             "「新建整套 VPC + 替换安全组」的危险变更集（真踩过）",
     )
 
     dsp = sub.add_parser(
         "destroy", conflict_handler="resolve", epilog=epilog,
-        help="[部署方] 拆掉云端后端（保留标了 RETAIN 的资源，ADR 0033）",
+        help="[部署方] 拆掉云端后端（数据类资源保留、不随之删）",
         description="拆掉云端后端 stack。数据类资源（runs 表/桶/ECR 仓库）按 IaC 的 RETAIN 标记保留、"
-                    "不随 stack 删除（ADR 0033）；版本戳等 stack 自己的参数随删。",
+                    "不随 stack 删除；版本戳等 stack 自己的参数随删。",
     )
     _add_provider_flag(dsp)
 

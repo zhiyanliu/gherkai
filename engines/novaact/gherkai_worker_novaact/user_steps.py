@@ -71,7 +71,7 @@ def _ensure_ns_package(name: str, path: Path) -> None:
     mod = sys.modules.get(name)
     if mod is None:
         mod = types.ModuleType(name)
-        mod.__doc__ = f"合成命名空间（gherkai worker 加载的使用方 steps，ADR 0037 决策 4）：{path}"
+        mod.__doc__ = f"合成命名空间（gherkai worker 加载的使用方 steps）：{path}"
         mod.__path__ = [str(path)]  # type: ignore[attr-defined]
         sys.modules[name] = mod
 

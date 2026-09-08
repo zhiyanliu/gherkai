@@ -105,8 +105,8 @@ class ContainerEngine:
         要连 daemon，`--version` 不连、探不出「装了但没起」）。
         """
         if shutil.which(self.binary) is None:
-            return (f"找不到容器引擎 `{self.binary}`：推/拉 worker 镜像都经它"
-                    f"（push-worker 与 deploy 的基底同步，ADR 0038「容器引擎口子」）。装好后重试。")
+            return (f"找不到容器引擎 `{self.binary}`：push-worker 与 deploy 同步基底镜像都要用它推/拉。"
+                    f"装好后重试。")
         try:
             out = subprocess.run([self.binary, "version", "--format", "{{.Server.Version}}"],
                                  capture_output=True, text=True, timeout=30)
@@ -191,7 +191,7 @@ def resolve_container_engine(requested: str | None = None, *, env=None) -> Conta
     if name not in SUPPORTED_ENGINES:
         raise UnsupportedContainerEngine(
             f"容器引擎 `{name}` 这一期未实装（只有 {'/'.join(SUPPORTED_ENGINES)}）。"
-            f"podman 等同形引擎经同一口子接入，属 ADR 0038 重议闸门——需要就提，别指望它已经能用。"
+            f"podman 等 docker 兼容引擎当前走不通；需要就提，别指望它已经能用。"
         )
     return ContainerEngine(name)
 

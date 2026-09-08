@@ -48,7 +48,8 @@ def deterministic(pattern: str, *, description: str, example: str) -> Callable:
             assert re.search(pattern, ctx.page.url)
     """
     if not description or not example:
-        raise ValueError(f"deterministic({pattern!r}) 注册缺 description/example（ADR 0036：能力必须可发现）")
+        raise ValueError(f"deterministic({pattern!r}) 注册缺 description/example："
+                         f"两者必填——缺了这条 step 不会出现在能力清单里，feature 作者发现不了它")
     compiled = re.compile(pattern)
 
     def register(handler: Callable) -> Callable:
@@ -93,7 +94,7 @@ def match(text: str):
     if len(hits) > 1:
         raws = ", ".join(repr(e.raw) for e, _ in hits)
         raise DeterministicConflict(
-            f"step {text!r} 命中多条确定性模式 [{raws}]（ADR 0022：最多命中一条，请收紧模式）"
+            f"step {text!r} 命中多条确定性模式 [{raws}]：一个 step 只能命中一条，请收紧模式"
         )
     entry, m = hits[0]
     return entry.handler, m.groupdict()

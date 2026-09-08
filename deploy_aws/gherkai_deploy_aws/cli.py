@@ -113,13 +113,13 @@ def classify_vpc_state(*, stack_exists: bool, stored_spec: str | None, requested
 
 
 def _vpc_flag(value: str) -> str:
-    """`--vpc` 的取值校验：`default` / `new` / `vpc-<id>` 三档，**无隐式默认**（ADR 0037 决策 6）。"""
+    """`--vpc` 的取值校验：`default` / `new` / `vpc-<id>` 三档，**无隐式默认**（ADR 0037 决策 6；
+    三档与 ADR 0033「VPC 来源：三档」一一对应）。"""
     if value in ("default", "new") or (value.startswith("vpc-") and len(value) > len("vpc-")):
         return value
     raise argparse.ArgumentTypeError(
         f"--vpc 须是 default / new / vpc-<id> 之一，得到 {value!r}"
-        "（三档与 ADR 0033「VPC 来源：三档」一一对应；不设隐式默认——漏档会合成"
-        "「新建整套 VPC + 替换 WorkerSg」的危险变更集，这是真踩过的坑）"
+        "（不设隐式默认：漏给档会合成「新建整套 VPC + 替换 WorkerSg」的危险变更集）"
     )
 
 
@@ -263,7 +263,7 @@ class Provider:
         解析得过（皮的契约块明写）。每个子动词 `set_defaults(_deploy_verb=<绑定方法>)`，皮据此优先分派。
         """
         sub = parser.add_subparsers(
-            title="worker 镜像子命令（ADR 0038；不给则本命令 = 部署/更新后端）", metavar="[子命令]",
+            title="worker 镜像子命令（不给则本命令 = 部署/更新后端）", metavar="[子命令]",
         )
         push = sub.add_parser(
             "push-worker", help="[部署方] 推一个本地镜像并注册为某引擎的一个 variant",
@@ -391,7 +391,7 @@ class Provider:
         reviewer 靶点，ADR 0037 决策 6）。目录由 CLI 皮的 `--synth-only DIR` 提供（接缝契约）。"""
         out = getattr(args, "synth_only", None)
         if not out:
-            raise ValueError("synth_only 需要 args.synth_only（CLI 皮的 --synth-only DIR）——见模块头接缝契约")
+            raise ValueError("synth_only 需要 args.synth_only（--synth-only DIR）")
         missing = self._require_vpc(args)
         if missing is not None:
             return missing
@@ -413,7 +413,7 @@ class Provider:
             return EXIT_PRECONDITION
         cdk_argv = cdk_command()
         if not cdk_argv:
-            print("找不到 cdk 也找不到 npx：cdk CLI 是 npm 物，装 Node（≥ %d）后重试（ADR 0037 决策 6）。"
+            print("找不到 cdk 也找不到 npx：cdk CLI 是 npm 物，装 Node（≥ %d）后重试。"
                   % NODE_MIN_MAJOR, file=sys.stderr)
             return EXIT_PRECONDITION
         target = self._resolve_target(args)
@@ -471,11 +471,12 @@ class Provider:
         """留的口子（ADR 0038「命令族」）：**尚未提供**，退 2 说清为什么与将来怎么落。
 
         为何占位而不干脆不给这个子命令：不给的话用户敲了只会得到 argparse 的「invalid choice」，读不出
-        「这件事是被想过、押后了」——而它押后的是**回收策略**（ECR untagged 层、旧版本 variant），不是忘了。
+        「这件事是被想过、押后了」——而它押后的是**回收策略**（ECR untagged 层、旧版本 variant），不是忘了
+        （属 ADR 0038 重议闸门）。
         """
         print("`delete-worker` 尚未提供。\n"
               "它要连带定回收策略（旧版本 variant 的 ECR tag / 重推顶掉的 untagged 层 / SSM 映射），"
-              "并套 push-worker 同一套清理语义（退休 tag + 静默期 + 在跑 run 安全阀）——属 ADR 0038 重议闸门。\n"
+              "并套 push-worker 同一套清理语义（退休 tag + 静默期 + 在跑 run 安全阀），这些还没定。\n"
               "当前可用的：`gherkai deploy list-workers` 看有哪些 variant 与待清理 revision；"
               "重推同名 variant 直接覆盖，无需先删。", file=sys.stderr)
         return EXIT_PRECONDITION
@@ -521,7 +522,7 @@ class Provider:
         if getattr(args, "vpc", None):
             return None
         print("缺 --vpc：VPC 档无隐式默认（default / new / vpc-<id>）——漏给曾合成「新建整套 VPC + 替换 WorkerSg」"
-              "的危险变更集（ADR 0037 决策 6）。--bootstrap 不需要它。", file=sys.stderr)
+              "的危险变更集。--bootstrap 不需要它。", file=sys.stderr)
         return EXIT_PRECONDITION
 
     # ---- context / cdk.json（纯推导，单测直打）----
@@ -536,7 +537,7 @@ class Provider:
         ctx: dict[str, str] = {"prefix": target.prefix, "version": self._resolve_version(args)}
         vpc = getattr(args, "vpc", None)
         if not vpc:  # 调用点已经 _require_vpc 过；这里是契约守卫，不是用户提示
-            raise ValueError("build_context 需要 args.vpc（VPC 档无隐式默认，ADR 0037 决策 6）——调用前先过 _require_vpc")
+            raise ValueError("build_context 需要 args.vpc：VPC 档无隐式默认，调用前先做缺档检查")
         if vpc == "default":
             ctx["use_default_vpc"] = "true"
         elif vpc != "new":
@@ -584,7 +585,7 @@ class Provider:
             return EXIT_PRECONDITION
         cdk_argv = cdk_command()
         if not cdk_argv:
-            print("找不到 cdk 也找不到 npx：cdk CLI 是 npm 物，装 Node（≥ %d）后重试（ADR 0037 决策 6）。"
+            print("找不到 cdk 也找不到 npx：cdk CLI 是 npm 物，装 Node（≥ %d）后重试。"
                   % NODE_MIN_MAJOR, file=sys.stderr)
             return EXIT_PRECONDITION
 
@@ -675,7 +676,7 @@ class Provider:
                   file=sys.stderr)
             return None
         print(f"{message}\n出路：① 先 `gherkai deploy --diff`（带同一组 flag）核对变更集；"
-              f"② 确认无误后带 `--allow-vpc-change` 放行这一次（ADR 0037 决策 6 三态）。", file=sys.stderr)
+              f"② 确认无误后带 `--allow-vpc-change` 放行这一次。", file=sys.stderr)
         return EXIT_PRECONDITION
 
     # ---- 内部：prefix/region/profile 与版本 ----
@@ -756,12 +757,10 @@ def check_node() -> str | None:
     if node is None:
         return (
             f"找不到 node：`gherkai deploy` 需要 Node ≥ {NODE_MIN_MAJOR} 在 PATH——CDK 的 Python 绑定是 jsii"
-            f"（import 即起 node 子进程），cdk CLI 本身也是 npm 物（ADR 0037 决策 6）。装好 Node 后重试。"
+            f"（import 即起 node 子进程），cdk CLI 本身也是 npm 物。装好 Node 后重试。"
         )
     major = _node_major(node)
     if major is not None and major < NODE_MIN_MAJOR:
-        return (
-            f"node 版本过低：{node} 是 v{major}，需要 ≥ {NODE_MIN_MAJOR}"
-            f"（与 worker 的 engines.node 同一下限，ADR 0037 决策 6）。"
-        )
+        # 下限与 worker 镜像的 `engines.node` 同一个（见上 NODE_MIN_MAJOR 的注释）。
+        return f"node 版本过低：{node} 是 v{major}，需要 ≥ {NODE_MIN_MAJOR}。"
     return None
