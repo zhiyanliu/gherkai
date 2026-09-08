@@ -81,10 +81,11 @@ npm 侧已占：`@gherkai/worker-midscene@0.0.0` 与非 scoped 的 `gherkai@0.0.
 
 ### 4. GHCR：首次推送后把两个 package 改成 public
 
-推 GHCR 用 `GITHUB_TOKEN`，**不需要任何 secret**；但**首次发布的 package 默认是 private**。
-基底镜像要能被使用方的部署机匿名 `docker pull`（`gherkai deploy` 的「同步基底」一步，ADR 0038），
-所以首个 release 跑完后进 *Packages → gherkai-worker-novaact / gherkai-worker-midscene →
-Package settings → Change visibility → Public*（各一次，之后一直有效）。
+推 GHCR 用 `GITHUB_TOKEN`，**不需要任何 secret**。GitHub 文档说首次发布的 package 默认 private，**实测（v1.4.0 首发）
+两个 package 随公开仓库直接就是 public、可匿名 `docker manifest inspect`**——首个 release 跑完后核对一次
+（`docker manifest inspect ghcr.io/zhiyanliu/gherkai-worker-novaact:<版本>` 匿名能读即可）；若为 private 才需进
+*Packages → 该 package → Package settings → Change visibility → Public*。基底镜像必须可匿名 pull——`gherkai deploy`
+的「同步基底」一步靶的就是它（ADR 0038）。
 
 ### 5. 仓库本身必须是 public
 
