@@ -35,11 +35,13 @@ dependencies = [
 ]
 # [local] = local 跑法的 Python 侧 worker，装进 CLI 同一个 venv（安装与拉起正交：装靠 extra、起靠定位链，
 # ADR 0037 决策 3）。midscene 是 Node 地盘，pip extra 够不到，走 npm。
-optional-dependencies = { local = ["gherkai-worker-novaact=={{ version }}"] }
+# [deploy-aws] = 改云端环境所需（供给后端 + worker 镜像推送），只有部署方装（ADR 0037 决策 2c/6）。
+optional-dependencies = { local = ["gherkai-worker-novaact=={{ version }}"], deploy-aws = ["gherkai-deploy-aws=={{ version }}"] }
 
 [tool.uv.sources]
 gherkai-runtime = { workspace = true }
 gherkai-worker-novaact = { workspace = true }
+gherkai-deploy-aws = { workspace = true }
 
 [build-system]
 requires = ["hatchling", "uv-dynamic-versioning>=0.7.0"]

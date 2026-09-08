@@ -10,8 +10,8 @@
     "semantic_hash": ""
   },
   "cli/tests/test_main.py": {
-    "mtime": 1788774004.5980306,
-    "ast_hash": "483f60a8052271f4b4c46d8fe24bbcbb",
+    "mtime": 1788774636.7146356,
+    "ast_hash": "000f1bb4db495b92ee90062d97aa204e",
     "semantic_hash": ""
   },
   "cli/tests/test_render.py": {
@@ -310,8 +310,8 @@
     "semantic_hash": ""
   },
   "CONTEXT.md": {
-    "mtime": 1788773721.1651256,
-    "ast_hash": "6356ef3507ec3ca869ae491b2688fd85",
+    "mtime": 1788774636.7151926,
+    "ast_hash": "b1f14f28b12d568c954285b1e9481038",
     "semantic_hash": ""
   },
   "README.md": {
@@ -320,8 +320,8 @@
     "semantic_hash": ""
   },
   "cli/README.md": {
-    "mtime": 1788773936.5186484,
-    "ast_hash": "db8995931b1228b626cfa75e6805040d",
+    "mtime": 1788774636.715034,
+    "ast_hash": "7a474c6892b7faafb84631dea8aa3e3c",
     "semantic_hash": ""
   },
   "docs/adr/0001-scope-limited-to-english-ui.md": {
@@ -510,8 +510,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0037-distribution-and-packaging.md": {
-    "mtime": 1788773936.5185058,
-    "ast_hash": "2c885764c27e778d2800775b80e085dd",
+    "mtime": 1788774636.7148788,
+    "ast_hash": "1ddcf77a7d173e42dd4fe2021a524eae",
     "semantic_hash": ""
   },
   "docs/adr/0038-worker-image-delivery.md": {
@@ -525,8 +525,8 @@
     "semantic_hash": ""
   },
   "cli/gherkai_cli/__main__.py": {
-    "mtime": 1788773936.5205653,
-    "ast_hash": "fb047e929b6229e4824da4ea0d8490ce",
+    "mtime": 1788774636.712609,
+    "ast_hash": "f111e344a914314f30b9857958b6149c",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/render.py": {
@@ -695,8 +695,8 @@
     "semantic_hash": ""
   },
   "runtime/gherkai_runtime/compose.py": {
-    "mtime": 1788773936.51924,
-    "ast_hash": "53f13410d9e12f90be123b3fff314a66",
+    "mtime": 1788774636.7122893,
+    "ast_hash": "18adf866b0b7af08fbe2543562b254c0",
     "semantic_hash": ""
   },
   "runtime/gherkai_runtime/detached.py": {
@@ -750,8 +750,8 @@
     "semantic_hash": ""
   },
   "docs/journey/0001-\u5206\u53d1\u4e0e\u6253\u5305\u65bd\u5de5\u8fdb\u5ea6\u603b\u7eb2.md": {
-    "mtime": 1788774080.8962643,
-    "ast_hash": "a9995c5cbca25d43d02d9ebb65037932",
+    "mtime": 1788774904.111499,
+    "ast_hash": "1f711b87652c76fb755042b08ee6f143",
     "semantic_hash": ""
   },
   "runtime/README.md": {
@@ -840,8 +840,8 @@
     "semantic_hash": ""
   },
   "engines/midscene/src/worker/run-scope.mts": {
-    "mtime": 1788773595.281033,
-    "ast_hash": "d63f0d74ef1384828cbe59d1a8c992b2",
+    "mtime": 1788774636.7144277,
+    "ast_hash": "00e5d9b4b980f84b277099761cbbfb39",
     "semantic_hash": ""
   },
   "engines/midscene/src/worker/run-scope.test.mts": {
@@ -915,8 +915,8 @@
     "semantic_hash": ""
   },
   "engines/novaact/gherkai_worker_novaact/run_scope.py": {
-    "mtime": 1788769683.8386195,
-    "ast_hash": "5a1f9ec0979372d51a220bbd47b9d83b",
+    "mtime": 1788774636.713516,
+    "ast_hash": "81cef4e887151734234b29869ba0b026",
     "semantic_hash": ""
   },
   "engines/novaact/gherkai_worker_novaact/user_steps.py": {
@@ -987,6 +987,11 @@
   "engines/novaact/tests/test_workflow_setup.py": {
     "mtime": 1788769776.0425196,
     "ast_hash": "93ed14b6d9d00db70346b8a779f6829c",
+    "semantic_hash": ""
+  },
+  "engines/novaact/tests/test_no_artifacts.py": {
+    "mtime": 1788774636.7136135,
+    "ast_hash": "b2da9a52733c65b2a62297cc0321b3b3",
     "semantic_hash": ""
   }
 }

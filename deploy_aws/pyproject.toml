@@ -1,0 +1,54 @@
+[project]
+name = "gherkai-deploy-aws"
+# version 与依赖均动态（ADR 0037 决策 2b）：gherkai-runtime[aws] 同版本 lockstep。
+dynamic = ["version", "dependencies"]
+description = "gherkai 的 AWS 后端供给（Python CDK：DDB/S3/ECS/ECR/IAM/VPC + 无状态跑批的 Stream/Lambda/EventBridge，ADR 0033/0034）与 worker 镜像推送注册（ADR 0038），经 `gherkai deploy` 族命令执行。发行名 gherkai-deploy-aws / import 名 gherkai_deploy_aws（ADR 0037 决策 6）"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Zhi Yan Liu" }]
+requires-python = ">=3.13"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Operating System :: OS Independent",
+    "Topic :: Software Development :: Testing",
+]
+
+[project.entry-points."gherkai.deploy"]
+# provider 发现面（ADR 0037 决策 6）：CLI 按 entry point group 发现已安装的 provider 包；一个即无需 --provider。
+aws = "gherkai_deploy_aws.cli:Provider"
+
+[project.urls]
+Homepage = "https://github.com/zhiyanliu/gherkai"
+Repository = "https://github.com/zhiyanliu/gherkai"
+Changelog = "https://github.com/zhiyanliu/gherkai/releases"
+
+[tool.hatch.metadata.hooks.uv-dynamic-versioning]
+# aws-cdk-lib 是 jsii 绑定（import 即起 node 子进程），只在本包上、经 CLI 的 [deploy-aws] extra 隔离（ADR 0037 决策 6）。
+dependencies = [
+    "gherkai-runtime[aws]=={{ version }}",
+    "aws-cdk-lib>=2.150.0",
+    "constructs>=10.0.0",
+]
+
+[tool.uv.sources]
+gherkai-runtime = { workspace = true }
+
+[build-system]
+requires = ["hatchling", "uv-dynamic-versioning>=0.7.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "uv-dynamic-versioning"
+
+[tool.uv-dynamic-versioning]
+vcs = "git"
+style = "pep440"
+strict = true
+dirty = true
+metadata = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["gherkai_deploy_aws"]
