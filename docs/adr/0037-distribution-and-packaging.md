@@ -216,7 +216,7 @@ worker 内容 = 框架脚手架 + 使用方确定性 step，属业界分类里�
 ## 落地次序与依赖（依赖关系，非进度追踪；本节编号只在本节内部使用，其它文档不引用它）
 
 0. **占名**（无依赖，先做）。
-1. **发行重组 + PyPI 首发**：workspace 化、三名改、dynamic versioning（三项配置显式钉死 + hook 的 dynamic 声明）、`packaging` 声明、metadata（license 文件进各包、`[project.urls]`、README 相对链接绝对化）、`--version`、`repo_root()` 三处非 engine 消费点退役（两个子进程 cwd、feature uri 基准）。首发即成立 `uvx gherkai submit --backend cloud`。
+1. **发行重组 + PyPI 首发**：workspace 化、三名改、dynamic versioning（三项配置显式钉死 + hook 的 dynamic 声明）、`packaging` 声明、metadata（license 文件进各包、`[project.urls]`；**包 README = 发行包长描述**——v1.4.0 首发时上去的是 contributor 向的子 README（含 ADR 指针与相对死链），随即改为 CLAUDE.md「README 分三层」：包目录 `README.md` 只写使用者内容、绝对链接，contributor 内容归同目录 `DEVELOPMENT.md`，护栏 `cli/tests/test_package_readmes.py`）、`--version`、`repo_root()` 三处非 engine 消费点退役（两个子进程 cwd、feature uri 基准）。首发即成立 `uvx gherkai submit --backend cloud`。
 2. **worker 交付**（依赖 1）：novaact 包化（boto3 直接声明、pytest 挪 dev、console script）+ `[local]`；定位链取代 `repo_root()`（含 miss 分叉与 `--no-report` 临时绝对落点）；midscene npm 包（ESM/tsc/tsx 注册、依赖挪位、resolve hook 随 dist、`.mts` 脚手架）；`steps/` 目录约定 + `RunMeta.steps_dir`（local 半）。
 3. **基底镜像 CI**（依赖 2，基底装的是 worker 包）：基底 Dockerfile 两态、CI 推 GHCR（linux/amd64）。worker 镜像的推送注册子系统按 [0038](./0038-worker-image-delivery.md) 自己的次序落地，其中只有「deploy 同步 GHCR 基底」一步依赖本步，运行时改显式 revision 等可先落。
 4. **`gherkai deploy`**（依赖 1、3）：`gherkai-deploy-aws` 收编 IaC 与 handler、provider 发现、asset 从已安装包、三 flag（四旋钮）+ SSM `version`/`vpc` 两参数各三态 + skew 检查、CI release 全链一次真跑；其 worker 镜像尾部步骤随 0038 落地。
@@ -246,6 +246,7 @@ worker 内容 = 框架脚手架 + 使用方确定性 step，属业界分类里�
 - **`--vpc` 只留 `default|new` 两档**：静默砍掉 [0033](./0033-iac-aws-backend-and-composition-wiring.md) 已定的 `vpc_id` 复用档，且以该档部署过的环境再 deploy 会合成危险变更集；三档齐全 + SSM 档三态比对。
 - **`--vpc` 隐式默认**：漏 context 合成建新 VPC 的真踩坑，必给。
 - **版本戳 / vpc 档由命令事后 `put_parameter`**：部署回滚会留错值；改 stack 资源与事务同生死。
+- **把包目录里的 contributor README 直接当 PyPI/npm 长描述**：v1.4.0 首发这么上去了——六个包页面满是 ADR 编号、模块布局、跑测试说明，`../docs/adr/…` 相对链接在 PyPI/npm 上全是死链；装了包、没有仓库的人看不懂也用不上。改为 README 分三层（根 README 给人保叙事；包 README 只写使用者内容、绝对 URL；`DEVELOPMENT.md` 装 contributor 内容、不进包），与「产品面文案不带内部指代」同一条原则的文档面。
 - **靠 `uv-dynamic-versioning` 默认配置区分 dev/release**：默认 `dirty=false`，tag commit 上的脏构建与正式版逐字节同名，skew 跳过判据失效；故 style/strict/dirty 三项显式钉死。**反向也被拒——显式 `metadata = true`**：干净 tag commit 也带 `+<sha>`，发布 gate 必败、PyPI 拒收（真跑证实）；metadata 用默认。
 - **使用方 steps 允许 `.ts`/`.js`**：模块体系取决于使用方目录的 `package.json#type`，无 package.json 的裸目录落 CJS 域、tsx ESM register 不生效、`import` 直接 SyntaxError；收敛到 `.mts`/`.mjs`。
 - **midscene 使用方 steps 靠 Node 默认解析找 `@gherkai/worker-midscene`**：全局装/npx 形态下必 `ERR_MODULE_NOT_FOUND`；resolve hook（或退到依赖注入）。
