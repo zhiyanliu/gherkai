@@ -45,7 +45,7 @@ core/gherkai_core/
 ## 跑测试
 
 ```bash
-uv run pytest          # 仓库根：跑三个 workspace 成员的全部单测
+uv run pytest          # 仓库根：跑全部 workspace 成员（core/runtime/cli/engines/novaact/deploy_aws）的单测
 cd core && uv run pytest   # 只跑 core 的（cwd 决定收集范围）
 ```
 

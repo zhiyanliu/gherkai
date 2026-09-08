@@ -69,11 +69,30 @@ class _FakeS3:
     def put_object(self, **kw): self._record.append(("s3", "put_object"))
 
 
-def _patch_cloud_handles(monkeypatch, record, *, preflight_err=None):
-    """patch store 钩子 + preflight（默认放行）返回记录调用的 fake（不连真 AWS）。
+def _patch_skew(monkeypatch, record=None, *, skew=("ok", "")):
+    """把版本 skew 闸（ADR 0037 决策 7）patch 成默认放行且静默：读戳不建 ssm client、判定直接给 `skew`。
+
+    两处都得 patch——`read_backend_version` 否则真去读 SSM、`check_version_skew` 否则会对 dev 版打「跳过比对」
+    提示行、污染其它断言。skew 自身的判据在 runtime 的 compose 测试里验；此处只让云端路径通过这道闸。
+    """
+    def fake_read_version(**kwargs):
+        if record is not None:
+            record.append(("ssm", "read_backend_version", kwargs.get("prefix")))
+        return "<stub 版本戳>"
+
+    monkeypatch.setattr(m.compose, "read_backend_version", fake_read_version)
+    monkeypatch.setattr(m.compose, "check_version_skew", lambda *a, **kw: skew)
+
+
+def _patch_cloud_handles(monkeypatch, record, *, preflight_err=None, skew=("ok", "")):
+    """patch store 钩子 + preflight（默认放行）+ 版本 skew 闸（默认放行且静默）返回记录调用的 fake（不连真 AWS）。
 
     preflight_cloud_resources 默认 patch 成返回 preflight_err（None=资源都在、放行）——它自己建 boto client 探活，
     测试里不真探，只验「接线调它 + 它的返回决定退 2」。返回 (fake_s3, made, preflight_calls)。
+
+    **版本 skew 闸（ADR 0037 决策 7）两处都 patch**：`read_backend_version`（否则真去建 ssm client 读 SSM）与
+    `check_version_skew`（默认判 `ok`＝无提示行，让本文件其它断言不被 skew 噪声干扰）。`skew=` 可换判定，
+    skew 自身的判据在 runtime 的 compose 测试里验、此处只验接线。
     """
     fake_s3 = _FakeS3(record)
     made = {"ddb_tables": [], "s3_clients": [], "fargate": []}
@@ -101,6 +120,7 @@ def _patch_cloud_handles(monkeypatch, record, *, preflight_err=None):
         made["fargate"].append(kwargs)
         return {"novaact": object(), "midscene": object()}  # 假 engine dict（fake_schedule 不真用）
 
+    _patch_skew(monkeypatch, record, skew=skew)
     monkeypatch.setattr(m.compose, "_make_ddb_table", fake_make_ddb)
     monkeypatch.setattr(m.compose, "_make_s3_client", fake_make_s3)
     monkeypatch.setattr(m.compose, "preflight_cloud_resources", fake_preflight)
@@ -240,13 +260,13 @@ def test_cloud_preflight_missing_resource_exits_2_names_prefix(tmp_path, monkeyp
     # preflight 返回非 None（某资源不存在）→ 退 2，错误串含 prefix（引导「prefix 配错/CDK 没部署」）。
     record: list = []
     _patch_cloud_handles(monkeypatch, record,
-                         preflight_err="--backend cloud 资源缺失：DynamoDB 表 gherkai-events（用 --prefix='gherkai-' 拼出）不存在——是 --prefix 配错、还是 iac_aws_backend（CDK）未部署？")
+                         preflight_err="--backend cloud 资源缺失：DynamoDB 表 gherkai-events（用 --prefix='gherkai-' 拼出）不存在——是 --prefix 配错、还是后端未部署（gherkai deploy）？")
     monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
     rc = m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud",
                  "--region", "us-east-1", "--quiet"])
     assert rc == 2
     err = capsys.readouterr().err
-    assert "资源缺失" in err and "--prefix" in err and "CDK" in err
+    assert "资源缺失" in err and "--prefix" in err and "gherkai deploy" in err
 
 
 # ---- begin 探活失败（store 不可达）→ 退 2 ----
@@ -431,6 +451,7 @@ def test_status_wait_cloud_kicker_missing_fails_fast(monkeypatch, capsys):
             raise ClientError({"Error": {"Code": "ResourceNotFoundException", "Message": "Function not found"}},
                               "Invoke")
 
+    _patch_skew(monkeypatch)  # 版本 skew 闸先于云端读（ADR 0037 决策 7），此处不是它的靶子
     monkeypatch.setattr(m.compose, "_make_ddb_table", lambda table, *, region, profile: _PendingTable())
     monkeypatch.setattr(m.compose, "_make_lambda_client", lambda *, region, profile: _NoKickerLambda())
     import time as _t
@@ -576,3 +597,119 @@ def test_cloud_ignores_default_steps_dir_silently(tmp_path, monkeypatch, capsys)
                  "--ddb-table", "T", "--s3-bucket", "B", "--region", "us-east-1", "--quiet"])
     assert rc == 0 and box["steps_dir"] is None
     assert "--steps-dir" not in capsys.readouterr().err
+
+
+# ---- 版本 skew 闸接线（ADR 0037 决策 7）：三态映射 + 「skew 先于资源 preflight」的次序 ----
+# skew 自身的判据（哪个版本组合判哪一档）在 runtime 的 test_compose 里验；这里只验皮的接线：
+# 判定 → 退出码/提示，以及 block 时**资源 preflight 一次都不跑**。
+
+def test_skew_block_stops_run_before_resource_preflight(tmp_path, monkeypatch, capsys):
+    """block → 退 2，且资源 preflight 一次都没跑（决策 7 的次序：skew 先）。
+
+    次序不是审美：skew 的修复动作是部署方跑 `gherkai deploy`，那一步同时把资源建齐——先报「表/task-def
+    不存在」只会把人引去查 --prefix，绕一圈回到同一个动作。
+    """
+    record: list = []
+    _, _, preflight_calls = _patch_cloud_handles(
+        monkeypatch, record, skew=("block", "版本 skew：本机 CLI 新于后端"))
+    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
+    rc = m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud",
+                 "--ddb-table", "T", "--s3-bucket", "B", "--region", "us-east-1", "--quiet"])
+    assert rc == 2
+    assert preflight_calls == [], "block 时不该再探资源"
+    assert "版本 skew" in capsys.readouterr().err
+
+
+def test_skew_block_stops_submit_before_resource_preflight(tmp_path, monkeypatch, capsys):
+    record: list = []
+    _, _, preflight_calls = _patch_cloud_handles(
+        monkeypatch, record, skew=("block", "版本 skew：本机 CLI 新于后端"))
+    rc = m.main(["submit", str(_write_feature(tmp_path)), "--backend", "cloud", "--region", "us-east-1"])
+    assert rc == 2
+    assert preflight_calls == []
+    assert not [r for r in record if r[0] == "ddb"], "block 时不该碰 runs 表"
+    assert "版本 skew" in capsys.readouterr().err
+
+
+def test_skew_block_stops_status_before_reading_ddb(monkeypatch, capsys):
+    """status 同受闸（cloud 三个入口一致）：block 时连 DDB 都不读。"""
+    record: list = []
+    _patch_cloud_handles(monkeypatch, record, skew=("block", "版本 skew：本机 CLI 新于后端"))
+    rc = m.main(["status", "r1", "--backend", "cloud", "--region", "us-east-1"])
+    assert rc == 2
+    assert not [r for r in record if r[0] == "ddb"]
+    assert "版本 skew" in capsys.readouterr().err
+
+
+def test_skew_warn_and_skip_pass_through_with_one_line(tmp_path, monkeypatch, capsys):
+    """warn（戳缺失 / CLI 偏旧）与 skip（dev 版）都只打一行、照常往下跑——决策 7 里这两档不拦。"""
+    for verdict in ("warn", "skip"):
+        record: list = []
+        _, _, preflight_calls = _patch_cloud_handles(
+            monkeypatch, record, skew=(verdict, f"提示：{verdict} 档一行"))
+        monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
+        rc = m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud",
+                     "--ddb-table", "T", "--s3-bucket", "B", "--region", "us-east-1", "--quiet"])
+        assert rc == 0, verdict
+        assert len(preflight_calls) == 1, verdict          # 闸放行 → 资源 preflight 照跑
+        assert f"提示：{verdict} 档一行" in capsys.readouterr().err
+
+
+def test_skew_ok_is_silent(tmp_path, monkeypatch, capsys):
+    """ok 档不打任何东西（同版本是常态，别在每次 run 上加噪声）。"""
+    record: list = []
+    _patch_cloud_handles(monkeypatch, record, skew=("ok", ""))
+    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
+    rc = m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud",
+                 "--ddb-table", "T", "--s3-bucket", "B", "--region", "us-east-1", "--quiet"])
+    assert rc == 0 and "版本" not in capsys.readouterr().err
+
+
+def test_skew_reads_stamp_with_resolved_prefix(tmp_path, monkeypatch):
+    """读戳用的是**已解析的 prefix**（与 subnet/sg 同一族路径 `/{prefix}backend/*`，故无需新增授权）。"""
+    record: list = []
+    _patch_cloud_handles(monkeypatch, record)
+    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
+    m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud", "--prefix", "stage-",
+            "--ddb-table", "T", "--s3-bucket", "B", "--region", "us-east-1", "--quiet"])
+    assert ("ssm", "read_backend_version", "stage-") in record
+
+
+def test_skew_real_judgement_end_to_end(tmp_path, monkeypatch, capsys):
+    """接线的真判定一次（只 stub 读戳与 CLI 自报版本，skew 判定用真函数）：新于 → 退 2 且给两条出路。"""
+    from gherkai_runtime.compose import check_version_skew as real_check
+
+    record: list = []
+    _, _, preflight_calls = _patch_cloud_handles(monkeypatch, record)
+    monkeypatch.setattr(m.compose, "check_version_skew", real_check)  # 用真判定
+    monkeypatch.setattr(m.compose, "read_backend_version", lambda **kw: "1.2.0")
+    monkeypatch.setattr(m, "_dist_version", lambda: "9.9.9")
+    rc = m.main(["submit", str(_write_feature(tmp_path)), "--backend", "cloud", "--region", "us-east-1"])
+    assert rc == 2 and preflight_calls == []
+    err = capsys.readouterr().err
+    assert "gherkai deploy" in err and "uvx --from 'gherkai==1.2.0'" in err
+
+    # 同版本 → 放行且静默（同一条真判定，证不是「恒 block」）
+    monkeypatch.setattr(m, "_dist_version", lambda: "1.2.0")
+    rc2 = m.main(["submit", str(_write_feature(tmp_path)), "--backend", "cloud", "--region", "us-east-1"])
+    assert rc2 == 0 and len(preflight_calls) == 1
+    assert "版本 skew" not in capsys.readouterr().err
+
+
+def test_skew_read_failure_exits_2_naming_the_parameter(tmp_path, monkeypatch, capsys):
+    """读戳撞非 ParameterNotFound 的 AWS 错（凭证/region/权限）→ 退 2 且点名参数路径。
+
+    不静默跳过：决策 7 的 block 档没有放行口，「读不到就放过」等于给它开了一个。
+    """
+    from botocore.exceptions import ClientError
+
+    record: list = []
+    _, _, preflight_calls = _patch_cloud_handles(monkeypatch, record)
+
+    def boom(**kwargs):
+        raise ClientError({"Error": {"Code": "AccessDeniedException", "Message": "no"}}, "GetParameter")
+
+    monkeypatch.setattr(m.compose, "read_backend_version", boom)
+    rc = m.main(["submit", str(_write_feature(tmp_path)), "--backend", "cloud", "--region", "us-east-1"])
+    assert rc == 2 and preflight_calls == []
+    assert "/gherkai-backend/version" in capsys.readouterr().err

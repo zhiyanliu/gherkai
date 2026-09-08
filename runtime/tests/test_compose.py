@@ -725,7 +725,7 @@ def test_preflight_missing_events_table_names_prefix():
         ecs=_FakeEcsClient({"prod-cluster"}),
     )
     assert err is not None
-    assert "prod-events" in err and "--prefix='prod-'" in err and "CDK" in err  # 点名 prefix + 引导
+    assert "prod-events" in err and "--prefix='prod-'" in err and "gherkai deploy" in err  # 点名 prefix + 引导
 
 
 def test_preflight_missing_task_def_names_prefix():
@@ -956,3 +956,126 @@ def test_match_deterministic_feeds_stdin_and_parses(monkeypatch, novaact_env_cmd
     assert captured["cmd"][-1] == "--match-steps"
     import json as _json
     assert _json.loads(captured["input"].decode()) == ["a", "b"]
+
+
+# ---- 版本 skew（ADR 0037 决策 7）：读戳 + 三态齐全 + 非纯净跳过 ----
+
+class _StampSsm:
+    """假 ssm：读版本戳参数。`value=None` 模拟 `ParameterNotFound`（本机制之前部署的环境）。"""
+
+    def __init__(self, value, *, error=None):
+        self.value, self.error, self.reads = value, error, []
+
+    def get_parameter(self, Name):
+        self.reads.append(Name)
+        if self.error is not None:
+            raise self.error
+        return {"Parameter": {"Value": self.value}}
+
+
+def _client_error(code):
+    from botocore.exceptions import ClientError
+
+    return ClientError({"Error": {"Code": code, "Message": "x"}}, "GetParameter")
+
+
+def test_read_backend_version_reads_prefixed_path():
+    ssm = _StampSsm("1.4.0")
+    assert compose.read_backend_version(prefix="prod-", ssm=ssm) == "1.4.0"
+    assert ssm.reads == ["/prod-backend/version"]  # 路径含 prefix，与 subnet/sg 同族
+
+
+def test_read_backend_version_missing_parameter_is_none_not_raise():
+    """`ParameterNotFound` → None（决策 7 判「警告不拦」）——若翻成异常，本机制之前部署的所有环境会被锁死。"""
+    ssm = _StampSsm(None, error=_client_error("ParameterNotFound"))
+    assert compose.read_backend_version(prefix="g-", ssm=ssm) is None
+
+
+def test_read_backend_version_other_aws_error_propagates():
+    """凭证/权限/region 类错误照抛——由入口皮归到自己的退出码层，不伪装成「没有戳」。"""
+    ssm = _StampSsm(None, error=_client_error("AccessDeniedException"))
+    with pytest.raises(Exception) as e:
+        compose.read_backend_version(prefix="g-", ssm=ssm)
+    assert "AccessDenied" in str(e.value)
+
+
+def test_read_backend_version_blank_value_is_none():
+    assert compose.read_backend_version(prefix="g-", ssm=_StampSsm("  ")) is None
+
+
+def test_skew_ok_same_release_is_silent():
+    verdict, msg = compose.check_version_skew("1.4.0", "1.4.0")
+    assert (verdict, msg) == (compose.SKEW_OK, "")
+
+
+def test_skew_block_when_cli_newer_names_both_exits():
+    """CLI 新于后端 → block，且消息必须点名**两条**出路（决策 7 不设放行口，只有这两条）。"""
+    verdict, msg = compose.check_version_skew("1.3.0", "1.4.0")
+    assert verdict == compose.SKEW_BLOCK
+    assert "gherkai deploy" in msg                      # ① 部署方升后端
+    assert "uvx --from 'gherkai==1.3.0'" in msg         # ② 临时跑同版本 CLI（点名后端版本）
+    assert "1.4.0" in msg
+
+
+def test_skew_warn_when_cli_older():
+    verdict, msg = compose.check_version_skew("1.4.0", "1.3.0")
+    assert verdict == compose.SKEW_WARN and "旧于" in msg
+
+
+def test_skew_warn_when_stamp_missing_points_at_deploy():
+    """戳缺失 = 本机制之前部署的环境 → warn（不拦）+ 提示跑一次 `gherkai deploy` 写入。"""
+    verdict, msg = compose.check_version_skew(None, "1.4.0")
+    assert verdict == compose.SKEW_WARN and "gherkai deploy" in msg
+
+
+def test_skew_skip_when_either_side_impure():
+    """任一侧带 .dev/.post/本地段 → skip（dev 逐提交前进，逐字比会把每次都判成 skew）。"""
+    for stamp, cli in [("1.4.0", "1.4.0.post3.dev0+abc.dirty"), ("1.4.0.dev1", "1.4.0"),
+                       ("1.4.0", "1.4.0+local"), ("1.4.0", "0+unknown")]:
+        verdict, msg = compose.check_version_skew(stamp, cli)
+        assert verdict == compose.SKEW_SKIP, (stamp, cli)
+        assert msg
+
+
+def test_skew_skip_when_own_version_unknown():
+    """未装成包（源码直跑）→ 调用点取不到自身版本、传 None → skip，不误判成 skew。"""
+    verdict, msg = compose.check_version_skew("1.4.0", None)
+    assert verdict == compose.SKEW_SKIP and msg
+
+
+def test_skew_compares_release_segment_only():
+    """只比 release 段（决策 7）：位数不同补零后比；同 release 段的 rc 与正式版视作同版本。"""
+    assert compose.check_version_skew("1.4.0", "1.4")[0] == compose.SKEW_OK
+    assert compose.check_version_skew("1.4", "1.4.0")[0] == compose.SKEW_OK
+    assert compose.check_version_skew("1.4.0", "1.4.0rc1")[0] == compose.SKEW_OK
+    assert compose.check_version_skew("1.4.0", "1.4.1")[0] == compose.SKEW_BLOCK
+    assert compose.check_version_skew("1.4.1", "1.4.0")[0] == compose.SKEW_WARN
+
+
+def test_skew_cli_version_is_mandatory_no_runtime_fallback():
+    """`cli_version` 必给（决策 7 比的是「写任务定义那一方」的版本）：不缺省成 gherkai-runtime 的版本——
+    editable 树里各包版本各自漂，缺省会埋一个只在 lockstep 发行态下才等价的第二真源。"""
+    with pytest.raises(TypeError):
+        compose.check_version_skew("1.0.0")  # type: ignore[call-arg]
+
+
+def test_check_backend_skew_reads_stamp_then_judges():
+    """读戳 + 判定一步到位（编排住产品本体，入口皮只翻退出码）。"""
+    ssm = _StampSsm("1.3.0")
+    verdict, msg = compose.check_backend_skew(prefix="prod-", cli_version="1.4.0", ssm=ssm)
+    assert verdict == compose.SKEW_BLOCK and "gherkai deploy" in msg
+    assert ssm.reads == ["/prod-backend/version"]
+
+
+def test_check_backend_skew_missing_stamp_warns_not_raises():
+    ssm = _StampSsm(None, error=_client_error("ParameterNotFound"))
+    verdict, msg = compose.check_backend_skew(prefix="g-", cli_version="1.4.0", ssm=ssm)
+    assert verdict == compose.SKEW_WARN and "gherkai deploy" in msg
+
+
+def test_check_backend_skew_propagates_read_errors():
+    """凭证/权限类读错误原样抛（调用方归到自己的退出码层），不吞成「放行」——block 无放行口，读不到≠放过。"""
+    from botocore.exceptions import ClientError
+    ssm = _StampSsm(None, error=_client_error("AccessDeniedException"))
+    with pytest.raises(ClientError):
+        compose.check_backend_skew(prefix="g-", cli_version="1.4.0", ssm=ssm)

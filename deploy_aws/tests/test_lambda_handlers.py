@@ -4,15 +4,18 @@
 另有一组走 moto 内存表跑真 handler（末尾「只推进 detached run」——组合根侧分流是行为契约，解析测不出来）。
 真 Stream 触发 / 真 Fargate / 真 EventBridge 投递仍是 moto 之外的真跑边界（绿≠对的证据边界）。
 
-lambdas/ 在仓库根，测试经 sys.path 加它（Lambda 部署时 handler + core + cli 打进同一 zip）。
+handler 源与本测试同住 provider 包（`gherkai_deploy_aws/lambdas/`，AWS 专属胶水，ADR 0037 决策 6）——测试不寄居
+上游 runtime（ADR 0016 当年抽包的理由之一就是「handler 测试无处安身」）。经 sys.path 加那个目录——**摊平 import
+是真实形态**：Lambda asset 把它们摊在 zip 根、作平级顶层模块（`exit_observer` 里 `from reconciler import …`
+依赖此形态），故这里也按顶层模块 import、不走包路径。
 """
 from __future__ import annotations
 
 import sys
 from pathlib import Path
 
-# lambdas/ 在仓库根（cli/ 的上一级）
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "lambdas"))
+# 包内的 handler 源目录（tests/ 与 gherkai_deploy_aws/ 是兄弟目录）
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "gherkai_deploy_aws" / "lambdas"))
 
 import exit_observer  # noqa: E402
 import reconciler  # noqa: E402

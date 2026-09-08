@@ -22,7 +22,7 @@
 
 > **承接 v0.x 顺延项（待真实业务系统）**：≥3 真实用例 QA 零代码验收 + 破例清单——当前用骨架用例（wikipedia/example.com）验证方向，真实系统验收顺延。
 
-> **v1.1 云端**：云端 store adapter（DynamoDB/S3）+ **执行面 Fargate/ECS 均已建成 + 真部署真跑**——`--backend cloud` 一个旋钮同时切「存储上云 + worker 跑 Fargate 容器」（`FargateEngine` adapter + `iac_aws_backend` CDK 工程，ADR 0032/0033）。配置与退出码分层见 [`cli/README.md`](./cli/README.md)。
+> **v1.1 云端**：云端 store adapter（DynamoDB/S3）+ **执行面 Fargate/ECS 均已建成 + 真部署真跑**——`--backend cloud` 一个旋钮同时切「存储上云 + worker 跑 Fargate 容器」（`FargateEngine` adapter + `gherkai-deploy-aws` 包的 CDK stack、经 `gherkai deploy` 部署，ADR 0032/0033/0037）。配置与退出码分层见 [`cli/README.md`](./cli/README.md)。
 
 > **v1.2 无状态跑批**（已实装，ADR 0034）：`submit` 提交完就走、返回 run_id，`status [--wait]` 轮询/接力收集——CLI 不必守着 run。local 档起 per-run 后台进程（setsid 脱离 CLI）+ SQLite events 推进；cloud 档三 Lambda 事件驱动链（kicker 冷启动 / reconciler 主推进 / 退出观察者）由 DDB Stream + EventBridge 驱动，submit 机器权限收窄到「提交那一下」。同步 `run` 命令保留不变。每个 job 有墙钟预算兜底（缺省 300s，`@timeout:` tag 按用例声明）——三种跑法都强制执行，提交完就走也不怕挂死/无限烧钱。
 
@@ -68,7 +68,8 @@ flowchart TD
 ├── README.md                  ← 本文件
 ├── CONTEXT.md                 ← 领域术语表（glossary）
 ├── CLAUDE.md                  ← 项目约定（沟通/文档纪律/代码纪律/工作方式）——给 AI coding agent 与人
-├── pyproject.toml / uv.lock   ← uv workspace 根（成员 = core / runtime / cli 三个发行包）：单一 lock + 共用 dev 依赖与 pytest 配置（ADR 0037）
+├── pyproject.toml / uv.lock   ← uv workspace 根（成员 = core / runtime / cli / engines/novaact / deploy_aws 五个发行包）：单一 lock + 共用 dev 依赖与 pytest 配置（ADR 0037）
+├── .github/                   ← CI 与发布链（workflows/{ci,release}.yml + scripts/；一次性人工前置与本地校验见 .github/workflows/README.md，ADR 0037 决策 8）
 ├── docs/                      ← 架构决策与过程记录
 │   ├── adr/                   ← 架构决策记录（0001–0038）
 │   ├── guides/                ← 给人的阅读理解文档（机制解读/横切合成等，只讲 how、权威在 ADR）
@@ -85,12 +86,11 @@ flowchart TD
 ├── runtime/                   ← 产品本体 = 组合根共享层（发行名 gherkai-runtime；ADR 0016「演进」节；cli/Lambda/WebUI 的共同地基）
 │   └── gherkai_runtime/{compose.py(引擎注册表/装配·云目标解析) · detached.py(local 无状态跑批宿主) · names.py(资源命名真源) · tunnel.py(--expose-local 隧道 provider，ADR 0035) · tunnel_host.py(隧道宿主编排+守护 TTL，ADR 0035)}
 ├── cli/                       ← 命令行皮（发行名 gherkai，命令 gherkai；ADR 0016）
-│   └── gherkai_cli/{__main__.py(argparse) · render.py}
+│   └── gherkai_cli/{__main__.py(argparse) · deploy.py(部署 provider 发现/分派皮) · render.py}
 ├── engines/                   ← 两个可插拔引擎，与 core 平级
 │   ├── midscene/   ← npm 包 @gherkai/worker-midscene（ESM）：src/bin.mts（入口）· src/worker/run-scope.mts（薄 worker）· src/worker/deterministic.mts · src/lib/agentcore-sigv4.mts · spikes/
 │   └── novaact/    ← 发行包 gherkai-worker-novaact：gherkai_worker_novaact/{run_scope.py（薄 worker）· deterministic.py · user_steps.py · lib/workflow_setup.py} · spikes/
-├── iac_aws_backend/           ← `--backend cloud` 的 AWS 资源 IaC（Python CDK：DDB/S3/ECS/ECR/IAM/VPC + 无状态跑批的 Stream/Lambda/EventBridge，ADR 0033/0034）
-├── lambdas/                   ← cloud 无状态跑批的三 Lambda 源（kicker/reconciler/exit-observer，ADR 0034；由 iac 打包部署）
+├── deploy_aws/                ← 发行包 gherkai-deploy-aws：`gherkai deploy` 的 AWS provider（Python CDK stack：DDB/S3/ECS/ECR/IAM/VPC + 无状态跑批的 Stream/Lambda/EventBridge；`gherkai_deploy_aws/lambdas/` 是三 Lambda 的 handler 源、随部署打进 asset，ADR 0033/0034/0037）
 └── tools/                     ← 复用工具库（端到端真跑 / 跨真实边界验证 / 时序诊断；长期资产，见 CLAUDE.md「工作方式」）
 ```
 
@@ -101,25 +101,25 @@ flowchart TD
   - AgentCore Browser（`bedrock-agentcore` 服务）
   - Nova Act 服务（`nova-act`）+ 模型 `nova-act-latest`
 - Nova Act workflow definition（IAM 路径必需）：**代码会自动 create-if-not-exists**（`engines/novaact/gherkai_worker_novaact/lib/workflow_setup.py`），无需手动操作。若想手动预建也可：`aws nova-act create-workflow-definition --region us-east-1 --name spike-wikipedia-benchmark`（见 ADR 0004）。
-- Node 22（midscene）、Python 3.13 + uv（core/runtime/cli 三包 + novaact worker）
+- Node ≥22（midscene worker；`gherkai deploy` 的 CDK/cdk CLI 同一下限）、Python 3.13 + uv（五个 workspace 成员）
 - （可选，仅 `--expose-local` 本地应用测试需要）[ngrok](https://ngrok.com/download) + authtoken（**注册免费账号即够**，付费账号亦可；`ngrok config add-authtoken <token>`——注意是 dashboard 上的 **Authtoken**，不是 `cr_` 开头的 API key）
 
 ## 运行（经核心库 cli，一个入口跑两个引擎）
 
 ```bash
 # 首次安装：两条都在仓库根执行（见下「注意」）
-uv sync                                            # cli + runtime + core 三包 + novaact worker（[local] extra）一次装齐（uv workspace，共用根 .venv/）
+uv sync                                            # 五个 workspace 成员（core/runtime/cli + novaact worker + deploy-aws provider）一次装齐（uv workspace，共用根 .venv/）
 (cd engines/midscene && npm ci && npm run build)   # Midscene worker（npm 包，Node 22）：装依赖 + 编译到 dist/
 # dev 态让 CLI 用本仓库的 midscene worker（发布后用户走 `npm i -g @gherkai/worker-midscene`，不需此步）：
 export GHERKAI_WORKER_MIDSCENE_CMD="node $PWD/engines/midscene/dist/bin.mjs"
 ```
 
-第一条 `uv sync` 把 `core/`、`runtime/`、`cli/` 三个发行包（`gherkai-core` / `gherkai-runtime` / `gherkai`）以 editable 装进仓库根的同一个 `.venv/`（ADR 0037：单一 workspace、单一 `uv.lock`）。此后**在仓库根**敲：`uv run gherkai <子命令>` 跑 CLI（`gherkai` 是安装出来的命令），`uv run pytest` 跑三包的全部单测。
+第一条 `uv sync` 把五个 workspace 成员（`gherkai-core` / `gherkai-runtime` / `gherkai` / `gherkai-worker-novaact` / `gherkai-deploy-aws`）以 editable 装进仓库根的同一个 `.venv/`（ADR 0037：单一 workspace、单一 `uv.lock`）。此后**在仓库根**敲：`uv run gherkai <子命令>` 跑 CLI（`gherkai` 是安装出来的命令），`uv run pytest` 跑全部成员的单测。
 
 跑法由**两个正交旋钮**组合出来（四种组合都合法），按需各选一档：
 
 - **怎么跑**——前台 `run`（CLI 在线守着，跑完直接给结果）或后台 `submit` + `status`（提交即走，事后查/收）。
-- **跑在哪 / 落在哪**（`--backend`）——`local`（默认：worker 跑本机子进程，结果落本地 `reports/`）或 `cloud`（worker 跑 Fargate 容器，状态落 DynamoDB、结果落 S3；需先部署 [`iac_aws_backend`](./iac_aws_backend/README.md)，一条 `cdk deploy` 建齐全部资源）。
+- **跑在哪 / 落在哪**（`--backend`）——`local`（默认：worker 跑本机子进程，结果落本地 `reports/`）或 `cloud`（worker 跑 Fargate 容器，状态落 DynamoDB、结果落 S3；需先由部署方跑 `gherkai deploy --vpc <档> --prefix <前缀>` 建齐全部资源——IaC 住 `gherkai-deploy-aws` 包、装 `gherkai[deploy-aws]`，见 [`deploy_aws/README.md`](./deploy_aws/README.md)）。
 
 ### ① 先预检（纯本地、不烧钱）
 
@@ -154,7 +154,7 @@ AWS_REGION=us-east-1 uv run gherkai run features/wikipedia_generic.feature \
 
 默认（local）落盘到当前目录下的 `reports/<run_id>/`（`--report-dir` 可改）：判定真值（`jobs/`）+ 控制面（`run_meta.json`/`run_state.json`）+ RunReport（`index.html` 人看入口 + `manifest.json`）。**边跑边写**：run 开始即落 definition + 初始态，每个 scope 起跑刷 RUNNING、完成即落判定，最后 finalize 总状态。
 
-加 `--backend cloud` 即同一条命令换云端档：worker 改跑 Fargate 容器、状态落 DynamoDB、判定真值与报告落 S3（`--prefix` 与 `cdk deploy` 时一致即可，表/桶/cluster 名由它批量推导）：
+加 `--backend cloud` 即同一条命令换云端档：worker 改跑 Fargate 容器、状态落 DynamoDB、判定真值与报告落 S3（`--prefix` 与 `gherkai deploy --prefix` 一致即可，表/桶/cluster 名由它批量推导）：
 
 ```bash
 AWS_REGION=us-east-1 uv run gherkai run features/engine_routing.feature \
@@ -210,6 +210,22 @@ cd engines/midscene && AWS_REGION=us-east-1 node_modules/.bin/tsx spikes/01-mode
 # Nova Act 引擎对标 spike
 AWS_REGION=us-east-1 uv run python engines/novaact/spikes/wikipedia_benchmark.py   # 用仓库根 .venv（novaact 无独立 venv）
 ```
+
+## 发布与版本（维护者）
+
+**版本真源只有 git tag `vX.Y.Z`**——五个 Python 发行包、npm 包 `@gherkai/worker-midscene`、两个 worker
+基底镜像同号，pyproject 与 package.json 里都没有手写版本号（ADR 0037 决策 2b/7）。发布因此是一个动作：
+
+```bash
+git tag v1.4.0 && git push origin v1.4.0   # GitHub Actions 接手：gate（版本==tag）→ PyPI → npm → GHCR 基底镜像 → GitHub Release
+```
+
+CI（push `main` / PR）跑三件：全成员 `pytest`、midscene 的 `npm ci && npm run build && npm test`、
+`uv build --all-packages` 的打包元数据 smoke。
+
+一次性人工前置（PyPI 占名与 trusted publisher、npm token secret、GHCR 包可见性）、TestPyPI 演练、
+以及**不推 tag 也能做的本地静态校验**，全在 [`.github/workflows/README.md`](./.github/workflows/README.md)；
+决策与理由在 [ADR 0037 决策 8](./docs/adr/0037-distribution-and-packaging.md)。
 
 ## 注意
 

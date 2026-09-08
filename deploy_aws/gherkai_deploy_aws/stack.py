@@ -1,4 +1,4 @@
-"""iac_aws_backend Stack（ADR 0033）：`--backend cloud` 需要的全部 AWS 资源。
+"""BackendStack（ADR 0033）：`--backend cloud` 需要的全部 AWS 资源。
 
 一套 stack 建齐（可按 prefix 多实例化，多环境 prod-/stage-）：
 - DynamoDB：{prefix}runs（控制面/RunStore）+ {prefix}events（events-out，开 expires_at TTL）；两表均开
@@ -6,17 +6,27 @@
 - S3：{prefix}artifacts（Result/Report/offload/job-in/artifact-upload，按 prefix key 分片）+ lifecycle
   规则 expire-job-in（按对象 tag gherkai=job-in 7 天过期）
 - ECS：{prefix}cluster + 2 task-def（novaact/midscene，各自镜像/task role）
-- ECR：2 repo（各承一镜像；镜像由 CI build&push，synth 不触发 docker build）
+- ECR：2 repo（各承一镜像；镜像由部署方 build&push，synth 不触发 docker build）
 - Lambda/事件驱动链（ADR 0034，见 _reconcile_lambdas）：{prefix}exit-observer / {prefix}reconciler /
   {prefix}kicker 三 Function + EventBridge rule {prefix}ecs-stopped + 两表 Stream 的 event source mapping
   （kicker 那条带 INSERT ∧ detached filter）
 - IAM：每引擎一个 task role（最小权限）+ 共享 execution role + 3 个 Lambda 执行角色 + job timeout 到点
   触发器的 Scheduler 执行角色 {prefix}timeout-scheduler
 - VPC + SSM：subnet/sg ID 写进 /{prefix}backend/subnets|security-groups（cli 读）
+- SSM 部署戳（**stack 资源、非命令事后 put_parameter**——与部署事务同生死、回滚不留错值，ADR 0037 决策 6）：
+  /{prefix}backend/version（版本单旋钮，供 preflight skew 比对，ADR 0037 决策 7）、
+  /{prefix}backend/vpc（生效 VPC 档，供下次 deploy 三态比对）、
+  /{prefix}backend/worker-template/<engine>（task-def 模板 revision ARN，ADR 0038 四步第 1 步）
 
-命名走 names.py（与 cli compose 同源，ADR 0033 护栏）。prefix 从 CDK context 读（cdk deploy -c prefix=prod-）。
+命名走 `names`（re-export 产品本体 `gherkai_runtime.names`，与 cli compose 真同源，ADR 0033 护栏）。
+context 旋钮由 `gherkai deploy` 拼给（见 app.py 头 / ADR 0037 决策 6），本文件只读不定 flag 面。
 """
 from __future__ import annotations
+
+import os
+import shutil
+import tempfile
+from pathlib import Path
 
 from aws_cdk import (
     Stack,
@@ -38,7 +48,7 @@ from aws_cdk import (
 )
 from constructs import Construct
 
-import names
+from gherkai_deploy_aws import names
 
 
 class BackendStack(Stack):
@@ -47,16 +57,22 @@ class BackendStack(Stack):
     FARGATE_STOP_TIMEOUT_MAX_S = 120
     DEFAULT_STOP_TIMEOUT_S = 120  # 默认贴 Fargate 上限：尽量给 worker 会话释放+抢传预算（grace 真容器校准见 ADR 0032），可 -c stop_timeout= 覆盖
 
+    # 模板 revision ARN 注给两个推进器 Lambda 的 env 名（ADR 0033「推进器 env 加模板 revision ARN」/ 0038）。
+    # 值形态 = `engine=arn` 逗号串（同 SUBNETS 的逗号串惯例；一个 env 位容纳全部引擎、加引擎不改 env 面）。
+    WORKER_TEMPLATE_ARNS_ENV = "WORKER_TEMPLATE_ARNS"
+
     def __init__(self, scope: Construct, construct_id: str, *, prefix: str, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
         self.prefix = prefix
         self.stop_timeout_s = self._resolve_stop_timeout()
+        self.version = self._resolve_version()
 
-        vpc = self._network()
+        vpc = self._network()    # 同时定 self._vpc_spec（生效 VPC 档，写进 SSM 供下次 deploy 三态比对）
         self._storage()          # DDB ×2 + S3 ×1
         self._cluster(vpc)       # {prefix}cluster（RunTask 时 cli 按名指定，task-def 不绑 cluster）
-        self._task_definitions()  # 2 引擎：ECR + task-def + task role
+        self._task_definitions()  # 2 引擎：ECR + task-def + task role + 模板 revision ARN 写 SSM
         self._ssm_network(vpc)   # 写 subnet/sg ID 供 cli 读
+        self._ssm_deployment_stamp()  # 写 version / vpc 档（ADR 0037 决策 6，随事务同生死）
         self._reconcile_lambdas(vpc)  # 无状态跑批（ADR 0034）：退出观察者 + reconciler + kicker 三 Lambda + EventBridge + Stream
 
     # ---- stopTimeout 解析（grace 真容器校准落点，ADR 0032）----
@@ -84,6 +100,34 @@ class BackendStack(Stack):
                 f"（>120s 部署期会被 ECS 拒；这正是 Nova grace 下限>120s 冲突的硬上限，见 ADR 0032）"
             )
         return seconds
+
+    # ---- 版本戳解析（ADR 0037 决策 6「版本戳」+ 决策 7 skew 三态的写侧）----
+    def _resolve_version(self) -> str:
+        """后端版本戳（PEP 440 字符串）：**`-c version=` 必给、无隐式默认**。
+
+        单一真源 = 发起这次部署的命令（`gherkai deploy` 传自己的版本，ADR 0037 决策 6/7 版本单旋钮）。
+        **不在此回落成「本包自报的 dist 版本」**：那会造出第二个真源——本 stack 由 cdk CLI 起的子进程合成，
+        真要与命令进程分叉（换 interpreter / 混装），回落值会静默写错戳，而戳恰是 preflight 唯一判据（决策 7
+        CLI 新于后端即退 2、不设放行口）。写错比缺失更坏，故缺即 fail-fast、点明该走 `gherkai deploy`。
+        **synth 期校验 PEP 440**：戳的消费者用 `packaging.version.Version` 比较（决策 7），非法串会让 preflight
+        在每个提交者那里炸；这里花一次校验换那边永不炸。
+        """
+        raw = self.node.try_get_context("version")
+        if not raw:
+            raise ValueError(
+                "缺 version context：后端版本戳无隐式默认（ADR 0037 决策 6/7）。"
+                "正式路径是 `gherkai deploy`（它传自己的版本）；手工合成请显式 -c version=<PEP 440 版本>"
+            )
+        version = str(raw)
+        from packaging.version import InvalidVersion, Version  # runtime 的硬依赖（ADR 0037 决策 2c）
+        try:
+            Version(version)
+        except InvalidVersion as exc:
+            raise ValueError(
+                f"version context 非合法 PEP 440 版本：{version!r}——preflight 的 skew 比对按 PEP 440 解析"
+                f"（ADR 0037 决策 7），非法戳会让每个提交者的 preflight 炸。原因：{exc}"
+            ) from exc
+        return version
 
     # ---- DynamoDB ×2 + S3 ×1（ADR 0033 资源清单；schema 与 core/tests/conftest.py fixture 一致）----
     def _storage(self) -> None:
@@ -137,20 +181,32 @@ class BackendStack(Stack):
             ],
         )
 
-    # ---- VPC（Fargate awsvpc 用）：三档 context 可指定（ADR 0033），默认建新 ----
+    # ---- VPC（Fargate awsvpc 用）：三档 context 可指定（ADR 0033/0037 决策 6，`--vpc` 必给、命令侧无隐式默认）----
     def _network(self) -> ec2.IVpc:
+        """建/取 VPC，**并把生效的档记进 `self._vpc_spec`**（写 SSM 供下次 deploy 三态比对，ADR 0037 决策 6）。
+
+        档值形态（与 `gherkai deploy --vpc` 三档一一对应，比对逻辑在 `cli.vpc_spec_matches`）：
+        `<vpc-id>` = 复用现有 / `default` = 账户默认 VPC / `new:<所建 vpc-id>` = 本 stack 新建（存出所建 id
+        使 `new` 档也可回溯核对）。**档必须在此一处推导**——它是「这次部署到底落在哪个 VPC」的唯一记账点，
+        与真正建/取 VPC 的分支同生死；分两处写就会出现「SSM 说 default、资源建在新 VPC」的错账。
+        """
         # 优先级：-c vpc_id=xxx（用现有 VPC）> -c use_default_vpc=true（用账户默认 VPC）> 建新。
         # 三档都走**公有子网 + assignPublicIp=ENABLED** 出网连 AgentCore/Bedrock/S3/DDB（worker 只出不入），**零 NAT 成本**。
         vpc_id = self.node.try_get_context("vpc_id")
         if vpc_id:
+            self._vpc_spec = str(vpc_id)
             return ec2.Vpc.from_lookup(self, "BackendVpc", vpc_id=vpc_id)
         if str(self.node.try_get_context("use_default_vpc")).lower() == "true":
+            self._vpc_spec = "default"
             return ec2.Vpc.from_lookup(self, "BackendVpc", is_default=True)
         # 建新：2-AZ、**零 NAT**（nat_gateways=0）。worker 落公有子网 + 公网 IP 出网，与 _worker_subnet_ids 的
         # 「公有子网优先」及 cli assignPublicIp=ENABLED 一致——不建常驻计费的 NAT。**真私有子网隔离（NAT/VPC
         # endpoint 出网）留 backlog**：现三档均公有子网出网，若未来要私有隔离需同步 _worker_subnet_ids 选私有
         # 子网 + cli assignPublicIp=DISABLED（跨组件联动）。
-        return ec2.Vpc(self, "BackendVpc", max_azs=2, nat_gateways=0)
+        vpc = ec2.Vpc(self, "BackendVpc", max_azs=2, nat_gateways=0)
+        # vpc_id 是 CDK token（部署期才有值）——拼进字符串由 CloudFormation 的 Fn::Join 解析，参数落地即真 id。
+        self._vpc_spec = f"new:{vpc.vpc_id}"
+        return vpc
 
     def _worker_subnet_ids(self, vpc: ec2.IVpc) -> list[str]:
         """worker task 落哪些 subnet——「优先公有子网、无则回落私有」这条契约的**唯一落点**（ADR 0033）。
@@ -182,6 +238,8 @@ class BackendStack(Stack):
         )
         self._execution_role = execution_role
         self._task_roles: list[iam.Role] = []  # 供 reconciler Lambda PassRole（RunTask 传 task/execution role）
+        # 引擎 → 模板 revision ARN（ADR 0038 四步第 1 步）：写 SSM + 注推进器 env，两处同一份、见 _one_task_def。
+        self._worker_template_arns: dict[str, str] = {}
         for engine in names.ENGINES:
             self._one_task_def(engine, execution_role)
 
@@ -225,6 +283,17 @@ class BackendStack(Stack):
             # 不设 AWS_REGION/AWS_PROFILE（ADR 0033 决策 C）：region 每 run 经 RunTask overrides 注入、凭证靠 task role。
             stop_timeout=Duration.seconds(self.stop_timeout_s),  # grace 真容器校准（ADR 0032），默认 120s、-c stop_timeout= 覆盖（见 _resolve_stop_timeout）
         )
+
+        # **模板 revision ARN 落 SSM**（ADR 0038 四步第 1 步 / SSM 参数真源表）：`task_definition_arn` 是
+        # `AWS::ECS::TaskDefinition` 的 `Ref`——返回**带 revision** 的 ARN；改 task-def 任一属性即替换出新 revision、
+        # 本参数值随之更新。**写者是 stack 资源、不是命令事后 put_parameter**：与 cdk 事务同生死，回滚不留错值。
+        # `push-worker` 永远从这里复制模板（不抄「最近一次」revision——那可能是某个 variant 的、或模板改过后已过期）。
+        ssm.StringParameter(
+            self, f"SsmWorkerTemplate{engine.capitalize()}",
+            parameter_name=names.ssm_worker_template_path(self.prefix, engine),
+            string_value=task_def.task_definition_arn,
+        )
+        self._worker_template_arns[engine] = task_def.task_definition_arn
 
     def _grant_task_role(self, role: iam.Role, engine: str) -> None:
         """task role 最小权限（ADR 0033 IAM 表，按动作×资源收窄）。两个引擎共享的 + 各引擎特有的。"""
@@ -341,6 +410,28 @@ class BackendStack(Stack):
         CfnOutput(self, "Prefix", value=self.prefix)
         CfnOutput(self, "SubnetsSsmPath", value=names.ssm_subnets_path(self.prefix))
 
+    # ---- SSM 部署戳：版本 + 生效 VPC 档（ADR 0037 决策 6）----
+    def _ssm_deployment_stamp(self) -> None:
+        """把「这次部署是什么版本、落在哪个 VPC」写成 **stack 资源**（不是命令事后 `put_parameter`）。
+
+        **为何是 stack 资源**：与部署事务同生死——CloudFormation 回滚时参数一起回滚，不会留下「戳说新版本、
+        Lambda 还是旧代码」的错账；`gherkai destroy` 随 stack 删除（**不 RETAIN**，与表/桶的数据资源相反：
+        戳是部署元数据、留着只会让下次 deploy 拿到已消失环境的档）。
+        两个消费者：`version` 供提交侧 preflight 比对 CLI 版本（skew 三态，ADR 0037 决策 7）；`vpc` 供下次
+        `gherkai deploy` 比对 `--vpc`（三态，同决策 6——只强制显式给值挡不住第二次 deploy 敲错档）。
+        两者都落在 [0033] 已授的 `/{prefix}backend/*` 通配内，CLI 侧不新增 SSM 授权。
+        """
+        ssm.StringParameter(
+            self, "SsmVersion",
+            parameter_name=names.ssm_version_path(self.prefix),
+            string_value=self.version,  # -c version= 必给（见 _resolve_version）
+        )
+        ssm.StringParameter(
+            self, "SsmVpcSpec",
+            parameter_name=names.ssm_vpc_path(self.prefix),
+            string_value=self._vpc_spec,  # 生效档，见 _network（new 档含所建 vpc-id、可回溯核对）
+        )
+
     # ---- 无状态跑批（ADR 0034）：退出观察者 + reconciler + kicker 三 Lambda + EventBridge + DDB Stream ----
     def _reconcile_lambdas(self, vpc: ec2.IVpc) -> None:
         """事件驱动推进链（ADR 0034 端到端 cloud 流程）：
@@ -352,7 +443,7 @@ class BackendStack(Stack):
 
         Lambda 代码打进一个 asset（内容清单见 `_build_lambda_asset`）。**复用同步 cloud run 的资源**（runs/events
         表、桶、cluster、task-def、task/execution role）——reconciler 起 worker task 与同步路径同一套
-        （compose.build_fargate_engines 单一真源，见 lambdas/reconciler.py）。故三个 handler 都得自己分辨
+        （compose.build_fargate_engines 单一真源，见本包 lambdas/reconciler.py）。故三个 handler 都得自己分辨
         「这个 run 归谁推进」：exit-observer/reconciler 在 handler 里判 detached（触发面滤不掉，ADR 0034
         端到端 cloud 1b），kicker 靠 Stream filter 滤（见下）——两者判据同一个标记。
         """
@@ -368,6 +459,18 @@ class BackendStack(Stack):
         }
         # 起 worker task 的 subnet（reconciler/kicker 共用一份；与写给 cli 的 SSM 同源——见 _worker_subnet_ids）
         subnets_env = ",".join(self._worker_subnet_ids(vpc))
+        # 模板 revision ARN 注给两个推进器（`engine=arn` 逗号串；ARN 是 CDK token、由 Fn::Join 落值）。
+        # **与 SSM `worker-template/<engine>` 同一份值、同一个事务**（见 _one_task_def）——env 只是省掉推进器
+        # 冷启动的一次 SSM 读，不是第二个真源。
+        # **前向口子**：ADR 0038「运行时与 preflight」把「definition 里带显式 revision」定为不变量，读侧兼容口径
+        # （旧 definition 无 `worker_task_defs` 字段）与 variant 解析随 0038 的 push-worker 批次落地；当前两个
+        # handler 尚未消费本 env（起 task 仍传 family），**故意先由 stack 侧就位**——它属于部署事务（ADR 0033
+        # 「推进器 env 加模板 revision ARN」），与镜像族命令解耦、不该等到那批才补。
+        template_env = {
+            self.WORKER_TEMPLATE_ARNS_ENV: ",".join(
+                f"{engine}={arn}" for engine, arn in self._worker_template_arns.items()
+            ),
+        }
 
         # ① 退出观察者 Lambda（薄；只 events 表 PutItem 写 task_exited）
         exit_observer = lambda_.Function(
@@ -431,7 +534,7 @@ class BackendStack(Stack):
             code=code,
             timeout=Duration.minutes(2),  # 起 task + 条件写；不等 worker 跑完（fire-and-forget）
             memory_size=256,
-            # env = common_env + 起 task 所需（SUBNETS/SG/MAX_CONCURRENCY）。lambdas/reconciler.py docstring 的 env
+            # env = common_env + 起 task 所需（SUBNETS/SG/MAX_CONCURRENCY）。本包 lambdas/reconciler.py docstring 的 env
             # 清单里还有 **REPORT_DIR / ASSIGN_PUBLIC_IP——IaC 有意不注入**，由该文件内缺省供给（reports / ENABLED）；
             # 改产物落点前缀或走私有子网（NAT 出网、assignPublicIp=DISABLED）时才需在此显式给。
             # 注：真要改 REPORT_DIR，用户侧 `submit --report-dir` 须跟着改成同值——detached submit 的 preflight
@@ -444,6 +547,7 @@ class BackendStack(Stack):
                 # ADR 0034 机制四）。task 烧部署方账单，故部署方保留总量控制权、钳住提交侧声明。
                 "MAX_CONCURRENCY": "8",
                 **timeout_env,  # job timeout 到点触发器（KICKER_ARN/SCHEDULER_ROLE_ARN，ADR 0034）
+                **template_env,  # worker task-def 模板 revision ARN（ADR 0038 读侧口子，见上）
             },
         )
         # reconciler 权限：runs 表读写（RunState 条件写）+ events 表读（重放）+ 桶读写（ResultStore/ReportStore/job-in）
@@ -501,6 +605,7 @@ class BackendStack(Stack):
                 "SECURITY_GROUPS": self._worker_sg_id,
                 "MAX_CONCURRENCY": "8",  # 同 reconciler：部署侧 cap，两侧须同值（kicker 起首批也走这个闸）
                 **timeout_env,  # kicker 也起 task（首批）→ 同样要武装 timeout schedule
+                **template_env,  # 同 reconciler：两侧须同值（kicker 起首批也照模板起）
             },
         )
         # kicker 权限 = reconciler 同款（起首批要 RunTask/PassRole/表桶）。
@@ -538,41 +643,79 @@ class BackendStack(Stack):
         CfnOutput(self, "ExitObserverFnName", value=exit_observer.function_name)
         CfnOutput(self, "KickerFnName", value=kicker.function_name)
 
+    # Lambda asset 里除 handler 外要带的 import 包（ADR 0037 决策 6「Lambda asset 来源」）：
+    # gherkai_runtime（产品本体：compose 装配单一真源，reconciler 复用其 build_fargate_engines——**不打 gherkai_cli**，
+    # Lambda 不背 argparse/render，ADR 0016「演进」节）+ gherkai_core（核心库）+ gherkin（core 的 feature 解析）
+    # + packaging（gherkai_runtime 的硬依赖，ADR 0037 决策 2c）+ **typing_extensions**。
+    # boto3 由 Lambda runtime 自带、不打（省包体）。
+    # **typing_extensions 是踩出来的**：它是 `gherkin-official>=42` 的传递依赖（`gherkin/parser_types.py` 无条件
+    # `from typing_extensions import NotRequired`，即便 3.13 的 typing 已有该名），旧实现靠 `pip install --target`
+    # 顺带装上、改成「按名复制已安装包」后就漏了。单测全绿、真 synth 出的 asset 一 import 就 ModuleNotFoundError
+    # ——故 `tests/test_lambda_asset.py::test_asset_imports_with_only_stdlib_beside_it` 用**剥掉 site-packages 的
+    # 子进程**真 import 一遍 asset，把这类漏传递依赖从「真跑才暴露」拉回单测。加/换依赖时那条测试是判据。
+    LAMBDA_ASSET_PACKAGES = ("gherkai_runtime", "gherkai_core", "gherkin", "packaging", "typing_extensions")
+
     def _build_lambda_asset(self) -> str:
-        """把 Lambda 代码打包到一个目录，返回其路径（Code.from_asset 用）。
+        """把 Lambda 代码摊到一个目录，返回其路径（`Code.from_asset` 用）。
 
-        内容 = lambdas/*.py（handler）+ core/gherkai_core（core 库）+ runtime/gherkai_runtime（产品本体：compose 装配单一
-        真源，reconciler 复用其 build_fargate_engines——不再打包 cli，Lambda 不背 argparse/render，ADR 0016
-        「演进」节）+ pip 装 gherkin-official（core 的唯一非 boto3 依赖；boto3 是 Lambda runtime 自带、不打）。
-        打到 iac_aws_backend/.lambda_build/（.gitignore；每次 synth 重建保新鲜）。
+        内容 = 本包 `lambdas/` 的 handler 源（asset 原料，ADR 0037 决策 6）+ `LAMBDA_ASSET_PACKAGES` 逐项
+        **从当前 venv 已安装位置**复制过来的 import 名（包 → 目录、单文件模块 → `.py`，见 `_installed_import_source`）。
+
+        **来源 = 已安装包、不是仓库相对路径、不联网装**（ADR 0037 决策 6）：
+        - 仓库相对路径（`../core/gherkai_core` 一类）只在 monorepo 里成立，wheel 用户的 site-packages 里没有
+          这种布局——那是「IaC 工程假定自己躺在 monorepo 里」的残留；
+        - 联网 `pip install gherkin-official` 会在离线环境断、且装到的是 PyPI 上的某个版本而非**运行中这一份**；
+          dev 版（`1.4.0.post3.dev0+…`）根本不在 PyPI 上，contributor 部署自己的 dev 版会直接断。
+        经 `importlib.util.find_spec` 定位 → 版本恒等于「发起这次部署的那份安装」，editable 安装也照样命中
+        （spec 指向源码目录，实测）。缺任一项 → fail-fast 点名它（少打一项的后果是 Lambda 运行期 ImportError，
+        要等到真起 run 才暴露；**清单完整性**由 `tests/test_lambda_asset.py` 的真 import 那条守，见清单注释）。
+
+        目录：`names.LAMBDA_ASSET_DIR_ENV`（命令给的临时工作目录，由命令负责清理）或自建 `mkdtemp`——
+        **不再写进仓库**（旧实现落 `iac_aws_backend/.lambda_build/`，那要求源码树可写、且 wheel 装的包目录不该被写）。
         """
-        import os
-        import shutil
-        import subprocess
+        work_dir = os.environ.get(names.LAMBDA_ASSET_DIR_ENV)
+        build = Path(work_dir) / "lambda-asset" if work_dir else Path(tempfile.mkdtemp(prefix="gherkai-lambda-"))
+        if build.exists():
+            shutil.rmtree(build)  # 每次 synth 重建：工作目录可能被同一命令的前一趟（如 --diff 后 deploy）用过
+        build.mkdir(parents=True)
 
-        here = os.path.dirname(os.path.abspath(__file__))
-        repo = os.path.dirname(here)
-        build = os.path.join(here, ".lambda_build")
-        if os.path.exists(build):
-            shutil.rmtree(build)
-        os.makedirs(build)
-        # handler
-        shutil.copytree(os.path.join(repo, "lambdas"), build, dirs_exist_ok=True,
+        # handler 源摊到 asset 根（Lambda 的 handler= 串按顶层模块名找它们，如 `reconciler.handler`；
+        # `exit_observer` 亦 `from reconciler import …` —— 二者在 zip 根是平级顶层模块，这是它们不做成
+        # 本包子包的原因：包内相对 import 到了 Lambda 里就不成立）。
+        handlers = Path(__file__).resolve().parent / "lambdas"
+        shutil.copytree(handlers, build, dirs_exist_ok=True,
                         ignore=shutil.ignore_patterns("__pycache__", ".gitignore", "tests"))
-        # core 库（core/gherkai_core → build/core）+ 产品本体（runtime/gherkai_runtime → build/gherkai）
-        shutil.copytree(os.path.join(repo, "core", "gherkai_core"), os.path.join(build, "gherkai_core"),
-                        ignore=shutil.ignore_patterns("__pycache__"))
-        shutil.copytree(os.path.join(repo, "runtime", "gherkai_runtime"), os.path.join(build, "gherkai_runtime"),
-                        ignore=shutil.ignore_patterns("__pycache__"))
-        # 依赖：gherkin-official（core 唯一非 boto3 依赖）。boto3 runtime 自带、不装（省包体）。
-        # uv venv 默认无 pip，优先 `uv pip install --target`（uv 自带）；回退 `python -m pip`（普通 venv）。
-        import sys
-        dep = "gherkin-official>=31.0.0"
-        if shutil.which("uv"):
-            subprocess.run(["uv", "pip", "install", "--quiet", "--target", build, dep], check=True)
-        else:
-            subprocess.run([sys.executable, "-m", "pip", "install", "--quiet", "--target", build, dep], check=True)
-        return build
+        for pkg in self.LAMBDA_ASSET_PACKAGES:
+            source = Path(self._installed_import_source(pkg))
+            if source.is_dir():
+                shutil.copytree(source, build / pkg, ignore=shutil.ignore_patterns("__pycache__", "tests"))
+            else:  # 单文件模块（如 typing_extensions.py）——按原名摊在 asset 根
+                shutil.copy2(source, build / source.name)
+        return str(build)
+
+    @staticmethod
+    def _installed_import_source(import_name: str) -> str:
+        """当前 venv 里某个 import 名的源路径（`find_spec`）——Lambda asset 的复制源，见 `_build_lambda_asset`。
+
+        **两种形态都要认**：包 → 目录（`submodule_search_locations`）；**单文件模块 → `.py` 文件**
+        （`typing_extensions` 就是这形态——按「包 = 目录」一刀切会把它判成「找不到」，实测踩过）。
+        """
+        import importlib.util
+
+        try:
+            spec = importlib.util.find_spec(import_name)
+        except (ImportError, ValueError):  # 坏 .pth / 半装：当作找不到，走下面的 fail-fast
+            spec = None
+        locations = list(spec.submodule_search_locations or ()) if spec else []
+        if locations:
+            return locations[0]
+        if spec and spec.origin and spec.origin != "built-in" and Path(spec.origin).is_file():
+            return spec.origin
+        raise RuntimeError(
+            f"Lambda asset 缺依赖 {import_name!r}：当前 venv 里定位不到它。"
+            f"部署须在装了 `gherkai[deploy-aws]` 的同一个环境里跑——asset 从已安装包复制"
+            f"（ADR 0037 决策 6），漏一项的后果是 Lambda 运行期 ImportError、要到真起 run 才暴露"
+        )
 
     @property
     def _worker_sg_id(self) -> str:

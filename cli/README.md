@@ -13,7 +13,8 @@ WebUI 将来是另一张皮，**直接调 core、复用产品本体 `gherkai_run
 
 ```
 cli/gherkai_cli/
-├── __main__.py   ← argparse 皮：run/submit/status/plan/list-engines/list-deterministic 解析 → 调 gherkai_runtime.compose/gherkai_core → 注入 RunPersistence 实时落库 → 调 render；定义退出码
+├── __main__.py   ← argparse 皮：run/submit/status/plan/list-engines/list-deterministic/deploy/destroy 解析 → 调 gherkai_runtime.compose/gherkai_core → 注入 RunPersistence 实时落库 → 调 render；定义退出码
+├── deploy.py     ← deploy/destroy 的命令面 + 部署 provider 发现（entry point group `gherkai.deploy`）；**零 IaC 知识**、不 import aws_cdk（ADR 0037 决策 6）
 └── render.py     ← 表层渲染：0024 事件 → 进度行；RunResult → 文本汇总 / JSON；RunState → status 视图
 ```
 
@@ -26,14 +27,14 @@ RUNNING、完成即落该 scope 判定真值，最后 `finalize` 写总状态（
 （裸跑、零落盘逃生舱）。
 
 落哪由 `--backend` 定：默认 `local`（文件落 `--report-dir`）；`--backend cloud` 让组合根改注入 DynamoDB/S3
-adapter、复用同一条 `RunPersistence`，把状态落 DynamoDB、判定真值与报告落 S3（表/桶需预先建好）。见下『选项』表与『跑』小节。未来 WebUI 复用同一套 `gherkai_runtime.compose` 装配，cli 这张皮的接线不变。
+adapter、复用同一条 `RunPersistence`，把状态落 DynamoDB、判定真值与报告落 S3（表/桶需预先建好——由 `gherkai deploy` 供给，见下『部署』节）。见下『选项』表与『跑』小节。未来 WebUI 复用同一套 `gherkai_runtime.compose` 装配，cli 这张皮的接线不变。
 
 ## 跑（会烧真 AWS 钱：模型调用 + AgentCore 会话）
 
 下面都从**仓库根**键入（feature 路径相对当前目录解析）：
 
 ```bash
-uv sync                                            # 一次装齐 core/runtime/cli 三个 workspace 成员（editable，单一根 uv.lock）
+uv sync                                            # 一次装齐五个 workspace 成员：core/runtime/cli/engines/novaact/deploy_aws（editable，单一根 uv.lock）
 
 # 跑一个 feature（默认引擎 novaact，默认 max-concurrency=1）
 uv run gherkai run features/wikipedia_generic.feature
@@ -56,7 +57,7 @@ uv run gherkai list-deterministic --engine midscene      # --json 可选；默�
 # 清单/标注都含**你自己的** step：自述入口同样加载 steps 目录（默认 ./steps，或 --steps-dir 指定）
 uv run gherkai list-deterministic --steps-dir ./my-steps
 
-# 云端落库：状态 → DynamoDB、判定结果与报告 → S3（表/桶需预先建好；boto3 随 CLI 一起装，无额外步骤）
+# 云端落库：状态 → DynamoDB、判定结果与报告 → S3（表/桶由 `gherkai deploy` 供给；boto3 随 CLI 一起装，无额外步骤）
 uv run gherkai run features/wikipedia_generic.feature \
   --backend cloud --ddb-table ui-test-runs --s3-bucket ui-test-artifacts-<你的后缀>
 # 兜底：也可用 AWS_DDB_TABLE / AWS_S3_BUCKET 环境变量代替这两个 flag
@@ -100,11 +101,89 @@ cloud 由云端 Lambda 事件驱动链推进（submit 机器无 ECS 写/执行�
 之一（人来查即接力），保证「推进即使中断、也能被查询者续到底」（ADR 0034）。`status` 须与 `submit` 用同一组定位参数——
 见下『选项（`status`）』表引言。
 
+## 部署（`gherkai deploy`）——只有部署方需要
+
+云端那套后端（DynamoDB 两表 / S3 桶 / ECS cluster + task-def / 无状态跑批的 Lambda 链 / VPC 与安全组）由
+`gherkai deploy` 供给。**IaC 装在一个独立的 provider 包里**，经 extra 隔离——只有**部署方**装它，
+团队里只提交 run 的人不必背 CDK 与 Node：
+
+```bash
+uv tool install 'gherkai[deploy-aws]'    # 部署方（或开发树里 uv sync 即已带）
+uv tool install gherkai                  # 只提交 run 的人：裸装即可 --backend cloud
+```
+
+**前置：Node ≥ 22 在 PATH**（与 worker 的 `engines.node` 同一下限）。Python 版 CDK 是 jsii 绑定、import 即起
+node 子进程，cdk CLI 本身也是 npm 物；PATH 上有 `cdk` 就用它，没有则 `npx -y aws-cdk@2` 兜底。
+
+```bash
+# 首次：账户+region 初始化一次（未初始化就 deploy，报错会指回这里）
+uv run gherkai deploy --bootstrap                                # 账户级、不合成 stack，不需要 --vpc
+
+# 看清这次会改什么（尤其网络/IAM）——不改账户
+uv run gherkai deploy --diff --vpc default --prefix gherkai-
+
+# 真部署（IAM 变更要人过目就加 --require-approval broadening）
+uv run gherkai deploy --vpc default --prefix gherkai-
+
+# 逃生舱：只导模板给自己的审批/发布流水线，不让本工具碰账户
+uv run gherkai deploy --synth-only ./out --vpc default
+
+# 拆掉（表/桶/ECR 是 RETAIN、不随之删，见 ADR 0033）
+uv run gherkai destroy --vpc default --prefix gherkai-
+```
+
+`--diff` / `--synth-only DIR` / `--bootstrap` 三者互斥，都不给 = 真部署。命令面还有 `--require-approval MODE`
+（透传 provider 的权限变更审批档）与下面的 `--allow-vpc-change`。装了多个 provider（当前只有 aws 一个）时
+`--provider <名>` 必给；装一个时不必给；一个都没装则报「装 `gherkai[deploy-aws]`」并退 `2`。
+
+### 三个旋钮
+
+| flag | 默认 | 说明 |
+|---|---|---|
+| `--prefix` | `gherkai-` | 全部云资源的命名空间。**须与 `run`/`submit` 的 `--prefix` 一致**；换 prefix 就是换一套独立环境（prod-/stage-），闲置成本近零 |
+| `--vpc` | **必给、无隐式默认**（`--bootstrap` 除外） | VPC 来源三档：`default`（账户默认 VPC）/ `new`（本 stack 新建，2-AZ 零 NAT）/ `vpc-<id>`（复用现有 VPC） |
+| `--stop-timeout` | provider 默认 | worker container 的 SIGTERM→SIGKILL 宽限秒（标定 `run --grace` 用） |
+
+`--vpc` **不给隐式默认是有意的**：漏了它会合成「新建整套 VPC + 替换 WorkerSg」这种危险变更集——真踩过的坑。
+
+### VPC 档比对（三态）
+
+只强制显式给值挡不住「第二次 deploy 敲错档」，所以生效的档会记在后端。deploy 前比对：
+
+| 情形 | 行为 |
+|---|---|
+| stack 不存在（真首次部署） | 放行 |
+| 后端没有记录、但 stack 已存在（本机制之前部署的环境） | 退 `2`——先 `--diff` 核对变更集，再带 `--allow-vpc-change` 放行一次 |
+| 有记录且与 `--vpc` 一致 | 放行 |
+| 有记录但与 `--vpc` 不一致 | 退 `2`（确认这确实是你要的网络变更后，用 `--allow-vpc-change` 放行） |
+
+### 版本 skew：CLI 与后端必须同版本
+
+deploy 会把自己的版本写成后端的版本戳，`run`/`submit`/`status --backend cloud` 在**任何资源预检之前**先比它
+（先比版本是有意的：skew 的修复动作正好也把资源补齐，先报「表不存在」只会让人白查一圈 `--prefix`）：
+
+| 比对结果 | 行为 |
+|---|---|
+| 同版本 | 放行、不打扰 |
+| **CLI 新于后端** | 退 `2`，**没有放行 flag**。两条出路：① 部署方 `gherkai deploy` 把后端升上来；② 临时用与后端同版本的 CLI、不动本机安装：`uvx --from 'gherkai==<后端版本>' gherkai …` |
+| CLI 旧于后端 | 警告不拦（`uv tool upgrade gherkai` 跟上） |
+| 后端没有版本戳（早于本机制的部署） | 警告不拦 + 提示部署方跑一次 `gherkai deploy` 写入 |
+| 任一侧是开发版（含 `.dev`/`.post`/`+`） | 跳过比对、警告一句（dev 版逐提交前进，逐字比会把每次都判成 skew） |
+
+**不设放行口是刻意的**：放行等于让新 CLI 写的任务定义进旧后端读，后果不可知且静默；用 `uvx` 按版本临时跑
+零成本。**升级即三步**（版本是一个旋钮，`gherkai` 与后端被 `==` 钉在同版本，没有「先升后端再升 CLI」这种次序）：
+① `uv tool upgrade 'gherkai[deploy-aws]'`；② 立刻 `gherkai deploy`（中间窗口里提交侧会退 `2`，这是预期）；
+③ 非部署者等这两步做完再升自己的 CLI。
+
+设计与取舍（为什么 IaC 进 wheel、为什么 provider 中立、为什么没有放行口）见
+[ADR 0037](../docs/adr/0037-distribution-and-packaging.md) 决策 6/7；资源清单与命名契约见
+[ADR 0033](../docs/adr/0033-iac-aws-backend-and-composition-wiring.md)。
+
 ## 退出码
 
 - `0` —— RunResult 总状态 passed
 - `1` —— 跑完了但有 failed/error（断言没过 / 引擎异常）；`--backend cloud` 下若 run 已开跑、中途 DynamoDB/S3 不可达（如桶被删）也退 `1`
-- `2` —— 没跑成：feature 读不到、plan 配置矛盾（PlanError）、参数非法（如 `--assertion-votes < 1`）、或无子命令；**本 run 用到的引擎的 worker 运行时定位不到**（四级定位链全 miss，报错自带该引擎的安装命令，ADR 0037 决策 3）、或 **`steps/` 目录里有文件加载失败**（worker 自述入口非零退出，CLI 转述其诊断；`plan`/`run`/`submit` 一律在起任何 job 前拒，ADR 0037 决策 4——`submit` 同样在提交前拒，不会让你「提交成功」后每个 job 都 error）；`--steps-dir` / env `GHERKAI_STEPS_DIR` 指的目录不存在；`--backend cloud` 还没开跑就被拒（缺 boto3、或 `--prefix` 拼出的表/桶/cluster/task-def 不存在·无权限·凭证/region 缺——运行前 preflight 点名 prefix fail-fast）
+- `2` —— 没跑成：feature 读不到、plan 配置矛盾（PlanError）、参数非法（如 `--assertion-votes < 1`）、或无子命令；**本 run 用到的引擎的 worker 运行时定位不到**（四级定位链全 miss，报错自带该引擎的安装命令，ADR 0037 决策 3）、或 **`steps/` 目录里有文件加载失败**（worker 自述入口非零退出，CLI 转述其诊断；`plan`/`run`/`submit` 一律在起任何 job 前拒，ADR 0037 决策 4——`submit` 同样在提交前拒，不会让你「提交成功」后每个 job 都 error）；`--steps-dir` / env `GHERKAI_STEPS_DIR` 指的目录不存在；`--backend cloud` 还没开跑就被拒（缺 boto3、**版本 skew 判 block**（CLI 新于后端，无放行口，见上『部署』节）、或 `--prefix` 拼出的表/桶/cluster/task-def 不存在·无权限·凭证/region 缺——运行前 preflight 点名 prefix fail-fast）；`deploy`/`destroy` 的没有可用部署 provider（没装 `gherkai[deploy-aws]` / 装了但加载失败）、或 **VPC 档与后端记录不符**（见上『部署』节）
 
 > cloud 失败分层的切分线 = run 是否已真正开跑：起 worker 前的配置/可达问题退 `2`，跑到一半的云端故障退 `1`。
 
@@ -119,7 +198,7 @@ cloud 由云端 Lambda 事件驱动链推进（submit 机器无 ECS 写/执行�
 - **`status`：查询本身成功即 `0`；判定退出码只在读到终态时给出。**
   - `0` —— run 达终态 `PASSED`；**或**未达终态（`pending`/`running`）时的一次查询（查到了就算成功，非 `--wait` 不评判）。
   - `1` —— run 达终态但非 `PASSED`（`failed`/`error`/`skipped`/`aborted`）。配 `--wait` 时即「轮询到终态后按判定给退出码」——CI 想拿 `run` 那样的 0/1 判定码，用 `status --wait`。
-  - `2` —— 查不到该 run（`--report-dir`/`--prefix`/`--ddb-table` 与 `submit` 不一致？）；cloud 读 DDB 时云端不可达；`--wait` 接力要 invoke 的 kicker Lambda 不存在（prefix 配错/CDK 未部署——接力对象缺失，死等无意义、点名 prefix 退出）。
+  - `2` —— 查不到该 run（`--report-dir`/`--prefix`/`--ddb-table` 与 `submit` 不一致？）；cloud 读 DDB 时云端不可达；`--wait` 接力要 invoke 的 kicker Lambda 不存在（prefix 配错/后端未部署——接力对象缺失，死等无意义、点名 prefix 退出）。
 
 > 一句话：`submit` 退出码答「提交成功了吗」，`status --wait` 退出码答「这个 run 判定过没过」（PASSED→`0` / 其余终态→`1`）——`run` 的 0/1 判定语义在拆分后落到了 `status --wait` 上。
 
@@ -149,12 +228,12 @@ cloud 由云端 Lambda 事件驱动链推进（submit 机器无 ECS 写/执行�
 | `--no-report` | off | 跳过 RunReport 归集，且**不生成引擎原生产物**（Midscene 不出 report；Nova SDK 的 trajectory 关不掉、由 SDK 写进其自身临时目录、不上报），RunResult 里也不会出现任何产物路径——真「不生成 report」（ADR 0037 决策 3）。逃生舱：CI 只看退出码/JSON、或调试不想落盘。 |
 | `--steps-dir` | `./steps`（存在才用） | 你自己的确定性 step 目录（ADR 0037 决策 4）：worker 启动时排序递归加载其中的 step 定义文件、注册进确定性注册表（两引擎扫同一目录，各取自己的扩展名：`.py` / `.mts`·`.mjs`）。解析顺序 `--steps-dir` > env `GHERKAI_STEPS_DIR` > `./steps`；**显式给的目录不存在直接退 2**（静默跳过等于把这些 step 悄悄换成 AI 判定）。值绝对化后写进 run 的 definition，本机后台推进/接力的进程读回同一份。[cloud] 不生效——云端 worker 的 steps 烙在定制镜像里（给了只警告、不拦） |
 | `--backend {local,cloud}` | `local` | 落库后端：local=文件落 `--report-dir`；cloud=状态落 DynamoDB、判定结果与报告落 S3（表/桶需预先建好） |
-| `--prefix` | `gherkai-` | [cloud] 资源名前缀：批量决定表/桶/cluster/task-def 默认名，**须与 CDK（`iac_aws_backend`）部署用的 prefix 一致**；多环境（prod-/stage-）切换用它。兜底 `AWS_RESOURCE_PREFIX` |
+| `--prefix` | `gherkai-` | [cloud] 资源名前缀：批量决定表/桶/cluster/task-def 默认名，**须与 `gherkai deploy --prefix` 一致**；多环境（prod-/stage-）切换用它。兜底 `AWS_RESOURCE_PREFIX` |
 | `--ddb-table` | `{prefix}runs` | [cloud] RunStore DynamoDB 表名（分区键 run_id + 排序键 item_type）；覆盖 prefix 默认；兜底 `AWS_DDB_TABLE` |
 | `--s3-bucket` | `{prefix}artifacts` | [cloud] S3 桶名（存判定结果与报告）；覆盖 prefix 默认；兜底 `AWS_S3_BUCKET` |
 | `--events-table` | `{prefix}events` | [cloud] events DynamoDB 表名（worker PutItem 目标，events-out）；覆盖 prefix 默认 |
 | `--cluster` | `{prefix}cluster` | [cloud] ECS cluster 名（Fargate 执行）；覆盖 prefix 默认 |
-| `--subnet` | SSM | [cloud] Fargate 子网 ID（可多次给）；不给则读 SSM `/{prefix}backend/subnets`（CDK 写的生成 ID） |
+| `--subnet` | SSM | [cloud] Fargate 子网 ID（可多次给）；不给则读 SSM `/{prefix}backend/subnets`（`gherkai deploy` 写的生成 ID） |
 | `--security-group` | SSM | [cloud] Fargate 安全组 ID（可多次给）；不给则读 SSM `/{prefix}backend/security-groups` |
 | `--region` | — | AWS region（local+cloud 均用；解析链 `--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > profile 配置；喂 store + worker） |
 | `--profile` | — | AWS profile（local+cloud 均用；`--profile` > `AWS_PROFILE`；喂 store + subprocess worker） |
@@ -181,7 +260,7 @@ cloud 由云端 Lambda 事件驱动链推进（submit 机器无 ECS 写/执行�
 | `--steps-dir` | `./steps`（存在才用） | 语义同 `run` 表。**值随 definition 走**：后台 per-run 进程与 `status --wait` 接力者从 definition 读回（它们的当前目录与你提交时不同，不会重新去猜 `./steps`），故同一个 run 三个推进者用的是同一套确定性 step |
 | `--report-dir` | `reports` | 归集报告落点；`status` 查时须给同一路径。[cloud] 产物前缀由 kicker/reconciler Lambda 的 `REPORT_DIR` 决定（IaC 侧配，缺省 `reports`）——给了不一致的值，preflight 直接退 `2` 并点名两侧值（否则跑完了却在你给的前缀下找不到结果） |
 | `--backend {local,cloud}` | `local` | local=本机 per-run 进程推进；cloud=Fargate + 云端 Lambda 事件驱动链推进（提交完真关机也跑完） |
-| `--prefix` | `gherkai-` | [cloud] 资源名前缀（须与 CDK 部署一致）；`status` 查时须给同一 prefix。兜底 `AWS_RESOURCE_PREFIX` |
+| `--prefix` | `gherkai-` | [cloud] 资源名前缀（须与 `gherkai deploy --prefix` 一致）；`status` 查时须给同一 prefix。兜底 `AWS_RESOURCE_PREFIX` |
 | `--ddb-table` / `--s3-bucket` / `--events-table` / `--cluster` | `{prefix}…` | [cloud] 覆盖各 prefix 默认名（语义同 `run` 表） |
 | `--region` / `--profile` | — | AWS region/profile（喂 store + worker，同 `run`） |
 

@@ -53,7 +53,7 @@ def finalize_artifacts(run_id, meta, event_log, result_store, report_store, now_
     从 events 全量重放 project_full → RunResult，逐 job save_job_result + report_store.write。幂等（重放 +
     覆盖写同 key）——多个推进者都 done 都聚合无害。store 注入 None（测试）则跳过对应半边；ReportStore 写失败
     隔离（判定真值已在 ResultStore、report 可从 RunResult 重建，ADR 0030 决定三）。
-    **唯一一份**（cloud Lambda / local per-run 两宿主同调此处）——曾双写于 detached.py 与 lambdas/reconciler.py，
+    **唯一一份**（cloud Lambda / local per-run 两宿主同调此处）——曾双写于 detached.py 与 deploy_aws/gherkai_deploy_aws/lambdas/reconciler.py，
     按「不复制归约/收尾逻辑」合并（ADR 0034 core 拆分）。纯编排：只调 project_full 与注入的 store，不 import boto3。
     """
     if result_store is None and report_store is None:

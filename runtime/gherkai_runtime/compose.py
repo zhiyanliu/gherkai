@@ -676,7 +676,7 @@ def _read_ssm_list(ssm, path: str) -> list[str]:
     if not values:
         raise ValueError(
             f"SSM 参数 {path!r} 为空（split 逗号过滤后无值）——预期 CDK 写入非空的 subnet/sg ID 列表。"
-            f"检查 iac_aws_backend 是否已 deploy 且该参数未被改空。"
+            f"检查后端是否已部署（`gherkai deploy`）且该参数未被改空。"
         )
     return values
 
@@ -769,6 +769,112 @@ def build_fargate_engines(
     return {engine: _engine(engine) for engine in _names.ENGINES}
 
 
+# ============================================================================
+# 版本 skew（ADR 0037 决策 7）：CLI 版本 vs 后端 SSM 版本戳，三态齐全 + 非纯净版本跳过。
+# **住产品本体、不住入口皮**：Lambda 推进器 / WebUI 将来同样要比「自己 vs 后端」，判据与措辞单点维护、
+# 不在第二处复刻（同 names 抽包的理由）。比对是纯函数（不连 AWS）；读戳是下面 read_backend_version 的事。
+# ============================================================================
+
+SKEW_OK = "ok"        # release 段相同
+SKEW_WARN = "warn"    # CLI 旧于后端 / 后端无戳——警告不拦
+SKEW_BLOCK = "block"  # CLI 新于后端——调用点退 2，无放行口
+SKEW_SKIP = "skip"    # 任一侧非纯发行版（或自身版本取不到）——无从比较
+
+
+def read_backend_version(*, prefix: str, region=None, profile=None, ssm=None) -> str | None:
+    """读后端版本戳 SSM 参数（`ssm_path(prefix, "version")`，由 stack 资源随部署事务写入，ADR 0037 决策 6）。
+
+    **`ParameterNotFound` → 返回 None、不抛**：戳缺失是本机制之前部署环境的正常态，决策 7 判它「警告不拦」；
+    若在此翻成异常一路退 2，所有现存部署会被 preflight 锁死（决策 7 明写要避免的那个后果）。其余 botocore
+    异常（凭证/region/权限/网络）照抛——由入口皮归到自己的退出码层（对齐 `resolve_network` 的处理）。
+    ssm client 可注入（测试）；未注入则惰性建，与 subnet/sg 同一条 session/region 解析（`_make_ssm_client`）。
+    """
+    if ssm is None:
+        ssm = _make_ssm_client(region=region, profile=profile)
+    try:
+        resp = ssm.get_parameter(Name=ssm_path(prefix, "version"))
+    except Exception as e:
+        err = getattr(e, "response", None)
+        code = (err or {}).get("Error", {}).get("Code") if isinstance(err, dict) else None
+        if code == "ParameterNotFound":
+            return None
+        raise
+    return (resp["Parameter"]["Value"] or "").strip() or None
+
+
+def _release_key(v: str) -> tuple[int, ...]:
+    """PEP 440 版本的 release 段（`1.4.0.post3+sha` → `(1, 4, 0)`）。
+
+    只在 `_is_pure_release` 已放行后调用——它对解析不了的版本返回 False，故此处不会撞 `InvalidVersion`。
+    """
+    from packaging.version import Version
+
+    return Version(v).release
+
+
+def check_version_skew(ssm_version: str | None, cli_version: str | None) -> tuple[str, str]:
+    """比 CLI 版本与后端版本戳 → `(verdict, message)`，verdict ∈ ok/warn/block/skip（ADR 0037 决策 7）。
+
+    message 是给人看的整句（ok 档为空串，调用点 `if message:` 即可）；**退码留给调用点**——`block` 一律退 2
+    且**无放行口**（决策 7 明拒 `--allow-version-skew`：放行 = 让新 CLI 写的 definition 进旧 Lambda runtime 读，
+    后果不可知且静默；uvx 按版本临时跑同版本 CLI 零成本，放行口没有真实需求）。其余三档只打一行、不拦。
+
+    判序——「无从比较」一律先于「比较结果」：
+    1. **戳缺失**（`ssm_version` 为 None/空）→ warn + 提示部署方跑一次 `gherkai deploy` 写入。**不可退 2**：
+       否则本机制之前部署的所有环境被 preflight 锁死（决策 7 明写要避免的后果）。
+    2. **自身版本取不到**（`cli_version` 为 None：未装成包、源码直跑）→ skip。**`cli_version` 必给、不缺省成本包
+       版本**：比的对象是「写任务定义那一方」（CLI）的版本，由调用点提供；editable 开发树里各包版本各自漂
+       （按各自 git 状态算），缺省读 `gherkai-runtime` 版本会埋一个只在 lockstep 发行态下才等价的第二真源。
+    3. **任一侧非纯发行版**（含 `.dev`/`.post`/本地段，或压根解析不了）→ skip：dev 版逐提交前进，逐字比较
+       会把每次都判成 skew（判据 `_is_pure_release` 与定位链第四级共用——它靠 2b 的 `dirty=true`/`metadata=true`
+       保证「非纯净构建一定带 `+`」才可靠）。
+    4. **只比 release 段**（决策 7）：pre/post/dev/本地段不参与，故同 release 段的 rc 与正式版视作同版本。
+       两侧位数不同（`1.4` vs `1.4.0`）时补零再比，避免元组字典序把 `1.4` 判成小于 `1.4.0`。
+    """
+    mine = cli_version
+    if not ssm_version:
+        return SKEW_WARN, (
+            "提示：后端没有版本戳（SSM /<prefix>backend/version）——这个部署早于版本戳机制，本次不比对版本、不拦。"
+            "请部署方跑一次 `gherkai deploy` 把戳写上（ADR 0037 决策 7）。"
+        )
+    if not mine:
+        return SKEW_SKIP, "提示：跳过版本比对——本机未以包形式安装（源码直跑），取不到自身版本。"
+    if not (_is_pure_release(mine) and _is_pure_release(ssm_version)):
+        return SKEW_SKIP, (
+            f"提示：跳过版本比对——CLI {mine} / 后端 {ssm_version} 中有非纯发行版本"
+            f"（.dev/.post/本地段，逐提交前进，逐字比会把每次都判成 skew）。"
+        )
+    r_mine, r_backend = _release_key(mine), _release_key(ssm_version)
+    n = max(len(r_mine), len(r_backend))  # 两侧位数不同则补零后比（见 docstring 判序 4）
+    r_mine += (0,) * (n - len(r_mine))
+    r_backend += (0,) * (n - len(r_backend))
+    if r_mine == r_backend:
+        return SKEW_OK, ""
+    if r_mine > r_backend:
+        return SKEW_BLOCK, (
+            f"版本 skew：本机 CLI {mine} 新于后端 {ssm_version}——拒绝执行（ADR 0037 决策 7，无放行口：新 CLI "
+            f"写的任务定义由旧后端读是真风险）。两条出路：\n"
+            f"  ① 部署方把后端升上来：gherkai deploy（升到 {mine}）\n"
+            f"  ② 临时用与后端同版本的 CLI、不动本机安装：uvx --from 'gherkai=={ssm_version}' gherkai …"
+        )
+    return SKEW_WARN, (
+        f"提示：本机 CLI {mine} 旧于后端 {ssm_version}（不拦——旧 CLI 写的任务定义新后端读得懂）。"
+        f"要跟上：uv tool upgrade gherkai。"
+    )
+
+
+def check_backend_skew(*, prefix: str, cli_version: str | None, region=None, profile=None,
+                       ssm=None) -> tuple[str, str]:
+    """读后端版本戳 + 判 skew 一步到位（ADR 0037 决策 7）——**编排住产品本体、不住入口皮**：CLI / WebUI /
+    推进器任何组合根要做「自己 vs 后端」比对都调这一处，判据、措辞与「戳缺失→警告不拦」的分叉单点维护。
+    **调用次序约定：先于 `preflight_cloud_resources`**——skew 的修复动作是部署方跑一次 `gherkai deploy`，那一步
+    同时把资源建齐/补齐；先报「表不存在」只会把人引去查 `--prefix`、绕一圈回到同一个动作。
+    读戳的异常（凭证/region/权限）原样抛，由调用方归到自己的退出码层（与 `read_backend_version` 一致）。
+    """
+    stamp = read_backend_version(prefix=prefix, region=region, profile=profile, ssm=ssm)
+    return check_version_skew(stamp, cli_version)
+
+
 def preflight_cloud_resources(
     *, prefix: str, events_table: str, bucket: str, cluster: str, runs_table: str | None = None,
     task_defs: list[str] | None = None, lambda_fns: list[str] | None = None,
@@ -785,7 +891,7 @@ def preflight_cloud_resources(
     驱动链三 Lambda（kicker/reconciler/exit-observer），任一缺则提交成功但 run 永不推进/收敛，挡在提交前
     （同步 run 进程内推进、不依赖链、不传）。句柄可注入（测试）；未注入惰性建。探法全只读：DDB DescribeTable、
     S3 HeadBucket、ECS DescribeClusters/DescribeTaskDefinition、Lambda GetFunction。
-    任一 botocore 异常都翻成「资源 X 不存在——是 --prefix 配错、还是 iac_aws_backend（CDK）未部署？」。
+    任一 botocore 异常都翻成「资源 X 不存在——是 --prefix 配错、还是后端未部署（`gherkai deploy`）？」。
 
     **`report_dir` 非 None 时另比对「推进器的产物前缀」一致性**（存在性之外的唯一语义探针，ADR 0033 preflight 条）：
     detached cloud 档的产物前缀有**两个独立来源**——提交侧 `--report-dir`（offload 的 args/ 落它）与推进侧
@@ -811,7 +917,7 @@ def preflight_cloud_resources(
 
     def _hint(resource_desc: str) -> str:
         return (f"--backend cloud 资源缺失：{resource_desc}（用 --prefix={prefix!r} 拼出）不存在——"
-                f"是 --prefix 配错、还是 iac_aws_backend（CDK）未部署到本 region/账户？")
+                f"是 --prefix 配错、还是后端未部署（gherkai deploy）到本 region/账户？")
 
     if runs_table is not None:  # 仅落库需要；--no-report 下 None、不探
         try:
@@ -863,7 +969,7 @@ def preflight_cloud_resources(
                 if cap is not None and declared_max_concurrency > cap:
                     on_warn(f"提示：--max-concurrency={declared_max_concurrency} 超过部署侧 per-run 上限 "
                             f"cap={cap}（推进器 Lambda env MAX_CONCURRENCY），本 run 将按 {cap} 并行"
-                            f"——要更高并发改 iac_aws_backend 的 MAX_CONCURRENCY（两 Lambda 须同值）。")
+                            f"——要更高并发改后端 stack（gherkai-deploy-aws）里推进器的 MAX_CONCURRENCY（两 Lambda 须同值）。")
                     warned_cap = True
             if report_dir is None:
                 continue
@@ -872,7 +978,7 @@ def preflight_cloud_resources(
                 return (f"--backend cloud 产物前缀不一致：submit 侧 --report-dir={report_dir!r}，"
                         f"推进器 {fn} 的 REPORT_DIR={remote!r}。detached 档的判定真值/报告由推进器按它自己的 "
                         f"REPORT_DIR 落，跑完你会在 --report-dir 下找不到结果。改用 --report-dir={remote!r}，"
-                        f"或在 iac_aws_backend（CDK）给推进器注入 REPORT_DIR={report_dir!r}。")
+                        f"或在后端 stack（gherkai-deploy-aws）给推进器注入 REPORT_DIR={report_dir!r}。")
     return None
 
 

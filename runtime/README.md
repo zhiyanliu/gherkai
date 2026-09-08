@@ -11,13 +11,13 @@
   region/profile 一处解析）/ 确定性能力自述（`query_deterministic` / `match_deterministic`，ADR 0036）/
   grace 推导 / run_id·时钟
 - `detached.py` —— local 无状态跑批宿主（ADR 0034）：SubprocessLauncher + per-run reconcile loop
-- `names.py` —— 资源命名真源（零依赖；`iac_aws_backend/names.py` 直接 re-export，消复刻）
+- `names.py` —— 资源命名真源（零依赖；`deploy_aws/gherkai_deploy_aws/names.py` 直接 re-export，消复刻）
 - `tunnel.py` —— 隧道 provider（ADR 0035）：`--expose-local` 起/拆 ngrok（basic-auth 凭据每 run 一换、按
   pid 跨进程收尾）+ job 文本里的 origin 替换（`map_origin_in_jobs`，worker/core 对隧道无知）
 - `tunnel_host.py` —— 隧道**宿主**编排（ADR 0035 决策 3）：起隧道 + 映射 definition + 恒注入的额外请求头；
   cloud submit 守护进程的轮询循环与其 TTL 算法（按 definition 算，不是拍常数）
 
 ```bash
-uv sync                        # 仓库根：一次装齐 core/runtime/cli 三个 workspace 成员（editable）
+uv sync                        # 仓库根：一次装齐五个 workspace 成员 core/runtime/cli/engines/novaact/deploy_aws（editable）
 cd runtime && uv run pytest -q # 只跑本包单测（根目录 `uv run pytest` 跑三成员全部）
 ```

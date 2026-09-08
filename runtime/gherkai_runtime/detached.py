@@ -143,7 +143,7 @@ def run_reconcile_loop(
         done = tick(run_id, meta, event_log, run_store, launcher, max_concurrency,
                     now_iso=now_iso_fn())
         if done:
-            # 收尾聚合走 core 唯一一份（曾在此双写一份、与 lambdas/reconciler.py 漂移风险，已合并）
+            # 收尾聚合走 core 唯一一份（曾在此双写一份、与 deploy_aws/gherkai_deploy_aws/lambdas/reconciler.py 漂移风险，已合并）
             finalize_artifacts(run_id, meta, event_log, result_store, report_store, now_iso_fn())
             return
         _recover_timed_out_claims(run_id, meta, event_log, run_store, launcher, now_iso_fn())

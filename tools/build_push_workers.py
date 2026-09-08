@@ -19,7 +19,7 @@ runtime；不加则 arm Mac build 出 arm64、容器启动期挂死（错误在�
 **build context** = 各引擎目录（`engines/{engine}/`，Dockerfile 在其下）。
 
 前置：Docker daemon 运行中；AWS 凭证（region 默认 us-east-1）；ECR repo 已由 CDK 建
-（`cdk deploy`，见 iac README）——本脚本不建 repo、只 push。
+（`gherkai deploy`，见 deploy_aws/README.md）——本脚本不建 repo、只 push。
 
 用法（从仓库根）：
     python tools/build_push_workers.py                       # 两个引擎都 build&push，tag=latest，prefix=gherkai-
@@ -98,7 +98,7 @@ def build_push(engine: str, *, prefix: str, tag: str, registry: str, dry_run: bo
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="两个引擎 worker 镜像 build & push 到 ECR（ADR 0033）")
     p.add_argument("--engine", choices=ENGINES, help="只构建一个引擎（默认两个都构建）")
-    p.add_argument("--prefix", default=DEFAULT_PREFIX, help=f"ECR repo 名前缀（默认 {DEFAULT_PREFIX}；须与 cdk deploy 用的 prefix 一致）")
+    p.add_argument("--prefix", default=DEFAULT_PREFIX, help=f"ECR repo 名前缀（默认 {DEFAULT_PREFIX}；须与 `gherkai deploy --prefix` 一致）")
     p.add_argument("--tag", default="latest", help="镜像 tag（默认 latest）")
     p.add_argument("--region", default=DEFAULT_REGION, help=f"AWS region（默认 {DEFAULT_REGION}）")
     p.add_argument("--dry-run", action="store_true", help="只打印将执行的命令，不真 build/push/调 AWS")

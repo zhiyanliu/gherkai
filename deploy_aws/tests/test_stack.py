@@ -1,8 +1,9 @@
-"""BackendStack 合成断言测试（ADR 0033）：纯本地 synth、不碰 AWS。
+"""BackendStack 合成断言测试（ADR 0033/0037 决策 6）：纯本地 synth、不碰 AWS。
 
 用 CDK assertions.Template 断言关键契约——尤其**与 cli 侧命名/schema 的单一事实源对齐点**（ADR 0033 护栏）：
-表/桶/task-def 名、events TTL 属性、container 名不带 prefix、SSM 路径。防未来改 stack 时漂移。
-跑：uv run pytest。
+表/桶/task-def 名、events TTL 属性、container 名不带 prefix、SSM 路径（含 version / vpc 档 / worker-template
+三族部署戳）。防未来改 stack 时漂移。
+跑：uv run pytest（根或 deploy_aws/ 下皆可）。
 """
 from __future__ import annotations
 
@@ -12,14 +13,13 @@ import aws_cdk as cdk
 from aws_cdk.assertions import Template, Match
 import pytest
 
-from stack import BackendStack
+from gherkai_deploy_aws.stack import BackendStack
+from synth_fixture import ACCOUNT, REGION, STAMP_VERSION, make_template as _template
 
 
-def _template(prefix: str = "gherkai-", context: dict | None = None) -> Template:
-    app = cdk.App(context=context)
-    stack = BackendStack(app, "T", prefix=prefix,
-                         env=cdk.Environment(account="000000000000", region="us-east-1"))
-    return Template.from_stack(stack)
+def _ssm_params(t: Template) -> dict[str, dict]:
+    """模板里全部 SSM 参数：Name → Properties。Name 恒是字面量（路径由 prefix 纯推导、无 token）。"""
+    return {p["Properties"]["Name"]: p["Properties"] for p in t.find_resources("AWS::SSM::Parameter").values()}
 
 
 def test_two_dynamodb_tables_with_correct_schema():
@@ -117,6 +117,120 @@ def test_ssm_params_with_prefix_path():
     t.has_resource_properties("AWS::SSM::Parameter", {
         "Name": "/gherkai-backend/security-groups", "Type": "StringList",
     })
+
+
+def test_ssm_parameter_set_is_exactly_six():
+    """SSM 参数**全集**钉死（枚举型护栏）：网络 2（subnets/security-groups，cli resolve_network 读）
+    + 部署戳 2（version/vpc，ADR 0037 决策 6）+ 模板 revision ARN 2（每引擎一个，ADR 0038 四步第 1 步）。
+
+    逐条比全集、不只验「存在」——「存在」式断言照不出**漏写**（少一个参数时子集匹配仍绿），而这些参数每一个
+    都有一个读侧消费者：漏了只在真跑时才炸（cli 连不上网络 / preflight 无戳 / push-worker 找不到模板）。
+    """
+    t = _template()
+    assert set(_ssm_params(t)) == {
+        "/gherkai-backend/subnets",
+        "/gherkai-backend/security-groups",
+        "/gherkai-backend/version",
+        "/gherkai-backend/vpc",
+        "/gherkai-backend/worker-template/novaact",
+        "/gherkai-backend/worker-template/midscene",
+    }
+
+
+# ---- 部署戳：版本（ADR 0037 决策 6「版本戳」/ 决策 7 skew 写侧）----
+def test_ssm_version_parameter_from_context():
+    # 值来自 -c version=（命令传入的、运行中 CLI 的版本）；String 类型、路径含 prefix。
+    t = _template()
+    assert _ssm_params(t)["/gherkai-backend/version"] == {
+        "Name": "/gherkai-backend/version", "Type": "String", "Value": STAMP_VERSION,
+    }
+
+
+def test_version_context_is_required():
+    # **无隐式默认**：缺 -c version= 即 synth 期 fail-fast（写错戳比缺戳更坏——戳是 preflight 唯一判据）。
+    with pytest.raises(ValueError, match="version context"):
+        BackendStack(cdk.App(), "T", prefix="gherkai-",
+                     env=cdk.Environment(account=ACCOUNT, region=REGION))
+
+
+def test_version_context_must_be_pep440():
+    # 非法版本串 synth 期就拒——否则每个提交者的 preflight（packaging.version 解析）都会炸。
+    with pytest.raises(ValueError, match="PEP 440"):
+        _template(context={"version": "not a version"})
+
+
+# ---- 部署戳：生效 VPC 档三档（ADR 0037 决策 6「VPC 档持久化比对」写侧）----
+def test_ssm_vpc_spec_default_dossier():
+    # -c use_default_vpc=true → 档记 "default"
+    t = _template(context={"use_default_vpc": "true"})
+    assert _ssm_params(t)["/gherkai-backend/vpc"]["Value"] == "default"
+
+
+def test_ssm_vpc_spec_reuse_existing_records_the_id():
+    # -c vpc_id=vpc-abc → 档记那个 id 原样（下次 deploy 逐字比对）
+    t = _template(context={"vpc_id": "vpc-0abc123"})
+    assert _ssm_params(t)["/gherkai-backend/vpc"]["Value"] == "vpc-0abc123"
+
+
+def test_ssm_vpc_spec_new_carries_created_vpc_id():
+    """建新档记 `new:<所建 vpc-id>`——**带出 id 才可回溯核对**（ADR 0037 决策 6）。
+
+    id 是部署期才有值的 CDK token，故模板里是 Fn::Join（"new:" + Ref(VPC)）；断言其形态而非字面值。
+    """
+    value = _ssm_params(_template())["/gherkai-backend/vpc"]["Value"]
+    parts = value["Fn::Join"][1]
+    assert parts[0] == "new:", f"档值应以 new: 起头：{value}"
+    assert any(isinstance(p, dict) and "Ref" in p for p in parts), f"档值应含所建 VPC 的 Ref：{value}"
+
+
+# ---- worker task-def 模板 revision ARN（ADR 0038 四步第 1 步）----
+def test_ssm_worker_template_arn_per_engine_refs_task_def():
+    """每引擎一个 `worker-template/<engine>` 参数，值 = task-def 的 `Ref`（**带 revision** 的 ARN）。
+
+    `Ref` 而非拼 family 名是要点：push-worker 从它复制模板，family 名取到的是「最新 ACTIVE」——可能是别人某个
+    variant 的 revision（ADR 0038 不变量）。
+    """
+    t = _template()
+    task_defs = set(t.find_resources("AWS::ECS::TaskDefinition"))
+    for engine in ("novaact", "midscene"):
+        props = _ssm_params(t)[f"/gherkai-backend/worker-template/{engine}"]
+        assert props["Type"] == "String"
+        assert isinstance(props["Value"], dict) and "Ref" in props["Value"], f"模板参数值应是 Ref：{props}"
+        assert props["Value"]["Ref"] in task_defs, f"{engine} 模板参数未指向本 stack 的 task-def：{props}"
+
+
+def test_worker_template_arns_env_on_both_advancers_only():
+    """模板 ARN 注给**两个推进器**（reconciler/kicker）的 env，且两侧同值——它们都起 task，形态分叉会让
+    「首批用一套模板、续起用另一套」（同 MAX_CONCURRENCY 两侧须同值的道理）。
+
+    退出观察者**不该有**：它只写 task_exited、从不起 task（薄，ADR 0034 机制二）——多注一份 env 是把
+    「谁起 task」这条职责边界糊掉。
+    """
+    t = _template()
+    env_of = {name: fn["Properties"].get("Environment", {}).get("Variables", {})
+              for name, fn in t.find_resources("AWS::Lambda::Function").items()}
+    with_arns = {name: v[BackendStack.WORKER_TEMPLATE_ARNS_ENV] for name, v in env_of.items()
+                 if BackendStack.WORKER_TEMPLATE_ARNS_ENV in v}
+    assert len(with_arns) == 2, f"应恰有 reconciler/kicker 两个 Lambda 拿模板 ARN，实际 {sorted(with_arns)}"
+    values = list(with_arns.values())
+    assert values[0] == values[1], f"两个推进器的模板 ARN env 应同值：{with_arns}"
+    # 形态：`engine=arn` 逗号串，两个引擎都在，ARN 是 task-def 的 Ref（部署期落值）
+    joined = json.dumps(values[0], ensure_ascii=False)
+    for engine in ("novaact", "midscene"):
+        assert f"{engine}=" in joined, f"缺 {engine} 的模板 ARN：{values[0]}"
+    assert _joined_refs(values[0]), f"模板 ARN env 应由 task-def Ref 拼出：{values[0]}"
+
+
+def test_worker_template_arns_env_matches_ssm_values():
+    """env 与 SSM `worker-template/<engine>` **同一份值**（env 只是省掉推进器冷启动的一次 SSM 读、不是第二个
+    真源）。比 Ref 序列：两处 Join 形态不同（一处纯 token、一处夹在 `engine=` 之间），比 JSON 会假红。"""
+    t = _template()
+    params = _ssm_params(t)
+    ssm_refs = [params[f"/gherkai-backend/worker-template/{e}"]["Value"]["Ref"] for e in ("novaact", "midscene")]
+    env_value = next(v["Properties"]["Environment"]["Variables"][BackendStack.WORKER_TEMPLATE_ARNS_ENV]
+                     for v in t.find_resources("AWS::Lambda::Function").values()
+                     if BackendStack.WORKER_TEMPLATE_ARNS_ENV in v["Properties"].get("Environment", {}).get("Variables", {}))
+    assert _joined_refs(env_value) == ssm_refs, f"env 与 SSM 的模板 ARN 不同源：{env_value} vs {ssm_refs}"
 
 
 def _joined_refs(value) -> list[str]:
@@ -236,6 +350,12 @@ def test_prefix_switches_whole_set():
         "ContainerDefinitions": Match.array_with([Match.object_like({"Name": "novaact-worker"})]),  # 仍不带 prefix
     })
     t.has_resource_properties("AWS::SSM::Parameter", {"Name": "/prod-backend/subnets"})
+    # 部署戳与模板参数同样随 prefix 走（路径全走 names.ssm_path，无遗漏的硬编码 gherkai-）
+    assert set(_ssm_params(t)) == {
+        "/prod-backend/subnets", "/prod-backend/security-groups",
+        "/prod-backend/version", "/prod-backend/vpc",
+        "/prod-backend/worker-template/novaact", "/prod-backend/worker-template/midscene",
+    }
 
 
 def test_timeout_scheduler_role_and_lambda_perms():

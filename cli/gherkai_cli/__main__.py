@@ -24,6 +24,7 @@ from gherkai_core.schedule import ScheduleOpts, schedule
 from gherkai_runtime import compose
 from gherkai_runtime import names as _names
 
+from gherkai_cli import deploy as _deploy
 from gherkai_cli import render
 
 
@@ -45,7 +46,38 @@ _STEPS_DIR_HELP = (
 )
 
 
-def _build_parser() -> argparse.ArgumentParser:
+# deploy/destroy 两个子命令要先解析 provider 才能贴它的 flag（见 _peek_deploy_provider / _build_parser）。
+_DEPLOY_COMMANDS = ("deploy", "destroy")
+
+
+def _peek_deploy_provider(argv: list[str] | None) -> "tuple[object | None, str | None]":
+    """从 argv 窥出「是不是 deploy/destroy、有没有 --provider」，据此解析部署 provider（ADR 0037 决策 6）。
+
+    用一个极小的预解析器（不带 help、不认缩写、`parse_known_args`）——它只认「子命令 + --provider」两件事，
+    其余全落 unknown 交给真 parser。**故意不在此报任何错**：argv 不成形（子命令拼错、`--provider` 缺值等）
+    一律返回 `(None, None)`，让真 parser 出它自己那套完整帮助/诊断，不在预解析层复刻一遍 argparse 的报错。
+    """
+    if not argv:
+        return None, None
+    pre = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
+    pre.add_argument("command", nargs="?")
+    pre.add_argument("--provider", default=None)
+    try:
+        ns, _rest = pre.parse_known_args(argv)
+    except SystemExit:  # 预解析器自己的 error（如 --provider 缺值）：留给真 parser 报
+        return None, None
+    if ns.command not in _DEPLOY_COMMANDS:
+        return None, None
+    return _deploy.resolve_provider(ns.provider)
+
+
+def _build_parser(*, provider: object | None = None, provider_error: str | None = None) -> argparse.ArgumentParser:
+    """建主 parser。`provider`（部署 provider，由 `main` 先窥 argv 解析出来）给了就让它贴自己的 flag。
+
+    **为何 provider 由 `main` 先解析、而不是在这里按需解析**：贴 flag 必须先加载 provider，而加载 = import 一个
+    带 CDK 的包（jsii，import 即起 node 子进程）——不能让 `gherkai run` 也付这个代价，故只在真跑 deploy/destroy
+    时解析（见 `_peek_deploy_provider`）。两者都不给时 deploy/destroy 只有皮自己的命令面 flag。
+    """
     p = argparse.ArgumentParser(
         prog="gherkai",
         description="解析 .feature → 分组 scope → 调度两个 AI 引擎 → 汇总运行结果（会烧真 AWS 钱）。",
@@ -113,7 +145,7 @@ def _build_parser() -> argparse.ArgumentParser:
     run.add_argument(
         "--prefix", default=None, metavar="P",
         help=f"[--backend cloud] 资源名前缀（默认 {compose.DEFAULT_PREFIX!r}）：批量决定表/桶/cluster/task-def 默认名；"
-             "须与 CDK（iac_aws_backend）部署用的 prefix 一致。多环境切换（prod-/stage-）用它。兜底 AWS_RESOURCE_PREFIX",
+             "须与 `gherkai deploy --prefix` 一致。多环境切换（prod-/stage-）用它。兜底 AWS_RESOURCE_PREFIX",
     )
     run.add_argument(
         "--ddb-table", default=None, metavar="NAME",
@@ -270,6 +302,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--steps-dir", default=None, metavar="DIR",
         help=_STEPS_DIR_HELP + "——清单据此含使用方定制 step（自述入口同样加载该目录）",
     )
+
+    # [部署方] 云端后端的供给面（ADR 0037 决策 6）：命令面在皮、IaC 在 provider 包（`gherkai[deploy-aws]`）。
+    # 皮绝不 import aws_cdk——只发现 provider、贴它的 flag、分派动作（契约见 gherkai_cli/deploy.py 顶部）。
+    _deploy.add_parsers(sub, provider=provider, provider_error=provider_error,
+                        cli_version=_dist_version())
     return p
 
 
@@ -654,6 +691,35 @@ def _submit_local(args, run_id: str, run_meta, initial, *, tunnel_info=None) -> 
     return 0
 
 
+def _cloud_skew_gate(target) -> "int | None":
+    """cloud 路径的**第一道闸**：CLI 与后端的版本 skew 三态（ADR 0037 决策 7）。放行 → None；拦下 → 2。
+
+    **必须先于资源 preflight**（决策 7 的次序）：skew 的修复动作是部署方跑一次 `gherkai deploy`，而那一步同时
+    把资源建齐/补齐——先报「表/task-def 不存在」只会把人引去查 `--prefix`，绕一圈回到同一个动作。
+    三个不拦的档（戳缺失 / CLI 偏旧 / 任一侧 dev 版）只打一行提示；**block 无放行 flag**（决策 7 明拒）。
+
+    读戳 + 判定住产品本体（`compose.check_backend_skew`，WebUI/推进器同调），本函数只把 verdict 翻成退出码。
+    比的是**本 CLI 自己的**版本（`_dist_version()`，而非产品本体包的）——`gherkai deploy` 往 SSM 写的戳就是它，
+    它也是写任务定义的那一方；两者靠 `==` lockstep 恒同版本，显式传免得读者去猜哪个。
+    读戳与 subnet/sg 同一条 session/region 解析，且戳落在已授的 `/{prefix}backend/*` 通配内、不新增授权。
+    """
+    try:
+        verdict, msg = compose.check_backend_skew(prefix=target.prefix, cli_version=_dist_version(),
+                                                 region=target.region, profile=target.profile)
+    except ImportError as e:
+        _progress(f"--backend cloud 需要 boto3：{e}")
+        return 2
+    except Exception as e:
+        if compose.is_botocore_error(e):
+            _progress(f"--backend cloud 读版本戳失败（SSM /{target.prefix}backend/version"
+                      f"——凭证/region/权限？）：{e}")
+            return 2
+        raise
+    if msg:
+        _progress(msg)
+    return 2 if verdict == compose.SKEW_BLOCK else None
+
+
 def _submit_cloud(args, run_id: str, run_meta, initial, *, tunnel_info=None) -> int:
     """cloud submit：只 create_run 写 definition 到 DDB（不起 task）→ 云端 Lambda 事件驱动链接管推进。
 
@@ -666,6 +732,10 @@ def _submit_cloud(args, run_id: str, run_meta, initial, *, tunnel_info=None) -> 
         runs_table=args.ddb_table, events_table=args.events_table,
         bucket=args.s3_bucket, cluster=args.cluster,
     )
+
+    skew_rc = _cloud_skew_gate(target)  # 版本 skew 先于资源 preflight（ADR 0037 决策 7 的次序）
+    if skew_rc is not None:
+        return skew_rc
 
     # preflight（events 表/cluster/桶/runs 表 + 本 run 用到引擎的 task-def + 事件驱动链三 Lambda + 推进器
     # REPORT_DIR 与 --report-dir 一致性）——配置错在提交前暴露、退 2。链上任一 Lambda 缺 = 提交成功但 run 永不
@@ -820,6 +890,10 @@ def _status_cloud(args) -> int:
                                           profile=args.profile, runs_table=args.ddb_table)
     kicker_fn = target.kicker_lambda  # {prefix}kicker，从 prefix 推理出、无需用户配
 
+    skew_rc = _cloud_skew_gate(target)  # 版本 skew 先于任何云端读（ADR 0037 决策 7 的次序）
+    if skew_rc is not None:
+        return skew_rc
+
     from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore
     run_store = DynamoDBRunStore(compose._make_ddb_table(
         target.runs_table, region=target.region, profile=target.profile))
@@ -863,7 +937,7 @@ def _status_cloud(args) -> int:
                     # 其他 AWS 错（限流/瞬时/无权限）仍吞——不致命，下轮再踢/靠云端链。
                     if getattr(e, "response", {}).get("Error", {}).get("Code") == "ResourceNotFoundException":
                         _progress(f"status --wait 接力失败：kicker Lambda {kicker_fn}（用 --prefix={target.prefix!r} 拼出）"
-                                  f"不存在——是 --prefix 配错、还是 iac_aws_backend（CDK）未部署？")
+                                  f"不存在——是 --prefix 配错、还是后端未部署（`gherkai deploy`）？")
                         return 2
                 stall = 0  # kickoff 后重置，给云端链时间响应（下一个 _STALL_KICK 窗口再判是否仍卡）
             _time.sleep(3.0)
@@ -1017,6 +1091,9 @@ def _cmd_run(args) -> int:
     #     不落库、不碰「在哪执行」。故 cloud 的 Fargate 执行配置解析在 do_report **之外**：`--no-report --backend cloud`
     #     仍在 Fargate 跑，只是不生成 report。cloud_fargate 置值 = 下面 resolver 用 FargateEngine（否则 SubprocessEngine）。
     if args.backend == "cloud":
+        skew_rc = _cloud_skew_gate(target)  # 版本 skew 先于资源 preflight（ADR 0037 决策 7 的次序）
+        if skew_rc is not None:
+            return skew_rc
         # preflight 执行必需资源（events 表 + cluster + 本 run 用到引擎的 task-def；桶=job-in/产物上传也执行
         # 需要）——fail-fast 点名 prefix。runs 表仅落库需要，故只在 do_report 时探（见 3b begin 探活）；此处
         # 不探 runs 表（--no-report 下用不到）。不探 Lambda——同步 run 进程内推进、不依赖事件驱动链（ADR 0033）。
@@ -1197,8 +1274,60 @@ def _cmd_run(args) -> int:
     return 0 if result.status == Status.PASSED else 1
 
 
+def _deploy_provider(args) -> "object | None":
+    """取已解析的 provider（`main` 窥 argv 时解析、经 `set_defaults` 落在 args 上）。
+
+    两个 None 分支是**保险分支**：走 `main` 时 provider 恒已解析、失败也已在那里退 2（早于 argparse，见 main），
+    但 parser 也可能被别的调用方不带 provider 构出来——那时就地补一次解析，而不是拿 None 去调方法。
+    """
+    provider = getattr(args, "_provider_obj", None)
+    err = getattr(args, "_provider_error", None)
+    if provider is None and err is None:
+        provider, err = _deploy.resolve_provider(getattr(args, "provider", None))
+    if provider is None:
+        _progress(err or "没有可用的部署 provider。")
+    return provider
+
+
+def _cmd_deploy(args) -> int:
+    """[部署方] 分派给 provider（ADR 0037 决策 6）：三个「不真部署」动作互斥，其余走真部署。皮零 IaC 知识。
+
+    退出码即 provider 的返回值——皮只在「provider 不可用」时自己退 2（VPC 档不一致/未 bootstrap 这类
+    诊断与退码归 provider，它才知道自己的账户状态）。
+    """
+    provider = _deploy_provider(args)
+    if provider is None:
+        return 2
+    # provider 贴的子动词（worker 镜像族 push-worker/list-workers，ADR 0038）优先——接缝见 deploy.py 契约块。
+    verb = getattr(args, "_deploy_verb", None)
+    if verb is not None:
+        return verb(args)
+    if args.bootstrap:
+        return provider.bootstrap(args)
+    if args.diff:
+        return provider.diff(args)
+    if args.synth_only is not None:
+        return provider.synth_only(args)
+    return provider.deploy(args)
+
+
+def _cmd_destroy(args) -> int:
+    """[部署方] 拆栈：分派给 provider（哪些资源 RETAIN 是 IaC 侧的事，ADR 0033）。"""
+    provider = _deploy_provider(args)
+    return 2 if provider is None else provider.destroy(args)
+
+
 def main(argv: list[str] | None = None) -> int:
-    parser = _build_parser()
+    # argv 落实成具体 list：要先窥一眼才知道该不该为它加载部署 provider（见 _peek_deploy_provider）。
+    argv = list(sys.argv[1:] if argv is None else argv)
+    provider, provider_err = _peek_deploy_provider(argv)
+    parser = _build_parser(provider=provider, provider_error=provider_err)
+    # provider 不可用时抢在 argparse 之前报它：它的旋钮没贴上，用户敲的 `--vpc default` 会被报成
+    # 「unrecognized arguments」、把真因（没装 / 装坏了）盖掉。**-h/--help 例外**——帮助恒可用，
+    # 降级的帮助自己在 epilog 里交代原因（provider_err 只在子命令是 deploy/destroy 时才非 None）。
+    if provider_err is not None and not any(a in ("-h", "--help") for a in argv):
+        _progress(provider_err)
+        return 2
     args = parser.parse_args(argv)
 
     if args.command == "list-deterministic":
@@ -1217,6 +1346,10 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_tunnel_watch(args)
     if args.command == "_reconcile":
         return _cmd_reconcile(args)
+    if args.command == "deploy":
+        return _cmd_deploy(args)
+    if args.command == "destroy":
+        return _cmd_destroy(args)
 
     # 无子命令 → 打帮助
     parser.print_help()

@@ -89,7 +89,7 @@ class FargateEngine:
     组合根构造期注入（对称 __main__ 在 new_run_id 后 build_engines 注入 artifact_s3 落点）：
     - ecs/s3/ddb client：boto3 句柄（adapter 不自建，ADR 0016）。
     - run_id：拼 events 表 PK 用（每 run 一个 engine 实例，run_id 构造期已生成）。
-    - task_config：cluster / task_definition / network（subnet/security-group/assign-public-ip）——**真值由 iac_aws_backend
+    - task_config：cluster / task_definition / network（subnet/security-group/assign-public-ip）——**真值由后端 stack（`gherkai-deploy-aws`）
       （ADR 0033）产出、组合根注入**；本 adapter 只认字段、不知真 ARN（moto 测用假值验接线）。
     - job_s3：(bucket, prefix) job 对象落点；events_table_name：events 表名（worker PutItem 目标）。
     - region：组合根**落实成具体字符串**的 AWS region（`--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > profile config，

@@ -96,7 +96,7 @@ class DdbEventLog:
     def has_exit(self, scope_id: str) -> bool:
         """单个 scope 有没有退出记录（**只读**，退出记录键位确定 → 单 item 点查、不走 records() 重放整 run）。
 
-        超时处置的「退出记录已在即让路」判断用（`lambdas/reconciler.py`，ADR 0034「job timeout」节被拒方案
+        超时处置的「退出记录已在即让路」判断用（`deploy_aws/gherkai_deploy_aws/lambdas/reconciler.py`，ADR 0034「job timeout」节被拒方案
         「处置者直接写 task_exited」的护栏）：一个 scope 的问题不该逐 scope Query 整 run。**强一致读**——
         判据正是「刚落的退出记录在不在」，最终一致读会漏看在途写、去 StopTask 一个已收敛的 job。
         """

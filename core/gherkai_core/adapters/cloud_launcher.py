@@ -30,7 +30,7 @@ class CloudLauncher:
     def __init__(self, resolver, *, run_id: str | None = None, timeout_watch=None) -> None:
         self._resolver = resolver
         # job timeout 的到点触发器（ADR 0034「job timeout」节 cloud 档，组合根注入；实现= EventBridge Scheduler
-        # one-time schedule，见 lambdas/reconciler.py）。协议：arm(run_id, scope_id, timeout_s)。None=未装配
+        # one-time schedule，见 deploy_aws/gherkai_deploy_aws/lambdas/reconciler.py）。协议：arm(run_id, scope_id, timeout_s)。None=未装配
         # （旧部署/无 env）——有预算的 job 降级为 tick 防御扫 + status --wait，打日志。
         self._run_id = run_id
         self._timeout_watch = timeout_watch

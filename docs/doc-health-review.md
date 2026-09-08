@@ -46,7 +46,7 @@ ADR/CONTEXT 是随构建**逐步长起来**的：每次在前人文档上叠加�
 - `docs/adr/*.md`（重点，80% 给 AI 读）
 - `CONTEXT.md`（术语/概念总表）
 - `docs/REFERENCES.md`（外部一手来源 + 源码内点自查资料，AI 用）
-- 全部 README（根 / `cli` / `core` / `core/tests` / `runtime` / `iac_aws_backend` / `engines/*`，主要给人读）
+- 全部 README（根 / `cli` / `core` / `core/tests` / `runtime` / `deploy_aws` / `engines/*` / `.github/workflows`，主要给人读）
 - `docs/guides/*.md`（给人的阅读理解层，派生视图——判据侧重见下「按文档类型的复盘侧重」）
 - **技术笔记/配方 + 工具手册**（如 `engines/midscene/spikes/SIGV4-FETCH-RECIPE.md`、`tools/e2e_harness.md`）——与代码同居、AI 照它接线/照它操作，**极易 STALE**（含可运行代码片段 + 命令 + 前置条件 + 踩坑点 + 源码路径）。
 - 未来新增的 docs/ 与子工程根下文档同样纳入（本任务名"文档健康度"、不焊死在某几类上——每次 `find . -name "*.md"` 排除 node_modules/.venv/.pytest_cache 扫一遍，别漏新文件）。

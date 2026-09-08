@@ -26,14 +26,14 @@
 
 ## 红线护栏
 
-- **不误删有用代码**：worker 是被 core spawn 的**子进程**，其入口函数不会被 core 直接 import——**别把它们当死代码**。同构形态还有 **Lambda 入口**（`lambdas/` 的 `handler`/`kicker_handler` 等）：由 `iac_aws_backend/stack.py` 以 `handler="..."` **字符串**装配、AWS runtime 调用，grep import 找不到生产调用点——同样别当死代码。同理留意组合根注入、动态调用、被测试用的便利方法、以及 **ADR 明写的前向口子**（为尚未实现的路径预留、当前无生产调用但有据保留，非残骸——判前先查相关 ADR 有没有把它记成 defer/口子）。
+- **不误删有用代码**：worker 是被 core spawn 的**子进程**，其入口函数不会被 core 直接 import——**别把它们当死代码**。同构形态还有 **Lambda 入口**（`deploy_aws/gherkai_deploy_aws/lambdas/` 的 `handler`/`kicker_handler` 等）：由 `deploy_aws/gherkai_deploy_aws/stack.py` 以 `handler="..."` **字符串**装配、AWS runtime 调用，grep import 找不到生产调用点——同样别当死代码。同理留意组合根注入、动态调用、被测试用的便利方法、以及 **ADR 明写的前向口子**（为尚未实现的路径预留、当前无生产调用但有据保留，非残骸——判前先查相关 ADR 有没有把它记成 defer/口子）。
 - **不是风格挑刺**：命名偏好、注释多少、能跑就行的小事不报。只报真降低质量的：真死代码、真更优写法、真违背设计。
 - **测试代码本身不在 review 范围**（只 review 生产代码）；但发现"生产代码有 bug 而测试没覆盖"可附带指出。
 - 改动比文档慎重（有回归风险）：**每改一批跑相关测试**；碰归约核心/协议等高风险处，改完跑全套 + 必要时临时反转验证测试非假绿。
 
 ## 执行方法（本项目跑通的最佳路径）
 
-覆盖范围：**当前的生产代码**（核心库 + 产品本体 `runtime/` + 前端 cli + 各引擎 worker + 云端 Lambda `lambdas/` + IaC `iac_aws_backend/`；`tools/` 是长期资产，注释纪律与死代码同在查范围）。非生产路径——spike/探针（诚实可丢弃）、及 ADR 已标"待退役/历史"的遗留层——视情况轻扫或跳过（先扫一遍目录、对照 ADR Status 判哪些还是当前生产路径，别照抄某一时刻的模块名单——本行枚举也曾漏掉 v1.2 新增的 lambdas/iac，快照必陈旧、目录扫描才是真值集）。
+覆盖范围：**当前的生产代码**（核心库 + 产品本体 `runtime/` + 前端 cli + 各引擎 worker + 部署 provider 包 `deploy_aws/`（CDK stack + `lambdas/` handler 源）；`tools/` 是长期资产，注释纪律与死代码同在查范围）。非生产路径——spike/探针（诚实可丢弃）、及 ADR 已标"待退役/历史"的遗留层——视情况轻扫或跳过（先扫一遍目录、对照 ADR Status 判哪些还是当前生产路径，别照抄某一时刻的模块名单——本行枚举也曾漏掉 v1.2 新增的 lambdas/iac，快照必陈旧、目录扫描才是真值集）。
 
 ### 分片深读（可用 workflow 并行）
 

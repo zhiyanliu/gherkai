@@ -12,7 +12,9 @@ EventBridge rule（detail-type='ECS Task State Change'、lastStatus=STOPPED、�
 极少数缺 exitCode 时写 None（宽限态，project 保守判 running，reconciler 下轮由别的信号补——或 status --wait
 人工兜底）。不在此重查 DescribeTasks（保持 handler 薄、无额外 IAM；真验证明基本不需要）。
 
-打包：本文件 + core 一起进 Lambda zip（部署见 iac_aws_backend）。boto3 是 Lambda runtime 自带。
+打包：本文件与 reconciler.py 是 **asset 原料**（住在 provider 包 `gherkai_deploy_aws/lambdas/`，ADR 0037 决策 6），
+由 `BackendStack._build_lambda_asset` 摊到 zip **根**（故按顶层模块名 import reconciler，不走包路径）。
+boto3 是 Lambda runtime 自带。
 env：EVENTS_TABLE（events 表名）、RUNS_TABLE（判 run 是否 detached，见 `_is_detached`）、
 AWS_REGION（Lambda runtime 自带）。
 """

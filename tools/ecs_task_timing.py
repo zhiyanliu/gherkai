@@ -4,7 +4,7 @@
 **为何独立成脚本、不改产品路径**：产品侧读 task 终态的两条路都**只取 lastStatus/exitCode、丢弃时间字段**（够判定
 即可）——同步态 `FargateEngine._probe_task`/`_await_exit_code`（core/gherkai_core/adapters/fargate_engine.py）产
 `TaskProbe(stopped, exit_code)` 供 `_read_events` 轮询判存活/退出；detached cloud 态由退出观察者 Lambda 从
-EventBridge 的 ECS STOPPED 事件读 `exitCode` 写 task_exited（ADR 0034 机制二，lambdas/exit_observer.py）。
+EventBridge 的 ECS STOPPED 事件读 `exitCode` 写 task_exited（ADR 0034 机制二，deploy_aws/gherkai_deploy_aws/lambdas/exit_observer.py）。
 grace/stopTimeout 校准要的是 SIGTERM→退出的**真实墙钟预算**（`stoppingAt`/`executionStoppedAt`/`stoppedAt`
 的差），属一次性标定、非运行期判定；混进任一条判定路径都会污染其单一职责、且改产品路径需回归。故独立脚本纯读。
 
