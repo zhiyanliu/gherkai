@@ -47,7 +47,7 @@ jobs:
       - name: pytest
         # 根 pytest 配置的 testpaths 覆盖全部成员（core / runtime / cli / engines/novaact / deploy_aws，
         # 后者含 CDK synth 测试）；integration 标记默认 deselect（要连真 AWS，见根 pyproject 注释）。
-        run: uv run --frozen pytest -q
+        run: uv run --frozen pytest -q -rs  # -rs：把 skip 原因打出来（真 docker/本地镜像那类条件用例，别让 skipped 计数成谜）
 
   node:
     name: midscene worker（npm）
