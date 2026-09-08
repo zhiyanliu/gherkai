@@ -143,6 +143,7 @@ uv run gherkai destroy --vpc default --prefix gherkai-
 | `--prefix` | `gherkai-` | 全部云资源的命名空间。**须与 `run`/`submit` 的 `--prefix` 一致**；换 prefix 就是换一套独立环境（prod-/stage-），闲置成本近零 |
 | `--vpc` | **必给、无隐式默认**（`--bootstrap` 除外） | VPC 来源三档：`default`（账户默认 VPC）/ `new`（本 stack 新建，2-AZ 零 NAT）/ `vpc-<id>`（复用现有 VPC） |
 | `--stop-timeout` | provider 默认 | worker container 的 SIGTERM→SIGKILL 宽限秒（标定 `run --grace` 用） |
+| `--refresh-context` | 关 | 丢弃本机缓存的 CDK 环境查询结果（VPC/子网/AZ）重新查询；默认复用缓存（见 `deploy_aws/README.md`） |
 
 `--vpc` **不给隐式默认是有意的**：漏了它会合成「新建整套 VPC + 替换 WorkerSg」这种危险变更集——真踩过的坑。
 

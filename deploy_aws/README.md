@@ -102,6 +102,8 @@ gherkai deploy list-workers
 
 `--region` / `--profile` 与 `run`/`submit` 同名同义（region 解析链 `--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > profile config，ADR 0016 决策 C）。退出码：`0` 成功；`2` 前置/校验失败（Node 缺失、VPC 档不符、读后端失败、容器引擎名不认、`push-worker` 的架构/版本 skew 拦截）；`1` **cdk 已成功而 worker 镜像四步失败**（账户已被改动，重跑 `gherkai deploy` 幂等收敛）；其余为 cdk CLI 自己的返回码（原样透传）。
 
+`--refresh-context` 丢弃本机缓存的 **CDK 环境查询结果**重新查询。`--vpc default` / `--vpc vpc-<id>` 走 CDK 的 `from_lookup`，查到的 VPC/子网/AZ 存在 `cdk.context.json`；命令的工作目录是一次性的，故把它按 prefix 持久化到 `$XDG_CACHE_HOME`（缺省 `~/.cache`）`/gherkai/cdk-context/<prefix>cdk.context.json`——这是 CDK 自己的标准做法（它建议入库），也避免每次重查、以及 cdk 对缺失查询值**先用占位 VPC 预合成一遍**时被 aws-cdk-lib 的模板校验器打出的 `[Warning] Template validation found issues…`（占位模板的误报；**首次**查询某 prefix 时仍会出现一次，之后走缓存即消失）。默认 VPC 的子网变了、或那条 warning 之外真出现「新建/替换子网」的变更集时，先 `--refresh-context` 再 `--diff`。
+
 `--stop-timeout N` 标定 worker container 的 SIGTERM→SIGKILL 宽限（默认 120s）。**Fargate 硬上限就是 120s**，>120 会在部署期被 ECS 拒——命令/synth 期就 fail-fast、点名这是平台限制而非笔误（Nova 的 grace 下限 150s > 120s 这个冲突正卡在这条硬上限上，见 ADR [0032](../docs/adr/0032-fargate-execution-environment.md)）。
 
 ### 本地验证（不碰 AWS）

@@ -115,7 +115,7 @@ def test_vpc_rejects_anything_else(value):
 
 def test_contributed_flag_surface_is_exactly_the_provider_specific_set():
     """flag 面全集钉死（枚举型护栏）：三个 context 旋钮 flag + AWS 定位二件套 + 两个「皮的中立版的 AWS
-    精确化」（见 cli 模块头「两层声明」），**就这七个**。
+    精确化」（见 cli 模块头「两层声明」）+ 查询缓存旋钮 `--refresh-context`，**就这八个**。
 
     比全集而非「某个 flag 在不在」：少一个 → 用户够不到某个旋钮；多一个 → 越界抢皮的命令面 flag。
     两种都只在接线后才暴露。
@@ -124,7 +124,7 @@ def test_contributed_flag_surface_is_exactly_the_provider_specific_set():
     Provider().add_arguments(parser)
     options = {opt for action in parser._actions for opt in action.option_strings} - {"-h", "--help"}
     assert options == {"--prefix", "--vpc", "--stop-timeout", "--region", "--profile",
-                       "--allow-vpc-change", "--require-approval"}
+                       "--allow-vpc-change", "--require-approval", "--refresh-context"}
 
 
 def test_worker_subverb_surface_is_exactly_three_and_only_on_deploy():
@@ -620,3 +620,69 @@ def test_tolerates_a_shell_that_declares_neither_command_face_flag(monkeypatch, 
     del args.allow_vpc_change, args.require_approval  # 模拟「皮压根没这两个 flag」
     _stub_backend(monkeypatch, stack_exists=True, stored="vpc-0abc")
     assert Provider()._guard_vpc_spec(args) == EXIT_PRECONDITION
+
+
+# ---------------------------------------------------------------- CDK 环境查询缓存（cdk.context.json 跨调用持久化）
+
+class _CdkWritingContext(_Recorder):
+    """`subprocess.run` 替身：像真 cdk 做过 from_lookup 那样，在 cwd 写下 `cdk.context.json`；并记下进 cwd 时那文件是否已在。"""
+
+    def __init__(self, content: str = '{"vpc-provider:account=1:region=us-east-1": {"vpcId": "vpc-cached"}}') -> None:
+        super().__init__()
+        self.content = content
+        self.seeded_with: list = []
+
+    def __call__(self, argv, **kwargs):
+        cwd = Path(kwargs["cwd"])
+        existing = cwd / "cdk.context.json"
+        self.seeded_with.append(existing.read_text() if existing.exists() else None)
+        existing.write_text(self.content)
+        return super().__call__(argv, **kwargs)
+
+
+def _cache_env(monkeypatch, tmp_path) -> Path:
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setattr(provider_cli, "check_node", lambda: None)
+    monkeypatch.setattr(provider_cli, "cdk_command", lambda: ["cdk-stub"])
+    return provider_cli.context_cache_path("gherkai-")
+
+
+def test_context_cache_is_saved_after_the_run_and_seeded_into_the_next_fresh_work_dir(monkeypatch, tmp_path):
+    """工作目录一次性 → 若每次空着进去，cdk 会对缺失的 lookup 值先用占位 VPC 预合成一遍（触发模板校验 warning、
+    多一轮查询）。缓存按 prefix 持久化在用户缓存目录：第一次跑完存回；第二次进全新工作目录前先放进去。"""
+    cache = _cache_env(monkeypatch, tmp_path)
+    rec = _CdkWritingContext()
+    monkeypatch.setattr(provider_cli.subprocess, "run", rec)
+    assert not cache.exists()
+    assert Provider().diff(_parse("--vpc", "default", "--region", "us-east-1")) == 0
+    assert rec.seeded_with == [None]                      # 首次：无缓存可放
+    assert cache.exists() and "vpc-cached" in cache.read_text()  # 跑完存回
+    assert Provider().diff(_parse("--vpc", "default", "--region", "us-east-1")) == 0
+    assert rec.seeded_with[1] == rec.content              # 第二次：全新工作目录里已被放进缓存
+
+
+def test_context_cache_survives_a_failed_cdk_run(monkeypatch, tmp_path):
+    """cdk 退非零也存回：查到的 lookup 值本身是对的，deploy 因别的原因失败不该让下次重查一遍。"""
+    cache = _cache_env(monkeypatch, tmp_path)
+    rec = _CdkWritingContext(); rec.returncode = 1
+    monkeypatch.setattr(provider_cli.subprocess, "run", rec)
+    assert Provider().diff(_parse("--vpc", "default", "--region", "us-east-1")) == 1
+    assert cache.exists()
+
+
+def test_refresh_context_discards_the_cache_before_running(monkeypatch, tmp_path, capsys):
+    cache = _cache_env(monkeypatch, tmp_path)
+    cache.parent.mkdir(parents=True)
+    cache.write_text("stale")
+    rec = _CdkWritingContext()
+    monkeypatch.setattr(provider_cli.subprocess, "run", rec)
+    assert Provider().diff(_parse("--vpc", "default", "--region", "us-east-1", "--refresh-context")) == 0
+    assert rec.seeded_with == [None]                      # 旧缓存没被放进工作目录
+    assert cache.read_text() == rec.content               # 新查到的存回
+    assert "丢弃" in capsys.readouterr().err
+
+
+def test_context_cache_is_per_prefix(monkeypatch, tmp_path):
+    _cache_env(monkeypatch, tmp_path)
+    assert provider_cli.context_cache_path("a-") != provider_cli.context_cache_path("b-")
+    assert provider_cli.context_cache_path("a-").name == "a-cdk.context.json"

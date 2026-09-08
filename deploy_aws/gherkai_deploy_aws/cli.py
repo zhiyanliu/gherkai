@@ -205,6 +205,11 @@ class Provider:
             "--stop-timeout", default=None, type=int, metavar="N",
             help="worker container 的 SIGTERM→SIGKILL 宽限秒数（默认 120，Fargate 硬上限 120）",
         )
+        parser.add_argument(
+            "--refresh-context", action="store_true",
+            help="丢弃本机缓存的 CDK 环境查询结果（VPC/子网/AZ，见 --vpc default|<id> 的 from_lookup）重新查询；"
+                 "默认复用缓存（CDK 标准做法，也避免每次为缺失查询预合成占位模板）",
+        )
         # 下面两个是**皮已声明的中立版的 AWS 精确化**（`conflict_handler="resolve"` 令本处生效，见模块头
         # 「两层声明」）：一个加 cdk 的取值 `choices`、一个把措辞钉到 VPC 档三态上。
         parser.add_argument(
@@ -571,8 +576,21 @@ class Provider:
             return EXIT_PRECONDITION
 
         target = self._resolve_target(args)
+        ctx_cache = context_cache_path(target.prefix)
         with self._work_dir() as work_dir:
             self.write_cdk_json(work_dir)
+            # **CDK 环境查询缓存（`cdk.context.json`）跨调用持久化**：工作目录是一次性的，若每次都空着进去，cdk 对
+            # `from_lookup`（`--vpc default|<id>`）缺失的值会先用占位 VPC/子网**预合成一遍**再去真查——aws-cdk-lib 的
+            # 模板校验器对那份占位模板报错、降级成「Template validation found issues」warning 打出来（真跑抓到、
+            # 全新目录 100% 复现、有缓存即消失），而且每次多一轮查询 API。CDK 自己的标准做法就是把该文件保留
+            # （它建议入库），这里放在用户缓存目录、按 prefix 一份；`--refresh-context` 丢弃重查（VPC/子网真变了时用）。
+            work_ctx = work_dir / "cdk.context.json"
+            if getattr(args, "refresh_context", False):
+                if ctx_cache.exists():
+                    ctx_cache.unlink()
+                    print(f"已丢弃 CDK 环境查询缓存 {ctx_cache}，本次重新查询。", file=sys.stderr)
+            elif ctx_cache.exists():
+                shutil.copyfile(ctx_cache, work_ctx)
             # 用户给的导出目录钉成**绝对**路径：cdk 子进程 cwd = 本次临时工作目录（用完即删），相对路径
             # 原样传会让导出物落进那里、随目录消失而命令退 0（真跑踩过）。默认落工作目录、随之清理。
             out_dir = output.resolve() if output is not None else work_dir / "cdk.out"
@@ -591,10 +609,14 @@ class Provider:
                 env["AWS_REGION"] = target.region
                 env["AWS_DEFAULT_REGION"] = target.region
             try:
-                return subprocess.run(argv, cwd=str(work_dir), env=env).returncode
+                rc = subprocess.run(argv, cwd=str(work_dir), env=env).returncode
             except FileNotFoundError as exc:  # cdk/npx 在 which 之后消失（极少见）——别抛 traceback
                 print(f"起不动 cdk CLI：{exc}", file=sys.stderr)
                 return EXIT_PRECONDITION
+            if work_ctx.exists():  # cdk 查过/更新过 → 存回缓存（失败与否都存：查到的值本身是对的）
+                ctx_cache.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(work_ctx, ctx_cache)
+            return rc
 
     # ---- 内部：VPC 档三态 ----
     def _guard_vpc_spec(self, args) -> int | None:
@@ -682,6 +704,13 @@ class Provider:
 # ---------------------------------------------------------------------------
 # Node / cdk CLI 前置（ADR 0037 决策 6「Node 前置是硬事实」）
 # ---------------------------------------------------------------------------
+
+def context_cache_path(prefix: str) -> Path:
+    """CDK 环境查询缓存（`cdk.context.json`）的持久化位置：`$XDG_CACHE_HOME`（缺省 `~/.cache`）`/gherkai/cdk-context/<prefix>cdk.context.json`。
+    按 prefix 一份（各环境可各自 `--refresh-context`，互不牵连）；不入仓库/包目录（wheel 用户没有可写的源码树）。"""
+    base = os.environ.get("XDG_CACHE_HOME") or os.path.join(os.path.expanduser("~"), ".cache")
+    return Path(base) / "gherkai" / "cdk-context" / f"{prefix}cdk.context.json"
+
 
 def cdk_command() -> list[str]:
     """cdk CLI 的调用前缀：PATH 上的 `cdk` 优先，否则 `npx -y aws-cdk@2`（ADR 0037 决策 6）。都没有 → 空列表。"""
