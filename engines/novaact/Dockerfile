@@ -11,7 +11,7 @@
 #     uv build --package gherkai-worker-novaact --out-dir dist
 #     docker build --platform linux/amd64 -f engines/novaact/Dockerfile \
 #       --build-arg WORKER_SOURCE=local --build-arg WORKER_WHEEL=gherkai_worker_novaact-<ver>-py3-none-any.whl \
-#       -t gherkai-worker-novaact:dev dist/          # ← context = 放 wheel 的目录
+#       -t gherkai-worker-novaact:dev dist/          # ← context = 放 wheel 的目录（会被整体 COPY 进 local stage）
 # **必须 `--platform linux/amd64`**：Fargate task-def 固定 X86_64（ARM64 是被拒方案，ADR 0038）；arm Mac 不加则 build 出
 # arm64、Fargate 启动期 exec format error 挂死（ADR 0033）。
 #
@@ -30,20 +30,28 @@ RUN pip install --upgrade pip
 # playwright 只作 CDP 客户端库、不 launch 本地 chromium——故只需 playwright 库（nova-act 依赖拉入），
 # 不需 `playwright install chromium` 的二进制 + 系统库（省几百 MB）。真跑验证：connectOverCDP 连云浏览器不依赖本地二进制。
 
+# **两个 stage 都对「自己的参数没给」保持容忍**（`if [ -n … ]`）：经典 builder（无 buildx 的机器，如某些 Linux 上
+# 裸 `docker build`）**会把未选中的 stage 也跑一遍**，守卫写成硬失败会让未选中的那个先炸——真 build 踩过。
+# 真正的把关在下面 final stage 的冒烟（不管走哪条 stage 都跑，漏 build-arg / 空产物在那里 fail-loud）。
+
 # ---- index 态：已发行包（CI / 使用方自建同版本基底）----
 FROM base AS worker-index
 ARG WORKER_VERSION
-RUN test -n "${WORKER_VERSION}" || { echo "index 态需要 --build-arg WORKER_VERSION=<X.Y.Z>（或改 WORKER_SOURCE=local 喂 wheel）" >&2; exit 1; } \
- && pip install "gherkai-worker-novaact==${WORKER_VERSION}"
+RUN if [ -n "${WORKER_VERSION}" ]; then pip install "gherkai-worker-novaact==${WORKER_VERSION}"; fi
 
 # ---- local 态：context 里的 wheel（发行前验镜像）----
 FROM base AS worker-local
 ARG WORKER_WHEEL
-# 保留原文件名：pip 从 wheel 文件名解析发行名/版本/tag，改名（如 worker.whl）会被拒「Invalid wheel filename」（真 build 踩过）
-COPY ${WORKER_WHEEL} /tmp/wheel/
-RUN pip install /tmp/wheel/*.whl && rm -rf /tmp/wheel
+# COPY 整个 context 再按名装：**COPY 不能条件化**，而经典 builder 也会跑本 stage——`COPY ${WORKER_WHEEL}` 在
+# 参数为空时直接语法错。context 就是放产物的目录，拷进来很便宜。
+# 装的是**原文件名**：pip 从 wheel 文件名解析发行名/版本/tag，改名（如 worker.whl）会被拒「Invalid wheel filename」（真 build 踩过）。
+COPY . /tmp/pkg/
+RUN if [ -n "${WORKER_WHEEL}" ]; then pip install "/tmp/pkg/${WORKER_WHEEL}"; fi; rm -rf /tmp/pkg
 
 FROM worker-${WORKER_SOURCE} AS final
+# 两态共同的诚实校验 + 冒烟：worker 必须真装上、入口必须真跑得起来（`--list-deterministic` 不需要 AWS）。
+# 漏 build-arg（选了 index 却没给版本 / 选了 local 却没给 wheel）在此 fail-loud，不拖到 Fargate 启动期。
+RUN python -m gherkai_worker_novaact --list-deterministic > /dev/null
 # 三通道分离（ADR 0024）：事件走 DDB（EventSink DDB 态）、诊断走 stderr、SDK 噪声走 stdout——容器日志（awslogs）
 # 抓 stdout/stderr 供调试，事件不依赖日志（走 DDB）。
 # region/凭证不焊镜像：AWS_REGION 经 RunTask overrides 注入、凭证走 task role（ADR 0033 决策 C）。
