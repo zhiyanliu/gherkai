@@ -50,7 +50,8 @@ export class JobSource {
     }
     const bucket = rest.slice(0, slash);
     const key = rest.slice(slash + 1);
-    const s3 = client ?? new S3Client({ region: process.env.AWS_REGION });
+    // maxAttempts: 1 = 关 SDK 重试（对称 Nova boto Config max_attempts=0，ADR 0032）。
+    const s3 = client ?? new S3Client({ region: process.env.AWS_REGION, maxAttempts: 1 });
     const resp = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }),
       { abortSignal: AbortSignal.timeout(10_000) });
     const text = await resp.Body!.transformToString("utf-8");

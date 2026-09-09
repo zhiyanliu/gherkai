@@ -81,7 +81,8 @@ export class EventSink {
   }
 
   private client_(): DynamoDBClient {
-    if (!this.client) this.client = new DynamoDBClient({ region: process.env.AWS_REGION });
+    // maxAttempts: 1 = 关 SDK 重试（对称 Nova boto Config max_attempts=0，ADR 0032）；AbortSignal 仍兜单次墙钟。
+    if (!this.client) this.client = new DynamoDBClient({ region: process.env.AWS_REGION, maxAttempts: 1 });
     return this.client;
   }
 
