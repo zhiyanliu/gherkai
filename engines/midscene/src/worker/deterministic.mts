@@ -1,13 +1,13 @@
 // 确定性 step 注册表（ADR 0022）——Midscene 引擎（Nova 引擎 deterministic.py 的对称 TS 版）。
 //
-// test engineer 用 `deterministic(pattern, handler, meta)` 把「正则 → handler」登记进一张表（meta 必填，
+// 测试开发用 `deterministic(pattern, handler, meta)` 把「正则 → handler」登记进一张表（meta 必填，
 // ADR 0036）。worker 派发每个 step 时**先查这张表**：命中走精确 handler（拿 Playwright page 判定、
 // **不投票、可复现**），未命中才落到内建 URL 导航 / AI catch-all（ADR 0020/0024）。
 //
 // 为什么匹配放 worker 不放 core（ADR 0022）：确定性 handler 引擎特定（碰 Playwright page），匹配表
 // 跟着 handler 走最内聚；core 只解析结构 + 调度，对 step 语义无知。
 //
-// 角色边界（ADR 0020）：QA 永远只写自然语言（默认走 AI）；确定性 step 由 test engineer 注册（QA 不碰）——
+// 角色边界（ADR 0020）：QA 永远只写自然语言（默认走 AI）；确定性 step 由测试开发注册（QA 不碰）——
 // 框架内建的那几条在 deterministic.steps.mts，项目专属的写在使用方 `steps/` 目录（ADR 0037 决策 4，
 // 经本模块的公开导出面 index.mts 注册进**同一张**表）。
 //

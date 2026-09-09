@@ -30,7 +30,7 @@ import { sigv4Fetch, signCdpUpgrade, getBaseUrl, MODEL, getRegion } from "../lib
 import { ArtifactUploader } from "../lib/artifact-upload.mjs";  // 产物 S3 上传（ADR 0029；无落点 env 时 no-op 报 file://）
 import { EventSink } from "../lib/event-sink.mjs";  // 事件出口（ADR 0024「I/O 边缘可注入接口」，两态见该模块头）
 import { JobSource } from "../lib/job-source.mjs";  // job 入口（同上）
-// 确定性 step 注册表（ADR 0022）+ test engineer 的锚点脚手架。
+// 确定性 step 注册表（ADR 0022）+ 测试开发的锚点脚手架。
 // import 脚手架即触发其顶层 deterministic(...) 注册副作用（对称 Nova 引擎 import deterministic_steps）。
 import { match as matchDeterministic, DeterministicAssertion, listRegistry, matchBatch } from "./deterministic.mjs";
 import { buildInstruction } from "./argument.mjs";

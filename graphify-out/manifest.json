@@ -235,9 +235,9 @@
     "semantic_hash": "52a6541e1d49d5f31ae4c3917adbe073"
   },
   "docs/adr/0020-step-phrasing-default-ai-deterministic-scaffold.md": {
-    "mtime": 1787021487.2998574,
-    "ast_hash": "7710371471aa44741c390c23114007a8",
-    "semantic_hash": "7710371471aa44741c390c23114007a8"
+    "mtime": 1788927728.998186,
+    "ast_hash": "4f7fbbbfec0ae7b788268848f3e6c5fc",
+    "semantic_hash": ""
   },
   "docs/adr/0025-plan-module-feature-to-jobs.md": {
     "mtime": 1786957053.5862658,
@@ -265,14 +265,14 @@
     "semantic_hash": "edae2c4a98921a58c66c6b46316bba26"
   },
   "CONTEXT.md": {
-    "mtime": 1788919610.3526993,
-    "ast_hash": "4033ac9bebf659e97f8f9604672b81e3",
-    "semantic_hash": "4033ac9bebf659e97f8f9604672b81e3"
+    "mtime": 1788927615.1439905,
+    "ast_hash": "e8ecc4bfff396067853f2623e9d9eaea",
+    "semantic_hash": ""
   },
   "README.md": {
-    "mtime": 1788922049.6499197,
-    "ast_hash": "2a6b5adb6be1862ebce4707ca6284ae8",
-    "semantic_hash": "2a6b5adb6be1862ebce4707ca6284ae8"
+    "mtime": 1788927615.1496072,
+    "ast_hash": "07a57f1ac30c13d0c7a8cdf09c3ab049",
+    "semantic_hash": ""
   },
   "cli/README.md": {
     "mtime": 1788922049.6610413,
@@ -350,9 +350,9 @@
     "semantic_hash": "f18d3ea11ce71c54e2f567d2d2c65033"
   },
   "docs/adr/0015-v1-positioning-smoke-not-regression.md": {
-    "mtime": 1788773594.475009,
-    "ast_hash": "086570282e4e70c93c07532fe4901a92",
-    "semantic_hash": "086570282e4e70c93c07532fe4901a92"
+    "mtime": 1788927615.1475904,
+    "ast_hash": "3185ef95868997d287a484803b978537",
+    "semantic_hash": ""
   },
   "docs/adr/0016-execution-architecture-core-lib-run-model.md": {
     "mtime": 1788859034.885134,
@@ -365,9 +365,9 @@
     "semantic_hash": "0c57d7d1c7e717ce5e58fa830b85f12c"
   },
   "docs/adr/0022-bdd-runner-retired-core-parses-thin-worker.md": {
-    "mtime": 1788773594.474439,
-    "ast_hash": "50fc2a5210503b5b6ee18c262ff4e856",
-    "semantic_hash": "50fc2a5210503b5b6ee18c262ff4e856"
+    "mtime": 1788927615.1467135,
+    "ast_hash": "93c225ba931f489b01834d15aa67f4fd",
+    "semantic_hash": ""
   },
   "docs/adr/0023-novaact-acting-python-locked-no-ts-core.md": {
     "mtime": 1785230026.0169964,
@@ -375,9 +375,9 @@
     "semantic_hash": "d433e28ccaea45df3762c4934dca3fe0"
   },
   "docs/adr/0024-worker-core-protocol.md": {
-    "mtime": 1788922049.660201,
-    "ast_hash": "c035f965f8204c0ae572b28af0cd635c",
-    "semantic_hash": "c035f965f8204c0ae572b28af0cd635c"
+    "mtime": 1788927615.1490593,
+    "ast_hash": "62404d4af7845617af12eb13b3996814",
+    "semantic_hash": ""
   },
   "docs/adr/0026-schedule-module.md": {
     "mtime": 1788922049.6569612,
@@ -450,9 +450,9 @@
     "semantic_hash": "186fccef00005f034f6192f267c37891"
   },
   "docs/adr/0036-deterministic-capability-discovery.md": {
-    "mtime": 1788922049.6591482,
-    "ast_hash": "dacf59a59d44606729059fe66d676080",
-    "semantic_hash": "dacf59a59d44606729059fe66d676080"
+    "mtime": 1788927615.1492996,
+    "ast_hash": "a0b95267e22b118168d6d90163437076",
+    "semantic_hash": ""
   },
   "docs/guides/execution-and-reconciliation.md": {
     "mtime": 1788922049.6607442,
@@ -460,9 +460,9 @@
     "semantic_hash": "bbe5d1e63e61a601565b7526ff27d56b"
   },
   "docs/adr/0037-distribution-and-packaging.md": {
-    "mtime": 1788921289.6107397,
-    "ast_hash": "7df3a615c59528b24168500438c5085f",
-    "semantic_hash": "7df3a615c59528b24168500438c5085f"
+    "mtime": 1788927615.146234,
+    "ast_hash": "d09fa2f1e8d7ef2b6559ceb694cb89fe",
+    "semantic_hash": ""
   },
   "docs/adr/0038-worker-image-delivery.md": {
     "mtime": 1788919610.3515348,
@@ -755,14 +755,14 @@
     "semantic_hash": "c9aa80d71981252133ff5c15c20a1312"
   },
   "engines/midscene/src/worker/deterministic.mts": {
-    "mtime": 1788854133.8378303,
-    "ast_hash": "3638c5f2f8fc03e503395ff9e27c2dbc",
-    "semantic_hash": "3638c5f2f8fc03e503395ff9e27c2dbc"
+    "mtime": 1788927615.1512616,
+    "ast_hash": "18790538a420b2a90e98f9489355e749",
+    "semantic_hash": ""
   },
   "engines/midscene/src/worker/deterministic.steps.mts": {
-    "mtime": 1788770683.3346326,
-    "ast_hash": "f091602411ec0ab9cb5eb81d67d77a56",
-    "semantic_hash": "f091602411ec0ab9cb5eb81d67d77a56"
+    "mtime": 1788927615.1498878,
+    "ast_hash": "9610f7da276b31429aea698b25774f00",
+    "semantic_hash": ""
   },
   "engines/midscene/src/worker/deterministic.test.mts": {
     "mtime": 1788773595.2811344,
@@ -780,9 +780,9 @@
     "semantic_hash": "7d14876d49a0941e85307eddd6af45d8"
   },
   "engines/midscene/src/worker/run-scope.mts": {
-    "mtime": 1788922049.6651537,
-    "ast_hash": "2d91f3e319cf590306ab928a832bbda8",
-    "semantic_hash": "2d91f3e319cf590306ab928a832bbda8"
+    "mtime": 1788927615.1509185,
+    "ast_hash": "8ac554ce47a3c18ea291c6cf713cb806",
+    "semantic_hash": ""
   },
   "engines/midscene/src/worker/run-scope.test.mts": {
     "mtime": 1788770683.3350656,
@@ -815,14 +815,14 @@
     "semantic_hash": "7da7c4ff15f37705fa8162a02c5451ba"
   },
   "engines/novaact/gherkai_worker_novaact/deterministic.py": {
-    "mtime": 1788854133.8377073,
-    "ast_hash": "52187b8a5a6e698ece6e6254f1bf43a3",
-    "semantic_hash": "52187b8a5a6e698ece6e6254f1bf43a3"
+    "mtime": 1788927615.1525407,
+    "ast_hash": "4dba03d2072cb2c44eaff788b8969b0c",
+    "semantic_hash": ""
   },
   "engines/novaact/gherkai_worker_novaact/deterministic_steps.py": {
-    "mtime": 1788773594.942755,
-    "ast_hash": "6b800ab00f38a1b1ff0b48daeb713588",
-    "semantic_hash": "6b800ab00f38a1b1ff0b48daeb713588"
+    "mtime": 1788927615.1529057,
+    "ast_hash": "27399fc79f7d79d5ee788cfab18be7e0",
+    "semantic_hash": ""
   },
   "engines/novaact/gherkai_worker_novaact/lib/__init__.py": {
     "mtime": 1788769536.2657616,
@@ -855,9 +855,9 @@
     "semantic_hash": "bbd7d7a20b20ab9f5ba26cd8fa1083a4"
   },
   "engines/novaact/gherkai_worker_novaact/run_scope.py": {
-    "mtime": 1788922049.6648395,
-    "ast_hash": "93353858bb83611c9e614af1c42e8157",
-    "semantic_hash": "93353858bb83611c9e614af1c42e8157"
+    "mtime": 1788927615.1523473,
+    "ast_hash": "069830893ad991a76992e45a84b20105",
+    "semantic_hash": ""
   },
   "engines/novaact/gherkai_worker_novaact/user_steps.py": {
     "mtime": 1788853899.7692533,

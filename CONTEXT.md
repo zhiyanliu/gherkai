@@ -60,7 +60,7 @@ _Avoid_: 把它当精确/像素级回归工具用。
 **点名检查 (Explicit check) vs 确定性锚点 (Deterministic anchor)**:
 两个不同层（ADR 0020）：
 - **点名检查**：QA 想精确核对某项时，直接写**纯自然语言** `Then "价格是 ¥99"`——仍走**默认 AI 判断**（QA 零代码、无路由关键词）。「能否抓某类变更」取决于 QA 点没点名，不是做不到。
-- **确定性锚点**：少数"不容 AI 抖动"的精确检查（URL/DOM），由 **test engineer** 在使用方项目的 `steps/` 目录写 `@deterministic` 注册（Playwright 查询；worker 包内的 `deterministic_steps` 脚手架只留内建示例），不走 AI、不预置（QA 不碰；ADR 0037 决策 4）。
+- **确定性锚点**：少数"不容 AI 抖动"的精确检查（URL/DOM），由**测试开发**在使用方项目的 `steps/` 目录写 `@deterministic` 注册（Playwright 查询；worker 包内的 `deterministic_steps` 脚手架只留内建示例），不走 AI、不预置（QA 不碰；ADR 0037 决策 4）。
 _Avoid_: 以为"不点名也能抓变更"；把它与 A/B 两种不确定性混为一谈；以为 QA 要学特殊措辞（QA 永远只写自然语言）。
 
 **两种不确定性 (A: flakiness / B: 柔性吞变更)**:
@@ -97,7 +97,7 @@ _Avoid_: 混淆"浏览器在云端"（spike 已验证）与"执行进程也在�
 _Avoid_: 以为子进程里跑整个 BDD runner（那是被否的 B2）；把 worker（运行时角色）与 engine（领域概念/目录名）混用。
 
 **确定性 step 注册表 (Deterministic step registry)**:
-test engineer 扩展确定性锚点的落点：在对应 worker 里登记 `(模式 → handler)`（`@deterministic`）。核心发原始 step 文本，worker 先查注册表命中走精确 handler、未命中落 catch-all 走 AI。匹配放 worker（确定性 handler 引擎特定，碰 Playwright/CDP），核心对 step 语义无知。延续 ADR 0020 角色边界（QA 永不碰）。**注册即暴露**：`description`/`example` 是 `@deterministic` 的必填 kwarg，缺则注册时 fail-loud（ValueError）——裸正则对 feature 作者不可读（ADR 0036）。**能力可发现**：worker 另有两个自述入口（`--list-deterministic` dump 清单 / `--match-steps` 批量回答某批 step 命中什么），CLI `list-deterministic --engine` 与 `plan` 的派发标注（含多模式冲突预检）只是转述之——匹配语义仍 100% 在 worker，core/CLI 不持有 pattern。
+测试开发扩展确定性锚点的落点：在对应 worker 里登记 `(模式 → handler)`（`@deterministic`）。核心发原始 step 文本，worker 先查注册表命中走精确 handler、未命中落 catch-all 走 AI。匹配放 worker（确定性 handler 引擎特定，碰 Playwright/CDP），核心对 step 语义无知。延续 ADR 0020 角色边界（QA 永不碰）。**注册即暴露**：`description`/`example` 是 `@deterministic` 的必填 kwarg，缺则注册时 fail-loud（ValueError）——裸正则对 feature 作者不可读（ADR 0036）。**能力可发现**：worker 另有两个自述入口（`--list-deterministic` dump 清单 / `--match-steps` 批量回答某批 step 命中什么），CLI `list-deterministic --engine` 与 `plan` 的派发标注（含多模式冲突预检）只是转述之——匹配语义仍 100% 在 worker，core/CLI 不持有 pattern。
 _Avoid_: 把匹配放进核心（核心只解析结构+调度，不懂 step 语义）；以为 QA 要写确定性 step；以为清单是另一份外置文件（那是双事实源、必与代码里的 pattern 漂移，ADR 0036 被拒方案）。
 
 **Ports 层 (Ports & adapters)**:

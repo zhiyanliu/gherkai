@@ -4,7 +4,7 @@
 
 ## 背景与问题
 
-确定性 step 由 test engineer 在 **worker 侧注册表**维护（[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)：`(模式 → handler)`，TS/Python 两份、模式对称），feature 作者写自然语言、默认走 AI（[0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md)）。信息不对称由此而生：**写 feature 的人无从得知当前引擎支持哪些确定性能力**——哪些措辞会命中精确 handler（确定性、免投票、省钱），哪些落到 AI。此前唯一的"可发现性"是脚手架文件里的代码注释，消费者只能是读代码的人。
+确定性 step 由测试开发在 **worker 侧注册表**维护（[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)：`(模式 → handler)`，TS/Python 两份、模式对称），feature 作者写自然语言、默认走 AI（[0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md)）。信息不对称由此而生：**写 feature 的人无从得知当前引擎支持哪些确定性能力**——哪些措辞会命中精确 handler（确定性、免投票、省钱），哪些落到 AI。此前唯一的"可发现性"是脚手架文件里的代码注释，消费者只能是读代码的人。
 
 **与 [0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md)「QA 零预设」的关系（澄清而非反转）**：零预设说的是「QA **不必学**任何措辞也能写 feature」（AI 兜底），本 ADR 加的是「QA **可以查**当前有什么确定性能力可复用」——可选的查询面不构成预设，默认 AI 的哲学不变。
 

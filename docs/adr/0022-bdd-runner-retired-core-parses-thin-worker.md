@@ -37,7 +37,7 @@
 
 核心**永不 import 引擎**：只 spawn、喂 JSON、读 JSON。这就是 [0016](./0016-execution-architecture-core-lib-run-model.md) `Engine` port 两个 adapter「形状一致」的含义。
 
-## 确定性 step 怎么扩展（test engineer 的扩展点）
+## 确定性 step 怎么扩展（测试开发的扩展点）
 
 > **实现状态（v1.0 当前）**：下述 `@deterministic` 注册表**已落地**，两个引擎对称——Nova `engines/novaact/gherkai_worker_novaact/deterministic.py`（`@deterministic` 装饰器 + `match()`）、Midscene `engines/midscene/src/worker/deterministic.mts`（`deterministic()` + `match()`）。worker 派发每个 step 时**先查注册表**（命中走精确 handler、不投票、可复现），未命中才落 ②内建 URL 导航 / ③AI catch-all。脚手架（`worker/` 下 `deterministic.steps.ts`/`deterministic_steps.py`，见下「迁移」）现各注册一个真实 URL 锚点（`页面地址匹配 "<正则>"`）。命中后：成功→`passed`（无 votes）；handler 抛 `AssertionError`→`failed`/`assertion_failed`；抛其它→`error`；命中多条→`DeterministicConflict`（ADR 0022 最多命中一条）。各有注册表单测背书。
 
@@ -61,7 +61,7 @@ def color_is(ctx, sel, hex):
 
 设计要点：
 
-- **几乎零写法变化**：当时那两个空脚手架（`deterministic.steps.ts` / `deterministic_steps.py`）的归宿——从「被 BDD runner 自动收集」变成「被 worker 注册表收集」，test engineer 还是写个带模式的函数，只把 `@when/@then` 换成我们的 `@deterministic`（外加一对必填的 description/example，[0036](./0036-deterministic-capability-discovery.md)：注册即暴露）。
+- **几乎零写法变化**：当时那两个空脚手架（`deterministic.steps.ts` / `deterministic_steps.py`）的归宿——从「被 BDD runner 自动收集」变成「被 worker 注册表收集」，测试开发还是写个带模式的函数，只把 `@when/@then` 换成我们的 `@deterministic`（外加一对必填的 description/example，[0036](./0036-deterministic-capability-discovery.md)：注册即暴露）。
 - **匹配放 worker，不放核心**：核心只发原始 step 文本；worker 先查自己的确定性表、未命中再走 AI。确定性 handler 是**引擎特定**的（要碰 Playwright 句柄、CDP eval），匹配表跟着 handler 走最内聚；核心保持对 step 语义无知（只管解析结构 + 调度）。
 - **两个引擎对称但各自语言**：确定性检查天然依赖引擎/CDP 的精确能力，**本就该写在对应 worker 里**（midscene=TS+Playwright，nova=Python）。这不是缺陷，是确定性检查的本质（它碰具体引擎精确 API，不像 AI step 引擎无关）。
 - **冲突规则自定**（如「最多命中一条，多条报错」），比 cucumber 的 pattern 歧义可控得多——这正是 B1 退役补丁的同源好处。

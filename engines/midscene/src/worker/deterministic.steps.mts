@@ -7,7 +7,7 @@
 // `deterministic(正则, handler, { description, example })` 注册（元数据必填、缺则 fail-loud——ADR 0036
 // 「注册即暴露」）；worker 启动时 import 本模块，顶层的 deterministic(...) 副作用把锚点登记进表。
 //
-// **本文件不是使用方的定制面**（ADR 0037 决策 4 起）：test engineer 的项目专属锚点写在**使用方项目的
+// **本文件不是使用方的定制面**（ADR 0037 决策 4 起）：测试开发的项目专属锚点写在**使用方项目的
 // `steps/` 目录**（`*.mts`，`import { deterministic } from "@gherkai/worker-midscene"`），由 worker 启动时
 // 加载（见 user-steps.mts）——不再靠改本文件（那是 clone-repo 分发时代的 fork 模式）。这里只留框架自带的
 // 那一条，兼作写法样例。角色边界不变（ADR 0020）：QA 永远只在 .feature 写自然语言、默认走 AI。
@@ -20,7 +20,7 @@
 import { deterministic, DeterministicAssertion } from "./deterministic.mjs";
 
 // 确定性 URL 断言：当前页 URL 须匹配给定正则（精确、不走 AI）。
-// .feature 写法（test engineer 约定的带关键词措辞，与 QA 的纯自然语言 Then 区分）：
+// .feature 写法（测试开发约定的带关键词措辞，与 QA 的纯自然语言 Then 区分）：
 //     Then 页面地址匹配 "/wiki/OpenAI"
 deterministic(
   '页面地址(?:精确)?匹配 "(?<pattern>[^"]+)"', // [^"]+（非 .+）：防 step 里出现第二对引号时贪婪跨引号捕获

@@ -1,6 +1,6 @@
 # Gherkin × (Midscene + Nova Act) × AgentCore Browser
 
-**gherkai** 是一套 UI 自动化测试框架：用 **Gherkin** 写测试意图（QA 零代码），由两个互相独立的 **AI 引擎**（Midscene / Nova Act）执行，浏览器由 **AWS Bedrock AgentCore** 在云端承载。同一份 `.feature` 两个引擎同读；AI 断言可多次投票治抖动；需要精确的检查（URL/DOM）由 test engineer 写成确定性 step，走 Playwright、不走 AI。
+**gherkai** 是一套 UI 自动化测试框架：用 **Gherkin** 写测试意图（QA 零代码），由两个互相独立的 **AI 引擎**（Midscene / Nova Act）执行，浏览器由 **AWS Bedrock AgentCore** 在云端承载。同一份 `.feature` 两个引擎同读；AI 断言可多次投票治抖动；需要精确的检查（URL/DOM）由测试开发写成确定性 step，走 Playwright、不走 AI。
 
 ## 能做什么
 
@@ -127,7 +127,7 @@ RUN_ID=$(gherkai submit my_app.feature --expose-local http://localhost:3000)
 
 - 动作/断言都写**纯自然语言**：`When "搜索 OpenAI"` / `Then "进入了 OpenAI 词条页"` → 默认走 AI（断言按投票取多数）。
 - scope / 引擎 / 超时预算用 **tag**：`@scope:login`（同 scope 共享会话、串行）/ `@engine:midscene|novaact` / `@timeout:120`（该 scope 的墙钟预算秒）。
-- **确定性精确检查**（URL/DOM，不容 AI 抖动）：test engineer 在项目的 `steps/` 目录注册（Nova Act 用 `*.py`、Midscene 用 `*.mts`，同一正则两侧对称），命中走精确判定、不投票；写法见 [`engines/novaact/README.md`](./engines/novaact/README.md) / [`engines/midscene/README.md`](./engines/midscene/README.md)。CLI 按 `--steps-dir` > 环境变量 `GHERKAI_STEPS_DIR` > `./steps` 找到它；任一文件加载失败即拒绝运行。云端跑时 steps 烙进 worker 镜像的 variant，见 [`deploy_aws/README.md`](./deploy_aws/README.md)。
+- **确定性精确检查**（URL/DOM，不容 AI 抖动）：测试开发在项目的 `steps/` 目录注册（Nova Act 用 `*.py`、Midscene 用 `*.mts`，同一正则两侧对称），命中走精确判定、不投票；写法见 [`engines/novaact/README.md`](./engines/novaact/README.md) / [`engines/midscene/README.md`](./engines/midscene/README.md)。CLI 按 `--steps-dir` > 环境变量 `GHERKAI_STEPS_DIR` > `./steps` 找到它；任一文件加载失败即拒绝运行。云端跑时 steps 烙进 worker 镜像的 variant，见 [`deploy_aws/README.md`](./deploy_aws/README.md)。
 - **多行参数**：AI 动作/断言 step 可挂 DataTable / DocString，随 step 一起喂 AI。
 
 示例 feature 在 [`features/`](./features/)。

@@ -244,7 +244,7 @@ def _run_step(nova, scenario_id: str, step: dict, votes_n: int, sink: EventSink)
     （ADR 0027 下沉：act 挂到其所属 step，不再聚合到 scenario 级）。确定性命中/URL 导航步不调 act、无 trajectory。
 
     派发优先级（ADR 0022/0020/0024）：
-      ① 确定性注册表命中（test engineer 注册的精确 handler，不投票、可复现）
+      ① 确定性注册表命中（测试开发注册的精确 handler，不投票、可复现）
       ② 内建 URL 导航（step 含引号内 URL）
       ③ Then → AI 断言 + 投票 / When·Given → AI 动作（默认 catch-all）
     """

@@ -8,14 +8,14 @@
 本模块，顶层的 @deterministic 副作用把锚点登记进表。
 
 **使用方的定制锚点不写在这里**（ADR 0037 决策 4）：本文件是发行包内容、装在 site-packages 里，
-改它等于 fork。使用方（test engineer）把自己的锚点写进**项目里的 `steps/` 目录**（`steps/*.py`，
+改它等于 fork。使用方（测试开发）把自己的锚点写进**项目里的 `steps/` 目录**（`steps/*.py`，
 顶层 `from gherkai_worker_novaact.deterministic import deterministic` 后同样 `@deterministic` 注册），
 worker 启动时按 env `GHERKAI_STEPS_DIR` 加载进**同一张表**（见 `user_steps.py`）。故本文件只保留
 一条示范锚点 + 注释里的写法样例，不承载项目专属内容。撞 pattern 按 ADR 0036 的 conflict 语义处理
 （`plan` 预检暴露），**内建与使用方之间没有优先级覆盖**。
 
 角色边界（ADR 0020）：
-  - 确定性锚点由 test engineer（会写代码的角色）维护；QA 永远只在 .feature 写自然语言
+  - 确定性锚点由测试开发（会写代码的角色）维护；QA 永远只在 .feature 写自然语言
     （默认走 AI catch-all，见 `run_scope.py` `_run_step` 派发③ / ADR 0024「worker 派发」）。
   - 仅当某断言确需精确、不能容忍 AI 非确定性时才加锚点。
 
@@ -38,7 +38,7 @@ from gherkai_worker_novaact.deterministic import deterministic
 def url_matches(ctx, pattern: str) -> None:
     """确定性 URL 断言：当前页 URL 须匹配给定正则（精确、不走 AI）。
 
-    .feature 写法（test engineer 约定的带关键词措辞，与 QA 的纯自然语言 Then 区分）：
+    .feature 写法（测试开发约定的带关键词措辞，与 QA 的纯自然语言 Then 区分）：
         Then 页面地址匹配 "/wiki/OpenAI"
     """
     url = ctx.page.url
