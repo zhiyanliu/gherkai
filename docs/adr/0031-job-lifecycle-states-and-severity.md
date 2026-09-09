@@ -57,7 +57,7 @@ class Status(str, Enum):
 
 实时写（[0030](./0030-realtime-persistence-seam.md)）需要两个**前置态**表示「还没出判定」：`pending`（run 开始时 `create_run` 把每个 job 摆这态）
 / `running`（worker 起了、收到 `scope_started` 后刷这态）。它们和 skipped/aborted 一样**只活在 job 级（`JobState.status` / 进而 `RunState`）**、
-绝不进 `JobResult.status`（JobResult 是终态判定，只会是 passed/failed/error/skipped/aborted）、绝不进 wire。
+绝不进 `JobResult.status`（JobResult 是终态判定，只会是 passed/failed/error/skipped/aborted）、绝不进 wire。**不变量的强制点 = `project_full`**（detached 收尾聚合，[0034](./0034-detached-batch-reconciler.md)）：收尾快照里任一 job 仍非终态即抛、本轮不落任何判定真值（归约中间态用 JobResult 作载体不算违背——只有落库/上 wire 的那份受约束）；同步 run 路径由 schedule 的归约器天然只产终态。
 
 **承载方式**：加进同一个 `Status` enum（`PENDING="pending"` / `RUNNING="running"`），理由同 skipped/aborted（统一类型、serialize/render 单点识别）。
 但与判定态有**本质区别**——它们是**生命周期前置态、不是判定结论**：

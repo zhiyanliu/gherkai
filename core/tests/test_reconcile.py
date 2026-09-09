@@ -181,3 +181,62 @@ def test_launch_failure_isolated_other_job_completes(tmp_path):
     assert state.jobs["a"].status == Status.ERROR
     assert state.jobs["b"].status == Status.PASSED
     assert state.status == Status.ERROR  # 任一 error → run error（ADR 0031 决定三）
+
+
+# ---------- commit-point 写序（ADR 0030 决定三 detached 同守）：判定真值先落、CAS 后 ----------
+
+class _RecordingResultStore:
+    def __init__(self, seq: list, fail: bool = False) -> None:
+        self.seq, self.fail, self.saved = seq, fail, []
+
+    def save_job_result(self, run_id, jr):
+        if self.fail:
+            raise OSError("S3 不可达")
+        self.seq.append(("verdict", jr.scope_id, jr.status))
+        self.saved.append(jr)
+
+
+class _OrderRecordingRunStore(LocalRunStore):
+    def __init__(self, root, seq: list) -> None:
+        super().__init__(root)
+        self.seq = seq
+
+    def try_finalize(self, run_id, status, ended_at):
+        self.seq.append(("finalize", status))
+        return super().try_finalize(run_id, status, ended_at)
+
+
+def test_finalize_writes_verdicts_before_commit_point(tmp_path):
+    """全 done 的 tick：ResultStore 各 job 判定真值**先**落，再 try_finalize（ADR 0030 决定三写序）——看到终态即
+    保证 jobs/*.json 已齐；反序在 detached 下崩在中间就是永久缺失（无人重试）。"""
+    seq: list = []
+    meta = _meta("a", "b")
+    log = SqliteEventLog(tmp_path / "e.db")
+    store = _OrderRecordingRunStore(tmp_path, seq)
+    store.create_run(meta, RunState(run_id="run-1", status=Status.PENDING,
+                                    jobs={s: JobState(s, Status.PENDING) for s in ("a", "b")},
+                                    started_at="t0", high_water_mark=0))
+    rs = _RecordingResultStore(seq)
+    tick("run-1", meta, log, store, FakeLauncher(), max_concurrency=2, now_iso="t1", result_store=rs)
+    _done_events(log, "a"); _done_events(log, "b", base=10)
+    assert tick("run-1", meta, log, store, FakeLauncher(), max_concurrency=2, now_iso="t2", result_store=rs) is True
+    kinds = [x[0] for x in seq]
+    assert kinds == ["verdict", "verdict", "finalize"], seq
+    assert all(jr.status == Status.PASSED for jr in rs.saved) and store.load_run_state("run-1").status == Status.PASSED
+
+
+def test_verdict_write_failure_fails_tick_before_commit_and_retry_heals(tmp_path):
+    """判定真值落库失败 → 异常裸穿、**未** commit（状态仍 running）；下一轮 tick（触发源重试）成功落完并 commit。
+    若反过来先 CAS 再落，失败发生在 commit 之后就没有下一轮了。"""
+    import pytest
+    seq: list = []
+    meta, log, store = _setup(tmp_path, "a")
+    tick("run-1", meta, log, store, FakeLauncher(), max_concurrency=1, now_iso="t1")
+    _done_events(log, "a")
+    with pytest.raises(OSError):
+        tick("run-1", meta, log, store, FakeLauncher(), max_concurrency=1, now_iso="t2",
+             result_store=_RecordingResultStore(seq, fail=True))
+    assert store.load_run_state("run-1").status == Status.RUNNING  # 没 commit
+    healthy = _RecordingResultStore(seq)
+    assert tick("run-1", meta, log, store, FakeLauncher(), max_concurrency=1, now_iso="t3", result_store=healthy) is True
+    assert [jr.scope_id for jr in healthy.saved] == ["a"] and store.load_run_state("run-1").status == Status.PASSED

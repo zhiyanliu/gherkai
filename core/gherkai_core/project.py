@@ -14,6 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from gherkai_core.model import (
+    TERMINAL_STATUSES,
     Event,
     Job,
     JobResult,
@@ -292,12 +293,20 @@ def _reduce_scope(job: Job, recs: list[EventRecord]) -> tuple[JobResult, Status,
     return result, status, max_seq
 
 
+class NonTerminalSnapshot(RuntimeError):
+    """收尾快照里有 job 仍非终态（ADR 0031 决定一·补：JobResult.status 只许终态，强制点在 project_full）。
+
+    正常到不了：tick 只在 plan_next 判全终态时才聚合。到了 = 本次读到的 events 快照落后于判定依据（或写者违约），
+    本轮不落任何判定真值、让触发源重试——绝不把 running/pending 写进 jobs/*.json。"""
+
+
 def project_full(meta: RunMeta, records: list[EventRecord]) -> RunResult:
     """从全量 records 推演出**完整 RunResult**（含各 JobResult 明细，ADR 0034）——finalize 收尾用。
 
     与 `project`（轻量 RunState、供实时投影写/plan_next）共用 `_reduce_scope` 归约；差别只在保留完整明细
-    （scenarios/steps/cost/report_refs）。reconciler finalize 抢到 commit 时用它落 ResultStore（判定真值）+
-    ReportStore（RunReport 聚合），与同步 run 路径的产物对齐。run 级 status 用真实聚合终态（此处是收尾、非投影，
+    （scenarios/steps/cost/report_refs）。tick 在 finalize **CAS 之前**用它落 ResultStore（判定真值，ADR 0030 决定三
+    写序）；宿主在 done 后用它聚合 RunReport。**守 ADR 0031 不变量**：任一 job 非终态即抛 NonTerminalSnapshot、一份
+    判定都不落（前置态绝不进 jobs/*.json）——tick 只在 plan_next 判全终态时才调本函数，正常到不了那一步。run 级 status 用真实聚合终态（此处是收尾、非投影，
     可落终态，与 project_state 的钳制不同）。没 record 的 job（未起）不进 RunResult.jobs（同 schedule 只收跑过的）。
     """
     by_scope: dict[str, list[EventRecord]] = {}
@@ -309,7 +318,10 @@ def project_full(meta: RunMeta, records: list[EventRecord]) -> RunResult:
         recs = by_scope.get(job.scope_id)
         if not recs:
             continue  # 没起过的 job 无明细可落（reconciler 未 launch 或 pending）——不臆造
-        jr, _status, _seq = _reduce_scope(job, recs)
+        jr, status, _seq = _reduce_scope(job, recs)
+        if status not in TERMINAL_STATUSES:
+            raise NonTerminalSnapshot(
+                f"收尾聚合读到 job {job.scope_id!r} 仍为 {status.value}：本次事件快照尚未到终态，本轮不落判定、等重放")
         job_results.append(jr)
 
     run_status = _aggregate([jr.status for jr in job_results])

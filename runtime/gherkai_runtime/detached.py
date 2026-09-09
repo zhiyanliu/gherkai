@@ -21,7 +21,7 @@ from gherkai_core.adapters.event_log import SqliteEventLog
 from gherkai_core.adapters.run_store.local import LocalRunStore
 from gherkai_core.adapters.subprocess_engine import SubprocessEngine
 from gherkai_core.model import Job, RunMeta, Status
-from gherkai_core.reconcile import finalize_artifacts, tick
+from gherkai_core.reconcile import finalize_report, tick
 
 # 接力恢复的判定余量秒（ADR 0034「job timeout」节 claimed_at ①）：超预算这么久才认定 owner 已死。
 # 非正确性参数（误判也收敛正确——owner 尚活时其 timer 同 deadline 早已触发、真退出记录同带 timed_out，
@@ -135,16 +135,16 @@ def run_reconcile_loop(
     tick 幂等——崩了 status --wait 可接力（状态全持久）。全 done（tick 返回 True）即退出（batch shape：
     跑完即停、不常驻）。
 
-    result_store/report_store（可选）：done 后聚合收尾——从 events 全量重放 project_full 构造完整 RunResult，
-    落 ResultStore（判定真值 jobs/*.json）+ ReportStore（RunReport index/manifest），与同步 run 路径产物对齐。
-    幂等（从 events 重放、覆盖写同 key）——多个推进者都 done 都聚合无害。注入 None（测试）则跳过收尾。
+    result_store/report_store（可选）：判定真值（jobs/*.json）由 tick 在 finalize CAS **之前**落（注入给 tick，
+    ADR 0030 决定三写序）；RunReport（index/manifest）在 done 后由 `finalize_report` 写（派生、失败隔离）。
+    两者都幂等（从 events 重放、覆盖写同 key）——多个推进者都 done 都写无害。注入 None（测试）则跳过。
     """
     while True:
         done = tick(run_id, meta, event_log, run_store, launcher, max_concurrency,
-                    now_iso=now_iso_fn())
+                    now_iso=now_iso_fn(), result_store=result_store)
         if done:
-            # 收尾聚合走 core 唯一一份（曾在此双写一份、与 deploy_aws/gherkai_deploy_aws/lambdas/reconciler.py 漂移风险，已合并）
-            finalize_artifacts(run_id, meta, event_log, result_store, report_store, now_iso_fn())
+            # 报告收尾走 core 唯一一份（曾在此双写一份、与 deploy_aws/gherkai_deploy_aws/lambdas/reconciler.py 漂移风险，已合并）
+            finalize_report(run_id, meta, event_log, report_store, now_iso_fn())
             return
         _recover_timed_out_claims(run_id, meta, event_log, run_store, launcher, now_iso_fn())
         time.sleep(poll_interval_s)

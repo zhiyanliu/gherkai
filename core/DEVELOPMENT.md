@@ -29,7 +29,7 @@ core/gherkai_core/
 ├── ports.py      ← Engine / WorkerHandle / EngineResolver / Sink / JobSink / RunStore / ResultStore / ReportStore 接口（组合根注入）
 ├── schedule.py   ← schedule(run_meta, engines, sink, opts, on_job_complete?, on_event?) -> RunResult（同步 run：并发/隔离/超时/优雅停）
 ├── project.py    ← 无状态跑批纯归约投影（ADR 0034）：project(events)→RunState/JobResult + plan_next(state)→actions + reduce_event（与 schedule 共用一份归约）+ projected_run_status（投影写该落的 run 级 status，两 RunStore adapter 共用）
-├── reconcile.py  ← 无状态跑批推进编排（ADR 0034）：tick(run_id, meta, event_log, run_store, launcher, N)——幂等、多触发源、CAS/HWM 条件写；起 job 经注入 Launcher（core 不 import boto3）+ finalize_artifacts(...)（done 后聚合收尾，cloud Lambda/local per-run 两宿主共用）
+├── reconcile.py  ← 无状态跑批推进编排（ADR 0034）：tick(run_id, meta, event_log, run_store, launcher, N, result_store=…)——幂等、多触发源、CAS/HWM 条件写；起 job 经注入 Launcher（core 不 import boto3）；finalize 分支在 CAS 前落判定真值（ADR 0030 决定三写序）+ finalize_report(...)（done 后写 RunReport，cloud Lambda/local per-run 两宿主共用）
 ├── persist.py    ← RunPersistence：编排 Store ports 随进度实时落库（commit-point 写序，ADR 0030）
 └── adapters/
     ├── subprocess_engine.py        ← Engine 实装（local）：spawn worker 子进程 + 读事件流

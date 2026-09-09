@@ -311,3 +311,13 @@ def test_exit_none_without_events_is_error_not_pending_nor_running():
     meta = _meta("a")
     state = project(meta, [_exit("a", None)])
     assert state.jobs["a"].status == Status.ERROR
+
+
+def test_project_full_refuses_non_terminal_snapshot():
+    """ADR 0031 决定一·补的强制点：收尾快照里 job 仍 running（只见 scope_started）→ 抛、一份判定都不落，
+    绝不把前置态写进 jobs/*.json。"""
+    import pytest
+    from gherkai_core.project import NonTerminalSnapshot
+    recs = [_ev("a", 1, ScopeStarted(scope_id="a", session_id="s"))]
+    with pytest.raises(NonTerminalSnapshot):
+        project_full(_meta("a"), recs)

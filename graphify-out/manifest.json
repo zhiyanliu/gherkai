@@ -60,8 +60,8 @@
     "semantic_hash": "a2ebccc49ced186f7a46ee3f46ade05f"
   },
   "core/tests/test_cloud_reconcile.py": {
-    "mtime": 1788943768.7616653,
-    "ast_hash": "d0f0b6666327bc525b769c2c8c499a1c",
+    "mtime": 1788945438.2786689,
+    "ast_hash": "53c09b14493b1304b3fee43db5205196",
     "semantic_hash": ""
   },
   "core/tests/test_conditional_writes.py": {
@@ -95,9 +95,9 @@
     "semantic_hash": "ece69885481b53c5ba7728733937c711"
   },
   "core/tests/test_project.py": {
-    "mtime": 1788766077.6133184,
-    "ast_hash": "9a8dd73367fbf414807c544ec8df0cba",
-    "semantic_hash": "9a8dd73367fbf414807c544ec8df0cba"
+    "mtime": 1788945554.214663,
+    "ast_hash": "75f3d2b1372e28246d2347d6e1c556c6",
+    "semantic_hash": ""
   },
   "core/tests/test_reconcile.py": {
     "mtime": 1788766077.608647,
@@ -125,9 +125,9 @@
     "semantic_hash": "8b2f403075db1c6b772bdd2c89ec8b3c"
   },
   "core/tests/test_sqlite_event_log.py": {
-    "mtime": 1788766077.6137135,
-    "ast_hash": "0571a73431de4d3f418d78ef5cb834d7",
-    "semantic_hash": "0571a73431de4d3f418d78ef5cb834d7"
+    "mtime": 1788945438.2785554,
+    "ast_hash": "365d46e984146ea0397f2344cee51c06",
+    "semantic_hash": ""
   },
   "core/tests/test_stores.py": {
     "mtime": 1788842145.8193476,
@@ -415,8 +415,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0034-detached-batch-reconciler.md": {
-    "mtime": 1788938003.318993,
-    "ast_hash": "878bbf977c3cfea2d8b584b4635232cc",
+    "mtime": 1788945352.439875,
+    "ast_hash": "834cc5e692f0eb90de0847647eb6fd22",
     "semantic_hash": ""
   },
   "docs/doc-health-review.md": {
@@ -500,9 +500,9 @@
     "semantic_hash": ""
   },
   "core/gherkai_core/adapters/cloud_launcher.py": {
-    "mtime": 1788842461.948193,
-    "ast_hash": "400178d5c3908cf64a09f8415473c411",
-    "semantic_hash": "400178d5c3908cf64a09f8415473c411"
+    "mtime": 1788945352.441253,
+    "ast_hash": "dcc332f199373c716437f072cf0ab42b",
+    "semantic_hash": ""
   },
   "core/gherkai_core/adapters/event_log/__init__.py": {
     "mtime": 1788766077.630543,
@@ -510,14 +510,14 @@
     "semantic_hash": "9a5d0f19084bf1edefae72124a1068ae"
   },
   "core/gherkai_core/adapters/event_log/ddb.py": {
-    "mtime": 1788943632.753128,
-    "ast_hash": "4028c334216a049784837dd59e99c275",
+    "mtime": 1788945352.441381,
+    "ast_hash": "aba2825d668dd9519f2d240425912243",
     "semantic_hash": ""
   },
   "core/gherkai_core/adapters/event_log/sqlite.py": {
-    "mtime": 1788766077.6307702,
-    "ast_hash": "724213a28bff1dea63b77ded2ec95aa0",
-    "semantic_hash": "724213a28bff1dea63b77ded2ec95aa0"
+    "mtime": 1788945352.4416287,
+    "ast_hash": "71b21d99bb54b4b5c5cdf0d30c8f34c5",
+    "semantic_hash": ""
   },
   "core/gherkai_core/adapters/fargate_engine.py": {
     "mtime": 1788842014.0565794,
@@ -605,14 +605,14 @@
     "semantic_hash": ""
   },
   "core/gherkai_core/project.py": {
-    "mtime": 1788943632.7523408,
-    "ast_hash": "2eae69a352865b13ab887c03ab1d9301",
+    "mtime": 1788945485.4560347,
+    "ast_hash": "5828a2bce6f9cb602e2d12294fa25697",
     "semantic_hash": ""
   },
   "core/gherkai_core/reconcile.py": {
-    "mtime": 1788839611.6611907,
-    "ast_hash": "049f4aedb89c9a208075323740c97024",
-    "semantic_hash": "049f4aedb89c9a208075323740c97024"
+    "mtime": 1788945352.4409616,
+    "ast_hash": "a2f40c1643c596b109d59b011959009c",
+    "semantic_hash": ""
   },
   "core/gherkai_core/schedule.py": {
     "mtime": 1788943632.7528415,
@@ -980,9 +980,9 @@
     "semantic_hash": ""
   },
   "deploy_aws/gherkai_deploy_aws/lambdas/exit_observer.py": {
-    "mtime": 1788837187.8046012,
-    "ast_hash": "740aa609a903bcae4c47d55d59e2fa27",
-    "semantic_hash": "740aa609a903bcae4c47d55d59e2fa27"
+    "mtime": 1788945352.4419043,
+    "ast_hash": "7a12da8f441bfb2cda80b133fd97e087",
+    "semantic_hash": ""
   },
   "deploy_aws/gherkai_deploy_aws/lambdas/reconciler.py": {
     "mtime": 1788943632.7533076,
@@ -1035,8 +1035,8 @@
     "semantic_hash": "1a35225aedbbc0587a6bbca8a2919630"
   },
   "deploy_aws/tests/test_lambda_handlers.py": {
-    "mtime": 1788943768.761552,
-    "ast_hash": "55b1dccba95674e048090b13850ce459",
+    "mtime": 1788945398.0019186,
+    "ast_hash": "f3391d73b81d70f267435ad83aaef024",
     "semantic_hash": ""
   },
   "deploy_aws/gherkai_deploy_aws/container.py": {

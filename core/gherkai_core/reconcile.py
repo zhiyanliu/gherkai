@@ -16,8 +16,8 @@ from __future__ import annotations
 from typing import Protocol
 
 from gherkai_core.model import Job, RunMeta
-from gherkai_core.ports import RunStore
-from gherkai_core.project import plan_next, project
+from gherkai_core.ports import ResultStore, RunStore
+from gherkai_core.project import plan_next, project, project_full
 
 
 class EventLog(Protocol):
@@ -46,29 +46,20 @@ class Launcher(Protocol):
     def launch(self, job: Job) -> None: ...
 
 
-def finalize_artifacts(run_id, meta, event_log, result_store, report_store, now_iso: str) -> None:
-    """done 后聚合判定真值 + RunReport（幂等；ADR 0034 收尾，对齐同步 run 路径产物）。
+def finalize_report(run_id, meta, event_log, report_store, now_iso: str) -> None:
+    """done 后写 RunReport（派生视图，**永远最后**；ADR 0030 决定三 / 0034 收尾）。宿主在 tick 返回 done 后调。
 
-    tick 的 try_finalize 只写 RunStore 总 status；判定明细（ResultStore）与 RunReport（ReportStore）在此补：
-    从 events 全量重放 project_full → RunResult，逐 job save_job_result + report_store.write。幂等（重放 +
-    覆盖写同 key）——多个推进者都 done 都聚合无害。store 注入 None（测试）则跳过对应半边；ReportStore 写失败
-    隔离（判定真值已在 ResultStore、report 可从 RunResult 重建，ADR 0030 决定三）。
-    **唯一一份**（cloud Lambda / local per-run 两宿主同调此处）——曾双写于 detached.py 与 deploy_aws/gherkai_deploy_aws/lambdas/reconciler.py，
-    按「不复制归约/收尾逻辑」合并（ADR 0034 core 拆分）。纯编排：只调 project_full 与注入的 store，不 import boto3。
+    判定真值（ResultStore 各 job）**不在此写**——它在 tick 的 finalize 分支、CAS 之前落（写序见 `tick`）；这里只剩
+    派生的报告：从 events 全量重放 project_full → RunResult → report_store.write。幂等（重放 + 覆盖写同 key）——多个
+    推进者都 done 都写无害。写失败隔离：判定真值已随 commit 落定、报告可从 RunResult 重建，不让它击穿已 done 的 run。
+    **唯一一份**（cloud Lambda / local per-run 两宿主同调此处，ADR 0034 core 拆分）。纯编排：不 import boto3。
     """
-    if result_store is None and report_store is None:
+    if report_store is None:
         return
-    from gherkai_core.project import project_full
-
-    result = project_full(meta, event_log.records())
-    if result_store is not None:
-        for jr in result.jobs:
-            result_store.save_job_result(run_id, jr)
-    if report_store is not None:
-        try:
-            report_store.write(run_id, result, created_at=now_iso)
-        except Exception:
-            pass  # 派生视图写失败不击穿判定真值（ADR 0030 决定三）
+    try:
+        report_store.write(run_id, project_full(meta, event_log.records()), created_at=now_iso)
+    except Exception:
+        pass  # 派生视图写失败不击穿判定真值（ADR 0030 决定三）
 
 
 def tick(
@@ -80,6 +71,7 @@ def tick(
     max_concurrency: int,
     *,
     now_iso: str,
+    result_store: ResultStore | None = None,
 ) -> bool:
     """推进一步。返回 run 是否已达终态（全 done 且 finalize 成功/已被别人 finalize）。
 
@@ -88,7 +80,9 @@ def tick(
     2. project_state() HWM 条件写落 RunState（stale 被挡、无害——下轮重读重推，机制三）。
     3. plan_next() → 动作：
        - start：try_claim_job() CAS 抢占（机制四），成功的那个（本实例）才 launcher.launch(job) 真起。
-       - finalize：try_finalize() 状态机单调条件写（机制三），成功=本实例 commit（触发 report 由组合根收尾）。
+       - finalize：先从**同一份** records 快照聚合各 job 判定真值落 result_store（注入时；commit-point 写序，ADR 0030
+         决定三 detached 同守），再 try_finalize() 状态机单调条件写（机制三）commit；RunReport 由宿主在 done 后写
+         （`finalize_report`）。聚合/落库异常裸穿：commit 前失败 → 本轮 tick 失败、触发源重试；commit 后无人重试。
     """
     records = event_log.records()
     # 基线 = 当前 RunStore 态：让 project 的 job 态单调不倒退（已 CAS claim 成 running 但 worker 还没吐
@@ -118,9 +112,15 @@ def tick(
                     event_log.record_exit(act.scope_id, PLATFORM_FAILED_EXIT)
         elif act.kind == "finalize":
             # 全 job 达终态（plan_next 只在此时给 finalize 动作）→ run 已 done。
-            # try_finalize 状态机单调条件写：True=本实例抢到 commit（负责 report 聚合）；False=别人已 finalize
-            # （幂等）。**两种都返回 done=True**——run 确已达终态，不能因「别人抢先 finalize」就让本推进者
-            # （如 status --wait 接力）返回 False 而永远等不到 done（真跑 status --wait 死循环复现）。
+            # ① 判定真值先落（ADR 0030 决定三写序）：用本 tick 已读的 records（与 state 同一快照，不再读一次），
+            #    project_full 逐 job 落 ResultStore；它对非终态 job 抛（ADR 0031 不变量守卫）——异常裸穿本 tick，
+            #    让触发源重试；绝不先 CAS 再补（CAS 之后无人重试，产物缺失即永久）。多推进者并发都落、幂等覆盖同 key。
+            if result_store is not None:
+                for jr in project_full(meta, records).jobs:
+                    result_store.save_job_result(run_id, jr)
+            # ② try_finalize 状态机单调条件写：True=本实例抢到 commit；False=别人已 finalize（幂等）。
+            #    **两种都返回 done=True**——run 确已达终态，不能因「别人抢先 finalize」就让本推进者
+            #    （如 status --wait 接力）返回 False 而永远等不到 done（真跑 status --wait 死循环复现）。
             run_store.try_finalize(run_id, state.status, now_iso)
             return True
     return False

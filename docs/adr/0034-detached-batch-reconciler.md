@@ -25,7 +25,8 @@
 |---|---|---|---|
 | **events 表** | 真值日志 | worker（执行事件）+ **退出观察者**（退出事件） | reconciler |
 | **`RunState`** | 物化读视图 | **唯一写者 = reconciler** | 外部（`status`/WebUI）**只读** |
-| **RunReport** | 派生产物（永远最后） | reconciler 在 `finalize` 时聚合（[0027](./0027-runreport-aggregation-index.md)） | 人 |
+| **ResultStore（jobs/*.json）** | 判定真值的持久副本（events 可重放重建） | reconciler 在 finalize **CAS 之前**从同一份 events 快照落（写序 [0030](./0030-realtime-persistence-seam.md) 决定三） | CI/人（按 scope 取单 job） |
+| **RunReport** | 派生产物（永远最后） | reconciler 在 finalize CAS **之后**聚合（[0027](./0027-runreport-aggregation-index.md)），失败隔离 | 人 |
 
 ## 命令形态
 
@@ -87,7 +88,8 @@ gherkai run <features>    # 原阻塞皮 = 同进程 schedule() 驱动循环（T
      ① 读该 run 全量 events → 纯推演完整 RunState
      ② HWM 条件写落 RunState（挡 stale 覆盖）
      ③ running<max_concurrency 且有 pending：CAS(pending→running) 抢一个 → RunTask 启下一个
-     ④ 全 job 终态：finalize(写总 status) + 聚合 RunReport
+     ④ 全 job 终态：同一份 events 快照 → 落各 job 判定真值（ResultStore）→ finalize CAS 写总 status（commit point）
+        → 聚合 RunReport（派生、失败隔离）。写序 [0030](./0030-realtime-persistence-seam.md) 决定三：CAS 前失败可重试、CAS 后失败无人重试
 5. 级联：下一 task STOPPED → 再触发 3-4 → … 直到全 done
 ```
 
@@ -214,7 +216,7 @@ adapter/组合根（Lambda handler / per-run 进程，注入具体 client）：
 
 **core 只吐「当前状态」与「建议动作」，绝不持 store、不 import boto3、不依赖执行环境。** Lambda handler 是 cloud 组合根（cold-start 读 env 造 adapter 注入纯 reconciler——**仍是组合根注入，不是 ports 内部 env-sniff 全局单例**，[0016](./0016-execution-architecture-core-lib-run-model.md) 禁的 GlobalConfigManager 反模式要在评审时守住别退化成它）；per-run 进程是 local 组合根。归约码作纯 core 函数被两宿主 import 复用 = 「不复制归约逻辑」的正解。
 
-**时钟也只一份：三宿主（前台 `run` 的 CLI / local per-run 进程 / 推进器 Lambda）落库时间戳一律调 `compose.now_iso()`**，反向解析一律 `compose.parse_iso()`（core 不取时钟——时间戳由组合根算好传进 `tick`/`finalize_artifacts`，[0016](./0016-execution-architecture-core-lib-run-model.md)）。曾各写一份 `_now_iso`、两种 ISO 格式（`isoformat()` 的 `+00:00` vs `strftime` 的 `…Z`），使**同一份 RunState 内** `started_at`（submit 侧写）与 `claimed_at`/`ended_at`（推进器写）格式不同——`status --json` 按 backend 给出不同格式的同名字段，机读消费者被迫兼容两种。「不复制归约逻辑」同理适用于「不复制取时钟」：多宿主同写一份数据结构时，**格式真源必须唯一**。
+**时钟也只一份：三宿主（前台 `run` 的 CLI / local per-run 进程 / 推进器 Lambda）落库时间戳一律调 `compose.now_iso()`**，反向解析一律 `compose.parse_iso()`（core 不取时钟——时间戳由组合根算好传进 `tick`/`finalize_report`，[0016](./0016-execution-architecture-core-lib-run-model.md)）。曾各写一份 `_now_iso`、两种 ISO 格式（`isoformat()` 的 `+00:00` vs `strftime` 的 `…Z`），使**同一份 RunState 内** `started_at`（submit 侧写）与 `claimed_at`/`ended_at`（推进器写）格式不同——`status --json` 按 backend 给出不同格式的同名字段，机读消费者被迫兼容两种。「不复制归约逻辑」同理适用于「不复制取时钟」：多宿主同写一份数据结构时，**格式真源必须唯一**。
 
 ## Engine port 演进：pull-iterate → 增出 fire-and-forget（已实装）
 
