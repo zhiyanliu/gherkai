@@ -6,7 +6,7 @@
 
 ## 判断
 
-**唯一跨引擎共享的是 `features/`（Gherkin 用例文本）**，即 [0005](./0005-single-shared-feature-file.md) 的单一事实源。**引擎的实现代码不跨引擎共享**，各自留在 `engines/midscene/` / `engines/novaact/` 内。
+**唯一跨引擎共享的是 `features/`（Gherkin 用例文本）**，即 [0005](./0005-single-shared-feature-file.md) 的单一事实源。跨引擎共享的**框架代码**仍止于此；使用方侧另有一个跨引擎共享的**约定面**——项目 `steps/` 目录（两引擎扫同一目录、正则成对、文件各按扩展名分属引擎），见 [0037](./0037-distribution-and-packaging.md) 决策 4。**引擎的实现代码不跨引擎共享**，各自留在 `engines/midscene/` / `engines/novaact/` 内。
 
 ## 为什么代码不跨引擎共享——不只是"语言不同"
 

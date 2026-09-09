@@ -17,7 +17,7 @@
 
 2. **确定性锚点 = 脚手架，QA 零预设**：少数"必须精确、不容 AI 抖动"的断言（URL/DOM 精确查），做成脚手架文件 `engines/midscene/src/worker/deterministic.steps.mts`（Midscene）/ `engines/novaact/gherkai_worker_novaact/deterministic_steps.py`（Nova Act），与各引擎 worker 主模块同级（分别与 `run-scope.mts` / `run_scope.py` 同目录；迁移史见 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)「迁移」条）；使用方自己的锚点写在项目 `steps/` 目录（[0037](./0037-distribution-and-packaging.md) 决策 4），内含**说明注释**教测试开发怎么加、怎么和 `.feature` 呼应。
    - **对 QA 零预设**：QA 永不碰确定性锚点、不学任何措辞——锚点由**测试开发角色**按真实需求维护（避免过度设计，同 [0018](./0018-generic-steps-capability.md) 删"取数原语"的教训）。
-   - **落地现状（[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md) 决定，非当初"空脚手架"）**：脚手架现由测试开发各内置**一个**演示/验证用 URL 锚点 `页面地址(?:精确)?匹配 "<正则>"`（`features/deterministic_anchor.feature` 实跑验证）；脚手架文件本身与 worker 主模块同目录、由 worker import 触发注册进注册表（锚点仍写在脚手架文件里，注册表只是收集机制）——锚点由测试开发维护、非 QA 预设，故不违背"QA 零预设"。当初"空脚手架、零具体锚点"的设想已被此演示锚点取代。**注册表现同时是能力自述面**（[0036](./0036-deterministic-capability-discovery.md)：注册即暴露——`@deterministic` 的 description/example 必填、QA 可用 `list-deterministic` 主动查已有锚点）：**「主动查」不等于「预设措辞」**，本条"QA 零预设"不变量仍成立。
+   - **落地现状**：脚手架现各内置**一个**演示/验证用 URL 锚点 `页面地址(?:精确)?匹配 "<正则>"`（`features/deterministic_anchor.feature` 实跑验证），取代当初"空脚手架、零具体锚点"的设想；落地形态与真实路径见 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)「实现状态」段——**锚点仍写在脚手架文件里、注册表只是收集机制**（实装偏差纠正见 0022「迁移」条），锚点由测试开发维护、非 QA 预设，"QA 零预设"不破。**注册表现同时是能力自述面**（[0036](./0036-deterministic-capability-discovery.md)：注册即暴露——`@deterministic` 的 description/example 必填、QA 可用 `list-deterministic` 主动查已有锚点）：**「主动查」不等于「预设措辞」**，本条"QA 零预设"不变量仍成立。
    - 两个引擎脚手架对齐。
 
 3. **URL 形态自动分流（导航不写死动词）**：QA 写到 URL 时（如 `Given 打开 "https://..."` / `访问 "https://..."` / `前往 "https://..."`），框架**按 step 文本里有没有 URL 字面量**（引号内 `https?://…`）自动分流，**不锁动词**：

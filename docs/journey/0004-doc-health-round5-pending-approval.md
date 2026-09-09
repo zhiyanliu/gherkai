@@ -69,7 +69,7 @@
 
 ### docs/adr/0020-step-phrasing-default-ai-deterministic-scaffold.md
 
-- **[P38] approve_reduced** · 原句：「脚手架文件本身迁入 `engines/*/worker/`、由 worker import 触发注册进注册表（锚点仍写在脚手架文件里，注册表只是收集机制）——锚点由测试开发维护、非 QA 预设，故不违背"QA 零预设"。」
+- **[P38] approve_reduced**（**已随主观发现 [25] 落地**：第 20 行已压成结论 + 0022 指针 + 保留两条不变量，无需再动） · 原句：「脚手架文件本身迁入 `engines/*/worker/`、由 worker import 触发注册进注册表（锚点仍写在脚手架文件里，注册表只是收集机制）——锚点由测试开发维护、非 QA 预设，故不违背"QA 零预设"。」
   - 提案改法：把第 20 行「落地现状」条压成两句：①「脚手架现各内置一个演示/验证用 URL 锚点 `页面地址(?:精确)?匹配 "<正则>"`（`features/deterministic_anchor.feature` 实跑验证），取代当初『空脚手架、零具体锚点』的设想；锚点仍由测试开发维护，『QA 零预设』不破。」②保留「注册表现同时是能力自述面（0036：注册即暴露——description/example 必填、QA 可用 `list-deterministic` 主动查）：『主动查』不等于『预设措辞』，本条不变量…
   - 复核缩小：落点重述确属沉积（第 3 行 Status 头、第 18 行各写过一遍且都带 0022「迁移」指针），可压；但被引句里的括注「（锚点仍写在脚手架文件里，注册表只是收集机制）」是防误读护栏，不能随落点一起删——0022 的标题字面就是「确定性 step = worker 注册表」，这条括注正是 0022 第 82 行「实装偏差纠正」在 0020 侧的落点，唯一其它副本只在 Status 头（元信息层），正文读者读到第 20 行「落地现状」条时若无它，会以为锚点住在注册表里。缩小后的改法：①「脚手架现各内置一个演示/验证用 URL 锚点 `页面地址(?:精确)?匹配 "<正则>"`（`features/deterministic_anchor.feature` 实跑验证），取代当初『空脚手架、零具体锚点』的设想；**锚点仍写在脚手架文件里、注册表只是收集机制**（实装偏差纠正见 0022「迁移」条），锚点由测试开发维护，『QA 零预…
 
@@ -186,7 +186,7 @@
   - 提案改法：裸 SDK 列举压成指针（同一列举在 REFERENCES.md 与 0010 ③ 各有更权威版本）。
   - 复核缩小：不整删，替换为「布尔之外的取结构化路径（取数/取串等）及两个引擎的对称映射与边界，见 [0018]；Midscene 该家族的 API 面与 .d.ts 位置见 [REFERENCES]」——须保留指向 0018 的正向指针（补 0014→0018 缺失的一环），不动 0014:16 的反模式句。
 
-## 二、主观发现待批（5 条）
+## 二、主观发现（5 条）——**已批、已落**（同批 commit）
 
 - **[14] docs/adr/0013-cross-engine-sharing-boundary.md · BOUNDARY** · 「**唯一跨引擎共享的是 `features/`（Gherkin 用例文本）**，即 [0005](./0005-single-shared-feature-file.md) 的单一事实源。」
   - 问题：0013 自称是「什么该共享、什么不该」的固定判断处，但共享面清单只列 `features/`，未纳入 ADR 0037 决策 4 后新增的第二个跨引擎共享面——使用方项目的 `steps/` 目录（两引擎扫同一目录、正则成对）。未来读者拿 0013 回答「X 该不该跨引擎共享」会得到不完整的地图。
@@ -208,7 +208,7 @@
   - 问题：guide 正文越界复述决策理由：这段（连同紧随的「local 无 cap：……没有第二方需要保护」与「不拦提交……故退 2」的取舍）几乎逐句复制 ADR 0034 机制四的 why/trade-off，违反本文自己声明的「只讲 how、不复述 why，why 只给指针」，形成双源、日后各自漂移。
   - 建议：正文只留 how：「并发上限 = min(definition 的 `RunMeta.max_concurrency`, 部署侧 cap)；cap = reconciler/kicker Lambda env `MAX_CONCURRENCY`（IaC 设，当前 8）；local 无 cap；`submit --backend cloud` preflight 超 cap 只提示不拦（REPORT_DIR 不一致才退 2）」；把「为何 cap 归部署方 / local 为何无…
 
-## 三、UNCERTAIN（1 条，方法文档范围枚举，请裁定）
+## 三、UNCERTAIN（1 条）——**已批、已落**（同批 commit）
 
 - **[93] docs/doc-health-review.md** · 「覆盖范围：**全部项目文档**——不预设"只有某几类相关"，凡人/AI 会消费的项目 Markdown 都在内：」
   - 问题：覆盖范围清单对真值集做差集后漏两项：`docs/doc-health-review.md` 与 `docs/code-health-review.md` 自身（两份方法文档也是 AI 消费的项目 Markdown，且互为姊妹、与 `.claude/commands/` 摘要成对，最需要一致性校准），清单里无任何条目点到它们。

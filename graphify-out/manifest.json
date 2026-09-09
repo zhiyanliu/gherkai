@@ -235,8 +235,8 @@
     "semantic_hash": "52a6541e1d49d5f31ae4c3917adbe073"
   },
   "docs/adr/0020-step-phrasing-default-ai-deterministic-scaffold.md": {
-    "mtime": 1788935878.311511,
-    "ast_hash": "d7d620fc0118d1973cabb1aa0b2fc695",
+    "mtime": 1788937078.0398602,
+    "ast_hash": "ae0e5beac6780b447de074ac413a1a08",
     "semantic_hash": ""
   },
   "docs/adr/0025-plan-module-feature-to-jobs.md": {
@@ -340,13 +340,13 @@
     "semantic_hash": "87df9864ab9368a37317714f853b6da0"
   },
   "docs/adr/0013-cross-engine-sharing-boundary.md": {
-    "mtime": 1788773594.478966,
-    "ast_hash": "09f677a3444a49b65bae32c1baa84f41",
-    "semantic_hash": "09f677a3444a49b65bae32c1baa84f41"
+    "mtime": 1788937078.0392237,
+    "ast_hash": "9e4aed71df0a38f9722f3966d2083537",
+    "semantic_hash": ""
   },
   "docs/adr/0014-ai-first-assertions.md": {
-    "mtime": 1788935769.9876564,
-    "ast_hash": "e5a0a53b00051aab19b94072341f094b",
+    "mtime": 1788937078.03952,
+    "ast_hash": "9b5c817f3716d76be052142f8a0e01ab",
     "semantic_hash": ""
   },
   "docs/adr/0015-v1-positioning-smoke-not-regression.md": {
@@ -420,8 +420,8 @@
     "semantic_hash": ""
   },
   "docs/doc-health-review.md": {
-    "mtime": 1788935700.78529,
-    "ast_hash": "c7c9178920a7874f664dd0e62e6c8e93",
+    "mtime": 1788937078.0408235,
+    "ast_hash": "6e91d414977bdf80c5297b133053ac89",
     "semantic_hash": ""
   },
   "engines/midscene/README.md": {
@@ -455,9 +455,9 @@
     "semantic_hash": ""
   },
   "docs/guides/execution-and-reconciliation.md": {
-    "mtime": 1788922049.6607442,
-    "ast_hash": "bbe5d1e63e61a601565b7526ff27d56b",
-    "semantic_hash": "bbe5d1e63e61a601565b7526ff27d56b"
+    "mtime": 1788937078.0405526,
+    "ast_hash": "4ffd6ff3f8113942fd2133de82a2c1aa",
+    "semantic_hash": ""
   },
   "docs/adr/0037-distribution-and-packaging.md": {
     "mtime": 1788936013.426941,
@@ -1080,8 +1080,8 @@
     "semantic_hash": "0f2c24660243dea3fda743a7f38ba29a"
   },
   "cli/DEVELOPMENT.md": {
-    "mtime": 1788935700.7874246,
-    "ast_hash": "043b08e9618005579eb7be150736316f",
+    "mtime": 1788937078.0401413,
+    "ast_hash": "ec22157c5b4a89b9914a37f5f931598d",
     "semantic_hash": ""
   },
   "deploy_aws/DEVELOPMENT.md": {
@@ -1140,8 +1140,8 @@
     "semantic_hash": ""
   },
   "docs/journey/0004-doc-health-round5-pending-approval.md": {
-    "mtime": 1788936201.5481367,
-    "ast_hash": "cc96a697f9207a4e8f5543d1994591ff",
+    "mtime": 1788937078.0412102,
+    "ast_hash": "4edf7f78ab9640f2b478e4f76b2e274a",
     "semantic_hash": ""
   }
 }

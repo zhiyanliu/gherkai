@@ -52,7 +52,7 @@ uv run pytest              # 仓库根：全部 workspace 成员
 cd cli && uv run pytest -q # 只跑本包（cwd 决定收集范围）
 ```
 
-`cli/tests/test_package_readmes.py` 是「包 README = 发行包长描述」的护栏（零 ADR/决策号/内部机制名、零相对链接、每个包目录一份 `DEVELOPMENT.md`）；`cli/tests/test_user_facing_messages.py` 管产品面文案不带内部指代。
+`cli/tests/test_package_readmes.py` 是「包 README = 发行包长描述」的护栏（零 ADR/决策号/内部机制名、零相对链接、每个包目录一份 `DEVELOPMENT.md`；另守根 `README.md` 与各包 pyproject/package.json 的 `description`——PyPI/npm 页顶 Summary——同样零内部指代）；`cli/tests/test_user_facing_messages.py` 管产品面文案不带内部指代。
 
 ## 实时落库
 

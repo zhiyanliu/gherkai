@@ -51,6 +51,7 @@ ADR/CONTEXT 是随构建**逐步长起来**的：每次在前人文档上叠加�
 - 全部 `DEVELOPMENT.md`（根 / `cli` / `core` / `runtime` / `deploy_aws` / `engines/*`，contributor 向，与同目录 README 成对——判据见上「按文档类型的复盘侧重」）
 - `CLAUDE.md`（项目约定；**只查 DEADLINK / STALE**——它点名的护栏测试文件、ADR 编号、目录名是否仍存在、与所指 ADR 是否一致。规则内容本身是决策，不在复盘里改）
 - `docs/journey/`（staging 区，可为空；**只做生命周期审计**：非空时逐个判「该吸收进 ADR / code 后删」还是「任务仍在推进、留」，不做密度 / 提纯——判据在 CLAUDE.md 文档纪律 journey 条「任务收尾即审计点」）
+- `docs/doc-health-review.md` / `docs/code-health-review.md`（两份复盘方法文档自身：只查 DEADLINK / STALE / 内部矛盾 + 与 `.claude/commands/` 摘要一致性；方法内容本身是决策，不在复盘里改——与 CLAUDE.md 同款口径）
 - `docs/guides/*.md`（给人的阅读理解层，派生视图——判据侧重见下「按文档类型的复盘侧重」）
 - **技术笔记/配方 + 工具手册**（如 `engines/midscene/spikes/SIGV4-FETCH-RECIPE.md`、`tools/e2e_harness.md`）——与代码同居、AI 照它接线/照它操作，**极易 STALE**（含可运行代码片段 + 命令 + 前置条件 + 踩坑点 + 源码路径）。
 - 未来新增的 docs/ 与子工程根下文档同样纳入（本任务名"文档健康度"、不焊死在某几类上——每次 `find . -name "*.md"` 排除 node_modules / .venv / .pytest_cache / **graphify-out**（含 wiki/，工具生成物）扫一遍，别漏新文件）。
