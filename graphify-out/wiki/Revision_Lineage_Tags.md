@@ -9,7 +9,7 @@
 
 ## Relationships
 
-- [Worker Image Push Workflow](Worker_Image_Push_Workflow.md) (1 shared connections)
+- [Worker Image Management](Worker_Image_Management.md) (1 shared connections)
 
 ## Source Files
 

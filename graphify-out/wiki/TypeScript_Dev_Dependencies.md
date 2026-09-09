@@ -12,7 +12,7 @@
 
 ## Relationships
 
-- [Midscene Package Manifest](Midscene_Package_Manifest.md) (1 shared connections)
+- [NPM Package Manifest](NPM_Package_Manifest.md) (1 shared connections)
 
 ## Source Files
 

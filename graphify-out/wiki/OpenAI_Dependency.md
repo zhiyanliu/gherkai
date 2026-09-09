@@ -9,7 +9,7 @@
 
 ## Relationships
 
-- [Node Dependencies](Node_Dependencies.md) (1 shared connections)
+- [JS Dependencies](JS_Dependencies.md) (1 shared connections)
 
 ## Source Files
 

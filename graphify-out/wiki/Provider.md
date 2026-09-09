@@ -2,7 +2,7 @@
 
 > God node · 80 connections · `deploy_aws/gherkai_deploy_aws/cli.py`
 
-**Community:** [AWS Deploy Provider CLI](AWS_Deploy_Provider_CLI.md)
+**Community:** [AWS Deploy Provider](AWS_Deploy_Provider.md)
 
 ## Connections by Relation
 

@@ -21,11 +21,11 @@
 
 ## Relationships
 
-- [AWS Deploy Provider CLI](AWS_Deploy_Provider_CLI.md) (18 shared connections)
-- [CDK Command Orchestration](CDK_Command_Orchestration.md) (2 shared connections)
+- [AWS Deploy Provider](AWS_Deploy_Provider.md) (18 shared connections)
+- [Provider Deploy Commands](Provider_Deploy_Commands.md) (2 shared connections)
 - [CDK App & Deploy CLI](CDK_App_%26_Deploy_CLI.md) (1 shared connections)
-- [CDK Invocation Test Fixtures](CDK_Invocation_Test_Fixtures.md) (1 shared connections)
-- [CloudFormation/SSM Client Stubs](CloudFormation-SSM_Client_Stubs.md) (1 shared connections)
+- [CDK Invocation Tests](CDK_Invocation_Tests.md) (1 shared connections)
+- [AWS Client Stubs (CFN/SSM)](AWS_Client_Stubs_%28CFN-SSM%29.md) (1 shared connections)
 
 ## Source Files
 

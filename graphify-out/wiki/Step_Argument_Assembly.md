@@ -27,8 +27,8 @@
 
 ## Relationships
 
-- [Nova Act Worker Package](Nova_Act_Worker_Package.md) (6 shared connections)
-- [Step Dispatch & Error Mapping](Step_Dispatch_%26_Error_Mapping.md) (1 shared connections)
+- [Nova Act Worker](Nova_Act_Worker.md) (6 shared connections)
+- [Step Dispatch Execution](Step_Dispatch_Execution.md) (1 shared connections)
 
 ## Source Files
 

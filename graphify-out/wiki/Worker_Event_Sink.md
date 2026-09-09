@@ -29,9 +29,9 @@
 
 ## Relationships
 
-- [Nova Act Worker Package](Nova_Act_Worker_Package.md) (2 shared connections)
-- [Environment and Version Resolution](Environment_and_Version_Resolution.md) (1 shared connections)
-- [Job Source Input](Job_Source_Input.md) (1 shared connections)
+- [Nova Act Worker](Nova_Act_Worker.md) (2 shared connections)
+- [Env Config & Error Classification](Env_Config_%26_Error_Classification.md) (1 shared connections)
+- [Worker Job Source](Worker_Job_Source.md) (1 shared connections)
 
 ## Source Files
 

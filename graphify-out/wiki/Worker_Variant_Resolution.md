@@ -1,6 +1,6 @@
 # Worker Variant Resolution
 
-> 47 nodes · cohesion 0.07
+> 52 nodes · cohesion 0.07
 
 ## Key Concepts
 
@@ -28,15 +28,14 @@
 - **test_one_engine_missing_fails_whole_resolution()** (4 connections) — `runtime/tests/test_worker_variant.py`
 - **test_unused_engine_not_probed()** (4 connections) — `runtime/tests/test_worker_variant.py`
 - **test_variant_none_uses_default_pointer()** (4 connections) — `runtime/tests/test_worker_variant.py`
-- **（引擎，镜像 tag）→ revision 映射的 SSM 键（相对键，全路径 = `ssm_path(prefix, 本键)`）。 值 =…** (1 connections) — `runtime/gherkai_runtime/names.py`
-- *... and 22 more nodes in this community*
+- **aws()** (3 connections) — `runtime/tests/test_worker_variant.py`
+- *... and 27 more nodes in this community*
 
 ## Relationships
 
-- [Composition Root Wiring](Composition_Root_Wiring.md) (12 shared connections)
-- [Resource Naming Source](Resource_Naming_Source.md) (10 shared connections)
+- [SSM Path & Client Composition](SSM_Path_%26_Client_Composition.md) (12 shared connections)
+- [Runtime Naming Source](Runtime_Naming_Source.md) (10 shared connections)
 - [Cloud Store Composition](Cloud_Store_Composition.md) (3 shared connections)
-- [AWS Test Fixtures (moto)](AWS_Test_Fixtures_%28moto%29.md) (2 shared connections)
 
 ## Source Files
 
@@ -45,7 +44,7 @@
 
 ## Audit Trail
 
-- EXTRACTED: 108 (100%)
+- EXTRACTED: 112 (100%)
 - INFERRED: 0 (0%)
 - AMBIGUOUS: 0 (0%)
 

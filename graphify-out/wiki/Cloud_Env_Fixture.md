@@ -10,7 +10,7 @@
 
 ## Relationships
 
-- [Lambda Handler Event Parsing](Lambda_Handler_Event_Parsing.md) (1 shared connections)
+- [Lambda Handler Tests](Lambda_Handler_Tests.md) (1 shared connections)
 
 ## Source Files
 

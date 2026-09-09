@@ -13,10 +13,11 @@
 ## Relationships
 
 - [Ngrok Tunnel Provider](Ngrok_Tunnel_Provider.md) (3 shared connections)
-- [Local Detached Run Wiring](Local_Detached_Run_Wiring.md) (2 shared connections)
-- [CLI Run/Submit Commands](CLI_Run-Submit_Commands.md) (2 shared connections)
-- [Tunnel Host TTL Watchdog](Tunnel_Host_TTL_Watchdog.md) (1 shared connections)
+- [Local Run Store](Local_Run_Store.md) (2 shared connections)
+- [Tunnel Host Watchdog](Tunnel_Host_Watchdog.md) (1 shared connections)
 - [Local Tunnel Exposure](Local_Tunnel_Exposure.md) (1 shared connections)
+- [Cloud Submit Preflight Gates](Cloud_Submit_Preflight_Gates.md) (1 shared connections)
+- [CLI Plan & Submit](CLI_Plan_%26_Submit.md) (1 shared connections)
 
 ## Source Files
 

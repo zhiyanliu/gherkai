@@ -33,7 +33,7 @@
 
 ## Relationships
 
-- [ADR Index & Dev Docs](ADR_Index_%26_Dev_Docs.md) (1 shared connections)
+- [Architecture Decision Records](Architecture_Decision_Records.md) (1 shared connections)
 
 ## Source Files
 

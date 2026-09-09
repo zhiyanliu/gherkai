@@ -33,16 +33,18 @@
 
 ## Relationships
 
-- [Run Schedule Orchestration](Run_Schedule_Orchestration.md) (37 shared connections)
-- [Run Result Verdict Model](Run_Result_Verdict_Model.md) (14 shared connections)
-- [Engine Ports & Adapters](Engine_Ports_%26_Adapters.md) (14 shared connections)
-- [Event Formatting & Cost Model](Event_Formatting_%26_Cost_Model.md) (11 shared connections)
-- [SQLite Event Log & Projection](SQLite_Event_Log_%26_Projection.md) (8 shared connections)
-- [ResultStore Local/S3](ResultStore_Local-S3.md) (4 shared connections)
-- [Subprocess Engine Integration](Subprocess_Engine_Integration.md) (2 shared connections)
-- [Worker Exit Code Translation](Worker_Exit_Code_Translation.md) (1 shared connections)
-- [Fargate Engine Unit Tests](Fargate_Engine_Unit_Tests.md) (1 shared connections)
-- [Wire Protocol Serialization](Wire_Protocol_Serialization.md) (1 shared connections)
+- [Run Scheduling Engine](Run_Scheduling_Engine.md) (37 shared connections)
+- [Run Result Rendering](Run_Result_Rendering.md) (12 shared connections)
+- [Engine Ports & Adapters](Engine_Ports_%26_Adapters.md) (12 shared connections)
+- [Event Progress Formatting](Event_Progress_Formatting.md) (12 shared connections)
+- [Boto Guard & S3 Offload](Boto_Guard_%26_S3_Offload.md) (5 shared connections)
+- [S3 Result Store](S3_Result_Store.md) (4 shared connections)
+- [State Projection & Planning](State_Projection_%26_Planning.md) (4 shared connections)
+- [Subprocess Engine Tests](Subprocess_Engine_Tests.md) (2 shared connections)
+- [Worker Exit Code Mapping](Worker_Exit_Code_Mapping.md) (1 shared connections)
+- [Fargate Engine Tests](Fargate_Engine_Tests.md) (1 shared connections)
+- [Fargate Worker Handle](Fargate_Worker_Handle.md) (1 shared connections)
+- [Exit Code Await Polling](Exit_Code_Await_Polling.md) (1 shared connections)
 
 ## Source Files
 

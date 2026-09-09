@@ -9,7 +9,7 @@
 
 ## Relationships
 
-- [AWS Deploy Provider CLI](AWS_Deploy_Provider_CLI.md) (1 shared connections)
+- [AWS Deploy Provider](AWS_Deploy_Provider.md) (1 shared connections)
 
 ## Source Files
 

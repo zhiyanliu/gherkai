@@ -22,11 +22,11 @@
 ## Relationships
 
 - [CLI Main Entry](CLI_Main_Entry.md) (3 shared connections)
-- [Deploy Command Shell Tests](Deploy_Command_Shell_Tests.md) (2 shared connections)
-- [CI and Release Workflows](CI_and_Release_Workflows.md) (1 shared connections)
+- [Deploy Command Shell](Deploy_Command_Shell.md) (2 shared connections)
+- [CI & Release Workflows](CI_%26_Release_Workflows.md) (1 shared connections)
 - [CDK App & Deploy CLI](CDK_App_%26_Deploy_CLI.md) (1 shared connections)
-- [ADR Index & Dev Docs](ADR_Index_%26_Dev_Docs.md) (1 shared connections)
-- [Deploy/Destroy CLI Commands](Deploy-Destroy_CLI_Commands.md) (1 shared connections)
+- [Architecture Decision Records](Architecture_Decision_Records.md) (1 shared connections)
+- [Deploy/Destroy Provider Dispatch](Deploy-Destroy_Provider_Dispatch.md) (1 shared connections)
 - [CLI Run Entry Tests](CLI_Run_Entry_Tests.md) (1 shared connections)
 
 ## Source Files

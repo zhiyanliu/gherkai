@@ -2,7 +2,7 @@
 
 > God node · 93 connections · `core/gherkai_core/model.py`
 
-**Community:** [Run Result Verdict Model](Run_Result_Verdict_Model.md)
+**Community:** [Boto Guard & S3 Offload](Boto_Guard_%26_S3_Offload.md)
 
 ## Connections by Relation
 

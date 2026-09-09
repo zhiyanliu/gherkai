@@ -23,9 +23,9 @@
 
 ## Relationships
 
-- [Worker Command Resolution](Worker_Command_Resolution.md) (8 shared connections)
-- [Composition Root Wiring](Composition_Root_Wiring.md) (2 shared connections)
-- [Backend Version Stamp Check](Backend_Version_Stamp_Check.md) (1 shared connections)
+- [Cloud Target Resolution](Cloud_Target_Resolution.md) (8 shared connections)
+- [SSM Path & Client Composition](SSM_Path_%26_Client_Composition.md) (2 shared connections)
+- [Backend Version Stamp](Backend_Version_Stamp.md) (1 shared connections)
 
 ## Source Files
 

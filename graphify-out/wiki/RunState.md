@@ -2,7 +2,7 @@
 
 > God node · 104 connections · `core/gherkai_core/model.py`
 
-**Community:** [Run State Rendering & Boto Guard](Run_State_Rendering_%26_Boto_Guard.md)
+**Community:** [Run State Rendering](Run_State_Rendering.md)
 
 ## Connections by Relation
 

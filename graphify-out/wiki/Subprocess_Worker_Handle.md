@@ -21,10 +21,11 @@
 
 ## Relationships
 
-- [Engine Ports & Adapters](Engine_Ports_%26_Adapters.md) (5 shared connections)
-- [Worker Exit Code Translation](Worker_Exit_Code_Translation.md) (1 shared connections)
-- [Job Serialization & E2E Harness](Job_Serialization_%26_E2E_Harness.md) (1 shared connections)
-- [S3 ReportStore & Subprocess Engine](S3_ReportStore_%26_Subprocess_Engine.md) (1 shared connections)
+- [Engine Ports & Adapters](Engine_Ports_%26_Adapters.md) (4 shared connections)
+- [Run Result Rendering](Run_Result_Rendering.md) (1 shared connections)
+- [Worker Exit Code Mapping](Worker_Exit_Code_Mapping.md) (1 shared connections)
+- [Job JSON Serialization](Job_JSON_Serialization.md) (1 shared connections)
+- [S3 Report Store & Subprocess](S3_Report_Store_%26_Subprocess.md) (1 shared connections)
 
 ## Source Files
 

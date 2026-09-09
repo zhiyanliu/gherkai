@@ -22,7 +22,7 @@
 ## Relationships
 
 - [Local Tunnel Exposure](Local_Tunnel_Exposure.md) (6 shared connections)
-- [Tunnel Origin URL Mapping](Tunnel_Origin_URL_Mapping.md) (5 shared connections)
+- [Job Origin URL Mapping](Job_Origin_URL_Mapping.md) (5 shared connections)
 - [Engine Ports & Adapters](Engine_Ports_%26_Adapters.md) (4 shared connections)
 - [Tunnel Cleanup](Tunnel_Cleanup.md) (3 shared connections)
 - [Tunnel Info Model](Tunnel_Info_Model.md) (3 shared connections)

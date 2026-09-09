@@ -17,11 +17,11 @@
 
 ## Relationships
 
-- [Lambda Handler Event Parsing](Lambda_Handler_Event_Parsing.md) (1 shared connections)
-- [Reconciler Lambda & Timeouts](Reconciler_Lambda_%26_Timeouts.md) (1 shared connections)
-- [ADR Index & Dev Docs](ADR_Index_%26_Dev_Docs.md) (1 shared connections)
-- [Cloud Launcher & DDB EventLog](Cloud_Launcher_%26_DDB_EventLog.md) (1 shared connections)
-- [DynamoDB RunStore Conditional Writes](DynamoDB_RunStore_Conditional_Writes.md) (1 shared connections)
+- [Lambda Handler Tests](Lambda_Handler_Tests.md) (1 shared connections)
+- [Reconciler Lambda](Reconciler_Lambda.md) (1 shared connections)
+- [Architecture Decision Records](Architecture_Decision_Records.md) (1 shared connections)
+- [Cloud Launcher & DDB Event Log](Cloud_Launcher_%26_DDB_Event_Log.md) (1 shared connections)
+- [Boto Guard & S3 Offload](Boto_Guard_%26_S3_Offload.md) (1 shared connections)
 
 ## Source Files
 

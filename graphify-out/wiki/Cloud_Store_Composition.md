@@ -1,6 +1,6 @@
 # Cloud Store Composition
 
-> 15 nodes · cohesion 0.15
+> 16 nodes · cohesion 0.14
 
 ## Key Concepts
 
@@ -11,6 +11,7 @@
 - **container_name()** (5 connections) — `runtime/gherkai_runtime/names.py`
 - **_make_s3_client()** (4 connections) — `runtime/gherkai_runtime/compose.py`
 - **test_worker_task_defs_is_required()** (3 connections) — `runtime/tests/test_worker_variant.py`
+- **test_build_fargate_engines_per_engine_taskdef_and_region_no_profile()** (2 connections) — `runtime/tests/test_compose.py`
 - **test_engine_absent_from_mapping_gets_throwing_placeholder()** (2 connections) — `runtime/tests/test_worker_variant.py`
 - **S3 key 前缀分隔符规范化：非空且不以 / 结尾则补 /（否则 S3*Store 拼 f'{prefix}{run_id}' 生成粘连 key）。** (1 connections) — `runtime/gherkai_runtime/compose.py`
 - **boto3 dynamodb.Table 资源（DDB adapter 吃 resource.Table，非 client）。region/profile 走…** (1 connections) — `runtime/gherkai_runtime/compose.py`
@@ -22,27 +23,28 @@
 
 ## Relationships
 
-- [Composition Root Wiring](Composition_Root_Wiring.md) (7 shared connections)
+- [SSM Path & Client Composition](SSM_Path_%26_Client_Composition.md) (7 shared connections)
 - [Worker Variant Resolution](Worker_Variant_Resolution.md) (3 shared connections)
-- [S3 Argument Offload](S3_Argument_Offload.md) (1 shared connections)
-- [DynamoDB RunStore Conditional Writes](DynamoDB_RunStore_Conditional_Writes.md) (1 shared connections)
-- [S3 ResultStore](S3_ResultStore.md) (1 shared connections)
-- [S3 ReportStore & Subprocess Engine](S3_ReportStore_%26_Subprocess_Engine.md) (1 shared connections)
-- [Worker Command Resolution](Worker_Command_Resolution.md) (1 shared connections)
-- [Run Result Verdict Model](Run_Result_Verdict_Model.md) (1 shared connections)
-- [Tunnel Host TTL Watchdog](Tunnel_Host_TTL_Watchdog.md) (1 shared connections)
-- [Cloud Resource Preflight Fakes](Cloud_Resource_Preflight_Fakes.md) (1 shared connections)
-- [Resource Naming Source](Resource_Naming_Source.md) (1 shared connections)
+- [S3 Argument Offloader](S3_Argument_Offloader.md) (1 shared connections)
+- [Boto Guard & S3 Offload](Boto_Guard_%26_S3_Offload.md) (1 shared connections)
+- [S3 Result Store](S3_Result_Store.md) (1 shared connections)
+- [S3 Report Store & Subprocess](S3_Report_Store_%26_Subprocess.md) (1 shared connections)
+- [Run Result Rendering](Run_Result_Rendering.md) (1 shared connections)
+- [Tunnel Host Watchdog](Tunnel_Host_Watchdog.md) (1 shared connections)
+- [Cloud Preflight Checks](Cloud_Preflight_Checks.md) (1 shared connections)
+- [Runtime Naming Source](Runtime_Naming_Source.md) (1 shared connections)
+- [Cloud Target Resolution](Cloud_Target_Resolution.md) (1 shared connections)
 
 ## Source Files
 
 - `runtime/gherkai_runtime/compose.py`
 - `runtime/gherkai_runtime/names.py`
+- `runtime/tests/test_compose.py`
 - `runtime/tests/test_worker_variant.py`
 
 ## Audit Trail
 
-- EXTRACTED: 31 (89%)
+- EXTRACTED: 32 (89%)
 - INFERRED: 4 (11%)
 - AMBIGUOUS: 0 (0%)
 

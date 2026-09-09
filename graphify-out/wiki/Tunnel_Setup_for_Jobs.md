@@ -1,4 +1,4 @@
-# Tunnel Setup for Jobs
+# Tunnel Setup For Jobs
 
 > 7 nodes · cohesion 0.29
 
@@ -16,8 +16,8 @@
 
 - [Local Tunnel Exposure](Local_Tunnel_Exposure.md) (3 shared connections)
 - [Engine Ports & Adapters](Engine_Ports_%26_Adapters.md) (3 shared connections)
-- [Tunnel Host TTL Watchdog](Tunnel_Host_TTL_Watchdog.md) (2 shared connections)
-- [Tunnel Origin URL Mapping](Tunnel_Origin_URL_Mapping.md) (1 shared connections)
+- [Tunnel Host Watchdog](Tunnel_Host_Watchdog.md) (2 shared connections)
+- [Job Origin URL Mapping](Job_Origin_URL_Mapping.md) (1 shared connections)
 
 ## Source Files
 

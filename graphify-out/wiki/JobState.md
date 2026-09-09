@@ -2,7 +2,7 @@
 
 > God node · 85 connections · `core/gherkai_core/model.py`
 
-**Community:** [DynamoDB RunStore Conditional Writes](DynamoDB_RunStore_Conditional_Writes.md)
+**Community:** [Run State Rendering](Run_State_Rendering.md)
 
 ## Connections by Relation
 

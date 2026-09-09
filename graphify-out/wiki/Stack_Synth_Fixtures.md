@@ -34,10 +34,10 @@
 ## Relationships
 
 - [CDK App & Deploy CLI](CDK_App_%26_Deploy_CLI.md) (6 shared connections)
-- [Backend Stack Synth Assertions](Backend_Stack_Synth_Assertions.md) (4 shared connections)
-- [Backend Stack Constructs](Backend_Stack_Constructs.md) (4 shared connections)
-- [ADR Index & Dev Docs](ADR_Index_%26_Dev_Docs.md) (2 shared connections)
-- [Lambda Dependency Bundling](Lambda_Dependency_Bundling.md) (2 shared connections)
+- [CDK Stack Synth Tests](CDK_Stack_Synth_Tests.md) (4 shared connections)
+- [Backend CDK Stack](Backend_CDK_Stack.md) (4 shared connections)
+- [Architecture Decision Records](Architecture_Decision_Records.md) (2 shared connections)
+- [Lambda Dependency Check](Lambda_Dependency_Check.md) (2 shared connections)
 
 ## Source Files
 

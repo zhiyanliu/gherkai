@@ -34,14 +34,14 @@
 ## Relationships
 
 - [CLI Run Entry Tests](CLI_Run_Entry_Tests.md) (49 shared connections)
-- [Version Skew Test Patches](Version_Skew_Test_Patches.md) (3 shared connections)
+- [Skew Gate Test Patching](Skew_Gate_Test_Patching.md) (3 shared connections)
 - [Engine Ports & Adapters](Engine_Ports_%26_Adapters.md) (2 shared connections)
 - [Fake S3 Client](Fake_S3_Client.md) (2 shared connections)
-- [Deploy Command Shell Tests](Deploy_Command_Shell_Tests.md) (1 shared connections)
+- [Deploy Command Shell](Deploy_Command_Shell.md) (1 shared connections)
 - [CLI Main Entry](CLI_Main_Entry.md) (1 shared connections)
 - [Fake DynamoDB Table](Fake_DynamoDB_Table.md) (1 shared connections)
-- [Environment and Version Resolution](Environment_and_Version_Resolution.md) (1 shared connections)
-- [Composition Root Wiring](Composition_Root_Wiring.md) (1 shared connections)
+- [Env Config & Error Classification](Env_Config_%26_Error_Classification.md) (1 shared connections)
+- [SSM Path & Client Composition](SSM_Path_%26_Client_Composition.md) (1 shared connections)
 
 ## Source Files
 

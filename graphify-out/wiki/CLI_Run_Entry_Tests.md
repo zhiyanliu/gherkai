@@ -34,17 +34,17 @@
 ## Relationships
 
 - [Cloud Backend CLI Tests](Cloud_Backend_CLI_Tests.md) (49 shared connections)
-- [Deploy Command Shell Tests](Deploy_Command_Shell_Tests.md) (18 shared connections)
-- [Tunnel CLI Wiring Tests](Tunnel_CLI_Wiring_Tests.md) (10 shared connections)
-- [Status Command Rendering](Status_Command_Rendering.md) (8 shared connections)
-- [CLI Main Entry](CLI_Main_Entry.md) (6 shared connections)
-- [CLI Run/Submit Commands](CLI_Run-Submit_Commands.md) (3 shared connections)
+- [Deploy Command Shell](Deploy_Command_Shell.md) (18 shared connections)
+- [Tunnel CLI Tests](Tunnel_CLI_Tests.md) (10 shared connections)
+- [Status Render & Exit Codes](Status_Render_%26_Exit_Codes.md) (7 shared connections)
+- [CLI Main Entry](CLI_Main_Entry.md) (5 shared connections)
+- [CLI Plan & Submit](CLI_Plan_%26_Submit.md) (4 shared connections)
 - [Engine Ports & Adapters](Engine_Ports_%26_Adapters.md) (3 shared connections)
-- [Deploy/Destroy CLI Commands](Deploy-Destroy_CLI_Commands.md) (2 shared connections)
+- [Run Status & Reconcile CLI](Run_Status_%26_Reconcile_CLI.md) (2 shared connections)
+- [Deploy/Destroy Provider Dispatch](Deploy-Destroy_Provider_Dispatch.md) (2 shared connections)
 - [Deploy Provider Discovery](Deploy_Provider_Discovery.md) (1 shared connections)
-- [List Deterministic CLI Command](List_Deterministic_CLI_Command.md) (1 shared connections)
-- [Plan Command & Rendering](Plan_Command_%26_Rendering.md) (1 shared connections)
-- [Version Skew Test Patches](Version_Skew_Test_Patches.md) (1 shared connections)
+- [Cloud Submit Preflight Gates](Cloud_Submit_Preflight_Gates.md) (1 shared connections)
+- [Skew Gate Test Patching](Skew_Gate_Test_Patching.md) (1 shared connections)
 
 ## Source Files
 

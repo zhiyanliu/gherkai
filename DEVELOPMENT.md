@@ -46,7 +46,7 @@
 │   ├── midscene/   ← npm 包 @gherkai/worker-midscene（ESM）：src/bin.mts（入口）· src/worker/run-scope.mts（薄 worker）· src/worker/deterministic.mts · src/lib/agentcore-sigv4.mts · spikes/
 │   └── novaact/    ← 发行包 gherkai-worker-novaact：gherkai_worker_novaact/{run_scope.py（薄 worker）· deterministic.py · user_steps.py · lib/workflow_setup.py} · spikes/
 ├── deploy_aws/                ← 发行包 gherkai-deploy-aws：`gherkai deploy` 的 AWS provider（Python CDK stack：DDB/S3/ECS/ECR/IAM/VPC + 无状态跑批的 Stream/Lambda/EventBridge；`gherkai_deploy_aws/lambdas/` 是三 Lambda 的 handler 源、随部署打进 asset；worker 镜像交付 `push-worker` / `list-workers`，ADR 0033/0034/0037/0038）
-└── tools/                     ← 复用工具库（端到端真跑 / 跨真实边界验证 / 时序诊断；长期资产，见 CLAUDE.md「工作方式」）
+└── tools/                     ← 复用工具库（端到端真跑 / 跨真实边界验证 / 时序诊断 / 知识图刷新；长期资产，见 CLAUDE.md「工作方式」）
 ```
 
 每个包目录都有两份文档：`README.md` = 发行包页面（逐字上 PyPI/npm，只写使用者内容）、`DEVELOPMENT.md` = 该包的 contributor 文档（模块布局、从 checkout 跑、测试、ADR 指针）——[`cli/`](./cli/DEVELOPMENT.md) · [`core/`](./core/DEVELOPMENT.md) · [`runtime/`](./runtime/DEVELOPMENT.md) · [`deploy_aws/`](./deploy_aws/DEVELOPMENT.md) · [`engines/novaact/`](./engines/novaact/DEVELOPMENT.md) · [`engines/midscene/`](./engines/midscene/DEVELOPMENT.md)。
@@ -84,6 +84,20 @@ cd engines/midscene && AWS_REGION=us-east-1 node_modules/.bin/tsx spikes/01-mode
 # Nova Act 引擎对标 spike
 AWS_REGION=us-east-1 uv run python engines/novaact/spikes/wikipedia_benchmark.py   # 用仓库根 .venv（novaact 无独立 venv）
 ```
+
+## 知识图刷新（graphify）
+
+`graphify-out/`（`graph.json` / `GRAPH_REPORT.md` / `wiki/`）是给 AI agent 的代码 + 文档知识图（CLAUDE.md「graphify」节让 agent 先查图再翻源码）。维护分两层：
+
+- **AST 层自动**：`graphify hook install` 装的 post-commit hook 在每次含代码文件的 commit 后重抽代码、重聚类；不调 LLM。
+- **LLM 层手动、周期性**：文档语义抽取与社区命名要 LLM（AWS Bedrock），hook 覆盖不到——改了 ADR / README / guides，或报告里社区名退化成文件名（hook 按枢纽节点起的临时名）时跑：
+
+```bash
+tools/graphify_refresh.sh            # 抽取到收敛 → LLM 命名社区 + 重生成报告 → 导出 wiki（顺序有意义，env 默认值见脚本头注释）
+tools/graphify_refresh.sh --force    # 全量重抽（清残留节点时；费用按全仓文档量计）
+```
+
+需要 Bedrock 凭证，且 env 里有 `AWS_REGION` 或 `AWS_PROFILE`（脚本会回落 `aws configure get region`）。本机没凭证时到有凭证的机器上跑：rsync 工作区过去（排除 `.git` / `.venv` / `node_modules`，**带上 `graphify-out/`** 以复用增量缓存）→ 跑脚本 → rsync `graphify-out/` 回来时**排除 `.graphify_root`**（它存绝对路径，带回会让本地 hook 重建失败）→ commit `graph.json` / `GRAPH_REPORT.md` / `manifest.json` / `wiki/`（其余是缓存与滚动备份，`.gitignore` 已排除）。
 
 ## 发布与版本
 

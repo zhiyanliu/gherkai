@@ -15,8 +15,8 @@
 
 ## Relationships
 
-- [Midscene Job Source TS](Midscene_Job_Source_TS.md) (2 shared connections)
-- [TypeScript Spike Probes](TypeScript_Spike_Probes.md) (1 shared connections)
+- [Midscene Job Source](Midscene_Job_Source.md) (2 shared connections)
+- [Model Spike Scripts](Model_Spike_Scripts.md) (1 shared connections)
 
 ## Source Files
 

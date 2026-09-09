@@ -11,7 +11,7 @@
 
 ## Relationships
 
-- [Backend Stack Synth Assertions](Backend_Stack_Synth_Assertions.md) (3 shared connections)
+- [CDK Stack Synth Tests](CDK_Stack_Synth_Tests.md) (3 shared connections)
 
 ## Source Files
 

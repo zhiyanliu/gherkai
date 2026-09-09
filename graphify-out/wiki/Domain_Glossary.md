@@ -33,13 +33,13 @@
 
 ## Relationships
 
-- [Run Result Verdict Model](Run_Result_Verdict_Model.md) (2 shared connections)
-- [ADR Index & Dev Docs](ADR_Index_%26_Dev_Docs.md) (1 shared connections)
+- [Run Result Rendering](Run_Result_Rendering.md) (2 shared connections)
+- [Architecture Decision Records](Architecture_Decision_Records.md) (1 shared connections)
 - [Engine Ports & Adapters](Engine_Ports_%26_Adapters.md) (1 shared connections)
-- [CI and Release Workflows](CI_and_Release_Workflows.md) (1 shared connections)
+- [CI & Release Workflows](CI_%26_Release_Workflows.md) (1 shared connections)
 - [Local Tunnel Exposure](Local_Tunnel_Exposure.md) (1 shared connections)
-- [Deploy AWS README](Deploy_AWS_README.md) (1 shared connections)
-- [Project Conventions & README Guards](Project_Conventions_%26_README_Guards.md) (1 shared connections)
+- [Deploy Docs](Deploy_Docs.md) (1 shared connections)
+- [Project Conventions & Docs](Project_Conventions_%26_Docs.md) (1 shared connections)
 
 ## Source Files
 

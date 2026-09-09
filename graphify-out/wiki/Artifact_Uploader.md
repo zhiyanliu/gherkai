@@ -18,7 +18,7 @@
 
 ## Relationships
 
-- [Midscene Job Source TS](Midscene_Job_Source_TS.md) (1 shared connections)
+- [Midscene Job Source](Midscene_Job_Source.md) (1 shared connections)
 
 ## Source Files
 

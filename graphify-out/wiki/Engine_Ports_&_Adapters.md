@@ -1,6 +1,6 @@
 # Engine Ports & Adapters
 
-> 102 nodes · cohesion 0.05
+> 96 nodes · cohesion 0.05
 
 ## Key Concepts
 
@@ -16,9 +16,6 @@
 - **scope.py** (21 connections) — `core/gherkai_core/scope.py`
 - **subprocess_engine.py** (18 connections) — `core/gherkai_core/adapters/subprocess_engine.py`
 - **parse.py** (15 connections) — `core/gherkai_core/parse.py`
-- **event_from_line()** (15 connections) — `core/gherkai_core/wire.py`
-- **_FakeEcs** (15 connections) — `core/tests/test_fargate_engine.py`
-- **_SeqEcs** (15 connections) — `core/tests/test_fargate_engine.py`
 - **_FakeSchedulerClient** (15 connections) — `deploy_aws/tests/test_lambda_handlers.py`
 - **_timeout_built()** (15 connections) — `deploy_aws/tests/test_lambda_handlers.py`
 - **PlanError** (14 connections) — `core/gherkai_core/errors.py`
@@ -29,22 +26,25 @@
 - **errors.py** (11 connections) — `core/gherkai_core/errors.py`
 - **test_offload_round_trip_real()** (11 connections) — `core/tests/test_cloud_integration.py`
 - **ConflictException** (10 connections) — `deploy_aws/tests/test_lambda_handlers.py`
-- *... and 77 more nodes in this community*
+- **exceptions** (10 connections) — `deploy_aws/tests/test_lambda_handlers.py`
+- **test_meta_json_holds_pointers_not_payload()** (9 connections) — `core/tests/test_arg_offload.py`
+- **test_reader_without_offloader_fails_loud_on_offloaded_meta()** (9 connections) — `core/tests/test_arg_offload.py`
+- *... and 71 more nodes in this community*
 
 ## Relationships
 
-- [Run State Rendering & Boto Guard](Run_State_Rendering_%26_Boto_Guard.md) (43 shared connections)
-- [Run Result Verdict Model](Run_Result_Verdict_Model.md) (42 shared connections)
-- [DynamoDB RunStore Conditional Writes](DynamoDB_RunStore_Conditional_Writes.md) (39 shared connections)
-- [SQLite Event Log & Projection](SQLite_Event_Log_%26_Projection.md) (24 shared connections)
-- [Cloud Launcher & DDB EventLog](Cloud_Launcher_%26_DDB_EventLog.md) (21 shared connections)
-- [Event Formatting & Cost Model](Event_Formatting_%26_Cost_Model.md) (20 shared connections)
-- [Reconcile Ports & Tick](Reconcile_Ports_%26_Tick.md) (16 shared connections)
-- [Wire Protocol Serialization](Wire_Protocol_Serialization.md) (16 shared connections)
-- [Feature Planning to Jobs](Feature_Planning_to_Jobs.md) (15 shared connections)
-- [Terminal Status Aggregation](Terminal_Status_Aggregation.md) (14 shared connections)
-- [ResultStore Local/S3](ResultStore_Local-S3.md) (13 shared connections)
-- [Render & ReportStore Local](Render_%26_ReportStore_Local.md) (13 shared connections)
+- [Run Result Rendering](Run_Result_Rendering.md) (65 shared connections)
+- [Run State Rendering](Run_State_Rendering.md) (56 shared connections)
+- [Event Progress Formatting](Event_Progress_Formatting.md) (33 shared connections)
+- [SQLite Event Log](SQLite_Event_Log.md) (23 shared connections)
+- [Feature Planning](Feature_Planning.md) (22 shared connections)
+- [S3 Result Store](S3_Result_Store.md) (18 shared connections)
+- [Cloud Launcher & DDB Event Log](Cloud_Launcher_%26_DDB_Event_Log.md) (16 shared connections)
+- [Boto Guard & S3 Offload](Boto_Guard_%26_S3_Offload.md) (15 shared connections)
+- [Terminal Status Aggregation](Terminal_Status_Aggregation.md) (12 shared connections)
+- [Run Scheduling Engine](Run_Scheduling_Engine.md) (11 shared connections)
+- [Architecture Decision Records](Architecture_Decision_Records.md) (10 shared connections)
+- [Job JSON Serialization](Job_JSON_Serialization.md) (10 shared connections)
 
 ## Source Files
 
@@ -62,17 +62,17 @@
 - `core/tests/test_arg_offload.py`
 - `core/tests/test_cloud_integration.py`
 - `core/tests/test_ddb_run_store.py`
-- `core/tests/test_fargate_engine.py`
 - `core/tests/test_project.py`
 - `core/tests/test_reconcile.py`
 - `core/tests/test_sqlite_event_log.py`
 - `core/tests/test_wire.py`
 - `deploy_aws/tests/test_lambda_handlers.py`
+- `runtime/tests/test_tunnel.py`
 
 ## Audit Trail
 
-- EXTRACTED: 556 (82%)
-- INFERRED: 120 (18%)
+- EXTRACTED: 546 (84%)
+- INFERRED: 106 (16%)
 - AMBIGUOUS: 0 (0%)
 
 ---

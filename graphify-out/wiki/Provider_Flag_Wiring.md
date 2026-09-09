@@ -22,7 +22,7 @@
 
 ## Relationships
 
-- [AWS Deploy Provider CLI](AWS_Deploy_Provider_CLI.md) (6 shared connections)
+- [AWS Deploy Provider](AWS_Deploy_Provider.md) (6 shared connections)
 - [CDK App & Deploy CLI](CDK_App_%26_Deploy_CLI.md) (1 shared connections)
 
 ## Source Files

@@ -29,12 +29,12 @@
 
 ## Relationships
 
-- [Deterministic Step Registry](Deterministic_Step_Registry.md) (8 shared connections)
-- [Nova Act Worker Package](Nova_Act_Worker_Package.md) (2 shared connections)
-- [Built-in Deterministic Anchors](Built-in_Deterministic_Anchors.md) (1 shared connections)
-- [Environment and Version Resolution](Environment_and_Version_Resolution.md) (1 shared connections)
-- [User Steps Directory Loading](User_Steps_Directory_Loading.md) (1 shared connections)
-- [Step Dispatch & Error Mapping](Step_Dispatch_%26_Error_Mapping.md) (1 shared connections)
+- [Nova Deterministic Registry](Nova_Deterministic_Registry.md) (8 shared connections)
+- [Nova Act Worker](Nova_Act_Worker.md) (2 shared connections)
+- [Deterministic Step Scaffolding](Deterministic_Step_Scaffolding.md) (1 shared connections)
+- [Env Config & Error Classification](Env_Config_%26_Error_Classification.md) (1 shared connections)
+- [User Steps Loading](User_Steps_Loading.md) (1 shared connections)
+- [Step Dispatch Execution](Step_Dispatch_Execution.md) (1 shared connections)
 
 ## Source Files
 

@@ -2,7 +2,7 @@
 
 > God node · 63 connections · `core/gherkai_core/schedule.py`
 
-**Community:** [Run Schedule Orchestration](Run_Schedule_Orchestration.md)
+**Community:** [Run Scheduling Engine](Run_Scheduling_Engine.md)
 
 ## Connections by Relation
 

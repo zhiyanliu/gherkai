@@ -2,7 +2,7 @@
 
 > God node · 72 connections · `core/gherkai_core/model.py`
 
-**Community:** [Run Result Verdict Model](Run_Result_Verdict_Model.md)
+**Community:** [Run Result Rendering](Run_Result_Rendering.md)
 
 ## Connections by Relation
 
