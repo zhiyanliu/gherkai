@@ -51,7 +51,7 @@ ADR/CONTEXT 是随构建**逐步长起来**的：每次在前人文档上叠加�
 - **技术笔记/配方 + 工具手册**（如 `engines/midscene/spikes/SIGV4-FETCH-RECIPE.md`、`tools/e2e_harness.md`）——与代码同居、AI 照它接线/照它操作，**极易 STALE**（含可运行代码片段 + 命令 + 前置条件 + 踩坑点 + 源码路径）。
 - 未来新增的 docs/ 与子工程根下文档同样纳入（本任务名"文档健康度"、不焊死在某几类上——每次 `find . -name "*.md"` 排除 node_modules/.venv/.pytest_cache 扫一遍，别漏新文件）。
 
-**明确排除**：`.claude/`、`.agents/`（skills/commands 是工具配置，非本项目文档，且不提交 git）；`node_modules/`、`.venv/`、`.pytest_cache/`（依赖/缓存）；**repo 内 code 注释/docstring 的引用方向违规归姊妹任务 [`code-health-review.md`](./code-health-review.md)**（本任务只管 `.md`，分工线两侧一致）。
+**明确排除**：`.claude/` 除 `commands/` 外的部分与 `.agents/`（skills / settings 是个人工具配置，不入库）；**`.claude/commands/` 在范围内**——它是本任务与姊妹任务的 Claude Code 入口、已入库，其要点摘要须与两份方法文档一致；`node_modules/`、`.venv/`、`.pytest_cache/`（依赖/缓存）；**repo 内 code 注释/docstring 的引用方向违规归姊妹任务 [`code-health-review.md`](./code-health-review.md)**（本任务只管 `.md`，分工线两侧一致）。
 
 ### 第一层：片内审计（可用 workflow 并行）
 

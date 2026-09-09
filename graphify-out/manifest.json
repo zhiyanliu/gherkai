@@ -420,9 +420,9 @@
     "semantic_hash": "44018fbf68aae534146da597643a2200"
   },
   "docs/doc-health-review.md": {
-    "mtime": 1788840569.8830533,
-    "ast_hash": "0a023cbf6b7ef2320dd4a35ddb98bade",
-    "semantic_hash": "0a023cbf6b7ef2320dd4a35ddb98bade"
+    "mtime": 1788930016.1187809,
+    "ast_hash": "69bd641dad18e8e204296cfd3e8d296d",
+    "semantic_hash": ""
   },
   "engines/midscene/README.md": {
     "mtime": 1788922049.6641738,
@@ -1110,8 +1110,8 @@
     "semantic_hash": "4047e4947c6dabeae8d1be6134e0dd0a"
   },
   "DEVELOPMENT.md": {
-    "mtime": 1788928318.405093,
-    "ast_hash": "b70233aef3713c3b5190047c8af785b5",
+    "mtime": 1788930016.1190424,
+    "ast_hash": "e1ed5a2368cebbc855c817cdde8f4462",
     "semantic_hash": ""
   },
   "docs/adr/0039-user-facing-surfaces-no-internal-references.md": {
@@ -1127,6 +1127,16 @@
   "docs/adr/0040-consumer-role-model-and-terminology.md": {
     "mtime": 1788929343.4296725,
     "ast_hash": "70fb19778afbdfda3982d7e15a9dfb1a",
+    "semantic_hash": ""
+  },
+  ".claude/commands/code-health-review.md": {
+    "mtime": 1788930190.6705694,
+    "ast_hash": "7d39dff70659b0826ef1b86412b5fa2e",
+    "semantic_hash": ""
+  },
+  ".claude/commands/doc-health-review.md": {
+    "mtime": 1788930190.667836,
+    "ast_hash": "47c467df1964ccf6867da99789621187",
     "semantic_hash": ""
   }
 }

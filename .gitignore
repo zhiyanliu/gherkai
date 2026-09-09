@@ -57,8 +57,10 @@ __pycache__/
 .tmp/
 *.tmp
 
-# Claude 工作流工具（个人/工作流，非本项目框架代码）
-.claude/
+# Claude 工作流工具（个人/工作流，非本项目框架代码）——只放行 .claude/commands/：那是复盘方法
+# （docs/{doc,code}-health-review.md）的 Claude Code 入口、属项目资产；skills / settings 是个人配置，不入库
+.claude/*
+!.claude/commands/
 skills-lock.json
 .agents/
 # MCP server 个人本地配置（可能含 API KEY 等密钥）

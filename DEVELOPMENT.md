@@ -25,6 +25,7 @@
 ├── CLAUDE.md                  ← 项目约定（沟通/文档纪律/代码纪律/工作方式）——给 AI coding agent 与人
 ├── pyproject.toml / uv.lock   ← uv workspace 根（成员 = core / runtime / cli / engines/novaact / deploy_aws 五个发行包）：单一 lock + 共用 dev 依赖与 pytest 配置（ADR 0037）
 ├── .github/                   ← CI 与发布链（workflows/{ci,release}.yml + scripts/；一次性人工前置与本地校验见 .github/workflows/README.md，ADR 0037 决策 8）
+├── .claude/commands/          ← Claude Code 项目命令：/doc-health-review、/code-health-review 两条复盘入口（.claude/ 其余为个人配置、不入库）
 ├── docs/                      ← 架构决策与过程记录
 │   ├── adr/                   ← 架构决策记录（0001–0040）
 │   ├── guides/                ← 给人的阅读理解文档（机制解读/横切合成等，只讲 how、权威在 ADR）
@@ -114,4 +115,4 @@ CI（push `main` / PR / 手动）跑三件：全成员 `pytest`、midscene 的 `
 - 决策与理由：[`docs/adr/`](./docs/adr/)（每篇带 Status 头；Accepted 的自包含）
 - 机制横切解读：[`docs/guides/`](./docs/guides/)
 - 术语：[`CONTEXT.md`](./CONTEXT.md)；外部一手来源：[`docs/REFERENCES.md`](./docs/REFERENCES.md)
-- 复盘方法：[`docs/doc-health-review.md`](./docs/doc-health-review.md) / [`docs/code-health-review.md`](./docs/code-health-review.md)
+- 复盘方法（给 AI coding agent 执行的任务指令，不是人手工清单）：[`docs/doc-health-review.md`](./docs/doc-health-review.md)（全部文档对照 code 去漂移）/ [`docs/code-health-review.md`](./docs/code-health-review.md)（全部生产代码查死代码 / 过时 / 违背 ADR）。事件驱动：显著构建里程碑或一批 ADR 增改后跑，不定期空跑。Claude Code 里敲 `/doc-health-review`、`/code-health-review`（入口在 [`.claude/commands/`](./.claude/commands/)，只是把方法文档喂给 agent 并强调不可跳过的步骤）；其它 AI coding 工具把对应方法文档整份作为任务指令即可。客观类问题 agent 直接改，主观类出报告待批。
