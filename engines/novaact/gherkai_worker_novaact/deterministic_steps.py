@@ -23,7 +23,7 @@ handler 约定（见 `deterministic.py`）：
   - 签名 `def h(ctx, **groups)`：ctx.page = Playwright Page；groups = 正则具名组 (?P<name>...)。
   - 判定失败抛 AssertionError → step 记 failed；抛其它 → error。
 
-Midscene 侧的对齐脚手架见 engines/midscene/src/worker/deterministic.steps.ts。
+Midscene 侧的对齐脚手架见 `@gherkai/worker-midscene` 的 `worker/deterministic.steps` 模块。
 """
 from __future__ import annotations
 

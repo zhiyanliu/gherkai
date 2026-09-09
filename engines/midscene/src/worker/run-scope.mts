@@ -44,7 +44,7 @@ const BROWSER_ID = "aws.browser.v1";
 // worker 建连失败、重试耗尽时以此码退出，作 out-of-band 信号（建连失败先于任何事件 emit）。
 const EX_WORKER_NETWORK = 80;
 // 建连重试上限（ADR 0028）；退避 [0.5,1,2]s，总 ~3.5s，远小于组合根按引擎推导的 grace 下限
-// （midscene 见 gherkai/gherkai/compose.py `MIDSCENE_GRACE_MIN_S`；此处不复述会变的数字）。
+// （midscene 见 runtime/gherkai_runtime/compose.py `MIDSCENE_GRACE_MIN_S`；此处不复述会变的数字）。
 const CONNECT_ATTEMPTS = 4;
 const CONNECT_BACKOFF_MS = [500, 1000, 2000];
 // SIGTERM cleanup 里单个 StopBrowserSession 的超时预算（ADR 0028）：退化网络下 Stop 可能挂很久

@@ -1,16 +1,16 @@
 [project]
 name = "gherkai-workspace"
 version = "0.0.0"
-description = "uv workspace 根（不发行）：gherkai-core / gherkai-runtime / gherkai 三个发行包共用单 lock 与开发入口（ADR 0037）。根自身无发行物。"
+description = "uv workspace 根（不发行）：gherkai-core / gherkai-runtime / gherkai / gherkai-worker-novaact / gherkai-deploy-aws 五个发行包共用单 lock 与开发入口（ADR 0037）。根自身无发行物。"
 requires-python = ">=3.13"
-# 根只依赖 CLI 发行包（它再拉 runtime → core），使 `uv sync` 一次装齐三个成员（editable）。
+# 根只依赖 CLI 发行包（它再拉 runtime → core），使 `uv sync` 一次装齐全部成员（editable）。
 dependencies = ["gherkai[local,deploy-aws]"]  # [local] = novaact worker；[deploy-aws] = AWS 供给包（ADR 0037 决策 3/6）
 
 [tool.uv]
 package = false  # 虚拟根：不构建、不安装自身
 
 [tool.uv.workspace]
-# 成员 = 目录 = 发行包（ADR 0037「工程布局」）。deploy_aws 与 engines/novaact 随后续阶段包化时加入。
+# 成员 = 目录 = 发行包（ADR 0037「工程布局」）。五个成员均已包化。
 members = ["core", "runtime", "cli", "engines/novaact", "deploy_aws"]  # engines/midscene 是 npm 包、不在此
 
 [tool.uv.sources]
@@ -19,7 +19,7 @@ gherkai-worker-novaact = { workspace = true }
 gherkai-deploy-aws = { workspace = true }
 
 [dependency-groups]
-# 三个成员共用的开发依赖（moto 只装 dynamodb/s3 后端；pytest-timeout 是挂死安全网，见根 pytest 配置）。
+# 全部成员共用的开发依赖（moto 只装 dynamodb/s3 后端；pytest-timeout 是挂死安全网，见根 pytest 配置）。
 dev = [
     "pytest>=8.0.0",
     "pytest-timeout>=2.3",

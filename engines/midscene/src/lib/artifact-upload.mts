@@ -22,7 +22,7 @@ import * as path from "node:path";
 // 单次 S3 上传超时（ADR 0029「上传必须套超时」）：远大于正常同区上传（亚秒~秒级）、且明显 < grace（worker
 // 优雅停宽限，ADR 0024）——退化网络下上传挂到此即 abort、best-effort 放弃，不拖住退出。**grace 是 run 级、随
 // 引擎组成变**：混引擎 run 取各引擎下限的 max（Nova 下限最大），midscene-only run 由组合根
-// engine_min_grace("midscene")=MIDSCENE_GRACE_MIN_S 保证 > 本超时——**那两个下限的真值住 gherkai/gherkai/compose.py，
+// engine_min_grace("midscene")=MIDSCENE_GRACE_MIN_S 保证 > 本超时——**那两个下限的真值住 runtime/gherkai_runtime/compose.py，
 // 此处不复述数字**（曾漏设 midscene 下限 → 回落 ScheduleOpts 默认 grace < 本超时、致 worker 被 SIGKILL）。
 const UPLOAD_TIMEOUT_MS = 10_000;
 

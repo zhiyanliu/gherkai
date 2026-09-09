@@ -4,7 +4,7 @@
 **这是 opt-in 手动端到端验证脚本，不进 pytest 默认套件**——它真 spawn worker、真喂 job（stdin）、真收
 事件流（EVENTS_FD）、真开 AgentCore 会话、真写 S3（**产生真实 AWS 费用、需网络/凭证、单次 ~1-2min**）。它补的是
 单测的 mock 覆盖不到、只能真跑的那层（对齐 CLAUDE.md「绿≠对」）：真 greenlet / 真会话 / 真进程退出码 /
-真事件流字节 / 真中断丢失量。纯逻辑回归仍由各引擎单测覆盖（Nova worker/test_*.py、core tests/ 等）。
+真事件流字节 / 真中断丢失量。纯逻辑回归仍由各引擎单测覆盖（Nova engines/novaact/tests/test_*.py、Midscene engines/midscene/src/worker/*.test.mts、core/tests/ 等）。
 
 **中断只是能力之一**（--interrupt）：--interrupt none 的 baseline 可验「事件流端到端正常 + 三通道分离 +
 零行为变化」（如 worker I/O 边缘重构后的回归）；--interrupt <时机> 才验中断韧性。
