@@ -70,11 +70,14 @@ skills-lock.json
 # 哈希，缺了会让首跑全量重抽语义层、花 API 钱）。
 # 其余是本地缓存与派生品（graph.html 可由 graph.json 重建；日期目录是每次跑
 # 新增的滚动备份，入库会无限膨胀），按「派生品不入库」惯例排除。
+# wiki/ 是例外：它虽由 graph.json 派生，但是 AI agent 的导航入口（CLAUDE.md graphify 节让 agent 优先读
+# wiki/index.md），clone 下来就该能用、不该要求每个环境先跑一次 LLM 重建，故入库。
 # （**/ 前缀盖住任意子目录的 graphify-out——如在 core/ 里跑 graphify 的残留缓存；白名单以 / 锚定，只放根那份）
 **/graphify-out/*
 !/graphify-out/GRAPH_REPORT.md
 !/graphify-out/graph.json
 !/graphify-out/manifest.json
+!/graphify-out/wiki/
 
 # uv build 产物（wheel/sdist），不入库
 dist/
