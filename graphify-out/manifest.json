@@ -240,8 +240,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0025-plan-module-feature-to-jobs.md": {
-    "mtime": 1788938003.3175585,
-    "ast_hash": "a771524f45a4ba558c95dc0dd842b773",
+    "mtime": 1788939387.7502763,
+    "ast_hash": "a63117daa79d53c2ee95676445a9d77c",
     "semantic_hash": ""
   },
   "docs/adr/0028-transient-network-ssl-resilience.md": {
@@ -250,8 +250,8 @@
     "semantic_hash": ""
   },
   "docs/code-health-review.md": {
-    "mtime": 1788932909.9343073,
-    "ast_hash": "5eecb1e1f73c4841f15048b395ff7192",
+    "mtime": 1788939945.860361,
+    "ast_hash": "3283910c1b9299dd9b962ed770d75a7e",
     "semantic_hash": ""
   },
   "tools/e2e_harness.md": {
@@ -340,8 +340,8 @@
     "semantic_hash": "87df9864ab9368a37317714f853b6da0"
   },
   "docs/adr/0013-cross-engine-sharing-boundary.md": {
-    "mtime": 1788937078.0392237,
-    "ast_hash": "9e4aed71df0a38f9722f3966d2083537",
+    "mtime": 1788939345.8426578,
+    "ast_hash": "b1f0b6be7139270feda567a399570ea0",
     "semantic_hash": ""
   },
   "docs/adr/0014-ai-first-assertions.md": {
@@ -350,13 +350,13 @@
     "semantic_hash": ""
   },
   "docs/adr/0015-v1-positioning-smoke-not-regression.md": {
-    "mtime": 1788935769.987765,
-    "ast_hash": "16aebf1c248d4d88837fd1c07cab9109",
+    "mtime": 1788939345.8424695,
+    "ast_hash": "88dd5911a0f0f4fb57c8804c942cb9af",
     "semantic_hash": ""
   },
   "docs/adr/0016-execution-architecture-core-lib-run-model.md": {
-    "mtime": 1788938003.3208513,
-    "ast_hash": "252acf9a19cbd338957c8e8f7ec17af5",
+    "mtime": 1788939345.8413937,
+    "ast_hash": "0b9e65314bd6bc2e246867ba67ad483f",
     "semantic_hash": ""
   },
   "docs/adr/0021-local-cucumber-patch-step-keyword-disambiguation.md": {
@@ -390,8 +390,8 @@
     "semantic_hash": "a9a2e177bf8c1e3026bf05971e4d68de"
   },
   "docs/adr/0029-engine-artifacts-to-s3.md": {
-    "mtime": 1788938003.3180723,
-    "ast_hash": "ea66d4c9704c0fd9f0b1a25e8073deaf",
+    "mtime": 1788939345.8421705,
+    "ast_hash": "640283facf4ab4726aae33c28820a448",
     "semantic_hash": ""
   },
   "docs/adr/0030-realtime-persistence-seam.md": {
@@ -420,8 +420,8 @@
     "semantic_hash": ""
   },
   "docs/doc-health-review.md": {
-    "mtime": 1788937569.1636724,
-    "ast_hash": "6e91d414977bdf80c5297b133053ac89",
+    "mtime": 1788939883.7900996,
+    "ast_hash": "9080432651c59456231ebf248b5fc741",
     "semantic_hash": ""
   },
   "engines/midscene/README.md": {
@@ -460,8 +460,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0037-distribution-and-packaging.md": {
-    "mtime": 1788938063.9051232,
-    "ast_hash": "0273f7d1db36afadbaa6f8f0090ce17c",
+    "mtime": 1788939345.8417187,
+    "ast_hash": "71c39fd98fa97e20989d131633e7957c",
     "semantic_hash": ""
   },
   "docs/adr/0038-worker-image-delivery.md": {
@@ -1135,8 +1135,8 @@
     "semantic_hash": ""
   },
   ".claude/commands/doc-health-review.md": {
-    "mtime": 1788935700.7847693,
-    "ast_hash": "98b4287c7f13b108d5c867d2634c9dff",
+    "mtime": 1788939883.7908375,
+    "ast_hash": "77385d70892bc63c249ccf886ca34063",
     "semantic_hash": ""
   }
 }
