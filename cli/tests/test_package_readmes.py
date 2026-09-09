@@ -1,4 +1,4 @@
-"""包 README = 发行包长描述（逐字上 PyPI / npm 页面）的护栏（CLAUDE.md 文档纪律「README 分三层」）。
+"""使用者向文档的护栏：根 README 与包 README（发行包长描述，逐字上 PyPI / npm 页面）、包 Summary（CLAUDE.md 文档纪律「README / DEVELOPMENT 分层」；决策与理由：ADR 0039）。
 
 读者是「装了包、没有仓库的人」：ADR 编号 / 决策号 / 内部机制名对他们是噪声，`../docs/...` 这类相对链接在
 PyPI/npm 上全是死链。contributor 内容（布局、测试、spike、ADR 指针）归同目录 `DEVELOPMENT.md`，不进包。

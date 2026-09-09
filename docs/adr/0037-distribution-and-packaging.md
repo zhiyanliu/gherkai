@@ -246,7 +246,7 @@ worker 内容 = 框架脚手架 + 使用方确定性 step，属业界分类里�
 - **`--vpc` 只留 `default|new` 两档**：静默砍掉 [0033](./0033-iac-aws-backend-and-composition-wiring.md) 已定的 `vpc_id` 复用档，且以该档部署过的环境再 deploy 会合成危险变更集；三档齐全 + SSM 档三态比对。
 - **`--vpc` 隐式默认**：漏 context 合成建新 VPC 的真踩坑，必给。
 - **版本戳 / vpc 档由命令事后 `put_parameter`**：部署回滚会留错值；改 stack 资源与事务同生死。
-- **把包目录里的 contributor README 直接当 PyPI/npm 长描述**：v1.4.0 首发这么上去了——六个包页面满是 ADR 编号、模块布局、跑测试说明，`../docs/adr/…` 相对链接在 PyPI/npm 上全是死链；装了包、没有仓库的人看不懂也用不上。改为 README 分三层（根 README 给人保叙事；包 README 只写使用者内容、绝对 URL；`DEVELOPMENT.md` 装 contributor 内容、不进包），与「产品面文案不带内部指代」同一条原则的文档面。
+- **把包目录里的 contributor README 直接当 PyPI/npm 长描述**：v1.4.0 首发这么上去了；改为 README / DEVELOPMENT 分层——决策、理由与护栏见 [0039](./0039-user-facing-surfaces-no-internal-references.md)。
 - **靠 `uv-dynamic-versioning` 默认配置区分 dev/release**：默认 `dirty=false`，tag commit 上的脏构建与正式版逐字节同名，skew 跳过判据失效；故 style/strict/dirty 三项显式钉死。**反向也被拒——显式 `metadata = true`**：干净 tag commit 也带 `+<sha>`，发布 gate 必败、PyPI 拒收（真跑证实）；metadata 用默认。
 - **使用方 steps 允许 `.ts`/`.js`**：模块体系取决于使用方目录的 `package.json#type`，无 package.json 的裸目录落 CJS 域、tsx ESM register 不生效、`import` 直接 SyntaxError；收敛到 `.mts`/`.mjs`。
 - **midscene 使用方 steps 靠 Node 默认解析找 `@gherkai/worker-midscene`**：全局装/npx 形态下必 `ERR_MODULE_NOT_FOUND`；resolve hook（或退到依赖注入）。
