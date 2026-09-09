@@ -4,17 +4,17 @@
 
 ## 能做什么
 
-| 能力 | 说明 |
-|---|---|
-| 双引擎执行 | 同一份 `.feature`，按 `@engine` tag 路由到 Midscene 或 Nova Act；未标走默认引擎 |
-| 云端浏览器 | 两个引擎都接 AgentCore Browser（每个 scope 一个会话），本机不装 Chromium |
-| 本机 / 云端两档 | `--backend local`：worker 跑本机子进程、结果落 `reports/`；`--backend cloud`：worker 跑 Fargate、状态落 DynamoDB、结果落 S3 |
-| 前台 / 后台两种跑法 | `run` 在线守着出结果；`submit` 提交即走、`status --wait` 事后收——cloud 档提交完关机也跑完 |
-| 投票治理 | AI 断言可配 N 次取多数票（`--assertion-votes`） |
-| 确定性 step | 项目里的 `steps/` 目录注册精确断言，`plan` 预检标注哪些 step 走确定性、哪些走 AI |
-| 本机应用测试 | `--expose-local http://localhost:3000` 经 ngrok 隧道把本机可达的应用暴露给云端浏览器 |
-| 预算兜底 | 每个 job 有墙钟预算（缺省 300s，`@timeout:` tag 可改），卡死/超时自动停、不会计费失控 |
-| 跨引擎报告 | 每个 run 一份 RunReport（`index.html` 人看入口 + `manifest.json`） |
+| 能力                | 说明                                                                                                                  |
+|---------------------|-----------------------------------------------------------------------------------------------------------------------|
+| 双引擎执行          | 同一份 `.feature`，按 `@engine` tag 路由到 Midscene 或 Nova Act；未标走默认引擎                                         |
+| 云端浏览器          | 两个引擎都接 AgentCore Browser（每个 scope 一个会话），本机不装 Chromium                                                 |
+| 本机 / 云端两档     | `--backend local`：worker 跑本机子进程、结果落 `reports/`；`--backend cloud`：worker 跑 Fargate、状态落 DynamoDB、结果落 S3 |
+| 前台 / 后台两种跑法 | `run` 在线守着出结果；`submit` 提交即走、`status --wait` 事后收——cloud 档提交完关机也跑完                               |
+| 投票治理            | AI 断言可配 N 次取多数票（`--assertion-votes`）                                                                         |
+| 确定性 step         | 项目里的 `steps/` 目录注册精确断言，`plan` 预检标注哪些 step 走确定性、哪些走 AI                                        |
+| 本机应用测试        | `--expose-local http://localhost:3000` 经 ngrok 隧道把本机可达的应用暴露给云端浏览器                                  |
+| 预算兜底            | 每个 job 有墙钟预算（缺省 300s，`@timeout:` tag 可改），卡死/超时自动停、不会计费失控                                      |
+| 跨引擎报告          | 每个 run 一份 RunReport（`index.html` 人看入口 + `manifest.json`）                                                      |
 
 ## 架构速览
 
@@ -57,6 +57,17 @@ flowchart TD
 - Node ≥22（Midscene worker；`gherkai deploy` 同一下限）、Python 3.13 + [uv](https://docs.astral.sh/uv/)
 - （可选，仅 `--expose-local` 需要）[ngrok](https://ngrok.com/download) + authtoken（免费账号即够；`ngrok config add-authtoken <token>`——是 dashboard 上的 **Authtoken**，不是 `cr_` 开头的 API key）
 
+## 谁用它
+
+角色是帽子不是人：本地开发时一个人常同时写被测应用、写对应的 step、build 完自己推，几顶帽子都在头上；团队分工时按下表拆开即可。
+
+| 你要做的事                                                  | 角色             | 装什么                                                     | 需要什么                                       |
+|-------------------------------------------------------------|------------------|------------------------------------------------------------|------------------------------------------------|
+| 写 `.feature`（纯自然语言、零代码），提交、看结果                | feature 作者（QA） | `gherkai`；要在本机跑（`--backend local`）再加下面两个 worker | 写：不需要任何凭证；跑：按跑法，见「上手」开头的表   |
+| 写 `steps/` 里的确定性 step，本机验证，build 定制 worker 镜像 | 测试开发         | `gherkai[local]` + `@gherkai/worker-midscene` + docker     | 同上；不需要云端写权限，镜像交给部署方推         |
+| 建/改共享的云端后端，推 worker 镜像                          | 部署方           | `gherkai[deploy-aws]` + Node ≥22 + docker                  | AWS 账号的部署权限（CDK、ECR、ECS、SSM）；跑用例同上 |
+| 开发框架本身                                                | contributor      | clone 仓库                                                 | 见 [`DEVELOPMENT.md`](./DEVELOPMENT.md)        |
+
 ## 安装
 
 ```bash
@@ -75,6 +86,15 @@ uvx gherkai --version                       # 或免安装临时跑（uvx --from
 
 - **怎么跑**——前台 `run`（CLI 在线守着，跑完直接给结果）或后台 `submit` + `status`（提交即走，事后查/收）。
 - **跑在哪 / 落在哪**（`--backend`）——`local`（默认：worker 跑本机子进程，结果落本地 `reports/`）或 `cloud`（worker 跑 Fargate 容器，状态落 DynamoDB、结果落 S3；需先由部署方跑 `gherkai deploy --vpc <档> --prefix <前缀>` 建齐资源，见 [`deploy_aws/README.md`](./deploy_aws/README.md)）。
+
+四种组合需要的权限不同、费用记到谁头上也不同；凭证越少的跑法越适合 CI 与低权限机器：
+
+| 跑法                                  | 需要什么                                                                                                                            | 费用记到     |
+|---------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------|--------------|
+| `plan`                                | 无凭证（装了 worker 才有确定性 step 标注）                                                                                            | 无           |
+| `run` / `submit`，`--backend local`    | 本机 AWS 凭证（见前置要求）+ 两个 worker                                                                                              | 自己的账号   |
+| `submit` + `status`，`--backend cloud` | 最小云端权限：读写运行记录表、只读探活、调用后端 Lambda（用例含多行参数时还要 S3 写权限）；不需要任何 ECS 写权限，任务由后端的 Lambda 拉起 | 部署方的账号 |
+| `run`，`--backend cloud`               | 上一档再加起停 Fargate task 与写结果桶的权限（CLI 进程自己起 task、自己上传任务、自己推进）                                             | 部署方的账号 |
 
 ### ① 先预检（纯本地、零费用）
 

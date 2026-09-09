@@ -47,6 +47,31 @@ _Avoid_: 把 AI 断言当成"无需治理就可信"——它为主，但必须�
 两个引擎的报告形态根本不同：**Midscene 出单一 `report.html`**（含每步截图+AI 决策+坐标，整 scope 一份，`kind=report`、挂 scope 级）；**Nova Act 每次 `act`/`act_get` 出一个 trajectory HTML**（`kind=trajectory`、挂到其所属 **step** 级）+ 一份 `session_summary.json` 数字汇总（`kind=summary`、挂 scope 级）。worker 经 0024 协议把产物**指针**报回 core（`reportRefs.ref`，core 内类型 `ResourceUri`＝带 scheme 的统一资源指针：本地 `file://`、未来云端 `s3://`/`https://`，故非裸本地路径；字段形状见 ADR 0024），core **不透明搬运**（不 stat/不 fetch/不打开 ref）。**`kind` 表产物类型（report/trajectory/summary/未来 video/trace），粒度由 report_ref 挂在 step/scenario/scope 哪级表达——二者正交**。同一 `ResourceUri` 也是 `ReportStore.write` 的返回类型（统一"资源指针"概念，ADR 0027）。**RunReport（ADR 0027）= 跨引擎归集索引**：`ReportStore` 把 `RunResult` 归集成 `manifest.json`（机器可读）+ `index.html`（人可导航入口），**不解析/不融合原生产物内容**，只索引/链接（cli 每次 run **默认生成**，`--no-report` 跳过）。index.html 的导航链接（`href`）local 相对化（产物本在 run 树内、目录可整体搬走）、cloud 恒为 `s3://`；`ref` 原始指针原样不改（不透明铁律）。新引擎报任意 `kind` 零改 core（永不按 kind 分支）。
 _Avoid_: 笼统说「两个引擎都出报告」而忽略其形态/落点的根本不同；把 `kind` 当粒度维度（它是产物类型，粒度由挂载层级表达）；把 RunReport 当成「解析两个引擎 html 融合成一个大报告」（它只归集索引、不碰产物内容）；以为 core 会按 `kind`/引擎分支处理产物（永不——扩展性契约，ADR 0027）。
 
+## 使用方角色
+
+**使用方 (Consumer) vs contributor**:
+使用方 = 用 gherkai 做测试的团队（下面三顶帽子的统称）；contributor = 开发框架本身的人。文档按此分层（使用者向 / contributor 向，ADR 0039）。角色是**帽子不是人**：本地开发时一个人常同时戴几顶（写被测应用、写 step、build 完自己推）；团队分工时按帽子拆权限与安装（ADR 0040）。
+_Avoid_: 把「使用方」当成单一画像；按岗位头衔而非按产物/权限划角色。
+
+**feature 作者 (Feature author，同义 QA)**:
+只写 `.feature` 纯自然语言、零代码；产物 = `.feature`，验证用 `plan`（不需要凭证）。要跑，按跑法权限梯取一档——跑不是这顶帽子独有的事。「QA 零代码」口号里的 QA 即此帽子。
+_Avoid_: 让 feature 作者学任何关键词措辞或碰 `steps/`。
+
+**测试开发 (Test developer)**:
+会写代码的测试帽子：在使用方项目 `steps/` 写确定性 step（两引擎各一份、模式对称）、本机 local 验证、build 定制 worker 镜像交给部署方推。不需要云端写权限。
+_Avoid_: test engineer / test-engineer（已弃用）；把「developer」当它的同义词（developer 只指被测应用的开发者）。
+
+**部署方 (Deployer)**:
+拥有 AWS 账号写权限、跑 `gherkai deploy` / `push-worker` 的帽子——唯一需要云端写权限的角色；装 `gherkai[deploy-aws]`。不拥有镜像构建。
+_Avoid_: 与「提交者」混用。
+
+**跑法权限梯 (Execution tiers)**:
+执行是与帽子正交的轴（ADR 0040）：`plan`（无凭证）< `--backend local`（本机凭证、自己付费）< cloud detached `submit`/`status`（最小云端权限、无任何 ECS 写）< cloud 同步 `run`（另需起停 task）。任何帽子或机器身份按需取一档；CI 应走 detached 档。
+_Avoid_: 把执行权限挂在帽子上；给「跑的人」单立角色。
+
+**提交者 (Submitter)**:
+不是帽子，是**权限类别**：跑法权限梯上两档云端跑法的权限持有者，人或机器身份都行。权限登记见 ADR 0033「资源清单」末段与 ADR 0038「权限面增量」。
+
 ## 产品形态
 
 **通用 step (Generic step)**:

@@ -28,6 +28,8 @@
 
 ## 角色边界（关键）
 
+> 角色正名与边界矩阵的单一真源现为 [0040](./0040-consumer-role-model-and-terminology.md)（「测试开发」即当时所称 test engineer）；本节保留当时的决策内容。
+
 - **QA**：永远只写 `.feature` 纯自然语言 → 默认走 AI。**"零代码"对 QA 成立。**
 - **测试开发**（会写代码）：偶尔需精确锚点时，在确定性脚手架（`worker/deterministic.steps.ts` / `worker/deterministic_steps.py`）写一小段 Playwright 查询 step。这是 BDD 原本的角色分工，**不破坏 QA 零代码**。
 

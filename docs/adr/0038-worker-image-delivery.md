@@ -11,7 +11,7 @@
 **要解的问题**：
 - **多套 step 集并存**：不同开发者/分支在同一个共享后端上各跑各的确定性 step 集而互不覆盖；跑时可选。单 tag cover 不了。
 - **版本噩梦**：同一个 tag 名在不同人嘴里指不同内容。要让「用的是哪份」可见、可查、run 内一致。
-- **所有权**：改共享后端用的镜像是一次部署变更，应归部署方；镜像**构建**是 developer 自己的容器工作，gherkai 不该拥有。默认画像 = developer 兼测试开发与部署方两角（同一台机器 build 完就推）；团队拆角色时权限边界要现成。
+- **所有权**：改共享后端用的镜像是一次部署变更，应归部署方；镜像**构建**是 developer 自己的容器工作，gherkai 不该拥有。默认画像 = developer 兼测试开发与部署方两角（同一台机器 build 完就推）；团队拆角色时权限边界要现成（角色模型与「帽子不是人」的一般化见 [0040](./0040-consumer-role-model-and-terminology.md)）。
 - **架构错误提前暴露**：`--platform` 漏给的错误不该拖到 Fargate 启动期才炸，应在推送前 fail-loud。**不支持 ARM64**（被拒方案，理由见下）。
 
 **AWS 事实（决定形状，均已对照官方文档）**：RunTask 的容器 override 字段全集是 command / environment / environmentFiles / cpu / memory / memoryReservation / resourceRequirements / name，**不能换镜像**；镜像与 `runtimePlatform` 都写在 task-def **revision** 里，revision 是不可变快照、无继承；RunTask 可传 `family`（最新 ACTIVE）或 `family:N`（精确）；task-def 镜像栏支持 `repo@sha256:<digest>`；`DeregisterTaskDefinition` 把 revision 置 INACTIVE——**不影响在跑的 task，但不能再用它起新 task，且注销后最多 10 分钟内这条限制可能尚未生效**；`DeleteTaskDefinitions` 永久删除 INACTIVE revision（有关联 task 时先 DELETE_IN_PROGRESS）；task-def 类 IAM 动作（Register / List / Describe）**不支持资源级权限，只能 `Resource: "*"`**；ECR 仓库 tag 可变性默认 MUTABLE；Fargate ARM64 的不可用面**按 AZ**（官方明列 us-east-1 的 `use1-az3`）。

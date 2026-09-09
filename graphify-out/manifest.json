@@ -235,8 +235,8 @@
     "semantic_hash": "52a6541e1d49d5f31ae4c3917adbe073"
   },
   "docs/adr/0020-step-phrasing-default-ai-deterministic-scaffold.md": {
-    "mtime": 1788927728.998186,
-    "ast_hash": "4f7fbbbfec0ae7b788268848f3e6c5fc",
+    "mtime": 1788928318.4045196,
+    "ast_hash": "8eb979bf7a85f862391cbb505b81b62b",
     "semantic_hash": ""
   },
   "docs/adr/0025-plan-module-feature-to-jobs.md": {
@@ -265,13 +265,13 @@
     "semantic_hash": "edae2c4a98921a58c66c6b46316bba26"
   },
   "CONTEXT.md": {
-    "mtime": 1788927615.1439905,
-    "ast_hash": "e8ecc4bfff396067853f2623e9d9eaea",
+    "mtime": 1788928906.4001615,
+    "ast_hash": "9d8f786471babb898556403fc29041b5",
     "semantic_hash": ""
   },
   "README.md": {
-    "mtime": 1788927615.1496072,
-    "ast_hash": "07a57f1ac30c13d0c7a8cdf09c3ab049",
+    "mtime": 1788929729.320837,
+    "ast_hash": "72b0824bc2bb232cda72687b6562e445",
     "semantic_hash": ""
   },
   "cli/README.md": {
@@ -410,9 +410,9 @@
     "semantic_hash": "6860022d8344f1045b4fe5081c6666d0"
   },
   "docs/adr/0033-iac-aws-backend-and-composition-wiring.md": {
-    "mtime": 1788919610.3522615,
-    "ast_hash": "3f81a93d0a9985f3311594b7f98dff9f",
-    "semantic_hash": "3f81a93d0a9985f3311594b7f98dff9f"
+    "mtime": 1788929315.402015,
+    "ast_hash": "2c0bad3cc357a0edd2f93477b7e68741",
+    "semantic_hash": ""
   },
   "docs/adr/0034-detached-batch-reconciler.md": {
     "mtime": 1788922049.6584494,
@@ -465,9 +465,9 @@
     "semantic_hash": ""
   },
   "docs/adr/0038-worker-image-delivery.md": {
-    "mtime": 1788919610.3515348,
-    "ast_hash": "1acfa6bc09809c141be8606ce8b02a4f",
-    "semantic_hash": "1acfa6bc09809c141be8606ce8b02a4f"
+    "mtime": 1788928318.404917,
+    "ast_hash": "af45c44711039c61ccdf68a7690df883",
+    "semantic_hash": ""
   },
   "cli/gherkai_cli/__init__.py": {
     "mtime": 1788766077.6260731,
@@ -1110,9 +1110,9 @@
     "semantic_hash": "4047e4947c6dabeae8d1be6134e0dd0a"
   },
   "DEVELOPMENT.md": {
-    "mtime": 1788926865.3466,
-    "ast_hash": "67222cfb0fcf326df5857d33574fa4d7",
-    "semantic_hash": "67222cfb0fcf326df5857d33574fa4d7"
+    "mtime": 1788928318.405093,
+    "ast_hash": "b70233aef3713c3b5190047c8af785b5",
+    "semantic_hash": ""
   },
   "docs/adr/0039-user-facing-surfaces-no-internal-references.md": {
     "mtime": 1788921323.8107913,
@@ -1123,5 +1123,10 @@
     "mtime": 1788926814.1316226,
     "ast_hash": "9e8b65705b510b04c074281bc06242b1",
     "semantic_hash": "9e8b65705b510b04c074281bc06242b1"
+  },
+  "docs/adr/0040-consumer-role-model-and-terminology.md": {
+    "mtime": 1788929343.4296725,
+    "ast_hash": "70fb19778afbdfda3982d7e15a9dfb1a",
+    "semantic_hash": ""
   }
 }

@@ -26,7 +26,7 @@
 ├── pyproject.toml / uv.lock   ← uv workspace 根（成员 = core / runtime / cli / engines/novaact / deploy_aws 五个发行包）：单一 lock + 共用 dev 依赖与 pytest 配置（ADR 0037）
 ├── .github/                   ← CI 与发布链（workflows/{ci,release}.yml + scripts/；一次性人工前置与本地校验见 .github/workflows/README.md，ADR 0037 决策 8）
 ├── docs/                      ← 架构决策与过程记录
-│   ├── adr/                   ← 架构决策记录（0001–0039）
+│   ├── adr/                   ← 架构决策记录（0001–0040）
 │   ├── guides/                ← 给人的阅读理解文档（机制解读/横切合成等，只讲 how、权威在 ADR）
 │   ├── journey/               ← 任务推进的 staging 区（过程产物，吸收进 ADR/code 后即删，见 CLAUDE.md「文档纪律」；可为空）
 │   ├── REFERENCES.md          ← 外部一手来源
