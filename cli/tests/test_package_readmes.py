@@ -79,3 +79,30 @@ def test_package_summaries_are_for_users_only():
         if FORBIDDEN.search(d):
             hits.append(f"{pkg}/package.json description: {d[:100]}")
     assert not hits, "包 Summary 不得含内部指代：\n" + "\n".join(hits)
+
+
+def _release_bodies() -> list[str]:
+    """release.yml 里 `body: |` 块标量的正文。不引 yaml 库（dev 依赖里没有它、别为一条护栏引入）：按缩进收块。"""
+    lines = (REPO / ".github/workflows/release.yml").read_text(encoding="utf-8").splitlines()
+    bodies, i = [], 0
+    while i < len(lines):
+        m = re.match(r"^(\s*)body:\s*\|", lines[i])
+        if not m:
+            i += 1
+            continue
+        indent, buf, i = len(m.group(1)), [], i + 1
+        while i < len(lines) and (not lines[i].strip() or len(lines[i]) - len(lines[i].lstrip()) > indent):
+            buf.append(lines[i])
+            i += 1
+        bodies.append("\n".join(buf))
+    return bodies
+
+
+def test_github_release_body_is_for_users_only():
+    """GitHub Release 正文 = Releases 页面，且是各包 pyproject `[project.urls] Changelog` 的落点——PyPI 上点 Changelog
+    直达，是没有仓库上下文的使用者面：零禁词、仓库内文件只用绝对 URL（同包 README）。找不到 body 即失败。"""
+    bodies = _release_bodies()
+    assert bodies, "release.yml 里找不到 `body: |`（workflow 改形态别让护栏静默变绿）"
+    hits = [f"release body:{i}: {line.strip()[:120]}" for body in bodies for i, line in enumerate(body.splitlines(), 1)
+            if FORBIDDEN.search(line) or RELATIVE_LINK.search(line)]
+    assert not hits, "Release 正文面向使用者，内部指代改成产品语言 + 指向 README 的绝对 URL：\n" + "\n".join(hits)

@@ -345,4 +345,7 @@ jobs:
             `ghcr.io/${{ github.repository_owner }}/gherkai-worker-novaact:${{ needs.build.outputs.version }}`
             · `ghcr.io/${{ github.repository_owner }}/gherkai-worker-midscene:${{ needs.build.outputs.version }}`
 
-            升级是三步（CLI → `gherkai deploy` → 重推自定义 variant），见 ADR 0037 决策 7。
+            升级是三步：① 部署方 `uv tool upgrade gherkai`（安装时带的 extras 沿用）→ ② 立刻 `gherkai deploy`
+            （①→② 之间提交会被拒，属预期）→ ③ 团队其他人再升自己的 CLI。有自定义 worker 镜像 variant 的，从新版本基底
+            重新 build 后 `gherkai deploy push-worker` 推一遍。细节见
+            https://github.com/zhiyanliu/gherkai/blob/HEAD/deploy_aws/README.md 的「版本与升级」。

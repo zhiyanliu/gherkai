@@ -95,14 +95,14 @@
     "semantic_hash": "ece69885481b53c5ba7728733937c711"
   },
   "core/tests/test_project.py": {
-    "mtime": 1788945554.214663,
-    "ast_hash": "75f3d2b1372e28246d2347d6e1c556c6",
+    "mtime": 1788945944.7359602,
+    "ast_hash": "796738d774a664235ce8c1bd8cae1986",
     "semantic_hash": ""
   },
   "core/tests/test_reconcile.py": {
-    "mtime": 1788766077.608647,
-    "ast_hash": "2df5fa5a590acfbf11b659216f99033e",
-    "semantic_hash": "2df5fa5a590acfbf11b659216f99033e"
+    "mtime": 1788945944.7358334,
+    "ast_hash": "f9e0a806a81e22e8d64795994bed8820",
+    "semantic_hash": ""
   },
   "core/tests/test_report_store.py": {
     "mtime": 1788944059.7532105,
@@ -395,13 +395,13 @@
     "semantic_hash": ""
   },
   "docs/adr/0030-realtime-persistence-seam.md": {
-    "mtime": 1788944240.2925804,
-    "ast_hash": "34547780630c6754118dc9264f68d652",
+    "mtime": 1788945944.7338524,
+    "ast_hash": "e211b494dab2e5e01a65835d3c4ad76f",
     "semantic_hash": ""
   },
   "docs/adr/0031-job-lifecycle-states-and-severity.md": {
-    "mtime": 1788935878.315205,
-    "ast_hash": "eb71064171b75df9c00456590dc1bf1c",
+    "mtime": 1788945944.7345324,
+    "ast_hash": "b8044133922cd44067dc374c78367b7a",
     "semantic_hash": ""
   },
   "docs/adr/0032-fargate-execution-environment.md": {
@@ -415,8 +415,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0034-detached-batch-reconciler.md": {
-    "mtime": 1788945352.439875,
-    "ast_hash": "834cc5e692f0eb90de0847647eb6fd22",
+    "mtime": 1788946063.401032,
+    "ast_hash": "738241484c2a4ea9503968f6d0e08170",
     "semantic_hash": ""
   },
   "docs/doc-health-review.md": {
@@ -605,13 +605,13 @@
     "semantic_hash": ""
   },
   "core/gherkai_core/project.py": {
-    "mtime": 1788945485.4560347,
-    "ast_hash": "5828a2bce6f9cb602e2d12294fa25697",
+    "mtime": 1788946063.4016886,
+    "ast_hash": "58ead8d655f18ef6e04d0ac026661f53",
     "semantic_hash": ""
   },
   "core/gherkai_core/reconcile.py": {
-    "mtime": 1788945352.4409616,
-    "ast_hash": "a2f40c1643c596b109d59b011959009c",
+    "mtime": 1788945944.7346716,
+    "ast_hash": "d10bccbd6429ff0805011023dfca090e",
     "semantic_hash": ""
   },
   "core/gherkai_core/schedule.py": {
@@ -650,9 +650,9 @@
     "semantic_hash": ""
   },
   "runtime/gherkai_runtime/detached.py": {
-    "mtime": 1788922049.6559267,
-    "ast_hash": "c772f5d3e3f44257254bfeecb582a59f",
-    "semantic_hash": "c772f5d3e3f44257254bfeecb582a59f"
+    "mtime": 1788945944.7349625,
+    "ast_hash": "9e8f033097997a32879ded6455ca96d5",
+    "semantic_hash": ""
   },
   "runtime/gherkai_runtime/names.py": {
     "mtime": 1788943140.8465395,
@@ -985,8 +985,8 @@
     "semantic_hash": ""
   },
   "deploy_aws/gherkai_deploy_aws/lambdas/reconciler.py": {
-    "mtime": 1788943632.7533076,
-    "ast_hash": "993bb24a85b6d4a1427e6f059ce9a492",
+    "mtime": 1788945944.7351062,
+    "ast_hash": "30adeae5a6390c70158f010ccb4220e5",
     "semantic_hash": ""
   },
   "deploy_aws/gherkai_deploy_aws/names.py": {
@@ -1030,9 +1030,9 @@
     "semantic_hash": "c08936632d3c4d5e4835cc3381de6776"
   },
   ".github/workflows/release.yml": {
-    "mtime": 1788857816.7528906,
-    "ast_hash": "1a35225aedbbc0587a6bbca8a2919630",
-    "semantic_hash": "1a35225aedbbc0587a6bbca8a2919630"
+    "mtime": 1788946164.5830443,
+    "ast_hash": "425d7810abb7b18f6643593cdbea9782",
+    "semantic_hash": ""
   },
   "deploy_aws/tests/test_lambda_handlers.py": {
     "mtime": 1788945398.0019186,
@@ -1075,9 +1075,9 @@
     "semantic_hash": ""
   },
   "cli/tests/test_package_readmes.py": {
-    "mtime": 1788921289.6113424,
-    "ast_hash": "0f2c24660243dea3fda743a7f38ba29a",
-    "semantic_hash": "0f2c24660243dea3fda743a7f38ba29a"
+    "mtime": 1788946164.5833828,
+    "ast_hash": "1d22ad43892994d82c25999edf980d65",
+    "semantic_hash": ""
   },
   "cli/DEVELOPMENT.md": {
     "mtime": 1788937078.0401413,
@@ -1100,9 +1100,9 @@
     "semantic_hash": ""
   },
   "core/DEVELOPMENT.md": {
-    "mtime": 1788861342.9507642,
-    "ast_hash": "c4c620e1afec0000b1a0ce4726a66461",
-    "semantic_hash": "c4c620e1afec0000b1a0ce4726a66461"
+    "mtime": 1788946063.4014876,
+    "ast_hash": "de8e2a9318077181dee585e9d91279f2",
+    "semantic_hash": ""
   },
   "runtime/DEVELOPMENT.md": {
     "mtime": 1788935700.7865164,
@@ -1115,9 +1115,9 @@
     "semantic_hash": ""
   },
   "docs/adr/0039-user-facing-surfaces-no-internal-references.md": {
-    "mtime": 1788921323.8107913,
-    "ast_hash": "ff0eb122567192c4b5a3abbf7281fccd",
-    "semantic_hash": "ff0eb122567192c4b5a3abbf7281fccd"
+    "mtime": 1788946199.854527,
+    "ast_hash": "65ed516e955076558ef78081fb7e1d37",
+    "semantic_hash": ""
   },
   "tools/graphify_refresh.sh": {
     "mtime": 1788943044.2904456,

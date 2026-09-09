@@ -33,13 +33,14 @@
 | 各包 `README.md`（`cli/` `core/` `runtime/` `deploy_aws/` `engines/novaact/` `engines/midscene/`） | **逐字上 PyPI / npm 页面**（pyproject `readme` / npm `files`）；改动随**下一个 tag** 才生效——PyPI 已发版本的长描述不可改 | **只用绝对 URL**（页面上相对链接全是死链；仓库内文件用 `https://github.com/zhiyanliu/gherkai/blob/HEAD/<path>`，`HEAD` 跟默认分支、不绑分支名）；最多末尾一句「设计文档见仓库 docs/adr」 |
 | 根 `DEVELOPMENT.md` | contributor 入口：版本线叙事、目录结构、从 checkout 跑、测试、spike、发布与版本、各包 DEVELOPMENT 索引、纪律/术语/ADR 指针 | 相对链接 |
 | 各包 `DEVELOPMENT.md` | 该包 contributor 文档：模块布局、从 checkout 跑、测试、维护者踩坑（真踩过的坑一条不丢）；**不进发行包**（wheel 本就不含，sdist 经 hatch `exclude` 排除） | 相对链接 |
+| GitHub Release 正文（`.github/workflows/release.yml` 的 `body:`） | Releases 页面；各包 pyproject `[project.urls] Changelog` 指它（[0037](./0037-distribution-and-packaging.md) 决策 8），即「装了包的人」点 Changelog 直达的页面——**使用者面**，没有仓库上下文 | 只用绝对 URL（同包 README）；升级/用法细节指使用者向 README，不写 ADR/决策号（首发正文曾漏一处「见 ADR 0037 决策 7」，已发 Release 需在 GitHub 上手工改） |
 
 页顶 Summary（pyproject / package.json 的 `description`）同属包页面，同一规则。搬家不是删：从使用者向文件移出的每条事实与踩坑，必须在对应 DEVELOPMENT.md 里找得到（实装时按旧文件逐字对照过）。
 
 ### 护栏
 
 - `cli/tests/test_user_facing_messages.py`：AST 扫五个生产包全部**非 docstring** 字符串字面量 + midscene `.mts` 去注释后按行扫，禁词表 = ADR 编号 / 决策·决定编号 / 内部机制名 / 内部函数名；Python 与 TS 同一张表（曾因 TS 表更松漏掉一处「组合根装配错误」）。
-- `cli/tests/test_package_readmes.py`：根 README 与进包的六份 README 零禁词，包 README 零相对链接（正则 `](../` `](./` `](x.md`），pyproject / package.json `description` 零禁词，根与每包都有 `DEVELOPMENT.md`；扫描面路径缺失即失败（包搬家不许让护栏变绿）。
+- `cli/tests/test_package_readmes.py`：根 README 与进包的六份 README 零禁词，包 README 零相对链接（正则 `](../` `](./` `](x.md`），pyproject / package.json `description` 零禁词，根与每包都有 `DEVELOPMENT.md`，GitHub Release 正文（release.yml 的 `body: |` 块）零禁词零相对链接；扫描面路径缺失即失败（包搬家 / workflow 改形态不许让护栏变绿）。
 - **护栏管不到的**：正则抓不住的行话（皮 / 装配 / 唯一真源 / 产品本体层）与「使用者读得懂吗」的判断，靠 review——两轮对抗核验都在这一档抓到过遗漏（runtime 页面整篇行话、`--grace` 漏标「仅 run」、定位链顺序写反）。
 
 ## 代价与权衡
