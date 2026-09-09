@@ -17,7 +17,16 @@
 - **`docs/journey/` 是任务推进的 staging 区，不是永久文档**：存当前工作的**过程**产物（进度/调查/探索/复盘）。**建不建，判据 = 过程信息有没有对话之外的读者**（对话上下文跨会话不可靠——截断/压缩/换 agent）：①下个会话/接手的 AI 要**恢复现场** → 进度总纲（做到哪、关键中间结论、下一步）、后续批次还要引用的调查记录；②人要**异步 review** → 待批报告（批毕即删）；没有这样的读者（单次会话内闭环）→ **不建**，过程留对话、别为小任务造文件。生命周期 = staging → 内容吸收进 ADR（决策）/ code（实现）/ commit（过程记录）→ 可删或归档；**任务收尾即审计点**（该吸收的吸收、吸收完即删）。**不苛求永久文档的严谨，只求「准确反映当前状态 + 导航有用」**：状态变了就改（别留旧态漂移）、别当永久建筑维护。文档内首行 `> 类型:` 头声明子类型（进度总纲/调查记录/…）——**不给它设计类型缩写**（journey 是异质集合、又是暂存，精确类型学是 ADR（结论、长期、要精确引用）才需要的严谨）。与 ADR 的对称在**寿命层**（journey 记过程/暂时 vs ADR 记结论/永久），非缩写层。
 - **`docs/guides/` 是给人（使用者/contributor）的阅读理解层（派生视图）**：凡帮人理解系统如何工作的**解释性文档**都归此——机制横切解读、数据流叙事、阅读路径等；README 停在鸟瞰与上手、ADR 按决策切片为 AI 检索优化，人要的成体系理解两者都给不出，此层补位。判据三条：**只讲 how、不复述 why**（决策理由/权衡/被拒方案留 ADR，guide 只给指针）；**权威在 ADR+code，新决策绝不先落 guide**（冲突以权威为准；每篇头部声明此定位、正文带权威指针）；**立文门槛 = README 给不到的深度 + 单个 ADR 直读给不出的理解视角**（典型 = 跨多个 ADR 才拼得出全貌的横切合成），不做逐 ADR 人话翻译。
 - **文档文件名 = 英文小写连字符标题（kebab-case），全 `docs/` 通用**：`docs/adr/` 与 `docs/journey/` 带四位编号前缀 `NNNN-`（两个目录各自独立编号、只增不复用），`docs/guides/` 及其它文档不编号；文件名不用中文、不用空格/下划线/大写。**唯一例外 = 约定俗成的全大写索引/入口文件**（`README.md`、`CONTEXT.md`、`CLAUDE.md`、`docs/REFERENCES.md`、各包 `DEVELOPMENT.md`），它们靠通行惯例被人一眼认出，保持原名。文件名是引用锚点、要在 URL/终端/grep 里稳定可打，中文标题放文档首行 `#` 即可。
-- **README / DEVELOPMENT 分层，按读者定内容与指针**：①**根 `README.md`** = 仓库首页、给**使用者**（来看这是什么、怎么装、怎么上手的人）：能力、架构速览、前置、安装、上手、写 feature，末尾「深入了解」一节链接 CONTEXT / guides / adr / DEVELOPMENT；正文**不写 ADR 编号、决策号、内部机制名、目录结构、开发环境、测试、spike、发布流程**（GitHub 渲染相对链接，故根 README 可用相对链接）；②**根 `DEVELOPMENT.md`** = contributor 入口：版本线叙事、目录结构、从 checkout 跑、测试、spike、发布与版本、各包 DEVELOPMENT 索引、纪律/术语/ADR 指针；③**各包目录的 `README.md`**（`cli/`、`core/`、`runtime/`、`deploy_aws/`、`engines/novaact/`、`engines/midscene/`）= **发行包的长描述，逐字上 PyPI / npm 页面** → 只写使用者需要的：这是什么、装法、用法、配置项、退出码/错误怎么办；同样不写内部指代，链接一律绝对 URL（PyPI/npm 上相对链接全是死链），最多末尾一句「设计文档见仓库 docs/adr」；④**各包目录的 `DEVELOPMENT.md`** = 该包的 contributor 文档（模块布局、从 checkout 跑、测试、spike、ADR 指针），不进发行包（sdist/wheel 均排除）。判据 = 「装了包 / 点开仓库首页、没读过 ADR 的人看得懂且用得上」——与代码纪律「产品面文案不带内部指代」是同一原则的文档面。护栏 = `cli/tests/test_package_readmes.py`（根 README 与进包的 README、pyproject/package.json 的 `description` 零 `ADR`/决策号/内部机制名；包 README 零相对链接；根与每包都有 `DEVELOPMENT.md`）。
+- **README / DEVELOPMENT 分层：按读者切文件，成对存在**。使用者向 = 根 `README.md` + 各包 `README.md`；contributor 向 = 根 `DEVELOPMENT.md` + 各包 `DEVELOPMENT.md`。**共用一条内容规则**：使用者向只写「这是什么、装法、用法、配置、退出码/错误怎么办」，**不写** ADR 编号/决策号/内部机制名/目录结构/开发环境/测试/spike/发布流程/设计叙事；这些全归 contributor 向，并带 ADR 指针。判据 = 「装了包 / 点开仓库首页、没读过 ADR 的人看得懂且用得上」——与代码纪律「产品面文案不带内部指代」同一原则。四层只差**去向与链接形态**：
+
+  | 文件 | 去向 | 链接 |
+  |---|---|---|
+  | 根 `README.md` | 仓库首页；末尾「深入了解」一节链 CONTEXT / guides / adr / DEVELOPMENT | 相对链接可（GitHub 渲染） |
+  | 各包 `README.md`（`cli/` `core/` `runtime/` `deploy_aws/` `engines/*`） | 逐字上 PyPI / npm 页面（pyproject `readme` / npm `files`）；**改动随下一个 tag 才生效** | **只用绝对 URL**（页面上相对链接全是死链）；最多末尾一句「设计文档见仓库 docs/adr」 |
+  | 根 `DEVELOPMENT.md` | contributor 入口：版本线、目录结构、从 checkout 跑、测试、spike、发布、各包 DEVELOPMENT 索引 | 相对链接 |
+  | 各包 `DEVELOPMENT.md` | 该包 contributor 文档：模块布局、从 checkout 跑、测试、维护者踩坑；**不进 sdist / wheel** | 相对链接 |
+
+  护栏 = `cli/tests/test_package_readmes.py`：使用者向文件与 pyproject / package.json 的 `description` 零内部指代，包 README 零相对链接，根与每包都有 `DEVELOPMENT.md`。
 
 ## 代码纪律
 
