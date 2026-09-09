@@ -1088,3 +1088,24 @@ def test_check_backend_skew_propagates_read_errors():
     ssm = _StampSsm(None, error=_client_error("AccessDeniedException"))
     with pytest.raises(ClientError):
         compose.check_backend_skew(prefix="g-", cli_version="1.4.0", ssm=ssm)
+
+
+def test_variant_miss_hint_offers_push_and_base_fallback():
+    """同版本档的 variant miss 提示须同时给两条出路（ADR 0038「升级不重置默认指针」条）：
+    让部署方 push-worker，或临时 --worker-variant base 先跑。"""
+    from gherkai_runtime.compose import _variant_miss_hint
+
+    msg = _variant_miss_hint(engine="midscene", variant="common", tag="1.4.0-common",
+                             what="SSM 里没有映射", cli_version="1.4.0", backend_version="1.4.0")
+    assert "push-worker" in msg and "--variant common" in msg
+    assert "--worker-variant base" in msg
+
+
+def test_variant_miss_hint_older_cli_only_guides_upgrade():
+    """CLI 旧于后端那一档只引导升级 CLI，不给 push、也不给 base 兜底（推旧命名空间的 tag 是原地绕圈）。"""
+    from gherkai_runtime.compose import _variant_miss_hint
+
+    msg = _variant_miss_hint(engine="novaact", variant="common", tag="1.3.0-common",
+                             what="SSM 里没有映射", cli_version="1.3.0", backend_version="1.4.0")
+    assert "升到后端版本" in msg or "升" in msg
+    assert "push-worker" not in msg and "--worker-variant base" not in msg

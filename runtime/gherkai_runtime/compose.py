@@ -1038,7 +1038,9 @@ def _variant_miss_hint(*, engine: str, variant: str, tag: str, what: str,
 
     CLI **旧于**后端（决策 7 里「警告不拦」的那一档）时不能引导去 `push-worker`：那会让人推一个**旧版本
     命名空间**的 tag，推完提交侧还是解析不到当前后端版本的映射、原地绕圈。此档一律引导升级 CLI。
-    其余档（同版本 / 无从比较 / 无戳）引导 push-worker——这是真正缺镜像时的修复动作。
+    其余档（同版本 / 无从比较 / 无戳）引导 push-worker——这是真正缺镜像时的修复动作；并给第二条出路
+    「临时 `--worker-variant base`」（ADR 0038「升级不重置默认指针」的配套：deploy 已把本版本基底同步成 base，
+    等不及部署方推自定义 variant 的人可先跑）。
     """
     if _release_cmp(cli_version, backend_version or "") == -1:
         return (f"引擎 {engine} 的 worker variant {variant!r} 解析失败（{what}）：本机 CLI {cli_version} "
@@ -1047,7 +1049,8 @@ def _variant_miss_hint(*, engine: str, variant: str, tag: str, what: str,
                 f"再提交——**别**照旧版本推镜像（推的 tag 后端不解析）。")
     return (f"引擎 {engine} 的 worker variant {variant!r} 解析失败（{what}，镜像 tag {tag}）。"
             f"让部署方推上去：gherkai deploy push-worker <本地镜像> --engine {engine} --variant {variant}"
-            f"（build 镜像时必须带 --platform linux/amd64）。")
+            f"（build 镜像时必须带 --platform linux/amd64）；或临时用 --worker-variant base 先跑"
+            f"（部署方跑过本版本 gherkai deploy 即有）。")
 
 
 def resolve_worker_variant(
