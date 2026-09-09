@@ -180,16 +180,16 @@ Fargate 执行环境配置（cluster / task-def / subnet / security-group / even
 - 第四返回值是 **`make_artifacts(run_id, report_index) -> dict` 工厂函数**（非现成 descriptor）——须在 finalize 拿到 `run_id` 与 `report_index` 后才能组装（`report_index` 可能因 write 失败被隔离而为 None，此时省略 `report_index` 键）；由 `build_local_stores`/`build_cloud_stores` 各自返回（各自最懂按 backend URI 化组装落点/前缀），`_cmd_run` 调它填 artifacts——**不给 Store port 加 `describe_artifacts`**（凭空扩接口面、6 个 adapter 全要实现，过度设计）。
 - `finalize()` 返回 None（`ReportStore.write` 失败被 `RunPersistence` 隔离，[0030](./0030-realtime-persistence-seam.md) 决定三）时 `report_index` 键不放裸 `'None'`——省略该键。（曾设 `_report_error` 字段留 traceback 供 cli 可选打 stderr，但 cli 从不消费、已删该悬空字段——写失败被静默隔离、报告可从 RunResult 重建。）
 
-## 工程布局：core / runtime / cli / engines 平级对标
+## 工程布局：core / runtime / cli / deploy_aws / engines 平级对标
 
 **本树是当前实装真值**（无未建项）。
 
-**三个目录 = 三个发行包 = 三名分离**（[0037](./0037-distribution-and-packaging.md) 决策 2）：`core/`＝发行名 `gherkai-core`＝import 名 `gherkai_core`；`runtime/`＝`gherkai-runtime`＝`gherkai_runtime`；`cli/`＝`gherkai`（命令同名 `gherkai`）＝`gherkai_cli`。三者是根 uv workspace 的成员，各自带 `pyproject.toml`（发行元数据 + 从 git tag 派生的 dynamic version）+ `README.md`/`LICENSE`/`tests/`；**lock 只有根一份**。
+**三个目录 = 三个发行包 = 三名分离**（[0037](./0037-distribution-and-packaging.md) 决策 2）：`core/`＝发行名 `gherkai-core`＝import 名 `gherkai_core`；`runtime/`＝`gherkai-runtime`＝`gherkai_runtime`；`cli/`＝`gherkai`（命令同名 `gherkai`）＝`gherkai_cli`。三者是根 uv workspace 的成员，各自带 `pyproject.toml`（发行元数据 + 从 git tag 派生的 dynamic version）+ `README.md`/`LICENSE`/`tests/`；**lock 只有根一份**。`engines/novaact`（`gherkai-worker-novaact`）与 `deploy_aws`（`gherkai-deploy-aws`）同为根 workspace 成员、同守三名分离，完整清单见 [0037](./0037-distribution-and-packaging.md) 决策 2a。
 
 ```
 ./
-├── pyproject.toml       ← uv workspace 根（虚拟根、不发行）：成员 = core/runtime/cli，dev 依赖与 pytest 配置在此（0037）
-├── uv.lock              ← 三成员共用的单一 lock（成员各自的 lock 已删）
+├── pyproject.toml       ← uv workspace 根（虚拟根、不发行）：成员 = core/runtime/cli/engines/novaact/deploy_aws（engines/midscene 是 npm 包、不在 workspace），dev 依赖与 pytest 配置在此（0037）
+├── uv.lock              ← 五成员共用的单一 lock（成员各自的 lock 已删）
 ├── core/                ← 发行包 gherkai-core：窄腰，纯编排，零引擎依赖
 │   └── gherkai_core/    ← import 名（模块文件名不变，0037 决策 2）
 │       ├── model.py · parse.py · scope.py · schedule.py · project.py · reconcile.py · persist.py · wire.py · serialize.py · ports.py · errors.py
@@ -200,6 +200,7 @@ Fargate 执行环境配置（cluster / task-def / subnet / security-group / even
 │   └── gherkai_runtime/{compose.py（组合根/引擎注册表 + `resolve_cloud_target` 云目标解析）· detached.py（local 无状态跑批宿主）· names.py（资源命名真源）· tunnel.py（`--expose-local` 隧道 provider，0035）· tunnel_host.py（隧道宿主编排 + 守护 TTL，0035）}
 ├── cli/                 ← 发行包 gherkai：纯皮 argparse + 渲染 + deploy provider 分派（workspace 成员；对兄弟包的依赖在 build 时渲染成 `==` lockstep pin，[0037](./0037-distribution-and-packaging.md) 决策 2）
 │   └── gherkai_cli/{__main__.py（argparse 皮）· deploy.py（`gherkai deploy`/`destroy` 的皮：provider 发现 + flag 贴接 + 分派，不含 IaC 知识，[0037](./0037-distribution-and-packaging.md) 决策 6）· render.py（事件/RunResult/RunState 渲染）}
+├── deploy_aws/          ← 发行包 gherkai-deploy-aws：AWS provider（`stack.py`/`app.py`=CDK · `names.py` · `cli.py`=Provider · `lambdas/{reconciler,exit_observer}.py` 作 Lambda asset 原料 · `workers.py`/`container.py`=worker 镜像族与容器引擎口，[0038](./0038-worker-image-delivery.md)），经 entry point group `gherkai.deploy` 被 cli 皮发现（[0037](./0037-distribution-and-packaging.md) 决策 6）
 └── engines/             ← 两个可插拔引擎，与 core 平级对标
     ├── midscene/        ← npm 包 @gherkai/worker-midscene（ESM，0037 决策 3）        worker：engines/midscene/src/worker/run-scope.mts
     │   ├── src/bin.mts（入口：进程内注册 tsx 与 resolve hook）· src/index.mts（使用方 step 文件的 import 面）· src/resolve-hook.mts（裸 specifier `@gherkai/worker-midscene` 的解析 hook，[0037](./0037-distribution-and-packaging.md) 决策 4）· src/worker/{run-scope,deterministic,deterministic.steps,user-steps,argument}.mts · src/lib/（引擎内共享：agentcore-sigv4 · artifact-upload · event-sink · job-source）
