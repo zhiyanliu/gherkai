@@ -2,7 +2,7 @@
 """worker 端到端真跑验证 harness（ADR 0024 worker↔core 协议 / 终止契约 / 0029 act 边界抢传；跨引擎）。
 
 **这是 opt-in 手动端到端验证脚本，不进 pytest 默认套件**——它真 spawn worker、真喂 job（stdin）、真收
-事件流（EVENTS_FD）、真开 AgentCore 会话、真写 S3（**烧真 AWS 钱、需网络/凭证、单次 ~1-2min**）。它补的是
+事件流（EVENTS_FD）、真开 AgentCore 会话、真写 S3（**产生真实 AWS 费用、需网络/凭证、单次 ~1-2min**）。它补的是
 单测的 mock 覆盖不到、只能真跑的那层（对齐 CLAUDE.md「绿≠对」）：真 greenlet / 真会话 / 真进程退出码 /
 真事件流字节 / 真中断丢失量。纯逻辑回归仍由各引擎单测覆盖（Nova worker/test_*.py、core tests/ 等）。
 
@@ -247,7 +247,7 @@ def run(engine: str, feature: str, votes: int, interrupt: str, run_id: str, grac
 
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser(description="worker 端到端真跑验证 harness（opt-in、烧真 AWS；中断只是能力之一）")
+    ap = argparse.ArgumentParser(description="worker 端到端真跑验证 harness（opt-in、产生真实 AWS 费用；中断只是能力之一）")
     ap.add_argument("--engine", choices=["novaact", "midscene"], default="novaact")
     ap.add_argument("--feature", default="wikipedia_assertions")
     ap.add_argument("--votes", type=int, default=1)

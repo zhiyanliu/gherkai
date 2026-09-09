@@ -37,7 +37,7 @@ class SubprocessLauncher:
     异步落 SQLite、下轮 tick 从 SQLite 重放看到进展）。
 
     同时 enforce job timeout（ADR 0034「job timeout」节 local 档）：job.timeout_s 非 None 时起 deadline
-    timer——到点先置 timed_out 标志再 handle.stop(engine grace)（协作停，保会话清理不烧钱），worker 退出后
+    timer——到点先置 timed_out 标志再 handle.stop(engine grace)（协作停，保会话清理、不持续计费），worker 退出后
     _pump 的 record_exit 带上标志，project 按归因链收敛 ERROR+timeout。
 
     **绑死 SubprocessEngine（不是任意 `Engine`）**：launch 用 `run_scope(job, raw_sink=...)` 拿原始事件行，

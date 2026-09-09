@@ -4,7 +4,7 @@
 逻辑全在 core；这里只接线 + 表层 IO。WebUI 是另一张皮，复用 compose、不经本文件。
 
 跑（开发期，仓库根）：uv run gherkai run <feature> [--default-engine novaact] [...]；装后直接 `gherkai run …`
-真跑会烧 AWS 钱（模型调用 + AgentCore 会话）。
+真跑会产生 AWS 费用（模型调用 + AgentCore 会话）。
 """
 from __future__ import annotations
 
@@ -95,7 +95,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     """
     p = argparse.ArgumentParser(
         prog="gherkai",
-        description="解析 .feature → 分组 scope → 调度两个 AI 引擎 → 汇总运行结果（会烧真 AWS 钱）。",
+        description="解析 .feature → 分组 scope → 调度两个 AI 引擎 → 汇总运行结果（会产生真实 AWS 费用）。",
     )
     p.add_argument("--version", action="version", version=f"%(prog)s {_dist_version()}")
     sub = p.add_subparsers(dest="command")
@@ -207,7 +207,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
 
     # plan 预检（dry-run）：纯本地解析 + 分组；**零 AWS、零花费、零副作用**（ADR 0036——派发标注会起本地
     # 瞬时 worker 自述子进程做 match，不跑 job）。
-    pl = sub.add_parser("plan", help="预检 .feature：看 scope/job 分组 + 校验配置，不真跑（不烧钱）")
+    pl = sub.add_parser("plan", help="预检 .feature：看 scope/job 分组 + 校验配置，不真跑（零费用）")
     pl.add_argument("features", nargs="+", type=Path, help="一个或多个 .feature 路径")
     pl.add_argument(
         "--default-job-timeout", type=float, default=300.0, metavar="S",
@@ -324,7 +324,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     sub.add_parser("list-engines", help="列出可用引擎及其 spawn 命令")
 
     # list-deterministic：按引擎查询确定性 step 能力清单（ADR 0036：worker 自述，feature 作者可发现）
-    ld = sub.add_parser("list-deterministic", help="列出指定引擎支持的确定性 step（供 feature 作者复用；不烧钱）")
+    ld = sub.add_parser("list-deterministic", help="列出指定引擎支持的确定性 step（供 feature 作者复用；零费用）")
     ld.add_argument("--engine", choices=sorted(_names.ENGINES), default="novaact",
                     help="查哪个引擎的注册表（默认 novaact，对齐 run 的 --default-engine 缺省）")
     ld.add_argument("--json", action="store_true", help="输出机器可读 JSON")
@@ -1156,7 +1156,7 @@ def _cmd_run(args) -> int:
     #     显式给了过小 grace → 入口友好拒绝（对齐 votes 校验惯例，退 2「没开跑就被拒」）。core 侧还有 enforce
     #     兜底（任何前端都受同一护栏），此处只为在 cli 给出清晰诊断、避免 core ValueError 冒到用户面。
     #     **必须排在起隧道 / cloud preflight / persistence.begin 之前**：只依赖 jobs，早拒才真「零副作用」——
-    #     否则配置错也已起 ngrok、烧掉云端调用、并落下永不 finalize 的半成品 run 记录。
+    #     否则配置错也已起 ngrok、产生云端调用费用、并落下永不 finalize 的半成品 run 记录。
     min_grace = max((compose.engine_min_grace(j.engine) for j in jobs), default=0.0)
     if args.grace is not None and (args.grace <= 0 or args.grace < min_grace):
         _progress(

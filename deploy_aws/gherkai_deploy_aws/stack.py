@@ -555,7 +555,7 @@ class BackendStack(Stack):
                 "SUBNETS": subnets_env,
                 "SECURITY_GROUPS": self._worker_sg_id,
                 # 部署侧 per-run 并发 cap（**非真源**：真源是 definition 的 max_concurrency，推进器取 min，
-                # ADR 0034 机制四）。task 烧部署方账单，故部署方保留总量控制权、钳住提交侧声明。
+                # ADR 0034 机制四）。task 计入部署方账单，故部署方保留总量控制权、钳住提交侧声明。
                 "MAX_CONCURRENCY": "8",
                 **timeout_env,  # job timeout 到点触发器（KICKER_ARN/SCHEDULER_ROLE_ARN，ADR 0034）
             },

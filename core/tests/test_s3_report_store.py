@@ -1,4 +1,4 @@
-"""S3ReportStore 对拍测试（ADR 0030 决定六 / 0027 / 0029）：与 LocalReportStore 同一批行为断言，moto mock、不烧真 AWS。
+"""S3ReportStore 对拍测试（ADR 0030 决定六 / 0027 / 0029）：与 LocalReportStore 同一批行为断言，moto mock、不产生真实 AWS 费用。
 
 对拍**后端无关的行为契约**（manifest 形态 = 纯派生视图不内嵌 result、report_index 扁平投影、index.html 渲染判定明细+链接、
 空态有效页）——即 test_report_store.py 里那批。物理落点断言从「文件系统路径」换成「S3 对象 get」。

@@ -3,7 +3,7 @@
 **两类测试、两套 fixture**（见 tests/README.md）：
 - **单测（默认）**：moto 内存 mock，全程**绝不连真 AWS**。两道保障——
   1. `_fake_aws_creds`（autouse）：任何 boto3 client 创建前把 AWS 凭证/region 覆盖成假值，即便机器有真凭证也盖掉、
-     且给 region 避免 NoRegionError。「不烧真 AWS」的硬隔离点。
+     且给 region 避免 NoRegionError。「不连真 AWS」的硬隔离点。
   2. `mock_aws`（moto）：拦截所有 AWS 调用到内存后端，不出网。
 - **集成测试（`@pytest.mark.integration`，默认 deselect）**：连**真** DDB/S3，专测 moto 抓不到的真语义。
   `_fake_aws_creds` 对它**让路**（不覆盖真凭证）；`real_aws` fixture 读 `AWS_DDB_TABLE`/`AWS_S3_BUCKET` 环境变量拿真表/桶名，

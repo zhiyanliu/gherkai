@@ -1,4 +1,4 @@
-"""compose（组合根逻辑）单测：不起任何子进程、不烧钱。"""
+"""compose（组合根逻辑）单测：不起任何子进程、零费用。"""
 from __future__ import annotations
 
 import sys

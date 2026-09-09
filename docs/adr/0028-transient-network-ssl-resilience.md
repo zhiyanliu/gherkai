@@ -3,7 +3,7 @@
 > **Status:** Accepted
 
 实测中 worker 建连（开 AgentCore 会话 / SigV4 握手 / CDP 连接）常遇 `ssl.SSLEOFError`（UNEXPECTED_EOF）
-等**网络瞬时故障**——一次抖动就让烧了钱的 job 直接废（worker returncode=1 → core 记 engine_error，零重试）。
+等**网络瞬时故障**——一次抖动就让已产生费用的 job 直接废（worker returncode=1 → core 记 engine_error，零重试）。
 本 ADR 加两层重试 + 一个 `network_error` 分类止血。**定位:对齐 [0015](./0015-v1-positioning-smoke-not-regression.md) 本地 smoke
 的务实加固,不是 enterprise 级 resilience**——act 级故障恢复、持续性网络故障的指数退避风暴都不在范围。
 
@@ -21,7 +21,7 @@
 
 ## 硬约束:只重试建连,**绝不重试 act**
 
-`act`/`act_get` **不幂等**（可能已点击/已部分执行）、**烧钱**、重试会重复副作用。所以:
+`act`/`act_get` **不幂等**（可能已点击/已部分执行）、**产生费用**、重试会重复副作用。所以:
 
 - 重试域的物理边界 = **`scope_started` 事件 emit 之前**。一旦 emit（会话已起、act 即将跑），
   worker 内 `started=True`（Nova）/ 跳出建连循环（Midscene），core 侧 `saw_step=True`（见过 `step_done`）——

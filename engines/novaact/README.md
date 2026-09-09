@@ -61,7 +61,7 @@ gherkai list-deterministic --engine novaact --json                # 机器可读
 gherkai plan features/                                            # 每个 step 会走确定性还是 AI
 ```
 
-两者都不建浏览器会话、不调模型，**不烧 AWS**。
+两者都不建浏览器会话、不调模型，**不产生 AWS 费用**。
 
 ## 把 steps 带到云端
 

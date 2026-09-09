@@ -1,4 +1,4 @@
-"""cli 入口 _cmd_run 接线测试：monkeypatch schedule（不起子进程、不烧 AWS），
+"""cli 入口 _cmd_run 接线测试：monkeypatch schedule（不起子进程、不产生 AWS 费用），
 
 验证落盘三层产物 + --json 输出形状（单一可解析 JSON 文档，回归护栏 ADR 0016/0027）。
 """
@@ -166,7 +166,7 @@ def test_submit_rejects_max_concurrency_below_one(tmp_path, monkeypatch, capsys)
     assert not report_dir.exists()   # definition 也没落库
 
 
-# ---- plan 预检（dry-run）：纯本地、不连 AWS、不烧钱 ----
+# ---- plan 预检（dry-run）：纯本地、不连 AWS、零费用 ----
 
 def test_plan_text_shows_scope_grouping(tmp_path, capsys):
     # plan 子命令：读 feature → 渲染 scope/job 分组，不起 worker（无需 monkeypatch schedule）。

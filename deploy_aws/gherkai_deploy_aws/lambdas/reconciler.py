@@ -283,7 +283,7 @@ def _build(run_id: str):
             kicker_arn=kicker_arn, role_arn=scheduler_role_arn, prefix=prefix)
     launcher = CloudLauncher(compose.make_resolver(engines), run_id=run_id, timeout_watch=timeout_watch)
     # 并发上限（ADR 0034 机制四）= min(definition 声明, 部署侧 cap)。cap = 本 Lambda 的 MAX_CONCURRENCY env
-    # （IaC 设）：语义是**部署侧 per-run 上限**、非真源——task 跑在部署方 cluster、烧部署方账单，故部署方保留
+    # （IaC 设）：语义是**部署侧 per-run 上限**、非真源——task 跑在部署方 cluster、计入部署方账单，故部署方保留
     # 总量控制权，提交侧声明再高也钳到 cap。meta 无值（打通前落的旧 definition）按 1，与打通前行为一致；
     # `or` 顺带把 0 也当无值——0 会让 plan_next 永不提议起 job（run 卡死），按 1 跑是保守可收敛的兜底。
     # env 漏注（IaC 改坏/手工建的 Lambda）时保守回 **1**：cap 的数值真源在 IaC 一处，code 不复制部署值

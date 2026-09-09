@@ -42,7 +42,7 @@ opts = {                 // 时间单位统一为秒；代码字段名带 _s 后
 
 ### 并发上限（保护真实 AWS 成本/配额）
 
-- `maxConcurrency` 默认 **4**（保守）：每个并行 worker = 一个 AgentCore 会话 + 持续模型调用，**真实烧钱**（[0024](./0024-worker-core-protocol.md) cost）。超出上限的 job 排队，有 worker 退出腾出槽位再起下一个。
+- `maxConcurrency` 默认 **4**（保守）：每个并行 worker = 一个 AgentCore 会话 + 持续模型调用，**产生真实费用**（[0024](./0024-worker-core-protocol.md) cost）。超出上限的 job 排队，有 worker 退出腾出槽位再起下一个。
 - 是**注入参数 + 保守默认**，不写死——本地全量可调高、配额紧可调低。
 
 ### 失败隔离（默认隔离，可配 fail-fast）
@@ -53,7 +53,7 @@ opts = {                 // 时间单位统一为秒；代码字段名带 _s 后
 
 ### 超时兜底
 
-- `Job.timeout_s`（per-job 墙钟预算，由 `@timeout:N` tag / `--default-job-timeout` 声明，见 [0019](./0019-feature-tags-scope-and-engine.md)/[0034](./0034-detached-batch-reconciler.md)；null=不超时）：防一个 job 卡死（AI 死循环 / 网络挂）永久占用并发槽位 + 烧钱。超时 → 优雅终止该 worker（走下文终止契约：停止请求→宽限→强杀）、记 `status:error` + `errorType:timeout`（[0024](./0024-worker-core-protocol.md) status 三态 + 规范化 errorType）。
+- `Job.timeout_s`（per-job 墙钟预算，由 `@timeout:N` tag / `--default-job-timeout` 声明，见 [0019](./0019-feature-tags-scope-and-engine.md)/[0034](./0034-detached-batch-reconciler.md)；null=不超时）：防一个 job 卡死（AI 死循环 / 网络挂）永久占用并发槽位 + 持续计费。超时 → 优雅终止该 worker（走下文终止契约：停止请求→宽限→强杀）、记 `status:error` + `errorType:timeout`（[0024](./0024-worker-core-protocol.md) status 三态 + 规范化 errorType）。
 - 引擎 SDK 各自也有超时（Midscene/Nova Act 都有），但那只覆盖「引擎调用内」卡住；**进程层面卡死（非引擎调用内）只有 schedule 能兜**，故 schedule 这层超时是必要的外层保险。
 - **静默 worker 的超时如何触发**：超时检查在「每收一个事件后」做。worker 完全静默（卡在单次操作内、事件通道零输出）时，事件循环会阻塞在读上、检查永不触发（曾致 300s 超时拖到 ~620s）。故 schedule 用 `_heartbeat_wrap`（后台 reader 线程把 adapter 的纯 `Iterator[Event]` 喂进队列，主侧 `queue.get(timeout=heartbeat_interval_s)` 超时即注入存活心跳）让循环周期性醒来查超时——**心跳在 schedule 层做一次、对所有 adapter 通用，Engine port 保持纯 `Iterator[Event]`**（机制细节见 [0028](./0028-transient-network-ssl-resilience.md)）。
 

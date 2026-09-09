@@ -1,6 +1,6 @@
 """测试用假 worker：读 stdin 的 job JSON，吐预设 ADR 0024 事件到 stdout。
 
-不接任何真引擎——只验证子进程 adapter 的 spawn/stdin/stdout/SIGTERM 管道（不烧 AWS）。
+不接任何真引擎——只验证子进程 adapter 的 spawn/stdin/stdout/SIGTERM 管道（不产生 AWS 费用）。
 行为由环境变量控制：
   WORKER_MODE=pass   → 对每个 scenario 吐 started/step_done(passed)/scenario_done，最后 scope_done
   WORKER_MODE=hang   → 吐一个 started 后死循环（测 SIGTERM 停止 + 会话清理 finally）

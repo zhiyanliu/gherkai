@@ -1,7 +1,7 @@
 """子进程 Engine adapter 集成测试（ADR 0026 机制层）。
 
 用 tests/fixtures/echo_worker.py 当真子进程 spawn，验证 spawn/stdin/stdout/SIGTERM 整条管道
-+ 与 schedule 配合，全程不接真引擎、不烧 AWS。
++ 与 schedule 配合，全程不接真引擎、不产生 AWS 费用。
 """
 from __future__ import annotations
 

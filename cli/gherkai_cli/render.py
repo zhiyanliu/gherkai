@@ -103,7 +103,7 @@ def render_run_state(state: RunState) -> str:
     return "\n".join(lines)
 
 
-# ---- plan 预检（dry-run）渲染：纯本地、不烧钱，展示 .feature → scope/job 分组 ----
+# ---- plan 预检（dry-run）渲染：纯本地、零费用，展示 .feature → scope/job 分组 ----
 
 def render_plan_text(jobs: list[Job], default_engine: str, dispatch: dict | None = None) -> str:
     """plan 产出 Job[] → 人看的多行预检视图（scope/engine/scenario/step，不真跑）。

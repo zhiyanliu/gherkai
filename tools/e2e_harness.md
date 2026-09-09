@@ -6,7 +6,7 @@
 
 ## 这是什么 / 什么时候用
 
-`e2e_harness.py` 是 **opt-in 手动端到端验证脚本，不进 pytest 默认套件**。它真 spawn worker、真喂 job（stdin）、真收事件流（`EVENTS_FD`）、真开 AgentCore 会话、真写 S3——**烧真 AWS 钱、需网络+凭证、单次 ~1-2min**。它验的是**单测的 mock 覆盖不到、只能真跑**的那一层（对齐 CLAUDE.md「绿≠对：识别结论的证据边界」）：真 greenlet / 真会话 / 真进程退出码 / 真 grace 秒数 / 真事件流字节 / 真中断丢失量。
+`e2e_harness.py` 是 **opt-in 手动端到端验证脚本，不进 pytest 默认套件**。它真 spawn worker、真喂 job（stdin）、真收事件流（`EVENTS_FD`）、真开 AgentCore 会话、真写 S3——**产生真实 AWS 费用、需网络+凭证、单次 ~1-2min**。它验的是**单测的 mock 覆盖不到、只能真跑**的那一层（对齐 CLAUDE.md「绿≠对：识别结论的证据边界」）：真 greenlet / 真会话 / 真进程退出码 / 真 grace 秒数 / 真事件流字节 / 真中断丢失量。
 
 **中断只是它的能力之一**（`--interrupt`）——它同样能跑 `--interrupt none` 的 baseline 验「事件流端到端正常 + 三通道分离 + 零行为变化」（如 worker I/O 重构后的回归）。纯逻辑回归仍由各引擎单测覆盖（Nova `worker/test_*.py`、Midscene `worker/*.test.ts`、`core/tests/test_subprocess_engine.py`）。
 
@@ -85,7 +85,7 @@ harness 结尾打印 `=== HARNESS_REPORT_JSON ===` + 一段 JSON。关键字段�
      ```
 2. **wikipedia SSL 环境坑（Nova 尤甚）**：某些网络下到 `www.wikipedia.org` 的 SSL 握手会挂（`SSLEOFError`，Nova SDK 本地 strict cert verify）。**Midscene 走 AgentCore 云浏览器、不受本地 SSL 影响**；Nova SDK 在本地建 CDP 时可能撞。若 Nova 全场景 SSL 失败，先直连测握手确认是环境问题，可临时用简单站点 feature 绕。
 3. **scenario 抢传只 Midscene 有**（Nova 侧 `session_summary.json` 在 scenario 边界不存在、无赔付对象——ADR 0029）。别期待 Nova 的 `scenario` 时机验出 log 抢传。
-4. **烧真 AWS 钱**：AgentCore 会话 + 模型调用 + S3。质量优先但别乱烧——每个时机跑一次即可，别无脑刷矩阵。用短 feature 控成本。
+4. **产生真实 AWS 费用**：AgentCore 会话 + 模型调用 + S3。质量优先但别浪费——每个时机跑一次即可，别无脑刷矩阵。用短 feature 控成本。
 
 ## 清理（跑完必做）
 

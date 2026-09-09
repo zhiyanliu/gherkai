@@ -65,7 +65,7 @@ URL、DOM 这类不容 AI 抖动的检查，可以由你自己写成确定性步
 |---|---|---|
 | `--default-engine {novaact,midscene}` | `novaact` | 未标 `@engine` 的 scope 用哪个引擎 |
 | `--max-concurrency N` | `1` | 同时在跑的 worker 上限（护成本与配额），须 ≥ 1。云端还受部署侧上限钳制，超出时按上限并行并提示 |
-| `--default-job-timeout S` | `300` | 单个 job 的墙钟预算秒（`<=0` 表示不超时）；用例上标 `@timeout:<秒>` 可逐 scope 覆盖。超预算的 job 会被停掉并判 error，本机挂死与云端无限烧钱都靠它止损 |
+| `--default-job-timeout S` | `300` | 单个 job 的墙钟预算秒（`<=0` 表示不超时）；用例上标 `@timeout:<秒>` 可逐 scope 覆盖。超预算的 job 会被停掉并判 error，本机挂死与云端计费失控都靠它止损 |
 | `--assertion-votes N` | `1` | AI 断言跑 N 次取多数票（如 3/5），治判定抖动 |
 | `--grace S` | 自动 | 仅 `run`。中止时留给 worker 关闭云端浏览器会话的秒数，不填按引擎自动取（novaact ≈150s、midscene ≈25s）。**给得太小会漏关会话、继续计费**，过小的值在开跑前就报错。云端 `submit` 的对应旋钮在部署侧：`gherkai deploy --stop-timeout` |
 | `--steps-dir DIR` | `./steps` | 你自己的确定性步骤目录（见上） |

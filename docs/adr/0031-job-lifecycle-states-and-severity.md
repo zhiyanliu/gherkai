@@ -41,7 +41,7 @@ class Status(str, Enum):
 > 看 `abort_flag` 而非笼统的 `self_stopped`，否则会把超时和 fail-fast 两类语义不同的中止混成一类、丢掉 timeout 分类。
 >
 > **network 重试耗尽的 job 也不是 skipped**：[0028](./0028-transient-network-ssl-resilience.md) 的 core 层 network 重试门槛是
-> 「network_error 且 `saw_step=False`」，耗尽后该 job 记 `error`。它同样 `saw_step=False`，但**已经开过会话/建连尝试（烧过钱）**——
+> 「network_error 且 `saw_step=False`」，耗尽后该 job 记 `error`。它同样 `saw_step=False`，但**已经开过会话/建连尝试（已计费）**——
 > `saw_step=False` 只表「可安全重试」、不表「没花钱/没起」。故它仍是 `error`、**正常进 run 级聚合**，不归 skipped/aborted。
 > skipped 的边界严格是「worker 从未 spawn」。
 

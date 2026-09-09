@@ -407,7 +407,7 @@ def _run_scenario(nova, scenario_id: str, steps: list[dict], votes_n: int, sink:
     """scope 内串行跑一个 scenario 的 steps，上游 error 后**短路**后续 step（ADR 0031 决定六 / 0028）。
 
     短路：scenario 内一旦某 step `status==error`（导航 SSL 失败等），后续 step 不再调 AI——
-    ① 省钱（不烧后续 AI 断言）；② 不在损坏环境（SSL 错误页）上跑出误导性假失败。被跳过的 step 发独立
+    ① 节省费用（不再调用后续 AI 断言）；② 不在损坏环境（SSL 错误页）上跑出误导性假失败。被跳过的 step 发独立
     `step_skipped` 事件（非 step_done；core 据此本地赋 StepResult(SKIPPED, shortcircuited=True)）。
     判据锁 `status==error`（不看 error_type）——两个引擎对称、network/engine 错都触发。
 
@@ -612,7 +612,7 @@ def main() -> int:
         log(f"worker: {e}")
         return EX_STEPS_LOAD
 
-    # 自述模式（ADR 0036）：dump 确定性注册表即退——不建会话、不读 stdin、不烧钱。
+    # 自述模式（ADR 0036）：dump 确定性注册表即退——不建会话、不读 stdin、零费用。
     # 内建脚手架（模块顶 import 的副作用）+ 上面加载的使用方 step，此刻注册表即真值。
     if "--list-deterministic" in sys.argv:
         print(json.dumps(_deterministic.list_registry(), ensure_ascii=False))

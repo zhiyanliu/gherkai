@@ -2,7 +2,7 @@
 
 锁两条曾致命的中断反模式的修复（见 ADR 0024 被拒方案）：建连早期 SIGTERM 误报 engine_error；signal handler raise 撞 playwright greenlet 切换区致死循环卡死。
 
-与 test_run_step.py 同风格：纯逻辑、注 fake nova、不连 AWS、不烧钱、不真起子进程。
+与 test_run_step.py 同风格：纯逻辑、注 fake nova、不连 AWS、零费用、不真起子进程。
 覆盖 flag-only 改造引入的新行为，防回归到会撞 greenlet 卡死的 raise 模型：
 - handler 只置 _stop 标志、绝不 raise（根因：handler raise 撞 playwright greenlet 切换区致死循环卡死，见 ADR 0024 被拒方案）。
 - SIGTERM/SIGINT 共用同一 flag-only handler（Ctrl-C 也协作式停）。
@@ -173,7 +173,7 @@ def test_vote_loop_full_votes_then_stop_still_emits(captured):
     orig_act_get = nova.act_get
     def _act_get_then_stop(instr, schema, timeout=None):
         r = orig_act_get(instr, schema, timeout=timeout)
-        r.metadata.time_worked_s = 3.5  # 这段时长真的烧了，不该随中止蒸发
+        r.metadata.time_worked_s = 3.5  # 这段时长已真实计费，不该随中止蒸发
         rs._stop.set()                  # 停止信号落在唯一那票的 act 期间（act 正常返回带回判定）
         return r
     nova.act_get = _act_get_then_stop

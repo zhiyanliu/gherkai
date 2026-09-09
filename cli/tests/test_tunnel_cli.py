@@ -73,7 +73,7 @@ def test_run_without_expose_local_zero_change(tmp_path, monkeypatch):
 
 
 def test_run_tunnel_failure_exits_2(tmp_path, monkeypatch, capsys):
-    """隧道起不来（如 authtoken 缺失）→ 退 2「没开跑就被拒」，不烧引擎钱。"""
+    """隧道起不来（如 authtoken 缺失）→ 退 2「没开跑就被拒」，不产生引擎费用。"""
     def boom(name):
         raise gtunnel.TunnelError("ngrok 隧道未就绪…authtoken 未配置")
 

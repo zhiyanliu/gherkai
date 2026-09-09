@@ -21,7 +21,7 @@ TS `deterministic(pattern, handler, { description, example })` / Python `@determ
 
 ### 2. worker 自述：`--list-deterministic` dump 模式
 
-worker argv 带 `--list-deterministic` 时：**不建会话、不读 stdin、不烧钱**，把注册表（pattern 原始串 + description + example）dump 成 JSON 数组到 stdout、退出 0。
+worker argv 带 `--list-deterministic` 时：**不建会话、不读 stdin、零费用**，把注册表（pattern 原始串 + description + example）dump 成 JSON 数组到 stdout、退出 0。
 
 - **真值单一**：清单直接从注册表代码生成，engine 侧加/改锚点，查询结果即时跟随——零第二事实源。
 - **跨语言被既有架构吸收**：TS/Python 注册表无法被 CLI（Python）直接 import，「spawn 子进程 + 结构化输出」正是本项目 worker 交互的既有形态（[0024](./0024-worker-core-protocol.md)）；dump 模式是 worker 的第二个入口形态（第一个是跑 job），不触碰 job 协议本身。

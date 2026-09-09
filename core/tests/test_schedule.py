@@ -311,7 +311,7 @@ def test_mixed_legs_each_native_metric_aggregated_separately():
 
 
 def test_failed_and_error_steps_cost_still_aggregated():
-    # 失败/出错的 step 也真实烧了钱（act/投票照样消耗时长 token）→ cost 仍累加，不漏报成本。
+    # 失败/出错的 step 也真实产生了费用（act/投票照样消耗时长 token）→ cost 仍累加，不漏报成本。
     events = [
         ScenarioStarted(scenario_id="x:0"),
         # 失败的 AI 断言步带 cost
@@ -326,7 +326,7 @@ def test_failed_and_error_steps_cost_still_aggregated():
     result = schedule(_rm([_job("x")]), FakeResolver(engine), CollectSink())
     jr = result.jobs[0]
     assert jr.status == Status.ERROR        # 状态如实反映失败
-    assert jr.total_tokens == 2000          # 但失败步烧的 token 仍计入（1200+800）
+    assert jr.total_tokens == 2000          # 但失败步消耗的 token 仍计入（1200+800）
     assert result.total_tokens == 2000
 
 
@@ -630,7 +630,7 @@ def test_on_job_complete_exception_propagates_not_swallowed():
 
 def test_on_job_complete_exception_stops_inflight_workers_before_raise():
     # review #2：回调抛异常时，冒泡前必须先 stop 所有在跑 worker——否则异常跳出 with、shutdown(wait=True)
-    # 会等在跑 worker 自然跑完（真 AgentCore 会话继续烧钱）。验：异常仍抛 + 在跑 worker 的 handle 被 stop。
+    # 会等在跑 worker 自然跑完（真 AgentCore 会话持续计费）。验：异常仍抛 + 在跑 worker 的 handle 被 stop。
     import pytest
     slow_started = threading.Event()  # slow 已 spawn 且在事件循环里
     release_fast = threading.Event()  # 放行 fast 完成（确保 slow 先在跑）
@@ -657,7 +657,7 @@ def test_on_job_complete_exception_stops_inflight_workers_before_raise():
     with pytest.raises(RuntimeError, match="fast 落库炸了"):
         schedule(_rm([_job("fast"), _job("slow")]), FakeResolver(engine), CollectSink(),
                  opts=ScheduleOpts(max_concurrency=2), on_job_complete=boom_on_fast)
-    # 关键断言：slow 的 worker 在异常冒泡前被 stop（止血，不空烧会话）
+    # 关键断言：slow 的 worker 在异常冒泡前被 stop（止血，不让会话空转计费）
     assert engine.handles["slow"].stopped
 
 
@@ -669,7 +669,7 @@ def test_grace_below_min_grace_raises():
     with pytest.raises(ValueError, match="grace"):
         schedule(_rm([_job("a")]), FakeResolver(engine), CollectSink(),
                  opts=ScheduleOpts(grace_period_s=5.0, min_grace_s=180.0))
-    # 起 worker 前就拒 → 引擎根本没被 run（无副作用、不烧会话）
+    # 起 worker 前就拒 → 引擎根本没被 run（无副作用、不建会话）
     assert "a" not in engine.handles
 
 

@@ -1,4 +1,4 @@
-"""DynamoDBRunStore 对拍测试（ADR 0030 决定六）：与 LocalRunStore 同一批行为断言，moto mock、不烧真 AWS。
+"""DynamoDBRunStore 对拍测试（ADR 0030 决定六）：与 LocalRunStore 同一批行为断言，moto mock、不产生真实 AWS 费用。
 
 对拍的是**后端无关的行为契约**（save/load round-trip、实时写生命周期、Map 单元素刷、未 create 报错、
 omit-null 时间戳）——即 test_stores.py 里 LocalRunStore 那批。物理落点断言（文件存在/JSON 是 list）是

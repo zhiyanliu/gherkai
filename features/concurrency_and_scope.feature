@@ -1,6 +1,6 @@
 # 手工真跑回归夹具（非日常 QA 用例）——验 ADR 0019：scope 内串行共享同一 AgentCore 会话
 # + scope 间并发 + cost 汇总。改动调度 / 会话生命周期后**手工重跑**，确认承重假设没塌。
-# 会真连 AgentCore、烧 AWS 钱（模型调用 + 云浏览器会话），故不进日常 QA 流。
+# 会真连 AgentCore、产生 AWS 费用（模型调用 + 云浏览器会话），故不进日常 QA 流。
 # 用 wikipedia 稳定站点（ADR：骨架验证用例），每个 scenario 尽量短以控成本。
 #
 # 结构（ADR 0019）：

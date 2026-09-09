@@ -1,4 +1,4 @@
-"""S3ResultStore 对拍测试（ADR 0030 决定六 / 0016）：与 LocalResultStore 同一批行为断言，moto mock、不烧真 AWS。
+"""S3ResultStore 对拍测试（ADR 0030 决定六 / 0016）：与 LocalResultStore 同一批行为断言，moto mock、不产生真实 AWS 费用。
 
 对拍后端无关的行为契约（save/load/load_all round-trip、自包含、scope_id 不透明编码不撞名/不逃逸）——
 即 test_stores.py 里 LocalResultStore 那批。物理落点断言（文件系统 glob）是 local 专属、换成 S3 的 list/key 断言。

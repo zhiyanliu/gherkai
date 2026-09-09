@@ -37,7 +37,7 @@ uv sync                                            # 一次装齐五个 workspac
 export GHERKAI_WORKER_MIDSCENE_CMD="node $PWD/engines/midscene/dist/bin.mjs"   # dev 态指向本仓库的 worker
 
 uv run gherkai plan features/wikipedia_generic.feature
-uv run gherkai run  features/wikipedia_generic.feature          # 真跑会烧 AWS 钱：模型调用 + AgentCore 会话
+uv run gherkai run  features/wikipedia_generic.feature          # 真跑会产生 AWS 费用：模型调用 + AgentCore 会话
 uv run gherkai run  features/wikipedia_generic.feature \
   --backend cloud --ddb-table ui-test-runs --s3-bucket ui-test-artifacts-<后缀>
 ```
@@ -95,8 +95,8 @@ cloud 由云端 Lambda 事件驱动链推进（submit 机器无 ECS 写/执行�
 注给 reconciler/kicker Lambda 的 env（曾在此声明过两个从不生效的 flag，已删）。
 
 cloud submit 的 `--max-concurrency` 受部署侧 cap 钳制（kicker/reconciler Lambda 的 env `MAX_CONCURRENCY`，
-IaC 设、当前 8——task 烧部署方账单，故留一道上限）；声明超上限时 preflight 提示「本 run 将按上限并行」、不拦提交。
-local 无此上限（worker 跑在提交者自己的机器、烧他自己的凭证）。
+IaC 设、当前 8——task 计入部署方账单，故留一道上限）；声明超上限时 preflight 提示「本 run 将按上限并行」、不拦提交。
+local 无此上限（worker 跑在提交者自己的机器、以自己的凭证计费）。
 
 ## 退出码分层的切分线
 

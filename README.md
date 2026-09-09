@@ -13,7 +13,7 @@
 | 投票治理 | AI 断言可配 N 次取多数票（`--assertion-votes`） |
 | 确定性 step | 项目里的 `steps/` 目录注册精确断言，`plan` 预检标注哪些 step 走确定性、哪些走 AI |
 | 本机应用测试 | `--expose-local http://localhost:3000` 经 ngrok 隧道把本机可达的应用暴露给云端浏览器 |
-| 预算兜底 | 每个 job 有墙钟预算（缺省 300s，`@timeout:` tag 可改），卡死/超时自动停、不无限烧钱 |
+| 预算兜底 | 每个 job 有墙钟预算（缺省 300s，`@timeout:` tag 可改），卡死/超时自动停、不会计费失控 |
 | 跨引擎报告 | 每个 run 一份 RunReport（`index.html` 人看入口 + `manifest.json`） |
 
 ## 架构速览
@@ -76,7 +76,7 @@ uvx gherkai --version                       # 或免安装临时跑（uvx --from
 - **怎么跑**——前台 `run`（CLI 在线守着，跑完直接给结果）或后台 `submit` + `status`（提交即走，事后查/收）。
 - **跑在哪 / 落在哪**（`--backend`）——`local`（默认：worker 跑本机子进程，结果落本地 `reports/`）或 `cloud`（worker 跑 Fargate 容器，状态落 DynamoDB、结果落 S3；需先由部署方跑 `gherkai deploy --vpc <档> --prefix <前缀>` 建齐资源，见 [`deploy_aws/README.md`](./deploy_aws/README.md)）。
 
-### ① 先预检（纯本地、不烧钱）
+### ① 先预检（纯本地、零费用）
 
 ```bash
 gherkai plan features/engine_routing.feature   # 看 scope/job 分组、engine 路由、校验配置；
@@ -85,7 +85,7 @@ gherkai list-engines                           # 列可用引擎（某引擎没�
 gherkai list-deterministic --engine midscene   # 列该引擎支持的确定性 step（含你项目 steps/ 里的；--json 可选）
 ```
 
-**先 `plan` 后跑**——真跑烧钱（模型调用 + AgentCore 会话），plan 是纯本地预检。
+**先 `plan` 后跑**——真跑会产生真实 AWS 费用（模型调用 + AgentCore 会话），plan 是纯本地预检。
 
 ### ② 前台跑：`run`
 

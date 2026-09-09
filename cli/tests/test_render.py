@@ -1,4 +1,4 @@
-"""render（表层渲染）单测：用 fake RunResult/Event，纯字符串/dict 断言，不烧钱。"""
+"""render（表层渲染）单测：用 fake RunResult/Event，纯字符串/dict 断言，零费用。"""
 from __future__ import annotations
 
 from gherkai_core.model import (

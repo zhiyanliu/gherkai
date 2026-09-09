@@ -1,6 +1,6 @@
 """SubprocessLauncher + reconcile loop 真跑集成测试（ADR 0034 P3b）。
 
-**真 spawn echo_worker 子进程**（不烧 AWS，但真 fd3/真退出码/真 SQLite）——这是「绿≠对」里该真跑的：
+**真 spawn echo_worker 子进程**（不产生 AWS 费用，但真 fd3/真退出码/真 SQLite）——这是「绿≠对」里该真跑的：
 launcher 读真 fd3 落 SQLite、真 handle.wait() 拿退出码写 task_exited、reconcile loop 真推进到终态。
 纯逻辑部分（project/plan_next/条件写）已在 core 单测覆盖；此处补 launcher 接线的真进程边界。
 

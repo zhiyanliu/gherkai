@@ -228,7 +228,7 @@ export async function main(): Promise<number> {
   // （ADR 0036「真值单一」不变：注册表 = 内建 + 使用方）。加载失败 fail-loud（抛 → bin 一行 stderr + 非零退出）。
   await loadUserSteps();
 
-  // 自述模式（ADR 0036）：dump 确定性注册表即退——不建会话、不读 stdin、不烧钱。
+  // 自述模式（ADR 0036）：dump 确定性注册表即退——不建会话、不读 stdin、零费用。
   // 脚手架已在模块顶 import（副作用注册），此刻注册表即真值。
   if (process.argv.includes("--list-deterministic")) {
     await writeStdoutFlushed(JSON.stringify(listRegistry()) + "\n");
@@ -315,7 +315,7 @@ export async function main(): Promise<number> {
     }
   }
 
-  // SIGTERM/SIGINT：清理会话再退（防 AgentCore 会话泄漏继续烧钱）。
+  // SIGTERM/SIGINT：清理会话再退（防 AgentCore 会话泄漏后持续计费）。
   let terminated = false;
   let onTerminate: (() => void) | undefined;  // 重试退避用：信号到达即 resolve、打断退避（对称 Nova 的 sleep 被信号打断）
   // agent 引用上提到 handler 可见（ADR 0029 中断抢传：handler 里读 agent.reportFile 抢传那份增量 report）。

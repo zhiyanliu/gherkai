@@ -111,7 +111,7 @@ def test_agentcore_startfailed_wrapping_chain_is_transient():
 
 
 def test_agentcore_permanent_wrapping_chain_not_transient():
-    # 反向护栏：底层是永久错（ValidationException），包两层后仍判永久（不误重试烧钱）
+    # 反向护栏：底层是永久错（ValidationException），包两层后仍判永久（不误重试而多计费）
     boto_err = _client_error(code="ValidationException", status=400)
     browser_auth = RuntimeError("browser auth"); browser_auth.__cause__ = boto_err
     start_failed = RuntimeError("start failed"); start_failed.__cause__ = browser_auth

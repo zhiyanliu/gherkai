@@ -61,7 +61,7 @@ class RunPersistence:
 
         **create_run 前先 preflight（ADR 0030 决定七）**：探底层可达（云端探表/桶，local no-op）。桶/表名错
         一律在此暴露（不管有无 offload 内容），组合根 gated except 归到退 2——消除「桶名错因是否有 offload
-        内容分裂成退 2/退 1」的不一致。探活在 create_run（真写）之前、早于起 worker，不烧引擎钱。
+        内容分裂成退 2/退 1」的不一致。探活在 create_run（真写）之前、早于起 worker，不产生引擎费用。
         """
         initial = RunState(
             run_id=self._run_id,

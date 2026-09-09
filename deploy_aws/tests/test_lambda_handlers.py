@@ -420,7 +420,7 @@ def test_build_takes_meta_max_concurrency_under_cap(cloud_env):
 
 
 def test_build_clamps_meta_max_concurrency_to_cap(cloud_env, monkeypatch):
-    """definition 声明 > cap → 钳到 cap：task 烧部署方账单，部署侧保留总量控制权（cap 语义）。"""
+    """definition 声明 > cap → 钳到 cap：task 计入部署方账单，部署侧保留总量控制权（cap 语义）。"""
     monkeypatch.setenv("MAX_CONCURRENCY", "2")
     _seed_run(cloud_env["runs"], detached=True, max_concurrency=9)
     assert reconciler._build("run-1")[4] == 2

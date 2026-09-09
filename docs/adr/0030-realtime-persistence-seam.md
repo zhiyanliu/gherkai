@@ -128,7 +128,7 @@ run 结束（schedule 返回后）:
 
 > **回调异常的停机止血**（实装关键）：on_job_complete 在主线程 fire，若它抛异常（如落库磁盘满），schedule **在异常
 > 冒泡前先 stop 所有在跑 worker**（`abort_flag.set()` + 逐个 `_stop()`）再重抛。否则异常跳出 `with ThreadPoolExecutor`，
-> `shutdown(wait=True)` 会等所有在跑 worker 自然跑完——真 AgentCore 会话继续烧钱。异常仍冒泡（落库失败=真问题、要暴露），
+> `shutdown(wait=True)` 会等所有在跑 worker 自然跑完——真 AgentCore 会话持续计费。异常仍冒泡（落库失败=真问题、要暴露），
 > 只是先掐掉在跑会话。
 
 > **写序的失败语义（残留风险，本地接受）**：若 `save_job_result` 成功但 `update_job_state` 失败，
@@ -202,7 +202,7 @@ cli `--backend {local,cloud}` 的组合根装配（两后端都下沉 `compose` 
 
 **Store port 增 `preflight()`——begin 前探活，配置错一律 begin 退 2（体验+实现统一）**：三个 Store port（Run/Result/Report）各加 `preflight() -> None`——DDB 探表（`describe_table`/一次条件读）、S3 探桶（`head_bucket`），**local adapter 是 no-op**（本地无「桶/表不存在」问题，一行 `pass`）。`RunPersistence.begin` 在 `create_run` **之前**调三个 store 的 `preflight()`：探活失败抛的 botocore 异常由 cli 的 `need_cloud` gated except 接住 → 退 2。
 
-**为何从「不做主动预检」反转为「做 preflight」**（推翻早先决策，记明理由）：早先图省一次往返、以 `begin` 的真实写为天然预检点，但那留了个**不一致**——桶名打错时，有 offload 内容的 run（offloader 在 begin 写 S3）会 begin 退 2、无 offload 内容的 run 拖到运行期首个 `save_job_result` 才 S3 报错退 1，**同一个「桶名错」因是否有大 argument 分裂成退 2/退 1**。加 `preflight()` 后：桶/表不存在或无访问权**一律在 begin 探活时暴露→退 2**（不管有无 offload 内容），消除该分裂。**权衡**：begin 多几次探活往返（DDB describe + S3 head×2），但 begin 早于起 worker、不烧引擎钱，几百 ms 可忽略——换体验+实现统一，值得。preflight 归 Store 自己（各后端最懂怎么探活、内聚），不外泄到组合根。
+**为何从「不做主动预检」反转为「做 preflight」**（推翻早先决策，记明理由）：早先图省一次往返、以 `begin` 的真实写为天然预检点，但那留了个**不一致**——桶名打错时，有 offload 内容的 run（offloader 在 begin 写 S3）会 begin 退 2、无 offload 内容的 run 拖到运行期首个 `save_job_result` 才 S3 报错退 1，**同一个「桶名错」因是否有大 argument 分裂成退 2/退 1**。加 `preflight()` 后：桶/表不存在或无访问权**一律在 begin 探活时暴露→退 2**（不管有无 offload 内容），消除该分裂。**权衡**：begin 多几次探活往返（DDB describe + S3 head×2），但 begin 早于起 worker、不产生引擎费用，几百 ms 可忽略——换体验+实现统一，值得。preflight 归 Store 自己（各后端最懂怎么探活、内聚），不外泄到组合根。
 
 **cloud 失败退出码分层——切分线 = run 是否已真正开跑**（对齐现有 `0 passed / 1 failed|error / 2 配置错` 约定，全走 stderr、绝不裸 traceback）：
 - **退 2（还没开跑就拒绝，与 `assertion_votes<1` 同类）**：缺 table/bucket（入口显式校验非空——否则 `None` 流进 adapter 到运行时才 botocore 报错）；缺 boto3（`build_cloud_stores` 的 `import boto3` 抛 ImportError → 提示装 `gherkai-core[aws]`）；`begin()` 的 `preflight()` 或 `create_run` 抛 botocore 异常（表/桶不存在、无权限、凭证/region 缺）。preflight 是主动探活点，兜住「纯 S3 桶名错也在 begin 暴露」。

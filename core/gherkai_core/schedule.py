@@ -159,7 +159,7 @@ class _Worker:
         """跑一个 job，含网络瞬时故障的选择性重试（ADR 0028）。
 
         重试门槛（双条件 AND，绝不放宽）：① 本次以 network_error 失败（worker 建连失败、
-        重试耗尽）② 「会话未起」= 本次零 step_done（证明 act 没跑、无副作用、不烧重复钱）。
+        重试耗尽）② 「会话未起」= 本次零 step_done（证明 act 没跑、无副作用、不重复计费）。
         fail_fast/timeout 优先级高于 network 重试（它们已主动中止，不再重跑）。
         """
         # deadline 跨 attempt 共享（ADR 0028）：覆盖所有 attempt 之和，重试不重置——否则 N 次重试
@@ -198,7 +198,7 @@ class _Worker:
         # 时长追踪（core 用事件到达时间戳算墙钟，ADR 0024；clock 与超时复用同一注入时钟）：
         timing = _Timing()
 
-        # 起 worker 前先看是否已被 fail-fast 中止（排队中的 job 不该再起、不烧钱）。
+        # 起 worker 前先看是否已被 fail-fast 中止（排队中的 job 不该再起、不产生费用）。
         # worker 从未 spawn → SKIPPED（没执行/没花钱/可无脑重跑，ADR 0031），非 error。
         if self.abort_flag.is_set():
             result.status = Status.SKIPPED
@@ -380,12 +380,12 @@ def schedule(
             job_results.append(jr)
             # 实时写接缝（ADR 0030）：job 一完成即回调它已归约好的 JobResult，供组合根落库（schedule 不碰 store）。
             # 主线程串行 fire。默认 None=no-op。回调异常仍冒泡（落库失败=真问题），但**冒泡前先 stop 所有在跑
-            # worker**——否则异常跳出 with、shutdown(wait=True) 会等在跑 worker 自然跑完（真 AgentCore 会话继续烧钱）。
+            # worker**——否则异常跳出 with、shutdown(wait=True) 会等在跑 worker 自然跑完（真 AgentCore 会话持续计费）。
             if on_job_complete is not None:
                 try:
                     on_job_complete(jr)
                 except BaseException:
-                    _stop_all()  # 止血：掐掉在跑会话，别空烧
+                    _stop_all()  # 止血：掐掉在跑会话，别空转计费
                     raise
             # fail-fast：一个 job 崩（error）→ 中止整批：设 abort + stop 所有在跑 worker（ADR 0026）
             if opts.fail_fast and jr.status == Status.ERROR and not abort_flag.is_set():
