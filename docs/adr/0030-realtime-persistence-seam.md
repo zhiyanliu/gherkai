@@ -112,7 +112,7 @@ run 结束（schedule 返回后）:
 「看到 RunStore 终态」即**保证**「所有 job 判定真值已落」。这修正了 v1.0 cli 现在的反序（先写控制面摘要、后写数据面，
 中途崩会留下「说 passed 但详细结果没齐」的假象）。
 
-**detached 路径同守（[0034](./0034-detached-batch-reconciler.md)）**：无状态跑批的 commit point 是 `try_finalize`（CAS）。判定真值（ResultStore 各 job）在 `tick` 的 finalize 分支内、CAS **之前**、从本 tick 已读的**同一份** records 快照聚合落库；RunReport 在 CAS 之后由宿主写、失败隔离（同上）。写在 CAS 之前还多一层理由：commit 之前的失败让本轮 tick 失败、被触发源重试（cloud events Stream 事件源重试 / local per-run 或 `status --wait` 接力再 tick）；commit 之后的失败**无人重试**——run 已终态、events 不再变化、没有下一次触发，「说 passed 但 jobs/*.json 没齐」在 detached 下是永久的（曾如此实装：先 CAS 再在 tick 之外补聚合，code-health 对抗验证发现）。
+**detached 路径同守（[0034](./0034-detached-batch-reconciler.md)）**：无状态跑批的 commit point 是 `try_finalize`（CAS）。判定真值（ResultStore 各 job）在 `tick` 的 finalize 分支内、CAS **之前**、从本 tick 已读的**同一份** records 快照聚合落库；RunReport 在 CAS 之后由宿主写、失败隔离（同上）。写在 CAS 之前还多一层理由：commit 之前的失败让本轮 tick 失败、被触发源重试（cloud events Stream 事件源重试 / local per-run 或 `status --wait` 接力再 tick）；commit 之后的失败**无人重试**——run 已终态、events 不再变化、没有下一次触发，「说 passed 但 jobs/*.json 没齐」在 detached 下是永久的（曾如此实装：先 CAS 再在 tick 之外补聚合，code-health 对抗验证发现）。真跑坐实：cloud detached run 收尾后 S3 `reports/<run_id>/` 下 jobs/*.json（判定真值）与 index.html/manifest.json（派生）齐全、reconciler 日志 `done + finalized` 无异常。
 
 > **两条写 RunStore 的路径必须共享同一把锁**（实装关键）：RUNNING 中间态刷在 **worker 线程**（经 `on_event`，在
 > `sink_lock` **之外**调）；job 终态刷 + finalize 在 **主线程**（经 on_job_complete，as_completed 串行）。这是**两个不同
