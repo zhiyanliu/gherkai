@@ -53,9 +53,17 @@ def test_shipped_readme_is_for_users_only(readme: Path):
 
 
 def test_every_package_dir_has_a_development_md():
-    """contributor 内容有明确去处（不是被删掉）：每个包目录一份 DEVELOPMENT.md。"""
-    missing = [pkg for pkg in PY_PACKAGES + NPM_PACKAGES if not (REPO / pkg / "DEVELOPMENT.md").is_file()]
+    """contributor 内容有明确去处（不是被删掉）：根目录与每个包目录各一份 DEVELOPMENT.md。"""
+    missing = [pkg for pkg in ("",) + PY_PACKAGES + NPM_PACKAGES if not (REPO / pkg / "DEVELOPMENT.md").is_file()]
     assert not missing, f"缺 DEVELOPMENT.md：{missing}"
+
+
+def test_root_readme_is_for_users_only():
+    """根 README = 仓库首页、给使用者：不写 ADR 编号/决策号/内部机制名（目录结构、开发环境、测试、发布归 DEVELOPMENT.md）。
+    相对链接在 GitHub 上正常渲染，故这里不查链接形态。"""
+    text = (REPO / "README.md").read_text(encoding="utf-8")
+    hits = [f"README.md:{i}: {line.strip()[:120]}" for i, line in enumerate(text.splitlines(), 1) if FORBIDDEN.search(line)]
+    assert not hits, "根 README 面向使用者，内部指代搬去 DEVELOPMENT.md：\n" + "\n".join(hits)
 
 
 def test_package_summaries_are_for_users_only():
