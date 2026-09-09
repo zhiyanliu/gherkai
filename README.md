@@ -46,7 +46,7 @@ flowchart TD
     B -. "ngrok 隧道回本机" .-> APP
 ```
 
-全栈托管在 AWS 内；当前范围限英文 UI。
+全栈托管在 AWS 内。**被测 UI 的语言**：Midscene 引擎不限（中文 UI 上动作与 AI 断言实测与英文同级可靠）；Nova Act 引擎的支持范围是英文 UI——它在中文页面上能操作、能判页面级语义，但「正文里是否出现某个中文词」这类断言会稳定判否。非英文应用请用 `@engine:midscene` 路由。
 
 ## 前置要求
 
@@ -149,6 +149,7 @@ RUN_ID=$(gherkai submit my_app.feature --expose-local http://localhost:3000)
 - scope / 引擎 / 超时预算用 **tag**：`@scope:login`（同 scope 共享会话、串行）/ `@engine:midscene|novaact` / `@timeout:120`（该 scope 的墙钟预算秒）。
 - **确定性精确检查**（URL/DOM，不容 AI 抖动）：测试开发在项目的 `steps/` 目录注册（Nova Act 用 `*.py`、Midscene 用 `*.mts`，同一正则两侧对称），命中走精确判定、不投票；写法见 [`engines/novaact/README.md`](./engines/novaact/README.md) / [`engines/midscene/README.md`](./engines/midscene/README.md)。CLI 按 `--steps-dir` > 环境变量 `GHERKAI_STEPS_DIR` > `./steps` 找到它；任一文件加载失败即拒绝运行。云端跑时 steps 烙进 worker 镜像的 variant，见 [`deploy_aws/README.md`](./deploy_aws/README.md)。
 - **多行参数**：AI 动作/断言 step 可挂 DataTable / DocString，随 step 一起喂 AI。
+- **非英文 UI**：给 scenario 标 `@engine:midscene`（或 `--default-engine midscene`）。AI 断言写成直白的语义陈述（「当前是 X 的词条页」「页面没有报错」），别把段落边界、子串规则塞进断言——那是确定性 step 的活。中文探针见 [`features/wikipedia_zh.feature`](./features/wikipedia_zh.feature)。
 
 示例 feature 在 [`features/`](./features/)。
 

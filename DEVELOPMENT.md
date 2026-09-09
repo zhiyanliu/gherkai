@@ -34,6 +34,7 @@
 │   └── {doc,code}-health-review.md  ← 文档/代码健康度复盘方法
 ├── features/                  ← 共享 .feature（同一份两个引擎同读；通用 step 风格，QA 零代码）
 │   ├── wikipedia_generic.feature / wikipedia_assertions.feature / wikipedia_robustness.feature
+│   ├── wikipedia_zh.feature                ← 非英文 UI 探针：中文维基 + 中文 step，两引擎同题（ADR 0001 的测量夹具与重议复测入口）
 │   ├── engine_routing.feature              ← @engine tag 路由验证
 │   ├── deterministic_anchor.feature        ← @deterministic 锚点验证（ADR 0022）
 │   └── concurrency_and_scope.feature       ← 手工真跑回归夹具：改调度/会话生命周期后重跑验 ADR 0019

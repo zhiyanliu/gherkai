@@ -4,6 +4,8 @@ gherkai 的 **Nova Act 执行引擎**：把 `.feature` 里的每个 step 在**�
 
 它是一个被 `gherkai` CLI 拉起并驱动的 **worker 进程**：日常你敲的是 `gherkai run` / `gherkai submit`，**不用直接调用本包的命令**。装上它 = 让 `gherkai` 能在本机用 novaact 引擎跑起来。
 
+**被测 UI 的语言**：支持范围是**英文 UI**（Amazon 对 Nova Act 的声明只覆盖英文）。中文页面上它能导航、能点中文按钮、能判「当前是 X 页」这类页面级断言，但「正文里是否出现某个中文词」这类断言会稳定判否——非英文应用请改用 Midscene 引擎（`@engine:midscene`），或把文本检查写成确定性 step。
+
 ## 安装
 
 ```bash

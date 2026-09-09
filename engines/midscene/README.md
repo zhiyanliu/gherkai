@@ -4,6 +4,8 @@ gherkai 的 **Midscene 执行引擎**：把 `.feature` 里的每个 step 在**�
 
 它是一个被 `gherkai` CLI 拉起并驱动的 **worker 进程**：日常你敲的是 `gherkai run` / `gherkai submit`，**不用直接调用本包的命令**。装上它 = 让 `gherkai` 能在本机用 midscene 引擎跑起来。
 
+**被测 UI 的语言**：不限。中文 UI 上的动作与 AI 断言实测与英文同级可靠（Qwen3-VL 是多语种模型）；断言写成直白的语义陈述即可，别把段落边界、子串规则塞进 AI 断言。
+
 ## 安装
 
 ```bash
