@@ -91,20 +91,20 @@
 > - **store adapter**（Local/DDB/S3）——只持久化 **core 自己的序列化数据**（RunMeta/RunState/JobResult/RunReport），并**不透明搬运** worker 报的 `ref`（`ResourceUri`，[0027](./0027-runreport-aggregation-index.md)）。store **不上传 worker 产物**。
 > - 二者是**矩阵不是绑定**：如 Local store + Fargate worker 合法（core 数据落本地、worker 产物在 S3）。**注意这是组合根内部/e2e 可拼的矩阵、非用户 CLI 旋钮**——面向用户 `--backend` 一个开关同时定 store 与执行（决策 A：cloud⇒Fargate 执行+云存储），不把这层正交暴露成用户旋钮。报告的自包含/可移植由 `index.html` 的 `href` 相对化达成（不拷贝产物；产物拷贝式 materialize 已否决，见 [0027](./0027-runreport-aggregation-index.md)「被拒方案」）——与 worker 把产物放哪正交。
 
-**adapters 按 port 分子目录的目标布局**（多后端时不按后端混放）——下为**目标态**，当前实装更扁平（见图后说明）：
+**adapters 按 port 分子目录**（多后端时不按后端混放）——下即当前实装：
 
 ```
 core/gherkai_core/
 ├── ports.py                 ← 接口定义（Engine / WorkerHandle / EngineResolver / Sink / JobSink（0030）/ RunStore / ResultStore / ReportStore）
 └── adapters/
-    ├── subprocess_engine.py              ← Engine 实装：单个参数化 adapter（spawn node / python 皆可）✅ 已建
-    ├── fargate_engine.py                 ← Engine 云端实装（job-in 走 S3、events-out 走 DDB events 表）✅ 已建（0024/0032/0033）
-    ├── report_store/{local.py, s3.py}    ← RunReport 归集（manifest+index）✅ 已建（0027；s3 见 0030）
-    ├── run_store/{local.py, ddb.py, arg_offload.py}  ← 控制面（ddb=DynamoDBRunStore、arg_offload=S3StepArgumentOffloader）✅ 已建（0030）
-    ├── result_store/{local.py, s3.py}    ← 数据面（s3=S3ResultStore）✅ 已建（0030）
-    ├── event_log/{sqlite.py, ddb.py}     ← EventLog port（无状态跑批的写模型：local SQLite / cloud DDB events 表）✅ 已建（0034）
-    ├── cloud_launcher.py                 ← Launcher port cloud 实装（ECS RunTask；对位 runtime/gherkai_runtime/detached.py 的 SubprocessLauncher）✅ 已建（0034）
-    └── _boto.py                          ← 云端 adapter 共享的 boto3 依赖守卫（非 port 实装，冗余兜底：主拦截在组合根）✅ 已建
+    ├── subprocess_engine.py              ← Engine 实装：单个参数化 adapter（spawn node / python 皆可）
+    ├── fargate_engine.py                 ← Engine 云端实装（job-in 走 S3、events-out 走 DDB events 表）（0024/0032/0033）
+    ├── report_store/{local.py, s3.py}    ← RunReport 归集（manifest+index）（0027；s3 见 0030）
+    ├── run_store/{local.py, ddb.py, arg_offload.py}  ← 控制面（ddb=DynamoDBRunStore、arg_offload=S3StepArgumentOffloader）（0030）
+    ├── result_store/{local.py, s3.py}    ← 数据面（s3=S3ResultStore）（0030）
+    ├── event_log/{sqlite.py, ddb.py}     ← EventLog port（无状态跑批的写模型：local SQLite / cloud DDB events 表）（0034）
+    ├── cloud_launcher.py                 ← Launcher port cloud 实装（ECS RunTask；对位 runtime/gherkai_runtime/detached.py 的 SubprocessLauncher）（0034）
+    └── _boto.py                          ← 云端 adapter 共享的 boto3 依赖守卫（非 port 实装，冗余兜底：主拦截在组合根）
 ```
 
 **`EventLog` / `Launcher` 两个 port 定义在 `core/gherkai_core/reconcile.py`、不在 `ports.py`**（[0034](./0034-detached-batch-reconciler.md)）：它们只服务无状态推进路径（reconciler 读全量 events 重放 / CAS 抢占成功后起一个 job），与 `ports.py` 那批「同步 `run` 也用」的口生命周期不同；实装各两个（`SqliteEventLog`/`DdbEventLog`、`SubprocessLauncher`（在 `runtime/gherkai_runtime/detached.py`）/`CloudLauncher`），同样组合根注入。
@@ -182,30 +182,30 @@ Fargate 执行环境配置（cluster / task-def / subnet / security-group / even
 
 ## 工程布局：core / runtime / cli / engines 平级对标
 
-**当前实装态**标在各行右侧 ✅（本树各行皆已建，无未建项）：根 workspace 已建、core/ 已建、runtime/ 已抽出并改名（见下「演进」节）、cli/ 已建、engines/ 已迁、两个引擎 worker 已落地。
+**本树是当前实装真值**（无未建项）。
 
 **三个目录 = 三个发行包 = 三名分离**（[0037](./0037-distribution-and-packaging.md) 决策 2）：`core/`＝发行名 `gherkai-core`＝import 名 `gherkai_core`；`runtime/`＝`gherkai-runtime`＝`gherkai_runtime`；`cli/`＝`gherkai`（命令同名 `gherkai`）＝`gherkai_cli`。三者是根 uv workspace 的成员，各自带 `pyproject.toml`（发行元数据 + 从 git tag 派生的 dynamic version）+ `README.md`/`LICENSE`/`tests/`；**lock 只有根一份**。
 
 ```
 ./
-├── pyproject.toml       ← uv workspace 根（虚拟根、不发行）：成员 = core/runtime/cli，dev 依赖与 pytest 配置在此  ✅ 已建（0037）
-├── uv.lock              ← 三成员共用的单一 lock（成员各自的 lock 已删）     ✅
-├── core/                ← 发行包 gherkai-core：窄腰，纯编排，零引擎依赖     ✅ 已建
+├── pyproject.toml       ← uv workspace 根（虚拟根、不发行）：成员 = core/runtime/cli，dev 依赖与 pytest 配置在此（0037）
+├── uv.lock              ← 三成员共用的单一 lock（成员各自的 lock 已删）
+├── core/                ← 发行包 gherkai-core：窄腰，纯编排，零引擎依赖
 │   └── gherkai_core/    ← import 名（模块文件名不变，0037 决策 2）
-│       ├── model.py · parse.py · scope.py · schedule.py · project.py · reconcile.py · persist.py · wire.py · serialize.py · ports.py · errors.py  ✅
+│       ├── model.py · parse.py · scope.py · schedule.py · project.py · reconcile.py · persist.py · wire.py · serialize.py · ports.py · errors.py
 │       │     （wire.py=worker 协议单向序列化；serialize.py=领域模型双向持久化的单一真理源，二者分工不同）
 │       │     （project.py=events→RunState/JobResult 的纯归约投影 · reconcile.py=无状态推进 tick（含 EventLog/Launcher 两 port）· persist.py=实时写编排 RunPersistence；见 0030/0034）
-│       └── adapters/    ← 按 port 分（清单见上「adapters 按 port 分子目录」）：subprocess_engine.py（单 adapter 参数化，非 midscene.py/novaact.py 两文件）· fargate_engine.py · cloud_launcher.py · event_log/ · run_store/ · result_store/ · report_store/ · _boto.py ✅
+│       └── adapters/    ← 按 port 分（清单见上「adapters 按 port 分子目录」）：subprocess_engine.py（单 adapter 参数化，非 midscene.py/novaact.py 两文件）· fargate_engine.py · cloud_launcher.py · event_log/ · run_store/ · result_store/ · report_store/ · _boto.py
 ├── runtime/             ← 发行包 gherkai-runtime：产品本体 = 组合根共享层（见下「演进」节；cli/Lambda/WebUI 的共同地基。原 `gherkai/`，0037 改名让位给 CLI 发行名）
 │   └── gherkai_runtime/{compose.py（组合根/引擎注册表 + `resolve_cloud_target` 云目标解析）· detached.py（local 无状态跑批宿主）· names.py（资源命名真源）· tunnel.py（`--expose-local` 隧道 provider，0035）· tunnel_host.py（隧道宿主编排 + 守护 TTL，0035）}
 ├── cli/                 ← 发行包 gherkai：纯皮 argparse + 渲染 + deploy provider 分派（workspace 成员；对兄弟包的依赖在 build 时渲染成 `==` lockstep pin，[0037](./0037-distribution-and-packaging.md) 决策 2）
 │   └── gherkai_cli/{__main__.py（argparse 皮）· deploy.py（`gherkai deploy`/`destroy` 的皮：provider 发现 + flag 贴接 + 分派，不含 IaC 知识，[0037](./0037-distribution-and-packaging.md) 决策 6）· render.py（事件/RunResult/RunState 渲染）}
-└── engines/             ← 两个可插拔引擎，与 core 平级对标                  ✅ 已迁
-    ├── midscene/        ← npm 包 @gherkai/worker-midscene（ESM，0037 决策 3）        ✅ worker：engines/midscene/src/worker/run-scope.mts
+└── engines/             ← 两个可插拔引擎，与 core 平级对标
+    ├── midscene/        ← npm 包 @gherkai/worker-midscene（ESM，0037 决策 3）        worker：engines/midscene/src/worker/run-scope.mts
     │   ├── src/bin.mts（入口：进程内注册 tsx 与 resolve hook）· src/index.mts（使用方 step 文件的 import 面）· src/resolve-hook.mts（裸 specifier `@gherkai/worker-midscene` 的解析 hook，[0037](./0037-distribution-and-packaging.md) 决策 4）· src/worker/{run-scope,deterministic,deterministic.steps,user-steps,argument}.mts · src/lib/（引擎内共享：agentcore-sigv4 · artifact-upload · event-sink · job-source）
     │   └── （node_modules / dist / spikes 随迁；tsconfig 入库）
-    └── novaact/         ← 发行包 gherkai-worker-novaact（0037 决策 3）              ✅ worker：engines/novaact/gherkai_worker_novaact/run_scope.py
-        ├── gherkai_worker_novaact/{run_scope.py · deterministic.py · deterministic_steps.py · user_steps.py · __main__.py}  ✅（确定性注册表已拆出：deterministic.py=注册表+匹配、deterministic_steps.py=内建脚手架锚点、user_steps.py=加载使用方 steps/ 目录，两引擎对称，见 0022/0036/0037；仅 ai_steps 的进一步拆分仍是留口子）
+    └── novaact/         ← 发行包 gherkai-worker-novaact（0037 决策 3）              worker：engines/novaact/gherkai_worker_novaact/run_scope.py
+        ├── gherkai_worker_novaact/{run_scope.py · deterministic.py · deterministic_steps.py · user_steps.py · __main__.py}（确定性注册表已拆出：deterministic.py=注册表+匹配、deterministic_steps.py=内建脚手架锚点、user_steps.py=加载使用方 steps/ 目录，两引擎对称，见 0022/0036/0037；仅 ai_steps 的进一步拆分仍是留口子）
         └── gherkai_worker_novaact/lib/（引擎内共享：workflow_setup · artifact_upload · event_sink · job_source · constants）· tests/（无独立 venv：随 CLI 的 [local] extra 装进根 .venv）
 ```
 
@@ -261,5 +261,5 @@ G1/G2 是 v1.0 核心库 `.feature` 解析的前置——其声明语法**现已
 - **现在做（v1.0）**：核心库 `core/` 可被调用（逻辑不焊死在 CLI main 里）；钉死上面数据模型；定义 ports 接口（`Engine`/`RunStore`/`ResultStore`/`ReportStore`）+ 组合根注入；核心自解析 Gherkin + 薄 worker（[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)）。模块设计：worker↔core 协议见 [0024](./0024-worker-core-protocol.md)；plan 模块见 [0025](./0025-plan-module-feature-to-jobs.md)；schedule 模块见 [0026](./0026-schedule-module.md)。
   - **ports 落地状态**：四个 port 的 local adapter 均已建（详见上「留口子：Ports & Adapters」节）。**两个引擎 worker 均已落地**（落点见上「工程布局」树），两个引擎对称、同讲 0024 协议。
 - **现在不做**：无状态机制 / WebUI ——接口已留好，等云端真需要时填 adapter + 组合根换注入。**避免为想象中的云端预先盖机器。**（**已越过**：云端 store/执行 adapter + 组合根接线 + IaC 在 v1.1 填齐、**无状态跑批机制 v1.2 已实装真跑通**——清单见上「版本切分」的 v1.1.0/v1.2.0 行；但无状态跑批**不止「填 adapter」**、是驱动模型演进，故当初「等填 adapter」的乐观预期对它不成立，见上「这样上云…」处的 ⚠️ 分层注。）
-- **G1/G2 声明语法已定**（ADR 0019）；其**调度实现**（scope 串/并行、会话共享、engine 冲突校验）已由核心库落地（[0025](./0025-plan-module-feature-to-jobs.md)/[0026](./0026-schedule-module.md)，见上「G1/G2 解析前置」节）。
+- **G1/G2**：声明语法（[0019](./0019-feature-tags-scope-and-engine.md)）与调度实现（[0025](./0025-plan-module-feature-to-jobs.md)/[0026](./0026-schedule-module.md)）均已落地——分工枚举见上「G1/G2 解析前置」节。
 - **多用例组织**：跑批入口（CLI 按路径跑一批）已落地；**按 tag 选子集仍未实现**——旧的 cucumber `--tags` 选子集约定随 BDD runner 一并退役（见 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)），核心调度层的 tag 过滤至今是留口子（`plan` 只接 feature 路径、无过滤参数；真需要时加 CLI 选择面 + plan 入口过滤，是加法）。**当初把它整体推给核心库的理由仍成立**：选子集依赖核心库的调度层，在（已退役的）bdd 直跑层做只是临时件、核心库终究会重做。`features/` 目前是 v0.x 打磨用例 + v1.0 起补的手工真跑验证夹具（并发/scope 共享、确定性锚点），仍未做目录/命名的有意组织。

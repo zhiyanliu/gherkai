@@ -1,6 +1,6 @@
 # 无状态跑批：CLI 提交 → 事件驱动推进 → 轮询收集（CQRS + reconciler）
 
-> **Status:** Accepted —— **已全部实装、local+cloud 两路端到端真部署真跑通**（core `project`/`reconcile` + cli `submit`/`status` 命令 + `gherkai-runtime` 的 `detached` 宿主 + `lambdas/` 三 Lambda + `gherkai-deploy-aws`（原 `iac_aws_backend`，[0037](./0037-distribution-and-packaging.md) 决策 6 收编）的 Stream/EventBridge 均落 code；真实 AWS 账户/us-east-1 真跑：local submit→per-run 推进→passed，cloud submit→kicker 冷启动→事件驱动链→passed，含卡死救活真验）。纠正 [0016](./0016-execution-architecture-core-lib-run-model.md)「无状态化=加 adapter+换注入、核心不动」对本能力的过强断言（见下「对 0016 的纠正」；0016/0024/0026/0031 已同步标 Partially-superseded-by 本 ADR，0030 标其「重议」条已由本 ADR 落地）。
+> **Status:** Accepted —— **已全部实装、local+cloud 两路端到端真部署真跑通**（落点横跨 core `project`/`reconcile`、cli `submit`/`status`、runtime `detached`、`deploy_aws` 的三 Lambda 与 Stream/EventBridge；真实 AWS 账户/us-east-1 真跑：local submit→per-run 推进→passed，cloud submit→kicker 冷启动→事件驱动链→passed，含卡死救活真验）。纠正 [0016](./0016-execution-architecture-core-lib-run-model.md)「无状态化=加 adapter+换注入、核心不动」对本能力的过强断言（见下「对 0016 的纠正」；0016/0024/0026/0031 已同步标 Partially-superseded-by 本 ADR，0030 标其「重议」条已由本 ADR 落地）。
 
 同步 `run` 是**「CLI 阻塞跑一批」**：组合根同进程 `schedule()` 持 `ThreadPoolExecutor`、`as_completed` 收敛到全批完成才返回。本 ADR 落地的产品项（曾是产品线唯一未做项、非加固）= **「CLI 提交完就走、异步收集」**（[0016](./0016-execution-architecture-core-lib-run-model.md) v1.2 已完成 + [0017](./0017-cloud-execution-fargate-over-runtime.md) batch shape）——新增 `submit`/`status` 命令、同步 `run` 保留不变。本 ADR 定这套无状态跑批的架构、数据模型、并发/写序不变量与被拒方案护栏。
 

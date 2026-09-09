@@ -4,11 +4,11 @@
 
 把「一次 run 的判定/状态**随进度实时落库**」做成正交接缝：执行编排（`schedule`，[0026](./0026-schedule-module.md)）只管跑、
 不碰存储；存储编排（新 `core/gherkai_core/persist.py` 的 `RunPersistence`）依赖 Store ports、由组合根注入具体 adapter。
-这是 v1.1 云端（DDB/S3）的前置：先在 local adapter 上把「实时写 + commit-point 写序」跑通，云端 DDB/S3 adapter 作新 adapter 接入（决定六，已实装）。
+这是 v1.1 云端（DDB/S3）的前置：先在 local adapter 上把「实时写 + commit-point 写序」跑通，云端 DDB/S3 adapter 作新 adapter 接入（见决定六）。
 
 **定位**：本 ADR 解决「**怎么把实时落库接进来而不污染 reducer / 不让每个组合根各写一遍**」。
 job 生命周期态（`skipped`/`aborted`/`pending`/`running`/severity）见 [0031](./0031-job-lifecycle-states-and-severity.md)；
-DDB 的并发一致性（Map<scope_id> 按 key 定位、条件更新）见下「决定六」（云端 adapter 落库形态，已实装）。
+DDB 的并发一致性（Map<scope_id> 按 key 定位、条件更新）见下「决定六」（云端 adapter 落库形态）。
 
 > **本文出现的 `pending`/`running`/`skipped`/`aborted` 这些状态值，定义与 severity 归属全在 [0031](./0031-job-lifecycle-states-and-severity.md)**；本篇只用它们描述时序，不定义。
 

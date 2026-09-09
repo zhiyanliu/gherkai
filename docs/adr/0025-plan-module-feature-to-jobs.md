@@ -117,7 +117,7 @@ Job = {
 
 ## 现在做 / 留口子
 
-- **现在做（v1.0）**：上述 `plan` 接口、parse（借 Compiler）、scope 分组 + engine 校验、id 派生、三档 Gherkin 特性、test cases。
+- **现在做（v1.0）**：上文已描述的全部；边界由下条「留口子不实现」界定。
 - **留口子不实现**：`@id:` 显式 id tag；Rule 层级的特殊处理（Compiler 已展开，暂不暴露 Rule 概念到领域模型）；feature 级 tag 的更多语义（现仅 `@scope`/`@engine`）。
 
 ## 重议

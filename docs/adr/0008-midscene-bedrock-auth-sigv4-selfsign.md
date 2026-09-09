@@ -13,7 +13,7 @@
 - **spike 与生产同路**——不再走「spike 先用兜底 key」。
 
 **为什么这个选择更稳（不只是更合心意）**：
-- 端点侧 SigV4 已证绿——SigV4 + `/openai/v1` + 纯文本在本账号实测拿到正确回复（HTTP 200），且 image_url 字段被端点接受（见 [0003](./0003-midscene-grounding-qwen3vl-bedrock.md)）。注：合格图片的成功视觉应答尚未实证，留待 spike。
+- 端点侧 SigV4 已证绿——SigV4 + `/openai/v1` + 纯文本在本账号实测拿到正确回复（HTTP 200），且 image_url 字段被端点接受（见 [0003](./0003-midscene-grounding-qwen3vl-bedrock.md)）。注：0003 的证据止于文本应答与 image_url 字段被接受；合格图片的成功视觉应答由下节 spike 第 1 段坐实。
 - 因此它**消除了 bearer 路那个最低置信的承重假设**（bearer 对 `/openai/v1`+vision 是否被接受、AWS 无文档）——根本不碰 bearer。
 - 风险性质从「AWS 政策侧未知」变为「进程内 SigV4 fetch 接线是否字节级正确」——后者在我们掌控内。
 

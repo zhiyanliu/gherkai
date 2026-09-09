@@ -137,7 +137,7 @@ uv 缺 Python 时自动下载托管 CPython，对 uv-first 受众近乎免费；
 
 worker 内容 = 框架脚手架 + 使用方确定性 step，属业界分类里的 **user-code image**，最后一层由使用方构建（Dagster user-code deployment / Prefect flow image 同理）；「维护者独占发布完整镜像、用户绝不自建」曾是备选，因抹掉定制面被拒。本 ADR 只定分工与基底通道：
 
-- **基底镜像**（维护者 CI 发布）：`ghcr.io/zhiyanliu/gherkai-worker-novaact:X.Y.Z` / `…-midscene:X.Y.Z`，内容 = 同版本 worker 包 + SDK 运行时 + 协议层，**零使用方内容**；**linux/amd64 单架构**（ARM64 被拒，理由与将来的路在 [0038](./0038-worker-image-delivery.md)）；tag = immutable `X.Y.Z` + 移动 `latest`（只跟随最新 tag；文档一律 `FROM …:X.Y.Z`）。Dockerfile 两态（与 Lambda asset 同源）：CI 态按版本从 PyPI / npm 装已发行包；本地态经 `--build-arg` 指向本地 `uv build` wheel / `npm pack` tarball（dev 版不在 PyPI，contributor 才造得出基底）。
+- **基底镜像**（维护者 CI 发布）：`ghcr.io/zhiyanliu/gherkai-worker-novaact:X.Y.Z` / `…-midscene:X.Y.Z`，内容 = 同版本 worker 包 + SDK 运行时 + 协议层，**零使用方内容**；**linux/amd64 单架构**（ARM64 被拒，理由与将来的路在 [0038](./0038-worker-image-delivery.md)）；tag = immutable `X.Y.Z` + 移动 `latest`（只跟随最新 tag；文档一律 `FROM …:X.Y.Z`）。Dockerfile 两态（与 Lambda asset 同源）：CI 态按版本从 PyPI / npm 装已发行包；本地态经 `--build-arg` 指向本地 `uv build` wheel / `npm pack` tarball（dev 版不在 PyPI，contributor 才造得出基底）。 **基底镜像的 CI 必须排在 worker 包发行之后**（基底装的是已发行的 worker 包）。
 - **为什么 GHCR 而非 ECR Public / Docker Hub**：运行时拉的是使用方私有 ECR 里的镜像，GHCR 只在使用方 `docker build` 与 deploy 同步基底时各被拉一次，ECR Public 的免流量/免认证优势碰不到；Docker Hub 匿名限额是负项；GHCR 与 repo 同屋檐、`GITHUB_TOKEN` 推送零配置。
 - **定制镜像由使用方在本地 build，gherkai 不拥有构建**：Dockerfile 模板（唯一真源）见 [0038](./0038-worker-image-delivery.md)「概念模型」节；必须 `--platform linux/amd64`，push-worker 推送前校验。**推送、注册、选择、清理、权限**全部在 [0038](./0038-worker-image-delivery.md)：variant 命名、默认指针、按（引擎，variant）注册 digest 引用的 task-def revision、`gherkai deploy push-worker` / `list-workers` / `delete-worker`、容器引擎口子、preflight 的 variant 解析。
 - `tools/build_push_workers.py` 已随 0038 落地退役（`gherkai deploy push-worker` 取代）。
@@ -172,6 +172,7 @@ worker 内容 = 框架脚手架 + 使用方确定性 step，属业界分类里�
 ## 决策 8：CI 发布链与占名
 
 - **占名（先于一切）**：PyPI **七名** = 五个真发行（`gherkai` / `gherkai-runtime` / `gherkai-core` / `gherkai-worker-novaact` / `gherkai-deploy-aws`）+ 两个防混淆占位（`gherkai-cli` / `gherkai-worker-midscene`），各真传一版 `0.0.0` 占位 sdist（README 指向 repo）——**PyPI 的 pending publisher 不占名**（官方明文：他人先注册即失效），必须真传。npm：注册 `gherkai` 用户/组织独占 `@gherkai` scope（原生命名空间，不需逐名防御）+ 发 `@gherkai/worker-midscene@0.0.0` 占位；可选占非 scoped `gherkai`（品牌保护，防 `npx gherkai` 跑出别人的包）。PyPI PEP 541 与 npm 争议政策都只针对无意图占坑，带真实项目指向即可。
+- **包 metadata 随发行重组一并落**：各包带 license 文件 + `[project.urls]`（含 Changelog）——PyPI 页面的信任面与导航面，属发行物、不属 CI。
 - **tag 触发全链**（GitHub Actions，`v*`），**前置、顺序与失败语义**：前置 = checkout 必 `fetch-depth: 0`（**`fetch-tags: true` 不是替代品**：Dunamai 对浅仓库直接拒算——真跑报 "This is a shallow repository, so Dunamai may not produce the correct version"，`--depth 1` 后 `git fetch --tags` 让 tag 可见了照样同一个错，与 tag 可见性无关）；随后 **gate：tag 形态 `vX.Y.Z` + 断言算出的版本 == 触发 tag** 再往下走。**发布链只认 `vX.Y.Z`**：预发行 tag（`v1.4.0rc1`）是合法 PEP 440 却不是合法 semver（npm 要 `1.4.0-rc.1`），gate 第一步拦掉——放进来就是 PyPI 发成功、npm 挂在 `npm version` 上的半发布态；也顺带挡住演练 tag 误 push。日常 CI 另做 **gate 演练**（干净 checkout 打本地 tag `v99.0.0` → build → 校版本==tag），使「干净 tag 也带本地段」这类回归不必等到发布日才炸。① `uv build --all-packages` → `astral-sh/attest-action` 生成 PEP 740 attestation（**`uv publish` 自身不生成**，只上传已有的 `*.publish.attestation`；漏这步 = 静默发无证物件）→ `uv publish`（PyPI trusted publisher，OIDC 免密）；② npm `npm version <X.Y.Z> --no-git-tag-version && npm ci && npm run build && npm publish --access public`（**`npm ci && npm run build` 不可省**：`dist/` 不入库、package.json 无 prepack 钩子，漏 build 会发出空 `dist/` 的包、bin 直接失效）。npm 侧同样走 **trusted publishing**（包在 npmjs.com 登记本仓库 + `release.yml`，OIDC 换授权、provenance 自动附带、零 secret；runner 上需 npm ≥ 11.5.1，Node 22 自带 10.x 故多一步 `npm i -g npm@^11.5.1`）；③ 基底镜像 `docker/build-push-action`（linux/amd64，两态 Dockerfile 的 index 态：`--build-arg WORKER_VERSION=<X.Y.Z>` 从 PyPI/npm 装已发行的 worker 包，见决策 5）→ GHCR（`GITHUB_TOKEN`；首发 package 的可见性**实测随公开仓库为 public**、可匿名 pull——GitHub 文档写「默认 private」，首个 release 后核对一次即可，若为 private 才需人工改，否则 0038 的「deploy 同步基底」匿名 pull 不到；docker attestation 关掉——开着会把镜像变成带 unknown/unknown 附属 manifest 的 index，0038 的 digest/架构校验路径要干净单 manifest）——**依赖 ①②已发行且索引可见**（带重试等待），且该 job 对已发行版本**可单独重跑**（对 `X.Y.Z` tag 幂等；**重跑旧版本时不推 `latest`**，`latest` 只跟随最新 tag），故「PyPI 已发、镜像缺失」的半发布态有确定的修复动作；④ GitHub Release 作 changelog 锚点（`[project.urls] Changelog` 指它）。TestPyPI 演练须配 `[[tool.uv.index]]` 的 `publish-url`，且 `uv publish --index` 要求 checkout 有 pyproject。
 - **[0033](./0033-iac-aws-backend-and-composition-wiring.md) defer 条由此闭环**：托管 = GitHub；基底镜像去 GHCR 后 CI **不再需要 OIDC→AWS 的 ECR push**——那套 IaC/凭证方案整体不需要了。
 
@@ -205,22 +206,10 @@ worker 内容 = 框架脚手架 + 使用方确定性 step，属业界分类里�
 - **[0024](./0024-worker-core-protocol.md) / [0026](./0026-schedule-module.md)**：worker↔core 协议、`SubprocessEngine` 参数化 cmd 不动；只是 cmd 的**来源**从 `repo_root()` 变定位链。
 - **[0009](./0009-maximize-aws-hard-constraint.md)**：`-aws` 后缀入名是「不用当前的命名把门关死」，**不是**对全栈 AWS 硬约束的反转——两个引擎本身绑在 AWS 服务上（Nova Act、Bedrock、AgentCore Browser），非 AWS 后端意味着引擎层也要重铺、距离很远。
 
-## 对既有文档与 code 注释的影响（校准清单，翻 Accepted 时已逐条完成；括注是当时的到期点，路径名为当时的路径）
+## 对既有文档与 code 注释的影响
 
-- **README.md**：「首次安装：三个运行环境」节与**全部** `uv run python -m cli …` 调用示例 → `uvx gherkai …` / `uv tool install`（发行重组落地时）；「环境隔离：Python 依赖在 `engines/novaact/.venv`、不污染全局」条**被决策 3 反转**（worker 装进 CLI 同 venv；`[local]` 落地时）；目录树（布局落地时）；「boto3 走可选 `core[aws]`」句（发行重组落地时）；两处 `cdk deploy` 提法（`--backend` 说明与云端档示例）→ `gherkai deploy --vpc … --prefix …`（**已校准**）。
-- **cli/README.md**（`uv sync --extra aws` / `pip install cli[aws]`）、**core/README.md**（`core[aws]`）、**gherkai/README.md**（`cd gherkai && uv sync`）→ 发行重组落地时。
-- **iac_aws_backend/README.md**（`uv run cdk deploy -c …`、三档 context 写法）→ `gherkai deploy` 落地时（其 `build_push_workers.py` / `latest` tag 部分归 0038）；**engines/novaact/README.md**（`.venv/bin/python` 直跑）、**engines/midscene/README.md**（`node --import tsx` 直跑、依赖全在本地 `node_modules`、`.ts` 脚手架文件名）→ worker 交付落地时。
-- **code 注释与用户可见文案**（判据 = `grep -rn 'core\[aws\]\|cli\[aws\]'` 全清，排除 `docs/adr/` 历史）：三份 pyproject 的 extras 说明注释（`cli`/`gherkai`/`core`）；`gherkai/gherkai/compose.py` 的 `build_cloud_stores` docstring（逐字是被 2c 反转的那句）；`core/core/adapters/_boto.py` 的报错文案（`pip install core[aws]`，**用户可见**，不改即教用户敲一个不存在的包）；三个云端 adapter（`run_store/ddb.py`、`report_store/s3.py`、`result_store/s3.py`）的 docstring；测试注释 `cli/tests/test_backend_cloud.py`、`gherkai/tests/test_compose.py`；`CONTEXT.md` 的「boto3 走可选依赖 `core[aws]`」句 → 发行重组落地时。**`CONTEXT.md` 描述 fork 模式定制的两句**（「确定性锚点…由测试开发在 `deterministic.steps` 脚手架里写」「在对应 worker 里登记 `(模式 → handler)`」）→ steps 目录约定落地时改为「在使用方 `steps/` 目录写」。**CONTEXT 新增词条**当前带「设计已定、施工未启」状态标记，各自随对应层落地去掉标记。
-- **docs/guides/execution-and-reconciliation.md** 引用的模块路径（`core/schedule.py` 等）→ import 改名落地时。
-
-## 落地次序与依赖（依赖关系，非进度追踪；本节编号只在本节内部使用，其它文档不引用它）
-
-0. **占名**（无依赖，先做）。
-1. **发行重组 + PyPI 首发**：workspace 化、三名改、dynamic versioning（三项配置显式钉死 + hook 的 dynamic 声明）、`packaging` 声明、metadata（license 文件进各包、`[project.urls]`；**包 README = 发行包长描述**——v1.4.0 首发时上去的是 contributor 向的子 README（含 ADR 指针与相对死链），随即改为 CLAUDE.md「README 分三层」：包目录 `README.md` 只写使用者内容、绝对链接，contributor 内容归同目录 `DEVELOPMENT.md`，护栏 `cli/tests/test_package_readmes.py`）、`--version`、`repo_root()` 三处非 engine 消费点退役（两个子进程 cwd、feature uri 基准）。首发即成立 `uvx gherkai submit --backend cloud`。
-2. **worker 交付**（依赖 1）：novaact 包化（boto3 直接声明、pytest 挪 dev、console script）+ `[local]`；定位链取代 `repo_root()`（含 miss 分叉与 `--no-report` 临时绝对落点）；midscene npm 包（ESM/tsc/tsx 注册、依赖挪位、resolve hook 随 dist、`.mts` 脚手架）；`steps/` 目录约定 + `RunMeta.steps_dir`（local 半）。
-3. **基底镜像 CI**（依赖 2，基底装的是 worker 包）：基底 Dockerfile 两态、CI 推 GHCR（linux/amd64）。worker 镜像的推送注册子系统按 [0038](./0038-worker-image-delivery.md) 自己的次序落地，其中只有「deploy 同步 GHCR 基底」一步依赖本步，运行时改显式 revision 等可先落。
-4. **`gherkai deploy`**（依赖 1、3）：`gherkai-deploy-aws` 收编 IaC 与 handler、provider 发现、asset 从已安装包、三 flag（四旋钮）+ SSM `version`/`vpc` 两参数各三态 + skew 检查、CI release 全链一次真跑；其 worker 镜像尾部步骤随 0038 落地。
-- **期外/按需**：worker `--capabilities` 自述入口（运行配置有效性 engine × browser 后端 × backend 走 worker 自述、非安装期 extras——等本地 browser 这类真实需求触发，[0036](./0036-deterministic-capability-discovery.md) 形态延伸）；去 Node 部署路线。
+- 发行重组 / worker 交付 / deploy 三层落地时，README·子 README·CONTEXT·guides 与 code 注释里的旧包名与旧调用示例已随各层校准（逐文件到期点见当时的 commit）。
+- 唯一有再犯价值的反模式：用户可见错误文案里的旧 extra 名（`pip install core[aws]`）会教用户敲一个不存在的包，属最易漏的一类；规则与护栏见 [0039](./0039-user-facing-surfaces-no-internal-references.md)。
 
 ## 实测项（**已清零**；「绿≠对」——每条都依赖 mock 之外的真实行为，证据内联于各条）
 
@@ -234,9 +223,10 @@ worker 内容 = 框架脚手架 + 使用方确定性 step，属业界分类里�
 
 ## 被拒方案（护栏，防未来重踩）
 
+- **进程包装层的 fd 转发补丁（为救 npx 兜底）**：多一层包装 = 多一处吞 fd/吞信号的地方（ADR 0024 三通道的反面教材）；npx 实测不穿透即降级为安装指引，midscene 无第四级（证据见决策 3 第 4 级；npm 行为若变按同法重测）。
 - **Homebrew tap / 单文件二进制（PyApp、PyInstaller、shiv、pex）**：受众（装 AWS 凭证、Docker 的开发/测试工程师）能装 uv；homebrew-core 门槛不达、tap 是第二个发布面与 bottle 维护；二进制带不了双语言 worker 环境。用户需求出现再议。
 - **单发行包（三 import 包一 wheel）**：省 pin 机制，但集成方无法按层引用（WebUI 只要 runtime、第三方只要 core）；pin 机制已由 dynamic-versioning hook 一处解决，单包唯一优势消失。
-- **不设 `[local]` / uvx 拉起作主路径**：同 venv 直调无包装层、离线、pin 锁死，三点全优；uvx 降为兜底（fd 预演已定：uvx 穿透 fd3 且转发 SIGTERM → novaact 保留；npx 不穿透 → midscene 无第四级，见下「midscene 的 `npx` 兜底拉起」条）。
+- **不设 `[local]` / uvx 拉起作主路径**：同 venv 直调无包装层、离线、pin 锁死，三点全优；uvx 降为兜底，fd 预演后仅 novaact 保留第四级（见决策 3 第 4 级）。
 - **CLI 上保留 `[aws]`**：裸装无一画像完整可用，头条命令撞头条用法。
 - **`[deploy-aws]` 命名为 `[aws]` 或 `[deploy]`**：前者说谎（裸装已能用 AWS）并把 CDK+Node 引向不需要的人；后者关 provider 门。
 - **维护者独占发布完整 worker 镜像**：确定性 step 是使用方地盘，worker 是 user-code image。
@@ -264,7 +254,6 @@ worker 内容 = 框架脚手架 + 使用方确定性 step，属业界分类里�
 ## 重议闸门
 
 - 出现非 AWS 后端的真实需求 → 命令 `gherkai deploy` 的 provider 发现面已留，届时新增 `gherkai-deploy-<provider>` 包，本 ADR 不需改。
-- 本地 browser 后端落地 → worker `--capabilities` 自述入口 + preflight/plan 消费（不回到安装期 extras 表达能力矩阵）。
-- **midscene 的 `npx` 兜底拉起**：实测 npx 不把 EVENTS_FD 传给 node 子进程（该号上是 npm 自己的 FIFO、写即 EBADF），事件全丢；按「实测不过 → 降级为报错指引」处置，**不**引入进程包装层的 fd 转发补丁（多一层包装 = 多一处吞 fd/吞信号的地方，ADR 0024 三通道的反面教材）。uvx 实测穿透，novaact 的第四级保留。
+- 本地 browser 后端落地 → worker `--capabilities` 自述入口 + preflight/plan 消费（运行配置有效性 = engine × browser 后端 × backend 走 worker 自述、非安装期 extras，[0036](./0036-deterministic-capability-discovery.md) 形态延伸；不回到安装期 extras 表达能力矩阵）。
 - midscene resolve hook 实测不稳 → 退到依赖注入形态（step 文件导出 `register(deterministic)`），Python 侧对称跟随以保两侧写法一致；Node 基线升到 ≥22.15 后可改用同步的 `module.registerHooks()`（Node 官方已在劝退异步 hook）。
 - 去 Node 部署路线（CI 预合成模板 + boto3 驱动 CloudFormation）→ 有需求再评估参数化成本。

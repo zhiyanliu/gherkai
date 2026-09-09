@@ -220,8 +220,8 @@
     "semantic_hash": "101775bd40d8593984e9e3337bfd74ab"
   },
   "docs/adr/0017-cloud-execution-fargate-over-runtime.md": {
-    "mtime": 1788935769.9883366,
-    "ast_hash": "ec7453985e507c6025c886b2827cc059",
+    "mtime": 1788938003.3172994,
+    "ast_hash": "600a042219dbbdd714ea84020f20658e",
     "semantic_hash": ""
   },
   "docs/adr/0018-generic-steps-capability.md": {
@@ -240,13 +240,13 @@
     "semantic_hash": ""
   },
   "docs/adr/0025-plan-module-feature-to-jobs.md": {
-    "mtime": 1788935878.3140984,
-    "ast_hash": "7f70a89cdae6bf09411b6e5df6f79050",
+    "mtime": 1788938003.3175585,
+    "ast_hash": "a771524f45a4ba558c95dc0dd842b773",
     "semantic_hash": ""
   },
   "docs/adr/0028-transient-network-ssl-resilience.md": {
-    "mtime": 1788935878.3143446,
-    "ast_hash": "252ff47de4f58bbdffa39769b3794cd0",
+    "mtime": 1788938003.317772,
+    "ast_hash": "5f55d6bcfad30c5beef0d7e1439dbdb9",
     "semantic_hash": ""
   },
   "docs/code-health-review.md": {
@@ -265,8 +265,8 @@
     "semantic_hash": "edae2c4a98921a58c66c6b46316bba26"
   },
   "CONTEXT.md": {
-    "mtime": 1788935700.7867477,
-    "ast_hash": "f91b22ea1f355619f448bd5ede96091d",
+    "mtime": 1788938003.3162508,
+    "ast_hash": "f5637604dd3dc9741abe12d0e50bb7cd",
     "semantic_hash": ""
   },
   "README.md": {
@@ -295,9 +295,9 @@
     "semantic_hash": ""
   },
   "docs/adr/0004-novaact-iam-auth-via-workflow.md": {
-    "mtime": 1788773594.4729698,
-    "ast_hash": "27e3f442f578ad60407520f91fc89ea4",
-    "semantic_hash": "27e3f442f578ad60407520f91fc89ea4"
+    "mtime": 1788938003.3165562,
+    "ast_hash": "d49fac7c820fbc4d3c91927845cb42c0",
+    "semantic_hash": ""
   },
   "docs/adr/0005-single-shared-feature-file.md": {
     "mtime": 1788935878.3124998,
@@ -315,8 +315,8 @@
     "semantic_hash": "6b550ac4a3d5555107a9a8d2b27dbcdb"
   },
   "docs/adr/0008-midscene-bedrock-auth-sigv4-selfsign.md": {
-    "mtime": 1788935769.9868643,
-    "ast_hash": "de051db05e2d3e59f7863d91dc3c912a",
+    "mtime": 1788938003.3168428,
+    "ast_hash": "78a1a5d24d2484fc61abf49da570032c",
     "semantic_hash": ""
   },
   "docs/adr/0009-maximize-aws-hard-constraint.md": {
@@ -345,8 +345,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0014-ai-first-assertions.md": {
-    "mtime": 1788937078.03952,
-    "ast_hash": "9b5c817f3716d76be052142f8a0e01ab",
+    "mtime": 1788938003.3170128,
+    "ast_hash": "bb0b106819ace154c8073fc395a07509",
     "semantic_hash": ""
   },
   "docs/adr/0015-v1-positioning-smoke-not-regression.md": {
@@ -355,8 +355,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0016-execution-architecture-core-lib-run-model.md": {
-    "mtime": 1788936013.4257193,
-    "ast_hash": "f286ca10ad0fe96110d0200ec8515b5c",
+    "mtime": 1788938003.3208513,
+    "ast_hash": "252acf9a19cbd338957c8e8f7ec17af5",
     "semantic_hash": ""
   },
   "docs/adr/0021-local-cucumber-patch-step-keyword-disambiguation.md": {
@@ -365,8 +365,8 @@
     "semantic_hash": "0c57d7d1c7e717ce5e58fa830b85f12c"
   },
   "docs/adr/0022-bdd-runner-retired-core-parses-thin-worker.md": {
-    "mtime": 1788935878.312905,
-    "ast_hash": "dfe1c7cb1efd8e3f4a9e2b2e9e4e7343",
+    "mtime": 1788938003.3194065,
+    "ast_hash": "3fad278e374fa007659c8297527b2af7",
     "semantic_hash": ""
   },
   "docs/adr/0023-novaact-acting-python-locked-no-ts-core.md": {
@@ -375,8 +375,8 @@
     "semantic_hash": "d433e28ccaea45df3762c4934dca3fe0"
   },
   "docs/adr/0024-worker-core-protocol.md": {
-    "mtime": 1788935878.3137069,
-    "ast_hash": "9dc295a9e7b334255c29a42c88b0b704",
+    "mtime": 1788938097.9346235,
+    "ast_hash": "208b80e1cd5b8584b057330a2a8057e8",
     "semantic_hash": ""
   },
   "docs/adr/0026-schedule-module.md": {
@@ -390,13 +390,13 @@
     "semantic_hash": "a9a2e177bf8c1e3026bf05971e4d68de"
   },
   "docs/adr/0029-engine-artifacts-to-s3.md": {
-    "mtime": 1788935878.3149688,
-    "ast_hash": "c6f59573854881c6f4e18a9336a159c3",
+    "mtime": 1788938003.3180723,
+    "ast_hash": "ea66d4c9704c0fd9f0b1a25e8073deaf",
     "semantic_hash": ""
   },
   "docs/adr/0030-realtime-persistence-seam.md": {
-    "mtime": 1788936110.3670094,
-    "ast_hash": "fe84d8a25fc5a60437358942939367c8",
+    "mtime": 1788938003.3183796,
+    "ast_hash": "f0065aeeb60cf78d0f0bf0f09a70fd33",
     "semantic_hash": ""
   },
   "docs/adr/0031-job-lifecycle-states-and-severity.md": {
@@ -410,17 +410,17 @@
     "semantic_hash": ""
   },
   "docs/adr/0033-iac-aws-backend-and-composition-wiring.md": {
-    "mtime": 1788936013.426411,
-    "ast_hash": "a2feffdbfe14b0fa93e40016e16aa9b1",
+    "mtime": 1788938003.3186965,
+    "ast_hash": "3aec14944cdcb3d2b77c227cbdca835d",
     "semantic_hash": ""
   },
   "docs/adr/0034-detached-batch-reconciler.md": {
-    "mtime": 1788935878.3159125,
-    "ast_hash": "d8a8ada45090bfce1aa0731d10e038ce",
+    "mtime": 1788938003.318993,
+    "ast_hash": "878bbf977c3cfea2d8b584b4635232cc",
     "semantic_hash": ""
   },
   "docs/doc-health-review.md": {
-    "mtime": 1788937078.0408235,
+    "mtime": 1788937569.1636724,
     "ast_hash": "6e91d414977bdf80c5297b133053ac89",
     "semantic_hash": ""
   },
@@ -460,13 +460,13 @@
     "semantic_hash": ""
   },
   "docs/adr/0037-distribution-and-packaging.md": {
-    "mtime": 1788936013.426941,
-    "ast_hash": "d3e28168829cd5f0c77806fc007f0451",
+    "mtime": 1788938063.9051232,
+    "ast_hash": "0273f7d1db36afadbaa6f8f0090ce17c",
     "semantic_hash": ""
   },
   "docs/adr/0038-worker-image-delivery.md": {
-    "mtime": 1788936013.427546,
-    "ast_hash": "8d5ef4218ff0fe1b9f68536b268a4eae",
+    "mtime": 1788938063.9057493,
+    "ast_hash": "a5514a8bd82fe2e916849221d2fe2ebb",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/__init__.py": {
@@ -1125,8 +1125,8 @@
     "semantic_hash": "9e8b65705b510b04c074281bc06242b1"
   },
   "docs/adr/0040-consumer-role-model-and-terminology.md": {
-    "mtime": 1788929343.4296725,
-    "ast_hash": "70fb19778afbdfda3982d7e15a9dfb1a",
+    "mtime": 1788938003.319252,
+    "ast_hash": "4f1eb0f9371b8182ecbb3e1495b370ea",
     "semantic_hash": ""
   },
   ".claude/commands/code-health-review.md": {
@@ -1137,11 +1137,6 @@
   ".claude/commands/doc-health-review.md": {
     "mtime": 1788935700.7847693,
     "ast_hash": "98b4287c7f13b108d5c867d2634c9dff",
-    "semantic_hash": ""
-  },
-  "docs/journey/0004-doc-health-round5-pending-approval.md": {
-    "mtime": 1788937078.0412102,
-    "ast_hash": "4edf7f78ab9640f2b478e4f76b2e274a",
     "semantic_hash": ""
   }
 }

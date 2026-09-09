@@ -61,7 +61,7 @@ docker build --platform linux/amd64 -t acme-novaact:login .
 5. **查重**：SSM 现映射的（模板 revision ARN、digest）二元组与本次一致 → 跳过注册；否则按血缘 tags 在 family 里找**本 variant** 同二元组的 ACTIVE 且未退休的 revision 复用（覆盖「上次中断在注册与写 SSM 之间」的孤儿）；找不到才注册。**限定同 variant**（真账户跑出来的坑）：variant B 的镜像 digest 恰与 A 相同时若复用 A 正在用的 revision，之后 A 换 digest 重推会把它退休、满静默期清掉，B 的映射悬空——每个 variant 自己一个 revision（ECR 层共享，只多一条 task-def），退休与清理才能按 variant 独立判。
 6. **注册 revision**：`DescribeTaskDefinition`（模板，`include=["TAGS"]`）→ 剔除只读字段（`taskDefinitionArn` / `revision` / `status` / `requiresAttributes` / `compatibilities` / `registeredAt` / `registeredBy`）→ 镜像栏改 `repo@sha256:<digest>`，其余（含 `runtimePlatform`）原样 → `RegisterTaskDefinition`，**tags 记血缘**：`gherkai:variant`、`gherkai:version`、`gherkai:digest`、`gherkai:template`（模板 ARN）。
 7. **写 SSM**：`worker-image/<engine>/<版本>-<variant>` = JSON（模板 revision ARN、revision ARN、digest、推送时间）；`--set-default` 时写默认指针，若该 variant 在其它引擎尚无镜像则**警告不拦**（「variant `X` 在 midscene 尚无镜像，用到该引擎的 run 会在 preflight 被拦」——与 preflight「按本 run 用到的引擎判」同一判据，单引擎团队不必凭空推另一引擎）。
-8. **退休被替换的旧 revision**：给它打 tag `gherkai:retired-at=<时刻>`（**不在本次删除**），然后跑一次清理 pass（不变量）。输出 tag / digest / revision，以及「提交时用 `--worker-variant <名>`」。实装次序细节：`--set-default` 落在与基底同步共享的推送路径之外，实际 = 写映射 → 退休旧 revision → 写指针 → 清理（两者无依赖）；registry host 取 `ecr:GetAuthorizationToken` 的 `proxyEndpoint`（权威、与 moto 同形），不另调 STS。
+8. **退休被替换的旧 revision**：给它打 tag `gherkai:retired-at=<时刻>`（**不在本次删除**），然后跑一次清理 pass（不变量）。输出 tag / digest / revision，以及「提交时用 `--worker-variant <名>`」。次序 = 写映射 → 退休旧 revision → 写指针 → 清理（两者无依赖）；`--set-default` 不在与基底同步共享的推送路径上。registry host 的取法见「权限面增量」。
 
 ## `gherkai deploy` 的 worker 镜像四步（第 1 步随 cdk 事务，后三步在 cdk 之后；全部幂等）
 
@@ -74,7 +74,7 @@ docker build --platform linux/amd64 -t acme-novaact:login .
 
 ## 不变量
 
-- **运行时只用 definition 里的显式 revision，永不用 family 取最新**——传 family 名会让 ECS 取该 family 最新 ACTIVE revision，多 variant 下任何一次 push 都会劫持默认（施工前代码即如此，已改为显式 revision）。
+- **运行时只用 definition 里的显式 revision，永不用 family 取最新**（迁移前的 IaC 曾传 family，理由见下「被拒方案」的『RunTask 传 family』条）。
 - **revision 按 digest 引用镜像**，重推同名 variant 产生新 revision、在跑的 run 手里的旧 revision 不受影响；一个 run 内镜像固定。
 - **幂等**：push-worker 与 deploy 四步的每一步先查再做，中断后重跑收敛。ECR push 天然幂等（同 digest 无操作）；`RegisterTaskDefinition` 不幂等，故以二元组查重、孤儿 revision 按血缘 tags 复用而非重复注册；ECR 登录令牌 12 小时有效、重跑重登；SSM 写是覆盖语义。
 - **并发写者：最后写者赢，孤儿由对账回收**。SSM 无条件写，两人同时 push 同名 variant 会各注册一个 revision、后写者的映射赢；先写者的 revision 不在映射里也没被打退休 tag——**清理 pass 按 family 全量对账**（凡带血缘 tags、ACTIVE、不在 SSM **任何版本**的 `worker-image/*` 映射里的 revision 视作孤儿，视同退休、退休时刻取其 `registeredAt`；旧版本 variant 的 revision 仍在映射里、**不是**孤儿，其回收归 `delete-worker`），不只看映射。同一 variant 的并发 push 不建议但不禁止。
@@ -105,16 +105,16 @@ docker build --platform linux/amd64 -t acme-novaact:login .
 
 ## 权限面增量
 
-[0033](./0033-iac-aws-backend-and-composition-wiring.md)「资源清单」末段是编排机器权限的单一登记处，随本 ADR 落地去那里改，此处只列增量；**资源域按 0033「结构上只能 `*` 的动作诚实保留、单开 statement」的纪律标注**：
+[0033](./0033-iac-aws-backend-and-composition-wiring.md)「资源清单」末段是编排机器权限的单一登记处（已按下列增量改毕），此处只列增量；**资源域按 0033「结构上只能 `*` 的动作诚实保留、单开 statement」的纪律标注**：
 
-- **部署方**：ECR repo 域动作 `ecr:BatchCheckLayerAvailability` / `InitiateLayerUpload` / `UploadLayerPart` / `CompleteLayerUpload` / `PutImage` + **`ecr:DescribeImages`**（推送前读旧 digest 以打印「原 → 新」；限两个 `{prefix}{engine}-worker` repo ARN）；**只能 `*`** 的 `ecr:GetAuthorizationToken`（其 `proxyEndpoint` 即 registry host，**不需要** `sts:GetCallerIdentity`）、`ecs:RegisterTaskDefinition` / `ListTaskDefinitions` / `DescribeTaskDefinition`（task-def 类动作官方明文不支持资源级权限）、`ecs:TagResource`（注册时打血缘 tag、退休时打 `retired-at`）；`ecs:DeregisterTaskDefinition` / `DeleteTaskDefinitions` 按 SAR 的 resource types 逐条核后再定能否收窄；`iam:PassRole`（task / execution role，RegisterTaskDefinition 需要）；SSM `GetParameter`（点读模板/映射/默认指针）+ `PutParameter` + `GetParametersByPath`（`/{prefix}backend/*`）；runs 表 `dynamodb:Query` 供清理安全阀——**资源须含索引 ARN** `table/{prefix}runs/index/status-index`（只给表 ARN 查不了 GSI）。
+- **部署方**：ECR repo 域动作 `ecr:BatchCheckLayerAvailability` / `InitiateLayerUpload` / `UploadLayerPart` / `CompleteLayerUpload` / `PutImage` + **`ecr:DescribeImages`**（推送前读旧 digest 以打印「原 → 新」；限两个 `{prefix}{engine}-worker` repo ARN）；**只能 `*`** 的 `ecr:GetAuthorizationToken`（其 `proxyEndpoint` 即 registry host——授权响应里的权威值、与 moto 同形，**不需要** `sts:GetCallerIdentity`）、`ecs:RegisterTaskDefinition` / `ListTaskDefinitions` / `DescribeTaskDefinition`（task-def 类动作官方明文不支持资源级权限）、`ecs:TagResource`（注册时打血缘 tag、退休时打 `retired-at`）；`ecs:DeregisterTaskDefinition` / `DeleteTaskDefinitions` 按 SAR 的 resource types 逐条核后再定能否收窄；`iam:PassRole`（task / execution role，RegisterTaskDefinition 需要）；SSM `GetParameter`（点读模板/映射/默认指针）+ `PutParameter` + `GetParametersByPath`（`/{prefix}backend/*`）；runs 表 `dynamodb:Query` 供清理安全阀——**资源须含索引 ARN** `table/{prefix}runs/index/status-index`（只给表 ARN 查不了 GSI）。
 - **提交者**：只读 `ecr:DescribeImages`（repo 域）、`ecs:DescribeTaskDefinition`（只能 `*`）；SSM 读落在已授通配内。
 - **云端推进器**：`ecs:RunTask` 资源域须覆盖 family 全部 revision——当前 IaC 已按 `task-definition/{family}:*` 授权（reconciler 与 kicker 同源），**无增量**；新增 SSM `GetParameter` + `GetParametersByPath`（`/{prefix}backend/*`）供兼容回落读默认指针与映射（stack 已授，exit-observer 不授）。
 - **写 step 的人不需要任何 AWS 写权限**（不推送时）：这是构建与推送解耦的直接收益。
 
 ## 容器引擎口子
 
-只需五个动词：`inspect`（存在、架构；推送后再取 digest）、`tag`、`login`、`push`、`pull`。默认 docker，`--container-engine podman` / env `GHERKAI_CONTAINER_ENGINE` 切换（podman 同形子命令），这期只实现 docker。repo 内碰 docker 的只有 `gherkai_deploy_aws/container.py`（push-worker 与 deploy 的基底同步经它；密码只走 `--password-stdin`）与两个 Dockerfile，CLI / runtime / CDK 都不碰它。`--container-engine` 在 `deploy` 与 `push-worker` 上都收（deploy 的第 2 步也要它）；两类失败分开归码——名字不认 → 退 2（本地参数问题，先于 VPC 档比对）；装了但不可用 → cdk 前只警告、cdk 后退 1「stack 已生效、重跑幂等收敛」。**这一期 deploy 机器需要容器引擎**（同步基底要 pull / push；非纯发行版本跳过该步、不探活）；免容器引擎的 registry 直拷是重议闸门里的加法。
+只需五个动词：`inspect`（存在、架构；推送后再取 digest）、`tag`、`login`、`push`、`pull`。默认 docker，`--container-engine podman` / env `GHERKAI_CONTAINER_ENGINE` 切换（podman 同形子命令），只实现 docker（podman 经同一口子接入，见重议闸门）。repo 内碰 docker 的只有 `gherkai_deploy_aws/container.py`（push-worker 与 deploy 的基底同步经它；密码只走 `--password-stdin`）与两个 Dockerfile，CLI / runtime / CDK 都不碰它。`--container-engine` 在 `deploy` 与 `push-worker` 上都收（deploy 的第 2 步也要它）；两类失败分开归码——名字不认 → 退 2（本地参数问题，先于 VPC 档比对）；装了但不可用 → cdk 前只警告、cdk 后退 1「stack 已生效、重跑幂等收敛」。**deploy 机器需要容器引擎**（同步基底要 pull / push；非纯发行版本跳过该步、不探活）；免容器引擎的 registry 直拷是重议闸门里的加法。
 
 ## 与版本升级的交互
 
@@ -128,14 +128,11 @@ docker build --platform linux/amd64 -t acme-novaact:login .
 - **[0037](./0037-distribution-and-packaging.md)**：其决策 5 只定两层分工与基底通道，机制、模板、被拒方案全部在本 ADR；两者 Status 独立翻牌。
 - **[0032](./0032-fargate-execution-environment.md)**：grace / `stopTimeout` 等执行面韧性不动；模板 revision 携带它们、variant revision 复制它们。
 
-## 对既有文档与 code 的影响（校准清单，Draft→Accepted 门槛的一部分）
+## 对既有文档与 code 的影响（校准清单，翻 Accepted 时已逐条完成；路径名为当时的路径）
 
-- `deploy_aws/README.md`（收编前的 `iac_aws_backend/README.md`）的 `build_push_workers.py` 步骤、`latest` tag 描述 → 改为 push-worker 流程；`--platform` 注意事项保留、补「push-worker 会提前拦」。（**已完成**）
-- `engines/*/Dockerfile` 的 `--platform linux/amd64` 注释 → 保留，补指向本 ADR。（**已完成**）
-- `CONTEXT.md` 的「worker 镜像：基底 / variant / 默认指针」词条的「设计已定、施工未启」标记 → 去掉。（**已完成**）
-- `tools/build_push_workers.py` 退役（其 ECR 登录序与命名规则收进 push-worker 与 `names.ecr_repo_name`）。（**已完成**）
+`deploy_aws/README.md` 的 push-worker 流程改写、两个 `engines/*/Dockerfile` 的 `--platform` 注释补本 ADR 指针、CONTEXT 词条去施工标记、`tools/build_push_workers.py` 退役。
 
-## 落地次序与依赖（依赖关系，非进度追踪）
+## 落地次序与依赖（依赖关系，非进度追踪；已全部落地，本节编号只在本节内部使用，其它文档不引用它）
 
 1. `names.image_tag` / `names.ecr_repo_name`（依赖 0037 的 runtime 包化）；`RunMeta.worker_variant` / `worker_task_defs` + STATE 顶层 `worker_task_def_arns` + `FargateEngine` / `CloudLauncher` 改显式 revision、缺失按默认指针解析（可在 0037 之前先落：把当前 IaC 建的唯一 revision 当作解析结果，行为不变）。
 2. IaC：stack 写 `worker-template/<engine>` 参数、推进器 SSM 读权限、runs 表 status GSI。
@@ -143,7 +140,7 @@ docker build --platform linux/amd64 -t acme-novaact:login .
 4. `gherkai deploy` 的 worker 镜像四步；preflight 的 variant 解析 + 严格退 2 + 打印；权限清单更新（依赖 0037 决策 8 的基底已在 GHCR）。
 5. `tools/build_push_workers.py` 退役；`deploy_aws/README.md`、Dockerfile 注释与 CONTEXT 校准。
 
-## 实测项（Draft → Accepted 前必清；「绿≠对」）
+## 实测项（**已清零**；「绿≠对」——每条都依赖 mock 之外的真实行为，证据内联于各条）
 
 1. 使用方按模板 build 后 `push-worker`，自定义 variant 与 `base` 并存、各自跑通两引擎；arm Mac 上不带 `--platform` build 出的镜像被步 2 拒绝并给出提示；`--worker-variant` 对某引擎缺失时严格退 2；`--set-default` 在另一引擎缺失时只警告。（**真账户已验**（独立 prefix、dev 版本、本地态基底镜像作 `base`）：两引擎 `push-worker … --variant base` 真推 ECR → 推后取 digest → 注册 revision（`:2`）→ 写 SSM；`--worker-variant nope` 退 2 并给 push 提示；`--set-default probe2` 只警告 midscene 缺映射，随后不带 flag 的双引擎 submit 在 preflight 被 midscene 缺映射拦下退 2；恢复 `base` 后双引擎 run passed。**发行版基底亦已验**：v1.4.0 首发后用 `uvx gherkai==1.4.0` 提交双引擎 run，两 task 分别用 GHCR 同步来的 `1.4.0-base` revision（ECR 镜像 digest 与 GHCR manifest digest 逐字相同：midscene `sha256:8070fd…`、novaact `sha256:704aa0…`），exit 0、run passed。**自定义 variant 携带真实使用方 step 亦已验**（v1.4.0 发行版）：使用方项目 `steps/title_check.py` + `steps/title-check.mts` 注册同一条 `页面标题包含 "…"` 锚点，按三行模板 `FROM ghcr.io/…:1.4.0` + `COPY steps/` + `ENV GHERKAI_STEPS_DIR` 各 build 一个镜像、`push-worker --variant custom` ×2，`submit --worker-variant custom` 的三 scope run：novaact 与 midscene 正例各 passed、novaact 故意错的标题断言 **failed**（证明走的是确定性 handler 而非 AI 兜底），三个 task 用的正是 custom 的 revision、worker 均 exit 0。**未另跑（判据已验、场景等价）**：arm Mac 上不带 `--platform` 真 build 这一场景没单独跑——`inspect` 得 arm64 → 步 2 拒的判据已在真 docker 上用真 arm64 镜像验过（见下 6），同一分支不重复跑。）
 2. push-worker 幂等：在推送与注册之间、注册与写 SSM 之间人为中断后重跑收敛，孤儿 revision 按血缘 tags 被复用而非重复注册；两个终端并发 push 同名 variant 后 `list-workers` 标出孤儿、静默期后清理回收。（**真账户部分已验**：同镜像重推 → 「映射已是（当前模板，本 digest）→ 跳过注册」；同名 variant 换 digest 重推 → 打印「原 → 新 digest」、旧 revision 打 `retired-at`、`list-workers` 列为待清理；与 `base` 同 digest 的新 variant 注册自己的 revision、不复用 `base` 的（此处真跑抓出并修掉「跨 variant 复用」）；**中断重跑**（按血缘 tags 手工注册一个 variant 的 revision、不写 SSM 以模拟中断在注册与写 SSM 之间 → 重跑 push-worker 复用它、不重复注册）；**并发 push 同名 variant**（两进程不同 digest 同时推 → 各注册一个 revision、后写者映射赢，`list-workers` 把先写者标为孤儿）。**静默期回收已验**：退休满 1 小时的 revision 在下一次 push-worker 末尾被回收，同趟未满 1 小时的留着（见下 3）。）
@@ -152,7 +149,7 @@ docker build --platform linux/amd64 -t acme-novaact:login .
 5. 升级演练：CLI 升版后 deploy → 默认指针悬空的 preflight 提示 → push 同名 variant 后恢复，不需 `--set-default`；CLI 版本超前于后端时 push-worker 被 skew 前置拦下。（**真账户已验**（跳板机克隆打本地 tag 得纯 `1.4.0` CLI + 改写 SSM 版本戳模拟后端版本）：戳 1.3.0 → `list-workers`/`submit` 均 block 退 2、push-worker 侧多给带 `[deploy-aws]` extra 的 uvx 出路；戳 1.5.0 → warn 不拦；戳 1.4.0 → 静默放行、`1.4.0-base` 未推 → submit 退 2 点名 push；push 同名 `base` → submit 解析到新映射、run passed、默认指针未动。**真 `gherkai deploy` 写新版本戳 + 同步 GHCR 基底已验**：用发行版 `uvx --from 'gherkai[deploy-aws]==1.4.0' gherkai deploy` 把验证环境从 dev 版升到 1.4.0——SSM 戳变 `1.4.0`、两引擎从 GHCR 拉 `1.4.0` 基底推成 ECR `1.4.0-base` 并注册 revision、默认指针不动、无需重派生（新版本尚无其它 variant）；随后 `uvx gherkai==1.4.0 submit` 的 run 用新 revision 跑通。）
 6. 本地未推送镜像的 `inspect` 确认 `RepoDigests` 为空，推送后取到的 digest 与 ECR `describe-images` 一致、注册的 revision 能被 RunTask 拉起。（**已验**：真 docker——未推送镜像 `RepoDigests` 空、`docker tag` 到 ECR ref 后仍空、arm64 镜像被步 2 拒；真账户——推后取到的 digest 被 `describe-images` 认（preflight 三环通过），kicker 起的 Fargate task 的 `taskDefinitionArn` 正是注册出的 `…-worker:2`（显式 revision、非 family 最新），两引擎 task 各 exit 0、run passed。）
 7. 多平台本地镜像在 amd64 主机上被 `inspect` 塌成单平台视图而放行——**定为已知边界、不补 manifest 级校验**。实测：Docker 默认镜像存储（overlay2）**装不下多平台镜像**——`docker buildx build --platform linux/amd64,linux/arm64 --load` 直接报 `docker exporter does not currently support exporting manifest lists`，即缺口只存在于开了 containerd 镜像存储的机器。推演（未真跑 containerd 存储）：amd64 主机上含 amd64 的多平台镜像通过校验后 `docker push` 推的是 index，推后 `RepoDigests` 即 index digest，task-def 按它引用，ECS 从 index 选 amd64——**无安全问题**；arm 主机上 `inspect` 得 arm64 → 被拒（过严但安全，按文档只构 amd64 单平台即可）。
-- **无凭证下已验的部分**（真账户侧见上 1–6 各条）：真 synth 出的模板含 runs 表 `status-index`（INCLUDE `worker_task_def_arns`）、推进器 SSM 读策略、ECR 无 lifecycle、无模板 env；moto 验了八步幂等（二元组查重、孤儿复用、退休 tag）、清理两道闸（静默期 + GSI Query）、重派生、指针不重置、`--set-default` 只警告、skew 前置；**跨组件真互通**——真 `DdbRunStore.create_run` 写的 STATE 属性被真清理安全阀在真 GSI 形状上读到（含终态即不再引用、META 无顶层 status 的稀疏性），真 push 写的 SSM/ECS/ECR 三件套被提交侧与宿主侧两个 `resolve_*` 原样读回。
+- **mock / 无凭证层的覆盖面**（真账户证据见上各条）：真 synth 出的模板含 runs 表 `status-index`（INCLUDE `worker_task_def_arns`）、推进器 SSM 读策略、ECR 无 lifecycle、无模板 env；moto 验了八步幂等（二元组查重、孤儿复用、退休 tag）、清理两道闸（静默期 + GSI Query）、重派生、指针不重置、`--set-default` 只警告、skew 前置；**跨组件真互通**——真 `DdbRunStore.create_run` 写的 STATE 属性被真清理安全阀在真 GSI 形状上读到（含终态即不再引用、META 无顶层 status 的稀疏性），真 push 写的 SSM/ECS/ECR 三件套被提交侧与宿主侧两个 `resolve_*` 原样读回。
 
 ## 被拒方案（护栏，防未来重踩）
 
