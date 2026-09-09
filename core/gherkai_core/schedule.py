@@ -57,7 +57,7 @@ def _heartbeat_wrap(events, poll_interval_s, deadline):
     schedule 的 except，保 WorkerNetworkError/ValueError 分类不变）。
 
     **为何在 schedule 层做一次、而非每个 worker/adapter**：心跳是「超时消费方（schedule 持有 deadline）对任何
-    慢/静默流的通用兜底」，与引擎无关；放这里写一次，对子进程/未来 Fargate/内存 FakeEngine 全适用，端口保持
+    慢/静默流的通用兜底」，与引擎无关；放这里写一次，对子进程/Fargate/内存 FakeEngine 全适用，端口保持
     纯 `Iterator[Event]`（不渗实现细节）。事件正常流动时 q.get 即时返回、永不注入心跳——故 fake-clock 单测的
     clock 读取序列不变（reader 线程只搬事件、绝不读 clock）。
 

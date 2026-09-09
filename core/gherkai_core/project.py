@@ -263,8 +263,8 @@ def _reduce_scope(job: Job, recs: list[EventRecord]) -> tuple[JobResult, Status,
         # 归因对齐同步路径（[0031] 决定一：超时是主动中止、记 error+timeout）；覆盖 reduce 期可能累积的
         # 其他归因——stop 是超时处置发起的，超时是根因。
         result.error_type = "timeout"
-        result.message = (f"job 超时（预算 {job.timeout_s}s，推进器中止）"
-                          if job.timeout_s else "job 超时（推进器中止）")
+        result.message = (f"job 超时（预算 {job.timeout_s}s，已中止）"
+                          if job.timeout_s else "job 超时（已中止）")
     elif status == Status.ERROR and result.message is None and exited is not None:
         # 兜底归因（detached 真跑教训：worker 起来即崩 → 零事件、判 error、message 全空——用户无从排障）。
         # 只补空 message、不覆盖 reduce 期已有归因；诊断细节在 worker stderr（local 落 reconcile.log /

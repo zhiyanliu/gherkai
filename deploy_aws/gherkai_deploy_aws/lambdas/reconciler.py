@@ -34,7 +34,9 @@ def _run_ids_from_stream(event) -> set[str]:
         keys = rec.get("dynamodb", {}).get("Keys", {})
         pk = keys.get("pk", {}).get("S")
         if pk and "#" in pk:
-            run_ids.add(pk.rsplit("#", 1)[0])  # scope_id 不含 #（pk=run_id#scope_id 单层复合），rsplit 1 取前段稳妥
+            # pk=run_id#scope_id：run_id 由 compose.new_run_id 生成、格式固定不含 #，scope_id 是 @scope 的用户文本、
+            # 可能含 #——从左切（split 1）在任何输入下都取到正确 run_id；从右切遇含 # 的 scope_id 会切错、整条 Stream 静默 no-op。
+            run_ids.add(pk.split("#", 1)[0])
     return run_ids
 
 

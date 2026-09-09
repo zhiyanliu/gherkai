@@ -73,7 +73,7 @@ export GRAPHIFY_LLM_TEMPERATURE="${GRAPHIFY_LLM_TEMPERATURE:-none}"
 # ---- .graphify_root 校正（从别的机器 rsync 回来的会带对方的绝对路径）----
 rootfile=graphify-out/.graphify_root
 if [[ -f "$rootfile" ]] && [[ "$(cat "$rootfile")" != "$ROOT" ]]; then
-  echo "校正 $rootfile：$(cat "$rootfile") → $ROOT"
+  echo "校正 ${rootfile}：$(cat "$rootfile") → ${ROOT}"
   printf '%s' "$ROOT" > "$rootfile"
 fi
 
@@ -89,10 +89,13 @@ step() {
   local name=$1; shift
   echo
   echo "===== [$(date -u +%FT%TZ)] $name: $*"
-  "$@" </dev/null 2>&1 | tee -a "$LOG" | { grep -Ev "$NOISE" || true; }
-  local rc=${PIPESTATUS[0]}
+  # `|| rc=…` 列表里 set -e 不触发（否则壳在下一行取 rc 之前就退了、这条指向 $LOG 的诊断永远打不出来）；
+  # 取 PIPESTATUS[0] 而非 $? 是为守住「退出码 = graphify 的」——右侧 tee/grep 的状态不该顶替它。
+  local rc=0
+  "$@" </dev/null 2>&1 | tee -a "$LOG" | { grep -Ev "$NOISE" || true; } || rc=${PIPESTATUS[0]}
   if (( rc != 0 )); then
-    echo "===== $name 失败 rc=$rc（完整日志：$LOG）" >&2
+    # 变量必须 `${}`：紧跟的全角 `（` `）` 会被 bash 吃进变量名，裸 $rc/$LOG 在 set -u 下当场 unbound 退出。
+    echo "===== $name 失败 rc=${rc}（完整日志：${LOG}）" >&2
     exit "$rc"
   fi
 }

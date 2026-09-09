@@ -347,10 +347,15 @@ class Provider:
         if missing is not None:
             return missing
         # 探活警告放在 `--vpc` 校验之后：缺 `--vpc` 会直接退 2，先打两行 docker 警告只会盖住真因。
-        probe = engine.probe()
-        if probe:
-            print(f"警告：{probe}\n     stack 会照常部署，但之后的 worker 镜像步骤（同步基底）会失败"
-                  f"（退 1）；装好容器引擎后重跑 `gherkai deploy` 幂等收敛。", file=sys.stderr)
+        # **只对纯发行版探**：非纯发行版（.dev/.post/本地段）第 2 步整步跳过、根本不碰容器引擎（判据与
+        # `workers.run_deploy_steps` 共用同一个 `compose.is_pure_release`，ADR 0038「容器引擎口子」），对它们预告
+        # 「之后会失败（退 1）」是假警告，还会与 `sync_base` 的「跳过基底同步」自相矛盾。
+        from gherkai_runtime import compose
+        if compose.is_pure_release(self._resolve_version(args)):
+            probe = engine.probe()
+            if probe:
+                print(f"警告：{probe}\n     stack 会照常部署，但之后的 worker 镜像步骤（同步基底）会失败"
+                      f"（退 1）；装好容器引擎后重跑 `gherkai deploy` 幂等收敛。", file=sys.stderr)
         blocked = self._guard_vpc_spec(args)
         if blocked is not None:
             return blocked
@@ -364,7 +369,7 @@ class Provider:
                   file=sys.stderr)
             return rc
         # cdk 成功 → worker 镜像四步（ADR 0038）。第 1 步（登记模板）已随 cdk 事务落地。
-        return self._worker_image_steps(args)
+        return self._worker_image_steps(args, engine)
 
     def destroy(self, args) -> int:
         """销毁 stack。**表/桶/ECR 是 `RETAIN`、不随之删**（防误删，ADR 0033）——残留清单见 README。
@@ -483,7 +488,7 @@ class Provider:
 
     # ---- 内部：容器引擎（ADR 0038「容器引擎口子」）----
     @staticmethod
-    def _container_engine(args, *, quiet: bool = False):
+    def _container_engine(args):
         """解析 `--container-engine` / env → 引擎对象；本期未实装的名字 → 打诊断并返回 None（调用点退 2）。
 
         **只解析、不探活**：探活（`probe()`）归真要用它的那一步——push-worker 在 skew 前置之后探（skew 拦下的
@@ -494,21 +499,20 @@ class Provider:
         try:
             return resolve_container_engine(getattr(args, "container_engine", None))
         except UnsupportedContainerEngine as exc:
-            if not quiet:
-                print(str(exc), file=sys.stderr)
+            print(str(exc), file=sys.stderr)
             return None
 
-    def _worker_image_steps(self, args) -> int:
+    def _worker_image_steps(self, args, engine) -> int:
         """cdk 成功之后的 worker 镜像第 2/3/4 步 + 清理 pass（第 1 步是 stack 资源、随 cdk 事务）。
+
+        `engine` 由 `deploy` 解析好传进来：名字不认在 cdk 之前就退 2 了（ADR 0038「容器引擎口子」），到这里必是
+        已实装的引擎；「装了但不可用」归 `workers.run_deploy_steps`（退 1）。
 
         **不做版本 skew 前置**：deploy 就是改戳的那个动作（ADR 0038）。失败退 1（不是 2）——账户已经被 cdk
         改过了，压成「前置失败」会让人以为什么都没发生。
         """
         from gherkai_deploy_aws import workers
 
-        engine = self._container_engine(args)
-        if engine is None:  # `--container-engine podman` 一类：stack 已生效，但这是参数问题、指向重议闸门
-            return workers.EXIT_FAILED
         target = self._resolve_target(args)
         return workers.run_deploy_steps(
             prefix=target.prefix, version=self._resolve_version(args), container=engine,

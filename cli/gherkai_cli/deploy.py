@@ -40,6 +40,8 @@ PROVIDER_GROUP = "gherkai.deploy"
 # **子动词接缝**（`gherkai deploy push-worker` / `list-workers` 那族 worker 镜像命令，ADR 0038）：provider 在
 # `add_arguments(deploy_parser)` 里自己 `add_subparsers()`，并给每个子动词 `set_defaults(_deploy_verb=<可调用>)`；
 # 皮的分派**先看 `_deploy_verb`**，有就交给它、没有才走 `--diff/--synth-only/--bootstrap/deploy` 那四路。
+# **组合规则**：子动词与三个「不真部署」flag 同给 → 皮退 2（`readonly_flag_conflict`）——子动词会真写账户（推镜像/
+# 注册 task-def），若让它静默盖过用户点名要的只读预览，正是那三个 flag 要防的事（ADR 0037 决策 6 的 reviewer 靶点）。
 # 这样那族命令落地时**皮一行不改**（它们要读 SSM/ECR/task-def、碰容器引擎，全属 provider 那半边）。
 # 子动词 subparser 不可设 `required=True`——否则裸 `gherkai deploy`（默认动作 = 真部署）会被 argparse 拒。
 # ============================================================================
@@ -78,12 +80,28 @@ def resolve_provider(name: str | None) -> tuple[object | None, str | None]:
         ep = match[0]
     try:
         loaded = ep.load()
-    except Exception as e:  # 半装 / 版本不匹配 / provider 自己的 import 链炸
+        obj = loaded() if isinstance(loaded, type) else loaded  # 实例化也算「加载」：__init__ 炸同属装了但不可用
+    except Exception as e:  # 半装 / 版本不匹配 / provider 自己的 import 链或 __init__ 炸
         return None, (
             f"部署 provider {ep.name!r} 加载失败（entry point {ep.value}）：{type(e).__name__}: {e}"
             f"——装了但不可用（版本不匹配？半装？），重装 `gherkai[deploy-aws]` 或 --provider 换一个。"
         )
-    return (loaded() if isinstance(loaded, type) else loaded), None
+    return obj, None
+
+
+def readonly_flag_conflict(args) -> str | None:
+    """provider 子动词（`_deploy_verb`，worker 镜像族、会真写账户）与 `--diff/--synth-only/--bootstrap` 同给 →
+    一句产品语言的诊断（调用点退 2）；否则 None。三 flag 是「先看清再改账户」的只读/准备靶点（ADR 0037 决策 6），
+    子动词的分派优先级若把它们静默吞掉，用户要的预览会变成真推镜像——见模块头「组合规则」。"""
+    if getattr(args, "_deploy_verb", None) is None:
+        return None
+    given = [flag for flag, on in (("--diff", getattr(args, "diff", False)),
+                                   ("--synth-only", getattr(args, "synth_only", None) is not None),
+                                   ("--bootstrap", getattr(args, "bootstrap", False))) if on]
+    if not given:
+        return None
+    return (f"{' / '.join(given)} 是只读/准备动作，不能与 worker 镜像子命令同用（子命令会真推镜像、改账户）："
+            f"去掉它再跑子命令，或单独跑 `gherkai deploy {given[0]}` 看变更集。")
 
 
 def add_parsers(sub, *, provider: object | None = None, provider_error: str | None = None,
@@ -136,7 +154,7 @@ def add_parsers(sub, *, provider: object | None = None, provider_error: str | No
     )
     dp.add_argument(
         "--allow-vpc-change", action="store_true",
-        help="放行 VPC 档变更：本次的档与后端记着的上次生效档不一致、或没给档而 stack 已存在时，deploy 退 2、"
+        help="放行 VPC 档变更：本次的档与后端记着的上次生效档不一致、或 stack 已存在但后端还没有档记录时，deploy 退 2、"
              "要你先 `--diff` 核对变更集；核对完带本 flag 放行一次——漏给 VPC 档会合成"
              "「新建整套 VPC + 替换安全组」的危险变更集（真踩过）",
     )

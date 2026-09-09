@@ -12,13 +12,18 @@
   **控制面投影摘要**（供 exit-code / 未来轮询续跑 / WebUI 进度），与 jobs/*.json 同源（均从同一 RunResult
   投影，不双写漂移）。要权威判定读 jobs/*.json；要快速总览/轮询读 run_state.json。
 
-**克制（ADR 0016）**：只忠实持久化已成形的 RunMeta/RunState（复用 serialize），**不发明** jobId/起止
-时刻/DDB 表/执行中实时更新读取面那些有意 defer 的字段——待真实续跑/轮询/WebUI 需求逼出再加。
+**克制（ADR 0016）**：只忠实持久化已成形的 RunMeta/RunState（复用 serialize），**不发明 serialize 之外的字段**。
+已落地（ADR 0030 决定四/六）：起止时刻（started_at/ended_at）、实时写三段（create_run / update_job_state /
+finalize_run）+ 读回面（load_run_state，`status` 与 tick 的 baseline 都靠它）、DDB 实装（同包 `ddb.py`）。
+仍有意 defer：jobId、续跑/部分重跑的 attempt 维度（ADR 0030「留口子」）——待真实需求逼出再加。
 落点与 LocalReportStore 对齐（同 `<root>/<run_id>/`）：run_meta.json + run_state.json。
 """
 from __future__ import annotations
 
 import json
+import tempfile
+import os
+import contextlib
 from pathlib import Path
 
 from gherkai_core.model import JobState, RunMeta, RunState, Status
@@ -30,8 +35,26 @@ from gherkai_core.serialize import (
 )
 
 
+
+def _atomic_write_json(path: Path, obj) -> None:
+    """同目录 tmp + `os.replace`：读者要么看到旧文件、要么看到新文件，绝不看到半截/空 JSON。
+
+    并发读者真实存在（ADR 0030 决定四/0034）：per-run 推进进程在 `_locked_rmw` 里写 run_state.json 时，
+    `gherkai status` / 接力进程**无锁**读同一文件（读面不持 `.runstate.lock`，只写面互斥）；`write_text` 是
+    truncate 再写，两步之间的读者会拿到空文件或前半截、json.loads 直接炸。tmp 与目标同目录保证 rename 同分区原子。
+    """
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(obj, ensure_ascii=False, indent=2))
+        os.replace(tmp, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
+
 class LocalRunStore:
-    """RunStore 的本地文件实现（组合根注入；未来 DDB 版换落点/读写）。"""
+    """RunStore 的本地文件实现（组合根注入；DDB 实装见同包 `ddb.py`）。"""
 
     def __init__(self, root: str | Path) -> None:
         self._root = Path(root)
@@ -39,17 +62,13 @@ class LocalRunStore:
     def _write_state(self, state: RunState) -> None:
         run_dir = self._root / state.run_id
         run_dir.mkdir(parents=True, exist_ok=True)
-        (run_dir / "run_state.json").write_text(
-            json.dumps(run_state_to_dict(state), ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        _atomic_write_json(run_dir / "run_state.json", run_state_to_dict(state))
 
     def save_run(self, meta: RunMeta, state: RunState) -> None:
         """落 <root>/<run_id>/{run_meta.json, run_state.json}（一次性写完整态，写面）。"""
         run_dir = self._root / meta.run_id
         run_dir.mkdir(parents=True, exist_ok=True)
-        (run_dir / "run_meta.json").write_text(
-            json.dumps(run_meta_to_dict(meta), ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        _atomic_write_json(run_dir / "run_meta.json", run_meta_to_dict(meta))
         self._write_state(state)
 
     # ---- 实时写三段（ADR 0030）----

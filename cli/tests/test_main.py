@@ -277,7 +277,19 @@ def test_run_grace_too_small_rejected(tmp_path, monkeypatch, capsys):
     rc = m.main(["run", str(_write_feature(tmp_path)), "--no-report", "--grace", "5"])
     assert rc == 2
     assert "opts" not in box  # schedule 根本没被调（跑前就拒了）
-    assert "grace" in capsys.readouterr().err.lower() or True  # 诊断打到 stderr
+    assert "--grace=5.0" in capsys.readouterr().err  # 诊断打到 stderr
+
+
+def test_run_grace_nan_inf_rejected(tmp_path, monkeypatch, capsys):
+    """--grace inf/nan 同拒（退 2）：inf 会让 SIGKILL 兜底永不触发、软停失效即挂死（ADR 0024/0026）；
+    与 --tunnel-ttl、@timeout 的「有限正数」判据同形。"""
+    for bad in ("inf", "nan"):
+        box = {}
+        monkeypatch.setattr(m, "schedule", _capturing_schedule(Status.PASSED, box))
+        rc = m.main(["run", str(_write_feature(tmp_path)), "--no-report", "--grace", bad])
+        assert rc == 2, bad
+        assert "opts" not in box
+        assert "有限正数" in capsys.readouterr().err
 
 
 def test_run_grace_sentinel_derives_from_engine(tmp_path, monkeypatch, capsys):
@@ -973,3 +985,11 @@ def test_run_and_submit_exit_2_before_spawn_when_user_steps_fail(tmp_path, monke
     assert m.main(["submit", str(feat), "--report-dir", str(tmp_path / "r"), "--steps-dir", str(steps)]) == 2
     assert "steps 加载失败" in capsys.readouterr().err
     assert not (tmp_path / "r").exists() or not any((tmp_path / "r").iterdir())  # 没落任何 run 记录
+
+
+def test_plan_rejects_a_directory_as_feature(tmp_path, capsys):
+    """给了目录 / 读不了的路径 → 退 2「读 feature 失败」，不是 IsADirectoryError traceback（退码语义 ADR 0021）。
+    读 feature 的失败面不止 FileNotFoundError：目录、权限、非 UTF-8 都属输入问题，同档处置。"""
+    rc = m.main(["plan", str(tmp_path)])
+    assert rc == 2
+    assert "读 feature 失败" in capsys.readouterr().err

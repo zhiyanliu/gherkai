@@ -68,7 +68,7 @@ def list_registry() -> list[dict]:
 class DeterministicConflict(Exception):
     """一个 step 文本命中多条确定性模式（ADR 0022：最多命中一条，多条是配置错误）。
 
-    冲突清单只经 message 传（派发侧只取 `str(e)` 进 step_done.message）；预检要结构化清单走
+    冲突清单只经 message 传（派发侧把异常文本并入 step_done.message，见 run_scope.py `_run_step` 的失败分支）；预检要结构化清单走
     match_batch 的 `{"conflict": [...]}`（ADR 0036），不从异常上挂字段。
     """
 

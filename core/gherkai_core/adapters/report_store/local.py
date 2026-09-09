@@ -73,7 +73,7 @@ class LocalReportStore:
     def write(self, run_id: str, result: RunResult, *, created_at: str = "") -> ResourceUri:
         """归集出 <root>/<run_id>/{manifest.json, index.html}，返回 index.html 的 file:// ResourceUri。
 
-        返回 file:// URI（而非裸 Path）以对齐 ReportStore 契约：与未来 S3 adapter 的 s3:// 返回同形（ADR 0027）。
+        返回 file:// URI（而非裸 Path）以对齐 ReportStore 契约：与 S3 adapter（同包 `s3.py`）的 s3:// 返回同形（ADR 0027）。
         resolve() 成绝对路径再 as_uri()——as_uri 要求绝对路径，而 cli 默认 report_dir 是相对的（"reports"）。
         """
         run_dir = self._root / run_id
@@ -84,8 +84,8 @@ class LocalReportStore:
         index_entries = self._collect(result, run_dir)
 
         # manifest = **纯派生导航视图**（ADR 0027）：不内嵌 result 真值副本——靠 run_id 软引用那次 run。
-        # 判定真值由 ResultStore（jobs/*.json / 未来对象存储）持有，运行态/身份由 RunStore（run_meta.json
-        # + run_state.json / 未来 DDB）持有（三层切分，ADR 0016）。这样 RunReport 是真·派生品（可删可重建、
+        # 判定真值由 ResultStore（local 的 jobs/*.json 或 S3ResultStore 的同形 key）持有，运行态/身份由 RunStore
+        # （local 的 run_meta.json + run_state.json 或 DynamoDBRunStore 的两 item）持有（三层切分，ADR 0016）。这样 RunReport 是真·派生品（可删可重建、
         # 永不作判定源），无真值冗余、无一致性风险。CI 要判定 → 用 run_id 找 ResultStore。
         manifest = {
             "schema_version": SCHEMA_VERSION,
@@ -249,7 +249,12 @@ def _render_index_html(manifest: dict, result: RunResult) -> str:
             meta_bits.append(" · ".join(jbits))
         if jr.session_id:
             meta_bits.append(f"会话 <code>{esc(jr.session_id)}</code>")
-        err = f' <span class="err">{esc(jr.error_type)}: {esc(jr.message or "")}</span>' if jr.error_type else ""
+        # 同 render_text 的口径：error 类红字带分类；fail-fast 派生态（skipped/aborted）error_type 恒 None、原因只在
+        # message（ADR 0031 决定一）→ 中性 note 色显出来，不复用 err 红（决定二：颜色跟 status 走，别把没跑染成出错）。
+        if jr.error_type:
+            err = f' <span class="err">{esc(jr.error_type)}: {esc(jr.message or "")}</span>'
+        else:
+            err = f' <span class="note">{esc(jr.message)}</span>' if jr.message else ""
 
         scen_blocks = []
         for sr in jr.scenarios:
@@ -336,6 +341,7 @@ def _render_index_html(manifest: dict, result: RunResult) -> str:
   .t {{ color: #8c959f; font-size: .85em; }}
   .votes {{ color: #0969da; font-size: .85em; }}
   .err {{ color: #cf222e; font-size: .85em; }}
+  .note {{ color: #57606a; font-size: .85em; }}
   .taint {{ color: #9a6700; font-size: .85em; }}
   ul.refs {{ list-style: none; padding: 0; }}
   ul.refs li {{ padding: .35rem 0; border-bottom: 1px solid #eee; }}

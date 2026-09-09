@@ -205,8 +205,9 @@ function stepCost(beforeTokens: number, agent: PlaywrightAgent): Record<string, 
 // **必须等真 flush 完才能退**，否则 pipe 下大 payload 在 64KB 处静默截断且 rc 仍是 0——组合根只能报「输出非
 // JSON」、真因不可见（ADR 0036 的 best-effort 降级把它吞成 plan 无标注）。两种直觉写法都不够：
 //   - `process.stdout.write(s)` 后紧跟 process.exit：pipe 上 stdout 是异步写，exit 不 flush 未写完的尾部；
-//   - `fs.writeSync(1, s)`：worker 跑在 `--import tsx` 下（见文件头「跑」），tsx 把 fd 1 置成非阻塞，
-//     writeSync 对 pipe 只写满内核缓冲就返回 **部分写字节数、且不重试**（真跑实测 1MB 只出 65536）。
+//   - `fs.writeSync(1, s)`：worker 进程里装着 tsx 的 ESM loader（`bin.mts` 进程内 `registerTsx()`；`npm test`
+//     经 `node --import tsx` 同样如此），tsx 把 fd 1 置成非阻塞，writeSync 对 pipe 只写满内核缓冲就返回
+//     **部分写字节数、且不重试**（真跑实测 1MB 只出 65536）。
 // 故走 write 回调等 libuv 真写完（背压/EAGAIN 交事件循环），再由统一出口 process.exit。
 async function writeStdoutFlushed(s: string): Promise<void> {
   await new Promise<void>((resolve, reject) => {
@@ -218,6 +219,14 @@ async function writeStdoutFlushed(s: string): Promise<void> {
 // 关 agent 的 generateReport、不抢传 log、不带 report ref。Midscene SDK 即便不出 report 也可能往 run 目录写 log/dump
 // （相对 cwd 的 ./midscene_run），故此档下若无 MIDSCENE_RUN_DIR 就把它导到一次性临时目录、不进用户 CWD（SDK 内部行为，不上报）。
 const NO_ARTIFACTS = process.env.GHERKAI_NO_ARTIFACTS === "1";
+
+/** scope 末整目录 flush 的根：`--no-report` 档返回 undefined（不上报任何原生产物，ADR 0037 决策 3——此档下
+ *  MIDSCENE_RUN_DIR 只是给 SDK 内部 log/dump 的一次性落点，flush 会把它们传上 S3、违背「不上报」）。导出供单测。 */
+export function artifactFlushRoot(): string | undefined {
+  if (NO_ARTIFACTS) return undefined;
+  const runRoot = process.env.MIDSCENE_RUN_DIR;
+  return runRoot ? path.resolve(runRoot) : undefined;
+}
 
 export async function main(): Promise<number> {
   if (NO_ARTIFACTS && !process.env.MIDSCENE_RUN_DIR) {
@@ -475,8 +484,8 @@ export async function main(): Promise<number> {
   // scope 末：整目录 flush 剩余产物（report.html 已实时传、跳过；log/ 等一并传）+ 全成功删整目录（ADR 0029）。
   // no-op（local/未注入落点）时直接返回、不碰本地。仅正常完成路径走到此；异常/网络耗尽的 catch 内 return 不 flush
   // ——中断产物保留本地（对称 Nova）。
-  const runRoot = process.env.MIDSCENE_RUN_DIR;
-  if (runRoot) await uploader.flushAndCleanup(path.resolve(runRoot));
+  const flushRoot = artifactFlushRoot();  // --no-report 档 → undefined，不 flush（对称 Nova 的 no-artifacts 分支）
+  if (flushRoot) await uploader.flushAndCleanup(flushRoot);
   // 正常路径若会话释放失败 → 非 0 退出，让 schedule 记 error、泄漏可观测
   // （ADR 0024「会话释放失败可观测」，对照 Nova）
   return cleanupFailed ? 1 : 0;

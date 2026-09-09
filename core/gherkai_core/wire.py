@@ -170,8 +170,9 @@ def event_from_line(line: str) -> Event:
 
 # worker 网络专用退出码：建连失败、重试耗尽时 worker 以此码退出（建连早于任何事件 emit，无法走事件通道）。
 # 值避开 POSIX sysexits(64-78)/shell 保留(126-128+n)/信号区。**两个引擎 worker 各自硬编码同一个值**
-# （Nova 的 run_scope.py / Midscene 的 run-scope.ts——语言边界抄不掉）；core 侧只此一处，Engine adapter 一律
-# import 本常量与下面的翻译函数，别各抄一份（抄一份 = 两处漂移，靠注释维持一致的人工约束）。
+# （Nova: engines/novaact/gherkai_worker_novaact/run_scope.py；Midscene: engines/midscene/src/worker/run-scope.mts
+#  ——语言边界抄不掉）；core 侧只此一处，Engine adapter 一律 import 本常量与下面的翻译函数，别各抄一份
+# （抄一份 = 两处漂移，靠注释维持一致的人工约束）。
 EX_WORKER_NETWORK = 80
 
 

@@ -1,4 +1,4 @@
-"""scope seam（ADR 0025）：解析后的 scenario 按 tag 分组 + engine 校验 → Job[]。
+"""scope seam（ADR 0025）：解析后的 scenario 按 tag 分组 + engine/timeout 校验 → Job[]。
 
 对外入口 plan(features, config) -> list[Job]：core 的窄腰第一步（解析→分组），
 产出的 Job 正是 worker↔core 协议（ADR 0024）的输入形状。
@@ -6,6 +6,8 @@
 语义（ADR 0025）：
 - @scope 全局命名空间：相同值同 scope，跨文件合并（合并时 warning log）；未标各自单元素 scope。
 - engine：scope 内缺省用 config.default_engine；任一 scenario 标了则全 scope 继承；多个不同值报错。
+- timeout：scope 内缺省用 config.default_job_timeout_s（未给=不超时）；任一 scenario 标了 @timeout:N 则全 scope 继承；
+  同 scope 多个不同值 / 非有限正数 → 报错（tag 语义权威在 ADR 0019）。
 - 一个 scenario 多个不同 @scope 值（feature 级传播 + scenario 级）→ 报错（与 engine 冲突对称）。
 - id 派生：有 @scope 用其值；无标用 scenario 的 id/标题。
 """

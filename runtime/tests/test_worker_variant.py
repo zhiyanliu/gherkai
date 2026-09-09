@@ -102,7 +102,7 @@ def _resolve(aws, **kw):
 
 # ---- 正常路径 ----
 def test_variant_none_uses_default_pointer(aws):
-    """不给 variant → 取部署级默认指针（ADR 0038「默认指针」）；解析结果带 digest/模板 ARN 供打印。"""
+    """不给 variant → 取部署级默认指针（ADR 0038「默认指针」）；解析结果带 digest 供打印。"""
     recs = _seed(aws, variant="base")
     got = _resolve(aws)
     assert set(got) == {"novaact"}
@@ -110,7 +110,6 @@ def test_variant_none_uses_default_pointer(aws):
     assert r.engine == "novaact" and r.variant == "base"
     assert r.revision_arn == recs["novaact"]["revision_arn"]
     assert r.digest == recs["novaact"]["digest"]
-    assert r.template_arn == recs["novaact"]["template_arn"]
 
 
 def test_explicit_variant_ignores_default_pointer(aws):

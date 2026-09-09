@@ -417,9 +417,9 @@ def cdk(monkeypatch) -> _Recorder:
     monkeypatch.setattr(provider_cli, "check_node", lambda: None)
     monkeypatch.setattr(provider_cli, "cdk_command", lambda: ["cdk-stub"])
     monkeypatch.setattr(provider_cli.subprocess, "run", rec)
-    monkeypatch.setattr(Provider, "_container_engine", staticmethod(lambda args, quiet=False: _FakeEngine()))
+    monkeypatch.setattr(Provider, "_container_engine", staticmethod(lambda args: _FakeEngine()))
 
-    def _steps(self, args):
+    def _steps(self, args, engine=None):
         rec.worker_steps.append(args)
         return 0
 
@@ -714,3 +714,27 @@ def test_yes_is_destroy_only():
     deploy = argparse.ArgumentParser(prog="gherkai deploy", conflict_handler="resolve")
     Provider().add_arguments(deploy)
     assert "--yes" not in {o for a in deploy._actions for o in a.option_strings}
+
+
+class _AbsentEngine:
+    """容器引擎替身：`probe()` 说「docker 没装」。"""
+
+    name = "docker"
+
+    def probe(self):
+        return "docker 未安装或 daemon 未起"
+
+
+def test_deploy_warns_about_missing_container_engine_only_for_pure_release_versions(cdk, monkeypatch, capsys):
+    """容器引擎缺失的前置警告只对**纯发行版**成立：dev/post/本地段版本的 worker 镜像步骤本就走不到「同步基底」
+    （ADR 0038 定位链第四级门槛 = is_pure_release），那时警告「之后的镜像步骤会失败」是假警报。"""
+    _stub_backend(monkeypatch, stack_exists=False, stored=None)
+    monkeypatch.setattr(Provider, "_container_engine", staticmethod(lambda args: _AbsentEngine()))
+
+    monkeypatch.setattr(Provider, "_resolve_version", staticmethod(lambda args: "1.4.0"))
+    assert Provider().deploy(_parse("--vpc", "default", "--region", "us-east-1")) == 0
+    assert "docker 未安装" in capsys.readouterr().err
+
+    monkeypatch.setattr(Provider, "_resolve_version", staticmethod(lambda args: "1.4.0.dev3+g0123abc"))
+    assert Provider().deploy(_parse("--vpc", "default", "--region", "us-east-1")) == 0
+    assert "docker 未安装" not in capsys.readouterr().err

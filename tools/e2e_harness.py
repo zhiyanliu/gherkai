@@ -159,6 +159,10 @@ def run(engine: str, feature: str, votes: int, interrupt: str, run_id: str, grac
         with lock:
             if kill_sent["t"] is not None:
                 return
+            if proc.poll() is not None:
+                # Popen.send_signal 对已退出的子进程是静默 no-op：不记账，否则 kill_phase 非空却没真投递 → 假阳性样本
+                print("[harness] 中断时机到点但 worker 已退出，未发 SIGTERM（无效样本）", flush=True)
+                return
             kill_sent["t"], kill_sent["phase"] = time.monotonic(), phase
         print(f"[harness] >>> SIGTERM sent at phase={phase} (t={kill_sent['t']-t0:.2f}s)", flush=True)
         proc.send_signal(signal.SIGTERM)
@@ -219,9 +223,17 @@ def run(engine: str, feature: str, votes: int, interrupt: str, run_id: str, grac
     # 丢失/抢传测量样本**。判据：盘或 S3 上有产物 = 有效样本（实测踩过：Midscene act 时机中断太早、盘空、
     # n_lost=0 曾被误读成抢传生效，实为无效样本）。
     produced = bool(disk) or bool(s3)
-    sample_valid = produced
+    # 第二类无效样本：**选了中断时机、但该时机根本没触发**（一路跑成 baseline）。两条已知路径：
+    #   · --interrupt scenario 撞上单 scenario scope（n_scen=1，见上 scenario_done 分支的条件）；
+    #   · --interrupt connect 的 2s 定时器发现 scope_started 已到（建连快于 2s）。
+    # 此时 n_lost=0 与抢传无关，报告里只有 kill_phase=null 一个线索——别让它躺着靠人眼捞。
+    interrupted = kill_sent["t"] is not None
+    sample_valid = produced and (interrupt == "none" or interrupted)
     if not produced:
         note = "无效样本：中断过早，盘与 S3 均无产物，n_lost=0 是『没东西可丢』非『抢传救回』——换更晚的中断时机重跑"
+    elif interrupt != "none" and not interrupted:
+        note = (f"无效样本：选了 --interrupt {interrupt} 但该时机未触发（未发 SIGTERM、跑成 baseline），"
+                "n_lost=0 不构成抢传证据——换时机，或换『多 scenario 归一个 @scope』的 feature 重跑")
     elif len(lost) == 0:
         note = "有效样本：产生了产物且 n_lost=0 → 抢传/上传真救回（非假阳性）"
     else:

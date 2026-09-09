@@ -151,7 +151,7 @@ def _patch_cloud_handles(monkeypatch, record, *, preflight_err=None, skew=("ok",
         return {
             e: m.compose.WorkerResolution(
                 engine=e, variant=effective, revision_arn=_stub_revision(e),
-                digest=_STUB_DIGEST, template_arn=_stub_revision(e).rsplit(":", 1)[0] + ":1")
+                digest=_STUB_DIGEST)
             for e in kwargs["engines"]
         }
 

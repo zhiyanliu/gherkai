@@ -34,8 +34,9 @@ from gherkai_core.scope import FeatureSource
 NOVA_ACT_TIMEOUT_S = int(os.environ.get("NOVA_ACT_TIMEOUT_S", "120"))  # SDK 允许 [2,1800]
 # grace 余量（ADR 0024/0028 grace 硬约束的 margin）：单 step 最坏耗时 + 会话释放 + 余量。→ Nova grace 下限 ≈
 # ACT_TIMEOUT_S + margin。**已真容器标定**（ADR 0032「真容器校准结论」）：4 次真跑实测 SIGTERM 落 act 中途 →
-# worker 干净退出最坏 21s（会话释放 ≤9s + ~12s 进程收尾固定尾巴），远低于旧保守值。故 margin 60→30（grace 下限
-# 180→150），留 ~1.5x 余量。env 可覆盖（再标定/调优）。
+# `stopping→executionStopped` 最坏 21s，但其中 ~11s 已坐实为 ECS 记录 executionStoppedAt 的平台侧滞后（worker 已退），
+# subprocess 档不存在该段——真实预算 = 会话释放 ≤9s，故 margin 60→30（grace 下限 180→150）仍留 ~3x 余量。
+# env 可覆盖（再标定/调优）。
 NOVA_GRACE_MARGIN_S = int(os.environ.get("NOVA_GRACE_MARGIN_S", "30"))
 
 # Midscene 的 grace 下限（ADR 0024 grace 硬约束）：Midscene worker 无「可控 act timeout」概念（不像 Nova 的
@@ -938,16 +939,16 @@ def check_backend_skew(*, prefix: str, cli_version: str | None, region=None, pro
 class WorkerResolution:
     """一个引擎的 worker variant 解析结果（ADR 0038「运行时与 preflight」）。
 
-    `revision_arn` 是**唯一进 RunTask 的字段**（不变量：显式 revision、永不 family）；`digest` / `template_arn`
-    供 preflight 打印与 `list-workers` 展示「这次跑的到底是哪份镜像、从哪个模板派生」——「用的是哪份可见、可查」
-    是本 ADR 要解的问题之一，故一起带回来、不让调用方二次读 SSM。
+    `revision_arn` 是**唯一进 RunTask 的字段**（不变量：显式 revision、永不 family）；`digest` 供 preflight
+    打印「这次跑的到底是哪份镜像」——「用的是哪份可见、可查」是本 ADR 要解的问题之一，故一起带回来、
+    不让调用方二次读 SSM。（SSM 记录里的 `template_arn` 不带回：解析侧无消费者，「从哪个模板派生」由
+    `gherkai deploy list-workers` 从 SSM/血缘 tags 直读展示。）
     """
 
     engine: str
     variant: str
     revision_arn: str
     digest: str
-    template_arn: str
 
 
 class WorkerVariantError(Exception):
@@ -1120,8 +1121,7 @@ def resolve_worker_variant(
         if not resp.get("imageDetails"):
             raise _miss(engine, f"ECR 仓库 {repo} 里按 digest {digest} 找不到镜像")
         out[engine] = WorkerResolution(
-            engine=engine, variant=variant, revision_arn=revision_arn, digest=digest,
-            template_arn=rec.get("template_arn", ""))
+            engine=engine, variant=variant, revision_arn=revision_arn, digest=digest)
     return out
 
 
@@ -1258,17 +1258,17 @@ def preflight_cloud_resources(
                     cap = None
                 if cap is not None and declared_max_concurrency > cap:
                     on_warn(f"提示：--max-concurrency={declared_max_concurrency} 超过部署侧 per-run 上限 "
-                            f"cap={cap}（推进器 Lambda env MAX_CONCURRENCY），本 run 将按 {cap} 并行"
-                            f"——要更高并发改后端 stack（gherkai-deploy-aws）里推进器的 MAX_CONCURRENCY（两 Lambda 须同值）。")
+                            f"cap={cap}，本 run 将按 {cap} 并行"
+                            f"——要更高并发由部署方调高后端 stack（gherkai-deploy-aws）的 MAX_CONCURRENCY 后重新部署。")
                     warned_cap = True
             if report_dir is None:
                 continue
             remote = env.get("REPORT_DIR", "reports")  # 缺键 = Lambda 侧走自己的缺省
             if _normalize_prefix(remote) != _normalize_prefix(report_dir):
                 return (f"--backend cloud 产物前缀不一致：submit 侧 --report-dir={report_dir!r}，"
-                        f"推进器 {fn} 的 REPORT_DIR={remote!r}。detached 档的判定真值/报告由推进器按它自己的 "
-                        f"REPORT_DIR 落，跑完你会在 --report-dir 下找不到结果。改用 --report-dir={remote!r}，"
-                        f"或在后端 stack（gherkai-deploy-aws）给推进器注入 REPORT_DIR={report_dir!r}。")
+                        f"后端 {fn} 的 REPORT_DIR={remote!r}。云端跑完的结果/报告按后端自己的 REPORT_DIR 落，"
+                        f"你会在 --report-dir 下找不到结果。改用 --report-dir={remote!r}，"
+                        f"或由部署方把后端 stack（gherkai-deploy-aws）的 REPORT_DIR 改成 {report_dir!r} 后重新部署。")
     return None
 
 

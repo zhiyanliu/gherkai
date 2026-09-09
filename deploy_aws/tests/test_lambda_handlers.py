@@ -558,3 +558,10 @@ def test_tick_runs_isolates_a_run_whose_worker_revision_cannot_be_resolved(monke
     assert out["ok"] and set(out["runs"]) == {"bad", "good"} and built_for == ["good"]
     printed = capsys.readouterr().out
     assert "bad" in printed and "解析失败" in printed
+
+
+def test_run_ids_scope_id_containing_hash_is_split_from_the_left():
+    """scope_id 是 @scope 的用户文本、可含 #；run_id 由 compose 生成不含 # → 必须从左切，否则该 run 的整条
+    events Stream 会被抽成错的 run_id、reconciler 静默 no-op（主推进链断）。"""
+    event = {"Records": [_stream_record("20260909T000000Z-a3f9c1#checkout#step-2")]}
+    assert reconciler._run_ids_from_stream(event) == {"20260909T000000Z-a3f9c1"}

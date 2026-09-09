@@ -35,7 +35,8 @@ from gherkai_core.model import (
 class WorkerHandle(Protocol):
     """一个在跑的 worker 的句柄（schedule 持有，用于 stop）。
 
-    不暴露进程/信号细节——「怎么停」的机制（SIGTERM→宽限→SIGKILL / 未来 StopTask）藏在 adapter 内部（ADR 0026）。
+    不暴露进程/信号细节——「怎么停」的机制藏在 adapter 内部（ADR 0026）：子进程 SIGTERM→宽限→SIGKILL（真用运行期 grace）；
+    Fargate `StopTask`（忽略运行期 grace 入参，宽限由 task-def 期 `stopTimeout` 定，ADR 0024「终止契约」）。
     """
 
     def stop(self, grace_period_s: float) -> None:
@@ -46,7 +47,7 @@ class WorkerHandle(Protocol):
 class Engine(Protocol):
     """执行引擎 port（ADR 0016）。
 
-    schedule 经此起 worker；adapter 形状一致（spawn node / spawn python / 未来 Fargate），schedule 对引擎无知。
+    schedule 经此起 worker；adapter 形状一致（spawn node 子进程 / spawn python 子进程 / Fargate task），schedule 对引擎无知。
     """
 
     def run_scope(self, job: Job) -> tuple[WorkerHandle, Iterator[Event]]:

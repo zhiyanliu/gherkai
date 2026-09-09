@@ -178,7 +178,7 @@ class ContainerEngine:
             raise ContainerError(f"`{self.binary} {' '.join(argv)}` 失败（exit {rc}）——诊断见上方 {self.binary} 输出。")
 
 
-def resolve_container_engine(requested: str | None = None, *, env=None) -> ContainerEngine:
+def resolve_container_engine(requested: str | None = None) -> ContainerEngine:
     """选容器引擎：`--container-engine` > env `GHERKAI_CONTAINER_ENGINE` > `docker`。
 
     本期外的名字 → `UnsupportedContainerEngine`（调用方退 2）。**不静默回落 docker**：给了 `--container-engine
@@ -186,8 +186,7 @@ def resolve_container_engine(requested: str | None = None, *, env=None) -> Conta
     """
     import os
 
-    environ = os.environ if env is None else env
-    name = (requested or environ.get(CONTAINER_ENGINE_ENV) or DEFAULT_CONTAINER_ENGINE).strip()
+    name = (requested or os.environ.get(CONTAINER_ENGINE_ENV) or DEFAULT_CONTAINER_ENGINE).strip()
     if name not in SUPPORTED_ENGINES:
         raise UnsupportedContainerEngine(
             f"容器引擎 `{name}` 这一期未实装（只有 {'/'.join(SUPPORTED_ENGINES)}）。"

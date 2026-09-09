@@ -106,7 +106,7 @@ def main() -> int:
         return 1
 
     errors: list[str] = []
-    versions: dict[str, str] = {}  # 发行名 → METADATA 里的版本
+    versions_seen: dict[str, set[str]] = {}  # 发行名 → 该成员在 dist 里出现过的**全部**版本（脏目录会 >1）
     seen_wheels: dict[str, Path] = {}
 
     for wheel in wheels:
@@ -120,7 +120,7 @@ def main() -> int:
             errors.append(f"{wheel.name} 的发行名 {name} 不是任何 workspace 成员——产物目录不干净（旧产物没清）")
             continue
         seen_wheels[name] = wheel
-        versions[name] = version
+        versions_seen.setdefault(name, set()).add(version)
 
         # 断言 3：兄弟包必须带 `==<版本>` 的 lockstep pin
         for entry in meta.get_all("Requires-Dist") or []:
@@ -140,8 +140,12 @@ def main() -> int:
         if name not in seen_wheels:
             errors.append(f"workspace 成员 {member_dir}（发行名 {name}）没有 wheel 产物——它没进发布链")
 
-    # 断言 2：版本一致
-    distinct = sorted(set(versions.values()))
+    # 断言 2：版本一致——先按成员查「同名多版本并存」（脏 dist：旧产物没清；`uv publish` 默认推 dist/* 全部文件，
+    # 会把上一次 build 的旧版本一并推上索引），再查跨成员一致。按发行名收单值会让后者覆盖前者、照不出这一格。
+    for name, vs in sorted(versions_seen.items()):
+        if len(vs) > 1:
+            errors.append(f"dist 目录里 {name} 同时存在 {sorted(vs)} 多个版本——旧产物没清，先 rm -rf 产物目录再 build")
+    distinct = sorted({v for vs in versions_seen.values() for v in vs})
     if len(distinct) > 1:
         errors.append(
             f"产物版本不一致：{distinct}——同 repo 全成员应从同一 git 状态派生出同一版本（ADR 0037 决策 2b）"
@@ -175,7 +179,7 @@ def main() -> int:
         for err in errors:
             fail(err)
         return 1
-    print("产物校验通过：成员齐、版本一致、兄弟包 pin 已渲染。")
+    print("产物校验通过：成员齐、版本一致（无旧版本残留）、兄弟包 pin 已渲染。")
     return 0
 
 

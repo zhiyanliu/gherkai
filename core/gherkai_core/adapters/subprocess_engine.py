@@ -9,7 +9,7 @@ schedule 只下逻辑指令（run_scope / handle.stop），对信号/进程无�
 - 停 worker：SIGTERM → 等 grace_period → 未退则 SIGKILL（ADR 0024 终止契约的机制实现）。
 - worker stdout（引擎 SDK 的进度噪声，不解析）+ stderr（worker 自己的诊断）都实时透传为日志。
 
-引擎无关：cmd 决定起哪个 worker（Nova Act 的 python worker / 未来 Midscene 的 node worker）。
+引擎无关：cmd 决定起哪个 worker（Nova Act 的 python worker / Midscene 的 node worker）。
 同一个 adapter 类，靠不同 cmd 服务不同引擎——符合「两 adapter 形状一致」（ADR 0024）。
 """
 from __future__ import annotations

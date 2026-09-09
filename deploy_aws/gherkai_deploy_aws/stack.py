@@ -89,7 +89,7 @@ class BackendStack(Stack):
         # str() 归一：str(True)='True' / str(90.5)='90.5' 都会让 int() 抛 ValueError，与 CLI str 路径行为一致。
         try:
             seconds = int(str(raw))
-        except (TypeError, ValueError):
+        except ValueError:
             raise ValueError(f"stop_timeout context 须为整数秒，得到 {raw!r}")
         if not 1 <= seconds <= self.FARGATE_STOP_TIMEOUT_MAX_S:
             raise ValueError(

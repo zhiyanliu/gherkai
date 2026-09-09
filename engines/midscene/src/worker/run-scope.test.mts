@@ -470,3 +470,18 @@ test("--match-steps: 超 64KB payload 经 pipe 完整送出（ADR 0036，不被 
   const got = JSON.parse(raw);  // 截断时这里抛（rc 仍 0，故只靠退出码守不住）
   assert.equal(got.length, texts.length, "逐条命中结果不该丢");
 });
+
+
+// ---- artifactFlushRoot：非 --no-report 档 → 解析后的 MIDSCENE_RUN_DIR（--no-report 档见 no-artifacts.test.mts）----
+test("artifactFlushRoot: 常规档给解析后的 MIDSCENE_RUN_DIR；未设则 undefined（local/无落点 no-op）", async () => {
+  const { artifactFlushRoot } = await importMod();
+  const prev = process.env.MIDSCENE_RUN_DIR;
+  try {
+    process.env.MIDSCENE_RUN_DIR = "some/rel/run-dir";
+    assert.equal(artifactFlushRoot(), path.resolve("some/rel/run-dir"));
+    delete process.env.MIDSCENE_RUN_DIR;
+    assert.equal(artifactFlushRoot(), undefined);
+  } finally {
+    if (prev === undefined) delete process.env.MIDSCENE_RUN_DIR; else process.env.MIDSCENE_RUN_DIR = prev;
+  }
+});

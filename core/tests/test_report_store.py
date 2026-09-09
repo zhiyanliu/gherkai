@@ -363,3 +363,16 @@ def test_empty_report_refs_still_valid_index(tmp_path: Path):
     assert "无引擎报告产物" in txt  # 空态有效页
     m = json.loads((tmp_path / "reports" / "empty-run" / "manifest.json").read_text("utf-8"))
     assert m["report_index"] == []
+
+
+def test_index_shows_fail_fast_reason_in_neutral_note_not_error_red(tmp_path):
+    """skipped/aborted 的 error_type 恒 None、原因只在 message（ADR 0031 决定一）→ index 也得显；用中性 note 色而非
+    err 红（决定二：颜色跟 status 走，没跑 ≠ 出错）。与 render_text 的口径对齐。"""
+    store = LocalReportStore(tmp_path)
+    jr = _jr("checkout", "novaact", status=Status.SKIPPED)
+    jr.message = "fail-fast：批次已中止，未启动（worker 未 spawn）"
+    meta = RunMeta(run_id="r-ff", created_at="2026-06-29T00:00:00Z", jobs=(jr.job,))
+    run = RunResult(run_meta=meta, status=Status.ERROR, jobs=[jr])
+    html = _uri_to_path(store.write(run.run_id, run, created_at="2026-06-29T00:00:00Z")).read_text(encoding="utf-8")
+    assert '<span class="note">fail-fast：批次已中止，未启动（worker 未 spawn）</span>' in html
+    assert 'class="err"' not in html

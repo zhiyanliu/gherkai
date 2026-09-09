@@ -250,3 +250,37 @@ def test_non_deploy_command_does_not_load_any_provider(monkeypatch):
 
     monkeypatch.setattr(dp, "entry_points", _boom)
     assert m.main(["list-engines"]) == 0
+
+
+def test_readonly_flags_cannot_be_combined_with_a_provider_subverb(monkeypatch, capsys):
+    """`--diff/--synth-only/--bootstrap` 与写账户的子动词同给 → 退 2、子动词不跑（ADR 0037 决策 6：三 flag 是
+    reviewer 的只读靶点；子动词的分派优先级不得把它们静默吞成真推镜像）。"""
+    seen: list[str] = []
+
+    class _WithVerb(_StubProvider):
+        def add_arguments(self, parser):
+            super().add_arguments(parser)
+            verbs = parser.add_subparsers(dest="worker_verb")
+            pw = verbs.add_parser("push-worker")
+            pw.add_argument("image")
+            pw.set_defaults(_deploy_verb=lambda args: (seen.append(args.image), 0)[1])
+
+    prov = _WithVerb()
+    _patch_eps(monkeypatch, _FakeEP("aws", prov))
+    for flags in (["--diff"], ["--synth-only", "/tmp/out"], ["--bootstrap"]):
+        assert m.main(["deploy", *flags, "push-worker", "img:tag"]) == 2, flags
+        assert flags[0] in capsys.readouterr().err
+    assert seen == [] and not prov.calls  # 子动词与 provider 的四路都没被调
+
+
+def test_provider_init_failure_is_named_not_traceback(monkeypatch, capsys):
+    """entry point 指向类、但实例化炸（provider 的 __init__ 依赖缺失）→ 同「装了但不可用」的诊断，不裸奔 traceback。"""
+
+    class _Broken(_StubProvider):
+        def __init__(self):
+            raise RuntimeError("provider 初始化失败：缺 X")
+
+    _patch_eps(monkeypatch, _FakeEP("aws", _Broken))
+    assert m.main(["deploy"]) == 2
+    err = capsys.readouterr().err
+    assert "stub_aws.cli:Provider" in err and "RuntimeError" in err

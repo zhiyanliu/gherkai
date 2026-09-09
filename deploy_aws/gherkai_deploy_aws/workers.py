@@ -345,7 +345,11 @@ def _retire(ecs, arn: str, *, now: datetime, out) -> bool:
 
 @dataclass(frozen=True)
 class CleanupOutcome:
-    """一次 pass 的结果：删掉的 revision + 留到下次的（ARN、原因）。供 `list-workers`/测试读。"""
+    """一次 pass 的结果：删掉的 revision + 留到下次的（ARN、原因）。**生产调用点（push-worker / deploy 末步）
+    只看 pass 自己打的输出、丢弃本返回值**；它存在是为让测试直接断言两道闸（静默期 + 在跑 run 引用）的判定，
+    不必去解析打印文本。`list-workers` 不走这里——它是只读命令，待清理/孤儿由 `_print_pending_cleanup`
+    现扫 family 列出（ADR 0038：清理 pass 机会式、由 push-worker/deploy 触发，无定时任务）。
+    """
 
     deleted: tuple[str, ...] = ()
     kept: tuple[tuple[str, str], ...] = ()
@@ -496,9 +500,6 @@ class PushOutcome:
     digest: str
     revision_arn: str
     template_arn: str
-    action: str                        # registered / reused / unchanged
-    previous_digest: str | None = None  # 目标 tag 原先指向的 digest（原已存在且不同才非 None）
-    retired_arn: str | None = None      # 被本次替换、已打退休 tag 的旧 revision
 
 
 def _ecr_login(aws: Aws, container) -> str:
@@ -599,12 +600,11 @@ def _push_one(image: str, *, engine: str, variant: str, prefix: str, version: st
     if mapping and mapping.template_arn == template_arn and mapping.digest == digest:
         out(f"{engine}/{variant}：映射已是（当前模板，本 digest）→ 跳过注册，沿用 {_short_arn(mapping.revision_arn)}")
         return PushOutcome(engine=engine, variant=variant, tag=tag, digest=digest,
-                           revision_arn=mapping.revision_arn, template_arn=template_arn,
-                           action="unchanged", previous_digest=previous_digest)
+                           revision_arn=mapping.revision_arn, template_arn=template_arn)
     reuse = _find_reusable(aws.ecs, prefix=prefix, engine=engine, variant=variant,
                            template_arn=template_arn, digest=digest)
     if reuse is not None:
-        revision_arn, action = reuse, "reused"
+        revision_arn = reuse
         out(f"{engine}/{variant}：family 里已有本 variant 同（模板，digest）且未退休的 revision "
             f"{_short_arn(revision_arn)} → 复用（上次中断在注册与写 SSM 之间留下的孤儿）")
     else:
@@ -612,22 +612,18 @@ def _push_one(image: str, *, engine: str, variant: str, prefix: str, version: st
         revision_arn = _register_revision(aws.ecs, template_arn=template_arn, engine=engine,
                                           image_ref=f"{repo_uri}@{digest}", digest=digest,
                                           variant=variant, version=version)
-        action = "registered"
 
     # 步 7：写映射（覆盖语义）
     _put_ssm(aws.ssm, _mapping_path(prefix, engine, tag),
              _record_json(template_arn=template_arn, revision_arn=revision_arn,
                           digest=digest, pushed_at=now.isoformat()))
 
-    # 步 8：退休被替换的旧 revision（不删；删归清理 pass）
-    retired = None
+    # 步 8：退休被替换的旧 revision（不删；删归清理 pass）——`_retire` 有副作用（真打 retired-at tag）并自己打印
     old = mapping.revision_arn if mapping else None
     if old and old != revision_arn:
-        if _retire(aws.ecs, old, now=now, out=out):
-            retired = old
+        _retire(aws.ecs, old, now=now, out=out)
     return PushOutcome(engine=engine, variant=variant, tag=tag, digest=digest,
-                       revision_arn=revision_arn, template_arn=template_arn, action=action,
-                       previous_digest=previous_digest, retired_arn=retired)
+                       revision_arn=revision_arn, template_arn=template_arn)
 
 
 def _find_reusable(ecs, *, prefix: str, engine: str, variant: str, template_arn: str, digest: str) -> str | None:
@@ -808,12 +804,12 @@ def rederive_variants(*, prefix: str, engines, version: str, aws: Aws, now: date
             _put_ssm(aws.ssm, _mapping_path(prefix, engine, mapping.tag),
                      _record_json(template_arn=template_arn, revision_arn=new_arn,
                                   digest=mapping.digest, pushed_at=mapping.pushed_at))
-            retired = mapping.revision_arn if _retire(aws.ecs, mapping.revision_arn, now=now, out=out) else None
+            _retire(aws.ecs, mapping.revision_arn, now=now, out=out)
             out(f"重派生 {engine}/{mapping.variant}：模板已更新 → {_short_arn(new_arn)}"
                 f"（旧 {_short_arn(mapping.revision_arn)} 已打退休 tag）")
             results.append(PushOutcome(engine=engine, variant=mapping.variant, tag=mapping.tag,
                                        digest=mapping.digest, revision_arn=new_arn,
-                                       template_arn=template_arn, action="registered", retired_arn=retired))
+                                       template_arn=template_arn))
     if not results:
         out("重派生：所有 variant 的 revision 都已基于当前模板——无需重派生")
     return results

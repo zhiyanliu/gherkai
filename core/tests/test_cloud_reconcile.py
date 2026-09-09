@@ -238,3 +238,20 @@ def test_tick_with_ddb_backend(events_table, ddb_run_store):
     done = tick("run-1", meta, log, ddb_run_store, launcher, 1, now_iso="t2")
     assert done is True
     assert ddb_run_store.load_run_state("run-1").status == Status.PASSED
+
+
+def test_ddb_event_log_queries_with_consistent_read():
+    """records() 是 reconcile 的投影输入：finalize 前 _final_drain / 退出观察者刚写的尾事件必须**立即**可读
+    （ADR 0030 决定四），最终一致读可能漏尾事件、把已完成 job 投成仍在跑——故 Query 必带 ConsistentRead。"""
+    class _Rec:
+        def __init__(self):
+            self.calls = []
+
+        def query(self, **kw):
+            self.calls.append(kw)
+            return {"Items": []}
+
+    table = _Rec()
+    assert DdbEventLog(table, "run-1", ["a", "b"]).records() == []
+    assert len(table.calls) == 2
+    assert all(kw.get("ConsistentRead") is True for kw in table.calls), table.calls

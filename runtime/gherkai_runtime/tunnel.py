@@ -75,7 +75,11 @@ class NgrokTunnel:
 
     def start(self, local_origin: str, *, with_auth: bool = True, timeout_s: float = 20.0) -> TunnelInfo:
         auth = _gen_auth() if with_auth else None
-        log_path = Path(tempfile.mkstemp(prefix="gherkai-tunnel-", suffix=".log")[1])
+        # 只要路径：agent 自己打开写、我们只轮询读。fd 必须立刻关——留着就是进程存活期的 fd 泄漏。
+        # 文件**有意不删**：隧道存活期 agent 一直在写，且它是唯一诊断通道（authtoken 缺失等 err 行在其中）。
+        _log_fd, _log_name = tempfile.mkstemp(prefix="gherkai-tunnel-", suffix=".log")
+        os.close(_log_fd)
+        log_path = Path(_log_name)
         cmd = [self._binary, "http", local_origin,
                "--log", str(log_path), "--log-format", "json"]
         policy_path: str | None = None

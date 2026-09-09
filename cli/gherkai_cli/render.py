@@ -59,7 +59,12 @@ def render_text(result: RunResult) -> str:
     for jr in result.jobs:
         jbits = _cost_bits(jr.total_tokens, jr.total_time_worked_s)
         cost_str = f"  [{', '.join(jbits)}]" if jbits else ""
-        err = f"  ({jr.error_type}: {jr.message})" if jr.error_type else ""
+        # 说明文字：error 类带分类前缀；fail-fast 派生态（skipped/aborted）的 error_type 恒 None、「为什么没跑」
+        # 只在 message 里（ADR 0031 决定一），故无分类时也显 message——否则人读视图只剩一个光秃的态、原因得改用 --json。
+        if jr.error_type:
+            err = f"  ({jr.error_type}: {jr.message})"
+        else:
+            err = f"  ({jr.message})" if jr.message else ""
         out.append(f"  job {jr.scope_id!r}: {jr.status.value}{cost_str}{err}")
         if jr.duration_ms is not None:
             out.append(f"    scope 墙钟: {_ms(jr.duration_ms)}")

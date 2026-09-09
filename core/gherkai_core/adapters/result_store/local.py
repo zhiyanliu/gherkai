@@ -2,7 +2,7 @@
 
 数据面（追加为主）：一次 run 的每个 JobResult 落 `<root>/<run_id>/jobs/<encoded_scope_id>.json`，
 供 CI 读单 scope 判定真值。与 RunStore（控制面：run_meta.json + run_state.json）互补——数据面按 job 追加，
-未来可流式（worker 跑完一个 job 即落），不必等整 run 结束。单 job 文件自包含（嵌完整 Job def）。
+已实时写：每 job 完成即落（`persist.RunPersistence.on_job_complete`，ADR 0030 决定一/三），不等整 run 结束。单 job 文件自包含（嵌完整 Job def）。
 
 **克制（ADR 0016）**：只忠实落已成形的 `JobResult`（复用 serialize.job_to_dict/from_dict），
 不发明 ADR 有意 defer 的数据面新字段。
@@ -21,7 +21,7 @@ from gherkai_core.serialize import job_result_from_dict, job_result_to_dict
 
 
 class LocalResultStore:
-    """ResultStore 的本地文件实现（组合根注入；未来对象存储版换落点）。"""
+    """ResultStore 的本地文件实现（组合根注入；S3 实装见同包 `s3.py`）。"""
 
     def __init__(self, root: str | Path) -> None:
         self._root = Path(root)

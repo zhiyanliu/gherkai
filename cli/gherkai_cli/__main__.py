@@ -12,7 +12,6 @@ import argparse
 import json
 import os
 import sys
-import tempfile
 from dataclasses import replace
 from pathlib import Path
 
@@ -150,7 +149,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     )
     run.add_argument(
         "--steps-dir", default=None, metavar="DIR",
-        help=_STEPS_DIR_HELP + "。值随 definition 走，本机后台推进/接力的宿主都读回同一份；"
+        help=_STEPS_DIR_HELP + "。值随提交记录走，本机后台推进/接力进程都读回同一份；"
              "[--backend cloud] 不生效（云端 worker 的 steps 烙在定制镜像里，警告不拦）",
     )
     # backend 选择（ADR 0016「cli backend 选择」/ 0030 决定七）：local=文件落盘（默认）；cloud=DDB/S3。
@@ -184,7 +183,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
         "--worker-variant", default=None, metavar="NAME",
         help="[--backend cloud] 云端 worker 镜像 variant（= 一套具名的确定性 step 集烙成的定制镜像）："
              "缺省用部署的默认指针（`gherkai deploy` 初始化为 base）。提交时把它解析成本 run 各引擎的"
-             "精确 task-def revision 写进 definition（一个 run 内镜像固定，别人重推同名 variant 不影响在跑的 run）；"
+             "精确 task-def revision 写进提交记录（一个 run 内镜像固定，别人重推同名 variant 不影响在跑的 run）；"
              "某引擎缺该 variant 即退 2、不回落默认。推送归部署方（`gherkai deploy push-worker`）。"
              "local 后端忽略（那边的确定性 step 直接从 --steps-dir 读、不经镜像）",
     )
@@ -240,8 +239,8 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
                     help="未标 @engine 的 scope 用的默认引擎")
     sm.add_argument("--assertion-votes", type=int, default=1, metavar="N", help="AI 断言投票次数（默认 1）")
     sm.add_argument("--max-concurrency", type=int, default=1,
-                    help="同时在跑的 worker 上限（默认 1）；随 definition 到达推进器，cloud 档受部署侧 cap"
-                         "（推进器 Lambda env MAX_CONCURRENCY）钳制")
+                    help="同时在跑的 worker 上限（默认 1）；随提交记录生效，cloud 档受部署侧上限"
+                         "（后端 stack 的 MAX_CONCURRENCY）钳制")
     sm.add_argument(
         "--default-job-timeout", type=float, default=300.0, metavar="S",
         help="未标 @timeout 的 scope 用的 job 墙钟超时秒（默认 300；<=0 表示不超时）；标了 @timeout:N 的按 tag 走",
@@ -261,11 +260,11 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
              "给了就用本值。TTL 到点无条件拆隧道，调小可能在 run 未完时断隧道",
     )
     sm.add_argument("--report-dir", default="reports", metavar="DIR",
-                    help="归集报告落点（默认 reports/）；cloud 档须与推进器 Lambda 的 REPORT_DIR 一致"
+                    help="归集报告落点（默认 reports/）；cloud 档须与后端部署的 REPORT_DIR 一致"
                          "（preflight 比对，不一致退 2）")
     sm.add_argument(
         "--steps-dir", default=None, metavar="DIR",
-        help=_STEPS_DIR_HELP + "。值随 definition 走，本机后台推进/接力的宿主都读回同一份；"
+        help=_STEPS_DIR_HELP + "。值随提交记录走，本机后台推进/接力进程都读回同一份；"
              "[--backend cloud] 不生效（云端 worker 的 steps 烙在定制镜像里，警告不拦）",
     )
     sm.add_argument("--region", default=None, metavar="R", help="AWS region（喂 worker）")
@@ -281,7 +280,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     sm.add_argument(
         "--worker-variant", default=None, metavar="NAME",
         help="[cloud] 云端 worker 镜像 variant（语义同 run）：缺省用部署的默认指针；提交时解析成各引擎的"
-             "精确 task-def revision 写进 definition（云端推进器照 definition 起 task）。local 后端忽略",
+             "精确 task-def revision 写进提交记录（云端照它起 task）。local 后端忽略",
     )
     # 注：submit 不收 --subnet/--security-group——cloud submit 只写 runs 表、不碰 SSM/ECS（ADR 0034），
     # 网络配置由 IaC 注给 reconciler/kicker Lambda 的 env（曾在此声明过两个从不生效的 flag，已删）。
@@ -292,7 +291,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     st.add_argument("--report-dir", default="reports", metavar="DIR", help="[local] run 落点（须与 submit 一致）")
     st.add_argument("--wait", action="store_true",
                     help="轮询到 run 达终态再返回（两路都支持，接力语义异：local=本机 tick 推进；"
-                         "cloud=检测卡住即 invoke kicker Lambda 接力）")
+                         "cloud=检测卡住即触发云端接力）")
     st.add_argument("--max-concurrency", type=int, default=1,
                     help="[local --wait] 接力推进并发上限的回落值（meta 带值时以 meta 为准）")
     st.add_argument("--json", action="store_true", help="输出机器可读 JSON（RunState）")
@@ -469,7 +468,9 @@ def _load_and_plan(args) -> "list | int":
     # 1) 读 feature（组合根的事，core 不碰 FS）→ FeatureSource[]
     try:
         features = [compose.load_feature(f) for f in args.features]
-    except FileNotFoundError as e:
+    except (OSError, UnicodeDecodeError) as e:
+        # 不止「文件不存在」：给了目录（IsADirectoryError）/ 无读权限 / 非 UTF-8 编码同属「没开跑就被拒」
+        # 的输入问题，一律退 2（退码语义 ADR 0021），不让它们以 traceback 形态逃出。
         _progress(f"读 feature 失败：{e}")
         return 2
     # 2) plan：.feature → Job[]（uri 互异/engine 冲突等违约 → PlanError；gherkin 语法错 → FeatureParseError）
@@ -508,7 +509,7 @@ def _validate_max_concurrency(args) -> bool:
     """
     mc = getattr(args, "max_concurrency", None)
     if mc is not None and mc < 1:
-        _progress(f"--max-concurrency={mc} 无效：须 ≥ 1（<=0 会让推进器永不起 job、run 卡死在 pending）")
+        _progress(f"--max-concurrency={mc} 无效：须 ≥ 1（<=0 会让 run 永不起 job、卡死在 pending）")
         return False
     return True
 
@@ -933,9 +934,9 @@ def _submit_cloud(args, run_id: str, run_meta, initial, *, tunnel_info=None) -> 
         _progress(f"隧道由守护进程持有（日志 {watch_log}）：run 终态即拆、TTL 兜底 {ttl_s:.0f}s"
                   f"（= 各 job 预算之和 + 启动余量；`--tunnel-ttl` 可覆盖）。"
                   f"**本机需保持开机联网直到 run 终态**——关机=隧道断=测试将以导航失败告终。")
-        _progress(f"已提交到云端（definition 已落库；kicker Lambda 起首批、云端链推进中）。查进度：gherkai status {run_id} --backend cloud --prefix {target.prefix}")
+        _progress(f"已提交到云端（提交记录已落库，云端已接管推进）。查进度：gherkai status {run_id} --backend cloud --prefix {target.prefix}")
     else:
-        _progress(f"已提交到云端（definition 已落库；kicker Lambda 起首批、云端链推进中，可关机）。查进度：gherkai status {run_id} --backend cloud --prefix {target.prefix}")
+        _progress(f"已提交到云端（提交记录已落库，云端已接管推进，可关机）。查进度：gherkai status {run_id} --backend cloud --prefix {target.prefix}")
     print(run_id)
     return 0
 
@@ -1067,7 +1068,7 @@ def _status_cloud(args) -> int:
                     # kicker 不存在 → 接力对象缺失，轮询死等无意义：点名 prefix fail-fast（ADR 0033 preflight 条）。
                     # 其他 AWS 错（限流/瞬时/无权限）仍吞——不致命，下轮再踢/靠云端链。
                     if getattr(e, "response", {}).get("Error", {}).get("Code") == "ResourceNotFoundException":
-                        _progress(f"status --wait 接力失败：kicker Lambda {kicker_fn}（用 --prefix={target.prefix!r} 拼出）"
+                        _progress(f"status --wait 接力失败：接力 Lambda {kicker_fn}（用 --prefix={target.prefix!r} 拼出）"
                                   f"不存在——是 --prefix 配错、还是后端未部署（`gherkai deploy`）？")
                         return 2
                 stall = 0  # kickoff 后重置，给云端链时间响应（下一个 _STALL_KICK 窗口再判是否仍卡）
@@ -1158,9 +1159,11 @@ def _cmd_run(args) -> int:
     #     **必须排在起隧道 / cloud preflight / persistence.begin 之前**：只依赖 jobs，早拒才真「零副作用」——
     #     否则配置错也已起 ngrok、产生云端调用费用、并落下永不 finalize 的半成品 run 记录。
     min_grace = max((compose.engine_min_grace(j.engine) for j in jobs), default=0.0)
-    if args.grace is not None and (args.grace <= 0 or args.grace < min_grace):
+    import math as _math
+    if args.grace is not None and (not _math.isfinite(args.grace) or args.grace <= 0 or args.grace < min_grace):
+        # nan/inf 同拒：inf 会让 SIGKILL 兜底永不触发（软停失效 = 挂死），与 --tunnel-ttl / @timeout 的判据同形。
         _progress(
-            f"--grace={args.grace} 太小：须 > 0 且 ≥ {min_grace}s"
+            f"--grace={args.grace} 无效：须为有限正数且 ≥ {min_grace}s"
             "（Nova act_timeout+余量；小于单个 act 的时长会让软停失效、浏览器会话泄漏）"
         )
         return 2
@@ -1447,6 +1450,10 @@ def _cmd_deploy(args) -> int:
     # provider 贴的子动词（worker 镜像族 push-worker/list-workers，ADR 0038）优先——接缝见 deploy.py 契约块。
     verb = getattr(args, "_deploy_verb", None)
     if verb is not None:
+        conflict = _deploy.readonly_flag_conflict(args)  # 子动词 + 只读 flag 同给 → 拒，别让预览变成真推镜像
+        if conflict:
+            _progress(conflict)
+            return 2
         return verb(args)
     if args.bootstrap:
         return provider.bootstrap(args)

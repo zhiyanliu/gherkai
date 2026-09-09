@@ -57,7 +57,9 @@ class DdbEventLog:
         for scope_id in self._scope_ids:
             pk = events_pk(self._run_id, scope_id)
             # 逐 scope 全量 Query（含翻页；SK 升序保序）。worker 段 + 可能的 task_exited 高位 item 都在同 PK 下。
-            kwargs = {"KeyConditionExpression": Key(PK_ATTR).eq(pk), "ScanIndexForward": True}
+            # ConsistentRead：本读面是 reconcile 的投影输入，且 finalize 前的 _final_drain / 退出观察者写入紧接着
+            # 就要被读到——最终一致读可能漏掉刚写的尾事件，让投影把已完成 job 判成仍在跑（ADR 0030 决定四）。
+            kwargs = {"KeyConditionExpression": Key(PK_ATTR).eq(pk), "ScanIndexForward": True, "ConsistentRead": True}
             while True:
                 resp = self._table.query(**kwargs)
                 for it in resp.get("Items", []):

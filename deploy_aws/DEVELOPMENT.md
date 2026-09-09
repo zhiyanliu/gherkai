@@ -68,7 +68,7 @@ asset 落进 `gherkai deploy` 的临时工作目录（`GHERKAI_LAMBDA_ASSET_DIR`
 
 `push-worker` 流程（细节与理由见 ADR 0038「push-worker 流程」）：版本 skew 前置（CLI **新于**后端 → 退 2，无放行口）→ `inspect` 校验存在与架构 → ECR 登录 → tag + push → **推送后**再 `inspect` 取 digest（本地未推送的镜像没有 registry digest，`.Id` 是 config digest、注册能过而 RunTask 才 `manifest unknown`）→ 按（模板 ARN、digest）查重 / 复用孤儿 / 否则从模板注册新 revision（血缘 tags：`gherkai:variant|version|digest|template`）→ 写 SSM 映射 → 旧 revision 打 `gherkai:retired-at` + 跑一次清理 pass。
 
-- **`--container-engine` 是留的口子**：这一期只实装 `docker`，别的名字退 2、不静默回落（`container.resolve_container_engine`）。名字不认 = 纯参数问题、绝不动账户；装了但不可用 / 没装 = 只警告，退码语义归 cdk 之后的四步。探活警告有意排在 `--vpc` 校验之后——缺 `--vpc` 会直接退 2，先打两行 docker 警告只会盖住真因。
+- **`--container-engine` 是留的口子**：这一期只实装 `docker`，别的名字退 2、不静默回落（`container.resolve_container_engine`）。名字不认 = 纯参数问题、绝不动账户；装了但不可用 / 没装 = 只警告（且只对纯发行版警告：dev/post/本地段版本本就不走同步基底，ADR 0038），退码语义归 cdk 之后的四步。探活警告有意排在 `--vpc` 校验之后——缺 `--vpc` 会直接退 2，先打两行 docker 警告只会盖住真因。
 - **`delete-worker` 是占位**：退 2 并说明押后的是回收策略（旧版本 variant 的 ECR tag / untagged 层），重议条件见 ADR 0038。
 - 子动词只挂 `deploy`、不挂 `destroy`（理由见 `cli.py._declares_worker_subverbs`）。
 
