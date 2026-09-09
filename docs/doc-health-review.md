@@ -36,7 +36,8 @@ ADR/CONTEXT 是随构建**逐步长起来**的：每次在前人文档上叠加�
 
 不同类型的文档，主要风险不同、别用一把尺子：
 - **ADR / CONTEXT**：查决策一致性、跨文档矛盾、被取代未标历史、Status 头（见下）、施工叙事沉积（SEDIMENT 类，ADR 是其主战场）、**引用方向合规 + 自包含**（不引用 journey、不用裸 WP 编号；Accepted ADR 须结论连同证据内联、自成一体——见「五类问题」DEADLINK 的引用方向违规条）。
-- **README**：查命令/参数/目录结构过时；保叙事、不激进压缩。
+- **README（使用者向：根 + 各包，各包 README 逐字上 PyPI/npm）**：查安装 / 命令 / 参数 / 退出码过时；保叙事、不激进压缩。**加查使用者向边界**（判据与四层去向见 ADR 0039、CLAUDE.md 文档纪律「README / DEVELOPMENT 分层」）：contributor 内容（目录结构、开发环境、测试、spike、发布流程）或内部指代（ADR 编号、决策号、内部机制名）出现在使用者面 = 越界，修法是搬去同目录 `DEVELOPMENT.md`、不是删。护栏 `cli/tests/test_package_readmes.py` 只管禁词正则、相对链接与 DEVELOPMENT.md 存在性，正则外的语义越界靠本任务。
+- **DEVELOPMENT.md（contributor 向：根 + 各包，与同目录 README 成对）**：查目录树 / 测试与开发命令 / ADR 编号范围与指针过时——全是枚举型，逐条对 `ls` / `git ls-files` / argparse；允许 ADR 指针与内部机制名。
 - **docs/guides/（给人的阅读理解层）**：按 README 同侧判据（保叙事）；主查两样——STALE（派生视图最易随上游漂移，对照 code 与权威 ADR）、**越界复述 why**（决策理由/权衡出现在 guide 正文 = 双源苗头；写作判据在 CLAUDE.md 文档纪律 guides 条，修法 = 压回指针）。
 - **REFERENCES / 技术笔记/配方**（SIGV4-RECIPE 这类）：**没有"决策矛盾"维度，重在"配方/引用还灵不灵"**——代码片段是否还与当前 SDK/实现对得上、踩坑点是否还成立、指向的 ADR/源码路径/外链是否有效。对照 code 核实是主要手段。
 
@@ -46,18 +47,21 @@ ADR/CONTEXT 是随构建**逐步长起来**的：每次在前人文档上叠加�
 - `docs/adr/*.md`（重点，80% 给 AI 读）
 - `CONTEXT.md`（术语/概念总表）
 - `docs/REFERENCES.md`（外部一手来源 + 源码内点自查资料，AI 用）
-- 全部 README（根 / `cli` / `core` / `core/tests` / `runtime` / `deploy_aws` / `engines/*` / `.github/workflows`，主要给人读）
+- 全部 README（根 / `cli` / `core` / `core/tests` / `runtime` / `deploy_aws` / `engines/*` / `.github/workflows`，使用者向、主要给人读）
+- 全部 `DEVELOPMENT.md`（根 / `cli` / `core` / `runtime` / `deploy_aws` / `engines/*`，contributor 向，与同目录 README 成对——判据见上「按文档类型的复盘侧重」）
+- `CLAUDE.md`（项目约定；**只查 DEADLINK / STALE**——它点名的护栏测试文件、ADR 编号、目录名是否仍存在、与所指 ADR 是否一致。规则内容本身是决策，不在复盘里改）
+- `docs/journey/`（staging 区，可为空；**只做生命周期审计**：非空时逐个判「该吸收进 ADR / code 后删」还是「任务仍在推进、留」，不做密度 / 提纯——判据在 CLAUDE.md 文档纪律 journey 条「任务收尾即审计点」）
 - `docs/guides/*.md`（给人的阅读理解层，派生视图——判据侧重见下「按文档类型的复盘侧重」）
 - **技术笔记/配方 + 工具手册**（如 `engines/midscene/spikes/SIGV4-FETCH-RECIPE.md`、`tools/e2e_harness.md`）——与代码同居、AI 照它接线/照它操作，**极易 STALE**（含可运行代码片段 + 命令 + 前置条件 + 踩坑点 + 源码路径）。
-- 未来新增的 docs/ 与子工程根下文档同样纳入（本任务名"文档健康度"、不焊死在某几类上——每次 `find . -name "*.md"` 排除 node_modules/.venv/.pytest_cache 扫一遍，别漏新文件）。
+- 未来新增的 docs/ 与子工程根下文档同样纳入（本任务名"文档健康度"、不焊死在某几类上——每次 `find . -name "*.md"` 排除 node_modules / .venv / .pytest_cache / **graphify-out**（含 wiki/，工具生成物）扫一遍，别漏新文件）。
 
-**明确排除**：`.claude/` 除 `commands/` 外的部分与 `.agents/`（skills / settings 是个人工具配置，不入库）；**`.claude/commands/` 在范围内**——它是本任务与姊妹任务的 Claude Code 入口、已入库，其要点摘要须与两份方法文档一致；`node_modules/`、`.venv/`、`.pytest_cache/`（依赖/缓存）；**repo 内 code 注释/docstring 的引用方向违规归姊妹任务 [`code-health-review.md`](./code-health-review.md)**（本任务只管 `.md`，分工线两侧一致）。
+**明确排除**：`.claude/` 除 `commands/` 外的部分与 `.agents/`（skills / settings 是个人工具配置，不入库）；**`.claude/commands/` 在范围内**——它是本任务与姊妹任务的 Claude Code 入口、已入库，其要点摘要须与两份方法文档一致；`node_modules/`、`.venv/`、`.pytest_cache/`（依赖/缓存）；**`graphify-out/`**（graph.json / GRAPH_REPORT.md / wiki/ 全是 graphify 生成物，刷新走 DEVELOPMENT.md「知识图刷新」，不当文档审）；**repo 内 code 注释/docstring 的引用方向违规归姊妹任务 [`code-health-review.md`](./code-health-review.md)**（本任务只管 `.md`，分工线两侧一致）。
 
 ### 第一层：片内审计（可用 workflow 并行）
 
 - **分片按主题耦合分组**——把主题相关、易互相矛盾的 ADR 分在同一片，便于发现**跨片矛盾**（先看当前 ADR 集自行按主题聚类，别照抄某一时刻的固定分组）。
 - **【强制】STALE 类必须 Read/Grep 实际 code 核实**，禁止凭印象——本任务最大的一类问题就是"code 改了、文档没跟"，只有对照 code 才抓得到。
-  - **枚举型内容是最高收益的机械核对点，逐条对真值集、别靠读**：目录树 / flag·选项表 / 模块清单 / 字段·事件类型列表 / 交叉引用 / ADR 编号范围——每一项都拿文档清单去 `ls` / grep / 对照 argparse 逐条比对源真值。**关键机制：遗漏项（实际有、文档漏列）在你读"已列出的内容"时是隐形的**——只有做「文档清单 vs 真值集」的差集才照得出，读列表本身永远发现不了漏了什么（本项目亲历：README 目录树漏 3 个顶层目录、cli 选项表漏 5 个 flag、ADR 接口清单漏字段——全是散文读着没问题、逐条对真值集才现形）。
+  - **枚举型内容是最高收益的机械核对点，逐条对真值集、别靠读**：目录树 / flag·选项表 / 模块清单 / 字段·事件类型列表 / 交叉引用 / ADR 编号范围——每一项都拿文档清单去 `ls` / grep / 对照 argparse 逐条比对源真值。**关键机制：遗漏项（实际有、文档漏列）在你读"已列出的内容"时是隐形的**——只有做「文档清单 vs 真值集」的差集才照得出，读列表本身永远发现不了漏了什么（本项目亲历：目录树（当时在 README，现在 DEVELOPMENT.md）漏 3 个顶层目录、cli 选项表漏 5 个 flag、ADR 接口清单漏字段——全是散文读着没问题、逐条对真值集才现形）。
 - **【强制】矛盾/过时/坏链接等客观类，逐条对抗验证**：交一个独立视角读原文+code 尝试**证伪**（默认怀疑），只保留 CONFIRMED 的——防止误判（把有意历史记录/风格偏好当成 bug）。
 - **【强制】提纯/密度审计（对本轮动过的 ADR）**——纠错抓「错」，这条抓「稀」；没有它，复盘会结构性偏向纠错、提纯永远被挤掉（亲历：一轮 16 条发现全是纠错、零提纯）：
   - **选材（全量，同本任务「全部项目文档」基调）**：审计集 = **全部 ADR + CONTEXT**——「何时做」的事件驱动只定何时触发，不缩覆盖范围。**有界工作量靠跨轮沿用、不靠缩范围**：自上轮提纯审计以来无改动的 ADR（`git log` 区间零命中），可沿用上轮对它的具名结论作判无依据（锚定到上轮审计 commit，仍是内容锚定、可核）；动过的必须重审。**动/没动清单写进报告**（可复核，不许沉默断言）。churn 高低只决定读的细致排序，**不做截断线**。首轮无前轮可沿用 = 全量深清、建立基线。
@@ -74,6 +78,7 @@ ADR/CONTEXT 是随构建**逐步长起来**的：每次在前人文档上叠加�
 - **构建引用图**（谁引用谁、入度/出度）：找孤儿节点（无人引用，可能已废）、超级枢纽（出入度都极高，可能过载——但高内聚总纲不该拆，只在"某段频繁独立变更且牵动无关段"时才是拆分信号）。**顺带标记反向违规边**：任何「长期文档 → `docs/journey/`」的引用都是方向违规（稳定物依赖了易删物），引用图里最易一眼看出——全部报（按 DEADLINK 引用方向违规条修）。
 - **Status 头一致性**：每个 ADR 有无标准 Status 头（见下）；"被取代"链是否双向（新 ADR 指向旧的，旧 ADR 也标了 superseded-by）。
 - **被取代/证伪的 ADR** 是否标了历史、反向指针是否补全。
+- **文件名合规（机械项，`ls` 一遍即可）**：`docs/` 下全部文件名英文 kebab-case；`docs/adr/`、`docs/journey/` 带四位编号且各自不复用；例外只有约定俗成的全大写入口文件（判据在 CLAUDE.md 文档纪律「文档文件名」条）。
 
 ### Status 头（每个 ADR 开头一行）
 

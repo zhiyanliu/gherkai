@@ -250,9 +250,9 @@
     "semantic_hash": "d17b8a9a35ce4e9fda4d8e98ba0c3de0"
   },
   "docs/code-health-review.md": {
-    "mtime": 1788840569.88268,
-    "ast_hash": "cbe8f8e132c8a585811ca034c36dac28",
-    "semantic_hash": "cbe8f8e132c8a585811ca034c36dac28"
+    "mtime": 1788932909.9343073,
+    "ast_hash": "5eecb1e1f73c4841f15048b395ff7192",
+    "semantic_hash": ""
   },
   "tools/e2e_harness.md": {
     "mtime": 1788922049.6524231,
@@ -265,13 +265,13 @@
     "semantic_hash": "edae2c4a98921a58c66c6b46316bba26"
   },
   "CONTEXT.md": {
-    "mtime": 1788928906.4001615,
-    "ast_hash": "9d8f786471babb898556403fc29041b5",
+    "mtime": 1788931912.2706928,
+    "ast_hash": "65d36e5e4bd272d07d0fe670df7e7336",
     "semantic_hash": ""
   },
   "README.md": {
-    "mtime": 1788929729.320837,
-    "ast_hash": "72b0824bc2bb232cda72687b6562e445",
+    "mtime": 1788932925.6516585,
+    "ast_hash": "1735a2a5d3b3ccf5433431a62036fad4",
     "semantic_hash": ""
   },
   "cli/README.md": {
@@ -280,9 +280,9 @@
     "semantic_hash": "a5b36d43fbf60c1cf4d3cfa212ec622d"
   },
   "docs/adr/0001-scope-limited-to-english-ui.md": {
-    "mtime": 1786952681.1430705,
-    "ast_hash": "fb4b1311a64249e1da6b22393e7b642a",
-    "semantic_hash": "fb4b1311a64249e1da6b22393e7b642a"
+    "mtime": 1788931912.269966,
+    "ast_hash": "7f3a912f359704746f6c8a970397fa1b",
+    "semantic_hash": ""
   },
   "docs/adr/0002-midscene-not-driven-by-gpt55.md": {
     "mtime": 1786943842.4949992,
@@ -420,14 +420,14 @@
     "semantic_hash": "44018fbf68aae534146da597643a2200"
   },
   "docs/doc-health-review.md": {
-    "mtime": 1788930016.1187809,
-    "ast_hash": "69bd641dad18e8e204296cfd3e8d296d",
+    "mtime": 1788932909.9340467,
+    "ast_hash": "feb9548deb9853d94f50e505e40940e0",
     "semantic_hash": ""
   },
   "engines/midscene/README.md": {
-    "mtime": 1788922049.6641738,
-    "ast_hash": "d09e3c1336e06b01e3a62089b64fa3f6",
-    "semantic_hash": "d09e3c1336e06b01e3a62089b64fa3f6"
+    "mtime": 1788931912.2711234,
+    "ast_hash": "e819f87da2d305c70367e63792d8fbcb",
+    "semantic_hash": ""
   },
   "engines/midscene/spikes/SIGV4-FETCH-RECIPE.md": {
     "mtime": 1788770701.8788826,
@@ -435,9 +435,9 @@
     "semantic_hash": "c93fa56b196da5e636b761e8f890ac6f"
   },
   "engines/novaact/README.md": {
-    "mtime": 1788922049.6642957,
-    "ast_hash": "45ae6522812e1c78653d818375c02f6e",
-    "semantic_hash": "45ae6522812e1c78653d818375c02f6e"
+    "mtime": 1788931912.2709904,
+    "ast_hash": "2d6325d48c3453f236b6fb08f49d90b6",
+    "semantic_hash": ""
   },
   "docs/adr/0035-local-app-testing-via-tunnel.md": {
     "mtime": 1788767843.66356,
@@ -1110,8 +1110,8 @@
     "semantic_hash": "4047e4947c6dabeae8d1be6134e0dd0a"
   },
   "DEVELOPMENT.md": {
-    "mtime": 1788930016.1190424,
-    "ast_hash": "e1ed5a2368cebbc855c817cdde8f4462",
+    "mtime": 1788931912.2713823,
+    "ast_hash": "9427804e92f50df9930fae11f1fdab57",
     "semantic_hash": ""
   },
   "docs/adr/0039-user-facing-surfaces-no-internal-references.md": {
@@ -1130,8 +1130,8 @@
     "semantic_hash": ""
   },
   ".claude/commands/code-health-review.md": {
-    "mtime": 1788930190.6705694,
-    "ast_hash": "7d39dff70659b0826ef1b86412b5fa2e",
+    "mtime": 1788932909.9345453,
+    "ast_hash": "5b816c4de57da7bf9928bbf2235574f3",
     "semantic_hash": ""
   },
   ".claude/commands/doc-health-review.md": {
