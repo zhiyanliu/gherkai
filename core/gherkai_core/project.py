@@ -129,6 +129,13 @@ def reduce_event(
 # ============================================================================
 
 
+# 平台侧退出哨兵（ADR 0034 机制二及其「launch 失败补偿」「退出码缺失」两条推论）：worker 进程**没有**给出退出码的两种形态
+# 都落它——①tick 起 task 失败（RunTask 抛/Popen OSError，进程根本没起）；②观察者收到 STOPPED 却缺 exitCode（容器没跑起来，
+# 如拉不到镜像）。非 0 即走「exit≠0 → ERROR」既有谓词，值本身不进任何分支判断；选 255 避开 worker 真实语义码（如网络码 80），
+# 只为日志/归因可辨识「这是平台侧起不来、不是 worker 跑挂」。core 单点定义，tick 与观察者 Lambda 都 import 本常量、别各抄一份。
+PLATFORM_FAILED_EXIT = 255
+
+
 @dataclass(frozen=True)
 class TaskExited:
     """平台侧退出观察者写入 events 表**独立键空间**的退出记录（ADR 0034 机制一/二）。
@@ -139,8 +146,10 @@ class TaskExited:
     events 表 SK 是 NUMBER、字符串前缀结构上不可行；local = 独立 `exits` 表；见 ADR 0034 机制一），不占
     worker 的连续数值 seq 段，故不参与 adapter 的单调 seq/断号检测（机制一：免撞号覆盖 scope_done）。
 
-    exit_code=None 仅用于「payload 缺 exitCode 的有界宽限态」（ADR 0032/0034 机制二兜底）——观察者应
-    在写 task_exited 前有界等待 exitCode 落值，正常必带值（实测 4/4 含 SIGKILL 都带）。
+    exit_code=None = 退出码未知（有退出记录、却没取到码）。**不是宽限态**（ADR 0034 机制二「退出码缺失」条）：
+    观察者只有一次机会看到 STOPPED，缺码时它应落 `PLATFORM_FAILED_EXIT` 哨兵 + reason；仍写 None 的（老版本观察者/
+    未知写者）由 `_job_status` 判 ERROR，绝不判 RUNNING（否则 run 永久 wedge）。
+    reason：平台侧归因（cloud = `stopCode: stoppedReason`），只在观察者落哨兵时带；投影进 job message 给用户看。
     """
 
     scope_id: str
@@ -149,6 +158,7 @@ class TaskExited:
     # local 由 launcher 的 timer 标志传入；cloud 经 StopTask reason → STOPPED 事件 detail.stoppedReason
     # 哨兵串还原。_job_status 见它 → ERROR，_reduce_scope 归因 error_type="timeout"。
     timed_out: bool = False
+    reason: str | None = None  # 平台侧归因（观察者落哨兵时带），见类 docstring
 
 
 @dataclass(frozen=True)
@@ -180,8 +190,8 @@ def project(meta: RunMeta, records: list[EventRecord], baseline: RunState | None
     1. 按 scope_id 分组 records；每组内 kind='event' 的按 seq 升序喂 reduce_event 归约出 JobResult；
     2. 「两件都要」纯谓词（机制二，谓词全文单一真源 = `_job_status`，别在两处各写一份）：以「有无
        task_exited」为一级键——有退出记录时进程终止本身即终态信号（exit≠0 → ERROR；exit==0 且见
-       scope_done → scenario 归约终态；exit==0 无 scope_done（含零事件）→ ERROR；exit_code 未落值 →
-       RUNNING 宽限）；无退出记录时见 scope_started → RUNNING、否则 PENDING。
+       scope_done → scenario 归约终态；exit==0 无 scope_done（含零事件）→ ERROR；退出码未知 →
+       ERROR）；无退出记录时见 scope_started → RUNNING、否则 PENDING。
     3. 聚合成 RunState：各 JobState（scope_id→status/session_id）+ run 总 status（_aggregate 终态）+
        high_water_mark（所有 scope 的 worker 段 max seq，机制三条件写用）。
 
@@ -269,7 +279,13 @@ def _reduce_scope(job: Job, recs: list[EventRecord]) -> tuple[JobResult, Status,
         # 兜底归因（detached 真跑教训：worker 起来即崩 → 零事件、判 error、message 全空——用户无从排障）。
         # 只补空 message、不覆盖 reduce 期已有归因；诊断细节在 worker stderr（local 落 reconcile.log /
         # cloud 落 CloudWatch task 日志），这里给指向。
-        if exited.exit_code not in (None, 0):
+        if exited.exit_code == PLATFORM_FAILED_EXIT:
+            # 平台侧哨兵：起 task 失败（tick 补偿）或容器没跑起来（观察者，带 reason）——不是 worker 自己的码
+            why = f"：{exited.reason}" if exited.reason else "——详见部署侧日志"
+            result.message = f"worker 未能启动或未正常结束（平台侧未取到退出码）{why}"
+        elif exited.exit_code is None:
+            result.message = "worker 已终止但退出码未知——无法判定为通过，按错误处理"
+        elif exited.exit_code != 0:
             result.message = f"worker 非正常退出（exit {exited.exit_code}；事件流无归因内容——详见 worker 日志）"
         elif exited.exit_code == 0 and not saw_scope_done:
             result.message = "worker 干净退出但内容不完整（无 scope_done）——矛盾形态，判 error"
@@ -326,8 +342,8 @@ def _job_status(
     - 有 task_exited（进程已终止，退出即终态信号，不论生命周期到哪）：
         · exit_code != 0 → ERROR（崩溃/网络码/SIGKILL/launch 失败哨兵；也防"发完 scope_done 又非0退出"
           的误报 PASSED）；
-        · exit_code is None → RUNNING（终止了但 exitCode 未落值，宽限态——含 TaskFailedToStart 的 STOPPED
-          无 exitCode 形态；保守等观察者补，机制二兜底）；
+        · exit_code is None → ERROR（有退出记录却无码：不可判定为通过；机制二「退出码缺失」条——观察者本应落
+          哨兵，此分支是防 wedge 的防御。曾判 RUNNING「等观察者补」，但 STOPPED 事件只来一次、永远补不上）；
         · exit_code == 0 且 saw_scope_done → scenario 归约的终态（passed/failed/error）；
         · exit_code == 0 但没 scope_done（含零事件干净退出）→ ERROR（内容不完整但进程说成功=矛盾，
           judged as error 比 running 死循环安全）。
@@ -339,7 +355,7 @@ def _job_status(
             # 处置本身即终态信号——归 ERROR，归因由 _reduce_scope 补 error_type="timeout"。
             return Status.ERROR
         if exited.exit_code is None:
-            return Status.RUNNING  # 终止了但 exitCode 未落值（宽限态）→ 保守，等观察者补
+            return Status.ERROR  # 有退出记录却无码 → 不可判定为通过；判 RUNNING 会永久 wedge（补码没有第二次机会）
         if exited.exit_code != 0:
             return Status.ERROR  # 进程非干净终止 → 终态（crash/网络码/SIGKILL/launch 失败统一收敛）
         # 到此 exit_code == 0（干净退出）：内容完整才算数

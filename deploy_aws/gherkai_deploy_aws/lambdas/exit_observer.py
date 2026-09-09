@@ -8,9 +8,11 @@ EventBridge rule（detail-type='ECS Task State Change'、lastStatus=STOPPED、�
 **只为 detached run 写**：同 cluster 的同步 `run --backend cloud` 的 task 同样触发本 handler，写前分流（见
 `_is_detached`；不变量与故障形态见 ADR 0034 端到端 cloud 1b 与机制一）。
 
-**exitCode 落值兜底（机制二）**：STOPPED 事件锚在 stoppedAt（已过 exitCode 落值窗口，真验证实必带值）；
-极少数缺 exitCode 时写 None（宽限态，project 保守判 running，reconciler 下轮由别的信号补——或 status --wait
-人工兜底）。不在此重查 DescribeTasks（保持 handler 薄、无额外 IAM；真验证明基本不需要）。
+**缺 exitCode → 落哨兵（机制二「退出码缺失」条）**：STOPPED 事件锚在 stoppedAt（已过 exitCode 落值窗口），正常退出
+必带码（真验 4/4）；缺码 = 容器没跑起来（stopCode=TaskFailedToStart：拉不到镜像/缺 secret/放置失败），且本事件是观察者
+**唯一一次机会**（ECS 不会再发）→ 写 `PLATFORM_FAILED_EXIT` 哨兵 + reason（`stopCode: stoppedReason`），投影走
+「exit≠0 → ERROR」收敛、用户在 job message 里看到归因。曾写 None 当宽限态等「下轮补」——没有下轮，run 永久 wedge。
+不在此重查 DescribeTasks（保持 handler 薄、无 ECS IAM；对 TaskFailedToStart 重查也永远拿不到码）。
 
 打包：本文件与 reconciler.py 是 **asset 原料**（住在 provider 包 `gherkai_deploy_aws/lambdas/`，ADR 0037 决策 6），
 由 `BackendStack._build_lambda_asset` 摊到 zip **根**（故按顶层模块名 import reconciler，不走包路径）。
@@ -23,15 +25,17 @@ from __future__ import annotations
 import os
 
 
-def _extract(detail: dict) -> tuple[str | None, str | None, int | None, bool]:
-    """从 STOPPED event 的 detail 拿 (run_id, scope_id, exit_code, timed_out)。
+def _extract(detail: dict) -> tuple[str | None, str | None, int | None, bool, str | None]:
+    """从 STOPPED event 的 detail 拿 (run_id, scope_id, exit_code, timed_out, reason)。
 
     run_id/scope_id：RunTask 注入的 env 原样在 detail.overrides.containerOverrides[].environment（真验坐实）。
-    exit_code：detail.containers[] 里匹配的 container 的 exitCode（缺 → None，宽限态）。
+    exit_code：detail.containers[] 里匹配的 container 的 exitCode；**缺 → `PLATFORM_FAILED_EXIT` 哨兵**（容器没跑
+    起来，见模块头），此时 reason = `stopCode: stoppedReason`（用户可见归因）；带码时 reason=None（worker 自己的日志才是归因源）。
     timed_out：detail.stoppedReason 含超时哨兵（reconciler 的超时处置 StopTask(reason) 原样出现在此，
     ADR 0034「job timeout」节归因链）→ task_exited 带 timed_out=True。
     """
     from reconciler import TIMEOUT_STOP_SENTINEL
+    from gherkai_core.project import PLATFORM_FAILED_EXIT
     run_id = scope_id = None
     for co in detail.get("overrides", {}).get("containerOverrides", []):
         for e in co.get("environment", []):
@@ -47,8 +51,13 @@ def _extract(detail: dict) -> tuple[str | None, str | None, int | None, bool]:
             if c.get("exitCode") is not None:
                 exit_code = c["exitCode"]
                 break
-    timed_out = TIMEOUT_STOP_SENTINEL in (detail.get("stoppedReason") or "")
-    return run_id, scope_id, exit_code, timed_out
+    stopped_reason = detail.get("stoppedReason") or ""
+    timed_out = TIMEOUT_STOP_SENTINEL in stopped_reason
+    reason = None
+    if exit_code is None:
+        exit_code = PLATFORM_FAILED_EXIT
+        reason = ": ".join(x for x in (detail.get("stopCode"), stopped_reason) if x) or "平台未给出退出码与原因"
+    return run_id, scope_id, exit_code, timed_out, reason
 
 
 def _is_detached(run_id: str) -> bool:
@@ -80,7 +89,7 @@ def _event_log(run_id: str, scope_id: str):
 def handler(event, context):
     """EventBridge ECS STOPPED 事件入口。写本 task 的 task_exited。"""
     detail = event.get("detail", {})
-    run_id, scope_id, exit_code, timed_out = _extract(detail)
+    run_id, scope_id, exit_code, timed_out, reason = _extract(detail)
     if not run_id or not scope_id:
         # 非本框架起的 task（同 cluster 别的负载）或 env 缺失 → 忽略（rule 已按 cluster 过滤，此为双保险）
         print(f"exit_observer: 跳过（缺 run_id/scope_id）taskArn={detail.get('taskArn')}")
@@ -89,6 +98,8 @@ def handler(event, context):
         print(f"exit_observer: 跳过（run {run_id} 非 detached，同步 cloud run 自己观察退出）")
         return {"skipped": True, "reason": "not-detached"}
     log = _event_log(run_id, scope_id)
-    log.record_exit(scope_id, exit_code, timed_out=timed_out)
-    print(f"exit_observer: task_exited run={run_id} scope={scope_id} exit={exit_code} timed_out={timed_out}")
-    return {"ok": True, "run_id": run_id, "scope_id": scope_id, "exit_code": exit_code, "timed_out": timed_out}
+    log.record_exit(scope_id, exit_code, timed_out=timed_out, reason=reason)
+    print(f"exit_observer: task_exited run={run_id} scope={scope_id} exit={exit_code} timed_out={timed_out}"
+          + (f" reason={reason!r}" if reason else ""))
+    return {"ok": True, "run_id": run_id, "scope_id": scope_id, "exit_code": exit_code, "timed_out": timed_out,
+            "reason": reason}

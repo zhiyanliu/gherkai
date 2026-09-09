@@ -37,7 +37,7 @@ class CloudLauncher:
         self._timeout_watch = timeout_watch
 
     def launch(self, job: Job) -> None:
-        # 武装**先于**起 task（ADR 0034「job timeout」节）：start_scope 失败时 tick 会补偿 record_exit(255)，
+        # 武装**先于**起 task（ADR 0034「job timeout」节）：start_scope 失败时 tick 会补偿 record_exit(PLATFORM_FAILED_EXIT)，
         # 但若补偿也失败（双失败）、job 永停 RUNNING——先建的 schedule 到点仍能收敛（「永 running」的最后
         # 兜底不因 launch 失败缺位）；失败 launch 留下的 schedule 到点走 no-op/直接收敛并自动删，零残留。
         if job.timeout_s:
@@ -55,6 +55,6 @@ class CloudLauncher:
                                    self._run_id, job.scope_id, exc_info=True)
         # fire-and-forget：按 engine 取 FargateEngine、start_scope 起 task 就返回。task_arn 不在此保留——
         # reconciler 靠 events 表（worker PutItem）+ task_exited（退出观察者 Lambda 写）推进，不靠 launcher 轮询。
-        # 异常冒泡（不兜）——tick 靠它触发 launch 失败补偿（record_exit 哨兵 255）。
+        # 异常冒泡（不兜）——tick 靠它触发 launch 失败补偿（record_exit 哨兵 PLATFORM_FAILED_EXIT）。
         engine = self._resolver(job.engine)
         engine.start_scope(job)

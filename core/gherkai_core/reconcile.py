@@ -27,12 +27,12 @@ class EventLog(Protocol):
     def records(self) -> list: ...  # list[EventRecord]（gherkai_core.project）
 
     # 幂等（独立键空间，机制一）。timed_out：超时处置的 stop 所致退出（ADR 0034「job timeout」节归因链）。
-    def record_exit(self, scope_id: str, exit_code: int | None, *, timed_out: bool = False) -> None: ...
+    def record_exit(self, scope_id: str, exit_code: int | None, *, timed_out: bool = False,
+                    reason: str | None = None) -> None: ...
 
 
-# launch 失败补偿的哨兵退出码（机制二推论）：非 0 即走「exit≠0 → ERROR」谓词，值本身不进任何分支判断；
-# 选 255 避开 worker 真实语义码（如网络码 80），只为日志可辨识「这是起不来、不是跑挂」。
-_LAUNCH_FAILED_EXIT = 255
+# launch 失败补偿的哨兵退出码（机制二推论）：定义在 project.py（与 TaskExited 同处、观察者 Lambda 亦 import），此处只引用。
+from gherkai_core.project import PLATFORM_FAILED_EXIT  # noqa: E402
 
 
 class Launcher(Protocol):
@@ -115,7 +115,7 @@ def tick(
                     # task_exited（进程没起、平台观察者无从观察）——不补偿则永停 RUNNING、整批 wedge、
                     # 三触发源都救不回。tick 在此扮演「起不来」时刻的退出观察者：记非 0 退出，下轮
                     # 重放走「exit≠0 → ERROR」既有谓词收敛。异常不裸穿（失败隔离：别拖垮同批其余 job）。
-                    event_log.record_exit(act.scope_id, _LAUNCH_FAILED_EXIT)
+                    event_log.record_exit(act.scope_id, PLATFORM_FAILED_EXIT)
         elif act.kind == "finalize":
             # 全 job 达终态（plan_next 只在此时给 finalize 动作）→ run 已 done。
             # try_finalize 状态机单调条件写：True=本实例抢到 commit（负责 report 聚合）；False=别人已 finalize

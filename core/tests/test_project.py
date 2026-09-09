@@ -15,7 +15,7 @@ from gherkai_core.model import (
     Status,
     Step,
 )
-from gherkai_core.project import Action, EventRecord, TaskExited, plan_next, project
+from gherkai_core.project import PLATFORM_FAILED_EXIT, Action, EventRecord, TaskExited, plan_next, project, project_full
 
 
 def _job(scope_id: str, engine: str = "novaact") -> Job:
@@ -119,18 +119,35 @@ def test_sigkill_137_is_error():
     assert state.jobs["a"].status == Status.ERROR
 
 
-def test_exit_code_none_is_conservative_running():
-    """exit_code=None（宽限态未落值）→ 保守判 RUNNING、不轻易落终态（机制二兜底）。"""
+def test_exit_code_none_is_error_not_running():
+    """有退出记录却无码（exit_code=None）→ ERROR：退出码未知即不可判定为通过（ADR 0034 机制二「退出码缺失」条）。
+    曾判 RUNNING「等观察者补」——STOPPED 事件只来一次、永远补不上，那是 run 永久 wedge 的根因。"""
     recs = _passed_events("a") + [_exit("a", None)]
     state = project(_meta("a"), recs)
-    assert state.jobs["a"].status == Status.RUNNING
+    assert state.jobs["a"].status == Status.ERROR
+    result = project_full(_meta("a"), recs)
+    assert "退出码未知" in (result.jobs[0].message or "")
+
+
+def test_platform_sentinel_exit_surfaces_reason_in_message():
+    """观察者落的平台哨兵（容器没跑起来）→ ERROR，且 reason（stopCode: stoppedReason）进 job message 给用户看归因。"""
+    exited = TaskExited(scope_id="a", exit_code=PLATFORM_FAILED_EXIT,
+                        reason="TaskFailedToStart: CannotPullContainerError: not found")
+    recs = [EventRecord(scope_id="a", kind="exit", exited=exited)]  # 零事件：容器根本没起
+    result = project_full(_meta("a"), recs)
+    jr = result.jobs[0]
+    assert jr.status == Status.ERROR
+    assert "CannotPullContainerError" in jr.message and "未能启动" in jr.message
+    # tick 的 launch 失败补偿同一哨兵、无 reason → 指向部署侧日志，不留空 message
+    result2 = project_full(_meta("a"), [_exit("a", PLATFORM_FAILED_EXIT)])
+    assert "部署侧日志" in result2.jobs[0].message
 
 
 # ---------- job timeout 归因链（ADR 0034「job timeout」节）----------
 
 def test_timed_out_exit_is_error_regardless_of_exit_code_shape():
     """超时处置的 stop → ERROR，不论 exit_code 形态（SIGKILL 137 / 协作退 0 / 未落值 None——
-    None 平时是保守 RUNNING 宽限态，timed_out 短路它：处置本身即终态信号）。"""
+    timed_out 归因优先：处置本身即终态信号，error_type 记 timeout 而非按码归因）。"""
     for code in (137, 0, None):
         recs = [_ev("a", 1, ScopeStarted(scope_id="a", session_id="s")), _timeout_exit("a", code)]
         state = project(_meta("a"), recs)
@@ -285,11 +302,12 @@ def test_clean_exit_without_events_converges_with_claimed_baseline():
     assert state.jobs["a"].status == Status.ERROR
 
 
-def test_exit_none_without_events_is_running_grace():
-    """零事件 + exit=None（TaskFailedToStart 的 STOPPED 无 exitCode）→ RUNNING 宽限（等观察者补），非 PENDING。
+def test_exit_none_without_events_is_error_not_pending_nor_running():
+    """零事件 + 有退出记录却无码 → ERROR（终态），既非 PENDING 也非 RUNNING（ADR 0034 机制二「退出码缺失」条）。
 
-    判 PENDING 会让 plan_next 重复提议 start（与已 claim 基线合并后则永停）——宽限 RUNNING 是机制二兜底语义。
+    判 PENDING 会让 plan_next 重复提议 start（与已 claim 基线合并后则永停）；判 RUNNING「等观察者补」同样永停——
+    STOPPED 事件只来一次。观察者本应落哨兵，此分支是防 wedge 的防御。
     """
     meta = _meta("a")
     state = project(meta, [_exit("a", None)])
-    assert state.jobs["a"].status == Status.RUNNING
+    assert state.jobs["a"].status == Status.ERROR

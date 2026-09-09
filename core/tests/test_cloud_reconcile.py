@@ -255,3 +255,15 @@ def test_ddb_event_log_queries_with_consistent_read():
     assert DdbEventLog(table, "run-1", ["a", "b"]).records() == []
     assert len(table.calls) == 2
     assert all(kw.get("ConsistentRead") is True for kw in table.calls), table.calls
+
+
+def test_ddb_record_exit_reason_roundtrip(events_table):
+    """DDB 侧 reason 属性 omit-when-empty、records() 读回进 TaskExited.reason（观察者落哨兵时的用户可见归因）。"""
+    log = DdbEventLog(events_table, "run-1", ["a", "b"])
+    log.record_exit("a", 255, reason="TaskFailedToStart: CannotPullContainerError")
+    log.record_exit("b", 0)
+    exits = {r.scope_id: r.exited for r in log.records() if r.kind == "exit"}
+    assert exits["a"].exit_code == 255 and exits["a"].reason == "TaskFailedToStart: CannotPullContainerError"
+    assert exits["b"].reason is None
+    item = events_table.get_item(Key={"pk": events_pk("run-1", "b"), "seq": EXIT_SK})["Item"]
+    assert "reason" not in item

@@ -44,7 +44,7 @@ def test_has_exit_single_scope(tmp_path):
     log = _log(tmp_path)
     log.append_event("a", 1, '{"type":"scope_started","scopeId":"a"}', 1.0)
     assert log.has_exit("a") is False
-    log.record_exit("a", None)  # exit_code=None（宽限态）也算「退出记录已在」
+    log.record_exit("a", None)  # exit_code=None（退出码未知，超时直写形态）也算「退出记录已在」
     assert log.has_exit("a") is True
     assert log.has_exit("b") is False
 
@@ -87,3 +87,13 @@ def test_records_feed_project_to_terminal(tmp_path):
     assert state.jobs["a"].status == Status.PASSED
     assert state.jobs["a"].session_id == "s"
     assert state.high_water_mark == 3
+
+
+def test_record_exit_reason_roundtrip(tmp_path):
+    """reason（平台侧归因串，port 对称 DDB）随退出记录落库、records() 读回；不传则 None。"""
+    log = _log(tmp_path)
+    log.record_exit("a", 255, reason="TaskFailedToStart: CannotPullContainerError")
+    log.record_exit("b", 0)
+    exits = {r.scope_id: r.exited for r in log.records() if r.kind == "exit"}
+    assert exits["a"].exit_code == 255 and exits["a"].reason == "TaskFailedToStart: CannotPullContainerError"
+    assert exits["b"].reason is None

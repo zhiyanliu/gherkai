@@ -69,7 +69,8 @@ class DdbEventLog:
                             scope_id=scope_id, kind="exit",
                             exited=TaskExited(scope_id=scope_id,
                                               exit_code=int(ec) if ec is not None else None,
-                                              timed_out=bool(it.get("timed_out", False))),
+                                              timed_out=bool(it.get("timed_out", False)),
+                                              reason=it.get("reason")),
                         ))
                     else:
                         recs.append(EventRecord(
@@ -108,11 +109,13 @@ class DdbEventLog:
         )
         return got.get("Item") is not None
 
-    def record_exit(self, scope_id: str, exit_code: int | None, *, timed_out: bool = False) -> None:
+    def record_exit(self, scope_id: str, exit_code: int | None, *, timed_out: bool = False,
+                    reason: str | None = None) -> None:
         """退出观察者 Lambda 调：写 task_exited 到保留高位 SK（独立键空间，机制一）。INSERT 幂等（覆盖同键）。
 
-        exit_code=None 仅用于「payload 缺 exitCode 的宽限态」（机制二兜底，观察者应尽量带值）。
-        timed_out：STOPPED 事件 stoppedReason 含超时哨兵（ADR 0034「job timeout」节归因链）；omit-when-False。"""
+        exit_code：观察者缺 exitCode 时应落 `PLATFORM_FAILED_EXIT` 哨兵而非 None（机制二「退出码缺失」条）；None 仅
+        超时处置直写（timed_out=True）时出现。timed_out：STOPPED 事件 stoppedReason 含超时哨兵（ADR 0034「job timeout」节
+        归因链）；reason：平台侧归因串（`stopCode: stoppedReason`），随哨兵一起带。两者 omit-when-empty。"""
         item = {
             PK_ATTR: events_pk(self._run_id, scope_id),
             SK_ATTR: EXIT_SK,
@@ -122,4 +125,6 @@ class DdbEventLog:
             item[EXIT_CODE_ATTR] = exit_code
         if timed_out:
             item["timed_out"] = True
+        if reason:
+            item["reason"] = reason
         self._table.put_item(Item=item)

@@ -9,8 +9,8 @@ worker 事件（原始 ADR 0024 JSON 行 + worker 段单调 seq）+ 平台侧退
 **表结构镜像 DDB events 表**（[0024]/[0034]）：
 - events 表：(scope_id, seq) 复合主键，line=原始 JSON 行，emit_ts=worker emit 墙钟（reduce_event 的 now）。
   worker 段单调数值 seq——per-run 进程读 fd3 时按到达顺序 1,2,3… 赋（worker 一个 scope 串行 emit）。
-- exits 表：(scope_id) 主键，exit_code（NULL=exitCode 未落值的宽限态）+ timed_out（超时处置所致退出的归因
-  标志，[0034]「job timeout」节）。独立表 = 独立键空间（机制一：退出记录不占 worker 数值 seq 段、不参与断号）。
+- exits 表：(scope_id) 主键，exit_code（NULL=退出码未知，仅超时处置直写时出现；投影判 ERROR、非宽限）+ timed_out（超时处置
+  所致退出的归因标志，[0034]「job timeout」节）+ reason（平台侧归因串，cloud 观察者落哨兵时带；local 恒空）。独立表 = 独立键空间（机制一：退出记录不占 worker 数值 seq 段、不参与断号）。
 
 并发：per-run 进程写、reconciler 读（同进程内两职责，也可能 status --wait 另进程读）。SQLite WAL 模式 +
 短事务，多读单写足够；跨进程写并发不在 local 目标内（写只有 per-run 进程一个）。
@@ -51,15 +51,18 @@ class SqliteEventLog:
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS exits ("
                 "  scope_id TEXT PRIMARY KEY,"  # 独立键空间（机制一）：退出记录不占 events 的 seq 段
-                "  exit_code INTEGER,"          # NULL 表 exitCode 尚未落值（宽限态，机制二兜底）
-                "  timed_out INTEGER NOT NULL DEFAULT 0"  # 超时归因（ADR 0034「job timeout」节）
+                "  exit_code INTEGER,"          # NULL = 退出码未知（仅超时处置直写；投影判 ERROR，机制二「退出码缺失」条）
+                "  timed_out INTEGER NOT NULL DEFAULT 0,"  # 超时归因（ADR 0034「job timeout」节）
+                "  reason TEXT"                 # 平台侧归因串（观察者落哨兵时带）
                 ")"
             )
-            # 旧库迁移（加列幂等）：timeout 列引入前建的 exits 表补列；已有列 → OperationalError，忽略
-            try:
-                conn.execute("ALTER TABLE exits ADD COLUMN timed_out INTEGER NOT NULL DEFAULT 0")
-            except sqlite3.OperationalError:
-                pass
+            # 旧库迁移（加列幂等）：列引入前建的 exits 表补列；已有列 → OperationalError，忽略
+            for ddl in ("ALTER TABLE exits ADD COLUMN timed_out INTEGER NOT NULL DEFAULT 0",
+                        "ALTER TABLE exits ADD COLUMN reason TEXT"):
+                try:
+                    conn.execute(ddl)
+                except sqlite3.OperationalError:
+                    pass
 
     def append_event(self, scope_id: str, seq: int, line: str, emit_ts: float) -> None:
         """追加一条 worker 事件（原始 JSON 行）。INSERT OR REPLACE：同 (scope,seq) 幂等（重放/重试无副作用）。"""
@@ -69,14 +72,16 @@ class SqliteEventLog:
                 (scope_id, seq, line, emit_ts),
             )
 
-    def record_exit(self, scope_id: str, exit_code: int | None, *, timed_out: bool = False) -> None:
+    def record_exit(self, scope_id: str, exit_code: int | None, *, timed_out: bool = False,
+                    reason: str | None = None) -> None:
         """写平台侧退出记录（per-run 进程 proc.wait() 拿到 exitcode 后调，机制二）。INSERT OR REPLACE 幂等。
 
-        timed_out：本次退出由超时处置的 stop 所致（launcher timer 标志，ADR 0034「job timeout」节归因链）。"""
+        timed_out：本次退出由超时处置的 stop 所致（launcher timer 标志，ADR 0034「job timeout」节归因链）。
+        reason：平台侧归因串（port 对称 DDB；local 宿主拿得到真实退出码、通常不传）。"""
         with self._connect() as conn:
             conn.execute(
-                "INSERT OR REPLACE INTO exits (scope_id, exit_code, timed_out) VALUES (?, ?, ?)",
-                (scope_id, exit_code, 1 if timed_out else 0),
+                "INSERT OR REPLACE INTO exits (scope_id, exit_code, timed_out, reason) VALUES (?, ?, ?, ?)",
+                (scope_id, exit_code, 1 if timed_out else 0, reason),
             )
 
     def has_exit(self, scope_id: str) -> bool:
@@ -99,12 +104,12 @@ class SqliteEventLog:
                     scope_id=scope_id, kind="event", seq=seq,
                     event=event_from_line(line), emit_ts=emit_ts,
                 ))
-            for scope_id, exit_code, timed_out in conn.execute(
-                "SELECT scope_id, exit_code, timed_out FROM exits"
+            for scope_id, exit_code, timed_out, reason in conn.execute(
+                "SELECT scope_id, exit_code, timed_out, reason FROM exits"
             ):
                 recs.append(EventRecord(
                     scope_id=scope_id, kind="exit",
-                    exited=TaskExited(scope_id=scope_id, exit_code=exit_code, timed_out=bool(timed_out)),
+                    exited=TaskExited(scope_id=scope_id, exit_code=exit_code, timed_out=bool(timed_out), reason=reason),
                 ))
         return recs
 

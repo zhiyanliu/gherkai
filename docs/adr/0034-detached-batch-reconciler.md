@@ -81,8 +81,8 @@ gherkai run <features>    # 原阻塞皮 = 同进程 schedule() 驱动循环（T
      claim/投影全 CCF 空转（`DynamoDBRunStore.create_run` 守此写序）。
 2. worker 云上跑（CLI 退出不杀 task，已实测）：PutItem 执行事件(seq 递增)→events 表；上传产物→S3
 3. task STOPPED → ECS 自动发 "Task State Change: STOPPED" 事件 → EventBridge
-     → [退出观察者 Lambda]（先判 detached，同步 run 的 task 停下不写）：从事件 payload 读 exitCode（实测 4/4 都带，含 SIGKILL=137）
-       → PutItem 一条 task_exited 事件(独立键空间 + exitCode) 到 events 表
+     → [退出观察者 Lambda]（先判 detached，同步 run 的 task 停下不写）：从事件 payload 读 exitCode（实测 4/4 都带，含 SIGKILL=137；缺则落哨兵 255 + reason，见机制二「退出码缺失」条）
+       → PutItem 一条 task_exited 事件(独立键空间 + exitCode[+reason]) 到 events 表
 4. events 表变化 → DynamoDB Stream → [reconciler Lambda]（先判 detached，非 detached 整体 no-op）：
      ① 读该 run 全量 events → 纯推演完整 RunState
      ② HWM 条件写落 RunState（挡 stale 覆盖）
@@ -123,7 +123,7 @@ per-run 进程（观察者+reconciler 三合一）：spawn worker 子进程
 
 退出观察者**不持有** worker 的 seq 计数器（[0024](./0024-worker-core-protocol.md)：seq 单进程串行自增、无分布式协调）。若 `task_exited` 塞进 worker 的连续数值 seq 段，DDB 最终一致读会算错 max seq → 撞号**覆盖 `scope_done`**（裸 PutItem 无条件写），或造空号让 adapter 断号检测死循环。**故 `task_exited` 用独立键空间**，adapter 的单调 seq/断号检测只跑 worker 的连续 seq 段，退出事件旁挂不入流。**两侧落地形态（实装）**：cloud events 表 SK 是 NUMBER（[0033](./0033-iac-aws-backend-and-composition-wiring.md) 资源清单 events 表），**字符串前缀（`exit#` 之类）结构上不可行**——护栏记此，别再往 NUMBER SK 上设计前缀；改用**保留高位数值 SK**（`10**18`，worker seq 从 1 递增、永不到它）+ 属性 `item_type='exit'`。local SQLite 用**独立 `exits` 表**（不占 events 表的 `(scope_id, seq)` 键空间）。worker「每 PK 单写者、seq 单进程自增」不变量**原样保留**——events 表只是多了一个**独立键空间**的第二写者（演进 [0024](./0024-worker-core-protocol.md)，见下）。
 
-**独立键空间只对无状态路径的读端存在**：exit item 只有 `pk/seq/item_type/exit_code?/timed_out?`、**无 `body` 属性**（它不是一条 [0024](./0024-worker-core-protocol.md) 事件行），故只有按 `item_type` 分流的 `DdbEventLog.records()` 认得它；同步 `run --backend cloud` 的读端（`FargateEngine` 的 events Query 轮询与最终 drain，[0024](./0024-worker-core-protocol.md)）按「每个 item 都是事件行」取 `body`，读到 exit item 即 `KeyError`（真跑前以假 events 表实测确认）。**故不变量是「exit item 只许落在 detached run 的 PK 上」**——exit-observer 写之前必须分流 detached（同步 run 的 task 与 detached 共用一个 cluster、必触发同一条 EventBridge rule，见上端到端 cloud 1b 的 handler 侧分流），且这些 item 对同步路径本就是无人消费的垃圾（同步路径不用 `DdbEventLog`）。不变量守在**写端**：同步读端若再加一层「非 `body` item 跳过」只是纯加法加固，不替代写端分流。
+**独立键空间只对无状态路径的读端存在**：exit item 只有 `pk/seq/item_type/exit_code?/timed_out?/reason?`、**无 `body` 属性**（它不是一条 [0024](./0024-worker-core-protocol.md) 事件行），故只有按 `item_type` 分流的 `DdbEventLog.records()` 认得它；同步 `run --backend cloud` 的读端（`FargateEngine` 的 events Query 轮询与最终 drain，[0024](./0024-worker-core-protocol.md)）按「每个 item 都是事件行」取 `body`，读到 exit item 即 `KeyError`（真跑前以假 events 表实测确认）。**故不变量是「exit item 只许落在 detached run 的 PK 上」**——exit-observer 写之前必须分流 detached（同步 run 的 task 与 detached 共用一个 cluster、必触发同一条 EventBridge rule，见上端到端 cloud 1b 的 handler 侧分流），且这些 item 对同步路径本就是无人消费的垃圾（同步路径不用 `DdbEventLog`）。不变量守在**写端**：同步读端若再加一层「非 `body` item 跳过」只是纯加法加固，不替代写端分流。
 
 ### 机制二：退出事件由平台侧观察者提供，从事件 payload 读 exitCode
 
@@ -133,16 +133,16 @@ per-run 进程（观察者+reconciler 三合一）：spawn worker 子进程
 
 - **`task_exited` 且 exit≠0（崩溃/网络码 80/SIGKILL）→ ERROR 终态，不等 `scope_done`**：worker 崩了根本没机会发 `scope_done`，此时**进程非干净终止本身就是终态信号**。若仍死等 `scope_done`，crash job 永远 RUNNING、reconciler 死循环（真跑 crash worker 复现，回归护栏 `core/tests/test_project.py::test_crash_no_scope_done_nonzero_exit_is_error`）。这一分支也覆盖「发完 scope_done 又非 0 退出」的误报 PASSED（exit≠0 一律 error，不看内容）。
 - **`task_exited` 且 exit==0 → 要求 `scope_done`**：干净退出才谈「内容完整」。有 `scope_done` → scenario 归约终态（passed/failed/error）；干净退出却没 `scope_done`（矛盾：进程说成功、内容没发完）→ ERROR（judged error 比死循环安全）。
-- **`task_exited` 且 exitCode 未落值（None，宽限态）→ 保守 RUNNING**（等观察者补 exitCode，机制二兜底、ADR 0032 落值延迟）。
+- **`task_exited` 且退出码未知（观察者没能取到 exitCode）→ ERROR 终态**：STOPPED 事件是观察者的**唯一一次机会**（ECS 不会为补码再发一次事件），「等观察者补」在事件驱动模型里结构上不存在；退出码未知即不可判定为通过，判 error 比无界等待安全（观察者侧落哨兵码，见下「退出码缺失」条）。
 - **无 `task_exited`（进程还没终止）→ RUNNING（见了 scope_started）/ PENDING（还没起）**。
 
 即：**进程终止（exit≠0）优先于内容完整判终态**；只有干净退出（exit==0）才回到「scope_done ∧ exit」的两件都要（实现见 `core.project._job_status`）。
 
-**`task_exited` 的判定不设「已见 scope_started」前置**（code-health 对抗验证逼出的精确化）：上表按「有无 task_exited」为一级键——**零事件 + exit==0**（构造期 SIGTERM → flag-only handler 构造完成即 `return 0`，[0024](./0024-worker-core-protocol.md) 设计内行为）与**零事件 + exit=None**（TaskFailedToStart，如镜像拉取失败的 STOPPED 事件无 exitCode）都必须走上表对应分支（前者 ERROR、后者宽限 RUNNING），**不得因「没见 scope_started」短路成 PENDING**——PENDING 与已 claim 的 RUNNING 基线单调合并后 job 永停 RUNNING、`plan_next` 既不提议也不 finalize、run 永不收敛（探针复现：4 轮 tick 不推进且 events 不再新增、永不自愈）。回归护栏 `core/tests/test_project.py` 的 exit-without-events 真值表用例。
+**`task_exited` 的判定不设「已见 scope_started」前置**（code-health 对抗验证逼出的精确化）：上表按「有无 task_exited」为一级键——**零事件 + exit==0**（构造期 SIGTERM → flag-only handler 构造完成即 `return 0`，[0024](./0024-worker-core-protocol.md) 设计内行为）与**零事件 + 退出码缺失**（TaskFailedToStart，如镜像拉取失败的 STOPPED 事件无 exitCode，观察者落哨兵）都必须走上表对应分支（两者皆 ERROR），**不得因「没见 scope_started」短路成 PENDING**——PENDING 与已 claim 的 RUNNING 基线单调合并后 job 永停 RUNNING、`plan_next` 既不提议也不 finalize、run 永不收敛（探针复现：4 轮 tick 不推进且 events 不再新增、永不自愈）。回归护栏 `core/tests/test_project.py` 的 exit-without-events 真值表用例。
 
 **launch 失败补偿——「起不来」也是一种进程终止（机制二的推论，code-health 对抗验证逼出）**：CAS 抢占成功后 `launcher.launch(job)` 可能抛异常（RunTask 放置失败/容量不足/task-def 配错/Popen OSError——其中 task-def 名配错是**确定性触发器**、每 job 必炸），此时 job 已被置 RUNNING 却永无 events、无 task_exited（进程根本没起、平台侧观察者无从观察）——若异常裸穿 tick，job 永停 RUNNING、整批不可恢复 wedge，且三触发源都救不回（「状态全持久、断点续」的可恢复性断言被推翻）；cloud 侧 Stream 重试还会因 job 已 running 而「成功」no-op、掩盖故障。**修法 = launch 的宿主（tick）扮演「起不来」这一时刻的退出观察者**：catch 异常 → `event_log.record_exit(scope_id, 非0哨兵码)` → 下轮重放走「exit≠0 → ERROR」既有谓词收敛终态。不发明新状态、不加重试（launch 级重试属 job 级重试的既有留口子）、异常不中断本 tick 其余 job（失败隔离，[0026](./0026-schedule-module.md)）。回归护栏 `core/tests/test_reconcile.py::test_launch_failure_does_not_wedge_run`。
 
-**exitCode 落值延迟兜底（防御性冗余）**：[0024](./0024-worker-core-protocol.md) 记 `lastStatus==STOPPED` 与 exitCode 落值非原子、`(True,None)` 是有界宽限态。**但 STOPPED 事件锚在 `stoppedAt`（task 完全清理完、已过 exitCode 落值窗口），故观察者从事件 payload 读 exitCode 可靠——实测见下 H1/H2**（数字集中在地基实测节，不在此复述）。仍保留一条廉价兜底（payload 缺 exitCode 则短暂重查 DescribeTasks / 重试）防未来平台行为变——**留而不依赖**，非 load-bearing。
+**退出码缺失：观察者落哨兵、不留宽限态（修正）**：本 ADR 最初把「STOPPED 但 exitCode 未落值」定义为有界宽限态（投影保守 RUNNING、观察者"短暂重查 DescribeTasks"兜底），根据是 [0024](./0024-worker-core-protocol.md) 记的 `lastStatus==STOPPED` 与 exitCode 落值非原子。**修正理由（code-health 对抗验证发现）**：①「补码」在事件驱动下没有第二次机会——ECS 对一个 task 只发一次 STOPPED 事件，观察者无 ECS 权限也不该有（薄 handler），所以宽限态在实装里是**无界**的；②容器根本没跑起来的形态（`stopCode=TaskFailedToStart`：拉不到镜像、缺 secret、放置失败）exitCode **必然**缺失，不是延迟而是永不——按旧表判 RUNNING 即 run 永久 wedge、三触发源都救不回。**决定**：观察者对缺 exitCode 的 STOPPED **一律落非 0 哨兵**（与上条 launch 失败补偿同一常量 `PLATFORM_FAILED_EXIT=255`，core 单点定义）并带 `reason`（`stopCode: stoppedReason`，随 `task_exited` 进事件日志、投影进 job message 让用户看到归因）；`_job_status` 对「有退出记录、非超时、退出码未知」判 ERROR（防御：老版本观察者或未知写者仍写 None 时不 wedge）。STOPPED 事件锚在 `stoppedAt`（已过落值窗口），正常退出必带码——实测 H1/H2 见地基实测节；哨兵只在容器没跑过时出现。**被拒**：给观察者加 DescribeTasks 重查/延迟重试——要加 ECS IAM 与调度机器，服务的却是一个实测从未出现、且对 TaskFailedToStart 无意义（永不落值）的形态。
 
 ### 机制三：`RunState` 投影写带 HWM 条件写（防并发 lost-update）
 

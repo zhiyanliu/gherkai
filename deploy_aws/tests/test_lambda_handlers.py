@@ -38,28 +38,43 @@ def _stopped_detail(run_id, scope_id, exit_code):
 
 
 def test_extract_run_scope_exit():
-    run_id, scope_id, exit_code, timed_out = exit_observer._extract(_stopped_detail("run-1", "a", 0))
+    run_id, scope_id, exit_code, timed_out, reason = exit_observer._extract(_stopped_detail("run-1", "a", 0))
     assert run_id == "run-1" and scope_id == "a" and exit_code == 0
     assert timed_out is False  # 普通退出（无超时哨兵）不误标
+    assert reason is None  # 带码的退出不带平台归因（worker 自己的日志才是归因源）
 
 
 def test_extract_nonzero_exit():
-    _r, _s, exit_code, _t = exit_observer._extract(_stopped_detail("run-1", "a", 137))
+    _r, _s, exit_code, _t, _reason = exit_observer._extract(_stopped_detail("run-1", "a", 137))
     assert exit_code == 137
 
 
-def test_extract_missing_exitcode_is_none():
-    """container 缺 exitCode（宽限态）→ None（机制二保守）。"""
+def test_extract_missing_exitcode_becomes_platform_sentinel_with_reason():
+    """container 缺 exitCode = 容器没跑起来（TaskFailedToStart）→ 落 PLATFORM_FAILED_EXIT 哨兵 + `stopCode: stoppedReason`
+    归因（ADR 0034 机制二「退出码缺失」条）。曾写 None 当宽限态等下轮补——STOPPED 事件只来一次，run 会永久 wedge。"""
+    from gherkai_core.project import PLATFORM_FAILED_EXIT
     detail = _stopped_detail("run-1", "a", 0)
     detail["containers"] = [{"name": "novaact-worker"}]  # 无 exitCode
-    _r, _s, exit_code, _t = exit_observer._extract(detail)
-    assert exit_code is None
+    detail["stopCode"] = "TaskFailedToStart"
+    detail["stoppedReason"] = "CannotPullContainerError: ref pull has been retried 1 time(s): not found"
+    _r, _s, exit_code, timed_out, reason = exit_observer._extract(detail)
+    assert exit_code == PLATFORM_FAILED_EXIT and timed_out is False
+    assert reason == "TaskFailedToStart: CannotPullContainerError: ref pull has been retried 1 time(s): not found"
+
+
+def test_extract_missing_exitcode_without_any_reason_still_gets_sentinel():
+    """连 stopCode/stoppedReason 都没有也不写 None：哨兵 + 占位归因，绝不留无码退出记录。"""
+    from gherkai_core.project import PLATFORM_FAILED_EXIT
+    detail = _stopped_detail("run-1", "a", 0)
+    detail["containers"] = []
+    _r, _s, exit_code, _t, reason = exit_observer._extract(detail)
+    assert exit_code == PLATFORM_FAILED_EXIT and reason
 
 
 def test_extract_missing_env_returns_none():
     """非本框架起的 task（env 无 RUN_ID/SCOPE_ID）→ (None, None, ...)，handler 会跳过。"""
     detail = {"overrides": {"containerOverrides": [{"environment": []}]}, "containers": []}
-    run_id, scope_id, _e, _t = exit_observer._extract(detail)
+    run_id, scope_id, _e, _t, _reason = exit_observer._extract(detail)
     assert run_id is None and scope_id is None
 
 
@@ -68,7 +83,7 @@ def test_extract_timed_out_from_stopped_reason_sentinel():
     （ADR 0034「job timeout」节归因链：exit_observer 据此写 task_exited(timed_out=True)）。"""
     detail = _stopped_detail("run-1", "a", 143)
     detail["stoppedReason"] = f"{reconciler.TIMEOUT_STOP_SENTINEL}: scope exceeded 300s budget"
-    _r, _s, exit_code, timed_out = exit_observer._extract(detail)
+    _r, _s, exit_code, timed_out, _reason = exit_observer._extract(detail)
     assert exit_code == 143 and timed_out is True
     # 普通 stop（如同步路径的 "core requested stop"）不含哨兵 → False
     detail["stoppedReason"] = "core requested stop"
