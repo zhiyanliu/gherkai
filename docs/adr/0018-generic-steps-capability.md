@@ -8,7 +8,7 @@ v0.x 验证「QA 只写 `.feature`、零 step 代码」靠一组**通用 step**�
 
 打磨中为了快速验证，临时写了像「页面上展示的语言版本数量应该大于 N」「词条首段应该提到 X」这种**绑死维基场景**的 step——它们能跑通，但**不是真正的通用 step**（真实项目不会有"语言版本数量"这种 step）。真正的通用 step 应是**抽象原语**，QA 把场景细节放进引号里的自然语言，而非放进 step 措辞。
 
-> **已收敛（v1.0）**：绑场景临时句子已全部归纳成抽象原语——现 `features/*.feature` 里只剩 `When/Then "{自然语言}"`（默认 AI）+ `Given 打开 "URL"`（导航）+ `Then 页面地址匹配 "正则"`（确定性锚点），无任何绑死场景的 step。其中**取数/取串两条原语后被删**（避免过度设计——QA 直接写自然语言让 AI 判，需精确数值走确定性锚点，见 CONTEXT 与下「待深化」）。
+> **已收敛（v1.0）**：绑场景临时句子已全部归纳成抽象原语——现 `features/*.feature` 里只剩 `When/Then "{自然语言}"`（默认 AI）+ `Given 打开 "URL"`（导航）+ `Then 页面地址匹配 "正则"`（确定性锚点），无任何绑死场景的 step。其中**取数/取串两条原语后被删**（避免过度设计——QA 直接写自然语言让 AI 判，需精确数值走确定性锚点，见 CONTEXT「通用 step (Generic step)」词条）。「否定断言」也不作独立原语——QA 直接写否定自然语言（如 `Then "页面没有出现服务器错误"`），走同一 `aiBoolean` / `act_get(BOOL_SCHEMA)` 布尔投票路径；v0.x 打磨期的「问肯定再取反」策略未进生产（其实测结论见下「第一批」，直接问否定 vs 问肯定取反的对比仍在下「待深化」）。
 
 **原语清单（含已删项，留作设计史）**：
 
@@ -19,7 +19,7 @@ v0.x 验证「QA 只写 `.feature`、零 step 代码」靠一组**通用 step**�
 | AI 布尔断言 | 问是非（+投票） | `aiBoolean` | `act_get(BOOL_SCHEMA)` |
 | AI 取数断言 | 提取数字再比较 | `aiNumber` | `act_get({type:integer})` |
 | AI 取串断言 | 提取文本再判断 | `aiString` | `act_get(STRING_SCHEMA)` |
-| AI 否定断言 | 确认"不存在"（问肯定取反+投票） | `aiBoolean` 取反 | `act_get(BOOL_SCHEMA)` 取反 |
+| AI 否定断言（**已收敛进「AI 布尔断言」，非独立原语**） | 确认"不存在"——QA 直接写否定句，走同一布尔投票路径 | `aiBoolean` | `act_get(BOOL_SCHEMA)` |
 | 确定性锚点 | 不靠 AI 的精确检查（URL/DOM） | `page.url()` 等 | `nova.page.url` 等 |
 
 **两个引擎对称（精确化）**：提取类从「对称布尔路径」推广到「对称提取路径」——`aiNumber/aiString` ↔ `act_get(各 schema)`。**但对称仅在命题清晰时成立**；命题措辞有歧义时两个引擎表现可能分叉（见下"负向验证"：同一句宽松断言 Midscene 判 false、Nova Act 判 true）。是 [0010](./0010-spike-as-apples-to-apples-benchmark.md) 对称论断的扩展 + 边界修正。

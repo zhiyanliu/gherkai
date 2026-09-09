@@ -1,6 +1,6 @@
 # 无状态跑批：CLI 提交 → 事件驱动推进 → 轮询收集（CQRS + reconciler）
 
-> **Status:** Accepted —— **已全部实装、local+cloud 两路端到端真部署真跑通**（core `project`/`reconcile` + cli `submit`/`status`/`detached` + `lambdas/` 三 Lambda + `iac_aws_backend` Stream/EventBridge 均落 code；真实 AWS 账户/us-east-1 真跑：local submit→per-run 推进→passed，cloud submit→kicker 冷启动→事件驱动链→passed，含卡死救活真验）。纠正 [0016](./0016-execution-architecture-core-lib-run-model.md)「无状态化=加 adapter+换注入、核心不动」对本能力的过强断言（见下「对 0016 的纠正」；0016/0024/0026/0031 已同步标 Partially-superseded-by 本 ADR，0030 标其「重议」条已由本 ADR 落地）。
+> **Status:** Accepted —— **已全部实装、local+cloud 两路端到端真部署真跑通**（core `project`/`reconcile` + cli `submit`/`status` 命令 + `gherkai-runtime` 的 `detached` 宿主 + `lambdas/` 三 Lambda + `gherkai-deploy-aws`（原 `iac_aws_backend`，[0037](./0037-distribution-and-packaging.md) 决策 6 收编）的 Stream/EventBridge 均落 code；真实 AWS 账户/us-east-1 真跑：local submit→per-run 推进→passed，cloud submit→kicker 冷启动→事件驱动链→passed，含卡死救活真验）。纠正 [0016](./0016-execution-architecture-core-lib-run-model.md)「无状态化=加 adapter+换注入、核心不动」对本能力的过强断言（见下「对 0016 的纠正」；0016/0024/0026/0031 已同步标 Partially-superseded-by 本 ADR，0030 标其「重议」条已由本 ADR 落地）。
 
 同步 `run` 是**「CLI 阻塞跑一批」**：组合根同进程 `schedule()` 持 `ThreadPoolExecutor`、`as_completed` 收敛到全批完成才返回。本 ADR 落地的产品项（曾是产品线唯一未做项、非加固）= **「CLI 提交完就走、异步收集」**（[0016](./0016-execution-architecture-core-lib-run-model.md) v1.2 已完成 + [0017](./0017-cloud-execution-fargate-over-runtime.md) batch shape）——新增 `submit`/`status` 命令、同步 `run` 保留不变。本 ADR 定这套无状态跑批的架构、数据模型、并发/写序不变量与被拒方案护栏。
 
@@ -205,7 +205,8 @@ reconciler 逻辑上是「唯一写者」，**物理上是并发实例**（实�
 
 ```
 core（纯函数，不 import boto3，local/cloud 共用）：
-   project(events) → RunState/RunResult          # 纯归约，全量重放，幂等抗乱序
+   project(RunMeta, events, baseline RunState) → RunState   # 纯归约，全量重放，幂等抗乱序；与基线按生命周期序单调合并（见上「claim 了但 events 还没到」条）
+   project_full(RunMeta, events) → RunResult                # 派生完整结果（报告/产出）用
    plan_next(RunState, max_concurrency) → [Action]  # 纯决策：该启哪些 pending、是否 finalize
 adapter/组合根（Lambda handler / per-run 进程，注入具体 client）：
    CAS 写 / RunTask / PutItem(task_exited/finalize) / RunState 落库   # 所有副作用在此层

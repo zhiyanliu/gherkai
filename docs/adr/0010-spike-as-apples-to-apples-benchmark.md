@@ -27,12 +27,12 @@
 
 **信号**：两个引擎在本（简单、确定性强）用例上 AI 断言均零抖动、与确定性断言完全一致——对「AI 断言可信度」是双边正面信号。**但样本仅 1 个用例**，断言哲学的最终取舍仍需更多/更难（动态内容、多候选、模糊判定）的用例才能定。本表为基准的起点，非结论。
 
-## 实测挖出的洞察（对 M5 报告统一关键）
+## 实测挖出的洞察（对报告统一关键，即原里程碑 M5）
 
 **① 报告产物模型两个引擎根本不同**（见 CONTEXT「报告产物模型」）：
 - Midscene → **单一 `report.html`**，落项目内 `midscene_run/report/`，含每步截图+AI 决策+坐标。
 - Nova Act → **每次 `act`/`act_get` 各一个 trajectory HTML**（本用例 11 个：1 动作 + 10 断言），默认落 **系统临时目录** `$TMPDIR/..._nova_act_logs/<sessionId>/`。
-- → M5「报告统一」必须弥合：单文件 vs 多文件、项目内 vs 临时目录、截图+坐标 vs 逐 act trajectory。
+- → 「报告统一」（原里程碑 M5）要面对三处差异：单文件 vs 多文件、项目内 vs 临时目录、截图+坐标 vs 逐 act trajectory。**v1.0 已由 [0027](./0027-runreport-aggregation-index.md) 兑现，且结论是「不弥合」**——只做跨引擎归集索引（`manifest.json` 机器可读 + `index.html` 人可导航入口），链接各自原生产物、不解析融合其内容，故这三处差异不必在报告层抹平。
 
 **② Nova Act 报告默认落临时目录、会被系统清理**——留不住、不可追溯。`NovaAct(logs_directory=...)` 可固定到项目内（类比 Midscene 的 `midscene_run/`）。spike 阶段尚未固定（用例已验证通过即可），M2/M5 接入时应设 `logs_directory` 并 gitignore。
 

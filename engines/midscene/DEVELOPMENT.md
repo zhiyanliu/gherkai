@@ -31,7 +31,7 @@ src/
 ├── bin.mts            ← 唯一入口（npm bin + 容器 CMD）：装 tsx loader + 注册 resolve hook + 调 worker main
 ├── index.mts          ← 包的公开 API：使用方 step 文件 import 的 { deterministic, DeterministicAssertion, 类型 }
 ├── resolve-hook.mts   ← 裸 specifier "@gherkai/worker-midscene" → worker 自身安装位置（随 dist 发布的独立入口）
-├── worker/            ← 薄 worker：run-scope（派发/会话/事件）、确定性注册表、内建脚手架、使用方 steps 加载
+├── worker/            ← 薄 worker：run-scope（派发/会话/事件）、确定性注册表、内建脚手架、使用方 steps 加载、step 多行参数拼接（DataTable/DocString → 附加文本；两引擎须同一拼法）
 └── lib/               ← I/O 边缘组件：job 入口 / 事件出口 / 产物上传 / SigV4
 dist/                  ← tsc 产物（*.mjs + *.d.mts），发布物；不入库
 spikes/                ← 五段式自检脚本（不进包、不编译）

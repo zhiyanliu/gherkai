@@ -15,7 +15,7 @@ WebUI 将来是另一张皮，**直接调 core、复用产品本体 `gherkai_run
 
 ```
 cli/gherkai_cli/
-├── __main__.py   ← argparse 皮：run/submit/status/plan/list-engines/list-deterministic/deploy/destroy 解析 → 调 gherkai_runtime.compose/gherkai_core → 注入 RunPersistence 实时落库 → 调 render；定义退出码
+├── __main__.py   ← argparse 皮：run/submit/status/plan/list-engines/list-deterministic/deploy/destroy，外加两个内部隐藏子命令（`argparse.SUPPRESS`、由 submit 以 setsid fork 拉起、非用户直接调）：`_reconcile`（local 档 per-run 推进进程入口，ADR 0034）/ `_tunnel_watch`（cloud submit 的隧道守护进程入口，ADR 0035 决策 3）——解析 → 调 gherkai_runtime.compose/gherkai_core → 注入 RunPersistence 实时落库 → 调 render；定义退出码
 ├── deploy.py     ← deploy/destroy 的命令面 + 部署 provider 发现（entry point group `gherkai.deploy`）；**零 IaC 知识**、不 import aws_cdk（ADR 0037 决策 6）
 └── render.py     ← 表层渲染：0024 事件 → 进度行；RunResult → 文本汇总 / JSON；RunState → status 视图
 ```

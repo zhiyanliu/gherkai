@@ -36,7 +36,7 @@ _Avoid_: 把骨架验证用例当成最终交付的业务测试。
 spike 脚本**紧贴各自引擎的语言/依赖环境**，放在对应子工程内、诚实标记可丢弃：
 - Midscene（TS）→ `engines/midscene/spikes/`，复用 `engines/midscene/node_modules`（含其配方笔记 `SIGV4-FETCH-RECIPE.md`，与代码同居）。
 - Nova Act（Python）→ `engines/novaact/spikes/`，用仓库根 workspace 的 `.venv`（`uv run python engines/novaact/spikes/…`；novaact worker 已包化、无独立 venv，ADR 0037）。
-不设 git 根级 `spikes/`，spike 紧贴各自引擎子工程。**引擎内**复用的代码（如 Midscene 的 SigV4，仅 Midscene 的 spike 与 bdd 共用）抽到该引擎的 `lib/`（见 `engines/midscene/src/lib/agentcore-sigv4.mts`）；这不是跨引擎共享——SigV4 是 Midscene 专属，Nova Act 走 IAM/Workflow 不碰它。跨引擎真正共享的是 `features/`（用例），见 [跨引擎共享边界](./docs/adr/0013-cross-engine-sharing-boundary.md)（ADR 0013）。
+不设 git 根级 `spikes/`，spike 紧贴各自引擎子工程。**引擎内**复用的代码（如 Midscene 的 SigV4，仅 Midscene 的 spike 与 worker 共用）抽到该引擎的 `lib/`（见 `engines/midscene/src/lib/agentcore-sigv4.mts`）；这不是跨引擎共享——SigV4 是 Midscene 专属，Nova Act 走 IAM/Workflow 不碰它。跨引擎真正共享的是 `features/`（用例），见 [跨引擎共享边界](./docs/adr/0013-cross-engine-sharing-boundary.md)（ADR 0013）。
 _Avoid_: 把某一引擎专属的 spike/文档/代码放到根级或另一引擎目录下；也别误以为引擎内的 `lib/` 是两个引擎共享。
 
 **确定性断言 vs AI 断言 (Deterministic vs AI assertion)**:
@@ -142,7 +142,7 @@ _Avoid_: 把「推进器」读作 reconciler 的中文名——reconciler（无�
 _Avoid_: 把它当运行参数（曾是 `ScheduleOpts` 参数、不进 definition，detached 推进器就拿不到它——已退役）；与 act 级超时（Nova 的 `NOVA_ACT_TIMEOUT_S`）或尚未做的 run 级总预算混为一谈；以为 worker 会自己超时自杀（enforce 全在推进器侧）。
 
 **三名分离：发行名 / import 名 / 命令名 (dist name / import name / command name)**:
-（ADR 0037 决策 2；**三名分离已随发行重组落地**：`core/gherkai_core`＝`gherkai-core`、`runtime/gherkai_runtime`＝`gherkai-runtime`、`cli/gherkai_cli`＝`gherkai`＋命令 `gherkai`，三者是根 uv workspace 的成员；`gherkai-worker-novaact`/`gherkai-deploy-aws` 两个发行名待引擎/部署层包化。尚未上 PyPI，首发即 1.4.0。）一个 Python 交付物有三个名字、各自独立取：**发行名**是 PyPI 上的包名（`gherkai` / `gherkai-runtime` / `gherkai-core` / `gherkai-worker-novaact` / `gherkai-deploy-aws`），**import 名**是 `site-packages` 里的顶层目录（一律 `gherkai_` 前缀：`gherkai_cli` / `gherkai_runtime` / `gherkai_core` / …），**命令名**是 console script（`gherkai`）。唯一硬约束：**用户敲的发行名 = 命令名**（`uvx <name>` 把 `<name>` 同时当发行名与命令名解析），故 CLI 发行包叫 `gherkai`、中间层让位叫 `gherkai-runtime`。版本真源 = git tag，兄弟包间 `==` lockstep pin（ADR 0037 决策 2）。
+（ADR 0037 决策 2；**三名分离已随发行重组落地**：`core/gherkai_core`＝`gherkai-core`、`runtime/gherkai_runtime`＝`gherkai-runtime`、`cli/gherkai_cli`＝`gherkai`＋命令 `gherkai`、`engines/novaact/gherkai_worker_novaact`＝`gherkai-worker-novaact`、`deploy_aws/gherkai_deploy_aws`＝`gherkai-deploy-aws`，五者均为根 uv workspace 成员（`engines/midscene` 是 npm 包、不在 workspace）；PyPI 首发 = 1.4.0（五包已发，发布链与占名见 ADR 0037 决策 8）。）一个 Python 交付物有三个名字、各自独立取：**发行名**是 PyPI 上的包名（`gherkai` / `gherkai-runtime` / `gherkai-core` / `gherkai-worker-novaact` / `gherkai-deploy-aws`），**import 名**是 `site-packages` 里的顶层目录（一律 `gherkai_` 前缀：`gherkai_cli` / `gherkai_runtime` / `gherkai_core` / …），**命令名**是 console script（`gherkai`）。唯一硬约束：**用户敲的发行名 = 命令名**（`uvx <name>` 把 `<name>` 同时当发行名与命令名解析），故 CLI 发行包叫 `gherkai`、中间层让位叫 `gherkai-runtime`。版本真源 = git tag，兄弟包间 `==` lockstep pin（ADR 0037 决策 2）。
 _Avoid_: 用裸通用词作发行名或 import 名（`core`/`cli`——前者 PyPI 已被占、后者与他人同名顶层包静默合并/互删）；把「发行名 ≠ import 名」当异常（`gherkin-official` 的 import 名就是 `gherkin`，是常态）；为兄弟包写 `>=` 范围依赖（装出未测混搭）。
 
 **worker 定位链 (worker locate chain)**:

@@ -4,7 +4,7 @@
 
 ## 这个目录是什么
 
-本目录即发行包 **`gherkai-worker-novaact`**（import 名 `gherkai_worker_novaact`、console script `gherkai-worker-novaact`，见 [ADR 0037](../../docs/adr/0037-distribution-and-packaging.md) 决策 3）：worker 代码住 `gherkai_worker_novaact/`，`spikes/` 与 `tests/` 不随包发行。
+本目录即发行包 **`gherkai-worker-novaact`**（import 名 `gherkai_worker_novaact`、console script `gherkai-worker-novaact`，见 [ADR 0037](../../docs/adr/0037-distribution-and-packaging.md) 决策 3）：worker 代码住 `gherkai_worker_novaact/`，`spikes/` 与 `tests/` 不进 wheel（装上的包里没有；sdist 按 hatch 默认仍收录）。
 
 > 目录故意叫 `novaact`（无下划线），避开与 pip 包 `import nova_act` 撞名。
 
@@ -70,7 +70,7 @@ uv run pytest -q engines/novaact/tests     # 只跑本引擎
 uv run pytest -q                           # 跑全 workspace（根 testpaths 已含本目录）
 ```
 
-## 跑 spike（可独立跑，不随包发行）
+## 跑 spike（可独立跑，不进 wheel）
 
 ```bash
 AWS_REGION=us-east-1 uv run python engines/novaact/spikes/wikipedia_benchmark.py    # 对标基准（维基百科端到端）

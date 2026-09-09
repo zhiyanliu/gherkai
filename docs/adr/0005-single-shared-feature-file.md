@@ -2,13 +2,13 @@
 
 > **Status:** Accepted
 
-`.feature`（Gherkin 文本）是整条链路上**唯一**语言无关、可共享的一层。两侧的 runner（Python 的 `pytest-bdd`、TS 的 `cucumber-js`）与 step 实现必然各自一套——这是「双语言裂缝」的物理后果，不是设计选择。
+`.feature`（Gherkin 文本）是整条链路上**唯一**语言无关、可共享的一层。两侧的 step 实现必然各自一套（v1.0 前是 Python `pytest-bdd` + TS `cucumber-js` 两套 runner 各自加载，runner 层已退役、改由核心统一解析——见下「演进」条与 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)；「两侧各一套 step 实现」这一点不变）——这是「双语言裂缝」的物理后果，不是设计选择。
 
 **决定**：被两套 runner 加载的 `.feature` 做成**物理同一个文件**（放 git 根的 `features/`），而非两份各自维护、靠纪律保持一致。这样它是真正的单一事实源——改一次两边都变。
 
 **为什么**：本框架的立身之本就是「一套业务可读用例，两个 AI 引擎都能跑」。退成两份同步只是口号，框架会退化成「两个各自为政的引擎恰好风格像」。
 
-**承受的代价（已知）**：两套 runner 对 Gherkin 方言/step 匹配语法支持不完全一致（cucumber-js 用 Cucumber Expressions/正则；pytest-bdd 用自己的 parser + `parsers.parse`/`re`），step 措辞需取两者交集。这个约束本身有价值：它逼迫 step 措辞保持中立、不绑定某引擎的能力。
+**承受的代价（已知）**：两套 runner 对 Gherkin 方言/step 匹配语法支持不完全一致（cucumber-js 用 Cucumber Expressions/正则；pytest-bdd 用自己的 parser + `parsers.parse`/`re`），step 措辞需取两者交集。这个约束本身有价值：它逼迫 step 措辞保持中立、不绑定某引擎的能力。**现状（[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md) 起）**：BDD runner 层退役、核心库单一解析器，「两套方言取交集」这条代价已消解；「step 措辞保持中立、不绑定某引擎能力」的收益作原则保留（确定性锚点仍需两引擎正则成对，见 [0037](./0037-distribution-and-packaging.md) 决策 4）。
 
 ## ✅ 已实测（M2 起）：同一份 .feature 双 runner 加载，均通过
 

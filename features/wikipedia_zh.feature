@@ -1,6 +1,7 @@
-# 非英文 UI 探针：纯中文页面 + 中文 step，两引擎各一个 scenario、步骤完全相同（ADR 0001「扩到非英文 UI 的路径」
-# 第 1 步的测量夹具）。配 --assertion-votes N 测 AI 断言在中文 UI 上的抖动率，与英文探针 wikipedia_*.feature 同构：
-# 稳定、中立、无登录站点。会真连 AgentCore、产生 AWS 费用，不进日常 QA 流。
+# 非英文 UI 探针：纯中文页面 + 中文 step，两引擎各一个 scenario、步骤完全相同（ADR 0001 的测量夹具，
+# 兼「Nova Act 解除英文限定的条件（重议闸门）」的复测入口）。配 --assertion-votes N 测 AI 断言在中文 UI
+# 上的抖动率，与英文探针 wikipedia_*.feature 同构：稳定、中立、无登录站点。会真连 AgentCore、产生 AWS 费用，
+# 不进日常 QA 流。
 Feature: 中文维基搜索（非英文 UI 探针）
 
   @engine:midscene @scope:zh-midscene

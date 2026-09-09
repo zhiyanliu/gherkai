@@ -51,6 +51,11 @@ const sigv4Fetch: typeof fetch = async (input, init = {}) => {
   return fetch(urlStr, { method: toSign.method, headers, body, ...(init.signal ? { signal: init.signal } : {}) });
 };
 
+// ⚠️ spike 期按源码推的回调形态；**现契约是 SDK 把已建好的 OpenAI 实例传进来**
+//（`createOpenAIClient(baseOpenAI, options)`，入参可用于 langsmith 之类的包装），照抄下面这行会
+// `BaseOpenAI is not a constructor`。生产写法 = 忽略入参、直接新建带 SigV4 fetch 的 client：
+//   createOpenAIClient: async () => new OpenAI({ baseURL, apiKey: "unused", fetch: sigv4Fetch })
+// 见 §7 与 src/worker/run-scope.mts。此处保留 spike 原样、勿照抄当现状
 export const createOpenAIClient = (BaseOpenAI: typeof OpenAI) =>
   new BaseOpenAI({ baseURL: BASE_URL, apiKey: "unused", fetch: sigv4Fetch });
 

@@ -13,7 +13,7 @@
 
 ## 单元测试（默认）
 
-pytest 配置在**仓库根** `pyproject.toml`（uv workspace 三成员共用一份，ADR 0037 决策 2）；根目录跑收集三成员的 `tests/`，
+pytest 配置在**仓库根** `pyproject.toml`（全部 workspace 成员共用一份，ADR 0037 决策 2）；根目录跑收集各成员的 `tests/`，
 在 `core/` 目录下跑只收集 core 的（cwd 决定收集范围）：
 
 ```bash

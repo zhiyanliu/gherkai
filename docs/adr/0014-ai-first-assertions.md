@@ -2,7 +2,7 @@
 
 > **Status:** Accepted
 
-测试用例的断言**默认走 AI**（Midscene `aiAssert` / Nova Act `act_get`+schema），让框架忠于其立身之本——「用 AI 引擎做自动化测试」。确定性断言（底层 Playwright `page`）退为**高保真补充与逃生舱**，而非默认。
+测试用例的断言**默认走 AI**（Midscene `aiBoolean` / Nova Act `act_get(BOOL_SCHEMA)`，两侧对称布尔 + 投票；**不走** Midscene `aiAssert`——抛错黑盒、与 Nova Act 不对称，见下「抖动治理」条），让框架忠于其立身之本——「用 AI 引擎做自动化测试」。确定性断言（底层 Playwright `page`）退为**高保真补充与逃生舱**，而非默认。
 
 ## 为什么 AI 为主（价值取向，非实测结论）
 

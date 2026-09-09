@@ -10,6 +10,7 @@ uv tool install 'gherkai[local]'            # 顺带装上在本机跑 Nova Act 
 npm i -g @gherkai/worker-midscene           # 在本机跑 Midscene 引擎的 worker（Node ≥ 22）
 uv tool install 'gherkai[deploy-aws]'       # 部署方：要用 gherkai deploy 建/改云端后端（另需 Node ≥ 22 + 容器引擎）
 uvx gherkai --version                       # 或者不安装、临时跑一次
+pipx install --fetch-python missing gherkai   # 不用 uv 的人：pipx 回落（pipx 默认不下载解释器，本项目要 Python ≥ 3.13；装 extra 写 'gherkai[local]'）
 ```
 
 需要 Python ≥ 3.13。两个引擎的 worker 是各自独立的程序：Nova Act 走上面的 `[local]` extra，Midscene 是 Node 包走 npm；只用 `--backend cloud` 提交的人两个都不用装（worker 跑在云端）。`gherkai list-engines` 会告诉你当前哪个引擎可用、缺的那个怎么装。

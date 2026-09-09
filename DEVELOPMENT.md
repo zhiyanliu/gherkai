@@ -4,7 +4,7 @@
 
 ## 现状与版本线
 
-架构：**核心库 `core/`（Python）自解析 Gherkin → 分组 scope/job → 调度**，每个 scope spawn 一个**薄 worker 子进程**（Midscene=TS / Nova Act=Python），worker 讲统一的 worker↔core 协议（ADR 0024）。`cli/` 是核心库的第一张前端皮（argparse + render），组合根共享层在 `runtime/`（ADR 0016「演进」节）。v0.x 的 cucumber-js/pytest-bdd 双 runner 直跑已**退役**（ADR 0016 / 0022 / 0023）。关键约束：**全栈托管在 AWS 内**（ADR 0009）；**范围限英文 UI**（ADR 0001）。
+架构：**核心库 `core/`（Python）自解析 Gherkin → 分组 scope/job → 调度**，每个 scope spawn 一个**薄 worker 子进程**（Midscene=TS / Nova Act=Python），worker 讲统一的 worker↔core 协议（ADR 0024）。`cli/` 是核心库的第一张前端皮（argparse + render），组合根共享层在 `runtime/`（ADR 0016「演进」节）。v0.x 的 cucumber-js/pytest-bdd 双 runner 直跑已**退役**（ADR 0016 / 0022 / 0023）。关键约束：**全栈托管在 AWS 内**（ADR 0009）；**UI 语言支持范围按引擎划分**——Midscene 不限、Nova Act 限英文（ADR 0001）。
 
 | 版本线 | 内容 | 状态 |
 |---|---|---|

@@ -152,7 +152,7 @@ class RunStore(Protocol):
 
 **接口真值以 `core/gherkai_core/ports.py` 为准**——上块是本决策期的**增量视图**，不是 `RunStore` 的完整现状：此后还追加了 `preflight`（探活，见下决定七）与条件写三方 `try_claim_job`/`project_state`/`try_finalize`（[0034](./0034-detached-batch-reconciler.md)）。
 
-- **新增三方法是 additive**：`save_run` 不删（`test_stores.py` 中 3 个 RunStore save/load 往返用例——`test_run_store_save_load` / `test_run_state_timestamps_round_trip` / `test_run_state_omits_null_timestamps`——仍用它；一次性写场景也仍用）。新方法只是把它的职责按生命周期拆成「开始/逐 job/结束」三段。
+- **新增三方法是 additive**：`save_run` 不删——`test_stores.py` 里多个 RunStore save/load 往返用例仍用它（`grep -rn 'save_run(' core/tests/` 可核）、一次性写场景也仍用。新方法只是把它的职责按生命周期拆成「开始/逐 job/结束」三段。
 - `update_job_state` 按 **scope_id 定位单个 job**：local adapter 是「读 run_state→改该 scope_id→写回」的 read-modify-write（**非自身线程安全**，靠 `RunPersistence` 的单一 store 锁串行，见决定三的并发不变量）；DDB adapter 用 `SET jobs.#sid=:js`（Map 按 key 路径，见下决定六）。这要求 `RunState.jobs` 用 **Map<scope_id> 形状**（见决定五）。
 
 ## 决定五：`RunState.jobs` 改 Map<scope_id> 形状（core model 一次到位）
@@ -161,12 +161,12 @@ class RunStore(Protocol):
 理由：实时按单个 job 刷状态需要「按 scope_id 定位某个 job」，list 只能按下标定位（DDB 更是无法按属性值定位 list 元素）。
 Map 形状下 `update_job_state` 各 scope 互不干扰、天然支持单元素更新。
 
-- **现在就改 core model**（不留到 DDB 阶段），改动点（含两个会**静默出错**的陷阱，务必逐一改）：
-  - `model.RunState.jobs`：`tuple[JobState,...]` → `dict[str, JobState]`。
-  - `serialize.run_state_to_dict`：现在是 `for js in state.jobs`——dict 化后若不改成 **`state.jobs.values()`**，会静默迭代 dict 的 **key（字符串）**、`js.scope_id` 直接 AttributeError。
+- **core model 一次到位、已落地**（不留到 DDB 阶段），落点 + 两条**防回归护栏**（原改造中两个会静默出错的陷阱）：
+  - `model.RunState.jobs`：`dict[str, JobState]`（原 `tuple[JobState,...]`）。
+  - `serialize.run_state_to_dict`：**护栏**——必须 `state.jobs.values()` 迭代；直接 `for js in state.jobs` 拿到的是 dict 的 **key（字符串）**、`js.scope_id` 静默 AttributeError。
   - `serialize.run_state_from_dict`：决定**落盘 JSON 形状**——本 ADR 选 **JSON 仍落 `list[{scope_id,status,session_id}]`、仅内存模型是 Map**（读回时 `{js.scope_id: js}` 重建），保 `run_state.json` 向后兼容、不动既有文件格式；DDB adapter 才在落库层用真 map item。
   - `run_state_from_result`：投影出 dict 而非 tuple。
-  - **`core/tests/test_stores.py`**：现用**位置下标** `state.jobs[0].scope_id` / `state.jobs[1].status`（dict 不支持整数下标，会 TypeError）——改成按 scope_id 取（如 `state.jobs["features/wiki.feature:6"]`）。
+  - **`core/tests/test_stores.py`**：**护栏**——RunState 的消费方按 scope_id 取（如 `state.jobs["features/wiki.feature:6"]`），**不用整数下标**（dict 不支持，会 TypeError）。
   - （**澄清**：`report_store/local.py` 的 index.html 渲染的是 `RunResult.jobs`、cli 也只 `run_state_from_result` **写**、从不**读** `RunState.jobs`——故那两处不是 RunState 消费点，真正会被打破的是上面的 serialize 迭代与 test_stores 下标。）
 - skipped 的 job 也要进 Map（它是 definition 的一部分，缺了会让 RunState 的 job 集与 RunMeta.jobs 对不齐）。各新态的 `session_id` 取值规则见 [0031](./0031-job-lifecycle-states-and-severity.md) 决定一；aborted 留 `session_id`（有现场可查）正是 Map 形状的受益场景。
 
@@ -185,11 +185,11 @@ Map 形状下 `update_job_state` 各 scope 互不干扰、天然支持单元素�
 
 **ResultStore 后端 = S3**（坐实 [0016](./0016-execution-architecture-core-lib-run-model.md) 原「待定」）：每 job 一 S3 对象，key = `<prefix>/<run_id>/jobs/<quote(scope_id)>.json`（`quote` 编码——scope_id 含 `/`:中文原样嵌会让 `load_all` 的 prefix 反解歧义）。**赌 CI 按 run_id+scope_id 键取判定**；将来若需跨 scope 查询/过滤，加 DDB 索引层（加法不返工）。
 
-**StepArgument offload —— docString/dataTable 存 S3 指针**（DdbRunStore 内部钩子，解 DDB 400KB 限）：RunMeta 深树里**只有 docString/dataTable 两类 argument** 换 S3 指针，其余 JSON 照常在 DDB META item。
+**StepArgument offload —— docString/dataTable 存 S3 指针**（`DynamoDBRunStore` 内部钩子，解 DDB 400KB 限）：RunMeta 深树里**只有 docString/dataTable 两类 argument** 换 S3 指针，其余 JSON 照常在 DDB META item。
 - **位置区分、非值探测**（关键决策）：offload 后 argument dict 出现 `content_ref`/`rows_ref`（原 `content`/`rows` 键**缺席**），读端按「哪个键在」分支——**绝不**靠「值是不是 s3 协议开头」猜内联/指针（值 sniff 脆：docString 正文本身可能以该前缀开头）。
 - **S3 key 含 step_index**：`<run_id>/args/<quote(scope_id)>/<quote(scenario_id)>/<step_index>/<kind>.json`——否则同 scenario 多 docString 撞 key、静默串值。
-- **对 core 透明**：offload/fetch 是 DdbRunStore 内部对 `serialize` 产物的加工（写端 to_dict 后换指针、读端交 serialize 前消解回内联），serialize/model 零感知；只挂 RunMeta 写/读路径，`update_job_state`/`finalize_run`/`load_run_state` 零 S3 依赖（RunState 无 argument）。
-- **offloader 是可选注入的协作者**（组合根抉择）：DdbRunStore 收一个可选 offloader，`None`（默认）→ argument 原样内联进 `meta_json`（小 run / 单测省一层 S3、少一个桶依赖）；注入 → 搬 S3。读端按「`content_ref`/`rows_ref` 键在不在」分支消解——**不依赖当前是否配了 offloader**，故「配了 offloader 的 store 读无 offloader 写的旧 run」天然兼容（无 `_ref` 键 = 内联，直接透传）。
+- **对 core 透明**：offload/fetch 是 `DynamoDBRunStore` 内部对 `serialize` 产物的加工（写端 to_dict 后换指针、读端交 serialize 前消解回内联），serialize/model 零感知；只挂 RunMeta 写/读路径，`update_job_state`/`finalize_run`/`load_run_state` 零 S3 依赖（RunState 无 argument）。
+- **offloader 是可选注入的协作者**（组合根抉择）：`DynamoDBRunStore` 收一个可选 offloader，`None`（默认）→ argument 原样内联进 `meta_json`（小 run / 单测省一层 S3、少一个桶依赖）；注入 → 搬 S3。读端按「`content_ref`/`rows_ref` 键在不在」分支消解——**不依赖当前是否配了 offloader**，故「配了 offloader 的 store 读无 offloader 写的旧 run」天然兼容（无 `_ref` 键 = 内联，直接透传）。
 - 粒度「一律 offload」（无 size 阈值）；size 阈值是未来的纯加法优化，不预置。
 
 **boto3 依赖 = optional extra（方案 A）**：boto3 进 `[project.optional-dependencies].aws`（core 主依赖仍只 gherkin，缺 boto3 时只有云端 adapter 用起来失败、core 主体可轻量 import）——守 [0016](./0016-execution-architecture-core-lib-run-model.md) 窄腰。
@@ -205,7 +205,7 @@ cli `--backend {local,cloud}` 的组合根装配（两后端都下沉 `compose` 
 **为何从「不做主动预检」反转为「做 preflight」**（推翻早先决策，记明理由）：早先图省一次往返、以 `begin` 的真实写为天然预检点，但那留了个**不一致**——桶名打错时，有 offload 内容的 run（offloader 在 begin 写 S3）会 begin 退 2、无 offload 内容的 run 拖到运行期首个 `save_job_result` 才 S3 报错退 1，**同一个「桶名错」因是否有大 argument 分裂成退 2/退 1**。加 `preflight()` 后：桶/表不存在或无访问权**一律在 begin 探活时暴露→退 2**（不管有无 offload 内容），消除该分裂。**权衡**：begin 多几次探活往返（DDB describe + S3 head×2），但 begin 早于起 worker、不产生引擎费用，几百 ms 可忽略——换体验+实现统一，值得。preflight 归 Store 自己（各后端最懂怎么探活、内聚），不外泄到组合根。
 
 **cloud 失败退出码分层——切分线 = run 是否已真正开跑**（对齐现有 `0 passed / 1 failed|error / 2 配置错` 约定，全走 stderr、绝不裸 traceback）：
-- **退 2（还没开跑就拒绝，与 `assertion_votes<1` 同类）**：缺 table/bucket（入口显式校验非空——否则 `None` 流进 adapter 到运行时才 botocore 报错）；缺 boto3（`build_cloud_stores` 的 `import boto3` 抛 ImportError → 提示装 `gherkai-core[aws]`）；`begin()` 的 `preflight()` 或 `create_run` 抛 botocore 异常（表/桶不存在、无权限、凭证/region 缺）。preflight 是主动探活点，兜住「纯 S3 桶名错也在 begin 暴露」。
+- **退 2（还没开跑就拒绝，与 `assertion_votes<1` 同类）**：缺 table/bucket（入口显式校验非空——否则 `None` 流进 adapter 到运行时才 botocore 报错）；缺 boto3（`build_cloud_stores` 的惰性 `import boto3` 抛 ImportError，cli 的 gated except 接住 → 退 2；发行包 `gherkai` 已硬依赖 `gherkai-runtime[aws]`、自带 boto3，装库层 extra 只是库消费者的事，见 [0037](./0037-distribution-and-packaging.md) 决策 2c）；`begin()` 的 `preflight()` 或 `create_run` 抛 botocore 异常（表/桶不存在、无权限、凭证/region 缺）。preflight 是主动探活点，兜住「纯 S3 桶名错也在 begin 暴露」。
 - **退 1（run 已开跑，error 级）**：`schedule()` 运行期内 `on_event`/`on_job_complete` 抛 botocore 异常（跑到一半 DDB/S3 挂，如桶被删）。决定三已定 `on_job_complete` 抛异常时 schedule 先 stop 所有 worker 再重抛，故会冒泡出 `schedule()`；cli 在 `need_cloud` 时给单一 `schedule()` 调用点包一层 `except (ClientError, BotoCoreError)`（**不复制两份调用**，避免回调/opts 透传漂移弄坏参数映射测试）。这是运行期兜底——preflight 只保证 begin 那刻可达，长 job 中途桶被删仍会在此退 1。
 
 ## 现在做 / 留口子

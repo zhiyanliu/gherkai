@@ -51,7 +51,7 @@
 
 | 层 | 内容 | 何时 | 类型 | store |
 |---|---|---|---|---|
-| **definition（前置身份）** | run_id + created_at + 跑哪些 job（完整 `Job`：scope/engine/scenarios/steps + 投票次数 `assertion_votes` + job 墙钟预算 `timeout_s`，"要跑什么"，[0019](./0019-feature-tags-scope-and-engine.md)/[0034](./0034-detached-batch-reconciler.md)「job timeout」节）+ run 级执行参数 `extra_http_headers`（隧道等 context 级请求头，[0035](./0035-local-app-testing-via-tunnel.md)）与 `max_concurrency`（本 run 几个 job 并行，[0034](./0034-detached-batch-reconciler.md) 机制四）——两者 core 都只搬运不消费语义，消费者是各推进器组合根 | **执行前**确定（plan 产出 + 组合根生成 run_id） | `RunMeta`（持有 `tuple[Job,...]`，不另造 JobMeta） | `RunStore`（控制面） + cloud 档的 worker 选择 `worker_variant`（人读）/ `worker_task_defs`（引擎 → task-def revision ARN；运行时只用它、永不用 family，[0038](./0038-worker-image-delivery.md)）|
+| **definition（前置身份）** | run_id + created_at + 跑哪些 job（完整 `Job`：scope/engine/scenarios/steps + 投票次数 `assertion_votes` + job 墙钟预算 `timeout_s`，"要跑什么"，[0019](./0019-feature-tags-scope-and-engine.md)/[0034](./0034-detached-batch-reconciler.md)「job timeout」节）+ run 级执行参数 `extra_http_headers`（隧道等 context 级请求头，[0035](./0035-local-app-testing-via-tunnel.md)）、`max_concurrency`（本 run 几个 job 并行，[0034](./0034-detached-batch-reconciler.md) 机制四）与 `steps_dir`（使用方确定性 step 目录的绝对路径，[0037](./0037-distribution-and-packaging.md) 决策 4；cloud 档恒 None——steps 烙进定制镜像，[0038](./0038-worker-image-delivery.md)）——这几项 core 都只搬运不消费语义，消费者是各推进器组合根 | **执行前**确定（plan 产出 + 组合根生成 run_id） | `RunMeta`（持有 `tuple[Job,...]`，不另造 JobMeta） | `RunStore`（控制面） + cloud 档的 worker 选择 `worker_variant`（人读）/ `worker_task_defs`（引擎 → task-def revision ARN；运行时只用它、永不用 family，[0038](./0038-worker-image-delivery.md)）|
 | **控制面运行态** | 总 status / 各 job status / 会话血缘 sessionId / 起止 | **执行后**产生（实时写下随进度增量刷，[0030](./0030-realtime-persistence-seam.md)） | `RunState`（`jobs: Map<scope_id, JobState>`，按 scope_id 定位单 job 实时刷；落盘 JSON 仍 list） | `RunStore`（控制面） |
 | **数据面判定明细** | 每 scenario/step 的 pass-fail、投票、cost、报告指针 | **执行后**产生 | `JobResult`→`ScenarioResult`→`StepResult` | `ResultStore`（数据面，判定真值唯一权威） |
 
@@ -146,7 +146,9 @@ core/gherkai_core/
 
 #### 决策 C：Fargate 执行配置走 CLI 参数注入（对称 `--ddb-table`/`--s3-bucket`）
 
-Fargate 执行环境配置（cluster / task-def / subnet / security-group / events 表名 / container-name 等）**走 CLI 参数注入 `FargateEngine` 构造**，与 `--ddb-table`/`--s3-bucket`/`--region`/`--profile` 同一「组合根注入、非 adapter sniff env」模式（见下「cloud 配置来源」补充 + 注入红线）。**不走 adapter 内部读 env**——那是本 ADR「禁止 ports module 内部 env-sniff」红线点名的反模式。（决策 C 的「注入、非 env-sniff」内核本就是本 ADR 注入红线 + [0024](./0024-worker-core-protocol.md)「run_id 注入 worker」的既有决策，`FargateEngine` 构造签名已兑现；此处只补齐「Fargate 那批参数也走 `--xxx` CLI 面、对称 `--table`」这个面向用户的接口决策。）
+Fargate 执行环境配置（cluster / task-def / subnet / security-group / events 表名 / container-name 等）**走组合根注入 `FargateEngine` 构造**（其中 cluster / subnet(s) / security-group(s) / events 表名有对应 `--xxx` flag，`--prefix` 批量定这批默认名），与 `--ddb-table`/`--s3-bucket`/`--region`/`--profile` 同一「组合根注入、非 adapter sniff env」模式（见下「cloud 配置来源」补充 + 注入红线）。**不走 adapter 内部读 env**——那是本 ADR「禁止 ports module 内部 env-sniff」红线点名的反模式。（决策 C 的「注入、非 env-sniff」内核本就是本 ADR 注入红线 + [0024](./0024-worker-core-protocol.md)「run_id 注入 worker」的既有决策，`FargateEngine` 构造签名已兑现；此处只补齐「Fargate 那批参数也走 `--xxx` CLI 面、对称 `--table`」这个面向用户的接口决策。）
+
+**注（并非每项都有裸 flag，注入内核不受影响）**：task-def 不走 `--task-def`——经 `--worker-variant` 在提交侧解析成**显式 revision ARN** 写进 definition（`RunMeta.worker_task_defs`），运行时只用 revision、永不用 family（[0038](./0038-worker-image-delivery.md)）；container-name 由命名真源 `names.container_name(engine)` 算出、assign-public-ip 取组合根默认值，两者都是组合根注入 `FargateEngine` 构造、只是不暴露成用户旋钮。
 
 **`--region`/`--profile` 必须真正贯通到 worker（不止 store 侧）——但 region 与 profile 是「正确的非对称」，不是机械对称**：worker 侧建 boto3/aws-sdk client（EventSink DDB / JobSource S3 / ArtifactUploader / Nova `Workflow`+`AgentCoreBrowserSessionProvider`）都靠 `AWS_REGION`/boto 默认凭证链（读 `AWS_PROFILE`）解析 region/凭证。**旧接线断裂**：`--region`/`--profile` 此前只喂给 `build_cloud_stores`（core 侧 store 显式 `Session(profile_name=…, region_name=…)`），而 subprocess worker 靠 `env={**os.environ}` **裸继承**父进程 env、Fargate worker 更无继承——于是 `--region us-west-2` 但 shell `AWS_REGION=us-east-1` 时 **store 与 worker 分叉**（core 落 west、worker 走 east），`--profile` 同理。
 
@@ -167,7 +169,7 @@ Fargate 执行环境配置（cluster / task-def / subnet / security-group / even
 
 **cloud 配置来源 + 落点语义**：
 - 表/桶经参数注入（`--ddb-table` 兜底 `AWS_DDB_TABLE`、`--s3-bucket` 兜底 `AWS_S3_BUCKET`）；adapter 假定表/桶已存在（建表建桶归 IaC）。（`AWS_DDB_TABLE`/`AWS_S3_BUCKET` 与集成测试 `tests/README.md` 用的同名——语义一致「哪张表/哪个桶」、不同进程不冲突。）
-- **Fargate 执行配置也走 CLI 参数注入（决策 C，与表/桶同模式）**：`--backend cloud` 换 `FargateEngine` 后，其执行环境配置（ECS cluster / task-def / subnet(s) / security-group(s) / assign-public-ip / events 表名 / container-name 等）同样经 CLI 参数注入 `FargateEngine` 构造，**与 `--ddb-table`/`--s3-bucket` 是同一注入模式**（组合根注入、adapter 不 sniff env）。这批参数具体形状（哪些必填、默认值、兜底 env）随 Fargate adapter 接线落地时定、以 code 为准，不在此焊死以免漂移；**接线点在 `compose.build_fargate_engines`**（新增函数、对称只产 SubprocessEngine 的 `build_engines`，`--backend cloud` 用它替代）——组合根在 `new_run_id()` 后把 run_id + 这批 task 配置一起传进 `FargateEngine()`（run_id 是拼 events 表 PK 所需，对称 artifact 落点注入）。adapter 假定 cluster/task-def/events 表已存在（建表建 task-def 归 IaC）。
+- **Fargate 执行配置也走 CLI 参数注入（决策 C，与表/桶同模式）**：`--backend cloud` 换 `FargateEngine` 后，其执行环境配置（ECS cluster / task-def / subnet(s) / security-group(s) / assign-public-ip / events 表名 / container-name 等）同样经组合根注入 `FargateEngine` 构造（哪些项有裸 flag 见上决策 C 的『注』），**与 `--ddb-table`/`--s3-bucket` 是同一注入模式**（组合根注入、adapter 不 sniff env）。这批参数具体形状（哪些必填、默认值、兜底 env）随 Fargate adapter 接线落地时定、以 code 为准，不在此焊死以免漂移；**接线点在 `compose.build_fargate_engines`**（新增函数、对称只产 SubprocessEngine 的 `build_engines`，`--backend cloud` 用它替代）——组合根在 `new_run_id()` 后把 run_id + 这批 task 配置一起传进 `FargateEngine()`（run_id 是拼 events 表 PK 所需，对称 artifact 落点注入）。adapter 假定 cluster/task-def/events 表已存在（建表建 task-def 归 IaC）。
 - **`--region`/`--profile` 可选**：都传给 `boto3.session.Session(profile_name=..., region_name=...)`（都为 None = 默认行为，不显式介入）。**凭证仍不硬编码**——profile/region 是运维配置（选哪个 AWS 账户/区域），不是把 access key 写进代码，不违背「组合根不持 IAM 知识」。region 解析链：`--region` 显式 > `AWS_REGION`/`AWS_DEFAULT_REGION` > profile 的 config `region` 字段——故**给了 `--profile` 但该 profile 没配 region 时仍需 `--region`**（否则 `NoRegionError`）；两者都可选、各自独立兜底。
 - **单 S3 桶 + `--report-dir` 复用为 key 前缀**：Result(`jobs/`)、Report(`index.html`)、offloader(`args/`) 三者 key 前缀天然不撞，共用一个桶最简；不新增 `--s3-prefix`——local 的 `<report-dir>/<run_id>/…` 与 cloud 的 `s3://bucket/<report-dir>/<run_id>/…` 布局工整对应。**分隔符规范化**：`--report-dir` 默认 `reports`（无尾 `/`），组合根在传给 S3 adapter 前补 `/`（非空且不以 `/` 结尾则补），否则 `S3*Store` 拼 `f"{prefix}{run_id}"` 会静默生成粘连 key `reports<run_id>/…`。真需分桶（report 公开 serve vs result 私有的生命周期策略）再拆，加法不返工。
 - **`--backend cloud --no-report` 合法**：`--no-report` 既有语义=零落盘裸跑、与 backend 正交；所有云端校验/import/异常 gated 在 `need_cloud = do_report and cloud`，此组合跳过一切云端检查（保「三个 store 一次不构造」的逃生舱）。
@@ -196,15 +198,15 @@ Fargate 执行环境配置（cluster / task-def / subnet / security-group / even
 │       └── adapters/    ← 按 port 分（清单见上「adapters 按 port 分子目录」）：subprocess_engine.py（单 adapter 参数化，非 midscene.py/novaact.py 两文件）· fargate_engine.py · cloud_launcher.py · event_log/ · run_store/ · result_store/ · report_store/ · _boto.py ✅
 ├── runtime/             ← 发行包 gherkai-runtime：产品本体 = 组合根共享层（见下「演进」节；cli/Lambda/WebUI 的共同地基。原 `gherkai/`，0037 改名让位给 CLI 发行名）
 │   └── gherkai_runtime/{compose.py（组合根/引擎注册表 + `resolve_cloud_target` 云目标解析）· detached.py（local 无状态跑批宿主）· names.py（资源命名真源）· tunnel.py（`--expose-local` 隧道 provider，0035）· tunnel_host.py（隧道宿主编排 + 守护 TTL，0035）}
-├── cli/                 ← 发行包 gherkai：纯皮 argparse + 渲染（workspace 成员；对兄弟包的依赖在 build 时渲染成 `==` lockstep pin，[0037](./0037-distribution-and-packaging.md) 决策 2）
-│   └── gherkai_cli/{__main__.py（argparse 皮）· render.py（事件/RunResult/RunState 渲染）}
+├── cli/                 ← 发行包 gherkai：纯皮 argparse + 渲染 + deploy provider 分派（workspace 成员；对兄弟包的依赖在 build 时渲染成 `==` lockstep pin，[0037](./0037-distribution-and-packaging.md) 决策 2）
+│   └── gherkai_cli/{__main__.py（argparse 皮）· deploy.py（`gherkai deploy`/`destroy` 的皮：provider 发现 + flag 贴接 + 分派，不含 IaC 知识，[0037](./0037-distribution-and-packaging.md) 决策 6）· render.py（事件/RunResult/RunState 渲染）}
 └── engines/             ← 两个可插拔引擎，与 core 平级对标                  ✅ 已迁
     ├── midscene/        ← npm 包 @gherkai/worker-midscene（ESM，0037 决策 3）        ✅ worker：engines/midscene/src/worker/run-scope.mts
-    │   ├── src/bin.mts（入口：进程内注册 tsx 与 resolve hook）· src/index.mts（使用方 step 文件的 import 面）· src/worker/{run-scope,deterministic,deterministic.steps,user-steps}.mts · src/lib/agentcore-sigv4.mts
+    │   ├── src/bin.mts（入口：进程内注册 tsx 与 resolve hook）· src/index.mts（使用方 step 文件的 import 面）· src/resolve-hook.mts（裸 specifier `@gherkai/worker-midscene` 的解析 hook，[0037](./0037-distribution-and-packaging.md) 决策 4）· src/worker/{run-scope,deterministic,deterministic.steps,user-steps,argument}.mts · src/lib/（引擎内共享：agentcore-sigv4 · artifact-upload · event-sink · job-source）
     │   └── （node_modules / dist / spikes 随迁；tsconfig 入库）
     └── novaact/         ← 发行包 gherkai-worker-novaact（0037 决策 3）              ✅ worker：engines/novaact/gherkai_worker_novaact/run_scope.py
         ├── gherkai_worker_novaact/{run_scope.py · deterministic.py · deterministic_steps.py · user_steps.py · __main__.py}  ✅（确定性注册表已拆出：deterministic.py=注册表+匹配、deterministic_steps.py=内建脚手架锚点、user_steps.py=加载使用方 steps/ 目录，两引擎对称，见 0022/0036/0037；仅 ai_steps 的进一步拆分仍是留口子）
-        └── gherkai_worker_novaact/lib/workflow_setup.py · tests/（无独立 venv：随 CLI 的 [local] extra 装进根 .venv）
+        └── gherkai_worker_novaact/lib/（引擎内共享：workflow_setup · artifact_upload · event_sink · job_source · constants）· tests/（无独立 venv：随 CLI 的 [local] extra 装进根 .venv）
 ```
 
 - **`engines/{midscene,novaact}` 提升为与 `core/` 平级**（不再各藏一个 `worker/` 子目录）：引擎子工程必须连同其依赖环境（`node_modules`+`agentcore-sigv4.mts` / `.venv`+`workflow_setup.py`）整体存在，故**整体**移到 `engines/` 下，既对称又不把代码与依赖环境拆开。
@@ -257,7 +259,7 @@ G1/G2 是 v1.0 核心库 `.feature` 解析的前置——其声明语法**现已
 ## 现在做 / 现在不做
 
 - **现在做（v1.0）**：核心库 `core/` 可被调用（逻辑不焊死在 CLI main 里）；钉死上面数据模型；定义 ports 接口（`Engine`/`RunStore`/`ResultStore`/`ReportStore`）+ 组合根注入；核心自解析 Gherkin + 薄 worker（[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)）。模块设计：worker↔core 协议见 [0024](./0024-worker-core-protocol.md)；plan 模块见 [0025](./0025-plan-module-feature-to-jobs.md)；schedule 模块见 [0026](./0026-schedule-module.md)。
-  - **ports 落地状态**：四个 port 的 local adapter 均已建（详见上「留口子：Ports & Adapters」节）。**两个引擎 worker 均已落地**（`engines/{novaact,midscene}/worker/`），两个引擎对称、同讲 0024 协议。
+  - **ports 落地状态**：四个 port 的 local adapter 均已建（详见上「留口子：Ports & Adapters」节）。**两个引擎 worker 均已落地**（落点见上「工程布局」树），两个引擎对称、同讲 0024 协议。
 - **现在不做**：无状态机制 / WebUI ——接口已留好，等云端真需要时填 adapter + 组合根换注入。**避免为想象中的云端预先盖机器。**（**已越过**：云端 store/执行 adapter + 组合根接线 + IaC 在 v1.1 填齐、**无状态跑批机制 v1.2 已实装真跑通**——清单见上「版本切分」的 v1.1.0/v1.2.0 行；但无状态跑批**不止「填 adapter」**、是驱动模型演进，故当初「等填 adapter」的乐观预期对它不成立，见上「这样上云…」处的 ⚠️ 分层注。）
 - **G1/G2 声明语法已定**（ADR 0019）；其**调度实现**（scope 串/并行、会话共享、engine 冲突校验）已由核心库落地（[0025](./0025-plan-module-feature-to-jobs.md)/[0026](./0026-schedule-module.md)，见上「G1/G2 解析前置」节）。
 - **多用例组织**：跑批入口（CLI 按路径跑一批）已落地；**按 tag 选子集仍未实现**——旧的 cucumber `--tags` 选子集约定随 BDD runner 一并退役（见 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)），核心调度层的 tag 过滤至今是留口子（`plan` 只接 feature 路径、无过滤参数；真需要时加 CLI 选择面 + plan 入口过滤，是加法）。**当初把它整体推给核心库的理由仍成立**：选子集依赖核心库的调度层，在（已退役的）bdd 直跑层做只是临时件、核心库终究会重做。`features/` 目前是 v0.x 打磨用例 + v1.0 起补的手工真跑验证夹具（并发/scope 共享、确定性锚点），仍未做目录/命名的有意组织。

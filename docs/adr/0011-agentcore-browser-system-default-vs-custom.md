@@ -5,7 +5,7 @@
 AgentCore Browser 有两类，选哪类取决于被测系统在公网还是内网。
 
 **两类（2026-06 本账号实查确认）**：
-- **系统默认 `aws.browser.v1`**：AWS 内建沙箱，`status: READY`，开箱即用、零配置。`list-browsers` 返回空 `[]` 是正常的——它是系统级的，不计入"你创建的" browser。本会话已实测可 `start-browser-session` 起停。
+- **系统默认 `aws.browser.v1`**：AWS 内建沙箱，`status: READY`，开箱即用、零配置。`list-browsers` 返回空 `[]` 是正常的——它是系统级的，不计入"你创建的" browser。已实测可 `start-browser-session` 起停（时间与账号见本节标题括注）。
 - **自建 custom browser（`create-browser`）**：可定制 `--network-configuration`（必填，如放进 VPC 走私网）、`--recording`（会话录像存 S3）、`--certificates`（自定义证书，测私有 HTTPS）、`--enterprise-policies`、`--execution-role-arn`、`--browser-signing`。
 
 **决定**：

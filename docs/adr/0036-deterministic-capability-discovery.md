@@ -1,6 +1,6 @@
 # 0036. 确定性能力暴露：worker 自述注册表，CLI 按引擎查询
 
-> **Status:** Accepted —— 清单查询（`list-deterministic`）与 plan 命中标注均已实现。
+> **Status:** Accepted（`plan` 标注降级的例外与 `--steps-dir` 查询面由 [0037](./0037-distribution-and-packaging.md) 决策 4 追加）—— 清单查询（`list-deterministic`）与 plan 命中标注均已实现。
 
 ## 背景与问题
 
@@ -31,6 +31,7 @@ worker argv 带 `--list-deterministic` 时：**不建会话、不读 stdin、零
 
 - **按引擎查询**（对齐 `run` 的引擎选择逻辑）：`--engine` 默认 `novaact`（与 `--default-engine` 缺省一致）、choices 来自引擎注册表——只返回指定引擎的清单，不做全量聚合。
 - `--json` 输出机器可读（stdout 只放核心产出，对齐既有输出契约）；文本模式渲染 description/example/pattern。
+- `--steps-dir DIR`（flag > env `GHERKAI_STEPS_DIR` > 默认 `./steps` 存在即用）：查询入口同样加载使用方的确定性 step 目录，故清单 = 内建脚手架 + 使用方定制；解析与加载机制见 [0037](./0037-distribution-and-packaging.md) 决策 4。
 - 纯本地 spawn（秒级）、零 AWS；worker 起不来/输出非 JSON → 退 2 带诊断。
 
 ### 4. plan 命中标注：「我写的这句会不会命中」
@@ -39,7 +40,7 @@ worker argv 带 `--list-deterministic` 时：**不建会话、不读 stdin、零
 
 - worker 第三入口 `--match-steps`：stdin 收 step 文本 JSON 数组，对每条用**同一注册表、同一 search 实现**回答 `null`（走 AI）/ `{pattern, description}`（命中）/ `{conflict:[patterns]}`（命中多条），stdout 一行 JSON 即退——匹配语义 100% 留在 worker。match 用**裸 step 文本**，与真跑派发的匹配面完全一致（不 unquote、不拼 argument，[0024](./0024-worker-core-protocol.md)）。
 - plan 按引擎分组 step、每引擎至多 spawn 一次；文本视图行尾标 `← 确定性: <description>`（AI 不标——噪声控制）、`--json` 给每 step 注 `deterministic` 键（plan 视图字段、非 definition）。
-- **标注默认开 + best-effort 按引擎降级**：引擎环境未装/查询失败只让该引擎的 job 无标注（stderr 警告），plan 核心功能保持零依赖不受影响。plan 的承诺从「不起 worker」校准为「零 AWS、零花费、零副作用」——本地瞬时 worker 子进程（自述模式）不违本质。
+- **标注默认开 + best-effort 按引擎降级**：引擎环境未装/查询失败只让该引擎的 job 无标注（stderr 警告），plan 核心功能保持零依赖不受影响。**例外 = 使用方 `steps/` 目录加载失败**（使用方代码错误，不是「环境没装」）→ `plan` 不降级、直接退 2 并转述 worker 诊断：降级成「无标注」等于把使用方定制 step 静默换成 AI 兜底，属最忌的静默降级（目录约定、三个自述入口与 fail-loud 机制见 [0037](./0037-distribution-and-packaging.md) 决策 4）。plan 的承诺从「不起 worker」校准为「零 AWS、零花费、零副作用」——本地瞬时 worker 子进程（自述模式）不违本质。
 - **冲突预检是附加价值**：命中多条模式在真跑时该 step 会 error（[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)），plan 提前以 ⚠ 标注 + stderr 警告暴露；**退出码仍 0**——注册表冲突是工程侧资产问题（feature 作者改措辞可避开、但无权修注册表），不该挡 feature 作者的 plan（与 PlanError=definition 层矛盾退 2 分层）。
 
 ## 被拒方案（护栏）

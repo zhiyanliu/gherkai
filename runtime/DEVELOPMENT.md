@@ -11,7 +11,7 @@
 ## 模块
 
 - `compose.py` —— 组合根/引擎注册表：`resolve_worker_cmd`（worker 四级定位链，ADR 0037 决策 3——env 覆写 >
-  同 venv `-m` > PATH bin > uvx/npx 兜底；全 miss 抛 `WorkerNotFoundError` 交调用点分叉）/ `build_engines` /
+  同 venv `-m` > PATH bin > uvx 兜底（**仅 novaact**；midscene 无本级，理由见下）；全 miss 抛 `WorkerNotFoundError` 交调用点分叉）/ `build_engines` /
   `build_fargate_engines`（cloud 档，吃**显式 task-def revision ARN** 的映射，ADR 0038）/ `build_local_stores` /
   `build_cloud_stores` / `resolve_cloud_target`（云资源终名 + region/profile 一处解析）/ 版本 skew 比对
   （`check_backend_skew`，五态见 `cli/DEVELOPMENT.md`；ADR 0037 决策 7）/ worker variant 解析（`resolve_worker_variant` 供提交侧 preflight、
@@ -35,7 +35,7 @@ cd runtime && uv run pytest -q # 只跑本包单测（仓库根 `uv run pytest` 
 `build_cloud_stores` / `build_fargate_engines` 的 boto3 import 惰性收在 `_make_*` 钩子里——**纯 local 路径绝不
 触发 import**（ADR 0016 窄腰 / 0030）。改这些函数时别把 `import boto3` 提到模块顶层。
 
-worker 定位链的第四级（uvx/npx 兜底）与 fd 传递的相互作用是真跑验出来的坑：`uvx` 不吞 fd3、`npx -y` 会把 fd
+worker 定位链的第四级（uvx 兜底）与 fd 传递的相互作用是真跑验出来的坑：`uvx` 不吞 fd3、`npx -y` 会把 fd
 换掉导致事件全丢（故 midscene 无第四级）——细节与实测证据在 `resolve_worker_cmd` 的 docstring 与 ADR 0037 决策 3。
 
 ## 相关 ADR

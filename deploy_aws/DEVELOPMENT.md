@@ -82,12 +82,12 @@ uv run pytest deploy_aws/tests -q   # stack 合成断言 + Provider + Lambda ass
 
 - `tests/synth_fixture.py`：真调 cdk 合成一次模板供多个测试共用（合成慢，别在每个用例里各合一遍）。
 - worker 镜像族分两层：`tests/test_workers.py` 用 moto（SSM/ECS/ECR/DDB）+ 假容器引擎验**编排**（步序、幂等查重、血缘 tags、清理两道闸）；`tests/test_container.py` 末尾三条用**真 docker** 验 mock 不出来的引擎事实（本地未推送镜像 `RepoDigests` 为空、arm64 镜像被架构判据拒），无 docker 时自动 skip。
-- **真 ECR push / RunTask 拉起注册出来的 revision / VPC 档三态与 skew 三态的真账户半边不在单测里**——「绿≠对」：这些结论依赖被 mock 掉的真实行为，改动这些路径时按 CLAUDE.md「代码纪律」升级到真跑。
+- **真 ECR push / RunTask 拉起注册出来的 revision / VPC 档比对与 skew 比对的真账户半边不在单测里**——「绿≠对」：这些结论依赖被 mock 掉的真实行为，改动这些路径时按 CLAUDE.md「代码纪律」升级到真跑。
 
 ## 设计文档
 
 - [0033](../docs/adr/0033-iac-aws-backend-and-composition-wiring.md)：IaC 定位、资源清单、命名契约、preflight、IAM 最小权限表、RETAIN 语义。
 - [0034](../docs/adr/0034-detached-batch-reconciler.md)：无状态跑批的事件链、并发 cap、job timeout。
-- [0037](../docs/adr/0037-distribution-and-packaging.md)：包化与 `gherkai deploy` 命令面、版本单旋钮与 skew 三态、Lambda asset 来源、CDK 查询缓存。
+- [0037](../docs/adr/0037-distribution-and-packaging.md)：包化与 `gherkai deploy` 命令面、版本单旋钮与 skew 检查（逐档判序见 `cli/DEVELOPMENT.md`「版本 skew」节）、Lambda asset 来源、CDK 查询缓存。
 - [0038](../docs/adr/0038-worker-image-delivery.md)：基底 / variant / 默认指针、push-worker 流程、显式 revision、清理与权限增量。
 - [0032](../docs/adr/0032-fargate-execution-environment.md)：Fargate 执行环境的中断/grace 韧性。

@@ -103,7 +103,7 @@ gherkai submit features/ --backend cloud --worker-variant login    # 提交时�
 ```
 
 - **重推同名 variant 直接放行**，只打印「原 digest → 新 digest」；在跑的 run 手里的旧 revision 按 digest 指着旧镜像层、不受影响。
-- **variant 按版本隔离**（tag 含 CLI 版本），旧版本的留在 ECR 作历史、不参与当前版本解析；升级不重置默认指针——若默认是 `common` 而新版本的 `common` 还没推，提交会退 2 并提示「推它、或临时 `--worker-variant base`」，推上去即恢复。
+- **variant 按版本隔离**（tag 含 CLI 版本），旧版本的留在 ECR 作历史、不参与当前版本解析；升级不重置默认指针——若默认是 `common` 而新版本的 `common` 还没推，提交会退 2 并提示让部署方把它推上去，推上去即恢复；急着跑可以自己临时 `--worker-variant base`（`gherkai deploy` 已把当前版本的基底同步成 `base`）。
 - **退休的旧 revision 机会式清理**（挂在 `push-worker` / `deploy` 末尾，无定时任务）：退休满 1 小时且无未结束的 run 引用才真删，否则留到下次；滞留无害，`list-workers` 看得到。**`delete-worker` 尚未提供**（退 2 并说明原因），旧版本 variant 的 ECR tag 目前请自行按需清理。
 
 ## 清理

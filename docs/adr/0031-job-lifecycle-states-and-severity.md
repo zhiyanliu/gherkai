@@ -66,7 +66,7 @@ class Status(str, Enum):
 - **不进 run 级聚合**：`_aggregate` 的过滤名单除 skipped/aborted 外**也要含 pending/running**（决定三）——否则一个还在 `running` 的 job 会污染 run 级 status。
 - **状态机推进 ≠ severity 升级**：job 生命周期是 `pending → running → 终态(passed/failed/error/…)` 的**单向推进**（终态一旦落定不回退）；
   这条「单调」是**生命周期推进**意义上的，与决定二 run 级的「severity max 单调只升」是**两套不同的序**，不可混用。
-- `_STATUS_COLOR` / index.html 给 pending/running 各配一个「进行中」视觉（灰/蓝），别走兜底色。
+- `_STATUS_COLOR` / index.html 给 pending/running 上「进行中」色（两者**共用同一个蓝**、报告里无需区分——pending 当前到不了 report，只为未来 RunState 视图兜底），别走兜底灰。
 - **「终态」有正向真源、定义取补：`core.model.TERMINAL_STATUSES = frozenset(Status) - {PENDING, RUNNING}`**。
   凡「等到终态 / 是否已终态」的消费方（`status --wait` 轮询、隧道守护的拆除判据、`status` 退出码判定）一律引它，
   **不各自正列白名单**——正向白名单散写多份时，新增终态漏改哪份、那份就永远判不到终态（`--wait` 无限轮询、
@@ -142,7 +142,7 @@ cli 退出码从「`status.value == 'passed'` 才 0」改为**基于 run 级 sev
 ## 决定六：step 级短路——SKIPPED 下探到 step 级 + 正交 `shortcircuited` 布尔
 
 [0028](./0028-transient-network-ssl-resilience.md) 记过一个真跑暴露的空白：scope 内 step 串行，**上游 step `error` 不短路下游** →
-下游在损坏环境（如 SSL 错误页）上跑出误导性 `failed`。本决定兑现 0028 记的「首选路线」：**worker 在 scope 内短路**——
+下游在损坏环境（如 SSL 错误页）上跑出误导性 `failed`。本决定兑现 [0028](./0028-transient-network-ssl-resilience.md)「scope 内 step 级短路」条记的执行修复方向：**worker 在 scope 内短路**——
 上游 step `status==error` 后，不再对后续 step 调 AI（省钱、报告干净），而是为每个被跳过的 step 发一个 `step_skipped` 事件。
 
 **这引出一个新问题：被短路的 step 用什么态？** 定下如下承载方式（三条硬约束，别踩）：

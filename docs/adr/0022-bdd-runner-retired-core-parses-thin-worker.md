@@ -39,7 +39,7 @@
 
 ## 确定性 step 怎么扩展（测试开发的扩展点）
 
-> **实现状态（v1.0 当前）**：下述 `@deterministic` 注册表**已落地**，两个引擎对称——Nova `engines/novaact/gherkai_worker_novaact/deterministic.py`（`@deterministic` 装饰器 + `match()`）、Midscene `engines/midscene/src/worker/deterministic.mts`（`deterministic()` + `match()`）。worker 派发每个 step 时**先查注册表**（命中走精确 handler、不投票、可复现），未命中才落 ②内建 URL 导航 / ③AI catch-all。脚手架（`worker/` 下 `deterministic.steps.ts`/`deterministic_steps.py`，见下「迁移」）现各注册一个真实 URL 锚点（`页面地址匹配 "<正则>"`）。命中后：成功→`passed`（无 votes）；handler 抛 `AssertionError`→`failed`/`assertion_failed`；抛其它→`error`；命中多条→`DeterministicConflict`（ADR 0022 最多命中一条）。各有注册表单测背书。
+> **实现状态（v1.0 当前）**：下述 `@deterministic` 注册表**已落地**，两个引擎对称——Nova `engines/novaact/gherkai_worker_novaact/deterministic.py`（`@deterministic` 装饰器 + `match()`）、Midscene `engines/midscene/src/worker/deterministic.mts`（`deterministic()` + `match()`）。worker 派发每个 step 时**先查注册表**（命中走精确 handler、不投票、可复现），未命中才落 ②内建 URL 导航 / ③AI catch-all。脚手架（`engines/midscene/src/worker/deterministic.steps.mts` / `engines/novaact/gherkai_worker_novaact/deterministic_steps.py`，迁移史见下「迁移」条）现各注册一个真实 URL 锚点（`页面地址匹配 "<正则>"`）。命中后：成功→`passed`（无 votes）；handler 抛 `AssertionError`→`failed`/`assertion_failed`；抛其它→`error`；命中多条→`DeterministicConflict`（ADR 0022 最多命中一条）。各有注册表单测背书。
 
 **扩展点 = 对应 worker 里的一张 step 注册表**（`(模式 → handler + 人话元数据 description/example)`；元数据必填的理由见 [0036](./0036-deterministic-capability-discovery.md)）。延续 [0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md) 的脚手架定位与角色边界（QA 永远只写自然语言、不碰确定性 step）：
 
@@ -68,7 +68,7 @@ def color_is(ctx, sel, hex):
 
 ## 退役清单（B1 删除/作废的东西）
 
-> **状态**：本清单所列 v0.x BDD 入口层已按此物理删除（`bdd/` + `midscene/patches/` 连同 cucumber/patch-package 依赖），确定性脚手架迁入 `worker/`（见下「迁移」）。
+> **状态**：本清单所列 v0.x BDD 入口层已按此物理删除（`bdd/` + `midscene/patches/` 连同 cucumber/patch-package 依赖），确定性脚手架迁入 `worker/`（见下「迁移」；该目录后随 worker 包化改为 `engines/midscene/src/worker/` 与 `engines/novaact/gherkai_worker_novaact/`，见 [0037](./0037-distribution-and-packaging.md) 决策 3）。
 
 删除的「BDD runner 入口管道」，**spike、sigv4 recipe、workflow_setup、step 逻辑一个都不删**：
 

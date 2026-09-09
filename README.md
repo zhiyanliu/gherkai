@@ -23,7 +23,7 @@ flowchart TD
     F["① 用例层<br/>features/*.feature —— 共享 Gherkin"]
 
     subgraph L2["② 产品层"]
-        CLI["gherkai 命令行<br/>plan / run / submit / status / list-engines / list-deterministic / deploy"]
+        CLI["gherkai 命令行<br/>plan / run / submit / status / list-engines / list-deterministic / deploy / destroy"]
         G["gherkai-runtime —— 运行时层<br/>引擎拉起 · 资源命名 · 本机/云端存储 · 隧道"]
         C["gherkai-core —— 执行核心库<br/>parse → scope 分组 → schedule 调度（零引擎依赖）"]
         CLI --> G --> C
@@ -76,6 +76,7 @@ uv tool install 'gherkai[local]'            # 本机跑 Nova Act worker（--back
 npm i -g @gherkai/worker-midscene           # 本机跑 Midscene worker（Node ≥22；CLI 按 PATH 定位）
 uv tool install 'gherkai[deploy-aws]'       # 部署方：gherkai deploy / push-worker（另需 Node ≥22、docker）
 uvx gherkai --version                       # 或免安装临时跑（uvx --from 'gherkai[local]' gherkai run …）
+pipx install --fetch-python missing gherkai   # 不用 uv 的人：pipx 回落（pipx 默认不下载解释器，本项目要 Python ≥ 3.13；装 extra 写 'gherkai[local]'）
 ```
 
 版本由 git tag 派生、各包同号锁定；CLI 与已部署后端的版本在 `--backend cloud` 预检时比对，不一致会明确提示怎么办。各包页面：[`gherkai`](https://pypi.org/project/gherkai/)（CLI）· [`gherkai-worker-novaact`](https://pypi.org/project/gherkai-worker-novaact/) · [`@gherkai/worker-midscene`](https://www.npmjs.com/package/@gherkai/worker-midscene) · [`gherkai-deploy-aws`](https://pypi.org/project/gherkai-deploy-aws/) · 库层 [`gherkai-core`](https://pypi.org/project/gherkai-core/) / [`gherkai-runtime`](https://pypi.org/project/gherkai-runtime/)。

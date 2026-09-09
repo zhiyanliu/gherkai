@@ -13,7 +13,7 @@
 | `release.yml` | push tag `v*` | gate（tag 形态 + 算出的版本==tag）→ ① PyPI → ② npm → ③ GHCR 基底镜像 → ④ GitHub Release |
 
 发布是**一个动作**：`git tag vX.Y.Z && git push origin vX.Y.Z`。版本真源只有 git tag
-（pyproject / package.json 里没有手写版本号），CI 从 tag 派生五个 wheel 的版本、npm 包版本、
+（五个 pyproject 走动态版本、无手写版本号；`engines/midscene/package.json` 只留 `0.0.0-dev` 占位——npm 的必填字段，发布时由 `npm version <tag>` 覆写，别手改），CI 从 tag 派生五个 wheel 的版本、npm 包版本、
 镜像 tag、Release 名。
 
 ### `release.yml` 的 job 图与重跑语义
