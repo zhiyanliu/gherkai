@@ -463,3 +463,16 @@ def test_run_state_jobs_map_round_trip(tmp_path: Path):
     got = store.load_run_state("map-run")
     assert got is not None and got == state
     assert isinstance(got.jobs, dict)
+
+
+def test_step_message_survives_round_trip_and_missing_key_is_none():
+    """step 级 message 写读两端同批（ADR 0042 决策三）：样例必须带**非默认**的 message——全 None 时
+    to_dict/from_dict 往返照不出漏读端（默认值恰好相等的假绿）。旧落盘无此键 → None（向后兼容）。"""
+    jr = _sample_run().jobs[0]
+    jr.scenarios[0].steps[1] = StepResult(index=1, status=Status.FAILED, error_type="assertion_failed",
+                                          message="AI 断言未过多数票（0/1）：搜索 OpenAI")
+    d = job_result_to_dict(jr)
+    assert d["scenarios"][0]["steps"][1]["message"] == "AI 断言未过多数票（0/1）：搜索 OpenAI"
+    assert job_result_from_dict(d).scenarios[0].steps[1].message == "AI 断言未过多数票（0/1）：搜索 OpenAI"
+    del d["scenarios"][0]["steps"][1]["message"]
+    assert job_result_from_dict(d).scenarios[0].steps[1].message is None

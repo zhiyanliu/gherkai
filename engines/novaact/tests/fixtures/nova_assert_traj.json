@@ -1,0 +1,48 @@
+{
+ "sdk_version": "3.4.187.0",
+ "prompt": "当前页面是关于 OpenAI 的维基百科词条页, format output with jsonschema: {\"type\": \"boolean\"}",
+ "steps": [
+  {
+   "active_url": "https://en.wikipedia.org/wiki/OpenAI",
+   "image": "data:image/jpeg;base64,/9j/4AAQSkZJRgABA…<stripped>",
+   "simplified_dom": "",
+   "program": {
+    "calls": [
+     {
+      "name": "think",
+      "kwargs": {
+       "value": "I am on the Wikipedia page for OpenAI. My task is to return whether the current page is the Wikipedia page for OpenAI. I can see the page title is 'OpenAI', and the page is from Wikipedia, so the current page is the Wikipedia page for OpenAI. My task is complete, and I have been asked to return a boolean indicating whether the current page is the Wikipedia page for OpenAI. I should return 'true'."
+      },
+      "id": "think",
+      "is_tool": false,
+      "is_return": false
+     },
+     {
+      "name": "return",
+      "kwargs": {
+       "value": "true"
+      },
+      "id": "return",
+      "is_tool": false,
+      "is_return": false
+     }
+    ]
+   }
+  }
+ ],
+ "metadata": {
+  "session_id": "01a0898c-bd9f-7527-9e85-ab83b165c49f",
+  "act_id": "01a0898d-5a0f-7006-8116-97531da7d82c",
+  "num_steps_executed": 1,
+  "start_time": 1789014137.5004518,
+  "end_time": 1789014147.3210297,
+  "prompt": "当前页面是关于 OpenAI 的维基百科词条页, format output with jsonschema: {\"type\": \"boolean\"}",
+  "step_server_times_s": [
+   3.261
+  ],
+  "time_worked_s": 9.82057785987854,
+  "human_wait_time_s": 0.0,
+  "workflow_definition_name": "spike-wikipedia-benchmark",
+  "workflow_run_id": "01a0898c-a3f1-7636-948e-9ef83ebada5a"
+ }
+}

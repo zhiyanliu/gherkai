@@ -266,6 +266,8 @@ def _render_index_html(manifest: dict, result: RunResult) -> str:
                     if st.votes and st.votes.total > 1 else ""
                 )
                 serr = f' <span class="err">{esc(st.error_type)}</span>' if st.error_type else ""
+                # step 级失败原因原文（ADR 0042 决策三）——与 CLI 文本的 step 行对称，报告页不只剩光秃的 error_type
+                smsg = f' <span class="msg">{esc(st.message)}</span>' if st.message else ""
                 # 连锁失败旁注（ADR 0031 决定六）：被 scope 内短路的 step（shortcircuited=True，status=skipped）——
                 # 上游 error 后 worker 跳过了它、没在损坏环境上跑。读 shortcircuited 正交布尔（比旧的"按 status 顺序猜"
                 # 精确）；不改判定/severity（守纯 reducer 红线）。
@@ -277,7 +279,7 @@ def _render_index_html(manifest: dict, result: RunResult) -> str:
                 step_rows.append(
                     f'<li id="{st_anchor}">{_dot(st.status.value)}<span class="stp">step[{st.index}]</span> '
                     f'{esc(st.status.value)} <span class="t">{_fmt_ms(st.duration_ms)}</span>'
-                    f'{votes}{serr}{taint}{_paperclips(st_anchor)}</li>'
+                    f'{votes}{serr}{smsg}{taint}{_paperclips(st_anchor)}</li>'
                 )
             steps_html = ("<ul class=\"steps\">" + "".join(step_rows) + "</ul>") if step_rows else ""
             sc_anchor = _node_anchor(jr.scope_id, sr.scenario_id, None)

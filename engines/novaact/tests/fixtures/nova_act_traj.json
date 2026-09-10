@@ -1,0 +1,92 @@
+{
+ "sdk_version": "3.4.187.0",
+ "prompt": "在搜索框输入 OpenAI 并提交搜索",
+ "steps": [
+  {
+   "active_url": "https://www.wikipedia.org/",
+   "image": "data:image/jpeg;base64,/9j/4AAQSkZJRgABA…<stripped>",
+   "simplified_dom": "",
+   "program": {
+    "calls": [
+     {
+      "name": "think",
+      "kwargs": {
+       "value": "I am on the Wikipedia page. My task is to search for OpenAI. I see a search bar at the top, but it is currently empty. I should type 'OpenAI' into the search bar to populate it and press enter to initiate the search."
+      },
+      "id": "think",
+      "is_tool": false,
+      "is_return": false
+     },
+     {
+      "name": "agentType",
+      "kwargs": {
+       "value": "OpenAI",
+       "box": "<box>480,490,514,892</box>",
+       "pressEnter": "{\"pressEnter\": true}"
+      },
+      "id": "agentType",
+      "is_tool": false,
+      "is_return": false
+     },
+     {
+      "name": "waitForPageToSettle",
+      "kwargs": {},
+      "id": "waitForPageToSettle",
+      "is_tool": false,
+      "is_return": false
+     },
+     {
+      "name": "takeObservation",
+      "kwargs": {},
+      "id": "takeObservation",
+      "is_tool": false,
+      "is_return": false
+     }
+    ]
+   }
+  },
+  {
+   "active_url": "https://en.wikipedia.org/wiki/OpenAI",
+   "image": "data:image/jpeg;base64,/9j/4AAQSkZJRgABA…<stripped>",
+   "simplified_dom": "",
+   "program": {
+    "calls": [
+     {
+      "name": "think",
+      "kwargs": {
+       "value": "I am now on the Wikipedia page for OpenAI, which means my last action was successful. I have successfully searched for OpenAI. My task is complete, and I was not asked to provide any information, so I will empty return."
+      },
+      "id": "think",
+      "is_tool": false,
+      "is_return": false
+     },
+     {
+      "name": "return",
+      "kwargs": {
+       "value": ""
+      },
+      "id": "return",
+      "is_tool": false,
+      "is_return": false
+     }
+    ]
+   }
+  }
+ ],
+ "metadata": {
+  "session_id": "01a0898c-bd9f-7527-9e85-ab83b165c49f",
+  "act_id": "01a0898c-eec2-7066-80dc-a8642afb0a01",
+  "num_steps_executed": 2,
+  "start_time": 1789014110.027499,
+  "end_time": 1789014136.948842,
+  "prompt": "在搜索框输入 OpenAI 并提交搜索",
+  "step_server_times_s": [
+   3.014,
+   3.216
+  ],
+  "time_worked_s": 26.921343088150024,
+  "human_wait_time_s": 0.0,
+  "workflow_definition_name": "spike-wikipedia-benchmark",
+  "workflow_run_id": "01a0898c-a3f1-7636-948e-9ef83ebada5a"
+ }
+}

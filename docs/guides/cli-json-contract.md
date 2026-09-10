@@ -47,6 +47,7 @@
 | `duration_ms` | number \| null | step 墙钟（性能指标，与成本正交） |
 | `votes` | object \| null | AI 断言才有：`yes`（赞成票）、`total`（总票数）；确定性/动作步为 null |
 | `error_type` | string \| null | `assertion_failed` / `engine_error` / `network_error` / `timeout` … |
+| `message` | string \| null | step 级失败原因原文（如「AI 断言未过多数票（0/1）：<断言文>」、act 异常的 `类型: 信息`）；passed 步为 null。旧 run 的落盘无此键 |
 | `report_refs[]` | array | step 级原生产物（Nova：本 step 的 act 轨迹 `kind=trajectory`） |
 | `shortcircuited` | bool | true = 上游 step error 后被跳过、未执行（此时 status=skipped） |
 

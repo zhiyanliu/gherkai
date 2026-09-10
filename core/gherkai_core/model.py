@@ -278,6 +278,9 @@ class StepResult:
     duration_ms: float | None = None  # 墙钟时长（性能指标，与 cost 的 time_worked_s 正交）
     votes: Votes | None = None
     error_type: str | None = None
+    # step 级失败原因原文（worker 在 step_done 带的 message：断言未过的票数与断言文 / act 异常 `type: message`），
+    # 从 StepDone 原样搬入、进 jobs/*.json（ADR 0042 决策三）。曾长期在归约时被丢，jobs 里的 step 只剩 error_type。
+    message: str | None = None
     report_refs: tuple[ReportRef, ...] = ()  # step 级原生产物指针（Nova：本 step 的 act 轨迹，kind=trajectory，ADR 0027）
     # 与判定轴（status）正交的第二维（ADR 0031 决定六）：True = 本 step 因上游 error 被 scope 内短路而跳过、没跑。
     # 仅在 status==SKIPPED（由 step_skipped 事件派生）时为 True；渲染层的连锁失败旁注据此判定（比"按 status 顺序猜"精确）。

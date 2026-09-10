@@ -1,0 +1,447 @@
+{
+ "sdkVersion": "1.9.8",
+ "groupName": "Midscene Report",
+ "groupDescription": "",
+ "modelBriefs": [],
+ "deviceType": "playwright",
+ "executions": [
+  {
+   "id": "6cdc7c13-6be2-463e-90d3-65962497ef07",
+   "logTime": 1786930430821,
+   "name": "Act - 点击『提交订单』按钮",
+   "tasks": [
+    {
+     "taskId": "7a069059-0031-4cba-a521-44bc17334f80",
+     "status": "finished",
+     "type": "Planning",
+     "subType": "Plan",
+     "param": {
+      "userInstruction": "点击『提交订单』按钮",
+      "imagesIncludeCount": 1,
+      "deepThink": false
+     },
+     "timing": {
+      "start": 1786930430848,
+      "getUiContextStart": 1786930430848,
+      "getUiContextEnd": 1786930434203,
+      "callAiStart": 1786930434203,
+      "callAiEnd": 1786930440682,
+      "captureAfterCallingSnapshotStart": 1786930440682,
+      "captureAfterCallingSnapshotEnd": 1786930442348,
+      "end": 1786930442348,
+      "cost": 11500
+     },
+     "uiContext": {
+      "shotSize": {
+       "width": 1456,
+       "height": 732
+      },
+      "deprecatedDpr": 1,
+      "screenshot": {
+       "type": "midscene_screenshot_ref",
+       "id": "b760c592-d07e-459d-9802-cde8bb5226b9",
+       "capturedAt": 1786930434108,
+       "mimeType": "image/jpeg",
+       "storage": "inline"
+      },
+      "shrunkShotToLogicalRatio": 1
+     },
+     "log": {
+      "rawResponse": "<stripped>",
+      "rawChoiceMessage": {
+       "content": "<stripped>",
+       "refusal": null,
+       "role": "assistant"
+      }
+     },
+     "usage": {
+      "completion_tokens": 136,
+      "prompt_tokens": 7994,
+      "total_tokens": 8130,
+      "cached_input": 0,
+      "time_cost": 6464,
+      "model_name": "qwen.qwen3-vl-235b-a22b",
+      "model_description": "qwen3-vl mode",
+      "response_model_name": "qwen.qwen3-vl-235b-a22b",
+      "slot": "default",
+      "intent": "planning",
+      "request_id": "b2c75976-4a4b-48e9-8f1d-2ad736090da3"
+     },
+     "output": {
+      "actions": [
+       {
+        "type": "Tap",
+        "param": {
+         "locate": {
+          "rect": {
+           "left": 7,
+           "top": 129,
+           "width": 67,
+           "height": 23
+          },
+          "center": [
+           40,
+           140
+          ],
+          "description": "提交订单 button"
+         }
+        }
+       }
+      ],
+      "log": "Click the \"提交订单\" button",
+      "thought": "The user instruction is to click the \"提交订单\" button. I can see this button clearly in the screenshot, located at the top left of the interface. Since this is the first action to be executed and there are no previous actions to consider, I will proceed with clicking this button as instructed.",
+      "yamlFlow": [
+       {
+        "aiTap": "",
+        "locate": "提交订单 button"
+       }
+      ],
+      "shouldContinuePlanning": true
+     },
+     "recorder": [
+      {
+       "type": "screenshot",
+       "ts": 1786930442348,
+       "screenshot": {
+        "type": "midscene_screenshot_ref",
+        "id": "0c9037e6-a712-437c-adfb-c49f08c34108",
+        "capturedAt": 1786930442311,
+        "mimeType": "image/jpeg",
+        "storage": "inline"
+       },
+       "timing": "after-calling"
+      }
+     ],
+     "cache": {
+      "hit": false
+     }
+    },
+    {
+     "taskId": "e0841ddc-3e9d-4a39-bfa4-b7f466b3ee58",
+     "status": "finished",
+     "type": "Planning",
+     "subType": "Locate",
+     "param": {
+      "prompt": "提交订单 button",
+      "bbox": [
+       5,
+       177,
+       50,
+       207
+      ],
+      "locatedPixelBbox": [
+       7,
+       129,
+       73,
+       151
+      ]
+     },
+     "thought": "",
+     "timing": {
+      "start": 1786930442353,
+      "getUiContextStart": 1786930442354,
+      "getUiContextEnd": 1786930442354,
+      "end": 1786930442354,
+      "cost": 1
+     },
+     "uiContext": {
+      "shotSize": {
+       "width": 1456,
+       "height": 732
+      },
+      "deprecatedDpr": 1,
+      "screenshot": {
+       "type": "midscene_screenshot_ref",
+       "id": "0c9037e6-a712-437c-adfb-c49f08c34108",
+       "capturedAt": 1786930442311,
+       "mimeType": "image/jpeg",
+       "storage": "inline"
+      },
+      "shrunkShotToLogicalRatio": 1
+     },
+     "output": {
+      "element": {
+       "rect": {
+        "left": 7,
+        "top": 129,
+        "width": 67,
+        "height": 23
+       },
+       "center": [
+        40,
+        140
+       ],
+       "description": "提交订单 button",
+       "dpr": 1
+      }
+     },
+     "hitBy": {
+      "from": "Plan",
+      "context": {
+       "locatedPixelBbox": [
+        7,
+        129,
+        73,
+        151
+       ]
+      }
+     },
+     "recorder": []
+    },
+    {
+     "taskId": "a72d27d4-42c1-44ec-80e9-fe8dd0667463",
+     "status": "finished",
+     "type": "Action Space",
+     "subType": "Tap",
+     "param": {
+      "locate": {
+       "rect": {
+        "left": 7,
+        "top": 129,
+        "width": 67,
+        "height": 23
+       },
+       "center": [
+        40,
+        140
+       ],
+       "description": "提交订单 button"
+      }
+     },
+     "timing": {
+      "start": 1786930442355,
+      "getUiContextStart": 1786930442356,
+      "getUiContextEnd": 1786930442356,
+      "beforeInvokeActionHookStart": 1786930442356,
+      "beforeInvokeActionHookEnd": 1786930442557,
+      "callActionStart": 1786930442557,
+      "callActionEnd": 1786930443027,
+      "afterInvokeActionHookStart": 1786930443028,
+      "afterInvokeActionHookEnd": 1786930444476,
+      "captureAfterCallingSnapshotStart": 1786930444476,
+      "captureAfterCallingSnapshotEnd": 1786930447046,
+      "end": 1786930447046,
+      "cost": 4691
+     },
+     "uiContext": {
+      "shotSize": {
+       "width": 1456,
+       "height": 732
+      },
+      "deprecatedDpr": 1,
+      "screenshot": {
+       "type": "midscene_screenshot_ref",
+       "id": "0c9037e6-a712-437c-adfb-c49f08c34108",
+       "capturedAt": 1786930442311,
+       "mimeType": "image/jpeg",
+       "storage": "inline"
+      },
+      "shrunkShotToLogicalRatio": 1
+     },
+     "recorder": [
+      {
+       "type": "screenshot",
+       "ts": 1786930447046,
+       "screenshot": {
+        "type": "midscene_screenshot_ref",
+        "id": "a64d320a-1a8a-4bf8-9546-8e2b0f11768e",
+        "capturedAt": 1786930447008,
+        "mimeType": "image/jpeg",
+        "storage": "inline"
+       },
+       "timing": "after-calling"
+      }
+     ]
+    },
+    {
+     "taskId": "cecb99a7-c9a7-4298-b3f1-44b178c50fec",
+     "status": "finished",
+     "type": "Planning",
+     "subType": "Plan",
+     "param": {
+      "userInstruction": "点击『提交订单』按钮",
+      "imagesIncludeCount": 1,
+      "deepThink": false
+     },
+     "timing": {
+      "start": 1786930447048,
+      "getUiContextStart": 1786930447049,
+      "getUiContextEnd": 1786930447049,
+      "callAiStart": 1786930447049,
+      "callAiEnd": 1786930451543,
+      "captureAfterCallingSnapshotStart": 1786930451543,
+      "captureAfterCallingSnapshotEnd": 1786930453213,
+      "end": 1786930453213,
+      "cost": 6165
+     },
+     "uiContext": {
+      "shotSize": {
+       "width": 1456,
+       "height": 732
+      },
+      "deprecatedDpr": 1,
+      "screenshot": {
+       "type": "midscene_screenshot_ref",
+       "id": "a64d320a-1a8a-4bf8-9546-8e2b0f11768e",
+       "capturedAt": 1786930447008,
+       "mimeType": "image/jpeg",
+       "storage": "inline"
+      },
+      "shrunkShotToLogicalRatio": 1
+     },
+     "log": {
+      "rawResponse": "<stripped>",
+      "rawChoiceMessage": {
+       "content": "<stripped>",
+       "refusal": null,
+       "role": "assistant"
+      }
+     },
+     "usage": {
+      "completion_tokens": 81,
+      "prompt_tokens": 8214,
+      "total_tokens": 8295,
+      "cached_input": 0,
+      "time_cost": 4485,
+      "model_name": "qwen.qwen3-vl-235b-a22b",
+      "model_description": "qwen3-vl mode",
+      "response_model_name": "qwen.qwen3-vl-235b-a22b",
+      "slot": "default",
+      "intent": "planning",
+      "request_id": "eb990038-29df-4481-af6c-c9e21821e0b6"
+     },
+     "output": {
+      "actions": [],
+      "log": "",
+      "thought": "The user's instruction was to click the \"提交订单\" button. According to the screenshot, the button has been successfully clicked, as indicated by the message \"订单提交成功\" (Order submitted successfully) displayed on the screen. This confirms that the task has been completed as requested. No further actions are required.",
+      "yamlFlow": [],
+      "output": "订单已成功提交",
+      "shouldContinuePlanning": false
+     },
+     "recorder": [
+      {
+       "type": "screenshot",
+       "ts": 1786930453213,
+       "screenshot": {
+        "type": "midscene_screenshot_ref",
+        "id": "c1b23df2-e0ea-435c-9e1e-7bf0b6dbeb9c",
+        "capturedAt": 1786930453176,
+        "mimeType": "image/jpeg",
+        "storage": "inline"
+       },
+       "timing": "after-calling"
+      }
+     ],
+     "cache": {
+      "hit": false
+     }
+    }
+   ]
+  },
+  {
+   "id": "a655a021-42e7-4883-9b99-f2df6dfb1604",
+   "logTime": 1786930453217,
+   "name": "Boolean - 页面上出现『订单提交成功』字样",
+   "tasks": [
+    {
+     "taskId": "9395202c-37a9-4c47-9b8e-153cbf26c1dd",
+     "status": "finished",
+     "type": "Insight",
+     "subType": "Boolean",
+     "param": {
+      "domIncluded": false,
+      "dataDemand": "页面上出现『订单提交成功』字样"
+     },
+     "timing": {
+      "start": 1786930453217,
+      "getUiContextStart": 1786930453218,
+      "getUiContextEnd": 1786930454885,
+      "captureAfterCallingSnapshotStart": 1786930458352,
+      "captureAfterCallingSnapshotEnd": 1786930460001,
+      "end": 1786930460001,
+      "cost": 6784
+     },
+     "uiContext": {
+      "shotSize": {
+       "width": 1456,
+       "height": 732
+      },
+      "deprecatedDpr": 1,
+      "screenshot": {
+       "type": "midscene_screenshot_ref",
+       "id": "bd83a7fe-e1d5-45b6-9a37-7b2cb9925c94",
+       "capturedAt": 1786930454848,
+       "mimeType": "image/jpeg",
+       "storage": "inline"
+      },
+      "shrunkShotToLogicalRatio": 1
+     },
+     "log": {
+      "logId": "872e2c50-67e4-48f7-984f-68c0167ece45",
+      "logTime": 1786930458351,
+      "type": "extract",
+      "userQuery": {
+       "dataDemand": {
+        "Boolean": "Boolean, based on the current screenshot and its contents if provided, unless the user explicitly asks to compare with reference images, 页面上出现『订单提交成功』字样"
+       }
+      },
+      "data": {
+       "Boolean": true
+      },
+      "taskInfo": {
+       "durationMs": 3466,
+       "rawResponse": "<stripped>",
+       "rawChoiceMessage": {
+        "content": "<stripped>",
+        "refusal": null,
+        "role": "assistant"
+       },
+       "formatResponse": "{\"thought\":\"The screenshot clearly displays the text \\\"订单提交成功\\\" on the page. This matches the condition specified in the DATA_DEMAND, which asks whether the phrase \\\"订单提交成功\\\" appears on the page. Since it is visibly present, the Boolean value should be true.\",\"data\":{\"Boolean\":true}}",
+       "usage": {
+        "completion_tokens": 72,
+        "prompt_tokens": 1804,
+        "total_tokens": 1876,
+        "cached_input": 0,
+        "time_cost": 3465,
+        "model_name": "qwen.qwen3-vl-235b-a22b",
+        "model_description": "qwen3-vl mode",
+        "response_model_name": "qwen.qwen3-vl-235b-a22b",
+        "slot": "default",
+        "request_id": "2d4438fa-1983-4bdc-8655-386b561f199a"
+       }
+      }
+     },
+     "usage": {
+      "completion_tokens": 72,
+      "prompt_tokens": 1804,
+      "total_tokens": 1876,
+      "cached_input": 0,
+      "time_cost": 3465,
+      "model_name": "qwen.qwen3-vl-235b-a22b",
+      "model_description": "qwen3-vl mode",
+      "response_model_name": "qwen.qwen3-vl-235b-a22b",
+      "slot": "default",
+      "intent": "insight",
+      "request_id": "2d4438fa-1983-4bdc-8655-386b561f199a"
+     },
+     "recorder": [
+      {
+       "type": "screenshot",
+       "ts": 1786930460001,
+       "screenshot": {
+        "type": "midscene_screenshot_ref",
+        "id": "70fca642-ba3e-449d-83b0-635becdd6ec3",
+        "capturedAt": 1786930459964,
+        "mimeType": "image/jpeg",
+        "storage": "inline"
+       },
+       "timing": "after-calling"
+      }
+     ],
+     "output": true,
+     "thought": "The screenshot clearly displays the text \"订单提交成功\" on the page. This matches the condition specified in the DATA_DEMAND, which asks whether the phrase \"订单提交成功\" appears on the page. Since it is visibly present, the Boolean value should be true."
+    }
+   ]
+  }
+ ]
+}

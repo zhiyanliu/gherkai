@@ -329,3 +329,20 @@ def test_project_full_carries_run_duration_from_host():
     recs = _passed_events("a") + [_exit("a", 0)]
     assert project_full(_meta("a"), recs).duration_ms is None
     assert project_full(_meta("a"), recs, run_duration_ms=135000.0).duration_ms == 135000.0
+
+
+def test_step_done_message_is_kept_in_step_result():
+    """step 级失败原因原文从 StepDone 搬进 StepResult（ADR 0042 决策三）——曾长期在归约时被丢。"""
+    from gherkai_core.model import StepDone, StepStarted
+    recs = [
+        _ev("a", 1, ScopeStarted(scope_id="a", session_id="sess-x")),
+        _ev("a", 2, StepStarted(scenario_id="a:1", step_index=0)),
+        _ev("a", 3, StepDone(scenario_id="a:1", step_index=0, status=Status.FAILED,
+                             error_type="assertion_failed", message="AI 断言未过多数票（0/1）：x")),
+        _ev("a", 4, ScenarioDone(scenario_id="a:1", status=Status.FAILED)),
+        _ev("a", 5, ScopeDone(scope_id="a")),
+        _exit("a", 0),
+    ]
+    result = project_full(_meta("a"), recs)
+    st = result.jobs[0].scenarios[0].steps[0]
+    assert st.status == Status.FAILED and st.message == "AI 断言未过多数票（0/1）：x"

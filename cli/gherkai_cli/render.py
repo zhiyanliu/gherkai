@@ -79,6 +79,9 @@ def render_text(result: RunResult) -> str:
                 # 正交布尔（比旧的"按 status 顺序猜 error 后 failed"精确）；不改判定/severity（守纯 reducer 红线）。
                 note = "  ⚠ 因前置 step error 被跳过（未执行）" if st.shortcircuited else ""
                 out.append(f"      step {st.index}: {st.status.value} ({_ms(st.duration_ms)}){v}{note}")
+                # step 级失败原因（ADR 0042 决策三）：与 job 行同款——有 message 就显，人读视图不只剩一个光秃的态
+                if st.message:
+                    out.append(f"        原因: {st.message}")
                 # step 级原生报告产物（Nova trajectory 挂这层，来自 step_done 下沉，ADR 0027）——缩进深一级
                 for rr in st.report_refs:
                     out.append(f"        report（{rr.label or rr.kind}）: {rr.ref}")

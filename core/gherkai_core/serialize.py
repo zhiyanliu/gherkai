@@ -157,6 +157,7 @@ def job_result_to_dict(jr: JobResult, *, include_job: bool = True) -> dict:
                         "duration_ms": st.duration_ms,
                         "votes": ({"yes": st.votes.yes, "total": st.votes.total} if st.votes else None),
                         "error_type": st.error_type,
+                        "message": st.message,  # step 级失败原因原文（ADR 0042 决策三）
                         "report_refs": [_ref_to_dict(rr) for rr in st.report_refs],  # step 级 trajectory（ADR 0027）
                         "shortcircuited": st.shortcircuited,  # scope 内短路标记（ADR 0031 决定六）
                     }
@@ -198,6 +199,7 @@ def job_result_from_dict(d: dict, *, job: Job | None = None) -> JobResult:
                         duration_ms=st.get("duration_ms"),
                         votes=_votes_from_dict(st.get("votes")),
                         error_type=st.get("error_type"),
+                        message=st.get("message"),  # 向后兼容：ADR 0042 之前的落盘无此键 → None
                         report_refs=tuple(_ref_from_dict(r) for r in st.get("report_refs", [])),  # 向后兼容：旧落盘无此键
                         shortcircuited=st.get("shortcircuited", False),  # 向后兼容：旧落盘无此键 → 默认 False（ADR 0031）
                     )

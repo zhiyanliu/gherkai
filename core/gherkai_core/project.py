@@ -92,6 +92,7 @@ def reduce_event(
         timing.steps.setdefault(event.scenario_id, []).append(
             StepResult(index=event.step_index, status=event.status,
                        duration_ms=dur_ms, votes=event.votes, error_type=event.error_type,
+                       message=event.message,  # step 级失败原因原文（ADR 0042 决策三）
                        report_refs=event.report_refs)  # step 级 trajectory 原样搬入（ADR 0027 下沉）
         )
     elif isinstance(event, StepSkipped):
