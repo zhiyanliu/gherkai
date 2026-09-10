@@ -220,22 +220,35 @@ def _timeout_built(tmp_path, *, status=Status.RUNNING, claimed_at=None, with_exi
 
 
 class _FakeEcs:
-    """list_tasks/describe_tasks/stop_task 记录器（describe 返回带 SCOPE_ID env 的 overrides）。"""
+    """list_tasks/describe_tasks/stop_task 记录器。`task_arns` = 在跑的 task；`tasks` = 带状态的 task 描述
+    （dict：arn / lastStatus / desiredStatus / exitCode? / stoppedReason? / stopCode?）。list_tasks 按 desiredStatus 过滤
+    （ECS 语义：正在停止/已停止的不在 RUNNING 列表里）；describe 返回带 SCOPE_ID env 的 overrides。"""
 
-    def __init__(self, task_arns=(), scope_id="a"):
-        self._arns = list(task_arns)
+    def __init__(self, task_arns=(), scope_id="a", tasks=()):
+        self._tasks = [{"arn": a, "lastStatus": "RUNNING", "desiredStatus": "RUNNING"} for a in task_arns] + list(tasks)
         self._scope_id = scope_id
         self.stopped: list[dict] = []
 
     def list_tasks(self, **kw):
-        return {"taskArns": self._arns}
+        want = kw.get("desiredStatus", "RUNNING")
+        return {"taskArns": [t["arn"] for t in self._tasks if t.get("desiredStatus", "RUNNING") == want]}
 
     def describe_tasks(self, **kw):
-        return {"tasks": [
-            {"taskArn": arn,
-             "overrides": {"containerOverrides": [{"environment": [
-                 {"name": "SCOPE_ID", "value": self._scope_id}]}]}}
-            for arn in kw["tasks"]]}
+        out = []
+        for t in self._tasks:
+            if t["arn"] not in kw["tasks"]:
+                continue
+            container = {"name": "novaact-worker"}
+            if t.get("exitCode") is not None:
+                container["exitCode"] = t["exitCode"]
+            d = {"taskArn": t["arn"], "lastStatus": t.get("lastStatus", "RUNNING"),
+                 "desiredStatus": t.get("desiredStatus", "RUNNING"), "containers": [container],
+                 "overrides": {"containerOverrides": [{"environment": [{"name": "SCOPE_ID", "value": self._scope_id}]}]}}
+            for k in ("stoppedReason", "stopCode"):
+                if t.get(k):
+                    d[k] = t[k]
+            out.append(d)
+        return {"tasks": out}
 
     def stop_task(self, **kw):
         self.stopped.append(kw)
@@ -580,3 +593,50 @@ def test_run_ids_scope_id_containing_hash_is_split_from_the_left():
     events Stream 会被抽成错的 run_id、reconciler 静默 no-op（主推进链断）。"""
     event = {"Records": [_stream_record("20260909T000000Z-a3f9c1#checkout#step-2")]}
     assert reconciler._run_ids_from_stream(event) == {"20260909T000000Z-a3f9c1"}
+
+
+def test_handle_timeout_leaves_a_stopping_task_to_the_observer(tmp_path, monkeypatch):
+    """task 正在停止（desiredStatus=STOPPED、lastStatus 未到 STOPPED）→ 不在 RUNNING 列表里，但**不是**无踪：不动、
+    不直写，等观察者的真退出记录（ADR 0034「job timeout」节）。曾按 RUNNING 列表判「无踪」直写 timed_out，与几秒后
+    到达的真退出记录同键互覆——恰在预算点跑完的 passed job 可被终判成 timeout。"""
+    monkeypatch.setenv("CLUSTER", "test-cluster")
+    ecs = _FakeEcs(tasks=[{"arn": "arn:task/1", "lastStatus": "DEPROVISIONING", "desiredStatus": "STOPPED"}])
+    built = _timeout_built(tmp_path)
+    r = reconciler._handle_timeout("run-1", "a", built, ecs_client=ecs)
+    assert r == "noop-stopping" and ecs.stopped == []
+    assert built[1].has_exit("a") is False  # 没直写
+
+
+def test_handle_timeout_converges_from_describe_when_task_already_stopped(tmp_path, monkeypatch):
+    """task 已 STOPPED 却无退出记录（STOPPED 事件丢投）→ 用与观察者同一提取函数从 DescribeTasks 落**真**退出记录
+    （exit 0、非 timed_out），不臆造 timeout；迟到的观察者写同内容同键、幂等。"""
+    monkeypatch.setenv("CLUSTER", "test-cluster")
+    ecs = _FakeEcs(tasks=[{"arn": "arn:task/1", "lastStatus": "STOPPED", "desiredStatus": "STOPPED",
+                           "exitCode": 0, "stoppedReason": "Essential container in task exited"}])
+    built = _timeout_built(tmp_path)
+    r = reconciler._handle_timeout("run-1", "a", built, ecs_client=ecs)
+    assert r == "converged-from-describe" and ecs.stopped == []
+    exits = {x.scope_id: x.exited for x in built[1].records() if x.kind == "exit"}
+    assert exits["a"].exit_code == 0 and exits["a"].timed_out is False and exits["a"].reason is None
+
+
+def test_handle_timeout_converges_from_describe_keeps_timeout_attribution_of_own_stop(tmp_path, monkeypatch):
+    """上一轮已 StopTask（stoppedReason 带哨兵）、事件丢投、本轮再扫到它已 STOPPED → 落记录仍归因 timeout。"""
+    monkeypatch.setenv("CLUSTER", "test-cluster")
+    ecs = _FakeEcs(tasks=[{"arn": "arn:task/1", "lastStatus": "STOPPED", "desiredStatus": "STOPPED",
+                           "exitCode": 143, "stoppedReason": f"{reconciler.TIMEOUT_STOP_SENTINEL}: scope exceeded 300s budget"}])
+    built = _timeout_built(tmp_path)
+    assert reconciler._handle_timeout("run-1", "a", built, ecs_client=ecs) == "converged-from-describe"
+    exits = {x.scope_id: x.exited for x in built[1].records() if x.kind == "exit"}
+    assert exits["a"].exit_code == 143 and exits["a"].timed_out is True
+
+
+def test_exit_from_task_is_shared_by_observer_and_timeout_handler():
+    """同一 task 对象 → 观察者 _extract 与 exit_from_task 给出同一 (exit_code, timed_out, reason)——同键幂等的前提。"""
+    detail = _stopped_detail("run-1", "a", 0)
+    detail["containers"] = [{"name": "novaact-worker"}]
+    detail["stopCode"] = "TaskFailedToStart"
+    detail["stoppedReason"] = "CannotPullContainerError: not found"
+    _r, _s, ec, to, reason = exit_observer._extract(detail)
+    assert (ec, to, reason) == reconciler.exit_from_task(detail)
+    assert reason == "TaskFailedToStart: CannotPullContainerError: not found"

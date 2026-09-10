@@ -84,23 +84,27 @@ def watch_run_and_stop_tunnel(
     TTL 到点 → 拆隧道自杀（防「run 卡死 / 查询持续异常」时 ngrok 进程泄漏）。返回拆除原因（调用方打印）。
 
     读库异常不致命（瞬时网络/限流）——经 `on_warn`（可选，皮层给打印口）报一句后继续轮询，TTL 是最终兜底。
+    **拆隧道在 finally**：store 装配抛（region 解析不出 / 凭证坏）或轮询被非 Exception 中断，本进程带着异常死掉——
+    它是隧道唯一宿主（ADR 0035 决策 3），不在此拆就没人拆、ngrok 永久留在公网。曾只在循环之后拆、装配段裸奔。
     """
-    from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore
-
-    target = compose.resolve_cloud_target(runs_table=runs_table, region=region, profile=profile)
-    run_store = DynamoDBRunStore(compose._make_ddb_table(
-        target.runs_table, region=target.region, profile=target.profile))
-    deadline = time.monotonic() + ttl_s
     reason = f"TTL 兜底 {ttl_s:.0f}s"
-    while time.monotonic() < deadline:
-        try:
-            state = run_store.load_run_state(run_id)
-            if state is not None and state.status in TERMINAL_STATUSES:
-                reason = f"run 终态 {state.status.value}"
-                break
-        except Exception as e:  # 瞬时读库异常不致命——TTL 最终兜底
-            if on_warn is not None:
-                on_warn(f"读 run 状态失败（继续轮询）：{e}")
-        time.sleep(poll_interval_s)
-    _tunnel.stop_tunnel(tunnel_pid)
+    try:
+        from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore
+
+        target = compose.resolve_cloud_target(runs_table=runs_table, region=region, profile=profile)
+        run_store = DynamoDBRunStore(compose._make_ddb_table(
+            target.runs_table, region=target.region, profile=target.profile))
+        deadline = time.monotonic() + ttl_s
+        while time.monotonic() < deadline:
+            try:
+                state = run_store.load_run_state(run_id)
+                if state is not None and state.status in TERMINAL_STATUSES:
+                    reason = f"run 终态 {state.status.value}"
+                    break
+            except Exception as e:  # 瞬时读库异常不致命——TTL 最终兜底
+                if on_warn is not None:
+                    on_warn(f"读 run 状态失败（继续轮询）：{e}")
+            time.sleep(poll_interval_s)
+    finally:
+        _tunnel.stop_tunnel(tunnel_pid)
     return reason

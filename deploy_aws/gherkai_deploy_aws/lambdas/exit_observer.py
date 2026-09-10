@@ -34,8 +34,8 @@ def _extract(detail: dict) -> tuple[str | None, str | None, int | None, bool, st
     timed_out：detail.stoppedReason 含超时哨兵（reconciler 的超时处置 StopTask(reason) 原样出现在此，
     ADR 0034「job timeout」节归因链）→ task_exited 带 timed_out=True。
     """
-    from reconciler import TIMEOUT_STOP_SENTINEL
-    from gherkai_core.project import PLATFORM_FAILED_EXIT
+    from reconciler import exit_from_task  # 与超时处置的「已 STOPPED 无退出记录」分支同一算法（同键幂等）
+
     run_id = scope_id = None
     for co in detail.get("overrides", {}).get("containerOverrides", []):
         for e in co.get("environment", []):
@@ -43,20 +43,7 @@ def _extract(detail: dict) -> tuple[str | None, str | None, int | None, bool, st
                 run_id = e.get("value")
             elif e.get("name") == "SCOPE_ID":
                 scope_id = e.get("value")
-    exit_code = None
-    containers = detail.get("containers", [])
-    if containers:
-        # 取第一个带 exitCode 的 container（worker 是 essential 单容器；多容器时 worker 容器的码即 task 结果）
-        for c in containers:
-            if c.get("exitCode") is not None:
-                exit_code = c["exitCode"]
-                break
-    stopped_reason = detail.get("stoppedReason") or ""
-    timed_out = TIMEOUT_STOP_SENTINEL in stopped_reason
-    reason = None
-    if exit_code is None:
-        exit_code = PLATFORM_FAILED_EXIT
-        reason = ": ".join(x for x in (detail.get("stopCode"), stopped_reason) if x) or "平台未给出退出码与原因"
+    exit_code, timed_out, reason = exit_from_task(detail)
     return run_id, scope_id, exit_code, timed_out, reason
 
 

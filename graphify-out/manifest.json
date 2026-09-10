@@ -75,9 +75,9 @@
     "semantic_hash": "2ec4902e5c100c7e945c3eadb222c4b2"
   },
   "core/tests/test_fargate_engine.py": {
-    "mtime": 1788766077.605578,
-    "ast_hash": "f6b8634ec3aa1ab556c9ad6ec7d77241",
-    "semantic_hash": "f6b8634ec3aa1ab556c9ad6ec7d77241"
+    "mtime": 1789005933.8123446,
+    "ast_hash": "c53c6164cc0805bde7b355ef924dc73d",
+    "semantic_hash": ""
   },
   "core/tests/test_lifecycle_states.py": {
     "mtime": 1788766077.6073096,
@@ -375,8 +375,8 @@
     "semantic_hash": "d433e28ccaea45df3762c4934dca3fe0"
   },
   "docs/adr/0024-worker-core-protocol.md": {
-    "mtime": 1788938097.9346235,
-    "ast_hash": "208b80e1cd5b8584b057330a2a8057e8",
+    "mtime": 1789005780.8792963,
+    "ast_hash": "63f0b3cb1a710489670be8fd262ce400",
     "semantic_hash": ""
   },
   "docs/adr/0026-schedule-module.md": {
@@ -395,8 +395,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0030-realtime-persistence-seam.md": {
-    "mtime": 1788945944.7338524,
-    "ast_hash": "e211b494dab2e5e01a65835d3c4ad76f",
+    "mtime": 1788947115.7624407,
+    "ast_hash": "b92c3df0c1db61e5bf3c74dcf41a4156",
     "semantic_hash": ""
   },
   "docs/adr/0031-job-lifecycle-states-and-severity.md": {
@@ -415,8 +415,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0034-detached-batch-reconciler.md": {
-    "mtime": 1788946063.401032,
-    "ast_hash": "738241484c2a4ea9503968f6d0e08170",
+    "mtime": 1789005780.8798106,
+    "ast_hash": "b50380285fecb33617ade7a5633a6df6",
     "semantic_hash": ""
   },
   "docs/doc-health-review.md": {
@@ -440,9 +440,9 @@
     "semantic_hash": ""
   },
   "docs/adr/0035-local-app-testing-via-tunnel.md": {
-    "mtime": 1788767843.66356,
-    "ast_hash": "219a06f5a088c9825a8d42d9d077aa4b",
-    "semantic_hash": "219a06f5a088c9825a8d42d9d077aa4b"
+    "mtime": 1789005933.8097725,
+    "ast_hash": "38b7766993f017c5758714c95b95a6bd",
+    "semantic_hash": ""
   },
   "cli/tests/test_tunnel_cli.py": {
     "mtime": 1788922049.6621282,
@@ -520,9 +520,9 @@
     "semantic_hash": ""
   },
   "core/gherkai_core/adapters/fargate_engine.py": {
-    "mtime": 1788842014.0565794,
-    "ast_hash": "5a064a174037c77e8d5688ca4e041b83",
-    "semantic_hash": "5a064a174037c77e8d5688ca4e041b83"
+    "mtime": 1789005933.812023,
+    "ast_hash": "0628602cda6f28760af7c08de683afe3",
+    "semantic_hash": ""
   },
   "core/gherkai_core/adapters/report_store/__init__.py": {
     "mtime": 1788943082.8703744,
@@ -665,9 +665,9 @@
     "semantic_hash": ""
   },
   "runtime/gherkai_runtime/tunnel_host.py": {
-    "mtime": 1788766077.6209702,
-    "ast_hash": "a997d60e6a92954d536e0a260b69bfa8",
-    "semantic_hash": "a997d60e6a92954d536e0a260b69bfa8"
+    "mtime": 1789005933.8102107,
+    "ast_hash": "c96726c9200c7b6928386c8233a8772d",
+    "semantic_hash": ""
   },
   "runtime/pyproject.toml": {
     "mtime": 1788862853.9040365,
@@ -690,9 +690,9 @@
     "semantic_hash": "6548e9fa1bf8e041d12f5b98a84b6955"
   },
   "runtime/tests/test_tunnel_host.py": {
-    "mtime": 1788766077.6230013,
-    "ast_hash": "3f7bfc50884980f6685c639f8b0b1bcc",
-    "semantic_hash": "3f7bfc50884980f6685c639f8b0b1bcc"
+    "mtime": 1789005933.8104587,
+    "ast_hash": "6860518f2552e39ef66a2713853dd19f",
+    "semantic_hash": ""
   },
   "runtime/README.md": {
     "mtime": 1788862853.9010756,
@@ -980,13 +980,13 @@
     "semantic_hash": ""
   },
   "deploy_aws/gherkai_deploy_aws/lambdas/exit_observer.py": {
-    "mtime": 1788945352.4419043,
-    "ast_hash": "7a12da8f441bfb2cda80b133fd97e087",
+    "mtime": 1789005933.8109276,
+    "ast_hash": "28b2eb4c91c8b8a20c0ae013eff5f629",
     "semantic_hash": ""
   },
   "deploy_aws/gherkai_deploy_aws/lambdas/reconciler.py": {
-    "mtime": 1788945944.7351062,
-    "ast_hash": "30adeae5a6390c70158f010ccb4220e5",
+    "mtime": 1789005933.8108072,
+    "ast_hash": "fdd8a662dfe7e8282fe64992e6a994a8",
     "semantic_hash": ""
   },
   "deploy_aws/gherkai_deploy_aws/names.py": {
@@ -1035,8 +1035,8 @@
     "semantic_hash": ""
   },
   "deploy_aws/tests/test_lambda_handlers.py": {
-    "mtime": 1788945398.0019186,
-    "ast_hash": "f3391d73b81d70f267435ad83aaef024",
+    "mtime": 1789005933.8113377,
+    "ast_hash": "b4337a0f7c0a1f49f3e93adfa6bf0f0a",
     "semantic_hash": ""
   },
   "deploy_aws/gherkai_deploy_aws/container.py": {

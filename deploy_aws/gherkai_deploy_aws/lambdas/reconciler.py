@@ -48,6 +48,40 @@ def _run_ids_from_stream(event) -> set[str]:
 # exit_observer 见它 → task_exited(timed_out=True) → 归因链收敛 ERROR+timeout。exit_observer 从此处 import。
 TIMEOUT_STOP_SENTINEL = "gherkai-job-timeout"
 
+
+def exit_from_task(task: dict) -> tuple[int, bool, str | None]:
+    """ECS task 对象 → 退出记录三元组 (exit_code, timed_out, reason)。**观察者与超时处置共用**（ADR 0034 机制二）。
+
+    STOPPED 事件的 `detail` 与 `DescribeTasks` 的 `tasks[i]` 是同一个 Task 形状，故同一 task 两边算出同一内容、
+    PutItem 同键幂等——超时处置对「已 STOPPED 却无退出记录」（事件丢投）落的记录，与迟到的观察者写入不互撞。
+    exit_code：containers[] 首个带 exitCode 的（worker 是 essential 单容器）；**缺 → PLATFORM_FAILED_EXIT 哨兵**
+    + reason=`stopCode: stoppedReason`（容器没跑起来，机制二「退出码缺失」条）。timed_out：stoppedReason 含本模块
+    StopTask 时写入的哨兵串（「job timeout」节归因链）。
+    """
+    from gherkai_core.project import PLATFORM_FAILED_EXIT
+
+    exit_code = None
+    for c in task.get("containers", []) or []:
+        if c.get("exitCode") is not None:
+            exit_code = int(c["exitCode"])
+            break
+    stopped_reason = task.get("stoppedReason") or ""
+    timed_out = TIMEOUT_STOP_SENTINEL in stopped_reason
+    reason = None
+    if exit_code is None:
+        exit_code = PLATFORM_FAILED_EXIT
+        reason = ": ".join(x for x in (task.get("stopCode"), stopped_reason) if x) or "平台未给出退出码与原因"
+    return exit_code, timed_out, reason
+
+
+def _task_scope_id(task: dict) -> str | None:
+    """RunTask 注入的 env SCOPE_ID 原样在 overrides.containerOverrides[].environment（观察者/超时处置同一提取术）。"""
+    for co in task.get("overrides", {}).get("containerOverrides", []):
+        for e in co.get("environment", []):
+            if e.get("name") == "SCOPE_ID":
+                return e.get("value")
+    return None
+
 # 防御扫（claimed_at ②）的判定余量秒：Scheduler one-time schedule 是主机制（到点准时处置），扫是双保险——
 # 余量让主机制先行、避免与在途的 STOPPED→exit_observer 链赛跑。非正确性参数（处置幂等、退出记录在即让路）。
 _DEFENSIVE_TIMEOUT_MARGIN_S = 60.0
@@ -99,13 +133,16 @@ class EventBridgeTimeoutWatch:
 
 
 def _handle_timeout(run_id: str, scope_id: str, built, ecs_client=None) -> str:
-    """超时处置（ADR 0034「job timeout」节 cloud 档）：仍 running 才动手——ListTasks(startedBy=run_id) →
-    DescribeTasks 按 overrides env SCOPE_ID 匹配（同 exit_observer 提取术）→ StopTask(reason 含哨兵) →
-    STOPPED 事件 → exit_observer 记 task_exited(timed_out=True) → 既有链收敛（stop 后让观察链自然收敛=单一真源）。
-
-    task 无踪且无退出记录（STOPPED 事件丢投等）：预算已尽仍无确认完成 → 直接 record_exit(timed_out=True)
-    收敛——对位 local 接力恢复：观察链已断时直接写是唯一收敛路径（亦是「到点 invoke 顺带兜事件丢投」的落点）。
-    返回处置结果串（日志/测试断言用）。
+    """超时处置（ADR 0034「job timeout」节 cloud 档）：仍 running 才动手——ListTasks(startedBy=run_id) **同时列
+    RUNNING 与 STOPPED**（后者 ECS 保留约 1h）→ DescribeTasks 按 overrides env SCOPE_ID 匹配 → 按 task 状态三路：
+    - 在跑 → StopTask(reason 含哨兵) → STOPPED 事件 → exit_observer 记 task_exited(timed_out=True)（stop 后让观察链
+      自然收敛 = 单一真源）；
+    - **正在停止**（desiredStatus=STOPPED、lastStatus 未到 STOPPED）→ 不动、等观察者。曾只列 RUNNING、把它判成
+      「无踪」直写 timed_out，与几秒后到达的真退出记录同键互覆——恰在预算点跑完的 passed job 可被终判成 timeout；
+    - **已 STOPPED 却无退出记录**（STOPPED 事件丢投）→ 用与观察者同一提取函数 `exit_from_task` 从 task 对象落真退出
+      记录（同内容同键、幂等），不臆造 timed_out。
+    两个列表都无踪且无退出记录：预算已尽仍无确认完成 → 直接 record_exit(timed_out=True) 收敛——对位 local 接力恢复，
+    观察链已断时直接写是唯一收敛路径。返回处置结果串（日志/测试断言用）。
     """
     import boto3
     from gherkai_core.model import Status
@@ -121,21 +158,33 @@ def _handle_timeout(run_id: str, scope_id: str, built, ecs_client=None) -> str:
     ecs = ecs_client if ecs_client is not None else boto3.client(
         "ecs", region_name=os.environ.get("REGION") or os.environ.get("AWS_REGION"))
     cluster = os.environ["CLUSTER"]
-    arns = ecs.list_tasks(cluster=cluster, startedBy=run_id, desiredStatus="RUNNING").get("taskArns", [])
+    arns: list[str] = []
+    for desired in ("RUNNING", "STOPPED"):  # 正在停止/刚停止的不在 RUNNING 列表里——必须两个都列，否则误判「无踪」
+        for arn in ecs.list_tasks(cluster=cluster, startedBy=run_id, desiredStatus=desired).get("taskArns", []):
+            if arn not in arns:
+                arns.append(arn)
     target = None
     if arns:
         for t in ecs.describe_tasks(cluster=cluster, tasks=arns).get("tasks", []):
-            envs = [e for co in t.get("overrides", {}).get("containerOverrides", [])
-                    for e in co.get("environment", [])]
-            if any(e.get("name") == "SCOPE_ID" and e.get("value") == scope_id for e in envs):
-                target = t["taskArn"]
+            if _task_scope_id(t) == scope_id:
+                target = t
                 break
     if target is not None:
+        arn = target["taskArn"]
+        if target.get("lastStatus") == "STOPPED":
+            # 已停但观察者没写（STOPPED 事件丢投）：从 task 对象落真退出记录——与观察者同一算法、同键幂等
+            exit_code, timed_out, reason = exit_from_task(target)
+            event_log.record_exit(scope_id, exit_code, timed_out=timed_out, reason=reason)
+            print(f"timeout-converge: run={run_id} scope={scope_id} task={arn} 已 STOPPED 无退出记录 → 按 DescribeTasks 落 exit={exit_code}")
+            return "converged-from-describe"
+        if target.get("desiredStatus") == "STOPPED":
+            print(f"timeout-noop: run={run_id} scope={scope_id} task={arn} 正在停止 → 等观察者")
+            return "noop-stopping"
         job = next((j for j in meta.jobs if j.scope_id == scope_id), None)
         budget = f"{job.timeout_s:g}" if job is not None and job.timeout_s else "?"
-        ecs.stop_task(cluster=cluster, task=target,
+        ecs.stop_task(cluster=cluster, task=arn,
                       reason=f"{TIMEOUT_STOP_SENTINEL}: scope exceeded {budget}s budget")
-        print(f"timeout-stop: run={run_id} scope={scope_id} task={target}")
+        print(f"timeout-stop: run={run_id} scope={scope_id} task={arn}")
         return "stopped"
     event_log.record_exit(scope_id, None, timed_out=True)
     print(f"timeout-converge: run={run_id} scope={scope_id} task 无踪且无退出记录 → 直接记 timed_out 收敛")

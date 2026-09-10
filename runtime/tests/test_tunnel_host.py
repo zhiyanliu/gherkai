@@ -134,3 +134,16 @@ def test_watch_ttl_fallback_when_run_never_settles(monkeypatch):
         on_warn=warned.append)
     assert stopped == [777] and "TTL" in reason
     assert warned and "读 run 状态失败" in warned[0]  # 诊断经 on_warn 交给皮打印
+
+
+def test_watch_stops_tunnel_even_when_store_assembly_fails(monkeypatch):
+    """store 装配段抛（region 解析不出/凭证坏）→ 守护进程带着异常退出，但隧道**必须已拆**（ADR 0035：守护进程是隧道
+    唯一宿主，它死了没人再拆）。曾只在轮询循环之后拆，装配一炸 ngrok 永久留在公网。"""
+    import pytest
+
+    stopped = []
+    monkeypatch.setattr(gtunnel, "stop_tunnel", lambda pid: stopped.append(pid))
+    monkeypatch.setattr(compose, "resolve_cloud_target", lambda **kw: (_ for _ in ()).throw(RuntimeError("no region")))
+    with pytest.raises(RuntimeError, match="no region"):
+        tunnel_host.watch_run_and_stop_tunnel("r1", tunnel_pid=778, runs_table="tbl", ttl_s=600.0, region=None)
+    assert stopped == [778]

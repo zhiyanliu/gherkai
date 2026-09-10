@@ -48,7 +48,7 @@
 |---|---|---|
 | 前台 `run`（local/cloud backend） | CLI 进程 | CLI 进程 `atexit` 拆——**有意选 atexit 而非 finally**：正常结束与 Ctrl-C 都收；SIGTERM 直杀的极端泄漏不兜（ngrok agent 是可见的独立进程，人能自行 kill） |
 | local `submit` | per-run 推进进程 | `run_reconcile_loop` 终态后拆；per-run 进程崩溃时由 `status --wait` 接力者据 `tunnel.json` 兜底拆 |
-| cloud `submit` | **隧道守护进程**（setsid fork 脱离 CLI） | 轮询 run 终态即拆 + TTL 兜底自杀（防泄漏），TTL 按 definition 算——见下 |
+| cloud `submit` | **隧道守护进程**（setsid fork 脱离 CLI） | 轮询 run 终态即拆 + TTL 兜底自杀（防泄漏），TTL 按 definition 算——见下；**任何异常路径同样拆**（store 装配抛 / 轮询被中断）：守护进程是隧道唯一宿主，它带着异常死掉没人再拆——曾只在循环之后拆、装配段裸奔，装配一炸 ngrok 即永久留在公网（code-health 对抗验证发现） |
 
 - 表外还有一处就地拆：**提交分流失败**（preflight/落库不过）时隧道尚无后台宿主可交棒，由 CLI 当场拆。
 - **隧道 agent 进程自身也 setsid**（spawn 时 `start_new_session=True`）：agent 的存活该由**宿主**决定（上表三形态 + `stop_tunnel(pid)` 这唯一拆除面），不该由终端的信号转发决定。否则 agent 与 CLI 同进程组，`submit` 时 CLI 收到终端广播的 SIGINT/SIGHUP 会**连坐杀掉正要交棒给后台宿主的 agent**——两个后台宿主本身都 setsid、唯独被交棒的 agent 不，交棒链就断在这一环。**已真跑核实（真 spawn + 真 `killpg`，非 mock——进程组归属属「绿测试覆盖不到的真实行为」）**：同组时一发 SIGINT 广播必杀 agent；agent 自成进程组后存活，而前台 `run` 档语义不变（Ctrl-C → `KeyboardInterrupt` → `atexit` 照常拆，见上表首行「有意选 atexit 而非 finally」）。

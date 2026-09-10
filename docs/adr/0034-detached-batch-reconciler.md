@@ -184,7 +184,7 @@ reconciler 逻辑上是「唯一写者」，**物理上是并发实例**（实�
 |---|---|---|---|
 | 同步 `run`（schedule） | 进程内 per-job deadline（原机制，改读 `job.timeout_s`） | `handle.stop(grace)` | 原路径：error+timeout |
 | local detached（per-run 进程） | `SubprocessLauncher` 起 timer 线程 | `handle.stop(engine_min_grace)` + 置本 scope timed_out 标志 | worker 协作退 → `_pump` 写 `task_exited(timed_out=True)` → project 判 ERROR+timeout |
-| cloud detached | **EventBridge Scheduler one-time schedule**（claim 后 CreateSchedule，`at = claim+timeout`、`ActionAfterCompletion=DELETE` 自动清）→ 到点 invoke kicker（payload 带 `timeout_scope`） | 仍 running 才动手：`ListTasks(cluster, startedBy=run_id)` → `DescribeTasks` 按 overrides env `SCOPE_ID` 匹配（同 exit_observer 提取术）→ `StopTask(reason 含哨兵串 gherkai-job-timeout)` | worker 协作退 → exit_observer 见 `stoppedReason` 哨兵 → `task_exited(timed_out=True)` → 同上 |
+| cloud detached | **EventBridge Scheduler one-time schedule**（claim 后 CreateSchedule，`at = claim+timeout`、`ActionAfterCompletion=DELETE` 自动清）→ 到点 invoke kicker（payload 带 `timeout_scope`） | 仍 running 才动手：`ListTasks(cluster, startedBy=run_id)` **同时列 RUNNING 与 STOPPED**（后者 ECS 保留约 1h）→ `DescribeTasks` 按 overrides env `SCOPE_ID` 匹配（同 exit_observer 提取术）→ 按 task 状态分三路：**在跑** → `StopTask(reason 含哨兵串 gherkai-job-timeout)`；**正在停止**（desiredStatus=STOPPED、lastStatus 未到 STOPPED）→ 不动、等观察者（曾只列 RUNNING、把它判成「无踪」直写 timed_out，与几秒后到达的真退出记录同键互覆——恰在预算点跑完的 passed job 可被终判成 timeout，code-health 对抗验证发现）；**已 STOPPED 而无退出记录**（STOPPED 事件丢投）→ 从 DescribeTasks 的 task 对象用与观察者**同一提取函数**（`exit_from_task`）落真退出记录（同内容、同键幂等）；两个列表都无踪才直写 `timed_out` | worker 协作退 → exit_observer 见 `stoppedReason` 哨兵 → `task_exited(timed_out=True)` → 同上 |
 
 **best-effort 边界**：CreateSchedule 失败不阻塞 launch（保护降级为 tick 防御扫 + status --wait，打日志）；schedule 到点时 job 已终态 → tick no-op（幂等）。
 

@@ -22,6 +22,7 @@ run_id 组合根构造期注入本 adapter（对称已有 artifact_s3 落点注�
 """
 from __future__ import annotations
 
+import logging
 import time
 from typing import Iterator, NamedTuple
 from urllib.parse import quote
@@ -39,6 +40,13 @@ BODY_ATTR = "body"  # 0024 事件的 JSON line 原样（DDB 不解析 body）
 # 不可行，故用保留高位数值 SK（worker seq 从 1 递增、永不到它）+ `item_type` 属性承载，退出记录不入 worker 段。
 # **该 item 没有 body**：读 worker 段的 Query 必须把 SK 上界收在 `EXIT_SK - 1`，否则读到它 → KeyError('body')。
 # 取值 10^18 = 远超任何真实 scope 事件数的大数（DDB Number 精度内；虽超 JSON 安全整数，但 DDB 线上存字符串数值故 OK）。
+logger = logging.getLogger("gherkai_core.adapters.fargate_engine")
+
+# 流式期最终一致读的断号宽限秒数（ADR 0024「读一致性」）：游标只越过连续前缀，页内断号处停住、下轮 re-query 补齐；
+# 断号持续超过此宽限 = 写者侧真洞（worker PutItem 失败但 seq 已耗——SDK 关重试、单次墙钟封顶）→ 记警告越过，别让流式读
+# 无界停摆（schedule 的静默兜底会把停摆误判成 worker 卡死）。EC 滞后通常 <1s，5s 留足余量；构造期可覆盖（测试）。
+EC_GAP_GRACE_S = 5.0
+
 EXIT_SK = 10 ** 18
 ITEM_TYPE_ATTR = "item_type"
 EXIT_ITEM_TYPE = "exit"     # item_type 取值：退出记录（worker 事件 item 不带此属性）
@@ -128,6 +136,7 @@ class FargateEngine:
                                    # （真跑暴露：只注 ARTIFACT_S3_* 不够，SDK 落点 env 也必注）。引擎无关：由组合根按引擎算好、本 adapter 只转发。
         region: str | None = None, # 注入 worker 的 AWS_REGION（组合根已落实成具体字符串，ADR 0016 决策 C）；None＝真无 region、worker fail-loud
         poll_interval_s: float = 0.5,
+        gap_grace_s: float = EC_GAP_GRACE_S,  # 流式期断号宽限（ADR 0024「读一致性」，见模块常量注释）
         null_exit_grace_polls: int = 5,  # STOPPED 但 exitCode 尚 null 时的有界宽限拍数（ADR 0024「exitCode 落值延迟」）——
                                    # 多等这么多拍等落值，超限才落定异常码 1（防把落值延迟误报 error）。5×0.5s≈2.5s，远大于落值瞬时窗口。
     ) -> None:
@@ -148,6 +157,7 @@ class FargateEngine:
         self._region = region
         # 不存 profile：Fargate 用 task role，注入 profile 名会 ProfileNotFound 盖过 task role（ADR 0016 决策 C 的非对称）。
         self._poll = poll_interval_s
+        self._gap_grace_s = gap_grace_s
         self._null_exit_grace_polls = null_exit_grace_polls
 
     def start_scope(self, job: Job) -> str:
@@ -252,20 +262,38 @@ class FargateEngine:
         """
         from boto3.dynamodb.conditions import Key
 
-        last_seq = 0
+        last_seq = 0  # 已消费的**连续前缀**末 seq（不是页内最大 seq）
+        gap_since: float | None = None  # 首次撞见当前断号的时刻；None = 当前无断号
         pk = events_pk(self._run_id, scope_id)
         while True:
             # 增量 Query：本 scope 的 **worker 段**、last_seq<SK<EXIT_SK、SK 升序（保序）。最终一致读（默认）——
-            # 流式期漏读无害，下轮补齐。**上界必须收在 EXIT_SK-1**：退出观察者的 task_exited item 挂同 PK 的保留
-            # 高位 SK 且无 body（ADR 0034 机制一），读进 worker 段即 KeyError；ADR 0024 亦定「单调/断号只跑 worker 段」。
+            # 漏读靠「游标只越过连续前缀」补齐（见下断号分支）。**上界必须收在 EXIT_SK-1**：退出观察者的 task_exited
+            # item 挂同 PK 的保留高位 SK 且无 body（ADR 0034 机制一），读进 worker 段即 KeyError；ADR 0024 亦定「单调/断号只跑 worker 段」。
             resp = self._events.query(
                 KeyConditionExpression=Key(PK_ATTR).eq(pk) & Key(SK_ATTR).between(last_seq + 1, EXIT_SK - 1),
                 ScanIndexForward=True,
             )
             items = resp.get("Items", [])
             saw_scope_done = False
+            consumed = 0
             for it in items:
-                last_seq = int(it[SK_ATTR])
+                seq = int(it[SK_ATTR])
+                if seq != last_seq + 1:
+                    # 断号（ADR 0024「读一致性」）：最终一致读可能先看到后写的 item。游标**不越过洞**——在此停住，
+                    # 下轮从 last_seq+1 re-query 补齐（Query 非破坏、重读无副作用）。曾直接把游标推到页内最大 seq，
+                    # 洞被永久越过（step/scenario 结果静默缺失）。
+                    now = time.monotonic()
+                    if gap_since is None:
+                        gap_since = now
+                    if now - gap_since < self._gap_grace_s:
+                        break  # 宽限内：等下轮
+                    # 宽限已过 = 写者侧真洞（worker PutItem 失败但 seq 已耗）→ 记警告、越过继续，别让流式读无界停摆
+                    # （schedule 的静默兜底会把停摆误判成 worker 卡死）。
+                    logger.warning("events 断号：scope %s 的 seq %d..%d 在 %.0fs 内未出现，视为写者侧丢失、越过继续",
+                                   scope_id, last_seq + 1, seq - 1, self._gap_grace_s)
+                gap_since = None
+                last_seq = seq
+                consumed += 1
                 event = event_from_line(it[BODY_ATTR])
                 yield event  # 解析失败抛 ValueError，schedule 记 error（同 subprocess）
                 if isinstance(event, ScopeDone):  # 终止判据：scope_done 是最后一条（复用已解析 event、不重复解析 body）
@@ -278,10 +306,11 @@ class FargateEngine:
                 raise_for_worker_exit(self._await_exit_code(task_arn), code_label="exitCode")
                 return
 
-            # 无新事件（或未见 scope_done）：查 task 是否已 STOPPED（兜底：worker 崩溃没发 scope_done）
-            if not items:
+            # 本轮无进展（无新事件，或停在断号处等补齐）且未见 scope_done：查 task 是否已 STOPPED（兜底：worker 崩溃没发 scope_done）
+            if consumed == 0:
                 if self._probe_task(task_arn).stopped:  # 已 STOPPED（exitCode 是否落值不影响"该终结了"）——别再拉事件
-                    # task 已 STOPPED。终读一次强一致 Query 补末尾（防最终一致还没看到最后几条 PutItem，ADR 0024 读一致性条）。
+                    # task 已 STOPPED。终读强一致 Query 从 last_seq+1 读全（含停在断号处未消费的部分；补最终一致还没看到的
+                    # 末尾 PutItem，ADR 0024 读一致性条）——终读里的断号即真洞、只记警告。
                     yield from self._final_drain(pk, last_seq)
                     # 拿确定退出码：_await_exit_code 处理「exitCode 尚 null」的有界宽限（ADR 0024「exitCode 落值延迟」）——
                     # 与 scope_done 路径复用同一读码逻辑（此刻已 STOPPED、几乎立即返回，除非撞落值延迟窗口）。
@@ -305,9 +334,15 @@ class FargateEngine:
             "ScanIndexForward": True,
             "ConsistentRead": True,  # 强一致：反映所有在先成功写（2× RRU，成本忽略；防永久漏最后几条）
         }
+        expected = last_seq + 1
         while True:
             resp = self._events.query(**kwargs)
             for it in resp.get("Items", []):
+                seq = int(it[SK_ATTR])
+                if seq != expected:
+                    # 强一致读里的断号 = 写者侧真洞（worker PutItem 失败但 seq 已耗），无从补、只记警告（ADR 0024 读一致性）
+                    logger.warning("events 终读断号：%s 的 seq %d..%d 缺失（强一致读、写者侧丢失）", pk, expected, seq - 1)
+                expected = seq + 1
                 yield event_from_line(it[BODY_ATTR])
             last_key = resp.get("LastEvaluatedKey")
             if not last_key:

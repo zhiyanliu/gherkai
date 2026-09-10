@@ -603,3 +603,77 @@ def test_await_exit_code_null_then_nonzero_landed_preserved():
     # 落值延迟后落到**非 0**（cleanupFailed→1、或 137 等）→ 如实返回该码（宽限不吞掉真实非 0 退出）。
     eng = _await_engine([_stopped_resp(None), _stopped_resp(137)], grace_polls=5)
     assert eng._await_exit_code("arn") == 137
+
+
+# ---- 流式期断号（ADR 0024「读一致性」）：游标只越过连续前缀 + 有界宽限 + 终读记洞 ----
+
+def _gap_engine(events_table, ecs, gap_grace_s: float) -> FargateEngine:
+    """裸构造：只装 _read_events 路径要用的属性（不起 RunTask）。"""
+    eng = FargateEngine.__new__(FargateEngine)
+    eng._events, eng._ecs, eng._run_id, eng._cluster, eng._container = events_table, ecs, _RUN_ID, "c", "novaact-worker"
+    eng._poll, eng._gap_grace_s, eng._null_exit_grace_polls = 0.001, gap_grace_s, 5
+    return eng
+
+
+def _ev_item(seq: int, ev: dict) -> dict:
+    import json as _json
+    return {"seq": seq, "body": _json.dumps(ev)}
+
+
+def test_read_events_gap_within_grace_waits_and_fills_in_order(caplog):
+    """最终一致读先看到 seq 3 却没 seq 2：游标停在 1、下轮 re-query 补到 2 后再往下——事件按 seq 顺序、一条不丢
+    （曾直接推到页内最大 seq、seq 2 被永久越过）。"""
+    import logging
+
+    class _Table:
+        def __init__(self):
+            self.calls = 0
+
+        def query(self, **kw):
+            self.calls += 1
+            if self.calls == 1:  # 副本滞后：seq 2 还没到、seq 3 已可见
+                return {"Items": [_ev_item(1, {"type": "scope_started", "scopeId": "browse"}),
+                                  _ev_item(3, {"type": "step_done", "scenarioId": "sc:0", "stepIndex": 0, "status": "passed"})]}
+            return {"Items": [_ev_item(2, {"type": "step_started", "scenarioId": "sc:0", "stepIndex": 0}),
+                              _ev_item(3, {"type": "step_done", "scenarioId": "sc:0", "stepIndex": 0, "status": "passed"}),
+                              _ev_item(4, {"type": "scope_done", "scopeId": "browse"})]}
+
+    table = _Table()
+    eng = _gap_engine(table, _delayed_stopped_ecs("novaact-worker", running_polls=1), gap_grace_s=5.0)
+    with caplog.at_level(logging.WARNING, logger="gherkai_core.adapters.fargate_engine"):
+        got = [type(e).__name__ for e in eng._read_events("browse", "arn:task/1")]
+    assert got == ["ScopeStarted", "StepStarted", "StepDone", "ScopeDone"]
+    assert table.calls == 2 and "断号" not in caplog.text  # 宽限内补齐，不算丢失
+
+
+def test_read_events_gap_beyond_grace_is_skipped_with_warning(caplog):
+    """洞在宽限后仍在 = 写者侧真丢（PutItem 失败、seq 已耗）→ 记警告、越过继续，流式读不无界停摆。"""
+    import logging
+
+    class _Table:
+        def query(self, **kw):
+            return {"Items": [_ev_item(1, {"type": "scope_started", "scopeId": "browse"}),
+                              _ev_item(3, {"type": "step_done", "scenarioId": "sc:0", "stepIndex": 0, "status": "passed"}),
+                              _ev_item(4, {"type": "scope_done", "scopeId": "browse"})]}
+
+    eng = _gap_engine(_Table(), _stopped_ecs("novaact-worker"), gap_grace_s=0.0)
+    with caplog.at_level(logging.WARNING, logger="gherkai_core.adapters.fargate_engine"):
+        got = [type(e).__name__ for e in eng._read_events("browse", "arn:task/1")]
+    assert got == ["ScopeStarted", "StepDone", "ScopeDone"]
+    assert "seq 2..2" in caplog.text and "越过继续" in caplog.text
+
+
+def test_final_drain_logs_real_holes_under_consistent_read(caplog):
+    """终读是强一致读，其中的断号无从补、只记警告（不等、不停）。"""
+    import logging
+
+    class _Table:
+        def query(self, **kw):
+            return {"Items": [_ev_item(2, {"type": "step_started", "scenarioId": "sc:0", "stepIndex": 0}),
+                              _ev_item(5, {"type": "scope_done", "scopeId": "browse"})]}
+
+    eng = FargateEngine.__new__(FargateEngine)
+    eng._events = _Table()
+    with caplog.at_level(logging.WARNING, logger="gherkai_core.adapters.fargate_engine"):
+        got = [type(e).__name__ for e in eng._final_drain(f"{_RUN_ID}#browse", 1)]
+    assert got == ["StepStarted", "ScopeDone"] and "终读断号" in caplog.text and "seq 3..4" in caplog.text
