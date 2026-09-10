@@ -1,6 +1,11 @@
 # Gherkin × (Midscene + Nova Act) × AgentCore Browser
 
-**gherkai** 是一套 UI 自动化测试框架：用 **Gherkin** 写测试意图（QA 零代码），由两个互相独立的 **AI 引擎**（Midscene / Nova Act）执行，浏览器由 **AWS Bedrock AgentCore** 在云端承载。同一份 `.feature` 两个引擎同读；AI 断言可多次投票治抖动；需要精确的检查（URL/DOM）由测试开发写成确定性 step，走 Playwright、不走 AI。
+**gherkai** 是一个 UI 自动化测试工具：测试用 **Gherkin**（`.feature` 文件）写成人话，交给 **AI 引擎**（Midscene 或 Nova Act，二选一或按用例混用）读懂后，在 **AWS Bedrock AgentCore** 承载的云端浏览器里真跑。
+
+`.feature` 里的一个 step 有两种跑法：
+
+- **交给 AI（默认）**：引擎读自然语言，自己操作页面、自己判断结果，QA 不用写代码。AI 的判断可能抖动，所以断言可以投多票取多数（`--assertion-votes`）。
+- **确定性 step**：必须精确的检查（当前 URL、某个 DOM 元素、精确文本）不该让 AI 猜，由测试开发写成一小段 Playwright 代码放进项目的 `steps/` 目录；step 文本命中即按代码执行、不问 AI、结果可复现。
 
 ## 能做什么
 
@@ -66,7 +71,7 @@ flowchart TD
 | 写 `.feature`（纯自然语言、零代码），提交、看结果                | feature 作者（QA） | `gherkai`；要在本机跑（`--backend local`）再加下面两个 worker | 写：不需要任何凭证；跑：按跑法，见「上手」开头的表   |
 | 写 `steps/` 里的确定性 step，本机验证，build 定制 worker 镜像 | 测试开发         | `gherkai[local]` + `@gherkai/worker-midscene` + docker     | 同上；不需要云端写权限，镜像交给部署方推         |
 | 建/改共享的云端后端，推 worker 镜像                          | 部署方           | `gherkai[deploy-aws]` + Node ≥22 + docker                  | AWS 账号的部署权限（CDK、ECR、ECS、SSM）；跑用例同上 |
-| 开发框架本身                                                | contributor      | clone 仓库                                                 | 见 [`DEVELOPMENT.md`](./DEVELOPMENT.md)        |
+| 开发 gherkai 本身                                              | contributor      | clone 仓库                                                 | 见 [`DEVELOPMENT.md`](./DEVELOPMENT.md)        |
 
 ## 安装
 
@@ -136,7 +141,7 @@ gherkai status "$RUN_ID" --backend cloud --prefix gherkai- --wait
 ### ④ 测本地/内网应用：`--expose-local`
 
 ```bash
-# feature 里照写原始地址 http://localhost:3000；框架起 ngrok 隧道后在提交时替换为公网 URL
+# feature 里照写原始地址 http://localhost:3000；gherkai 起 ngrok 隧道后在提交时替换为公网 URL
 # （带每 run 一换的 basic-auth 凭据、run 结束即拆）
 gherkai run my_app.feature --expose-local http://localhost:3000
 RUN_ID=$(gherkai submit my_app.feature --expose-local http://localhost:3000)

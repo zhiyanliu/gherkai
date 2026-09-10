@@ -1,6 +1,6 @@
-# Gherkin × (Midscene + Nova Act) × AgentCore 测试框架
+# Gherkin × (Midscene + Nova Act) × AgentCore 测试工具
 
-一套用 Gherkin 描述测试意图、由两个互相独立的 AI 引擎执行、由 AWS 云端浏览器承载的 UI 自动化测试框架。三层正交，靠 CDP（Chrome DevTools Protocol）串联。
+一套用 Gherkin 描述测试意图、由两个互相独立的 AI 引擎执行、由 AWS 云端浏览器承载的 UI 自动化测试工具（命令行 + 运行时 + 引擎 worker + 部署包，使用方写 `.feature` 跑命令、不对着它的 API 编程——故称工具不称框架）。三层正交，靠 CDP（Chrome DevTools Protocol）串联。
 
 ## Language
 
@@ -50,7 +50,7 @@ _Avoid_: 笼统说「两个引擎都出报告」而忽略其形态/落点的根�
 ## 使用方角色
 
 **使用方 (Consumer) vs contributor**:
-使用方 = 用 gherkai 做测试的团队（下面三顶帽子的统称）；contributor = 开发框架本身的人。文档按此分层（使用者向 / contributor 向，ADR 0039）。角色是**帽子不是人**：本地开发时一个人常同时戴几顶（写被测应用、写 step、build 完自己推）；团队分工时按帽子拆权限与安装（ADR 0040）。
+使用方 = 用 gherkai 做测试的团队（下面三顶帽子的统称）；contributor = 开发 gherkai 本身的人。文档按此分层（使用者向 / contributor 向，ADR 0039）。角色是**帽子不是人**：本地开发时一个人常同时戴几顶（写被测应用、写 step、build 完自己推）；团队分工时按帽子拆权限与安装（ADR 0040）。
 _Avoid_: 把「使用方」当成单一画像；按岗位头衔而非按产物/权限划角色。
 
 **feature 作者 (Feature author，同义 QA)**:
@@ -98,7 +98,7 @@ _Avoid_: 把 step 级 `shortcircuited`（scope 内短路）与 job 级 `skipped`
 
 **成本可观测 (Cost observability)**:
 产品价值之一：一次跑批花了多少（ADR 0024）。**原则——engine 只报原生量、core 只各自合计、不折美元**：两个引擎计费轴不同（Nova 按 agent 工作时长 `time_worked_s`、Midscene 按 LLM token），core 各自累加成 `total_time_worked_s` / `total_tokens`（step→scope→run，无引擎报则 None）。**美元折算交消费者**（用自己 AWS 账户的真实费率）——框架不内置费率常量（避免追会过期的单价表）。与**墙钟时长** `duration_ms`（性能）正交：`time_worked_s` 是 Nova 计费量、`duration_ms` 是 core 测的执行墙钟，两个数不同。
-_Avoid_: 以为框架算美元（不折美元、只报原生量，美元交消费者）；混淆成本 `time_worked_s` 与性能 `duration_ms`。
+_Avoid_: 以为 gherkai 算美元（不折美元、只报原生量，美元交消费者）；混淆成本 `time_worked_s` 与性能 `duration_ms`。
 
 **Run 数据模型 (Run data model)**:
 执行的层级（ADR 0016）：**Run ⊃ Job(=Scope) ⊃ Scenario ⊃ Step**。Scope = 共享操作上下文的 scenario 分组，是执行单元（scope 内串行、scope 间并行）；Feature 是正交的组织轴。Step 是最细一级（core 经 `StepResult` 保留 step 级粒度）。各级带**墙钟时长** `duration_ms`（性能指标）。Run 产出两样：**RunResult**（机器可读汇总判定，给退出码/CI/WebUI；含 run_id、status、各级时长、原生量成本合计 `total_tokens`/`total_time_worked_s`）与 **RunReport**（人看的归集索引，原 M5「报告统一」的归宿，**v1.0 已实现**：manifest.json + index.html 入口，只索引/链接原生产物、不融合内容，ADR 0027）。
