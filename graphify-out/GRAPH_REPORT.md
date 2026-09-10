@@ -1,7 +1,7 @@
 # Graph Report - yaozhou  (2026-09-10)
 
 ## Corpus Check
-- 231 files · ~212,145 words
+- 231 files · ~212,187 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -10,7 +10,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `fb066a23`
+- Built from commit: `d7723384`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -337,16 +337,16 @@
 10. `_rm()` - 48 edges
 
 ## Surprising Connections (you probably didn't know these)
-- `_load_and_plan()` --calls--> `parse_feature()`  [INFERRED]
-  cli/gherkai_cli/__main__.py → core/gherkai_core/parse.py
-- `_cmd_submit()` --calls--> `JobState`  [INFERRED]
-  cli/gherkai_cli/__main__.py → core/gherkai_core/model.py
-- `_cmd_submit()` --calls--> `RunMeta`  [INFERRED]
-  cli/gherkai_cli/__main__.py → core/gherkai_core/model.py
-- `_cmd_submit()` --calls--> `stop_tunnel()`  [INFERRED]
-  cli/gherkai_cli/__main__.py → runtime/gherkai_runtime/tunnel.py
-- `_submit_local()` --calls--> `SqliteEventLog`  [INFERRED]
-  cli/gherkai_cli/__main__.py → core/gherkai_core/adapters/event_log/sqlite.py
+- `_status_cloud()` --calls--> `DynamoDBRunStore`  [INFERRED]
+  cli/gherkai_cli/__main__.py → core/gherkai_core/adapters/run_store/ddb.py
+- `_build()` --calls--> `DynamoDBRunStore`  [INFERRED]
+  deploy_aws/gherkai_deploy_aws/lambdas/reconciler.py → core/gherkai_core/adapters/run_store/ddb.py
+- `build_cloud_stores()` --calls--> `DynamoDBRunStore`  [INFERRED]
+  runtime/gherkai_runtime/compose.py → core/gherkai_core/adapters/run_store/ddb.py
+- `_sample_run()` --calls--> `Job`  [INFERRED]
+  cli/tests/test_render.py → core/gherkai_core/model.py
+- `test_render_text_annotates_shortcircuited_step()` --calls--> `Job`  [INFERRED]
+  cli/tests/test_render.py → core/gherkai_core/model.py
 
 ## Import Cycles
 - None detected.
@@ -1164,11 +1164,11 @@ Nodes (3): cloud_env(), moto 内存 runs/events 表 + 桶 + 推进器 Lambda 的
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `_run_step()` connect `test_run_step.py` to `test_argument.py`, `test_interrupt_model.py`, `reconciler.py`, `run_scope.py`, `test_deterministic.py`?**
-  _High betweenness centrality (0.102) - this node is a cross-community bridge._
+  _High betweenness centrality (0.130) - this node is a cross-community bridge._
 - **Why does `handler()` connect `reconciler.py` to `test_run_step.py`?**
-  _High betweenness centrality (0.101) - this node is a cross-community bridge._
-- **Why does `ADR 0016 执行架构` connect `core/DEVELOPMENT.md` to `Execution Architecture Decisions`, `代码健康度复盘任务说明`?**
-  _High betweenness centrality (0.045) - this node is a cross-community bridge._
+  _High betweenness centrality (0.128) - this node is a cross-community bridge._
+- **Why does `PlanError` connect `plan` to `test_lifecycle_states.py`, `ValueError`?**
+  _High betweenness centrality (0.047) - this node is a cross-community bridge._
 - **Are the 7 inferred relationships involving `Provider` (e.g. with `_AbsentEngine` and `_CdkWritingContext`) actually correct?**
   _`Provider` has 7 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 6 inferred relationships involving `schedule()` (e.g. with `.on_job_complete()` and `test_adapter_crash_is_error()`) actually correct?**

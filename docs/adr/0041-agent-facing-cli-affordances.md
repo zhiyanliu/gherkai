@@ -27,6 +27,7 @@ gherkai 的直接操作者越来越多是 AI coding agent（Claude Code / Codex 
 ### 二、`--quiet` 把 worker 日志落盘
 
 - `run --quiet`（local 执行档）：worker 的 stdout/stderr 透传改写到 **`<report_dir>/<run_id>/worker.log`**（`--no-report` 时落系统临时目录 `gherkai-worker-<run_id>.log`），结束时只打一行位置；`--json` 的 `artifacts` 加 `worker_log`。默认档（不 quiet）行为不变——人看流水仍是最快的排障方式。cloud 执行档 worker 在云端跑、日志在 CloudWatch，无此文件、`artifacts` 无此键；`submit` 的 local per-run 进程本就落 `reconcile.log`，不变。
+- **真跑坐实**（跳板机本机 novaact run）：`--quiet` 下终端只多一行 `worker 日志: file://…/worker.log`、无 SDK 流水；worker.log 38 行、零 ANSI 颜色码；`--backend cloud --quiet` 不建该文件、无未定义变量。`status --json` 的 `artifacts` 两档都对（local 全 `file://`；cloud `s3://` 报告与判定明细 + `ddb://` 元信息），且同步 `run` 落的 run_state 确实没有 `high_water_mark`（与本 ADR 决策五的契约页所记一致）。`deploy list-workers --json` 的 stdout 可被严格解析，skew 提示走 stderr。
 - 机制：`SubprocessEngine(log_sink=…)` 注入一个文件句柄，`_pump_log` 有 sink 则写 sink（无颜色码）、无 sink 则照旧写 stderr；组合根（`compose.build_engines(worker_log=…)`）只转发。**句柄生命周期**：CLI 在 schedule 返回后关句柄，而透传是两条 daemon 线程——为让日志尾部（多半是失败原因）落完再关，`stop()` 与事件迭代器结束（自然 EOF / 被放弃）两处都对 pump 线程做**有界** join（进程已退即 EOF；带超时是因为定位链第 4 级 uvx 是包装进程、孙进程可能仍持写端）；join 超时后残余的写入撞上已关句柄只静默停转发，不让 traceback 打到 stderr（那正是 `--quiet` 要挡的东西）。
 - 被拒：另开 `--worker-logs off|file` 旋钮——「少进上下文」是同一个意图，两个旋钮让 agent 多记一条；env 开关——不可见、难发现。
 

@@ -1150,8 +1150,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0041-agent-facing-cli-affordances.md": {
-    "mtime": 1789026760.2492793,
-    "ast_hash": "9d480f03f38674c856b8362f832a2e12",
+    "mtime": 1789027963.2407162,
+    "ast_hash": "309a1ffd6b53b86b8e22908b0055367a",
     "semantic_hash": ""
   },
   "cli/tests/test_cli_json_contract.py": {
