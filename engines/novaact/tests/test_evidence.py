@@ -402,3 +402,18 @@ def test_evidence_upload_failure_is_swallowed(logs_dir, monkeypatch, capsys):
                         1, sink, scope_id="sc") == "passed"
     assert all(r["kind"] != "evidence" for r in _done(sink).get("reportRefs", []))
     assert "本步证据未能保存" in capsys.readouterr().err
+
+
+def test_error_text_prefers_sdk_message_and_is_single_line():
+    """SDK 异常的 str() 是多行 repr（真跑暴露：ActTimeoutError 把「原因」撑成十几行）——取 .message 首行、折叠空白、封顶。"""
+    from gherkai_worker_novaact.run_scope import _error_text
+
+    class ActTimeoutError(Exception):
+        def __init__(self):
+            self.message = "Timed out; try increasing the 'timeout' kwarg   on the 'act' call"
+            super().__init__("\nActTimeoutError(\n    message = Timed out\n    metadata = ActMetadata(...)\n)\n\nPlease consider providing feedback: https://x")
+
+    assert _error_text(ActTimeoutError()) == "ActTimeoutError: Timed out; try increasing the 'timeout' kwarg on the 'act' call"
+    assert _error_text(RuntimeError("boom\nsecond line")) == "RuntimeError: boom"
+    assert _error_text(RuntimeError("x" * 500)).endswith("x" * 10) and len(_error_text(RuntimeError("x" * 500))) == len("RuntimeError: ") + 300
+    assert _error_text(RuntimeError("")) == "RuntimeError"

@@ -67,11 +67,11 @@
 | act.url | 末 frame 的 `active_url` | 调用返回后 `page.url()` |
 | frame | `steps[i]` | `tasks[i]` |
 | frame.url | `steps[i].active_url` | null（`uiContext` 只有 shotSize / dpr / screenshot） |
-| frame.thought | `steps[i].program.calls` 中 `name == "think"` 的 `kwargs.value`（多个则换行拼接） | `tasks[i].thought`（真产物：`Insight/Boolean` 带完整推理；`Planning/Plan`、`Planning/Locate`、`Action Space/*` 无 → null） |
+| frame.thought | `steps[i].program.calls` 中 `name == "think"` 的 `kwargs.value`（多个则换行拼接） | `tasks[i].thought` 非空则取之；否则回落 `tasks[i].output.thought`（真产物：`Insight/Boolean` 的推理在 `thought`，`Planning/Plan` 的推理在 `output.thought`；`Planning/Locate` 带空串、`Action Space/*` 无 → null，按值判非空） |
 | frame.actions | `calls` 中 `name` 不为 `think` / `return` 者：`{name, args: kwargs}`（如 `agentType`、`waitForPageToSettle`、`takeObservation`） | `{name: "<type>/<subType>", args: param}`（如 `Planning/Plan`、`Planning/Locate`、`Action Space/Tap`、`Insight/Boolean`） |
 | frame.screenshot | `steps[i].image`（data URL base64 jpeg）解成 `act-<i>-frame-<j>.jpg` | **不读 `.base64`**：SDK 在每个 task 更新后即 flush 报告，inline 模式下把 `ScreenshotItem` 的 base64 置空、之后读它会对多 MB 的 report.html 做同步全文扫描且找不到即抛。改为给 agent 传 `persistExecutionDump: true`，SDK 把每张截图落成独立文件 `<MIDSCENE_RUN_DIR>/report/screenshots/<id>.<ext>`；evidence 按 `screenshot.id` + 扩展名拼该路径引用，零解码零复制。取哪张：优先 `tasks[i].recorder` 中 `timing === "after-calling"` 的（动作**后**；只有每轮 plan 的末个 task 有），否则 `tasks[i].uiContext.screenshot`（动作**前**）。同一 `ScreenshotItem` 会跨 task 共享（300 ms 复用缓存、只有 Insight 类 task 强制刷新）→ 多个 frame 可指同一 uri。副作用：`persistExecutionDump` 还会在 report 目录写 `<n>.execution.json`，随 scope 末整目录 flush 一并上传，接受 |
 | act.result | `calls` 中 `name == "return"` 者的 `kwargs` | 末个 task 的 `output`（`Insight/Boolean` 的 `output` 即该票的布尔） |
-| act.error | act 抛出的异常 `type: message` | `tasks[*].errorMessage` 首个非空 |
+| act.error | act 抛出的异常压成**一行** `类型: 信息`（SDK 异常带 `.message` 取它，否则 str() 首个非空行；折叠空白、封顶 300 字。真跑暴露：`ActTimeoutError` 的 str() 是十几行 repr 加反馈链接，整段进 message 会把 run 文本 / explain / jobs json 的「原因」撑开；同一函数也产 `step_done.message`） | `tasks[*].errorMessage` 首个非空 |
 | act.time_worked_s | `metadata.time_worked_s` | null |
 
 **截图策略（有上界）**。单次 AI 调用的帧数由引擎 SDK 的默认步数上限封顶（Nova = 30，worker 不改它），每帧一张截图，再乘 `--assertion-votes`（入口只校验 ≥ 1），不设上界时单个 failed Then 可达数十帧、按 100 到 200 KB/帧即 10 MB 量级。故：**frames 列表保留全部 frame 的 thought / actions / url（文本很小），只有 `screenshot` 受限**——failed / error step 每个 act 最多 K = 3 张（末帧、首个含 thought 的帧、出错帧，去重后取前 K），每 step 总数再封 M = 12；passed step 每 act 只留末帧一张。Midscene 侧按 `ScreenshotItem.id` 去重后计。`--no-report` 档（`GHERKAI_NO_ARTIFACTS=1`，[0037](./0037-distribution-and-packaging.md) 决策 3）不产 evidence，且此档 Midscene 关了 `generateReport`、`persistExecutionDump` 随之不设（SDK 禁止二者组合）。

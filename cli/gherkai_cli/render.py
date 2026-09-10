@@ -40,6 +40,11 @@ def _cost_bits(tokens: int | None, time_worked_s: float | None) -> list[str]:
     return bits
 
 
+def _one_line(text) -> str:
+    """多行/带多余空白的原因文本折叠成一行（防御：引擎异常的 repr 可能多行，版式不该被它撑开）。"""
+    return " ".join(str(text).split()) if text is not None else ""
+
+
 def _ms(duration_ms: float | None) -> str:
     return f"{duration_ms / 1000:.1f}s" if duration_ms is not None else "?"
 
@@ -83,7 +88,7 @@ def render_text(result: RunResult) -> str:
                 out.append(f"      step {st.index}: {st.status.value} ({_ms(st.duration_ms)}){v}{note}")
                 # step 级失败原因（ADR 0042 决策三）：与 job 行同款——有 message 就显，人读视图不只剩一个光秃的态
                 if st.message:
-                    out.append(f"        原因: {st.message}")
+                    out.append(f"        原因: {_one_line(st.message)}")
                 # step 级原生报告产物（Nova trajectory 挂这层，来自 step_done 下沉，ADR 0027）——缩进深一级
                 for rr in st.report_refs:
                     out.append(f"        report（{rr.label or rr.kind}）: {rr.ref}")
@@ -327,7 +332,7 @@ def _act_lines(act: dict, *, ref: str, full: bool) -> list[str]:
         bits.append(f"url={act['url']}")
     lines = ["      " + "  ".join(bits)]
     if act.get("error"):
-        lines.append(f"        错误: {act['error']}")
+        lines.append(f"        错误: {_one_line(act['error'])}")
     frames = act.get("frames") or []
     if full:
         for j, fr in enumerate(frames):
@@ -366,7 +371,7 @@ def _step_lines(step: dict, *, expand_passed: bool, full: bool) -> list[str]:
         bits.append("⚠ 因前置 step error 被跳过（未执行）")
     lines = [head + "  " + "  ".join(bits)]
     if step["message"]:
-        lines.append(f"      原因：{step['message']}")
+        lines.append(f"      原因：{_one_line(step['message'])}")
     if not explain_step_expands(step, expand_passed=expand_passed):
         return lines
     ev = step["evidence"]

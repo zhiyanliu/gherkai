@@ -159,8 +159,20 @@ function shotOf(task: TaskLike, shotsDir: string): { id: string; file: string } 
  *  `Planning/Locate` 带**空串**——空串等于「没有推理」，故按值判非空（否则「首个含 thought 的帧」会选中
  *  一个什么都没写的 Locate 帧）。 */
 function thoughtOf(task: TaskLike): string | null {
-  const t = task.thought;
-  return typeof t === "string" && t.trim() !== "" ? t : null;
+  const own = nonEmpty(task.thought);
+  if (own !== null) return own;
+  // `Planning/Plan` 的推理不在 task.thought、而在 output.thought（真跑核出：Plan 的 output 形如
+  // {actions, log, thought}）——不回落它，动作步的 frame 就全无推理可看（ADR 0042 决策一映射表）。
+  const out = task.output;
+  if (out && typeof out === "object" && !Array.isArray(out)) {
+    return nonEmpty((out as { thought?: unknown }).thought);
+  }
+  return null;
+}
+
+/** 非空字符串才算「有推理」：空串 / 非字符串 / 缺失一律 null（按值判，ADR 0042 决策六第 1 道防线）。 */
+function nonEmpty(v: unknown): string | null {
+  return typeof v === "string" && v.trim() !== "" ? v : null;
 }
 
 /** frame.actions：`{name: "<type>/<subType>", args: param}`（如 `Planning/Plan`、`Action Space/Tap`）。

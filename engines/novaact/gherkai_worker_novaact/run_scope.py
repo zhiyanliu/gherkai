@@ -416,7 +416,7 @@ def _run_step(nova, scenario_id: str, step: dict, votes_n: int, sink: EventSink,
         # 故"act 中途恢复"仍是 defer（ADR 0028），这里只把失败原因记准。
         ev = {
             "type": "step_done", "scenarioId": scenario_id, "stepIndex": idx,
-            "status": "error", "errorType": _classify_act_error(e), "message": f"{type(e).__name__}: {e}",
+            "status": "error", "errorType": _classify_act_error(e), "message": _error_text(e),
         }
         # 失败 act 的费用已经发生（ADR 0024「失败的 act 同样带 cost」）：SDK 异常对象同样带 metadata.time_worked_s，加上
         # 本 step 已投完的票；曾整块丢掉 → total_time_worked_s 对所有出错 step 系统性低报。
@@ -657,6 +657,21 @@ def _is_transient_network(e: BaseException, *, connecting: bool = False) -> bool
             return True
         cur = cur.__cause__ or cur.__context__
     return False
+
+
+def _error_text(e: BaseException) -> str:
+    """异常 → 一行「类型: 信息」，作 step_done 的 message 与 evidence 的 act.error（ADR 0042 决策三/决策一）。
+
+    Nova SDK 异常的 str() 是多行 repr（`ActTimeoutError(\n message = …\n metadata = ActMetadata(…)\n)` 再拖一段
+    反馈链接），整段进 message 会把 run 文本 / explain / jobs json 的「原因」撑成十几行——真跑暴露。SDK 异常带
+    `.message`（人话那一句），优先取它；没有则取 str() 的首个非空行。折叠空白、封顶 300 字：message 是一句原因、
+    不是堆栈，完整对象在 worker 日志里。
+    """
+    msg = getattr(e, "message", None)
+    text = msg if isinstance(msg, str) and msg.strip() else str(e)
+    first = next((ln.strip() for ln in text.splitlines() if ln.strip()), "")
+    first = " ".join(first.split())
+    return f"{type(e).__name__}: {first[:300]}" if first else type(e).__name__
 
 
 def _classify_act_error(e: BaseException) -> str:

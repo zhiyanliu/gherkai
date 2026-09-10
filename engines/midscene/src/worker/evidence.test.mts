@@ -99,10 +99,14 @@ test("映射：act 的 frames 逐 task 一条，actions 名 = type/subType，arg
   assert.ok(doc.acts.every((a) => a.frames.every((f) => f.url === null)));
 });
 
-test("映射：thought 只出现在 Insight/Boolean（Plan 无该字段、Locate 是空串 → 都 null）", () => {
+test("映射：thought 按值判——Insight/Boolean 取 task.thought，Planning/Plan 回落 output.thought，Locate 空串 / Tap 无 → null", () => {
   const doc = build({ executions: FIXTURE.executions });
-  assert.deepEqual(doc.acts[0].frames.map((f) => f.thought), [null, null, null, null]);
-  assert.ok(doc.acts[1].frames[0].thought?.includes("订单提交成功"));
+  const th = doc.acts[0].frames.map((f) => f.thought);
+  assert.ok(th[0]?.startsWith("The user instruction is to click"));   // Plan：推理在 output.thought（真跑核出）
+  assert.equal(th[1], null);                                           // Locate：空串 → null
+  assert.equal(th[2], null);                                           // Tap：无
+  assert.ok(th[3]?.startsWith("The user's instruction was to click"));
+  assert.ok(doc.acts[1].frames[0].thought?.includes("订单提交成功"));    // Boolean：task.thought
 });
 
 test("映射：result = 末个 task 的 output（Boolean 的 output 即那一票的布尔）", () => {
