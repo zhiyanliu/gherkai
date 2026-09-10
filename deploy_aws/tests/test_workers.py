@@ -791,3 +791,37 @@ def test_list_workers_json_shape(aws):
     assert v["tag"] == f"{VERSION}-login" and v["digest"].startswith("sha256:7") and v["revision_arn"] and v["template_arn"]
     assert nova["pending_cleanup"] and nova["pending_cleanup"][0]["reason"] == "retired" and nova["pending_cleanup"][0]["retired_at"]
     assert doc["engines"]["midscene"]["variants"] == []
+
+
+def test_list_workers_json_keys_match_contract_doc(aws):
+    """`--json` 字段契约护栏（ADR 0041 决策五，与 cli/tests/test_cli_json_contract.py 读同一份文档）：真输出递归收键，
+    逐个断言 docs/guides/cli-json-contract.md 里以反引号出现。样例含 variant 与退休 revision，键才收得全。"""
+    import json as _json
+    import re
+    from pathlib import Path
+
+    seed_backend(aws)
+    _push(aws, FakeContainer(digests=["sha256:" + "6" * 64]), set_default=True)
+    _push(aws, FakeContainer(digests=["sha256:" + "7" * 64]))
+    out, text = _out()
+    assert workers.list_workers(prefix=PREFIX, cli_version=VERSION, aws=aws, out=out, as_json=True) == 0
+    doc = _json.loads(text())
+
+    def leaf_keys(o, acc=None):
+        acc = set() if acc is None else acc
+        if isinstance(o, dict):
+            for k, v in o.items():
+                acc.add(k)
+                leaf_keys(v, acc)
+        elif isinstance(o, list):
+            for v in o:
+                leaf_keys(v, acc)
+        return acc
+
+    contract = (Path(__file__).resolve().parents[2] / "docs" / "guides" / "cli-json-contract.md").read_text(encoding="utf-8")
+    documented = set()
+    for token in re.findall(r"`([A-Za-z_][A-Za-z0-9_.<>/ \[\]]*?)`", contract):
+        for part in re.split(r"\s*/\s*", token):
+            documented.add(part.split(".")[-1].rstrip("[]"))
+    missing = sorted(k for k in leaf_keys(doc) if k not in documented and k not in {"novaact", "midscene"})  # 引擎名是键、非契约字段
+    assert not missing, f"[deploy list-workers --json] 文档没写：{missing}"

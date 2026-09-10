@@ -17,6 +17,7 @@
 | 前台 / 后台两种跑法 | `run` 在线守着出结果；`submit` 提交即走、`status --wait` 事后收——cloud 档提交完关机也跑完                               |
 | 投票治理            | AI 断言可配 N 次取多数票（`--assertion-votes`）                                                                         |
 | 确定性 step         | 项目里的 `steps/` 目录注册精确断言，`plan` 预检标注哪些 step 走确定性、哪些走 AI                                        |
+| 机读与自检          | 每条命令都有 `--json`；`doctor` 一条命令自检环境；`--tags` / `--scenario` 只跑一部分；`--quiet` 把 worker 日志落盘——给脚本与 AI agent 驾驭用 |
 | 本机应用测试        | `--expose-local http://localhost:3000` 经 ngrok 隧道把本机可达的应用暴露给云端浏览器                                  |
 | 预算兜底            | 每个 job 有墙钟预算（缺省 300s，`@timeout:` tag 可改），卡死/超时自动停、不会计费失控                                      |
 | 跨引擎报告          | 每个 run 一份 RunReport（`index.html` 人看入口 + `manifest.json`）                                                      |
@@ -108,6 +109,8 @@ pipx install --fetch-python missing gherkai   # 不用 uv 的人：pipx 回落�
 gherkai plan features/engine_routing.feature   # 看 scope/job 分组、engine 路由、校验配置；
                                                # 每个 step 标注派发预期：命中确定性 step 的标「← 确定性: <说明>」，纯自然语言步走 AI
 gherkai list-engines                           # 列可用引擎（某引擎没装会原地给装法）
+gherkai doctor                                 # 一次自检：引擎、steps/ 加载；加 --backend cloud --prefix P 连带查凭证与后端
+gherkai plan features/x.feature --tags smoke   # 只看带 @smoke 的 scenario（run/submit 同样认 --tags / --scenario）
 gherkai list-deterministic --engine midscene   # 列该引擎支持的确定性 step（含你项目 steps/ 里的；--json 可选）
 ```
 

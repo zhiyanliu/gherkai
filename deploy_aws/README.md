@@ -98,7 +98,7 @@ gherkai deploy push-worker acme-novaact:login --engine novaact --variant login -
 gherkai deploy push-worker acme-midscene:login --engine midscene --variant login
 # 顺手把默认指针指过去（该 variant 在另一引擎还没有 → 只警告不拦）
 gherkai deploy push-worker acme-novaact:common --engine novaact --variant common --set-default
-gherkai deploy list-workers                       # 当前版本有哪些 variant、默认是谁、哪些 revision 待清理
+gherkai deploy list-workers [--json]              # 当前版本有哪些 variant、默认是谁、哪些 revision 待清理
 gherkai submit features/ --backend cloud --worker-variant login    # 提交时选 variant（缺省 = 默认指针）
 ```
 
