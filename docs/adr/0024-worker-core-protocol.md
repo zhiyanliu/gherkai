@@ -76,7 +76,7 @@ worker **边跑边流式上报**（每行一个事件），core 实时收。选�
    "reportRefs":[{"kind":"report","ref":"file:///.../midscene_run/report/xxx.html","label":"Midscene report"}]}
 ```
 
-**失败/超时的 act 同样带 cost**（费用已经发生）：error 的 `step_done` 上也报原生量——Nova 从异常对象的 `metadata` 取 `time_worked_s`、并累加同 step 已投完的票；Midscene 取 token 增量（agent 日志里的 usage 不因抛异常消失）。曾只在成功路径带 cost，run 级 `total_*` 对所有出错 step 系统性低报（code-health 对抗验证发现）。
+**失败/超时的 act 同样带 cost**（费用已经发生）：error 的 `step_done` 上也报原生量——Nova 从异常对象的 `metadata` 取 `time_worked_s`、并累加同 step 已投完的票；Midscene 取 token 增量（agent 日志里的 usage 不因抛异常消失）。曾只在成功路径带 cost，run 级 `total_*` 对所有出错 step 系统性低报（code-health 对抗验证发现）。**真跑坐实**（本地 Nova worker，`NOVA_ACT_TIMEOUT_S=2` 逼出 `ActTimeoutError`）：SDK 的超时异常对象确带 `metadata.time_worked_s`，error 的 `step_done` 报出 `time_worked_s=23.09`、run 合计随之计入；顺带观察到 act 的 timeout 只在 agent 步边界检查——设 2s 的 act 实际 23.6s 才返回（与 [0028](./0028-transient-network-ssl-resilience.md)「须等 act 到安全点」一致，grace 余量按此心智留）。
 
 **`step_skipped` 事件（scope 内短路，[0031](./0031-job-lifecycle-states-and-severity.md) 决定六）**：当 scope 内某 step `error` 后，worker
 短路后续 step（不调 AI），为每个被跳过的 step 发一条 `step_skipped`——**独立事件、平行于 step_done，不是 step_done 的第 4 个 status**：
