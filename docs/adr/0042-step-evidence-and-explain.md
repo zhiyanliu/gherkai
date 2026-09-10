@@ -209,6 +209,14 @@ agent / skill 只依赖 evidence schema 与 `explain` 输出，两者都是我�
 
 ## 验证（Accepted 前必做，结论内联到此处）
 
+**已坐实（跳板机本机 run、两引擎、故意失败的 AI 断言 + 强制 act 超时）**：
+
+- Nova 故意失败断言：trajectory json 真落盘、evidence.json 的 `frames` 非空、末帧 thought 原文「…there is no red banner… I should return false」、`vote=false`、`result={"value":"false"}`、截图 200 KB 有效 JPEG、prompt 不含 SDK 追加的 schema 样板；passed 动作步 2 帧、只末帧有截图；`explain` 三形态（默认 / `--scenario 3 --step 1 --full` / `--json`）正确、stderr 干净、`--json` 严格可解析；manifest kinds 含 `evidence`、index.html 显示 step 原因。
+- Nova 强制超时（`NOVA_ACT_TIMEOUT_S=2`）：error act 契约成立——`error` 非空、`frames == []`、`time_worked_s` 与 prompt 仍填，`explain` 退 0 并打「错误:」行。同时暴露 SDK 异常 str() 是十几行 repr 加反馈链接 → 决策一 act.error 的「压成一行」规则由此而来，复跑确认为一行。
+- Midscene 故意失败断言（dev worker）：`Insight/Boolean` 的 thought 完整解释判否、截图为 SDK 落到 `report/screenshots/<id>.jpeg` 的 228 KB 文件、passed 动作步 4 帧只末帧有截图；同时核出 `Planning/Plan` 的推理在 `output.thought` → 映射表回落规则由此而来。
+
+**待坐实（cloud 档，需先重传 Lambda asset + 推两引擎新 worker 镜像）**：`s3://` evidence ref 经 `explain --backend cloud` 读取；截图字节随 scope 末 flush 上传、URI 可取；Content-Type=image/jpeg 使浏览器渲染而非下载。
+
 - 单测：两引擎映射函数对真产物 fixture（含 Midscene 的 error task、Nova 的 N 票）；best-effort 路径（抽取 / 上传抛异常 → `step_done` 照发、无 evidence ref、status 不变）；serialize round-trip 带非默认 step message；`explain` 本地 / 云端两档读取、`record_missing` 与三种 `evidence_missing`、多命中 `--scenario` + `--step`、退出码；cloud 档 skew 三态；契约护栏含 evidence 夹具。
 - 真跑（跳板机；**先重传 Lambda asset + 推新 worker 镜像**，否则 cloud 档必然看不到 message / evidence、易误判成 bug）：
   - Nova 故意失败的 AI 断言：trajectory json 真落盘、evidence.json 的 `frames` 非空、末帧 thought 解释了判否、`vote=false`；
