@@ -66,7 +66,7 @@ URL、DOM 这类不容 AI 抖动的检查，可以由你自己写成确定性步
 | flag | 默认 | 说明 |
 |---|---|---|
 | `--default-engine {novaact,midscene}` | `novaact` | 未标 `@engine` 的 scope 用哪个引擎 |
-| `--tags TAG[,TAG…]` / `--scenario SEL` | — | 只跑一部分（`plan` 也认）：`--tags` 一个值内逗号 = 任一命中、重复给 = 都要命中、`@` 可省；`--scenario` = `<文件>:<行>`、行号（纯数字只当行号；Scenario Outline 给声明行选中全部 example）、或标题的一段文字，可重复（任一命中），与 `--tags` 同给两者都要满足。筛选只减少跑哪几条，scope 的引擎/超时仍按全量解析。筛空退 `2` 并列出全部候选。改一句断言只重跑那一条，别整文件重跑 |
+| `--scope ID` / `--tags TAG[,TAG…]` / `--scenario SEL` | — | 只跑一部分（`plan` 也认）：`--scope` = 报告/JSON 里的 `scope_id`（`@scope` 的名字，或未标时的 `<文件>:<行>`），重跑某个失败的 job 最直接；`--tags` 一个值内逗号 = 任一命中、重复给 = 都要命中、`@` 可省；`--scenario` = `<文件>:<行>`、行号（纯数字只当行号；Scenario Outline 给声明行选中全部 example）、或标题的一段文字，可重复（任一命中），与 `--tags` 同给两者都要满足。筛选只减少跑哪几条，scope 的引擎/超时仍按全量解析。筛空退 `2` 并列出全部候选。改一句断言只重跑那一条，别整文件重跑 |
 | `--max-concurrency N` | `1` | 同时在跑的 worker 上限（护成本与配额），须 ≥ 1。云端还受部署侧上限钳制，超出时按上限并行并提示 |
 | `--default-job-timeout S` | `300` | 单个 job 的墙钟预算秒（`<=0` 表示不超时）；用例上标 `@timeout:<秒>` 可逐 scope 覆盖。超预算的 job 会被停掉并判 error，本机挂死与云端计费失控都靠它止损 |
 | `--assertion-votes N` | `1` | AI 断言跑 N 次取多数票（如 3/5），治判定抖动 |

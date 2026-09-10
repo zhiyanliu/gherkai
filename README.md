@@ -110,7 +110,7 @@ gherkai plan features/engine_routing.feature   # 看 scope/job 分组、engine �
                                                # 每个 step 标注派发预期：命中确定性 step 的标「← 确定性: <说明>」，纯自然语言步走 AI
 gherkai list-engines                           # 列可用引擎（某引擎没装会原地给装法）
 gherkai doctor                                 # 一次自检：引擎、steps/ 加载；加 --backend cloud --prefix P 连带查凭证与后端
-gherkai plan features/x.feature --tags smoke   # 只看带 @smoke 的 scenario（run/submit 同样认 --tags / --scenario）
+gherkai plan features/x.feature --tags smoke   # 只看带 @smoke 的 scenario（run/submit 同样认 --scope / --tags / --scenario）
 gherkai list-deterministic --engine midscene   # 列该引擎支持的确定性 step（含你项目 steps/ 里的；--json 可选）
 ```
 

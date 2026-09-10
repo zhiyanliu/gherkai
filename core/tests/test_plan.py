@@ -373,10 +373,13 @@ def test_plan_select_keeps_scope_engine_and_timeout():
             "  @smoke\n  Scenario: c\n    When \"z\"\n")
     all_jobs = plan([FeatureSource("t.feature", text)], CFG)
     assert sorted(len(j.scenarios) for j in all_jobs) == [1, 2]
-    smoke = plan([FeatureSource("t.feature", text)], CFG, select=lambda p: "@smoke" in p.tags)
+    smoke = plan([FeatureSource("t.feature", text)], CFG, select=lambda p, scope_id: "@smoke" in p.tags)
     # named scope s1 只带被选中的 a；c 自成 scope；b 被筛掉
     assert sorted((j.scope_id, [s.name for s in j.scenarios]) for j in smoke) == [("s1", ["a"]), ("t.feature:9", ["c"])]
-    assert plan([FeatureSource("t.feature", text)], CFG, select=lambda p: False) == []
+    assert plan([FeatureSource("t.feature", text)], CFG, select=lambda p, scope_id: False) == []
+    # scope_id 一并传给谓词：按分组键选整个 named scope（@scope 值）——业务概念不从 tags 反推
+    [s1] = plan([FeatureSource("t.feature", text)], CFG, select=lambda p, scope_id: scope_id == "s1")
+    assert s1.scope_id == "s1" and [s.name for s in s1.scenarios] == ["a", "b"]
 
     # 不变量：筛选只减少跑哪几条——scope 的 engine/timeout 按**全量**成员解析（曾在分组前筛：筛掉带 tag 的成员后
     # 剩下的静默回落到缺省引擎/预算，迭代结论对全量跑不成立）
@@ -384,7 +387,7 @@ def test_plan_select_keeps_scope_engine_and_timeout():
              "  @scope:s @engine:novaact @timeout:900\n  Scenario: a\n    When \"x\"\n"
              "  @scope:s\n  Scenario: b\n    When \"y\"\n")
     cfg = PlanConfig(default_engine="midscene", default_job_timeout_s=300.0)
-    [job] = plan([FeatureSource("t.feature", text2)], cfg, select=lambda p: p.scenario.name == "b")
+    [job] = plan([FeatureSource("t.feature", text2)], cfg, select=lambda p, scope_id: p.scenario.name == "b")
     assert job.engine == "novaact" and job.timeout_s == 900.0 and [s.name for s in job.scenarios] == ["b"]
 
 
@@ -397,5 +400,5 @@ def test_plan_select_dropped_scope_does_not_block_iteration():
             "  Scenario: c\n    When \"z\"\n")
     with pytest.raises(PlanError, match="多个 @engine"):
         plan([FeatureSource("t.feature", text)], CFG)
-    [job] = plan([FeatureSource("t.feature", text)], CFG, select=lambda p: p.scenario.name == "c")
+    [job] = plan([FeatureSource("t.feature", text)], CFG, select=lambda p, scope_id: p.scenario.name == "c")
     assert [s.name for s in job.scenarios] == ["c"]

@@ -86,7 +86,12 @@ def _peek_deploy_provider(argv: list[str] | None) -> "tuple[object | None, str |
 
 
 def _add_selection_flags(p: argparse.ArgumentParser) -> None:
-    """run / plan / submit 共用的 scenario 筛选 flag（ADR 0041 决策一）。语义写在 help 里，解析在 `_build_selector`。"""
+    """run / plan / submit 共用的筛选 flag（ADR 0041 决策一）。语义写在 help 里，解析在 `_build_selector`。"""
+    p.add_argument(
+        "--scope", action="append", default=None, metavar="ID",
+        help="只跑这些 scope（可重复，任一命中）：值 = 报告/JSON 里的 scope_id——@scope 的名字，或未标 scope 时的 <文件>:<行号>。"
+             "重跑某个失败的 job 用它最直接；与 --tags/--scenario 同给时都要满足",
+    )
     p.add_argument(
         "--tags", action="append", default=None, metavar="TAG[,TAG...]",
         help="只跑带这些 tag 的 scenario：一个值内逗号分隔为「任一命中」，重复给本 flag 为「都要命中」；@ 可省。"
@@ -100,18 +105,20 @@ def _add_selection_flags(p: argparse.ArgumentParser) -> None:
 
 
 def _build_selector(args):
-    """把 `--tags` / `--scenario` 组装成 `plan(select=…)` 的谓词；两者都没给 → None（不筛）。
+    """把 `--scope` / `--tags` / `--scenario` 组装成 `plan(select=…)` 的谓词；都没给 → None（不筛）。
 
-    tag：每个 --tags 值拆逗号、去 @ 归一后取「任一命中」，多个 --tags 之间取「且」。scenario：等于 id（uri:line）/
-    行号 / 标题子串，多个之间取「或」。两组之间取「且」。core 不认这些 flag，只收谓词（ADR 0041 决策一）。
+    scope：等于分组键 scope_id（@scope 的值 / 未标时的 uri:line），多个之间「或」。tag：每个 --tags 值拆逗号、去 @ 归一后
+    取「任一命中」，多个 --tags 之间取「且」。scenario：等于 id / 行号 / 标题子串，多个之间取「或」。三组之间取「且」。
+    core 不认这些 flag，只收谓词（ADR 0041 决策一）。
     """
+    scopes = {s for s in (getattr(args, "scope", None) or []) if s}
     tag_groups = [
         {t.strip().lstrip("@") for t in raw.split(",") if t.strip()}
         for raw in (getattr(args, "tags", None) or [])
     ]
     tag_groups = [g for g in tag_groups if g]
     sels = [s for s in (getattr(args, "scenario", None) or []) if s]
-    if not tag_groups and not sels:
+    if not scopes and not tag_groups and not sels:
         return None
 
     def _scenario_hit(p) -> bool:
@@ -132,7 +139,9 @@ def _build_selector(args):
                 return True
         return False
 
-    def select(p) -> bool:
+    def select(p, scope_id: str) -> bool:
+        if scopes and scope_id not in scopes:
+            return False
         tags = {t.lstrip("@") for t in p.tags}
         if any(not (g & tags) for g in tag_groups):
             return False
@@ -142,7 +151,8 @@ def _build_selector(args):
 
 
 def _selection_label(args) -> str:
-    bits = [f"--tags {v}" for v in (getattr(args, "tags", None) or [])]
+    bits = [f"--scope {v}" for v in (getattr(args, "scope", None) or [])]
+    bits += [f"--tags {v}" for v in (getattr(args, "tags", None) or [])]
     bits += [f"--scenario {v}" for v in (getattr(args, "scenario", None) or [])]
     return " ".join(bits)
 
@@ -734,6 +744,10 @@ def _load_and_plan(args) -> "list | int":
         if not raw.strip():
             _progress("--scenario 的值不能为空：给 <文件>:<行号>、行号，或标题的一段文字")
             return 2
+    for raw in (getattr(args, "scope", None) or []):
+        if not raw.strip():
+            _progress("--scope 的值不能为空：给报告里的 scope_id（@scope 的名字，或 <文件>:<行号>）")
+            return 2
     # 1) 读 feature（组合根的事，core 不碰 FS）→ FeatureSource[]
     try:
         features = [compose.load_feature(f) for f in args.features]
@@ -763,7 +777,7 @@ def _load_and_plan(args) -> "list | int":
             if not jobs:
                 _progress(f"没有 scenario 匹配 {_selection_label(args)}。本批可选（id  标题  tags）：")
                 for p in everything:
-                    _progress(f"  {p.scenario.id}  {p.scenario.name}  {' '.join(p.tags)}")
+                    _progress(f"  {p.scenario.id}  {p.scenario.name}  {' '.join(p.tags)}")  # @scope:x 即 --scope x 的值
                 return 2
             if picked < len(everything):
                 _progress(f"筛选：{picked}/{len(everything)} scenario（{_selection_label(args)}）")

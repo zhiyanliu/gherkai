@@ -10,8 +10,8 @@
     "semantic_hash": ""
   },
   "cli/tests/test_main.py": {
-    "mtime": 1789020691.7169533,
-    "ast_hash": "7aa92d9115cdeab17a9e84ff7276b207",
+    "mtime": 1789026760.2506037,
+    "ast_hash": "fb7700401ee71bb903c759cb36c91b90",
     "semantic_hash": ""
   },
   "cli/tests/test_render.py": {
@@ -90,8 +90,8 @@
     "semantic_hash": "9e3d38e7e12e5927e31eeaa0b287479c"
   },
   "core/tests/test_plan.py": {
-    "mtime": 1789020610.6062992,
-    "ast_hash": "8b9a05dcdde40aac2b1e9a8f4b8f1341",
+    "mtime": 1789026760.2504098,
+    "ast_hash": "e7bd7886de9da1ec76bcdceea753e6b2",
     "semantic_hash": ""
   },
   "core/tests/test_project.py": {
@@ -270,13 +270,13 @@
     "semantic_hash": ""
   },
   "README.md": {
-    "mtime": 1789020504.9308567,
-    "ast_hash": "86aa8de5558e2fb9a249c21deb0e2fd4",
+    "mtime": 1789026760.2500567,
+    "ast_hash": "47bf644832c63d25d8706d785856f1cd",
     "semantic_hash": ""
   },
   "cli/README.md": {
-    "mtime": 1789020504.9316485,
-    "ast_hash": "c3e618388bc1232c9353f0245a3b7bb0",
+    "mtime": 1789026760.2497115,
+    "ast_hash": "e2b668180269743337ee9ceb9d50fc91",
     "semantic_hash": ""
   },
   "docs/adr/0001-scope-limited-to-english-ui.md": {
@@ -475,13 +475,13 @@
     "semantic_hash": "f8709951abd0e0502c200a03e34fea86"
   },
   "cli/gherkai_cli/__main__.py": {
-    "mtime": 1789020504.9293487,
-    "ast_hash": "13a80d2d0a1740709495d38be3367e66",
+    "mtime": 1789026760.2490091,
+    "ast_hash": "674aa4bf16f9e3e87e37e084dbc5e104",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/render.py": {
-    "mtime": 1788943954.2467017,
-    "ast_hash": "a03853ecc19eace9cdf31e11aabb3c9d",
+    "mtime": 1789026760.2477858,
+    "ast_hash": "7a51e16d1111659fb1a498ebe92d324f",
     "semantic_hash": ""
   },
   "core/gherkai_core/__init__.py": {
@@ -620,8 +620,8 @@
     "semantic_hash": ""
   },
   "core/gherkai_core/scope.py": {
-    "mtime": 1789020339.2676625,
-    "ast_hash": "e90867a5537d3d9e750fb677324c212e",
+    "mtime": 1789026760.2482057,
+    "ast_hash": "b19b04f4aefbb7fdae3c5e23c2b9f2ed",
     "semantic_hash": ""
   },
   "core/gherkai_core/serialize.py": {
@@ -1150,8 +1150,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0041-agent-facing-cli-affordances.md": {
-    "mtime": 1789020504.9296865,
-    "ast_hash": "617d95788e2130ad3f843ce5c3b15262",
+    "mtime": 1789026760.2492793,
+    "ast_hash": "9d480f03f38674c856b8362f832a2e12",
     "semantic_hash": ""
   },
   "cli/tests/test_cli_json_contract.py": {

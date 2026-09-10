@@ -14,11 +14,12 @@ gherkai 的直接操作者越来越多是 AI coding agent（Claude Code / Codex 
 
 ## 决策
 
-### 一、scenario 筛选：`--tags` / `--scenario`，run / plan / submit 三命令同形
+### 一、scenario 筛选：`--scope` / `--tags` / `--scenario`，run / plan / submit 三命令同形
 
-- 两个可重复 flag，都在 **scope 分组与 engine/timeout 解析之后、Job 组装之前**筛（core `plan(features, config, select=…)` 收一个 `ParsedScenario → bool` 谓词）。**不变量：筛选只减少「跑哪几条」**——scope 的引擎、墙钟预算、会话身份一律按全量成员解析，与不筛时逐字一致；否则筛后跑的与全量跑的不是同一件事，迭代结论不可迁移（曾在分组前筛：把带 `@engine:midscene @timeout:900` 的成员筛掉，剩下的成员静默跑在 novaact / 300s，对抗审查真跑复现）。整组被筛空的 scope 不进任何 job，且在解析 engine/timeout **之前**跳过——被筛掉的 scope 里的 tag 冲突不拦本次迭代；`_scope_key`（一个 scenario 多个 `@scope`）仍对全量成员 fail-fast。跨文件合并 warning 按**要跑的**成员算。三个命令同一套解析（`_load_and_plan`），definition 即筛后的 job 集——`submit` 落库的就是它，`plan` 标注的也是它。空值（`--tags ""`）退 2，不静默降级成跑全批。
+- 三个可重复 flag，都在 **scope 分组与 engine/timeout 解析之后、Job 组装之前**筛（core `plan(features, config, select=…)` 收一个 `(ParsedScenario, scope_id) → bool` 谓词（scope_id 一并传入，业务概念按分组键判、不从 tags 反推））。**不变量：筛选只减少「跑哪几条」**——scope 的引擎、墙钟预算、会话身份一律按全量成员解析，与不筛时逐字一致；否则筛后跑的与全量跑的不是同一件事，迭代结论不可迁移（曾在分组前筛：把带 `@engine:midscene @timeout:900` 的成员筛掉，剩下的成员静默跑在 novaact / 300s，对抗审查真跑复现）。整组被筛空的 scope 不进任何 job，且在解析 engine/timeout **之前**跳过——被筛掉的 scope 里的 tag 冲突不拦本次迭代；`_scope_key`（一个 scenario 多个 `@scope`）仍对全量成员 fail-fast。跨文件合并 warning 按**要跑的**成员算。三个命令同一套解析（`_load_and_plan`），definition 即筛后的 job 集——`submit` 落库的就是它，`plan` 标注的也是它。空值（`--tags ""`）退 2，不静默降级成跑全批。
+- **`--scope ID`**：可重复、彼此为**或**；值 = 报告与 `--json` 里的 `scope_id`（`@scope:` 的名字，未标 scope 时是 `<uri>:<行>`），按分组键**精确**匹配。这是「重跑某个失败 job」的直接回路：agent 从 `jobs/*.json` 读到 `scope_id` 原样填回来。scope 是业务概念，在 Gherkin 里靠 tag 承载（[0019](./0019-feature-tags-scope-and-engine.md) 的取舍——Gherkin 没有别的 per-scenario 元数据位）；筛选面上不让使用者反推这层实现细节（`--tags scope:x` 仍可用，那是通用 tag 筛选顺带覆盖的）。
 - **`--tags TAG[,TAG…]`**：一个值内逗号分隔为**或**（任一命中）；flag 重复为**且**；`@` 可带可不带。tag 集 = gherkin 已合并的 feature 级 + scenario 级。
-- **`--scenario SEL`**：可重复、彼此为**或**。`SEL` 三种写法**按序试、互斥**：等于 scenario id（`<uri>:<声明行>[:<Examples 行>]`）；ASCII 纯数字或 `:数字` = 行号（只当行号、不回落标题匹配，否则 `--scenario 3` 会连带选中标题「重试3次」；Scenario Outline 给声明行 = 选中它全部 example，给数据行 = 只选那一条）；否则按 scenario 标题**子串**匹配（大小写敏感）。`--tags` 与 `--scenario` 同给为**且**。
+- **`--scenario SEL`**：可重复、彼此为**或**。`SEL` 三种写法**按序试、互斥**：等于 scenario id（`<uri>:<声明行>[:<Examples 行>]`）；ASCII 纯数字或 `:数字` = 行号（只当行号、不回落标题匹配，否则 `--scenario 3` 会连带选中标题「重试3次」；Scenario Outline 给声明行 = 选中它全部 example，给数据行 = 只选那一条）；否则按 scenario 标题**子串**匹配（大小写敏感）。三个 flag 同给为**且**。
 - **筛后为空 → 退 2**，并列出本批全部 scenario（`id  标题  tags`）供改参数——不静默跑空批。筛掉了 scenario 时在 stderr 打一行「筛选：N/M」。
 - **有意的语义代价**：named scope（`@scope:X`）里只选其中几个 scenario，会话仍按 scope 建，只是少跑几条——这是迭代用法，不是回归用法；scope 内 scenario 若互相依赖，筛掉前置即可能失败，由使用者判断。
 - 被拒：cucumber 风格 tag 表达式（`@a and not @b`）——多一门小语言，agent 与人都得学；两个 flag 的且/或已覆盖迭代场景。行号范围、glob 同理不做。

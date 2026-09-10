@@ -178,7 +178,7 @@ def test_plan_text_shows_scope_grouping(tmp_path, capsys):
     rc = m.main(["plan", str(feat)])
     assert rc == 0
     out = capsys.readouterr().out
-    assert "plan（预检，未真跑）" in out
+    assert "plan（预检，未执行）" in out
     assert "1 job(scope)" in out
     assert "engine=midscene" in out          # @engine tag 生效
     assert "Then" in out and "对吗" in out    # step 预览
@@ -1314,3 +1314,23 @@ def test_empty_selection_flag_values_are_rejected(tmp_path, capsys):
     assert m.main(["plan", str(feat), "--tags", ""]) == 2 and "--tags 的值不能为空" in capsys.readouterr().err
     assert m.main(["plan", str(feat), "--tags", "@,"]) == 2
     assert m.main(["plan", str(feat), "--scenario", " "]) == 2 and "--scenario 的值不能为空" in capsys.readouterr().err
+
+
+def test_scope_filter_selects_whole_named_scope_by_id(tmp_path, capsys):
+    """--scope = 报告里的 scope_id：named scope 的名字选中整个 scope（两条都跑），未标 scope 的用 <文件>:<行>；
+    与 --scenario 同给为且。plan 文本里 named scope 不再重复打 (name=…)。"""
+    p = tmp_path / "s.feature"
+    p.write_text("Feature: F\n"
+                 "  @scope:browse\n  Scenario: 进入\n    When \"a\"\n"
+                 "  @scope:browse\n  Scenario: 停留\n    When \"b\"\n"
+                 "  Scenario: 独立\n    When \"c\"\n", encoding="utf-8")
+    assert m.main(["plan", str(p), "--json", "--scope", "browse"]) == 0
+    assert _plan_names(capsys) == ["停留", "进入"]
+    assert m.main(["plan", str(p), "--json", "--scope", f"{p}:8"]) == 0   # 未标 scope：scope_id = uri:line
+    assert _plan_names(capsys) == ["独立"]
+    assert m.main(["plan", str(p), "--json", "--scope", "browse", "--scenario", "停留"]) == 0
+    assert _plan_names(capsys) == ["停留"]
+    assert m.main(["plan", str(p), "--scope", "browse"]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith("===== plan") and "job scope='browse' engine=" in out and "(name=" not in out
+    assert m.main(["plan", str(p), "--scope", ""]) == 2 and "--scope 的值不能为空" in capsys.readouterr().err

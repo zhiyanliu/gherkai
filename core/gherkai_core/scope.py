@@ -126,14 +126,15 @@ def _resolve_timeout(scope_id: str, members: list[ParsedScenario], default: floa
 
 
 def plan(features: list[FeatureSource], config: PlanConfig, *,
-         select: Callable[[ParsedScenario], bool] | None = None) -> list[Job]:
+         select: Callable[[ParsedScenario, str], bool] | None = None) -> list[Job]:
     """core 窄腰第一步：一组 .feature → 可调度的 Job 列表（ADR 0025）。
 
     select（ADR 0041 决策一）：scenario 筛选谓词，在 **scope 分组与 engine/timeout 解析之后、Job 组装之前**施加。
     不变量：筛选只减少「跑哪几条」——scope 的引擎、墙钟预算、会话身份一律按**全量**成员解析，与不筛时逐字一致（否则筛后
     跑的与全量跑的不是同一件事，迭代结论不可迁移）。整组被筛空的 scope 不进任何 job（且在解析 engine/timeout 之前跳过，
     它内部的 tag 冲突不拦本次迭代）；`_scope_key` 仍对全量成员校验（一个 scenario 多个 @scope 照样 fail-fast）。None = 不筛。
-    谓词由调用方按 `--tags/--scenario` 组装，core 只收 `ParsedScenario → bool`、不认 flag 语义。筛后为空返回 []。
+    谓词由调用方按 `--scope/--tags/--scenario` 组装，core 只收 `(ParsedScenario, scope_id) → bool`、不认 flag 语义
+    （scope_id 一并传入：业务概念「scope」的筛选按分组键判，不逼调用方从 tags 反推）。筛后为空返回 []。
 
     严格契约：`features` 的 uri 必须互异（uri 是 scenarioId 前缀，重复会撞 id）。重复 → PlanError。
     这是**接口违约**校验，与「跨文件同 @scope 合并」（领域语义、warning、见下文 scope 分组）正交：
@@ -175,7 +176,7 @@ def plan(features: list[FeatureSource], config: PlanConfig, *,
     jobs: list[Job] = []
     picked_uris: dict[str, set[str]] = {}  # 实际要跑的成员所在 uri（跨文件合并 warning 按它算，别报不会跑的文件）
     for key, members in groups.items():
-        picked = members if select is None else [m for m in members if select(m)]
+        picked = members if select is None else [m for m in members if select(m, key)]
         if not picked:
             continue
         engine = _resolve_engine(key, members, config.default_engine)

@@ -118,12 +118,14 @@ def render_plan_text(jobs: list[Job], default_engine: str, dispatch: dict | None
     """
     n_scenarios = sum(len(j.scenarios) for j in jobs)
     out: list[str] = [
-        "", "===== plan（预检，未真跑）=====",
+        "===== plan（预检，未执行）=====",
         f"  {len(jobs)} job(scope)  ·  {n_scenarios} scenario  ·  default_engine={default_engine}",
     ]
     for j in jobs:
         votes = f"  votes={j.assertion_votes}" if j.assertion_votes != 1 else ""
-        out.append(f"  job scope={j.scope_id!r} (name={j.scope_name!r}) engine={j.engine}{votes}")
+        # name 只在与 scope_id 不同时显示：named scope 二者同为 @scope 值（重复无信息）；未标 scope 时 id=uri:line、name=标题
+        name = f" (name={j.scope_name!r})" if j.scope_name != j.scope_id else ""
+        out.append(f"  job scope={j.scope_id!r}{name} engine={j.engine}{votes}")
         for sc in j.scenarios:
             out.append(f"    scenario {sc.id!r}  ({len(sc.steps)} step)")
             for st in sc.steps:
