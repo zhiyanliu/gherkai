@@ -125,8 +125,8 @@
     "semantic_hash": "8b2f403075db1c6b772bdd2c89ec8b3c"
   },
   "core/tests/test_sqlite_event_log.py": {
-    "mtime": 1789009100.9317083,
-    "ast_hash": "ba99d74187df8c451d5dfa567684b9fc",
+    "mtime": 1789015682.560334,
+    "ast_hash": "1757caa8905e746be670f0817fe4d351",
     "semantic_hash": ""
   },
   "core/tests/test_stores.py": {
@@ -990,8 +990,8 @@
     "semantic_hash": ""
   },
   "deploy_aws/gherkai_deploy_aws/names.py": {
-    "mtime": 1789007725.5130823,
-    "ast_hash": "2649e1103ce17e61235417d256eb1072",
+    "mtime": 1789015682.5607264,
+    "ast_hash": "83ebbbc729886517973b00b9492e8ccd",
     "semantic_hash": ""
   },
   "deploy_aws/gherkai_deploy_aws/stack.py": {

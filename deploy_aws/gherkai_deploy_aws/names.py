@@ -75,12 +75,12 @@ def stack_name(prefix: str) -> str:
 
 
 def ssm_subnets_path(prefix: str) -> str:
-    """subnet ID 列表的 SSM 路径（= gherkai_runtime.names.ssm_path(prefix, "subnets") 的便捷形式）。"""
+    """subnet ID 列表的 SSM 路径（= gherkai_runtime.names.ssm_path(prefix, SUBNETS_KEY) 的便捷形式）。"""
     return ssm_path(prefix, SUBNETS_KEY)
 
 
 def ssm_security_groups_path(prefix: str) -> str:
-    """sg ID 列表的 SSM 路径（= gherkai_runtime.names.ssm_path(prefix, "security-groups") 的便捷形式）。"""
+    """sg ID 列表的 SSM 路径（= gherkai_runtime.names.ssm_path(prefix, SECURITY_GROUPS_KEY) 的便捷形式）。"""
     return ssm_path(prefix, SECURITY_GROUPS_KEY)
 
 

@@ -50,7 +50,7 @@ def test_has_exit_single_scope(tmp_path):
 
 
 def test_exit_code_none_stored(tmp_path):
-    """exitCode 宽限态（None）可存（机制二兜底）。"""
+    """exit_code=None（退出码未知，仅超时处置直写时出现）可存、读回仍是 None——投影侧判 ERROR、不是宽限态（ADR 0034 机制二「退出码缺失」条）。"""
     log = _log(tmp_path)
     log.record_exit("a", None)
     exits = [r for r in log.records() if r.kind == "exit"]
