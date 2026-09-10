@@ -7,7 +7,8 @@
 > 逐个断言出现在本页——漏键即红。本页只讲「有什么字段、什么意思、何时出现」，不讲为什么（那在 ADR）。
 
 通则：`--json` 下 **stdout 只有一个 JSON 文档**，诊断/进度一律走 stderr；`null` 表示「无此值」（如无成本、未落值），
-省略键表示「此形态下不存在」（各节注明）。退出码含义见 `cli/README.md`「退出码」。
+省略键表示「此形态下不存在」（各节注明）。退出码非 0 的前置/读取失败路径 stdout 可为空、诊断在 stderr——**先按退出码分流再解析**。
+退出码含义见 `cli/README.md`「退出码」。
 
 ## `gherkai run … --json`
 
@@ -21,7 +22,7 @@
 | `total_tokens` / `total_time_worked_s` | number \| null | 跨 job 的引擎原生量合计（Midscene 报 tokens、Nova 报 agent 工作秒）；无引擎报即 null，**不折美元** |
 | `jobs[]` | array | 每个 job（= 一个 scope，一条浏览器会话）的判定，见下 |
 | `run_meta` | object | 本次 run 的 definition（提交时定死），见下 |
-| `artifacts` | object | 产物落点，见下；`--no-report` 且非 `--quiet` 时**省略** |
+| `artifacts` | object | 产物落点，见下；`--no-report` 时**省略**（例外：local 档 `--no-report --quiet` 仍有一键 `worker_log`） |
 
 `jobs[]` 每项：
 
@@ -68,7 +69,7 @@
 | `run_meta` / `run_state` | definition / 运行态的落点 |
 | `jobs_dir` | 判定明细目录（每 job 一份 JSON，形状 = 上面 `jobs[]` 的一项 + 内嵌 `job` definition） |
 | `report_index` | RunReport `index.html`；报告写失败被隔离时**省略** |
-| `worker_log` | `--quiet` 时 worker 日志落点；非 quiet 省略 |
+| `worker_log` | worker 日志落点；仅 `--quiet` 且本机执行（`--backend local`）时出现——cloud 档 worker 在云端跑、日志在 CloudWatch，此键不出现 |
 
 ## `gherkai plan … --json`
 
@@ -76,10 +77,12 @@
 |---|---|---|
 | `default_engine` | string | 未标 `@engine` 的 scope 用的引擎 |
 | `job_count` / `scenario_count` | int | 筛选后的数量（`--tags` / `--scenario` 生效后） |
-| `jobs[]` | array | 与 `run_meta.jobs[]` 同形，另每个 step 多一个 `deterministic` 键 |
+| `jobs[]` | array | 与 `run_meta.jobs[]` 同形，另每个 step **可能**多一个 `deterministic` 键（出现条件见下） |
 
-`steps[].deterministic`：`null` = 走 AI；带 `pattern` + `description` = 命中该确定性 step；带 `conflict`（命中的模式列表）= 多条模式
-同时命中，真跑该 step 会记 error（先改模式或措辞）。无 worker 可自述时全部为 null（stderr 有提示）。
+`steps[].deterministic` 三态：至少一个引擎自述成功时该键在**每个** step 上都出现——`null` = 走 AI；带 `pattern` + `description` = 命中
+该确定性 step；带 `conflict`（命中的模式列表）= 多条模式同时命中，真跑该 step 会记 error（先改模式或措辞）。**全部引擎都问不到
+worker 自述时该键整批省略**（不是 null；stderr 有「标注降级」提示）。部分引擎降级时，该引擎的 step 同样是 `null`、机读层与「走 AI」
+不可区分——看 stderr 那行点出的引擎名。
 
 ## `gherkai status <run_id> --json`
 
@@ -90,8 +93,8 @@ RunState（控制面运行态）+ 附加 `artifacts`：
 | `run_id` | string | |
 | `status` | `pending` / `running` / 五终态 | run 级；**注意** job 已被认领时 run 级仍可能 `pending`（投影滞后一拍） |
 | `started_at` / `ended_at` | ISO 8601 \| 省略 | `ended_at` 只在终态出现 |
-| `high_water_mark` | int \| null | 已投影的事件水位（诊断用） |
-| `jobs[]` | array | `scope_id`、`status`（含 `pending` / `running` 前置态）、`session_id`、`claimed_at`（被推进器认领的时刻，超时起算点） |
+| `high_water_mark` | int \| 省略 | 已投影的事件水位（诊断用）；仅经推进器投影写过的 run 有（`submit` / `status --wait` / 云端推进链），同步 `run` 落的 run_state 无此键 |
+| `jobs[]` | array | `scope_id`、`status`（含 `pending` / `running` 前置态）、`session_id`（未起会话时 null，键恒在）、`claimed_at`（被推进器认领的时刻，超时起算点；未认领时**省略**） |
 | `artifacts` | object | 与 `run` 同键（`run_meta` / `run_state` / `jobs_dir` / `report_index`）；是**约定落点**，终态后才真有内容 |
 
 ## `gherkai list-engines --json`
@@ -118,9 +121,9 @@ RunState（控制面运行态）+ 附加 `artifacts`：
 | 键 | 含义 |
 |---|---|
 | `section` | `cli` / `engines` / `steps` / `aws` / `backend` / `provider` |
-| `name` | 项名：`version`、`novaact` / `midscene` / `any`、`dir` / `load.<engine>`、`identity`、`version` / `resources` / `worker.<engine>` / `reachability`、provider 自报的 `node` / `cdk` / `container-engine` |
+| `name` | 项名：`cli`：`version`；`engines`：`novaact` / `midscene` / `any`；`steps`：`dir` / `load.<engine>`；`aws`：`region` / `identity`；`backend`：`version` / `resources` / `worker.default` / `worker.<engine>` / `worker.any` / `reachability`（云端未查时的占位）；`provider`：`deploy-aws`（provider 不可用时的占位——没装 ok=true/required=false，装了但加载失败 ok=false）、provider 自报的 `node` / `cdk` / `container-engine`，或它的 name |
 | `ok` | 该项通过 |
-| `required` | false = 可选能力缺失（如另一个引擎没装、没装 deploy-aws extra），不影响退出码 |
+| `required` | false = 可选能力缺失（另一个引擎没装、没装 deploy-aws extra、部署工具链缺项），不影响退出码；退出码 = 全部 required 项是否 ok |
 | `detail` | 一句人话：通过时是事实（命令、版本、ARN），失败时是怎么办 |
 
 不给 `--backend cloud` / `--prefix` 时 `aws` / `backend` 段标「未查」、`required=false`。

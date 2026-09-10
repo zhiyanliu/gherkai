@@ -32,6 +32,8 @@ PROVIDER_GROUP = "gherkai.deploy"
 #   diff(args) -> int           `--diff`：只呈变更集、不改账户。
 #   synth_only(args) -> int     `--synth-only DIR`：只导模板到 `args.synth_only`、不连账户改动。
 #   bootstrap(args) -> int      `--bootstrap`：透传 provider 的账户初始化（cdk bootstrap）。
+#   doctor(args) -> list[dict]  **可选**：`gherkai doctor` 的 provider 段，每项 {name, ok, detail} + 可选 required（缺省 False）；
+#                               只读、不返退出码（ADR 0041 决策四）。缺席则入口打一行「provider 未提供自检」。
 # 全部收**已解析的 argparse.Namespace**、返回**进程退出码**：provider 自己声明的 flag 自己读，皮声明的命令面
 # flag（`--require-approval` / `--allow-vpc-change`）也在同一个 Namespace 上，provider 按需取。
 # 皮**不代 provider 做**：VPC 档 SSM 三态比对、版本戳写入、Node 前置检查、cdk 调用——全在 provider 内

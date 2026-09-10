@@ -755,8 +755,9 @@ def test_provider_doctor_reports_toolchain(monkeypatch):
     monkeypatch.setattr(provider_cli, "cdk_command", lambda: ["cdk-stub"])
     monkeypatch.setattr(container_mod, "resolve_container_engine", lambda requested=None: _Engine())
     checks = {c["name"]: c for c in Provider().doctor(SimpleNamespace())}
-    assert checks["node"]["ok"] and checks["node"]["required"]
-    assert checks["cdk"]["ok"] and checks["cdk"]["detail"] == "cdk-stub"
+    # provider 段是部署能力清单：三项都 required=False（doctor 不知道这台机器要不要部署；硬拦在 gherkai deploy 自身）
+    assert checks["node"]["ok"] and checks["node"]["required"] is False
+    assert checks["cdk"]["ok"] and checks["cdk"]["detail"] == "cdk-stub" and checks["cdk"]["required"] is False
     assert checks["container-engine"]["ok"] and checks["container-engine"]["required"] is False
 
     monkeypatch.setattr(provider_cli, "check_node", lambda: "找不到 node：需要 Node ≥ 22")

@@ -14,7 +14,9 @@ CLI 皮负责：
   `bootstrap`，都不给 → `deploy`；`gherkai destroy` → `destroy`；
 - 先声明 `--require-approval` 与 `--allow-vpc-change` 的**中立版**，使 `deploy --help` 在**没装任何 provider**
   时也列得出这两个动作旋钮；
-- 可选把自身版本放进 `args.version`（缺则本包自报 dist 版本，见 `_resolve_version`）。
+- 可选把自身版本放进 `args.version`（缺则本包自报 dist 版本，见 `_resolve_version`）；
+- `gherkai doctor` 时若 provider 提供**可选**的 `doctor(args) -> list[dict]`（每项 `{name, ok, detail}` + 可选 `required`，
+  缺省 False；只读、不返退出码），把它并进自检输出的 provider 段（ADR 0041 决策四）。
 
 Provider 负责（CLI 一概不懂）：`--prefix`/`--vpc`/`--stop-timeout` 三个 context 旋钮 + AWS 概念的
 `--region`/`--profile`（CLI 皮不在 deploy/destroy 子命令上声明这五个）、context 拼装、`cdk.json` 生成、
@@ -478,16 +480,17 @@ class Provider:
     def doctor(self, args) -> list[dict]:
         """`gherkai doctor` 的 provider 段（ADR 0041 决策四）：部署方工具链**只读**自检——Node ≥ 22、cdk 可定位、容器引擎可用。
 
-        收的是 doctor 的 Namespace（不是 deploy 的），故一律 getattr 取值。容器引擎标 required=False：只有同步基底 /
-        push-worker 才用得上，没装 docker 不该让只提交 run 的人自检失败。"""
+        收的是 doctor 的 Namespace（不是 deploy 的），故一律 getattr 取值。三项一律 required=False：provider 段是**部署
+        能力清单**——doctor 不知道这台机器要不要部署，装了 extra 的提交者缺 node 不该被判环境坏掉；真正的硬拦在
+        `gherkai deploy` 自身（check_node / 容器引擎探活，ADR 0038）。缺项由入口在人读尾行单独点出。"""
         from gherkai_deploy_aws.container import UnsupportedContainerEngine, resolve_container_engine
 
         checks: list[dict] = []
         node_err = check_node()
-        checks.append({"name": "node", "ok": node_err is None, "required": True,
+        checks.append({"name": "node", "ok": node_err is None, "required": False,
                        "detail": node_err or f"node {shutil.which('node')}"})
         cdk = cdk_command()
-        checks.append({"name": "cdk", "ok": bool(cdk), "required": True,
+        checks.append({"name": "cdk", "ok": bool(cdk), "required": False,
                        "detail": " ".join(cdk) if cdk else "找不到 cdk 也找不到 npx：装 Node（自带 npx）或 npm i -g aws-cdk"})
         try:
             engine = resolve_container_engine(getattr(args, "container_engine", None))

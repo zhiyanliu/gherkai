@@ -365,8 +365,8 @@ def test_bare_tag_without_value_errors_with_location(tag: str):
     assert "t.feature:" in str(ei.value)
 
 
-# ---- select：scenario 筛选谓词（ADR 0041 决策一）——parse 之后、分组之前 ----
-def test_plan_select_filters_scenarios_before_grouping():
+# ---- select：scenario 筛选谓词（ADR 0041 决策一）——分组与 engine/timeout 解析之后、Job 组装之前 ----
+def test_plan_select_keeps_scope_engine_and_timeout():
     text = ("Feature: F\n"
             "  @scope:s1 @smoke\n  Scenario: a\n    When \"x\"\n"
             "  @scope:s1\n  Scenario: b\n    When \"y\"\n"
@@ -377,3 +377,25 @@ def test_plan_select_filters_scenarios_before_grouping():
     # named scope s1 只带被选中的 a；c 自成 scope；b 被筛掉
     assert sorted((j.scope_id, [s.name for s in j.scenarios]) for j in smoke) == [("s1", ["a"]), ("t.feature:9", ["c"])]
     assert plan([FeatureSource("t.feature", text)], CFG, select=lambda p: False) == []
+
+    # 不变量：筛选只减少跑哪几条——scope 的 engine/timeout 按**全量**成员解析（曾在分组前筛：筛掉带 tag 的成员后
+    # 剩下的静默回落到缺省引擎/预算，迭代结论对全量跑不成立）
+    text2 = ("Feature: F\n"
+             "  @scope:s @engine:novaact @timeout:900\n  Scenario: a\n    When \"x\"\n"
+             "  @scope:s\n  Scenario: b\n    When \"y\"\n")
+    cfg = PlanConfig(default_engine="midscene", default_job_timeout_s=300.0)
+    [job] = plan([FeatureSource("t.feature", text2)], cfg, select=lambda p: p.scenario.name == "b")
+    assert job.engine == "novaact" and job.timeout_s == 900.0 and [s.name for s in job.scenarios] == ["b"]
+
+
+def test_plan_select_dropped_scope_does_not_block_iteration():
+    """整组被筛掉的 scope 里的 tag 冲突不拦本次迭代（空组在解析 engine/timeout 之前跳过）；
+    但「一个 scenario 多个 @scope」仍对全量 fail-fast（_scope_key 在分组时对每个 scenario 校验）。"""
+    text = ("Feature: F\n"
+            "  @scope:bad @engine:novaact\n  Scenario: a\n    When \"x\"\n"
+            "  @scope:bad @engine:midscene\n  Scenario: b\n    When \"y\"\n"
+            "  Scenario: c\n    When \"z\"\n")
+    with pytest.raises(PlanError, match="多个 @engine"):
+        plan([FeatureSource("t.feature", text)], CFG)
+    [job] = plan([FeatureSource("t.feature", text)], CFG, select=lambda p: p.scenario.name == "c")
+    assert [s.name for s in job.scenarios] == ["c"]

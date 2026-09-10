@@ -129,9 +129,11 @@ def plan(features: list[FeatureSource], config: PlanConfig, *,
          select: Callable[[ParsedScenario], bool] | None = None) -> list[Job]:
     """core 窄腰第一步：一组 .feature → 可调度的 Job 列表（ADR 0025）。
 
-    select（ADR 0041 决策一）：scenario 筛选谓词，在 **parse 之后、scope 分组之前**施加——筛掉的 scenario 不进任何 job，
-    named scope 只带被选中的成员（迭代用法的有意代价）。None = 不筛。谓词由调用方按 `--tags/--scenario` 组装，core 只收
-    `ParsedScenario → bool`、不认 flag 语义。筛后为空返回 []（调用方决定怎么提示）。
+    select（ADR 0041 决策一）：scenario 筛选谓词，在 **scope 分组与 engine/timeout 解析之后、Job 组装之前**施加。
+    不变量：筛选只减少「跑哪几条」——scope 的引擎、墙钟预算、会话身份一律按**全量**成员解析，与不筛时逐字一致（否则筛后
+    跑的与全量跑的不是同一件事，迭代结论不可迁移）。整组被筛空的 scope 不进任何 job（且在解析 engine/timeout 之前跳过，
+    它内部的 tag 冲突不拦本次迭代）；`_scope_key` 仍对全量成员校验（一个 scenario 多个 @scope 照样 fail-fast）。None = 不筛。
+    谓词由调用方按 `--tags/--scenario` 组装，core 只收 `ParsedScenario → bool`、不认 flag 语义。筛后为空返回 []。
 
     严格契约：`features` 的 uri 必须互异（uri 是 scenarioId 前缀，重复会撞 id）。重复 → PlanError。
     这是**接口违约**校验，与「跨文件同 @scope 合并」（领域语义、warning、见下文 scope 分组）正交：
@@ -148,21 +150,17 @@ def plan(features: list[FeatureSource], config: PlanConfig, *,
             )
         seen_uris.add(f.uri)
 
-    # 1) 解析所有 feature → ParsedScenario（带 tags）；再按 select 筛（分组之前，ADR 0041 决策一）
+    # 1) 解析所有 feature → ParsedScenario（带 tags）。select 不在此施加：分组与 engine/timeout 要看全量成员（ADR 0041 决策一）
     all_parsed: list[ParsedScenario] = []
     for f in features:
         all_parsed.extend(parse_feature(f.uri, f.text))
-    if select is not None:
-        all_parsed = [p for p in all_parsed if select(p)]
 
     # 2) 按 @scope 分组（全局命名空间）；未标的各自单元素 scope
     #    分组键：有 @scope → 用其值；无标 → 用 scenario_id（保证各自独立、不撞）
     groups: dict[str, list[ParsedScenario]] = {}
     group_is_named: dict[str, bool] = {}  # 该组是否来自显式 @scope（用于 warning + name 派生）
-    group_uris: dict[str, set[str]] = {}  # 该 scope 出现在哪些 uri（检测跨文件合并）
-
     for parsed in all_parsed:
-        scope_value, scenario_id = _scope_key(parsed)
+        scope_value, scenario_id = _scope_key(parsed)  # 对全量成员校验：一个 scenario 多个 @scope 不因被筛掉而放过
         if scope_value is not None:
             key = scope_value
             group_is_named[key] = True
@@ -170,20 +168,16 @@ def plan(features: list[FeatureSource], config: PlanConfig, *,
             key = scenario_id  # 未标 scope：自成单元素 scope，键 = scenario_id（ADR 0025）
             group_is_named[key] = False
         groups.setdefault(key, []).append(parsed)
-        group_uris.setdefault(key, set()).add(parsed.uri)  # 权威 uri（parse 时已知），不从 id 有损反解
 
-    # 3) 跨文件合并 warning（ADR 0025）：一个 named scope 跨多个 uri
-    for key, uris in group_uris.items():
-        if group_is_named.get(key) and len(uris) > 1:
-            logger.warning(
-                "scope %r 跨 %d 个 feature 文件合并（%s）：这些文件的 scenario 将串行共享同一会话。"
-                "若非有意，检查是否 @scope 撞名。",
-                key, len(uris), ", ".join(sorted(uris)),
-            )
-
-    # 4) 每组解析 engine + 派生 scope 名 → 组装 Job
+    # 3) 每组：engine/timeout 按**全量**成员解析（不变量：筛选只减少跑哪几条，不改 scope 的引擎、预算、会话身份），
+    #    再施加 select 取本次要跑的成员；整组筛空则不进任何 job——且在解析之前跳过，被筛掉的 scope 里的 @engine/@timeout
+    #    冲突不拦本次迭代（ADR 0041 决策一）。
     jobs: list[Job] = []
+    picked_uris: dict[str, set[str]] = {}  # 实际要跑的成员所在 uri（跨文件合并 warning 按它算，别报不会跑的文件）
     for key, members in groups.items():
+        picked = members if select is None else [m for m in members if select(m)]
+        if not picked:
+            continue
         engine = _resolve_engine(key, members, config.default_engine)
         timeout_s = _resolve_timeout(key, members, config.default_job_timeout_s)
         named = group_is_named.get(key, False)
@@ -193,15 +187,25 @@ def plan(features: list[FeatureSource], config: PlanConfig, *,
         else:
             # 未标 scope：scope_id = scenario_id；scope_name = scenario 标题（人写名，不复用机器键，ADR 0025）
             scope_id = key
-            scope_name = members[0].scenario.name
+            scope_name = picked[0].scenario.name
         jobs.append(
             Job(
                 scope_id=scope_id,
                 scope_name=scope_name,
                 engine=engine,
-                scenarios=tuple(m.scenario for m in members),  # 丢弃 tags，Scenario 保持纯净
+                scenarios=tuple(m.scenario for m in picked),  # 丢弃 tags，Scenario 保持纯净
                 assertion_votes=config.default_assertion_votes,  # per-scope 覆盖留口子（@votes:），现统一用缺省
                 timeout_s=timeout_s,
             )
         )
+        picked_uris[key] = {m.uri for m in picked}  # 权威 uri（parse 时已知），不从 id 有损反解
+
+    # 4) 跨文件合并 warning（ADR 0025）：一个 named scope **要跑的**成员跨多个 uri
+    for key, uris in picked_uris.items():
+        if group_is_named.get(key) and len(uris) > 1:
+            logger.warning(
+                "scope %r 跨 %d 个 feature 文件合并（%s）：这些文件的 scenario 将串行共享同一会话。"
+                "若非有意，检查是否 @scope 撞名。",
+                key, len(uris), ", ".join(sorted(uris)),
+            )
     return jobs

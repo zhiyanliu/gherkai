@@ -825,3 +825,38 @@ def test_list_workers_json_keys_match_contract_doc(aws):
             documented.add(part.split(".")[-1].rstrip("[]"))
     missing = sorted(k for k in leaf_keys(doc) if k not in documented and k not in {"novaact", "midscene"})  # 引擎名是键、非契约字段
     assert not missing, f"[deploy list-workers --json] 文档没写：{missing}"
+
+
+def test_pending_cleanup_is_json_serializable_with_real_registered_at(monkeypatch):
+    """真 AWS 的 DescribeTaskDefinition 带 registeredAt（datetime），moto 不带——`--json` 曾因此 TypeError 而单测照不出。
+    _pending_cleanup 把它转成 ISO 串，doc 可直接 json.dumps。"""
+    import json as _json
+    from datetime import datetime, timezone
+
+    revs = [workers.RevisionInfo(arn="arn:r/1", tags={names.TAG_VARIANT: "login", names.TAG_DIGEST: "sha256:a",
+                                                        names.TAG_RETIRED_AT: "2026-09-08T07:00:00+00:00"},
+                                 registered_at=datetime(2026, 9, 8, 6, 0, tzinfo=timezone.utc)),
+            workers.RevisionInfo(arn="arn:r/2", tags={names.TAG_VARIANT: "stray", names.TAG_DIGEST: "sha256:b"},
+                                 registered_at=datetime(2026, 9, 8, 6, 30, tzinfo=timezone.utc))]
+    monkeypatch.setattr(workers, "scan_family", lambda ecs, family: revs)
+    from types import SimpleNamespace
+    items = workers._pending_cleanup(aws=SimpleNamespace(ecs=None), family="f", mapped=set())  # scan_family 已 fake，ecs 不被真用
+    assert [i["reason"] for i in items] == ["retired", "orphan"]
+    assert items[0]["registered_at"] == "2026-09-08T06:00:00+00:00"
+    _json.dumps(items)  # 不抛
+
+
+def test_list_workers_json_sends_diagnostics_to_err_sink(aws):
+    """--json 下 stdout 只留一个 JSON 文档：skew 提示 / 读失败诊断走 err（stderr），文本档行为不变。"""
+    seed_backend(aws, stamp="9.9.9")  # 后端戳 ≠ CLI 版本 → skew 提示
+    out, text = _out()
+    errs: list[str] = []
+    rc = workers.list_workers(prefix=PREFIX, cli_version=VERSION, aws=aws, out=out,
+                              err=lambda *a: errs.append(" ".join(str(x) for x in a)), as_json=True)
+    body = text()
+    if rc == 0:
+        import json as _json
+        _json.loads(body)  # stdout 可解析
+        assert errs, "skew 提示应走 err"
+    else:
+        assert body == "" and errs  # block 档：stdout 为空、诊断在 err

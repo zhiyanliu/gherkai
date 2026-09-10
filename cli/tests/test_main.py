@@ -1069,6 +1069,7 @@ def test_plan_empty_selection_exits_2_and_lists_candidates(tmp_path, capsys):
     assert m.main(["plan", str(feat), "--json", "--tags", "nope"]) == 2
     err = capsys.readouterr().err
     assert "没有 scenario 匹配 --tags nope" in err and "登录成功" in err and "结账" in err and "搜索" in err
+    assert "@smoke @slow" in err  # 候选行带 tags，方便改 --tags
 
 
 def test_run_tags_narrow_the_definition_and_report_selection(tmp_path, monkeypatch, capsys):
@@ -1110,6 +1111,7 @@ def _fake_locator(monkeypatch, available=("novaact",)):
 
 
 def _no_provider(monkeypatch):
+    monkeypatch.setattr(m._deploy, "provider_entry_points", lambda: [])
     monkeypatch.setattr(m._deploy, "resolve_provider", lambda name=None: (None, "没有可用的部署 provider：装 `gherkai[deploy-aws]`"))
 
 
@@ -1159,15 +1161,19 @@ def test_doctor_no_engine_at_all_fails_locally_but_not_for_cloud(monkeypatch, ca
     monkeypatch.setattr(m.compose, "probe_aws_identity", lambda *, region, profile: {"account": "x", "arn": "arn:aws:sts::x:assumed-role/r", "region": region})
     monkeypatch.setattr(m.compose, "check_backend_skew", lambda **kw: (compose.SKEW_OK, "", "1.4.1"))
     monkeypatch.setattr(m.compose, "preflight_cloud_resources", lambda **kw: None)
+    monkeypatch.setattr(m.compose, "read_worker_default", lambda **kw: "base")
     monkeypatch.setattr(m.compose, "resolve_worker_variant", lambda **kw: {
-        e: compose.WorkerResolution(engine=e, variant="base", revision_arn=f"arn:{e}:7", digest="sha256:0") for e in kw["engines"]})
+        e: compose.WorkerResolution(engine=e, variant=kw["variant"], revision_arn=f"arn:{e}:7", digest="sha256:0") for e in kw["engines"]})
     assert m.main(["doctor", "--backend", "cloud", "--prefix", "vfy-", "--region", "us-east-1", "--json"]) == 0
     doc = json.loads(capsys.readouterr().out)
     by = {(c["section"], c["name"]): c for c in doc["checks"]}
     assert by[("engines", "any")]["required"] is False
-    assert by[("aws", "identity")]["ok"] and "us-east-1" in by[("aws", "identity")]["detail"]
+    assert by[("aws", "region")]["ok"] and by[("aws", "region")]["detail"] == "us-east-1"
+    assert by[("aws", "identity")]["ok"] and "assumed-role" in by[("aws", "identity")]["detail"]
     assert by[("backend", "version")]["ok"] and by[("backend", "resources")]["ok"]
+    assert by[("backend", "worker.default")]["ok"] and by[("backend", "worker.default")]["required"] is False
     assert by[("backend", "worker.novaact")]["ok"] and "arn:novaact:7" in by[("backend", "worker.novaact")]["detail"]
+    assert by[("backend", "worker.novaact")]["required"] is False and by[("backend", "worker.any")]["ok"] and by[("backend", "worker.any")]["required"] is True
 
 
 def test_doctor_cloud_reports_backend_failures_and_exits_2(monkeypatch, capsys):
@@ -1176,13 +1182,15 @@ def test_doctor_cloud_reports_backend_failures_and_exits_2(monkeypatch, capsys):
     monkeypatch.setattr(m.compose, "probe_aws_identity", lambda *, region, profile: {"account": "x", "arn": "arn", "region": region})
     monkeypatch.setattr(m.compose, "check_backend_skew", lambda **kw: (compose.SKEW_BLOCK, "版本 skew：本机 CLI 新于后端", "1.3.0"))
     monkeypatch.setattr(m.compose, "preflight_cloud_resources", lambda **kw: "events 表 vfy-events 不存在——prefix 配错或后端未部署")
-    monkeypatch.setattr(m.compose, "resolve_worker_variant", lambda **kw: (_ for _ in ()).throw(compose.WorkerVariantError("没有映射", engine="novaact")))
+    monkeypatch.setattr(m.compose, "read_worker_default", lambda **kw: "base")
+    monkeypatch.setattr(m.compose, "resolve_worker_variant", lambda **kw: (_ for _ in ()).throw(compose.WorkerVariantError("没有映射", engine=kw["engines"][0])))
     assert m.main(["doctor", "--prefix", "vfy-", "--region", "us-east-1", "--json"]) == 2  # 给了 --prefix 即查云端
     doc = json.loads(capsys.readouterr().out)
     by = {(c["section"], c["name"]): c for c in doc["checks"]}
     assert not by[("backend", "version")]["ok"] and "skew" in by[("backend", "version")]["detail"]
     assert not by[("backend", "resources")]["ok"] and "vfy-events" in by[("backend", "resources")]["detail"]
-    assert not by[("backend", "worker.novaact")]["ok"]
+    assert not by[("backend", "worker.novaact")]["ok"] and not by[("backend", "worker.midscene")]["ok"]
+    assert not by[("backend", "worker.any")]["ok"] and by[("backend", "worker.any")]["required"] is True  # 两引擎都解析不到才算必修失败
 
 
 def test_doctor_provider_section_comes_from_provider_doctor(monkeypatch, capsys):
@@ -1194,6 +1202,7 @@ def test_doctor_provider_section_comes_from_provider_doctor(monkeypatch, capsys)
         def doctor(self, args):
             return [{"name": "node", "ok": False, "required": True, "detail": "找不到 node：需要 Node ≥ 22"},
                     {"name": "container-engine", "ok": False, "required": False, "detail": "docker 未装"}]
+    monkeypatch.setattr(m._deploy, "provider_entry_points", lambda: [object()])
     monkeypatch.setattr(m._deploy, "resolve_provider", lambda name=None: (_Prov(), None))
     assert m.main(["doctor", "--json"]) == 2
     doc = json.loads(capsys.readouterr().out)
@@ -1204,3 +1213,104 @@ def test_doctor_provider_section_comes_from_provider_doctor(monkeypatch, capsys)
     assert m.main(["doctor"]) == 2
     out = capsys.readouterr().out
     assert "✗ provider.node" in out and "- provider.container-engine" in out and "自检有失败项" in out
+    assert "部署工具链有缺口" in out  # provider 段缺项单独点出，别混在通用的可选缺失里
+
+
+def test_doctor_cloud_credential_failure_is_required_and_exits_2(monkeypatch, capsys):
+    """凭证探针抛 → aws.identity 必修失败、backend 标未查（可选）、退 2；不去碰后端。"""
+    _fake_locator(monkeypatch); _no_provider(monkeypatch)
+    monkeypatch.setattr(m.compose, "probe_aws_identity", lambda **kw: (_ for _ in ()).throw(RuntimeError("Unable to locate credentials")))
+    touched = []
+    monkeypatch.setattr(m.compose, "check_backend_skew", lambda **kw: touched.append("skew") or (compose.SKEW_OK, "", "1"))
+    assert m.main(["doctor", "--prefix", "vfy-", "--region", "us-east-1", "--json"]) == 2
+    by = {(c["section"], c["name"]): c for c in json.loads(capsys.readouterr().out)["checks"]}
+    assert not by[("aws", "identity")]["ok"] and by[("aws", "identity")]["required"] is True
+    assert "Unable to locate credentials" in by[("aws", "identity")]["detail"]
+    assert by[("backend", "reachability")]["required"] is False and "未查" in by[("backend", "reachability")]["detail"]
+    assert touched == []
+
+
+def test_doctor_cloud_without_region_fails_region_check_first(monkeypatch, capsys):
+    """region 解析不出 → aws.region 必修失败、后端标未查，不会把 NoRegionError 误诊成「prefix 配错」。"""
+    _fake_locator(monkeypatch); _no_provider(monkeypatch)
+    monkeypatch.setattr(m.compose, "resolve_region", lambda r, p: None)
+    monkeypatch.setattr(m.compose, "probe_aws_identity", lambda **kw: (_ for _ in ()).throw(AssertionError("不该被调")))
+    assert m.main(["doctor", "--backend", "cloud", "--json"]) == 2
+    by = {(c["section"], c["name"]): c for c in json.loads(capsys.readouterr().out)["checks"]}
+    assert not by[("aws", "region")]["ok"] and "AWS_REGION" in by[("aws", "region")]["detail"]
+    assert ("aws", "identity") not in by and "region" in by[("backend", "reachability")]["detail"]
+
+
+def test_doctor_cloud_profile_error_at_target_resolution_is_a_credential_failure(monkeypatch, capsys):
+    """--profile 打错在 resolve_cloud_target 就炸（读 profile config）→ 与探针失败同一句诊断、退 2，不冒 traceback。"""
+    _fake_locator(monkeypatch); _no_provider(monkeypatch)
+    monkeypatch.setattr(m.compose, "resolve_cloud_target", lambda **kw: (_ for _ in ()).throw(RuntimeError("The config profile (nope) could not be found")))
+    assert m.main(["doctor", "--prefix", "vfy-", "--profile", "nope", "--json"]) == 2
+    by = {(c["section"], c["name"]): c for c in json.loads(capsys.readouterr().out)["checks"]}
+    assert not by[("aws", "identity")]["ok"] and "凭证/region 不可用" in by[("aws", "identity")]["detail"]
+
+
+def test_doctor_cloud_missing_default_pointer_is_required_failure(monkeypatch, capsys):
+    _fake_locator(monkeypatch); _no_provider(monkeypatch)
+    monkeypatch.setattr(m.compose, "probe_aws_identity", lambda **kw: {"account": "x", "arn": "arn", "region": kw["region"]})
+    monkeypatch.setattr(m.compose, "check_backend_skew", lambda **kw: (compose.SKEW_OK, "", "1.4.1"))
+    monkeypatch.setattr(m.compose, "preflight_cloud_resources", lambda **kw: None)
+    monkeypatch.setattr(m.compose, "read_worker_default", lambda **kw: None)
+    assert m.main(["doctor", "--prefix", "vfy-", "--region", "us-east-1", "--json"]) == 2
+    by = {(c["section"], c["name"]): c for c in json.loads(capsys.readouterr().out)["checks"]}
+    assert not by[("backend", "worker.default")]["ok"] and "gherkai deploy" in by[("backend", "worker.default")]["detail"]
+    assert ("backend", "worker.any") not in by  # 指针都没有，不再逐引擎
+
+
+def test_doctor_provider_installed_but_broken_is_required_failure(monkeypatch, capsys):
+    """装了 deploy-aws extra 却加载失败（半装/版本不匹配）→ 必修失败：明确装了的东西坏了；靠 entry point 结构判、不靠文案前缀。"""
+    _fake_locator(monkeypatch)
+    monkeypatch.setattr(m._deploy, "provider_entry_points", lambda: [object()])
+    monkeypatch.setattr(m._deploy, "resolve_provider", lambda name=None: (None, "部署 provider 'aws' 加载失败（entry point x）：ImportError"))
+    assert m.main(["doctor", "--json"]) == 2
+    by = {(c["section"], c["name"]): c for c in json.loads(capsys.readouterr().out)["checks"]}
+    assert not by[("provider", "deploy-aws")]["ok"] and by[("provider", "deploy-aws")]["required"] is True
+    # 装了多个未指名：不是故障，只是不替用户猜哪个云
+    monkeypatch.setattr(m._deploy, "provider_entry_points", lambda: [object(), object()])
+    monkeypatch.setattr(m._deploy, "resolve_provider", lambda name=None: (None, "装了多个部署 provider（aws, gcp）：用 --provider <名> 指定其一。"))
+    assert m.main(["doctor", "--json"]) == 0
+
+
+def test_doctor_runs_worker_self_describe_even_without_steps_dir(monkeypatch, capsys):
+    """无 steps/ 目录也对可用引擎跑一次自述（验 worker 起得来），但只作可选项：自述失败不改退出码。"""
+    _fake_locator(monkeypatch); _no_provider(monkeypatch)
+    monkeypatch.chdir(monkeypatch._temp_dir if hasattr(monkeypatch, "_temp_dir") else ".")
+    monkeypatch.delenv("GHERKAI_STEPS_DIR", raising=False)
+    monkeypatch.setattr(m.compose, "query_deterministic", lambda engine, *, steps_dir=None, timeout_s=60.0: (_ for _ in ()).throw(RuntimeError("worker 起不来")))
+    assert m.main(["doctor", "--json"]) == 0
+    by = {(c["section"], c["name"]): c for c in json.loads(capsys.readouterr().out)["checks"]}
+    assert not by[("steps", "load.novaact")]["ok"] and by[("steps", "load.novaact")]["required"] is False
+
+
+def test_doctor_steps_dir_error_reason_lands_in_json_detail(tmp_path, monkeypatch, capsys):
+    _fake_locator(monkeypatch); _no_provider(monkeypatch)
+    assert m.main(["doctor", "--json", "--steps-dir", str(tmp_path / "nope")]) == 2
+    by = {(c["section"], c["name"]): c for c in json.loads(capsys.readouterr().out)["checks"]}
+    assert not by[("steps", "dir")]["ok"] and "不是目录" in by[("steps", "dir")]["detail"] and "nope" in by[("steps", "dir")]["detail"]
+
+
+def test_scenario_digit_selector_is_line_only_and_outline_declaration_line_selects_all_examples(tmp_path, capsys):
+    """纯数字 SEL 只当行号、不回落标题子串（标题「重试3次」不被 --scenario 3 连带选中）；Scenario Outline 的 id 是
+    <uri>:<声明行>:<数据行>，给声明行选中全部 example。"""
+    p = tmp_path / "o.feature"
+    p.write_text("Feature: F\n"
+                 "  Scenario Outline: 下单 <n>\n    When \"买 <n> 件\"\n    Examples:\n      | n |\n      | 1 |\n      | 2 |\n"
+                 "  Scenario: 重试3次\n    When \"x\"\n", encoding="utf-8")
+    assert m.main(["plan", str(p), "--json", "--scenario", "2"]) == 0
+    assert _plan_names(capsys) == ["下单 1 [@6]", "下单 2 [@7]"]  # 声明行 2 → 两条 example（标题带 Examples 行标记）；「重试3次」不因含数字被带上
+    assert m.main(["plan", str(p), "--json", "--scenario", "3"]) == 2  # 行 3 是 When 行、不是 scenario；不回落成标题子串
+    assert "没有 scenario 匹配" in capsys.readouterr().err
+    assert m.main(["plan", str(p), "--json", "--scenario", "重试"]) == 0
+    assert _plan_names(capsys) == ["重试3次"]
+
+
+def test_empty_selection_flag_values_are_rejected(tmp_path, capsys):
+    feat = _tagged_feature(tmp_path)
+    assert m.main(["plan", str(feat), "--tags", ""]) == 2 and "--tags 的值不能为空" in capsys.readouterr().err
+    assert m.main(["plan", str(feat), "--tags", "@,"]) == 2
+    assert m.main(["plan", str(feat), "--scenario", " "]) == 2 and "--scenario 的值不能为空" in capsys.readouterr().err

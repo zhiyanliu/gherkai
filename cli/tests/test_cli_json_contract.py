@@ -113,6 +113,8 @@ def test_list_engines_and_deterministic_json_keys_are_documented(monkeypatch):
 def test_doctor_json_keys_are_documented(monkeypatch, capsys):
     monkeypatch.setattr(m.compose, "resolve_worker_cmd",
                         lambda name, *, version=None: compose.WorkerCmd(cmd=["x"], cwd=None, source="s"))
+    monkeypatch.setattr(m._deploy, "provider_entry_points", lambda: [])
     monkeypatch.setattr(m._deploy, "resolve_provider", lambda name=None: (None, "没有可用的部署 provider"))
+    monkeypatch.setattr(m.compose, "query_deterministic", lambda engine, *, steps_dir=None, timeout_s=60.0: [])
     assert m.main(["doctor", "--json"]) == 0
     _assert_documented(json.loads(capsys.readouterr().out), section="doctor --json")

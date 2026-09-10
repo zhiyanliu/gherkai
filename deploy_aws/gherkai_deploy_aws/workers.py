@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import base64
 import json
+import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
@@ -873,7 +874,7 @@ def run_deploy_steps(*, prefix: str, version: str, container, engines=None, regi
 # ---------------------------------------------------------------------------
 
 def list_workers(*, prefix: str, cli_version: str | None, engines=None, region=None, profile=None,
-                 aws: Aws | None = None, out=print, as_json: bool = False) -> int:
+                 aws: Aws | None = None, out=print, err=None, as_json: bool = False) -> int:
     """按引擎列**当前版本**的 variant（tag / digest / 推送时间 / revision）+ 默认指针 + 待清理与孤儿。
 
     「当前版本」= 跑这条命令的 CLI 自身版本（与 push-worker 打 tag 用的同一个）——故本命令同样过 skew 前置：
@@ -883,7 +884,9 @@ def list_workers(*, prefix: str, cli_version: str | None, engines=None, region=N
 
     aws = aws or make_aws(region=region, profile=profile)
     engines = tuple(engines or names.ENGINES)
-    blocked = _skew_gate(compose, prefix=prefix, cli_version=cli_version, ssm=aws.ssm, out=out)
+    err = err or (lambda *a: print(*a, file=sys.stderr))
+    diag = err if as_json else out  # --json 下 stdout 只留一个 JSON 文档：skew 提示 / 读失败诊断走 stderr（ADR 0041 决策三）
+    blocked = _skew_gate(compose, prefix=prefix, cli_version=cli_version, ssm=aws.ssm, out=diag)
     if blocked is not None:
         return blocked
     version = str(cli_version)
@@ -902,7 +905,7 @@ def list_workers(*, prefix: str, cli_version: str | None, engines=None, region=N
                 "pending_cleanup": _pending_cleanup(aws, family=family, mapped=mapped),
             }
     except Exception as exc:  # 读侧命令：连不上/没权限也别抛 traceback（同 provider 其余读侧的口径）
-        out(f"读不到 worker 镜像状态（SSM/ECS）：{exc}")
+        diag(f"读不到 worker 镜像状态（SSM/ECS）：{exc}")
         return EXIT_PRECONDITION
     if as_json:  # 机读形态（ADR 0041 决策三）：同一份 doc、不另拼
         out(json.dumps(doc, ensure_ascii=False, indent=2))
@@ -936,12 +939,14 @@ def _pending_cleanup(aws: Aws, *, family: str, mapped: set) -> list[dict]:
     机读行 {revision_arn, reason: retired|orphan, variant, retired_at, registered_at}；文本渲染在 list_workers。"""
     items: list[dict] = []
     for rev in scan_family(aws.ecs, family):
+        # registered_at 是 datetime → 转 ISO 串：doc 要能 json.dumps（真 AWS 返 registeredAt，moto 不返——单测照不出）
+        reg = rev.registered_at.isoformat() if rev.registered_at else None
         if rev.tags.get(names.TAG_RETIRED_AT):
             items.append({"revision_arn": rev.arn, "reason": "retired", "variant": rev.tags.get(names.TAG_VARIANT, "?"),
-                          "retired_at": rev.tags[names.TAG_RETIRED_AT], "registered_at": rev.registered_at})
+                          "retired_at": rev.tags[names.TAG_RETIRED_AT], "registered_at": reg})
         elif rev.has_lineage and rev.arn not in mapped:
             items.append({"revision_arn": rev.arn, "reason": "orphan", "variant": rev.tags.get(names.TAG_VARIANT, "?"),
-                          "retired_at": None, "registered_at": rev.registered_at})
+                          "retired_at": None, "registered_at": reg})
     return items
 
 

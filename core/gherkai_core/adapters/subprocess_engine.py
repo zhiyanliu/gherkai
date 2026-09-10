@@ -27,8 +27,9 @@ from gherkai_core.wire import event_from_line, job_to_line, raise_for_worker_exi
 class SubprocessWorkerHandle:
     """一个在跑的 worker 子进程的句柄。stop() 翻成 SIGTERM→宽限→SIGKILL（ADR 0026 机制层）。"""
 
-    def __init__(self, proc: subprocess.Popen) -> None:
+    def __init__(self, proc: subprocess.Popen, pumps: tuple = ()) -> None:
         self._proc = proc
+        self._pumps = pumps  # 透传 worker stdout/stderr 的两条 daemon 线程：stop 后有界 join，让日志尾部落完（ADR 0041 决策二）
 
     def stop(self, grace_period_s: float) -> None:
         proc = self._proc
@@ -42,6 +43,9 @@ class SubprocessWorkerHandle:
             proc.wait(timeout=grace_period_s)
         except subprocess.TimeoutExpired:
             proc.kill()  # SIGKILL 兜底（会话清理可能落空，已知代价，ADR 0026）
+        # 进程已退 → 管道写端关、pump 读到 EOF 即结束；有界 join 让最后几行（多半是失败原因）先落到 sink，再由调用方关句柄。
+        # 必须带超时：定位链第 4 级 uvx 是包装进程，孙进程可能仍持有 stdout 写端。
+        _join_pumps(self._pumps, 0.5)
 
     def wait(self) -> int:
         """阻塞等 worker 退出、返回 returncode（ADR 0034：local 无状态跑批的退出观察者用）。
@@ -114,8 +118,10 @@ class SubprocessEngine:
         # **先起 pump、再写 stdin**：job JSON 可能很大（DataTable/DocString），写 stdin 会在管道满时阻塞；此刻 worker 若已在往
         # stdout/stderr 吐（SDK import 噪声）而无人读，父卡 stdin.write、子卡 stdout.write ——互锁。线程是 daemon、EOF 自然退出，
         # 下面 stdin 失败分支 kill/wait 后它们随管道关闭结束。
-        threading.Thread(target=_pump_log, args=(proc.stdout, job.scope_id, "out", self._log_sink), daemon=True).start()
-        threading.Thread(target=_pump_log, args=(proc.stderr, job.scope_id, "err", self._log_sink), daemon=True).start()
+        pumps = (threading.Thread(target=_pump_log, args=(proc.stdout, job.scope_id, "out", self._log_sink), daemon=True),
+                 threading.Thread(target=_pump_log, args=(proc.stderr, job.scope_id, "err", self._log_sink), daemon=True))
+        for t in pumps:
+            t.start()
         try:
             assert proc.stdin is not None
             proc.stdin.write(job_to_line(job) + "\n")
@@ -129,12 +135,18 @@ class SubprocessEngine:
             proc.wait()
             raise
 
-        handle = SubprocessWorkerHandle(proc)
-        return handle, _read_events(proc, events_r, raw_sink)
+        handle = SubprocessWorkerHandle(proc, pumps=pumps)
+        return handle, _read_events(proc, events_r, raw_sink, pumps=pumps)
+
+
+def _join_pumps(pumps, timeout_s: float) -> None:
+    """有界等 worker 日志 pump 线程结束（进程退了它们读到 EOF 就完）。超时不等——孙进程可能仍持写端。"""
+    for t in pumps:
+        t.join(timeout_s)
 
 
 def _read_events(
-    proc: subprocess.Popen, events_r: int, raw_sink: "Callable[[str], None] | None" = None
+    proc: subprocess.Popen, events_r: int, raw_sink: "Callable[[str], None] | None" = None, pumps: tuple = ()
 ) -> Iterator[Event]:
     """逐行读 fd3（纯 ADR 0024 事件）→ Event。worker 异常退出且 returncode>0 时抛错（schedule 记 error）。
 
@@ -148,17 +160,22 @@ def _read_events(
     落库失败不该拖垮执行；reconciler 靠事件持久性推进、丢一条下轮 worker 不会重发，但那是 cloud 事件日志（DDB）
     路径的边界，ADR 0034）。
     """
-    with os.fdopen(events_r, "r", encoding="utf-8") as events:
-        for line in events:
-            line = line.strip()
-            if not line:
-                continue
-            if raw_sink is not None:
-                try:
-                    raw_sink(line)  # 旁路落原始行（无状态跑批），解析前
-                except Exception:
-                    pass
-            yield event_from_line(line)  # 解析失败 → 抛 ValueError，schedule 捕获记 error
+    try:
+        with os.fdopen(events_r, "r", encoding="utf-8") as events:
+            for line in events:
+                line = line.strip()
+                if not line:
+                    continue
+                if raw_sink is not None:
+                    try:
+                        raw_sink(line)  # 旁路落原始行（无状态跑批），解析前
+                    except Exception:
+                        pass
+                yield event_from_line(line)  # 解析失败 → 抛 ValueError，schedule 捕获记 error
+    finally:
+        # 自然 EOF 与被放弃（GeneratorExit，schedule 主动停后不再 next）两条路都有界等 pump 落完日志尾部，
+        # 再轮到调用方关 sink 句柄（ADR 0041 决策二）；stop() 路径另有一次 join，两处都在、哪条先到都不裸奔。
+        _join_pumps(pumps, 2.0)
     # fd3 耗尽 = worker 关了事件通道。等它真正退出，拿 returncode。
     proc.wait()
     rc = proc.returncode
@@ -193,8 +210,11 @@ def _pump_log(stream, scope_id: str, tag: str, sink=None) -> None:
     prefix = f"[worker {scope_id}:{tag}]"
     if sink is not None:
         for line in stream:
-            sink.write(f"{prefix} {line}")
-            sink.flush()
+            try:
+                sink.write(f"{prefix} {line}")
+                sink.flush()
+            except ValueError:
+                return  # 句柄已关 = 本进程正在收尾（join 超时后仍有尾巴的残余路径）：静默停转发，别把 traceback 打到 stderr
         return
     if sys.stderr.isatty():
         color = _ANSI_COLORS[hash(scope_id) % len(_ANSI_COLORS)]
