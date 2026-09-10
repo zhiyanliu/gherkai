@@ -1049,3 +1049,19 @@ def test_status_cloud_terminal_prints_s3_and_ddb_locations(monkeypatch, capsys):
     assert "报告: s3://gherkai-artifacts/reports/r1/index.html" in err
     assert "判定明细: s3://gherkai-artifacts/reports/r1/jobs/" in err
     assert "ddb://gherkai-runs/r1#META" in err
+
+
+def test_status_cloud_json_includes_artifact_locations(monkeypatch, capsys):
+    """status --json 附加 artifacts（ADR 0041 决策三）：RunState 部分形状不变，多一个键给报告/判定明细/元信息位置。"""
+    class _PassedTable:
+        def get_item(self, **kw):
+            return {"Item": {"run_id": "r1", "item_type": "STATE", "status": "passed", "jobs": {}}}
+
+    _patch_skew(monkeypatch)
+    monkeypatch.setattr(m.compose, "_make_ddb_table", lambda table, *, region, profile: _PassedTable())
+    assert m.main(["status", "r1", "--backend", "cloud", "--region", "us-east-1", "--json"]) == 0
+    doc = json.loads(capsys.readouterr().out)
+    assert doc["run_id"] == "r1" and doc["status"] == "passed"
+    assert doc["artifacts"]["report_index"] == "s3://gherkai-artifacts/reports/r1/index.html"
+    assert doc["artifacts"]["jobs_dir"] == "s3://gherkai-artifacts/reports/r1/jobs/"
+    assert doc["artifacts"]["run_meta"] == "ddb://gherkai-runs/r1#META"

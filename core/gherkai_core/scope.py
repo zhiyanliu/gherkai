@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import math
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from gherkai_core.model import Job
@@ -124,8 +125,13 @@ def _resolve_timeout(scope_id: str, members: list[ParsedScenario], default: floa
     return n
 
 
-def plan(features: list[FeatureSource], config: PlanConfig) -> list[Job]:
+def plan(features: list[FeatureSource], config: PlanConfig, *,
+         select: Callable[[ParsedScenario], bool] | None = None) -> list[Job]:
     """core 窄腰第一步：一组 .feature → 可调度的 Job 列表（ADR 0025）。
+
+    select（ADR 0041 决策一）：scenario 筛选谓词，在 **parse 之后、scope 分组之前**施加——筛掉的 scenario 不进任何 job，
+    named scope 只带被选中的成员（迭代用法的有意代价）。None = 不筛。谓词由调用方按 `--tags/--scenario` 组装，core 只收
+    `ParsedScenario → bool`、不认 flag 语义。筛后为空返回 []（调用方决定怎么提示）。
 
     严格契约：`features` 的 uri 必须互异（uri 是 scenarioId 前缀，重复会撞 id）。重复 → PlanError。
     这是**接口违约**校验，与「跨文件同 @scope 合并」（领域语义、warning、见下文 scope 分组）正交：
@@ -142,10 +148,12 @@ def plan(features: list[FeatureSource], config: PlanConfig) -> list[Job]:
             )
         seen_uris.add(f.uri)
 
-    # 1) 解析所有 feature → ParsedScenario（带 tags）
+    # 1) 解析所有 feature → ParsedScenario（带 tags）；再按 select 筛（分组之前，ADR 0041 决策一）
     all_parsed: list[ParsedScenario] = []
     for f in features:
         all_parsed.extend(parse_feature(f.uri, f.text))
+    if select is not None:
+        all_parsed = [p for p in all_parsed if select(p)]
 
     # 2) 按 @scope 分组（全局命名空间）；未标的各自单元素 scope
     #    分组键：有 @scope → 用其值；无标 → 用 scenario_id（保证各自独立、不撞）

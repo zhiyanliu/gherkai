@@ -771,3 +771,23 @@ def test_list_workers_says_when_the_default_pointer_is_missing(aws):
     out, text = _out()
     assert workers.list_workers(prefix=PREFIX, cli_version=VERSION, aws=aws, out=out) == 0
     assert "未初始化" in text()
+
+
+def test_list_workers_json_shape(aws):
+    """list-workers --json（ADR 0041 决策三）：与文本同一份 doc——prefix/version/default_variant/engines{family, ecr_repo,
+    variants[], pending_cleanup[]}；退休 revision 进 pending_cleanup 且 reason=retired。"""
+    seed_backend(aws)
+    _push(aws, FakeContainer(digests=["sha256:" + "6" * 64]), set_default=True)
+    _push(aws, FakeContainer(digests=["sha256:" + "7" * 64]))  # 重推 login → 旧 revision 退休
+    out, text = _out()
+    assert workers.list_workers(prefix=PREFIX, cli_version=VERSION, aws=aws, out=out, as_json=True) == 0
+    import json as _json
+    doc = _json.loads(text())
+    assert doc["prefix"] == PREFIX and doc["version"] == VERSION and doc["default_variant"] == "login"
+    nova = doc["engines"]["novaact"]
+    assert nova["family"] == names.task_def_name(PREFIX, "novaact") and nova["ecr_repo"] == names.ecr_repo_name(PREFIX, "novaact")
+    assert [v["variant"] for v in nova["variants"]] == ["login"]
+    v = nova["variants"][0]
+    assert v["tag"] == f"{VERSION}-login" and v["digest"].startswith("sha256:7") and v["revision_arn"] and v["template_arn"]
+    assert nova["pending_cleanup"] and nova["pending_cleanup"][0]["reason"] == "retired" and nova["pending_cleanup"][0]["retired_at"]
+    assert doc["engines"]["midscene"]["variants"] == []

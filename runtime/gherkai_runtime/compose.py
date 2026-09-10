@@ -312,8 +312,11 @@ def build_engines(
     extra_http_headers: dict[str, str] | None = None,
     steps_dir: str | Path | None = None,
     no_artifacts: bool = False,
+    worker_log=None,
 ) -> dict[str, Engine]:
     """每个引擎一个 SubprocessEngine（cmd 不同，core 引擎无关，ADR 0026）。
+
+    worker_log（ADR 0041 决策二）：worker stdout/stderr 透传的落点文件句柄；None = 本进程 stderr（默认）。组合根只转发。
 
     no_artifacts（`--no-report`，ADR 0037 决策 3）：经 env `GHERKAI_NO_ARTIFACTS=1` 告知 worker **不生成、不上报**引擎
     原生产物（Midscene 关 generateReport；Nova SDK 无关闭开关、不传 logs_directory 让它写进自己 mkdtemp 的临时目录），
@@ -411,7 +414,7 @@ def build_engines(
             wc = resolve_worker_cmd(engine)
         except WorkerNotFoundError as miss:
             return _UnavailableEngine(miss)
-        return SubprocessEngine(cmd=wc.cmd, cwd=wc.cwd, env=env)
+        return SubprocessEngine(cmd=wc.cmd, cwd=wc.cwd, env=env, log_sink=worker_log)
 
     return {"novaact": _leg("novaact", nova_env), "midscene": _leg("midscene", midscene_env)}
 
@@ -707,6 +710,15 @@ def _make_ssm_client(*, region, profile):
     """boto3 ssm client（读 subnet/sg 的确定性路径参数）。"""
     import boto3
     return boto3.session.Session(profile_name=profile, region_name=region).client("ssm")
+
+
+def probe_aws_identity(*, region, profile) -> dict:
+    """凭证/region 可用性探针（`gherkai doctor`，ADR 0041 决策四）：STS GetCallerIdentity，返 {account, arn, region}。
+    只读、零资源；异常原样抛给调用方翻成一句诊断。"""
+    import boto3
+    sts = boto3.session.Session(profile_name=profile, region_name=region).client("sts")
+    ident = sts.get_caller_identity()
+    return {"account": ident.get("Account"), "arn": ident.get("Arn"), "region": region}
 
 
 def _make_lambda_client(*, region, profile):

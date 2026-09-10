@@ -738,3 +738,28 @@ def test_deploy_warns_about_missing_container_engine_only_for_pure_release_versi
     monkeypatch.setattr(Provider, "_resolve_version", staticmethod(lambda args: "1.4.0.dev3+g0123abc"))
     assert Provider().deploy(_parse("--vpc", "default", "--region", "us-east-1")) == 0
     assert "docker 未安装" not in capsys.readouterr().err
+
+
+def test_provider_doctor_reports_toolchain(monkeypatch):
+    """`gherkai doctor` 的 provider 段（ADR 0041 决策四）：node / cdk 必需，容器引擎可选；全部只读、不碰 AWS。"""
+    from types import SimpleNamespace
+
+    from gherkai_deploy_aws import container as container_mod
+
+    class _Engine:
+        name = "docker"
+        def probe(self):
+            return None
+
+    monkeypatch.setattr(provider_cli, "check_node", lambda: None)
+    monkeypatch.setattr(provider_cli, "cdk_command", lambda: ["cdk-stub"])
+    monkeypatch.setattr(container_mod, "resolve_container_engine", lambda requested=None: _Engine())
+    checks = {c["name"]: c for c in Provider().doctor(SimpleNamespace())}
+    assert checks["node"]["ok"] and checks["node"]["required"]
+    assert checks["cdk"]["ok"] and checks["cdk"]["detail"] == "cdk-stub"
+    assert checks["container-engine"]["ok"] and checks["container-engine"]["required"] is False
+
+    monkeypatch.setattr(provider_cli, "check_node", lambda: "找不到 node：需要 Node ≥ 22")
+    monkeypatch.setattr(provider_cli, "cdk_command", lambda: [])
+    checks = {c["name"]: c for c in Provider().doctor(SimpleNamespace())}
+    assert not checks["node"]["ok"] and not checks["cdk"]["ok"] and "npx" in checks["cdk"]["detail"]

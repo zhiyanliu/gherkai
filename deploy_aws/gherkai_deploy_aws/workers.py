@@ -873,7 +873,7 @@ def run_deploy_steps(*, prefix: str, version: str, container, engines=None, regi
 # ---------------------------------------------------------------------------
 
 def list_workers(*, prefix: str, cli_version: str | None, engines=None, region=None, profile=None,
-                 aws: Aws | None = None, out=print) -> int:
+                 aws: Aws | None = None, out=print, as_json: bool = False) -> int:
     """按引擎列**当前版本**的 variant（tag / digest / 推送时间 / revision）+ 默认指针 + 待清理与孤儿。
 
     「当前版本」= 跑这条命令的 CLI 自身版本（与 push-worker 打 tag 用的同一个）——故本命令同样过 skew 前置：
@@ -889,43 +889,60 @@ def list_workers(*, prefix: str, cli_version: str | None, engines=None, region=N
     version = str(cli_version)
     try:
         default = read_default_variant(aws.ssm, prefix)
-        out(f"prefix {prefix}    版本 {version}    默认 variant {default or '（未初始化——跑一次 gherkai deploy）'}")
         # 全部版本的映射只枚举一次（GetParametersByPath 每页 10 条要翻页），两个引擎共用——同 cleanup_pass 的做法
         mapped = {a for _e, _t, raw in _iter_image_params(aws.ssm, prefix) for a in _mapped_arn(raw)}
+        doc: dict = {"prefix": prefix, "version": version, "default_variant": default, "engines": {}}
         for engine in engines:
             family = names.task_def_name(prefix, engine)
-            out(f"\n== {engine}（family {family}，ECR repo {names.ecr_repo_name(prefix, engine)}）==")
             mappings = current_version_mappings(aws.ssm, prefix=prefix, engine=engine, version=version)
-            if not mappings:
-                out("  （本版本还没有任何 variant——`gherkai deploy` 会同步基底，或 push-worker 推一个）")
-            else:
-                tag_w = max(28, max(len(m.tag) for m in mappings) + 2)  # dev 版 tag 很长，列宽随内容
-                out("  " + _cell("variant", 16) + _cell("tag", tag_w) + _cell("digest", 20)
-                    + _cell("推送时间", 28) + "revision")
-                for m in mappings:
-                    out("  " + _cell(m.variant, 16) + _cell(m.tag, tag_w)
-                        + _cell(names.short_digest(m.digest), 20) + _cell(m.pushed_at or "-", 28)
-                        + _short_arn(m.revision_arn))
-            _print_pending_cleanup(aws, family=family, mapped=mapped, out=out)
+            doc["engines"][engine] = {
+                "family": family, "ecr_repo": names.ecr_repo_name(prefix, engine),
+                "variants": [{"variant": m.variant, "tag": m.tag, "digest": m.digest, "pushed_at": m.pushed_at,
+                              "revision_arn": m.revision_arn, "template_arn": m.template_arn} for m in mappings],
+                "pending_cleanup": _pending_cleanup(aws, family=family, mapped=mapped),
+            }
     except Exception as exc:  # 读侧命令：连不上/没权限也别抛 traceback（同 provider 其余读侧的口径）
         out(f"读不到 worker 镜像状态（SSM/ECS）：{exc}")
         return EXIT_PRECONDITION
+    if as_json:  # 机读形态（ADR 0041 决策三）：同一份 doc、不另拼
+        out(json.dumps(doc, ensure_ascii=False, indent=2))
+        return EXIT_OK
+    out(f"prefix {prefix}    版本 {version}    默认 variant {default or '（未初始化——跑一次 gherkai deploy）'}")
+    for engine, info in doc["engines"].items():
+        out(f"\n== {engine}（family {info['family']}，ECR repo {info['ecr_repo']}）==")
+        variants = info["variants"]
+        if not variants:
+            out("  （本版本还没有任何 variant——`gherkai deploy` 会同步基底，或 push-worker 推一个）")
+        else:
+            tag_w = max(28, max(len(v["tag"]) for v in variants) + 2)  # dev 版 tag 很长，列宽随内容
+            out("  " + _cell("variant", 16) + _cell("tag", tag_w) + _cell("digest", 20)
+                + _cell("推送时间", 28) + "revision")
+            for v in variants:
+                out("  " + _cell(v["variant"], 16) + _cell(v["tag"], tag_w)
+                    + _cell(names.short_digest(v["digest"]), 20) + _cell(v["pushed_at"] or "-", 28)
+                    + _short_arn(v["revision_arn"]))
+        for item in info["pending_cleanup"]:
+            if item["reason"] == "retired":
+                out(f"  待清理 {_cell(_short_arn(item['revision_arn']), 28)}已退休 {item['retired_at']}（variant {item['variant']}）")
+            else:
+                out(f"  待清理 {_cell(_short_arn(item['revision_arn']), 28)}孤儿：无任何版本的映射引用"
+                    f"（variant {item['variant']}，注册于 {item['registered_at'] or '?'}）")
     return EXIT_OK
 
 
-def _print_pending_cleanup(aws: Aws, *, family: str, mapped: set, out) -> None:
+def _pending_cleanup(aws: Aws, *, family: str, mapped: set) -> list[dict]:
     """已退休（带 retired-at）与孤儿（带血缘 tags、不在任何版本的映射里）——清理 pass 的候选，列出来才可解释
-    「为什么 family 里 revision 比 variant 多」。`mapped` = 全部版本映射引用的 revision ARN 集合（调用方算一次）。"""
-    lines = []
+    「为什么 family 里 revision 比 variant 多」。`mapped` = 全部版本映射引用的 revision ARN 集合（调用方算一次）。
+    机读行 {revision_arn, reason: retired|orphan, variant, retired_at, registered_at}；文本渲染在 list_workers。"""
+    items: list[dict] = []
     for rev in scan_family(aws.ecs, family):
         if rev.tags.get(names.TAG_RETIRED_AT):
-            lines.append(f"  待清理 {_cell(_short_arn(rev.arn), 28)}已退休 {rev.tags[names.TAG_RETIRED_AT]}"
-                         f"（variant {rev.tags.get(names.TAG_VARIANT, '?')}）")
+            items.append({"revision_arn": rev.arn, "reason": "retired", "variant": rev.tags.get(names.TAG_VARIANT, "?"),
+                          "retired_at": rev.tags[names.TAG_RETIRED_AT], "registered_at": rev.registered_at})
         elif rev.has_lineage and rev.arn not in mapped:
-            lines.append(f"  待清理 {_cell(_short_arn(rev.arn), 28)}孤儿：无任何版本的映射引用"
-                         f"（variant {rev.tags.get(names.TAG_VARIANT, '?')}，注册于 {rev.registered_at or '?'}）")
-    for line in lines:
-        out(line)
+            items.append({"revision_arn": rev.arn, "reason": "orphan", "variant": rev.tags.get(names.TAG_VARIANT, "?"),
+                          "retired_at": None, "registered_at": rev.registered_at})
+    return items
 
 
 def _cell(text: str, width: int) -> str:

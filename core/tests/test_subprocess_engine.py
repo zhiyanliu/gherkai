@@ -189,3 +189,21 @@ def test_large_job_and_noisy_worker_do_not_deadlock():
     _handle, events = engine.run_scope(job)
     types = [e.type for e in events]
     assert types[0] == "scope_started" and types[-1] == "scope_done" and types.count("step_done") == 3
+
+
+def test_log_sink_receives_worker_logs_and_keeps_stderr_clean(capsys):
+    """log_sink（ADR 0041 决策二）：给了文件句柄，worker 的 stdout/stderr 透传全写 sink（无颜色码）、本进程 stderr 不再出现
+    `[worker …]` 行——`run --quiet` 靠它把 SDK 噪声挡在 agent 的上下文之外。"""
+    import io
+    import os
+
+    sink = io.StringIO()
+    env = {**os.environ, "WORKER_MODE": "pass", "WORKER_NOISE_BYTES": "64"}
+    engine = SubprocessEngine(cmd=[sys.executable, _WORKER], env=env, log_sink=sink)
+    handle, events = engine.run_scope(_job("s"))
+    assert [e.type for e in events][-1] == "scope_done"
+    deadline = time.monotonic() + 5
+    while "[worker s:out]" not in sink.getvalue() and time.monotonic() < deadline:
+        time.sleep(0.02)  # pump 是 daemon 线程，等它把噪声行写完
+    assert "[worker s:out] " + "x" * 64 in sink.getvalue()
+    assert "[worker" not in capsys.readouterr().err

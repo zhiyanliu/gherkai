@@ -288,6 +288,8 @@ class Provider:
                         "加上默认指针，以及已退休待清理与孤儿 revision。",
         )
         self._add_locator_flags(listing)
+        listing.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
+                             help="输出机器可读 JSON（prefix/version/default_variant/engines）")
         listing.set_defaults(_deploy_verb=self.list_workers)
 
         delete = sub.add_parser(
@@ -470,7 +472,31 @@ class Provider:
 
         target = self._resolve_target(args)
         return workers.list_workers(prefix=target.prefix, cli_version=self._resolve_version(args),
-                                    region=target.region, profile=target.profile)
+                                    region=target.region, profile=target.profile,
+                                    as_json=getattr(args, "json", False))
+
+    def doctor(self, args) -> list[dict]:
+        """`gherkai doctor` 的 provider 段（ADR 0041 决策四）：部署方工具链**只读**自检——Node ≥ 22、cdk 可定位、容器引擎可用。
+
+        收的是 doctor 的 Namespace（不是 deploy 的），故一律 getattr 取值。容器引擎标 required=False：只有同步基底 /
+        push-worker 才用得上，没装 docker 不该让只提交 run 的人自检失败。"""
+        from gherkai_deploy_aws.container import UnsupportedContainerEngine, resolve_container_engine
+
+        checks: list[dict] = []
+        node_err = check_node()
+        checks.append({"name": "node", "ok": node_err is None, "required": True,
+                       "detail": node_err or f"node {shutil.which('node')}"})
+        cdk = cdk_command()
+        checks.append({"name": "cdk", "ok": bool(cdk), "required": True,
+                       "detail": " ".join(cdk) if cdk else "找不到 cdk 也找不到 npx：装 Node（自带 npx）或 npm i -g aws-cdk"})
+        try:
+            engine = resolve_container_engine(getattr(args, "container_engine", None))
+            probe = engine.probe()
+            checks.append({"name": "container-engine", "ok": probe is None, "required": False,
+                           "detail": probe or f"{engine.name} 可用（同步基底 / push-worker 用）"})
+        except UnsupportedContainerEngine as exc:
+            checks.append({"name": "container-engine", "ok": False, "required": False, "detail": str(exc)})
+        return checks
 
     def delete_worker(self, args) -> int:
         """留的口子（ADR 0038「命令族」）：**尚未提供**，退 2 说清为什么与将来怎么落。

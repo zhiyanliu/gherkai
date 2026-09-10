@@ -363,3 +363,17 @@ def test_bare_tag_without_value_errors_with_location(tag: str):
     with pytest.raises(PlanError, match="缺少值") as ei:
         _plan(f'Feature: F\n  {tag}\n  Scenario: a\n    When "x"\n')
     assert "t.feature:" in str(ei.value)
+
+
+# ---- select：scenario 筛选谓词（ADR 0041 决策一）——parse 之后、分组之前 ----
+def test_plan_select_filters_scenarios_before_grouping():
+    text = ("Feature: F\n"
+            "  @scope:s1 @smoke\n  Scenario: a\n    When \"x\"\n"
+            "  @scope:s1\n  Scenario: b\n    When \"y\"\n"
+            "  @smoke\n  Scenario: c\n    When \"z\"\n")
+    all_jobs = plan([FeatureSource("t.feature", text)], CFG)
+    assert sorted(len(j.scenarios) for j in all_jobs) == [1, 2]
+    smoke = plan([FeatureSource("t.feature", text)], CFG, select=lambda p: "@smoke" in p.tags)
+    # named scope s1 只带被选中的 a；c 自成 scope；b 被筛掉
+    assert sorted((j.scope_id, [s.name for s in j.scenarios]) for j in smoke) == [("s1", ["a"]), ("t.feature:9", ["c"])]
+    assert plan([FeatureSource("t.feature", text)], CFG, select=lambda p: False) == []

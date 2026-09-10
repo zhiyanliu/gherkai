@@ -56,10 +56,14 @@ class SubprocessWorkerHandle:
 class SubprocessEngine:
     """Engine port 的子进程实现。cmd = 启 worker 的命令行（如 ['uv','run','python','run_scope.py']）。"""
 
-    def __init__(self, cmd: list[str], cwd: str | None = None, env: dict | None = None) -> None:
+    def __init__(self, cmd: list[str], cwd: str | None = None, env: dict | None = None,
+                 log_sink=None) -> None:
         self._cmd = cmd
         self._cwd = cwd
         self._env = env
+        # worker stdout/stderr 透传的落点（ADR 0041 决策二）：None → 本进程 stderr（人看流水，默认）；
+        # 文件句柄 → 写它（`run --quiet` 落 worker.log，agent 的上下文不被 SDK 噪声灌满）。只转发、不解析。
+        self._log_sink = log_sink
 
     @property
     def cmd(self) -> list[str]:
@@ -110,8 +114,8 @@ class SubprocessEngine:
         # **先起 pump、再写 stdin**：job JSON 可能很大（DataTable/DocString），写 stdin 会在管道满时阻塞；此刻 worker 若已在往
         # stdout/stderr 吐（SDK import 噪声）而无人读，父卡 stdin.write、子卡 stdout.write ——互锁。线程是 daemon、EOF 自然退出，
         # 下面 stdin 失败分支 kill/wait 后它们随管道关闭结束。
-        threading.Thread(target=_pump_log, args=(proc.stdout, job.scope_id, "out"), daemon=True).start()
-        threading.Thread(target=_pump_log, args=(proc.stderr, job.scope_id, "err"), daemon=True).start()
+        threading.Thread(target=_pump_log, args=(proc.stdout, job.scope_id, "out", self._log_sink), daemon=True).start()
+        threading.Thread(target=_pump_log, args=(proc.stderr, job.scope_id, "err", self._log_sink), daemon=True).start()
         try:
             assert proc.stdin is not None
             proc.stdin.write(job_to_line(job) + "\n")
@@ -178,15 +182,20 @@ def _read_events(
 _ANSI_COLORS = (31, 32, 33, 34, 35, 36, 91, 92, 93, 94, 95, 96)
 
 
-def _pump_log(stream, scope_id: str, tag: str) -> None:
+def _pump_log(stream, scope_id: str, tag: str, sink=None) -> None:
     """把 worker 的 stdout（SDK 噪声，tag=out）/ stderr（诊断，tag=err）实时透传为本进程日志。
 
-    带 [worker <scope_id>:<tag>] 前缀，多 worker 并发时区分来源。
-    仅当本进程 stderr 是终端（isatty）时才上色——管道/文件/CI 输出纯文本，避免 ANSI 乱码。
+    带 [worker <scope_id>:<tag>] 前缀，多 worker 并发时区分来源。sink=None 写本进程 stderr、仅当它是终端（isatty）
+    时才上色——管道/文件/CI 输出纯文本，避免 ANSI 乱码；sink 给了文件句柄则写它（无颜色码，逐行 flush 让 tail 可见）。
     """
     if stream is None:
         return
     prefix = f"[worker {scope_id}:{tag}]"
+    if sink is not None:
+        for line in stream:
+            sink.write(f"{prefix} {line}")
+            sink.flush()
+        return
     if sys.stderr.isatty():
         color = _ANSI_COLORS[hash(scope_id) % len(_ANSI_COLORS)]
         prefix = f"\033[{color}m{prefix}\033[0m"

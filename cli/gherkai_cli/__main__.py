@@ -85,6 +85,58 @@ def _peek_deploy_provider(argv: list[str] | None) -> "tuple[object | None, str |
     return _deploy.resolve_provider(ns.provider)
 
 
+def _add_selection_flags(p: argparse.ArgumentParser) -> None:
+    """run / plan / submit 共用的 scenario 筛选 flag（ADR 0041 决策一）。语义写在 help 里，解析在 `_build_selector`。"""
+    p.add_argument(
+        "--tags", action="append", default=None, metavar="TAG[,TAG...]",
+        help="只跑带这些 tag 的 scenario：一个值内逗号分隔为「任一命中」，重复给本 flag 为「都要命中」；@ 可省。"
+             "feature 行的 tag 已传给其下每个 scenario",
+    )
+    p.add_argument(
+        "--scenario", action="append", default=None, metavar="SEL",
+        help="只跑这些 scenario（可重复，任一命中）：SEL = <文件>:<行号>，或 行号 / :行号，或标题的一段文字（区分大小写）。"
+             "与 --tags 同给时两者都要满足",
+    )
+
+
+def _build_selector(args):
+    """把 `--tags` / `--scenario` 组装成 `plan(select=…)` 的谓词；两者都没给 → None（不筛）。
+
+    tag：每个 --tags 值拆逗号、去 @ 归一后取「任一命中」，多个 --tags 之间取「且」。scenario：等于 id（uri:line）/
+    行号 / 标题子串，多个之间取「或」。两组之间取「且」。core 不认这些 flag，只收谓词（ADR 0041 决策一）。
+    """
+    tag_groups = [
+        {t.strip().lstrip("@") for t in raw.split(",") if t.strip()}
+        for raw in (getattr(args, "tags", None) or [])
+    ]
+    tag_groups = [g for g in tag_groups if g]
+    sels = [s for s in (getattr(args, "scenario", None) or []) if s]
+    if not tag_groups and not sels:
+        return None
+
+    def _scenario_hit(p) -> bool:
+        sid, name = p.scenario.id, p.scenario.name
+        line = sid.rsplit(":", 1)[-1]
+        for s in sels:
+            if s == sid or s.lstrip(":") == line or (s in name):
+                return True
+        return False
+
+    def select(p) -> bool:
+        tags = {t.lstrip("@") for t in p.tags}
+        if any(not (g & tags) for g in tag_groups):
+            return False
+        return _scenario_hit(p) if sels else True
+
+    return select
+
+
+def _selection_label(args) -> str:
+    bits = [f"--tags {v}" for v in (getattr(args, "tags", None) or [])]
+    bits += [f"--scenario {v}" for v in (getattr(args, "scenario", None) or [])]
+    return " ".join(bits)
+
+
 def _build_parser(*, provider: object | None = None, provider_error: str | None = None) -> argparse.ArgumentParser:
     """建主 parser。`provider`（部署 provider，由 `main` 先窥 argv 解析出来）给了就让它贴自己的 flag。
 
@@ -135,9 +187,11 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
         "--tunnel", choices=sorted(_tunnel_providers()), default="ngrok",
         help="--expose-local 用的隧道 provider（默认 ngrok，当前唯一实现）",
     )
+    _add_selection_flags(run)
     run.add_argument("--fail-fast", action="store_true", help="任一 job 崩则中止整批")
     run.add_argument("--json", action="store_true", help="只输出机器可读 JSON（不打进度/文本汇总）")
-    run.add_argument("--quiet", action="store_true", help="不打逐事件进度（仍打文本汇总）")
+    run.add_argument("--quiet", action="store_true",
+                     help="少进屏幕/上下文：不打逐事件进度，worker 日志改落 <report-dir>/<run_id>/worker.log（只打一行位置）；仍打文本汇总")
     # RunReport 是 run 的应得产物：默认总归集（manifest.json + index.html）到 <report-dir>/<run_id>/。
     run.add_argument(
         "--report-dir", default="reports", metavar="DIR",
@@ -221,6 +275,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
         "--assertion-votes", type=int, default=1, metavar="N",
         help="AI 断言投票次数（默认 1）——影响分组产出的投票次数，故预检也可设",
     )
+    _add_selection_flags(pl)
     pl.add_argument("--json", action="store_true", help="输出机器可读 JSON（scope/job 分组）")
     pl.add_argument(
         "--steps-dir", default=None, metavar="DIR",
@@ -237,6 +292,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     sm.add_argument("features", nargs="+", type=Path, help="一个或多个 .feature 路径")
     sm.add_argument("--default-engine", choices=sorted(_names.ENGINES), default="novaact",
                     help="未标 @engine 的 scope 用的默认引擎")
+    _add_selection_flags(sm)
     sm.add_argument("--assertion-votes", type=int, default=1, metavar="N", help="AI 断言投票次数（默认 1）")
     sm.add_argument("--max-concurrency", type=int, default=1,
                     help="同时在跑的 worker 上限（默认 1）；随提交记录生效，cloud 档受部署侧上限"
@@ -321,7 +377,18 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     tw.add_argument("--region", default=None)
     tw.add_argument("--profile", default=None)
 
-    sub.add_parser("list-engines", help="列出可用引擎及其 spawn 命令")
+    le = sub.add_parser("list-engines", help="列出可用引擎及其 spawn 命令")
+    le.add_argument("--json", action="store_true", help="输出机器可读 JSON（每引擎 available/cmd/source/hint）")
+
+    dr = sub.add_parser("doctor", help="自检环境（只读）：引擎 worker、steps 目录、凭证、后端资源与版本、部署工具链；全过退 0，有失败项退 2")
+    dr.add_argument("--backend", choices=["local", "cloud"], default="local",
+                    help="cloud（或给了 --prefix）时连带查凭证与后端；local 只查本机")
+    dr.add_argument("--prefix", default=None, metavar="P", help="[cloud] 资源名前缀（须与部署一致）")
+    dr.add_argument("--region", default=None, metavar="R")
+    dr.add_argument("--profile", default=None, metavar="NAME")
+    dr.add_argument("--report-dir", default="reports", metavar="DIR", help="[cloud] 与后端报告前缀比对（须与 submit 用的一致）")
+    dr.add_argument("--steps-dir", default=None, metavar="DIR", help=_STEPS_DIR_HELP)
+    dr.add_argument("--json", action="store_true", help="输出机器可读 JSON（{ok, checks[]}）")
 
     # list-deterministic：按引擎查询确定性 step 能力清单（ADR 0036：worker 自述，feature 作者可发现）
     ld = sub.add_parser("list-deterministic", help="列出指定引擎支持的确定性 step（供 feature 作者复用；零费用）")
@@ -436,23 +503,141 @@ def _cmd_list_deterministic(args) -> int:
     return 0
 
 
-def _cmd_list_engines() -> int:
-    """列出各引擎 worker 的拉起命令 + 命中的定位链级别（ADR 0037 决策 3 的自省口）；miss 则打安装指引。
-
-    **恒退 0**：本命令是「告诉我这台机器上环境什么样」的诊断，某引擎没装正是要展示的信息、不是命令失败
-    （要判「装了没」的脚本请看具体引擎那行，或用 run/list-deterministic 的退 2）。
-    """
-    print("可用引擎（本机 worker 运行时的探测结果）：")
+def _probe_engines() -> list[dict]:
+    """两引擎各走一遍定位链（ADR 0037 决策 3）→ 机读行：{engine, available, cmd, cwd, source, hint}。list-engines 与 doctor 共用。"""
+    rows: list[dict] = []
     for name in sorted(_names.ENGINES):
         try:
             wc = compose.resolve_worker_cmd(name)
+            rows.append({"engine": name, "available": True, "cmd": list(wc.cmd), "cwd": wc.cwd, "source": wc.source, "hint": None})
         except compose.WorkerNotFoundError as e:
-            print(f"  - {name}: <未定位到 worker 运行时>")
-            print(f"    {e}")
+            rows.append({"engine": name, "available": False, "cmd": None, "cwd": None, "source": None, "hint": str(e)})
+    return rows
+
+
+def _cmd_list_engines(args) -> int:
+    """列出各引擎 worker 的拉起命令 + 命中的定位链级别（ADR 0037 决策 3 的自省口）；miss 则打安装指引。
+
+    **恒退 0**：本命令是「告诉我这台机器上环境什么样」的诊断，某引擎没装正是要展示的信息、不是命令失败
+    （要判「装了没」的脚本请看具体引擎那行，或用 run/list-deterministic 的退 2）。--json 给机读行（ADR 0041 决策三）。
+    """
+    rows = _probe_engines()
+    if args.json:
+        print(json.dumps(rows, ensure_ascii=False, indent=2))
+        return 0
+    print("可用引擎（本机 worker 运行时的探测结果）：")
+    for r in rows:
+        if not r["available"]:
+            print(f"  - {r['engine']}: <未定位到 worker 运行时>")
+            print(f"    {r['hint']}")
             continue
-        print(f"  - {name}: {' '.join(wc.cmd)}")
-        print(f"    来源: {wc.source}" + (f"    cwd: {wc.cwd}" if wc.cwd else ""))
+        print(f"  - {r['engine']}: {' '.join(r['cmd'])}")
+        print(f"    来源: {r['source']}" + (f"    cwd: {r['cwd']}" if r["cwd"] else ""))
     return 0
+
+
+def _cmd_doctor(args) -> int:
+    """只读自检（ADR 0041 决策四）：一个入口、按组件分组；每项 {section, name, ok, required, detail}。
+    全部 required 项 ok → 退 0，否则退 2（agent 据此分流）。不给 --backend cloud / --prefix 时只查本机。
+    provider 段经 deploy 接缝调 provider 可选的 `doctor(args)`（部署方工具链归 provider 自查，入口只编排）。"""
+    checks: list[dict] = []
+
+    def add(section: str, name: str, ok: bool, detail: str, *, required: bool = True) -> None:
+        checks.append({"section": section, "name": name, "ok": bool(ok), "required": required, "detail": detail})
+
+    add("cli", "version", True, f"gherkai {_dist_version()}，Python {sys.version.split()[0]}", required=False)
+
+    rows = _probe_engines()
+    for r in rows:
+        add("engines", r["engine"], r["available"],
+            (" ".join(r["cmd"]) + f"（{r['source']}）") if r["available"] else r["hint"], required=False)
+    any_engine = any(r["available"] for r in rows)
+    add("engines", "any", any_engine,
+        "至少一个引擎的 worker 可用" if any_engine
+        else "两个引擎的 worker 都没定位到：local 档一个 job 也起不来（只提交 cloud 档的人可忽略本项）",
+        required=(args.backend != "cloud"))
+
+    steps_dir = _resolve_steps_dir(args)  # 显式给的目录不存在 → 它已打印原因、返回 2
+    if isinstance(steps_dir, int):
+        add("steps", "dir", False, "显式指定的 steps 目录不存在（见上方提示）")
+    elif steps_dir is None:
+        add("steps", "dir", True, "无 steps/ 目录：只有内建确定性 step（多数项目的常态）", required=False)
+    else:
+        add("steps", "dir", True, steps_dir, required=False)
+        for r in rows:
+            if not r["available"]:
+                continue
+            try:
+                n = len(compose.query_deterministic(r["engine"], steps_dir=steps_dir))
+                add("steps", f"load.{r['engine']}", True, f"{n} 条确定性 step（含内建）")
+            except Exception as e:  # 自述失败 = 使用方 steps 加载失败/worker 起不来，原样转述
+                add("steps", f"load.{r['engine']}", False, f"steps 加载失败：{e}")
+
+    want_cloud = args.backend == "cloud" or args.prefix is not None
+    if not want_cloud:
+        add("aws", "identity", True, "未查（给 --backend cloud 或 --prefix 才查云端）", required=False)
+        add("backend", "reachability", True, "未查（同上）", required=False)
+    else:
+        target = compose.resolve_cloud_target(prefix=args.prefix, region=args.region, profile=args.profile)
+        try:
+            ident = compose.probe_aws_identity(region=target.region, profile=target.profile)
+        except Exception as e:
+            add("aws", "identity", False, f"凭证/region 不可用（--region / AWS_REGION / --profile）：{e}")
+            add("backend", "reachability", False, "未查：凭证先过不了", required=False)
+        else:
+            add("aws", "identity", True, f"region {target.region}，身份 {ident['arn']}")
+            backend_version = None
+            try:
+                verdict, msg, backend_version = compose.check_backend_skew(
+                    prefix=target.prefix, cli_version=_installed_version(), region=target.region, profile=target.profile)
+                add("backend", "version", verdict != compose.SKEW_BLOCK,
+                    msg or f"后端 {backend_version}，CLI {_installed_version()}：一致")
+            except Exception as e:
+                add("backend", "version", False, f"读不到后端版本戳（prefix 配错或后端未部署？）：{e}")
+            try:
+                err = compose.preflight_cloud_resources(
+                    prefix=target.prefix, events_table=target.events_table, bucket=target.bucket,
+                    cluster=target.cluster, runs_table=target.runs_table,
+                    task_defs=[compose.task_def_name(target.prefix, e) for e in sorted(_names.ENGINES)],
+                    lambda_fns=target.detached_chain_lambdas, report_dir=args.report_dir,
+                    region=target.region, profile=target.profile)
+                add("backend", "resources", err is None,
+                    err or "runs/events 表、桶、cluster、两引擎 task-def、三个 Lambda 都在；报告前缀与 --report-dir 一致")
+            except Exception as e:
+                add("backend", "resources", False, f"探资源失败：{e}")
+            try:
+                res = compose.resolve_worker_variant(
+                    prefix=target.prefix, variant=None, engines=sorted(_names.ENGINES),
+                    cli_version=_installed_version(), backend_version=backend_version,
+                    region=target.region, profile=target.profile)
+                for eng, r in sorted(res.items()):
+                    add("backend", f"worker.{eng}", True, f"默认 variant {r.variant} → {r.revision_arn}")
+            except compose.WorkerVariantError as e:
+                add("backend", f"worker.{getattr(e, 'engine', None) or 'default'}", False, str(e))
+            except Exception as e:
+                add("backend", "worker.default", False, f"解析默认 worker variant 失败：{e}")
+
+    provider, perr = _deploy.resolve_provider(None)
+    if provider is None:
+        not_installed = (perr or "").startswith("没有可用的部署 provider")
+        add("provider", "deploy-aws", not_installed,
+            "未装 [deploy-aws] extra（只有部署方需要）" if not_installed else (perr or "provider 不可用"),
+            required=False)
+    elif hasattr(provider, "doctor"):
+        for c in provider.doctor(args):
+            add("provider", c["name"], c["ok"], c["detail"], required=c.get("required", True))
+    else:
+        add("provider", getattr(provider, "name", "provider"), True, "provider 未提供自检", required=False)
+
+    ok_all = all(c["ok"] or not c["required"] for c in checks)
+    if args.json:
+        print(json.dumps({"ok": ok_all, "checks": checks}, ensure_ascii=False, indent=2))
+    else:
+        for c in checks:
+            mark = "✓" if c["ok"] else ("✗" if c["required"] else "-")
+            print(f"{mark} {c['section']}.{c['name']}: {c['detail']}")
+        print("\n自检通过" if ok_all else "\n自检有失败项（✗ 为必须修的；- 为可选能力缺失）")
+    return 0 if ok_all else 2
 
 
 def _load_and_plan(args) -> "list | int":
@@ -476,14 +661,29 @@ def _load_and_plan(args) -> "list | int":
         return 2
     # 2) plan：.feature → Job[]（uri 互异/engine 冲突等违约 → PlanError；gherkin 语法错 → FeatureParseError）
     try:
-        jobs = plan(features, PlanConfig(
+        cfg = PlanConfig(
             default_engine=args.default_engine,
             default_assertion_votes=args.assertion_votes,
             # 两层设定的缺省层（ADR 0019 @timeout / ADR 0034「job timeout」节）：标了 @timeout: 的 scope
             # 按 tag 走，未标的用本缺省；<=0 → None=不超时。载体在 definition（Job.timeout_s），
             # 三路推进器（同步 schedule / local per-run / cloud）各自 enforce。
             default_job_timeout_s=(args.default_job_timeout if args.default_job_timeout > 0 else None),
-        ))
+        )
+        select = _build_selector(args)
+        jobs = plan(features, cfg, select=select)
+        if select is not None:
+            # 筛选（ADR 0041 决策一）：筛空退 2 并列全部候选——别静默跑空批；有筛掉的就打一行 N/M 让人/agent 确认没选错
+            everything = plan(features, cfg)
+            total = sum(len(j.scenarios) for j in everything)
+            picked = sum(len(j.scenarios) for j in jobs)
+            if not jobs:
+                _progress(f"没有 scenario 匹配 {_selection_label(args)}。本批可选（id  标题  tags）：")
+                for j in everything:
+                    for sc in j.scenarios:
+                        _progress(f"  {sc.id}  {sc.name}")
+                return 2
+            if picked < total:
+                _progress(f"筛选：{picked}/{total} scenario（{_selection_label(args)}）")
         # 引擎名预检（配置错在 plan 层即拦、退 2——否则 local run 要到起 job 时 resolver 才炸，已开跑退 1
         # 且错误形态差）。--default-engine 已被 argparse choices 拦，此处兜的是 @engine tag 拼错。
         unknown = sorted({j.engine for j in jobs} - set(_names.ENGINES))
@@ -953,7 +1153,9 @@ def _render_status(state, args, *, wait_hint: str, locations: dict) -> int:
     """
     if args.json:
         from gherkai_core.serialize import run_state_to_dict
-        print(json.dumps(run_state_to_dict(state), ensure_ascii=False, indent=2))
+        doc = run_state_to_dict(state)
+        doc["artifacts"] = locations  # 附加键（ADR 0041 决策三）：RunState 部分形状不变；位置是约定落点、终态才真有
+        print(json.dumps(doc, ensure_ascii=False, indent=2))
     else:
         print(render.render_run_state(state))
         if state.status in TERMINAL_STATUSES:
@@ -1195,6 +1397,8 @@ def _cmd_run(args) -> int:
                        max_concurrency=args.max_concurrency,
                        steps_dir=steps_dir)  # cloud 档恒 None（上面已置）
     do_report = not args.no_report  # RunReport 默认生成；--no-report 跳过（逃生舱）
+    worker_log_fh = None  # --quiet（local 执行档）时打开的 worker 日志句柄，见 build_engines 处
+    worker_log_path: Path | None = None
     # 两个引擎的产物落点（ADR 0027/0037 决策 3）：
     # - 归集档（默认）：落 <report_dir>/<run_id>/ 下**本次 run 专属的绝对路径**目录，与 RunReport 同处、长期留存。
     #   **必须绝对路径**：worker 是 cwd 与 cli 不同的子进程，相对路径两侧解析到不同位置 → 产物落错地方，
@@ -1329,12 +1533,21 @@ def _cmd_run(args) -> int:
             extra_http_headers=tunnel_headers,  # 隧道模式的额外请求头（ADR 0035 决策 4；None=不注入）
         )
     else:
+        if args.quiet:
+            # --quiet 也管 worker 日志（ADR 0041 决策二）：落 <run_dir>/worker.log（--no-report 时落系统临时目录），
+            # 结束只打一行位置——agent 的上下文别被 SDK 的 think/act 流水灌满；人看流水走默认档。
+            import tempfile as _tf
+            worker_log_path = ((report_root / run_id / "worker.log") if do_report
+                               else Path(_tf.gettempdir()) / f"gherkai-worker-{run_id}.log")
+            worker_log_path.parent.mkdir(parents=True, exist_ok=True)
+            worker_log_fh = open(worker_log_path, "a", encoding="utf-8")
         engines = compose.build_engines(
             no_artifacts=not do_report,  # --no-report：worker 不生成/不上报原生产物（ADR 0037 决策 3）
             nova_logs_dir=nova_logs_dir, midscene_run_dir=midscene_run_dir,
             region=target.region, profile=target.profile,
             extra_http_headers=tunnel_headers,  # 同上（ADR 0035）
             steps_dir=steps_dir,  # 使用方确定性 step 目录（ADR 0037 决策 4；与写进 definition 的同一个值）
+            worker_log=worker_log_fh,  # --quiet 时的 worker 日志落点；None = stderr 透传（默认）
         )
     resolver = compose.make_resolver(engines)
 
@@ -1398,6 +1611,9 @@ def _cmd_run(args) -> int:
     if persistence:
         index = persistence.finalize(result, ended_at=compose.now_iso())
         artifacts = make_artifacts(run_id, index)  # report_index=None（report 写失败被隔离）时该键省略
+    if worker_log_fh is not None:
+        worker_log_fh.close()
+        artifacts = {**artifacts, "worker_log": worker_log_path.as_uri()}  # --quiet 落盘的 worker 日志位置
 
     # cloud 模式：清理本地 run 根的空壳（ADR 0029）。cloud 下 <report_dir>/<run_id>/ 只是 worker 写产物的临时
     # 暂存区——产物已上传 S3、worker 已 rmtree 各自子目录（nova-trajectories/midscene-run），只剩空目录。
@@ -1416,12 +1632,14 @@ def _cmd_run(args) -> int:
         print(json.dumps(out, ensure_ascii=False, indent=2))
     else:
         print(render.render_text(result))
-    if artifacts:
+    if "run_meta" in artifacts:  # 落过库才有这三行（--quiet --no-report 时 artifacts 只有 worker_log）
         # report_index 键可能缺席（report 写失败被隔离，ADR 0030 决定三）——缺则提示写失败、不打裸值
         report_line = artifacts.get("report_index", "<报告写入失败，已跳过；判定结果不受影响、仍已落库>")
         _progress(f"\n报告: {report_line}")
         _progress(f"运行元信息: {artifacts['run_meta']}、{artifacts['run_state']}")
         _progress(f"判定明细: {artifacts['jobs_dir']}")
+    if worker_log_fh is not None:
+        _progress(f"worker 日志: {artifacts['worker_log']}")
 
     # 退出码基于 run 级 status（ADR 0031 决定五）：读 schedule 返回的内存终值（必是终态，不回读落库态）。
     # PASSED→0，其余（failed/error，含必伴随 error 的 skipped/aborted 批次）→1。对未来新态稳健。
@@ -1491,7 +1709,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "list-deterministic":
         return _cmd_list_deterministic(args)
     if args.command == "list-engines":
-        return _cmd_list_engines()
+        return _cmd_list_engines(args)
+    if args.command == "doctor":
+        return _cmd_doctor(args)
     if args.command == "plan":
         return _cmd_plan(args)
     if args.command == "run":
