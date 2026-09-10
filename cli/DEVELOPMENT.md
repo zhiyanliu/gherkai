@@ -15,9 +15,10 @@ WebUI 将来是另一张皮，**直接调 core、复用产品本体 `gherkai_run
 
 ```
 cli/gherkai_cli/
-├── __main__.py   ← argparse 皮：run/submit/status/plan/list-engines/doctor/list-deterministic/deploy/destroy，外加两个内部隐藏子命令（`argparse.SUPPRESS`、由 submit 以 setsid fork 拉起、非用户直接调）：`_reconcile`（local 档 per-run 推进进程入口，ADR 0034）/ `_tunnel_watch`（cloud submit 的隧道守护进程入口，ADR 0035 决策 3）——解析 → 调 gherkai_runtime.compose/gherkai_core → 注入 RunPersistence 实时落库 → 调 render；定义退出码
+├── __main__.py   ← argparse 皮：run/submit/status/explain/plan/list-engines/doctor/list-deterministic/deploy/destroy，外加两个内部隐藏子命令（`argparse.SUPPRESS`、由 submit 以 setsid fork 拉起、非用户直接调）：`_reconcile`（local 档 per-run 推进进程入口，ADR 0034）/ `_tunnel_watch`（cloud submit 的隧道守护进程入口，ADR 0035 决策 3）——解析 → 调 gherkai_runtime.compose/gherkai_core → 注入 RunPersistence 实时落库 → 调 render；定义退出码
 ├── deploy.py     ← deploy/destroy 的命令面 + 部署 provider 发现（entry point group `gherkai.deploy`）；**零 IaC 知识**、不 import aws_cdk（ADR 0037 决策 6）
-└── render.py     ← 表层渲染：0024 事件 → 进度行；RunResult → 文本汇总 / JSON；RunState → status 视图
+└── render.py     ← 表层渲染：0024 事件 → 进度行；RunResult → 文本汇总 / JSON；RunState → status 视图；
+                  JobResult + evidence → explain 的文本/JSON（两形态同源，见模块内 explain 节的注释）
 ```
 
 组合根逻辑（compose/detached/names/tunnel/tunnel_host）住在平级的产品本体包 `runtime/gherkai_runtime/`（曾在本包内、被 Lambda/iac 的真实代价逼出抽包，ADR 0016「演进」节）：那是任何前端都要的接线，后者只是 argparse + 标准 IO。
@@ -149,3 +150,4 @@ deploy 会把自己的版本写成后端的版本戳，`run`/`submit`/`status --
 - [0036](../docs/adr/0036-deterministic-capability-discovery.md) 确定性能力自述（`list-deterministic`、plan 标注）
 - [0037](../docs/adr/0037-distribution-and-packaging.md) 分发与打包（三名分离 / worker 定位链 / `steps/` 约定 / deploy 进 wheel / 版本 skew）
 - [0038](../docs/adr/0038-worker-image-delivery.md) worker 镜像交付（variant → 显式 task-def revision、被拒方案）
+- [0042](../docs/adr/0042-step-evidence-and-explain.md) step 级机读证据与 `explain`（证据 schema、文本预算、只用 0/2 的退出码）

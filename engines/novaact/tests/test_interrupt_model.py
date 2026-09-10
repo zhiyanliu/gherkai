@@ -205,9 +205,9 @@ def test_run_scenario_stops_midway(captured):
     orig = rs._run_step
     calls = []
 
-    def _wrap(n, sid, st, v, sink):
+    def _wrap(n, sid, st, v, sink, **kw):  # **kw 透传（_run_step 的关键字参数与本测试无关，别随其增减而红）
         calls.append(st["index"])
-        r = orig(n, sid, st, v, sink)
+        r = orig(n, sid, st, v, sink, **kw)
         rs._stop.set()  # 第一步跑完就置位
         return r
 

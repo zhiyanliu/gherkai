@@ -165,7 +165,7 @@ worker 内容 = 框架脚手架 + 使用方确定性 step，属业界分类里�
 - CLI **新于**后端 → 退 2，**不设放行口**。提示两条出路：部署方 `gherkai deploy` 升后端；或临时用与后端同版本的 CLI（`uvx --from 'gherkai==<后端版本>' gherkai …`，不动本机安装）。理由：新 CLI 写的 definition 结构由旧 Lambda runtime 读是真风险；放行口等于宣称支持混搭版本，与「不做兼容矩阵」相悖；contributor 的 dev 版本本就跳过检查、不需要它。
 - CLI **旧于**后端 → 警告不拦。
 - 任一侧是非纯净版本（含 `.dev`/`.post`/`+`）→ 跳过比较、警告一句（dev 距离逐提交前进，逐字比较会把每次都判成 skew）。2b 的 `dirty=true` + metadata 默认行为保证「非纯净构建一定带 `+`」，这条判据才可靠。
-- **接线**：读戳 + 判定住产品本体（`compose.check_backend_skew`，WebUI/推进器同调、判据与措辞单点），三个 cloud 入口（`run`/`submit`/`status`）**先于资源 preflight** 调它（skew 的修复动作 `gherkai deploy` 同时把资源补齐，先报「表不存在」只会绕一圈）。`ParameterNotFound` → 戳缺失档；其它读失败（凭证/权限/网络）→ 退 2——block 无放行口，「读不到就放过」等于开了一个。比的是 **CLI 自己的**发行版本（`importlib.metadata.version("gherkai")`，必由调用点传入、不缺省成 runtime 包版本：editable 树里各包版本各自漂）；源码直跑取不到 → 跳过。
+- **接线**：读戳 + 判定住产品本体（`compose.check_backend_skew`，WebUI/推进器同调、判据与措辞单点），四个 cloud 入口（`run`/`submit`/`status`/`explain`，后者见 [0042](./0042-step-evidence-and-explain.md)）**先于资源 preflight / 任何云端读** 调它（skew 的修复动作 `gherkai deploy` 同时把资源补齐，先报「表不存在」只会绕一圈）。`ParameterNotFound` → 戳缺失档；其它读失败（凭证/权限/网络）→ 退 2——block 无放行口，「读不到就放过」等于开了一个。比的是 **CLI 自己的**发行版本（`importlib.metadata.version("gherkai")`，必由调用点传入、不缺省成 runtime 包版本：editable 树里各包版本各自漂）；源码直跑取不到 → 跳过。
 
 **操作规则（本架构下真实成立的形式，不是 Prefect 那句「先升 server」的直译）**：后端由 CLI 的 `[deploy-aws]` extra 部署、且被 `==` 钉在同版本，所以「先升后端再升 CLI」无法执行——真实次序是**升级即三步**：①`uv tool upgrade gherkai`；②立刻 `gherkai deploy`（新模板、同步新版本基底、重派生；中间窗口 preflight 会退 2，这是预期）；③团队有自定义 variant 或自定义默认的，从新版本基底重新 build 各引擎镜像、`push-worker` 推上去（默认指针不重置、推上去即恢复，细节见 [0038](./0038-worker-image-delivery.md)）。**非部署者**（团队里只提交 run 的人）等部署者做完三步再升自己的 CLI；部署者若不想动本机安装，可 `uvx --from 'gherkai[deploy-aws]==X.Y.Z' gherkai deploy` 先升后端。
 

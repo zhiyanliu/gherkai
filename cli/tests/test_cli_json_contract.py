@@ -24,27 +24,34 @@ def _documented_keys() -> set[str]:
     return set(re.findall(r"`([A-Za-z_][A-Za-z0-9_.<>/ \[\]]*?)`", DOC.read_text(encoding="utf-8")))
 
 
-def _leaf_keys(o, out: set[str] | None = None) -> set[str]:
-    """递归收全部 dict 键名（只取键名本身，不含路径——文档按键名解释）。"""
+def _leaf_keys(o, out: set[str] | None = None, *, opaque: "set[str]" = frozenset()) -> set[str]:
+    """递归收全部 dict 键名（只取键名本身，不含路径——文档按键名解释）。
+
+    opaque = 「到这个键就停止下钻」的键名集（该键本身仍要文档化，它的子键不属本契约）：用于引擎原样透传的
+    对象（explain 的 `args` / `result`，内部键随 SDK 漂移，ADR 0042 决策四）。**与 ignore 不同**：ignore 是
+    「这个键名不用写进文档」，会连同名的真契约键一起放过；opaque 只切断该节点以下的递归。
+    """
     out = set() if out is None else out
     if isinstance(o, dict):
         for k, v in o.items():
             out.add(k)
-            _leaf_keys(v, out)
+            if k not in opaque:
+                _leaf_keys(v, out, opaque=opaque)
     elif isinstance(o, list):
         for v in o:
-            _leaf_keys(v, out)
+            _leaf_keys(v, out, opaque=opaque)
     return out
 
 
-def _assert_documented(sample, *, section: str, ignore: set[str] = frozenset()) -> None:
+def _assert_documented(sample, *, section: str, ignore: set[str] = frozenset(),
+                       opaque: "set[str]" = frozenset()) -> None:
     documented = _documented_keys()
     # 文档里合法的书写形态：`key` / `a` / `b`（两个键一格）/ `engines.<engine>.family`（路径末段）
     flat = set()
     for token in documented:
         for part in re.split(r"\s*/\s*", token):
             flat.add(part.split(".")[-1].rstrip("[]"))  # 文档里数组键写成 `jobs[]`，比对时按键名
-    missing = sorted(k for k in _leaf_keys(sample) if k not in flat and k not in ignore)
+    missing = sorted(k for k in _leaf_keys(sample, opaque=opaque) if k not in flat and k not in ignore)
     assert not missing, f"[{section}] 这些键出现在真实输出里、文档没写：{missing}——改 docs/guides/cli-json-contract.md"
 
 
@@ -118,3 +125,33 @@ def test_doctor_json_keys_are_documented(monkeypatch, capsys):
     monkeypatch.setattr(m.compose, "query_deterministic", lambda engine, *, steps_dir=None, timeout_s=60.0: [])
     assert m.main(["doctor", "--json"]) == 0
     _assert_documented(json.loads(capsys.readouterr().out), section="doctor --json")
+
+
+def _sample_evidence() -> dict:
+    """手搭的 evidence 夹具（ADR 0042 决策一的 schema，固定键全填）——形状与两引擎映射测试用的真产物裁剪版一致。
+
+    `frames[].actions[].args` 与 `acts[].result` 内塞了引擎侧的键（`box` / `matches_schema`…）：它们是引擎原样
+    透传的对象、不属本契约，护栏须在这两个节点停止下钻——若 opaque 机制失效，这些键会漏进比对、本用例立刻变红。
+    """
+    return {
+        "schema_version": 1, "engine": "novaact", "scope_id": "f.feature:3",
+        "scenario_id": "f.feature:3", "step_index": 2,
+        "step": {"keyword": "Then", "text": "对吗"},
+        "status": "failed", "message": "AI 断言未过多数票（0/1）：对吗",
+        "acts": [{
+            "index": 0, "prompt": "对吗", "vote": False, "url": "https://x/login",
+            "frames": [{"url": "https://x/login", "thought": "Returning false.",
+                        "actions": [{"name": "agentClick", "args": {"box": "1,2,3,4"}}],
+                        "screenshot": "file:///r/act-0-frame-1.jpg"}],
+            "result": {"matches_schema": True, "parsed_response": "false"},
+            "error": "ActError: timed out", "time_worked_s": 9.8,
+        }],
+    }
+
+
+def test_explain_json_keys_are_documented():
+    """explain 的样例由**真渲染器**从手搭 JobResult + evidence 夹具生成（否则 evidence 那批键根本不进比对）。"""
+    jr = _sample_run_result().jobs[0]
+    doc = render.explain_to_dict(run_id="r", status="failed", results=[jr],
+                                 evidence_reader=lambda refs: (_sample_evidence(), None))
+    _assert_documented(doc, section="explain --json", opaque={"args", "result"})

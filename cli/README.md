@@ -42,6 +42,7 @@ gherkai status "$RUN_ID" --wait --json                  # 事后轮询到跑完�
 | `gherkai run <feature...>` | 前台跑完这批：CLI 全程在线，跑完直接给判定与报告 |
 | `gherkai submit <feature...>` | 提交完就走：打印一个 `run_id` 后立即退出，后台继续推进 |
 | `gherkai status <run_id>` | 查这个 run 的进度/结果；`--wait` 轮询到跑完再返回；到终态时同时打出报告与判定明细的位置（本机路径或 S3；`--json` 里是 `artifacts` 键） |
+| `gherkai explain <run_id> [<scope_id>]` | 看这个 run 每一步的证据：问了 AI 什么、AI 看见了什么、为什么这么判——用例没过时第一个该敲的命令。`--scenario` / `--step` 缩到某条用例的某一步，`--all` 连通过的步也展开，`--full` 逐帧全文，`--json` 机读 |
 | `gherkai list-engines` | 列出可用引擎（缺的那个原地给安装命令）；`--json` 机读 |
 | `gherkai doctor` | 只读自检：引擎 worker、`steps/` 加载、（给 `--backend cloud --prefix` 时）凭证、后端资源与版本、部署工具链；全过退 `0`、有必修项失败退 `2`；`--json` 机读 |
 | `gherkai list-deterministic --engine <名>` | 列出该引擎支持的确定性步骤（含你自己写的），写 feature 时查着复用 |
@@ -49,7 +50,9 @@ gherkai status "$RUN_ID" --wait --json                  # 事后轮询到跑完�
 
 `run` 要求 CLI 全程在线（网断、关机即中止）。`submit` 把「提交」和「收结果」拆开：local 档在本机起一个脱离 CLI 的后台进程推进，cloud 档交给云端推进（提交完真关机也能跑完）。`status --wait` 既是查询也是接力——后台进程崩了或卡住，来查的这条命令会把它续到底。
 
-`status` 的 `--backend` / `--report-dir` / `--prefix`（cloud）必须与 `submit` 时一致，否则查不到这个 run（`--report-dir` 在 cloud 档是后端的报告前缀，默认 `reports`，同样用来拼终态时打出的 S3 位置）。
+`status` 的 `--backend` / `--report-dir` / `--prefix`（cloud）必须与 `submit` 时一致，否则查不到这个 run（`--report-dir` 在 cloud 档是后端的报告前缀，默认 `reports`，同样用来拼终态时打出的 S3 位置）。`explain` 用同一套定位参数。
+
+`explain` 答的是「为什么这么判」：它按用例的书写顺序列出每一步，失败/出错/被跳过的步展开成「问了 AI 什么 → AI 每一步看见与想了什么 → 截图在哪」。文本形态是摘要（每次 AI 调用默认只打最后一段推理，`--full` 打全），`--json` 带完整证据。哪一步没有机读证据（确定性步本就不产，或抽取当时失败了），它会明说，并给出该步其它产物的链接。
 
 ## `steps/` 目录：你自己的确定性步骤
 
@@ -87,11 +90,11 @@ stdout 只放该命令的核心产出（`--json` 的 JSON、人看的文本汇�
 
 | 码 | 含义 |
 |---|---|
-| `0` | 成功：`run` 全部通过 / `plan` 这批可跑 / `submit` 已提交 / `status` 查到了（未跑完时只表示查询成功） |
+| `0` | 成功：`run` 全部通过 / `plan` 这批可跑 / `submit` 已提交 / `status` 查到了（未跑完时只表示查询成功）/ `explain` 渲染出来了 |
 | `1` | 跑完了但有用例失败或出错（断言没过、引擎异常）；云端跑到一半存储不可达也算这一档 |
 | `2` | 没跑起来：feature 读不到、写法或参数不合法、引擎 worker 没装、`steps/` 里有文件加载失败、`--steps-dir` 指的目录不存在；云端还包括凭证/region 缺失、`--prefix` 对应的资源不存在或无权限、版本与后端不匹配、请求的 worker variant 没推过 |
 
-分界线是「有没有真的开跑」：开跑前的配置与可达性问题退 `2`，跑到一半的故障退 `1`。`submit` 与 `status` 各答不同的问题——`submit` 的退出码只说「提交成功了吗」（判定此刻还没出），`status` 的退出码只在读到终态时才表判定（通过 `0` / 其余终态 `1` / 查不到这个 run `2`）；CI 想拿 `run` 那样的 0/1 判定码，用 `status --wait`。
+分界线是「有没有真的开跑」：开跑前的配置与可达性问题退 `2`，跑到一半的故障退 `1`。`submit` 与 `status` 各答不同的问题——`submit` 的退出码只说「提交成功了吗」（判定此刻还没出），`status` 的退出码只在读到终态时才表判定（通过 `0` / 其余终态 `1` / 查不到这个 run `2`）；CI 想拿 `run` 那样的 0/1 判定码，用 `status --wait`。`explain` 只说「证据读出来了吗」、从不表判定：用例失败它照样退 `0`（判定看 `run` / `status --wait`），只有参数写错（如 `--step` 没同时给 `--scenario`）、run 或 scope 查不到、云端读不到才退 `2`。
 
 ## CLI 要和后端同版本
 

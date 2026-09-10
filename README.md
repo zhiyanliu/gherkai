@@ -17,7 +17,7 @@
 | 前台 / 后台两种跑法 | `run` 在线守着出结果；`submit` 提交即走、`status --wait` 事后收——cloud 档提交完关机也跑完                               |
 | 投票治理            | AI 断言可配 N 次取多数票（`--assertion-votes`）                                                                         |
 | 确定性 step         | 项目里的 `steps/` 目录注册精确断言，`plan` 预检标注哪些 step 走确定性、哪些走 AI                                        |
-| 机读与自检          | 查询类命令都有 `--json`（plan / run / status / list-* / doctor / deploy list-workers）；`doctor` 一条命令自检环境；`--tags` / `--scenario` 只跑一部分；`--quiet` 把 worker 日志落盘——给脚本与 AI agent 驾驭用 |
+| 机读与自检          | 查询类命令都有 `--json`（plan / run / status / explain / list-* / doctor / deploy list-workers）；`explain` 把失败那一步的 AI 推理与截图指针机读化；`doctor` 一条命令自检环境；`--tags` / `--scenario` 只跑一部分；`--quiet` 把 worker 日志落盘——给脚本与 AI agent 驾驭用 |
 | 本机应用测试        | `--expose-local http://localhost:3000` 经 ngrok 隧道把本机可达的应用暴露给云端浏览器                                  |
 | 预算兜底            | 每个 job 有墙钟预算（缺省 300s，`@timeout:` tag 可改），卡死/超时自动停、不会计费失控                                      |
 | 跨引擎报告          | 每个 run 一份 RunReport（`index.html` 人看入口 + `manifest.json`）                                                      |
@@ -29,7 +29,7 @@ flowchart TD
     F["① 用例层<br/>features/*.feature —— 共享 Gherkin"]
 
     subgraph L2["② 产品层"]
-        CLI["gherkai 命令行<br/>plan / run / submit / status / list-engines / doctor / list-deterministic / deploy / destroy"]
+        CLI["gherkai 命令行<br/>plan / run / submit / status / explain / list-engines / doctor / list-deterministic / deploy / destroy"]
         G["gherkai-runtime —— 运行时层<br/>引擎拉起 · 资源命名 · 本机/云端存储 · 隧道"]
         C["gherkai-core —— 执行核心库<br/>parse → scope 分组 → schedule 调度（零引擎依赖）"]
         CLI --> G --> C
@@ -133,6 +133,7 @@ AWS_REGION=us-east-1 gherkai run features/wikipedia_generic.feature \
 RUN_ID=$(gherkai submit features/wikipedia_generic.feature)
 gherkai status "$RUN_ID"            # 查一眼进度（只读）
 gherkai status "$RUN_ID" --wait     # 等到终态、按判定给退出码——CI 要 0/1 判定用这个
+gherkai explain "$RUN_ID"           # 有用例没过时看为什么：逐步打出问了 AI 什么、AI 看见了什么、截图在哪（云端档加同一套 --backend/--prefix）
 
 # cloud 档：提交即返回，之后由云端推进——提交完关机也跑完
 RUN_ID=$(gherkai submit features/wikipedia_generic.feature --backend cloud --prefix gherkai-)

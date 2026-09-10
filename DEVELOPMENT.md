@@ -27,7 +27,7 @@
 ├── .github/                   ← CI 与发布链（workflows/{ci,release}.yml + scripts/；一次性人工前置与本地校验见 .github/workflows/README.md，ADR 0037 决策 8）
 ├── .claude/commands/          ← Claude Code 项目命令：/doc-health-review、/code-health-review 两条复盘入口（.claude/ 其余为个人配置、不入库）
 ├── docs/                      ← 架构决策与过程记录
-│   ├── adr/                   ← 架构决策记录（0001–0041）
+│   ├── adr/                   ← 架构决策记录（0001–0042）
 │   ├── guides/                ← 给人的阅读理解文档（机制解读/横切合成等，只讲 how、权威在 ADR）
 │   ├── journey/               ← 任务推进的 staging 区（过程产物，吸收进 ADR/code 后即删，见 CLAUDE.md「文档纪律」；可为空）
 │   ├── REFERENCES.md          ← 外部一手来源

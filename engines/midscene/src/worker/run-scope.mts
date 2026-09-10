@@ -34,6 +34,8 @@ import { JobSource } from "../lib/job-source.mjs";  // job 入口（同上）
 // import 脚手架即触发其顶层 deterministic(...) 注册副作用（对称 Nova 引擎 import deterministic_steps）。
 import { match as matchDeterministic, DeterministicAssertion, listRegistry, matchBatch } from "./deterministic.mjs";
 import { buildInstruction } from "./argument.mjs";
+// step 级机读证据（ADR 0042）：SDK 结构 → gherkai 自有 schema 的映射与落盘全住那个模块；此处只挂钩子。
+import { stepEvidenceRef, executionsLength, EVIDENCE_KIND, type EvidenceHook } from "./evidence.mjs";
 import "./deterministic.steps.mjs";  // 内建脚手架（ADR 0022 退役 bdd 层后迁入 worker/）——**先于**使用方 steps 注册
 import { loadUserSteps } from "./user-steps.mjs";  // 使用方 steps/ 目录的加载（ADR 0037 决策 4）
 
@@ -384,6 +386,13 @@ export async function main(): Promise<number> {
     const page = ctx.pages()[0] ?? (await ctx.newPage());
     const agent = new PlaywrightAgent(page, {
       generateReport: !NO_ARTIFACTS,  // --no-report：不出 report.html（ADR 0037 决策 3）
+      // 让 SDK 把每张截图另落成独立文件 `report/screenshots/<id>.<扩展名>`（ADR 0042 决策一）：evidence 只
+      // 引用这些文件、零解码零复制，从而不必读 ScreenshotItem.base64（SDK 每个 task 后即 flush 报告并置空它，
+      // 之后读会对多 MB 的 report.html 做同步全文扫描且找不到即抛）。副作用是 report 目录多出
+      // `<n>.execution.json`，随 scope 末整目录 flush 一并上传，接受。
+      // **必须与 generateReport 同真同假**：SDK 在 generateReport=false 且此项为 true 时直接抛
+      // （`--no-report` 档不产 evidence，正好同为 false）。
+      persistExecutionDump: !NO_ARTIFACTS,
       modelConfig: modelConfig(),
       createOpenAIClient: async () => new OpenAI({ baseURL: getBaseUrl(), apiKey: "unused", fetch: sigv4Fetch }) as any,
     });
@@ -434,11 +443,17 @@ export async function main(): Promise<number> {
     // 单调增长、跨 scenario 累积，只传真变过的 topic 文件、不重发未变 log）。log 落 `<MIDSCENE_RUN_DIR>/log/`。
     const logSeen = new Map<string, number>();
     const logDir = (!NO_ARTIFACTS && process.env.MIDSCENE_RUN_DIR) ? path.join(path.resolve(process.env.MIDSCENE_RUN_DIR), "log") : undefined;
+    // step 级机读证据的注入（ADR 0042 决策一）：落点与 flush 根同一判据——`--no-report` 档（此档也没开
+    // persistExecutionDump、无截图文件可引）或没给产物落点 → undefined = 本 run 不产 evidence。
+    const evidenceRoot = artifactFlushRoot();
+    const evidence: EvidenceHook | undefined = evidenceRoot
+      ? { runDir: evidenceRoot, scopeId: scope.id, uploader, logFn: log }
+      : undefined;
     for (const sc of job.scenarios) {
       await eventSink.emit({ type: "scenario_started", scenarioId: sc.id });
       // scope 内 step 短路在 runScenario 内（上游 error 跳过后续、发 step_skipped，ADR 0031 决定六）；
       // act 边界抢传（report snapshot）也在 runScenario 内 step_done 安全点（ADR 0029，为 Fargate 预演）。
-      const statuses = await runScenario(agent, page, sc.id, sc.steps, votesN, uploader, snapState, eventSink);
+      const statuses = await runScenario(agent, page, sc.id, sc.steps, votesN, uploader, snapState, eventSink, evidence);
       await eventSink.emit({ type: "scenario_done", scenarioId: sc.id, status: aggregate(statuses) });
       // scenario 边界抢传诊断 log（ADR 0029「第四级」，Midscene 单引擎、为 Fargate 预演）：把该 scenario 期间已在盘、
       // 未传的 log/*.log 抢进 S3，收窄 log 丢失窗口从「整个 run」到「当前正在跑的 scenario」。best-effort：失败吞、
@@ -501,6 +516,7 @@ async function runScenario(
   agent: PlaywrightAgent, page: import("playwright").Page, scenarioId: string, steps: Step[], votesN: number,
   uploader: ArtifactUploader, snapState: { mtime: number },
   sink: { emit: (e: unknown) => Promise<void> },
+  evidence?: EvidenceHook,  // step 级机读证据（ADR 0042）；不注入 = 不产（`--no-report` 档 / 无产物落点）
 ): Promise<string[]> {
   const statuses: string[] = [];
   let shortcircuit = false;
@@ -509,7 +525,7 @@ async function runScenario(
       await sink.emit({ type: "step_skipped", scenarioId, stepIndex: step.index });
       continue;
     }
-    const status = await runStep(agent, page, scenarioId, step, votesN, sink);
+    const status = await runStep(agent, page, scenarioId, step, votesN, sink, evidence);
     statuses.push(status);
     // act 边界抢传（ADR 0029，为 Fargate 预演）：step_done 安全点（act 已返回、SDK onTaskUpdate 已 await flush，
     // 盘上 report 一致无半写），把增量增长的单份 report.html 用 snapshotReport overwrite 同 key 抢传。
@@ -531,14 +547,40 @@ async function runScenario(
   return statuses;
 }
 
+// evidence ref **追加**进 step_done 的 reportRefs（ADR 0042 决策一）：追加而非整体赋值——将来若 Midscene
+// 也有第二类 step 级产物，两者不能各自赋值互相覆盖（Nova 侧已有 trajectory 挂载，正是这么被约束的）。
+// Midscene 此前 step 级 reportRefs 恒空，evidence 是首条，故事件对象上此键可能还不存在。
+function appendReportRef(
+  ev: Record<string, unknown>, ref: { kind: string; ref: string; label?: string },
+): void {
+  const refs = (ev.reportRefs as Array<{ kind: string; ref: string; label?: string }> | undefined) ?? [];
+  refs.push(ref);
+  ev.reportRefs = refs;
+}
+
 async function runStep(
   agent: PlaywrightAgent, page: import("playwright").Page, scenarioId: string, step: Step, votesN: number,
   sink: { emit: (e: unknown) => Promise<void> },
+  evidence?: EvidenceHook,  // step 级机读证据（ADR 0042）；不注入 = 不产
 ): Promise<string> {
   const { index, keyword, text } = step;
   await sink.emit({ type: "step_started", scenarioId, stepIndex: index });  // step 时长起点
   // 本 step 起点的累计 token：成功与失败路径都按增量算成本（确定性/URL 分支不调 AI、增量为 0 → 不带 cost）
   const tokBefore = cumulativeTokens(agent);
+  // 本 step 起点的 execution 数（ADR 0042 决策一）：step 末按它从 agent.dump.executions 切出本 step 新增的。
+  // **在 try 之外**：executionsLength 自己吞异常，绝不能让「记起点」这步冒泡（那会连 step_done 都发不出）。
+  const execFrom = executionsLength(agent);
+  const votes: boolean[] = [];        // 逐票结果（进 evidence 的 act.vote；多数票数学仍看 yes 计数）
+  let instr: string | null = null;    // 交给引擎的指令（进 evidence 的 act.prompt）；null = 本 step 没调 AI
+  // 本 step 判定已成之后收尾产 evidence（三条出口共用）。**绝不抛**（决策二：对判定零影响）——
+  // 落在 act 异常分类路径之外的语义由 stepEvidenceRef 内部整体 try 保证，故此处可直接 await。
+  const attachEvidence = async (ev: Record<string, unknown>, status: string, error: string | null) => {
+    const ref = await stepEvidenceRef(evidence, {
+      scenarioId, step, status, message: (ev.message as string | undefined) ?? null,
+      agent, execFrom, page, prompt: instr, votes, error,
+    });
+    if (ref !== null) appendReportRef(ev, { kind: EVIDENCE_KIND, ref, label: EVIDENCE_KIND });
+  };
   try {
     // ① 确定性注册表（ADR 0022）：命中走精确 handler、不投票；AssertionError→failed，其它→error
     const hit = matchDeterministic(text);
@@ -568,9 +610,15 @@ async function runStep(
     }
     if (keyword === "Then") {
       // AI 断言 + N 次投票（ADR 0014/0024）；votesN=1 即单次判定（仍发 votes 标记这是 AI 断言）
-      const instr = buildInstruction(step.text, step.argument as any);  // 自然语言 + 多行参数（DataTable/DocString，ADR 0024）
+      instr = buildInstruction(step.text, step.argument as any);  // 自然语言 + 多行参数（DataTable/DocString，ADR 0024）
       let yes = 0;
-      for (let i = 0; i < votesN; i++) if (await agent.aiBoolean(instr)) yes++;
+      // 逐票记进 votes：evidence 要「本次调用计入判定的那一票」（ADR 0042 映射表 act.vote = aiBoolean 返回值），
+      // 光有 yes 计数分不清是哪几票投的 no。
+      for (let i = 0; i < votesN; i++) {
+        const vote = await agent.aiBoolean(instr);
+        votes.push(vote);
+        if (vote) yes++;
+      }
       const passed = yes > votesN / 2;
       const ev: Record<string, unknown> = {
         type: "step_done", scenarioId, stepIndex: index,
@@ -580,14 +628,17 @@ async function runStep(
       const cost = stepCost(tokBefore, agent);  // N 票 token 增量合计（修：原 lastCost 只算最后一票）
       if (cost) ev.cost = cost;
       if (!passed) { ev.errorType = "assertion_failed"; ev.message = `AI 断言未过多数票（${yes}/${votesN}）：${text}`; }
+      await attachEvidence(ev, passed ? "passed" : "failed", null);
       await sink.emit(ev);
       return passed ? "passed" : "failed";
     }
     // When / Given（非 URL）→ AI 动作（无 votes）
-    await agent.aiAct(buildInstruction(step.text, step.argument as any));
+    instr = buildInstruction(step.text, step.argument as any);
+    await agent.aiAct(instr);
     const ev: Record<string, unknown> = { type: "step_done", scenarioId, stepIndex: index, status: "passed" };
     const cost = stepCost(tokBefore, agent);
     if (cost) ev.cost = cost;
+    await attachEvidence(ev, "passed", null);
     await sink.emit(ev);
     return "passed";
   } catch (e) {
@@ -603,6 +654,8 @@ async function runStep(
     // 失败的 act 费用已经发生（ADR 0024「失败的 act 同样带 cost」）：agent 日志里的 usage 不因抛异常消失，照报 token 增量
     const cost = stepCost(tokBefore, agent);
     if (cost) ev.cost = cost;
+    // error step 的 evidence 最该产（抛错的 task 仍在 executions 里、带 errorMessage）；抽取失败也只是没 ref
+    await attachEvidence(ev, "error", `${(e as Error).name}: ${(e as Error).message}`);
     await sink.emit(ev);
     return "error";
   }

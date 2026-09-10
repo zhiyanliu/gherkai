@@ -12,6 +12,8 @@
 // 上传/删除策略（ADR 0029 混合两级 + 整目录，抗 SDK 升级）：
 // - toReportRef(path)：reportRef 文件 → 实时上传（不删、记 uploaded）、报 s3://。失败抛（worker 可观测、
 //   engine_error）——报告链接强保证。
+// - refFor(path)：只算 ref、不上传、不记 uploaded（ADR 0042 决策一）——供 evidence 里引用的截图先拿确定性
+//   URI，字节交 flushAndCleanup 兜；ref 与 toReportRef 逐字一致（后者的 ref 也经它算）。
 // - flushAndCleanup(dir)：scope 末调。递归 walk 整个产物目录上传剩余文件（已实时传的跳过）——不按文件类型/名字挑
 //   （整目录一股脑传，本地清理不损耗任何产物、不受 SDK 升级影响）。剩余上传失败吞掉；全部成功（实时+剩余）才
 //   rmSync 整目录（本地零残留）；任一失败则整目录保留不删（产物不丢）。
@@ -25,6 +27,21 @@ import * as path from "node:path";
 // engine_min_grace("midscene")=MIDSCENE_GRACE_MIN_S 保证 > 本超时——**那两个下限的真值住 runtime/gherkai_runtime/compose.py，
 // 此处不复述数字**（曾漏设 midscene 下限 → 回落 ScheduleOpts 默认 grace < 本超时、致 worker 被 SIGKILL）。
 const UPLOAD_TIMEOUT_MS = 10_000;
+
+// 后缀 → Content-Type（ADR 0042 决策一「不是零改动」①，与 Nova 上传器同规则同步改）：不带 ContentType 的
+// 对象在 S3 落成 binary/octet-stream，浏览器直开变**下载**而非渲染——`.html` 早有映射，evidence 带来的
+// `.json` 与截图 `.jpeg`/`.png` 若漏，报告里点开截图只会下文件。无映射的后缀仍不带 ContentType（保旧行为）。
+const CONTENT_TYPES: Record<string, string> = {
+  ".html": "text/html; charset=utf-8",
+  ".json": "application/json",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".png": "image/png",
+};
+
+function contentTypeFor(localAbs: string): string | undefined {
+  return CONTENT_TYPES[path.extname(localAbs).toLowerCase()];
+}
 
 export class ArtifactUploader {
   private bucket: string | undefined;
@@ -82,22 +99,34 @@ export class ArtifactUploader {
     await this.client_().send(
       new PutObjectCommand({
         Bucket: this.bucket!, Key: this.keyFor(abs), Body: body,
-        ContentType: abs.endsWith(".html") ? "text/html; charset=utf-8" : undefined,
+        ContentType: contentTypeFor(abs),
       }),
       { abortSignal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS) },
     );
   }
 
+  // 「只算 ref 不上传」（ADR 0042 决策一「不是零改动」②，对称 Nova 的 ref_for）：返回与 toReportRef
+  // **逐字一致**的 ref，但不碰网络、不记 uploaded——字节交 scope 末的整目录 flush 兜。
+  // 用途：evidence 里引用的截图（K × 票数张）若逐张即时上传，就是把串行 PutObject 压在判定临界路径上、
+  // 把已成的判定拖在网络上；key 是确定性纯路径计算，先算 URI 后传字节即可。
+  // 代价（接受，ADR 0042 决策一）：cloud 档若 worker 在 scope 中途被杀，截图 URI 可能悬空（引用它的 json
+  // 已传、图没传）——消费端按「读不到」处理；local 档 file:// 无此问题。
+  refFor(localPath: string): string {
+    if (!this.enabled) return `file://${localPath}`;  // no-op 裸拼（与 Nova 对称、保旧行为）
+    return `s3://${this.bucket}/${this.keyFor(path.resolve(localPath))}`;
+  }
+
   // reportRef 文件 → 实时上传（不删、记 uploaded）、报 s3://；no-op 时报 file://。
-  // 失败原样抛（worker 记 engine_error、可观测）——报告链接强保证，不吞。no-op 裸拼 file://（与 Nova 对称、保旧行为）。
+  // 失败原样抛（worker 记 engine_error、可观测）——报告链接强保证，不吞。
+  // ref 一律经 refFor 算（单一事实源：两个方法的 ref 逐字一致是 ADR 0042 决策一「先算 URI 后传字节」的前提）。
   async toReportRef(localPath: string): Promise<string> {
-    if (!this.enabled) return `file://${localPath}`;
+    if (!this.enabled) return this.refFor(localPath);
     const abs = path.resolve(localPath);
-    // 幂等短路（对称 Nova）：已成功传过 → 直接返 s3:// ref、不重传（key 确定性可算）。防同一文件被多次引用时冗余 PutObject。
-    if (this.uploaded.has(abs)) return `s3://${this.bucket}/${this.keyFor(abs)}`;
+    // 幂等短路（对称 Nova）：已成功传过 → 直接返 ref、不重传（key 确定性可算）。防同一文件被多次引用时冗余 PutObject。
+    if (this.uploaded.has(abs)) return this.refFor(abs);
     await this.uploadOne(abs);            // 实时上传（失败抛 → 可观测、不删）
     this.uploaded.add(abs);               // 记下，flush 时跳过
-    return `s3://${this.bucket}/${this.keyFor(abs)}`;
+    return this.refFor(abs);
   }
 
   // act 边界抢传单文件快照（ADR 0029「act 边界抢传」，为 Fargate 预演）：供 worker 在每个 step_done 安全点

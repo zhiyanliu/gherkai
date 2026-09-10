@@ -378,6 +378,32 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     st.add_argument("--region", default=None, metavar="R")
     st.add_argument("--profile", default=None, metavar="P")
 
+    # explain：读判定明细 + step 级机读证据，合成「哪步、问什么、看见什么、为什么」（ADR 0042 决策四）。
+    # 定位 flag 与 status 全集同形（同一批 run 用同一套定位参数），另有筛选/展开/机读四个自己的旋钮。
+    ex = sub.add_parser("explain", help="看一个 run 的每步证据：问了 AI 什么、AI 看见了什么、为什么这么判"
+                                       "（只读；不表判定，退出码只有 0/2）")
+    ex.add_argument("run_id", help="run/submit 打印的 run_id")
+    ex.add_argument("scope_id", nargs="?", default=None,
+                    help="只看这一个 scope（缺省 = 该 run 的全部 job）；值 = 报告/JSON 里的 scope_id")
+    ex.add_argument("--scenario", action="append", default=None, metavar="SEL",
+                    help="只看这些 scenario（可重复，任一命中）：SEL = 判定明细里的 scenario id、行号，"
+                         "或标题的一段文字（区分大小写）")
+    ex.add_argument("--step", type=int, default=None, metavar="N",
+                    help="只看第 N 步（scenario 内 0 起的书写序号，与文本里的 step 号、JSON 的 index 同一口径）；"
+                         "须与 --scenario 同给")
+    ex.add_argument("--all", action="store_true",
+                    help="通过的 step 也展开证据（默认只展开 failed/error/skipped/无记录的）")
+    ex.add_argument("--full", action="store_true",
+                    help="逐 frame 全文展开（默认每次 AI 调用只显示最后一段推理与它的截图）")
+    ex.add_argument("--json", action="store_true", help="输出机器可读 JSON（内嵌证据全文）")
+    ex.add_argument("--backend", choices=["local", "cloud"], default="local", help="须与 submit 一致")
+    ex.add_argument("--report-dir", default="reports", metavar="DIR",
+                    help="run 落点（local）/ 后端报告与判定明细前缀（cloud）——须与 submit 一致")
+    ex.add_argument("--prefix", default=None, metavar="P", help="[cloud] 资源名前缀（须与部署一致）")
+    ex.add_argument("--ddb-table", default=None, metavar="NAME", help="[cloud] RunStore DDB 表名")
+    ex.add_argument("--region", default=None, metavar="R")
+    ex.add_argument("--profile", default=None, metavar="P")
+
     # _reconcile：per-run 进程入口（submit setsid fork 它，非用户直接调）。跑 reconcile loop 到全 done。
     rc = sub.add_parser("_reconcile", help=argparse.SUPPRESS)
     rc.add_argument("run_id")
@@ -1395,6 +1421,200 @@ def _status_cloud(args) -> int:
                               run_id=args.run_id))
 
 
+# ============================================================================
+# explain（ADR 0042 决策四）：判定明细 + step 级机读证据 → 「哪步、问什么、看见什么、为什么」
+# 只读、**退出码只 0/2**：它是证据渲染器、不重复表判定（判定码看 run / status --wait），故 run 判 failed 时
+# explain 仍退 0；2 只用于参数错 / run 或 scope 不存在 / cloud 档不可用。
+# ============================================================================
+
+
+def _explain_scenario_matches(scenario, sels: list[str]) -> bool:
+    """explain 的 `--scenario` 匹配：id 全等 / 行号 / 标题子串，多个 SEL 之间「或」。
+
+    **另起一份、不复用 `_build_selector`**：那个谓词按 `ParsedScenario` 的 uri 切尾、按 tags 判，而 explain
+    只读 RunStore/ResultStore、不重解 `.feature`——uri 与 tags 都拿不到。可匹配的只有 job 定义里的
+    `Scenario.id` 与 `Scenario.name`。行号档取 `scenario_id`（`<uri>:<行>[:<example 行>]`）尾部的连续数字段比对：
+    uri 自身以「数字冒号段」结尾时可能误命中，接受这个边角（ADR 0042 决策四明记为有损）。
+    """
+    tail: list[str] = []
+    for seg in reversed(scenario.id.split(":")):
+        if not seg.isdigit():
+            break
+        tail.append(seg)
+    return any(sel == scenario.id or (sel.isdigit() and sel in tail) or sel in scenario.name for sel in sels)
+
+
+def _explain_read_evidence(refs, read_bytes) -> "tuple[dict | None, str | None]":
+    """读该 step 的机读证据 → `(evidence | None, evidence_missing | None)`（ADR 0042 决策四）。
+
+    只解引用 `kind == "evidence"`（gherkai 自有 schema），引擎原生产物（report/trajectory/summary）仍只当
+    链接、永不解析（ADR 0042 决策五按层收窄 0027 的消费端规则）。每 step 至多一份，多了取首条。
+    三种缺口分开表达：`no_ref`（本就不产 / 抽取失败，结果树分不出来）、`unreadable`（读不到或不是 JSON）、
+    `unsupported_schema`（版本不认识）。**读失败不打提示行**：证据是 best-effort 的注释（0042 决策二），
+    缺口已由 evidence_missing 自述，而 `--json` 要求 stdout 只有一个文档、人读视图也不该被逐 step 的噪声淹。
+    """
+    ev_refs = [r for r in refs if r.kind == "evidence"]
+    if not ev_refs:
+        return None, "no_ref"
+    try:
+        doc = json.loads(read_bytes(ev_refs[0].ref))
+    except Exception:  # 文件不在（cloud 档 flush 前被杀）/ 权限 / 不是 JSON：一律归「读不到」
+        return None, "unreadable"
+    if not isinstance(doc, dict) or doc.get("schema_version") != 1:
+        return None, "unsupported_schema"
+    return doc, None
+
+
+def _explain_empty(args, state, *, hint: str) -> int:
+    """没有判定明细可渲染时的输出：人读打一行提示、`--json` 仍只打一个（scopes 为空的）文档。恒退 0。
+
+    退 0 而非 2 是刻意的（ADR 0042 决策四）：查询本身成功了，「明细还没落地」不是错——判定码看 status --wait。
+    """
+    if args.json:
+        # results 为空 → evidence_reader 不会被调到，给个占位即可（形状仍由渲染器单点产出，不在此手拼）
+        doc = render.explain_to_dict(run_id=state.run_id, status=state.status.value, results=[],
+                                     evidence_reader=lambda refs: (None, None))
+        print(json.dumps(doc, ensure_ascii=False, indent=2))
+    else:
+        _progress(hint)
+    return 0
+
+
+def _explain_emit(args, state, result_store, *, read_bytes) -> int:
+    """local/cloud 共用的后半段：取判定明细 → 筛 scenario/step → 合成文档 → 打文本或 JSON。
+
+    带 `scope_id` 时只 `load_job_result`（云端 = 一次 GetObject），不带才 `load_all`（云端还需列举对象权限）
+    ——权限面按需求最小化，见 ADR 0042 决策四「云端权限面」。
+    """
+    run_id = args.run_id
+    not_landed = f"判定明细尚未落地，可先用 gherkai status {run_id} --wait 等到终态"
+    if args.scope_id:
+        jr = result_store.load_job_result(run_id, args.scope_id)
+        if jr is None:
+            available = [r.scope_id for r in result_store.load_all(run_id)]
+            if not available and state.status not in TERMINAL_STATUSES:
+                return _explain_empty(args, state, hint=not_landed)  # 不是 scope 写错，是还没落地
+            _progress(f"未找到 scope：{args.scope_id}（本 run 已落地的 scope：{'、'.join(available) or '无'}）")
+            return 2
+        results = [jr]
+    else:
+        results = result_store.load_all(run_id)
+    if not results:
+        # detached run（submit）全 job 终态才一次性落判定明细，未终态时零文件；终态却零文件属异常但同样只是「没得渲染」
+        return _explain_empty(args, state, hint=(not_landed if state.status not in TERMINAL_STATUSES
+                                                else "本 run 没有任何 job 的判定明细"))
+
+    scenario_ids = None
+    sels = list(args.scenario or [])
+    if sels:
+        matched = [sc for jr in results for sc in jr.job.scenarios if _explain_scenario_matches(sc, sels)]
+        if not matched:
+            _progress(f"没有 scenario 匹配 --scenario {' '.join(sels)}。本 run 已落地的（id  标题  步数）：")
+            for jr in results:
+                for sc in jr.job.scenarios:
+                    _progress(f"  {sc.id}  {sc.name}  {len(sc.steps)} step")
+            return 2
+        if args.step is not None:
+            with_step = [sc for sc in matched if any(st.index == args.step for st in sc.steps)]
+            if not with_step:
+                _progress(f"命中的 scenario 都没有第 {args.step} 步（步号是 scenario 内 0 起的书写序号）。"
+                          "命中的是（id  步数）：")
+                for sc in matched:
+                    _progress(f"  {sc.id}  {len(sc.steps)} step")
+                return 2
+            matched = with_step
+        scenario_ids = {sc.id for sc in matched}
+
+    expand_passed = bool(args.all)
+    doc = render.explain_to_dict(
+        run_id=state.run_id, status=state.status.value, results=results,
+        evidence_reader=lambda refs: _explain_read_evidence(refs, read_bytes),
+        # --json 契约要求证据全给；文本模式「不展开就不读」，省掉云端逐 step 一次 GetObject 的白下载
+        wants_evidence=(None if args.json
+                        else lambda st: render.explain_step_expands(st, expand_passed=expand_passed)),
+        scenario_ids=scenario_ids, step_index=args.step)
+    if args.json:  # 提示行一律不打：stdout 只有这一个文档，机读侧靠顶层 status 自明
+        print(json.dumps(doc, ensure_ascii=False, indent=2))
+        return 0
+    if state.status not in TERMINAL_STATUSES:
+        # 同步 run 中途可见已完成的 job（逐 job 落盘）——说清「这只是已完成部分」，免得读者以为剩下的没跑
+        _progress("run 仍在跑，以下为已完成部分")
+    print(render.render_explain_text(doc, expand_passed=expand_passed, full=args.full))
+    return 0
+
+
+def _cmd_explain(args) -> int:
+    """[查询] 看一个 run 的 step 级证据（ADR 0042 决策四）。
+
+    local：读 `--report-dir` 下的 run；cloud：**先过版本 skew 闸门**（先于任何云端读，同 status），再读 DDB/S3。
+    """
+    if args.step is not None and not args.scenario:
+        _progress("--step 要和 --scenario 一起给：步号是某条 scenario 内的序号，单给它不知道是哪条 scenario 的第几步")
+        return 2
+    for raw in (args.scenario or []):
+        if not raw.strip():  # 空串会子串匹配上每条标题（静默命中全部），拒掉
+            _progress("--scenario 的值不能为空：给判定明细里的 scenario id、行号，或标题的一段文字")
+            return 2
+    if args.backend == "cloud":
+        return _explain_cloud(args)
+
+    report_root = Path(args.report_dir).resolve()
+    run_store, result_store, _rp, _mk = compose.build_local_stores(report_dir=str(report_root))
+    if (state := run_store.load_run_state(args.run_id)) is None:
+        _progress(f"未找到 run：{args.run_id}（--report-dir 是否与 submit 一致？）")
+        return 2
+    return _explain_emit(args, state, result_store, read_bytes=compose.read_resource)
+
+
+def _explain_cloud(args) -> int:
+    """cloud explain：DDB 读 run 运行态、S3 读判定明细与证据。
+
+    次序同 `_status_cloud`：`resolve_cloud_target`（纯字符串推导、不连 AWS）→ 版本 skew 闸门（先于任何云端读，
+    ADR 0037 决策 7）→ 装 store。权限面与 status 不同（ADR 0042 决策四）：同样要版本戳读 + runs 表 GetItem，
+    另需该桶的读对象权限（判定明细与证据），不带 scope_id 时还需列举对象；不需要 status --wait 的 Lambda 调用权限。
+    """
+    target = compose.resolve_cloud_target(prefix=args.prefix, region=args.region,
+                                          profile=args.profile, runs_table=args.ddb_table)
+    skew_rc, _backend_version = _cloud_skew_gate(target)
+    if skew_rc is not None:
+        return skew_rc
+
+    handle: dict = {}
+
+    def read_bytes(uri: str) -> bytes:
+        # s3 client 建一次复用（一个 run 可能读几十份证据，别逐次建 session）；boto3 仍惰性 import 在钩子里
+        if "s3" not in handle:
+            handle["s3"] = compose._make_s3_client(region=target.region, profile=target.profile)
+        return compose.read_resource(uri, s3=handle["s3"])
+
+    try:
+        run_store, result_store, _rp, _mk = compose.build_cloud_stores(
+            table=target.runs_table, bucket=target.bucket, prefix=args.report_dir,
+            region=target.region, profile=target.profile)
+        state = run_store.load_run_state(args.run_id)
+    except ImportError as e:
+        _progress(f"--backend cloud 需要 boto3：{e}")
+        return 2
+    except Exception as e:
+        if not compose.is_botocore_error(e):
+            raise
+        _progress(f"explain --backend cloud 云端不可达（表/凭证/region）：{e}")
+        return 2
+    if state is None:
+        _progress(f"未找到 run：{args.run_id}（--prefix/--ddb-table 是否与 submit 一致？）")
+        return 2
+    try:
+        return _explain_emit(args, state, result_store, read_bytes=read_bytes)
+    except Exception as e:
+        if not compose.is_botocore_error(e):
+            raise
+        # 证据读失败已在 _explain_read_evidence 内部吞成 evidence_missing，能到这里的是读判定明细本身失败
+        extra = "" if args.scope_id else "（不给 scope_id 时还需列举对象的权限）"
+        _progress(f"explain --backend cloud 读判定明细失败：需要读桶 {target.bucket} 里对象的权限{extra}；"
+                  f"--prefix/--report-dir/凭证/region 也一并核对。{e}")
+        return 2
+
+
 def _cmd_reconcile(args) -> int:
     """per-run 进程入口（submit setsid fork 它，非用户直接调）：跑 reconcile loop 到全 done 自退（ADR 0034）。
 
@@ -1821,6 +2041,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_submit(args)
     if args.command == "status":
         return _cmd_status(args)
+    if args.command == "explain":
+        return _cmd_explain(args)
     if args.command == "_tunnel_watch":
         return _cmd_tunnel_watch(args)
     if args.command == "_reconcile":

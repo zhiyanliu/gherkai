@@ -17,10 +17,13 @@ import { ArtifactUploader } from "../lib/artifact-upload.mjs";
 function withMockClient(u: ArtifactUploader, opts: { failKeys?: string[] } = {}): string[] {
   const keys: string[] = [];
   const sendOpts: any[] = [];
+  const inputs: any[] = [];
   (u as any).client = {
     sendOpts,  // 新测试经 (u as any).client.sendOpts 读第二参，不污染返回的 keys 数组（deepEqual 友好）
+    inputs,    // 同理：整个 PutObject input（ContentType 断言用）另记，keys 仍是纯 key 数组
     send: async (cmd: any, options?: any) => {
       keys.push(cmd.input.Key);
+      inputs.push(cmd.input);
       sendOpts.push(options);
       if ((opts.failKeys ?? []).includes(cmd.input.Key)) throw new Error("s3 fail");
       return {};
@@ -352,4 +355,67 @@ test("半注入（有桶缺 MIDSCENE_RUN_DIR）→ 装配矛盾 fail-loud（ADR 
       if (v === undefined) delete process.env[k]; else process.env[k] = v;
     }
   }
+});
+
+
+// ---- refFor（「只算 ref 不上传」，ADR 0042 决策一）：与 toReportRef 的 ref 逐字一致、不碰网络、不记账本 ----
+test("refFor: ref 与 toReportRef 逐字一致，但不上传、不记 uploaded", async () => {
+  const root = tmproot();
+  const runDir = path.join(root, "reports", "rid");
+  const shots = path.join(runDir, "midscene-run", "report", "screenshots");
+  fs.mkdirSync(shots, { recursive: true });
+  const img = path.join(shots, "abc.jpeg"); fs.writeFileSync(img, "jpegbytes");
+  const u = new (ArtifactUploader as any)("bkt", "reports/rid/", runDir);
+  const keys = withMockClient(u);
+  const ref = u.refFor(img);
+  assert.deepEqual(keys, [], "只算 ref → 零 PutObject（截图字节交 scope 末整目录 flush）");
+  assert.equal((u as any).uploaded.size, 0, "不记 uploaded → flush 仍会传它");
+  // 逐字一致（evidence 里写的 URI 与将来 flush 上去的对象必须同一个 key，否则 URI 悬空）
+  assert.equal(ref, await u.toReportRef(img));
+  assert.equal(ref, "s3://bkt/reports/rid/midscene-run/report/screenshots/abc.jpeg");
+  // refFor 之后 flush 照传（字节最终进 S3）
+  await u.flushAndCleanup(path.join(runDir, "midscene-run"));
+  assert.ok(keys.includes("reports/rid/midscene-run/report/screenshots/abc.jpeg"));
+});
+
+test("refFor: no-op（未注入落点）→ 与 toReportRef 同样报 file://", async () => {
+  const root = tmproot();
+  const f = path.join(root, "shot.jpeg"); fs.writeFileSync(f, "x");
+  delete process.env.ARTIFACT_S3_BUCKET;
+  const u = ArtifactUploader.fromEnv();
+  assert.equal(u.refFor(f), `file://${f}`);
+  assert.equal(u.refFor(f), await u.toReportRef(f));
+});
+
+test("refFor: 文件还没落盘也能算（key 是确定性纯路径计算）", () => {
+  const root = tmproot();
+  const runDir = path.join(root, "reports", "rid");
+  const u = new (ArtifactUploader as any)("bkt", "reports/rid/", runDir);
+  const notYet = path.join(runDir, "midscene-run", "report", "screenshots", "later.jpeg");
+  assert.equal(u.refFor(notYet), "s3://bkt/reports/rid/midscene-run/report/screenshots/later.jpeg");
+});
+
+// ---- 后缀 → Content-Type（ADR 0042 决策一）：evidence 的 .json 与截图 .jpeg/.jpg/.png 必须带对的类型 ----
+// 漏映射的表现是浏览器直开变**下载**而非渲染（S3 落 binary/octet-stream），且单测若只看 key 照绿。
+test("ContentType: .json / .jpeg / .jpg / .png / .html 各按其类型，未知后缀不带", async () => {
+  const root = tmproot();
+  const runDir = path.join(root, "reports", "rid");
+  const dir = path.join(runDir, "midscene-run", "report");
+  fs.mkdirSync(dir, { recursive: true });
+  const u = new (ArtifactUploader as any)("bkt", "reports/rid/", runDir);
+  withMockClient(u);
+  const cases: Array<[string, string | undefined]> = [
+    ["evidence.json", "application/json"],
+    ["a.jpeg", "image/jpeg"],
+    ["b.jpg", "image/jpeg"],
+    ["c.png", "image/png"],
+    ["r.html", "text/html; charset=utf-8"],
+    ["d.PNG", "image/png"],          // 后缀大小写不敏感
+    ["x.execution.json", "application/json"],
+    ["e.log", undefined],            // 无映射 → 不带 ContentType（保旧行为）
+  ];
+  for (const [name] of cases) fs.writeFileSync(path.join(dir, name), "bytes");
+  for (const [name] of cases) await u.snapshotReport(path.join(dir, name));
+  const inputs = (u as any).client.inputs as any[];
+  assert.deepEqual(inputs.map((i) => i.ContentType), cases.map(([, ct]) => ct));
 });

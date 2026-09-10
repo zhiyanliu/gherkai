@@ -149,7 +149,58 @@ def test_html_gets_text_html_content_type_both_paths(tmp_path):
     ct = "text/html; charset=utf-8"
     assert calls.extra_by_key["reports/rid/nova-trajectories/sess/act_0.html"] == {"ContentType": ct}
     assert calls.extra_by_key["reports/rid/nova-trajectories/sess/act_1.html"] == {"ContentType": ct}
-    assert calls.extra_by_key["reports/rid/nova-trajectories/sess/act_0_trajectory.json"] == {}
+    # .json 亦显式打（ADR 0042 决策一：evidence.json 要能直开、不被当二进制下载；trajectory json 同规则受益）
+    assert calls.extra_by_key["reports/rid/nova-trajectories/sess/act_0_trajectory.json"] == {
+        "ContentType": "application/json"}
+
+
+# ---- evidence 的截图/json Content-Type（ADR 0042 决策一）：不显式给 → 浏览器直开变下载 ----
+def test_evidence_screenshot_and_json_content_types(tmp_path):
+    run_dir = tmp_path / "reports" / "rid"
+    art = run_dir / "nova-trajectories" / "evidence" / "sc" / "step-2"
+    art.mkdir(parents=True)
+    (art / "act-0-frame-4.jpg").write_bytes(b"\xff\xd8")
+    (art / "act-0-frame-5.jpeg").write_bytes(b"\xff\xd8")
+    (art / "shot.PNG").write_bytes(b"\x89PNG")
+    (art / "evidence.json").write_text("{}")
+    u, calls = _uploader_with_mock("bkt", "reports/rid/", run_dir)
+    u.flush_and_cleanup(run_dir / "nova-trajectories")
+    base = "reports/rid/nova-trajectories/evidence/sc/step-2/"
+    assert calls.extra_by_key[base + "act-0-frame-4.jpg"] == {"ContentType": "image/jpeg"}
+    assert calls.extra_by_key[base + "act-0-frame-5.jpeg"] == {"ContentType": "image/jpeg"}
+    assert calls.extra_by_key[base + "shot.PNG"] == {"ContentType": "image/png"}  # 后缀比对大小写无关
+    assert calls.extra_by_key[base + "evidence.json"] == {"ContentType": "application/json"}
+
+
+# ---- ref_for：只算 ref、不上传（ADR 0042 决策一「上传时机分两类」；截图字节随 scope 末 flush 走）----
+def test_ref_for_equals_report_ref_without_uploading(tmp_path):
+    run_dir = tmp_path / "reports" / "rid"
+    art = run_dir / "nova-trajectories" / "evidence" / "sc" / "step-2"
+    art.mkdir(parents=True)
+    shot = art / "act-0-frame-4.jpg"; shot.write_bytes(b"\xff\xd8")
+    u, calls = _uploader_with_mock("bkt", "reports/rid/", run_dir)
+    ref = u.ref_for(str(shot))
+    assert calls == []                                  # 关键：算 ref 不产生 PutObject（判定临界路径零网络）
+    assert ref == u.to_report_ref(str(shot))             # 与真上传给出的 ref 逐字一致（否则 URI 悬空）
+    assert len(calls) == 1                               # 上一句才是真上传
+
+
+def test_ref_for_noop_reports_same_file_uri_as_report_ref(tmp_path):
+    f = tmp_path / "nova-trajectories" / "evidence" / "sc" / "step-0" / "act-0-frame-0.jpg"
+    f.parent.mkdir(parents=True); f.write_bytes(b"\xff\xd8")
+    u = ArtifactUploader(bucket=None, prefix="reports/rid/", run_dir=tmp_path)
+    assert u.ref_for(str(f)) == u.to_report_ref(str(f)) == f"file://{f}"
+    assert f.exists()
+
+
+def test_ref_for_does_not_need_the_file_to_exist(tmp_path):
+    """key 是确定性纯路径计算 → 截图还没落盘也能先算 URI 写进 evidence.json。"""
+    run_dir = tmp_path / "reports" / "rid"
+    u, calls = _uploader_with_mock("bkt", "reports/rid/", run_dir)
+    missing = run_dir / "nova-trajectories" / "evidence" / "sc" / "step-0" / "act-0-frame-0.jpg"
+    assert u.ref_for(str(missing)) == (
+        "s3://bkt/reports/rid/nova-trajectories/evidence/sc/step-0/act-0-frame-0.jpg")
+    assert calls == []
 
 
 def test_content_type_suffix_match_is_case_insensitive(tmp_path):

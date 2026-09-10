@@ -22,8 +22,8 @@
 头等约束。保证机制：
 
 - **`ReportRef = {kind: str, ref: ResourceUri, label: str | None}`**（取代旧 `{granularity: Literal["scope","act"], path}`）：
-  - `kind` —— **产物类型**（开放字符串，引擎自报）：`report`（完整报告页）/ `trajectory`（轨迹页）/ `summary`（数字汇总）/ 未来 `video`/`trace`/`har`…。core/gherkai_core/wire/schedule **永不读它的值、永不按它分支**，是文档化约定常量、非枚举。**「粒度」不由 kind 表达，而由 report_ref 挂在哪一级表达**——`StepResult.report_refs`=step 级、`ScenarioResult.report_refs`=scenario 级、`JobResult.report_refs`=scope 级。（旧值 `scope`/`act` 把粒度混进了 kind——`scope` 是粒度、`act` 是引擎内部动作类型；归正为纯类型维度，粒度交给挂载层级，二者正交、不重复不撞名。）
-  - `ref` —— **统一指针 `ResourceUri`**，不假定是本地文件。本地产物用 `file://` 前缀；未来可是 `s3://`/`https://`。core/ReportStore **不 stat、不 fetch、不打开** ref，只索引/链接。
+  - `kind` —— **产物类型**（开放字符串，引擎自报）：`report`（完整报告页）/ `trajectory`（轨迹页）/ `summary`（数字汇总）/ `evidence`（gherkai 自有 schema 的 step 级机读证据，[0042](./0042-step-evidence-and-explain.md)）/ 未来 `video`/`trace`/`har`…。core/gherkai_core/wire/schedule **永不读它的值、永不按它分支**，是文档化约定常量、非枚举。**「粒度」不由 kind 表达，而由 report_ref 挂在哪一级表达**——`StepResult.report_refs`=step 级、`ScenarioResult.report_refs`=scenario 级、`JobResult.report_refs`=scope 级。（旧值 `scope`/`act` 把粒度混进了 kind——`scope` 是粒度、`act` 是引擎内部动作类型；归正为纯类型维度，粒度交给挂载层级，二者正交、不重复不撞名。）
+  - `ref` —— **统一指针 `ResourceUri`**，不假定是本地文件。本地产物用 `file://` 前缀；未来可是 `s3://`/`https://`。core/ReportStore **不 stat、不 fetch、不打开** ref，只索引/链接。**皮层侧按层收窄**（[0042](./0042-step-evidence-and-explain.md)）：`model / wire / schedule / ReportStore` 永不解引用不变；CLI `explain` 与 `compose.read_resource` **只对 gherkai 自有 schema 的 ref（`kind == "evidence"`）解引用**，对引擎原生产物（`report` / `trajectory` / `summary`）仍只当链接、永不解析——解引用许可绑在「内容是不是我们自己定义的 schema」上。
   - `label` —— 可选人类可读锚文本；缺省由消费端回落 `kind`。worker 可全部不报。
 - **铁律**：`core/gherkai_core/model.py`、`core/gherkai_core/wire.py`、`core/gherkai_core/schedule.py` 对 `ReportRef` 永久是**不透明搬运**。任何「按 kind 选 `<video>`/`<iframe>`」之类的渲染分支**只允许出现在 cli / WebUI 皮层**，绝不写回 core。
 - 新引擎接入 = 它的 worker 报自己的 `ReportRef`，经 [0024](./0024-worker-core-protocol.md) 协议原样进 `report_refs`，归到 RunReport，**core 一行不改**。
@@ -124,9 +124,9 @@ class ReportStore(Protocol):
 
 - 顶部一行 run 摘要（run_id + 总 status + duration + 原生量成本）。
 - **① 判定明细树**：job→scenario→step，逐级上色（含派生态 skipped/aborted、前置态 pending/running 各自配色，非兜底灰，见 [0031](./0031-job-lifecycle-states-and-severity.md)）+ step 级 status/votes tally/error_type/时长。**被 scope 内短路的 step 显 `skipped` 态 + 读 `shortcircuited` 布尔加「⚠ 因前置 step error 被跳过」旁注**（连锁失败旁注，判据是 shortcircuited 而非「按 status 顺序猜」，见 [0031](./0031-job-lifecycle-states-and-severity.md) 决定六）。让纯确定性 run（无原生产物）也一眼看懂结果。**但不拿它当 CI 判定源**（判定真值在 ResultStore）。
-- **② 原生报告产物导航清单**：每条 report_ref 一行——job.status 上色 + scope_id（+ scenario_id/step[N] 表粒度）+ engine + `[kind]` + 指向 `href` 的 `<a>`（`label` 或回落 `kind` 作锚文本）。`href` 由 `make_href` 算（local 相对 / cloud 恒等 ref，见上「href 相对化」）。
+- **② 报告产物导航清单（引擎原生产物 + gherkai evidence，[0042](./0042-step-evidence-and-explain.md)）**：每条 report_ref 一行——job.status 上色 + scope_id（+ scenario_id/step[N] 表粒度）+ engine + `[kind]` + 指向 `href` 的 `<a>`（`label` 或回落 `kind` 作锚文本）。`href` 由 `make_href` 算（local 相对 / cloud 恒等 ref，见上「href 相对化」）。
 - 上色用内联 `<style>`。
-- **空态**：无任何 report_ref 时②仍生成有效的「空报告」清单（标注本次无原生产物）、①判定明细树照常渲染，不报错。
+- **空态**：无任何 report_ref 时②仍生成有效的「空报告」清单（标注本次无报告产物）、①判定明细树照常渲染，不报错。
 
 ## Nova reportRef 的回传与归属（trajectory 下沉 step 级 + session 汇总）
 
@@ -135,7 +135,7 @@ Nova worker 设 `NovaAct(logs_directory=<run 专属持久目录>)`，act/act_get
 - **trajectory 下沉到 step 级**（`kind=trajectory`，经 [0024](./0024-worker-core-protocol.md) `StepDone.report_refs` 回传）：worker 在**每个 step 内**收集本 step 触发的 act 产物（一个 step 可能多次 act → 多个 trajectory），随该 step 的 `step_done` 报出，归到 `StepResult.report_refs`。**为何下沉到 step 而非 scenario**：`act` 是引擎内部动作粒度、比 step 还细,但 step 是 domain 有效概念——把 act 轨迹挂到它所属的 step 下,信息最全（agent 能精确追溯「step N 这次判定 → 这几个 act 轨迹」）,而聚合到 scenario 级会丢失 act↔step 归属。（下沉后 Nova 不再填 `scenario_done.report_refs`——该字段保留、协议向后兼容。）
 - **session 汇总作 scope 级**（`kind=summary`，经 `ScopeDone.report_refs` 回传）：Nova SDK 落的 `session_summary.json`（session_id/time_worked_s/**act_count** 等）作 scope 级 report_ref。它**不是人看报告、是数字汇总**——作为「引擎特有富信息」的载体经不透明指针带给 agent（见下「引擎特有量不进 model」）。
 
-**Midscene 保持 scope 级**（`kind=report`，`scope_done.report_refs`，1 个 report html/worker）。两引擎产物形态/粒度不同（[0010](./0010-spike-as-apples-to-apples-benchmark.md)），core 不分支、不透明搬运——这正是「引擎自报粒度、core 不规定每级都得有」。
+**Midscene 的 report 仍 scope 级**（`kind=report`，`scope_done.report_refs`，1 个 report html/worker）；两引擎的 evidence 都下沉 step 级（`kind=evidence`，[0042](./0042-step-evidence-and-explain.md)）。两引擎产物形态/粒度不同（[0010](./0010-spike-as-apples-to-apples-benchmark.md)），core 不分支、不透明搬运——这正是「引擎自报粒度、core 不规定每级都得有」。
 
 ### 引擎特有量不进 model：判据是「domain 是否有效」，不是「引擎套不套得上」
 
@@ -165,7 +165,7 @@ URL、断言了什么」都不落痕（只有 pass/fail 进 result 树）。大�
 - **现在做（v1.0）**：本 ADR 上述全部决策均已实装（单测 + 两引擎真 e2e 覆盖）。
 - **留口子不实现**：
   - **确定性 step 产物可观测性**：让 `@deterministic` handler 可选地产一个轻量产物（当时 URL / 截图 / 检查描述），使纯确定性用例的 RunReport 也有内容可看。判定真值在 result 树已够；产物可观测另开一轮（与 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md) 确定性 step 设计一并演进）。**与 [0036](./0036-deterministic-capability-discovery.md) 的划界**：0036 解决的是「**跑前**知道有哪些确定性锚点」（注册表自述 → `list-deterministic` / `plan` 派发标注），本口子要的是「**跑后**看见那一步实际做了什么」（运行期产物）——同源于确定性 step 的不可观测，但非同一件事，0036 落地后本口子照旧敞着。
-  - 按 `kind` 的富渲染（`<video>`/`<iframe>`，皮层将来做）；trajectory 内部结构化提取。
+  - 按 `kind` 的富渲染（`<video>`/`<iframe>`，皮层将来做）。trajectory 内部结构化提取已由 [0042](./0042-step-evidence-and-explain.md) 落地——位置在 **worker**（引擎知识的唯一住处）、产物是 gherkai 自有 schema 的 `kind=evidence`，core 仍不解析任何产物。
   （注：store 读回面**已落地**——`RunStore.load_run_meta`/`load_run_state` + `ResultStore.load_job_result`/`load_all`，靠 `serialize` 完整重建，[0016](./0016-execution-architecture-core-lib-run-model.md)。）
 
 ## 重议

@@ -174,7 +174,8 @@ class ReportRef:
     不 stat/fetch ref、不按 kind 分支。新引擎报任意 kind 都零改 core（扩展性契约）。
 
     kind:  **产物类型**（开放字符串，引擎自报）。约定值 "report"（完整报告页）/"trajectory"（轨迹页）/
-           "summary"（数字汇总），未来可 "video"/"trace"/"har"…（非枚举）。**粒度不由 kind 表达**，而由
+           "summary"（数字汇总）/"evidence"（gherkai 自有 schema 的 step 级机读证据，ADR 0042 决策一），
+           未来可 "video"/"trace"/"har"…（非枚举）。**粒度不由 kind 表达**，而由
            report_ref 挂在 StepResult/ScenarioResult/JobResult 哪一级表达（二者正交，ADR 0027）。
     ref:   统一指针 URI（ResourceUri）——不假定是本地文件。本地产物用 file:// 前缀；未来可 s3://、https://。
     label: 可选人类可读锚文本；缺省由消费端（cli/WebUI 皮层）回落 kind。
@@ -221,7 +222,9 @@ class StepDone:
     cost: Cost | None = None
     error_type: str | None = None  # ErrorType；failed/error 两态均可带
     message: str | None = None
-    report_refs: tuple[ReportRef, ...] = ()  # step 级原生产物（Nova：本 step 的 act 轨迹，kind=trajectory，ADR 0027）
+    # step 级产物指针：两引擎都带 kind=evidence（gherkai 自有 schema 的机读证据，ADR 0042 决策一）；
+    # Nova 另带本 step 各 act 的 kind=trajectory 轨迹页（ADR 0027）。
+    report_refs: tuple[ReportRef, ...] = ()
     type: Literal["step_done"] = "step_done"
 
 
@@ -281,7 +284,8 @@ class StepResult:
     # step 级失败原因原文（worker 在 step_done 带的 message：断言未过的票数与断言文 / act 异常 `type: message`），
     # 从 StepDone 原样搬入、进 jobs/*.json（ADR 0042 决策三）。曾长期在归约时被丢，jobs 里的 step 只剩 error_type。
     message: str | None = None
-    report_refs: tuple[ReportRef, ...] = ()  # step 级原生产物指针（Nova：本 step 的 act 轨迹，kind=trajectory，ADR 0027）
+    # step 级产物指针（原样搬自 StepDone，见那里的注释：两引擎的 kind=evidence + Nova 的 kind=trajectory）
+    report_refs: tuple[ReportRef, ...] = ()
     # 与判定轴（status）正交的第二维（ADR 0031 决定六）：True = 本 step 因上游 error 被 scope 内短路而跳过、没跑。
     # 仅在 status==SKIPPED（由 step_skipped 事件派生）时为 True；渲染层的连锁失败旁注据此判定（比"按 status 顺序猜"精确）。
     shortcircuited: bool = False

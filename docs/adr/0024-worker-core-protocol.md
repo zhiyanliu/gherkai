@@ -64,14 +64,14 @@ worker **边跑边流式上报**（每行一个事件），core 实时收。选�
 {"type":"scenario_started","scenarioId":"..."}
 {"type":"step_started","scenarioId":"...","stepIndex":1}
 // 动作步：无 votes（core 据此知道它不是 AI 断言，不纳入抖动汇总）；cost 是原生量（Nova 报时长 / Midscene 报 token）
-// step_done 可带 step 级 reportRefs（Nova：本 step 的 act 轨迹，一个 step 可能多个 act，kind=trajectory）
+// step_done 可带 step 级 reportRefs：两引擎都挂本 step 的 gherkai evidence（kind=evidence，ADR 0042）；Nova 另挂本 step 的 act 轨迹（一个 step 可能多个 act，kind=trajectory）
 {"type":"step_done","scenarioId":"...","stepIndex":1,"status":"passed","cost":{"time_worked_s":9.3},
    "reportRefs":[{"kind":"trajectory","ref":"file:///.../act_1.html","label":"trajectory"}]}
 {"type":"step_started","scenarioId":"...","stepIndex":2}
 // AI 断言步：有 votes（core 据此纳入抖动汇总）；N 票各一个 trajectory
 {"type":"step_done","scenarioId":"...","stepIndex":2,"status":"passed","votes":{"yes":3,"total":3},"cost":{"tokens":1915}}
 {"type":"scenario_done","scenarioId":"...","status":"passed"}
-// scope_done 可带 scope 级 reportRefs：Midscene 1 个 report html/worker（kind=report）；Nova 一份 session 汇总（kind=summary）
+// scope_done 可带 scope 级 reportRefs：Midscene 1 个 report html/worker（kind=report，仍 scope 级）；Nova 一份 session 汇总（kind=summary）
 {"type":"scope_done","scopeId":"login","sessionId":"...",
    "reportRefs":[{"kind":"report","ref":"file:///.../midscene_run/report/xxx.html","label":"Midscene report"}]}
 ```
@@ -111,7 +111,7 @@ worker **边跑边流式上报**（每行一个事件），core 实时收。选�
 - **`errorType` + `message`**（规范化失败分类）：`errorType` 取自固定类别集，让 RunResult/未来重试能按类型分支；`message` 是人类可读诊断。**`failed` 与 `error` 两态均可带 `errorType`**（`failed`→`assertion_failed`；`error`→其余执行故障类）。**两个引擎映射**：Nova Act 有丰富异常树（按类映射），Midscene 只抛通用 `Error`（归 `engine_error`）。初始类别集：`assertion_failed`（断言没过）/ `timeout` / `guardrail` / `engine_error`（引擎内部/通用异常）/ `navigation_error` / `network_error`（网络/SSL 建连层瞬时故障,可重试,[0028](./0028-transient-network-ssl-resilience.md)）。类别集可随真实失败样本扩充。**退出码约定（[0028](./0028-transient-network-ssl-resilience.md)）**：建连失败发生在任何事件 emit 之前,worker 无法走事件通道,故约定专用退出码 `EX_WORKER_NETWORK=80` 作 out-of-band 信号；adapter 把它翻成 `WorkerNetworkError` → schedule 记 `network_error`。**常量与「码→异常」翻译归协议层 `core/gherkai_core/wire.py`**（`EX_WORKER_NETWORK` + `raise_for_worker_exit`）——退出码与事件行同属本协议的两条通道，各 Engine adapter 只把自己传输里的码交给它，不各存一份约定。
 
 **core 不分支的附加信息**（存进 RunReport，不进 core 逻辑分支）：
-- **`reportRefs`**：可挂 `step_done`/`scenario_done`/`scope_done` 三级事件；每项 `{kind, ref, label?}`。**`kind` 表「产物类型」**（开放字符串：`report` 完整报告页 / `trajectory` 轨迹页 / `summary` 数字汇总 / 未来 `video`/`trace`/`har`…），**「粒度」由挂在哪级事件表达、不由 kind 表达**（step 级挂 step_done、scope 级挂 scope_done）。`ref` 统一 URI、本地 `file://`，`label` 可选锚文本。两个引擎产物形态不同（[0010](./0010-spike-as-apples-to-apples-benchmark.md)）：Midscene 1 个 report html/worker（`kind=report`、`scope_done` 带）；Nova 每 act 一个 trajectory（`kind=trajectory`、下沉到 **`step_done`** 带，本 step 的 act 都挂该 step，一个 step 可多个）+ 一份 session 汇总（`kind=summary`、`scope_done` 带，是引擎特有富信息如 act_count 的载体、非人看报告）。core **永不读 `kind` 值、不解释 `ref`**——不透明搬运、原样归进 RunReport（[0027](./0027-runreport-aggregation-index.md)）。`ReportRef` 形态详见 [0027](./0027-runreport-aggregation-index.md)。
+- **`reportRefs`**：可挂 `step_done`/`scenario_done`/`scope_done` 三级事件；每项 `{kind, ref, label?}`。**`kind` 表「产物类型」**（开放字符串：`report` 完整报告页 / `trajectory` 轨迹页 / `summary` 数字汇总 / `evidence` gherkai 自有 schema 的 step 级机读证据（[0042](./0042-step-evidence-and-explain.md)）/ 未来 `video`/`trace`/`har`…），**「粒度」由挂在哪级事件表达、不由 kind 表达**（step 级挂 step_done、scope 级挂 scope_done）。`ref` 统一 URI、本地 `file://`，`label` 可选锚文本。两引擎都在 **`step_done`** 带 `kind=evidence`（跑过 AI 的 step 各一份）；其余产物形态不同（[0010](./0010-spike-as-apples-to-apples-benchmark.md)）：Midscene 的 report 仍 scope 级（`kind=report`、`scope_done` 带）；Nova 每 act 一个 trajectory（`kind=trajectory`、下沉到 `step_done` 带，本 step 的 act 都挂该 step，一个 step 可多个）+ 一份 session 汇总（`kind=summary`、`scope_done` 带，是引擎特有富信息如 act_count 的载体、非人看报告）。core **永不读 `kind` 值、不解释 `ref`**——不透明搬运、原样归进 RunReport（[0027](./0027-runreport-aggregation-index.md)）。`ReportRef` 形态详见 [0027](./0027-runreport-aggregation-index.md)。
 
 **worker 派发（不进协议，仅说明 worker 内部如何把 step 变成引擎调用）**：worker 收到 `(keyword, text)` 后按优先级派发——① 命中测试开发的确定性注册表（[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)）→ 精确判定、无 votes；② 否则若 step 文本含 URL 字面量（引号内 `https?://…`）→ 内建确定性导航（code 抽 URL 直接 goto/go_to_url，不浪费 AI、不跑偏），动词随意（"打开/访问/前往…"皆可，对齐 [0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md) 纯自然语言）；③ 否则 `Then` → AI 断言（aiBoolean/act_get + 投票，带 votes）、**其余关键字（`When`/`Given`）→ AI 动作**（aiAct/act，无 votes——非 `Then` 一律走这支，catch-all）。这些区别 core 不消费，故不出现在协议字段中。
 

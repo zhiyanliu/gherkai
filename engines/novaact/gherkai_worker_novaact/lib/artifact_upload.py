@@ -25,7 +25,15 @@ from pathlib import Path
 # 按后缀显式打 Content-Type（与 Midscene uploader 同一规则，ADR 0024 两引擎语义对称）：boto3/s3transfer
 # **不猜** content type，默认落成 binary/octet-stream → presigned/控制台直开 trajectory .html（ADR 0027 选
 # .html 就是为「人能看」）会被当附件下载而非渲染。未列后缀不设（走 S3 默认）。
-_CONTENT_TYPE_BY_SUFFIX = {".html": "text/html; charset=utf-8"}
+# 图片/json 同理（ADR 0042 决策一）：evidence 的截图与 evidence.json 都要能直开渲染（截图被当附件下载、
+# json 被当二进制，agent 与人取证都得先另存），两引擎同规则同步改。
+_CONTENT_TYPE_BY_SUFFIX = {
+    ".html": "text/html; charset=utf-8",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".json": "application/json",
+}
 
 
 def _extra_args(local_abs: Path) -> dict:
@@ -104,6 +112,19 @@ class ArtifactUploader:
         self._s3().upload_file(str(p), self._bucket, key, ExtraArgs=_extra_args(p))  # 实时上传（失败抛 → 可观测、不删）
         self._uploaded.add(str(p.resolve()))               # 记下，flush 时跳过
         return f"s3://{self._bucket}/{key}"
+
+    def ref_for(self, local_path: str) -> str:
+        """**只算 ref、不上传**：返回该文件将来（scope 末 flush 后）会有的那个 ref，与 `to_report_ref` 逐字一致。
+
+        给 evidence 的截图用（ADR 0042 决策一「上传时机分两类」）：即时上传是逐文件串行 PutObject 且套了短超时，
+        把 K×票数 次 PutObject 压在判定临界路径上会把已成的判定拖在网络上；key 是确定性纯路径计算，故可先算
+        URI 写进 evidence.json、字节交给 scope 末的整目录递归 flush（总字节不变）。
+        代价：cloud 档若 worker 在 scope 中途被杀，截图 URI 可能悬空（json 已传、图没传）——消费端按「读不到」
+        处理；本地档 `file://` 无此问题。
+        """
+        if not self.enabled:
+            return f"file://{local_path}"  # 与 to_report_ref 的 no-op 分支同形（不 resolve，保调用方 abspath 语义）
+        return f"s3://{self._bucket}/{self._key_for(Path(local_path))}"
 
     def flush_and_cleanup(self, artifact_dir: str | Path) -> None:
         """scope 末：整目录递归上传剩余文件（跳过已实时传的）+ 全成功则 rmtree 整目录（ADR 0029）。

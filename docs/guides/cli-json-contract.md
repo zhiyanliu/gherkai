@@ -48,7 +48,7 @@
 | `votes` | object \| null | AI 断言才有：`yes`（赞成票）、`total`（总票数）；确定性/动作步为 null |
 | `error_type` | string \| null | `assertion_failed` / `engine_error` / `network_error` / `timeout` … |
 | `message` | string \| null | step 级失败原因原文（如「AI 断言未过多数票（0/1）：<断言文>」、act 异常的 `类型: 信息`）；passed 步为 null。旧 run 的落盘无此键 |
-| `report_refs[]` | array | step 级原生产物（Nova：本 step 的 act 轨迹 `kind=trajectory`） |
+| `report_refs[]` | array | step 级产物指针：两引擎都有 `kind=evidence`（gherkai 自有格式的机读证据，`gherkai explain` 读它，见下节）；Nova 另有每次 act 的轨迹页 `kind=trajectory` |
 | `shortcircuited` | bool | true = 上游 step error 后被跳过、未执行（此时 status=skipped） |
 
 `run_meta`（definition）：`run_id`、`created_at`、`max_concurrency`、`steps_dir`（使用方确定性 step 目录，绝对路径或 null）、
@@ -97,6 +97,75 @@ RunState（控制面运行态）+ 附加 `artifacts`：
 | `high_water_mark` | int \| 省略 | 已投影的事件水位（诊断用）；仅经推进器投影写过的 run 有（`submit` / `status --wait` / 云端推进链），同步 `run` 落的 run_state 无此键 |
 | `jobs[]` | array | `scope_id`、`status`（含 `pending` / `running` 前置态）、`session_id`（未起会话时 null，键恒在）、`claimed_at`（被推进器认领的时刻，超时起算点；未认领时**省略**） |
 | `artifacts` | object | 与 `run` 同键（`run_meta` / `run_state` / `jobs_dir` / `report_index`）；是**约定落点**，终态后才真有内容 |
+
+## `gherkai explain <run_id> [<scope_id>] --json`
+
+step 级证据视图：判定树（**骨架 = 提交时的 job 定义**）+ 每个 AI step 的机读证据。**不表判定**——退出码只有 `0`
+（渲染成功，哪怕全部 step 没有证据、判定明细尚未落地）与 `2`（参数错 / run 或 scope 不存在 / 云端不可用）；
+判定码看 `run` 或 `status --wait`。`--json` 下 stdout 只有这一个文档，「run 仍在跑」这类提示一律不打（机读侧看顶层 `status`）。
+
+| 键 | 类型 | 含义 |
+|---|---|---|
+| `run_id` | string | |
+| `status` | 同 `status` 一节的取值 | run 级运行态；未终态时文档只含已落地的那部分 job |
+| `scopes[]` | array | 每个 job 一项，见下 |
+
+`scopes[]` 每项 = `scope_id`、`engine`、`status`、`error_type`、`message`、`session_id`、`report_refs[]`（形状同 `run --json`，
+原样搬判定明细里的指针、不解析）、`scenarios[]`，另加：
+
+| 键 | 类型 | 含义 |
+|---|---|---|
+| `aborted_hint` | string \| null | 非 null = 这个 job 被中止且只落了部分 step 记录：已执行 step 的证据已产出，但指针没进判定记录 |
+
+`scenarios[]` 每项 = `scenario_id`、`name`、`status`（**null = 这条 scenario 没有判定记录**——worker 被外部中止时，
+没跑完的 scenario 不进判定明细）、`steps[]`：
+
+| 键 | 类型 | 含义 |
+|---|---|---|
+| `index` / `keyword` / `text` | int / string / string | 来自 job 定义（骨架）：0 起的书写序号、Given/When/Then、step 原文 |
+| `status` / `votes` / `error_type` / `message` / `shortcircuited` / `duration_ms` / `report_refs[]` | | 同 `run --json` 的 `steps[]`；`record_missing` 为 true 时这些全是 null / 空数组 |
+| `record_missing` | bool | true = 骨架里有这一步、判定明细里没有它的记录（未执行或未上报） |
+| `evidence` | object \| null | 这一步的机读证据全文（固定键见下）；null 时看 `evidence_missing` |
+| `evidence_missing` | `no_ref` / `unreadable` / `unsupported_schema` \| null | null = 证据已读到。`no_ref` = 这一步没有证据指针（确定性步/导航步本就不产，或抽取失败——两者在这里分不出来）；`unreadable` = 指针在但读不到或内容不是 JSON；`unsupported_schema` = 证据的格式版本这个 CLI 认不出 |
+
+### `evidence` 的固定键
+
+一个 AI step 一份，由 worker 在该 step 结束那一刻从引擎产物里抽出，两引擎同形。**字段全部可选容缺**（缺 → `null` /
+空数组）：格式只承诺键名与类型，不承诺每个引擎每次都填满。
+
+| 键 | 类型 | 含义 |
+|---|---|---|
+| `schema_version` | int | 证据格式版本，当前 `1`；认不出的版本 explain 报 `unsupported_schema` |
+| `engine` | `novaact` / `midscene` | 产出它的引擎 |
+| `scope_id` / `scenario_id` / `step_index` | string / string / int | 这份证据属于哪一步（与判定树冗余，为的是文件自包含） |
+| `step` | object | `keyword` + `text`：该 step 的原文 |
+| `status` / `message` | 同 `steps[]` 的两个同名键 | 与判定记录里同一步一致 |
+| `acts[]` | array | 本 step 里的每次 AI 调用一项（N 票断言 = N 项），见下 |
+
+`acts[]` 每项：
+
+| 键 | 类型 | 含义 |
+|---|---|---|
+| `index` | int | 本 step 内第几次调用（0 起） |
+| `prompt` | string \| null | 交给引擎的指令（step 文本 + 多行参数），不含引擎追加的输出格式样板 |
+| `vote` | bool \| null | 这次调用计入判定的那一票；null = 不是投票调用（Given/When 的动作） |
+| `url` | string \| null | 调用结束时的页面地址 |
+| `frames[]` | array | 引擎内部逐步的「观察—思考—动作」，见下 |
+| `result` | object \| null | **引擎原样返回值**：内部键随引擎版本变，**不属本契约**，只供阅读；判票看 `vote` |
+| `error` | string \| null | 这次调用抛的错（`类型: 信息`）。Nova 出错的调用没有 frames（引擎不落轨迹文件），这是正常形态、不是抽取失败 |
+| `time_worked_s` | number \| null | 这次调用的 agent 工作秒（Nova 报；Midscene 恒 null——它的计时是另一种量、不混用） |
+
+`frames[]` 每项：
+
+| 键 | 类型 | 含义 |
+|---|---|---|
+| `url` | string \| null | 该 frame 的页面地址（只有 Nova 有；Midscene 恒 null） |
+| `thought` | string \| null | 模型这一步的推理原文——「为什么这么判」通常就在最后一段 |
+| `screenshot` | string \| null | 该 frame 的截图（`file://` 或 `s3://`）；只有被截图策略选中的 frame 有，其余 null。**只给地址、不内嵌图**；云端档若 worker 中途被杀，地址可能取不到对象（按「读不到」处理） |
+| `actions[]` | array | 每项 `name`（动作名）+ `args`（**引擎原样透传的参数对象**：内部键随引擎版本变、**不属本契约**） |
+
+文本形态（不给 `--json`）是给人/agent 一次读进上下文的摘要，不是证据全文转写：默认每次调用只显示最后一段推理与它的截图
+（超长截断并指回 `--json` 或那份证据文件），`--full` 关掉这个预算逐 frame 全文，`--all` 连通过的 step 也展开。
 
 ## `gherkai list-engines --json`
 

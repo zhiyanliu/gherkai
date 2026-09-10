@@ -1,6 +1,6 @@
 # 0041. 面向 AI agent 驾驭的 CLI 能力：scenario 筛选、静默落盘、JSON 覆盖补齐、doctor 自检、JSON 契约
 
-> **Status:** Accepted（2026-09-10）—— 五项均已实装并有护栏；agent skill（另立）以本 ADR 的命令面为教学对象。
+> **Status:** Accepted（2026-09-10）—— 五项均已实装并有护栏；agent skill（另立）以本 ADR 的命令面为教学对象。本 ADR「重议闸门」失败证据机读化一条已由 [0042](./0042-step-evidence-and-explain.md)（step 级 evidence + `explain`）落地，五项决策不变。
 
 ## 背景与问题
 
@@ -38,6 +38,7 @@ gherkai 的直接操作者越来越多是 AI coding agent（Claude Code / Codex 
 - `list-engines --json`：每引擎 `{engine, available, cmd, cwd, source, hint}`。
 - `deploy list-workers --json`：`{prefix, version, default_variant, engines: {<engine>: {family, ecr_repo, variants: […], pending_cleanup: […]}}}`。
 - `status --json`：在 RunState 之外**附加** `artifacts`（与 `run --json` 同键：`run_meta` / `run_state` / `jobs_dir` / `report_index`），位置由 compose 单点拼、始终给出（是否已写成看 status 是否终态）。RunState 部分形状不变（加法兼容）。
+- `explain --json`：判定树 + 每步 evidence 合成的排障视图，形状见 [0042](./0042-step-evidence-and-explain.md) 决策四。
 - 原则：stdout 只放数据、诊断走 stderr、`--json` 下不打人读提示（沿用既有）。
 
 ### 四、`doctor`：一个入口、按组件分组
@@ -66,5 +67,5 @@ gherkai 的直接操作者越来越多是 AI coding agent（Claude Code / Codex 
 
 ## 重议闸门
 
-- 失败证据的机读化（trajectory `.json` 引用 / `explain` 子命令）：本轮未做，agent 排障仍需人读 HTML 或按命名规则找 `_trajectory.json`；出现真实需求时立项。
+- 失败证据的机读化（`explain` 子命令）：已由 [0042](./0042-step-evidence-and-explain.md) 落地——worker 在 step 边界产 gherkai 自有 schema 的 evidence、`explain` 合成判定树与证据；不是「引用 trajectory `.json`、格式由 skill 说明」那条路（被拒理由见该 ADR）。
 - JSON Schema 生成：见决策五被拒项。

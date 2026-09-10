@@ -696,6 +696,41 @@ def build_cloud_stores(*, table: str, bucket: str, prefix: str = "",
     return run_store, result_store, report_store, make_artifacts
 
 
+def read_resource(uri: str, *, s3=None, region: str | None = None, profile: str | None = None) -> bytes:
+    """读一个 `ResourceUri` 的字节（`file://`、裸路径、`s3://`）——**皮层解引用产物 ref 的唯一入口**（ADR 0042 决策四）。
+
+    许可边界（ADR 0027 的消费端规则按层收窄、见 0042 决策五）：本函数只提供「按 URI 取字节」这一能力，
+    **该不该解引用由调用方按 ref 的 kind 判**——皮层只对 gherkai 自有 schema 的 ref（`kind == "evidence"`）
+    解引用，引擎原生产物（report / trajectory / summary）仍只当链接；`model / wire / schedule / ReportStore`
+    永不调本函数。
+
+    `file://` 复用 report_store 的 URI→路径解析（唯一一份，不写第三份）；`s3://` 走 boto `get_object`，
+    client 经与 `build_cloud_stores` 同一个 `_make_s3_client` 钩子拿（测试可 monkeypatch）。**`s3` 参数优先**：
+    调用方读多个对象时建一次复用，别逐次建 session。boto3 仍只惰性 import（`file://` 档零 boto 依赖，
+    对齐「纯 local 路径绝不 import boto3」）。
+    读不到/解不开一律抛（ValueError 或底层 OSError/botocore 异常），best-effort 由调用方裹 try 决定（0042 决策二）。
+    """
+    from urllib.parse import urlparse
+
+    parsed = urlparse(uri)
+    if parsed.scheme in ("", "file"):
+        from gherkai_core.adapters.report_store.local import local_path_from_uri
+
+        path = local_path_from_uri(uri)
+        if path is None:  # file://host/…（远端/UNC）：不是本机文件
+            raise ValueError(f"不是本机可读的文件 URI：{uri}")
+        return path.read_bytes()
+    if parsed.scheme == "s3":
+        # s3://<bucket>/<key>：key 原样（上传器写 ref 时未做 percent-encoding，见 0029 的 key 计算）
+        bucket, key = parsed.netloc, parsed.path.lstrip("/")
+        if not bucket or not key:
+            raise ValueError(f"s3 URI 缺 bucket 或 key：{uri}")
+        if s3 is None:
+            s3 = _make_s3_client(region=region, profile=profile)
+        return s3.get_object(Bucket=bucket, Key=key)["Body"].read()
+    raise ValueError(f"不支持的 URI scheme：{uri}")
+
+
 # ============================================================================
 # Fargate 执行接线（ADR 0033 / 0016 决策 A/C）：--backend cloud 时用 FargateEngine 替代 SubprocessEngine。
 # boto3 句柄钩子抽出供测试 monkeypatch（同 store 侧 _make_* 惯例）；import boto3 惰性收在钩子内。

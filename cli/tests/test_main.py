@@ -1334,3 +1334,312 @@ def test_scope_filter_selects_whole_named_scope_by_id(tmp_path, capsys):
     out = capsys.readouterr().out
     assert out.startswith("===== plan") and "job scope='browse' engine=" in out and "(name=" not in out
     assert m.main(["plan", str(p), "--scope", ""]) == 2 and "--scope 的值不能为空" in capsys.readouterr().err
+
+
+# ---- explain（ADR 0042 决策四）：判定明细 + step 级机读证据的合成视图 ----
+# 夹具照 ADR 的文本样例搭（同一份 run 喂各用例）：一个 scope、两条 scenario——第一条 failed 且第 3 步无记录
+# （worker 被中止的形态）、第二条 error 后短路。evidence 是真文件、ref 是真 file:// URI（读路径全程真跑）。
+
+def _evidence_fixture(*, step_index=2, thought="I am on the login page.\n看到「密码错误」。Returning false.",
+                      screenshot="file:///tmp/act-0-frame-4.jpg", schema_version=1) -> dict:
+    return {
+        "schema_version": schema_version, "engine": "novaact",
+        "scope_id": "features/login.feature:6", "scenario_id": "features/login.feature:12",
+        "step_index": step_index, "step": {"keyword": "Then", "text": "页面显示「登录成功」"},
+        "status": "failed", "message": "AI 断言未过多数票（0/1）：页面显示「登录成功」",
+        "acts": [{
+            "index": 0, "prompt": "页面显示「登录成功」", "vote": False, "url": "https://app.example.com/login",
+            "frames": [
+                {"url": "https://app.example.com", "thought": None,
+                 "actions": [{"name": "agentClick", "args": {"box": "1,2"}}], "screenshot": None},
+                {"url": "https://app.example.com/login", "thought": thought,
+                 "actions": [{"name": "takeObservation", "args": {}}], "screenshot": screenshot},
+            ],
+            "result": {"value": "false"}, "error": None, "time_worked_s": 9.8,
+        }],
+    }
+
+
+def _explain_job(*, scope_id="features/login.feature:6"):
+    from gherkai_core.model import Job, Scenario, Step
+    s1 = (Step(0, "Given", '打开 "https://app.example.com/login"'),
+          Step(1, "When", "输入用户名「alice」与密码「wrong」"),
+          Step(2, "Then", "页面显示「登录成功」"),
+          Step(3, "When", "点击「退出」"))
+    s2 = (Step(0, "Given", '打开 "https://app.example.com/login"'), Step(1, "Then", "页面提示「账户已锁定」"))
+    return Job(scope_id=scope_id, scope_name="登录", engine="novaact",
+               scenarios=(Scenario(id="features/login.feature:12", name="密码错误时不放行", steps=s1),
+                          Scenario(id="features/login.feature:20", name="锁定账户提示", steps=s2)))
+
+
+def _explain_run(tmp_path, *, evidence=..., run_status=None, with_results=True, job_only=False,
+                 evidence_text=None):
+    """在 tmp_path/reports 下搭一个 run：run_meta/run_state + 一份 JobResult（+ 真 evidence.json）。
+
+    evidence=None → step 2 不挂 evidence ref（no_ref）；evidence_text 给非 JSON 串 → unreadable；
+    with_results=False → 只落 run_meta/run_state（detached run 未 finalize 的零文件形态）；
+    job_only=True → JobResult 有 job 级判定但零 step 记录（worker 没起来/起来就被掐）。
+    """
+    from gherkai_core.model import (JobResult, JobState, ReportRef, RunMeta, RunState, ScenarioResult,
+                                    Status as S, StepResult, Votes)
+    root = tmp_path / "reports"
+    run_id = "20260910T080630Z-9fa261"
+    job = _explain_job()
+    refs2 = [ReportRef(kind="trajectory", ref="file:///tmp/act-0.html", label="act 0")]
+    if evidence is not ... or evidence_text is not None:
+        payload = evidence_text if evidence_text is not None else json.dumps(evidence, ensure_ascii=False)
+    else:
+        payload = json.dumps(_evidence_fixture(), ensure_ascii=False)
+    if evidence is not None or evidence_text is not None:
+        ev_dir = root / run_id / "evidence"
+        ev_dir.mkdir(parents=True, exist_ok=True)
+        ev_path = ev_dir / "evidence.json"
+        ev_path.write_text(payload, encoding="utf-8")
+        refs2.insert(0, ReportRef(kind="evidence", ref=ev_path.resolve().as_uri(), label="evidence"))
+    scenarios = [] if job_only else [
+        ScenarioResult(scenario_id="features/login.feature:12", status=S.FAILED, duration_ms=22600.0, steps=[
+            StepResult(index=0, status=S.PASSED, duration_ms=1100.0),
+            StepResult(index=1, status=S.PASSED, duration_ms=9400.0),
+            StepResult(index=2, status=S.FAILED, duration_ms=12100.0, votes=Votes(yes=0, total=1),
+                       error_type="assertion_failed",
+                       message="AI 断言未过多数票（0/1）：页面显示「登录成功」", report_refs=tuple(refs2)),
+        ]),  # step 3 无记录（被中止：scenario_done 没到，这一步的记录不进 jobs/*.json）
+        ScenarioResult(scenario_id="features/login.feature:20", status=S.ERROR, steps=[
+            StepResult(index=0, status=S.ERROR, error_type="network_error",
+                       message="建连失败（网络/SSL 瞬时故障）：timed out",
+                       report_refs=(ReportRef(kind="trajectory", ref="file:///tmp/act-1.html", label="act 0"),)),
+            StepResult(index=1, status=S.SKIPPED, shortcircuited=True),
+        ]),
+    ]
+    jr = JobResult(job=job, status=S.ABORTED if job_only else S.FAILED, scenarios=scenarios,
+                   session_id="01a0deadbeef", error_type="timeout" if job_only else None,
+                   message="job 墙钟超时被停" if job_only else None,
+                   report_refs=(ReportRef(kind="summary", ref="file:///tmp/summary.json", label="summary"),))
+    st = run_status or (S.ABORTED if job_only else S.FAILED)
+    run_store, result_store, _rp, _mk = compose.build_local_stores(report_dir=str(root))
+    run_store.save_run(RunMeta(run_id=run_id, created_at="2026-09-10T08:06:30Z", jobs=(job,)),
+                       RunState(run_id=run_id, status=st, jobs={job.scope_id: JobState(job.scope_id, st)},
+                                started_at="t0", ended_at="t9" if st in m.TERMINAL_STATUSES else None))
+    if with_results:
+        result_store.save_job_result(run_id, jr)
+    return root, run_id
+
+
+def _explain(capsys, root, run_id, *flags):
+    rc = m.main(["explain", run_id, *flags, "--report-dir", str(root)])
+    cap = capsys.readouterr()
+    return rc, cap.out, cap.err
+
+
+def test_explain_text_renders_reason_thought_screenshot_and_gaps(tmp_path, capsys):
+    """文本形态（ADR 0042 决策四）：原因行、末个带推理的 frame 的 think + 截图、被省略 frame 计数、
+    短路旁注只在 shortcircuited 的 step 上、无记录 step、证据缺失的 step 打「无 AI 证据」+ 兜底 ref。"""
+    root, run_id = _explain_run(tmp_path)
+    rc, out, err = _explain(capsys, root, run_id)
+    assert rc == 0  # 证据渲染器不表判定：run 判 failed 也退 0
+    assert f"run {run_id}  status=failed" in out
+    assert "scope features/login.feature:6  engine=novaact  status=failed  session=01a0deadbeef" in out
+    assert "scenario features/login.feature:12  密码错误时不放行  failed" in out
+    assert "step 2  Then 页面显示「登录成功」  failed  votes 0/1  (12.1s)" in out
+    assert "原因：AI 断言未过多数票（0/1）：页面显示「登录成功」" in out
+    assert "act 0  vote=false  url=https://app.example.com/login" in out
+    assert "think: I am on the login page." in out and "Returning false." in out
+    assert "截图: file:///tmp/act-0-frame-4.jpg" in out
+    assert "其余 1 个 frame 已省略（--full 查看）" in out          # 两个 frame，只渲染了带推理的那个
+    assert "step 3  When 点击「退出」  无记录（未执行或未上报）" in out
+    assert "step 0  Given 打开 \"https://app.example.com/login\"  error  (network_error)" in out
+    assert "无 AI 证据" in out and "report（act 0）: file:///tmp/act-1.html" in out   # 缺证据 → 兜底指针
+    marker = "⚠ 因前置 step error 被跳过（未执行）"
+    assert out.count(marker) == 1 and marker in out.split("step 1  Then 页面提示「账户已锁定」")[1]
+    assert "passed  (1.1s)" in out and "think" not in out.split("step 0  Given")[1].split("step 1")[0]
+    assert err == ""  # 终态 run：无提示行
+
+
+def test_explain_json_is_single_document_with_record_and_evidence_gaps(tmp_path, capsys):
+    """--json：stdout 只有一个可严格解析的文档；无记录 step 给 status=null + record_missing；
+    有记录但没挂 evidence 的给 evidence_missing=no_ref；挂了的内嵌 evidence 全文。"""
+    root, run_id = _explain_run(tmp_path)
+    rc, out, err = _explain(capsys, root, run_id, "--json")
+    assert rc == 0
+    doc = json.loads(out)
+    assert doc["run_id"] == run_id and doc["status"] == "failed" and len(doc["scopes"]) == 1
+    sc = doc["scopes"][0]
+    assert sc["scope_id"] == "features/login.feature:6" and sc["engine"] == "novaact"
+    assert sc["session_id"] == "01a0deadbeef" and sc["report_refs"][0]["kind"] == "summary"
+    s1, s2 = sc["scenarios"]
+    assert [st["record_missing"] for st in s1["steps"]] == [False, False, False, True]
+    assert s1["steps"][3]["status"] is None and s1["steps"][3]["evidence_missing"] == "no_ref"
+    assert s1["steps"][0]["evidence_missing"] == "no_ref" and s1["steps"][0]["evidence"] is None
+    ev = s1["steps"][2]["evidence"]
+    assert s1["steps"][2]["evidence_missing"] is None and ev["schema_version"] == 1
+    assert ev["acts"][0]["vote"] is False and ev["acts"][0]["frames"][1]["thought"].startswith("I am on")
+    assert s2["steps"][1]["shortcircuited"] is True and s2["steps"][1]["status"] == "skipped"
+    assert s2["steps"][0]["message"].startswith("建连失败")
+    assert err == ""
+
+
+def test_explain_scenario_selector_matches_id_line_title_and_ors(tmp_path, capsys):
+    """--scenario：id 全等 / 行号（scenario_id 尾部数字段）/ 标题子串三档，可重复且彼此为或。"""
+    root, run_id = _explain_run(tmp_path)
+    for sel in ("features/login.feature:12", "12", "密码错误"):
+        rc, out, _ = _explain(capsys, root, run_id, "--scenario", sel)
+        assert rc == 0 and "features/login.feature:12" in out and "features/login.feature:20" not in out
+    rc, out, _ = _explain(capsys, root, run_id, "--scenario", "12", "--scenario", "锁定")
+    assert rc == 0 and "features/login.feature:12" in out and "features/login.feature:20" in out
+    rc, _out, err = _explain(capsys, root, run_id, "--scenario", "不存在的标题")
+    assert rc == 2 and "没有 scenario 匹配" in err and "features/login.feature:20  锁定账户提示  2 step" in err
+    assert m.main(["explain", run_id, "--report-dir", str(root), "--scenario", " "]) == 2
+
+
+def test_explain_step_needs_scenario_and_lists_candidates_when_absent(tmp_path, capsys):
+    """--step 单给退 2（步号没有归属）；命中的 scenario 都没有第 N 步 → 退 2 并列出候选 id 与步数；
+    正常时只渲染每条命中 scenario 的第 N 步。"""
+    root, run_id = _explain_run(tmp_path)
+    rc, _out, err = _explain(capsys, root, run_id, "--step", "2")
+    assert rc == 2 and "--step 要和 --scenario 一起给" in err
+    rc, _out, err = _explain(capsys, root, run_id, "--scenario", "12", "--step", "9")
+    assert rc == 2 and "都没有第 9 步" in err and "features/login.feature:12  4 step" in err
+    rc, out, _ = _explain(capsys, root, run_id, "--scenario", "12", "--step", "2")
+    assert rc == 0 and "step 2  Then" in out and "step 0  Given" not in out
+
+
+def test_explain_all_expands_passed_and_full_drops_the_text_budget(tmp_path, capsys):
+    """--all 也展开 passed step；--full 逐 frame 全文（省略计数消失、无推理的 frame 也现身）。"""
+    root, run_id = _explain_run(tmp_path)
+    _rc, out, _ = _explain(capsys, root, run_id, "--full")
+    assert "其余" not in out and "frame 0  url=https://app.example.com" in out and "frame 1" in out
+    _rc, out, _ = _explain(capsys, root, run_id)
+    assert "step 0  Given 打开 \"https://app.example.com/login\"  passed  (1.1s)" in out
+    passed_block = out.split("step 0  Given")[1].split("step 1")[0]
+    assert "无 AI 证据" not in passed_block           # 默认不展开 passed
+    _rc, out, _ = _explain(capsys, root, run_id, "--all")
+    assert "无 AI 证据" in out.split("step 0  Given")[1].split("step 1")[0]
+
+
+def test_explain_long_thought_is_truncated_with_pointer(tmp_path, capsys):
+    """单段推理超预算 → 截断并指出完整内容在哪（--json 或那份 evidence.json）；--full 不截断。"""
+    root, run_id = _explain_run(tmp_path, evidence=_evidence_fixture(thought="推" * 1000))
+    _rc, out, _ = _explain(capsys, root, run_id)
+    assert "…（已截断；完整内容见 --json 或 evidence.json：file://" in out
+    assert out.count("推") == 800
+    _rc, out, _ = _explain(capsys, root, run_id, "--full")
+    assert "已截断" not in out and out.count("推") == 1000
+
+
+def test_explain_unreadable_and_unsupported_evidence(tmp_path, capsys):
+    """读不到/解不开 → unreadable；schema_version 不认识 → unsupported_schema。两者都不影响退出码（0）。"""
+    root, run_id = _explain_run(tmp_path, evidence_text="{ 不是 JSON")
+    rc, out, _ = _explain(capsys, root, run_id)
+    assert rc == 0 and "AI 证据读不到" in out
+    rc, out, _ = _explain(capsys, root, run_id, "--json")
+    assert rc == 0 and json.loads(out)["scopes"][0]["scenarios"][0]["steps"][2]["evidence_missing"] == "unreadable"
+    root, run_id = _explain_run(tmp_path / "v2", evidence=_evidence_fixture(schema_version=99))
+    rc, out, _ = _explain(capsys, root, run_id)
+    assert rc == 0 and "认不出" in out
+    rc, out, _ = _explain(capsys, root, run_id, "--json")
+    assert json.loads(out)["scopes"][0]["scenarios"][0]["steps"][2]["evidence_missing"] == "unsupported_schema"
+
+
+def test_explain_unknown_run_and_scope_exit_2(tmp_path, capsys):
+    root, run_id = _explain_run(tmp_path)
+    assert m.main(["explain", "no-such-run", "--report-dir", str(root)]) == 2
+    assert "未找到 run" in capsys.readouterr().err
+    assert m.main(["explain", run_id, "no-such-scope", "--report-dir", str(root)]) == 2
+    err = capsys.readouterr().err
+    assert "未找到 scope" in err and "features/login.feature:6" in err   # 列出本 run 已落地的 scope
+    assert m.main(["explain", run_id, "features/login.feature:6", "--report-dir", str(root)]) == 0
+
+
+def test_explain_detached_run_without_job_files_exits_0_with_one_hint(tmp_path, capsys):
+    """detached run 未终态时零判定明细（全 job 终态才一次性落）→ 退 0 + 一行提示；--json 不打提示、
+    stdout 仍只有一个文档（机读侧靠顶层 status 自明）。"""
+    from gherkai_core.model import Status as S
+    root, run_id = _explain_run(tmp_path, with_results=False, run_status=S.RUNNING)
+    rc, out, err = _explain(capsys, root, run_id)
+    assert rc == 0 and out == "" and "判定明细尚未落地" in err and f"gherkai status {run_id} --wait" in err
+    rc, out, err = _explain(capsys, root, run_id, "--json")
+    assert rc == 0 and err == ""
+    doc = json.loads(out)
+    assert doc["status"] == "running" and doc["scopes"] == []
+
+
+def test_explain_nonterminal_sync_run_says_partial(tmp_path, capsys):
+    """同步 run 中途已有落地的 job → 首行提示「以下为已完成部分」；--json 不打提示行。"""
+    from gherkai_core.model import Status as S
+    root, run_id = _explain_run(tmp_path, run_status=S.RUNNING)
+    rc, out, err = _explain(capsys, root, run_id)
+    assert rc == 0 and "run 仍在跑，以下为已完成部分" in err and "scenario features/login.feature:12" in out
+    rc, out, err = _explain(capsys, root, run_id, "--json")
+    assert rc == 0 and err == "" and json.loads(out)["status"] == "running"
+
+
+def test_explain_job_without_step_records_gets_a_job_block(tmp_path, capsys):
+    """零 step 记录的 job（worker 没起来/起来就被掐）：单独一段 job 判定块（判定 + 归因 + 产物 + 去看 worker 日志），
+    骨架仍逐 step 打「无记录」。"""
+    root, run_id = _explain_run(tmp_path, job_only=True)
+    rc, out, _ = _explain(capsys, root, run_id)
+    assert rc == 0
+    assert "判定：aborted  (timeout: job 墙钟超时被停)" in out
+    assert "诊断细节见 worker 日志" in out
+    assert "report（summary）: file:///tmp/summary.json" in out
+    # 两条 scenario 各自也没有判定记录（scenario_done 没到）→ 2 条 scenario 行 + 4+2 条 step 行
+    assert out.count("无记录（未执行或未上报）") == 8
+    assert "scenario features/login.feature:20  锁定账户提示  无记录（未执行或未上报）" in out
+    doc = json.loads(_explain(capsys, root, run_id, "--json")[1])
+    assert doc["scopes"][0]["aborted_hint"] is None      # 零记录不是「部分记录」，不打那句
+
+
+def _explain_cloud_stores(jr, state):
+    """假的云端两 store（explain 只读 RunStore/ResultStore）：验接线与读路径，不连真 AWS。"""
+    class _RunStore:
+        def load_run_state(self, run_id):
+            return state
+
+    class _ResultStore:
+        def load_all(self, run_id):
+            return [jr]
+
+        def load_job_result(self, run_id, scope_id):
+            return jr if scope_id == jr.scope_id else None
+
+    return _RunStore(), _ResultStore(), object(), (lambda run_id, report_index: {})
+
+
+def test_explain_cloud_blocks_on_version_skew_before_any_cloud_read(monkeypatch, capsys):
+    """cloud 档第一道闸是版本 skew（先于任何云端读）：block → 退 2，且根本没去装 store。"""
+    monkeypatch.setattr(m.compose, "check_backend_skew",
+                        lambda **kw: (compose.SKEW_BLOCK, "本机 CLI 新于后端", "1.3.0"))
+    monkeypatch.setattr(m.compose, "build_cloud_stores",
+                        lambda **kw: (_ for _ in ()).throw(AssertionError("skew 拦下后不该装 store")))
+    assert m.main(["explain", "r", "--backend", "cloud", "--prefix", "vfy-", "--region", "us-east-1"]) == 2
+    assert "本机 CLI 新于后端" in capsys.readouterr().err
+
+
+def test_explain_cloud_reads_evidence_from_s3(monkeypatch, capsys):
+    """cloud 档：判定明细经 ResultStore 读回，证据经注入的 s3 client `get_object` 读回（s3:// 解引用路径）。"""
+    import io
+
+    from gherkai_core.model import JobResult, JobState, ReportRef, RunState, ScenarioResult, StepResult, Votes
+    ev = json.dumps(_evidence_fixture(), ensure_ascii=False).encode("utf-8")
+    job = _explain_job()
+    jr = JobResult(job=job, status=Status.FAILED, session_id="s-1", scenarios=[
+        ScenarioResult(scenario_id="features/login.feature:12", status=Status.FAILED, steps=[
+            StepResult(index=2, status=Status.FAILED, votes=Votes(yes=0, total=1), message="断言未过",
+                       report_refs=(ReportRef(kind="evidence", ref="s3://bkt/reports/r/ev.json", label="evidence"),))])])
+    state = RunState(run_id="r", status=Status.FAILED, jobs={job.scope_id: JobState(job.scope_id, Status.FAILED)},
+                     ended_at="t9")
+    monkeypatch.setattr(m.compose, "check_backend_skew", lambda **kw: (compose.SKEW_OK, "", "1.4.1"))
+    monkeypatch.setattr(m.compose, "build_cloud_stores", lambda **kw: _explain_cloud_stores(jr, state))
+    got = []
+
+    class _S3:
+        def get_object(self, Bucket, Key):
+            got.append((Bucket, Key))
+            return {"Body": io.BytesIO(ev)}
+
+    monkeypatch.setattr(m.compose, "_make_s3_client", lambda **kw: _S3())
+    rc = m.main(["explain", "r", "--backend", "cloud", "--prefix", "vfy-", "--region", "us-east-1", "--json"])
+    out = capsys.readouterr().out
+    assert rc == 0 and got == [("bkt", "reports/r/ev.json")]
+    step = json.loads(out)["scopes"][0]["scenarios"][0]["steps"][2]
+    assert step["evidence"]["acts"][0]["vote"] is False and step["evidence_missing"] is None

@@ -60,6 +60,7 @@ from gherkai_worker_novaact.lib.artifact_upload import ArtifactUploader  # 产�
 # 使用方自己的 step 目录在 main() 里加载（本 import 之后 = 内建先注册，ADR 0037 决策 4）。
 from gherkai_worker_novaact import deterministic as _deterministic
 from gherkai_worker_novaact import deterministic_steps  # noqa: F401  仅为触发注册（其顶层 @deterministic 副作用）
+from gherkai_worker_novaact import evidence as _evidence  # step 级机读证据（ADR 0042；SDK 格式耦合全关在那个模块）
 from gherkai_worker_novaact.user_steps import EX_STEPS_LOAD, UserStepsError, load_user_steps
 
 # region 不再硬编码兜底（ADR 0016 决策 C）：None 时不再抢在 profile config 前跑错区。**正常路径由组合根落实**——
@@ -234,14 +235,65 @@ def _presend_act_siblings(step_traj: list[str]) -> None:
                 log(f"act 边界抢传 json 失败（忽略、scope 末 flush 兜底）：{e}")
 
 
-def _run_step(nova, scenario_id: str, step: dict, votes_n: int, sink: EventSink) -> str:
-    """派发执行一个 step，吐 step_done 事件（带本 step 的 trajectory reportRefs），返回 status。
+def _act_record(index: int, prompt: str | None, obj, *, vote: bool | None = None,
+                error: str | None = None) -> _evidence.ActRecord:
+    """一次 AI 调用 → evidence 的 act 输入材料（`obj` = act 的结果对象，抛错时是异常对象——两者都带 metadata）。
+
+    trajectory 路径取 `metadata.trajectory_file_path`（json，沿用 `_collect_traj` 的同一来源；**不用**公开属性
+    `ActResult.trajectory_file_path`，未开 replayable 时它恒 None，见 ADR 0042 决策一映射表）。抛错的 act 该
+    文件通常不存在——那是 SDK 事实，映射侧按 `frames: []` 处理、不报抽取失败。
+    """
+    md = getattr(obj, "metadata", None)
+    p = getattr(md, "trajectory_file_path", None) if md is not None else None
+    return _evidence.ActRecord(
+        index=index, prompt=prompt, vote=vote, error=error,
+        time_worked_s=getattr(md, "time_worked_s", None) if md is not None else None,
+        trajectory_path=str(p) if p else None,
+    )
+
+
+def _attach_evidence(ev: dict, *, scope_id: str | None, scenario_id: str, step: dict, acts: list) -> None:
+    """产本 step 的 evidence（json + 截图）、即时上传 json、把 ref **追加**进 step_done 的 reportRefs（ADR 0042 决策一）。
+
+    **整体 best-effort、且必须裹在自己的 try 里（ADR 0042 决策二，这是对 0029「reportRef 文件上传失败即抛」开的
+    具名例外）**：evidence 是判定的注释，缺了只损排障便利；trajectory 是报告链接本身，其强保证不动。
+    调用点须在 `_run_step` 的 act 异常分类路径**之外**——否则一次上传抖动就把已成的 passed 判定翻成
+    network_error / engine_error。故这里吞掉一切异常、只留一行日志。
+    `status` / `message` 从要 emit 的事件里取（不另算一份，免两份漂）。**追加而非赋值**：`_attach_traj_refs`
+    是整体赋值，两者各自赋值会互相覆盖 → 本函数须在它之后调、并 extend 同一个列表。
+    没有 AI 调用的 step（确定性命中 / URL 导航）不产 evidence。
+    """
+    try:
+        if _no_artifacts() or not acts:
+            return  # `--no-report`：不产、不上报（与引擎原生产物同档）
+        base = os.environ.get("NOVA_LOGS_DIR")
+        if not base:
+            return  # 无产物落点（手动直跑/脚手架）：SDK 只写它自己的临时目录，evidence 无处安身
+        path = _evidence.write_step_evidence(
+            base_dir=base, scope_id=scope_id, scenario_id=scenario_id, step_index=step["index"],
+            keyword=step.get("keyword"), text=step.get("text"),
+            status=ev.get("status"), message=ev.get("message"), acts=acts,
+            ref_for=_get_uploader().ref_for,   # 截图只算 URI、不即时传（字节随 scope 末 flush）
+        )
+        # evidence.json 的 ref 必须随 step_done 走 → 即时上传拿 ref（小文件，cloud 一次 PutObject；local no-op）
+        ref = _get_uploader().to_report_ref(os.path.abspath(path))
+        ev.setdefault("reportRefs", []).append({"kind": "evidence", "ref": ref, "label": "evidence"})
+    except Exception as e:  # noqa: BLE001  evidence 全链 best-effort：一行日志、判定与事件照发
+        log(f"本步证据未能保存（不影响本步判定）：{type(e).__name__}: {e}")
+
+
+def _run_step(nova, scenario_id: str, step: dict, votes_n: int, sink: EventSink,
+              *, scope_id: str | None = None) -> str:
+    """派发执行一个 step，吐 step_done 事件（带本 step 的 trajectory + evidence reportRefs），返回 status。
 
     sink：事件出口（ADR 0024 I/O 边缘可注入接口，参数注入使测试可注 fake）——本函数所有事件经 sink.emit 吐。
 
     votes_n：AI 断言（Then）投票次数（来自 job.assertionVotes，ADR 0014）；1=不抖动检测。
     trajectory 收集在**本 step 局部**（每次 AI act 一个），随该 step 的 step_done 报出 step 级 reportRefs
     （ADR 0027 下沉：act 挂到其所属 step，不再聚合到 scenario 级）。确定性命中/URL 导航步不调 act、无 trajectory。
+
+    scope_id：只为写进 evidence 的自包含头（ADR 0042 决策一），由 main 经 `_run_scenario` 透传；
+    缺省 None → evidence 该字段为 null（schema 逐字段容缺），判定与事件不受影响。
 
     派发优先级（ADR 0022/0020/0024）：
       ① 确定性注册表命中（测试开发注册的精确 handler，不投票、可复现）
@@ -252,6 +304,8 @@ def _run_step(nova, scenario_id: str, step: dict, votes_n: int, sink: EventSink)
     keyword = step["keyword"]
     text = step["text"]
     step_traj: list[str] = []  # 本 step 的 trajectory 路径（act 逐个收进来）
+    acts: list = []  # 本 step 各 AI 调用的 evidence 材料（ADR 0042 决策一：一个 act = 一次 act/act_get）
+    inflight: str | None = None  # 已发出、尚未拿到结果的 act 的指令：抛错时据它补一条 error act（其余时刻为 None）
     tw_total = 0.0  # 本 step 已真实计费的 time_worked_s 累计（多票逐票加；except 分支也要报——费用不随异常蒸发，ADR 0024）
 
     sink.emit({"type": "step_started", "scenarioId": scenario_id, "stepIndex": idx})  # step 时长起点
@@ -294,12 +348,16 @@ def _run_step(nova, scenario_id: str, step: dict, votes_n: int, sink: EventSink)
                 if _stop.is_set():
                     break  # 停止信号（ADR 0024 flag-only）：多票途中收到 → 不再投后续票
                 # act 套 timeout（ADR 0024 act 有界返回）：到点抛 ActTimeoutError（可 catch、归 timeout）
+                inflight = instruction
                 r = nova.act_get(instruction, BOOL_SCHEMA, timeout=ACT_TIMEOUT_S)
-                votes.append(bool(r.matches_schema and r.parsed_response))
+                vote = bool(r.matches_schema and r.parsed_response)
+                votes.append(vote)
                 c = _cost_from_result(r)  # 每票各自的原生量（Nova 每 act 独立报，对称累加而非覆盖）
                 if c and c.get("time_worked_s") is not None:
                     tw_total += c["time_worked_s"]
                 _collect_traj(r, step_traj)  # N 票各一个 trajectory，都挂本 step
+                acts.append(_act_record(len(acts), instruction, r, vote=vote))  # 票源同一表达式（ADR 0042 决策一）
+                inflight = None
             if len(votes) < votes_n:
                 # 票没投满（只可能因循环顶 _stop 提前 break）→ **不 emit 带 verdict 的 step_done**：
                 # 用部分票 + 完整 votes_n 分母算 passed 会把「外部中止」误标成确定的断言判定（如 1/3→failed、
@@ -322,24 +380,34 @@ def _run_step(nova, scenario_id: str, step: dict, votes_n: int, sink: EventSink)
             if not passed:
                 ev["errorType"] = "assertion_failed"
                 ev["message"] = f"AI 断言未过多数票（{yes}/{votes_n}）：{text}"
+            # evidence 在 _attach_traj_refs 之后（那个整体赋值 reportRefs，本函数 extend 同一列表）、在 message
+            # 之后（evidence 冗余 step_done 的 status/message 以自包含）。best-effort、失败不影响本事件（ADR 0042 决策二）。
+            _attach_evidence(ev, scope_id=scope_id, scenario_id=scenario_id, step=step, acts=acts)
             sink.emit(ev)
             return "passed" if passed else "failed"
 
         # When / Given（非 URL）→ AI 动作（无 votes）
         # act 套 timeout（ADR 0024 act 有界返回）：到点抛 ActTimeoutError（可 catch、归 timeout）
-        r = nova.act(_instruction(text, step), timeout=ACT_TIMEOUT_S)
+        instruction = _instruction(text, step)
+        inflight = instruction
+        r = nova.act(instruction, timeout=ACT_TIMEOUT_S)
         _collect_traj(r, step_traj)
+        acts.append(_act_record(len(acts), instruction, r))  # 动作步不投票 → vote=None（ADR 0042 决策一）
+        inflight = None
         ev = {"type": "step_done", "scenarioId": scenario_id, "stepIndex": idx, "status": "passed"}
         cost = _cost_from_result(r)
         if cost:
             ev["cost"] = cost
         _attach_traj_refs(ev, step_traj)
+        _attach_evidence(ev, scope_id=scope_id, scenario_id=scenario_id, step=step, acts=acts)
         sink.emit(ev)
         return "passed"
 
     except Exception as e:
-        # 失败的 act 最需要看 trajectory——Nova 的 ActError 也带 metadata.trajectory_file_path
-        # （SDK 在 finally 已写盘），同一 helper 收集（ADR 0027：失败 act 的产物不丢）。
+        # 失败的 act 最需要看 trajectory——Nova 的 ActError 也带 metadata.trajectory_file_path，同一 helper
+        # 收集（ADR 0027：失败 act 的产物不丢）。**但那条路径给的 `_trajectory.json` 通常不存在**：SDK 的写盘
+        # 闸门是「act 正常返回且有 step」，抛错时只落 `.html`（`_collect_traj` 正是取 .html、故仍有效；唯一例外
+        # 是 schema 不匹配——结果已就绪才抛，json 仍写）。evidence 侧据此把 error act 记成 frames []（ADR 0042 决策一）。
         _collect_traj(e, step_traj)
         # 诊断分类细化（ADR 0028）：act 中途若是网络瞬时故障（CDP 闪断等），标 network_error 比笼统
         # engine_error 更准——便于排查"是网络抖动还是 AI 真出错"。**仅分类、不触发重试/恢复**：act 不幂等，
@@ -358,6 +426,11 @@ def _run_step(nova, scenario_id: str, step: dict, votes_n: int, sink: EventSink)
             ev["cost"] = {"time_worked_s": tw}
         # 失败 act 的 trajectory 最该留（ADR 0027/0028）——protect_emit：上传再失败也绝不吞 engine_error 事件
         _attach_traj_refs(ev, step_traj, protect_emit=True)
+        # 抛错的那次 AI 调用也进 evidence（ADR 0042 决策一 error act 契约：error 非空、prompt/time_worked_s 仍填、
+        # frames 为空）。inflight 非空 = 异常出自某次 act/act_get；为空则异常在确定性 handler/指令拼装等处，无 act 可记。
+        if inflight is not None:
+            acts.append(_act_record(len(acts), inflight, e, error=ev["message"]))
+        _attach_evidence(ev, scope_id=scope_id, scenario_id=scenario_id, step=step, acts=acts)
         sink.emit(ev)
         return "error"
 
@@ -409,7 +482,8 @@ def _instruction(text: str, step: dict) -> str:
     return f"{base}\n{extra}" if extra else base
 
 
-def _run_scenario(nova, scenario_id: str, steps: list[dict], votes_n: int, sink: EventSink) -> list[str]:
+def _run_scenario(nova, scenario_id: str, steps: list[dict], votes_n: int, sink: EventSink,
+                  *, scope_id: str | None = None) -> list[str]:
     """scope 内串行跑一个 scenario 的 steps，上游 error 后**短路**后续 step（ADR 0031 决定六 / 0028）。
 
     短路：scenario 内一旦某 step `status==error`（导航 SSL 失败等），后续 step 不再调 AI——
@@ -420,6 +494,8 @@ def _run_scenario(nova, scenario_id: str, steps: list[dict], votes_n: int, sink:
     **短路只作用于本 scenario**（不跨 scenario：下一 scenario 可能导航到新页恢复，独立测试用例不该被牵连；
     跨 job 的中止是 fail-fast 的职责，两者正交，ADR 0031 决定六）。返回各步 status——被跳过步**不进** statuses，
     故不参与 _aggregate；scenario 判定由那个 error step 决定（与后面短路了几步无关）。
+
+    scope_id：只为透传给 evidence 的自包含头（ADR 0042 决策一），对派发/判定无影响。
     """
     statuses: list[str] = []
     shortcircuit = False
@@ -431,7 +507,7 @@ def _run_scenario(nova, scenario_id: str, steps: list[dict], votes_n: int, sink:
         if shortcircuit:
             sink.emit({"type": "step_skipped", "scenarioId": scenario_id, "stepIndex": st["index"]})
             continue
-        status = _run_step(nova, scenario_id, st, votes_n, sink)
+        status = _run_step(nova, scenario_id, st, votes_n, sink, scope_id=scope_id)
         if status == "aborted":
             break  # step 被外部中止（投票途中收到 _stop）：不进 statuses、不参与 _aggregate，
             # 与循环顶 _stop 检查同语义（外部中止非执行事实）。下轮循环顶的 _stop 检查也会 break，这里提前收。
@@ -701,7 +777,8 @@ def main() -> int:
                     # trajectory 现由每个 _run_step 挂进各自 step_done 的 step 级 reportRefs（ADR 0027 下沉）——
                     # 不再在 scenario 级聚合；scenario_done 不带 reportRefs（协议字段保留、向后兼容）。
                     # scope 内 step 短路（上游 error 跳过后续、发 step_skipped，ADR 0031 决定六）在 _run_scenario 内。
-                    statuses = _run_scenario(nova, sid, sc["steps"], votes_n, sink)
+                    # scope_id 透传到 step：evidence 的头里带它（文件自包含，ADR 0042 决策一）
+                    statuses = _run_scenario(nova, sid, sc["steps"], votes_n, sink, scope_id=scope["id"])
                     # scenario_done 出口 + 中止护栏（模块级 _emit_scenario_done_unless_stopped，供单测直驱）：
                     # 中途中止时不 emit（部分 statuses 会算出假 passed），返 True → 停本 session。
                     if _emit_scenario_done_unless_stopped(sink, sid, statuses):

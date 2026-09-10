@@ -121,12 +121,12 @@ class LocalReportStore:
 def _relative_href(ref: str, resolved_run_dir: Path) -> str:
     """把 run 树内的本地产物 ref 转成相对 run_dir 的 href；否则原样返回 ref（ADR 0027 href 相对化）。
 
-    只对本地文件（file:// 或裸本地路径，见 _local_path）相对化，远端 scheme（s3/http…）原样——
+    只对本地文件（file:// 或裸本地路径，见 local_path_from_uri）相对化，远端 scheme（s3/http…）原样——
     **只按 scheme 分支、绝不按 kind 分支**。产物路径 resolve() 后与已解析的 run_dir 算相对：防 macOS
     /tmp↔/private/tmp 等 symlink 造假 ValueError → 误回落绝对（resolved_run_dir 已由调用方 resolve）。
     产物落在 run_dir 树外（worker 没吃到落点环境变量、落了 SDK 临时目录）→ relative_to 抛错 → 回落 ref（绝对，不可移植）。
     """
-    local = _local_path(ref)
+    local = local_path_from_uri(ref)
     if local is None:
         return ref  # 非本地文件（s3/http…）：无相对概念，原样
     try:
@@ -136,8 +136,12 @@ def _relative_href(ref: str, resolved_run_dir: Path) -> str:
     return rel.as_posix()  # 相对 run_dir（index.html 所在目录）；POSIX 分隔符，URL/跨平台友好
 
 
-def _local_path(ref: str) -> Path | None:
+def local_path_from_uri(ref: str) -> Path | None:
     """若 ref 指向本地文件（file:// 或裸路径），返回 Path；远端（http/s3 等）返回 None。
+
+    **公开小工具**（本模块 href 相对化之外的第二个消费者：皮层解引用自有 schema 的产物 ref，ADR 0042
+    决策四）——`file://` → 路径的解析只此一份，别在别处再写第二份 urlparse+url2pathname。
+    对 ReportRef 的不透明搬运铁律（ADR 0027）不受影响：本函数只算路径、不读内容、不按 kind 分支。
 
     用 url2pathname 正确还原 file:// URI：解 percent-encoding（如 %20→空格——Nova trajectory
     文件名含中文/空格会被编码），并把 netloc(host) 并回路径。带非 localhost host 的（远端/UNC）→ None。
