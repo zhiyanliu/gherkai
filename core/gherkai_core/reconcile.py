@@ -49,18 +49,20 @@ class Launcher(Protocol):
     def launch(self, job: Job) -> None: ...
 
 
-def finalize_report(run_id, meta, event_log, report_store, now_iso: str) -> None:
+def finalize_report(run_id, meta, event_log, report_store, now_iso: str, *, run_duration_ms: float | None = None) -> None:
     """done 后写 RunReport（派生视图，**永远最后**；ADR 0030 决定三 / 0034 收尾）。宿主在 tick 返回 done 后调。
 
     判定真值（ResultStore 各 job）**不在此写**——它在 tick 的 finalize 分支、CAS 之前落（写序见 `tick`）；这里只剩
     派生的报告：从 events 全量重放 project_full → RunResult → report_store.write。幂等（重放 + 覆盖写同 key）——多个
     推进者都 done 都写无害。写失败隔离：判定真值已随 commit 落定、报告可从 RunResult 重建，不让它击穿已 done 的 run。
+    run_duration_ms：run 级墙钟（RunState started_at→ended_at），宿主算好传入（core 不解析时间戳）；缺则报告墙钟显「?」。
     **唯一一份**（cloud Lambda / local per-run 两宿主同调此处，ADR 0034 core 拆分）。纯编排：不 import boto3。
     """
     if report_store is None:
         return
     try:
-        report_store.write(run_id, project_full(meta, event_log.records()), created_at=now_iso)
+        report_store.write(run_id, project_full(meta, event_log.records(), run_duration_ms=run_duration_ms),
+                           created_at=now_iso)
     except Exception:
         pass  # 派生视图写失败不击穿判定真值（ADR 0030 决定三）
 

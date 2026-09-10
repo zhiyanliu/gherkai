@@ -89,7 +89,7 @@ gherkai run <features>    # 原阻塞皮 = 同进程 schedule() 驱动循环（T
      ② HWM 条件写落 RunState（挡 stale 覆盖）
      ③ running<max_concurrency 且有 pending：CAS(pending→running) 抢一个 → RunTask 启下一个
      ④ 全 job 终态：同一份 events 快照 → 落各 job 判定真值（ResultStore）→ finalize CAS 写总 status（commit point）
-        → 聚合 RunReport（派生、失败隔离）。写序 [0030](./0030-realtime-persistence-seam.md) 决定三：CAS 前失败可重试、CAS 后失败无人重试
+        → 聚合 RunReport（派生、失败隔离；run 级墙钟 = RunState started_at→ended_at，宿主算好传入）。写序 [0030](./0030-realtime-persistence-seam.md) 决定三：CAS 前失败可重试、CAS 后失败无人重试
 5. 级联：下一 task STOPPED → 再触发 3-4 → … 直到全 done
 ```
 

@@ -111,6 +111,18 @@ def parse_iso(ts: str) -> datetime:
     return datetime.fromisoformat(ts.replace("Z", "+00:00"))
 
 
+def run_duration_ms(state) -> float | None:
+    """detached run 的 run 级墙钟（毫秒）= RunState `ended_at` − `started_at`（提交落库到 finalize commit，含排队/起容器；
+    ADR 0024「三级执行时长」detached 条）。两端任一缺或解析不了 → None（报告显「?」——派生指标，绝不让收尾因它炸）。
+    宿主在 finalize_report 前调，算好传给 core。"""
+    if state is None or not getattr(state, "started_at", None) or not getattr(state, "ended_at", None):
+        return None
+    try:
+        return (parse_iso(state.ended_at) - parse_iso(state.started_at)).total_seconds() * 1000.0
+    except ValueError:
+        return None
+
+
 # ============================================================================
 # worker 定位链（ADR 0037 决策 3）：**安装与拉起正交**——四级顺序解析「用什么命令 spawn 某引擎 worker」。
 # dev 与分发**同一条链、不设 dev 模式特判**：分发后没有 repo，任何靠 repo 结构的隐式行为都是漂移面

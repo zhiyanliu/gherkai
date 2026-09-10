@@ -300,14 +300,17 @@ class NonTerminalSnapshot(RuntimeError):
     本轮不落任何判定真值、让触发源重试——绝不把 running/pending 写进 jobs/*.json。"""
 
 
-def project_full(meta: RunMeta, records: list[EventRecord]) -> RunResult:
+def project_full(meta: RunMeta, records: list[EventRecord], *, run_duration_ms: float | None = None) -> RunResult:
     """从全量 records 推演出**完整 RunResult**（含各 JobResult 明细，ADR 0034）——finalize 收尾用。
 
     与 `project`（轻量 RunState、供实时投影写/plan_next）共用 `_reduce_scope` 归约；差别只在保留完整明细
     （scenarios/steps/cost/report_refs）。tick 在 finalize **CAS 之前**用它落 ResultStore（判定真值，ADR 0030 决定三
     写序）；宿主在 done 后用它聚合 RunReport。**守 ADR 0031 不变量**：任一 job 非终态即抛 NonTerminalSnapshot、一份
     判定都不落（前置态绝不进 jobs/*.json）——tick 只在 plan_next 判全终态时才调本函数，正常到不了那一步。run 级 status 用真实聚合终态（此处是收尾、非投影，
-    可落终态，与 project_state 的钳制不同）。没 record 的 job（未起）不进 RunResult.jobs（同 schedule 只收跑过的）。
+    可落终态，与 project_state 的钳制不同）。收尾前提是全 job 终态、每个 job 至少有一条退出记录，故正常没有「无 record 的
+    job」；防御分支：没 record 的 job 不臆造明细、不进 RunResult.jobs（与同步 schedule 不同——那边从未 spawn 的 job 记
+    SKIPPED，detached 没有 fail-fast、不产生这一态）。run 级 duration_ms 由宿主按 RunState started_at→ended_at 算好经
+    `run_duration_ms` 传入（ADR 0024「三级执行时长」detached 条；core 不取时钟、不解析时间戳），缺则 None。
     """
     by_scope: dict[str, list[EventRecord]] = {}
     for r in records:
@@ -331,6 +334,7 @@ def project_full(meta: RunMeta, records: list[EventRecord]) -> RunResult:
         run_meta=meta,
         status=run_status,
         jobs=job_results,
+        duration_ms=run_duration_ms,
         total_tokens=sum(tok) if tok else None,
         total_time_worked_s=sum(tw) if tw else None,
     )

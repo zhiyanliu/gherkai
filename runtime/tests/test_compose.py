@@ -1109,3 +1109,17 @@ def test_variant_miss_hint_older_cli_only_guides_upgrade():
                              what="SSM 里没有映射", cli_version="1.3.0", backend_version="1.4.0")
     assert "升到后端版本" in msg or "升" in msg
     assert "push-worker" not in msg and "--worker-variant base" not in msg
+
+
+# ---- run_duration_ms：detached run 级墙钟 = RunState ended_at − started_at（ADR 0024「三级执行时长」detached 条）----
+def test_run_duration_ms_from_run_state_timestamps():
+    from gherkai_core.model import RunState, Status
+
+    st = RunState(run_id="r", status=Status.PASSED, jobs={}, high_water_mark=0,
+                  started_at="2026-09-09T09:40:38.625792+00:00", ended_at="2026-09-09T09:42:53.215060+00:00")
+    assert compose.run_duration_ms(st) == pytest.approx(134589.268)
+    assert compose.run_duration_ms(RunState(run_id="r", status=Status.RUNNING, jobs={}, high_water_mark=0,
+                                            started_at="2026-09-09T09:40:38+00:00")) is None  # 未 finalize
+    assert compose.run_duration_ms(None) is None
+    assert compose.run_duration_ms(RunState(run_id="r", status=Status.PASSED, jobs={}, high_water_mark=0,
+                                            started_at="t0", ended_at="t9")) is None  # 解析不了 → 派生指标显「?」，不炸收尾

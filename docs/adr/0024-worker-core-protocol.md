@@ -49,7 +49,7 @@ worker **边跑边流式上报**（每行一个事件），core 实时收。选�
 
 **事件三级 started/done 对齐**（接口的一部分，core 假定有序、乱序为 worker 违约）：每级都有配对的起止事件——`scope_started`…`scope_done`（最外，scope_started 首条、scope_done 末条）⊃ `scenario_started`…`scenario_done` ⊃ `step_started`…`step_done`。worker 在每级开始前发 `*_started`、结束后发 `*_done`。**例外：被 scope 内短路跳过的 step 既不发 `step_started` 也不发 `step_done`，只发一条 `step_skipped`**（它根本没起跑，无起止可配对；core 归约时 `duration_ms=None`，见下 `step_skipped` 事件段 + [0031](./0031-job-lifecycle-states-and-severity.md) 决定六）。
 
-**三级执行时长**（性能指标，与成本正交）：core 用**事件到达的墙钟时间戳**（注入的 `clock`，与超时复用同一时钟）算各级时长——`step/scenario/scope` 各 = 其 `*_done` 到达 − `*_started` 到达；`run` 级 = schedule 整体包住（含并发，≠ 各 scope 之和）。落在 `StepResult.duration_ms` / `ScenarioResult.duration_ms` / `JobResult.duration_ms` / `RunResult.duration_ms`。**这是墙钟时长，不是成本**——与 cost 的 `time_worked_s`（Nova 计费量）正交；测的是 core 收到事件的时刻，含微秒级 IPC 传输延迟（worker 发→core 读），对性能诊断够用。worker 只发 `*_started`/`*_done` 信号、不算时长（worker 报事件、core 算指标）。
+**三级执行时长**（性能指标，与成本正交）：core 用**事件到达的墙钟时间戳**（注入的 `clock`，与超时复用同一时钟）算各级时长——`step/scenario/scope` 各 = 其 `*_done` 到达 − `*_started` 到达；`run` 级 = schedule 整体包住（含并发，≠ 各 scope 之和）；**detached 路径的 run 级墙钟 = RunState `started_at`→`ended_at`**（提交落库到 finalize commit，含排队/起容器——那里没有 schedule 包住的进程内时钟），由宿主按 RunState 算好传给收尾聚合（core 不取时钟、不解析时间戳）。落在 `StepResult.duration_ms` / `ScenarioResult.duration_ms` / `JobResult.duration_ms` / `RunResult.duration_ms`。**这是墙钟时长，不是成本**——与 cost 的 `time_worked_s`（Nova 计费量）正交；测的是 core 收到事件的时刻，含微秒级 IPC 传输延迟（worker 发→core 读），对性能诊断够用。worker 只发 `*_started`/`*_done` 信号、不算时长（worker 报事件、core 算指标）。
 
 **传输通道：三通道分离（实现期细化，子进程 worker）**——0024 事件**不走 stdout**，而走一条专用管道，与引擎 SDK 的进度噪声、worker 自身诊断物理隔离：
 - **事件通道**（纯 0024 JSON Lines）：core adapter 自建管道，把写端 fd 号经环境变量 `EVENTS_FD` 告知 worker（`pass_fds` 让子进程继承该 fd 但**不重映射 fd 号**，故不硬编码 3；worker 读 `EVENTS_FD` 打开事件输出）。
@@ -75,6 +75,8 @@ worker **边跑边流式上报**（每行一个事件），core 实时收。选�
 {"type":"scope_done","scopeId":"login","sessionId":"...",
    "reportRefs":[{"kind":"report","ref":"file:///.../midscene_run/report/xxx.html","label":"Midscene report"}]}
 ```
+
+**失败/超时的 act 同样带 cost**（费用已经发生）：error 的 `step_done` 上也报原生量——Nova 从异常对象的 `metadata` 取 `time_worked_s`、并累加同 step 已投完的票；Midscene 取 token 增量（agent 日志里的 usage 不因抛异常消失）。曾只在成功路径带 cost，run 级 `total_*` 对所有出错 step 系统性低报（code-health 对抗验证发现）。
 
 **`step_skipped` 事件（scope 内短路，[0031](./0031-job-lifecycle-states-and-severity.md) 决定六）**：当 scope 内某 step `error` 后，worker
 短路后续 step（不调 AI），为每个被跳过的 step 发一条 `step_skipped`——**独立事件、平行于 step_done，不是 step_done 的第 4 个 status**：

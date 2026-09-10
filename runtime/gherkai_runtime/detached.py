@@ -145,7 +145,10 @@ def run_reconcile_loop(
                     now_iso=now_iso_fn(), result_store=result_store)
         if done:
             # 报告收尾走 core 唯一一份（曾在此双写一份、与 deploy_aws/gherkai_deploy_aws/lambdas/reconciler.py 漂移风险，已合并）
-            finalize_report(run_id, meta, event_log, report_store, now_iso_fn())
+            from gherkai_runtime import compose
+
+            finalize_report(run_id, meta, event_log, report_store, now_iso_fn(),
+                            run_duration_ms=compose.run_duration_ms(run_store.load_run_state(run_id)))
             return
         _recover_timed_out_claims(run_id, meta, event_log, run_store, launcher, now_iso_fn())
         time.sleep(poll_interval_s)

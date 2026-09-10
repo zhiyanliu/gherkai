@@ -485,3 +485,19 @@ test("artifactFlushRoot: 常规档给解析后的 MIDSCENE_RUN_DIR；未设则 u
     if (prev === undefined) delete process.env.MIDSCENE_RUN_DIR; else process.env.MIDSCENE_RUN_DIR = prev;
   }
 });
+
+
+// ---- 失败 act 的费用照报（ADR 0024「失败的 act 同样带 cost」）：agent 日志里的 usage 不因抛异常消失 ----
+test("runStep: aiAct 抛异常 → error 的 step_done 仍带本 step 的 token 增量", async () => {
+  const { runStep } = await importMod();
+  const tasks: any[] = [];
+  const agent = {
+    aiAct: async () => { tasks.push({ usage: { total_tokens: 150 } }); throw new Error("AI boom"); },
+    aiBoolean: async () => true,
+    _unstableLogContent: () => ({ executions: [{ tasks }] }),
+  } as any;
+  assert.equal(await runStep(agent, fakePage, "sc:0", step("When", '"做事"'), 1, testSink), "error");
+  const ev = events().find((e) => e.type === "step_done");
+  assert.equal(ev.status, "error");
+  assert.deepEqual(ev.cost, { tokens: 150 });  // 曾整块丢掉 → total_tokens 低报
+});

@@ -252,6 +252,7 @@ def _run_step(nova, scenario_id: str, step: dict, votes_n: int, sink: EventSink)
     keyword = step["keyword"]
     text = step["text"]
     step_traj: list[str] = []  # 本 step 的 trajectory 路径（act 逐个收进来）
+    tw_total = 0.0  # 本 step 已真实计费的 time_worked_s 累计（多票逐票加；except 分支也要报——费用不随异常蒸发，ADR 0024）
 
     sink.emit({"type": "step_started", "scenarioId": scenario_id, "stepIndex": idx})  # step 时长起点
     try:
@@ -288,8 +289,7 @@ def _run_step(nova, scenario_id: str, step: dict, votes_n: int, sink: EventSink)
         if keyword == "Then":
             # AI 断言 + N 次投票（ADR 0014/0024）；votes_n=1 即单次判定（仍发 votes 标记这是 AI 断言）
             instruction = _instruction(text, step)  # 自然语言 + 多行参数（DataTable/DocString，ADR 0024）
-            votes = []
-            tw_total = 0.0  # N 票 time_worked_s 累加（修：原 last_cost 只算最后一票，votes>1 时欠计 (N-1)/N）
+            votes = []  # N 票 time_worked_s 逐票累加进 tw_total（修：原 last_cost 只算最后一票，votes>1 时欠计 (N-1)/N）
             for _ in range(votes_n):
                 if _stop.is_set():
                     break  # 停止信号（ADR 0024 flag-only）：多票途中收到 → 不再投后续票
@@ -350,6 +350,12 @@ def _run_step(nova, scenario_id: str, step: dict, votes_n: int, sink: EventSink)
             "type": "step_done", "scenarioId": scenario_id, "stepIndex": idx,
             "status": "error", "errorType": _classify_act_error(e), "message": f"{type(e).__name__}: {e}",
         }
+        # 失败 act 的费用已经发生（ADR 0024「失败的 act 同样带 cost」）：SDK 异常对象同样带 metadata.time_worked_s，加上
+        # 本 step 已投完的票；曾整块丢掉 → total_time_worked_s 对所有出错 step 系统性低报。
+        c = _cost_from_result(e)
+        tw = tw_total + float((c or {}).get("time_worked_s") or 0.0)
+        if tw > 0:
+            ev["cost"] = {"time_worked_s": tw}
         # 失败 act 的 trajectory 最该留（ADR 0027/0028）——protect_emit：上传再失败也绝不吞 engine_error 事件
         _attach_traj_refs(ev, step_traj, protect_emit=True)
         sink.emit(ev)

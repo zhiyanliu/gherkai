@@ -284,3 +284,40 @@ def test_run_scenario_failed_does_not_shortcircuit(captured):
     statuses = rs._run_scenario(nova, "sc:0", steps, votes_n=1, sink=captured)
     assert statuses == ["failed", "passed"]  # failed 不触发短路，第二步照跑
     assert [e for e in captured if e["type"] == "step_skipped"] == []
+
+
+# ---- 失败 act 的费用照报（ADR 0024「失败的 act 同样带 cost」）----
+class _ActBoom(RuntimeError):
+    """模拟 Nova SDK 的 act 异常：与成功结果一样带 metadata（time_worked_s 已真实计费、trajectory 已写盘）。"""
+    def __init__(self, tw):
+        super().__init__("act boom")
+        self.metadata = _Meta(tw)
+
+
+def test_failed_act_reports_time_worked_from_exception_metadata(captured):
+    """When 步 act 抛异常 → error 的 step_done 带 cost（从异常 metadata 取 time_worked_s）——曾整块丢掉，
+    total_time_worked_s 对所有出错 step 系统性低报。"""
+    nova = _FakeNova(act_raises=_ActBoom(2.5))
+    assert rs._run_step(nova, "sc:0", _step("When", '"做事"'), 1, captured) == "error"
+    ev = _done(captured)
+    assert ev["status"] == "error" and ev["cost"] == {"time_worked_s": 2.5}
+
+
+def test_failed_vote_keeps_already_billed_votes_in_cost(captured):
+    """Then 三票：第 1 票成功（2.0s）、第 2 票抛（1.5s）→ error 事件 cost = 已投票 + 失败票 = 3.5s，不丢前票。"""
+    class _Nova(_FakeNova):
+        def act_get(self, instr, schema, timeout=None):
+            self._i += 1
+            if self._i == 1:
+                return _FakeResult(True, tw=2.0)
+            raise _ActBoom(1.5)
+
+    assert rs._run_step(_Nova(), "sc:0", _step("Then", '"对吗"'), 3, captured) == "error"
+    assert _done(captured)["cost"] == {"time_worked_s": 3.5}
+
+
+def test_failed_act_without_metadata_has_no_cost(captured):
+    """异常不带 metadata（非 SDK 异常，如网络错）→ 不臆造 cost（对齐成功路径「>0 才带」）。"""
+    nova = _FakeNova(act_raises=ConnectionError("reset"))
+    assert rs._run_step(nova, "sc:0", _step("When", '"做事"'), 1, captured) == "error"
+    assert "cost" not in _done(captured)

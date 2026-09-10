@@ -537,6 +537,8 @@ async function runStep(
 ): Promise<string> {
   const { index, keyword, text } = step;
   await sink.emit({ type: "step_started", scenarioId, stepIndex: index });  // step 时长起点
+  // 本 step 起点的累计 token：成功与失败路径都按增量算成本（确定性/URL 分支不调 AI、增量为 0 → 不带 cost）
+  const tokBefore = cumulativeTokens(agent);
   try {
     // ① 确定性注册表（ADR 0022）：命中走精确 handler、不投票；AssertionError→failed，其它→error
     const hit = matchDeterministic(text);
@@ -567,7 +569,6 @@ async function runStep(
     if (keyword === "Then") {
       // AI 断言 + N 次投票（ADR 0014/0024）；votesN=1 即单次判定（仍发 votes 标记这是 AI 断言）
       const instr = buildInstruction(step.text, step.argument as any);  // 自然语言 + 多行参数（DataTable/DocString，ADR 0024）
-      const tokBefore = cumulativeTokens(agent);  // 投票前累计 → 用增量算本 step 全 N 票成本（不少报）
       let yes = 0;
       for (let i = 0; i < votesN; i++) if (await agent.aiBoolean(instr)) yes++;
       const passed = yes > votesN / 2;
@@ -583,7 +584,6 @@ async function runStep(
       return passed ? "passed" : "failed";
     }
     // When / Given（非 URL）→ AI 动作（无 votes）
-    const tokBefore = cumulativeTokens(agent);  // 动作前累计 → 增量算本 step 成本
     await agent.aiAct(buildInstruction(step.text, step.argument as any));
     const ev: Record<string, unknown> = { type: "step_done", scenarioId, stepIndex: index, status: "passed" };
     const cost = stepCost(tokBefore, agent);
@@ -596,10 +596,14 @@ async function runStep(
     // step_done）」，此处 step_started 早已 emit、saw_step=True，双条件 AND 天然不满足；本失败走 step_done
     // 事件流（非退出码 80），core 侧 is_network=False。"act 中途恢复"仍 defer，这里只把失败原因记准。
     const errorType = isTransientNetwork(e) ? "network_error" : "engine_error";
-    await sink.emit({
+    const ev: Record<string, unknown> = {
       type: "step_done", scenarioId, stepIndex: index,
       status: "error", errorType, message: `${(e as Error).name}: ${(e as Error).message}`,
-    });
+    };
+    // 失败的 act 费用已经发生（ADR 0024「失败的 act 同样带 cost」）：agent 日志里的 usage 不因抛异常消失，照报 token 增量
+    const cost = stepCost(tokBefore, agent);
+    if (cost) ev.cost = cost;
+    await sink.emit(ev);
     return "error";
   }
 }

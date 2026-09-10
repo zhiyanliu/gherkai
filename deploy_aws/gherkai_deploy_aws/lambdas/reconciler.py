@@ -396,7 +396,8 @@ def _tick_runs(run_ids: set[str], label: str, *, prebuilt: dict | None = None) -
         if done:
             # 报告收尾走 core 唯一一份（曾在此双写、与 runtime/gherkai_runtime/detached.py 漂移风险，已合并）
             from gherkai_core.reconcile import finalize_report
-            finalize_report(run_id, meta, event_log, pstore, compose.now_iso())
+            finalize_report(run_id, meta, event_log, pstore, compose.now_iso(),
+                            run_duration_ms=compose.run_duration_ms(run_store.load_run_state(run_id)))
             print(f"{label}: run {run_id} done + finalized")
         else:
             print(f"{label}: run {run_id} advanced (not done)")

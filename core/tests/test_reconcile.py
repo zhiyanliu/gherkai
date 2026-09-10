@@ -240,3 +240,19 @@ def test_verdict_write_failure_fails_tick_before_commit_and_retry_heals(tmp_path
     healthy = _RecordingResultStore(seq)
     assert tick("run-1", meta, log, store, FakeLauncher(), max_concurrency=1, now_iso="t3", result_store=healthy) is True
     assert [jr.scope_id for jr in healthy.saved] == ["a"] and store.load_run_state("run-1").status == Status.PASSED
+
+
+def test_finalize_report_passes_run_duration_into_the_report(tmp_path):
+    """收尾报告带宿主算好的 run 级墙钟（RunState started_at→ended_at）。"""
+    from gherkai_core.reconcile import finalize_report
+
+    meta, log, store = _setup(tmp_path, "a")
+    _done_events(log, "a")
+    seen = {}
+
+    class _Report:
+        def write(self, run_id, result, *, created_at):
+            seen["duration_ms"] = result.duration_ms
+
+    finalize_report("run-1", meta, log, _Report(), "t9", run_duration_ms=4200.0)
+    assert seen["duration_ms"] == 4200.0

@@ -321,3 +321,11 @@ def test_project_full_refuses_non_terminal_snapshot():
     recs = [_ev("a", 1, ScopeStarted(scope_id="a", session_id="s"))]
     with pytest.raises(NonTerminalSnapshot):
         project_full(_meta("a"), recs)
+
+
+def test_project_full_carries_run_duration_from_host():
+    """run 级墙钟由宿主按 RunState started_at→ended_at 算好传入（ADR 0024「三级执行时长」detached 条；core 不取时钟）；
+    不传则 None（报告显「?」）。曾从不给，detached 的 RunReport 首屏墙钟恒「?」。"""
+    recs = _passed_events("a") + [_exit("a", 0)]
+    assert project_full(_meta("a"), recs).duration_ms is None
+    assert project_full(_meta("a"), recs, run_duration_ms=135000.0).duration_ms == 135000.0
