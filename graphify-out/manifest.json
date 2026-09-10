@@ -5,13 +5,13 @@
     "semantic_hash": "012df2410d264c68d7afa8b689202d80"
   },
   "cli/tests/test_backend_cloud.py": {
-    "mtime": 1788943044.2895525,
-    "ast_hash": "5a44d6d33a1e2ab1817cf6cab79e4276",
+    "mtime": 1789015198.5876482,
+    "ast_hash": "117aeb8b9dd4df8540b4142fce75e1be",
     "semantic_hash": ""
   },
   "cli/tests/test_main.py": {
-    "mtime": 1788943768.7614148,
-    "ast_hash": "706dd2beeea8096a0e6207865ccfb7f0",
+    "mtime": 1789015198.587239,
+    "ast_hash": "e661b7bac07c390afe9ba922da3f3a4c",
     "semantic_hash": ""
   },
   "cli/tests/test_render.py": {
@@ -265,18 +265,18 @@
     "semantic_hash": "edae2c4a98921a58c66c6b46316bba26"
   },
   "CONTEXT.md": {
-    "mtime": 1788938003.3162508,
-    "ast_hash": "f5637604dd3dc9741abe12d0e50bb7cd",
+    "mtime": 1789012082.5641384,
+    "ast_hash": "dbf657706bd8658226dcadef35ac8aca",
     "semantic_hash": ""
   },
   "README.md": {
-    "mtime": 1788936056.7289267,
-    "ast_hash": "f69ff19e4787f2274b1bd40b1e2d9012",
+    "mtime": 1789012536.9035993,
+    "ast_hash": "d2852a1472a3fe3c6462971480cf4bc0",
     "semantic_hash": ""
   },
   "cli/README.md": {
-    "mtime": 1788936056.7292979,
-    "ast_hash": "4648617242a29a9ed1e3cc0adf1e4331",
+    "mtime": 1789015198.5878851,
+    "ast_hash": "25486f23dbd2557d77cf04e4d3b190dd",
     "semantic_hash": ""
   },
   "docs/adr/0001-scope-limited-to-english-ui.md": {
@@ -475,8 +475,8 @@
     "semantic_hash": "f8709951abd0e0502c200a03e34fea86"
   },
   "cli/gherkai_cli/__main__.py": {
-    "mtime": 1789009100.9347355,
-    "ast_hash": "4a84e4cb66194b90c603e15ba5c0fd70",
+    "mtime": 1789015198.5864096,
+    "ast_hash": "8da80f26531332f0ae78fd9bd4cd85b7",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/render.py": {
@@ -645,8 +645,8 @@
     "semantic_hash": "112a5f5e0768c74afbeb75b528c11951"
   },
   "runtime/gherkai_runtime/compose.py": {
-    "mtime": 1789009755.7072194,
-    "ast_hash": "387fc27cebad369e0f9209cc4b1a49f2",
+    "mtime": 1789015085.890306,
+    "ast_hash": "e48bb93309715c3138c0f7b19a33846e",
     "semantic_hash": ""
   },
   "runtime/gherkai_runtime/detached.py": {

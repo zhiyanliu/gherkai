@@ -41,14 +41,14 @@ gherkai status "$RUN_ID" --wait --json                  # 事后轮询到跑完�
 | `gherkai plan <feature...>` | 预检：分组、校验、逐步骤标注派发预期。不连云、不花钱 |
 | `gherkai run <feature...>` | 前台跑完这批：CLI 全程在线，跑完直接给判定与报告 |
 | `gherkai submit <feature...>` | 提交完就走：打印一个 `run_id` 后立即退出，后台继续推进 |
-| `gherkai status <run_id>` | 查这个 run 的进度/结果；`--wait` 轮询到跑完再返回 |
+| `gherkai status <run_id>` | 查这个 run 的进度/结果；`--wait` 轮询到跑完再返回；到终态时同时打出报告与判定明细的位置（本机路径或 S3） |
 | `gherkai list-engines` | 列出可用引擎（缺的那个原地给安装命令） |
 | `gherkai list-deterministic --engine <名>` | 列出该引擎支持的确定性步骤（含你自己写的），写 feature 时查着复用 |
 | `gherkai deploy` / `gherkai destroy` | 建/改/拆云端后端。只有部署方需要，见下 |
 
 `run` 要求 CLI 全程在线（网断、关机即中止）。`submit` 把「提交」和「收结果」拆开：local 档在本机起一个脱离 CLI 的后台进程推进，cloud 档交给云端推进（提交完真关机也能跑完）。`status --wait` 既是查询也是接力——后台进程崩了或卡住，来查的这条命令会把它续到底。
 
-`status` 的 `--backend` / `--report-dir`（local）/ `--prefix`（cloud）必须与 `submit` 时一致，否则查不到这个 run。
+`status` 的 `--backend` / `--report-dir` / `--prefix`（cloud）必须与 `submit` 时一致，否则查不到这个 run（`--report-dir` 在 cloud 档是后端的报告前缀，默认 `reports`，同样用来拼终态时打出的 S3 位置）。
 
 ## `steps/` 目录：你自己的确定性步骤
 

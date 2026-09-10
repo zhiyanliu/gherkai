@@ -519,9 +519,13 @@ def _args(wait=False, json_=False):
     return SimpleNamespace(wait=wait, json=json_, run_id="r")
 
 
+_LOCS = {"report_index": "file:///tmp/x/r/index.html", "run_meta": "file:///tmp/x/r/run_meta.json",
+         "run_state": "file:///tmp/x/r/run_state.json", "jobs_dir": "file:///tmp/x/r/jobs"}
+
+
 def test_render_status_pending_hints_wait(capsys):
     """pending + 非 --wait + 非 json → 打 --wait 接力提示（提示走 stderr）。退出码 0（查询本身成功）。"""
-    rc = m._render_status(_mk_state(Status.PENDING), _args(), wait_hint="gherkai status r --wait")
+    rc = m._render_status(_mk_state(Status.PENDING), _args(), wait_hint="gherkai status r --wait", locations=_LOCS)
     err = capsys.readouterr().err
     assert "仍 pending" in err and "gherkai status r --wait" in err
     assert rc == 0
@@ -529,18 +533,18 @@ def test_render_status_pending_hints_wait(capsys):
 
 def test_render_status_running_no_hint(capsys):
     """running → 不提示（在跑、正常）。退出码 0。"""
-    rc = m._render_status(_mk_state(Status.RUNNING), _args(), wait_hint="x")
+    rc = m._render_status(_mk_state(Status.RUNNING), _args(), wait_hint="x", locations=_LOCS)
     assert "仍 pending" not in capsys.readouterr().err
     assert rc == 0
 
 
 def test_render_status_terminal_no_hint_and_exitcode(capsys):
     """终态：passed→0、其余终态→1（含派生终态 skipped/aborted），均不提示。"""
-    assert m._render_status(_mk_state(Status.PASSED), _args(), wait_hint="x") == 0
-    assert m._render_status(_mk_state(Status.FAILED), _args(), wait_hint="x") == 1
-    assert m._render_status(_mk_state(Status.ERROR), _args(), wait_hint="x") == 1
-    assert m._render_status(_mk_state(Status.SKIPPED), _args(), wait_hint="x") == 1
-    assert m._render_status(_mk_state(Status.ABORTED), _args(), wait_hint="x") == 1
+    assert m._render_status(_mk_state(Status.PASSED), _args(), wait_hint="x", locations=_LOCS) == 0
+    assert m._render_status(_mk_state(Status.FAILED), _args(), wait_hint="x", locations=_LOCS) == 1
+    assert m._render_status(_mk_state(Status.ERROR), _args(), wait_hint="x", locations=_LOCS) == 1
+    assert m._render_status(_mk_state(Status.SKIPPED), _args(), wait_hint="x", locations=_LOCS) == 1
+    assert m._render_status(_mk_state(Status.ABORTED), _args(), wait_hint="x", locations=_LOCS) == 1
     assert "仍 pending" not in capsys.readouterr().err
 
 
@@ -565,13 +569,13 @@ def test_terminal_status_consumers_use_core_single_source():
 
 def test_render_status_wait_pending_no_hint(capsys):
     """--wait 下即使 pending 也不打提示（--wait 本身在接力、提示多余）。"""
-    m._render_status(_mk_state(Status.PENDING), _args(wait=True), wait_hint="x")
+    m._render_status(_mk_state(Status.PENDING), _args(wait=True), wait_hint="x", locations=_LOCS)
     assert "仍 pending" not in capsys.readouterr().err
 
 
 def test_render_status_json_no_hint(capsys):
     """--json（机读）：pending 也不打人读提示，且 stdout 是可解析 JSON。"""
-    m._render_status(_mk_state(Status.PENDING), _args(json_=True), wait_hint="x")
+    m._render_status(_mk_state(Status.PENDING), _args(json_=True), wait_hint="x", locations=_LOCS)
     cap = capsys.readouterr()
     assert "仍 pending" not in cap.err
     json.loads(cap.out)  # stdout 是纯 JSON
@@ -993,3 +997,28 @@ def test_plan_rejects_a_directory_as_feature(tmp_path, capsys):
     rc = m.main(["plan", str(tmp_path)])
     assert rc == 2
     assert "读 feature 失败" in capsys.readouterr().err
+
+
+def test_render_status_pending_run_with_claimed_job_does_not_hint(capsys):
+    """run 级仍 pending 但已有 job 被 claim（running）→ 推进已开始，不提示「可能未启动」。这是 detached 的正常窗口：
+    claim 只动 job、run 级要等下一次投影写；Fargate 拉起期间恒如此（真跑 submit 后连查三次撞见误报）。"""
+    from gherkai_core.model import JobState, RunState
+    state = RunState(run_id="r", status=Status.PENDING,
+                     jobs={"a": JobState("a", Status.RUNNING), "b": JobState("b", Status.PENDING)}, high_water_mark=0)
+    assert m._render_status(state, _args(), wait_hint="x", locations=_LOCS) == 0
+    assert "仍 pending" not in capsys.readouterr().err
+
+
+def test_render_status_terminal_prints_artifact_locations(capsys):
+    """终态时对标 `run` 结束的三行：报告 / 运行元信息 / 判定明细（S3 或本地路径可直接复制）；未终态不打（产物还没落）。"""
+    m._render_status(_mk_state(Status.PASSED), _args(), wait_hint="x", locations=_LOCS)
+    err = capsys.readouterr().err
+    assert "报告: file:///tmp/x/r/index.html" in err and "判定明细: file:///tmp/x/r/jobs" in err
+    assert "运行元信息: file:///tmp/x/r/run_meta.json、file:///tmp/x/r/run_state.json" in err
+    m._render_status(_mk_state(Status.RUNNING), _args(), wait_hint="x", locations=_LOCS)
+    assert "报告:" not in capsys.readouterr().err
+    # --json 形状不变：stdout 纯 RunState JSON，stderr 不掺位置行
+    m._render_status(_mk_state(Status.PASSED), _args(json_=True), wait_hint="x", locations=_LOCS)
+    cap = capsys.readouterr()
+    json.loads(cap.out)
+    assert "报告:" not in cap.err

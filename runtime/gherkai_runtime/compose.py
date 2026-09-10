@@ -493,6 +493,33 @@ def make_resolver(engines: dict[str, Engine]):
 # Store 装配（ADR 0016「cli backend 选择」/ 0030 决定六·七）：两个后端对称、都在 compose 可复用
 # （cli 是第一个调用者，WebUI 直接复用这两个函数、不经 cli）。各返回：
 #   (run_store, result_store, report_store, make_artifacts)
+
+def local_artifact_locations(report_dir: str, run_id: str) -> dict:
+    """local 档一个 run 的产物落点（全 file:// URI）：run_meta / run_state / jobs_dir / report_index。**单点**：
+    `run` 结束打印、`status` 终态打印、`--json` 的 artifacts 都从这里拼（曾只在 run 路径的闭包里拼，status 到终态
+    只打 ended_at、用户得自己找报告）。report_index 是**约定落点**（LocalReportStore 的 index.html），不代表已写成——
+    run 路径拿 finalize 返回值覆盖/省略它（ADR 0030 决定三写失败隔离），status 路径按约定给。"""
+    run_dir = (Path(report_dir) / run_id).resolve()
+    return {
+        "run_meta": run_dir.joinpath("run_meta.json").as_uri(),
+        "run_state": run_dir.joinpath("run_state.json").as_uri(),
+        "jobs_dir": run_dir.joinpath("jobs").as_uri(),
+        "report_index": run_dir.joinpath("index.html").as_uri(),
+    }
+
+
+def cloud_artifact_locations(*, bucket: str, report_prefix: str, table: str, run_id: str) -> dict:
+    """cloud 档一个 run 的产物落点：jobs_dir / report_index 为 s3://（对拍 S3ResultStore / S3ReportStore 的 key 布局
+    `<report_prefix>/<run_id>/…`），run_meta / run_state 为 ddb:// 诊断指针（纯展示、不被解析）。单点理由同 local。
+    report_prefix = 后端 REPORT_DIR（与 submit 的 --report-dir 一致，preflight 已比对）。"""
+    pfx = _normalize_prefix(report_prefix)
+    return {
+        "run_meta": f"ddb://{table}/{run_id}#META",
+        "run_state": f"ddb://{table}/{run_id}#STATE",
+        "jobs_dir": f"s3://{bucket}/{pfx}{run_id}/jobs/",
+        "report_index": f"s3://{bucket}/{pfx}{run_id}/index.html",
+    }
+
 # make_artifacts(run_id, report_index) -> dict：把 --json 的 artifacts 落点指针按后端组装、全 URI 化
 #   （local file:// / cloud s3://+ddb://）；report_index=None（report 写失败被隔离）则省略该键、不放裸 'None'。
 # ============================================================================
@@ -518,15 +545,13 @@ def build_local_stores(*, report_dir: str | Path):
     report_store: ReportStore = LocalReportStore(root)
 
     def make_artifacts(run_id: str, report_index) -> dict:
-        # 全 file:// URI（与 cloud s3:// 同形工整）；run_meta/run_state/jobs_dir 是本地落点、report_index 取 finalize 返回
-        run_dir = (root / run_id).resolve()
-        d = {
-            "run_meta": run_dir.joinpath("run_meta.json").as_uri(),
-            "run_state": run_dir.joinpath("run_state.json").as_uri(),
-            "jobs_dir": run_dir.joinpath("jobs").as_uri(),
-        }
-        if report_index is not None:  # None = report 写失败被隔离（ADR 0030 决定三），省略键、不放裸 'None'
+        # 落点走 local_artifact_locations 单点（status 终态打印同一份）；report_index 以 finalize 返回值为准：
+        # None = report 写失败被隔离（ADR 0030 决定三）→ 省略键、不放裸 'None'
+        d = local_artifact_locations(str(root), run_id)
+        if report_index is not None:
             d["report_index"] = str(report_index)
+        else:
+            d.pop("report_index", None)
         return d
 
     return run_store, result_store, report_store, make_artifacts
@@ -656,14 +681,13 @@ def build_cloud_stores(*, table: str, bucket: str, prefix: str = "",
     report_store: ReportStore = S3ReportStore(s3, bucket, pfx)
 
     def make_artifacts(run_id: str, report_index) -> dict:
-        # jobs_dir=s3://（对拍 S3ResultStore key 布局）；run_meta/run_state=ddb:// 诊断指针（纯展示、不被解析）
-        d = {
-            "run_meta": f"ddb://{table}/{run_id}#META",
-            "run_state": f"ddb://{table}/{run_id}#STATE",
-            "jobs_dir": f"s3://{bucket}/{pfx}{run_id}/jobs/",
-        }
-        if report_index is not None:  # None = report 写失败被隔离，省略键
+        # 落点走 cloud_artifact_locations 单点（status 终态打印同一份）；report_index 以 finalize 返回值为准，
+        # None = report 写失败被隔离 → 省略键
+        d = cloud_artifact_locations(bucket=bucket, report_prefix=prefix, table=table, run_id=run_id)
+        if report_index is not None:
             d["report_index"] = str(report_index)
+        else:
+            d.pop("report_index", None)
         return d
 
     return run_store, result_store, report_store, make_artifacts

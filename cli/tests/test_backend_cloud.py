@@ -1031,3 +1031,21 @@ def test_bad_default_pointer_name_exits_2_pointing_at_the_parameter(tmp_path, mo
     assert rc == 2
     err = capsys.readouterr().err
     assert "/stage-backend/worker-default" in err and "不合法" in err
+
+
+def test_status_cloud_terminal_prints_s3_and_ddb_locations(monkeypatch, capsys):
+    """cloud status 到终态打出与 `run --backend cloud` 同款的位置行（s3:// 报告与判定明细、ddb:// 元信息），
+    落点按 --prefix 推理出的桶/表与 --report-dir 前缀拼——用户不用自己拼 S3 路径。"""
+    class _PassedTable:
+        def get_item(self, **kw):
+            return {"Item": {"run_id": "r1", "item_type": "STATE", "status": "passed", "jobs": {},
+                             "ended_at": "2026-09-10T04:28:41+00:00"}}
+
+    _patch_skew(monkeypatch)
+    monkeypatch.setattr(m.compose, "_make_ddb_table", lambda table, *, region, profile: _PassedTable())
+    rc = m.main(["status", "r1", "--backend", "cloud", "--region", "us-east-1"])
+    assert rc == 0
+    err = capsys.readouterr().err
+    assert "报告: s3://gherkai-artifacts/reports/r1/index.html" in err
+    assert "判定明细: s3://gherkai-artifacts/reports/r1/jobs/" in err
+    assert "ddb://gherkai-runs/r1#META" in err

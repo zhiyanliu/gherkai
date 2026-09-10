@@ -288,7 +288,8 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     st = sub.add_parser("status", help="[无状态跑批] 查一个 run 的进度/结果（--wait 轮询到完成）")
     st.add_argument("run_id", help="submit 返回的 run_id")
     st.add_argument("--backend", choices=["local", "cloud"], default="local", help="须与 submit 一致")
-    st.add_argument("--report-dir", default="reports", metavar="DIR", help="[local] run 落点（须与 submit 一致）")
+    st.add_argument("--report-dir", default="reports", metavar="DIR",
+                    help="run 落点（local）/ 后端报告前缀（cloud）——须与 submit 一致；终态时据此打印报告与判定明细位置")
     st.add_argument("--wait", action="store_true",
                     help="轮询到 run 达终态再返回（两路都支持，接力语义异：local=本机 tick 推进；"
                          "cloud=检测卡住即触发云端接力）")
@@ -941,11 +942,13 @@ def _submit_cloud(args, run_id: str, run_meta, initial, *, tunnel_info=None) -> 
     return 0
 
 
-def _render_status(state, args, *, wait_hint: str) -> int:
-    """渲染 RunState + pending 诊断提示 + 退出码——**local/cloud 共享一份**（保两路一致，ADR 0034）。
+def _render_status(state, args, *, wait_hint: str, locations: dict) -> int:
+    """渲染 RunState + pending 诊断提示 + 终态产物位置 + 退出码——**local/cloud 共享一份**（保两路一致，ADR 0034）。
 
     state 已确认非 None（调用方先查）。wait_hint = 各自的 `status --wait` 接力命令示例（local 用 --report-dir、
-    cloud 用 --backend cloud --prefix，触发逻辑同、只命令示例异）。--json 机读、不打人读提示。
+    cloud 用 --backend cloud --prefix，触发逻辑同、只命令示例异）。locations = 该 run 的产物落点（compose 单点拼，
+    与 `run` 结束时打的同一份）：终态才打——报告/判定明细在 finalize 才落，未终态打了是空指针。--json 机读：只出
+    RunState、不打提示与位置（形状不变）。
     退出码：PASSED→0 / pending·running（未达终态、非 --wait）→0（查询本身成功）/ 其余终态→1。
     """
     if args.json:
@@ -953,9 +956,18 @@ def _render_status(state, args, *, wait_hint: str) -> int:
         print(json.dumps(run_state_to_dict(state), ensure_ascii=False, indent=2))
     else:
         print(render.render_run_state(state))
-    # 疑似卡住诊断（两路一致）：非 --wait、非 json、仍 pending → 提示 --wait 接力（**只提示、不自动 kickoff/tick**——
-    # 保「查看」纯只读无副作用；救活决定权留用户，走 --wait）。running/终态不提示。
-    if not args.wait and not args.json and state.status == Status.PENDING:
+        if state.status in TERMINAL_STATUSES:
+            # 与 `run` 结束时同款三行（对标输出，S3/本地路径可直接复制）；report 写失败被隔离时这里给的是约定落点
+            _progress(f"\n报告: {locations['report_index']}")
+            _progress(f"运行元信息: {locations['run_meta']}、{locations['run_state']}")
+            _progress(f"判定明细: {locations['jobs_dir']}")
+    # 疑似卡住诊断（两路一致）：非 --wait、非 json、**所有 job 仍 pending** → 提示 --wait 接力（**只提示、不自动
+    # kickoff/tick**——保「查看」纯只读无副作用；救活决定权留用户，走 --wait）。判据不能只看 run 级 status：
+    # 推进器 claim（CAS pending→running）只动那个 job、run 级 status 要等下一次 tick 的投影写才翻 running，而
+    # 下一次 tick 要等 worker 发出第一个事件——Fargate 拉起那几十秒里恒是「job running、run pending」，此时推进
+    # 早已开始，提示「推进可能未启动」是误报（真跑 submit 后连查三次撞见）。任一 job 已 claim 即闭嘴。
+    all_jobs_pending = all(js.status == Status.PENDING for js in state.jobs.values())
+    if not args.wait and not args.json and state.status == Status.PENDING and all_jobs_pending:
         _progress(f"提示：run 仍 pending。若已提交较久，推进可能未启动——`{wait_hint}` 可接力推进。")
     if state.status == Status.PASSED:
         return 0
@@ -997,7 +1009,8 @@ def _cmd_status(args) -> int:
     if state is None:  # 不可达（上面已查过），保险分支
         _progress(f"未找到 run：{args.run_id}（--report-dir 是否与 submit 一致？）")
         return 2
-    return _render_status(state, args, wait_hint=f"gherkai status {args.run_id} --report-dir {args.report_dir} --wait")
+    return _render_status(state, args, wait_hint=f"gherkai status {args.run_id} --report-dir {args.report_dir} --wait",
+                          locations=compose.local_artifact_locations(str(report_root), args.run_id))
 
 
 def _status_cloud(args) -> int:
@@ -1076,7 +1089,10 @@ def _status_cloud(args) -> int:
         _progress(f"未找到 run：{args.run_id}（--prefix/--ddb-table 是否与 submit 一致？）")
         return 2
     return _render_status(state, args,
-                          wait_hint=f"gherkai status {args.run_id} --backend cloud --prefix {target.prefix} --wait")
+                          wait_hint=f"gherkai status {args.run_id} --backend cloud --prefix {target.prefix} --wait",
+                          locations=compose.cloud_artifact_locations(
+                              bucket=target.bucket, report_prefix=args.report_dir, table=target.runs_table,
+                              run_id=args.run_id))
 
 
 def _cmd_reconcile(args) -> int:
