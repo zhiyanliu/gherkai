@@ -47,12 +47,16 @@ class PlanConfig:
     default_job_timeout_s: float | None = None
 
 
-def _values_with_prefix(tags: tuple[str, ...], prefix: str) -> list[str]:
-    """从 tags 取某前缀的去重值（保序）。如 prefix='@scope:' → ['login']。"""
+def _values_with_prefix(tags: tuple[str, ...], prefix: str, where: str) -> list[str]:
+    """从 tags 取某前缀的去重值（保序）。如 prefix='@scope:' → ['login']。where = 出错时的定位（scenario id，即 uri:line）。"""
     seen: list[str] = []
     for t in tags:
         if t.startswith(prefix):
             v = t[len(prefix):]
+            if not v:
+                # 空值 fail-fast（ADR 0025，与 @timeout 立场一致：标了 tag 就得给有效值、想走缺省就删 tag）。否则裸 @scope:
+                # 会跨文件静默合并成一个空名 scope、裸 @engine: 会把 engine 置成空串顶掉缺省。
+                raise PlanError(f"{where}：tag {t!r} 缺少值：标了 {prefix} 就得给值（想走缺省就删掉这个 tag）")
             if v not in seen:
                 seen.append(v)
     return seen
@@ -63,7 +67,7 @@ def _scope_key(parsed: ParsedScenario) -> tuple[str | None, str]:
 
     多个不同 @scope 值 → PlanError（ADR 0025，与 engine 冲突对称）。
     """
-    scope_values = _values_with_prefix(parsed.tags, _SCOPE_PREFIX)
+    scope_values = _values_with_prefix(parsed.tags, _SCOPE_PREFIX, parsed.scenario.id)
     if len(scope_values) > 1:
         raise PlanError(
             f"scenario {parsed.scenario.id!r} 解析出多个 @scope 值 {scope_values}："
@@ -77,7 +81,7 @@ def _resolve_engine(scope_id: str, members: list[ParsedScenario], default_engine
     """解析一个 scope 的 engine：缺省用 default；任一标了则继承；多个不同值报错（ADR 0019/0025）。"""
     engines: list[str] = []
     for m in members:
-        for v in _values_with_prefix(m.tags, _ENGINE_PREFIX):
+        for v in _values_with_prefix(m.tags, _ENGINE_PREFIX, m.scenario.id):
             if v not in engines:
                 engines.append(v)
     if len(engines) > 1:
@@ -98,7 +102,7 @@ def _resolve_timeout(scope_id: str, members: list[ParsedScenario], default: floa
     """
     raws: list[str] = []
     for m in members:
-        for v in _values_with_prefix(m.tags, _TIMEOUT_PREFIX):
+        for v in _values_with_prefix(m.tags, _TIMEOUT_PREFIX, m.scenario.id):
             if v not in raws:
                 raws.append(v)
     if len(raws) > 1:

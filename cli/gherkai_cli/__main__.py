@@ -775,7 +775,7 @@ def _cloud_skew_gate(target) -> "tuple[int | None, str | None]":
         return 2, None
     except Exception as e:
         if compose.is_botocore_error(e):
-            _progress(f"--backend cloud 读版本戳失败（SSM /{target.prefix}backend/version"
+            _progress(f"--backend cloud 读版本戳失败（SSM {_names.ssm_path(target.prefix, _names.BACKEND_VERSION_KEY)}"
                       f"——凭证/region/权限？）：{e}")
             return 2, None
         raise
@@ -989,14 +989,9 @@ def _cmd_status(args) -> int:
 
     if args.wait:
         # 接力推进：per-run 进程崩了/慢了，人来查即自己 tick 到终态（状态全持久、tick 幂等，断点续）。
-        meta, log, store, launcher, mc, rstore, pstore = detached.build_local_reconcile(
-            str(report_root), args.run_id, args.max_concurrency,
-            region=args.region, profile=args.profile,
-        )
-        detached.run_reconcile_loop(args.run_id, meta, log, store, launcher, mc,
-                                    poll_interval_s=0.5, now_iso_fn=compose.now_iso,
-                                    result_store=rstore, report_store=pstore)
-        detached.cleanup_tunnel(str(report_root), args.run_id)  # 接力者兜底拆隧道（per-run 崩时，ADR 0035）
+        # 与 per-run 进程同一入口（装配/推进/拆隧道三句只在 detached.drive_local_reconcile 写一份）。
+        detached.drive_local_reconcile(str(report_root), args.run_id, args.max_concurrency,
+                                       region=args.region, profile=args.profile)
 
     state = run_store.load_run_state(args.run_id)
     if state is None:  # 不可达（上面已查过），保险分支
@@ -1096,14 +1091,8 @@ def _cmd_reconcile(args) -> int:
     if not _validate_max_concurrency(args):  # 回落值同校验（meta 缺值时它就是并发闸）
         return 2
     report_root = Path(args.report_dir).resolve()
-    meta, log, store, launcher, mc, rstore, pstore = detached.build_local_reconcile(
-        str(report_root), args.run_id, args.max_concurrency,
-        region=args.region, profile=args.profile,
-    )
-    detached.run_reconcile_loop(args.run_id, meta, log, store, launcher, mc,
-                                poll_interval_s=0.5, now_iso_fn=compose.now_iso,
-                                result_store=rstore, report_store=pstore)
-    detached.cleanup_tunnel(str(report_root), args.run_id)  # 隧道收尾（有 tunnel.json 才动作，ADR 0035）
+    detached.drive_local_reconcile(str(report_root), args.run_id, args.max_concurrency,
+                                   region=args.region, profile=args.profile)
     return 0
 
 
@@ -1200,8 +1189,8 @@ def _cmd_run(args) -> int:
     report_root = Path(args.report_dir).resolve()
     if do_report:
         artifact_root = report_root / run_id
-        nova_logs_dir: Path | None = artifact_root / "nova-trajectories"
-        midscene_run_dir: Path | None = artifact_root / "midscene-run"
+        nova_logs_dir: Path | None = artifact_root / _names.ARTIFACT_SUBDIR["novaact"]  # 子目录名单点（三宿主同名，ADR 0029）
+        midscene_run_dir: Path | None = artifact_root / _names.ARTIFACT_SUBDIR["midscene"]
     else:
         nova_logs_dir = midscene_run_dir = None
     # 产物 S3 落点：cloud（Fargate）由 build_fargate_engines 内部按 (bucket, <report_dir>/<run_id>/) 自算注入；

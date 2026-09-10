@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 
 from gherkai_core.adapters.subprocess_engine import SubprocessEngine
-from gherkai_core.model import Job, RunMeta, Scenario, ScopeDone, ScopeStarted, Status, Step
+from gherkai_core.model import Job, RunMeta, Scenario, ScopeDone, ScopeStarted, Status, Step, StepArgument
 from gherkai_core.schedule import schedule, ScheduleOpts
 from tests.fake_engine import CollectSink
 
@@ -174,3 +174,18 @@ def test_scope_started_carries_session_id():
     assert isinstance(first, ScopeStarted)
     assert first.session_id == "echo-sess"
     handle.stop(grace_period_s=5.0)  # 收尾杀掉 silent worker
+
+
+def test_large_job_and_noisy_worker_do_not_deadlock():
+    """pump 线程必须**先于**写 stdin 起：job JSON >64KB（DocString）× worker 读 stdin 前先吐 >64KB stdout 噪声，
+    否则父卡 stdin.write（管道满）、子卡 stdout.write（无人读）互锁——把两行 Thread.start() 挪回 stdin 之后，本用例
+    在真子进程下挂死、由 pytest 全局 --timeout 判红（macOS/Linux 管道缓冲 64KB，两侧各取 300KB 留足余量）。"""
+    import os
+    env = {**os.environ, "WORKER_MODE": "pass", "WORKER_NOISE_BYTES": str(300_000)}
+    engine = SubprocessEngine(cmd=[sys.executable, _WORKER], env=env)
+    big = Step(0, "Given", "大参数", argument=StepArgument(kind="docString", content="y" * 300_000))
+    job = Job(scope_id="s", scope_name="s", engine="novaact",
+              scenarios=(Scenario(id="s:0", name="sc", steps=(big, Step(1, "When", "搜索"), Step(2, "Then", "进入页面"))),))
+    _handle, events = engine.run_scope(job)
+    types = [e.type for e in events]
+    assert types[0] == "scope_started" and types[-1] == "scope_done" and types.count("step_done") == 3

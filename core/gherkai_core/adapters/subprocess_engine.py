@@ -105,6 +105,13 @@ class SubprocessEngine:
             os.close(events_w)
             raise
         os.close(events_w)  # 父进程不写，关掉写端（否则读端永不 EOF）
+        # stdout（SDK 噪声）+ stderr（worker 诊断）都实时透传为日志，单独线程读，避免管道满阻塞 worker。
+        # 带 scope_id 前缀，多 worker 并发时区分谁在说话（与领域模型对齐、可追溯）。
+        # **先起 pump、再写 stdin**：job JSON 可能很大（DataTable/DocString），写 stdin 会在管道满时阻塞；此刻 worker 若已在往
+        # stdout/stderr 吐（SDK import 噪声）而无人读，父卡 stdin.write、子卡 stdout.write ——互锁。线程是 daemon、EOF 自然退出，
+        # 下面 stdin 失败分支 kill/wait 后它们随管道关闭结束。
+        threading.Thread(target=_pump_log, args=(proc.stdout, job.scope_id, "out"), daemon=True).start()
+        threading.Thread(target=_pump_log, args=(proc.stderr, job.scope_id, "err"), daemon=True).start()
         try:
             assert proc.stdin is not None
             proc.stdin.write(job_to_line(job) + "\n")
@@ -117,11 +124,6 @@ class SubprocessEngine:
             proc.kill()
             proc.wait()
             raise
-
-        # stdout（SDK 噪声）+ stderr（worker 诊断）都实时透传为日志，单独线程读，避免管道满阻塞 worker。
-        # 带 scope_id 前缀，多 worker 并发时区分谁在说话（与领域模型对齐、可追溯）。
-        threading.Thread(target=_pump_log, args=(proc.stdout, job.scope_id, "out"), daemon=True).start()
-        threading.Thread(target=_pump_log, args=(proc.stderr, job.scope_id, "err"), daemon=True).start()
 
         handle = SubprocessWorkerHandle(proc)
         return handle, _read_events(proc, events_r, raw_sink)

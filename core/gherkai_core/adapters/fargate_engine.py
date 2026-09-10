@@ -53,17 +53,22 @@ EXIT_ITEM_TYPE = "exit"     # item_type 取值：退出记录（worker 事件 it
 EXIT_CODE_ATTR = "exit_code"
 
 class TaskProbe(NamedTuple):
-    """一次 DescribeTasks 探测的结果——**两个正交事实各自命名**（ADR 0024「exitCode 落值延迟」）：
+    """一次 DescribeTasks 探测的结果——**三个正交事实各自命名**（ADR 0024「exitCode 落值延迟」；前两个见下、第三个 `missing` 见末段）：
 
     - `stopped`：task 是否已到 STOPPED 终态。
     - `exit_code`：container 的 exitCode；`None` = 尚未落值。
 
     **关键：`stopped` 与 `exit_code` 非原子**——DescribeTasks 的 `lastStatus==STOPPED` 翻转与 `containers[].exitCode`
-    落值可分两次可见，STOPPED 瞬间 exit_code 可能短暂 `None`（AWS 有记录的时序）。故三种有意义组合：
+    落值可分两次可见，STOPPED 瞬间 exit_code 可能短暂 `None`（AWS 有记录的时序）。故前两个字段有三种有意义组合：
     `(False, None)`=未 STOPPED（继续轮询）；`(True, None)`=已 STOPPED 但码尚未落值（有界多等几拍，别当异常）；
-    `(True, int)`=已 STOPPED 且落值。用命名字段表达，避免把"到没到终态"与"码落没落值"挤进一个过载返回值。"""
+    `(True, int)`=已 STOPPED 且落值。用命名字段表达，避免把"到没到终态"与"码落没落值"挤进一个过载返回值。
+
+    第三个正交事实 `missing`：DescribeTasks **查不到这个 task**（空 `tasks` + `failures[].reason=MISSING`）——不是「未 STOPPED」。
+    ECS API 最终一致，RunTask 刚返回时可能短暂 MISSING（有界多等 `missing_task_grace_polls`）；持续 MISSING = task 已不在
+    ECS（已停超 1h 被清 / 被删 / ARN 错），再轮询永远等不到 STOPPED，调用方抛可归因异常（ADR 0024「exitCode 落值延迟」条）。"""
     stopped: bool
     exit_code: int | None
+    missing: bool = False
 
 
 def events_pk(run_id: str, scope_id: str) -> str:
@@ -137,6 +142,8 @@ class FargateEngine:
         region: str | None = None, # 注入 worker 的 AWS_REGION（组合根已落实成具体字符串，ADR 0016 决策 C）；None＝真无 region、worker fail-loud
         poll_interval_s: float = 0.5,
         gap_grace_s: float = EC_GAP_GRACE_S,  # 流式期断号宽限（ADR 0024「读一致性」，见模块常量注释）
+        missing_task_grace_polls: int = 20,  # DescribeTasks 连续 MISSING 的有界宽限拍数（ECS API 最终一致，RunTask 刚返回可短暂查不到；
+                                   # 20×0.5s≈10s）——超限 = task 已不在 ECS，抛而非无上界轮询（ADR 0024「exitCode 落值延迟」条）
         null_exit_grace_polls: int = 5,  # STOPPED 但 exitCode 尚 null 时的有界宽限拍数（ADR 0024「exitCode 落值延迟」）——
                                    # 多等这么多拍等落值，超限才落定异常码 1（防把落值延迟误报 error）。5×0.5s≈2.5s，远大于落值瞬时窗口。
     ) -> None:
@@ -158,6 +165,7 @@ class FargateEngine:
         # 不存 profile：Fargate 用 task role，注入 profile 名会 ProfileNotFound 盖过 task role（ADR 0016 决策 C 的非对称）。
         self._poll = poll_interval_s
         self._gap_grace_s = gap_grace_s
+        self._missing_task_grace_polls = missing_task_grace_polls
         self._null_exit_grace_polls = null_exit_grace_polls
 
     def start_scope(self, job: Job) -> str:
@@ -264,6 +272,7 @@ class FargateEngine:
 
         last_seq = 0  # 已消费的**连续前缀**末 seq（不是页内最大 seq）
         gap_since: float | None = None  # 首次撞见当前断号的时刻；None = 当前无断号
+        missing_polls = 0  # DescribeTasks 连续 MISSING 计数（有界宽限，见 _count_missing）
         pk = events_pk(self._run_id, scope_id)
         while True:
             # 增量 Query：本 scope 的 **worker 段**、last_seq<SK<EXIT_SK、SK 升序（保序）。最终一致读（默认）——
@@ -306,9 +315,17 @@ class FargateEngine:
                 raise_for_worker_exit(self._await_exit_code(task_arn), code_label="exitCode")
                 return
 
+            if consumed:
+                missing_polls = 0  # 有进展 = worker 活着在写，「连续 MISSING」断掉（与 _await_exit_code 同一语义）
             # 本轮无进展（无新事件，或停在断号处等补齐）且未见 scope_done：查 task 是否已 STOPPED（兜底：worker 崩溃没发 scope_done）
             if consumed == 0:
-                if self._probe_task(task_arn).stopped:  # 已 STOPPED（exitCode 是否落值不影响"该终结了"）——别再拉事件
+                probe = self._probe_task(task_arn)
+                if probe.missing:  # 查不到 task：有界等（ECS 最终一致）、超限抛——不落进无上界轮询
+                    missing_polls = self._count_missing(task_arn, missing_polls)
+                    time.sleep(self._poll)
+                    continue
+                missing_polls = 0
+                if probe.stopped:  # 已 STOPPED（exitCode 是否落值不影响"该终结了"）——别再拉事件
                     # task 已 STOPPED。终读强一致 Query 从 last_seq+1 读全（含停在断号处未消费的部分；补最终一致还没看到的
                     # 末尾 PutItem，ADR 0024 读一致性条）——终读里的断号即真洞、只记警告。
                     yield from self._final_drain(pk, last_seq)
@@ -317,6 +334,18 @@ class FargateEngine:
                     raise_for_worker_exit(self._await_exit_code(task_arn), code_label="exitCode")
                     return
                 time.sleep(self._poll)  # task 还在跑、暂无新事件 → 等一个轮询周期再拉（延迟 vs 读放大，ADR 0024）
+
+    def _count_missing(self, task_arn: str, missing_polls: int) -> int:
+        """DescribeTasks 查不到 task 的有界宽限计数：超 `missing_task_grace_polls` 即抛（ADR 0024「exitCode 落值延迟」条第三态）。
+
+        与 RunTask 放置失败同一口径抛 RuntimeError（schedule 记 error、可归因），不让 `_read_events`/`_await_exit_code` 落进
+        无上界轮询——曾把空 tasks 压成「未 STOPPED」，task 被 ECS 清掉后 scope 永远等不到终态。"""
+        missing_polls += 1
+        if missing_polls > self._missing_task_grace_polls:
+            raise RuntimeError(
+                f"DescribeTasks 连续 {missing_polls} 拍查不到 task {task_arn}（ECS MISSING）：task 已不在 ECS 里"
+                f"（已停超过保留期被清 / 被删 / ARN 错），无法再等其终态——按 error 收敛")
+        return missing_polls
 
     def _final_drain(self, pk: str, last_seq: int) -> Iterator[Event]:
         """task STOPPED 后的终读：强一致 Query 补最终一致可能还没看到的末尾事件（ADR 0024 读一致性条）。
@@ -350,14 +379,18 @@ class FargateEngine:
             kwargs["ExclusiveStartKey"] = last_key  # 续下一页（>1MB 尾部才触发）
 
     def _probe_task(self, task_arn: str) -> TaskProbe:
-        """DescribeTasks 探一次 task 终态 + 退出码，返回 TaskProbe(stopped, exit_code)（ADR 0024「exitCode 落值延迟」）。
+        """DescribeTasks 探一次 task 终态 + 退出码，返回 TaskProbe(stopped, exit_code, missing)（ADR 0024「exitCode 落值延迟」）。
 
         未 STOPPED → (False, None)；已 STOPPED 但 exitCode 尚 null（缺 container 亦然）→ (True, None)；
-        已 STOPPED 且落值 → (True, int)。stopped 与 exit_code 非原子（见 TaskProbe），故分开返回、不揉进单值。
+        已 STOPPED 且落值 → (True, int)；**查不到 task** → (False, None, missing=True)。stopped 与 exit_code 非原子（见 TaskProbe），
+        故分开返回、不揉进单值。
         """
         resp = self._ecs.describe_tasks(cluster=self._cluster, tasks=[task_arn])
         tasks = resp.get("tasks", [])
-        if not tasks or tasks[0].get("lastStatus") != "STOPPED":
+        if not tasks:
+            # 查不到 task（failures 里 reason=MISSING）≠ 未 STOPPED：单独成态，让调用方有界等 / 超限抛（见 TaskProbe.missing）。
+            return TaskProbe(stopped=False, exit_code=None, missing=True)
+        if tasks[0].get("lastStatus") != "STOPPED":
             return TaskProbe(stopped=False, exit_code=None)  # 未 STOPPED
         containers = tasks[0].get("containers", [])
         # 已 STOPPED。找本 worker container 的 exitCode；缺 container / exitCode 尚 null → (True, None)（落值延迟，非"当异常"）。
@@ -370,14 +403,24 @@ class FargateEngine:
         scope_done 只表示事件流内容完整、非进程终态；等 STOPPED 读码才能捕获「worker 发完 scope_done 又会话释放失败
         非 0 退出」（Midscene cleanupFailed→exit 1），与 subprocess 无条件 proc.wait() 同构。阻塞期 = worker 会话释放
         + ECS 记录 executionStoppedAt 平台滞后（~11s，ADR 0032 结论 2）；轮询静默时由 schedule _heartbeat_wrap/deadline
-        兜底唤醒（同主循环兜底路径的 sleep 轮询，不会真无限——worker 已在退出路径、很快 STOPPED）。
+        兜底唤醒（同主循环兜底路径的 sleep 轮询；task 可见时不会真无限——worker 已在退出路径、很快 STOPPED；MISSING 那一格
+        另由下述有界宽限兜住）。
 
         **STOPPED 但 exitCode 尚 null**（ADR 0024「exitCode 落值延迟」）：不立即当异常（否则把干净退出误报 error），
         **有界**多等 `_null_exit_grace_polls` 拍等落值；超限仍 null 才落定为 1（容器真被强杀/没报码，非落值延迟）。
+
+        **DescribeTasks 查不到 task**（第三态、非「未 STOPPED」）：有界多等 `_missing_task_grace_polls` 拍（ECS API 最终一致），
+        超限 **raise RuntimeError**（`_count_missing`）——本函数据此可抛，调用方按 error 收敛（ADR 0024 同条）。
         """
         pending_polls = 0
+        missing_polls = 0
         while True:
             probe = self._probe_task(task_arn)
+            if probe.missing:
+                missing_polls = self._count_missing(task_arn, missing_polls)
+                time.sleep(self._poll)
+                continue
+            missing_polls = 0
             if not probe.stopped:  # 未 STOPPED → 继续轮询等终态
                 time.sleep(self._poll)
                 continue

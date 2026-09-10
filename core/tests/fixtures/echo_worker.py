@@ -48,6 +48,12 @@ def emit(obj):
 
 
 def main():
+    # WORKER_NOISE_BYTES：**读 stdin 之前**往 stdout 灌 N 字节（模拟 SDK import 期噪声）——只有发生在读 stdin 之前才能
+    # 复现「父卡 stdin.write、子卡 stdout.write」的互锁；放在读 stdin 之后就测不到（adapter 的 pump 线程顺序护栏用）。
+    noise = int(os.environ.get("WORKER_NOISE_BYTES", "0"))
+    if noise:
+        sys.stdout.write("x" * noise + "\n")
+        sys.stdout.flush()
     job = json.loads(sys.stdin.readline())
     mode = os.environ.get("WORKER_MODE", "pass")
     scope = job["scope"]

@@ -708,9 +708,9 @@ def resolve_network(
         if ssm is None:
             ssm = _make_ssm_client(region=region, profile=profile)
         if subnets is None:
-            subnets = _read_ssm_list(ssm, ssm_path(prefix, "subnets"))
+            subnets = _read_ssm_list(ssm, ssm_path(prefix, _names.SUBNETS_KEY))
         if security_groups is None:
-            security_groups = _read_ssm_list(ssm, ssm_path(prefix, "security-groups"))
+            security_groups = _read_ssm_list(ssm, ssm_path(prefix, _names.SECURITY_GROUPS_KEY))
     return {"subnets": subnets, "securityGroups": security_groups, "assignPublicIp": assign_public_ip}
 
 
@@ -762,12 +762,12 @@ def build_fargate_engines(
     # run 树）。**cloud 必注入**——否则容器盘停即销毁、产物必丢（ADR 0029「cloud 注入不是可选」）。
     artifact_s3 = (bucket, f"{pfx}{run_id}/")
     # SDK 产物落点 env（容器内路径）——**uploader 靠它算 run_dir/相对 key，缺它 no-op 报 file://、产物丢**（真跑暴露）。
-    # 容器内固定 run 根 /tmp/gherkai-run/<run_id>/，按引擎子目录（对称 subprocess 侧 nova-trajectories/midscene-run）：
+    # 容器内固定 run 根 /tmp/gherkai-run/<run_id>/，按引擎子目录（names.ARTIFACT_SUBDIR，对称 subprocess 侧）：
     # uploader run_dir=父级=<run 根>，S3 key = ARTIFACT_S3_PREFIX(<report_dir>/<run_id>/) + 相对路径 → 与 subprocess 镜像一致。
     container_run_root = f"/tmp/gherkai-run/{run_id}"
-    sdk_env_by_engine = {
-        "novaact": {"NOVA_LOGS_DIR": f"{container_run_root}/nova-trajectories"},
-        "midscene": {"MIDSCENE_RUN_DIR": f"{container_run_root}/midscene-run"},
+    sdk_env_by_engine = {  # 子目录名走 names.ARTIFACT_SUBDIR 单点（与 subprocess 侧同名，S3 key 才能镜像 run 树）
+        "novaact": {"NOVA_LOGS_DIR": f"{container_run_root}/{_names.ARTIFACT_SUBDIR['novaact']}"},
+        "midscene": {"MIDSCENE_RUN_DIR": f"{container_run_root}/{_names.ARTIFACT_SUBDIR['midscene']}"},
     }
     # 额外请求头（ADR 0035）：对称 build_engines 的 headers_env，经 FargateEngine extra_env 注 RunTask overrides。
     headers_env = (
@@ -818,7 +818,7 @@ SKEW_SKIP = "skip"    # 任一侧非纯发行版（或自身版本取不到）�
 
 
 def read_backend_version(*, prefix: str, region=None, profile=None, ssm=None) -> str | None:
-    """读后端版本戳 SSM 参数（`ssm_path(prefix, "version")`，由 stack 资源随部署事务写入，ADR 0037 决策 6）。
+    """读后端版本戳 SSM 参数（`ssm_path(prefix, BACKEND_VERSION_KEY)`，由 stack 资源随部署事务写入，ADR 0037 决策 6）。
 
     **`ParameterNotFound` → 返回 None、不抛**：戳缺失是本机制之前部署环境的正常态，决策 7 判它「警告不拦」；
     若在此翻成异常一路退 2，所有现存部署会被 preflight 锁死（决策 7 明写要避免的那个后果）。其余 botocore
@@ -827,15 +827,7 @@ def read_backend_version(*, prefix: str, region=None, profile=None, ssm=None) ->
     """
     if ssm is None:
         ssm = _make_ssm_client(region=region, profile=profile)
-    try:
-        resp = ssm.get_parameter(Name=ssm_path(prefix, "version"))
-    except Exception as e:
-        err = getattr(e, "response", None)
-        code = (err or {}).get("Error", {}).get("Code") if isinstance(err, dict) else None
-        if code == "ParameterNotFound":
-            return None
-        raise
-    return (resp["Parameter"]["Value"] or "").strip() or None
+    return _ssm_get(ssm, ssm_path(prefix, _names.BACKEND_VERSION_KEY))  # 「不在 → None、其余照抛、空串视缺失」与 _ssm_get 同一份
 
 
 def _release_key(v: str) -> tuple[int, ...]:
@@ -887,7 +879,7 @@ def check_version_skew(ssm_version: str | None, cli_version: str | None) -> tupl
     mine = cli_version
     if not ssm_version:
         return SKEW_WARN, (
-            "提示：后端没有版本戳（SSM /<prefix>backend/version）——这个部署早于版本戳机制，本次不比对版本、不拦。"
+            f"提示：后端没有版本戳（SSM /<prefix>backend/{_names.BACKEND_VERSION_KEY}）——这个部署早于版本戳机制，本次不比对版本、不拦。"
             "请部署方跑一次 `gherkai deploy` 把戳写上。"
         )
     if not mine:
@@ -976,7 +968,8 @@ def _ssm_get(ssm, path: str) -> str | None:
     """读一个 SSM String 参数 → 值（strip 后空串视作缺失）；**`ParameterNotFound` → None，其余异常照抛**。
 
     把「参数不在」与「凭证/权限/网络坏了」分开：前者是本 ADR 各 miss 分支要翻成带指引提示的正常态，后者该
-    原样冒泡给入口皮归到自己的退出码层（对齐 `read_backend_version` 的处理）。
+    原样冒泡给入口皮归到自己的退出码层。**两个 ADR 的读侧共用本函数**：0038 各 variant miss 分支把 None 翻成带指引提示；
+    0037 决策 7 的版本戳（`read_backend_version`）缺失必须是 None——翻成异常会把所有本机制之前的部署 preflight 锁死。
     """
     try:
         resp = ssm.get_parameter(Name=path)
@@ -1145,7 +1138,7 @@ def resolve_default_worker_task_defs(
         ssm = _make_ssm_client(region=region, profile=profile)
     if not backend_version:
         raise WorkerVariantError(
-            f"兼容路径无从解析 worker 镜像：读不到后端版本戳（SSM {ssm_path(prefix, 'version')}）——"
+            f"兼容路径无从解析 worker 镜像：读不到后端版本戳（SSM {ssm_path(prefix, _names.BACKEND_VERSION_KEY)}）——"
             f"镜像 tag 含版本。请部署方跑一次 `gherkai deploy` 把戳写上。")
     variant = read_worker_default(prefix=prefix, ssm=ssm)
     if variant is None:

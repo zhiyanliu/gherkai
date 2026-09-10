@@ -11,6 +11,7 @@ from __future__ import annotations
 
 # 共享命名真源（re-export 保 stack.py/tests 既有引用不动）
 from gherkai_runtime.names import (  # noqa: F401
+    BACKEND_VERSION_KEY,
     BASE_CLUSTER,
     BASE_BUCKET,
     BASE_EVENTS_TABLE,
@@ -27,7 +28,11 @@ from gherkai_runtime.names import (  # noqa: F401
     TAG_TEMPLATE,
     TAG_VARIANT,
     TAG_VERSION,
+    SECURITY_GROUPS_KEY,
+    SUBNETS_KEY,
+    VPC_KEY,
     WORKER_DEFAULT_KEY,
+    WORKER_IMAGE_ROOT_KEY,
     container_name,
     default_name,
     ecr_repo_name,
@@ -71,17 +76,17 @@ def stack_name(prefix: str) -> str:
 
 def ssm_subnets_path(prefix: str) -> str:
     """subnet ID 列表的 SSM 路径（= gherkai_runtime.names.ssm_path(prefix, "subnets") 的便捷形式）。"""
-    return ssm_path(prefix, "subnets")
+    return ssm_path(prefix, SUBNETS_KEY)
 
 
 def ssm_security_groups_path(prefix: str) -> str:
     """sg ID 列表的 SSM 路径（= gherkai_runtime.names.ssm_path(prefix, "security-groups") 的便捷形式）。"""
-    return ssm_path(prefix, "security-groups")
+    return ssm_path(prefix, SECURITY_GROUPS_KEY)
 
 
 def ssm_version_path(prefix: str) -> str:
     """后端版本戳的 SSM 路径（ADR 0037 决策 6「版本戳」/ 决策 7 skew 比对读侧）。"""
-    return ssm_path(prefix, "version")
+    return ssm_path(prefix, BACKEND_VERSION_KEY)
 
 
 def ssm_vpc_path(prefix: str) -> str:
@@ -90,7 +95,7 @@ def ssm_vpc_path(prefix: str) -> str:
     值形态三档：`default` / `new:<所建 vpc-id>` / `<复用的 vpc-id>`——`new` 档也存出所建 vpc-id 使其可回溯核对。
     比对逻辑（含 `new:` 前缀匹配）在 `cli.vpc_spec_matches`，与本路径同一批语义、别在别处重写。
     """
-    return ssm_path(prefix, "vpc")
+    return ssm_path(prefix, VPC_KEY)
 
 
 def ssm_worker_template_path(prefix: str, engine: str) -> str:

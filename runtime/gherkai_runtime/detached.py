@@ -22,6 +22,7 @@ from gherkai_core.adapters.run_store.local import LocalRunStore
 from gherkai_core.adapters.subprocess_engine import SubprocessEngine
 from gherkai_core.model import Job, RunMeta, Status
 from gherkai_core.reconcile import finalize_report, tick
+from gherkai_runtime import names  # 叶子模块（compose 要惰性 import 防环，names 不用）
 
 # 接力恢复的判定余量秒（ADR 0034「job timeout」节 claimed_at ①）：超预算这么久才认定 owner 已死。
 # 非正确性参数（误判也收敛正确——owner 尚活时其 timer 同 deadline 早已触发、真退出记录同带 timed_out，
@@ -150,6 +151,19 @@ def run_reconcile_loop(
         time.sleep(poll_interval_s)
 
 
+def drive_local_reconcile(report_dir: str, run_id: str, max_concurrency: int, *, region=None, profile=None,
+                          poll_interval_s: float = 0.5) -> None:
+    """local 推进的**唯一入口**（ADR 0034 三宿主同一套机制）：装配 → tick 到终态 → 拆隧道。per-run 进程与
+    `status --wait` 接力都调这里——曾在 cli 两处逐字复写这三句装配，改一处漏一处就让接力者与 per-run 行为分叉。"""
+    from gherkai_runtime import compose
+
+    meta, log, store, launcher, mc, rstore, pstore = build_local_reconcile(
+        report_dir, run_id, max_concurrency, region=region, profile=profile)
+    run_reconcile_loop(run_id, meta, log, store, launcher, mc, poll_interval_s=poll_interval_s,
+                       now_iso_fn=compose.now_iso, result_store=rstore, report_store=pstore)
+    cleanup_tunnel(report_dir, run_id)  # 隧道收尾（有 tunnel.json 才动作，ADR 0035）；接力者同样兜底拆
+
+
 def _recover_timed_out_claims(run_id, meta, event_log, run_store, launcher, now_iso: str) -> None:
     """接力恢复 deadline（ADR 0034「job timeout」节 claimed_at ①）：**他人 claim、本进程无 handle** 的
     RUNNING job 超预算（claimed_at 起算）且无退出记录 → 观察链已死（deadline timer 随 owner 进程丢、
@@ -166,16 +180,18 @@ def _recover_timed_out_claims(run_id, meta, event_log, run_store, launcher, now_
     if state is None:
         return
     job_by_scope = {j.scope_id: j for j in meta.jobs}
-    exited_scopes = {r.scope_id for r in event_log.records() if r.kind == "exit"}
-    now = compose.parse_iso(now_iso)
+    now = None  # 有候选才解析（多数 tick 一个候选都没有）
     for sid, js in state.jobs.items():
-        if js.status != Status.RUNNING or sid in launcher.owned_scopes or sid in exited_scopes:
+        if js.status != Status.RUNNING or sid in launcher.owned_scopes:
             continue
         job = job_by_scope.get(sid)
         if job is None or not job.timeout_s or not js.claimed_at:
             continue  # 无预算/无起算点（旧数据）→ 不处置（除超时外无权臆断他人 claim 的死活）
+        if now is None:
+            now = compose.parse_iso(now_iso)
         elapsed = (now - compose.parse_iso(js.claimed_at)).total_seconds()
-        if elapsed > job.timeout_s + _RECOVERY_MARGIN_S:
+        # 廉价过滤都过了才点查退出记录（has_exit 主键点查，对位 cloud `_handle_timeout`）——别为判一个 scope 重放整 run 的 events
+        if elapsed > job.timeout_s + _RECOVERY_MARGIN_S and not event_log.has_exit(sid):
             event_log.record_exit(sid, None, timed_out=True)  # exit_code=None：无观察到的退出码，诚实留空
 
 
@@ -221,8 +237,8 @@ def build_local_reconcile(report_dir: str, run_id: str, max_concurrency: int,
         raise FileNotFoundError(f"per-run reconcile：run_meta 不存在（submit 未落库？）：{run_id}")
     log = SqliteEventLog(db_path)
     # 产物落点 env 注入（同步 run 路径的 build_engines 一致）：nova/midscene 产物落 <report_dir>/<run_id>/ 下。
-    nova_logs_dir = root / run_id / "nova-trajectories"
-    midscene_run_dir = root / run_id / "midscene-run"
+    nova_logs_dir = root / run_id / names.ARTIFACT_SUBDIR["novaact"]  # 子目录名单点（三宿主同名，ADR 0029）
+    midscene_run_dir = root / run_id / names.ARTIFACT_SUBDIR["midscene"]
     engines = compose.build_engines(
         nova_logs_dir=nova_logs_dir, midscene_run_dir=midscene_run_dir,
         region=region, profile=profile,

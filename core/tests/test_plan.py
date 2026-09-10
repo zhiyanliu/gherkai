@@ -353,3 +353,13 @@ def test_leading_and_keyword_fails_fast():
         parse_feature("y.feature", "Feature: t\n  Scenario: s\n    And 先看一眼\n")
     r = parse_feature("z.feature", "Feature: t\n  Scenario: s\n    Given 打开页面\n    And 再看一眼\n")
     assert [st.keyword for st in r[0].scenario.steps] == ["Given", "Given"]  # 继承前驱,照常
+
+
+@pytest.mark.parametrize("tag", ["@scope:", "@engine:", "@timeout:"])
+def test_bare_tag_without_value_errors_with_location(tag: str):
+    """裸 `@scope:` / `@engine:` / `@timeout:`（空值）→ PlanError（ADR 0025：标了 tag 就得给值），且消息带 `uri:line`
+    定位（本模块其余 PlanError 都带；@timeout 原走「不是数字」路径带 scope 定位，收口到空值分支后不能丢）。
+    曾无声放行：裸 @scope: 跨文件合并成一个空名 scope、裸 @engine: 把 engine 置空串顶掉缺省。"""
+    with pytest.raises(PlanError, match="缺少值") as ei:
+        _plan(f'Feature: F\n  {tag}\n  Scenario: a\n    When "x"\n')
+    assert "t.feature:" in str(ei.value)

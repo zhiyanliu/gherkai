@@ -235,3 +235,25 @@ def test_run_state_timestamps_share_one_format(tmp_path):
     assert all(stamps.values()), stamps  # 三个写者都真写了（否则断言空转）
     for name, ts in stamps.items():
         assert ts == compose.parse_iso(ts).isoformat(), f"{name}={ts} 与 compose.now_iso 格式不同"
+
+
+def test_drive_local_reconcile_drives_to_terminal_then_tears_down_tunnel(tmp_path, monkeypatch):
+    """local 推进唯一入口的三步护栏（ADR 0034 三宿主同一套机制 + ADR 0035「终态即拆」）：装配 → 推到终态 → 拆隧道。
+    只把引擎替成 echo_worker、只桩掉「真杀 pid」这一 OS 边界，其余真跑——漏掉拆隧道那步即隧道留在公网。"""
+    from gherkai_runtime import compose, detached
+    from gherkai_runtime import tunnel as gtunnel
+
+    _seed_for_build(tmp_path, "run-d", max_concurrency=1)
+    (tmp_path / "run-d" / "tunnel.json").write_text('{"pid": 4242}', encoding="utf-8")
+    monkeypatch.setenv("AWS_REGION", "us-test-9")
+    env = {**os.environ, "WORKER_MODE": "pass"}
+    monkeypatch.setattr(compose, "build_engines",
+                        lambda **kw: {"novaact": SubprocessEngine(cmd=[sys.executable, _ECHO], env=env)})
+    stopped: list[int] = []
+    monkeypatch.setattr(gtunnel, "stop_tunnel", lambda pid: stopped.append(pid))
+
+    detached.drive_local_reconcile(str(tmp_path), "run-d", 1, region=None, profile=None, poll_interval_s=0.01)
+
+    assert LocalRunStore(tmp_path).load_run_state("run-d").status == Status.PASSED  # 推到终态
+    assert list((tmp_path / "run-d" / "jobs").glob("*.json"))  # 判定真值已落（tick 在 CAS 前写）
+    assert stopped == [4242] and not (tmp_path / "run-d" / "tunnel.json").exists()  # 拆了隧道、交棒文件已清

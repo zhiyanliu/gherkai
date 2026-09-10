@@ -56,6 +56,10 @@ class BackendStack(Stack):
     # Fargate 平台对 container stopTimeout 的硬上限（SIGTERM→SIGKILL 宽限）。ECS 部署期会拒 >120s（对 EC2 launch
     # type 无此限、对 Fargate 有）；此常量供 synth 期 fail-fast，别等 deploy 才炸（Nova grace 下限 150s>120s 冲突的根源，见 ADR 0032）。
     FARGATE_STOP_TIMEOUT_MAX_S = 120
+    # 部署侧 per-run 并发 cap（**非真源**：真源是 definition 的 max_concurrency，推进器取 min，ADR 0034 机制四）。task 计入
+    # 部署方账单，故部署方保留总量控制权、钳住提交侧声明。reconciler 与 kicker 两个推进器**必须同值**（首批与续起并行度
+    # 一致）——单点在此，两个推进器共用同一份 advancer_env（同值由结构保证，不靠人对齐）。
+    DEPLOY_SIDE_MAX_CONCURRENCY = 8
     DEFAULT_STOP_TIMEOUT_S = 120  # 默认贴 Fargate 上限：尽量给 worker 会话释放+抢传预算（grace 真容器校准见 ADR 0032），可 -c stop_timeout= 覆盖
 
     def __init__(self, scope: Construct, construct_id: str, *, prefix: str, **kwargs) -> None:
@@ -536,60 +540,35 @@ class BackendStack(Stack):
             f"{names.job_timeout_schedule_prefix(self.prefix)}*"
         ]
 
-        # ② reconciler Lambda（重；读全量重放 + 起 task + finalize 聚合）
-        reconciler = lambda_.Function(
-            self, "ReconcilerFn",
-            function_name=names.default_name(self.prefix, names.BASE_RECONCILER_LAMBDA),  # 真同源（gherkai_runtime.names）——cli preflight 据 --prefix 拼同名探活（ADR 0033）
-            runtime=lambda_.Runtime.PYTHON_3_13,
-            handler="reconciler.handler",
-            code=code,
-            timeout=Duration.minutes(2),  # 起 task + 条件写；不等 worker 跑完（fire-and-forget）
-            memory_size=256,
-            # env = common_env + 起 task 所需（SUBNETS/SG/MAX_CONCURRENCY）。本包 lambdas/reconciler.py docstring 的 env
-            # 清单里还有 **REPORT_DIR / ASSIGN_PUBLIC_IP——IaC 有意不注入**，由该文件内缺省供给（reports / ENABLED）；
-            # 改产物落点前缀或走私有子网（NAT 出网、assignPublicIp=DISABLED）时才需在此显式给。
-            # 注：真要改 REPORT_DIR，用户侧 `submit --report-dir` 须跟着改成同值——detached submit 的 preflight
-            # 比对两侧、不一致即退 2（ADR 0033 preflight 条「产物前缀一致性」）。
-            environment={
-                **common_env,
-                "SUBNETS": subnets_env,
-                "SECURITY_GROUPS": self._worker_sg_id,
-                # 部署侧 per-run 并发 cap（**非真源**：真源是 definition 的 max_concurrency，推进器取 min，
-                # ADR 0034 机制四）。task 计入部署方账单，故部署方保留总量控制权、钳住提交侧声明。
-                "MAX_CONCURRENCY": "8",
-                **timeout_env,  # job timeout 到点触发器（KICKER_ARN/SCHEDULER_ROLE_ARN，ADR 0034）
-            },
-        )
-        # reconciler 权限：runs 表读写（RunState 条件写）+ events 表读（重放）+ 桶读写（ResultStore/ReportStore/job-in）
-        self._runs_table.grant_read_write_data(reconciler)
-        self._events_table.grant_read_data(reconciler)
-        self._bucket.grant_read_write(reconciler)
-        # 起 worker task：RunTask + PassRole（把 execution/task role 传给 task）+ DescribeTasks（兜底读退出码）。
+        # 起 worker task 的资源域：family 全部 revision（ADR 0038 不变量：RunTask 用显式 revision，授权覆盖 :*）
         task_def_arns = [
             f"arn:aws:ecs:{self.region}:{self.account}:task-definition/{names.task_def_name(self.prefix, e)}:*"
             for e in names.ENGINES
         ]
-        reconciler.add_to_role_policy(iam.PolicyStatement(
-            actions=["ecs:RunTask"], resources=task_def_arns,
-        ))
-        reconciler.add_to_role_policy(iam.PolicyStatement(
-            # ListTasks：job timeout 处置按 startedBy=run_id 定位 task（ADR 0034「job timeout」节）
-            actions=["ecs:DescribeTasks", "ecs:StopTask", "ecs:ListTasks"],
-            resources=["*"],  # task ARN 运行期生成、无法预知；条件可加 cluster ARN，从简保留 *（只读/停本框架 task）
-        ))
-        # job timeout：CreateSchedule（+ActionAfterCompletion=DELETE 前置的 DeleteSchedule）+ 把 Scheduler
-        # 执行 role 传给 schedule（PassRole）。
-        reconciler.add_to_role_policy(iam.PolicyStatement(
-            actions=["scheduler:CreateSchedule", "scheduler:DeleteSchedule"],
-            resources=timeout_schedule_arns))
-        reconciler.add_to_role_policy(iam.PolicyStatement(
-            actions=["iam:PassRole"], resources=[scheduler_role.role_arn]))
-        reconciler.add_to_role_policy(ssm_read)  # 兼容回落读默认指针 + worker-image 映射（ADR 0038）
-        # PassRole：RunTask 要把 execution role + 各 task role 传给起的 task——须显式授 iam:PassRole 到这些 role ARN。
-        reconciler.add_to_role_policy(iam.PolicyStatement(
-            actions=["iam:PassRole"],
-            resources=[self._execution_role.role_arn] + [r.role_arn for r in self._task_roles],
-        ))
+        # ② reconciler Lambda（重；读全量重放 + 起 task + finalize 聚合）与 ③ kicker（踢启器）Lambda 是**同款装配**
+        #    （env + 表/桶 grant + 起 task/停 task/超时 schedule 全套策略），只差入口 handler 与触发源——分工：kicker「让 run
+        #    动起来」（runs 表 Stream INSERT 冷启动 + status --wait kickoff）/ reconciler「推着走」（events 表 Stream）。
+        #    两侧 env 与权限面**必须同**（kicker 起首批、reconciler 续起，权限/并发不一致就会「首批能起、续起失败」），
+        #    故装配抽成 _advancer_function 一份、别复写两遍。
+        # env = common_env + 起 task 所需（SUBNETS/SG/MAX_CONCURRENCY）。本包 lambdas/reconciler.py docstring 的 env
+        # 清单里还有 **REPORT_DIR / ASSIGN_PUBLIC_IP——IaC 有意不注入**，由该文件内缺省供给（reports / ENABLED）；
+        # 改产物落点前缀或走私有子网（NAT 出网、assignPublicIp=DISABLED）时才需在此显式给。
+        # 注：真要改 REPORT_DIR，用户侧 `submit --report-dir` 须跟着改成同值——detached submit 的 preflight
+        # 比对两侧、不一致即退 2（ADR 0033 preflight 条「产物前缀一致性」）。
+        advancer_env = {
+            **common_env,
+            "SUBNETS": subnets_env,
+            "SECURITY_GROUPS": self._worker_sg_id,
+            "MAX_CONCURRENCY": str(self.DEPLOY_SIDE_MAX_CONCURRENCY),  # 部署侧 per-run cap（见类常量注释）
+            **timeout_env,  # job timeout 到点触发器（KICKER_ARN/SCHEDULER_ROLE_ARN，ADR 0034）——两个推进器都起 task、都要武装
+        }
+        reconciler = self._advancer_function(
+            "ReconcilerFn",
+            function_name=names.default_name(self.prefix, names.BASE_RECONCILER_LAMBDA),  # 真同源（gherkai_runtime.names）——cli preflight 据 --prefix 拼同名探活（ADR 0033）
+            handler="reconciler.handler", code=code, environment=advancer_env,
+            task_def_arns=task_def_arns, timeout_schedule_arns=timeout_schedule_arns,
+            scheduler_role=scheduler_role, ssm_read=ssm_read,
+        )
         # events 表 Stream → reconciler（NEW_IMAGE；worker PutItem / task_exited 触发推进）。
         reconciler.add_event_source(lambda_sources.DynamoEventSource(
             self._events_table,
@@ -597,43 +576,14 @@ class BackendStack(Stack):
             batch_size=10,
             retry_attempts=2,
         ))
-
-        # ③ kicker（踢启器）Lambda（冷启动 + status --wait kickoff，ADR 0034）：runs 表 Stream 的 **INSERT** 触发
-        #    （submit create_run 写 definition）+ status --wait 直接 invoke kickoff → tick 起首批 task。复用 reconciler
-        #    的 code + 全套装配（同一 build_fargate_engines/tick），只是 handler=kicker_handler、触发源=runs Stream
-        #    INSERT。分工：kicker「让 run 动起来」/ reconciler「推着走」。故它需要与 reconciler 相同的权限（起 task 等）。
-        kicker = lambda_.Function(
-            self, "KickerFn",
+        kicker = self._advancer_function(
+            "KickerFn",
             function_name=kicker_name,  # 真同源（gherkai_runtime.names）——cli status --wait 据 --prefix 推理出它 invoke kickoff（ADR 0034）
-            runtime=lambda_.Runtime.PYTHON_3_13,
             handler="reconciler.kicker_handler",  # 同一 reconciler.py、不同入口
-            code=code,
-            timeout=Duration.minutes(2),
-            memory_size=256,
-            environment={  # 与 reconciler 同装配（起 task 需 SUBNETS/SG/MAX_CONCURRENCY）
-                **common_env,
-                "SUBNETS": subnets_env,
-                "SECURITY_GROUPS": self._worker_sg_id,
-                "MAX_CONCURRENCY": "8",  # 同 reconciler：部署侧 cap，两侧须同值（kicker 起首批也走这个闸）
-                **timeout_env,  # kicker 也起 task（首批）→ 同样要武装 timeout schedule
-            },
+            code=code, environment=advancer_env,
+            task_def_arns=task_def_arns, timeout_schedule_arns=timeout_schedule_arns,
+            scheduler_role=scheduler_role, ssm_read=ssm_read,
         )
-        # kicker 权限 = reconciler 同款（起首批要 RunTask/PassRole/表桶）。
-        self._runs_table.grant_read_write_data(kicker)
-        self._events_table.grant_read_data(kicker)
-        self._bucket.grant_read_write(kicker)
-        kicker.add_to_role_policy(iam.PolicyStatement(actions=["ecs:RunTask"], resources=task_def_arns))
-        kicker.add_to_role_policy(iam.PolicyStatement(
-            actions=["ecs:DescribeTasks", "ecs:StopTask", "ecs:ListTasks"], resources=["*"]))
-        kicker.add_to_role_policy(iam.PolicyStatement(
-            actions=["iam:PassRole"],
-            resources=[self._execution_role.role_arn] + [r.role_arn for r in self._task_roles]))
-        kicker.add_to_role_policy(iam.PolicyStatement(
-            actions=["scheduler:CreateSchedule", "scheduler:DeleteSchedule"],
-            resources=timeout_schedule_arns))
-        kicker.add_to_role_policy(iam.PolicyStatement(
-            actions=["iam:PassRole"], resources=[scheduler_role.role_arn]))
-        kicker.add_to_role_policy(ssm_read)  # 同 reconciler：兼容回落读 SSM（两个推进器同权限面）
         # runs 表 Stream → kicker，**INSERT ∧ NewImage.detached=true**（filter，ADR 0034）：
         # - 仅 INSERT：reconciler 之后写 runs 表的 MODIFY（project_state/finalize）不触发——无自触发放大。
         # - 仅 detached 标记：同步 `run --backend cloud` 的 create_run 同样 INSERT、但由进程内 schedule 推进，
@@ -653,6 +603,46 @@ class BackendStack(Stack):
         CfnOutput(self, "ReconcilerFnName", value=reconciler.function_name)
         CfnOutput(self, "ExitObserverFnName", value=exit_observer.function_name)
         CfnOutput(self, "KickerFnName", value=kicker.function_name)
+
+    def _advancer_function(self, construct_id: str, *, function_name: str, handler: str, code, environment: dict,
+                           task_def_arns: list, timeout_schedule_arns: list, scheduler_role, ssm_read):
+        """推进器 Lambda（reconciler / kicker）的同款装配：Function + 表/桶 grant + 起 task/停 task/超时 schedule 全套策略。
+
+        两个推进器分工不同、权限面与 env 相同（ADR 0034）——曾整段复写两遍，单侧改漏即权限分叉（首批能起、续起失败）。
+        触发源（events/runs 表 Stream）不在此挂：那是两者唯一的差别，留在调用点。
+        """
+        fn = lambda_.Function(
+            self, construct_id,
+            function_name=function_name,
+            runtime=lambda_.Runtime.PYTHON_3_13,
+            handler=handler,
+            code=code,
+            timeout=Duration.minutes(2),  # 起 task + 条件写；不等 worker 跑完（fire-and-forget）
+            memory_size=256,
+            environment=environment,
+        )
+        # 权限：runs 表读写（RunState 条件写）+ events 表读（重放）+ 桶读写（ResultStore/ReportStore/job-in）
+        self._runs_table.grant_read_write_data(fn)
+        self._events_table.grant_read_data(fn)
+        self._bucket.grant_read_write(fn)
+        # 起 worker task：RunTask（family 全部 revision）+ DescribeTasks/StopTask/ListTasks（超时处置定位/停 task、兜底读退出码）
+        fn.add_to_role_policy(iam.PolicyStatement(actions=["ecs:RunTask"], resources=task_def_arns))
+        fn.add_to_role_policy(iam.PolicyStatement(
+            # ListTasks：job timeout 处置按 startedBy=run_id 定位 task（ADR 0034「job timeout」节）
+            actions=["ecs:DescribeTasks", "ecs:StopTask", "ecs:ListTasks"],
+            resources=["*"],  # task ARN 运行期生成、无法预知；条件可加 cluster ARN，从简保留 *（只读/停本框架 task）
+        ))
+        # job timeout：CreateSchedule（+ActionAfterCompletion=DELETE 前置的 DeleteSchedule）+ 把 Scheduler 执行 role 传给 schedule（PassRole）
+        fn.add_to_role_policy(iam.PolicyStatement(
+            actions=["scheduler:CreateSchedule", "scheduler:DeleteSchedule"], resources=timeout_schedule_arns))
+        fn.add_to_role_policy(iam.PolicyStatement(actions=["iam:PassRole"], resources=[scheduler_role.role_arn]))
+        fn.add_to_role_policy(ssm_read)  # 兼容回落读默认指针 + worker-image 映射（ADR 0038）
+        # PassRole：RunTask 要把 execution role + 各 task role 传给起的 task——须显式授 iam:PassRole 到这些 role ARN。
+        fn.add_to_role_policy(iam.PolicyStatement(
+            actions=["iam:PassRole"],
+            resources=[self._execution_role.role_arn] + [r.role_arn for r in self._task_roles],
+        ))
+        return fn
 
     # Lambda asset 里除 handler 外要带的 import 包（ADR 0037 决策 6「Lambda asset 来源」）：
     # gherkai_runtime（产品本体：compose 装配单一真源，reconciler 复用其 build_fargate_engines——**不打 gherkai_cli**，

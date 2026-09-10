@@ -597,7 +597,7 @@ def test_reconcile_lambdas_share_per_run_concurrency_cap():
             for name, fn in t.find_resources("AWS::Lambda::Function").items()
             if "MAX_CONCURRENCY" in fn["Properties"].get("Environment", {}).get("Variables", {})}
     assert len(caps) == 2, f"应恰有 reconciler/kicker 两个 Lambda 拿 cap，实际 {sorted(caps)}"
-    assert set(caps.values()) == {"8"}, f"两侧 cap 应同为 8，实际 {caps}"
+    assert set(caps.values()) == {str(BackendStack.DEPLOY_SIDE_MAX_CONCURRENCY)}, f"两侧 cap 应同为类常量，实际 {caps}"
 
 
 def test_exit_observer_can_read_runs_table_only():
@@ -618,3 +618,27 @@ def test_exit_observer_can_read_runs_table_only():
     assert "dynamodb:GetItem" in runs_actions, f"缺 runs 表读权限（detached 分流会 AccessDenied）：{runs_actions}"
     writes = [a for a in runs_actions if any(w in a for w in ("PutItem", "UpdateItem", "DeleteItem"))]
     assert not writes, f"退出观察者不应有 runs 表写权限：{writes}"
+
+
+def _advancer_stmts(t: Template, role_hint: str) -> set[str]:
+    """某推进器执行角色上的全部 policy 语句（规范化成可比字符串）。剔掉 event source mapping 自动加的 Stream 读语句——
+    两个推进器订阅的表不同（runs vs events），这是它们**唯一**的合法权限差异（触发源，见 stack._advancer_function docstring）。"""
+    out, hit = set(), False
+    for _lid, p in t.find_resources("AWS::IAM::Policy").items():
+        if role_hint not in json.dumps(p["Properties"].get("Roles", [])):
+            continue
+        hit = True
+        for st in p["Properties"]["PolicyDocument"]["Statement"]:
+            if "StreamArn" in json.dumps(st.get("Resource"), ensure_ascii=False):
+                continue
+            out.add(json.dumps(st, sort_keys=True, ensure_ascii=False))
+    assert hit, f"找不到 Roles 含 {role_hint!r} 的 policy（角色改名别让护栏静默变绿）"
+    return out
+
+
+def test_reconciler_and_kicker_have_the_same_permission_face():
+    """两个推进器**权限面同一份**（ADR 0034：同一套装配与权限，只换 handler 与触发源）。按角色归属逐条比对——曾各写一段、
+    单侧摘掉 RunTask/PassRole/Scheduler 四条全量测试仍绿（既有断言不按角色归属、任一 policy 命中即过）。"""
+    t = _template()
+    rec, kick = _advancer_stmts(t, "Reconciler"), _advancer_stmts(t, "Kicker")
+    assert rec and rec == kick, f"仅 reconciler：{rec - kick}\n仅 kicker：{kick - rec}"

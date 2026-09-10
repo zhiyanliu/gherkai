@@ -195,8 +195,10 @@ class DynamoDBRunStore:
         **各 job 态逐 job 单调条件写（机制三②的 job 级半边，对拍 local 的逐 job 合并）**：task_exited 无数值
         seq，两次投影可携带相同 HWM、①挡不住 job 终态被 stale 投影刷回（还会重开 double-launch 窗口，机制四）。
         DDB put_item 表达不了 per-key 条件 → 拆两步：先 update_item 条件写标量（HWM+status 双守，CCF 即整体
-        stale 返 False），再对每个 job 用 `SET jobs.#sid=:js` + 「当前非更推进态」的单元素条件写，被挡的单个
-        job 静默跳过（库中已更推进，正确态在库、无信息丢失）。两步非原子，但每步各自条件守卫、次序（先标量后
+        stale 返 False），再对每个 job **逐属性** `SET jobs.#sid.status/.session_id/.claimed_at` + 「当前非更推进态」的单元素
+        条件写，被挡的单个 job 静默跳过（库中已更推进，正确态在库、无信息丢失）。逐属性而非整 entry：update_item 不碰未提及
+        属性，投影没带的 session_id/claimed_at（claimed_at 只由 try_claim_job 落库、事件推演不出）天然保留——对拍 local 的
+        「投影缺字段回填库中值」兜底，不再依赖调用方总传 baseline。两步非原子，但每步各自条件守卫、次序（先标量后
         jobs）保证中间态只会「标量新、job 旧」= 等价于一次携带旧 job 视图的合法投影，下轮重放收敛。
         update_item 天然不碰未提及属性——started_at 由 create_run 落、此处不再传（修「put_item 整 item 覆盖把
         started_at 抹掉」的对拍不一致）。"""
@@ -230,18 +232,28 @@ class DynamoDBRunStore:
             new_rank = _lifecycle_rank(js.status)
             try:
                 if new_rank >= 2:
-                    # 写终态：库中任何态都可被终态覆盖（终态 rank 最高；job 不存在也允许——补建）
-                    cond, vals = None, {}
+                    # 写终态：库中任何态都可被终态覆盖（终态 rank 最高）。但 job 必须已在 Map 里——逐属性 SET 的父路径
+                    # 不存在会 ValidationException（穿出即整 tick 失败），而「投影带 definition 外的 scope」本就不该发生
+                    # （project 侧同样忽略、不臆造 job）→ attribute_exists 把它转成 CCF、与 local 同样静默跳过。
+                    cond, vals = "attribute_exists(jobs.#sid)", {}
                 elif new_rank == 1:
                     cond, vals = "jobs.#sid.#jst IN (:pending, :running)", {
                         ":pending": Status.PENDING.value, ":running": Status.RUNNING.value}
                 else:
                     cond, vals = "jobs.#sid.#jst = :pending", {":pending": Status.PENDING.value}
+                sets = ["jobs.#sid.#jst = :st"]
+                vals[":st"] = js.status.value
+                if js.session_id is not None:  # omit-when-None = 不提及 = 保留库中值（回填兜底）
+                    sets.append("jobs.#sid.session_id = :sess")
+                    vals[":sess"] = js.session_id
+                if js.claimed_at is not None:
+                    sets.append("jobs.#sid.claimed_at = :cat")
+                    vals[":cat"] = js.claimed_at
                 kwargs = dict(
                     Key={"run_id": run_id, _ITEM_TYPE_ATTR: _STATE},
-                    UpdateExpression="SET jobs.#sid = :js",
-                    ExpressionAttributeNames={"#sid": sid, "#jst": "status"} if cond else {"#sid": sid},
-                    ExpressionAttributeValues={":js": _job_state_to_item(js), **vals},
+                    UpdateExpression="SET " + ", ".join(sets),
+                    ExpressionAttributeNames={"#sid": sid, "#jst": "status"},
+                    ExpressionAttributeValues=vals,
                 )
                 if cond:
                     kwargs["ConditionExpression"] = cond

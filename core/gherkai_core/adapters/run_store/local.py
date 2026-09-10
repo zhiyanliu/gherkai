@@ -189,18 +189,20 @@ class LocalRunStore:
             if cur.status not in (Status.PENDING, Status.RUNNING):
                 return None  # 已 finalize 终态：不被投影刷回（机制三 finalize 单调的对偶保护）
             # 机制三② job 级：逐 job 与库中现态取较推进者（同 rank 取新值——终态间以本次投影为准）
-            jobs: dict[str, JobState] = {}
+            jobs: dict[str, JobState] = dict(cur.jobs)  # 从库中现态出发：投影没带的 job 原样保留
             for sid, js in state.jobs.items():
                 cur_js = cur.jobs.get(sid)
-                if cur_js is not None and _lifecycle_rank(cur_js.status) > _lifecycle_rank(js.status):
+                if cur_js is None:
+                    continue  # definition 外的 scope（不该发生：project 只吐 meta.jobs 的键）→ 不臆造，与 DDB 的 CCF 跳过对拍
+                if _lifecycle_rank(cur_js.status) > _lifecycle_rank(js.status):
                     jobs[sid] = cur_js  # 库中更推进（已终态/已 claim）→ 保留，不回退
                 else:
                     # 血缘/claim 时刻不丢：投影缺的字段回填库中值（claimed_at 只由 try_claim_job 落、
                     # 事件推演不出——正常经 project 的 baseline 带回，此处兜没带 baseline 的投影）
                     jobs[sid] = JobState(
                         scope_id=sid, status=js.status,
-                        session_id=js.session_id or (cur_js.session_id if cur_js else None),
-                        claimed_at=js.claimed_at or (cur_js.claimed_at if cur_js else None))
+                        session_id=js.session_id or cur_js.session_id,
+                        claimed_at=js.claimed_at or cur_js.claimed_at)
             # run 级 status 按投影里的 job 态定（全 pending → pending，否则 running）；传入的 run 级值是
             # 终态聚合值、一律不用（规则与理由见 projected_run_status）。
             return RunState(run_id=state.run_id, status=projected_run_status(state.jobs), jobs=jobs,

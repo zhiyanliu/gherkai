@@ -55,6 +55,7 @@ Job = {
 - **背景**：Gherkin 标准里，贴在 **Feature 行**的 tag 会**下传给该 feature 的每个 scenario**（gherkin-official 编译出的 pickle `tags` 已合并 feature 级 + scenario 级）。故一个 scenario 可能同时背 feature 级 `@scope:login` + 自身的 `@scope:checkout` = 两个不同 `@scope` 值。
 - **裁决（与 engine 冲突对称）**：一个 scenario 解析出**多个不同 `@scope` 值 → 报错、拒绝运行**。理由同 engine：scope = 会话边界，一个 scenario 只能属一条会话线，同属两个 scope 物理自相矛盾。
 - **feature 级 `@scope` 传播仍允许**：在 Feature 行标 `@scope:X` 让整个文件归一个会话，是受支持的便利写法——只要其下没有 scenario 再标一个**不同**的 `@scope` 值（标相同值无害、不算冲突）。
+- **裸 `@scope:`（空值）→ 报错**：与 `@timeout` 同一立场（标了 tag 就得给有效值、想走缺省就删 tag）。否则不同文件里的裸 `@scope:` 会被当成同一个 named scope 静默合并进一条会话（code-health 对抗验证发现，曾无声放行）。
 
 ### engine 解析（scope 级，规则同 [0019](./0019-feature-tags-scope-and-engine.md)）
 
@@ -62,6 +63,7 @@ Job = {
 - 整 scope 未标 `@engine` → 用 `config.defaultEngine`；
 - scope 内任一 scenario 标了 → 全 scope 继承；
 - 同 scope 多个不同 engine 值 → 报错拒运行（物理自相矛盾）。
+- 裸 `@engine:`（空值）→ 报错（同 `@scope`/`@timeout` 的空值立场；曾静默把 engine 置成空串顶掉 `config.defaultEngine`）。
 
 ### timeout 解析（scope 级，规则同 [0019](./0019-feature-tags-scope-and-engine.md)）
 

@@ -155,7 +155,7 @@ class RunStore(Protocol):
 **接口真值以 `core/gherkai_core/ports.py` 为准**——上块是本决策期的**增量视图**，不是 `RunStore` 的完整现状：此后还追加了 `preflight`（探活，见下决定七）与条件写三方 `try_claim_job`/`project_state`/`try_finalize`（[0034](./0034-detached-batch-reconciler.md)）。
 
 - **新增三方法是 additive**：`save_run` 不删——`test_stores.py` 里多个 RunStore save/load 往返用例仍用它（`grep -rn 'save_run(' core/tests/` 可核）、一次性写场景也仍用。新方法只是把它的职责按生命周期拆成「开始/逐 job/结束」三段。
-- `update_job_state` 按 **scope_id 定位单个 job**：local adapter 是「读 run_state→改该 scope_id→写回」的 read-modify-write（**非自身线程安全**，靠 `RunPersistence` 的单一 store 锁串行，见决定三的并发不变量）；DDB adapter 用 `SET jobs.#sid=:js`（Map 按 key 路径，见下决定六）。这要求 `RunState.jobs` 用 **Map<scope_id> 形状**（见决定五）。
+- `update_job_state` 按 **scope_id 定位单个 job**：local adapter 是「读 run_state→改该 scope_id→写回」的 read-modify-write（**非自身线程安全**，靠 `RunPersistence` 的单一 store 锁串行，见决定三的并发不变量）；DDB adapter 用 `SET jobs.#sid=:js`（Map 按 key 路径整 entry 刷——调用方一次给全量 JobState；投影写另按逐属性刷，见下决定六）。这要求 `RunState.jobs` 用 **Map<scope_id> 形状**（见决定五）。
 
 ## 决定五：`RunState.jobs` 改 Map<scope_id> 形状（core model 一次到位）
 
@@ -183,7 +183,7 @@ Map 形状下 `update_job_state` 各 scope 互不干扰、天然支持单元素�
 - **排序键字段名用 `item_type` 而非 DDB 圈惯用缩写 `sk`**：`item_type` 自描述其真实语义（区分同一 run 的 definition/运行态 item），避免 `sk` 被误读成 scenario/step key 或 DDB secondary index。
 - 读用 `ConsistentRead=True`（RunStore 是控制面小记录，强一致的 commit-point 正确性收益 >> RCU 成本）。events 表的**投影读**（`DdbEventLog.records()`，reconcile/finalize 的输入）同理强一致：finalize 前刚写的尾事件（终读 drain、退出观察者的 `task_exited`）必须立即可见，最终一致读漏尾会把已完成 job 投成仍在跑；2× RRU 相对 run 级读量可忽略。**建表责任在 IaC/组合根、非 adapter**——adapter 假定表已存在（同 [0016](./0016-execution-architecture-core-lib-run-model.md) 窄腰：adapter 不持 schema/IAM 建表权知识）。
 
-**RunState.jobs 落 DDB 用原生 Map（M 型）、非 JSON blob**：`update_job_state` 要按 scope_id 单元素刷（`SET jobs.#sid=:js`），blob 无法单元素刷、退化成整 item RMW、违背决定四/五。**字段仍源于 serialize（单一真理源），只是 jobs 的容器形状在 adapter 层从 list 特化成 Map**——这是「DDB adapter 对 jobs 容器的落库层特化」，非第二真理源。**RunStore 侧无 float**（RunMeta/RunState 全 str/int/Status，float 只在 JobResult/RunResult→ResultStore），故原生 Map 无 float→Decimal 顾虑。未 create 就 update/finalize 须复刻 local「报错」语义（条件写）；session_id=None 沿用 omit-when-None（不写该键、读回得 None）。
+**RunState.jobs 落 DDB 用原生 Map（M 型）、非 JSON blob**：`update_job_state` 按 scope_id 单元素刷整 entry（`SET jobs.#sid=:js`，调用方给全量、对拍 local 的整 entry 替换）；**投影写（`project_state`）逐属性**（`SET jobs.#sid.<attr>=…`：未提及的 `session_id`/`claimed_at` 由 update_item 天然保留——对拍 local 的「投影缺字段回填库中值」兜底；曾整 entry 覆盖，不带 baseline 的投影会抹掉只由 claim 落库的 `claimed_at`）。blob 无法单元素刷、退化成整 item RMW、违背决定四/五。**字段仍源于 serialize（单一真理源），只是 jobs 的容器形状在 adapter 层从 list 特化成 Map**——这是「DDB adapter 对 jobs 容器的落库层特化」，非第二真理源。**RunStore 侧无 float**（RunMeta/RunState 全 str/int/Status，float 只在 JobResult/RunResult→ResultStore），故原生 Map 无 float→Decimal 顾虑。未 create 就 update/finalize 须复刻 local「报错」语义（条件写）；session_id=None 沿用 omit-when-None（不写该键、读回得 None）。
 
 **ResultStore 后端 = S3**（坐实 [0016](./0016-execution-architecture-core-lib-run-model.md) 原「待定」）：每 job 一 S3 对象，key = `<prefix>/<run_id>/jobs/<quote(scope_id)>.json`（`quote` 编码——scope_id 含 `/`:中文原样嵌会让 `load_all` 的 prefix 反解歧义）。**赌 CI 按 run_id+scope_id 键取判定**；将来若需跨 scope 查询/过滤，加 DDB 索引层（加法不返工）。
 

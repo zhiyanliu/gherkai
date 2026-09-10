@@ -56,13 +56,14 @@ class SqliteEventLog:
                 "  reason TEXT"                 # 平台侧归因串（观察者落哨兵时带）
                 ")"
             )
-            # 旧库迁移（加列幂等）：列引入前建的 exits 表补列；已有列 → OperationalError，忽略
-            for ddl in ("ALTER TABLE exits ADD COLUMN timed_out INTEGER NOT NULL DEFAULT 0",
-                        "ALTER TABLE exits ADD COLUMN reason TEXT"):
-                try:
-                    conn.execute(ddl)
-                except sqlite3.OperationalError:
-                    pass
+            # 旧库迁移（加列幂等）：只保留**已发行版本建过缺列 schema** 的那一列——v1.4.0 建的 exits 表没有 reason，新版接力
+            # （status --wait）同一 run 的 events.db 时补列；已有列 → OperationalError，忽略。timed_out 的补列已删：首个含本文件
+            # 的发行版 v1.3.0 的 CREATE TABLE 就带它、迁移不可达（判据 = git tag 真值集；新加列时照此加一条 ALTER，等最老
+            # 受支持发行版都带它时再删）。
+            try:
+                conn.execute("ALTER TABLE exits ADD COLUMN reason TEXT")
+            except sqlite3.OperationalError:
+                pass
 
     def append_event(self, scope_id: str, seq: int, line: str, emit_ts: float) -> None:
         """追加一条 worker 事件（原始 JSON 行）。INSERT OR REPLACE：同 (scope,seq) 幂等（重放/重试无副作用）。"""

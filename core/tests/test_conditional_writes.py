@@ -256,3 +256,38 @@ def test_double_finalize_rejected(run_store):
 def test_finalize_missing_run_fails(run_store):
     """未 create 的 run → finalize False（不崩、不臆造）。"""
     assert run_store.try_finalize("nope", Status.PASSED, "t") is False
+
+
+def test_projection_without_baseline_keeps_stored_lineage(run_store):
+    """**不带 baseline** 的投影（session_id 从事件来、claimed_at 事件推演不出 → None）落库后，库中的 claimed_at 仍在、
+    session_id 已刷——两 adapter 对拍：local 靠「投影缺字段回填库中值」，DDB 靠逐属性 SET 不提及即保留
+    （曾整 entry 覆盖，一次不带 baseline 的投影就把只由 claim 落库的 claimed_at 静默抹掉）。"""
+    from gherkai_core.model import ScopeStarted
+    from gherkai_core.project import EventRecord, project
+
+    meta = _meta()
+    run_store.create_run(meta, _initial(meta, hwm=0))
+    assert run_store.try_claim_job("run-1", "a", claimed_at="2026-08-13T01:02:03Z") is True
+    recs = [EventRecord(scope_id="a", kind="event", seq=1,
+                        event=ScopeStarted(scope_id="a", session_id="sess-1"), emit_ts=0.0)]
+    projected = project(meta, recs)  # 无 baseline
+    assert projected.jobs["a"].claimed_at is None  # 投影自己不知道 claimed_at
+    assert run_store.project_state("run-1", projected) is True
+    got = run_store.load_run_state("run-1")
+    assert got.jobs["a"].claimed_at == "2026-08-13T01:02:03Z" and got.jobs["a"].session_id == "sess-1"
+    assert got.jobs["a"].status == Status.RUNNING
+
+
+def test_projection_with_unknown_scope_is_ignored_not_invented(run_store):
+    """投影带一个 definition 外的 scope（不该发生：project 只吐 meta.jobs 的键）→ 两 adapter 都**不臆造** job、不抛：
+    local 跳过、DDB 经 attribute_exists 走 CCF 跳过（曾整 entry SET 会补建，改逐属性后父路径不存在会 ValidationException
+    穿出、整 tick 失败——收敛成同一语义并钉住）。"""
+    meta = _meta()
+    run_store.create_run(meta, _initial(meta, hwm=0))
+    projected = RunState(run_id="run-1", status=Status.RUNNING,
+                         jobs={"a": JobState("a", Status.PASSED), "b": JobState("b", Status.PENDING),
+                               "ghost": JobState("ghost", Status.PASSED)},
+                         started_at="2026-07-19T00:00:00Z", high_water_mark=1)
+    assert run_store.project_state("run-1", projected) is True
+    got = run_store.load_run_state("run-1")
+    assert set(got.jobs) == {"a", "b"} and got.jobs["a"].status == Status.PASSED

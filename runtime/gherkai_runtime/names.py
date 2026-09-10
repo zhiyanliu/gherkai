@@ -25,6 +25,18 @@ BASE_JOB_TIMEOUT_SCHEDULE = "job-timeout"
 # task-def / container：按 job.engine 拼 `{prefix}{engine}-worker`（对称 EngineResolver 按 engine 选）。
 ENGINES = ("novaact", "midscene")
 
+# 后端 SSM 参数的相对键（全路径 = `ssm_path(prefix, 键)`；参数族真值表见 ADR 0038「SSM 参数与命名真源」、0037 决策 6）。
+# 调用点一律引常量、不写裸字面量——推送方/解析方/IaC/Lambda 拼的必须是同一个键。
+BACKEND_VERSION_KEY = "version"        # 后端版本戳（stack 资源随部署事务写；提交侧 skew 比对读）
+SUBNETS_KEY = "subnets"                # worker 子网 ID 列表
+SECURITY_GROUPS_KEY = "security-groups"  # worker 安全组 ID
+VPC_KEY = "vpc"                       # 生效的 VPC 档（部署方三态比对读，ADR 0037 决策 6）
+WORKER_IMAGE_ROOT_KEY = "worker-image"  # `worker-image/<engine>/<tag>` 映射族的根（按路径列举时用；单条键走 worker_image_key）
+
+# 引擎原生产物在 run 树下的子目录名（ADR 0029「S3 key 镜像本地 run 树」的前提）：同步 run / local per-run / cloud 容器内
+# 三宿主拼的必须是同一个名字，故单点；键 = 引擎名（ENGINES）。改名 = 改 S3 key 布局，须同时考虑已落产物的可读性。
+ARTIFACT_SUBDIR = {"novaact": "nova-trajectories", "midscene": "midscene-run"}
+
 
 def default_name(prefix: str, base: str) -> str:
     """prefix + 基名（原样拼，prefix 含分隔符由用户负责）。CDK 与 cli 共用此推导 → 单一事实源。"""
@@ -134,4 +146,4 @@ def worker_image_key(engine: str, tag: str) -> str:
     值 = JSON：`template_arn` / `revision_arn` / `digest` / `pushed_at`（ISO 8601 UTC）。键含版本 ⇒ variant
     **按版本隔离**：旧版本的 variant 留作历史、不参与当前版本解析。
     """
-    return f"worker-image/{engine}/{tag}"
+    return f"{WORKER_IMAGE_ROOT_KEY}/{engine}/{tag}"

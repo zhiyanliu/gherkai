@@ -101,6 +101,7 @@ def snapshot_s3(prefix: str) -> list[tuple[str, int]]:
 
 
 def run(engine: str, feature: str, votes: int, interrupt: str, run_id: str, grace_cap: float):
+    from gherkai_runtime.names import ARTIFACT_SUBDIR  # 子目录名单点（与三宿主同名，ADR 0029）——harness 忠实复现生产布局
     if not BUCKET:
         sys.exit("错误：需经环境变量 HARNESS_S3_BUCKET 提供可写 S3 桶")
     job = build_job(feature, engine, votes)
@@ -109,9 +110,9 @@ def run(engine: str, feature: str, votes: int, interrupt: str, run_id: str, grac
     run_dir = _TMP / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
     if engine == "novaact":
-        artifact_dir, local_key = run_dir / "nova-trajectories", "NOVA_LOGS_DIR"
+        artifact_dir, local_key = run_dir / ARTIFACT_SUBDIR["novaact"], "NOVA_LOGS_DIR"
     else:
-        artifact_dir, local_key = run_dir / "midscene-run", "MIDSCENE_RUN_DIR"
+        artifact_dir, local_key = run_dir / ARTIFACT_SUBDIR["midscene"], "MIDSCENE_RUN_DIR"
     artifact_dir.mkdir(parents=True, exist_ok=True)
     prefix = f"harness/{run_id}/"
 

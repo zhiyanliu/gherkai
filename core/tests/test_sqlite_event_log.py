@@ -97,3 +97,23 @@ def test_record_exit_reason_roundtrip(tmp_path):
     exits = {r.scope_id: r.exited for r in log.records() if r.kind == "exit"}
     assert exits["a"].exit_code == 255 and exits["a"].reason == "TaskFailedToStart: CannotPullContainerError"
     assert exits["b"].reason is None
+
+
+def test_opening_a_v140_shaped_db_adds_the_reason_column(tmp_path):
+    """唯一存活的迁移分支必须有红灯：v1.4.0（已发行）建的 exits 表没有 reason 列，新版接力同一 run 的 events.db 时
+    `_init_schema` 补列且旧行照常读回。删这条 ALTER 前先看到这里变红——「不可达就删」的判据是 git tag 真值集，
+    v1.4.0 的 CREATE TABLE 逐字：scope_id / exit_code / timed_out，无 reason。"""
+    import sqlite3
+
+    path = tmp_path / "events.db"
+    with sqlite3.connect(path) as conn:
+        conn.execute("CREATE TABLE exits (scope_id TEXT PRIMARY KEY, exit_code INTEGER, timed_out INTEGER NOT NULL DEFAULT 0)")
+        conn.execute("INSERT INTO exits (scope_id, exit_code, timed_out) VALUES ('old', 0, 0)")
+    log = SqliteEventLog(path)
+    with sqlite3.connect(path) as conn:
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(exits)")}
+    assert "reason" in cols
+    log.record_exit("new", 255, reason="TaskFailedToStart: x")
+    exits = {r.scope_id: r.exited for r in log.records() if r.kind == "exit"}
+    assert exits["old"].exit_code == 0 and exits["old"].reason is None
+    assert exits["new"].reason == "TaskFailedToStart: x"

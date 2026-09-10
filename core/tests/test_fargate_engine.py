@@ -526,24 +526,24 @@ def _engine_with_fake_ecs(describe_response, container_name="worker") -> Fargate
 def test_probe_task_not_stopped():
     # 未 STOPPED → (stopped=False, exit_code=None)（调用方继续轮询等终态）
     eng = _engine_with_fake_ecs({"tasks": [{"lastStatus": "RUNNING", "containers": [{"name": "worker"}]}]})
-    assert eng._probe_task("arn") == (False, None)
+    assert eng._probe_task("arn") == (False, None, False)
 
 
 def test_probe_task_stopped_with_exit_code():
     eng = _engine_with_fake_ecs({"tasks": [{"lastStatus": "STOPPED", "containers": [{"name": "worker", "exitCode": 0}]}]})
-    assert eng._probe_task("arn") == (True, 0)
+    assert eng._probe_task("arn") == (True, 0, False)
     eng2 = _engine_with_fake_ecs({"tasks": [{"lastStatus": "STOPPED", "containers": [{"name": "worker", "exitCode": 137}]}]})
-    assert eng2._probe_task("arn") == (True, 137)
+    assert eng2._probe_task("arn") == (True, 137, False)
 
 
 def test_probe_task_stopped_but_exit_code_null():
     # STOPPED 但 exitCode=null（lastStatus 翻转与 exitCode 落值非原子，STOPPED 瞬间可能短暂 null，ADR 0024「exitCode 落值延迟」）
     # → (stopped=True, exit_code=None)：**两事实各自命名、不揉进单值**；调用方 _await_exit_code 据此有界多等几拍等落值、别当异常。
     eng = _engine_with_fake_ecs({"tasks": [{"lastStatus": "STOPPED", "containers": [{"name": "worker", "exitCode": None}]}]})
-    assert eng._probe_task("arn") == (True, None)
+    assert eng._probe_task("arn") == (True, None, False)
     # STOPPED 但整个 containers 空（更极端的落值延迟）→ 同样 (True, None)、不崩
     eng2 = _engine_with_fake_ecs({"tasks": [{"lastStatus": "STOPPED", "containers": []}]})
-    assert eng2._probe_task("arn") == (True, None)
+    assert eng2._probe_task("arn") == (True, None, False)
 
 
 def test_raise_for_worker_exit_maps_codes_with_fargate_label():
@@ -607,11 +607,12 @@ def test_await_exit_code_null_then_nonzero_landed_preserved():
 
 # ---- 流式期断号（ADR 0024「读一致性」）：游标只越过连续前缀 + 有界宽限 + 终读记洞 ----
 
-def _gap_engine(events_table, ecs, gap_grace_s: float) -> FargateEngine:
+def _gap_engine(events_table, ecs, gap_grace_s: float, missing_grace_polls: int = 20) -> FargateEngine:
     """裸构造：只装 _read_events 路径要用的属性（不起 RunTask）。"""
     eng = FargateEngine.__new__(FargateEngine)
     eng._events, eng._ecs, eng._run_id, eng._cluster, eng._container = events_table, ecs, _RUN_ID, "c", "novaact-worker"
-    eng._poll, eng._gap_grace_s, eng._null_exit_grace_polls = 0.001, gap_grace_s, 5
+    eng._poll, eng._gap_grace_s, eng._null_exit_grace_polls = 0.0, gap_grace_s, 5
+    eng._missing_task_grace_polls = missing_grace_polls
     return eng
 
 
@@ -677,3 +678,96 @@ def test_final_drain_logs_real_holes_under_consistent_read(caplog):
     with caplog.at_level(logging.WARNING, logger="gherkai_core.adapters.fargate_engine"):
         got = [type(e).__name__ for e in eng._final_drain(f"{_RUN_ID}#browse", 1)]
     assert got == ["StepStarted", "ScopeDone"] and "终读断号" in caplog.text and "seq 3..4" in caplog.text
+
+
+def test_probe_task_missing_is_a_third_state_not_running():
+    """DescribeTasks 空 tasks + failures MISSING → missing=True（不是「未 STOPPED」）：ECS 最终一致下 RunTask 刚返回可短暂
+    查不到；持续 MISSING 则 task 已不在 ECS，再等永远等不到 STOPPED（ADR 0024「exitCode 落值延迟」条第三态）。"""
+    eng = _engine_with_fake_ecs({"tasks": [], "failures": [{"arn": "arn", "reason": "MISSING"}]})
+    assert eng._probe_task("arn") == (False, None, True)
+
+
+def test_await_exit_code_missing_task_beyond_grace_raises():
+    """持续 MISSING 超过有界宽限 → 抛可归因 RuntimeError（schedule 记 error），不再无上界轮询。"""
+    import pytest
+
+    eng = _engine_with_fake_ecs({"tasks": [], "failures": [{"arn": "arn", "reason": "MISSING"}]})
+    eng._poll, eng._missing_task_grace_polls, eng._null_exit_grace_polls = 0.0, 3, 5
+    with pytest.raises(RuntimeError, match="MISSING"):
+        eng._await_exit_code("arn")
+
+
+def test_await_exit_code_transient_missing_then_stopped_reads_code():
+    """MISSING 只是瞬时（最终一致）→ 宽限内恢复可见并 STOPPED → 正常读到码，不误报。"""
+    class _Ecs:
+        def __init__(self):
+            self.calls = 0
+
+        def describe_tasks(self, **kw):
+            self.calls += 1
+            if self.calls <= 2:
+                return {"tasks": [], "failures": [{"arn": "arn", "reason": "MISSING"}]}
+            return {"tasks": [{"lastStatus": "STOPPED", "containers": [{"name": "worker", "exitCode": 0}]}]}
+
+    eng = FargateEngine.__new__(FargateEngine)
+    eng._ecs, eng._cluster, eng._container = _Ecs(), "c", "worker"
+    eng._poll, eng._missing_task_grace_polls, eng._null_exit_grace_polls = 0.0, 5, 5
+    assert eng._await_exit_code("arn") == 0
+
+
+# ---- _read_events 的 MISSING 分支（ADR 0024「exitCode 落值延迟」条第三态）：有界抛 / 瞬时恢复 / 有进展即断连续 ----
+
+class _MissingThenStoppedEcs:
+    """前 missing_calls 次 describe → MISSING，之后 STOPPED exit 0。"""
+
+    def __init__(self, missing_calls: int):
+        self.missing_calls, self.calls = missing_calls, 0
+
+    def describe_tasks(self, **kw):
+        self.calls += 1
+        if self.calls <= self.missing_calls:
+            return {"tasks": [], "failures": [{"arn": "arn", "reason": "MISSING"}]}
+        return {"tasks": [{"lastStatus": "STOPPED", "containers": [{"name": "novaact-worker", "exitCode": 0}]}]}
+
+
+class _RoundsTable:
+    """按轮次给 Items（用尽后恒空）。"""
+
+    def __init__(self, rounds):
+        self.rounds, self.calls = list(rounds), 0
+
+    def query(self, **kw):
+        self.calls += 1
+        return {"Items": self.rounds.pop(0) if self.rounds else []}
+
+
+def test_read_events_persistent_missing_task_raises_after_grace():
+    """无事件 + DescribeTasks 恒 MISSING → 连续超过宽限即抛可归因 RuntimeError（曾把空 tasks 当「未 STOPPED」无上界轮询）。"""
+    import pytest
+
+    ecs = _MissingThenStoppedEcs(missing_calls=10**6)
+    eng = _gap_engine(_RoundsTable([]), ecs, gap_grace_s=5.0, missing_grace_polls=3)
+    with pytest.raises(RuntimeError, match="MISSING"):
+        list(eng._read_events("browse", "arn:task/1"))
+    assert ecs.calls == 4  # 宽限 3 拍 + 第 4 拍抛：有界，且是本闸门抛的
+
+
+def test_read_events_transient_missing_then_events_and_stopped():
+    """瞬时 MISSING（ECS 最终一致）→ 宽限内恢复 → 事件照常读、scope_done 后读到 exit 0，不误报。"""
+    table = _RoundsTable([[], [], [_ev_item(1, {"type": "scope_started", "scopeId": "browse"}),
+                                   _ev_item(2, {"type": "scope_done", "scopeId": "browse"})]])
+    eng = _gap_engine(table, _MissingThenStoppedEcs(missing_calls=2), gap_grace_s=5.0, missing_grace_polls=5)
+    got = [type(e).__name__ for e in eng._read_events("browse", "arn:task/1")]
+    assert got == ["ScopeStarted", "ScopeDone"]
+
+
+def test_read_events_progress_resets_missing_count():
+    """「连续 MISSING」的连续性被有进展的轮次打断：事件/空轮交替、空轮都探到 MISSING，累计 3 次但从不连续 2 次，
+    宽限 1 拍也不该抛（曾只在探到非 MISSING 时归零、有进展的轮次不归零——累计口径与 ADR 0024「连续」不符）。"""
+    rounds = [[_ev_item(1, {"type": "scope_started", "scopeId": "browse"})], [],
+              [_ev_item(2, {"type": "step_started", "scenarioId": "sc:0", "stepIndex": 0})], [],
+              [_ev_item(3, {"type": "step_done", "scenarioId": "sc:0", "stepIndex": 0, "status": "passed"})], [],
+              [_ev_item(4, {"type": "scope_done", "scopeId": "browse"})]]
+    eng = _gap_engine(_RoundsTable(rounds), _MissingThenStoppedEcs(missing_calls=3), gap_grace_s=5.0, missing_grace_polls=1)
+    got = [type(e).__name__ for e in eng._read_events("browse", "arn:task/1")]
+    assert got == ["ScopeStarted", "StepStarted", "StepDone", "ScopeDone"]

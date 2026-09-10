@@ -170,7 +170,7 @@ def _iter_image_params(ssm, prefix: str):
     `GetParametersByPath(Recursive=True)` 单页最多 10 条、**必须翻页**（ADR 0038「SSM 参数与命名真源」末句）；
     漏翻页的后果是清理 pass 把翻到第二页的 variant 判成孤儿、静默删掉别人在用的 revision。
     """
-    root = names.ssm_path(prefix, "worker-image")
+    root = names.ssm_path(prefix, names.WORKER_IMAGE_ROOT_KEY)
     token = None
     while True:
         kwargs = {"Path": root, "Recursive": True}
@@ -704,7 +704,7 @@ def _skew_gate(compose, *, prefix: str, cli_version: str | None, ssm, out) -> in
     except Exception as exc:
         # 读戳失败（凭证/权限/region/网络）——`read_backend_version` 有意把这类异常抛给入口皮归码，
         # 本模块就是那个皮：归到「前置失败」这一档、不抛 traceback（同 `cli._guard_vpc_spec` 的口径）。
-        out(f"读不到后端版本戳（SSM {names.ssm_path(prefix, 'version')}）：{exc}\n"
+        out(f"读不到后端版本戳（SSM {names.ssm_path(prefix, names.BACKEND_VERSION_KEY)}）：{exc}\n"
             f"需要可用的凭证与 region（--region / AWS_REGION / --profile），以及 ssm:GetParameter 权限。")
         return EXIT_PRECONDITION
     if verdict != compose.SKEW_BLOCK:

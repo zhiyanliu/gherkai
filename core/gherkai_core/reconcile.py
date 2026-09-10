@@ -26,6 +26,9 @@ class EventLog(Protocol):
 
     def records(self) -> list: ...  # list[EventRecord]（gherkai_core.project）
 
+    # 单个 scope 有无退出记录（主键点查）——超时处置/接力恢复判「观察链是否已写」用，别为一个 scope 重放整 run。
+    def has_exit(self, scope_id: str) -> bool: ...
+
     # 幂等（独立键空间，机制一）。timed_out：超时处置的 stop 所致退出（ADR 0034「job timeout」节归因链）。
     def record_exit(self, scope_id: str, exit_code: int | None, *, timed_out: bool = False,
                     reason: str | None = None) -> None: ...
