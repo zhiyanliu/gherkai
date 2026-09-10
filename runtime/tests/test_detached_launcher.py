@@ -45,7 +45,8 @@ def _setup(tmp_path, mode, *sids, timeout_s: float | None = None):
     store.create_run(meta, RunState(run_id="run-1", status=Status.PENDING,
                                     jobs={s: JobState(s, Status.PENDING) for s in sids},
                                     started_at="t0", high_water_mark=0))
-    launcher = SubprocessLauncher(_echo_resolver(mode), log)
+    # 测试显式给短 grace（echo_worker 收 SIGTERM 即协作退）；生产由组合根注 compose.engine_min_grace，参数无缺省
+    launcher = SubprocessLauncher(_echo_resolver(mode), log, min_grace_fn=lambda _engine: 1.0)
     return meta, log, store, launcher
 
 
@@ -226,7 +227,7 @@ def test_run_state_timestamps_share_one_format(tmp_path):
     store.create_run(meta, RunState(run_id="run-1", status=Status.PENDING,
                                     jobs={"a": JobState("a", Status.PENDING)},
                                     started_at=compose.now_iso(), high_water_mark=0))
-    launcher = SubprocessLauncher(_echo_resolver("pass"), log)
+    launcher = SubprocessLauncher(_echo_resolver("pass"), log, min_grace_fn=lambda _engine: 1.0)
     run_reconcile_loop("run-1", meta, log, store, launcher, max_concurrency=1,
                        poll_interval_s=0.05, now_iso_fn=compose.now_iso)
     state = store.load_run_state("run-1")

@@ -47,11 +47,13 @@ class SubprocessLauncher:
     """
 
     def __init__(self, resolver: Callable[[str], SubprocessEngine], event_log: SqliteEventLog, *,
-                 min_grace_fn=None) -> None:
+                 min_grace_fn: Callable[[str], float]) -> None:
         self._resolver = resolver
         self._event_log = event_log
-        # engine→grace 下限（组合根注入 compose.engine_min_grace；None → 缺省 5s）：timeout stop 用它当
-        # 协作停宽限（grace < 单 act 时长会致会话泄漏，ADR 0024 grace 硬约束——超时杀也不豁免）。
+        # engine→grace 下限，**必传**（组合根传 compose.engine_min_grace；测试传显式 fake）：timeout stop 用它当协作停
+        # 宽限（grace < 单 act 时长会致会话泄漏，ADR 0024 grace 硬约束——超时杀也不豁免）。不留缺省：任何回落值都必然
+        # 低于引擎下限（Nova 150s），漏注入宁在构造期 TypeError 炸掉，别让超时停静默变成杀会话（同 run_reconcile_loop
+        # 的 now_iso_fn 立场）。
         self._min_grace_fn = min_grace_fn
         # 本 launcher 起过的 scope（run_reconcile_loop 的接力恢复扫豁免它们——自家 job 的 deadline 有 timer 在管）
         self.owned_scopes: set[str] = set()
@@ -73,7 +75,7 @@ class SubprocessLauncher:
         timer: threading.Timer | None = None
         timed_out = threading.Event()
         if job.timeout_s:
-            grace = self._min_grace_fn(job.engine) if self._min_grace_fn else 5.0
+            grace = self._min_grace_fn(job.engine)
 
             def _on_deadline() -> None:
                 timed_out.set()  # 先置标志再 stop：_pump 的 record_exit 必见（归因链时序）

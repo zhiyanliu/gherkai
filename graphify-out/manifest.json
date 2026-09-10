@@ -375,8 +375,8 @@
     "semantic_hash": "d433e28ccaea45df3762c4934dca3fe0"
   },
   "docs/adr/0024-worker-core-protocol.md": {
-    "mtime": 1789009594.784063,
-    "ast_hash": "26ee39e0c495a140b60090b44ddab284",
+    "mtime": 1789011112.6126559,
+    "ast_hash": "f54e68e8f6ef6b9de8471ab34e1f3e0e",
     "semantic_hash": ""
   },
   "docs/adr/0026-schedule-module.md": {
@@ -650,8 +650,8 @@
     "semantic_hash": ""
   },
   "runtime/gherkai_runtime/detached.py": {
-    "mtime": 1789009594.7855797,
-    "ast_hash": "cc6d5b875c00dae37f091548121cee83",
+    "mtime": 1789011357.6340976,
+    "ast_hash": "1179fb08b85546c654fe13e3223224ad",
     "semantic_hash": ""
   },
   "runtime/gherkai_runtime/names.py": {
@@ -680,8 +680,8 @@
     "semantic_hash": ""
   },
   "runtime/tests/test_detached_launcher.py": {
-    "mtime": 1789009100.9331927,
-    "ast_hash": "f6f7115fbb54b36e032aa4d10278396d",
+    "mtime": 1789011357.6344671,
+    "ast_hash": "6f3581e902e98fcacf9da91d6381baad",
     "semantic_hash": ""
   },
   "runtime/tests/test_tunnel.py": {
