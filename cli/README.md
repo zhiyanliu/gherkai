@@ -84,7 +84,7 @@ URL、DOM 这类不容 AI 抖动的检查，可以由你自己写成确定性步
 
 ## 输出与报告
 
-stdout 只放该命令的核心产出（`--json` 的 JSON、人看的文本汇总、列表），进度与诊断全走 stderr——所以 `gherkai run … --json > r.json` 拿到的是纯净 JSON，进度仍在终端可见。每次 `run` 默认在 `reports/<run_id>/` 留一份报告：`index.html` 是可点开的入口（判定明细 + 每个引擎自己的报告产物各一行链接），`manifest.json` 是给 CI/工具消费的清单。
+stdout 只放该命令的核心产出（`--json` 的 JSON、人看的文本汇总、列表），进度与诊断全走 stderr——所以 `gherkai run … --json > r.json` 拿到的是纯净 JSON，进度仍在终端可见。每次 `run` 默认在 `reports/<run_id>/` 留一份报告：`index.html` 是可点开的入口（判定明细 + 每个报告产物一行链接：引擎自己的报告产物各一行链接），`manifest.json` 是给 CI/工具消费的清单。
 
 ## 退出码
 

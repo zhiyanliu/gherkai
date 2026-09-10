@@ -151,9 +151,12 @@ def test_no_thought_frames_yields_only_last_frame():
     assert _picks("failed", [_synthetic(4)]) == [(0, 3)]
 
 
-def test_per_act_cap_is_three():
-    # Nova 侧候选只有「末帧 + 首个含 thought 帧」两项（frame 无出错标记、抛错 act 更无 json）→ 不会超 K
-    assert len(_picks("failed", [_synthetic(30, thought_at=tuple(range(30)))])) <= ev.MAX_SHOTS_PER_ACT
+def test_failed_act_candidates_are_last_frame_and_first_thought_only():
+    # Nova 侧候选恒 ≤ 2（末帧 + 首个含 thought 帧；第三项「出错帧」无对应物：抛错 act 无 json、frame 无出错标记），
+    # 故 K=3 的截断分支在本引擎不可达——钉住候选集形状，候选若膨胀成「所有含 thought 帧」立刻变红。
+    picks = _picks("failed", [_synthetic(30, thought_at=tuple(range(30)))])
+    assert picks == [(0, 29), (0, 0)]
+    assert len(picks) <= ev.MAX_SHOTS_PER_ACT
 
 
 def test_per_step_cap_truncates_at_twelve():

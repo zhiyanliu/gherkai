@@ -386,7 +386,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     ex.add_argument("scope_id", nargs="?", default=None,
                     help="只看这一个 scope（缺省 = 该 run 的全部 job）；值 = 报告/JSON 里的 scope_id")
     ex.add_argument("--scenario", action="append", default=None, metavar="SEL",
-                    help="只看这些 scenario（可重复，任一命中）：SEL = 判定明细里的 scenario id、行号，"
+                    help="只看这些 scenario（可重复，任一命中）：SEL = 判定明细里的 scenario id、行号（纯数字或 :行号，只当行号、不按标题匹配），"
                          "或标题的一段文字（区分大小写）")
     ex.add_argument("--step", type=int, default=None, metavar="N",
                     help="只看第 N 步（scenario 内 0 起的书写序号，与文本里的 step 号、JSON 的 index 同一口径）；"
@@ -1433,15 +1433,27 @@ def _explain_scenario_matches(scenario, sels: list[str]) -> bool:
 
     **另起一份、不复用 `_build_selector`**：那个谓词按 `ParsedScenario` 的 uri 切尾、按 tags 判，而 explain
     只读 RunStore/ResultStore、不重解 `.feature`——uri 与 tags 都拿不到。可匹配的只有 job 定义里的
-    `Scenario.id` 与 `Scenario.name`。行号档取 `scenario_id`（`<uri>:<行>[:<example 行>]`）尾部的连续数字段比对：
-    uri 自身以「数字冒号段」结尾时可能误命中，接受这个边角（ADR 0042 决策四明记为有损）。
+    `Scenario.id` 与 `Scenario.name`。三档**按序试、互斥**（与 run/plan 的 `_scenario_hit` 同律）：id 全等 →
+    纯数字（可带前导 `:`）只当行号、**不回落标题子串**（否则 `--scenario 3` 会命中标题含 3 的 scenario）→ 标题子串。
+    行号档取 `scenario_id`（`<uri>:<行>[:<example 行>]`）尾部的连续数字段比对：uri 自身以「数字冒号段」结尾时
+    可能误命中，接受这个边角（ADR 0042 决策四明记为有损）。
     """
     tail: list[str] = []
     for seg in reversed(scenario.id.split(":")):
         if not seg.isdigit():
             break
         tail.append(seg)
-    return any(sel == scenario.id or (sel.isdigit() and sel in tail) or sel in scenario.name for sel in sels)
+    for sel in sels:
+        if sel == scenario.id:
+            return True
+        bare = sel.lstrip(":")
+        if bare.isascii() and bare.isdecimal():
+            if bare in tail:
+                return True
+            continue  # 数字只当行号，不回落到标题
+        if sel in scenario.name:
+            return True
+    return False
 
 
 def _explain_read_evidence(refs, read_bytes) -> "tuple[dict | None, str | None]":

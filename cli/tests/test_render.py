@@ -227,3 +227,19 @@ def test_render_text_shows_reason_for_fail_fast_states():
     out = render.render_text(RunResult(run_meta=meta, status=Status.ERROR, jobs=[a, b]))
     assert "未启动" in out and "本 job 被中止" in out
     assert "None:" not in out
+
+
+def test_render_text_step_reason_line_is_single_line_and_only_when_present():
+    """step 级原因行（ADR 0042 决策三）：failed/error step 下附「原因: …」，多行/多余空白折叠成一行；passed 步不显。"""
+    job = Job(scope_id="s", scope_name="s", engine="novaact", scenarios=())
+    jr = JobResult(job=job, status=Status.ERROR, scenarios=[ScenarioResult(scenario_id="s:1", status=Status.ERROR, steps=[
+        StepResult(index=0, status=Status.PASSED, duration_ms=10.0),
+        StepResult(index=1, status=Status.ERROR, error_type="timeout", duration_ms=20.0,
+                   message="ActTimeoutError: 超时\n  at foo\n\n  at bar"),
+    ])])
+    out = render.render_text(RunResult(run_meta=RunMeta(run_id="r", created_at="", jobs=(job,)), status=Status.ERROR, jobs=[jr]))
+    lines = out.splitlines()
+    reason = [ln for ln in lines if ln.startswith("        原因: ")]
+    assert reason == ["        原因: ActTimeoutError: 超时 at foo at bar"]
+    i0 = lines.index("      step 0: passed (0.0s)")
+    assert not lines[i0 + 1].startswith("        原因")

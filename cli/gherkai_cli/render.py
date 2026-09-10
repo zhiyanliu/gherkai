@@ -277,6 +277,8 @@ def explain_to_dict(*, run_id: str, status: str | None, results: list[JobResult]
                 "status": None if sr is None else sr.status.value,
                 "steps": steps,
             })
+        if (scenario_ids is not None or step_index is not None) and not scenarios:
+            continue  # 筛选生效且本 scope 无一命中：不产空壳 scope（文本/JSON 同律）
         scopes.append({
             "scope_id": jr.scope_id,
             "engine": jr.engine,
@@ -289,6 +291,9 @@ def explain_to_dict(*, run_id: str, status: str | None, results: list[JobResult]
             "aborted_hint": (_ABORTED_PARTIAL_HINT
                              if jr.status in (Status.ABORTED, Status.ERROR) and 0 < len(recorded) < total_steps
                              else None),
+            # 「这个 job 有没有任何 step 记录」是 job 的事实、按未筛的判定树算一次——渲染层据此打 job 判定块；
+            # 曾在筛后的 scenarios 上重算，--scenario/--step 筛剩无记录 step 时会把有完整记录的 job 误打成零记录。
+            "has_step_records": bool(recorded),
             "scenarios": scenarios,
         })
     return {"run_id": run_id, "status": status, "scopes": scopes}
@@ -401,8 +406,7 @@ def render_explain_text(doc: dict, *, expand_passed: bool = False, full: bool = 
         out += [f"  {_ref_line(rr)}" for rr in sc["report_refs"]]
         # 一个 step 记录都没有的 job（worker 没起来 / 起来就被掐）：判定只剩 job 级这一层，单独打一段，
         # 免得读者在一片「无记录」里找不到「到底为什么」。
-        has_step_record = any(not st["record_missing"] for scen in sc["scenarios"] for st in scen["steps"])
-        if not has_step_record:
+        if not sc["has_step_records"]:  # job 级事实（explain_to_dict 按未筛判定树算），不在筛后的 steps 上重算
             why = ""
             if sc["error_type"]:
                 why = f"  ({sc['error_type']}: {sc['message'] or ''})"

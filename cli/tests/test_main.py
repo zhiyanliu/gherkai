@@ -1643,3 +1643,53 @@ def test_explain_cloud_reads_evidence_from_s3(monkeypatch, capsys):
     assert rc == 0 and got == [("bkt", "reports/r/ev.json")]
     step = json.loads(out)["scopes"][0]["scenarios"][0]["steps"][2]
     assert step["evidence"]["acts"][0]["vote"] is False and step["evidence_missing"] is None
+
+
+def test_explain_filter_to_unrecorded_step_does_not_fake_job_verdict_block(tmp_path, capsys):
+    """--scenario/--step 筛到一个无记录的 step 时，「零 step 记录的 job 判定块」不能凭筛后视图误打：
+    has_step_records 是 job 级事实、按未筛判定树算（ADR 0042 决策四）。"""
+    root, run_id = _explain_run(tmp_path)
+    rc, out, _ = _explain(capsys, root, run_id, "--scenario", "密码", "--step", "3")
+    assert rc == 0 and "step 3  When 点击「退出」  无记录（未执行或未上报）" in out
+    assert "诊断细节见 worker 日志" not in out and "判定：" not in out
+    rc, out, _ = _explain(capsys, root, run_id, "--scenario", "密码", "--step", "3", "--json")
+    doc = json.loads(out)
+    assert doc["scopes"][0]["has_step_records"] is True
+    assert [s["record_missing"] for s in doc["scopes"][0]["scenarios"][0]["steps"]] == [True]
+
+
+def test_explain_to_dict_drops_unmatched_scopes_and_keeps_job_fact():
+    """多 scope 下 --scenario 只命中其一：未命中的 scope 不产空壳条目（文本/JSON 同律）；命中的 scope 的
+    has_step_records 不随筛选变化。"""
+    from gherkai_core.model import Job, JobResult, Scenario, ScenarioResult, Status as S, Step, StepResult
+    from gherkai_cli import render
+    j1 = _explain_job(scope_id="a.feature:6")
+    j2 = Job(scope_id="b.feature:6", scope_name="b", engine="novaact",  # 与 a 无共同 scenario → 筛 :12 时整个未命中
+             scenarios=(Scenario(id="features/other.feature:5", name="其它", steps=(Step(0, "Given", "x"),)),))
+    jr1 = JobResult(job=j1, status=S.FAILED, scenarios=[ScenarioResult(
+        scenario_id="features/login.feature:12", status=S.FAILED,
+        steps=[StepResult(index=0, status=S.PASSED), StepResult(index=1, status=S.FAILED, message="x")])])
+    jr2 = JobResult(job=j2, status=S.PASSED, scenarios=[ScenarioResult(
+        scenario_id="features/other.feature:5", status=S.PASSED, steps=[StepResult(index=0, status=S.PASSED)])])
+    reader = lambda refs: (None, "no_ref")
+    # 全量：两个 scope 都在
+    full = render.explain_to_dict(run_id="r", status="failed", results=[jr1, jr2], evidence_reader=reader)
+    assert [s["scope_id"] for s in full["scopes"]] == ["a.feature:6", "b.feature:6"]
+    assert all(s["has_step_records"] for s in full["scopes"])
+    # 只命中 a 里的 scenario:12 且筛到无记录的 step 3 → b 整个不出现；a 的 has_step_records 仍 True
+    doc = render.explain_to_dict(run_id="r", status="failed", results=[jr1, jr2], evidence_reader=reader,
+                                 scenario_ids={"features/login.feature:12"}, step_index=3)
+    assert [s["scope_id"] for s in doc["scopes"]] == ["a.feature:6"]
+    assert doc["scopes"][0]["has_step_records"] is True
+    text = render.render_explain_text(doc)
+    assert "诊断细节见 worker 日志" not in text and "b.feature:6" not in text
+
+
+def test_explain_scenario_matcher_digits_are_line_numbers_only():
+    """纯数字 / :数字 只当行号、不回落标题子串（与 run/plan 同律）；标题子串、id 全等照常。"""
+    from gherkai_core.model import Scenario
+    sc = Scenario(id="f.feature:12", name="重试3次后放行", steps=())
+    hit = m._explain_scenario_matches
+    assert hit(sc, ["3"]) is False          # 标题含 3，但 3 不是行号 → 不命中
+    assert hit(sc, [":12"]) and hit(sc, ["12"]) and hit(sc, ["重试"]) and hit(sc, ["f.feature:12"])
+    assert hit(sc, ["3", "重试"]) is True   # 或

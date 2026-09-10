@@ -116,6 +116,7 @@ step 级证据视图：判定树（**骨架 = 提交时的 job 定义**）+ 每�
 | 键 | 类型 | 含义 |
 |---|---|---|
 | `aborted_hint` | string \| null | 非 null = 这个 job 被中止且只落了部分 step 记录：已执行 step 的证据已产出，但指针没进判定记录 |
+| `has_step_records` | bool | 这个 job 在判定明细里有没有任何 step 记录（按整个 job 算，不随 `--scenario` / `--step` 筛选变化）；false = 判定只剩 job 级那一层 |
 
 `scenarios[]` 每项 = `scenario_id`、`name`、`status`（**null = 这条 scenario 没有判定记录**——worker 被外部中止时，
 没跑完的 scenario 不进判定明细）、`steps[]`：
@@ -123,7 +124,7 @@ step 级证据视图：判定树（**骨架 = 提交时的 job 定义**）+ 每�
 | 键 | 类型 | 含义 |
 |---|---|---|
 | `index` / `keyword` / `text` | int / string / string | 来自 job 定义（骨架）：0 起的书写序号、Given/When/Then、step 原文 |
-| `status` / `votes` / `error_type` / `message` / `shortcircuited` / `duration_ms` / `report_refs[]` | | 同 `run --json` 的 `steps[]`；`record_missing` 为 true 时这些全是 null / 空数组 |
+| `status` / `votes` / `error_type` / `message` / `shortcircuited` / `duration_ms` / `report_refs[]` | | 同 `run --json` 的 `steps[]`；`record_missing` 为 true 时 `status` / `votes` / `error_type` / `message` / `duration_ms` 为 null、`report_refs` 为空数组、`shortcircuited` 恒 false（类型始终是 bool；判「有没有记录」一律看 `record_missing`） |
 | `record_missing` | bool | true = 骨架里有这一步、判定明细里没有它的记录（未执行或未上报） |
 | `evidence` | object \| null | 这一步的机读证据全文（固定键见下）；null 时看 `evidence_missing` |
 | `evidence_missing` | `no_ref` / `unreadable` / `unsupported_schema` \| null | null = 证据已读到。`no_ref` = 这一步没有证据指针（确定性步/导航步本就不产，或抽取失败——两者在这里分不出来）；`unreadable` = 指针在但读不到或内容不是 JSON；`unsupported_schema` = 证据的格式版本这个 CLI 认不出 |

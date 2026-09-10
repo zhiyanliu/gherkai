@@ -157,7 +157,7 @@ def test_index_html_votes_tally_shown_only_when_multi_vote(tmp_path: Path):
 
 
 def test_index_html_shows_verdict_even_without_report_refs(tmp_path: Path):
-    # 用户痛点护栏：纯确定性 run（无引擎报告产物 report_refs=[]）的 index.html 也要能看懂结果——
+    # 用户痛点护栏：纯确定性 run（无报告产物 report_refs=[]）的 index.html 也要能看懂结果——
     # 判定明细（job/scenario/step status + 时长 + sessionId）直接渲染，不再是一张白纸。
     run = _rr(
         "det-run",
@@ -183,7 +183,7 @@ def test_index_html_shows_verdict_even_without_report_refs(tmp_path: Path):
     assert "step[0]" in txt and "step[1]" in txt
     assert "01KW9DSK" in txt                   # sessionId 呈现（会话血缘可追）
     # 产物区为空但有意义提示，且不再含已移除的内部设计语
-    assert "无引擎报告产物" in txt
+    assert "无报告产物" in txt
     assert "本页不解析其内容" not in txt        # 已移除的底注
 
 
@@ -360,7 +360,7 @@ def test_empty_report_refs_still_valid_index(tmp_path: Path):
     idx = store.write(run.run_id, run)
     txt = _uri_to_path(idx).read_text("utf-8")
     assert "empty-run" in txt
-    assert "无引擎报告产物" in txt  # 空态有效页
+    assert "无报告产物" in txt  # 空态有效页
     m = json.loads((tmp_path / "reports" / "empty-run" / "manifest.json").read_text("utf-8"))
     assert m["report_index"] == []
 
@@ -376,3 +376,23 @@ def test_index_shows_fail_fast_reason_in_neutral_note_not_error_red(tmp_path):
     html = _uri_to_path(store.write(run.run_id, run, created_at="2026-06-29T00:00:00Z")).read_text(encoding="utf-8")
     assert '<span class="note">fail-fast：批次已中止，未启动（worker 未 spawn）</span>' in html
     assert 'class="err"' not in html
+
+
+def test_index_html_step_reason_follows_job_style_and_has_no_orphan_css_class(tmp_path):
+    """step 原因（ADR 0042 决策三）沿用 job 行两分支：有 error_type → 同一个 err 红 span「error_type: message」；
+    无分类 → note 灰。并固化「页面用到的每个 class 都在 <style> 里有定义」，防再出现孤儿类。"""
+    import re
+    from gherkai_core.model import ScenarioResult, StepResult
+    jr = _jr("s", "novaact", status=Status.ERROR, scenarios=[ScenarioResult(scenario_id="s:1", status=Status.ERROR, steps=[
+        StepResult(index=0, status=Status.FAILED, error_type="assertion_failed", message="AI 断言未过多数票（0/1）：x"),
+        StepResult(index=1, status=Status.ERROR, message="只有原因没有分类"),
+        StepResult(index=2, status=Status.PASSED),
+    ])])
+    uri = LocalReportStore(tmp_path).write("r1", _rr("r1", [jr], status=Status.ERROR))
+    txt = _uri_to_path(uri).read_text(encoding="utf-8")
+    assert '<span class="err">assertion_failed: AI 断言未过多数票（0/1）：x</span>' in txt
+    assert '<span class="note">只有原因没有分类</span>' in txt
+    used = set(re.findall(r'class="([a-zA-Z][\w-]*)"', txt))
+    style = txt[txt.index("<style>"):txt.index("</style>")]
+    defined = set(re.findall(r"\.([a-zA-Z][\w-]*)", style))  # 复合选择器（ul.scns / .jobhd b）也算定义
+    assert used <= defined, f"孤儿 class：{sorted(used - defined)}"

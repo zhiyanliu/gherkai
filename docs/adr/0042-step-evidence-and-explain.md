@@ -111,7 +111,7 @@ evidence 的抽取、落盘、上传任一环失败 → worker 日志一行、�
 - **JobResult 只含收到 `scenario_done` 的 scenario**——worker 被外部中止（超时 / fail-fast / 信号）时未完成的 scenario 不算判定、其 step 记录不进 `jobs/*.json`。explain 以 job 定义为骨架逐 scenario / 逐 step 渲染，无记录的 step 文本打「无记录（未执行或未上报）」、JSON 给 `status: null` + `record_missing: true`；无任何 step 记录的 job 单独渲染一段 job 判定块（status / error_type / message + job 级 report_refs + 「诊断细节见 worker 日志」）。被中止 job 里已跑完的 step 其 evidence 已产且已上传，但 ref 只在事件记录里；**本 ADR 不让 explain 读事件流**（compose 现只暴露三个 store，加事件接缝是另一件事），输出里提示「本 job 被中止，部分已执行 step 的证据未进判定记录」。
 - **step 有记录但无 evidence** → `evidence: null` + `evidence_missing: "no_ref" | "unreadable" | "unsupported_schema"`。`no_ref` 覆盖「确定性 / URL 导航 step 本就不产」与「AI 跑了但抽取失败」两种，结果树分不出来；文本打「无 AI 证据」。
 
-**未终态 run 分两档**：同步 `run` 中途可见已完成 job（逐 job 落 ResultStore），文本首行提示「run 仍在跑，以下为已完成部分」；`submit` 的 detached run（本地 per-run 进程与云端 reconciler 同一份 tick）在全 job 终态 finalize 时才一次性落 ResultStore，未终态时零文件——explain 退 0、只打一行「判定明细尚未落地，可先用 `status --wait` 等到终态」。让 detached run 中途可见需从事件流逐 scope 归约，属另一个决策。`--json` 下不打任何提示行（0041 决策三：stdout 只有一个 JSON 文档），机读侧靠顶层 `status` 自明。
+**未终态 run 分两档**：同步 `run` 中途可见已完成 job（逐 job 落 ResultStore），文本形态经 stderr 提示「run 仍在跑，以下为已完成部分」（stdout 只放核心产出，与 `status` 的提示同律）；`submit` 的 detached run（本地 per-run 进程与云端 reconciler 同一份 tick）在全 job 终态 finalize 时才一次性落 ResultStore，未终态时零文件——explain 退 0、只打一行「判定明细尚未落地，可先用 `status --wait` 等到终态」。让 detached run 中途可见需从事件流逐 scope 归约，属另一个决策。`--json` 下不打任何提示行（0041 决策三：stdout 只有一个 JSON 文档），机读侧靠顶层 `status` 自明。
 
 **文本形态**（skipped 只由上游 `status == error` 短路产生，判据是 `StepResult.shortcircuited`、不按 status 顺序猜，作用域是同一 scenario；断言 `failed` **不**短路后续 step，见 [0031](./0031-job-lifecycle-states-and-severity.md) 决定六与 [0028](./0028-transient-network-ssl-resilience.md)）：
 
@@ -138,7 +138,7 @@ scope features/login.feature:6  engine=novaact  status=failed  session=01a0…
 
 **文本预算**：文本形态是给 agent 一次读进上下文的摘要，不是 evidence 全文转写。每个 act 默认只渲染**最后一个带 thought 的 frame**（判否理由通常落在末次观察）及其截图 uri；单段 thought 超过 800 字截断并接一行「…（已截断；完整内容见 --json 或 evidence.json：<ref>）」；被省略的 frame 打一行「其余 M 个 frame 已省略」。`--full` 关闭预算、逐 frame 全文。理由：一个 3 票断言最坏 90 段 thought，文本形态若无预算会一次撑爆 agent 上下文，而它恰是 agent 的首选读法。evidence 缺失的 step 下打一行该 step / 该 scope 的其它原生产物 ref 作兜底指针。
 
-**JSON 形态**：`{run_id, status, scopes: [{scope_id, engine, status, error_type, message, session_id, report_refs, aborted_hint, scenarios: [{scenario_id, name, status, steps: [{index, keyword, text, status, votes, error_type, message, shortcircuited, duration_ms, report_refs, record_missing, evidence: <evidence.json 全文> | null, evidence_missing}]}]}]}`。`report_refs` 原样搬既有字段、不解析（含 evidence 之外的 trajectory / report / summary）：explain 已从 ResultStore 读到整个 JobResult、这些 ref 就在手上，云端 `status --json` 只投影 RunState 没有它们，不搬等于让 agent 自己去 S3 抠 `jobs/*.json`。evidence 全文内嵌可以：它不含 base64、只有 uri。**契约页与护栏**：evidence 的固定键单列一节；`frames[].actions[].args` 与 `acts[].result` 是引擎原样透传的对象，内部键随 SDK、不属于本契约，护栏在这两个节点**停止递归**（不是塞 `ignore` 名单——那会连真契约键一起放过），`_leaf_keys` 需支持「指定键处停止下钻」；explain 的护栏样例由手搭的 evidence 夹具喂进渲染器生成（形状与两引擎映射测试共用的真产物裁剪版一致），否则 evidence 那批键根本不进比对。
+**JSON 形态**（筛选生效时无一命中的 scope 不产出空壳条目）：`{run_id, status, scopes: [{scope_id, engine, status, error_type, message, session_id, report_refs, aborted_hint, has_step_records, scenarios: [{scenario_id, name, status, steps: [{index, keyword, text, status, votes, error_type, message, shortcircuited, duration_ms, report_refs, record_missing, evidence: <evidence.json 全文> | null, evidence_missing}]}]}]}`。`report_refs` 原样搬既有字段、不解析（含 evidence 之外的 trajectory / report / summary）：explain 已从 ResultStore 读到整个 JobResult、这些 ref 就在手上，云端 `status --json` 只投影 RunState 没有它们，不搬等于让 agent 自己去 S3 抠 `jobs/*.json`。evidence 全文内嵌可以：它不含 base64、只有 uri。**契约页与护栏**：evidence 的固定键单列一节；`frames[].actions[].args` 与 `acts[].result` 是引擎原样透传的对象，内部键随 SDK、不属于本契约，护栏在这两个节点**停止递归**（不是塞 `ignore` 名单——那会连真契约键一起放过），`_leaf_keys` 需支持「指定键处停止下钻」；explain 的护栏样例由手搭的 evidence 夹具喂进渲染器生成（形状与两引擎映射测试共用的真产物裁剪版一致），否则 evidence 那批键根本不进比对。
 
 **退出码：只用 0 / 2，不用 1**。explain 是证据渲染器、不重复表判定（判定码看 `run` / `status --wait`），run 判 failed / error 时 explain 仍退 0；同款先例是 [0041](./0041-agent-facing-cli-affordances.md) 决策四的 `doctor`。0 = 渲染成功（哪怕全部 step 无 evidence、判定明细尚未落地）；2 = 参数错（含 `--step` 未同给 `--scenario`、命中的 scenario 都无第 N 步）/ run 或 scope 不存在 / cloud 档 skew block 或凭证·region·权限不可用。
 
@@ -199,7 +199,8 @@ agent / skill 只依赖 evidence schema 与 `explain` 输出，两者都是我�
 - [0037](./0037-distribution-and-packaging.md) 决策 7 接线句：cloud 入口由 run / submit / status 三个改为四个、补 `explain`。
 - [0041](./0041-agent-facing-cli-affordances.md)：决策三查询类命令清单补 `explain --json`；「重议闸门」失败证据机读化一条标已由本 ADR 落地并反向链；Status 头**保持 Accepted**、按 0030 / 0034 的既有写法追加一句反向链——0041 无决策被反转，不写 Partially-superseded。
 - `docs/guides/cli-json-contract.md`：`run --json` steps 表补 `message`；step 级 `report_refs` 说明补 `kind=evidence`、两引擎皆有；新增 `explain --json` 一节（含 evidence 固定键与两个不透明节点、`record_missing` / `evidence_missing` 取值）。
-- `cli/README.md`（explain 用法；退出码节补「explain 只说证据读出来了吗、不表判定」）、根 `README.md`、`cli/DEVELOPMENT.md`、`DEVELOPMENT.md` ADR 范围。
+- `cli/README.md`（explain 用法；退出码节补「explain 只说证据读出来了吗、不表判定」；index.html 描述含 evidence 行）、根 `README.md`、`cli/DEVELOPMENT.md`（RunReport 内部：清单含 evidence）、`DEVELOPMENT.md` ADR 范围、`engines/midscene/DEVELOPMENT.md` worker 模块枚举补 evidence。
+- `CONTEXT.md`：术语表 kind 枚举补 `evidence`、两引擎 step_done 带 evidence 一句（core 不透明搬运那句主语是 core、仍成立，只补皮层解引用半句）；版本单旋钮的 cloud 入口数三改四。
 
 **交付链（不改 IaC 资源，但不重部署云端看不到）**
 

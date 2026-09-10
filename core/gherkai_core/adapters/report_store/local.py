@@ -4,7 +4,7 @@
 - manifest.json = 薄信封（schema_version/run_id/created_at）+ report_index（扁平投影，便于 CI/WebUI 遍历）。
   **不内嵌 result 真值副本**——靠 run_id 软引用那次 run，判定真值由 ResultStore 持有（report 是纯派生视图、
   可删可重建、永不作判定源，ADR 0027/0016）。
-- index.html = 最小人可导航入口：每条报告产物一行链接，点开看**原样的**原生产物。摘要直接用内存 RunResult。
+- index.html = 最小人可导航入口：每条报告产物一行链接（引擎原生产物 + gherkai 自有 schema 的 step 级 evidence），点开看**原样**文件。摘要直接用内存 RunResult。
 
 不透明搬运（ADR 0027）：对 ReportRef 只「算一个链接」，绝不解析/重写/抽内容、不按 kind 分支。
 href 是 core 自算的导航链接（不受不透明铁律约束，铁律圈的是 ref）：local 把落在 run 树内的
@@ -182,7 +182,8 @@ def _render_index_html(manifest: dict, result: RunResult) -> str:
     两块内容（ADR 0027/0016）：
     ① 判定明细（job→scenario→step，status/时长/sessionId）——直接从内存 RunResult 渲染，让纯确定性
        run（无原生产物）也一眼看懂结果（判定真值仍以 ResultStore 的 jobs/*.json 为准，本页只是人看视图）。
-    ② 报告产物导航——report_index 的扁平投影，链接指向各引擎原样产物（不透明搬运，不解析内容）。
+    ② 报告产物导航——report_index 的扁平投影，链接指向引擎原样产物与 gherkai 自有的 step 级 evidence（本页对二者都只
+       链接、不解析内容；evidence 的解引用只在 CLI explain，ADR 0042 决策五）。
     """
     esc = html.escape
     run_id = manifest["run_id"]
@@ -227,7 +228,7 @@ def _render_index_html(manifest: dict, result: RunResult) -> str:
         if not seqs:
             return ""
         n = f"×{len(seqs)}" if len(seqs) > 1 else ""
-        return f' <a class="clip" href="#ref-{seqs[0]}" title="{len(seqs)} 个引擎报告产物">📎{n}</a>'
+        return f' <a class="clip" href="#ref-{seqs[0]}" title="{len(seqs)} 个报告产物">📎{n}</a>'
 
     dur_s = _fmt_ms(result.duration_ms)
     cost_bits = []
@@ -269,9 +270,12 @@ def _render_index_html(manifest: dict, result: RunResult) -> str:
                     f' <span class="votes">{st.votes.yes}/{st.votes.total} 票</span>'
                     if st.votes and st.votes.total > 1 else ""
                 )
-                serr = f' <span class="err">{esc(st.error_type)}</span>' if st.error_type else ""
-                # step 级失败原因原文（ADR 0042 决策三）——与 CLI 文本的 step 行对称，报告页不只剩光秃的 error_type
-                smsg = f' <span class="msg">{esc(st.message)}</span>' if st.message else ""
+                # step 级失败原因原文（ADR 0042 决策三）沿用 job 行的两分支：有 error_type → 并进同一个 err 红 span
+                # （`error_type: message`）；无分类（派生态）→ 中性 note 色。别再造第三种样式。
+                if st.error_type:
+                    serr = f' <span class="err">{esc(st.error_type)}{(": " + esc(st.message)) if st.message else ""}</span>'
+                else:
+                    serr = f' <span class="note">{esc(st.message)}</span>' if st.message else ""
                 # 连锁失败旁注（ADR 0031 决定六）：被 scope 内短路的 step（shortcircuited=True，status=skipped）——
                 # 上游 error 后 worker 跳过了它、没在损坏环境上跑。读 shortcircuited 正交布尔（比旧的"按 status 顺序猜"
                 # 精确）；不改判定/severity（守纯 reducer 红线）。
@@ -283,7 +287,7 @@ def _render_index_html(manifest: dict, result: RunResult) -> str:
                 step_rows.append(
                     f'<li id="{st_anchor}">{_dot(st.status.value)}<span class="stp">step[{st.index}]</span> '
                     f'{esc(st.status.value)} <span class="t">{_fmt_ms(st.duration_ms)}</span>'
-                    f'{votes}{serr}{smsg}{taint}{_paperclips(st_anchor)}</li>'
+                    f'{votes}{serr}{taint}{_paperclips(st_anchor)}</li>'
                 )
             steps_html = ("<ul class=\"steps\">" + "".join(step_rows) + "</ul>") if step_rows else ""
             sc_anchor = _node_anchor(jr.scope_id, sr.scenario_id, None)
@@ -325,7 +329,7 @@ def _render_index_html(manifest: dict, result: RunResult) -> str:
     if rows:
         refs_body = "<ul class=\"refs\">\n" + "\n".join(rows) + "\n</ul>"
     else:
-        refs_body = '<p class="empty">本次 run 无引擎报告产物（纯确定性步骤不产引擎报告；判定明细见上）。</p>'
+        refs_body = '<p class="empty">本次 run 无报告产物（纯确定性步骤既不产引擎报告、也不产 AI 步骤证据；判定明细见上）。</p>'
 
     return f"""<!doctype html>
 <html lang="zh"><head><meta charset="utf-8">
@@ -371,7 +375,7 @@ def _render_index_html(manifest: dict, result: RunResult) -> str:
 </div>
 <h2>判定明细（{len(result.jobs)} job）</h2>
 {jobs_html}
-<h2>引擎报告产物（{len(manifest["report_index"])}）</h2>
+<h2>报告产物（{len(manifest["report_index"])}）——引擎原生产物 + 每个 AI 步骤的证据</h2>
 {refs_body}
 </body></html>
 """

@@ -365,17 +365,24 @@ test("refFor: ref 与 toReportRef 逐字一致，但不上传、不记 uploaded"
   const shots = path.join(runDir, "midscene-run", "report", "screenshots");
   fs.mkdirSync(shots, { recursive: true });
   const img = path.join(shots, "abc.jpeg"); fs.writeFileSync(img, "jpegbytes");
+  const img2 = path.join(shots, "def.jpeg"); fs.writeFileSync(img2, "jpegbytes2");  // 只 refFor、从不 toReportRef
   const u = new (ArtifactUploader as any)("bkt", "reports/rid/", runDir);
   const keys = withMockClient(u);
   const ref = u.refFor(img);
+  const ref2 = u.refFor(img2);
   assert.deepEqual(keys, [], "只算 ref → 零 PutObject（截图字节交 scope 末整目录 flush）");
   assert.equal((u as any).uploaded.size, 0, "不记 uploaded → flush 仍会传它");
   // 逐字一致（evidence 里写的 URI 与将来 flush 上去的对象必须同一个 key，否则 URI 悬空）
   assert.equal(ref, await u.toReportRef(img));
   assert.equal(ref, "s3://bkt/reports/rid/midscene-run/report/screenshots/abc.jpeg");
-  // refFor 之后 flush 照传（字节最终进 S3）
+  // 只算过 ref、没被实时传的截图，字节由 scope 末 flush 兜上去（ADR 0042 决策一「上传时机分两类」）——
+  // 否则 evidence 里的 URI 悬空。abc.jpeg 已被 toReportRef 实时传过，flush 按幂等守卫跳过它、不重传。
   await u.flushAndCleanup(path.join(runDir, "midscene-run"));
-  assert.ok(keys.includes("reports/rid/midscene-run/report/screenshots/abc.jpeg"));
+  assert.deepEqual(keys, [
+    "reports/rid/midscene-run/report/screenshots/abc.jpeg",
+    "reports/rid/midscene-run/report/screenshots/def.jpeg",
+  ]);
+  assert.equal(ref2, "s3://bkt/reports/rid/midscene-run/report/screenshots/def.jpeg");
 });
 
 test("refFor: no-op（未注入落点）→ 与 toReportRef 同样报 file://", async () => {

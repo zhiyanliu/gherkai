@@ -72,9 +72,9 @@ adapter、复用同一条 `RunPersistence`，把状态落 DynamoDB、判定真�
 
 ### RunReport 内部
 
-- `manifest.json` —— 薄信封（run_id 等）+ 各引擎原生报告产物的扁平清单。判定/时长/成本**不在此**——用
+- `manifest.json` —— 薄信封（run_id 等）+ 报告产物的扁平清单（引擎原生产物 + 每个 AI step 的 gherkai evidence）。判定/时长/成本**不在此**——用
   `run_id` 到 `ResultStore`（`jobs/*.json`）取判定真值；`index.html` 才含判定明细。
-- `index.html` —— 判定明细树 + 每个原生产物（Midscene html / Nova trajectory）一行链接，点开看**原样**产物。
+- `index.html` —— 判定明细树 + 每个报告产物（Midscene html / Nova trajectory / step evidence）一行链接，点开看**原样**文件。
   RunReport 只索引/链接、**不解析融合**产物内容；新引擎报任意 `kind` 零改 core（ADR 0027）。
 - index 链接指向产物**原位**（local 相对链接——产物就在 `reports/<run_id>/` 树内、目录可整体搬走；cloud 为 `s3://`）。
 
