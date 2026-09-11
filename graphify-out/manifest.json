@@ -420,8 +420,8 @@
     "semantic_hash": ""
   },
   "docs/doc-health-review.md": {
-    "mtime": 1788939883.7900996,
-    "ast_hash": "9080432651c59456231ebf248b5fc741",
+    "mtime": 1789105028.6334805,
+    "ast_hash": "6ef8b4e52210df58a1cc3413d3b6e1f0",
     "semantic_hash": ""
   },
   "engines/midscene/README.md": {
@@ -1222,6 +1222,11 @@
   "docs/guides/verdict-model.md": {
     "mtime": 1789104222.9082751,
     "ast_hash": "93d6c1cf720da30045749a461fe7967b",
+    "semantic_hash": ""
+  },
+  "docs/guides/README.md": {
+    "mtime": 1789105028.6336267,
+    "ast_hash": "3d45a18c9cc706a397a38da48a771865",
     "semantic_hash": ""
   }
 }

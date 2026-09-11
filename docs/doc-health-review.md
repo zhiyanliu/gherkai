@@ -39,7 +39,7 @@ ADR/CONTEXT 是随构建**逐步长起来**的：每次在前人文档上叠加�
 - **ADR / CONTEXT**：查决策一致性、跨文档矛盾、被取代未标历史、Status 头（见下）、施工叙事沉积（SEDIMENT 类，ADR 是其主战场）、**引用方向合规 + 自包含**（不引用 journey、不用裸 WP 编号；Accepted ADR 须结论连同证据内联、自成一体——见「五类问题」DEADLINK 的引用方向违规条）。
 - **README（使用者向：根 + 各包，各包 README 逐字上 PyPI/npm）**：查安装 / 命令 / 参数 / 退出码过时；保叙事、不激进压缩。**加查使用者向边界**（判据与四层去向见 ADR 0039、CLAUDE.md 文档纪律「README / DEVELOPMENT 分层」）：contributor 内容（目录结构、开发环境、测试、spike、发布流程）或内部指代（ADR 编号、决策号、内部机制名）出现在使用者面 = 越界，修法是搬去同目录 `DEVELOPMENT.md`、不是删。护栏 `cli/tests/test_package_readmes.py` 只管禁词正则、相对链接与 DEVELOPMENT.md 存在性，正则外的语义越界靠本任务。
 - **DEVELOPMENT.md（contributor 向：根 + 各包，与同目录 README 成对）**：查目录树 / 测试与开发命令 / ADR 编号范围与指针过时——全是枚举型，逐条对 `ls` / `git ls-files` / argparse；允许 ADR 指针与内部机制名。
-- **docs/guides/（给人的阅读理解层）**：按 README 同侧判据（保叙事）；主查两样——STALE（派生视图最易随上游漂移，对照 code 与权威 ADR）、**越界复述 why**（决策理由/权衡出现在 guide 正文 = 双源苗头；写作判据在 CLAUDE.md 文档纪律 guides 条，修法 = 压回指针）。
+- **docs/guides/（给人的阅读理解层）**：按 README 同侧判据（保叙事）；主查三样——STALE（派生视图最易随上游漂移，对照 code 与权威 ADR）、**越界复述 why**（决策理由/权衡出现在 guide 正文 = 双源苗头；写作判据在 CLAUDE.md 文档纪律 guides 条，修法 = 压回指针）、**guide 之间的主题归属与重叠**（同一机制只一篇作 owner、其余给指针；两篇各讲一遍必各自漂——修法是定归属、留指针，不是压句子；新增 guide 时既有篇的延伸阅读要指过来；归属表 = `docs/guides/README.md` 索引，审计时对照它）。
 - **REFERENCES / 技术笔记/配方**（SIGV4-RECIPE 这类）：**没有"决策矛盾"维度，重在"配方/引用还灵不灵"**——代码片段是否还与当前 SDK/实现对得上、踩坑点是否还成立、指向的 ADR/源码路径/外链是否有效。对照 code 核实是主要手段。
 
 ## 执行方法（两轮验证过的最佳路径）
