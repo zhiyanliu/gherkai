@@ -109,7 +109,7 @@ evidence 的抽取、落盘、上传任一环失败 → worker 日志一行、�
 **记录缺口的两种情形，分开表达**：
 
 - **JobResult 只含收到 `scenario_done` 的 scenario**——worker 被外部中止（超时 / fail-fast / 信号）时未完成的 scenario 不算判定、其 step 记录不进 `jobs/*.json`。explain 以 job 定义为骨架逐 scenario / 逐 step 渲染，无记录的 step 文本打「无记录（未执行或未上报）」、JSON 给 `status: null` + `record_missing: true`；无任何 step 记录的 job 单独渲染一段 job 判定块（status / error_type / message + job 级 report_refs + 「诊断细节见 worker 日志」）。被中止 job 里已跑完的 step 其 evidence 已产且已上传，但 ref 只在事件记录里；**本 ADR 不让 explain 读事件流**（compose 现只暴露三个 store，加事件接缝是另一件事），输出里提示「本 job 被中止，部分已执行 step 的证据未进判定记录」。
-- **step 有记录但无 evidence** → `evidence: null` + `evidence_missing: "no_ref" | "unreadable" | "unsupported_schema"`。`no_ref` 覆盖「确定性 / URL 导航 step 本就不产」与「AI 跑了但抽取失败」两种，结果树分不出来；文本打「无 AI 证据」。
+- **step 有记录但无 evidence** → `evidence: null` + `evidence_missing: "no_ref" | "unreadable" | "unsupported_schema"`。`no_ref` 覆盖「确定性 / URL 导航 step 本就不产」、「AI 跑了但抽取失败」以及「无判定记录的 step」（没记录自然没指针、与 `record_missing` 同现）三种，结果树分不出前两种；文本打「无 AI 证据」。
 
 **未终态 run 分两档**：同步 `run` 中途可见已完成 job（逐 job 落 ResultStore），文本形态经 stderr 提示「run 仍在跑，以下为已完成部分」（stdout 只放核心产出，与 `status` 的提示同律）；`submit` 的 detached run（本地 per-run 进程与云端 reconciler 同一份 tick）在全 job 终态 finalize 时才一次性落 ResultStore，未终态时零文件——explain 退 0、只打一行「判定明细尚未落地，可先用 `status --wait` 等到终态」。让 detached run 中途可见需从事件流逐 scope 归约，属另一个决策。`--json` 下不打任何提示行（0041 决策三：stdout 只有一个 JSON 文档），机读侧靠顶层 `status` 自明。
 

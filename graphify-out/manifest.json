@@ -275,8 +275,8 @@
     "semantic_hash": ""
   },
   "cli/README.md": {
-    "mtime": 1789036160.2106788,
-    "ast_hash": "f5f6640e7834b95245f0f8dce1587365",
+    "mtime": 1789101625.7813172,
+    "ast_hash": "7a5adde5bf7504c070d3435264ef9b37",
     "semantic_hash": ""
   },
   "docs/adr/0001-scope-limited-to-english-ui.md": {
@@ -415,8 +415,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0034-detached-batch-reconciler.md": {
-    "mtime": 1789009594.7843497,
-    "ast_hash": "ca03b6ec4d8a5c148614a505f83463df",
+    "mtime": 1789101698.4748862,
+    "ast_hash": "fdd7cdc877d2112ff3a2bdff19b66490",
     "semantic_hash": ""
   },
   "docs/doc-health-review.md": {
@@ -455,8 +455,8 @@
     "semantic_hash": ""
   },
   "docs/guides/execution-and-reconciliation.md": {
-    "mtime": 1788937078.0405526,
-    "ast_hash": "4ffd6ff3f8113942fd2133de82a2c1aa",
+    "mtime": 1789101625.7809355,
+    "ast_hash": "34ded4c11c57bb8c375e3e70e1db8cbe",
     "semantic_hash": ""
   },
   "docs/adr/0037-distribution-and-packaging.md": {
@@ -1160,13 +1160,13 @@
     "semantic_hash": ""
   },
   "docs/guides/cli-json-contract.md": {
-    "mtime": 1789092614.626585,
-    "ast_hash": "1dedd2ff0f7620e4c09a9f949a7afdd3",
+    "mtime": 1789101625.7804399,
+    "ast_hash": "fcfe60cab14cd3c51153d770142a741a",
     "semantic_hash": ""
   },
   "docs/adr/0042-step-evidence-and-explain.md": {
-    "mtime": 1789098203.2994413,
-    "ast_hash": "14c9c9c72baa91b3244820aed8d6eecc",
+    "mtime": 1789101625.7815242,
+    "ast_hash": "0545b09a1d57f567b18a186d297b38ec",
     "semantic_hash": ""
   },
   "engines/midscene/src/worker/evidence.mts": {

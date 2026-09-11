@@ -73,7 +73,7 @@ URL、DOM 这类不容 AI 抖动的检查，可以由你自己写成确定性步
 | `--max-concurrency N` | `1` | 同时在跑的 worker 上限（护成本与配额），须 ≥ 1。云端还受部署侧上限钳制，超出时按上限并行并提示 |
 | `--default-job-timeout S` | `300` | 单个 job 的墙钟预算秒（`<=0` 表示不超时）；用例上标 `@timeout:<秒>` 可逐 scope 覆盖。超预算的 job 会被停掉并判 error，本机挂死与云端计费失控都靠它止损 |
 | `--assertion-votes N` | `1` | AI 断言跑 N 次取多数票（如 3/5），治判定抖动 |
-| `--grace S` | 自动 | 仅 `run`。中止时留给 worker 关闭云端浏览器会话的秒数，不填按引擎自动取（novaact ≈150s、midscene ≈25s）。**给得太小会漏关会话、继续计费**，过小的值在开跑前就报错。云端 `submit` 的对应旋钮在部署侧：`gherkai deploy --stop-timeout` |
+| `--grace S` | 自动 | 仅 `run`。中止时留给 worker 关闭云端浏览器会话的秒数，不填按引擎自动取（novaact ≈150s、midscene ≈31s）。**给得太小会漏关会话、继续计费**，过小的值在开跑前就报错。云端 `submit` 的对应旋钮在部署侧：`gherkai deploy --stop-timeout` |
 | `--steps-dir DIR` | `./steps` | 你自己的确定性步骤目录（见上） |
 | `--report-dir DIR` / `--no-report` | `reports` / 关 | 报告落点（每次 run 落 `DIR/<run_id>/`，`status` 查同一个 run 要给同一路径；云端有自己的产物前缀，给了不一致的值会在提交前退 `2` 并点名两侧的值）／一点都不落盘：不归集报告，也不生成引擎自己的报告产物（仅 `run`；Nova Act 的 SDK 轨迹关不掉，它会写进自己的临时目录、不上报） |
 | `--expose-local ORIGIN` | — | 把「本机可达」的被测应用经隧道暴露给云端浏览器，值 = feature 里书写的原始地址（如 `http://localhost:3000`）。框架会替换成一次性公网地址（带每 run 一换的用户名口令，跑完即拆）。页面资源全经隧道，ngrok 免费层配额约 1GB/月 + 2 万请求/月，重度使用可能碰顶（表现为 429 或断流）。**用它时本机要保持开机联网到 run 结束**，否则应用不可达、用例会以导航失败告终。云端 `submit` 时隧道另有一个兜底存活时间 `--tunnel-ttl S`（默认按这批用例的预算算，**调小有风险**：到点无条件拆隧道，短于实际时长会让剩下的用例跑成导航失败） |
