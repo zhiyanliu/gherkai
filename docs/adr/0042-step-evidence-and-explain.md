@@ -229,6 +229,8 @@ agent / skill 只依赖 evidence schema 与 `explain` 输出，两者都是我�
 
 **submit 路径（reconciler Lambda 投影判定，asset 重传后）**：S3 上 Lambda 写出的 `jobs/*.json` 每个 step 都带 `message` 键（failed 步为断言原因原文）、step 级 `report_refs` 含 `trajectory` + `evidence`；`explain --backend cloud` 读该 run 与本机 CLI 落判定的 run 形态一致——决策三的 message 在两条投影路径上都到位。
 
+**截图后台队列 + 收尾排空（决策一修订）的 cloud 真跑**：用 `--default-job-timeout` 把两引擎的 run 掐断——Nova 掐在 scope 末收尾期（6 步全跑完、job 记 timeout）：5 份 evidence.json 引用的 5 张截图全部在 S3（`image/jpeg`）；Midscene 掐在 scope 中途（跑完 step 0–4、step 5 在途）：4 份 evidence.json 引用的 4 张截图全部在 S3，而此路径**不走 scope 末 flush**——修订前这 4 张必丢、URI 悬空。即「字节在下个 step 期间上传 + 退出路径 6 s 排空」在真 Fargate SIGTERM 上闭合。
+
 **验证暴露并已吸收的两处**：Nova SDK 异常 str() 为多行 repr → act.error / step message 压成一行（决策一映射表）；Midscene `Planning/Plan` 的推理在 `output.thought` → 映射回落（决策一映射表）。
 
 - 单测：两引擎映射函数对真产物 fixture（含 Midscene 的 error task、Nova 的 N 票）；best-effort 路径（抽取 / 上传抛异常 → `step_done` 照发、无 evidence ref、status 不变）；serialize round-trip 带非默认 step message；`explain` 本地 / 云端两档读取、`record_missing` 与三种 `evidence_missing`、多命中 `--scenario` + `--step`、退出码；cloud 档 skew 三态；契约护栏含 evidence 夹具。

@@ -855,7 +855,7 @@
     "semantic_hash": "bbd7d7a20b20ab9f5ba26cd8fa1083a4"
   },
   "engines/novaact/gherkai_worker_novaact/run_scope.py": {
-    "mtime": 1789094975.7740712,
+    "mtime": 1789095996.7297807,
     "ast_hash": "8887348a01a5ef741be7fb85ac499198",
     "semantic_hash": ""
   },
@@ -1165,8 +1165,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0042-step-evidence-and-explain.md": {
-    "mtime": 1789095378.7073293,
-    "ast_hash": "166012ac278970d2c08e8f00615bc3e7",
+    "mtime": 1789096089.3555667,
+    "ast_hash": "d2d2308b374b81bd999b6efae810d0e6",
     "semantic_hash": ""
   },
   "engines/midscene/src/worker/evidence.mts": {
