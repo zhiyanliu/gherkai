@@ -1,7 +1,7 @@
-# Graph Report - yaozhou  (2026-09-10)
+# Graph Report - yaozhou  (2026-09-11)
 
 ## Corpus Check
-- 239 files · ~231,471 words
+- 239 files · ~231,647 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -10,7 +10,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `0e2e16da`
+- Built from commit: `965c0b49`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -365,18 +365,18 @@
 7. `RunMeta` - 55 edges
 8. `JobState` - 54 edges
 9. `FakeResolver` - 53 edges
-10. `_patch_cloud_handles()` - 49 edges
+10. `_job()` - 49 edges
 
 ## Surprising Connections (you probably didn't know these)
-- `_runtime_version()` --calls--> `_dist_version()`  [INFERRED]
-  runtime/gherkai_runtime/compose.py → cli/gherkai_cli/__main__.py
-- `_load_and_plan()` --calls--> `parse_feature()`  [INFERRED]
-  cli/gherkai_cli/__main__.py → core/gherkai_core/parse.py
-- `_load_and_plan()` --calls--> `plan()`  [INFERRED]
-  cli/gherkai_cli/__main__.py → core/gherkai_core/scope.py
-- `_load_and_plan()` --calls--> `PlanConfig`  [INFERRED]
-  cli/gherkai_cli/__main__.py → core/gherkai_core/scope.py
-- `_cmd_submit()` --calls--> `JobState`  [INFERRED]
+- `_status_cloud()` --calls--> `DynamoDBRunStore`  [INFERRED]
+  cli/gherkai_cli/__main__.py → core/gherkai_core/adapters/run_store/ddb.py
+- `_build()` --calls--> `DynamoDBRunStore`  [INFERRED]
+  deploy_aws/gherkai_deploy_aws/lambdas/reconciler.py → core/gherkai_core/adapters/run_store/ddb.py
+- `build_cloud_stores()` --calls--> `DynamoDBRunStore`  [INFERRED]
+  runtime/gherkai_runtime/compose.py → core/gherkai_core/adapters/run_store/ddb.py
+- `_FakeProc` --uses--> `Job`  [INFERRED]
+  runtime/tests/test_tunnel.py → core/gherkai_core/model.py
+- `_cmd_run()` --calls--> `RunMeta`  [INFERRED]
   cli/gherkai_cli/__main__.py → core/gherkai_core/model.py
 
 ## Import Cycles
@@ -1222,12 +1222,12 @@ Nodes (4): runtime 包 —— contributor 文档, 从 checkout 跑 / 测试, 模
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `test_evidence_failure_never_changes_verdict()` connect `_Nova` to `test_package_readmes.py`, `_run_step`, `test_evidence.py`?**
-  _High betweenness centrality (0.106) - this node is a cross-community bridge._
 - **Why does `PlanError` connect `plan` to `test_lifecycle_states.py`, `parse_feature`, `test_event_sink.py`?**
-  _High betweenness centrality (0.080) - this node is a cross-community bridge._
+  _High betweenness centrality (0.067) - this node is a cross-community bridge._
+- **Why does `test_evidence_failure_never_changes_verdict()` connect `_Nova` to `test_package_readmes.py`, `_run_step`, `test_evidence.py`?**
+  _High betweenness centrality (0.066) - this node is a cross-community bridge._
 - **Why does `test_value_error_not_transient()` connect `_is_transient_network` to `test_event_sink.py`?**
-  _High betweenness centrality (0.073) - this node is a cross-community bridge._
+  _High betweenness centrality (0.051) - this node is a cross-community bridge._
 - **Are the 7 inferred relationships involving `Provider` (e.g. with `_AbsentEngine` and `_CdkWritingContext`) actually correct?**
   _`Provider` has 7 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 6 inferred relationships involving `schedule()` (e.g. with `.on_job_complete()` and `test_adapter_crash_is_error()`) actually correct?**

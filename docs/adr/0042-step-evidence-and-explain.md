@@ -1,6 +1,6 @@
 # 0042. step 级机读证据（evidence）与 `gherkai explain`
 
-> **Status:** Draft（施工中；翻 Accepted 的审计点：真跑证据内联到「验证」节、影响面列出的每处反向链已落、全文无过程指代）
+> **Status:** Accepted（2026-09-11）—— 六项决策已实装并有护栏；两引擎本机与 cloud 档真跑证据见「验证」节；影响面所列反向链（0024 / 0027 / 0029 / 0032 / 0037 / 0041 / CONTEXT）已逐条落。
 
 ## 背景
 
@@ -207,15 +207,17 @@ agent / skill 只依赖 evidence schema 与 `explain` 输出，两者都是我�
 - cloud 档的 `jobs/*.json` 由 reconciler Lambda 投影产出，Lambda 里的 `gherkai_core` 是部署时从已安装包复制进 asset 的（[0037](./0037-distribution-and-packaging.md) 决策 6）→ `StepResult.message` 要重跑 `gherkai deploy` 才在云端生效。
 - evidence 住 worker 镜像 → 云端要产 evidence 必须推带新 worker 代码的镜像（dev 树 = `gherkai deploy push-worker`；发行版 = 新基底 + `gherkai deploy`）。
 
-## 验证（Accepted 前必做，结论内联到此处）
+## 验证（已完成，结论内联）
 
-**已坐实（跳板机本机 run、两引擎、故意失败的 AI 断言 + 强制 act 超时）**：
+**本机档（跳板机本机 run、两引擎、故意失败的 AI 断言 + 强制 act 超时）**：
 
 - Nova 故意失败断言：trajectory json 真落盘、evidence.json 的 `frames` 非空、末帧 thought 原文「…there is no red banner… I should return false」、`vote=false`、`result={"value":"false"}`、截图 200 KB 有效 JPEG、prompt 不含 SDK 追加的 schema 样板；passed 动作步 2 帧、只末帧有截图；`explain` 三形态（默认 / `--scenario 3 --step 1 --full` / `--json`）正确、stderr 干净、`--json` 严格可解析；manifest kinds 含 `evidence`、index.html 显示 step 原因。
 - Nova 强制超时（`NOVA_ACT_TIMEOUT_S=2`）：error act 契约成立——`error` 非空、`frames == []`、`time_worked_s` 与 prompt 仍填，`explain` 退 0 并打「错误:」行。同时暴露 SDK 异常 str() 是十几行 repr 加反馈链接 → 决策一 act.error 的「压成一行」规则由此而来，复跑确认为一行。
 - Midscene 故意失败断言（dev worker）：`Insight/Boolean` 的 thought 完整解释判否、截图为 SDK 落到 `report/screenshots/<id>.jpeg` 的 228 KB 文件、passed 动作步 4 帧只末帧有截图；同时核出 `Planning/Plan` 的推理在 `output.thought` → 映射表回落规则由此而来。
 
-**待坐实（cloud 档，需先重传 Lambda asset + 推两引擎新 worker 镜像）**：`s3://` evidence ref 经 `explain --backend cloud` 读取；截图字节随 scope 末 flush 上传、URI 可取；Content-Type=image/jpeg 使浏览器渲染而非下载。
+**cloud 档（推两引擎 dev worker 镜像为 variant `base` 后，`run --backend cloud` 两引擎各一次故意失败断言）**：`explain --backend cloud` 文本与 `--json` 都能顺 `s3://` ref 读到 evidence（stderr 干净、JSON 严格可解析、`has_step_records` 在）；截图字节确实随 scope 末 flush 到达 S3——evidence.json 里的 `s3://…/act-0-frame-0.jpg`（Nova）与 `…/report/screenshots/<id>.jpeg`（Midscene）HEAD 均为 `image/jpeg`、约 230 KB，evidence.json 为 `application/json`——即「截图 URI 确定性算出、字节延后上传」这条设计在真 S3 上闭合，浏览器直开渲染而非下载。Nova 与 Midscene 的判否 thought、`vote=false`、passed 步只留末帧与本机档一致。
+
+**验证暴露并已吸收的两处**：Nova SDK 异常 str() 为多行 repr → act.error / step message 压成一行（决策一映射表）；Midscene `Planning/Plan` 的推理在 `output.thought` → 映射回落（决策一映射表）。
 
 - 单测：两引擎映射函数对真产物 fixture（含 Midscene 的 error task、Nova 的 N 票）；best-effort 路径（抽取 / 上传抛异常 → `step_done` 照发、无 evidence ref、status 不变）；serialize round-trip 带非默认 step message；`explain` 本地 / 云端两档读取、`record_missing` 与三种 `evidence_missing`、多命中 `--scenario` + `--step`、退出码；cloud 档 skew 三态；契约护栏含 evidence 夹具。
 - 真跑（跳板机；**先重传 Lambda asset + 推新 worker 镜像**，否则 cloud 档必然看不到 message / evidence、易误判成 bug）：

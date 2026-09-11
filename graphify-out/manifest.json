@@ -1165,8 +1165,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0042-step-evidence-and-explain.md": {
-    "mtime": 1789036560.8488317,
-    "ast_hash": "de506cb73f08b2504415a80f013608ef",
+    "mtime": 1789090514.291645,
+    "ast_hash": "c8ead908628fa8654efcbf907ab51e1b",
     "semantic_hash": ""
   },
   "engines/midscene/src/worker/evidence.mts": {
