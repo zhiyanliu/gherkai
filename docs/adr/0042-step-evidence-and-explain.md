@@ -217,6 +217,8 @@ agent / skill 只依赖 evidence schema 与 `explain` 输出，两者都是我�
 
 **cloud 档（推两引擎 dev worker 镜像为 variant `base` 后，`run --backend cloud` 两引擎各一次故意失败断言）**：`explain --backend cloud` 文本与 `--json` 都能顺 `s3://` ref 读到 evidence（stderr 干净、JSON 严格可解析、`has_step_records` 在）；截图字节确实随 scope 末 flush 到达 S3——evidence.json 里的 `s3://…/act-0-frame-0.jpg`（Nova）与 `…/report/screenshots/<id>.jpeg`（Midscene）HEAD 均为 `image/jpeg`、约 230 KB，evidence.json 为 `application/json`——即「截图 URI 确定性算出、字节延后上传」这条设计在真 S3 上闭合，浏览器直开渲染而非下载。Nova 与 Midscene 的判否 thought、`vote=false`、passed 步只留末帧与本机档一致。
 
+**submit 路径（reconciler Lambda 投影判定，asset 重传后）**：S3 上 Lambda 写出的 `jobs/*.json` 每个 step 都带 `message` 键（failed 步为断言原因原文）、step 级 `report_refs` 含 `trajectory` + `evidence`；`explain --backend cloud` 读该 run 与本机 CLI 落判定的 run 形态一致——决策三的 message 在两条投影路径上都到位。
+
 **验证暴露并已吸收的两处**：Nova SDK 异常 str() 为多行 repr → act.error / step message 压成一行（决策一映射表）；Midscene `Planning/Plan` 的推理在 `output.thought` → 映射回落（决策一映射表）。
 
 - 单测：两引擎映射函数对真产物 fixture（含 Midscene 的 error task、Nova 的 N 票）；best-effort 路径（抽取 / 上传抛异常 → `step_done` 照发、无 evidence ref、status 不变）；serialize round-trip 带非默认 step message；`explain` 本地 / 云端两档读取、`record_missing` 与三种 `evidence_missing`、多命中 `--scenario` + `--step`、退出码；cloud 档 skew 三态；契约护栏含 evidence 夹具。
