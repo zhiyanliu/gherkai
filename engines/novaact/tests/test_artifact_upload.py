@@ -24,6 +24,8 @@ class _Calls(list):
         super().__init__()
         self.extra_by_key: dict = {}
 
+        self.config_by_key = {}
+
 
 def _uploader_with_mock(bucket, prefix, run_dir, *, fail_keys=(), fail_times=None, delay_s=0.0):
     """造 uploader + 塞 mock s3 client（记录 upload_file 调用）。
@@ -36,9 +38,10 @@ def _uploader_with_mock(bucket, prefix, run_dir, *, fail_keys=(), fail_times=Non
     calls = _Calls()
     left = dict(fail_times or {})
 
-    def _upload(local, bkt, key, ExtraArgs=None):  # noqa: N803  boto3 的形参名就是驼峰
+    def _upload(local, bkt, key, ExtraArgs=None, Config=None):  # noqa: N803  boto3 的形参名就是驼峰
         calls.append((local, bkt, key))
         calls.extra_by_key[key] = ExtraArgs
+        calls.config_by_key[key] = Config
         if delay_s:
             time.sleep(delay_s)
         if key in fail_keys:
@@ -384,3 +387,32 @@ def test_concurrent_report_ref_and_queue_share_uploaded_set(tmp_path):
     assert u.drain(10.0) is True
     assert not t.is_alive()
     assert len(u._uploaded) == 12 and len(calls) == 12   # 12 个文件各传一次，无异常、无丢账
+
+
+def test_uploads_run_in_calling_thread_not_s3transfer_pool(tmp_path):
+    """upload_file 必带 TransferConfig(use_threads=False)（ADR 0042 决策一）：否则传输落在 s3transfer 的非 daemon
+    线程池，解释器退出被 atexit join、进程多拖一次 client 超时，drain 的「有界」名不副实（真跑量过 ≈10s）。
+    队列与主流程 to_report_ref 两条路径都要带。"""
+    root = tmp_path / "reports" / "rid"; d = root / "nova-trajectories" / "evidence"; d.mkdir(parents=True)
+    a = d / "a.jpg"; a.write_bytes(b"x"); b = d / "b.json"; b.write_text("{}")
+    u, calls = _uploader_with_mock("bkt", "reports/rid/", root)
+    u.enqueue([str(a)]); assert u.drain(5.0)
+    u.to_report_ref(str(b))
+    for key, cfg in calls.config_by_key.items():
+        assert cfg is not None and cfg.use_threads is False, key
+    assert len(calls.config_by_key) == 2
+
+
+def test_drain_timeout_abandons_queue_silently(tmp_path, capsys):
+    """drain 超时放弃后队列线程转入静默：后续项不再发起上传、不再写 stderr（进程正在退出，finalization 期写
+    buffered stderr 可能致命）。"""
+    root = tmp_path / "reports" / "rid"; d = root / "nova-trajectories" / "evidence"; d.mkdir(parents=True)
+    files = []
+    for i in range(3):
+        f = d / f"s{i}.jpg"; f.write_bytes(b"x"); files.append(str(f))
+    u, calls = _uploader_with_mock("bkt", "reports/rid/", root, delay_s=0.3)
+    u.enqueue(files)
+    assert u.drain(0.05) is False          # 首项在途即超时 → 放弃
+    time.sleep(1.2)                        # 给线程时间跑完剩余项（若它还在传，会多出 PutObject）
+    assert len(calls) == 1, calls           # 只有放弃前已发起的那一次；后两项被跳过
+    assert "证据截图上传失败" not in capsys.readouterr().err

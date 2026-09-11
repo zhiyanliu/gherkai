@@ -36,7 +36,8 @@ NOVA_ACT_TIMEOUT_S = int(os.environ.get("NOVA_ACT_TIMEOUT_S", "120"))  # SDK 允
 # grace 下限 ≈ ACT_TIMEOUT_S + margin。**已真容器标定**（ADR 0032「真容器校准结论」）：4 次真跑实测 SIGTERM 落
 # act 中途 → `stopping→executionStopped` 最坏 21s，但其中 ~11s 已坐实为 ECS 记录 executionStoppedAt 的平台侧滞后
 # （worker 已退），subprocess 档不存在该段——真实预算 = 会话释放 ≤9s + evidence 截图后台队列的退出档有界排空 6s
-# （worker 的 `EVIDENCE_DRAIN_EXIT_S`，**排在会话释放之后**，ADR 0042 决策一）= 15s，故 margin **不动**（30 仍留
+# （worker 的 `EVIDENCE_DRAIN_EXIT_S`，**排在会话释放之后**，ADR 0042 决策一；上传本体在队列线程内跑、`use_threads=False`，
+# 无 s3transfer 线程池被 atexit join 的尾巴——否则要再加一次 client 超时 ≈10s，真跑量过）= 15s，故 margin **不动**（30 仍留
 # ~2x 余量；历史上 60→30 时 grace 下限 180→150）。env 可覆盖（再标定/调优）。
 NOVA_GRACE_MARGIN_S = int(os.environ.get("NOVA_GRACE_MARGIN_S", "30"))
 

@@ -375,8 +375,8 @@
     "semantic_hash": "d433e28ccaea45df3762c4934dca3fe0"
   },
   "docs/adr/0024-worker-core-protocol.md": {
-    "mtime": 1789032852.3783417,
-    "ast_hash": "3a0494ed7cf7c6c81a42ee2e9cfec59f",
+    "mtime": 1789097304.9689832,
+    "ast_hash": "50a6597a53d15bd6c5e9c6205aa88c9e",
     "semantic_hash": ""
   },
   "docs/adr/0026-schedule-module.md": {
@@ -645,8 +645,8 @@
     "semantic_hash": "112a5f5e0768c74afbeb75b528c11951"
   },
   "runtime/gherkai_runtime/compose.py": {
-    "mtime": 1789095022.819211,
-    "ast_hash": "13b68e6ce0ce6f5cab530c141bd9581f",
+    "mtime": 1789097355.0944757,
+    "ast_hash": "4c7e685423219501ec5d0c6ce04bddd8",
     "semantic_hash": ""
   },
   "runtime/gherkai_runtime/detached.py": {
@@ -715,8 +715,8 @@
     "semantic_hash": "07917cddf02762219fe85ed56fdb0642"
   },
   "engines/midscene/src/lib/artifact-upload.mts": {
-    "mtime": 1789094585.6813834,
-    "ast_hash": "faa11402e3918aa71a29a57db9ebcccf",
+    "mtime": 1789097304.9684472,
+    "ast_hash": "fef9ce4435ae760817066e175a1e74fe",
     "semantic_hash": ""
   },
   "engines/midscene/src/lib/event-sink.mts": {
@@ -830,8 +830,8 @@
     "semantic_hash": "b0e31e7e6f992e9336ebb8d4fed626bf"
   },
   "engines/novaact/gherkai_worker_novaact/lib/artifact_upload.py": {
-    "mtime": 1789094994.085661,
-    "ast_hash": "8b06654d29354e6acc3d29638c933cfb",
+    "mtime": 1789097355.0939426,
+    "ast_hash": "ba8f8c10ea32447079b105c46fcdda48",
     "semantic_hash": ""
   },
   "engines/novaact/gherkai_worker_novaact/lib/constants.py": {
@@ -855,8 +855,8 @@
     "semantic_hash": "bbd7d7a20b20ab9f5ba26cd8fa1083a4"
   },
   "engines/novaact/gherkai_worker_novaact/run_scope.py": {
-    "mtime": 1789095996.7297807,
-    "ast_hash": "8887348a01a5ef741be7fb85ac499198",
+    "mtime": 1789097304.9682834,
+    "ast_hash": "f109f01dbb3046bedee3cec30e037852",
     "semantic_hash": ""
   },
   "engines/novaact/gherkai_worker_novaact/user_steps.py": {
@@ -880,8 +880,8 @@
     "semantic_hash": "150c55d3ffefb7f83033bdefb1d165ab"
   },
   "engines/novaact/tests/test_artifact_upload.py": {
-    "mtime": 1789094823.3059273,
-    "ast_hash": "862cf663d92641e951db1b5405beca91",
+    "mtime": 1789097438.7345417,
+    "ast_hash": "0e75eebc44c3ea82830e437493622a22",
     "semantic_hash": ""
   },
   "engines/novaact/tests/test_deterministic.py": {
@@ -1165,8 +1165,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0042-step-evidence-and-explain.md": {
-    "mtime": 1789096089.3555667,
-    "ast_hash": "d2d2308b374b81bd999b6efae810d0e6",
+    "mtime": 1789097496.4165552,
+    "ast_hash": "153d49af4988d6130aec764d2bc9feed",
     "semantic_hash": ""
   },
   "engines/midscene/src/worker/evidence.mts": {
@@ -1200,8 +1200,8 @@
     "semantic_hash": ""
   },
   "engines/novaact/tests/test_evidence.py": {
-    "mtime": 1789094948.959055,
-    "ast_hash": "0c4dafe9fe2daca962710b68c5663a09",
+    "mtime": 1789097355.0948946,
+    "ast_hash": "1bd6bcda0884a505d2152c8dc5d49b9e",
     "semantic_hash": ""
   }
 }

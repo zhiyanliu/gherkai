@@ -529,8 +529,9 @@ def test_drain_logs_one_line_when_not_fully_drained(monkeypatch, capsys):
 
 # ---- main() 三条收尾路径的接线（fake 掉 SDK：不建会话、零费用）----
 class _FakeCdp:
-    def __init__(self, on_enter=None):
+    def __init__(self, on_enter=None, trace=None):
         self._on_enter = on_enter
+        self._trace = trace   # 传了才记 ("cdp_exit",)：Workflow 那个同形 fake 不传，免得多记一条
 
     def __enter__(self):
         if self._on_enter:
@@ -538,20 +539,27 @@ class _FakeCdp:
         return ("ws://fake", {})
 
     def __exit__(self, *a):
+        if self._trace is not None:
+            self._trace.append(("cdp_exit",))
         return False
 
 
 class _FakeNovaAct:
-    def __init__(self, **kw):
-        pass
+    def __init__(self, trace=None, raise_in_session=None, **kw):
+        self._trace = trace
+        self._raise = raise_in_session   # 非空 → 会话已起（__enter__ 之后）才抛，覆盖「先释放会话再排空」
 
     def __enter__(self):
         return self
 
     def __exit__(self, *a):
+        if self._trace is not None:
+            self._trace.append(("nova_exit",))
         return False
 
     def get_session_id(self):
+        if self._raise is not None:
+            raise self._raise
         return "sess-fake"
 
 
@@ -571,7 +579,7 @@ def main_fakes(monkeypatch, logs_dir):
     rs._stop.clear()
 
 
-def _install_provider(monkeypatch, on_enter=None, raises=None):
+def _install_provider(monkeypatch, on_enter=None, raises=None, trace=None):
     class _P:
         def __init__(self, region=None):
             pass
@@ -579,7 +587,7 @@ def _install_provider(monkeypatch, on_enter=None, raises=None):
         def cdp_session(self):
             if raises is not None:
                 raise raises
-            return _FakeCdp(on_enter)
+            return _FakeCdp(on_enter, trace=trace)
 
     monkeypatch.setattr(rs, "AgentCoreBrowserSessionProvider", _P)
 
@@ -594,12 +602,14 @@ def test_scope_end_drains_before_flush(main_fakes, logs_dir):
 
 
 def test_stop_signal_path_drains_after_session_release(main_fakes):
-    """协作停：三层 with 已退出（会话已释放）之后才排空，用退出档预算；不 flush（中断产物留本地）。"""
+    """协作停：三层 with 已退出（会话已释放）之后才排空，用退出档预算；不 flush（中断产物留本地）。
+    会话释放的两个 __exit__ 也进同一条 trace——把 drain 挪进 with 之内（会话未释放先排空）这里立刻变红。"""
     trace: list = []
     main_fakes.setattr(rs, "_uploader_singleton", _RecUploader(trace))
-    _install_provider(main_fakes, on_enter=lambda: rs._stop.set())
+    main_fakes.setattr(rs, "NovaAct", lambda **k: _FakeNovaAct(trace=trace))
+    _install_provider(main_fakes, on_enter=lambda: rs._stop.set(), trace=trace)
     assert rs.main() == 0
-    assert trace == [("drain", rs.EVIDENCE_DRAIN_EXIT_S)]
+    assert trace == [("nova_exit",), ("cdp_exit",), ("drain", rs.EVIDENCE_DRAIN_EXIT_S)]
 
 
 def test_network_exhausted_path_drains(main_fakes):
@@ -613,11 +623,12 @@ def test_network_exhausted_path_drains(main_fakes):
 
 
 def test_exception_path_drains_and_still_raises(main_fakes):
-    """异常退出路径（第三条）：排空一次仍原样冒泡（不改退出码/不吞异常）。"""
+    """异常退出路径（第三条）：会话已起后才炸 → 先释放会话（两个 __exit__）、再排空一次，异常仍原样冒泡。"""
     trace: list = []
     main_fakes.setattr(rs, "_uploader_singleton", _RecUploader(trace))
     main_fakes.setattr(rs, "_is_transient_network", lambda e, connecting=False: False)
-    _install_provider(main_fakes, raises=RuntimeError("会话炸了"))
+    main_fakes.setattr(rs, "NovaAct", lambda **k: _FakeNovaAct(trace=trace, raise_in_session=RuntimeError("会话炸了")))
+    _install_provider(main_fakes, trace=trace)
     with pytest.raises(RuntimeError, match="会话炸了"):
         rs.main()
-    assert trace == [("drain", rs.EVIDENCE_DRAIN_EXIT_S)]
+    assert trace == [("nova_exit",), ("cdp_exit",), ("drain", rs.EVIDENCE_DRAIN_EXIT_S)]

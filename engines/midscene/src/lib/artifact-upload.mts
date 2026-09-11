@@ -236,7 +236,9 @@ export class ArtifactUploader {
       } catch {
         continue;  // 路径算不出（拿到的不是字符串）→ 跳过这张，绝不抛给主流程
       }
-      this.chain = this.chain.then(() => this.uploadQueued(abs));  // 串成链：前一项 settle 才起下一项
+      // 串成链：前一项 settle 才起下一项。链尾一律 .catch 兜底——「永不 reject」是结构性保证，不依赖 uploadQueued
+      // 每行恰好不抛（一项 reject 会毁掉其后所有项与 drain）；对称 Nova 队列线程的 except 兜底。
+      this.chain = this.chain.then(() => this.uploadQueued(abs)).catch(() => {});
     }
   }
 
@@ -247,7 +249,7 @@ export class ArtifactUploader {
     if (err !== null) {
       // 产品面一行：发生了什么 + 不影响什么 + 还能看什么（设计判据留在上面注释里）。
       this.logFn(`worker: 排障截图上传失败（已重试后放弃，不影响判定结果；仍可看引擎原生报告）：`
-        + `${path.basename(abs)}：${err.message}`);
+        + `${path.basename(abs)}：${String((err as { message?: unknown }).message ?? err)}`);
     }
   }
 

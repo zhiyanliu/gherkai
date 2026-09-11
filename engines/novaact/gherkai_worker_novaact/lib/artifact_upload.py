@@ -55,6 +55,8 @@ def _log(msg: str) -> None:
 
     本模块**不 import run_scope 的 log**（那边 import 本模块，反向依赖会成环）；队列线程与主流程并发写 stderr
     安全（BufferedWriter 自带锁；「非重入」那个坑只在信号 handler 里写才撞，见 run_scope._on_signal）。
+    **解释器 finalization 期除外**：daemon 线程在主线程退出后再写 buffered stderr 可能撞 `_enter_buffered_busy` 致命错——
+    故 `drain` 超时放弃后队列线程转入静默（不再上传、不再写日志，见 `_abandoned`），主线程返回后它不再碰 stderr。
     """
     sys.stderr.write(f"{msg}\n")
     sys.stderr.flush()
@@ -79,6 +81,8 @@ class ArtifactUploader:
         self._run_dir = run_dir
         self._client = None            # 惰性建（仅真上传时，避免 no-op 路径 import boto3）
         self._uploaded: set[str] = set()  # 已上传的绝对路径（实时/队列/flush 三处共用，跳过重复传）
+        self._tcfg = None                 # boto3 TransferConfig(use_threads=False)，惰性建（见 _transfer_config）
+        self._abandoned = False           # drain 超时放弃后置 True：队列线程静默（不上传、不写日志）
         self._flush_ok = True          # 剩余批量是否全成功（任一失败 → 整目录不删）
         # `_uploaded` 被主流程与队列线程同时读写 → 一律经这把锁（boto3 低层 client 自身线程安全，不必守）
         self._lock = threading.Lock()
@@ -140,7 +144,8 @@ class ArtifactUploader:
         # （key 确定性可算）。消除对已传兄弟的冗余 PutObject（ADR 0029 幂等去重）。
         if self._is_uploaded(p):
             return f"s3://{self._bucket}/{key}"
-        self._s3().upload_file(str(p), self._bucket, key, ExtraArgs=_extra_args(p))  # 实时上传（失败抛 → 可观测、不删）
+        self._s3().upload_file(str(p), self._bucket, key, ExtraArgs=_extra_args(p),
+                               Config=self._transfer_config())  # 实时上传（失败抛 → 可观测、不删）；传输在本线程
         self._mark_uploaded(p)                             # 记下，队列/flush 时跳过
         return f"s3://{self._bucket}/{key}"
 
@@ -175,9 +180,11 @@ class ArtifactUploader:
         排空的预算按此量级取（有界，ADR 0029「退出时间有界」）。
         """
         for _ in range(2):          # 首次 + 重试一次
+            if self._abandoned:
+                return False        # drain 已放弃：不再发起上传（进程正在退出）
             try:
                 self._s3().upload_file(str(local_abs), self._bucket, self._key_for(local_abs),
-                                       ExtraArgs=_extra_args(local_abs))
+                                       ExtraArgs=_extra_args(local_abs), Config=self._transfer_config())
             except Exception:  # noqa: BLE001  含 key 算不出（文件不在 run 树内）等一切故障：best-effort
                 continue
             self._mark_uploaded(local_abs)
@@ -189,7 +196,9 @@ class ArtifactUploader:
         """把文件交给后台队列顺序上传（**不阻塞调用方**）；no-op 档直接返回。
 
         调用点在 `step_done` **emit 之后**（ADR 0042 决策一：截图字节绝不压判定临界路径）。队列线程惰性起、
-        daemon（进程退出不被它拖住；收尾靠 `drain` 有界等）。
+        daemon，且上传本体也在这个线程里跑（`use_threads=False`，见 `_transfer_config`）——否则 boto3 会把传输交给
+        s3transfer 的非 daemon 线程池，解释器退出时被 atexit join、进程多拖一次 client 超时（≈10 s，真跑实测），
+        drain 的「有界」就名不副实。收尾靠 `drain` 有界等，drain 预算即退出成本。
         """
         if not self.enabled:
             return
@@ -215,9 +224,22 @@ class ArtifactUploader:
             while self._pending > 0:
                 left = deadline - time.monotonic()
                 if left <= 0:
+                    self._abandoned = True   # 放弃：队列线程此后不再上传、不再写日志（进程要退了）
                     return False
                 self._idle.wait(left)
         return True
+
+    def _transfer_config(self):
+        """boto3 传输配置：`use_threads=False` → 传输在调用线程内跑（NonThreadedExecutor）。
+
+        默认的线程池是非 daemon 线程，解释器退出时被 join；后台队列的 daemon 语义与 `drain` 的有界退出都靠这一项
+        才成立（真跑：黑洞端点下 drain(1.0) 后进程 11.2 s 才退，改后 1.15 s）。主流程的 `to_report_ref` 同用，
+        统一一处。惰性 import（file:// no-op 档零 boto 依赖）。
+        """
+        if self._tcfg is None:
+            from boto3.s3.transfer import TransferConfig
+            self._tcfg = TransferConfig(use_threads=False)
+        return self._tcfg
 
     def _ensure_worker(self) -> None:
         with self._lock:
@@ -245,8 +267,12 @@ class ArtifactUploader:
         if self._is_uploaded(p):
             return          # 已被实时上传/flush 传过（幂等去重，ADR 0029）
         if not self._upload_once_with_retry(p):
-            # 放弃：只一行产品语言的日志（文件仍在产物目录里 → scope 末 flush 还有一次机会）
-            _log(f"证据截图上传失败（收尾时再试一次）：{p.name}")
+            if self._abandoned:
+                return          # 进程正在退出：不写 stderr（finalization 期写 buffered stderr 可能致命，见 _log）
+            # 放弃：一行产品语言（发生了什么 + 不影响什么）。**不承诺「收尾再试」**——三条提前退出路径
+            # （停止信号 / 网络耗尽 / 异常）只 drain 不 flush，那句在这些档上是假的；文件仍在目录里，
+            # 正常完成路径的 flush 还会兜一次。文案与 Midscene 上传器同形（两引擎语义对称，ADR 0024）。
+            _log(f"证据截图上传失败（已重试后放弃，不影响判定与报告；该截图链接可能打不开）：{p.name}")
 
     def flush_and_cleanup(self, artifact_dir: str | Path) -> None:
         """scope 末：整目录递归上传剩余文件（跳过已传的）+ 全成功则 rmtree 整目录（ADR 0029）。

@@ -231,6 +231,8 @@ agent / skill 只依赖 evidence schema 与 `explain` 输出，两者都是我�
 
 **截图后台队列 + 收尾排空（决策一修订）的 cloud 真跑**：用 `--default-job-timeout` 把两引擎的 run 掐断——Nova 掐在 scope 末收尾期（6 步全跑完、job 记 timeout）：5 份 evidence.json 引用的 5 张截图全部在 S3（`image/jpeg`）；Midscene 掐在 scope 中途（跑完 step 0–4、step 5 在途）：4 份 evidence.json 引用的 4 张截图全部在 S3，而此路径**不走 scope 末 flush**——修订前这 4 张必丢、URI 悬空。即「字节在下个 step 期间上传 + 退出路径 6 s 排空」在真 Fargate SIGTERM 上闭合。
 
+**对抗审查真跑核出并已吸收**：Nova 侧 boto3 的 `upload_file` 默认把传输交给 s3transfer 的非 daemon 线程池，解释器退出时被 atexit join——黑洞端点下 `drain(1.0)` 返回后进程 11.2 s 才退（多拖一次 client 超时），「daemon 队列线程 + 有界 drain」的退出账目失真；改为 `TransferConfig(use_threads=False)` 让传输落在队列线程内后 1.15 s 退出，drain 预算即退出成本。同批：drain 超时后队列线程静默（不再上传、不写 stderr，避开 finalization 期写 buffered stderr 的致命错窗口）；Midscene 链尾结构性 `.catch`。
+
 **验证暴露并已吸收的两处**：Nova SDK 异常 str() 为多行 repr → act.error / step message 压成一行（决策一映射表）；Midscene `Planning/Plan` 的推理在 `output.thought` → 映射回落（决策一映射表）。
 
 - 单测：两引擎映射函数对真产物 fixture（含 Midscene 的 error task、Nova 的 N 票）；best-effort 路径（抽取 / 上传抛异常 → `step_done` 照发、无 evidence ref、status 不变）；serialize round-trip 带非默认 step message；`explain` 本地 / 云端两档读取、`record_missing` 与三种 `evidence_missing`、多命中 `--scenario` + `--step`、退出码；cloud 档 skew 三态；契约护栏含 evidence 夹具。

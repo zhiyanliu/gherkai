@@ -325,7 +325,7 @@ def _drain_evidence_uploads(timeout_s: float) -> None:
         if u is None or not u.enabled:
             return  # 无队列（零 evidence）/ 本机 no-op 档（截图就在本地，无需上传）
         if not u.drain(timeout_s):
-            log("部分证据截图未能在收尾时限内传完（这些截图的链接可能暂时打不开；判定与报告不受影响）")
+            log("部分证据截图未能在收尾时限内传完（这些截图的链接可能打不开；判定与报告不受影响）")
     except Exception as e:  # noqa: BLE001  收尾路径绝不因它改变退出码
         log(f"证据截图收尾上传未能完成（判定与报告不受影响）：{type(e).__name__}: {e}")
 
