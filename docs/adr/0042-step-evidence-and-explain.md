@@ -138,6 +138,8 @@ scope features/login.feature:6  engine=novaact  status=failed  session=01a0…
 
 **文本 key = JSON 字段名**：`message:` / `thought:` / `screenshot:` / `error:` 与 `vote=` / `url=` / `status=` 同律，文本与 `--json` 一一对应、agent 零翻译；中文只用于整句提示（「无 AI 证据」「无记录（未执行或未上报）」「其余 N 个 frame 已省略」「因前置 step error 被跳过」）与 run 的人读文本。
 
+**step 行总显 votes（含 `1/1`）**：`votes` 的存在即「这是 AI 断言」的标记，agent 据此区分 AI 断言与确定性 / 动作步；故 explain 不套人读汇总「`total==1` 不显 tally」的降噪规则（[0014](./0014-ai-first-assertions.md) 那条针对 `run` 的人读输出与报告页），两者有意不同。
+
 **文本预算**：文本形态是给 agent 一次读进上下文的摘要，不是 evidence 全文转写。每个 act 默认只渲染**最后一个带 thought 的 frame**（判否理由通常落在末次观察）及其截图 uri；单段 thought 超过 800 字截断并接一行「…（已截断；完整内容见 --json 或 evidence.json：<ref>）」；被省略的 frame 打一行「其余 M 个 frame 已省略」。`--full` 关闭预算、逐 frame 全文。理由：一个 3 票断言最坏 90 段 thought，文本形态若无预算会一次撑爆 agent 上下文，而它恰是 agent 的首选读法。evidence 缺失的 step 下打一行该 step / 该 scope 的其它原生产物 ref 作兜底指针。
 
 **JSON 形态**（筛选生效时无一命中的 scope 不产出空壳条目）：`{run_id, status, scopes: [{scope_id, engine, status, error_type, message, session_id, report_refs, aborted_hint, has_step_records, scenarios: [{scenario_id, name, status, steps: [{index, keyword, text, status, votes, error_type, message, shortcircuited, duration_ms, report_refs, record_missing, evidence: <evidence.json 全文> | null, evidence_missing}]}]}]}`。`report_refs` 原样搬既有字段、不解析（含 evidence 之外的 trajectory / report / summary）：explain 已从 ResultStore 读到整个 JobResult、这些 ref 就在手上，云端 `status --json` 只投影 RunState 没有它们，不搬等于让 agent 自己去 S3 抠 `jobs/*.json`。evidence 全文内嵌可以：它不含 base64、只有 uri。**契约页与护栏**：evidence 的固定键单列一节；`frames[].actions[].args` 与 `acts[].result` 是引擎原样透传的对象，内部键随 SDK、不属于本契约，护栏在这两个节点**停止递归**（不是塞 `ignore` 名单——那会连真契约键一起放过），`_leaf_keys` 需支持「指定键处停止下钻」；explain 的护栏样例由手搭的 evidence 夹具喂进渲染器生成（形状与两引擎映射测试共用的真产物裁剪版一致），否则 evidence 那批键根本不进比对。

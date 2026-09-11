@@ -118,7 +118,7 @@ aws ecr delete-repository --repository-name gherkai-novaact-worker --force
 aws ecr delete-repository --repository-name gherkai-midscene-worker --force
 ```
 
-不手动删则同 prefix 重新 deploy 会因资源已存在而冲突。cluster / task 定义 / SSM 参数（含版本戳与 VPC 档）/ 日志组随 stack 销毁、无需手动。
+不手动删则同 prefix 重新 deploy 会因资源已存在而冲突。cluster / task 定义 / 日志组 / SSM 里的版本戳与 VPC 档随 stack 销毁、无需手动。**worker 镜像映射与默认 variant 指针这两族 SSM 参数不随 destroy 删**：同 prefix 重建后它们还记着上一套环境里的 variant——ECR 仓库留着的话，重新 `gherkai deploy` 会把这些 variant 按原镜像重新登记、照样能用；ECR 仓库也删了的话，这些 variant 变成「有记录、没镜像」，提交时退 2 并提示找不到镜像，重推同名 variant 即恢复。想清空重来就自己删（把 `gherkai-` 换成你的 prefix）：`aws ssm get-parameters-by-path --path /gherkai-backend/worker-image --recursive --query 'Parameters[].Name' --output text` 列出后逐条 `aws ssm delete-parameter --name …`，再 `aws ssm delete-parameter --name /gherkai-backend/worker-default`。
 
 ## 部署机需要的权限
 
@@ -128,7 +128,7 @@ aws ecr delete-repository --repository-name gherkai-midscene-worker --force
 
 `0` 成功 · `2` 前置/校验失败（Node 缺失、VPC 档不符或无记录、读后端失败、容器引擎名不认、`push-worker` 的架构或版本不符——都是你可修的）· `1` **cdk 已成功、而 worker 镜像步骤失败**（账户已被改动，重跑 `gherkai deploy` 幂等收敛）· 其余 = cdk CLI 自己的返回码（原样透传）。
 
-常见的几条：**找不到 node** → 装 Node ≥ 22；**VPC 档报错** → 见上「VPC 三档」；**`push-worker` 说架构不对** → 带 `--platform linux/amd64` 重 build；**`push-worker` 说 CLI 新于后端** → 先 `gherkai deploy`；**deploy 只警告「容器引擎不可用」、没同步基底** → 修好 docker 后重跑 `gherkai deploy`。
+常见的几条：**找不到 node** → 装 Node ≥ 22；**VPC 档报错** → 见上「VPC 三档」；**`push-worker` 说架构不对** → 带 `--platform linux/amd64` 重 build；**`push-worker` 说 CLI 新于后端** → 先 `gherkai deploy`；**deploy 说找不到容器引擎 / 连不上 daemon** → 装好 docker 并让 daemon 起着，再重跑 `gherkai deploy`（cdk 之前先警告一句、stack 仍照常部署，随后的同步基底这步退 `1`，重跑幂等收敛）。
 
 ## 帮助
 

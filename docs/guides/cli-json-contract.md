@@ -9,6 +9,8 @@
 > （`explain` 的 `evidence` 用一份与两引擎映射测试同形的手搭夹具）、递归收集全部键名（`actions[].args` 与 `acts[].result` 两个引擎透传节点不下钻）、
 > 逐个断言出现在本页——漏键即红。本页只讲「有什么字段、什么意思、何时出现」，不讲为什么（那在 ADR）。
 
+姊妹页分工，本文只讲字段：字段背后的判定语义（四层归约 / 状态 / 退出码）→ [`verdict-model.md`](./verdict-model.md)；`artifacts` 各键指向的落点与证据 → [`artifacts-and-evidence.md`](./artifacts-and-evidence.md)；这些字段何时才有内容（推进链与落地时机）→ [`execution-and-reconciliation.md`](./execution-and-reconciliation.md)。
+
 通则：`--json` 下 **stdout 只有一个 JSON 文档**，诊断/进度一律走 stderr；`null` 表示「无此值」（如无成本、未落值），
 省略键表示「此形态下不存在」（各节注明）。退出码非 0 的前置/读取失败路径 stdout 可为空、诊断在 stderr——**先按退出码分流再解析**。
 退出码含义见 `cli/README.md`「退出码」。

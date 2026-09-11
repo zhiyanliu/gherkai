@@ -61,9 +61,9 @@ local 与 cloud 在这条路上的差别**只在 Engine adapter**：
 - **local**：`SubprocessEngine` spawn 本机 worker 子进程，事件走专用 fd（`EVENTS_FD`，三通道分离：事件/SDK 噪声/诊断各走各的）。
 - **cloud**：`FargateEngine` 把 job JSON 放 S3、`RunTask` 起容器；worker 在容器里把事件逐条 PutItem 进 DDB events 表，adapter 这头**轮询 Query** 读回来，同时 `DescribeTasks` 盯着 task 死活。事件读取只扫 worker 的连续 seq 段——events 表里还有另一类「退出记录」item，为什么读端要避开它、谁保证前台 run 撞不上，见 §5 的键空间对照与 §7。
 
-另外两个能力是前台驱动循环独有的、后台跑批**不具备**：`--fail-fast` 早停（以及由它派生的 skipped/aborted 态）与 network 瞬时故障的 job 级整体重试——后台档失败一律隔离、逐 job 各自收敛（[ADR 0026](../adr/0026-schedule-module.md) 失败隔离、[ADR 0031](../adr/0031-job-lifecycle-states-and-severity.md) 决定一）。
+另外两个能力只存在于前台驱动循环、后台跑批**不具备**：`--fail-fast` 早停（以及由它派生的 skipped/aborted 态），以及 `schedule` 里那条 network 瞬时故障的 job 级整批重试通道——但它**今天在 `run` 上并未启用**（`ScheduleOpts.network_retry` 默认 0、CLI 没接这个旋钮），网络抖动的实际处置见 [`verdict-model.md`](./verdict-model.md) §3c、门控与两层分工见 [ADR 0028](../adr/0028-transient-network-ssl-resilience.md)。后台档失败一律隔离、逐 job 各自收敛（[ADR 0026](../adr/0026-schedule-module.md) 失败隔离、[ADR 0031](../adr/0031-job-lifecycle-states-and-severity.md) 决定一）。
 
-> 权威：[ADR 0024](../adr/0024-worker-core-protocol.md)（worker↔core 协议、三通道、退出码）、[ADR 0026](../adr/0026-schedule-module.md)（调度/心跳/优雅终止）、[ADR 0032](../adr/0032-fargate-execution-environment.md)（Fargate 执行面）、[ADR 0030](../adr/0030-realtime-persistence-seam.md)（实时写）。
+> 权威：[ADR 0024](../adr/0024-worker-core-protocol.md)（worker↔core 协议、三通道、退出码）、[ADR 0026](../adr/0026-schedule-module.md)（调度/心跳/优雅终止）、[ADR 0032](../adr/0032-fargate-execution-environment.md)（Fargate 执行面）、[ADR 0030](../adr/0030-realtime-persistence-seam.md)（实时写）、[ADR 0028](../adr/0028-transient-network-ssl-resilience.md)（两层网络重试）。
 
 ## 4. 后台跑批 `submit` 的一生
 
@@ -204,3 +204,7 @@ sequenceDiagram
 | 实时持久化接缝（终态提交点 commit point/条件写）                  | [ADR 0030](../adr/0030-realtime-persistence-seam.md)                 |
 | 云资源 IaC/命名/提交前探活（preflight）                           | [ADR 0033](../adr/0033-iac-aws-backend-and-composition-wiring.md)    |
 | 分层总纲（core/runtime/cli/engines）                              | [ADR 0016](../adr/0016-execution-architecture-core-lib-run-model.md) |
+| 判定怎么算出来（四层归约 / 七个状态 / 各命令退出码语义）          | [`verdict-model.md`](./verdict-model.md)                             |
+| 产物与证据落在哪、哪一份答哪个问题                                | [`artifacts-and-evidence.md`](./artifacts-and-evidence.md)           |
+| 云端后端由哪几个载体拼成、改动要推哪一处                          | [`cloud-backend-carriers.md`](./cloud-backend-carriers.md)           |
+| 确定性 step 从写到云端命中的一生                                  | [`deterministic-step-lifecycle.md`](./deterministic-step-lifecycle.md) |

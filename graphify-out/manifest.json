@@ -455,8 +455,8 @@
     "semantic_hash": ""
   },
   "docs/guides/execution-and-reconciliation.md": {
-    "mtime": 1789101625.7809355,
-    "ast_hash": "34ded4c11c57bb8c375e3e70e1db8cbe",
+    "mtime": 1789104172.8223321,
+    "ast_hash": "6f5c0bb5109a90ab841c1dfd64463a1d",
     "semantic_hash": ""
   },
   "docs/adr/0037-distribution-and-packaging.md": {
@@ -945,8 +945,8 @@
     "semantic_hash": "efe2baa0b743a2d6b48ce1578972a33a"
   },
   "deploy_aws/README.md": {
-    "mtime": 1789018190.1671484,
-    "ast_hash": "1c545bfd4d045e4abee41001e1352432",
+    "mtime": 1789104172.822811,
+    "ast_hash": "d182d784f3bb41909e2c70b7f597b5d0",
     "semantic_hash": ""
   },
   ".github/scripts/check_dist_metadata.py": {
@@ -1160,13 +1160,13 @@
     "semantic_hash": ""
   },
   "docs/guides/cli-json-contract.md": {
-    "mtime": 1789101625.7804399,
-    "ast_hash": "fcfe60cab14cd3c51153d770142a741a",
+    "mtime": 1789104172.8224595,
+    "ast_hash": "2ab0ba465863556bec9a2e5250fa9347",
     "semantic_hash": ""
   },
   "docs/adr/0042-step-evidence-and-explain.md": {
-    "mtime": 1789101625.7815242,
-    "ast_hash": "0545b09a1d57f567b18a186d297b38ec",
+    "mtime": 1789104222.9080758,
+    "ast_hash": "d8e9586068fa02eb2a2daf2449b7ee1e",
     "semantic_hash": ""
   },
   "engines/midscene/src/worker/evidence.mts": {
@@ -1202,6 +1202,26 @@
   "engines/novaact/tests/test_evidence.py": {
     "mtime": 1789097355.0948946,
     "ast_hash": "1bd6bcda0884a505d2152c8dc5d49b9e",
+    "semantic_hash": ""
+  },
+  "docs/guides/artifacts-and-evidence.md": {
+    "mtime": 1789104172.821741,
+    "ast_hash": "c9ca7433b8709cd0b838f9eb707280e4",
+    "semantic_hash": ""
+  },
+  "docs/guides/cloud-backend-carriers.md": {
+    "mtime": 1789104172.8221302,
+    "ast_hash": "e3972c2067c43faee2e2abaff78d066d",
+    "semantic_hash": ""
+  },
+  "docs/guides/deterministic-step-lifecycle.md": {
+    "mtime": 1789104172.8215477,
+    "ast_hash": "0a924bfc1bb9151ac3a1a295ff6613ea",
+    "semantic_hash": ""
+  },
+  "docs/guides/verdict-model.md": {
+    "mtime": 1789104222.9082751,
+    "ast_hash": "93d6c1cf720da30045749a461fe7967b",
     "semantic_hash": ""
   }
 }
