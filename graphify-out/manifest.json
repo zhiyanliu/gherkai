@@ -10,8 +10,8 @@
     "semantic_hash": ""
   },
   "cli/tests/test_main.py": {
-    "mtime": 1789036449.318776,
-    "ast_hash": "dd52325ac29c1e094912cfde5fa3a82f",
+    "mtime": 1789092414.2408402,
+    "ast_hash": "68cc8eed7fcab4ca4d945db2e80cf55d",
     "semantic_hash": ""
   },
   "cli/tests/test_render.py": {
@@ -480,8 +480,8 @@
     "semantic_hash": ""
   },
   "cli/gherkai_cli/render.py": {
-    "mtime": 1789036160.2093186,
-    "ast_hash": "9f9c3d896c9e86981e4d3862c5438c79",
+    "mtime": 1789092456.0399086,
+    "ast_hash": "629c1abe17e439826bfcb30aa1908f92",
     "semantic_hash": ""
   },
   "core/gherkai_core/__init__.py": {
@@ -1165,8 +1165,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0042-step-evidence-and-explain.md": {
-    "mtime": 1789091916.1246183,
-    "ast_hash": "4682f633feaf96a9740d85d9110caa16",
+    "mtime": 1789092414.2410965,
+    "ast_hash": "9dfb54b584822973d42ffaae562974fb",
     "semantic_hash": ""
   },
   "engines/midscene/src/worker/evidence.mts": {

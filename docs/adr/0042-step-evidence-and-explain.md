@@ -122,19 +122,21 @@ scope features/login.feature:6  engine=novaact  status=failed  session=01a0…
     step 0  Given 打开 "https://app.example.com/login"      passed  (1.1s)
     step 1  When 输入用户名「alice」与密码「wrong」           passed  (9.4s)
     step 2  Then 页面显示「登录成功」                        failed  votes 0/1  (12.1s)
-      原因：AI 断言未过多数票（0/1）：页面显示「登录成功」
+      message: AI 断言未过多数票（0/1）：页面显示「登录成功」
       act 0  vote=false  url=https://app.example.com/login
-        think: I am on the login page. The task asks whether the page shows "登录成功".
-               I see an error banner "密码错误" instead. Returning false.
-        截图: file:///…/evidence/…/step-2/act-0-frame-4.jpg
+        thought: I am on the login page. The task asks whether the page shows "登录成功".
+                 I see an error banner "密码错误" instead. Returning false.
+        screenshot: file:///…/evidence/…/step-2/act-0-frame-4.jpg
         其余 4 个 frame 已省略（--full 查看）
     step 3  When 点击「退出」                                 passed  (3.2s)
   scenario features/login.feature:20  锁定账户提示  error
     step 0  Given 打开 "https://app.example.com/login"      error  (network_error)
-      原因：worker 建连失败（网络/SSL 瞬时故障）：…
+      message: worker 建连失败（网络/SSL 瞬时故障）：…
       无 AI 证据
     step 1  Then 页面提示「账户已锁定」                      skipped  ⚠ 因前置 step error 被跳过（未执行）
 ```
+
+**文本 key = JSON 字段名**：`message:` / `thought:` / `screenshot:` / `error:` 与 `vote=` / `url=` / `status=` 同律，文本与 `--json` 一一对应、agent 零翻译；中文只用于整句提示（「无 AI 证据」「无记录（未执行或未上报）」「其余 N 个 frame 已省略」「因前置 step error 被跳过」）与 run 的人读文本。
 
 **文本预算**：文本形态是给 agent 一次读进上下文的摘要，不是 evidence 全文转写。每个 act 默认只渲染**最后一个带 thought 的 frame**（判否理由通常落在末次观察）及其截图 uri；单段 thought 超过 800 字截断并接一行「…（已截断；完整内容见 --json 或 evidence.json：<ref>）」；被省略的 frame 打一行「其余 M 个 frame 已省略」。`--full` 关闭预算、逐 frame 全文。理由：一个 3 票断言最坏 90 段 thought，文本形态若无预算会一次撑爆 agent 上下文，而它恰是 agent 的首选读法。evidence 缺失的 step 下打一行该 step / 该 scope 的其它原生产物 ref 作兜底指针。
 

@@ -1441,10 +1441,10 @@ def test_explain_text_renders_reason_thought_screenshot_and_gaps(tmp_path, capsy
     assert "scope features/login.feature:6  engine=novaact  status=failed  session=01a0deadbeef" in out
     assert "scenario features/login.feature:12  密码错误时不放行  failed" in out
     assert "step 2  Then 页面显示「登录成功」  failed  votes 0/1  (12.1s)" in out
-    assert "原因：AI 断言未过多数票（0/1）：页面显示「登录成功」" in out
+    assert "message: AI 断言未过多数票（0/1）：页面显示「登录成功」" in out
     assert "act 0  vote=false  url=https://app.example.com/login" in out
-    assert "think: I am on the login page." in out and "Returning false." in out
-    assert "截图: file:///tmp/act-0-frame-4.jpg" in out
+    assert "thought: I am on the login page." in out and "Returning false." in out
+    assert "screenshot: file:///tmp/act-0-frame-4.jpg" in out
     assert "其余 1 个 frame 已省略（--full 查看）" in out          # 两个 frame，只渲染了带推理的那个
     assert "step 3  When 点击「退出」  无记录（未执行或未上报）" in out
     assert "step 0  Given 打开 \"https://app.example.com/login\"  error  (network_error)" in out

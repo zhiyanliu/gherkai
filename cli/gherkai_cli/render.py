@@ -313,12 +313,16 @@ def _evidence_ref(step: dict) -> str:
 
 
 def _thought_lines(thought: str, indent: str, *, ref: str, full: bool) -> list[str]:
-    """一段推理文本 → 文本行（超预算截断，除 --full；多行原文的续行对齐到 `think: ` 之后）。"""
+    """一段推理文本 → 文本行（超预算截断，除 --full；多行原文的续行对齐到 `thought: ` 之后）。
+
+    文本形态的 key 一律用 `--json` 的字段名（thought / screenshot / message / error，与 vote= / url= 同律）——
+    agent 读文本再对 JSON 零翻译；中文只留给整句提示。
+    """
     text = thought
     if not full and len(text) > _THOUGHT_BUDGET:
         text = text[:_THOUGHT_BUDGET] + f"…（已截断；完整内容见 --json 或 evidence.json：{ref}）"
-    head = f"{indent}think: "
-    cont = indent + " " * len("think: ")
+    head = f"{indent}thought: "
+    cont = indent + " " * len("thought: ")
     parts = text.split("\n")
     return [head + parts[0]] + [cont + p for p in parts[1:]]
 
@@ -337,7 +341,7 @@ def _act_lines(act: dict, *, ref: str, full: bool) -> list[str]:
         bits.append(f"url={act['url']}")
     lines = ["      " + "  ".join(bits)]
     if act.get("error"):
-        lines.append(f"        错误: {_one_line(act['error'])}")
+        lines.append(f"        error: {_one_line(act['error'])}")
     frames = act.get("frames") or []
     if full:
         for j, fr in enumerate(frames):
@@ -346,13 +350,13 @@ def _act_lines(act: dict, *, ref: str, full: bool) -> list[str]:
             if fr.get("thought"):
                 lines += _thought_lines(fr["thought"], "          ", ref=ref, full=True)
             if fr.get("screenshot"):
-                lines.append(f"          截图: {fr['screenshot']}")
+                lines.append(f"          screenshot: {fr['screenshot']}")
         return lines
     last = next((i for i in range(len(frames) - 1, -1, -1) if frames[i].get("thought")), None)
     if last is not None:
         lines += _thought_lines(frames[last]["thought"], "        ", ref=ref, full=False)
         if frames[last].get("screenshot"):
-            lines.append(f"        截图: {frames[last]['screenshot']}")
+            lines.append(f"        screenshot: {frames[last]['screenshot']}")
     omitted = len(frames) - (0 if last is None else 1)
     if omitted > 0:
         lines.append(f"        其余 {omitted} 个 frame 已省略（--full 查看）")
@@ -376,7 +380,7 @@ def _step_lines(step: dict, *, expand_passed: bool, full: bool) -> list[str]:
         bits.append("⚠ 因前置 step error 被跳过（未执行）")
     lines = [head + "  " + "  ".join(bits)]
     if step["message"]:
-        lines.append(f"      原因：{_one_line(step['message'])}")
+        lines.append(f"      message: {_one_line(step['message'])}")
     if not explain_step_expands(step, expand_passed=expand_passed):
         return lines
     ev = step["evidence"]
