@@ -101,7 +101,7 @@ Claude 的 plugin marketplace 只覆盖 Claude、仪式更多，现阶段不做�
 
 - `doctor` 加一项「已装 skill 的版本是否等于 CLI」（读 `.gherkai-skill-version`；「版本未知」态跳过比对；dev 树里该值是 `uv sync` 时的快照、只对发行版安装有判定意义）：等安装命令真用起来再定形态。
 - `skill uninstall`：目前 `rm -rf` 即可；评测前置需要它时再加。
-- `scripts/`：等评测显示测试用例反复手写同一 helper 再收进来；`assets/`（模板 / 图标类输出资产）同理——本 skill 只输出文字指导，真要用时先进白名单再开。
+- `scripts/`：等评测显示测试用例反复手写同一 helper 再收进来；`assets/`（模板 / 图标类、skill 往使用方项目产出的资源文件）同理——本 skill 不产这类文件，它教 agent 操作 CLI 与改 feature / steps（本机与 cloud 两档的跑法都在 scope 内；决策七缺省集不执行 `run` / `submit` 是评测手段、不是能力边界），真要用时先进白名单再开。
 - 仓库根镜像 / 发布到 skills.sh 一类目录：等使用方需求。
 - 引擎专属 skill 拆分（`gherkai-novaact` / `gherkai-midscene`）：evidence **schema** 同形、引擎差异有界且一页 reference 列得完，不拆。
 
