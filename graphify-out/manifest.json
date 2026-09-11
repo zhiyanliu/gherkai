@@ -1228,5 +1228,10 @@
     "mtime": 1789105028.6336267,
     "ast_hash": "3d45a18c9cc706a397a38da48a771865",
     "semantic_hash": ""
+  },
+  "docs/adr/0043-agent-skill-for-driving-gherkai.md": {
+    "mtime": 1789107144.896392,
+    "ast_hash": "b6674e154e471fecb89136a327155f96",
+    "semantic_hash": ""
   }
 }
