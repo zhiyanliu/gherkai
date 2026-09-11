@@ -178,9 +178,16 @@ agent / skill 只依赖 evidence schema 与 `explain` 输出，两者都是我�
 
 - **断言时向模型要理由**（Nova `BOOL_SCHEMA` → `{result, reason}`、Midscene `aiBoolean` → 带 reason 的 `aiQuery`）：一行就知道为什么判否，但改了断言提问方式、影响判定质量与两引擎对标口径（[0010](./0010-spike-as-apples-to-apples-benchmark.md)、[0014](./0014-ai-first-assertions.md)），需单独 ADR + 真跑对比。先看 thought 文本够不够用。
 - **Nova error act 的现场截图**（失败点直接 `nova.page.screenshot()` + `page.url`）：可补上 Nova 侧 error step 的空 frames，但 CDP 断连类失败下该路径自身也不可用，仍是 best-effort；不混进映射表当既有来源，等 explain 用起来看是否真缺。
-- **explain 读事件流找回被中止 job 的 evidence ref**、**detached run 中途可见**：都要新的 core 接缝，各自另议。
+- **explain 读事件流找回被中止 job 的 evidence ref**、**detached run 中途可见**：都要新的 core 接缝，各自另议（触发信号见下「重议闸门」）。
 - 确定性 step 的 evidence（当时 URL / 截图）：0027 另一留口子，本 ADR 不动。
 - 报告 index.html 内嵌渲染 evidence（截图缩略、thought 折叠）：皮层富渲染，等 explain 用起来再定形态。
+
+## 已知缺口与重议闸门
+
+两处缺口都是本 ADR 有意接受的取舍，不是遗漏；这里把「什么情况下该回来改」写成可对表的信号。
+
+- **截图字节只靠 scope 末 flush，有两面风险（cloud 档；本机档文件在盘上、不受影响）**。① 信号 / 超时 / 网络耗尽三条提前退出路径都不 flush（沿 [0028](./0028-transient-network-ssl-resilience.md)「中断产物保留本地」），已完成 step 的 evidence.json 已在 S3、其中的截图 URI 却在容器销毁后悬空；② 正常路径的 flush 本身是 best-effort——逐文件单次 PutObject、无重试、失败只记日志继续，容器随后销毁，一次 S3 瞬时抖动就是一个永远 404 的 URI，evidence.json 不会被改写。**触发信号**：agent 顺 evidence 取截图撞 404、或中止 run 的排障需要看已完成 step 的现场。**预案**：截图在 `step_done` 发出之后进后台队列上传（不占判定临界路径——这正是拒绝即时上传的理由），scope 末与中断路径在 grace 预算内**有界排空**，flush 只兜漏网；上传器补一次重试。两面都收窄到「进程被硬杀的那几秒」。这是对决策一「上传时机分两类」的修订，动两 worker 的上传器与收尾序列。
+- **被中止的 job，explain 找不到它已产的 evidence**。未完成 scenario 不发 `scenario_done`，其 step 记录不进 `jobs/*.json`，evidence 指针只留在事件记录里；explain 现在只打 `aborted_hint`。**触发信号**：skill 用起来后 agent 在被中止 job 上排障时反复撞到这行提示、要靠人去 S3 翻。**预案**：core 暴露事件流读接缝（RunStore / EventLog 层），explain 对 `aborted_hint` 的 job 从事件记录补取 evidence ref；与「detached run 中途可见」共用同一接缝，一并立项。
 
 ## 影响面
 
