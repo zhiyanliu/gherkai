@@ -34,7 +34,7 @@
 | `total_tokens` / `total_time_worked_s` | number \| null | 本 job 的原生量合计（失败的 act 也计入） |
 | `session_id` | string \| null | 引擎会话 id（血缘；可对上 worker 日志/轨迹目录） |
 | `error_type` | string \| null | job 级归因（如 `timeout`）；skipped/aborted 恒 null、原因在 `message` |
-| `message` | string \| null | job 级说明（超时、未启动原因、fail-fast 被中止等） |
+| `message` | string \| null | job 级「为何不是 passed」的原因原文（超时、未启动、fail-fast 被中止、worker 异常退出等）；passed 时为 null。**`message` 在本契约里恒为原因**：只出现在非 passed 态上，job 级与 step 级同义，与 worker 协议里的同名字段一脉相承 |
 | `report_refs[]` | array | job 级原生产物指针：`kind`（`summary` / `report`）、`ref`（`file://` 或 `s3://` URI）、`label` |
 | `scenarios[]` | array | 见下 |
 
