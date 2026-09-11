@@ -32,11 +32,12 @@ from gherkai_core.scope import FeatureSource
 #    subprocess 档见 build_engines、Fargate 档见 build_fargate_engines——两档都注，否则该档的 worker 落回自带字面量）；
 # ② 算 Nova 的 grace 下限（见 engine_min_grace）。env 可覆盖（真跑标定/调优）。
 NOVA_ACT_TIMEOUT_S = int(os.environ.get("NOVA_ACT_TIMEOUT_S", "120"))  # SDK 允许 [2,1800]
-# grace 余量（ADR 0024/0028 grace 硬约束的 margin）：单 step 最坏耗时 + 会话释放 + 余量。→ Nova grace 下限 ≈
-# ACT_TIMEOUT_S + margin。**已真容器标定**（ADR 0032「真容器校准结论」）：4 次真跑实测 SIGTERM 落 act 中途 →
-# `stopping→executionStopped` 最坏 21s，但其中 ~11s 已坐实为 ECS 记录 executionStoppedAt 的平台侧滞后（worker 已退），
-# subprocess 档不存在该段——真实预算 = 会话释放 ≤9s，故 margin 60→30（grace 下限 180→150）仍留 ~3x 余量。
-# env 可覆盖（再标定/调优）。
+# grace 余量（ADR 0024/0028 grace 硬约束的 margin）：单 step 最坏耗时 + 会话释放 + 截图队列排空 + 余量。→ Nova
+# grace 下限 ≈ ACT_TIMEOUT_S + margin。**已真容器标定**（ADR 0032「真容器校准结论」）：4 次真跑实测 SIGTERM 落
+# act 中途 → `stopping→executionStopped` 最坏 21s，但其中 ~11s 已坐实为 ECS 记录 executionStoppedAt 的平台侧滞后
+# （worker 已退），subprocess 档不存在该段——真实预算 = 会话释放 ≤9s + evidence 截图后台队列的退出档有界排空 6s
+# （worker 的 `EVIDENCE_DRAIN_EXIT_S`，**排在会话释放之后**，ADR 0042 决策一）= 15s，故 margin **不动**（30 仍留
+# ~2x 余量；历史上 60→30 时 grace 下限 180→150）。env 可覆盖（再标定/调优）。
 NOVA_GRACE_MARGIN_S = int(os.environ.get("NOVA_GRACE_MARGIN_S", "30"))
 
 # Midscene 的 grace 下限（ADR 0024 grace 硬约束）：Midscene worker 无「可控 act timeout」概念（不像 Nova 的
@@ -44,10 +45,11 @@ NOVA_GRACE_MARGIN_S = int(os.environ.get("NOVA_GRACE_MARGIN_S", "30"))
 # SIGKILL 打断到一半（会话释放虽由「先释放会话再抢传」的排序 + Stop 预算保住不泄漏，但 worker 退不干净、
 # 中断兜底 report 抢传被截断）。下限 = onSignal 最坏串行路径的超时预算之和 + 余量，各段与 worker 常量同源：
 #   inflight settle(INFLIGHT_SETTLE_MS≈1.5s) + 会话 Stop(STOP_SESSION_BUDGET_MS≈3s) + browser.close race(≈3s)
-#   + 中断兜底 snapshotReport 上传(UPLOAD_TIMEOUT_MS≈10s) ≈ 17.5s，取 25s 留余量。**有界的待真跑标定量**，
+#   + 中断兜底 snapshotReport 上传(UPLOAD_TIMEOUT_MS≈10s) + step 级证据的截图队列排空(QUEUE_DRAIN_EXIT_MS≈6s，
+#   ADR 0042 决策一：排在会话释放之后、与兜底抢传并列) ≈ 23.5s，取 31s 留余量。**有界的待真跑标定量**，
 # 可 env 覆盖。（历史：曾为 0.0=无下限，导致 midscene-only run 默认 grace 回落 ScheduleOpts 的 5s < 上传超时
 # 10s，SIGTERM 时 worker 可能被 SIGKILL、兜底抢传截断——见 ADR 0024 grace 硬约束条。）
-MIDSCENE_GRACE_MIN_S = int(os.environ.get("MIDSCENE_GRACE_MIN_S", "25"))
+MIDSCENE_GRACE_MIN_S = int(os.environ.get("MIDSCENE_GRACE_MIN_S", "31"))
 
 
 # ============================================================================

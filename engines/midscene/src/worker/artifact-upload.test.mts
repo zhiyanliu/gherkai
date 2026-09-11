@@ -426,3 +426,166 @@ test("ContentType: .json / .jpeg / .jpg / .png / .html 各按其类型，未知�
   const inputs = (u as any).client.inputs as any[];
   assert.deepEqual(inputs.map((i) => i.ContentType), cases.map(([, ct]) => ct));
 });
+
+// ---- 后台上传队列（enqueue / drain，ADR 0042 决策一「上传时机分两类」）----
+// 重点护：key 与 refFor 逐字一致（evidence 里写的 URI 与真上去的对象同一个 key，否则永久 404）、
+// FIFO 顺序不重叠、成功记账让 flush 跳过（不双传）、失败重试一次后记一行放弃、排空有界、no-op 即返。
+
+// 建一个 <runDir>/midscene-run/report/screenshots 目录，塞若干截图文件。返回 { runDir, msDir, shot(name) }。
+function mkShots(names: string[]): { runDir: string; msDir: string; files: string[] } {
+  const root = tmproot();
+  const runDir = path.join(root, "reports", "rid");
+  const msDir = path.join(runDir, "midscene-run");
+  const shots = path.join(msDir, "report", "screenshots");
+  fs.mkdirSync(shots, { recursive: true });
+  const files = names.map((n) => {
+    const p = path.join(shots, n);
+    fs.writeFileSync(p, "jpegbytes-" + n);
+    return p;
+  });
+  return { runDir, msDir, files };
+}
+
+test("enqueue: 后台传的 key 与 refFor 逐字一致（evidence 里的 URI 不悬空）", async () => {
+  const { runDir, files } = mkShots(["a.jpeg", "b.png"]);
+  const u = new (ArtifactUploader as any)("bkt", "reports/rid/", runDir);
+  const keys = withMockClient(u);
+  const refs = files.map((f) => u.refFor(f));       // evidence.json 里写下的 URI（先算）
+  u.enqueue(files);                                  // step_done emit 之后交队列（后传字节）
+  assert.deepEqual(keys, [], "enqueue 同步返回、不在调用线上传（判定不等字节）");
+  assert.equal(await u.drain(5000), true);
+  assert.deepEqual(keys, [
+    "reports/rid/midscene-run/report/screenshots/a.jpeg",
+    "reports/rid/midscene-run/report/screenshots/b.png",
+  ], "FIFO：按入队顺序传");
+  assert.deepEqual(refs, keys.map((k) => `s3://bkt/${k}`), "URI 与真上去的 key 逐字一致");
+});
+
+test("enqueue: 单条链顺序传、永不重叠（退化网络下不并发挤爆）", async () => {
+  const { runDir, files } = mkShots(["a.jpeg", "b.jpeg", "c.jpeg"]);
+  const u = new (ArtifactUploader as any)("bkt", "reports/rid/", runDir);
+  let inFlight = 0;
+  let maxInFlight = 0;
+  const done: string[] = [];
+  (u as any).client = {
+    send: async (cmd: any) => {
+      inFlight++;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise((r) => setTimeout(r, 10));
+      inFlight--;
+      done.push(cmd.input.Key);
+      return {};
+    },
+  };
+  u.enqueue(files);
+  assert.equal(await u.drain(5000), true);
+  assert.equal(maxInFlight, 1, "同时最多一个在途（单线程 FIFO）");
+  assert.deepEqual(done.map((k) => path.basename(k)), ["a.jpeg", "b.jpeg", "c.jpeg"]);
+});
+
+test("enqueue: 传成功记账 → scope 末 flush 跳过它，同一 key 不双传", async () => {
+  const { runDir, msDir, files } = mkShots(["a.jpeg"]);
+  const log = path.join(msDir, "log"); fs.mkdirSync(log);
+  fs.writeFileSync(path.join(log, "ai.log"), "log");   // flush 该传的漏网文件
+  const u = new (ArtifactUploader as any)("bkt", "reports/rid/", runDir);
+  const keys = withMockClient(u);
+  u.enqueue(files);
+  await u.drain(5000);
+  await u.flushAndCleanup(msDir);
+  const shotKey = "reports/rid/midscene-run/report/screenshots/a.jpeg";
+  assert.equal(keys.filter((k) => k === shotKey).length, 1, "队列已传的截图 flush 不重传");
+  assert.ok(keys.includes("reports/rid/midscene-run/log/ai.log"), "漏网的仍由 flush 传");
+  assert.ok(!fs.existsSync(msDir), "全成功（队列+flush）→ 整目录删");
+});
+
+test("enqueue: 已被 toReportRef 实时传过的文件再入队 → 跳过、零 PutObject", async () => {
+  const { runDir, files } = mkShots(["a.jpeg"]);
+  const u = new (ArtifactUploader as any)("bkt", "reports/rid/", runDir);
+  const keys = withMockClient(u);
+  await u.toReportRef(files[0]);   // 实时传过（记 uploaded）
+  u.enqueue(files);
+  await u.drain(5000);
+  assert.equal(keys.length, 1, "队列按已传集合短路，不重复 PutObject");
+});
+
+test("enqueue: 上传失败重试一次；再失败 → 一行日志放弃，不记账（flush 还有一次机会）", async () => {
+  const { runDir, msDir, files } = mkShots(["a.jpeg"]);
+  const shotKey = "reports/rid/midscene-run/report/screenshots/a.jpeg";
+  const u = new (ArtifactUploader as any)("bkt", "reports/rid/", runDir);
+  const keys = withMockClient(u, { failKeys: [shotKey] });
+  const logs: string[] = [];
+  (u as any).logFn = (m: string) => logs.push(m);
+  u.enqueue(files);
+  assert.equal(await u.drain(5000), true, "失败也算排空（链不 reject）");
+  assert.deepEqual(keys, [shotKey, shotKey], "首传 + 重试一次，共两次");
+  assert.equal(logs.length, 1, "放弃时只记一行");
+  assert.ok(logs[0].includes("截图"));
+  assert.equal((u as any).uploaded.size, 0, "没传成功 → 不记账，flush 仍会再试");
+  // flush 兜底：还会再试（且它自己也重试一次）
+  await u.flushAndCleanup(msDir);
+  assert.equal(keys.filter((k) => k === shotKey).length, 4, "flush 又试两次（首传+重试）");
+  assert.ok(fs.existsSync(msDir), "始终没传成 → 整目录保留（产物不丢）");
+});
+
+test("enqueue: 队列里一项失败不饿死后续项（链不被 reject 毁掉）", async () => {
+  const { runDir, files } = mkShots(["bad.jpeg", "good.jpeg"]);
+  const badKey = "reports/rid/midscene-run/report/screenshots/bad.jpeg";
+  const u = new (ArtifactUploader as any)("bkt", "reports/rid/", runDir);
+  const keys = withMockClient(u, { failKeys: [badKey] });
+  (u as any).logFn = () => {};
+  u.enqueue(files);
+  assert.equal(await u.drain(5000), true);
+  assert.ok(keys.includes("reports/rid/midscene-run/report/screenshots/good.jpeg"), "后一项照传");
+});
+
+test("drain: 队列空闲 → 立即 true", async () => {
+  const { runDir } = mkShots([]);
+  const u = new (ArtifactUploader as any)("bkt", "reports/rid/", runDir);
+  withMockClient(u);
+  assert.equal(await u.drain(0), true, "什么都没入队 → 无须等");
+});
+
+test("drain: 有一项挂过预算 → false（有界，不拖住退出）", async () => {
+  const { runDir, files } = mkShots(["a.jpeg", "b.jpeg"]);
+  const u = new (ArtifactUploader as any)("bkt", "reports/rid/", runDir);
+  let released: (() => void) | undefined;
+  const keys: string[] = [];
+  (u as any).client = {
+    send: async (cmd: any) => {
+      keys.push(cmd.input.Key);
+      await new Promise<void>((r) => { released = r; });  // 挂住（模拟退化网络下的 PutObject）
+      return {};
+    },
+  };
+  u.enqueue(files);
+  const t0 = Date.now();
+  assert.equal(await u.drain(30), false, "预算内没排空 → false（调用方记一行放弃）");
+  assert.ok(Date.now() - t0 < 5000, "drain 真的有界返回，不等在途上传跑完");
+  assert.equal(keys.length, 1, "链是顺序的：第二项还没起");
+  released?.();  // 放掉在途那项，别把测试进程的事件循环吊住
+  await u.drain(5000);
+});
+
+test("drain / enqueue: no-op（未注入落点）→ 入队不碰盘、排空立即 true", async () => {
+  const root = tmproot();
+  const f = path.join(root, "shot.jpeg"); fs.writeFileSync(f, "x");
+  delete process.env.ARTIFACT_S3_BUCKET;
+  const u = ArtifactUploader.fromEnv();
+  assert.equal(u.enabled, false);
+  const keys = withMockClient(u);
+  u.enqueue([f]);                              // 不抛、不入链
+  assert.equal(await u.drain(0), true);
+  assert.deepEqual(keys, []);
+});
+
+test("enqueue: 绝不抛（调用点在已成的判定之后的主流程上）", async () => {
+  const { runDir } = mkShots([]);
+  const u = new (ArtifactUploader as any)("bkt", "reports/rid/", runDir);
+  withMockClient(u);
+  (u as any).logFn = () => {};
+  assert.doesNotThrow(() => u.enqueue([]));
+  assert.doesNotThrow(() => u.enqueue([undefined as any, 42 as any]));  // 算不出路径的项跳过、不抛
+  // 文件不存在（SDK 没落盘 / 已被清）→ 上传时 readFileSync 抛，仍只是队列内部失败，不冒到调用方
+  assert.doesNotThrow(() => u.enqueue([path.join(runDir, "midscene-run", "report", "screenshots", "nope.jpeg")]));
+  assert.equal(await u.drain(5000), true);
+});

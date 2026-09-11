@@ -18,8 +18,9 @@ error act 的契约（ADR 0042 决策一）：act 抛错 → `error` 非空、`p
 这是 SDK 事实、不是抽取失败，消费端别把空 frames 当 bug。
 
 本模块只产文件、不上传、不发事件：`evidence.json` 的 ref 由调用方经 uploader 即时上传拿到；截图 URI 由注入的
-`ref_for` 确定性算出（字节交给 scope 末的整目录 flush，不把 K×票数 次 PutObject 压在判定临界路径上，
-ADR 0042 决策一「上传时机分两类」）。调用方负责 best-effort 兜底（ADR 0042 决策二）。
+`ref_for` 确定性算出（字节由调用方在 `step_done` emit 之后交给 uploader 的后台队列，不把 K×票数 次 PutObject
+压在判定临界路径上，ADR 0042 决策一「上传时机分两类」）——故 `write_step_evidence` **回传它写下的截图路径**，
+调用方拿去入队。调用方负责 best-effort 兜底（ADR 0042 决策二）。
 """
 from __future__ import annotations
 
@@ -51,6 +52,18 @@ _KEY_SLUG_MAX = 80          # 目录名长度上界（scenario_id 可以很长�
 _KEY_HASH_LEN = 8
 
 _DATA_URL = re.compile(r"^data:image/[A-Za-z0-9.+-]+;base64,")
+
+
+@dataclass(frozen=True)
+class WrittenEvidence:
+    """`write_step_evidence` 的产出：evidence.json 的本地路径 + 它写下的截图本地路径。
+
+    两者去向不同（ADR 0042 决策一「上传时机分两类」）：json 由调用方即时上传换 ref 挂进 `step_done`；
+    截图路径在 emit 之后交给上传器的后台队列（本模块不上传、不认识队列）。
+    """
+
+    json_path: str
+    screenshots: list[str]
 
 
 @dataclass(frozen=True)
@@ -276,11 +289,13 @@ def write_step_evidence(
     message: str | None,
     acts: Sequence[ActRecord],
     ref_for: Callable[[str], str],
-) -> str:
-    """落 `evidence.json` + 选中的截图，返回 json 的本地绝对路径（调用方再经 uploader 换成 ref）。
+) -> WrittenEvidence:
+    """落 `evidence.json` + 选中的截图，回传两者的本地路径（去向不同，见 `WrittenEvidence`）。
 
-    `ref_for`：本地路径 → 该文件**将来**的 ref（`file://` / `s3://`），只算不传——截图字节随 scope 末整目录
-    flush 走（ADR 0042 决策一）。单张截图解不开就留 null、不打断整份 evidence（逐字段容缺）。
+    `ref_for`：本地路径 → 该文件**将来**的 ref（`file://` / `s3://`），只算不传——截图字节由调用方在
+    `step_done` emit 之后交给上传器的后台队列（ADR 0042 决策一）。**回传的截图路径正是入队清单**：只含真写下
+    的那些（解不开的图留 null、不落盘、也不入队），故队列里不会有幻影文件。
+    单张截图解不开就留 null、不打断整份 evidence（逐字段容缺）。
     """
     trajectories = [read_trajectory(a.trajectory_path) for a in acts]
     doc = step_evidence(
@@ -290,6 +305,7 @@ def write_step_evidence(
     )
     out = step_dir(base_dir, scenario_id, step_index)
     out.mkdir(parents=True, exist_ok=True)
+    shots: list[str] = []
     for i, j in select_screenshots(doc):
         steps = (trajectories[i] or {}).get("steps") or []
         raw = _decode_data_url(steps[j].get("image") if j < len(steps) and isinstance(steps[j], dict) else None)
@@ -298,6 +314,7 @@ def write_step_evidence(
         shot = out / f"act-{doc['acts'][i].get('index', i)}-frame-{j}.jpg"
         shot.write_bytes(raw)
         doc["acts"][i]["frames"][j]["screenshot"] = ref_for(str(shot))
+        shots.append(str(shot))
     path = out / "evidence.json"
     path.write_text(json.dumps(doc, ensure_ascii=False, indent=2), encoding="utf-8")
-    return str(path)
+    return WrittenEvidence(json_path=str(path), screenshots=shots)

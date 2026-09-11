@@ -195,8 +195,9 @@ agent / skill 只依赖 evidence schema 与 `explain` 输出，两者都是我�
 
 - `core/gherkai_core/model.py`（`StepResult.message`；`ReportRef.kind` docstring 约定值补 `evidence`；`StepDone.report_refs` / `StepResult.report_refs` 注释去掉「只有 Nova 有 step 级产物」的暗示）、`project.py`、`serialize.py`（step dict 双向：to_dict 落键 / from_dict `.get` 容缺）。
 - `core/gherkai_core/adapters/report_store/local.py`：step 行补 message；产物导航节标题 / tooltip / 空态 / docstring 措辞改「报告产物（引擎原生产物 + gherkai evidence）」；断言旧文案的 `core/tests/test_report_store.py`、`test_s3_report_store.py` 同改。URI→路径解析提升为公开小工具供 `read_resource` 复用。
-- `engines/novaact/gherkai_worker_novaact/run_scope.py`（evidence 钩子、追加 ref、删「SDK 在 finally 已写盘」的错误注释）+ 新模块 `evidence.py`；`lib/artifact_upload.py`（Content-Type 映射、`ref_for`）；fixture 测试。
-- `engines/midscene/src/worker/run-scope.mts`（`persistExecutionDump: true`、`runStep` 拿 uploader 与 page、step 级 reportRefs 首次出现）+ 新模块 `evidence.mts`（自写结构类型）；`src/lib/artifact-upload.mts`（Content-Type 映射、`refFor`）；fixture 测试。
+- `engines/novaact/gherkai_worker_novaact/run_scope.py`（evidence 钩子、追加 ref、删「SDK 在 finally 已写盘」的错误注释）+ 新模块 `evidence.py`；`lib/artifact_upload.py`（Content-Type 映射、`ref_for`、后台队列 `enqueue` / 有界 `drain`、队列与 flush 共用的「重试一次」）；`run_scope.py` 三条 emit 点之后入队、scope 末与三条退出路径排空；fixture 测试。
+- `engines/midscene/src/worker/run-scope.mts`（`persistExecutionDump: true`、`runStep` 拿 uploader 与 page、step 级 reportRefs 首次出现、emit 之后入队、scope 末 / `shutdownSequence` / catch 路径排空）+ 新模块 `evidence.mts`（自写结构类型）；`src/lib/artifact-upload.mts`（Content-Type 映射、`refFor`、`enqueue` / `drain`、重试一次）；fixture 测试。
+- `runtime/gherkai_runtime/compose.py`：`MIDSCENE_GRACE_MIN_S` 25→31（收尾多一段 6 s 排空），Nova margin 不动、注释枚举补该项。
 - `runtime/gherkai_runtime/compose.py`：`read_resource(uri)`。
 - `cli/gherkai_cli/__main__.py`：`explain` 子命令（含 skew 闸门、结果树匹配器）；`render.py`：文本渲染 + step 行补原因；`cli/tests/test_cli_json_contract.py`：`_leaf_keys` 支持在指定键处停止下钻 + explain 样例（内嵌 evidence 夹具）。
 

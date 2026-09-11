@@ -96,6 +96,15 @@ def _get_uploader() -> ArtifactUploader:
     return _uploader_singleton
 
 
+# evidence 截图后台队列的**有界**排空预算（ADR 0042 决策一）。两档不同是因为两条路径的时间预算不同：
+# - scope 末（正常完成）：判定已全部 emit、无人在等，给足 30s 让字节到 S3，漏网的紧接着由整目录 flush 兜。
+# - 提前退出（停止信号 / 网络耗尽 / 异常）：整个收尾必须落在 grace 内，且**排在会话释放之后**（ADR 0024
+#   「会话释放优先」）。6s 是这条路径分给截图的份额——组合根的 Nova grace 余量（compose.NOVA_GRACE_MARGIN_S）
+#   按「会话释放 + 本预算」组成，见那个常量的注释。超时即放弃（截图是判定的注释，不值得拿会话泄漏去换）。
+EVIDENCE_DRAIN_SCOPE_END_S = 30.0
+EVIDENCE_DRAIN_EXIT_S = 6.0
+
+
 _URL_IN_QUOTES = re.compile(r'"(https?://[^"]+)"')
 
 
@@ -252,8 +261,12 @@ def _act_record(index: int, prompt: str | None, obj, *, vote: bool | None = None
     )
 
 
-def _attach_evidence(ev: dict, *, scope_id: str | None, scenario_id: str, step: dict, acts: list) -> None:
+def _attach_evidence(ev: dict, *, scope_id: str | None, scenario_id: str, step: dict,
+                     acts: list) -> list[str]:
     """产本 step 的 evidence（json + 截图）、即时上传 json、把 ref **追加**进 step_done 的 reportRefs（ADR 0042 决策一）。
+
+    **回传本步写下的截图本地路径**（无则空 list）：它们的字节不在此上传——调用方在 `sink.emit(ev)` **之后**交给
+    上传器的后台队列（见 `_enqueue_evidence_shots`）。任一环失败 → 空 list（没写下就没什么可传）。
 
     **整体 best-effort、且必须裹在自己的 try 里（ADR 0042 决策二，这是对 0029「reportRef 文件上传失败即抛」开的
     具名例外）**：evidence 是判定的注释，缺了只损排障便利；trajectory 是报告链接本身，其强保证不动。
@@ -265,21 +278,56 @@ def _attach_evidence(ev: dict, *, scope_id: str | None, scenario_id: str, step: 
     """
     try:
         if _no_artifacts() or not acts:
-            return  # `--no-report`：不产、不上报（与引擎原生产物同档）
+            return []  # `--no-report`：不产、不上报（与引擎原生产物同档）
         base = os.environ.get("NOVA_LOGS_DIR")
         if not base:
-            return  # 无产物落点（手动直跑/脚手架）：SDK 只写它自己的临时目录，evidence 无处安身
-        path = _evidence.write_step_evidence(
+            return []  # 无产物落点（手动直跑/脚手架）：SDK 只写它自己的临时目录，evidence 无处安身
+        written = _evidence.write_step_evidence(
             base_dir=base, scope_id=scope_id, scenario_id=scenario_id, step_index=step["index"],
             keyword=step.get("keyword"), text=step.get("text"),
             status=ev.get("status"), message=ev.get("message"), acts=acts,
-            ref_for=_get_uploader().ref_for,   # 截图只算 URI、不即时传（字节随 scope 末 flush）
+            ref_for=_get_uploader().ref_for,   # 截图只算 URI、不在此传（字节 emit 后进后台队列）
         )
         # evidence.json 的 ref 必须随 step_done 走 → 即时上传拿 ref（小文件，cloud 一次 PutObject；local no-op）
-        ref = _get_uploader().to_report_ref(os.path.abspath(path))
+        ref = _get_uploader().to_report_ref(os.path.abspath(written.json_path))
         ev.setdefault("reportRefs", []).append({"kind": "evidence", "ref": ref, "label": "evidence"})
+        return [os.path.abspath(sh) for sh in written.screenshots]
     except Exception as e:  # noqa: BLE001  evidence 全链 best-effort：一行日志、判定与事件照发
         log(f"本步证据未能保存（不影响本步判定）：{type(e).__name__}: {e}")
+        return []
+
+
+def _enqueue_evidence_shots(paths: list[str]) -> None:
+    """把本步截图交给上传器的后台队列——**必须在 `sink.emit(step_done)` 之后调**（ADR 0042 决策一）。
+
+    顺序是契约：截图字节绝不压在判定临界路径上（emit 前入队等于让下游判定排在一次 K×票数 的上传编排后面）。
+    入队本身不阻塞（只是 put + 惰性起线程），但仍整体裹 try：evidence 全链 best-effort（ADR 0042 决策二），
+    连一次入队都不许把已发出的判定后面的流程搞崩。字节的收尾由 `_drain_evidence_uploads` 有界排空 + flush 兜。
+    """
+    if not paths:
+        return
+    try:
+        _get_uploader().enqueue(paths)
+    except Exception as e:  # noqa: BLE001
+        log(f"本步证据截图未能排入上传队列（不影响本步判定）：{type(e).__name__}: {e}")
+
+
+def _drain_evidence_uploads(timeout_s: float) -> None:
+    """收尾：**有界**等 evidence 截图的后台队列传完（ADR 0042 决策一）。best-effort、绝不抛。
+
+    调用位置守两条：①**在会话释放之后**（ADR 0024「会话释放优先」——三层 with 已退出），与既有的中断兜底
+    抢传并列；② scope 末排在 `flush_and_cleanup` **之前**（队列传完的文件 flush 会跳过，漏网的由它兜）。
+    `_uploader_singleton is None` 即本进程从未用过上传器（零 evidence）→ 队列必空，直接返回：此时也不该在
+    退出路径上现造上传器，`from_env` 对「半注入」是 fail-loud 的（ADR 0033），会把干净退出变成 traceback。
+    """
+    try:
+        u = _uploader_singleton
+        if u is None or not u.enabled:
+            return  # 无队列（零 evidence）/ 本机 no-op 档（截图就在本地，无需上传）
+        if not u.drain(timeout_s):
+            log("部分证据截图未能在收尾时限内传完（这些截图的链接可能暂时打不开；判定与报告不受影响）")
+    except Exception as e:  # noqa: BLE001  收尾路径绝不因它改变退出码
+        log(f"证据截图收尾上传未能完成（判定与报告不受影响）：{type(e).__name__}: {e}")
 
 
 def _run_step(nova, scenario_id: str, step: dict, votes_n: int, sink: EventSink,
@@ -382,8 +430,9 @@ def _run_step(nova, scenario_id: str, step: dict, votes_n: int, sink: EventSink,
                 ev["message"] = f"AI 断言未过多数票（{yes}/{votes_n}）：{text}"
             # evidence 在 _attach_traj_refs 之后（那个整体赋值 reportRefs，本函数 extend 同一列表）、在 message
             # 之后（evidence 冗余 step_done 的 status/message 以自包含）。best-effort、失败不影响本事件（ADR 0042 决策二）。
-            _attach_evidence(ev, scope_id=scope_id, scenario_id=scenario_id, step=step, acts=acts)
+            shots = _attach_evidence(ev, scope_id=scope_id, scenario_id=scenario_id, step=step, acts=acts)
             sink.emit(ev)
+            _enqueue_evidence_shots(shots)   # emit 之后才入队（判定不等字节，ADR 0042 决策一）
             return "passed" if passed else "failed"
 
         # When / Given（非 URL）→ AI 动作（无 votes）
@@ -399,8 +448,9 @@ def _run_step(nova, scenario_id: str, step: dict, votes_n: int, sink: EventSink,
         if cost:
             ev["cost"] = cost
         _attach_traj_refs(ev, step_traj)
-        _attach_evidence(ev, scope_id=scope_id, scenario_id=scenario_id, step=step, acts=acts)
+        shots = _attach_evidence(ev, scope_id=scope_id, scenario_id=scenario_id, step=step, acts=acts)
         sink.emit(ev)
+        _enqueue_evidence_shots(shots)       # emit 之后才入队（同上）
         return "passed"
 
     except Exception as e:
@@ -430,8 +480,9 @@ def _run_step(nova, scenario_id: str, step: dict, votes_n: int, sink: EventSink,
         # frames 为空）。inflight 非空 = 异常出自某次 act/act_get；为空则异常在确定性 handler/指令拼装等处，无 act 可记。
         if inflight is not None:
             acts.append(_act_record(len(acts), inflight, e, error=ev["message"]))
-        _attach_evidence(ev, scope_id=scope_id, scenario_id=scenario_id, step=step, acts=acts)
+        shots = _attach_evidence(ev, scope_id=scope_id, scenario_id=scenario_id, step=step, acts=acts)
         sink.emit(ev)
+        _enqueue_evidence_shots(shots)       # emit 之后才入队（同上）
         return "error"
 
 
@@ -824,16 +875,23 @@ def main() -> int:
                     # 手写退避（ADR 0028 + 0024 flag-only）：_backoff_interrupted 用 _stop.wait，收到信号即唤醒。
                     if _backoff_interrupted(attempt):
                         break  # 退避中收到停止信号 → 不再重连
+        except BaseException:
+            # 异常退出路径（ADR 0042 决策一第三条）：会话已在 _run_session 的三层 with 退出时释放，此处只给
+            # 在途截图同一份有界预算再抢一下（best-effort，不改变冒泡的异常与退出码）。
+            _drain_evidence_uploads(EVIDENCE_DRAIN_EXIT_S)
+            raise
         finally:
             set_current_workflow(outer)
 
     # 停止信号（ADR 0024 flag-only）：三层 with 已正常退出（__exit__ 释放了会话）。干净退、不吐 scope_done、不 flush。
     if _stop.is_set():
         log(f"worker: signal {_stop_signum} received, cooperative stop — session shutdown complete")
+        _drain_evidence_uploads(EVIDENCE_DRAIN_EXIT_S)  # 会话已释放，再给在途截图一小段有界预算（ADR 0042 决策一）
         return 0
     if network_exhausted:
         # 建连重试耗尽（ADR 0028）：with __exit__ 已清理。以网络专用退出码退出，core 据此记 network_error。不吐 scope_done。
         log("worker: connect retries exhausted, exiting with network code")
+        _drain_evidence_uploads(EVIDENCE_DRAIN_EXIT_S)  # 同上（本档多半也传不动，有界即可）
         return EX_WORKER_NETWORK
 
     # scope 级 reportRef：Nova SDK 落的 session_summary.json（session_id/time_worked_s/act_count 等）作
@@ -863,6 +921,8 @@ def main() -> int:
     # （ADR 0029）。no-op（local/未注入落点）时直接返回、不碰本地。仅正常完成路径走到此；停止信号/网络耗尽的
     # 提前 return（见上）不 flush——中断产物保留本地（见 ADR 0028）。
     if base:
+        # 先排空后台截图队列（ADR 0042 决策一：flush 只兜漏网的、已传的按已传集合跳过），再整目录 flush。
+        _drain_evidence_uploads(EVIDENCE_DRAIN_SCOPE_END_S)
         _get_uploader().flush_and_cleanup(base)
     return 0
 

@@ -53,7 +53,7 @@
 
    **实测覆盖边界（诚实声明）**：4 次真跑的 act 均短（正常 4~11s、最坏 SIGTERM→退出 21s ≪ 120），**未撞上上述最坏长 act 情形**——即实测证明的是「典型/短 act 分布下 SIGKILL 不触发」，**非**「任何 act 下都不触发」。最坏长 act 的 Fargate SIGKILL 是**已识别、经权衡接受的结构性残余**（D+兜底），非被实测排除。
 
-   **据此的 code 决策**：Nova `NOVA_GRACE_MARGIN_S` **60→30**（下限 180→150，主要收益在 subprocess 路径满足不变量 + 留 ~1.5x 余量；Fargate 路径 grace 被忽略、此改动不影响其行为）；**`ACT_TIMEOUT_S=120` 不动**（见上②③）；**Midscene `MIDSCENE_GRACE_MIN_S=25` 不动**（实测 12.4s、~2x 余量；Midscene 无 greenlet、会话释放 0.2s，长 act 下也远快于 Nova）。
+   **据此的 code 决策**：Nova `NOVA_GRACE_MARGIN_S` **60→30**（下限 180→150，主要收益在 subprocess 路径满足不变量 + 留 ~1.5x 余量；Fargate 路径 grace 被忽略、此改动不影响其行为）；**`ACT_TIMEOUT_S=120` 不动**（见上②③）；**Midscene `MIDSCENE_GRACE_MIN_S=25` 不动**（实测 12.4s、~2x 余量；Midscene 无 greenlet、会话释放 0.2s，长 act 下也远快于 Nova）。后来的 step 级 evidence（[0042](./0042-step-evidence-and-explain.md) 决策一）给两 worker 的收尾序列各加了一段**有界的截图队列排空**（退出路径 6 s，排在会话释放之后）：Nova 落在 `NOVA_GRACE_MARGIN_S=30` 内不动；Midscene 的下限组成多一项 → `MIDSCENE_GRACE_MIN_S` **25→31**。
 
 ## Fargate 特有问题：处置结论
 

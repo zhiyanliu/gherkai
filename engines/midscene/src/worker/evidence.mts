@@ -10,10 +10,12 @@
 //    读它会对多 MB 的 report.html 做同步全文扫描且找不到即抛。改为引用 SDK 自己落盘的截图文件——agent
 //    建时传 `persistExecutionDump: true`，SDK 把每张截图写成 `<run 目录>/report/screenshots/<id>.<扩展名>`，
 //    evidence 只按 id + 扩展名拼路径，零解码零复制。
-// ③ **截图 URI 不即时上传**（决策一「上传时机分两类」）：用上传器同一 key 规则的 `refFor` 确定性算出写进
-//    json，字节交 scope 末的整目录 flush（本就递归传整个产物目录、总字节不变）。理由：即时上传是逐文件串行
-//    PutObject 且套短超时，把 K × 票数次压在判定临界路径上会把已成的判定拖在网络上。`evidence.json` 自身
-//    相反——它的 ref 必须随 step_done 走，故经 `toReportRef` 即时传。
+// ③ **截图 URI 不即时上传、字节也不等到 scope 末**（决策一「上传时机分两类」）：URI 用上传器同一 key 规则的
+//    `refFor` 确定性算出写进 json；字节由调用方在 step_done **emit 之后**交上传器的后台队列（本模块把引用到
+//    的截图本地路径一并回传，见 `StepEvidence.screenshots`），scope 末的整目录 flush 只兜漏网。理由：即时上传
+//    是逐文件串行 PutObject 且套短超时，把 K × 票数次压在判定临界路径上会把已成的判定拖在网络上；而只靠
+//    scope 末 flush，中断路径根本不 flush。`evidence.json` 自身相反——它的 ref 必须随 step_done 走，故经
+//    `toReportRef` 即时传。
 // ④ **对判定零影响**（决策二，这是对「step 内产物上传失败即抛」开的具名例外）：抽取 / 落盘 / 上传任一环
 //    失败 → 一行日志、本 step 不带 evidence ref，step_done 的 status / votes / cost / message 照发。故对外
 //    只暴露一个「绝不抛」的 `stepEvidenceRef`，调用方无需自己兜：裸放进 runStep 的 try 里，一次上传抖动
@@ -296,12 +298,18 @@ export function buildEvidence(input: BuildEvidenceInput): EvidenceDoc {
 
 // ---- 落盘 + 上传（IO；失败交上层的 best-effort 兜，见文件头④）----
 
-/** 上传器接口（只用这两个方法；`ArtifactUploader` 满足之）。 */
+/** 上传器接口 = evidence 这条链要用到的三种上传时机（ADR 0042 决策一；`ArtifactUploader` 满足之）。
+ *
+ *  前两个由本模块调（都在 step 判定之后的临界路径上，故一个即时传小文件、一个只算 URI）；
+ *  `enqueue` **由调用方在 step_done emit 之后调**、本模块自己不碰——入队早于 emit 就把「判定先出、字节后传」
+ *  的顺序反了。三者列在同一个接口里是有意的：截图的 URI 与字节是一件事的两半，分两个接口声明必漂移。 */
 export interface EvidenceUploader {
   /** 即时上传并返 ref（失败抛）——evidence.json 的 ref 必须随 step_done 走，故走它。 */
   toReportRef(localPath: string): Promise<string>;
-  /** 只算 ref 不上传（截图字节交 scope 末整目录 flush）。 */
+  /** 只算 ref 不上传（截图字节随后入队）。 */
   refFor(localPath: string): string;
+  /** 截图字节入后台队列（同步返回、绝不抛；FIFO 顺序传、失败重试一次）。 */
+  enqueue(paths: string[]): void;
 }
 
 /** runStep 的 evidence 依赖（注入；undefined = 本 run 不产 evidence）。 */
@@ -338,6 +346,16 @@ export function executionsLength(agent: unknown): number {
   }
 }
 
+/** `stepEvidenceRef` 的产出。
+ *
+ *  `screenshots` = 本 step 的 evidence **真正引用到**的截图本地路径（URI 已算好写进 json、字节还没传）：
+ *  调用方在 step_done emit 之后把它交给 `uploader.enqueue`（ADR 0042 决策一）。**在算 URI 的同一处收集**
+ *  （见 `stepEvidenceRef` 里包装的 refFor），故「json 里引用了」与「入了队」不会因两处各挑一次而漂移。 */
+export interface StepEvidence {
+  ref: string;
+  screenshots: string[];
+}
+
 export interface StepEvidenceInput {
   scenarioId: string;
   step: { index: number; keyword: string; text: string };
@@ -355,14 +373,15 @@ export interface StepEvidenceInput {
   error: string | null;
 }
 
-/** step 判定已成之后产本 step 的 evidence，返回其 ref（挂进 step_done）；**绝不抛**（ADR 0042 决策二）。
+/** step 判定已成之后产本 step 的 evidence，返回 ref（挂进 step_done）+ 引用到的截图路径（emit 后入队）；
+ *  **绝不抛**（ADR 0042 决策二）。
  *
  *  跳过的两种情形：① 无 hook（`--no-report` 档 / 没给产物落点）；② 本 step 没调过 AI（确定性 step、
  *  URL 导航 step——既无新 execution 也无指令），这类 step 本就不产 evidence。
- *  失败 → 一行日志 + 返 null（本 step 不带 evidence ref），判定与其余事件字段照发。 */
+ *  失败 → 一行日志 + 返 null（本 step 不带 evidence ref、也不入队），判定与其余事件字段照发。 */
 export async function stepEvidenceRef(
   hook: EvidenceHook | undefined, input: StepEvidenceInput,
-): Promise<string | null> {
+): Promise<StepEvidence | null> {
   if (hook === undefined) return null;
   try {
     const all = (input.agent as { dump?: { executions?: unknown[] } } | undefined)?.dump?.executions;
@@ -374,6 +393,9 @@ export async function stepEvidenceRef(
     } catch {
       url = null;  // 页面已关/CDP 断连：URL 缺了不影响其余证据
     }
+    // 被引用的截图本地路径：**在算 URI 的同一处记**（refFor 只对真写进 json 的那几张调，截图预算/去重
+    // 都已生效）——「引用了 ⇒ 入了队」由此成立，不必在外面照着策略再挑一遍。
+    const screenshots: string[] = [];
     const doc = buildEvidence({
       scopeId: hook.scopeId,
       scenarioId: input.scenarioId,
@@ -386,9 +408,9 @@ export async function stepEvidenceRef(
       url,
       error: input.error,
       runDir: hook.runDir,
-      refFor: (p) => hook.uploader.refFor(p),
+      refFor: (p) => { screenshots.push(p); return hook.uploader.refFor(p); },
     });
-    return await writeEvidence(doc, hook.runDir, hook.uploader);
+    return { ref: await writeEvidence(doc, hook.runDir, hook.uploader), screenshots };
   } catch (e) {
     const logFn = hook.logFn ?? ((m: string) => process.stderr.write(m + "\n"));
     // 产品面一行：说清发生了什么 + 不影响什么 + 人能怎么办（原生报告还在）。设计判据留在本文件注释里。

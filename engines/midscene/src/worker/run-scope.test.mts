@@ -401,10 +401,15 @@ test("interruptSnapshot: 抢传失败 → 吞掉、不抛（best-effort，不影
 });
 
 
-// ---- shutdownSequence（SIGTERM 收尾序列，ADR 0024 会话释放优先铁律）：锁住 cleanup 先于抢传的顺序不变量 ----
-// 造带 order 记录的 spy deps；断言 cleanup 在 snapshotReport 之前调用（会话释放优先，抢传 best-effort 不延迟它）。
-function shutdownSpy(opts: { cleanupFailed?: boolean; reportFile?: string | null; inflight?: boolean } = {}) {
+// ---- shutdownSequence（SIGTERM 收尾序列，ADR 0024 会话释放优先铁律）：锁住 cleanup 先于抢传/排空的顺序不变量 ----
+// 造带 order 记录的 spy deps；断言 cleanup 排在 snapshotReport 与截图队列排空之前（会话释放优先，那两件
+// best-effort、不延迟它）。drained=false 模拟「预算内没排空」→ 该记一行。
+function shutdownSpy(opts: {
+  cleanupFailed?: boolean; reportFile?: string | null; inflight?: boolean; drained?: boolean;
+} = {}) {
   const order: string[] = [];
+  const logs: string[] = [];
+  const drainBudgets: number[] = [];
   // 用 "reportFile" in opts 区分「未传→默认有 report」vs「显式传 null→空窗」（?? 对 null 也回退、会吞掉空窗意图）
   const rf = "reportFile" in opts ? opts.reportFile : "/tmp/run/report.html";
   const deps = {
@@ -412,20 +417,24 @@ function shutdownSpy(opts: { cleanupFailed?: boolean; reportFile?: string | null
     settleMs: 1,
     sleep: async (_ms: number) => { order.push("sleep"); },
     cleanup: async () => { order.push("cleanup"); },
-    uploader: { snapshotReport: async (_p: string) => { order.push("snapshot"); } },
+    uploader: {
+      snapshotReport: async (_p: string) => { order.push("snapshot"); },
+      drain: async (ms: number) => { order.push("drain"); drainBudgets.push(ms); return opts.drained ?? true; },
+    },
     reportFile: () => rf,
     getCleanupFailed: () => opts.cleanupFailed ?? false,
-    logFn: () => {},
+    logFn: (m: string) => { logs.push(m); },
   };
-  return { order, deps };
+  return { order, logs, drainBudgets, deps };
 }
 
 test("shutdownSequence: cleanup 先于中断抢传（会话释放优先铁律，ADR 0024）", async () => {
   const { shutdownSequence } = await importMod();
   const { order, deps } = shutdownSpy();
   const code = await shutdownSequence(deps);
-  // 核心不变量：会话释放（cleanup）必须排在抢传（snapshot）之前——退化网络下抢传挂也不该延迟会话释放。
-  assert.deepEqual(order, ["cleanup", "snapshot"], "顺序须 cleanup→snapshot，绝不可颠倒");
+  // 核心不变量：会话释放（cleanup）必须排在抢传（snapshot）与截图队列排空（drain）之前——退化网络下这两件
+  // 各自挂满预算，也不该延迟会话释放。
+  assert.deepEqual(order, ["cleanup", "snapshot", "drain"], "顺序须 cleanup→snapshot→drain，绝不可颠倒");
   assert.equal(code, 0, "cleanup 未失败 → 退 0");
 });
 
@@ -433,7 +442,8 @@ test("shutdownSequence: 在途窗口兜底 → sleep 在 cleanup 之前", async 
   const { shutdownSequence } = await importMod();
   const { order, deps } = shutdownSpy({ inflight: true });
   await shutdownSequence(deps);
-  assert.deepEqual(order, ["sleep", "cleanup", "snapshot"], "inflight → 先等在途 settle，再 cleanup，再抢传");
+  assert.deepEqual(order, ["sleep", "cleanup", "snapshot", "drain"],
+    "inflight → 先等在途 settle，再 cleanup，再抢传，再排空截图队列");
 });
 
 test("shutdownSequence: cleanupFailed → 退出码 1（泄漏可观测）", async () => {
@@ -446,7 +456,45 @@ test("shutdownSequence: reportFile 空窗 → cleanup 照跑、抢传跳过", as
   const { shutdownSequence } = await importMod();
   const { order, deps } = shutdownSpy({ reportFile: null });
   await shutdownSequence(deps);
-  assert.deepEqual(order, ["cleanup"], "无 reportFile：只 cleanup，interruptSnapshot 内部跳过 snapshot");
+  assert.deepEqual(order, ["cleanup", "drain"],
+    "无 reportFile：cleanup 照跑、interruptSnapshot 内部跳过 snapshot，截图队列照排空");
+});
+
+
+// ---- 截图后台队列的有界排空（drainArtifactQueue，ADR 0042 决策一）----
+// 与 interruptSnapshot 同形的收尾小函数：排不空只记一行、绝不抛（收尾路径抛会跳过后面的 exit/flush）。
+test("shutdownSequence: 排空截图队列排在会话释放之后，且预算有界（计入 grace）", async () => {
+  const { shutdownSequence } = await importMod();
+  const { deps, drainBudgets, order } = shutdownSpy();
+  await shutdownSequence(deps);
+  assert.equal(drainBudgets.length, 1, "只排空一次");
+  assert.ok(drainBudgets[0] > 0 && drainBudgets[0] <= 10_000,
+    `退出路径的排空预算须有界且小（计入 grace），实为 ${drainBudgets[0]}ms`);
+  assert.ok(order.indexOf("drain") > order.indexOf("cleanup"));
+});
+
+test("shutdownSequence: 预算内没排空 → 一行日志、退出码不受影响", async () => {
+  const { shutdownSequence } = await importMod();
+  const { deps, logs } = shutdownSpy({ drained: false });
+  const code = await shutdownSequence(deps);
+  assert.equal(code, 0, "排不空不是会话泄漏，不该改退出码");
+  assert.equal(logs.filter((m) => m.includes("截图")).length, 1, "只一行、且是说截图的");
+});
+
+test("drainArtifactQueue: 队列已空（drain 返 true）→ 不记日志", async () => {
+  const { drainArtifactQueue } = await importMod();
+  const logs: string[] = [];
+  await drainArtifactQueue({ drain: async () => true }, 6000, (m) => logs.push(m));
+  assert.deepEqual(logs, []);
+});
+
+test("drainArtifactQueue: drain 抛（上传器坏了 / 没这个方法）→ 吞掉、只记一行，绝不抛", async () => {
+  // 收尾路径上抛 = 跳过后面的 process.exit / flush，比丢几张截图严重得多（best-effort 语义）。
+  const { drainArtifactQueue } = await importMod();
+  const logs: string[] = [];
+  await drainArtifactQueue({ drain: async () => { throw new Error("boom"); } }, 6000, (m) => logs.push(m));
+  assert.equal(logs.length, 1);
+  assert.ok(logs[0].includes("boom"));
 });
 
 

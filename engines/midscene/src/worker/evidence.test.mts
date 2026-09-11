@@ -3,7 +3,9 @@
 //    ——格式漂移在升 @midscene/web 后跑测试时变红（决策六第 2 道防线）；
 // ② 截图：路径由 id + 扩展名拼、`after-calling` 优先、按 id 去重、上界 K/M；
 // ③ scenario 键派生（确定性 + 不二次撞名）；
-// ④ best-effort（决策二）：落盘/上传抛 → step_done 照发、无 evidence ref、status 不变。
+// ④ best-effort（决策二）：落盘/上传抛 → step_done 照发、无 evidence ref、status 不变；
+// ⑤ 截图字节的时机（决策一「上传时机分两类」）：引用到的截图路径随 ref 一起回传，runStep 在 step_done
+//    **emit 之后**才交给上传器的后台队列（顺序反了就等于把字节压回判定前面）。
 // 纯逻辑 + 本地临时目录，不起浏览器、不连 AWS。跑：npm test。
 import { test } from "node:test";
 import assert from "node:assert";
@@ -288,19 +290,24 @@ function tmpRun(): string {
   return path.join(d, "midscene-run");
 }
 
-// local 档上传器的行为形状：refFor / toReportRef 都报 file://，记录调用以分辨「传了字节」与「只算 ref」。
+// local 档上传器的行为形状：refFor / toReportRef 都报 file://，记录调用以分辨「传了字节」（即时）、
+// 「只算 ref」与「入了后台队列」（截图字节）。queued 收平铺后的路径，order 记跨调用的相对次序。
 function spyUploader(opts: { failUpload?: boolean } = {}) {
   const uploaded: string[] = [];
   const refs: string[] = [];
+  const queued: string[] = [];
+  const order: string[] = [];
   const uploader: EvidenceUploader = {
     toReportRef: async (p) => {
       if (opts.failUpload) throw new Error("s3 fail");
       uploaded.push(p);
+      order.push("toReportRef");
       return fileRef(p);
     },
     refFor: (p) => { refs.push(p); return fileRef(p); },
+    enqueue: (paths) => { queued.push(...paths); order.push("enqueue"); },
   };
-  return { uploader, uploaded, refs };
+  return { uploader, uploaded, refs, queued, order };
 }
 
 const fixtureAgent = { dump: { executions: FIXTURE.executions } };
@@ -308,8 +315,8 @@ const urlPage = { url: () => "https://shop.example.com/cart" };
 
 test("stepEvidenceRef：落盘到落点 + 经 toReportRef 即时上传拿 ref；截图只算 ref 不上传", async () => {
   const runDir = tmpRun();
-  const { uploader, uploaded, refs } = spyUploader();
-  const ref = await stepEvidenceRef(
+  const { uploader, uploaded, refs, queued } = spyUploader();
+  const produced = await stepEvidenceRef(
     { runDir, scopeId: "features/order.feature:6", uploader, logFn: () => {} },
     {
       scenarioId: "features/order.feature:12", step: STEP, status: "failed",
@@ -318,10 +325,14 @@ test("stepEvidenceRef：落盘到落点 + 经 toReportRef 即时上传拿 ref；
     },
   );
   const file = evidenceFile(runDir, "features/order.feature:12", 2);
-  assert.equal(ref, fileRef(file));
+  assert.equal(produced?.ref, fileRef(file));
   assert.deepEqual(uploaded, [file], "evidence.json 即时上传（它的 ref 要随 step_done 走）");
   assert.ok(refs.every((p) => p.includes(path.join("report", "screenshots"))), "截图只算 ref、不进上传");
   assert.ok(refs.length > 0);
+  // 引用到的截图路径随 ref 一起回传（ADR 0042 决策一）：**与 refFor 被调的那几张逐字一致**——本模块自己
+  // 不入队（那是 emit 之后的事），但「json 里引用了谁」必须原样交出去，否则调用方无从入队、URI 就悬空。
+  assert.deepEqual(produced?.screenshots, refs);
+  assert.deepEqual(queued, [], "stepEvidenceRef 自己绝不入队（入队排在 step_done emit 之后）");
   const doc = JSON.parse(fs.readFileSync(file, "utf-8")) as EvidenceDoc;
   assert.equal(doc.acts.length, 1, "execFrom=1 只切出本 step 新增的那个 execution");
   assert.equal(doc.acts[0].vote, false);
@@ -331,21 +342,21 @@ test("stepEvidenceRef：落盘到落点 + 经 toReportRef 即时上传拿 ref；
 });
 
 test("stepEvidenceRef：无 hook（--no-report 档 / 无产物落点）→ 直接不产", async () => {
-  const ref = await stepEvidenceRef(undefined, {
+  const produced = await stepEvidenceRef(undefined, {
     scenarioId: "s:1", step: STEP, status: "passed", message: null, agent: fixtureAgent,
     execFrom: 0, page: urlPage, prompt: STEP.text, votes: [], error: null,
   });
-  assert.equal(ref, null);
+  assert.equal(produced, null);
 });
 
 test("stepEvidenceRef：本 step 没调过 AI（无新 execution 且无指令）→ 不产", async () => {
   const runDir = tmpRun();
   const { uploader, uploaded } = spyUploader();
-  const ref = await stepEvidenceRef({ runDir, scopeId: "sc", uploader }, {
+  const produced = await stepEvidenceRef({ runDir, scopeId: "sc", uploader }, {
     scenarioId: "s:1", step: { index: 0, keyword: "Given", text: '打开 "https://x/"' }, status: "passed",
     message: null, agent: fixtureAgent, execFrom: 2, page: urlPage, prompt: null, votes: [], error: null,
   });
-  assert.equal(ref, null);
+  assert.equal(produced, null);
   assert.deepEqual(uploaded, []);
   assert.ok(!fs.existsSync(path.join(runDir, "evidence")), "确定性 / 导航 step 不留空证据目录");
 });
@@ -353,11 +364,11 @@ test("stepEvidenceRef：本 step 没调过 AI（无新 execution 且无指令）
 test("stepEvidenceRef：page.url() 抛（页面已关）→ url 记 null，其余证据照产", async () => {
   const runDir = tmpRun();
   const { uploader } = spyUploader();
-  const ref = await stepEvidenceRef({ runDir, scopeId: "sc", uploader, logFn: () => {} }, {
+  const produced = await stepEvidenceRef({ runDir, scopeId: "sc", uploader, logFn: () => {} }, {
     scenarioId: "s:1", step: STEP, status: "error", message: "boom", agent: fixtureAgent,
     execFrom: 1, page: { url: () => { throw new Error("closed"); } }, prompt: STEP.text, votes: [], error: "E: boom",
   });
-  assert.notEqual(ref, null);
+  assert.notEqual(produced, null);
   const doc = JSON.parse(fs.readFileSync(evidenceFile(runDir, "s:1", 2), "utf-8")) as EvidenceDoc;
   assert.equal(doc.acts[0].url, null);
   assert.ok(doc.acts[0].frames.length > 0);
@@ -370,11 +381,11 @@ test("stepEvidenceRef：落盘失败 → 日志一行 + 返 null，绝不抛", a
   fs.writeFileSync(asFile, "x");
   const { uploader, uploaded } = spyUploader();
   const logs: string[] = [];
-  const ref = await stepEvidenceRef({ runDir: asFile, scopeId: "sc", uploader, logFn: (m) => logs.push(m) }, {
+  const produced = await stepEvidenceRef({ runDir: asFile, scopeId: "sc", uploader, logFn: (m) => logs.push(m) }, {
     scenarioId: "s:1", step: STEP, status: "failed", message: null, agent: fixtureAgent,
     execFrom: 1, page: urlPage, prompt: STEP.text, votes: [false], error: null,
   });
-  assert.equal(ref, null);
+  assert.equal(produced, null);
   assert.deepEqual(uploaded, []);
   assert.equal(logs.length, 1, "失败只一行日志");
   assert.ok(logs[0].includes("证据"));
@@ -384,11 +395,11 @@ test("stepEvidenceRef：上传失败 → 同样吞成 null（toReportRef 的失�
   const runDir = tmpRun();
   const { uploader } = spyUploader({ failUpload: true });
   const logs: string[] = [];
-  const ref = await stepEvidenceRef({ runDir, scopeId: "sc", uploader, logFn: (m) => logs.push(m) }, {
+  const produced = await stepEvidenceRef({ runDir, scopeId: "sc", uploader, logFn: (m) => logs.push(m) }, {
     scenarioId: "s:1", step: STEP, status: "failed", message: null, agent: fixtureAgent,
     execFrom: 1, page: urlPage, prompt: STEP.text, votes: [false], error: null,
   });
-  assert.equal(ref, null);
+  assert.equal(produced, null);
   assert.equal(logs.length, 1);
   assert.ok(fs.existsSync(evidenceFile(runDir, "s:1", 2)), "json 已落盘（本地仍留证据，scope 末整目录 flush 兜）");
 });
@@ -544,6 +555,48 @@ test("runStep：不注入 evidence（--no-report 档）→ 事件与此前逐字
   assert.equal(status, "passed");
   const done = events.find((e) => e.type === "step_done");
   assert.equal(done.reportRefs, undefined);
+});
+
+// ---- ⑤ 截图字节的时机（ADR 0042 决策一「上传时机分两类」）----
+// 锁住「emit 先、入队后」这个顺序契约：入队排在 emit 之前，等于把 K × 票数次 PutObject 又压回判定前面
+// （判定要等队列排到才发得出），正是决策一要避免的那件事；顺序只在真实调用序里看得见，故用同一个 order 数组
+// 记 sink.emit 与上传器三个方法的相对次序。
+test("runStep：截图字节在 step_done emit **之后**才入队，且入的正是 json 里引用的那几张", async () => {
+  const { runStep } = await importRunScope();
+  const runDir = tmpRun();
+  const order: string[] = [];
+  const queued: string[] = [];
+  const uploader: EvidenceUploader = {
+    toReportRef: async (p) => { order.push("上传 evidence.json"); return fileRef(p); },
+    refFor: (p) => fileRef(p),
+    enqueue: (paths) => { order.push("截图入队"); queued.push(...paths); },
+  };
+  const events: any[] = [];
+  const sink = { emit: async (e: any) => { events.push(e); order.push(`emit:${e.type}`); } };
+  const { agent } = dumpAgent([false]);
+  await runStep(agent, stepPage, "s:1", { index: 0, keyword: "Then", text: "对吗" }, 1, sink,
+    { runDir, scopeId: "sc", uploader, logFn: () => {} });
+  assert.deepEqual(order, [
+    "emit:step_started", "上传 evidence.json", "emit:step_done", "截图入队",
+  ], "evidence.json 即时传拿 ref → 发 step_done → 才把截图交后台队列");
+  // 入队的与 json 里写的 URI 同一批（否则 json 里的 URI 悬空、或传了没人引用的字节）
+  const doc = JSON.parse(fs.readFileSync(evidenceFile(runDir, "s:1", 0), "utf-8")) as EvidenceDoc;
+  const inDoc = doc.acts.flatMap((a) => a.frames.map((f) => f.screenshot)).filter((u) => u !== null);
+  assert.ok(inDoc.length > 0, "本 step 的 evidence 确实引用了截图");
+  assert.deepEqual(queued.map(fileRef), inDoc);
+});
+
+test("runStep：本 step 的 evidence 没引用任何截图 → 不入队（不给队列塞空批）", async () => {
+  const { runStep } = await importRunScope();
+  const runDir = tmpRun();
+  const { uploader, queued } = spyUploader();
+  const { events, sink } = collector();
+  // 新 execution 的 task 不带截图（如 SDK 未落盘 / 无 screenshot id）→ json 里 screenshot 全 null
+  const { agent } = dumpAgent([true], () => exec(task({ thought: "想了想" })));
+  await runStep(agent, stepPage, "s:1", { index: 0, keyword: "Then", text: "对吗" }, 1, sink,
+    { runDir, scopeId: "sc", uploader, logFn: () => {} });
+  assert.equal(events.find((e) => e.type === "step_done").reportRefs[0].kind, "evidence");
+  assert.deepEqual(queued, []);
 });
 
 test("runStep：URL 导航 step（不调 AI）→ 不产 evidence", async () => {

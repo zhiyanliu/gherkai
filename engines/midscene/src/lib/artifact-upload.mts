@@ -13,9 +13,11 @@
 // - toReportRef(path)：reportRef 文件 → 实时上传（不删、记 uploaded）、报 s3://。失败抛（worker 可观测、
 //   engine_error）——报告链接强保证。
 // - refFor(path)：只算 ref、不上传、不记 uploaded（ADR 0042 决策一）——供 evidence 里引用的截图先拿确定性
-//   URI，字节交 flushAndCleanup 兜；ref 与 toReportRef 逐字一致（后者的 ref 也经它算）。
-// - flushAndCleanup(dir)：scope 末调。递归 walk 整个产物目录上传剩余文件（已实时传的跳过）——不按文件类型/名字挑
-//   （整目录一股脑传，本地清理不损耗任何产物、不受 SDK 升级影响）。剩余上传失败吞掉；全部成功（实时+剩余）才
+//   URI，字节随后交 enqueue 的后台队列；ref 与 toReportRef 逐字一致（后者的 ref 也经它算）。
+// - enqueue(paths) / drain(ms)：截图字节的后台队列（ADR 0042 决策一「上传时机分两类」）——step_done emit 之后
+//   入队、单条链 FIFO 顺序传（既不占判定临界路径、也不等到 scope 末），收尾对队列做有界排空。
+// - flushAndCleanup(dir)：scope 末调。递归 walk 整个产物目录上传剩余文件（已成功传过的跳过）——不按文件类型/名字挑
+//   （整目录一股脑传，本地清理不损耗任何产物、不受 SDK 升级影响）。剩余上传失败吞掉；全部成功（实时+队列+剩余）才
 //   rmSync 整目录（本地零残留）；任一失败则整目录保留不删（产物不丢）。
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import * as fs from "node:fs";
@@ -27,6 +29,13 @@ import * as path from "node:path";
 // engine_min_grace("midscene")=MIDSCENE_GRACE_MIN_S 保证 > 本超时——**那两个下限的真值住 runtime/gherkai_runtime/compose.py，
 // 此处不复述数字**（曾漏设 midscene 下限 → 回落 ScheduleOpts 默认 grace < 本超时、致 worker 被 SIGKILL）。
 const UPLOAD_TIMEOUT_MS = 10_000;
+
+// 单文件的上传尝试次数（ADR 0042 决策一「失败重试一次后记一行日志放弃」）= 首传 + 重试一次。
+// 后台队列与 scope 末 flush 共用：两处都是 best-effort 且**无人替它们重试**，而截图 URI 一旦悬空就是永久
+// 404（evidence.json 里已经写着那个 URI 了）——一次 S3 抖动不该换来一个永久悬空的链接。
+// **toReportRef 不走这条**：它的契约是「失败即抛」（报告链接强保证，交 worker 观测），重试语义归调用方。
+// 代价：退化网络下最坏墙钟翻倍（单文件仍被 uploadOne 的 AbortSignal 封顶，故仍有界）。
+const UPLOAD_ATTEMPTS = 2;
 
 // 后缀 → Content-Type（ADR 0042 决策一「不是零改动」①，与 Nova 上传器同规则同步改）：不带 ContentType 的
 // 对象在 S3 落成 binary/octet-stream，浏览器直开变**下载**而非渲染——`.html` 早有映射，evidence 带来的
@@ -48,14 +57,23 @@ export class ArtifactUploader {
   private prefix: string;
   private runDir: string | undefined; // 本地 run 树根（= MIDSCENE_RUN_DIR 父级），算相对 key 用
   private client: S3Client | undefined; // 惰性建（仅真上传时）
-  private uploaded = new Set<string>(); // 已实时上传的绝对路径（flush 时跳过）
+  private uploaded = new Set<string>(); // 已成功上传的绝对路径（重复引用 / 后台队列 / flush 时跳过）
   private flushOk = true;               // 剩余批量是否全成功（任一失败 → 整目录不删）
+  // 后台上传队列（ADR 0042 决策一）：**单条 promise 链** = 单线程 FIFO、顺序上传、永不重叠——退化网络下
+  // 不会把 K × 票数个 PutObject 并发挤在一起（每个还各套 10s 超时）。链上每一项都吞掉自己的失败、故此链
+  // 永不 reject（一项 reject 会毁掉其后所有项与 drain）。
+  private chain: Promise<void> = Promise.resolve();
 
   private constructor(bucket: string | undefined, prefix: string, runDir: string | undefined) {
     this.bucket = bucket;
     this.prefix = prefix;
     this.runDir = runDir;
   }
+
+  // 诊断输出（stderr）。**后台队列的失败无人可 catch**——enqueue 同步返回、上传在链上跑，主流程早走了，
+  // 故只有上传器自己能记那一行（其余方法仍是「抛给 worker 记」，本类不替它们记）。可替换：单测断言那一行、
+  // 将来 worker 想换诊断出口也从这里注。
+  logFn: (msg: string) => void = (m) => process.stderr.write(m + "\n");
 
   // 从组合根注入的 env 造。无 ARTIFACT_S3_BUCKET → no-op uploader（报 file://）。
   static fromEnv(): ArtifactUploader {
@@ -105,12 +123,29 @@ export class ArtifactUploader {
     );
   }
 
+  // 传一个文件、失败重试一次（后台队列与 scope 末 flush 共用，见 UPLOAD_ATTEMPTS）。成功 → 记 uploaded
+  // 并返 null；尝试尽了 → 返最后一个错（**不记 uploaded**，故后续 flush 还有一次机会）。绝不抛。
+  private async uploadWithRetry(abs: string): Promise<Error | null> {
+    let last: Error | null = null;
+    for (let attempt = 1; attempt <= UPLOAD_ATTEMPTS; attempt++) {
+      try {
+        await this.uploadOne(abs);
+        this.uploaded.add(abs);
+        return null;
+      } catch (e) {
+        last = e as Error;
+      }
+    }
+    return last;
+  }
+
   // 「只算 ref 不上传」（ADR 0042 决策一「不是零改动」②，对称 Nova 的 ref_for）：返回与 toReportRef
-  // **逐字一致**的 ref，但不碰网络、不记 uploaded——字节交 scope 末的整目录 flush 兜。
+  // **逐字一致**的 ref，但不碰网络、不记 uploaded——字节由调用方在 step_done emit 之后交 enqueue 的后台
+  // 队列传（scope 末的整目录 flush 只兜漏网）。
   // 用途：evidence 里引用的截图（K × 票数张）若逐张即时上传，就是把串行 PutObject 压在判定临界路径上、
   // 把已成的判定拖在网络上；key 是确定性纯路径计算，先算 URI 后传字节即可。
-  // 代价（接受，ADR 0042 决策一）：cloud 档若 worker 在 scope 中途被杀，截图 URI 可能悬空（引用它的 json
-  // 已传、图没传）——消费端按「读不到」处理；local 档 file:// 无此问题。
+  // 残余风险（接受，ADR 0042 决策一）：cloud 档若 worker 被硬杀（SIGKILL / 容器被收），最后一个 step 尚在途的
+  // 一两张截图 URI 可能悬空（引用它的 json 已传、图没传）——消费端按「读不到」处理；local 档 file:// 无此问题。
   refFor(localPath: string): string {
     if (!this.enabled) return `file://${localPath}`;  // no-op 裸拼（与 Nova 对称、保旧行为）
     return `s3://${this.bucket}/${this.keyFor(path.resolve(localPath))}`;
@@ -185,9 +220,64 @@ export class ArtifactUploader {
     }
   }
 
-  // scope 末：整目录递归上传剩余文件（跳过已实时传的）+ 全成功则 rmSync 整目录（ADR 0029）。
+  // 截图字节入后台队列（ADR 0042 决策一「上传时机分两类」）：**调用点必须在 step_done emit 之后**——
+  // 判定不等字节，主流程入队即走、立刻进下一 step；字节在下个 step 跑的时候顺着链传上去。
+  // 队列语义：单条链 FIFO 顺序传（不重叠）；每项已传过（实时 / 上一次入队）→ 跳过、不重复 PutObject；
+  // 失败重试一次；再失败记一行日志放弃（不记 uploaded → scope 末 flush 还有一次机会）；成功记 uploaded
+  // → 让 flush 跳过它。
+  // **同步返回、绝不抛**：调用点在已成的判定之后的主流程上，一个异常就会把 passed 翻成 error
+  // （ADR 0042 决策二「对判定零影响」）。no-op（未注入落点）→ 直接返回，连链都不碰。
+  enqueue(paths: string[]): void {
+    if (!this.enabled) return;
+    for (const p of paths) {
+      let abs: string;
+      try {
+        abs = path.resolve(p);
+      } catch {
+        continue;  // 路径算不出（拿到的不是字符串）→ 跳过这张，绝不抛给主流程
+      }
+      this.chain = this.chain.then(() => this.uploadQueued(abs));  // 串成链：前一项 settle 才起下一项
+    }
+  }
+
+  // 队列里的一项。**永不 reject**（链上一项 reject 会毁掉其后所有项与 drain），失败到底就记一行日志。
+  private async uploadQueued(abs: string): Promise<void> {
+    if (this.uploaded.has(abs)) return;  // 已传过 → 不重复 PutObject
+    const err = await this.uploadWithRetry(abs);
+    if (err !== null) {
+      // 产品面一行：发生了什么 + 不影响什么 + 还能看什么（设计判据留在上面注释里）。
+      this.logFn(`worker: 排障截图上传失败（已重试后放弃，不影响判定结果；仍可看引擎原生报告）：`
+        + `${path.basename(abs)}：${err.message}`);
+    }
+  }
+
+  // 后台队列的**有界排空**（ADR 0042 决策一）：等队列跑完，最多等 timeoutMs；返回是否在预算内排空完
+  // （false = 还有在途/未起的项，调用方记一行日志放弃即可，scope 末 flush 兜漏网）。
+  // **调用位置守「会话释放优先」**（ADR 0024）：收尾路径上排在会话释放之后——退化网络下排空挂满预算，
+  // 不该让 AgentCore 会话多泄漏那么久。
+  // 超时**不取消在途上传**（单文件已被 uploadOne 的 AbortSignal 封顶），只是不再等 → 真墙钟上界 ≈
+  // timeoutMs + 单文件超时（与 snapshotLogs 的软界同一形状）。
+  // no-op（未注入落点）→ 立即 true（enqueue 什么都没入，队列本就空）。
+  async drain(timeoutMs: number): Promise<boolean> {
+    if (!this.enabled) return true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        this.chain.then(() => true),
+        new Promise<boolean>((resolve) => { timer = setTimeout(() => resolve(false), timeoutMs); }),
+      ]);
+    } finally {
+      // 清掉未触发的定时器：否则它会把事件循环吊住到预算耗尽，正常路径的退出被硬生生拖慢 30s。
+      if (timer !== undefined) clearTimeout(timer);
+    }
+  }
+
+  // scope 末：整目录递归上传剩余文件（跳过已传过的）+ 全成功则 rmSync 整目录（ADR 0029）。
   // no-op → 直接返回（不碰本地）。剩余上传失败吞掉（报告链接不依赖它），但置 flushOk=false → 整目录不删。
   // 不按文件类型/名字挑——walk 整个目录、一股脑传，抗引擎 SDK 升级。
+  // 逐文件**失败重试一次**（见 UPLOAD_ATTEMPTS）：这是截图 URI 的最后一道兜底，单次 best-effort 的一次抖动
+  // 就是一个永久 404。已被后台队列传成功的在此按 uploaded 跳过（同一 key 不重复 PutObject）；调用方应先
+  // drain 再 flush，否则一个仍在途的队列项可能与本方法各传一次同一 key（同 key 同字节、只是冗余，接受）。
   async flushAndCleanup(artifactDir: string): Promise<void> {
     if (!this.enabled) return;
     if (!fs.existsSync(artifactDir)) return;
@@ -196,10 +286,8 @@ export class ArtifactUploader {
       if (!ent.isFile()) continue;
       // Node 的 recursive Dirent.parentPath（>=20）给出所在目录；拼回绝对路径
       const abs = path.resolve((ent as any).parentPath ?? (ent as any).path ?? artifactDir, ent.name);
-      if (this.uploaded.has(abs)) continue; // reportRef 文件已实时传，跳过
-      try {
-        await this.uploadOne(abs);
-      } catch {
+      if (this.uploaded.has(abs)) continue; // 已传过（reportRef 实时传 / 后台队列传成功），跳过
+      if (await this.uploadWithRetry(abs) !== null) {
         this.flushOk = false; // 剩余上传失败：吞掉（报告链接不依赖它），但标记 → 整目录不删
       }
     }

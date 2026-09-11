@@ -6,7 +6,11 @@ mock boto3 client（不连真 AWS、不加 moto 依赖）。重点护 ADR 0029�
 - **整目录传，不按文件挑**（抗 SDK 升级）：flush walk 整目录，log/.json 一并传。
 - **失败护栏**：reportRef 实时传失败抛（可观测）；剩余 flush 失败吞掉但整目录不删；全成功才 rmtree。
 - **no-op**：无 ARTIFACT_S3_BUCKET → 报 file://、不上传、不删。
+- **后台队列**（ADR 0042 决策一）：enqueue 的 key 与 `ref_for` 先算的 URI 逐字一致（否则 evidence 里的截图 URI
+  悬空）、FIFO、失败重试一次后一行日志放弃、成功让 flush 跳过、drain 有界（超时返 False，剩下的交给 flush）。
 """
+import threading
+import time
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -21,17 +25,27 @@ class _Calls(list):
         self.extra_by_key: dict = {}
 
 
-def _uploader_with_mock(bucket, prefix, run_dir, *, fail_keys=()):
-    """造 uploader + 塞 mock s3 client（记录 upload_file 调用；fail_keys 里的 key 抛错）。"""
+def _uploader_with_mock(bucket, prefix, run_dir, *, fail_keys=(), fail_times=None, delay_s=0.0):
+    """造 uploader + 塞 mock s3 client（记录 upload_file 调用）。
+
+    `fail_keys`：该 key 每次都抛（永久失败）。`fail_times`：{key: 前 N 次抛}（测「重试一次即成」）。
+    `delay_s`：每次上传睡这么久（测 drain 的有界性——队列在途时 drain 应超时返 False）。
+    """
     u = ArtifactUploader(bucket=bucket, prefix=prefix, run_dir=Path(run_dir))
     client = MagicMock()
     calls = _Calls()
+    left = dict(fail_times or {})
 
     def _upload(local, bkt, key, ExtraArgs=None):  # noqa: N803  boto3 的形参名就是驼峰
         calls.append((local, bkt, key))
         calls.extra_by_key[key] = ExtraArgs
+        if delay_s:
+            time.sleep(delay_s)
         if key in fail_keys:
             raise RuntimeError(f"s3 fail: {key}")
+        if left.get(key):
+            left[key] -= 1
+            raise RuntimeError(f"s3 flaky: {key}")
 
     client.upload_file.side_effect = _upload
     u._client = client
@@ -252,3 +266,121 @@ def test_bucket_without_logs_dir_fails_loud(monkeypatch):
     monkeypatch.delenv("NOVA_LOGS_DIR", raising=False)
     with pytest.raises(ValueError, match="NOVA_LOGS_DIR"):
         ArtifactUploader.from_env()
+
+
+# ---- 后台队列（ADR 0042 决策一「上传时机分两类」）：截图在 step_done 之后入队、字节不压判定临界路径 ----
+def _shots(run_dir, n=3):
+    art = run_dir / "nova-trajectories" / "evidence" / "sc" / "step-2"
+    art.mkdir(parents=True, exist_ok=True)
+    out = []
+    for j in range(n):
+        f = art / f"act-0-frame-{j}.jpg"
+        f.write_bytes(b"\xff\xd8")
+        out.append(f)
+    return out
+
+
+def test_enqueue_uploads_in_background_with_same_key_as_ref_for(tmp_path):
+    """队列传出去的 key **必须**等于 evidence.json 里先算好的那个 URI——不等即永久 404。"""
+    run_dir = tmp_path / "reports" / "rid"
+    shots = _shots(run_dir)
+    u, calls = _uploader_with_mock("bkt", "reports/rid/", run_dir)
+    refs = [u.ref_for(str(f)) for f in shots]      # evidence.json 里写下的 URI（只算不传）
+    assert calls == []
+    u.enqueue(str(f) for f in shots)               # step_done emit 之后入队（可迭代即可）
+    assert u.drain(10.0) is True
+    assert [f"s3://bkt/{c[2]}" for c in calls] == refs     # 逐字一致 + FIFO 顺序
+    assert calls.extra_by_key[calls[0][2]] == {"ContentType": "image/jpeg"}  # ExtraArgs 同 to_report_ref
+
+
+def test_flush_skips_files_already_uploaded_by_queue(tmp_path):
+    run_dir = tmp_path / "reports" / "rid"
+    shots = _shots(run_dir, 2)
+    u, calls = _uploader_with_mock("bkt", "reports/rid/", run_dir)
+    u.enqueue([str(f) for f in shots])
+    assert u.drain(10.0) is True
+    n_queued = len(calls)
+    u.flush_and_cleanup(run_dir / "nova-trajectories")
+    assert len(calls) == n_queued == 2              # flush 一次都没重传（走已传集合）
+    assert not (run_dir / "nova-trajectories").exists()   # 全成功 → 整目录删（队列传的也算成功）
+
+
+def test_queue_retries_once_then_gives_up_and_keeps_going(tmp_path, capsys):
+    """永久失败的那张：共 2 次尝试（首次 + 重试一次）→ 一行日志放弃；后面的项照传（线程不死）。"""
+    run_dir = tmp_path / "reports" / "rid"
+    bad, good = _shots(run_dir, 2)
+    bad_key = "reports/rid/nova-trajectories/evidence/sc/step-2/act-0-frame-0.jpg"
+    u, calls = _uploader_with_mock("bkt", "reports/rid/", run_dir, fail_keys={bad_key})
+    u.enqueue([str(bad), str(good)])
+    assert u.drain(10.0) is True
+    assert sum(1 for c in calls if c[2] == bad_key) == 2          # 首次 + 重试一次，然后放弃
+    assert any(c[2].endswith("act-0-frame-1.jpg") for c in calls)  # 后一项照传
+    err = capsys.readouterr().err
+    assert len([ln for ln in err.splitlines() if "证据截图上传失败" in ln]) == 1  # 只一行
+    assert "act-0-frame-0.jpg" in err
+    # 放弃的那张仍在本地 → flush 还有一次机会（这就是「放弃」的代价上界）
+    assert bad.exists()
+
+
+def test_queue_retry_succeeds_on_second_attempt(tmp_path, capsys):
+    run_dir = tmp_path / "reports" / "rid"
+    (shot,) = _shots(run_dir, 1)
+    key = "reports/rid/nova-trajectories/evidence/sc/step-2/act-0-frame-0.jpg"
+    u, calls = _uploader_with_mock("bkt", "reports/rid/", run_dir, fail_times={key: 1})
+    u.enqueue([str(shot)])
+    assert u.drain(10.0) is True
+    assert sum(1 for c in calls if c[2] == key) == 2      # 第一次抖动、第二次成
+    assert "证据截图上传失败" not in capsys.readouterr().err  # 成了就不该报失败
+    u.flush_and_cleanup(run_dir / "nova-trajectories")
+    assert sum(1 for c in calls if c[2] == key) == 2      # 已记进已传集合 → flush 跳过
+
+
+def test_drain_is_bounded_returns_false_while_item_in_flight(tmp_path):
+    """drain 有界：在途项没传完就到点 → False（调用方据此打一行日志，剩下的交给 flush）。"""
+    run_dir = tmp_path / "reports" / "rid"
+    (shot,) = _shots(run_dir, 1)
+    u, calls = _uploader_with_mock("bkt", "reports/rid/", run_dir, delay_s=0.5)
+    assert u.drain(0.0) is True          # 空队列：立即 True
+    u.enqueue([str(shot)])
+    t0 = time.monotonic()
+    assert u.drain(0.05) is False        # 在途 → 到点即返（不等它）
+    assert time.monotonic() - t0 < 0.4   # 真的没等满 0.5s 的上传
+    assert u.drain(10.0) is True         # 传完后再问 → True
+    assert len(calls) == 1
+
+
+def test_noop_uploader_enqueue_and_drain_are_immediate(tmp_path):
+    """本机 no-op 档：截图就在本地，队列/排空都是直接返回（不起线程、不碰 boto3）。"""
+    u = ArtifactUploader(bucket=None, prefix="reports/rid/", run_dir=tmp_path)
+    u.enqueue(["/nonexistent/act-0-frame-0.jpg"])
+    assert u.drain(0.0) is True
+    assert u._worker is None and u._pending == 0
+
+
+def test_concurrent_report_ref_and_queue_share_uploaded_set(tmp_path):
+    """线程安全 smoke：主流程实时传 + 队列并发传各自的文件 → 不抛、两边都记进同一个已传集合。"""
+    run_dir = tmp_path / "reports" / "rid"
+    art = run_dir / "nova-trajectories"
+    art.mkdir(parents=True)
+    queued = _shots(run_dir, 6)
+    realtime = []
+    for i in range(6):
+        f = art / f"act_{i}.html"
+        f.write_text("traj")
+        realtime.append(f)
+    u, calls = _uploader_with_mock("bkt", "reports/rid/", run_dir)
+    start = threading.Event()
+
+    def _realtime():
+        start.wait()
+        for f in realtime:
+            u.to_report_ref(str(f))
+
+    t = threading.Thread(target=_realtime)
+    t.start()
+    u.enqueue([str(f) for f in queued])
+    start.set()
+    t.join(10)
+    assert u.drain(10.0) is True
+    assert not t.is_alive()
+    assert len(u._uploaded) == 12 and len(calls) == 12   # 12 个文件各传一次，无异常、无丢账

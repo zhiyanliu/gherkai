@@ -51,7 +51,8 @@ const CONNECT_ATTEMPTS = 4;
 const CONNECT_BACKOFF_MS = [500, 1000, 2000];
 // SIGTERM cleanup 里单个 StopBrowserSession 的超时预算（ADR 0028）：退化网络下 Stop 可能挂很久
 // （共享 client maxAttempts=3、无显式超时），超过 schedule grace 会被 SIGKILL 打断到一半 → 会话泄漏。
-// 套这个预算：挂死时及时放弃，至少让 worker 干净退出、不被强杀。须 < grace（组合根按引擎推导的下限，midscene-only ≈ MIDSCENE_GRACE_MIN_S=25s）。
+// 套这个预算：挂死时及时放弃，至少让 worker 干净退出、不被强杀。须 < grace（组合根按引擎推导的下限，
+// midscene-only 见 runtime/gherkai_runtime/compose.py 的 `MIDSCENE_GRACE_MIN_S`；此处不复述会变的数字）。
 const STOP_SESSION_BUDGET_MS = 3000;
 // StartBrowserSession 已发出 RPC 但 sessionId 未返回的在途窗口兜底（ADR 0028）：SIGTERM 落在这一瞬时
 // 服务端可能已建会话但客户端没拿到 id。给一小段时间让 Start 的 await 返回、id 落进待清理集，再 cleanup。
@@ -61,6 +62,14 @@ const INFLIGHT_SETTLE_MS = 1500;
 // 下一 scenario、并叠进 grace。给整次快照套此总预算：超预算即放弃剩余（best-effort，scope 末 flush 兜底）。
 // 抢传跑在主流程（scenario 之间、非 SIGTERM handler），此预算限的是「延迟下一 scenario 的墙钟」，非 grace。
 const SCENARIO_LOG_SNAPSHOT_BUDGET_MS = 8000;
+// 截图后台队列的排空预算（ADR 0042 决策一「有界排空」）：
+//   · scope 末（正常路径：判定已全部 emit、会话已释放）给宽预算——此刻只剩字节要落地，等一等换来的是
+//     evidence 里的截图 URI 不悬空；真排不完的还有整目录 flush 兜。
+//   · 提前退出路径（停止信号 / 建连重试耗尽 / 异常）给紧预算——**这段计入 grace**，与会话释放、中断兜底
+//     抢传共用同一个宽限（下限的真值住 runtime/gherkai_runtime/compose.py 的 `MIDSCENE_GRACE_MIN_S`，
+//     此处不复述会变的数字）。这些路径不 flush、排不完的字节就此丢，故也不能给 0。
+const QUEUE_DRAIN_SCOPE_END_MS = 30_000;
+const QUEUE_DRAIN_EXIT_MS = 6_000;
 
 // AWS SDK v3 服务端瞬时故障的错误 name 集（ADR 0028，节流+瞬时超时类）——与 Nova _BOTO_TRANSIENT_CODES
 // 逐字对齐（18 项，保两个引擎对称）。AgentCore 起会话（StartBrowserSessionCommand）是 AWS SDK v3 调用，
@@ -147,10 +156,29 @@ async function interruptSnapshot(
   }
 }
 
-// SIGTERM/SIGINT 收尾序列（ADR 0024 终止契约 + 0029 中断兜底抢传）——从 onSignal 提出为可测函数（依赖注入），
+// 截图后台队列的有界排空（ADR 0042 决策一）——与 interruptSnapshot 同形的可测小函数：只管「排空那一步」的
+// 决策（排不完记一行、放弃），**位置**（必须排在会话释放之后）由调用方保证。
+// best-effort、**绝不抛**：收尾路径上抛会跳过后面的 exit / flush；排不完不是错，正常路径还有整目录 flush 兜。
+async function drainArtifactQueue(
+  uploader: { drain: (timeoutMs: number) => Promise<boolean> },
+  budgetMs: number,
+  logFn: (m: string) => void = log,
+): Promise<void> {
+  try {
+    if (!(await uploader.drain(budgetMs))) {
+      // 产品面一行：发生了什么 + 不影响什么 + 还能看什么。
+      logFn("worker: 部分排障截图未能在收尾预算内传完（已放弃，不影响判定结果；仍可看引擎原生报告）");
+    }
+  } catch (e) {
+    logFn(`worker: 排障截图收尾上传失败（best-effort、忽略）：${(e as Error).message}`);
+  }
+}
+
+// SIGTERM/SIGINT 收尾序列（ADR 0024 终止契约 + 0029 中断兜底抢传 + 0042 截图队列排空）——从 onSignal 提出为可测函数（依赖注入），
 // 对称 Nova 把 _on_signal 提到模块级供 test_interrupt_model/process 测。**锁住关键顺序不变量**：
-//   会话释放（cleanup）**必须先于**中断兜底抢传（interruptSnapshot）——ADR 0024「会话释放优先」铁律，
-//   抢传是 best-effort、绝不延迟会话释放（退化网络下抢传挂 10s 也不该让会话多泄漏 10s）。
+//   会话释放（cleanup）**必须先于**中断兜底抢传（interruptSnapshot）与截图队列排空（drainArtifactQueue）
+//   ——ADR 0024「会话释放优先」铁律，那两件都是 best-effort、绝不延迟会话释放（退化网络下各自挂满自己的
+//   预算，也不该让会话多泄漏那么久）。
 // 返回该退出的码（cleanupFailed→1 让泄漏可观测、否则 0）；不自己 process.exit（交调用方，便于测试不真退进程）。
 // deps 全注入（cleanup/getCleanupFailed/uploader/reportFile...）→ 单测可传 spy 断言调用序列，无需真信号/真进程。
 interface ShutdownDeps {
@@ -158,7 +186,10 @@ interface ShutdownDeps {
   settleMs: number;                    // 在途兜底等待（INFLIGHT_SETTLE_MS）
   sleep: (ms: number) => Promise<void>;
   cleanup: () => Promise<void>;        // 释放会话（**先跑**）
-  uploader: { snapshotReport: (p: string) => Promise<void> };
+  uploader: {
+    snapshotReport: (p: string) => Promise<void>;
+    drain: (timeoutMs: number) => Promise<boolean>;  // 截图后台队列的有界排空（ADR 0042 决策一）
+  };
   reportFile: () => string | null | undefined;  // 惰性读（agentRef 可能收尾时才有值）
   getCleanupFailed: () => boolean;     // cleanup 内部副作用写的泄漏标记
   logFn?: (m: string) => void;
@@ -168,7 +199,10 @@ async function shutdownSequence(deps: ShutdownDeps): Promise<number> {
   logFn("worker: signal received, releasing AgentCore session(s)");
   if (deps.inflightPending()) await deps.sleep(deps.settleMs);  // 在途窗口兜底（ADR 0028）
   await deps.cleanup();                                          // ① 会话释放优先（ADR 0024 铁律）
-  await interruptSnapshot(deps.uploader, deps.reportFile());     // ② 抢传排其后（best-effort、不延迟①）
+  await interruptSnapshot(deps.uploader, deps.reportFile(), logFn);  // ② 抢传排其后（best-effort、不延迟①）
+  // ③ 截图后台队列的有界排空（ADR 0042 决策一）：同样排在①之后、与②并列。本路径**不 flush**，队列里
+  //    没传完的截图就此丢，故给一小段计入 grace 的预算把在途的落地。
+  await drainArtifactQueue(deps.uploader, QUEUE_DRAIN_EXIT_MS, logFn);
   const failed = deps.getCleanupFailed();
   logFn(`worker: session shutdown complete after signal${failed ? " (WITH FAILURE)" : ""}`);
   return failed ? 1 : 0;
@@ -485,6 +519,9 @@ export async function main(): Promise<number> {
     }
   } catch (e) {
     await cleanup();
+    // 会话已释放，再排空截图后台队列（会话释放优先，ADR 0024；对齐 onSignal 里的③）——网络耗尽与异常
+    // 这两条提前退出路径都**不 flush**（中断产物留本地），队列里没传完的字节就此丢，故给有界预算兜一把。
+    await drainArtifactQueue(uploader, QUEUE_DRAIN_EXIT_MS);
     // 建连重试耗尽（网络瞬时故障）→ 退网络专用码（ADR 0028）；但 cleanupFailed（会话泄漏）优先级更高。
     if (networkExhausted && !cleanupFailed) {
       log("worker: connect retries exhausted, exiting with network code");
@@ -500,6 +537,9 @@ export async function main(): Promise<number> {
   // no-op（local/未注入落点）时直接返回、不碰本地。仅正常完成路径走到此；异常/网络耗尽的 catch 内 return 不 flush
   // ——中断产物保留本地（对称 Nova）。
   const flushRoot = artifactFlushRoot();  // --no-report 档 → undefined，不 flush（对称 Nova 的 no-artifacts 分支）
+  // 先排空后台截图队列、再整目录 flush（ADR 0042 决策一）：flush 只兜漏网的那几张——若反过来，队列里
+  // 在途的那张会被 flush 按「还没记 uploaded」重传一次（同 key 冗余）。
+  await drainArtifactQueue(uploader, QUEUE_DRAIN_SCOPE_END_MS);
   if (flushRoot) await uploader.flushAndCleanup(flushRoot);
   // 正常路径若会话释放失败 → 非 0 退出，让 schedule 记 error、泄漏可观测
   // （ADR 0024「会话释放失败可观测」，对照 Nova）
@@ -572,14 +612,23 @@ async function runStep(
   const execFrom = executionsLength(agent);
   const votes: boolean[] = [];        // 逐票结果（进 evidence 的 act.vote；多数票数学仍看 yes 计数）
   let instr: string | null = null;    // 交给引擎的指令（进 evidence 的 act.prompt）；null = 本 step 没调 AI
-  // 本 step 判定已成之后收尾产 evidence（三条出口共用）。**绝不抛**（决策二：对判定零影响）——
-  // 落在 act 异常分类路径之外的语义由 stepEvidenceRef 内部整体 try 保证，故此处可直接 await。
-  const attachEvidence = async (ev: Record<string, unknown>, status: string, error: string | null) => {
-    const ref = await stepEvidenceRef(evidence, {
+  // 本 step 判定已成之后的收尾出口（三条出口共用）：产 evidence → 挂 ref → **emit** → 才把截图交后台队列。
+  // **这个顺序是契约**（ADR 0042 决策一「上传时机分两类」）：evidence.json 的 ref 必须随 step_done 走，故它
+  // 即时传；截图字节反过来——emit 之前入队就是把字节又压回判定前面，主流程该做的是发完判定立刻进下一 step。
+  // **绝不抛**（决策二：对判定零影响）——落在 act 异常分类路径之外的语义由 stepEvidenceRef 内部整体 try
+  // 保证，enqueue 则是同步返回、不抛（见上传器）。故此处可直接 await。
+  const emitWithEvidence = async (ev: Record<string, unknown>, status: string, error: string | null) => {
+    const produced = await stepEvidenceRef(evidence, {
       scenarioId, step, status, message: (ev.message as string | undefined) ?? null,
       agent, execFrom, page, prompt: instr, votes, error,
     });
-    if (ref !== null) appendReportRef(ev, { kind: EVIDENCE_KIND, ref, label: EVIDENCE_KIND });
+    if (produced !== null) {
+      appendReportRef(ev, { kind: EVIDENCE_KIND, ref: produced.ref, label: EVIDENCE_KIND });
+    }
+    await sink.emit(ev);
+    if (produced !== null && produced.screenshots.length > 0) {
+      evidence?.uploader.enqueue(produced.screenshots);  // emit 之后：字节在下个 step 期间顺链传上去
+    }
   };
   try {
     // ① 确定性注册表（ADR 0022）：命中走精确 handler、不投票；AssertionError→failed，其它→error
@@ -628,8 +677,7 @@ async function runStep(
       const cost = stepCost(tokBefore, agent);  // N 票 token 增量合计（修：原 lastCost 只算最后一票）
       if (cost) ev.cost = cost;
       if (!passed) { ev.errorType = "assertion_failed"; ev.message = `AI 断言未过多数票（${yes}/${votesN}）：${text}`; }
-      await attachEvidence(ev, passed ? "passed" : "failed", null);
-      await sink.emit(ev);
+      await emitWithEvidence(ev, passed ? "passed" : "failed", null);
       return passed ? "passed" : "failed";
     }
     // When / Given（非 URL）→ AI 动作（无 votes）
@@ -638,8 +686,7 @@ async function runStep(
     const ev: Record<string, unknown> = { type: "step_done", scenarioId, stepIndex: index, status: "passed" };
     const cost = stepCost(tokBefore, agent);
     if (cost) ev.cost = cost;
-    await attachEvidence(ev, "passed", null);
-    await sink.emit(ev);
+    await emitWithEvidence(ev, "passed", null);
     return "passed";
   } catch (e) {
     // 诊断分类细化（ADR 0028，对称 Nova）：act 中途网络瞬时故障（CDP 闪断等）标 network_error 比笼统
@@ -655,8 +702,7 @@ async function runStep(
     const cost = stepCost(tokBefore, agent);
     if (cost) ev.cost = cost;
     // error step 的 evidence 最该产（抛错的 task 仍在 executions 里、带 errorMessage）；抽取失败也只是没 ref
-    await attachEvidence(ev, "error", `${(e as Error).name}: ${(e as Error).message}`);
-    await sink.emit(ev);
+    await emitWithEvidence(ev, "error", `${(e as Error).name}: ${(e as Error).message}`);
     return "error";
   }
 }
@@ -669,4 +715,6 @@ function aggregate(statuses: string[]): string {
 
 // 测试可见（对称 Nova：Nova worker 靠 if __name__ 守卫使 _run_step/_run_scenario/_is_transient_network 可 import 测）。
 // `main` 由 bin 调（见文件头「本模块不是进程入口」）；其余是单测面。
-export { runStep, runScenario, isTransientNetwork, aggregate, interruptSnapshot, shutdownSequence };
+export {
+  runStep, runScenario, isTransientNetwork, aggregate, interruptSnapshot, drainArtifactQueue, shutdownSequence,
+};

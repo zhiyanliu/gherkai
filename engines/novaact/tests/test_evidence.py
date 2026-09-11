@@ -200,15 +200,19 @@ def test_scenario_key_does_not_use_display_name():
 def test_write_step_evidence_layout_and_screenshots(tmp_path):
     traj_path = tmp_path / "act_0_trajectory.json"
     traj_path.write_text(json.dumps(_synthetic(5, thought_at=(1, 4))), encoding="utf-8")
-    path = ev.write_step_evidence(
+    written = ev.write_step_evidence(
         base_dir=tmp_path, scope_id="features/login.feature:6", scenario_id="features/login.feature:12",
         step_index=2, keyword="Then", text="页面显示「登录成功」", status="failed",
         message="AI 断言未过多数票（0/1）：页面显示「登录成功」",
         acts=[ev.ActRecord(index=0, prompt="页面显示「登录成功」", vote=False,
                            trajectory_path=str(traj_path))],
         ref_for=lambda p: f"file://{p}")
+    path = written.json_path
     out = ev.step_dir(tmp_path, "features/login.feature:12", 2)
     assert Path(path) == out / "evidence.json"
+    # 回传的截图清单 = 真写下的那些（调用方拿它入队，ADR 0042 决策一）：与目录里的 .jpg 一一对应、顺序即帧序
+    assert [Path(x).name for x in written.screenshots] == ["act-0-frame-4.jpg", "act-0-frame-1.jpg"]
+    assert sorted(written.screenshots) == sorted(str(x) for x in out.glob("*.jpg"))
     assert out.parent.parent == tmp_path / "evidence" and out.name == "step-2"
     assert sorted(p.name for p in out.iterdir()) == [
         "act-0-frame-1.jpg", "act-0-frame-4.jpg", "evidence.json"]
@@ -224,14 +228,15 @@ def test_undecodable_image_leaves_screenshot_null(tmp_path):
     """真 fixture 的 base64 被裁短（解不开）→ 截图给 null、evidence.json 照落（逐字段容缺）。"""
     traj_path = tmp_path / "act_0_trajectory.json"
     traj_path.write_text(json.dumps(_fixture("nova_assert_traj.json")), encoding="utf-8")
-    path = ev.write_step_evidence(
+    written = ev.write_step_evidence(
         base_dir=tmp_path, scope_id="s", scenario_id="sc:1", step_index=0, keyword="Then", text="t",
         status="failed", message=None,
         acts=[ev.ActRecord(index=0, prompt="t", vote=False, trajectory_path=str(traj_path))],
         ref_for=lambda p: f"file://{p}")
-    doc = json.loads(Path(path).read_text(encoding="utf-8"))
+    doc = json.loads(Path(written.json_path).read_text(encoding="utf-8"))
     assert doc["acts"][0]["frames"][0]["screenshot"] is None
     assert not list(ev.step_dir(tmp_path, "sc:1", 0).glob("*.jpg"))
+    assert written.screenshots == []   # 没写下的图不入队（队列里不许有幻影文件）
 
 
 # ---- _run_step 钩子（ADR 0042 决策一「怎么挂」/ 决策二 best-effort）----
@@ -420,3 +425,199 @@ def test_error_text_prefers_sdk_message_and_is_single_line():
     assert _error_text(RuntimeError("boom\nsecond line")) == "RuntimeError: boom"
     assert _error_text(RuntimeError("x" * 500)).endswith("x" * 10) and len(_error_text(RuntimeError("x" * 500))) == len("RuntimeError: ") + 300
     assert _error_text(RuntimeError("")) == "RuntimeError"
+
+
+# ---- 截图字节：step_done **emit 之后**才入后台队列（ADR 0042 决策一「上传时机分两类」）----
+class _TracingSink(list):
+    """记 emit 与 enqueue 的**先后**（顺序即契约：判定绝不等截图字节）。"""
+
+    def __init__(self, trace):
+        super().__init__()
+        self._trace = trace
+
+    def emit(self, obj):
+        self._trace.append(("emit", obj["type"]))
+        self.append(obj)
+
+
+def test_screenshots_enqueued_only_after_step_done_emit(logs_dir, monkeypatch):
+    trace: list = []
+    u = rs._get_uploader()      # no-op 档的真上传器（单例已由 fixture 重置）
+    monkeypatch.setattr(u, "enqueue", lambda paths: trace.append(("enqueue", list(paths))))
+    traj = _write_traj(logs_dir, "act_0_x_trajectory.json", _synthetic(2, thought_at=(0,)))
+    sink = _TracingSink(trace)
+    assert rs._run_step(_Nova(traj=traj), "sc:1", {"index": 0, "keyword": "Then", "text": '"对吗"'},
+                        1, sink, scope_id="sc") == "passed"
+    assert [t[0] for t in trace] == ["emit", "emit", "enqueue"]   # step_started, step_done, 然后才入队
+    assert trace[1][1] == "step_done"
+    queued = trace[2][1]
+    # 入队的正是本步真写下的截图（绝对路径），与 evidence.json 里的 URI 同一批文件
+    doc = json.loads(Path(_done(sink)["reportRefs"][-1]["ref"][len("file://"):]).read_text(encoding="utf-8"))
+    uris = [f["screenshot"] for f in doc["acts"][0]["frames"] if f["screenshot"]]
+    assert queued and [f"file://{q}" for q in queued] == uris
+    assert all(Path(q).is_absolute() and Path(q).exists() for q in queued)
+
+
+def test_no_enqueue_when_step_wrote_no_screenshot(logs_dir, monkeypatch):
+    """确定性 / URL 导航 step 不产 evidence → 一次入队都不该有（队列里不许有幻影文件）。"""
+    trace: list = []
+    u = rs._get_uploader()
+    monkeypatch.setattr(u, "enqueue", lambda paths: trace.append(("enqueue", list(paths))))
+    sink = _TracingSink(trace)
+    rs._run_step(_Nova(), "sc:1", {"index": 0, "keyword": "Given", "text": '打开 "https://example.com"'},
+                 1, sink, scope_id="sc")
+    assert [t[0] for t in trace] == ["emit", "emit"]
+
+
+def test_enqueue_failure_never_changes_verdict(logs_dir, monkeypatch, capsys):
+    """入队本身抛（不该发生，但 best-effort 不留缺口，ADR 0042 决策二）→ 判定与事件照常、一行日志。"""
+    u = rs._get_uploader()
+
+    def _boom(paths):
+        raise RuntimeError("队列坏了")
+
+    monkeypatch.setattr(u, "enqueue", _boom)
+    traj = _write_traj(logs_dir, "act_0_x_trajectory.json", _synthetic(1, thought_at=(0,)))
+    sink = _Sink()
+    assert rs._run_step(_Nova(traj=traj), "sc:1", {"index": 0, "keyword": "Then", "text": '"对吗"'},
+                        1, sink, scope_id="sc") == "passed"
+    done = _done(sink)
+    assert done["status"] == "passed" and any(r["kind"] == "evidence" for r in done["reportRefs"])
+    err = capsys.readouterr().err
+    assert len([ln for ln in err.splitlines() if "未能排入上传队列" in ln]) == 1
+
+
+# ---- 收尾排空（ADR 0042 决策一：scope 末 30s / 提前退出 6s，位置在会话释放之后、flush 之前）----
+class _RecUploader:
+    """记录 drain / flush 调用的假上传器（顺序与超时参数都是契约）。"""
+
+    enabled = True
+
+    def __init__(self, trace, drained=True):
+        self._trace = trace
+        self._drained = drained
+
+    def drain(self, timeout_s):
+        self._trace.append(("drain", timeout_s))
+        return self._drained
+
+    def flush_and_cleanup(self, d):
+        self._trace.append(("flush", str(d)))
+
+    def to_report_ref(self, path):       # main() 只在 session_summary 存在时才调（本组用例不产）
+        raise AssertionError("本用例不该走到 summary 上传")
+
+
+def test_drain_noop_when_uploader_never_used(monkeypatch, capsys):
+    """零 evidence（单例还没造）→ 直接返回；且**不在退出路径上现造上传器**（半注入会 fail-loud 抛）。"""
+    monkeypatch.setattr(rs, "_uploader_singleton", None)
+    monkeypatch.setenv("ARTIFACT_S3_BUCKET", "bkt")
+    monkeypatch.delenv("NOVA_LOGS_DIR", raising=False)
+    rs._drain_evidence_uploads(6.0)      # 不抛
+    assert rs._uploader_singleton is None
+    assert capsys.readouterr().err == ""
+
+
+def test_drain_logs_one_line_when_not_fully_drained(monkeypatch, capsys):
+    trace: list = []
+    monkeypatch.setattr(rs, "_uploader_singleton", _RecUploader(trace, drained=False))
+    rs._drain_evidence_uploads(6.0)
+    assert trace == [("drain", 6.0)]
+    err = capsys.readouterr().err.splitlines()
+    assert len(err) == 1 and "未能在收尾时限内传完" in err[0]
+
+
+# ---- main() 三条收尾路径的接线（fake 掉 SDK：不建会话、零费用）----
+class _FakeCdp:
+    def __init__(self, on_enter=None):
+        self._on_enter = on_enter
+
+    def __enter__(self):
+        if self._on_enter:
+            self._on_enter()
+        return ("ws://fake", {})
+
+    def __exit__(self, *a):
+        return False
+
+
+class _FakeNovaAct:
+    def __init__(self, **kw):
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def get_session_id(self):
+        return "sess-fake"
+
+
+@pytest.fixture
+def main_fakes(monkeypatch, logs_dir):
+    """把 main() 的 SDK 面全 fake 掉（job 走 stdin、scenarios 空 → 只跑到收尾序列）。"""
+    monkeypatch.setattr(rs.signal, "signal", lambda s, h: None)
+    monkeypatch.setattr(rs.sys, "stdin", type("S", (), {"readline": staticmethod(
+        lambda: json.dumps({"scope": {"id": "x"}, "scenarios": []}))})())
+    monkeypatch.setattr(rs, "ensure_workflow_definition", lambda *a, **k: None)
+    monkeypatch.setattr(rs, "Workflow", lambda **k: _FakeCdp())      # with wf: 用同一个上下文管理器形状
+    monkeypatch.setattr(rs, "get_current_workflow", lambda: None)
+    monkeypatch.setattr(rs, "set_current_workflow", lambda w: None)
+    monkeypatch.setattr(rs, "NovaAct", lambda **k: _FakeNovaAct())
+    rs._stop.clear()
+    yield monkeypatch
+    rs._stop.clear()
+
+
+def _install_provider(monkeypatch, on_enter=None, raises=None):
+    class _P:
+        def __init__(self, region=None):
+            pass
+
+        def cdp_session(self):
+            if raises is not None:
+                raise raises
+            return _FakeCdp(on_enter)
+
+    monkeypatch.setattr(rs, "AgentCoreBrowserSessionProvider", _P)
+
+
+def test_scope_end_drains_before_flush(main_fakes, logs_dir):
+    """正常完成：先有界排空队列（30s）、再整目录 flush（flush 只兜漏网的）。顺序反了就等于没有队列。"""
+    trace: list = []
+    main_fakes.setattr(rs, "_uploader_singleton", _RecUploader(trace))
+    _install_provider(main_fakes)
+    assert rs.main() == 0
+    assert trace == [("drain", rs.EVIDENCE_DRAIN_SCOPE_END_S), ("flush", str(logs_dir))]
+
+
+def test_stop_signal_path_drains_after_session_release(main_fakes):
+    """协作停：三层 with 已退出（会话已释放）之后才排空，用退出档预算；不 flush（中断产物留本地）。"""
+    trace: list = []
+    main_fakes.setattr(rs, "_uploader_singleton", _RecUploader(trace))
+    _install_provider(main_fakes, on_enter=lambda: rs._stop.set())
+    assert rs.main() == 0
+    assert trace == [("drain", rs.EVIDENCE_DRAIN_EXIT_S)]
+
+
+def test_network_exhausted_path_drains(main_fakes):
+    trace: list = []
+    main_fakes.setattr(rs, "_uploader_singleton", _RecUploader(trace))
+    main_fakes.setattr(rs, "_is_transient_network", lambda e, connecting=False: True)
+    main_fakes.setattr(rs, "_backoff_interrupted", lambda attempt: False)
+    _install_provider(main_fakes, raises=OSError("dns 抖了"))
+    assert rs.main() == rs.EX_WORKER_NETWORK
+    assert trace == [("drain", rs.EVIDENCE_DRAIN_EXIT_S)]
+
+
+def test_exception_path_drains_and_still_raises(main_fakes):
+    """异常退出路径（第三条）：排空一次仍原样冒泡（不改退出码/不吞异常）。"""
+    trace: list = []
+    main_fakes.setattr(rs, "_uploader_singleton", _RecUploader(trace))
+    main_fakes.setattr(rs, "_is_transient_network", lambda e, connecting=False: False)
+    _install_provider(main_fakes, raises=RuntimeError("会话炸了"))
+    with pytest.raises(RuntimeError, match="会话炸了"):
+        rs.main()
+    assert trace == [("drain", rs.EVIDENCE_DRAIN_EXIT_S)]
