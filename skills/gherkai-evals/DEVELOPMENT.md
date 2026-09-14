@@ -1,6 +1,6 @@
-# gherkai agent skill 的评测资产（contributor 侧）
+# gherkai agent skill 的评测资产（contributor 文档）
 
-> 定位：迭代 `cli/gherkai_cli/skills/gherkai/` 这份 skill 用的开发期资产，**不随 skill 发行**、使用方接触不到。决策与理由见
+> 读者：迭代 `cli/gherkai_cli/skills/gherkai/` 这份 skill 的维护者与 AI coding agent——**不是使用方**，评测资产不随 skill 发行、使用方也不需要知道它存在；按仓库的 README / DEVELOPMENT 分层，本文是 contributor 向、故叫 DEVELOPMENT.md。决策与理由见
 > [ADR 0043](../../docs/adr/0043-agent-skill-for-driving-gherkai.md) 决策七；本文只讲怎么跑。
 
 | 文件 | 是什么 |
