@@ -48,7 +48,7 @@
 │   ├── midscene/   ← npm 包 @gherkai/worker-midscene（ESM）：src/bin.mts（入口）· src/worker/run-scope.mts（薄 worker）· src/worker/deterministic.mts · src/lib/agentcore-sigv4.mts · spikes/
 │   └── novaact/    ← 发行包 gherkai-worker-novaact：gherkai_worker_novaact/{run_scope.py（薄 worker）· deterministic.py · user_steps.py · lib/workflow_setup.py} · spikes/
 ├── deploy_aws/                ← 发行包 gherkai-deploy-aws：`gherkai deploy` 的 AWS provider（Python CDK stack：DDB/S3/ECS/ECR/IAM/VPC + 无状态跑批的 Stream/Lambda/EventBridge；`gherkai_deploy_aws/lambdas/` 是三 Lambda 的 handler 源、随部署打进 asset；worker 镜像交付 `push-worker` / `list-workers`，ADR 0033/0034/0037/0038）
-├── skills/                    ← README.md 只是一行指针（skill 真身不在这里）；gherkai-evals/ = agent skill 的评测资产（evals.json / trigger-eval.json / fixtures/ / materialize.py / run_evals.py / trigger_eval.py，跑法见其 DEVELOPMENT.md）：contributor 侧、不分发；结果工作区 gherkai-workspace/ 不入库（ADR 0043 决策七）
+├── skills/                    ← README.md 只是一行指针（skill 真身不在这里）；gherkai-evals/ = agent skill 的评测资产（evals.json / trigger-eval.json / fixtures/ / materialize.py / run_evals.py / trigger_eval.py，跑法与 fixture 清单在 ADR 0043 决策七、不另立文档）：维护者 / agent 侧、不分发；结果工作区 gherkai-workspace/ 不入库（ADR 0043 决策七）
 └── tools/                     ← 复用工具库（端到端真跑 / 跨真实边界验证 / 时序诊断 / 知识图刷新；长期资产，见 CLAUDE.md「工作方式」）
 ```
 

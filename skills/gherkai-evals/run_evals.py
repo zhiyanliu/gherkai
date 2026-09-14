@@ -6,8 +6,9 @@
 设计见 docs/adr/0043-agent-skill-for-driving-gherkai.md 决策七。要点：
 - **隔离**：舞台由 materialize.py 物化到仓库外，cwd = 舞台、PATH 前置舞台 `bin/`；舞台里的 CLI 来自装进仓库外
   目录的 wheel，任何路径都不指仓库（`--prepare-cli` 那步保证），两臂只差「有没有拿到 skill」一个变量。
-- **with-skill 臂只给中立路径**：提示里给的是 `<cli-dir>/skill/SKILL.md`，不是仓库里的那份——给仓库路径等于
-  邀请它顺着仓库读原始教材，delta 就不再是 skill 的功劳。
+- **with-skill 臂只给中立路径**：每次运行把 skill 拷进一个随机命名的临时目录、提示里只给这个路径，跑完即删——给仓库路径
+  等于邀请它顺着仓库读原始教材；放在 `<cli-dir>/skill/` 也不行（第三轮 eval 3 的 baseline 顺着 shim 指向的 cli-dir
+  `grep` 到了它、读了 references/engines.md），必须是 baseline 无从枚举到的位置。
 - **过程断言只认工具流水**：每次跑都存 `tool_calls.json`（用了哪些命令、有没有真跑、有没有装东西），答案自述不算证据；
   `timing.json` 另记三个每轮必报的污染 / 效率指标（repo_touches / network_calls / skill_copy_touches）。
 - **一次跑多遍**：跨 run 的方差是判「两臂差值是不是噪声」的前提，缺省 3 次。
@@ -33,6 +34,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -42,6 +44,8 @@ REPO = HERE.parent.parent
 EVALS = HERE / "evals.json"
 MATERIALIZE = HERE / "materialize.py"
 WORKSPACE = REPO / "skills" / "gherkai-workspace"
+# skill 的唯一真源（与 wheel 内那份同树）；只用来拷进临时目录，这个路径绝不进提示。
+SKILL_SRC = REPO / "cli" / "gherkai_cli" / "skills" / "gherkai"
 DEFAULT_CLI_DIR = Path("/tmp/gherkai-eval-cli")
 STAGE_ROOT = Path("/tmp/gherkai-eval-stages")
 DEFAULT_FIXTURE = "wiki-search"
@@ -116,14 +120,15 @@ def tool_calls_of(events: list[dict]) -> list[dict]:
     return calls
 
 
-def pollution_metrics(calls: list[dict], skill_dir: Path) -> dict:
-    """每轮必报的三个指标：污染（触仓库 / 触 skill 副本）与不可重放（联网）。事后 grep 才知道 = 太晚。"""
+def pollution_metrics(calls: list[dict], skill_dirs: list[Path]) -> dict:
+    """每轮必报的三个指标：污染（触仓库 / 触 skill 副本）与不可重放（联网）。事后 grep 才知道 = 太晚。
+    skill_dirs = 本次运行的临时 skill 目录 + 旧版 `<cli-dir>/skill/`（若还在）；with-skill 臂天然 ≥1，baseline 臂 >0 即污染。"""
     repo_touches = network_calls = skill_copy_touches = 0
     for c in calls:
         blob = json.dumps(c.get("input"), ensure_ascii=False)
         if str(REPO) in blob:
             repo_touches += 1
-        if str(skill_dir) in blob:
+        if any(str(d) in blob for d in skill_dirs):
             skill_copy_touches += 1
         if c.get("tool") in ("WebFetch", "WebSearch"):
             network_calls += 1
@@ -172,7 +177,10 @@ def run_one(ev: dict, arm: str, run_no: int, it_dir: Path, cli_dir: Path, model:
     out_dir.mkdir(parents=True, exist_ok=True)
     stage = materialize(ev.get("fixture") or DEFAULT_FIXTURE,
                         STAGE_ROOT / f"{it_dir.name}-{eid}-{arm}-run{run_no}", cli_dir)
-    skill_dir = cli_dir / "skill"
+    # skill 副本放随机命名的临时目录（不在 cli-dir、不在舞台），只有 with-skill 臂的提示知道它在哪
+    skill_tmp = Path(tempfile.mkdtemp(prefix="agent-skill-"))
+    skill_dir = skill_tmp / "gherkai"
+    shutil.copytree(SKILL_SRC, skill_dir, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
     prompt = ev["prompt"] + COMMON_SUFFIX
     if arm == "with_skill":
         prompt += f"\n\n（先读这份 skill 并照它做：{skill_dir / 'SKILL.md'}）"
@@ -206,7 +214,8 @@ def run_one(ev: dict, arm: str, run_no: int, it_dir: Path, cli_dir: Path, model:
     usage = data.get("usage") or {}
     total_tokens = sum(int(usage.get(k, 0) or 0) for k in
                        ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "output_tokens"))
-    metrics = pollution_metrics(calls, skill_dir)
+    metrics = pollution_metrics(calls, [skill_tmp, cli_dir / "skill"])
+    shutil.rmtree(skill_tmp, ignore_errors=True)
     (out_dir / "timing.json").write_text(json.dumps({
         "total_tokens": total_tokens, "duration_ms": int(dur * 1000), "total_duration_seconds": round(dur, 1),
         "num_turns": data.get("num_turns"), "cost_usd": data.get("total_cost_usd"),
@@ -232,9 +241,10 @@ def main() -> None:
     a = ap.parse_args()
 
     cli_dir = Path(a.cli_dir).resolve()
-    skill_md = cli_dir / "skill" / "SKILL.md"
-    if not skill_md.is_file():
-        fail(f"{skill_md} 不在——先跑：python skills/gherkai-evals/materialize.py --prepare-cli {cli_dir}")
+    if not (cli_dir / "venv" / "bin" / "gherkai").is_file():
+        fail(f"{cli_dir} 没备好——先跑：python skills/gherkai-evals/materialize.py --prepare-cli {cli_dir}")
+    if not (SKILL_SRC / "SKILL.md").is_file():
+        fail(f"仓库里没有 skill：{SKILL_SRC}")
     if not shutil.which("claude"):
         fail("PATH 里没有 claude（两臂都靠 `claude -p` 跑）")
     evals = load_evals(a.ids, a.include_opt_in)
