@@ -180,7 +180,7 @@ gherkai skill install --print             # 只把正文打到 stdout，什么�
 npx skills add https://github.com/zhiyanliu/gherkai/tree/v<版本>/cli/gherkai_cli/skills/gherkai --agent claude-code
 ```
 
-这条路不经 CLI、版本要自己钉：URL 里的 `v<版本>` 写成你要跟的 CLI 版本；写 `HEAD` 拿的是默认分支最新、可能比装的 CLI 新。skill 教 agent 的是操作模型（何时先 `plan`、失败先 `explain`、退出码怎么分流、什么时候该写确定性 step），命令细节仍以 `gherkai <命令> --help` 为准。
+这条路不经 CLI、版本要自己钉：URL 里的 `v<版本>` 写成你要跟的 CLI 版本（tag 或 commit 都行；带斜杠的分支名不行，安装器会在第一个斜杠处切断 ref）；写 `HEAD` 拿的是默认分支最新、可能比装的 CLI 新。skill 教 agent 的是操作模型（何时先 `plan`、失败先 `explain`、退出码怎么分流、什么时候该写确定性 step），命令细节仍以 `gherkai <命令> --help` 为准。
 
 ## 注意
 
