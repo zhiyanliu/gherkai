@@ -88,6 +88,10 @@ _Avoid_: 把它当精确/像素级回归工具用。
 - **确定性锚点**：少数"不容 AI 抖动"的精确检查（URL/DOM），由**测试开发**在使用方项目的 `steps/` 目录写 `@deterministic` 注册（Playwright 查询；worker 包内的 `deterministic_steps` 脚手架只留内建示例），不走 AI、不预置（QA 不碰；ADR 0037 决策 4）。
 _Avoid_: 以为"不点名也能抓变更"；把它与 A/B 两种不确定性混为一谈；以为 QA 要学特殊措辞（QA 永远只写自然语言）。
 
+**agent skill (gherkai skill)**:
+教 AI coding agent（Claude Code / Codex）驾驭本工具的一份 `SKILL.md` + `references/`：从需求写 feature 与 steps、`plan → run / submit → status → explain` 的工作循环、退出码分流、失败汇报模板；三个任务域（测试 / 环境排障 / 云端交付）一个入口、按域拆 references。真身随 CLI wheel 发行（`cli/gherkai_cli/skills/gherkai/`），`gherkai skill install` 拷进使用方项目或用户级 agent 目录、与 CLI 同版本、重装整目录收敛（ADR 0043）。
+_Avoid_: 把它当第二份文档源——机读字段页是契约页的确定性转换副本、正文只写操作模型；把它当内部文档——它是产品面，零 ADR 编号 / 内部机制名、只用绝对 URL。
+
 **两种不确定性 (A: flakiness / B: 柔性吞变更)**:
 A = 同一页面 AI 判断飘忽（随机噪声）→ **投票可治**；B = 页面真变了但 AI 柔性照样跑过、不报警（灵敏度不足）→ **投票治不了**，v1.0 接受为已知边界（ADR 0015）。
 _Avoid_: 以为"投票能带来确定性"——它只压 A，给不了对变更的灵敏度（B）。

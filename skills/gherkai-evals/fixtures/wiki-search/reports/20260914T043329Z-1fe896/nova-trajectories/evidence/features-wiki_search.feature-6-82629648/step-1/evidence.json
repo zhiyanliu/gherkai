@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "engine": "novaact",
+  "scope_id": "search",
+  "scenario_id": "features/wiki_search.feature:6",
+  "step_index": 1,
+  "step": {
+    "keyword": "When",
+    "text": "\"在搜索框输入 OpenAI 并提交搜索\""
+  },
+  "status": "passed",
+  "message": null,
+  "acts": [
+    {
+      "index": 0,
+      "prompt": "在搜索框输入 OpenAI 并提交搜索",
+      "vote": null,
+      "url": "https://en.wikipedia.org/wiki/OpenAI",
+      "frames": [
+        {
+          "url": "https://en.wikipedia.org/wiki/Main_Page",
+          "thought": "I am on the Wikipedia page. My task is to search for OpenAI. I see a search field at the top of the page, but it is empty. I should type 'OpenAI' into the search field to populate it and press enter to initiate the search.",
+          "actions": [
+            {
+              "name": "agentType",
+              "args": {
+                "value": "OpenAI",
+                "box": "<box>18,264,46,670</box>",
+                "pressEnter": "{\"pressEnter\": true}"
+              }
+            },
+            {
+              "name": "waitForPageToSettle",
+              "args": {}
+            },
+            {
+              "name": "takeObservation",
+              "args": {}
+            }
+          ],
+          "screenshot": null
+        },
+        {
+          "url": "https://en.wikipedia.org/wiki/OpenAI",
+          "thought": "I am now on the Wikipedia page for OpenAI, meaning that my previous action was successful. I have successfully searched for OpenAI. My task is complete, and no return information was asked from me. I will simply return.",
+          "actions": [],
+          "screenshot": "file://{{FIXTURE_ROOT}}/reports/20260914T043329Z-1fe896/nova-trajectories/evidence/features-wiki_search.feature-6-82629648/step-1/act-0-frame-1.jpg"
+        }
+      ],
+      "result": {
+        "value": ""
+      },
+      "error": null,
+      "time_worked_s": 25.867700338363647
+    }
+  ]
+}

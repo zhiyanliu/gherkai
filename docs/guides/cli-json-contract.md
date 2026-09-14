@@ -8,6 +8,9 @@
 > 本页与 code 的一致性由护栏守着：`cli/tests/test_cli_json_contract.py` 与 `deploy_aws/tests/test_workers.py` 用真渲染器生成样例
 > （`explain` 的 `evidence` 用一份与两引擎映射测试同形的手搭夹具）、递归收集全部键名（`actions[].args` 与 `acts[].result` 两个引擎透传节点不下钻）、
 > 逐个断言出现在本页——漏键即红。本页只讲「有什么字段、什么意思、何时出现」，不讲为什么（那在 ADR）。
+> **给 agent skill 的那份是本页的确定性转换副本**（`cli/gherkai_cli/skills/gherkai/references/cli-json-contract.md`，随 CLI wheel 发行）：
+> 由 `tools/render_skill_contract.py` 生成——剥掉本引用块与下面的姊妹页导航段、把仓库内指针与内部用词改写成使用方拿得到的形态；
+> 改了本页要重跑生成器，`cli/tests/test_skill.py` 断言副本与转换结果相等（为何不 link、不手抄见 ADR 0043 决策四）。
 
 姊妹页分工，本文只讲字段：字段背后的判定语义（四层归约 / 状态 / 退出码）→ [`verdict-model.md`](./verdict-model.md)；`artifacts` 各键指向的落点与证据 → [`artifacts-and-evidence.md`](./artifacts-and-evidence.md)；这些字段何时才有内容（推进链与落地时机）→ [`execution-and-reconciliation.md`](./execution-and-reconciliation.md)。
 

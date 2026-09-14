@@ -33,14 +33,14 @@
 
 | 交付物 | 通道 | 版本 | 谁构建 |
 |---|---|---|---|
-| `gherkai`（CLI） | PyPI，uv-first | git tag，单一旋钮 | 维护者 CI |
+| `gherkai`（CLI；含随 wheel 带的 `gherkai_cli/skills/gherkai/` 包数据 = agent skill，[0043](./0043-agent-skill-for-driving-gherkai.md)） | PyPI，uv-first | git tag，单一旋钮 | 维护者 CI |
 | `gherkai-runtime` / `gherkai-core` | PyPI，被 `==` lockstep pin；CLI 用户不直接装（集成方按层直依赖，见 2a） | 同号 | 维护者 CI |
 | `gherkai-worker-novaact` | PyPI，经 CLI extra `[local]` 装进 **同一个** venv | 同号 | 维护者 CI |
 | `@gherkai/worker-midscene` | npm（scope `@gherkai`） | 同号 | 维护者 CI |
 | worker **基底镜像** ×2 | **GHCR**（与 repo 同屋檐），linux/amd64，immutable `:X.Y.Z` | 同号 | 维护者 CI |
 | worker **定制镜像**（基底 + 使用方 steps，按 variant 多套并存） | 使用方私有 ECR；机制全在 [0038](./0038-worker-image-delivery.md) | 跟 CLI | 使用方本地 build，部署方 `gherkai deploy push-worker` 推送注册 |
 | `gherkai-deploy-aws`（IaC + Lambda handler 源 + worker 镜像推送） | PyPI，经 CLI extra `[deploy-aws]`；命令 `gherkai deploy` / `destroy` 及 worker 镜像族（0038） | 同号 | 维护者 CI |
-| `features/`（示例）· `tools/` · `docs/` | 不分发 | — | — |
+| `features/`（示例）· `tools/` · `docs/` · 根 `skills/`（agent skill 评测资产，0043） | 不分发 | — | — |
 
 八条决策展开如下。
 
@@ -183,12 +183,12 @@ worker 内容 = 框架脚手架 + 使用方确定性 step，属业界分类里�
 ├── pyproject.toml          ← uv workspace 根：[tool.uv.workspace] members 五个 Python 包；根自身无发行物
 ├── core/                   ← dist gherkai-core   · import gherkai_core   （今 core/）
 ├── runtime/                ← dist gherkai-runtime · import gherkai_runtime（今 gherkai/；目录改名避免 gherkai/gherkai_runtime/ 的歧义；names 含 image_tag / ecr_repo_name，0038）
-├── cli/                    ← dist gherkai        · import gherkai_cli · 命令 gherkai（今 cli/）
+├── cli/                    ← dist gherkai        · import gherkai_cli · 命令 gherkai（今 cli/）；gherkai_cli/skills/gherkai/ = 随 wheel 带的 agent skill（0043）
 ├── deploy_aws/             ← dist gherkai-deploy-aws · import gherkai_deploy_aws（stack.py / app.py / names.py / cli.py=Provider / lambdas/ 两个 handler 源作 asset 原料；worker 镜像族命令与容器引擎口子，0038）
 ├── engines/
 │   ├── novaact/            ← dist gherkai-worker-novaact · import gherkai_worker_novaact · console script 同名 · Dockerfile = 基底镜像（今 worker/ + lib/ 收进包）
 │   └── midscene/           ← npm @gherkai/worker-midscene · Dockerfile = 基底镜像（ESM + tsc dist/，tsconfig 入库，tsx 留 dependency，resolve hook 随 dist/）
-├── features/ · tools/ · docs/   ← 不分发（tools/build_push_workers.py 已随 0038 退役）
+├── features/ · tools/ · docs/ · skills/gherkai-evals/   ← 不分发（tools/build_push_workers.py 已随 0038 退役；skills/gherkai-evals/ = agent skill 评测资产，0043）
 ```
 
 - 一个目录 = 一个 workspace 成员 = 一个 lock（根 `uv.lock`），当前五处各自的 `uv.lock` 合一；`uv run gherkai …`、`uv run pytest`（根跑全部）、`uv build --package <name>`。**单 lock 要求全员依赖共解**（已实测通过）；将来某成员升版引入冲突时用 `tool.uv.conflicts` 声明或把该成员移出 workspace，不回退到多 lock。

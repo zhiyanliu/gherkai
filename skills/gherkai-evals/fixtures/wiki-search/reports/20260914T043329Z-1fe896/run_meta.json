@@ -1,0 +1,78 @@
+{
+  "run_id": "20260914T043329Z-1fe896",
+  "created_at": "2026-09-14T04:33:29.087670+00:00",
+  "jobs": [
+    {
+      "scope_id": "search",
+      "scope_name": "search",
+      "engine": "novaact",
+      "scenarios": [
+        {
+          "id": "features/wiki_search.feature:6",
+          "name": "搜索 OpenAI 并进入词条页",
+          "steps": [
+            {
+              "index": 0,
+              "keyword": "Given",
+              "text": "打开 \"https://en.wikipedia.org/wiki/Main_Page\""
+            },
+            {
+              "index": 1,
+              "keyword": "When",
+              "text": "\"在搜索框输入 OpenAI 并提交搜索\""
+            },
+            {
+              "index": 2,
+              "keyword": "Then",
+              "text": "页面地址匹配 \"/wiki/OpenAI\""
+            },
+            {
+              "index": 3,
+              "keyword": "Then",
+              "text": "\"当前是关于 OpenAI 的维基百科词条页\""
+            },
+            {
+              "index": 4,
+              "keyword": "Then",
+              "text": "\"词条首段说 OpenAI 成立于 1999 年\""
+            }
+          ]
+        }
+      ],
+      "assertion_votes": 1,
+      "timeout_s": 300.0
+    },
+    {
+      "scope_id": "features/wiki_search.feature:13",
+      "scope_name": "词条标题的精确检查",
+      "engine": "novaact",
+      "scenarios": [
+        {
+          "id": "features/wiki_search.feature:13",
+          "name": "词条标题的精确检查",
+          "steps": [
+            {
+              "index": 0,
+              "keyword": "Given",
+              "text": "打开 \"https://en.wikipedia.org/wiki/Python_(programming_language)\""
+            },
+            {
+              "index": 1,
+              "keyword": "Then",
+              "text": "页面标题包含 \"Python\""
+            },
+            {
+              "index": 2,
+              "keyword": "Then",
+              "text": "\"页面右侧的信息框里列出了最新稳定版本号\""
+            }
+          ]
+        }
+      ],
+      "assertion_votes": 1,
+      "timeout_s": 300.0
+    }
+  ],
+  "max_concurrency": 2,
+  "steps_dir": "{{FIXTURE_ROOT}}/steps"
+}

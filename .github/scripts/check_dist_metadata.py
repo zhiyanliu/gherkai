@@ -5,16 +5,20 @@
 `uv build` smoke 的断言体——把「元数据/metadata hook 回归」挡在推索引之前，而不是等发行后
 用户装不上才发现（ADR 0037「现状实测」记的原始故障就是 `Requires-Dist: core` 裸名）。
 
-三条断言都对照**真值集**（根 pyproject 的 `[tool.uv.workspace] members` → 各成员
-`[project] name`），不靠人读产物清单——新增一个 workspace 成员却忘了它进不进发布链，
-只有逐条比对真值集才照得出来：
+四条断言都对照**真值集**（前三条：根 pyproject 的 `[tool.uv.workspace] members` → 各成员
+`[project] name`；第四条：源目录的文件系统遍历），不靠人读产物清单——新增一个 workspace 成员却忘了
+它进不进发布链，只有逐条比对真值集才照得出来：
 
 1. 每个成员都产出 sdist + wheel；
 2. 全部产物同一个版本，且给了 `--expect-version` 时逐字等于它（版本真源 = git tag，
    ADR 0037 决策 2b）；
 3. wheel METADATA 里凡指向兄弟发行包的 `Requires-Dist` 都带 `==<版本>` lockstep pin
    （ADR 0037 决策 2b；uv-dynamic-versioning 的 metadata hook 没生效时这里会退化成裸名，
-   而 wheel 本身照样构建成功——即「绿≠对」，故须显式断言）。
+   而 wheel 本身照样构建成功——即「绿≠对」，故须显式断言）；
+4. `gherkai` wheel 内 `gherkai_cli/skills/gherkai/` 的文件集**逐条等于**源目录（agent skill 随 wheel
+   发行，ADR 0043 决策一/六），且不含评测资产（`evals`）。为何必须是集合相等：hatchling 默认认从项目根
+   向上找到的第一份 `.gitignore`（即 `cli/.gitignore`，今含 `reports/`），命中的路径**静默**不进
+   sdist/wheel，`git add -f` 强跟踪也救不回来——「文件受 git 跟踪」式护栏对这一格无效。
 
 用法：
     python3 .github/scripts/check_dist_metadata.py --dist dist [--expect-version 1.4.0]
@@ -67,6 +71,44 @@ def member_dist_names(repo_root: Path) -> dict[str, str]:
                 raise SystemExit(f"{pyproject} 的 [project] 没有 name")
             result[str(member_dir.relative_to(repo_root))] = name
     return result
+
+
+SKILL_DIST_NAME = "gherkai"                          # 带 skill 的那个发行包（CLI）
+SKILL_PACKAGE_DIR = "gherkai_cli/skills/gherkai"     # 包内路径 = wheel 内路径（hatchling 直收包目录下的非 .py）
+SKILL_SOURCE_DIR = "cli/" + SKILL_PACKAGE_DIR
+
+
+def skill_source_files(repo_root: Path) -> set[str]:
+    """真值集：源目录的文件系统遍历（**不用 `git ls-files`**——见模块 docstring 断言 4 的理由：
+    受不受 git 跟踪与进不进 wheel 是两件事，这里要比的是「磁盘上有什么」）。排除 `__pycache__/` 与 `*.pyc`。"""
+    root = repo_root / SKILL_SOURCE_DIR
+    if not root.is_dir():
+        raise SystemExit(f"源目录不存在：{root}——skill 搬家了？先修本脚本的路径，别让闸门静默变绿")
+    return {
+        str(p.relative_to(root)) for p in root.rglob("*")
+        if p.is_file() and "__pycache__" not in p.parts and p.suffix != ".pyc"
+    }
+
+
+def check_skill_payload(wheel: Path, repo_root: Path) -> list[str]:
+    """断言 4：wheel 内 skill 文件集 == 源目录文件集，且 wheel 里不含评测资产。"""
+    expected = skill_source_files(repo_root)
+    with zipfile.ZipFile(wheel) as zf:
+        names = zf.namelist()
+
+    prefix = SKILL_PACKAGE_DIR + "/"
+    shipped = {n[len(prefix):] for n in names if n.startswith(prefix) and not n.endswith("/")}
+    errors: list[str] = []
+    if missing := sorted(expected - shipped):
+        errors.append(
+            f"{wheel.name} 里缺这些 skill 文件：{missing}——最可能是被 `cli/.gitignore` 静默吞了"
+            "（hatchling 默认认项目根向上第一份 .gitignore）；改名或在 cli/pyproject 的 wheel target 显式 include"
+        )
+    if extra := sorted(shipped - expected):
+        errors.append(f"{wheel.name} 里多出这些 skill 文件（源目录没有）：{extra}——产物目录不干净或构建配置多收了")
+    if evals := sorted(n for n in names if "evals" in n):
+        errors.append(f"{wheel.name} 里带上了评测资产：{evals}——评测资产住仓库根 skills/gherkai-evals/，不该进发行包")
+    return errors
 
 
 def wheel_metadata(wheel: Path):
@@ -140,6 +182,10 @@ def main() -> int:
         if name not in seen_wheels:
             errors.append(f"workspace 成员 {member_dir}（发行名 {name}）没有 wheel 产物——它没进发布链")
 
+    # 断言 4：agent skill 随 wheel 带走，逐文件对齐源目录
+    if SKILL_DIST_NAME in seen_wheels:
+        errors.extend(check_skill_payload(seen_wheels[SKILL_DIST_NAME], repo_root))
+
     # 断言 2：版本一致——先按成员查「同名多版本并存」（脏 dist：旧产物没清；`uv publish` 默认推 dist/* 全部文件，
     # 会把上一次 build 的旧版本一并推上索引），再查跨成员一致。按发行名收单值会让后者覆盖前者、照不出这一格。
     for name, vs in sorted(versions_seen.items()):
@@ -179,7 +225,7 @@ def main() -> int:
         for err in errors:
             fail(err)
         return 1
-    print("产物校验通过：成员齐、版本一致（无旧版本残留）、兄弟包 pin 已渲染。")
+    print("产物校验通过：成员齐、版本一致（无旧版本残留）、兄弟包 pin 已渲染、skill 文件集与源目录一致。")
     return 0
 
 

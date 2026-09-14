@@ -163,6 +163,25 @@ RUN_ID=$(gherkai submit my_app.feature --expose-local http://localhost:3000)
 
 示例 feature 在 [`features/`](./features/)。
 
+## 让 AI agent 驾驭
+
+装了 CLI 的项目可以把 gherkai 的 agent skill 装进来，让 Claude Code / Codex 这类 coding agent 替你写用例、跑、读失败证据、收窄重跑、汇报：
+
+```bash
+gherkai skill install                     # 装给 Claude Code：<项目>/.claude/skills/gherkai/，与已装的 CLI 同版本
+gherkai skill install --agent codex       # 装给 Codex：<项目>/.agents/skills/gherkai/；--agent all 两处都装
+gherkai skill install --global            # 装到用户级目录（~/.claude/skills/ 或 ~/.agents/skills/），对你所有项目生效
+gherkai skill install --print             # 只把正文打到 stdout，什么都不装
+```
+
+装完会问一句要不要往项目的 `CLAUDE.md` / `AGENTS.md` 追加一行提示（`--pointer yes|no` 免交互）。重装即收敛：整个目录换成当前 CLI 带的那份，不留上一版的残余；不是本命令装的同名目录不动、退 `2`。不装 CLI 也能拿到同一份：
+
+```bash
+npx skills add https://github.com/zhiyanliu/gherkai/tree/v<版本>/cli/gherkai_cli/skills/gherkai --agent claude-code
+```
+
+这条路不经 CLI、版本要自己钉：URL 里的 `v<版本>` 写成你要跟的 CLI 版本；写 `HEAD` 拿的是默认分支最新、可能比装的 CLI 新。skill 教 agent 的是操作模型（何时先 `plan`、失败先 `explain`、退出码怎么分流、什么时候该写确定性 step），命令细节仍以 `gherkai <命令> --help` 为准。
+
 ## 注意
 
 - 运行会真实消耗 AWS 费用（模型调用 + AgentCore 会话）。

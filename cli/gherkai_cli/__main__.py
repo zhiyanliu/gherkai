@@ -26,6 +26,7 @@ from gherkai_runtime import names as _names
 
 from gherkai_cli import deploy as _deploy
 from gherkai_cli import render
+from gherkai_cli import skill_install as _skill_install
 
 
 def _dist_version() -> str:
@@ -445,6 +446,31 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     ld.add_argument(
         "--steps-dir", default=None, metavar="DIR",
         help=_STEPS_DIR_HELP + "——清单据此含使用方定制 step（自述入口同样加载该目录）",
+    )
+
+    # skill：把随 wheel 带的 agent skill 装到使用方项目/用户级 agent 目录（ADR 0043 决策三）。
+    # 形态是**普通嵌套 subparser + 子动词必填**（裸 `gherkai skill` 由 argparse 自己报错退 2）；
+    # 不套 deploy 的 `set_defaults` 间接层——那层是为 provider 中立设的，skill 无 provider。
+    sk = sub.add_parser("skill", help="装给 AI coding agent 用的 gherkai 技能包（教它怎么驾驭本工具）")
+    sk_sub = sk.add_subparsers(dest="skill_command", required=True)
+    si = sk_sub.add_parser("install", help="把技能包装进项目（或用户级）的 agent 目录")
+    si.add_argument(
+        "--agent", choices=list(_skill_install.AGENT_CHOICES), default="claude-code",
+        help="装给哪个 agent（默认 claude-code）：claude-code → .claude/skills/、codex → .agents/skills/、all → 两处都装",
+    )
+    where = si.add_mutually_exclusive_group()
+    where.add_argument("--dir", default=None, metavar="DIR", help="装进哪个项目根（默认当前目录）")
+    where.add_argument(
+        "--global", dest="global_", action="store_true",
+        help="装到用户级目录（~ 下，对你所有项目生效），与 --dir 互斥",
+    )
+    si.add_argument(
+        "--print", dest="print_only", action="store_true",
+        help="只把技能包正文打到 stdout（供管道/贴给别处），什么都不装",
+    )
+    si.add_argument(
+        "--pointer", choices=["yes", "no"], default=None,
+        help="非交互回答「要不要把那行提示追加进项目的 CLAUDE.md / AGENTS.md」（不给且在交互终端时会问一次，默认否）",
     )
 
     # [部署方] 云端后端的供给面（ADR 0037 决策 6）：命令面在皮、IaC 在 provider 包（`gherkai[deploy-aws]`）。
@@ -2026,6 +2052,15 @@ def _cmd_destroy(args) -> int:
     return 2 if provider is None else provider.destroy(args)
 
 
+def _cmd_skill_install(args) -> int:
+    """[使用方] 把包内那份 agent skill 收敛安装到目标目录（行为与判据见 `skill_install` 模块头，ADR 0043 决策三）。
+
+    版本显式传进去：标记值取法与后端版本 skew 比对同源（`_installed_version()`，未装成包 → None →
+    标记记「版本未知」、安装照常完成）；`--version` 显示用的占位串不进标记。
+    """
+    return _skill_install.install(args, version=_installed_version())
+
+
 def main(argv: list[str] | None = None) -> int:
     # argv 落实成具体 list：要先窥一眼才知道该不该为它加载部署 provider（见 _peek_deploy_provider）。
     argv = list(sys.argv[1:] if argv is None else argv)
@@ -2063,6 +2098,9 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_deploy(args)
     if args.command == "destroy":
         return _cmd_destroy(args)
+    if args.command == "skill":
+        # 子动词只有 install（argparse 的 required=True + choices 已把别的形态挡在前面）
+        return _cmd_skill_install(args)
 
     # 无子命令 → 打帮助
     parser.print_help()

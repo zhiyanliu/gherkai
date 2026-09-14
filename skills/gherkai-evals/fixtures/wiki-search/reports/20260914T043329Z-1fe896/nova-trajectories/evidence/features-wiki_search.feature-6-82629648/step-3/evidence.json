@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "engine": "novaact",
+  "scope_id": "search",
+  "scenario_id": "features/wiki_search.feature:6",
+  "step_index": 3,
+  "step": {
+    "keyword": "Then",
+    "text": "\"当前是关于 OpenAI 的维基百科词条页\""
+  },
+  "status": "passed",
+  "message": null,
+  "acts": [
+    {
+      "index": 0,
+      "prompt": "当前是关于 OpenAI 的维基百科词条页",
+      "vote": true,
+      "url": "https://en.wikipedia.org/wiki/OpenAI",
+      "frames": [
+        {
+          "url": "https://en.wikipedia.org/wiki/OpenAI",
+          "thought": "I am on the Wikipedia page for OpenAI. My task is to return whether the current page is the Wikipedia page for OpenAI. I can see the page title is 'OpenAI', which matches the user's request. I should return true to indicate that the current page is the Wikipedia page for OpenAI.",
+          "actions": [],
+          "screenshot": "file://{{FIXTURE_ROOT}}/reports/20260914T043329Z-1fe896/nova-trajectories/evidence/features-wiki_search.feature-6-82629648/step-3/act-0-frame-0.jpg"
+        }
+      ],
+      "result": {
+        "value": "true"
+      },
+      "error": null,
+      "time_worked_s": 9.589812278747559
+    }
+  ]
+}

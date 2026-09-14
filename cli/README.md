@@ -46,6 +46,7 @@ gherkai status "$RUN_ID" --wait --json                  # 事后轮询到跑完�
 | `gherkai list-engines` | 列出可用引擎（缺的那个原地给安装命令）；`--json` 机读 |
 | `gherkai doctor` | 只读自检：引擎 worker、`steps/` 加载、（给 `--backend cloud --prefix` 时）凭证、后端资源与版本、部署工具链；全过退 `0`、有必修项失败退 `2`；`--json` 机读 |
 | `gherkai list-deterministic --engine <名>` | 列出该引擎支持的确定性步骤（含你自己写的），写 feature 时查着复用 |
+| `gherkai skill install` | 把驾驭本工具的 agent skill 装进项目：Claude Code 落 `.claude/skills/gherkai/`、Codex 落 `.agents/skills/gherkai/`（`--agent claude-code|codex|all`、`--global` 装用户级、`--print` 只打正文）。与 CLI 同版本，重装即收敛；装完可选追加一行提示进 `CLAUDE.md` / `AGENTS.md` |
 | `gherkai deploy` / `gherkai destroy` | 建/改/拆云端后端。只有部署方需要，见下 |
 
 `run` 要求 CLI 全程在线（网断、关机即中止）。`submit` 把「提交」和「收结果」拆开：local 档在本机起一个脱离 CLI 的后台进程推进，cloud 档交给云端推进（提交完真关机也能跑完）。`status --wait` 既是查询也是接力——后台进程崩了或卡住，来查的这条命令会把它续到底。

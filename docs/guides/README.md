@@ -11,4 +11,4 @@
 | [`cloud-backend-carriers.md`](./cloud-backend-carriers.md) | 云端后端由哪几个载体拼成；一次改动要推到哪几处才生效；症状怎么反查载体 | stack / Lambda asset / 基底镜像 / variant 镜像 / SSM 五种载体、版本升级传播顺序、症状→载体反查、提交侧 revision 解析与退休规则、prefix 隔离 |
 | [`cli-json-contract.md`](./cli-json-contract.md) | `--json` 各命令有什么字段、什么意思、何时出现 | 全部机读字段的名、类型、出现条件（唯一字段级参考，有护栏钉着；其它篇只链不列） |
 
-不在这一层的东西：使用者操作手册在各包 `README.md`，contributor 的目录/测试/发布链在各 `DEVELOPMENT.md`，决策与理由在 [`docs/adr/`](../adr/)，术语在 [`CONTEXT.md`](../../CONTEXT.md)，驾驭本工具的 AI agent 用 skill（另立）。
+不在这一层的东西：使用者操作手册在各包 `README.md`，contributor 的目录/测试/发布链在各 `DEVELOPMENT.md`，决策与理由在 [`docs/adr/`](../adr/)，术语在 [`CONTEXT.md`](../../CONTEXT.md)，驾驭本工具的 AI agent 用随 CLI 发行的 skill（`cli/gherkai_cli/skills/gherkai/`，`gherkai skill install` 装进项目；它的机读字段页是本目录 [`cli-json-contract.md`](./cli-json-contract.md) 的确定性转换副本，为何不 link、如何转换见 [ADR 0043](../adr/0043-agent-skill-for-driving-gherkai.md)）。

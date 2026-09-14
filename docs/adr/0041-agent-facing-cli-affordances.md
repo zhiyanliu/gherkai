@@ -1,6 +1,6 @@
 # 0041. 面向 AI agent 驾驭的 CLI 能力：scenario 筛选、静默落盘、JSON 覆盖补齐、doctor 自检、JSON 契约
 
-> **Status:** Accepted（2026-09-10）—— 五项均已实装并有护栏；agent skill（另立）以本 ADR 的命令面为教学对象。本 ADR「重议闸门」失败证据机读化一条已由 [0042](./0042-step-evidence-and-explain.md)（step 级 evidence + `explain`）落地，五项决策不变。
+> **Status:** Accepted（2026-09-10）—— 五项均已实装并有护栏；agent skill（[0043](./0043-agent-skill-for-driving-gherkai.md)）以本 ADR 的命令面为教学对象。本 ADR「重议闸门」失败证据机读化一条已由 [0042](./0042-step-evidence-and-explain.md)（step 级 evidence + `explain`）落地，五项决策不变。
 
 ## 背景与问题
 
@@ -55,7 +55,7 @@ gherkai 的直接操作者越来越多是 AI coding agent（Claude Code / Codex 
 
 ### 五、JSON 字段契约文档 + 护栏
 
-- 文档住 repo：`docs/guides/cli-json-contract.md`（给使用者/agent 的参考层，读者是「拿 `--json` 写脚本或 skill 的人」；不进发行包、不写 why）。skill 只链接它，不复制字段表——复制即第二事实源。
+- 文档住 repo：`docs/guides/cli-json-contract.md`（给使用者/agent 的参考层，读者是「拿 `--json` 写脚本或 skill 的人」；不进发行包、不写 why）。唯一手写源仍在这里、不进发行包；agent skill 带一份**确定性转换**的副本随 CLI 发行（为何不能 link、转换规则与相等性护栏见 [0043](./0043-agent-skill-for-driving-gherkai.md) 决策四）——手写第二份才是第二事实源，生成副本由护栏钉住。
 - **护栏 = 真值集对照**（CLAUDE.md 文档纪律）：`cli/tests/test_cli_json_contract.py` 用真渲染器生成各命令的 JSON 样例，递归收集全部键名，逐个断言文档里以反引号出现——文档漏键即红。
 - 被拒：`gherkai schema <cmd>` 输出 JSON Schema——更机读，但要维护一套 schema 生成；先用文档 + 护栏，需求出现再升级（重议闸门）。
 
@@ -63,7 +63,7 @@ gherkai 的直接操作者越来越多是 AI coding agent（Claude Code / Codex 
 
 - README（根 / cli）：新增 flag、`--quiet` 语义、`doctor`、`--json` 覆盖表；deploy_aws README：`list-workers --json`。
 - 与 [0039](./0039-user-facing-surfaces-no-internal-references.md)：`doctor` 与筛选提示的文案同受产品面约束。
-- agent skill（另立，不在本 ADR）：以本命令面为教学对象；skill 里的流程 = `doctor → plan（--tags/--scenario）→ run --quiet --json → 读 jobs/*.json → 改 → 重跑`。
+- agent skill：以本命令面为教学对象，内容（工作循环、旋钮分组、退出码分流、失败汇报）全在 [0043](./0043-agent-skill-for-driving-gherkai.md) 决策五。
 
 ## 重议闸门
 

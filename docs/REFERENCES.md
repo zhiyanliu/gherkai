@@ -81,3 +81,11 @@ aws bedrock-agentcore stop-browser-session  --region us-east-1 --browser-identif
 - https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_DescribeTaskDefinition.html · https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_RegisterTaskDefinition.html — 复制模板时须剔除的只读字段、`include=TAGS`、注册时打 tags 需 `ecs:TagResource`
 - https://docs.aws.amazon.com/systems-manager/latest/APIReference/API_GetParametersByPath.html — 单页最多 10 条、`Recursive` 默认 false；标准参数值上限 4KB
 - https://github.com/moby/moby/blob/master/api/swagger.yaml — `ImageInspect.RepoDigests` 仅在 pull/push 过 registry 后可用（本地 build 的镜像无 manifest digest）
+
+## Agent Skills（见 ADR 0043）
+
+- https://agentskills.io/specification — Agent Skills 开放规范：`SKILL.md` frontmatter（`name` 小写连字符 ≤ 64 且等于目录名、`description` ≤ 1024 字符）、正文建议 < 500 行、`references/` `scripts/` `assets/` 三类捆绑资源、渐进式披露（元数据常驻 → 触发时读正文 → 按需读 references）
+- https://github.com/vercel-labs/skills — `npx skills add <source>`：容器目录默认只扫 `skills/` `.claude/skills/` 等惯用位，任意路径用 `tree/<ref>/<path>` 直指（可钉 tag）；`--agent` 选安装位；Claude Code 落 `.claude/skills/`、Codex 落 `.agents/skills/`（`.codex/skills` 官方从未列出）
+- https://developers.openai.com/codex/skills — Codex skills：项目级 `.agents/skills/`、用户级 `~/.agents/skills/`；AGENTS.md 只需一行指针
+- https://code.claude.com/docs/en/skills — Claude Code skills：项目级 `.claude/skills/`、用户级 `~/.claude/skills/`；frontmatter 允许宿主扩展键
+- skill-creator（Anthropic `example-skills` 插件内，本机 `~/.claude/plugins/cache/anthropic-agent-skills/example-skills/<hash>/skills/skill-creator/`）——评测循环（`evals.json` schema、with-skill vs baseline 两臂、`scripts/aggregate_benchmark.py`、`eval-viewer/generate_review.py`）与 description 优化（`scripts/run_loop.py --eval-set <触发集> --skill-path <skill> --model <模型>`，train / held-out 分割）

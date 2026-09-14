@@ -12,17 +12,11 @@ import tomllib
 from pathlib import Path
 
 import pytest
+from _doc_rules import FORBIDDEN, RELATIVE_LINK  # 禁词 / 相对链接的单一事实源（见该模块 docstring）
 
 REPO = Path(__file__).resolve().parents[2]
 PY_PACKAGES = ("cli", "core", "runtime", "deploy_aws", "engines/novaact")
 NPM_PACKAGES = ("engines/midscene",)
-
-FORBIDDEN = re.compile(
-    r"\bADR\b"                       # ADR 编号 / 「见 ADR」
-    r"|决策\s*[0-9A-Za-z]"            # 决策 N
-    r"|不变量|定位链|被拒方案|重议闸门|实测项|接缝契约|模块头|组合根"
-)
-RELATIVE_LINK = re.compile(r"\]\((?:\.\.?/|(?![a-z][a-z0-9+.-]*:|#)[^)\s]+\.md)")  # ](../x) / ](./x) / ](foo.md)
 
 
 def _shipped_readmes() -> list[Path]:

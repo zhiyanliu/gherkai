@@ -1,0 +1,155 @@
+{
+  "job": {
+    "scope_id": "search",
+    "scope_name": "search",
+    "engine": "novaact",
+    "scenarios": [
+      {
+        "id": "features/wiki_search.feature:6",
+        "name": "搜索 OpenAI 并进入词条页",
+        "steps": [
+          {
+            "index": 0,
+            "keyword": "Given",
+            "text": "打开 \"https://en.wikipedia.org/wiki/Main_Page\""
+          },
+          {
+            "index": 1,
+            "keyword": "When",
+            "text": "\"在搜索框输入 OpenAI 并提交搜索\""
+          },
+          {
+            "index": 2,
+            "keyword": "Then",
+            "text": "页面地址匹配 \"/wiki/OpenAI\""
+          },
+          {
+            "index": 3,
+            "keyword": "Then",
+            "text": "\"当前是关于 OpenAI 的维基百科词条页\""
+          },
+          {
+            "index": 4,
+            "keyword": "Then",
+            "text": "\"词条首段说 OpenAI 成立于 1999 年\""
+          }
+        ]
+      }
+    ],
+    "assertion_votes": 1,
+    "timeout_s": 300.0
+  },
+  "status": "failed",
+  "duration_ms": 57777.266598073766,
+  "total_tokens": null,
+  "total_time_worked_s": 45.25985074043274,
+  "session_id": "01a09e31-3099-7331-8898-f27f18ae720c",
+  "error_type": null,
+  "message": null,
+  "report_refs": [
+    {
+      "kind": "summary",
+      "ref": "file://{{FIXTURE_ROOT}}/reports/20260914T043329Z-1fe896/nova-trajectories/01a09e31-3099-7331-8898-f27f18ae720c/session_summary.json",
+      "label": "Nova session summary"
+    }
+  ],
+  "scenarios": [
+    {
+      "scenario_id": "features/wiki_search.feature:6",
+      "status": "failed",
+      "duration_ms": 53766.92446193192,
+      "report_refs": [],
+      "steps": [
+        {
+          "index": 0,
+          "status": "passed",
+          "duration_ms": 6777.898868080229,
+          "votes": null,
+          "error_type": null,
+          "message": null,
+          "report_refs": [],
+          "shortcircuited": false
+        },
+        {
+          "index": 1,
+          "status": "passed",
+          "duration_ms": 26455.71290992666,
+          "votes": null,
+          "error_type": null,
+          "message": null,
+          "report_refs": [
+            {
+              "kind": "trajectory",
+              "ref": "file://{{FIXTURE_ROOT}}/reports/20260914T043329Z-1fe896/nova-trajectories/01a09e31-3099-7331-8898-f27f18ae720c/act_01a09e31-5dcb-76f7-983f-59fd83d6f568_在搜索框输入_OpenAI_并提交搜索.html",
+              "label": "trajectory"
+            },
+            {
+              "kind": "evidence",
+              "ref": "file://{{FIXTURE_ROOT}}/reports/20260914T043329Z-1fe896/nova-trajectories/evidence/features-wiki_search.feature-6-82629648/step-1/evidence.json",
+              "label": "evidence"
+            }
+          ],
+          "shortcircuited": false
+        },
+        {
+          "index": 2,
+          "status": "passed",
+          "duration_ms": 0.011669006198644638,
+          "votes": null,
+          "error_type": null,
+          "message": null,
+          "report_refs": [],
+          "shortcircuited": false
+        },
+        {
+          "index": 3,
+          "status": "passed",
+          "duration_ms": 10147.216374985874,
+          "votes": {
+            "yes": 1,
+            "total": 1
+          },
+          "error_type": null,
+          "message": null,
+          "report_refs": [
+            {
+              "kind": "trajectory",
+              "ref": "file://{{FIXTURE_ROOT}}/reports/20260914T043329Z-1fe896/nova-trajectories/01a09e31-3099-7331-8898-f27f18ae720c/act_01a09e31-c51c-7360-aeb2-c33f5b12418a_当前是关于_OpenAI_的维基百科词条页,_format_.html",
+              "label": "trajectory"
+            },
+            {
+              "kind": "evidence",
+              "ref": "file://{{FIXTURE_ROOT}}/reports/20260914T043329Z-1fe896/nova-trajectories/evidence/features-wiki_search.feature-6-82629648/step-3/evidence.json",
+              "label": "evidence"
+            }
+          ],
+          "shortcircuited": false
+        },
+        {
+          "index": 4,
+          "status": "failed",
+          "duration_ms": 10385.927584953606,
+          "votes": {
+            "yes": 0,
+            "total": 1
+          },
+          "error_type": "assertion_failed",
+          "message": "AI 断言未过多数票（0/1）：\"词条首段说 OpenAI 成立于 1999 年\"",
+          "report_refs": [
+            {
+              "kind": "trajectory",
+              "ref": "file://{{FIXTURE_ROOT}}/reports/20260914T043329Z-1fe896/nova-trajectories/01a09e31-3099-7331-8898-f27f18ae720c/act_01a09e31-ecc1-70ce-a795-a3ba7fd77d04_词条首段说_OpenAI_成立于_1999_年,_forma.html",
+              "label": "trajectory"
+            },
+            {
+              "kind": "evidence",
+              "ref": "file://{{FIXTURE_ROOT}}/reports/20260914T043329Z-1fe896/nova-trajectories/evidence/features-wiki_search.feature-6-82629648/step-4/evidence.json",
+              "label": "evidence"
+            }
+          ],
+          "shortcircuited": false
+        }
+      ]
+    }
+  ]
+}

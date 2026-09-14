@@ -50,6 +50,27 @@ screenshots/
 test-results/
 playwright-report/
 
+# ── agent skill 的评测资产（仓库根 skills/，开发期用、不随包发行）──
+# 结果工作区（每轮评测的 transcript / 日志 / 舞台残留）是派生品，不入库。
+skills/*-workspace/
+# fixtures/ 相反：它是入库资产（评测要能直读、diff、与真跑产出同形），但上面的派生品段会**部分**吞掉它
+# ——`reports/`、`*.log`、`screenshots/`、`*.report.html` 命中规则，而 Nova 的 evidence 截图不命中；
+# 部分吞比全缺更难发现，故整棵反白名单放行。护栏是行为式的：cli/tests/test_skill.py 拿探针路径跑
+# `git check-ignore --no-index`，两向都断（派生品形态未被忽略 + 密钥形态仍被忽略）。
+!skills/gherkai-evals/fixtures/**
+# 反白名单排在密钥块之后，会把密钥规则一起放开，故在此**重列**密钥块的每一条、只作用于这棵子树。
+# 改动时以上面的密钥块为准、逐条对照（含那条放行示例文件的反规则——否则 `.env.*` 会把 `.env.example` 吞掉）。
+skills/gherkai-evals/fixtures/**/.env
+skills/gherkai-evals/fixtures/**/.env.*
+!skills/gherkai-evals/fixtures/**/.env.example
+skills/gherkai-evals/fixtures/**/*.pem
+skills/gherkai-evals/fixtures/**/*.key
+skills/gherkai-evals/fixtures/**/.aws/
+skills/gherkai-evals/fixtures/**/credentials
+# 反白名单也会把这两份 worker 侧日志救回来：它们含产出机器的绝对路径、对评测无用，显式排除。
+skills/gherkai-evals/fixtures/**/worker.log
+skills/gherkai-evals/fixtures/**/reconcile.log
+
 # ── 通用临时 ──
 tmp/
 __pycache__/

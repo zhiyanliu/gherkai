@@ -1,0 +1,97 @@
+{
+  "schema_version": 1,
+  "run_id": "20260914T043329Z-1fe896",
+  "created_at": "2026-09-14T04:34:41.675248+00:00",
+  "report_index": [
+    {
+      "scope_id": "search",
+      "scenario_id": null,
+      "step_index": null,
+      "engine": "novaact",
+      "kind": "summary",
+      "href": "nova-trajectories/01a09e31-3099-7331-8898-f27f18ae720c/session_summary.json",
+      "label": "Nova session summary"
+    },
+    {
+      "scope_id": "search",
+      "scenario_id": "features/wiki_search.feature:6",
+      "step_index": 1,
+      "engine": "novaact",
+      "kind": "trajectory",
+      "href": "nova-trajectories/01a09e31-3099-7331-8898-f27f18ae720c/act_01a09e31-5dcb-76f7-983f-59fd83d6f568_在搜索框输入_OpenAI_并提交搜索.html",
+      "label": "trajectory"
+    },
+    {
+      "scope_id": "search",
+      "scenario_id": "features/wiki_search.feature:6",
+      "step_index": 1,
+      "engine": "novaact",
+      "kind": "evidence",
+      "href": "nova-trajectories/evidence/features-wiki_search.feature-6-82629648/step-1/evidence.json",
+      "label": "evidence"
+    },
+    {
+      "scope_id": "search",
+      "scenario_id": "features/wiki_search.feature:6",
+      "step_index": 3,
+      "engine": "novaact",
+      "kind": "trajectory",
+      "href": "nova-trajectories/01a09e31-3099-7331-8898-f27f18ae720c/act_01a09e31-c51c-7360-aeb2-c33f5b12418a_当前是关于_OpenAI_的维基百科词条页,_format_.html",
+      "label": "trajectory"
+    },
+    {
+      "scope_id": "search",
+      "scenario_id": "features/wiki_search.feature:6",
+      "step_index": 3,
+      "engine": "novaact",
+      "kind": "evidence",
+      "href": "nova-trajectories/evidence/features-wiki_search.feature-6-82629648/step-3/evidence.json",
+      "label": "evidence"
+    },
+    {
+      "scope_id": "search",
+      "scenario_id": "features/wiki_search.feature:6",
+      "step_index": 4,
+      "engine": "novaact",
+      "kind": "trajectory",
+      "href": "nova-trajectories/01a09e31-3099-7331-8898-f27f18ae720c/act_01a09e31-ecc1-70ce-a795-a3ba7fd77d04_词条首段说_OpenAI_成立于_1999_年,_forma.html",
+      "label": "trajectory"
+    },
+    {
+      "scope_id": "search",
+      "scenario_id": "features/wiki_search.feature:6",
+      "step_index": 4,
+      "engine": "novaact",
+      "kind": "evidence",
+      "href": "nova-trajectories/evidence/features-wiki_search.feature-6-82629648/step-4/evidence.json",
+      "label": "evidence"
+    },
+    {
+      "scope_id": "features/wiki_search.feature:13",
+      "scenario_id": null,
+      "step_index": null,
+      "engine": "novaact",
+      "kind": "summary",
+      "href": "nova-trajectories/01a09e31-372b-7376-9768-93c7e0625960/session_summary.json",
+      "label": "Nova session summary"
+    },
+    {
+      "scope_id": "features/wiki_search.feature:13",
+      "scenario_id": "features/wiki_search.feature:13",
+      "step_index": 2,
+      "engine": "novaact",
+      "kind": "trajectory",
+      "href": "nova-trajectories/01a09e31-372b-7376-9768-93c7e0625960/act_01a09e31-6772-7465-a673-0cf195595e43_页面右侧的信息框里列出了最新稳定版本号,_format_ou.html",
+      "label": "trajectory"
+    },
+    {
+      "scope_id": "features/wiki_search.feature:13",
+      "scenario_id": "features/wiki_search.feature:13",
+      "step_index": 2,
+      "engine": "novaact",
+      "kind": "evidence",
+      "href": "nova-trajectories/evidence/features-wiki_search.feature-13-93f62c2a/step-2/evidence.json",
+      "label": "evidence"
+    }
+  ]
+}
