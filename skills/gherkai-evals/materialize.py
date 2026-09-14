@@ -88,7 +88,8 @@ def copy_fixture(case: str, stage: Path) -> None:
     src = FIXTURES / case
     if not src.is_dir():
         fail(f"fixture 不存在：{src}")
-    shutil.copytree(src, stage, dirs_exist_ok=True)
+    # 本机对 fixture 跑过 plan / list-deterministic 就会在 steps/ 下留 .pyc（内嵌编译机绝对路径）——不能带进舞台
+    shutil.copytree(src, stage, dirs_exist_ok=True, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
 
 
 def substitute_placeholders(stage: Path) -> int:
