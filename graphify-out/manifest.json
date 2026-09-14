@@ -1230,8 +1230,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0043-agent-skill-for-driving-gherkai.md": {
-    "mtime": 1789370589.429174,
-    "ast_hash": "fb4c179b1d1a3713746f243c457ebfb1",
+    "mtime": 1789371906.218723,
+    "ast_hash": "91703edb9a09dc583353e43b38bdc16c",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skill_install.py": {
@@ -1562,6 +1562,16 @@
   "skills/README.md": {
     "mtime": 1789370762.0696075,
     "ast_hash": "d073804a5d43aa2660e145a3695c6662",
+    "semantic_hash": ""
+  },
+  "skills/gherkai-evals/summarize_runs.py": {
+    "mtime": 1789371885.0558677,
+    "ast_hash": "cf2857546e4cf241f8cef7938b8e4ba7",
+    "semantic_hash": ""
+  },
+  "skills/gherkai-evals/grader-prompt.md": {
+    "mtime": 1789371885.0578992,
+    "ast_hash": "d2ffe3d58ad21aa3d9c7ad1312d0a3ee",
     "semantic_hash": ""
   }
 }
