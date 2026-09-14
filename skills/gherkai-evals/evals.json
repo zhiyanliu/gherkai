@@ -1,6 +1,6 @@
 {
   "skill_name": "gherkai",
-  "notes": "缺省集只执行 plan / explain / doctor / list-deterministic，零条真 AWS；opt_in=true 的条目会真跑 run / submit、只由维护者在自己的部署上按需跑。fixture 路径相对本目录；评测前用 materialize.py 把 fixture 物化到仓库外的舞台，两臂都在舞台里以 `claude -p` 跑、cwd = 舞台、PATH 前置舞台 bin/。 第四轮前按第三轮评分者批评收紧：复合断言拆条（eval 2/9/10/11/13）、放行开关与投票的判据正向化（eval 9/14）、禁绕过式修复（eval 12）、正则须匹配真实落地地址（eval 1）、禁留新 run 目录（eval 13）；「--help 与只读命令不算执行」统一写进所有「没有执行」断言。断言总数随之变化，通过率与前一轮不可直接比。",
+  "notes": "缺省集只执行 plan / explain / doctor / list-deterministic，零条真 AWS；opt_in=true 的条目会真跑 run / submit、只由维护者在自己的部署上按需跑。fixture 路径相对本目录；评测前用 materialize.py 把 fixture 物化到仓库外的舞台，两臂都在舞台里以 `claude -p` 跑、cwd = 舞台、PATH 前置舞台 bin/。 第四轮前按第三轮评分者批评收紧：复合断言拆条（eval 2/9/10/11/13）、放行开关与投票的判据正向化（eval 9/14）、禁绕过式修复（eval 12）、正则须匹配真实落地地址（eval 1）、禁留新 run 目录（eval 13）；「--help 与只读命令不算执行」统一写进所有「没有执行」断言。断言总数随之变化，通过率与前一轮不可直接比。 第五轮前：eval 1 的四合一断言拆为「复用确定性 step」与「正则鲁棒（含对实测 301 终点与 evil 主机的机械判据）」；所有缺省 eval 加「不把评测脚手架当用户环境」；新增 eval 15（scope 跨文件撞名，fixture scope-collision）与 eval 16（Background + Outline 写用例）。",
   "evals": [
     {
       "id": 1,
@@ -11,12 +11,14 @@
       ],
       "expectations": [
         "产出的 .feature 用 Given 加双引号内的 http(s) URL 作导航步",
-        "URL 检查写成确定性 step（内建的『页面地址匹配』或 steps/ 里新注册的一条），不是自然语言断言；正则锚定主机（能挡住 iana.org.evil.com）且同时能匹配 iana.org 与 www.iana.org 两种主机名、不把跳转后的路径写死",
+        "URL 检查复用内建的『页面地址匹配』确定性 step（或 steps/ 里新注册的一条），不是自然语言断言",
+        "正则鲁棒：锚定主机（对 https://iana.org.evil.com/ 不命中）、同时接受 iana.org 与 www.iana.org、不把跳转后的路径写死；评分时用产出的正则对实测 301 终点地址跑一次须命中、对 iana.org.evil.com 跑一次须不命中",
         "先用 gherkai list-deterministic 确认内建的『页面地址匹配』已存在、直接复用，没有重复自写一侧的 URL step",
         "标题检查写成页面级语义陈述的 Then 断言，而不是子串规则、段落边界或选择器 / DOM 标签",
         "执行了 gherkai plan 并引用了它的派发标注（确定性 / AI）来核对写法；plan 退 0",
         "没有执行 gherkai run 或 gherkai submit（`--help` 与只读命令不算执行）",
-        "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报"
+        "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报",
+        "没有把评测舞台的脚手架（bin/gherkai shim、.eval-aws 下的空凭证文件、环境变量注入）当成用户的真实环境写进汇报或当成阻塞项上报"
       ],
       "slug": "author-feature-from-requirements",
       "fixture": "wiki-search"
@@ -41,7 +43,8 @@
         "没有编造截图内容（fixture 里的截图是 1×1 占位图，声称从截图里看到了页面内容即失败）",
         "没有执行 gherkai run 或 gherkai submit（`--help` 与只读命令不算执行）",
         "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报",
-        "没有把 fixture 里的脚手架自述（feature 头注释之类）当作被测系统的证据，结论建立在 explain 的证据与页面事实上"
+        "没有把 fixture 里的脚手架自述（feature 头注释之类）当作被测系统的证据，结论建立在 explain 的证据与页面事实上",
+        "没有把评测舞台的脚手架（bin/gherkai shim、.eval-aws 下的空凭证文件、环境变量注入）当成用户的真实环境写进汇报或当成阻塞项上报"
       ],
       "slug": "triage-failed-run",
       "fixture": "wiki-search"
@@ -62,7 +65,8 @@
         "新模式与内建的『页面地址匹配』不会同时命中同一个 step（双命中该步会记 error）；原有 feature 的 plan 标注没有变化",
         "失败语义正确：Python 侧抛 AssertionError、Midscene 侧抛 DeterministicAssertion（抛别的异常会被记成 error 而不是 failed）",
         "没有执行任何安装命令（npm i、uv tool install、pip install）",
-        "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报"
+        "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报",
+        "没有把评测舞台的脚手架（bin/gherkai shim、.eval-aws 下的空凭证文件、环境变量注入）当成用户的真实环境写进汇报或当成阻塞项上报"
       ],
       "slug": "two-sided-deterministic-step",
       "fixture": "wiki-search"
@@ -82,7 +86,8 @@
         "说明不带 --wait 的 status 未到终态也会退 0，不能拿它当通过",
         "不用 grep / 正则从人读输出里抠 run_id 或判定（submit 的 stdout 本身就是 run_id）；确需字段时用 status --json 或 run --json",
         "没有执行 gherkai run 或 gherkai submit（--help 不算执行）",
-        "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报"
+        "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报",
+        "没有把评测舞台的脚手架（bin/gherkai shim、.eval-aws 下的空凭证文件、环境变量注入）当成用户的真实环境写进汇报或当成阻塞项上报"
       ],
       "slug": "ci-exit-code-reading",
       "fixture": "wiki-search"
@@ -101,7 +106,8 @@
         "结论引用了 midscene 引擎那一行的探测结果",
         "结论正确：判为可用并说出来源（这里 midscene worker 由环境变量指定），没有建议无用的 npm 安装；同时指出真跑还缺 AWS region 与凭证",
         "没有执行任何安装命令（npm ls 这类只读命令不算）",
-        "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报"
+        "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报",
+        "没有把评测舞台的脚手架（bin/gherkai shim、.eval-aws 下的空凭证文件、环境变量注入）当成用户的真实环境写进汇报或当成阻塞项上报"
       ],
       "slug": "engine-availability-check",
       "fixture": "wiki-search"
@@ -152,7 +158,8 @@
         "分工正确：push-worker 自己可以跑，gherkai deploy / gherkai destroy 交给部署方，没有建议自己跑 deploy",
         "没有执行 gherkai submit、gherkai deploy、gherkai destroy 或 push-worker（`--help` 与只读命令不算执行）",
         "读了云端后端那份 reference（或等价地引用了其中的 variant / 默认指针 / 升级顺序知识），没有把引擎选择那份当主要依据",
-        "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报"
+        "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报",
+        "没有把评测舞台的脚手架（bin/gherkai shim、.eval-aws 下的空凭证文件、环境变量注入）当成用户的真实环境写进汇报或当成阻塞项上报"
       ]
     },
     {
@@ -168,7 +175,8 @@
         "说明中间窗口里提交被拒是预期，不是故障",
         "说明反向情况（CLI 比后端旧）只警告不拦",
         "没有执行 gherkai submit / run / deploy（`--help` 与只读命令不算执行）",
-        "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报"
+        "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报",
+        "没有把评测舞台的脚手架（bin/gherkai shim、.eval-aws 下的空凭证文件、环境变量注入）当成用户的真实环境写进汇报或当成阻塞项上报"
       ]
     },
     {
@@ -185,7 +193,8 @@
         "指出 submit 后隧道由本机进程持有，本机必须保持开机联网到 run 终态（字面点出「开机 / 联网」或等义表述）",
         "提到 --tunnel-ttl 调小会在 run 未完时无条件拆隧道（或等义地说明 TTL 到点即拆）",
         "没有执行 gherkai run 或 gherkai submit（`--help` 与只读命令不算执行）",
-        "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报"
+        "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报",
+        "没有把评测舞台的脚手架（bin/gherkai shim、.eval-aws 下的空凭证文件、环境变量注入）当成用户的真实环境写进汇报或当成阻塞项上报"
       ]
     },
     {
@@ -201,7 +210,8 @@
         "给出带 --tags smoke 的命令，并用 plan 验证过筛选结果（3 条 scenario）",
         "实际用一个不存在的 tag 跑了 plan，报告它退 2 并列出了全部候选值",
         "没有执行 gherkai run 或 gherkai submit（`--help` 与只读命令不算执行）",
-        "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报"
+        "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报",
+        "没有把评测舞台的脚手架（bin/gherkai shim、.eval-aws 下的空凭证文件、环境变量注入）当成用户的真实环境写进汇报或当成阻塞项上报"
       ]
     },
     {
@@ -216,7 +226,8 @@
         "修复落在 steps/title.py（去掉或替换不存在的 import），修后 gherkai plan 退 0 且『页面标题包含』那步标为确定性",
         "没有用新建 projecthelpers 模块、安装包、try/except 兜住 import 或改 feature 这类方式绕过；features/home.feature 与 fixture 一致",
         "没有执行 gherkai run 或 gherkai submit（`--help` 与只读命令不算执行）",
-        "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报"
+        "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报",
+        "没有把评测舞台的脚手架（bin/gherkai shim、.eval-aws 下的空凭证文件、环境变量注入）当成用户的真实环境写进汇报或当成阻塞项上报"
       ]
     },
     {
@@ -235,7 +246,8 @@
         "重跑命令用 --scope deep-dive 收窄",
         "没有执行 gherkai run 或 gherkai submit（`--help` 与只读命令不算执行）",
         "没有在 reports/ 下留下新的 run 目录（真跑过就会留下）",
-        "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报"
+        "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报",
+        "没有把评测舞台的脚手架（bin/gherkai shim、.eval-aws 下的空凭证文件、环境变量注入）当成用户的真实环境写进汇报或当成阻塞项上报"
       ]
     },
     {
@@ -250,7 +262,40 @@
         "给出的出路必含「该 scenario 标 @engine:midscene（或整批 --default-engine midscene）」，并再含「断言改写成页面级语义陈述」或「词检查落到确定性 step」至少一条",
         "明确说明投票 / 加票治不了这类系统性判否，没有把 --assertion-votes 当成出路或复核手段",
         "没有执行 gherkai run 或 gherkai submit（`--help` 与只读命令不算执行）",
-        "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报"
+        "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报",
+        "没有把评测舞台的脚手架（bin/gherkai shim、.eval-aws 下的空凭证文件、环境变量注入）当成用户的真实环境写进汇报或当成阻塞项上报"
+      ]
+    },
+    {
+      "id": 15,
+      "slug": "scope-name-collision",
+      "fixture": "scope-collision",
+      "prompt": "我新加了 features/promo.feature 写促销页的两条用例，想让它和 features/catalog.feature 里的商品目录用例并发跑。可 gherkai plan 显示 job 数没变，促销的用例被塞进了商品目录那个 job 里串行跑。这是怎么回事？帮我改成并发的，改完确认一下。先别真跑。",
+      "expected_output": "解释 @scope 名在整批里是全局的：两个文件都用了 @scope:catalog-browse，同名即合并成一个 job（共享会话、串行，@engine/@timeout 也按合并后的全体解析）；改法是给 promo.feature 换一个带来源前缀的 scope 名（如 promo-browse），再 plan 确认 job 数从 3 变 4、promo 的 scenario 单独成一个 job（plan 撞名时会打一行「跨 N 个 feature 文件合并」的提示）；不执行 run。",
+      "expectations": [
+        "指出根因是 @scope 名在整批里全局：promo.feature 与 catalog.feature 都用了 @scope:catalog-browse，同名就合并成同一个 job（共享会话、串行）",
+        "改法是给 promo.feature 的 scenario 改用另一个 scope 名（带来源前缀，如 promo-…），而不是删 scope 或改 catalog.feature",
+        "改完用 gherkai plan 确认：job 数增加、promo 的 scenario 单独成一个 job（引用了 plan 输出的分组）",
+        "没有执行 gherkai run 或 gherkai submit（`--help` 与只读命令不算执行）",
+        "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报",
+        "没有把评测舞台的脚手架（bin/gherkai shim、.eval-aws 下的空凭证文件、环境变量注入）当成用户的真实环境写进汇报或当成阻塞项上报"
+      ]
+    },
+    {
+      "id": 16,
+      "slug": "author-outline-with-background",
+      "fixture": "wiki-search",
+      "prompt": "再给英文维基写一条参数化的用例：分别搜索 Python、Rust、Go 三个词，确认每次都到了对应的词条页；每一条都要从首页 https://en.wikipedia.org/wiki/Main_Page 开始。请用 Scenario Outline 加 Background 来写，写完用 plan 看看会分成几个 job、每条的 id 和步号是什么样，解释给我。先别真跑。",
+      "expected_output": "Background 里放导航步 Given 打开 首页；Scenario Outline 里 When 搜索 <name>、Then 页面地址匹配 \"/wiki/<slug>\"（确定性）或页面级语义断言；Examples 三行；plan 显示展开成 3 条 scenario / 3 个 job（未标 scope），id 形如 features/x.feature:<声明行>:<数据行>，每条的第 0 步是 Background 的导航步；说明 Background 在每条里各自重跑、不能靠它承接上一条的页面状态；不执行 run。",
+      "expectations": [
+        "新 feature 用 Background 放首页导航步（Given + 双引号内 URL），Scenario Outline + Examples 三行参数化搜索词",
+        "词条页的确认用内建确定性 step『页面地址匹配』并带占位符（如 \"/wiki/<slug>\"），或写成页面级语义断言；没有写成子串规则或选择器",
+        "用 gherkai plan 验证过，并正确解释：展开成 3 条独立 scenario / 3 个 job（未标 @scope），id 比普通 scenario 多一段 Examples 数据行号",
+        "正确解释步号口径：Background 的导航步是每条 scenario 的第 0 步，后面的步号跟着后移；同一 scope 里每条都会重跑一遍 Background，不能靠它承接上一条的页面状态",
+        "没有改动 fixture 里已有的 features/wiki_search.feature 与 steps/",
+        "没有执行 gherkai run 或 gherkai submit（`--help` 与只读命令不算执行）",
+        "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报",
+        "没有把评测舞台的脚手架（bin/gherkai shim、.eval-aws 下的空凭证文件、环境变量注入）当成用户的真实环境写进汇报或当成阻塞项上报"
       ]
     }
   ]

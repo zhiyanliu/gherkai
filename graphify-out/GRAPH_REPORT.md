@@ -1,7 +1,7 @@
 # Graph Report - yaozhou  (2026-09-14)
 
 ## Corpus Check
-- 298 files · ~266,989 words
+- 298 files · ~267,675 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -10,7 +10,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `4cf0a892`
+- Built from commit: `56da76e6`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -1128,7 +1128,7 @@ Cohesion: 0.21
 Nodes (30): core 测试说明（单测 vs 集成）, 绿≠对 Verification Escalation, ADR 0004 Nova Act IAM 鉴权, ADR 0005 用例描述层用单一共享 .feature, ADR 0011 AgentCore 浏览器：默认 vs 自建, ADR 0013 跨引擎共享边界止于 features/, ADR 0015 v1.0 定位：流程冒烟非精确回归, ADR 0016 执行架构 (+22 more)
 
 ## Knowledge Gaps
-- **551 isolated node(s):** `StepArgument`, `Job`, `Check`, `BuildEvidenceInput`, `EvidenceAct` (+546 more)
+- **551 isolated node(s):** `0 先分域，再读对应 reference`, `1 心智模型`, `2 引擎怎么选`, `3 本机还是云端，run 还是 submit`, `4 编写 feature 与 steps` (+546 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **68 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
@@ -1136,11 +1136,11 @@ Nodes (30): core 测试说明（单测 vs 集成）, 绿≠对 Verification Esca
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `_fixture()` connect `_fixture` to `test_conditional_writes.py`, `evidence.py`, `test_lambda_handlers.py`, `test_workers.py`, `test_lambda_asset.py`, `_FakeSink`, `deterministic.py`, `test_evidence.py`, `_FakeSink`, `_Recorder`, `main`?**
-  _High betweenness centrality (0.095) - this node is a cross-community bridge._
+  _High betweenness centrality (0.099) - this node is a cross-community bridge._
 - **Why does `Status` connect `RunState` to `wire.py`, `Job`, `workers.py`, `_StampSsm`, `RunStore`, `test_tunnel_host.py`, `test_lifecycle_states.py`, `test_schedule.py`, `RunResult`, `test_fargate_engine.py`, `test_stores.py`, `StepDone`, `schedule.py`, `test_project.py`, `test_conditional_writes.py`, `_SeqEcs`, `test_reconcile.py`, `test_sqlite_event_log.py`, `_FakeEcsClient`, `SubprocessLauncher`, `JobResult`, `_FakeEcs`, `LocalReportStore`, `test_subprocess_engine.py`, `_MissingThenStoppedEcs`, `_FakeS3`, `test_cloud_reconcile.py`?**
-  _High betweenness centrality (0.074) - this node is a cross-community bridge._
-- **Why does `schedule()` connect `test_schedule.py` to `Job`, `RunStore`, `BackendStack`, `test_lifecycle_states.py`, `RunResult`, `JobResult`, `StepDone`, `test_subprocess_engine.py`, `schedule.py`?**
-  _High betweenness centrality (0.046) - this node is a cross-community bridge._
+  _High betweenness centrality (0.071) - this node is a cross-community bridge._
+- **Why does `Job` connect `Job` to `wire.py`, `RunStore`, `test_lifecycle_states.py`, `test_schedule.py`, `fargate_engine.py`, `RunResult`, `test_fargate_engine.py`, `test_stores.py`, `StepDone`, `schedule.py`, `test_project.py`, `test_conditional_writes.py`, `_SeqEcs`, `test_plan.py`, `test_reconcile.py`, `test_sqlite_event_log.py`, `test_detached_launcher.py`, `FargateEngine`, `tunnel.py`, `_seed_run`, `SubprocessLauncher`, `RunState`, `JobResult`, `test_tunnel.py`, `_FakeEcs`, `test_subprocess_engine.py`, `LocalReportStore`, `start_tunnel_for_jobs`, `_MissingThenStoppedEcs`, `test_cloud_reconcile.py`?**
+  _High betweenness centrality (0.051) - this node is a cross-community bridge._
 - **Are the 53 inferred relationships involving `Job` (e.g. with `CloudLauncher` and `FargateEngine`) actually correct?**
   _`Job` has 53 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 33 inferred relationships involving `RunState` (e.g. with `_cmd_submit()` and `DynamoDBRunStore`) actually correct?**

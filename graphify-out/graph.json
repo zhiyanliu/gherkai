@@ -17479,10 +17479,10 @@
       "source_location": "L151",
       "_callable": true,
       "_origin": "ast",
-      "id": "skills_gherkai_evals_run_evals_collect_outputs",
       "community": 31,
       "community_name": "run_evals.py",
-      "norm_label": "collect_outputs()"
+      "norm_label": "collect_outputs()",
+      "id": "skills_gherkai_evals_run_evals_collect_outputs"
     },
     {
       "label": "fail()",
@@ -17491,10 +17491,10 @@
       "source_location": "L73",
       "_callable": true,
       "_origin": "ast",
-      "id": "skills_gherkai_evals_run_evals_fail",
       "community": 31,
       "community_name": "run_evals.py",
-      "norm_label": "fail()"
+      "norm_label": "fail()",
+      "id": "skills_gherkai_evals_run_evals_fail"
     },
     {
       "label": "load_evals()",
@@ -17503,10 +17503,10 @@
       "source_location": "L78",
       "_callable": true,
       "_origin": "ast",
-      "id": "skills_gherkai_evals_run_evals_load_evals",
       "community": 31,
       "community_name": "run_evals.py",
-      "norm_label": "load_evals()"
+      "norm_label": "load_evals()",
+      "id": "skills_gherkai_evals_run_evals_load_evals"
     },
     {
       "label": "main()",
@@ -17515,10 +17515,10 @@
       "source_location": "L247",
       "_callable": true,
       "_origin": "ast",
-      "id": "skills_gherkai_evals_run_evals_main",
       "community": 31,
       "community_name": "run_evals.py",
-      "norm_label": "main()"
+      "norm_label": "main()",
+      "id": "skills_gherkai_evals_run_evals_main"
     },
     {
       "label": "materialize()",
@@ -17527,10 +17527,10 @@
       "source_location": "L175",
       "_callable": true,
       "_origin": "ast",
-      "id": "skills_gherkai_evals_run_evals_materialize",
       "community": 31,
       "community_name": "run_evals.py",
-      "norm_label": "materialize()"
+      "norm_label": "materialize()",
+      "id": "skills_gherkai_evals_run_evals_materialize"
     },
     {
       "label": "parse_events()",
@@ -17539,10 +17539,10 @@
       "source_location": "L99",
       "_callable": true,
       "_origin": "ast",
-      "id": "skills_gherkai_evals_run_evals_parse_events",
       "community": 31,
       "community_name": "run_evals.py",
-      "norm_label": "parse_events()"
+      "norm_label": "parse_events()",
+      "id": "skills_gherkai_evals_run_evals_parse_events"
     },
     {
       "label": "pollution_metrics()",
@@ -17551,10 +17551,10 @@
       "source_location": "L133",
       "_callable": true,
       "_origin": "ast",
-      "id": "skills_gherkai_evals_run_evals_pollution_metrics",
       "community": 31,
       "community_name": "run_evals.py",
-      "norm_label": "pollution_metrics()"
+      "norm_label": "pollution_metrics()",
+      "id": "skills_gherkai_evals_run_evals_pollution_metrics"
     },
     {
       "label": "_purge_session_dir()",
@@ -17563,10 +17563,10 @@
       "source_location": "L123",
       "_callable": true,
       "_origin": "ast",
-      "id": "skills_gherkai_evals_run_evals_purge_session_dir",
       "community": 31,
       "community_name": "run_evals.py",
-      "norm_label": "_purge_session_dir()"
+      "norm_label": "_purge_session_dir()",
+      "id": "skills_gherkai_evals_run_evals_purge_session_dir"
     },
     {
       "label": "run_one()",
@@ -17575,10 +17575,10 @@
       "source_location": "L184",
       "_callable": true,
       "_origin": "ast",
-      "id": "skills_gherkai_evals_run_evals_run_one",
       "community": 31,
       "community_name": "run_evals.py",
-      "norm_label": "run_one()"
+      "norm_label": "run_one()",
+      "id": "skills_gherkai_evals_run_evals_run_one"
     },
     {
       "label": "tool_calls_of()",
@@ -17587,10 +17587,10 @@
       "source_location": "L112",
       "_callable": true,
       "_origin": "ast",
-      "id": "skills_gherkai_evals_run_evals_tool_calls_of",
       "community": 31,
       "community_name": "run_evals.py",
-      "norm_label": "tool_calls_of()"
+      "norm_label": "tool_calls_of()",
+      "id": "skills_gherkai_evals_run_evals_tool_calls_of"
     },
     {
       "label": "fail()",
@@ -43039,10 +43039,10 @@
       "source_file": "",
       "source_location": "",
       "_origin": "ast",
-      "id": "path",
       "community": 31,
       "community_name": "run_evals.py",
-      "norm_label": "path"
+      "norm_label": "path",
+      "id": "path"
     },
     {
       "label": "run_evals.py",
@@ -43050,10 +43050,10 @@
       "source_file": "skills/gherkai-evals/run_evals.py",
       "source_location": "L1",
       "_origin": "ast",
-      "id": "skills_gherkai_evals_run_evals",
       "community": 31,
       "community_name": "run_evals.py",
-      "norm_label": "run_evals.py"
+      "norm_label": "run_evals.py",
+      "id": "skills_gherkai_evals_run_evals"
     },
     {
       "label": "trigger_eval.py",
@@ -43083,10 +43083,10 @@
       "source_file": "skills/gherkai-evals/run_evals.py",
       "source_location": "L124",
       "_origin": "ast",
-      "id": "skills_gherkai_evals_run_evals_rationale_124",
       "community": 31,
       "community_name": "run_evals.py",
-      "norm_label": "\u5220\u6389 claude code \u4e3a\u8fd9\u4e2a\u821e\u53f0\u8def\u5f84\u5efa\u7684\u4f1a\u8bdd\u76ee\u5f55(\u542b memory/),\u4fdd\u8bc1\u6bcf\u6b21\u8fd0\u884c\u4ece\u96f6\u5f00\u59cb\u3002"
+      "norm_label": "\u5220\u6389 claude code \u4e3a\u8fd9\u4e2a\u821e\u53f0\u8def\u5f84\u5efa\u7684\u4f1a\u8bdd\u76ee\u5f55(\u542b memory/),\u4fdd\u8bc1\u6bcf\u6b21\u8fd0\u884c\u4ece\u96f6\u5f00\u59cb\u3002",
+      "id": "skills_gherkai_evals_run_evals_rationale_124"
     },
     {
       "label": "\u6bcf\u8f6e\u5fc5\u62a5\u7684\u4e09\u4e2a\u6307\u6807\uff1a\u6c61\u67d3\uff08\u89e6\u4ed3\u5e93 / \u89e6 skill \u526f\u672c\uff09\u4e0e\u4e0d\u53ef\u91cd\u653e\uff08\u8054\u7f51\uff09\u3002\u4e8b\u540e grep \u624d\u77e5\u9053 = \u592a\u665a\u3002 skill_dirs = \u672c\u6b21\u8fd0\u884c\u7684\u4e34\u65f6\u2026",
@@ -43094,10 +43094,10 @@
       "source_file": "skills/gherkai-evals/run_evals.py",
       "source_location": "L134",
       "_origin": "ast",
-      "id": "skills_gherkai_evals_run_evals_rationale_134",
       "community": 31,
       "community_name": "run_evals.py",
-      "norm_label": "\u6bcf\u8f6e\u5fc5\u62a5\u7684\u4e09\u4e2a\u6307\u6807:\u6c61\u67d3(\u89e6\u4ed3\u5e93 / \u89e6 skill \u526f\u672c)\u4e0e\u4e0d\u53ef\u91cd\u653e(\u8054\u7f51)\u3002\u4e8b\u540e grep \u624d\u77e5\u9053 = \u592a\u665a\u3002 skill_dirs = \u672c\u6b21\u8fd0\u884c\u7684\u4e34\u65f6..."
+      "norm_label": "\u6bcf\u8f6e\u5fc5\u62a5\u7684\u4e09\u4e2a\u6307\u6807:\u6c61\u67d3(\u89e6\u4ed3\u5e93 / \u89e6 skill \u526f\u672c)\u4e0e\u4e0d\u53ef\u91cd\u653e(\u8054\u7f51)\u3002\u4e8b\u540e grep \u624d\u77e5\u9053 = \u592a\u665a\u3002 skill_dirs = \u672c\u6b21\u8fd0\u884c\u7684\u4e34\u65f6...",
+      "id": "skills_gherkai_evals_run_evals_rationale_134"
     },
     {
       "label": "\u7528\u54ea\u4e2a gherkai \u88c5 skill\uff1a\u4f18\u5148\u4ed3\u5e93\u5916\u90a3\u5957\uff1b\u5b83\u88ab `--prepare-cli` \u5265\u6389\u4e86\u5305\u5185 skill \u65f6\u56de\u843d\u5230\u4ed3\u5e93 `.venv`\u3002\u2026",
@@ -47178,10 +47178,10 @@
       "source_file": "cli/gherkai_cli/skills/gherkai/SKILL.md",
       "source_location": "L1",
       "_origin": "ast",
+      "id": "cli_gherkai_cli_skills_gherkai_skill",
       "community": 51,
       "community_name": "gherkai\uff1a\u66ff\u4f7f\u7528\u8005\u628a UI \u6d4b\u8bd5\u6574\u6761\u8dd1\u901a",
-      "norm_label": "skill.md",
-      "id": "cli_gherkai_cli_skills_gherkai_skill"
+      "norm_label": "skill.md"
     },
     {
       "label": "0 \u5148\u5206\u57df\uff0c\u518d\u8bfb\u5bf9\u5e94 reference",
@@ -47189,21 +47189,21 @@
       "source_file": "cli/gherkai_cli/skills/gherkai/SKILL.md",
       "source_location": "L10",
       "_origin": "ast",
+      "id": "cli_gherkai_cli_skills_gherkai_skill_0_\u5148\u5206\u57df_\u518d\u8bfb\u5bf9\u5e94_reference",
       "community": 51,
       "community_name": "gherkai\uff1a\u66ff\u4f7f\u7528\u8005\u628a UI \u6d4b\u8bd5\u6574\u6761\u8dd1\u901a",
-      "norm_label": "0 \u5148\u5206\u57df,\u518d\u8bfb\u5bf9\u5e94 reference",
-      "id": "cli_gherkai_cli_skills_gherkai_skill_0_\u5148\u5206\u57df_\u518d\u8bfb\u5bf9\u5e94_reference"
+      "norm_label": "0 \u5148\u5206\u57df,\u518d\u8bfb\u5bf9\u5e94 reference"
     },
     {
       "label": "10 \u522b\u505a\u7684\u4e8b",
       "file_type": "document",
       "source_file": "cli/gherkai_cli/skills/gherkai/SKILL.md",
-      "source_location": "L108",
+      "source_location": "L109",
       "_origin": "ast",
+      "id": "cli_gherkai_cli_skills_gherkai_skill_10_\u522b\u505a\u7684\u4e8b",
       "community": 51,
       "community_name": "gherkai\uff1a\u66ff\u4f7f\u7528\u8005\u628a UI \u6d4b\u8bd5\u6574\u6761\u8dd1\u901a",
-      "norm_label": "10 \u522b\u505a\u7684\u4e8b",
-      "id": "cli_gherkai_cli_skills_gherkai_skill_10_\u522b\u505a\u7684\u4e8b"
+      "norm_label": "10 \u522b\u505a\u7684\u4e8b"
     },
     {
       "label": "1 \u5fc3\u667a\u6a21\u578b",
@@ -47211,10 +47211,10 @@
       "source_file": "cli/gherkai_cli/skills/gherkai/SKILL.md",
       "source_location": "L20",
       "_origin": "ast",
+      "id": "cli_gherkai_cli_skills_gherkai_skill_1_\u5fc3\u667a\u6a21\u578b",
       "community": 51,
       "community_name": "gherkai\uff1a\u66ff\u4f7f\u7528\u8005\u628a UI \u6d4b\u8bd5\u6574\u6761\u8dd1\u901a",
-      "norm_label": "1 \u5fc3\u667a\u6a21\u578b",
-      "id": "cli_gherkai_cli_skills_gherkai_skill_1_\u5fc3\u667a\u6a21\u578b"
+      "norm_label": "1 \u5fc3\u667a\u6a21\u578b"
     },
     {
       "label": "2 \u5f15\u64ce\u600e\u4e48\u9009",
@@ -47222,10 +47222,10 @@
       "source_file": "cli/gherkai_cli/skills/gherkai/SKILL.md",
       "source_location": "L27",
       "_origin": "ast",
+      "id": "cli_gherkai_cli_skills_gherkai_skill_2_\u5f15\u64ce\u600e\u4e48\u9009",
       "community": 51,
       "community_name": "gherkai\uff1a\u66ff\u4f7f\u7528\u8005\u628a UI \u6d4b\u8bd5\u6574\u6761\u8dd1\u901a",
-      "norm_label": "2 \u5f15\u64ce\u600e\u4e48\u9009",
-      "id": "cli_gherkai_cli_skills_gherkai_skill_2_\u5f15\u64ce\u600e\u4e48\u9009"
+      "norm_label": "2 \u5f15\u64ce\u600e\u4e48\u9009"
     },
     {
       "label": "3 \u672c\u673a\u8fd8\u662f\u4e91\u7aef\uff0crun \u8fd8\u662f submit",
@@ -47233,76 +47233,76 @@
       "source_file": "cli/gherkai_cli/skills/gherkai/SKILL.md",
       "source_location": "L31",
       "_origin": "ast",
+      "id": "cli_gherkai_cli_skills_gherkai_skill_3_\u672c\u673a\u8fd8\u662f\u4e91\u7aef_run_\u8fd8\u662f_submit",
       "community": 51,
       "community_name": "gherkai\uff1a\u66ff\u4f7f\u7528\u8005\u628a UI \u6d4b\u8bd5\u6574\u6761\u8dd1\u901a",
-      "norm_label": "3 \u672c\u673a\u8fd8\u662f\u4e91\u7aef,run \u8fd8\u662f submit",
-      "id": "cli_gherkai_cli_skills_gherkai_skill_3_\u672c\u673a\u8fd8\u662f\u4e91\u7aef_run_\u8fd8\u662f_submit"
+      "norm_label": "3 \u672c\u673a\u8fd8\u662f\u4e91\u7aef,run \u8fd8\u662f submit"
     },
     {
       "label": "4 \u7f16\u5199 feature \u4e0e steps",
       "file_type": "document",
       "source_file": "cli/gherkai_cli/skills/gherkai/SKILL.md",
-      "source_location": "L39",
+      "source_location": "L40",
       "_origin": "ast",
+      "id": "cli_gherkai_cli_skills_gherkai_skill_4_\u7f16\u5199_feature_\u4e0e_steps",
       "community": 51,
       "community_name": "gherkai\uff1a\u66ff\u4f7f\u7528\u8005\u628a UI \u6d4b\u8bd5\u6574\u6761\u8dd1\u901a",
-      "norm_label": "4 \u7f16\u5199 feature \u4e0e steps",
-      "id": "cli_gherkai_cli_skills_gherkai_skill_4_\u7f16\u5199_feature_\u4e0e_steps"
+      "norm_label": "4 \u7f16\u5199 feature \u4e0e steps"
     },
     {
       "label": "5 \u5de5\u4f5c\u5faa\u73af",
       "file_type": "document",
       "source_file": "cli/gherkai_cli/skills/gherkai/SKILL.md",
-      "source_location": "L51",
+      "source_location": "L52",
       "_origin": "ast",
+      "id": "cli_gherkai_cli_skills_gherkai_skill_5_\u5de5\u4f5c\u5faa\u73af",
       "community": 51,
       "community_name": "gherkai\uff1a\u66ff\u4f7f\u7528\u8005\u628a UI \u6d4b\u8bd5\u6574\u6761\u8dd1\u901a",
-      "norm_label": "5 \u5de5\u4f5c\u5faa\u73af",
-      "id": "cli_gherkai_cli_skills_gherkai_skill_5_\u5de5\u4f5c\u5faa\u73af"
+      "norm_label": "5 \u5de5\u4f5c\u5faa\u73af"
     },
     {
       "label": "6 \u673a\u8bfb\u8bfb\u6cd5",
       "file_type": "document",
       "source_file": "cli/gherkai_cli/skills/gherkai/SKILL.md",
-      "source_location": "L62",
+      "source_location": "L63",
       "_origin": "ast",
+      "id": "cli_gherkai_cli_skills_gherkai_skill_6_\u673a\u8bfb\u8bfb\u6cd5",
       "community": 51,
       "community_name": "gherkai\uff1a\u66ff\u4f7f\u7528\u8005\u628a UI \u6d4b\u8bd5\u6574\u6761\u8dd1\u901a",
-      "norm_label": "6 \u673a\u8bfb\u8bfb\u6cd5",
-      "id": "cli_gherkai_cli_skills_gherkai_skill_6_\u673a\u8bfb\u8bfb\u6cd5"
+      "norm_label": "6 \u673a\u8bfb\u8bfb\u6cd5"
     },
     {
       "label": "7 \u65cb\u94ae\u6309\u300c\u8c01\u6709\u8fd9\u4e2a flag\u300d\u5206\u7ec4",
       "file_type": "document",
       "source_file": "cli/gherkai_cli/skills/gherkai/SKILL.md",
-      "source_location": "L66",
+      "source_location": "L67",
       "_origin": "ast",
+      "id": "cli_gherkai_cli_skills_gherkai_skill_7_\u65cb\u94ae\u6309_\u8c01\u6709\u8fd9\u4e2a_flag_\u5206\u7ec4",
       "community": 51,
       "community_name": "gherkai\uff1a\u66ff\u4f7f\u7528\u8005\u628a UI \u6d4b\u8bd5\u6574\u6761\u8dd1\u901a",
-      "norm_label": "7 \u65cb\u94ae\u6309\u300c\u8c01\u6709\u8fd9\u4e2a flag\u300d\u5206\u7ec4",
-      "id": "cli_gherkai_cli_skills_gherkai_skill_7_\u65cb\u94ae\u6309_\u8c01\u6709\u8fd9\u4e2a_flag_\u5206\u7ec4"
+      "norm_label": "7 \u65cb\u94ae\u6309\u300c\u8c01\u6709\u8fd9\u4e2a flag\u300d\u5206\u7ec4"
     },
     {
       "label": "8 \u9000\u51fa\u7801\u5206\u6d41",
       "file_type": "document",
       "source_file": "cli/gherkai_cli/skills/gherkai/SKILL.md",
-      "source_location": "L76",
+      "source_location": "L77",
       "_origin": "ast",
+      "id": "cli_gherkai_cli_skills_gherkai_skill_8_\u9000\u51fa\u7801\u5206\u6d41",
       "community": 51,
       "community_name": "gherkai\uff1a\u66ff\u4f7f\u7528\u8005\u628a UI \u6d4b\u8bd5\u6574\u6761\u8dd1\u901a",
-      "norm_label": "8 \u9000\u51fa\u7801\u5206\u6d41",
-      "id": "cli_gherkai_cli_skills_gherkai_skill_8_\u9000\u51fa\u7801\u5206\u6d41"
+      "norm_label": "8 \u9000\u51fa\u7801\u5206\u6d41"
     },
     {
       "label": "9 \u5931\u8d25\u6c47\u62a5\u6a21\u677f",
       "file_type": "document",
       "source_file": "cli/gherkai_cli/skills/gherkai/SKILL.md",
-      "source_location": "L83",
+      "source_location": "L84",
       "_origin": "ast",
+      "id": "cli_gherkai_cli_skills_gherkai_skill_9_\u5931\u8d25\u6c47\u62a5\u6a21\u677f",
       "community": 51,
       "community_name": "gherkai\uff1a\u66ff\u4f7f\u7528\u8005\u628a UI \u6d4b\u8bd5\u6574\u6761\u8dd1\u901a",
-      "norm_label": "9 \u5931\u8d25\u6c47\u62a5\u6a21\u677f",
-      "id": "cli_gherkai_cli_skills_gherkai_skill_9_\u5931\u8d25\u6c47\u62a5\u6a21\u677f"
+      "norm_label": "9 \u5931\u8d25\u6c47\u62a5\u6a21\u677f"
     },
     {
       "label": "gherkai\uff1a\u66ff\u4f7f\u7528\u8005\u628a UI \u6d4b\u8bd5\u6574\u6761\u8dd1\u901a",
@@ -47310,10 +47310,10 @@
       "source_file": "cli/gherkai_cli/skills/gherkai/SKILL.md",
       "source_location": "L6",
       "_origin": "ast",
+      "id": "cli_gherkai_cli_skills_gherkai_skill_gherkai_\u66ff\u4f7f\u7528\u8005\u628a_ui_\u6d4b\u8bd5\u6574\u6761\u8dd1\u901a",
       "community": 51,
       "community_name": "gherkai\uff1a\u66ff\u4f7f\u7528\u8005\u628a UI \u6d4b\u8bd5\u6574\u6761\u8dd1\u901a",
-      "norm_label": "gherkai:\u66ff\u4f7f\u7528\u8005\u628a ui \u6d4b\u8bd5\u6574\u6761\u8dd1\u901a",
-      "id": "cli_gherkai_cli_skills_gherkai_skill_gherkai_\u66ff\u4f7f\u7528\u8005\u628a_ui_\u6d4b\u8bd5\u6574\u6761\u8dd1\u901a"
+      "norm_label": "gherkai:\u66ff\u4f7f\u7528\u8005\u628a ui \u6d4b\u8bd5\u6574\u6761\u8dd1\u901a"
     },
     {
       "label": "test_sqlite_event_log.py",
@@ -105804,9 +105804,9 @@
       "source_location": "L89",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "skills_gherkai_evals_run_evals_load_evals",
-      "target": "skills_gherkai_evals_run_evals_fail",
-      "confidence_score": 1.0
+      "target": "skills_gherkai_evals_run_evals_fail"
     },
     {
       "relation": "calls",
@@ -105816,9 +105816,9 @@
       "source_location": "L261",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "skills_gherkai_evals_run_evals_main",
-      "target": "path",
-      "confidence_score": 1.0
+      "target": "path"
     },
     {
       "relation": "calls",
@@ -105828,9 +105828,9 @@
       "source_location": "L263",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "skills_gherkai_evals_run_evals_main",
-      "target": "skills_gherkai_evals_run_evals_fail",
-      "confidence_score": 1.0
+      "target": "skills_gherkai_evals_run_evals_fail"
     },
     {
       "relation": "calls",
@@ -105840,9 +105840,9 @@
       "source_location": "L268",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "skills_gherkai_evals_run_evals_main",
-      "target": "skills_gherkai_evals_run_evals_load_evals",
-      "confidence_score": 1.0
+      "target": "skills_gherkai_evals_run_evals_load_evals"
     },
     {
       "relation": "calls",
@@ -105852,9 +105852,9 @@
       "source_location": "L191",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "skills_gherkai_evals_run_evals_run_one",
-      "target": "skills_gherkai_evals_run_evals_purge_session_dir",
-      "confidence_score": 1.0
+      "target": "skills_gherkai_evals_run_evals_purge_session_dir"
     },
     {
       "relation": "calls",
@@ -105864,9 +105864,9 @@
       "source_location": "L192",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "skills_gherkai_evals_run_evals_run_one",
-      "target": "skills_gherkai_evals_run_evals_materialize",
-      "confidence_score": 1.0
+      "target": "skills_gherkai_evals_run_evals_materialize"
     },
     {
       "relation": "calls",
@@ -105876,9 +105876,9 @@
       "source_location": "L224",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "skills_gherkai_evals_run_evals_run_one",
-      "target": "skills_gherkai_evals_run_evals_parse_events",
-      "confidence_score": 1.0
+      "target": "skills_gherkai_evals_run_evals_parse_events"
     },
     {
       "relation": "calls",
@@ -105888,9 +105888,9 @@
       "source_location": "L228",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "skills_gherkai_evals_run_evals_run_one",
-      "target": "skills_gherkai_evals_run_evals_tool_calls_of",
-      "confidence_score": 1.0
+      "target": "skills_gherkai_evals_run_evals_tool_calls_of"
     },
     {
       "relation": "calls",
@@ -105900,9 +105900,9 @@
       "source_location": "L233",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "skills_gherkai_evals_run_evals_run_one",
-      "target": "skills_gherkai_evals_run_evals_pollution_metrics",
-      "confidence_score": 1.0
+      "target": "skills_gherkai_evals_run_evals_pollution_metrics"
     },
     {
       "relation": "calls",
@@ -105912,9 +105912,9 @@
       "source_location": "L242",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "skills_gherkai_evals_run_evals_run_one",
-      "target": "skills_gherkai_evals_run_evals_collect_outputs",
-      "confidence_score": 1.0
+      "target": "skills_gherkai_evals_run_evals_collect_outputs"
     },
     {
       "relation": "calls",
@@ -107868,9 +107868,9 @@
       "source_location": "L133",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "skills_gherkai_evals_run_evals_pollution_metrics",
-      "target": "path",
-      "confidence_score": 1.0
+      "target": "path"
     },
     {
       "relation": "extends",
@@ -119364,9 +119364,9 @@
       "source_location": "L151",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "skills_gherkai_evals_run_evals_collect_outputs",
-      "target": "path",
-      "confidence_score": 1.0
+      "target": "path"
     },
     {
       "relation": "references",
@@ -119376,9 +119376,9 @@
       "source_location": "L123",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "skills_gherkai_evals_run_evals_purge_session_dir",
-      "target": "path",
-      "confidence_score": 1.0
+      "target": "path"
     },
     {
       "relation": "references",
@@ -119388,9 +119388,9 @@
       "source_location": "L184",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "skills_gherkai_evals_run_evals_run_one",
-      "target": "path",
-      "confidence_score": 1.0
+      "target": "path"
     },
     {
       "relation": "references",
@@ -120792,9 +120792,9 @@
       "source_location": "L175",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "skills_gherkai_evals_run_evals_materialize",
-      "target": "path",
-      "confidence_score": 1.0
+      "target": "path"
     },
     {
       "relation": "references",
@@ -123566,9 +123566,9 @@
       "source_location": "L6",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "cli_gherkai_cli_skills_gherkai_skill",
-      "target": "cli_gherkai_cli_skills_gherkai_skill_gherkai_\u66ff\u4f7f\u7528\u8005\u628a_ui_\u6d4b\u8bd5\u6574\u6761\u8dd1\u901a"
+      "target": "cli_gherkai_cli_skills_gherkai_skill_gherkai_\u66ff\u4f7f\u7528\u8005\u628a_ui_\u6d4b\u8bd5\u6574\u6761\u8dd1\u901a",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -123577,20 +123577,20 @@
       "source_location": "L10",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "cli_gherkai_cli_skills_gherkai_skill_gherkai_\u66ff\u4f7f\u7528\u8005\u628a_ui_\u6d4b\u8bd5\u6574\u6761\u8dd1\u901a",
-      "target": "cli_gherkai_cli_skills_gherkai_skill_0_\u5148\u5206\u57df_\u518d\u8bfb\u5bf9\u5e94_reference"
+      "target": "cli_gherkai_cli_skills_gherkai_skill_0_\u5148\u5206\u57df_\u518d\u8bfb\u5bf9\u5e94_reference",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "cli/gherkai_cli/skills/gherkai/SKILL.md",
-      "source_location": "L108",
+      "source_location": "L109",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "cli_gherkai_cli_skills_gherkai_skill_gherkai_\u66ff\u4f7f\u7528\u8005\u628a_ui_\u6d4b\u8bd5\u6574\u6761\u8dd1\u901a",
-      "target": "cli_gherkai_cli_skills_gherkai_skill_10_\u522b\u505a\u7684\u4e8b"
+      "target": "cli_gherkai_cli_skills_gherkai_skill_10_\u522b\u505a\u7684\u4e8b",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -123599,9 +123599,9 @@
       "source_location": "L20",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "cli_gherkai_cli_skills_gherkai_skill_gherkai_\u66ff\u4f7f\u7528\u8005\u628a_ui_\u6d4b\u8bd5\u6574\u6761\u8dd1\u901a",
-      "target": "cli_gherkai_cli_skills_gherkai_skill_1_\u5fc3\u667a\u6a21\u578b"
+      "target": "cli_gherkai_cli_skills_gherkai_skill_1_\u5fc3\u667a\u6a21\u578b",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -123610,9 +123610,9 @@
       "source_location": "L27",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "cli_gherkai_cli_skills_gherkai_skill_gherkai_\u66ff\u4f7f\u7528\u8005\u628a_ui_\u6d4b\u8bd5\u6574\u6761\u8dd1\u901a",
-      "target": "cli_gherkai_cli_skills_gherkai_skill_2_\u5f15\u64ce\u600e\u4e48\u9009"
+      "target": "cli_gherkai_cli_skills_gherkai_skill_2_\u5f15\u64ce\u600e\u4e48\u9009",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -123621,75 +123621,75 @@
       "source_location": "L31",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "cli_gherkai_cli_skills_gherkai_skill_gherkai_\u66ff\u4f7f\u7528\u8005\u628a_ui_\u6d4b\u8bd5\u6574\u6761\u8dd1\u901a",
-      "target": "cli_gherkai_cli_skills_gherkai_skill_3_\u672c\u673a\u8fd8\u662f\u4e91\u7aef_run_\u8fd8\u662f_submit"
+      "target": "cli_gherkai_cli_skills_gherkai_skill_3_\u672c\u673a\u8fd8\u662f\u4e91\u7aef_run_\u8fd8\u662f_submit",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "cli/gherkai_cli/skills/gherkai/SKILL.md",
-      "source_location": "L39",
+      "source_location": "L40",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "cli_gherkai_cli_skills_gherkai_skill_gherkai_\u66ff\u4f7f\u7528\u8005\u628a_ui_\u6d4b\u8bd5\u6574\u6761\u8dd1\u901a",
-      "target": "cli_gherkai_cli_skills_gherkai_skill_4_\u7f16\u5199_feature_\u4e0e_steps"
+      "target": "cli_gherkai_cli_skills_gherkai_skill_4_\u7f16\u5199_feature_\u4e0e_steps",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "cli/gherkai_cli/skills/gherkai/SKILL.md",
-      "source_location": "L51",
+      "source_location": "L52",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "cli_gherkai_cli_skills_gherkai_skill_gherkai_\u66ff\u4f7f\u7528\u8005\u628a_ui_\u6d4b\u8bd5\u6574\u6761\u8dd1\u901a",
-      "target": "cli_gherkai_cli_skills_gherkai_skill_5_\u5de5\u4f5c\u5faa\u73af"
+      "target": "cli_gherkai_cli_skills_gherkai_skill_5_\u5de5\u4f5c\u5faa\u73af",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "cli/gherkai_cli/skills/gherkai/SKILL.md",
-      "source_location": "L62",
+      "source_location": "L63",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "cli_gherkai_cli_skills_gherkai_skill_gherkai_\u66ff\u4f7f\u7528\u8005\u628a_ui_\u6d4b\u8bd5\u6574\u6761\u8dd1\u901a",
-      "target": "cli_gherkai_cli_skills_gherkai_skill_6_\u673a\u8bfb\u8bfb\u6cd5"
+      "target": "cli_gherkai_cli_skills_gherkai_skill_6_\u673a\u8bfb\u8bfb\u6cd5",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "cli/gherkai_cli/skills/gherkai/SKILL.md",
-      "source_location": "L66",
+      "source_location": "L67",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "cli_gherkai_cli_skills_gherkai_skill_gherkai_\u66ff\u4f7f\u7528\u8005\u628a_ui_\u6d4b\u8bd5\u6574\u6761\u8dd1\u901a",
-      "target": "cli_gherkai_cli_skills_gherkai_skill_7_\u65cb\u94ae\u6309_\u8c01\u6709\u8fd9\u4e2a_flag_\u5206\u7ec4"
+      "target": "cli_gherkai_cli_skills_gherkai_skill_7_\u65cb\u94ae\u6309_\u8c01\u6709\u8fd9\u4e2a_flag_\u5206\u7ec4",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "cli/gherkai_cli/skills/gherkai/SKILL.md",
-      "source_location": "L76",
+      "source_location": "L77",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "cli_gherkai_cli_skills_gherkai_skill_gherkai_\u66ff\u4f7f\u7528\u8005\u628a_ui_\u6d4b\u8bd5\u6574\u6761\u8dd1\u901a",
-      "target": "cli_gherkai_cli_skills_gherkai_skill_8_\u9000\u51fa\u7801\u5206\u6d41"
+      "target": "cli_gherkai_cli_skills_gherkai_skill_8_\u9000\u51fa\u7801\u5206\u6d41",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "cli/gherkai_cli/skills/gherkai/SKILL.md",
-      "source_location": "L83",
+      "source_location": "L84",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "cli_gherkai_cli_skills_gherkai_skill_gherkai_\u66ff\u4f7f\u7528\u8005\u628a_ui_\u6d4b\u8bd5\u6574\u6761\u8dd1\u901a",
-      "target": "cli_gherkai_cli_skills_gherkai_skill_9_\u5931\u8d25\u6c47\u62a5\u6a21\u677f"
+      "target": "cli_gherkai_cli_skills_gherkai_skill_9_\u5931\u8d25\u6c47\u62a5\u6a21\u677f",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -148536,9 +148536,9 @@
       "source_location": "L112",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "skills_gherkai_evals_run_evals",
-      "target": "skills_gherkai_evals_run_evals_tool_calls_of",
-      "confidence_score": 1.0
+      "target": "skills_gherkai_evals_run_evals_tool_calls_of"
     },
     {
       "relation": "contains",
@@ -148547,9 +148547,9 @@
       "source_location": "L123",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "skills_gherkai_evals_run_evals",
-      "target": "skills_gherkai_evals_run_evals_purge_session_dir",
-      "confidence_score": 1.0
+      "target": "skills_gherkai_evals_run_evals_purge_session_dir"
     },
     {
       "relation": "contains",
@@ -148558,9 +148558,9 @@
       "source_location": "L133",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "skills_gherkai_evals_run_evals",
-      "target": "skills_gherkai_evals_run_evals_pollution_metrics",
-      "confidence_score": 1.0
+      "target": "skills_gherkai_evals_run_evals_pollution_metrics"
     },
     {
       "relation": "contains",
@@ -148569,9 +148569,9 @@
       "source_location": "L151",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "skills_gherkai_evals_run_evals",
-      "target": "skills_gherkai_evals_run_evals_collect_outputs",
-      "confidence_score": 1.0
+      "target": "skills_gherkai_evals_run_evals_collect_outputs"
     },
     {
       "relation": "contains",
@@ -148580,9 +148580,9 @@
       "source_location": "L175",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "skills_gherkai_evals_run_evals",
-      "target": "skills_gherkai_evals_run_evals_materialize",
-      "confidence_score": 1.0
+      "target": "skills_gherkai_evals_run_evals_materialize"
     },
     {
       "relation": "contains",
@@ -148591,9 +148591,9 @@
       "source_location": "L184",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "skills_gherkai_evals_run_evals",
-      "target": "skills_gherkai_evals_run_evals_run_one",
-      "confidence_score": 1.0
+      "target": "skills_gherkai_evals_run_evals_run_one"
     },
     {
       "relation": "contains",
@@ -148602,9 +148602,9 @@
       "source_location": "L247",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "skills_gherkai_evals_run_evals",
-      "target": "skills_gherkai_evals_run_evals_main",
-      "confidence_score": 1.0
+      "target": "skills_gherkai_evals_run_evals_main"
     },
     {
       "relation": "contains",
@@ -148613,9 +148613,9 @@
       "source_location": "L73",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "skills_gherkai_evals_run_evals",
-      "target": "skills_gherkai_evals_run_evals_fail",
-      "confidence_score": 1.0
+      "target": "skills_gherkai_evals_run_evals_fail"
     },
     {
       "relation": "contains",
@@ -148624,9 +148624,9 @@
       "source_location": "L78",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "skills_gherkai_evals_run_evals",
-      "target": "skills_gherkai_evals_run_evals_load_evals",
-      "confidence_score": 1.0
+      "target": "skills_gherkai_evals_run_evals_load_evals"
     },
     {
       "relation": "contains",
@@ -148635,9 +148635,9 @@
       "source_location": "L99",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "skills_gherkai_evals_run_evals",
-      "target": "skills_gherkai_evals_run_evals_parse_events",
-      "confidence_score": 1.0
+      "target": "skills_gherkai_evals_run_evals_parse_events"
     },
     {
       "relation": "contains",
@@ -168589,9 +168589,9 @@
       "source_location": "L124",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "skills_gherkai_evals_run_evals_rationale_124",
-      "target": "skills_gherkai_evals_run_evals_purge_session_dir",
-      "confidence_score": 1.0
+      "target": "skills_gherkai_evals_run_evals_purge_session_dir"
     },
     {
       "relation": "rationale_for",
@@ -168600,9 +168600,9 @@
       "source_location": "L134",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "skills_gherkai_evals_run_evals_rationale_134",
-      "target": "skills_gherkai_evals_run_evals_pollution_metrics",
-      "confidence_score": 1.0
+      "target": "skills_gherkai_evals_run_evals_pollution_metrics"
     },
     {
       "relation": "rationale_for",
@@ -182972,5 +182972,5 @@
       "source_file": "docs/adr/0034-detached-batch-reconciler.md"
     }
   ],
-  "built_at_commit": "4cf0a89293fbd6dcb5b0f41945e36b2e8ad38af6"
+  "built_at_commit": "56da76e6a2fc0254a30a8b285c0c58036ed915a7"
 }
