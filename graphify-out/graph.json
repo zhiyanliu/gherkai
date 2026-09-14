@@ -670,6 +670,19 @@
       "id": "engines_midscene_src_lib_event_sink_eventsink"
     },
     {
+      "label": "_SpyUploader",
+      "file_type": "code",
+      "source_file": "engines/novaact/tests/test_antetheft.py",
+      "source_location": "L16",
+      "_callable": true,
+      "_callable_class": true,
+      "_origin": "ast",
+      "community": 133,
+      "community_name": "_presend_act_siblings",
+      "norm_label": "_spyuploader",
+      "id": "engines_novaact_tests_test_antetheft_spyuploader"
+    },
+    {
       "label": "_FakeSchedulerClient",
       "file_type": "code",
       "source_file": "deploy_aws/tests/test_lambda_handlers.py",
@@ -1047,19 +1060,6 @@
       "id": "deploy_aws_gherkai_deploy_aws_workers_workercommanderror"
     },
     {
-      "label": "_SpyUploader",
-      "file_type": "code",
-      "source_file": "engines/novaact/tests/test_antetheft.py",
-      "source_location": "L16",
-      "_callable": true,
-      "_callable_class": true,
-      "_origin": "ast",
-      "community": 20,
-      "community_name": "run_scope.py",
-      "norm_label": "_spyuploader",
-      "id": "engines_novaact_tests_test_antetheft_spyuploader"
-    },
-    {
       "label": "_DeterministicCtx",
       "file_type": "code",
       "source_file": "engines/novaact/gherkai_worker_novaact/run_scope.py",
@@ -1067,8 +1067,8 @@
       "_callable": true,
       "_callable_class": true,
       "_origin": "ast",
-      "community": 206,
-      "community_name": "_DeterministicCtx",
+      "community": 20,
+      "community_name": "run_scope.py",
       "norm_label": "_deterministicctx",
       "id": "engines_novaact_gherkai_worker_novaact_run_scope_deterministicctx"
     },
@@ -7201,6 +7201,114 @@
       "id": "engines_midscene_src_lib_event_sink_resolveeventsfd"
     },
     {
+      "label": "_presend_act_siblings()",
+      "file_type": "code",
+      "source_file": "engines/novaact/gherkai_worker_novaact/run_scope.py",
+      "source_location": "L226",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 133,
+      "community_name": "_presend_act_siblings",
+      "norm_label": "_presend_act_siblings()",
+      "id": "engines_novaact_gherkai_worker_novaact_run_scope_presend_act_siblings"
+    },
+    {
+      "label": "_make_act_pair()",
+      "file_type": "code",
+      "source_file": "engines/novaact/tests/test_antetheft.py",
+      "source_location": "L30",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 133,
+      "community_name": "_presend_act_siblings",
+      "norm_label": "_make_act_pair()",
+      "id": "engines_novaact_tests_test_antetheft_make_act_pair"
+    },
+    {
+      "label": ".__init__()",
+      "file_type": "code",
+      "source_file": "engines/novaact/tests/test_antetheft.py",
+      "source_location": "L18",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 133,
+      "community_name": "_presend_act_siblings",
+      "norm_label": ".__init__()",
+      "id": "engines_novaact_tests_test_antetheft_spyuploader_init"
+    },
+    {
+      "label": ".to_report_ref()",
+      "file_type": "code",
+      "source_file": "engines/novaact/tests/test_antetheft.py",
+      "source_location": "L23",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 133,
+      "community_name": "_presend_act_siblings",
+      "norm_label": ".to_report_ref()",
+      "id": "engines_novaact_tests_test_antetheft_spyuploader_to_report_ref"
+    },
+    {
+      "label": "test_presend_all_act_siblings()",
+      "file_type": "code",
+      "source_file": "engines/novaact/tests/test_antetheft.py",
+      "source_location": "L76",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 133,
+      "community_name": "_presend_act_siblings",
+      "norm_label": "test_presend_all_act_siblings()",
+      "id": "engines_novaact_tests_test_antetheft_test_presend_all_act_siblings"
+    },
+    {
+      "label": "test_presend_ignores_non_html()",
+      "file_type": "code",
+      "source_file": "engines/novaact/tests/test_antetheft.py",
+      "source_location": "L58",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 133,
+      "community_name": "_presend_act_siblings",
+      "norm_label": "test_presend_ignores_non_html()",
+      "id": "engines_novaact_tests_test_antetheft_test_presend_ignores_non_html"
+    },
+    {
+      "label": "test_presend_skips_when_no_sibling_json()",
+      "file_type": "code",
+      "source_file": "engines/novaact/tests/test_antetheft.py",
+      "source_location": "L49",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 133,
+      "community_name": "_presend_act_siblings",
+      "norm_label": "test_presend_skips_when_no_sibling_json()",
+      "id": "engines_novaact_tests_test_antetheft_test_presend_skips_when_no_sibling_json"
+    },
+    {
+      "label": "test_presend_swallows_upload_failure()",
+      "file_type": "code",
+      "source_file": "engines/novaact/tests/test_antetheft.py",
+      "source_location": "L66",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 133,
+      "community_name": "_presend_act_siblings",
+      "norm_label": "test_presend_swallows_upload_failure()",
+      "id": "engines_novaact_tests_test_antetheft_test_presend_swallows_upload_failure"
+    },
+    {
+      "label": "test_presend_uploads_sibling_json()",
+      "file_type": "code",
+      "source_file": "engines/novaact/tests/test_antetheft.py",
+      "source_location": "L38",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 133,
+      "community_name": "_presend_act_siblings",
+      "norm_label": "test_presend_uploads_sibling_json()",
+      "id": "engines_novaact_tests_test_antetheft_test_presend_uploads_sibling_json"
+    },
+    {
       "label": ".create_schedule()",
       "file_type": "code",
       "source_file": "deploy_aws/tests/test_lambda_handlers.py",
@@ -8399,18 +8507,6 @@
       "community_name": "_error_text",
       "norm_label": "_error_text()",
       "id": "engines_novaact_gherkai_worker_novaact_run_scope_error_text"
-    },
-    {
-      "label": "_is_transient_client_error()",
-      "file_type": "code",
-      "source_file": "engines/novaact/gherkai_worker_novaact/run_scope.py",
-      "source_location": "L635",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 149,
-      "community_name": "_error_text",
-      "norm_label": "_is_transient_client_error()",
-      "id": "engines_novaact_gherkai_worker_novaact_run_scope_is_transient_client_error"
     },
     {
       "label": "test_error_text_prefers_sdk_message_and_is_single_line()",
@@ -12685,6 +12781,30 @@
       "id": "engines_novaact_gherkai_worker_novaact_run_scope_cost_from_result"
     },
     {
+      "label": ".__init__()",
+      "file_type": "code",
+      "source_file": "engines/novaact/gherkai_worker_novaact/run_scope.py",
+      "source_location": "L118",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 20,
+      "community_name": "run_scope.py",
+      "norm_label": ".__init__()",
+      "id": "engines_novaact_gherkai_worker_novaact_run_scope_deterministicctx_init"
+    },
+    {
+      "label": ".page()",
+      "file_type": "code",
+      "source_file": "engines/novaact/gherkai_worker_novaact/run_scope.py",
+      "source_location": "L122",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 20,
+      "community_name": "run_scope.py",
+      "norm_label": ".page()",
+      "id": "engines_novaact_gherkai_worker_novaact_run_scope_deterministicctx_page"
+    },
+    {
       "label": "_drain_evidence_uploads()",
       "file_type": "code",
       "source_file": "engines/novaact/gherkai_worker_novaact/run_scope.py",
@@ -12757,18 +12877,6 @@
       "id": "engines_novaact_gherkai_worker_novaact_run_scope_no_artifacts"
     },
     {
-      "label": "_presend_act_siblings()",
-      "file_type": "code",
-      "source_file": "engines/novaact/gherkai_worker_novaact/run_scope.py",
-      "source_location": "L226",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 20,
-      "community_name": "run_scope.py",
-      "norm_label": "_presend_act_siblings()",
-      "id": "engines_novaact_gherkai_worker_novaact_run_scope_presend_act_siblings"
-    },
-    {
       "label": "_traj_refs()",
       "file_type": "code",
       "source_file": "engines/novaact/gherkai_worker_novaact/run_scope.py",
@@ -12791,102 +12899,6 @@
       "community_name": "run_scope.py",
       "norm_label": "main()",
       "id": "engines_novaact_tests_fixtures_interrupt_worker_main"
-    },
-    {
-      "label": "_make_act_pair()",
-      "file_type": "code",
-      "source_file": "engines/novaact/tests/test_antetheft.py",
-      "source_location": "L30",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 20,
-      "community_name": "run_scope.py",
-      "norm_label": "_make_act_pair()",
-      "id": "engines_novaact_tests_test_antetheft_make_act_pair"
-    },
-    {
-      "label": ".__init__()",
-      "file_type": "code",
-      "source_file": "engines/novaact/tests/test_antetheft.py",
-      "source_location": "L18",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 20,
-      "community_name": "run_scope.py",
-      "norm_label": ".__init__()",
-      "id": "engines_novaact_tests_test_antetheft_spyuploader_init"
-    },
-    {
-      "label": ".to_report_ref()",
-      "file_type": "code",
-      "source_file": "engines/novaact/tests/test_antetheft.py",
-      "source_location": "L23",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 20,
-      "community_name": "run_scope.py",
-      "norm_label": ".to_report_ref()",
-      "id": "engines_novaact_tests_test_antetheft_spyuploader_to_report_ref"
-    },
-    {
-      "label": "test_presend_all_act_siblings()",
-      "file_type": "code",
-      "source_file": "engines/novaact/tests/test_antetheft.py",
-      "source_location": "L76",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 20,
-      "community_name": "run_scope.py",
-      "norm_label": "test_presend_all_act_siblings()",
-      "id": "engines_novaact_tests_test_antetheft_test_presend_all_act_siblings"
-    },
-    {
-      "label": "test_presend_ignores_non_html()",
-      "file_type": "code",
-      "source_file": "engines/novaact/tests/test_antetheft.py",
-      "source_location": "L58",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 20,
-      "community_name": "run_scope.py",
-      "norm_label": "test_presend_ignores_non_html()",
-      "id": "engines_novaact_tests_test_antetheft_test_presend_ignores_non_html"
-    },
-    {
-      "label": "test_presend_skips_when_no_sibling_json()",
-      "file_type": "code",
-      "source_file": "engines/novaact/tests/test_antetheft.py",
-      "source_location": "L49",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 20,
-      "community_name": "run_scope.py",
-      "norm_label": "test_presend_skips_when_no_sibling_json()",
-      "id": "engines_novaact_tests_test_antetheft_test_presend_skips_when_no_sibling_json"
-    },
-    {
-      "label": "test_presend_swallows_upload_failure()",
-      "file_type": "code",
-      "source_file": "engines/novaact/tests/test_antetheft.py",
-      "source_location": "L66",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 20,
-      "community_name": "run_scope.py",
-      "norm_label": "test_presend_swallows_upload_failure()",
-      "id": "engines_novaact_tests_test_antetheft_test_presend_swallows_upload_failure"
-    },
-    {
-      "label": "test_presend_uploads_sibling_json()",
-      "file_type": "code",
-      "source_file": "engines/novaact/tests/test_antetheft.py",
-      "source_location": "L38",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 20,
-      "community_name": "run_scope.py",
-      "norm_label": "test_presend_uploads_sibling_json()",
-      "id": "engines_novaact_tests_test_antetheft_test_presend_uploads_sibling_json"
     },
     {
       "label": "test_drain_noop_when_uploader_never_used()",
@@ -13105,40 +13117,40 @@
       "id": "cli_tests_test_main_test_list_engines_json_shape"
     },
     {
-      "label": ".__init__()",
-      "file_type": "code",
-      "source_file": "engines/novaact/gherkai_worker_novaact/run_scope.py",
-      "source_location": "L118",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 206,
-      "community_name": "_DeterministicCtx",
-      "norm_label": ".__init__()",
-      "id": "engines_novaact_gherkai_worker_novaact_run_scope_deterministicctx_init"
-    },
-    {
-      "label": ".page()",
-      "file_type": "code",
-      "source_file": "engines/novaact/gherkai_worker_novaact/run_scope.py",
-      "source_location": "L122",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 206,
-      "community_name": "_DeterministicCtx",
-      "norm_label": ".page()",
-      "id": "engines_novaact_gherkai_worker_novaact_run_scope_deterministicctx_page"
-    },
-    {
-      "label": "_isolate()",
+      "label": "_clean_env()",
       "file_type": "code",
       "source_file": "engines/novaact/tests/test_user_steps.py",
-      "source_location": "L29",
+      "source_location": "L202",
       "_callable": true,
       "_origin": "ast",
-      "community": 207,
-      "community_name": "_isolate",
-      "norm_label": "_isolate()",
-      "id": "engines_novaact_tests_test_user_steps_isolate"
+      "community": 206,
+      "community_name": "_clean_env",
+      "norm_label": "_clean_env()",
+      "id": "engines_novaact_tests_test_user_steps_clean_env"
+    },
+    {
+      "label": "test_broken_steps_dir_makes_list_deterministic_exit_nonzero()",
+      "file_type": "code",
+      "source_file": "engines/novaact/tests/test_user_steps.py",
+      "source_location": "L190",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 206,
+      "community_name": "_clean_env",
+      "norm_label": "test_broken_steps_dir_makes_list_deterministic_exit_nonzero()",
+      "id": "engines_novaact_tests_test_user_steps_test_broken_steps_dir_makes_list_deterministic_exit_nonzero"
+    },
+    {
+      "label": "test_list_deterministic_subprocess_includes_user_steps()",
+      "file_type": "code",
+      "source_file": "engines/novaact/tests/test_user_steps.py",
+      "source_location": "L174",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 206,
+      "community_name": "_clean_env",
+      "norm_label": "test_list_deterministic_subprocess_includes_user_steps()",
+      "id": "engines_novaact_tests_test_user_steps_test_list_deterministic_subprocess_includes_user_steps"
     },
     {
       "label": "classify_vpc_state()",
@@ -16963,10 +16975,10 @@
       "source_location": "L141",
       "_callable": true,
       "_origin": "ast",
-      "id": "skills_gherkai_evals_run_evals_collect_outputs",
       "community": 31,
       "community_name": "run_evals.py",
-      "norm_label": "collect_outputs()"
+      "norm_label": "collect_outputs()",
+      "id": "skills_gherkai_evals_run_evals_collect_outputs"
     },
     {
       "label": "fail()",
@@ -16975,10 +16987,10 @@
       "source_location": "L73",
       "_callable": true,
       "_origin": "ast",
-      "id": "skills_gherkai_evals_run_evals_fail",
       "community": 31,
       "community_name": "run_evals.py",
-      "norm_label": "fail()"
+      "norm_label": "fail()",
+      "id": "skills_gherkai_evals_run_evals_fail"
     },
     {
       "label": "load_evals()",
@@ -16987,10 +16999,10 @@
       "source_location": "L78",
       "_callable": true,
       "_origin": "ast",
-      "id": "skills_gherkai_evals_run_evals_load_evals",
       "community": 31,
       "community_name": "run_evals.py",
-      "norm_label": "load_evals()"
+      "norm_label": "load_evals()",
+      "id": "skills_gherkai_evals_run_evals_load_evals"
     },
     {
       "label": "main()",
@@ -16999,10 +17011,10 @@
       "source_location": "L229",
       "_callable": true,
       "_origin": "ast",
-      "id": "skills_gherkai_evals_run_evals_main",
       "community": 31,
       "community_name": "run_evals.py",
-      "norm_label": "main()"
+      "norm_label": "main()",
+      "id": "skills_gherkai_evals_run_evals_main"
     },
     {
       "label": "materialize()",
@@ -17011,10 +17023,10 @@
       "source_location": "L165",
       "_callable": true,
       "_origin": "ast",
-      "id": "skills_gherkai_evals_run_evals_materialize",
       "community": 31,
       "community_name": "run_evals.py",
-      "norm_label": "materialize()"
+      "norm_label": "materialize()",
+      "id": "skills_gherkai_evals_run_evals_materialize"
     },
     {
       "label": "parse_events()",
@@ -17023,10 +17035,10 @@
       "source_location": "L99",
       "_callable": true,
       "_origin": "ast",
-      "id": "skills_gherkai_evals_run_evals_parse_events",
       "community": 31,
       "community_name": "run_evals.py",
-      "norm_label": "parse_events()"
+      "norm_label": "parse_events()",
+      "id": "skills_gherkai_evals_run_evals_parse_events"
     },
     {
       "label": "pollution_metrics()",
@@ -17035,10 +17047,10 @@
       "source_location": "L123",
       "_callable": true,
       "_origin": "ast",
-      "id": "skills_gherkai_evals_run_evals_pollution_metrics",
       "community": 31,
       "community_name": "run_evals.py",
-      "norm_label": "pollution_metrics()"
+      "norm_label": "pollution_metrics()",
+      "id": "skills_gherkai_evals_run_evals_pollution_metrics"
     },
     {
       "label": "run_one()",
@@ -17047,10 +17059,10 @@
       "source_location": "L174",
       "_callable": true,
       "_origin": "ast",
-      "id": "skills_gherkai_evals_run_evals_run_one",
       "community": 31,
       "community_name": "run_evals.py",
-      "norm_label": "run_one()"
+      "norm_label": "run_one()",
+      "id": "skills_gherkai_evals_run_evals_run_one"
     },
     {
       "label": "tool_calls_of()",
@@ -17059,10 +17071,10 @@
       "source_location": "L112",
       "_callable": true,
       "_origin": "ast",
-      "id": "skills_gherkai_evals_run_evals_tool_calls_of",
       "community": 31,
       "community_name": "run_evals.py",
-      "norm_label": "tool_calls_of()"
+      "norm_label": "tool_calls_of()",
+      "id": "skills_gherkai_evals_run_evals_tool_calls_of"
     },
     {
       "label": "fail()",
@@ -19105,6 +19117,18 @@
       "id": "engines_novaact_tests_test_interrupt_model_test_vote_loop_stops_midway_no_bogus_verdict"
     },
     {
+      "label": "_is_transient_client_error()",
+      "file_type": "code",
+      "source_file": "engines/novaact/gherkai_worker_novaact/run_scope.py",
+      "source_location": "L635",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 39,
+      "community_name": "_is_transient_network",
+      "norm_label": "_is_transient_client_error()",
+      "id": "engines_novaact_gherkai_worker_novaact_run_scope_is_transient_client_error"
+    },
+    {
       "label": "_is_transient_network()",
       "file_type": "code",
       "source_file": "engines/novaact/gherkai_worker_novaact/run_scope.py",
@@ -20473,6 +20497,18 @@
       "id": "core_tests_test_sqlite_event_log_test_opening_a_v140_shaped_db_adds_the_reason_column"
     },
     {
+      "label": "list_registry()",
+      "file_type": "code",
+      "source_file": "engines/novaact/gherkai_worker_novaact/deterministic.py",
+      "source_location": "L63",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 42,
+      "community_name": "test_user_steps.py",
+      "norm_label": "list_registry()",
+      "id": "engines_novaact_gherkai_worker_novaact_deterministic_list_registry"
+    },
+    {
       "label": "load_user_steps()",
       "file_type": "code",
       "source_file": "engines/novaact/gherkai_worker_novaact/user_steps.py",
@@ -20483,18 +20519,6 @@
       "community_name": "test_user_steps.py",
       "norm_label": "load_user_steps()",
       "id": "engines_novaact_gherkai_worker_novaact_user_steps_load_user_steps"
-    },
-    {
-      "label": "_clean_env()",
-      "file_type": "code",
-      "source_file": "engines/novaact/tests/test_user_steps.py",
-      "source_location": "L202",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 42,
-      "community_name": "test_user_steps.py",
-      "norm_label": "_clean_env()",
-      "id": "engines_novaact_tests_test_user_steps_clean_env"
     },
     {
       "label": "_step_file()",
@@ -20519,18 +20543,6 @@
       "community_name": "test_user_steps.py",
       "norm_label": "test_broken_file_does_not_leave_half_module_in_sys_modules()",
       "id": "engines_novaact_tests_test_user_steps_test_broken_file_does_not_leave_half_module_in_sys_modules"
-    },
-    {
-      "label": "test_broken_steps_dir_makes_list_deterministic_exit_nonzero()",
-      "file_type": "code",
-      "source_file": "engines/novaact/tests/test_user_steps.py",
-      "source_location": "L190",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 42,
-      "community_name": "test_user_steps.py",
-      "norm_label": "test_broken_steps_dir_makes_list_deterministic_exit_nonzero()",
-      "id": "engines_novaact_tests_test_user_steps_test_broken_steps_dir_makes_list_deterministic_exit_nonzero"
     },
     {
       "label": "test_excludes_underscore_and_test_prefixed_files()",
@@ -20567,18 +20579,6 @@
       "community_name": "test_user_steps.py",
       "norm_label": "test_import_error_fails_loud_naming_the_file()",
       "id": "engines_novaact_tests_test_user_steps_test_import_error_fails_loud_naming_the_file"
-    },
-    {
-      "label": "test_list_deterministic_subprocess_includes_user_steps()",
-      "file_type": "code",
-      "source_file": "engines/novaact/tests/test_user_steps.py",
-      "source_location": "L174",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 42,
-      "community_name": "test_user_steps.py",
-      "norm_label": "test_list_deterministic_subprocess_includes_user_steps()",
-      "id": "engines_novaact_tests_test_user_steps_test_list_deterministic_subprocess_includes_user_steps"
     },
     {
       "label": "test_loads_recursively_in_sorted_order_and_registers()",
@@ -21131,6 +21131,18 @@
       "community_name": "_fixture",
       "norm_label": "_reset_stop()",
       "id": "engines_novaact_tests_test_interrupt_model_reset_stop"
+    },
+    {
+      "label": "_isolate()",
+      "file_type": "code",
+      "source_file": "engines/novaact/tests/test_user_steps.py",
+      "source_location": "L29",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 45,
+      "community_name": "_fixture",
+      "norm_label": "_isolate()",
+      "id": "engines_novaact_tests_test_user_steps_isolate"
     },
     {
       "label": "midscene_env_cmd()",
@@ -23015,18 +23027,6 @@
       "community_name": "test_deterministic.py",
       "norm_label": "deterministic()",
       "id": "engines_novaact_gherkai_worker_novaact_deterministic_deterministic"
-    },
-    {
-      "label": "list_registry()",
-      "file_type": "code",
-      "source_file": "engines/novaact/gherkai_worker_novaact/deterministic.py",
-      "source_location": "L63",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 57,
-      "community_name": "test_deterministic.py",
-      "norm_label": "list_registry()",
-      "id": "engines_novaact_gherkai_worker_novaact_deterministic_list_registry"
     },
     {
       "label": "match()",
@@ -29878,8 +29878,8 @@
       "author": null,
       "contributor": null,
       "rationale": "\u4e91\u7aef AgentCore \u6d4f\u89c8\u5668\u65e0\u6cd5\u8def\u7531\u5230\u5f00\u53d1\u673a localhost\uff1b\u51fa\u7ad9\u96a7\u9053\u662f\u884c\u4e1a\u6807\u51c6\u67b6\u6784\u3001\u672c\u673a\u96f6\u5165\u7ad9\u7aef\u53e3\u3001\u53cc\u5f15\u64ce\u96f6\u534f\u8bae\u4fb5\u5165",
-      "community": 101,
-      "community_name": "ADR 0035 \u96a7\u9053\u66b4\u9732\u672c\u673a\u5e94\u7528",
+      "community": 338,
+      "community_name": "ADR 0037 \u5206\u53d1\u4e0e\u6253\u5305",
       "norm_label": "adr 0035 \u96a7\u9053\u66b4\u9732\u672c\u673a\u5e94\u7528",
       "_origin": "ast",
       "id": "docs_adr_0035_local_app_testing_via_tunnel"
@@ -29942,8 +29942,8 @@
       "author": null,
       "contributor": null,
       "rationale": "ADR \u7f16\u53f7\u4e0e\u5185\u90e8\u673a\u5236\u540d\u6f0f\u5230\u4f7f\u7528\u8005\u80fd\u770b\u5230\u7684\u9762\u4e0a\uff1a\u4f7f\u7528\u8005\u624b\u91cc\u6ca1\u6709\u4ed3\u5e93\uff0c\u65e2\u8bfb\u4e0d\u61c2\u4e5f\u67e5\u4e0d\u5230\uff0c\u8fd8\u6324\u6389\u4e86\u300c\u600e\u4e48\u529e\u300d\u7684\u4f4d\u7f6e",
-      "community": 338,
-      "community_name": "ADR 0037 \u5206\u53d1\u4e0e\u6253\u5305",
+      "community": 36,
+      "community_name": "execution-and-reconciliation.md",
       "norm_label": "adr 0039: \u7528\u6237\u53ef\u89c1\u9762\u4e0d\u5e26\u5185\u90e8\u6307\u4ee3",
       "_origin": "ast",
       "id": "docs_adr_0039_user_facing_surfaces_no_internal_references"
@@ -33276,10 +33276,10 @@
       "source_file": "docs/adr/0043-agent-skill-for-driving-gherkai.md",
       "source_location": "L1",
       "_origin": "ast",
-      "id": "docs_adr_0043_agent_skill_for_driving_gherkai_0043_\u9a7e\u9a6d_gherkai_\u7684_agent_skill_\u4f4f_cli_\u5305\u5185_\u968f_wheel_\u53d1\u884c_\u5185\u5bb9\u5355\u4efd_\u5f15\u7528\u6587\u6863\u4e3a\u786e\u5b9a\u6027\u8f6c\u6362\u7684\u526f\u672c",
       "community": 125,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "0043. \u9a7e\u9a6d gherkai \u7684 agent skill:\u4f4f cli \u5305\u5185\u3001\u968f wheel \u53d1\u884c\u3001\u5185\u5bb9\u5355\u4efd\u3001\u5f15\u7528\u6587\u6863\u4e3a\u786e\u5b9a\u6027\u8f6c\u6362\u7684\u526f\u672c"
+      "norm_label": "0043. \u9a7e\u9a6d gherkai \u7684 agent skill:\u4f4f cli \u5305\u5185\u3001\u968f wheel \u53d1\u884c\u3001\u5185\u5bb9\u5355\u4efd\u3001\u5f15\u7528\u6587\u6863\u4e3a\u786e\u5b9a\u6027\u8f6c\u6362\u7684\u526f\u672c",
+      "id": "docs_adr_0043_agent_skill_for_driving_gherkai_0043_\u9a7e\u9a6d_gherkai_\u7684_agent_skill_\u4f4f_cli_\u5305\u5185_\u968f_wheel_\u53d1\u884c_\u5185\u5bb9\u5355\u4efd_\u5f15\u7528\u6587\u6863\u4e3a\u786e\u5b9a\u6027\u8f6c\u6362\u7684\u526f\u672c"
     },
     {
       "label": "\u4e00\u3001skill \u771f\u8eab\u4f4f CLI \u5305\u5185 `cli/gherkai_cli/skills/gherkai/`\uff0c\u968f wheel \u5929\u7136\u5e26\u8d70\uff1b\u4e0d\u5355\u5f00 repo\u3001\u4e0d\u653e\u4ed3\u5e93\u6839\u3001\u4e0d\u7528 force-include",
@@ -33287,10 +33287,10 @@
       "source_file": "docs/adr/0043-agent-skill-for-driving-gherkai.md",
       "source_location": "L15",
       "_origin": "ast",
-      "id": "docs_adr_0043_agent_skill_for_driving_gherkai_\u4e00_skill_\u771f\u8eab\u4f4f_cli_\u5305\u5185_cli_gherkai_cli_skills_gherkai_\u968f_wheel_\u5929\u7136\u5e26\u8d70_\u4e0d\u5355\u5f00_repo_\u4e0d\u653e\u4ed3\u5e93\u6839_\u4e0d\u7528_force_include",
       "community": 125,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "\u4e00\u3001skill \u771f\u8eab\u4f4f cli \u5305\u5185 `cli/gherkai_cli/skills/gherkai/`,\u968f wheel \u5929\u7136\u5e26\u8d70;\u4e0d\u5355\u5f00 repo\u3001\u4e0d\u653e\u4ed3\u5e93\u6839\u3001\u4e0d\u7528 force-include"
+      "norm_label": "\u4e00\u3001skill \u771f\u8eab\u4f4f cli \u5305\u5185 `cli/gherkai_cli/skills/gherkai/`,\u968f wheel \u5929\u7136\u5e26\u8d70;\u4e0d\u5355\u5f00 repo\u3001\u4e0d\u653e\u4ed3\u5e93\u6839\u3001\u4e0d\u7528 force-include",
+      "id": "docs_adr_0043_agent_skill_for_driving_gherkai_\u4e00_skill_\u771f\u8eab\u4f4f_cli_\u5305\u5185_cli_gherkai_cli_skills_gherkai_\u968f_wheel_\u5929\u7136\u5e26\u8d70_\u4e0d\u5355\u5f00_repo_\u4e0d\u653e\u4ed3\u5e93\u6839_\u4e0d\u7528_force_include"
     },
     {
       "label": "\u4e03\u3001\u8bc4\u6d4b\u4e0e\u8fed\u4ee3\uff1a\u6309 skill-creator \u5faa\u73af\uff0c\u7f3a\u7701\u96c6\u96f6\u6761\u771f AWS\uff0c\u821e\u53f0\u5728\u4ed3\u5e93\u5916",
@@ -33298,10 +33298,10 @@
       "source_file": "docs/adr/0043-agent-skill-for-driving-gherkai.md",
       "source_location": "L75",
       "_origin": "ast",
-      "id": "docs_adr_0043_agent_skill_for_driving_gherkai_\u4e03_\u8bc4\u6d4b\u4e0e\u8fed\u4ee3_\u6309_skill_creator_\u5faa\u73af_\u7f3a\u7701\u96c6\u96f6\u6761\u771f_aws_\u821e\u53f0\u5728\u4ed3\u5e93\u5916",
       "community": 125,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "\u4e03\u3001\u8bc4\u6d4b\u4e0e\u8fed\u4ee3:\u6309 skill-creator \u5faa\u73af,\u7f3a\u7701\u96c6\u96f6\u6761\u771f aws,\u821e\u53f0\u5728\u4ed3\u5e93\u5916"
+      "norm_label": "\u4e03\u3001\u8bc4\u6d4b\u4e0e\u8fed\u4ee3:\u6309 skill-creator \u5faa\u73af,\u7f3a\u7701\u96c6\u96f6\u6761\u771f aws,\u821e\u53f0\u5728\u4ed3\u5e93\u5916",
+      "id": "docs_adr_0043_agent_skill_for_driving_gherkai_\u4e03_\u8bc4\u6d4b\u4e0e\u8fed\u4ee3_\u6309_skill_creator_\u5faa\u73af_\u7f3a\u7701\u96c6\u96f6\u6761\u771f_aws_\u821e\u53f0\u5728\u4ed3\u5e93\u5916"
     },
     {
       "label": "\u4e09\u3001\u5b89\u88c5\u9762\u4e24\u6761\uff0c\u6587\u6863\u63a8\u8350\u7b2c\u4e00\u6761",
@@ -33309,10 +33309,10 @@
       "source_file": "docs/adr/0043-agent-skill-for-driving-gherkai.md",
       "source_location": "L26",
       "_origin": "ast",
-      "id": "docs_adr_0043_agent_skill_for_driving_gherkai_\u4e09_\u5b89\u88c5\u9762\u4e24\u6761_\u6587\u6863\u63a8\u8350\u7b2c\u4e00\u6761",
       "community": 125,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "\u4e09\u3001\u5b89\u88c5\u9762\u4e24\u6761,\u6587\u6863\u63a8\u8350\u7b2c\u4e00\u6761"
+      "norm_label": "\u4e09\u3001\u5b89\u88c5\u9762\u4e24\u6761,\u6587\u6863\u63a8\u8350\u7b2c\u4e00\u6761",
+      "id": "docs_adr_0043_agent_skill_for_driving_gherkai_\u4e09_\u5b89\u88c5\u9762\u4e24\u6761_\u6587\u6863\u63a8\u8350\u7b2c\u4e00\u6761"
     },
     {
       "label": "\u4e0d\u505a / \u5ef6\u540e",
@@ -33320,10 +33320,10 @@
       "source_file": "docs/adr/0043-agent-skill-for-driving-gherkai.md",
       "source_location": "L113",
       "_origin": "ast",
-      "id": "docs_adr_0043_agent_skill_for_driving_gherkai_\u4e0d\u505a_\u5ef6\u540e",
       "community": 125,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "\u4e0d\u505a / \u5ef6\u540e"
+      "norm_label": "\u4e0d\u505a / \u5ef6\u540e",
+      "id": "docs_adr_0043_agent_skill_for_driving_gherkai_\u4e0d\u505a_\u5ef6\u540e"
     },
     {
       "label": "\u4e8c\u3001\u5185\u5bb9\u53ea\u6709\u4e00\u4efd\uff1a`SKILL.md` \u5c31\u662f\u5de5\u5177\u65e0\u5173\u7684\u6838\u5fc3\uff1b\u300c\u9002\u914d\u300d\u53ea\u5269\u88c5\u5230\u54ea\u4e0e\u4e00\u884c\u6307\u9488",
@@ -33331,10 +33331,10 @@
       "source_file": "docs/adr/0043-agent-skill-for-driving-gherkai.md",
       "source_location": "L22",
       "_origin": "ast",
-      "id": "docs_adr_0043_agent_skill_for_driving_gherkai_\u4e8c_\u5185\u5bb9\u53ea\u6709\u4e00\u4efd_skill_md_\u5c31\u662f\u5de5\u5177\u65e0\u5173\u7684\u6838\u5fc3_\u9002\u914d_\u53ea\u5269\u88c5\u5230\u54ea\u4e0e\u4e00\u884c\u6307\u9488",
       "community": 125,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "\u4e8c\u3001\u5185\u5bb9\u53ea\u6709\u4e00\u4efd:`skill.md` \u5c31\u662f\u5de5\u5177\u65e0\u5173\u7684\u6838\u5fc3;\u300c\u9002\u914d\u300d\u53ea\u5269\u88c5\u5230\u54ea\u4e0e\u4e00\u884c\u6307\u9488"
+      "norm_label": "\u4e8c\u3001\u5185\u5bb9\u53ea\u6709\u4e00\u4efd:`skill.md` \u5c31\u662f\u5de5\u5177\u65e0\u5173\u7684\u6838\u5fc3;\u300c\u9002\u914d\u300d\u53ea\u5269\u88c5\u5230\u54ea\u4e0e\u4e00\u884c\u6307\u9488",
+      "id": "docs_adr_0043_agent_skill_for_driving_gherkai_\u4e8c_\u5185\u5bb9\u53ea\u6709\u4e00\u4efd_skill_md_\u5c31\u662f\u5de5\u5177\u65e0\u5173\u7684\u6838\u5fc3_\u9002\u914d_\u53ea\u5269\u88c5\u5230\u54ea\u4e0e\u4e00\u884c\u6307\u9488"
     },
     {
       "label": "\u4e94\u3001\u5185\u5bb9\u91cd\u5fc3\uff1a\u4e00\u4e2a skill \u5165\u53e3\u3001\u4e09\u4e2a\u4efb\u52a1\u57df\u3001\u6309\u57df\u62c6 references\uff1b\u6b63\u6587\u662f agent \u7684\u64cd\u4f5c\u6a21\u578b\uff0c\u4e0d\u662f\u590d\u8ff0 `--help`",
@@ -33342,10 +33342,10 @@
       "source_file": "docs/adr/0043-agent-skill-for-driving-gherkai.md",
       "source_location": "L42",
       "_origin": "ast",
-      "id": "docs_adr_0043_agent_skill_for_driving_gherkai_\u4e94_\u5185\u5bb9\u91cd\u5fc3_\u4e00\u4e2a_skill_\u5165\u53e3_\u4e09\u4e2a\u4efb\u52a1\u57df_\u6309\u57df\u62c6_references_\u6b63\u6587\u662f_agent_\u7684\u64cd\u4f5c\u6a21\u578b_\u4e0d\u662f\u590d\u8ff0_help",
       "community": 125,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "\u4e94\u3001\u5185\u5bb9\u91cd\u5fc3:\u4e00\u4e2a skill \u5165\u53e3\u3001\u4e09\u4e2a\u4efb\u52a1\u57df\u3001\u6309\u57df\u62c6 references;\u6b63\u6587\u662f agent \u7684\u64cd\u4f5c\u6a21\u578b,\u4e0d\u662f\u590d\u8ff0 `--help`"
+      "norm_label": "\u4e94\u3001\u5185\u5bb9\u91cd\u5fc3:\u4e00\u4e2a skill \u5165\u53e3\u3001\u4e09\u4e2a\u4efb\u52a1\u57df\u3001\u6309\u57df\u62c6 references;\u6b63\u6587\u662f agent \u7684\u64cd\u4f5c\u6a21\u578b,\u4e0d\u662f\u590d\u8ff0 `--help`",
+      "id": "docs_adr_0043_agent_skill_for_driving_gherkai_\u4e94_\u5185\u5bb9\u91cd\u5fc3_\u4e00\u4e2a_skill_\u5165\u53e3_\u4e09\u4e2a\u4efb\u52a1\u57df_\u6309\u57df\u62c6_references_\u6b63\u6587\u662f_agent_\u7684\u64cd\u4f5c\u6a21\u578b_\u4e0d\u662f\u590d\u8ff0_help"
     },
     {
       "label": "\u516d\u3001\u62a4\u680f\uff1askill \u662f\u4ea7\u54c1\u9762\uff0c\u540c\u53d7 0039 \u7ea6\u675f\uff0c\u4e14\u4e0e CLI \u771f\u503c\u9010\u9879\u5bf9\u7167",
@@ -33353,10 +33353,10 @@
       "source_file": "docs/adr/0043-agent-skill-for-driving-gherkai.md",
       "source_location": "L63",
       "_origin": "ast",
-      "id": "docs_adr_0043_agent_skill_for_driving_gherkai_\u516d_\u62a4\u680f_skill_\u662f\u4ea7\u54c1\u9762_\u540c\u53d7_0039_\u7ea6\u675f_\u4e14\u4e0e_cli_\u771f\u503c\u9010\u9879\u5bf9\u7167",
       "community": 125,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "\u516d\u3001\u62a4\u680f:skill \u662f\u4ea7\u54c1\u9762,\u540c\u53d7 0039 \u7ea6\u675f,\u4e14\u4e0e cli \u771f\u503c\u9010\u9879\u5bf9\u7167"
+      "norm_label": "\u516d\u3001\u62a4\u680f:skill \u662f\u4ea7\u54c1\u9762,\u540c\u53d7 0039 \u7ea6\u675f,\u4e14\u4e0e cli \u771f\u503c\u9010\u9879\u5bf9\u7167",
+      "id": "docs_adr_0043_agent_skill_for_driving_gherkai_\u516d_\u62a4\u680f_skill_\u662f\u4ea7\u54c1\u9762_\u540c\u53d7_0039_\u7ea6\u675f_\u4e14\u4e0e_cli_\u771f\u503c\u9010\u9879\u5bf9\u7167"
     },
     {
       "label": "\u51b3\u7b56",
@@ -33364,10 +33364,10 @@
       "source_file": "docs/adr/0043-agent-skill-for-driving-gherkai.md",
       "source_location": "L13",
       "_origin": "ast",
-      "id": "docs_adr_0043_agent_skill_for_driving_gherkai_\u51b3\u7b56",
       "community": 125,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "\u51b3\u7b56"
+      "norm_label": "\u51b3\u7b56",
+      "id": "docs_adr_0043_agent_skill_for_driving_gherkai_\u51b3\u7b56"
     },
     {
       "label": "\u56db\u3001skill \u4e0e docs \u7684\u5173\u7cfb\uff1a\u4e0d link\u3001\u786e\u5b9a\u6027\u8f6c\u6362\u51fa\u526f\u672c\uff1b\u6b63\u6587\u662f\u65b0\u5185\u5bb9\u4e0d\u662f\u590d\u8ff0",
@@ -33375,10 +33375,10 @@
       "source_file": "docs/adr/0043-agent-skill-for-driving-gherkai.md",
       "source_location": "L33",
       "_origin": "ast",
-      "id": "docs_adr_0043_agent_skill_for_driving_gherkai_\u56db_skill_\u4e0e_docs_\u7684\u5173\u7cfb_\u4e0d_link_\u786e\u5b9a\u6027\u8f6c\u6362\u51fa\u526f\u672c_\u6b63\u6587\u662f\u65b0\u5185\u5bb9\u4e0d\u662f\u590d\u8ff0",
       "community": 125,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "\u56db\u3001skill \u4e0e docs \u7684\u5173\u7cfb:\u4e0d link\u3001\u786e\u5b9a\u6027\u8f6c\u6362\u51fa\u526f\u672c;\u6b63\u6587\u662f\u65b0\u5185\u5bb9\u4e0d\u662f\u590d\u8ff0"
+      "norm_label": "\u56db\u3001skill \u4e0e docs \u7684\u5173\u7cfb:\u4e0d link\u3001\u786e\u5b9a\u6027\u8f6c\u6362\u51fa\u526f\u672c;\u6b63\u6587\u662f\u65b0\u5185\u5bb9\u4e0d\u662f\u590d\u8ff0",
+      "id": "docs_adr_0043_agent_skill_for_driving_gherkai_\u56db_skill_\u4e0e_docs_\u7684\u5173\u7cfb_\u4e0d_link_\u786e\u5b9a\u6027\u8f6c\u6362\u51fa\u526f\u672c_\u6b63\u6587\u662f\u65b0\u5185\u5bb9\u4e0d\u662f\u590d\u8ff0"
     },
     {
       "label": "\u5f71\u54cd\u9762",
@@ -33386,10 +33386,10 @@
       "source_file": "docs/adr/0043-agent-skill-for-driving-gherkai.md",
       "source_location": "L123",
       "_origin": "ast",
-      "id": "docs_adr_0043_agent_skill_for_driving_gherkai_\u5f71\u54cd\u9762",
       "community": 125,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "\u5f71\u54cd\u9762"
+      "norm_label": "\u5f71\u54cd\u9762",
+      "id": "docs_adr_0043_agent_skill_for_driving_gherkai_\u5f71\u54cd\u9762"
     },
     {
       "label": "\u80cc\u666f",
@@ -33397,10 +33397,10 @@
       "source_file": "docs/adr/0043-agent-skill-for-driving-gherkai.md",
       "source_location": "L5",
       "_origin": "ast",
-      "id": "docs_adr_0043_agent_skill_for_driving_gherkai_\u80cc\u666f",
       "community": 125,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "\u80cc\u666f"
+      "norm_label": "\u80cc\u666f",
+      "id": "docs_adr_0043_agent_skill_for_driving_gherkai_\u80cc\u666f"
     },
     {
       "label": "\u88ab\u62d2\u65b9\u6848",
@@ -33408,10 +33408,10 @@
       "source_file": "docs/adr/0043-agent-skill-for-driving-gherkai.md",
       "source_location": "L95",
       "_origin": "ast",
-      "id": "docs_adr_0043_agent_skill_for_driving_gherkai_\u88ab\u62d2\u65b9\u6848",
       "community": 125,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "\u88ab\u62d2\u65b9\u6848"
+      "norm_label": "\u88ab\u62d2\u65b9\u6848",
+      "id": "docs_adr_0043_agent_skill_for_driving_gherkai_\u88ab\u62d2\u65b9\u6848"
     },
     {
       "label": "\u9a8c\u8bc1\uff082026-09-14\uff0c\u7ed3\u8bba\u5185\u8054\uff09",
@@ -33419,10 +33419,10 @@
       "source_file": "docs/adr/0043-agent-skill-for-driving-gherkai.md",
       "source_location": "L143",
       "_origin": "ast",
-      "id": "docs_adr_0043_agent_skill_for_driving_gherkai_\u9a8c\u8bc1_2026_09_14_\u7ed3\u8bba\u5185\u8054",
       "community": 125,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "\u9a8c\u8bc1(2026-09-14,\u7ed3\u8bba\u5185\u8054)"
+      "norm_label": "\u9a8c\u8bc1(2026-09-14,\u7ed3\u8bba\u5185\u8054)",
+      "id": "docs_adr_0043_agent_skill_for_driving_gherkai_\u9a8c\u8bc1_2026_09_14_\u7ed3\u8bba\u5185\u8054"
     },
     {
       "label": "check_dist_metadata.py",
@@ -34141,6 +34141,61 @@
       "community_name": "event-sink.mts",
       "norm_label": "adr-0033",
       "id": "engines_midscene_src_lib_event_sink_mts_docref_adr_0033"
+    },
+    {
+      "label": "test_antetheft.py",
+      "file_type": "code",
+      "source_file": "engines/novaact/tests/test_antetheft.py",
+      "source_location": "L1",
+      "_origin": "ast",
+      "community": 133,
+      "community_name": "_presend_act_siblings",
+      "norm_label": "test_antetheft.py",
+      "id": "engines_novaact_tests_test_antetheft"
+    },
+    {
+      "label": "act \u8fb9\u754c\u62a2\u4f20\uff08ADR 0029\u300cact \u8fb9\u754c\u62a2\u4f20\u300d\uff0c\u4e3a Fargate \u9884\u6f14\uff09\uff1a\u5728 step_done \u5b89\u5168\u70b9\uff0c\u628a\u672c step \u5404 act \u7684 \u914d\u5957\u2026",
+      "file_type": "rationale",
+      "source_file": "engines/novaact/gherkai_worker_novaact/run_scope.py",
+      "source_location": "L227",
+      "_origin": "ast",
+      "community": 133,
+      "community_name": "_presend_act_siblings",
+      "norm_label": "act \u8fb9\u754c\u62a2\u4f20(adr 0029\u300cact \u8fb9\u754c\u62a2\u4f20\u300d,\u4e3a fargate \u9884\u6f14):\u5728 step_done \u5b89\u5168\u70b9,\u628a\u672c step \u5404 act \u7684 \u914d\u5957...",
+      "id": "engines_novaact_gherkai_worker_novaact_run_scope_rationale_227"
+    },
+    {
+      "label": "act \u8fb9\u754c\u62a2\u4f20\u5355\u6d4b\uff08ADR 0029\u300cact \u8fb9\u754c\u62a2\u4f20\u300d\uff0c\u4e3a Fargate \u9884\u6f14\u2014\u2014subprocess+cloud \u5148\u5efa\u597d\u5e76\u9a8c\u8bc1\uff09\u3002 \u9a8c\u2026",
+      "file_type": "rationale",
+      "source_file": "engines/novaact/tests/test_antetheft.py",
+      "source_location": "L1",
+      "_origin": "ast",
+      "community": 133,
+      "community_name": "_presend_act_siblings",
+      "norm_label": "act \u8fb9\u754c\u62a2\u4f20\u5355\u6d4b(adr 0029\u300cact \u8fb9\u754c\u62a2\u4f20\u300d,\u4e3a fargate \u9884\u6f14\u2014\u2014subprocess+cloud \u5148\u5efa\u597d\u5e76\u9a8c\u8bc1)\u3002 \u9a8c...",
+      "id": "engines_novaact_tests_test_antetheft_rationale_1"
+    },
+    {
+      "label": "\u8bb0\u5f55 to_report_ref \u88ab\u8c03\u7684\u8def\u5f84\uff08\u9a8c\u62a2\u4f20\uff09\uff1benabled \u53ef\u63a7 no-op\u3002",
+      "file_type": "rationale",
+      "source_file": "engines/novaact/tests/test_antetheft.py",
+      "source_location": "L17",
+      "_origin": "ast",
+      "community": 133,
+      "community_name": "_presend_act_siblings",
+      "norm_label": "\u8bb0\u5f55 to_report_ref \u88ab\u8c03\u7684\u8def\u5f84(\u9a8c\u62a2\u4f20);enabled \u53ef\u63a7 no-op\u3002",
+      "id": "engines_novaact_tests_test_antetheft_rationale_17"
+    },
+    {
+      "label": "\u9020\u4e00\u5bf9 act \u4ea7\u7269\uff08.html + \u914d\u5957 _trajectory.json\uff09\uff0c\u8fd4\u56de (html \u8def\u5f84, json \u8def\u5f84)\u3002",
+      "file_type": "rationale",
+      "source_file": "engines/novaact/tests/test_antetheft.py",
+      "source_location": "L31",
+      "_origin": "ast",
+      "community": 133,
+      "community_name": "_presend_act_siblings",
+      "norm_label": "\u9020\u4e00\u5bf9 act \u4ea7\u7269(.html + \u914d\u5957 _trajectory.json),\u8fd4\u56de (html \u8def\u5f84, json \u8def\u5f84)\u3002",
+      "id": "engines_novaact_tests_test_antetheft_rationale_31"
     },
     {
       "label": "create_schedule \u8bb0\u5f55\u5668\uff08\u542b exceptions.ConflictException \u5f62\u72b6\uff0c\u517c\u5bb9 boto3 client \u5f02\u5e38\u8bbf\u95ee\u8def\u5f84\uff09\u3002",
@@ -35065,28 +35120,6 @@
       "community_name": "Path",
       "norm_label": "upload_file \u7684 extraargs(\u4e24\u5904\u4e0a\u4f20\u5171\u7528,\u907f\u514d\u7b2c\u4e09\u5904\u6f02\u79fb):\u4ec5\u5728\u6709\u6620\u5c04\u65f6\u5e26 contenttype\u3002",
       "id": "engines_novaact_gherkai_worker_novaact_lib_artifact_upload_rationale_66"
-    },
-    {
-      "label": "BaseException",
-      "file_type": "code",
-      "source_file": "",
-      "source_location": "",
-      "_origin": "ast",
-      "community": 149,
-      "community_name": "_error_text",
-      "norm_label": "baseexception",
-      "id": "engines_novaact_gherkai_worker_novaact_run_scope_py_baseexception"
-    },
-    {
-      "label": "boto ClientError \u662f\u5426\u670d\u52a1\u7aef\u77ac\u65f6\uff08\u6309\u9519\u8bef\u7801/HTTP \u72b6\u6001\u7801\u7ec6\u5206\uff0cADR 0028\uff09\u3002\u975e ClientError \u8fd4\u56de False\u3002",
-      "file_type": "rationale",
-      "source_file": "engines/novaact/gherkai_worker_novaact/run_scope.py",
-      "source_location": "L636",
-      "_origin": "ast",
-      "community": 149,
-      "community_name": "_error_text",
-      "norm_label": "boto clienterror \u662f\u5426\u670d\u52a1\u7aef\u77ac\u65f6(\u6309\u9519\u8bef\u7801/http \u72b6\u6001\u7801\u7ec6\u5206,adr 0028)\u3002\u975e clienterror \u8fd4\u56de false\u3002",
-      "id": "engines_novaact_gherkai_worker_novaact_run_scope_rationale_636"
     },
     {
       "label": "\u5f02\u5e38 \u2192 \u4e00\u884c\u300c\u7c7b\u578b: \u4fe1\u606f\u300d\uff0c\u4f5c step_done \u7684 message \u4e0e evidence \u7684 act.error\uff08ADR 0042 \u51b3\u7b56\u4e09/\u51b3\u7b56\u4e00\uff09\u3002\u2026",
@@ -38908,17 +38941,6 @@
       "id": "engines_novaact_tests_fixtures_interrupt_worker"
     },
     {
-      "label": "test_antetheft.py",
-      "file_type": "code",
-      "source_file": "engines/novaact/tests/test_antetheft.py",
-      "source_location": "L1",
-      "_origin": "ast",
-      "community": 20,
-      "community_name": "run_scope.py",
-      "norm_label": "test_antetheft.py",
-      "id": "engines_novaact_tests_test_antetheft"
-    },
-    {
       "label": "test_no_artifacts.py",
       "file_type": "code",
       "source_file": "engines/novaact/tests/test_no_artifacts.py",
@@ -38961,6 +38983,17 @@
       "community_name": "run_scope.py",
       "norm_label": "nova act \u8584 worker(adr 0022/0024):\u8bfb\u5165\u4e00\u4e2a scope \u7684 job json \u2192 \u8dd1\u8fd9\u4e2a scope \u2192 \u5410 adr 0024...",
       "id": "engines_novaact_gherkai_worker_novaact_run_scope_rationale_1"
+    },
+    {
+      "label": "\u4f20\u7ed9\u786e\u5b9a\u6027 handler \u7684\u4e0a\u4e0b\u6587\uff1a\u66b4\u9732 Playwright `page`\uff08\u7cbe\u786e DOM/URL \u67e5\uff0c\u4e0d\u8d70 AI\uff09\u3002 Nova \u628a\u5e95\u5c42\u2026",
+      "file_type": "rationale",
+      "source_file": "engines/novaact/gherkai_worker_novaact/run_scope.py",
+      "source_location": "L112",
+      "_origin": "ast",
+      "community": 20,
+      "community_name": "run_scope.py",
+      "norm_label": "\u4f20\u7ed9\u786e\u5b9a\u6027 handler \u7684\u4e0a\u4e0b\u6587:\u66b4\u9732 playwright `page`(\u7cbe\u786e dom/url \u67e5,\u4e0d\u8d70 ai)\u3002 nova \u628a\u5e95\u5c42...",
+      "id": "engines_novaact_gherkai_worker_novaact_run_scope_rationale_112"
     },
     {
       "label": "\u62a5 Nova SDK \u539f\u751f\u91cf time_worked_s\uff08ADR 0024\uff1aengine \u53ea\u62a5\u539f\u751f\u91cf\uff0ccore \u4e0d\u7b97\u7f8e\u5143\uff09\u3002",
@@ -39018,17 +39051,6 @@
       "id": "engines_novaact_gherkai_worker_novaact_run_scope_rationale_209"
     },
     {
-      "label": "act \u8fb9\u754c\u62a2\u4f20\uff08ADR 0029\u300cact \u8fb9\u754c\u62a2\u4f20\u300d\uff0c\u4e3a Fargate \u9884\u6f14\uff09\uff1a\u5728 step_done \u5b89\u5168\u70b9\uff0c\u628a\u672c step \u5404 act \u7684 \u914d\u5957\u2026",
-      "file_type": "rationale",
-      "source_file": "engines/novaact/gherkai_worker_novaact/run_scope.py",
-      "source_location": "L227",
-      "_origin": "ast",
-      "community": 20,
-      "community_name": "run_scope.py",
-      "norm_label": "act \u8fb9\u754c\u62a2\u4f20(adr 0029\u300cact \u8fb9\u754c\u62a2\u4f20\u300d,\u4e3a fargate \u9884\u6f14):\u5728 step_done \u5b89\u5168\u70b9,\u628a\u672c step \u5404 act \u7684 \u914d\u5957...",
-      "id": "engines_novaact_gherkai_worker_novaact_run_scope_rationale_227"
-    },
-    {
       "label": "\u4ea7\u672c step \u7684 evidence\uff08json + \u622a\u56fe\uff09\u3001\u5373\u65f6\u4e0a\u4f20 json\u3001\u628a ref **\u8ffd\u52a0**\u8fdb step_done \u7684\u2026",
       "file_type": "rationale",
       "source_file": "engines/novaact/gherkai_worker_novaact/run_scope.py",
@@ -39071,39 +39093,6 @@
       "community_name": "run_scope.py",
       "norm_label": "\u8fdb\u7a0b\u7ea7\u4fe1\u53f7\u6d4b\u8bd5\u7684 fixture worker(adr 0024 flag-only \u4e2d\u65ad\u6a21\u578b,\u56de\u5f52\u54e8\u5175)\u3002 \u88ab...",
       "id": "engines_novaact_tests_fixtures_interrupt_worker_rationale_1"
-    },
-    {
-      "label": "act \u8fb9\u754c\u62a2\u4f20\u5355\u6d4b\uff08ADR 0029\u300cact \u8fb9\u754c\u62a2\u4f20\u300d\uff0c\u4e3a Fargate \u9884\u6f14\u2014\u2014subprocess+cloud \u5148\u5efa\u597d\u5e76\u9a8c\u8bc1\uff09\u3002 \u9a8c\u2026",
-      "file_type": "rationale",
-      "source_file": "engines/novaact/tests/test_antetheft.py",
-      "source_location": "L1",
-      "_origin": "ast",
-      "community": 20,
-      "community_name": "run_scope.py",
-      "norm_label": "act \u8fb9\u754c\u62a2\u4f20\u5355\u6d4b(adr 0029\u300cact \u8fb9\u754c\u62a2\u4f20\u300d,\u4e3a fargate \u9884\u6f14\u2014\u2014subprocess+cloud \u5148\u5efa\u597d\u5e76\u9a8c\u8bc1)\u3002 \u9a8c...",
-      "id": "engines_novaact_tests_test_antetheft_rationale_1"
-    },
-    {
-      "label": "\u8bb0\u5f55 to_report_ref \u88ab\u8c03\u7684\u8def\u5f84\uff08\u9a8c\u62a2\u4f20\uff09\uff1benabled \u53ef\u63a7 no-op\u3002",
-      "file_type": "rationale",
-      "source_file": "engines/novaact/tests/test_antetheft.py",
-      "source_location": "L17",
-      "_origin": "ast",
-      "community": 20,
-      "community_name": "run_scope.py",
-      "norm_label": "\u8bb0\u5f55 to_report_ref \u88ab\u8c03\u7684\u8def\u5f84(\u9a8c\u62a2\u4f20);enabled \u53ef\u63a7 no-op\u3002",
-      "id": "engines_novaact_tests_test_antetheft_rationale_17"
-    },
-    {
-      "label": "\u9020\u4e00\u5bf9 act \u4ea7\u7269\uff08.html + \u914d\u5957 _trajectory.json\uff09\uff0c\u8fd4\u56de (html \u8def\u5f84, json \u8def\u5f84)\u3002",
-      "file_type": "rationale",
-      "source_file": "engines/novaact/tests/test_antetheft.py",
-      "source_location": "L31",
-      "_origin": "ast",
-      "community": 20,
-      "community_name": "run_scope.py",
-      "norm_label": "\u9020\u4e00\u5bf9 act \u4ea7\u7269(.html + \u914d\u5957 _trajectory.json),\u8fd4\u56de (html \u8def\u5f84, json \u8def\u5f84)\u3002",
-      "id": "engines_novaact_tests_test_antetheft_rationale_31"
     },
     {
       "label": "\u96f6 evidence\uff08\u5355\u4f8b\u8fd8\u6ca1\u9020\uff09\u2192 \u76f4\u63a5\u8fd4\u56de\uff1b\u4e14**\u4e0d\u5728\u9000\u51fa\u8def\u5f84\u4e0a\u73b0\u9020\u4e0a\u4f20\u5668**\uff08\u534a\u6ce8\u5165\u4f1a fail-loud \u629b\uff09\u3002",
@@ -39282,26 +39271,37 @@
       "id": "cli_tests_test_main_rationale_1280"
     },
     {
-      "label": "\u4f20\u7ed9\u786e\u5b9a\u6027 handler \u7684\u4e0a\u4e0b\u6587\uff1a\u66b4\u9732 Playwright `page`\uff08\u7cbe\u786e DOM/URL \u67e5\uff0c\u4e0d\u8d70 AI\uff09\u3002 Nova \u628a\u5e95\u5c42\u2026",
-      "file_type": "rationale",
-      "source_file": "engines/novaact/gherkai_worker_novaact/run_scope.py",
-      "source_location": "L112",
-      "_origin": "ast",
-      "community": 206,
-      "community_name": "_DeterministicCtx",
-      "norm_label": "\u4f20\u7ed9\u786e\u5b9a\u6027 handler \u7684\u4e0a\u4e0b\u6587:\u66b4\u9732 playwright `page`(\u7cbe\u786e dom/url \u67e5,\u4e0d\u8d70 ai)\u3002 nova \u628a\u5e95\u5c42...",
-      "id": "engines_novaact_gherkai_worker_novaact_run_scope_rationale_112"
-    },
-    {
-      "label": "\u6ce8\u518c\u8868 snapshot/restore + \u6e05\u6389\u672c\u6d4b\u8bd5\u585e\u8fdb sys.modules \u7684\u5408\u6210\u6a21\u5757\uff08\u8de8\u6587\u4ef6\u987a\u5e8f\u6027\u5047\u7eff/\u5047\u7ea2\u7684\u9632\u7ebf\uff09\u3002",
+      "label": "\u771f\u5b50\u8fdb\u7a0b + \u771f env\uff1a`-m gherkai_worker_novaact --list-deterministic` \u62a5\u7684\u8868\u542b\u4f7f\u7528\u65b9 step\u3002\u2026",
       "file_type": "rationale",
       "source_file": "engines/novaact/tests/test_user_steps.py",
-      "source_location": "L30",
+      "source_location": "L175",
       "_origin": "ast",
-      "community": 207,
-      "community_name": "_isolate",
-      "norm_label": "\u6ce8\u518c\u8868 snapshot/restore + \u6e05\u6389\u672c\u6d4b\u8bd5\u585e\u8fdb sys.modules \u7684\u5408\u6210\u6a21\u5757(\u8de8\u6587\u4ef6\u987a\u5e8f\u6027\u5047\u7eff/\u5047\u7ea2\u7684\u9632\u7ebf)\u3002",
-      "id": "engines_novaact_tests_test_user_steps_rationale_30"
+      "community": 206,
+      "community_name": "_clean_env",
+      "norm_label": "\u771f\u5b50\u8fdb\u7a0b + \u771f env:`-m gherkai_worker_novaact --list-deterministic` \u62a5\u7684\u8868\u542b\u4f7f\u7528\u65b9 step\u3002...",
+      "id": "engines_novaact_tests_test_user_steps_rationale_175"
+    },
+    {
+      "label": "fail-loud \u5230\u8fdb\u7a0b\u8fb9\u754c\uff1a\u574f step \u6587\u4ef6 \u2192 \u81ea\u8ff0\u5165\u53e3\u4e5f\u975e 0 \u9000\u51fa\u3001stderr \u6307\u540d\u6587\u4ef6\uff08\u4e0d\u9759\u9ed8\u7ed9\u51fa\u6b8b\u7f3a\u6e05\u5355\uff09\u3002",
+      "file_type": "rationale",
+      "source_file": "engines/novaact/tests/test_user_steps.py",
+      "source_location": "L191",
+      "_origin": "ast",
+      "community": 206,
+      "community_name": "_clean_env",
+      "norm_label": "fail-loud \u5230\u8fdb\u7a0b\u8fb9\u754c:\u574f step \u6587\u4ef6 \u2192 \u81ea\u8ff0\u5165\u53e3\u4e5f\u975e 0 \u9000\u51fa\u3001stderr \u6307\u540d\u6587\u4ef6(\u4e0d\u9759\u9ed8\u7ed9\u51fa\u6b8b\u7f3a\u6e05\u5355)\u3002",
+      "id": "engines_novaact_tests_test_user_steps_rationale_191"
+    },
+    {
+      "label": "\u5b50\u8fdb\u7a0b env\uff1a\u4fdd\u7559 PATH/PYTHONPATH \u7b49\u8fd0\u884c\u5fc5\u9700\u9879\uff0c\u5265\u6389\u53ef\u80fd\u5e72\u6270\u7684 GHERKAI_* / AWS \u843d\u70b9\u3002",
+      "file_type": "rationale",
+      "source_file": "engines/novaact/tests/test_user_steps.py",
+      "source_location": "L203",
+      "_origin": "ast",
+      "community": 206,
+      "community_name": "_clean_env",
+      "norm_label": "\u5b50\u8fdb\u7a0b env:\u4fdd\u7559 path/pythonpath \u7b49\u8fd0\u884c\u5fc5\u9700\u9879,\u5265\u6389\u53ef\u80fd\u5e72\u6270\u7684 gherkai_* / aws \u843d\u70b9\u3002",
+      "id": "engines_novaact_tests_test_user_steps_rationale_203"
     },
     {
       "label": "\u4e09\u6001\u5224\u5b9a\uff08ADR 0037 \u51b3\u7b56 6\uff09\u3002\u8fd4\u56de\u4e0a\u9762\u56db\u4e2a `VPC_*` \u4e4b\u4e00\u3002 \u5224\u5e8f\u91cc **stack\u2026",
@@ -42353,10 +42353,10 @@
       "source_file": "",
       "source_location": "",
       "_origin": "ast",
-      "id": "path",
       "community": 31,
       "community_name": "run_evals.py",
-      "norm_label": "path"
+      "norm_label": "path",
+      "id": "path"
     },
     {
       "label": "run_evals.py",
@@ -42364,10 +42364,10 @@
       "source_file": "skills/gherkai-evals/run_evals.py",
       "source_location": "L1",
       "_origin": "ast",
-      "id": "skills_gherkai_evals_run_evals",
       "community": 31,
       "community_name": "run_evals.py",
-      "norm_label": "run_evals.py"
+      "norm_label": "run_evals.py",
+      "id": "skills_gherkai_evals_run_evals"
     },
     {
       "label": "trigger_eval.py",
@@ -42397,10 +42397,10 @@
       "source_file": "skills/gherkai-evals/run_evals.py",
       "source_location": "L124",
       "_origin": "ast",
-      "id": "skills_gherkai_evals_run_evals_rationale_124",
       "community": 31,
       "community_name": "run_evals.py",
-      "norm_label": "\u6bcf\u8f6e\u5fc5\u62a5\u7684\u4e09\u4e2a\u6307\u6807:\u6c61\u67d3(\u89e6\u4ed3\u5e93 / \u89e6 skill \u526f\u672c)\u4e0e\u4e0d\u53ef\u91cd\u653e(\u8054\u7f51)\u3002\u4e8b\u540e grep \u624d\u77e5\u9053 = \u592a\u665a\u3002 skill_dirs = \u672c\u6b21\u8fd0\u884c\u7684\u4e34\u65f6..."
+      "norm_label": "\u6bcf\u8f6e\u5fc5\u62a5\u7684\u4e09\u4e2a\u6307\u6807:\u6c61\u67d3(\u89e6\u4ed3\u5e93 / \u89e6 skill \u526f\u672c)\u4e0e\u4e0d\u53ef\u91cd\u653e(\u8054\u7f51)\u3002\u4e8b\u540e grep \u624d\u77e5\u9053 = \u592a\u665a\u3002 skill_dirs = \u672c\u6b21\u8fd0\u884c\u7684\u4e34\u65f6...",
+      "id": "skills_gherkai_evals_run_evals_rationale_124"
     },
     {
       "label": "\u7528\u54ea\u4e2a gherkai \u88c5 skill\uff1a\u4f18\u5148\u4ed3\u5e93\u5916\u90a3\u5957\uff1b\u5b83\u88ab `--prepare-cli` \u5265\u6389\u4e86\u5305\u5185 skill \u65f6\u56de\u843d\u5230\u4ed3\u5e93 `.venv`\u3002\u2026",
@@ -43406,127 +43406,6 @@
       "id": "docs_adr_0040_consumer_role_model_and_terminology"
     },
     {
-      "label": "0041-agent-facing-cli-affordances.md",
-      "file_type": "document",
-      "source_file": "docs/adr/0041-agent-facing-cli-affordances.md",
-      "source_location": "L1",
-      "_origin": "ast",
-      "community": 338,
-      "community_name": "ADR 0037 \u5206\u53d1\u4e0e\u6253\u5305",
-      "norm_label": "0041-agent-facing-cli-affordances.md",
-      "id": "docs_adr_0041_agent_facing_cli_affordances"
-    },
-    {
-      "label": "0042-step-evidence-and-explain.md",
-      "file_type": "document",
-      "source_file": "docs/adr/0042-step-evidence-and-explain.md",
-      "source_location": "L1",
-      "_origin": "ast",
-      "community": 338,
-      "community_name": "ADR 0037 \u5206\u53d1\u4e0e\u6253\u5305",
-      "norm_label": "0042-step-evidence-and-explain.md",
-      "id": "docs_adr_0042_step_evidence_and_explain"
-    },
-    {
-      "label": "0043-agent-skill-for-driving-gherkai.md",
-      "file_type": "document",
-      "source_file": "docs/adr/0043-agent-skill-for-driving-gherkai.md",
-      "source_location": "L1",
-      "_origin": "ast",
-      "id": "docs_adr_0043_agent_skill_for_driving_gherkai",
-      "community": 338,
-      "community_name": "ADR 0037 \u5206\u53d1\u4e0e\u6253\u5305",
-      "norm_label": "0043-agent-skill-for-driving-gherkai.md"
-    },
-    {
-      "label": "artifacts-and-evidence.md",
-      "file_type": "document",
-      "source_file": "docs/guides/artifacts-and-evidence.md",
-      "source_location": "L1",
-      "_origin": "ast",
-      "community": 338,
-      "community_name": "ADR 0037 \u5206\u53d1\u4e0e\u6253\u5305",
-      "norm_label": "artifacts-and-evidence.md",
-      "id": "docs_guides_artifacts_and_evidence"
-    },
-    {
-      "label": "guides/cli-json-contract.md",
-      "file_type": "document",
-      "source_file": "docs/guides/cli-json-contract.md",
-      "source_location": "L1",
-      "_origin": "ast",
-      "community": 338,
-      "community_name": "ADR 0037 \u5206\u53d1\u4e0e\u6253\u5305",
-      "norm_label": "guides/cli-json-contract.md",
-      "id": "docs_guides_cli_json_contract"
-    },
-    {
-      "label": "cloud-backend-carriers.md",
-      "file_type": "document",
-      "source_file": "docs/guides/cloud-backend-carriers.md",
-      "source_location": "L1",
-      "_origin": "ast",
-      "community": 338,
-      "community_name": "ADR 0037 \u5206\u53d1\u4e0e\u6253\u5305",
-      "norm_label": "cloud-backend-carriers.md",
-      "id": "docs_guides_cloud_backend_carriers"
-    },
-    {
-      "label": "deterministic-step-lifecycle.md",
-      "file_type": "document",
-      "source_file": "docs/guides/deterministic-step-lifecycle.md",
-      "source_location": "L1",
-      "_origin": "ast",
-      "community": 338,
-      "community_name": "ADR 0037 \u5206\u53d1\u4e0e\u6253\u5305",
-      "norm_label": "deterministic-step-lifecycle.md",
-      "id": "docs_guides_deterministic_step_lifecycle"
-    },
-    {
-      "label": "execution-and-reconciliation.md",
-      "file_type": "document",
-      "source_file": "docs/guides/execution-and-reconciliation.md",
-      "source_location": "L1",
-      "_origin": "ast",
-      "community": 338,
-      "community_name": "ADR 0037 \u5206\u53d1\u4e0e\u6253\u5305",
-      "norm_label": "execution-and-reconciliation.md",
-      "id": "docs_guides_execution_and_reconciliation"
-    },
-    {
-      "label": "guides/README.md",
-      "file_type": "document",
-      "source_file": "docs/guides/README.md",
-      "source_location": "L1",
-      "_origin": "ast",
-      "community": 338,
-      "community_name": "ADR 0037 \u5206\u53d1\u4e0e\u6253\u5305",
-      "norm_label": "guides/readme.md",
-      "id": "docs_guides_readme"
-    },
-    {
-      "label": "docs/guides \u7d22\u5f15",
-      "file_type": "document",
-      "source_file": "docs/guides/README.md",
-      "source_location": "L1",
-      "_origin": "ast",
-      "community": 338,
-      "community_name": "ADR 0037 \u5206\u53d1\u4e0e\u6253\u5305",
-      "norm_label": "docs/guides \u7d22\u5f15",
-      "id": "docs_guides_readme_docs_guides_\u7d22\u5f15"
-    },
-    {
-      "label": "verdict-model.md",
-      "file_type": "document",
-      "source_file": "docs/guides/verdict-model.md",
-      "source_location": "L1",
-      "_origin": "ast",
-      "community": 338,
-      "community_name": "ADR 0037 \u5206\u53d1\u4e0e\u6253\u5305",
-      "norm_label": "verdict-model.md",
-      "id": "docs_guides_verdict_model"
-    },
-    {
       "label": "midscene/DEVELOPMENT.md",
       "file_type": "document",
       "source_file": "engines/midscene/DEVELOPMENT.md",
@@ -44001,6 +43880,127 @@
       "id": "core_tests_test_conditional_writes_rationale_86"
     },
     {
+      "label": "0041-agent-facing-cli-affordances.md",
+      "file_type": "document",
+      "source_file": "docs/adr/0041-agent-facing-cli-affordances.md",
+      "source_location": "L1",
+      "_origin": "ast",
+      "community": 36,
+      "community_name": "execution-and-reconciliation.md",
+      "norm_label": "0041-agent-facing-cli-affordances.md",
+      "id": "docs_adr_0041_agent_facing_cli_affordances"
+    },
+    {
+      "label": "0042-step-evidence-and-explain.md",
+      "file_type": "document",
+      "source_file": "docs/adr/0042-step-evidence-and-explain.md",
+      "source_location": "L1",
+      "_origin": "ast",
+      "community": 36,
+      "community_name": "execution-and-reconciliation.md",
+      "norm_label": "0042-step-evidence-and-explain.md",
+      "id": "docs_adr_0042_step_evidence_and_explain"
+    },
+    {
+      "label": "0043-agent-skill-for-driving-gherkai.md",
+      "file_type": "document",
+      "source_file": "docs/adr/0043-agent-skill-for-driving-gherkai.md",
+      "source_location": "L1",
+      "_origin": "ast",
+      "community": 36,
+      "community_name": "execution-and-reconciliation.md",
+      "norm_label": "0043-agent-skill-for-driving-gherkai.md",
+      "id": "docs_adr_0043_agent_skill_for_driving_gherkai"
+    },
+    {
+      "label": "artifacts-and-evidence.md",
+      "file_type": "document",
+      "source_file": "docs/guides/artifacts-and-evidence.md",
+      "source_location": "L1",
+      "_origin": "ast",
+      "community": 36,
+      "community_name": "execution-and-reconciliation.md",
+      "norm_label": "artifacts-and-evidence.md",
+      "id": "docs_guides_artifacts_and_evidence"
+    },
+    {
+      "label": "guides/cli-json-contract.md",
+      "file_type": "document",
+      "source_file": "docs/guides/cli-json-contract.md",
+      "source_location": "L1",
+      "_origin": "ast",
+      "community": 36,
+      "community_name": "execution-and-reconciliation.md",
+      "norm_label": "guides/cli-json-contract.md",
+      "id": "docs_guides_cli_json_contract"
+    },
+    {
+      "label": "cloud-backend-carriers.md",
+      "file_type": "document",
+      "source_file": "docs/guides/cloud-backend-carriers.md",
+      "source_location": "L1",
+      "_origin": "ast",
+      "community": 36,
+      "community_name": "execution-and-reconciliation.md",
+      "norm_label": "cloud-backend-carriers.md",
+      "id": "docs_guides_cloud_backend_carriers"
+    },
+    {
+      "label": "deterministic-step-lifecycle.md",
+      "file_type": "document",
+      "source_file": "docs/guides/deterministic-step-lifecycle.md",
+      "source_location": "L1",
+      "_origin": "ast",
+      "community": 36,
+      "community_name": "execution-and-reconciliation.md",
+      "norm_label": "deterministic-step-lifecycle.md",
+      "id": "docs_guides_deterministic_step_lifecycle"
+    },
+    {
+      "label": "execution-and-reconciliation.md",
+      "file_type": "document",
+      "source_file": "docs/guides/execution-and-reconciliation.md",
+      "source_location": "L1",
+      "_origin": "ast",
+      "community": 36,
+      "community_name": "execution-and-reconciliation.md",
+      "norm_label": "execution-and-reconciliation.md",
+      "id": "docs_guides_execution_and_reconciliation"
+    },
+    {
+      "label": "guides/README.md",
+      "file_type": "document",
+      "source_file": "docs/guides/README.md",
+      "source_location": "L1",
+      "_origin": "ast",
+      "community": 36,
+      "community_name": "execution-and-reconciliation.md",
+      "norm_label": "guides/readme.md",
+      "id": "docs_guides_readme"
+    },
+    {
+      "label": "docs/guides \u7d22\u5f15",
+      "file_type": "document",
+      "source_file": "docs/guides/README.md",
+      "source_location": "L1",
+      "_origin": "ast",
+      "community": 36,
+      "community_name": "execution-and-reconciliation.md",
+      "norm_label": "docs/guides \u7d22\u5f15",
+      "id": "docs_guides_readme_docs_guides_\u7d22\u5f15"
+    },
+    {
+      "label": "verdict-model.md",
+      "file_type": "document",
+      "source_file": "docs/guides/verdict-model.md",
+      "source_location": "L1",
+      "_origin": "ast",
+      "community": 36,
+      "community_name": "execution-and-reconciliation.md",
+      "norm_label": "verdict-model.md",
+      "id": "docs_guides_verdict_model"
+    },
+    {
       "label": "Path",
       "file_type": "code",
       "source_file": "",
@@ -44331,6 +44331,17 @@
       "id": "engines_novaact_tests_test_interrupt_model_rationale_67"
     },
     {
+      "label": "BaseException",
+      "file_type": "code",
+      "source_file": "",
+      "source_location": "",
+      "_origin": "ast",
+      "community": 39,
+      "community_name": "_is_transient_network",
+      "norm_label": "baseexception",
+      "id": "engines_novaact_gherkai_worker_novaact_run_scope_py_baseexception"
+    },
+    {
       "label": "test_transient_network.py",
       "file_type": "code",
       "source_file": "engines/novaact/tests/test_transient_network.py",
@@ -44340,6 +44351,17 @@
       "community_name": "_is_transient_network",
       "norm_label": "test_transient_network.py",
       "id": "engines_novaact_tests_test_transient_network"
+    },
+    {
+      "label": "boto ClientError \u662f\u5426\u670d\u52a1\u7aef\u77ac\u65f6\uff08\u6309\u9519\u8bef\u7801/HTTP \u72b6\u6001\u7801\u7ec6\u5206\uff0cADR 0028\uff09\u3002\u975e ClientError \u8fd4\u56de False\u3002",
+      "file_type": "rationale",
+      "source_file": "engines/novaact/gherkai_worker_novaact/run_scope.py",
+      "source_location": "L636",
+      "_origin": "ast",
+      "community": 39,
+      "community_name": "_is_transient_network",
+      "norm_label": "boto clienterror \u662f\u5426\u670d\u52a1\u7aef\u77ac\u65f6(\u6309\u9519\u8bef\u7801/http \u72b6\u6001\u7801\u7ec6\u5206,adr 0028)\u3002\u975e clienterror \u8fd4\u56de false\u3002",
+      "id": "engines_novaact_gherkai_worker_novaact_run_scope_rationale_636"
     },
     {
       "label": "\u662f\u5426\u7f51\u7edc/SSL \u77ac\u65f6\u6545\u969c\uff08\u53ef\u91cd\u8bd5\uff0cADR 0028\uff09\u3002 \u767d\u540d\u5355\u5339\u914d**\u5177\u4f53**\u77ac\u65f6\u7c7b\u578b\uff0c\u4e0d\u7528\u5bbd OSError \u515c\u5e95\u2014\u2014ssl.SSLError \u4e0e\u2026",
@@ -45035,6 +45057,17 @@
       "id": "engines_novaact_tests_test_user_steps_py_parametrize"
     },
     {
+      "label": "\u6ce8\u518c\u8868\u81ea\u8ff0\uff08ADR 0036\uff09\uff1aworker --list-deterministic \u65f6 dump \u6210 JSON \u7ed9 CLI \u8f6c\u8ff0\u3002",
+      "file_type": "rationale",
+      "source_file": "engines/novaact/gherkai_worker_novaact/deterministic.py",
+      "source_location": "L64",
+      "_origin": "ast",
+      "community": 42,
+      "community_name": "test_user_steps.py",
+      "norm_label": "\u6ce8\u518c\u8868\u81ea\u8ff0(adr 0036):worker --list-deterministic \u65f6 dump \u6210 json \u7ed9 cli \u8f6c\u8ff0\u3002",
+      "id": "engines_novaact_gherkai_worker_novaact_deterministic_rationale_64"
+    },
+    {
       "label": "\u52a0\u8f7d `root` \u4e0b\u7684\u4f7f\u7528\u65b9\u786e\u5b9a\u6027 step \u6587\u4ef6\uff0c\u8fd4\u56de\u5b9e\u9645\u52a0\u8f7d\u7684\u6587\u4ef6\u5217\u8868\uff08\u6392\u5e8f\u540e\uff09\u3002 `root` = env `GHERKAI_STEPS_DIR`\u2026",
       "file_type": "rationale",
       "source_file": "engines/novaact/gherkai_worker_novaact/user_steps.py",
@@ -45077,39 +45110,6 @@
       "community_name": "test_user_steps.py",
       "norm_label": "\u4f7f\u7528\u65b9\u53eb `json.py` \u4e5f\u4e0d\u80fd\u906e\u853d\u6807\u51c6\u5e93(\u6839\u4e0d\u5165 sys.path \u7684\u5b9e\u9645\u540e\u679c,\u800c\u975e\u4ec5\u65ad\u8a00 sys.path \u5217\u8868)\u3002",
       "id": "engines_novaact_tests_test_user_steps_rationale_158"
-    },
-    {
-      "label": "\u771f\u5b50\u8fdb\u7a0b + \u771f env\uff1a`-m gherkai_worker_novaact --list-deterministic` \u62a5\u7684\u8868\u542b\u4f7f\u7528\u65b9 step\u3002\u2026",
-      "file_type": "rationale",
-      "source_file": "engines/novaact/tests/test_user_steps.py",
-      "source_location": "L175",
-      "_origin": "ast",
-      "community": 42,
-      "community_name": "test_user_steps.py",
-      "norm_label": "\u771f\u5b50\u8fdb\u7a0b + \u771f env:`-m gherkai_worker_novaact --list-deterministic` \u62a5\u7684\u8868\u542b\u4f7f\u7528\u65b9 step\u3002...",
-      "id": "engines_novaact_tests_test_user_steps_rationale_175"
-    },
-    {
-      "label": "fail-loud \u5230\u8fdb\u7a0b\u8fb9\u754c\uff1a\u574f step \u6587\u4ef6 \u2192 \u81ea\u8ff0\u5165\u53e3\u4e5f\u975e 0 \u9000\u51fa\u3001stderr \u6307\u540d\u6587\u4ef6\uff08\u4e0d\u9759\u9ed8\u7ed9\u51fa\u6b8b\u7f3a\u6e05\u5355\uff09\u3002",
-      "file_type": "rationale",
-      "source_file": "engines/novaact/tests/test_user_steps.py",
-      "source_location": "L191",
-      "_origin": "ast",
-      "community": 42,
-      "community_name": "test_user_steps.py",
-      "norm_label": "fail-loud \u5230\u8fdb\u7a0b\u8fb9\u754c:\u574f step \u6587\u4ef6 \u2192 \u81ea\u8ff0\u5165\u53e3\u4e5f\u975e 0 \u9000\u51fa\u3001stderr \u6307\u540d\u6587\u4ef6(\u4e0d\u9759\u9ed8\u7ed9\u51fa\u6b8b\u7f3a\u6e05\u5355)\u3002",
-      "id": "engines_novaact_tests_test_user_steps_rationale_191"
-    },
-    {
-      "label": "\u5b50\u8fdb\u7a0b env\uff1a\u4fdd\u7559 PATH/PYTHONPATH \u7b49\u8fd0\u884c\u5fc5\u9700\u9879\uff0c\u5265\u6389\u53ef\u80fd\u5e72\u6270\u7684 GHERKAI_* / AWS \u843d\u70b9\u3002",
-      "file_type": "rationale",
-      "source_file": "engines/novaact/tests/test_user_steps.py",
-      "source_location": "L203",
-      "_origin": "ast",
-      "community": 42,
-      "community_name": "test_user_steps.py",
-      "norm_label": "\u5b50\u8fdb\u7a0b env:\u4fdd\u7559 path/pythonpath \u7b49\u8fd0\u884c\u5fc5\u9700\u9879,\u5265\u6389\u53ef\u80fd\u5e72\u6270\u7684 gherkai_* / aws \u843d\u70b9\u3002",
-      "id": "engines_novaact_tests_test_user_steps_rationale_203"
     },
     {
       "label": "\u5199\u4e00\u4e2a\u6700\u5c0f step \u6587\u4ef6\uff1a\u9876\u5c42 @deterministic \u6ce8\u518c\uff08\u4e0e\u4f7f\u7528\u65b9\u771f\u5b9e\u5199\u6cd5\u9010\u5b57\u4e00\u81f4\uff09\u3002",
@@ -45594,6 +45594,17 @@
       "community_name": "_fixture",
       "norm_label": "\u6bcf\u4e2a\u7528\u4f8b\u524d\u540e\u6e05 _stop(\u6a21\u5757\u7ea7\u5355\u4f8b,\u907f\u514d\u7528\u4f8b\u95f4\u4e32\u6270)\u3002",
       "id": "engines_novaact_tests_test_interrupt_model_rationale_23"
+    },
+    {
+      "label": "\u6ce8\u518c\u8868 snapshot/restore + \u6e05\u6389\u672c\u6d4b\u8bd5\u585e\u8fdb sys.modules \u7684\u5408\u6210\u6a21\u5757\uff08\u8de8\u6587\u4ef6\u987a\u5e8f\u6027\u5047\u7eff/\u5047\u7ea2\u7684\u9632\u7ebf\uff09\u3002",
+      "file_type": "rationale",
+      "source_file": "engines/novaact/tests/test_user_steps.py",
+      "source_location": "L30",
+      "_origin": "ast",
+      "community": 45,
+      "community_name": "_fixture",
+      "norm_label": "\u6ce8\u518c\u8868 snapshot/restore + \u6e05\u6389\u672c\u6d4b\u8bd5\u585e\u8fdb sys.modules \u7684\u5408\u6210\u6a21\u5757(\u8de8\u6587\u4ef6\u987a\u5e8f\u6027\u5047\u7eff/\u5047\u7ea2\u7684\u9632\u7ebf)\u3002",
+      "id": "engines_novaact_tests_test_user_steps_rationale_30"
     },
     {
       "label": "\u5b9a\u4f4d\u94fe\u7b2c\u4e00\u7ea7\u9489\u6b7b\u4e00\u4e2a\u5047 novaact cmd\uff1a\u81ea\u8ff0\u7528\u4f8b\u53ea\u9a8c\u300c\u7ec4\u5408\u6839\u600e\u4e48\u62fc\u547d\u4ee4/\u6536\u7ed3\u679c\u300d\uff0c\u4e0d\u4f9d\u8d56\u672c\u673a\u88c5\u4e86\u4ec0\u4e48\u3002",
@@ -47607,17 +47618,6 @@
       "community_name": "test_deterministic.py",
       "norm_label": "\u88c5\u9970\u5668:\u628a handler \u6309\u6b63\u5219 pattern \u767b\u8bb0\u8fdb\u6ce8\u518c\u8868\u3002 description/example \u5fc5\u586b(adr...",
       "id": "engines_novaact_gherkai_worker_novaact_deterministic_rationale_40"
-    },
-    {
-      "label": "\u6ce8\u518c\u8868\u81ea\u8ff0\uff08ADR 0036\uff09\uff1aworker --list-deterministic \u65f6 dump \u6210 JSON \u7ed9 CLI \u8f6c\u8ff0\u3002",
-      "file_type": "rationale",
-      "source_file": "engines/novaact/gherkai_worker_novaact/deterministic.py",
-      "source_location": "L64",
-      "_origin": "ast",
-      "community": 57,
-      "community_name": "test_deterministic.py",
-      "norm_label": "\u6ce8\u518c\u8868\u81ea\u8ff0(adr 0036):worker --list-deterministic \u65f6 dump \u6210 json \u7ed9 cli \u8f6c\u8ff0\u3002",
-      "id": "engines_novaact_gherkai_worker_novaact_deterministic_rationale_64"
     },
     {
       "label": "\u5728\u6ce8\u518c\u8868\u91cc\u627e\u547d\u4e2d text \u7684\u552f\u4e00 handler\u3002 \u8fd4\u56de (handler, groups_dict) \u6216 None\uff08\u672a\u547d\u4e2d\u8d70 AI\uff09\u3002\u547d\u4e2d\u591a\u6761 \u2192\u2026",
@@ -53077,6 +53077,116 @@
       "id": "runtime_tests_test_tunnel_rationale_79"
     },
     {
+      "label": "0041. \u9762\u5411 AI agent \u9a7e\u9a6d\u7684 CLI \u80fd\u529b\uff1ascenario \u7b5b\u9009\u3001\u9759\u9ed8\u843d\u76d8\u3001JSON \u8986\u76d6\u8865\u9f50\u3001doctor \u81ea\u68c0\u3001JSON \u5951\u7ea6",
+      "file_type": "document",
+      "source_file": "docs/adr/0041-agent-facing-cli-affordances.md",
+      "source_location": "L1",
+      "_origin": "ast",
+      "community": 92,
+      "community_name": "\u5224\u5b9a\u662f\u600e\u4e48\u7b97\u51fa\u6765\u7684\uff1a\u4ece\u4e00\u7968\u5230\u9000\u51fa\u7801",
+      "norm_label": "0041. \u9762\u5411 ai agent \u9a7e\u9a6d\u7684 cli \u80fd\u529b:scenario \u7b5b\u9009\u3001\u9759\u9ed8\u843d\u76d8\u3001json \u8986\u76d6\u8865\u9f50\u3001doctor \u81ea\u68c0\u3001json \u5951\u7ea6",
+      "id": "docs_adr_0041_agent_facing_cli_affordances_0041_\u9762\u5411_ai_agent_\u9a7e\u9a6d\u7684_cli_\u80fd\u529b_scenario_\u7b5b\u9009_\u9759\u9ed8\u843d\u76d8_json_\u8986\u76d6\u8865\u9f50_doctor_\u81ea\u68c0_json_\u5951\u7ea6"
+    },
+    {
+      "label": "\u4e00\u3001scenario \u7b5b\u9009\uff1a`--scope` / `--tags` / `--scenario`\uff0crun / plan / submit \u4e09\u547d\u4ee4\u540c\u5f62",
+      "file_type": "document",
+      "source_file": "docs/adr/0041-agent-facing-cli-affordances.md",
+      "source_location": "L17",
+      "_origin": "ast",
+      "community": 92,
+      "community_name": "\u5224\u5b9a\u662f\u600e\u4e48\u7b97\u51fa\u6765\u7684\uff1a\u4ece\u4e00\u7968\u5230\u9000\u51fa\u7801",
+      "norm_label": "\u4e00\u3001scenario \u7b5b\u9009:`--scope` / `--tags` / `--scenario`,run / plan / submit \u4e09\u547d\u4ee4\u540c\u5f62",
+      "id": "docs_adr_0041_agent_facing_cli_affordances_\u4e00_scenario_\u7b5b\u9009_scope_tags_scenario_run_plan_submit_\u4e09\u547d\u4ee4\u540c\u5f62"
+    },
+    {
+      "label": "\u4e09\u3001JSON \u8986\u76d6\u8865\u9f50\uff1a\u67e5\u8be2\u7c7b\u547d\u4ee4\u90fd\u6709\u673a\u8bfb\u5f62\u6001",
+      "file_type": "document",
+      "source_file": "docs/adr/0041-agent-facing-cli-affordances.md",
+      "source_location": "L34",
+      "_origin": "ast",
+      "community": 92,
+      "community_name": "\u5224\u5b9a\u662f\u600e\u4e48\u7b97\u51fa\u6765\u7684\uff1a\u4ece\u4e00\u7968\u5230\u9000\u51fa\u7801",
+      "norm_label": "\u4e09\u3001json \u8986\u76d6\u8865\u9f50:\u67e5\u8be2\u7c7b\u547d\u4ee4\u90fd\u6709\u673a\u8bfb\u5f62\u6001",
+      "id": "docs_adr_0041_agent_facing_cli_affordances_\u4e09_json_\u8986\u76d6\u8865\u9f50_\u67e5\u8be2\u7c7b\u547d\u4ee4\u90fd\u6709\u673a\u8bfb\u5f62\u6001"
+    },
+    {
+      "label": "\u4e8c\u3001`--quiet` \u628a worker \u65e5\u5fd7\u843d\u76d8",
+      "file_type": "document",
+      "source_file": "docs/adr/0041-agent-facing-cli-affordances.md",
+      "source_location": "L27",
+      "_origin": "ast",
+      "community": 92,
+      "community_name": "\u5224\u5b9a\u662f\u600e\u4e48\u7b97\u51fa\u6765\u7684\uff1a\u4ece\u4e00\u7968\u5230\u9000\u51fa\u7801",
+      "norm_label": "\u4e8c\u3001`--quiet` \u628a worker \u65e5\u5fd7\u843d\u76d8",
+      "id": "docs_adr_0041_agent_facing_cli_affordances_\u4e8c_quiet_\u628a_worker_\u65e5\u5fd7\u843d\u76d8"
+    },
+    {
+      "label": "\u4e94\u3001JSON \u5b57\u6bb5\u5951\u7ea6\u6587\u6863 + \u62a4\u680f",
+      "file_type": "document",
+      "source_file": "docs/adr/0041-agent-facing-cli-affordances.md",
+      "source_location": "L56",
+      "_origin": "ast",
+      "community": 92,
+      "community_name": "\u5224\u5b9a\u662f\u600e\u4e48\u7b97\u51fa\u6765\u7684\uff1a\u4ece\u4e00\u7968\u5230\u9000\u51fa\u7801",
+      "norm_label": "\u4e94\u3001json \u5b57\u6bb5\u5951\u7ea6\u6587\u6863 + \u62a4\u680f",
+      "id": "docs_adr_0041_agent_facing_cli_affordances_\u4e94_json_\u5b57\u6bb5\u5951\u7ea6\u6587\u6863_\u62a4\u680f"
+    },
+    {
+      "label": "\u51b3\u7b56",
+      "file_type": "document",
+      "source_file": "docs/adr/0041-agent-facing-cli-affordances.md",
+      "source_location": "L15",
+      "_origin": "ast",
+      "community": 92,
+      "community_name": "\u5224\u5b9a\u662f\u600e\u4e48\u7b97\u51fa\u6765\u7684\uff1a\u4ece\u4e00\u7968\u5230\u9000\u51fa\u7801",
+      "norm_label": "\u51b3\u7b56",
+      "id": "docs_adr_0041_agent_facing_cli_affordances_\u51b3\u7b56"
+    },
+    {
+      "label": "\u56db\u3001`doctor`\uff1a\u4e00\u4e2a\u5165\u53e3\u3001\u6309\u7ec4\u4ef6\u5206\u7ec4",
+      "file_type": "document",
+      "source_file": "docs/adr/0041-agent-facing-cli-affordances.md",
+      "source_location": "L44",
+      "_origin": "ast",
+      "community": 92,
+      "community_name": "\u5224\u5b9a\u662f\u600e\u4e48\u7b97\u51fa\u6765\u7684\uff1a\u4ece\u4e00\u7968\u5230\u9000\u51fa\u7801",
+      "norm_label": "\u56db\u3001`doctor`:\u4e00\u4e2a\u5165\u53e3\u3001\u6309\u7ec4\u4ef6\u5206\u7ec4",
+      "id": "docs_adr_0041_agent_facing_cli_affordances_\u56db_doctor_\u4e00\u4e2a\u5165\u53e3_\u6309\u7ec4\u4ef6\u5206\u7ec4"
+    },
+    {
+      "label": "\u5f71\u54cd",
+      "file_type": "document",
+      "source_file": "docs/adr/0041-agent-facing-cli-affordances.md",
+      "source_location": "L62",
+      "_origin": "ast",
+      "community": 92,
+      "community_name": "\u5224\u5b9a\u662f\u600e\u4e48\u7b97\u51fa\u6765\u7684\uff1a\u4ece\u4e00\u7968\u5230\u9000\u51fa\u7801",
+      "norm_label": "\u5f71\u54cd",
+      "id": "docs_adr_0041_agent_facing_cli_affordances_\u5f71\u54cd"
+    },
+    {
+      "label": "\u80cc\u666f\u4e0e\u95ee\u9898",
+      "file_type": "document",
+      "source_file": "docs/adr/0041-agent-facing-cli-affordances.md",
+      "source_location": "L5",
+      "_origin": "ast",
+      "community": 92,
+      "community_name": "\u5224\u5b9a\u662f\u600e\u4e48\u7b97\u51fa\u6765\u7684\uff1a\u4ece\u4e00\u7968\u5230\u9000\u51fa\u7801",
+      "norm_label": "\u80cc\u666f\u4e0e\u95ee\u9898",
+      "id": "docs_adr_0041_agent_facing_cli_affordances_\u80cc\u666f\u4e0e\u95ee\u9898"
+    },
+    {
+      "label": "\u91cd\u8bae\u95f8\u95e8",
+      "file_type": "document",
+      "source_file": "docs/adr/0041-agent-facing-cli-affordances.md",
+      "source_location": "L68",
+      "_origin": "ast",
+      "community": 92,
+      "community_name": "\u5224\u5b9a\u662f\u600e\u4e48\u7b97\u51fa\u6765\u7684\uff1a\u4ece\u4e00\u7968\u5230\u9000\u51fa\u7801",
+      "norm_label": "\u91cd\u8bae\u95f8\u95e8",
+      "id": "docs_adr_0041_agent_facing_cli_affordances_\u91cd\u8bae\u95f8\u95e8"
+    },
+    {
       "label": "1. \u56db\u5c42\u5f52\u7ea6\uff1a\u4e00\u7968 \u2192 step \u2192 scenario \u2192 job \u2192 run",
       "file_type": "document",
       "source_file": "docs/guides/verdict-model.md",
@@ -53715,116 +53825,6 @@
       "id": "docs_adr_0039_user_facing_surfaces_no_internal_references_\u9762\u4e8c_\u6587\u6863\u5206\u5c42_readme_development_\u6210\u5bf9"
     },
     {
-      "label": "0041. \u9762\u5411 AI agent \u9a7e\u9a6d\u7684 CLI \u80fd\u529b\uff1ascenario \u7b5b\u9009\u3001\u9759\u9ed8\u843d\u76d8\u3001JSON \u8986\u76d6\u8865\u9f50\u3001doctor \u81ea\u68c0\u3001JSON \u5951\u7ea6",
-      "file_type": "document",
-      "source_file": "docs/adr/0041-agent-facing-cli-affordances.md",
-      "source_location": "L1",
-      "_origin": "ast",
-      "community": 95,
-      "community_name": "0039. \u7528\u6237\u53ef\u89c1\u9762\u4e0d\u5e26\u5185\u90e8\u6307\u4ee3\uff1a\u4ea7\u54c1\u6587\u6848\u4e0e\u6587\u6863\u5206\u5c42",
-      "norm_label": "0041. \u9762\u5411 ai agent \u9a7e\u9a6d\u7684 cli \u80fd\u529b:scenario \u7b5b\u9009\u3001\u9759\u9ed8\u843d\u76d8\u3001json \u8986\u76d6\u8865\u9f50\u3001doctor \u81ea\u68c0\u3001json \u5951\u7ea6",
-      "id": "docs_adr_0041_agent_facing_cli_affordances_0041_\u9762\u5411_ai_agent_\u9a7e\u9a6d\u7684_cli_\u80fd\u529b_scenario_\u7b5b\u9009_\u9759\u9ed8\u843d\u76d8_json_\u8986\u76d6\u8865\u9f50_doctor_\u81ea\u68c0_json_\u5951\u7ea6"
-    },
-    {
-      "label": "\u4e00\u3001scenario \u7b5b\u9009\uff1a`--scope` / `--tags` / `--scenario`\uff0crun / plan / submit \u4e09\u547d\u4ee4\u540c\u5f62",
-      "file_type": "document",
-      "source_file": "docs/adr/0041-agent-facing-cli-affordances.md",
-      "source_location": "L17",
-      "_origin": "ast",
-      "community": 95,
-      "community_name": "0039. \u7528\u6237\u53ef\u89c1\u9762\u4e0d\u5e26\u5185\u90e8\u6307\u4ee3\uff1a\u4ea7\u54c1\u6587\u6848\u4e0e\u6587\u6863\u5206\u5c42",
-      "norm_label": "\u4e00\u3001scenario \u7b5b\u9009:`--scope` / `--tags` / `--scenario`,run / plan / submit \u4e09\u547d\u4ee4\u540c\u5f62",
-      "id": "docs_adr_0041_agent_facing_cli_affordances_\u4e00_scenario_\u7b5b\u9009_scope_tags_scenario_run_plan_submit_\u4e09\u547d\u4ee4\u540c\u5f62"
-    },
-    {
-      "label": "\u4e09\u3001JSON \u8986\u76d6\u8865\u9f50\uff1a\u67e5\u8be2\u7c7b\u547d\u4ee4\u90fd\u6709\u673a\u8bfb\u5f62\u6001",
-      "file_type": "document",
-      "source_file": "docs/adr/0041-agent-facing-cli-affordances.md",
-      "source_location": "L34",
-      "_origin": "ast",
-      "community": 95,
-      "community_name": "0039. \u7528\u6237\u53ef\u89c1\u9762\u4e0d\u5e26\u5185\u90e8\u6307\u4ee3\uff1a\u4ea7\u54c1\u6587\u6848\u4e0e\u6587\u6863\u5206\u5c42",
-      "norm_label": "\u4e09\u3001json \u8986\u76d6\u8865\u9f50:\u67e5\u8be2\u7c7b\u547d\u4ee4\u90fd\u6709\u673a\u8bfb\u5f62\u6001",
-      "id": "docs_adr_0041_agent_facing_cli_affordances_\u4e09_json_\u8986\u76d6\u8865\u9f50_\u67e5\u8be2\u7c7b\u547d\u4ee4\u90fd\u6709\u673a\u8bfb\u5f62\u6001"
-    },
-    {
-      "label": "\u4e8c\u3001`--quiet` \u628a worker \u65e5\u5fd7\u843d\u76d8",
-      "file_type": "document",
-      "source_file": "docs/adr/0041-agent-facing-cli-affordances.md",
-      "source_location": "L27",
-      "_origin": "ast",
-      "community": 95,
-      "community_name": "0039. \u7528\u6237\u53ef\u89c1\u9762\u4e0d\u5e26\u5185\u90e8\u6307\u4ee3\uff1a\u4ea7\u54c1\u6587\u6848\u4e0e\u6587\u6863\u5206\u5c42",
-      "norm_label": "\u4e8c\u3001`--quiet` \u628a worker \u65e5\u5fd7\u843d\u76d8",
-      "id": "docs_adr_0041_agent_facing_cli_affordances_\u4e8c_quiet_\u628a_worker_\u65e5\u5fd7\u843d\u76d8"
-    },
-    {
-      "label": "\u4e94\u3001JSON \u5b57\u6bb5\u5951\u7ea6\u6587\u6863 + \u62a4\u680f",
-      "file_type": "document",
-      "source_file": "docs/adr/0041-agent-facing-cli-affordances.md",
-      "source_location": "L56",
-      "_origin": "ast",
-      "community": 95,
-      "community_name": "0039. \u7528\u6237\u53ef\u89c1\u9762\u4e0d\u5e26\u5185\u90e8\u6307\u4ee3\uff1a\u4ea7\u54c1\u6587\u6848\u4e0e\u6587\u6863\u5206\u5c42",
-      "norm_label": "\u4e94\u3001json \u5b57\u6bb5\u5951\u7ea6\u6587\u6863 + \u62a4\u680f",
-      "id": "docs_adr_0041_agent_facing_cli_affordances_\u4e94_json_\u5b57\u6bb5\u5951\u7ea6\u6587\u6863_\u62a4\u680f"
-    },
-    {
-      "label": "\u51b3\u7b56",
-      "file_type": "document",
-      "source_file": "docs/adr/0041-agent-facing-cli-affordances.md",
-      "source_location": "L15",
-      "_origin": "ast",
-      "community": 95,
-      "community_name": "0039. \u7528\u6237\u53ef\u89c1\u9762\u4e0d\u5e26\u5185\u90e8\u6307\u4ee3\uff1a\u4ea7\u54c1\u6587\u6848\u4e0e\u6587\u6863\u5206\u5c42",
-      "norm_label": "\u51b3\u7b56",
-      "id": "docs_adr_0041_agent_facing_cli_affordances_\u51b3\u7b56"
-    },
-    {
-      "label": "\u56db\u3001`doctor`\uff1a\u4e00\u4e2a\u5165\u53e3\u3001\u6309\u7ec4\u4ef6\u5206\u7ec4",
-      "file_type": "document",
-      "source_file": "docs/adr/0041-agent-facing-cli-affordances.md",
-      "source_location": "L44",
-      "_origin": "ast",
-      "community": 95,
-      "community_name": "0039. \u7528\u6237\u53ef\u89c1\u9762\u4e0d\u5e26\u5185\u90e8\u6307\u4ee3\uff1a\u4ea7\u54c1\u6587\u6848\u4e0e\u6587\u6863\u5206\u5c42",
-      "norm_label": "\u56db\u3001`doctor`:\u4e00\u4e2a\u5165\u53e3\u3001\u6309\u7ec4\u4ef6\u5206\u7ec4",
-      "id": "docs_adr_0041_agent_facing_cli_affordances_\u56db_doctor_\u4e00\u4e2a\u5165\u53e3_\u6309\u7ec4\u4ef6\u5206\u7ec4"
-    },
-    {
-      "label": "\u5f71\u54cd",
-      "file_type": "document",
-      "source_file": "docs/adr/0041-agent-facing-cli-affordances.md",
-      "source_location": "L62",
-      "_origin": "ast",
-      "community": 95,
-      "community_name": "0039. \u7528\u6237\u53ef\u89c1\u9762\u4e0d\u5e26\u5185\u90e8\u6307\u4ee3\uff1a\u4ea7\u54c1\u6587\u6848\u4e0e\u6587\u6863\u5206\u5c42",
-      "norm_label": "\u5f71\u54cd",
-      "id": "docs_adr_0041_agent_facing_cli_affordances_\u5f71\u54cd"
-    },
-    {
-      "label": "\u80cc\u666f\u4e0e\u95ee\u9898",
-      "file_type": "document",
-      "source_file": "docs/adr/0041-agent-facing-cli-affordances.md",
-      "source_location": "L5",
-      "_origin": "ast",
-      "community": 95,
-      "community_name": "0039. \u7528\u6237\u53ef\u89c1\u9762\u4e0d\u5e26\u5185\u90e8\u6307\u4ee3\uff1a\u4ea7\u54c1\u6587\u6848\u4e0e\u6587\u6863\u5206\u5c42",
-      "norm_label": "\u80cc\u666f\u4e0e\u95ee\u9898",
-      "id": "docs_adr_0041_agent_facing_cli_affordances_\u80cc\u666f\u4e0e\u95ee\u9898"
-    },
-    {
-      "label": "\u91cd\u8bae\u95f8\u95e8",
-      "file_type": "document",
-      "source_file": "docs/adr/0041-agent-facing-cli-affordances.md",
-      "source_location": "L68",
-      "_origin": "ast",
-      "community": 95,
-      "community_name": "0039. \u7528\u6237\u53ef\u89c1\u9762\u4e0d\u5e26\u5185\u90e8\u6307\u4ee3\uff1a\u4ea7\u54c1\u6587\u6848\u4e0e\u6587\u6863\u5206\u5c42",
-      "norm_label": "\u91cd\u8bae\u95f8\u95e8",
-      "id": "docs_adr_0041_agent_facing_cli_affordances_\u91cd\u8bae\u95f8\u95e8"
-    },
-    {
       "label": "variant \u67d0\u4e00\u73af miss \u65f6\u7684\u6574\u53e5\u63d0\u793a\u2014\u2014**\u6309\u7248\u672c skew \u5206\u53c9**\uff08ADR 0038\u300cpreflight\u300d\u6761\uff09\u3002 CLI **\u65e7\u4e8e**\u540e\u7aef\uff08\u51b3\u7b56\u2026",
       "file_type": "rationale",
       "source_file": "runtime/gherkai_runtime/compose.py",
@@ -54309,9 +54309,41 @@
       "rationale": "\u7531 stack.py \u4ee5 handler=\"...\" \u5b57\u7b26\u4e32\u88c5\u914d\u3001AWS runtime \u8c03\u7528\uff0cgrep import \u627e\u4e0d\u5230\u751f\u4ea7\u8c03\u7528\u70b9\uff0c\u6545\u4e0d\u53ef\u5f53\u6b7b\u4ee3\u7801",
       "community": 101,
       "norm_label": "lambda handler \u5165\u53e3(lambdas/)",
-      "community_name": "ADR 0035 \u96a7\u9053\u66b4\u9732\u672c\u673a\u5e94\u7528",
+      "community_name": "\u4ee3\u7801\u5065\u5eb7\u5ea6\u590d\u76d8\u4efb\u52a1\u8bf4\u660e",
       "_origin": "semantic",
       "id": "deploy_aws_gherkai_deploy_aws_lambdas_handler"
+    },
+    {
+      "label": "createOpenAIClient injection",
+      "file_type": "code",
+      "source_file": "engines/midscene/spikes/SIGV4-FETCH-RECIPE.md",
+      "source_location": "\u00a71/\u00a77",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null,
+      "rationale": "\u4f20 createOpenAIClient \u4f1a\u8ba9 Agent \u5207\u5230\u9694\u79bb ModelConfigManager\u3001\u65e0\u89c6 overrideAIConfig \u4e0e\u5168\u5c40 env\uff0c\u6545\u6a21\u578b\u914d\u7f6e\u5fc5\u987b\u968f opts.modelConfig \u4e00\u8d77\u7ed9",
+      "community": 101,
+      "norm_label": "createopenaiclient injection",
+      "community_name": "\u4ee3\u7801\u5065\u5eb7\u5ea6\u590d\u76d8\u4efb\u52a1\u8bf4\u660e",
+      "_origin": "semantic",
+      "id": "engines_midscene_spikes_sigv4_fetch_recipe_createopenaiclient"
+    },
+    {
+      "label": "sigv4Fetch custom fetch",
+      "file_type": "code",
+      "source_file": "engines/midscene/spikes/SIGV4-FETCH-RECIPE.md",
+      "source_location": "\u00a71",
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null,
+      "rationale": "\u53ea\u7b7e\u6700\u5c0f\u624b\u5efa\u8bf7\u6c42 {host, content-type}\uff1asmithy \u4f1a\u7b7e denylist \u4e4b\u5916\u7684\u6bcf\u4e2a\u5934\uff0c\u800c content-length / x-stainless-* / accept-encoding \u5728 wire \u4e0a\u4f1a\u88ab\u6539 \u2192 403 SignatureDoesNotMatch\uff1bbody \u539f\u6837\u900f\u4f20\u907f\u514d\u91cd\u65b0\u5e8f\u5217\u5316\u7834\u574f\u7b7e\u540d",
+      "community": 101,
+      "norm_label": "sigv4fetch custom fetch",
+      "community_name": "\u4ee3\u7801\u5065\u5eb7\u5ea6\u590d\u76d8\u4efb\u52a1\u8bf4\u660e",
+      "_origin": "semantic",
+      "id": "engines_midscene_spikes_sigv4_fetch_recipe_sigv4fetch"
     },
     {
       "label": "\u56fe\u626b\u7684\u76f2\u533a\u4e0e grep \u5f3a\u5236\u57fa\u7ebf",
@@ -54325,9 +54357,73 @@
       "rationale": "\u5b57\u7b26\u4e32\u88c5\u914d\u7684 Lambda handler\u3001\u52a8\u6001\u8c03\u7528\u3001\u7ec4\u5408\u6839\u6ce8\u5165\u5728\u8c03\u7528\u56fe\u91cc\u540c\u6837\u96f6\u5165\u8fb9\uff0c\u56fe\u8bf4\u300c\u65e0\u4eba\u8c03\u7528\u300d\u4e0d\u6784\u6210\u5220\u9664\u4f9d\u636e\uff1b\u6ce8\u91ca\u8fdd\u89c4\u591a\u5728 rationale \u88ab\u622a\u65ad\u7684\u540e\u534a\u622a\uff0c\u626b\u56fe\u4f1a\u7ed9\u5047\u9634\u6027",
       "community": 101,
       "norm_label": "\u56fe\u626b\u7684\u76f2\u533a\u4e0e grep \u5f3a\u5236\u57fa\u7ebf",
-      "community_name": "ADR 0035 \u96a7\u9053\u66b4\u9732\u672c\u673a\u5e94\u7528",
+      "community_name": "\u4ee3\u7801\u5065\u5eb7\u5ea6\u590d\u76d8\u4efb\u52a1\u8bf4\u660e",
       "_origin": "semantic",
       "id": "docs_code_health_review_graph_blind_spot"
+    },
+    {
+      "label": "GHERKAI_STEPS_DIR env contract",
+      "file_type": "concept",
+      "source_file": "engines/midscene/DEVELOPMENT.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null,
+      "rationale": "\u7ea6\u5b9a\u89e3\u6790\uff08--steps-dir > env > ./steps\uff09\u7559\u5728\u7ec4\u5408\u6839\uff0cworker \u53ea\u8ba4 env\u3001\u4e0d\u91cd\u89e3\u6790\uff0c\u4fdd\u6301\u5206\u5c42",
+      "community": 101,
+      "norm_label": "gherkai_steps_dir env contract",
+      "community_name": "\u4ee3\u7801\u5065\u5eb7\u5ea6\u590d\u76d8\u4efb\u52a1\u8bf4\u660e",
+      "_origin": "semantic",
+      "id": "engines_midscene_development_gherkai_steps_dir"
+    },
+    {
+      "label": "AgentCore cloud browser (CDP)",
+      "file_type": "concept",
+      "source_file": "engines/midscene/README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null,
+      "rationale": "\u6d4f\u89c8\u5668\u8dd1\u5728\u4e91\u7aef\u3001\u672c\u673a\u4e0d\u9700\u8981 Chromium\uff0cplaywright \u53ea\u4f5c CDP \u5ba2\u6237\u7aef\u5e93",
+      "community": 101,
+      "norm_label": "agentcore cloud browser (cdp)",
+      "community_name": "\u4ee3\u7801\u5065\u5eb7\u5ea6\u590d\u76d8\u4efb\u52a1\u8bf4\u660e",
+      "_origin": "semantic",
+      "id": "engines_midscene_readme_agentcore_browser"
+    },
+    {
+      "label": "Deterministic step (user-authored)",
+      "file_type": "concept",
+      "source_file": "engines/midscene/README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null,
+      "rationale": "\u81ea\u7136\u8bed\u8a00 step \u9ed8\u8ba4\u4ea4\u7ed9 AI\uff1b\u5fc5\u987b\u7cbe\u786e\u3001\u4e0d\u5bb9\u6296\u52a8\u7684\u5224\u5b9a\u5199\u6210\u786e\u5b9a\u6027 step\uff0c\u547d\u4e2d\u5373\u8d70\u7528\u6237\u51fd\u6570\u3001\u53ef\u590d\u73b0\uff1b\u6269\u5c55\u540d\u53ea\u8ba4 .mts/.mjs \u56e0 .ts/.js \u4f1a\u843d\u8fdb CJS \u57df",
+      "community": 101,
+      "norm_label": "deterministic step (user-authored)",
+      "community_name": "\u4ee3\u7801\u5065\u5eb7\u5ea6\u590d\u76d8\u4efb\u52a1\u8bf4\u660e",
+      "_origin": "semantic",
+      "id": "engines_midscene_readme_deterministic_step"
+    },
+    {
+      "label": "Qwen3-VL 235B on Bedrock (grounding model)",
+      "file_type": "concept",
+      "source_file": "engines/midscene/README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null,
+      "rationale": "\u7528\u88f8 model id qwen.qwen3-vl-235b-a22b\u3001\u65e0 -instruct \u540e\u7f00\u3001\u65e0 inference-profile ARN\uff0c\u7aef\u70b9\u8def\u5f84\u5fc5\u987b /openai/v1",
+      "community": 101,
+      "norm_label": "qwen3-vl 235b on bedrock (grounding model)",
+      "community_name": "\u4ee3\u7801\u5065\u5eb7\u5ea6\u590d\u76d8\u4efb\u52a1\u8bf4\u660e",
+      "_origin": "semantic",
+      "id": "engines_midscene_readme_qwen3vl_bedrock"
     },
     {
       "label": "ADR 0001 \u6846\u67b6\u8303\u56f4\u9650\u5b9a\u4e3a\u82f1\u6587 UI",
@@ -54341,7 +54437,7 @@
       "rationale": "\u9650\u5b9a\u662f\u652f\u6301\u5951\u7ea6\u4e0e\u8bc1\u636e\u8fb9\u754c\uff1a\u975e\u82f1\u6587\u843d\u5728 AWS \u58f0\u660e\u652f\u6301\u8303\u56f4\u5916\u3001\u65e0 N \u6b21\u6296\u52a8\u6570\u636e\uff0c\u4e14 AI \u65ad\u8a00\u8bed\u4e49\u9762\u66f4\u5bbd\u4f1a\u653e\u5927\u6296\u52a8",
       "community": 101,
       "norm_label": "adr 0001 \u6846\u67b6\u8303\u56f4\u9650\u5b9a\u4e3a\u82f1\u6587 ui",
-      "community_name": "ADR 0035 \u96a7\u9053\u66b4\u9732\u672c\u673a\u5e94\u7528",
+      "community_name": "\u4ee3\u7801\u5065\u5eb7\u5ea6\u590d\u76d8\u4efb\u52a1\u8bf4\u660e",
       "_origin": "semantic",
       "id": "docs_adr_0001_scope_limited_to_english_ui"
     },
@@ -54357,7 +54453,7 @@
       "rationale": "Bedrock \u4e0a gpt-5.5 \u53ea\u652f\u6301 Responses API\u3001\u4e0d\u652f\u6301 chat-completions\uff0c\u800c Midscene \u53ea\u8c03 chat-completions\uff1b\u6559\u8bad\u662f\u53ea\u8ba4\u54cd\u5e94 body\u3001\u4e0d\u8ba4 HTTP \u72b6\u6001\u7801",
       "community": 101,
       "norm_label": "adr 0002 \u4e0d\u7528 gpt-5.5",
-      "community_name": "ADR 0035 \u96a7\u9053\u66b4\u9732\u672c\u673a\u5e94\u7528",
+      "community_name": "\u4ee3\u7801\u5065\u5eb7\u5ea6\u590d\u76d8\u4efb\u52a1\u8bf4\u660e",
       "_origin": "semantic",
       "id": "docs_adr_0002_midscene_not_driven_by_gpt55"
     },
@@ -54373,7 +54469,7 @@
       "rationale": "\u5b83\u662f\u552f\u4e00\u540c\u65f6\u6ee1\u8db3\u300c\u5f00\u6e90 / chat-completions / AWS \u6258\u7ba1\u300d\u4e09\u9879\u786c\u7ea6\u675f\u7684\u9009\u9879\uff0c\u4e14\u5b9e\u6d4b\u63a5\u53d7 image_url \u8fdb\u5165\u56fe\u50cf\u89e3\u6790",
       "community": 101,
       "norm_label": "adr 0003 qwen3-vl \u5b9a\u4f4d",
-      "community_name": "ADR 0035 \u96a7\u9053\u66b4\u9732\u672c\u673a\u5e94\u7528",
+      "community_name": "\u4ee3\u7801\u5065\u5eb7\u5ea6\u590d\u76d8\u4efb\u52a1\u8bf4\u660e",
       "_origin": "semantic",
       "id": "docs_adr_0003_midscene_grounding_qwen3vl_bedrock"
     },
@@ -54389,7 +54485,7 @@
       "rationale": "\u9879\u76ee\u786c\u7ea6\u675f\u800c\u975e\u53ef\u6743\u8861\u504f\u597d\uff1aAWS \u5185\u6709\u53ef\u7528\u65b9\u6848\u5373\u91c7\u7528\uff0c\u5373\u4f7f\u5916\u90e8\u8d28\u91cf\u66f4\u597d\uff1b\u79bb\u5f00 AWS \u987b\u53e6\u7acb ADR \u8bb0\u4e3a\u4f8b\u5916",
       "community": 101,
       "norm_label": "adr 0009 \u6700\u5927\u5316\u4f7f\u7528 aws \u662f\u786c\u524d\u63d0",
-      "community_name": "ADR 0035 \u96a7\u9053\u66b4\u9732\u672c\u673a\u5e94\u7528",
+      "community_name": "\u4ee3\u7801\u5065\u5eb7\u5ea6\u590d\u76d8\u4efb\u52a1\u8bf4\u660e",
       "_origin": "semantic",
       "id": "docs_adr_0009_maximize_aws_hard_constraint"
     },
@@ -54405,25 +54501,9 @@
       "rationale": "\u7acb\u9879\u65f6\u300c\u4e24\u5f15\u64ce\u987b\u53ef\u5bf9\u6807\u300d\u662f\u786c\u7ea6\u675f\u2014\u2014\u82e5\u7528\u4f8b\u63aa\u8f9e/\u65ad\u8a00\u5199\u6cd5/\u5ea6\u91cf\u53e3\u5f84\u6f02\u79fb\uff0c\u5bf9\u6bd4\u5c31\u5931\u53bb\u610f\u4e49",
       "community": 101,
       "norm_label": "adr 0010 spike \u4f5c\u5bf9\u6807\u57fa\u51c6",
-      "community_name": "ADR 0035 \u96a7\u9053\u66b4\u9732\u672c\u673a\u5e94\u7528",
+      "community_name": "\u4ee3\u7801\u5065\u5eb7\u5ea6\u590d\u76d8\u4efb\u52a1\u8bf4\u660e",
       "_origin": "semantic",
       "id": "docs_adr_0010_spike_as_apples_to_apples_benchmark"
-    },
-    {
-      "label": "ADR 0011 AgentCore \u6d4f\u89c8\u5668\uff1a\u9ed8\u8ba4 vs \u81ea\u5efa",
-      "file_type": "document",
-      "source_file": "docs/adr/0011-agentcore-browser-system-default-vs-custom.md",
-      "source_location": null,
-      "source_url": null,
-      "captured_at": null,
-      "author": null,
-      "contributor": null,
-      "rationale": "\u516c\u7f51\u7528\u4f8b\u7528\u4e0d\u4e0a\u4efb\u4f55\u81ea\u5efa\u80fd\u529b\uff0c\u81ea\u5efa\u53ea\u4f1a\u5f92\u589e network-configuration \u5fc5\u586b\u9879\u8d1f\u62c5\uff1b\u5185\u7f51/\u8bc1\u4e66/\u5f55\u50cf\u9700\u6c42\u624d\u5207\u81ea\u5efa",
-      "community": 101,
-      "norm_label": "adr 0011 agentcore \u6d4f\u89c8\u5668:\u9ed8\u8ba4 vs \u81ea\u5efa",
-      "community_name": "ADR 0035 \u96a7\u9053\u66b4\u9732\u672c\u673a\u5e94\u7528",
-      "_origin": "semantic",
-      "id": "docs_adr_0011_agentcore_browser_system_default_vs_custom"
     },
     {
       "label": "ADR 0024 engine \u53ea\u62a5\u539f\u751f\u91cf\u3001core \u4e0d\u6298\u7f8e\u5143",
@@ -54437,7 +54517,7 @@
       "rationale": null,
       "community": 101,
       "norm_label": "adr 0024 engine \u53ea\u62a5\u539f\u751f\u91cf\u3001core \u4e0d\u6298\u7f8e\u5143",
-      "community_name": "ADR 0035 \u96a7\u9053\u66b4\u9732\u672c\u673a\u5e94\u7528",
+      "community_name": "\u4ee3\u7801\u5065\u5eb7\u5ea6\u590d\u76d8\u4efb\u52a1\u8bf4\u660e",
       "_origin": "semantic",
       "id": "docs_adr_0024"
     },
@@ -54453,7 +54533,7 @@
       "rationale": null,
       "community": 101,
       "norm_label": "adr 0026 \u7eaf reducer \u4e0d\u81c6\u65ad\u56e0\u679c",
-      "community_name": "ADR 0035 \u96a7\u9053\u66b4\u9732\u672c\u673a\u5e94\u7528",
+      "community_name": "\u4ee3\u7801\u5065\u5eb7\u5ea6\u590d\u76d8\u4efb\u52a1\u8bf4\u660e",
       "_origin": "semantic",
       "id": "docs_adr_0026"
     },
@@ -54469,7 +54549,7 @@
       "rationale": null,
       "community": 101,
       "norm_label": "adr 0027 core \u4e0d\u900f\u660e\u642c\u8fd0\u4ea7\u7269",
-      "community_name": "ADR 0035 \u96a7\u9053\u66b4\u9732\u672c\u673a\u5e94\u7528",
+      "community_name": "\u4ee3\u7801\u5065\u5eb7\u5ea6\u590d\u76d8\u4efb\u52a1\u8bf4\u660e",
       "_origin": "semantic",
       "id": "docs_adr_0027"
     },
@@ -54485,7 +54565,7 @@
       "rationale": null,
       "community": 101,
       "norm_label": "adr 0034 reconcile \u4e3a core \u7eaf\u51fd\u6570\u3001\u526f\u4f5c\u7528\u5728 adapter",
-      "community_name": "ADR 0035 \u96a7\u9053\u66b4\u9732\u672c\u673a\u5e94\u7528",
+      "community_name": "\u4ee3\u7801\u5065\u5eb7\u5ea6\u590d\u76d8\u4efb\u52a1\u8bf4\u660e",
       "_origin": "semantic",
       "id": "docs_adr_0034"
     },
@@ -54501,9 +54581,57 @@
       "rationale": "\u751f\u4ea7\u4ee3\u7801\u968f\u6784\u5efa\u9010\u6b65\u53e0\u52a0\uff0c\u5355\u70b9\u5408\u7406\u800c\u7d2f\u79ef\u51fa\u6b7b\u4ee3\u7801/\u5c40\u90e8\u6700\u4f18/\u8fdd\u80cc ADR\uff1b\u4e8b\u4ef6\u9a71\u52a8\u89e6\u53d1\u56e0\u4e3a\u4ee3\u7801\u503a\u662f\u6784\u5efa\u7684\u51fd\u6570\u3001\u4e0d\u662f\u65f6\u95f4\u7684\u51fd\u6570",
       "community": 101,
       "norm_label": "\u4ee3\u7801\u5065\u5eb7\u5ea6\u590d\u76d8\u4efb\u52a1\u8bf4\u660e",
-      "community_name": "ADR 0035 \u96a7\u9053\u66b4\u9732\u672c\u673a\u5e94\u7528",
+      "community_name": "\u4ee3\u7801\u5065\u5eb7\u5ea6\u590d\u76d8\u4efb\u52a1\u8bf4\u660e",
       "_origin": "semantic",
       "id": "docs_code_health_review"
+    },
+    {
+      "label": "@gherkai/worker-midscene README",
+      "file_type": "document",
+      "source_file": "engines/midscene/README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null,
+      "rationale": null,
+      "community": 101,
+      "norm_label": "@gherkai/worker-midscene readme",
+      "community_name": "\u4ee3\u7801\u5065\u5eb7\u5ea6\u590d\u76d8\u4efb\u52a1\u8bf4\u660e",
+      "_origin": "semantic",
+      "id": "engines_midscene_readme"
+    },
+    {
+      "label": "SIGV4-FETCH-RECIPE.md",
+      "file_type": "document",
+      "source_file": "engines/midscene/spikes/SIGV4-FETCH-RECIPE.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null,
+      "rationale": null,
+      "community": 101,
+      "norm_label": "sigv4-fetch-recipe.md",
+      "community_name": "\u4ee3\u7801\u5065\u5eb7\u5ea6\u590d\u76d8\u4efb\u52a1\u8bf4\u660e",
+      "_origin": "semantic",
+      "id": "engines_midscene_spikes_sigv4_fetch_recipe"
+    },
+    {
+      "label": "\u4ee3\u7801\u7eaa\u5f8b\uff08\u7eff\u2260\u5bf9 / \u63a5\u53e3\u8bda\u5b9e\uff09",
+      "file_type": "concept",
+      "source_file": "CLAUDE.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null,
+      "rationale": "\u5355\u6d4b\u53ea\u8986\u76d6 mock \u4e4b\u5185\u7684\u4e16\u754c\uff1b\u4f9d\u8d56\u771f\u5b9e\u884c\u4e3a\uff08\u8fdb\u7a0b/\u4fe1\u53f7/\u5e76\u53d1/\u771f IO\uff09\u7684\u7ed3\u8bba\u987b\u771f\u8dd1\uff0c\u4ef7\u503c\u5728\u5206\u6d41\u800c\u975e\u4e00\u5f8b\u6000\u7591",
+      "community": 107,
+      "norm_label": "\u4ee3\u7801\u7eaa\u5f8b(\u7eff=\u5bf9 / \u63a5\u53e3\u8bda\u5b9e)",
+      "community_name": "test_user_facing_messages.py",
+      "_origin": "semantic",
+      "id": "claude_code_discipline"
     },
     {
       "label": "\u5b9a\u5236 worker \u955c\u50cf\u643a\u5e26 steps \u5230\u4e91\u7aef",
@@ -54778,6 +54906,38 @@
       "id": "docs_adr_0035_extra_http_headers"
     },
     {
+      "label": "\u96a7\u9053\u5bbf\u4e3b\u4e09\u5f62\u6001 + TTL \u515c\u5e95",
+      "file_type": "concept",
+      "source_file": "docs/adr/0035-local-app-testing-via-tunnel.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null,
+      "rationale": "TTL \u6309 definition \u6c42\u548c\u7b97\u800c\u975e\u62cd\u5e38\u6570\uff1aTTL \u5230\u70b9\u65e0\u6761\u4ef6\u62c6\u96a7\u9053\uff0c\u77ed\u4e8e\u5b9e\u9645\u9884\u7b97\u4f1a\u8ba9\u5269\u4f59 job \u4ee5\u5047\u5931\u8d25\u544a\u7ec8\uff1b\u6c42\u548c\u5bf9\u4efb\u4f55\u5e76\u53d1\u53d6\u503c\u90fd\u662f\u4fdd\u5b88\u4e0a\u754c\uff0c\u9ad8\u4f30\u53ea\u662f\u96a7\u9053\u591a\u7559\u4e00\u4f1a\u513f",
+      "community": 117,
+      "norm_label": "\u96a7\u9053\u5bbf\u4e3b\u4e09\u5f62\u6001 + ttl \u515c\u5e95",
+      "community_name": "gherkai deploy push-worker\uff08\u516b\u6b65\u6d41\u7a0b\uff09",
+      "_origin": "semantic",
+      "id": "docs_adr_0035_tunnel_host"
+    },
+    {
+      "label": "TunnelProvider \u53e3\u5b50\uff08\u9996\u4e2a\u5b9e\u73b0 ngrok\uff09",
+      "file_type": "concept",
+      "source_file": "docs/adr/0035-local-app-testing-via-tunnel.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null,
+      "rationale": "\u505c\u6b62\u9762\u6309 pid \u800c\u975e\u8fdb\u7a0b\u5bf9\u8c61\uff1a\u6536\u5c3e\u8005\u4e0e\u8d77\u96a7\u9053\u8005\u5e38\u4e0d\u5728\u540c\u4e00\u8fdb\u7a0b\uff0c\u8fdb\u7a0b\u53e5\u67c4\u4f20\u4e0d\u8fc7\u53bb\u3002\u662f\u5bf9\u300c\u6700\u5927\u5316\u7528 AWS\u300d\u786c\u7ea6\u675f\u7684\u663e\u5f0f\u4f8b\u5916\uff0c\u56e0 AWS \u5185\u5b9e\u67e5\u65e0\u7b49\u4ef7\u7269",
+      "community": 117,
+      "norm_label": "tunnelprovider \u53e3\u5b50(\u9996\u4e2a\u5b9e\u73b0 ngrok)",
+      "community_name": "gherkai deploy push-worker\uff08\u516b\u6b65\u6d41\u7a0b\uff09",
+      "_origin": "semantic",
+      "id": "docs_adr_0035_tunnel_provider"
+    },
+    {
       "label": "--list-deterministic dump \u6a21\u5f0f / CLI \u5b50\u547d\u4ee4",
       "file_type": "concept",
       "source_file": "docs/adr/0036-deterministic-capability-discovery.md",
@@ -54952,134 +55112,6 @@
       "community_name": "gherkai deploy push-worker\uff08\u516b\u6b65\u6d41\u7a0b\uff09",
       "_origin": "semantic",
       "id": "docs_adr_0038_variant"
-    },
-    {
-      "label": "createOpenAIClient injection",
-      "file_type": "code",
-      "source_file": "engines/midscene/spikes/SIGV4-FETCH-RECIPE.md",
-      "source_location": "\u00a71/\u00a77",
-      "source_url": null,
-      "captured_at": null,
-      "author": null,
-      "contributor": null,
-      "rationale": "\u4f20 createOpenAIClient \u4f1a\u8ba9 Agent \u5207\u5230\u9694\u79bb ModelConfigManager\u3001\u65e0\u89c6 overrideAIConfig \u4e0e\u5168\u5c40 env\uff0c\u6545\u6a21\u578b\u914d\u7f6e\u5fc5\u987b\u968f opts.modelConfig \u4e00\u8d77\u7ed9",
-      "community": 133,
-      "norm_label": "createopenaiclient injection",
-      "community_name": "@gherkai/worker-midscene README",
-      "_origin": "semantic",
-      "id": "engines_midscene_spikes_sigv4_fetch_recipe_createopenaiclient"
-    },
-    {
-      "label": "sigv4Fetch custom fetch",
-      "file_type": "code",
-      "source_file": "engines/midscene/spikes/SIGV4-FETCH-RECIPE.md",
-      "source_location": "\u00a71",
-      "source_url": null,
-      "captured_at": null,
-      "author": null,
-      "contributor": null,
-      "rationale": "\u53ea\u7b7e\u6700\u5c0f\u624b\u5efa\u8bf7\u6c42 {host, content-type}\uff1asmithy \u4f1a\u7b7e denylist \u4e4b\u5916\u7684\u6bcf\u4e2a\u5934\uff0c\u800c content-length / x-stainless-* / accept-encoding \u5728 wire \u4e0a\u4f1a\u88ab\u6539 \u2192 403 SignatureDoesNotMatch\uff1bbody \u539f\u6837\u900f\u4f20\u907f\u514d\u91cd\u65b0\u5e8f\u5217\u5316\u7834\u574f\u7b7e\u540d",
-      "community": 133,
-      "norm_label": "sigv4fetch custom fetch",
-      "community_name": "@gherkai/worker-midscene README",
-      "_origin": "semantic",
-      "id": "engines_midscene_spikes_sigv4_fetch_recipe_sigv4fetch"
-    },
-    {
-      "label": "GHERKAI_STEPS_DIR env contract",
-      "file_type": "concept",
-      "source_file": "engines/midscene/DEVELOPMENT.md",
-      "source_location": null,
-      "source_url": null,
-      "captured_at": null,
-      "author": null,
-      "contributor": null,
-      "rationale": "\u7ea6\u5b9a\u89e3\u6790\uff08--steps-dir > env > ./steps\uff09\u7559\u5728\u7ec4\u5408\u6839\uff0cworker \u53ea\u8ba4 env\u3001\u4e0d\u91cd\u89e3\u6790\uff0c\u4fdd\u6301\u5206\u5c42",
-      "community": 133,
-      "norm_label": "gherkai_steps_dir env contract",
-      "community_name": "@gherkai/worker-midscene README",
-      "_origin": "semantic",
-      "id": "engines_midscene_development_gherkai_steps_dir"
-    },
-    {
-      "label": "AgentCore cloud browser (CDP)",
-      "file_type": "concept",
-      "source_file": "engines/midscene/README.md",
-      "source_location": null,
-      "source_url": null,
-      "captured_at": null,
-      "author": null,
-      "contributor": null,
-      "rationale": "\u6d4f\u89c8\u5668\u8dd1\u5728\u4e91\u7aef\u3001\u672c\u673a\u4e0d\u9700\u8981 Chromium\uff0cplaywright \u53ea\u4f5c CDP \u5ba2\u6237\u7aef\u5e93",
-      "community": 133,
-      "norm_label": "agentcore cloud browser (cdp)",
-      "community_name": "@gherkai/worker-midscene README",
-      "_origin": "semantic",
-      "id": "engines_midscene_readme_agentcore_browser"
-    },
-    {
-      "label": "Deterministic step (user-authored)",
-      "file_type": "concept",
-      "source_file": "engines/midscene/README.md",
-      "source_location": null,
-      "source_url": null,
-      "captured_at": null,
-      "author": null,
-      "contributor": null,
-      "rationale": "\u81ea\u7136\u8bed\u8a00 step \u9ed8\u8ba4\u4ea4\u7ed9 AI\uff1b\u5fc5\u987b\u7cbe\u786e\u3001\u4e0d\u5bb9\u6296\u52a8\u7684\u5224\u5b9a\u5199\u6210\u786e\u5b9a\u6027 step\uff0c\u547d\u4e2d\u5373\u8d70\u7528\u6237\u51fd\u6570\u3001\u53ef\u590d\u73b0\uff1b\u6269\u5c55\u540d\u53ea\u8ba4 .mts/.mjs \u56e0 .ts/.js \u4f1a\u843d\u8fdb CJS \u57df",
-      "community": 133,
-      "norm_label": "deterministic step (user-authored)",
-      "community_name": "@gherkai/worker-midscene README",
-      "_origin": "semantic",
-      "id": "engines_midscene_readme_deterministic_step"
-    },
-    {
-      "label": "Qwen3-VL 235B on Bedrock (grounding model)",
-      "file_type": "concept",
-      "source_file": "engines/midscene/README.md",
-      "source_location": null,
-      "source_url": null,
-      "captured_at": null,
-      "author": null,
-      "contributor": null,
-      "rationale": "\u7528\u88f8 model id qwen.qwen3-vl-235b-a22b\u3001\u65e0 -instruct \u540e\u7f00\u3001\u65e0 inference-profile ARN\uff0c\u7aef\u70b9\u8def\u5f84\u5fc5\u987b /openai/v1",
-      "community": 133,
-      "norm_label": "qwen3-vl 235b on bedrock (grounding model)",
-      "community_name": "@gherkai/worker-midscene README",
-      "_origin": "semantic",
-      "id": "engines_midscene_readme_qwen3vl_bedrock"
-    },
-    {
-      "label": "@gherkai/worker-midscene README",
-      "file_type": "document",
-      "source_file": "engines/midscene/README.md",
-      "source_location": null,
-      "source_url": null,
-      "captured_at": null,
-      "author": null,
-      "contributor": null,
-      "rationale": null,
-      "community": 133,
-      "norm_label": "@gherkai/worker-midscene readme",
-      "community_name": "@gherkai/worker-midscene README",
-      "_origin": "semantic",
-      "id": "engines_midscene_readme"
-    },
-    {
-      "label": "SIGV4-FETCH-RECIPE.md",
-      "file_type": "document",
-      "source_file": "engines/midscene/spikes/SIGV4-FETCH-RECIPE.md",
-      "source_location": null,
-      "source_url": null,
-      "captured_at": null,
-      "author": null,
-      "contributor": null,
-      "rationale": null,
-      "community": 133,
-      "norm_label": "sigv4-fetch-recipe.md",
-      "community_name": "@gherkai/worker-midscene README",
-      "_origin": "semantic",
-      "id": "engines_midscene_spikes_sigv4_fetch_recipe"
     },
     {
       "label": "\u62bd\u8c61\u539f\u8bed\u5f0f\u901a\u7528 step",
@@ -56059,38 +56091,6 @@
       "id": "docs_adr_0030_realtime_persistence_seam_step_argument_offloader"
     },
     {
-      "label": "\u4ee3\u7801\u7eaa\u5f8b\uff08\u7eff\u2260\u5bf9 / \u63a5\u53e3\u8bda\u5b9e\uff09",
-      "file_type": "concept",
-      "source_file": "CLAUDE.md",
-      "source_location": null,
-      "source_url": null,
-      "captured_at": null,
-      "author": null,
-      "contributor": null,
-      "rationale": "\u5355\u6d4b\u53ea\u8986\u76d6 mock \u4e4b\u5185\u7684\u4e16\u754c\uff1b\u4f9d\u8d56\u771f\u5b9e\u884c\u4e3a\uff08\u8fdb\u7a0b/\u4fe1\u53f7/\u5e76\u53d1/\u771f IO\uff09\u7684\u7ed3\u8bba\u987b\u771f\u8dd1\uff0c\u4ef7\u503c\u5728\u5206\u6d41\u800c\u975e\u4e00\u5f8b\u6000\u7591",
-      "community": 338,
-      "norm_label": "\u4ee3\u7801\u7eaa\u5f8b(\u7eff=\u5bf9 / \u63a5\u53e3\u8bda\u5b9e)",
-      "community_name": "ADR 0037 \u5206\u53d1\u4e0e\u6253\u5305",
-      "_origin": "semantic",
-      "id": "claude_code_discipline"
-    },
-    {
-      "label": "\u5de5\u4f5c\u65b9\u5f0f\uff08tools/ \u590d\u7528\u3001AWS \u5f00\u53d1\u671f\u514d\u8d39\uff09",
-      "file_type": "concept",
-      "source_file": "CLAUDE.md",
-      "source_location": null,
-      "source_url": null,
-      "captured_at": null,
-      "author": null,
-      "contributor": null,
-      "rationale": "\u5f00\u53d1\u671f\u8d44\u6e90\u514d\u8d39\u4ee5\u514d\u7701\u94b1\u963b\u788d\u771f\u8dd1\uff1b\u4ea4\u4ed8\u7269\u8fd0\u884c\u6210\u672c\u4ecd\u662f\u8bbe\u8ba1\u7ea6\u675f\u2014\u2014\u5224\u636e=\u8c01\u6301\u7eed\u4e70\u5355",
-      "community": 338,
-      "norm_label": "\u5de5\u4f5c\u65b9\u5f0f(tools/ \u590d\u7528\u3001aws \u5f00\u53d1\u671f\u514d\u8d39)",
-      "community_name": "ADR 0037 \u5206\u53d1\u4e0e\u6253\u5305",
-      "_origin": "semantic",
-      "id": "claude_ways_of_working"
-    },
-    {
       "label": "\u7eff\u2260\u5bf9 Verification Escalation",
       "file_type": "concept",
       "source_file": "DEVELOPMENT.md",
@@ -56105,6 +56105,38 @@
       "_origin": "semantic",
       "community_name": "ADR 0037 \u5206\u53d1\u4e0e\u6253\u5305",
       "id": "development_green_not_correct"
+    },
+    {
+      "label": "act \u8fb9\u754c\u5373\u65f6\u62a2\u4f20",
+      "file_type": "concept",
+      "source_file": "docs/adr/0032-fargate-execution-environment.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null,
+      "rationale": "\u7ed3\u675f\u6279\u91cf\u4e0a\u4f20\u6302\u5728\u5e72\u51c0\u7ed3\u675f\u8def\u5f84\u3001\u4e2d\u65ad\u5373\u4e22\uff08\u5b9e\u6d4b Nova ~930KB / Midscene ~2.0MB\uff09\uff1b\u62a2\u4f20\u951a\u5728 step_done \u5b89\u5168\u70b9\u800c\u975e\u4fe1\u53f7 handler\uff0c\u56e0 Nova \u5728\u4e2d\u65ad\u8def\u5f84\u4f1a\u649e greenlet",
+      "community": 338,
+      "norm_label": "act \u8fb9\u754c\u5373\u65f6\u62a2\u4f20",
+      "community_name": "ADR 0037 \u5206\u53d1\u4e0e\u6253\u5305",
+      "_origin": "semantic",
+      "id": "docs_adr_0032_act_boundary_upload"
+    },
+    {
+      "label": "\u5b64\u513f\u4ea7\u7269\u626b\u76d8 reaper\uff08\u7ecf\u5206\u6790\u5426\u51b3\uff09",
+      "file_type": "concept",
+      "source_file": "docs/adr/0032-fargate-execution-environment.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null,
+      "rationale": "\u4e0d\u662f\u6210\u672c\u95ee\u9898\u800c\u662f\u7269\u7406\u4e0d\u6210\u7acb\uff1a\u5bb9\u5668\u76d8\u505c\u5373\u9500\u6bc1\uff0c\u67e5 S3 \u53ea\u80fd\u786e\u8ba4\u5df2\u4f20\u7684\u3001\u635e\u4e0d\u56de\u6ca1\u4f20\u7684\uff1b\u80fd\u4f20\u7684\u5df2\u88ab\u62a2\u4f20\u8986\u76d6",
+      "community": 338,
+      "norm_label": "\u5b64\u513f\u4ea7\u7269\u626b\u76d8 reaper(\u7ecf\u5206\u6790\u5426\u51b3)",
+      "community_name": "ADR 0037 \u5206\u53d1\u4e0e\u6253\u5305",
+      "_origin": "semantic",
+      "id": "docs_adr_0032_orphan_reaper"
     },
     {
       "label": "worker \u5b9a\u4f4d\u94fe\u56db\u7ea7\uff08\u53d6\u4ee3 repo_root()\uff09",
@@ -56123,38 +56155,6 @@
       "id": "docs_adr_0037_worker_locator_chain"
     },
     {
-      "label": "\u4ea7\u54c1\u6587\u6848\u7981\u5185\u90e8\u6307\u4ee3\uff08AST \u62a4\u680f\uff09",
-      "file_type": "concept",
-      "source_file": "docs/adr/0039-user-facing-surfaces-no-internal-references.md",
-      "source_location": null,
-      "source_url": null,
-      "captured_at": null,
-      "author": null,
-      "contributor": null,
-      "rationale": "\u7ef4\u62a4\u8005\u6709\u4ed3\u5e93\u3001\u6ce8\u91ca\u4e0e docstring\uff0c\u4e0d\u9700\u8981\u501f\u7528\u6237\u7684\u7ec8\u7aef\u4f20\u8bdd\uff1b\u5224\u636e = \u6ca1\u8bfb\u8fc7 ADR \u7684\u4eba\u770b\u5f97\u61c2\u4e14\u7528\u5f97\u4e0a",
-      "community": 338,
-      "norm_label": "\u4ea7\u54c1\u6587\u6848\u7981\u5185\u90e8\u6307\u4ee3(ast \u62a4\u680f)",
-      "community_name": "ADR 0037 \u5206\u53d1\u4e0e\u6253\u5305",
-      "_origin": "semantic",
-      "id": "docs_adr_0039_product_copy_rule"
-    },
-    {
-      "label": "README / DEVELOPMENT \u6309\u8bfb\u8005\u5206\u5c42",
-      "file_type": "concept",
-      "source_file": "docs/adr/0039-user-facing-surfaces-no-internal-references.md",
-      "source_location": null,
-      "source_url": null,
-      "captured_at": null,
-      "author": null,
-      "contributor": null,
-      "rationale": "PyPI/npm \u62ff\u7684\u662f\u6574\u4efd\u6587\u4ef6\uff0c\u5355\u6587\u4ef6\u5185\u5206\u8282\u6321\u4e0d\u4f4f contributor \u5185\u5bb9\u4e0a\u9875\u9762\uff1b\u5305 README \u53ea\u7528\u7edd\u5bf9 URL \u56e0\u9875\u9762\u4e0a\u76f8\u5bf9\u94fe\u63a5\u5168\u662f\u6b7b\u94fe",
-      "community": 338,
-      "norm_label": "readme / development \u6309\u8bfb\u8005\u5206\u5c42",
-      "community_name": "ADR 0037 \u5206\u53d1\u4e0e\u6253\u5305",
-      "_origin": "semantic",
-      "id": "docs_adr_0039_readme_development_layering"
-    },
-    {
       "label": "Thin worker execution model",
       "file_type": "concept",
       "source_file": "engines/midscene/DEVELOPMENT.md",
@@ -56169,38 +56169,6 @@
       "community_name": "ADR 0037 \u5206\u53d1\u4e0e\u6253\u5305",
       "_origin": "semantic",
       "id": "engines_midscene_development_thin_worker"
-    },
-    {
-      "label": "CLAUDE.md \u9879\u76ee\u7ea6\u5b9a",
-      "file_type": "document",
-      "source_file": "CLAUDE.md",
-      "source_location": null,
-      "source_url": null,
-      "captured_at": null,
-      "author": null,
-      "contributor": null,
-      "rationale": "\u6587\u6863/\u4ee3\u7801\u7eaa\u5f8b\u96c6\u4e2d\u4e00\u5904\uff0c\u4f9b AI coding agent \u4e0e\u4eba\u5171\u540c\u9075\u5b88\uff1bADR \u8bb0\u7a33\u5b9a\u51b3\u7b56\u3001journey \u8bb0\u8fc7\u7a0b\uff0c\u6309\u5bff\u547d\u5206\u5c42",
-      "community": 338,
-      "norm_label": "claude.md \u9879\u76ee\u7ea6\u5b9a",
-      "community_name": "ADR 0037 \u5206\u53d1\u4e0e\u6253\u5305",
-      "_origin": "semantic",
-      "id": "claude"
-    },
-    {
-      "label": "gherkai CLI \u4f7f\u7528\u8005\u9875\u9762",
-      "file_type": "document",
-      "source_file": "cli/README.md",
-      "source_location": null,
-      "source_url": null,
-      "captured_at": null,
-      "author": null,
-      "contributor": null,
-      "rationale": "\u9010\u5b57\u4f5c PyPI \u957f\u63cf\u8ff0\uff0c\u53ea\u5199\u4f7f\u7528\u8005\u5185\u5bb9\u3001\u4e0d\u5e26 ADR \u7f16\u53f7\u4e0e\u5185\u90e8\u673a\u5236\u540d",
-      "community": 338,
-      "norm_label": "gherkai cli \u4f7f\u7528\u8005\u9875\u9762",
-      "community_name": "ADR 0037 \u5206\u53d1\u4e0e\u6253\u5305",
-      "_origin": "semantic",
-      "id": "cli_readme"
     },
     {
       "label": "ADR 0004 Nova Act IAM \u9274\u6743",
@@ -56233,6 +56201,22 @@
       "community_name": "ADR 0037 \u5206\u53d1\u4e0e\u6253\u5305",
       "_origin": "semantic",
       "id": "docs_adr_0005_single_shared_feature_file"
+    },
+    {
+      "label": "ADR 0011 AgentCore \u6d4f\u89c8\u5668\uff1a\u9ed8\u8ba4 vs \u81ea\u5efa",
+      "file_type": "document",
+      "source_file": "docs/adr/0011-agentcore-browser-system-default-vs-custom.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null,
+      "rationale": "\u516c\u7f51\u7528\u4f8b\u7528\u4e0d\u4e0a\u4efb\u4f55\u81ea\u5efa\u80fd\u529b\uff0c\u81ea\u5efa\u53ea\u4f1a\u5f92\u589e network-configuration \u5fc5\u586b\u9879\u8d1f\u62c5\uff1b\u5185\u7f51/\u8bc1\u4e66/\u5f55\u50cf\u9700\u6c42\u624d\u5207\u81ea\u5efa",
+      "community": 338,
+      "norm_label": "adr 0011 agentcore \u6d4f\u89c8\u5668:\u9ed8\u8ba4 vs \u81ea\u5efa",
+      "community_name": "ADR 0037 \u5206\u53d1\u4e0e\u6253\u5305",
+      "_origin": "semantic",
+      "id": "docs_adr_0011_agentcore_browser_system_default_vs_custom"
     },
     {
       "label": "ADR 0013 \u8de8\u5f15\u64ce\u5171\u4eab\u8fb9\u754c\u6b62\u4e8e features/",
@@ -56459,22 +56443,6 @@
       "id": "docs_adr_0030_realtime_persistence_seam"
     },
     {
-      "label": "ADR 0031: job \u751f\u547d\u5468\u671f\u6001 skipped/aborted + severity \u6570\u503c\u5e8f",
-      "file_type": "document",
-      "source_file": "docs/adr/0031-job-lifecycle-states-and-severity.md",
-      "source_location": null,
-      "source_url": null,
-      "captured_at": null,
-      "author": null,
-      "contributor": null,
-      "rationale": "\u4e09\u6001\u4e0d\u591f\u7528\uff1afail-fast \u628a\u300c\u6392\u961f\u6ca1\u8d77\u300d\u4e0e\u300c\u8dd1\u4e00\u534a\u88ab\u6390\u300d\u4e24\u7c7b\u90fd\u6c61\u67d3\u6210 error\uff0c\u8de8 run \u7edf\u8ba1/CI \u5f52\u56e0\u4f1a\u628a\u88ab\u7275\u8fde\u8bef\u7b97\u6210\u81ea\u8eab\u5d29",
-      "community": 338,
-      "norm_label": "adr 0031: job \u751f\u547d\u5468\u671f\u6001 skipped/aborted + severity \u6570\u503c\u5e8f",
-      "community_name": "ADR 0037 \u5206\u53d1\u4e0e\u6253\u5305",
-      "_origin": "semantic",
-      "id": "docs_adr_0031_job_lifecycle_states_and_severity"
-    },
-    {
       "label": "ADR 0032: Fargate \u6267\u884c\u73af\u5883\uff08\u4e2d\u65ad\u4e22\u5931/grace/\u5373\u65f6\u4e0a\u4f20\uff09",
       "file_type": "document",
       "source_file": "docs/adr/0032-fargate-execution-environment.md",
@@ -56523,6 +56491,102 @@
       "id": "docs_adr_0034_detached_batch_reconciler"
     },
     {
+      "label": "\u5de5\u4f5c\u65b9\u5f0f\uff08tools/ \u590d\u7528\u3001AWS \u5f00\u53d1\u671f\u514d\u8d39\uff09",
+      "file_type": "concept",
+      "source_file": "CLAUDE.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null,
+      "rationale": "\u5f00\u53d1\u671f\u8d44\u6e90\u514d\u8d39\u4ee5\u514d\u7701\u94b1\u963b\u788d\u771f\u8dd1\uff1b\u4ea4\u4ed8\u7269\u8fd0\u884c\u6210\u672c\u4ecd\u662f\u8bbe\u8ba1\u7ea6\u675f\u2014\u2014\u5224\u636e=\u8c01\u6301\u7eed\u4e70\u5355",
+      "community": 36,
+      "norm_label": "\u5de5\u4f5c\u65b9\u5f0f(tools/ \u590d\u7528\u3001aws \u5f00\u53d1\u671f\u514d\u8d39)",
+      "community_name": "execution-and-reconciliation.md",
+      "_origin": "semantic",
+      "id": "claude_ways_of_working"
+    },
+    {
+      "label": "\u4ea7\u54c1\u6587\u6848\u7981\u5185\u90e8\u6307\u4ee3\uff08AST \u62a4\u680f\uff09",
+      "file_type": "concept",
+      "source_file": "docs/adr/0039-user-facing-surfaces-no-internal-references.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null,
+      "rationale": "\u7ef4\u62a4\u8005\u6709\u4ed3\u5e93\u3001\u6ce8\u91ca\u4e0e docstring\uff0c\u4e0d\u9700\u8981\u501f\u7528\u6237\u7684\u7ec8\u7aef\u4f20\u8bdd\uff1b\u5224\u636e = \u6ca1\u8bfb\u8fc7 ADR \u7684\u4eba\u770b\u5f97\u61c2\u4e14\u7528\u5f97\u4e0a",
+      "community": 36,
+      "norm_label": "\u4ea7\u54c1\u6587\u6848\u7981\u5185\u90e8\u6307\u4ee3(ast \u62a4\u680f)",
+      "community_name": "execution-and-reconciliation.md",
+      "_origin": "semantic",
+      "id": "docs_adr_0039_product_copy_rule"
+    },
+    {
+      "label": "README / DEVELOPMENT \u6309\u8bfb\u8005\u5206\u5c42",
+      "file_type": "concept",
+      "source_file": "docs/adr/0039-user-facing-surfaces-no-internal-references.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null,
+      "rationale": "PyPI/npm \u62ff\u7684\u662f\u6574\u4efd\u6587\u4ef6\uff0c\u5355\u6587\u4ef6\u5185\u5206\u8282\u6321\u4e0d\u4f4f contributor \u5185\u5bb9\u4e0a\u9875\u9762\uff1b\u5305 README \u53ea\u7528\u7edd\u5bf9 URL \u56e0\u9875\u9762\u4e0a\u76f8\u5bf9\u94fe\u63a5\u5168\u662f\u6b7b\u94fe",
+      "community": 36,
+      "norm_label": "readme / development \u6309\u8bfb\u8005\u5206\u5c42",
+      "community_name": "execution-and-reconciliation.md",
+      "_origin": "semantic",
+      "id": "docs_adr_0039_readme_development_layering"
+    },
+    {
+      "label": "CLAUDE.md \u9879\u76ee\u7ea6\u5b9a",
+      "file_type": "document",
+      "source_file": "CLAUDE.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null,
+      "rationale": "\u6587\u6863/\u4ee3\u7801\u7eaa\u5f8b\u96c6\u4e2d\u4e00\u5904\uff0c\u4f9b AI coding agent \u4e0e\u4eba\u5171\u540c\u9075\u5b88\uff1bADR \u8bb0\u7a33\u5b9a\u51b3\u7b56\u3001journey \u8bb0\u8fc7\u7a0b\uff0c\u6309\u5bff\u547d\u5206\u5c42",
+      "community": 36,
+      "norm_label": "claude.md \u9879\u76ee\u7ea6\u5b9a",
+      "community_name": "execution-and-reconciliation.md",
+      "_origin": "semantic",
+      "id": "claude"
+    },
+    {
+      "label": "gherkai CLI \u4f7f\u7528\u8005\u9875\u9762",
+      "file_type": "document",
+      "source_file": "cli/README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null,
+      "rationale": "\u9010\u5b57\u4f5c PyPI \u957f\u63cf\u8ff0\uff0c\u53ea\u5199\u4f7f\u7528\u8005\u5185\u5bb9\u3001\u4e0d\u5e26 ADR \u7f16\u53f7\u4e0e\u5185\u90e8\u673a\u5236\u540d",
+      "community": 36,
+      "norm_label": "gherkai cli \u4f7f\u7528\u8005\u9875\u9762",
+      "community_name": "execution-and-reconciliation.md",
+      "_origin": "semantic",
+      "id": "cli_readme"
+    },
+    {
+      "label": "ADR 0031: job \u751f\u547d\u5468\u671f\u6001 skipped/aborted + severity \u6570\u503c\u5e8f",
+      "file_type": "document",
+      "source_file": "docs/adr/0031-job-lifecycle-states-and-severity.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null,
+      "rationale": "\u4e09\u6001\u4e0d\u591f\u7528\uff1afail-fast \u628a\u300c\u6392\u961f\u6ca1\u8d77\u300d\u4e0e\u300c\u8dd1\u4e00\u534a\u88ab\u6390\u300d\u4e24\u7c7b\u90fd\u6c61\u67d3\u6210 error\uff0c\u8de8 run \u7edf\u8ba1/CI \u5f52\u56e0\u4f1a\u628a\u88ab\u7275\u8fde\u8bef\u7b97\u6210\u81ea\u8eab\u5d29",
+      "community": 36,
+      "norm_label": "adr 0031: job \u751f\u547d\u5468\u671f\u6001 skipped/aborted + severity \u6570\u503c\u5e8f",
+      "community_name": "execution-and-reconciliation.md",
+      "_origin": "semantic",
+      "id": "docs_adr_0031_job_lifecycle_states_and_severity"
+    },
+    {
       "label": "README.md \u4ed3\u5e93\u9996\u9875",
       "file_type": "document",
       "source_file": "README.md",
@@ -56531,43 +56595,11 @@
       "captured_at": null,
       "author": null,
       "contributor": null,
-      "community": 338,
+      "community": 36,
       "norm_label": "readme.md \u4ed3\u5e93\u9996\u9875",
-      "community_name": "ADR 0037 \u5206\u53d1\u4e0e\u6253\u5305",
+      "community_name": "execution-and-reconciliation.md",
       "_origin": "semantic",
       "id": "readme"
-    },
-    {
-      "label": "act \u8fb9\u754c\u5373\u65f6\u62a2\u4f20",
-      "file_type": "concept",
-      "source_file": "docs/adr/0032-fargate-execution-environment.md",
-      "source_location": null,
-      "source_url": null,
-      "captured_at": null,
-      "author": null,
-      "contributor": null,
-      "rationale": "\u7ed3\u675f\u6279\u91cf\u4e0a\u4f20\u6302\u5728\u5e72\u51c0\u7ed3\u675f\u8def\u5f84\u3001\u4e2d\u65ad\u5373\u4e22\uff08\u5b9e\u6d4b Nova ~930KB / Midscene ~2.0MB\uff09\uff1b\u62a2\u4f20\u951a\u5728 step_done \u5b89\u5168\u70b9\u800c\u975e\u4fe1\u53f7 handler\uff0c\u56e0 Nova \u5728\u4e2d\u65ad\u8def\u5f84\u4f1a\u649e greenlet",
-      "community": 36,
-      "norm_label": "act \u8fb9\u754c\u5373\u65f6\u62a2\u4f20",
-      "community_name": "act \u8fb9\u754c\u5373\u65f6\u62a2\u4f20",
-      "_origin": "semantic",
-      "id": "docs_adr_0032_act_boundary_upload"
-    },
-    {
-      "label": "\u5b64\u513f\u4ea7\u7269\u626b\u76d8 reaper\uff08\u7ecf\u5206\u6790\u5426\u51b3\uff09",
-      "file_type": "concept",
-      "source_file": "docs/adr/0032-fargate-execution-environment.md",
-      "source_location": null,
-      "source_url": null,
-      "captured_at": null,
-      "author": null,
-      "contributor": null,
-      "rationale": "\u4e0d\u662f\u6210\u672c\u95ee\u9898\u800c\u662f\u7269\u7406\u4e0d\u6210\u7acb\uff1a\u5bb9\u5668\u76d8\u505c\u5373\u9500\u6bc1\uff0c\u67e5 S3 \u53ea\u80fd\u786e\u8ba4\u5df2\u4f20\u7684\u3001\u635e\u4e0d\u56de\u6ca1\u4f20\u7684\uff1b\u80fd\u4f20\u7684\u5df2\u88ab\u62a2\u4f20\u8986\u76d6",
-      "community": 36,
-      "norm_label": "\u5b64\u513f\u4ea7\u7269\u626b\u76d8 reaper(\u7ecf\u5206\u6790\u5426\u51b3)",
-      "community_name": "act \u8fb9\u754c\u5373\u65f6\u62a2\u4f20",
-      "_origin": "semantic",
-      "id": "docs_adr_0032_orphan_reaper"
     },
     {
       "label": "\u63a8\u8fdb\u5668 advancer",
@@ -57622,38 +57654,6 @@
       "community_name": "reconcile.tick\uff08\u65e0\u72b6\u6001\u63a8\u8fdb\u4e00\u6b65\uff0c\u56db\u5bbf\u4e3b\u5171\u7528\uff09",
       "_origin": "semantic",
       "id": "docs_adr_0034_tick"
-    },
-    {
-      "label": "\u96a7\u9053\u5bbf\u4e3b\u4e09\u5f62\u6001 + TTL \u515c\u5e95",
-      "file_type": "concept",
-      "source_file": "docs/adr/0035-local-app-testing-via-tunnel.md",
-      "source_location": null,
-      "source_url": null,
-      "captured_at": null,
-      "author": null,
-      "contributor": null,
-      "rationale": "TTL \u6309 definition \u6c42\u548c\u7b97\u800c\u975e\u62cd\u5e38\u6570\uff1aTTL \u5230\u70b9\u65e0\u6761\u4ef6\u62c6\u96a7\u9053\uff0c\u77ed\u4e8e\u5b9e\u9645\u9884\u7b97\u4f1a\u8ba9\u5269\u4f59 job \u4ee5\u5047\u5931\u8d25\u544a\u7ec8\uff1b\u6c42\u548c\u5bf9\u4efb\u4f55\u5e76\u53d1\u53d6\u503c\u90fd\u662f\u4fdd\u5b88\u4e0a\u754c\uff0c\u9ad8\u4f30\u53ea\u662f\u96a7\u9053\u591a\u7559\u4e00\u4f1a\u513f",
-      "community": 63,
-      "norm_label": "\u96a7\u9053\u5bbf\u4e3b\u4e09\u5f62\u6001 + ttl \u515c\u5e95",
-      "community_name": "reconcile.tick\uff08\u65e0\u72b6\u6001\u63a8\u8fdb\u4e00\u6b65\uff0c\u56db\u5bbf\u4e3b\u5171\u7528\uff09",
-      "_origin": "semantic",
-      "id": "docs_adr_0035_tunnel_host"
-    },
-    {
-      "label": "TunnelProvider \u53e3\u5b50\uff08\u9996\u4e2a\u5b9e\u73b0 ngrok\uff09",
-      "file_type": "concept",
-      "source_file": "docs/adr/0035-local-app-testing-via-tunnel.md",
-      "source_location": null,
-      "source_url": null,
-      "captured_at": null,
-      "author": null,
-      "contributor": null,
-      "rationale": "\u505c\u6b62\u9762\u6309 pid \u800c\u975e\u8fdb\u7a0b\u5bf9\u8c61\uff1a\u6536\u5c3e\u8005\u4e0e\u8d77\u96a7\u9053\u8005\u5e38\u4e0d\u5728\u540c\u4e00\u8fdb\u7a0b\uff0c\u8fdb\u7a0b\u53e5\u67c4\u4f20\u4e0d\u8fc7\u53bb\u3002\u662f\u5bf9\u300c\u6700\u5927\u5316\u7528 AWS\u300d\u786c\u7ea6\u675f\u7684\u663e\u5f0f\u4f8b\u5916\uff0c\u56e0 AWS \u5185\u5b9e\u67e5\u65e0\u7b49\u4ef7\u7269",
-      "community": 63,
-      "norm_label": "tunnelprovider \u53e3\u5b50(\u9996\u4e2a\u5b9e\u73b0 ngrok)",
-      "community_name": "reconcile.tick\uff08\u65e0\u72b6\u6001\u63a8\u8fdb\u4e00\u6b65\uff0c\u56db\u5bbf\u4e3b\u5171\u7528\uff09",
-      "_origin": "semantic",
-      "id": "docs_adr_0035_tunnel_provider"
     },
     {
       "label": "adapters/_boto.py \u4f9d\u8d56\u5b88\u536b",
@@ -105773,9 +105773,9 @@
       "source_location": "L89",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "skills_gherkai_evals_run_evals_load_evals",
-      "target": "skills_gherkai_evals_run_evals_fail",
-      "confidence_score": 1.0
+      "target": "skills_gherkai_evals_run_evals_fail"
     },
     {
       "relation": "calls",
@@ -105785,9 +105785,9 @@
       "source_location": "L243",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "skills_gherkai_evals_run_evals_main",
-      "target": "path",
-      "confidence_score": 1.0
+      "target": "path"
     },
     {
       "relation": "calls",
@@ -105797,9 +105797,9 @@
       "source_location": "L245",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "skills_gherkai_evals_run_evals_main",
-      "target": "skills_gherkai_evals_run_evals_fail",
-      "confidence_score": 1.0
+      "target": "skills_gherkai_evals_run_evals_fail"
     },
     {
       "relation": "calls",
@@ -105809,9 +105809,9 @@
       "source_location": "L250",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "skills_gherkai_evals_run_evals_main",
-      "target": "skills_gherkai_evals_run_evals_load_evals",
-      "confidence_score": 1.0
+      "target": "skills_gherkai_evals_run_evals_load_evals"
     },
     {
       "relation": "calls",
@@ -105821,9 +105821,9 @@
       "source_location": "L178",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "skills_gherkai_evals_run_evals_run_one",
-      "target": "skills_gherkai_evals_run_evals_materialize",
-      "confidence_score": 1.0
+      "target": "skills_gherkai_evals_run_evals_materialize"
     },
     {
       "relation": "calls",
@@ -105833,9 +105833,9 @@
       "source_location": "L208",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "skills_gherkai_evals_run_evals_run_one",
-      "target": "skills_gherkai_evals_run_evals_parse_events",
-      "confidence_score": 1.0
+      "target": "skills_gherkai_evals_run_evals_parse_events"
     },
     {
       "relation": "calls",
@@ -105845,9 +105845,9 @@
       "source_location": "L212",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "skills_gherkai_evals_run_evals_run_one",
-      "target": "skills_gherkai_evals_run_evals_tool_calls_of",
-      "confidence_score": 1.0
+      "target": "skills_gherkai_evals_run_evals_tool_calls_of"
     },
     {
       "relation": "calls",
@@ -105857,9 +105857,9 @@
       "source_location": "L217",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "skills_gherkai_evals_run_evals_run_one",
-      "target": "skills_gherkai_evals_run_evals_pollution_metrics",
-      "confidence_score": 1.0
+      "target": "skills_gherkai_evals_run_evals_pollution_metrics"
     },
     {
       "relation": "calls",
@@ -105869,9 +105869,9 @@
       "source_location": "L224",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "skills_gherkai_evals_run_evals_run_one",
-      "target": "skills_gherkai_evals_run_evals_collect_outputs",
-      "confidence_score": 1.0
+      "target": "skills_gherkai_evals_run_evals_collect_outputs"
     },
     {
       "relation": "calls",
@@ -107813,9 +107813,9 @@
       "source_location": "L123",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "skills_gherkai_evals_run_evals_pollution_metrics",
-      "target": "path",
-      "confidence_score": 1.0
+      "target": "path"
     },
     {
       "relation": "extends",
@@ -119321,9 +119321,9 @@
       "source_location": "L141",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "skills_gherkai_evals_run_evals_collect_outputs",
-      "target": "path",
-      "confidence_score": 1.0
+      "target": "path"
     },
     {
       "relation": "references",
@@ -119333,9 +119333,9 @@
       "source_location": "L174",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "skills_gherkai_evals_run_evals_run_one",
-      "target": "path",
-      "confidence_score": 1.0
+      "target": "path"
     },
     {
       "relation": "references",
@@ -120737,9 +120737,9 @@
       "source_location": "L165",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "skills_gherkai_evals_run_evals_materialize",
-      "target": "path",
-      "confidence_score": 1.0
+      "target": "path"
     },
     {
       "relation": "references",
@@ -138548,9 +138548,9 @@
       "source_location": "L1",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_adr_0043_agent_skill_for_driving_gherkai",
-      "target": "docs_adr_0043_agent_skill_for_driving_gherkai_0043_\u9a7e\u9a6d_gherkai_\u7684_agent_skill_\u4f4f_cli_\u5305\u5185_\u968f_wheel_\u53d1\u884c_\u5185\u5bb9\u5355\u4efd_\u5f15\u7528\u6587\u6863\u4e3a\u786e\u5b9a\u6027\u8f6c\u6362\u7684\u526f\u672c",
-      "confidence_score": 1.0
+      "target": "docs_adr_0043_agent_skill_for_driving_gherkai_0043_\u9a7e\u9a6d_gherkai_\u7684_agent_skill_\u4f4f_cli_\u5305\u5185_\u968f_wheel_\u53d1\u884c_\u5185\u5bb9\u5355\u4efd_\u5f15\u7528\u6587\u6863\u4e3a\u786e\u5b9a\u6027\u8f6c\u6362\u7684\u526f\u672c"
     },
     {
       "relation": "contains",
@@ -138559,9 +138559,9 @@
       "source_location": "L113",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_adr_0043_agent_skill_for_driving_gherkai_0043_\u9a7e\u9a6d_gherkai_\u7684_agent_skill_\u4f4f_cli_\u5305\u5185_\u968f_wheel_\u53d1\u884c_\u5185\u5bb9\u5355\u4efd_\u5f15\u7528\u6587\u6863\u4e3a\u786e\u5b9a\u6027\u8f6c\u6362\u7684\u526f\u672c",
-      "target": "docs_adr_0043_agent_skill_for_driving_gherkai_\u4e0d\u505a_\u5ef6\u540e",
-      "confidence_score": 1.0
+      "target": "docs_adr_0043_agent_skill_for_driving_gherkai_\u4e0d\u505a_\u5ef6\u540e"
     },
     {
       "relation": "contains",
@@ -138570,9 +138570,9 @@
       "source_location": "L123",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_adr_0043_agent_skill_for_driving_gherkai_0043_\u9a7e\u9a6d_gherkai_\u7684_agent_skill_\u4f4f_cli_\u5305\u5185_\u968f_wheel_\u53d1\u884c_\u5185\u5bb9\u5355\u4efd_\u5f15\u7528\u6587\u6863\u4e3a\u786e\u5b9a\u6027\u8f6c\u6362\u7684\u526f\u672c",
-      "target": "docs_adr_0043_agent_skill_for_driving_gherkai_\u5f71\u54cd\u9762",
-      "confidence_score": 1.0
+      "target": "docs_adr_0043_agent_skill_for_driving_gherkai_\u5f71\u54cd\u9762"
     },
     {
       "relation": "contains",
@@ -138581,9 +138581,9 @@
       "source_location": "L13",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_adr_0043_agent_skill_for_driving_gherkai_0043_\u9a7e\u9a6d_gherkai_\u7684_agent_skill_\u4f4f_cli_\u5305\u5185_\u968f_wheel_\u53d1\u884c_\u5185\u5bb9\u5355\u4efd_\u5f15\u7528\u6587\u6863\u4e3a\u786e\u5b9a\u6027\u8f6c\u6362\u7684\u526f\u672c",
-      "target": "docs_adr_0043_agent_skill_for_driving_gherkai_\u51b3\u7b56",
-      "confidence_score": 1.0
+      "target": "docs_adr_0043_agent_skill_for_driving_gherkai_\u51b3\u7b56"
     },
     {
       "relation": "contains",
@@ -138592,9 +138592,9 @@
       "source_location": "L143",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_adr_0043_agent_skill_for_driving_gherkai_0043_\u9a7e\u9a6d_gherkai_\u7684_agent_skill_\u4f4f_cli_\u5305\u5185_\u968f_wheel_\u53d1\u884c_\u5185\u5bb9\u5355\u4efd_\u5f15\u7528\u6587\u6863\u4e3a\u786e\u5b9a\u6027\u8f6c\u6362\u7684\u526f\u672c",
-      "target": "docs_adr_0043_agent_skill_for_driving_gherkai_\u9a8c\u8bc1_2026_09_14_\u7ed3\u8bba\u5185\u8054",
-      "confidence_score": 1.0
+      "target": "docs_adr_0043_agent_skill_for_driving_gherkai_\u9a8c\u8bc1_2026_09_14_\u7ed3\u8bba\u5185\u8054"
     },
     {
       "relation": "contains",
@@ -138603,9 +138603,9 @@
       "source_location": "L5",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_adr_0043_agent_skill_for_driving_gherkai_0043_\u9a7e\u9a6d_gherkai_\u7684_agent_skill_\u4f4f_cli_\u5305\u5185_\u968f_wheel_\u53d1\u884c_\u5185\u5bb9\u5355\u4efd_\u5f15\u7528\u6587\u6863\u4e3a\u786e\u5b9a\u6027\u8f6c\u6362\u7684\u526f\u672c",
-      "target": "docs_adr_0043_agent_skill_for_driving_gherkai_\u80cc\u666f",
-      "confidence_score": 1.0
+      "target": "docs_adr_0043_agent_skill_for_driving_gherkai_\u80cc\u666f"
     },
     {
       "relation": "contains",
@@ -138614,9 +138614,9 @@
       "source_location": "L95",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_adr_0043_agent_skill_for_driving_gherkai_0043_\u9a7e\u9a6d_gherkai_\u7684_agent_skill_\u4f4f_cli_\u5305\u5185_\u968f_wheel_\u53d1\u884c_\u5185\u5bb9\u5355\u4efd_\u5f15\u7528\u6587\u6863\u4e3a\u786e\u5b9a\u6027\u8f6c\u6362\u7684\u526f\u672c",
-      "target": "docs_adr_0043_agent_skill_for_driving_gherkai_\u88ab\u62d2\u65b9\u6848",
-      "confidence_score": 1.0
+      "target": "docs_adr_0043_agent_skill_for_driving_gherkai_\u88ab\u62d2\u65b9\u6848"
     },
     {
       "relation": "contains",
@@ -138625,9 +138625,9 @@
       "source_location": "L15",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_adr_0043_agent_skill_for_driving_gherkai_\u51b3\u7b56",
-      "target": "docs_adr_0043_agent_skill_for_driving_gherkai_\u4e00_skill_\u771f\u8eab\u4f4f_cli_\u5305\u5185_cli_gherkai_cli_skills_gherkai_\u968f_wheel_\u5929\u7136\u5e26\u8d70_\u4e0d\u5355\u5f00_repo_\u4e0d\u653e\u4ed3\u5e93\u6839_\u4e0d\u7528_force_include",
-      "confidence_score": 1.0
+      "target": "docs_adr_0043_agent_skill_for_driving_gherkai_\u4e00_skill_\u771f\u8eab\u4f4f_cli_\u5305\u5185_cli_gherkai_cli_skills_gherkai_\u968f_wheel_\u5929\u7136\u5e26\u8d70_\u4e0d\u5355\u5f00_repo_\u4e0d\u653e\u4ed3\u5e93\u6839_\u4e0d\u7528_force_include"
     },
     {
       "relation": "contains",
@@ -138636,9 +138636,9 @@
       "source_location": "L22",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_adr_0043_agent_skill_for_driving_gherkai_\u51b3\u7b56",
-      "target": "docs_adr_0043_agent_skill_for_driving_gherkai_\u4e8c_\u5185\u5bb9\u53ea\u6709\u4e00\u4efd_skill_md_\u5c31\u662f\u5de5\u5177\u65e0\u5173\u7684\u6838\u5fc3_\u9002\u914d_\u53ea\u5269\u88c5\u5230\u54ea\u4e0e\u4e00\u884c\u6307\u9488",
-      "confidence_score": 1.0
+      "target": "docs_adr_0043_agent_skill_for_driving_gherkai_\u4e8c_\u5185\u5bb9\u53ea\u6709\u4e00\u4efd_skill_md_\u5c31\u662f\u5de5\u5177\u65e0\u5173\u7684\u6838\u5fc3_\u9002\u914d_\u53ea\u5269\u88c5\u5230\u54ea\u4e0e\u4e00\u884c\u6307\u9488"
     },
     {
       "relation": "contains",
@@ -138647,9 +138647,9 @@
       "source_location": "L26",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_adr_0043_agent_skill_for_driving_gherkai_\u51b3\u7b56",
-      "target": "docs_adr_0043_agent_skill_for_driving_gherkai_\u4e09_\u5b89\u88c5\u9762\u4e24\u6761_\u6587\u6863\u63a8\u8350\u7b2c\u4e00\u6761",
-      "confidence_score": 1.0
+      "target": "docs_adr_0043_agent_skill_for_driving_gherkai_\u4e09_\u5b89\u88c5\u9762\u4e24\u6761_\u6587\u6863\u63a8\u8350\u7b2c\u4e00\u6761"
     },
     {
       "relation": "contains",
@@ -138658,9 +138658,9 @@
       "source_location": "L33",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_adr_0043_agent_skill_for_driving_gherkai_\u51b3\u7b56",
-      "target": "docs_adr_0043_agent_skill_for_driving_gherkai_\u56db_skill_\u4e0e_docs_\u7684\u5173\u7cfb_\u4e0d_link_\u786e\u5b9a\u6027\u8f6c\u6362\u51fa\u526f\u672c_\u6b63\u6587\u662f\u65b0\u5185\u5bb9\u4e0d\u662f\u590d\u8ff0",
-      "confidence_score": 1.0
+      "target": "docs_adr_0043_agent_skill_for_driving_gherkai_\u56db_skill_\u4e0e_docs_\u7684\u5173\u7cfb_\u4e0d_link_\u786e\u5b9a\u6027\u8f6c\u6362\u51fa\u526f\u672c_\u6b63\u6587\u662f\u65b0\u5185\u5bb9\u4e0d\u662f\u590d\u8ff0"
     },
     {
       "relation": "contains",
@@ -138669,9 +138669,9 @@
       "source_location": "L42",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_adr_0043_agent_skill_for_driving_gherkai_\u51b3\u7b56",
-      "target": "docs_adr_0043_agent_skill_for_driving_gherkai_\u4e94_\u5185\u5bb9\u91cd\u5fc3_\u4e00\u4e2a_skill_\u5165\u53e3_\u4e09\u4e2a\u4efb\u52a1\u57df_\u6309\u57df\u62c6_references_\u6b63\u6587\u662f_agent_\u7684\u64cd\u4f5c\u6a21\u578b_\u4e0d\u662f\u590d\u8ff0_help",
-      "confidence_score": 1.0
+      "target": "docs_adr_0043_agent_skill_for_driving_gherkai_\u4e94_\u5185\u5bb9\u91cd\u5fc3_\u4e00\u4e2a_skill_\u5165\u53e3_\u4e09\u4e2a\u4efb\u52a1\u57df_\u6309\u57df\u62c6_references_\u6b63\u6587\u662f_agent_\u7684\u64cd\u4f5c\u6a21\u578b_\u4e0d\u662f\u590d\u8ff0_help"
     },
     {
       "relation": "contains",
@@ -138680,9 +138680,9 @@
       "source_location": "L63",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_adr_0043_agent_skill_for_driving_gherkai_\u51b3\u7b56",
-      "target": "docs_adr_0043_agent_skill_for_driving_gherkai_\u516d_\u62a4\u680f_skill_\u662f\u4ea7\u54c1\u9762_\u540c\u53d7_0039_\u7ea6\u675f_\u4e14\u4e0e_cli_\u771f\u503c\u9010\u9879\u5bf9\u7167",
-      "confidence_score": 1.0
+      "target": "docs_adr_0043_agent_skill_for_driving_gherkai_\u516d_\u62a4\u680f_skill_\u662f\u4ea7\u54c1\u9762_\u540c\u53d7_0039_\u7ea6\u675f_\u4e14\u4e0e_cli_\u771f\u503c\u9010\u9879\u5bf9\u7167"
     },
     {
       "relation": "contains",
@@ -138691,9 +138691,9 @@
       "source_location": "L75",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_adr_0043_agent_skill_for_driving_gherkai_\u51b3\u7b56",
-      "target": "docs_adr_0043_agent_skill_for_driving_gherkai_\u4e03_\u8bc4\u6d4b\u4e0e\u8fed\u4ee3_\u6309_skill_creator_\u5faa\u73af_\u7f3a\u7701\u96c6\u96f6\u6761\u771f_aws_\u821e\u53f0\u5728\u4ed3\u5e93\u5916",
-      "confidence_score": 1.0
+      "target": "docs_adr_0043_agent_skill_for_driving_gherkai_\u4e03_\u8bc4\u6d4b\u4e0e\u8fed\u4ee3_\u6309_skill_creator_\u5faa\u73af_\u7f3a\u7701\u96c6\u96f6\u6761\u771f_aws_\u821e\u53f0\u5728\u4ed3\u5e93\u5916"
     },
     {
       "relation": "contains",
@@ -148459,9 +148459,9 @@
       "source_location": "L112",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "skills_gherkai_evals_run_evals",
-      "target": "skills_gherkai_evals_run_evals_tool_calls_of",
-      "confidence_score": 1.0
+      "target": "skills_gherkai_evals_run_evals_tool_calls_of"
     },
     {
       "relation": "contains",
@@ -148470,9 +148470,9 @@
       "source_location": "L123",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "skills_gherkai_evals_run_evals",
-      "target": "skills_gherkai_evals_run_evals_pollution_metrics",
-      "confidence_score": 1.0
+      "target": "skills_gherkai_evals_run_evals_pollution_metrics"
     },
     {
       "relation": "contains",
@@ -148481,9 +148481,9 @@
       "source_location": "L141",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "skills_gherkai_evals_run_evals",
-      "target": "skills_gherkai_evals_run_evals_collect_outputs",
-      "confidence_score": 1.0
+      "target": "skills_gherkai_evals_run_evals_collect_outputs"
     },
     {
       "relation": "contains",
@@ -148492,9 +148492,9 @@
       "source_location": "L165",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "skills_gherkai_evals_run_evals",
-      "target": "skills_gherkai_evals_run_evals_materialize",
-      "confidence_score": 1.0
+      "target": "skills_gherkai_evals_run_evals_materialize"
     },
     {
       "relation": "contains",
@@ -148503,9 +148503,9 @@
       "source_location": "L174",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "skills_gherkai_evals_run_evals",
-      "target": "skills_gherkai_evals_run_evals_run_one",
-      "confidence_score": 1.0
+      "target": "skills_gherkai_evals_run_evals_run_one"
     },
     {
       "relation": "contains",
@@ -148514,9 +148514,9 @@
       "source_location": "L229",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "skills_gherkai_evals_run_evals",
-      "target": "skills_gherkai_evals_run_evals_main",
-      "confidence_score": 1.0
+      "target": "skills_gherkai_evals_run_evals_main"
     },
     {
       "relation": "contains",
@@ -148525,9 +148525,9 @@
       "source_location": "L73",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "skills_gherkai_evals_run_evals",
-      "target": "skills_gherkai_evals_run_evals_fail",
-      "confidence_score": 1.0
+      "target": "skills_gherkai_evals_run_evals_fail"
     },
     {
       "relation": "contains",
@@ -148536,9 +148536,9 @@
       "source_location": "L78",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "skills_gherkai_evals_run_evals",
-      "target": "skills_gherkai_evals_run_evals_load_evals",
-      "confidence_score": 1.0
+      "target": "skills_gherkai_evals_run_evals_load_evals"
     },
     {
       "relation": "contains",
@@ -148547,9 +148547,9 @@
       "source_location": "L99",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "skills_gherkai_evals_run_evals",
-      "target": "skills_gherkai_evals_run_evals_parse_events",
-      "confidence_score": 1.0
+      "target": "skills_gherkai_evals_run_evals_parse_events"
     },
     {
       "relation": "contains",
@@ -168479,9 +168479,9 @@
       "source_location": "L124",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "skills_gherkai_evals_run_evals_rationale_124",
-      "target": "skills_gherkai_evals_run_evals_pollution_metrics",
-      "confidence_score": 1.0
+      "target": "skills_gherkai_evals_run_evals_pollution_metrics"
     },
     {
       "relation": "rationale_for",
@@ -169579,9 +169579,9 @@
       "source_location": "L136",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_adr_0043_agent_skill_for_driving_gherkai",
-      "target": "docs_adr_0016_execution_architecture_core_lib_run_model",
-      "confidence_score": 1.0
+      "target": "docs_adr_0016_execution_architecture_core_lib_run_model"
     },
     {
       "relation": "references",
@@ -169590,9 +169590,9 @@
       "source_location": "L18",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_adr_0043_agent_skill_for_driving_gherkai",
-      "target": "docs_adr_0037_distribution_and_packaging",
-      "confidence_score": 1.0
+      "target": "docs_adr_0037_distribution_and_packaging"
     },
     {
       "relation": "references",
@@ -169601,9 +169601,9 @@
       "source_location": "L40",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_adr_0043_agent_skill_for_driving_gherkai",
-      "target": "docs_adr_0039_user_facing_surfaces_no_internal_references",
-      "confidence_score": 1.0
+      "target": "docs_adr_0039_user_facing_surfaces_no_internal_references"
     },
     {
       "relation": "references",
@@ -169612,9 +169612,9 @@
       "source_location": "L51",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_adr_0043_agent_skill_for_driving_gherkai",
-      "target": "docs_adr_0001_scope_limited_to_english_ui",
-      "confidence_score": 1.0
+      "target": "docs_adr_0001_scope_limited_to_english_ui"
     },
     {
       "relation": "references",
@@ -169623,9 +169623,9 @@
       "source_location": "L57",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_adr_0043_agent_skill_for_driving_gherkai",
-      "target": "docs_adr_0031_job_lifecycle_states_and_severity",
-      "confidence_score": 1.0
+      "target": "docs_adr_0031_job_lifecycle_states_and_severity"
     },
     {
       "relation": "references",
@@ -169634,9 +169634,9 @@
       "source_location": "L7",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_adr_0043_agent_skill_for_driving_gherkai",
-      "target": "docs_adr_0042_step_evidence_and_explain",
-      "confidence_score": 1.0
+      "target": "docs_adr_0042_step_evidence_and_explain"
     },
     {
       "relation": "references",
@@ -170957,17 +170957,6 @@
       "confidence_score": 1.0,
       "source": "runtime_development",
       "target": "docs_adr_0038_worker_image_delivery"
-    },
-    {
-      "relation": "references",
-      "confidence": "EXTRACTED",
-      "source_file": "skills/README.md",
-      "source_location": "L3",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "skills_readme",
-      "target": "docs_adr_0043_agent_skill_for_driving_gherkai",
-      "confidence_score": 1.0
     },
     {
       "relation": "indirect_call",
@@ -182766,5 +182755,5 @@
       "source_file": "docs/adr/0034-detached-batch-reconciler.md"
     }
   ],
-  "built_at_commit": "36906b7ec3f25dfdf05577590870d046cba86f48"
+  "built_at_commit": "328e670623afefe609e2c5886eacc724e22c125f"
 }
