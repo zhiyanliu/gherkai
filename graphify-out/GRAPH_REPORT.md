@@ -1,7 +1,7 @@
 # Graph Report - yaozhou  (2026-09-14)
 
 ## Corpus Check
-- 273 files · ~258,682 words
+- 273 files · ~258,897 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -10,7 +10,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `c65860aa`
+- Built from commit: `c1bbc1f9`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -290,16 +290,16 @@
 10. `Step` - 69 edges
 
 ## Surprising Connections (you probably didn't know these)
-- `_status_cloud()` --calls--> `DynamoDBRunStore`  [INFERRED]
-  cli/gherkai_cli/__main__.py → core/gherkai_core/adapters/run_store/ddb.py
-- `_is_detached()` --calls--> `DynamoDBRunStore`  [INFERRED]
-  deploy_aws/gherkai_deploy_aws/lambdas/exit_observer.py → core/gherkai_core/adapters/run_store/ddb.py
-- `_build()` --calls--> `DynamoDBRunStore`  [INFERRED]
-  deploy_aws/gherkai_deploy_aws/lambdas/reconciler.py → core/gherkai_core/adapters/run_store/ddb.py
-- `watch_run_and_stop_tunnel()` --calls--> `DynamoDBRunStore`  [INFERRED]
-  runtime/gherkai_runtime/tunnel_host.py → core/gherkai_core/adapters/run_store/ddb.py
 - `_FakeEcs` --uses--> `Job`  [INFERRED]
   deploy_aws/tests/test_lambda_handlers.py → core/gherkai_core/model.py
+- `SubprocessLauncher` --uses--> `Job`  [INFERRED]
+  runtime/gherkai_runtime/detached.py → core/gherkai_core/model.py
+- `TunnelSetup` --uses--> `Job`  [INFERRED]
+  runtime/gherkai_runtime/tunnel_host.py → core/gherkai_core/model.py
+- `NgrokTunnel` --uses--> `Job`  [INFERRED]
+  runtime/gherkai_runtime/tunnel.py → core/gherkai_core/model.py
+- `TunnelError` --uses--> `Job`  [INFERRED]
+  runtime/gherkai_runtime/tunnel.py → core/gherkai_core/model.py
 
 ## Import Cycles
 - None detected.
@@ -1129,7 +1129,7 @@ Cohesion: 0.21
 Nodes (29): adapters/_boto.py 依赖守卫, core 测试说明（单测 vs 集成）, 绿≠对 Verification Escalation, ADR 0004 Nova Act IAM 鉴权, ADR 0005 用例描述层用单一共享 .feature, ADR 0011 AgentCore 浏览器：默认 vs 自建, ADR 0013 跨引擎共享边界止于 features/, ADR 0015 v1.0 定位：流程冒烟非精确回归 (+21 more)
 
 ## Knowledge Gaps
-- **543 isolated node(s):** `0 先分域，再读对应 reference`, `1 心智模型`, `2 引擎怎么选`, `3 本机还是云端，run 还是 submit`, `4 编写 feature 与 steps` (+538 more)
+- **543 isolated node(s):** `背景`, `一、skill 真身住 CLI 包内 `cli/gherkai_cli/skills/gherkai/`，随 wheel 天然带走；不单开 repo、不放仓库根、不用 force-include`, `二、内容只有一份：`SKILL.md` 就是工具无关的核心；「适配」只剩装到哪与一行指针`, `三、安装面两条，文档推荐第一条`, `四、skill 与 docs 的关系：不 link、确定性转换出副本；正文是新内容不是复述` (+538 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **59 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
@@ -1137,11 +1137,11 @@ Nodes (29): adapters/_boto.py 依赖守卫, core 测试说明（单测 vs 集成
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `_fixture()` connect `_fixture` to `test_workers.py`, `test_interrupt_model.py`, `evidence.py`, `test_lambda_asset.py`, `test_lambda_handlers.py`, `deterministic.py`, `test_user_steps.py`, `Status`, `test_evidence.py`, `_FakeSink`, `_Recorder`, `_RecUploader`?**
-  _High betweenness centrality (0.079) - this node is a cross-community bridge._
+  _High betweenness centrality (0.112) - this node is a cross-community bridge._
 - **Why does `Status` connect `Status` to `Job`, `workers.py`, `JobResult`, `test_reconcile.py`, `test_tunnel_host.py`, `test_lifecycle_states.py`, `Fake S3 Client`, `test_schedule.py`, `JobState`, `RunPersistence`, `_FakeEcs`, `test_project.py`, `test_conditional_writes.py`, `SqliteEventLog`, `test_cloud_integration.py`, `test_detached_launcher.py`, `_SeqEcs`, `StepDone`, `_MissingThenStoppedEcs`, `_FakeEcsClient`, `_StampSsm`, `_FakeTable`, `_FakeEcs`, `test_fargate_engine.py`, `LocalReportStore`, `EventBridgeTimeoutWatch`, `test_subprocess_engine.py`, `RevisionInfo`, `test_cloud_reconcile.py`?**
-  _High betweenness centrality (0.071) - this node is a cross-community bridge._
-- **Why does `schedule()` connect `test_schedule.py` to `test_project.py`, `Job`, `.__init__`, `test_subprocess_engine.py`, `StepDone`, `JobResult`, `test_lifecycle_states.py`, `ValueError`, `RunPersistence`?**
-  _High betweenness centrality (0.036) - this node is a cross-community bridge._
+  _High betweenness centrality (0.073) - this node is a cross-community bridge._
+- **Why does `Job` connect `Job` to `JobResult`, `test_reconcile.py`, `test_lifecycle_states.py`, `test_schedule.py`, `JobState`, `_engine`, `RunPersistence`, `TunnelInfo`, `_FakeEcs`, `test_project.py`, `test_conditional_writes.py`, `_read_events`, `SqliteEventLog`, `test_plan.py`, `test_cloud_integration.py`, `test_tunnel_cli.py`, `test_detached_launcher.py`, `FargateEngine`, `_SeqEcs`, `StepDone`, `_MissingThenStoppedEcs`, `tunnel.py`, `_FakeEcs`, `start_tunnel_for_jobs`, `test_tunnel.py`, `test_fargate_engine.py`, `LocalReportStore`, `test_subprocess_engine.py`, `job_to_json`, `Status`, `test_cloud_reconcile.py`?**
+  _High betweenness centrality (0.053) - this node is a cross-community bridge._
 - **Are the 53 inferred relationships involving `Job` (e.g. with `CloudLauncher` and `FargateEngine`) actually correct?**
   _`Job` has 53 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 32 inferred relationships involving `RunState` (e.g. with `DynamoDBRunStore` and `LocalRunStore`) actually correct?**

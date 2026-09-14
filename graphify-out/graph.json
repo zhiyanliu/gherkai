@@ -38077,7 +38077,7 @@
       "label": "\u5f55\u4e00\u4e2a fixture",
       "file_type": "document",
       "source_file": "skills/gherkai-evals/README.md",
-      "source_location": "L37",
+      "source_location": "L38",
       "_origin": "ast",
       "id": "skills_gherkai_evals_readme_\u5f55\u4e00\u4e2a_fixture",
       "community": 181,
@@ -38088,7 +38088,7 @@
       "label": "\u8dd1\u4e00\u8f6e",
       "file_type": "document",
       "source_file": "skills/gherkai-evals/README.md",
-      "source_location": "L13",
+      "source_location": "L14",
       "_origin": "ast",
       "id": "skills_gherkai_evals_readme_\u8dd1\u4e00\u8f6e",
       "community": 181,
@@ -41068,10 +41068,10 @@
       "source_file": "docs/adr/0041-agent-facing-cli-affordances.md",
       "source_location": "L1",
       "_origin": "ast",
-      "id": "docs_adr_0041_agent_facing_cli_affordances_0041_\u9762\u5411_ai_agent_\u9a7e\u9a6d\u7684_cli_\u80fd\u529b_scenario_\u7b5b\u9009_\u9759\u9ed8\u843d\u76d8_json_\u8986\u76d6\u8865\u9f50_doctor_\u81ea\u68c0_json_\u5951\u7ea6",
       "community": 226,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "0041. \u9762\u5411 ai agent \u9a7e\u9a6d\u7684 cli \u80fd\u529b:scenario \u7b5b\u9009\u3001\u9759\u9ed8\u843d\u76d8\u3001json \u8986\u76d6\u8865\u9f50\u3001doctor \u81ea\u68c0\u3001json \u5951\u7ea6"
+      "norm_label": "0041. \u9762\u5411 ai agent \u9a7e\u9a6d\u7684 cli \u80fd\u529b:scenario \u7b5b\u9009\u3001\u9759\u9ed8\u843d\u76d8\u3001json \u8986\u76d6\u8865\u9f50\u3001doctor \u81ea\u68c0\u3001json \u5951\u7ea6",
+      "id": "docs_adr_0041_agent_facing_cli_affordances_0041_\u9762\u5411_ai_agent_\u9a7e\u9a6d\u7684_cli_\u80fd\u529b_scenario_\u7b5b\u9009_\u9759\u9ed8\u843d\u76d8_json_\u8986\u76d6\u8865\u9f50_doctor_\u81ea\u68c0_json_\u5951\u7ea6"
     },
     {
       "label": "\u4e00\u3001scenario \u7b5b\u9009\uff1a`--scope` / `--tags` / `--scenario`\uff0crun / plan / submit \u4e09\u547d\u4ee4\u540c\u5f62",
@@ -41079,10 +41079,10 @@
       "source_file": "docs/adr/0041-agent-facing-cli-affordances.md",
       "source_location": "L17",
       "_origin": "ast",
-      "id": "docs_adr_0041_agent_facing_cli_affordances_\u4e00_scenario_\u7b5b\u9009_scope_tags_scenario_run_plan_submit_\u4e09\u547d\u4ee4\u540c\u5f62",
       "community": 226,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "\u4e00\u3001scenario \u7b5b\u9009:`--scope` / `--tags` / `--scenario`,run / plan / submit \u4e09\u547d\u4ee4\u540c\u5f62"
+      "norm_label": "\u4e00\u3001scenario \u7b5b\u9009:`--scope` / `--tags` / `--scenario`,run / plan / submit \u4e09\u547d\u4ee4\u540c\u5f62",
+      "id": "docs_adr_0041_agent_facing_cli_affordances_\u4e00_scenario_\u7b5b\u9009_scope_tags_scenario_run_plan_submit_\u4e09\u547d\u4ee4\u540c\u5f62"
     },
     {
       "label": "\u4e09\u3001JSON \u8986\u76d6\u8865\u9f50\uff1a\u67e5\u8be2\u7c7b\u547d\u4ee4\u90fd\u6709\u673a\u8bfb\u5f62\u6001",
@@ -41090,10 +41090,10 @@
       "source_file": "docs/adr/0041-agent-facing-cli-affordances.md",
       "source_location": "L34",
       "_origin": "ast",
-      "id": "docs_adr_0041_agent_facing_cli_affordances_\u4e09_json_\u8986\u76d6\u8865\u9f50_\u67e5\u8be2\u7c7b\u547d\u4ee4\u90fd\u6709\u673a\u8bfb\u5f62\u6001",
       "community": 226,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "\u4e09\u3001json \u8986\u76d6\u8865\u9f50:\u67e5\u8be2\u7c7b\u547d\u4ee4\u90fd\u6709\u673a\u8bfb\u5f62\u6001"
+      "norm_label": "\u4e09\u3001json \u8986\u76d6\u8865\u9f50:\u67e5\u8be2\u7c7b\u547d\u4ee4\u90fd\u6709\u673a\u8bfb\u5f62\u6001",
+      "id": "docs_adr_0041_agent_facing_cli_affordances_\u4e09_json_\u8986\u76d6\u8865\u9f50_\u67e5\u8be2\u7c7b\u547d\u4ee4\u90fd\u6709\u673a\u8bfb\u5f62\u6001"
     },
     {
       "label": "\u4e8c\u3001`--quiet` \u628a worker \u65e5\u5fd7\u843d\u76d8",
@@ -41101,10 +41101,10 @@
       "source_file": "docs/adr/0041-agent-facing-cli-affordances.md",
       "source_location": "L27",
       "_origin": "ast",
-      "id": "docs_adr_0041_agent_facing_cli_affordances_\u4e8c_quiet_\u628a_worker_\u65e5\u5fd7\u843d\u76d8",
       "community": 226,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "\u4e8c\u3001`--quiet` \u628a worker \u65e5\u5fd7\u843d\u76d8"
+      "norm_label": "\u4e8c\u3001`--quiet` \u628a worker \u65e5\u5fd7\u843d\u76d8",
+      "id": "docs_adr_0041_agent_facing_cli_affordances_\u4e8c_quiet_\u628a_worker_\u65e5\u5fd7\u843d\u76d8"
     },
     {
       "label": "\u4e94\u3001JSON \u5b57\u6bb5\u5951\u7ea6\u6587\u6863 + \u62a4\u680f",
@@ -41112,10 +41112,10 @@
       "source_file": "docs/adr/0041-agent-facing-cli-affordances.md",
       "source_location": "L56",
       "_origin": "ast",
-      "id": "docs_adr_0041_agent_facing_cli_affordances_\u4e94_json_\u5b57\u6bb5\u5951\u7ea6\u6587\u6863_\u62a4\u680f",
       "community": 226,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "\u4e94\u3001json \u5b57\u6bb5\u5951\u7ea6\u6587\u6863 + \u62a4\u680f"
+      "norm_label": "\u4e94\u3001json \u5b57\u6bb5\u5951\u7ea6\u6587\u6863 + \u62a4\u680f",
+      "id": "docs_adr_0041_agent_facing_cli_affordances_\u4e94_json_\u5b57\u6bb5\u5951\u7ea6\u6587\u6863_\u62a4\u680f"
     },
     {
       "label": "\u51b3\u7b56",
@@ -41123,10 +41123,10 @@
       "source_file": "docs/adr/0041-agent-facing-cli-affordances.md",
       "source_location": "L15",
       "_origin": "ast",
-      "id": "docs_adr_0041_agent_facing_cli_affordances_\u51b3\u7b56",
       "community": 226,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "\u51b3\u7b56"
+      "norm_label": "\u51b3\u7b56",
+      "id": "docs_adr_0041_agent_facing_cli_affordances_\u51b3\u7b56"
     },
     {
       "label": "\u56db\u3001`doctor`\uff1a\u4e00\u4e2a\u5165\u53e3\u3001\u6309\u7ec4\u4ef6\u5206\u7ec4",
@@ -41134,10 +41134,10 @@
       "source_file": "docs/adr/0041-agent-facing-cli-affordances.md",
       "source_location": "L44",
       "_origin": "ast",
-      "id": "docs_adr_0041_agent_facing_cli_affordances_\u56db_doctor_\u4e00\u4e2a\u5165\u53e3_\u6309\u7ec4\u4ef6\u5206\u7ec4",
       "community": 226,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "\u56db\u3001`doctor`:\u4e00\u4e2a\u5165\u53e3\u3001\u6309\u7ec4\u4ef6\u5206\u7ec4"
+      "norm_label": "\u56db\u3001`doctor`:\u4e00\u4e2a\u5165\u53e3\u3001\u6309\u7ec4\u4ef6\u5206\u7ec4",
+      "id": "docs_adr_0041_agent_facing_cli_affordances_\u56db_doctor_\u4e00\u4e2a\u5165\u53e3_\u6309\u7ec4\u4ef6\u5206\u7ec4"
     },
     {
       "label": "\u5f71\u54cd",
@@ -41145,10 +41145,10 @@
       "source_file": "docs/adr/0041-agent-facing-cli-affordances.md",
       "source_location": "L62",
       "_origin": "ast",
-      "id": "docs_adr_0041_agent_facing_cli_affordances_\u5f71\u54cd",
       "community": 226,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "\u5f71\u54cd"
+      "norm_label": "\u5f71\u54cd",
+      "id": "docs_adr_0041_agent_facing_cli_affordances_\u5f71\u54cd"
     },
     {
       "label": "\u80cc\u666f\u4e0e\u95ee\u9898",
@@ -41156,10 +41156,10 @@
       "source_file": "docs/adr/0041-agent-facing-cli-affordances.md",
       "source_location": "L5",
       "_origin": "ast",
-      "id": "docs_adr_0041_agent_facing_cli_affordances_\u80cc\u666f\u4e0e\u95ee\u9898",
       "community": 226,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "\u80cc\u666f\u4e0e\u95ee\u9898"
+      "norm_label": "\u80cc\u666f\u4e0e\u95ee\u9898",
+      "id": "docs_adr_0041_agent_facing_cli_affordances_\u80cc\u666f\u4e0e\u95ee\u9898"
     },
     {
       "label": "\u91cd\u8bae\u95f8\u95e8",
@@ -41167,10 +41167,10 @@
       "source_file": "docs/adr/0041-agent-facing-cli-affordances.md",
       "source_location": "L68",
       "_origin": "ast",
-      "id": "docs_adr_0041_agent_facing_cli_affordances_\u91cd\u8bae\u95f8\u95e8",
       "community": 226,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "\u91cd\u8bae\u95f8\u95e8"
+      "norm_label": "\u91cd\u8bae\u95f8\u95e8",
+      "id": "docs_adr_0041_agent_facing_cli_affordances_\u91cd\u8bae\u95f8\u95e8"
     },
     {
       "label": "@aws-sdk/client-bedrock-agentcore",
@@ -41860,10 +41860,10 @@
       "source_file": "docs/adr/0041-agent-facing-cli-affordances.md",
       "source_location": "L1",
       "_origin": "ast",
-      "id": "docs_adr_0041_agent_facing_cli_affordances",
       "community": 27,
       "community_name": "execution-and-reconciliation.md",
-      "norm_label": "0041-agent-facing-cli-affordances.md"
+      "norm_label": "0041-agent-facing-cli-affordances.md",
+      "id": "docs_adr_0041_agent_facing_cli_affordances"
     },
     {
       "label": "0042-step-evidence-and-explain.md",
@@ -47220,10 +47220,10 @@
       "source_file": "cli/gherkai_cli/skills/gherkai/SKILL.md",
       "source_location": "L1",
       "_origin": "ast",
-      "id": "cli_gherkai_cli_skills_gherkai_skill",
       "community": 51,
       "community_name": "gherkai\uff1a\u66ff\u4f7f\u7528\u8005\u628a UI \u6d4b\u8bd5\u6574\u6761\u8dd1\u901a",
-      "norm_label": "skill.md"
+      "norm_label": "skill.md",
+      "id": "cli_gherkai_cli_skills_gherkai_skill"
     },
     {
       "label": "0 \u5148\u5206\u57df\uff0c\u518d\u8bfb\u5bf9\u5e94 reference",
@@ -47231,10 +47231,10 @@
       "source_file": "cli/gherkai_cli/skills/gherkai/SKILL.md",
       "source_location": "L10",
       "_origin": "ast",
-      "id": "cli_gherkai_cli_skills_gherkai_skill_0_\u5148\u5206\u57df_\u518d\u8bfb\u5bf9\u5e94_reference",
       "community": 51,
       "community_name": "gherkai\uff1a\u66ff\u4f7f\u7528\u8005\u628a UI \u6d4b\u8bd5\u6574\u6761\u8dd1\u901a",
-      "norm_label": "0 \u5148\u5206\u57df,\u518d\u8bfb\u5bf9\u5e94 reference"
+      "norm_label": "0 \u5148\u5206\u57df,\u518d\u8bfb\u5bf9\u5e94 reference",
+      "id": "cli_gherkai_cli_skills_gherkai_skill_0_\u5148\u5206\u57df_\u518d\u8bfb\u5bf9\u5e94_reference"
     },
     {
       "label": "10 \u522b\u505a\u7684\u4e8b",
@@ -47242,10 +47242,10 @@
       "source_file": "cli/gherkai_cli/skills/gherkai/SKILL.md",
       "source_location": "L108",
       "_origin": "ast",
-      "id": "cli_gherkai_cli_skills_gherkai_skill_10_\u522b\u505a\u7684\u4e8b",
       "community": 51,
       "community_name": "gherkai\uff1a\u66ff\u4f7f\u7528\u8005\u628a UI \u6d4b\u8bd5\u6574\u6761\u8dd1\u901a",
-      "norm_label": "10 \u522b\u505a\u7684\u4e8b"
+      "norm_label": "10 \u522b\u505a\u7684\u4e8b",
+      "id": "cli_gherkai_cli_skills_gherkai_skill_10_\u522b\u505a\u7684\u4e8b"
     },
     {
       "label": "1 \u5fc3\u667a\u6a21\u578b",
@@ -47253,10 +47253,10 @@
       "source_file": "cli/gherkai_cli/skills/gherkai/SKILL.md",
       "source_location": "L20",
       "_origin": "ast",
-      "id": "cli_gherkai_cli_skills_gherkai_skill_1_\u5fc3\u667a\u6a21\u578b",
       "community": 51,
       "community_name": "gherkai\uff1a\u66ff\u4f7f\u7528\u8005\u628a UI \u6d4b\u8bd5\u6574\u6761\u8dd1\u901a",
-      "norm_label": "1 \u5fc3\u667a\u6a21\u578b"
+      "norm_label": "1 \u5fc3\u667a\u6a21\u578b",
+      "id": "cli_gherkai_cli_skills_gherkai_skill_1_\u5fc3\u667a\u6a21\u578b"
     },
     {
       "label": "2 \u5f15\u64ce\u600e\u4e48\u9009",
@@ -47264,10 +47264,10 @@
       "source_file": "cli/gherkai_cli/skills/gherkai/SKILL.md",
       "source_location": "L27",
       "_origin": "ast",
-      "id": "cli_gherkai_cli_skills_gherkai_skill_2_\u5f15\u64ce\u600e\u4e48\u9009",
       "community": 51,
       "community_name": "gherkai\uff1a\u66ff\u4f7f\u7528\u8005\u628a UI \u6d4b\u8bd5\u6574\u6761\u8dd1\u901a",
-      "norm_label": "2 \u5f15\u64ce\u600e\u4e48\u9009"
+      "norm_label": "2 \u5f15\u64ce\u600e\u4e48\u9009",
+      "id": "cli_gherkai_cli_skills_gherkai_skill_2_\u5f15\u64ce\u600e\u4e48\u9009"
     },
     {
       "label": "3 \u672c\u673a\u8fd8\u662f\u4e91\u7aef\uff0crun \u8fd8\u662f submit",
@@ -47275,10 +47275,10 @@
       "source_file": "cli/gherkai_cli/skills/gherkai/SKILL.md",
       "source_location": "L31",
       "_origin": "ast",
-      "id": "cli_gherkai_cli_skills_gherkai_skill_3_\u672c\u673a\u8fd8\u662f\u4e91\u7aef_run_\u8fd8\u662f_submit",
       "community": 51,
       "community_name": "gherkai\uff1a\u66ff\u4f7f\u7528\u8005\u628a UI \u6d4b\u8bd5\u6574\u6761\u8dd1\u901a",
-      "norm_label": "3 \u672c\u673a\u8fd8\u662f\u4e91\u7aef,run \u8fd8\u662f submit"
+      "norm_label": "3 \u672c\u673a\u8fd8\u662f\u4e91\u7aef,run \u8fd8\u662f submit",
+      "id": "cli_gherkai_cli_skills_gherkai_skill_3_\u672c\u673a\u8fd8\u662f\u4e91\u7aef_run_\u8fd8\u662f_submit"
     },
     {
       "label": "4 \u7f16\u5199 feature \u4e0e steps",
@@ -47286,10 +47286,10 @@
       "source_file": "cli/gherkai_cli/skills/gherkai/SKILL.md",
       "source_location": "L39",
       "_origin": "ast",
-      "id": "cli_gherkai_cli_skills_gherkai_skill_4_\u7f16\u5199_feature_\u4e0e_steps",
       "community": 51,
       "community_name": "gherkai\uff1a\u66ff\u4f7f\u7528\u8005\u628a UI \u6d4b\u8bd5\u6574\u6761\u8dd1\u901a",
-      "norm_label": "4 \u7f16\u5199 feature \u4e0e steps"
+      "norm_label": "4 \u7f16\u5199 feature \u4e0e steps",
+      "id": "cli_gherkai_cli_skills_gherkai_skill_4_\u7f16\u5199_feature_\u4e0e_steps"
     },
     {
       "label": "5 \u5de5\u4f5c\u5faa\u73af",
@@ -47297,10 +47297,10 @@
       "source_file": "cli/gherkai_cli/skills/gherkai/SKILL.md",
       "source_location": "L51",
       "_origin": "ast",
-      "id": "cli_gherkai_cli_skills_gherkai_skill_5_\u5de5\u4f5c\u5faa\u73af",
       "community": 51,
       "community_name": "gherkai\uff1a\u66ff\u4f7f\u7528\u8005\u628a UI \u6d4b\u8bd5\u6574\u6761\u8dd1\u901a",
-      "norm_label": "5 \u5de5\u4f5c\u5faa\u73af"
+      "norm_label": "5 \u5de5\u4f5c\u5faa\u73af",
+      "id": "cli_gherkai_cli_skills_gherkai_skill_5_\u5de5\u4f5c\u5faa\u73af"
     },
     {
       "label": "6 \u673a\u8bfb\u8bfb\u6cd5",
@@ -47308,10 +47308,10 @@
       "source_file": "cli/gherkai_cli/skills/gherkai/SKILL.md",
       "source_location": "L62",
       "_origin": "ast",
-      "id": "cli_gherkai_cli_skills_gherkai_skill_6_\u673a\u8bfb\u8bfb\u6cd5",
       "community": 51,
       "community_name": "gherkai\uff1a\u66ff\u4f7f\u7528\u8005\u628a UI \u6d4b\u8bd5\u6574\u6761\u8dd1\u901a",
-      "norm_label": "6 \u673a\u8bfb\u8bfb\u6cd5"
+      "norm_label": "6 \u673a\u8bfb\u8bfb\u6cd5",
+      "id": "cli_gherkai_cli_skills_gherkai_skill_6_\u673a\u8bfb\u8bfb\u6cd5"
     },
     {
       "label": "7 \u65cb\u94ae\u6309\u300c\u8c01\u6709\u8fd9\u4e2a flag\u300d\u5206\u7ec4",
@@ -47319,10 +47319,10 @@
       "source_file": "cli/gherkai_cli/skills/gherkai/SKILL.md",
       "source_location": "L66",
       "_origin": "ast",
-      "id": "cli_gherkai_cli_skills_gherkai_skill_7_\u65cb\u94ae\u6309_\u8c01\u6709\u8fd9\u4e2a_flag_\u5206\u7ec4",
       "community": 51,
       "community_name": "gherkai\uff1a\u66ff\u4f7f\u7528\u8005\u628a UI \u6d4b\u8bd5\u6574\u6761\u8dd1\u901a",
-      "norm_label": "7 \u65cb\u94ae\u6309\u300c\u8c01\u6709\u8fd9\u4e2a flag\u300d\u5206\u7ec4"
+      "norm_label": "7 \u65cb\u94ae\u6309\u300c\u8c01\u6709\u8fd9\u4e2a flag\u300d\u5206\u7ec4",
+      "id": "cli_gherkai_cli_skills_gherkai_skill_7_\u65cb\u94ae\u6309_\u8c01\u6709\u8fd9\u4e2a_flag_\u5206\u7ec4"
     },
     {
       "label": "8 \u9000\u51fa\u7801\u5206\u6d41",
@@ -47330,10 +47330,10 @@
       "source_file": "cli/gherkai_cli/skills/gherkai/SKILL.md",
       "source_location": "L76",
       "_origin": "ast",
-      "id": "cli_gherkai_cli_skills_gherkai_skill_8_\u9000\u51fa\u7801\u5206\u6d41",
       "community": 51,
       "community_name": "gherkai\uff1a\u66ff\u4f7f\u7528\u8005\u628a UI \u6d4b\u8bd5\u6574\u6761\u8dd1\u901a",
-      "norm_label": "8 \u9000\u51fa\u7801\u5206\u6d41"
+      "norm_label": "8 \u9000\u51fa\u7801\u5206\u6d41",
+      "id": "cli_gherkai_cli_skills_gherkai_skill_8_\u9000\u51fa\u7801\u5206\u6d41"
     },
     {
       "label": "9 \u5931\u8d25\u6c47\u62a5\u6a21\u677f",
@@ -47341,10 +47341,10 @@
       "source_file": "cli/gherkai_cli/skills/gherkai/SKILL.md",
       "source_location": "L83",
       "_origin": "ast",
-      "id": "cli_gherkai_cli_skills_gherkai_skill_9_\u5931\u8d25\u6c47\u62a5\u6a21\u677f",
       "community": 51,
       "community_name": "gherkai\uff1a\u66ff\u4f7f\u7528\u8005\u628a UI \u6d4b\u8bd5\u6574\u6761\u8dd1\u901a",
-      "norm_label": "9 \u5931\u8d25\u6c47\u62a5\u6a21\u677f"
+      "norm_label": "9 \u5931\u8d25\u6c47\u62a5\u6a21\u677f",
+      "id": "cli_gherkai_cli_skills_gherkai_skill_9_\u5931\u8d25\u6c47\u62a5\u6a21\u677f"
     },
     {
       "label": "gherkai\uff1a\u66ff\u4f7f\u7528\u8005\u628a UI \u6d4b\u8bd5\u6574\u6761\u8dd1\u901a",
@@ -47352,10 +47352,10 @@
       "source_file": "cli/gherkai_cli/skills/gherkai/SKILL.md",
       "source_location": "L6",
       "_origin": "ast",
-      "id": "cli_gherkai_cli_skills_gherkai_skill_gherkai_\u66ff\u4f7f\u7528\u8005\u628a_ui_\u6d4b\u8bd5\u6574\u6761\u8dd1\u901a",
       "community": 51,
       "community_name": "gherkai\uff1a\u66ff\u4f7f\u7528\u8005\u628a UI \u6d4b\u8bd5\u6574\u6761\u8dd1\u901a",
-      "norm_label": "gherkai:\u66ff\u4f7f\u7528\u8005\u628a ui \u6d4b\u8bd5\u6574\u6761\u8dd1\u901a"
+      "norm_label": "gherkai:\u66ff\u4f7f\u7528\u8005\u628a ui \u6d4b\u8bd5\u6574\u6761\u8dd1\u901a",
+      "id": "cli_gherkai_cli_skills_gherkai_skill_gherkai_\u66ff\u4f7f\u7528\u8005\u628a_ui_\u6d4b\u8bd5\u6574\u6761\u8dd1\u901a"
     },
     {
       "label": "test_cloud_integration.py",
@@ -122730,9 +122730,9 @@
       "source_location": "L6",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "cli_gherkai_cli_skills_gherkai_skill",
-      "target": "cli_gherkai_cli_skills_gherkai_skill_gherkai_\u66ff\u4f7f\u7528\u8005\u628a_ui_\u6d4b\u8bd5\u6574\u6761\u8dd1\u901a",
-      "confidence_score": 1.0
+      "target": "cli_gherkai_cli_skills_gherkai_skill_gherkai_\u66ff\u4f7f\u7528\u8005\u628a_ui_\u6d4b\u8bd5\u6574\u6761\u8dd1\u901a"
     },
     {
       "relation": "contains",
@@ -122741,9 +122741,9 @@
       "source_location": "L10",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "cli_gherkai_cli_skills_gherkai_skill_gherkai_\u66ff\u4f7f\u7528\u8005\u628a_ui_\u6d4b\u8bd5\u6574\u6761\u8dd1\u901a",
-      "target": "cli_gherkai_cli_skills_gherkai_skill_0_\u5148\u5206\u57df_\u518d\u8bfb\u5bf9\u5e94_reference",
-      "confidence_score": 1.0
+      "target": "cli_gherkai_cli_skills_gherkai_skill_0_\u5148\u5206\u57df_\u518d\u8bfb\u5bf9\u5e94_reference"
     },
     {
       "relation": "contains",
@@ -122752,9 +122752,9 @@
       "source_location": "L108",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "cli_gherkai_cli_skills_gherkai_skill_gherkai_\u66ff\u4f7f\u7528\u8005\u628a_ui_\u6d4b\u8bd5\u6574\u6761\u8dd1\u901a",
-      "target": "cli_gherkai_cli_skills_gherkai_skill_10_\u522b\u505a\u7684\u4e8b",
-      "confidence_score": 1.0
+      "target": "cli_gherkai_cli_skills_gherkai_skill_10_\u522b\u505a\u7684\u4e8b"
     },
     {
       "relation": "contains",
@@ -122763,9 +122763,9 @@
       "source_location": "L20",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "cli_gherkai_cli_skills_gherkai_skill_gherkai_\u66ff\u4f7f\u7528\u8005\u628a_ui_\u6d4b\u8bd5\u6574\u6761\u8dd1\u901a",
-      "target": "cli_gherkai_cli_skills_gherkai_skill_1_\u5fc3\u667a\u6a21\u578b",
-      "confidence_score": 1.0
+      "target": "cli_gherkai_cli_skills_gherkai_skill_1_\u5fc3\u667a\u6a21\u578b"
     },
     {
       "relation": "contains",
@@ -122774,9 +122774,9 @@
       "source_location": "L27",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "cli_gherkai_cli_skills_gherkai_skill_gherkai_\u66ff\u4f7f\u7528\u8005\u628a_ui_\u6d4b\u8bd5\u6574\u6761\u8dd1\u901a",
-      "target": "cli_gherkai_cli_skills_gherkai_skill_2_\u5f15\u64ce\u600e\u4e48\u9009",
-      "confidence_score": 1.0
+      "target": "cli_gherkai_cli_skills_gherkai_skill_2_\u5f15\u64ce\u600e\u4e48\u9009"
     },
     {
       "relation": "contains",
@@ -122785,9 +122785,9 @@
       "source_location": "L31",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "cli_gherkai_cli_skills_gherkai_skill_gherkai_\u66ff\u4f7f\u7528\u8005\u628a_ui_\u6d4b\u8bd5\u6574\u6761\u8dd1\u901a",
-      "target": "cli_gherkai_cli_skills_gherkai_skill_3_\u672c\u673a\u8fd8\u662f\u4e91\u7aef_run_\u8fd8\u662f_submit",
-      "confidence_score": 1.0
+      "target": "cli_gherkai_cli_skills_gherkai_skill_3_\u672c\u673a\u8fd8\u662f\u4e91\u7aef_run_\u8fd8\u662f_submit"
     },
     {
       "relation": "contains",
@@ -122796,9 +122796,9 @@
       "source_location": "L39",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "cli_gherkai_cli_skills_gherkai_skill_gherkai_\u66ff\u4f7f\u7528\u8005\u628a_ui_\u6d4b\u8bd5\u6574\u6761\u8dd1\u901a",
-      "target": "cli_gherkai_cli_skills_gherkai_skill_4_\u7f16\u5199_feature_\u4e0e_steps",
-      "confidence_score": 1.0
+      "target": "cli_gherkai_cli_skills_gherkai_skill_4_\u7f16\u5199_feature_\u4e0e_steps"
     },
     {
       "relation": "contains",
@@ -122807,9 +122807,9 @@
       "source_location": "L51",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "cli_gherkai_cli_skills_gherkai_skill_gherkai_\u66ff\u4f7f\u7528\u8005\u628a_ui_\u6d4b\u8bd5\u6574\u6761\u8dd1\u901a",
-      "target": "cli_gherkai_cli_skills_gherkai_skill_5_\u5de5\u4f5c\u5faa\u73af",
-      "confidence_score": 1.0
+      "target": "cli_gherkai_cli_skills_gherkai_skill_5_\u5de5\u4f5c\u5faa\u73af"
     },
     {
       "relation": "contains",
@@ -122818,9 +122818,9 @@
       "source_location": "L62",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "cli_gherkai_cli_skills_gherkai_skill_gherkai_\u66ff\u4f7f\u7528\u8005\u628a_ui_\u6d4b\u8bd5\u6574\u6761\u8dd1\u901a",
-      "target": "cli_gherkai_cli_skills_gherkai_skill_6_\u673a\u8bfb\u8bfb\u6cd5",
-      "confidence_score": 1.0
+      "target": "cli_gherkai_cli_skills_gherkai_skill_6_\u673a\u8bfb\u8bfb\u6cd5"
     },
     {
       "relation": "contains",
@@ -122829,9 +122829,9 @@
       "source_location": "L66",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "cli_gherkai_cli_skills_gherkai_skill_gherkai_\u66ff\u4f7f\u7528\u8005\u628a_ui_\u6d4b\u8bd5\u6574\u6761\u8dd1\u901a",
-      "target": "cli_gherkai_cli_skills_gherkai_skill_7_\u65cb\u94ae\u6309_\u8c01\u6709\u8fd9\u4e2a_flag_\u5206\u7ec4",
-      "confidence_score": 1.0
+      "target": "cli_gherkai_cli_skills_gherkai_skill_7_\u65cb\u94ae\u6309_\u8c01\u6709\u8fd9\u4e2a_flag_\u5206\u7ec4"
     },
     {
       "relation": "contains",
@@ -122840,9 +122840,9 @@
       "source_location": "L76",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "cli_gherkai_cli_skills_gherkai_skill_gherkai_\u66ff\u4f7f\u7528\u8005\u628a_ui_\u6d4b\u8bd5\u6574\u6761\u8dd1\u901a",
-      "target": "cli_gherkai_cli_skills_gherkai_skill_8_\u9000\u51fa\u7801\u5206\u6d41",
-      "confidence_score": 1.0
+      "target": "cli_gherkai_cli_skills_gherkai_skill_8_\u9000\u51fa\u7801\u5206\u6d41"
     },
     {
       "relation": "contains",
@@ -122851,9 +122851,9 @@
       "source_location": "L83",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "cli_gherkai_cli_skills_gherkai_skill_gherkai_\u66ff\u4f7f\u7528\u8005\u628a_ui_\u6d4b\u8bd5\u6574\u6761\u8dd1\u901a",
-      "target": "cli_gherkai_cli_skills_gherkai_skill_9_\u5931\u8d25\u6c47\u62a5\u6a21\u677f",
-      "confidence_score": 1.0
+      "target": "cli_gherkai_cli_skills_gherkai_skill_9_\u5931\u8d25\u6c47\u62a5\u6a21\u677f"
     },
     {
       "relation": "contains",
@@ -137503,9 +137503,9 @@
       "source_location": "L1",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_adr_0041_agent_facing_cli_affordances",
-      "target": "docs_adr_0041_agent_facing_cli_affordances_0041_\u9762\u5411_ai_agent_\u9a7e\u9a6d\u7684_cli_\u80fd\u529b_scenario_\u7b5b\u9009_\u9759\u9ed8\u843d\u76d8_json_\u8986\u76d6\u8865\u9f50_doctor_\u81ea\u68c0_json_\u5951\u7ea6",
-      "confidence_score": 1.0
+      "target": "docs_adr_0041_agent_facing_cli_affordances_0041_\u9762\u5411_ai_agent_\u9a7e\u9a6d\u7684_cli_\u80fd\u529b_scenario_\u7b5b\u9009_\u9759\u9ed8\u843d\u76d8_json_\u8986\u76d6\u8865\u9f50_doctor_\u81ea\u68c0_json_\u5951\u7ea6"
     },
     {
       "relation": "contains",
@@ -137514,9 +137514,9 @@
       "source_location": "L15",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_adr_0041_agent_facing_cli_affordances_0041_\u9762\u5411_ai_agent_\u9a7e\u9a6d\u7684_cli_\u80fd\u529b_scenario_\u7b5b\u9009_\u9759\u9ed8\u843d\u76d8_json_\u8986\u76d6\u8865\u9f50_doctor_\u81ea\u68c0_json_\u5951\u7ea6",
-      "target": "docs_adr_0041_agent_facing_cli_affordances_\u51b3\u7b56",
-      "confidence_score": 1.0
+      "target": "docs_adr_0041_agent_facing_cli_affordances_\u51b3\u7b56"
     },
     {
       "relation": "contains",
@@ -137525,9 +137525,9 @@
       "source_location": "L5",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_adr_0041_agent_facing_cli_affordances_0041_\u9762\u5411_ai_agent_\u9a7e\u9a6d\u7684_cli_\u80fd\u529b_scenario_\u7b5b\u9009_\u9759\u9ed8\u843d\u76d8_json_\u8986\u76d6\u8865\u9f50_doctor_\u81ea\u68c0_json_\u5951\u7ea6",
-      "target": "docs_adr_0041_agent_facing_cli_affordances_\u80cc\u666f\u4e0e\u95ee\u9898",
-      "confidence_score": 1.0
+      "target": "docs_adr_0041_agent_facing_cli_affordances_\u80cc\u666f\u4e0e\u95ee\u9898"
     },
     {
       "relation": "contains",
@@ -137536,9 +137536,9 @@
       "source_location": "L62",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_adr_0041_agent_facing_cli_affordances_0041_\u9762\u5411_ai_agent_\u9a7e\u9a6d\u7684_cli_\u80fd\u529b_scenario_\u7b5b\u9009_\u9759\u9ed8\u843d\u76d8_json_\u8986\u76d6\u8865\u9f50_doctor_\u81ea\u68c0_json_\u5951\u7ea6",
-      "target": "docs_adr_0041_agent_facing_cli_affordances_\u5f71\u54cd",
-      "confidence_score": 1.0
+      "target": "docs_adr_0041_agent_facing_cli_affordances_\u5f71\u54cd"
     },
     {
       "relation": "contains",
@@ -137547,9 +137547,9 @@
       "source_location": "L68",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_adr_0041_agent_facing_cli_affordances_0041_\u9762\u5411_ai_agent_\u9a7e\u9a6d\u7684_cli_\u80fd\u529b_scenario_\u7b5b\u9009_\u9759\u9ed8\u843d\u76d8_json_\u8986\u76d6\u8865\u9f50_doctor_\u81ea\u68c0_json_\u5951\u7ea6",
-      "target": "docs_adr_0041_agent_facing_cli_affordances_\u91cd\u8bae\u95f8\u95e8",
-      "confidence_score": 1.0
+      "target": "docs_adr_0041_agent_facing_cli_affordances_\u91cd\u8bae\u95f8\u95e8"
     },
     {
       "relation": "contains",
@@ -137558,9 +137558,9 @@
       "source_location": "L17",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_adr_0041_agent_facing_cli_affordances_\u51b3\u7b56",
-      "target": "docs_adr_0041_agent_facing_cli_affordances_\u4e00_scenario_\u7b5b\u9009_scope_tags_scenario_run_plan_submit_\u4e09\u547d\u4ee4\u540c\u5f62",
-      "confidence_score": 1.0
+      "target": "docs_adr_0041_agent_facing_cli_affordances_\u4e00_scenario_\u7b5b\u9009_scope_tags_scenario_run_plan_submit_\u4e09\u547d\u4ee4\u540c\u5f62"
     },
     {
       "relation": "contains",
@@ -137569,9 +137569,9 @@
       "source_location": "L27",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_adr_0041_agent_facing_cli_affordances_\u51b3\u7b56",
-      "target": "docs_adr_0041_agent_facing_cli_affordances_\u4e8c_quiet_\u628a_worker_\u65e5\u5fd7\u843d\u76d8",
-      "confidence_score": 1.0
+      "target": "docs_adr_0041_agent_facing_cli_affordances_\u4e8c_quiet_\u628a_worker_\u65e5\u5fd7\u843d\u76d8"
     },
     {
       "relation": "contains",
@@ -137580,9 +137580,9 @@
       "source_location": "L34",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_adr_0041_agent_facing_cli_affordances_\u51b3\u7b56",
-      "target": "docs_adr_0041_agent_facing_cli_affordances_\u4e09_json_\u8986\u76d6\u8865\u9f50_\u67e5\u8be2\u7c7b\u547d\u4ee4\u90fd\u6709\u673a\u8bfb\u5f62\u6001",
-      "confidence_score": 1.0
+      "target": "docs_adr_0041_agent_facing_cli_affordances_\u4e09_json_\u8986\u76d6\u8865\u9f50_\u67e5\u8be2\u7c7b\u547d\u4ee4\u90fd\u6709\u673a\u8bfb\u5f62\u6001"
     },
     {
       "relation": "contains",
@@ -137591,9 +137591,9 @@
       "source_location": "L44",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_adr_0041_agent_facing_cli_affordances_\u51b3\u7b56",
-      "target": "docs_adr_0041_agent_facing_cli_affordances_\u56db_doctor_\u4e00\u4e2a\u5165\u53e3_\u6309\u7ec4\u4ef6\u5206\u7ec4",
-      "confidence_score": 1.0
+      "target": "docs_adr_0041_agent_facing_cli_affordances_\u56db_doctor_\u4e00\u4e2a\u5165\u53e3_\u6309\u7ec4\u4ef6\u5206\u7ec4"
     },
     {
       "relation": "contains",
@@ -137602,9 +137602,9 @@
       "source_location": "L56",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_adr_0041_agent_facing_cli_affordances_\u51b3\u7b56",
-      "target": "docs_adr_0041_agent_facing_cli_affordances_\u4e94_json_\u5b57\u6bb5\u5951\u7ea6\u6587\u6863_\u62a4\u680f",
-      "confidence_score": 1.0
+      "target": "docs_adr_0041_agent_facing_cli_affordances_\u4e94_json_\u5b57\u6bb5\u5951\u7ea6\u6587\u6863_\u62a4\u680f"
     },
     {
       "relation": "contains",
@@ -147521,7 +147521,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "skills/gherkai-evals/README.md",
-      "source_location": "L13",
+      "source_location": "L14",
       "weight": 1.0,
       "_origin": "ast",
       "source": "skills_gherkai_evals_readme_gherkai_agent_skill_\u7684\u8bc4\u6d4b\u8d44\u4ea7_contributor_\u4fa7",
@@ -147532,7 +147532,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "skills/gherkai-evals/README.md",
-      "source_location": "L37",
+      "source_location": "L38",
       "weight": 1.0,
       "_origin": "ast",
       "source": "skills_gherkai_evals_readme_gherkai_agent_skill_\u7684\u8bc4\u6d4b\u8d44\u4ea7_contributor_\u4fa7",
@@ -168270,9 +168270,9 @@
       "source_location": "L20",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_adr_0041_agent_facing_cli_affordances",
-      "target": "docs_adr_0019_feature_tags_scope_and_engine",
-      "confidence_score": 1.0
+      "target": "docs_adr_0019_feature_tags_scope_and_engine"
     },
     {
       "relation": "references",
@@ -168281,9 +168281,9 @@
       "source_location": "L3",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_adr_0041_agent_facing_cli_affordances",
-      "target": "docs_adr_0042_step_evidence_and_explain",
-      "confidence_score": 1.0
+      "target": "docs_adr_0042_step_evidence_and_explain"
     },
     {
       "relation": "references",
@@ -168292,9 +168292,9 @@
       "source_location": "L3",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_adr_0041_agent_facing_cli_affordances",
-      "target": "docs_adr_0043_agent_skill_for_driving_gherkai",
-      "confidence_score": 1.0
+      "target": "docs_adr_0043_agent_skill_for_driving_gherkai"
     },
     {
       "relation": "references",
@@ -168303,9 +168303,9 @@
       "source_location": "L7",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_adr_0041_agent_facing_cli_affordances",
-      "target": "docs_adr_0036_deterministic_capability_discovery",
-      "confidence_score": 1.0
+      "target": "docs_adr_0036_deterministic_capability_discovery"
     },
     {
       "relation": "references",
@@ -168314,9 +168314,9 @@
       "source_location": "L7",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_adr_0041_agent_facing_cli_affordances",
-      "target": "docs_adr_0037_distribution_and_packaging",
-      "confidence_score": 1.0
+      "target": "docs_adr_0037_distribution_and_packaging"
     },
     {
       "relation": "references",
@@ -168325,9 +168325,9 @@
       "source_location": "L7",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_adr_0041_agent_facing_cli_affordances",
-      "target": "docs_adr_0039_user_facing_surfaces_no_internal_references",
-      "confidence_score": 1.0
+      "target": "docs_adr_0039_user_facing_surfaces_no_internal_references"
     },
     {
       "relation": "references",
@@ -181537,5 +181537,5 @@
       "source_file": "docs/adr/0034-detached-batch-reconciler.md"
     }
   ],
-  "built_at_commit": "c65860aaa8adbe94a321215b1a1535762f770aba"
+  "built_at_commit": "c1bbc1f9034bf0f1098fafcc75c7e46ab8ae0a9e"
 }

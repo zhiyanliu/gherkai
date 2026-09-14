@@ -1,5 +1,5 @@
-# 评测 fixture：英文维基（Nova Act 默认引擎）。第一条 scenario 最后一步是刻意写错的事实断言，
-# 用来录一份带失败证据的 run；第二条不标 scope、演示 <文件>:<行号> 形态的 scope_id 与项目自写的确定性 step。
+# 英文维基上的 UI 冒烟用例（Nova Act 默认引擎）。
+# 项目自写的确定性 step 在 steps/（两引擎成对）。
 Feature: 维基百科搜索
 
   @scope:search

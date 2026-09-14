@@ -6,8 +6,9 @@
 | 文件 | 是什么 |
 |---|---|
 | `evals.json` | 行为评测（skill-creator 的 `evals.json` schema）。缺省集只执行 `plan` / `explain` / `doctor` / `list-deterministic`，零条真 AWS；`opt_in: true` 的条目真跑 `run` / `submit`，维护者在自己的部署上按需跑 |
-| `trigger-eval.json` | description 优化的触发查询集（20 条，含 Cucumber / Playwright / behave 这类 near-miss 负例），喂 skill-creator 的 `run_loop.py --eval-set` |
-| `fixtures/<case>/` | 物化式 fixture = 一个「使用方项目」快照：`features/` `steps/` + 真跑录下的 `reports/<run_id>/`；绝对路径一律是占位符 `{{FIXTURE_ROOT}}` |
+| `trigger-eval.json` | description 优化的触发查询集（25 条，含 Cucumber / Playwright / behave / pytest 这类 near-miss 负例与 4 条「项目里没有 .feature」的条目），喂 skill-creator 的 `run_loop.py --eval-set` |
+| `fixtures/<case>/` | 物化式 fixture = 一个「使用方项目」快照：`features/` `steps/` + 真跑录下的 `reports/<run_id>/`；绝对路径一律是占位符 `{{FIXTURE_ROOT}}`。**fixture 里不写「答案」**（哪一步是刻意写错的、为什么会失败这类脚手架自述会随舞台一起交给被测 agent、变成泄题）——录制意图记在下面 |
+| `fixtures/wiki-search/` | 英文维基、Nova Act 默认引擎的一次本机 run：第一条 scenario 的最后一步是刻意写错的事实断言（OpenAI 成立年份），录下带失败证据的 run；第二条不标 scope，演示 `<文件>:<行号>` 形态的 scope_id 与项目自写的确定性 step（两引擎成对） |
 | `materialize.py` | 把 fixture 物化到仓库外的舞台（替占位符、生成 `bin/gherkai` shim、前置断言、完整性断言）；`--snapshot` 是逆操作、录 fixture 用 |
 
 ## 跑一轮

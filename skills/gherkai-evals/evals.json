@@ -1,6 +1,6 @@
 {
   "skill_name": "gherkai",
-  "notes": "缺省集只执行 plan / explain / doctor / list-deterministic，零条真 AWS；opt_in=true 的条目会真跑 run / submit、只由维护者在自己的部署上按需跑。fixture 路径相对本目录；评测前用 materialize.py 把 fixture 物化到仓库外的舞台，两臂都在舞台里以 `claude -p` 跑、cwd = 舞台、PATH 前置舞台 bin/。",
+  "notes": "缺省集只执行 plan / explain / doctor / list-deterministic，零条真 AWS；opt_in=true 的条目会真跑 run / submit、只由维护者在自己的部署上按需跑。fixture 路径相对本目录；评测前用 materialize.py 把 fixture 物化到仓库外的舞台，两臂都在舞台里以 `claude -p` 跑、cwd = 舞台、PATH 前置舞台 bin/。 第二轮评分者批评的吸收情况：eval-3 的正则宽窄断言已去掉「或模式带了引号与特征词」这条后门；各 eval 补了 baseline 容易失手的结果断言；「完整汇报」「不装东西」这类全过的门槛断言保留、但解读时视为有效性闸门而非判别位。",
   "evals": [
     {
       "id": 1,
@@ -12,9 +12,10 @@
       "expectations": [
         "产出的 .feature 用 Given 加双引号内的 http(s) URL 作导航步",
         "URL 检查写成确定性 step（内建的『页面地址匹配』或 steps/ 里新注册的一条），不是自然语言断言；正则锚定主机（能挡住 iana.org.evil.com 这类地址），而不是不锚定的子串",
+        "先用 gherkai list-deterministic 确认内建的『页面地址匹配』已存在、直接复用，没有重复自写一侧的 URL step",
         "标题检查写成页面级语义陈述的 Then 断言，而不是子串规则、段落边界或选择器 / DOM 标签",
         "执行了 gherkai plan 并引用了它的派发标注（确定性 / AI）来核对写法；plan 退 0",
-        "没有执行 gherkai run 或 gherkai submit",
+        "没有执行 gherkai run 或 gherkai submit（`--help` 与只读命令不算执行）",
         "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报"
       ]
     },
@@ -34,8 +35,9 @@
         "如果改了 feature：只动了要改的那一步，两条 scenario 的行号与 scope_id 不变（旧报告仍指得到）",
         "如果改了 feature：改后 gherkai plan 退 0，新断言是页面级语义陈述（不塞子串规则或段落边界）",
         "没有编造截图内容（fixture 里的截图是 1×1 占位图，声称从截图里看到了页面内容即失败）",
-        "没有执行 gherkai run 或 gherkai submit",
-        "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报"
+        "没有执行 gherkai run 或 gherkai submit（`--help` 与只读命令不算执行）",
+        "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报",
+        "没有把 fixture 里的脚手架自述（feature 头注释之类）当作被测系统的证据，结论建立在 explain 的证据与页面事实上"
       ]
     },
     {
@@ -50,7 +52,9 @@
         "新增的 Midscene step 放在 .mts 或 .mjs 文件里（不是 .ts）、带 description 与 example，正则用具名组 (?<...>) 接收前缀参数",
         "两侧正则语义一致、description 与 example 同文；handler 用各自引擎的取 URL 方式（Python 的 page.url 属性 / JS 的 page.url() 方法）",
         "分别对 novaact 与 midscene 执行了 gherkai list-deterministic --engine 核对，且两侧清单都含这条",
-        "模式够窄：用 gherkai plan 验证过一条含『页面地址』字样的长句 AI 步不会被它命中（或模式带了引号与特征词、锚定形态明确）",
+        "模式够窄：gherkai plan 的输出里，一条含『页面地址』字样的长句 AI 步没有被新模式标成确定性（只看正则长相不算验证）",
+        "新模式与内建的『页面地址匹配』不会同时命中同一个 step（双命中该步会记 error）；原有 feature 的 plan 标注没有变化",
+        "失败语义正确：Python 侧抛 AssertionError、Midscene 侧抛 DeterministicAssertion（抛别的异常会被记成 error 而不是 failed）",
         "没有执行任何安装命令（npm i、uv tool install、pip install）",
         "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报"
       ]
@@ -65,6 +69,8 @@
       "expectations": [
         "指出 submit 的退出码只表示提交成功、不是判定",
         "改好的脚本用 gherkai status <run_id> --wait 的退出码（或 gherkai run 的退出码）作为 CI 判定",
+        "脚本先校验 submit 的退出码并确认 run_id 非空，再进入 status --wait；submit / status / explain 的 --report-dir（cloud 档还有 --backend / --prefix）逐字一致",
+        "explain 的退出码不参与门禁（它恒 0 / 2、从不表判定），脚本里显式丢弃它",
         "说明不带 --wait 的 status 未到终态也会退 0，不能拿它当通过",
         "不用 grep / 正则从人读输出里抠 run_id 或判定（submit 的 stdout 本身就是 run_id）；确需字段时用 status --json 或 run --json",
         "没有执行 gherkai run 或 gherkai submit（--help 不算执行）",
@@ -80,6 +86,8 @@
       ],
       "expectations": [
         "执行了 gherkai doctor 或 gherkai list-engines 来判断，而不是靠猜或只看文件",
+        "没有执行 gherkai run 或 gherkai submit（`--help` 与只读命令不算执行）",
+        "指出真跑还缺 AWS region 与凭证（舞台里两份 AWS 配置文件为空）、缺了会在起会话时失败，而不是只报「引擎可用」",
         "结论引用了 midscene 引擎那一行的探测结果",
         "结论正确：判为可用并说出来源（这里 midscene worker 由环境变量指定），没有建议无用的 npm 安装；同时指出真跑还缺 AWS region 与凭证",
         "没有执行任何安装命令（npm ls 这类只读命令不算）",
