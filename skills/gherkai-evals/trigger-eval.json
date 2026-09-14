@@ -1,22 +1,102 @@
 [
-  {"query": "帮我把 features/login.feature 用 gherkai 跑一下，看看能不能过", "should_trigger": true},
-  {"query": "项目里的 .feature 用例最近一次跑挂了两条，帮我看看为什么失败", "should_trigger": true},
-  {"query": "根据这份注册流程的需求文档，给我写一个 .feature 用例和需要的确定性 step，用 gherkai 跑", "should_trigger": true},
-  {"query": "gherkai doctor 报 engines.any 失败，怎么修", "should_trigger": true},
-  {"query": "我改了 steps/ 里的一条确定性 step，怎么让云端也用上新的？", "should_trigger": true},
-  {"query": "把这批 UI 用例提交到云端后台跑，我等会儿再收结果", "should_trigger": true},
-  {"query": "Run the gherkai tests for the checkout feature and explain any failed scenario", "should_trigger": true},
-  {"query": "How do I push a custom worker variant image with my deterministic steps to the gherkai backend?", "should_trigger": true},
-  {"query": "这个断言在中文页面上总是判否，是被测应用的问题吗？（用例在 features/ 下，用 gherkai 跑的）", "should_trigger": true},
-  {"query": "CI 里怎么接 gherkai 的退出码和 --json 输出", "should_trigger": true},
-  {"query": "给我写一个 Cucumber 的 step definition，用 cucumber-js 跑 features/login.feature", "should_trigger": false},
-  {"query": "帮我用 Playwright 写一个登录页的 e2e 测试并配置 playwright.config.ts", "should_trigger": false},
-  {"query": "pytest 挂了三个用例，帮我看看是什么问题", "should_trigger": false},
-  {"query": "帮我把这个 Gherkin 文件转成 Jira 里的验收标准列表", "should_trigger": false},
-  {"query": "用 Cypress 把这个购物车流程录制成测试", "should_trigger": false},
-  {"query": "Write a behave step implementation in Python for the Given step in features/search.feature", "should_trigger": false},
-  {"query": "帮我部署一个 AWS Lambda 函数处理 S3 事件", "should_trigger": false},
-  {"query": "我们的 Selenium 测试在 CI 上很不稳定，怎么加重试", "should_trigger": false},
-  {"query": "解释一下 Gherkin 里 Scenario Outline 和 Examples 怎么写", "should_trigger": false},
-  {"query": "How do I set up AWS credentials for boto3 in a Docker container?", "should_trigger": false}
+  {
+    "query": "帮我把 features/login.feature 用 gherkai 跑一下，看看能不能过",
+    "should_trigger": true
+  },
+  {
+    "query": "项目里的 .feature 用例最近一次跑挂了两条，帮我看看为什么失败",
+    "should_trigger": true
+  },
+  {
+    "query": "根据这份注册流程的需求文档，给我写一个 .feature 用例和需要的确定性 step，用 gherkai 跑",
+    "should_trigger": true
+  },
+  {
+    "query": "gherkai doctor 报 engines.any 失败，怎么修",
+    "should_trigger": true
+  },
+  {
+    "query": "我改了 steps/ 里的一条确定性 step，怎么让云端也用上新的？",
+    "should_trigger": true
+  },
+  {
+    "query": "把这批 UI 用例提交到云端后台跑，我等会儿再收结果",
+    "should_trigger": true
+  },
+  {
+    "query": "Run the gherkai tests for the checkout feature and explain any failed scenario",
+    "should_trigger": true
+  },
+  {
+    "query": "How do I push a custom worker variant image with my deterministic steps to the gherkai backend?",
+    "should_trigger": true
+  },
+  {
+    "query": "这个断言在中文页面上总是判否，是被测应用的问题吗？（用例在 features/ 下，用 gherkai 跑的）",
+    "should_trigger": true
+  },
+  {
+    "query": "CI 里怎么接 gherkai 的退出码和 --json 输出",
+    "should_trigger": true
+  },
+  {
+    "query": "给我写一个 Cucumber 的 step definition，用 cucumber-js 跑 features/login.feature",
+    "should_trigger": false
+  },
+  {
+    "query": "帮我用 Playwright 写一个登录页的 e2e 测试并配置 playwright.config.ts",
+    "should_trigger": false
+  },
+  {
+    "query": "pytest 挂了三个用例，帮我看看是什么问题",
+    "should_trigger": false
+  },
+  {
+    "query": "帮我把这个 Gherkin 文件转成 Jira 里的验收标准列表",
+    "should_trigger": false
+  },
+  {
+    "query": "用 Cypress 把这个购物车流程录制成测试",
+    "should_trigger": false
+  },
+  {
+    "query": "Write a behave step implementation in Python for the Given step in features/search.feature",
+    "should_trigger": false
+  },
+  {
+    "query": "帮我部署一个 AWS Lambda 函数处理 S3 事件",
+    "should_trigger": false
+  },
+  {
+    "query": "我们的 Selenium 测试在 CI 上很不稳定，怎么加重试",
+    "should_trigger": false
+  },
+  {
+    "query": "解释一下 Gherkin 里 Scenario Outline 和 Examples 怎么写",
+    "should_trigger": false
+  },
+  {
+    "query": "How do I set up AWS credentials for boto3 in a Docker container?",
+    "should_trigger": false
+  },
+  {
+    "query": "用 gherkai 给这个项目的登录流程写第一条 UI 用例并预检",
+    "should_trigger": true,
+    "project": "no-feature"
+  },
+  {
+    "query": "gherkai 在这台机器上能不能跑？帮我自检一下环境",
+    "should_trigger": true,
+    "project": "no-feature"
+  },
+  {
+    "query": "给登录流程写个端到端 UI 测试，能自动跑的那种",
+    "should_trigger": false,
+    "project": "no-feature"
+  },
+  {
+    "query": "我们的前端项目还没有任何自动化测试，帮我搭一套 e2e 测试",
+    "should_trigger": false,
+    "project": "no-feature"
+  }
 ]

@@ -20,16 +20,19 @@ STAGE=$(python skills/gherkai-evals/materialize.py wiki-search)          # 舞�
 # 结果按 skill-creator 的布局落 skills/gherkai-workspace/iteration-N/eval-<id>/{with_skill,without_skill}/（已 gitignore）
 ```
 
+两臂的 `claude -p` 必带：`--setting-sources project`（切断宿主用户级设置：ultracode / 子代理 / 个人 skills）、`--disallowedTools Workflow Agent Task`（`-p` 会在后台子代理完成前返回）、固定 `--model`、`--output-format stream-json`（存工具调用流水，评分的过程断言只认它）；子进程 env 只剥会话嵌套变量，保留 Bedrock 鉴权与模型映射。触发率别用 skill-creator 的 `run_eval.py`（在当前 Claude Code 上恒 0，原因见 ADR 0043 决策七），改为把 skill `gherkai skill install` 进临时项目后跑 `claude -p` 看 `Skill(gherkai)` / Read SKILL.md 是否出现；`trigger-eval.json` 里 `project: no-feature` 的条目不放 `.feature`。
+
 前置：`<repo>/.venv/bin/gherkai` 存在（仓库根 `uv sync`）；要让 midscene 引擎在舞台里可查，先 `cd engines/midscene && npm run build`（shim 会注入 `GHERKAI_WORKER_MIDSCENE_CMD`）。舞台的 shim 把 AWS 相关环境变量清掉并指向空配置文件，所以本机段输出跨机器一致。评测提示与工具白名单禁止任何安装类操作。
 
-description 优化（skill-creator 的循环，`--model` 传当前会话模型）：
+评分用 skill-creator 的 `agents/grader.md`（每臂写 `run-1/grading.json`），聚合与查看：
 
 ```bash
-cd <skill-creator 目录> && python -m scripts.run_loop --eval-set <repo>/skills/gherkai-evals/trigger-eval.json \
-  --skill-path <repo>/cli/gherkai_cli/skills/gherkai --model <模型> --holdout 0.4 --results-dir <repo>/skills/gherkai-workspace/trigger
+cd <skill-creator 目录> && <repo>/.venv/bin/python -m scripts.aggregate_benchmark <repo>/skills/gherkai-workspace/iteration-N --skill-name gherkai
+<repo>/.venv/bin/python <skill-creator 目录>/eval-viewer/generate_review.py <repo>/skills/gherkai-workspace/iteration-N --skill-name gherkai \
+  --benchmark <repo>/skills/gherkai-workspace/iteration-N/benchmark.json --static <repo>/skills/gherkai-workspace/iteration-N/review.html
 ```
 
-产出的 description 入库前要过 `cli/tests/test_skill.py` 的 ≤ 1024 字符护栏。
+skill-creator 的脚本要用仓库 `.venv` 的 Python（系统 python3 版本过低）。改动 description 入库前要过 `cli/tests/test_skill.py` 的 ≤ 1024 字符护栏。
 
 ## 录一个 fixture
 

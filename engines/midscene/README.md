@@ -63,7 +63,7 @@ deterministic(
 ```bash
 gherkai list-deterministic --engine midscene --steps-dir ./steps   # 人读清单（pattern + 说明 + 可抄的示例）
 gherkai list-deterministic --engine midscene --json                # 机器可读
-gherkai plan features/                                             # 每个 step 会走确定性还是 AI
+gherkai plan features/*.feature                                    # 每个 step 会走确定性还是 AI
 ```
 
 两者都不建浏览器会话、不调模型，**不产生 AWS 费用**。
