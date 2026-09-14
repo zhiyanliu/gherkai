@@ -1230,8 +1230,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0043-agent-skill-for-driving-gherkai.md": {
-    "mtime": 1789398569.104298,
-    "ast_hash": "b754416cfa214cdfd63d0c38dbd7b425",
+    "mtime": 1789405543.2881649,
+    "ast_hash": "0e6002ee189ebe511fea78fb0f41f9af",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skill_install.py": {

@@ -1,6 +1,6 @@
 {
   "skill_name": "gherkai",
-  "notes": "缺省集只执行 plan / explain / doctor / list-deterministic，零条真 AWS；opt_in=true 的条目会真跑 run / submit、只由维护者在自己的部署上按需跑。fixture 路径相对本目录；评测前用 materialize.py 把 fixture 物化到仓库外的舞台，两臂都在舞台里以 `claude -p` 跑、cwd = 舞台、PATH 前置舞台 bin/。 第四轮前按第三轮评分者批评收紧：复合断言拆条（eval 2/9/10/11/13）、放行开关与投票的判据正向化（eval 9/14）、禁绕过式修复（eval 12）、正则须匹配真实落地地址（eval 1）、禁留新 run 目录（eval 13）；「--help 与只读命令不算执行」统一写进所有「没有执行」断言。断言总数随之变化，通过率与前一轮不可直接比。 第五轮前：eval 1 的四合一断言拆为「复用确定性 step」与「正则鲁棒（含对实测 301 终点与 evil 主机的机械判据）」；所有缺省 eval 加「不把评测脚手架当用户环境」；新增 eval 15（scope 跨文件撞名，fixture scope-collision）与 eval 16（Background + Outline 写用例）。",
+  "notes": "缺省集只执行 plan / explain / doctor / list-deterministic，零条真 AWS；opt_in=true 的条目会真跑 run / submit、只由维护者在自己的部署上按需跑。fixture 路径相对本目录；评测前用 materialize.py 把 fixture 物化到仓库外的舞台，两臂都在舞台里以 `claude -p` 跑、cwd = 舞台、PATH 前置舞台 bin/。 第四轮前按第三轮评分者批评收紧：复合断言拆条（eval 2/9/10/11/13）、放行开关与投票的判据正向化（eval 9/14）、禁绕过式修复（eval 12）、正则须匹配真实落地地址（eval 1）、禁留新 run 目录（eval 13）；「--help 与只读命令不算执行」统一写进所有「没有执行」断言。断言总数随之变化，通过率与前一轮不可直接比。 第五轮前：eval 1 的四合一断言拆为「复用确定性 step」与「正则鲁棒（含对实测 301 终点与 evil 主机的机械判据）」；所有缺省 eval 加「不把评测脚手架当用户环境」；新增 eval 15（scope 跨文件撞名，fixture scope-collision）与 eval 16（Background + Outline 写用例）。 第五轮后：eval 16 断言 2 与 expected_output 对齐（确定性 URL step 或页面级语义断言二选一、各带判据），第五轮 fable/sonnet 的 with-skill 因旧断言被误判。",
   "evals": [
     {
       "id": 1,
@@ -290,7 +290,7 @@
       "expected_output": "Background 里放导航步 Given 打开 首页；Scenario Outline 里 When 搜索 <name>、Then 页面地址匹配 \"/wiki/<slug>\"（确定性）或页面级语义断言；Examples 三行；plan 显示展开成 3 条 scenario / 3 个 job（未标 scope），id 形如 features/x.feature:<声明行>:<数据行>，每条的第 0 步是 Background 的导航步；说明 Background 在每条里各自重跑、不能靠它承接上一条的页面状态；不执行 run。",
       "expectations": [
         "新建一个 feature 文件（放在 features/ 下），用 Background 放首页导航步（Given + 双引号内 URL），Scenario Outline + Examples 三行参数化搜索词；没有改动 fixture 已有的 features/wiki_search.feature 与 steps/",
-        "词条页的确认用内建确定性 step『页面地址匹配』带占位符（如 \"/wiki/<slug>\"），plan 里该步带「← 确定性」标注；没有把精确文本匹配写成 AI 断言",
+        "词条页的确认二选一且各有判据：用内建确定性 step『页面地址匹配』带占位符（如 \"/wiki/<slug>\"，Examples 需带 slug 列）且 plan 里该步带「← 确定性」标注；或写成页面级语义断言（「当前是 <name> 的词条页」）并说明为何不用确定性（如 slug 与搜索词不一致、消歧义页）。两种都不得把精确文本匹配写成 AI 子串断言",
         "用 gherkai plan 验证过，并正确解释：展开成 3 条独立 scenario / 3 个 job（未标 @scope），id 比普通 scenario 多一段 Examples 数据行号",
         "正确解释步号口径：Background 的导航步是每条 scenario 的第 0 步，后面的步号跟着后移；同一 scope 里每条都会重跑一遍 Background，不能靠它承接上一条的页面状态",
         "没有执行 gherkai run 或 gherkai submit（`--help` 与只读命令不算执行）",
