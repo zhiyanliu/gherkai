@@ -6,8 +6,7 @@
 做什么（设计见 docs/adr/0043-agent-skill-for-driving-gherkai.md 决策七）：
 0. `--prepare-cli <dir>`（一次性、要联网、几分钟）：`uv build --all-packages` 出 wheel → `uv venv` 建 `<dir>/venv`
    并装 gherkai / core / runtime / novaact worker 四个 wheel → **删掉装进去的 `gherkai_cli/skills`**（wheel 一定带
-   skill，留着等于把 with-skill 臂的自变量搬进 baseline 的发现面）→ 把 skill 拷到中立路径 `<dir>/skill/`（with-skill
-   臂的提示只给这条路径）→ 把已构建的 midscene（`dist/` + `package.json` + `node_modules/`）拷到 `<dir>/midscene/`
+   skill，留着等于把 with-skill 臂的自变量搬进 baseline 的发现面）→（skill 副本**不放这里**：run_evals.py 每次运行拷进随机命名的临时目录、只出现在 with-skill 臂的提示里）→ 把已构建的 midscene（`dist/` + `package.json` + `node_modules/`）拷到 `<dir>/midscene/`
    （包自引用与 tsx loader 都要它，缺一个 `.mts` step 就加载不了）→ 写 `<dir>/PREPARED.json`。
    **为什么整套搬出仓库**：舞台里任何指向仓库的路径都是一条教材泄漏渠道——首轮 baseline 顺着 shim 里的
    `exec <repo>/.venv/bin/gherkai` 读到了 CLI 源码、根 README、退出码表，甚至 skill 自己的 references，148 次工具
@@ -147,10 +146,11 @@ def prepare_cli(cli_dir: Path) -> None:
         shutil.rmtree(p)
     if not stripped:
         fail("装完没找到 gherkai_cli/skills（wheel 布局变了？）——没确认剥掉就不能开跑，baseline 会发现 skill")
-    skill_dst = cli_dir / "skill"
-    if skill_dst.exists():
-        shutil.rmtree(skill_dst)
-    shutil.copytree(SKILL_SRC, skill_dst, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    # 这个目录里**不能**有 skill 副本：baseline 顺着 shim 指向的路径 `grep` 一下就翻到（第三轮 eval 3 实测）。
+    # with-skill 臂要读的那份由 run_evals.py 每次运行拷进随机命名的临时目录、只出现在它的提示里。
+    stale_skill = cli_dir / "skill"
+    if stale_skill.exists():
+        shutil.rmtree(stale_skill)
     src_bin = MIDSCENE_SRC / "dist" / "bin.mjs"
     if not src_bin.is_file():
         fail(f"midscene 还没构建：{src_bin}（engines/midscene 下 npm run build）")
@@ -183,7 +183,7 @@ def prepare_cli(cli_dir: Path) -> None:
         "midscene_copied_at": (old.get("midscene_copied_at") or _now()) if reused else _now(),
         "wheels": [Path(w).name for w in wheels],
     }, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"materialize: CLI 备好：{cli_dir}（CLI={venv / 'bin' / 'gherkai'}，skill={skill_dst}）", file=sys.stderr)
+    print(f"materialize: CLI 备好：{cli_dir}（CLI={venv / 'bin' / 'gherkai'}；目录里刻意不放 skill 副本）", file=sys.stderr)
     print(str(cli_dir))
 
 
@@ -196,6 +196,8 @@ def assert_prepared(cli_dir: Path) -> tuple[Path, Path]:
         fail("舞台要用的 CLI 还没备好，缺：\n  " + "\n  ".join(missing)
              + f"\n先跑：python skills/gherkai-evals/materialize.py --prepare-cli {cli_dir}")
     left = [str(x) for x in cli_dir.glob("venv/lib/python3.*/site-packages/gherkai_cli/skills")]
+    if (cli_dir / "skill").exists():      # 旧版 --prepare-cli 放过一份副本，baseline 会 grep 到（第三轮实测）
+        left.append(str(cli_dir / "skill"))
     if left:
         fail("这套 CLI 里又出现了 wheel 自带的 skill（baseline 会发现它），重跑 --prepare-cli：\n  " + "\n  ".join(left))
     return cli, midscene_bin
