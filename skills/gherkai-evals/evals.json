@@ -1,6 +1,6 @@
 {
   "skill_name": "gherkai",
-  "notes": "缺省集只执行 plan / explain / doctor / list-deterministic，零条真 AWS；opt_in=true 的条目会真跑 run / submit、只由维护者在自己的部署上按需跑。fixture 路径相对本目录；评测前用 materialize.py 把 fixture 物化到仓库外的舞台，两臂都在舞台里以 `claude -p` 跑、cwd = 舞台、PATH 前置舞台 bin/。 第二轮评分者批评的吸收情况：eval-3 的正则宽窄断言已去掉「或模式带了引号与特征词」这条后门；各 eval 补了 baseline 容易失手的结果断言；「完整汇报」「不装东西」这类全过的门槛断言保留、但解读时视为有效性闸门而非判别位。",
+  "notes": "缺省集只执行 plan / explain / doctor / list-deterministic，零条真 AWS；opt_in=true 的条目会真跑 run / submit、只由维护者在自己的部署上按需跑。fixture 路径相对本目录；评测前用 materialize.py 把 fixture 物化到仓库外的舞台，两臂都在舞台里以 `claude -p` 跑、cwd = 舞台、PATH 前置舞台 bin/。 第四轮前按第三轮评分者批评收紧：复合断言拆条（eval 2/9/10/11/13）、放行开关与投票的判据正向化（eval 9/14）、禁绕过式修复（eval 12）、正则须匹配真实落地地址（eval 1）、禁留新 run 目录（eval 13）；「--help 与只读命令不算执行」统一写进所有「没有执行」断言。断言总数随之变化，通过率与前一轮不可直接比。",
   "evals": [
     {
       "id": 1,
@@ -11,7 +11,7 @@
       ],
       "expectations": [
         "产出的 .feature 用 Given 加双引号内的 http(s) URL 作导航步",
-        "URL 检查写成确定性 step（内建的『页面地址匹配』或 steps/ 里新注册的一条），不是自然语言断言；正则锚定主机（能挡住 iana.org.evil.com 这类地址），而不是不锚定的子串",
+        "URL 检查写成确定性 step（内建的『页面地址匹配』或 steps/ 里新注册的一条），不是自然语言断言；正则锚定主机（能挡住 iana.org.evil.com）且同时能匹配 iana.org 与 www.iana.org 两种主机名、不把跳转后的路径写死",
         "先用 gherkai list-deterministic 确认内建的『页面地址匹配』已存在、直接复用，没有重复自写一侧的 URL step",
         "标题检查写成页面级语义陈述的 Then 断言，而不是子串规则、段落边界或选择器 / DOM 标签",
         "执行了 gherkai plan 并引用了它的派发标注（确定性 / AI）来核对写法；plan 退 0",
@@ -30,12 +30,14 @@
       ],
       "expectations": [
         "调用过 gherkai explain（文本或 --json）读取失败证据",
-        "没有把 index.html 或引擎原生的 session_summary / act_*.html 当取证来源",
-        "汇报里引用了失败步的 message 原因与截图位置",
+        "结论的依据来自 explain 输出或 evidence.json 的 thought / message，没有把 index.html 或引擎原生 session_summary / act_*.html 的内容当依据",
+        "汇报里引用了失败步的 message 原因原文",
+        "汇报里给出了失败步截图的位置（file:// 路径或 evidence 目录），不只是裸文件名",
         "结论是用例断言写错（成立年份），没有把失败归为被测网站或引擎故障",
         "给出的重跑命令用 --scope（值为 search）或 --scenario 收窄到失败的那条，而不是整批重跑",
         "如果改了 feature：只动了要改的那一步，两条 scenario 的行号与 scope_id 不变（旧报告仍指得到）",
         "如果改了 feature：改后 gherkai plan 退 0，新断言是页面级语义陈述（不塞子串规则或段落边界）",
+        "如果改了 feature：改后的年份是 2015（有独立依据，不是把 1999 改成别的猜测值）",
         "没有编造截图内容（fixture 里的截图是 1×1 占位图，声称从截图里看到了页面内容即失败）",
         "没有执行 gherkai run 或 gherkai submit（`--help` 与只读命令不算执行）",
         "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报",
@@ -133,7 +135,7 @@
         "提交前执行了 gherkai doctor --backend cloud --prefix vfy-",
         "submit 带了 --backend cloud --prefix vfy-，并保存了 stdout 的 run_id",
         "告诉用户收结果要用 status --backend cloud --prefix vfy- --wait（参数与 submit 一致）",
-        "没有执行 gherkai deploy 或 gherkai destroy"
+        "没有执行 gherkai deploy 或 gherkai destroy（`--help` 与只读命令不算执行）"
       ],
       "slug": "optin-cloud-submit",
       "fixture": "wiki-search"
@@ -160,9 +162,10 @@
       "prompt": "同事在 CI 上跑 `gherkai submit features/wiki_search.feature --backend cloud --prefix gherkai-` 突然退 2，报错说 CLI 版本比云端后端新、不给提交。他想加个参数强行放行。怎么办？",
       "expected_output": "没有放行开关；两条出路：部署方先 gherkai deploy 把后端升上来，或临时用与后端同版本的 CLI（uvx --from 'gherkai==<后端版本>' gherkai …）；升级顺序是部署方先升 CLI → 立刻 deploy → 其他人再升，中间窗口被拒是预期；CLI 比后端旧只警告。",
       "expectations": [
-        "明确说 CLI 比后端新时没有强行放行的开关，不要去找参数",
+        "明确说 CLI 比后端新时没有强行放行的开关，没有给出任何可用的放行参数，也没有建议改源码或换 dev 构建绕过",
         "给出临时出路：用与后端同版本的 CLI 跑，形如 uvx --from 'gherkai==<后端版本>' gherkai …，不动本机安装",
-        "给出根治出路与顺序：部署方升 CLI 后立刻 gherkai deploy，其他人再升自己的 CLI；中间窗口提交被拒是预期",
+        "给出根治出路与顺序：部署方先升 CLI、立刻 gherkai deploy，其他人再升自己的 CLI（顺序不能反）",
+        "说明中间窗口里提交被拒是预期，不是故障",
         "说明反向情况（CLI 比后端旧）只警告不拦",
         "没有执行 gherkai submit / run / deploy（`--help` 与只读命令不算执行）",
         "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报"
@@ -176,9 +179,11 @@
       "expected_output": "feature 照写原始地址 http://localhost:3000；run / submit / plan 加 --expose-local http://localhost:3000（值 = feature 里书写的原始 origin），提交时替换成带每 run 一换凭据的公网 URL；前置：本机装好 ngrok 且在 PATH、配好 authtoken（ngrok config add-authtoken 或 NGROK_AUTHTOKEN 任一）；submit 后隧道由本机进程持有、本机须开机联网到终态；--tunnel-ttl 调小会提前拆隧道；可先用 plan --expose-local 看标注。",
       "expectations": [
         "feature 里照写原始地址 http://localhost:3000，不是让用户改成公网地址",
-        "命令加 --expose-local http://localhost:3000（值是 feature 里书写的原始 origin），并说明 plan 也收、只标注不起隧道",
+        "命令加 --expose-local http://localhost:3000（值是 feature 里书写的原始 origin），并说明 plan 也收这个 flag",
+        "说明 plan 只标注该地址会在真跑时被替换、自己不起隧道",
         "前置两条都提到：本机装 ngrok 并在 PATH 上、配好 authtoken（ngrok config add-authtoken 或环境变量 NGROK_AUTHTOKEN 任一即可）",
-        "指出 submit 后隧道由本机进程持有、本机必须保持开机联网到 run 终态，这是「提交完关机也跑完」的例外",
+        "指出 submit 后隧道由本机进程持有，本机必须保持开机联网到 run 终态（字面点出「开机 / 联网」或等义表述）",
+        "提到 --tunnel-ttl 调小会在 run 未完时无条件拆隧道（或等义地说明 TTL 到点即拆）",
         "没有执行 gherkai run 或 gherkai submit（`--help` 与只读命令不算执行）",
         "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报"
       ]
@@ -190,8 +195,9 @@
       "prompt": "把 features/ 下所有用例跑一遍，跑之前先告诉我会开多少个浏览器会话、大概什么规模；另外我只想先跑带 @smoke 的那几条，帮我把命令写出来，然后用一个不存在的 tag 试一下筛空会怎样。这次先别真跑。",
       "expected_output": "gherkai plan features/*.feature 报 9 job / 12 scenario（含 Outline 展开），说明 job 数 = 云端浏览器会话数、--max-concurrency 只改并发不减总账；给出 --tags smoke 的命令并用 plan 验证筛出的条数；plan --tags <不存在> 退 2 并列出全部候选；不执行 run。",
       "expectations": [
-        "用 gherkai plan 报出了 job 数与 scenario 数（9 个 job / 12 条 scenario，或与 plan 输出一致的数字），并说明 job 数就是要开的云端浏览器会话数、费用随它走",
-        "说明 --max-concurrency 只改同时跑几个、不减少总量",
+        "用 gherkai plan 报出了 job 数与 scenario 数（9 个 job / 12 条 scenario，或与 plan 输出一致的数字）",
+        "明确说 job 数就是要开的云端浏览器会话数、总费用随 job 数与步数走",
+        "明确说加大 --max-concurrency 只改同时跑几个、不减少 job 总数与总费用（把「并发放大费用」或「并发省钱」说反都算失败）",
         "给出带 --tags smoke 的命令，并用 plan 验证过筛选结果（3 条 scenario）",
         "实际用一个不存在的 tag 跑了 plan，报告它退 2 并列出了全部候选值",
         "没有执行 gherkai run 或 gherkai submit（`--help` 与只读命令不算执行）",
@@ -208,6 +214,7 @@
         "复现并读出真实原因：steps/title.py import 了不存在的模块，plan 整批拒绝出结果",
         "结论是 steps 文件的问题、不是 feature 写错，并解释为什么不静默跳过（跳过等于把确定性判定悄悄换回 AI）",
         "修复落在 steps/title.py（去掉或替换不存在的 import），修后 gherkai plan 退 0 且『页面标题包含』那步标为确定性",
+        "没有用新建 projecthelpers 模块、安装包、try/except 兜住 import 或改 feature 这类方式绕过；features/home.feature 与 fixture 一致",
         "没有执行 gherkai run 或 gherkai submit（`--help` 与只读命令不算执行）",
         "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报"
       ]
@@ -222,10 +229,12 @@
         "用 gherkai explain 读取，并正确判断失败落在 job 级（超时 / 被中止）而不是某一步的断言判否",
         "汇报用 job 级结构（scope_id、判定 error/aborted、原因 message），没有为不存在的失败步编造步号、thought 或截图",
         "指出没跑到的步是没有记录（record_missing），不是判否",
-        "读对了用例结构：Background 的导航步展开进每条 scenario 的第 0 步，Scenario Outline 的两行 Examples 各是一条独立 scenario、id 比普通 scenario 多一段数据行号（如 features/browse.feature:13:19），没有把它们当成同一条用例",
+        "读对了 Background：它的导航步展开进每条 scenario 的第 0 步，长流程 scenario 因此是 5 步",
+        "读对了 Scenario Outline：两行 Examples 各是一条独立 scenario / 独立 job，id 比普通 scenario 多一段数据行号（如 features/browse.feature:13:19），没有把它们当成同一条用例",
         "建议是加大该 scope 的 @timeout（或调 --default-job-timeout）或把长流程拆小，而不是改断言文字或归为网站问题",
         "重跑命令用 --scope deep-dive 收窄",
         "没有执行 gherkai run 或 gherkai submit（`--help` 与只读命令不算执行）",
+        "没有在 reports/ 下留下新的 run 目录（真跑过就会留下）",
         "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报"
       ]
     },
@@ -238,8 +247,8 @@
       "expectations": [
         "用 gherkai explain 对照了两条 scenario 的证据，指出判否的是 novaact 引擎那条、midscene 那条通过",
         "归因到 Nova Act 在非英文页面上『正文是否出现某个词』这类断言会系统性判否，不是被测网站的问题，也不是用例写错",
-        "给出的出路含：该 scenario 标 @engine:midscene（或整批 --default-engine midscene）、断言改写成页面级语义陈述、词检查落到确定性 step 三者中至少两条",
-        "没有建议用 --assertion-votes 加票来解决（投票治不了系统性判否）",
+        "给出的出路必含「该 scenario 标 @engine:midscene（或整批 --default-engine midscene）」，并再含「断言改写成页面级语义陈述」或「词检查落到确定性 step」至少一条",
+        "明确说明投票 / 加票治不了这类系统性判否，没有把 --assertion-votes 当成出路或复核手段",
         "没有执行 gherkai run 或 gherkai submit（`--help` 与只读命令不算执行）",
         "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报"
       ]
