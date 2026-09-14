@@ -120,6 +120,16 @@ def tool_calls_of(events: list[dict]) -> list[dict]:
     return calls
 
 
+def _purge_session_dir(stage: Path) -> None:
+    """删掉 Claude Code 为这个舞台路径建的会话目录（含 memory/），保证每次运行从零开始。"""
+    key = re.sub(r"[^A-Za-z0-9]", "-", str(stage.resolve() if stage.exists() else Path("/private") / stage.relative_to("/")
+                                             if str(stage).startswith("/tmp/") else stage))
+    for cand in {key, re.sub(r"[^A-Za-z0-9]", "-", str(stage))}:
+        d = Path.home() / ".claude" / "projects" / cand
+        if d.is_dir():
+            shutil.rmtree(d, ignore_errors=True)
+
+
 def pollution_metrics(calls: list[dict], skill_dirs: list[Path]) -> dict:
     """每轮必报的三个指标：污染（触仓库 / 触 skill 副本）与不可重放（联网）。事后 grep 才知道 = 太晚。
     skill_dirs = 本次运行的临时 skill 目录 + 旧版 `<cli-dir>/skill/`（若还在）；with-skill 臂天然 ≥1，baseline 臂 >0 即污染。"""
@@ -175,8 +185,11 @@ def run_one(ev: dict, arm: str, run_no: int, it_dir: Path, cli_dir: Path, model:
     eid, slug = ev["id"], ev["slug"]
     out_dir = it_dir / f"eval-{eid}-{slug}" / arm / f"run-{run_no}"
     out_dir.mkdir(parents=True, exist_ok=True)
-    stage = materialize(ev.get("fixture") or DEFAULT_FIXTURE,
-                        STAGE_ROOT / f"{it_dir.name}-{eid}-{arm}-run{run_no}", cli_dir)
+    # 舞台路径带随机后缀：Claude Code 按 cwd 给每个项目一个 ~/.claude/projects/<路径>/memory/，同名路径重跑会把上一次
+    # 的记忆（含上一次的结论）灌进新会话——第三轮 baseline 重跑就这样被自己的旧 run 喂了答案；跑前跑后再各清一次兜底
+    stage = STAGE_ROOT / f"{it_dir.name}-{eid}-{arm}-run{run_no}-{os.urandom(3).hex()}"
+    _purge_session_dir(stage)
+    stage = materialize(ev.get("fixture") or DEFAULT_FIXTURE, stage, cli_dir)
     # skill 副本放随机命名的临时目录（不在 cli-dir、不在舞台），只有 with-skill 臂的提示知道它在哪
     skill_tmp = Path(tempfile.mkdtemp(prefix="agent-skill-"))
     skill_dir = skill_tmp / "gherkai"
@@ -215,7 +228,9 @@ def run_one(ev: dict, arm: str, run_no: int, it_dir: Path, cli_dir: Path, model:
     total_tokens = sum(int(usage.get(k, 0) or 0) for k in
                        ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "output_tokens"))
     metrics = pollution_metrics(calls, [skill_tmp, cli_dir / "skill"])
+    metrics["memory_reads"] = sum(1 for c in calls if "/.claude/projects/" in json.dumps(c.get("input"), ensure_ascii=False))
     shutil.rmtree(skill_tmp, ignore_errors=True)
+    _purge_session_dir(stage)
     (out_dir / "timing.json").write_text(json.dumps({
         "total_tokens": total_tokens, "duration_ms": int(dur * 1000), "total_duration_seconds": round(dur, 1),
         "num_turns": data.get("num_turns"), "cost_usd": data.get("total_cost_usd"),

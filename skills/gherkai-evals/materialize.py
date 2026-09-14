@@ -173,6 +173,9 @@ def prepare_cli(cli_dir: Path) -> None:
                 shutil.copytree(src, midscene_dst / name, symlinks=True, ignore_dangling_symlinks=True)
             else:
                 shutil.copy2(src, midscene_dst / name)
+    # 只读：haiku 那轮的一个 baseline 把用户「想加个放行参数」的诉求直接实现进了共享 venv 的 __main__.py（9 次 Edit），
+    # 之后所有轮次的 CLI 都多了一个 --allow-version-skew；评测舞台的 CLI 必须是不可变的
+    _run(["chmod", "-R", "a-w", str(venv), str(midscene_dst)])
     marker = cli_dir / "PREPARED.json"
     old = json.loads(marker.read_text(encoding="utf-8")) if marker.is_file() else {}
     sha = subprocess.run(["git", "-C", str(REPO), "rev-parse", "HEAD"],
@@ -183,13 +186,20 @@ def prepare_cli(cli_dir: Path) -> None:
         "prepared_at": _now(),
         "midscene_copied_at": (old.get("midscene_copied_at") or _now()) if reused else _now(),
         "wheels": [Path(w).name for w in wheels],
+        "cli_main_sha256": _cli_main_digest(cli_dir),
     }, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"materialize: CLI 备好：{cli_dir}（CLI={venv / 'bin' / 'gherkai'}；目录里刻意不放 skill 副本）", file=sys.stderr)
     print(str(cli_dir))
 
 
+def _cli_main_digest(cli_dir: Path) -> str:
+    import hashlib
+    mains = sorted(cli_dir.glob("venv/lib/python3.*/site-packages/gherkai_cli/__main__.py"))
+    return hashlib.sha256(b"".join(m.read_bytes() for m in mains)).hexdigest() if mains else ""
+
+
 def assert_prepared(cli_dir: Path) -> tuple[Path, Path]:
-    """舞台只许指向已备好的仓库外 CLI；没备好就响亮失败，绝不回落到仓库 .venv。"""
+    """舞台只许指向已备好、且没被改过的仓库外 CLI；没备好或被改过就响亮失败，绝不回落到仓库 .venv。"""
     cli = cli_dir / "venv" / "bin" / "gherkai"
     midscene_bin = cli_dir / "midscene" / "dist" / "bin.mjs"
     missing = [str(x) for x in (cli_dir / "PREPARED.json", cli, midscene_bin) if not x.exists()]
@@ -201,6 +211,10 @@ def assert_prepared(cli_dir: Path) -> tuple[Path, Path]:
         left.append(str(cli_dir / "skill"))
     if left:
         fail("这套 CLI 里又出现了 wheel 自带的 skill（baseline 会发现它），重跑 --prepare-cli：\n  " + "\n  ".join(left))
+    recorded = json.loads((cli_dir / "PREPARED.json").read_text(encoding="utf-8")).get("cli_main_sha256")
+    if recorded and recorded != _cli_main_digest(cli_dir):
+        fail(f"{cli_dir} 里的 CLI 入口被改过（哈希与 PREPARED.json 不一致）——某个被测 agent 动了共享 venv；重跑 --prepare-cli，"
+             "并把它改动之后跑的 run 全部作废")
     return cli, midscene_bin
 
 

@@ -260,7 +260,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
         help="[--backend cloud] 云端 worker 镜像 variant（= 一套具名的确定性 step 集烙成的定制镜像）："
              "缺省用部署的默认指针（`gherkai deploy` 初始化为 base）。提交时把它解析成本 run 各引擎的"
              "精确 task-def revision 写进提交记录（一个 run 内镜像固定，别人重推同名 variant 不影响在跑的 run）；"
-             "某引擎缺该 variant 即退 2、不回落默认。推送归部署方（`gherkai deploy push-worker`）。"
+             "某引擎缺该 variant 即退 2、不回落默认。variant 用 `gherkai deploy push-worker` 推（要装 deploy extra 并有 ECR 写权限，不改 IAM）。"
              "local 后端忽略（那边的确定性 step 直接从 --steps-dir 读、不经镜像）",
     )
     run.add_argument(
