@@ -1,0 +1,97 @@
+{
+  "job": {
+    "scope_id": "features/browse.feature:13:19",
+    "scope_name": "打开词条 Python [@19]",
+    "engine": "novaact",
+    "scenarios": [
+      {
+        "id": "features/browse.feature:13:19",
+        "name": "打开词条 Python [@19]",
+        "steps": [
+          {
+            "index": 0,
+            "keyword": "Given",
+            "text": "打开 \"https://en.wikipedia.org/wiki/Main_Page\""
+          },
+          {
+            "index": 1,
+            "keyword": "When",
+            "text": "\"在搜索框输入 Python 并提交搜索\""
+          },
+          {
+            "index": 2,
+            "keyword": "Then",
+            "text": "页面地址匹配 \"/wiki/Python\""
+          }
+        ]
+      }
+    ],
+    "assertion_votes": 1,
+    "timeout_s": 300.0
+  },
+  "status": "passed",
+  "duration_ms": 37044.35094597284,
+  "total_tokens": null,
+  "total_time_worked_s": 25.426724433898926,
+  "session_id": "01a09eaa-58f7-75b0-bfe1-75c1e5f16e0a",
+  "error_type": null,
+  "message": null,
+  "report_refs": [
+    {
+      "kind": "summary",
+      "ref": "file://{{FIXTURE_ROOT}}/reports/20260914T064548Z-94622e/nova-trajectories/01a09eaa-58f7-75b0-bfe1-75c1e5f16e0a/session_summary.json",
+      "label": "Nova session summary"
+    }
+  ],
+  "scenarios": [
+    {
+      "scenario_id": "features/browse.feature:13:19",
+      "status": "passed",
+      "duration_ms": 33173.12382895034,
+      "report_refs": [],
+      "steps": [
+        {
+          "index": 0,
+          "status": "passed",
+          "duration_ms": 7206.153434002772,
+          "votes": null,
+          "error_type": null,
+          "message": null,
+          "report_refs": [],
+          "shortcircuited": false
+        },
+        {
+          "index": 1,
+          "status": "passed",
+          "duration_ms": 25966.86857996974,
+          "votes": null,
+          "error_type": null,
+          "message": null,
+          "report_refs": [
+            {
+              "kind": "trajectory",
+              "ref": "file://{{FIXTURE_ROOT}}/reports/20260914T064548Z-94622e/nova-trajectories/01a09eaa-58f7-75b0-bfe1-75c1e5f16e0a/act_01a09eaa-8776-742b-b8e2-92b141fcd968_在搜索框输入_Python_并提交搜索.html",
+              "label": "trajectory"
+            },
+            {
+              "kind": "evidence",
+              "ref": "file://{{FIXTURE_ROOT}}/reports/20260914T064548Z-94622e/nova-trajectories/evidence/features-browse.feature-13-19-0f906707/step-1/evidence.json",
+              "label": "evidence"
+            }
+          ],
+          "shortcircuited": false
+        },
+        {
+          "index": 2,
+          "status": "passed",
+          "duration_ms": 0.011124066077172756,
+          "votes": null,
+          "error_type": null,
+          "message": null,
+          "report_refs": [],
+          "shortcircuited": false
+        }
+      ]
+    }
+  ]
+}

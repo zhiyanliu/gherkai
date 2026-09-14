@@ -1,0 +1,23 @@
+{
+  "run_id": "20260914T064548Z-94622e",
+  "status": "error",
+  "started_at": "2026-09-14T06:45:48.211491+00:00",
+  "ended_at": "2026-09-14T06:46:41.106158+00:00",
+  "jobs": [
+    {
+      "scope_id": "deep-dive",
+      "status": "error",
+      "session_id": "01a09eaa-531b-7639-ba6e-89a9d5fc0700"
+    },
+    {
+      "scope_id": "features/browse.feature:13:19",
+      "status": "passed",
+      "session_id": "01a09eaa-58f7-75b0-bfe1-75c1e5f16e0a"
+    },
+    {
+      "scope_id": "features/browse.feature:13:20",
+      "status": "passed",
+      "session_id": "01a09eaa-55d6-7147-bddb-14bc6da5cad3"
+    }
+  ]
+}

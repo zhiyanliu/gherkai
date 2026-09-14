@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "engine": "novaact",
+  "scope_id": "features/browse.feature:13:19",
+  "scenario_id": "features/browse.feature:13:19",
+  "step_index": 1,
+  "step": {
+    "keyword": "When",
+    "text": "\"在搜索框输入 Python 并提交搜索\""
+  },
+  "status": "passed",
+  "message": null,
+  "acts": [
+    {
+      "index": 0,
+      "prompt": "在搜索框输入 Python 并提交搜索",
+      "vote": null,
+      "url": "https://en.wikipedia.org/wiki/Python",
+      "frames": [
+        {
+          "url": "https://en.wikipedia.org/wiki/Main_Page",
+          "thought": "I am on the Wikipedia page. My task is to search for Python. I see a search field at the top of the page, but it is empty. I should type 'Python' into the search field to populate it and press enter to initiate the search.",
+          "actions": [
+            {
+              "name": "agentType",
+              "args": {
+                "value": "Python",
+                "box": "<box>18,264,46,670</box>",
+                "pressEnter": "{\"pressEnter\": true}"
+              }
+            },
+            {
+              "name": "waitForPageToSettle",
+              "args": {}
+            },
+            {
+              "name": "takeObservation",
+              "args": {}
+            }
+          ],
+          "screenshot": null
+        },
+        {
+          "url": "https://en.wikipedia.org/wiki/Python",
+          "thought": "I am now on the Wikipedia page for Python, meaning that my previous action was successful. I have successfully searched for Python. My task is complete, and no return information was asked from me. I will simply return.",
+          "actions": [],
+          "screenshot": "file://{{FIXTURE_ROOT}}/reports/20260914T064548Z-94622e/nova-trajectories/evidence/features-browse.feature-13-19-0f906707/step-1/act-0-frame-1.jpg"
+        }
+      ],
+      "result": {
+        "value": ""
+      },
+      "error": null,
+      "time_worked_s": 25.426724433898926
+    }
+  ]
+}

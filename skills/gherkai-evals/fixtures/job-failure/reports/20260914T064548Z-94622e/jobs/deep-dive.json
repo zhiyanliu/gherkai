@@ -1,0 +1,51 @@
+{
+  "job": {
+    "scope_id": "deep-dive",
+    "scope_name": "deep-dive",
+    "engine": "novaact",
+    "scenarios": [
+      {
+        "id": "features/browse.feature:7",
+        "name": "长流程：搜索、进入词条、跳到历史一节",
+        "steps": [
+          {
+            "index": 0,
+            "keyword": "Given",
+            "text": "打开 \"https://en.wikipedia.org/wiki/Main_Page\""
+          },
+          {
+            "index": 1,
+            "keyword": "When",
+            "text": "\"在搜索框输入 Python 并提交搜索\""
+          },
+          {
+            "index": 2,
+            "keyword": "Then",
+            "text": "\"当前是 Python 的词条页\""
+          },
+          {
+            "index": 3,
+            "keyword": "When",
+            "text": "\"点击目录里的 History 链接\""
+          },
+          {
+            "index": 4,
+            "keyword": "Then",
+            "text": "\"页面滚到了 History 一节\""
+          }
+        ]
+      }
+    ],
+    "assertion_votes": 1,
+    "timeout_s": 20.0
+  },
+  "status": "error",
+  "duration_ms": null,
+  "total_tokens": null,
+  "total_time_worked_s": null,
+  "session_id": "01a09eaa-531b-7639-ba6e-89a9d5fc0700",
+  "error_type": "timeout",
+  "message": "job 超时（>20.0s）",
+  "report_refs": [],
+  "scenarios": []
+}

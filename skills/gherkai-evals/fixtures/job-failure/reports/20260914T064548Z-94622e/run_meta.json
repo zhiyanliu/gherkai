@@ -1,0 +1,107 @@
+{
+  "run_id": "20260914T064548Z-94622e",
+  "created_at": "2026-09-14T06:45:48.200408+00:00",
+  "jobs": [
+    {
+      "scope_id": "deep-dive",
+      "scope_name": "deep-dive",
+      "engine": "novaact",
+      "scenarios": [
+        {
+          "id": "features/browse.feature:7",
+          "name": "长流程：搜索、进入词条、跳到历史一节",
+          "steps": [
+            {
+              "index": 0,
+              "keyword": "Given",
+              "text": "打开 \"https://en.wikipedia.org/wiki/Main_Page\""
+            },
+            {
+              "index": 1,
+              "keyword": "When",
+              "text": "\"在搜索框输入 Python 并提交搜索\""
+            },
+            {
+              "index": 2,
+              "keyword": "Then",
+              "text": "\"当前是 Python 的词条页\""
+            },
+            {
+              "index": 3,
+              "keyword": "When",
+              "text": "\"点击目录里的 History 链接\""
+            },
+            {
+              "index": 4,
+              "keyword": "Then",
+              "text": "\"页面滚到了 History 一节\""
+            }
+          ]
+        }
+      ],
+      "assertion_votes": 1,
+      "timeout_s": 20.0
+    },
+    {
+      "scope_id": "features/browse.feature:13:19",
+      "scope_name": "打开词条 Python [@19]",
+      "engine": "novaact",
+      "scenarios": [
+        {
+          "id": "features/browse.feature:13:19",
+          "name": "打开词条 Python [@19]",
+          "steps": [
+            {
+              "index": 0,
+              "keyword": "Given",
+              "text": "打开 \"https://en.wikipedia.org/wiki/Main_Page\""
+            },
+            {
+              "index": 1,
+              "keyword": "When",
+              "text": "\"在搜索框输入 Python 并提交搜索\""
+            },
+            {
+              "index": 2,
+              "keyword": "Then",
+              "text": "页面地址匹配 \"/wiki/Python\""
+            }
+          ]
+        }
+      ],
+      "assertion_votes": 1,
+      "timeout_s": 300.0
+    },
+    {
+      "scope_id": "features/browse.feature:13:20",
+      "scope_name": "打开词条 Rust [@20]",
+      "engine": "novaact",
+      "scenarios": [
+        {
+          "id": "features/browse.feature:13:20",
+          "name": "打开词条 Rust [@20]",
+          "steps": [
+            {
+              "index": 0,
+              "keyword": "Given",
+              "text": "打开 \"https://en.wikipedia.org/wiki/Main_Page\""
+            },
+            {
+              "index": 1,
+              "keyword": "When",
+              "text": "\"在搜索框输入 Rust 并提交搜索\""
+            },
+            {
+              "index": 2,
+              "keyword": "Then",
+              "text": "页面地址匹配 \"/wiki/Rust\""
+            }
+          ]
+        }
+      ],
+      "assertion_votes": 1,
+      "timeout_s": 300.0
+    }
+  ],
+  "max_concurrency": 3
+}

@@ -1,0 +1,114 @@
+{
+  "job": {
+    "scope_id": "zh-novaact",
+    "scope_name": "zh-novaact",
+    "engine": "novaact",
+    "scenarios": [
+      {
+        "id": "features/zh_terms.feature:4",
+        "name": "Nova Act 在中文词条页判断首段用词",
+        "steps": [
+          {
+            "index": 0,
+            "keyword": "Given",
+            "text": "打开 \"https://zh.wikipedia.org/wiki/人工智能\""
+          },
+          {
+            "index": 1,
+            "keyword": "Then",
+            "text": "\"当前是关于人工智能的维基百科词条页\""
+          },
+          {
+            "index": 2,
+            "keyword": "Then",
+            "text": "\"词条首段提到了计算机或机器\""
+          }
+        ]
+      }
+    ],
+    "assertion_votes": 1,
+    "timeout_s": 300.0
+  },
+  "status": "failed",
+  "duration_ms": 33542.8375339834,
+  "total_tokens": null,
+  "total_time_worked_s": 19.532470703125,
+  "session_id": "01a09eaf-38c5-7312-8b39-506f5911035a",
+  "error_type": null,
+  "message": null,
+  "report_refs": [
+    {
+      "kind": "summary",
+      "ref": "file://{{FIXTURE_ROOT}}/reports/20260914T065107Z-60843a/nova-trajectories/01a09eaf-38c5-7312-8b39-506f5911035a/session_summary.json",
+      "label": "Nova session summary"
+    }
+  ],
+  "scenarios": [
+    {
+      "scenario_id": "features/zh_terms.feature:4",
+      "status": "failed",
+      "duration_ms": 29476.487584062852,
+      "report_refs": [],
+      "steps": [
+        {
+          "index": 0,
+          "status": "passed",
+          "duration_ms": 8904.4841240393,
+          "votes": null,
+          "error_type": null,
+          "message": null,
+          "report_refs": [],
+          "shortcircuited": false
+        },
+        {
+          "index": 1,
+          "status": "passed",
+          "duration_ms": 10726.828687009402,
+          "votes": {
+            "yes": 1,
+            "total": 1
+          },
+          "error_type": null,
+          "message": null,
+          "report_refs": [
+            {
+              "kind": "trajectory",
+              "ref": "file://{{FIXTURE_ROOT}}/reports/20260914T065107Z-60843a/nova-trajectories/01a09eaf-38c5-7312-8b39-506f5911035a/act_01a09eaf-6de5-7168-aacc-3a1fc2d58f87_当前是关于人工智能的维基百科词条页,_format_outp.html",
+              "label": "trajectory"
+            },
+            {
+              "kind": "evidence",
+              "ref": "file://{{FIXTURE_ROOT}}/reports/20260914T065107Z-60843a/nova-trajectories/evidence/features-zh_terms.feature-4-d886a701/step-1/evidence.json",
+              "label": "evidence"
+            }
+          ],
+          "shortcircuited": false
+        },
+        {
+          "index": 2,
+          "status": "failed",
+          "duration_ms": 9845.056566991843,
+          "votes": {
+            "yes": 0,
+            "total": 1
+          },
+          "error_type": "assertion_failed",
+          "message": "AI 断言未过多数票（0/1）：\"词条首段提到了计算机或机器\"",
+          "report_refs": [
+            {
+              "kind": "trajectory",
+              "ref": "file://{{FIXTURE_ROOT}}/reports/20260914T065107Z-60843a/nova-trajectories/01a09eaf-38c5-7312-8b39-506f5911035a/act_01a09eaf-97c4-71ff-a9ba-7a6b95293036_词条首段提到了计算机或机器,_format_output_w.html",
+              "label": "trajectory"
+            },
+            {
+              "kind": "evidence",
+              "ref": "file://{{FIXTURE_ROOT}}/reports/20260914T065107Z-60843a/nova-trajectories/evidence/features-zh_terms.feature-4-d886a701/step-2/evidence.json",
+              "label": "evidence"
+            }
+          ],
+          "shortcircuited": false
+        }
+      ]
+    }
+  ]
+}

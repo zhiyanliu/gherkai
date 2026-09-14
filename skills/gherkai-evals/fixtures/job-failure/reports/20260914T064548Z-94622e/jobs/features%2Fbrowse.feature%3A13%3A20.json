@@ -1,0 +1,97 @@
+{
+  "job": {
+    "scope_id": "features/browse.feature:13:20",
+    "scope_name": "打开词条 Rust [@20]",
+    "engine": "novaact",
+    "scenarios": [
+      {
+        "id": "features/browse.feature:13:20",
+        "name": "打开词条 Rust [@20]",
+        "steps": [
+          {
+            "index": 0,
+            "keyword": "Given",
+            "text": "打开 \"https://en.wikipedia.org/wiki/Main_Page\""
+          },
+          {
+            "index": 1,
+            "keyword": "When",
+            "text": "\"在搜索框输入 Rust 并提交搜索\""
+          },
+          {
+            "index": 2,
+            "keyword": "Then",
+            "text": "页面地址匹配 \"/wiki/Rust\""
+          }
+        ]
+      }
+    ],
+    "assertion_votes": 1,
+    "timeout_s": 300.0
+  },
+  "status": "passed",
+  "duration_ms": 36129.31109289639,
+  "total_tokens": null,
+  "total_time_worked_s": 24.96014094352722,
+  "session_id": "01a09eaa-55d6-7147-bddb-14bc6da5cad3",
+  "error_type": null,
+  "message": null,
+  "report_refs": [
+    {
+      "kind": "summary",
+      "ref": "file://{{FIXTURE_ROOT}}/reports/20260914T064548Z-94622e/nova-trajectories/01a09eaa-55d6-7147-bddb-14bc6da5cad3/session_summary.json",
+      "label": "Nova session summary"
+    }
+  ],
+  "scenarios": [
+    {
+      "scenario_id": "features/browse.feature:13:20",
+      "status": "passed",
+      "duration_ms": 32170.435150968842,
+      "report_refs": [],
+      "steps": [
+        {
+          "index": 0,
+          "status": "passed",
+          "duration_ms": 6685.941854026169,
+          "votes": null,
+          "error_type": null,
+          "message": null,
+          "report_refs": [],
+          "shortcircuited": false
+        },
+        {
+          "index": 1,
+          "status": "passed",
+          "duration_ms": 25484.38643303234,
+          "votes": null,
+          "error_type": null,
+          "message": null,
+          "report_refs": [
+            {
+              "kind": "trajectory",
+              "ref": "file://{{FIXTURE_ROOT}}/reports/20260914T064548Z-94622e/nova-trajectories/01a09eaa-55d6-7147-bddb-14bc6da5cad3/act_01a09eaa-82f7-750d-a3ad-8e22c44a6ee1_在搜索框输入_Rust_并提交搜索.html",
+              "label": "trajectory"
+            },
+            {
+              "kind": "evidence",
+              "ref": "file://{{FIXTURE_ROOT}}/reports/20260914T064548Z-94622e/nova-trajectories/evidence/features-browse.feature-13-20-f40ee148/step-1/evidence.json",
+              "label": "evidence"
+            }
+          ],
+          "shortcircuited": false
+        },
+        {
+          "index": 2,
+          "status": "passed",
+          "duration_ms": 0.012301024980843067,
+          "votes": null,
+          "error_type": null,
+          "message": null,
+          "report_refs": [],
+          "shortcircuited": false
+        }
+      ]
+    }
+  ]
+}

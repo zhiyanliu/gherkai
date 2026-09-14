@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "engine": "midscene",
+  "scope_id": "zh-midscene",
+  "scenario_id": "features/zh_terms.feature:10",
+  "step_index": 2,
+  "step": {
+    "keyword": "Then",
+    "text": "\"词条首段提到了计算机或机器\""
+  },
+  "status": "passed",
+  "message": null,
+  "acts": [
+    {
+      "index": 0,
+      "prompt": "词条首段提到了计算机或机器",
+      "vote": true,
+      "url": "https://zh.wikipedia.org/wiki/%E4%BA%BA%E5%B7%A5%E6%99%BA%E8%83%BD",
+      "frames": [
+        {
+          "url": null,
+          "thought": "The first paragraph of the article on \"人工智能\" (Artificial Intelligence) mentions \"计算机\" (computer) explicitly: \"指让计算机完成那些以往需要人类智慧才能应付的任务\" (refers to letting computers complete tasks that previously required human intelligence). Therefore, the statement is true.",
+          "actions": [
+            {
+              "name": "Insight/Boolean",
+              "args": {
+                "domIncluded": false,
+                "dataDemand": "词条首段提到了计算机或机器"
+              }
+            }
+          ],
+          "screenshot": "file://{{FIXTURE_ROOT}}/reports/20260914T065107Z-60843a/midscene-run/report/screenshots/5fc4aae7-4839-48ff-b80a-ba656fc8e6b2.jpeg"
+        }
+      ],
+      "result": true,
+      "error": null,
+      "time_worked_s": null
+    }
+  ]
+}

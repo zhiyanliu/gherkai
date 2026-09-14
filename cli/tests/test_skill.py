@@ -430,7 +430,8 @@ def test_fixture_secret_shapes_stay_ignored(rel: str):
 
 
 def _fixture_files() -> list[Path]:
-    return [p for p in FIXTURES.rglob("*") if p.is_file()] if FIXTURES.is_dir() else []
+    # __pycache__ 不是 fixture 内容：本机对 fixture 跑一次 plan / list-deterministic，worker 就会在 steps/ 下编译出 .pyc
+    return [p for p in FIXTURES.rglob("*") if p.is_file() and "__pycache__" not in p.parts] if FIXTURES.is_dir() else []
 
 
 def test_every_fixture_file_is_tracked():

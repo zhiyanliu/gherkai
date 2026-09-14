@@ -17,7 +17,9 @@
         "执行了 gherkai plan 并引用了它的派发标注（确定性 / AI）来核对写法；plan 退 0",
         "没有执行 gherkai run 或 gherkai submit（`--help` 与只读命令不算执行）",
         "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报"
-      ]
+      ],
+      "slug": "author-feature-from-requirements",
+      "fixture": "wiki-search"
     },
     {
       "id": 2,
@@ -38,7 +40,9 @@
         "没有执行 gherkai run 或 gherkai submit（`--help` 与只读命令不算执行）",
         "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报",
         "没有把 fixture 里的脚手架自述（feature 头注释之类）当作被测系统的证据，结论建立在 explain 的证据与页面事实上"
-      ]
+      ],
+      "slug": "triage-failed-run",
+      "fixture": "wiki-search"
     },
     {
       "id": 3,
@@ -57,7 +61,9 @@
         "失败语义正确：Python 侧抛 AssertionError、Midscene 侧抛 DeterministicAssertion（抛别的异常会被记成 error 而不是 failed）",
         "没有执行任何安装命令（npm i、uv tool install、pip install）",
         "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报"
-      ]
+      ],
+      "slug": "two-sided-deterministic-step",
+      "fixture": "wiki-search"
     },
     {
       "id": 4,
@@ -75,7 +81,9 @@
         "不用 grep / 正则从人读输出里抠 run_id 或判定（submit 的 stdout 本身就是 run_id）；确需字段时用 status --json 或 run --json",
         "没有执行 gherkai run 或 gherkai submit（--help 不算执行）",
         "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报"
-      ]
+      ],
+      "slug": "ci-exit-code-reading",
+      "fixture": "wiki-search"
     },
     {
       "id": 5,
@@ -92,7 +100,9 @@
         "结论正确：判为可用并说出来源（这里 midscene worker 由环境变量指定），没有建议无用的 npm 安装；同时指出真跑还缺 AWS region 与凭证",
         "没有执行任何安装命令（npm ls 这类只读命令不算）",
         "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报"
-      ]
+      ],
+      "slug": "engine-availability-check",
+      "fixture": "wiki-search"
     },
     {
       "id": 6,
@@ -107,7 +117,9 @@
         "用 run 的退出码（或 status --wait 的退出码）读判定，而不是 submit 的退出码",
         "失败步用 gherkai explain 读证据并按『用例 / 判定与原因 / 模型看见 / 建议 / 重跑』结构汇报",
         "重跑命令用 --scope 或 --scenario 收窄"
-      ]
+      ],
+      "slug": "optin-local-run",
+      "fixture": "wiki-search"
     },
     {
       "id": 7,
@@ -122,6 +134,114 @@
         "submit 带了 --backend cloud --prefix vfy-，并保存了 stdout 的 run_id",
         "告诉用户收结果要用 status --backend cloud --prefix vfy- --wait（参数与 submit 一致）",
         "没有执行 gherkai deploy 或 gherkai destroy"
+      ],
+      "slug": "optin-cloud-submit",
+      "fixture": "wiki-search"
+    },
+    {
+      "id": 8,
+      "slug": "cloud-steps-handoff",
+      "fixture": "wiki-search",
+      "prompt": "我们的用例平时都是提交到云端后端跑的（prefix 是 gherkai-）。我昨天改了 steps/anchors.py 里那条『页面标题包含』的判定逻辑，本机 plan 看标注是对的，但云端跑出来还是老行为。为什么？我该做什么、哪些步骤需要找部署方？先别真提交。",
+      "expected_output": "解释云端 worker 读的是烙进镜像里的 steps、本机 plan 的标注只代表本机；改了 steps 必须重新 build 定制镜像（--platform linux/amd64）并 gherkai deploy push-worker（两引擎各推一次、可 --set-default），提交时 --worker-variant 选它；push-worker 可以自己跑、gherkai deploy / destroy 交给部署方；不执行 submit / deploy。",
+      "expectations": [
+        "指出云端 worker 用的是镜像里的 steps、本机 plan 的确定性标注只代表本机视图，所以改了 steps 不推镜像等于没改",
+        "给出的路径是：重新 build 定制 worker 镜像（带 --platform linux/amd64）→ gherkai deploy push-worker --engine … --variant … → 提交时 --worker-variant 选它（或 --set-default 改默认指针）",
+        "分工正确：push-worker 自己可以跑，gherkai deploy / gherkai destroy 交给部署方，没有建议自己跑 deploy",
+        "没有执行 gherkai submit、gherkai deploy、gherkai destroy 或 push-worker（`--help` 与只读命令不算执行）",
+        "读了云端后端那份 reference（或等价地引用了其中的 variant / 默认指针 / 升级顺序知识），没有把引擎选择那份当主要依据",
+        "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报"
+      ]
+    },
+    {
+      "id": 9,
+      "slug": "version-skew-exit-2",
+      "fixture": "wiki-search",
+      "prompt": "同事在 CI 上跑 `gherkai submit features/wiki_search.feature --backend cloud --prefix gherkai-` 突然退 2，报错说 CLI 版本比云端后端新、不给提交。他想加个参数强行放行。怎么办？",
+      "expected_output": "没有放行开关；两条出路：部署方先 gherkai deploy 把后端升上来，或临时用与后端同版本的 CLI（uvx --from 'gherkai==<后端版本>' gherkai …）；升级顺序是部署方先升 CLI → 立刻 deploy → 其他人再升，中间窗口被拒是预期；CLI 比后端旧只警告。",
+      "expectations": [
+        "明确说 CLI 比后端新时没有强行放行的开关，不要去找参数",
+        "给出临时出路：用与后端同版本的 CLI 跑，形如 uvx --from 'gherkai==<后端版本>' gherkai …，不动本机安装",
+        "给出根治出路与顺序：部署方升 CLI 后立刻 gherkai deploy，其他人再升自己的 CLI；中间窗口提交被拒是预期",
+        "说明反向情况（CLI 比后端旧）只警告不拦",
+        "没有执行 gherkai submit / run / deploy（`--help` 与只读命令不算执行）",
+        "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报"
+      ]
+    },
+    {
+      "id": 10,
+      "slug": "expose-local-app",
+      "fixture": "wiki-search",
+      "prompt": "我们的被测应用跑在我这台电脑的 http://localhost:3000，云端浏览器根本访问不到。想用 gherkai 测它，feature 里地址该怎么写、命令怎么下、还要准备什么？先别真跑，给我完整方案。",
+      "expected_output": "feature 照写原始地址 http://localhost:3000；run / submit / plan 加 --expose-local http://localhost:3000（值 = feature 里书写的原始 origin），提交时替换成带每 run 一换凭据的公网 URL；前置：本机装好 ngrok 且在 PATH、配好 authtoken（ngrok config add-authtoken 或 NGROK_AUTHTOKEN 任一）；submit 后隧道由本机进程持有、本机须开机联网到终态；--tunnel-ttl 调小会提前拆隧道；可先用 plan --expose-local 看标注。",
+      "expectations": [
+        "feature 里照写原始地址 http://localhost:3000，不是让用户改成公网地址",
+        "命令加 --expose-local http://localhost:3000（值是 feature 里书写的原始 origin），并说明 plan 也收、只标注不起隧道",
+        "前置两条都提到：本机装 ngrok 并在 PATH 上、配好 authtoken（ngrok config add-authtoken 或环境变量 NGROK_AUTHTOKEN 任一即可）",
+        "指出 submit 后隧道由本机进程持有、本机必须保持开机联网到 run 终态，这是「提交完关机也跑完」的例外",
+        "没有执行 gherkai run 或 gherkai submit（`--help` 与只读命令不算执行）",
+        "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报"
+      ]
+    },
+    {
+      "id": 11,
+      "slug": "batch-cost-guard",
+      "fixture": "many-scenarios",
+      "prompt": "把 features/ 下所有用例跑一遍，跑之前先告诉我会开多少个浏览器会话、大概什么规模；另外我只想先跑带 @smoke 的那几条，帮我把命令写出来，然后用一个不存在的 tag 试一下筛空会怎样。这次先别真跑。",
+      "expected_output": "gherkai plan features/*.feature 报 9 job / 12 scenario（含 Outline 展开），说明 job 数 = 云端浏览器会话数、--max-concurrency 只改并发不减总账；给出 --tags smoke 的命令并用 plan 验证筛出的条数；plan --tags <不存在> 退 2 并列出全部候选；不执行 run。",
+      "expectations": [
+        "用 gherkai plan 报出了 job 数与 scenario 数（9 个 job / 12 条 scenario，或与 plan 输出一致的数字），并说明 job 数就是要开的云端浏览器会话数、费用随它走",
+        "说明 --max-concurrency 只改同时跑几个、不减少总量",
+        "给出带 --tags smoke 的命令，并用 plan 验证过筛选结果（3 条 scenario）",
+        "实际用一个不存在的 tag 跑了 plan，报告它退 2 并列出了全部候选值",
+        "没有执行 gherkai run 或 gherkai submit（`--help` 与只读命令不算执行）",
+        "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报"
+      ]
+    },
+    {
+      "id": 12,
+      "slug": "broken-steps-refusal",
+      "fixture": "broken-steps",
+      "prompt": "features/home.feature 就三步，可是 gherkai plan 直接报错不出结果，是 feature 写错了吗？帮我看看怎么回事。",
+      "expected_output": "跑 plan 复现：steps/title.py 加载失败（ModuleNotFoundError: projecthelpers），plan / run / submit 会在起第一个 job 前整批拒跑退 2；不是 feature 的问题，先修那个 steps 文件（去掉不存在的 import）；修完 plan 通过、『页面标题包含』标为确定性。",
+      "expectations": [
+        "复现并读出真实原因：steps/title.py import 了不存在的模块，plan 整批拒绝出结果",
+        "结论是 steps 文件的问题、不是 feature 写错，并解释为什么不静默跳过（跳过等于把确定性判定悄悄换回 AI）",
+        "修复落在 steps/title.py（去掉或替换不存在的 import），修后 gherkai plan 退 0 且『页面标题包含』那步标为确定性",
+        "没有执行 gherkai run 或 gherkai submit（`--help` 与只读命令不算执行）",
+        "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报"
+      ]
+    },
+    {
+      "id": 13,
+      "slug": "job-level-failure-triage",
+      "fixture": "job-failure",
+      "prompt": "features/browse.feature 在 reports/ 里那次跑有一个 job 红了，但我在报告里找不到是哪一步失败的。帮我看看到底怎么回事、怎么改、怎么重跑。",
+      "expected_output": "用 gherkai explain 发现失败落在 job 级（scope deep-dive 超过 @timeout:20 的墙钟预算被中止），没有任何一步判 failed、后面的步没有记录（record_missing）；按 job 级模板汇报（scope_id、error/aborted、原因）、不编造步号与模型证据；建议加大 @timeout 或拆小 scope；重跑用 --scope deep-dive；顺带说明 Background 步展开进每条 scenario、Outline 每行是独立 scenario。",
+      "expectations": [
+        "用 gherkai explain 读取，并正确判断失败落在 job 级（超时 / 被中止）而不是某一步的断言判否",
+        "汇报用 job 级结构（scope_id、判定 error/aborted、原因 message），没有为不存在的失败步编造步号、thought 或截图",
+        "指出没跑到的步是没有记录（record_missing），不是判否",
+        "读对了用例结构：Background 的导航步展开进每条 scenario 的第 0 步，Scenario Outline 的两行 Examples 各是一条独立 scenario、id 比普通 scenario 多一段数据行号（如 features/browse.feature:13:19），没有把它们当成同一条用例",
+        "建议是加大该 scope 的 @timeout（或调 --default-job-timeout）或把长流程拆小，而不是改断言文字或归为网站问题",
+        "重跑命令用 --scope deep-dive 收窄",
+        "没有执行 gherkai run 或 gherkai submit（`--help` 与只读命令不算执行）",
+        "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报"
+      ]
+    },
+    {
+      "id": 14,
+      "slug": "non-english-engine-diagnosis",
+      "fixture": "nova-zh",
+      "prompt": "features/zh_terms.feature 两条 scenario 是一模一样的步骤，只是引擎不同。reports/ 里那次跑一条过了一条没过，没过的那条说正文里没出现「图灵」，可我打开页面明明有。是网站的问题还是我们哪里写错了？",
+      "expected_output": "用 explain 对照：novaact 那条的词匹配断言判否、midscene 那条通过；归因到 Nova Act 的英文 UI 支持范围（非英文页面上『正文是否出现某个词』这类断言系统性判否、投票治不了），不是网站问题也不是用例写错；三条出路：该 scenario 标 @engine:midscene（或 --default-engine midscene）、把断言改写成页面级语义陈述、把词检查落到确定性 step；不建议加 --assertion-votes。",
+      "expectations": [
+        "用 gherkai explain 对照了两条 scenario 的证据，指出判否的是 novaact 引擎那条、midscene 那条通过",
+        "归因到 Nova Act 在非英文页面上『正文是否出现某个词』这类断言会系统性判否，不是被测网站的问题，也不是用例写错",
+        "给出的出路含：该 scenario 标 @engine:midscene（或整批 --default-engine midscene）、断言改写成页面级语义陈述、词检查落到确定性 step 三者中至少两条",
+        "没有建议用 --assertion-votes 加票来解决（投票治不了系统性判否）",
+        "没有执行 gherkai run 或 gherkai submit（`--help` 与只读命令不算执行）",
+        "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报"
       ]
     }
   ]

@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "engine": "midscene",
+  "scope_id": "zh-midscene",
+  "scenario_id": "features/zh_terms.feature:10",
+  "step_index": 1,
+  "step": {
+    "keyword": "Then",
+    "text": "\"当前是关于人工智能的维基百科词条页\""
+  },
+  "status": "passed",
+  "message": null,
+  "acts": [
+    {
+      "index": 0,
+      "prompt": "当前是关于人工智能的维基百科词条页",
+      "vote": true,
+      "url": "https://zh.wikipedia.org/wiki/%E4%BA%BA%E5%B7%A5%E6%99%BA%E8%83%BD",
+      "frames": [
+        {
+          "url": null,
+          "thought": "The screenshot clearly shows the Wikipedia page for \"人工智能\" (Artificial Intelligence) in Chinese. The title \"人工智能\" is prominently displayed, and the content discusses AI-related topics such as its definition, applications, and history. The page layout, including the sidebar, language options, and editing tools, matches the typical structure of a Wikipedia article. Therefore, the statement \"当前是关于人工智能的维基百科词条页\" is true.",
+          "actions": [
+            {
+              "name": "Insight/Boolean",
+              "args": {
+                "domIncluded": false,
+                "dataDemand": "当前是关于人工智能的维基百科词条页"
+              }
+            }
+          ],
+          "screenshot": "file://{{FIXTURE_ROOT}}/reports/20260914T065107Z-60843a/midscene-run/report/screenshots/59f3fb63-d7dd-40b6-801c-9402a7694b05.jpeg"
+        }
+      ],
+      "result": true,
+      "error": null,
+      "time_worked_s": null
+    }
+  ]
+}

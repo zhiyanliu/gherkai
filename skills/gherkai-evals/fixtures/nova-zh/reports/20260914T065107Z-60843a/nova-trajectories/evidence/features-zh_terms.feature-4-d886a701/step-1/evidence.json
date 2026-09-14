@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "engine": "novaact",
+  "scope_id": "zh-novaact",
+  "scenario_id": "features/zh_terms.feature:4",
+  "step_index": 1,
+  "step": {
+    "keyword": "Then",
+    "text": "\"当前是关于人工智能的维基百科词条页\""
+  },
+  "status": "passed",
+  "message": null,
+  "acts": [
+    {
+      "index": 0,
+      "prompt": "当前是关于人工智能的维基百科词条页",
+      "vote": true,
+      "url": "https://zh.wikipedia.org/wiki/%E4%BA%BA%E5%B7%A5%E6%99%BA%E8%83%BD",
+      "frames": [
+        {
+          "url": "https://zh.wikipedia.org/wiki/%E4%BA%BA%E5%B7%A5%E6%99%BA%E8%83%BD",
+          "thought": "I am on the Wikipedia page for Artificial Intelligence. My task is to return whether the current page is the Wikipedia page for Artificial Intelligence. I can see the page title is '人工智能', which is the Chinese translation for Artificial Intelligence. I can also see the English title 'Artificial intelligence' in the first paragraph. This confirms that the current page is the Wikipedia page for Artificial Intelligence. I should return true to complete my task.",
+          "actions": [],
+          "screenshot": "file://{{FIXTURE_ROOT}}/reports/20260914T065107Z-60843a/nova-trajectories/evidence/features-zh_terms.feature-4-d886a701/step-1/act-0-frame-0.jpg"
+        }
+      ],
+      "result": {
+        "value": "true"
+      },
+      "error": null,
+      "time_worked_s": 10.204395771026611
+    }
+  ]
+}

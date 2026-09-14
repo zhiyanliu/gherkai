@@ -1,0 +1,104 @@
+{
+  "job": {
+    "scope_id": "zh-midscene",
+    "scope_name": "zh-midscene",
+    "engine": "midscene",
+    "scenarios": [
+      {
+        "id": "features/zh_terms.feature:10",
+        "name": "Midscene 在中文词条页判断首段用词",
+        "steps": [
+          {
+            "index": 0,
+            "keyword": "Given",
+            "text": "打开 \"https://zh.wikipedia.org/wiki/人工智能\""
+          },
+          {
+            "index": 1,
+            "keyword": "Then",
+            "text": "\"当前是关于人工智能的维基百科词条页\""
+          },
+          {
+            "index": 2,
+            "keyword": "Then",
+            "text": "\"词条首段提到了计算机或机器\""
+          }
+        ]
+      }
+    ],
+    "assertion_votes": 1,
+    "timeout_s": 300.0
+  },
+  "status": "passed",
+  "duration_ms": 20324.846729054116,
+  "total_tokens": 3793,
+  "total_time_worked_s": null,
+  "session_id": "01M2FAY5HE0BWXRPFZJN8NBGXW",
+  "error_type": null,
+  "message": null,
+  "report_refs": [
+    {
+      "kind": "report",
+      "ref": "file://{{FIXTURE_ROOT}}/reports/20260914T065107Z-60843a/midscene-run/report/playwright-2026-09-14_06-51-13-a8cafd3b.html",
+      "label": "Midscene report"
+    }
+  ],
+  "scenarios": [
+    {
+      "scenario_id": "features/zh_terms.feature:10",
+      "status": "passed",
+      "duration_ms": 19746.402159915306,
+      "report_refs": [],
+      "steps": [
+        {
+          "index": 0,
+          "status": "passed",
+          "duration_ms": 3456.552509102039,
+          "votes": null,
+          "error_type": null,
+          "message": null,
+          "report_refs": [],
+          "shortcircuited": false
+        },
+        {
+          "index": 1,
+          "status": "passed",
+          "duration_ms": 9640.564139001071,
+          "votes": {
+            "yes": 1,
+            "total": 1
+          },
+          "error_type": null,
+          "message": null,
+          "report_refs": [
+            {
+              "kind": "evidence",
+              "ref": "file://{{FIXTURE_ROOT}}/reports/20260914T065107Z-60843a/midscene-run/evidence/features_zh_terms.feature_10-3f5c0f82/step-1/evidence.json",
+              "label": "evidence"
+            }
+          ],
+          "shortcircuited": false
+        },
+        {
+          "index": 2,
+          "status": "passed",
+          "duration_ms": 6649.161117034964,
+          "votes": {
+            "yes": 1,
+            "total": 1
+          },
+          "error_type": null,
+          "message": null,
+          "report_refs": [
+            {
+              "kind": "evidence",
+              "ref": "file://{{FIXTURE_ROOT}}/reports/20260914T065107Z-60843a/midscene-run/evidence/features_zh_terms.feature_10-3f5c0f82/step-2/evidence.json",
+              "label": "evidence"
+            }
+          ],
+          "shortcircuited": false
+        }
+      ]
+    }
+  ]
+}

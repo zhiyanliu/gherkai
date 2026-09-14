@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8">
+<title>运行报告 20260914T064548Z-94622e</title>
+<style>
+  body { font: 14px/1.5 -apple-system, system-ui, sans-serif; margin: 2rem; color: #1f2328; }
+  h1 { font-size: 1.2rem; }
+  h2 { font-size: 1rem; margin: 1.4rem 0 .5rem; }
+  .summary { padding: .6rem .9rem; border-left: 4px solid #9a6700; background: #f6f8fa; margin: 1rem 0; }
+  .status { font-weight: 700; color: #9a6700; text-transform: uppercase; }
+  .job { margin: .8rem 0; padding: .5rem .8rem; border: 1px solid #e1e4e8; border-radius: 6px; }
+  .jobhd b { text-transform: uppercase; font-size: .85em; }
+  .jobmeta { color: #57606a; font-size: .85em; margin: .2rem 0 .3rem 1.1rem; }
+  ul.scns, ul.steps { list-style: none; padding-left: 1.1rem; margin: .2rem 0; }
+  ul.steps { padding-left: 1.6rem; }
+  ul.scns li, ul.steps li { padding: .15rem 0; }
+  .scn { color: #1f2328; }
+  .stp { color: #57606a; }
+  .t { color: #8c959f; font-size: .85em; }
+  .votes { color: #0969da; font-size: .85em; }
+  .err { color: #cf222e; font-size: .85em; }
+  .note { color: #57606a; font-size: .85em; }
+  .taint { color: #9a6700; font-size: .85em; }
+  ul.refs { list-style: none; padding: 0; }
+  ul.refs li { padding: .35rem 0; border-bottom: 1px solid #eee; }
+  .dot { display: inline-block; width: .6rem; height: .6rem; border-radius: 50%; margin-right: .5rem; vertical-align: middle; }
+  .eng { color: #57606a; }
+  .kind { color: #8250df; font-size: .85em; }
+  code { background: #eff1f3; padding: .1rem .3rem; border-radius: 4px; }
+  .empty { color: #57606a; }
+  /* 判定明细树 ↔ 产物列表的双向关联：📎（树→产物）、↑（产物→树），点击平滑滚动 + 高亮落点 */
+  .clip, .uplink { text-decoration: none; font-size: .85em; }
+  .clip { color: #8250df; }
+  .uplink { color: #57606a; }
+  html { scroll-behavior: smooth; }
+  :target { background: #fff8c5; border-radius: 4px; box-shadow: 0 0 0 4px #fff8c5; }
+</style></head>
+<body>
+<h1>运行报告</h1>
+<div class="summary">
+  <div>run_id: <code>20260914T064548Z-94622e</code></div>
+  <div>总状态: <span class="status">error</span> · 墙钟 52.9s · 成本 50.4s agent-time</div>
+</div>
+<h2>判定明细（3 job）</h2>
+<div class="job" id="node-j0"><div class="jobhd"><span class="dot" style="background:#9a6700"></span><code>deep-dive</code> <b>error</b> <span class="err">timeout: job 超时（&gt;20.0s）</span><div class="jobmeta">novaact · 墙钟 ? · 会话 <code>01a09eaa-531b-7639-ba6e-89a9d5fc0700</code></div></div></div>
+<div class="job" id="node-j1"><div class="jobhd"><span class="dot" style="background:#1a7f37"></span><code>features/browse.feature:13:19</code> <b>passed</b> <a class="clip" href="#ref-0" title="1 个报告产物">📎</a><div class="jobmeta">novaact · 墙钟 37.0s · 25.4s agent-time · 会话 <code>01a09eaa-58f7-75b0-bfe1-75c1e5f16e0a</code></div></div><ul class="scns"><li id="node-j1-s0"><span class="dot" style="background:#1a7f37"></span><span class="scn">features/browse.feature:13:19</span> passed <span class="t">33.2s</span><ul class="steps"><li id="node-j1-s0-t0"><span class="dot" style="background:#1a7f37"></span><span class="stp">step[0]</span> passed <span class="t">7.2s</span></li><li id="node-j1-s0-t1"><span class="dot" style="background:#1a7f37"></span><span class="stp">step[1]</span> passed <span class="t">26.0s</span> <a class="clip" href="#ref-1" title="2 个报告产物">📎×2</a></li><li id="node-j1-s0-t2"><span class="dot" style="background:#1a7f37"></span><span class="stp">step[2]</span> passed <span class="t">0.0s</span></li></ul></li></ul></div>
+<div class="job" id="node-j2"><div class="jobhd"><span class="dot" style="background:#1a7f37"></span><code>features/browse.feature:13:20</code> <b>passed</b> <a class="clip" href="#ref-3" title="1 个报告产物">📎</a><div class="jobmeta">novaact · 墙钟 36.1s · 25.0s agent-time · 会话 <code>01a09eaa-55d6-7147-bddb-14bc6da5cad3</code></div></div><ul class="scns"><li id="node-j2-s0"><span class="dot" style="background:#1a7f37"></span><span class="scn">features/browse.feature:13:20</span> passed <span class="t">32.2s</span><ul class="steps"><li id="node-j2-s0-t0"><span class="dot" style="background:#1a7f37"></span><span class="stp">step[0]</span> passed <span class="t">6.7s</span></li><li id="node-j2-s0-t1"><span class="dot" style="background:#1a7f37"></span><span class="stp">step[1]</span> passed <span class="t">25.5s</span> <a class="clip" href="#ref-4" title="2 个报告产物">📎×2</a></li><li id="node-j2-s0-t2"><span class="dot" style="background:#1a7f37"></span><span class="stp">step[2]</span> passed <span class="t">0.0s</span></li></ul></li></ul></div>
+<h2>报告产物（6）——引擎原生产物 + 每个 AI 步骤的证据</h2>
+<ul class="refs">
+<li id="ref-0"><span class="dot" style="background:#1a7f37"></span><code>features/browse.feature:13:19</code> <a class="uplink" href="#node-j1" title="定位到判定明细">↑</a> <span class="eng">novaact</span> <span class="kind">[summary]</span> <a href="nova-trajectories/01a09eaa-58f7-75b0-bfe1-75c1e5f16e0a/session_summary.json">Nova session summary</a></li>
+<li id="ref-1"><span class="dot" style="background:#1a7f37"></span><code>features/browse.feature:13:19 · features/browse.feature:13:19 · step[1]</code> <a class="uplink" href="#node-j1-s0-t1" title="定位到判定明细">↑</a> <span class="eng">novaact</span> <span class="kind">[trajectory]</span> <a href="nova-trajectories/01a09eaa-58f7-75b0-bfe1-75c1e5f16e0a/act_01a09eaa-8776-742b-b8e2-92b141fcd968_在搜索框输入_Python_并提交搜索.html">trajectory</a></li>
+<li id="ref-2"><span class="dot" style="background:#1a7f37"></span><code>features/browse.feature:13:19 · features/browse.feature:13:19 · step[1]</code> <a class="uplink" href="#node-j1-s0-t1" title="定位到判定明细">↑</a> <span class="eng">novaact</span> <span class="kind">[evidence]</span> <a href="nova-trajectories/evidence/features-browse.feature-13-19-0f906707/step-1/evidence.json">evidence</a></li>
+<li id="ref-3"><span class="dot" style="background:#1a7f37"></span><code>features/browse.feature:13:20</code> <a class="uplink" href="#node-j2" title="定位到判定明细">↑</a> <span class="eng">novaact</span> <span class="kind">[summary]</span> <a href="nova-trajectories/01a09eaa-55d6-7147-bddb-14bc6da5cad3/session_summary.json">Nova session summary</a></li>
+<li id="ref-4"><span class="dot" style="background:#1a7f37"></span><code>features/browse.feature:13:20 · features/browse.feature:13:20 · step[1]</code> <a class="uplink" href="#node-j2-s0-t1" title="定位到判定明细">↑</a> <span class="eng">novaact</span> <span class="kind">[trajectory]</span> <a href="nova-trajectories/01a09eaa-55d6-7147-bddb-14bc6da5cad3/act_01a09eaa-82f7-750d-a3ad-8e22c44a6ee1_在搜索框输入_Rust_并提交搜索.html">trajectory</a></li>
+<li id="ref-5"><span class="dot" style="background:#1a7f37"></span><code>features/browse.feature:13:20 · features/browse.feature:13:20 · step[1]</code> <a class="uplink" href="#node-j2-s0-t1" title="定位到判定明细">↑</a> <span class="eng">novaact</span> <span class="kind">[evidence]</span> <a href="nova-trajectories/evidence/features-browse.feature-13-20-f40ee148/step-1/evidence.json">evidence</a></li>
+</ul>
+</body></html>

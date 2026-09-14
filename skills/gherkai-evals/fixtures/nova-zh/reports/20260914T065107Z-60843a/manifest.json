@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "run_id": "20260914T065107Z-60843a",
+  "created_at": "2026-09-14T06:51:57.059933+00:00",
+  "report_index": [
+    {
+      "scope_id": "zh-novaact",
+      "scenario_id": null,
+      "step_index": null,
+      "engine": "novaact",
+      "kind": "summary",
+      "href": "nova-trajectories/01a09eaf-38c5-7312-8b39-506f5911035a/session_summary.json",
+      "label": "Nova session summary"
+    },
+    {
+      "scope_id": "zh-novaact",
+      "scenario_id": "features/zh_terms.feature:4",
+      "step_index": 1,
+      "engine": "novaact",
+      "kind": "trajectory",
+      "href": "nova-trajectories/01a09eaf-38c5-7312-8b39-506f5911035a/act_01a09eaf-6de5-7168-aacc-3a1fc2d58f87_当前是关于人工智能的维基百科词条页,_format_outp.html",
+      "label": "trajectory"
+    },
+    {
+      "scope_id": "zh-novaact",
+      "scenario_id": "features/zh_terms.feature:4",
+      "step_index": 1,
+      "engine": "novaact",
+      "kind": "evidence",
+      "href": "nova-trajectories/evidence/features-zh_terms.feature-4-d886a701/step-1/evidence.json",
+      "label": "evidence"
+    },
+    {
+      "scope_id": "zh-novaact",
+      "scenario_id": "features/zh_terms.feature:4",
+      "step_index": 2,
+      "engine": "novaact",
+      "kind": "trajectory",
+      "href": "nova-trajectories/01a09eaf-38c5-7312-8b39-506f5911035a/act_01a09eaf-97c4-71ff-a9ba-7a6b95293036_词条首段提到了计算机或机器,_format_output_w.html",
+      "label": "trajectory"
+    },
+    {
+      "scope_id": "zh-novaact",
+      "scenario_id": "features/zh_terms.feature:4",
+      "step_index": 2,
+      "engine": "novaact",
+      "kind": "evidence",
+      "href": "nova-trajectories/evidence/features-zh_terms.feature-4-d886a701/step-2/evidence.json",
+      "label": "evidence"
+    },
+    {
+      "scope_id": "zh-midscene",
+      "scenario_id": null,
+      "step_index": null,
+      "engine": "midscene",
+      "kind": "report",
+      "href": "midscene-run/report/playwright-2026-09-14_06-51-13-a8cafd3b.html",
+      "label": "Midscene report"
+    },
+    {
+      "scope_id": "zh-midscene",
+      "scenario_id": "features/zh_terms.feature:10",
+      "step_index": 1,
+      "engine": "midscene",
+      "kind": "evidence",
+      "href": "midscene-run/evidence/features_zh_terms.feature_10-3f5c0f82/step-1/evidence.json",
+      "label": "evidence"
+    },
+    {
+      "scope_id": "zh-midscene",
+      "scenario_id": "features/zh_terms.feature:10",
+      "step_index": 2,
+      "engine": "midscene",
+      "kind": "evidence",
+      "href": "midscene-run/evidence/features_zh_terms.feature_10-3f5c0f82/step-2/evidence.json",
+      "label": "evidence"
+    }
+  ]
+}
