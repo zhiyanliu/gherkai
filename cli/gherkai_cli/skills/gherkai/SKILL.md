@@ -54,7 +54,7 @@ Midscene 对被测 UI 的语言不限。Nova Act 的支持范围是英文 UI：�
 2. `gherkai plan <feature…>`：看分组、引擎路由、派发标注、筛选结果。纯本地、零费用。**plan 打出的 job 数 = 这一批要开几个云端浏览器会话**，费用随 job 数与步数走，`--max-concurrency` 只改同时跑几个、不减总账。首次在这个项目真跑、或 job 数明显超出人交代的范围（人只说一条、plan 列出一屏）时，先把分组与规模报给人再跑；只想验证刚写的那条就按第 6 条收窄到一条。
 3. `gherkai run <feature…>` 或 `gherkai submit <feature…>` + `gherkai status <run_id> --wait`。真跑产生 AWS 费用，先 `plan` 后跑。
 4. 有用例没过，**第一个命令是 `gherkai explain <run_id>`**：按书写顺序列每一步，失败 / 出错 / 跳过的步展开成「问了 AI 什么 → 它看见与想了什么 → 截图在哪」；判定里已看出哪个 job 红了就直接 `gherkai explain <run_id> <scope_id>`（位置参数，值与重跑用的 `--scope` 同一个）；再往细走 `--scenario SEL` / `--step N`（0 起、与文本步号同口径，须与 `--scenario` 同给）缩到一步，`--all` 连通过的步也展开，`--full` 逐帧全文，`--json` 拿完整证据。要更多再读 `--json` 或 `jobs/*.json`，别解析 HTML 报告、别猜产物路径，顺 `ref` 走。
-5. 修：断言写法问题改 feature（只动要改的那一步、别增删其它行——未标 scope 的 scenario 用行号当 id，行号一漂，旧报告与 `--scope` 的值就都指不到了）；精确检查改成确定性 step；语言面问题换引擎；确是被测应用的 bug 就交给人定夺。**要说「是被测应用的 bug」之前先复投**：AI 断言默认只判一次（`explain` 里那步打 `votes 0/1` 就是只判了一次），判否也可能是模型这一次没看准——收窄到那一条再多投几票：`gherkai run <feature> --scope <scope_id> --assertion-votes 3`（票数作用于本 run 每条 AI 断言、费用随票数涨，所以务必先收窄）。三票一致判否才报 bug；出现分歧票就是抖动或断言措辞歧义，改成直白的语义陈述或落到确定性 step。**四种处置都按第 9 节汇报**——人要知道的不只「哪条是产品 bug」，还有「你替他改了什么、为什么」：改断言写法、换引擎都动了验收口径，不报等于悄悄放宽了这条用例。
+5. 修：断言写法问题改 feature（只动要改的那一步、别增删其它行——未标 scope 的 scenario 用行号当 id，行号一漂，旧报告与 `--scope` 的值就都指不到了）；精确检查改成确定性 step；语言面问题换引擎；确是被测应用的 bug 就交给人定夺。**要说「是被测应用的 bug」之前先复投**：AI 断言默认只判一次（`explain` 里那步打 `votes 0/1` 就是只判了一次），判否也可能是模型这一次没看准——收窄到那一条再多投几票：`gherkai run <feature> --scope <scope_id> --assertion-votes 3`（票数作用于本 run 每条 AI 断言、费用随票数涨，所以务必先收窄）。三票一致判否才报 bug；出现分歧票就是抖动或断言措辞歧义，改成直白的语义陈述或落到确定性 step。**例外：Nova 档下非英文页面的词匹配判否是系统性的，复投只烧钱、不要给 `--assertion-votes`，直接走第 2 节的三条出路。****四种处置都按第 9 节汇报**——人要知道的不只「哪条是产品 bug」，还有「你替他改了什么、为什么」：改断言写法、换引擎都动了验收口径，不报等于悄悄放宽了这条用例。
 6. **收窄重跑**（`run` / `submit` / `plan` 同一套）：`--scope ID` 值 = 判定明细里的 `scope_id`，重跑失败 job 最直接；`--scenario SEL`（完整 scenario id、行号、或标题片段，区分大小写；`Scenario Outline` 给声明行的行号 = 选中它展开的全部数据行）；`--tags TAG[,TAG]`（一个值内逗号 = 任一命中，重复给 = 都要命中，@ 可省）。`--scope` / `--scenario` 可重复、任一命中；`--tags` 重复给 = 都要命中；不同类同给时都要满足。筛成空集退 2 并列出全部候选，照着改。
 7. `steps/` 里任一文件加载失败，`plan` / `run` / `submit` 都会在起第一个 job 前整批拒跑退 2，错误点名文件与异常。先修那个文件，不是怀疑 feature。显式给的 `--steps-dir` 不存在同样退 2；缺省 `./steps` 不存在不算错。
 8. 只写了一侧的确定性 step，在另一引擎上这一步会悄悄换回 AI 判定，前置检查不替你发现（它只查本次用到的引擎）。两引擎都用时 `list-deterministic --engine` 各查一遍。
@@ -82,7 +82,7 @@ Midscene 对被测 UI 的语言不限。Nova Act 的支持范围是英文 UI：�
 
 ## 9 失败汇报模板
 
-向人汇报每条没过的用例时用固定小结构，让人一眼能定夺。先认失败落在哪一层：**有某一步判 failed / error** → 步级模板；**没有任何一步判否、只有 job 级的 error / aborted**（超时、起 worker 失败、网络、被 `--fail-fast` 掐停）→ job 级模板。硬套错的那个会逼你编出不存在的步号与模型证据。
+向人汇报每条没过的用例时用固定小结构，让人一眼能定夺。汇报是给人的：别提「按 skill 第几节」「见 references/…」这类你自己的读物，直接给内容。先认失败落在哪一层：**有某一步判 failed / error** → 步级模板；**没有任何一步判否、只有 job 级的 error / aborted**（超时、起 worker 失败、网络、被 `--fail-fast` 掐停）→ job 级模板。硬套错的那个会逼你编出不存在的步号与模型证据。
 
 步级：
 
@@ -114,4 +114,5 @@ job 级：
 - cloud 档改了 steps 不 `push-worker` 等于没改：云端 worker 读的是镜像里那份，本机 `plan` 的标注不代表云端。
 - 别只写一侧的确定性 step：另一引擎上会静默落回 AI，run 还可能「通过」。
 - 别调小 `--grace`（仅 `run` 有）：云端 `submit` 的对应旋钮在部署侧的 `gherkai deploy --stop-timeout`，归部署方。
+- 别为了「验证一下改动」就 `run` / `submit`：每次真跑都开云端浏览器会话、花真钱，改完用 `plan`（零费用）验写法与标注；真跑只在人要结果时做。
 - 别自己跑 `gherkai deploy` / `gherkai destroy`：交给人，你负责准备命令与前置清单。
