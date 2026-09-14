@@ -190,12 +190,15 @@ def run_one(ev: dict, arm: str, run_no: int, it_dir: Path, cli_dir: Path, model:
     stage = STAGE_ROOT / f"{it_dir.name}-{eid}-{arm}-run{run_no}-{os.urandom(3).hex()}"
     _purge_session_dir(stage)
     stage = materialize(ev.get("fixture") or DEFAULT_FIXTURE, stage, cli_dir)
-    # skill 副本放随机命名的临时目录（不在 cli-dir、不在舞台），只有 with-skill 臂的提示知道它在哪
-    skill_tmp = Path(tempfile.mkdtemp(prefix="agent-skill-"))
+    # skill 副本只给 with-skill 臂建，放 ~/.cache 下随机命名的目录（不在 cli-dir、不在舞台、也不在 $TMPDIR——
+    # baseline 会 `ls $TMPDIR`，第三轮 eval 9 的一次 baseline 就这样翻到了并发 with-skill 运行的副本），只有提示知道它在哪
+    skill_root = Path.home() / ".cache" / "gherkai-eval-skill"
+    skill_root.mkdir(parents=True, exist_ok=True)
+    skill_tmp = Path(tempfile.mkdtemp(prefix="s-", dir=skill_root))
     skill_dir = skill_tmp / "gherkai"
-    shutil.copytree(SKILL_SRC, skill_dir, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
     prompt = ev["prompt"] + COMMON_SUFFIX
     if arm == "with_skill":
+        shutil.copytree(SKILL_SRC, skill_dir, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
         prompt += f"\n\n（先读这份 skill 并照它做：{skill_dir / 'SKILL.md'}）"
     env = {k: v for k, v in os.environ.items() if k not in STRIP_ENV}
     env["PATH"] = f"{stage / 'bin'}:" + env.get("PATH", "")
@@ -227,7 +230,7 @@ def run_one(ev: dict, arm: str, run_no: int, it_dir: Path, cli_dir: Path, model:
     usage = data.get("usage") or {}
     total_tokens = sum(int(usage.get(k, 0) or 0) for k in
                        ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "output_tokens"))
-    metrics = pollution_metrics(calls, [skill_tmp, cli_dir / "skill"])
+    metrics = pollution_metrics(calls, [skill_tmp, skill_root, cli_dir / "skill"])
     metrics["memory_reads"] = sum(1 for c in calls if "/.claude/projects/" in json.dumps(c.get("input"), ensure_ascii=False))
     shutil.rmtree(skill_tmp, ignore_errors=True)
     _purge_session_dir(stage)
