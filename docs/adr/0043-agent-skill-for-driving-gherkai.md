@@ -39,7 +39,9 @@ Claude 的 plugin marketplace 只覆盖 Claude、仪式更多，现阶段不做�
 - **`SKILL.md` 正文**是给 agent 的新文档（操作模型），docs 里没有等价物、不算重复；它与 README 有事实重叠（flag 名、退出码），读者不同写法不同，漂移由护栏挡。guides 给人、skill 给 agent，同一机制两边各有一份是**按读者分层**，不是双源。
 - GitHub 上 docs 的绝对 URL 可留作**次级**指针，形态按 [0039](./0039-user-facing-surfaces-no-internal-references.md) 面二的发行物约定用 `blob/HEAD/`（不绑分支名 / tag）；版本一致性靠「装的 skill == 装的 CLI」（决策三）保证，不靠 URL 钉版本——也正因 `HEAD` 的 docs 可能比装的 CLI 新，它只能作次级指针。
 
-### 五、内容重心：agent 的操作模型，不是复述 `--help`
+### 五、内容重心：一个 skill 入口、三个任务域、按域拆 references；正文是 agent 的操作模型，不是复述 `--help`
+
+**三个任务域，一个入口**。使用方与 gherkai 打交道有三类事：**A 用它做测试**（QA / 测试开发：写 feature 与 steps、`plan`、`run` / `submit`、`status`、`explain`、收窄重跑、汇报——高频，skill 存在的理由）；**B 环境就位与排障**（同一批人卡住时：装 CLI 与引擎 worker、`doctor`、`list-engines` 与 worker 定位、AWS 凭证 / region、ngrok、版本 skew 怎么办——低频但阻塞，与 A 是连续体）；**C 云端后端交付**（部署方 / 维护者：`deploy` 交人、基底同步、variant 镜像 build + `push-worker`、`list-workers`、升级顺序、多环境 prefix、清理——另一种角色，IAM 相关由人执行、agent 辅助）。另有横切的**机读消费**（CI 接退出码与 `--json`、取产物），是 A / B 共用的读法、归契约副本。A 与 C 有一条真实交接：本机写好的确定性 step 要进云端必须 `push-worker`，skill 要把这条线画出来。**做成一个 skill、按域拆 references**（skill-creator 的多域组织形状：`SKILL.md` = 共享心智模型 + 路由 + 最高频的 A 工作流，`references/<域>.md` 各一份、agent 只读相关的）：三域共享同一套词汇与版本、一条 description；A → B → C 是连续体，一个 run 因 skew 退 2 时 agent 要无缝走到 C 的知识，拆开反而要它自判切哪个；两档触发面已覆盖 C（部署方项目无 `.feature`、但显式提 gherkai）。**拆成多个 skill 的重议闸门**（可测）：`description` 装不下三域的触发语境（1024 字符硬上限），或正文超形态上限（决策六），或评测显示跨域误路由。
 
 **定位**：skill 教 agent 替使用者把整条工作跑通——从需求与被测应用的信息**写出** feature 与必要的 steps 代码，到本机 / cloud 两档的执行、判定、排障与收窄重跑；不是只给建议。**触发面**（写进 `description`）：项目里有 `.feature` 且 gherkai 在场（装了 CLI / 有 gherkai 式 `steps/` / 文档提到）→ 提到测试意图即触发；没有 `.feature` → 只在显式提到 gherkai 时触发；纯 Cucumber / Playwright 项目（有它们自己的 step definitions 或配置）不接管——触发查询集的负例按这类 near-miss 出。**语言**：正文中文（与 CLI 输出、README 同侧），`description` 末尾加一行英文触发词，防英文提示下漏触发。skill 名 `gherkai`（= 目录名）。
 
@@ -56,7 +58,7 @@ Claude 的 plugin marketplace 只覆盖 Claude、仪式更多，现阶段不做�
 9. **失败汇报模板**：agent 向人汇报时按固定小结构——哪步（scenario / step 文本）、判定与原因（`message`）、模型看见了什么（thought 一句 + 截图地址）、建议动作（改断言写法 / 改确定性 step / 换引擎 / 被测应用的问题），让人一眼能定夺。
 10. **别做的事**（每条带为什么）：别把 `submit` 退 0 当通过；别把不带 `--wait` 的 `status` 退 0 当通过；别解析 HTML 报告或 SDK 原生 trajectory；别猜产物路径、顺 `ref` 走；cloud 改了 steps 不推镜像等于没改；别只写一侧的确定性 step；`--grace` 别调小（仅 `run`；云端 `submit` 的对应旋钮在部署侧 `gherkai deploy --stop-timeout`）。
 
-`references/`：`cli-json-contract.md`（转换副本）；`engines.md`（两引擎的选择依据与语言限制、evidence 字段的引擎填充差异清单、确定性 step 的**最小模板**（Nova = Python、Midscene = TS，含 `description` / `example` 元数据，离线也能写）与响亮失败读法、两侧正则的对称约定、完整写法指向各自 README 的 `blob/HEAD/` 绝对 URL）；`cloud.md`（部署方 / 使用方分工、`submit`–`status`–`explain --backend cloud` 一条线、skew 与 variant 的处置、`--expose-local` 例外）。是否需要 `scripts/`，由评测循环里「多个测试用例是否重复手写同一个 helper」决定（skill-creator 的判据），初版不带。
+`references/`（按域）：`cli-json-contract.md`（转换副本，机读消费）；`engines.md`（两引擎的选择依据与语言限制、evidence 字段的引擎填充差异清单、确定性 step 的**最小模板**（Nova = Python、Midscene = TS，含 `description` / `example` 元数据，离线也能写）与响亮失败读法、两侧正则的对称约定、完整写法指向各自 README 的 `blob/HEAD/` 绝对 URL）；`setup-and-diagnosis.md`（域 B：安装 CLI 与引擎 worker 的几条路、`doctor` 各段怎么读、`list-engines` 与 worker 定位、凭证 / region、ngrok 前置、skew 退 2 的处置）；`cloud-backend.md`（域 C：部署方 / 使用方分工、`deploy` 交人与前置清单、`submit`–`status`–`explain --backend cloud` 一条线、variant 与 `push-worker`、`list-workers`、升级传播顺序、多环境 prefix、A→C 的交接、`--expose-local` 例外）。正文里 A 的工作流内联，B / C 只留路由句与指针。是否需要 `scripts/`，由评测循环里「多个测试用例是否重复手写同一个 helper」决定（skill-creator 的判据），初版不带。
 
 ### 六、护栏：skill 是产品面，同受 0039 约束，且与 CLI 真值逐项对照
 
@@ -109,12 +111,13 @@ Claude 的 plugin marketplace 只覆盖 Claude、仪式更多，现阶段不做�
 - `scripts/`：等评测显示测试用例反复手写同一 helper 再收进来；`assets/`（模板 / 图标类、skill 往使用方项目产出的资源文件）同理——本 skill 不产这类文件，它教 agent 操作 CLI 与改 feature / steps（本机与 cloud 两档的跑法都在 scope 内；决策七缺省集不执行 `run` / `submit` 是评测手段、不是能力边界），真要用时先进白名单再开。
 - 仓库根镜像 / 发布到 skills.sh 一类目录：等使用方需求。
 - 引擎专属 skill 拆分（`gherkai-novaact` / `gherkai-midscene`）：evidence **schema** 同形、引擎差异有界且一页 reference 列得完，不拆。
+- 按任务域拆成多个 skill（测试 / 排障 / 部署）：现为一个入口三份 reference，拆分只在决策五的重议闸门触发时做。
 
 ## 影响面
 
 **code**
 
-- 新目录 `cli/gherkai_cli/skills/gherkai/`（`SKILL.md`、`references/{cli-json-contract.md, engines.md, cloud.md}`）；仓库根 `skills/gherkai-evals/{evals.json, trigger-eval.json, fixtures/, materialize.py}`（不分发）；`tools/render_skill_contract.py`（契约页 → 副本的确定性转换，含禁词映射表）；`.gitignore` 加 `skills/*-workspace/`、fixture 反白名单与其后的密钥块重列。
+- 新目录 `cli/gherkai_cli/skills/gherkai/`（`SKILL.md`、`references/{cli-json-contract.md, engines.md, setup-and-diagnosis.md, cloud-backend.md}`）；仓库根 `skills/gherkai-evals/{evals.json, trigger-eval.json, fixtures/, materialize.py}`（不分发）；`tools/render_skill_contract.py`（契约页 → 副本的确定性转换，含禁词映射表）；`.gitignore` 加 `skills/*-workspace/`、fixture 反白名单与其后的密钥块重列。
 - `cli/gherkai_cli/__main__.py`：`skill install` 子命令（嵌套 subparser、子动词必填）；新模块 `cli/gherkai_cli/skill_install.py`（`importlib.resources` 定位、整目录收敛、标记文件、`--print`）。`cli/pyproject.toml` 不需要 force-include。
 - 测试：`cli/tests/test_skill.py`（产品面文案与指针形态、命令面成对真值与排他断言、JSON 键对照、转换副本相等、目录白名单、形态四条、安装命令行为含跨版本收敛、fixture 的 ignore 行为式断言与 git 跟踪、fixture 绝对路径不变量）；`deploy_aws/tests/` 加 provider 侧 token 对照（prog 末段 + 中立 flag + provider）；禁词 / 相对链接常量从 `cli/tests/test_package_readmes.py` 抽成共享模块；`.github/scripts/check_dist_metadata.py`（CI 打包 smoke 与发布 gate 共用）加一项「wheel 内 skill 文件集 == 源目录文件集、不含评测资产」，其 docstring 的断言清单同步。
 

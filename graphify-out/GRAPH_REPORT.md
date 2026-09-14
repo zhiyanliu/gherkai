@@ -1,7 +1,7 @@
-# Graph Report - yaozhou  (2026-09-11)
+# Graph Report - yaozhou  (2026-09-14)
 
 ## Corpus Check
-- 245 files · ~243,756 words
+- 245 files · ~243,939 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -10,7 +10,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `c2787e5f`
+- Built from commit: `be8ceeea`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -366,10 +366,10 @@
   cli/gherkai_cli/__main__.py → core/gherkai_core/adapters/run_store/ddb.py
 - `_build()` --calls--> `DynamoDBRunStore`  [INFERRED]
   deploy_aws/gherkai_deploy_aws/lambdas/reconciler.py → core/gherkai_core/adapters/run_store/ddb.py
-- `_cmd_run()` --calls--> `RunMeta`  [INFERRED]
+- `_cmd_submit()` --calls--> `JobState`  [INFERRED]
   cli/gherkai_cli/__main__.py → core/gherkai_core/model.py
-- `_cmd_submit()` --calls--> `RunMeta`  [INFERRED]
-  cli/gherkai_cli/__main__.py → core/gherkai_core/model.py
+- `_explain_run()` --calls--> `JobState`  [INFERRED]
+  cli/tests/test_main.py → core/gherkai_core/model.py
 
 ## Import Cycles
 - None detected.
@@ -1203,11 +1203,11 @@ Nodes (4): test_shipped_readme_is_for_users_only(), 裸 `@scope:` / `@engine:` /
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `NonTerminalSnapshot` connect `test_project.py` to `model.py`, `StepDone`, `JobResult`, `test_evidence.py`, `StepResult`, `RunPersistence`?**
-  _High betweenness centrality (0.069) - this node is a cross-community bridge._
-- **Why does `_run_step()` connect `_run_step` to `test_argument.py`, `test_interrupt_model.py`, `test_evidence.py`, `run_scope.py`, `test_deterministic.py`?**
-  _High betweenness centrality (0.060) - this node is a cross-community bridge._
+  _High betweenness centrality (0.072) - this node is a cross-community bridge._
 - **Why does `test_evidence_failure_never_changes_verdict()` connect `test_evidence.py` to `_run_step`, `parametrize`?**
-  _High betweenness centrality (0.056) - this node is a cross-community bridge._
+  _High betweenness centrality (0.055) - this node is a cross-community bridge._
+- **Why does `_run_step()` connect `_run_step` to `test_argument.py`, `test_interrupt_model.py`, `test_evidence.py`, `run_scope.py`, `test_deterministic.py`?**
+  _High betweenness centrality (0.051) - this node is a cross-community bridge._
 - **Are the 7 inferred relationships involving `Provider` (e.g. with `_AbsentEngine` and `_CdkWritingContext`) actually correct?**
   _`Provider` has 7 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 6 inferred relationships involving `schedule()` (e.g. with `.on_job_complete()` and `test_adapter_crash_is_error()`) actually correct?**
