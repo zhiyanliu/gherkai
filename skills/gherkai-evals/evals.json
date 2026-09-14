@@ -273,9 +273,10 @@
       "prompt": "我新加了 features/promo.feature 写促销页的两条用例，想让它和 features/catalog.feature 里的商品目录用例并发跑。可 gherkai plan 显示 job 数没变，促销的用例被塞进了商品目录那个 job 里串行跑。这是怎么回事？帮我改成并发的，改完确认一下。先别真跑。",
       "expected_output": "解释 @scope 名在整批里是全局的：两个文件都用了 @scope:catalog-browse，同名即合并成一个 job（共享会话、串行，@engine/@timeout 也按合并后的全体解析）；改法是给 promo.feature 换一个带来源前缀的 scope 名（如 promo-browse），再 plan 确认 job 数从 3 变 4、promo 的 scenario 单独成一个 job（plan 撞名时会打一行「跨 N 个 feature 文件合并」的提示）；不执行 run。",
       "expectations": [
-        "指出根因是 @scope 名在整批里全局：promo.feature 与 catalog.feature 都用了 @scope:catalog-browse，同名就合并成同一个 job（共享会话、串行）",
-        "改法是给 promo.feature 的 scenario 改用另一个 scope 名（带来源前缀，如 promo-…），而不是删 scope 或改 catalog.feature",
-        "改完用 gherkai plan 确认：job 数增加、promo 的 scenario 单独成一个 job（引用了 plan 输出的分组）",
+        "指出根因是 @scope 名在整批里全局：promo.feature 与 catalog.feature 都用了 @scope:catalog-browse，同名就合并成同一个 job（共享会话、串行），并引用了 plan 打出的「跨 2 个 feature 文件合并」提示",
+        "改法是给 promo.feature 的两条 scenario 换成同一个带来源前缀的新 scope 名（如 promo-…），两条仍在一个 scope 里（第二条没有导航步、靠同一会话承接页面状态）；没有删 scope、没有改 catalog.feature",
+        "改完用 gherkai plan 确认 job 数从 3 变 4、promo 的两条单独成一个 job，并把改前 / 改后的分组对比写进汇报",
+        "指出要真并发还得看 --max-concurrency（默认只跑 1 个），拆 scope 只是让它们可以并发",
         "没有执行 gherkai run 或 gherkai submit（`--help` 与只读命令不算执行）",
         "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报",
         "没有把评测舞台的脚手架（bin/gherkai shim、.eval-aws 下的空凭证文件、环境变量注入）当成用户的真实环境写进汇报或当成阻塞项上报"
@@ -288,11 +289,10 @@
       "prompt": "再给英文维基写一条参数化的用例：分别搜索 Python、Rust、Go 三个词，确认每次都到了对应的词条页；每一条都要从首页 https://en.wikipedia.org/wiki/Main_Page 开始。请用 Scenario Outline 加 Background 来写，写完用 plan 看看会分成几个 job、每条的 id 和步号是什么样，解释给我。先别真跑。",
       "expected_output": "Background 里放导航步 Given 打开 首页；Scenario Outline 里 When 搜索 <name>、Then 页面地址匹配 \"/wiki/<slug>\"（确定性）或页面级语义断言；Examples 三行；plan 显示展开成 3 条 scenario / 3 个 job（未标 scope），id 形如 features/x.feature:<声明行>:<数据行>，每条的第 0 步是 Background 的导航步；说明 Background 在每条里各自重跑、不能靠它承接上一条的页面状态；不执行 run。",
       "expectations": [
-        "新 feature 用 Background 放首页导航步（Given + 双引号内 URL），Scenario Outline + Examples 三行参数化搜索词",
-        "词条页的确认用内建确定性 step『页面地址匹配』并带占位符（如 \"/wiki/<slug>\"），或写成页面级语义断言；没有写成子串规则或选择器",
+        "新建一个 feature 文件（放在 features/ 下），用 Background 放首页导航步（Given + 双引号内 URL），Scenario Outline + Examples 三行参数化搜索词；没有改动 fixture 已有的 features/wiki_search.feature 与 steps/",
+        "词条页的确认用内建确定性 step『页面地址匹配』带占位符（如 \"/wiki/<slug>\"），plan 里该步带「← 确定性」标注；没有把精确文本匹配写成 AI 断言",
         "用 gherkai plan 验证过，并正确解释：展开成 3 条独立 scenario / 3 个 job（未标 @scope），id 比普通 scenario 多一段 Examples 数据行号",
         "正确解释步号口径：Background 的导航步是每条 scenario 的第 0 步，后面的步号跟着后移；同一 scope 里每条都会重跑一遍 Background，不能靠它承接上一条的页面状态",
-        "没有改动 fixture 里已有的 features/wiki_search.feature 与 steps/",
         "没有执行 gherkai run 或 gherkai submit（`--help` 与只读命令不算执行）",
         "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报",
         "没有把评测舞台的脚手架（bin/gherkai shim、.eval-aws 下的空凭证文件、环境变量注入）当成用户的真实环境写进汇报或当成阻塞项上报"
