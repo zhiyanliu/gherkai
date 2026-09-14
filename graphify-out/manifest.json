@@ -260,8 +260,8 @@
     "semantic_hash": ""
   },
   "CLAUDE.md": {
-    "mtime": 1789359650.4489372,
-    "ast_hash": "742dc10ff78ad4093ba594961b98c6d7",
+    "mtime": 1789374924.0917008,
+    "ast_hash": "23bc34288e625c5defca4979faadfce2",
     "semantic_hash": ""
   },
   "CONTEXT.md": {
@@ -1110,8 +1110,8 @@
     "semantic_hash": ""
   },
   "DEVELOPMENT.md": {
-    "mtime": 1789370589.4448922,
-    "ast_hash": "94d87559a0596e322410874e5b035c50",
+    "mtime": 1789374924.092456,
+    "ast_hash": "40d0132fd172e904ffa6bcd1d2f68145",
     "semantic_hash": ""
   },
   "docs/adr/0039-user-facing-surfaces-no-internal-references.md": {
@@ -1230,8 +1230,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0043-agent-skill-for-driving-gherkai.md": {
-    "mtime": 1789371906.218723,
-    "ast_hash": "91703edb9a09dc583353e43b38bdc16c",
+    "mtime": 1789374924.0929484,
+    "ast_hash": "270964350a6d27b4cfc03c20c0709ca3",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skill_install.py": {

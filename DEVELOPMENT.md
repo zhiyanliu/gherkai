@@ -67,6 +67,26 @@ export GHERKAI_WORKER_MIDSCENE_CMD="node $PWD/engines/midscene/dist/bin.mjs"
 
 环境隔离：Python 成员与 Nova Act worker 都在仓库根 `.venv`（worker 与 CLI 同 venv 是设计——`python -m gherkai_worker_novaact` 无包装层、fd 直达，ADR 0037 决策 3），Midscene worker 的 TS 依赖在 `engines/midscene/node_modules`——均不污染全局。前置的 AWS 凭证/服务与 ngrok 见 README「前置要求」。
 
+## 在有凭证的机器上验未发布的工作树
+
+本机没有 AWS 凭证时，真跑（本机档 `run` 也要连 AgentCore 与模型）到一台有凭证的开发机上做；机器、前缀、region 这类环境事实不入 repo，走操作者自己的备忘。流程（真踩过的坑都在这里）：
+
+```bash
+# 1) 把工作树同步过去（不要 push 半成品到 public repo）；排除本地产物，保留 .git 让版本能从 tag 派生
+rsync -az --delete --exclude .venv --exclude node_modules --exclude graphify-out --exclude reports \
+      --exclude engines/midscene/dist --exclude skills/gherkai-workspace --exclude .pytest_cache --exclude __pycache__ \
+      --exclude .claude/ --exclude .agents/ ./ <user>@<host>:~/<repo-copy>/
+# 2) 在那份 checkout 里用 uv run 跑——PyPI 装的 gherkai 是发行版，没有新代码
+ssh <host> 'cd ~/<repo-copy> && export PATH=$PATH:~/.local/bin && AWS_REGION=<region> uv run gherkai run features/x.feature'
+```
+
+- 已 push 的代码可以直接在远端 `git pull https://github.com/zhiyanliu/gherkai.git <branch>`（匿名 https；远端一般没有 git 的 SSH key，`origin` 是 SSH URL 拉不动）。
+- 远端 `.venv` 里的发行版本是**上次 `uv sync` 时的快照**（`uv run` 会重新装 editable 成员，但版本串跟当时的 git 状态走）；worker 镜像 tag 含精确版本串，所以这份 checkout **不能** cloud `run` / `submit`（variant 解析找不到 `<该版本>-base`，退 2 是设计内提示）——验云端侧新代码只能用只读命令或另推 dev 版 variant（`gherkai deploy push-worker`，见 ADR 0038）。
+- Midscene 的 dev worker：`cd engines/midscene && npm run build` 出 `dist/bin.mjs`，再把它软链成 PATH 上的 `gherkai-worker-midscene`（或设 `GHERKAI_WORKER_MIDSCENE_CMD`），CLI 就按定位链找到它。
+- 要一份带 error act 的证据（验 `explain` 的错误分支）：`NOVA_ACT_TIMEOUT_S=2` 让 Nova 的 act 必超时。
+- ssh 长等待会被远端掐断：带 `-o ServerAliveInterval=15`，`status --wait` 这类长等改成 15 秒一轮的 `status --json` 轮询；长任务用 `nohup … > log 2>&1 &` 起、再轮询日志。偶发 kex 阶段被拒（TCP 通、sshd 拒）——等几分钟重试，别急着重启实例。
+- 录评测 fixture 的远端步骤见 ADR 0043 决策七；知识图刷新见下节。
+
 ## 测试
 
 ```bash
