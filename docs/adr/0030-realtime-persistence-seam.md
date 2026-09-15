@@ -139,6 +139,17 @@ run 结束（schedule 返回后）:
 > 消费端读判定走 `ResultStore.load_all` 兜底。`finalize_run` 没落 = run 未提交、可由 load_all 重建。
 > 真事务（DDB `TransactWriteItems`）**不用**——规模化跑批会撞它的 100 项/4MB 上限，commit-point 写序把原子性需求降到 DDB 天然原子的单 item。
 
+> **local 三个写面一律原子写**（同目录 tmp + `os.replace`，共享助手 `core/gherkai_core/adapters/_atomic.py`）：
+> 控制面 `run_meta.json` / `run_state.json`、数据面 `jobs/*.json`、报告面 `manifest.json` + `index.html`。
+> 三面各有**设计内的**跨进程并发读者（无锁读 run_state 的 `status` 与接力进程；run 跑到一半读已完成 job 的
+> `explain`，[0042](./0042-step-evidence-and-explain.md) 决策四；第一个写者退出后即读报告的人/CI），
+> 而 `write_text` 是 truncate 再写——两步之间的读者会拿到空文件或前半截、`json.loads` 直接炸。
+> 权限**按面显式声明、不随环境 umask 漂移**：控制面 0600（只本机同 uid 的进程消费），数据面与报告 0644
+> （消费者是 CI / 人 / 静态 server，产物可读性是契约的一部分）。
+> **两条被接受的代价**：① **不做 fsync**——本层防的是并发读者看到中间态，不是掉电后的持久性（那要 fsync
+> 文件 + 目录，成本进每次收尾）；② **写面仍无跨进程互斥**——靠原子替换而非锁，故两个推进者各写一遍同一份
+> `jobs/*.json` / 报告仍无害（内容由同一份事件快照派生、可重建），文件锁只护 run_state.json 的 read-modify-write。
+
 ## 决定四：RunStore 新增三个 additive 方法，`save_run` 保留
 
 ```python

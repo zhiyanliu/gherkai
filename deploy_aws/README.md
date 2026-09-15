@@ -39,11 +39,11 @@ gherkai deploy --synth-only ./out --vpc default             # 只导模板到 DI
 gherkai destroy --vpc default --prefix gherkai- [--yes]     # 拆栈；交互终端下会再问一次，脚本/非 TTY 加 --yes
 ```
 
-`--diff` / `--synth-only DIR` / `--bootstrap` 三者互斥，各把默认动作换成一个只读/准备动作；都不给 = 真部署。`destroy` 收下表除 `--container-engine` 外的同一组旋钮，另有 `--yes`。
+`--diff` / `--synth-only DIR` / `--bootstrap` 三者互斥，各把默认动作换成一个只读/准备动作；都不给 = 真部署。`destroy` 收下表里的 `--prefix` / `--vpc` / `--refresh-context` / `--stop-timeout` / `--region` / `--profile`，另有 `--yes`；`--allow-vpc-change` / `--require-approval` / `--container-engine` **只属 `deploy`**（`destroy` 不做 VPC 档比对、`cdk destroy` 也没有审批档，给了直接被拒、退 `2`）。
 
 | flag | 作用 |
 |---|---|
-| `--prefix P` | 资源名前缀（默认 `gherkai-`，兜底 `AWS_RESOURCE_PREFIX`）；**必须与 `gherkai run` / `submit` 的 `--prefix` 一致**——建出来的资源名就是提交侧推导的默认名，不一致则提交侧连不上、preflight 报错点名 prefix。多环境切换靠它 |
+| `--prefix P` | 资源名前缀（默认 `gherkai-`，兜底 `AWS_RESOURCE_PREFIX`）；**必须与 `gherkai run` / `submit` 的 `--prefix` 一致**——建出来的资源名就是提交侧推导的默认名，不一致则提交侧连不上、提交前检查会报错并点名 prefix。多环境切换靠它 |
 | `--vpc 档` | `default` / `new` / `vpc-<id>`，**必给**；见下「VPC 三档」 |
 | `--allow-vpc-change` | 放行一次 VPC 档变更或首次登记 |
 | `--require-approval` | 透传 cdk 的 IAM 变更审批档（`never` / `any-change` / `broadening`） |
@@ -64,7 +64,7 @@ gherkai destroy --vpc default --prefix gherkai- [--yes]     # 拆栈；交互终
 
 ## 版本与升级
 
-后端记一个版本戳，提交侧 preflight 拿它比对 CLI 版本、不一致即拦。CLI 与后端钉在同一版本，故**升级是三步**：
+后端记一个版本戳，提交前检查拿它比对 CLI 版本、不一致即拦。CLI 与后端钉在同一版本，故**升级是三步**：
 
 1. `uv tool upgrade gherkai` —— 升 CLI（安装时带的 `[deploy-aws]` extra 会沿用）。
 2. `gherkai deploy` —— 新模板 + 新版本基底镜像同步进 ECR + 对新版本已有的 variant 重派生。（1→2 中间的窗口里提交会退 2，这是预期。）
@@ -126,9 +126,9 @@ aws ecr delete-repository --repository-name gherkai-midscene-worker --force
 
 ## 退出码与常见错误
 
-`0` 成功 · `2` 前置/校验失败（Node 缺失、VPC 档不符或无记录、读后端失败、容器引擎名不认、`push-worker` 的架构或版本不符——都是你可修的）· `1` **cdk 已成功、而 worker 镜像步骤失败**（账户已被改动，重跑 `gherkai deploy` 幂等收敛）· 其余 = cdk CLI 自己的返回码（原样透传）。
+`0` 成功 · `2` 前置/校验失败（Node 缺失或找不到 cdk / npx、VPC 档不符或无记录、读后端失败、容器引擎名不认、`push-worker` 的架构或版本不符——都是你可修的；工具链这两条在动你的账户之前就拦下）· `1` **cdk 已成功、而 worker 镜像步骤失败**（账户已被改动，重跑 `gherkai deploy` 幂等收敛）· 其余 = cdk CLI 自己的返回码（原样透传）。
 
-常见的几条：**找不到 node** → 装 Node ≥ 22；**VPC 档报错** → 见上「VPC 三档」；**`push-worker` 说架构不对** → 带 `--platform linux/amd64` 重 build；**`push-worker` 说 CLI 新于后端** → 先 `gherkai deploy`；**deploy 说找不到容器引擎 / 连不上 daemon** → 装好 docker 并让 daemon 起着，再重跑 `gherkai deploy`（cdk 之前先警告一句、stack 仍照常部署，随后的同步基底这步退 `1`，重跑幂等收敛）。
+常见的几条：**找不到 node** → 装 Node ≥ 22；**找不到 cdk 也找不到 npx** → 装 Node ≥ 22（npx 随它一起来）或 `npm i -g aws-cdk`，再重跑；**VPC 档报错** → 见上「VPC 三档」；**`push-worker` 说架构不对** → 带 `--platform linux/amd64` 重 build；**`push-worker` 说 CLI 新于后端** → 先 `gherkai deploy`；**deploy 说找不到容器引擎 / 连不上 daemon** → 装好 docker 并让 daemon 起着，再重跑 `gherkai deploy`（cdk 之前先警告一句、stack 仍照常部署，随后的同步基底这步退 `1`，重跑幂等收敛）。
 
 ## 帮助
 

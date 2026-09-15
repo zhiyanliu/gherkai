@@ -85,11 +85,11 @@ Job = {
 
 **id 是不透明标识符**：`scenarioId`/`scopeId` 只在 JSON/dict key/未来 DB key 用（全支持任意 UTF-8），core **不拿它当路径解析**。**不对 id 做 normalize**——清洗字符（空格→下划线、删非 ASCII 等）会把不同输入映射成同一输出、**制造撞名**，而撞名是静默灾难（schedule 归位错乱、DB 主键冲突），远比「id 含空格/中文」严重。故含空格/中文的 uri **原样保留**。若未来某消费层（URL/文件名）需安全字符 id，由该层做**可逆**编码（urlencode 等、保唯一），不在 core 做有损转换。
 
-**`uri` 约定 + 互异契约**：plan 把调用方传入的 `uri` **原样**用作 id 前缀，**不做路径解析**（plan 不碰 FS、无 base dir）。调用方（组合根/CLI）负责传**稳定可读且互异**的 `uri`。**plan 入口校验 uri 互异——重复 = 接口违约 → 报错**（同一文件喂两遍会撞 scenarioId、结果错乱；这是脏输入，fail-fast，不静默吞）。注意这与「跨文件同 `@scope` 合并」（领域语义、warning）**正交**：前者是 uri 重复（bug、报错），后者是不同 uri 但同 scope 值（有意、合并、warning）。收集去重等便利逻辑由调用方负责，core 窄腰只接 uri 互异的列表。下文 id 规则统一以 `<uri>` 表示。
+**`uri` 约定 + 互异契约**：plan 把调用方传入的 `uri` **原样**用作 id 前缀，**不做路径解析**（plan 不碰 FS、无 base dir）。调用方（组合根/CLI）负责传**稳定可读且互异**的 `uri`。**plan 入口校验 uri 互异——重复 = 接口违约 → 报错**（同一文件喂两遍会撞 scenarioId、结果错乱；这是脏输入，fail-fast，不静默吞）。注意这与「跨文件同 `@scope` 合并」（领域语义、warning）**正交**：前者是 uri 重复（bug、报错），后者是不同 uri 但同 scope 值（有意、合并、warning）。收集去重等便利逻辑由调用方负责，core 窄腰只接 uri 互异的列表。**CLI 侧已履约**：组合根读完 feature 后按 `load_feature` 算出的 uri **保序去重**、并打一行点名被忽略路径的提示（`features/*.feature features/a.feature` 这类 glob 与显式路径并列同给不该撞库级违约）；去重键取 uri 而非原始路径字符串，免得调用方重抄一份路径归一规则（其单一事实源在 `load_feature`）。core 的报错**不是死分支**——uri 互异是库契约，其它调用方（未来 WebUI、直接喂字符串的 test）仍要守；被接受的代价是「路径写法归一不到同一 uri 的混写」两侧都不拦（同一文件的绝对路径与相对路径并列：CLI 去重键不同、core 按「不同 uri 即便内容相同 → 放行」，该文件的 scenario 跑两遍）。下文 id 规则统一以 `<uri>` 表示。
 
 - `scenarioId`：`<uri>:<scenario行号>`；Outline 展开的多个 scenario 共享 scenario 行号，故各自再加 `:<example行号>` 消歧（行号取自 AST，见上「行号来源」）。
 - `scenarioName`：Scenario 标题（`<placeholder>` 已插值）；Outline 展开的多个 scenario 若标题模板不含占位符会重名，故**追加 Examples 行标识**（实现用 `[@<example行号>]`，如 `登录 [@15]`）保证可区分、可追溯。
-- `scopeId`：有 `@scope:X` → 用 `X`（干净 token）；无标 → 各 scenario 自成单元素 scope，`scopeId` **= 该 scenario 的 `scenarioId`**（直接复用，自动继承上面的 Outline `:<example行号>` 消歧，不会撞 id）。
+- `scopeId`：有 `@scope:X` → 用 `X`（干净 token）；无标 → 各 scenario 自成单元素 scope，`scopeId` **= 该 scenario 的 `scenarioId`**（直接复用，自动继承上面的 Outline `:<example行号>` 消歧，故未标之间天然不撞）。**两类键共用同一个 `scopeId` 命名空间**：`@scope` 的值撞上某条**未标 scope** 的 scenario 的 `scenarioId` → 报错（撞 `scopeId` = 状态 Map 只剩一个键、结果文件互相覆盖、claim 只过一个 = 静默丢结果，与裸 `@scope:` 同立场）。判据取两类分组键的**键集交**、与遍历顺序无关，且只比**当了分组键**的 id——那条 scenario 自己也标了别的 `@scope` 时它的 id 根本不当键，不误伤。
 - `scopeName`：有 `@scope:X` → `@scope` 原值（可含空格/标点的人写名）；无标 → 取该 scenario 的标题（人写名），**不复用机器派生的 `scopeId`**（保持 name = 人写展示名的语义，对齐 [0024](./0024-worker-core-protocol.md)）。
 - 行号稳定（feature 不大改即不变）、人可读出来源；更强稳定性靠 `@id:` tag，暂不做（见下「留口子不实现」/「重议」）。
 
@@ -116,6 +116,7 @@ Job = {
 - 同一 scope 多个不同 `@timeout` → 报错；`@timeout` 非数字 / `<=0` / `nan` / `inf`（含 `1e400` 溢出成 inf）→ 报错；
 - timeout 缺省兜底 + tag 优先（同一批里标了 `@timeout` 的 scope 走 tag、未标的走 `defaultJobTimeout`）；无 tag 又无缺省 → 不超时；
 - 未标 scope 的 scenario → 各自独立成 job（含未标 scope 的 Outline → N 个 job 不撞 id）；
+- **`@scope` 的值撞未标 scope 的 scenario id → 报错**（同文件 / 跨文件、named 在前与在后共四种顺序都报，钉死判定与遍历顺序无关）；值等于某条**自身已标 `@scope`** 的 scenario 的 id → 不报错（钉死不误杀）；
 - 裸 `@scope:` / `@engine:` / `@timeout:`（空值）→ 报错，且消息带 `uri:line` 定位；
 - Rule 内嵌 scenario：行号经 `astNodeIds` 下钻 Rule 回查到真实行 → 多个 Rule 场景 id 互异、不塌成 `<uri>:None`；
 - `select` 谓词（[0041](./0041-agent-facing-cli-affordances.md) 决策一）：筛后 scope 的 engine/timeout 与全量解析逐字一致；整组被筛空的 scope 其 tag 冲突不拦本次迭代；

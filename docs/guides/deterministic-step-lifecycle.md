@@ -80,7 +80,7 @@ worker 拿到的只有 `keyword` + 裸 `text`（＋可选多行参数）。派�
 | local（`--backend local`，含 `submit` 的后台推进） | 本机目录 | 提交侧 CLI 解析一次：`--steps-dir` > env `GHERKAI_STEPS_DIR` > `./steps`（相对**提交时** CWD、存在才用）→ 绝对路径写进 definition 的 `RunMeta.steps_dir` |
 | cloud（`--backend cloud`） | **variant 镜像里烙进去的 `/app/steps`** | 提交侧只解析 **variant 名** → 每个引擎的 task-def revision；`RunMeta.steps_dir` 不写 |
 
-local 侧的关键是**解析只做一次、值随 definition 走**：起 worker 的三个宿主（同步 `run` 本进程、`submit` fork 的 per-run 进程、`status --wait` 接力者）CWD 各不相同，谁再解析一次 `./steps` 都会让同一个 run 在不同宿主下用到不同的 step 集。所以宿主一律**读回** `meta.steps_dir`（`runtime/gherkai_runtime/detached.py` `build_local_reconcile`）、经 env `GHERKAI_STEPS_DIR` 注给 worker（`compose.build_engines`）；worker 只认这一个 env，不认约定、不猜 `./steps`。三宿主是谁、为什么 CWD 不同，见 [`execution-and-reconciliation.md`](./execution-and-reconciliation.md) §4a。
+local 侧的关键是**解析只做一次、值随 definition 走**：起 worker 的三个宿主（同步 `run` 本进程、`submit` fork 的 per-run 进程、`status --wait` 接力者）CWD 各不相同，谁再解析一次 `./steps` 都会让同一个 run 在不同宿主下用到不同的 step 集。所以宿主一律**读回** `meta.steps_dir`（`runtime/gherkai_runtime/detached.py` `build_local_reconcile`）、经 env `GHERKAI_STEPS_DIR` 注给 worker（`compose.build_engines`）；worker 只认这一个 env，不认约定、不猜 `./steps`；宿主建这份 env 时还会先**清掉**自己 shell 里的同名 `GHERKAI_STEPS_DIR`，所以接力那台机器上 export 过这个变量也越不过 definition。三宿主是谁、为什么 CWD 不同，见 [`execution-and-reconciliation.md`](./execution-and-reconciliation.md) §4a。
 
 cloud 侧的关键是**镜像是唯一载体**：你的 `steps/` 靠三行 Dockerfile（`FROM <基底>:X.Y.Z` + `COPY steps/ /app/steps` + `ENV GHERKAI_STEPS_DIR=/app/steps`，模板唯一真源在 [ADR 0038](../adr/0038-worker-image-delivery.md)「概念模型」节）烙进一个 **variant**，由部署方 `gherkai deploy push-worker` 推上去。提交时 `compose.resolve_worker_variant` 做三环存在性/一致性校验（三环各查什么、缺哪一环怎么报，见 [`cloud-backend-carriers.md`](./cloud-backend-carriers.md) §5）——**一个字节的 steps 内容都不看**。
 

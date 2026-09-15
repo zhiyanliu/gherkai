@@ -85,12 +85,22 @@ gherkai run <features>    # 原阻塞皮 = 同进程 schedule() 驱动循环（T
 3. task STOPPED → ECS 自动发 "Task State Change: STOPPED" 事件 → EventBridge
      → [退出观察者 Lambda]（先判 detached，同步 run 的 task 停下不写）：从事件 payload 读 exitCode（实测 4/4 都带，含 SIGKILL=137；缺则落哨兵 255 + reason，见机制二「退出码缺失」条）
        → PutItem 一条 task_exited 事件(独立键空间 + exitCode[+reason]) 到 events 表
-4. events 表变化 → DynamoDB Stream → [reconciler Lambda]（先判 detached，非 detached 整体 no-op）：
+4. events 表变化 → DynamoDB Stream → [reconciler Lambda]（**两道语义闸，都整体 no-op**：先判 detached，非 detached 不碰；再判 run 是否已提交终态，已终态不碰——见下「已收尾的 run 不再推演」）：
      ① 读该 run 全量 events → 纯推演完整 RunState
      ② HWM 条件写落 RunState（挡 stale 覆盖）
      ③ running<max_concurrency 且有 pending：CAS(pending→running) 抢一个 → RunTask 启下一个
      ④ 全 job 终态：同一份 events 快照 → 落各 job 判定真值（ResultStore）→ finalize CAS 写总 status（commit point）
-        → 聚合 RunReport（派生、失败隔离；run 级墙钟 = RunState started_at→ended_at，宿主算好传入）。写序 [0030](./0030-realtime-persistence-seam.md) 决定三：CAS 前失败可重试、CAS 后失败无人重试
+        → 聚合 RunReport（派生、失败隔离；run 级墙钟 = RunState started_at→ended_at，宿主算好传入——**宿主侧取这个数本身也在失败隔离内**：多读一次 RunState 跑在提交点之后（限流/瞬时 5xx/落盘读错都会抛），commit 后失败无人重试，抛出去还会让 events Stream 本批重试耗尽后整批丢弃、连坐同批其它 run 的事件；故失败按缺值走、报告墙钟显「?」。「宿主算好传入」说的是「core 不解析时间戳」，**不是「取数可以裸抛」**）。写序 [0030](./0030-realtime-persistence-seam.md) 决定三：CAS 前失败可重试、CAS 后失败无人重试
+     **不变量：已收尾的 run 不再推演——已提交终态的 run，云端推进器整体 no-op**（判在 detached 之后、读 definition
+     之前：先分流省掉强一致 META 读 + offload 正文的 S3 取回）。理由：终态时判定真值与报告都已落库，再 tick 一次
+     只会拿「此刻还剩下的事件」重算一遍并按 [0030](./0030-realtime-persistence-seam.md) 决定三的写序无条件覆盖——
+     而 events 表开 TTL（[0033](./0033-iac-aws-backend-and-composition-wiring.md)「events 表开 TTL」条），过期后
+     worker 事件已被删、只剩永不过期的退出记录，重算结果是「每个 job 都 error、零 scenario」，把权威判定真值静默销毁。
+     挡的触发面不止 TTL 删除的重投（那道另有 Stream filter + handler 跳过两层）：迟到重投、手工重放同一批 Stream
+     记录、**超时到点 payload 一并 no-op**（与「job timeout」节「到点时 job 已终态 → tick no-op」同源；且 run 到终态
+     的前提就是每个 job 都已有退出记录或已判超时，不会漏 StopTask）。**明确接受的代价**：从此没有「重 tick 一个已
+     收尾的 run 来补写丢失报告」这条路——残余窗口 = 提交点之后、推进器 2 分钟执行上限用尽那一瞬，此时 RunReport
+     将永久缺失（判定真值在提交点之前已落、不受影响；报告是派生产物，宁缺不错）。
 5. 级联：下一 task STOPPED → 再触发 3-4 → … 直到全 done
 ```
 

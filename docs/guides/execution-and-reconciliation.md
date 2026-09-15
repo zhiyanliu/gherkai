@@ -124,7 +124,7 @@ sequenceDiagram
 - **`status`（不带 `--wait`）纯只读、零副作用**——看到的新鲜度取决于最近一次 `tick` 是什么时候；它不推进、也不 kickoff。
 - **run 级 status 的取值语义**：投影写被钳在 `pending`/`running` 两档——投影里全部 job 仍 pending = `pending`，任一 job 已推进 = `running`；run 级**终态**由 `try_finalize` 一次落定（提交点），**读到终态 = run 已提交**。注意投影落后于抢占一拍：CAS 抢占只改那个 job 的态，run 级要等下一次 `tick` 才翻 `running`——故「run 仍 pending」≠「还没开始推进」；`status` 的「推进可能未启动」提示因此要求 run 级 `pending` **且所有 job 仍 pending** 才打。
 - **退出码分层**（CI 接线最易建错心智）：`submit` 的退出码只表示「提交成功与否」、**不是判定**；判定退出码由 `status --wait` 等到终态后给。根因：CLI 脱离后不再有内存里的判定终值——各命令退出码的完整分工见 [`verdict-model.md`](./verdict-model.md) §5（本篇不重复它的表）。
-- **结果落哪**：`try_finalize`（CAS）是**提交点**——同一次 `tick` 在它**之前**已把各 job 的判定明细（`jobs/*.json`）从本轮 records 聚合落库，故**读到终态即判定明细已齐**；提交点之后宿主才写派生的 RunReport（写失败被隔离、不击穿已提交的 run）。两段都幂等，local per-run 进程与 cloud reconciler 共用 `core` 的同一份收尾逻辑。落点：local = `--report-dir/<run_id>/`，cloud = S3 桶下 `<report_dir>/<run_id>/`——cloud `submit` 的 `--report-dir` 须与推进器侧一致（提交前探活会比对、不一致退 2），否则「跑完了却在自己给的前缀下找不到结果」。
+- **结果落哪**：`try_finalize`（CAS）是**提交点**——同一次 `tick` 在它**之前**已把各 job 的判定明细（`jobs/*.json`）从本轮 records 聚合落库，故**读到终态即判定明细已齐**；提交点之后宿主才写派生的 RunReport（写失败被隔离、不击穿已提交的 run）。两段都幂等，local per-run 进程与 cloud reconciler 共用 `core` 的同一份收尾逻辑。**但 cloud 档的云端推进器对已提交终态的 run 整体不动作**（§7 里 reconciler 的第二道判）：故 RunReport 若恰在提交点之后没写成，云端不会再自己补写它（判定明细在提交点之前已落定，读到终态即已齐、不受影响）；local 档没有这道闸——`status --wait` 接力会把已终态的 run 再重放一遍、顺手把报告重写出来（本机事件不过期）。落点：local = `--report-dir/<run_id>/`，cloud = S3 桶下 `<report_dir>/<run_id>/`——cloud `submit` 的 `--report-dir` 须与推进器侧一致（提交前探活会比对、不一致退 2），否则「跑完了却在自己给的前缀下找不到结果」。
 
 最后一条不对称（**掐得掐不得**）：cloud 的 `--wait` 检测卡住时只是**踢一脚** kicker（fire-and-forget），踢完随时可离场——云端链自己跑完；local 的 `--wait` 接力者一旦接手**就是唯一推进者**，掐掉它 run 就地停摆（已 claim job 的计时也随进程一起丢，靠下次接力恢复）。根因：主推进器的位置不同（云端 Lambda vs 本机进程）。
 
@@ -187,10 +187,10 @@ sequenceDiagram
 `run --backend cloud` 与 `submit --backend cloud` 共享同一套表和 Lambda——前台 run 照样往两张表里写（definition 落 runs 表、worker 事件落 events 表），Stream 里照样有它的记录——**若无闸门，云端推进器就会被这些记录唤醒、跑来推前台 run**（双开推进器：同一 scope 起两个 task）。两道闸门拦在不同层，判据同源（STATE 上的 `detached` 标记）：
 
 - **kicker 这扇门**：runs 表 Stream 的事件源 **filter**（`INSERT ∧ detached=true`）在**事件源层**就滤掉——前台 run 的 STATE 不带标记，kicker 根本不会被 invoke。
-- **reconciler 这扇门**：events 表的 item 身上没有 `detached` 标记、事件源层滤不了——Lambda 会被 invoke，闸门在 **handler 内**：`tick` 装配前先查 `is_detached`，非后台 run 直接不动作（日志会出现 `skip: run … 非 detached`）。
+- **reconciler 这扇门**：events 表的 item 身上没有 `detached` 标记、事件源层滤不了——Lambda 会被 invoke，闸门在 **handler 内**：`tick` 装配前先查 `is_detached`（**是不是 `submit` 提交的后台批次**），不是就直接不动作（日志会出现 `skip: run … 不是 submit 提交的后台批次`）。它后面还紧跟第二道判（管的不是本节这件事）：**这个 run 是否已收尾**——已收尾同样整体不动作、不再改写它已落定的结果（日志 `skip: run … 已结束，不再改写它的结果`）。
 - **exit-observer 的同源分流**（严格说不是第三扇推进器闸门——它不推进，防的是另一件事）：不给前台 run 写退出记录，免得无 `body` 的 exit item 混进前台 run 的事件流（前台的退出观察由 Engine adapter 自己做，§5）；判据同一个 `is_detached`。
 
-> 权威：[ADR 0034](../adr/0034-detached-batch-reconciler.md)（「filter 必须区分写入者」条）、[ADR 0033](../adr/0033-iac-aws-backend-and-composition-wiring.md)（Stream/filter 资源；events 表那半只能在 handler 内判）。
+> 权威：[ADR 0034](../adr/0034-detached-batch-reconciler.md)（「filter 必须区分写入者」条）、[ADR 0033](../adr/0033-iac-aws-backend-and-composition-wiring.md)（Stream/filter 资源；events 表那条只滤得掉 TTL 删除，`detached` 那半只能在 handler 内判）。
 
 ## 8. 延伸阅读
 

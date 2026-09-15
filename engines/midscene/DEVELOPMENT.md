@@ -79,10 +79,11 @@ GHERKAI_WORKER_MIDSCENE_CMD="node $(pwd)/src/bin.mts"     # 需 Node ≥ 22.18�
 
 ## 使用方 `steps/` 的加载（实现要点）
 
-约定解析（`--steps-dir` > env > `./steps`）在组合根，worker 只认 env `GHERKAI_STEPS_DIR`、不重解析（ADR 0037 决策 4；[ADR 0016](../../docs/adr/0016-execution-architecture-core-lib-run-model.md) 分层）。`src/worker/user-steps.mts` 排序递归遍历 `.mts` / `.mjs`（排除 `*.test.*`）逐个 `await import`，两条 fail-loud：
+约定解析（`--steps-dir` > env > `./steps`）在组合根，worker 只认 env `GHERKAI_STEPS_DIR`、不重解析（ADR 0037 决策 4；[ADR 0016](../../docs/adr/0016-execution-architecture-core-lib-run-model.md) 分层）。`src/worker/user-steps.mts` 排序递归遍历 `.mts` / `.mjs`（排除 `*.test.*`）逐个 `await import`，三条 fail-loud：
 
 - import 失败 → 立刻抛，带文件名与原异常；
 - **零注册检查**：某文件加载后注册表条数没涨 → 抛。这是「双实例」风险的显式化——裸 specifier 若解析到第二份包副本，注册会落进 worker 永远不读的表，症状本来是「全部 step 静默走 AI、run 还可能通过」。`index.mts` 与 worker 自身 import 的必须是同一个 `worker/deterministic.mjs` URL（靠 bin 注册的 resolve hook 保证，见 `resolve-hook.mts` 头注释）。
+- **目录本身**：env 已设但目录不存在 / 不是目录 → 进遍历之前就抛。组合根只在目录存在时才注入，走到这里说明提交后目录被移走或路径写错——明确指了一个地方而那里没东西 = 配置错，不是「没定制」（Nova 侧同处理）。
 
 抛出而非自己 `process.exit`：退出码由入口（`bin.mts`）统一落地（非零、且不是 [ADR 0028](../../docs/adr/0028-transient-network-ssl-resilience.md) 的网络专用 80），本模块保持可单测。
 

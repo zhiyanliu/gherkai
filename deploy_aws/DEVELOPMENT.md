@@ -22,7 +22,7 @@
 
 **唯一接缝的硬约束**：**CLI 皮绝不 import `aws_cdk`**（jsii 绑定，import 即起 node 子进程，ADR 0037 决策 6）。故 `cli.py` 自身也只 import 标准库 + `gherkai_runtime` + 本包 `names`（零 `aws_cdk`）；`stack.py` / `app.py` 只经 cdk CLI 起的子进程触达。改动时别把 `aws_cdk` 漏进 `cli.py` 的 import 面——`gherkai --help` 的启动代价挂在这条上。
 
-**`--require-approval` / `--allow-vpc-change` 是有意的两层声明**：CLI 皮先声明 provider 中立版（provider 缺席时 `deploy --help` 不残缺），`Provider.add_arguments` 再声明带 AWS 语义的版本（前者能 `choices` 校验 cdk 三档、后者措辞点名 VPC 档三态）；皮的 subparser 开 `conflict_handler="resolve"`，同名以后贴的为准。两层不是重复真源，是「中立占位 + provider 精确化」。`Provider` 另经 `getattr` 容忍它们彻底缺席（别的皮）：缺 `--allow-vpc-change` = 一律不放行（fail-closed）。
+**`--require-approval` / `--allow-vpc-change` 是有意的两层声明**：CLI 皮先声明 provider 中立版（provider 缺席时 `deploy --help` 不残缺），`Provider.add_arguments` 再声明带 AWS 语义的版本（前者能 `choices` 校验 cdk 三档、后者措辞点名 VPC 档三态）；皮的 subparser 开 `conflict_handler="resolve"`，同名以后贴的为准。两层不是重复真源，是「中立占位 + provider 精确化」。两层都只贴 `deploy`：`destroy` 不消费它们（不做 VPC 档三态比对、`cdk destroy` 也无 `--require-approval`），贴上去只会让 `destroy --help` 出现两个恒无效的旋钮。`Provider` 另经 `getattr` 容忍它们彻底缺席（别的皮）：缺 `--allow-vpc-change` = 一律不放行（fail-closed）。
 
 ## 命名真源
 

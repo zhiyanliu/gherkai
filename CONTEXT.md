@@ -113,8 +113,8 @@ _Avoid_: 以为 gherkai 算美元（不折美元、只报原生量，美元交�
 _Avoid_: 把 Feature 当执行单元；**把 Job 当 scenario 粒度（破坏会话依赖）——Job = Scope，不是 scenario**；混淆 RunResult（数据）与 RunReport（报告）。
 
 **标识符 (id：scenarioId / scopeId)**:
-关联键（把 worker 事件挂回 scenario；`scopeId` 已是 cloud events 表主键的一半 `run_id#scope_id`、也是 DDB RunStore `STATE.jobs` Map 的 key），是**不透明标识符**——只在 JSON/dict key/DB key 用，全支持任意 UTF-8（空格、中文路径原样保留，**不 normalize**：任何清洗字符的转换都会把不同输入映射成同一输出、制造撞名，而撞名是静默灾难，比"id 含空格"严重得多）。core **不拿 id 当路径解析**。`scenarioId = <uri>:<行号>[:<example行号>]`；`uri` 由调用方原样传入、core 不解析。**唯一性责任在调用方**：plan 要求 `features` 列表 uri 互异（重复 = 接口违约 → 报错，ADR 0025）。若未来某消费层（URL/文件名）需安全字符 id，由该层做**可逆**编码（urlencode 等、保唯一），不在 core 做有损 normalize。
-_Avoid_: 对 id 做有损 normalize（撞名风险 > 可读性收益）；把 id 当文件路径去读；以为 uri 重复会被 core 静默 merge（那是撞 id 的 bug，core 报错；跨文件同 `@scope` 合并是另一回事，见 ADR 0025「scope 全局命名空间（跨文件合并，撞名 warning）」节）。
+关联键（把 worker 事件挂回 scenario；`scopeId` 已是 cloud events 表主键的一半 `run_id#scope_id`、也是 DDB RunStore `STATE.jobs` Map 的 key），是**不透明标识符**——只在 JSON/dict key/DB key 用，全支持任意 UTF-8（空格、中文路径原样保留，**不 normalize**：任何清洗字符的转换都会把不同输入映射成同一输出、制造撞名，而撞名是静默灾难，比"id 含空格"严重得多）。core **不拿 id 当路径解析**。`scenarioId = <uri>:<行号>[:<example行号>]`；`uri` 由调用方原样传入、core 不解析。**唯一性责任在调用方**：plan 要求 `features` 列表 uri 互异（重复 = 接口违约 → 报错，ADR 0025）；`scopeId` 的唯一性由 plan 自己守——`@scope` 的值与未标 scope 的 scenario 编号**共用一个 `scopeId` 命名空间**，撞上即报错，故 plan 返回的 job 其 `scopeId` 两两互异（ADR 0025「id 派生」）。若未来某消费层（URL/文件名）需安全字符 id，由该层做**可逆**编码（urlencode 等、保唯一），不在 core 做有损 normalize。
+_Avoid_: 对 id 做有损 normalize（撞名风险 > 可读性收益）；把 id 当文件路径去读；以为 uri 重复会被 core 静默 merge（那是撞 id 的 bug，core 报错；跨文件同 `@scope` 合并是另一回事，见 ADR 0025「scope 全局命名空间（跨文件合并，撞名 warning）」节）；以为 `@scope` 的值可以随便取（值撞上同批某条未标 scope 的 scenario 编号 = 撞 `scopeId`，core 报错、不静默把两条并进一个会话）。
 
 **执行核心库窄腰 (Core-library narrow waist)**:
 真正的窄腰是**执行核心库**（解析 `.feature` → 分组 scope → 调度 → 收集结果），**不是 CLI**（见 ADR 0016）。CLI 是核心库的第一个、最薄的前端；WebUI 是另一个前端，**直接调核心、不 shell-out CLI**。CI/skill 通过 CLI 这个皮间接用核心。上层前端与可替换的执行引擎（`Engine` port，本地进程 / Fargate；见下「执行引擎 port」条）都围绕核心库解耦。

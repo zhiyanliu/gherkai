@@ -91,7 +91,7 @@
 > - **store adapter**（Local/DDB/S3）——只持久化 **core 自己的序列化数据**（RunMeta/RunState/JobResult/RunReport），并**不透明搬运** worker 报的 `ref`（`ResourceUri`，[0027](./0027-runreport-aggregation-index.md)）。store **不上传 worker 产物**。
 > - 二者是**矩阵不是绑定**：如 Local store + Fargate worker 合法（core 数据落本地、worker 产物在 S3）。**注意这是组合根内部/e2e 可拼的矩阵、非用户 CLI 旋钮**——面向用户 `--backend` 一个开关同时定 store 与执行（决策 A：cloud⇒Fargate 执行+云存储），不把这层正交暴露成用户旋钮。报告的自包含/可移植由 `index.html` 的 `href` 相对化达成（不拷贝产物；产物拷贝式 materialize 已否决，见 [0027](./0027-runreport-aggregation-index.md)「被拒方案」）——与 worker 把产物放哪正交。
 
-**adapters 按 port 分子目录**（多后端时不按后端混放）——下即当前实装：
+**adapters 按 port 分子目录**（多后端时不按后端混放；`_` 前缀 = adapter 间共享的私有件、非 port 实装）——下即当前实装：
 
 ```
 core/gherkai_core/
@@ -104,7 +104,8 @@ core/gherkai_core/
     ├── result_store/{local.py, s3.py}    ← 数据面（s3=S3ResultStore）（0030）
     ├── event_log/{sqlite.py, ddb.py}     ← EventLog port（无状态跑批的写模型：local SQLite / cloud DDB events 表）（0034）
     ├── cloud_launcher.py                 ← Launcher port cloud 实装（ECS RunTask；对位 runtime/gherkai_runtime/detached.py 的 SubprocessLauncher）（0034）
-    └── _boto.py                          ← 云端 adapter 共享的 boto3 依赖守卫（非 port 实装，冗余兜底：主拦截在组合根）
+    ├── _boto.py                          ← 云端 adapter 共享的 boto3 依赖守卫（非 port 实装，冗余兜底：主拦截在组合根）
+    └── _atomic.py                        ← 本地 store 写面共享的原子落盘（tmp + `os.replace`；非 port 实装，三个写面的并发读者见模块头）
 ```
 
 **`EventLog` / `Launcher` 两个 port 定义在 `core/gherkai_core/reconcile.py`、不在 `ports.py`**（[0034](./0034-detached-batch-reconciler.md)）：它们只服务无状态推进路径（reconciler 读全量 events 重放 / CAS 抢占成功后起一个 job），与 `ports.py` 那批「同步 `run` 也用」的口生命周期不同；实装各两个（`SqliteEventLog`/`DdbEventLog`、`SubprocessLauncher`（在 `runtime/gherkai_runtime/detached.py`）/`CloudLauncher`），同样组合根注入。
@@ -195,7 +196,7 @@ Fargate 执行环境配置（cluster / task-def / subnet / security-group / even
 │       ├── model.py · parse.py · scope.py · schedule.py · project.py · reconcile.py · persist.py · wire.py · serialize.py · ports.py · errors.py
 │       │     （wire.py=worker 协议单向序列化；serialize.py=领域模型双向持久化的单一真理源，二者分工不同）
 │       │     （project.py=events→RunState/JobResult 的纯归约投影 · reconcile.py=无状态推进 tick（含 EventLog/Launcher 两 port）· persist.py=实时写编排 RunPersistence；见 0030/0034）
-│       └── adapters/    ← 按 port 分（清单见上「adapters 按 port 分子目录」）：subprocess_engine.py（单 adapter 参数化，非 midscene.py/novaact.py 两文件）· fargate_engine.py · cloud_launcher.py · event_log/ · run_store/ · result_store/ · report_store/ · _boto.py
+│       └── adapters/    ← 按 port 分（清单见上「adapters 按 port 分子目录」）：subprocess_engine.py（单 adapter 参数化，非 midscene.py/novaact.py 两文件）· fargate_engine.py · cloud_launcher.py · event_log/ · run_store/ · result_store/ · report_store/ · _boto.py · _atomic.py
 ├── runtime/             ← 发行包 gherkai-runtime：产品本体 = 组合根共享层（见下「演进」节；cli/Lambda/WebUI 的共同地基。原 `gherkai/`，0037 改名让位给 CLI 发行名）
 │   └── gherkai_runtime/{compose.py（组合根/引擎注册表 + `resolve_cloud_target` 云目标解析）· detached.py（local 无状态跑批宿主）· names.py（资源命名真源）· tunnel.py（`--expose-local` 隧道 provider，0035）· tunnel_host.py（隧道宿主编排 + 守护 TTL，0035）}
 ├── cli/                 ← 发行包 gherkai：纯皮 argparse + 渲染 + deploy provider 分派 + 包内 skill 安装（workspace 成员；对兄弟包的依赖在 build 时渲染成 `==` lockstep pin，[0037](./0037-distribution-and-packaging.md) 决策 2）
