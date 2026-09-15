@@ -62,18 +62,20 @@ harness 结尾打印 `=== HARNESS_REPORT_JSON ===` + 一段 JSON。关键字段�
 | `hung`                       | **`true` = 失败**：worker SIGTERM 后 grace-cap 内没退、被 SIGKILL。中断正确性的头号红线                                 |
 | `exit_code`                  | 正常/协作停止应 `0`；网络耗尽 `80`（`EX_WORKER_NETWORK`）；会话释放失败 `1`                                              |
 | `grace_s`                    | SIGTERM→worker 退出实测秒数（`none` 时为 null）。应 « grace-cap                                                         |
-| `sample_valid`               | **判读前先看这个**。`false` = 无效样本（中断太早、盘和 S3 都空，`n_lost=0` 是"没东西可丢"而非"抢传救回"）→ 换更晚时机重跑 |
+| `sample_valid`               | **判读前先看这个**。`false` = 无效样本，两类：① 中断太早、盘和 S3 都空（`n_lost=0` 是"没东西可丢"而非"抢传救回"）→ 换更晚时机重跑；② 选了 `--interrupt <时机>` 但该时机没触发、一路跑成 baseline（`kill_phase=null`；已知两条：`scenario` 撞上单 scenario scope、`connect` 的 2s 定时器发现建连已完成）→ 换时机，或换「多 scenario 归一个 `@scope`」的 feature 重跑。具体哪一类看 `sample_note` |
 | `sample_note`                | 人话解释 sample_valid + 丢失量                                                                                       |
 | `lost_on_fargate` / `n_lost` | **盘上有、S3 无**的文件 = Fargate 容器盘销毁时会真丢的。subprocess 下这些留本地盘、**非真丢**                           |
 | `bytes_lost`                 | 同上字节数                                                                                                           |
 | `disk_files` / `s3_files`    | 中断后盘上 / S3 上各有什么（含 size）                                                                                  |
 | `scope_done_emitted`         | 中断路径应 `false`（不 emit scope_done、不走 flush）；正常完成 `true`                                                    |
+| `kill_phase`                 | SIGTERM 实际落在哪个时机（`connect`/`act_midway`/`between_steps`/`after_scenario1`/`scope_end`）。**非空 = 信号真投递了**（时机到点但 worker 已先退时故意不记账，避免「有 phase 没投递」的假阳性）。`--interrupt none` 本就为 `null`；**选了中断时机却为 `null` = 这次根本没发出 SIGTERM**（该时机未触发或 worker 已先退），此时任何丢失/抢传结论都不成立 |
+| `counts`                     | `step_started`/`step_done`/`scenario_done`/`n_scenarios`：核对中断落点是否如预期；`scenario` 时机要求 `n_scenarios>1`，否则该时机不触发（见下「多 scenario 陷阱」） |
 
 ### 判读要点（易误判，务必照做）
 
 - **先看 `sample_valid`，再看 `n_lost`**。`n_lost=0` 在 `sample_valid=false` 时毫无意义——历史踩过：Midscene `act` 时机中断太早、盘空、`n_lost=0` 被误读成"抢传生效"，实为无效样本。
 - **`n_lost=0` 不等于"零残余"**。harness 的 lost 判据是**文件名**"盘有 S3 无"。若某文件名已在 S3（被早先抢传过）、但盘上是更大的版本（后续又 append 了），`n_lost` 记 0，但存在**字节级增量残余**。要验抢传"救了多少"，需**逐文件对比 disk vs S3 的 size**（scenario 抢传验证就是这么坐实的：scenario1 的 log 进了 S3，scenario2 的增量 disk>S3）。
-- **验"抢传因果"要交叉核对时序**：`scope_done_emitted=false` + worker stderr 有 `signal received`/`session shutdown` 但**无 flush 日志** = 确实走了中断退出、没走 scope 末 flush。这样才能证明 S3 里的产物只可能来自**边界抢传**、而非退出路径顺带传的。
+- **验"抢传因果"要交叉核对时序**：`kill_phase` 非空 + `scope_done_emitted=false` + worker stderr 有 `signal received`/`session shutdown` = 确实走了中断退出路径，而 scope 末整目录 flush 只在正常完成路径执行（中断路径在它之前就 return 了）。这样才能证明 S3 里的产物只可能来自**边界抢传**、而非退出路径顺带传的。**别拿「flush 日志」当判据**——两个 worker 的 scope 末 flush 成功时不打任何日志（只有失败/兜底提示里出现 flush 字样），"没看到 flush 日志"对正常路径同样成立、不构成证据。
 
 ## 真跑陷阱（历史踩过，务必避开）
 

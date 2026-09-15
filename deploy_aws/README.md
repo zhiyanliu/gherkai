@@ -122,7 +122,7 @@ aws ecr delete-repository --repository-name gherkai-midscene-worker --force
 
 ## 部署机需要的权限
 
-部署机的凭证要能做云端写操作（比只提交 run 的人大得多）：**CloudFormation** 建/改/删本 stack + 读 stack（VPC 档比对）；**建改删** DynamoDB 表、S3 桶、ECS 集群与 task 定义、ECR 仓库、Lambda 与其事件源、EventBridge 规则与调度、VPC/子网/安全组、CloudWatch 日志组；**IAM** 建角色与策略 + `PassRole`（把 task / Lambda 角色交给 ECS 与 Lambda）；**SSM** 读写 `/{prefix}backend/*`；**worker 镜像**——ECR 登录与推送、ECS 注册/注销 task 定义 revision 并打 tag、`Query` runs 表及其 `status-index`（清理前确认没有在跑的 run 引用旧 revision）；**`sts:GetCallerIdentity`**（`--bootstrap` 取账户号，对任何主体恒可用）。
+部署机的凭证要能做云端写操作（比只提交 run 的人大得多）：**CloudFormation** 建/改/删本 stack + 读 stack（VPC 档比对）；**建改删** DynamoDB 表、S3 桶、ECS 集群与 task 定义、ECR 仓库、Lambda 与其事件源、EventBridge 规则与调度、VPC/子网/安全组、CloudWatch 日志组；**IAM** 建角色与策略 + `PassRole`（把 task / Lambda 角色交给 ECS 与 Lambda）；**SSM** 读写 `/{prefix}backend/*`；**worker 镜像**——ECR 登录与推送、ECS 注册/注销/删除 task 定义 revision 并打 tag、`Query` runs 表及其 `status-index`（清理前确认没有在跑的 run 引用旧 revision）；**`sts:GetCallerIdentity`**（`--bootstrap` 取账户号，对任何主体恒可用）。
 
 ## 退出码与常见错误
 

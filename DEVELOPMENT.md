@@ -48,7 +48,7 @@
 │   ├── midscene/   ← npm 包 @gherkai/worker-midscene（ESM）：src/bin.mts（入口）· src/worker/run-scope.mts（薄 worker）· src/worker/deterministic.mts · src/lib/agentcore-sigv4.mts · spikes/
 │   └── novaact/    ← 发行包 gherkai-worker-novaact：gherkai_worker_novaact/{run_scope.py（薄 worker）· deterministic.py · user_steps.py · lib/workflow_setup.py} · spikes/
 ├── deploy_aws/                ← 发行包 gherkai-deploy-aws：`gherkai deploy` 的 AWS provider（Python CDK stack：DDB/S3/ECS/ECR/IAM/VPC + 无状态跑批的 Stream/Lambda/EventBridge；`gherkai_deploy_aws/lambdas/` 是三 Lambda 的 handler 源、随部署打进 asset；worker 镜像交付 `push-worker` / `list-workers`，ADR 0033/0034/0037/0038）
-├── skills/                    ← README.md 只是一行指针（skill 真身不在这里）；gherkai-evals/ = agent skill 的评测资产（evals.json / trigger-eval.json / fixtures/ / materialize.py / run_evals.py / trigger_eval.py，跑法与 fixture 清单在 ADR 0043 决策七、不另立文档）：维护者 / agent 侧、不分发；结果工作区 gherkai-workspace/ 不入库（ADR 0043 决策七）
+├── skills/                    ← README.md 只是一行指针（skill 真身不在这里）；gherkai-evals/ = agent skill 的评测资产（evals.json / trigger-eval.json / fixtures/ / materialize.py / run_evals.py / trigger_eval.py / summarize_runs.py / grader-prompt.md，跑法与 fixture 清单在 ADR 0043 决策七、不另立文档）：维护者 / agent 侧、不分发；结果工作区 gherkai-workspace/ 不入库（ADR 0043 决策七）
 └── tools/                     ← 复用工具库（端到端真跑 / 跨真实边界验证 / 时序诊断 / 知识图刷新；长期资产，见 CLAUDE.md「工作方式」）
 ```
 
@@ -95,7 +95,7 @@ uv run pytest                                    # 全部 workspace 成员的单
 uv run pytest core/tests -m integration          # 集成测试：假定真表/桶已预建（见 core/tests/README.md）
 ```
 
-三条纯文档/文案护栏也在单测里：`cli/tests/test_user_facing_messages.py`（产品面文案不带内部指代）、`cli/tests/test_package_readmes.py`（包页面 / 根 README 使用者向、每包有 DEVELOPMENT.md）、`cli/tests/test_skill.py`（随 wheel 发行的 agent skill：文案与指针形态、`gherkai <子命令> --flag` 组合对照 argparse 真值与「仅某命令」排他、反引号键名对照契约页、契约页转换副本相等、目录白名单与形态上限、评测 fixture 的 ignore 行为与可搬迁不变量；provider 侧 `deploy` / `destroy` 旋钮在 `deploy_aws/tests/test_skill_deploy_tokens.py`）。单测绿不等于对——凡结论依赖 mock 之外的真实行为（进程/信号/并发/真 AWS），按 CLAUDE.md「绿≠对」升级验证；端到端真跑的现成工具在 `tools/`（先翻一眼、别重造）。
+四条纯文档/文案护栏也在单测里：`cli/tests/test_cli_json_contract.py`（`--json` 字段契约：真渲染器出样例 → 递归收全部键名 → 逐个断言出现在 `docs/guides/cli-json-contract.md` 里，文档漏键即红；`list-workers` 样例要 moto，同源断言在 `deploy_aws/tests/test_workers.py`）、`cli/tests/test_user_facing_messages.py`（产品面文案不带内部指代）、`cli/tests/test_package_readmes.py`（包页面 / 根 README 使用者向、每包有 DEVELOPMENT.md）、`cli/tests/test_skill.py`（随 wheel 发行的 agent skill：文案与指针形态、`gherkai <子命令> --flag` 组合对照 argparse 真值与「仅某命令」排他、反引号键名对照契约页、契约页转换副本相等、目录白名单与形态上限、评测 fixture 的 ignore 行为与可搬迁不变量；provider 侧 `deploy` / `destroy` 旋钮在 `deploy_aws/tests/test_skill_deploy_tokens.py`）。单测绿不等于对——凡结论依赖 mock 之外的真实行为（进程/信号/并发/真 AWS），按 CLAUDE.md「绿≠对」升级验证；端到端真跑的现成工具在 `tools/`（先翻一眼、别重造）。
 
 ## Spike（可独立跑的技术验证脚本）
 

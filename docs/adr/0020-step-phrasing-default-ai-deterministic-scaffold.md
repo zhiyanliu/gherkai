@@ -31,7 +31,7 @@
 > 角色正名与边界矩阵的单一真源现为 [0040](./0040-consumer-role-model-and-terminology.md)（「测试开发」即当时所称 test engineer）；本节保留当时的决策内容。
 
 - **QA**：永远只写 `.feature` 纯自然语言 → 默认走 AI。**"零代码"对 QA 成立。**
-- **测试开发**（会写代码）：偶尔需精确锚点时，在确定性脚手架里写一小段 Playwright 查询 step。这是 BDD 原本的角色分工，**不破坏 QA 零代码**。（当时的落点 = worker 包内脚手架文件；**定制面已由 [0037](./0037-distribution-and-packaging.md) 决策 4 反转**——使用方锚点写进项目里的 `steps/` 目录（`steps/*.py` / `steps/*.mts`，经 `--steps-dir` / env `GHERKAI_STEPS_DIR` 加载进同一张确定性注册表），worker 包内脚手架只留内建示范锚点：那是发行包内容，改它等于 fork。角色分工本身不变。）
+- **测试开发**（会写代码）：偶尔需精确锚点时，在确定性脚手架里写一小段 Playwright 查询 step。这是 BDD 原本的角色分工，**不破坏 QA 零代码**。（当时的落点 = worker 包内脚手架文件；**定制面已由 [0037](./0037-distribution-and-packaging.md) 决策 4 反转**——使用方锚点写进项目里的 `steps/` 目录（Nova 侧 `steps/*.py`、Midscene 侧 `steps/*.mts` 或 `*.mjs`，经 `--steps-dir` / env `GHERKAI_STEPS_DIR` 加载进同一张确定性注册表），worker 包内脚手架只留内建示范锚点：那是发行包内容，改它等于 fork。角色分工本身不变。）
 
 ## 删除的过时措辞
 

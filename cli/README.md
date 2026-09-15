@@ -77,7 +77,7 @@ URL、DOM 这类不容 AI 抖动的检查，可以由你自己写成确定性步
 | `--grace S` | 自动 | 仅 `run`。中止时留给 worker 关闭云端浏览器会话的秒数，不填按引擎自动取（novaact ≈150s、midscene ≈31s）。**给得太小会漏关会话、继续计费**，过小的值在开跑前就报错。云端 `submit` 的对应旋钮在部署侧：`gherkai deploy --stop-timeout` |
 | `--steps-dir DIR` | `./steps` | 你自己的确定性步骤目录（见上） |
 | `--report-dir DIR` / `--no-report` | `reports` / 关 | 报告落点（每次 run 落 `DIR/<run_id>/`，`status` 查同一个 run 要给同一路径；云端有自己的产物前缀，给了不一致的值会在提交前退 `2` 并点名两侧的值）／一点都不落盘：不归集报告，也不生成引擎自己的报告产物（仅 `run`；Nova Act 的 SDK 轨迹关不掉，它会写进自己的临时目录、不上报） |
-| `--expose-local ORIGIN` | — | 把「本机可达」的被测应用经隧道暴露给云端浏览器，值 = feature 里书写的原始地址（如 `http://localhost:3000`）。框架会替换成一次性公网地址（带每 run 一换的用户名口令，跑完即拆）。页面资源全经隧道，ngrok 免费层配额约 1GB/月 + 2 万请求/月，重度使用可能碰顶（表现为 429 或断流）。**用它时本机要保持开机联网到 run 结束**，否则应用不可达、用例会以导航失败告终。云端 `submit` 时隧道另有一个兜底存活时间 `--tunnel-ttl S`（默认按这批用例的预算算，**调小有风险**：到点无条件拆隧道，短于实际时长会让剩下的用例跑成导航失败） |
+| `--expose-local ORIGIN` | — | 把「本机可达」的被测应用经隧道暴露给云端浏览器，值 = feature 里书写的原始地址（如 `http://localhost:3000`）。gherkai 会替换成一次性公网地址（带每 run 一换的用户名口令，跑完即拆）。页面资源全经隧道，ngrok 免费层配额约 1GB/月 + 2 万请求/月，重度使用可能碰顶（表现为 429 或断流）。**用它时本机要保持开机联网到 run 结束**，否则应用不可达、用例会以导航失败告终。云端 `submit` 时隧道另有一个兜底存活时间 `--tunnel-ttl S`（默认按这批用例的预算算，**调小有风险**：到点无条件拆隧道，短于实际时长会让剩下的用例跑成导航失败） |
 | `--fail-fast` / `--json` / `--quiet` | 关 | 任一 job 崩就中止整批／只输出机器可读 JSON（字段见 [`docs/guides/cli-json-contract.md`](https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/guides/cli-json-contract.md)）／少进屏幕：不打逐步进度，本机跑时 worker 日志改落 `<report-dir>/<run_id>/worker.log`（`--no-report` 时落系统临时目录）、只打一行位置；`--backend cloud` 没有本机 worker 日志（worker 在云端跑，日志在 CloudWatch）（都仅 `run`；`submit` 只打 `run_id`，进度看 `status`） |
 | `--region` / `--profile` | — | AWS region / profile（两种 backend 都用，也喂给 worker） |
 
@@ -85,7 +85,7 @@ URL、DOM 这类不容 AI 抖动的检查，可以由你自己写成确定性步
 
 ## 输出与报告
 
-stdout 只放该命令的核心产出（`--json` 的 JSON、人看的文本汇总、列表），进度与诊断全走 stderr——所以 `gherkai run … --json > r.json` 拿到的是纯净 JSON，进度仍在终端可见。每次 `run` 默认在 `reports/<run_id>/` 留一份报告：`index.html` 是可点开的入口（判定明细 + 每个报告产物一行链接：引擎自己的报告产物各一行链接），`manifest.json` 是给 CI/工具消费的清单。
+stdout 只放该命令的核心产出（`--json` 的 JSON、人看的文本汇总、列表），进度与诊断全走 stderr——所以 `gherkai run … --json > r.json` 拿到的是纯净 JSON，进度仍在终端可见。每次 `run` 默认在 `reports/<run_id>/` 留一份报告：`index.html` 是可点开的入口（判定明细 + 每条报告产物一行链接：引擎自己的报告产物与每个 AI 步骤的证据各一行），`manifest.json` 是给 CI/工具消费的清单。
 
 ## 退出码
 

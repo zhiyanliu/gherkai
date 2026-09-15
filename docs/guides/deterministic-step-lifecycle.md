@@ -13,7 +13,7 @@
 | ③ 查 | `list-deterministic` / `plan` 标注 / `doctor` | 三个命令都 spawn 一次 worker 的**自述入口**，问的就是这张表 |
 | ④ 跑 | worker 派发每个 step | 先查这张表，命中即走你的 handler；不命中才落内建 URL 导航 / AI |
 
-怎么写一个 handler（签名、正则具名组、抛什么异常对应什么判定）**不在本文**——看使用者向的两篇：[`engines/novaact/README.md`](../../engines/novaact/README.md)、[`engines/midscene/README.md`](../../engines/midscene/README.md)。本文讲的是这四段之间的接缝。
+怎么写一个 handler（签名、`ctx` 能拿到什么、正则具名组怎么传参）**不在本文**——看使用者向的两篇：[`engines/novaact/README.md`](../../engines/novaact/README.md)、[`engines/midscene/README.md`](../../engines/midscene/README.md)。本文讲的是这四段之间的接缝（handler 抛异常之后怎么落成判定，见 §1 的映射表）。
 
 ```mermaid
 flowchart LR

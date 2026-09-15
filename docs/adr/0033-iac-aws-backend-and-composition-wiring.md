@@ -6,7 +6,7 @@
 
 `--backend cloud` 按 [0016](./0016-execution-architecture-core-lib-run-model.md) 决策 A = **存储上云（DDB/S3）+ Fargate 执行**（单旋钮）。这两半的 AWS 资源此前一律「假定已存在、建表归 IaC」（[0030](./0030-realtime-persistence-seam.md) 决定六：adapter 不持 schema/建表权知识），生产侧从无建表建桶代码——只在 moto 单测 fixture（`core/tests/conftest.py`）里程序化建出。**本 ADR 决定把这些 fixture 里的建表建桶动作固化成真 CDK。**
 
-**决策：新建顶层工程 `iac_aws_backend/`（Python CDK），与 `core/`/`cli/`/`engines/` 平级。**（历史注：[0037](./0037-distribution-and-packaging.md) 决策 6 实装后，该工程收编进发行包 `gherkai-deploy-aws`（`deploy_aws/gherkai_deploy_aws/`：stack / app / names / cli(Provider) / lambdas/），经 `gherkai deploy` 执行；下文「`iac_aws_backend`」即指今住在该包里的 stack 代码。）
+**决策：新建顶层工程 `iac_aws_backend/`（Python CDK），与 `core/`/`cli/`/`engines/` 平级。**（历史注：[0037](./0037-distribution-and-packaging.md) 决策 6 实装后，该工程收编进发行包 `gherkai-deploy-aws`（`deploy_aws/gherkai_deploy_aws/`：stack / app / names / cli(Provider) / lambdas/，另加 worker 镜像族命令 `workers` 与容器引擎口子 `container`（[0038](./0038-worker-image-delivery.md)）），经 `gherkai deploy` 执行；下文「`iac_aws_backend`」即指今住在该包里的 stack 代码。）
 
 - **命名**：`iac_` 前缀对齐「工程」定位；`aws_backend` 精确覆盖它建的东西 = 「`--backend cloud` 这个 backend 所需的 aws 资源」——含**存储**（DDB/S3）**与执行**（Fargate/ECR），不窄化成只有存储。（与决策 A「backend=存储+执行单旋钮」呼应。）
 - **语言 = Python CDK**（aws-cdk-lib）。理由：与 core/cli 同语言（团队心智一致、CI 复用 uv 工具链）；不引入第二语言/Terraform HCL。
@@ -16,7 +16,7 @@
 
 一套 CDK stack（可按 prefix 多实例化，见「两层命名」）建：
 
-**DynamoDB（2 张表，均 `PAY_PER_REQUEST`；schema 权威源 = `core/tests/conftest.py` fixture，CDK 照抄）：**
+**DynamoDB（2 张表，均 `PAY_PER_REQUEST`；schema 权威源 = CDK（`deploy_aws/gherkai_deploy_aws/stack.py`）——moto 单测 fixture（`core/tests/conftest.py`）只按各测试需要局部复刻键 schema，两表 Stream（见下 13.）、events 表 TTL 属性 `expires_at`（见下「events 表开 TTL」条）、runs 表按 `status` 的稀疏 GSI（[0038](./0038-worker-image-delivery.md)）都不在 fixture 里）：**
 1. `{prefix}runs`（控制面 / RunStore，已有 adapter，本 ADR 纳入统一 IaC）：PK=`run_id`(S)、SK=`item_type`(S，值 `META`/`STATE`）。
 2. `{prefix}events`（events-out，本 ADR 新增）：PK=`pk`(S，值 `run_id#scope_id`)、SK=`seq`(N)；非键属性 `body`(S) 不进 AttributeDefinitions。**独立于 runs 表、绝不合表**（[0024](./0024-worker-core-protocol.md)：两种访问模式——runs 点读/单元素刷、events 大量追加+范围 Query；合表会踩 run_id 热分区、破 [0030](./0030-realtime-persistence-seam.md) 单写者不变量）。
 
@@ -25,7 +25,7 @@
 
 **ECS / Fargate：**
 4. ECS cluster `{prefix}cluster`。
-5. **每引擎一个 task definition + 一个容器镜像（2 个，见「2 镜像」节）**：task-def family = `{prefix}{engine}-worker`（`engine`=引擎规范名 `novaact`/`midscene`，即 `{prefix}novaact-worker` / `{prefix}midscene-worker`——须与 cli `compose.task_def_name` 逐字一致）。Fargate 兼容、`networkMode=awsvpc`。**`stopTimeout` 显式设为 120s（`stack._resolve_stop_timeout`，贴 Fargate ≤120s 平台上限）、可经 CDK context `-c stop_timeout=N` 覆盖**（synth 期对非整数/越界 `[1,120]` fail-fast）——做成可配是为 grace 真容器标定期迭代试不同值免改 code。**grace 预算解法归 [0032](./0032-fargate-execution-environment.md)、已真容器标定**（曾担心 Nova grace 下限 > 120s 硬上限的冲突，0032 结论 4 实测厘清：subprocess 侧压 margin 60→30 后下限 150 满足不变量、Fargate 侧对最坏长 act 结构性接受 SIGKILL+TTL 兜底；`ACT_TIMEOUT_S` 不动），**不是 stopTimeout 是否设值**（`FargateWorkerHandle.stop` 忽略运行期 grace 只发 StopTask，真实宽限由此 task-def 期 `stopTimeout` 决定）。**task-def 内 container 元素名 = `{engine}-worker`（不带 prefix，见下「container 名约定」）**。**task-def 不设 `AWS_REGION`/`AWS_PROFILE`**（见「task-def 不焊 region/凭证」）。
+5. **每引擎一个 task definition + 一个容器镜像（2 个，见「2 镜像」节）**：task-def family = `{prefix}{engine}-worker`（`engine`=引擎规范名 `novaact`/`midscene`，即 `{prefix}novaact-worker` / `{prefix}midscene-worker`——须与 cli `compose.task_def_name` 逐字一致）。Fargate 兼容、`networkMode=awsvpc`。**`stopTimeout` 显式设为 120s（`stack._resolve_stop_timeout`，贴 Fargate ≤120s 平台上限）、可经 CDK context `-c stop_timeout=N` 覆盖**（synth 期对非整数/越界 `[1,120]` fail-fast）——做成可配是为 grace 真容器标定期迭代试不同值免改 code。**grace 预算解法归 [0032](./0032-fargate-execution-environment.md)、已真容器标定**（曾担心 Nova grace 下限 > 120s 硬上限的冲突，0032 结论 4 实测厘清：subprocess 侧压 margin 60→30 后下限 150 满足不变量、Fargate 侧对最坏长 act 结构性接受 SIGKILL+TTL 兜底；`ACT_TIMEOUT_S` 不动），**不是 stopTimeout 是否设值**（`FargateWorkerHandle.stop` 忽略运行期 grace 只发 StopTask，真实宽限由此 task-def 期 `stopTimeout` 决定）。**task-def 内 container 元素名 = `{engine}-worker`（不带 prefix，见下「container 名约定」）**。**task-def 不设 `AWS_REGION`/`AWS_PROFILE`**（见「task-def 不焊 region/凭证」）。**container 日志走 `awslogs` log driver → 每引擎一个 CloudWatch 日志组 `/{prefix}worker/{engine}`**（stream 前缀 = 引擎名、保留 14 天、随 stack 销毁）——cloud 档没有本机 worker 日志文件，排障看它（[0041](./0041-agent-facing-cli-affordances.md) 决策二）。
 6. ECR 仓库（2 个，各承一镜像）。
 7. VPC 网络：subnet(s) + security group(s)（`awsvpcConfiguration` 用；ID 走 SSM，见「subnet/sg 走 SSM」）。**VPC 来源三档可指定**（见下「VPC 来源」）——曾默认建新（历史注：0037 决策 6 实装后 `gherkai deploy --vpc default|new|<vpc-id>` **必给、无隐式默认**，三档能力不减），支持复用现有/默认 VPC 避 NAT 成本。
 
@@ -167,7 +167,7 @@ subnet/sg 不是「名字」，是 **AWS 建 VPC 时生成的 ID**（`subnet-0ab
 
 - **`build_fargate_engines`（对称 `build_engines` 的 dict）**：按 `job.engine` 造 `FargateEngine`（`new_run_id()` 后把 run_id + cluster + 按引擎选的 task-def + network（读 SSM）+ events 表名 + container-name + job-s3 + artifact-s3 + **SDK 产物落点 env** + region 一起注入构造，对称已有 store 注入；**不传 profile**——决策 C 非对称）。
 - **产物上传要注入两组 env、缺一不可（真跑暴露）**：worker `ArtifactUploader` 上传需要 ① `ARTIFACT_S3_BUCKET`/`PREFIX`（S3 落点）**和** ② SDK 产物本地落点 env（`NOVA_LOGS_DIR`/`MIDSCENE_RUN_DIR`，容器内路径，如 `/tmp/gherkai-run/<run_id>/{nova-trajectories,midscene-run}`）——uploader 用后者的父级算 `run_dir`/相对 key，**缺它 `run_dir=None` → uploader no-op → 报 `file://` → 产物写容器盘、STOPPED 后随盘销毁必丢**（ADR [0029](./0029-engine-artifacts-to-s3.md)）。subprocess 侧 `build_engines` 本就注入 SDK 落点 env，Fargate 侧曾漏（只注 S3 落点）——**只注 ①不注②等于没上传**。这两组按引擎不同（Nova `NOVA_LOGS_DIR` / Midscene `MIDSCENE_RUN_DIR`），组合根按引擎算好、`FargateEngine` 引擎无关地转发。
-- **按引擎选 task-def**：`job.engine` → `{prefix}{engine}-worker`（对称 `EngineResolver` 按 engine 选 cmd）。
+- **按引擎选 task-def**：`job.engine` → `{prefix}{engine}-worker`（对称 `EngineResolver` 按 engine 选 cmd）。（历史注：[0038](./0038-worker-image-delivery.md) 实装后**运行时不再由 family 名推导**——组合根必须收到 `worker_task_defs`（引擎 → task-def **revision** ARN；提交侧 preflight 按 variant 解析、写进 definition），RunTask 传**显式 revision、绝不传 family**（传 family 会取最新 ACTIVE revision、让一次推送劫持在跑的 run）；映射里没有的引擎装空腿、真去起它才抛。family 名本身不变、仍是命名契约（见上「资源清单」5. 与「两层命名」），只是不再作 RunTask 入参。）
 - **Fargate 配置参数**：`--prefix`/`--cluster`/`--subnet`/`--security-group`/`--events-table` 等走 CLI 参数、默认 = prefix 推导 / SSM 读、可覆盖（决策 C，[0016](./0016-execution-architecture-core-lib-run-model.md)）。
 - **`--backend cloud` 切执行引擎**：决策 A 从设计落到 CLI 的动作点——cloud ⇒ FargateEngine 而非 SubprocessEngine。
 - **report ⊥ 执行（关键，别耦合）**：`--backend` 定**执行环境**（cloud⇒Fargate）、`--no-report` 定**落不落库**，两轴正交。故组合根把「Fargate 执行配置解析 + 切 FargateEngine」放在 `do_report` **之外**（只看 `--backend cloud`）——`--backend cloud --no-report` = **Fargate 执行 + 不落库**（不是退回 subprocess）。`--no-report` 的逃生舱只跳过 store 落库（`persistence=None`），绝不改执行环境。（被拒的错误接线：把 FargateEngine 切换塞进 `if do_report` 分支——会让 `--no-report` 意外把执行退回 subprocess，违背决策 A 的「cloud=Fargate 与 report 无关」。）

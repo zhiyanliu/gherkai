@@ -36,7 +36,8 @@ gherkai submit <features> --backend cloud
      （只写 DDB、不起 task——冷启动交kicker Lambda，见下 cloud 端到端流程；local 则 fork per-run 进程推进）
 gherkai status <run_id> [--wait]
    → 不带 --wait：读 RunState 渲染一次（**纯只读、零副作用、不 kickoff/tick**——保「查看」无惊讶 + 只需读权限）。
-     读到仍 `pending` 时**只打一句诊断提示**「若已提交较久仍 pending，推进可能未启动，可 `status --wait` 接力」
+     读到 run 级仍 `pending` **且所有 job 仍 pending** 时**只打一句诊断提示**「若已提交较久仍 pending，推进可能未启动，
+     可 `status --wait` 接力」（判据的后半条为何必要——claim 窗口内 run 级 pending 而 job 已 running，见下机制三「已知诊断窗口」）
      ——提示而不自动推进（决定权留用户；救活走 --wait，不给纯查看强加 invoke/起 task 权限）。**local/cloud 两路
      此渲染+提示+退出码逻辑经共享函数（`_render_status`）同一份实现、行为一致**，只 `--wait` 命令示例按后端异
      （local 用 `--report-dir` / cloud 用 `--backend cloud --prefix`）。
@@ -55,7 +56,7 @@ gherkai run <features>    # 原阻塞皮 = 同进程 schedule() 驱动循环（T
 
 ```
 1. submit(CLI)：plan → create_run 写 RunMeta+全 pending 到 runs 表 → CLI 退出（run_id 已在手）。
-   **只写 DDB、不起任何 task**——submit 机器权限面仅「runs 表写 + preflight 只读探活（Describe*/Get*/Head*，含 detached 链三 Lambda 存在性，[0033] preflight 条）」，不碰 ECS RunTask（冷启动由kicker Lambda 做，见下）。
+   **只写 DDB、不起任何 task**——submit 机器权限面仅「runs 表写 + preflight 只读探活（Describe*/Get*/Head*，含 detached 链三 Lambda 存在性，[0033](./0033-iac-aws-backend-and-composition-wiring.md) preflight 条）」，不碰 ECS RunTask（冷启动由kicker Lambda 做，见下）。
 1b. runs 表 Stream（**仅 INSERT 且带 `detached` 标记**）→ [kicker Lambda]：新 run 的 **STATE item 落库即触发**
      （写序契约见下，触发时 definition 必已在库）→ tick 起首批 min(max_concurrency, |jobs|) 个 task（CAS 抢占；
      max_concurrency 随 definition 到达、与部署侧 cap 取 min，见下机制四）。这是纯事件驱动链的**冷启动**（无此步则无 events/无 STOPPED，
@@ -104,7 +105,7 @@ per-run 进程（观察者+reconciler 三合一）：spawn worker 子进程
    · proc.wait() 拿 exitcode 写 task_exited · 推演写本地 RunState · 启下一个 · 全 done 自退
 ```
 
-**同一份 core 推演码，两个宿主（Lambda / per-run 进程）各注入自己的 adapter**——local/cloud 对称落到 events 通道：两侧 reconciler 都从持久 events 重放推演，**唯一差别是存储介质**（DDB 表 vs 本地 SQLite）+ **谁把 worker 事件写进该存储**（cloud=worker 自己 PutItem，[0024]；local=per-run 进程读 worker fd3 后旁路落 SQLite）。
+**同一份 core 推演码，两个宿主（Lambda / per-run 进程）各注入自己的 adapter**——local/cloud 对称落到 events 通道：两侧 reconciler 都从持久 events 重放推演，**唯一差别是存储介质**（DDB 表 vs 本地 SQLite）+ **谁把 worker 事件写进该存储**（cloud=worker 自己 PutItem，[0024](./0024-worker-core-protocol.md)；local=per-run 进程读 worker fd3 后旁路落 SQLite）。
 
 **关键：local 的 worker 不改、对 SQLite 无知（实装校准）**——worker 仍讲 [0024](./0024-worker-core-protocol.md) fd3 协议吐原始 JSON 行（引擎无关、两执行环境同一份 worker），SQLite 落库是 per-run 进程侧 `SubprocessLauncher` 读 fd3 时旁路做的（存原始行 + 按到达序赋 worker 段单调 seq）。故「worker 写持久 events 存储」在 local 的准确表述是「per-run 进程代 worker 写」——worker 业务零改，对称性落在「事件最终进了持久可重放存储」这一层，非「worker 自己写哪」。
 
@@ -115,7 +116,7 @@ per-run 进程（观察者+reconciler 三合一）：spawn worker 子进程
 1. **主力**：cloud=DDB Stream 事件（runs 表 INSERT→kicker 冷启动 / events 表→reconciler 级联推进）/ local=per-run 进程——正常一路推完。
 2. **兜底/接力**：`status --wait`——per-run 进程崩、或 Stream 偶发断链/丢投时，人来查即接力推（状态全持久、tick 幂等，断点续）。**local 与 cloud 的接力机制本质不对称（关键，勿混）**：
    - **local 接力 = 本机进程亲自跑 tick**（spawn subprocess worker、读 SQLite、finalize）。**推进全靠这个本机进程**——掐掉即停（local 无云端接管者）。故 local 必须**有本机进程真跑到终态**：要么 submit fork 的 per-run 进程，要么 per-run 崩后 `status --wait` 顶上、且**必须一直 wait 到底**。
-   - **cloud 接力 = 检测卡住才异步 fire-and-forget invoke kicker Lambda**（`InvocationType=Event`、不等返回）。**kickoff（秒级）即完成救活**——此后即便退出 `status`，云端 Lambda 链（kicker起首批 → events Stream → reconciler）自接管跑完，**不依赖本机 status 进程存活**。**「检测卡住」= 状态连续 K 轮无变化才踢**（记住上轮 `(status, high_water_mark)`，连续 K 轮不变→判卡住→invoke 一次→重置）——**非每轮无脑踢**：run 正常推进（hwm 在涨/态在变）时一次都不踢，只在真卡住（冷启动丢投卡 pending、或中途丢投卡 running）时踢。避免正常路径下 N 次无效 invoke（kicker tick 发现无 pending 即 no-op、白白重放读 DDB）——对齐「零空转、只在真需要时动」的事件驱动精神（[CLAUDE.md「工作方式」：交付物运行成本是设计约束]，同否决定时器轮询的理由）。检测是纯客户端内存比较、零额外 AWS 调用/权限。保 status 机器零 ECS 权限（起 task 走 Lambda 角色）；Lambda 名从 `--prefix` 推理、用户无感。
+   - **cloud 接力 = 检测卡住才异步 fire-and-forget invoke kicker Lambda**（`InvocationType=Event`、不等返回）。**kickoff（秒级）即完成救活**——此后即便退出 `status`，云端 Lambda 链（kicker起首批 → events Stream → reconciler）自接管跑完，**不依赖本机 status 进程存活**。**「检测卡住」= 状态连续 K 轮无变化才踢**（记住上轮 `(status, high_water_mark)`，连续 K 轮不变→判卡住→invoke 一次→重置）——**非每轮无脑踢**：run 正常推进（hwm 在涨/态在变）时一次都不踢，只在真卡住（冷启动丢投卡 pending、或中途丢投卡 running）时踢。避免正常路径下 N 次无效 invoke（kicker tick 发现无 pending 即 no-op、白白重放读 DDB）——对齐「零空转、只在真需要时动」的事件驱动精神（[CLAUDE.md「工作方式」：交付物运行成本是设计约束](../../CLAUDE.md)，同否决定时器轮询的理由）。检测是纯客户端内存比较、零额外 AWS 调用/权限。保 status 机器零 ECS 权限（起 task 走 Lambda 角色）；Lambda 名从 `--prefix` 推理、用户无感。
    - **一句话**：cloud「kickoff即可离场」/ local「本机必须跑到底」。根因在**主推进器位置**（cloud 云端 Lambda / local 本机进程，见 1.）——三触发源「齐备」是表层对称，「本机是否必须跑到底」才是里层不对称。
 3. 三者同时触发也无害——靠下面 CAS + HWM 条件写。**`status` 对 cloud 是可选的查看+崩溃kickoff（非推进链必需环，云端链才是）；对 local，per-run 崩后 status --wait 是唯一本机推进者、此时反而是必需环**。
 
@@ -237,7 +238,7 @@ adapter/组合根（Lambda handler / per-run 进程，注入具体 client）：
 
 moto 立即返回测不到事件投递/并发时序，健康网真跑不触发这些路径——故下列是「绿≠对」边界的唯一有效证据：
 
-- **H1 事件 payload 带 exitCode（4/4，含最硬的 SIGKILL 截断）**：正常退出 exitCode=0→payload 带 0；缺 job 非 0 退出=1→带 1；StopTask 软停=0→带 0；**忽略 SIGTERM 的 sleeper 被 SIGKILL 硬杀=137→payload 仍带 137**。结论：观察者从 STOPPED 事件读 exitCode 可靠（事件锚在 `stoppedAt`、已过 exitCode 落值窗口）→ 机制二「极薄观察者」成立、机制二兜底降为防御性冗余。
+- **H1 事件 payload 带 exitCode（4/4，含最硬的 SIGKILL 截断）**：正常退出 exitCode=0→payload 带 0；缺 job 非 0 退出=1→带 1；StopTask 软停=0→带 0；**忽略 SIGTERM 的 sleeper 被 SIGKILL 硬杀=137→payload 仍带 137**。结论：观察者从 STOPPED 事件读 exitCode 可靠（事件锚在 `stoppedAt`、已过 exitCode 落值窗口）→ 机制二「极薄观察者」成立；缺码时重查 DescribeTasks 的兜底整体被拒（见机制二「退出码缺失：观察者落哨兵、不留宽限态」条），缺码一律落非 0 哨兵 + `reason`。
 - **H2 延迟**：EventBridge→Lambda 投递 **0.6s**（近瞬时）；但端到端「worker 真停(`executionStoppedAt`)→可归约」= **~27s**，瓶颈全在 ECS 平台 `executionStoppedAt→stoppedAt` 清理开销（STOPPED 事件锚在 `stoppedAt`）。放大了 [0032](./0032-fargate-execution-environment.md) 记的 ~11s 平台滞后。**级联每步有 ~20-30s 固有尾延迟**——对异步跑批可接受，`status --wait` 会有此尾延迟，属已知特性。
 - **H3/机制三/四 并发写序（真 DDB）**：HWM 条件写——B 写终态(hwm=20)后 A 用旧快照(hwm=10)迟到写被 `ConditionalCheckFailedException` 挡、终态未被刷回 running；同 hwm 重复写幂等。**DDB Streams 并发度=2**（4 job 触发 2 个并发 Lambda 实例）→ 坐实「并发 reconciler」前提真实、HWM 条件写用得上；**同 PK 严格保序**（每 job seq `[1..5]` 按序到达）。
 

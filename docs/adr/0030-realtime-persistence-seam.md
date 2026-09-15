@@ -166,10 +166,10 @@ Map 形状下 `update_job_state` 各 scope 互不干扰、天然支持单元素�
 - **core model 一次到位、已落地**（不留到 DDB 阶段），落点 + 两条**防回归护栏**（原改造中两个会静默出错的陷阱）：
   - `model.RunState.jobs`：`dict[str, JobState]`（原 `tuple[JobState,...]`）。
   - `serialize.run_state_to_dict`：**护栏**——必须 `state.jobs.values()` 迭代；直接 `for js in state.jobs` 拿到的是 dict 的 **key（字符串）**、`js.scope_id` 静默 AttributeError。
-  - `serialize.run_state_from_dict`：决定**落盘 JSON 形状**——本 ADR 选 **JSON 仍落 `list[{scope_id,status,session_id}]`、仅内存模型是 Map**（读回时 `{js.scope_id: js}` 重建），保 `run_state.json` 向后兼容、不动既有文件格式；DDB adapter 才在落库层用真 map item。
+  - `serialize.run_state_from_dict`：决定**落盘 JSON 形状**——本 ADR 选 **JSON 仍落 `list[{scope_id,status,session_id}]`（[0034](./0034-detached-batch-reconciler.md) 后每条另带 omit-when-None 的 `claimed_at`）、仅内存模型是 Map**（读回时 `{js.scope_id: js}` 重建），保 `run_state.json` 向后兼容、不动既有文件格式；DDB adapter 才在落库层用真 map item。
   - `run_state_from_result`：投影出 dict 而非 tuple。
   - **`core/tests/test_stores.py`**：**护栏**——RunState 的消费方按 scope_id 取（如 `state.jobs["features/wiki.feature:6"]`），**不用整数下标**（dict 不支持，会 TypeError）。
-  - （**澄清**：`report_store/local.py` 的 index.html 渲染的是 `RunResult.jobs`、cli 也只 `run_state_from_result` **写**、从不**读** `RunState.jobs`——故那两处不是 RunState 消费点，真正会被打破的是上面的 serialize 迭代与 test_stores 下标。）
+  - （**澄清**：`report_store/local.py` 的 index.html 渲染的是 `RunResult.jobs`、不是 RunState 消费点；本决策期 cli 也只**写**（经 `run_state_from_result` 投影，该函数现只剩测试在用）、从不**读** `RunState.jobs`——故改造期真正会被打破的是上面的 serialize 迭代与 test_stores 下标。**此后 cli 已成为 `RunState.jobs` 的读者**（[0034](./0034-detached-batch-reconciler.md) 的 `status`：`cli/gherkai_cli/render.py` 的 `render_run_state` 遍历 `state.jobs.items()`、`_render_status` 的「所有 job 仍 pending」诊断遍历 `state.jobs.values()`）——两处都按 key 遍历/取值，Map 形状原生支持。）
 - skipped 的 job 也要进 Map（它是 definition 的一部分，缺了会让 RunState 的 job 集与 RunMeta.jobs 对不齐）。各新态的 `session_id` 取值规则见 [0031](./0031-job-lifecycle-states-and-severity.md) 决定一；aborted 留 `session_id`（有现场可查）正是 Map 形状的受益场景。
 
 ## 决定六：云端 adapter 的落库形态（DDB/S3）

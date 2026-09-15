@@ -29,7 +29,7 @@ flowchart TD
     F["① 用例层<br/>features/*.feature —— 共享 Gherkin"]
 
     subgraph L2["② 产品层"]
-        CLI["gherkai 命令行<br/>plan / run / submit / status / explain / list-engines / doctor / list-deterministic / deploy / destroy"]
+        CLI["gherkai 命令行<br/>plan / run / submit / status / explain / list-engines / doctor / list-deterministic / skill / deploy / destroy"]
         G["gherkai-runtime —— 运行时层<br/>引擎拉起 · 资源命名 · 本机/云端存储 · 隧道"]
         C["gherkai-core —— 执行核心库<br/>parse → scope 分组 → schedule 调度（零引擎依赖）"]
         CLI --> G --> C

@@ -62,7 +62,7 @@ Midscene 对被测 UI 的语言不限。Nova Act 的支持范围是英文 UI：�
 
 ## 6 机读读法
 
-字段表在 `references/cli-json-contract.md`。几条读法：`message` 恒为「为何不是 passed」，job 级与 step 级同义，通过时为 null；`record_missing` 为 true = 骨架里有这一步、判定明细里没有它的记录（没跑到或没上报），此时 `status` / `votes` / `error_type` / `message` / `duration_ms` 全为 null，但 `report_refs` 是空数组、`shortcircuited` 恒 false，判有没有记录只看 `record_missing`；`evidence_missing` 非 null = 这一步没读到机读证据：`no_ref` 里混着「确定性 step 与导航步本就不产」「AI 跑了但抽取失败」「这一步根本没有记录」三种、在这里分不开，`unreadable` = 指针在但读不到，`unsupported_schema` = 格式版本不认，要区分「没跑」与「跑了没产证据」一律看 `record_missing`；`aborted_hint` 非 null = 这个 job 终态是 aborted 或 error、且判定明细里只有部分 step 的记录，别据此判终态，终态看同层 `status`；`has_step_records` 是 job 级事实、不随筛选变化，为 false 时判定只剩 job 级那一层。`run --json` 的 `artifacts` 给报告与判定明细位置，`--no-report` 时这个键整个不出现；`status --json` 的 `artifacts` 恒在、给的是约定落点，未到终态那些路径可能还没写出来，别拿它的存在当终态判据，终态看同层 `status`。
+字段表在 `references/cli-json-contract.md`。几条读法：`message` 恒为「为何不是 passed」，job 级与 step 级同义，通过时为 null；`record_missing` 为 true = 骨架里有这一步、判定明细里没有它的记录（没跑到或没上报），此时 `status` / `votes` / `error_type` / `message` / `duration_ms` 全为 null，但 `report_refs` 是空数组、`shortcircuited` 恒 false，判有没有记录只看 `record_missing`；`evidence_missing` 非 null = 这一步没读到机读证据：`no_ref` 里混着「确定性 step 与导航步本就不产」「AI 跑了但抽取失败」「这一步根本没有记录」三种、在这里分不开，`unreadable` = 指针在但读不到，`unsupported_schema` = 格式版本不认，要区分「没跑」与「跑了没产证据」一律看 `record_missing`；`aborted_hint` 非 null = 这个 job 终态是 aborted 或 error、且判定明细里只有部分 step 的记录，别据此判终态，终态看同层 `status`；`has_step_records` 是 job 级事实、不随筛选变化，为 false 时判定只剩 job 级那一层。`run --json` 的 `artifacts` 给报告与判定明细位置，`--no-report` 时这个键省略（唯一例外：本机跑且同时给了 `--quiet`，那时它只剩一个 `worker_log`）；`status --json` 的 `artifacts` 恒在、给的是约定落点，未到终态那些路径可能还没写出来，别拿它的存在当终态判据，终态看同层 `status`。
 
 ## 7 旋钮按「谁有这个 flag」分组
 
@@ -102,7 +102,7 @@ job 级：
 ```
 用例：<scope_id>（整个 job，判否不落在某一步）  引擎：<engine>
 判定：<error(<error_type>)|aborted>  原因：<message 原文>
-建议：<把这个 scope 拆小 | 给它加 @timeout:<秒>（或调 --default-job-timeout） | 被 fail-fast 掐停的：根因在先失败的那个 job，先汇报那条 | 环境或引擎的问题：见 references/setup-and-diagnosis.md>
+建议：<把这个 scope 拆小 | 给它加 @timeout:<秒>（或调 --default-job-timeout） | 被 fail-fast 掐停的：根因在先失败的那个 job，先汇报那条 | 环境或引擎的问题：<一句说清是哪一样，如 worker 版本与 CLI 不一致、region 或凭证缺失、隧道断开>>
 重跑：gherkai run <feature> --scope <scope_id>
 ```
 

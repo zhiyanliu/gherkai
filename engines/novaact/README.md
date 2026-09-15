@@ -17,7 +17,7 @@ CLI 按这个顺序找 worker，命中即用：① 环境变量 `GHERKAI_WORKER_
 ## AWS 前置
 
 - **纯 IAM 鉴权**：走本机 AWS 默认凭证链（profile / 环境变量 / 实例角色皆可）。**不需要 `NOVA_ACT_API_KEY`**——本引擎不用 API key。
-- **region 必须显式给**：`AWS_REGION`，或 `gherkai run --region <R>`；未设即报错，不猜默认 region。
+- **region 必须解析得出**：`gherkai run --region <R>`，或 `AWS_REGION` / `AWS_DEFAULT_REGION`，或 profile 配置里的 region；四处都没有即报错，不猜默认 region。
 - 该 region 下账号需可用：**Nova Act 服务**（`nova-act`）+ 模型 `nova-act-latest`，以及 **AgentCore Browser**（`bedrock-agentcore`）。浏览器跑在云端，本机**不需要装 Chromium**。
 - Nova Act 的 workflow definition 由 worker **自动按需创建**（幂等，已存在即跳过），不必手工预建。
 
@@ -44,7 +44,7 @@ def login(ctx, user):
 - 目录**排序递归**遍历 `*.py`；跳过 `_*.py`（你自己的辅助模块，供相对 import 用）与 `test_*.py`（你自己的测试）。
 - 本包内建一条示范锚点 `页面地址匹配 "<正则>"`，装上即可在 `.feature` 里直接写 `Then 页面地址匹配 "/wiki/OpenAI"`。
 
-目录怎么告诉 CLI：`gherkai run --steps-dir ./steps`（`run` / `submit` / `plan` / `list-deterministic` 四处都有此选项），缺省 `./steps`。
+目录怎么告诉 CLI：`gherkai run --steps-dir ./steps`（`run` / `submit` / `plan` / `list-deterministic` / `doctor` 五处都有此选项），缺省 `./steps`。
 
 ### 用错了会怎样（一律响亮失败，绝不静默降级）
 

@@ -1,7 +1,7 @@
 # gherkai CLI 的 `--json` 字段契约
 
 > **定位**：给拿 `--json` 写脚本或 agent skill 的人看的参考页（ADR 0041 决策五）。**权威在 code**：`core/gherkai_core/serialize.py`
-> 与 `cli/gherkai_cli/render.py`（渲染器）、`cli/gherkai_cli/__main__.py`（`doctor` / `list-engines`）、
+> 与 `cli/gherkai_cli/render.py`（渲染器）、`runtime/gherkai_runtime/compose.py`（`artifacts` 四键的落点拼装：`local_artifact_locations` / `cloud_artifact_locations`）、`cli/gherkai_cli/__main__.py`（`doctor` / `list-engines`，另注入 `artifacts.worker_log`）、
 > `deploy_aws/gherkai_deploy_aws/workers.py`（`list-workers`）；worker 侧两块：`engines/novaact/gherkai_worker_novaact/evidence.py`
 > 与 `engines/midscene/src/worker/evidence.mts`（`evidence` 的固定键，两引擎同形）、`engines/novaact/gherkai_worker_novaact/deterministic.py`
 > 的 `list_registry()` 与 `engines/midscene/src/worker/deterministic.mts` 的 `listRegistry()`（`list-deterministic` 的三键，worker 自述、CLI 只转述）。

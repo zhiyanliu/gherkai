@@ -54,7 +54,7 @@ aws bedrock-agentcore stop-browser-session  --region us-east-1 --browser-identif
 - https://github.com/astral-sh/attest-action — 生成 PEP 740 attestation 的 Action（在 `uv publish` 之前）
 - https://github.com/astral-sh/uv/issues/9811 — uv 不把 workspace/path 依赖翻译成版本 pin（`needs-design`，open）
 - https://github.com/ninoseki/uv-dynamic-versioning — git tag 派生版本 + hatch metadata hook 渲染 `pkg=={{ version }}`（依赖须整体 dynamic、`[project]` 侧删除）
-- https://github.com/pydantic/pydantic-ai/blob/main/clai/pyproject.toml · https://pypi.org/pypi/clai/json — 上述三段配置的生产先例（`Requires-Dist: pydantic-ai==2.31.1`）
+- https://github.com/pydantic/pydantic-ai/blob/main/clai/pyproject.toml · https://pypi.org/pypi/clai/json — 上述三段配置的生产先例（`Requires-Dist: pydantic-ai==<clai 同版本>`，随 clai 发版前进；2026-09 采样为 `==2.43.0`）
 - https://docs.pypi.org/trusted-publishers/creating-a-project-through-oidc/ — pending publisher **不**预留项目名（他人先注册即失效）
 - https://packaging.python.org/en/latest/discussions/distribution-package-vs-import-package/ — 发行名与 import 名不强制任何关系；同名顶层 import 包可由多个发行包提供
 - https://packaging.python.org/en/latest/guides/tool-recommendations/ — PyPA 官方工具推荐（仍只列 pipx）；对照 https://pipx.pypa.io/latest/how-to/use-uv-backend.html（pipx 的 uv backend）与 https://pipx.pypa.io/latest/how-to/standalone-python.html（`--fetch-python missing`）
@@ -85,7 +85,7 @@ aws bedrock-agentcore stop-browser-session  --region us-east-1 --browser-identif
 ## Agent Skills（见 ADR 0043）
 
 - https://agentskills.io/specification — Agent Skills 开放规范：`SKILL.md` frontmatter（`name` 小写连字符 ≤ 64 且等于目录名、`description` ≤ 1024 字符）、正文建议 < 500 行、`references/` `scripts/` `assets/` 三类捆绑资源、渐进式披露（元数据常驻 → 触发时读正文 → 按需读 references）
-- https://github.com/vercel-labs/skills — `npx skills add <source>`：容器目录默认只扫 `skills/` `.claude/skills/` 等惯用位，任意路径用 `tree/<ref>/<path>` 直指（可钉 tag）；`--agent` 选安装位；Claude Code 落 `.claude/skills/`、Codex 落 `.agents/skills/`（`.codex/skills` 官方从未列出）
+- https://github.com/vercel-labs/skills — `npx skills add <source>`：容器目录默认只扫 `skills/` `.claude/skills/` 等惯用位，任意路径用 `tree/<ref>/<path>` 直指（可钉 tag）；`--agent` 选安装位，`-g` 切全局；Claude Code 落 `.claude/skills/` / `~/.claude/skills/`、Codex 落 `.agents/skills/` / **`~/.codex/skills/`**（项目级 `.codex/skills` 官方从未列出；Codex 全局位与 `gherkai skill install` 的 `~/.agents/skills/` 分叉，见 ADR 0043 决策三）
 - https://developers.openai.com/codex/skills — Codex skills：项目级 `.agents/skills/`、用户级 `~/.agents/skills/`；AGENTS.md 只需一行指针
 - https://code.claude.com/docs/en/skills — Claude Code skills：项目级 `.claude/skills/`、用户级 `~/.claude/skills/`；frontmatter 允许宿主扩展键
-- skill-creator（Anthropic `example-skills` 插件内，本机 `~/.claude/plugins/cache/anthropic-agent-skills/example-skills/<hash>/skills/skill-creator/`）——评测循环（`evals.json` schema、with-skill vs baseline 两臂、`scripts/aggregate_benchmark.py`、`eval-viewer/generate_review.py`）与 description 优化（`scripts/run_loop.py --eval-set <触发集> --skill-path <skill> --model <模型>`，train / held-out 分割）
+- skill-creator（Anthropic `example-skills` 插件内，本机 `~/.claude/plugins/cache/anthropic-agent-skills/example-skills/<hash>/skills/skill-creator/`）——评测循环（`evals.json` schema、with-skill vs baseline 两臂、`scripts/aggregate_benchmark.py`、`eval-viewer/generate_review.py`）与 description 优化（`scripts/run_loop.py --eval-set <触发集> --skill-path <skill> --model <模型>`，train / held-out 分割；**其触发测量经 `scripts/run_eval.py` 走 `.claude/commands/<name>.md` 那套、在 Claude Code 2.1.270 上对本项目 skill 实测恒 0**，触发率改用自写驱动，见 ADR 0043 决策七）

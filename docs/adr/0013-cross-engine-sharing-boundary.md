@@ -17,7 +17,7 @@
 | 鉴权 | SigV4 自签（[0008](./0008-midscene-bedrock-auth-sigv4-selfsign.md)） | IAM + Workflow（[0004](./0004-novaact-iam-auth-via-workflow.md)） | ❌ 机制根本不同 |
 | 模型调用 | OpenAI chat-completions（Qwen3-VL） | Nova 自家 SDK | ❌ |
 | 浏览器接入 | connectOverCDP + 自签 upgrade | provider.cdp_session() | ⚠️ 概念像、实现各异 |
-| 断言 | aiAssert / page | act_get / page | ⚠️ 语义对齐、API 不同 |
+| 断言 | aiBoolean / page | act_get(BOOL_SCHEMA) / page | ⚠️ 语义对齐、API 不同 |
 
 即便都用同一语言，SigV4 与 IAM-Workflow 也是两套东西，抽不到一起。**共享停留在概念层（都接 AgentCore、都出报告、都跑同一 `.feature`），不在代码层。** 引擎内复用（如 `engines/midscene/src/lib/agentcore-sigv4.mts` 被 Midscene 的 spike 与 worker 共用）是健康的，但那是**引擎内**，不是跨引擎——勿混（CONTEXT 曾误把 SigV4 写成"两个引擎共享"，已更正）。
 

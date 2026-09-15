@@ -75,7 +75,7 @@ asset 落进 `gherkai deploy` 的临时工作目录（`GHERKAI_LAMBDA_ASSET_DIR`
 ## 本地验证（不碰 AWS）
 
 ```bash
-uv run pytest deploy_aws/tests -q   # stack 合成断言 + Provider + Lambda asset + Lambda handler + worker 镜像族
+uv run pytest deploy_aws/tests -q   # stack 合成断言 + Provider + Lambda asset + Lambda handler + worker 镜像族 + skill 的 deploy/destroy 旋钮文案（test_skill_deploy_tokens.py）
 ```
 
 本包是根 uv workspace 的成员，一次 `uv sync` 即装齐；命令从仓库任意位置都可跑（`uv run gherkai …`）。

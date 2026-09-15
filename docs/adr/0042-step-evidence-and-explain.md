@@ -54,7 +54,7 @@
 }
 ```
 
-字段全部**可选容缺**（缺 → `null` / 空数组），schema 只承诺键名与类型，不承诺每个引擎每次都填满。**error act 的契约**：act 抛错 → 该 act 的 `error` 非空、`prompt` 与 `time_worked_s`（异常 metadata 带）仍填；Nova 侧 `frames: []`（SDK 不落 json），Midscene 侧 frames 仍在。这是 SDK 事实、不是抽取失败，`explain` 不报 `evidence_missing`。两引擎在 error step 上**不同形**，消费端别把 Nova 的空 frames 当 bug。
+字段全部**可选容缺**（缺 → `null` / 空数组），schema 只承诺键名与类型，不承诺每个引擎每次都填满。**error act 的契约**：act 抛错 → 该 act 的 `error` 非空、`prompt` 与 `time_worked_s`（异常 metadata 带）仍填；Nova 侧 `frames: []`（SDK 不落 json），Midscene 侧 frames 通常仍在——但抛错早于 SDK 记下任何 execution（如指令刚发出就断连）时，Midscene 也只留一条只带 `error`、`frames: []` 的 act。这是 SDK 事实、不是抽取失败，`explain` 不报 `evidence_missing`。两引擎在 error step 上**不同形**，消费端别把空 frames 当 bug。
 
 **引擎映射**（SDK 耦合唯一允许存在的地方：各引擎一个纯函数、用真产物裁成的 fixture 钉住；判别一律按**值**，不按 SDK 的布尔标志——Nova 的 `is_tool` / `is_return` 在真产物里对所有 call 都是 False，按它判会静默取空）：
 
@@ -64,7 +64,7 @@
 | act | 一个 trajectory 文件（一次 act / act_get；N 票断言 = N 个 act） | 一个 execution（一次 `aiAct` / `aiBoolean` / `aiQuery`） |
 | act.prompt | worker 自己构造的指令串（同送给 `act` 的那个）；**不取** json 的 `prompt`——`act_get` 时 SDK 在尾部追加了 `, format output with jsonschema: {...}` | worker 自己构造的指令串；`execution.name` 形如「Act - <指令>」「Boolean - <断言>」，是 SDK 展示名、不当真值 |
 | act.vote | `bool(r.matches_schema and r.parsed_response)`，与 `step_done` 的票源同一表达式（不要用 `result` 反推：模型回非 JSON 或不过 schema 时 `matches_schema=False` 记 no，而 return call 的 kwargs 里仍留着看似为真的原文） | `aiBoolean` 的返回值 |
-| act.url | 末 frame 的 `active_url` | 调用返回后 `page.url()` |
+| act.url | 末 frame 的 `active_url` | step 末取一次 `page.url()`（同 step 各 act 共用；同一 step 内页面通常不变） |
 | frame | `steps[i]` | `tasks[i]` |
 | frame.url | `steps[i].active_url` | null（`uiContext` 只有 shotSize / dpr / screenshot） |
 | frame.thought | `steps[i].program.calls` 中 `name == "think"` 的 `kwargs.value`（多个则换行拼接） | `tasks[i].thought` 非空则取之；否则回落 `tasks[i].output.thought`（真产物：`Insight/Boolean` 的推理在 `thought`，`Planning/Plan` 的推理在 `output.thought`；`Planning/Locate` 带空串、`Action Space/*` 无 → null，按值判非空） |
@@ -74,7 +74,7 @@
 | act.error | act 抛出的异常压成**一行** `类型: 信息`（SDK 异常带 `.message` 取它，否则 str() 首个非空行；折叠空白、封顶 300 字。真跑暴露：`ActTimeoutError` 的 str() 是十几行 repr 加反馈链接，整段进 message 会把 run 文本 / explain / jobs json 的「原因」撑开；同一函数也产 `step_done.message`） | `tasks[*].errorMessage` 首个非空 |
 | act.time_worked_s | `metadata.time_worked_s` | null |
 
-**截图策略（有上界）**。单次 AI 调用的帧数由引擎 SDK 的默认步数上限封顶（Nova = 30，worker 不改它），每帧一张截图，再乘 `--assertion-votes`（入口只校验 ≥ 1），不设上界时单个 failed Then 可达数十帧、按 100 到 200 KB/帧即 10 MB 量级。故：**frames 列表保留全部 frame 的 thought / actions / url（文本很小），只有 `screenshot` 受限**——failed / error step 每个 act 最多 K = 3 张（末帧、首个含 thought 的帧、出错帧，去重后取前 K），每 step 总数再封 M = 12；passed step 每 act 只留末帧一张。Midscene 侧按 `ScreenshotItem.id` 去重后计。`--no-report` 档（`GHERKAI_NO_ARTIFACTS=1`，[0037](./0037-distribution-and-packaging.md) 决策 3）不产 evidence，且此档 Midscene 关了 `generateReport`、`persistExecutionDump` 随之不设（SDK 禁止二者组合）。
+**截图策略（有上界）**。单次 AI 调用的帧数由引擎 SDK 的默认步数上限封顶（Nova = 30，worker 不改它），每帧一张截图，再乘 `--assertion-votes`（入口只校验 ≥ 1），不设上界时单个 failed Then 可达数十帧、按 100 到 200 KB/帧即 10 MB 量级。故：**frames 列表保留全部 frame 的 thought / actions / url（文本很小），只有 `screenshot` 受限**——failed / error step 每个 act 最多 K = 3 张（末帧、首个含 thought 的帧、出错帧，去重后取前 K；**Nova 侧只有前两项**——frame 自身不带错误标记，抛错的 act 又无 frames（见上「error act 的契约」），无「出错帧」可选，K 仍按 3 留作上界），每 step 总数再封 M = 12；passed step 每 act 只留末帧一张。Midscene 侧按 `ScreenshotItem.id` 去重后计。`--no-report` 档（`GHERKAI_NO_ARTIFACTS=1`，[0037](./0037-distribution-and-packaging.md) 决策 3）不产 evidence，且此档 Midscene 关了 `generateReport`、`persistExecutionDump` 随之不设（SDK 禁止二者组合）。
 
 **落哪、怎么传**。evidence 落在**各引擎自己的产物目录**下：Nova `NOVA_LOGS_DIR/evidence/<scenario 键>/step-<n>/`，Midscene `MIDSCENE_RUN_DIR/evidence/<scenario 键>/step-<n>/`；目录内 `evidence.json`，Nova 的截图 `act-<i>-frame-<j>.jpg`（Midscene 的截图是 SDK 落在 `report/screenshots/` 的文件，只引用）。**`<scenario 键>` 由 `scenario_id`（`<uri>:<行>[:<example 行>]`）派生，不用显示名**：标题不唯一（同文件重名只靠 id 区分、`@scope` 又允许跨文件合并成一个 job），且产物目录按 run 共享、S3 key 按相对 run 目录镜像，同一 run 内所有 scope 共用这一命名空间；派生必须确定性且不二次撞名（分隔符转义 + 尾附 id 短哈希），撞了 key 的表现是 evidence 静默互相覆盖、`explain` 读到另一条 scenario 的 thought 且无从察觉。放在引擎目录内的理由：两引擎上传器的 S3 key 都相对各自 run 目录算，复用 [0029](./0029-engine-artifacts-to-s3.md) 的上传器（key 计算、幂等去重、scope 末整目录递归 flush）而不引入新的注入 env 与上传根。**不是零改动**：① 两引擎的后缀→Content-Type 映射现只有 `.html`，`.jpg` / `.json` 会落成 `binary/octet-stream`、浏览器直开变下载，故各加 `.jpg`/`.jpeg` → `image/jpeg`、`.png` → `image/png`、`.json` → `application/json`（两边同规则同步改）；② 上传器加一个「只算 ref 不上传」的方法（Nova `ref_for(path)`、Midscene `refFor(path)`），见下。
 
@@ -173,7 +173,7 @@ agent / skill 只依赖 evidence schema 与 `explain` 输出，两者都是我�
 - **只给原生 json 加 ref、格式由 skill 说明**：零抽取代码，但把两套 SDK 内部格式写进 skill 散文、无测试盯着，升版即漂。
 - **evidence 集中落 `reports/<run_id>/evidence/`**：两引擎上传器的 key 都相对各自 run 目录算，集中落要新增注入 env 与上传根，为目录美观开新路径不值。`explain` 顺 ref 找、落哪对消费者透明。
 - **Midscene 走 `outputFormat: "html-and-external-assets"` 目录模式取截图**：report 从单文件变目录，牵动 `kind=report` 的 ref 与中断抢传路径，比 `persistExecutionDump` 代价大得多。
-- **截图即时上传**：K × 票数次串行 PutObject 压在判定临界路径上；改为确定性 URI + scope 末 flush 兜底。
+- **截图即时上传**：K × 票数次串行 PutObject 压在判定临界路径上；改为确定性 URI + `step_done` 之后的后台队列上传 + 收尾有界排空，scope 末 flush 只兜漏网（见决策一「上传时机分两类」）。
 - **evidence 用 SDK 的 `is_tool` / `is_return` 或 `ActResult.trajectory_file_path` 公开属性**：真产物 / 真会话下前者恒 False、后者恒 None。
 
 ## 不做 / 延后
@@ -224,7 +224,7 @@ agent / skill 只依赖 evidence schema 与 `explain` 输出，两者都是我�
 **本机档（跳板机本机 run、两引擎、故意失败的 AI 断言 + 强制 act 超时）**：
 
 - Nova 故意失败断言：trajectory json 真落盘、evidence.json 的 `frames` 非空、末帧 thought 原文「…there is no red banner… I should return false」、`vote=false`、`result={"value":"false"}`、截图 200 KB 有效 JPEG、prompt 不含 SDK 追加的 schema 样板；passed 动作步 2 帧、只末帧有截图；`explain` 三形态（默认 / `--scenario 3 --step 1 --full` / `--json`）正确、stderr 干净、`--json` 严格可解析；manifest kinds 含 `evidence`、index.html 显示 step 原因。
-- Nova 强制超时（`NOVA_ACT_TIMEOUT_S=2`）：error act 契约成立——`error` 非空、`frames == []`、`time_worked_s` 与 prompt 仍填，`explain` 退 0 并打「错误:」行。同时暴露 SDK 异常 str() 是十几行 repr 加反馈链接 → 决策一 act.error 的「压成一行」规则由此而来，复跑确认为一行。
+- Nova 强制超时（`NOVA_ACT_TIMEOUT_S=2`）：error act 契约成立——`error` 非空、`frames == []`、`time_worked_s` 与 prompt 仍填，`explain` 退 0 并打 `error:` 行。同时暴露 SDK 异常 str() 是十几行 repr 加反馈链接 → 决策一 act.error 的「压成一行」规则由此而来，复跑确认为一行。
 - Midscene 故意失败断言（dev worker）：`Insight/Boolean` 的 thought 完整解释判否、截图为 SDK 落到 `report/screenshots/<id>.jpeg` 的 228 KB 文件、passed 动作步 4 帧只末帧有截图；同时核出 `Planning/Plan` 的推理在 `output.thought` → 映射表回落规则由此而来。
 
 **cloud 档（推两引擎 dev worker 镜像为 variant `base` 后，`run --backend cloud` 两引擎各一次故意失败断言）**：`explain --backend cloud` 文本与 `--json` 都能顺 `s3://` ref 读到 evidence（stderr 干净、JSON 严格可解析、`has_step_records` 在）；截图字节确实随 scope 末 flush 到达 S3——evidence.json 里的 `s3://…/act-0-frame-0.jpg`（Nova）与 `…/report/screenshots/<id>.jpeg`（Midscene）HEAD 均为 `image/jpeg`、约 230 KB，evidence.json 为 `application/json`——即「截图 URI 确定性算出、字节延后上传」这条设计在真 S3 上闭合，浏览器直开渲染而非下载。Nova 与 Midscene 的判否 thought、`vote=false`、passed 步只留末帧与本机档一致。

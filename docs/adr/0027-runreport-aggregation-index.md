@@ -34,7 +34,7 @@
 
 归集必须有个 run 标识（manifest 目录名 / 未来 DDB 主键）。[0016](./0016-execution-architecture-core-lib-run-model.md) 早把 `run_id` 列为「持久化层 Run 级字段、deferred」——RunReport 落地把它逼了出来：
 
-- **生成权在组合根**（cli 的 `compose` / 未来 WebUI bootstrap），不在 `schedule` 内部生成。理由：WebUI 语义是「提交即返回 runId、之后轮询」——runId 必须**先于**跑批存在；schedule 内部生成会与该模型打架。也避免 schedule 内部 `uuid`/时钟破坏其「fake-clock 可确定性单测」的定位。
+- **生成权在组合根**（`runtime/gherkai_runtime/compose.py` / 未来 WebUI bootstrap），不在 `schedule` 内部生成。理由：WebUI 语义是「提交即返回 runId、之后轮询」——runId 必须**先于**跑批存在；schedule 内部生成会与该模型打架。也避免 schedule 内部 `uuid`/时钟破坏其「fake-clock 可确定性单测」的定位。
 - **run_id 落进 `RunMeta`（definition），`RunResult` 经 property 取**：组合根生成 run_id 后包成 `RunMeta(run_id, created_at, jobs)` 喂 `schedule(run_meta, ...)`；`RunResult` 持 `run_meta`、`run_id` 经 property delegate（自描述：落库后用自身字段对上主键）。run_id 归位 definition 层属「三层切分」（见 [0016](./0016-execution-architecture-core-lib-run-model.md)）。
 - run_id 对调用方**不透明**，只保证「可排序 + 抗碰撞」（实现用时间戳前缀 + 随机尾，格式留 `compose` 实现、不入本 ADR 契约）。
 - **生命周期**：run_id 在组合根生成（先于 `schedule`）。`plan` 阶段失败（feature 读不到 / `PlanError`）发生在 schedule 之前 → 不生成 run_id、不产 RunReport。
@@ -71,7 +71,7 @@ class ReportStore(Protocol):
 > - `href` 是**正交的另一件事、且不受铁律约束**：它是 core 为 `index.html` 导航自算的链接，本就允许 core 生成/改写（「算一个链接」是 ReportStore 的本分）。local 把 `href` 相对化（指向产物在 run 树内原位，如 `nova-trajectories/<s>/act_0.html`）→ 报告目录整拷到别的机器链接不断；cloud 下 `s3://` 全局可寻址、无相对必要，`href==ref`。
 > - `LocalReportStore` → `S3ReportStore`（v1.1 已建）只换「manifest+index 这些 **core 派生数据**落哪 / 返回的 URI scheme / `href` 相对化策略」，core 不动、且复用同一份 `_render_index_html` 与 `collect_report_index`（单一渲染真理源）。（注意区分：`S3ReportStore` 是把 **RunReport 自身**（manifest/index.html）写到 S3，与「worker 把自己的产物上传 S3」是两回事。）
 
-- **`write` 失败被隔离、不击穿已 commit 的 run**（实时写接缝，[0030](./0030-realtime-persistence-seam.md)）：RunReport 是**纯派生只读视图、可重建、永不作判定源**——故 `RunPersistence.finalize` 在 commit point（`finalize_run`，判定真值已落 ResultStore）之后才调 `ReportStore.write`，且把 write 的异常隔离（吞掉+留痕+返回 None），不让一个「可重建的报告」写失败把整个 run 拖成裸 traceback 退出、CI 拿不到判定输出。
+- **`write` 失败被隔离、不击穿已 commit 的 run**（实时写接缝，[0030](./0030-realtime-persistence-seam.md)）：RunReport 是**纯派生只读视图、可重建、永不作判定源**——故 `RunPersistence.finalize` 在 commit point（`finalize_run`，判定真值已落 ResultStore）之后才调 `ReportStore.write`，且把 write 的异常隔离（吞掉+**不留痕**+返回 None——曾设的 `_report_error` 留痕字段已按悬空字段判据删，见 [0016](./0016-execution-architecture-core-lib-run-model.md)「`finalize()` 返回 None」条），不让一个「可重建的报告」写失败把整个 run 拖成裸 traceback 退出、CI 拿不到判定输出。
 
 > **被拒方案：不做「materialize」式的产物拷贝**（别重新进坑）。曾有过一个 opt-in「把产物按字节拷进 `<run_id>/artifacts/` 求自包含」的开关，已否决——报告自包含由 `href` 相对化零成本达成（产物本就在 run 树内），而拷贝是「拷一份已在树里的东西」的纯磁盘放大；云端用 `s3://` 绝对链接（全局可寻址、拷/分享不断），拷贝亦零收益。**取舍**：报告「半可移植」——`index.html`/`manifest.json` 相对 `href` 可整目录搬走，`jobs/*.json` 的 `ref` 保持绝对（判定真值/provenance）拷机器后其产物链接仍断；跨机器分享用 `index.html` 或 `--backend cloud`（全在 S3）即可，不为此付全量拷贝代价。
 
@@ -125,6 +125,7 @@ class ReportStore(Protocol):
 - 顶部一行 run 摘要（run_id + 总 status + duration + 原生量成本）。
 - **① 判定明细树**：job→scenario→step，逐级上色（含派生态 skipped/aborted、前置态 pending/running 各自配色，非兜底灰，见 [0031](./0031-job-lifecycle-states-and-severity.md)）+ step 级 status/votes tally/error_type/时长。**被 scope 内短路的 step 显 `skipped` 态 + 读 `shortcircuited` 布尔加「⚠ 因前置 step error 被跳过」旁注**（连锁失败旁注，判据是 shortcircuited 而非「按 status 顺序猜」，见 [0031](./0031-job-lifecycle-states-and-severity.md) 决定六）。让纯确定性 run（无原生产物）也一眼看懂结果。**但不拿它当 CI 判定源**（判定真值在 ResultStore）。
 - **② 报告产物导航清单（引擎原生产物 + gherkai evidence，[0042](./0042-step-evidence-and-explain.md)）**：每条 report_ref 一行——job.status 上色 + scope_id（+ scenario_id/step[N] 表粒度）+ engine + `[kind]` + 指向 `href` 的 `<a>`（`label` 或回落 `kind` 作锚文本）。`href` 由 `make_href` 算（local 相对 / cloud 恒等 ref，见上「href 相对化」）。
+- **①②双向锚点关联**：①里挂了产物的节点行尾加 📎（同节点多产物显 📎×N、链到首条）链到②对应条目，②每条加 ↑ 链回所属树节点；关联键 = 产物挂载层级的 `(scope_id, scenario_id, step_index)` 三元组，锚点 id 纯 ASCII（`node-jN-sN-tN` 用 job/scenario 的位置序号 + step 自身 index，`ref-N` 用在 `report_index` 里的序号）——`scope_id` 可含中文/冒号，不能直接进 `#fragment`；落点 `:target` 高亮 + 平滑滚动。平铺清单表达不了「产物属于哪个 job/scenario/step」，借①的树结构补上。仍守本节「无外链 JS/CSS、单文件」：只用同文件内 fragment 链接 + 内联 CSS，零 JS。
 - 上色用内联 `<style>`。
 - **空态**：无任何 report_ref 时②仍生成有效的「空报告」清单（标注本次无报告产物）、①判定明细树照常渲染，不报错。
 
@@ -144,7 +145,7 @@ Nova worker 设 `NovaAct(logs_directory=<run 专属持久目录>)`，act/act_get
 ## 纯确定性用例 → 空 report_index（已知、合理、非缺陷）
 
 一个**只含确定性 step**（导航 + `@deterministic` 锚点，零 AI step）的用例，跑出的 RunReport
-`report_index` **为空**、`index.html` 显示「本次 run 无原生报告产物」。这是**有意的诚实空态**，不是 bug：
+`report_index` **为空**、`index.html` 显示「本次 run 无报告产物」的空态提示（页面文案同时点出纯确定性步骤既不产引擎报告、也不产 AI 步骤证据）。这是**有意的诚实空态**，不是 bug：
 
 - 原生报告产物**只在引擎实际执行 AI 操作时才产生**（Midscene 的 `agent.reportFile` 仅在调过
   agent 后存在；Nova 的 trajectory 仅在 `act`/`act_get` 后存在）。确定性 step 走 `page.goto`/

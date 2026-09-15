@@ -7,7 +7,7 @@
 角色早已是多处设计的键，却没有单一真源：
 
 - **安装**按角色切：裸 `gherkai` 给只提交的人、`[local]` 给本机跑 worker 的人、`[deploy-aws]` 给改云端环境的人（[0037](./0037-distribution-and-packaging.md) 决策 2/5/6）。
-- **权限**按主体登记：[0033](./0033-iac-aws-backend-and-composition-wiring.md)「资源清单」末段分编排进程 / detached 提交 / 部署方 / 推进器；[0038](./0038-worker-image-delivery.md)「权限面增量」分部署方 / 提交者 / 云端推进器。
+- **权限**按主体登记：[0033](./0033-iac-aws-backend-and-composition-wiring.md)「资源清单」末段分编排进程 / detached 提交 / 部署方 / 提交者；[0038](./0038-worker-image-delivery.md)「权限面增量」分部署方 / 提交者 / 云端推进器。
 - **所有权**按角色分：镜像构建归写 step 的人、推送与注册归部署方（0038）；`steps/` 归使用方项目（0037 决策 4）；QA 永不碰 steps（[0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md)）。
 - **文档分层**按读者分：使用者向 / contributor 向（[0039](./0039-user-facing-surfaces-no-internal-references.md)）。
 - **执行**按跑法分级：0033 登记的权限随跑法而异——detached `submit` / `status` 只要 runs 表读写 + 只读探活 + `InvokeFunction`，同步 `run --backend cloud` 另需 ECS 起停 task；local 用本机凭证；`plan` 不需要凭证。

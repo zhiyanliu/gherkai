@@ -109,7 +109,7 @@ npm i @aws-sdk/signature-v4 @aws-sdk/protocol-http @aws-crypto/sha256-js @aws-sd
 ## 7. 合体实测（第 3 段，`03-midscene-grounding.ts`）—— 全通
 
 整条 Midscene 引擎端到端跑通（AgentCore 云端浏览器 + SigV4 自签 + 维基用例）：
-- `aiAct("搜 OpenAI 并提交")` → 真进到 `https://en.wikipedia.org/wiki/OpenAI`（58.9s，含规划+定位+多步动作）
+- `aiAct('type "OpenAI" into the search input and submit the search')` → 真进到 `https://en.wikipedia.org/wiki/OpenAI`（58.9s，含规划+定位+多步动作）
 - A 确定性断言（url 含 `/wiki/OpenAI`）：pass
 - B AI 断言（`aiAssert`）×10：**10/10 pass，抖动率 0%，与 A 完全一致**，平均 10.45s/次
 - `report.html` 正常生成；真实整页截图过 Bedrock 图像 sanitize（无 400）

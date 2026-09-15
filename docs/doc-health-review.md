@@ -37,27 +37,29 @@ ADR/CONTEXT 是随构建**逐步长起来**的：每次在前人文档上叠加�
 
 不同类型的文档，主要风险不同、别用一把尺子：
 - **ADR / CONTEXT**：查决策一致性、跨文档矛盾、被取代未标历史、Status 头（见下）、施工叙事沉积（SEDIMENT 类，ADR 是其主战场）、**引用方向合规 + 自包含**（不引用 journey、不用裸 WP 编号；Accepted ADR 须结论连同证据内联、自成一体——见「五类问题」DEADLINK 的引用方向违规条）。
-- **README（使用者向：根 + 各包，各包 README 逐字上 PyPI/npm）**：查安装 / 命令 / 参数 / 退出码过时；保叙事、不激进压缩。**加查使用者向边界**（判据与四层去向见 ADR 0039、CLAUDE.md 文档纪律「README / DEVELOPMENT 分层」）：contributor 内容（目录结构、开发环境、测试、spike、发布流程）或内部指代（ADR 编号、决策号、内部机制名）出现在使用者面 = 越界，修法是搬去同目录 `DEVELOPMENT.md`、不是删。护栏 `cli/tests/test_package_readmes.py` 只管禁词正则、相对链接与 DEVELOPMENT.md 存在性，正则外的语义越界靠本任务。
+- **README（使用者向：根 + 各包，各包 README 逐字上 PyPI/npm）**：查安装 / 命令 / 参数 / 退出码过时；保叙事、不激进压缩。**加查使用者向边界**（判据与各层去向见 ADR 0039 面二去向表、CLAUDE.md 文档纪律「README / DEVELOPMENT 分层」）：contributor 内容（目录结构、开发环境、测试、spike、发布流程）或内部指代（ADR 编号、决策号、内部机制名）出现在使用者面 = 越界，修法是搬去同目录 `DEVELOPMENT.md`、不是删。护栏 `cli/tests/test_package_readmes.py` 只管禁词正则、相对链接与 DEVELOPMENT.md 存在性，正则外的语义越界靠本任务。
 - **DEVELOPMENT.md（contributor 向：根 + 各包，与同目录 README 成对）**：查目录树 / 测试与开发命令 / ADR 编号范围与指针过时——全是枚举型，逐条对 `ls` / `git ls-files` / argparse；允许 ADR 指针与内部机制名。
 - **docs/guides/（给人的阅读理解层）**：按 README 同侧判据（保叙事）；主查三样——STALE（派生视图最易随上游漂移，对照 code 与权威 ADR）、**越界复述 why**（决策理由/权衡出现在 guide 正文 = 双源苗头；写作判据在 CLAUDE.md 文档纪律 guides 条，修法 = 压回指针）、**guide 之间的主题归属与重叠**（同一机制只一篇作 owner、其余给指针；两篇各讲一遍必各自漂——修法是定归属、留指针，不是压句子；新增 guide 时既有篇的延伸阅读要指过来；归属表 = `docs/guides/README.md` 索引，审计时对照它）。
+- **agent skill（`cli/gherkai_cli/skills/gherkai/**`，随 CLI wheel 发行、`gherkai skill install` 拷进使用方项目）**：按各包 README 同侧判据（零 ADR 编号 / 决策号 / 内部机制名，只用绝对 URL，跨文件指针写反引号裸路径），去向与链接形态见 ADR 0039 面二去向表 + [0043](./adr/0043-agent-skill-for-driving-gherkai.md)。护栏 `cli/tests/test_skill.py` 管禁词 / 相对链接 / URL 钉 HEAD·tag / flag 归属与排他 / JSON 键名 / 契约副本等值（provider 侧 `deploy`·`destroy` token 在 `deploy_aws/tests/test_skill_deploy_tokens.py`）；本任务只查正则与真值集之外的——语义越界（行话、contributor 内容漏进使用者面）与「安装态的 agent 照它做还对不对」。**`references/cli-json-contract.md` 是 `docs/guides/cli-json-contract.md` 的确定性转换产物、一律不手改**：副本与源的同步由护栏等值断言机械保证（改源页后跑 `tools/render_skill_contract.py` 重渲染），本任务要查的是那份**手写源**与 code 是否一致。
 - **REFERENCES / 技术笔记/配方**（SIGV4-RECIPE 这类）：**没有"决策矛盾"维度，重在"配方/引用还灵不灵"**——代码片段是否还与当前 SDK/实现对得上、踩坑点是否还成立、指向的 ADR/源码路径/外链是否有效。对照 code 核实是主要手段。
 
-## 执行方法（两轮验证过的最佳路径）
+## 执行方法（多轮复盘验证过的最佳路径）
 
 覆盖范围：**全部项目文档**——不预设"只有某几类相关"，凡人/AI 会消费的项目 Markdown 都在内：
 - `docs/adr/*.md`（重点，80% 给 AI 读）
 - `CONTEXT.md`（术语/概念总表）
 - `docs/REFERENCES.md`（外部一手来源 + 源码内点自查资料，AI 用）
-- 全部 README（根 / `cli` / `core` / `core/tests` / `runtime` / `deploy_aws` / `engines/*` / `.github/workflows`，使用者向、主要给人读）
+- 全部 README（根 / `cli` / `core` / `core/tests` / `runtime` / `deploy_aws` / `engines/*` / `.github/workflows`，主要给人读；使用者向 / contributor 向的分界见上「按文档类型的复盘侧重」——`core/tests` 与 `.github/workflows` 两份不进发行包、按 contributor 向判，ADR 指针与相对链接在它们里合法）
 - 全部 `DEVELOPMENT.md`（根 / `cli` / `core` / `runtime` / `deploy_aws` / `engines/*`，contributor 向，与同目录 README 成对——判据见上「按文档类型的复盘侧重」）
 - `CLAUDE.md`（项目约定；**只查 DEADLINK / STALE**——它点名的护栏测试文件、ADR 编号、目录名是否仍存在、与所指 ADR 是否一致。规则内容本身是决策，不在复盘里改）
 - `docs/journey/`（staging 区，可为空；**只做生命周期审计**：非空时逐个判「该吸收进 ADR / code 后删」还是「任务仍在推进、留」，不做密度 / 提纯——判据在 CLAUDE.md 文档纪律 journey 条「任务收尾即审计点」）
 - `docs/doc-health-review.md` / `docs/code-health-review.md`（两份复盘方法文档自身：只查 DEADLINK / STALE / 内部矛盾 + 与 `.claude/commands/` 摘要一致性；方法内容本身是决策，不在复盘里改——与 CLAUDE.md 同款口径）
-- `docs/guides/*.md`（给人的阅读理解层，派生视图——判据侧重见下「按文档类型的复盘侧重」）
+- `docs/guides/*.md`（给人的阅读理解层，派生视图——判据侧重见上「按文档类型的复盘侧重」）
+- 随 CLI wheel 发行的 **agent skill markdown**（`cli/gherkai_cli/skills/gherkai/SKILL.md` + `references/*.md`，5 份入库）——使用者/agent 面，安装态没有仓库上下文；判据侧重见上「按文档类型的复盘侧重」。
 - **技术笔记/配方 + 工具手册**（如 `engines/midscene/spikes/SIGV4-FETCH-RECIPE.md`、`tools/e2e_harness.md`）——与代码同居、AI 照它接线/照它操作，**极易 STALE**（含可运行代码片段 + 命令 + 前置条件 + 踩坑点 + 源码路径）。
 - 未来新增的 docs/ 与子工程根下文档同样纳入（本任务名"文档健康度"、不焊死在某几类上——每次 `find . -name "*.md"` 排除 node_modules / .venv / .pytest_cache / **graphify-out**（含 wiki/，工具生成物）扫一遍，别漏新文件）。
 
-**明确排除**：`.claude/` 除 `commands/` 外的部分与 `.agents/`（skills / settings 是个人工具配置，不入库）；**`.claude/commands/` 在范围内**——它是本任务与姊妹任务的 Claude Code 入口、已入库，其要点摘要须与两份方法文档一致；`node_modules/`、`.venv/`、`.pytest_cache/`（依赖/缓存）；**`graphify-out/`**（graph.json / GRAPH_REPORT.md / wiki/ 全是 graphify 生成物，刷新走 DEVELOPMENT.md「知识图刷新」，不当文档审）；**repo 内 code 注释/docstring 的引用方向违规归姊妹任务 [`code-health-review.md`](./code-health-review.md)**（本任务只管 `.md`，分工线两侧一致）。
+**明确排除**：`.claude/` 除 `commands/` 外的部分与 `.agents/`（`.claude/skills/`、settings 等个人工具配置，不入库；随 wheel 发行的 `cli/gherkai_cli/skills/` 在范围内，见上覆盖范围）；**`.claude/commands/` 在范围内**——它是本任务与姊妹任务的 Claude Code 入口、已入库，其要点摘要须与两份方法文档一致；`node_modules/`、`.venv/`、`.pytest_cache/`（依赖/缓存）；**`graphify-out/`**（graph.json / GRAPH_REPORT.md / wiki/ 全是 graphify 生成物，刷新走 DEVELOPMENT.md「知识图刷新」，不当文档审）；**repo 内 code 注释/docstring 的引用方向违规归姊妹任务 [`code-health-review.md`](./code-health-review.md)**（本任务只管 `.md`，分工线两侧一致）。
 
 ### 第一层：片内审计（可用 workflow 并行）
 

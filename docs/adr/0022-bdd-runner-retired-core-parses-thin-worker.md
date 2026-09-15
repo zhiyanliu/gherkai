@@ -1,6 +1,6 @@
 # BDD runner 退役：核心库自解析 Gherkin + 两个引擎薄 worker（确定性 step = worker 注册表）
 
-> **Status:** Accepted —— 与 [0016](./0016-execution-architecture-core-lib-run-model.md) 一并**部分取代 [0006](./0006-form-a-two-subprojects-no-orchestrator.md)**（反转其「两套 runner 各自加载 / 不设统一编排入口」操作立场：BDD runner 退役、核心库自解析 + 组合根统一入口；0006「两子工程并列 + 双语言裂缝」核心结论仍成立）。
+> **Status:** Accepted —— 与 [0016](./0016-execution-architecture-core-lib-run-model.md) 一并**部分取代 [0006](./0006-form-a-two-subprojects-no-orchestrator.md)**（反转其「两套 runner 各自加载 / 不设统一编排入口」操作立场：BDD runner 退役、核心库自解析 + 组合根统一入口；0006「两子工程并列 + 双语言裂缝」核心结论仍成立）。（确定性 step 的**定制面**已由 [0037](./0037-distribution-and-packaging.md) 决策 4 从「改 worker 包内脚手架」移到「使用方项目 `steps/` 目录」；本 ADR 的注册表机制与角色边界不变。）
 
 核心库（v1.0）落地执行形态时的关键转向：**不再让每个引擎跑整个 BDD runner（cucumber-js / pytest-bdd），而是核心库自己解析 `.feature`、把每个 step 派发给一个薄 worker 子进程。** 本 ADR 记录这个转向（代号 B1）、它退役了哪些 hack、确定性 step 怎么扩展、以及对 [0019](./0019-feature-tags-scope-and-engine.md)/[0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md)/[0021](./0021-local-cucumber-patch-step-keyword-disambiguation.md) 的影响。执行架构总成见 [0016](./0016-execution-architecture-core-lib-run-model.md)。
 
@@ -41,7 +41,7 @@
 
 > **实现状态（v1.0 当前）**：下述 `@deterministic` 注册表**已落地**——Nova `engines/novaact/gherkai_worker_novaact/deterministic.py`（`@deterministic` 装饰器 + `match()`）、Midscene `engines/midscene/src/worker/deterministic.mts`（`deterministic()` + `match()`）。worker 派发每个 step 时**先查注册表**（命中走精确 handler、不投票、可复现），未命中才落 ②内建 URL 导航 / ③AI catch-all。脚手架（`engines/midscene/src/worker/deterministic.steps.mts` / `engines/novaact/gherkai_worker_novaact/deterministic_steps.py`，迁移史见下「迁移」条）现各注册一个真实 URL 锚点（`页面地址匹配 "<正则>"`）。命中后：成功→`passed`（无 votes）；handler 抛 `AssertionError`→`failed`/`assertion_failed`；抛其它→`error`；命中多条→`DeterministicConflict`（见下『冲突规则自定』条）。各有注册表单测背书。
 
-**扩展点 = 对应 worker 里的一张 step 注册表**（`(模式 → handler + 人话元数据 description/example)`；元数据必填的理由见 [0036](./0036-deterministic-capability-discovery.md)）。延续 [0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md) 的脚手架定位与角色边界（QA 永远只写自然语言、不碰确定性 step）：
+**扩展点 = 对应 worker 里的一张 step 注册表**（`(模式 → handler + 人话元数据 description/example)`；元数据必填的理由见 [0036](./0036-deterministic-capability-discovery.md)）。延续 [0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md) 的脚手架定位与角色边界（QA 永远只写自然语言、不碰确定性 step）。**使用方（测试开发）的锚点不写进 worker 包内的脚手架**——写进使用方项目的 `steps/` 目录，worker 启动时加载进**同一张表**（`@deterministic` 注册机制同一条），包内脚手架只留内建示范锚点，见 [0037](./0037-distribution-and-packaging.md) 决策 4；下文「几乎零写法变化」描述的写法在 `steps/` 里逐字成立：
 
 ```python
 # novaact worker 内（midscene worker 是对称的 TS 版）
@@ -79,7 +79,7 @@ def color_is(ctx, sel, hex):
 | `engines/novaact/bdd/conftest.py`（tag 路由 hook） | engine 路由改由核心调度层做（[0019](./0019-feature-tags-scope-and-engine.md)） |
 | `engines/midscene/bdd/package.json`（`{type:module}`）+ `bdd/steps/generic.steps.ts` + `novaact/bdd/test_generic_steps.py` | cucumber/pytest-bdd 工程配置 + 已迁进 worker 的 step 逻辑副本 |
 
-**迁移（不删，改落 `lib/` 或 `worker/`）**：`agentcore-sigv4.mts`、`workflow_setup.py` 落各引擎 `lib/`（`midscene/lib/`、`novaact/lib/`，worker 进程内直接 import）；`generic.steps`/`test_generic_steps` 的**逻辑**早已在 worker 派发实现（其 bdd 副本已随 B1 退役删除）；**确定性脚手架 `deterministic_steps.py`/`deterministic.steps.ts` 迁入 `worker/`**——注意这是**实装偏差纠正**：原 ADR 说"确定性 step 迁入 worker 注册表"，但实现是 **worker 反向 import 脚手架**（触发 `@deterministic` 顶层注册副作用），故脚手架是 worker 的**活依赖**、非可删副本；退役 bdd 时把它从 `bdd/` 移到 `worker/` 同目录（`novaact/worker/deterministic_steps.py`、`midscene/worker/deterministic.steps.ts`），worker import 路径相应改为同目录。全部 spike 与 `SIGV4-FETCH-RECIPE.md`（独立可跑的证据，[0010](./0010-spike-as-apples-to-apples-benchmark.md)）保留在各引擎 `spikes/`。
+**迁移（不删，改落 `lib/` 或 `worker/`）**：`agentcore-sigv4.mts`、`workflow_setup.py` 落各引擎 `lib/`（随 worker 包化现为 `engines/midscene/src/lib/` 与 `engines/novaact/gherkai_worker_novaact/lib/`，见 [0037](./0037-distribution-and-packaging.md) 决策 3；worker 进程内直接 import）；`generic.steps`/`test_generic_steps` 的**逻辑**早已在 worker 派发实现（其 bdd 副本已随 B1 退役删除）；**确定性脚手架 `deterministic_steps.py`/`deterministic.steps.ts` 迁入 `worker/`**——注意这是**实装偏差纠正**：原 ADR 说"确定性 step 迁入 worker 注册表"，但实现是 **worker 反向 import 脚手架**（触发 `@deterministic` 顶层注册副作用），故脚手架是 worker 的**活依赖**、非可删副本；退役 bdd 时把它从 `bdd/` 移到 `worker/` 同目录（`novaact/worker/deterministic_steps.py`、`midscene/worker/deterministic.steps.ts`），worker import 路径相应改为同目录。全部 spike 与 `SIGV4-FETCH-RECIPE.md`（独立可跑的证据，[0010](./0010-spike-as-apples-to-apples-benchmark.md)）保留在各引擎 `spikes/`。
 
 ## 对既有 ADR 的影响
 

@@ -133,8 +133,11 @@ skipped = -1  <  passed = 0  <  failed = 1  <  error = 2  <  aborted = 3
 | `plan` | 这批能跑吗（零 AWS、零副作用） | 能 | — | 配置错、写法错、使用方 steps 加载失败 |
 | `explain` | 证据读出来了吗（**从不表判定**） | 渲染出来了——**run 判 failed 也退 0**；判定明细还没落地同样退 0 | — | 参数写错（如 `--step` 没同时给 `--scenario`）、run/scope 查不到、云端读不到 |
 | `doctor` | 必修项都过了吗 | 全过 | — | 任一 `required` 项 fail（可选能力缺失只标 `-`，不影响退码） |
+| `list-deterministic` | 这个引擎有哪些确定性 step（纯本地、零 AWS） | 列出来了 | — | `--steps-dir`（或 env）不是目录 / worker 定位不到 / 使用方 steps 加载失败 / 该引擎自述失败 |
+| `list-engines` | 这台机器的引擎环境什么样 | **恒 0**（某引擎没装正是要展示的信息，不算命令失败——要判「装了没」就看那一行，或用 `run`/`list-deterministic` 的退 2） | — | — |
+| `skill install` | 技能包装好了吗 | 装好了（`--print` 则打完正文） | — | `--dir` 不是目录 / 目标目录里是别的东西 / 包内技能包缺失 / 写不进去（含指令文件那一行） |
 
-一句话记：**表判定的只有 `run` 与 `status`，也只有它们会退 1**；`submit`/`plan`/`explain`/`doctor` 全是 0/2 的「做成了 / 没做成」。（部署方命令 `deploy`/`destroy` 不在本表口径内：它们原样透传 cdk 的退出码，`deploy` 退 1 = cdk 或其后的 worker 镜像步骤失败、账户已被改动，重跑幂等收敛——别按判定码读。）`run` 的判定码读 `schedule` 返回的内存 `RunResult.status`（必是终态，不回读可能停在 pending 的落库态）；`status` 的判定码读回落库的 `RunState`——两路 `status`（local/cloud）共用同一个 `_render_status`，行为一致。
+一句话记：**表判定的只有 `run` 与 `status`，也只有它们会退 1**；`submit`/`plan`/`explain`/`doctor`/`list-deterministic`/`skill install` 全是 0/2 的「做成了 / 没做成」，`list-engines` 更进一步——它恒 0（理由见表）。（部署方命令 `deploy`/`destroy` 不在本表口径内，但 `2` 与本表同源：`0` 成功；`2` 是它们自己的前置/校验失败（缺 Node 或找不到 cdk、`--vpc` 缺档或档不符、容器引擎名不认、`push-worker` 的架构/skew 拦截——都在动账户之前就拦下；唯一例外是 `push-worker` 推送途中的 AWS 调用失败，也归 `2`，但那时镜像/revision 可能已写进账户）；`1` = cdk 自己失败（cdk CLI 报错多为 1，原样透传）或 cdk 已成功而其后的 worker 镜像步骤失败——两者都意味账户可能已被改动，重跑 `gherkai deploy` 幂等收敛；其余码同样是 cdk CLI 自己的返回值原样透传——都别按判定码读。给使用者的口径见 `deploy_aws/README.md`「退出码与常见错误」。）`run` 的判定码读 `schedule` 返回的内存 `RunResult.status`（必是终态，不回读可能停在 pending 的落库态）；`status` 的判定码读回落库的 `RunState`——两路 `status`（local/cloud）共用同一个 `_render_status`，行为一致。
 
 **CI 该接哪一条**：
 

@@ -111,9 +111,9 @@ cloud 失败分层的切分线 = run 是否已真正开跑：起 worker 前的�
 **preflight 次序是刻意的：版本 skew → 资源存在性 → variant 解析。** skew 的修复动作（`gherkai deploy`）正好也把
 资源补齐、也是重推镜像的前置；反过来先报「表不存在」或「variant 没推」只会让人白查一轮 `--prefix` / 白推一轮镜像。
 
-## 版本 skew 五态（ADR 0037 决策 7）
+## 版本 skew 六态（ADR 0037 决策 7）
 
-deploy 会把自己的版本写成后端的版本戳，`run`/`submit`/`status --backend cloud` 在**任何资源预检之前**先比它：
+deploy 会把自己的版本写成后端的版本戳，四个 cloud 入口（`run`/`submit`/`status`/`explain`）**先于资源预检 / 任何云端读**比它（`doctor --backend cloud` 另把它当一个自检项读）：
 
 | 比对结果 | 行为 |
 |---|---|
@@ -122,6 +122,7 @@ deploy 会把自己的版本写成后端的版本戳，`run`/`submit`/`status --
 | CLI 旧于后端 | 警告不拦（`uv tool upgrade gherkai` 跟上） |
 | 后端没有版本戳（早于本机制的部署） | 警告不拦 + 提示部署方跑一次 `gherkai deploy` 写入 |
 | 任一侧是开发版（含 `.dev`/`.post`/`+`） | 跳过比对、警告一句（dev 版逐提交前进，逐字比会把每次都判成 skew） |
+| 取不到本机 CLI 版本（未以包形式安装、源码直跑） | 跳过比对、警告一句 |
 
 **不设放行口是刻意的**：放行等于让新 CLI 写的任务定义进旧后端读，后果不可知且静默；用
 `uvx --from 'gherkai==<后端版本>' gherkai …` 按版本临时跑零成本。版本是一个旋钮——`gherkai` 与后端被 `==`

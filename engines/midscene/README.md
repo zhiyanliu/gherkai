@@ -17,7 +17,7 @@ CLI 在 PATH 上找 `gherkai-worker-midscene` 命令（`npm i -g` 的结果）�
 ## AWS 前置
 
 - **纯 IAM 鉴权**：进程内 SigV4 自签，复用本机 AWS 默认凭证链（profile / 环境变量 / 实例角色皆可）。**不需要任何 API key**（无 bearer token）。
-- **region 必须显式给**：`AWS_REGION`，或 `gherkai run --region <R>`；未设即报错，不猜默认 region。
+- **region 必须解析得出**：`gherkai run --region <R>`，或 `AWS_REGION` / `AWS_DEFAULT_REGION`，或 profile 配置里的 region；四处都没有即报错，不猜默认 region。
 - 该 region 下账号需可用：**Bedrock 模型** `qwen.qwen3-vl-235b-a22b`（视觉定位大脑），以及 **AgentCore Browser**（`bedrock-agentcore`）。浏览器跑在云端，本机**不需要装 Chromium**。
 
 ## 写确定性 step（`steps/*.mts`）
@@ -46,7 +46,7 @@ deterministic(
 - 目录**排序递归**遍历，`*.test.*` 跳过。
 - 本包内建一条示范锚点 `页面地址匹配 "<正则>"`，装上即可在 `.feature` 里直接写 `Then 页面地址匹配 "/wiki/OpenAI"`。撞上同一 pattern **不做覆盖**，按冲突处理（见下表）。
 
-目录怎么告诉 CLI：`gherkai run --steps-dir ./steps`（`run` / `submit` / `plan` / `list-deterministic` 四处都有此选项），缺省 `./steps`。
+目录怎么告诉 CLI：`gherkai run --steps-dir ./steps`（`run` / `submit` / `plan` / `list-deterministic` / `doctor` 五处都有此选项），缺省 `./steps`。
 
 ### 用错了会怎样（一律响亮失败，绝不静默降级）
 

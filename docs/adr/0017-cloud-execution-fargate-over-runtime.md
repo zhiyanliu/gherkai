@@ -32,4 +32,4 @@ Runtime 成为更优选，当且仅当 **workload 从批处理变成长驻服务
 
 > **已落地（v1.1 云端执行）**：Fargate/ECS 即 `--backend cloud` 的执行实态（见 Status 头与 [0032](./0032-fargate-execution-environment.md)/[0033](./0033-iac-aws-backend-and-composition-wiring.md)）。**A/B 实测未做**——直接按上「workload shape 是批处理」判据落地，故「诚实修正」里成本那条『孰优只能实测』至今未量化。上「翻盘条件」仍适用：shape 变成长驻服务时重估。下述原计划保留作决策史。
 
-上云时（v1.x），先用真实用例 A/B 实测 Fargate 与（若仍疑）Runtime 的成本/冷启动/会话保活，再最终敲定。`runScope` 的执行实现是可替换的（[0016](./0016-execution-architecture-core-lib-run-model.md)），故即便选错也能换——这降低了本决策的下注风险。
+上云时（v1.x），先用真实用例 A/B 实测 Fargate 与（若仍疑）Runtime 的成本/冷启动/会话保活，再最终敲定。`run_scope` 的执行实现是可替换的（[0016](./0016-execution-architecture-core-lib-run-model.md)），故即便选错也能换——这降低了本决策的下注风险。

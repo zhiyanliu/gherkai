@@ -47,7 +47,7 @@
 | 组合 | 隧道宿主 | 拆除时机 |
 |---|---|---|
 | 前台 `run`（local/cloud backend） | CLI 进程 | CLI 进程 `atexit` 拆——**有意选 atexit 而非 finally**：正常结束与 Ctrl-C 都收；SIGTERM 直杀的极端泄漏不兜（ngrok agent 是可见的独立进程，人能自行 kill） |
-| local `submit` | per-run 推进进程 | `run_reconcile_loop` 终态后拆；per-run 进程崩溃时由 `status --wait` 接力者据 `tunnel.json` 兜底拆 |
+| local `submit` | per-run 推进进程 | `detached.drive_local_reconcile`（local 推进唯一入口）tick 到终态后拆；per-run 进程崩溃时由 `status --wait` 接力者走同一入口、据 `tunnel.json` 兜底拆 |
 | cloud `submit` | **隧道守护进程**（setsid fork 脱离 CLI） | 轮询 run 终态即拆 + TTL 兜底自杀（防泄漏），TTL 按 definition 算——见下；**任何异常路径同样拆**（store 装配抛 / 轮询被中断）：守护进程是隧道唯一宿主，它带着异常死掉没人再拆——曾只在循环之后拆、装配段裸奔，装配一炸 ngrok 即永久留在公网（code-health 对抗验证发现） |
 
 - 表外还有一处就地拆：**提交分流失败**（preflight/落库不过）时隧道尚无后台宿主可交棒，由 CLI 当场拆。

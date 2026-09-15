@@ -1,6 +1,6 @@
 # 0039. 用户可见面不带内部指代：产品文案与文档分层
 
-> **Status:** Accepted（2026-09-09）—— 两面均已实装并有护栏：产品文案面（`cli/tests/test_user_facing_messages.py`）、文档面（`cli/tests/test_package_readmes.py`）。本 ADR 是 CLAUDE.md 代码纪律「产品面文案不带内部指代」与文档纪律「README / DEVELOPMENT 分层」两条约定的决策与理由所在；约定文件只留规则与指针。
+> **Status:** Accepted（2026-09-09）—— 两面均已实装并有护栏：产品文案面（`cli/tests/test_user_facing_messages.py`）、文档面（`cli/tests/test_package_readmes.py`；随包发行的 agent skill 那一层另由 `cli/tests/test_skill.py` 扫）。本 ADR 是 CLAUDE.md 代码纪律「产品面文案不带内部指代」与文档纪律「README / DEVELOPMENT 分层」两条约定的决策与理由所在；约定文件只留规则与指针。
 
 ## 背景与问题
 
@@ -72,4 +72,4 @@
 
 - CLAUDE.md：代码纪律「产品面文案不带内部指代」与文档纪律「README / DEVELOPMENT 分层」两条压回规则 + 判据 + 护栏 + 指向本 ADR。
 - [0037](./0037-distribution-and-packaging.md) 被拒方案里「contributor README 当长描述」一条改为指向本 ADR。
-- 两条护栏测试的 docstring 指向本 ADR。
+- 三条护栏测试的 docstring 指向本 ADR（`test_user_facing_messages.py` / `test_package_readmes.py` / `test_skill.py`）。

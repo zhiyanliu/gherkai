@@ -11,6 +11,8 @@
 
 **决定**：代码形态固定为 `NOVA_ACT_API_KEY` 不设 + `AgentCoreBrowserSessionProvider` + `Workflow(workflow_definition_name=..., model_id=...)`，让浏览器与模型都跑在 IAM 上。
 
+**代码形态的两个强制细节**（漏了直接崩、非可选风格）：① `Workflow(...)` 必须被 `with` 进入才建出 `workflow_run`，只构造不进入会在 `NovaAct` 初始化时报 `ValidationFailed: Workflow does not have workflow run set. Please use Workflow as a context manager`；② `NovaAct` 未显式收到 workflow 时经 contextvar 找它，故用 `@workflow` 装饰器（它内部即 `with Workflow` + 设 contextvar）或自己 `with Workflow` 时手工 `set_current_workflow(wf)`、退出时还原——worker 走后者（见 `engines/novaact/gherkai_worker_novaact/run_scope.py` 的 `with wf` + `set_current_workflow`）。
+
 ## ✅ 已实测全通（2026-06-23，`engines/novaact/spikes/wikipedia_benchmark.py`）
 
 纯 IAM 经 `@workflow` 端到端跑通：维基用例动作成功、AgentCore 云端浏览器连上、workflow run 状态 `SUCCEEDED`、`nova-act-latest` 模型访问授予。**ADR 早先标记的"IAM 经 Workflow 能否授权 nova-act 服务"残余风险——已关闭。**

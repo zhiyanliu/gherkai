@@ -9,7 +9,7 @@
 
 | 文件 | 触发 | 干什么 |
 |---|---|---|
-| `ci.yml` | push `main` / 所有 PR / 手动 | ① `uv sync --locked` + 根 `pytest`（全 workspace 成员，含 deploy_aws 的 CDK synth 测试）；② midscene `npm ci && npm run build && npm test`；③ `uv build --all-packages` smoke + 产物校验 |
+| `ci.yml` | push `main` / 所有 PR / 手动 | ① `uv sync --locked` + 根 `pytest`（全 workspace 成员，含 deploy_aws 的 CDK synth 测试）；② midscene `npm ci && npm run build && npm test`；③ `uv build --all-packages` smoke + 产物校验 + 发布 gate 演练（打本地临时 tag、不 push：版本必须逐字等于 tag） |
 | `release.yml` | push tag `v*` | gate（tag 形态 + 算出的版本==tag）→ ① PyPI → ② npm → ③ GHCR 基底镜像 → ④ GitHub Release |
 
 发布是**一个动作**：`git tag vX.Y.Z && git push origin vX.Y.Z`。版本真源只有 git tag
@@ -45,10 +45,10 @@ build（gate + uv build --all-packages + 产物校验 + 上传 artifact）
 
 七个名字各真传一版 `0.0.0` 占位 sdist——**pending publisher 不占名**（他人先注册即失效，ADR 0037 决策 8）。
 
-现状（2026-09-08 核对 `https://pypi.org/pypi/<name>/json`）：**七名全部已占**（各一版 `0.0.0` 占位，owner `Zhi Yan Liu`）——
-`gherkai` / `gherkai-runtime` / `gherkai-core` / `gherkai-worker-novaact` / `gherkai-deploy-aws`（真发行）、`gherkai-cli` / `gherkai-worker-midscene`（防混淆占位，永不发真内容）。
+现状（2026-09-08 核对 `https://pypi.org/pypi/<name>/json`）：**七名全部已占**（owner `Zhi Yan Liu`）——
+`gherkai` / `gherkai-runtime` / `gherkai-core` / `gherkai-worker-novaact` / `gherkai-deploy-aws`（真发行：占名时各真传一版 `0.0.0`，此后按 tag 发正式版本）、`gherkai-cli` / `gherkai-worker-midscene`（防混淆占位，索引上只有那一版 `0.0.0`、永不发真内容）。
 
-npm 侧已占：`@gherkai/worker-midscene@0.0.0` 与非 scoped 的 `gherkai@0.0.0`（maintainer `liuzhiyan`）。
+npm 侧已占（maintainer `liuzhiyan`）：`@gherkai/worker-midscene`（占名的 `0.0.0` 之后按 tag 发正式版本）与非 scoped 的 `gherkai@0.0.0`（防混淆占位）。
 
 ### 2. PyPI trusted publisher × 5（只有真发行的五个需要）
 
