@@ -211,6 +211,30 @@ test("runStep: aiAct 抛非网络异常 → error/engine_error", async () => {
   assert.equal(events().find((e) => e.type === "step_done").errorType, "engine_error");
 });
 
+// ---- 失败原因压成一行有界文本（ADR 0042 决策一/三，对称 Nova _error_text）----
+test("runStep: 多行超长异常 → message 只留首个非空行、折叠空白、有界", async () => {
+  // Playwright 异常的 message 惯常是「一句原因 + 多行 call log」，整段进 message 会把 run 的 step 行、
+  // explain 的「原因」与判定明细 JSON 撑成一条上千字符的行（下游只折不截）。
+  const { runStep } = await importMod();
+  const firstLine = "Timeout 30000ms exceeded：等" + "候元素可见".repeat(100);  // 首行本身就超上界
+  const err: any = new Error(`\n  ${firstLine}  \n=========== logs ===========\n  navigating to "https://x"\n`);
+  err.name = "TimeoutError";
+  const agent = { aiAct: async () => { throw err; } } as any;
+  assert.equal(await runStep(agent, fakePage, "sc:0", step("When", '"做事"'), 1, testSink), "error");
+  const msg = events().find((e) => e.type === "step_done").message as string;
+  assert.equal(msg.includes("\n"), false, "原因须是一行");
+  assert.equal(msg.includes("logs"), false, "首个非空行之后的 call log 不进 message");
+  assert.equal(msg, `TimeoutError: ${firstLine.slice(0, 300)}`);        // 类型 + 首行截 300
+  assert.ok(msg.length <= "TimeoutError: ".length + 300, `有界：${msg.length}`);
+});
+
+test("runStep: 异常 message 的内部空白折叠成单空格", async () => {
+  const { runStep } = await importMod();
+  const agent = { aiAct: async () => { throw new Error("locator   resolved \t to  2 elements"); } } as any;
+  await runStep(agent, fakePage, "sc:0", step("When", '"做事"'), 1, testSink);
+  assert.equal(events().find((e) => e.type === "step_done").message, "Error: locator resolved to 2 elements");
+});
+
 // ---- scope 内 step 短路（ADR 0031 决定六 / 0028，对称 Nova test_run_step）----
 // fake agent：aiAct 抛异常模拟 step error；记 aiAct/aiBoolean 调用数（验证短路后不再调）。
 function shortcircuitAgent(navRaises: Error) {

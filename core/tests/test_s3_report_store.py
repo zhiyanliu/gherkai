@@ -85,7 +85,7 @@ def test_index_html_links_and_summary(s3_report_store, aws, tmp_path):
 
 # ---- 连锁失败旁注在 S3 index.html 对称（复用 local 渲染，ADR 0031 决定六）----
 def test_index_html_taints_shortcircuited_step(s3_report_store, aws):
-    # S3 版复用 local 的 _render_index_html，taint 行为应自动对称——显式锚住，防未来 S3 分叉出独立渲染。
+    # S3 版复用 local 的 render_index_html，taint 行为应自动对称——显式锚住，防未来 S3 分叉出独立渲染。
     run = _rr(
         "chain",
         [_jr("s", "novaact", status=Status.ERROR, scenarios=[

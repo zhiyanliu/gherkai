@@ -208,10 +208,15 @@ def _variant_of(tag: str, version: str) -> str | None:
     return tag[len(head):] if tag.startswith(head) and len(tag) > len(head) else None
 
 
-def current_version_mappings(ssm, *, prefix: str, engine: str, version: str) -> list[ImageMapping]:
-    """某引擎**当前版本**的全部 variant 映射（按 variant 名排序）。旧版本的留作历史、不参与当前版本解析。"""
+def current_version_mappings(params, *, engine: str, version: str) -> list[ImageMapping]:
+    """某引擎**当前版本**的全部 variant 映射（按 variant 名排序）。旧版本的留作历史、不参与当前版本解析。
+
+    **吃一次枚举好的 `(engine, tag, value)` 序列**（`list(_iter_image_params(ssm, prefix))`）、自己不枚举：枚举与
+    筛选分开，是为让**一次** `_iter_image_params`（要翻页、且跨全部版本全部引擎）喂多个引擎的筛选——逐引擎各走
+    一遍全量枚举会把 `GetParametersByPath` 的翻页次数乘上引擎数。读不懂的映射按 `_parse_mapping` 的口径丢掉、不抛。
+    """
     out: list[ImageMapping] = []
-    for eng, tag, raw in _iter_image_params(ssm, prefix):
+    for eng, tag, raw in params:
         if eng != engine or _variant_of(tag, version) is None:
             continue
         mapping = _parse_mapping(eng, tag, raw, version=version)
@@ -802,12 +807,19 @@ def rederive_variants(*, prefix: str, engines, version: str, aws: Aws, now: date
     `pushed_at` **保留原值**：它记的是镜像推上去的时刻，重派生没碰镜像。
     """
     results: list[PushOutcome] = []
+    # 全部版本的映射只枚举一次（要翻页），各引擎的筛选共用：每个引擎只改自己那些映射参数，故这份快照与
+    # 逐引擎重读等价。
+    params = list(_iter_image_params(aws.ssm, prefix))
     for engine in engines:
         template_arn = _template_arn(aws, prefix=prefix, engine=engine)
-        for mapping in current_version_mappings(aws.ssm, prefix=prefix, engine=engine, version=version):
-            if mapping.template_arn == template_arn:
-                continue
-            repo_uri = _repo_uri_from_template(aws.ecs, template_arn=template_arn, engine=engine)
+        stale = [m for m in current_version_mappings(params, engine=engine, version=version)
+                 if m.template_arn != template_arn]
+        if not stale:
+            continue
+        # repo URI 只依赖（模板，引擎）——两者都是下面这个循环的不变量，故**每引擎算一次**：放进循环会让
+        # 待重派生的每个 variant 多打一次模板 describe。整个引擎无事可做时连这一次也不打。
+        repo_uri = _repo_uri_from_template(aws.ecs, template_arn=template_arn, engine=engine)
+        for mapping in stale:
             new_arn = _register_revision(aws.ecs, template_arn=template_arn, engine=engine,
                                          image_ref=f"{repo_uri}@{mapping.digest}", digest=mapping.digest,
                                          variant=mapping.variant, version=version)
@@ -900,12 +912,14 @@ def list_workers(*, prefix: str, cli_version: str | None, engines=None, region=N
     version = str(cli_version)
     try:
         default = read_default_variant(aws.ssm, prefix)
-        # 全部版本的映射只枚举一次（GetParametersByPath 每页 10 条要翻页），两个引擎共用——同 cleanup_pass 的做法
-        mapped = {a for _e, _t, raw in _iter_image_params(aws.ssm, prefix) for a in _mapped_arn(raw)}
+        # 全部版本的映射只枚举一次（GetParametersByPath 每页 10 条要翻页）：孤儿对账用的 `mapped` 与
+        # 各引擎的当前版本筛选共用这一份物化结果——同 cleanup_pass 的做法（枚举一次、逐引擎对账）
+        params = list(_iter_image_params(aws.ssm, prefix))
+        mapped = {a for _e, _t, raw in params for a in _mapped_arn(raw)}
         doc: dict = {"prefix": prefix, "version": version, "default_variant": default, "engines": {}}
         for engine in engines:
             family = names.task_def_name(prefix, engine)
-            mappings = current_version_mappings(aws.ssm, prefix=prefix, engine=engine, version=version)
+            mappings = current_version_mappings(params, engine=engine, version=version)
             doc["engines"][engine] = {
                 "family": family, "ecr_repo": names.ecr_repo_name(prefix, engine),
                 "variants": [{"variant": m.variant, "tag": m.tag, "digest": m.digest, "pushed_at": m.pushed_at,

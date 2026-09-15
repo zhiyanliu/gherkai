@@ -177,6 +177,21 @@ class Spy:
         return wrapped
 
 
+class CountingEcs:
+    """ECS client 的记参壳（数「同一个 task-def 被 describe 了几次」）——`Spy` 只记方法名，数不出这个。"""
+
+    def __init__(self, inner):
+        self._inner = inner
+        self.described: list[str] = []
+
+    def describe_task_definition(self, **kw):
+        self.described.append(kw["taskDefinition"])
+        return self._inner.describe_task_definition(**kw)
+
+    def __getattr__(self, item):
+        return getattr(self._inner, item)
+
+
 def _out():
     """收集打印文本的 out 替身 → (调用函数, 取全文函数)。"""
     lines: list[str] = []
@@ -205,6 +220,42 @@ def _revisions(aws, engine) -> list[str]:
 def _tags(aws, arn) -> dict[str, str]:
     resp = aws.ecs.describe_task_definition(taskDefinition=arn, include=["TAGS"])
     return {t["key"]: t["value"] for t in resp.get("tags") or []}
+
+
+# --------------------------------------------------------------------------- 当前版本映射的筛选
+
+def _image_param(engine, variant, *, version=VERSION, revision="arn:rev", raw=None):
+    """`_iter_image_params` 那种 `(engine, tag, value)` 三元组（不过 SSM，直接喂筛选函数）。"""
+    tag = names.image_tag(version, variant)
+    if raw is None:
+        raw = json.dumps({"template_arn": "arn:tpl", "revision_arn": revision,
+                          "digest": "sha256:" + "a" * 64, "pushed_at": NOW.isoformat()})
+    return engine, tag, raw
+
+
+def test_current_version_mappings_filters_one_engine_and_version_out_of_a_shared_enumeration():
+    """`current_version_mappings` 吃**已枚举好**的参数序列：只留本引擎 + 本版本的、按 variant 名排序，
+    读不懂的丢掉、不抛。
+
+    「吃序列而不自己枚举」是接口的一部分——同一份物化结果能连着喂多个引擎，翻页次数才不随引擎数增长
+    （逐引擎重走枚举结果一样、只是多打 AWS 调用，只断结果照不出）。
+    """
+    params = [
+        _image_param("novaact", "login"),
+        _image_param("novaact", "base"),
+        _image_param("novaact", "login", version="1.3.0"),        # 旧版本：留作历史、不参与当前版本解析
+        _image_param("midscene", "login"),                        # 另一个引擎
+        _image_param("novaact", "broken", raw="{ 这不是 JSON"),    # 坏参数：丢掉、不该让整份列举瘫掉
+        _image_param("novaact", "halfwritten", raw='{"template_arn": "arn:tpl"}'),   # 缺键：同上
+    ]
+
+    nova = workers.current_version_mappings(params, engine="novaact", version=VERSION)
+    assert [m.variant for m in nova] == ["base", "login"], [m.tag for m in nova]
+    assert {m.engine for m in nova} == {"novaact"}
+    # 同一份序列再喂另一个引擎（多引擎共用一次枚举的实际用法）
+    assert [m.variant for m in workers.current_version_mappings(params, engine="midscene", version=VERSION)] \
+        == ["login"]
+    assert workers.current_version_mappings(params, engine="novaact", version="9.9.9") == []
 
 
 # --------------------------------------------------------------------------- push-worker 八步
@@ -682,6 +733,45 @@ def test_rederive_ignores_other_versions(aws):
     assert _mapping(aws, "novaact", "login", version="1.3.0")["template_arn"] != new_templates["novaact"]
 
 
+def test_rederive_enumerates_ssm_once_and_reads_the_template_once_per_engine(aws):
+    """重派生是「枚举一次、逐引擎筛」+「repo URI 每引擎算一次」：SSM 全量枚举次数不随引擎数增长、
+    模板 describe 次数不随 variant 数翻倍。
+
+    **只断输出照不出这两条**——逐引擎重走枚举 / 逐 variant 重读模板，结果一模一样，只是多打 AWS 调用
+    （枚举要翻页，每页 10 条）。
+    """
+    seed_backend(aws)
+    _push(aws, FakeContainer(digests=["sha256:" + "1" * 64]))
+    _push(aws, FakeContainer(digests=["sha256:" + "2" * 64]), variant="base")
+    _push(aws, FakeContainer(digests=["sha256:" + "3" * 64]), engine="midscene")
+    new_templates = seed_backend(aws, cpu="2048")             # cdk 换出新模板 → 三个 variant 全部待重派生
+
+    ssm_spy, ecs_counter = Spy(aws.ssm), CountingEcs(aws.ecs)
+    counted = workers.Aws(ssm=ssm_spy, ecs=ecs_counter, ecr=aws.ecr, ddb=aws.ddb)
+    out, _ = _out()
+    results = workers.rederive_variants(prefix=PREFIX, engines=names.ENGINES, version=VERSION,
+                                        aws=counted, now=NOW, out=out)
+    assert {(r.engine, r.variant) for r in results} == {("novaact", "base"), ("novaact", "login"),
+                                                        ("midscene", "login")}
+    assert ssm_spy.calls.count("get_parameters_by_path") == 1, \
+        f"全量枚举应只跑一次（两个引擎共用），实际 {ssm_spy.calls.count('get_parameters_by_path')} 次"
+    # 每引擎：取 repo URI 读模板一次 + 每个新 revision 从模板复制一次
+    assert ecs_counter.described.count(new_templates["novaact"]) == 3, ecs_counter.described
+    assert ecs_counter.described.count(new_templates["midscene"]) == 2, ecs_counter.described
+
+
+def test_rederive_does_not_read_the_template_when_nothing_is_stale(aws):
+    """模板没变（deploy 重跑的常态）→ 一次模板 describe 都不打：判定只用映射里记的模板 ARN。"""
+    seed_backend(aws)
+    _push(aws, FakeContainer())
+    counter = CountingEcs(aws.ecs)
+    out, _ = _out()
+    assert workers.rederive_variants(prefix=PREFIX, engines=names.ENGINES, version=VERSION,
+                                     aws=workers.Aws(ssm=aws.ssm, ecs=counter, ecr=aws.ecr, ddb=aws.ddb),
+                                     now=NOW, out=out) == []
+    assert counter.described == [], f"无事可做却读了模板：{counter.described}"
+
+
 def test_run_deploy_steps_reports_a_missing_container_engine_as_exit_1(aws):
     """cdk 已成功、机器上没有容器引擎 → 退 1 + 「stack 已生效、重跑幂等收敛」（不是退 2：账户已被改过）。"""
     seed_backend(aws)
@@ -771,6 +861,26 @@ def test_list_workers_says_when_the_default_pointer_is_missing(aws):
     out, text = _out()
     assert workers.list_workers(prefix=PREFIX, cli_version=VERSION, aws=aws, out=out) == 0
     assert "未初始化" in text()
+
+
+def test_list_workers_enumerates_ssm_once_for_all_engines(aws):
+    """`list-workers` 的全量枚举（待清理对账用的映射集 + 各引擎当前版本的 variant）只跑一次、两个引擎共用。
+
+    **只断输出照不出这条**——逐引擎重走一遍枚举，列出来的东西一模一样，只是多花几趟分页
+    （`GetParametersByPath` 每页 10 条）。
+    """
+    seed_backend(aws)
+    _push(aws, FakeContainer(digests=["sha256:" + "6" * 64]), set_default=True)
+    _push(aws, FakeContainer(digests=["sha256:" + "7" * 64]), engine="midscene")
+    spy = Spy(aws.ssm)
+    out, text = _out()
+    assert workers.list_workers(prefix=PREFIX, cli_version=VERSION,
+                                aws=workers.Aws(ssm=spy, ecs=aws.ecs, ecr=aws.ecr, ddb=aws.ddb),
+                                out=out) == 0
+    n = spy.calls.count("get_parameters_by_path")
+    assert n == 1, f"全量枚举应只跑一次（两个引擎共用），实际 {n} 次"
+    body = text()
+    assert body.count("1.4.0-login") == 2, f"枚举一次不等于少列东西：两个引擎的 variant 都该在\n{body}"
 
 
 def test_list_workers_json_shape(aws):

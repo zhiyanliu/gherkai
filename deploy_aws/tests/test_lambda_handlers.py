@@ -179,7 +179,8 @@ def test_starter_run_ids_empty_when_neither():
 
 from gherkai_core.adapters.event_log import SqliteEventLog  # noqa: E402
 from gherkai_core.adapters.run_store.local import LocalRunStore  # noqa: E402
-from gherkai_core.model import Job, JobState, RunMeta, RunState, Scenario, Status, Step  # noqa: E402
+from gherkai_core.model import (Job, JobState, RunMeta, RunState, Scenario, Status, Step,  # noqa: E402
+                                StepArgument)
 
 
 class _FakeSchedulerClient:
@@ -457,6 +458,55 @@ def test_reconciler_ticks_detached_run(cloud_env):
     store = _seed_run(cloud_env["runs"], detached=True)
     reconciler.handler({"Records": [_stream_record("run-1#a")]}, None)
     assert store.load_run_state("run-1").jobs["a"].status == Status.RUNNING
+
+
+def test_build_wires_arg_offloader_so_step_argument_bodies_read_back(cloud_env):
+    """`_build` 装的 RunStore 必带 arg_offloader（ADR 0030 决定七）：META 里只留 S3 指针的 docString 正文要读得回。
+
+    漏挂则 load_run_meta 对含指针的 META 直接 fail-loud 抛，云端推进器整条链停在装配上。写端按 submit 侧形态
+    造（同桶、同 REPORT_DIR 前缀——fixture 不设 REPORT_DIR，Lambda 侧默认 `reports`）。
+    """
+    import boto3
+    from gherkai_core.adapters.run_store.arg_offload import S3StepArgumentOffloader
+
+    body = "第一行\n第二行"
+    offloader = S3StepArgumentOffloader(boto3.client("s3", region_name="us-east-1"), _BUCKET, "reports/")
+    store = DynamoDBRunStore(cloud_env["runs"], arg_offloader=offloader, detached=True)
+    job = Job(scope_id="a", scope_name="a", engine="novaact",
+              scenarios=(Scenario(id="a:1", name="s",
+                                  steps=(Step(0, "Given", "x",
+                                              argument=StepArgument(kind="docString", content=body)),)),))
+    store.create_run(
+        RunMeta(run_id="run-1", created_at="t0", jobs=(job,), worker_variant="base",
+                worker_task_defs={"novaact": _WORKER_REV}),
+        RunState(run_id="run-1", status=Status.PENDING, jobs={"a": JobState("a", Status.PENDING)},
+                 started_at="t0"))
+
+    built = reconciler._build("run-1")
+    assert built is not None
+    meta = built[0]
+    assert meta.jobs[0].scenarios[0].steps[0].argument.content == body
+
+
+def test_build_reuses_its_own_handles_and_builds_no_new_client(cloud_env, monkeypatch):
+    """`_build` 的三层 store 全用它自己已建的那批句柄装配——compose 里建句柄的两个钩子在此一次都不该跑。
+
+    这条同时是「region 不必传给 `build_cloud_stores`」的前提：region 在那边的唯一消费者就是这两个钩子。
+    退回手工重造装配、或漏掉句柄注入，本用例即红（钩子被叫到就抛）。
+    """
+    from gherkai_runtime import compose
+
+    def _boom(*a, **kw):
+        raise AssertionError("句柄已注入，装配不该再建 client")
+
+    monkeypatch.setattr(compose, "_make_ddb_table", _boom)
+    monkeypatch.setattr(compose, "_make_s3_client", _boom)
+    _seed_run(cloud_env["runs"], detached=True)
+
+    built = reconciler._build("run-1")
+
+    assert built is not None
+    assert built[0].run_id == "run-1"   # META 真读回来了（装配可用，不是「钩子没跑因为整条路都没走」）
 
 
 # ---------- 已收尾的 run 不再被改写（判定真值销毁的第二道闸，ADR 0030 决定三 / 0034）----------

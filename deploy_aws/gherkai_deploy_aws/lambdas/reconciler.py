@@ -267,9 +267,10 @@ def _build(run_id: str):
     **None = 本 run 云端推进器不该动**（非 detached / 已收尾 / definition 不在库，三支见下）——两个 handler
     据此整体 no-op。
 
-    **FargateEngine 装配复用 compose.build_fargate_engines（单一真源，不重造）**——job-in 前缀 / artifact 落点 /
-    container 名 / SDK env 全与同步 cloud run 路径一致、零漂移（ADR 0016：compose 是组合根逻辑、WebUI/
-    Lambda 都复用、不经 cli——组合根共享层即产品本体包）。Lambda 打包带上 gherkai（不再背 argparse/render）。
+    **store 与 FargateEngine 装配都复用 compose（`build_cloud_stores` / `build_fargate_engines`，单一真源、
+    不重造）**——三层 store 的 prefix 规范化与 offloader 挂载、job-in 前缀 / artifact 落点 / container 名 /
+    SDK env 全与同步 cloud run 路径一致、零漂移（ADR 0016：compose 是组合根逻辑、WebUI/Lambda 都复用、
+    不经 cli——组合根共享层即产品本体包）。Lambda 打包带上 gherkai（不再背 argparse/render）。
 
     **worker task-def revision 两条来源**（ADR 0038）：① definition 的 `meta.worker_task_defs`（正常路径，提交侧
     preflight 已把 variant 解析成各引擎的显式 revision）；② 缺该字段 → **兼容路径**（`_resolve_worker_task_defs`）
@@ -279,9 +280,6 @@ def _build(run_id: str):
     import boto3
     from gherkai_core.adapters.event_log import DdbEventLog
     from gherkai_core.adapters.cloud_launcher import CloudLauncher
-    from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore
-    from gherkai_core.adapters.result_store.s3 import S3ResultStore
-    from gherkai_core.adapters.report_store.s3 import S3ReportStore
     from gherkai_core.model import TERMINAL_STATUSES
     from gherkai_runtime import compose
 
@@ -289,21 +287,26 @@ def _build(run_id: str):
     ddb = boto3.resource("dynamodb", region_name=region)
     s3 = boto3.client("s3", region_name=region)
 
-    runs_table = ddb.Table(os.environ["RUNS_TABLE"])
+    runs_table_name = os.environ["RUNS_TABLE"]
+    runs_table = ddb.Table(runs_table_name)
     events_table = ddb.Table(os.environ["EVENTS_TABLE"])
     bucket = os.environ["ARTIFACTS_BUCKET"]
     report_dir = os.environ.get("REPORT_DIR", "reports")
     prefix = os.environ.get("PREFIX", compose.DEFAULT_PREFIX)
 
-    # arg_offloader 必须注入（ADR 0030 决定七「offloader 生产默认挂载、不给生产选要不要正确」）：
-    # submit 侧（build_cloud_stores）把超限 docString/dataTable 正文 offload 到 S3、META 只留指针——
-    # 此处不注入则 load_run_meta 的 content_ref 分支被跳过、正文静默还原成 None → worker 拿空参数跑错
-    # （moto 复现）。prefix 用 REPORT_DIR 与 submit 侧同源（restore 按绝对 URI 取回、实际不依赖 prefix，
-    # 但写读两侧同构造零漂移）。
-    from gherkai_core.adapters.run_store.arg_offload import S3StepArgumentOffloader
-
-    offloader = S3StepArgumentOffloader(s3, bucket, compose._normalize_prefix(report_dir))
-    run_store = DynamoDBRunStore(runs_table, arg_offloader=offloader)
+    # 三层 store 走 compose.build_cloud_stores（与 submit 侧同一真源、不重造：prefix 规范化、三个 S3 件套共享
+    # 一个 client、**arg_offloader 默认挂载**都由它保证），句柄注入以复用本函数已建的 ddb resource / s3 client。
+    # offloader 尤其不能漏（ADR 0030 决定七「生产默认挂载、不给生产选要不要正确」）：submit 侧把 docString/
+    # dataTable 正文 offload 到 S3、META 只留指针，漏挂则 load_run_meta 对含指针的 META 直接 fail-loud 抛，
+    # 云端推进器整条链停在装配上。prefix 用 REPORT_DIR 与 submit 侧同源（restore 按绝对 URI 取回、实际不依赖
+    # prefix，但写读两侧同构造零漂移）；**不含 run_id**——S3*Store 内部自拼 `{prefix}{run_id}/…`。
+    # region 不传：它在 build_cloud_stores 里只喂建句柄的那两个钩子，而此处两个句柄都已注入、钩子不会跑。
+    # detached 不传（默认 False）：本 Lambda 只读已存在的 run，不 create_run、不写 detached 标记。
+    # 第四项 make_artifacts 是同步 run 打落点用的，云端推进器不打、丢弃。
+    run_store, result_store, report_store, _ = compose.build_cloud_stores(
+        table=runs_table_name, bucket=bucket, prefix=report_dir,
+        ddb_table=runs_table, s3=s3)
+    # `is_detached` 是 DDB adapter 上的方法、不在 RunStore 端口面上——cloud 档这个 store 恒是 DDB 实现。
     if not run_store.is_detached(run_id):
         # 只推进 detached run（ADR 0034 端到端 cloud 1b）：同步 `run --backend cloud` 由进程内 schedule 推进，
         # 推进器碰它就是双开推进器（抢 claim/RunTask/finalize）。kicker 那扇门由 Stream filter 挡，events 表
@@ -330,11 +333,6 @@ def _build(run_id: str):
         return None  # definition 不存在（META 尚未落库的极端窗口 / 别的 run）——忽略
     scope_ids = [j.scope_id for j in meta.jobs]
     event_log = DdbEventLog(events_table, run_id, scope_ids)
-
-    # ResultStore/ReportStore：prefix 传 report_dir（**不含 run_id**——S3*Store 内部自拼 {prefix}{run_id}/…，
-    # 与 build_cloud_stores 一致；含 run_id 会重复）。共享一个 s3 client。
-    result_store = S3ResultStore(s3, bucket, compose._normalize_prefix(report_dir))
-    report_store = S3ReportStore(s3, bucket, compose._normalize_prefix(report_dir))
 
     # CloudLauncher 用 compose.build_fargate_engines 产的 resolver（单一真源、零漂移）。
     network = {

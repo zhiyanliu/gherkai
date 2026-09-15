@@ -232,9 +232,6 @@ def is_pure_release(v: str) -> bool:
     return not (pv.is_devrelease or pv.is_postrelease or pv.local)
 
 
-_is_pure_release = is_pure_release  # 模块内旧名（定位链/skew 判据处仍用）；跨包（deploy 的基底同步）用公开名
-
-
 def resolve_worker_cmd(engine: str, *, version: str | None = None) -> WorkerCmd:
     """按四级定位链解析某引擎 worker 的拉起命令（ADR 0037 决策 3）。
 
@@ -245,7 +242,7 @@ def resolve_worker_cmd(engine: str, *, version: str | None = None) -> WorkerCmd:
        **无包装层是硬要求**——EVENTS_FD 经 `pass_fds` 只到**被直接 spawn 的那个进程**（ADR 0024 三通道），
        包装进程会吞 fd3（midscene 换 `--import tsx` 那次踩过：tsx 二进制再 spawn 子-node → fd3 EBADF）。
     3. PATH 上的可执行 `gherkai-worker-<engine>`（Python 侧 console script / Node 侧 `npm i -g`）。
-    4. 兜底拉起 `uvx <发行名>==<版本>`（**仅 novaact**），**双条件**：①版本是纯发行版（见 `_is_pure_release`）；
+    4. 兜底拉起 `uvx <发行名>==<版本>`（**仅 novaact**），**双条件**：①版本是纯发行版（见 `is_pure_release`）；
        ②`uvx` 在 PATH。任一不成立即跳过本级（直接判 miss，报安装指引更有用）。
        uvx 是包装进程但**实测不吞 fd3**：子进程里 EVENTS_FD 与父侧同一 pipe inode、事件到达，SIGTERM 也转发。
        midscene **没有本级**：`npx -y <包>@<版本>` 实测把 fd 换掉（node 里该号上是 npm 自己的 FIFO、写即 EBADF），
@@ -279,7 +276,7 @@ def resolve_worker_cmd(engine: str, *, version: str | None = None) -> WorkerCmd:
         return WorkerCmd(cmd=[found], cwd=None, source=f"PATH 可执行 {bin_name}")
     fallback = _WORKER_FALLBACK.get(engine)  # midscene 无第四级（见 _WORKER_FALLBACK 注）
     v = version if version is not None else _runtime_version()
-    if fallback is not None and v is not None and _is_pure_release(v) and shutil.which(fallback[0]):
+    if fallback is not None and v is not None and is_pure_release(v) and shutil.which(fallback[0]):
         launcher, build = fallback
         return WorkerCmd(cmd=build(v), cwd=None, source=f"{launcher} 兜底拉起（版本 {v}）")
     raise WorkerNotFoundError(
@@ -702,7 +699,7 @@ def _make_s3_client(*, region, profile):
 
 def build_cloud_stores(*, table: str, bucket: str, prefix: str = "",
                        region: str | None = None, profile: str | None = None,
-                       detached: bool = False):
+                       detached: bool = False, ddb_table=None, s3=None):
     """云端三层 store（RunStore→DDB、Result/ReportStore→S3）+ cloud artifacts descriptor（s3://+ddb://）。
 
     DDB 吃 `resource.Table`、三个 S3 件套（ResultStore/ReportStore/offloader）**共享一个 client**（喂错句柄
@@ -711,6 +708,10 @@ def build_cloud_stores(*, table: str, bucket: str, prefix: str = "",
     cli[aws]→core[aws] extra」已被 ADR 0037 决策 2c 反转：CLI 发行包 gherkai 硬依赖 `gherkai-runtime[aws]`、
     自带 boto3，库层 `gherkai-core[aws]`/`gherkai-runtime[aws]` extra 保留给库消费者；缺 boto3 抛 ImportError
     由 cli 归到退 2）。prefix 分隔符规范化避粘连 key。
+
+    **句柄可注入**（`ddb_table` / `s3`，同 `build_fargate_engines` 的注入惯例；未给则走 `_make_*` 钩子）：
+    Lambda 组合根要把同一个 s3 client 分给 engine、同一个 ddb resource 分给 events 表，注入让它复用这批
+    句柄而不必手工重造本函数的装配——重造的那份里 prefix 规范化与 offloader 挂载会各自漂。
     """
     from gherkai_core.adapters.report_store.s3 import S3ReportStore
     from gherkai_core.adapters.result_store.s3 import S3ResultStore
@@ -718,8 +719,10 @@ def build_cloud_stores(*, table: str, bucket: str, prefix: str = "",
     from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore
 
     pfx = _normalize_prefix(prefix)
-    ddb_table = _make_ddb_table(table, region=region, profile=profile)
-    s3 = _make_s3_client(region=region, profile=profile)  # 一个 client 注入三个 S3 件套
+    if ddb_table is None:
+        ddb_table = _make_ddb_table(table, region=region, profile=profile)
+    if s3 is None:
+        s3 = _make_s3_client(region=region, profile=profile)  # 一个 client 注入三个 S3 件套
 
     offloader = S3StepArgumentOffloader(s3, bucket, pfx)
     # detached：无状态跑批 submit 传 True → create_run 的 STATE 带 detached 标记、触发 kicker 冷启动；
@@ -961,7 +964,7 @@ def read_backend_version(*, prefix: str, region=None, profile=None, ssm=None) ->
 def _release_key(v: str) -> tuple[int, ...]:
     """PEP 440 版本的 release 段（`1.4.0.post3+sha` → `(1, 4, 0)`）。
 
-    只在 `_is_pure_release` 已放行后调用——它对解析不了的版本返回 False，故此处不会撞 `InvalidVersion`。
+    只在 `is_pure_release` 已放行后调用——它对解析不了的版本返回 False，故此处不会撞 `InvalidVersion`。
     """
     from packaging.version import Version
 
@@ -976,7 +979,7 @@ def _release_cmp(a: str, b: str) -> int | None:
     （ADR 0038：CLI 与后端同版本 → 引导去 push-worker；CLI 旧于后端 → 引导升级 CLI）。补零/纯净判据在两处
     各写一遍必漂。
     """
-    if not (a and b and _is_pure_release(a) and _is_pure_release(b)):
+    if not (a and b and is_pure_release(a) and is_pure_release(b)):
         return None
     ra, rb = _release_key(a), _release_key(b)
     n = max(len(ra), len(rb))
@@ -999,7 +1002,7 @@ def check_version_skew(ssm_version: str | None, cli_version: str | None) -> tupl
        版本**：比的对象是「写任务定义那一方」（CLI）的版本，由调用点提供；editable 开发树里各包版本各自漂
        （按各自 git 状态算），缺省读 `gherkai-runtime` 版本会埋一个只在 lockstep 发行态下才等价的第二真源。
     3. **任一侧非纯发行版**（含 `.dev`/`.post`/本地段，或压根解析不了）→ skip：dev 版逐提交前进，逐字比较
-       会把每次都判成 skew（判据 `_is_pure_release` 与定位链第四级共用——它靠 2b 的 `dirty=true`/`metadata=true`
+       会把每次都判成 skew（判据 `is_pure_release` 与定位链第四级共用——它靠 2b 的 `dirty=true`/`metadata=true`
        保证「非纯净构建一定带 `+`」才可靠）。
     4. **只比 release 段**（决策 7）：pre/post/dev/本地段不参与，故同 release 段的 rc 与正式版视作同版本。
        两侧位数不同（`1.4` vs `1.4.0`）时补零再比，避免元组字典序把 `1.4` 判成小于 `1.4.0`。

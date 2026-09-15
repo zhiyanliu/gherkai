@@ -11,7 +11,7 @@
 无相对化必要（不 presign、不做产物拷贝）。故 make_href 恒返 rr.ref。（产物拷贝式 materialize 已否决，
 见 [0027]「被拒方案」——曾计划 S3 版 copy_object 进 artifacts/，因 s3:// 已可移植而零收益。）
 
-复用 LocalReportStore 的渲染真理源（`_render_index_html`/`SCHEMA_VERSION`）——不重写、两 adapter 同一份 index 渲染。
+复用 LocalReportStore 的渲染真理源（`render_index_html`/`SCHEMA_VERSION`）——不重写、两 adapter 同一份 index 渲染。
 """
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ from gherkai_core.adapters._boto import require_boto3
 from gherkai_core.model import ResourceUri, RunResult
 
 # 复用 report 的单一真理源：index.html 渲染 + schema 版本 + report_index 三级投影（S3 与 Local 出一致的 report）
-from gherkai_core.adapters.report_store.local import SCHEMA_VERSION, _render_index_html, collect_report_index
+from gherkai_core.adapters.report_store.local import SCHEMA_VERSION, collect_report_index, render_index_html
 
 
 class S3ReportStore:
@@ -57,7 +57,7 @@ class S3ReportStore:
         # index.html 复用 Local 的渲染（单一真理源）——两 adapter 出一致的入口页
         self._s3.put_object(
             Bucket=self._bucket, Key=f"{base}/index.html",
-            Body=_render_index_html(manifest, result).encode("utf-8"),
+            Body=render_index_html(manifest, result).encode("utf-8"),
             ContentType="text/html; charset=utf-8",
         )
         return ResourceUri(f"s3://{self._bucket}/{base}/index.html")

@@ -1051,6 +1051,67 @@ def test_render_status_terminal_prints_artifact_locations(capsys):
     assert "报告:" not in cap.err
 
 
+def test_run_terminal_prints_the_same_three_artifact_lines(tmp_path, monkeypatch, capsys):
+    """`run` 结束打的三行与 `status` 终态**同一份**（`_print_artifact_lines`）：报告 / 运行元信息 / 判定明细，
+    值取本次 run 的落点（file:// 可直接复制）。两处曾各抄一份，文案或键名一改就分叉。"""
+    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
+    reports = tmp_path / "reports"
+    assert m.main(["run", str(_write_feature(tmp_path)), "--report-dir", str(reports)]) == 0
+    err = capsys.readouterr().err
+    run_dir = next(d for d in reports.iterdir() if d.is_dir())
+    assert f"报告: {(run_dir / 'index.html').as_uri()}" in err
+    assert (f"运行元信息: {(run_dir / 'run_meta.json').as_uri()}、"
+            f"{(run_dir / 'run_state.json').as_uri()}") in err
+    assert f"判定明细: {(run_dir / 'jobs').as_uri()}" in err
+
+
+def test_artifact_lines_report_write_failure_falls_back_to_a_note(capsys):
+    """报告写入被隔离（落点表里没有 report_index 键，ADR 0030 决定三）→ 报告那行给「写失败」提示，
+    既不打裸 None、也不掩盖另两行仍然有效。"""
+    m._print_artifact_lines({k: v for k, v in _LOCS.items() if k != "report_index"})
+    err = capsys.readouterr().err
+    assert "报告: <报告写入失败" in err and "None" not in err
+    assert "判定明细: file:///tmp/x/r/jobs" in err  # 判定结果照旧落库、位置照打
+
+
+def test_run_lists_each_job_but_submit_only_prints_the_count(tmp_path, monkeypatch, capsys):
+    """run 与 submit 共享同一段前置（plan → steps 目录 → local 档 worker 检查），唯一的输出差别 = 逐 job 明细：
+    run 打（本机跑批要看得见分组），submit 不打（提交完就走、进度看 status）。计数行两处同款。"""
+    import subprocess
+
+    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
+    assert m.main(["run", str(_write_feature(tmp_path)), "--report-dir", str(tmp_path / "r")]) == 0
+    err = capsys.readouterr().err
+    assert "plan: 1 job(s)" in err and "- scope=" in err
+
+    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: type("P", (), {"pid": 1})())
+    assert m.main(["submit", str(_write_feature(tmp_path)), "--report-dir", str(tmp_path / "s")]) == 0
+    err = capsys.readouterr().err
+    assert "plan: 1 job(s)" in err and "- scope=" not in err
+
+
+def test_run_and_submit_share_one_steps_dir_help_text(capsys):
+    """`--steps-dir` 的 help 在 run/submit 两处是同一个常量（曾字节级抄两份）：措辞改一处即两处生效。
+
+    这两个子命令产提交记录、且值会随它到后台推进/接力进程，故要那两句补充（值随提交记录走 / cloud 档不
+    生效）；`plan`、`doctor` 等不产提交记录的子命令用不加补充的公共段（`doctor` 同样带 `--backend`，判据不
+    是它）。
+    """
+    import argparse
+
+    sub = next(a for a in m._build_parser()._actions if isinstance(a, argparse._SubParsersAction))
+
+    def steps_dir_help(command: str) -> str:
+        return next(a.help for a in sub.choices[command]._actions if "--steps-dir" in a.option_strings)
+
+    assert steps_dir_help("run") == steps_dir_help("submit") == m._STEPS_DIR_HELP_RUN_SUBMIT
+    assert m._STEPS_DIR_HELP_RUN_SUBMIT.startswith(m._STEPS_DIR_HELP)
+    assert steps_dir_help("plan").startswith(m._STEPS_DIR_HELP)
+    assert steps_dir_help("plan") != m._STEPS_DIR_HELP_RUN_SUBMIT
+    # doctor 也带 --backend，却只查环境、不产提交记录 → 恒用不加补充的公共段（钉住「判据不是 --backend」）
+    assert steps_dir_help("doctor") == m._STEPS_DIR_HELP
+
+
 # ---- --tags / --scenario 筛选（ADR 0041 决策一）：run/plan/submit 同一解析 ----
 def _tagged_feature(tmp_path):
     p = tmp_path / "sel.feature"

@@ -61,6 +61,14 @@ _STEPS_DIR_HELP = (
     "你自己的确定性 step 目录（默认 ./steps 存在即用；亦可 env GHERKAI_STEPS_DIR）：worker 启动时排序递归"
     "加载其中的 step 定义文件、注册进它的确定性注册表"
 )
+# `run` / `submit`（真跑与提交那一侧）另加两句：值随提交记录走、cloud 档不生效。
+# 同一段措辞两处共用（曾字节级抄两份），改一处即两处生效。判据不是「带 --backend」——
+# `doctor` 也带 --backend，但它只查环境、不产提交记录，故用不加补充的公共段。
+_STEPS_DIR_HELP_RUN_SUBMIT = (
+    _STEPS_DIR_HELP
+    + "。值随提交记录走，本机后台推进/接力进程都读回同一份；"
+      "[--backend cloud] 不生效（云端 worker 的 steps 烙在定制镜像里，警告不拦）"
+)
 
 
 # deploy/destroy 两个子命令要先解析 provider 才能贴它的 flag（见 _peek_deploy_provider / _build_parser）。
@@ -225,11 +233,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
         "--no-report", action="store_true",
         help="跳过报告归集（CI 只看退出码/JSON、或调试时不想落盘的逃生舱）",
     )
-    run.add_argument(
-        "--steps-dir", default=None, metavar="DIR",
-        help=_STEPS_DIR_HELP + "。值随提交记录走，本机后台推进/接力进程都读回同一份；"
-             "[--backend cloud] 不生效（云端 worker 的 steps 烙在定制镜像里，警告不拦）",
-    )
+    run.add_argument("--steps-dir", default=None, metavar="DIR", help=_STEPS_DIR_HELP_RUN_SUBMIT)
     # backend 选择（ADR 0016「cli backend 选择」/ 0030 决定七）：local=文件落盘（默认）；cloud=DDB/S3。
     # 仅 run 加（plan 纯本地不落库、不连 AWS，不加）。cloud 一次换齐三层（RunStore→DDB、Result/Report→S3）。
     run.add_argument(
@@ -342,11 +346,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     sm.add_argument("--report-dir", default="reports", metavar="DIR",
                     help="归集报告落点（默认 reports/）；cloud 档须与后端部署的 REPORT_DIR 一致"
                          "（提交前会比对，不一致退 2）")
-    sm.add_argument(
-        "--steps-dir", default=None, metavar="DIR",
-        help=_STEPS_DIR_HELP + "。值随提交记录走，本机后台推进/接力进程都读回同一份；"
-             "[--backend cloud] 不生效（云端 worker 的 steps 烙在定制镜像里，警告不拦）",
-    )
+    sm.add_argument("--steps-dir", default=None, metavar="DIR", help=_STEPS_DIR_HELP_RUN_SUBMIT)
     sm.add_argument("--region", default=None, metavar="R", help="AWS region（喂 worker）")
     sm.add_argument("--profile", default=None, metavar="P", help="AWS profile（喂 subprocess worker）")
     # backend：local（默认，per-run 进程本机推进）/ cloud（Fargate + 云端 Lambda 事件驱动链推进，ADR 0034）。
@@ -354,9 +354,8 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
                     help="local=本机后台进程推进（默认）；cloud=Fargate + 云端 Lambda 事件驱动链推进（提交完真关机也跑完）")
     sm.add_argument("--prefix", default=None, metavar="P", help="[cloud] 资源名前缀（默认 gherkai-；须与 CDK 一致）")
     sm.add_argument("--ddb-table", default=None, metavar="NAME", help="[cloud] 运行状态表（DynamoDB）名")
+    # --s3-bucket 对 submit 有真实作用（run_store 挂的超大 step 参数卸载器写这个桶），故保留。
     sm.add_argument("--s3-bucket", default=None, metavar="NAME", help="[cloud] S3 桶名")
-    sm.add_argument("--events-table", default=None, metavar="NAME", help="[cloud] events DDB 表名")
-    sm.add_argument("--cluster", default=None, metavar="NAME", help="[cloud] ECS cluster 名")
     sm.add_argument(
         "--worker-variant", default=None, metavar="NAME",
         help="[cloud] 云端 worker 镜像 variant（语义同 run）：缺省用部署的默认指针；提交时解析成各引擎的"
@@ -364,6 +363,10 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     )
     # 注：submit 不收 --subnet/--security-group——cloud submit 只写 runs 表、不碰 SSM/ECS（ADR 0034），
     # 网络配置由 IaC 注给 reconciler/kicker Lambda 的 env（曾在此声明过两个从不生效的 flag，已删）。
+    # **同理不收 --events-table / --cluster**（也曾声明过、已删）：真正读它们的是云端推进器，取自自己的 Lambda
+    # env，与提交记录无关；在 submit 侧它们唯一的作用是改「提交前检查」探哪个资源名，给错值会把「探针指错」
+    # 伪装成「后端未部署」（那句诊断恒说「按 --prefix 拼出的名字不存在」，而显式给的名字并非 prefix 拼出）。
+    # cloud submit 的探针一律按 --prefix 推——与部署侧同一套命名真源（ADR 0033 两层命名）。
 
     st = sub.add_parser("status", help="[无状态跑批] 查一个 run 的进度/结果（--wait 轮询到完成）")
     st.add_argument("run_id", help="submit 返回的 run_id")
@@ -966,6 +969,60 @@ def _setup_tunnel(args, jobs):
     return setup.jobs, setup.extra_http_headers, setup.info
 
 
+def _plan_and_preflight(args, *, list_jobs: bool) -> "tuple[list, str | None] | int":
+    """`run` 与 `submit` 的共享前置（同一序列，次序本身是判据）：入口 flag 校验 → plan → steps 目录解析
+    → local 档 worker 运行时 preflight。成功返回 `(jobs, steps_dir)`；任一步失败返回**退出码**（调用方原样返回）。
+
+    **整块只碰本机、不碰隧道/云端/落库**（末步给了 steps 目录时会起本地瞬时 worker 子进程做自述——非跑 job）——
+    故排在起隧道 / 探云端资源 / 落库之前，让配置错落在
+    「没开跑就被拒」层（各步自己的判据见 `_validate_max_concurrency` / `_validate_worker_variant` /
+    `_load_and_plan` / `_resolve_steps_dir_for_backend` / `_preflight_worker_runtimes`）。抽出的理由同
+    `_load_and_plan`：run 与 submit 曾各手抄一份、会漂移。
+    `list_jobs`：`run` 在计数行后再逐 job 打一行（scope/engine/scenario 数）；`submit` 只打计数行（进度看 `status`）。
+    调用方各自的旋钮校验（`run` 的 `--grace`、`submit` 的 `--tunnel-ttl`）接在本函数之后、仍在起隧道之前。
+    """
+    if not _validate_max_concurrency(args):  # 最早：读 feature/起隧道/preflight 之前（真零副作用）
+        return 2
+    if not _validate_worker_variant(args):   # 同上层（入口校验，ADR 0038）；local 档在此只打一行「不生效」
+        return 2
+    jobs = _load_and_plan(args)  # votes/筛选值校验 + 读 feature + plan（前置失败返回退出码 2）
+    if isinstance(jobs, int):
+        return jobs
+    # 进度走 stderr（不受 --json 开关；stdout 始终只放核心产出）
+    _progress(f"plan: {len(jobs)} job(s)  (default_engine={args.default_engine})")
+    if list_jobs:
+        for j in jobs:
+            _progress(f"  - scope={j.scope_id!r} engine={j.engine} scenarios={len(j.scenarios)}")
+
+    # 使用方确定性 step 目录（ADR 0037 决策 4）：解析一次 → 写进 definition + 注给本进程/宿主起的 worker。
+    steps_dir = _resolve_steps_dir_for_backend(args)
+    if isinstance(steps_dir, int):
+        return steps_dir
+    # worker 运行时 preflight（ADR 0037 决策 3 miss 分叉）：**仅 local 档**——worker 在本机 spawn，定位链 miss
+    # 要在 spawn/提交之前退 2，不该变成一批 job 级 engine_error（submit 更坏：「提交成功」后逐 job error、
+    # 诊断只落后台日志）。cloud 档 worker 在 Fargate，本机没有也正常（那档探镜像/task-def，见各自的 cloud 分支）。
+    if args.backend != "cloud":
+        miss = _preflight_worker_runtimes(jobs, steps_dir)
+        if miss is not None:
+            return miss
+    return jobs, steps_dir
+
+
+def _build_run_meta(args, jobs, steps_dir: "str | None", tunnel_headers: "dict | None") -> RunMeta:
+    """组装 definition（ADR 0016/0027）：新 run_id + 创建时刻 + plan 产出的 jobs + run 级执行参数。
+
+    `run` 与 `submit` 共用（六个字段曾各抄一份）；run_id 在此生成，调用方从 `run_meta.run_id` 取回。
+    `steps_dir` 在 cloud 档恒 None（`_resolve_steps_dir_for_backend` 已清零）；`extra_http_headers` 是隧道
+    注入的额外请求头（ADR 0035 决策 4），空表归一成 None。
+    """
+    return RunMeta(
+        run_id=compose.new_run_id(), created_at=compose.now_iso(), jobs=tuple(jobs),
+        extra_http_headers=tuple(tunnel_headers.items()) if tunnel_headers else None,
+        max_concurrency=args.max_concurrency,
+        steps_dir=steps_dir,
+    )
+
+
 def _cmd_plan(args) -> int:
     """plan 预检：读 feature → plan → 渲染 scope/job 分组 + 派发预期标注（ADR 0036）。
     **零 AWS、零花费、零副作用**（标注会起本地瞬时 worker 子进程做 match 自述——非跑 job；失败自动降级）。
@@ -1017,6 +1074,18 @@ def _progress(*args, **kwargs) -> None:
     print(*args, **kwargs)
 
 
+def _print_artifact_lines(locations: dict) -> None:
+    """产物落点三行（报告 / 运行元信息 / 判定明细）→ stderr：**`run` 结束与 `status` 终态共用这一份**
+    （两处对标输出，S3/本地路径可直接复制；曾各抄一份，文案或键名一改就分叉）。
+
+    `locations` = compose 单点拼的落点表。缺 `report_index` 键 = 报告写入被隔离的失败（ADR 0030 决定三）
+    → 该行给「写失败」提示、不打裸值；`status` 侧拿的是 compose 给的约定落点、必有该键，故只有 `run` 会走到回落。
+    """
+    _progress(f"\n报告: {locations.get('report_index', '<报告写入失败，已跳过；判定结果不受影响、仍已落库>')}")
+    _progress(f"运行元信息: {locations['run_meta']}、{locations['run_state']}")
+    _progress(f"判定明细: {locations['jobs_dir']}")
+
+
 def _cmd_submit(args) -> int:
     """[无状态跑批] 提交完就走（ADR 0034）：plan → 写 RunMeta+全 pending → 起首轮推进 → 打印 run_id → 立即退出。
 
@@ -1026,26 +1095,12 @@ def _cmd_submit(args) -> int:
       CLI 不留本机进程、submit 机器零 ECS 权限。
     退出码 = 提交成功与否（非 run 判定；判定由 status 查）。
     """
-    if not _validate_max_concurrency(args):  # 最早：读 feature/起隧道/preflight 之前（真零副作用）
-        return 2
-    if not _validate_worker_variant(args):   # 同上层（入口校验，ADR 0038）；local 档在此只打一行「不生效」
-        return 2
-    jobs = _load_and_plan(args)
-    if isinstance(jobs, int):
-        return jobs
-    _progress(f"plan: {len(jobs)} job(s)  (default_engine={args.default_engine})")
-
-    # worker 运行时 preflight（ADR 0037 决策 3 miss 分叉）：**仅 local 档**——per-run 进程在本机 spawn worker，
-    # 定位链 miss 要在提交前退 2（否则提交成功、后台每个 job 都 engine_error）。cloud 档 worker 在 Fargate，
-    # 本机没有也正常（cloud 的镜像/task-def 由 _submit_cloud 的 preflight 探）。**排在起隧道之前**（零副作用）。
-    # 使用方确定性 step 目录（ADR 0037 决策 4）：提交侧解析一次、随 definition 走给 per-run/接力宿主。
-    steps_dir = _resolve_steps_dir_for_backend(args)
-    if isinstance(steps_dir, int):
-        return steps_dir
-    if args.backend != "cloud":
-        miss = _preflight_worker_runtimes(jobs, steps_dir)
-        if miss is not None:
-            return miss
+    # 共享前置（与 run 同一份，见 _plan_and_preflight）：入口校验 → plan → steps 目录 → local 档 worker preflight。
+    # 整块**排在起隧道之前**——早拒才真零副作用。
+    prepped = _plan_and_preflight(args, list_jobs=False)  # 逐 job 明细归 run；submit 只打计数行（进度看 status）
+    if isinstance(prepped, int):
+        return prepped
+    jobs, steps_dir = prepped
 
     # --tunnel-ttl 校验（对齐 --grace/--assertion-votes 的入口校验惯例，退 2「没开跑就被拒」）：
     # <=0 等于隧道刚起就被拆。**必须排在起隧道之前**——早拒才真零副作用（否则配置错也已起 ngrok）。
@@ -1063,11 +1118,8 @@ def _cmd_submit(args) -> int:
         return tunneled
     jobs, tunnel_headers, tunnel_info = tunneled
 
-    run_id = compose.new_run_id()
-    run_meta = RunMeta(run_id=run_id, created_at=compose.now_iso(), jobs=tuple(jobs),
-                       extra_http_headers=tuple(tunnel_headers.items()) if tunnel_headers else None,
-                       max_concurrency=args.max_concurrency,
-                       steps_dir=steps_dir)  # cloud 档恒 None（上面已置），local 档随 definition 到达宿主
+    run_meta = _build_run_meta(args, jobs, steps_dir, tunnel_headers)  # steps_dir 随 definition 到达宿主
+    run_id = run_meta.run_id
     from gherkai_core.model import JobState, RunState
     initial = RunState(
         run_id=run_id, status=Status.PENDING,
@@ -1246,10 +1298,11 @@ def _submit_cloud(args, run_id: str, run_meta, initial, *, tunnel_info=None, on_
     events Stream → reconciler 接管（补起后续 / finalize）。submit 只写 DDB、不碰 ECS——机器权限收窄到只剩
     「runs 表写 + preflight」（见下正文注释）。CLI 写完即退、不留本机进程。
     """
+    # events 表/cluster 名不收 flag、一律按 prefix 推（判据见 _build_parser 里 submit 的 flag 面注释）：
+    # 它们在这条路上只被下面的 preflight 探针消费，与写进提交记录的内容无关。
     target = compose.resolve_cloud_target(
         prefix=args.prefix, region=args.region, profile=args.profile,
-        runs_table=args.ddb_table, events_table=args.events_table,
-        bucket=args.s3_bucket, cluster=args.cluster,
+        runs_table=args.ddb_table, bucket=args.s3_bucket,
     )
 
     # 版本 skew 先于资源 preflight（ADR 0037 决策 7 的次序）；戳一并拿回，供下面的 variant 解析（ADR 0038）
@@ -1359,10 +1412,7 @@ def _render_status(state, args, *, wait_hint: str, locations: dict) -> int:
     else:
         print(render.render_run_state(state))
         if state.status in TERMINAL_STATUSES:
-            # 与 `run` 结束时同款三行（对标输出，S3/本地路径可直接复制）；report 写失败被隔离时这里给的是约定落点
-            _progress(f"\n报告: {locations['report_index']}")
-            _progress(f"运行元信息: {locations['run_meta']}、{locations['run_state']}")
-            _progress(f"判定明细: {locations['jobs_dir']}")
+            _print_artifact_lines(locations)  # 与 `run` 结束时同一份（见其 docstring）
     # 疑似卡住诊断（两路一致）：非 --wait、非 json、**所有 job 仍 pending** → 提示 --wait 接力（**只提示、不自动
     # kickoff/tick**——保「查看」纯只读无副作用；救活决定权留用户，走 --wait）。判据不能只看 run 级 status：
     # 推进器 claim（CAS pending→running）只动那个 job、run 级 status 要等下一次 tick 的投影写才翻 running，而
@@ -1753,31 +1803,12 @@ def _cmd_tunnel_watch(args) -> int:
 def _cmd_run(args) -> int:
     use_json = args.json
 
-    if not _validate_max_concurrency(args):  # 最早：读 feature/起隧道/preflight/begin 之前（真零副作用）
-        return 2
-    if not _validate_worker_variant(args):   # 同上层（入口校验，ADR 0038）；local 档在此只打一行「不生效」
-        return 2
-    # 0/1/2) votes 校验 + 读 feature + plan（与 _cmd_plan 共享；前置失败返回退出码 2，见 _load_and_plan）
-    jobs = _load_and_plan(args)
-    if isinstance(jobs, int):
-        return jobs
-
-    # 进度走 stderr（不再受 --json 开关；stdout 始终只放核心产出）。--quiet 仍可静音逐事件。
-    _progress(f"plan: {len(jobs)} job(s)  (default_engine={args.default_engine})")
-    for j in jobs:
-        _progress(f"  - scope={j.scope_id!r} engine={j.engine} scenarios={len(j.scenarios)}")
-
-    # worker 运行时 preflight（ADR 0037 决策 3 miss 分叉）：**仅 local 执行档**（cloud 档 worker 在 Fargate，
-    # 本机定位链无关）。定位链 miss → 退 2，**在 spawn 前**、不进 job 级 engine_error。排在起隧道/preflight/
-    # begin 之前（只依赖 jobs，早拒才真零副作用——同 votes/grace 校验的位置理由）。
-    # 使用方确定性 step 目录（ADR 0037 决策 4）：解析一次 → 写进 definition + 注给本进程起的 worker。
-    steps_dir = _resolve_steps_dir_for_backend(args)
-    if isinstance(steps_dir, int):
-        return steps_dir
-    if args.backend != "cloud":
-        miss = _preflight_worker_runtimes(jobs, steps_dir)
-        if miss is not None:
-            return miss
+    # 0/1/2) 共享前置（与 submit 同一份，见 _plan_and_preflight）：入口校验 → plan（+ 逐 job 明细）→
+    #        steps 目录 → local 执行档的 worker preflight。整块排在起隧道 / 云端探资源 / begin 之前。
+    prepped = _plan_and_preflight(args, list_jobs=True)  # run 逐 job 打一行（本机跑批看得见分组）
+    if isinstance(prepped, int):
+        return prepped
+    jobs, steps_dir = prepped
 
     # 2a) grace 硬约束（ADR 0024）：按本 run 各引擎的下限取 max（grace 是 run 级单值）。引擎特定下限住组合根。
     #     显式给了过小 grace → 入口友好拒绝（对齐 votes 校验惯例，退 2「没开跑就被拒」）。core 侧还有 enforce
@@ -1808,13 +1839,10 @@ def _cmd_run(args) -> int:
         from gherkai_runtime.tunnel import stop_tunnel
         atexit.register(stop_tunnel, tunnel_info.pid)
 
-    # 3) 组合根：构造 RunMeta（definition：生成 run_id + now + plan 产出的 jobs，先于跑批，ADR 0016/0027）
+    # 3) 组合根：构造 RunMeta（definition 先于跑批，ADR 0016/0027；与 submit 同一份，见 _build_run_meta）
     #    + 注入具体引擎 resolver（core 引擎无关）
-    run_id = compose.new_run_id()
-    run_meta = RunMeta(run_id=run_id, created_at=compose.now_iso(), jobs=tuple(jobs),
-                       extra_http_headers=tuple(tunnel_headers.items()) if tunnel_headers else None,
-                       max_concurrency=args.max_concurrency,
-                       steps_dir=steps_dir)  # cloud 档恒 None（上面已置）
+    run_meta = _build_run_meta(args, jobs, steps_dir, tunnel_headers)
+    run_id = run_meta.run_id
     do_report = not args.no_report  # RunReport 默认生成；--no-report 跳过（逃生舱）
     worker_log_fh = None  # --quiet（local 执行档）时打开的 worker 日志句柄，见 build_engines 处
     worker_log_path: Path | None = None
@@ -2056,11 +2084,7 @@ def _cmd_run(args) -> int:
     else:
         print(render.render_text(result))
     if "run_meta" in artifacts:  # 落过库才有这三行（--quiet --no-report 时 artifacts 只有 worker_log）
-        # report_index 键可能缺席（report 写失败被隔离，ADR 0030 决定三）——缺则提示写失败、不打裸值
-        report_line = artifacts.get("report_index", "<报告写入失败，已跳过；判定结果不受影响、仍已落库>")
-        _progress(f"\n报告: {report_line}")
-        _progress(f"运行元信息: {artifacts['run_meta']}、{artifacts['run_state']}")
-        _progress(f"判定明细: {artifacts['jobs_dir']}")
+        _print_artifact_lines(artifacts)  # 与 `status` 终态同一份（含 report_index 缺席时的回落文案）
     if worker_log_fh is not None:
         _progress(f"worker 日志: {artifacts['worker_log']}")
 

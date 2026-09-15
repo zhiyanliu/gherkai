@@ -134,6 +134,20 @@ test("映射：error = 首个非空 errorMessage；无 errorMessage 时末个 ac
   assert.deepEqual(doc2.acts.map((a) => a.error), [null, "ActError: timeout"]);
 });
 
+test("映射：多行超长 errorMessage 压成一行有界文本（与 step_done.message 同形）", () => {
+  // SDK 的 errorMessage 与抛出异常的 message 同源（Playwright 的「一句原因 + 多行 call log」），act.error
+  // 无论从哪条来源填，形状都必须一样——否则 explain / 报告页的「原因」会因来源不同而一行 / 上千字符不定。
+  const firstLine = "Element not found：等" + "候元素可见".repeat(100);  // 首行本身就超上界
+  const raw = `\n  ${firstLine}  \n=========== logs ===========\n  waiting for locator("#x")\n`;
+  const doc = build({ status: "error", executions: [exec(task({ errorMessage: raw }))], error: "TimeoutError: x", votes: [] });
+  const got = doc.acts[0].error as string;
+  assert.equal(got.includes("\n"), false, "原因须是一行");
+  assert.equal(got.includes("logs"), false, "首个非空行之后的 call log 不进 error");
+  assert.equal(got, firstLine.slice(0, 300));
+  // 「出错帧」判据同一函数：压行不改变「这一帧算不算出错」
+  assert.deepEqual(doc.acts[0].frames.length, 1);
+});
+
 test("映射：抛错早于任何 execution 落账 → 仍留一条只带 error 的 act（frames 空是 SDK 事实）", () => {
   const doc = build({ status: "error", executions: [], error: "TargetClosedError: closed", votes: [] });
   assert.equal(doc.acts.length, 1);

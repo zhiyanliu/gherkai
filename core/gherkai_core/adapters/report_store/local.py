@@ -100,7 +100,7 @@ class LocalReportStore:
 
         # index.html 摘要直接用内存 result（不从 manifest 取——manifest 已不含 result）
         index_path = run_dir / "index.html"
-        atomic_write_text(index_path, _render_index_html(manifest, result))
+        atomic_write_text(index_path, render_index_html(manifest, result))
         return ResourceUri(index_path.resolve().as_uri())
 
     def preflight(self) -> None:
@@ -177,8 +177,28 @@ def _fmt_ms(ms: float | None) -> str:
     return f"{ms / 1000:.1f}s" if ms is not None else "?"
 
 
-def _render_index_html(manifest: dict, result: RunResult) -> str:
-    """渲染入口页。manifest 提供 run_id/created_at/report_index；result（内存 RunResult）提供判定明细 + 摘要。
+def _reason_html(error_type: str | None, message: str | None) -> str:
+    """渲染一行的「原因」片段——job 行与 step 行共用同一份，**别再造第三种样式**。
+
+    两分支口径同 render_text（有分类 → err 红字带分类 `error_type: message`；无分类 → 中性 note；空 message
+    两侧同律——只显分类、不留吊着的冒号，`gherkai_cli.render` 的 job 行与此处一致）；
+    fail-fast 派生态（skipped/aborted）error_type 恒 None、原因只在 message（ADR 0031 决定一）→ 用
+    中性 note 色显出来，不复用 err 红（决定二：颜色跟 status 走，别把没跑染成出错）。step 级失败原因原文
+    （ADR 0042 决策三）走同一函数，故两处样式不再靠人肉同步（曾各抄一份、空 message 的处置已分叉过）。
+    """
+    esc = html.escape
+    if error_type:
+        tail = f": {esc(message)}" if message else ""  # message 空 → 只显分类，不留吊着的冒号
+        return f' <span class="err">{esc(error_type)}{tail}</span>'
+    if message:
+        return f' <span class="note">{esc(message)}</span>'
+    return ""
+
+
+def render_index_html(manifest: dict, result: RunResult) -> str:
+    """渲染入口页——**local/s3 共享的渲染真理源**（公开名：同包 `s3.py` 是第二个消费者，两 adapter 出一致的入口页）。
+
+    manifest 提供 run_id/created_at/report_index；result（内存 RunResult）提供判定明细 + 摘要。
 
     两块内容（ADR 0027/0016）：
     ① 判定明细（job→scenario→step，status/时长/sessionId）——直接从内存 RunResult 渲染，让纯确定性
@@ -255,12 +275,7 @@ def _render_index_html(manifest: dict, result: RunResult) -> str:
             meta_bits.append(" · ".join(jbits))
         if jr.session_id:
             meta_bits.append(f"会话 <code>{esc(jr.session_id)}</code>")
-        # 同 render_text 的口径：error 类红字带分类；fail-fast 派生态（skipped/aborted）error_type 恒 None、原因只在
-        # message（ADR 0031 决定一）→ 中性 note 色显出来，不复用 err 红（决定二：颜色跟 status 走，别把没跑染成出错）。
-        if jr.error_type:
-            err = f' <span class="err">{esc(jr.error_type)}: {esc(jr.message or "")}</span>'
-        else:
-            err = f' <span class="note">{esc(jr.message)}</span>' if jr.message else ""
+        err = _reason_html(jr.error_type, jr.message)
 
         scen_blocks = []
         for sr in jr.scenarios:
@@ -271,15 +286,13 @@ def _render_index_html(manifest: dict, result: RunResult) -> str:
                     f' <span class="votes">{st.votes.yes}/{st.votes.total} 票</span>'
                     if st.votes and st.votes.total > 1 else ""
                 )
-                # step 级失败原因原文（ADR 0042 决策三）沿用 job 行的两分支：有 error_type → 并进同一个 err 红 span
-                # （`error_type: message`）；无分类（派生态）→ 中性 note 色。别再造第三种样式。
-                if st.error_type:
-                    serr = f' <span class="err">{esc(st.error_type)}{(": " + esc(st.message)) if st.message else ""}</span>'
-                else:
-                    serr = f' <span class="note">{esc(st.message)}</span>' if st.message else ""
+                serr = _reason_html(st.error_type, st.message)
                 # 连锁失败旁注（ADR 0031 决定六）：被 scope 内短路的 step（shortcircuited=True，status=skipped）——
                 # 上游 error 后 worker 跳过了它、没在损坏环境上跑。读 shortcircuited 正交布尔（比旧的"按 status 顺序猜"
                 # 精确）；不改判定/severity（守纯 reducer 红线）。
+                # 下面这句与 cli 文本渲染的旁注同款措辞（那边提成了 `gherkai_cli.render._SHORTCIRCUIT_NOTE`；
+                # core 不能 import cli，故跨包不共享常量）——改一处要改两处，由 cli 侧的
+                # test_index_html_shortcircuit_note_matches_cli_wording 逐字钉住（那边两包都 import 得到）。
                 taint = (
                     ' <span class="taint">⚠ 因前置 step error 被跳过（未执行）</span>'
                     if st.shortcircuited else ""

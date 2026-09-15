@@ -2,14 +2,14 @@
 
 护住四条不变量（各自对应一个真实会静默出错的场景）：
 - **排序递归加载 + 注册进同一张表**：注册顺序可复现 → ADR 0022/0036 的 conflict 清单可复现。
-- **排除 `_*` / `test_*`**：前者是供相对 import 的辅助模块、后者是使用方自己的测试，误当 step 文件加载
-  会把它们的顶层副作用/依赖拖进 worker。
+- **排除 `_` 开头的文件或目录 / `test_*`**：前者是供其它 step 文件 import 的辅助模块（`_helpers.py`、
+  `_pages/` 整目录同性质）、后者是使用方自己的测试，误当 step 文件加载会把它们的顶层副作用/依赖拖进 worker。
 - **fail-loud**：语法错/导入错/目录不存在都必须响亮失败——静默跳过等于把确定性 step 换成 AI catch-all、
   run 可能假「通过」（本项目最忌的静默降级）。
 - **steps 根不入 `sys.path`**：否则使用方一个 `json.py` 就遮蔽标准库、症状离原因极远。
 
-末尾两个真子进程测试跨了「进程 + argv + env」这条边（`-m gherkai_worker_novaact --list-deterministic` 与
-非 0 退出码），in-process 断言覆盖不到。
+末尾的真子进程测试跨了「进程 + argv + env」这条边（`-m gherkai_worker_novaact --list-deterministic` 的清单、
+非 0 退出码、诊断行有无），in-process 断言覆盖不到。
 """
 import json
 import subprocess
@@ -84,6 +84,37 @@ def test_excludes_underscore_and_test_prefixed_files(tmp_path):
 
     assert [f.name for f in loaded] == ["real.py"]
     assert [e.raw for e in d._REGISTRY[before:]] == ["P-real"]
+
+
+def test_excludes_files_under_underscore_dirs(tmp_path):
+    """`_` 开头的**目录**整棵排除：段名判定（不只 basename），否则 `_pages/selectors.py` 会被当 step 文件加载。"""
+    _step_file(tmp_path / "real.py", "P-real")
+    _step_file(tmp_path / "_pages" / "selectors.py", "P-page-object")
+    _step_file(tmp_path / "_pages" / "deep" / "more.py", "P-page-deep")
+    _step_file(tmp_path / "sub" / "_fixtures" / "data.py", "P-sub-fixture")
+
+    before = len(d._REGISTRY)
+    loaded = load_user_steps(str(tmp_path))
+
+    assert [f.name for f in loaded] == ["real.py"]
+    assert [e.raw for e in d._REGISTRY[before:]] == ["P-real"]
+
+
+def test_underscore_dir_still_importable_relatively(tmp_path):
+    """`_pages/` 这类辅助目录同样只是不被自动加载，仍可被 step 文件相对 import（排除它的**用途**）。"""
+    (tmp_path / "_pages").mkdir()
+    (tmp_path / "_pages" / "selectors.py").write_text("PATTERN = 'P-from-page-object'\n", encoding="utf-8")
+    (tmp_path / "uses_page_object.py").write_text(
+        "from gherkai_worker_novaact.deterministic import deterministic\n"
+        "from ._pages import selectors\n"
+        "@deterministic(selectors.PATTERN, description='d', example='e')\n"
+        "def h(ctx):\n"
+        "    pass\n",
+        encoding="utf-8",
+    )
+    before = len(d._REGISTRY)
+    load_user_steps(str(tmp_path))
+    assert [e.raw for e in d._REGISTRY[before:]] == ["P-from-page-object"]
 
 
 def test_underscore_helper_still_importable_relatively(tmp_path):
@@ -197,6 +228,29 @@ def test_broken_steps_dir_makes_list_deterministic_exit_nonzero(tmp_path):
     assert proc.returncode == EX_STEPS_LOAD, (proc.returncode, proc.stderr.decode()[-500:])
     assert "broken.py" in proc.stderr.decode("utf-8")
     assert proc.stdout.decode("utf-8").strip() == ""  # 没吐半份清单
+
+
+def test_loaded_count_line_on_stderr_subprocess(tmp_path):
+    """加载成功也留一行 stderr（文件数 + 目录）：使用方据它分清「目录没被读到」与「pattern 没命中」。"""
+    _step_file(tmp_path / "mine.py", "P-x")
+    _step_file(tmp_path / "sub" / "other.py", "P-y")
+    proc = subprocess.run(
+        [sys.executable, "-m", "gherkai_worker_novaact", "--list-deterministic"],
+        capture_output=True, timeout=60, env={**_clean_env(), "GHERKAI_STEPS_DIR": str(tmp_path)},
+    )
+    assert proc.returncode == 0, proc.stderr.decode()[-500:]
+    err = proc.stderr.decode("utf-8")
+    assert "已加载使用方 steps 2 个文件" in err and str(tmp_path) in err
+
+
+def test_no_loaded_line_when_nothing_injected(tmp_path):
+    """未注入目录 = 使用方没定制，正常路径不打这行（诊断行不许变成人人都看见的噪声）。"""
+    proc = subprocess.run(
+        [sys.executable, "-m", "gherkai_worker_novaact", "--list-deterministic"],
+        capture_output=True, timeout=60, env=_clean_env(),
+    )
+    assert proc.returncode == 0, proc.stderr.decode()[-500:]
+    assert "已加载使用方 steps" not in proc.stderr.decode("utf-8")
 
 
 def _clean_env() -> dict:

@@ -16,8 +16,9 @@ ADR 0016 分层）。**worker 只认一个 env `GHERKAI_STEPS_DIR`**——没有
 - **steps 根不入 `sys.path`**：否则使用方目录里一个 `json.py` / `re.py` 就遮蔽标准库、症状离原因极远。
   故用 `importlib.util.spec_from_file_location` 按**文件路径**加载，模块名挂在合成命名空间
   `gherkai_user_steps.*` 下（不与任何真实可安装包撞名）。合成包的 `__path__` 指向 steps 目录本身，使
-  step 文件之间的**相对** import（`from . import _helpers`）可用——这也是 `_*` 前缀被排除在自动加载之外
-  的用途：它们是被显式 import 的辅助模块，不是 step 文件。
+  step 文件之间的**相对** import（`from . import _helpers`、`from ._pages import selectors`）可用——这也是
+  `_` 开头的**文件或目录**被排除在自动加载之外的用途：它们是被其它 step 文件显式 import 的辅助模块，不是
+  step 文件；判整条相对路径而非仅文件名，两引擎同一条规则。
 - **加载失败 fail-loud**（ADR 0037 决策 4）：任一文件 import 失败 → 带文件名与异常退出，**绝不静默跳过**。
   跳过等于把该文件里的确定性 step 静默换成 AI catch-all、run 可能「通过」——本项目最忌的静默降级。
   同理「给了目录但目录不存在」也是 fail-loud：使用方明确指了一个地方，那里没东西 = 配置错，不是「没定制」。
@@ -76,10 +77,15 @@ def _ensure_ns_package(name: str, path: Path) -> None:
         sys.modules[name] = mod
 
 
-def _is_step_file(file: Path) -> bool:
-    """自动加载的筛选（ADR 0037 决策 4）：排除 `_*`（辅助模块，供相对 import）与 `test_*`（使用方自己的测试）。"""
-    name = file.name
-    return not name.startswith("_") and not name.startswith("test_")
+def _is_step_file(rel: Path) -> bool:
+    """自动加载的筛选（ADR 0037 决策 4）：排除 `_` 开头的**文件或目录**（辅助模块，供其它 step 文件 import）
+    与 `test_*` 文件（使用方自己的测试）。
+
+    收的是**相对 steps 根的路径**、`_` 判其中任一段：`_pages/selectors.py` 这类整目录的辅助模块与
+    `_helpers.py` 同性质（被显式 import、自己不注册 handler），只看 basename 会把它们当 step 文件加载、
+    把顶层副作用与依赖拖进 worker。Midscene 侧同一条规则（两引擎给使用方的说法一致）。
+    """
+    return not any(p.startswith("_") for p in rel.parts) and not rel.name.startswith("test_")
 
 
 def load_user_steps(root: str | None) -> list[Path]:
@@ -87,6 +93,8 @@ def load_user_steps(root: str | None) -> list[Path]:
 
     `root` = env `GHERKAI_STEPS_DIR` 的值（由组合根注入）。None / 空串 → no-op（没定制，返回空表）。
     目录不存在、或任一文件 import 失败 → 抛 `UserStepsError`（fail-loud，见模块文档）。
+    返回的文件列表是**诊断用**：调用点（`run_scope.main()`）据它打一行「已加载使用方 steps N 个文件（目录）」，
+    与 Midscene 侧同形——「写了 steps 却全走 AI」时使用方靠这行分清是目录没被读到还是 pattern 没命中。
     """
     if not root or not root.strip():
         return []  # 未注入 = 使用方没有定制 step，正常路径（不是错）
@@ -100,7 +108,7 @@ def load_user_steps(root: str | None) -> list[Path]:
 
     # 排序遍历：保证注册顺序可复现 → ADR 0022/0036 的 conflict 清单也可复现（同一组文件永远给同一份清单）。
     # 按相对 posix 路径排序（而非 rglob 的文件系统顺序，那个跨平台/跨 fs 不稳）。
-    files = sorted((f for f in base.rglob("*.py") if _is_step_file(f)),
+    files = sorted((f for f in base.rglob("*.py") if _is_step_file(f.relative_to(base))),
                    key=lambda f: f.relative_to(base).as_posix())
 
     _ensure_ns_package(_NS_ROOT, base)

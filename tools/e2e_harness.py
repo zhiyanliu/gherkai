@@ -39,8 +39,7 @@ import threading
 import time
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO / "core"))
+REPO = Path(__file__).resolve().parent.parent  # 只用来算 features/ 等仓库内路径；两个包都由 workspace venv 提供
 
 from gherkai_core.scope import plan, PlanConfig, FeatureSource  # noqa: E402
 from gherkai_core.wire import job_to_line  # noqa: E402

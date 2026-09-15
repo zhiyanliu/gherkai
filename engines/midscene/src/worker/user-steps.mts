@@ -3,15 +3,20 @@
 // 契约（约定逻辑**不在这里**）：目录由组合根解析（`--steps-dir` > env > `./steps`）、随 definition 持久化、
 // 经 env `GHERKAI_STEPS_DIR` 注给 worker。worker 只认这个 env、不认约定、不重解析——保持薄（ADR 0016 分层）。
 //
-// 加载规则：**排序**递归遍历 `*.mts` / `*.mjs`（排除 `*.test.*`），逐个 `await import(fileURL)`，文件顶层
-// `deterministic(...)` 的副作用完成注册。排序保证 conflict 清单可复现（ADR 0036）。
+// 加载规则：**排序**递归遍历 `*.mts` / `*.mjs`（排除 `_*` 与 `*.test.*`），逐个 `await import(fileURL)`，
+// 文件顶层 `deterministic(...)` 的副作用完成注册。排序保证 conflict 清单可复现（ADR 0036）。
+// `_*` = 使用方的辅助模块（页面对象、选择器常量、共享 helper），不自动加载、供 step 文件相对 import——
+// 与 Nova 侧同义（同一份 `steps/` 目录在两个引擎上能承载的内容必须对称）。**`_` 判在路径的任一段上**：
+// `_selectors.mts` 与 `_pages/selectors.mts` 都不自动加载，故辅助模块既可按文件前缀标、也可按目录分组
+// （目录级排除两侧同时在，否则同一个 `_pages/login.mts` 会在一侧注册、在另一侧静默落回 AI）。它同时挡住
+// 下面零注册检查的一类误报：辅助模块自己一条都不注册，被自动加载就会撞上那条 fail-loud。
 //
 // 两条 fail-loud（本项目最忌静默降级——跳过一个 step 文件 = 把确定性判定静默换成 AI catch-all、run 可能「通过」）：
 //   ① import 失败（语法/依赖错）→ 立刻抛，带文件名与原异常；
 //   ② **零注册检查**：某文件加载后注册表条数没涨 → 抛。这是 ADR 0037 决策 4「双实例」的显式化——
 //      裸 specifier 若解析到第二份包副本，注册会落进 worker 永远不读的表，症状本来是「全部 step 静默走 AI」；
 //      这条把它变成起不来的显式失败。（副作用：使用方写了个一条都不注册的文件也会被拒——正确，
-//      那个文件对 worker 毫无意义、多半是写错了。）
+//      那个文件对 worker 毫无意义、多半是写错了；真正的共享代码走上面的 `_*` 面。）
 //
 // 另有一条 fail-loud 在进入遍历之前：env 已设但目录不存在 / 不是目录 → 抛。组合根只在目录存在时才注入，
 // 走到这里说明提交后目录被移走或写错，属「没开跑就被拒」的配置错（Nova 侧同一处理）。
@@ -25,7 +30,8 @@ import { registrySize } from "./deterministic.mjs";
 
 const STEP_EXTS = [".mts", ".mjs"];
 
-/** 排序递归收集 step 文件（同层按名字排序、目录深度优先，保加载次序可复现）。 */
+/** 排序递归收集 step 文件（同层按名字排序、目录深度优先，保加载次序可复现）。
+ * 路径任一段以 `_` 开头即辅助模块面：`_*` 目录整棵跳过、`_*` 文件跳过（见模块头）。 */
 export function collectStepFiles(root: string): string[] {
   const out: string[] = [];
   const entries = fs.readdirSync(root, { withFileTypes: true });
@@ -33,11 +39,13 @@ export function collectStepFiles(root: string): string[] {
   for (const e of entries) {
     const full = path.join(root, e.name);
     if (e.isDirectory()) {
+      if (e.name.startsWith("_")) continue;  // 辅助模块目录（`_pages/` 之类），整棵不自动加载
       out.push(...collectStepFiles(full));
       continue;
     }
     if (!e.isFile()) continue;
     if (!STEP_EXTS.includes(path.extname(e.name))) continue;
+    if (e.name.startsWith("_")) continue;  // 使用方的辅助模块（页面对象/选择器常量/共享 helper），供 step 文件相对 import
     if (/\.test\./.test(e.name)) continue; // 使用方的测试文件不是 step 文件
     out.push(full);
   }

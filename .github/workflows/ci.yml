@@ -5,7 +5,7 @@ name: ci
 # 「第一次跑」——打包元数据/metadata hook 的回归在日常提交就炸，不必等推 tag。
 on:
   push:
-    branches: [main] # tag push 不进这里（branches 过滤已排除），发布链见 release.yml
+    branches: ['**'] # 任何分支的 push 都跑（本仓库开发在 feat/* 分支上、无常驻 main）；tag push 不进这里（branches 过滤已排除），发布链见 release.yml
   pull_request:
   workflow_dispatch:
 

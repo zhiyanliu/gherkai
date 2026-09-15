@@ -14,6 +14,10 @@
 handler 约定：
 - 签名 `def handler(ctx, **groups)`：ctx 暴露 `page`（Playwright Page）；**groups = 正则的具名组**
   （`(?P<name>...)`）。无具名组则不传额外参数。
+- **必须是同步函数**（`def`，不能 `async def`）：本引擎同步执行 handler，返回 awaitable 会被 `run_scope._run_step`
+  检出并抛 TypeError（该 step 记 error）——因为 coroutine 不被 await 时里面的断言压根没跑，静默判 passed 是假阳性。
+  对侧 Midscene 的 handler 允许 async（那边是 async 执行模型），故这是引擎执行模型差异、不是可对齐项：
+  需要异步的判定只能写在 Midscene 侧。
 - 判定失败抛 `AssertionError` → step 记 **failed**（断言没过）；抛其它异常 → step 记 **error**。
 - 不投票（确定性 = 无抖动，与 AI 断言的 votes 区分）。
 """

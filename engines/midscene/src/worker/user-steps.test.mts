@@ -24,14 +24,29 @@ function tmpSteps(files: Record<string, string>): string {
   return root;
 }
 
-// ---- 遍历规则：排序、递归、扩展名、排除 *.test.* ----
-test("collectStepFiles: 排序递归、只取 .mts/.mjs、排除 *.test.*", () => {
+// ---- 遍历规则：排序、递归、扩展名、排除 _* 与 *.test.* ----
+test("collectStepFiles: 排序递归、只取 .mts/.mjs、排除 _* 与 *.test.*", () => {
   const root = tmpSteps({
     "b.mts": "", "a.mjs": "", "a.test.mts": "", "notes.md": "", "old.ts": "",
+    "_helpers.mts": "", "m/_shared.mjs": "",   // 辅助模块面（不自动加载，供 step 文件相对 import）
+    "_pages/selectors.mts": "", "_pages/deep/more.mjs": "",   // 目录形态的辅助模块：`_` 在路径任一段即整棵跳过
     "z/deep/x.mts": "", "m/y.mjs": "", "m/y.test.mjs": "",
   });
   const got = collectStepFiles(root).map((f) => path.relative(root, f));
   assert.deepEqual(got, ["a.mjs", "b.mts", path.join("m", "y.mjs"), path.join("z", "deep", "x.mts")]);
+});
+
+test("loadUserSteps: _* 辅助模块（文件与目录两形态）不进加载清单（ADR 0037 决策 4）", async () => {
+  // 辅助模块（页面对象/选择器常量）一条 step 都不注册，若被自动加载就会撞上零注册 fail-loud。
+  const root = tmpSteps({ "_helpers.mts": "", "_pages/selectors.mts": "", "a.mts": "" });
+  let n = 0;
+  const files = await loadUserSteps({
+    stepsDir: root,
+    importer: async () => { n += 1; },   // 每个被加载的文件都让 size 涨一格：这条只钉「辅助模块不进加载清单」；守卫本身在下面的真跑那条钉（fake 下守卫永不开火）
+    size: () => n,
+    logFn: () => {},
+  });
+  assert.deepEqual(files.map((f) => path.basename(f)), ["a.mts"]);
 });
 
 // ---- env 未设 / 目录缺失 ----
@@ -120,6 +135,38 @@ deterministic('嵌套锚点', () => {}, { description: "d2", example: "e2" });\n
   assert.ok(patterns.some((p: string) => p.includes("页面地址")), `内建该在：${patterns}`);
   assert.ok(patterns.includes('自定义锚点 "(?<x>[^"]+)"'), `使用方 .mts 该在：${patterns}`);
   assert.ok(patterns.includes("嵌套锚点"), `使用方 .mjs 该在：${patterns}`);
+});
+
+test("真跑: _* 辅助模块由 step 文件 import 后注册照样算（ESM 缓存不让零注册守卫误报）", async () => {
+  // 真 loader 才照得出这条：注册发生在 `_shared.mts` 的顶层，`a.mts` 只是 import 它。若 `_shared.mts` 也被
+  // 自动加载（排序在前），它先注册完、`a.mts` 命中 ESM 缓存不再注册、条数不涨 → 守卫会在 `a.mts` 上误开火。
+  const root = tmpSteps({
+    "_shared.mts": `import { deterministic } from "@gherkai/worker-midscene";
+export const SUBMIT = "#submit";
+deterministic('共享锚点 "(?<x>[^"]+)"', () => {}, { description: "d", example: "e" });\n`,
+    "a.mts": `import { SUBMIT } from "./_shared.mts";
+export const used = SUBMIT;\n`,
+  });
+  const { code, out, err } = await runBin(root);
+  assert.equal(code, 0, `应退 0（辅助模块不自动加载、注册经 import 链完成），stderr=${err}`);
+  const patterns = JSON.parse(out).map((e: { pattern: string }) => e.pattern);
+  assert.ok(patterns.includes('共享锚点 "(?<x>[^"]+)"'), `经 import 链的注册该在表里：${patterns}`);
+});
+
+test("真跑: `_*` 目录里的辅助模块不自动加载（不撞零注册守卫），step 文件相对 import 它照样可用", async () => {
+  // 按目录分组辅助模块是使用方的自然写法（`steps/_pages/` 放页面对象）。这类文件一条 step 都不注册，
+  // 只判文件名的排除会把它收进加载清单 → 零注册守卫开火、worker 起不来，诊断还把人指向「双实例」，
+  // 离真因极远。相对 import 这一半只有真 loader 照得出（合成路径/缓存都在真 ESM 里）。
+  const root = tmpSteps({
+    "_pages/selectors.mts": `export const SUBMIT = "#submit";\n`,
+    "a.mts": `import { deterministic } from "@gherkai/worker-midscene";
+import { SUBMIT } from "./_pages/selectors.mts";
+deterministic('目录辅助模块锚点 "(?<x>[^"]+)"', () => { void SUBMIT; }, { description: "d", example: "e" });\n`,
+  });
+  const { code, out, err } = await runBin(root);
+  assert.equal(code, 0, `应退 0（辅助模块目录整棵不自动加载），stderr=${err}`);
+  const patterns = JSON.parse(out).map((e: { pattern: string }) => e.pattern);
+  assert.ok(patterns.includes('目录辅助模块锚点 "(?<x>[^"]+)"'), `使用方 step 该在表里：${patterns}`);
 });
 
 test("真跑: 语法错的 steps 文件 → 非零退出 + stderr 点名该文件（绝不静默跳过）", async () => {

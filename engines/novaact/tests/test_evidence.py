@@ -469,6 +469,35 @@ def test_no_enqueue_when_step_wrote_no_screenshot(logs_dir, monkeypatch):
     assert [t[0] for t in trace] == ["emit", "emit"]
 
 
+class _NovaRaisesAfterFirstVote:
+    """第一票正常回（带 trajectory → 有截图可入队），第二票抛——把 except 出口逼成「有截图的 error step」。"""
+
+    def __init__(self, traj, exc):
+        self._traj = traj
+        self._exc = exc
+        self._n = 0
+
+    def act_get(self, instr, schema, timeout=None):
+        self._n += 1
+        if self._n > 1:
+            raise self._exc
+        return _Result(True, self._traj)
+
+
+def test_error_step_also_enqueues_only_after_emit(logs_dir, monkeypatch):
+    """except 出口（step 记 error）同守 emit→enqueue 序：三条出口共用一个收尾出口，不许有一条漏掉这层顺序。"""
+    trace: list = []
+    u = rs._get_uploader()
+    monkeypatch.setattr(u, "enqueue", lambda paths: trace.append(("enqueue", list(paths))))
+    traj = _write_traj(logs_dir, "act_0_x_trajectory.json", _synthetic(2, thought_at=(0,)))
+    sink = _TracingSink(trace)
+    assert rs._run_step(_NovaRaisesAfterFirstVote(traj, RuntimeError("第二票挂了")), "sc:1",
+                        {"index": 0, "keyword": "Then", "text": '"对吗"'}, 2, sink, scope_id="sc") == "error"
+    assert [t[0] for t in trace] == ["emit", "emit", "enqueue"]   # step_started, step_done, 然后才入队
+    assert trace[1][1] == "step_done" and sink[-1]["status"] == "error"
+    assert trace[2][1], "已写下的截图仍要入队（error 出口不因异常丢掉字节）"
+
+
 def test_enqueue_failure_never_changes_verdict(logs_dir, monkeypatch, capsys):
     """入队本身抛（不该发生，但 best-effort 不留缺口，ADR 0042 决策二）→ 判定与事件照常、一行日志。"""
     u = rs._get_uploader()

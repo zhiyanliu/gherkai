@@ -23,6 +23,7 @@
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { oneLineError } from "./error-text.mjs";  // act.error 与 step_done.message 同一条压行规则
 
 /** evidence schema 版本（ADR 0042 决策六第 3 道防线：消费端据此判「不认识的版本」）。 */
 export const EVIDENCE_SCHEMA_VERSION = 1;
@@ -186,10 +187,12 @@ function actionsOf(task: TaskLike): Array<{ name: string; args: unknown }> {
   return name === "" ? [] : [{ name, args: task.param ?? null }];
 }
 
-/** 非空错误文本判据（按值，不按 SDK 标志）——同时是 act.error 与「出错帧」的**同一个**判据。 */
+/** 非空错误文本判据（按值，不按 SDK 标志）——同时是 act.error 与「出错帧」的**同一个**判据。
+ *  取到的文本过 `oneLineError`：SDK 的 `errorMessage` 与抛出异常的 message 同源（多行 call log），两条来源
+ *  须同形，否则同一个 `act.error` 字段会因文本从哪儿来而一行 / 上千字符不定（ADR 0042 决策一映射表）。 */
 function errorTextOf(task: TaskLike): string | null {
   const m = task.errorMessage;
-  return typeof m === "string" && m.trim() !== "" ? m : null;
+  return typeof m === "string" && m.trim() !== "" ? oneLineError(m) : null;
 }
 
 /** 本 act 挑哪些 frame 配截图（ADR 0042 决策一截图策略）：

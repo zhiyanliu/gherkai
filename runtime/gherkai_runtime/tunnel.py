@@ -82,10 +82,12 @@ class NgrokTunnel:
         log_path = Path(_log_name)
         cmd = [self._binary, "http", local_origin,
                "--log", str(log_path), "--log-format", "json"]
-        policy_path: str | None = None
         if auth:
             # Traffic Policy：basic-auth 在 ngrok 边缘拦（免费 action，ADR 0035 决策 4）。
             # 手写 YAML（结构固定且凭据纯字母数字，无转义面），不为此引 yaml 依赖。
+            # 文件**有意不删**（与上面 log 文件同）：agent 可能在隧道存活期重读 policy，删掉就有把边缘
+            # basic-auth 拆成裸公网口的风险；凭据只对本隧道有效、随 stop_tunnel 即成死凭据，且 mkstemp
+            # 建出来就是 0600（仅本用户可读）。真要清理须先真跑核实 agent 不重读——只跑单测证明不了。
             policy = (
                 "on_http_request:\n"
                 "  - actions:\n"

@@ -105,7 +105,9 @@ def job_from_dict(d: dict) -> Job:
 # ============================================================================
 
 
-def _ref_to_dict(rr: ReportRef) -> dict:
+def ref_to_dict(rr: ReportRef) -> dict:
+    """ReportRef → dict。**公开名**：与 `job_to_dict`/`to_dict` 同列的共享入口——`jobs/*.json`、`run --json`
+    与 cli 的 explain 文档都用这一份（不透明搬运 kind/ref/label，ADR 0027），故不做私有符号被外部依赖。"""
     return {"kind": rr.kind, "ref": rr.ref, "label": rr.label}
 
 
@@ -143,13 +145,13 @@ def job_result_to_dict(jr: JobResult, *, include_job: bool = True) -> dict:
         "session_id": jr.session_id,
         "error_type": jr.error_type,
         "message": jr.message,
-        "report_refs": [_ref_to_dict(rr) for rr in jr.report_refs],
+        "report_refs": [ref_to_dict(rr) for rr in jr.report_refs],
         "scenarios": [
             {
                 "scenario_id": sr.scenario_id,
                 "status": sr.status.value,
                 "duration_ms": sr.duration_ms,
-                "report_refs": [_ref_to_dict(rr) for rr in sr.report_refs],
+                "report_refs": [ref_to_dict(rr) for rr in sr.report_refs],
                 "steps": [
                     {
                         "index": st.index,
@@ -158,7 +160,7 @@ def job_result_to_dict(jr: JobResult, *, include_job: bool = True) -> dict:
                         "votes": ({"yes": st.votes.yes, "total": st.votes.total} if st.votes else None),
                         "error_type": st.error_type,
                         "message": st.message,  # step 级失败原因原文（ADR 0042 决策三）
-                        "report_refs": [_ref_to_dict(rr) for rr in st.report_refs],  # step 级产物：两引擎的 kind=evidence + Nova 的 kind=trajectory（ADR 0042 决策一 / 0027）
+                        "report_refs": [ref_to_dict(rr) for rr in st.report_refs],  # step 级产物：两引擎的 kind=evidence + Nova 的 kind=trajectory（ADR 0042 决策一 / 0027）
                         "shortcircuited": st.shortcircuited,  # scope 内短路标记（ADR 0031 决定六）
                     }
                     for st in sr.steps

@@ -112,8 +112,36 @@ def test_render_text_annotates_shortcircuited_step():
     step1 = next(l for l in lines if "step 1:" in l)
     step0 = next(l for l in lines if "step 0:" in l)
     assert "被跳过" in step1          # 被短路的 step 加旁注
+    assert render._SHORTCIRCUIT_NOTE in step1  # 与 explain 的 step 行同一句（措辞单点，别再各抄一份）
     assert "skipped" in step1         # 显 skipped 态
     assert "被跳过" not in step0      # 上游 error 步本身不加
+
+
+def test_index_html_shortcircuit_note_matches_cli_wording():
+    """跨包措辞护栏（ADR 0031 决定六）：报告入口页的短路旁注与本模块的旁注是同一句。
+
+    core 不能 import cli（分层方向），那句在两包各有一份字面量；测试两边都能 import，故护栏放 cli 侧——
+    改一处忘改另一处本条就红（此前两包各只被自己的字面量钉住，措辞可静默分叉）。
+    比对前 unescape：core 那份内嵌进 HTML，将来措辞若带 & / < 也照样对得上。
+    """
+    import html as html_mod
+
+    from gherkai_core.adapters.report_store.local import render_index_html
+
+    job = Job(scope_id="s", scope_name="s", engine="novaact", scenarios=())
+    run = RunResult(
+        run_meta=RunMeta(run_id="r", created_at="", jobs=(job,)),
+        status=Status.ERROR,
+        jobs=[JobResult(job=job, status=Status.ERROR, scenarios=[
+            ScenarioResult(scenario_id="s:0", status=Status.ERROR, steps=[
+                StepResult(index=0, status=Status.ERROR, error_type="network_error"),   # 上游 error（不加旁注）
+                StepResult(index=1, status=Status.SKIPPED, shortcircuited=True),          # 被短路 → 加旁注
+            ]),
+        ])],
+    )
+    manifest = {"run_id": run.run_id, "created_at": "", "report_index": []}
+    txt = html_mod.unescape(render_index_html(manifest, run))
+    assert txt.count(render._SHORTCIRCUIT_NOTE) == 1   # 只挂被短路那一步，且与文本渲染逐字同款
 
 
 def test_render_text_no_annotation_on_plain_failed():
@@ -243,3 +271,13 @@ def test_render_text_step_reason_line_is_single_line_and_only_when_present():
     assert reason == ["        原因: ActTimeoutError: 超时 at foo at bar"]
     i0 = lines.index("      step 0: passed (0.0s)")
     assert not lines[i0 + 1].startswith("        原因")
+
+
+def test_job_line_with_error_type_but_no_message_has_no_orphan_colon():
+    """job 行有分类、message 为 None → 只显分类 `(worker_crashed)`，不打 `(worker_crashed: None)`——与报告页 index.html 同口径。"""
+    job = Job(scope_id="s", scope_name="s", engine="novaact", scenarios=[])
+    jr = JobResult(job=job, status=Status.ERROR)
+    jr.error_type = "worker_crashed"
+    meta = RunMeta(run_id="r", created_at="2026-01-01T00:00:00Z", jobs=(job,))
+    out = render.render_text(RunResult(run_meta=meta, status=Status.ERROR, jobs=[jr]))
+    assert "(worker_crashed)" in out and "None" not in out

@@ -8,6 +8,8 @@
 from __future__ import annotations
 
 import json
+import re
+from pathlib import Path
 
 import aws_cdk as cdk
 from aws_cdk.assertions import Template, Match
@@ -343,6 +345,8 @@ def test_task_role_resource_arns_narrowed():
 
     收窄依据 = AWS SAR resource_types + IAM 策略模拟器实证。此测试钉死 CDK 生成的 ARN 形态。
     """
+    from gherkai_deploy_aws import names as _names
+
     t = _template()
     # 收集所有 IAM policy 的所有 statement（Resource 统一序列化后搜，容 str/list/Fn::Join）
     stmts = []
@@ -359,7 +363,7 @@ def test_task_role_resource_arns_narrowed():
     invoke = res_for("bedrock:InvokeModel")
     assert invoke, "缺 bedrock:InvokeModel 权限"
     for r in invoke:
-        assert "foundation-model/qwen.qwen3-vl-235b-a22b" in r, f"InvokeModel 未收窄到 Qwen 模型 ARN：{r}"
+        assert f"foundation-model/{_names.QWEN_MODEL_ID}" in r, f"InvokeModel 未收窄到 Qwen 模型 ARN：{r}"
         assert r != '"*"', "InvokeModel 不应是裸 *"
 
     # ② nova-act → 收窄到 workflow-definition/* 通配（definition 名段 *，不 pin 具体名——避免 IaC 跨工程耦合
@@ -370,7 +374,8 @@ def test_task_role_resource_arns_narrowed():
         assert "nova-act" in r and "workflow-definition" in r, f"nova-act 未收窄到 workflow-definition ARN：{r}"
         assert r != '"*"', "nova-act 不应是裸 *"
         # 不该 pin 具体 definition 名（那是 worker 运行期概念、不该泄进 IAM）
-        assert "spike-wikipedia-benchmark" not in r, f"nova-act 不应 pin 具体 definition 名（应用 * 通配）：{r}"
+        assert re.search(r'workflow-definition/[^*"/]', r) is None, \
+            f"nova-act 不应 pin 具体 definition 名（definition 名段必须是 *）：{r}"
     all_nova_actions = {a for acts, _ in stmts for a in acts if a.startswith("nova-act:")}
     assert "nova-act:GetAct" not in all_nova_actions, "GetAct 非真实 IAM action，应已删除"
 
@@ -391,6 +396,32 @@ def test_task_role_resource_arns_narrowed():
                    "bedrock-agentcore:ConnectBrowserAutomationStream", "bedrock-agentcore:ConnectBrowserLiveViewStream"):
         rs = res_for(action)
         assert rs and all(r == '"*"' for r in rs), f"{action} 应保留 *（SAR 不支持 resource-level）：{rs}"
+
+
+def test_qwen_model_id_matches_the_midscene_worker_source():
+    """跨语言硬契约对拍：IAM pin 的模型 id 必须与 Midscene worker 侧的 `MODEL` 逐字一致。
+
+    两侧共享不了常量（Python 的 IAM 收窄 ↔ TS 的 Bedrock 调用），只有对拍钉得住：TS 侧换模型而 IAM 没跟上，
+    结果是运行期 InvokeModel 被 implicitDeny——`test_task_role_resource_arns_narrowed` 只比 Python 自己的常量、
+    照不出这种单侧改动。
+    skip 只认**源码树在不在**（按仓库根标志判），不认「那个文件读不到」：源码树在而文件不见了 = TS 侧改名/挪走，
+    该红着点名，不是静默 skip——把两种缺失混成一个条件，等于让重构悄悄关掉这条护栏。
+    """
+    from gherkai_deploy_aws import names as _names
+
+    root = Path(__file__).resolve().parents[2]
+    if not (root / "pyproject.toml").is_file() and not (root / ".git").exists():
+        pytest.skip("仓库源码树不在（只装了 wheel）——跨语言对拍只在仓库内有意义")
+    mts = root / "engines" / "midscene" / "src" / "lib" / "agentcore-sigv4.mts"
+    assert mts.is_file(), (
+        f"{mts} 不在了——TS 侧把这个文件改名/挪走了，来更新这条对拍的路径"
+        "（源码树在就必须找得到它，别让护栏静默 skip 掉）"
+    )
+    hit = re.search(r'export\s+const\s+MODEL\s*=\s*"([^"]+)"', mts.read_text(encoding="utf-8"))
+    assert hit, f"{mts.name} 里找不到 `export const MODEL = \"…\"`——TS 侧改了写法，来更新这条对拍的抽取方式"
+    assert hit.group(1) == _names.QWEN_MODEL_ID, (
+        f"模型 id 两侧不一致：{mts.name} 是 {hit.group(1)!r}，names.QWEN_MODEL_ID 是 {_names.QWEN_MODEL_ID!r}"
+    )
 
 
 def test_prefix_switches_whole_set():

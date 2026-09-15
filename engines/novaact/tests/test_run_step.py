@@ -7,6 +7,7 @@
 """
 import pytest
 
+from gherkai_worker_novaact import deterministic as _d
 from gherkai_worker_novaact import run_scope as rs
 
 
@@ -99,6 +100,31 @@ def test_when_natural_language_goes_to_act(captured):
     assert r == "passed"
     assert nova.calls[0][0] == "act"
     assert _done(captured).get("votes") is None  # 动作步无 votes
+
+
+# ---- 确定性 handler 必须同步（契约见 deterministic.py「handler 约定」）----
+# 那个没人 await 的 coroutine 必然引出 RuntimeWarning——它正是本用例要护住的现象，不是测试脏
+@pytest.mark.filterwarnings("ignore:coroutine .* was never awaited:RuntimeWarning")
+def test_async_deterministic_handler_is_error_not_silent_pass(captured):
+    """`async def` 的 handler：coroutine 没人 await → 函数体里的断言压根不跑。
+
+    必须显式记 error（并点明原因），绝不能因为「调用没抛异常」就判 passed——那是最坏的假阳性：
+    用例作者以为精确判定在跑，实际什么都没判。（Midscene 侧允许 async，故两侧写法不可互抄。）
+    """
+    saved = list(_d._REGISTRY)
+    try:
+        @_d.deterministic(r"^异步判定$", description="测试用：async handler", example="Then 异步判定")
+        async def _async_handler(ctx):
+            raise AssertionError("这行压根不会跑到")
+
+        r = rs._run_step(_FakeNova(), "sc:0", _step("Then", "异步判定"), 1, captured)
+    finally:
+        _d._REGISTRY[:] = saved
+
+    assert r == "error"                      # 不是 passed（静默假阳性），也不是 failed（断言没跑，无从判失败）
+    done = _done(captured)
+    assert done["status"] == "error" and "不能是 async" in done["message"]
+    assert done.get("votes") is None         # 确定性分支命中：没走 AI、不投票
 
 
 # ---- 投票多数票数学（ADR 0014 边界）----

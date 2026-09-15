@@ -418,3 +418,18 @@ def test_index_html_step_reason_follows_job_style_and_has_no_orphan_css_class(tm
     style = txt[txt.index("<style>"):txt.index("</style>")]
     defined = set(re.findall(r"\.([a-zA-Z][\w-]*)", style))  # 复合选择器（ul.scns / .jobhd b）也算定义
     assert used <= defined, f"孤儿 class：{sorted(used - defined)}"
+
+
+def test_index_reason_with_error_type_but_no_message_has_no_orphan_colon(tmp_path):
+    """有分类而 message 为空 → 只显分类，别拼出吊着的冒号（`error_type: `）。job 行与 step 行共用同一份原因
+    渲染，故两处一起钉——当前生产的 job 级 error_type 与 message 恒成对赋值，这里钉的是渲染本身的契约。"""
+    jr = _jr("s", "novaact", status=Status.ERROR, error_type="worker_crashed", scenarios=[
+        ScenarioResult(scenario_id="s:1", status=Status.ERROR, steps=[
+            StepResult(index=0, status=Status.ERROR, error_type="network_error"),
+        ]),
+    ])
+    uri = LocalReportStore(tmp_path).write("r-nomsg", _rr("r-nomsg", [jr], status=Status.ERROR))
+    txt = _uri_to_path(uri).read_text(encoding="utf-8")
+    assert '<span class="err">worker_crashed</span>' in txt
+    assert '<span class="err">network_error</span>' in txt
+    assert "worker_crashed:" not in txt and "network_error:" not in txt

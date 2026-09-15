@@ -265,8 +265,9 @@ def _attach_evidence(ev: dict, *, scope_id: str | None, scenario_id: str, step: 
                      acts: list) -> list[str]:
     """产本 step 的 evidence（json + 截图）、即时上传 json、把 ref **追加**进 step_done 的 reportRefs（ADR 0042 决策一）。
 
-    **回传本步写下的截图本地路径**（无则空 list）：它们的字节不在此上传——调用方在 `sink.emit(ev)` **之后**交给
-    上传器的后台队列（见 `_enqueue_evidence_shots`）。任一环失败 → 空 list（没写下就没什么可传）。
+    **回传本步写下的截图本地路径**（无则空 list）：它们的字节不在此上传——唯一调用点 `_emit_step_done` 在
+    `sink.emit(ev)` **之后**才交给上传器的后台队列（见 `_enqueue_evidence_shots`）。任一环失败 → 空 list
+    （没写下就没什么可传）。
 
     **整体 best-effort、且必须裹在自己的 try 里（ADR 0042 决策二，这是对 0029「reportRef 文件上传失败即抛」开的
     具名例外）**：evidence 是判定的注释，缺了只损排障便利；trajectory 是报告链接本身，其强保证不动。
@@ -298,9 +299,8 @@ def _attach_evidence(ev: dict, *, scope_id: str | None, scenario_id: str, step: 
 
 
 def _enqueue_evidence_shots(paths: list[str]) -> None:
-    """把本步截图交给上传器的后台队列——**必须在 `sink.emit(step_done)` 之后调**（ADR 0042 决策一）。
+    """把本步截图交给上传器的后台队列（唯一调用点 `_emit_step_done`，在 `sink.emit` 之后——顺序契约与理由集中在那里）。
 
-    顺序是契约：截图字节绝不压在判定临界路径上（emit 前入队等于让下游判定排在一次 K×票数 的上传编排后面）。
     入队本身不阻塞（只是 put + 惰性起线程），但仍整体裹 try：evidence 全链 best-effort（ADR 0042 决策二），
     连一次入队都不许把已发出的判定后面的流程搞崩。字节的收尾由 `_drain_evidence_uploads` 有界排空 + flush 兜。
     """
@@ -310,6 +310,26 @@ def _enqueue_evidence_shots(paths: list[str]) -> None:
         _get_uploader().enqueue(paths)
     except Exception as e:  # noqa: BLE001
         log(f"本步证据截图未能排入上传队列（不影响本步判定）：{type(e).__name__}: {e}")
+
+
+def _emit_step_done(sink: EventSink, ev: dict, *, scope_id: str | None, scenario_id: str,
+                    step: dict, acts: list) -> None:
+    """**有 AI 调用的 step** 判定已成后的唯一收尾出口：产 evidence → 挂 ref → emit → 才把截图交后台队列
+    （确定性命中 / URL 导航步不产 evidence，判定即 `sink.emit`、不经本函数）。
+
+    三条出口（Then 投票 / When·Given 动作 / except 失败）共用一份——这个顺序是契约（ADR 0042 决策一
+    「上传时机分两类」），三处各手写一遍时加第四条出口或调顺序必漂（`_attach_traj_refs` 收口前正是如此）。
+    顺序的理由：evidence.json 的 ref 必须随 step_done 走、故它即时上传；截图字节反过来——emit 之前入队就是
+    把字节压回判定前面，主流程该做的是发完判定立刻进下一 step。
+    **evidence 两环绝不抛**（ADR 0042 决策二：对判定零影响）：`_attach_evidence` / `_enqueue_evidence_shots` 各自整体 try，
+    入队只是 put + 惰性起线程。夹在中间的 `sink.emit` **不在此保护内**——事件通道故障不是 best-effort 面（DDB PutItem /
+    fd 写失败照旧抛，由调用点的 `except` 归 engine_error），故本函数不是「无异常的收尾动作」，不可放进 finally/清理路径。
+    调用点须排在 `_attach_traj_refs` **之后**（那个整体赋值 reportRefs，evidence 只 extend 同一列表），
+    失败路径还须在 `acts` 补完 error act 之后。
+    """
+    shots = _attach_evidence(ev, scope_id=scope_id, scenario_id=scenario_id, step=step, acts=acts)
+    sink.emit(ev)
+    _enqueue_evidence_shots(shots)
 
 
 def _drain_evidence_uploads(timeout_s: float, *, flush_follows: bool) -> None:
@@ -433,11 +453,8 @@ def _run_step(nova, scenario_id: str, step: dict, votes_n: int, sink: EventSink,
             if not passed:
                 ev["errorType"] = "assertion_failed"
                 ev["message"] = f"AI 断言未过多数票（{yes}/{votes_n}）：{text}"
-            # evidence 在 _attach_traj_refs 之后（那个整体赋值 reportRefs，本函数 extend 同一列表）、在 message
-            # 之后（evidence 冗余 step_done 的 status/message 以自包含）。best-effort、失败不影响本事件（ADR 0042 决策二）。
-            shots = _attach_evidence(ev, scope_id=scope_id, scenario_id=scenario_id, step=step, acts=acts)
-            sink.emit(ev)
-            _enqueue_evidence_shots(shots)   # emit 之后才入队（判定不等字节，ADR 0042 决策一）
+            # 收尾出口排在 _attach_traj_refs 与 message 之后（evidence 冗余 step_done 的 status/message 以自包含）。
+            _emit_step_done(sink, ev, scope_id=scope_id, scenario_id=scenario_id, step=step, acts=acts)
             return "passed" if passed else "failed"
 
         # When / Given（非 URL）→ AI 动作（无 votes）
@@ -453,9 +470,7 @@ def _run_step(nova, scenario_id: str, step: dict, votes_n: int, sink: EventSink,
         if cost:
             ev["cost"] = cost
         _attach_traj_refs(ev, step_traj)
-        shots = _attach_evidence(ev, scope_id=scope_id, scenario_id=scenario_id, step=step, acts=acts)
-        sink.emit(ev)
-        _enqueue_evidence_shots(shots)       # emit 之后才入队（同上）
+        _emit_step_done(sink, ev, scope_id=scope_id, scenario_id=scenario_id, step=step, acts=acts)
         return "passed"
 
     except Exception as e:
@@ -485,9 +500,7 @@ def _run_step(nova, scenario_id: str, step: dict, votes_n: int, sink: EventSink,
         # frames 为空）。inflight 非空 = 异常出自某次 act/act_get；为空则异常在确定性 handler/指令拼装等处，无 act 可记。
         if inflight is not None:
             acts.append(_act_record(len(acts), inflight, e, error=ev["message"]))
-        shots = _attach_evidence(ev, scope_id=scope_id, scenario_id=scenario_id, step=step, acts=acts)
-        sink.emit(ev)
-        _enqueue_evidence_shots(shots)       # emit 之后才入队（同上）
+        _emit_step_done(sink, ev, scope_id=scope_id, scenario_id=scenario_id, step=step, acts=acts)
         return "error"
 
 
@@ -759,11 +772,16 @@ def main() -> int:
     # 故自述入口报的注册表与真跑派发用的是同一张表（ADR 0036「真值单一」不因定制而破）。
     # worker 只认 env、不解析约定（`--steps-dir` / 默认 `./steps` / 写进 definition 全在组合根）。
     # 加载失败 fail-loud（绝不静默跳过——跳过 = 把确定性 step 静默换成 AI catch-all、run 可能假「通过」）。
+    steps_dir = os.environ.get("GHERKAI_STEPS_DIR")
     try:
-        load_user_steps(os.environ.get("GHERKAI_STEPS_DIR"))
+        loaded = load_user_steps(steps_dir)
     except UserStepsError as e:
         log(f"worker: {e}")
         return EX_STEPS_LOAD
+    if loaded:
+        # 一行 stderr 确认「目录被读到了、读了几个文件」（与 Midscene worker 的 user-steps 诊断行同形）：
+        # 「写了 steps 却全走 AI」的头号原因是目录没被注入，没这行使用方分不清是没读到还是没命中。
+        log(f"worker: 已加载使用方 steps {len(loaded)} 个文件（{steps_dir}）")
 
     # 自述模式（ADR 0036）：dump 确定性注册表即退——不建会话、不读 stdin、零费用。
     # 内建脚手架（模块顶 import 的副作用）+ 上面加载的使用方 step，此刻注册表即真值。

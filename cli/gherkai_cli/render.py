@@ -7,7 +7,7 @@ from __future__ import annotations
 from gherkai_core.model import Event, Job, JobResult, RunResult, RunState, Status
 from gherkai_core.serialize import to_dict  # 单一真理源（ADR 0027）：cli --json 与 manifest 共用
 # ReportRef → dict 与 jobs/*.json、run --json 同一份（单一序列化真源，ADR 0027）；explain 的 report_refs 原样搬。
-from gherkai_core.serialize import _ref_to_dict
+from gherkai_core.serialize import ref_to_dict
 
 
 def format_event(ev: Event) -> str:
@@ -49,6 +49,12 @@ def _ms(duration_ms: float | None) -> str:
     return f"{duration_ms / 1000:.1f}s" if duration_ms is not None else "?"
 
 
+# 连锁失败旁注的措辞（ADR 0031 决定六）：run 的文本汇总（`render_text`）与 explain 的 step 行（`_step_lines`）
+# 共用这一句；RunReport index.html 里还有同款措辞的第三份，在 core 的 ReportStore 侧（跨包不共享常量），
+# 改这句要一并改那边。
+_SHORTCIRCUIT_NOTE = "⚠ 因前置 step error 被跳过（未执行）"
+
+
 def render_text(result: RunResult) -> str:
     """RunResult → 人看的多行汇总（嵌套 job/scenario/step + 时长 + 成本 + 报告指针）。
 
@@ -69,7 +75,7 @@ def render_text(result: RunResult) -> str:
         # 说明文字：error 类带分类前缀；fail-fast 派生态（skipped/aborted）的 error_type 恒 None、「为什么没跑」
         # 只在 message 里（ADR 0031 决定一），故无分类时也显 message——否则人读视图只剩一个光秃的态、原因得改用 --json。
         if jr.error_type:
-            err = f"  ({jr.error_type}: {jr.message})"
+            err = f"  ({jr.error_type}: {jr.message})" if jr.message else f"  ({jr.error_type})"  # 空 message 不留吊着的冒号（与报告页同口径）
         else:
             err = f"  ({jr.message})" if jr.message else ""
         out.append(f"  job {jr.scope_id!r}: {jr.status.value}{cost_str}{err}")
@@ -84,7 +90,7 @@ def render_text(result: RunResult) -> str:
                 # 连锁失败旁注（ADR 0031 决定六）：被 scope 内短路的 step（shortcircuited=True，status=skipped）——
                 # 上游 error 后 worker 跳过了它、没在损坏环境上跑。旁注解释"为何 skipped"，读 shortcircuited 这个
                 # 正交布尔（比旧的"按 status 顺序猜 error 后 failed"精确）；不改判定/severity（守纯 reducer 红线）。
-                note = "  ⚠ 因前置 step error 被跳过（未执行）" if st.shortcircuited else ""
+                note = f"  {_SHORTCIRCUIT_NOTE}" if st.shortcircuited else ""
                 out.append(f"      step {st.index}: {st.status.value} ({_ms(st.duration_ms)}){v}{note}")
                 # step 级失败原因（ADR 0042 决策三）：与 job 行同款——有 message 就显，人读视图不只剩一个光秃的态
                 if st.message:
@@ -266,7 +272,7 @@ def explain_to_dict(*, run_id: str, status: str | None, results: list[JobResult]
                     "message": None if st is None else st.message,
                     "shortcircuited": bool(st is not None and st.shortcircuited),
                     "duration_ms": None if st is None else st.duration_ms,
-                    "report_refs": [] if st is None else [_ref_to_dict(rr) for rr in st.report_refs],
+                    "report_refs": [] if st is None else [ref_to_dict(rr) for rr in st.report_refs],
                     "record_missing": st is None,
                     "evidence": None,
                     # 无记录的 step 没有任何 ref，故与「有记录但没挂 evidence」同归 no_ref
@@ -290,7 +296,7 @@ def explain_to_dict(*, run_id: str, status: str | None, results: list[JobResult]
             "error_type": jr.error_type,
             "message": jr.message,
             "session_id": jr.session_id,
-            "report_refs": [_ref_to_dict(rr) for rr in jr.report_refs],
+            "report_refs": [ref_to_dict(rr) for rr in jr.report_refs],
             # 中止的 job 里已跑完的 step 其证据已产，但 ref 只在事件记录里、不进判定记录 → 明说，别让读者以为没产
             "aborted_hint": (_ABORTED_PARTIAL_HINT
                              if jr.status in (Status.ABORTED, Status.ERROR) and 0 < len(recorded) < total_steps
@@ -381,7 +387,7 @@ def _step_lines(step: dict, *, expand_passed: bool, full: bool) -> list[str]:
     if step["duration_ms"] is not None:
         bits.append(f"({_ms(step['duration_ms'])})")
     if step["shortcircuited"]:
-        bits.append("⚠ 因前置 step error 被跳过（未执行）")
+        bits.append(_SHORTCIRCUIT_NOTE)
     lines = [head + "  " + "  ".join(bits)]
     if step["message"]:
         lines.append(f"      message: {_one_line(step['message'])}")

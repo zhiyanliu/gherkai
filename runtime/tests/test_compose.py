@@ -157,11 +157,11 @@ def test_resolve_worker_cmd_unknown_engine():
 
 def test_pure_release_predicate():
     # 第四级门槛的判据（PEP 440）：纯发行版才可能在 PyPI/npm 上
-    assert compose._is_pure_release("1.4.0") and compose._is_pure_release("1.4.0rc1")
-    assert not compose._is_pure_release("1.4.0.dev1")
-    assert not compose._is_pure_release("1.3.0.post10.dev0+f2efc49.dirty")
-    assert not compose._is_pure_release("1.4.0+dirty")
-    assert not compose._is_pure_release("not-a-version")
+    assert compose.is_pure_release("1.4.0") and compose.is_pure_release("1.4.0rc1")
+    assert not compose.is_pure_release("1.4.0.dev1")
+    assert not compose.is_pure_release("1.3.0.post10.dev0+f2efc49.dirty")
+    assert not compose.is_pure_release("1.4.0+dirty")
+    assert not compose.is_pure_release("not-a-version")
 
 
 # ---- build_engines：cmd/cwd 走定位链 + env 注入 ----
@@ -697,6 +697,72 @@ def test_build_fargate_engines_per_engine_taskdef_and_region_no_profile(monkeypa
     mid = by_engine[_REV["midscene"]]
     assert mid["sdk_artifact_dir_env"] == {"MIDSCENE_RUN_DIR": "/tmp/gherkai-run/rid-1/midscene-run"}
     assert "NOVA_ACT_TIMEOUT_S" not in mid["extra_env"]  # 引擎特定值只给该引擎（Midscene 无可控 act timeout）
+
+
+# ---- build_cloud_stores（ADR 0016 组合根注入 / 0030 决定七 offloader 默认挂载）----
+
+def _fake_store_ctors(monkeypatch) -> dict:
+    """把 build_cloud_stores 用的四个 adapter 换成只记构造参数的 fake（不 require boto3、不连 AWS）。"""
+    import gherkai_core.adapters.report_store.s3 as _rp
+    import gherkai_core.adapters.result_store.s3 as _rs
+    import gherkai_core.adapters.run_store.arg_offload as _ao
+    import gherkai_core.adapters.run_store.ddb as _ddb
+    seen: dict = {}
+
+    def _rec(name):
+        def _ctor(*args, **kwargs):
+            seen[name] = (args, kwargs)
+            return f"<{name}>"
+        return _ctor
+
+    monkeypatch.setattr(_ao, "S3StepArgumentOffloader", _rec("offloader"))
+    monkeypatch.setattr(_ddb, "DynamoDBRunStore", _rec("run_store"))
+    monkeypatch.setattr(_rs, "S3ResultStore", _rec("result_store"))
+    monkeypatch.setattr(_rp, "S3ReportStore", _rec("report_store"))
+    return seen
+
+
+def test_build_cloud_stores_uses_injected_handles_without_building_clients(monkeypatch):
+    """注入 ddb_table/s3 → 原样喂给 store，绝不另建 client（Lambda 组合根靠这条复用它已建的那批句柄，
+    而不是手工重造这套装配——重造那份的 prefix 规范化与 offloader 挂载会各自漂）。"""
+    seen = _fake_store_ctors(monkeypatch)
+
+    def _boom(*a, **kw):
+        raise AssertionError("注入句柄后不该再建 client")
+
+    monkeypatch.setattr(compose, "_make_ddb_table", _boom)
+    monkeypatch.setattr(compose, "_make_s3_client", _boom)
+    ddb_table, s3 = object(), object()
+    run_store, result_store, report_store, _mk = compose.build_cloud_stores(
+        table="prod-runs", bucket="prod-artifacts", prefix="reports", region="us-west-2",
+        ddb_table=ddb_table, s3=s3)
+
+    assert (run_store, result_store, report_store) == ("<run_store>", "<result_store>", "<report_store>")
+    assert seen["run_store"][0] == (ddb_table,)     # DDB 吃注入的 resource.Table，不另建
+    # 三个 S3 件套共享注入的那**一个** client（喂错句柄类型运行时才 AttributeError，ADR 0016），
+    # prefix 规范化仍由本函数一处做（"reports" → "reports/"，避粘连 key）
+    for name in ("offloader", "result_store", "report_store"):
+        assert seen[name][0] == (s3, "prod-artifacts", "reports/")
+    # offloader 默认挂载（ADR 0030 决定七）：漏挂则 META 里的 content_ref 正文静默还原成 None
+    assert seen["run_store"][1] == {"arg_offloader": "<offloader>", "detached": False}
+
+
+def test_build_cloud_stores_builds_handles_when_not_injected(monkeypatch):
+    """不注入则走 _make_* 钩子惰性建（table/region/profile 照传）——注入是可选口子、不改默认路径。"""
+    seen = _fake_store_ctors(monkeypatch)
+    made = {}
+    monkeypatch.setattr(compose, "_make_ddb_table",
+                        lambda table, *, region, profile: made.setdefault("ddb", (table, region, profile)))
+    monkeypatch.setattr(compose, "_make_s3_client",
+                        lambda *, region, profile: made.setdefault("s3", (region, profile)))
+    compose.build_cloud_stores(table="prod-runs", bucket="prod-artifacts", prefix="reports",
+                               region="us-west-2", profile="myprof", detached=True)
+
+    assert made["ddb"] == ("prod-runs", "us-west-2", "myprof")
+    assert made["s3"] == ("us-west-2", "myprof")
+    assert seen["run_store"][0] == (made["ddb"],)               # 建出来的句柄就是喂进去的那个
+    assert seen["result_store"][0] == (made["s3"], "prod-artifacts", "reports/")
+    assert seen["run_store"][1]["detached"] is True             # submit 档标记透传（ADR 0034）
 
 
 # ---- preflight_cloud_resources（ADR 0033）：探资源存在性、缺则点名 prefix ----

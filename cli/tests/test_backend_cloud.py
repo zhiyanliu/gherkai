@@ -461,6 +461,35 @@ def test_submit_cloud_preflight_probes_taskdefs_and_lambda_chain(tmp_path, monke
     assert pf["report_dir"] == "reports"
 
 
+def test_submit_does_not_accept_events_table_or_cluster(tmp_path):
+    """submit 不认 --events-table / --cluster（argparse 退 2），同它不认 --subnet/--security-group：
+
+    这两个名字真正的读者是云端推进链（从自己的 env 取），提交侧给了对这个 run 的执行零影响——唯一作用是
+    改「提交前检查」探哪个资源，给错值会把「探针指错」伪装成「后端未部署」。故探针一律按 --prefix 推。
+    同步 `run` 侧仍收（那边在本机组装 Fargate 执行配置，这两个名字真参与执行）。
+    """
+    import pytest
+
+    for flag in ("--events-table", "--cluster"):
+        with pytest.raises(SystemExit) as ei:
+            m.main(["submit", str(_write_feature(tmp_path)), "--backend", "cloud", flag, "whatever"])
+        assert ei.value.code == 2, f"submit 不该认 {flag}"
+    ns = m._build_parser().parse_args(["run", "x.feature", "--backend", "cloud",
+                                       "--events-table", "e", "--cluster", "c"])
+    assert (ns.events_table, ns.cluster) == ("e", "c")
+
+
+def test_submit_cloud_preflight_probes_prefix_derived_names(tmp_path, monkeypatch, capsys):
+    """submit 的 events 表/cluster 探针名一律按 --prefix 推（无 flag 可覆盖，见上一条）。"""
+    record: list = []
+    _, _, preflight_calls = _patch_cloud_handles(monkeypatch, record)
+    rc = m.main(["submit", str(_write_feature(tmp_path)), "--backend", "cloud",
+                 "--region", "us-east-1", "--prefix", "stage-"])
+    assert rc == 0
+    pf = preflight_calls[0]
+    assert pf["events_table"] == "stage-events" and pf["cluster"] == "stage-cluster"
+
+
 def test_submit_cloud_passes_custom_report_dir_to_preflight(tmp_path, monkeypatch, capsys):
     """非默认 --report-dir 也要交给 preflight 比对（否则提交侧/推进侧前缀静默分裂、结果落别处）。"""
     record: list = []

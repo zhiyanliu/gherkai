@@ -36,6 +36,7 @@ import { match as matchDeterministic, DeterministicAssertion, listRegistry, matc
 import { buildInstruction } from "./argument.mjs";
 // step 级机读证据（ADR 0042）：SDK 结构 → gherkai 自有 schema 的映射与落盘全住那个模块；此处只挂钩子。
 import { stepEvidenceRef, executionsLength, EVIDENCE_KIND, type EvidenceHook } from "./evidence.mjs";
+import { errorText } from "./error-text.mjs";  // 失败原因压成一行有界文本（ADR 0042；与 evidence 侧同一规则）
 import "./deterministic.steps.mjs";  // 内建脚手架（ADR 0022 退役 bdd 层后迁入 worker/）——**先于**使用方 steps 注册
 import { loadUserSteps } from "./user-steps.mjs";  // 使用方 steps/ 目录的加载（ADR 0037 决策 4）
 
@@ -699,15 +700,19 @@ async function runStep(
     // step_done）」，此处 step_started 早已 emit、saw_step=True，双条件 AND 天然不满足；本失败走 step_done
     // 事件流（非退出码 80），core 侧 is_network=False。"act 中途恢复"仍 defer，这里只把失败原因记准。
     const errorType = isTransientNetwork(e) ? "network_error" : "engine_error";
+    // message 与 evidence 的 error 同过 errorText（一行、有界；Playwright 异常的 message 常拖着多行 call
+    // log，规则与理由见 error-text.mts，Nova 侧 `_error_text` 是对称版）。两处必须同一份文本：evidence 冗余
+    // step_done 的 message 以自包含（ADR 0042 决策一）。
+    const message = errorText(e);
     const ev: Record<string, unknown> = {
       type: "step_done", scenarioId, stepIndex: index,
-      status: "error", errorType, message: `${(e as Error).name}: ${(e as Error).message}`,
+      status: "error", errorType, message,
     };
     // 失败的 act 费用已经发生（ADR 0024「失败的 act 同样带 cost」）：agent 日志里的 usage 不因抛异常消失，照报 token 增量
     const cost = stepCost(tokBefore, agent);
     if (cost) ev.cost = cost;
     // error step 的 evidence 最该产（抛错的 task 仍在 executions 里、带 errorMessage）；抽取失败也只是没 ref
-    await emitWithEvidence(ev, "error", `${(e as Error).name}: ${(e as Error).message}`);
+    await emitWithEvidence(ev, "error", message);
     return "error";
   }
 }
