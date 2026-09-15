@@ -87,7 +87,7 @@ flowchart LR
 ③ 打开 ①/② 给出的 index.html 或原生产物链接 → 引擎自己的报告页 / 轨迹页 / 截图，看现场
 ```
 
-`status` 与 `explain` 的退出码语义不同：判定码由 `run` 与 `status` 给——`status` 只在读到终态时才表判定（`passed`→0、其余终态→1；未达终态退 0，故 CI 拿判定要用 `status --wait`），**`explain` 只用 0 / 2**（0 = 渲染成功，哪怕一条证据都没有；2 = 参数错 / run 或 scope 不存在 / 云端不可用），别拿它判红绿。detached run 未到终态时判定明细还没落地，`explain` 会打一行「先用 `status --wait`」并退 0。
+读这三步时别把 `explain` 当判定门：它**从不表判定**（只用 0 / 2，哪怕一条证据都没有也退 0），判定码只由 `run` 与 `status` 给（`status` 只在读到终态时才表判定、未达终态退 0，故 CI 拿判定要用 `status --wait`）——各命令退出码分别在回答什么见 [`./verdict-model.md`](./verdict-model.md)「退出码」节。detached run 未到终态时判定明细还没落地，`explain` 会打一行「先用 `status --wait`」并退 0。
 
 **看到这个提示 → 它在说什么**（文本形态；机读侧对应 `record_missing` / `evidence_missing` / `aborted_hint`）：
 

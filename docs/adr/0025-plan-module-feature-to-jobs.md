@@ -2,7 +2,7 @@
 
 > **Status:** Accepted
 
-核心库把一组 `.feature` 变成可调度的 **job 列表**的模块。它兑现 [0019](./0019-feature-tags-scope-and-engine.md)/[0016](./0016-execution-architecture-core-lib-run-model.md) 一直 defer 到核心库的「scope 分组 + engine 冲突校验 + Gherkin 解析」。输出的 Job 正是 [0024](./0024-worker-core-protocol.md) worker↔core 协议的输入形状。下一块 `schedule`（scope 串/并行调度）以本模块输出为输入，另立。
+核心库把一组 `.feature` 变成可调度的 **job 列表**的模块。它兑现 [0019](./0019-feature-tags-scope-and-engine.md)/[0016](./0016-execution-architecture-core-lib-run-model.md) 一直 defer 到核心库的「scope 分组 + engine 冲突校验 + Gherkin 解析」。输出的 Job 正是 [0024](./0024-worker-core-protocol.md) worker↔core 协议的输入形状。调度（scope 间串/并行、会话共享）另立 `schedule` 模块，见 [0026](./0026-schedule-module.md)，以本模块输出为输入。
 
 ## 接口（深模块，小）
 
@@ -91,7 +91,7 @@ Job = {
 - `scenarioName`：Scenario 标题（`<placeholder>` 已插值）；Outline 展开的多个 scenario 若标题模板不含占位符会重名，故**追加 Examples 行标识**（实现用 `[@<example行号>]`，如 `登录 [@15]`）保证可区分、可追溯。
 - `scopeId`：有 `@scope:X` → 用 `X`（干净 token）；无标 → 各 scenario 自成单元素 scope，`scopeId` **= 该 scenario 的 `scenarioId`**（直接复用，自动继承上面的 Outline `:<example行号>` 消歧，不会撞 id）。
 - `scopeName`：有 `@scope:X` → `@scope` 原值（可含空格/标点的人写名）；无标 → 取该 scenario 的标题（人写名），**不复用机器派生的 `scopeId`**（保持 name = 人写展示名的语义，对齐 [0024](./0024-worker-core-protocol.md)）。
-- 行号稳定（feature 不大改即不变）、人可读出来源。若未来需更强稳定性可引 `@id:` tag，暂不做。
+- 行号稳定（feature 不大改即不变）、人可读出来源；更强稳定性靠 `@id:` tag，暂不做（见下「留口子不实现」/「重议」）。
 
 ## 第三方库 seam（gherkin-official 藏在 parse 后）
 

@@ -179,7 +179,7 @@ subnet/sg 不是「名字」，是 **AWS 建 VPC 时生成的 ID**（`subnet-0ab
 
 ## 留待（defer）
 
-- **镜像瘦身**：属施工，不在本 ADR 决策面。（真容器 grace/中断校准已完成，归 [0032](./0032-fargate-execution-environment.md) Accepted。）
+- **镜像瘦身**：属施工，不在本 ADR 决策面。
 - **build & push ECR 的自动化程度**：手动步骤曾由 `tools/build_push_workers.py` 固化（ECR 登录 + 两引擎 `docker build --platform linux/amd64` + push 一条命令）——**已退役**（[0038](./0038-worker-image-delivery.md)）：使用方按三行模板自己 build 定制镜像，部署方 `gherkai deploy push-worker` 推送并注册 revision（推送前校验 linux/amd64，把 Fargate 启动期 `exec format error` 提前拦下）；基底镜像由维护者 CI 发 GHCR（[0037](./0037-distribution-and-packaging.md) 决策 8）、`gherkai deploy` 同步进使用方 ECR。使用方定制镜像的 CI 属使用方自己的流水线，不在本项目。
 
 ## 重议

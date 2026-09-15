@@ -6,6 +6,8 @@
 
 **决定**：当某个能力在 AWS 内有可用方案时，即采用 AWS 方案，**即使 AWS 外存在质量/便利性更好的替代**。离开 AWS 的方案只有在「AWS 内确实无任何可行选项」时才进入考虑，且需另立 ADR 显式记录为对本约束的例外。
 
+**适用面** = 交付物的**运行栈**（模型托管 / 浏览器层 / 鉴权 / 存储 / 编排，即上文列举的轴）。维护者侧的源码托管、包索引、镜像 registry 与 CI（GitHub / PyPI / npm / GHCR，见 [0037](./0037-distribution-and-packaging.md) 决策 5、8）是发布通道、不在其内——运行期真正被拉起的 worker 镜像仍在使用方私有 ECR（[0038](./0038-worker-image-delivery.md)）。发布通道放 AWS 外不是例外、不进下面的例外清单。
+
 **已据此约束做出的选择**：
 - [0003](./0003-midscene-grounding-qwen3vl-bedrock.md)：Midscene 大脑选 Bedrock 上的 Qwen3-VL，而非 AWS 外的模型。
 - [0004](./0004-novaact-iam-auth-via-workflow.md) / [0008](./0008-midscene-bedrock-auth-sigv4-selfsign.md)：两个引擎统一走 IAM/SigV4，不引入额外凭证体系。

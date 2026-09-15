@@ -1,6 +1,6 @@
 # UI 语言支持范围：按引擎划分（Midscene 不限；Nova Act 限英文）
 
-> **Status:** Accepted（2026-09-09 修订：范围从「框架限英文 UI」改为按引擎划分——Midscene 不限 UI 语言，Nova Act 的支持范围仍是英文 UI；据中文维基 5 次真跑、两引擎各 125 票的量化结果，见「非英文的真实边界」）。
+> **Status:** Accepted（2026-09-09 修订：范围从「框架限英文 UI」改为按引擎划分——Midscene 不限 UI 语言，Nova Act 的支持范围仍是英文 UI；据中文维基 5 次真跑、两引擎各 125 票的量化结果，见「非英文的真实边界」）。文件名沿用原 slug `scope-limited-to-english-ui`——它是引用锚点，稳定优先于语义新鲜；范围以本行与标题为准。
 
 ## 决策
 

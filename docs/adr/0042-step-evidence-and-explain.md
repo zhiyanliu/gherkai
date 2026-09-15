@@ -203,7 +203,7 @@ agent / skill 只依赖 evidence schema 与 `explain` 输出，两者都是我�
 - `runtime/gherkai_runtime/compose.py`：`read_resource(uri)`。
 - `cli/gherkai_cli/__main__.py`：`explain` 子命令（含 skew 闸门、结果树匹配器）；`render.py`：文本渲染 + step 行补原因；`cli/tests/test_cli_json_contract.py`：`_leaf_keys` 支持在指定键处停止下钻 + explain 样例（内嵌 evidence 夹具）。
 
-**文档（反向链逐处列出，Accepted 前逐条核）**
+**文档（反向链逐处列出）**
 
 - [0024](./0024-worker-core-protocol.md)：kind 例举补 `evidence`；「Midscene 1 个 report html/worker（scope_done 带）；Nova 每 act 一个 trajectory（下沉 step_done）」改为「两引擎都在 `step_done` 带 `kind=evidence`；Midscene 的 report 仍 scope 级」；协议示例里「只有 Nova 有 step 级 reportRefs」的行内注释同改。
 - [0027](./0027-runreport-aggregation-index.md)：kind 例举补 `evidence`；「Midscene 保持 scope 级」句改写；「消费端不 stat / open」条按层收窄并反向链；留口子「trajectory 内部结构化提取」标已落地；index.html 形态 ② 条与空态条措辞同步。
@@ -214,7 +214,7 @@ agent / skill 只依赖 evidence schema 与 `explain` 输出，两者都是我�
 - `cli/README.md`（explain 用法；退出码节补「explain 只说证据读出来了吗、不表判定」；index.html 描述含 evidence 行）、根 `README.md`、`cli/DEVELOPMENT.md`（RunReport 内部：清单含 evidence）、`DEVELOPMENT.md` ADR 范围、`engines/midscene/DEVELOPMENT.md` worker 模块枚举补 evidence。
 - `CONTEXT.md`：术语表 kind 枚举补 `evidence`、两引擎 step_done 带 evidence 一句（core 不透明搬运那句主语是 core、仍成立，只补皮层解引用半句）；版本单旋钮的 cloud 入口数三改四。
 
-**交付链（不改 IaC 资源，但不重部署云端看不到）**
+**交付链（不改 IaC 资源，但不重部署云端看不到——cloud 档跑不出 message / evidence，易误判成 bug）**
 
 - cloud 档的 `jobs/*.json` 由 reconciler Lambda 投影产出，Lambda 里的 `gherkai_core` 是部署时从已安装包复制进 asset 的（[0037](./0037-distribution-and-packaging.md) 决策 6）→ `StepResult.message` 要重跑 `gherkai deploy` 才在云端生效。
 - evidence 住 worker 镜像 → 云端要产 evidence 必须推带新 worker 代码的镜像（dev 树 = `gherkai deploy push-worker`；发行版 = 新基底 + `gherkai deploy`）。
@@ -237,9 +237,4 @@ agent / skill 只依赖 evidence schema 与 `explain` 输出，两者都是我�
 
 **验证暴露并已吸收的两处**：Nova SDK 异常 str() 为多行 repr → act.error / step message 压成一行（决策一映射表）；Midscene `Planning/Plan` 的推理在 `output.thought` → 映射回落（决策一映射表）。
 
-- 单测：两引擎映射函数对真产物 fixture（含 Midscene 的 error task、Nova 的 N 票）；best-effort 路径（抽取 / 上传抛异常 → `step_done` 照发、无 evidence ref、status 不变）；serialize round-trip 带非默认 step message；`explain` 本地 / 云端两档读取、`record_missing` 与三种 `evidence_missing`、多命中 `--scenario` + `--step`、退出码；cloud 档 skew 三态；契约护栏含 evidence 夹具。
-- 真跑（跳板机；**先重传 Lambda asset + 推新 worker 镜像**，否则 cloud 档必然看不到 message / evidence、易误判成 bug）：
-  - Nova 故意失败的 AI 断言：trajectory json 真落盘、evidence.json 的 `frames` 非空、末帧 thought 解释了判否、`vote=false`；
-  - Nova 故意 act 超时（`ActTimeoutError`）：evidence.json 可解析、`acts[0].error` 非空、`frames == []`、`explain` 退 0；
-  - Midscene 故意失败的 AI 断言：`Insight/Boolean` 的 thought 进 evidence、截图文件存在且被引用；
-  - 截图在浏览器**渲染**而非下载（Content-Type=image/jpeg）；`explain --json` 可被严格解析；cloud 档 `s3://` 读取可用、flush 后截图 URI 可取。
+**单测护栏**：两引擎映射函数对真产物 fixture（含 Midscene 的 error task、Nova 的 N 票）；best-effort 路径（抽取 / 上传抛异常 → `step_done` 照发、无 evidence ref、status 不变）；serialize round-trip 带非默认 step message；`explain` 本地 / 云端两档读取、`record_missing` 与三种 `evidence_missing`、多命中 `--scenario` + `--step`、退出码；cloud 档 skew 三态；契约护栏含 evidence 夹具。

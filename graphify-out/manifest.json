@@ -215,8 +215,8 @@
     "semantic_hash": ""
   },
   "docs/REFERENCES.md": {
-    "mtime": 1789444044.082358,
-    "ast_hash": "37b930aeed74dcede3e0bedb95531cd8",
+    "mtime": 1789455877.1126013,
+    "ast_hash": "fc1f73ea8e39b606b5705ecff04b8eae",
     "semantic_hash": ""
   },
   "docs/adr/0017-cloud-execution-fargate-over-runtime.md": {
@@ -240,8 +240,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0025-plan-module-feature-to-jobs.md": {
-    "mtime": 1789445205.9239705,
-    "ast_hash": "0eb877d34066133fd3b1c1dfb651850a",
+    "mtime": 1789455778.543312,
+    "ast_hash": "cc80b993ca2f7c826138f8e3979a3d08",
     "semantic_hash": ""
   },
   "docs/adr/0028-transient-network-ssl-resilience.md": {
@@ -280,8 +280,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0001-scope-limited-to-english-ui.md": {
-    "mtime": 1789359650.451664,
-    "ast_hash": "f442008134d8f08e19763140ae69ec65",
+    "mtime": 1789455661.451683,
+    "ast_hash": "e32bec0c3adfb276fd2e475b07ac6f4c",
     "semantic_hash": ""
   },
   "docs/adr/0002-midscene-not-driven-by-gpt55.md": {
@@ -320,8 +320,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0009-maximize-aws-hard-constraint.md": {
-    "mtime": 1788935878.3116882,
-    "ast_hash": "eb54b0d388374daafffd63611fc9df11",
+    "mtime": 1789455661.4508212,
+    "ast_hash": "9ff1bb7044fcb60b2d347e8fea273c0f",
     "semantic_hash": ""
   },
   "docs/adr/0010-spike-as-apples-to-apples-benchmark.md": {
@@ -350,13 +350,13 @@
     "semantic_hash": ""
   },
   "docs/adr/0015-v1-positioning-smoke-not-regression.md": {
-    "mtime": 1788939345.8424695,
-    "ast_hash": "88dd5911a0f0f4fb57c8804c942cb9af",
+    "mtime": 1789455785.930652,
+    "ast_hash": "47748c70b06275b90235b0c77b295c0a",
     "semantic_hash": ""
   },
   "docs/adr/0016-execution-architecture-core-lib-run-model.md": {
-    "mtime": 1789445205.9233596,
-    "ast_hash": "1030add5f3ca1365fa0fe54d044f7b22",
+    "mtime": 1789455789.2522585,
+    "ast_hash": "fb966f6d3aac3505141e8e001709ed88",
     "semantic_hash": ""
   },
   "docs/adr/0021-local-cucumber-patch-step-keyword-disambiguation.md": {
@@ -375,8 +375,8 @@
     "semantic_hash": "d433e28ccaea45df3762c4934dca3fe0"
   },
   "docs/adr/0024-worker-core-protocol.md": {
-    "mtime": 1789445205.9238317,
-    "ast_hash": "3cfb8a5a6f7ceb8fdcb5a9a510cedfe5",
+    "mtime": 1789455790.5118217,
+    "ast_hash": "8b83c8d48ff1bdffb6ac3aee122d7661",
     "semantic_hash": ""
   },
   "docs/adr/0026-schedule-module.md": {
@@ -385,13 +385,13 @@
     "semantic_hash": "cb90d776f70a7991304114b338bc2163"
   },
   "docs/adr/0027-runreport-aggregation-index.md": {
-    "mtime": 1789444021.7350433,
-    "ast_hash": "b7d2f2a7543e56fa03fafc063c78279d",
+    "mtime": 1789457107.0193787,
+    "ast_hash": "d9ee5187ced7219527352f5ea96b72cf",
     "semantic_hash": ""
   },
   "docs/adr/0029-engine-artifacts-to-s3.md": {
-    "mtime": 1789444016.2036366,
-    "ast_hash": "be82df3b5d683ff17cf2762044f424c4",
+    "mtime": 1789455773.5274858,
+    "ast_hash": "9c60823b4ed2cf876649ceeabc1fb177",
     "semantic_hash": ""
   },
   "docs/adr/0030-realtime-persistence-seam.md": {
@@ -405,23 +405,23 @@
     "semantic_hash": ""
   },
   "docs/adr/0032-fargate-execution-environment.md": {
-    "mtime": 1789445513.2396333,
-    "ast_hash": "c098b2a00fba522caab3b3c6abfcf27c",
+    "mtime": 1789455776.1756241,
+    "ast_hash": "ae1a6932546456edecae4bfaf03cea4f",
     "semantic_hash": ""
   },
   "docs/adr/0033-iac-aws-backend-and-composition-wiring.md": {
-    "mtime": 1789446028.881649,
-    "ast_hash": "6a9b37cc53fa8c110c3d76af85b4be1b",
+    "mtime": 1789455765.7086282,
+    "ast_hash": "8f77c3341db752e2721fa8d0e9fea856",
     "semantic_hash": ""
   },
   "docs/adr/0034-detached-batch-reconciler.md": {
-    "mtime": 1789445205.924184,
-    "ast_hash": "187024fbebe02ad5741bef900dea7a61",
+    "mtime": 1789455766.0351841,
+    "ast_hash": "53e337ab8ec39bd14fc3e59d18f99414",
     "semantic_hash": ""
   },
   "docs/doc-health-review.md": {
-    "mtime": 1789444046.333552,
-    "ast_hash": "3f261cd6a7e282458f5e09da79d9ed7f",
+    "mtime": 1789456172.229808,
+    "ast_hash": "6929dff0313a7a1b5c38c34ee723f6a7",
     "semantic_hash": ""
   },
   "engines/midscene/README.md": {
@@ -455,13 +455,13 @@
     "semantic_hash": ""
   },
   "docs/guides/execution-and-reconciliation.md": {
-    "mtime": 1789445205.9250786,
-    "ast_hash": "b2075615ca0924e129abd429062f7816",
+    "mtime": 1789455776.4288785,
+    "ast_hash": "23610108d45810c62e3ac05215845660",
     "semantic_hash": ""
   },
   "docs/adr/0037-distribution-and-packaging.md": {
-    "mtime": 1789444061.8423994,
-    "ast_hash": "83254b09c2806fa9ec3ff86d8ce254d6",
+    "mtime": 1789456601.2430737,
+    "ast_hash": "fab76d4bdf0f90118197465c8371572e",
     "semantic_hash": ""
   },
   "docs/adr/0038-worker-image-delivery.md": {
@@ -995,8 +995,8 @@
     "semantic_hash": ""
   },
   "deploy_aws/gherkai_deploy_aws/stack.py": {
-    "mtime": 1789009100.9355228,
-    "ast_hash": "4ece43cb84ccd6221cc7047b68a061f2",
+    "mtime": 1789455646.167737,
+    "ast_hash": "96a9c0b374f9ce466830cadf156a0ab5",
     "semantic_hash": ""
   },
   "deploy_aws/tests/synth_fixture.py": {
@@ -1070,8 +1070,8 @@
     "semantic_hash": ""
   },
   "cli/tests/test_user_facing_messages.py": {
-    "mtime": 1788943632.75245,
-    "ast_hash": "c15b4e2af14da83ab8fed23828033bb3",
+    "mtime": 1789455646.167349,
+    "ast_hash": "6d3e293e35ef48587a5675a703a96e5f",
     "semantic_hash": ""
   },
   "cli/tests/test_package_readmes.py": {
@@ -1115,8 +1115,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0039-user-facing-surfaces-no-internal-references.md": {
-    "mtime": 1789445205.924485,
-    "ast_hash": "adbc41fc1c4b2b64be96802fae6f80ac",
+    "mtime": 1789456601.2426307,
+    "ast_hash": "d718794268bf76ba23134904e3a8d4e2",
     "semantic_hash": ""
   },
   "tools/graphify_refresh.sh": {
@@ -1135,8 +1135,8 @@
     "semantic_hash": ""
   },
   ".claude/commands/doc-health-review.md": {
-    "mtime": 1788939883.7908375,
-    "ast_hash": "77385d70892bc63c249ccf886ca34063",
+    "mtime": 1789456231.9893093,
+    "ast_hash": "82142df4a286c3d5bd4952eed431a5a1",
     "semantic_hash": ""
   },
   "core/tests/test_local_run_store_atomic.py": {
@@ -1165,8 +1165,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0042-step-evidence-and-explain.md": {
-    "mtime": 1789444008.6287508,
-    "ast_hash": "e48747245c6d6b6a42c2396e27dc50f7",
+    "mtime": 1789455796.935047,
+    "ast_hash": "b77d7ee682aaa6b0a39b924ab4a67ed0",
     "semantic_hash": ""
   },
   "engines/midscene/src/worker/evidence.mts": {
@@ -1205,18 +1205,18 @@
     "semantic_hash": ""
   },
   "docs/guides/artifacts-and-evidence.md": {
-    "mtime": 1789104172.821741,
-    "ast_hash": "c9ca7433b8709cd0b838f9eb707280e4",
+    "mtime": 1789456601.2428,
+    "ast_hash": "ee88ad9baa185c590b1ac00d45b45ba9",
     "semantic_hash": ""
   },
   "docs/guides/cloud-backend-carriers.md": {
-    "mtime": 1789104172.8221302,
-    "ast_hash": "e3972c2067c43faee2e2abaff78d066d",
+    "mtime": 1789455810.9721928,
+    "ast_hash": "c595e8ed38115568169898cb96c5a58b",
     "semantic_hash": ""
   },
   "docs/guides/deterministic-step-lifecycle.md": {
-    "mtime": 1789444219.507061,
-    "ast_hash": "55f772798fb4857fc263ffccefc3fec1",
+    "mtime": 1789455783.589118,
+    "ast_hash": "fdcd01252c78bedd9914454935bd0131",
     "semantic_hash": ""
   },
   "docs/guides/verdict-model.md": {
@@ -1230,8 +1230,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0043-agent-skill-for-driving-gherkai.md": {
-    "mtime": 1789445205.9249153,
-    "ast_hash": "0181738c59cda53ecf099327d6b2b99a",
+    "mtime": 1789455829.930887,
+    "ast_hash": "347b73e12758dfb8cfb84ee63e36499f",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skill_install.py": {
@@ -1280,8 +1280,8 @@
     "semantic_hash": ""
   },
   "tools/render_skill_contract.py": {
-    "mtime": 1789358707.3752673,
-    "ast_hash": "314d835d87d285877aee4eafe4731a03",
+    "mtime": 1789455889.1299517,
+    "ast_hash": "5638f25b4b99be5a92241b82164ad4e7",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skills/gherkai/SKILL.md": {
@@ -1290,8 +1290,8 @@
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skills/gherkai/references/cli-json-contract.md": {
-    "mtime": 1789360232.1858838,
-    "ast_hash": "a6541d9415dd35042e75dd22ea669dd7",
+    "mtime": 1789455897.4347947,
+    "ast_hash": "9d95a64d385a158e74358700d87d265a",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skills/gherkai/references/cloud-backend.md": {
@@ -1572,11 +1572,6 @@
   "skills/gherkai-evals/grader-prompt.md": {
     "mtime": 1789444233.2395911,
     "ast_hash": "edff15a6c8a93d4cffc7c4742e34ee2e",
-    "semantic_hash": ""
-  },
-  "docs/journey/0005-doc-health-round6-pending-approval.md": {
-    "mtime": 1789446066.0521183,
-    "ast_hash": "255d8b552640faef48132c8cfe6714ad",
     "semantic_hash": ""
   }
 }

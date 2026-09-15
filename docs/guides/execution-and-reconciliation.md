@@ -123,7 +123,7 @@ sequenceDiagram
 
 - **`status`（不带 `--wait`）纯只读、零副作用**——看到的新鲜度取决于最近一次 `tick` 是什么时候；它不推进、也不 kickoff。
 - **run 级 status 的取值语义**：投影写被钳在 `pending`/`running` 两档——投影里全部 job 仍 pending = `pending`，任一 job 已推进 = `running`；run 级**终态**由 `try_finalize` 一次落定（提交点），**读到终态 = run 已提交**。注意投影落后于抢占一拍：CAS 抢占只改那个 job 的态，run 级要等下一次 `tick` 才翻 `running`——故「run 仍 pending」≠「还没开始推进」；`status` 的「推进可能未启动」提示因此要求 run 级 `pending` **且所有 job 仍 pending** 才打。
-- **退出码分层**（CI 接线最易建错心智）：`submit` 的退出码只表示「提交成功与否」、**不是判定**；判定退出码由 `status --wait` 等到终态后给（passed→0 / 其余终态→1；不带 `--wait` 且未到终态 → 0，那是「查询成功」；查不到 run → 2）。根因：CLI 脱离后不再有内存里的判定终值。
+- **退出码分层**（CI 接线最易建错心智）：`submit` 的退出码只表示「提交成功与否」、**不是判定**；判定退出码由 `status --wait` 等到终态后给。根因：CLI 脱离后不再有内存里的判定终值——各命令退出码的完整分工见 [`verdict-model.md`](./verdict-model.md) §5（本篇不重复它的表）。
 - **结果落哪**：`try_finalize`（CAS）是**提交点**——同一次 `tick` 在它**之前**已把各 job 的判定明细（`jobs/*.json`）从本轮 records 聚合落库，故**读到终态即判定明细已齐**；提交点之后宿主才写派生的 RunReport（写失败被隔离、不击穿已提交的 run）。两段都幂等，local per-run 进程与 cloud reconciler 共用 `core` 的同一份收尾逻辑。落点：local = `--report-dir/<run_id>/`，cloud = S3 桶下 `<report_dir>/<run_id>/`——cloud `submit` 的 `--report-dir` 须与推进器侧一致（提交前探活会比对、不一致退 2），否则「跑完了却在自己给的前缀下找不到结果」。
 
 最后一条不对称（**掐得掐不得**）：cloud 的 `--wait` 检测卡住时只是**踢一脚** kicker（fire-and-forget），踢完随时可离场——云端链自己跑完；local 的 `--wait` 接力者一旦接手**就是唯一推进者**，掐掉它 run 就地停摆（已 claim job 的计时也随进程一起丢，靠下次接力恢复）。根因：主推进器的位置不同（云端 Lambda vs 本机进程）。

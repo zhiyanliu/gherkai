@@ -140,7 +140,7 @@ core/gherkai_core/
 
 `subprocess worker + 注入 S3 落点/DDB events`（旧称「subprocess+cloud」）**不再是面向用户的 CLI 档**（决策 A 下 `--backend cloud` = Fargate），而是**内部预演/测试手段**——即 `tools/e2e_harness.py` 与开发验证用的路径：本地 subprocess worker 注入云存储落点，真跑验证上传链/events 链/S3 key 等，为 Fargate 忠实预演，不必等真容器。
 
-**关键：这只是重定位「谁来用、是不是用户档」，不删预演的价值论证**——「上传/抢传能力提前在 subprocess 环境建好并验证、为 Fargate 铺路」这套论证（见 [0029](./0029-engine-artifacts-to-s3.md)/[0032](./0032-fargate-execution-environment.md)）完全成立、一字不动，只是承载它的 `subprocess + 注入云存储` 从「CLI 用户可选一档」标注为「e2e_harness/开发预演手段」。
+**预演的价值论证仍完全成立**——「上传/抢传能力提前在 subprocess 环境建好并验证、为 Fargate 铺路」（见 [0029](./0029-engine-artifacts-to-s3.md)/[0032](./0032-fargate-execution-environment.md)）；变的只是承载它的 `subprocess + 注入云存储` 的定位：从「CLI 用户可选一档」改为「e2e_harness/开发预演手段」。
 
 **承载机制 = `tools/e2e_harness.py` 自拼 worker env，不由 `compose.build_engines` 暴露形参**：`build_engines` 曾留一个 `artifact_s3=(bucket, prefix)` 形参做这件事，决策 A 落地后它**零生产/工具调用点**（cloud 档恒走 `build_fargate_engines` 自算落点、local 档恒不注入、e2e_harness 自己拼 `ARTIFACT_S3_*` 后 Popen），且其 docstring 反过来声称「跟 `--backend cloud` 走、由组合根注入」——与决策 A 相反的长期漂移源，故删。**护栏（防未来重复进坑）**：上面「内部矩阵仍正交（组合根/e2e 可拼）」不变——真要从组合根再拼这一档时，重加形参是加法、不返工；但**别把它当「cloud 档的注入点」复活**（那是 `build_fargate_engines` 的职责，两处都注入即双真源）。
 
@@ -164,7 +164,7 @@ Fargate 执行环境配置（cluster / task-def / subnet / security-group / even
 - **`build_local_stores(*, report_dir) -> (run_store, result_store, report_store, make_artifacts)`**：new 三个 `Local*Store(root)`，返回三 store + `make_artifacts` 工厂函数（见下第四返回值说明）。
 - **`build_cloud_stores(*, table, bucket, prefix, region=None, profile=None, detached=False) -> (run_store, result_store, report_store, make_artifacts)`**：`detached` 是行为开关不是可选装饰——**仅 `submit` 传 `True`**（`create_run` 写的 STATE 带 detached 标记 → 触发 cloud kicker 冷启动），同步 `run` 不传（否则双开推进器，[0034](./0034-detached-batch-reconciler.md)）。`import boto3` 惰性收在函数体内（原设「cli 主依赖不含 boto3，走 `cli[aws]→core[aws]` extra」——**已被 [0037](./0037-distribution-and-packaging.md) 决策 2c 反转**：CLI 发行包 `gherkai` 硬依赖 `gherkai-runtime[aws]`、裸装即可 `--backend cloud`，库层 `gherkai-core[aws]`/`gherkai-runtime[aws]` extra 只留给库消费者；**「纯 local 路径绝不触发 import」这条不变量仍成立**——懒加载与安装期装没装 boto3 正交）。造 boto3 句柄抽成可 patch 的小钩子。返回三 store + cloud 的 `make_artifacts` 工厂。
 - **两种 boto3 句柄别混**（静默出错高危）：`DynamoDBRunStore` 吃 `resource.Table`（内部 `self._table.put_item`/`.meta.client`），三个 S3 件套（ResultStore/ReportStore/offloader）**共享一个** `client`。喂错句柄类型运行时才 AttributeError、moto/cli 都测不到。
-- **测试注入点随之迁移**：原 cli 测试 `monkeypatch m.LocalRunStore/...`（模块级名字）改为 patch `compose.build_local_stores`（或其内部构造钩子）——注入点从「__main__ 模块级 Local* 名字」迁到「compose 的 build 函数」，验的东西不变（写序 / --no-report 不构造 / running→final），只换注入锚。cloud 同理 patch `compose` 的 boto3 钩子。cli 测试**只验接线层**（backend 选对了、构造了正确 adapter + 参数对 + offloader 挂了），不引 moto——adapter 行为已由 core 包 moto 全覆盖，cli 再测是重复且破窄腰。
+- **测试注入锚 = `compose.build_local_stores`（或其内部构造钩子），cloud 同理 patch `compose` 的 boto3 钩子**：cli 侧据此验写序 / --no-report 不构造 / running→final，且**只验接线层**（backend 选对了、构造了正确 adapter + 参数对 + offloader 挂了），不引 moto——adapter 行为已由 core 包 moto 全覆盖，cli 再测是重复且破窄腰。
 - **trade-off**：把 local 装配从 `__main__` 迁进 `compose` 要改现有 3 个 `monkeypatch m.Local*` 测试的注入点——换来 compose 两后端对称可复用（WebUI 两路都能直接复用），值得。
 
 **cloud 配置来源 + 落点语义**：

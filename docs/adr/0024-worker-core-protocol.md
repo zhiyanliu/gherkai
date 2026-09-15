@@ -174,7 +174,7 @@ core 的 `schedule`/汇总逻辑应能用一个**假 worker**（in-memory adapte
 
 ## 远程传输演进（Fargate：port 抽象活、pipe 传输死）
 
-> 本节钉的是**已想清、不会变**的边界（哪些 survive、哪些必改）。**传输选型已定 + adapter 已实装 + 组合根接线已落地**：events-out 焊死到 DynamoDB events 表（worker PutItem / core Query 轮询，非 SQS/MSK/CloudWatch——见下「DynamoDB 作 events-out 传输」+ 三方案被拒护栏），`FargateEngine` adapter 已编码（`core/gherkai_core/adapters/fargate_engine.py`，job-in 走 S3、events-out 走 DDB、stop→StopTask、退出码→DescribeTasks），**组合根接线已完成**（`compose.build_fargate_engines` + `--backend cloud` 切执行 + IaC，[0033](./0033-iac-aws-backend-and-composition-wiring.md) Accepted、真部署真跑）。产物→S3 是**正交的另一条边**，见 [0029](./0029-engine-artifacts-to-s3.md)。
+> 本节钉的是**已想清、不会变**的边界（哪些 survive、哪些必改）。events-out 焊死到 DynamoDB events 表（worker PutItem / core Query 轮询，非 SQS/MSK/CloudWatch——见下「DynamoDB 作 events-out 传输」+ 三方案被拒护栏），`FargateEngine` adapter 已编码（`core/gherkai_core/adapters/fargate_engine.py`，job-in 走 S3、events-out 走 DDB、stop→StopTask、退出码→DescribeTasks），**组合根接线已完成**（`compose.build_fargate_engines` + `--backend cloud` 切执行 + IaC，[0033](./0033-iac-aws-backend-and-composition-wiring.md) Accepted、真部署真跑）。产物→S3 是**正交的另一条边**，见 [0029](./0029-engine-artifacts-to-s3.md)。
 
 当前传输是**OS 管道**：core 是 worker 父进程，job 写 worker stdin、事件读 worker 的 `EVENTS_FD` fd、退出码经 `proc.wait()`。搬到 Fargate（[0017](./0017-cloud-execution-fargate-over-runtime.md)），core 不再是 worker 父进程，**管道语义（父子进程 / fd 继承 / EOF / stdin）全无对等物**。核实（AWS 文档 + 本仓 code，2026-07）的结论分两层：
 

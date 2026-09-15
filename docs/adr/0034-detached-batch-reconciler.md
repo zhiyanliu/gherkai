@@ -234,7 +234,7 @@ adapter/组合根（Lambda handler / per-run 进程，注入具体 client）：
 
 存活的是**纯归约器**（`project`），消失的是**同步驱动循环**（ThreadPool/as_completed/abort_flag/fail-fast `_stop_all`/进程内并发闸）——后者在无状态路径重新宿主为 reconciler。同步 `run` 路径仍用现驱动循环（两种驱动模型并存，按命令分流）。
 
-## 地基实测（2026-07-19，真实 AWS 账户/us-east-1；6 个真 Fargate task——其中 4 个构成 H1 退出场景矩阵——+ 真 DDB Streams/条件写；临时 PoC 脚手架验后即清、未入库）
+## 地基实测（2026-07-19，真实 AWS 账户/us-east-1；6 个真 Fargate task——其中 4 个构成 H1 退出场景矩阵——+ 真 DDB Streams/条件写）
 
 moto 立即返回测不到事件投递/并发时序，健康网真跑不触发这些路径——故下列是「绿≠对」边界的唯一有效证据：
 

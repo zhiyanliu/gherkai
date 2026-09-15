@@ -36,7 +36,7 @@
 | agent skill（`cli/gherkai_cli/skills/gherkai/**`：`SKILL.md` + `references/`） | 随 CLI wheel 发行、由 `gherkai skill install` 拷进使用方项目或用户级 agent 目录（[0043](./0043-agent-skill-for-driving-gherkai.md)）——**使用者面**，读者是 agent，安装态没有仓库上下文 | **只用绝对 URL**（相对链接在安装态必死）；跨文件指针写反引号裸路径（如 `references/engines.md`）；零 ADR / 决策号 / 内部机制名 |
 | GitHub Release 正文（`.github/workflows/release.yml` 的 `body:`） | Releases 页面；各包 pyproject `[project.urls] Changelog` 指它（[0037](./0037-distribution-and-packaging.md) 决策 8），即「装了包的人」点 Changelog 直达的页面——**使用者面**，没有仓库上下文 | 只用绝对 URL（同包 README）；升级/用法细节指使用者向 README，不写 ADR/决策号（首发正文曾漏一处「见 ADR 0037 决策 7」，已发 Release 需在 GitHub 上手工改） |
 
-页顶 Summary（pyproject / package.json 的 `description`）同属包页面，同一规则。搬家不是删：从使用者向文件移出的每条事实与踩坑，必须在对应 DEVELOPMENT.md 里找得到（实装时按旧文件逐字对照过）。
+页顶 Summary（pyproject / package.json 的 `description`）同属包页面，同一规则。搬家不是删：从使用者向文件移出的每条事实与踩坑，必须在对应 DEVELOPMENT.md 里找得到。
 
 ### 护栏
 
@@ -72,4 +72,3 @@
 
 - CLAUDE.md：代码纪律「产品面文案不带内部指代」与文档纪律「README / DEVELOPMENT 分层」两条压回规则 + 判据 + 护栏 + 指向本 ADR。
 - [0037](./0037-distribution-and-packaging.md) 被拒方案里「contributor README 当长描述」一条改为指向本 ADR。
-- 三条护栏测试的 docstring 指向本 ADR（`test_user_facing_messages.py` / `test_package_readmes.py` / `test_skill.py`）。

@@ -66,7 +66,7 @@ SDK 调查证实两引擎产物形态/上传能力不对称，"上传那一小�
 - **Nova 写盘时机**：per-act 文件在 `_act()` 的 `finally`→`RunInfoCompiler.compile()` 即写（非批量，非原子——`.html`/`.json` 分多次 `open` 顺序写，故中断可留"孤零 `.html`"）；`session_summary.json` 仅 `_stop()` 写一次。
 - **Midscene 落点写死本地**：`@midscene/core` `report-generator.js` `getMidsceneRunSubDir('report')`=`cwd/MIDSCENE_RUN_DIR/report/`；无 S3/sink；`agent.reportFile` 构造后即有绝对路径（不必等 destroy）。report 边跑边 `appendFile`（每 task flush），中断时盘上已是"含已完成 task 的部分有效 html"。
 
-## 分期：上传第一期（subprocess 预演环境落地，现在做）/ Fargate 增强（未来）
+## 分期：上传第一期（subprocess 预演环境落地，已实现）/ Fargate 增强（未来）
 
 上传能力从执行环境解绑后，实现分两期：
 
@@ -75,7 +75,7 @@ SDK 调查证实两引擎产物形态/上传能力不对称，"上传那一小�
 
 ## 第一期实现定论（subprocess 预演环境敲定，已实现）
 
-第一期真做时把下面几点从"待定"钉死（原"留口子"里对应项标状态）：
+下面几点是第一期敲定的定论（「留口子」里对应项已标状态）：
 
 - **注入机制（组合根，非 env-sniff）**：cloud 时组合根给 worker 多注入一组 S3 落点 env——`ARTIFACT_S3_BUCKET` + `ARTIFACT_S3_PREFIX`（=`<report_dir>/<run_id>/`），对称现有 `NOVA_LOGS_DIR`/`MIDSCENE_RUN_DIR`。**注入点按档分**（[0016](./0016-execution-architecture-core-lib-run-model.md) 决策 A/B）：cloud 档在 `compose.build_fargate_engines`（经 RunTask overrides 注给容器）；内部预演档由 `tools/e2e_harness.py` 自拼 worker env；**local 档的 `compose.build_engines` 恒不注入**（它曾有个 `artifact_s3` 形参，无生产调用点、已删，见 [0016](./0016-execution-architecture-core-lib-run-model.md) 决策 B）。**local 不注入 → worker 走原 `file://` 路径、零行为变化**。worker 只认"有没有这组 env"，对"我在哪跑（subprocess/fargate）"无知（[0016](./0016-execution-architecture-core-lib-run-model.md) 注入红线）。
 - **两个引擎都 worker 手动上传（boto3 / @aws-sdk/client-s3）**：Nova 不用官方 `S3Writer` stop-hook，改 worker 手动 `upload_file`——与 Midscene 手动 `PutObject` 对称、时序完全可控（先确认上传成功再删本地）、上传错误直接可观测（不被 SDK 静默吞）。

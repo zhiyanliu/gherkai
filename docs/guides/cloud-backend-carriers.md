@@ -99,7 +99,7 @@ cloud 提交是**定义期解析、运行期照抄**，这条是「重推 varian
 
 第 3 条的正确性有两道配套护栏，都在回收侧：
 
-- **ECR 仓库不设任何 lifecycle 规则**——重推会把旧 tag 顶成 untagged，而在跑 run 的旧 revision 正按 digest 指着那一层；untagged 过期规则会静默删掉它，让在跑 run 的后续 job 拉不到镜像。于是每次重推会永久留一层 untagged 存储，随重推次数增长。
+- **ECR 仓库不设任何 lifecycle 规则**——在跑 run 的旧 revision 按 digest 指着被重推顶成 untagged 的那一层，所以这两个 repo 上**别加 untagged 过期规则**；随之而来的 untagged 层增长是已知的存储成本（为什么这样定、代价怎么记在案，见本节末权威行 ADR 0038）。
 - **删 revision 要过两道闸**（机会式清理 pass，挂在 `push-worker` 末步与 `deploy` 第 4 步末，**无定时任务**）：退休满 `workers.RETIRE_QUIET_PERIOD`（值见该常量）**且**无未到终态的 run 引用它。引用判定走 runs 表 `status-index` GSI 的 `Query` + `contains(worker_task_def_arns, :arn)`——GSI 必须 `INCLUDE` 这个属性，不投影则恒不匹配、安全阀静默失效。任一闸不满足就留到下次 pass（滞留无害：`ACTIVE` 但无人引用）。**已知盲区**：`run --backend cloud --no-report` 不写 STATE item，其 revision 引用对安全阀不可见。
 
 > 权威：[ADR 0038](../adr/0038-worker-image-delivery.md)「不变量」「运行时与 preflight」（含被拒方案：RunTask 传 family、缺字段回落模板、ECR untagged 过期规则）、[ADR 0034](../adr/0034-detached-batch-reconciler.md)（definition 随 run 走、宿主只读回）；code：`compose.resolve_worker_variant` / `resolve_default_worker_task_defs`、`workers.cleanup_pass`、`core/gherkai_core/adapters/run_store/ddb.py` 的 `create_run`。

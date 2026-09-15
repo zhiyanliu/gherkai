@@ -1,6 +1,6 @@
 # RunReport：跨引擎归集索引（不融合原生产物内容）
 
-> **Status:** Accepted
+> **Status:** Partially-superseded-by 0042 —— 归集索引语义/形态/扩展性契约与不透明搬运铁律不变；「消费端只当 URI 用、不 stat / open」一条由 [0042](./0042-step-evidence-and-explain.md) **按层收窄**（`model / wire / schedule / ReportStore` 永不解引用不变，皮层 `explain` / `read_resource` 只对 `kind == "evidence"` 的自有 schema 解引用），留口子「trajectory 内部结构化提取」亦由其落地（位置在 worker）。（正文两处已就地改写并反向链。）
 
 兑现 [0016](./0016-execution-architecture-core-lib-run-model.md) 一直 deferred 的「报告统一」（原里程碑 M5）。本 ADR 定 **RunReport 的语义、形态与扩展性契约**，并落地 `ReportStore` 的 local adapter。
 
@@ -62,7 +62,7 @@ class ReportStore(Protocol):
 
 （无 `materialize` 参数——产物拷贝式的 materialize 已否决，见下「被拒方案」。）
 
-- **返回 `ResourceUri` 而非 `Path`**（封版前收口）：`LocalReportStore` 回 `file://…/index.html`，`S3ReportStore` 回 `s3://…/index.html`（v1.1 已建，ADR 0030 决定六）——**同一签名容两种落点**，否则 S3 adapter 被迫返回 `Path` 包 `s3://`（`Path` 会把 `s3://b/x` 折成 `s3:/b/x`，错）。`ResourceUri = NewType("ResourceUri", str)`（定义在 `core/gherkai_core/model.py`）：把这个**本就存在于 `ReportRef.ref` 注释里**的约定提升成命名类型，统一「`ReportRef.ref` 与 `write` 返回值都是带 scheme 的资源指针」。比裸 `str` 多一层意图、又零运行时成本/零依赖（运行时即 `str`）。消费端（cli/WebUI）只当 URI 用、不 stat/open。
+- **返回 `ResourceUri` 而非 `Path`**：`LocalReportStore` 回 `file://…/index.html`，`S3ReportStore` 回 `s3://…/index.html`（v1.1 已建，ADR 0030 决定六）——**同一签名容两种落点**，否则 S3 adapter 被迫返回 `Path` 包 `s3://`（`Path` 会把 `s3://b/x` 折成 `s3:/b/x`，错）。`ResourceUri = NewType("ResourceUri", str)`（定义在 `core/gherkai_core/model.py`）：把这个**本就存在于 `ReportRef.ref` 注释里**的约定提升成命名类型，统一「`ReportRef.ref` 与 `write` 返回值都是带 scheme 的资源指针」。比裸 `str` 多一层意图、又零运行时成本/零依赖（运行时即 `str`）。消费端（cli/WebUI）只当 URI 用、不 stat/open。
   - 实现注意：`LocalReportStore` 内 `index_path.resolve().as_uri()`——`as_uri()` 要求绝对路径，而 cli 默认 `--report-dir` 是相对的（`reports`），不 `resolve()` 会抛 `ValueError`。
 - **`index.html` 链接（`href`）指向产物原位**：不拷贝、不搬运产物。`href` 是 core 自己生成的**导航链接**（`index.html` 的 `<a href>`），local 相对化、cloud 恒等于 `ref`（见下「href 相对化」）。
 
@@ -93,7 +93,7 @@ class ReportStore(Protocol):
 - **cloud（S3）**：`href` 恒 = `ref`（`s3://` 全局可寻址、无相对必要）。
 - **只按 scheme 分支（`file://` 相对、其余 identity），绝不按 `kind` 分支**——后者才是铁律点名禁止的。为算相对 href 而 `urlparse` 解析 `ref` 字符串**不越铁律**：铁律「禁止解析」的宾语是产物**内容**（HTML/trajectory 字节），非 `ref` 指针串；「算一个链接」本就要读 `ref`。
 
-**职责边界（三 port 正交，[0016](./0016-execution-architecture-core-lib-run-model.md)）**：`RunStore`=控制面（definition `RunMeta` + 运行态 `RunState`：status/血缘）、`ResultStore`=数据面（判定真值唯一权威）、`ReportStore`=**纯派生只读导航视图**（可从 `RunResult` 完全重建、永不作 CI 判定源）。`ResultStore` 旧 docstring「RunReport 归集靠它」一句删除——归集职责移交 `ReportStore`。
+**职责边界（三 port 正交，[0016](./0016-execution-architecture-core-lib-run-model.md)）**：`RunStore`=控制面（definition `RunMeta` + 运行态 `RunState`：status/血缘）、`ResultStore`=数据面（判定真值唯一权威）、`ReportStore`=**纯派生只读导航视图**（可从 `RunResult` 完全重建、永不作 CI 判定源）。
 
 ## manifest.json 形态
 
@@ -167,7 +167,6 @@ URL、断言了什么」都不落痕（只有 pass/fail 进 result 树）。大�
 - **留口子不实现**：
   - **确定性 step 产物可观测性**：让 `@deterministic` handler 可选地产一个轻量产物（当时 URL / 截图 / 检查描述），使纯确定性用例的 RunReport 也有内容可看。判定真值在 result 树已够；产物可观测另开一轮（与 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md) 确定性 step 设计一并演进）。**与 [0036](./0036-deterministic-capability-discovery.md) 的划界**：0036 解决的是「**跑前**知道有哪些确定性锚点」（注册表自述 → `list-deterministic` / `plan` 派发标注），本口子要的是「**跑后**看见那一步实际做了什么」（运行期产物）——同源于确定性 step 的不可观测，但非同一件事，0036 落地后本口子照旧敞着。
   - 按 `kind` 的富渲染（`<video>`/`<iframe>`，皮层将来做）。trajectory 内部结构化提取已由 [0042](./0042-step-evidence-and-explain.md) 落地——位置在 **worker**（引擎知识的唯一住处）、产物是 gherkai 自有 schema 的 `kind=evidence`，core 仍不解析任何产物。
-  （注：store 读回面**已落地**——`RunStore.load_run_meta`/`load_run_state` + `ResultStore.load_job_result`/`load_all`，靠 `serialize` 完整重建，[0016](./0016-execution-architecture-core-lib-run-model.md)。）
 
 ## 重议
 

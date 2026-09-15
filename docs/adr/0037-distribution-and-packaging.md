@@ -21,7 +21,7 @@
 | 版本 | **五份** pyproject（`cli`/`core`/`gherkai` 三个发行包 + `engines/novaact`、`iac_aws_backend` 两个非包工程）全 `0.1.0`，`engines/midscene/package.json` 另写 `1.0.0`——六处手写版本、零真源；而 [0016](./0016-execution-architecture-core-lib-run-model.md) 版本切分已按 SemVer 宣布 v1.0–v1.3 完成，叙事完全脱钩 |
 | 依赖共解 | `nova-act>=3.4.187.0` + `boto3>=1.34` + `gherkin-official>=31` + `aws-cdk-lib>=2.150` 一个 venv 内 `uv lock`：107 包**零冲突**——「worker 必须独立 venv」不是依赖冲突所迫 |
 
-### 业界现状（2026，为选型提供的外部事实；一手来源登记在 [docs/REFERENCES.md](../REFERENCES.md)「分发与打包」节）
+### 业界现状（2026，为选型提供的外部事实；一手来源登记在 [docs/REFERENCES.md](../REFERENCES.md)「发行与打包」节）
 
 - **PyPI + uv 是事实默认**：uv 月下载量约为 pipx 的 28 倍（pypistats，2026-08 采样）；pipx 自己加了 uv backend；抽样的同类 Python CLI（harlequin / posting / llm 三个 README）均以 `uv tool install` 领头、pipx 作回落。PyPA 官方指南仍只写 pipx——官方与生态已分叉，本项目跟生态。
 - **`uvx <name>` 把 `<name>` 同时当发行名与命令名解析**（实测：发行名 `gherkai-cli` + 命令 `gherkai` 时 `uvx gherkai` 直接失败）→ 用户敲的那个发行包必须叫 `gherkai`。
@@ -60,7 +60,7 @@
 | `gherkai-worker-novaact` | `gherkai_worker_novaact` | Nova Act worker 运行时，console script `gherkai-worker-novaact` | `engines/novaact`（venv 规格，无 build-system） |
 | `gherkai-deploy-aws` | `gherkai_deploy_aws` | AWS 后端供给（CDK + Lambda handler 源）+ worker 镜像推送注册（0038） | `iac_aws_backend/` + `lambdas/`（非包工程） |
 
-- **唯一硬约束：用户敲的发行名 = 命令名**（`uvx` 解析规则）→ CLI 发行包叫 `gherkai`，当前的中间层 `gherkai` 让位改 `gherkai-runtime`。目标态文档里凡指命名真源模块一律写 `gherkai_runtime.names`（当前 `gherkai/gherkai/names.py`）。
+- **唯一硬约束：用户敲的发行名 = 命令名**（`uvx` 解析规则）→ CLI 发行包叫 `gherkai`，当前的中间层 `gherkai` 让位改 `gherkai-runtime`。
 - **import 包全部带 `gherkai_` 前缀**：`core`/`cli` 作顶层 import 名是静默合并/互删的碰撞源（见实测）；改名是机械 sweep（`from core.` → `from gherkai_core.`），随发行重组一次做完。
 - **发行名带 `gherkai-` 前缀**：PyPI 无 scope，前缀是唯一命名空间手段；`gherkai-cli`、`gherkai-worker-midscene` 两个名字作**防混淆占位**（前者是用户最自然的误猜，后者防人以为 midscene worker 是 pip 包），永不发真内容。
 - **多包而非单包**：集成方按层引用——未来 WebUI 只依赖 `gherkai-runtime`、第三方只解析 feature 就依赖 `gherkai-core`（零 boto3）、Lambda asset 只装 runtime。单发行包（三 import 包一 wheel）曾是备选（省掉 pin 机制），因「按层引用」这个真实需求被拒；pin 机制由 2b 解决后单包的唯一优势消失。
@@ -72,7 +72,7 @@
 - **`[tool.uv-dynamic-versioning]` 三项显式钉死（style / strict / dirty），`metadata` 有意留默认**：`style = "pep440"`（上游文档对默认 style 自相矛盾，而镜像 tag 归一化与 skew 比较都建立在 PEP 440 形态上）；`strict = true`（无 tag 时 build 失败，而非静默回落 `0.0.0`）；`dirty = true`（默认关；关着则 tag commit 上带未提交改动构建出的版本与正式发行版逐字节相同，决策 7 的「非纯净版本跳过 skew 比较」不会触发）。**`metadata` 不显式开**：dunamai 默认 = 非 tag commit 或脏树才带 `+<sha>`/`+dirty`；显式 `metadata = true` 会让**干净 tag commit** 也算出 `1.4.0+<sha>`——发布 gate「版本==tag」必败、PyPI 拒收本地段版本，链路按那配置永远发不出去（真跑证实：五个 pyproject 曾这样配，对抗核验在真 clone + 真 tag 上抓出）。三种 git 状态实测：干净 tag → `1.4.0`；脏树 → `1.4.0+dirty`；离 tag N 提交 → `1.4.0.postN.dev0+<sha>`（默认 `bump=false`、commit 无前缀）——非纯净构建必带 `+`，决策 7 的判据成立。
 - **hook 的硬约束（实现者必读）**：启用该 metadata hook 的包，`dependencies` 与 `optional-dependencies` 必须**整体**搬进 hook 表、`[project]` 侧删除并声明 `dynamic = ["version", "dependencies", "optional-dependencies"]`——静态与动态不能共存，不含模板的条目也一起搬。只有 `gherkai-core`（无兄弟 pin）不需要依赖 hook、只 `dynamic = ["version"]`。2c 的依赖表因此是**渲染后的等效依赖**，不是 pyproject 字面内容。
 - **为何 `==` 不是 `>=`**：三个包是同一 repo 切出的切片，内部契约随时一起动；`>=` 会让 resolver 装出从未测过的混搭（`gherkai 1.5 + gherkai-core 1.4`）。`==` 让这种组合**在安装层就不存在**，兼容性问题被分发机制消灭而非靠文档管理。代价「每次全家一起发」在 monorepo 单 release train 下为零。
-- **同 repo 所有 workspace 成员的版本从同一 git 状态派生**，天然同号：本地 dev 版本两侧一致、pin 自满足。dirty 状态下 `uv sync` 的解析行为列入实测项。**editable 安装的元数据版本是 `uv sync` 时算出的快照**，工作树之后再改、版本串不会自动变——凡从 `importlib.metadata` 读版本的地方（`--version`、镜像 tag 前缀、skew 比较）都以此为限，contributor 在 dev 树上操作前先 `uv sync`。
+- **同 repo 所有 workspace 成员的版本从同一 git 状态派生**，天然同号：本地 dev 版本两侧一致、pin 自满足。**editable 安装的元数据版本是 `uv sync` 时算出的快照**，工作树之后再改、版本串不会自动变——凡从 `importlib.metadata` 读版本的地方（`--version`、镜像 tag 前缀、skew 比较）都以此为限，contributor 在 dev 树上操作前先 `uv sync`。
 - **npm 侧的版本真源同样是 git tag、但机制不同**：`package.json` 常驻占位 `"version": "0.0.0-dev"`，CI 发布时 `npm version X.Y.Z --no-git-tag-version` 写入 tag 版本再 publish；**非纯净版本永不发 npm**（只有 CI 从 tag 发），故不需要 PEP 440→semver 的转换件（release 形态 `X.Y.Z` 两边同形，`.dev`/`.post`/`+` 形态不是合法 semver、也不会到 npm）。contributor 本地态基底 build 用 dev 树 `npm pack` 出的 `0.0.0-dev` tarball 即可——基底内容由 tarball 决定、不由版本串决定。
 - **代码内版本**经 `importlib.metadata.version("gherkai")` 读取，不复制；CLI 加 `--version`（当前没有）。
 - **首发版本号接续 [0016](./0016-execution-architecture-core-lib-run-model.md) 的版本叙事、不倒回 0.x**：1.0 的稳定承诺是已做过的决策，公开发行从头计数是对叙事说谎。本 ADR 的完成线并入 0016 版本切分的 v1.4.0（与阅读理解层、AI skills 暴露同一完成线），PyPI 首发即 1.4.0。
@@ -93,7 +93,7 @@ gherkai ──hard──▶ gherkai-runtime[aws]=={{v}} ──▶ gherkai-core[a
 | `gherkai-runtime` | `gherkai-core=={{ version }}`、**`packaging>=24`**（preflight 的版本比较；当前 venv 里能 import 到纯属 pytest 的传递依赖，生产路径必须自己声明） | `[aws]` = `gherkai-core[aws]=={{ version }}` |
 | `gherkai`（CLI） | **`gherkai-runtime[aws]=={{ version }}`** | `[local]` = `gherkai-worker-novaact=={{ version }}`；`[deploy-aws]` = `gherkai-deploy-aws=={{ version }}` |
 | `gherkai-deploy-aws` | `gherkai-runtime[aws]=={{ version }}`、`aws-cdk-lib>=2.150.0`、`constructs>=10` | 无 |
-| `gherkai-worker-novaact` | `nova-act>=3.4.187.0`、**`boto3>=1.34`**（worker 自己直接 import boto3，直接 import 就直接声明、不靠 nova-act 传递） | 无（**不依赖 gherkai-core**：worker 讲协议、零 core 依赖，[0024](./0024-worker-core-protocol.md)）；当前混在主依赖里的 pytest 挪去 dev group |
+| `gherkai-worker-novaact` | `nova-act>=3.4.187.0`、**`boto3>=1.34`**（worker 自己直接 import boto3，直接 import 就直接声明、不靠 nova-act 传递） | 无（**不依赖 gherkai-core**：worker 讲协议、零 core 依赖，[0024](./0024-worker-core-protocol.md)） |
 
 - **CLI 硬依赖 boto3（反转 [0016](./0016-execution-architecture-core-lib-run-model.md)「cli backend 选择」节 `build_cloud_stores` 条的「cli 主依赖不含 boto3，走 `cli[aws]→core[aws]` extra」）**：按用户画像过一遍，裸装 `gherkai` 时没有任何画像能跑起完整用法——提交 cloud run 要 boto3；local 跑 novaact 装 `[local]` 而 nova-act 自带 boto3；只剩「仅跑 midscene 的 local 用户」与「只 `plan`」两种边缘画像省下一次安装体积。而 `[aws]` 留在 CLI 上的摩擦落在头条用法：`uvx gherkai submit --backend cloud` 会因缺 boto3 失败、要改写成 `uvx --from 'gherkai[aws]' gherkai …`。**code 层不变量不动**：local 路径**绝不 import boto3**靠懒加载保证（`compose` 的 `_make_*` 钩子），与安装期是否装了 boto3 无关。
 - **`[aws]` 保留在 core 与 runtime 层**：[0030](./0030-realtime-persistence-seam.md) 决定六守的本来就是「core 作为库可轻量 import、不被 boto3 绑死」，针对的是库消费者；库层保留 extra 完整兑现它。
@@ -138,7 +138,7 @@ uv 缺 Python 时自动下载托管 CPython，对 uv-first 受众近乎免费；
 worker 内容 = 框架脚手架 + 使用方确定性 step，属业界分类里的 **user-code image**，最后一层由使用方构建（Dagster user-code deployment / Prefect flow image 同理）；「维护者独占发布完整镜像、用户绝不自建」曾是备选，因抹掉定制面被拒。本 ADR 只定分工与基底通道：
 
 - **基底镜像**（维护者 CI 发布）：`ghcr.io/zhiyanliu/gherkai-worker-novaact:X.Y.Z` / `…-midscene:X.Y.Z`，内容 = 同版本 worker 包 + SDK 运行时 + 协议层，**零使用方内容**；**linux/amd64 单架构**（ARM64 被拒，理由与将来的路在 [0038](./0038-worker-image-delivery.md)）；tag = immutable `X.Y.Z` + 移动 `latest`（只跟随最新 tag；文档一律 `FROM …:X.Y.Z`）。Dockerfile 两态（与 Lambda asset 同源）：CI 态按版本从 PyPI / npm 装已发行包；本地态经 `--build-arg` 指向本地 `uv build` wheel / `npm pack` tarball（dev 版不在 PyPI，contributor 才造得出基底）。 **基底镜像的 CI 必须排在 worker 包发行之后**（基底装的是已发行的 worker 包）。
-- **为什么 GHCR 而非 ECR Public / Docker Hub**：运行时拉的是使用方私有 ECR 里的镜像，GHCR 只在使用方 `docker build` 与 deploy 同步基底时各被拉一次，ECR Public 的免流量/免认证优势碰不到；Docker Hub 匿名限额是负项；GHCR 与 repo 同屋檐、`GITHUB_TOKEN` 推送零配置。
+- **为什么 GHCR 而非 ECR Public / Docker Hub**：运行时拉的是使用方私有 ECR 里的镜像，GHCR 只在使用方 `docker build` 与 deploy 同步基底时各被拉一次，ECR Public 的免流量/免认证优势碰不到；Docker Hub 匿名限额是负项；GHCR 与 repo 同屋檐、`GITHUB_TOKEN` 推送零配置。（与 [0009](./0009-maximize-aws-hard-constraint.md)「最大化 AWS」的关系：GHCR 是发布通道、属其适用面之外，见 0009「适用面」句；不是例外。）
 - **定制镜像由使用方在本地 build，gherkai 不拥有构建**：Dockerfile 模板（唯一真源）见 [0038](./0038-worker-image-delivery.md)「概念模型」节；必须 `--platform linux/amd64`，push-worker 推送前校验。**推送、注册、选择、清理、权限**全部在 [0038](./0038-worker-image-delivery.md)：variant 命名、默认指针、按（引擎，variant）注册 digest 引用的 task-def revision、`gherkai deploy push-worker` / `list-workers` / `delete-worker`、容器引擎口子、preflight 的 variant 解析。
 - `tools/build_push_workers.py` 已随 0038 落地退役（`gherkai deploy push-worker` 取代）。
 

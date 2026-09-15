@@ -12,13 +12,14 @@
 - https://midscenejs.com/bridge-mode.md — 连桌面 Chrome（CDP 接法参考）
 - 安装的源码（本机 ground truth）：`engines/midscene/node_modules/@midscene/core/dist/`、`.../shared/dist/`
   - `createOpenAIClient` 注入点：`@midscene/core .../service-caller/index`（见 ADR 0008）
-  - 隔离 ModelConfigManager：`@midscene/core .../agent/agent.js`（传 createOpenAIClient/modelConfig 即切隔离，见 spike 配方 §7）
+  - 隔离 ModelConfigManager：`@midscene/core .../agent/agent.js`（传 createOpenAIClient/modelConfig 即切隔离，见 `engines/midscene/spikes/SIGV4-FETCH-RECIPE.md` §7）
   - planning 无条件附图：`@midscene/core .../ai-model/llm-planning.js`（见 ADR 0012）
   - 取结构化 API：`aiBoolean/aiNumber/aiString/aiQuery/aiAsk`（`.../agent/agent.d.ts`，见 ADR 0010/0014）
 
 ## Nova Act
 
 - https://github.com/aws/nova-act — README（AgentCore 接法、`nova.page`、HITL）
+- https://docs.aws.amazon.com/nova-act/latest/userguide/ — 官方用户指南（HITL 实现、workflow definition 与 IAM 路径、SDK 行为的一手权威；README 只给上手面）
 - https://nova.amazon.com/act — API key 生成、Playground
 - 安装的源码：`.venv/lib/python3.13/site-packages/nova_act/`（仓库根 workspace venv）
   - AgentCore provider：`browser_auth/agentcore_session_provider.py`（`cdp_session()` yield `(ws_url, headers)`）
@@ -46,7 +47,7 @@ aws bedrock-agentcore start-browser-session --region us-east-1 --browser-identif
 aws bedrock-agentcore stop-browser-session  --region us-east-1 --browser-identifier aws.browser.v1 --session-id <id>
 ```
 
-## 分发与打包（见 ADR 0037 / 0038）
+## 发行与打包（见 ADR 0037）
 
 - https://docs.astral.sh/uv/guides/tools/ — `uvx` / `uv tool install`：`<name>` 同时作发行名与命令名解析；extras 用 `--from 'pkg[extra]'`
 - https://docs.astral.sh/uv/concepts/projects/dependencies/ — `tool.uv.sources` 只被 uv 认、不进标准元数据（发布 wheel 的 `Requires-Dist` 为裸名）
@@ -65,14 +66,17 @@ aws bedrock-agentcore stop-browser-session  --region us-east-1 --browser-identif
 - https://docs.npmjs.com/about-scopes — npm scope 即命名空间（`@gherkai/*`）；https://docs.npmjs.com/policies/disputes — npm 名字争议政策（占位包须带真实项目指向）
 - https://github.com/tconbeer/harlequin · https://github.com/darrenburns/posting · https://github.com/simonw/llm — 同类 Python CLI 的 README 安装块抽样（`uv tool install` 领头、pipx 回落）
 - https://nodejs.org/api/module.html — `module.register()` 异步 customization hooks（独立 loader 线程、`data` 传参）与 `module.registerHooks()`（同步，≥22.15）；https://github.com/privatenumber/tsx — `tsx/esm/api` register 只对 ESM（`.mts`/`.mjs`，或 `package.json#type=module` 下的 `.ts`/`.js`）生效
-- https://github.com/distribution/reference — 镜像引用语法（tag = `[\w][\w.-]{0,127}`，`+`/`!` 非法）
-- https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry — GHCR：公共镜像匿名拉取、`GITHUB_TOKEN` 推送
-- https://aws.amazon.com/ecr/pricing/ · https://docs.aws.amazon.com/AmazonECR/latest/userguide/pull-through-cache.html — ECR Public 免流量费与 pull-through cache 免认证（本项目运行时不拉公共镜像，故不构成选型依据）；https://docs.docker.com/docker-hub/usage/pulls/ — Docker Hub 匿名拉取限额
 - https://docs.brew.sh/Package-Acceptance-Policy — homebrew-core 收录门槛（star/fork/仓库年龄）
 - https://docs.aws.amazon.com/cdk/v2/guide/getting-started.html — CDK 前置：Python CDK 亦需 Node.js（jsii）
 - https://github.com/dagster-io/dagster/blob/master/helm/dagster/README.md — 「chart 版本 = 包版本，镜像 tag 缺省跟 chart」；https://github.com/dagster-io/dagster-cloud/issues/38 — 无版本模板硬编码 URL 致 EU 部署断的事故
 - https://docs.prefect.io/v3/concepts/server — client/server 版本兼容的一句规则（本项目改写为「升级即三步」，见 ADR 0037 决策 7）
 - https://aws.github.io/chalice/topics/cfn.html · https://aws.github.io/chalice/topics/tf.html — Chalice「IaC 进 wheel + `package --pkg-format cloudformation|terraform` 导出阀」模式；https://github.com/outerbounds/metaflow-tools — Metaflow 的 IaC 单独 repo 模式（被拒方案对照）
+
+## 镜像与 ECS 交付（见 ADR 0038）
+
+- https://github.com/distribution/reference — 镜像引用语法（tag = `[\w][\w.-]{0,127}`，`+`/`!` 非法）
+- https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry — GHCR：公共镜像匿名拉取、`GITHUB_TOKEN` 推送
+- https://aws.amazon.com/ecr/pricing/ · https://docs.aws.amazon.com/AmazonECR/latest/userguide/pull-through-cache.html — ECR Public 免流量费与 pull-through cache 免认证（本项目运行时不拉公共镜像，故不构成选型依据）；https://docs.docker.com/docker-hub/usage/pulls/ — Docker Hub 匿名拉取限额
 - https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_RunTask.html · https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_ContainerOverride.html — RunTask 的容器 override 字段（无 image，故选镜像 = 选 task-def revision，见 ADR 0038）
 - https://docs.aws.amazon.com/AmazonECS/latest/developerguide/deregister-task-definition-v2.html · https://docs.aws.amazon.com/AmazonECS/latest/developerguide/delete-task-definition-v2.html — Deregister（INACTIVE：在跑 task 不受影响、不能再起新 task）与 Delete（永久删 INACTIVE）语义
 - https://docs.aws.amazon.com/AmazonECS/latest/developerguide/fargate-tasks-services.html#fargate-task-definitions — Fargate `runtimePlatform.cpuArchitecture`（ARM64 / X86_64）按 task-def 设定；https://aws.amazon.com/fargate/pricing/ — x86 与 ARM 单价对照
