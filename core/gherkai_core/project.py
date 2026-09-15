@@ -93,7 +93,7 @@ def reduce_event(
             StepResult(index=event.step_index, status=event.status,
                        duration_ms=dur_ms, votes=event.votes, error_type=event.error_type,
                        message=event.message,  # step 级失败原因原文（ADR 0042 决策三）
-                       report_refs=event.report_refs)  # step 级 trajectory 原样搬入（ADR 0027 下沉）
+                       report_refs=event.report_refs)  # step 级产物指针原样搬入（内容见 model.StepDone.report_refs 注释）
         )
     elif isinstance(event, StepSkipped):
         # scope 内短路（ADR 0031 决定六）：上游 error 后 worker 跳过本 step、没调 AI。
@@ -272,15 +272,18 @@ def _reduce_scope(job: Job, recs: list[EventRecord]) -> tuple[JobResult, Status,
     status = _job_status(saw_scope_started, saw_scope_done, exited, scenario_status)
     result.status = status
     if exited is not None and exited.timed_out:
-        # 归因对齐同步路径（[0031] 决定一：超时是主动中止、记 error+timeout）；覆盖 reduce 期可能累积的
-        # 其他归因——stop 是超时处置发起的，超时是根因。
+        # 归因对齐同步路径（[0031] 决定一：超时是主动中止、记 error+timeout）。投影路径的 job 级归因只由本函数写
+        # （reduce_event 只累积 scenario/step 明细与成本，不写 JobResult 的 error_type/message），故超时分支
+        # 先判即定——stop 是超时处置发起的，超时是根因。
         result.error_type = "timeout"
         result.message = (f"job 超时（预算 {job.timeout_s}s，已中止）"
                           if job.timeout_s else "job 超时（已中止）")
     elif status == Status.ERROR and result.message is None and exited is not None:
         # 兜底归因（detached 真跑教训：worker 起来即崩 → 零事件、判 error、message 全空——用户无从排障）。
-        # 只补空 message、不覆盖 reduce 期已有归因；诊断细节在 worker stderr（local 落 reconcile.log /
-        # cloud 落 CloudWatch task 日志），这里给指向。
+        # `result.message is None` 是防御性守卫（当前恒真：job 级归因只在本函数写）——若将来 reduce 期开始写
+        # job 级归因，它保证那份归因不被这里的兜底文案盖掉；`exited is not None` 供下面 `exited.exit_code`
+        # 类型收窄（status==ERROR 已蕴含它非 None，见 `_job_status`）。诊断细节在 worker stderr（local 落
+        # reconcile.log / cloud 落 CloudWatch task 日志），这里给指向。
         if exited.exit_code == PLATFORM_FAILED_EXIT:
             # 平台侧哨兵：起 task 失败（tick 补偿）或容器没跑起来（观察者，带 reason）——不是 worker 自己的码
             why = f"：{exited.reason}" if exited.reason else "——详见部署侧日志"

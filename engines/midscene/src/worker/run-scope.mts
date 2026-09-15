@@ -40,8 +40,6 @@ import "./deterministic.steps.mjs";  // 内建脚手架（ADR 0022 退役 bdd �
 import { loadUserSteps } from "./user-steps.mjs";  // 使用方 steps/ 目录的加载（ADR 0037 决策 4）
 
 const BROWSER_ID = "aws.browser.v1";
-// AI 断言投票次数由 job.assertionVotes 决定（ADR 0014/0024，组合根经 --assertion-votes 设）。
-// 默认 1（不抖动检测，结果直观）；调高才跑 N 次取多数票。
 // 网络专用退出码（ADR 0028）：与 core/gherkai_core/wire.py 的 EX_WORKER_NETWORK 同值（协议层单一事实源，两 Engine adapter 共用翻译）。
 // worker 建连失败、重试耗尽时以此码退出，作 out-of-band 信号（建连失败先于任何事件 emit）。
 const EX_WORKER_NETWORK = 80;
@@ -152,7 +150,8 @@ async function interruptSnapshot(
   try {
     await uploader.snapshotReport(reportFile);
   } catch (e) {
-    logFn(`worker: 中断兜底抢传 report 失败（best-effort、忽略）：${(e as Error).message}`);
+    // 产品面一行：发生了什么 + 不影响什么（best-effort、失败吞不抛的判据见上函数头）。
+    logFn(`worker: 引擎原生报告未能在中断退出前上传（不影响判定与退出；这次中断的引擎报告可能看不到）：${(e as Error).message}`);
   }
 }
 
@@ -170,7 +169,8 @@ async function drainArtifactQueue(
       logFn("worker: 部分排障截图未能在收尾预算内传完（已放弃，不影响判定结果；仍可看引擎原生报告）");
     }
   } catch (e) {
-    logFn(`worker: 排障截图收尾上传失败（best-effort、忽略）：${(e as Error).message}`);
+    // 产品面一行，与上面「排不完」那行同形（best-effort、绝不抛的判据见上函数头）。
+    logFn(`worker: 排障截图收尾上传失败（不影响判定结果；仍可看引擎原生报告）：${(e as Error).message}`);
   }
 }
 
@@ -269,7 +269,7 @@ export async function main(): Promise<number> {
     process.env.MIDSCENE_RUN_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "gherkai-midscene-"));
   }
   // 使用方 steps/ 目录的注册（ADR 0037 决策 4）：**内建脚手架之后**（模块顶 import 已注册完）、
-  // **三个自述入口与 job 循环之前**——故 --list-deterministic / --match-steps / plan 标注都反映使用方定制
+  // **自述入口与 job 循环之前**——故 --list-deterministic / --match-steps / plan 标注都反映使用方定制
   // （ADR 0036「真值单一」不变：注册表 = 内建 + 使用方）。加载失败 fail-loud（抛 → bin 一行 stderr + 非零退出）。
   await loadUserSteps();
 
@@ -470,7 +470,7 @@ export async function main(): Promise<number> {
     // 但血缘已先随首事件落到 core（ADR 0028 观测缺口修复，对称 Nova）。
     await eventSink.emit({ type: "scope_started", scopeId: scope.id, sessionId });  // 三级时长起点（越过此点不再重试建连）
     // scope 内串行跑 scenarios，共享同一会话（ADR 0019/0024）
-    const votesN = job.assertionVotes ?? 1;  // AI 断言投票次数（ADR 0014/0024）；缺省 1
+    const votesN = job.assertionVotes ?? 1;  // AI 断言投票次数（ADR 0014/0024，组合根经 --assertion-votes 设）；缺省 1 = 单次判定、不做抖动检测
     // report 抢传的 mtime 去重状态：**scope 级共享**（单份 report.html 跨 scenario 累积增长，共享才准）。
     const snapState = { mtime: -1 };
     // scenario 边界 log 抢传的 per-file mtime 去重表（ADR 0029「第四级」）：**scope 级共享**（log append-only
@@ -497,7 +497,9 @@ export async function main(): Promise<number> {
         try {
           await uploader.snapshotLogs(logDir, logSeen, SCENARIO_LOG_SNAPSHOT_BUDGET_MS);
         } catch (e) {
-          log(`worker: scenario 边界 log 抢传失败（best-effort、忽略、scope 末 flush 兜底）：${(e as Error).message}`);
+          // 产品面一行：**不承诺「收尾再试」**——正常完成路径的 scope 末整目录 flush 会兜一次，但停止信号 /
+          // 网络耗尽 / 异常三条提前退出路径只排空队列、不 flush，那句在这些档上是假的（与 Nova 上传器同一判据）。
+          log(`worker: 引擎诊断日志未能即时上传（不影响判定与报告；这些日志可能最终没能上传）：${(e as Error).message}`);
         }
       }
     }
@@ -514,7 +516,8 @@ export async function main(): Promise<number> {
         const ref = await uploader.toReportRef(agent.reportFile);  // 实时上传（不删，留到 flush 整目录删）
         reportRefs.push({ kind: "report", ref, label: "Midscene report" });
       } catch (e) {
-        log(`worker: scope 级 report 上传失败（best-effort、忽略、不带 report ref）：${(e as Error).message}`);
+        // 产品面一行：判定已 emit 完，这里只丢一个报告链接（不带 report ref、失败吞不抛的判据见上）。
+        log(`worker: 引擎原生报告未能上传（不影响判定与报告，报告里少一个引擎报告链接）：${(e as Error).message}`);
       }
     }
   } catch (e) {
@@ -579,7 +582,9 @@ async function runScenario(
           snapState.mtime = mt;
         }
       } catch (e) {
-        log(`worker: report 抢传失败（best-effort、忽略、下步重试）：${(e as Error).message}`);
+        // 产品面一行：不承诺「一定会再传」——snapState.mtime 未更新，后续 step_done 安全点与 scope 末的
+        // 报告上传都会再试；但异常提前退出那条路径两者都不跑（与 Nova 上传器同一判据）。
+        log(`worker: 引擎原生报告未能即时上传（不影响判定；后面还会再试）：${(e as Error).message}`);
       }
     }
     if (status === "error") shortcircuit = true;  // 本 scenario 后续 step 短路

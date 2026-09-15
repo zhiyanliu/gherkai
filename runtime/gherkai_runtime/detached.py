@@ -25,8 +25,13 @@ from gherkai_core.reconcile import finalize_report, tick
 from gherkai_runtime import names  # 叶子模块（compose 要惰性 import 防环，names 不用）
 
 # 接力恢复的判定余量秒（ADR 0034「job timeout」节 claimed_at ①）：超预算这么久才认定 owner 已死。
-# 非正确性参数（误判也收敛正确——owner 尚活时其 timer 同 deadline 早已触发、真退出记录同带 timed_out，
-# 覆盖无害），只为让活 owner 的 stop→grace→真退出路径通常先落、少churn。
+# 口径 = **只挡时钟抖动与轮询粒度**：起算点 claimed_at 是 claim 时的墙钟、owner 的 deadline timer 起于其后的
+# launch，且本判据每 poll_interval 才查一次。**不覆盖**活 owner 的 stop→协作退收尾——SIGTERM 是 flag-only、
+# 只在 act 边界被检测（in-flight act 要有界返回才退），之后还有会话释放与证据有界排空，故引擎 grace 下限本身
+# 就取到数十秒级（compose.engine_min_grace：midscene 31s / Nova = NOVA_ACT_TIMEOUT_S+NOVA_GRACE_MARGIN_S=150s），
+# 远大于本余量。所以活 owner 场景多半是本记录先落、随后被真退出记录覆盖：靠「后到覆盖、归因不变」收敛
+# （同带 timed_out=True、record_exit 是 INSERT OR REPLACE 同 key），**不靠本余量抢先**。故本值是非正确性参数，
+# 调大调小只影响 owner 真死时的恢复延迟。
 _RECOVERY_MARGIN_S = 10.0
 
 
@@ -94,7 +99,8 @@ class SubprocessLauncher:
             name=f"launcher-{scope_id}",
         ).start()
 
-    def _pump(self, scope_id: str, handle, events, timer=None, timed_out=None) -> None:
+    def _pump(self, scope_id: str, handle, events, timer: threading.Timer | None,
+              timed_out: threading.Event) -> None:
         """驱动一个 worker 的 fd3 事件流跑完（落库在 raw_sink 里做）；结束后 handle.wait() 拿 exitcode 写 task_exited。
 
         迭代 events 只为驱动 fd3 读（每行触发 raw_sink 落库）——迭代产出的 Event 本身丢弃（我们要的是原始行、
@@ -113,9 +119,9 @@ class SubprocessLauncher:
             try:
                 exit_code = handle.wait()
             except Exception:
-                exit_code = None  # 拿不到退出码 → None（宽限态，机制二保守判 running，人可 status 查）
-            self._event_log.record_exit(scope_id, exit_code,
-                                        timed_out=bool(timed_out is not None and timed_out.is_set()))
+                # 拿不到退出码 → None（有退出记录却无码 → 投影判 ERROR，**不是**宽限态；ADR 0034 机制二「退出码缺失」条）
+                exit_code = None
+            self._event_log.record_exit(scope_id, exit_code, timed_out=timed_out.is_set())
 
 
 def run_reconcile_loop(
@@ -149,8 +155,17 @@ def run_reconcile_loop(
             # 报告收尾走 core 唯一一份（曾在此双写一份、与 deploy_aws/gherkai_deploy_aws/lambdas/reconciler.py 漂移风险，已合并）
             from gherkai_runtime import compose
 
+            # run 级墙钟是**派生指标**（缺则报告里显「?」），取它要多读一次 RunState——落盘读会因 IO 错/文件写坏抛，
+            # 而这一步跑在 finalize 的 commit point **之后**：commit 后的失败无人重试（ADR 0030 决定三），抛出去会让
+            # 本进程带着未写的报告退出、还会跳过拆隧道那步（`drive_local_reconcile` 的 cleanup_tunnel 在本函数返回
+            # 后才跑，ADR 0035「拆除时机」表 local `submit` 行）。故整段隔离、失败按缺值走（ADR 0034 收尾节把
+            # run 级墙钟划在「派生、失败隔离」那一侧；cloud 推进侧同形）。
+            try:
+                duration_ms = compose.run_duration_ms(run_store.load_run_state(run_id))
+            except Exception:
+                duration_ms = None
             finalize_report(run_id, meta, event_log, report_store, now_iso_fn(),
-                            run_duration_ms=compose.run_duration_ms(run_store.load_run_state(run_id)))
+                            run_duration_ms=duration_ms)
             return
         _recover_timed_out_claims(run_id, meta, event_log, run_store, launcher, now_iso_fn())
         time.sleep(poll_interval_s)
@@ -239,7 +254,11 @@ def build_local_reconcile(report_dir: str, run_id: str, max_concurrency: int,
     store = LocalRunStore(root)
     meta = store.load_run_meta(run_id)
     if meta is None:
-        raise FileNotFoundError(f"per-run reconcile：run_meta 不存在（submit 未落库？）：{run_id}")
+        # 正常路径下 submit 的 create_run 早已落 RunStore，走到这里 = 落点被删/写坏或 report_dir 指错。
+        # 文案按产品语言给：常见形态已由 `_cmd_status` 的 run 存在性预检翻成退 2；这里兜住剩下的两条——
+        # run_state 在而 definition 缺（落点被删/写坏）的裸 traceback，以及 per-run 后台进程把它写进 reconcile.log。
+        raise FileNotFoundError(f"找不到这个 run 的提交记录，无法继续推进：{run_id}"
+                                f"（产物目录被删或写坏？也确认 --report-dir 与提交时一致）")
     log = SqliteEventLog(db_path)
     # 产物落点 env 注入（同步 run 路径的 build_engines 一致）：nova/midscene 产物落 <report_dir>/<run_id>/ 下。
     nova_logs_dir = root / run_id / names.ARTIFACT_SUBDIR["novaact"]  # 子目录名单点（三宿主同名，ADR 0029）

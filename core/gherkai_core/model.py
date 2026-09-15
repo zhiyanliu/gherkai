@@ -391,9 +391,11 @@ class RunMeta:
     # 「用到哪套确定性 step」影响判定可复现性、本就属 run 定义。core 只搬运不消费（约定逻辑在组合根）。
     # None=无使用方 step（worker 只有内建脚手架注册）；cloud 档恒 None（steps 烙在定制镜像里，ADR 0038）。
     steps_dir: str | None = None
-    # 本 run 用的 worker variant 名（ADR 0038「运行时与 preflight」）：**人读用**（status / 报告里显示
-    # 「这次跑的是哪套确定性 step 集」），机器起 task 一律看下面的 worker_task_defs。提交侧 preflight 解析
-    # `--worker-variant`（缺省取部署级默认指针）后填。None=local 档 / 引入本 ADR 前提交的旧 definition。
+    # 本 run 用的 worker variant 名（ADR 0038「运行时与 preflight」）：**人读用**——回答「这次跑的是哪套确定性
+    # step 集」。人读面只有 definition 自身：落库的 META（cloud 档 = runs 表 META item；local 档此字段恒 None、
+    # 序列化省键）与 `gherkai run --json` 顶层的 `run_meta`；status 输出当前不带它（文本与 `--json` 都只吐
+    # RunState + artifacts），报告页同样不展示。机器起 task 一律看下面的 worker_task_defs。提交侧 preflight
+    # 解析 `--worker-variant`（缺省取部署级默认指针）后填。None=local 档 / 引入本 ADR 前提交的旧 definition。
     worker_variant: str | None = None
     # 引擎 → worker task-def **revision ARN**（ADR 0038 不变量「运行时只用 definition 里的显式 revision，
     # 永不用 family 取最新」）：提交侧 preflight 把 variant 解析成各引擎的精确 revision，写进 definition；

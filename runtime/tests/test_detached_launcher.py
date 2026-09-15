@@ -112,7 +112,7 @@ def test_relay_recovers_foreign_timed_out_claim(tmp_path):
     assert state.status == Status.ERROR
     exits = [r for r in log.records() if r.kind == "exit"]
     assert len(exits) == 1 and exits[0].exited.timed_out is True
-    assert exits[0].exited.exit_code is None  # 无观察到的退出码——诚实留空（宽限态被 timed_out 短路）
+    assert exits[0].exited.exit_code is None  # 无观察到的退出码——诚实留空（「码未知」分支被 timed_out 归因短路）
 
 
 def test_crash_worker_finalizes_error(tmp_path):
@@ -125,6 +125,63 @@ def test_crash_worker_finalizes_error(tmp_path):
     # task_exited 记了真实非 0 退出码
     exits = [r for r in log.records() if r.kind == "exit"]
     assert len(exits) == 1 and exits[0].exited.exit_code != 0
+
+
+def test_report_still_written_when_the_run_duration_read_fails(tmp_path):
+    """run 级墙钟取数失败不得连坐报告收尾（ADR 0030 决定三：commit point 之后的失败无人重试）。
+
+    墙钟是派生指标，取它要在 finalize commit **之后**多读一次 RunState——落盘读会因 IO 错/文件写坏抛。
+    裸抛出去 = 判定已 commit、报告没落，且 `drive_local_reconcile` 的拆隧道那步（在本函数返回后才跑）被跳过、
+    隧道留在公网。故按缺值走：循环正常返回、报告照写、报告里的 run 级墙钟为 None（渲染成「?」）。
+    cloud 推进侧同形，两宿主各一条护栏。
+    """
+    from gherkai_core.model import TERMINAL_STATUSES
+    from gherkai_runtime import compose
+
+    class _FailsOnTerminalRead:
+        """代理真 RunStore：run 已终态时的 load_run_state（即取墙钟那次）抛 OSError，其余原样转发。"""
+
+        def __init__(self, inner):
+            self._inner = inner
+            self.raised = 0
+
+        def __getattr__(self, name):
+            return getattr(self._inner, name)
+
+        def load_run_state(self, run_id):
+            state = self._inner.load_run_state(run_id)
+            if state is not None and state.status in TERMINAL_STATUSES:
+                self.raised += 1
+                raise OSError("run_state.json 读坏了")
+            return state
+
+    written = []
+
+    class _RecordingReportStore:
+        def write(self, run_id, result, *, created_at):
+            written.append((run_id, result, created_at))
+
+    # 真时钟（非 _now 常量）：要让两端时间戳都可解析，否则墙钟本来就是 None、本例空过
+    meta = RunMeta(run_id="run-1", created_at=compose.now_iso(), jobs=(_job("a"),))
+    log = SqliteEventLog(tmp_path / "events.db")
+    inner = LocalRunStore(tmp_path)
+    inner.create_run(meta, RunState(run_id="run-1", status=Status.PENDING,
+                                    jobs={"a": JobState("a", Status.PENDING)},
+                                    started_at=compose.now_iso(), high_water_mark=0))
+    launcher = SubprocessLauncher(_echo_resolver("pass"), log, min_grace_fn=lambda _engine: 1.0)
+    store = _FailsOnTerminalRead(inner)
+
+    # 不抛 = 第一件要钉的事（退回「实参里直接取数」的写法即 OSError 裸穿）
+    run_reconcile_loop("run-1", meta, log, store, launcher, max_concurrency=1,
+                       poll_interval_s=0.05, now_iso_fn=compose.now_iso,
+                       report_store=_RecordingReportStore())
+
+    assert store.raised == 1                    # 失败确实落在取墙钟那次读上
+    assert len(written) == 1                    # 报告仍写（判定已 commit，报告不能被派生指标带走）
+    assert written[0][1].duration_ms is None     # 墙钟按缺值走
+    assert inner.load_run_state("run-1").status == Status.PASSED  # commit 本身不受影响
+    # 数据本身够算出墙钟，None 只因那次读失败——否则本例分不清「隔离生效」与「本来就没值」
+    assert compose.run_duration_ms(inner.load_run_state("run-1")) is not None
 
 
 def test_build_local_reconcile_resolves_region_like_foreground(tmp_path, monkeypatch):
@@ -211,6 +268,27 @@ def test_build_local_reconcile_no_steps_dir_when_definition_has_none(tmp_path, m
     _m, _l, _s, launcher, _mc, _rs, _rp = build_local_reconcile(
         str(tmp_path), "run-n", max_concurrency=1, region="us-east-1")
     assert "GHERKAI_STEPS_DIR" not in launcher._resolver("novaact")._env
+
+
+def test_build_local_reconcile_host_env_steps_dir_does_not_leak(tmp_path, monkeypatch):
+    """接力者 shell 的 GHERKAI_STEPS_DIR **不得**越过 definition（ADR 0037 决策 4：宿主一律从 definition 读回）。
+
+    与 `test_build_local_reconcile_no_steps_dir_when_definition_has_none` 的区别正是漏检面：那条先 delenv 该 env，
+    恰好绕开继承路径。真实形态是提交时没有确定性 step
+    （definition steps_dir=None）、之后在 export 了该 env 的 shell 里 `status <run> --wait` 接力——若组合根只做
+    加法，worker 会加载接力者那台机器的 step 目录，本 run 的确定性 step 集与 definition 不符、判定不可复现。
+    """
+    from gherkai_runtime.detached import build_local_reconcile
+
+    _seed_for_build(tmp_path, "run-leak", max_concurrency=1)
+    monkeypatch.setenv("GHERKAI_STEPS_DIR", "/host/relay/steps")
+    monkeypatch.setenv("GHERKAI_NO_ARTIFACTS", "1")
+    _m, _l, _s, launcher, _mc, _rs, _rp = build_local_reconcile(
+        str(tmp_path), "run-leak", max_concurrency=1, region="us-east-1")
+    env = launcher._resolver("novaact")._env
+    assert env is not None  # 本路径恒注入产物落点，env 必非 None
+    assert "GHERKAI_STEPS_DIR" not in env
+    assert "GHERKAI_NO_ARTIFACTS" not in env  # 同为组合根拥有的键（产物开关也随 definition 走）
 
 
 def test_run_state_timestamps_share_one_format(tmp_path):

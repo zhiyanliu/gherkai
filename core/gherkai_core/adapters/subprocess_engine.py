@@ -71,13 +71,8 @@ class SubprocessEngine:
 
     @property
     def cmd(self) -> list[str]:
-        """启 worker 的命令行（只读，供组合根自省/日志，如 CLI 的 list-engines）。"""
+        """启 worker 的命令行（只读自省口，不在 Engine port 契约内）。生产路径不经此——CLI 的 list-engines / doctor 走 compose.resolve_worker_cmd 的定位链；现由组合根装配的单测断言接线用。"""
         return list(self._cmd)
-
-    @property
-    def cwd(self) -> str | None:
-        """worker 的工作目录（只读，供组合根自省，如 list-deterministic 的 dump spawn，ADR 0036）。"""
-        return self._cwd
 
     def run_scope(
         self, job: Job, raw_sink: "Callable[[str], None] | None" = None

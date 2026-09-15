@@ -241,7 +241,7 @@ def _presend_act_siblings(step_traj: list[str]) -> None:
             try:
                 _get_uploader().to_report_ref(os.path.abspath(js))  # 幂等上传+记账；返回值丢弃（json 不进 reportRefs）
             except Exception as e:  # noqa: BLE001  抢传 best-effort，失败不打断 step
-                log(f"act 边界抢传 json 失败（忽略、scope 末 flush 兜底）：{e}")
+                log(f"引擎轨迹文件未能即时上传（不影响判定与报告链接）：{type(e).__name__}: {e}")
 
 
 def _act_record(index: int, prompt: str | None, obj, *, vote: bool | None = None,
@@ -312,11 +312,15 @@ def _enqueue_evidence_shots(paths: list[str]) -> None:
         log(f"本步证据截图未能排入上传队列（不影响本步判定）：{type(e).__name__}: {e}")
 
 
-def _drain_evidence_uploads(timeout_s: float) -> None:
+def _drain_evidence_uploads(timeout_s: float, *, flush_follows: bool) -> None:
     """收尾：**有界**等 evidence 截图的后台队列传完（ADR 0042 决策一）。best-effort、绝不抛。
 
     调用位置守两条：①**在会话释放之后**（ADR 0024「会话释放优先」——三层 with 已退出），与既有的中断兜底
-    抢传并列；② scope 末排在 `flush_and_cleanup` **之前**（队列传完的文件 flush 会跳过，漏网的由它兜）。
+    抢传并列；② scope 末排在 `flush_and_cleanup` **之前**（队列传完的文件 flush 会跳过，漏网的由它兜）——故
+    scope 末这档超时不等于丢：紧随的整目录 flush 会把剩下的传上去。
+    `flush_follows` 由调用点声明「我后面还跟着 flush 吗」（不在这里猜调用栈），超时提示据此分两句：会 flush 的
+    只说改由收尾统一上传，不会 flush 的（提前退出路径只排空、不 flush）才说链接可能打不开。必传、无默认：
+    默认值会让新调用点静默拿到一句可能为假的承诺。
     `_uploader_singleton is None` 即本进程从未用过上传器（零 evidence）→ 队列必空，直接返回：此时也不该在
     退出路径上现造上传器，`from_env` 对「半注入」是 fail-loud 的（ADR 0033），会把干净退出变成 traceback。
     """
@@ -325,7 +329,8 @@ def _drain_evidence_uploads(timeout_s: float) -> None:
         if u is None or not u.enabled:
             return  # 无队列（零 evidence）/ 本机 no-op 档（截图就在本地，无需上传）
         if not u.drain(timeout_s):
-            log("部分证据截图未能在收尾时限内传完（这些截图的链接可能打不开；判定与报告不受影响）")
+            log("部分证据截图未能在收尾时限内传完（剩余的改由收尾统一上传；判定与报告不受影响）" if flush_follows
+                else "部分证据截图未能在收尾时限内传完（这些截图的链接可能打不开；判定与报告不受影响）")
     except Exception as e:  # noqa: BLE001  收尾路径绝不因它改变退出码
         log(f"证据截图收尾上传未能完成（判定与报告不受影响）：{type(e).__name__}: {e}")
 
@@ -878,7 +883,7 @@ def main() -> int:
         except BaseException:
             # 异常退出路径（ADR 0042 决策一第三条）：会话已在 _run_session 的三层 with 退出时释放，此处只给
             # 在途截图同一份有界预算再抢一下（best-effort，不改变冒泡的异常与退出码）。
-            _drain_evidence_uploads(EVIDENCE_DRAIN_EXIT_S)
+            _drain_evidence_uploads(EVIDENCE_DRAIN_EXIT_S, flush_follows=False)
             raise
         finally:
             set_current_workflow(outer)
@@ -886,12 +891,12 @@ def main() -> int:
     # 停止信号（ADR 0024 flag-only）：三层 with 已正常退出（__exit__ 释放了会话）。干净退、不吐 scope_done、不 flush。
     if _stop.is_set():
         log(f"worker: signal {_stop_signum} received, cooperative stop — session shutdown complete")
-        _drain_evidence_uploads(EVIDENCE_DRAIN_EXIT_S)  # 会话已释放，再给在途截图一小段有界预算（ADR 0042 决策一）
+        _drain_evidence_uploads(EVIDENCE_DRAIN_EXIT_S, flush_follows=False)  # 会话已释放，再给在途截图一小段有界预算（ADR 0042 决策一）
         return 0
     if network_exhausted:
         # 建连重试耗尽（ADR 0028）：with __exit__ 已清理。以网络专用退出码退出，core 据此记 network_error。不吐 scope_done。
         log("worker: connect retries exhausted, exiting with network code")
-        _drain_evidence_uploads(EVIDENCE_DRAIN_EXIT_S)  # 同上（本档多半也传不动，有界即可）
+        _drain_evidence_uploads(EVIDENCE_DRAIN_EXIT_S, flush_follows=False)  # 同上（本档多半也传不动，有界即可）
         return EX_WORKER_NETWORK
 
     # scope 级 reportRef：Nova SDK 落的 session_summary.json（session_id/time_worked_s/act_count 等）作
@@ -912,7 +917,7 @@ def main() -> int:
             try:
                 scope_refs.append({"kind": "summary", "ref": _get_uploader().to_report_ref(summary), "label": "Nova session summary"})
             except Exception as e:  # noqa: BLE001
-                log(f"scope 级 session summary 上传失败（best-effort、忽略、不带 summary ref）：{type(e).__name__}: {e}")
+                log(f"引擎会话汇总未能上传（不影响判定与报告，报告里少一个汇总链接）：{type(e).__name__}: {e}")
     ev = {"type": "scope_done", "scopeId": scope["id"], "sessionId": session_id}
     if scope_refs:
         ev["reportRefs"] = scope_refs
@@ -922,7 +927,7 @@ def main() -> int:
     # 提前 return（见上）不 flush——中断产物保留本地（见 ADR 0028）。
     if base:
         # 先排空后台截图队列（ADR 0042 决策一：flush 只兜漏网的、已传的按已传集合跳过），再整目录 flush。
-        _drain_evidence_uploads(EVIDENCE_DRAIN_SCOPE_END_S)
+        _drain_evidence_uploads(EVIDENCE_DRAIN_SCOPE_END_S, flush_follows=True)
         _get_uploader().flush_and_cleanup(base)
     return 0
 

@@ -1,6 +1,6 @@
 """StepArgument S3 offload（ADR 0030 决定六）：把 RunMeta 深树里的 docString/dataTable 换成 S3 指针，解 DDB 400KB 限。
 
-**DdbRunStore 内部钩子、对 core 透明**：只加工 `serialize.run_meta_to_dict` 的**产物 dict**——写端 `json.dumps` 前把
+**DynamoDBRunStore 内部钩子、对 core 透明**：只加工 `serialize.run_meta_to_dict` 的**产物 dict**——写端 `json.dumps` 前把
 docString 的 `content` / dataTable 的 `rows` 搬去 S3、原键换成 `content_ref` / `rows_ref`（值=s3:// URI）；读端
 `json.loads` 后按指针取回、消解回内联，再交 `run_meta_from_dict`。serialize/model 零感知。
 
@@ -47,7 +47,7 @@ def has_pointers(meta_dict: dict) -> bool:
 
 
 class S3StepArgumentOffloader:
-    """把 RunMeta 里 docString/dataTable 的正文搬 S3（DdbRunStore 注入）。offload/restore 一对，互逆。"""
+    """把 RunMeta 里 docString/dataTable 的正文搬 S3（DynamoDBRunStore 注入）。offload/restore 一对，互逆。"""
 
     def __init__(self, s3_client, bucket: str, prefix: str = "") -> None:
         """s3_client：boto3 s3 client（组合根注入；建桶责任在 IaC）。prefix：可选 key 前缀。"""

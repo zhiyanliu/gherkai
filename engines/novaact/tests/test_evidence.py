@@ -513,18 +513,29 @@ def test_drain_noop_when_uploader_never_used(monkeypatch, capsys):
     monkeypatch.setattr(rs, "_uploader_singleton", None)
     monkeypatch.setenv("ARTIFACT_S3_BUCKET", "bkt")
     monkeypatch.delenv("NOVA_LOGS_DIR", raising=False)
-    rs._drain_evidence_uploads(6.0)      # 不抛
+    rs._drain_evidence_uploads(6.0, flush_follows=False)      # 不抛
     assert rs._uploader_singleton is None
     assert capsys.readouterr().err == ""
 
 
 def test_drain_logs_one_line_when_not_fully_drained(monkeypatch, capsys):
+    """提前退出路径（其后不 flush）：超时提示说链接可能打不开——不承诺任何后续兜底。"""
     trace: list = []
     monkeypatch.setattr(rs, "_uploader_singleton", _RecUploader(trace, drained=False))
-    rs._drain_evidence_uploads(6.0)
+    rs._drain_evidence_uploads(6.0, flush_follows=False)
     assert trace == [("drain", 6.0)]
     err = capsys.readouterr().err.splitlines()
     assert len(err) == 1 and "未能在收尾时限内传完" in err[0]
+    assert "链接可能打不开" in err[0] and "改由收尾统一上传" not in err[0]
+
+
+def test_drain_timeout_before_flush_promises_flush_not_broken_links(monkeypatch, capsys):
+    """scope 末（其后紧跟整目录 flush）：超时不等于丢，提示只说改由收尾统一上传、不吓人。"""
+    trace: list = []
+    monkeypatch.setattr(rs, "_uploader_singleton", _RecUploader(trace, drained=False))
+    rs._drain_evidence_uploads(6.0, flush_follows=True)
+    err = capsys.readouterr().err.splitlines()
+    assert len(err) == 1 and "改由收尾统一上传" in err[0] and "链接可能打不开" not in err[0]
 
 
 # ---- main() 三条收尾路径的接线（fake 掉 SDK：不建会话、零费用）----

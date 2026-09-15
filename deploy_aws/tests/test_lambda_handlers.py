@@ -120,6 +120,26 @@ def test_run_ids_multi_run():
     assert reconciler._run_ids_from_stream(event) == {"run-1", "run-2"}
 
 
+def test_run_ids_skips_ttl_remove_records():
+    """events 表 TTL 过期删除同样进 Stream（带 Keys 的 REMOVE 记录）→ 必须不算 run：它不携带新信息，却会让
+    reconciler 对一个早已收尾的 run 重跑全量重放，而那时 worker 事件已被 TTL 删、只剩永不过期的退出记录，
+    推演结果是「每个 job 都 error」并覆盖写 S3 的判定真值。"""
+    removed = dict(_stream_record("run-1#a"), eventName="REMOVE")
+    assert reconciler._run_ids_from_stream({"Records": [removed]}) == set()
+    # 混批：同批里的正常写入照常推进（别退化成「整批丢弃」）
+    kept = dict(_stream_record("run-2#a"), eventName="INSERT")
+    assert reconciler._run_ids_from_stream({"Records": [removed, kept]}) == {"run-2"}
+
+
+def test_run_ids_keeps_modify_and_records_without_event_name():
+    """只排除 REMOVE、**不做 INSERT 白名单**：events 虽只 PutItem，同键重写（超时处置直写的退出记录被迟到的
+    观察者以真退出码/归因重写）在 Stream 上是 MODIFY，白名单会把这类携带新归因的写入静默滤掉；缺 eventName
+    的记录形状同样照收。"""
+    modified = dict(_stream_record("run-1#a"), eventName="MODIFY")
+    assert reconciler._run_ids_from_stream({"Records": [modified]}) == {"run-1"}
+    assert reconciler._run_ids_from_stream({"Records": [_stream_record("run-1#a")]}) == {"run-1"}
+
+
 def test_run_ids_scope_with_colon_not_hash():
     """scope_id 含 : （feature:行号）但不含 #——rsplit('#',1) 正确只切 run_id#scope 的分隔。"""
     event = {"Records": [_stream_record("20260719T04Z-abc#features/deterministic_anchor.feature:7")]}
@@ -437,6 +457,128 @@ def test_reconciler_ticks_detached_run(cloud_env):
     store = _seed_run(cloud_env["runs"], detached=True)
     reconciler.handler({"Records": [_stream_record("run-1#a")]}, None)
     assert store.load_run_state("run-1").jobs["a"].status == Status.RUNNING
+
+
+# ---------- 已收尾的 run 不再被改写（判定真值销毁的第二道闸，ADR 0030 决定三 / 0034）----------
+
+def _seed_finished_run(cloud_env, *, status=Status.PASSED):
+    """造「run 已收尾 + events 表只剩永不过期的退出记录」的形态 = worker 事件被 TTL 删掉约 7 天后的真实样子，
+    并预置那时已在 S3 的判定真值与报告。返回 (store, s3 client)。"""
+    import boto3
+    from gherkai_core.adapters.event_log import DdbEventLog
+
+    store = DynamoDBRunStore(cloud_env["runs"], detached=True)
+    job = Job(scope_id="a", scope_name="a", engine="novaact",
+              scenarios=(Scenario(id="a:1", name="s", steps=(Step(0, "Given", "x"),)),))
+    store.create_run(
+        RunMeta(run_id="run-1", created_at="t0", jobs=(job,), worker_task_defs={"novaact": _WORKER_REV}),
+        RunState(run_id="run-1", status=status, jobs={"a": JobState("a", status)},
+                 started_at="2026-09-01T00:00:00+00:00", ended_at="2026-09-01T00:03:00+00:00"))
+    DdbEventLog(cloud_env["events"], "run-1", ["a"]).record_exit("a", 0)  # 不带 expires_at：退出记录永不过期
+    s3 = boto3.client("s3", region_name="us-east-1")
+    s3.put_object(Bucket=_BUCKET, Key="reports/run-1/jobs/a.json", Body=b'{"status": "passed"}')
+    s3.put_object(Bucket=_BUCKET, Key="reports/run-1/index.html", Body=b"<html>passed</html>")
+    return store, s3
+
+
+def _report_bytes(s3) -> dict[str, bytes]:
+    keys = [o["Key"] for o in s3.list_objects_v2(Bucket=_BUCKET, Prefix="reports/run-1/").get("Contents", [])]
+    return {k: s3.get_object(Bucket=_BUCKET, Key=k)["Body"].read() for k in keys}
+
+
+def test_finished_run_is_not_reprojected_by_a_late_or_replayed_event(cloud_env):
+    """已收尾的 run 再被触发（迟到重投 / 手工重放同一批 Stream 记录 / TTL 之后的任何唤醒）→ 两个 handler 整体
+    no-op：判定真值 jobs/*.json 与报告 index.html **字节不变**。
+
+    否则：那时 events 表只剩退出记录，全量重放把每个 job 推成 status=error / 零 scenario，并按 finalize 分支的
+    写序覆盖 ResultStore——run 状态说 passed、判定真值说 error 的永久错乱（判定真值是权威源）。
+    """
+    store, s3 = _seed_finished_run(cloud_env)
+    before = _report_bytes(s3)
+    assert before, "预置报告没落进桶，断言会空转"
+
+    reconciler.handler({"Records": [_stream_record("run-1#a")]}, None)
+    reconciler.kicker_handler({"run_id": "run-1"}, None)
+
+    assert _report_bytes(s3) == before          # 判定真值与报告一个字节没动
+    assert store.load_run_state("run-1").status == Status.PASSED
+    assert cloud_env["events"].scan()["Count"] == 1  # 零补偿写（launch 没被调过）
+
+
+def test_finished_run_gate_keys_on_the_committed_run_status_only(cloud_env):
+    """对偶（防「闸恒真」的假绿）：闸只认**已提交的 run 级终态**——同一形态（events 只剩退出记录、S3 已有旧产物）
+    但 run 级仍 running（提交点还没落）时照常推进到收尾，说明挡住的是「已提交」而不是「有终态 job」。"""
+    store, s3 = _seed_finished_run(cloud_env, status=Status.RUNNING)
+    before = _report_bytes(s3)
+    reconciler.handler({"Records": [_stream_record("run-1#a")]}, None)
+    assert store.load_run_state("run-1").status == Status.ERROR  # 本 tick 真跑到 finalize（exit=0 无 scope_done → error）
+    assert _report_bytes(s3) != before                           # 判定真值与报告由本 tick 写出
+
+
+def test_timeout_payload_on_a_finished_run_is_a_noop(cloud_env):
+    """超时到点触发器的 payload 打到一个已收尾的 run（预算点前后跑完的常态）→ 不处置、不改写
+    （ADR 0034「到点时 job 已终态 → 处置 no-op」；run 终态的前提就是每个 job 都已有退出记录或已判超时）。"""
+    _store, s3 = _seed_finished_run(cloud_env)
+    before = _report_bytes(s3)
+    out = reconciler.kicker_handler({"run_id": "run-1", "timeout_scope": "a"}, None)
+    assert out["ok"] and _report_bytes(s3) == before
+
+
+# ---------- commit point 之后的取数不许击穿已 commit 的 run（ADR 0030 决定三 / 0034 收尾）----------
+
+def test_report_still_written_when_the_run_duration_read_fails(cloud_env, monkeypatch):
+    """run 级墙钟只是报告里的派生指标（缺则显「?」），取它要在 finalize **之后**多读一次 RunState——那次强一致读
+    抛（DDB 限流 / 瞬时 5xx）不许冒泡：commit 之后的失败无人重试，且在云端会让 events Stream 本批重试耗尽后整批
+    丢弃、连坐同批其它 run 的事件。断言 handler 正常返回、报告照写、墙钟按缺值走。
+    """
+    import gherkai_core.reconcile as core_reconcile
+
+    # 让 run 一 tick 就 done：job 已 CAS 成 running、events 表已有它的退出记录 → 本 tick 推成终态 → finalize
+    store = DynamoDBRunStore(cloud_env["runs"], detached=True)
+    job = Job(scope_id="a", scope_name="a", engine="novaact",
+              scenarios=(Scenario(id="a:1", name="s", steps=(Step(0, "Given", "x"),)),))
+    store.create_run(
+        RunMeta(run_id="run-1", created_at="t0", jobs=(job,), worker_task_defs={"novaact": _WORKER_REV}),
+        RunState(run_id="run-1", status=Status.RUNNING,
+                 jobs={"a": JobState("a", Status.RUNNING, claimed_at="2026-09-01T00:00:00+00:00")},
+                 started_at="2026-09-01T00:00:00+00:00"))
+    from gherkai_core.adapters.event_log import DdbEventLog
+    DdbEventLog(cloud_env["events"], "run-1", ["a"]).record_exit("a", 0)
+
+    # 只让 finalize **之后**的那次读抛（finalize 之前的读是 tick 的正常输入，抛了就不是本用例要验的路径）
+    real_load, real_finalize = DynamoDBRunStore.load_run_state, DynamoDBRunStore.try_finalize
+    committed: list[bool] = []
+
+    def load(self, run_id):
+        if committed:
+            raise RuntimeError("DDB 限流")
+        return real_load(self, run_id)
+
+    def try_finalize(self, *a, **kw):
+        out = real_finalize(self, *a, **kw)
+        committed.append(True)
+        return out
+
+    monkeypatch.setattr(DynamoDBRunStore, "load_run_state", load)
+    monkeypatch.setattr(DynamoDBRunStore, "try_finalize", try_finalize)
+
+    seen: dict = {}
+    real_report = core_reconcile.finalize_report
+
+    def spy(*a, **kw):
+        seen.update(kw)
+        return real_report(*a, **kw)
+
+    monkeypatch.setattr(core_reconcile, "finalize_report", spy)
+
+    out = reconciler.handler({"Records": [_stream_record("run-1#a")]}, None)
+
+    assert out == {"ok": True, "runs": ["run-1"]}       # 不抛 → Stream 本批不重试、不整批丢弃
+    assert committed, "run 没跑到 finalize，断言会空转"
+    assert seen.get("run_duration_ms") is None          # 取数失败按缺值走（报告墙钟显「?」）
+    import boto3
+    s3 = boto3.client("s3", region_name="us-east-1")
+    assert s3.get_object(Bucket=_BUCKET, Key="reports/run-1/index.html")["Body"].read()  # 报告仍被写出
 
 
 # ---------- 并发上限 = min(meta, 部署侧 cap)（ADR 0034 机制四）----------

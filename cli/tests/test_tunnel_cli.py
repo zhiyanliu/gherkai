@@ -171,3 +171,159 @@ def test_submit_rejects_nonfinite_tunnel_ttl(tmp_path, monkeypatch, capsys):
         assert rc == 2, f"--tunnel-ttl {bad} 应被拒"
         assert calls == []  # 隧道一次都没起
         assert "--tunnel-ttl" in capsys.readouterr().err
+
+
+# ---- 隧道就地拆：边界 = 后台宿主 fork 成功（ADR 0035 决策 3） ----
+def _stops(calls) -> list:
+    return [c for c in calls if c[0] == "stop"]
+
+
+def _patch_cloud_gates(monkeypatch, *, preflight_err=None):
+    """让 cloud submit 走到 preflight 这一步而不连 AWS：版本 skew 闸放行 + preflight 返回给定结果。
+
+    skew/preflight 各自的判据在别处验（runtime 的 compose 测试 / test_backend_cloud.py），此处只要它们别真去
+    读 SSM/探资源。
+    """
+    monkeypatch.setattr(m.compose, "read_backend_version", lambda **kw: "<stub 版本戳>")
+    monkeypatch.setattr(m.compose, "check_version_skew", lambda *a, **kw: ("ok", ""))
+    monkeypatch.setattr(m.compose, "preflight_cloud_resources", lambda **kw: preflight_err)
+
+
+def test_submit_local_store_failure_tears_down_tunnel(tmp_path, monkeypatch):
+    """local submit 落库抛（报告目录不可写/盘满）→ 隧道还没交棒给后台宿主，就地拆；异常照常上抛。
+
+    这条路上 tunnel.json 还没落盘，pid 无处可寻——不当场拆就没有任何接力者救得了，只能人手 kill。
+    """
+    import pytest
+
+    calls = []
+    _patch_tunnel(monkeypatch, calls)
+
+    def boom(**kw):
+        raise OSError("Read-only file system")
+
+    monkeypatch.setattr(m.compose, "build_local_stores", boom)
+    with pytest.raises(OSError):
+        m.main(["submit", str(_write_feature(tmp_path)),
+                "--report-dir", str(tmp_path / "reports"),
+                "--expose-local", "http://localhost:3000"])
+    assert _stops(calls) == [("stop", INFO.pid)]
+
+
+def test_submit_local_fork_failure_tears_down_tunnel(tmp_path, monkeypatch):
+    """local submit fork 推进进程抛 → 隧道无宿主（tunnel.json 在但没人读它），就地拆。"""
+    import pytest
+
+    calls = []
+    _patch_tunnel(monkeypatch, calls)
+
+    def boom(cmd, **kw):
+        raise OSError("Cannot allocate memory")
+
+    monkeypatch.setattr(subprocess, "Popen", boom)
+    with pytest.raises(OSError):
+        m.main(["submit", str(_write_feature(tmp_path)),
+                "--report-dir", str(tmp_path / "reports"),
+                "--expose-local", "http://localhost:3000"])
+    assert _stops(calls) == [("stop", INFO.pid)]
+
+
+def test_submit_local_failure_after_handoff_keeps_tunnel(tmp_path, monkeypatch):
+    """fork **成功之后**的收尾行抛（stdout 是坏管道、Ctrl-C 恰落此窗）→ **不拆**：宿主已经在跑，
+    拆了会让剩余 job 在被测应用不可达下跑成假失败（兜底反成失败源，还烧真钱）。"""
+    import builtins
+
+    import pytest
+
+    calls = []
+    _patch_tunnel(monkeypatch, calls)
+
+    class _FakeProc:
+        pid = 1
+
+    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: _FakeProc())
+    real_print = builtins.print
+
+    def only_stdout_breaks(*a, **kw):
+        if kw.get("file") is None:  # 进度走 stderr；打 run_id 那一次才是 stdout
+            raise BrokenPipeError("stdout 是坏管道")
+        real_print(*a, **kw)
+
+    monkeypatch.setattr(m, "print", only_stdout_breaks, raising=False)
+    with pytest.raises(BrokenPipeError):
+        m.main(["submit", str(_write_feature(tmp_path)),
+                "--report-dir", str(tmp_path / "reports"),
+                "--expose-local", "http://localhost:3000"])
+    assert _stops(calls) == []
+
+
+def test_submit_cloud_preflight_failure_tears_down_tunnel(tmp_path, monkeypatch, capsys):
+    """cloud submit 被 preflight 拦下（退 2，各道闸都在守护 fork 之前）→ 隧道无宿主可交棒，就地拆。"""
+    calls = []
+    _patch_tunnel(monkeypatch, calls)
+    _patch_cloud_gates(monkeypatch, preflight_err="资源缺失：ECS cluster gherkai-cluster 不存在")
+    rc = m.main(["submit", str(_write_feature(tmp_path)), "--backend", "cloud",
+                 "--region", "us-east-1", "--expose-local", "http://localhost:3000"])
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "gherkai-cluster" in err
+    assert _stops(calls) == [("stop", INFO.pid)]
+    # 拆了必须说一声：这一格也可能是「已提交、只是没交上棒」（云端已接管、照跑照烧钱），用户光看一个栈
+    # 或一行 rc=2 判断不出隧道已经没了。
+    assert "隧道已拆除" in err and "重新提交" in err
+
+
+def test_submit_cloud_target_resolution_failure_tears_down_tunnel(tmp_path, monkeypatch):
+    """--profile 打错这类解析失败是**抛**（不是退 2）、且在守护 fork 之前 → 同样就地拆。"""
+    import pytest
+
+    calls = []
+    _patch_tunnel(monkeypatch, calls)
+
+    def boom(**kw):
+        raise RuntimeError("The config profile (nope) could not be found")
+
+    monkeypatch.setattr(m.compose, "resolve_cloud_target", boom)
+    with pytest.raises(RuntimeError):
+        m.main(["submit", str(_write_feature(tmp_path)), "--backend", "cloud",
+                "--profile", "nope", "--expose-local", "http://localhost:3000"])
+    assert _stops(calls) == [("stop", INFO.pid)]
+
+
+def _patch_cloud_commit(monkeypatch):
+    """再放行守护 fork 之前的最后两道：worker variant 解析与 runs 表写入（都不连 AWS）。
+
+    各自的判据在 test_backend_cloud.py 验；此处只为把用例推进到「守护已 fork」那一刻。
+    """
+    from gherkai_runtime.compose import WorkerResolution
+
+    monkeypatch.setattr(m.compose, "resolve_worker_variant",
+                        lambda *, engines, **kw: {
+                            e: WorkerResolution(engine=e, variant="base", revision_arn=f"arn:{e}:1",
+                                                digest="sha256:" + "0" * 64) for e in engines})
+
+    class _RunStore:
+        def create_run(self, meta, state):
+            pass
+
+    monkeypatch.setattr(m.compose, "build_cloud_stores",
+                        lambda **kw: (_RunStore(), object(), object(), (lambda r, i: {})))
+
+
+def test_submit_cloud_keeps_tunnel_after_daemon_fork(tmp_path, monkeypatch, capsys):
+    """cloud submit 一路顺到守护 fork 成功 → **不拆**（对称于 local 的交棒边界用例）。
+
+    守护是 cloud 档隧道的唯一宿主：这里误拆等于让云端已接管的整批 job 在被测应用不可达下跑成假失败。
+    """
+    calls = []
+    _patch_tunnel(monkeypatch, calls)
+    _patch_cloud_gates(monkeypatch)
+    _patch_cloud_commit(monkeypatch)
+    forked = []
+    monkeypatch.setattr(subprocess, "Popen",
+                        lambda cmd, **kw: forked.append(cmd) or type("P", (), {"pid": 9})())
+    rc = m.main(["submit", str(_write_feature(tmp_path)), "--backend", "cloud",
+                 "--region", "us-east-1", "--expose-local", "http://localhost:3000"])
+    assert rc == 0, capsys.readouterr().err
+    assert any("_tunnel_watch" in c for c in forked)
+    assert _stops(calls) == []

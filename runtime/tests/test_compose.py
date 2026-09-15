@@ -188,9 +188,9 @@ def test_build_engines_miss_leg_does_not_break_the_other(monkeypatch):
         engines["midscene"].run_scope(object())
 
 
-def test_build_engines_injects_extra_http_headers_env(midscene_env_cmd):
+def test_build_engines_injects_extra_http_headers_env(monkeypatch, midscene_env_cmd):
     """extra_http_headers（ADR 0035 决策 4）→ 两 worker env 注 GHERKAI_EXTRA_HTTP_HEADERS（JSON）；
-    不传则不注入（默认路径零变化）。"""
+    不传则**不注入、且清掉宿主继承的同名值**（该键由组合根拥有，见 compose._COMPOSE_OWNED_WORKER_ENV）。"""
     import json as _json
 
     engines = compose.build_engines(extra_http_headers={"ngrok-skip-browser-warning": "1"})
@@ -198,23 +198,53 @@ def test_build_engines_injects_extra_http_headers_env(midscene_env_cmd):
         env = engines[name]._env
         assert env is not None, name
         assert _json.loads(env["GHERKAI_EXTRA_HTTP_HEADERS"]) == {"ngrok-skip-browser-warning": "1"}
+    # 宿主 shell 里有同名值时不传 headers：两条腿都必须建 env（非 None）且该键已被清掉。
+    # 断言不写成 `env2 is None or key not in env2`——env2 为 None 时那种写法空过，恰好照不出继承泄漏。
+    monkeypatch.setenv("GHERKAI_EXTRA_HTTP_HEADERS", '{"leaked": "1"}')
     engines2 = compose.build_engines()
     for name in ("novaact", "midscene"):
         env2 = engines2[name]._env
-        assert env2 is None or "GHERKAI_EXTRA_HTTP_HEADERS" not in env2, name
+        assert env2 is not None, name
+        assert "GHERKAI_EXTRA_HTTP_HEADERS" not in env2, name
 
 
-def test_build_engines_injects_steps_dir_env_both_legs(tmp_path: Path, midscene_env_cmd):
+def test_build_engines_injects_steps_dir_env_both_legs(tmp_path: Path, monkeypatch, midscene_env_cmd):
     """steps_dir（ADR 0037 决策 4）→ **两个** worker 都注 GHERKAI_STEPS_DIR（两引擎扫同一目录、各取自己的
-    扩展名）；不传则不注入（worker 只有内建脚手架注册）。worker 只认这个 env，约定逻辑不进 worker。"""
+    扩展名）；不传则不注入、且清掉宿主继承的同名值（worker 只剩内建脚手架）。约定逻辑不进 worker。"""
     steps = tmp_path / "steps"
     engines = compose.build_engines(steps_dir=steps)
     for name in ("novaact", "midscene"):
         assert engines[name]._env["GHERKAI_STEPS_DIR"] == str(steps), name
+    # 同上：宿主 env 有值时收紧成「env2 必非 None 且不含该键」，不用会空过的 or 写法
+    monkeypatch.setenv("GHERKAI_STEPS_DIR", "/host/steps")
     engines2 = compose.build_engines()
     for name in ("novaact", "midscene"):
         env2 = engines2[name]._env
-        assert env2 is None or "GHERKAI_STEPS_DIR" not in env2, name
+        assert env2 is not None, name
+        assert "GHERKAI_STEPS_DIR" not in env2, name
+
+
+def test_build_engines_scrubs_inherited_owned_env(monkeypatch, midscene_env_cmd):
+    """组合根拥有的三个 env「有值注、无值清」（ADR 0037 决策 4/3 + ADR 0035 决策 4）：definition 说没有时，
+    宿主 shell 里的同名值**不得**越过 definition 直达 worker。
+
+    真实触发形态：提交时既无 `--steps-dir`、也无 `./steps` ⇒ definition 里 steps_dir 为 None；之后在 export 了
+    GHERKAI_STEPS_DIR 的 shell 里 `status <run> --wait` 接力推进——只做加法的注入会让 worker 加载接力者那台机器的
+    step 目录，本 run 用到的确定性 step 集与 definition 不符、判定不可复现。
+    """
+    import os
+
+    monkeypatch.setenv("GHERKAI_STEPS_DIR", "/host/steps")
+    monkeypatch.setenv("GHERKAI_NO_ARTIFACTS", "1")
+    monkeypatch.setenv("GHERKAI_EXTRA_HTTP_HEADERS", '{"leaked": "1"}')
+    engines = compose.build_engines()  # 三样都不传（= definition 里都没有）
+    for name in ("novaact", "midscene"):
+        env = engines[name]._env
+        # 宿主带 owned 键 ⇒ 必须建一份 scrub 后的 env；回落 None 等于整份继承 os.environ（泄漏）
+        assert env is not None, name
+        for key in compose._COMPOSE_OWNED_WORKER_ENV:
+            assert key not in env, (name, key)
+        assert env.get("PATH") == os.environ.get("PATH"), name  # 只清这三键，其余（PATH/AWS 凭证等）照常继承
 
 
 def test_resolver_known_and_unknown(midscene_env_cmd):
@@ -270,8 +300,11 @@ def test_build_engines_injects_artifact_dirs_symmetrically(tmp_path: Path, midsc
     assert engines["midscene"]._env.get("PATH") == os.environ.get("PATH")
 
 
-def test_build_engines_no_dirs_midscene_env_none(midscene_env_cmd):
+def test_build_engines_no_dirs_midscene_env_none(monkeypatch, midscene_env_cmd):
     # 不传落点、也无共注 env：midscene env 保持 None，SubprocessEngine 回落继承 os.environ（不硬替换）。
+    # 前提 = 宿主 env 干净：宿主带组合根拥有的键时，按契约会建一份 scrub 后的 env（非 None），见上面 scrub 用例。
+    for key in compose._COMPOSE_OWNED_WORKER_ENV:
+        monkeypatch.delenv(key, raising=False)
     engines = compose.build_engines()
     assert engines["midscene"]._env is None
 
@@ -340,6 +373,8 @@ def test_build_engines_midscene_no_rebuild_when_no_region_profile(monkeypatch, m
     # 本就够，免无谓拷贝）——补建只为 region/profile 覆盖，无值则不建。Nova 仍补建（NOVA_ACT_TIMEOUT_S 恒需）。
     monkeypatch.delenv("AWS_REGION", raising=False)
     monkeypatch.delenv("AWS_DEFAULT_REGION", raising=False)
+    for key in compose._COMPOSE_OWNED_WORKER_ENV:  # 前提 = 宿主 env 干净（带 owned 键时按契约会建 scrub 后的 env）
+        monkeypatch.delenv(key, raising=False)
     engines = compose.build_engines(region=None, profile=None)
     assert engines["midscene"]._env is None       # 不补建
     assert engines["novaact"]._env is not None     # Nova 恒补建（timeout）
@@ -889,11 +924,19 @@ def test_query_deterministic_parses_worker_json(monkeypatch, novaact_env_cmd):
         return _P()
 
     monkeypatch.setattr(subprocess, "run", fake_run)
+    # 先把宿主 shell 弄脏：不 setenv 则下面「不含该键」的断言在干净环境里空过、照不出继承泄漏
+    # （同 `env is None or key not in env` 那种写法的毛病）。
+    monkeypatch.setenv("GHERKAI_STEPS_DIR", "/host/steps")
     got = compose.query_deterministic("novaact")
     assert got == [{"pattern": "p", "description": "d", "example": "e"}]
     assert captured["cmd"] == ["/fake/novaact-worker", "--list-deterministic"]  # 定位链 cmd + 自述 flag
     assert captured["cwd"] is None      # 定位链未给 cwd → 继承本进程 CWD（worker 无专属 cwd，ADR 0037 决策 3）
-    assert captured["env"] is None      # 无 steps_dir → 不动 env（worker 继承本进程环境）
+    # 无 steps_dir：env 仍自建一份——组合根拥有的键「有值注、无值清」，宿主 shell 的 GHERKAI_STEPS_DIR 不得
+    # 越过调用方解析出的结果（自述清单要与本次要跑的 step 集一致）；其余环境照常继承。
+    import os
+    assert captured["env"] is not None
+    assert "GHERKAI_STEPS_DIR" not in captured["env"]
+    assert captured["env"].get("PATH") == os.environ.get("PATH")
 
 
 def test_query_deterministic_injects_steps_dir_env(monkeypatch, novaact_env_cmd, tmp_path):

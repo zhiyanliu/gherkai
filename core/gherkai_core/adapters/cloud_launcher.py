@@ -43,7 +43,8 @@ class CloudLauncher:
         if job.timeout_s:
             if self._timeout_watch is None or self._run_id is None:
                 logger.warning(
-                    "job timeout 未武装（未注入 timeout_watch/run_id）：scope=%s 预算 %ss 降级为 tick 防御扫",
+                    "这个 job 没有超时看护：后端未启用定时能力（后端版本较旧时会这样，重新部署后端即可启用）"
+                    "——scope=%s 预算 %ss；超时仍由后台巡检兜底收敛，只是不如到点准时",
                     job.scope_id, job.timeout_s)
             else:
                 # best-effort（ADR 0034「job timeout」节边界）：武装失败不阻塞 launch——保护降级为
@@ -51,8 +52,10 @@ class CloudLauncher:
                 try:
                     self._timeout_watch.arm(self._run_id, job.scope_id, job.timeout_s)
                 except Exception:
-                    logger.warning("job timeout 武装失败（best-effort 降级 tick 防御扫）：run=%s scope=%s",
-                                   self._run_id, job.scope_id, exc_info=True)
+                    logger.warning(
+                        "这个 job 的超时看护没能设置好（不影响本次启动）：run=%s scope=%s"
+                        "——超时改由后台巡检兜底收敛；若反复出现，检查后端的定时权限配置",
+                        self._run_id, job.scope_id, exc_info=True)
         # fire-and-forget：按 engine 取 FargateEngine、start_scope 起 task 就返回。task_arn 不在此保留——
         # reconciler 靠 events 表（worker PutItem）+ task_exited（退出观察者 Lambda 写）推进，不靠 launcher 轮询。
         # 异常冒泡（不兜）——tick 靠它触发 launch 失败补偿（record_exit 哨兵 PLATFORM_FAILED_EXIT）。

@@ -134,7 +134,7 @@ def test_s3_result_store_round_trip_real(real_aws):
 
 # ---- StepArgument offload：真 S3 指针往返 ----
 def test_offload_round_trip_real(real_aws):
-    """真 S3：DdbRunStore 挂 offloader，docString/dataTable 搬真 S3、META 只留指针、读回逐字节还原。"""
+    """真 S3：DynamoDBRunStore 挂 offloader，docString/dataTable 搬真 S3、META 只留指针、读回逐字节还原。"""
     from gherkai_core.model import Job, Scenario, Step, StepArgument
 
     store = _ddb_store(real_aws, offloader=_offloader(real_aws))

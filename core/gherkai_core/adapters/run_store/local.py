@@ -21,11 +21,9 @@ finalize_run）+ 读回面（load_run_state，`status` 与 tick 的 baseline 都
 from __future__ import annotations
 
 import json
-import tempfile
-import os
-import contextlib
 from pathlib import Path
 
+from gherkai_core.adapters._atomic import atomic_write_json
 from gherkai_core.model import JobState, RunMeta, RunState, Status
 from gherkai_core.serialize import (
     run_meta_from_dict,
@@ -37,21 +35,16 @@ from gherkai_core.serialize import (
 
 
 def _atomic_write_json(path: Path, obj) -> None:
-    """同目录 tmp + `os.replace`：读者要么看到旧文件、要么看到新文件，绝不看到半截/空 JSON。
+    """控制面文件（run_meta.json / run_state.json）的原子写。
 
     并发读者真实存在（ADR 0030 决定四/0034）：per-run 推进进程在 `_locked_rmw` 里写 run_state.json 时，
-    `gherkai status` / 接力进程**无锁**读同一文件（读面不持 `.runstate.lock`，只写面互斥）；`write_text` 是
-    truncate 再写，两步之间的读者会拿到空文件或前半截、json.loads 直接炸。tmp 与目标同目录保证 rename 同分区原子。
+    `gherkai status` / 接力进程**无锁**读同一文件（读面不持 `.runstate.lock`，只写面互斥）。原子性的实现与
+    其余两面的读者见 `gherkai_core.adapters._atomic`。
+
+    权限收在 0600：控制面只被本机同 uid 的进程消费（`status` / 接力 / 同步 run 自己），无跨用户/跨容器读需求——
+    对外可读的是数据面 jobs/*.json 与报告产物，不是这两个文件。
     """
-    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(json.dumps(obj, ensure_ascii=False, indent=2))
-        os.replace(tmp, path)
-    except BaseException:
-        with contextlib.suppress(OSError):
-            os.unlink(tmp)
-        raise
+    atomic_write_json(path, obj, mode=0o600)
 
 class LocalRunStore:
     """RunStore 的本地文件实现（组合根注入；DDB 实装见同包 `ddb.py`）。"""

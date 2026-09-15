@@ -22,9 +22,9 @@ ADR 0016 分层）。**worker 只认一个 env `GHERKAI_STEPS_DIR`**——没有
   跳过等于把该文件里的确定性 step 静默换成 AI catch-all、run 可能「通过」——本项目最忌的静默降级。
   同理「给了目录但目录不存在」也是 fail-loud：使用方明确指了一个地方，那里没东西 = 配置错，不是「没定制」。
 
-三个自述入口（`--list-deterministic` / `--match-steps`）与 job 模式**同样**先加载（调用点在
-`run_scope.main()` 顶部），故 `list-deterministic` 与 plan 标注反映使用方定制（ADR 0036「真值单一」仍成立：
-注册表 = 内建脚手架 + 加载的使用方模块）。
+自述入口（`--list-deterministic` / `--match-steps`；ADR 0037 决策 4 另留了未来 `--capabilities` 的口子）与
+job 模式**同样**先加载（调用点在 `run_scope.main()` 顶部），故 `list-deterministic` 与 plan 标注反映使用方
+定制（ADR 0036「真值单一」仍成立：注册表 = 内建脚手架 + 加载的使用方模块）。
 """
 from __future__ import annotations
 

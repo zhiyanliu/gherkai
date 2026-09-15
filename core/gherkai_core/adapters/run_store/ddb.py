@@ -9,7 +9,9 @@ RunMeta 与 RunState **分两 item**（同 run_id、item_type 各异；同分区
   **write-once（create_run）/ read-whole（load_run_meta）**，从不单元素更新——故整体存 JSON 字符串最简、
   且躲开 DDB 原生 Map 对空串/嵌套 list 的挑剔（DataTable rows 常含空 cell）。第 4 步 offload 在 `json.dumps`
   **前**对 dict 里的 docString/dataTable 换指针，不需要 META 是原生 Map。
-- **STATE item**：`{run_id, item_type='STATE', status, started_at?, ended_at?, jobs=<原生 Map>}`，另有两个
+- **STATE item**：`{run_id, item_type='STATE', status, started_at?, ended_at?, high_water_mark?,
+  jobs=<原生 Map>}`（`?` = omit-when-None；`high_water_mark` 只在无状态跑批的投影写时有值，是本 item 唯一的
+  数值属性——投影写的 ConditionExpression 按它做数值守卫、读回 Decimal 转 int，见 ADR 0034 机制三），另有两个
   **可选顶层标记**：`detached`（ADR 0034，kicker 的 Stream filter 认它）与 `worker_task_def_arns`（ADR 0038，
   清理 pass 的在跑 run 安全阀按它 Query + `contains`）——两者都是「DDB 侧要查得动」才摊到顶层的。
   jobs **必须原生 Map** 才能 `SET jobs.#sid=:js` 按 scope_id 单元素刷（决定六）；其 entry 全是 str（无 float），
@@ -249,15 +251,13 @@ class DynamoDBRunStore:
                 if js.claimed_at is not None:
                     sets.append("jobs.#sid.claimed_at = :cat")
                     vals[":cat"] = js.claimed_at
-                kwargs = dict(
+                self._table.update_item(
                     Key={"run_id": run_id, _ITEM_TYPE_ATTR: _STATE},
                     UpdateExpression="SET " + ", ".join(sets),
                     ExpressionAttributeNames={"#sid": sid, "#jst": "status"},
                     ExpressionAttributeValues=vals,
+                    ConditionExpression=cond,  # 三分支一律带条件（ADR 0034 机制三②「非更推进态」的单元素条件写）
                 )
-                if cond:
-                    kwargs["ConditionExpression"] = cond
-                self._table.update_item(**kwargs)
             except self._table.meta.client.exceptions.ConditionalCheckFailedException:
                 continue  # 库中该 job 已更推进（终态/已 claim）→ 保留库中态，不回退
         return True

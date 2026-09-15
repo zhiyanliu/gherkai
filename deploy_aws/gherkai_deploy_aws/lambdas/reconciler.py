@@ -28,9 +28,20 @@ import os
 
 
 def _run_ids_from_stream(event) -> set[str]:
-    """从 DDB Stream records 提取涉及的 run_id 集（PK=run_id#scope_id，取 # 前段）。去重——一个 batch 可能多条同 run。"""
+    """从 DDB Stream records 提取涉及的 run_id 集（PK=run_id#scope_id，取 # 前段）。去重——一个 batch 可能多条同 run。
+
+    **REMOVE 记录跳过**：events 表开 TTL（`expires_at`，两引擎的 event sink 写 emit+7d），TTL 过期删除同样进
+    Stream、同样带 Keys。它不携带任何新信息，却会让本 handler 对一个早已收尾的 run 重跑一次全量重放——那时
+    worker 事件已被删、只剩不带 `expires_at`（永不过期）的退出记录，推演出的每个 job 都成 error 并按 ADR 0030
+    决定三的写序覆盖 ResultStore 里的判定真值。用 `.get` 只排除 REMOVE、**不做 INSERT 白名单**：events 表虽只
+    PutItem，同键重写（超时处置直写的退出记录被迟到的观察者以真退出码/归因重写）在 Stream 上是 MODIFY。
+    IaC 侧的事件源 filter 同样滤掉 REMOVE（见 `stack.py` events 表的 `DynamoEventSource`）——那道要重新部署
+    才生效，本道不依赖部署。语义闸另有一道在 `_build`（已终态的 run 整体 no-op），挡迟到重投/手工重放。
+    """
     run_ids: set[str] = set()
     for rec in event.get("Records", []):
+        if rec.get("eventName") == "REMOVE":
+            continue
         keys = rec.get("dynamodb", {}).get("Keys", {})
         pk = keys.get("pk", {}).get("S")
         if pk and "#" in pk:
@@ -45,7 +56,8 @@ def _run_ids_from_stream(event) -> set[str]:
 # ============================================================================
 
 # StopTask reason 里的超时哨兵串：经 STOPPED 事件 detail.stoppedReason 原样出现（现成通道、零新键空间），
-# exit_observer 见它 → task_exited(timed_out=True) → 归因链收敛 ERROR+timeout。exit_observer 从此处 import。
+# exit_observer 见它 → task_exited(timed_out=True) → 归因链收敛 ERROR+timeout。哨兵串的比对封在 `exit_from_task`
+# 里，观察者 Lambda 与超时处置经该函数共用（都不各自 import 本常量）。
 TIMEOUT_STOP_SENTINEL = "gherkai-job-timeout"
 
 
@@ -178,7 +190,8 @@ def _handle_timeout(run_id: str, scope_id: str, built, ecs_client=None) -> str:
             print(f"timeout-converge: run={run_id} scope={scope_id} task={arn} 已 STOPPED 无退出记录 → 按 DescribeTasks 落 exit={exit_code}")
             return "converged-from-describe"
         if target.get("desiredStatus") == "STOPPED":
-            print(f"timeout-noop: run={run_id} scope={scope_id} task={arn} 正在停止 → 等观察者")
+            # 不抢着写：退出记录由 exit_observer 收到 STOPPED 事件时落（本函数 docstring「正在停止」那路）
+            print(f"timeout-noop: run={run_id} scope={scope_id} task={arn} 正在停止 → 等它的退出事件到达再收尾")
             return "noop-stopping"
         job = next((j for j in meta.jobs if j.scope_id == scope_id), None)
         budget = f"{job.timeout_s:g}" if job is not None and job.timeout_s else "?"
@@ -187,7 +200,7 @@ def _handle_timeout(run_id: str, scope_id: str, built, ecs_client=None) -> str:
         print(f"timeout-stop: run={run_id} scope={scope_id} task={arn}")
         return "stopped"
     event_log.record_exit(scope_id, None, timed_out=True)
-    print(f"timeout-converge: run={run_id} scope={scope_id} task 无踪且无退出记录 → 直接记 timed_out 收敛")
+    print(f"timeout-converge: run={run_id} scope={scope_id} 找不到这个 task、也没有它的退出记录 → 直接按超时结案")
     return "converged-directly"
 
 
@@ -241,7 +254,7 @@ def _resolve_worker_task_defs(meta, *, prefix: str, region: str | None, ssm=None
     variant = compose.read_worker_default(prefix=prefix, ssm=ssm)
     task_defs = compose.resolve_default_worker_task_defs(
         prefix=prefix, engines=engines, backend_version=backend_version, ssm=ssm)
-    print(f"worker-compat: run definition 无 worker_task_defs（旧 CLI/升级前提交）→ 走兼容路径，"
+    print(f"worker-compat: run {meta.run_id} 的任务定义没记 worker 镜像版本（旧版 CLI 或升级前提交）→ 走兼容路径，"
           f"按后端默认指针解析 variant={variant!r} 版本={backend_version} 引擎={engines}")
     return task_defs
 
@@ -251,7 +264,8 @@ def _build(run_id: str):
 
     返回 (meta, event_log, run_store, launcher, max_concurrency, result_store, report_store)——同 local
     build_local_reconcile 的形状，供 tick + finalize 聚合。meta 从 RunStore 读回（definition）。
-    **None = 本 run 不由云端推进器管**（definition 不在库 / 非 detached，见下）——两个 handler 据此整体 no-op。
+    **None = 本 run 云端推进器不该动**（非 detached / 已收尾 / definition 不在库，三支见下）——两个 handler
+    据此整体 no-op。
 
     **FargateEngine 装配复用 compose.build_fargate_engines（单一真源，不重造）**——job-in 前缀 / artifact 落点 /
     container 名 / SDK env 全与同步 cloud run 路径一致、零漂移（ADR 0016：compose 是组合根逻辑、WebUI/
@@ -268,6 +282,7 @@ def _build(run_id: str):
     from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore
     from gherkai_core.adapters.result_store.s3 import S3ResultStore
     from gherkai_core.adapters.report_store.s3 import S3ReportStore
+    from gherkai_core.model import TERMINAL_STATUSES
     from gherkai_runtime import compose
 
     region = os.environ.get("REGION") or os.environ.get("AWS_REGION")
@@ -295,7 +310,20 @@ def _build(run_id: str):
         # Stream 这扇门滤不了（events item 无 detached 标记）——同一判据在此判，返回 None = 全 handler no-op。
         # 判在 load_run_meta **之前**：同步 run 的每条 worker 事件都会触发本 Lambda，先判省掉强一致 META
         # 读 + offload 正文的 S3 取回，且推进器在断定「不该碰」前不读对方 definition（STATE 缺失同落此支）。
-        print(f"skip: run {run_id} 非 detached（同步 cloud run 由进程内 schedule 推进）")
+        print(f"skip: run {run_id} 不是 submit 提交的后台批次（同步的 `run --backend cloud` 由发起它的命令自己推进）")
+        return None
+    # **已收尾的 run 不再推演**：run 到终态时判定真值与报告都已落库，再 tick 一次只会拿「此刻还剩下的事件」
+    # 重算一遍并覆盖写（ADR 0030 决定三的写序无条件执行）——events 表开 TTL，7 天后 worker 事件已被删、只剩
+    # 永不过期的退出记录，重算结果是「每个 job 都 error、零 scenario」，把权威的判定真值静默销毁。触发面不只
+    # TTL 的 REMOVE（那道已在 `_run_ids_from_stream` 与 IaC filter 挡）：迟到重投、手工重放同一批 Stream 记录、
+    # 超时到点触发器的 payload 都落到这里——后者与 ADR 0034「到点时 job 已终态 → 处置 no-op」一致，且 run
+    # 终态的前提就是每个 job 都已有退出记录或已判超时，不会漏 StopTask。
+    # **明确接受的代价**：从此没有「重 tick 一个已收尾的 run 来补写丢失的报告」这条路——finalize_report 只有
+    # 本 Lambda 与 detached 宿主两个调用点、本就没有独立的重生成命令，而事件过期后重 tick 只会生成错报告。
+    # 判在 `load_run_meta` 之前同上一支的理由：省掉强一致 META 读 + offload 正文的 S3 取回。
+    state = run_store.load_run_state(run_id)
+    if state is not None and state.status in TERMINAL_STATUSES:
+        print(f"skip: run {run_id} 已结束，不再改写它的结果")
         return None
     meta = run_store.load_run_meta(run_id)
     if meta is None:
@@ -396,8 +424,17 @@ def _tick_runs(run_ids: set[str], label: str, *, prebuilt: dict | None = None) -
         if done:
             # 报告收尾走 core 唯一一份（曾在此双写、与 runtime/gherkai_runtime/detached.py 漂移风险，已合并）
             from gherkai_core.reconcile import finalize_report
+            # run 级墙钟是**派生指标**（缺则报告里显「?」），取它要多读一次 RunState——强一致读、会因限流/
+            # 瞬时 5xx 抛，而这一步跑在 finalize 的 commit point **之后**：commit 后的失败无人重试（ADR 0030
+            # 决定三），抛出去还会让本次 invocation 失败、events Stream 本批重试耗尽后整批丢弃，连坐同批其它
+            # run 的事件（同上面 WorkerVariantError 逐 run 隔离的理由）。故整段隔离、失败按缺值走
+            # （ADR 0034 收尾节把 run 级墙钟划在「派生、失败隔离」那一侧）。
+            try:
+                duration_ms = compose.run_duration_ms(run_store.load_run_state(run_id))
+            except Exception:
+                duration_ms = None
             finalize_report(run_id, meta, event_log, pstore, compose.now_iso(),
-                            run_duration_ms=compose.run_duration_ms(run_store.load_run_state(run_id)))
+                            run_duration_ms=duration_ms)
             print(f"{label}: run {run_id} done + finalized")
         else:
             print(f"{label}: run {run_id} advanced (not done)")

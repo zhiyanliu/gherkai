@@ -2,7 +2,10 @@
 
 数据面（追加为主）：一次 run 的每个 JobResult 落 `<root>/<run_id>/jobs/<encoded_scope_id>.json`，
 供 CI 读单 scope 判定真值。与 RunStore（控制面：run_meta.json + run_state.json）互补——数据面按 job 追加，
-已实时写：每 job 完成即落（`persist.RunPersistence.on_job_complete`，ADR 0030 决定一/三），不等整 run 结束。单 job 文件自包含（嵌完整 Job def）。
+单 job 文件自包含（嵌完整 Job def）。**两个写者、两种时序**：同步 `run` 由 `persist.RunPersistence.on_job_complete`
+每 job 完成即落、不等整 run 结束（ADR 0030 决定一/三）；detached / 无状态跑批由 `reconcile.tick` 的 finalize 分支在
+commit（CAS）**之前**从同一份 events 快照一次性落全部 job（ADR 0034 数据模型三件套表 / 0030 决定三「detached 路径同守」）——
+故 detached run 未达终态时本目录零文件，CLI 对用户说的「判定明细尚未落地」即此（ADR 0042 决策四）。
 
 **克制（ADR 0016）**：只忠实落已成形的 `JobResult`（复用 serialize.job_to_dict/from_dict），
 不发明 ADR 有意 defer 的数据面新字段。
@@ -16,6 +19,7 @@ import json
 from pathlib import Path
 from urllib.parse import quote
 
+from gherkai_core.adapters._atomic import atomic_write_json
 from gherkai_core.model import JobResult
 from gherkai_core.serialize import job_result_from_dict, job_result_to_dict
 
@@ -27,13 +31,17 @@ class LocalResultStore:
         self._root = Path(root)
 
     def save_job_result(self, run_id: str, job: JobResult) -> None:
-        """把单个 JobResult 落盘成 <root>/<run_id>/jobs/<encoded_scope_id>.json（追加，写面）。"""
+        """把单个 JobResult 落盘成 <root>/<run_id>/jobs/<encoded_scope_id>.json（追加，写面）。
+
+        **原子写**（tmp+rename，见 `gherkai_core.adapters._atomic`）：读者是另一个进程且是设计内的——
+        `explain` 允许在 run 跑到一半时读已完成 job（ADR 0042 决策四），无状态跑批下两个推进者又会各写一遍
+        全部 jobs/*.json（写面无跨进程锁，文件锁只护 run_state.json）。非原子写会让读者撞上 truncate 窗口、
+        拿到空 JSON。
+        """
         jobs_dir = self._root / run_id / "jobs"
         jobs_dir.mkdir(parents=True, exist_ok=True)
         fname = quote(job.scope_id, safe="") + ".json"  # 可逆编码，scope_id 任意字符都安全成文件名
-        (jobs_dir / fname).write_text(
-            json.dumps(job_result_to_dict(job), ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        atomic_write_json(jobs_dir / fname, job_result_to_dict(job))
 
     def load_job_result(self, run_id: str, scope_id: str) -> JobResult | None:
         """读回单个 JobResult（读回面）；不存在返回 None。"""

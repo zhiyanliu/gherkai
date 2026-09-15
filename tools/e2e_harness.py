@@ -129,21 +129,26 @@ def run(engine: str, feature: str, votes: int, interrupt: str, run_id: str, grac
                             stderr=subprocess.PIPE, text=True, encoding="utf-8", bufsize=1,
                             pass_fds=(events_w,))
     os.close(events_w)
-    proc.stdin.write(job_to_line(job) + "\n")
-    proc.stdin.flush()
-    proc.stdin.close()
-
-    events, t0 = [], time.monotonic()
-    kill_sent = {"t": None, "phase": None}
-    hung = {"v": False}
-    lock = threading.Lock()
 
     def log_pump(stream, tag):
         for line in stream:
             print(f"[worker {tag}] {line.rstrip()}", flush=True)
 
+    # 先起 pump、再写 stdin：与 `SubprocessEngine.run_scope` 同序（理由见该 adapter 同处注释——大 job 写 stdin
+    # 阻塞 × worker 读 stdin 前先吐 stdout 噪声 = 父子互锁）。harness 要忠实复现 adapter 的 spawn 环境，
+    # 顺序分叉会让这里跑出的中断/丢失结论不可迁移到生产路径。
     threading.Thread(target=log_pump, args=(proc.stdout, "out"), daemon=True).start()
     threading.Thread(target=log_pump, args=(proc.stderr, "err"), daemon=True).start()
+
+    proc.stdin.write(job_to_line(job) + "\n")
+    proc.stdin.flush()
+    proc.stdin.close()
+
+    # t0 = 事件/grace 相对时刻的基线，钉在「job 写完」这一刻（别跟着 pump 上移，否则实测时刻与历史报告不可比）
+    events, t0 = [], time.monotonic()
+    kill_sent = {"t": None, "phase": None}
+    hung = {"v": False}
+    lock = threading.Lock()
 
     def _watchdog():
         deadline = kill_sent["t"] + grace_cap

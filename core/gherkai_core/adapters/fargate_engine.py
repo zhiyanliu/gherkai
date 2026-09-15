@@ -33,13 +33,11 @@ from gherkai_core.wire import event_from_line, job_to_line, raise_for_worker_exi
 
 # events 表 schema 的**单一事实源**（ADR 0024「DynamoDB 作 events-out」+ ADR 0034 机制一）：PK=run_id#scope_id、
 # SK=scope 内单调 seq。**读写两侧共用**——`DdbEventLog` import 这批常量，别在别处再抄一份（抄一份 = 两处漂移）。
+# 同属这份事实源的还有下方 `EXIT_SK` 起的那组 exit 键空间常量（中间隔着本模块自用的 logger 与宽限常量）。
 PK_ATTR = "pk"
 SK_ATTR = "seq"
 BODY_ATTR = "body"  # 0024 事件的 JSON line 原样（DDB 不解析 body）
-# 平台侧退出观察者写的 `task_exited` 的**独立键空间**（ADR 0034 机制一）：DDB SK 是 NUMBER、字符串前缀结构上
-# 不可行，故用保留高位数值 SK（worker seq 从 1 递增、永不到它）+ `item_type` 属性承载，退出记录不入 worker 段。
-# **该 item 没有 body**：读 worker 段的 Query 必须把 SK 上界收在 `EXIT_SK - 1`，否则读到它 → KeyError('body')。
-# 取值 10^18 = 远超任何真实 scope 事件数的大数（DDB Number 精度内；虽超 JSON 安全整数，但 DDB 线上存字符串数值故 OK）。
+
 logger = logging.getLogger("gherkai_core.adapters.fargate_engine")
 
 # 流式期最终一致读的断号宽限秒数（ADR 0024「读一致性」）：游标只越过连续前缀，页内断号处停住、下轮 re-query 补齐；
@@ -47,6 +45,10 @@ logger = logging.getLogger("gherkai_core.adapters.fargate_engine")
 # 无界停摆（schedule 的静默兜底会把停摆误判成 worker 卡死）。EC 滞后通常 <1s，5s 留足余量；构造期可覆盖（测试）。
 EC_GAP_GRACE_S = 5.0
 
+# 平台侧退出观察者写的 `task_exited` 的**独立键空间**（ADR 0034 机制一）：DDB SK 是 NUMBER、字符串前缀结构上
+# 不可行，故用保留高位数值 SK（worker seq 从 1 递增、永不到它）+ `item_type` 属性承载，退出记录不入 worker 段。
+# **该 item 没有 body**：读 worker 段的 Query 必须把 SK 上界收在 `EXIT_SK - 1`，否则读到它 → KeyError('body')。
+# 取值 10^18 = 远超任何真实 scope 事件数的大数（DDB Number 精度内；虽超 JSON 安全整数，但 DDB 线上存字符串数值故 OK）。
 EXIT_SK = 10 ** 18
 ITEM_TYPE_ATTR = "item_type"
 EXIT_ITEM_TYPE = "exit"     # item_type 取值：退出记录（worker 事件 item 不带此属性）

@@ -550,6 +550,24 @@ def test_stream_event_source_mapping_to_reconciler():
     t.resource_count_is("AWS::Lambda::EventSourceMapping", 2)
 
 
+def test_events_stream_mapping_filters_out_ttl_removes():
+    """events 表的事件源 filter 必须排除 REMOVE：events 开 TTL，过期删除同样进 Stream，会让 reconciler 对一个
+    早已收尾的 run 拿「此刻还剩下的事件」重算并覆盖判定真值。
+
+    形态必须是 `anything-but REMOVE`、**不是** INSERT 白名单：events 虽只 PutItem，同键重写（超时处置直写的退出
+    记录被迟到的观察者以真退出码/归因重写）在 Stream 上是 MODIFY，白名单会把这类携带新归因的写入静默滤掉。
+    """
+    t = _template()
+    events_pats = [
+        f["Pattern"]
+        for lid, m in t.find_resources("AWS::Lambda::EventSourceMapping").items()
+        if "EventsTable" in lid
+        for f in m["Properties"].get("FilterCriteria", {}).get("Filters", [])
+    ]
+    assert len(events_pats) == 1, f"events 事件源应恰有 1 条 filter，实际 {events_pats}"
+    assert json.loads(events_pats[0]) == {"eventName": [{"anything-but": ["REMOVE"]}]}, events_pats[0]
+
+
 def test_reconciler_can_runtask_and_passrole():
     # reconciler 权限含 ecs:RunTask + iam:PassRole（起 worker task + 传 execution/task role）。
     t = _template()
@@ -618,6 +636,25 @@ def test_exit_observer_can_read_runs_table_only():
     assert "dynamodb:GetItem" in runs_actions, f"缺 runs 表读权限（detached 分流会 AccessDenied）：{runs_actions}"
     writes = [a for a in runs_actions if any(w in a for w in ("PutItem", "UpdateItem", "DeleteItem"))]
     assert not writes, f"退出观察者不应有 runs 表写权限：{writes}"
+
+
+def test_exit_observer_can_only_putitem_on_events_table():
+    """退出观察者对 events 表**只 PutItem**：events 是 append-only 的判定真值日志，观察者只追加 task_exited、
+    不该能改/删（ADR 0033 资源清单「exit-observer 只需 events 表写（PutItem）」+「动作维度全最小」）。
+
+    按角色归属逐条取语句、断言动作**集合相等**（不是「含 PutItem」）——CDK 的 grant_write_data 会连带
+    BatchWriteItem/UpdateItem/DeleteItem/DescribeTable，只查「含」照不出这条。
+    """
+    t = _template()
+    events_actions: list[str] = []
+    for props in [p["Properties"] for p in t.find_resources("AWS::IAM::Policy").values()
+                  if "ExitObserver" in json.dumps(p["Properties"].get("Roles", []))]:
+        for st in props["PolicyDocument"]["Statement"]:
+            if "EventsTable" not in json.dumps(st.get("Resource", "")):
+                continue
+            acts = st.get("Action")
+            events_actions += acts if isinstance(acts, list) else [acts]
+    assert set(events_actions) == {"dynamodb:PutItem"}, f"events 表授权面应恰是 PutItem，实际 {sorted(events_actions)}"
 
 
 def _advancer_stmts(t: Template, role_hint: str) -> set[str]:

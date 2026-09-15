@@ -397,7 +397,7 @@ test("interruptSnapshot: 抢传失败 → 吞掉、不抛（best-effort，不影
   // 不抛才对：若 rethrow，onSignal 的 process.exit 会被跳过、worker 退不干净——本断言锁住 catch 不被误删。
   await interruptSnapshot(uploader, "/tmp/run/report.html", (m) => logs.push(m));
   assert.equal(snaps.length, 1, "试过抢传");
-  assert.ok(logs.some((m) => m.includes("中断兜底抢传 report 失败")), "失败被 log（吞、不抛）");
+  assert.ok(logs.some((m) => m.includes("引擎原生报告未能在中断退出前上传")), "失败被 log（吞、不抛）");
 });
 
 

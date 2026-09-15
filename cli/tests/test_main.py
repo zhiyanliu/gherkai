@@ -999,6 +999,33 @@ def test_plan_rejects_a_directory_as_feature(tmp_path, capsys):
     assert "读 feature 失败" in capsys.readouterr().err
 
 
+def test_same_feature_given_twice_is_deduped_not_rejected(tmp_path, capsys):
+    """同一个 .feature 传两遍：CLI 按一次算 + 打一行提示，不再撞 core 窄腰的 uri 互异违约退 2
+    （收集去重是调用方的责任，ADR 0025）。"""
+    feat = _write_feature(tmp_path)
+    rc = m.main(["plan", str(feat), str(feat), "--json"])
+    assert rc == 0
+    doc = json.loads(capsys.readouterr().out)
+    assert len(doc["jobs"]) == 1 and sum(len(j["scenarios"]) for j in doc["jobs"]) == 1
+
+
+def test_differently_written_same_file_is_deduped_with_a_hint(tmp_path, monkeypatch, capsys):
+    """写法不同、归一后是同一个文件（`demo.feature` 与 `sub/../demo.feature`）→ 同样按一次算：
+    去重键必须取 load_feature 算出的 uri（路径归一后），不是原始路径字符串——glob + 显式并列常撞出这种混写。
+    提示点名被忽略的那个写法（可能是打错了文件名）。
+
+    注：`./x.feature` 不足以钉住这条——argparse 的 `type=Path` 已把 `./` 折掉，两个入参到这里已是同一字符串。
+    """
+    _write_feature(tmp_path)
+    (tmp_path / "sub").mkdir()
+    monkeypatch.chdir(tmp_path)
+    rc = m.main(["plan", "demo.feature", "sub/../demo.feature", "--json"])
+    cap = capsys.readouterr()
+    assert rc == 0, cap.err
+    assert len(json.loads(cap.out)["jobs"]) == 1
+    assert "忽略 1 个重复路径" in cap.err and "sub/../demo.feature" in cap.err
+
+
 def test_render_status_pending_run_with_claimed_job_does_not_hint(capsys):
     """run 级仍 pending 但已有 job 被 claim（running）→ 推进已开始，不提示「可能未启动」。这是 detached 的正常窗口：
     claim 只动 job、run 级要等下一次投影写；Fargate 拉起期间恒如此（真跑 submit 后连查三次撞见误报）。"""
@@ -1556,7 +1583,9 @@ def test_explain_detached_run_without_job_files_exits_0_with_one_hint(tmp_path, 
     from gherkai_core.model import Status as S
     root, run_id = _explain_run(tmp_path, with_results=False, run_status=S.RUNNING)
     rc, out, err = _explain(capsys, root, run_id)
-    assert rc == 0 and out == "" and "判定明细尚未落地" in err and f"gherkai status {run_id} --wait" in err
+    # 建议命令要能原样跑通：local 档必带 --report-dir（默认 reports/ 与本用例的 tmp 根不同，不带即查不到）
+    assert rc == 0 and out == "" and "判定明细尚未落地" in err
+    assert f"gherkai status {run_id} --report-dir {root} --wait" in err
     rc, out, err = _explain(capsys, root, run_id, "--json")
     assert rc == 0 and err == ""
     doc = json.loads(out)
@@ -1643,6 +1672,31 @@ def test_explain_cloud_reads_evidence_from_s3(monkeypatch, capsys):
     assert rc == 0 and got == [("bkt", "reports/r/ev.json")]
     step = json.loads(out)["scopes"][0]["scenarios"][0]["steps"][2]
     assert step["evidence"]["acts"][0]["vote"] is False and step["evidence_missing"] is None
+
+
+def test_explain_cloud_not_landed_hint_carries_cloud_locator_flags(monkeypatch, capsys):
+    """cloud 档「判定明细尚未落地」给的 status 命令必带 --backend cloud --prefix：照抄要跑得通，
+    否则落回 local 档、报「未找到 run」还把人引去查 --report-dir（方向指错）。prefix 取已解析的那个。"""
+    from gherkai_core.model import JobState, RunState
+    job = _explain_job()
+    state = RunState(run_id="r", status=Status.PENDING,
+                     jobs={job.scope_id: JobState(job.scope_id, Status.PENDING)})
+
+    class _NothingLanded:
+        def load_all(self, run_id):
+            return []
+
+        def load_job_result(self, run_id, scope_id):
+            return None
+
+    run_store = _explain_cloud_stores(None, state)[0]
+    monkeypatch.setattr(m.compose, "check_backend_skew", lambda **kw: (compose.SKEW_OK, "", "1.4.1"))
+    monkeypatch.setattr(m.compose, "build_cloud_stores",
+                        lambda **kw: (run_store, _NothingLanded(), object(), (lambda r, i: {})))
+    rc = m.main(["explain", "r", "--backend", "cloud", "--prefix", "vfy-", "--region", "us-east-1"])
+    err = capsys.readouterr().err
+    assert rc == 0 and "判定明细尚未落地" in err
+    assert "gherkai status r --backend cloud --prefix vfy- --wait" in err
 
 
 def test_explain_filter_to_unrecorded_step_does_not_fake_job_verdict_block(tmp_path, capsys):

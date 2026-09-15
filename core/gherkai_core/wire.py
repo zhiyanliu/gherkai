@@ -138,7 +138,7 @@ def event_from_json(d: dict) -> Event:
             cost=_cost_from_json(d.get("cost")),
             error_type=d.get("errorType"),
             message=d.get("message"),
-            report_refs=_report_refs_from_json(d.get("reportRefs")),  # step 级 trajectory（ADR 0027 下沉）
+            report_refs=_report_refs_from_json(d.get("reportRefs")),  # step 级产物：两引擎的 kind=evidence + Nova 的 kind=trajectory（ADR 0042 决策一 / 0027 下沉）
         )
     if t == "step_skipped":
         # scope 内短路（ADR 0031 决定六 / 0024）：独立事件、无 status/votes/cost——加法解析，

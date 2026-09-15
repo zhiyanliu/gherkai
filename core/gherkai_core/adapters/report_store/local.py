@@ -17,12 +17,12 @@ file:// 产物相对化（目录可整体搬走、链接不断），否则 href=
 from __future__ import annotations
 
 import html
-import json
 from pathlib import Path
 from typing import Callable
 from urllib.parse import urlparse
 from urllib.request import url2pathname
 
+from gherkai_core.adapters._atomic import atomic_write_json, atomic_write_text
 from gherkai_core.model import ReportRef, ResourceUri, RunResult
 
 SCHEMA_VERSION = 1
@@ -93,13 +93,14 @@ class LocalReportStore:
             "created_at": created_at,
             "report_index": index_entries,
         }
-        (run_dir / "manifest.json").write_text(
-            json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        # 两个文件都**原子写**（tmp+rename，见 `gherkai_core.adapters._atomic`）：同一份报告允许被两个推进者
+        # 各写一遍（派生视图、可重建，ADR 0027），而人/CI 会在第一个写者退出后立刻读——非原子写会让第二遍的
+        # truncate 窗口把读者撞成空 manifest / 空白页。
+        atomic_write_json(run_dir / "manifest.json", manifest)
 
         # index.html 摘要直接用内存 result（不从 manifest 取——manifest 已不含 result）
         index_path = run_dir / "index.html"
-        index_path.write_text(_render_index_html(manifest, result), encoding="utf-8")
+        atomic_write_text(index_path, _render_index_html(manifest, result))
         return ResourceUri(index_path.resolve().as_uri())
 
     def preflight(self) -> None:

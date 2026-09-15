@@ -166,6 +166,14 @@ def install(args, *, version: str | None) -> int:
         for p in pointer_paths:
             try:
                 added = _append_pointer(p)
+            except UnicodeDecodeError:
+                # 使用方的指令文件不是 UTF-8（GBK 存出的 CLAUDE.md 等）：读侧一个
+                # `read_text(encoding="utf-8")` 抛的栈不该冲到使用者面前（同 `__main__` 读 feature 处的写法）。
+                # 宁可不写也不改用 errors="replace"：那会把用户文件里的非 UTF-8 段落写坏。
+                # 与下面的 OSError 分开报：混在「写不进去」里会把人引去查写权限/磁盘，真因（文件编码）只剩一句
+                # 英文 codec 报文。skill 本身已装好，退出码照「没全做成」算。
+                _stderr(f"skill 已装好，但 {p} 不是 UTF-8 编码、不敢改它（怕把原文写坏）。这一行请自己贴：{POINTER_LINE}")
+                return 2
             except OSError as e:
                 # skill 本身已装好；只是要加的那一行没写进去——说清两件事，退出码照「没全做成」算
                 _stderr(f"skill 已装好，但写不进 {p}：{e}。这一行请自己贴：{POINTER_LINE}")

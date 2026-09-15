@@ -59,3 +59,5 @@ def test_concurrent_reader_never_sees_torn_run_state(tmp_path):
     # 读回是最后一次写的完整态、且目录里无 tmp 残留
     assert store.load_run_state(run_id).jobs["features/f0.feature:199"].session_id == "s-199-0"
     assert not list((tmp_path / run_id).glob("*.tmp"))
+    # 控制面文件权限保持 0600（只被本机同 uid 的进程消费）——共享助手的默认 0644 不该顶掉这个声明
+    assert state_path.stat().st_mode & 0o777 == 0o600, oct(state_path.stat().st_mode & 0o777)

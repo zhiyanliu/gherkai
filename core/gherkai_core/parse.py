@@ -38,12 +38,14 @@ class ParsedScenario:
 
     scenario: Scenario
     tags: tuple[str, ...]  # 已合并 feature 级 + scenario 级（gherkin Compiler 合并，ADR 0025）
-    uri: str  # 该 scenario 所属 .feature 的 uri（权威值，parse 时本就已知）——供 scope 跨文件合并 warning 分组，
-    # 免得 scope 从 scenario_id 有损反解（scenario_id 含冒号/数字端口时反解会错，见 scope.group_uris）
+    uri: str  # 该 scenario 所属 .feature 的 uri（权威值，parse 时本就已知）——供 scope.plan 统计 named scope 要跑的成员
+    # 落在哪几个文件（跨文件合并 warning），也供 cli 的 `_build_selector` 从 scenario_id 切掉 uri 前缀取行号；两处都
+    # 免于从 scenario_id 有损反解（uri 自身含冒号，如带端口的 URL，按冒号反解就会错——ADR 0025「id 派生」）
 
 # pickle step type → 我们的 keyword（And/But 已被 Compiler 折叠继承上一条非连接词的类型）。
-# 例外：无前驱可继承的 `*`/And/But（如 scenario 首步就是 And）Compiler 给 type='Unknown'——**判不出即
-# 拒绝猜**，由下面的 _step_keyword 抛 PlanError（ADR 0025），故本表**不设**默认值。
+# 例外：`*` 步骤（gherkin 不把它当连接词，故**无论前驱是什么**都不继承）与无 Given/When/Then 可继承的
+# And/But（scenario 首步就是 And，或前驱是 `*`）Compiler 给 type='Unknown'——**判不出即拒绝猜**，由下面的
+# _step_keyword 抛 PlanError（ADR 0025），故本表**不设**默认值。
 _TYPE_TO_KEYWORD = {"Context": "Given", "Action": "When", "Outcome": "Then"}
 
 
@@ -66,9 +68,15 @@ def _step_keyword(pickle_step: dict, scenario_id: str) -> str:
 def _index_ast_lines(gherkin_document: dict) -> dict[str, int]:
     """建 AST 节点 id → location.line 的索引，供 pickle 的 astNodeIds 回查行号。
 
-    遍历 feature 及 **Rule 下**（Compiler 把 Rule 场景完全展开成真实 pickle，其 astNodeIds 指向 Rule 内节点，
-    ADR 0025）的 background/scenario 及其 steps、scenario.examples 的 tableBody 行。**必须下钻 rule**——
-    否则 Rule 内 scenario 回查行号得 None → sid 塌成 `<uri>:None`、多个 Rule 场景静默撞名（ADR 0025 撞名=静默灾难）。
+    只记 **scenario 节点**与其 **examples.tableBody 行**（pickle 顶层 astNodeIds 只有这两类，见
+    `_scenario_line_and_example_line`）。遍历 feature 顶层及 **Rule 下**（Compiler 把 Rule 场景完全展开成真实
+    pickle，其 astNodeIds 指向 Rule 内节点，ADR 0025）——**必须下钻 rule**，否则 Rule 内 scenario 回查行号得
+    None → sid 塌成 `<uri>:None`、多个 Rule 场景静默撞名（ADR 0025 撞名=静默灾难）。
+
+    被拒方案：顺手把 background 节点与每个 step 的行号也记进来。实测 gherkin 42.0.1 的 Compiler，pickle 顶层
+    astNodeIds 恒为 `[scenario]` 或 `[scenario, Examples 数据行]`：step 自己的 astNodeIds 挂在 pickle step 上、
+    parse 从不查，background 节点 id 永不出现在任何 astNodeIds 里。多记的条目无人消费，而 ADR 0025「行号来源」
+    要的正是 scenario 行 + Examples 行两样。
     """
     lines: dict[str, int] = {}
 
@@ -77,15 +85,11 @@ def _index_ast_lines(gherkin_document: dict) -> dict[str, int]:
             lines[node["id"]] = node["location"]["line"]
 
     def record_children(children: list) -> None:
-        """处理一个 children 列表（feature 顶层 / Rule 内层同构）：记 background/scenario 及其 step/examples 行。"""
+        """处理一个 children 列表（feature 顶层 / Rule 内层同构）：记 scenario 节点与其 Examples 数据行。"""
         for child in children:
-            for key in ("background", "scenario"):
-                node = child.get(key)
-                if not node:
-                    continue
+            node = child.get("scenario")
+            if node:
                 record(node)
-                for step in node.get("steps", []):
-                    record(step)
                 # Scenario Outline 的 Examples 表行（pickle astNodeIds 末项指向它，用于区分展开后的多个 scenario）
                 for ex in node.get("examples", []):
                     for row in ex.get("tableBody", []):

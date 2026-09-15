@@ -9,7 +9,8 @@
 - timeout：scope 内缺省用 config.default_job_timeout_s（未给=不超时）；任一 scenario 标了 @timeout:N 则全 scope 继承；
   同 scope 多个不同值 / 非有限正数 → 报错（tag 语义权威在 ADR 0019）。
 - 一个 scenario 多个不同 @scope 值（feature 级传播 + scenario 级）→ 报错（与 engine 冲突对称）。
-- id 派生：有 @scope 用其值；无标用 scenario 的 id/标题。
+- id 派生：有 @scope 用其值；无标用 scenario 的 id/标题；两者共用一个 scope_id 命名空间（下游主键），
+  @scope 的值撞上某条未标 scenario 的 id → 报错（撞 id = 静默丢结果，与裸 `@scope:` 同立场）。
 """
 from __future__ import annotations
 
@@ -146,8 +147,8 @@ def plan(features: list[FeatureSource], config: PlanConfig, *,
     for f in features:
         if f.uri in seen_uris:
             raise PlanError(
-                f"features 含重复 uri {f.uri!r}：uri 是 scenarioId 前缀，重复会撞 id。"
-                f"core 窄腰要求 uri 互异（调用方负责收集时去重）。"
+                f"同一个 .feature 给了两次：{f.uri!r}（重复会让两份的 scenario 编号撞在一起、结果错乱）。"
+                f"每个文件只给一次。"
             )
         seen_uris.add(f.uri)
 
@@ -157,37 +158,45 @@ def plan(features: list[FeatureSource], config: PlanConfig, *,
         all_parsed.extend(parse_feature(f.uri, f.text))
 
     # 2) 按 @scope 分组（全局命名空间）；未标的各自单元素 scope
-    #    分组键：有 @scope → 用其值；无标 → 用 scenario_id（保证各自独立、不撞）
-    groups: dict[str, list[ParsedScenario]] = {}
-    group_is_named: dict[str, bool] = {}  # 该组是否来自显式 @scope（用于 warning + name 派生）
+    #    分组键 = (是否来自显式 @scope, 键值)：有 @scope → 其值；无标 → scenario_id（ADR 0025）。
+    #    「是否 named」进键、由结构承载——曾用一张 key→bool 边表，两类键撞上时被后写的成员覆盖，
+    #    scope_name 与跨文件 warning 都随遍历顺序摆动（顺序依赖的静默错）。
+    groups: dict[tuple[bool, str], list[ParsedScenario]] = {}
     for parsed in all_parsed:
         scope_value, scenario_id = _scope_key(parsed)  # 对全量成员校验：一个 scenario 多个 @scope 不因被筛掉而放过
-        if scope_value is not None:
-            key = scope_value
-            group_is_named[key] = True
-        else:
-            key = scenario_id  # 未标 scope：自成单元素 scope，键 = scenario_id（ADR 0025）
-            group_is_named[key] = False
-        groups.setdefault(key, []).append(parsed)
+        group_key = (True, scope_value) if scope_value is not None else (False, scenario_id)
+        groups.setdefault(group_key, []).append(parsed)
+
+    # 2.1) 两类键共用 scope_id 命名空间（scope_id = 键值，ADR 0025「id 派生」）：@scope 的值若等于某条未标
+    #      scenario 的 id，两个组会派生出同一个 scope_id，而 scope_id 是下游主键（RunState.jobs 的 key、每 job
+    #      一个结果文件、claim 的键）→ 状态只剩一个、结果互相覆盖。撞名=静默灾难，故 fail-fast（与裸 `@scope:`
+    #      同立场）。判据用集合交、与遍历顺序无关；且只比**当了分组键**的 id，不误伤「那条 scenario 自己也标了
+    #      别的 @scope」的无害输入（它的 id 根本不当键）。
+    collided = sorted({k for named, k in groups if named} & {k for named, k in groups if not named})
+    if collided:
+        joined = "、".join(collided)
+        raise PlanError(
+            f"@scope 的值和某条 scenario 的编号相同：{joined}。"
+            f"没标 @scope 的 scenario 用自己的编号（文件:行号）当会话名，撞上会把两条 scenario 并进同一个会话、"
+            f"跑出来的结果互相覆盖。给这个 @scope 换个名字。"
+        )
 
     # 3) 每组：engine/timeout 按**全量**成员解析（不变量：筛选只减少跑哪几条，不改 scope 的引擎、预算、会话身份），
     #    再施加 select 取本次要跑的成员；整组筛空则不进任何 job——且在解析之前跳过，被筛掉的 scope 里的 @engine/@timeout
     #    冲突不拦本次迭代（ADR 0041 决策一）。
     jobs: list[Job] = []
-    picked_uris: dict[str, set[str]] = {}  # 实际要跑的成员所在 uri（跨文件合并 warning 按它算，别报不会跑的文件）
-    for key, members in groups.items():
+    picked_uris: dict[str, set[str]] = {}  # named scope 实际要跑的成员所在 uri（跨文件合并 warning 按它算，别报不会跑的文件）
+    for (named, key), members in groups.items():
         picked = members if select is None else [m for m in members if select(m, key)]
         if not picked:
             continue
         engine = _resolve_engine(key, members, config.default_engine)
         timeout_s = _resolve_timeout(key, members, config.default_job_timeout_s)
-        named = group_is_named.get(key, False)
+        scope_id = key
         if named:
-            scope_id = key
             scope_name = key  # @scope 原值（人写名）
         else:
             # 未标 scope：scope_id = scenario_id；scope_name = scenario 标题（人写名，不复用机器键，ADR 0025）
-            scope_id = key
             scope_name = picked[0].scenario.name
         jobs.append(
             Job(
@@ -199,11 +208,12 @@ def plan(features: list[FeatureSource], config: PlanConfig, *,
                 timeout_s=timeout_s,
             )
         )
-        picked_uris[key] = {m.uri for m in picked}  # 权威 uri（parse 时已知），不从 id 有损反解
+        if named:
+            picked_uris[key] = {m.uri for m in picked}  # 权威 uri（parse 时已知），不从 id 有损反解
 
     # 4) 跨文件合并 warning（ADR 0025）：一个 named scope **要跑的**成员跨多个 uri
     for key, uris in picked_uris.items():
-        if group_is_named.get(key) and len(uris) > 1:
+        if len(uris) > 1:
             logger.warning(
                 "scope %r 跨 %d 个 feature 文件合并（%s）：这些文件的 scenario 将串行共享同一会话。"
                 "若非有意，检查是否 @scope 撞名。",

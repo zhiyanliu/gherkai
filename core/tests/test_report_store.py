@@ -90,6 +90,28 @@ def test_writes_manifest_and_index(tmp_path: Path):
     assert index.startswith("file://") and index.endswith("/index.html")
     assert (run_dir / "manifest.json").exists()
     assert _uri_to_path(index).exists()
+    # 原子写（tmp+rename）不许留残骸、也不许把产物权限收窄成 owner-only——报告是给人/CI/静态 server 读的
+    assert not list(run_dir.glob("*.tmp"))
+    for name in ("manifest.json", "index.html"):
+        mode = (run_dir / name).stat().st_mode & 0o777
+        assert mode & 0o044, (name, oct(mode))
+
+
+def test_report_files_keep_explicit_mode_under_tight_umask(tmp_path: Path):
+    """收紧 umask 也必须落 0644——这是「报告写面退回 write_text」的判别式护栏。
+
+    `write_text` 的权限随 umask 走（077 下 = 0600），原子助手显式 chmod 成声明的 mode；报告是给人/CI/
+    静态 server 读的那一份（ADR 0027），权限不该随环境漂移。原子性本身由 test_atomic_write.py 的通用用例钉。
+    """
+    run = _run_with_refs(tmp_path)
+    old_umask = os.umask(0o077)
+    try:
+        LocalReportStore(tmp_path / "reports").write(run.run_id, run, created_at="2026-06-29T00:00:00Z")
+    finally:
+        os.umask(old_umask)
+    run_dir = tmp_path / "reports" / _RUN_ID
+    for name in ("manifest.json", "index.html"):
+        assert (run_dir / name).stat().st_mode & 0o777 == 0o644, (name, oct((run_dir / name).stat().st_mode & 0o777))
 
 
 def test_manifest_shape(tmp_path: Path):

@@ -13,6 +13,9 @@
 //      这条把它变成起不来的显式失败。（副作用：使用方写了个一条都不注册的文件也会被拒——正确，
 //      那个文件对 worker 毫无意义、多半是写错了。）
 //
+// 另有一条 fail-loud 在进入遍历之前：env 已设但目录不存在 / 不是目录 → 抛。组合根只在目录存在时才注入，
+// 走到这里说明提交后目录被移走或写错，属「没开跑就被拒」的配置错（Nova 侧同一处理）。
+//
 // 抛出而非自己 `process.exit`：退出码由入口（`bin.mts`）统一落地（非零、且不是 ADR 0028 的网络专用 80），
 // 本模块保持可单测。
 import * as fs from "node:fs";
@@ -48,7 +51,8 @@ export interface LoadUserStepsDeps {
   logFn?: (m: string) => void;                         // 默认 stderr
 }
 
-/** 加载使用方 steps 目录。env 未设 / 目录不存在 → no-op（组合根只在目录存在时才注入，这里再兜一层）。
+/** 加载使用方 steps 目录。env 未设 / 空串 → no-op（使用方没定制，正常路径）；env 已设但目录不存在 / 不是目录 → 抛
+ * （fail-loud：明确指了一个地方而那里没东西 = 配置错，不是「没定制」，ADR 0037 决策 4）。
  * 返回加载了的文件列表（诊断用）。 */
 export async function loadUserSteps(deps: LoadUserStepsDeps = {}): Promise<string[]> {
   const stepsDir = deps.stepsDir ?? process.env.GHERKAI_STEPS_DIR;

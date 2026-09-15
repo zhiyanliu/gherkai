@@ -171,17 +171,21 @@ class ArtifactUploader:
         with self._lock:
             self._uploaded.add(str(local_abs.resolve()))
 
-    def _upload_once_with_retry(self, local_abs: Path) -> bool:
+    def _upload_once_with_retry(self, local_abs: Path, *, respect_abandon: bool = False) -> bool:
         """传一个文件、失败**重试一次**；成功 True（并记进已传集合）、两次都失败 False（不抛）。
 
         队列与 flush 共用（key 规则与 ExtraArgs 只此一处，不复刻——`to_report_ref` 的 key 由同一 `_key_for` 算，
         故三条路径给出的 key 逐字一致，`ref_for` 先算的 URI 才不会悬空）。
         **重试之间不 sleep**：client 侧本就 connect 5s / read 10s、零退避（见 `_s3`），两次尝试最坏 ~30s——收尾
         排空的预算按此量级取（有界，ADR 0029「退出时间有界」）。
+        `respect_abandon`：**只有队列线程传 True**（`drain` 超时后它须静默，见 `_abandoned`；留在重试循环内才
+        继续抑制在途那一项的第二次尝试——drain 的预算即退出成本）。主线程的 `flush_and_cleanup` 用默认
+        False：ADR 0042 决策一是「队列有界排空、flush 只兜漏网」，drain 超时正是最需要 flush 兜底的一档，
+        若它也被 `_abandoned` gate 掉，整目录一个字节都不再传、也不删（产物随容器盘销毁即永久丢）。
         """
         for _ in range(2):          # 首次 + 重试一次
-            if self._abandoned:
-                return False        # drain 已放弃：不再发起上传（进程正在退出）
+            if respect_abandon and self._abandoned:
+                return False        # drain 已放弃：队列线程不再发起上传（进程正在退出）
             try:
                 self._s3().upload_file(str(local_abs), self._bucket, self._key_for(local_abs),
                                        ExtraArgs=_extra_args(local_abs), Config=self._transfer_config())
@@ -266,7 +270,7 @@ class ArtifactUploader:
         p = Path(path)
         if self._is_uploaded(p):
             return          # 已被实时上传/flush 传过（幂等去重，ADR 0029）
-        if not self._upload_once_with_retry(p):
+        if not self._upload_once_with_retry(p, respect_abandon=True):
             if self._abandoned:
                 return          # 进程正在退出：不写 stderr（finalization 期写 buffered stderr 可能致命，见 _log）
             # 放弃：一行产品语言（发生了什么 + 不影响什么）。**不承诺「收尾再试」**——三条提前退出路径

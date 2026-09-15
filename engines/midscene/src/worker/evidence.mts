@@ -323,7 +323,7 @@ export interface EvidenceHook {
 }
 
 /** 落盘 + 即时上传，返回 ref。失败原样抛——best-effort 由 `stepEvidenceRef` 统一兜（文件头④）。 */
-export async function writeEvidence(
+async function writeEvidence(
   doc: EvidenceDoc, runDir: string, uploader: EvidenceUploader,
 ): Promise<string> {
   const file = evidenceFile(runDir, doc.scenario_id, doc.step_index);

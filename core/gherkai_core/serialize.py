@@ -158,7 +158,7 @@ def job_result_to_dict(jr: JobResult, *, include_job: bool = True) -> dict:
                         "votes": ({"yes": st.votes.yes, "total": st.votes.total} if st.votes else None),
                         "error_type": st.error_type,
                         "message": st.message,  # step 级失败原因原文（ADR 0042 决策三）
-                        "report_refs": [_ref_to_dict(rr) for rr in st.report_refs],  # step 级 trajectory（ADR 0027）
+                        "report_refs": [_ref_to_dict(rr) for rr in st.report_refs],  # step 级产物：两引擎的 kind=evidence + Nova 的 kind=trajectory（ADR 0042 决策一 / 0027）
                         "shortcircuited": st.shortcircuited,  # scope 内短路标记（ADR 0031 决定六）
                     }
                     for st in sr.steps

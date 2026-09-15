@@ -215,3 +215,15 @@ def test_write_failure_stays_inside_the_exit_code_set(tmp_path, capsys):
     (tmp_path / ".claude").write_text("这是个文件、不是目录", encoding="utf-8")
     assert m.main(["skill", "install", "--dir", str(tmp_path)]) == 2
     assert "装不进去" in capsys.readouterr().err
+
+
+def test_non_utf8_pointer_file_stays_inside_the_exit_code_set(tmp_path, capsys):
+    # 使用方的 CLAUDE.md 不是 UTF-8（中文环境用 GBK 的编辑器存出来的）：读侧同样只许退 2、不许抛栈
+    claude_md = tmp_path / "CLAUDE.md"
+    before = "中文\n".encode("gb18030")
+    claude_md.write_bytes(before)
+    assert m.main(["skill", "install", "--dir", str(tmp_path), "--pointer", "yes"]) == 2
+    err = capsys.readouterr().err
+    assert "这一行请自己贴" in err and "不是 UTF-8 编码" in err  # 说真因（编码），不误导去查写权限
+    # 宁可不写也不写坏：读不了就一个字节都别动（errors="replace" 那种写法会把用户文件的非 UTF-8 段落毁掉）
+    assert claude_md.read_bytes() == before

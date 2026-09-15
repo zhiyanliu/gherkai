@@ -125,7 +125,7 @@ class BackendStack(Stack):
         except InvalidVersion as exc:
             raise ValueError(
                 f"version context 非合法 PEP 440 版本：{version!r}——提交侧的版本比对按 PEP 440 解析，"
-                f"非法戳会让每个提交者的 preflight 炸。原因：{exc}"
+                f"非法戳会让每个提交者的提交前检查报错。原因：{exc}"
             ) from exc
         return version
 
@@ -497,7 +497,13 @@ class BackendStack(Stack):
             timeout=Duration.seconds(30),
             environment=common_env,
         )
-        self._events_table.grant_write_data(exit_observer)  # 写 task_exited（PutItem）
+        # events 表**只 PutItem**：events 是 append-only 的判定真值日志（ADR 0034 写模型），观察者只追加
+        # task_exited、不该能改/删（ADR 0033 资源清单「exit-observer 只需 events 表写（PutItem）」）。故不用
+        # CDK 的 grant_write_data——它连带 BatchWriteItem/UpdateItem/DeleteItem/DescribeTable。
+        # 资源用 `table_arn`（同 stack 内、表在 `_storage` 里先建）而非按名拼 ARN：拼串把「名→ARN」的推导又
+        # 复刻一遍，表名一改即静默漂移。
+        exit_observer.add_to_role_policy(iam.PolicyStatement(
+            actions=["dynamodb:PutItem"], resources=[self._events_table.table_arn]))
         # runs 表**只读**：写前判 run 是否 detached（同 cluster 的同步 cloud run 也触发本 Lambda，ADR 0034
         # 端到端 cloud 1b 的 handler 侧分流）。观察者绝不写 runs 表（RunState 单写者，ADR 0030）。
         self._runs_table.grant_read_data(exit_observer)
@@ -570,11 +576,19 @@ class BackendStack(Stack):
             scheduler_role=scheduler_role, ssm_read=ssm_read,
         )
         # events 表 Stream → reconciler（NEW_IMAGE；worker PutItem / task_exited 触发推进）。
+        # filter **排除 REMOVE**：events 表开 TTL（见 `_storage` 的 time_to_live_attribute），过期删除同样进
+        # Stream，会让 reconciler 对一个早已收尾的 run 拿「此刻还剩下的事件」重算并覆盖判定真值。
+        # 用 `anything-but REMOVE` 而非 INSERT 白名单：events 虽只 PutItem，同键重写（超时处置直写的退出记录
+        # 被迟到的观察者以真退出码/归因重写）在 Stream 上是 MODIFY，白名单会把这类新归因静默滤掉。
+        # Lambda 侧同样跳过 REMOVE（`lambdas/reconciler.py` 的 `_run_ids_from_stream`）——本道要 redeploy 才生效。
         reconciler.add_event_source(lambda_sources.DynamoEventSource(
             self._events_table,
             starting_position=lambda_.StartingPosition.LATEST,
             batch_size=10,
             retry_attempts=2,
+            filters=[lambda_.FilterCriteria.filter({
+                "eventName": lambda_.FilterRule.not_equals("REMOVE"),
+            })],
         ))
         kicker = self._advancer_function(
             "KickerFn",

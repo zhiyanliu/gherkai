@@ -29,8 +29,9 @@ def _extract(detail: dict) -> tuple[str | None, str | None, int | None, bool, st
     """从 STOPPED event 的 detail 拿 (run_id, scope_id, exit_code, timed_out, reason)。
 
     run_id/scope_id：RunTask 注入的 env 原样在 detail.overrides.containerOverrides[].environment（真验坐实）。
-    exit_code：detail.containers[] 里匹配的 container 的 exitCode；**缺 → `PLATFORM_FAILED_EXIT` 哨兵**（容器没跑
-    起来，见模块头），此时 reason = `stopCode: stoppedReason`（用户可见归因）；带码时 reason=None（worker 自己的日志才是归因源）。
+    exit_code：`exit_from_task` 从 detail.containers[] 取**首个带 exitCode 的**（worker 是 essential 单容器，无需按名匹配）；
+    **缺 → `PLATFORM_FAILED_EXIT` 哨兵**（容器没跑起来，见模块头），此时 reason = `stopCode: stoppedReason`
+    （用户可见归因）；带码时 reason=None（worker 自己的日志才是归因源）。
     timed_out：detail.stoppedReason 含超时哨兵（reconciler 的超时处置 StopTask(reason) 原样出现在此，
     ADR 0034「job timeout」节归因链）→ task_exited 带 timed_out=True。
     """
@@ -82,7 +83,8 @@ def handler(event, context):
         print(f"exit_observer: 跳过（缺 run_id/scope_id）taskArn={detail.get('taskArn')}")
         return {"skipped": True}
     if not _is_detached(run_id):
-        print(f"exit_observer: 跳过（run {run_id} 非 detached，同步 cloud run 自己观察退出）")
+        # 分流判据与故障形态见 `_is_detached`（同步 `run --backend cloud` 的 task 同 cluster、同样触发本 rule）
+        print(f"exit_observer: 跳过（run {run_id} 不是 submit 提交的后台批次；同步的 `run --backend cloud` 由发起它的命令自己观察退出）")
         return {"skipped": True, "reason": "not-detached"}
     log = _event_log(run_id, scope_id)
     log.record_exit(scope_id, exit_code, timed_out=timed_out, reason=reason)

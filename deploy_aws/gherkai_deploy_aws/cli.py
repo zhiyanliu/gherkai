@@ -20,13 +20,15 @@ CLI 皮负责：
 
 Provider 负责（CLI 一概不懂）：`--prefix`/`--vpc`/`--stop-timeout` 三个 context 旋钮 + AWS 概念的
 `--region`/`--profile`（CLI 皮不在 deploy/destroy 子命令上声明这五个）、context 拼装、`cdk.json` 生成、
-cdk CLI 调用、VPC 档三态比对、Node 前置检查。
+cdk CLI 调用、VPC 档三态比对、工具链前置检查（Node ≥ 22 与 cdk CLI 可定位，见 `_toolchain_gate`）。
 
 **`--require-approval` / `--allow-vpc-change` 是有意的两层声明**：皮给中立版（provider 缺席时帮助不残缺），
 本类**再声明一次**带 AWS 语义的版本（`--require-approval` 的取值是 cdk 的三档，能 `choices` 校验；
 `--allow-vpc-change` 的措辞要点名 VPC 档三态）。皮的 subparser 开了 `conflict_handler="resolve"`，同名即
-以后贴的（本类）为准——两层不是重复真源，是「中立占位 + provider 精确化」。本类另经 `getattr` 容忍它们
-彻底缺席（别的皮）：缺 `--allow-vpc-change` = 一律不放行（fail-closed）、缺 `--require-approval` = 交给 cdk 默认。
+以后贴的（本类）为准——两层不是重复真源，是「中立占位 + provider 精确化」。两层都**只贴 deploy**：destroy
+不消费它们（不做 VPC 档三态比对，cdk destroy 也没有 `--require-approval`），皮的中立版同样只在 deploy 上。
+本类另经 `getattr` 容忍它们彻底缺席（别的皮）：缺 `--allow-vpc-change` = 一律不放行（fail-closed）、
+缺 `--require-approval` = 交给 cdk 默认。
 
 ## worker 镜像子动词（ADR 0038 命令族）
 
@@ -37,7 +39,7 @@ cdk CLI 调用、VPC 档三态比对、Node 前置检查。
 
 ## 退出码
 
-`0` 成功；`2` **前置/校验失败**（Node 缺失、VPC 档不符或无记录、读后端失败、容器引擎名不认、push-worker
+`0` 成功；`2` **前置/校验失败**（Node 缺失或 cdk CLI 定位不到、VPC 档不符或无记录、读后端失败、容器引擎名不认、push-worker
 的架构/skew 拦截——用户可修，对齐 CLI 既有 preflight 退 2 的口径）；**`1`** = cdk 已成功而 worker 镜像四步失败
 （账户已被改动，重跑 `gherkai deploy` 幂等收敛，ADR 0038）；其余 = cdk CLI 自己的返回码（原样透传，
 别把 cdk 的失败压成自己的码）。
@@ -214,15 +216,19 @@ class Provider:
         )
         # 下面两个是**皮已声明的中立版的 AWS 精确化**（`conflict_handler="resolve"` 令本处生效，见模块头
         # 「两层声明」）：一个加 cdk 的取值 `choices`、一个把措辞钉到 VPC 档三态上。
-        parser.add_argument(
-            "--allow-vpc-change", action="store_true",
-            help="放行一次 VPC 档变更/首次登记（默认拦：档与后端记录不符即退 2，先 --diff 核对变更集）",
-        )
-        parser.add_argument(
-            "--require-approval", default=None,
-            choices=("never", "any-change", "broadening"),
-            help="透传 cdk 的 IAM 变更审批档（不给则用 cdk 自己的默认值）",
-        )
+        # **只贴 deploy**：destroy 两个都不消费（不做 VPC 档三态比对，cdk destroy 也没有 `--require-approval`），
+        # 贴上去就是 `--help` 里两个恒无效的旋钮。`prog` 认不出时仍贴（同 `_is_destroy_parser` 的降级口径：
+        # 无 prog 的 parser 要拿得到全集）。
+        if not self._is_destroy_parser(parser):
+            parser.add_argument(
+                "--allow-vpc-change", action="store_true",
+                help="放行一次 VPC 档变更/首次登记（默认拦：档与后端记录不符即退 2，先 --diff 核对变更集）",
+            )
+            parser.add_argument(
+                "--require-approval", default=None,
+                choices=("never", "any-change", "broadening"),
+                help="透传 cdk 的 IAM 变更审批档（不给则用 cdk 自己的默认值）",
+            )
         # --region/--profile 归 provider（AWS 概念）：CLI 皮不在本子命令上声明，见模块头接缝契约。
         parser.add_argument("--region", default=None, metavar="R", help="AWS region（默认走 AWS_REGION/profile 配置）")
         parser.add_argument("--profile", default=None, metavar="P", help="AWS profile（默认 AWS_PROFILE）")
@@ -333,12 +339,12 @@ class Provider:
     # ---- 命令面（CLI 皮据它自己的 flag 选调；每个方法自成一次完整调用）----
     def deploy(self, args) -> int:
         """供给/更新后端。**先过 VPC 档三态**（ADR 0037 决策 6），过了才调 `cdk deploy`。"""
-        # 工具链前置先于 VPC 档比对：前者不花网络、不要凭证——缺 Node 的人不该先被要求配好 AWS 凭证
-        # 才看到「你缺 Node」。`_run_cdk` 里同样查一次（每条命令都要过这一关，不靠调用者记得）。
-        node_error = check_node()
-        if node_error:
-            print(node_error, file=sys.stderr)
-            return EXIT_PRECONDITION
+        # 工具链前置（Node + cdk CLI）先于 VPC 档比对，理由见 `_toolchain_gate`。**cdk 可定位性必须也在这一档**：
+        # 若只在 `_run_cdk` 里拦，就要等读过后端、比对过 VPC 档之后才退 2，而那条路径上 cdk 一行输出都没有——
+        # 底下「失败原因见上方 cdk 输出」的提示会变成误导（它建议的 `--bootstrap` 也会以同样的原因失败）。
+        toolchain = self._toolchain_gate()
+        if toolchain is not None:
+            return toolchain
         # 容器引擎的两类问题也在这一档处置（本地、不花网络、不要凭证——这一期 deploy 机器需要容器引擎，
         # 同步基底要 pull/push，ADR 0038「容器引擎口子」）：
         # - **名字不认**（env/flag 给了 podman）→ 纯参数问题，退 2、绝不动账户；
@@ -416,15 +422,10 @@ class Provider:
         account 经 STS `GetCallerIdentity` 取（对任何主体恒可用、不算新增权限）；region 走同一条解析链
         （`--region` / AWS_REGION / profile 配置），取不到 → 退 2（bootstrap stack 是按 region 建的，不能猜）。
         """
-        node_error = check_node()
-        if node_error:
-            print(node_error, file=sys.stderr)
-            return EXIT_PRECONDITION
+        blocked = self._toolchain_gate()
+        if blocked is not None:
+            return blocked
         cdk_argv = cdk_command()
-        if not cdk_argv:
-            print("找不到 cdk 也找不到 npx：cdk CLI 是 npm 物，装 Node（≥ %d）后重试。"
-                  % NODE_MIN_MAJOR, file=sys.stderr)
-            return EXIT_PRECONDITION
         target = self._resolve_target(args)
         try:
             sts = _make_sts_client(region=target.region, profile=target.profile)
@@ -451,7 +452,7 @@ class Provider:
                 print(f"起不动 cdk CLI：{exc}", file=sys.stderr)
                 return EXIT_PRECONDITION
 
-    # ---- 命令面（worker 镜像族，ADR 0038；皮经 args._deploy_verb 分派到这三个）----
+    # ---- 命令面（worker 镜像族，ADR 0038「命令族」；皮经 args._deploy_verb 分派到 push_worker / list_workers / delete_worker）----
     def push_worker(self, args) -> int:
         """`gherkai deploy push-worker <镜像> --engine … --variant …`（八步见 `workers.push_worker`）。"""
         from gherkai_deploy_aws import workers
@@ -477,6 +478,7 @@ class Provider:
                                     region=target.region, profile=target.profile,
                                     as_json=getattr(args, "json", False))
 
+    # ---- 命令面（doctor 的 provider 段，ADR 0041 决策四；由 `gherkai doctor` 入口直调，不属 worker 镜像族、不经 _deploy_verb）----
     def doctor(self, args) -> list[dict]:
         """`gherkai doctor` 的 provider 段（ADR 0041 决策四）：部署方工具链**只读**自检——Node ≥ 22、cdk 可定位、容器引擎可用。
 
@@ -501,6 +503,7 @@ class Provider:
             checks.append({"name": "container-engine", "ok": False, "required": False, "detail": str(exc)})
         return checks
 
+    # ---- 命令面（worker 镜像族续，ADR 0038「命令族」）----
     def delete_worker(self, args) -> int:
         """留的口子（ADR 0038「命令族」）：**尚未提供**，退 2 说清为什么与将来怎么落。
 
@@ -547,6 +550,20 @@ class Provider:
             prefix=target.prefix, version=self._resolve_version(args), container=engine,
             region=target.region, profile=target.profile,
         )
+
+    # ---- 内部：部署工具链前置（Node / cdk；ADR 0037 决策 6）——与下面的容器引擎口子无关 ----
+    @staticmethod
+    def _toolchain_gate() -> int | None:
+        """Node 与 cdk CLI 两个前置：缺 → 打一句话、退 2；齐 → None。
+
+        `deploy` / `bootstrap` / `_run_cdk` 三处共用（每条命令都要过这一关，不靠调用者记得）。**排在动任何
+        AWS 读之前**：工具链缺失不花网络、不要凭证——缺工具的人不该先被要求配好 AWS 凭证才看到「你缺工具」。
+        """
+        for error in (check_node(), check_cdk()):
+            if error:
+                print(error, file=sys.stderr)
+                return EXIT_PRECONDITION
+        return None
 
     @staticmethod
     def _require_vpc(args) -> int | None:
@@ -612,15 +629,10 @@ class Provider:
             shutil.rmtree(path, ignore_errors=True)
 
     def _run_cdk(self, verb: str, args, *, extra=(), output: Path | None = None) -> int:
-        node_error = check_node()
-        if node_error:
-            print(node_error, file=sys.stderr)
-            return EXIT_PRECONDITION
+        blocked = self._toolchain_gate()
+        if blocked is not None:
+            return blocked
         cdk_argv = cdk_command()
-        if not cdk_argv:
-            print("找不到 cdk 也找不到 npx：cdk CLI 是 npm 物，装 Node（≥ %d）后重试。"
-                  % NODE_MIN_MAJOR, file=sys.stderr)
-            return EXIT_PRECONDITION
 
         target = self._resolve_target(args)
         ctx_cache = context_cache_path(target.prefix)
@@ -778,6 +790,17 @@ def _node_major(node: str) -> int | None:
         return None
     raw = (out.stdout or "").strip().lstrip("v").split(".")[0]
     return int(raw) if raw.isdigit() else None
+
+
+def check_cdk() -> str | None:
+    """cdk CLI 前置：PATH 上既无 `cdk` 也无 `npx` → 返回给人看的一句话；能定位 → None。
+
+    与 `check_node()` 同形（**不抛 traceback**，ADR 0037 决策 6）。消息在此单点维护——`deploy` / `bootstrap` /
+    `_run_cdk` 三处共用（`doctor` 的 detail 是自检清单的另一种措辞，另写）。
+    """
+    if cdk_command():
+        return None
+    return f"找不到 cdk 也找不到 npx：cdk CLI 是 npm 物，装 Node（≥ {NODE_MIN_MAJOR}）后重试。"
 
 
 def check_node() -> str | None:

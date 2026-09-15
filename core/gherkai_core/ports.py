@@ -1,4 +1,4 @@
-"""ports 层（ADR 0016 六边形架构）：核心只依赖这些接口，具体 adapter 由组合根注入。
+"""ports 层（ADR 0016 六边形架构）：核心的主要注入口在此（另两个见末段），具体 adapter 由组合根注入。
 
 四个 port（关注点拆开，不揉成上帝 module）：
 - Engine        —— 真正跑一个 scope（spawn worker、讲 ADR 0024 协议）；adapter = 子进程/Fargate
@@ -9,6 +9,13 @@
 禁止：port 内部 env-sniff 自选实现（Midscene GlobalConfigManager 反模式）。adapter 一律组合根注入。
 接口先定（逼清边界）；四个 port 的 local + 云端 adapter 均已实装（RunStore: local/ddb、Result/ReportStore:
 local/s3、Engine: subprocess/fargate），组合根按 `--backend` 注入。
+
+**另两个 port 不在本模块**：`EventLog` 与 `Launcher` 定义在 `reconcile.py`、与消费它们的 reconciler 同处——
+只服务无状态推进路径，与本模块那批「同步 `run` 也用」的口生命周期不同（ADR 0016「`EventLog` / `Launcher`
+两个 port 定义在 `reconcile.py`」条；亦见 ADR 0034「Engine port 演进」）。同样组合根注入、各两个实装：
+`EventLog` = `adapters/event_log/sqlite.py`（local）/ `adapters/event_log/ddb.py`（cloud）；`Launcher` =
+`runtime/gherkai_runtime/detached.py` 的 `SubprocessLauncher`（local）/ `adapters/cloud_launcher.py` 的
+`CloudLauncher`（cloud）。盘点 core 的注入接缝时**两处都要看**。
 """
 from __future__ import annotations
 
@@ -163,7 +170,8 @@ class ReportStore(Protocol):
     """归集报告产物为一份**派生只读导航视图**（RunReport，ADR 0027）：manifest.json + index.html。
 
     纯派生：可从 RunResult 完全重建，**永不作 CI 判定源**（判定真值在 RunResult/ResultStore）。
-    读 report_refs + 各级 status/时长/成本 + step 级 votes/error_type/shortcircuited 渲染「人看」视图；
+    读 report_refs + 各级标识（scope_id/scenario_id/step index）与 status/时长/成本 + job 级 engine/session_id
+    + job/step 级 error_type·message（失败原因原文；step 级 message 见 ADR 0042 决策三）+ step 级 votes/shortcircuited 渲染「人看」视图；
     不拿产物内容、不按 kind 分支（不透明搬运，ADR 0027）。
     """
 

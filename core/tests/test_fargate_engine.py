@@ -71,7 +71,7 @@ def _delayed_stopped_ecs(container_name: str, running_polls: int, exit_code: int
 
     **模拟真实时序**（ADR 0032 结论 2：scope_done 先于 ECS 记录 executionStoppedAt ~11s）：worker 已 emit
     scope_done、但 task 还没到 STOPPED——_probe_task 返回 (stopped=False, ...) → _await_exit_code 须 sleep 轮询等到 STOPPED。
-    `_stopped_ecs`（首次即 STOPPED）把这 ~11s 滞后塌缩为 0、测不出「轮询等 STOPPED」这个 option-c 定义行为
+    `_stopped_ecs`（首次即 STOPPED）把这 ~11s 滞后塌缩为 0、测不出「轮询等 STOPPED」这个定义行为
     （变异：把循环退化成单次读退出码，_stopped_ecs 下仍绿、但真 Fargate 每 scope 收尾拿 exitCode=None 崩）。"""
     class _DelayedEcs:
         def __init__(self):
@@ -432,9 +432,9 @@ def test_read_events_stopped_clean_exit_zero_terminates_without_raise(fargate):
 
 
 # ---- scope_done 后仍读退出码（ADR 0024「事件流结束信号」，与 subprocess 无条件 proc.wait() 同构）----
-# **本组是本次改动（scope_done 非终态、等 STOPPED 读码）的核心守卫**：worker 可发完 scope_done 又在会话释放阶段
+# **本组守的是「scope_done 非终态、须等 STOPPED 读退出码」这条契约**：worker 可发完 scope_done 又在会话释放阶段
 # 非 0 退出（Midscene cleanupFailed→exit 1），若「读到 scope_done 即 break、不读码」则该退出被吞、job 误报 PASSED、
-# 会话泄漏不可观测（违 ADR 0024「会话释放失败可观测」）。这正是能一开始就抓住那个 bug 的回归守卫。
+# 会话泄漏不可观测（违 ADR 0024「会话释放失败可观测」）。
 def test_read_events_scope_done_then_nonzero_exit_raises(fargate):
     """worker 发完 scope_done 又非 0 退出（会话释放失败，Midscene cleanupFailed→exit 1）：
     scope_done 后等 STOPPED 读到 exit 1 → 抛 RuntimeError（泄漏可观测），**不因见 scope_done 就吞掉退出码**。"""
@@ -453,12 +453,12 @@ def test_read_events_scope_done_then_nonzero_exit_raises(fargate):
 
 
 def test_read_events_scope_done_waits_for_stopped_before_reading_exit(fargate, monkeypatch):
-    """**option-c 定义行为的核心守卫**：scope_done 先于 ECS STOPPED ~11s 到达（ADR 0032 结论 2），_await_exit_code
+    """**「scope_done 后轮询等 STOPPED 再读码」的核心守卫**：scope_done 先于 ECS STOPPED ~11s 到达（ADR 0032 结论 2），_await_exit_code
     须**轮询等到 STOPPED** 才读 exitCode——不能读到 scope_done 就立刻读码（那时 _probe_task 返回 stopped=False、
     还没退出码，若立即读会拿不到码，真 Fargate 每 scope 收尾崩）。
 
     **前几个 assert 塌缩不了这个滞后**（其余 scope_done 测试用 _stopped_ecs 首次即 STOPPED、把滞后压成 0，故
-    「等 STOPPED」的轮询循环零覆盖——变异把循环退化成单次读退出码仍全绿，见对抗 review）。本测试用 _delayed_stopped_ecs
+    「等 STOPPED」的轮询循环零覆盖——变异把循环退化成单次读退出码仍全绿）。本测试用 _delayed_stopped_ecs
     造「前 2 次 RUNNING（exitCode null）、第 3 次才 STOPPED」的真实时序，锁死轮询：把 time.sleep 打桩计数（不真睡）。"""
     sleeps = []
     monkeypatch.setattr("gherkai_core.adapters.fargate_engine.time.sleep", lambda s: sleeps.append(s))

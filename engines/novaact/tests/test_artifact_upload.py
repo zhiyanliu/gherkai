@@ -416,3 +416,40 @@ def test_drain_timeout_abandons_queue_silently(tmp_path, capsys):
     time.sleep(1.2)                        # 给线程时间跑完剩余项（若它还在传，会多出 PutObject）
     assert len(calls) == 1, calls           # 只有放弃前已发起的那一次；后两项被跳过
     assert "证据截图上传失败" not in capsys.readouterr().err
+
+
+def test_flush_still_uploads_after_drain_timeout(tmp_path):
+    """drain 超时后主线程 flush **照传**剩余文件：放弃标志只约束队列线程，不该把兜底整条关掉。
+
+    这一档恰是最需要 flush 的一档（ADR 0042 决策一：队列有界排空、flush 只兜漏网）——若 flush 也被放弃标志
+    gate 掉，整目录一个字节都不再传、`_flush_ok` 也留 False 使目录不删，cloud 档产物随容器盘销毁即永久 404。
+    """
+    root = tmp_path / "reports" / "rid"
+    art = root / "nova-trajectories"
+    d = art / "evidence"
+    d.mkdir(parents=True)
+    shots = []
+    for i in range(3):
+        f = d / f"s{i}.jpg"
+        f.write_bytes(b"x")
+        shots.append(f)
+    traj = art / "act_0_trajectory.json"
+    traj.write_text("{}")                   # 从未入队：只有 flush 会传它
+    u, calls = _uploader_with_mock("bkt", "reports/rid/", root, delay_s=0.3)
+    u.enqueue([str(f) for f in shots])
+    assert u.drain(0.05) is False           # 首项在途即超时 → 队列线程放弃
+    deadline = time.monotonic() + 5
+    while u._pending > 0 and time.monotonic() < deadline:
+        time.sleep(0.02)                    # 等队列把剩余项走完（放弃后它们只是被跳过、不上传）
+    assert u._pending == 0
+    assert len(calls) == 1, calls           # 只有放弃前已发起的那一次
+    u.flush_and_cleanup(art)
+    assert {c[2] for c in calls} == {
+        "reports/rid/nova-trajectories/evidence/s0.jpg",
+        "reports/rid/nova-trajectories/evidence/s1.jpg",
+        "reports/rid/nova-trajectories/evidence/s2.jpg",
+        "reports/rid/nova-trajectories/act_0_trajectory.json",
+    }                                       # 队列跳过的两张 + 从未入队的 json 都由 flush 传出去了
+    assert len(calls) == 4, calls           # 且队列已传成功的 s0 不被 flush 重传（幂等去重仍在）
+    assert u._flush_ok is True
+    assert not art.exists()                 # 全成功 → 整目录删（本地零残留）

@@ -120,7 +120,11 @@ def _put_ssm(ssm, path: str, value: str) -> None:
 
 @dataclass(frozen=True)
 class ImageMapping:
-    """SSM `worker-image/<engine>/<tag>` 的一条映射（JSON 四键 + 从键名反推的 engine/tag/variant）。"""
+    """SSM `worker-image/<engine>/<tag>` 的一条映射（JSON 四键 + 从键名反推的 engine/tag/variant）。
+
+    `engine` 是记录的身份位（从参数路径反推）；当前调用方都已自带 engine（`current_version_mappings` 用它做
+    过滤后才构造），故该字段暂无读点、**有意保留**。
+    """
 
     engine: str
     tag: str
@@ -336,7 +340,7 @@ def _retire(ecs, arn: str, *, now: datetime, out) -> bool:
         return True
     except Exception as exc:
         out(f"警告：给旧 revision 打退休 tag 失败（{arn}）：{exc}\n"
-            f"     不拦——它已不在映射里，下次清理 pass 会按孤儿处置。")
+            f"     不拦——它已不在映射里，下次 push-worker / deploy 末尾的清理会按孤儿回收它。")
         return False
 
 
@@ -348,8 +352,8 @@ def _retire(ecs, arn: str, *, now: datetime, out) -> bool:
 class CleanupOutcome:
     """一次 pass 的结果：删掉的 revision + 留到下次的（ARN、原因）。**生产调用点（push-worker / deploy 末步）
     只看 pass 自己打的输出、丢弃本返回值**；它存在是为让测试直接断言两道闸（静默期 + 在跑 run 引用）的判定，
-    不必去解析打印文本。`list-workers` 不走这里——它是只读命令，待清理/孤儿由 `_print_pending_cleanup`
-    现扫 family 列出（ADR 0038：清理 pass 机会式、由 push-worker/deploy 触发，无定时任务）。
+    不必去解析打印文本。`list-workers` 不走这里——它是只读命令，待清理/孤儿由 `_pending_cleanup` 现扫 family
+    产出机读行、文本渲染在 `list_workers`（ADR 0038：清理 pass 机会式、由 push-worker/deploy 触发，无定时任务）。
     """
 
     deleted: tuple[str, ...] = ()
@@ -420,8 +424,8 @@ def cleanup_pass(*, prefix: str, engines, ssm, ecs, ddb, now: datetime, out=prin
         referenced_by_ssm = {m for _e, _t, raw in _iter_image_params(ssm, prefix)
                              for m in _mapped_arn(raw)}
     except Exception as exc:
-        out(f"警告：清理 pass 读不全 SSM 的 worker-image 映射（{exc}）——本次跳过清理"
-            f"（读不全就无从分辨孤儿，宁可不清也不误删）。")
+        out(f"警告：读不全 worker 镜像映射（{exc}）——本次跳过清理"
+            f"（读不全就分不清哪些还在用，宁可不清也不误删）。")
         return CleanupOutcome()
     runs_table = names.default_name(prefix, names.BASE_RUNS_TABLE)
     deleted: list[str] = []
@@ -431,7 +435,7 @@ def cleanup_pass(*, prefix: str, engines, ssm, ecs, ddb, now: datetime, out=prin
         try:
             revisions = scan_family(ecs, family)
         except Exception as exc:
-            out(f"警告：清理 pass 列不出 {family} 的 revision：{exc}（留到下次 pass）")
+            out(f"警告：清理旧 revision 时列不出 {family} 的 revision：{exc}（留到下次清理）")
             continue
         for rev in revisions:
             retired_at, reason = rev.retired_at, "已退休"
@@ -493,14 +497,19 @@ def _short_arn(arn: str) -> str:
 
 @dataclass(frozen=True)
 class PushOutcome:
-    """一次「推一个引擎的一个 variant」的结果（deploy 的基底同步复用同一条路径、同一个结果类型）。"""
+    """一次「推一个引擎的一个 variant」的结果（deploy 的基底同步复用同一条路径、同一个结果类型）。
+
+    **不带 `template_arn`**（同 `gherkai_runtime.compose.WorkerResolution` 的取舍）：消费侧无人读，
+    「从哪个模板派生」由 `gherkai deploy list-workers` 从 SSM/血缘 tags 直读展示。
+    `engine` 是本条结果的引擎身份位（`sync_base` / `rederive_variants` 返回的是跨引擎平铺 list，靠它区分归属）；
+    当前 `push_worker` 的成功输出用的是自己的局部 engine，故该字段暂无读点、**有意保留**。
+    """
 
     engine: str
     variant: str
     tag: str
     digest: str
     revision_arn: str
-    template_arn: str
 
 
 def _ecr_login(aws: Aws, container) -> str:
@@ -601,7 +610,7 @@ def _push_one(image: str, *, engine: str, variant: str, prefix: str, version: st
     if mapping and mapping.template_arn == template_arn and mapping.digest == digest:
         out(f"{engine}/{variant}：映射已是（当前模板，本 digest）→ 跳过注册，沿用 {_short_arn(mapping.revision_arn)}")
         return PushOutcome(engine=engine, variant=variant, tag=tag, digest=digest,
-                           revision_arn=mapping.revision_arn, template_arn=template_arn)
+                           revision_arn=mapping.revision_arn)
     reuse = _find_reusable(aws.ecs, prefix=prefix, engine=engine, variant=variant,
                            template_arn=template_arn, digest=digest)
     if reuse is not None:
@@ -624,7 +633,7 @@ def _push_one(image: str, *, engine: str, variant: str, prefix: str, version: st
     if old and old != revision_arn:
         _retire(aws.ecs, old, now=now, out=out)
     return PushOutcome(engine=engine, variant=variant, tag=tag, digest=digest,
-                       revision_arn=revision_arn, template_arn=template_arn)
+                       revision_arn=revision_arn)
 
 
 def _find_reusable(ecs, *, prefix: str, engine: str, variant: str, template_arn: str, digest: str) -> str | None:
@@ -716,7 +725,7 @@ def _skew_gate(compose, *, prefix: str, cli_version: str | None, ssm, out) -> in
     out(f"（本命令住 gherkai-deploy-aws，故临时跑同版本时要带 extra："
         f"uvx --from 'gherkai[deploy-aws]=={stamp}' gherkai deploy …）\n"
         f"不放行的理由：CLI 跑在后端前面会把镜像推进一个没人解析的版本命名空间"
-        f"（tag 含 CLI 版本），而提交者的 preflight 提示又把他推回这一步、形成死循环。")
+        f"（tag 含 CLI 版本），而提交者那边的提交前检查又会提示他回到这一步、形成死循环。")
     return EXIT_PRECONDITION
 
 
@@ -733,7 +742,7 @@ def _set_default(aws: Aws, *, prefix: str, variant: str, version: str, engine: s
         if other == engine:
             continue
         if read_mapping(aws.ssm, prefix=prefix, engine=other, tag=tag, version=version) is None:
-            out(f"警告：variant `{variant}` 在 {other} 尚无镜像（tag {tag}），用到该引擎的 run 会在 preflight 被拦。"
+            out(f"警告：variant `{variant}` 在 {other} 尚无镜像（tag {tag}），用到该引擎的 run 会在提交前检查被拦。"
                 f"\n     需要就为 {other} 也推一份：gherkai deploy push-worker <镜像> --engine {other} "
                 f"--variant {variant}")
 
@@ -809,8 +818,7 @@ def rederive_variants(*, prefix: str, engines, version: str, aws: Aws, now: date
             out(f"重派生 {engine}/{mapping.variant}：模板已更新 → {_short_arn(new_arn)}"
                 f"（旧 {_short_arn(mapping.revision_arn)} 已打退休 tag）")
             results.append(PushOutcome(engine=engine, variant=mapping.variant, tag=mapping.tag,
-                                       digest=mapping.digest, revision_arn=new_arn,
-                                       template_arn=template_arn))
+                                       digest=mapping.digest, revision_arn=new_arn))
     if not results:
         out("重派生：所有 variant 的 revision 都已基于当前模板——无需重派生")
     return results

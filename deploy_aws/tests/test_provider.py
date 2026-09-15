@@ -127,6 +127,31 @@ def test_contributed_flag_surface_is_exactly_the_provider_specific_set():
                        "--allow-vpc-change", "--require-approval", "--refresh-context"}
 
 
+def test_the_two_action_knobs_are_only_on_deploy():
+    """`--allow-vpc-change` / `--require-approval` **只贴 deploy**（枚举型全集比对，同上条口径）。
+
+    destroy 两个都不消费：它不做 VPC 档三态比对，`cdk destroy` 也没有 `--require-approval`——贴上去就是
+    `--help` 里两个恒无效的旋钮，且措辞讲的是 deploy 的变更集。皮的中立版同样只在 deploy 上（见 cli 模块头
+    「两层声明」），故 destroy 上这两个 flag 只可能来自本 provider。
+    """
+    def _flags(prog: str) -> set[str]:
+        parser = argparse.ArgumentParser(prog=prog, conflict_handler="resolve")
+        Provider().add_arguments(parser)
+        return {opt for action in parser._actions for opt in action.option_strings} - {"-h", "--help"}
+
+    shared = {"--prefix", "--vpc", "--stop-timeout", "--region", "--profile", "--refresh-context"}
+    # deploy 还多一个 `--container-engine`（第 2 步同步基底要用它）、destroy 多一个 `--yes`——两者各自的专属项
+    assert _flags("gherkai deploy") == shared | {"--allow-vpc-change", "--require-approval", "--container-engine"}
+    assert _flags("gherkai destroy") == shared | {"--yes"}
+    # 行为变化：destroy 上给这两个从「静默忽略」变成 argparse 报错（退 2，同 preflight 口径）
+    destroy = argparse.ArgumentParser(prog="gherkai destroy", conflict_handler="resolve")
+    Provider().add_arguments(destroy)
+    for argv in (["--vpc", "default", "--require-approval", "never"],
+                 ["--vpc", "default", "--allow-vpc-change"]):
+        with pytest.raises(SystemExit):
+            destroy.parse_args(argv)
+
+
 def test_worker_subverb_surface_is_exactly_three_and_only_on_deploy():
     """子动词全集钉死（枚举型护栏）+ **只挂 deploy**。
 
@@ -571,6 +596,35 @@ def test_missing_node_reports_cleanly_and_skips_cdk(monkeypatch, capsys):
     assert ran.calls == []
 
 
+def test_missing_cdk_stops_deploy_before_any_aws_read(monkeypatch, capsys):
+    """有 node、`cdk` 与 `npx` 都定位不到（如装了 nodejs 没装 npm）：`deploy` 在读后端之前退 2。
+
+    **不能落到 cdk 调用那一层再退**：那时会多打一条「失败原因见上方 cdk 输出……最常见的是未 bootstrap」，
+    而这条路径上 cdk 一行输出都没有，且它建议的 `gherkai deploy --bootstrap` 会以同样的「找不到 cdk」失败。
+    """
+    monkeypatch.setattr(provider_cli, "check_node", lambda: None)
+    monkeypatch.setattr(provider_cli, "cdk_command", lambda: [])
+    monkeypatch.setattr(Provider, "_container_engine", staticmethod(lambda args: _FakeEngine()))
+    ran = _Recorder()
+    monkeypatch.setattr(provider_cli.subprocess, "run", ran)
+
+    aws_reads: list[str] = []
+
+    def _no_aws(**kw):
+        aws_reads.append("read")
+        raise AssertionError("工具链前置不该先读 AWS")  # 会被 _guard_vpc_spec 的宽 except 吞掉，故另立账
+
+    monkeypatch.setattr(provider_cli, "_make_cfn_client", _no_aws)
+    monkeypatch.setattr(provider_cli, "_make_ssm_client", _no_aws)
+
+    rc = Provider().deploy(_parse("--vpc", "default", "--region", "us-east-1"))
+    assert rc == EXIT_PRECONDITION
+    err = capsys.readouterr().err
+    assert "找不到 cdk" in err and "bootstrap" not in err
+    assert ran.calls == []   # 一个子进程都没起
+    assert aws_reads == []   # 一次 AWS 句柄都没建
+
+
 def test_node_too_old_is_rejected(monkeypatch, capsys):
     monkeypatch.setattr(provider_cli.shutil, "which", lambda name: f"/usr/bin/{name}")
     monkeypatch.setattr(provider_cli, "_node_major", lambda node: 18)
@@ -691,9 +745,10 @@ def test_context_cache_is_per_prefix(monkeypatch, tmp_path):
 # ---------------------------------------------------------------- destroy --yes（非交互销毁）
 
 def _parse_destroy(*argv: str) -> argparse.Namespace:
+    # 皮在 destroy parser 上**只**贴 provider 选择那一个 flag：`--allow-vpc-change` / `--require-approval`
+    # 的中立版只在 deploy 上（见 `_parse` 与 cli 模块头「两层声明」），故这里不能手工补——补了就掩盖
+    # 「destroy 侧根本没有这两个旋钮」这条接线事实。
     parser = argparse.ArgumentParser(prog="gherkai destroy", conflict_handler="resolve")
-    parser.add_argument("--allow-vpc-change", action="store_true")
-    parser.add_argument("--require-approval", default=None, metavar="MODE")
     Provider().add_arguments(parser)
     args = parser.parse_args(argv)
     args.version = VERSION

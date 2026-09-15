@@ -151,7 +151,7 @@ def test_cross_file_scope_merge_warns(caplog):
 # ---- 重复 uri → 报错（接口违约，与上面跨文件 @scope 合并正交：那是 warning、这是 error）----
 def test_duplicate_uri_errors():
     f = FeatureSource("dup.feature", "Feature: D\n  Scenario: s\n    When \"x\"\n")
-    with pytest.raises(PlanError, match="重复 uri"):
+    with pytest.raises(PlanError, match="给了两次"):
         plan([f, f], CFG)  # 同一文件喂两遍 = 调用方 bug，fail-fast
 
 
@@ -296,6 +296,82 @@ def test_unlabeled_scope_independent_jobs():
     assert len(jobs) == 2  # 未标 scope 的 Outline 展开 → 2 个独立 job
     scope_ids = [j.scope_id for j in jobs]
     assert len(set(scope_ids)) == 2  # scope_id 不撞（继承 scenario_id 的 example 消歧）
+
+
+# ---- scope_id 命名空间：@scope 的值撞上未标 scenario 的 id → 报错（ADR 0025：撞 id = 静默灾难）----
+def test_named_scope_colliding_with_unlabeled_scenario_id_errors():
+    """未标 scope 的 scenario 拿自己的 id 当 scope_id；@scope 标成同一个字符串 = 两组派生出同一个 scope_id。
+
+    曾静默并成一个 job（= 一个共享会话）、同文件内连跨文件合并 warning 都不打；scope_id 是下游主键
+    （状态 Map / 结果文件 / claim），撞上等于丢结果，故 fail-fast。
+    """
+    # `Scenario: plain` 在第 2 行 → 它的 scope_id = t.feature:2
+    with pytest.raises(PlanError, match="编号相同"):
+        _plan(
+            """Feature: T
+  Scenario: plain
+    When "x"
+  @scope:t.feature:2
+  Scenario: hijack
+    When "y"
+"""
+        )
+
+
+def test_scope_id_collision_errors_regardless_of_order():
+    """named 在前、未标在后同样报错——判定不依赖遍历顺序。
+
+    曾用一张 key→bool 边表记「是否 named」，撞键时被后写的成员覆盖：顺序一反，scope_name 就从机器键摆到
+    某成员的标题，跨文件那条 warning 也被吞掉。
+    """
+    # `Scenario: plain` 在第 5 行
+    with pytest.raises(PlanError, match="编号相同"):
+        _plan(
+            """Feature: T
+  @scope:t.feature:5
+  Scenario: hijack
+    When "x"
+  Scenario: plain
+    When "y"
+"""
+        )
+
+
+@pytest.mark.parametrize("named_first", [True, False])
+def test_scope_id_collision_across_files_errors(named_first: bool):
+    """跨文件同构输入：两种 features 顺序都报错（此前只有「未标在前」那种顺序才打得出 warning）。"""
+    fa = FeatureSource("a.feature", 'Feature: A\n  @scope:b.feature:2\n  Scenario: a1\n    When "x"\n')
+    fb = FeatureSource("b.feature", 'Feature: B\n  Scenario: b1\n    When "y"\n')  # b1 在第 2 行
+    with pytest.raises(PlanError, match="编号相同"):
+        plan([fa, fb] if named_first else [fb, fa], CFG)
+
+
+def test_scope_id_collision_errors_even_when_narrowed_away():
+    """撞名检测在施加 select 之前：收窄到只跑 named 那个 scope 也照样退——撞的是 scope_id 命名空间，不是本次跑哪几条。
+
+    与「整组被筛空的 scope 其 @engine/@timeout 冲突不拦本次迭代」相反，属对全量成员 fail-fast 那一族（同 _scope_key）。
+    """
+    f = FeatureSource(
+        "t.feature",
+        'Feature: T\n  Scenario: plain\n    When "x"\n  @scope:t.feature:2\n  Scenario: hijack\n    When "y"\n',
+    )
+    with pytest.raises(PlanError, match="编号相同"):
+        plan([f], CFG, select=lambda p, k: p.scenario.name == "hijack")
+
+
+def test_named_scope_matching_a_tagged_scenario_id_is_ok():
+    """@scope 的值等于某条**自身已标 @scope** 的 scenario 的 id → 不报错：那条 id 根本没当分组键，不会撞。"""
+    jobs = _plan(
+        """Feature: T
+  @scope:s1
+  Scenario: tagged
+    When "x"
+  @scope:t.feature:3
+  Scenario: other
+    When "y"
+"""
+    )  # `Scenario: tagged` 在第 3 行，但它归 scope s1
+    assert sorted(j.scope_id for j in jobs) == ["s1", "t.feature:3"]
 
 
 # ---- engine 继承：scope 内任一 scenario 标了 → 全 scope 继承 ----

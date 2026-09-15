@@ -209,10 +209,14 @@ _EVIDENCE_MISSING_TEXT = {
 
 
 def explain_step_expands(step: dict, *, expand_passed: bool) -> bool:
-    """这个 step 要不要展开证据（ADR 0042 决策四）：默认只展开 failed / error / skipped / 无记录，`--all` 也展开 passed。
+    """这个 step 要不要展开证据（ADR 0042 决策四）：默认展开 failed / error / skipped，`--all` 也展开 passed。
 
     **同时兼作「要不要去读 evidence」的判据**（`explain_to_dict` 的 `wants_evidence`）：文本模式下不展开就不读，
     省掉云端逐 step 一次 GetObject 的白下载；`--json` 契约要求全给，那一路不传本谓词。
+
+    **无记录的 step 不经本谓词**：文本侧由 `_step_lines` 提前打「无记录（未执行或未上报）」直接返回，
+    `explain_to_dict` 的 `st is not None` 守卫也不会把它交给 `wants_evidence`。下面那行只作全函数防御——
+    让这个导出的谓词对任意 step dict 都给出正确答案，当前没有调用点能进到那里。
     """
     if step["record_missing"]:
         return False  # 无记录 = 没有 ref 可读，展不出东西（状态行已说明它没跑/没上报）
@@ -332,7 +336,7 @@ def _act_lines(act: dict, *, ref: str, full: bool) -> list[str]:
 
     默认预算：只渲染**最后一个带推理的 frame**（判否理由通常落在末次观察）及其截图，其余 frame 只报个数；
     `--full` 逐 frame 全文。frames 为空是 Nova 出错 act 的正常形态（SDK 不落轨迹 json，ADR 0042 决策一），
-    不当异常报——`错误:` 那行才是这种 act 的信息所在。
+    不当异常报——`error:` 那行才是这种 act 的信息所在。
     """
     vote = act.get("vote")
     # vote 用 json 的写法（true/false/null）：null = 本次调用不是投票调用（Given/When 的动作），与「投否」不同

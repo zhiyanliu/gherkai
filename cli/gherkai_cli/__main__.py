@@ -53,7 +53,9 @@ def _installed_version() -> "str | None":
         return None
 
 
-# `--steps-dir` 的公共 help（run/plan/submit/list-deterministic 四处共用，措辞单点维护、不抄四份）。
+# `--steps-dir` 的公共 help：凡带 `--steps-dir` 的子命令共用这一段措辞，单点维护、不抄多份
+# （使用点 grep `_STEPS_DIR_HELP` 即得；此处不枚举子命令，免得增删后注释漂）。部分使用点会在
+# 其后追加本命令特有的补充说明。
 # 文案是产品面（不带 ADR/内部机制名）；定制 step 的解析与 fail-loud 判据见 ADR 0037 决策 4。
 _STEPS_DIR_HELP = (
     "你自己的确定性 step 目录（默认 ./steps 存在即用；亦可 env GHERKAI_STEPS_DIR）：worker 启动时排序递归"
@@ -241,7 +243,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     )
     run.add_argument(
         "--ddb-table", default=None, metavar="NAME",
-        help="[--backend cloud] RunStore DynamoDB 表名（覆盖 prefix 默认 {prefix}runs）；兜底 AWS_DDB_TABLE",
+        help="[--backend cloud] 运行状态表（DynamoDB）名（覆盖 prefix 默认 {prefix}runs）；兜底 AWS_DDB_TABLE",
     )
     run.add_argument(
         "--s3-bucket", default=None, metavar="NAME",
@@ -325,7 +327,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     )
     sm.add_argument(
         "--expose-local", default=None, metavar="ORIGIN",
-        help="经隧道暴露本机可达的被测应用（语义同 run；submit 后隧道由后台进程持有——local=per-run 进程、"
+        help="经隧道暴露本机可达的被测应用（语义同 run；submit 后隧道由后台进程持有——local=本机后台进程、"
              "cloud=隧道守护进程，本机需保持开机联网直到 run 终态）",
     )
     sm.add_argument(
@@ -339,7 +341,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     )
     sm.add_argument("--report-dir", default="reports", metavar="DIR",
                     help="归集报告落点（默认 reports/）；cloud 档须与后端部署的 REPORT_DIR 一致"
-                         "（preflight 比对，不一致退 2）")
+                         "（提交前会比对，不一致退 2）")
     sm.add_argument(
         "--steps-dir", default=None, metavar="DIR",
         help=_STEPS_DIR_HELP + "。值随提交记录走，本机后台推进/接力进程都读回同一份；"
@@ -349,9 +351,9 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     sm.add_argument("--profile", default=None, metavar="P", help="AWS profile（喂 subprocess worker）")
     # backend：local（默认，per-run 进程本机推进）/ cloud（Fargate + 云端 Lambda 事件驱动链推进，ADR 0034）。
     sm.add_argument("--backend", choices=["local", "cloud"], default="local",
-                    help="local=本机 per-run 进程推进（默认）；cloud=Fargate + 云端 Lambda 事件驱动链推进（提交完真关机也跑完）")
+                    help="local=本机后台进程推进（默认）；cloud=Fargate + 云端 Lambda 事件驱动链推进（提交完真关机也跑完）")
     sm.add_argument("--prefix", default=None, metavar="P", help="[cloud] 资源名前缀（默认 gherkai-；须与 CDK 一致）")
-    sm.add_argument("--ddb-table", default=None, metavar="NAME", help="[cloud] RunStore DDB 表名")
+    sm.add_argument("--ddb-table", default=None, metavar="NAME", help="[cloud] 运行状态表（DynamoDB）名")
     sm.add_argument("--s3-bucket", default=None, metavar="NAME", help="[cloud] S3 桶名")
     sm.add_argument("--events-table", default=None, metavar="NAME", help="[cloud] events DDB 表名")
     sm.add_argument("--cluster", default=None, metavar="NAME", help="[cloud] ECS cluster 名")
@@ -368,14 +370,16 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     st.add_argument("--backend", choices=["local", "cloud"], default="local", help="须与 submit 一致")
     st.add_argument("--report-dir", default="reports", metavar="DIR",
                     help="run 落点（local）/ 后端报告前缀（cloud）——须与 submit 一致；终态时据此打印报告与判定明细位置")
+    # 两档接力形态不同：local 由本机这个进程亲自跑 reconcile.tick 推进；cloud 只 invoke kicker Lambda，
+    # 保 status 机器零 ECS 权限（ADR 0034）。help 里只讲用户看得见的差别。
     st.add_argument("--wait", action="store_true",
-                    help="轮询到 run 达终态再返回（两路都支持，接力语义异：local=本机 tick 推进；"
+                    help="轮询到 run 达终态再返回（两路都支持，接力方式不同：local=在本机接着把它推到底；"
                          "cloud=检测卡住即触发云端接力）")
     st.add_argument("--max-concurrency", type=int, default=1,
                     help="[local --wait] 接力推进并发上限的回落值（meta 带值时以 meta 为准）")
     st.add_argument("--json", action="store_true", help="输出机器可读 JSON（RunState）")
     st.add_argument("--prefix", default=None, metavar="P", help="[cloud] 资源名前缀（读 DDB RunState）")
-    st.add_argument("--ddb-table", default=None, metavar="NAME", help="[cloud] RunStore DDB 表名")
+    st.add_argument("--ddb-table", default=None, metavar="NAME", help="[cloud] 运行状态表（DynamoDB）名")
     st.add_argument("--region", default=None, metavar="R")
     st.add_argument("--profile", default=None, metavar="P")
 
@@ -401,7 +405,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     ex.add_argument("--report-dir", default="reports", metavar="DIR",
                     help="run 落点（local）/ 后端报告与判定明细前缀（cloud）——须与 submit 一致")
     ex.add_argument("--prefix", default=None, metavar="P", help="[cloud] 资源名前缀（须与部署一致）")
-    ex.add_argument("--ddb-table", default=None, metavar="NAME", help="[cloud] RunStore DDB 表名")
+    ex.add_argument("--ddb-table", default=None, metavar="NAME", help="[cloud] 运行状态表（DynamoDB）名")
     ex.add_argument("--region", default=None, metavar="R")
     ex.add_argument("--profile", default=None, metavar="P")
 
@@ -801,13 +805,31 @@ def _load_and_plan(args) -> "list | int":
             _progress("--scope 的值不能为空：给报告里的 scope_id（@scope 的名字，或 <文件>:<行号>）")
             return 2
     # 1) 读 feature（组合根的事，core 不碰 FS）→ FeatureSource[]
+    #    保序按 uri 去重：core 窄腰只接 uri 互异的列表，收集去重这类便利逻辑由调用方（组合根/CLI）负责
+    #    （ADR 0025）——`gherkai run features/*.feature features/a.feature` 这类 glob+显式并列不该撞库级违约。
+    #    去重键取 load_feature 算出的 uri，不在这里重抄一份路径归一规则（那规则的单一事实源在 load_feature）。
+    features = []
+    seen_uris: set[str] = set()
+    dup_paths: list[Path] = []
     try:
-        features = [compose.load_feature(f) for f in args.features]
+        for f in args.features:
+            src = compose.load_feature(f)
+            if src.uri in seen_uris:
+                dup_paths.append(f)
+                continue
+            seen_uris.add(src.uri)
+            features.append(src)
     except (OSError, UnicodeDecodeError) as e:
         # 不止「文件不存在」：给了目录（IsADirectoryError）/ 无读权限 / 非 UTF-8 编码同属「没开跑就被拒」
         # 的输入问题，一律退 2（退码语义 ADR 0021），不让它们以 traceback 形态逃出。
         _progress(f"读 feature 失败：{e}")
         return 2
+    if dup_paths:
+        # 点名被忽略的路径：用户多半是 glob 撞了显式并列，也可能是打错了文件名，看得见才好判断。
+        _progress(
+            f"同一个 .feature 传了多次，已按一次算（忽略 {len(dup_paths)} 个重复路径："
+            + "、".join(str(p) for p in dup_paths) + "）"
+        )
     # 2) plan：.feature → Job[]（uri 互异/engine 冲突等违约 → PlanError；gherkin 语法错 → FeatureParseError）
     try:
         cfg = PlanConfig(
@@ -1053,19 +1075,40 @@ def _cmd_submit(args) -> int:
         started_at=compose.now_iso(), high_water_mark=0,
     )
 
-    if args.backend == "cloud":
-        rc_ = _submit_cloud(args, run_id, run_meta, initial, tunnel_info=tunnel_info)
-    else:
-        rc_ = _submit_local(args, run_id, run_meta, initial, tunnel_info=tunnel_info)
-    if rc_ != 0 and tunnel_info is not None:
-        from gherkai_runtime.tunnel import stop_tunnel
+    # 隧道交棒的分界线 = 后台宿主 fork 成功那一刻（local=推进进程、cloud=隧道守护进程），由被调方经
+    # `on_handoff` 通知。**分界线之前**没交上棒（返回非 0 或抛异常：解析 profile / 落库 / 建日志 / fork
+    # 本身失败）→ 隧道没有宿主，就地拆掉，否则脱离进程组的 agent 会永久把本机应用留在公网（ADR 0035 决策 3）。
+    # **「没交棒」≠「没提交」**：cloud 档 `create_run` 已过、只是守护没 fork 起来这一格，云端链已经接管这个
+    # run；local 档同理（run 记录已在盘上、接力者会来推它）。这一格照样拆（没有任何收尾者，不拆就是永久公网
+    # 暴露），但必须打一行说清楚——否则用户只看到一个栈、以为什么都没发生，而云端照跑照烧钱。
+    # **分界线之后**即便收尾几行抛（stdout 是坏管道、Ctrl-C 恰落此窗）也不能拆：宿主已经在跑，拆了会让
+    # 剩余 job 在被测应用不可达下跑成假失败——兜底机制反成失败源，且烧真钱。
+    handed_off = False
 
-        stop_tunnel(tunnel_info.pid)  # 提交失败 → 隧道无宿主可交棒，就地拆（成功路径由后台宿主收尾）
+    def _mark_handoff() -> None:
+        nonlocal handed_off
+        handed_off = True
+
+    _submit = _submit_cloud if args.backend == "cloud" else _submit_local
+    try:
+        rc_ = _submit(args, run_id, run_meta, initial,
+                      tunnel_info=tunnel_info, on_handoff=_mark_handoff)
+    finally:
+        if tunnel_info is not None and not handed_off:
+            from gherkai_runtime.tunnel import stop_tunnel
+
+            stop_tunnel(tunnel_info.pid)  # 幂等（进程已不在则静默返回）；异常照常上抛、不吞
+            _progress("隧道已拆除（本机的被测应用不再对外暴露）。若上面已经打出提交成功，这一批就别再往下推"
+                      "——它要访问的地址已经失效、只会以导航失败告终：先修掉报出来的问题，再重新提交。")
     return rc_
 
 
-def _submit_local(args, run_id: str, run_meta, initial, *, tunnel_info=None) -> int:
-    """local submit：create_run（文件）+ 建 events SQLite + setsid fork per-run 进程推进。"""
+def _submit_local(args, run_id: str, run_meta, initial, *, tunnel_info=None, on_handoff=None) -> int:
+    """local submit：create_run（文件）+ 建 events SQLite + setsid fork per-run 进程推进。
+
+    `on_handoff`（给了就调）在 fork 成功那一刻通知调用方「隧道已有后台宿主」——它是 `_cmd_submit` 里
+    「未交棒即就地拆隧道」的分界线（ADR 0035 决策 3），故必须紧跟 Popen、不能等到本函数收尾。
+    """
     import subprocess as _sp
     from gherkai_core.adapters.event_log import SqliteEventLog
 
@@ -1079,7 +1122,7 @@ def _submit_local(args, run_id: str, run_meta, initial, *, tunnel_info=None) -> 
         from gherkai_runtime.detached import write_tunnel_file
 
         write_tunnel_file(str(report_root), run_id, tunnel_info)
-        _progress(f"隧道由本机 per-run 进程持有（pid 记录于 {report_root / run_id / 'tunnel.json'}）：run 终态即拆。")
+        _progress(f"隧道由本机后台进程持有（pid 记录于 {report_root / run_id / 'tunnel.json'}）：run 终态即拆。")
 
     # setsid fork per-run 进程（start_new_session=True = 脱离 CLI 进程组，CLI 退出不带走它，ADR 0034）。
     cmd = [sys.executable, "-m", "gherkai_cli", "_reconcile", run_id,
@@ -1095,6 +1138,8 @@ def _submit_local(args, run_id: str, run_meta, initial, *, tunnel_info=None) -> 
     # cwd 继承提交进程、不再指向仓库根（分发后没有 repo，ADR 0037 决策 3）；per-run 所需路径都经参数/definition 传。
     _sp.Popen(cmd, start_new_session=True,
               stdin=_sp.DEVNULL, stdout=log_f, stderr=log_f)
+    if on_handoff is not None:
+        on_handoff()  # 紧跟 fork：往下每一行都可能抛，而此刻宿主已在跑、隧道不该再被拆
     log_f.close()  # 子进程已持有 fd（Popen 继承），父进程侧句柄即关
     _progress(f"已提交（本机后台推进中）。查进度：gherkai status {run_id} --report-dir {args.report_dir}")
     print(run_id)
@@ -1191,8 +1236,11 @@ def _worker_meta_fields(resolutions: dict) -> dict:
     }
 
 
-def _submit_cloud(args, run_id: str, run_meta, initial, *, tunnel_info=None) -> int:
+def _submit_cloud(args, run_id: str, run_meta, initial, *, tunnel_info=None, on_handoff=None) -> int:
     """cloud submit：只 create_run 写 definition 到 DDB（不起 task）→ 云端 Lambda 事件驱动链接管推进。
+
+    `on_handoff` 语义同 `_submit_local`：这里的宿主是隧道守护进程，故只在它 fork 成功后调（没起隧道时
+    无棒可交、不调）。本函数各道闸的退 2 都在 fork 之前，`_cmd_submit` 侧「未交棒即拆」自然涵盖它们。
 
     冷启动由 kicker Lambda 做：create_run 写 definition（INSERT）→ runs 表 Stream 触发 kicker → tick 起首批 →
     events Stream → reconciler 接管（补起后续 / finalize）。submit 只写 DDB、不碰 ECS——机器权限收窄到只剩
@@ -1281,6 +1329,8 @@ def _submit_cloud(args, run_id: str, run_meta, initial, *, tunnel_info=None) -> 
         with open(watch_log, "ab") as lf:
             _sp.Popen(cmd, start_new_session=True,  # cwd 继承提交进程（ADR 0037 决策 3），同 per-run 进程
                       stdin=_sp.DEVNULL, stdout=lf, stderr=lf)
+        if on_handoff is not None:
+            on_handoff()  # 紧跟 fork：守护已接管隧道，往下几行抛也不能再拆
         _progress(f"隧道由守护进程持有（日志 {watch_log}）：run 终态即拆、TTL 兜底 {ttl_s:.0f}s"
                   f"（= 各 job 预算之和 + 启动余量；`--tunnel-ttl` 可覆盖）。"
                   f"**本机需保持开机联网直到 run 终态**——关机=隧道断=测试将以导航失败告终。")
@@ -1518,14 +1568,18 @@ def _explain_empty(args, state, *, hint: str) -> int:
     return 0
 
 
-def _explain_emit(args, state, result_store, *, read_bytes) -> int:
+def _explain_emit(args, state, result_store, *, read_bytes, wait_hint: str) -> int:
     """local/cloud 共用的后半段：取判定明细 → 筛 scenario/step → 合成文档 → 打文本或 JSON。
 
     带 `scope_id` 时只 `load_job_result`（云端 = 一次 GetObject），不带才 `load_all`（云端还需列举对象权限）
     ——权限面按需求最小化，见 ADR 0042 决策四「云端权限面」。
+
+    `wait_hint` = 各自的 `status --wait` 接力命令示例（local 用 --report-dir、cloud 用 --backend cloud
+    --prefix），取法同 `_render_status`：本函数两路共用，定位信息只有调用方手里有（cloud 的 prefix 已解析、
+    不在 args 上），故必传、不在此自算——「怎么办」给出的命令要能原样跑通。
     """
     run_id = args.run_id
-    not_landed = f"判定明细尚未落地，可先用 gherkai status {run_id} --wait 等到终态"
+    not_landed = f"判定明细尚未落地，可先用 {wait_hint} 等到终态"
     if args.scope_id:
         jr = result_store.load_job_result(run_id, args.scope_id)
         if jr is None:
@@ -1601,7 +1655,11 @@ def _cmd_explain(args) -> int:
     if (state := run_store.load_run_state(args.run_id)) is None:
         _progress(f"未找到 run：{args.run_id}（--report-dir 是否与 submit 一致？）")
         return 2
-    return _explain_emit(args, state, result_store, read_bytes=compose.read_resource)
+    return _explain_emit(
+        args, state, result_store, read_bytes=compose.read_resource,
+        # --report-dir 无条件带（即便是默认值），与 submit 提示/status 的 wait_hint 同惯例
+        wait_hint=f"gherkai status {args.run_id} --report-dir {args.report_dir} --wait",
+    )
 
 
 def _explain_cloud(args) -> int:
@@ -1642,7 +1700,12 @@ def _explain_cloud(args) -> int:
         _progress(f"未找到 run：{args.run_id}（--prefix/--ddb-table 是否与 submit 一致？）")
         return 2
     try:
-        return _explain_emit(args, state, result_store, read_bytes=read_bytes)
+        return _explain_emit(
+            args, state, result_store, read_bytes=read_bytes,
+            # 用已解析的 target.prefix（args.prefix 可能是 None，靠 env/默认兜底才成 prefix）；
+            # 刻意不带 --region/--profile，与 status 的 cloud 提示一致（也别把 profile 名打到终端）
+            wait_hint=f"gherkai status {args.run_id} --backend cloud --prefix {target.prefix} --wait",
+        )
     except Exception as e:
         if not compose.is_botocore_error(e):
             raise
@@ -1926,8 +1989,9 @@ def _cmd_run(args) -> int:
     on_event = persistence.on_event if persistence else None
     on_job_complete = persistence.on_job_complete if persistence else None
 
+    # 这里起的是 schedule 的进程内驱动，非 reconcile.tick 那条推进路径（ADR 0034）。
     _progress(
-        f"run_id={run_id}  schedule: 启动 worker 建立 AgentCore 云端浏览器会话（将产生 AWS 费用）  "
+        f"run_id={run_id}  开始跑：启动 worker 建立 AgentCore 云端浏览器会话（将产生 AWS 费用）  "
         f"max_concurrency={args.max_concurrency} default_job_timeout={args.default_job_timeout}s ..."
     )
 

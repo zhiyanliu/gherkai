@@ -306,6 +306,27 @@ def _runtime_version() -> str | None:
         return None
 
 
+# 组合根拥有的 worker env（`GHERKAI_STEPS_DIR`、`GHERKAI_NO_ARTIFACTS`——ADR 0037 决策 4/3；
+# `GHERKAI_EXTRA_HTTP_HEADERS`——ADR 0035 决策 4）：**有值显式注、无值显式清**——它们是组合根 → worker 的内部
+# 接线，只认本模块的入参、不认宿主 shell 的同名值。`GHERKAI_STEPS_DIR` / `GHERKAI_EXTRA_HTTP_HEADERS` 的值随
+# definition 持久化（`RunMeta.steps_dir` / `RunMeta.extra_http_headers`），宿主继承值越过它，同一个 run 在三个宿主
+# （同步 `run`、local per-run 进程、`status --wait` 接力者）下就用到不同的确定性 step 集/请求头、判定不可复现；
+# `GHERKAI_NO_ARTIFACTS` 不进 definition（`--no-report` 只挂在同步 `run`、该档什么都不落），清它挡的是另一件事：
+# 用户没给 `--no-report`、却因宿主导出过该值而收不到产物。
+# **只列 gherkai 自有键**：`NOVA_LOGS_DIR` / `MIDSCENE_RUN_DIR` 是 SDK 侧旋钮，本模块的 None 档按 `build_engines`
+# docstring 的契约回落「SDK 默认」（SDK 默认本身就含读自己那个 env），清掉即改契约，故不在此列。
+_COMPOSE_OWNED_WORKER_ENV = ("GHERKAI_STEPS_DIR", "GHERKAI_NO_ARTIFACTS", "GHERKAI_EXTRA_HTTP_HEADERS")
+
+
+def _scrubbed_environ() -> dict[str, str]:
+    """继承一份 os.environ、抹掉组合根拥有的那些键（见 `_COMPOSE_OWNED_WORKER_ENV`）——所有注入 env 的起手式。
+
+    只做加法的注入会让宿主 shell 的 `GHERKAI_STEPS_DIR` 直达 worker（definition 说「无使用方 step」也拦不住）。
+    `build_fargate_engines` 侧不需要对称处理：RunTask overrides 是逐条显式枚举、容器不继承宿主 env，没有继承面。
+    """
+    return {k: v for k, v in os.environ.items() if k not in _COMPOSE_OWNED_WORKER_ENV}
+
+
 def build_engines(
     *,
     nova_logs_dir: str | Path | None = None,
@@ -331,10 +352,11 @@ def build_engines(
     **cmd/cwd 来自 `resolve_worker_cmd` 的四级定位链**（ADR 0037 决策 3），不再由仓库结构推导；
     某引擎 miss 只让那条腿变成「一用即报错」（见 `_UnavailableEngine`），不连坐另一条。
 
-    产物持久落点（两引擎对称，经环境变量传给 SDK，ADR 0027）——**调用方应恒给绝对路径、不给 None**：
-    worker 已无专属 cwd（定位链后 cwd 多为 None＝继承调用者 CWD，ADR 0037 决策 3），落 SDK 默认相对目录
-    会写进用户 CWD，故 `--no-report` 档也由 CLI 注入系统临时目录下 run 专属的绝对落点。None 仅为兼容
-    「真不关心产物落哪」的调用者（回落 SDK 默认，行为随 CWD 漂）：
+    产物持久落点（两引擎对称，经环境变量传给 SDK，ADR 0027）——**归集档调用方须给绝对路径**；
+    `--no-report` 档恒给 None（真不生成，见上 no_artifacts 条）。绝对路径是硬要求：worker 已无专属 cwd
+    （定位链后 cwd 多为 None＝继承调用者 CWD，ADR 0037 决策 3），落 SDK 默认相对目录会写进用户 CWD。
+    两个都给 None 且 no_artifacts=False 时不注入落点 env，仅为兼容「真不关心产物落哪」的库层调用者
+    （回落 SDK 默认，行为随 CWD 漂）：
     - nova_logs_dir → `NOVA_LOGS_DIR` → Nova SDK `logs_directory`，trajectory 落这里。
     - midscene_run_dir → `MIDSCENE_RUN_DIR` → Midscene SDK 的 run 根目录（report/dump/log 全在其下），
       report.html 落这里。**必须传绝对路径**：SDK 用 `path.resolve(process.cwd(), MIDSCENE_RUN_DIR)`
@@ -343,7 +365,8 @@ def build_engines(
     steps_dir（ADR 0037 决策 4）：使用方确定性 step 目录的**绝对路径**，经 env `GHERKAI_STEPS_DIR` 注给
     **两个** worker（worker 启动时排序递归加载、注册进自己那张注册表）。约定解析（flag > env > `./steps`）
     在提交侧、值随 definition（`RunMeta.steps_dir`）走——本函数只搬运读回的值，**不自己解析 `./steps`**
-    （三个宿主 CWD 各不相同，重解析必分叉，ADR 0034）。None＝无使用方 step（worker 只有内建脚手架）。
+    （三个宿主 CWD 各不相同，重解析必分叉，ADR 0034）。None＝无使用方 step（worker 只有内建脚手架）——
+    此时宿主 shell 里继承来的同名 env 会被**清掉**、不得越过 definition（见 `_COMPOSE_OWNED_WORKER_ENV`）。
 
     **不注入产物 S3 上传落点**（`ARTIFACT_S3_BUCKET`/`PREFIX`）：本函数是 local 档，worker 恒报 `file://`。
     上传落点由 `build_fargate_engines` 注入（cloud 档，ADR 0029）；`subprocess worker + 注入 S3 落点` 的
@@ -359,8 +382,9 @@ def build_engines(
     **FargateEngine 侧只注入 region、不注入 profile**（容器用 task role，profile 是本机 `~/.aws` 概念、注入会
     ProfileNotFound 盖过 task role——正确的非对称，ADR 0016 决策 C）。
     """
-    # 完整继承当前环境（AWS 凭证等）再叠加产物落点——SubprocessEngine 的 env 非 None 时整体替换，故须带 os.environ。
-    # 两引擎共注的附加 env（都是「有值才注、无值零变化」）：
+    # 继承当前环境（AWS 凭证等）再叠加产物落点——SubprocessEngine 的 env 非 None 时整体替换，故须带 os.environ；
+    # 唯独组合根拥有的那些键先抹掉（`_scrubbed_environ`），它们只认本函数的入参、不认宿主继承值。
+    # 两引擎共注的附加 env（都是「有值就注、无值就清宿主继承值」）：
     # - 浏览器 context 级额外请求头（ADR 0035 决策 4，如 ngrok-skip-browser-warning）：JSON 经 env 注给
     #   两个 worker，worker 在 browser context 上 setExtraHTTPHeaders（纯 CDP 命令，无回调）。
     # - 使用方确定性 step 目录（ADR 0037 决策 4）：worker 只认这个 env，绝对路径、约定逻辑不进 worker。
@@ -382,10 +406,13 @@ def build_engines(
             env["AWS_PROFILE"] = profile
 
     def _env(local_dir: str | Path | None, local_key: str) -> dict | None:
-        # local 落点 env + 共注附加 env（headers / steps_dir）。全无 → None（worker 全用继承 env + SDK 默认）。
-        if local_dir is None and not common_env:
+        # local 落点 env + 共注附加 env（headers / steps_dir）。三者全无（无落点、无共注、宿主 env 也没有组合根
+        # 拥有的键）→ None（worker 全用继承 env + SDK 默认）；宿主带 owned 键时必须建一份 scrub 后的 env，
+        # 否则继承值越过 definition 直达 worker（见 `_COMPOSE_OWNED_WORKER_ENV`）。
+        if (local_dir is None and not common_env
+                and not any(k in os.environ for k in _COMPOSE_OWNED_WORKER_ENV)):
             return None
-        env = {**os.environ}
+        env = _scrubbed_environ()
         if local_dir is not None:
             env[local_key] = str(local_dir)
         env.update(common_env)
@@ -396,16 +423,16 @@ def build_engines(
     midscene_env = _env(midscene_run_dir, "MIDSCENE_RUN_DIR")
     # Nova 的 act timeout **双端同源**（ADR 0024 grace 硬约束）：组合根持 NOVA_ACT_TIMEOUT_S 单一真值，
     # 显式注入给 worker（消除「worker 私有默认 120」与「组合根 grace 下限」两处独立 120 的漂移）。
-    # nova_env 为 None（调用方未给产物落点）时也要建一份注入——故补一个继承 os.environ 的 env。
+    # nova_env 为 None（调用方未给产物落点）时也要建一份注入——故补一份 scrub 后的继承 env（同 `_env` 的起手式）。
     if nova_env is None:
-        nova_env = {**os.environ}
+        nova_env = _scrubbed_environ()
         _inject_aws(nova_env)  # 补建路径也须叠加 --region/--profile（Nova Workflow 的 nova-act client 读 AWS_REGION/凭证）
     nova_env["NOVA_ACT_TIMEOUT_S"] = str(NOVA_ACT_TIMEOUT_S)
     # Midscene 补建同理（对称，ADR 0016 决策 C）：midscene_env 为 None（未给落点、无共注 env）且 --region/--profile
     # 有值时也须建 env 注入——否则 midscene worker 继承 os.environ、拿不到 --profile 覆盖，而它经 fromNodeProviderChain()
     # 消费凭证做 AgentCore/Bedrock 鉴权（真消费、非无害）。仅在有值时补建（无值则继承 os.environ 本就够、免无谓拷贝）。
     if midscene_env is None and (region is not None or profile is not None):
-        midscene_env = {**os.environ}
+        midscene_env = _scrubbed_environ()
         _inject_aws(midscene_env)
 
     def _leg(engine: str, env: dict | None) -> Engine:
@@ -438,7 +465,11 @@ def _ask_worker(engine: str, flag: str, *, what: str, steps_dir: str | Path | No
 
     wc = resolve_worker_cmd(engine)  # 引擎名非法 → ValueError（定位链里查一次即够，此处不复刻校验）
     cmd = list(wc.cmd) + [flag]
-    env = {**os.environ, "GHERKAI_STEPS_DIR": str(steps_dir)} if steps_dir is not None else None
+    # env 恒自建：steps 目录同样「有值显式注、无值显式清」（见 `_COMPOSE_OWNED_WORKER_ENV`）——自述/标注要反映
+    # 调用方解析出的那份 step 集，不受宿主 shell 里同名 env 影响。
+    env = _scrubbed_environ()
+    if steps_dir is not None:
+        env["GHERKAI_STEPS_DIR"] = str(steps_dir)
     try:
         proc = subprocess.run(cmd, cwd=wc.cwd, env=env, capture_output=True,
                               timeout=timeout_s, input=payload)
@@ -496,9 +527,11 @@ def make_resolver(engines: dict[str, Engine]):
 
 
 # ============================================================================
-# Store 装配（ADR 0016「cli backend 选择」/ 0030 决定六·七）：两个后端对称、都在 compose 可复用
-# （cli 是第一个调用者，WebUI 直接复用这两个函数、不经 cli）。各返回：
-#   (run_store, result_store, report_store, make_artifacts)
+# 产物落点单点（ADR 0041 决策三「status --json 附加 artifacts」）：`artifacts` 四键的落点算式按后端各一份，
+# run 结束打印 / status 终态打印 / --json 都从这里拼（下方 Store 装配的 make_artifacts 复用它们）；
+# 键义与「约定落点≠已写成」的细节见两个函数的 docstring。
+# ============================================================================
+
 
 def local_artifact_locations(report_dir: str, run_id: str) -> dict:
     """local 档一个 run 的产物落点（全 file:// URI）：run_meta / run_state / jobs_dir / report_index。**单点**：
@@ -517,7 +550,11 @@ def local_artifact_locations(report_dir: str, run_id: str) -> dict:
 def cloud_artifact_locations(*, bucket: str, report_prefix: str, table: str, run_id: str) -> dict:
     """cloud 档一个 run 的产物落点：jobs_dir / report_index 为 s3://（对拍 S3ResultStore / S3ReportStore 的 key 布局
     `<report_prefix>/<run_id>/…`），run_meta / run_state 为 ddb:// 诊断指针（纯展示、不被解析）。单点理由同 local。
-    report_prefix = 后端 REPORT_DIR（与 submit 的 --report-dir 一致，preflight 已比对）。"""
+    report_prefix = 该 run 的产物前缀，**由调用方给、本函数只拼不校验**：同步 `run --backend cloud` 传自己的
+    `--report-dir`（同一进程既写又拼、自洽）；`status --backend cloud` 原样取用户给的 `--report-dir`（该 flag 的
+    help 已写明须与 submit 一致）。与推进侧 Lambda `REPORT_DIR` env 的一致性比对是**提交侧探针**（`submit` /
+    `doctor` 经 `preflight_cloud_resources` 比，ADR 0033「产物前缀一致性」条），查询侧不重做——故这里给的 s3://
+    与 local 档一样是**约定落点**，不代表 key 已写成。"""
     pfx = _normalize_prefix(report_prefix)
     return {
         "run_meta": f"ddb://{table}/{run_id}#META",
@@ -526,6 +563,11 @@ def cloud_artifact_locations(*, bucket: str, report_prefix: str, table: str, run
         "report_index": f"s3://{bucket}/{pfx}{run_id}/index.html",
     }
 
+
+# ============================================================================
+# Store 装配（ADR 0016「cli backend 选择」/ 0030 决定六·七）：两个后端对称、都在 compose 可复用
+# （cli 是第一个调用者，WebUI 直接复用 build_local_stores / build_cloud_stores、不经 cli）。各返回：
+#   (run_store, result_store, report_store, make_artifacts)
 # make_artifacts(run_id, report_index) -> dict：把 --json 的 artifacts 落点指针按后端组装、全 URI 化
 #   （local file:// / cloud s3://+ddb://）；report_index=None（report 写失败被隔离）则省略该键、不放裸 'None'。
 # ============================================================================
@@ -873,9 +915,9 @@ def build_fargate_engines(
         if revision_arn is None:
             # 本 run 没解析该引擎的 worker revision（正常态：没用到它）——空腿，真去起才抛（见 _UnavailableEngine）。
             return _UnavailableEngine(WorkerVariantError(
-                f"引擎 {engine!r} 的 worker task-def revision 未随本 run 解析——definition 的 worker_task_defs "
-                f"只覆盖 {sorted(worker_task_defs) or '（空）'}。若本 run 真要跑该引擎，重新提交（提交侧 preflight "
-                f"会按本 run 用到的引擎逐个解析 variant）。",
+                f"引擎 {engine!r} 的 worker task-def revision 未随本 run 解析——提交时定死的任务定义里只解析了 "
+                f"{sorted(worker_task_defs) or '（空）'} 这些引擎。若本 run 真要跑该引擎，重新提交"
+                f"（提交时会按本 run 用到的引擎逐个解析 variant）。",
                 engine=engine))
         return FargateEngine(
             ecs_client=ecs, s3_client=s3, ddb_events_table=ddb_events_table,
@@ -1336,8 +1378,8 @@ def preflight_cloud_resources(
                 except ValueError:
                     cap = None
                 if cap is not None and declared_max_concurrency > cap:
-                    on_warn(f"提示：--max-concurrency={declared_max_concurrency} 超过部署侧 per-run 上限 "
-                            f"cap={cap}，本 run 将按 {cap} 并行"
+                    on_warn(f"提示：--max-concurrency={declared_max_concurrency} 超过后端为单个 run 设的"
+                            f"并发上限 {cap}，本 run 将按 {cap} 并行"
                             f"——要更高并发由部署方调高后端 stack（gherkai-deploy-aws）的 MAX_CONCURRENCY 后重新部署。")
                     warned_cap = True
             if report_dir is None:
