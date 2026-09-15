@@ -1,6 +1,6 @@
 {
   "skill_name": "gherkai",
-  "notes": "缺省集只执行 plan / explain / doctor / list-deterministic，零条真 AWS；opt_in=true 的条目会真跑 run / submit、只由维护者在自己的部署上按需跑。fixture 路径相对本目录；评测前用 materialize.py 把 fixture 物化到仓库外的舞台，两臂都在舞台里以 `claude -p` 跑、cwd = 舞台、PATH 前置舞台 bin/。 第四轮前按第三轮评分者批评收紧：复合断言拆条（eval 2/9/10/11/13）、放行开关与投票的判据正向化（eval 9/14）、禁绕过式修复（eval 12）、正则须匹配真实落地地址（eval 1）、禁留新 run 目录（eval 13）；「--help 与只读命令不算执行」统一写进所有「没有执行」断言。断言总数随之变化，通过率与前一轮不可直接比。 第五轮前：eval 1 的四合一断言拆为「复用确定性 step」与「正则鲁棒（含对实测 301 终点与 evil 主机的机械判据）」；所有缺省 eval 加「不把评测脚手架当用户环境」；新增 eval 15（scope 跨文件撞名，fixture scope-collision）与 eval 16（Background + Outline 写用例）。 第五轮后：eval 16 断言 2 与 expected_output 对齐（确定性 URL step 或页面级语义断言二选一、各带判据），第五轮 fable/sonnet 的 with-skill 因旧断言被误判。",
+  "notes": "缺省集只执行 plan / explain / doctor / list-deterministic，零条真 AWS；opt_in=true 的条目会真跑 run / submit、只由维护者在自己的部署上按需跑。fixture 路径相对本目录；评测前用 materialize.py 把 fixture 物化到仓库外的舞台，两臂都在舞台里以 `claude -p` 跑、cwd = 舞台、PATH 前置舞台 bin/。 第四轮前按第三轮评分者批评收紧：复合断言拆条（eval 2/9/10/11/13）、放行开关与投票的判据正向化（eval 9/14）、禁绕过式修复（eval 12）、正则须匹配真实落地地址（eval 1）、禁留新 run 目录（eval 13）；「--help 与只读命令不算执行」统一写进所有「没有执行」断言。断言总数随之变化，通过率与前一轮不可直接比。 第五轮前：eval 1 的四合一断言拆为「复用确定性 step」与「正则鲁棒（含对实测 301 终点与 evil 主机的机械判据）」；所有缺省 eval 加「不把评测脚手架当用户环境」；新增 eval 15（scope 跨文件撞名，fixture scope-collision）与 eval 16（Background + Outline 写用例）。 第五轮后：eval 16 断言 2 与 expected_output 对齐（确定性 URL step 或页面级语义断言二选一、各带判据），第五轮 fable/sonnet 的 with-skill 因旧断言被误判。 第五轮后尺子备忘已落：eval 1 正则加裸主机须命中；eval 2 三条条件式断言改为必须落盘；eval 16 步号口径与 Background 执行语义拆成两条（缺省集 122 条）。",
   "evals": [
     {
       "id": 1,
@@ -12,7 +12,7 @@
       "expectations": [
         "产出的 .feature 用 Given 加双引号内的 http(s) URL 作导航步",
         "URL 检查复用内建的『页面地址匹配』确定性 step（或 steps/ 里新注册的一条），不是自然语言断言",
-        "正则鲁棒：锚定主机（对 https://iana.org.evil.com/ 不命中）、同时接受 iana.org 与 www.iana.org、不把跳转后的路径写死；评分时用产出的正则对实测 301 终点地址跑一次须命中、对 iana.org.evil.com 跑一次须不命中",
+        "正则鲁棒：锚定主机（对 https://iana.org.evil.com/ 不命中）、同时接受 iana.org 与 www.iana.org、不把跳转后的路径写死；评分时用产出的正则跑三次：对实测 301 终点地址须命中、对 https://iana.org/domains/example（裸主机）须命中、对 https://iana.org.evil.com/ 须不命中",
         "先用 gherkai list-deterministic 确认内建的『页面地址匹配』已存在、直接复用，没有重复自写一侧的 URL step",
         "标题检查写成页面级语义陈述的 Then 断言，而不是子串规则、段落边界或选择器 / DOM 标签",
         "执行了 gherkai plan 并引用了它的派发标注（确定性 / AI）来核对写法；plan 退 0",
@@ -37,9 +37,9 @@
         "汇报里给出了失败步截图的位置（file:// 路径或 evidence 目录），不只是裸文件名",
         "结论是用例断言写错（成立年份），没有把失败归为被测网站或引擎故障",
         "给出的重跑命令用 --scope（值为 search）或 --scenario 收窄到失败的那条，而不是整批重跑",
-        "如果改了 feature：只动了要改的那一步，两条 scenario 的行号与 scope_id 不变（旧报告仍指得到）",
-        "如果改了 feature：改后 gherkai plan 退 0，新断言是页面级语义陈述（不塞子串规则或段落边界）",
-        "如果改了 feature：改后的年份是 2015（有独立依据，不是把 1999 改成别的猜测值）",
+        "把改法落盘到 features/wiki_search.feature（不只是口头建议）：只动要改的那一步，两条 scenario 的行号与 scope_id 不变（旧报告仍指得到）",
+        "改后 gherkai plan 退 0，新断言是页面级语义陈述（不塞子串规则或段落边界）",
+        "改后的年份是 2015，且有独立依据（explain 里模型看见的页面内容或其它可核来源），不是把 1999 改成别的猜测值",
         "没有编造截图内容（fixture 里的截图是 1×1 占位图，声称从截图里看到了页面内容即失败）",
         "没有执行 gherkai run 或 gherkai submit（`--help` 与只读命令不算执行）",
         "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报",
@@ -292,7 +292,8 @@
         "新建一个 feature 文件（放在 features/ 下），用 Background 放首页导航步（Given + 双引号内 URL），Scenario Outline + Examples 三行参数化搜索词；没有改动 fixture 已有的 features/wiki_search.feature 与 steps/",
         "词条页的确认二选一且各有判据：用内建确定性 step『页面地址匹配』带占位符（如 \"/wiki/<slug>\"，Examples 需带 slug 列）且 plan 里该步带「← 确定性」标注；或写成页面级语义断言（「当前是 <name> 的词条页」）并说明为何不用确定性（如 slug 与搜索词不一致、消歧义页）。两种都不得把精确文本匹配写成 AI 子串断言",
         "用 gherkai plan 验证过，并正确解释：展开成 3 条独立 scenario / 3 个 job（未标 @scope），id 比普通 scenario 多一段 Examples 数据行号",
-        "正确解释步号口径：Background 的导航步是每条 scenario 的第 0 步，后面的步号跟着后移；同一 scope 里每条都会重跑一遍 Background，不能靠它承接上一条的页面状态",
+        "正确解释步号口径：Background 的导航步是每条 scenario 的第 0 步，scenario 里书写的步跟着后移（explain --step N 同此口径）",
+        "正确说明 Background 的执行语义：同一 scope 里每条 scenario 都各自重跑一遍 Background，不能靠它承接上一条的页面状态",
         "没有执行 gherkai run 或 gherkai submit（`--help` 与只读命令不算执行）",
         "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报",
         "没有把评测舞台的脚手架（bin/gherkai shim、.eval-aws 下的空凭证文件、环境变量注入）当成用户的真实环境写进汇报或当成阻塞项上报"
