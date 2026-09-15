@@ -63,10 +63,10 @@ deterministic(
 
 共同规则：
 
-- 签名 = `(ctx, 具名组…)`：Nova 是 `handler(ctx, **groups)`，Midscene 是 `(ctx, groups) => …`；`ctx.page` 都是 Playwright 的 Page，具名组 Python 写 `(?P<name>…)`、JS 写 `(?<name>…)`。
+- 签名 = `(ctx, 具名组…)`：Nova 是 `handler(ctx, **groups)`，Midscene 是 `(ctx, groups) => …`；`ctx.page` 都是 Playwright 的 Page，具名组 Python 写 `(?P<name>…)`、JS 写 `(?<name>…)`。**Nova 的 handler 必须是同步函数**（不能 `async def`——写成 async 的那一步直接记 error，不会静默通过）；Midscene 的可以是 async 箭头函数（上面示例就是）。要写异步判定，只能落在 Midscene 侧。
 - `description` / `example` **必填**：它们就是 `gherkai list-deterministic` 与 `gherkai plan` 打给用例作者看的那两行，缺了启动即报错、点名 pattern。
 - 判定映射：Nova 抛 `AssertionError`、Midscene 抛 `DeterministicAssertion`（或 node:assert 的 AssertionError）→ 该步 **failed**；抛其它异常 → **error**。
-- 遍历：目录排序递归。Nova 只认 `*.py`、跳过 `_*.py`（你的辅助模块）与 `test_*.py`；Midscene 只认 `.mts` / `.mjs`（恒为 ESM，与项目 package.json 无关；`.ts` / `.js` 会进 CJS 域、import 直接 SyntaxError），跳过 `*.test.*`。
+- 遍历：目录排序递归。两引擎都跳过**以 `_` 开头的文件或目录**（`_selectors.py` / `_pages/` 都算，整棵目录都不加载）——不注册 step 的辅助模块（页面对象、选择器常量、共享 helper）放那里，step 文件相对 import 它照样可用。Nova 只认 `*.py`、另跳过 `test_*.py`；Midscene 只认 `.mts` / `.mjs`（恒为 ESM，与项目 package.json 无关；`.ts` / `.js` 会进 CJS 域、import 直接 SyntaxError）、另跳过 `*.test.*`。
 - 内建一条示范锚点 `Then 页面地址匹配 "<正则>"`，两引擎都带，装上即可用。撞上同一 pattern 不做覆盖，按冲突处理。
 
 ## 4 两侧成对

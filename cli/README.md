@@ -81,7 +81,7 @@ URL、DOM 这类不容 AI 抖动的检查，可以由你自己写成确定性步
 | `--fail-fast` / `--json` / `--quiet` | 关 | 任一 job 崩就中止整批／只输出机器可读 JSON（字段见 [`docs/guides/cli-json-contract.md`](https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/guides/cli-json-contract.md)）／少进屏幕：不打逐步进度，本机跑时 worker 日志改落 `<report-dir>/<run_id>/worker.log`（`--no-report` 时落系统临时目录）、只打一行位置；`--backend cloud` 没有本机 worker 日志（worker 在云端跑，日志在 CloudWatch）（都仅 `run`；`submit` 只打 `run_id`，进度看 `status`） |
 | `--region` / `--profile` | — | AWS region / profile（两种 backend 都用，也喂给 worker） |
 
-**云端专用**（`--backend cloud`）：`--prefix`（默认 `gherkai-`，须与部署时一致；环境变量 `AWS_RESOURCE_PREFIX`）一把决定表/桶/集群等资源名；要单独覆盖就用 `--ddb-table`（`AWS_DDB_TABLE`）/ `--s3-bucket`（`AWS_S3_BUCKET`）/ `--events-table` / `--cluster`；`--worker-variant` 见上；`run` 还可用 `--subnet` / `--security-group` 覆盖网络（不给则读部署时写下的值）。
+**云端专用**（`--backend cloud`）：`--prefix`（默认 `gherkai-`，须与部署时一致；环境变量 `AWS_RESOURCE_PREFIX`）一把决定表/桶/集群等资源名；要单独覆盖就用 `--ddb-table`（`AWS_DDB_TABLE`）/ `--s3-bucket`（`AWS_S3_BUCKET`）；`--worker-variant` 见上；`run` 还可用 `--events-table` / `--cluster` 覆盖资源名、`--subnet` / `--security-group` 覆盖网络（不给则读部署时写下的值）。`submit` 只按 `--prefix` 推事件表与集群名（那两个名字对提交无影响，给了会退 `2`）。
 
 ## 输出与报告
 

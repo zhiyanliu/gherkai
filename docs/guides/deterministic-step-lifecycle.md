@@ -110,7 +110,7 @@ variant / 默认指针 / revision / digest 这些载体本身（SSM 键、ECR ta
 
 最后一条值得单独看：Midscene 侧的正确性靠**两道防线**——`bin.mts` 注册的 resolve hook 把裸 specifier 钉到 worker 自身已加载的那个 URL（禁止从 cwd/argv 推算），以及 `user-steps.mts` 的零注册检查把「静默落回 AI」翻成「起不来」。Nova 侧没有这个风险（同进程、绝对包 import 命中同一 module 对象），故也没有这层兜底——这是**有理由的不对称**，不是漏实现。
 
-顺带两条筛选规则（自动加载会跳过的文件，跳过它们是约定而非降级）：Nova 排除 `_*`（供相对 import 的辅助模块）与 `test_*`；Midscene 排除 `*.test.*`，只认 `.mts` / `.mjs`。想自查当前状态：`gherkai doctor --steps-dir …` 的 `steps.dir` + `steps.load.<engine>` 两项就是这条链的体检（有 steps 目录时 `load.*` 是必修项，没有时降为可选）。
+顺带两条筛选规则（自动加载会跳过的文件，跳过它们是约定而非降级）：Nova 排除 `_*`（供相对 import 的辅助模块）与 `test_*`；Midscene 同样排除 `_*`（同一语义的辅助模块面）与 `*.test.*`，只认 `.mts` / `.mjs`。两侧的 `_` 都判在**路径任一段**上——`_selectors.mts` 与 `_pages/selectors.mts` 同权，辅助模块可按目录分组（被排除的目录整棵不进收集，相对 import 它照旧生效）。想自查当前状态：`gherkai doctor --steps-dir …` 的 `steps.dir` + `steps.load.<engine>` 两项就是这条链的体检（有 steps 目录时 `load.*` 是必修项，没有时降为可选）。
 
 > 权威：[ADR 0037](../adr/0037-distribution-and-packaging.md) 决策 4（加载失败 fail-loud、提交侧同样前置、裸 specifier 解析与双实例不变量）、[ADR 0036](../adr/0036-deterministic-capability-discovery.md) 决策 4（`plan` 的降级与例外）、[ADR 0038](../adr/0038-worker-image-delivery.md)（variant 解析 miss 的提示分叉）。
 

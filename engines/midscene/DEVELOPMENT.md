@@ -79,7 +79,7 @@ GHERKAI_WORKER_MIDSCENE_CMD="node $(pwd)/src/bin.mts"     # 需 Node ≥ 22.18�
 
 ## 使用方 `steps/` 的加载（实现要点）
 
-约定解析（`--steps-dir` > env > `./steps`）在组合根，worker 只认 env `GHERKAI_STEPS_DIR`、不重解析（ADR 0037 决策 4；[ADR 0016](../../docs/adr/0016-execution-architecture-core-lib-run-model.md) 分层）。`src/worker/user-steps.mts` 排序递归遍历 `.mts` / `.mjs`（排除 `*.test.*`）逐个 `await import`，三条 fail-loud：
+约定解析（`--steps-dir` > env > `./steps`）在组合根，worker 只认 env `GHERKAI_STEPS_DIR`、不重解析（ADR 0037 决策 4；[ADR 0016](../../docs/adr/0016-execution-architecture-core-lib-run-model.md) 分层）。`src/worker/user-steps.mts` 排序递归遍历 `.mts` / `.mjs`（排除 `_*` 与 `*.test.*`；`_` 判在路径任一段上——`_*` 目录整棵跳过，与 Nova 侧同规则）逐个 `await import`，三条 fail-loud：
 
 - import 失败 → 立刻抛，带文件名与原异常；
 - **零注册检查**：某文件加载后注册表条数没涨 → 抛。这是「双实例」风险的显式化——裸 specifier 若解析到第二份包副本，注册会落进 worker 永远不读的表，症状本来是「全部 step 静默走 AI、run 还可能通过」。`index.mts` 与 worker 自身 import 的必须是同一个 `worker/deterministic.mjs` URL（靠 bin 注册的 resolve hook 保证，见 `resolve-hook.mts` 头注释）。

@@ -40,8 +40,9 @@ def login(ctx, user):
 
 - 签名 `handler(ctx, **groups)`：`groups` = 正则里的具名组 `(?P<name>...)`（无具名组则只收 `ctx`）；`ctx.page` 是 Playwright `Page`。
 - `description` / `example` **必填**——它们就是 `gherkai list-deterministic` 与 `gherkai plan` 打给用例作者看的那两行，缺了启动即报错。
+- handler 必须是**同步函数**（`def`，不能 `async def`）：本引擎同步执行——写成 `async def` 时函数体里的断言压根不会跑，所以这种 step 直接记 **error**（不假装通过）。需要异步的判定请写在 Midscene 引擎（`@engine:midscene`）那边。
 - 抛 `AssertionError` → 该 step 记 **failed**（断言没过）；抛其它异常 → 记 **error**。确定性 step 不投票。
-- 目录**排序递归**遍历 `*.py`；跳过 `_*.py`（你自己的辅助模块，供相对 import 用）与 `test_*.py`（你自己的测试）。
+- 目录**排序递归**遍历 `*.py`；跳过 `_` 开头的文件或目录（`_helpers.py`、`_pages/` …）——它们不自动加载，供其它 step 文件 import 用；也跳过 `test_*.py`（你自己的测试）。
 - 本包内建一条示范锚点 `页面地址匹配 "<正则>"`，装上即可在 `.feature` 里直接写 `Then 页面地址匹配 "/wiki/OpenAI"`。
 
 目录怎么告诉 CLI：`gherkai run --steps-dir ./steps`（`run` / `submit` / `plan` / `list-deterministic` / `doctor` 五处都有此选项），缺省 `./steps`。

@@ -16,7 +16,7 @@
 
 - **AWS 凭证 + region us-east-1**（default profile 即可）。
 - **一个可写 S3 桶**，经环境变量 `HARNESS_S3_BUCKET` 传入（**勿硬编码**账号相关值）。跑完自行清理桶内 `harness/<run-id>/` 前缀（见下「清理」）。
-- 用**仓库根的 workspace venv** 跑（`uv run python …`，等价 `.venv/bin/python`）——harness 复用真实 `gherkai_core.scope.plan` 生成 job，防手搓 JSON 漂移；根 `uv sync` 已把 `gherkai_core` 装成 editable（ADR 0037 决策 2）。**cwd 与 `PYTHONPATH` 都不限**——harness 由 `__file__` 派生仓库根、自己把 `<repo>/core` 插进 `sys.path`，features/engines 路径也全由该根算出。
+- 用**仓库根的 workspace venv** 跑（`uv run python …`，等价 `.venv/bin/python`）——harness 复用真实 `gherkai_core.scope.plan` 生成 job（防手搓 JSON 漂移）与 `gherkai_runtime.compose` 的 worker 定位链；根 `uv sync` 已把 `gherkai_core` 与 `gherkai_runtime` 都装成 editable（ADR 0037 决策 2）。**cwd 与 `PYTHONPATH` 都不限**——这是 editable 安装给的，harness 不改 `sys.path`，只由 `__file__` 派生仓库根算 `features/` 路径（worker 路径不由它算——见下条四级定位链）。
 - **worker 经四级定位链拉起**（与 CLI 同一真源，ADR 0037 决策 3），harness 不按仓库布局拼路径：novaact 随仓库根 `uv sync` 装进同一 workspace venv，即命中「同 venv `-m` 入口」，无需独立 venv；midscene 需先在 `engines/midscene/` 跑 `npm install && npm run build` 生成 `dist/bin.mjs`，再用 `GHERKAI_WORKER_MIDSCENE_CMD="node <仓库根绝对路径>/engines/midscene/dist/bin.mjs"` 显式覆写（第一级）。四级全 miss 抛 `WorkerNotFoundError`、带安装指引。
 
 ## 调用

@@ -130,7 +130,7 @@ tools/graphify_refresh.sh --force    # 全量重抽（清残留节点时；费�
 git tag v1.4.0 && git push origin v1.4.0   # GitHub Actions 接手：gate（版本==tag）→ PyPI → npm → GHCR 基底镜像 → GitHub Release
 ```
 
-发版后的验证里有一项手动的：把新版本部署到验证环境后，用 agent skill 的云端一条线（`doctor --backend cloud --prefix <前缀>` → `plan` → `submit` → `status --wait` → `explain`）在有凭证的机器上真走一遍——它是 skill 评测里唯一没被真实数据覆盖的域（评测舞台刻意无凭证），结论回填 ADR 0043「验证」节。
+发版后的验证里有一项手动的：把新版本部署到验证环境后，用 agent skill 的云端一条线（`doctor --backend cloud --prefix <前缀>` → `plan` → `submit` → `status --wait` → `explain`）在有凭证的机器上真走一遍——它是 skill 评测里唯一没被真实数据覆盖的域（评测舞台刻意无凭证），结论回填 ADR 0043「验证」节。同一次真跑顺带核一件事：Nova Act 的 workflow definition 名已改为产品名 `gherkai-worker`（原 spike 期代号），首次 `run --engine novaact` 须在使用方账户自动建出该名的 definition 且 run 到终态——create-if-not-exists 跨真实 AWS 边界，单测绿不算证据（ADR 0004）。
 
 CI（push `main` / PR / 手动）跑三件：全成员 `pytest`、midscene 的 `npm ci && npm run build && npm test`、`uv build --all-packages` 的打包元数据 smoke + 发布 gate 演练。一次性人工前置（PyPI trusted publisher、npm trusted publisher、GHCR 可见性核对）、TestPyPI 演练、以及**不推 tag 也能做的本地静态校验**，全在 [`.github/workflows/README.md`](./.github/workflows/README.md)；决策与理由在 [ADR 0037 决策 8](./docs/adr/0037-distribution-and-packaging.md)。
 

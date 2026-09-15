@@ -111,7 +111,7 @@ cloud 提交是**定义期解析、运行期照抄**，这条是「重推 varian
 两条配套事实：
 
 - **两侧 prefix 必须一致**：部署侧与提交侧走的是**同一条解析链** `compose.resolve_cloud_target`（flag > `AWS_RESOURCE_PREFIX` > `names.DEFAULT_PREFIX`），CDK 建出的名就是提交侧推导的默认名；不一致时 preflight 点名 prefix 退 2。
-- **variant 按版本隔离，不是「多版本在跑」**：SSM 键含版本（`worker-image/<engine>/<版本>-<variant>`），旧版本的映射留作历史、不参与当前版本解析（`workers.current_version_mappings` 只收当前版本前缀那些）。
+- **variant 按版本隔离，不是「多版本在跑」**：SSM 键含版本（`worker-image/<engine>/<版本>-<variant>`），旧版本的映射留作历史、不参与当前版本解析（`workers.current_version_mappings` 吃一次枚举好的参数序列、只收当前版本前缀那些）。
 
 前台 `run --backend cloud` 与 detached `submit --backend cloud` **共用同一套表、桶、cluster、task-def 与三个 Lambda**——分流靠 STATE 上的 `detached` 标记（kicker 在 Stream filter 层滤、reconciler/exit-observer 在 handler 内判），故一套 prefix 同时服务两种跑法而互不干扰；两道闸门的细节见 [`execution-and-reconciliation.md`](./execution-and-reconciliation.md) §7。
 

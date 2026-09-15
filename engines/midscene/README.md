@@ -43,7 +43,7 @@ deterministic(
 - **扩展名只认 `.mts` / `.mjs`**：这两个恒为 ESM，与你项目里有没有 `package.json`、`type` 写什么无关（`.ts` / `.js` 会落进 CJS 域、`import` 直接 SyntaxError）。
 - `description` / `example` **必填**——它们就是 `gherkai list-deterministic` 与 `gherkai plan` 打给用例作者看的那两行，缺了启动即报错。
 - 判定失败抛 `DeterministicAssertion`（或 `node:assert` 的 `AssertionError`）→ 该 step 记 **failed**；抛其它 → 记 **error**。
-- 目录**排序递归**遍历，`*.test.*` 跳过。
+- 目录**排序递归**遍历；跳过**以 `_` 开头的文件或目录**（`_selectors.mts`、`_pages/` 都算——你自己的辅助模块，供 step 文件相对 import 用，放进去就不会被当成 step 文件加载）与 `*.test.*`（你自己的测试）。
 - 本包内建一条示范锚点 `页面地址匹配 "<正则>"`，装上即可在 `.feature` 里直接写 `Then 页面地址匹配 "/wiki/OpenAI"`。撞上同一 pattern **不做覆盖**，按冲突处理（见下表）。
 
 目录怎么告诉 CLI：`gherkai run --steps-dir ./steps`（`run` / `submit` / `plan` / `list-deterministic` / `doctor` 五处都有此选项），缺省 `./steps`。
