@@ -8,7 +8,7 @@
 
 ## `gherkai run … --json`
 
-顶层 = RunResult（判定）+ `run_meta`（definition）+ `artifacts`（落点）。
+顶层 = RunResult（判定）+ `run_meta`（提交时定死的这批任务本身）+ `artifacts`（落点）。
 
 | 键 | 类型 | 含义 |
 |---|---|---|
@@ -17,7 +17,7 @@
 | `duration_ms` | number \| null | run 级墙钟（含并发，≠ 各 job 之和） |
 | `total_tokens` / `total_time_worked_s` | number \| null | 跨 job 的引擎原生量合计（Midscene 报 tokens、Nova 报 agent 工作秒）；无引擎报即 null，**不折美元** |
 | `jobs[]` | array | 每个 job（= 一个 scope，一条浏览器会话）的判定，见下 |
-| `run_meta` | object | 本次 run 的 definition（提交时定死），见下 |
+| `run_meta` | object | 本次 run 的任务定义（提交时定死），见下 |
 | `artifacts` | object | 产物落点，见下；`--no-report` 时**省略**（例外：local 档 `--no-report --quiet` 仍有一键 `worker_log`） |
 
 `jobs[]` 每项：
@@ -47,7 +47,7 @@
 | `report_refs[]` | array | step 级产物指针：两引擎都有 `kind=evidence`（gherkai 自有格式的机读证据，`gherkai explain` 读它，见下节）；Nova 另有每次 act 的轨迹页 `kind=trajectory` |
 | `shortcircuited` | bool | true = 上游 step error 后被跳过、未执行（此时 status=skipped） |
 
-`run_meta`（definition）：`run_id`、`created_at`、`max_concurrency`、`steps_dir`（使用方确定性 step 目录的绝对路径；未解析到目录时**省略**该键——不是 null；cloud 档恒省略，steps 烙在镜像里）、
+`run_meta`（提交时定死的这批任务本身）：`run_id`、`created_at`、`max_concurrency`、`steps_dir`（使用方确定性 step 目录的绝对路径；未解析到目录时**省略**该键——不是 null；cloud 档恒省略，steps 烙在镜像里）、
 `worker_variant` / `worker_task_defs`（cloud 档：提交时解析的 variant 与各引擎 task-def revision ARN，local 档省略）、
 `extra_http_headers`（`--expose-local` 注入的请求头，无则省略）、`jobs[]`：
 
@@ -63,8 +63,8 @@
 
 | 键 | 含义 |
 |---|---|
-| `run_meta` / `run_state` | definition / 运行态的落点 |
-| `jobs_dir` | 判定明细目录（每 job 一份 JSON，文件名 = URL 编码的 scope_id；形状 = 上面 `jobs[]` 的一项，但**顶层 `scope_id` 换成内嵌的完整 `job` definition**（同 `run_meta.jobs[]` 每项的形状）——scope 键从 `job.scope_id` 取，单文件自包含、不必读 run_meta） |
+| `run_meta` / `run_state` | 任务定义 / 运行态的落点 |
+| `jobs_dir` | 判定明细目录（每 job 一份 JSON，文件名 = URL 编码的 scope_id；形状 = 上面 `jobs[]` 的一项，但**顶层 `scope_id` 换成内嵌的完整 `job` 定义**（同 `run_meta.jobs[]` 每项的形状）——scope 键从 `job.scope_id` 取，单文件自包含、不必读 run_meta） |
 | `report_index` | RunReport `index.html`；报告写失败被隔离时**省略** |
 | `worker_log` | worker 日志落点；仅 `--quiet` 且本机执行（`--backend local`）时出现——cloud 档 worker 在云端跑、日志在 CloudWatch，此键不出现 |
 
@@ -88,10 +88,10 @@ RunState（控制面运行态）+ 附加 `artifacts`：
 | 键 | 类型 | 含义 |
 |---|---|---|
 | `run_id` | string | |
-| `status` | `pending` / `running` / `passed` / `failed` / `error` | run 级（job 级的 `skipped` / `aborted` 不上浮到 run 级）；**注意** job 已被认领时 run 级仍可能 `pending`（投影滞后一拍） |
+| `status` | `pending` / `running` / `passed` / `failed` / `error` | run 级（job 级的 `skipped` / `aborted` 不上浮到 run 级）；**注意** job 已被认领时 run 级仍可能 `pending`（run 级状态比 job 级晚一拍） |
 | `started_at` / `ended_at` | ISO 8601 \| 省略 | `ended_at` 只在终态出现 |
-| `high_water_mark` | int \| 省略 | 已投影的事件水位（诊断用）；仅经推进器投影写过的 run 有（`submit` / `status --wait` / 云端推进链），同步 `run` 落的 run_state 无此键 |
-| `jobs[]` | array | `scope_id`、`status`（含 `pending` / `running` 前置态）、`session_id`（未起会话时 null，键恒在）、`claimed_at`（被推进器认领的时刻，超时起算点；未认领时**省略**） |
+| `high_water_mark` | int \| 省略 | 已处理到的事件水位（诊断用）；仅由后台推进写过的 run 有（`submit` / `status --wait` / 云端推进链），同步 `run` 落的 run_state 无此键 |
+| `jobs[]` | array | `scope_id`、`status`（含 `pending` / `running` 前置态）、`session_id`（未起会话时 null，键恒在）、`claimed_at`（被后台推进认领的时刻，超时起算点；未认领时**省略**） |
 | `artifacts` | object | 与 `run` 同键（`run_meta` / `run_state` / `jobs_dir` / `report_index`）；是**约定落点**，终态后才真有内容 |
 
 ## `gherkai explain <run_id> [<scope_id>] --json`

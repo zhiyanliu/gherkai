@@ -39,8 +39,9 @@ FORBIDDEN = re.compile(
     r"|不变量|定位链|实测项|被拒方案|重议闸门|接缝契约|模块头|组合根装配"
     r"|_require_vpc"
 )
-# .mts 侧去注释后按行扫（TS 无 docstring 概念，注释即注释）——禁词与 Python 侧同一张表，别让 TS 侧更松
-FORBIDDEN_TS = ("ADR", "决策", "不变量", "定位链", "实测项", "被拒方案", "重议闸门", "接缝契约", "模块头", "组合根装配")
+# .mts 侧去注释后按行扫（TS 无 docstring 概念，注释即注释）——禁词与 Python 侧**同一张表**（复用上面的 FORBIDDEN，
+# 别让 TS 侧更松），外加两个裸子串收得更严：TS 侧没有「ADR 0034」「决策 3」之外的合法用法，出现即错。
+FORBIDDEN_TS_BARE = ("ADR", "决策")
 
 
 def _docstring_node_ids(tree: ast.AST) -> set[int]:
@@ -89,7 +90,7 @@ def _scan_midscene() -> list[str]:
         if path.name.endswith(".test.mts"):
             continue
         for lineno, code in _strip_ts_comments(path.read_text(encoding="utf-8")):
-            if any(bad in code for bad in FORBIDDEN_TS):
+            if FORBIDDEN.search(code) or any(bad in code for bad in FORBIDDEN_TS_BARE):
                 hits.append(f"{path.relative_to(REPO_ROOT)}:{lineno}: {code.strip()[:100]!r}")
     return hits
 

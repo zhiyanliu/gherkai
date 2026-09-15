@@ -129,7 +129,7 @@ class BackendStack(Stack):
             ) from exc
         return version
 
-    # ---- DynamoDB ×2 + S3 ×1（ADR 0033 资源清单；schema 与 core/tests/conftest.py fixture 一致）----
+    # ---- DynamoDB ×2 + S3 ×1（ADR 0033 资源清单；schema 权威源在此，core/tests/conftest.py 的 moto fixture 只按各测试需要局部复刻键 schema）----
     def _storage(self) -> None:
         # runs 表（控制面/RunStore）：PK=run_id(S) / SK=item_type(S，值 META/STATE）。
         # **开 Stream（NEW_IMAGE，ADR 0034）**：submit 的 create_run 写 definition（INSERT）→ 触发 kicker Lambda
