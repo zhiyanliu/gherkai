@@ -21,8 +21,20 @@
 ## 三类问题（分类找）
 
 1. **DEAD**：死代码——定义了但无人调用的函数/类/分支、永远为真/假的条件、不可达路径、旧实现残骸、冗余重复逻辑、悬空字段（设计了留痕/口子但生产端从不消费）。
-2. **STALE_INEFFICIENT**：过时或低效——过时的注释/常量、局部最优的写法、该抽取的重复逻辑、不必要的复杂度、性能隐患。**含 code 注释的引用方向违规 / 悬空指针**：三形态（引 `docs/journey/` / 裸 WP 编号 / 只在某次会话成立的指代）与修法（改指稳定物或翻成自明事件描述）**详见 CLAUDE.md 文档纪律「引用方向单向」+「指针只指稳定物」**（该纪律显式含 repo 内 code 注释），此处不复述。**一次性脚本/脚手架本不该入 repo**（放 `$CLAUDE_JOB_DIR/tmp`），故凡在 `tools/`/产品树的注释一律守此规。**「注释」含 docstring、含测试 / `deploy_aws`（CDK stack 与 lambdas）/ `.mts`·TS / bash（`tools/*.sh`）等全部 repo 代码文件**（CLAUDE.md 该纪律是「repo 内注释一律守」——测试逻辑本身仍不 review（见红线护栏），但其注释的引用方向违规同报）。（`.md` 文档的同类违规归姊妹任务 [`doc-health-review.md`](./doc-health-review.md)；本任务只管 code 注释，不重叠。）**注释违规不可用 graphify 图扫**：图里的 `rationale` 节点只存注释前被截断的部分内容，违规多半在截掉的后半截——扫图会给出"无违规"的假阴性，比不扫更坏；必须直读源码注释全文（grep 时排除 `.venv/`、`node_modules/` 等依赖树，否则命中的多是第三方包文本）。
-3. **VIOLATES_ADR**：与 ADR 已定设计违背/不符（最高价值）。常见形态（示例，**以各 ADR 现状为准**——被 Superseded 的不再算基线）：core 本该"不透明搬运"却解析了产物（[0027]）；本该纯 reducer 却臆断因果（[0026]）；本该组合根注入却在 module 里 env-sniff 自选（[0016]）；本该 engine 只报原生量 core 不折美元（[0024]）；core 本该对 step 语义无知却解析了（[0022]）；reconcile 本该 core 纯函数只提议、副作用全在 adapter/组合根却在 core 做副作用/import boto3，外部本该只读 RunState 却自行从 events 推演（[0034]）；消费点假定仓库布局（`repo_root()` 类路径推导）而不走 worker 定位链与 `steps/` 目录约定（[0037]）；运行时按 task-def family 取最新而非 definition 里的显式 revision（[0038]）；到用户终端 / 日志的文案带 ADR 编号、决策号或内部机制名——护栏 `cli/tests/test_user_facing_messages.py` 只管禁词正则，正则外的语义泄漏靠本任务（[0039]）。这些是深层架构不变量、较稳定，但 review 时仍以 ADR 正文为准。**doc-health 移交的第③类不一致在此接收**（code 偏离 ADR 已定设计、且无任何 ADR 记录该偏离——doc-health 不得把 ADR 改成 code 的样子）：裁定为实现未对齐 → 改 code；裁定为设计该变 → 人拍板后显式改 ADR，不由复盘顺手抹平。
+2. **STALE_INEFFICIENT**：过时或低效——过时的注释/常量、局部最优的写法、该抽取的重复逻辑、不必要的复杂度、性能隐患。**含 code 注释的引用方向违规 / 悬空指针**，三件事：
+   - **判据与修法不在此复述**：三形态（引 `docs/journey/` / 裸 WP 编号 / 只在某次会话成立的指代）与修法（改指稳定物或翻成自明事件描述）**详见 CLAUDE.md 文档纪律「引用方向单向」+「指针只指稳定物」**（该纪律显式含 repo 内 code 注释、一律守）。
+   - **范围 = 全部 repo 代码文件的注释与 docstring**：`tools/`、产品树、测试、`deploy_aws`（CDK stack 与 lambdas）、`.mts`·TS、bash（`tools/*.sh`）、`.github/` 下的 workflow 与脚本等——一次性脚本/脚手架本该放 `$CLAUDE_JOB_DIR/tmp` 不入 repo，入了库就一律守此规；测试逻辑本身仍不 review（见红线护栏），但其注释的引用方向违规同报。`.md` 文档的同类违规归姊妹任务 [`doc-health-review.md`](./doc-health-review.md)。
+   - **检测法：必须直读源码注释全文**，grep 时排除 `.venv/`、`node_modules/` 等依赖树（否则命中的多是第三方包文本）。**不可用 graphify 图扫**——图里的 `rationale` 节点只存注释前被截断的部分内容，违规多半在截掉的后半截，扫图会给出"无违规"的假阴性，比不扫更坏。
+3. **VIOLATES_ADR**：与 ADR 已定设计违背/不符（最高价值）。**doc-health 移交的第③类不一致在此接收**（code 偏离 ADR 已定设计、且无任何 ADR 记录该偏离——doc-health 不得把 ADR 改成 code 的样子）：裁定为实现未对齐 → 改 code；裁定为设计该变 → 人拍板后显式改 ADR，不由复盘顺手抹平。常见形态（示例，按 ADR 号排便于反查，**以各 ADR 现状为准**——被 Superseded 的不再算基线；这些是深层架构不变量、较稳定，但 review 时仍以 ADR 正文为准）：
+   - [0016] 本该组合根注入却在 module 里 env-sniff 自选。
+   - [0022] core 本该对 step 语义无知却解析了。
+   - [0024] 本该 engine 只报原生量、core 不折美元。
+   - [0026] 本该纯 reducer 却臆断因果。
+   - [0027] core 本该"不透明搬运"却解析了产物。
+   - [0034] reconcile 本该 core 纯函数只提议、副作用全在 adapter/组合根，却在 core 做副作用/import boto3；外部本该只读 RunState 却自行从 events 推演。
+   - [0037] 消费点假定仓库布局（`repo_root()` 类路径推导）而不走 worker 定位链与 `steps/` 目录约定。
+   - [0038] 运行时按 task-def family 取最新而非 definition 里的显式 revision。
+   - [0039] 到用户终端 / 日志的文案带 ADR 编号、决策号或内部机制名——护栏 `cli/tests/test_user_facing_messages.py` 只管禁词正则，正则外的语义泄漏靠本任务。
 
 ## 红线护栏
 
@@ -33,15 +45,15 @@
 
 ## 执行方法（本项目跑通的最佳路径）
 
-覆盖范围：**当前的生产代码**（核心库 + 产品本体 `runtime/` + 前端 cli + 各引擎 worker + 部署 provider 包 `deploy_aws/`（CDK stack + `lambdas/` handler 源）；`tools/` 是长期资产，注释纪律与死代码同在查范围；**发布链也是生产路径**（发布即生产）：`.github/workflows/{ci,release}.yml` + `.github/scripts/`、两引擎 `Dockerfile`——查失效步骤 / 占位、与 pyproject·package.json 约定是否对得上，`metadata=true` 曾让发布 gate 必败正是这类 bug）。非生产路径——spike/探针（诚实可丢弃）、及 ADR 已标"待退役/历史"的遗留层——视情况轻扫或跳过（先扫一遍目录、对照 ADR Status 判哪些还是当前生产路径，别照抄某一时刻的模块名单——本行枚举也曾漏掉 v1.2 新增的 lambdas 与部署包（当时叫 iac_aws_backend），快照必陈旧、目录扫描才是真值集）。
+覆盖范围：**当前的生产代码**（核心库 + 产品本体 `runtime/` + 前端 cli + 各引擎 worker + 部署 provider 包 `deploy_aws/`（CDK stack + `lambdas/` handler 源）；`tools/` 是长期资产，注释纪律与死代码同在查范围；**发布链也是生产路径**（发布即生产）：`.github/workflows/{ci,release}.yml` + `.github/scripts/`、两引擎 `Dockerfile`——查失效步骤 / 占位、与 pyproject·package.json 约定是否对得上，`metadata=true` 曾让发布 gate 必败正是这类 bug）。非生产路径——spike/探针（诚实可丢弃）、及 ADR 已标"待退役/历史"的遗留层——视情况轻扫或跳过（先扫一遍目录、对照 ADR Status 判哪些还是当前生产路径，别照抄某一时刻的模块名单——本行枚举自己就曾漏掉后来新增的部署包与 lambdas，快照必陈旧、目录扫描才是真值集）。
 
 ### 分片深读（可用 workflow 并行）
 
-- **开局先画变更热力图（只排序、不截断）**：取上轮锚点——`git log --format='%h %(trailers:key=Code-Health-Round,valueonly)' | grep -m1 .`（落地提交带 trailer，见下「产出与提交」；首轮或锚点缺失就用上一次 code-health 落地提交，`git log --grep=code-health` 找）——跑 `git diff --stat <锚点>..HEAD` 落在生产代码与 `docs/adr/`。**热区 = 变更集 ∪ 一跳依赖**：变更文件的调用者 / 导入者（`graphify path` 或 `graphify-out/graph.json` 的调用·导入边，再 grep 符号兜底）一并拉进来——改一个核心契约（ports / wire 字段 / Status 枚举）可能只动几十行，失效的却是别处一行没改的调用者，只看 diff 会把它们排成冷区。用法三样：① 分片把热区代码与同期动过的 ADR 放同一片，审计员拿到的是「这块在 ADR NNNN 下长出来的，对着它核」这种具体假设；② 热区先读、深读，冷区后读、做一遍完整但轻的 DEAD / VIOLATES 核对——**冷区不能跳**（没动的代码会被别处的调用者变化弄死，判死码是全局属性）；③ 「code 大改、ADR 零改」的不对称本身就是线索（设计没落 ADR，或旧 ADR 缺历史注）。债是构建的函数（见上「何时做」），变更集是它的密度先验，不是范围。
-- **取回上轮驳回的重构提案、别重提**：锚点提交说明里记着上轮被驳回的主观/重构项（提案 + 驳回原因，记法见下「产出与提交」）。本轮对同一段 code 再起同样的提案前先对这份清单：涉及的文件不在热区 = 前提没变、沿用驳回不重提；落在热区 = 前提可能变了、重评并在报告里点明「上轮驳回过、本轮因 X 变了重提」。
+- **开局先画变更热力图（只排序、不截断）**：取上轮锚点——`git log --format='%h %(trailers:key=Code-Health-Round,valueonly)' | grep -m1 .`（落地提交带 trailer，见下「产出与提交」；首轮或锚点缺失就用上一次 code-health 落地提交，`git log --grep=code-health` 找）——跑 `git diff --stat <锚点>..HEAD` 落在生产代码与 `docs/adr/`。**热区 = 变更集 ∪ 一跳依赖**：变更文件的调用者 / 导入者（`graphify path` 或 `graphify-out/graph.json` 的调用·导入边，再 grep 符号兜底）一并拉进来——改一个核心契约（ports / wire 字段 / Status 枚举）可能只动几十行，失效的却是别处一行没改的调用者，只看 diff 会把它们排成冷区。用法三样：① 分片把热区代码与同期动过的 ADR 放同一片，审计员拿到的是「这块在 ADR NNNN 下长出来的，对着它核」这种具体假设；② 热区先读、深读，冷区后读、做一遍完整但轻的 DEAD / VIOLATES 核对——**冷区不能跳**（没动的代码会被别处的调用者变化弄死，判死码是全局属性）；③ 「code 大改、ADR 零改」的不对称本身就是线索（设计没落 ADR，或旧 ADR 缺历史注）。变更集是债的密度先验（依据见上「何时做」），不是范围。
+- **取回上轮驳回的重构提案、别重提**：锚点提交说明里记着上轮被驳回的主观/重构项（提案 + 驳回原因，记法见下「产出与提交」）。本轮对同一段 code 再起同样的提案前先对这份清单：涉及的文件不在热区 = 前提没变、沿用驳回不重提；落在热区 = 前提可能变了、重评并在报告里点明「上轮驳回过、这次因 X 变了重提」。
 - **按模块耦合分组分片**：先看当前 codebase 实际结构，把耦合紧、易互相影响的代码分在同一片（相关代码同片才便于发现跨文件的重复与不一致）。分片粒度按当时模块数与规模自行定，别照抄某一时刻的固定方案。**「实际结构」的真值**：生产文件间的 `imports` / `calls` 边（`graphify path` 或读 `graphify-out/graph.json`，排除 tests）+ git 共变（锚点以来同一提交一起改的文件）。**知识图的社区划分只当线索、不当分片边界**——它按图的连通密度切、把测试与文档节点一并算进去，与生产耦合不是一回事，且只随 `tools/graphify_refresh.sh` 刷新（多半比 code 旧）。
 - **【强制】每片对照相关 ADR review**：VIOLATES_ADR 类**必须 Read 相关 ADR 核实**决策确实被违背（非误读）。ADR 基线在 `docs/adr/`，每个开头有 Status 头——**Superseded/Draft 的不作当前基线**。
-- **【强制】死代码类必 grep 确认真无调用点**——含 worker 子进程入口、组合根注入、动态调用、测试引用。确认不了就标低置信、别误删。**先用 graphify 图缩小候选**：`graphify-out/graph.json` 已入库（AST 层由 post-commit hook 随代码 commit 维护，文档语义层与社区命名由 `tools/graphify_refresh.sh` 刷新，见 DEVELOPMENT.md「知识图刷新」；CLAUDE.md 也要求代码问题先 `graphify query`）——`graphify affected "<符号>"` 反查引用，它走 AST 解析出的调用关系，不受同名符号/字符串/注释干扰，比纯文本 grep 精确。**但它的盲区恰好落在本任务护栏上**——字符串装配的 Lambda `handler`、动态调用、组合根注入在图里同样是零入边，且 AST 层只随 commit 更新、工作区未提交的改动不在图里，**图说"无人调用"不构成删除依据**。故 grep 与人工判断始终是【强制】基线与最终裁决，图只用于排序候选、不替代确认。
+- **【强制】死代码类必 grep 确认真无调用点**——含 worker 子进程入口、组合根注入、动态调用、测试引用。确认不了就标低置信、别误删。**先用 graphify 图缩小候选**：`graphify affected "<符号>"` 反查引用，走 AST 解析出的调用关系、不受同名符号/字符串/注释干扰，比纯文本 grep 精确（`graphify-out/graph.json` 已入库：AST 层由 post-commit hook 随 commit 维护，文档语义层与社区命名由 `tools/graphify_refresh.sh` 刷新，见 DEVELOPMENT.md「知识图刷新」）。**但它的盲区恰好落在本任务护栏上**——字符串装配的 Lambda `handler`、动态调用、组合根注入在图里同样是零入边，且 AST 层只随 commit 更新、工作区未提交的改动不在图里：**图说"无人调用"不构成删除依据、只用于排序候选**，grep 与人工判断始终是【强制】基线与最终裁决。
 
 ### 对抗验证
 
@@ -56,5 +68,5 @@
 ## 产出与提交
 
 - 客观类改完给 diff 汇报；重构/主观类批准后再改。
-- 与文档改动分开、独立成 commit；commit message 说清各类各改了几条、守了哪些护栏、跑了哪些测试。**落地提交**（本轮客观项与获批项都落完的那个）说明里两样必带：① 被驳回的主观/重构提案各记一行（提案 + 驳回原因），是下一轮「别重提」的依据；② 末尾 git trailer `Code-Health-Round: N`（与 `Co-Authored-By` 同在最后一个段落，中间不能有空行），是下一轮热力图的锚点——两样都只在这里、不落任何文件（复盘过程记录的归宿是 git 历史，不是长期文档）。
+- 与文档改动分开、独立成 commit；commit message 说清各类各改了几条、守了哪些护栏、跑了哪些测试。**落地提交**（本轮客观项与获批项都落完的那个）说明里两样必带：① 被驳回的主观/重构提案各记一行（提案 + 驳回原因），是下一轮「别重提」的依据；② 末尾 git trailer `Code-Health-Round: N`（与 `Co-Authored-By` 同在最后一个段落，中间不能有空行），是下一轮画热力图的锚点——两样都只在这里、不落任何文件（复盘过程记录的归宿是 git 历史，不是长期文档）。
 - **提交前自检**：`git status` 确认没有调试残留文件（临时副本/探针）被 `git add -A` 误纳入。
