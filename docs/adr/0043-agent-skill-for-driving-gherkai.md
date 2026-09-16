@@ -136,7 +136,7 @@ Claude 的 plugin marketplace 只覆盖 Claude、仪式更多，现阶段不做�
 - [0039](./0039-user-facing-surfaces-no-internal-references.md)（扩展、Status 不动）：面二表新增一行（`cli/gherkai_cli/skills/gherkai/**`；去向 = 随 CLI wheel 发行、由 `skill install` 拷进使用方项目 / agent 目录；链接只用绝对 URL），并把表前「四层只差去向与链接形态」改为不数数的说法（表已含 Release 正文一行，钉数字必再漂）；「护栏」节补 `cli/tests/test_skill.py` 这只 markdown 扫描器。
 - [0016](./0016-execution-architecture-core-lib-run-model.md)（扩展、Status 不动）：v1.4.0 完成线里「claude/ai skills 暴露」一项改为工具中立措辞并补权威指针到本 ADR；本 ADR 翻 Accepted 时同步该项完成状态。
 - [0001](./0001-scope-limited-to-english-ui.md)（扩展、Status 不动）：「影响」节承载语言口径的面加 skill 的 `references/engines.md`。
-- `CLAUDE.md`：代码纪律「产品面文案不带内部指代」的条件加「以及随发行包发到使用方项目的 markdown（agent skill）」；文档纪律「README / DEVELOPMENT 分层」的使用者向枚举加「随包发行的 skill 内容」，两处指本 ADR。
+- `CLAUDE.md`：代码纪律「产品面文案不带内部指代」的条件加「以及随发行包发到使用方项目的 markdown（agent skill）」；文档纪律「README / DEVELOPMENT 分层」的使用者向枚举加「随包发行的 agent skill」，两处指本 ADR。
 - `docs/REFERENCES.md` 新开「Agent Skills」节：规范（frontmatter 字段与上限）、vercel-labs `skills` CLI README（容器目录、直指路径、安装位）、Codex skills 文档（`.agents/skills` 位）、skill-creator 位置。
 - 根 `README.md` 加「让 AI agent 驾驭」一节（两条安装路径、次选路径不钉 tag 时的版本代价与钉 tag 模板）；`cli/README.md` 加 `skill install` 行；`docs/guides/cli-json-contract.md` 头部加 skill 指引与「有转换副本随 CLI 发行」；`docs/guides/README.md` 末句 skill 指向本目录。
 - 根 `DEVELOPMENT.md`：目录树（`cli/gherkai_cli/` 行加 `skills/gherkai/`、新增根 `skills/gherkai-evals/`）、ADR 范围到 0043、测试节的护栏枚举句补 `cli/tests/test_skill.py`（按实况改写，它不只扫文案）；`cli/DEVELOPMENT.md`：模块树的子命令枚举加 `skill`、模块行加 `skill_install.py`、「跑测试」节加 `test_skill.py` 与 `tools/render_skill_contract.py` 的跑法；`CONTEXT.md` 术语加 skill。
