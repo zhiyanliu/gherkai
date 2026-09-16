@@ -397,8 +397,8 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
                     help="只看这些 scenario（可重复，任一命中）：SEL = 判定明细里的 scenario id、行号（纯数字或 :行号，只当行号、不按标题匹配），"
                          "或标题的一段文字（区分大小写）")
     ex.add_argument("--step", type=int, default=None, metavar="N",
-                    help="只看第 N 步（scenario 内 0 起的书写序号，与文本里的 step 号、JSON 的 index 同一口径）；"
-                         "须与 --scenario 同给")
+                    help="只看第 N 步（scenario 内 0 起的书写序号，与文本里的 step 号、JSON 的 index 同一口径），"
+                         "点名的这一步连通过的也展开证据；须与 --scenario 同给")
     ex.add_argument("--all", action="store_true",
                     help="通过的 step 也展开证据（默认只展开 failed/error/skipped；无记录的 step 没有证据可展开，只在状态位说明）")
     ex.add_argument("--full", action="store_true",
@@ -1667,7 +1667,8 @@ def _explain_emit(args, state, result_store, *, read_bytes, wait_hint: str) -> i
             matched = with_step
         scenario_ids = {sc.id for sc in matched}
 
-    expand_passed = bool(args.all)
+    # 显式点名一步（--step）即展开它的证据——点名就是想看，不必再给 --all（ADR 0042 决策四）
+    expand_passed = bool(args.all) or args.step is not None
     doc = render.explain_to_dict(
         run_id=state.run_id, status=state.status.value, results=results,
         evidence_reader=lambda refs: _explain_read_evidence(refs, read_bytes),

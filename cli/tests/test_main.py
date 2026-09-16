@@ -1591,6 +1591,17 @@ def test_explain_step_needs_scenario_and_lists_candidates_when_absent(tmp_path, 
     assert rc == 0 and "step 2  Then" in out and "step 0  Given" not in out
 
 
+def test_explain_named_step_expands_even_when_passed(tmp_path, capsys):
+    """显式 --step 点名的那一步即展开证据（点名就是想看），不必再给 --all；默认视图对同一 passed 步仍不展开。"""
+    root, run_id = _explain_run(tmp_path)
+    _rc, out, _ = _explain(capsys, root, run_id)
+    assert "step 0  Given" in out and "无 AI 证据" not in out.split("step 0  Given")[1].split("step 1")[0]
+    rc, out, _ = _explain(capsys, root, run_id, "--scenario", "12", "--step", "0")
+    assert rc == 0 and "step 0  Given" in out
+    block = out.split("step 0  Given")[1]
+    assert ("无 AI 证据" in block) or ("act 0" in block)  # 展开了（该步有无 AI 证据两种形态都算展开）
+
+
 def test_explain_all_expands_passed_and_full_drops_the_text_budget(tmp_path, capsys):
     """--all 也展开 passed step；--full 逐 frame 全文（省略计数消失、无推理的 frame 也现身）。"""
     root, run_id = _explain_run(tmp_path)
