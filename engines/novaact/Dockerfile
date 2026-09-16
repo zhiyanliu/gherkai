@@ -49,9 +49,9 @@ COPY . /tmp/pkg/
 RUN if [ -n "${WORKER_WHEEL}" ]; then pip install "/tmp/pkg/${WORKER_WHEEL}"; fi; rm -rf /tmp/pkg
 
 FROM worker-${WORKER_SOURCE} AS final
-# 两态共同的诚实校验 + 冒烟：worker 必须真装上、入口必须真跑得起来（`--list-deterministic` 不需要 AWS）。
+# 两态共同的诚实校验 + 冒烟：worker 必须真装上、入口必须真跑得起来（`--capabilities` 自述不需要 AWS）。
 # 漏 build-arg（选了 index 却没给版本 / 选了 local 却没给 wheel）在此 fail-loud，不拖到 Fargate 启动期。
-RUN python -m gherkai_worker_novaact --list-deterministic > /dev/null
+RUN python -m gherkai_worker_novaact --capabilities > /dev/null
 # 三通道分离（ADR 0024）：事件走 DDB（EventSink DDB 态）、诊断走 stderr、SDK 噪声走 stdout——容器日志（awslogs）
 # 抓 stdout/stderr 供调试，事件不依赖日志（走 DDB）。
 # region/凭证不焊镜像：AWS_REGION 经 RunTask overrides 注入、凭证走 task role（ADR 0033 决策 C）。

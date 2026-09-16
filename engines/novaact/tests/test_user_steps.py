@@ -8,8 +8,8 @@
   run 可能假「通过」（本项目最忌的静默降级）。
 - **steps 根不入 `sys.path`**：否则使用方一个 `json.py` 就遮蔽标准库、症状离原因极远。
 
-末尾的真子进程测试跨了「进程 + argv + env」这条边（`-m gherkai_worker_novaact --list-deterministic` 的清单、
-非 0 退出码、诊断行有无），in-process 断言覆盖不到。
+末尾的真子进程测试跨了「进程 + argv + env」这条边（`-m gherkai_worker_novaact --capabilities` 自述对象里的
+`deterministic_steps` 清单、非 0 退出码、诊断行有无），in-process 断言覆盖不到。
 """
 import json
 import subprocess
@@ -201,28 +201,29 @@ def test_step_file_named_like_stdlib_does_not_shadow(tmp_path):
     assert sys.modules["json"] is reimported_json
 
 
-# ---- (e) 三个入口都先加载：真子进程验 --list-deterministic 含使用方 step ----
-def test_list_deterministic_subprocess_includes_user_steps(tmp_path):
-    """真子进程 + 真 env：`-m gherkai_worker_novaact --list-deterministic` 报的表含使用方 step。
+# ---- (e) job 模式与两个非 job 入口都先加载：真子进程验 --capabilities 的清单含使用方 step ----
+def test_capabilities_subprocess_includes_user_steps(tmp_path):
+    """真子进程 + 真 env：`-m gherkai_worker_novaact --capabilities` 的 `deterministic_steps` 含使用方 step。
 
     跨了「进程 + env + argv」这条边（in-process 断言只证 registry，证不到自述入口先加载了 steps）。
     """
     _step_file(tmp_path / "mine.py", "P-user-visible")
     proc = subprocess.run(
-        [sys.executable, "-m", "gherkai_worker_novaact", "--list-deterministic"],
+        [sys.executable, "-m", "gherkai_worker_novaact", "--capabilities"],
         capture_output=True, timeout=60, env={**_clean_env(), "GHERKAI_STEPS_DIR": str(tmp_path)},
     )
     assert proc.returncode == 0, proc.stderr.decode()[-500:]
-    patterns = [e["pattern"] for e in json.loads(proc.stdout.decode("utf-8"))]
+    caps = json.loads(proc.stdout.decode("utf-8"))
+    patterns = [e["pattern"] for e in caps["deterministic_steps"]]  # 清单是自述对象的一个键（ADR 0036「5.」）
     assert "P-user-visible" in patterns
     assert any("页面地址" in p for p in patterns)  # 内建脚手架仍在（叠加、不是替换）
 
 
-def test_broken_steps_dir_makes_list_deterministic_exit_nonzero(tmp_path):
+def test_broken_steps_dir_makes_capabilities_exit_nonzero(tmp_path):
     """fail-loud 到进程边界：坏 step 文件 → 自述入口也非 0 退出、stderr 指名文件（不静默给出残缺清单）。"""
     (tmp_path / "broken.py").write_text("def h(:\n", encoding="utf-8")
     proc = subprocess.run(
-        [sys.executable, "-m", "gherkai_worker_novaact", "--list-deterministic"],
+        [sys.executable, "-m", "gherkai_worker_novaact", "--capabilities"],
         capture_output=True, timeout=60, env={**_clean_env(), "GHERKAI_STEPS_DIR": str(tmp_path)},
     )
     assert proc.returncode == EX_STEPS_LOAD, (proc.returncode, proc.stderr.decode()[-500:])
@@ -235,7 +236,7 @@ def test_loaded_count_line_on_stderr_subprocess(tmp_path):
     _step_file(tmp_path / "mine.py", "P-x")
     _step_file(tmp_path / "sub" / "other.py", "P-y")
     proc = subprocess.run(
-        [sys.executable, "-m", "gherkai_worker_novaact", "--list-deterministic"],
+        [sys.executable, "-m", "gherkai_worker_novaact", "--capabilities"],
         capture_output=True, timeout=60, env={**_clean_env(), "GHERKAI_STEPS_DIR": str(tmp_path)},
     )
     assert proc.returncode == 0, proc.stderr.decode()[-500:]
@@ -246,7 +247,7 @@ def test_loaded_count_line_on_stderr_subprocess(tmp_path):
 def test_no_loaded_line_when_nothing_injected(tmp_path):
     """未注入目录 = 使用方没定制，正常路径不打这行（诊断行不许变成人人都看见的噪声）。"""
     proc = subprocess.run(
-        [sys.executable, "-m", "gherkai_worker_novaact", "--list-deterministic"],
+        [sys.executable, "-m", "gherkai_worker_novaact", "--capabilities"],
         capture_output=True, timeout=60, env=_clean_env(),
     )
     assert proc.returncode == 0, proc.stderr.decode()[-500:]

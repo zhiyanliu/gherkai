@@ -1,8 +1,9 @@
 """`--capabilities` 自述入口单测（ADR 0036「5.」/ ADR 0024「引擎自报下限」，Nova 侧）。
 
-全部走**真子进程**：这条入口的契约恰好都在进程边界上——argv 分派、`NOVA_ACT_TIMEOUT_S` /
-`NOVA_GRACE_MARGIN_S` 两个 env 旋钮在 import 期读、stdout 只此一个 JSON 对象、不读 stdin、不建会话。
-in-process 调 `_capabilities()` 证不到这些（env 已在 import 期定型、stdin/AWS 更碰不到）。
+全部走**真子进程**：这条入口的契约恰好都在进程边界上——argv 分派（含「`--list-deterministic` 不再被
+识别」这条不留别名的红线）、`NOVA_ACT_TIMEOUT_S` / `NOVA_GRACE_MARGIN_S` 两个 env 旋钮在 import 期读、
+stdout 只此一个 JSON 对象、不读 stdin、不建会话。in-process 调 `_capabilities()` 证不到这些（env 已在
+import 期定型、argv/stdin/AWS 更碰不到）。
 
 跑（从 repo 根）：uv run pytest -q engines/novaact/tests/test_capabilities.py
 """
@@ -30,15 +31,27 @@ def _clean_env(**extra: str) -> dict:
 
 
 def test_capabilities_shape_and_min_grace_from_injected_act_timeout():
-    """形状 + `min_grace_s` = 注入的 `NOVA_ACT_TIMEOUT_S` + worker 侧 margin（组合根查询它当 grace 下限）。"""
+    """键集恰四个 + `min_grace_s` = 注入的 `NOVA_ACT_TIMEOUT_S` + worker 侧 margin（组合根查它当 grace 下限）。
+
+    键集**全等**断言（非「至少含」）：ADR 0036「5.」的自述对象是消费侧按键取的契约面，多一个未声明的键
+    或少一个键都要连 `schema_version` 一起议——「至少含」照不出多出来的键。
+    """
     proc = subprocess.run(_CMD, capture_output=True, timeout=60,
                           env=_clean_env(NOVA_ACT_TIMEOUT_S="7"))
     assert proc.returncode == 0, proc.stderr.decode()[-500:]
     out = proc.stdout.decode("utf-8")
     assert len(out.strip().splitlines()) == 1, out  # stdout 只此一个 JSON 对象（消费侧整段 json.loads）
     caps = json.loads(out)
-    assert caps == {"schema_version": 1, "engine": "novaact", "min_grace_s": 7 + NOVA_GRACE_MARGIN_S}
+    assert set(caps) == {"schema_version", "engine", "min_grace_s", "deterministic_steps"}, caps
+    assert caps["schema_version"] == 1
+    assert caps["engine"] == "novaact"
+    assert caps["min_grace_s"] == 7 + NOVA_GRACE_MARGIN_S
     assert NOVA_GRACE_MARGIN_S > 0  # margin 须 > 0（ADR 0024：act 有界返回之后还要会话释放 + 截图排空）
+    steps = caps["deterministic_steps"]  # 注册表清单（ADR 0036「2.」），内建脚手架至少一条
+    assert isinstance(steps, list) and steps, caps
+    assert all(set(e) == {"pattern", "description", "example"} for e in steps), steps
+    assert all(e["pattern"] and e["description"] and e["example"] for e in steps), steps
+    assert any("页面地址" in e["pattern"] for e in steps), steps  # 脚手架注册的真锚点在表里
 
 
 def test_min_grace_tracks_both_env_knobs():
@@ -78,7 +91,7 @@ def test_does_not_read_stdin():
 
 
 def test_broken_steps_dir_makes_capabilities_exit_nonzero(tmp_path):
-    """steps 加载失败在这个入口也 fail-loud（ADR 0037 决策 4「三个自述入口同样加载 steps」）：
+    """steps 加载失败在这个入口也 fail-loud（ADR 0037 决策 4「两个非 job 入口同样加载 steps」）：
     非 0 退出、stderr 指名文件、stdout 不吐半份能力声明（组合根宁可 fail-loud 也不要静默的下限）。"""
     from gherkai_worker_novaact.user_steps import EX_STEPS_LOAD
 
@@ -88,3 +101,17 @@ def test_broken_steps_dir_makes_capabilities_exit_nonzero(tmp_path):
     assert proc.returncode == EX_STEPS_LOAD, (proc.returncode, proc.stderr.decode()[-500:])
     assert "broken.py" in proc.stderr.decode("utf-8")
     assert proc.stdout.decode("utf-8").strip() == ""
+
+
+def test_list_deterministic_flag_no_longer_recognized():
+    """`--list-deterministic` 已删、**不留别名**（ADR 0036 被拒方案末条「每个自述项一个独立 flag」）。
+
+    只有真 argv 证得到：这个 flag 认不出 → 落进 job 模式去读 stdin，stdin 给 DEVNULL（无 job 载荷）→
+    非 0 退出、stdout 一个 JSON 对象都不吐；若哪天有人为兼容偷偷把它接回自述，这条即红。
+    """
+    proc = subprocess.run([sys.executable, "-m", "gherkai_worker_novaact", "--list-deterministic"],
+                          stdin=subprocess.DEVNULL, capture_output=True, timeout=60, env=_clean_env())
+    assert proc.returncode != 0, proc.stdout.decode("utf-8")[-500:]
+    out = proc.stdout.decode("utf-8")
+    assert "deterministic_steps" not in out and "min_grace_s" not in out, out
+    assert not [ln for ln in out.splitlines() if ln.strip().startswith("{")], out  # 没有半份 JSON 对象

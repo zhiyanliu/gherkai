@@ -271,7 +271,7 @@ function stepCost(beforeTokens: number, agent: PlaywrightAgent): Record<string, 
   return delta > 0 ? { tokens: delta } : undefined;
 }
 
-// 自述入口（--list-deterministic / --match-steps / --capabilities）的 stdout payload 写出（ADR 0036「stdout 一行 JSON 即退」）：
+// 两个非 job 入口（--capabilities 自述 / --match-steps 查询）的 stdout payload 写出（ADR 0036「stdout 一行 JSON 即退」）：
 // **必须等真 flush 完才能退**，否则 pipe 下大 payload 在 64KB 处静默截断且 rc 仍是 0——组合根只能报「输出非
 // JSON」、真因不可见（ADR 0036 的 best-effort 降级把它吞成 plan 无标注）。两种直觉写法都不够：
 //   - `process.stdout.write(s)` 后紧跟 process.exit：pipe 上 stdout 是异步写，exit 不 flush 未写完的尾部；
@@ -303,16 +303,10 @@ export async function main(): Promise<number> {
     process.env.MIDSCENE_RUN_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "gherkai-midscene-"));
   }
   // 使用方 steps/ 目录的注册（ADR 0037 决策 4）：**内建脚手架之后**（模块顶 import 已注册完）、
-  // **自述入口与 job 循环之前**——故 --list-deterministic / --match-steps / --capabilities / plan 标注都反映使用方定制
+  // **两个非 job 入口与 job 循环之前**——故 --capabilities / --match-steps / plan 标注都反映使用方定制
   // （ADR 0036「真值单一」不变：注册表 = 内建 + 使用方）。加载失败 fail-loud（抛 → bin 一行 stderr + 非零退出）。
   await loadUserSteps();
 
-  // 自述模式（ADR 0036）：dump 确定性注册表即退——不建会话、不读 stdin、零费用。
-  // 脚手架已在模块顶 import（副作用注册），此刻注册表即真值。
-  if (process.argv.includes("--list-deterministic")) {
-    await writeStdoutFlushed(JSON.stringify(listRegistry()) + "\n");
-    return 0;
-  }
   // 批量 match 查询（ADR 0036 决策 4，plan 命中标注）：stdin 一行 JSON 数组（step 文本）→ stdout 一行
   // 逐条命中结果。匹配语义留在 worker（CLI 零复刻）；同样不建会话、零 AWS。
   if (process.argv.includes("--match-steps")) {
@@ -324,12 +318,16 @@ export async function main(): Promise<number> {
   }
   // 引擎能力自述（ADR 0036「5.」）：一个 JSON 对象即退，同样不建会话、不读 stdin、零费用。
   // min_grace_s = 本引擎收尾路径要的 grace 下限（ADR 0024「引擎自报下限」：真值住算它的这一侧，
-  // 组合根只查询后聚合、不持引擎特定常量）。schema_version 只在键语义变化时递增（加键不递增）。
+  // 组合根只查询后聚合、不持引擎特定常量）。deterministic_steps = 注册表清单（ADR 0036「2.」：内建脚手架
+  // 在模块顶 import 时注册、使用方 steps 上面刚加载完，此刻注册表即真值）。
+  // **加键不加入口**（ADR 0036「5.」）：新增自述项都是本对象的新键、不再开第二个 flag——组合根一次 spawn
+  // 就同时拿到「steps 加载成功 / 清单 / grace 下限」。schema_version 只在既有键语义变化时递增（加键不递增）。
   if (process.argv.includes("--capabilities")) {
     await writeStdoutFlushed(JSON.stringify({
       schema_version: 1,
       engine: "midscene",
       min_grace_s: minGraceSeconds(),
+      deterministic_steps: listRegistry(),
     }) + "\n");
     return 0;
   }

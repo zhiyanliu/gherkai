@@ -324,8 +324,28 @@ def test_run_grace_mixed_engines_takes_max_of_self_reported(tmp_path, monkeypatc
     assert box["opts"].min_grace_s == max(FAKE_MIN_GRACE_S.values())
 
 
+def test_local_run_asks_each_engine_for_capabilities_once(tmp_path, monkeypatch, capsys):
+    """本机 run **每引擎只问一次能力自述**（ADR 0036「5.」一次 spawn 拿全：steps 加载结果 + 清单 + grace 下限）。
+
+    跑前检查带着解析出的 steps 目录问那一次，2a 的 grace 下限就复用同一份对象（compose 的进程内缓存，下限与
+    使用方 step 无关）——两处各问一次等于每个引擎多 spawn 一个 worker（Nova 每次还要 import SDK）。
+    计数装在假替身**外面**：替身只替掉「问 worker」那一跳，被测的是 cli 与 compose 的复用逻辑。
+    """
+    steps = tmp_path / "steps"
+    steps.mkdir()
+    asked: list[tuple] = []
+    stubbed = compose.query_capabilities  # conftest autouse 装的确定性假替身（不是真 spawn）
+    monkeypatch.setattr(m.compose, "query_capabilities",
+                        lambda engine, **kw: asked.append((engine, kw.get("steps_dir"))) or stubbed(engine, **kw))
+    box = {}
+    monkeypatch.setattr(m, "schedule", _capturing_schedule(Status.PASSED, box))
+    assert m.main(["run", str(_write_feature(tmp_path)), "--no-report", "--steps-dir", str(steps)]) == 0
+    assert asked == [("novaact", str(steps.resolve()))]  # 只一次，且带着解析出的 steps 目录
+    assert box["opts"].min_grace_s == FAKE_MIN_GRACE_S["novaact"]  # 下限仍取自那份自述
+
+
 def test_run_engine_self_describe_failure_refuses_to_run(tmp_path, monkeypatch, capsys):
-    """问不到引擎自报的下限（旧 worker 不认该入口 / 起不来 / 输出不合契约）→ **退 2、绝不回落猜的下限**
+    """问不到引擎自报的下限（版本不一致的 worker 不认该入口 / 起不来 / 输出不合契约）→ **退 2、绝不回落猜的下限**
     （ADR 0024「引擎自报下限」fail-loud；回落 = grace 默默不够、收尾被强杀）。文案与自述失败同一口径。"""
     box = {}
     monkeypatch.setattr(m, "schedule", _capturing_schedule(Status.PASSED, box))
@@ -619,23 +639,27 @@ def test_render_status_json_no_hint(capsys):
 # ---- list-deterministic（ADR 0036）：按引擎查询确定性能力清单 ----
 
 def test_list_deterministic_text_and_json(monkeypatch, capsys):
+    """清单取自能力自述对象的 deterministic_steps 键（ADR 0036「5.」「加键不加入口」），文本与 --json 的形状
+    逐字不变——自述对象的其它键（下限/身份位）**不得**漏进输出。"""
     entries = [{"pattern": 'p "(?P<x>[^"]+)"', "description": "断言某事", "example": 'Then p "v"'}]
     calls = []
-    monkeypatch.setattr(m.compose, "query_deterministic",
-                        lambda engine, steps_dir=None: calls.append(engine) or entries)
+    monkeypatch.setattr(m.compose, "query_capabilities",
+                        lambda engine, *, steps_dir=None, timeout_s=60.0: calls.append(engine) or
+                        {"schema_version": 1, "engine": engine, "min_grace_s": 150.0,
+                         "deterministic_steps": entries})
     assert m.main(["list-deterministic", "--engine", "midscene"]) == 0
     out = capsys.readouterr().out
     assert "断言某事" in out and 'Then p "v"' in out and calls == ["midscene"]
     assert m.main(["list-deterministic", "--json"]) == 0  # 默认 novaact（对齐 run 缺省）
     doc = json.loads(capsys.readouterr().out)
-    assert doc["engine"] == "novaact" and doc["deterministic_steps"] == entries
+    assert doc == {"engine": "novaact", "deterministic_steps": entries}  # 键集不变：不带 min_grace_s 等自述项
 
 
 def test_list_deterministic_worker_failure_exits_2(monkeypatch, capsys):
-    def boom(engine, steps_dir=None):
+    def boom(engine, *, steps_dir=None, timeout_s=60.0):
         raise RuntimeError("worker 自述失败（exit 1）：...")
 
-    monkeypatch.setattr(m.compose, "query_deterministic", boom)
+    monkeypatch.setattr(m.compose, "query_capabilities", boom)
     assert m.main(["list-deterministic"]) == 2
     assert "自述失败" in capsys.readouterr().err
 
@@ -809,10 +833,10 @@ def test_submit_local_exits_2_when_worker_runtime_missing(tmp_path, monkeypatch,
 
 def test_list_deterministic_worker_not_found_exits_2(monkeypatch, capsys):
     # list-deterministic 的分叉：退 2、消息带安装指引（自述查不了就是查不了，无降级余地）
-    def boom(engine, steps_dir=None):
+    def boom(engine, *, steps_dir=None, timeout_s=60.0):
         raise _miss(engine)
 
-    monkeypatch.setattr(m.compose, "query_deterministic", boom)
+    monkeypatch.setattr(m.compose, "query_capabilities", boom)
     assert m.main(["list-deterministic"]) == 2
     assert "uv tool install" in capsys.readouterr().err
 
@@ -936,9 +960,8 @@ def test_submit_local_persists_steps_dir_into_definition(tmp_path, monkeypatch):
 
     forked = []
     monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: forked.append(cmd) or _FakeProc())
-    # 提交侧预检会以自述入口探 worker（ADR 0037 决策 4）；本测只验持久化通道，把探测桩掉（上面的假 Popen 会让
-    # subprocess.run 拿到假对象）。
-    monkeypatch.setattr(m.compose, "query_deterministic", lambda engine, *, steps_dir=None, timeout_s=60.0: [])
+    # 提交侧跑前检查会问一次能力自述（ADR 0037 决策 4）；本测只验持久化通道，那一跳由 conftest 的 autouse
+    # 假替身盖住（不 spawn 真 worker）。
     steps = tmp_path / "steps"
     steps.mkdir()
     monkeypatch.delenv("GHERKAI_STEPS_DIR", raising=False)
@@ -951,7 +974,7 @@ def test_submit_local_persists_steps_dir_into_definition(tmp_path, monkeypatch):
 
 
 def test_plan_and_list_deterministic_pass_steps_dir_to_worker(tmp_path, monkeypatch, capsys):
-    """三个自述入口同样加载 steps 目录（ADR 0037 决策 4）→ plan 标注与 list-deterministic 清单反映定制 step。"""
+    """两个非 job 入口同样加载 steps 目录（ADR 0037 决策 4）→ plan 标注与 list-deterministic 清单反映定制 step。"""
     steps = tmp_path / "steps"
     steps.mkdir()
     monkeypatch.delenv("GHERKAI_STEPS_DIR", raising=False)
@@ -959,8 +982,9 @@ def test_plan_and_list_deterministic_pass_steps_dir_to_worker(tmp_path, monkeypa
     seen = {}
     monkeypatch.setattr(m.compose, "match_deterministic",
                         lambda engine, texts, steps_dir=None: seen.update(match=steps_dir) or [None] * len(texts))
-    monkeypatch.setattr(m.compose, "query_deterministic",
-                        lambda engine, steps_dir=None: seen.update(query=steps_dir) or [])
+    monkeypatch.setattr(m.compose, "query_capabilities",
+                        lambda engine, *, steps_dir=None, timeout_s=60.0: seen.update(query=steps_dir) or
+                        {"schema_version": 1, "engine": engine, "min_grace_s": 150.0, "deterministic_steps": []})
     assert m.main(["plan", str(_det_feature(tmp_path))]) == 0
     assert m.main(["list-deterministic"]) == 0
     assert seen["match"] == str(steps.resolve()) and seen["query"] == str(steps.resolve())
@@ -1007,22 +1031,27 @@ def test_plan_degrades_when_worker_missing(tmp_path, monkeypatch, capsys):
 
 
 def test_run_and_submit_exit_2_before_spawn_when_user_steps_fail(tmp_path, monkeypatch, capsys):
-    """run / submit：steps 目录已解析时先以自述入口探一次，worker 非零退出 → 起任何 job 之前退 2（不进 job 级 error）。"""
+    """run / submit：跑前先问一次能力自述，worker 非零退出 → 起任何 job 之前退 2（不进 job 级 error）。
+
+    **文案中性**：该入口现在会加载使用方 steps，非零退出既可能是那些文件加载失败、也可能是这个引擎的 worker
+    与命令行工具版本不一致（不认该入口）——两种成因都得点到，别把用户往单一方向带。"""
     feat = tmp_path / "t.feature"
     feat.write_text('Feature: t\n  Scenario: s\n    When "做点啥"\n', encoding="utf-8")
     steps = _steps_dir_with_file(tmp_path)
     monkeypatch.setattr(compose, "resolve_worker_cmd", _fake_worker_cmd)
 
     def boom(engine, *, steps_dir=None, timeout_s=60.0):
-        raise compose.WorkerSelfDescribeError(engine, 2, "demo.py：SyntaxError", "确定性能力查询")
+        raise compose.WorkerSelfDescribeError(engine, 2, "demo.py：SyntaxError", "能力自述")
 
-    monkeypatch.setattr(compose, "query_deterministic", boom)
+    monkeypatch.setattr(compose, "query_capabilities", boom)
     spawned = {"n": 0}
     monkeypatch.setattr(m, "schedule", lambda *a, **k: spawned.__setitem__("n", spawned["n"] + 1))
     assert m.main(["run", str(feat), "--no-report", "--steps-dir", str(steps)]) == 2
     assert spawned["n"] == 0
     assert m.main(["submit", str(feat), "--report-dir", str(tmp_path / "r"), "--steps-dir", str(steps)]) == 2
-    assert "steps 加载失败" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "demo.py：SyntaxError" in err  # 原样转述 worker 诊断
+    assert "steps/ 目录里的文件加载失败" in err and "版本不一致" in err
     assert not (tmp_path / "r").exists() or not any((tmp_path / "r").iterdir())  # 没落任何 run 记录
 
 
@@ -1254,7 +1283,9 @@ def test_doctor_local_json_checks_and_exit_codes(tmp_path, monkeypatch, capsys):
     _fake_locator(monkeypatch)
     _no_provider(monkeypatch)
     steps = tmp_path / "steps"; steps.mkdir()
-    monkeypatch.setattr(m.compose, "query_deterministic", lambda engine, *, steps_dir=None, timeout_s=60.0: [{"pattern": "a"}, {"pattern": "b"}])
+    monkeypatch.setattr(m.compose, "query_capabilities", lambda engine, *, steps_dir=None, timeout_s=60.0: {
+        "schema_version": 1, "engine": engine, "min_grace_s": 150.0,
+        "deterministic_steps": [{"pattern": "a"}, {"pattern": "b"}]})  # 计数取自述对象的清单键（ADR 0036「5.」）
     assert m.main(["doctor", "--json", "--steps-dir", str(steps)]) == 0
     doc = json.loads(capsys.readouterr().out)
     by = {(c["section"], c["name"]): c for c in doc["checks"]}
@@ -1268,7 +1299,7 @@ def test_doctor_local_json_checks_and_exit_codes(tmp_path, monkeypatch, capsys):
 
     def boom(engine, *, steps_dir=None, timeout_s=60.0):
         raise RuntimeError("worker 自述退 1：steps/login.py 第 3 行 SyntaxError")  # doctor 对任何加载异常都原样转述
-    monkeypatch.setattr(m.compose, "query_deterministic", boom)
+    monkeypatch.setattr(m.compose, "query_capabilities", boom)
     assert m.main(["doctor", "--json", "--steps-dir", str(steps)]) == 2
     doc = json.loads(capsys.readouterr().out)
     bad = next(c for c in doc["checks"] if c["name"] == "load.novaact")
@@ -1395,7 +1426,7 @@ def test_doctor_cloud_worker_grace_unset_stop_timeout_is_reported(monkeypatch, c
 
 
 def test_doctor_cloud_worker_grace_query_failure_lands_in_detail(monkeypatch, capsys):
-    """问不到本机 worker 的下限（旧 worker 不认该入口 / 起不来）→ 转述诊断、不静默按「够用」放过；
+    """问不到本机 worker 的下限（版本不一致的 worker 不认该入口 / 起不来）→ 转述诊断、不静默按「够用」放过；
     doctor 是只读自检，一行报到底，不像 run 那样退 2。"""
     _fake_locator(monkeypatch, available=("midscene",))
     _cloud_backend_ok(monkeypatch)
@@ -1495,7 +1526,7 @@ def test_doctor_runs_worker_self_describe_even_without_steps_dir(monkeypatch, ca
     _fake_locator(monkeypatch); _no_provider(monkeypatch)
     monkeypatch.chdir(monkeypatch._temp_dir if hasattr(monkeypatch, "_temp_dir") else ".")
     monkeypatch.delenv("GHERKAI_STEPS_DIR", raising=False)
-    monkeypatch.setattr(m.compose, "query_deterministic", lambda engine, *, steps_dir=None, timeout_s=60.0: (_ for _ in ()).throw(RuntimeError("worker 起不来")))
+    monkeypatch.setattr(m.compose, "query_capabilities", lambda engine, *, steps_dir=None, timeout_s=60.0: (_ for _ in ()).throw(RuntimeError("worker 起不来")))
     assert m.main(["doctor", "--json"]) == 0
     by = {(c["section"], c["name"]): c for c in json.loads(capsys.readouterr().out)["checks"]}
     assert not by[("steps", "load.novaact")]["ok"] and by[("steps", "load.novaact")]["required"] is False

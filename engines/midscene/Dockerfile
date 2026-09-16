@@ -45,9 +45,9 @@ RUN if [ -n "${WORKER_TARBALL}" ]; then npm install -g "/tmp/pkg/${WORKER_TARBAL
  && rm -rf /tmp/pkg
 
 FROM worker-${WORKER_SOURCE} AS final
-# 两态共同的诚实校验 + 冒烟：worker 必须真装上、bin 必须真跑得起来（`--list-deterministic` 不需要 AWS）。
+# 两态共同的诚实校验 + 冒烟：worker 必须真装上、bin 必须真跑得起来（`--capabilities` 自述不需要 AWS）。
 # 漏 build-arg（选了 index 却没给版本 / 选了 local 却没给 tarball）在此 fail-loud，不拖到 Fargate 启动期。
-RUN gherkai-worker-midscene --list-deterministic > /dev/null
+RUN gherkai-worker-midscene --capabilities > /dev/null
 # region 不焊镜像：AWS_REGION 经 RunTask overrides 注入（agentcore-sigv4 的 getRegion 读它、全可配，ADR 0033/0016 决策 C）；
 # 凭证走 task role（fromNodeProviderChain 解析 AWS_CONTAINER_CREDENTIALS_RELATIVE_URI）。
 CMD ["gherkai-worker-midscene"]

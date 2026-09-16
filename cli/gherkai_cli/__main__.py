@@ -205,7 +205,9 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     run.add_argument(
         "--grace", type=float, default=None,
         help="停止后等 worker 优雅退出的宽限秒（默认按本 run 用到的引擎自己报的最短宽限推导，通常是分钟量级）；"
-             "小于单个 AI 操作的时长会让浏览器会话泄漏，给过小值直接退 2",
+             "小于单个 AI 操作的时长会让浏览器会话泄漏，给过小值直接退 2。"
+             "只有本机跑才用它：--backend cloud 的停止宽限由部署侧的 gherkai deploy --stop-timeout 决定，"
+             "云端跑时给了本 flag 直接退 2",
     )
     # 隧道暴露本机应用的整套机制（凭据轮换、生命周期、谁负责拆）见 ADR 0035。
     run.add_argument(
@@ -538,14 +540,23 @@ def _resolve_steps_dir_for_backend(args) -> str | int | None:
     return None
 
 
+# worker 自述（--capabilities）非零退出的两种成因，三个消费点（run/submit 跑前检查、list-deterministic、doctor）同一句：
+# 该入口会加载使用方 steps，非零退出既可能是那些文件加载失败，也可能是 worker 与 CLI 版本不一致（不认该入口、掉进
+# job 模式读到空 stdin 即退）；只转述 worker 的 stderr 时，后一种只剩一句与版本无关的 JSON 解析错、用户不知升级哪一侧。
+_SELF_DESCRIBE_CAUSES = ("（可能是 steps/ 目录里的文件加载失败，也可能是这个引擎的 worker 与命令行工具"
+                         "版本不一致——两者须同版本安装）")
+
+
 def _preflight_worker_runtimes(jobs, steps_dir: str | None) -> int | None:
-    """本次 plan 用到的各引擎：worker 运行时能否定位 + （给了 steps 目录时）能否完成自述（ADR 0037 决策 3/4）。
+    """本次 plan 用到的各引擎：worker 运行时能否定位 + 能力自述能否完成（ADR 0037 决策 3/4）。
 
     - 定位链四级全 miss → 打安装指引 + **退 2**：「运行时没装」是环境/配置问题，属「没开跑就被拒」层，
       不该变成一批 job 级 `engine_error`（更不该跑掉一半才发现）。
-    - steps 目录已解析 → 以 `--list-deterministic` 自述入口探一次：worker 非零退出（典型 = 使用方 steps 文件
-      加载失败，fail-loud）→ 转述其诊断 + **退 2**。否则 `submit` 会「提交成功」后逐 job error、诊断只落
-      reconcile.log——那是静默降级（ADR 0037 决策 4「提交侧同样前置」）。
+    - **每个引擎恒问一次能力自述**（`--capabilities`，ADR 0036「5.」）：worker 非零退出 → 转述其诊断 + **退 2**。
+      否则 `submit` 会「提交成功」后逐 job error、诊断只落 reconcile.log——那是静默降级（ADR 0037 决策 4
+      「提交侧同样前置」）。**不再按「有没有 steps 目录」分支**：这一份自述同时给出「steps 加载成功 + 清单 +
+      grace 下限」（ADR 0036「5.」），恒问一次后 `_cmd_run` 的 grace 下限（`compose.engine_min_grace`）命中同一份
+      进程内缓存——本机 run 每引擎只 spawn 一次自述。
     **只查本次用到的引擎**——另一个引擎没装不连坐（dev 下 midscene 常态未装）。返回 2 或 None。
     cloud 执行档不调用本函数：那档 worker 在 Fargate 容器里跑，本机定位链无关。
     """
@@ -555,15 +566,12 @@ def _preflight_worker_runtimes(jobs, steps_dir: str | None) -> int | None:
         except compose.WorkerNotFoundError as e:
             _progress(f"引擎运行时缺失，拒绝运行：{e}")
             return 2
-        if steps_dir is None:
-            continue
         try:
-            compose.query_deterministic(engine, steps_dir=steps_dir)
-        except compose.WorkerSelfDescribeError as e:
-            _progress(f"使用方 steps 加载失败（引擎 {engine}），拒绝运行：{e}")
-            return 2
-        except (ValueError, RuntimeError) as e:  # 超时/输出非 JSON：worker 连自述都做不到，跑 job 也没戏
-            _progress(f"引擎 {engine} 的 worker 自述失败，拒绝运行：{e}")
+            compose.query_capabilities(engine, steps_dir=steps_dir)
+        except (ValueError, RuntimeError) as e:
+            # 含 WorkerSelfDescribeError（worker 起来了但非零退出）与超时 / 输出非 JSON / 自述不合契约；
+            # 文案中性、点到两种成因（见 _SELF_DESCRIBE_CAUSES）。
+            _progress(f"引擎 {engine} 的 worker 自述失败，拒绝运行：{e}\n{_SELF_DESCRIBE_CAUSES}")
             return 2
     return None
 
@@ -575,9 +583,13 @@ def _cmd_list_deterministic(args) -> int:
     if isinstance(steps_dir, int):
         return steps_dir
     try:
-        entries = compose.query_deterministic(args.engine, steps_dir=steps_dir)
-    except (ValueError, RuntimeError) as e:  # 含 WorkerNotFoundError（定位链 miss，其消息自带安装指引）
+        # 清单 = 能力自述对象的 deterministic_steps 键（ADR 0036「5.」「加键不加入口」：worker 只有两个非 job 入口）
+        entries = compose.query_capabilities(args.engine, steps_dir=steps_dir)["deterministic_steps"]
+    except compose.WorkerNotFoundError as e:  # 定位链 miss：消息自带安装指引，别再叠版本不一致的猜测
         _progress(f"list-deterministic 失败：{e}")
+        return 2
+    except (ValueError, RuntimeError) as e:  # 与跑前检查同一口径（两种成因）
+        _progress(f"list-deterministic 失败：{e}\n{_SELF_DESCRIBE_CAUSES}")
         return 2
     if args.json:
         print(json.dumps({"engine": args.engine, "deterministic_steps": entries}, ensure_ascii=False, indent=2))
@@ -661,12 +673,13 @@ def _cmd_doctor(args) -> int:
             if not r["available"]:
                 continue
             try:
-                n = len(compose.query_deterministic(r["engine"], steps_dir=steps_dir))
+                n = len(compose.query_capabilities(r["engine"], steps_dir=steps_dir)["deterministic_steps"])
                 add("steps", f"load.{r['engine']}", True,
                     f"{n} 条确定性 step（含内建）" + ("" if steps_dir else "；无 steps/ 目录，仅内建"),
                     required=steps_dir is not None)
-            except Exception as e:  # 自述失败 = 使用方 steps 加载失败 / worker 起不来，原样转述
-                add("steps", f"load.{r['engine']}", False, f"worker 自述失败：{e}", required=steps_dir is not None)
+            except Exception as e:  # 自述失败 = 使用方 steps 加载失败 / 版本不一致 / 起不来：原样转述 + 点到成因（detail 要给「怎么办」）
+                add("steps", f"load.{r['engine']}", False, f"worker 自述失败：{e}{_SELF_DESCRIBE_CAUSES}",
+                    required=steps_dir is not None)
 
     want_cloud = args.backend == "cloud" or args.prefix is not None
     if not want_cloud:
@@ -1879,16 +1892,27 @@ def _cmd_run(args) -> int:
     #     `FargateWorkerHandle.stop` 忽略运行期 grace（真实宽限 = task-def 期 stopTimeout，`doctor --backend cloud`
     #     的 worker.grace 行专门比对它），而提交机器本就不必装 worker 运行时（ADR 0037 决策 3「cloud 档不查本机
     #     定位链」，见 _preflight_worker_runtimes）——在此查会把纯 cloud 用户按本机环境无理由挡住。
+    #     **cloud 档还要拒绝显式 `--grace`**（同条 ADR）：那档没有它的作用面，配了无效值就在入口拒，别让用户
+    #     以为设了一道防护——真正的云端宽限在部署侧（`gherkai deploy --stop-timeout`）。
     #     显式给了过小 grace → 入口友好拒绝（对齐 votes 校验惯例，退 2「没开跑就被拒」）。core 侧还有 enforce
     #     兜底（任何前端都受同一护栏），此处只为在 cli 给出清晰诊断、避免 core ValueError 冒到用户面。
     #     **必须排在起隧道 / cloud 探资源 / persistence.begin 之前**：只依赖 jobs（cloud 档连 worker 都不问），
     #     早拒才真「零副作用」——否则配置错也已起 ngrok、产生云端调用费用、并落下永不 finalize 的半成品 run 记录。
+    if args.backend == "cloud" and args.grace is not None:
+        # 云端档**拒绝**显式 --grace（ADR 0024「引擎自报下限」条）：那个值到不了任何机制面（Fargate 侧真实宽限
+        # 是 task-def 期 stopTimeout，`FargateWorkerHandle.stop` 忽略运行期 grace），静默接受等于让用户以为设了
+        # 一道会话泄漏防护——与 `--report-dir` 撞云端产物前缀即退 2 同口径：入口不许配无效值。
+        _progress("--grace 在云端不生效：云端的停止宽限由部署侧的 gherkai deploy --stop-timeout 决定"
+                  "（gherkai doctor --backend cloud 会比对它够不够）；只有本机跑才用 --grace")
+        return 2
     min_grace = 0.0
     if args.backend != "cloud":
         for _engine in sorted({j.engine for j in jobs}):
             try:
+                # 正常路径上跑前检查已带 steps 目录问过一次 → 这里命中进程内缓存（下限与 step 无关，见
+                # compose.engine_min_grace）；缓存没命中就是真去问，故 fail-loud 的兜底照留。
                 min_grace = max(min_grace, compose.engine_min_grace(_engine))
-            except (ValueError, RuntimeError) as e:  # 旧 worker 不认该 flag / 起不来 / 输出不合契约
+            except (ValueError, RuntimeError) as e:  # 版本不一致的 worker 不认该入口 / 起不来 / 输出不合契约
                 _progress(f"引擎 {_engine} 的 worker 自述失败，拒绝运行：{e}")
                 return 2
     import math as _math

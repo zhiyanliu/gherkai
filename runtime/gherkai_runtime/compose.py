@@ -52,9 +52,10 @@ from gherkai_runtime.names import (  # noqa: E402
 from gherkai_runtime import names as _names  # noqa: E402
 
 
-# 引擎 → 自报 grace 下限的进程内缓存（ADR 0024「引擎自报下限」：每引擎最多 spawn 一次自述）。**不设失效**：
-# 一个进程内 worker 二进制与注入的 NOVA_ACT_TIMEOUT_S 都不会变，而调用点按 job 逐个问（run 里 N 个 job 同一引擎）。
-_ENGINE_MIN_GRACE_CACHE: dict[str, float] = {}
+# 能力自述对象的进程内缓存（ADR 0024「引擎自报下限」/ ADR 0036「5.」：每「引擎 + steps 目录」最多 spawn 一次自述）。
+# 键含 steps 目录是因为清单键随它变（下限不随，见 engine_min_grace）。**不设失效**：一个进程内 worker 二进制、
+# 注入的 NOVA_ACT_TIMEOUT_S 与那个目录的内容都不会变，而调用点按 job / 按引擎逐个问（run 里 N 个 job 同一引擎）。
+_CAPABILITIES_CACHE: dict[tuple[str, str | None], dict] = {}
 # 能力自述（`--capabilities`）的格式版本（ADR 0036「5.」）：两引擎 worker 各自报同一个数；只在键语义变时递增。
 CAPABILITIES_SCHEMA_VERSION = 1
 
@@ -65,38 +66,18 @@ def engine_min_grace(engine_name: str) -> float:
     **组合根不再持任何引擎特定的下限常量**：下限的真值是 worker 自己的收尾预算（Nova = 注入的
     `NOVA_ACT_TIMEOUT_S` + worker 侧 margin；Midscene = SIGTERM 收尾序列各段超时预算之和 + 余量），住在算它
     的那一侧才不需要人工同步——收尾里多一段（如证据截图队列的退出档排空）时下限自己跟着涨。组合根只做三件事：
-    查询（`--capabilities`）、进程内按引擎缓存、把值作 `ScheduleOpts.min_grace_s` 传给 core（core 只 enforce
+    查询（`--capabilities`）、进程内缓存、把值作 `ScheduleOpts.min_grace_s` 传给 core（core 只 enforce
     「grace ≥ 此下限」的引擎无关关系）。混引擎 run 由调用方取各引擎下限的 max（grace 是 run 级单值）。
-    **查不到即抛、绝不回落常量**（异常语义见 `query_capabilities`；旧 worker 不认该 flag 即 fail-loud，CLI 与
-    worker 须同版本安装）：静默回落一个猜的下限 = grace 默默不够、收尾被 SIGKILL 截断，正是本机制要消除的漂移。
+    **下限与使用方 step 无关**（它只是引擎自己的收尾预算）→ 该引擎**任一** steps 目录下的缓存对象都供得出这个
+    值；一份都没有时才无 steps 地问一次。故 `run` 的跑前检查带着 steps 目录问过之后，本机 run 每引擎只 spawn 一次。
+    **查不到即抛、绝不回落常量**（异常与契约校验见 `query_capabilities`；版本不一致的 worker 不认该 flag 即
+    fail-loud，CLI 与 worker 须同版本安装）：静默回落一个猜的下限 = grace 默默不够、收尾被 SIGKILL 截断，
+    正是本机制要消除的漂移。
     """
-    cached = _ENGINE_MIN_GRACE_CACHE.get(engine_name)
-    if cached is not None:
-        return cached
-    caps = query_capabilities(engine_name)
-    # 自述的身份位当场核（**不是**将来才用的预留位）：定位链第一级是 env 覆写（GHERKAI_WORKER_*_CMD），指错引擎时
-    # 不核就静默拿另一引擎的下限（Nova 拿到 31s → grace < 单 act 上界 → SIGTERM 落 act 中途必被硬杀、会话泄漏），
-    # 正是本机制要消除的「grace 默默不够」。schema_version 同理：认不出的格式版本按 fail-loud 处置、不猜键语义。
-    if caps.get("engine") != engine_name:
-        raise RuntimeError(
-            f"要问的是引擎 {engine_name} 的 worker，回答的却自称 {caps.get('engine')!r}"
-            "——这个引擎的 worker 路径指错了？（检查 GHERKAI_WORKER_*_CMD）"
-        )
-    if caps.get("schema_version") != CAPABILITIES_SCHEMA_VERSION:
-        raise RuntimeError(
-            f"引擎 {engine_name} 的能力自述格式版本是 {caps.get('schema_version')!r}、命令行工具认的是 "
-            f"{CAPABILITIES_SCHEMA_VERSION}——worker 与命令行工具版本不一致？两者须同版本安装。"
-        )
-    raw = caps.get("min_grace_s")
-    # 契约校验：非负有限数（bool 是 int 子类、单独挡）。不合契约 = worker 与 CLI 不同版本 / 自述实现错，
-    # 与「输出非 JSON」同档 fail-loud——把它当 0 会让 core 的 grace 护栏形同废除。
-    if isinstance(raw, bool) or not isinstance(raw, (int, float)) or not math.isfinite(raw) or raw < 0:
-        raise RuntimeError(
-            f"引擎 {engine_name} 自述的最短停止宽限不是非负有限数：{raw!r}"
-            "——worker 与命令行工具版本不一致？两者须同版本安装。"
-        )
-    _ENGINE_MIN_GRACE_CACHE[engine_name] = float(raw)
-    return float(raw)
+    for (engine, _steps_dir), caps in _CAPABILITIES_CACHE.items():
+        if engine == engine_name:
+            return float(caps["min_grace_s"])
+    return float(query_capabilities(engine_name)["min_grace_s"])
 
 
 def new_run_id() -> str:
@@ -463,13 +444,14 @@ def build_engines(
 def _ask_worker(engine: str, flag: str, *, what: str, steps_dir: str | Path | None = None,
                 timeout_s: float = 60.0, payload: bytes | None = None,
                 extra_env: Mapping[str, str] | None = None) -> list | dict:
-    """spawn 一次某引擎 worker 的**自述入口**、收一行 JSON（ADR 0036 决策 2/4 的共同机制）。
+    """spawn 一次某引擎 worker 的**非 job 入口**、收一行 JSON（ADR 0036「4.」/「5.」两个入口的共同机制）。
 
-    自述入口不建会话、不读 job、零 AWS，秒级返回。三个自述入口（`--list-deterministic` / `--match-steps` /
-    `--capabilities`）只差 flag、stdin、注入 env 与错误措辞，故共用本体（曾各抄一份 spawn+诊断，会漂移）。
-    返回值形状随入口：清单/match 是数组、能力自述是对象（调用方各自校验）。
+    非 job 入口不建会话、不读 job、零 AWS，秒级返回。worker **只有两个**：`--capabilities`（自述，ADR 0036「5.」）
+    与 `--match-steps`（查询，同 ADR「4.」）——只差 flag、stdin、注入 env 与错误措辞，故共用本体（曾各抄一份
+    spawn+诊断，会漂移）。
+    返回值形状随入口：match 查询是数组、能力自述是对象（契约校验在各自的调用方，见 `query_capabilities`）。
     - worker cmd 走定位链（ADR 0037 决策 3）：miss → WorkerNotFoundError（RuntimeError 子类，调用点分叉）。
-    - steps_dir（ADR 0037 决策 4）经 env 注入：三个自述入口同样加载 steps 目录，故 `list-deterministic`
+    - steps_dir（ADR 0037 决策 4）经 env 注入：两个入口同样加载 steps 目录，故 `list-deterministic` 的清单
       与 `plan` 标注反映使用方定制 step（注册表 = 内建脚手架 + 加载的使用方模块）。
     - extra_env：该入口特有的注入（能力自述给 Nova 注 `NOVA_ACT_TIMEOUT_S`，见 `query_capabilities`）——
       叠在 scrub 后的继承 env 上，与 steps_dir 同一份 env。
@@ -488,10 +470,10 @@ def _ask_worker(engine: str, flag: str, *, what: str, steps_dir: str | Path | No
     if extra_env:
         env.update(extra_env)
     try:
-        # payload 为 None 的入口（--list-deterministic / --capabilities）显式给 DEVNULL、**不继承调用者 stdin**：
-        # 不认该 flag 的旧 worker 会掉进 job 模式读 stdin——继承来的 stdin 是 TTY 时它挂到 timeout_s 才被判超时
-        # （诊断成「自述超时」而非「版本不一致」）、还会吞掉用户在终端敲的内容；DEVNULL 让它立刻读到 EOF、
-        # 非零退出 → WorkerSelfDescribeError，「旧 worker 不认入口即 fail-loud」才真落地（实测：不认 flag 的
+        # payload 为 None 的入口（`--capabilities`）显式给 DEVNULL、**不继承调用者 stdin**：
+        # 不认该 flag 的 worker（版本不一致）会掉进 job 模式读 stdin——继承来的 stdin 是 TTY 时它挂到 timeout_s
+        # 才被判超时（诊断成「自述超时」而非「版本不一致」）、还会吞掉用户在终端敲的内容；DEVNULL 让它立刻读到
+        # EOF、非零退出 → WorkerSelfDescribeError，「不认该入口即 fail-loud」才真落地（实测：不认该 flag 的
         # Nova worker 接常开的 stdin 管子阻塞 >20s 不退）。
         proc = subprocess.run(cmd, cwd=wc.cwd, env=env, capture_output=True, timeout=timeout_s,
                               input=payload, stdin=subprocess.DEVNULL if payload is None else None)
@@ -510,41 +492,65 @@ def _ask_worker(engine: str, flag: str, *, what: str, steps_dir: str | Path | No
         raise RuntimeError(f"引擎 {engine} 的 {what}输出非 JSON：{proc.stdout[:200]!r}") from e
 
 
-def query_deterministic(engine: str, *, steps_dir: str | Path | None = None,
-                        timeout_s: float = 60.0) -> list[dict]:
-    """查询某引擎 worker 的确定性能力清单（ADR 0036）：spawn `worker --list-deterministic` 收 JSON。
-
-    真值单一：清单由 worker 注册表代码即时生成（内建脚手架 + steps_dir 加载的使用方模块，ADR 0037 决策 4）。
-    异常语义见 `_ask_worker`（调用方 `list-deterministic` 归退 2）。
-    """
-    return _ask_worker(engine, "--list-deterministic", what="worker 自述",
-                       steps_dir=steps_dir, timeout_s=timeout_s)
-
-
-def query_capabilities(engine: str, *, timeout_s: float = 60.0) -> dict:
+def query_capabilities(engine: str, *, steps_dir: str | Path | None = None,
+                       timeout_s: float = 60.0) -> dict:
     """查某引擎 worker 的能力自述（ADR 0036「5.」）：spawn `worker --capabilities` 收一个 JSON 对象。
 
-    目前唯一消费者是 `engine_min_grace`（grace 下限），`engine` / `schema_version` 两个身份位在那里当场核
-    （指错 worker 路径 / 版本不一致都要 fail-loud）；将来加能力键不加入口。**Nova 查询也注入 `NOVA_ACT_TIMEOUT_S`**：它自报的下限 = 这个注入值 + worker 侧 margin，
-    不注入则 worker 按自带缺省算——operator 调大单 act 上界后下限静默偏低，正是「两端同源」要挡的漂移
-    （见该常量注释；两个真跑档 build_engines / build_fargate_engines 注的是同一个值）。
-    **不传 steps 目录**：下限是引擎自己的收尾预算、与使用方 step 无关（该入口仍照 ADR 0037 决策 4 加载 env 指定
-    的目录，而组合根拥有的键在 `_ask_worker` 里被清，故这里恒是「无使用方 step」档）。
-    异常语义见 `_ask_worker`（调用方：`run` 退 2、doctor 只报一行）；输出不是 JSON 对象 → RuntimeError。
+    **唯一的自述入口、一次 spawn 拿全**（ADR 0036 被拒方案末条「每个自述项一个独立 flag」）：steps 加载是否成功
+    （`run`/`submit` 的跑前检查）、确定性 step 清单（`list-deterministic`、doctor 的加载计数）、grace 下限
+    （`engine_min_grace`）都取这同一份对象——本机 run 每引擎因此只 spawn 一次（进程内按「引擎 + steps 目录」缓存；
+    Nova 每次 spawn 都要 import SDK，自述项各占一个 flag 时 spawn 次数随项数增长）。
+    **契约校验全在这里**（不散到各消费者：每个取键的人都该受同一道）——`engine`/`schema_version` 两个身份位、
+    `min_grace_s` 非负有限数、`deterministic_steps` 是数组；**不合契约不写缓存**（一次坏自述不该被记成「这引擎
+    就这样」）。身份位当场核的理由见下方注释。
+    **Nova 查询也注入 `NOVA_ACT_TIMEOUT_S`**：它自报的下限 = 这个注入值 + worker 侧 margin，不注入则 worker 按
+    自带缺省算——operator 调大单 act 上界后下限静默偏低，正是「两端同源」要挡的漂移（见该常量注释；两个真跑档
+    build_engines / build_fargate_engines 注的是同一个值）。
+    steps_dir（ADR 0037 决策 4）：该入口同样加载 steps 目录，故 `deterministic_steps` = 内建脚手架 + 使用方定制、
+    且使用方 steps 加载失败在这里就 fail-loud；不给时组合根拥有的键被显式清（见 `_ask_worker`），即「无使用方
+    step」档（grace 下限与 step 无关，故 `engine_min_grace` 走这一档）。
+    异常语义见 `_ask_worker`（调用方各自分叉：`run`/`submit`/`list-deterministic` 退 2、doctor 只报一行、
+    `plan` 那侧走 match 查询）；输出不是 JSON 对象 → RuntimeError。
     """
+    key = (engine, None if steps_dir is None else str(steps_dir))
+    cached = _CAPABILITIES_CACHE.get(key)
+    if cached is not None:
+        return cached
     extra_env = {"NOVA_ACT_TIMEOUT_S": str(NOVA_ACT_TIMEOUT_S)} if engine == "novaact" else None
-    try:
-        caps = _ask_worker(engine, "--capabilities", what="能力自述", timeout_s=timeout_s, extra_env=extra_env)
-    except WorkerSelfDescribeError as e:
-        # 这条入口不带使用方 steps（env 已被清），非零退出几乎只剩一种成因：旧 worker 不认该 flag、掉进 job 模式
-        # 读到空 stdin 即退（跳板机对发行版 worker 实测：stderr 是一句 JSON 解析错）——原样转述 stderr 的同时把
-        # 真因说出来，否则用户只看到一句与版本无关的解析错误、不知道该升级哪一侧。
-        raise WorkerSelfDescribeError(
-            engine, e.returncode,
-            e.stderr_tail + "\n——worker 不认识能力自述？worker 与命令行工具须同版本安装，请升级该引擎的 worker",
-            "能力自述") from e
+    caps = _ask_worker(engine, "--capabilities", what="能力自述", steps_dir=steps_dir,
+                       timeout_s=timeout_s, extra_env=extra_env)
     if not isinstance(caps, dict):
         raise RuntimeError(f"引擎 {engine} 的能力自述输出不是 JSON 对象：{caps!r}")
+    # 身份位当场核（**不是**将来才用的预留位）：定位链第一级是 env 覆写（GHERKAI_WORKER_*_CMD），指错引擎时不核
+    # 就静默拿另一引擎的自述（Nova 拿到 midscene 的 31s → grace < 单 act 上界 → SIGTERM 落 act 中途必被硬杀、
+    # 会话泄漏），正是本机制要消除的「grace 默默不够」。schema_version 同理：认不出的格式版本按 fail-loud 处置、
+    # 不猜键语义。
+    if caps.get("engine") != engine:
+        raise RuntimeError(
+            f"要问的是引擎 {engine} 的 worker，回答的却自称 {caps.get('engine')!r}"
+            "——这个引擎的 worker 路径指错了？（检查 GHERKAI_WORKER_*_CMD）"
+        )
+    if caps.get("schema_version") != CAPABILITIES_SCHEMA_VERSION:
+        raise RuntimeError(
+            f"引擎 {engine} 的能力自述格式版本是 {caps.get('schema_version')!r}、命令行工具认的是 "
+            f"{CAPABILITIES_SCHEMA_VERSION}——worker 与命令行工具版本不一致？两者须同版本安装。"
+        )
+    raw = caps.get("min_grace_s")
+    # 契约校验：非负有限数（bool 是 int 子类、单独挡）。不合契约 = worker 与 CLI 不同版本 / 自述实现错，
+    # 与「输出非 JSON」同档 fail-loud——把它当 0 会让 core 的 grace 护栏形同废除。
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)) or not math.isfinite(raw) or raw < 0:
+        raise RuntimeError(
+            f"引擎 {engine} 自述的最短停止宽限不是非负有限数：{raw!r}"
+            "——worker 与命令行工具版本不一致？两者须同版本安装。"
+        )
+    # 清单同档校验：不是数组则消费者（list-deterministic / doctor 计数）会拿 len() 崩在无关处，
+    # 且「清单不可信」本身就是版本/实现不一致的信号。
+    if not isinstance(caps.get("deterministic_steps"), list):
+        raise RuntimeError(
+            f"引擎 {engine} 自述的确定性 step 清单不是数组：{caps.get('deterministic_steps')!r}"
+            "——worker 与命令行工具版本不一致？两者须同版本安装。"
+        )
+    _CAPABILITIES_CACHE[key] = caps
     return caps
 
 
@@ -555,7 +561,7 @@ def match_deterministic(engine: str, texts: list[str], *, steps_dir: str | Path 
     spawn `worker --match-steps`、stdin 喂 JSON 文本数组、收逐条结果（None=走 AI /
     {"pattern","description"}=命中 / {"conflict":[...]}=命中多条——真跑将 error，plan 预检提前暴露）。
     匹配语义 100% 在 worker（同一注册表同一 search 实现），CLI 零复刻（ADR 0022「匹配放 worker」红线）。
-    异常语义同 query_deterministic（调用方 plan 做 best-effort 降级）。
+    异常语义同 `query_capabilities`（调用方 plan 做 best-effort 降级）。
     """
     return _ask_worker(engine, "--match-steps", what="match 查询", steps_dir=steps_dir,
                        timeout_s=timeout_s, payload=json.dumps(texts, ensure_ascii=False).encode("utf-8"))

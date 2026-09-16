@@ -65,7 +65,7 @@ def deterministic(pattern: str, *, description: str, example: str) -> Callable:
 
 
 def list_registry() -> list[dict]:
-    """注册表自述（ADR 0036）：worker --list-deterministic 时 dump 成 JSON 给 CLI 转述。"""
+    """注册表自述（ADR 0036「2.」）：作自述入口 `--capabilities` 的 `deterministic_steps` 键给 CLI 转述。"""
     return [{"pattern": e.raw, "description": e.description, "example": e.example} for e in _REGISTRY]
 
 

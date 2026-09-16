@@ -77,18 +77,19 @@ def test_list_registry_reflects_registrations():
                     "example": 'Then 页面地址匹配 "/x"'}]
 
 
-def test_worker_dump_mode_real_subprocess():
-    """--list-deterministic 自述模式（ADR 0036）真子进程：不读 stdin、输出 JSON、含脚手架真锚点。"""
+def test_registry_dump_via_capabilities_real_subprocess():
+    """注册表清单经自述入口出去（ADR 0036「2.」/「5.」）真子进程：`--capabilities` 的 `deterministic_steps`
+    键含脚手架真锚点、每项元数据齐全（清单没有自己的 flag——加键不加入口，见「5.」）。"""
     import json as _json
     import subprocess
     import sys as _sys
 
     # 真子进程按**分发形态**拉起（ADR 0037 决策 3 定位链第二级 `python -m …`），不再指脚本路径——
     # 组合根 spawn 的就是这条 cmd，测的即生产拉起方式。
-    proc = subprocess.run([_sys.executable, "-m", "gherkai_worker_novaact", "--list-deterministic"],
+    proc = subprocess.run([_sys.executable, "-m", "gherkai_worker_novaact", "--capabilities"],
                           capture_output=True, timeout=60)
     assert proc.returncode == 0, proc.stderr.decode()[-300:]
-    entries = _json.loads(proc.stdout.decode("utf-8"))
+    entries = _json.loads(proc.stdout.decode("utf-8"))["deterministic_steps"]
     assert any("页面地址" in e["pattern"] for e in entries)
     assert all(e.get("description") and e.get("example") for e in entries)
 

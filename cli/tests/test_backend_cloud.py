@@ -210,6 +210,32 @@ def test_cloud_offloader_attached(tmp_path, monkeypatch, capsys):
     assert ("s3", "put_object") in record
 
 
+def test_cloud_rejects_explicit_grace_at_the_entrance(tmp_path, monkeypatch, capsys):
+    """cloud 档**拒绝**显式 `--grace`（ADR 0024「引擎自报下限」条）：那个值到不了任何机制面（Fargate 侧真实宽限
+    是 task-def 期 `stopTimeout`、`FargateWorkerHandle.stop` 忽略运行期 grace），静默接受等于让用户以为设了一道
+    会话泄漏防护——与 `--report-dir` 撞云端产物前缀即退 2 同口径：入口不许配无效值。
+
+    退 2 且**零副作用**：schedule 没被调、一次云端调用（建 client / 探资源 / 解析镜像）都没发出。
+    对照「不给 --grace 照常跑」见 `test_cloud_does_not_ask_local_worker_for_grace_floor`。
+    """
+    record = []
+    _fake_s3, made, preflight_calls = _patch_cloud_handles(monkeypatch, record)
+    called = {"n": 0}
+    monkeypatch.setattr(m, "schedule", lambda *a, **k: called.__setitem__("n", called["n"] + 1))
+    rc = m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud", "--ddb-table", "T",
+                 "--s3-bucket", "B", "--region", "us-east-1", "--grace", "300", "--quiet"])
+    assert rc == 2
+    assert called["n"] == 0 and record == [] and preflight_calls == [] and made["variant"] == []
+    err = capsys.readouterr().err
+    assert "--grace 在云端不生效" in err and "gherkai deploy --stop-timeout" in err
+    # flag 的自述与入口的拒绝不许漂移：--help 得自己说清「只有本机跑才用它」，否则用户是撞了才知道
+    import pytest
+
+    with pytest.raises(SystemExit):
+        m.main(["run", "--help"])
+    assert "只有本机跑" in capsys.readouterr().out
+
+
 def test_cloud_does_not_ask_local_worker_for_grace_floor(tmp_path, monkeypatch, capsys):
     """cloud 档**不问本机 worker** 要 grace 下限（ADR 0024「引擎自报下限」× ADR 0032 真容器校准结论 4 的两条路径之分）。
 

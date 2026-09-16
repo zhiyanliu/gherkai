@@ -59,7 +59,8 @@ export function registrySize(): number {
   return REGISTRY.length;
 }
 
-/** 注册表自述（ADR 0036）：worker --list-deterministic 时 dump 成 JSON 给 CLI 转述。 */
+/** 注册表自述（ADR 0036「2.」）：这份清单就是 worker `--capabilities` 自述对象的 `deterministic_steps`
+ * 键（唯一出口——没有独立的清单 flag），CLI 取出后转述给 feature 作者。 */
 export function listRegistry(): Array<{ pattern: string; description: string; example: string }> {
   return REGISTRY.map((e) => ({ pattern: e.raw, description: e.meta.description, example: e.meta.example }));
 }

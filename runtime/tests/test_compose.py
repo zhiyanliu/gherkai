@@ -449,46 +449,74 @@ def test_resolve_region_no_boto3_returns_none_not_crash(monkeypatch):
     assert compose.resolve_region(None, "someprofile") is None  # 缺 boto3 读不到 profile config → None、不崩
 
 
-# ---- engine_min_grace：向 worker 问自报下限 + 进程内缓存（ADR 0024「引擎自报下限」/ ADR 0036「5.」）----
+# ---- query_capabilities：整份自述对象 + 契约校验 + 按（引擎, steps 目录）缓存（ADR 0036「5.」）----
 
 @pytest.fixture
-def fresh_grace_cache(monkeypatch):
-    """每个用例一份空缓存：模块级缓存跨用例泄漏会让「查了几次」的断言与失败档全部失真。"""
-    monkeypatch.setattr(compose, "_ENGINE_MIN_GRACE_CACHE", {})
+def fresh_caps_cache(monkeypatch):
+    """每个用例一份空缓存：模块级缓存跨用例泄漏会让「问了几次」的断言与失败档全部失真。"""
+    monkeypatch.setattr(compose, "_CAPABILITIES_CACHE", {})
 
 
-def _fake_caps_proc(payload: bytes, returncode: int = 0):
+def _caps_json(engine: str = "novaact", min_grace_s=150, steps: str = "[]") -> bytes:
+    """一份合契约的自述对象（四个键，ADR 0036「5.」）。"""
+    return (f'{{"schema_version": 1, "engine": "{engine}", "min_grace_s": {min_grace_s}, '
+            f'"deterministic_steps": {steps}}}').encode()
+
+
+def _fake_caps_proc(payload: bytes, returncode: int = 0, stderr: bytes = b""):
     class _P:
         pass
-    _P.returncode, _P.stdout, _P.stderr = returncode, payload, b""
+    _P.returncode, _P.stdout, _P.stderr = returncode, payload, stderr
     return _P
 
 
-def test_engine_min_grace_takes_worker_self_reported_value(monkeypatch, novaact_env_cmd, fresh_grace_cache):
-    """下限 = worker 自报值（组合根不再持任何引擎特定常量）；查询走 `--capabilities` 自述入口。
+def test_query_capabilities_returns_whole_object(monkeypatch, novaact_env_cmd, fresh_caps_cache):
+    """整份自述对象原样返回（四个键：schema_version / engine / min_grace_s / deterministic_steps）——
+    清单、grace 下限、steps 加载结果都出自**这一次** spawn（ADR 0036「5.」「加键不加入口」）。
 
     Nova 查询**必须注入 NOVA_ACT_TIMEOUT_S**：worker 自报的下限 = 这个注入值 + 它自己的 margin，不注入则它按
     自带缺省算，operator 调大单 act 上界后下限静默偏低（组合根持单一真值的意义就在此）。
     """
+    import os
     import subprocess
 
     captured = {}
 
     def fake_run(cmd, **kw):
         captured["cmd"], captured["env"] = cmd, kw.get("env")
-        return _fake_caps_proc(b'{"schema_version": 1, "engine": "novaact", "min_grace_s": 150}')
+        return _fake_caps_proc(_caps_json(steps='[{"pattern": "p", "description": "d", "example": "e"}]'))
 
     monkeypatch.setattr(subprocess, "run", fake_run)
     monkeypatch.setenv("GHERKAI_STEPS_DIR", "/host/steps")  # 先把宿主 shell 弄脏，否则下面「不含该键」的断言空过
-    assert compose.engine_min_grace("novaact") == 150.0
-    assert captured["cmd"] == ["/fake/novaact-worker", "--capabilities"]
+    assert compose.query_capabilities("novaact") == {
+        "schema_version": 1, "engine": "novaact", "min_grace_s": 150,
+        "deterministic_steps": [{"pattern": "p", "description": "d", "example": "e"}]}
+    assert captured["cmd"] == ["/fake/novaact-worker", "--capabilities"]  # 定位链 cmd + 唯一的自述 flag
     assert captured["env"]["NOVA_ACT_TIMEOUT_S"] == str(compose.NOVA_ACT_TIMEOUT_S)
-    # 不传 steps 目录：下限是引擎自己的收尾预算、与使用方 step 无关；组合根拥有的键照样被清（不许宿主值越过）
+    # 未给 steps 目录：env 仍自建一份——组合根拥有的键「有值注、无值清」，宿主 shell 的 GHERKAI_STEPS_DIR 不得
+    # 越过调用方解析出的结果（清单要与本次要跑的 step 集一致）；其余环境照常继承。
     assert "GHERKAI_STEPS_DIR" not in captured["env"]
+    assert captured["env"].get("PATH") == os.environ.get("PATH")
 
 
-def test_engine_min_grace_caches_per_engine(monkeypatch, novaact_env_cmd, fresh_grace_cache):
-    """进程内按引擎缓存（ADR 0024「引擎自报下限」）：同一引擎只 spawn 一次自述，另一引擎单独问。"""
+def test_query_capabilities_injects_steps_dir_env(monkeypatch, novaact_env_cmd, fresh_caps_cache, tmp_path):
+    """该入口同样加载 steps 目录（ADR 0037 决策 4）→ steps_dir 经 env 注入：清单因此含使用方定制 step，
+    使用方 steps 加载失败也在这一次 spawn 里 fail-loud。注入是叠加（保 os.environ，否则 worker 丢 PATH/凭证）。"""
+    import os
+    import subprocess
+
+    captured = {}
+    monkeypatch.setattr(subprocess, "run",
+                        lambda cmd, **kw: captured.update(kw) or _fake_caps_proc(_caps_json()))
+    compose.query_capabilities("novaact", steps_dir=tmp_path / "steps")
+    assert captured["env"]["GHERKAI_STEPS_DIR"] == str(tmp_path / "steps")
+    assert captured["env"].get("PATH") == os.environ.get("PATH")
+    assert captured["cwd"] is None  # 定位链未给 cwd → 继承本进程 CWD（worker 无专属 cwd，ADR 0037 决策 3）
+
+
+def test_query_capabilities_caches_per_engine_and_steps_dir(monkeypatch, novaact_env_cmd, fresh_caps_cache, tmp_path):
+    """缓存键 =（引擎, steps 目录）：同键第二次不 spawn；换引擎、换目录、无目录各自一份（清单随目录变，
+    Nova 每次 spawn 都要 import SDK，多问一次不便宜）。"""
     import subprocess
 
     calls: list[str] = []
@@ -496,108 +524,175 @@ def test_engine_min_grace_caches_per_engine(monkeypatch, novaact_env_cmd, fresh_
     def fake_run(cmd, **kw):
         calls.append(cmd[0])
         engine = "novaact" if "novaact" in cmd[0] else "midscene"
-        value = 150 if engine == "novaact" else 31
-        return _fake_caps_proc(f'{{"schema_version": 1, "engine": "{engine}", "min_grace_s": {value}}}'.encode())
+        return _fake_caps_proc(_caps_json(engine, 150 if engine == "novaact" else 31))
 
     monkeypatch.setattr(subprocess, "run", fake_run)
-    assert compose.engine_min_grace("novaact") == 150.0
-    assert compose.engine_min_grace("novaact") == 150.0  # 第二次走缓存
+    a, b = tmp_path / "a", tmp_path / "b"
+    assert compose.query_capabilities("novaact", steps_dir=a)["min_grace_s"] == 150
+    assert compose.query_capabilities("novaact", steps_dir=a)["min_grace_s"] == 150  # 同键 → 走缓存
     assert calls == ["/fake/novaact-worker"]
-    assert compose.engine_min_grace("midscene") == 31.0  # 另一引擎不共用缓存项
-    assert calls == ["/fake/novaact-worker", "/fake/midscene-worker"]
+    compose.query_capabilities("novaact", steps_dir=b)   # 换 steps 目录 → 另一份（清单可能不同）
+    compose.query_capabilities("novaact")                # 无 steps 又一份
+    compose.query_capabilities("midscene", steps_dir=a)  # 换引擎 → 另一份
+    assert len(calls) == 4
+    assert set(compose._CAPABILITIES_CACHE) == {("novaact", str(a)), ("novaact", str(b)),
+                                                ("novaact", None), ("midscene", str(a))}
 
 
-def test_engine_min_grace_worker_failure_fails_loud(monkeypatch, novaact_env_cmd, fresh_grace_cache):
-    """worker 非零退出（旧 worker 不认该 flag 即如此）→ WorkerSelfDescribeError 上抛、**不回落任何常量**，
-    且不写缓存（否则一次失败被记成「这引擎下限 = 猜的值」）。"""
+def test_query_capabilities_worker_failure_fails_loud_verbatim(monkeypatch, novaact_env_cmd, fresh_caps_cache):
+    """worker 非零退出 → WorkerSelfDescribeError **原样上抛**（转述 stderr）、不写缓存、不回落任何常量。
+
+    **组合根不再追加「不认识能力自述 → 须同版本安装」那句断言**：该入口现在会加载使用方 steps（ADR 0037
+    决策 4），非零退出不再只剩「版本不一致的 worker 不认这个 flag」一种成因（更常见的是使用方 steps 文件报错）
+    ——在这里替用户断定成因会误导，两种可能由调用点用中性文案一起点到。
+    """
     import subprocess
 
-    monkeypatch.setattr(subprocess, "run",
-                        lambda cmd, **kw: _fake_caps_proc(b"", returncode=2))
-    with pytest.raises(compose.WorkerSelfDescribeError, match="同版本安装"):
-        compose.engine_min_grace("novaact")  # 该入口不带使用方 steps，非零退出≈旧 worker：诊断要点出升级哪一侧
-    assert compose._ENGINE_MIN_GRACE_CACHE == {}
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: _fake_caps_proc(
+        b"", returncode=2, stderr="steps/demo.py：SyntaxError".encode()))
+    with pytest.raises(compose.WorkerSelfDescribeError) as ei:
+        compose.query_capabilities("novaact", steps_dir="/tmp/steps")
+    assert "steps/demo.py：SyntaxError" in str(ei.value)
+    assert "同版本安装" not in str(ei.value)
+    assert compose._CAPABILITIES_CACHE == {}
 
 
 _OK_HEAD = b'"schema_version": 1, "engine": "novaact"'  # 身份位合法，让每个用例只有一处缺陷
+_OK_STEPS = b', "deterministic_steps": []'
 
 
 @pytest.mark.parametrize("payload", [
-    b'{' + _OK_HEAD + b'}',                                    # 缺键
-    b'{' + _OK_HEAD + b', "min_grace_s": "150"}',              # 字符串
-    b'{' + _OK_HEAD + b', "min_grace_s": true}',               # bool（是 int 子类，须单独挡）
-    b'{' + _OK_HEAD + b', "min_grace_s": -1}',                 # 负数
-    b'{' + _OK_HEAD + b', "min_grace_s": Infinity}',           # 非有限（json 认它）
-    b'[{' + _OK_HEAD + b', "min_grace_s": 150}]',              # 不是 JSON 对象
-    b'{"schema_version": 1, "engine": "midscene", "min_grace_s": 31}',   # 自称另一引擎（worker 路径指错）
-    b'{"schema_version": 2, "engine": "novaact", "min_grace_s": 150}',   # 格式版本不认识
-    b'{"engine": "novaact", "min_grace_s": 150}',                        # 缺格式版本
+    b'{' + _OK_HEAD + _OK_STEPS + b'}',                                  # 缺下限键
+    b'{' + _OK_HEAD + b', "min_grace_s": "150"' + _OK_STEPS + b'}',      # 字符串
+    b'{' + _OK_HEAD + b', "min_grace_s": true' + _OK_STEPS + b'}',       # bool（是 int 子类，须单独挡）
+    b'{' + _OK_HEAD + b', "min_grace_s": -1' + _OK_STEPS + b'}',         # 负数
+    b'{' + _OK_HEAD + b', "min_grace_s": Infinity' + _OK_STEPS + b'}',   # 非有限（json 认它）
+    b'{' + _OK_HEAD + b', "min_grace_s": 150}',                          # 缺清单键
+    b'{' + _OK_HEAD + b', "min_grace_s": 150, "deterministic_steps": {}}',  # 清单不是数组
+    b'[{' + _OK_HEAD + b', "min_grace_s": 150' + _OK_STEPS + b'}]',      # 不是 JSON 对象
+    b'{"schema_version": 1, "engine": "midscene", "min_grace_s": 31, "deterministic_steps": []}',  # 自称另一引擎
+    b'{"schema_version": 2, "engine": "novaact", "min_grace_s": 150, "deterministic_steps": []}',   # 版本不认识
+    b'{"engine": "novaact", "min_grace_s": 150, "deterministic_steps": []}',                        # 缺格式版本
 ])
-def test_engine_min_grace_rejects_off_contract_answer(monkeypatch, novaact_env_cmd, fresh_grace_cache, payload):
-    """自述不合契约 → fail-loud（与「输出非 JSON」同档）：值当 0 处理会让 core 的 grace 护栏形同废除；
-    身份位（engine / schema_version）不核则 `GHERKAI_WORKER_NOVAACT_CMD` 指到 midscene bin 时 Nova 静默拿 31s
-    （grace < 单 act 上界 → SIGTERM 落 act 中途必被硬杀），正是本机制要消除的「grace 默默不够」。"""
+def test_query_capabilities_rejects_off_contract_answer(monkeypatch, novaact_env_cmd, fresh_caps_cache, payload):
+    """自述不合契约 → fail-loud（与「输出非 JSON」同档），且不写缓存。校验放在这一个函数里，**每个消费者
+    （run 前置 / list-deterministic / doctor / engine_min_grace）都受同一道**：下限当 0 处理会让 core 的 grace
+    护栏形同废除；身份位（engine / schema_version）不核则 `GHERKAI_WORKER_NOVAACT_CMD` 指到 midscene bin 时
+    Nova 静默拿 31s（grace < 单 act 上界 → SIGTERM 落 act 中途必被硬杀）；清单不是数组则消费者 len() 崩在无关处。
+    """
     import subprocess
 
     monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: _fake_caps_proc(payload))
     with pytest.raises(RuntimeError):
-        compose.engine_min_grace("novaact")
-    assert compose._ENGINE_MIN_GRACE_CACHE == {}
+        compose.query_capabilities("novaact")
+    assert compose._CAPABILITIES_CACHE == {}
 
 
-def test_engine_min_grace_wrong_engine_names_the_misconfiguration(monkeypatch, novaact_env_cmd, fresh_grace_cache):
+def test_query_capabilities_wrong_engine_names_the_misconfiguration(monkeypatch, novaact_env_cmd, fresh_caps_cache):
     """自称的引擎对不上 → 诊断点名「路径指错」并给出要查的旋钮（而不是泛泛的「版本不一致」）。"""
     import subprocess
 
-    monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: _fake_caps_proc(
-        b'{"schema_version": 1, "engine": "midscene", "min_grace_s": 31}'))
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: _fake_caps_proc(_caps_json("midscene", 31)))
     with pytest.raises(RuntimeError, match="自称 'midscene'.*GHERKAI_WORKER_"):
-        compose.engine_min_grace("novaact")
+        compose.query_capabilities("novaact")
 
 
-def test_ask_worker_no_payload_entries_do_not_inherit_stdin(monkeypatch, novaact_env_cmd, fresh_grace_cache):
-    """无 stdin 载荷的自述入口（--capabilities / --list-deterministic）显式 stdin=DEVNULL、不继承调用者 stdin：
-    不认该 flag 的旧 worker 会掉进 job 模式读 stdin，继承来的 TTY 让它挂到超时才被判「自述超时」（诊断指错方向、
-    还吞用户键入）；DEVNULL 让它立刻读到 EOF 非零退出 → 「旧 worker 不认入口即 fail-loud」才真落地。
-    --match-steps 有 stdin 载荷（input=…），subprocess 不许同时给 stdin，故那条不设。"""
+def test_ask_worker_no_payload_entry_does_not_inherit_stdin(monkeypatch, novaact_env_cmd, fresh_caps_cache):
+    """无 stdin 载荷的入口（`--capabilities`）显式 stdin=DEVNULL、不继承调用者 stdin：不认该 flag 的 worker
+    （版本不一致）会掉进 job 模式读 stdin，继承来的 TTY 让它挂到超时才被判「自述超时」（诊断指错方向、还吞用户
+    键入）；DEVNULL 让它立刻读到 EOF 非零退出 → 「不认该入口即 fail-loud」才真落地。
+    `--match-steps` 有 stdin 载荷（input=…），subprocess 不许同时给 stdin，故那条不设。"""
     import subprocess
 
     captured: list[dict] = []
     monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: captured.append(kw) or _fake_caps_proc(
-        b'{"schema_version": 1, "engine": "novaact", "min_grace_s": 150}'
-        if "--capabilities" in cmd else b'[]'))
-    compose.engine_min_grace("novaact")
-    compose.query_deterministic("novaact")
+        _caps_json() if "--capabilities" in cmd else b"[]"))
+    compose.query_capabilities("novaact")
     compose.match_deterministic("novaact", ["x"])
-    assert [kw.get("stdin") for kw in captured] == [subprocess.DEVNULL, subprocess.DEVNULL, None]
-    assert captured[2]["input"] == b'["x"]'
+    assert [kw.get("stdin") for kw in captured] == [subprocess.DEVNULL, None]
+    assert captured[1]["input"] == b'["x"]'
 
 
-def test_engine_min_grace_unknown_engine_raises(fresh_grace_cache):
+def test_query_capabilities_unknown_engine_raises(fresh_caps_cache):
+    with pytest.raises(ValueError, match="未知引擎"):
+        compose.query_capabilities("nope")
+
+
+def test_query_capabilities_midscene_gets_no_nova_env(monkeypatch, novaact_env_cmd, fresh_caps_cache):
+    """NOVA_ACT_TIMEOUT_S 只注给 Nova（它是 Nova 的旋钮）——Midscene 的下限由它自己的收尾预算算出。"""
+    import subprocess
+
+    captured = {}
+    monkeypatch.setattr(subprocess, "run",
+                        lambda cmd, **kw: captured.update(kw) or _fake_caps_proc(_caps_json("midscene", 31)))
+    monkeypatch.delenv("NOVA_ACT_TIMEOUT_S", raising=False)
+    assert compose.query_capabilities("midscene")["min_grace_s"] == 31
+    assert "NOVA_ACT_TIMEOUT_S" not in captured["env"]
+
+
+# ---- engine_min_grace：下限取自自述对象、复用该引擎任一份缓存（ADR 0024「引擎自报下限」）----
+
+def test_engine_min_grace_takes_worker_self_reported_value(monkeypatch, novaact_env_cmd, fresh_caps_cache):
+    """下限 = worker 自报值（组合根不再持任何引擎特定常量）；一份缓存都没有时**不带 steps 目录**问一次
+    （下限是引擎自己的收尾预算、与使用方 step 无关）。"""
+    import subprocess
+
+    captured, calls = {}, []
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: (
+        calls.append(cmd), captured.update(kw, cmd=cmd))[0] or _fake_caps_proc(_caps_json()))
+    monkeypatch.setenv("GHERKAI_STEPS_DIR", "/host/steps")  # 弄脏宿主 env，否则下面的断言空过
+    assert compose.engine_min_grace("novaact") == 150.0
+    assert captured["cmd"] == ["/fake/novaact-worker", "--capabilities"]
+    assert "GHERKAI_STEPS_DIR" not in captured["env"]
+    assert compose.engine_min_grace("novaact") == 150.0  # 第二次走 query_capabilities 写下的缓存
+    assert len(calls) == 1
+
+
+def test_engine_min_grace_reuses_capabilities_asked_with_steps_dir(
+        monkeypatch, novaact_env_cmd, fresh_caps_cache, tmp_path):
+    """跑前检查带着 steps 目录问过 → 下限直接取那份缓存对象、**不再 spawn**（下限与 step 无关，故不挑目录）：
+    这就是「本机 run 每引擎只 spawn 一次自述」的落点。另一引擎不共用缓存项。"""
+    import subprocess
+
+    calls: list[str] = []
+
+    def fake_run(cmd, **kw):
+        calls.append(cmd[0])
+        engine = "novaact" if "novaact" in cmd[0] else "midscene"
+        return _fake_caps_proc(_caps_json(engine, 150 if engine == "novaact" else 31))
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    compose.query_capabilities("novaact", steps_dir=tmp_path / "steps")  # run 的跑前检查那一次
+    assert calls == ["/fake/novaact-worker"]
+    assert compose.engine_min_grace("novaact") == 150.0
+    assert calls == ["/fake/novaact-worker"]  # 没有第二次 spawn
+    assert compose.engine_min_grace("midscene") == 31.0
+    assert calls == ["/fake/novaact-worker", "/fake/midscene-worker"]
+
+
+def test_engine_min_grace_worker_failure_fails_loud(monkeypatch, novaact_env_cmd, fresh_caps_cache):
+    """问不到就抛（异常原样冒上去、由调用点退 2）——**绝不回落猜的常量**：那等于 grace 默默不够、收尾被强杀。"""
+    import subprocess
+
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: _fake_caps_proc(b"", returncode=2))
+    with pytest.raises(compose.WorkerSelfDescribeError):
+        compose.engine_min_grace("novaact")
+    assert compose._CAPABILITIES_CACHE == {}
+
+
+def test_engine_min_grace_unknown_engine_raises(fresh_caps_cache):
     # 未知引擎在定位链的单点校验处抛（不再静默给 0.0——那会让 core 的 grace 护栏对拼错的引擎名形同废除）
     with pytest.raises(ValueError, match="未知引擎"):
         compose.engine_min_grace("unknown")
 
 
-def test_engine_min_grace_miss_raises_worker_not_found(monkeypatch, fresh_grace_cache):
+def test_engine_min_grace_miss_raises_worker_not_found(monkeypatch, fresh_caps_cache):
     """本机没定位到该引擎 worker → WorkerNotFoundError（doctor 据此跳过比对、run 据此退 2 带安装指引）。"""
     monkeypatch.delenv("GHERKAI_WORKER_MIDSCENE_CMD", raising=False)
     monkeypatch.setattr(compose.shutil, "which", lambda n: None)
     monkeypatch.setattr(compose, "_runtime_version", lambda: None)
     with pytest.raises(compose.WorkerNotFoundError):
         compose.engine_min_grace("midscene")
-
-
-def test_query_capabilities_midscene_gets_no_nova_env(monkeypatch, novaact_env_cmd, fresh_grace_cache):
-    """NOVA_ACT_TIMEOUT_S 只注给 Nova（它是 Nova 的旋钮）——Midscene 的下限由它自己的收尾预算算出。"""
-    import subprocess
-
-    captured = {}
-    monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: captured.update(kw) or _fake_caps_proc(
-        b'{"schema_version": 1, "engine": "midscene", "min_grace_s": 31}'))
-    monkeypatch.delenv("NOVA_ACT_TIMEOUT_S", raising=False)
-    assert compose.query_capabilities("midscene")["min_grace_s"] == 31
-    assert "NOVA_ACT_TIMEOUT_S" not in captured["env"]
 
 
 # ---- 两层命名（ADR 0033）：prefix + 基名推导 / task-def / container / SSM 路径 ----
@@ -1094,82 +1189,14 @@ def novaact_env_cmd(monkeypatch):
     monkeypatch.delenv("GHERKAI_WORKER_MIDSCENE_CWD", raising=False)
 
 
-def test_query_deterministic_parses_worker_json(monkeypatch, novaact_env_cmd):
-    import subprocess
-
-    class _P:
-        returncode = 0
-        stdout = b'[{"pattern": "p", "description": "d", "example": "e"}]'
-        stderr = b""
-
-    captured = {}
-
-    def fake_run(cmd, **kw):
-        captured["cmd"] = cmd
-        captured["cwd"] = kw.get("cwd")
-        captured["env"] = kw.get("env")
-        return _P()
-
-    monkeypatch.setattr(subprocess, "run", fake_run)
-    # 先把宿主 shell 弄脏：不 setenv 则下面「不含该键」的断言在干净环境里空过、照不出继承泄漏
-    # （同 `env is None or key not in env` 那种写法的毛病）。
-    monkeypatch.setenv("GHERKAI_STEPS_DIR", "/host/steps")
-    got = compose.query_deterministic("novaact")
-    assert got == [{"pattern": "p", "description": "d", "example": "e"}]
-    assert captured["cmd"] == ["/fake/novaact-worker", "--list-deterministic"]  # 定位链 cmd + 自述 flag
-    assert captured["cwd"] is None      # 定位链未给 cwd → 继承本进程 CWD（worker 无专属 cwd，ADR 0037 决策 3）
-    # 无 steps_dir：env 仍自建一份——组合根拥有的键「有值注、无值清」，宿主 shell 的 GHERKAI_STEPS_DIR 不得
-    # 越过调用方解析出的结果（自述清单要与本次要跑的 step 集一致）；其余环境照常继承。
-    import os
-    assert captured["env"] is not None
-    assert "GHERKAI_STEPS_DIR" not in captured["env"]
-    assert captured["env"].get("PATH") == os.environ.get("PATH")
-
-
-def test_query_deterministic_injects_steps_dir_env(monkeypatch, novaact_env_cmd, tmp_path):
-    """自述入口同样加载 steps 目录（ADR 0037 决策 4）→ steps_dir 经 env 注入，故 list-deterministic 的清单
-    含使用方定制 step。注入是叠加（保 os.environ，否则 worker 丢 PATH/凭证）。"""
-    import os
-    import subprocess
-
-    class _P:
-        returncode = 0
-        stdout = b"[]"
-        stderr = b""
-
-    captured = {}
-    monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: captured.update(kw) or _P())
-    compose.query_deterministic("novaact", steps_dir=tmp_path / "steps")
-    assert captured["env"]["GHERKAI_STEPS_DIR"] == str(tmp_path / "steps")
-    assert captured["env"].get("PATH") == os.environ.get("PATH")
-
-
-def test_query_deterministic_unknown_engine():
-    with pytest.raises(ValueError, match="未知引擎"):
-        compose.query_deterministic("nope")
-
-
-def test_query_deterministic_worker_failure_raises(monkeypatch, novaact_env_cmd):
-    import subprocess
-
-    class _P:
-        returncode = 1
-        stdout = b""
-        stderr = "worker exploded".encode()
-
-    monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: _P())
-    with pytest.raises(RuntimeError, match="自述失败"):
-        compose.query_deterministic("midscene")
-
-
-def test_self_describe_miss_raises_worker_not_found(monkeypatch):
-    """定位链 miss 时自述入口抛 WorkerNotFoundError（而非「起不来」的通用 RuntimeError）——
-    调用点据此分叉：list-deterministic 退 2 打安装指引、plan 降级。"""
+def test_self_describe_miss_raises_worker_not_found(monkeypatch, fresh_caps_cache):
+    """定位链 miss 时**两个非 job 入口**都抛 WorkerNotFoundError（而非「起不来」的通用 RuntimeError）——
+    调用点据此分叉：list-deterministic / run 退 2 打安装指引、plan 标注降级。"""
     monkeypatch.delenv("GHERKAI_WORKER_MIDSCENE_CMD", raising=False)
     monkeypatch.setattr(compose.shutil, "which", lambda n: None)
     monkeypatch.setattr(compose, "_runtime_version", lambda: None)
     with pytest.raises(compose.WorkerNotFoundError):
-        compose.query_deterministic("midscene")
+        compose.query_capabilities("midscene")
     with pytest.raises(compose.WorkerNotFoundError):
         compose.match_deterministic("midscene", ["a"])
 

@@ -112,7 +112,7 @@ def test_list_engines_and_deterministic_json_keys_are_documented(monkeypatch):
         raise compose.WorkerNotFoundError(name, "未找到")
     monkeypatch.setattr(m.compose, "resolve_worker_cmd", fake)
     _assert_documented(m._probe_engines(), section="list-engines --json")
-    # list-deterministic：CLI 原样转述 worker 自述行（pattern/description/example 三键，ADR 0036）
+    # list-deterministic：CLI 原样转述自述对象里的清单行（pattern/description/example 三键，ADR 0036「5.」）
     _assert_documented({"engine": "novaact", "deterministic_steps": [{"pattern": "p", "description": "d", "example": "e"}]},
                        section="list-deterministic --json")
 
@@ -122,7 +122,8 @@ def test_doctor_json_keys_are_documented(monkeypatch, capsys):
                         lambda name, *, version=None: compose.WorkerCmd(cmd=["x"], cwd=None, source="s"))
     monkeypatch.setattr(m._deploy, "provider_entry_points", lambda: [])
     monkeypatch.setattr(m._deploy, "resolve_provider", lambda name=None: (None, "没有可用的部署 provider"))
-    monkeypatch.setattr(m.compose, "query_deterministic", lambda engine, *, steps_dir=None, timeout_s=60.0: [])
+    monkeypatch.setattr(m.compose, "query_capabilities", lambda engine, *, steps_dir=None, timeout_s=60.0: {
+        "schema_version": 1, "engine": engine, "min_grace_s": 150.0, "deterministic_steps": []})
     assert m.main(["doctor", "--json"]) == 0
     _assert_documented(json.loads(capsys.readouterr().out), section="doctor --json")
 

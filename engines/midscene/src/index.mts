@@ -12,7 +12,8 @@
 // resolve hook（见 `resolve-hook.mts` 的头注释）。
 //
 // 导出面刻意窄：只给写一个 handler 真正需要的东西。`match` / `matchBatch` / `listRegistry`
-// 是 worker 内部的派发与自述面（ADR 0036），不对使用方开放。
+// 是 worker 内部的派发面与两个非 job 入口（`--capabilities` 自述 / `--match-steps` 查询，ADR 0036
+// 「5.」/「4.」）的数据源，不对使用方开放。
 export { deterministic, DeterministicAssertion } from "./worker/deterministic.mjs";
 export type {
   DeterministicCtx,      // handler 第一参：{ page: Playwright Page }

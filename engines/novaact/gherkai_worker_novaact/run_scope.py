@@ -778,20 +778,24 @@ def _capabilities() -> dict[str, object]:
     注释：会话释放 + 截图队列排空，已真容器标定）。**worker 自己算、组合根只查询**（ADR 0024「引擎自报
     下限」）：SIGTERM 落长 act 中途时，协作停要等这一次 in-flight act 有界返回才退三层 with 释放会话，
     这两段预算都只有 worker 知道；组合根持任何引擎特定的下限常量都会漂移。
-    加键不加入口（如将来的 browser 后端能力）——故返回 dict、消费侧按键取。
+    `deterministic_steps` = 此刻注册表的清单（ADR 0036「2.」）：内建脚手架（模块顶 import 的副作用）+
+    `main()` 顶部加载的使用方 step——与真跑派发用的是同一张表，故复用 `list_registry()`、不另拼一份。
+    加键不加入口（如将来的 browser 后端能力）——故返回 dict、消费侧按键取；`run` 的前置检查因此只需
+    spawn 一次，同一份自述同时给出「steps 加载成功 / 清单 / grace 下限」（ADR 0036「5.」）。
     """
     return {
         "schema_version": CAPABILITIES_SCHEMA_VERSION,
         "engine": _evidence.ENGINE,  # 与 evidence 里报的引擎名同源，不另写字面量
         "min_grace_s": ACT_TIMEOUT_S + NOVA_GRACE_MARGIN_S,
+        "deterministic_steps": _deterministic.list_registry(),  # 同一张注册表（ADR 0036「2.」真值单一）
     }
 
 
 def main() -> int:
     # 使用方确定性 step 目录（ADR 0037 决策 4）：内建脚手架已在模块顶 import 期注册完，这里把使用方的叠上去。
-    # 位置是**契约的一部分**：先于下面任何一条路径（job 模式 / 三个自述入口 --list-deterministic /
-    # --match-steps / --capabilities），故自述入口报的注册表与真跑派发用的是同一张表（ADR 0036「真值单一」
-    # 不因定制而破）；`--capabilities` 同样在这之后，故 steps 加载失败在它上面也 fail-loud（ADR 0037 决策 4）。
+    # 位置是**契约的一部分**：先于下面任何一条路径（job 模式 / 两个非 job 入口 --capabilities 自述 /
+    # --match-steps 查询），故自述报的注册表与真跑派发用的是同一张表（ADR 0036「真值单一」不因定制而破）；
+    # `--capabilities` 同样在这之后，故 steps 加载失败在它上面也 fail-loud（ADR 0037 决策 4）。
     # worker 只认 env、不解析约定（`--steps-dir` / 默认 `./steps` / 写进 definition 全在组合根）。
     # 加载失败 fail-loud（绝不静默跳过——跳过 = 把确定性 step 静默换成 AI catch-all、run 可能假「通过」）。
     steps_dir = os.environ.get("GHERKAI_STEPS_DIR")
@@ -805,18 +809,15 @@ def main() -> int:
         # 「写了 steps 却全走 AI」的头号原因是目录没被注入，没这行使用方分不清是没读到还是没命中。
         log(f"worker: 已加载使用方 steps {len(loaded)} 个文件（{steps_dir}）")
 
-    # 自述模式（ADR 0036）：dump 确定性注册表即退——不建会话、不读 stdin、零费用。
-    # 内建脚手架（模块顶 import 的副作用）+ 上面加载的使用方 step，此刻注册表即真值。
-    if "--list-deterministic" in sys.argv:
-        print(json.dumps(_deterministic.list_registry(), ensure_ascii=False))
-        return 0
-    # 批量 match 查询（ADR 0036 决策 4，plan 命中标注）：stdin 一行 JSON 数组（step 文本）→ stdout
-    # 逐条命中结果。匹配语义留在 worker（CLI 零复刻）；同样不建会话、零 AWS。
+    # 批量 match 查询（ADR 0036「4.」，plan 命中标注）：stdin 一行 JSON 数组（step 文本）→ stdout
+    # 逐条命中结果。匹配语义留在 worker（CLI 零复刻）；不建会话、零 AWS。
     if "--match-steps" in sys.argv:
         texts = json.loads(sys.stdin.read())
         print(json.dumps(_deterministic.match_batch(texts), ensure_ascii=False))
         return 0
-    # 引擎能力自述（ADR 0036「5.」）：同样不建会话、不读 stdin、零费用。
+    # 引擎能力自述（ADR 0036「5.」，唯一的自述入口）：不建会话、不读 stdin、零费用。确定性清单是本对象的
+    # `deterministic_steps` 键，**没有 `--list-deterministic` 别名**（加键不加入口，见 ADR 0036「5.」）——
+    # 落到这里之下即 job 模式，认不出的 flag 会去读 stdin、不会静默给出半份自述。
     if "--capabilities" in sys.argv:
         print(json.dumps(_capabilities(), ensure_ascii=False))
         return 0
