@@ -568,7 +568,7 @@ def _template_arn(aws: Aws, *, prefix: str, engine: str) -> str:
 
 def _push_one(image: str, *, engine: str, variant: str, prefix: str, version: str,
               container, aws: Aws, now: datetime, out) -> PushOutcome:
-    """ADR 0038「push-worker 流程」步 2–8 的实现（步 1 的版本 skew 前置在 `push_worker` 里；deploy 的基底同步
+    """ADR 0038「push-worker 流程」步 2-8 的实现（步 1 的版本 skew 前置在 `push_worker` 里；deploy 的基底同步
     与重派生共用本函数 / `_register_revision`，故这里**不做**任何 skew 判断）。"""
     try:
         tag = names.image_tag(version, variant)

@@ -231,7 +231,7 @@ function cumulativeTokens(agent: PlaywrightAgent): number {
   }
 }
 
-// 本 step 的 token 成本 = 跑后累计 − 跑前累计（增量）。增量 0（无新 usage）→ undefined（不假装 0）。
+// 本 step 的 token 成本 = 跑后累计 - 跑前累计（增量）。增量 0（无新 usage）→ undefined（不假装 0）。
 function stepCost(beforeTokens: number, agent: PlaywrightAgent): Record<string, unknown> | undefined {
   const after = cumulativeTokens(agent);
   const delta = after - beforeTokens;

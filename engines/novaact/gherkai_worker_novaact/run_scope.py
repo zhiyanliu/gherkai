@@ -597,7 +597,7 @@ def _aggregate(statuses: list[str]) -> str:
 def _emit_scenario_done_unless_stopped(sink: EventSink, scenario_id: str, statuses: list[str]) -> bool:
     """scenario 跑完后的 scenario_done 出口 + 中止护栏（模块级、供单测直驱）。
 
-    返回 True＝中止（调用方应停止本 session、不再跑后续 scenario）。**中止时绝不 emit scenario_done**：
+    返回 True=中止（调用方应停止本 session、不再跑后续 scenario）。**中止时绝不 emit scenario_done**：
     scenario 中途收到 _stop 时 `_run_scenario` 返回**部分 statuses**，用它算判定会把没跑完的 scenario 标成
     确定 passed（假阳性——`_aggregate([])`/`_aggregate(["passed"])` 都 == "passed"），违反「停止是外部中止、
     非执行事实、worker 不越权标注」（ADR 0031/0024）；未完成 scenario 交 core 按派生态处理。对称 step 级投票

@@ -109,7 +109,7 @@ def _patch_cloud_handles(monkeypatch, record, *, preflight_err=None, skew=("ok",
     测试里不真探，只验「接线调它 + 它的返回决定退 2」。返回 (fake_s3, made, preflight_calls)。
 
     **版本 skew 闸（ADR 0037 决策 7）两处都 patch**：`read_backend_version`（否则真去建 ssm client 读 SSM）与
-    `check_version_skew`（默认判 `ok`＝无提示行，让本文件其它断言不被 skew 噪声干扰）。`skew=` 可换判定，
+    `check_version_skew`（默认判 `ok`=无提示行，让本文件其它断言不被 skew 噪声干扰）。`skew=` 可换判定，
     skew 自身的判据在 runtime 的 compose 测试里验、此处只验接线。
 
     **worker variant 闸（ADR 0038）同理 patch `resolve_worker_variant`**：它真身要读 SSM 映射 + 探 ECS/ECR。

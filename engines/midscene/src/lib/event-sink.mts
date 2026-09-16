@@ -26,7 +26,7 @@ const PUT_TIMEOUT_MS = 10_000;
 // events 表 TTL（ADR 0033 / 0024，对称 Nova _EVENTS_TTL_S）：每条 event item 写 expires_at=now+7d（epoch 秒），
 // IaC 在该属性开 DDB TTL 自动过期。events 是进度脚手架（权威在 RunReport/ResultStore），留 7 天供事后调查。
 // **改值须同步全部解码方（反向依赖）**：下游把本值当共享常量反解 emit 时刻——core 侧 event_log/ddb.py 的
-// `_emit_ts`（emit_epoch = expires_at − 本值，用于算时长）与 tools/events_wallclock.py 各自硬编码同一个 7d；
+// `_emit_ts`（emit_epoch = expires_at - 本值，用于算时长）与 tools/events_wallclock.py 各自硬编码同一个 7d；
 // 只改这里会让它们把 midscene scope 的 emit 时刻算偏（且无人报错）。
 const EVENTS_TTL_S = 7 * 24 * 60 * 60;
 

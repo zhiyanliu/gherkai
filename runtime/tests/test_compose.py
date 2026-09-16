@@ -33,7 +33,7 @@ def test_chain_level1_env_cmd_wins_with_optional_cwd(monkeypatch):
 
 
 def test_chain_level1_env_cmd_without_cwd_gives_none(monkeypatch):
-    # _CWD 是**可选**配套：不给则 cwd=None＝继承调用者 CWD（worker 不再有专属 cwd）
+    # _CWD 是**可选**配套：不给则 cwd=None=继承调用者 CWD（worker 不再有专属 cwd）
     monkeypatch.setenv("GHERKAI_WORKER_MIDSCENE_CMD", "node worker.mjs")
     monkeypatch.delenv("GHERKAI_WORKER_MIDSCENE_CWD", raising=False)
     assert compose.resolve_worker_cmd("midscene").cwd is None
@@ -416,7 +416,7 @@ def test_resolve_region_falls_back_to_profile_config(monkeypatch):
 
 
 def test_resolve_region_none_when_all_miss(monkeypatch):
-    # 全 miss（无 --region/env、profile config 也无 region）→ None＝fail-loud（worker 报错、不硬编码 east）。
+    # 全 miss（无 --region/env、profile config 也无 region）→ None=fail-loud（worker 报错、不硬编码 east）。
     monkeypatch.delenv("AWS_REGION", raising=False)
     monkeypatch.delenv("AWS_DEFAULT_REGION", raising=False)
 
@@ -1220,7 +1220,7 @@ def test_variant_miss_hint_older_cli_only_guides_upgrade():
     assert "push-worker" not in msg and "--worker-variant base" not in msg
 
 
-# ---- run_duration_ms：detached run 级墙钟 = RunState ended_at − started_at（ADR 0024「三级执行时长」detached 条）----
+# ---- run_duration_ms：detached run 级墙钟 = RunState ended_at - started_at（ADR 0024「三级执行时长」detached 条）----
 def test_run_duration_ms_from_run_state_timestamps():
     from gherkai_core.model import RunState, Status
 

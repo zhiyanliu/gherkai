@@ -1864,7 +1864,7 @@ def _cmd_run(args) -> int:
     # 产物 S3 落点：cloud（Fargate）由 build_fargate_engines 内部按 (bucket, <report_dir>/<run_id>/) 自算注入；
     # local（subprocess）CLI 恒不注入（worker 报 file://、不上传）——「subprocess+注入 S3 落点」是内部预演档
     # （ADR 0016 决策 B / 0029），由 tools/e2e_harness.py 自拼 worker env 直起 worker 实现，不经 CLI/compose。
-    cloud_fargate: dict | None = None  # cloud 分支置值（ADR 0033）：Fargate 执行配置，供 build_fargate_engines；None＝走 subprocess
+    cloud_fargate: dict | None = None  # cloud 分支置值（ADR 0033）：Fargate 执行配置，供 build_fargate_engines；None=走 subprocess
     # 目标解析（compose.resolve_cloud_target 一次吐 prefix + 各资源终名 + region/profile，ADR 0033 两层命名）。
     # **local 档也解析**：region/profile 两路都要（喂 subprocess worker + store），云资源名多算几个纯字符串、不用即弃。
     # region/profile 是「正确的非对称」（ADR 0016 决策 C）：
@@ -1873,7 +1873,7 @@ def _cmd_run(args) -> int:
     # - region：解析链落实成**具体字符串**（见 compose.resolve_region）。profile config 回落是关键：AgentCore
     #   validate_region 不吃 profile config、要显式 region 字符串，不落实则 profile-only 下 worker InvalidRegionError
     #   崩。落实后 subprocess env + FargateEngine overrides + store 三处同源、消除分叉。
-    # 均可为 None＝真无（fail-loud、不硬编码 east，对齐 store 宽容边界）。
+    # 均可为 None=真无（fail-loud、不硬编码 east，对齐 store 宽容边界）。
     target = compose.resolve_cloud_target(
         prefix=args.prefix, region=args.region, profile=args.profile,
         runs_table=args.ddb_table, events_table=args.events_table,

@@ -1,0 +1,5 @@
+{
+  // 中文排版符号（——、·、→、≠、①…）是本仓库注释与文案的常规用字，不是同形攻击；放行 zh-hans 后，
+  // ambiguousCharacters 仍对西里尔/希腊/全角拉丁这类真同形字符高亮（保留这道安全提示）。
+  "editor.unicodeHighlight.allowedLocales": { "_os": true, "_vscode": true, "zh-hans": true }
+}

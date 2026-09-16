@@ -141,7 +141,7 @@ class FargateEngine:
         sdk_artifact_dir_env: dict | None = None,  # 按引擎的 SDK 产物落点 env（如 {"NOVA_LOGS_DIR": "/容器内/…/nova-trajectories"}）——
                                    # worker ArtifactUploader 用其父级算 run_dir/相对 key。**缺它 uploader run_dir=None→no-op 报 file://→产物丢**
                                    # （真跑暴露：只注 ARTIFACT_S3_* 不够，SDK 落点 env 也必注）。引擎无关：由组合根按引擎算好、本 adapter 只转发。
-        region: str | None = None, # 注入 worker 的 AWS_REGION（组合根已落实成具体字符串，ADR 0016 决策 C）；None＝真无 region、worker fail-loud
+        region: str | None = None, # 注入 worker 的 AWS_REGION（组合根已落实成具体字符串，ADR 0016 决策 C）；None=真无 region、worker fail-loud
         poll_interval_s: float = 0.5,
         gap_grace_s: float = EC_GAP_GRACE_S,  # 流式期断号宽限（ADR 0024「读一致性」，见模块常量注释）
         missing_task_grace_polls: int = 20,  # DescribeTasks 连续 MISSING 的有界宽限拍数（ECS API 最终一致，RunTask 刚返回可短暂查不到；

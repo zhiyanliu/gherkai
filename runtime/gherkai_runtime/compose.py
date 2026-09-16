@@ -115,7 +115,7 @@ def parse_iso(ts: str) -> datetime:
 
 
 def run_duration_ms(state) -> float | None:
-    """detached run 的 run 级墙钟（毫秒）= RunState `ended_at` − `started_at`（提交落库到 finalize commit，含排队/起容器；
+    """detached run 的 run 级墙钟（毫秒）= RunState `ended_at` - `started_at`（提交落库到 finalize commit，含排队/起容器；
     ADR 0024「三级执行时长」detached 条）。两端任一缺或解析不了 → None（报告显「?」——派生指标，绝不让收尾因它炸）。
     宿主在 finalize_report 前调，算好传给 core。"""
     if state is None or not getattr(state, "started_at", None) or not getattr(state, "ended_at", None):
@@ -158,7 +158,7 @@ _WORKER_INSTALL_HINT = {
 class WorkerCmd:
     """一个引擎 worker 的拉起方式 = 定位链的解析结果（ADR 0037 决策 3）。
 
-    cmd/cwd 直接喂 `SubprocessEngine`；**cwd 恒可为 None＝继承当前进程 CWD**——worker 不再有专属 cwd
+    cmd/cwd 直接喂 `SubprocessEngine`；**cwd 恒可为 None=继承当前进程 CWD**——worker 不再有专属 cwd
     （故 local 档产物落点必须是绝对路径，见 build_engines）。source 是人读的命中级别描述，只供
     `list-engines` 自省/诊断，**不参与任何分支判断**（别按它做逻辑，否则级别措辞成了隐式契约）。
     """
@@ -351,7 +351,7 @@ def build_engines(
 
     产物持久落点（两引擎对称，经环境变量传给 SDK，ADR 0027）——**归集档调用方须给绝对路径**；
     `--no-report` 档恒给 None（真不生成，见上 no_artifacts 条）。绝对路径是硬要求：worker 已无专属 cwd
-    （定位链后 cwd 多为 None＝继承调用者 CWD，ADR 0037 决策 3），落 SDK 默认相对目录会写进用户 CWD。
+    （定位链后 cwd 多为 None=继承调用者 CWD，ADR 0037 决策 3），落 SDK 默认相对目录会写进用户 CWD。
     两个都给 None 且 no_artifacts=False 时不注入落点 env，仅为兼容「真不关心产物落哪」的库层调用者
     （回落 SDK 默认，行为随 CWD 漂）：
     - nova_logs_dir → `NOVA_LOGS_DIR` → Nova SDK `logs_directory`，trajectory 落这里。
@@ -362,7 +362,7 @@ def build_engines(
     steps_dir（ADR 0037 决策 4）：使用方确定性 step 目录的**绝对路径**，经 env `GHERKAI_STEPS_DIR` 注给
     **两个** worker（worker 启动时排序递归加载、注册进自己那张注册表）。约定解析（flag > env > `./steps`）
     在提交侧、值随 definition（`RunMeta.steps_dir`）走——本函数只搬运读回的值，**不自己解析 `./steps`**
-    （三个宿主 CWD 各不相同，重解析必分叉，ADR 0034）。None＝无使用方 step（worker 只有内建脚手架）——
+    （三个宿主 CWD 各不相同，重解析必分叉，ADR 0034）。None=无使用方 step（worker 只有内建脚手架）——
     此时宿主 shell 里继承来的同名 env 会被**清掉**、不得越过 definition（见 `_COMPOSE_OWNED_WORKER_ENV`）。
 
     **不注入产物 S3 上传落点**（`ARTIFACT_S3_BUCKET`/`PREFIX`）：本函数是 local 档，worker 恒报 `file://`。
@@ -373,7 +373,7 @@ def build_engines(
     `AWS_REGION` > `AWS_DEFAULT_REGION` > profile config）与 profile（`--profile` > `AWS_PROFILE`）：非 None 时经 `_inject_aws`
     显式写进注入 env（`AWS_REGION`/`AWS_PROFILE`）覆盖继承值——使 `--region`/`--profile` 真贯通到 subprocess worker
     （EventSink/JobSource/ArtifactUploader/Nova Workflow/Midscene fromNodeProviderChain 建 client 都读它们）、与 core store
-    同源、消除分叉。None＝不写（真无值、fail-loud，对齐 store 宽容）。**subprocess 两个引擎都注入**（Nova/Midscene 补建路径见下）。
+    同源、消除分叉。None=不写（真无值、fail-loud，对齐 store 宽容）。**subprocess 两个引擎都注入**（Nova/Midscene 补建路径见下）。
     注意：本函数**只建 subprocess 两个引擎**（local 执行）。cloud 执行由 `build_fargate_engines` 接管——组合根
     （`__main__`）按 `--backend` 分流：cloud ⇒ `build_fargate_engines`（FargateEngine）、否则本函数（SubprocessEngine）。
     **FargateEngine 侧只注入 region、不注入 profile**（容器用 task role，profile 是本机 `~/.aws` 概念、注入会
@@ -394,7 +394,7 @@ def build_engines(
         common_env["GHERKAI_NO_ARTIFACTS"] = "1"
 
     def _inject_aws(env: dict) -> None:
-        # --region/--profile 解析值覆盖继承的 AWS_REGION/AWS_PROFILE（None＝不写、留 boto 默认链/profile config
+        # --region/--profile 解析值覆盖继承的 AWS_REGION/AWS_PROFILE（None=不写、留 boto 默认链/profile config
         # 兜底，ADR 0016 决策 C）。subprocess worker 的 EventSink/JobSource/ArtifactUploader/Nova Workflow 都读
         # 这两个 env 建 client——显式写入使 `--region`/`--profile` 真生效、与 core store 侧同源、消除分叉。
         if region is not None:
@@ -611,7 +611,7 @@ def resolve_region(explicit_region: str | None, profile: str | None) -> str | No
     无则 None）。boto3 惰性 import（仅前三级都 miss 时才触发）——**缺 boto3（纯 local 未装 aws extra）也不硬依赖**：
     catch ImportError → 返回 None（等价于「无 region」，与真无 region 同走 fail-loud），保住「纯 local 路径绝不
     依赖 boto3」不变量（否则纯 local + 无 region env 的用户跑会撞未捕获 ImportError，而非优雅 fail-loud）。
-    真无 region（全 miss / 或缺 boto3 读不到 profile config）→ 返回 None＝fail-loud（worker 报错、不硬编码 east，对齐 store 宽容边界）。
+    真无 region（全 miss / 或缺 boto3 读不到 profile config）→ 返回 None=fail-loud（worker 报错、不硬编码 east，对齐 store 宽容边界）。
     """
     r = explicit_region or os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
     if r:
@@ -647,7 +647,7 @@ class CloudTarget:
 
     @property
     def detached_chain_lambdas(self) -> list[str]:
-        """无状态跑批事件驱动链的三 Lambda（ADR 0034）——detached submit 的 preflight 名单，顺序＝链上顺序。"""
+        """无状态跑批事件驱动链的三 Lambda（ADR 0034）——detached submit 的 preflight 名单，顺序=链上顺序。"""
         return [self.kicker_lambda, self.reconciler_lambda, self.exit_observer_lambda]
 
 

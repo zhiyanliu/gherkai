@@ -34,7 +34,7 @@ TUNNEL_EXTRA_HTTP_HEADERS = {"ngrok-skip-browser-warning": "1"}
 # job.timeout_s 从 claim 起算、已含拉镜像（ADR 0034「job timeout」节），故此处兜的是「链路投递 + Lambda
 # 冷启动 + 每 job 尾延迟的累计 + 收尾」。取 900s：对常规批量留数倍余量；极大批量用显式 TTL 覆盖。
 CLOUD_STARTUP_MARGIN_S = 900.0
-# 无 job 预算（`--default-job-timeout <=0` 且未标 `@timeout` ＝ 执行侧不超时）时的 TTL 记账上限。
+# 无 job 预算（`--default-job-timeout <=0` 且未标 `@timeout` = 执行侧不超时）时的 TTL 记账上限。
 # **只用于算 TTL，不是执行超时**：TTL 必须有限（否则泄漏兜底失效），故给不超时的 job 记一个明确上界。
 UNBOUNDED_JOB_BUDGET_S = 3600.0
 
@@ -67,7 +67,7 @@ def compute_watch_ttl_s(
 
     **求和而非取 max**：并发 >1 时各 job 部分重叠、真实墙钟 < 各预算之和，故串行总预算对**任何**并发取值
     都是保守上界（并发随 definition 走、cloud 再受部署侧 cap 钳制，ADR 0034 机制四——此处不必知道取值）。
-    高估无害：TTL 偏长＝隧道多留一会儿（run 终态照常提前拆）；反向（低估）才会造出假失败。
+    高估无害：TTL 偏长=隧道多留一会儿（run 终态照常提前拆）；反向（低估）才会造出假失败。
     无预算（执行侧不超时）的 job 按 `unbounded_job_budget_s` 记账——TTL 必须有限。
     """
     return startup_margin_s + sum(

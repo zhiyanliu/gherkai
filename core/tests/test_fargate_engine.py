@@ -122,7 +122,7 @@ def test_run_scope_job_key_quotes_scope_id(fargate):
     sid = "features/deterministic_anchor.feature:7"
     handle, _events = eng.run_scope(_job(sid))
     expected_key = f"{_RUN_ID}/jobs/{quote(sid, safe='')}.json"  # features%2Fdeterministic_anchor.feature%3A7.json
-    obj = fargate["s3"].get_object(Bucket=fargate["bucket"], Key=expected_key)  # 能取到＝key 用了 quote
+    obj = fargate["s3"].get_object(Bucket=fargate["bucket"], Key=expected_key)  # 能取到=key 用了 quote
     assert json.loads(obj["Body"].read().decode("utf-8"))["scope"]["id"] == sid
     assert "%2F" in expected_key and "%3A" in expected_key  # 确认 / 和 : 都被编码（不造子前缀）
 
@@ -305,7 +305,7 @@ def test_read_events_midscene_lowlevel_marshalling_and_ascending_read(fargate):
     _, events = eng.run_scope(_job("browse"))
     eng._ecs = _stopped_ecs(fargate["container_name"])  # scope_done 后等 STOPPED 读码（见 _stopped_ecs docstring）
     got = list(events)
-    # 11 条全读出（低层写的 item core 能 Query＝跨层编组同构）、升序（step 0..9 依次——引擎误用降序读会红）
+    # 11 条全读出（低层写的 item core 能 Query=跨层编组同构）、升序（step 0..9 依次——引擎误用降序读会红）
     assert len(got) == 11
     assert [type(e).__name__ for e in got] == ["StepDone"] * 10 + ["ScopeDone"]
     assert [e.step_index for e in got[:10]] == list(range(10))  # 升序读（跨 9/10 边界；moto 默认即升序，故此断言守降序误用、不守漏 ScanIndexForward）
