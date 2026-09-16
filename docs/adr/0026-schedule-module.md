@@ -22,7 +22,7 @@ opts = {                 // 时间单位统一为秒；代码字段名带 _s 后
   clock,                 // 时间源（可注入 fake clock 单测超时/grace 路径；默认 monotonic，抗系统时钟回拨）
 }
 ```
-（上为语言中立伪代码；实际实现为 dataclass `ScheduleOpts`，字段 snake_case：`max_concurrency`/`fail_fast`/`grace_period_s`/`min_grace_s`（默认 0.0，grace 下限，引擎无关纯数、组合根按引擎算好传入，schedule enforce `grace ≥ min_grace_s`，见 [0024](./0024-worker-core-protocol.md) grace 硬约束）/`clock`/`network_retry`（默认 0）/`retry_sleep`/`heartbeat_interval_s`（默认 0.5，静默 worker 超时兜底轮询间隔，见下「静默 worker 的超时如何触发」）（[0028](./0028-transient-network-ssl-resilience.md)）。）
+（上为语言中立伪代码；实际实现为 dataclass `ScheduleOpts`，字段 snake_case：`max_concurrency`/`fail_fast`/`grace_period_s`/`min_grace_s`（默认 0.0，grace 下限，引擎无关纯数、组合根按引擎向 worker 查自报值后传入，schedule enforce `grace ≥ min_grace_s`，见 [0024](./0024-worker-core-protocol.md) grace 硬约束）/`clock`/`network_retry`（默认 0）/`retry_sleep`/`heartbeat_interval_s`（默认 0.5，静默 worker 超时兜底轮询间隔，见下「静默 worker 的超时如何触发」）（[0028](./0028-transient-network-ssl-resilience.md)）。）
 
 **per-job 墙钟预算不在 `opts`**——载体是 definition 的 `Job.timeout_s`（`@timeout:N` tag / CLI `--default-job-timeout` 在组合根解析定值，见 [0019](./0019-feature-tags-scope-and-engine.md)/[0034](./0034-detached-batch-reconciler.md)），schedule 起 job 时据它算 deadline；`opts` 只留并发/隔离/grace/重试/心跳这些策略旋钮。
 

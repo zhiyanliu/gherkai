@@ -27,9 +27,10 @@ uv sync            # 在 repo 根跑一次，core/runtime/cli + 本 worker 一�
 ```bash
 echo '<job json>' | AWS_REGION=us-east-1 uv run python -m gherkai_worker_novaact
 
-# 两个「自述」入口（不建会话、不跑 job、零 AWS，[ADR 0036](../../docs/adr/0036-deterministic-capability-discovery.md)）——cli 的 list-deterministic / plan 标注即转述它们：
+# 三个「自述」入口（不建会话、不跑 job、零 AWS，[ADR 0036](../../docs/adr/0036-deterministic-capability-discovery.md)）——cli 的 list-deterministic / plan 标注 / grace 下限即转述它们：
 uv run gherkai-worker-novaact --list-deterministic                    # dump 确定性注册表（pattern + description + example）
 echo '["页面地址匹配 \"/wiki/OpenAI\""]' | uv run python -m gherkai_worker_novaact --match-steps   # 批量问这些 step 各命中什么
+uv run gherkai-worker-novaact --capabilities                          # 引擎能力：{schema_version, engine, min_grace_s}（= NOVA_ACT_TIMEOUT_S + NOVA_GRACE_MARGIN_S，组合根查它当 grace 下限）
 ```
 
 让 CLI 指向本 checkout（dev 覆写，定位链第一级）：`export GHERKAI_WORKER_NOVAACT_CMD="$(pwd)/.venv/bin/python -m gherkai_worker_novaact"`——workspace 已装 editable 时通常**不需要**（第二级同 venv 就命中）。

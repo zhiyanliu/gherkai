@@ -43,7 +43,7 @@
 
 3. **`stopTimeout=120` 校准落定、保留**：最坏实测 SIGTERM→退出 21s ≪ 120，有 ~5x 余量。**适用面注记**：本校准（连同 grace 链路）只在**有人发停止**时生效——三路推进器都有这样的发起者：同步 `run` 的 job 预算到点 `handle.stop`、local detached launcher deadline timer 的 `handle.stop`、cloud detached 超时处置的 `StopTask`（哨兵 reason），外加任何路径上人工的 `StopTask`。job timeout 已是产品级设定、三路各自 enforce——见 [0034](./0034-detached-batch-reconciler.md)「job timeout」节。**做成可配**（部署方拧 `gherkai deploy --stop-timeout N`，命令拼成 CDK context `-c stop_timeout=`；解析与 synth 期 `[1,120]` 越界 fail-fast 在 `stack._resolve_stop_timeout`、默认 120，见 [0037](./0037-distribution-and-packaging.md) 决策 6），便于未来再标定；`FargateWorkerHandle.stop` 忽略运行期 grace、真实宽限即由此常量决定。
 
-4. **grace 下限 vs stopTimeout 的冲突：subprocess 侧解决、Fargate 侧对最坏长 act 结构性接受（D+TTL 兜底）**。组合根 `engine_min_grace` 给 Nova 的 grace 下限 = `ACT_TIMEOUT_S+margin`。**要区分两条执行路径**（不能混为「不同层所以不冲突」——那只对 subprocess 成立）：
+4. **grace 下限 vs stopTimeout 的冲突：subprocess 侧解决、Fargate 侧对最坏长 act 结构性接受（D+TTL 兜底）**。Nova 的 grace 下限 = `ACT_TIMEOUT_S+margin`（worker 自报、组合根 `engine_min_grace` 查询聚合）。**要区分两条执行路径**（不能混为「不同层所以不冲突」——那只对 subprocess 成立）：
 
    - **subprocess 路径（local）**：`SubprocessWorkerHandle.stop` **真用** grace（SIGTERM→等 grace→SIGKILL，退出经 `proc.wait()`、无 ECS 的 ~11s 记录滞后）。压 margin 60→30 后下限 = 120+30 = **150s**，满足 [0024](./0024-worker-core-protocol.md) 不变量 `grace ≥ act_timeout + margin`——最坏长 act（跑满 `ACT_TIMEOUT_S`=120s 才到安全点）+ 会话释放(~9s) ≈ 129s < 150s，能容纳、不泄漏（比 Fargate 侧更宽裕，因无平台记录滞后）。
 

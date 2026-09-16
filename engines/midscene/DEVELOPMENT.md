@@ -48,9 +48,10 @@ spikes/                ← 五段式自检脚本（不进包、不编译）
 ```bash
 echo '<job json>' | AWS_REGION=us-east-1 node dist/bin.mjs
 
-# 两个「自述」入口（不建会话、不跑 job、零 AWS，[ADR 0036](../../docs/adr/0036-deterministic-capability-discovery.md)）——cli 的 list-deterministic / plan 标注即转述它们：
+# 三个「自述」入口（不建会话、不跑 job、零 AWS，[ADR 0036](../../docs/adr/0036-deterministic-capability-discovery.md)）——cli 的 list-deterministic / plan 标注 / grace 下限即转述它们：
 node dist/bin.mjs --list-deterministic                    # dump 确定性注册表（pattern + description + example）
 echo '["页面地址匹配 \"/wiki/OpenAI\""]' | node dist/bin.mjs --match-steps   # 批量问这些 step 各命中什么
+node dist/bin.mjs --capabilities                          # 引擎能力（含 min_grace_s = 收尾预算算出的 grace 下限）
 ```
 
 ## 从本 checkout 跑

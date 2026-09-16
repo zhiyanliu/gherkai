@@ -58,6 +58,7 @@ worker 拿到的只有 `keyword` + 裸 `text`（+可选多行参数）。派发�
 |---|---|---|
 | `--list-deterministic` | `gherkai list-deterministic`、`doctor` 的 `steps.load.<engine>` 项、`run`/`submit` 的提交侧探活 | `list_registry()` / `listRegistry()` dump 成一行 JSON（`pattern` / `description` / `example`）即退 |
 | `--match-steps` | `gherkai plan` 的派发标注 | stdin 收 step 文本数组 → `match_batch` / `matchBatch` → 一行 JSON 即退 |
+| `--capabilities` | `gherkai run` 定 grace 下限、`doctor --backend cloud` 比对云端停止宽限 | 与 step 无关：一个 JSON 对象（`engine` / `schema_version` / `min_grace_s`）即退；仍先加载 steps 目录（三入口对称、加载失败同样响亮） |
 | job 模式（无 flag） | `run` / `submit` 真跑 | 建会话、按 §1 派发 |
 
 不可能分叉的两道结构保证：
@@ -116,7 +117,7 @@ variant / 默认指针 / revision / digest 这些载体本身（SSM 键、ECR ta
 
 ## 5. 两条腿必须对称，与一个诚实的缺口
 
-**对称是要求，不是巧合**：同一份 `.feature` 要能在两个引擎上跑出同样的行为，故注册表 API（`deterministic` + 必填 `description`/`example`）、加载规则（排序递归、fail-loud）、派发三级顺序、判定映射、两个自述入口（`--list-deterministic` / `--match-steps`）的 flag 与输出形状，两侧逐条对齐；各自语言的实现细节（`re` vs `RegExp`、`**groups` vs groups 对象、同步 vs 可 `await`）随语言。跨引擎**不共享 code**——两个 worker 的实现代码各属各引擎，共享面只有 `.feature` 与使用方项目里的 `steps/` 目录约定（两引擎扫同一目录、各取自己的扩展名、正则成对）。
+**对称是要求，不是巧合**：同一份 `.feature` 要能在两个引擎上跑出同样的行为，故注册表 API（`deterministic` + 必填 `description`/`example`）、加载规则（排序递归、fail-loud）、派发三级顺序、判定映射、三个自述入口（`--list-deterministic` / `--match-steps` / `--capabilities`）的 flag 与输出形状，两侧逐条对齐；各自语言的实现细节（`re` vs `RegExp`、`**groups` vs groups 对象、同步 vs 可 `await`）随语言。跨引擎**不共享 code**——两个 worker 的实现代码各属各引擎，共享面只有 `.feature` 与使用方项目里的 `steps/` 目录约定（两引擎扫同一目录、各取自己的扩展名、正则成对）。
 
 **缺口（已知、非缺陷）**：确定性 step **不产任何产物**。它不调 AI，于是没有 trajectory、没有引擎原生报告页，也不产 `kind=evidence` 的机读证据（Nova `_attach_evidence` 在 `acts` 为空时直接返回；Midscene `stepEvidenceRef` 在「无新 execution 且 prompt 为 null」时返回 null）。后果链：
 

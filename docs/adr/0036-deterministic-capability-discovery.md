@@ -34,10 +34,6 @@ worker argv 带 `--list-deterministic` 时：**不建会话、不读 stdin、零
 - `--steps-dir DIR`（flag > env `GHERKAI_STEPS_DIR` > 默认 `./steps` 存在即用）：查询入口同样加载使用方的确定性 step 目录，故清单 = 内建脚手架 + 使用方定制；解析与加载机制见 [0037](./0037-distribution-and-packaging.md) 决策 4。
 - 纯本地 spawn（秒级）、零 AWS；worker 起不来/输出非 JSON → 退 2 带诊断。
 
-### 4. worker 自述：`--capabilities`（引擎能力，第三个自述入口）
-
-worker argv 带 `--capabilities` 时：**不建会话、不读 stdin、零费用**，把自己的能力声明作一个 JSON 对象打到 stdout、退出 0：`{"schema_version": 1, "engine": "<name>", "min_grace_s": <number>}`。首个字段 `min_grace_s` 是 [0024](./0024-worker-core-protocol.md) grace 硬约束的下限——Nova = `NOVA_ACT_TIMEOUT_S`（组合根注入的 env，缺省 120）+ margin（worker 常量，可 env 覆盖）；Midscene = SIGTERM 收尾序列各段超时预算之和 + 余量，由 worker 里那些预算常量算出、不另写字面量。组合根经 `compose.engine_min_grace` 查询、进程内缓存、按 run 取 max；query 失败（旧 worker 不认 flag、非法 JSON、非零退出）与另两个入口同律 **fail-loud**（`WorkerSelfDescribeError`，不降级、不回落常量）。为将来的 browser 后端能力（[0037](./0037-distribution-and-packaging.md) 被拒方案 / 未来项）预留位置：加键不加入口。`schema_version` 只在键语义变化时递增。
-
 ### 4. plan 命中标注：「我写的这句会不会命中」
 
 清单查询解决「有什么可用」；feature 作者还需要「**我写的这句会不会命中**」——`plan` 预检对每个 step 标注路由预期。**不做 CLI 侧复刻匹配**（TS/Python 正则方言不同：`(?<n>)` vs `(?P<n>)`；复刻匹配语义 = 对 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)「设计要点」节「匹配放 worker，不放核心」条的漂移面），机制 = **worker 批量 match 查询**：
@@ -46,6 +42,10 @@ worker argv 带 `--capabilities` 时：**不建会话、不读 stdin、零费用
 - plan 按引擎分组 step、每引擎至多 spawn 一次；文本视图行尾标 `← 确定性: <description>`（AI 不标——噪声控制）、`--json` 给每 step 注 `deterministic` 键（plan 视图字段、非 definition）。
 - **标注默认开 + best-effort 按引擎降级**：引擎环境未装/查询失败只让该引擎的 job 无标注（stderr 警告），plan 核心功能保持零依赖不受影响。**例外 = 使用方 `steps/` 目录加载失败**（使用方代码错误，不是「环境没装」）→ `plan` 不降级、直接退 2 并转述 worker 诊断：降级成「无标注」等于把使用方定制 step 静默换成 AI 兜底，属最忌的静默降级（目录约定、三个自述入口与 fail-loud 机制见 [0037](./0037-distribution-and-packaging.md) 决策 4）。plan 的承诺从「不起 worker」校准为「零 AWS、零花费、零副作用」——本地瞬时 worker 子进程（自述模式）不违本质。
 - **冲突预检是附加价值**：命中多条模式在真跑时该 step 会 error（[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)），plan 提前以 ⚠ 标注 + stderr 警告暴露；**退出码仍 0**——注册表冲突是工程侧资产问题（feature 作者改措辞可避开、但无权修注册表），不该挡 feature 作者的 plan（与 PlanError=definition 层矛盾退 2 分层）。
+
+### 5. worker 自述：`--capabilities`（引擎能力，第三个自述入口）
+
+worker argv 带 `--capabilities` 时：**不建会话、不读 stdin、零费用**，把自己的能力声明作一个 JSON 对象打到 stdout、退出 0：`{"schema_version": 1, "engine": "<name>", "min_grace_s": <number>}`。首个字段 `min_grace_s` 是 [0024](./0024-worker-core-protocol.md) grace 硬约束的下限——Nova = `NOVA_ACT_TIMEOUT_S`（组合根注入的 env，缺省 120）+ margin（worker 常量，可 env 覆盖）；Midscene = SIGTERM 收尾序列各段超时预算之和 + 余量，由 worker 里那些预算常量算出、不另写字面量。组合根经 `compose.engine_min_grace` 查询、进程内缓存、按 run 取 max，并**当场核两个身份位**：`engine` 须等于所问引擎（定位链第一级是 env 覆写，指错 worker 路径时不核就静默拿另一引擎的下限）、`schema_version` 须是它认识的版本；无 stdin 载荷的自述入口一律 `stdin=DEVNULL`（不认该 flag 的旧 worker 会掉进 job 模式读 stdin，继承 TTY 就挂到超时、诊断指错方向）；**只在本机执行档查**——cloud 档的 worker 跑在 Fargate、运行期 grace 到不了它（真实宽限 = task-def 的 `stopTimeout`），且提交机器不必装 worker，见 [0024](./0024-worker-core-protocol.md)「引擎自报下限」条；query 失败（旧 worker 不认 flag、非法 JSON、非零退出）与另两个入口同律 **fail-loud**（`WorkerSelfDescribeError`，不降级、不回落常量）。为将来的 browser 后端能力（[0037](./0037-distribution-and-packaging.md) 被拒方案 / 未来项）预留位置：加键不加入口。`schema_version` 只在键语义变化时递增。
 
 ## 被拒方案（护栏）
 
