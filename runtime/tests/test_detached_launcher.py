@@ -115,6 +115,35 @@ def test_relay_recovers_foreign_timed_out_claim(tmp_path):
     assert exits[0].exited.exit_code is None  # 无观察到的退出码——诚实留空（「码未知」分支被 timed_out 归因短路）
 
 
+def test_grace_query_failure_never_spawns_a_worker(tmp_path):
+    """grace 下限现在要 spawn 一次 worker 自述才问得到、**会抛**（ADR 0024「引擎自报下限」：旧 worker 不认入口 /
+    定位不到 / 答非契约）——launch 必须问在起 worker **之前**：抛在 run_scope 之后就是「worker 已起、_pump 没起」，
+    tick 的 launch 失败补偿（PLATFORM_FAILED_EXIT）以「进程没起」为前提，那时留下的是没人读 fd3、没人 wait、
+    没人 stop 的孤儿 worker（真会话真计费）。这里钉：min_grace_fn 抛 → run_scope 零调用、job 经补偿收敛 ERROR。"""
+    from gherkai_core.project import PLATFORM_FAILED_EXIT
+
+    meta, log, store, _ = _setup(tmp_path, "pass", "a", timeout_s=60.0)
+    spawned: list[str] = []
+    real_engine = _echo_resolver("pass")("novaact")
+
+    class _Spy:
+        def run_scope(self, job, **kw):
+            spawned.append(job.scope_id)
+            return real_engine.run_scope(job, **kw)
+
+    def _old_worker(_engine: str) -> float:
+        raise RuntimeError("引擎 novaact 的能力自述超时")  # 旧 worker 不认 --capabilities 的真实形态之一
+
+    launcher = SubprocessLauncher(lambda _name: _Spy(), log, min_grace_fn=_old_worker)
+    run_reconcile_loop("run-1", meta, log, store, launcher, max_concurrency=1,
+                       poll_interval_s=0.05, now_iso_fn=_now)
+    assert spawned == []  # 下限问不到 → 一个 worker 都没起（无孤儿）
+    state = store.load_run_state("run-1")
+    assert state.status == Status.ERROR
+    exits = [r for r in log.records() if r.kind == "exit"]
+    assert len(exits) == 1 and exits[0].exited.exit_code == PLATFORM_FAILED_EXIT
+
+
 def test_crash_worker_finalizes_error(tmp_path):
     """echo_worker(crash) 非 0 退出 → task_exited 带非0 → project 判 error → run finalize error（机制二真跑）。"""
     meta, log, store, launcher = _setup(tmp_path, "crash", "a")

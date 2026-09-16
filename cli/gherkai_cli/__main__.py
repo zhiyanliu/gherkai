@@ -201,11 +201,11 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
         help="未标 @timeout 的 scope 用的 job 墙钟超时秒（默认 300；<=0 表示不超时）；"
              "标了 @timeout:N tag 的按 tag 走（同 @engine/--default-engine 模式）",
     )
-    # 下限判据（Nova 的 act_timeout + 余量、为何必须 ≥ 单个 act 时长）见 ADR 0024；help 只讲怎么用。
+    # 下限判据（为何必须 ≥ 单个 act 时长 + 收尾预算、以及为何改由 worker 自报）见 ADR 0024；help 只讲怎么用。
     run.add_argument(
         "--grace", type=float, default=None,
-        help="停止后等 worker 优雅退出的宽限秒（默认按本 run 引擎推导：Nova≈act_timeout+余量）；"
-             "小于单个 act 的时长会让浏览器会话泄漏，给过小值直接退 2",
+        help="停止后等 worker 优雅退出的宽限秒（默认按本 run 用到的引擎自己报的最短宽限推导，通常是分钟量级）；"
+             "小于单个 AI 操作的时长会让浏览器会话泄漏，给过小值直接退 2",
     )
     # 隧道暴露本机应用的整套机制（凭据轮换、生命周期、谁负责拆）见 ADR 0035。
     run.add_argument(
@@ -744,18 +744,79 @@ def _doctor_cloud(args, target, add, cred_fail: str) -> None:
         return
     add("backend", "worker.default", True, f"默认 variant {default_variant}", required=False)
     resolved_any = False
+    revisions: dict[str, str] = {}  # 引擎 → 已解析的 revision ARN（供下面的停止宽限比对，只比解析得开的）
     for eng in sorted(_names.ENGINES):
         try:
             res = compose.resolve_worker_variant(
                 prefix=target.prefix, variant=default_variant, engines=[eng], cli_version=_installed_version(),
                 backend_version=backend_version, region=target.region, profile=target.profile)
             resolved_any = True
+            revisions[eng] = res[eng].revision_arn
             add("backend", f"worker.{eng}", True, f"variant {res[eng].variant} → {res[eng].revision_arn}", required=False)
         except Exception as e:
             add("backend", f"worker.{eng}", False, str(e), required=False)
     add("backend", "worker.any", resolved_any,
         "至少一个引擎解析到 worker 镜像" if resolved_any
         else "两个引擎都解析不到默认 variant 的镜像：cloud 档一个 job 也起不来（见上各引擎那行的指引）")
+    _doctor_worker_grace(target, add, revisions)
+
+
+def _doctor_worker_grace(target, add, revisions: dict) -> None:
+    """doctor 的 `backend.worker.grace` 行：引擎 worker 自报的最短收尾宽限 vs 云端 task-def 的停止宽限。
+
+    为何值得一行：cloud 档的真实宽限是 task-def 期 `stopTimeout`（`FargateWorkerHandle.stop` 忽略运行期
+    grace）、且受 Fargate 平台上限约束，而引擎自报的下限可能更大（Nova = 单 act 上界 + 收尾余量）——这个
+    结构性不满足是 ADR 0032 真容器校准结论 4 的**既定接受**（最坏情形：SIGTERM 落在一次会跑满上界的 act 早期
+    → 收尾被 SIGKILL 截断、会话靠 AgentCore 会话 TTL 兜底），故按**可选能力缺失**口径报（`-`、required=False），
+    不是必修失败：它不挡任何一次正常跑批，只是把「这台后端的宽限够不够最坏情形」变成看得见的一行。
+    比对面两侧各有前置：**只比已解析到 revision 的引擎**（没解析到的，上面 worker.<engine> 行已报）；
+    **本机没定位到该引擎 worker 就跳过**（下限是 worker 自报的，没 worker 就问不出来——纯 cloud 用户不必为
+    这一行装运行时，同 engines.any 在 cloud 档降为可选的判据）。
+    文案不能只给「抬高」一条路：`stopTimeout` 的部署缺省就是 Fargate 平台硬顶（deploy_aws 的 DEFAULT_STOP_TIMEOUT_S
+    = FARGATE_STOP_TIMEOUT_MAX_S），Nova 自报下限恒大于它 → 部署正常的后端上这一行对 Nova **恒为 `-`**；cli 不依赖
+    deploy_aws、不知平台上限具体几秒，故文案分「未顶满可抬 / 顶满即接受」两支，别让用户追一个 ADR 0032 已记录接受的残余。
+    比对左侧用的是**本机** worker 自报的值：Nova 的 margin 可经宿主 env 覆盖、但 Fargate 容器 env 是显式枚举、
+    容器内恒按缺省算——宿主覆盖过 margin 时这行偏保守（不会漏报）。
+    """
+    if not revisions:
+        add("backend", "worker.grace", True, "未查：没有解析到镜像的引擎（见上各引擎那行）", required=False)
+        return
+    details: list[str] = []
+    skipped: list[str] = []
+    ok_all = True
+    for eng, revision_arn in sorted(revisions.items()):
+        try:
+            need = compose.engine_min_grace(eng)
+        except compose.WorkerNotFoundError:
+            skipped.append(eng)  # 本机没装该引擎 worker：问不到它要多长收尾，跳过（不是故障）
+            continue
+        except Exception as e:
+            ok_all = False
+            details.append(f"{eng}: 问不到本机 worker 需要的收尾宽限（{e}）")
+            continue
+        try:
+            stop_timeout = compose.read_task_def_stop_timeout(
+                revision_arn, engine=eng, region=target.region, profile=target.profile)
+        except Exception as e:
+            ok_all = False
+            details.append(f"{eng}: 读不到云端为它设的停止宽限（{e}）")
+            continue
+        if stop_timeout is None:
+            ok_all = False
+            details.append(f"{eng}: 云端没为它设停止宽限，无从判断 {need:g}s 的收尾够不够")
+        elif need <= stop_timeout:
+            details.append(f"{eng}: 收尾需 {need:g}s ≤ 云端停止宽限 {stop_timeout}s")
+        else:
+            ok_all = False
+            details.append(
+                f"{eng}: 收尾需 {need:g}s > 云端停止宽限 {stop_timeout}s——极端情形（停止信号正好落在一次"
+                f"跑满时长上限的 AI 操作刚开始时）收尾会被强制终止：浏览器会话改由云端会话超时回收、该 scope 最后"
+                f"一两张截图可能没传上去。云端宽限还没顶到平台上限时，可让部署方跑一次 gherkai deploy --stop-timeout 抬高；"
+                f"已经在上限了就抬不动了，这条差距是平台限制、属已知并接受的代价，不必处理"
+            )
+    if skipped:
+        details.append(f"本机没有 {'/'.join(skipped)} 的 worker，跳过（只提交、不在本机跑不需要它）")
+    add("backend", "worker.grace", ok_all, "；".join(details), required=False)
 
 
 def _doctor_provider(args, add) -> None:
@@ -1811,21 +1872,35 @@ def _cmd_run(args) -> int:
         return prepped
     jobs, steps_dir = prepped
 
-    # 2a) grace 硬约束（ADR 0024）：按本 run 各引擎的下限取 max（grace 是 run 级单值）。引擎特定下限住组合根。
+    # 2a) grace 硬约束（ADR 0024）：按本 run 各引擎的下限取 max（grace 是 run 级单值），**下限由各引擎 worker
+    #     自报**（compose.engine_min_grace 查一次 `--capabilities`、进程内缓存；查不到即 fail-loud 退 2，不回落
+    #     猜的常量——那等于让 core 的 grace 护栏形同废除）。
+    #     **只对本机执行档查**（ADR 0032 真容器校准结论 4 的两条路径之分）：cloud 档 worker 跑在 Fargate 里、
+    #     `FargateWorkerHandle.stop` 忽略运行期 grace（真实宽限 = task-def 期 stopTimeout，`doctor --backend cloud`
+    #     的 worker.grace 行专门比对它），而提交机器本就不必装 worker 运行时（ADR 0037 决策 3「cloud 档不查本机
+    #     定位链」，见 _preflight_worker_runtimes）——在此查会把纯 cloud 用户按本机环境无理由挡住。
     #     显式给了过小 grace → 入口友好拒绝（对齐 votes 校验惯例，退 2「没开跑就被拒」）。core 侧还有 enforce
     #     兜底（任何前端都受同一护栏），此处只为在 cli 给出清晰诊断、避免 core ValueError 冒到用户面。
-    #     **必须排在起隧道 / cloud preflight / persistence.begin 之前**：只依赖 jobs，早拒才真「零副作用」——
-    #     否则配置错也已起 ngrok、产生云端调用费用、并落下永不 finalize 的半成品 run 记录。
-    min_grace = max((compose.engine_min_grace(j.engine) for j in jobs), default=0.0)
+    #     **必须排在起隧道 / cloud 探资源 / persistence.begin 之前**：只依赖 jobs（cloud 档连 worker 都不问），
+    #     早拒才真「零副作用」——否则配置错也已起 ngrok、产生云端调用费用、并落下永不 finalize 的半成品 run 记录。
+    min_grace = 0.0
+    if args.backend != "cloud":
+        for _engine in sorted({j.engine for j in jobs}):
+            try:
+                min_grace = max(min_grace, compose.engine_min_grace(_engine))
+            except (ValueError, RuntimeError) as e:  # 旧 worker 不认该 flag / 起不来 / 输出不合契约
+                _progress(f"引擎 {_engine} 的 worker 自述失败，拒绝运行：{e}")
+                return 2
     import math as _math
     if args.grace is not None and (not _math.isfinite(args.grace) or args.grace <= 0 or args.grace < min_grace):
         # nan/inf 同拒：inf 会让 SIGKILL 兜底永不触发（软停失效 = 挂死），与 --tunnel-ttl / @timeout 的判据同形。
         _progress(
             f"--grace={args.grace} 无效：须为有限正数且 ≥ {min_grace}s"
-            "（Nova act_timeout+余量；小于单个 act 的时长会让软停失效、浏览器会话泄漏）"
+            "（这是本 run 用到的引擎自己报的最短收尾宽限；更小的值会让停止变成强杀、浏览器会话泄漏）"
         )
         return 2
-    # --grace 哨兵默认（None）→ 跟随本 run 引擎推导（Nova run 自然 ≥act_timeout+余量；midscene-only 回到小值）。
+    # --grace 哨兵默认（None）→ 跟随本 run 引擎自报的下限（Nova 自然 ≥ 单 act 上界 + 收尾；midscene-only 回到小值；
+    #    cloud 档 min_grace=0 → 回落 ScheduleOpts 默认，反正 Fargate 侧忽略运行期 grace，见上 2a）。
     grace = args.grace if args.grace is not None else max(min_grace, ScheduleOpts.grace_period_s)
 
     # 2b) --expose-local：起隧道 + 把 jobs 文本中的 origin 替换成公网 URL（ADR 0035）。前台 run 的隧道

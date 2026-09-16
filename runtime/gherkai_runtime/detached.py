@@ -28,8 +28,8 @@ from gherkai_runtime import names  # 叶子模块（compose 要惰性 import 防
 # 口径 = **只挡时钟抖动与轮询粒度**：起算点 claimed_at 是 claim 时的墙钟、owner 的 deadline timer 起于其后的
 # launch，且本判据每 poll_interval 才查一次。**不覆盖**活 owner 的 stop→协作退收尾——SIGTERM 是 flag-only、
 # 只在 act 边界被检测（in-flight act 要有界返回才退），之后还有会话释放与证据有界排空，故引擎 grace 下限本身
-# 就取到数十秒级（compose.engine_min_grace：midscene 31s / Nova = NOVA_ACT_TIMEOUT_S+NOVA_GRACE_MARGIN_S=150s），
-# 远大于本余量。所以活 owner 场景多半是本记录先落、随后被真退出记录覆盖：靠「后到覆盖、归因不变」收敛
+# 就取到数十秒级（各引擎 worker 经自述入口 `--capabilities` 自报、compose.engine_min_grace 只查询聚合；今值
+# midscene 31s / Nova 150s），远大于本余量。所以活 owner 场景多半是本记录先落、随后被真退出记录覆盖：靠「后到覆盖、归因不变」收敛
 # （同带 timed_out=True、record_exit 是 INSERT OR REPLACE 同 key），**不靠本余量抢先**。故本值是非正确性参数，
 # 调大调小只影响 owner 真死时的恢复延迟。
 _RECOVERY_MARGIN_S = 10.0
@@ -76,11 +76,15 @@ class SubprocessLauncher:
             seq_box[0] += 1
             self._event_log.append_event(scope_id, seq_box[0], line, time.time())
 
+        # grace 下限要 spawn 一次 worker 自述才问得到（ADR 0024「引擎自报下限」）、**会抛**（旧 worker 不认入口 /
+        # 定位不到 / 答非契约）——故必须问在起 worker **之前**：抛在 run_scope 之后就是「worker 已起、_pump 没起」，
+        # tick 的 launch 失败补偿（PLATFORM_FAILED_EXIT）前提是「进程没起、平台观察者无从观察」，那时留下的是
+        # 没人读 fd3、没人 wait、没人 stop 的孤儿 worker（真会话真计费）+ 泄漏的事件管道 fd。
+        grace = self._min_grace_fn(job.engine) if job.timeout_s else None
         handle, events = engine.run_scope(job, raw_sink=raw_sink)
         timer: threading.Timer | None = None
         timed_out = threading.Event()
         if job.timeout_s:
-            grace = self._min_grace_fn(job.engine)
 
             def _on_deadline() -> None:
                 timed_out.set()  # 先置标志再 stop：_pump 的 record_exit 必见（归因链时序）

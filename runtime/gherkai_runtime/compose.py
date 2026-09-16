@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import math
 import os
 import secrets
 import shlex
@@ -27,30 +28,12 @@ from gherkai_core.ports import Engine, ReportStore, ResultStore, RunStore
 from gherkai_core.scope import FeatureSource
 
 
-# Nova 单 act 时间上界（ADR 0024 act 有界返回）——**组合根持单一真值**，同时派生两端（消除漂移）：
-# ① 注入 worker 的 NOVA_ACT_TIMEOUT_S env（worker run_scope.py 读它，缺省也是 120、此处显式注入使两端同源；
-#    subprocess 档见 build_engines、Fargate 档见 build_fargate_engines——两档都注，否则该档的 worker 落回自带字面量）；
-# ② 算 Nova 的 grace 下限（见 engine_min_grace）。env 可覆盖（真跑标定/调优）。
+# Nova 单 act 时间上界（ADR 0024 act 有界返回）——**组合根持单一真值**，注入 worker 的 NOVA_ACT_TIMEOUT_S env
+# （worker run_scope.py 读它，缺省也是 120、此处显式注入使两端同源）：subprocess 档见 build_engines、Fargate 档见
+# build_fargate_engines、能力自述查询见 query_capabilities——**三处都注**，否则那条路上的 worker 落回自带字面量。
+# **grace 下限不在这里算**（ADR 0024「引擎自报下限」）：worker 按这同一个注入值 + 自己的 margin 自报下限
+# （见 engine_min_grace），故「worker 的单 act 上界」与「grace 下限」仍同源于本常量。env 可覆盖（真跑标定/调优）。
 NOVA_ACT_TIMEOUT_S = int(os.environ.get("NOVA_ACT_TIMEOUT_S", "120"))  # SDK 允许 [2,1800]
-# grace 余量（ADR 0024/0028 grace 硬约束的 margin）：单 step 最坏耗时 + 会话释放 + 截图队列排空 + 余量。→ Nova
-# grace 下限 ≈ ACT_TIMEOUT_S + margin。**已真容器标定**（ADR 0032「真容器校准结论」）：4 次真跑实测 SIGTERM 落
-# act 中途 → `stopping→executionStopped` 最坏 21s，但其中 ~11s 已坐实为 ECS 记录 executionStoppedAt 的平台侧滞后
-# （worker 已退），subprocess 档不存在该段——真实预算 = 会话释放 ≤9s + evidence 截图后台队列的退出档有界排空 6s
-# （worker 的 `EVIDENCE_DRAIN_EXIT_S`，**排在会话释放之后**，ADR 0042 决策一；上传本体在队列线程内跑、`use_threads=False`，
-# 无 s3transfer 线程池被 atexit join 的尾巴——否则要再加一次 client 超时 ≈10s，真跑量过）= 15s，故 margin **不动**（30 仍留
-# ~2x 余量；历史上 60→30 时 grace 下限 180→150）。env 可覆盖（再标定/调优）。
-NOVA_GRACE_MARGIN_S = int(os.environ.get("NOVA_GRACE_MARGIN_S", "30"))
-
-# Midscene 的 grace 下限（ADR 0024 grace 硬约束）：Midscene worker 无「可控 act timeout」概念（不像 Nova 的
-# ACT_TIMEOUT_S），但它的 **SIGTERM onSignal 收尾路径本身有确定的超时预算**，grace 必须够它跑完、否则会被
-# SIGKILL 打断到一半（会话释放虽由「先释放会话再抢传」的排序 + Stop 预算保住不泄漏，但 worker 退不干净、
-# 中断兜底 report 抢传被截断）。下限 = onSignal 最坏串行路径的超时预算之和 + 余量，各段与 worker 常量同源：
-#   inflight settle(INFLIGHT_SETTLE_MS≈1.5s) + 会话 Stop(STOP_SESSION_BUDGET_MS≈3s) + browser.close race(≈3s)
-#   + 中断兜底 snapshotReport 上传(UPLOAD_TIMEOUT_MS≈10s) + step 级证据的截图队列排空(QUEUE_DRAIN_EXIT_MS≈6s，
-#   ADR 0042 决策一：排在会话释放之后、与兜底抢传并列) ≈ 23.5s，取 31s 留余量。**有界的待真跑标定量**，
-# 可 env 覆盖。（历史：曾为 0.0=无下限，导致 midscene-only run 默认 grace 回落 ScheduleOpts 的 5s < 上传超时
-# 10s，SIGTERM 时 worker 可能被 SIGKILL、兜底抢传截断——见 ADR 0024 grace 硬约束条。）
-MIDSCENE_GRACE_MIN_S = int(os.environ.get("MIDSCENE_GRACE_MIN_S", "31"))
 
 
 # ============================================================================
@@ -69,21 +52,51 @@ from gherkai_runtime.names import (  # noqa: E402
 from gherkai_runtime import names as _names  # noqa: E402
 
 
-def engine_min_grace(engine_name: str) -> float:
-    """按引擎给 grace 下限（ADR 0024 grace 硬约束）——**引擎特定值住在组合根**（core 不认）。
+# 引擎 → 自报 grace 下限的进程内缓存（ADR 0024「引擎自报下限」：每引擎最多 spawn 一次自述）。**不设失效**：
+# 一个进程内 worker 二进制与注入的 NOVA_ACT_TIMEOUT_S 都不会变，而调用点按 job 逐个问（run 里 N 个 job 同一引擎）。
+_ENGINE_MIN_GRACE_CACHE: dict[str, float] = {}
+# 能力自述（`--capabilities`）的格式版本（ADR 0036「5.」）：两引擎 worker 各自报同一个数；只在键语义变时递增。
+CAPABILITIES_SCHEMA_VERSION = 1
 
-    Nova：`ACT_TIMEOUT_S + margin`（SIGTERM 落长 act 中途须等 act 有界返回才协作退释放会话）。
-    Midscene：`MIDSCENE_GRACE_MIN_S`（无可控 act timeout，但 onSignal 收尾路径的超时预算之和须 < grace，
-    否则 worker 被 SIGKILL、中断兜底抢传截断——见该常量注释）。
-    组合根算好后作 `ScheduleOpts.min_grace_s` 传给 core，core 只 enforce「grace ≥ 此下限」的引擎无关关系。
-    混引擎 run 由调用方取各引擎下限的 max（grace 是 run 级单值）。
-    （未来更干净：引擎经 Engine port 自声明 min_grace，替代这里的 engine_name 分支，ADR 0024 记为 defer。）
+
+def engine_min_grace(engine_name: str) -> float:
+    """问该引擎 worker 自报的 grace 下限（ADR 0024「引擎自报下限」，自述契约见 ADR 0036「5.」）。
+
+    **组合根不再持任何引擎特定的下限常量**：下限的真值是 worker 自己的收尾预算（Nova = 注入的
+    `NOVA_ACT_TIMEOUT_S` + worker 侧 margin；Midscene = SIGTERM 收尾序列各段超时预算之和 + 余量），住在算它
+    的那一侧才不需要人工同步——收尾里多一段（如证据截图队列的退出档排空）时下限自己跟着涨。组合根只做三件事：
+    查询（`--capabilities`）、进程内按引擎缓存、把值作 `ScheduleOpts.min_grace_s` 传给 core（core 只 enforce
+    「grace ≥ 此下限」的引擎无关关系）。混引擎 run 由调用方取各引擎下限的 max（grace 是 run 级单值）。
+    **查不到即抛、绝不回落常量**（异常语义见 `query_capabilities`；旧 worker 不认该 flag 即 fail-loud，CLI 与
+    worker 版本 `==` 锁步）：静默回落一个猜的下限 = grace 默默不够、收尾被 SIGKILL 截断，正是本机制要消除的漂移。
     """
-    if engine_name == "novaact":
-        return float(NOVA_ACT_TIMEOUT_S + NOVA_GRACE_MARGIN_S)
-    if engine_name == "midscene":
-        return float(MIDSCENE_GRACE_MIN_S)
-    return 0.0
+    cached = _ENGINE_MIN_GRACE_CACHE.get(engine_name)
+    if cached is not None:
+        return cached
+    caps = query_capabilities(engine_name)
+    # 自述的身份位当场核（**不是**将来才用的预留位）：定位链第一级是 env 覆写（GHERKAI_WORKER_*_CMD），指错引擎时
+    # 不核就静默拿另一引擎的下限（Nova 拿到 31s → grace < 单 act 上界 → SIGTERM 落 act 中途必被硬杀、会话泄漏），
+    # 正是本机制要消除的「grace 默默不够」。schema_version 同理：认不出的格式版本按 fail-loud 处置、不猜键语义。
+    if caps.get("engine") != engine_name:
+        raise RuntimeError(
+            f"要问的是引擎 {engine_name} 的 worker，回答的却自称 {caps.get('engine')!r}"
+            "——这个引擎的 worker 路径指错了？（检查 GHERKAI_WORKER_*_CMD）"
+        )
+    if caps.get("schema_version") != CAPABILITIES_SCHEMA_VERSION:
+        raise RuntimeError(
+            f"引擎 {engine_name} 的能力自述格式版本是 {caps.get('schema_version')!r}、命令行工具认的是 "
+            f"{CAPABILITIES_SCHEMA_VERSION}——worker 与命令行工具版本不一致？两者须同版本安装。"
+        )
+    raw = caps.get("min_grace_s")
+    # 契约校验：非负有限数（bool 是 int 子类、单独挡）。不合契约 = worker 与 CLI 不同版本 / 自述实现错，
+    # 与「输出非 JSON」同档 fail-loud——把它当 0 会让 core 的 grace 护栏形同废除。
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)) or not math.isfinite(raw) or raw < 0:
+        raise RuntimeError(
+            f"引擎 {engine_name} 自述的最短停止宽限不是非负有限数：{raw!r}"
+            "——worker 与命令行工具版本不一致？两者须同版本安装。"
+        )
+    _ENGINE_MIN_GRACE_CACHE[engine_name] = float(raw)
+    return float(raw)
 
 
 def new_run_id() -> str:
@@ -419,7 +432,8 @@ def build_engines(
     nova_env = _env(nova_logs_dir, "NOVA_LOGS_DIR")
     midscene_env = _env(midscene_run_dir, "MIDSCENE_RUN_DIR")
     # Nova 的 act timeout **双端同源**（ADR 0024 grace 硬约束）：组合根持 NOVA_ACT_TIMEOUT_S 单一真值，
-    # 显式注入给 worker（消除「worker 私有默认 120」与「组合根 grace 下限」两处独立 120 的漂移）。
+    # 显式注入给 worker（消除「worker 私有默认 120」与本常量两处独立 120 的漂移——worker 自报的 grace 下限
+    # 也是按注入值算的，见 engine_min_grace / query_capabilities）。
     # nova_env 为 None（调用方未给产物落点）时也要建一份注入——故补一份 scrub 后的继承 env（同 `_env` 的起手式）。
     if nova_env is None:
         nova_env = _scrubbed_environ()
@@ -447,14 +461,18 @@ def build_engines(
 
 
 def _ask_worker(engine: str, flag: str, *, what: str, steps_dir: str | Path | None = None,
-                timeout_s: float = 60.0, payload: bytes | None = None) -> list:
+                timeout_s: float = 60.0, payload: bytes | None = None,
+                extra_env: Mapping[str, str] | None = None) -> list | dict:
     """spawn 一次某引擎 worker 的**自述入口**、收一行 JSON（ADR 0036 决策 2/4 的共同机制）。
 
-    自述入口不建会话、不读 job、零 AWS，秒级返回。两个自述入口（`--list-deterministic` /
-    `--match-steps`）只差 flag、stdin 与错误措辞，故共用本体（曾各抄一份 spawn+诊断，会漂移）。
+    自述入口不建会话、不读 job、零 AWS，秒级返回。三个自述入口（`--list-deterministic` / `--match-steps` /
+    `--capabilities`）只差 flag、stdin、注入 env 与错误措辞，故共用本体（曾各抄一份 spawn+诊断，会漂移）。
+    返回值形状随入口：清单/match 是数组、能力自述是对象（调用方各自校验）。
     - worker cmd 走定位链（ADR 0037 决策 3）：miss → WorkerNotFoundError（RuntimeError 子类，调用点分叉）。
     - steps_dir（ADR 0037 决策 4）经 env 注入：三个自述入口同样加载 steps 目录，故 `list-deterministic`
       与 `plan` 标注反映使用方定制 step（注册表 = 内建脚手架 + 加载的使用方模块）。
+    - extra_env：该入口特有的注入（能力自述给 Nova 注 `NOVA_ACT_TIMEOUT_S`，见 `query_capabilities`）——
+      叠在 scrub 后的继承 env 上，与 steps_dir 同一份 env。
     引擎名非法 → ValueError；worker 非 0 退出 → WorkerSelfDescribeError（如 steps 加载失败，调用点退 2 不降级）；
     起不来/超时/输出非 JSON → RuntimeError 带诊断。
     """
@@ -467,9 +485,16 @@ def _ask_worker(engine: str, flag: str, *, what: str, steps_dir: str | Path | No
     env = _scrubbed_environ()
     if steps_dir is not None:
         env["GHERKAI_STEPS_DIR"] = str(steps_dir)
+    if extra_env:
+        env.update(extra_env)
     try:
-        proc = subprocess.run(cmd, cwd=wc.cwd, env=env, capture_output=True,
-                              timeout=timeout_s, input=payload)
+        # payload 为 None 的入口（--list-deterministic / --capabilities）显式给 DEVNULL、**不继承调用者 stdin**：
+        # 不认该 flag 的旧 worker 会掉进 job 模式读 stdin——继承来的 stdin 是 TTY 时它挂到 timeout_s 才被判超时
+        # （诊断成「自述超时」而非「版本不一致」）、还会吞掉用户在终端敲的内容；DEVNULL 让它立刻读到 EOF、
+        # 非零退出 → WorkerSelfDescribeError，「旧 worker 不认入口即 fail-loud」才真落地（实测：不认 flag 的
+        # Nova worker 接常开的 stdin 管子阻塞 >20s 不退）。
+        proc = subprocess.run(cmd, cwd=wc.cwd, env=env, capture_output=True, timeout=timeout_s,
+                              input=payload, stdin=subprocess.DEVNULL if payload is None else None)
     except FileNotFoundError as e:
         raise RuntimeError(
             f"引擎 {engine} 的 worker 起不来（{e}）——用的是「{wc.source}」，该命令不可执行？"
@@ -494,6 +519,24 @@ def query_deterministic(engine: str, *, steps_dir: str | Path | None = None,
     """
     return _ask_worker(engine, "--list-deterministic", what="worker 自述",
                        steps_dir=steps_dir, timeout_s=timeout_s)
+
+
+def query_capabilities(engine: str, *, timeout_s: float = 60.0) -> dict:
+    """查某引擎 worker 的能力自述（ADR 0036「5.」）：spawn `worker --capabilities` 收一个 JSON 对象。
+
+    目前唯一消费者是 `engine_min_grace`（grace 下限），`engine` / `schema_version` 两个身份位在那里当场核
+    （指错 worker 路径 / 版本不一致都要 fail-loud）；将来加能力键不加入口。**Nova 查询也注入 `NOVA_ACT_TIMEOUT_S`**：它自报的下限 = 这个注入值 + worker 侧 margin，
+    不注入则 worker 按自带缺省算——operator 调大单 act 上界后下限静默偏低，正是「两端同源」要挡的漂移
+    （见该常量注释；两个真跑档 build_engines / build_fargate_engines 注的是同一个值）。
+    **不传 steps 目录**：下限是引擎自己的收尾预算、与使用方 step 无关（该入口仍照 ADR 0037 决策 4 加载 env 指定
+    的目录，而组合根拥有的键在 `_ask_worker` 里被清，故这里恒是「无使用方 step」档）。
+    异常语义见 `_ask_worker`（调用方：`run` 退 2、doctor 只报一行）；输出不是 JSON 对象 → RuntimeError。
+    """
+    extra_env = {"NOVA_ACT_TIMEOUT_S": str(NOVA_ACT_TIMEOUT_S)} if engine == "novaact" else None
+    caps = _ask_worker(engine, "--capabilities", what="能力自述", timeout_s=timeout_s, extra_env=extra_env)
+    if not isinstance(caps, dict):
+        raise RuntimeError(f"引擎 {engine} 的能力自述输出不是 JSON 对象：{caps!r}")
+    return caps
 
 
 def match_deterministic(engine: str, texts: list[str], *, steps_dir: str | Path | None = None,
@@ -909,8 +952,8 @@ def build_fargate_engines(
         headers_env = {**headers_env, "GHERKAI_NO_ARTIFACTS": "1"}
     # 引擎特定 env（同 headers 走 extra_env 注 RunTask overrides）：Nova 的 act timeout **双端同源**
     # （ADR 0024 grace 硬约束）——容器不继承本地 env、RunTask overrides 逐条枚举，故 cloud 档必须显式注，
-    # 否则 worker 落回自带字面量：operator 调 NOVA_ACT_TIMEOUT_S 只抬高了 grace 下限、改不动容器内单 act
-    # 上界，ADR 0032 明写的逃生舱（「要更长 act 就调这个 env」）在云端静默失效、local/cloud 行为分叉。
+    # 否则 worker 落回自带字面量：operator 调 NOVA_ACT_TIMEOUT_S 改不动容器内的单 act 上界，
+    # ADR 0032 明写的逃生舱（「要更长 act 就调这个 env」）在云端静默失效、local/cloud 行为分叉。
     engine_env = {"novaact": {"NOVA_ACT_TIMEOUT_S": str(NOVA_ACT_TIMEOUT_S)}}
 
     def _engine(engine: str) -> Engine:
@@ -1247,6 +1290,28 @@ def resolve_worker_variant(
         out[engine] = WorkerResolution(
             engine=engine, variant=variant, revision_arn=revision_arn, digest=digest)
     return out
+
+
+def read_task_def_stop_timeout(revision_arn: str, *, engine: str, region=None, profile=None, ecs=None) -> int | None:
+    """读某 task-def revision 上 worker container 的 `stopTimeout`（秒）= **cloud 档真实的停止宽限**。
+
+    只读、单次 `DescribeTaskDefinition`。用途只有一个：`doctor --backend cloud` 拿它跟本机 worker 自报的
+    grace 下限比对——Fargate 的 `FargateWorkerHandle.stop` 忽略运行期 grace，宽限由这个 task-def 期常量决定
+    （部署方经 `gherkai deploy --stop-timeout` 拧、Fargate 硬上限 120s，ADR 0032 真容器校准结论 3/4）。
+    故它是「下限满足不满足」这问题在 cloud 侧的对照值，与 subprocess 侧的运行期 grace 不是同一个量。
+    container 按 `names.container_name(engine)` 认（与 IaC 同源）；该 container 没设 stopTimeout（ECS 允许
+    不设、语义回落平台默认）或 task-def 里找不到它 → None（调用方按「比不了」处置，不猜值）。
+    botocore 异常原样抛给调用方翻成一句诊断（doctor 的既有惯例）。
+    """
+    if ecs is None:
+        ecs = _make_ecs_client(region=region, profile=profile)
+    td = ecs.describe_task_definition(taskDefinition=revision_arn).get("taskDefinition", {})
+    want = container_name(engine)
+    for c in td.get("containerDefinitions") or []:
+        if c.get("name") == want:
+            raw = c.get("stopTimeout")
+            return int(raw) if isinstance(raw, (int, float)) and not isinstance(raw, bool) else None
+    return None
 
 
 def resolve_default_worker_task_defs(

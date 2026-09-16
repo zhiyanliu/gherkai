@@ -49,7 +49,7 @@ from nova_act import NovaAct, AgentCoreBrowserSessionProvider, BOOL_SCHEMA, Work
 from nova_act.types.workflow import set_current_workflow, get_current_workflow
 
 from gherkai_worker_novaact.lib.workflow_setup import ensure_workflow_definition
-from gherkai_worker_novaact.lib.constants import MODEL_ID, WORKFLOW_DEF  # 共享常量（单一真理源，与 spike 共用）
+from gherkai_worker_novaact.lib.constants import MODEL_ID, WORKFLOW_DEF, NOVA_GRACE_MARGIN_S  # 共享常量（单一真理源）
 from gherkai_worker_novaact.lib.event_sink import EventSink  # 事件出口（ADR 0024 I/O 边缘可注入接口；fd 态 / DDB 态两态）
 from gherkai_worker_novaact.lib.job_source import JobSource  # job 入口（同上）
 from gherkai_worker_novaact.lib.artifact_upload import ArtifactUploader  # 产物 S3 上传（ADR 0029；无落点 env 时 no-op 报 file://）
@@ -99,8 +99,9 @@ def _get_uploader() -> ArtifactUploader:
 # evidence 截图后台队列的**有界**排空预算（ADR 0042 决策一）。两档不同是因为两条路径的时间预算不同：
 # - scope 末（正常完成）：判定已全部 emit、无人在等，给足 30s 让字节到 S3，漏网的紧接着由整目录 flush 兜。
 # - 提前退出（停止信号 / 网络耗尽 / 异常）：整个收尾必须落在 grace 内，且**排在会话释放之后**（ADR 0024
-#   「会话释放优先」）。6s 是这条路径分给截图的份额——组合根的 Nova grace 余量（compose.NOVA_GRACE_MARGIN_S）
-#   按「会话释放 + 本预算」组成，见那个常量的注释。超时即放弃（截图是判定的注释，不值得拿会话泄漏去换）。
+#   「会话释放优先」）。6s 是这条路径分给截图的份额——Nova grace 余量（`lib/constants.py` 的
+#   `NOVA_GRACE_MARGIN_S`）按「会话释放 + 本预算」组成，见那个常量的注释。超时即放弃（截图是判定的注释，
+#   不值得拿会话泄漏去换）。
 EVIDENCE_DRAIN_SCOPE_END_S = 30.0
 EVIDENCE_DRAIN_EXIT_S = 6.0
 
@@ -766,10 +767,31 @@ def _classify_act_error(e: BaseException) -> str:
     return "engine_error"  # 其余执行故障（含未细分的 ActError 子类）仍归 engine_error
 
 
+CAPABILITIES_SCHEMA_VERSION = 1  # 只在键语义变化时递增（ADR 0036「5.」）
+
+
+def _capabilities() -> dict[str, object]:
+    """本 worker 的能力声明（`--capabilities` 的 stdout，ADR 0036「5.」）。
+
+    `min_grace_s` = grace 硬约束的下限（ADR 0024）= 单 act 上界 `ACT_TIMEOUT_S`（组合根注入的
+    `NOVA_ACT_TIMEOUT_S`，缺省 120）+ 收尾余量 `NOVA_GRACE_MARGIN_S`（见 `lib/constants.py` 那个常量的
+    注释：会话释放 + 截图队列排空，已真容器标定）。**worker 自己算、组合根只查询**（ADR 0024「引擎自报
+    下限」）：SIGTERM 落长 act 中途时，协作停要等这一次 in-flight act 有界返回才退三层 with 释放会话，
+    这两段预算都只有 worker 知道；组合根持任何引擎特定的下限常量都会漂移。
+    加键不加入口（如将来的 browser 后端能力）——故返回 dict、消费侧按键取。
+    """
+    return {
+        "schema_version": CAPABILITIES_SCHEMA_VERSION,
+        "engine": _evidence.ENGINE,  # 与 evidence 里报的引擎名同源，不另写字面量
+        "min_grace_s": ACT_TIMEOUT_S + NOVA_GRACE_MARGIN_S,
+    }
+
+
 def main() -> int:
     # 使用方确定性 step 目录（ADR 0037 决策 4）：内建脚手架已在模块顶 import 期注册完，这里把使用方的叠上去。
-    # 位置是**契约的一部分**：先于下面三条路径的任何一条（job 模式 / --list-deterministic / --match-steps），
-    # 故自述入口报的注册表与真跑派发用的是同一张表（ADR 0036「真值单一」不因定制而破）。
+    # 位置是**契约的一部分**：先于下面任何一条路径（job 模式 / 三个自述入口 --list-deterministic /
+    # --match-steps / --capabilities），故自述入口报的注册表与真跑派发用的是同一张表（ADR 0036「真值单一」
+    # 不因定制而破）；`--capabilities` 同样在这之后，故 steps 加载失败在它上面也 fail-loud（ADR 0037 决策 4）。
     # worker 只认 env、不解析约定（`--steps-dir` / 默认 `./steps` / 写进 definition 全在组合根）。
     # 加载失败 fail-loud（绝不静默跳过——跳过 = 把确定性 step 静默换成 AI catch-all、run 可能假「通过」）。
     steps_dir = os.environ.get("GHERKAI_STEPS_DIR")
@@ -793,6 +815,10 @@ def main() -> int:
     if "--match-steps" in sys.argv:
         texts = json.loads(sys.stdin.read())
         print(json.dumps(_deterministic.match_batch(texts), ensure_ascii=False))
+        return 0
+    # 引擎能力自述（ADR 0036「5.」）：同样不建会话、不读 stdin、零费用。
+    if "--capabilities" in sys.argv:
+        print(json.dumps(_capabilities(), ensure_ascii=False))
         return 0
 
     # flag-only handler 装在 job 模式的首句（模块级 _on_signal，SIGTERM/SIGINT 共用，只置 _stop、绝不 raise，

@@ -449,34 +449,155 @@ def test_resolve_region_no_boto3_returns_none_not_crash(monkeypatch):
     assert compose.resolve_region(None, "someprofile") is None  # 缺 boto3 读不到 profile config → None、不崩
 
 
-# ---- engine_min_grace：按引擎给 grace 下限（ADR 0024 grace 硬约束）----
-def test_engine_min_grace_nova_covers_act_timeout_plus_margin():
-    # 断言语义关系而非重述公式（否则同义反复、测不出常量漂移）：Nova 下限须**严格大于**单 act 上界——
-    # 才留得出会话释放余量（SIGTERM 落长 act 中途须等 act 有界返回才协作退释放会话，ADR 0024）。
-    # 若 margin 误设为 0（违 ADR「grace 须留会话释放余量」红线），下限=act_timeout，此断言会红。
-    g = compose.engine_min_grace("novaact")
-    assert g > compose.NOVA_ACT_TIMEOUT_S, "Nova grace 下限须 > 单 act 上界（留会话释放余量）"
-    assert compose.NOVA_GRACE_MARGIN_S > 0, "margin 须 > 0（ADR 0024 会话释放余量红线）"
+# ---- engine_min_grace：向 worker 问自报下限 + 进程内缓存（ADR 0024「引擎自报下限」/ ADR 0036「5.」）----
+
+@pytest.fixture
+def fresh_grace_cache(monkeypatch):
+    """每个用例一份空缓存：模块级缓存跨用例泄漏会让「查了几次」的断言与失败档全部失真。"""
+    monkeypatch.setattr(compose, "_ENGINE_MIN_GRACE_CACHE", {})
 
 
-def test_engine_min_grace_midscene_nonzero_covers_onsignal_budget():
-    # Midscene 下限 = MIDSCENE_GRACE_MIN_S（非零）：onSignal 收尾路径超时预算之和须 < grace，否则 worker 被
-    # SIGKILL、中断兜底 report 抢传截断（ADR 0024 grace 硬约束；曾为 0.0 致 midscene-only run grace 回落 5s < 上传 10s）。
-    assert compose.engine_min_grace("midscene") == float(compose.MIDSCENE_GRACE_MIN_S)
-    assert compose.engine_min_grace("midscene") > 0.0
-    # 必须够 onSignal 最坏串行路径（会话 Stop + browser.close + 中断兜底上传超时），且 > Midscene 上传超时 10s。
-    assert compose.MIDSCENE_GRACE_MIN_S >= 10
+def _fake_caps_proc(payload: bytes, returncode: int = 0):
+    class _P:
+        pass
+    _P.returncode, _P.stdout, _P.stderr = returncode, payload, b""
+    return _P
 
 
-def test_engine_min_grace_unknown_engine_zero():
-    # 未知引擎无下限（0.0）——保守：core enforce grace > 0 仍兜底。
-    assert compose.engine_min_grace("unknown") == 0.0
+def test_engine_min_grace_takes_worker_self_reported_value(monkeypatch, novaact_env_cmd, fresh_grace_cache):
+    """下限 = worker 自报值（组合根不再持任何引擎特定常量）；查询走 `--capabilities` 自述入口。
+
+    Nova 查询**必须注入 NOVA_ACT_TIMEOUT_S**：worker 自报的下限 = 这个注入值 + 它自己的 margin，不注入则它按
+    自带缺省算，operator 调大单 act 上界后下限静默偏低（组合根持单一真值的意义就在此）。
+    """
+    import subprocess
+
+    captured = {}
+
+    def fake_run(cmd, **kw):
+        captured["cmd"], captured["env"] = cmd, kw.get("env")
+        return _fake_caps_proc(b'{"schema_version": 1, "engine": "novaact", "min_grace_s": 150}')
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setenv("GHERKAI_STEPS_DIR", "/host/steps")  # 先把宿主 shell 弄脏，否则下面「不含该键」的断言空过
+    assert compose.engine_min_grace("novaact") == 150.0
+    assert captured["cmd"] == ["/fake/novaact-worker", "--capabilities"]
+    assert captured["env"]["NOVA_ACT_TIMEOUT_S"] == str(compose.NOVA_ACT_TIMEOUT_S)
+    # 不传 steps 目录：下限是引擎自己的收尾预算、与使用方 step 无关；组合根拥有的键照样被清（不许宿主值越过）
+    assert "GHERKAI_STEPS_DIR" not in captured["env"]
 
 
-def test_engine_min_grace_mixed_run_takes_max():
-    # 混引擎 run 的 min_grace = 各引擎下限的 max（grace 是 run 级单值，__main__ 取 max）——Nova 下限最大、支配。
-    legs = ["novaact", "midscene"]
-    assert max(compose.engine_min_grace(e) for e in legs) == compose.engine_min_grace("novaact")
+def test_engine_min_grace_caches_per_engine(monkeypatch, novaact_env_cmd, fresh_grace_cache):
+    """进程内按引擎缓存（ADR 0024「引擎自报下限」）：同一引擎只 spawn 一次自述，另一引擎单独问。"""
+    import subprocess
+
+    calls: list[str] = []
+
+    def fake_run(cmd, **kw):
+        calls.append(cmd[0])
+        engine = "novaact" if "novaact" in cmd[0] else "midscene"
+        value = 150 if engine == "novaact" else 31
+        return _fake_caps_proc(f'{{"schema_version": 1, "engine": "{engine}", "min_grace_s": {value}}}'.encode())
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert compose.engine_min_grace("novaact") == 150.0
+    assert compose.engine_min_grace("novaact") == 150.0  # 第二次走缓存
+    assert calls == ["/fake/novaact-worker"]
+    assert compose.engine_min_grace("midscene") == 31.0  # 另一引擎不共用缓存项
+    assert calls == ["/fake/novaact-worker", "/fake/midscene-worker"]
+
+
+def test_engine_min_grace_worker_failure_fails_loud(monkeypatch, novaact_env_cmd, fresh_grace_cache):
+    """worker 非零退出（旧 worker 不认该 flag 即如此）→ WorkerSelfDescribeError 上抛、**不回落任何常量**，
+    且不写缓存（否则一次失败被记成「这引擎下限 = 猜的值」）。"""
+    import subprocess
+
+    monkeypatch.setattr(subprocess, "run",
+                        lambda cmd, **kw: _fake_caps_proc(b"", returncode=2))
+    with pytest.raises(compose.WorkerSelfDescribeError):
+        compose.engine_min_grace("novaact")
+    assert compose._ENGINE_MIN_GRACE_CACHE == {}
+
+
+_OK_HEAD = b'"schema_version": 1, "engine": "novaact"'  # 身份位合法，让每个用例只有一处缺陷
+
+
+@pytest.mark.parametrize("payload", [
+    b'{' + _OK_HEAD + b'}',                                    # 缺键
+    b'{' + _OK_HEAD + b', "min_grace_s": "150"}',              # 字符串
+    b'{' + _OK_HEAD + b', "min_grace_s": true}',               # bool（是 int 子类，须单独挡）
+    b'{' + _OK_HEAD + b', "min_grace_s": -1}',                 # 负数
+    b'{' + _OK_HEAD + b', "min_grace_s": Infinity}',           # 非有限（json 认它）
+    b'[{' + _OK_HEAD + b', "min_grace_s": 150}]',              # 不是 JSON 对象
+    b'{"schema_version": 1, "engine": "midscene", "min_grace_s": 31}',   # 自称另一引擎（worker 路径指错）
+    b'{"schema_version": 2, "engine": "novaact", "min_grace_s": 150}',   # 格式版本不认识
+    b'{"engine": "novaact", "min_grace_s": 150}',                        # 缺格式版本
+])
+def test_engine_min_grace_rejects_off_contract_answer(monkeypatch, novaact_env_cmd, fresh_grace_cache, payload):
+    """自述不合契约 → fail-loud（与「输出非 JSON」同档）：值当 0 处理会让 core 的 grace 护栏形同废除；
+    身份位（engine / schema_version）不核则 `GHERKAI_WORKER_NOVAACT_CMD` 指到 midscene bin 时 Nova 静默拿 31s
+    （grace < 单 act 上界 → SIGTERM 落 act 中途必被硬杀），正是本机制要消除的「grace 默默不够」。"""
+    import subprocess
+
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: _fake_caps_proc(payload))
+    with pytest.raises(RuntimeError):
+        compose.engine_min_grace("novaact")
+    assert compose._ENGINE_MIN_GRACE_CACHE == {}
+
+
+def test_engine_min_grace_wrong_engine_names_the_misconfiguration(monkeypatch, novaact_env_cmd, fresh_grace_cache):
+    """自称的引擎对不上 → 诊断点名「路径指错」并给出要查的旋钮（而不是泛泛的「版本不一致」）。"""
+    import subprocess
+
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: _fake_caps_proc(
+        b'{"schema_version": 1, "engine": "midscene", "min_grace_s": 31}'))
+    with pytest.raises(RuntimeError, match="自称 'midscene'.*GHERKAI_WORKER_"):
+        compose.engine_min_grace("novaact")
+
+
+def test_ask_worker_no_payload_entries_do_not_inherit_stdin(monkeypatch, novaact_env_cmd, fresh_grace_cache):
+    """无 stdin 载荷的自述入口（--capabilities / --list-deterministic）显式 stdin=DEVNULL、不继承调用者 stdin：
+    不认该 flag 的旧 worker 会掉进 job 模式读 stdin，继承来的 TTY 让它挂到超时才被判「自述超时」（诊断指错方向、
+    还吞用户键入）；DEVNULL 让它立刻读到 EOF 非零退出 → 「旧 worker 不认入口即 fail-loud」才真落地。
+    --match-steps 有 stdin 载荷（input=…），subprocess 不许同时给 stdin，故那条不设。"""
+    import subprocess
+
+    captured: list[dict] = []
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: captured.append(kw) or _fake_caps_proc(
+        b'{"schema_version": 1, "engine": "novaact", "min_grace_s": 150}'
+        if "--capabilities" in cmd else b'[]'))
+    compose.engine_min_grace("novaact")
+    compose.query_deterministic("novaact")
+    compose.match_deterministic("novaact", ["x"])
+    assert [kw.get("stdin") for kw in captured] == [subprocess.DEVNULL, subprocess.DEVNULL, None]
+    assert captured[2]["input"] == b'["x"]'
+
+
+def test_engine_min_grace_unknown_engine_raises(fresh_grace_cache):
+    # 未知引擎在定位链的单点校验处抛（不再静默给 0.0——那会让 core 的 grace 护栏对拼错的引擎名形同废除）
+    with pytest.raises(ValueError, match="未知引擎"):
+        compose.engine_min_grace("unknown")
+
+
+def test_engine_min_grace_miss_raises_worker_not_found(monkeypatch, fresh_grace_cache):
+    """本机没定位到该引擎 worker → WorkerNotFoundError（doctor 据此跳过比对、run 据此退 2 带安装指引）。"""
+    monkeypatch.delenv("GHERKAI_WORKER_MIDSCENE_CMD", raising=False)
+    monkeypatch.setattr(compose.shutil, "which", lambda n: None)
+    monkeypatch.setattr(compose, "_runtime_version", lambda: None)
+    with pytest.raises(compose.WorkerNotFoundError):
+        compose.engine_min_grace("midscene")
+
+
+def test_query_capabilities_midscene_gets_no_nova_env(monkeypatch, novaact_env_cmd, fresh_grace_cache):
+    """NOVA_ACT_TIMEOUT_S 只注给 Nova（它是 Nova 的旋钮）——Midscene 的下限由它自己的收尾预算算出。"""
+    import subprocess
+
+    captured = {}
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: captured.update(kw) or _fake_caps_proc(
+        b'{"schema_version": 1, "engine": "midscene", "min_grace_s": 31}'))
+    monkeypatch.delenv("NOVA_ACT_TIMEOUT_S", raising=False)
+    assert compose.query_capabilities("midscene")["min_grace_s"] == 31
+    assert "NOVA_ACT_TIMEOUT_S" not in captured["env"]
 
 
 # ---- 两层命名（ADR 0033）：prefix + 基名推导 / task-def / container / SSM 路径 ----
@@ -1073,6 +1194,34 @@ def test_match_deterministic_feeds_stdin_and_parses(monkeypatch, novaact_env_cmd
     assert captured["cmd"][-1] == "--match-steps"
     import json as _json
     assert _json.loads(captured["input"].decode()) == ["a", "b"]
+
+
+# ---- read_task_def_stop_timeout（doctor 的 cloud 侧对照值，ADR 0032 真容器校准结论 4）----
+
+class _StopTimeoutEcs:
+    def __init__(self, containers: list[dict]):
+        self._containers, self.asked = containers, []
+
+    def describe_task_definition(self, *, taskDefinition):
+        self.asked.append(taskDefinition)
+        return {"taskDefinition": {"containerDefinitions": self._containers}}
+
+
+def test_read_task_def_stop_timeout_reads_worker_container():
+    # 按 container 名（与 IaC 同源的 `{engine}-worker`）认，不取碰巧第一个 container 的值
+    ecs = _StopTimeoutEcs([{"name": "sidecar", "stopTimeout": 5},
+                           {"name": compose.container_name("novaact"), "stopTimeout": 120}])
+    assert compose.read_task_def_stop_timeout("arn:td:7", engine="novaact", ecs=ecs) == 120
+    assert ecs.asked == ["arn:td:7"]
+
+
+def test_read_task_def_stop_timeout_none_when_unset_or_container_absent():
+    # 没设 stopTimeout / task-def 里没这个 container → None（「比不了」，调用方不猜值）
+    assert compose.read_task_def_stop_timeout(
+        "arn:td:7", engine="novaact",
+        ecs=_StopTimeoutEcs([{"name": compose.container_name("novaact")}])) is None
+    assert compose.read_task_def_stop_timeout(
+        "arn:td:7", engine="novaact", ecs=_StopTimeoutEcs([{"name": "other", "stopTimeout": 90}])) is None
 
 
 # ---- 版本 skew（ADR 0037 决策 7）：读戳 + 三态齐全 + 非纯净跳过 ----

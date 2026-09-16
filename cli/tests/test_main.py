@@ -12,6 +12,8 @@ from gherkai_core.model import JobResult, RunResult, Status
 from gherkai_cli import __main__ as m
 from gherkai_runtime import compose
 
+from conftest import FAKE_MIN_GRACE_S  # 假 worker 自报的 grace 下限（autouse 夹具注的那份）
+
 
 def _fake_schedule_factory():
     """造一个不起 worker 的假 schedule：发事件给 sink（进度）+ on_event（persistence 刷 RUNNING）+ 每 job
@@ -254,8 +256,8 @@ def test_run_exit_code_1_on_error(tmp_path, monkeypatch, capsys):
 def test_run_schedule_opts_mapping(tmp_path, monkeypatch, capsys):
     box = {}
     monkeypatch.setattr(m, "schedule", _capturing_schedule(Status.PASSED, box))
-    # grace 用合法值（≥ Nova 下限）；默认引擎 novaact → min_grace=ACT_TIMEOUT_S+margin。
-    good_grace = compose.NOVA_ACT_TIMEOUT_S + compose.NOVA_GRACE_MARGIN_S + 10
+    # grace 用合法值（≥ Nova 下限）；默认引擎 novaact → min_grace = 该引擎 worker 自报的下限（假 worker 见 conftest）。
+    good_grace = FAKE_MIN_GRACE_S["novaact"] + 10
     m.main(["run", str(_write_feature(tmp_path)), "--no-report",
             "--max-concurrency", "3", "--default-job-timeout", "120", "--grace", str(good_grace), "--fail-fast"])
     o = box["opts"]
@@ -267,7 +269,7 @@ def test_run_schedule_opts_mapping(tmp_path, monkeypatch, capsys):
     # 但 meta 照落——definition 要诚实记「这个 run 声明了几路并行」
     assert box["run_meta"].max_concurrency == 3
     # min_grace_s 也传给 core（核心不变量：core enforce grace≥此下限，ADR 0024 grace 硬约束）
-    assert o.min_grace_s == float(compose.NOVA_ACT_TIMEOUT_S + compose.NOVA_GRACE_MARGIN_S)
+    assert o.min_grace_s == FAKE_MIN_GRACE_S["novaact"]
 
 
 def test_run_grace_too_small_rejected(tmp_path, monkeypatch, capsys):
@@ -292,15 +294,48 @@ def test_run_grace_nan_inf_rejected(tmp_path, monkeypatch, capsys):
         assert "有限正数" in capsys.readouterr().err
 
 
-def test_run_grace_sentinel_derives_from_engine(tmp_path, monkeypatch, capsys):
-    # 不给 --grace（哨兵默认 None）→ 按本 run 引擎推导：novaact → grace = min_grace = act_timeout+margin。
+def test_run_grace_sentinel_derives_from_engine_self_report(tmp_path, monkeypatch, capsys):
+    """不给 --grace（哨兵默认 None）→ 按本 run 引擎**自报**的下限推导（ADR 0024「引擎自报下限」）：
+    novaact-only run 的 grace = min_grace = 该引擎 worker 报的值，不再是组合根算的常量、也不是旧的硬编码 10。"""
     box = {}
     monkeypatch.setattr(m, "schedule", _capturing_schedule(Status.PASSED, box))
     m.main(["run", str(_write_feature(tmp_path)), "--no-report"])
     o = box["opts"]
-    expected = float(compose.NOVA_ACT_TIMEOUT_S + compose.NOVA_GRACE_MARGIN_S)
-    assert o.grace_period_s == expected  # 默认从引擎推导，不再是旧的硬编码 10
-    assert o.min_grace_s == expected
+    assert o.grace_period_s == FAKE_MIN_GRACE_S["novaact"]
+    assert o.min_grace_s == FAKE_MIN_GRACE_S["novaact"]
+
+
+def test_run_grace_mixed_engines_takes_max_of_self_reported(tmp_path, monkeypatch, capsys):
+    """混引擎 run 取各引擎自报下限的 max（grace 是 run 级单值，ADR 0024）——两条腿都问、按大的那个定。"""
+    feat = tmp_path / "mixed.feature"
+    feat.write_text(
+        "Feature: mixed\n"
+        "  @engine:midscene\n  Scenario: a\n    When \"做点啥\"\n"
+        "  @engine:novaact\n  Scenario: b\n    When \"做点啥\"\n", encoding="utf-8")
+    _fake_locator(monkeypatch, available=("novaact", "midscene"))  # 两条腿都得「装了」才问得到（dev 机常缺 midscene）
+    asked: list[str] = []
+    stubbed = compose.query_capabilities  # conftest autouse 装的确定性假替身（不是真 spawn），此处只在它外面加计数
+    monkeypatch.setattr(m.compose, "query_capabilities",
+                        lambda engine, **kw: asked.append(engine) or stubbed(engine, **kw))
+    box = {}
+    monkeypatch.setattr(m, "schedule", _capturing_schedule(Status.PASSED, box))
+    assert m.main(["run", str(feat), "--no-report"]) == 0
+    assert sorted(asked) == ["midscene", "novaact"]
+    assert box["opts"].min_grace_s == max(FAKE_MIN_GRACE_S.values())
+
+
+def test_run_engine_self_describe_failure_refuses_to_run(tmp_path, monkeypatch, capsys):
+    """问不到引擎自报的下限（旧 worker 不认该入口 / 起不来 / 输出不合契约）→ **退 2、绝不回落猜的下限**
+    （ADR 0024「引擎自报下限」fail-loud；回落 = grace 默默不够、收尾被强杀）。文案与自述失败同一口径。"""
+    box = {}
+    monkeypatch.setattr(m, "schedule", _capturing_schedule(Status.PASSED, box))
+    monkeypatch.setattr(m.compose, "query_capabilities", lambda engine, **kw: (_ for _ in ()).throw(
+        compose.WorkerSelfDescribeError(engine, 2, "unrecognized arguments: --capabilities", "能力自述")))
+    rc = m.main(["run", str(_write_feature(tmp_path)), "--no-report"])
+    assert rc == 2
+    assert "opts" not in box  # schedule 根本没被调（跑前就拒了，零副作用）
+    err = capsys.readouterr().err
+    assert "worker 自述失败，拒绝运行" in err and "novaact" in err
 
 
 def test_run_timeout_nonpositive_maps_to_none(tmp_path, monkeypatch, capsys):
@@ -1279,6 +1314,97 @@ def test_doctor_cloud_reports_backend_failures_and_exits_2(monkeypatch, capsys):
     assert not by[("backend", "resources")]["ok"] and "vfy-events" in by[("backend", "resources")]["detail"]
     assert not by[("backend", "worker.novaact")]["ok"] and not by[("backend", "worker.midscene")]["ok"]
     assert not by[("backend", "worker.any")]["ok"] and by[("backend", "worker.any")]["required"] is True  # 两引擎都解析不到才算必修失败
+    # 一个 revision 都没解析到 → 停止宽限无从比对（不去 describe 任何 task-def，也不冒充「查过了」）
+    assert by[("backend", "worker.grace")]["ok"] and "未查" in by[("backend", "worker.grace")]["detail"]
+
+
+# ---- doctor --backend cloud 的停止宽限比对（ADR 0024「引擎自报下限」× ADR 0032 真容器校准结论 4）----
+
+def _cloud_backend_ok(monkeypatch):
+    """把 cloud doctor 里 worker.grace 之前的每一项摆成 ok，只留停止宽限那行做变量。"""
+    _no_provider(monkeypatch)
+    monkeypatch.setattr(m.compose, "probe_aws_identity",
+                        lambda *, region, profile: {"account": "x", "arn": "arn", "region": region})
+    monkeypatch.setattr(m.compose, "check_backend_skew", lambda **kw: (compose.SKEW_OK, "", "1.4.1"))
+    monkeypatch.setattr(m.compose, "preflight_cloud_resources", lambda **kw: None)
+    monkeypatch.setattr(m.compose, "read_worker_default", lambda **kw: "base")
+    monkeypatch.setattr(m.compose, "resolve_worker_variant", lambda **kw: {
+        e: compose.WorkerResolution(engine=e, variant=kw["variant"], revision_arn=f"arn:{e}:7", digest="sha256:0")
+        for e in kw["engines"]})
+
+
+def _stub_stop_timeout(monkeypatch, value, asked=None):
+    def fake(revision_arn, *, engine, region=None, profile=None, ecs=None):
+        if asked is not None:
+            asked.append((engine, revision_arn))
+        return value(engine) if callable(value) else value
+    monkeypatch.setattr(m.compose, "read_task_def_stop_timeout", fake)
+
+
+def _doctor_cloud_json(capsys, expect_rc=0):
+    assert m.main(["doctor", "--backend", "cloud", "--prefix", "vfy-", "--region", "us-east-1", "--json"]) == expect_rc
+    return {(c["section"], c["name"]): c for c in json.loads(capsys.readouterr().out)["checks"]}
+
+
+def test_doctor_cloud_worker_grace_ok_and_skips_engine_without_local_worker(monkeypatch, capsys):
+    """两态一测：本机装了的引擎（midscene）下限 ≤ 云端停止宽限 → ✓；本机没装的（novaact）**跳过**。
+
+    跳过而非失败：下限是 worker 自报的，本机没这个 worker 就问不出来——只提交、不在本机跑的人不该为这一行装运行时。
+    比对只对**已解析到 revision** 的引擎做一次 describe（不去猜没解析到的那条腿）。
+    """
+    _fake_locator(monkeypatch, available=("midscene",))
+    _cloud_backend_ok(monkeypatch)
+    asked: list[tuple] = []
+    _stub_stop_timeout(monkeypatch, 120, asked)
+    by = _doctor_cloud_json(capsys)
+    row = by[("backend", "worker.grace")]
+    assert row["ok"] and row["required"] is False
+    assert f"收尾需 {FAKE_MIN_GRACE_S['midscene']:g}s ≤ 云端停止宽限 120s" in row["detail"]
+    assert "本机没有 novaact 的 worker，跳过" in row["detail"]
+    assert asked == [("midscene", "arn:midscene:7")]  # 跳过的引擎不 describe
+
+
+def test_doctor_cloud_worker_grace_shortfall_is_optional_gap_not_failure(monkeypatch, capsys):
+    """下限 > 云端停止宽限 → `-`（可选能力缺失）、退出码仍 0：这是 ADR 0032 真容器校准结论 4 的既定接受
+    （Fargate stopTimeout 有平台上限、Nova 的下限更大），不挡任何一次正常跑批，只让它看得见 + 给出抬高的办法。
+    处置分两支：未顶到平台上限可抬、顶满即「已知并接受」——部署缺省就是平台硬顶，Nova 在正常后端上恒落这一格，
+    只给「抬高」会让用户追一个已接受的残余。"""
+    _fake_locator(monkeypatch, available=("novaact", "midscene"))
+    _cloud_backend_ok(monkeypatch)
+    _stub_stop_timeout(monkeypatch, 120)
+    by = _doctor_cloud_json(capsys)
+    row = by[("backend", "worker.grace")]
+    assert row["ok"] is False and row["required"] is False  # 可选缺失：退出码 0（上面的 expect_rc）
+    assert f"novaact: 收尾需 {FAKE_MIN_GRACE_S['novaact']:g}s > 云端停止宽限 120s" in row["detail"]
+    assert "gherkai deploy --stop-timeout" in row["detail"]
+    assert "已知并接受" in row["detail"]  # 顶满平台上限的那支处置也在（Nova 在部署缺省下恒落此格）
+    assert f"midscene: 收尾需 {FAKE_MIN_GRACE_S['midscene']:g}s ≤" in row["detail"]  # 另一条腿照过
+    # 人读形态：- 标可选缺失、末行点明 - 的含义（同 provider 段可选项）
+    _stub_stop_timeout(monkeypatch, 120)
+    assert m.main(["doctor", "--backend", "cloud", "--prefix", "vfy-", "--region", "us-east-1"]) == 0
+    assert "- backend.worker.grace" in capsys.readouterr().out
+
+
+def test_doctor_cloud_worker_grace_unset_stop_timeout_is_reported(monkeypatch, capsys):
+    """云端没为该 container 设 stopTimeout（读回 None）→ 报「无从判断」，不当成 ✓（也不猜平台默认值）。"""
+    _fake_locator(monkeypatch, available=("midscene",))
+    _cloud_backend_ok(monkeypatch)
+    _stub_stop_timeout(monkeypatch, None)
+    row = _doctor_cloud_json(capsys)[("backend", "worker.grace")]
+    assert row["ok"] is False and "云端没为它设停止宽限" in row["detail"]
+
+
+def test_doctor_cloud_worker_grace_query_failure_lands_in_detail(monkeypatch, capsys):
+    """问不到本机 worker 的下限（旧 worker 不认该入口 / 起不来）→ 转述诊断、不静默按「够用」放过；
+    doctor 是只读自检，一行报到底，不像 run 那样退 2。"""
+    _fake_locator(monkeypatch, available=("midscene",))
+    _cloud_backend_ok(monkeypatch)
+    monkeypatch.setattr(m.compose, "query_capabilities", lambda engine, **kw: (_ for _ in ()).throw(
+        compose.WorkerSelfDescribeError(engine, 2, "unrecognized arguments: --capabilities", "能力自述")))
+    monkeypatch.setattr(m.compose, "read_task_def_stop_timeout",
+                        lambda *a, **kw: (_ for _ in ()).throw(AssertionError("下限都没问到，不该去 describe")))
+    row = _doctor_cloud_json(capsys)[("backend", "worker.grace")]
+    assert row["ok"] is False and "问不到本机 worker 需要的收尾宽限" in row["detail"]
 
 
 def test_doctor_provider_section_comes_from_provider_doctor(monkeypatch, capsys):

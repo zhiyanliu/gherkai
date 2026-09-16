@@ -10,8 +10,8 @@
 //      但使用方 `steps/` 里的 `.mts` step 文件仍要在运行期被 import，须有 TS 转译能力（ADR 0037 决策 3）；
 //   ② 注册裸 specifier 的 resolve hook（见 resolve-hook.mts 头注释：为什么 Node 默认解析够不到）；
 //      **须在 ① 之后**——hook 链后注册者先跑，我们要抢在 tsx 的 resolve 之前截住那个裸 specifier；
-//   ③ 动态 import run-scope 的 main 并跑（argv 原样透传：--list-deterministic / --match-steps / job 模式
-//      的判定都在 main 里读 process.argv，本文件不解析、不过滤任何 flag）。
+//   ③ 动态 import run-scope 的 main 并跑（argv 原样透传：--list-deterministic / --match-steps /
+//      --capabilities / job 模式的判定都在 main 里读 process.argv，本文件不解析、不过滤任何 flag）。
 import { register as registerLoaderHook } from "node:module";
 import { register as registerTsx } from "tsx/esm/api";
 

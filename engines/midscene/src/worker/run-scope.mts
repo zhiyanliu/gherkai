@@ -27,7 +27,9 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import { sigv4Fetch, signCdpUpgrade, getBaseUrl, MODEL, getRegion } from "../lib/agentcore-sigv4.mjs";
-import { ArtifactUploader } from "../lib/artifact-upload.mjs";  // 产物 S3 上传（ADR 0029；无落点 env 时 no-op 报 file://）
+// 产物 S3 上传（ADR 0029；无落点 env 时 no-op 报 file://）；UPLOAD_TIMEOUT_MS 是自报 grace 下限的加数之一
+// （中断兜底抢传那一段的预算，见下 minGraceSeconds），单一真值住上传器、此处只引用。
+import { ArtifactUploader, UPLOAD_TIMEOUT_MS } from "../lib/artifact-upload.mjs";
 import { EventSink } from "../lib/event-sink.mjs";  // 事件出口（ADR 0024「I/O 边缘可注入接口」，两态见该模块头）
 import { JobSource } from "../lib/job-source.mjs";  // job 入口（同上）
 // 确定性 step 注册表（ADR 0022）+ 测试开发的锚点脚手架。
@@ -44,18 +46,17 @@ const BROWSER_ID = "aws.browser.v1";
 // 网络专用退出码（ADR 0028）：与 core/gherkai_core/wire.py 的 EX_WORKER_NETWORK 同值（协议层单一事实源，两 Engine adapter 共用翻译）。
 // worker 建连失败、重试耗尽时以此码退出，作 out-of-band 信号（建连失败先于任何事件 emit）。
 const EX_WORKER_NETWORK = 80;
-// 建连重试上限（ADR 0028）；退避 [0.5,1,2]s，总 ~3.5s，远小于组合根按引擎推导的 grace 下限
-// （midscene 见 runtime/gherkai_runtime/compose.py `MIDSCENE_GRACE_MIN_S`；此处不复述会变的数字）。
+// 建连重试上限（ADR 0028）；退避 [0.5,1,2]s，总 ~3.5s，远小于本 worker 自报的 grace 下限（见下 minGraceSeconds）。
 const CONNECT_ATTEMPTS = 4;
 const CONNECT_BACKOFF_MS = [500, 1000, 2000];
 // SIGTERM cleanup 里单个 StopBrowserSession 的超时预算（ADR 0028）：退化网络下 Stop 可能挂很久
 // （共享 client maxAttempts=3、无显式超时），超过 schedule grace 会被 SIGKILL 打断到一半 → 会话泄漏。
-// 套这个预算：挂死时及时放弃，至少让 worker 干净退出、不被强杀。须 < grace（组合根按引擎推导的下限，
-// midscene-only 见 runtime/gherkai_runtime/compose.py 的 `MIDSCENE_GRACE_MIN_S`；此处不复述会变的数字）。
-const STOP_SESSION_BUDGET_MS = 3000;
+// 套这个预算：挂死时及时放弃，至少让 worker 干净退出、不被强杀。须 < grace——本段是自报下限
+// minGraceSeconds 的加数之一（见下），故「够跑完」由那个下限保证、不靠人对数字。
+export const STOP_SESSION_BUDGET_MS = 3000;
 // StartBrowserSession 已发出 RPC 但 sessionId 未返回的在途窗口兜底（ADR 0028）：SIGTERM 落在这一瞬时
 // 服务端可能已建会话但客户端没拿到 id。给一小段时间让 Start 的 await 返回、id 落进待清理集，再 cleanup。
-const INFLIGHT_SETTLE_MS = 1500;
+export const INFLIGHT_SETTLE_MS = 1500;
 // scenario 边界 log 抢传的总墙钟预算（ADR 0029「第四级：scenario 边界抢传」）：单个 log 上传已被
 // uploadOne 的 AbortSignal.timeout(10s) 封顶，但一个 scenario 边界要传多个 log，退化网络下串行累加会拖住
 // 下一 scenario、并叠进 grace。给整次快照套此总预算：超预算即放弃剩余（best-effort，scope 末 flush 兜底）。
@@ -65,10 +66,42 @@ const SCENARIO_LOG_SNAPSHOT_BUDGET_MS = 8000;
 //   · scope 末（正常路径：判定已全部 emit、会话已释放）给宽预算——此刻只剩字节要落地，等一等换来的是
 //     evidence 里的截图 URI 不悬空；真排不完的还有整目录 flush 兜。
 //   · 提前退出路径（停止信号 / 建连重试耗尽 / 异常）给紧预算——**这段计入 grace**，与会话释放、中断兜底
-//     抢传共用同一个宽限（下限的真值住 runtime/gherkai_runtime/compose.py 的 `MIDSCENE_GRACE_MIN_S`，
-//     此处不复述会变的数字）。这些路径不 flush、排不完的字节就此丢，故也不能给 0。
+//     抢传共用同一个宽限（本段是自报下限 minGraceSeconds 的加数之一，见下）。这些路径不 flush、
+//     排不完的字节就此丢，故也不能给 0。
 const QUEUE_DRAIN_SCOPE_END_MS = 30_000;
-const QUEUE_DRAIN_EXIT_MS = 6_000;
+export const QUEUE_DRAIN_EXIT_MS = 6_000;
+
+// SIGTERM cleanup 末尾关本地 browser 的超时预算（会话已 Stop 之后才跑，见下 cleanup）：close 易挂起，
+// 套预算别让它吃掉 grace 里留给后面几段的份额。本段同样是自报下限 minGraceSeconds 的加数之一。
+export const BROWSER_CLOSE_BUDGET_MS = 3000;
+// 自报 grace 下限的余量（ADR 0024 grace 硬约束的 margin）：收尾各段预算之和之外再留一档，吸收段间调度、
+// SDK 抖动与不被上述预算覆盖的零碎（诊断写出、事件 flush、进程退出本身）。
+// **取值来路**：使下限落在已标定的 31 s 上（各段之和 23.5 + 本余量 7.5）——31 不是新数，是 ADR 0032 真容器校准
+// 判「25 够用」（实测约 2x 余量）后、又被 ADR 0042 决策一的 6 s 截图队列排空顶上来的今值。改本常量 = 改一个
+// 已标定的下限，要有意识地改。与 Nova 侧不对称的一点：Nova 的 margin 可 env 覆盖（再标定免改码），本常量是
+// 编译期值、再标定要改这里重编。
+export const MIN_GRACE_MARGIN_MS = 7500;
+
+/** 本引擎自报给组合根的 grace 下限，单位秒（ADR 0024「引擎自报下限」，经 `--capabilities` 出口，
+ *  契约见 ADR 0036「5. worker 自述：--capabilities」）。
+ *
+ *  Midscene worker 没有「可控的单 act 超时」概念（不像 Nova 的 act 时间上界），但它的 **SIGTERM 收尾路径
+ *  本身有确定的超时预算**，grace 必须够这条路径跑完：不够则收尾被 SIGKILL 截断——会话释放本身有
+ *  「先释放会话、再抢传」的排序 + Stop 预算保底不泄漏，但 worker 退不干净、中断兜底的引擎报告抢传与
+ *  截图队列排空会被拦腰砍掉。故下限 = 收尾最坏串行路径各段预算之和 + 余量，**由那些预算常量算出、
+ *  不另写字面量**：谁改某段预算，下限自动跟着走（曾把这个下限当常量放在组合根，收尾里加进截图队列排空后
+ *  只能靠人记得把它改大；漏一次就是 grace 默默不够、收尾被硬杀截断）。
+ *
+ *  加数与顺序即 shutdownSequence 的逐段串行（见该函数）：在途窗口兜底 INFLIGHT_SETTLE_MS
+ *  + 会话 Stop STOP_SESSION_BUDGET_MS + 关 browser BROWSER_CLOSE_BUDGET_MS + 中断兜底报告抢传的单次
+ *  上传超时 UPLOAD_TIMEOUT_MS + 截图队列退出档排空 QUEUE_DRAIN_EXIT_MS（ADR 0042 决策一：排在会话释放
+ *  之后、与兜底抢传并列）+ MIN_GRACE_MARGIN_MS。scenario 边界抢传的 SCENARIO_LOG_SNAPSHOT_BUDGET_MS
+ *  **不在其中**——它跑在主流程、不在收尾路径上（见该常量注释）。 */
+export function minGraceSeconds(): number {
+  const totalMs = INFLIGHT_SETTLE_MS + STOP_SESSION_BUDGET_MS + BROWSER_CLOSE_BUDGET_MS
+    + UPLOAD_TIMEOUT_MS + QUEUE_DRAIN_EXIT_MS + MIN_GRACE_MARGIN_MS;
+  return totalMs / 1000;
+}
 
 // AWS SDK v3 服务端瞬时故障的错误 name 集（ADR 0028，节流+瞬时超时类）——与 Nova _BOTO_TRANSIENT_CODES
 // 逐字对齐（18 项，保两个引擎对称）。AgentCore 起会话（StartBrowserSessionCommand）是 AWS SDK v3 调用，
@@ -238,7 +271,7 @@ function stepCost(beforeTokens: number, agent: PlaywrightAgent): Record<string, 
   return delta > 0 ? { tokens: delta } : undefined;
 }
 
-// 自述入口（--list-deterministic / --match-steps）的 stdout payload 写出（ADR 0036「stdout 一行 JSON 即退」）：
+// 自述入口（--list-deterministic / --match-steps / --capabilities）的 stdout payload 写出（ADR 0036「stdout 一行 JSON 即退」）：
 // **必须等真 flush 完才能退**，否则 pipe 下大 payload 在 64KB 处静默截断且 rc 仍是 0——组合根只能报「输出非
 // JSON」、真因不可见（ADR 0036 的 best-effort 降级把它吞成 plan 无标注）。两种直觉写法都不够：
 //   - `process.stdout.write(s)` 后紧跟 process.exit：pipe 上 stdout 是异步写，exit 不 flush 未写完的尾部；
@@ -270,7 +303,7 @@ export async function main(): Promise<number> {
     process.env.MIDSCENE_RUN_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "gherkai-midscene-"));
   }
   // 使用方 steps/ 目录的注册（ADR 0037 决策 4）：**内建脚手架之后**（模块顶 import 已注册完）、
-  // **自述入口与 job 循环之前**——故 --list-deterministic / --match-steps / plan 标注都反映使用方定制
+  // **自述入口与 job 循环之前**——故 --list-deterministic / --match-steps / --capabilities / plan 标注都反映使用方定制
   // （ADR 0036「真值单一」不变：注册表 = 内建 + 使用方）。加载失败 fail-loud（抛 → bin 一行 stderr + 非零退出）。
   await loadUserSteps();
 
@@ -287,6 +320,17 @@ export async function main(): Promise<number> {
     for await (const c of process.stdin) chunks.push(c as Buffer);
     const texts: string[] = JSON.parse(Buffer.concat(chunks).toString("utf-8"));
     await writeStdoutFlushed(JSON.stringify(matchBatch(texts)) + "\n");
+    return 0;
+  }
+  // 引擎能力自述（ADR 0036「5.」）：一个 JSON 对象即退，同样不建会话、不读 stdin、零费用。
+  // min_grace_s = 本引擎收尾路径要的 grace 下限（ADR 0024「引擎自报下限」：真值住算它的这一侧，
+  // 组合根只查询后聚合、不持引擎特定常量）。schema_version 只在键语义变化时递增（加键不递增）。
+  if (process.argv.includes("--capabilities")) {
+    await writeStdoutFlushed(JSON.stringify({
+      schema_version: 1,
+      engine: "midscene",
+      min_grace_s: minGraceSeconds(),
+    }) + "\n");
     return 0;
   }
 
@@ -356,7 +400,7 @@ export async function main(): Promise<number> {
     if (browser) {
       await Promise.race([
         browser.close().catch(() => {}),
-        new Promise<void>((r) => setTimeout(r, 3000)),
+        new Promise<void>((r) => setTimeout(r, BROWSER_CLOSE_BUDGET_MS)),
       ]);
     }
   }

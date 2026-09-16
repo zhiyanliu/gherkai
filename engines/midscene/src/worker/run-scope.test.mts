@@ -544,6 +544,41 @@ test("--match-steps: 超 64KB payload 经 pipe 完整送出（ADR 0036，不被 
 });
 
 
+// ---- 能力自述 --capabilities（ADR 0036「5.」）：JSON 形状 + min_grace_s 的来路（ADR 0024「引擎自报下限」）----
+// **真跑入口**：组合根消费的就是这条路（spawn worker → 读 stdout 一行 JSON → 拿 min_grace_s 当 grace 下限），
+// 且「不建会话、不读 stdin、零费用」只有真跑才看得见——本测试不喂 stdin、不给 AWS 凭证，照样该退 0。
+// 起源码形态的 bin 要有 TS 转译能力：`--import tsx` 传绝对 URL（与 cwd 无关），不靠 Node 原生 type stripping
+// （那要 Node ≥22.18，而包只声明 >=22——同 user-steps.test.mts 的真跑层）。
+test("--capabilities: 一个 JSON 对象即退 0；min_grace_s = 收尾各段预算之和 + 余量，当前 = 31s", async () => {
+  const {
+    INFLIGHT_SETTLE_MS, STOP_SESSION_BUDGET_MS, BROWSER_CLOSE_BUDGET_MS, QUEUE_DRAIN_EXIT_MS, MIN_GRACE_MARGIN_MS,
+  } = await importMod();
+  const { UPLOAD_TIMEOUT_MS } = await import("../lib/artifact-upload.mjs");
+  const proc = spawn(process.execPath, [
+    "--import", import.meta.resolve("tsx"), path.join(import.meta.dirname, "..", "bin.mts"), "--capabilities",
+  ], { stdio: ["ignore", "pipe", "pipe"] });
+  const out: Buffer[] = []; const err: Buffer[] = [];
+  proc.stdout.on("data", (c) => out.push(c));
+  proc.stderr.on("data", (c) => err.push(c));
+  const code: number = await new Promise((r) => proc.on("close", r));
+  const raw = Buffer.concat(out).toString("utf-8");
+  assert.equal(code, 0, `应退 0，stderr=${Buffer.concat(err).toString("utf-8")}`);
+  const got = JSON.parse(raw);
+  assert.deepEqual(Object.keys(got).sort(), ["engine", "min_grace_s", "schema_version"], `键集：${raw}`);
+  assert.equal(got.schema_version, 1);
+  assert.equal(got.engine, "midscene");
+  // 自报值必须**由收尾预算常量算出**（改某段预算、下限自动跟着走；见 run-scope.mts minGraceSeconds 注释）——
+  // 故这里复算而不是照抄一个数。**它挡的是漂移、不是写法**：某段预算改了而出口没跟着走即红；改成与今值相等的
+  // 字面量 31 仍然绿（那一格靠下面的绝对值断言 + code review 挡）。
+  const expected = (INFLIGHT_SETTLE_MS + STOP_SESSION_BUDGET_MS + BROWSER_CLOSE_BUDGET_MS
+    + UPLOAD_TIMEOUT_MS + QUEUE_DRAIN_EXIT_MS + MIN_GRACE_MARGIN_MS) / 1000;
+  assert.equal(got.min_grace_s, expected, "自报的下限得是那些预算常量的和，不是另写的字面量");
+  // 再钉一次绝对值：当前各段预算下就是 31s。它变了意味着 grace 下限变了（ADR 0024 grace 硬约束的红线，
+  // 且组合根/task-def stopTimeout 侧的比对结论随之变），要有意识地改、不该被某段预算的顺手调整带偏。
+  assert.equal(got.min_grace_s, 31, `当前行为是 31s，实际 ${got.min_grace_s}s`);
+});
+
+
 // ---- artifactFlushRoot：非 --no-report 档 → 解析后的 MIDSCENE_RUN_DIR（--no-report 档见 no-artifacts.test.mts）----
 test("artifactFlushRoot: 常规档给解析后的 MIDSCENE_RUN_DIR；未设则 undefined（local/无落点 no-op）", async () => {
   const { artifactFlushRoot } = await importMod();

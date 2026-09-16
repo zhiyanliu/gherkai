@@ -108,8 +108,8 @@ const BIN = path.join(import.meta.dirname, "..", "bin.mts");
 // （ADR 0037 决策 3 实测过的坑），而本测试刻意把 cwd 放在 repo 外 → 故把 tsx 的 loader 解析成**绝对 URL**
 // 再传（从本文件解析，与 cwd 无关）。也不靠 Node 的原生 type stripping（那要 Node ≥22.18，而包只声明 >=22）。
 const TSX_LOADER = import.meta.resolve("tsx");
-function runBin(stepsDir: string): Promise<{ code: number; out: string; err: string }> {
-  const proc = spawn(process.execPath, ["--import", TSX_LOADER, BIN, "--list-deterministic"], {
+function runBin(stepsDir: string, flag = "--list-deterministic"): Promise<{ code: number; out: string; err: string }> {
+  const proc = spawn(process.execPath, ["--import", TSX_LOADER, BIN, flag], {
     cwd: os.tmpdir(),  // cwd 也在 repo 外：任何靠 cwd 上溯 node_modules 的解析都会现形
     env: { ...process.env, GHERKAI_STEPS_DIR: stepsDir },
     stdio: ["ignore", "pipe", "pipe"],
@@ -174,6 +174,16 @@ test("真跑: 语法错的 steps 文件 → 非零退出 + stderr 点名该文�
   const { code, err } = await runBin(root);
   assert.notEqual(code, 0, "加载失败必须非零退出");
   assert.match(err, /broken\.mts/);
+});
+
+test("真跑: --capabilities 同样先加载 steps：语法错的目录 → 非零退出 + 点名 + stdout 不吐半份能力声明", async () => {
+  // 三个自述入口对称（ADR 0037 决策 4）：能力自述本身不需要 steps，「反正用不上、把分支挪到加载之前」是很自然的
+  // 想法——但那会让坏 steps 目录在 run 的下限查询这一步静默通过、到真跑才炸。Nova 侧有同款用例，这里钉住位置契约。
+  const root = tmpSteps({ "broken.mts": `import { deterministic } from "@gherkai/worker-midscene"; deterministic(\n` });
+  const { code, out, err } = await runBin(root, "--capabilities");
+  assert.notEqual(code, 0, "加载失败必须非零退出");
+  assert.match(err, /broken\.mts/);
+  assert.equal(out, "", `stdout 不该有能力声明：${out}`);
 });
 
 test("真跑: 一条都不注册的 steps 文件 → 非零退出 + 点名（双实例守卫的显式失败）", async () => {
