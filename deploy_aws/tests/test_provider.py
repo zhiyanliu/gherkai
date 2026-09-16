@@ -53,18 +53,48 @@ def _parse(*argv: str) -> argparse.Namespace:
 
 # ---------------------------------------------------------------- flag 面
 
-def test_vpc_absent_parses_but_every_synthesizing_verb_exits_2(cdk, capsys):
-    """`--vpc` 无隐式默认（漏档会合成「新建整套 VPC + 替换 WorkerSg」，ADR 0037 决策 6）——但校验在**运行期**、
+def test_vpc_absent_parses_but_every_synthesizing_verb_exits_2(cdk, monkeypatch, capsys):
+    """`--vpc` 无隐式默认（ADR 0037 决策 6：漏档曾被合成为新建整套 VPC 的变更集）——但校验在**运行期**、
     不在 argparse：`--bootstrap` 是账户级动作、不合成 app，不该被拖着要一个无关旋钮。四个合成动词缺档 → 退 2、
     **不调 cdk**。"""
     args = _parse("--prefix", "gherkai-", "--region", "us-east-1")
     assert args.vpc is None
+    _stub_backend(monkeypatch, stack_exists=False, stored=None)  # 提示里的「怎么办」半句要读后端；这里钉首次部署那一格
     p = Provider()
     args.synth_only = "out"
     for verb in (p.deploy, p.diff, p.destroy, p.synth_only):
         assert verb(args) == 2, verb.__name__
-        assert "--vpc" in capsys.readouterr().err
+        err = capsys.readouterr().err
+        assert "--vpc default" in err and "--vpc new" in err and "vpc-<id>" in err  # 三档各是什么
+        assert "首次部署" in err
+        assert "WorkerSg" not in err and "变更集" not in err  # 产品面不带 construct 名与 cdk 行话（ADR 0039）
     assert cdk.calls == []  # 一次都没起 cdk
+
+
+def test_vpc_absent_hint_names_the_recorded_tier_for_an_existing_environment(cdk, monkeypatch, capsys):
+    """环境已存在且后端记着上次的档 → 提示直接报出那一档（用户最需要的那句），仍退 2、不起 cdk。"""
+    _stub_backend(monkeypatch, stack_exists=True, stored="default")
+    assert Provider().deploy(_parse("--prefix", "vfy-", "--region", "us-east-1")) == 2
+    err = capsys.readouterr().err
+    assert "上次部署用的是 `--vpc default`" in err and cdk.calls == []
+
+
+def test_vpc_absent_hint_for_existing_environment_without_record(cdk, monkeypatch, capsys):
+    """环境已存在但没有档记录（早于登记机制的部署）→ 说明要给当初那一档，不臆造。"""
+    _stub_backend(monkeypatch, stack_exists=True, stored=None)
+    assert Provider().deploy(_parse("--prefix", "vfy-", "--region", "us-east-1")) == 2
+    err = capsys.readouterr().err
+    assert "没有网络档记录" in err and "上次部署用的是" not in err
+
+
+def test_vpc_absent_hint_is_best_effort_when_backend_unreadable(cdk, monkeypatch, capsys):
+    """读后端失败（凭证 / 权限）→ 提示退回通用版：仍退 2、不抛栈、不多一种失败。"""
+    def boom(**kw):
+        raise RuntimeError("no credentials")
+    monkeypatch.setattr(provider_cli, "_make_cfn_client", boom)
+    assert Provider().deploy(_parse("--prefix", "vfy-", "--region", "us-east-1")) == 2
+    err = capsys.readouterr().err
+    assert "缺 --vpc" in err and "上次部署用的是" not in err and "首次部署" not in err and "Traceback" not in err
 
 
 def test_bootstrap_needs_no_vpc_and_never_loads_the_app(cdk, monkeypatch):

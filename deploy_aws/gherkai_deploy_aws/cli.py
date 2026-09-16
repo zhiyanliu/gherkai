@@ -122,8 +122,7 @@ def _vpc_flag(value: str) -> str:
     if value in ("default", "new") or (value.startswith("vpc-") and len(value) > len("vpc-")):
         return value
     raise argparse.ArgumentTypeError(
-        f"--vpc 须是 default / new / vpc-<id> 之一，得到 {value!r}"
-        "（不设隐式默认：漏给档会合成「新建整套 VPC + 替换 WorkerSg」的危险变更集）"
+        f"--vpc 须是 default（用账户的默认 VPC）/ new（新建一套）/ vpc-<id>（用现有的某个）之一，得到 {value!r}"
     )
 
 
@@ -565,15 +564,34 @@ class Provider:
                 return EXIT_PRECONDITION
         return None
 
-    @staticmethod
-    def _require_vpc(args) -> int | None:
-        """凡要合成 app 的动作（deploy / diff / synth / destroy）都必须有 `--vpc`（无隐式默认，ADR 0037 决策 6）；
-        缺 → 退 2。不用 argparse 的 `required=True`：那会把 `--bootstrap`（账户级、不合成 app）也拖进来。"""
+    def _require_vpc(self, args) -> int | None:
+        """凡要合成 app 的动作（deploy / diff / synth / destroy）都必须有 `--vpc`（无隐式默认，ADR 0037 决策 6：
+        漏给曾被合成为「新建整套 VPC + 替换 WorkerSg」的变更集）；缺 → 退 2。不用 argparse 的 `required=True`：
+        那会把 `--bootstrap`（账户级、不合成 app）也拖进来。
+
+        提示按 ADR 0039 只说三档各是什么、为什么不给默认、怎么办；「怎么办」尽量具体——环境已存在且后端记着上次的
+        档时直接报出那一档（读 SSM 是 best-effort：读不到就不给这半句，不因提示而多一种失败）。"""
         if getattr(args, "vpc", None):
             return None
-        print("缺 --vpc：VPC 档无隐式默认（default / new / vpc-<id>）——漏给曾合成「新建整套 VPC + 替换 WorkerSg」"
-              "的危险变更集。--bootstrap 不需要它。", file=sys.stderr)
+        print("缺 --vpc：部署要显式选网络——`--vpc default`（用账户的默认 VPC）/ `--vpc new`（新建一套）/ "
+              "`--vpc vpc-<id>`（用现有的某个）。不给默认值是有意的：漏选会被当成「新建网络」、悄悄换掉在用的那套。"
+              f"{self._stored_vpc_hint(args)}（`--bootstrap` 不需要此项。）", file=sys.stderr)
         return EXIT_PRECONDITION
+
+    def _stored_vpc_hint(self, args) -> str:
+        """给缺 `--vpc` 的提示配「怎么办」：环境已存在 → 报后端记录的上次那一档；无记录 → 说明要给当初那一档；
+        stack 不在 → 首次部署按需选。任何读取失败（凭证 / region / 权限）→ 空串，提示退回通用版。"""
+        try:
+            target = self._resolve_target(args)
+            cfn = _make_cfn_client(region=target.region, profile=target.profile)
+            if not _stack_exists(cfn, names.stack_name(target.prefix)):
+                return "首次部署按需选一个。"
+            stored = _read_stored_vpc_spec(_make_ssm_client(region=target.region, profile=target.profile), target.prefix)
+        except Exception:
+            return ""
+        if stored:
+            return f"这个环境上次部署用的是 `--vpc {stored}`，沿用即可。"
+        return "这个环境已存在但后端没有网络档记录，请给当初部署用的那一档。"
 
     # ---- context / cdk.json（纯推导，单测直打）----
     def build_context(self, args) -> dict[str, str]:
@@ -709,7 +727,7 @@ class Provider:
             message = (
                 f"stack {stack} 已存在，但 {path} 没有 VPC 档记录——这个部署早于 VPC 档登记机制，"
                 f"本次 deploy 无从核对 `--vpc {args.vpc}` 是否与当初一致。**这恰是最危险的那一次 deploy**："
-                f"档给错会合成「新建整套 VPC + 替换 WorkerSg」的变更集（真踩过）。"
+                f"档给错会被当成新建一套网络、把在用的整套换掉。"
             )
         else:
             message = (

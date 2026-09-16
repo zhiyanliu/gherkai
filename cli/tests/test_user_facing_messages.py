@@ -40,6 +40,7 @@ FORBIDDEN = re.compile(
     r"|preflight|per-run|\btick\b|清理\s*pass|武装|防御扫"  # 机制名 / 施工行话：产品面只说「提交前检查 / 本机后台进程 / 推进 / 清理」
     r"|best-effort|抢传|flush\s*兜底|不带\s*ref"  # 上传/收尾的失败语义行话：产品面只说「未能上传 + 不影响什么」
     r"|_require_vpc"
+    r"|替换\s*WorkerSg"  # CDK construct 名进了叙事（stack.py 里作 construct id 的字面量是合法的，只抓成句形态）：产品面只说「worker 的网络 / 安全组」
 )
 # .mts 侧去注释后按行扫（TS 无 docstring 概念，注释即注释）——禁词与 Python 侧**同一张表**（复用上面的 FORBIDDEN，
 # 别让 TS 侧更松），外加两个裸子串收得更严：TS 侧没有「ADR 0034」「决策 3」之外的合法用法，出现即错。
