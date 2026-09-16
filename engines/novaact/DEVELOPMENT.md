@@ -27,10 +27,9 @@ uv sync            # 在 repo 根跑一次，core/runtime/cli + 本 worker 一�
 ```bash
 echo '<job json>' | AWS_REGION=us-east-1 uv run python -m gherkai_worker_novaact
 
-# 三个「自述」入口（不建会话、不跑 job、零 AWS，[ADR 0036](../../docs/adr/0036-deterministic-capability-discovery.md)）——cli 的 list-deterministic / plan 标注 / grace 下限即转述它们：
-uv run gherkai-worker-novaact --list-deterministic                    # dump 确定性注册表（pattern + description + example）
+# 两个非 job 入口（不建会话、不跑 job、零 AWS，[ADR 0036](../../docs/adr/0036-deterministic-capability-discovery.md)）——cli 的 list-deterministic / doctor / run 前置 / plan 标注即转述它们：
+uv run gherkai-worker-novaact --capabilities                          # 能力自述：{schema_version, engine, min_grace_s, deterministic_steps}（下限 = NOVA_ACT_TIMEOUT_S + NOVA_GRACE_MARGIN_S；清单 = 注册表 pattern + description + example）
 echo '["页面地址匹配 \"/wiki/OpenAI\""]' | uv run python -m gherkai_worker_novaact --match-steps   # 批量问这些 step 各命中什么
-uv run gherkai-worker-novaact --capabilities                          # 引擎能力：{schema_version, engine, min_grace_s}（= NOVA_ACT_TIMEOUT_S + NOVA_GRACE_MARGIN_S，组合根查它当 grace 下限）
 ```
 
 让 CLI 指向本 checkout（dev 覆写，定位链第一级）：`export GHERKAI_WORKER_NOVAACT_CMD="$(pwd)/.venv/bin/python -m gherkai_worker_novaact"`——workspace 已装 editable 时通常**不需要**（第二级同 venv 就命中）。
@@ -50,7 +49,7 @@ uv run gherkai-worker-novaact --capabilities                          # 引擎�
 worker **只认一个环境变量 `GHERKAI_STEPS_DIR`**——`--steps-dir` flag / 默认 `./steps` / 随 run definition 持久化全由 CLI 侧（组合根）解析后注入，worker 不猜路径（ADR 0037 决策 4）。手动直跑 worker 时自己给 env：
 
 ```bash
-GHERKAI_STEPS_DIR=$PWD/steps uv run gherkai-worker-novaact --list-deterministic   # 清单含使用方 step
+GHERKAI_STEPS_DIR=$PWD/steps uv run gherkai-worker-novaact --capabilities   # deterministic_steps 含使用方 step
 ```
 
 加载实现（`gherkai_worker_novaact/user_steps.py`）的两条不变量，各有具体的坑作依据：
@@ -106,7 +105,7 @@ docker build --platform linux/amd64 -f engines/novaact/Dockerfile \
 真 build 踩过的三条：
 
 - **必须 `--platform linux/amd64`**：Fargate task-def 固定 X86_64；arm Mac 不加则 build 出 arm64、容器启动期 `exec format error` 挂死（ADR 0033/0038）。
-- **经典 builder（无 buildx）会把未选中的 stage 也跑一遍**，故两个 stage 都对「自己的参数没给」保持容忍（`if [ -n … ]`）；真正的把关在 final stage 的冒烟（`--list-deterministic`，不需要 AWS），漏 build-arg 在那里 fail-loud、不拖到 Fargate 启动期。
+- **经典 builder（无 buildx）会把未选中的 stage 也跑一遍**，故两个 stage 都对「自己的参数没给」保持容忍（`if [ -n … ]`）；真正的把关在 final stage 的冒烟（`--capabilities`，不需要 AWS），漏 build-arg 在那里 fail-loud、不拖到 Fargate 启动期。
 - wheel 必须用**原文件名**装：pip 从文件名解析发行名/版本/tag，改名会被拒「Invalid wheel filename」。
 
 **不装 chromium 二进制**：worker 连的是 AgentCore 云浏览器（`cdp_session` → `connectOverCDP`），playwright 只作 CDP 客户端库、不 launch 本地 chromium——省几百 MB，真跑验证过。

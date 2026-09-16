@@ -48,10 +48,9 @@ spikes/                ← 五段式自检脚本（不进包、不编译）
 ```bash
 echo '<job json>' | AWS_REGION=us-east-1 node dist/bin.mjs
 
-# 三个「自述」入口（不建会话、不跑 job、零 AWS，[ADR 0036](../../docs/adr/0036-deterministic-capability-discovery.md)）——cli 的 list-deterministic / plan 标注 / grace 下限即转述它们：
-node dist/bin.mjs --list-deterministic                    # dump 确定性注册表（pattern + description + example）
+# 两个非 job 入口（不建会话、不跑 job、零 AWS，[ADR 0036](../../docs/adr/0036-deterministic-capability-discovery.md)）——cli 的 list-deterministic / doctor / run 前置 / plan 标注即转述它们：
+node dist/bin.mjs --capabilities                          # 能力自述：{schema_version, engine, min_grace_s, deterministic_steps}（下限由收尾预算常量算出；清单 = 注册表 pattern + description + example）
 echo '["页面地址匹配 \"/wiki/OpenAI\""]' | node dist/bin.mjs --match-steps   # 批量问这些 step 各命中什么
-node dist/bin.mjs --capabilities                          # 引擎能力（含 min_grace_s = 收尾预算算出的 grace 下限）
 ```
 
 ## 从本 checkout 跑
@@ -128,7 +127,7 @@ docker build --platform linux/amd64 -f engines/midscene/Dockerfile \
 真 build 踩过的两条：
 
 - **必须 `--platform linux/amd64`**：Fargate task-def 固定 X86_64；arm Mac 不加则 build 出 arm64、容器启动期 `exec format error` 挂死（ADR 0033/0038）。
-- **经典 builder（无 buildx）会把未选中的 stage 也跑一遍**，故两个 stage 都对「自己的参数没给」保持容忍（`if [ -n … ]`）；真正的把关在 final stage 的冒烟（`--list-deterministic`，不需要 AWS），漏 build-arg 在那里 fail-loud、不拖到 Fargate 启动期。
+- **经典 builder（无 buildx）会把未选中的 stage 也跑一遍**，故两个 stage 都对「自己的参数没给」保持容忍（`if [ -n … ]`）；真正的把关在 final stage 的冒烟（`--capabilities`，不需要 AWS），漏 build-arg 在那里 fail-loud、不拖到 Fargate 启动期。
 
 容器入口与 npm bin 同一个（`gherkai-worker-midscene` → `dist/bin.mjs`）：bin 是带 shebang 的文件、内核直接 exec node，**本进程即 worker**、不套包装进程（同上 fd3 理由）。**不装 chromium 二进制**：连的是 AgentCore 云浏览器（`chromium.connectOverCDP(wsUrl)`），playwright 只作 CDP 客户端库。
 

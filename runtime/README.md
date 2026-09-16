@@ -47,7 +47,7 @@ result = schedule(meta, compose.make_resolver(engines), print, ScheduleOpts(max_
 | 决定结果落哪 | `compose.build_local_stores` / `build_cloud_stores` |
 | 解析云资源终名与 region/profile | `compose.resolve_cloud_target` / `resolve_network` |
 | 提交前的体检（资源在不在、版本对不对、镜像选哪套） | `compose.preflight_cloud_resources` / `check_backend_skew` / `resolve_worker_variant` |
-| 查引擎支持哪些确定性步骤、某段文本会不会命中 | `compose.query_deterministic` / `match_deterministic` |
+| 查引擎能力（确定性步骤清单、停止宽限下限）、某段文本会不会命中 | `compose.query_capabilities` / `match_deterministic` |
 | 「提交完就走」的本机后台推进 | `detached` |
 | 云资源、SSM 路径、worker 镜像 tag 怎么命名 | `names`（命名规则只有这一份实现，别自己拼字符串） |
 | 把本机可达的被测应用暴露给云端浏览器 | `tunnel` / `tunnel_host` |

@@ -47,7 +47,7 @@ gherkai 的直接操作者越来越多是 AI coding agent（Claude Code / Codex 
 - 组件与归属（**按 extra 实施、单入口汇总**——自检能力跟着它检查的组件走，入口只做编排）：
   - `cli`：版本、Python。
   - `engines`：两引擎的定位链结果（同 `list-engines`），各自 `required=false`（缺一个不算故障）；聚合项「至少一个可用」为 required 闸门——两个都定位不到时 local 档一个 job 也起不来；`--backend cloud` 时该聚合项降为可选（只提交、不在本机跑的人不需要 worker）。
-  - `steps`：解析到的 `steps/` 目录（显式给的目录不存在 = 必修失败，原因进 detail）；对每个可用引擎跑一次 worker 自述（`--list-deterministic`）——有 steps 目录时是使用方 step 能否加载（必修，加载失败会静默降级成 AI），没有时只验 worker 起得来（可选，单引擎不连坐）。
+  - `steps`：解析到的 `steps/` 目录（显式给的目录不存在 = 必修失败，原因进 detail）；对每个可用引擎跑一次 worker 自述（`--capabilities`，清单取其 `deterministic_steps`）——有 steps 目录时是使用方 step 能否加载（必修，加载失败会静默降级成 AI），没有时只验 worker 起得来（可选，单引擎不连坐）。
   - `aws`（给了 `--backend cloud` 或 `--prefix` 才查）：region 解析（解析不出即必修失败、云端其余项标未查）、凭证身份（STS；profile 名不存在等解析期错误与探针失败同一句诊断）。
   - `backend`（同上）：版本戳与 skew 三态、资源 preflight（表/桶/cluster/两引擎 task-def/三 Lambda，并比对后端 `REPORT_DIR` 与 `--report-dir` 一致——复用 submit 的 `preflight_cloud_resources`）、默认 worker variant：先读指针（缺失 = 必修失败），再**逐引擎**解析（各自可选——单引擎团队不必为另一个引擎推镜像，同 submit 只按用到的引擎判）+ 聚合「至少一个引擎可用」为必修。
   - `provider`：按 entry point 结构化判——没装 `[deploy-aws]` extra → 一行「部署方才需要」（可选）；装了多个未指名 → 未查（可选）；装了但加载失败 → 必修失败（明确装了的东西坏了）；装了且提供可选的 `doctor(args) -> list[dict]`（每项 `{name, ok, detail}` + 可选 `required`，缺省 False；只读、不返退出码，[0037](./0037-distribution-and-packaging.md) 决策 6 契约）→ 并入输出。AWS provider 报 Node ≥ 22、cdk 可定位、容器引擎可用，**三项都可选**：provider 段是部署能力清单，doctor 不知道这台机器要不要部署；真正的硬拦在 `gherkai deploy` 自身。人读尾行单独点出「部署工具链有缺口」。

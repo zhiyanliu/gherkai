@@ -146,8 +146,8 @@ npm provenance、GHCR 推送与包可见性、以及「等索引可见」在真�
 
 CI 的 `images` job 用 index 态（按 tag 版本装已发行包）；发行前要验镜像内容，用 local 态喂本地产物——命令与 build-arg
 见各 `engines/*/Dockerfile` 头注释（`uv build --package gherkai-worker-novaact` 出 wheel、`npm pack` 出 tarball，
-`--build-arg WORKER_SOURCE=local`，context = 放产物的目录）。冒烟（不需要 AWS）：`docker run --rm --platform linux/amd64 <镜像> python -m gherkai_worker_novaact --list-deterministic` /
-`… <镜像> gherkai-worker-midscene --list-deterministic`（要给完整命令：node 基底的 entrypoint 会把以 `-` 开头的首参当 node 选项）。index 态只能在首个正式发行后验（占位 `0.0.0` 是空包）。
+`--build-arg WORKER_SOURCE=local`，context = 放产物的目录）。冒烟（不需要 AWS）：`docker run --rm --platform linux/amd64 <镜像> python -m gherkai_worker_novaact --capabilities` /
+`… <镜像> gherkai-worker-midscene --capabilities`（要给完整命令：node 基底的 entrypoint 会把以 `-` 开头的首参当 node 选项）。index 态只能在首个正式发行后验（占位 `0.0.0` 是空包）。
 
 ## 维护
 

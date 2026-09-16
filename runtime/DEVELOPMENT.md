@@ -15,8 +15,8 @@
   `build_fargate_engines`（cloud 档，吃**显式 task-def revision ARN** 的映射，ADR 0038）/ `build_local_stores` /
   `build_cloud_stores` / `resolve_cloud_target`（云资源终名 + region/profile 一处解析）/ 版本 skew 比对
   （`check_backend_skew`，五态见 `cli/DEVELOPMENT.md`；ADR 0037 决策 7）/ worker variant 解析（`resolve_worker_variant` 供提交侧 preflight、
-  `resolve_default_worker_task_defs` 供宿主兼容路径，ADR 0038）/ worker 自述查询（`query_deterministic` /
-  `match_deterministic`，ADR 0036；`query_capabilities` → `engine_min_grace` 向 worker 查 grace 下限 + 进程内按引擎缓存，ADR 0024「引擎自报下限」）/
+  `resolve_default_worker_task_defs` 供宿主兼容路径，ADR 0038）/ worker 两个非 job 入口的查询（`query_capabilities` 自述对象：清单 + grace 下限，进程内按「引擎 + steps 目录」缓存，`engine_min_grace` 从中取下限，ADR 0036「5.」/ 0024「引擎自报下限」；
+  `match_deterministic` 查询，ADR 0036「4.」）/
   `read_task_def_stop_timeout`（doctor cloud 侧的对照值）/ run_id·时钟
 - `detached.py` —— local 无状态跑批宿主（ADR 0034）：SubprocessLauncher + per-run reconcile loop
 - `names.py` —— 资源命名真源（零依赖；`deploy_aws/gherkai_deploy_aws/names.py` 直接 re-export，消复刻）：
