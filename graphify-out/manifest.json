@@ -250,8 +250,8 @@
     "semantic_hash": ""
   },
   "docs/code-health-review.md": {
-    "mtime": 1789532996.6106107,
-    "ast_hash": "6eceb9899423a8aad864f8b81ede5e90",
+    "mtime": 1789534262.8085682,
+    "ast_hash": "970f6e874298e6a94f011a2de93432ab",
     "semantic_hash": ""
   },
   "tools/e2e_harness.md": {
@@ -420,8 +420,8 @@
     "semantic_hash": ""
   },
   "docs/doc-health-review.md": {
-    "mtime": 1789532996.6103885,
-    "ast_hash": "4d92ba32cf44a2e0f7de2ed27c2cf728",
+    "mtime": 1789534262.8084288,
+    "ast_hash": "2c9790a840bb702602854498729e31f0",
     "semantic_hash": ""
   },
   "engines/midscene/README.md": {
@@ -1130,13 +1130,13 @@
     "semantic_hash": ""
   },
   ".claude/commands/code-health-review.md": {
-    "mtime": 1789530938.2125127,
-    "ast_hash": "a4dd017e59d67239c424b866f1764b2e",
+    "mtime": 1789534262.8087416,
+    "ast_hash": "47c6e37ec08ab18583757ecc322819ec",
     "semantic_hash": ""
   },
   ".claude/commands/doc-health-review.md": {
-    "mtime": 1789530938.212401,
-    "ast_hash": "b1f575e01029c6253988272429580196",
+    "mtime": 1789534262.8086703,
+    "ast_hash": "1a1112f508aa7979b3624e56bbbb0aaf",
     "semantic_hash": ""
   },
   "core/tests/test_local_run_store_atomic.py": {

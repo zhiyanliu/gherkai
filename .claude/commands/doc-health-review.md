@@ -10,3 +10,4 @@ Read `docs/doc-health-review.md` 并**严格按其中记录的方法**执行文�
 - **引用方向合规**是维度之一：长期文档（ADR/CONTEXT/README）不得引用 `docs/journey/`、不得用裸 WP 编号（悬空指针）；Accepted ADR 必自包含。判据权威在 CLAUDE.md 文档纪律，检查法在 `docs/doc-health-review.md`。
 - 客观类（矛盾/过时/坏链接）直接改——**但 code 偏离 ADR 已定设计的不一致不改文档**，报操作者裁定（附复盘方倾向与理由）并移交 code-health；主观类（压缩/重组/施工叙事提纯）先出报告待操作者批。
 - 落地提交说明末尾带 trailer `Doc-Health-Round: N` / `Doc-Health-Records: <被删的 journey 报告路径>`——下一轮跨轮沿用的锚点，定位与取回命令在方法文档「选材」条。
+- 开局读上轮落地提交里的「方法复盘」，其提议的规则变更是本轮第一份待批；收口时在落地提交说明写本轮的方法复盘（哪些规则抓到了 / 零命中 / 卡点 / 提议增删改）——规则只凭这条证据链变，SEDIMENT 只管措辞。
