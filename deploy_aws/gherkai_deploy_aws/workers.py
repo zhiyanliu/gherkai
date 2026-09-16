@@ -792,10 +792,10 @@ def init_default_pointer(*, prefix: str, aws: Aws, out) -> str:
     升级时重置回 base 会抹掉它，被拒方案有专条）。"""
     current = read_default_variant(aws.ssm, prefix)
     if current:
-        out(f"默认 variant 已是 `{current}`——不动（升级不重置团队意图）")
+        out(f"已保留默认 worker 镜像 variant `{current}`（部署不改动已有的默认设置）")
         return current
     _put_ssm(aws.ssm, names.ssm_path(prefix, names.WORKER_DEFAULT_KEY), BASE_VARIANT)
-    out(f"默认 variant 初始化为 `{BASE_VARIANT}`")
+    out(f"默认 worker 镜像 variant 初始化为 `{BASE_VARIANT}`（官方基底镜像，未定制）")
     return BASE_VARIANT
 
 
@@ -827,12 +827,12 @@ def rederive_variants(*, prefix: str, engines, version: str, aws: Aws, now: date
                      _record_json(template_arn=template_arn, revision_arn=new_arn,
                                   digest=mapping.digest, pushed_at=mapping.pushed_at))
             _retire(aws.ecs, mapping.revision_arn, now=now, out=out)
-            out(f"重派生 {engine}/{mapping.variant}：模板已更新 → {_short_arn(new_arn)}"
-                f"（旧 {_short_arn(mapping.revision_arn)} 已打退休 tag）")
+            out(f"{engine}/{mapping.variant} 的 worker 运行配置已按本次部署更新 → {_short_arn(new_arn)}"
+                f"（旧配置 {_short_arn(mapping.revision_arn)} 已标记待清理）")
             results.append(PushOutcome(engine=engine, variant=mapping.variant, tag=mapping.tag,
                                        digest=mapping.digest, revision_arn=new_arn))
     if not results:
-        out("重派生：所有 variant 的 revision 都已基于当前模板——无需重派生")
+        out("各 variant 的 worker 运行配置已是最新，无需更新")
     return results
 
 

@@ -642,7 +642,7 @@ def test_init_default_pointer_only_when_missing(aws):
                           Type="String", Overwrite=True)
     out2, text2 = _out()
     assert workers.init_default_pointer(prefix=PREFIX, aws=aws, out=out2) == "common"
-    assert "不动" in text2(), "默认指针记的是团队意图，升级不重置（ADR 0038）"
+    assert "已保留默认 worker 镜像 variant `common`" in text2(), "默认指针记的是团队意图，升级不重置（ADR 0038）"
 
 
 def test_sync_base_pulls_ghcr_and_pushes_as_base(aws):
@@ -707,7 +707,7 @@ def test_rederive_registers_from_the_new_template_and_retires_the_old(aws):
     assert td["cpu"] == "2048", "重派生的意义就在于让既有 variant 跟上模板的新配置"
     assert td["containerDefinitions"][0]["image"].endswith(f"@{before['digest']}")
     assert _tags(aws, before["revision_arn"])[names.TAG_RETIRED_AT] == NOW.isoformat()
-    assert "重派生" in text()
+    assert "运行配置已按本次部署更新" in text()
 
 
 def test_rederive_skips_when_template_arn_is_unchanged(aws):
@@ -718,7 +718,7 @@ def test_rederive_skips_when_template_arn_is_unchanged(aws):
     results = workers.rederive_variants(prefix=PREFIX, engines=names.ENGINES, version=VERSION,
                                         aws=aws, now=NOW, out=out)
     assert results == [] and _revisions(aws, "novaact") == before
-    assert "无需重派生" in text()
+    assert "运行配置已是最新，无需更新" in text()
 
 
 def test_rederive_ignores_other_versions(aws):

@@ -1045,8 +1045,8 @@
     "semantic_hash": "54d95fc9705e2678f94629b22ebb0573"
   },
   "deploy_aws/gherkai_deploy_aws/workers.py": {
-    "mtime": 1789550271.6754215,
-    "ast_hash": "a6b8da57eb9e921754a962c2827f6606",
+    "mtime": 1789556602.2402008,
+    "ast_hash": "1a80c6ed1df9a48bfc7076a8a2e1c460",
     "semantic_hash": ""
   },
   "runtime/tests/test_names_worker.py": {
@@ -1065,9 +1065,9 @@
     "semantic_hash": "61fd73b875e7bfc45364bbff76e048ef"
   },
   "deploy_aws/tests/test_workers.py": {
-    "mtime": 1789476093.3611553,
-    "ast_hash": "e82f72f00c7efc25ba80f2145f8ee703",
-    "semantic_hash": "e82f72f00c7efc25ba80f2145f8ee703"
+    "mtime": 1789556662.282995,
+    "ast_hash": "5db6f789da6aaddeec308b44e6f5a3a2",
+    "semantic_hash": ""
   },
   "cli/tests/test_user_facing_messages.py": {
     "mtime": 1789536639.4914684,
