@@ -1,6 +1,6 @@
 # Provider
 
-> God node · 80 connections · `deploy_aws/gherkai_deploy_aws/cli.py`
+> God node · 89 connections · `deploy_aws/gherkai_deploy_aws/cli.py`
 
 **Community:** [AWS Deploy Provider](AWS_Deploy_Provider.md)
 
@@ -10,6 +10,8 @@
 - _parse() `EXTRACTED`
 - test_context_cache_is_saved_after_the_run_and_seeded_into_the_next_fresh_work_dir() `EXTRACTED`
 - test_context_cache_survives_a_failed_cdk_run() `EXTRACTED`
+- test_deploy_warns_about_missing_container_engine_only_for_pure_release_versions() `EXTRACTED`
+- test_missing_cdk_stops_deploy_before_any_aws_read() `EXTRACTED`
 - test_synth_only_pins_a_relative_dir_to_the_callers_cwd() `EXTRACTED`
 - test_bootstrap_needs_no_vpc_and_never_loads_the_app() `EXTRACTED`
 - test_deploy_passes_require_approval_through() `EXTRACTED`
@@ -25,36 +27,35 @@
 - test_cdk_returncode_is_passed_through() `EXTRACTED`
 - test_cdk_runs_in_the_work_dir_which_holds_the_generated_cdk_json() `EXTRACTED`
 - test_delete_worker_is_a_documented_placeholder() `EXTRACTED`
-- test_deploy_blocked_by_vpc_guard_never_invokes_cdk() `EXTRACTED`
-- test_destroy_invokes_cdk_destroy_with_same_context() `EXTRACTED`
 
 ### contains
 - cli.py `EXTRACTED`
 
 ### imports
 - test_provider.py `EXTRACTED`
+- test_skill_deploy_tokens.py `EXTRACTED`
 
 ### method
 - ._run_cdk() `EXTRACTED`
+- .deploy() `EXTRACTED`
 - ._guard_vpc_spec() `EXTRACTED`
 - ._resolve_target() `EXTRACTED`
 - .add_arguments() `EXTRACTED`
-- .deploy() `EXTRACTED`
 - .bootstrap() `EXTRACTED`
-- ._add_worker_subverbs() `EXTRACTED`
 - .synth_only() `EXTRACTED`
-- ._container_engine() `EXTRACTED`
-- ._worker_image_steps() `EXTRACTED`
+- ._toolchain_gate() `EXTRACTED`
+- ._resolve_version() `EXTRACTED`
+- ._add_worker_subverbs() `EXTRACTED`
 - ._require_vpc() `EXTRACTED`
 - .build_context() `EXTRACTED`
-- ._resolve_version() `EXTRACTED`
 - ._add_container_engine_flag() `EXTRACTED`
+- .diff() `EXTRACTED`
 - .push_worker() `EXTRACTED`
+- .doctor() `EXTRACTED`
+- ._container_engine() `EXTRACTED`
+- ._worker_image_steps() `EXTRACTED`
 - .write_cdk_json() `EXTRACTED`
 - ._work_dir() `EXTRACTED`
-- ._is_destroy_parser() `EXTRACTED`
-- ._declares_worker_subverbs() `EXTRACTED`
-- ._add_locator_flags() `EXTRACTED`
 
 ### rationale_for
 - AWS provider——`gherkai deploy` 族命令在 AWS 上的实现（接缝契约见模块头）。 `EXTRACTED`
@@ -64,8 +65,9 @@
 - _CdkWritingContext `INFERRED`
 - UnsupportedContainerEngine `INFERRED`
 - _ClientError `INFERRED`
-- _Cfn `INFERRED`
 - _FakeEngine `INFERRED`
+- _AbsentEngine `INFERRED`
+- _Cfn `INFERRED`
 - _Ssm `INFERRED`
 
 ---

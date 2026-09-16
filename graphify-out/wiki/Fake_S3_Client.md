@@ -13,10 +13,11 @@
 ## Relationships
 
 - [Cloud Backend CLI Tests](Cloud_Backend_CLI_Tests.md) (2 shared connections)
-- [Run Result Rendering](Run_Result_Rendering.md) (2 shared connections)
-- [State Projection & Planning](State_Projection_%26_Planning.md) (1 shared connections)
-- [Boto Guard & S3 Offload](Boto_Guard_%26_S3_Offload.md) (1 shared connections)
-- [SSM Path & Client Composition](SSM_Path_%26_Client_Composition.md) (1 shared connections)
+- [S3 Result Store](S3_Result_Store.md) (1 shared connections)
+- [Text Render & Wording Guards](Text_Render_%26_Wording_Guards.md) (1 shared connections)
+- [Run State Projection](Run_State_Projection.md) (1 shared connections)
+- [Cloud Boto3 Guards & EventLog](Cloud_Boto3_Guards_%26_EventLog.md) (1 shared connections)
+- [Runtime Composition Root](Runtime_Composition_Root.md) (1 shared connections)
 
 ## Source Files
 

@@ -1,13 +1,12 @@
 # Worker Variant Resolution
 
-> 52 nodes · cohesion 0.07
+> 45 nodes · cohesion 0.08
 
 ## Key Concepts
 
 - **test_worker_variant.py** (31 connections) — `runtime/tests/test_worker_variant.py`
 - **_seed()** (23 connections) — `runtime/tests/test_worker_variant.py`
 - **_resolve()** (16 connections) — `runtime/tests/test_worker_variant.py`
-- **worker_image_key()** (8 connections) — `runtime/gherkai_runtime/names.py`
 - **test_digest_not_in_ecr_is_a_miss()** (8 connections) — `runtime/tests/test_worker_variant.py`
 - **_register_revision()** (6 connections) — `runtime/tests/test_worker_variant.py`
 - **test_malformed_ssm_record_is_named()** (6 connections) — `runtime/tests/test_worker_variant.py`
@@ -28,23 +27,25 @@
 - **test_one_engine_missing_fails_whole_resolution()** (4 connections) — `runtime/tests/test_worker_variant.py`
 - **test_unused_engine_not_probed()** (4 connections) — `runtime/tests/test_worker_variant.py`
 - **test_variant_none_uses_default_pointer()** (4 connections) — `runtime/tests/test_worker_variant.py`
-- **aws()** (3 connections) — `runtime/tests/test_worker_variant.py`
-- *... and 27 more nodes in this community*
+- **worker variant 解析（ADR 0038「运行时与 preflight」）：variant 名 → 各引擎的 task-def revision…** (1 connections) — `runtime/tests/test_worker_variant.py`
+- **不给 variant → 取部署级默认指针（ADR 0038「默认指针」）；解析结果带 digest 供打印。** (1 connections) — `runtime/tests/test_worker_variant.py`
+- *... and 20 more nodes in this community*
 
 ## Relationships
 
-- [SSM Path & Client Composition](SSM_Path_%26_Client_Composition.md) (12 shared connections)
-- [Runtime Naming Source](Runtime_Naming_Source.md) (10 shared connections)
-- [Cloud Store Composition](Cloud_Store_Composition.md) (3 shared connections)
+- [Runtime Composition Root](Runtime_Composition_Root.md) (13 shared connections)
+- [Resource Naming Source](Resource_Naming_Source.md) (7 shared connections)
+- [Cloud Compose Helpers](Cloud_Compose_Helpers.md) (3 shared connections)
+- [AWS Test Fixtures](AWS_Test_Fixtures.md) (2 shared connections)
+- [Runtime Composition & Tunnel Host](Runtime_Composition_%26_Tunnel_Host.md) (1 shared connections)
 
 ## Source Files
 
-- `runtime/gherkai_runtime/names.py`
 - `runtime/tests/test_worker_variant.py`
 
 ## Audit Trail
 
-- EXTRACTED: 112 (100%)
+- EXTRACTED: 103 (100%)
 - INFERRED: 0 (0%)
 - AMBIGUOUS: 0 (0%)
 

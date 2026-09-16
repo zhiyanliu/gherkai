@@ -1,53 +1,62 @@
 # Local Report Store
 
-> 25 nodes · cohesion 0.11
+> 52 nodes · cohesion 0.12
 
 ## Key Concepts
 
-- **report_store/local.py** (13 connections) — `core/gherkai_core/adapters/report_store/local.py`
-- **report_store/s3.py** (9 connections) — `core/gherkai_core/adapters/report_store/s3.py`
-- **collect_report_index()** (7 connections) — `core/gherkai_core/adapters/report_store/local.py`
-- **._collect()** (7 connections) — `core/gherkai_core/adapters/report_store/local.py`
-- **_render_index_html()** (7 connections) — `core/gherkai_core/adapters/report_store/local.py`
-- **.write()** (6 connections) — `core/gherkai_core/adapters/report_store/local.py`
-- **.write()** (6 connections) — `core/gherkai_core/adapters/report_store/s3.py`
-- **_relative_href()** (5 connections) — `core/gherkai_core/adapters/report_store/local.py`
-- **_local_path()** (4 connections) — `core/gherkai_core/adapters/report_store/local.py`
-- **Path** (4 connections)
-- **report_store/__init__.py** (3 connections) — `core/gherkai_core/adapters/report_store/__init__.py`
-- **_fmt_ms()** (2 connections) — `core/gherkai_core/adapters/report_store/local.py`
-- **.__init__()** (2 connections) — `core/gherkai_core/adapters/report_store/local.py`
-- **ReportStore adapters（ADR 0027）。当前只有 local；未来 s3。** (1 connections) — `core/gherkai_core/adapters/report_store/__init__.py`
-- **ResourceUri** (1 connections)
-- **LocalReportStore（ADR 0027）：把一次 run 的报告产物归集成本地一份自包含目录。 产出…** (1 connections) — `core/gherkai_core/adapters/report_store/local.py`
-- **遍历 result 树投影 report_index（复用共享 collect_report_index）。 make_href：把落在 run…** (1 connections) — `core/gherkai_core/adapters/report_store/local.py`
-- **把 run 树内的本地产物 ref 转成相对 run_dir 的 href；否则原样返回 ref（ADR 0027 href 相对化）。…** (1 connections) — `core/gherkai_core/adapters/report_store/local.py`
-- **若 ref 指向本地文件（file:// 或裸路径），返回 Path；远端（http/s3 等）返回 None。 用 url2pathname 正确还原…** (1 connections) — `core/gherkai_core/adapters/report_store/local.py`
-- **渲染入口页。manifest 提供 run_id/created_at/report_index；result（内存 RunResult）提供判定明细 +…** (1 connections) — `core/gherkai_core/adapters/report_store/local.py`
-- **遍历 result 树，把每个 ReportRef 投影成一条扁平 index 项（三级，ADR 0027）——**local/s3 共享的单一真理源**。…** (1 connections) — `core/gherkai_core/adapters/report_store/local.py`
-- **归集出 <root>/<run_id>/{manifest.json, index.html}，返回 index.html 的 file://…** (1 connections) — `core/gherkai_core/adapters/report_store/local.py`
-- **ResourceUri** (1 connections)
-- **S3ReportStore（ADR 0030 决定六 / 0027 / 0029）：ReportStore port 的 S3 实装。 把一次 run 的…** (1 connections) — `core/gherkai_core/adapters/report_store/s3.py`
-- **把 manifest.json + index.html 写到 `s3://bucket/<prefix><run_id>/`，返回 index.html 的…** (1 connections) — `core/gherkai_core/adapters/report_store/s3.py`
+- **LocalReportStore** (39 connections) — `core/gherkai_core/adapters/report_store/local.py`
+- **test_report_store.py** (37 connections) — `core/tests/test_report_store.py`
+- **StepResult** (35 connections) — `core/gherkai_core/model.py`
+- **ReportRef** (30 connections) — `core/gherkai_core/model.py`
+- **_jr()** (21 connections) — `core/tests/test_report_store.py`
+- **_rr()** (21 connections) — `core/tests/test_report_store.py`
+- **_run_with_refs()** (19 connections) — `core/tests/test_report_store.py`
+- **test_s3_report_store.py** (19 connections) — `core/tests/test_s3_report_store.py`
+- **Path** (18 connections)
+- **_uri_to_path()** (13 connections) — `core/tests/test_report_store.py`
+- **test_index_html_no_taint_on_plain_failed()** (8 connections) — `core/tests/test_report_store.py`
+- **test_index_html_shows_verdict_even_without_report_refs()** (8 connections) — `core/tests/test_report_store.py`
+- **test_index_html_step_reason_follows_job_style_and_has_no_orphan_css_class()** (8 connections) — `core/tests/test_report_store.py`
+- **test_index_html_taints_shortcircuited_step()** (8 connections) — `core/tests/test_report_store.py`
+- **test_index_reason_with_error_type_but_no_message_has_no_orphan_colon()** (8 connections) — `core/tests/test_report_store.py`
+- **test_index_html_votes_tally_shown_only_when_multi_vote()** (7 connections) — `core/tests/test_report_store.py`
+- **test_index_shows_fail_fast_reason_in_neutral_note_not_error_red()** (7 connections) — `core/tests/test_report_store.py`
+- **test_empty_report_refs_still_valid_index()** (6 connections) — `core/tests/test_report_store.py`
+- **test_file_uri_with_remote_host_kept_as_ref()** (6 connections) — `core/tests/test_report_store.py`
+- **test_href_falls_back_absolute_for_artifact_outside_run_tree()** (6 connections) — `core/tests/test_report_store.py`
+- **test_href_relativized_for_bare_path_ref()** (6 connections) — `core/tests/test_report_store.py`
+- **test_href_relativized_percent_encoded_path()** (6 connections) — `core/tests/test_report_store.py`
+- **test_href_relativized_through_symlinked_run_dir()** (6 connections) — `core/tests/test_report_store.py`
+- **test_remote_ref_kept_as_ref()** (6 connections) — `core/tests/test_report_store.py`
+- **_read_s3()** (6 connections) — `core/tests/test_s3_report_store.py`
+- *... and 27 more nodes in this community*
 
 ## Relationships
 
-- [Report Refs & Results](Report_Refs_%26_Results.md) (8 shared connections)
-- [Run Result Rendering](Run_Result_Rendering.md) (7 shared connections)
-- [Engine Ports & Adapters](Engine_Ports_%26_Adapters.md) (2 shared connections)
-- [Boto Guard & S3 Offload](Boto_Guard_%26_S3_Offload.md) (2 shared connections)
-- [S3 Report Store & Subprocess](S3_Report_Store_%26_Subprocess.md) (2 shared connections)
+- [Text Render & Wording Guards](Text_Render_%26_Wording_Guards.md) (23 shared connections)
+- [S3 Report Store & Control Plane](S3_Report_Store_%26_Control_Plane.md) (9 shared connections)
+- [DynamoDB RunStore Adapter](DynamoDB_RunStore_Adapter.md) (8 shared connections)
+- [Cloud Boto3 Guards & EventLog](Cloud_Boto3_Guards_%26_EventLog.md) (8 shared connections)
+- [Report Index Collection](Report_Index_Collection.md) (7 shared connections)
+- [Schedule Core & Fakes](Schedule_Core_%26_Fakes.md) (6 shared connections)
+- [Job Explain & S3 Offload](Job_Explain_%26_S3_Offload.md) (6 shared connections)
+- [Event Formatting](Event_Formatting.md) (6 shared connections)
+- [Local Result Store & Persistence](Local_Result_Store_%26_Persistence.md) (5 shared connections)
+- [S3 Result Store](S3_Result_Store.md) (5 shared connections)
+- [Explain Command Tests](Explain_Command_Tests.md) (4 shared connections)
+- [SQLite Event Log](SQLite_Event_Log.md) (2 shared connections)
 
 ## Source Files
 
-- `core/gherkai_core/adapters/report_store/__init__.py`
 - `core/gherkai_core/adapters/report_store/local.py`
-- `core/gherkai_core/adapters/report_store/s3.py`
+- `core/gherkai_core/model.py`
+- `core/tests/test_report_store.py`
+- `core/tests/test_s3_report_store.py`
 
 ## Audit Trail
 
-- EXTRACTED: 54 (100%)
-- INFERRED: 0 (0%)
+- EXTRACTED: 238 (93%)
+- INFERRED: 18 (7%)
 - AMBIGUOUS: 0 (0%)
 
 ---

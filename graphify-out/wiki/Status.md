@@ -1,8 +1,8 @@
 # Status
 
-> God node · 93 connections · `core/gherkai_core/model.py`
+> God node · 105 connections · `core/gherkai_core/model.py`
 
-**Community:** [Boto Guard & S3 Offload](Boto_Guard_%26_S3_Offload.md)
+**Community:** [Cloud Boto3 Guards & EventLog](Cloud_Boto3_Guards_%26_EventLog.md)
 
 ## Connections by Relation
 
@@ -18,24 +18,24 @@
 - model.py `EXTRACTED`
 
 ### imports
-- test_schedule.py `EXTRACTED`
 - test_fargate_engine.py `EXTRACTED`
-- test_stores.py `EXTRACTED`
+- test_schedule.py `EXTRACTED`
 - test_project.py `EXTRACTED`
+- test_stores.py `EXTRACTED`
 - test_lifecycle_states.py `EXTRACTED`
 - serialize.py `EXTRACTED`
 - project.py `EXTRACTED`
-- wire.py `EXTRACTED`
 - test_cloud_reconcile.py `EXTRACTED`
-- test_wire.py `EXTRACTED`
-- test_conditional_writes.py `EXTRACTED`
 - test_report_store.py `EXTRACTED`
-- schedule.py `EXTRACTED`
-- test_subprocess_engine.py `EXTRACTED`
+- wire.py `EXTRACTED`
+- test_conditional_writes.py `EXTRACTED`
 - test_reconcile.py `EXTRACTED`
+- test_wire.py `EXTRACTED`
+- test_subprocess_engine.py `EXTRACTED`
+- schedule.py `EXTRACTED`
 - test_cloud_integration.py `EXTRACTED`
 - test_persist.py `EXTRACTED`
-- ports.py `EXTRACTED`
+- run_store/local.py `EXTRACTED`
 - test_ddb_run_store.py `EXTRACTED`
 - test_arg_offload.py `EXTRACTED`
 
@@ -68,23 +68,23 @@
 - LocalRunStore `INFERRED`
 - ScheduleOpts `INFERRED`
 - DynamoDBRunStore `INFERRED`
-- RunStore `INFERRED`
 - EventRecord `INFERRED`
-- RunPersistence `INFERRED`
+- RunStore `INFERRED`
 - TaskExited `INFERRED`
-- _IncClock `INFERRED`
+- RunPersistence `INFERRED`
 - ResultStore `INFERRED`
+- _IncClock `INFERRED`
 - Timing `INFERRED`
+- _FakeEcs `INFERRED`
 - Engine `INFERRED`
 - ReportStore `INFERRED`
+- Aws `INFERRED`
 - Action `INFERRED`
+- NonTerminalSnapshot `INFERRED`
 - _Worker `INFERRED`
 - _NetRaiseEngine `INFERRED`
-- Aws `INFERRED`
 - _AbortProbeEngine `INFERRED`
-- _FakeEcs `INFERRED`
-- EngineResolver `INFERRED`
-- Sink `INFERRED`
+- FakeLauncher `INFERRED`
 
 ---
 

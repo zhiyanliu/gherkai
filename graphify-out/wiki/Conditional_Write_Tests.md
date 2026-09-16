@@ -1,17 +1,20 @@
 # Conditional Write Tests
 
-> 37 nodes · cohesion 0.10
+> 43 nodes · cohesion 0.09
 
 ## Key Concepts
 
-- **test_conditional_writes.py** (34 connections) — `core/tests/test_conditional_writes.py`
-- **_meta()** (21 connections) — `core/tests/test_conditional_writes.py`
-- **_initial()** (20 connections) — `core/tests/test_conditional_writes.py`
+- **test_conditional_writes.py** (36 connections) — `core/tests/test_conditional_writes.py`
+- **_meta()** (23 connections) — `core/tests/test_conditional_writes.py`
+- **_initial()** (22 connections) — `core/tests/test_conditional_writes.py`
 - **test_projection_lands_running_once_any_job_advanced()** (7 connections) — `core/tests/test_conditional_writes.py`
 - **test_projection_preserves_claimed_at()** (7 connections) — `core/tests/test_conditional_writes.py`
+- **test_projection_without_baseline_keeps_stored_lineage()** (7 connections) — `core/tests/test_conditional_writes.py`
 - **test_projection_never_lands_terminal_run_status()** (6 connections) — `core/tests/test_conditional_writes.py`
+- **test_projection_with_unknown_scope_is_ignored_not_invented()** (6 connections) — `core/tests/test_conditional_writes.py`
 - **test_same_hwm_terminal_job_not_regressed()** (6 connections) — `core/tests/test_conditional_writes.py`
 - **test_stale_projection_rejected()** (6 connections) — `core/tests/test_conditional_writes.py`
+- **run_store()** (5 connections) — `core/tests/test_conditional_writes.py`
 - **test_equal_hwm_projection_allowed()** (5 connections) — `core/tests/test_conditional_writes.py`
 - **test_projection_keeps_pending_while_no_job_started()** (5 connections) — `core/tests/test_conditional_writes.py`
 - **test_projection_preserves_started_at()** (5 connections) — `core/tests/test_conditional_writes.py`
@@ -26,21 +29,16 @@
 - **test_finalize_missing_run_fails()** (2 connections) — `core/tests/test_conditional_writes.py`
 - **RunStore 无状态跑批条件写对拍测试（ADR 0034 P2）：try_claim_job / project_state /…** (1 connections) — `core/tests/test_conditional_writes.py`
 - **关键（机制三）：先写 hwm=10，再用 stale 快照 hwm=5 投影 → 被挡（False），不覆盖。** (1 connections) — `core/tests/test_conditional_writes.py`
-- **同 hwm 投影写允许（幂等：同一批 events 重放算出同 state，覆盖无害）。** (1 connections) — `core/tests/test_conditional_writes.py`
-- **关键（机制三②，ADR 0034）：task_exited 无数值 seq → 两投影同 HWM，job 终态不得被 stale 投影刷回。…** (1 connections) — `core/tests/test_conditional_writes.py`
-- **机制四护栏：已 CAS claim 的 RUNNING 不被同 HWM 的 pending 视图投影刷回（防 double-launch 窗口重开）。** (1 connections) — `core/tests/test_conditional_writes.py`
-- *... and 12 more nodes in this community*
+- *... and 18 more nodes in this community*
 
 ## Relationships
 
-- [Run State Rendering](Run_State_Rendering.md) (13 shared connections)
-- [Engine Ports & Adapters](Engine_Ports_%26_Adapters.md) (7 shared connections)
-- [Run Result Rendering](Run_Result_Rendering.md) (6 shared connections)
-- [Event Replay Projection](Event_Replay_Projection.md) (4 shared connections)
-- [State Projection & Planning](State_Projection_%26_Planning.md) (3 shared connections)
-- [Boto Guard & S3 Offload](Boto_Guard_%26_S3_Offload.md) (2 shared connections)
-- [Local Run Store](Local_Run_Store.md) (1 shared connections)
-- [Run Store Fixtures](Run_Store_Fixtures.md) (1 shared connections)
+- [Run State Projection](Run_State_Projection.md) (13 shared connections)
+- [Job Explain & S3 Offload](Job_Explain_%26_S3_Offload.md) (11 shared connections)
+- [Run State Rendering](Run_State_Rendering.md) (9 shared connections)
+- [DynamoDB RunStore Adapter](DynamoDB_RunStore_Adapter.md) (8 shared connections)
+- [Cloud Boto3 Guards & EventLog](Cloud_Boto3_Guards_%26_EventLog.md) (2 shared connections)
+- [AWS Test Fixtures](AWS_Test_Fixtures.md) (1 shared connections)
 
 ## Source Files
 
@@ -48,7 +46,7 @@
 
 ## Audit Trail
 
-- EXTRACTED: 105 (100%)
+- EXTRACTED: 122 (100%)
 - INFERRED: 0 (0%)
 - AMBIGUOUS: 0 (0%)
 

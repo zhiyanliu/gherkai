@@ -1,12 +1,12 @@
 # Cloud Backend CLI Tests
 
-> 94 nodes · cohesion 0.05
+> 98 nodes · cohesion 0.05
 
 ## Key Concepts
 
-- **test_backend_cloud.py** (63 connections) — `cli/tests/test_backend_cloud.py`
-- **_patch_cloud_handles()** (49 connections) — `cli/tests/test_backend_cloud.py`
-- **_write_feature()** (46 connections) — `cli/tests/test_backend_cloud.py`
+- **test_backend_cloud.py** (67 connections) — `cli/tests/test_backend_cloud.py`
+- **_patch_cloud_handles()** (50 connections) — `cli/tests/test_backend_cloud.py`
+- **_write_feature()** (48 connections) — `cli/tests/test_backend_cloud.py`
 - **_fake_schedule_factory()** (33 connections) — `cli/tests/test_backend_cloud.py`
 - **test_variant_gate_only_probes_engines_the_run_uses()** (9 connections) — `cli/tests/test_backend_cloud.py`
 - **test_run_cloud_resolves_variant_into_definition_and_engines()** (8 connections) — `cli/tests/test_backend_cloud.py`
@@ -29,19 +29,22 @@
 - **test_variant_print_suppressed_by_quiet()** (6 connections) — `cli/tests/test_backend_cloud.py`
 - **test_variant_resolution_prints_one_line_per_engine()** (6 connections) — `cli/tests/test_backend_cloud.py`
 - **_definition()** (5 connections) — `cli/tests/test_backend_cloud.py`
-- *... and 69 more nodes in this community*
+- *... and 73 more nodes in this community*
 
 ## Relationships
 
-- [CLI Run Entry Tests](CLI_Run_Entry_Tests.md) (49 shared connections)
-- [Skew Gate Test Patching](Skew_Gate_Test_Patching.md) (3 shared connections)
-- [Engine Ports & Adapters](Engine_Ports_%26_Adapters.md) (2 shared connections)
+- [CLI Main Flow Tests](CLI_Main_Flow_Tests.md) (50 shared connections)
+- [Cloud Status Artifacts](Cloud_Status_Artifacts.md) (5 shared connections)
 - [Fake S3 Client](Fake_S3_Client.md) (2 shared connections)
-- [Deploy Command Shell](Deploy_Command_Shell.md) (1 shared connections)
-- [CLI Main Entry](CLI_Main_Entry.md) (1 shared connections)
+- [Cloud Boto3 Guards & EventLog](Cloud_Boto3_Guards_%26_EventLog.md) (1 shared connections)
+- [Deploy CLI Shell](Deploy_CLI_Shell.md) (1 shared connections)
+- [CLI Command Entry Points](CLI_Command_Entry_Points.md) (1 shared connections)
 - [Fake DynamoDB Table](Fake_DynamoDB_Table.md) (1 shared connections)
-- [Env Config & Error Classification](Env_Config_%26_Error_Classification.md) (1 shared connections)
-- [SSM Path & Client Composition](SSM_Path_%26_Client_Composition.md) (1 shared connections)
+- [Backend CDK Stack](Backend_CDK_Stack.md) (1 shared connections)
+- [CLI Run Command Tests](CLI_Run_Command_Tests.md) (1 shared connections)
+- [Submit & Tunnel CLI Tests](Submit_%26_Tunnel_CLI_Tests.md) (1 shared connections)
+- [CLI Parser Construction](CLI_Parser_Construction.md) (1 shared connections)
+- [Runtime Composition Root](Runtime_Composition_Root.md) (1 shared connections)
 
 ## Source Files
 
@@ -49,7 +52,7 @@
 
 ## Audit Trail
 
-- EXTRACTED: 282 (99%)
+- EXTRACTED: 294 (99%)
 - INFERRED: 4 (1%)
 - AMBIGUOUS: 0 (0%)
 

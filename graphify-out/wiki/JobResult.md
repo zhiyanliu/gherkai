@@ -1,17 +1,24 @@
 # JobResult
 
-> God node · 72 connections · `core/gherkai_core/model.py`
+> God node · 83 connections · `core/gherkai_core/model.py`
 
-**Community:** [Run Result Rendering](Run_Result_Rendering.md)
+**Community:** [S3 Result Store](S3_Result_Store.md)
 
 ## Connections by Relation
 
 ### calls
 - _sample_run() `EXTRACTED`
+- _explain_run() `EXTRACTED`
+- test_explain_cloud_reads_evidence_from_s3() `EXTRACTED`
+- test_explain_to_dict_drops_unmatched_scopes_and_keeps_job_fact() `EXTRACTED`
 - _sample_run() `EXTRACTED`
+- test_index_html_shortcircuit_note_matches_cli_wording() `EXTRACTED`
 - test_render_text_shows_step_level_report_refs() `EXTRACTED`
+- test_render_text_step_reason_line_is_single_line_and_only_when_present() `EXTRACTED`
 - test_render_text_annotates_shortcircuited_step() `EXTRACTED`
 - test_render_text_no_annotation_on_plain_failed() `EXTRACTED`
+- test_job_line_with_error_type_but_no_message_has_no_orphan_colon() `EXTRACTED`
+- test_render_text_shows_reason_for_fail_fast_states() `EXTRACTED`
 - test_new_states_round_trip() `EXTRACTED`
 - test_result_store_scope_id_not_path_traversal() `EXTRACTED`
 - test_prefix_isolates_runs() `EXTRACTED`
@@ -34,6 +41,7 @@
 - ports.py `EXTRACTED`
 - persist.py `EXTRACTED`
 - test_s3_result_store.py `EXTRACTED`
+- test_local_result_store_atomic.py `EXTRACTED`
 - result_store/local.py `EXTRACTED`
 - result_store/s3.py `EXTRACTED`
 
@@ -54,40 +62,40 @@
 - reduce_event() `EXTRACTED`
 - _jr() `EXTRACTED`
 - ._run_once() `EXTRACTED`
+- _big_job_result() `EXTRACTED`
+- explain_to_dict() `EXTRACTED`
 - ._reduce() `EXTRACTED`
 - .load_all() `EXTRACTED`
+- .save_job_result() `EXTRACTED`
 - .save_job_result() `EXTRACTED`
 - .on_job_complete() `EXTRACTED`
 - .load_job_result() `EXTRACTED`
 - .load_all() `EXTRACTED`
-- .save_job_result() `EXTRACTED`
 - .load_job_result() `EXTRACTED`
 - .run() `EXTRACTED`
 - .load_all() `EXTRACTED`
-- .__call__() `EXTRACTED`
-- .save_job_result() `EXTRACTED`
 
 ### uses
 - ScheduleOpts `INFERRED`
-- RunStore `INFERRED`
 - EventRecord `INFERRED`
-- RunPersistence `INFERRED`
+- RunStore `INFERRED`
 - TaskExited `INFERRED`
+- RunPersistence `INFERRED`
 - ResultStore `INFERRED`
 - Timing `INFERRED`
+- LocalResultStore `INFERRED`
 - Engine `INFERRED`
 - ReportStore `INFERRED`
 - Action `INFERRED`
+- NonTerminalSnapshot `INFERRED`
 - _Worker `INFERRED`
 - _NetRaiseEngine `INFERRED`
-- LocalResultStore `INFERRED`
-- S3ResultStore `INFERRED`
 - _AbortProbeEngine `INFERRED`
+- S3ResultStore `INFERRED`
 - EngineResolver `INFERRED`
-- Sink `INFERRED`
 - JobSink `INFERRED`
+- Sink `INFERRED`
 - _Heartbeat `INFERRED`
-- _FakeTable `INFERRED`
 
 ---
 

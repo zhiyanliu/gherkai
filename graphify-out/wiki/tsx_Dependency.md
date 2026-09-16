@@ -1,4 +1,4 @@
-# tsx Dependency
+# TSX Dependency
 
 > 2 nodes · cohesion 1.00
 
@@ -9,7 +9,7 @@
 
 ## Relationships
 
-- [JS Dependencies](JS_Dependencies.md) (1 shared connections)
+- [Node Dependencies](Node_Dependencies.md) (1 shared connections)
 
 ## Source Files
 

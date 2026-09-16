@@ -1,63 +1,63 @@
 # SQLite Event Log
 
-> 70 nodes · cohesion 0.05
+> 82 nodes · cohesion 0.04
 
 ## Key Concepts
 
-- **test_reconcile.py** (29 connections) — `core/tests/test_reconcile.py`
-- **SqliteEventLog** (24 connections) — `core/gherkai_core/adapters/event_log/sqlite.py`
-- **tick()** (21 connections) — `core/gherkai_core/reconcile.py`
-- **test_sqlite_event_log.py** (19 connections) — `core/tests/test_sqlite_event_log.py`
-- **FakeLauncher** (16 connections) — `core/tests/test_reconcile.py`
-- **_setup()** (14 connections) — `core/tests/test_reconcile.py`
-- **BoomLauncher** (12 connections) — `core/tests/test_reconcile.py`
-- **event_log/__init__.py** (11 connections) — `core/gherkai_core/adapters/event_log/__init__.py`
-- **EventLog** (9 connections) — `core/gherkai_core/reconcile.py`
-- **_log()** (9 connections) — `core/tests/test_sqlite_event_log.py`
+- **test_detached_launcher.py** (30 connections) — `runtime/tests/test_detached_launcher.py`
+- **SqliteEventLog** (27 connections) — `core/gherkai_core/adapters/event_log/sqlite.py`
+- **SubprocessEngine** (21 connections) — `core/gherkai_core/adapters/subprocess_engine.py`
+- **detached.py** (19 connections) — `runtime/gherkai_runtime/detached.py`
+- **build_local_reconcile()** (19 connections) — `runtime/gherkai_runtime/detached.py`
+- **run_reconcile_loop()** (19 connections) — `runtime/gherkai_runtime/detached.py`
+- **subprocess_engine.py** (16 connections) — `core/gherkai_core/adapters/subprocess_engine.py`
+- **SubprocessLauncher** (16 connections) — `runtime/gherkai_runtime/detached.py`
+- **_setup()** (14 connections) — `runtime/tests/test_detached_launcher.py`
+- **test_report_still_written_when_the_run_duration_read_fails()** (13 connections) — `runtime/tests/test_detached_launcher.py`
+- **test_run_state_timestamps_share_one_format()** (13 connections) — `runtime/tests/test_detached_launcher.py`
+- **_seed_for_build()** (12 connections) — `runtime/tests/test_detached_launcher.py`
+- **_job()** (10 connections) — `runtime/tests/test_detached_launcher.py`
 - **._connect()** (8 connections) — `core/gherkai_core/adapters/event_log/sqlite.py`
-- **Launcher** (8 connections) — `core/gherkai_core/reconcile.py`
-- **_done_events()** (6 connections) — `core/tests/test_reconcile.py`
-- **test_double_finalize_idempotent()** (6 connections) — `core/tests/test_reconcile.py`
-- **test_tick_finalizes_when_all_done()** (6 connections) — `core/tests/test_reconcile.py`
-- **test_tick_starts_next_after_completion()** (6 connections) — `core/tests/test_reconcile.py`
-- **test_launch_failure_does_not_wedge_run()** (5 connections) — `core/tests/test_reconcile.py`
-- **test_launch_failure_isolated_other_job_completes()** (5 connections) — `core/tests/test_reconcile.py`
-- **test_tick_idempotent_no_double_launch()** (5 connections) — `core/tests/test_reconcile.py`
-- **test_tick_nonzero_exit_finalizes_error()** (5 connections) — `core/tests/test_reconcile.py`
-- **_meta()** (4 connections) — `core/tests/test_reconcile.py`
-- **test_first_tick_starts_up_to_concurrency()** (4 connections) — `core/tests/test_reconcile.py`
-- **.append_event()** (3 connections) — `core/gherkai_core/adapters/event_log/sqlite.py`
-- **.has_exit()** (3 connections) — `core/gherkai_core/adapters/event_log/sqlite.py`
-- **.__init__()** (3 connections) — `core/gherkai_core/adapters/event_log/sqlite.py`
-- *... and 45 more nodes in this community*
+- **test_build_local_reconcile_reads_steps_dir_from_definition()** (8 connections) — `runtime/tests/test_detached_launcher.py`
+- **test_build_local_reconcile_resolves_region_like_foreground()** (8 connections) — `runtime/tests/test_detached_launcher.py`
+- **drive_local_reconcile()** (6 connections) — `runtime/gherkai_runtime/detached.py`
+- **_echo_resolver()** (6 connections) — `runtime/tests/test_detached_launcher.py`
+- **test_drive_local_reconcile_drives_to_terminal_then_tears_down_tunnel()** (6 connections) — `runtime/tests/test_detached_launcher.py`
+- **test_job_timeout_stops_worker_and_attributes_timeout()** (6 connections) — `runtime/tests/test_detached_launcher.py`
+- **_now()** (5 connections) — `runtime/tests/test_detached_launcher.py`
+- **test_crash_worker_finalizes_error()** (5 connections) — `runtime/tests/test_detached_launcher.py`
+- **test_single_job_passes_end_to_end()** (5 connections) — `runtime/tests/test_detached_launcher.py`
+- **test_two_jobs_concurrency_one()** (5 connections) — `runtime/tests/test_detached_launcher.py`
+- **now_iso()** (4 connections) — `runtime/gherkai_runtime/compose.py`
+- *... and 57 more nodes in this community*
 
 ## Relationships
 
-- [Run Result Rendering](Run_Result_Rendering.md) (23 shared connections)
-- [Engine Ports & Adapters](Engine_Ports_%26_Adapters.md) (23 shared connections)
-- [Local Run Store](Local_Run_Store.md) (9 shared connections)
-- [Run State Rendering](Run_State_Rendering.md) (9 shared connections)
-- [Cloud Launcher & DDB Event Log](Cloud_Launcher_%26_DDB_Event_Log.md) (4 shared connections)
-- [Boto Guard & S3 Offload](Boto_Guard_%26_S3_Offload.md) (4 shared connections)
-- [Event Replay Projection](Event_Replay_Projection.md) (2 shared connections)
-- [Lambda Handler Tests](Lambda_Handler_Tests.md) (1 shared connections)
-- [S3 Report Store & Subprocess](S3_Report_Store_%26_Subprocess.md) (1 shared connections)
-- [CLI Plan & Submit](CLI_Plan_%26_Submit.md) (1 shared connections)
-- [State Projection & Planning](State_Projection_%26_Planning.md) (1 shared connections)
-- [Reconciler Lambda](Reconciler_Lambda.md) (1 shared connections)
+- [DynamoDB RunStore Adapter](DynamoDB_RunStore_Adapter.md) (17 shared connections)
+- [Job Explain & S3 Offload](Job_Explain_%26_S3_Offload.md) (16 shared connections)
+- [Cloud Boto3 Guards & EventLog](Cloud_Boto3_Guards_%26_EventLog.md) (11 shared connections)
+- [Runtime Composition Root](Runtime_Composition_Root.md) (9 shared connections)
+- [S3 Report Store & Control Plane](S3_Report_Store_%26_Control_Plane.md) (6 shared connections)
+- [Run State Rendering](Run_State_Rendering.md) (6 shared connections)
+- [Reconciler Ports](Reconciler_Ports.md) (5 shared connections)
+- [Worker Process Handle & Event Pump](Worker_Process_Handle_%26_Event_Pump.md) (5 shared connections)
+- [Subprocess Engine Tests](Subprocess_Engine_Tests.md) (4 shared connections)
+- [SQLite Event Log Tests](SQLite_Event_Log_Tests.md) (3 shared connections)
+- [Cloud Job Launcher](Cloud_Job_Launcher.md) (3 shared connections)
+- [Run State Projection](Run_State_Projection.md) (3 shared connections)
 
 ## Source Files
 
-- `core/gherkai_core/adapters/event_log/__init__.py`
 - `core/gherkai_core/adapters/event_log/sqlite.py`
-- `core/gherkai_core/reconcile.py`
-- `core/tests/test_reconcile.py`
-- `core/tests/test_sqlite_event_log.py`
+- `core/gherkai_core/adapters/subprocess_engine.py`
+- `runtime/gherkai_runtime/compose.py`
+- `runtime/gherkai_runtime/detached.py`
+- `runtime/tests/test_detached_launcher.py`
 
 ## Audit Trail
 
-- EXTRACTED: 166 (86%)
-- INFERRED: 27 (14%)
+- EXTRACTED: 224 (89%)
+- INFERRED: 27 (11%)
 - AMBIGUOUS: 0 (0%)
 
 ---

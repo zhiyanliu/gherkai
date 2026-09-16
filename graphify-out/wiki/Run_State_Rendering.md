@@ -1,68 +1,66 @@
 # Run State Rendering
 
-> 90 nodes · cohesion 0.05
+> 27 nodes · cohesion 0.08
 
 ## Key Concepts
 
-- **RunState** (104 connections) — `core/gherkai_core/model.py`
-- **JobState** (85 connections) — `core/gherkai_core/model.py`
-- **test_stores.py** (55 connections) — `core/tests/test_stores.py`
-- **_sample_run()** (38 connections) — `core/tests/test_stores.py`
-- **test_cloud_integration.py** (28 connections) — `core/tests/test_cloud_integration.py`
-- **test_ddb_run_store.py** (24 connections) — `core/tests/test_ddb_run_store.py`
-- **run_store/local.py** (20 connections) — `core/gherkai_core/adapters/run_store/local.py`
-- **run_meta_from_dict()** (16 connections) — `core/gherkai_core/serialize.py`
-- **run_meta_to_dict()** (16 connections) — `core/gherkai_core/serialize.py`
-- **run_state_from_result()** (10 connections) — `core/gherkai_core/model.py`
-- **from_dict()** (10 connections) — `core/gherkai_core/serialize.py`
-- **_uniq()** (10 connections) — `core/tests/test_cloud_integration.py`
-- **Path** (10 connections)
-- **to_dict()** (9 connections) — `core/gherkai_core/serialize.py`
-- **_ddb_store()** (9 connections) — `core/tests/test_cloud_integration.py`
-- **_initial_state()** (9 connections) — `core/tests/test_stores.py`
-- **test_ddb_state_item_grows_past_400kb_on_incremental_update_real()** (8 connections) — `core/tests/test_cloud_integration.py`
-- **.load_run_state()** (7 connections) — `core/gherkai_core/adapters/run_store/local.py`
-- **.save_run()** (7 connections) — `core/gherkai_core/adapters/run_store/local.py`
-- **._write_state()** (7 connections) — `core/gherkai_core/adapters/run_store/local.py`
-- **test_ddb_empty_string_scalar_and_map_entry_real()** (7 connections) — `core/tests/test_cloud_integration.py`
-- **test_ddb_run_store_lifecycle_real()** (7 connections) — `core/tests/test_cloud_integration.py`
-- **test_ddb_session_id_none_omitted_real()** (7 connections) — `core/tests/test_cloud_integration.py`
+- **RunState** (125 connections) — `core/gherkai_core/model.py`
+- **WorkerHandle** (12 connections) — `core/gherkai_core/ports.py`
+- **_mk_state()** (9 connections) — `cli/tests/test_main.py`
+- **test_explain_cloud_not_landed_hint_carries_cloud_locator_flags()** (7 connections) — `cli/tests/test_main.py`
 - **render_run_state()** (6 connections) — `cli/gherkai_cli/render.py`
-- **.finalize_run()** (6 connections) — `core/gherkai_core/adapters/run_store/local.py`
-- *... and 65 more nodes in this community*
+- **test_render_status_pending_run_with_claimed_job_does_not_hint()** (6 connections) — `cli/tests/test_main.py`
+- **.load_run_state()** (5 connections) — `core/gherkai_core/adapters/run_store/ddb.py`
+- **.project_state()** (5 connections) — `core/gherkai_core/adapters/run_store/ddb.py`
+- **.create_run()** (5 connections) — `core/gherkai_core/adapters/run_store/local.py`
+- **.begin()** (5 connections) — `core/gherkai_core/persist.py`
+- **test_render_run_state_lists_jobs_and_session_lineage()** (4 connections) — `cli/tests/test_render.py`
+- **test_render_run_state_shows_ended_at_when_terminal()** (4 connections) — `cli/tests/test_render.py`
+- **_state_scalars()** (4 connections) — `core/gherkai_core/adapters/run_store/ddb.py`
+- **.create_run()** (3 connections) — `core/gherkai_core/ports.py`
+- **.save_run()** (3 connections) — `core/gherkai_core/ports.py`
+- **.stop()** (2 connections) — `core/gherkai_core/ports.py`
+- **`status` 的 RunState 人读渲染（轻量；权威判定明细读 jobs/*.json 或 --json）。 local/cloud…** (1 connections) — `cli/gherkai_cli/render.py`
+- **run 级仍 pending 但已有 job 被 claim（running）→ 推进已开始，不提示「可能未启动」。这是 detached 的正常窗口：…** (1 connections) — `cli/tests/test_main.py`
+- **cloud 档「判定明细尚未落地」给的 status 命令必带 --backend cloud --prefix：照抄要跑得通， 否则落回 local…** (1 connections) — `cli/tests/test_main.py`
+- **HWM 条件写 STATE：仅当 (传入 hwm ≥ 库中 hwm) 且 (库中未 finalize) 才写（机制三①）。CCF → stale/已终态 →…** (1 connections) — `core/gherkai_core/adapters/run_store/ddb.py`
+- **读回运行态（从 STATE item，jobs 原生 Map → dict[scope_id, JobState]）；不存在返回 None。…** (1 connections) — `core/gherkai_core/adapters/run_store/ddb.py`
+- **RunState 顶层标量 → DDB 属性（status + omit-when-None 的起止 + hwm，对齐…** (1 connections) — `core/gherkai_core/adapters/run_store/ddb.py`
+- **run 开始：写 definition（run_meta.json）+ 初始运行态（run_state.json，各 job 一般为 pending）。…** (1 connections) — `core/gherkai_core/adapters/run_store/local.py`
+- **一次 run 的**控制面运行态**（status/血缘/起止；执行后产生，ADR 0016 控制面）。 与…** (1 connections) — `core/gherkai_core/model.py`
+- **run 开始（schedule 之前）：先探活三个 store，再写 definition + 初始全 pending 运行态。 满足 ADR…** (1 connections) — `core/gherkai_core/persist.py`
+- *... and 2 more nodes in this community*
 
 ## Relationships
 
-- [Engine Ports & Adapters](Engine_Ports_%26_Adapters.md) (56 shared connections)
-- [Run Result Rendering](Run_Result_Rendering.md) (54 shared connections)
-- [Local Run Store](Local_Run_Store.md) (35 shared connections)
-- [Boto Guard & S3 Offload](Boto_Guard_%26_S3_Offload.md) (30 shared connections)
-- [S3 Result Store](S3_Result_Store.md) (30 shared connections)
-- [Conditional Write Tests](Conditional_Write_Tests.md) (13 shared connections)
-- [SQLite Event Log](SQLite_Event_Log.md) (9 shared connections)
-- [Local Result Store](Local_Result_Store.md) (8 shared connections)
-- [Cloud Launcher & DDB Event Log](Cloud_Launcher_%26_DDB_Event_Log.md) (8 shared connections)
-- [Report Refs & Results](Report_Refs_%26_Results.md) (6 shared connections)
-- [Status Render & Exit Codes](Status_Render_%26_Exit_Codes.md) (4 shared connections)
-- [Event Replay Projection](Event_Replay_Projection.md) (4 shared connections)
+- [Job Explain & S3 Offload](Job_Explain_%26_S3_Offload.md) (33 shared connections)
+- [DynamoDB RunStore Adapter](DynamoDB_RunStore_Adapter.md) (32 shared connections)
+- [Cloud Boto3 Guards & EventLog](Cloud_Boto3_Guards_%26_EventLog.md) (11 shared connections)
+- [Run Status Rendering](Run_Status_Rendering.md) (9 shared connections)
+- [Conditional Write Tests](Conditional_Write_Tests.md) (9 shared connections)
+- [S3 Report Store & Control Plane](S3_Report_Store_%26_Control_Plane.md) (8 shared connections)
+- [Cloud Adapter Integration Tests](Cloud_Adapter_Integration_Tests.md) (7 shared connections)
+- [Run State Projection](Run_State_Projection.md) (6 shared connections)
+- [SQLite Event Log](SQLite_Event_Log.md) (6 shared connections)
+- [Reconciler Ports](Reconciler_Ports.md) (5 shared connections)
+- [Event Formatting](Event_Formatting.md) (5 shared connections)
+- [Cloud Job Launcher](Cloud_Job_Launcher.md) (4 shared connections)
 
 ## Source Files
 
 - `cli/gherkai_cli/render.py`
+- `cli/tests/test_main.py`
 - `cli/tests/test_render.py`
+- `core/gherkai_core/adapters/run_store/ddb.py`
 - `core/gherkai_core/adapters/run_store/local.py`
 - `core/gherkai_core/model.py`
 - `core/gherkai_core/persist.py`
 - `core/gherkai_core/ports.py`
-- `core/gherkai_core/serialize.py`
-- `core/tests/test_cloud_integration.py`
-- `core/tests/test_ddb_run_store.py`
-- `core/tests/test_stores.py`
 
 ## Audit Trail
 
-- EXTRACTED: 440 (90%)
-- INFERRED: 47 (10%)
+- EXTRACTED: 150 (80%)
+- INFERRED: 38 (20%)
 - AMBIGUOUS: 0 (0%)
 
 ---

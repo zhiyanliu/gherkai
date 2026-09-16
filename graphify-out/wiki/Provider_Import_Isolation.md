@@ -9,7 +9,7 @@
 
 ## Relationships
 
-- [AWS Deploy Provider](AWS_Deploy_Provider.md) (1 shared connections)
+- [Deploy Provider Tests](Deploy_Provider_Tests.md) (1 shared connections)
 
 ## Source Files
 

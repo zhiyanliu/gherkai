@@ -23,9 +23,10 @@
 
 ## Relationships
 
-- [Cloud Target Resolution](Cloud_Target_Resolution.md) (8 shared connections)
-- [SSM Path & Client Composition](SSM_Path_%26_Client_Composition.md) (2 shared connections)
-- [Backend Version Stamp](Backend_Version_Stamp.md) (1 shared connections)
+- [Cloud Target & Worker Resolution](Cloud_Target_%26_Worker_Resolution.md) (8 shared connections)
+- [Backend Version Skew Check](Backend_Version_Skew_Check.md) (1 shared connections)
+- [Version Release Comparison](Version_Release_Comparison.md) (1 shared connections)
+- [Runtime Composition Root](Runtime_Composition_Root.md) (1 shared connections)
 
 ## Source Files
 
