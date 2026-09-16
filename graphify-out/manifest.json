@@ -10,8 +10,8 @@
     "semantic_hash": ""
   },
   "cli/tests/test_main.py": {
-    "mtime": 1789476014.8518908,
-    "ast_hash": "c78600a521f8c7d959ac4bdcc945bfe1",
+    "mtime": 1789537566.7545335,
+    "ast_hash": "24276ddd9b370e5159f5299b188d0611",
     "semantic_hash": ""
   },
   "cli/tests/test_render.py": {
@@ -275,8 +275,8 @@
     "semantic_hash": ""
   },
   "cli/README.md": {
-    "mtime": 1789475923.8535328,
-    "ast_hash": "eae0b97952f4f5a00c450bbb45d628af",
+    "mtime": 1789537566.7550426,
+    "ast_hash": "b49975ddcb44478f24aa5a27a152ad25",
     "semantic_hash": ""
   },
   "docs/adr/0001-scope-limited-to-english-ui.md": {
@@ -475,8 +475,8 @@
     "semantic_hash": ""
   },
   "cli/gherkai_cli/__main__.py": {
-    "mtime": 1789537052.821742,
-    "ast_hash": "567bbd333470e8c44dd21e7c96c4a939",
+    "mtime": 1789537578.299377,
+    "ast_hash": "9da355c58bd3cf0b9cb8aae065bf6637",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/render.py": {
@@ -1165,8 +1165,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0042-step-evidence-and-explain.md": {
-    "mtime": 1789476549.691591,
-    "ast_hash": "3605d15a3afbfadf98e335932c44a9e6",
+    "mtime": 1789537566.7547233,
+    "ast_hash": "2d6e4c751613e50200c106fcbb9fa19e",
     "semantic_hash": ""
   },
   "engines/midscene/src/worker/evidence.mts": {
@@ -1230,8 +1230,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0043-agent-skill-for-driving-gherkai.md": {
-    "mtime": 1789537419.7189746,
-    "ast_hash": "0ee0567075536f098aa796f96b682483",
+    "mtime": 1789537566.7552803,
+    "ast_hash": "6a4a68794d26acc32914bba4dc2a71ec",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skill_install.py": {

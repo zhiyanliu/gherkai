@@ -42,7 +42,7 @@ gherkai status "$RUN_ID" --wait --json                  # 事后轮询到跑完�
 | `gherkai run <feature...>` | 前台跑完这批：CLI 全程在线，跑完直接给判定与报告 |
 | `gherkai submit <feature...>` | 提交完就走：打印一个 `run_id` 后立即退出，后台继续推进 |
 | `gherkai status <run_id>` | 查这个 run 的进度/结果；`--wait` 轮询到跑完再返回；到终态时同时打出报告与判定明细的位置（本机路径或 S3；`--json` 里是 `artifacts` 键） |
-| `gherkai explain <run_id> [<scope_id>]` | 看这个 run 每一步的证据：问了 AI 什么、AI 看见了什么、为什么这么判——用例没过时第一个该敲的命令。`--scenario` / `--step` 缩到某条用例的某一步，`--all` 连通过的步也展开，`--full` 逐帧全文，`--json` 机读 |
+| `gherkai explain <run_id> [<scope_id>]` | 看这个 run 每一步的证据：问了 AI 什么、AI 看见了什么、为什么这么判——用例没过时第一个该敲的命令。`--scenario` / `--step` 缩到某条用例的某一步（点名的那一步连通过也展开），`--all` 连通过的步也展开，`--full` 逐帧全文，`--json` 机读 |
 | `gherkai list-engines` | 列出可用引擎（缺的那个原地给安装命令）；`--json` 机读 |
 | `gherkai doctor` | 只读自检：引擎 worker、`steps/` 加载、（给 `--backend cloud --prefix` 时）凭证、后端资源与版本、部署工具链；全过退 `0`、有必修项失败退 `2`；`--json` 机读 |
 | `gherkai list-deterministic --engine <名>` | 列出该引擎支持的确定性步骤（含你自己写的），写 feature 时查着复用 |
