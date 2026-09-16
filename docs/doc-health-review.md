@@ -63,7 +63,7 @@ ADR/CONTEXT 是随构建**逐步长起来**的：每次在前人文档上叠加�
 - 全部 `DEVELOPMENT.md`（根 / `cli` / `core` / `runtime` / `deploy_aws` / `engines/*`，contributor 向，与同目录 README 成对——判据见上「按文档类型的复盘侧重」）
 - `CLAUDE.md`（项目约定；**只查 DEADLINK / STALE**——它点名的护栏测试文件、ADR 编号、目录名是否仍存在、与所指 ADR 是否一致。规则内容本身是决策，不在复盘里改）
 - `docs/journey/`（staging 区，可为空；**只做生命周期审计**：非空时逐个判「该吸收进 ADR / code 后删」还是「任务仍在推进、留」，不做密度 / 提纯——判据在 CLAUDE.md 文档纪律 journey 条「任务收尾即审计点」）
-- `docs/doc-health-review.md` / `docs/code-health-review.md` 与它们的 Claude Code 入口 `.claude/commands/{doc,code}-health-review.md`（方法文档与入口摘要都已入库：只查 DEADLINK / STALE / 内部矛盾 + 摘要与方法文档是否一致（摘要只列要点，判据不复制）；方法内容本身是决策，不在复盘里改——与 CLAUDE.md 同款口径）
+- `docs/doc-health-review.md` / `docs/code-health-review.md` 与它们的 Claude Code 入口 `.claude/commands/{doc,code}-health-review.md`（方法文档与入口摘要都已入库：查 DEADLINK / STALE / 内部矛盾 / SEDIMENT + 摘要与方法文档是否一致（摘要只列要点，判据不复制）；方法内容本身是决策，不在复盘里改——SEDIMENT 只动措辞不动规则（亲历数字、轮次坐标、同一规则的第二遍重述），按主观类出提案待批；不进提纯审计集的 git 层读——与 CLAUDE.md 同款口径）
 - `docs/guides/*.md`（给人的阅读理解层，派生视图——判据侧重见上「按文档类型的复盘侧重」）
 - 随 CLI wheel 发行的 **agent skill markdown**（`cli/gherkai_cli/skills/gherkai/SKILL.md` + `references/*.md`，5 份入库）——使用者/agent 面，安装态没有仓库上下文；判据侧重见上「按文档类型的复盘侧重」。
 - **技术笔记/配方 + 工具手册**（如 `engines/midscene/spikes/SIGV4-FETCH-RECIPE.md`、`tools/e2e_harness.md`）——与代码同居、AI 照它接线/照它操作，**极易 STALE**（含可运行代码片段 + 命令 + 前置条件 + 踩坑点 + 源码路径）。
