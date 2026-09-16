@@ -400,7 +400,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
                     help="只看第 N 步（scenario 内 0 起的书写序号，与文本里的 step 号、JSON 的 index 同一口径）；"
                          "须与 --scenario 同给")
     ex.add_argument("--all", action="store_true",
-                    help="通过的 step 也展开证据（默认只展开 failed/error/skipped/无记录的）")
+                    help="通过的 step 也展开证据（默认只展开 failed/error/skipped；无记录的 step 没有证据可展开，只在状态位说明）")
     ex.add_argument("--full", action="store_true",
                     help="逐 frame 全文展开（默认每次 AI 调用只显示最后一段推理与它的截图）")
     ex.add_argument("--json", action="store_true", help="输出机器可读 JSON（内嵌证据全文）")
