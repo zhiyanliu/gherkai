@@ -295,8 +295,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0004-novaact-iam-auth-via-workflow.md": {
-    "mtime": 1789473713.4305325,
-    "ast_hash": "b29ddc91c6e142d2959f8635b8347fc8",
+    "mtime": 1789536369.8216617,
+    "ast_hash": "23d853dc1e47757b3ca1190335634ac7",
     "semantic_hash": ""
   },
   "docs/adr/0005-single-shared-feature-file.md": {
@@ -1230,8 +1230,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0043-agent-skill-for-driving-gherkai.md": {
-    "mtime": 1789466425.6748385,
-    "ast_hash": "9416fda06392394b71f09e4090f8898d",
+    "mtime": 1789536369.8290286,
+    "ast_hash": "74d8997cf88aa2dedf183318761625a5",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skill_install.py": {
