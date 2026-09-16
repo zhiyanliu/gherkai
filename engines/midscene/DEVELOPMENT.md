@@ -9,7 +9,7 @@
 | 发行名 | `@gherkai/worker-midscene`（npm，public） |
 | 命令名 | `gherkai-worker-midscene`（bin = `dist/bin.mjs`） |
 | 运行时 | Node ≥ 22，统一 ESM（`"type": "module"`，源码 `.mts` → 产物 `.mjs`） |
-| 版本 | 与 CLI（`gherkai`）lockstep；仓库里是占位 `0.0.0-dev`，发行版本由 CI 在 publish 时写入 |
+| 版本 | 与 CLI（`gherkai`）同版本发行；仓库里是占位 `0.0.0-dev`，发行版本由 CI 在 publish 时写入 |
 
 以 npm 包分发的理由见 [ADR 0037](../../docs/adr/0037-distribution-and-packaging.md) 决策 3。
 

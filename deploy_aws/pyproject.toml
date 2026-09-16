@@ -1,6 +1,6 @@
 [project]
 name = "gherkai-deploy-aws"
-# version 与依赖均动态（ADR 0037 决策 2b）：gherkai-runtime[aws] 同版本 lockstep。
+# version 与依赖均动态（ADR 0037 决策 2b）：gherkai-runtime[aws] `==` 同版本 pin。
 dynamic = ["version", "dependencies"]
 description = "gherkai 的 AWS 后端部署（gherkai deploy）：CDK 建 DynamoDB/S3/ECS/Lambda 等资源，worker 镜像推送与注册"
 readme = "README.md"

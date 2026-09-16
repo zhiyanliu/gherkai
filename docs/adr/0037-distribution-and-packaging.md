@@ -1,6 +1,6 @@
 # 0037. 分发与打包：PyPI 多包 workspace（uv-first）+ `gherkai deploy` 进 wheel
 
-> **Status:** Accepted（2026-09-08，随 v1.4.0 首发翻牌）—— 决策 1-8 全部实装：uv workspace 五包 + 三名分离 + git tag 版本 + `==` lockstep；worker 交付（novaact 包 / `@gherkai/worker-midscene` / 四级定位链——第四级经 fd 预演定为 uvx 保留、npx 废弃）；`steps/` 定制面；两态基底 Dockerfile + GHCR；`gherkai deploy`（provider 发现、VPC 三态、版本戳、asset 从已安装包、CDK 查询缓存）；skew 三态；CI 发布链。**实测项除一项外已清零**（首个真 tag 全链一次全绿，发行版 CLI 在真账户完成部署升级 + 云端 run；唯一残留 = 「实测项」第 4 条末的「`destroy` 后同 prefix 重部署的冲突形态」待真账户）。「背景与问题」「现状实测」两节是**施工前快照、历史叙述**。worker 镜像交付的独立子系统见 [0038](./0038-worker-image-delivery.md)（**Accepted**，实测项 1-7 已清零）。
+> **Status:** Accepted（2026-09-08，随 v1.4.0 首发翻牌）—— 决策 1-8 全部实装：uv workspace 五包 + 三名分离 + git tag 版本 + 兄弟包 `==` 同版本 pin；worker 交付（novaact 包 / `@gherkai/worker-midscene` / 四级定位链——第四级经 fd 预演定为 uvx 保留、npx 废弃）；`steps/` 定制面；两态基底 Dockerfile + GHCR；`gherkai deploy`（provider 发现、VPC 三态、版本戳、asset 从已安装包、CDK 查询缓存）；skew 三态；CI 发布链。**实测项除一项外已清零**（首个真 tag 全链一次全绿，发行版 CLI 在真账户完成部署升级 + 云端 run；唯一残留 = 「实测项」第 4 条末的「`destroy` 后同 prefix 重部署的冲突形态」待真账户）。「背景与问题」「现状实测」两节是**施工前快照、历史叙述**。worker 镜像交付的独立子系统见 [0038](./0038-worker-image-delivery.md)（**Accepted**，实测项 1-7 已清零）。
 
 ## 背景与问题
 
@@ -34,7 +34,7 @@
 | 交付物 | 通道 | 版本 | 谁构建 |
 |---|---|---|---|
 | `gherkai`（CLI；含随 wheel 带的 `gherkai_cli/skills/gherkai/` 包数据 = agent skill，[0043](./0043-agent-skill-for-driving-gherkai.md)） | PyPI，uv-first | git tag，单一旋钮 | 维护者 CI |
-| `gherkai-runtime` / `gherkai-core` | PyPI，被 `==` lockstep pin；CLI 用户不直接装（集成方按层直依赖，见 2a） | 同号 | 维护者 CI |
+| `gherkai-runtime` / `gherkai-core` | PyPI，被 `==` 同版本 pin；CLI 用户不直接装（集成方按层直依赖，见 2a） | 同号 | 维护者 CI |
 | `gherkai-worker-novaact` | PyPI，经 CLI extra `[local]` 装进 **同一个** venv | 同号 | 维护者 CI |
 | `@gherkai/worker-midscene` | npm（scope `@gherkai`） | 同号 | 维护者 CI |
 | worker **基底镜像** ×2 | **GHCR**（与 repo 同屋檐），linux/amd64，immutable `:X.Y.Z` | 同号 | 维护者 CI |
@@ -66,7 +66,7 @@
 - **多包而非单包**：集成方按层引用——未来 WebUI 只依赖 `gherkai-runtime`、第三方只解析 feature 就依赖 `gherkai-core`（零 boto3）、Lambda asset 只装 runtime。单发行包（三 import 包一 wheel）曾是备选（省掉 pin 机制），因「按层引用」这个真实需求被拒；pin 机制由 2b 解决后单包的唯一优势消失。
 - **分层不动**：`gherkai_cli → gherkai_runtime → gherkai_core` 的依赖方向、窄腰红线、组合根注入（[0016](./0016-execution-architecture-core-lib-run-model.md)）全部保留，本 ADR 只动名字与打包边界。
 
-### 2b. 版本：git tag 唯一真源，兄弟包 `==` lockstep pin，不做兼容矩阵
+### 2b. 版本：git tag 唯一真源，兄弟包 `==` 同版本 pin，不做兼容矩阵
 
 - **git tag `vX.Y.Z` 是唯一版本真源**，pyproject / package.json 不再手写版本号（当前六处手写版本作废）。构建后端 hatchling + `uv-dynamic-versioning`：`[tool.hatch.version] source = "uv-dynamic-versioning"` 派生版本；`[tool.hatch.metadata.hooks.uv-dynamic-versioning] dependencies = ["gherkai-runtime=={{ version }}"]` 在 build 时渲染精确 pin；`[tool.uv.sources] gherkai-runtime = { workspace = true }` 让本地开发走 path。三段与 pydantic-ai `clai` 的生产配置同形。
 - **`[tool.uv-dynamic-versioning]` 三项显式钉死（style / strict / dirty），`metadata` 有意留默认**：`style = "pep440"`（上游文档对默认 style 自相矛盾，而镜像 tag 归一化与 skew 比较都建立在 PEP 440 形态上）；`strict = true`（无 tag 时 build 失败，而非静默回落 `0.0.0`）；`dirty = true`（默认关；关着则 tag commit 上带未提交改动构建出的版本与正式发行版逐字节相同，决策 7 的「非纯净版本跳过 skew 比较」不会触发）。**`metadata` 不显式开**：dunamai 默认 = 非 tag commit 或脏树才带 `+<sha>`/`+dirty`；显式 `metadata = true` 会让**干净 tag commit** 也算出 `1.4.0+<sha>`——发布 gate「版本==tag」必败、PyPI 拒收本地段版本，链路按那配置永远发不出去（真跑证实：五个 pyproject 曾这样配，对抗核验在真 clone + 真 tag 上抓出）。三种 git 状态实测：干净 tag → `1.4.0`；脏树 → `1.4.0+dirty`；离 tag N 提交 → `1.4.0.postN.dev0+<sha>`（默认 `bump=false`、commit 无前缀）——非纯净构建必带 `+`，决策 7 的判据成立。

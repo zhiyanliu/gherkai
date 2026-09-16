@@ -285,7 +285,7 @@ def test_context_prefix_follows_the_runtime_resolution_chain(monkeypatch):
 
 
 def test_version_falls_back_to_installed_dist_version():
-    """CLI 皮没交版本 → 本包自报 dist 版本（`==` lockstep pin 成同一个，不引入第二个真源）。"""
+    """CLI 皮没交版本 → 本包自报 dist 版本（`==` 同版本 pin 成同一个，不引入第二个真源）。"""
     args = _parse("--vpc", "new")
     del args.version
     assert Provider().build_context(args)["version"]  # 非空即可（dev 版形如 1.3.0.postN.devM+sha.dirty）

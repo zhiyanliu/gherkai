@@ -761,7 +761,7 @@ class Provider:
         """写进 SSM 版本戳的版本（ADR 0037 决策 6「版本戳」/ 决策 7 版本单旋钮）。
 
         优先 CLI 皮交进来的 `args.version`（= 运行中的 CLI 的版本，决策 7 比对的正是它）；缺则本包自报 dist
-        版本——两者被 `==` lockstep pin 成同一个（决策 2b），此回落不引入第二个真源。都取不到 → fail-fast：
+        版本——两者被 `==` 同版本 pin 成同一个（决策 2b），此回落不引入第二个真源。都取不到 → fail-fast：
         戳写错比缺失更坏（缺失是「警告不拦」，写错会让所有提交者的 skew 判定失真）。
         """
         explicit = getattr(args, "version", None)

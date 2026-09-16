@@ -88,7 +88,7 @@ def test_chain_level2_skipped_when_module_missing(monkeypatch):
 
 
 def test_chain_level4_uvx_only_on_pure_release(monkeypatch):
-    """第四级兜底拉起只有 novaact/uvx：版本是纯发行版 + uvx 在 PATH → 按 CLI 版本 pin（worker 与 CLI lockstep）。
+    """第四级兜底拉起只有 novaact/uvx：版本是纯发行版 + uvx 在 PATH → 按 CLI 版本 pin（worker 与 CLI 须同版本）。
     midscene **没有第四级**——fd 预演实测 npx 把 EVENTS_FD 换成 npm 自己的 FIFO（写即 EBADF、事件全丢），
     即使 npx 在 PATH、版本纯净，也直接 miss 报安装指引（ADR 0037 决策 3「预演不过则降为报错 + 安装指引」）。"""
     monkeypatch.delenv("GHERKAI_WORKER_NOVAACT_CMD", raising=False)
@@ -1320,7 +1320,7 @@ def test_skew_compares_release_segment_only():
 
 def test_skew_cli_version_is_mandatory_no_runtime_fallback():
     """`cli_version` 必给（决策 7 比的是「写任务定义那一方」的版本）：不缺省成 gherkai-runtime 的版本——
-    editable 树里各包版本各自漂，缺省会埋一个只在 lockstep 发行态下才等价的第二真源。"""
+    editable 树里各包版本各自漂，缺省会埋一个只在各包同版本的发行态下才等价的第二真源。"""
     with pytest.raises(TypeError):
         compose.check_version_skew("1.0.0")  # type: ignore[call-arg]
 

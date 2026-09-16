@@ -78,7 +78,7 @@ jobs:
           tag="${GITHUB_REF_NAME}"
           version="${VERSION}"
 
-          # 产物校验（版本==tag / workspace 成员齐 / 兄弟包 `==` lockstep pin 已渲染）。
+          # 产物校验（版本==tag / workspace 成员齐 / 兄弟包 `==` 同版本 pin 已渲染）。
           # 用 uv 带的 3.13 跑脚本，不依赖 runner 自带 python3 的版本（脚本用 tomllib，需 ≥3.11）。
           uv run --no-project python .github/scripts/check_dist_metadata.py \
             --dist dist --expect-version "$version"

@@ -1272,7 +1272,7 @@ def _cloud_skew_gate(target) -> "tuple[int | None, str | None]":
     tag 的镜像）。读戳 + 判定住产品本体（`compose.check_backend_skew`，第三元即戳；WebUI/推进器同调，措辞单点），
     本函数只把 verdict 翻成退出码。
     比的是**本 CLI 自己的**版本（`_installed_version()`，而非产品本体包的）——`gherkai deploy` 往 SSM 写的戳就是它，
-    它也是写任务定义的那一方；两者靠 `==` lockstep 恒同版本，显式传免得读者去猜哪个；未装成包 → None → 跳过。
+    它也是写任务定义的那一方；两者靠 `==` pin 恒同版本，显式传免得读者去猜哪个；未装成包 → None → 跳过。
     读戳与 subnet/sg 同一条 session/region 解析，且戳落在已授的 `/{prefix}backend/*` 通配内、不新增授权。
     """
     try:

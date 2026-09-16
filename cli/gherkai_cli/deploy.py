@@ -176,7 +176,7 @@ def add_parsers(sub, *, provider: object | None = None, provider_error: str | No
         provider.add_arguments(dsp)
     for p in (dp, dsp):
         # `version` = **CLI 自己的**发行版本，交给 provider 写进后端版本戳（ADR 0037 决策 6/7）：戳必须是
-        # 「写任务定义那一方」的版本，因为 run/submit 的 skew 闸拿它比。发行态下五个包 `==` lockstep 恒同版本，
+        # 「写任务定义那一方」的版本，因为 run/submit 的 skew 闸拿它比。发行态下五个包经 `==` pin 恒同版本，
         # 但 editable 的开发树里各包版本会各自漂（各自按 git 状态算），故显式传、不让 provider 自报。
         p.set_defaults(_provider_obj=provider, _provider_error=provider_error, version=cli_version)
 

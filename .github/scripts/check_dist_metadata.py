@@ -12,7 +12,7 @@
 1. 每个成员都产出 sdist + wheel；
 2. 全部产物同一个版本，且给了 `--expect-version` 时逐字等于它（版本真源 = git tag，
    ADR 0037 决策 2b）；
-3. wheel METADATA 里凡指向兄弟发行包的 `Requires-Dist` 都带 `==<版本>` lockstep pin
+3. wheel METADATA 里凡指向兄弟发行包的 `Requires-Dist` 都带 `==<版本>` 同版本 pin
    （ADR 0037 决策 2b；uv-dynamic-versioning 的 metadata hook 没生效时这里会退化成裸名，
    而 wheel 本身照样构建成功——即「绿≠对」，故须显式断言）；
 4. `gherkai` wheel 内 `gherkai_cli/skills/gherkai/` 的文件集**逐条等于**源目录（agent skill 随 wheel
@@ -164,7 +164,7 @@ def main() -> int:
         seen_wheels[name] = wheel
         versions_seen.setdefault(name, set()).add(version)
 
-        # 断言 3：兄弟包必须带 `==<版本>` 的 lockstep pin
+        # 断言 3：兄弟包必须带 `==<版本>` 的同版本 pin
         for entry in meta.get_all("Requires-Dist") or []:
             dep_raw = re.split(r"[\s;\[=<>!~(]", entry.strip(), maxsplit=1)[0]
             dep = normalize(dep_raw)

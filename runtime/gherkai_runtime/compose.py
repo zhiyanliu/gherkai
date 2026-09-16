@@ -68,7 +68,7 @@ def engine_min_grace(engine_name: str) -> float:
     查询（`--capabilities`）、进程内按引擎缓存、把值作 `ScheduleOpts.min_grace_s` 传给 core（core 只 enforce
     「grace ≥ 此下限」的引擎无关关系）。混引擎 run 由调用方取各引擎下限的 max（grace 是 run 级单值）。
     **查不到即抛、绝不回落常量**（异常语义见 `query_capabilities`；旧 worker 不认该 flag 即 fail-loud，CLI 与
-    worker 版本 `==` 锁步）：静默回落一个猜的下限 = grace 默默不够、收尾被 SIGKILL 截断，正是本机制要消除的漂移。
+    worker 须同版本安装）：静默回落一个猜的下限 = grace 默默不够、收尾被 SIGKILL 截断，正是本机制要消除的漂移。
     """
     cached = _ENGINE_MIN_GRACE_CACHE.get(engine_name)
     if cached is not None:
@@ -260,7 +260,7 @@ def resolve_worker_cmd(engine: str, *, version: str | None = None) -> WorkerCmd:
        uvx 是包装进程但**实测不吞 fd3**：子进程里 EVENTS_FD 与父侧同一 pipe inode、事件到达，SIGTERM 也转发。
        midscene **没有本级**：`npx -y <包>@<版本>` 实测把 fd 换掉（node 里该号上是 npm 自己的 FIFO、写即 EBADF），
        事件全丢，按「预演不过则降为报错 + 安装指引」处置（ADR 0037 决策 3）。
-    version：第四级 pin 的版本，缺省取本包（gherkai-runtime）版本——worker 与 CLI `==` lockstep
+    version：第四级 pin 的版本，缺省取本包（gherkai-runtime）版本——worker 与 CLI `==` 同版本
     （ADR 0037 决策 2b），未装成包（源码直跑）时取不到 → 第四级跳过。
     """
     if engine not in _names.ENGINES:
@@ -1052,7 +1052,7 @@ def check_version_skew(ssm_version: str | None, cli_version: str | None) -> tupl
        否则本机制之前部署的所有环境被 preflight 锁死（决策 7 明写要避免的后果）。
     2. **自身版本取不到**（`cli_version` 为 None：未装成包、源码直跑）→ skip。**`cli_version` 必给、不缺省成本包
        版本**：比的对象是「写任务定义那一方」（CLI）的版本，由调用点提供；editable 开发树里各包版本各自漂
-       （按各自 git 状态算），缺省读 `gherkai-runtime` 版本会埋一个只在 lockstep 发行态下才等价的第二真源。
+       （按各自 git 状态算），缺省读 `gherkai-runtime` 版本会埋一个只在各包同版本的发行态下才等价的第二真源。
     3. **任一侧非纯发行版**（含 `.dev`/`.post`/本地段，或压根解析不了）→ skip：dev 版逐提交前进，逐字比较
        会把每次都判成 skew（判据 `is_pure_release` 与定位链第四级共用——它靠 2b 的 `dirty=true`/`metadata=true`
        保证「非纯净构建一定带 `+`」才可靠）。
