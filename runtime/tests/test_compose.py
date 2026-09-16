@@ -514,8 +514,8 @@ def test_engine_min_grace_worker_failure_fails_loud(monkeypatch, novaact_env_cmd
 
     monkeypatch.setattr(subprocess, "run",
                         lambda cmd, **kw: _fake_caps_proc(b"", returncode=2))
-    with pytest.raises(compose.WorkerSelfDescribeError):
-        compose.engine_min_grace("novaact")
+    with pytest.raises(compose.WorkerSelfDescribeError, match="同版本安装"):
+        compose.engine_min_grace("novaact")  # 该入口不带使用方 steps，非零退出≈旧 worker：诊断要点出升级哪一侧
     assert compose._ENGINE_MIN_GRACE_CACHE == {}
 
 

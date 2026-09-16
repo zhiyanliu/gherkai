@@ -533,7 +533,16 @@ def query_capabilities(engine: str, *, timeout_s: float = 60.0) -> dict:
     异常语义见 `_ask_worker`（调用方：`run` 退 2、doctor 只报一行）；输出不是 JSON 对象 → RuntimeError。
     """
     extra_env = {"NOVA_ACT_TIMEOUT_S": str(NOVA_ACT_TIMEOUT_S)} if engine == "novaact" else None
-    caps = _ask_worker(engine, "--capabilities", what="能力自述", timeout_s=timeout_s, extra_env=extra_env)
+    try:
+        caps = _ask_worker(engine, "--capabilities", what="能力自述", timeout_s=timeout_s, extra_env=extra_env)
+    except WorkerSelfDescribeError as e:
+        # 这条入口不带使用方 steps（env 已被清），非零退出几乎只剩一种成因：旧 worker 不认该 flag、掉进 job 模式
+        # 读到空 stdin 即退（跳板机对发行版 worker 实测：stderr 是一句 JSON 解析错）——原样转述 stderr 的同时把
+        # 真因说出来，否则用户只看到一句与版本无关的解析错误、不知道该升级哪一侧。
+        raise WorkerSelfDescribeError(
+            engine, e.returncode,
+            e.stderr_tail + "\n——worker 不认识能力自述？worker 与命令行工具须同版本安装，请升级该引擎的 worker",
+            "能力自述") from e
     if not isinstance(caps, dict):
         raise RuntimeError(f"引擎 {engine} 的能力自述输出不是 JSON 对象：{caps!r}")
     return caps
