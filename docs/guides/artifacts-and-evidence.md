@@ -12,7 +12,7 @@
 | **运行态** | 控制面投影：run 级 status、各 job 的 status·session_id·claimed_at，以及事件水位（只有经推进器投影过的 run 才有这一项） | 「现在跑到哪了 / 提交了没」 | `run_state.json` / runs 表 `STATE` item | 可（能从判定真值重建） |
 | **判定真值** ★ | 每个 job 一份自包含的判定明细：job→scenario→step 的 status·votes·error_type·message·duration + 全部产物指针 | 「结果到底是什么、为什么」 | `jobs/<urlencode(scope_id)>.json` | **不能**——这是唯一权威 |
 | **派生导航** | `manifest.json`（机读扁平产物清单）+ `index.html`（判定明细树 + 每条产物一行链接，含锚点回跳） | 「人从哪一眼看进去」 | 同 run 目录 | **可删可重建，永不作判定源** |
-| **现场证据** | 引擎原生产物（Nova trajectory `.html`+`_trajectory.json`、`session_summary.json`；Midscene `report/` 下那份 HTML（文件名由 SDK 生成、含时间戳，别按固定名找）+ `report/screenshots/`）＋ gherkai 自有的 step 级 `evidence.json` 与它引用的截图 | 「那一步模型看见了什么、怎么想的」 | 各引擎产物子目录下（见 §2） | 可（但删了排障就只剩状态码） |
+| **现场证据** | 引擎原生产物（Nova trajectory `.html`+`_trajectory.json`、`session_summary.json`；Midscene `report/` 下那份 HTML（文件名由 SDK 生成、含时间戳，别按固定名找）+ `report/screenshots/`）+ gherkai 自有的 step 级 `evidence.json` 与它引用的截图 | 「那一步模型看见了什么、怎么想的」 | 各引擎产物子目录下（见 §2） | 可（但删了排障就只剩状态码） |
 
 三条推论，排障时最常用：
 

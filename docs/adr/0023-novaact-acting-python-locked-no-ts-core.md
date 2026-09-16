@@ -13,7 +13,7 @@
 **关键认知翻转——Nova Act 的 REST API 是「客户端驱动的工具调用循环」：服务端是大脑，客户端是手。**
 
 - `InvokeActStep` **不是**服务端帮你操作浏览器。它返回一串 `calls`（`browser.{action}` / `tool.{name}`），即「模型想执行的下一步动作」；**真正的点击/输入要靠客户端自己执行**，再把 `CallResult` 回传。`CreateAct.status` 枚举里赫然有 `PENDING_CLIENT_ACTION`——据此状态机语义可推断服务端会**阻塞等客户端**把动作做完（推断，文档未直用 "block" 字样）。
-- 自然语言指令在 `CreateAct` 的 `task` 字段（1–10000 字符）+ 客户端提供的 `toolSpecs`，**不在** `InvokeActStep`。
+- 自然语言指令在 `CreateAct` 的 `task` 字段（1-10000 字符）+ 客户端提供的 `toolSpecs`，**不在** `InvokeActStep`。
 - 全部 16 个 REST operation **没有一个**是「启动浏览器/导航/截图/点击」；`CreateSession` 的 body 只有 `clientToken`，**完全没有浏览器/AgentCore 相关参数**。REST 服务自身根本不持有浏览器概念。
 - **Python `nova-act` SDK 的真正价值，不是大脑（大脑在服务端、语言无关），而是它内置的那套 Playwright/CDP 客户端循环**——把服务端发的 `browser.*` 指令落到真实浏览器（含 AgentCore Browser）上。这套「手」的胶水，只有 Python SDK 有（仓库语言占比来自先前调查、本 ADR 未复验：约 98.6% Python，零 TS/JS）。
 - **Strands Agents（TS）填不上这个洞**：TS SDK（`strands-agents/sdk-typescript`，已 archived，迁到 `harness-sdk`）只带 Notebook / File / HTTP 三个 tool，**没有 Nova Act 浏览器 tool**，也没有自然语言浏览器 acting 能力。它只做 LLM/工具编排。

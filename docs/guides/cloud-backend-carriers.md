@@ -12,7 +12,7 @@
 | **三个 Lambda 的部署 asset** | `lambdas/` 的 handler 源（`reconciler.py` 一份两个入口 + `exit_observer.py`）+ `BackendStack.LAMBDA_ASSET_PACKAGES` 逐项**从当前 venv 已安装位置复制**的 import 包（含 `gherkai_core` / `gherkai_runtime`）。boto3 由 Lambda runtime 自带 | 同一条 `gherkai deploy`（asset 由 `stack._build_lambda_asset()` 现摊到临时目录） | asset 内容变 → CDK 算出的 asset hash 变 → 这次 deploy 的变更集里就带三个函数的代码更新 | `stack.BackendStack.LAMBDA_ASSET_PACKAGES`；落点经 env `names.LAMBDA_ASSET_DIR_ENV` 从命令进程传给 cdk 起的 app 进程 |
 | **官方基底镜像** | 同版本 worker 包 + SDK 运行时 + 协议层，**零使用方内容**（`engines/*/Dockerfile`） | 维护者 CI 按 tag 发到 GHCR（`workers.GHCR_BASE_IMAGE`） | GHCR 上就位**之后**，还要 `gherkai deploy` 第 2 步 pull→push 进你自己的 ECR 才在云端可用——**运行时不直连 GHCR** | `ghcr.io/…/gherkai-worker-<engine>:<版本>` |
 | **使用方的 variant 镜像** | 基底 + 你 `COPY` 进去的确定性 step 目录（`GHERKAI_STEPS_DIR`）——**云端跑哪套 step 由镜像决定**，不由提交侧 `--steps-dir` 决定 | 你自己 build（gherkai 不拥有构建）+ `gherkai deploy push-worker`（推 ECR、从模板注册 revision、写 SSM 映射） | 写完 SSM 映射后，**下一次提交**解析到新 revision；已在跑的 run 不换（见 §5） | ECR tag = `names.image_tag(CLI 版本, variant)`；repo 名 = `names.ecr_repo_name` |
-| **SSM 参数** | `version`（后端版本戳）、`vpc`（生效 VPC 档）、`worker-template/<engine>`（模板 revision ARN）、`subnets`/`security-groups`——这四族是 **stack 资源**；`worker-image/<engine>/<tag>`（映射 JSON）、`worker-default`（默认 variant 指针）——这两族由命令 `put_parameter` 写 | 前四族随 cdk 事务；后两族由 `push-worker` / `deploy` 的第 2–4 步写 | `put_parameter` 即生效（**覆盖语义、最后写者赢**） | 路径全经 `names.ssm_path(prefix, key)`，键名常量在 `gherkai_runtime.names` |
+| **SSM 参数** | `version`（后端版本戳）、`vpc`（生效 VPC 档）、`worker-template/<engine>`（模板 revision ARN）、`subnets`/`security-groups`——这四族是 **stack 资源**；`worker-image/<engine>/<tag>`（映射 JSON）、`worker-default`（默认 variant 指针）——这两族由命令 `put_parameter` 写 | 前四族随 cdk 事务；后两族由 `push-worker` / `deploy` 的第 2-4 步写 | `put_parameter` 即生效（**覆盖语义、最后写者赢**） | 路径全经 `names.ssm_path(prefix, key)`，键名常量在 `gherkai_runtime.names` |
 
 ```mermaid
 flowchart LR
@@ -123,9 +123,9 @@ cloud 提交是**定义期解析、运行期照抄**，这条是「重推 varian
 |---|---|
 | 部署命令的全部 flag、VPC 三档、权限清单、`destroy` 后的残留 | [`deploy_aws/README.md`](../../deploy_aws/README.md) |
 | worker 镜像交付全部决策/护栏/被拒方案 | [ADR 0038](../adr/0038-worker-image-delivery.md) |
-| 分发形态、`gherkai deploy` 的 provider 接缝、版本单旋钮与 skew | [ADR 0037](../adr/0037-distribution-and-packaging.md) 决策 6–7 |
+| 分发形态、`gherkai deploy` 的 provider 接缝、版本单旋钮与 skew | [ADR 0037](../adr/0037-distribution-and-packaging.md) 决策 6-7 |
 | 云资源 IaC / 命名 / IAM / preflight | [ADR 0033](../adr/0033-iac-aws-backend-and-composition-wiring.md) |
-| Fargate 执行面：`stopTimeout` ↔ `deploy --stop-timeout`（默认值与 Fargate 硬上限见 `stack.BackendStack` 的两个常量与 `--help`）、grace 预算、中断韧性 | [ADR 0032](../adr/0032-fargate-execution-environment.md)（真容器校准结论 3–4） |
+| Fargate 执行面：`stopTimeout` ↔ `deploy --stop-timeout`（默认值与 Fargate 硬上限见 `stack.BackendStack` 的两个常量与 `--help`）、grace 预算、中断韧性 | [ADR 0032](../adr/0032-fargate-execution-environment.md)（真容器校准结论 3-4） |
 | 事件驱动推进链、超时闹钟、投影与提交点 | [`execution-and-reconciliation.md`](./execution-and-reconciliation.md)、[ADR 0034](../adr/0034-detached-batch-reconciler.md) |
 | 判定怎么算出来（run/job/step 三级与严重度） | [`verdict-model.md`](./verdict-model.md) |
 | 产物与证据的落点、S3 key 布局 | [`artifacts-and-evidence.md`](./artifacts-and-evidence.md) |

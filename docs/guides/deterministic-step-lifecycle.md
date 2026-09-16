@@ -29,7 +29,7 @@ flowchart LR
 
 ## 1. 派发决策链：一条 step 文本进 worker 之后
 
-worker 拿到的只有 `keyword` + 裸 `text`（＋可选多行参数）。派发是**三级、短路、无优先级配置**（Nova `run_scope.py` `_run_step`、Midscene `run-scope.mts` `runStep`，同序）：
+worker 拿到的只有 `keyword` + 裸 `text`（+可选多行参数）。派发是**三级、短路、无优先级配置**（Nova `run_scope.py` `_run_step`、Midscene `run-scope.mts` `runStep`，同序）：
 
 1. **确定性注册表**：`match(text)` / `matchDeterministic(text)`——用**裸 step 文本**扫全表（不 unquote、不拼多行参数）。命中一条 → 调 handler，**不投票**。
 2. **内建 URL 导航**：文本里有引号包裹的 `https?://…`（Nova `_URL_IN_QUOTES` / Midscene `URL_IN_QUOTES`）→ 直接 `go_to_url` / `page.goto`，不问 AI。
@@ -69,7 +69,7 @@ worker 拿到的只有 `keyword` + 裸 `text`（＋可选多行参数）。派�
 
 文本视图只标少数派：命中标 `← 确定性: <description>`、冲突标 `← ⚠`，走 AI 的**不标**（噪声控制，`render.py` `_dispatch_hint`）。`--json` 的 `deterministic` 键是三态（`null` / 命中 / `conflict`）、且整批省略也有含义——字段级语义见 [`cli-json-contract.md`](./cli-json-contract.md)，本文不重复。冲突在 `plan` 只是 ⚠ + stderr 警告，**退出码仍 0**（改措辞是 feature 作者能做的，修注册表不是）。
 
-> 权威：[ADR 0036](../adr/0036-deterministic-capability-discovery.md)（决策 1–4：元数据必填、自述入口、CLI 子命令、plan 标注与降级）、[ADR 0037](../adr/0037-distribution-and-packaging.md) 决策 4（自述入口与 job 模式同样先加载 steps 目录）。
+> 权威：[ADR 0036](../adr/0036-deterministic-capability-discovery.md)（决策 1-4：元数据必填、自述入口、CLI 子命令、plan 标注与降级）、[ADR 0037](../adr/0037-distribution-and-packaging.md) 决策 4（自述入口与 job 模式同样先加载 steps 目录）。
 
 ## 3. 两个真值源、一个岔口：为什么「改了 steps，云端没变」是设计
 

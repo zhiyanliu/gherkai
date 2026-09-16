@@ -1,6 +1,6 @@
 # 0038. worker 镜像交付：基底、variant 与推送注册
 
-> **Status:** Accepted（2026-09-09）—— 命令族（`push-worker` / `list-workers`；`delete-worker` 退 2 占位、留重议闸门）、`gherkai deploy` 四步、运行时显式 revision（`RunMeta.worker_task_defs` + STATE 顶层 `worker_task_def_arns`）、preflight variant 解析、runs 表 status GSI 与推进器 SSM 读、`tools/build_push_workers.py` 退役全部实装；**实测项 1–7 清零**（真账户：两引擎 base/自定义 variant 跑通、幂等/孤儿复用/并发 push、静默期回收与在跑 run 拦截、重推期间在跑 run 仍用旧 revision、兼容路径、升级演练；多平台镜像缺口定为已知边界、不补校验）。基底镜像随 [0037](./0037-distribution-and-packaging.md) 的 v1.4.0 首发进 GHCR，`gherkai deploy` 基底同步在真账户走通。[0033](./0033-iac-aws-backend-and-composition-wiring.md) 的镜像/task-def/ECR/权限表述已加历史注与权限登记。
+> **Status:** Accepted（2026-09-09）—— 命令族（`push-worker` / `list-workers`；`delete-worker` 退 2 占位、留重议闸门）、`gherkai deploy` 四步、运行时显式 revision（`RunMeta.worker_task_defs` + STATE 顶层 `worker_task_def_arns`）、preflight variant 解析、runs 表 status GSI 与推进器 SSM 读、`tools/build_push_workers.py` 退役全部实装；**实测项 1-7 清零**（真账户：两引擎 base/自定义 variant 跑通、幂等/孤儿复用/并发 push、静默期回收与在跑 run 拦截、重推期间在跑 run 仍用旧 revision、兼容路径、升级演练；多平台镜像缺口定为已知边界、不补校验）。基底镜像随 [0037](./0037-distribution-and-packaging.md) 的 v1.4.0 首发进 GHCR，`gherkai deploy` 基底同步在真账户走通。[0033](./0033-iac-aws-backend-and-composition-wiring.md) 的镜像/task-def/ECR/权限表述已加历史注与权限登记。
 
 ## 背景与问题
 

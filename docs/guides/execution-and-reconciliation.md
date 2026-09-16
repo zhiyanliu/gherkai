@@ -9,7 +9,7 @@ gherkai 跑一个 run 有**两种驱动模型**，按命令分流：
 - **同步驱动（`run`，下称前台）**：CLI 进程内的 `schedule()`（`core/gherkai_core/schedule.py`）全程在线——起 worker、消费事件流、判超时、收结果，一个循环干到底。local 下 CLI 关掉即中止（worker 随事件管道断开而早亡）；cloud 下关掉 CLI 只是放弃收结果——已在跑的 Fargate task 无人 StopTask，会继续跑完并继续计费。
 - **无状态驱动（`submit` + `status`，下称后台/后台跑批）**：没有常驻的「调度进程」。核心是一个**纯编排步骤 `reconcile.tick`**（`core/gherkai_core/reconcile.py`；判定与决策是 `gherkai_core.project` 的纯函数，副作用全经注入的 EventLog/RunStore/Launcher）：读全量事件重放 → 算出当前该干什么 → 条件写落库 → 抢占式起下一个 job。**谁都可以来调它推一步**，它自己不记状态、不假设上一步是谁推的——这就是「无状态」的含义。
 
-不管哪种驱动，worker→`core` 的话语只有两条：**事件流**（`scope_started`/`step_done`/… 的逐条事件）＋ **进程退出信号**（退出码——不是 worker「说」的，是父进程/平台观察到的；[ADR 0024](../adr/0024-worker-core-protocol.md) 协议）。判定「两件都要」：事件内容完整 ∧ 进程干净终止（防假绿）。两种驱动的差别本质是**有没有人在线守着听**——前台有：schedule 全程在线、听完即用，退出信号由 Engine adapter 当场观察；后台没有常驻听者：事件流被持久化、退出信号也被翻成 `task_exited` 记进同一份日志，于是谁来推进都能纯靠重放这份日志（各组合的物理通道见 §5）。
+不管哪种驱动，worker→`core` 的话语只有两条：**事件流**（`scope_started`/`step_done`/… 的逐条事件）+ **进程退出信号**（退出码——不是 worker「说」的，是父进程/平台观察到的；[ADR 0024](../adr/0024-worker-core-protocol.md) 协议）。判定「两件都要」：事件内容完整 ∧ 进程干净终止（防假绿）。两种驱动的差别本质是**有没有人在线守着听**——前台有：schedule 全程在线、听完即用，退出信号由 Engine adapter 当场观察；后台没有常驻听者：事件流被持久化、退出信号也被翻成 `task_exited` 记进同一份日志，于是谁来推进都能纯靠重放这份日志（各组合的物理通道见 §5）。
 
 两种驱动共享同一份 `core`（parse/plan/project/判定模型），但**一个 run 只属于一种驱动**。cloud 档的分界线是 `detached` 标记：cloud `submit` 会在 runs 表的 STATE item 上写它，云端三 Lambda 据它只认领**后台 run**（带 `detached` 标记的），前台 run 的地盘绝不踏进（怎么保证的见 §7）。
 
@@ -44,7 +44,7 @@ flowchart TB
 | **local** | CLI 进程内 `schedule()`；worker = 本机子进程（fd3 事件流直达）；超时 = schedule 循环内计时到点；CLI 关掉即中止                                                      | **per-run 推进进程**（`setsid` 脱离 CLI）循环调 `tick`；事件旁路落 SQLite；该进程自兼退出观察者；本机需保持开机                                                                                                                               |
 | **cloud** | 同一个进程内 `schedule()`，worker 换 Fargate task（job-in 走 S3、事件走 DDB events 表、adapter 轮询读）；云端 Lambda 对这种 run **一律不动作**（no-op；两道闸门，见 §7） | **三 Lambda 事件驱动链**：kicker（冷启动）、reconciler（主推进）、exit-observer（退出观察），事件串起、非调用链（§4b）；提交完关机也能跑完（例外：`--expose-local` 隧道模式下本机须保持开机联网，[ADR 0035](../adr/0035-local-app-testing-via-tunnel.md)） |
 
-顺带钉一个贯穿全文的粒度：**job = scope**——一个 `@scope` 分组就是一个调度/执行单位（上云时坐实，[ADR 0017](../adr/0017-cloud-execution-fargate-over-runtime.md)），§6 超时闹钟的 per-(run,scope) 即 per-job。四格的详细解剖在 §3–§4；横切机制（事件通道/退出观察/超时）在 §5–§6。四格的权威：[ADR 0034](../adr/0034-detached-batch-reconciler.md)（两种驱动与后台跑批全部决策）、[ADR 0026](../adr/0026-schedule-module.md)（同步 schedule）、[ADR 0032](../adr/0032-fargate-execution-environment.md)（Fargate 执行面）。
+顺带钉一个贯穿全文的粒度：**job = scope**——一个 `@scope` 分组就是一个调度/执行单位（上云时坐实，[ADR 0017](../adr/0017-cloud-execution-fargate-over-runtime.md)），§6 超时闹钟的 per-(run,scope) 即 per-job。四格的详细解剖在 §3-§4；横切机制（事件通道/退出观察/超时）在 §5-§6。四格的权威：[ADR 0034](../adr/0034-detached-batch-reconciler.md)（两种驱动与后台跑批全部决策）、[ADR 0026](../adr/0026-schedule-module.md)（同步 schedule）、[ADR 0032](../adr/0032-fargate-execution-environment.md)（Fargate 执行面）。
 
 ## 3. 前台 `run` 的一生
 
@@ -115,7 +115,7 @@ sequenceDiagram
 - 多宿主并发安全：`tick` 幂等，job 抢占走 CAS 条件写（PENDING→RUNNING 只有一个赢家）、投影落库走 HWM（投影只前进不后退的水位）与终态条件写——Stream 分片并发触发多个 Lambda 实例、叠加 `status --wait` 踢起的 kicker 调用，全都安全。
 - **并发上限：声明随 definition 走，部署侧只留一道 cap**（与超时预算同构：都属 run 的定义）。`run` 与 `submit` 都把 `--max-concurrency` 落进 definition（`RunMeta.max_concurrency`），detached 的推进器一律读 meta——local per-run 进程与 `status --wait` 接力者都以 meta 为准（各自的 flag 只是 meta 无值时的回落，接力不会悄悄改这个 run 的并行度）；同步 `run` 在同进程内直接用 flag（没有通道问题），meta 照落、只为 definition 诚实；cloud 档取 `min(definition 声明, 部署侧 cap)`，cap = reconciler/kicker 的 Lambda env `MAX_CONCURRENCY`（IaC 设，当前 8），闸的是 worker（Fargate task）的并行数、per-run 语义（单 run 内最多几个 job 并行），是**上限、不是真源**——提交侧在 cap 以内说了算；**local 无 cap**。声明超 cap 时不会静默按 cap 跑：`submit --backend cloud` 的 preflight 读推进器 env 比一下，超了就提示「本 run 将按 cap 并行、要更高并发改 IaC」——但**不拦提交**（对比 `REPORT_DIR` 不一致会退 2）。旧 definition（无此值）按 1，与打通前行为一致。为何 cap 归部署方、local 为何无 cap、为何超 cap 只提示不拦——why 见 [ADR 0034](../adr/0034-detached-batch-reconciler.md) 机制四。
 
-> 权威：[ADR 0034](../adr/0034-detached-batch-reconciler.md)（机制一–四、端到端流程、重议闸门）、[ADR 0033](../adr/0033-iac-aws-backend-and-composition-wiring.md)（三 Lambda 的 IaC/权限/触发面）。
+> 权威：[ADR 0034](../adr/0034-detached-batch-reconciler.md)（机制一-四、端到端流程、重议闸门）、[ADR 0033](../adr/0033-iac-aws-backend-and-composition-wiring.md)（三 Lambda 的 IaC/权限/触发面）。
 
 ### 4c. 读侧：进度怎么看、结果落在哪
 
@@ -134,7 +134,7 @@ sequenceDiagram
 
 ## 5. 同一条事件流的四条物理通道（横切对照）
 
-§3–§4 按跑法纵切讲完了生命周期；从这节起横过来看跨组合的机制。第一条就是 §1 说的那条事件流——逻辑上它在四个组合里完全同构（同一套事件、同一份解析），物理载体却各不相同：
+§3-§4 按跑法纵切讲完了生命周期；从这节起横过来看跨组合的机制。第一条就是 §1 说的那条事件流——逻辑上它在四个组合里完全同构（同一套事件、同一份解析），物理载体却各不相同：
 
 | 组合         | worker 写到哪                        | 谁读、怎么读                                                                       |
 |--------------|--------------------------------------|-----------------------------------------------------------------------------------|

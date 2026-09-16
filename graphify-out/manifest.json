@@ -5,8 +5,8 @@
     "semantic_hash": ""
   },
   "cli/tests/test_backend_cloud.py": {
-    "mtime": 1789474240.4020128,
-    "ast_hash": "5e771b1564c0894ffd8c4bb83b7c42e8",
+    "mtime": 1789538913.1461332,
+    "ast_hash": "8192ef9016d522c516c07b0296fb46ca",
     "semantic_hash": ""
   },
   "cli/tests/test_main.py": {
@@ -75,8 +75,8 @@
     "semantic_hash": "2ec4902e5c100c7e945c3eadb222c4b2"
   },
   "core/tests/test_fargate_engine.py": {
-    "mtime": 1789462222.8895247,
-    "ast_hash": "88b2ba45d564237aa14a4f69cfb292b5",
+    "mtime": 1789538913.149684,
+    "ast_hash": "9cd187598462de437371389448902b90",
     "semantic_hash": ""
   },
   "core/tests/test_lifecycle_states.py": {
@@ -205,9 +205,9 @@
     "semantic_hash": "99c4e0cf7f14774b0dd3233eadd40558"
   },
   "core/README.md": {
-    "mtime": 1788862853.9012249,
-    "ast_hash": "ff5b555fadc1eb592fdb969f76183364",
-    "semantic_hash": "ff5b555fadc1eb592fdb969f76183364"
+    "mtime": 1789538913.1472194,
+    "ast_hash": "6507e1d048db1ab9c6b093c4b5f86a58",
+    "semantic_hash": ""
   },
   "core/tests/README.md": {
     "mtime": 1788935700.7876713,
@@ -245,8 +245,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0028-transient-network-ssl-resilience.md": {
-    "mtime": 1789444172.1650774,
-    "ast_hash": "036bb356b3b4cf4edf0a53c185ac50a6",
+    "mtime": 1789538913.15473,
+    "ast_hash": "501b789a66aaa7fe379b6aaedff5582a",
     "semantic_hash": ""
   },
   "docs/code-health-review.md": {
@@ -260,13 +260,13 @@
     "semantic_hash": ""
   },
   "CLAUDE.md": {
-    "mtime": 1789444234.3327038,
-    "ast_hash": "da3c4a8e534ce9b5d39908770b30cda7",
+    "mtime": 1789538005.2260933,
+    "ast_hash": "57835a45088991a4f23ea20bc5ee2f37",
     "semantic_hash": ""
   },
   "CONTEXT.md": {
-    "mtime": 1789466260.8186135,
-    "ast_hash": "51a5bf1e3d4cb24530dfec55502b3c1f",
+    "mtime": 1789538913.1445339,
+    "ast_hash": "0bf4d030bfe375a8a126c3af1f1aa605",
     "semantic_hash": ""
   },
   "README.md": {
@@ -275,13 +275,13 @@
     "semantic_hash": ""
   },
   "cli/README.md": {
-    "mtime": 1789537566.7550426,
-    "ast_hash": "b49975ddcb44478f24aa5a27a152ad25",
+    "mtime": 1789538913.1449437,
+    "ast_hash": "a9f4fac8671cd9303a5da53070f42be3",
     "semantic_hash": ""
   },
   "docs/adr/0001-scope-limited-to-english-ui.md": {
-    "mtime": 1789455661.451683,
-    "ast_hash": "e32bec0c3adfb276fd2e475b07ac6f4c",
+    "mtime": 1789538913.152304,
+    "ast_hash": "39e03ae63c3f45d5a5f643abb5dd83a4",
     "semantic_hash": ""
   },
   "docs/adr/0002-midscene-not-driven-by-gpt55.md": {
@@ -290,8 +290,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0003-midscene-grounding-qwen3vl-bedrock.md": {
-    "mtime": 1788935769.98627,
-    "ast_hash": "f569548ee4338c3893511cb38b2ff972",
+    "mtime": 1789538913.1526575,
+    "ast_hash": "df9934527ac802dd4ded206c8764ab79",
     "semantic_hash": ""
   },
   "docs/adr/0004-novaact-iam-auth-via-workflow.md": {
@@ -355,8 +355,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0016-execution-architecture-core-lib-run-model.md": {
-    "mtime": 1789475850.0485961,
-    "ast_hash": "087fb38ef34469387ae6c3e2f88c0231",
+    "mtime": 1789538913.1532645,
+    "ast_hash": "7c4e5eb563d2d5b53f2cd16f8d354eda",
     "semantic_hash": ""
   },
   "docs/adr/0021-local-cucumber-patch-step-keyword-disambiguation.md": {
@@ -370,13 +370,13 @@
     "semantic_hash": ""
   },
   "docs/adr/0023-novaact-acting-python-locked-no-ts-core.md": {
-    "mtime": 1785230026.0169964,
-    "ast_hash": "d433e28ccaea45df3762c4934dca3fe0",
-    "semantic_hash": "d433e28ccaea45df3762c4934dca3fe0"
+    "mtime": 1789538913.1538126,
+    "ast_hash": "b6dfbdfce0e647ee349ee38fe530bacb",
+    "semantic_hash": ""
   },
   "docs/adr/0024-worker-core-protocol.md": {
-    "mtime": 1789455790.5118217,
-    "ast_hash": "8b83c8d48ff1bdffb6ac3aee122d7661",
+    "mtime": 1789538913.1542106,
+    "ast_hash": "4aa83f553b4f5460caa8a7faf1acce73",
     "semantic_hash": ""
   },
   "docs/adr/0026-schedule-module.md": {
@@ -390,8 +390,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0029-engine-artifacts-to-s3.md": {
-    "mtime": 1789466385.1902943,
-    "ast_hash": "71a9d1665e4055a8e4081a7a4d8c1612",
+    "mtime": 1789538913.1550553,
+    "ast_hash": "ef957df6900dd0c4b23a59dfb8da0155",
     "semantic_hash": ""
   },
   "docs/adr/0030-realtime-persistence-seam.md": {
@@ -420,8 +420,8 @@
     "semantic_hash": ""
   },
   "docs/doc-health-review.md": {
-    "mtime": 1789534401.1504624,
-    "ast_hash": "d6b33710aac7720d7a7fd39863f5253a",
+    "mtime": 1789538005.2262735,
+    "ast_hash": "f487e30d2ed60d768de6f5268cdfe8df",
     "semantic_hash": ""
   },
   "engines/midscene/README.md": {
@@ -440,8 +440,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0035-local-app-testing-via-tunnel.md": {
-    "mtime": 1789466423.9869416,
-    "ast_hash": "be3cd19678cb5bd95755d2c4555b48e7",
+    "mtime": 1789538913.155643,
+    "ast_hash": "5c90dcd5f4bf3c31f8fcda0129067e13",
     "semantic_hash": ""
   },
   "cli/tests/test_tunnel_cli.py": {
@@ -455,18 +455,18 @@
     "semantic_hash": ""
   },
   "docs/guides/execution-and-reconciliation.md": {
-    "mtime": 1789466514.5544746,
-    "ast_hash": "2d67f627eec7e563da3a79d1f0d97e8f",
+    "mtime": 1789538913.1583188,
+    "ast_hash": "e4199e94d89bfc1cc68247513be934e1",
     "semantic_hash": ""
   },
   "docs/adr/0037-distribution-and-packaging.md": {
-    "mtime": 1789476243.3674333,
-    "ast_hash": "070118389da1d8d4bfb4a950af6e958d",
+    "mtime": 1789538913.156077,
+    "ast_hash": "347880769723923e89e1e1fe71e56f04",
     "semantic_hash": ""
   },
   "docs/adr/0038-worker-image-delivery.md": {
-    "mtime": 1789466368.876975,
-    "ast_hash": "8e1334d349e460f63ae6ffda8a854056",
+    "mtime": 1789538913.1562777,
+    "ast_hash": "c7ad19e240276eba1f6d3a6a4b1d1fff",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/__init__.py": {
@@ -475,8 +475,8 @@
     "semantic_hash": ""
   },
   "cli/gherkai_cli/__main__.py": {
-    "mtime": 1789537578.299377,
-    "ast_hash": "9da355c58bd3cf0b9cb8aae065bf6637",
+    "mtime": 1789538913.1454465,
+    "ast_hash": "ec0e1d3c23ac52dacf33356f7170e1e7",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/render.py": {
@@ -510,8 +510,8 @@
     "semantic_hash": "9a5d0f19084bf1edefae72124a1068ae"
   },
   "core/gherkai_core/adapters/event_log/ddb.py": {
-    "mtime": 1788945352.441381,
-    "ast_hash": "aba2825d668dd9519f2d240425912243",
+    "mtime": 1789538913.147644,
+    "ast_hash": "214ffb16ac807f2dcca6c04e0bed30f9",
     "semantic_hash": ""
   },
   "core/gherkai_core/adapters/event_log/sqlite.py": {
@@ -520,8 +520,8 @@
     "semantic_hash": ""
   },
   "core/gherkai_core/adapters/fargate_engine.py": {
-    "mtime": 1789463437.9913666,
-    "ast_hash": "36bb7a7608d42e0d0bab582981a6986e",
+    "mtime": 1789538913.1478586,
+    "ast_hash": "8f7ea5448344969625c6f23c95d8a80a",
     "semantic_hash": ""
   },
   "core/gherkai_core/adapters/report_store/__init__.py": {
@@ -645,8 +645,8 @@
     "semantic_hash": ""
   },
   "runtime/gherkai_runtime/compose.py": {
-    "mtime": 1789474732.6886299,
-    "ast_hash": "397e6ec784530a599644feaaf590d3a6",
+    "mtime": 1789538913.1635487,
+    "ast_hash": "0d81689c6c04e82dfd9a1815eb908567",
     "semantic_hash": ""
   },
   "runtime/gherkai_runtime/detached.py": {
@@ -665,8 +665,8 @@
     "semantic_hash": ""
   },
   "runtime/gherkai_runtime/tunnel_host.py": {
-    "mtime": 1789005933.8102107,
-    "ast_hash": "c96726c9200c7b6928386c8233a8772d",
+    "mtime": 1789538913.1638975,
+    "ast_hash": "c0aff10a462e410bb249a7414820ce78",
     "semantic_hash": ""
   },
   "runtime/pyproject.toml": {
@@ -675,8 +675,8 @@
     "semantic_hash": ""
   },
   "runtime/tests/test_compose.py": {
-    "mtime": 1789474163.4871633,
-    "ast_hash": "20d58c90e7b8566b11c07fdde94fa9f2",
+    "mtime": 1789538913.1641583,
+    "ast_hash": "cafb680ecf185a50db10ce8e41fa89f1",
     "semantic_hash": ""
   },
   "runtime/tests/test_detached_launcher.py": {
@@ -695,9 +695,9 @@
     "semantic_hash": ""
   },
   "runtime/README.md": {
-    "mtime": 1788862853.9010756,
-    "ast_hash": "74777ba933e137505a21072a988758ff",
-    "semantic_hash": "74777ba933e137505a21072a988758ff"
+    "mtime": 1789538913.1629736,
+    "ast_hash": "e64de37fe6c209064d9d2930fbe7f2fa",
+    "semantic_hash": ""
   },
   "engines/midscene/src/bin.mts": {
     "mtime": 1788770970.1262362,
@@ -720,8 +720,8 @@
     "semantic_hash": ""
   },
   "engines/midscene/src/lib/event-sink.mts": {
-    "mtime": 1788940678.7581198,
-    "ast_hash": "bd5be4087037bcf93fb1d5c8907888f9",
+    "mtime": 1789538913.1592436,
+    "ast_hash": "fed0f21440d833f7e0649185b9944224",
     "semantic_hash": ""
   },
   "engines/midscene/src/lib/job-source.mts": {
@@ -780,8 +780,8 @@
     "semantic_hash": "7d14876d49a0941e85307eddd6af45d8"
   },
   "engines/midscene/src/worker/run-scope.mts": {
-    "mtime": 1789473972.5085936,
-    "ast_hash": "0e7477b5bb8ff634a67c6d021d632ebc",
+    "mtime": 1789538913.1604238,
+    "ast_hash": "76035b596d6c99967605f38c6e6f56b6",
     "semantic_hash": ""
   },
   "engines/midscene/src/worker/run-scope.test.mts": {
@@ -840,9 +840,9 @@
     "semantic_hash": ""
   },
   "engines/novaact/gherkai_worker_novaact/lib/event_sink.py": {
-    "mtime": 1788853899.7685478,
-    "ast_hash": "ac9b20e000dfd4726854de8d8c0f6e24",
-    "semantic_hash": "ac9b20e000dfd4726854de8d8c0f6e24"
+    "mtime": 1789538913.16129,
+    "ast_hash": "ef6b9546ef28863099da5417995102ff",
+    "semantic_hash": ""
   },
   "engines/novaact/gherkai_worker_novaact/lib/job_source.py": {
     "mtime": 1786557387.4290538,
@@ -855,8 +855,8 @@
     "semantic_hash": "bbd7d7a20b20ab9f5ba26cd8fa1083a4"
   },
   "engines/novaact/gherkai_worker_novaact/run_scope.py": {
-    "mtime": 1789475843.767639,
-    "ast_hash": "c561633db04cb5dbeb4dfbbaf233741a",
+    "mtime": 1789538913.1616104,
+    "ast_hash": "7f8f38e1515b327445e43a81f51499c0",
     "semantic_hash": ""
   },
   "engines/novaact/gherkai_worker_novaact/user_steps.py": {
@@ -1045,8 +1045,8 @@
     "semantic_hash": ""
   },
   "deploy_aws/gherkai_deploy_aws/workers.py": {
-    "mtime": 1789476237.7777584,
-    "ast_hash": "f2b077c91d26696511ac09ac685226c4",
+    "mtime": 1789538913.151236,
+    "ast_hash": "3c79d2916cf8fae1e9e6235e2bbc1cdb",
     "semantic_hash": ""
   },
   "runtime/tests/test_names_worker.py": {
@@ -1110,13 +1110,13 @@
     "semantic_hash": ""
   },
   "DEVELOPMENT.md": {
-    "mtime": 1789475772.8893867,
-    "ast_hash": "a47a9d502683bd041840629fff2005b3",
+    "mtime": 1789538913.1447113,
+    "ast_hash": "3f739e2bad51a3613923535710a1336b",
     "semantic_hash": ""
   },
   "docs/adr/0039-user-facing-surfaces-no-internal-references.md": {
-    "mtime": 1789466488.9907491,
-    "ast_hash": "346803f5cf8cbe512d90995a0e38985b",
+    "mtime": 1789538913.1563795,
+    "ast_hash": "3b9a587ab85d44dc2fed61e479aa6c9f",
     "semantic_hash": ""
   },
   "tools/graphify_refresh.sh": {
@@ -1150,8 +1150,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0041-agent-facing-cli-affordances.md": {
-    "mtime": 1789466285.564814,
-    "ast_hash": "ae40253a06b311f4aa1f61ff8ceef312",
+    "mtime": 1789538913.1565292,
+    "ast_hash": "dc5b87a97f85d5bf65fa37a6085560c1",
     "semantic_hash": ""
   },
   "cli/tests/test_cli_json_contract.py": {
@@ -1165,8 +1165,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0042-step-evidence-and-explain.md": {
-    "mtime": 1789537566.7547233,
-    "ast_hash": "2d6e4c751613e50200c106fcbb9fa19e",
+    "mtime": 1789538913.156724,
+    "ast_hash": "315a114985c5aa2fdf59c44f4f50f705",
     "semantic_hash": ""
   },
   "engines/midscene/src/worker/evidence.mts": {
@@ -1205,18 +1205,18 @@
     "semantic_hash": ""
   },
   "docs/guides/artifacts-and-evidence.md": {
-    "mtime": 1789466321.2724233,
-    "ast_hash": "e4e2d5449ad858b603c9b7ce13263eff",
+    "mtime": 1789538913.1573699,
+    "ast_hash": "fca2c790ae9d2184220547c94a6a5cbe",
     "semantic_hash": ""
   },
   "docs/guides/cloud-backend-carriers.md": {
-    "mtime": 1789476104.0182824,
-    "ast_hash": "070fdacdc56a26dd9b5b6c967daa4d6b",
+    "mtime": 1789538913.15776,
+    "ast_hash": "01966e7e00564bf8afb1c530249675ad",
     "semantic_hash": ""
   },
   "docs/guides/deterministic-step-lifecycle.md": {
-    "mtime": 1789476266.1670272,
-    "ast_hash": "0f14a4d8520a4cc47594fe024d5aa6f2",
+    "mtime": 1789538913.1579928,
+    "ast_hash": "90169ccbae579c8a28624637ee99cef2",
     "semantic_hash": ""
   },
   "docs/guides/verdict-model.md": {
@@ -1230,8 +1230,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0043-agent-skill-for-driving-gherkai.md": {
-    "mtime": 1789537566.7552803,
-    "ast_hash": "6a4a68794d26acc32914bba4dc2a71ec",
+    "mtime": 1789538913.1569824,
+    "ast_hash": "24a77fe238fce4393e17c72eee1a1e7f",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skill_install.py": {
@@ -1257,21 +1257,6 @@
   "deploy_aws/tests/test_skill_deploy_tokens.py": {
     "mtime": 1789359406.491964,
     "ast_hash": "57a4e8025be04273a1f1d8dd98611524",
-    "semantic_hash": ""
-  },
-  "skills/gherkai-evals/fixtures/wiki-search/reports/20260914T043329Z-1fe896/manifest.json": {
-    "mtime": 1789360481.0,
-    "ast_hash": "bf5ec22e92e04b6e7727c435d4fc8e4f",
-    "semantic_hash": ""
-  },
-  "skills/gherkai-evals/fixtures/wiki-search/steps/anchors.mts": {
-    "mtime": 1789360379.0,
-    "ast_hash": "5a17d92af1c9d2d80d657d7825e36f13",
-    "semantic_hash": ""
-  },
-  "skills/gherkai-evals/fixtures/wiki-search/steps/anchors.py": {
-    "mtime": 1789360379.0,
-    "ast_hash": "e83e254f3a5b413a49d3f1ad88b55d3e",
     "semantic_hash": ""
   },
   "skills/gherkai-evals/materialize.py": {
@@ -1309,81 +1294,6 @@
     "ast_hash": "d0f7cf1e813fa38948243b6c848ab9c9",
     "semantic_hash": ""
   },
-  "skills/gherkai-evals/fixtures/wiki-search/reports/20260914T043329Z-1fe896/index.html": {
-    "mtime": 1789360481.0,
-    "ast_hash": "ff71fa4860c4aec45a7efc1a4547d1a5",
-    "semantic_hash": ""
-  },
-  "skills/gherkai-evals/fixtures/wiki-search/reports/20260914T043329Z-1fe896/nova-trajectories/evidence/features-wiki_search.feature-13-93f62c2a/step-2/act-0-frame-0.jpg": {
-    "mtime": 1789360811.3275137,
-    "ast_hash": "4eec0b180cf61580fee45d7236f900c8",
-    "semantic_hash": ""
-  },
-  "skills/gherkai-evals/fixtures/wiki-search/reports/20260914T043329Z-1fe896/nova-trajectories/evidence/features-wiki_search.feature-6-82629648/step-1/act-0-frame-1.jpg": {
-    "mtime": 1789360811.3270724,
-    "ast_hash": "4eec0b180cf61580fee45d7236f900c8",
-    "semantic_hash": ""
-  },
-  "skills/gherkai-evals/fixtures/wiki-search/reports/20260914T043329Z-1fe896/nova-trajectories/evidence/features-wiki_search.feature-6-82629648/step-3/act-0-frame-0.jpg": {
-    "mtime": 1789360811.3272343,
-    "ast_hash": "4eec0b180cf61580fee45d7236f900c8",
-    "semantic_hash": ""
-  },
-  "skills/gherkai-evals/fixtures/wiki-search/reports/20260914T043329Z-1fe896/nova-trajectories/evidence/features-wiki_search.feature-6-82629648/step-4/act-0-frame-0.jpg": {
-    "mtime": 1789360811.3273735,
-    "ast_hash": "4eec0b180cf61580fee45d7236f900c8",
-    "semantic_hash": ""
-  },
-  "skills/gherkai-evals/fixtures/wiki-search/reports/20260914T043329Z-1fe896/jobs/features%2Fwiki_search.feature%3A13.json": {
-    "mtime": 1789360811.3280122,
-    "ast_hash": "0ce80176a618576ae75914599ad2fc26",
-    "semantic_hash": ""
-  },
-  "skills/gherkai-evals/fixtures/wiki-search/reports/20260914T043329Z-1fe896/jobs/search.json": {
-    "mtime": 1789360811.3280902,
-    "ast_hash": "9cea842cfbf887789a3dd79bcd07358a",
-    "semantic_hash": ""
-  },
-  "skills/gherkai-evals/fixtures/wiki-search/reports/20260914T043329Z-1fe896/nova-trajectories/01a09e31-3099-7331-8898-f27f18ae720c/session_summary.json": {
-    "mtime": 1789360480.0,
-    "ast_hash": "ff731a13409b00167877e3d732ee1c8d",
-    "semantic_hash": ""
-  },
-  "skills/gherkai-evals/fixtures/wiki-search/reports/20260914T043329Z-1fe896/nova-trajectories/01a09e31-372b-7376-9768-93c7e0625960/session_summary.json": {
-    "mtime": 1789360446.0,
-    "ast_hash": "227ca6fd38303522dc996aa360414d50",
-    "semantic_hash": ""
-  },
-  "skills/gherkai-evals/fixtures/wiki-search/reports/20260914T043329Z-1fe896/nova-trajectories/evidence/features-wiki_search.feature-13-93f62c2a/step-2/evidence.json": {
-    "mtime": 1789360811.327459,
-    "ast_hash": "3eb19ebf05b4bcf63489c3bc99892093",
-    "semantic_hash": ""
-  },
-  "skills/gherkai-evals/fixtures/wiki-search/reports/20260914T043329Z-1fe896/nova-trajectories/evidence/features-wiki_search.feature-6-82629648/step-1/evidence.json": {
-    "mtime": 1789360811.326996,
-    "ast_hash": "2cbd59f5352a3e173ce1830ece630b58",
-    "semantic_hash": ""
-  },
-  "skills/gherkai-evals/fixtures/wiki-search/reports/20260914T043329Z-1fe896/nova-trajectories/evidence/features-wiki_search.feature-6-82629648/step-3/evidence.json": {
-    "mtime": 1789360811.327168,
-    "ast_hash": "56b14f3f016b7fdd325c44ef5783caa2",
-    "semantic_hash": ""
-  },
-  "skills/gherkai-evals/fixtures/wiki-search/reports/20260914T043329Z-1fe896/nova-trajectories/evidence/features-wiki_search.feature-6-82629648/step-4/evidence.json": {
-    "mtime": 1789360811.3273187,
-    "ast_hash": "003afdb2d0d64e08e7b03f694ce56f89",
-    "semantic_hash": ""
-  },
-  "skills/gherkai-evals/fixtures/wiki-search/reports/20260914T043329Z-1fe896/run_meta.json": {
-    "mtime": 1789360811.3267255,
-    "ast_hash": "eaa533d77bd3b56556f0a1967d415e65",
-    "semantic_hash": ""
-  },
-  "skills/gherkai-evals/fixtures/wiki-search/reports/20260914T043329Z-1fe896/run_state.json": {
-    "mtime": 1789360481.0,
-    "ast_hash": "4e7efd85f7143d53d07d616b41bfe3eb",
-    "semantic_hash": ""
-  },
   "skills/gherkai-evals/evals.json": {
     "mtime": 1789438082.8485687,
     "ast_hash": "4b1822eb00b272a0828ba0349d09c1d0",
@@ -1394,21 +1304,6 @@
     "ast_hash": "d6a7f7e29a3e9bb2ec8b603270468ae4",
     "semantic_hash": ""
   },
-  "skills/gherkai-evals/fixtures/broken-steps/steps/title.py": {
-    "mtime": 1789368297.6848984,
-    "ast_hash": "15c794be7aec51728f0c0aa83d86e65b",
-    "semantic_hash": ""
-  },
-  "skills/gherkai-evals/fixtures/job-failure/reports/20260914T064548Z-94622e/manifest.json": {
-    "mtime": 1789368401.0,
-    "ast_hash": "7203d32440110f2ca3dcc11ece8027cd",
-    "semantic_hash": ""
-  },
-  "skills/gherkai-evals/fixtures/nova-zh/reports/20260914T065107Z-60843a/manifest.json": {
-    "mtime": 1789368717.0,
-    "ast_hash": "862bc18d766afb5991d2a605993fbd7c",
-    "semantic_hash": ""
-  },
   "skills/gherkai-evals/run_evals.py": {
     "mtime": 1789375294.712854,
     "ast_hash": "f363aeae0dfbc46fb828a6e9c521c64b",
@@ -1417,146 +1312,6 @@
   "skills/gherkai-evals/trigger_eval.py": {
     "mtime": 1789369040.0478764,
     "ast_hash": "bb66523161ade9d696fea15b5b563d5a",
-    "semantic_hash": ""
-  },
-  "skills/gherkai-evals/fixtures/job-failure/reports/20260914T064548Z-94622e/index.html": {
-    "mtime": 1789368401.0,
-    "ast_hash": "695d69504b27300a992ca8cf48522fa2",
-    "semantic_hash": ""
-  },
-  "skills/gherkai-evals/fixtures/nova-zh/reports/20260914T065107Z-60843a/index.html": {
-    "mtime": 1789368717.0,
-    "ast_hash": "4155105938fe7d605f4cacb116d7a382",
-    "semantic_hash": ""
-  },
-  "skills/gherkai-evals/fixtures/job-failure/reports/20260914T064548Z-94622e/nova-trajectories/evidence/features-browse.feature-13-19-0f906707/step-1/act-0-frame-1.jpg": {
-    "mtime": 1789368622.8854434,
-    "ast_hash": "4eec0b180cf61580fee45d7236f900c8",
-    "semantic_hash": ""
-  },
-  "skills/gherkai-evals/fixtures/job-failure/reports/20260914T064548Z-94622e/nova-trajectories/evidence/features-browse.feature-13-20-f40ee148/step-1/act-0-frame-1.jpg": {
-    "mtime": 1789368622.885278,
-    "ast_hash": "4eec0b180cf61580fee45d7236f900c8",
-    "semantic_hash": ""
-  },
-  "skills/gherkai-evals/fixtures/nova-zh/reports/20260914T065107Z-60843a/midscene-run/report/screenshots/59f3fb63-d7dd-40b6-801c-9402a7694b05.jpeg": {
-    "mtime": 1789368950.1885016,
-    "ast_hash": "4eec0b180cf61580fee45d7236f900c8",
-    "semantic_hash": ""
-  },
-  "skills/gherkai-evals/fixtures/nova-zh/reports/20260914T065107Z-60843a/midscene-run/report/screenshots/5fc4aae7-4839-48ff-b80a-ba656fc8e6b2.jpeg": {
-    "mtime": 1789368950.1886013,
-    "ast_hash": "4eec0b180cf61580fee45d7236f900c8",
-    "semantic_hash": ""
-  },
-  "skills/gherkai-evals/fixtures/nova-zh/reports/20260914T065107Z-60843a/midscene-run/report/screenshots/9e7ef467-c971-4670-a361-7a18c8cb0c77.jpeg": {
-    "mtime": 1789368950.1886554,
-    "ast_hash": "4eec0b180cf61580fee45d7236f900c8",
-    "semantic_hash": ""
-  },
-  "skills/gherkai-evals/fixtures/nova-zh/reports/20260914T065107Z-60843a/midscene-run/report/screenshots/d8161f5e-5fdf-482e-95e6-3f50eb5e71b9.jpeg": {
-    "mtime": 1789368950.1885533,
-    "ast_hash": "4eec0b180cf61580fee45d7236f900c8",
-    "semantic_hash": ""
-  },
-  "skills/gherkai-evals/fixtures/nova-zh/reports/20260914T065107Z-60843a/nova-trajectories/evidence/features-zh_terms.feature-4-d886a701/step-1/act-0-frame-0.jpg": {
-    "mtime": 1789368950.1887908,
-    "ast_hash": "4eec0b180cf61580fee45d7236f900c8",
-    "semantic_hash": ""
-  },
-  "skills/gherkai-evals/fixtures/nova-zh/reports/20260914T065107Z-60843a/nova-trajectories/evidence/features-zh_terms.feature-4-d886a701/step-2/act-0-frame-0.jpg": {
-    "mtime": 1789368950.1889029,
-    "ast_hash": "4eec0b180cf61580fee45d7236f900c8",
-    "semantic_hash": ""
-  },
-  "skills/gherkai-evals/fixtures/job-failure/reports/20260914T064548Z-94622e/jobs/deep-dive.json": {
-    "mtime": 1789368372.0,
-    "ast_hash": "01c63720a5e52717e1345025b182bf5f",
-    "semantic_hash": ""
-  },
-  "skills/gherkai-evals/fixtures/job-failure/reports/20260914T064548Z-94622e/jobs/features%2Fbrowse.feature%3A13%3A19.json": {
-    "mtime": 1789368622.8856506,
-    "ast_hash": "3a0d1a6df1243af9f53c0fcdf9ae4994",
-    "semantic_hash": ""
-  },
-  "skills/gherkai-evals/fixtures/job-failure/reports/20260914T064548Z-94622e/jobs/features%2Fbrowse.feature%3A13%3A20.json": {
-    "mtime": 1789368622.885775,
-    "ast_hash": "c5b416f48e2134934099c4260db9e074",
-    "semantic_hash": ""
-  },
-  "skills/gherkai-evals/fixtures/job-failure/reports/20260914T064548Z-94622e/nova-trajectories/01a09eaa-55d6-7147-bddb-14bc6da5cad3/session_summary.json": {
-    "mtime": 1789368398.0,
-    "ast_hash": "3730dfd4abf95c9953acbc4eaff3201b",
-    "semantic_hash": ""
-  },
-  "skills/gherkai-evals/fixtures/job-failure/reports/20260914T064548Z-94622e/nova-trajectories/01a09eaa-58f7-75b0-bfe1-75c1e5f16e0a/session_summary.json": {
-    "mtime": 1789368400.0,
-    "ast_hash": "c08f2597343fad8b167986c1a2be6aac",
-    "semantic_hash": ""
-  },
-  "skills/gherkai-evals/fixtures/job-failure/reports/20260914T064548Z-94622e/nova-trajectories/evidence/features-browse.feature-13-19-0f906707/step-1/evidence.json": {
-    "mtime": 1789368622.8853745,
-    "ast_hash": "20b99a480b3b4d72e8d425110fc0bb40",
-    "semantic_hash": ""
-  },
-  "skills/gherkai-evals/fixtures/job-failure/reports/20260914T064548Z-94622e/nova-trajectories/evidence/features-browse.feature-13-20-f40ee148/step-1/evidence.json": {
-    "mtime": 1789368622.8852174,
-    "ast_hash": "4bdd59a89e40de420d6f65bb3b9df070",
-    "semantic_hash": ""
-  },
-  "skills/gherkai-evals/fixtures/job-failure/reports/20260914T064548Z-94622e/run_meta.json": {
-    "mtime": 1789368348.0,
-    "ast_hash": "b6661468c6d6d2552cce3ddc418f7fd4",
-    "semantic_hash": ""
-  },
-  "skills/gherkai-evals/fixtures/job-failure/reports/20260914T064548Z-94622e/run_state.json": {
-    "mtime": 1789368401.0,
-    "ast_hash": "a5a16df073b9fb9eba358e5caba694a4",
-    "semantic_hash": ""
-  },
-  "skills/gherkai-evals/fixtures/nova-zh/reports/20260914T065107Z-60843a/jobs/zh-midscene.json": {
-    "mtime": 1789368950.1892426,
-    "ast_hash": "674c1819073ca51dcf43e566943ecdc8",
-    "semantic_hash": ""
-  },
-  "skills/gherkai-evals/fixtures/nova-zh/reports/20260914T065107Z-60843a/jobs/zh-novaact.json": {
-    "mtime": 1789368950.189155,
-    "ast_hash": "4c040463b525ea067b30eb7cadbdfedf",
-    "semantic_hash": ""
-  },
-  "skills/gherkai-evals/fixtures/nova-zh/reports/20260914T065107Z-60843a/midscene-run/evidence/features_zh_terms.feature_10-3f5c0f82/step-1/evidence.json": {
-    "mtime": 1789368950.1879578,
-    "ast_hash": "dfd8783ee2178599bc6a41b5ddfecdb6",
-    "semantic_hash": ""
-  },
-  "skills/gherkai-evals/fixtures/nova-zh/reports/20260914T065107Z-60843a/midscene-run/evidence/features_zh_terms.feature_10-3f5c0f82/step-2/evidence.json": {
-    "mtime": 1789368950.1880412,
-    "ast_hash": "6189245c1d97dadd18e573b6f1262cb3",
-    "semantic_hash": ""
-  },
-  "skills/gherkai-evals/fixtures/nova-zh/reports/20260914T065107Z-60843a/nova-trajectories/01a09eaf-38c5-7312-8b39-506f5911035a/session_summary.json": {
-    "mtime": 1789368716.0,
-    "ast_hash": "b1976588469747e5307222035df4e174",
-    "semantic_hash": ""
-  },
-  "skills/gherkai-evals/fixtures/nova-zh/reports/20260914T065107Z-60843a/nova-trajectories/evidence/features-zh_terms.feature-4-d886a701/step-1/evidence.json": {
-    "mtime": 1789368950.1887426,
-    "ast_hash": "630029ba91c0b93938a73387c1167a87",
-    "semantic_hash": ""
-  },
-  "skills/gherkai-evals/fixtures/nova-zh/reports/20260914T065107Z-60843a/nova-trajectories/evidence/features-zh_terms.feature-4-d886a701/step-2/evidence.json": {
-    "mtime": 1789368950.1888573,
-    "ast_hash": "b11e0ffe66914f7739efb3872ce3ed6f",
-    "semantic_hash": ""
-  },
-  "skills/gherkai-evals/fixtures/nova-zh/reports/20260914T065107Z-60843a/run_meta.json": {
-    "mtime": 1789368667.0,
-    "ast_hash": "a762cbdae5f9204729a35a02545dbf69",
-    "semantic_hash": ""
-  },
-  "skills/gherkai-evals/fixtures/nova-zh/reports/20260914T065107Z-60843a/run_state.json": {
-    "mtime": 1789368717.0,
-    "ast_hash": "6f9ac1513cfe40bdd3cca9561bd1c164",
     "semantic_hash": ""
   },
   "skills/README.md": {
@@ -1597,6 +1352,11 @@
   "engines/midscene/src/worker/error-text.test.mts": {
     "mtime": 1789476058.4173944,
     "ast_hash": "0bcf3ecfb90a218dae5164aca618eaec",
+    "semantic_hash": ""
+  },
+  ".vscode/settings.json": {
+    "mtime": 1789538913.1706197,
+    "ast_hash": "c65c2bb229c60f782cdb2f96f3e0985a",
     "semantic_hash": ""
   }
 }

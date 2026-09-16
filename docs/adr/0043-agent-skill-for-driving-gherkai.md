@@ -58,7 +58,7 @@ Claude 的 plugin marketplace 只覆盖 Claude、仪式更多，现阶段不做�
 9. **失败汇报模板**：agent 向人汇报时按固定小结构——哪步（scenario / step 文本）、判定与原因（`message`）、模型看见了什么（thought 一句 + 截图地址）、建议动作（改断言写法 / 改确定性 step / 换引擎 / 被测应用的问题），让人一眼能定夺。
 10. **别做的事**（每条带为什么）：别把 `submit` 退 0 当通过；别把不带 `--wait` 的 `status` 退 0 当通过；别解析 HTML 报告或 SDK 原生 trajectory；别猜产物路径、顺 `ref` 走；cloud 改了 steps 不推镜像等于没改；别只写一侧的确定性 step；`--grace` 别调小（仅 `run`；云端 `submit` 的对应旋钮在部署侧 `gherkai deploy --stop-timeout`）。
 
-`references/`（按域）：`cli-json-contract.md`（转换副本，机读消费）；`engines.md`（两引擎的选择依据与语言限制、evidence 字段的引擎填充差异清单、确定性 step 的**最小模板**（Nova = Python、Midscene = TS，含 `description` / `example` 元数据，离线也能写）与响亮失败读法、两侧正则的对称约定、完整写法指向各自 README 的 `blob/HEAD/` 绝对 URL）；`setup-and-diagnosis.md`（域 B：安装 CLI 与引擎 worker 的几条路、`doctor` 各段怎么读、`list-engines` 与 worker 定位、凭证 / region、ngrok 前置、skew 退 2 的处置）；`cloud-backend.md`（域 C：部署方 / 使用方分工、`deploy` 交人与前置清单、`submit`–`status`–`explain --backend cloud` 一条线、variant 与 `push-worker`、`list-workers`、升级传播顺序、多环境 prefix、A→C 的交接、`--expose-local` 例外）。正文里 A 的工作流内联，B / C 只留路由句与指针。是否需要 `scripts/`，由评测循环里「多个测试用例是否重复手写同一个 helper」决定（skill-creator 的判据），初版不带。
+`references/`（按域）：`cli-json-contract.md`（转换副本，机读消费）；`engines.md`（两引擎的选择依据与语言限制、evidence 字段的引擎填充差异清单、确定性 step 的**最小模板**（Nova = Python、Midscene = TS，含 `description` / `example` 元数据，离线也能写）与响亮失败读法、两侧正则的对称约定、完整写法指向各自 README 的 `blob/HEAD/` 绝对 URL）；`setup-and-diagnosis.md`（域 B：安装 CLI 与引擎 worker 的几条路、`doctor` 各段怎么读、`list-engines` 与 worker 定位、凭证 / region、ngrok 前置、skew 退 2 的处置）；`cloud-backend.md`（域 C：部署方 / 使用方分工、`deploy` 交人与前置清单、`submit`-`status`-`explain --backend cloud` 一条线、variant 与 `push-worker`、`list-workers`、升级传播顺序、多环境 prefix、A→C 的交接、`--expose-local` 例外）。正文里 A 的工作流内联，B / C 只留路由句与指针。是否需要 `scripts/`，由评测循环里「多个测试用例是否重复手写同一个 helper」决定（skill-creator 的判据），初版不带。
 
 ### 六、护栏：skill 是产品面，同受 0039 约束，且与 CLI 真值逐项对照
 
@@ -69,7 +69,7 @@ Claude 的 plugin marketplace 只覆盖 Claude、仪式更多，现阶段不做�
 - **JSON 键对照**：参与比对的 token = 匹配 `^[a-z][a-z0-9_]*$` 且不含 `-` `/` `.` `@` 的反引号 token，减去一张入库豁免表（引擎名、状态值、目录名等；命中未登记的非键即红，逼人显式登记）；真值集取契约页字段表**任一列**里的反引号键加「顶层 / 每项 …」散文行记的键（`report_refs[]` 行的 `kind` / `ref`、`votes` 的 `yes` / `total` 这类真键只出现在含义列，首列-only 会把它们逼进非键豁免表、语义反了），不取契约页全页反引号超集（它有意混入 flag 与路径——键形状正则已把这两类滤掉）。
 - **转换副本**：`transform(docs/guides/cli-json-contract.md) == references/cli-json-contract.md`，且转换用到的禁词映射表命中未登记词即红。
 - **目录白名单与 wheel 内容**：`cli/gherkai_cli/skills/gherkai/` 下只允许 `SKILL.md`、`references/`、（按需）`scripts/`，其它文件 / 目录即红（挡评测资产悄悄长回来；`.gherkai-skill-version` 是安装态产物、不在此列）。**wheel 内 `gherkai_cli/skills/gherkai/` 的文件集逐条等于源目录的文件集**（源侧按文件系统遍历取、排除 `__pycache__/` 与 `*.pyc`，不用 `git ls-files`），落在 `.github/scripts/check_dist_metadata.py`（CI 打包 smoke 与发布 gate 共用同一份）。理由：hatchling 默认认从项目根向上找到的第一份 `.gitignore`（即 `cli/.gitignore`，今含 `reports/`），命中的路径静默不进 sdist / wheel，`git add -f` 强跟踪也救不回来——「文件受 git 跟踪」式护栏对这一格无效，只有集合相等能抓。
-- **形态**（规范硬约束的本地复刻，不引外部校验器）：`name` 匹配 `^[a-z0-9]+(-[a-z0-9]+)*$`、1–64 字符、**等于目录名**（安装目标目录名由它派生）；`description` 非空且 ≤ 1024 字符（description 优化循环天然把它写长，这条是刹车）；正文 ≤ 500 行**且** ≤ 12000 字符（行数管结构、字符数管上下文成本；超了往 `references/` 挪，不压行）；不做 frontmatter 字段白名单（各宿主有合法扩展键）。
+- **形态**（规范硬约束的本地复刻，不引外部校验器）：`name` 匹配 `^[a-z0-9]+(-[a-z0-9]+)*$`、1-64 字符、**等于目录名**（安装目标目录名由它派生）；`description` 非空且 ≤ 1024 字符（description 优化循环天然把它写长，这条是刹车）；正文 ≤ 500 行**且** ≤ 12000 字符（行数管结构、字符数管上下文成本；超了往 `references/` 挪，不压行）；不做 frontmatter 字段白名单（各宿主有合法扩展键）。
 - **不复述可调数字**：超时、grace、票数默认值一律「见 `--help`」，与 guides 同律。
 
 ### 七、评测与迭代：按 skill-creator 循环，缺省集零条真 AWS，舞台在仓库外
@@ -131,7 +131,7 @@ Claude 的 plugin marketplace 只覆盖 Claude、仪式更多，现阶段不做�
 
 **文档（反向链逐处列出，Accepted 前逐条核）**
 
-- [0041](./0041-agent-facing-cli-affordances.md)：决策五「skill 只链接它，不复制字段表」改为「唯一手写源仍在 docs、不进发行包；skill 带一份确定性转换的副本随 CLI 发行（为何不能 link、转换与护栏见 0043 决策四）」；「影响」节那条前向指代改为指向 0043 决策五、删掉工作循环的复述；Status 头两处：「agent skill（另立）」改指 0043；本 ADR 翻 Accepted 时改 `Partially-superseded-by 0043`，限定范围 = 决策五「skill 只链接它，不复制字段表」这一子句被反转，决策一–四与决策五其余部分不变。
+- [0041](./0041-agent-facing-cli-affordances.md)：决策五「skill 只链接它，不复制字段表」改为「唯一手写源仍在 docs、不进发行包；skill 带一份确定性转换的副本随 CLI 发行（为何不能 link、转换与护栏见 0043 决策四）」；「影响」节那条前向指代改为指向 0043 决策五、删掉工作循环的复述；Status 头两处：「agent skill（另立）」改指 0043；本 ADR 翻 Accepted 时改 `Partially-superseded-by 0043`，限定范围 = 决策五「skill 只链接它，不复制字段表」这一子句被反转，决策一-四与决策五其余部分不变。
 - [0037](./0037-distribution-and-packaging.md)（扩展、Status 不动）：「决策总览」CLI 行注「含随 wheel 带的 `skills/gherkai` 包数据（0043）」、末行不分发枚举加根 `skills/`（评测资产）；「工程布局」树补 `cli/gherkai_cli/skills/` 与根 `skills/gherkai-evals/`。
 - [0039](./0039-user-facing-surfaces-no-internal-references.md)（扩展、Status 不动）：面二表新增一行（`cli/gherkai_cli/skills/gherkai/**`；去向 = 随 CLI wheel 发行、由 `skill install` 拷进使用方项目 / agent 目录；链接只用绝对 URL），并把表前「四层只差去向与链接形态」改为不数数的说法（表已含 Release 正文一行，钉数字必再漂）；「护栏」节补 `cli/tests/test_skill.py` 这只 markdown 扫描器。
 - [0016](./0016-execution-architecture-core-lib-run-model.md)（扩展、Status 不动）：v1.4.0 完成线里「claude/ai skills 暴露」一项改为工具中立措辞并补权威指针到本 ADR；本 ADR 翻 Accepted 时同步该项完成状态。

@@ -62,6 +62,6 @@ SQLite / DynamoDB 事件流。**不想自己接线**就用 [`gherkai-runtime`](h
 
 ## 相关
 
-主页与问题反馈：https://github.com/zhiyanliu/gherkai#readme ｜ https://github.com/zhiyanliu/gherkai/issues
+主页与问题反馈：https://github.com/zhiyanliu/gherkai#readme | https://github.com/zhiyanliu/gherkai/issues
 
 设计文档（架构决策记录）见 https://github.com/zhiyanliu/gherkai/tree/HEAD/docs/adr
