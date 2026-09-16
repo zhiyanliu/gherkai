@@ -1,0 +1,5 @@
+# graphify 的扫描排除（gitignore 语法；.gitignore 里的项 graphify 已默认排除，这里只列入了库但不该进知识图的）。
+# 评测 fixture 是录下来的运行产物快照（截图是 1×1 的 PNG 占位、扩展名沿用原产物的 .jpg/.jpeg）——不是知识，
+# 且 graphify 按扩展名当 jpeg 送 Bedrock 会被拒（image/jpeg 声明 vs PNG 字节），整块语义抽取跟着失败。
+skills/gherkai-evals/fixtures/
+skills/gherkai-workspace/

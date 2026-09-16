@@ -120,7 +120,7 @@ tools/graphify_refresh.sh            # 抽取到收敛 → LLM 命名社区 + �
 tools/graphify_refresh.sh --force    # 全量重抽（清残留节点时；费用按全仓文档量计）
 ```
 
-需要 Bedrock 凭证，且 env 里有 `AWS_REGION` 或 `AWS_PROFILE`（脚本会回落 `aws configure get region`）。本机没凭证时到有凭证的机器上跑：rsync 工作区过去（排除 `.git` / `.venv` / `node_modules`，**带上 `graphify-out/`** 以复用增量缓存）→ 跑脚本 → rsync `graphify-out/` 回来时**排除 `.graphify_root`**（它存绝对路径，带回会让本地 hook 重建失败）→ commit `graph.json` / `GRAPH_REPORT.md` / `manifest.json` / `wiki/`（其余是缓存与滚动备份，`.gitignore` 已排除）。
+扫描范围由 `.gitignore` + 根 `.graphifyignore` 决定：评测 fixture（`skills/gherkai-evals/fixtures/`，运行产物快照、截图是 PNG 占位却带 .jpg 扩展名，送 Bedrock 会被拒并拖垮整块抽取）与评测 workspace 排除在图外。需要 Bedrock 凭证，且 env 里有 `AWS_REGION` 或 `AWS_PROFILE`（脚本会回落 `aws configure get region`）。本机没凭证时到有凭证的机器上跑：rsync 工作区过去（排除 `.git` / `.venv` / `node_modules`，**带上 `graphify-out/`** 以复用增量缓存）→ 跑脚本 → rsync `graphify-out/` 回来时**排除 `.graphify_root`**（它存绝对路径，带回会让本地 hook 重建失败）→ commit `graph.json` / `GRAPH_REPORT.md` / `manifest.json` / `wiki/`（其余是缓存与滚动备份，`.gitignore` 已排除）。
 
 ## 发布与版本
 
