@@ -34,6 +34,10 @@ worker argv 带 `--list-deterministic` 时：**不建会话、不读 stdin、零
 - `--steps-dir DIR`（flag > env `GHERKAI_STEPS_DIR` > 默认 `./steps` 存在即用）：查询入口同样加载使用方的确定性 step 目录，故清单 = 内建脚手架 + 使用方定制；解析与加载机制见 [0037](./0037-distribution-and-packaging.md) 决策 4。
 - 纯本地 spawn（秒级）、零 AWS；worker 起不来/输出非 JSON → 退 2 带诊断。
 
+### 4. worker 自述：`--capabilities`（引擎能力，第三个自述入口）
+
+worker argv 带 `--capabilities` 时：**不建会话、不读 stdin、零费用**，把自己的能力声明作一个 JSON 对象打到 stdout、退出 0：`{"schema_version": 1, "engine": "<name>", "min_grace_s": <number>}`。首个字段 `min_grace_s` 是 [0024](./0024-worker-core-protocol.md) grace 硬约束的下限——Nova = `NOVA_ACT_TIMEOUT_S`（组合根注入的 env，缺省 120）+ margin（worker 常量，可 env 覆盖）；Midscene = SIGTERM 收尾序列各段超时预算之和 + 余量，由 worker 里那些预算常量算出、不另写字面量。组合根经 `compose.engine_min_grace` 查询、进程内缓存、按 run 取 max；query 失败（旧 worker 不认 flag、非法 JSON、非零退出）与另两个入口同律 **fail-loud**（`WorkerSelfDescribeError`，不降级、不回落常量）。为将来的 browser 后端能力（[0037](./0037-distribution-and-packaging.md) 被拒方案 / 未来项）预留位置：加键不加入口。`schema_version` 只在键语义变化时递增。
+
 ### 4. plan 命中标注：「我写的这句会不会命中」
 
 清单查询解决「有什么可用」；feature 作者还需要「**我写的这句会不会命中**」——`plan` 预检对每个 step 标注路由预期。**不做 CLI 侧复刻匹配**（TS/Python 正则方言不同：`(?<n>)` vs `(?P<n>)`；复刻匹配语义 = 对 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)「设计要点」节「匹配放 worker，不放核心」条的漂移面），机制 = **worker 批量 match 查询**：
