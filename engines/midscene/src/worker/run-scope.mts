@@ -26,7 +26,7 @@ import {
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import { sigv4Fetch, signCdpUpgrade, getBaseUrl, MODEL, getRegion } from "../lib/agentcore-sigv4.mjs";
+import { sigv4Fetch, signCdpUpgrade, getBaseUrl, MODEL, modelFamily, getRegion } from "../lib/agentcore-sigv4.mjs";
 // 产物 S3 上传（ADR 0029；无落点 env 时 no-op 报 file://）；UPLOAD_TIMEOUT_MS 是自报 grace 下限的加数之一
 // （中断兜底抢传那一段的预算，见下 minGraceSeconds），单一真值住上传器、此处只引用。
 import { ArtifactUploader, UPLOAD_TIMEOUT_MS } from "../lib/artifact-upload.mjs";
@@ -153,7 +153,14 @@ function modelConfig() {
     MIDSCENE_MODEL_NAME: MODEL,
     MIDSCENE_MODEL_BASE_URL: getBaseUrl(),
     MIDSCENE_MODEL_API_KEY: "unused",
-    MIDSCENE_USE_QWEN3_VL: "true",
+    // 模型家族（ADR 0044 决策 2）：决定 Midscene 用哪套提示词与请求参数。由 modelFamily() 按模型 id 推断、
+    // 可经 env 显式指定，**取代旧的单一家族硬开关 `MIDSCENE_USE_QWEN3_VL: "true"`**（模型不再只有一个）。
+    // 已核 SDK 1.12.8 侧这两者语义等价：node_modules/@midscene/shared/dist/lib/env/ 下 constants.js 的
+    // DEFAULT_MODEL_CONFIG_KEYS 把 modelFamily 槽绑到 MIDSCENE_MODEL_FAMILY，parse-model-config.js 的
+    // parseOpenaiSdkConfig 取 `provider[keys.modelFamily] || legacyConfigToModelFamily(provider)`，而后者对
+    // MIDSCENE_USE_QWEN3_VL 的映射结果正是 "qwen3-vl"——两条路汇进同一个 modelFamily 字段、下游适配同一条，
+    // 且显式键优先于 legacy 推导。取值合法性由 SDK 自己校验（它按版本有一张 family 可取值表）。
+    MIDSCENE_MODEL_FAMILY: modelFamily(),
   };
 }
 const URL_IN_QUOTES = /"(https?:\/\/[^"]+)"/;
@@ -329,6 +336,11 @@ export async function main(): Promise<number> {
   // **两个非 job 入口与 job 循环之前**——故 --capabilities / --match-steps / plan 标注都反映使用方定制
   // （ADR 0036「真值单一」不变：注册表 = 内建 + 使用方）。加载失败 fail-loud（抛 → bin 一行 stderr + 非零退出）。
   await loadUserSteps();
+
+  // 模型家族的启动期校验（ADR 0044 决策 2）：推不出即抛 → bin 一行 stderr + 非零退出。**位置 load-bearing**：
+  // 在任何入口分派之前，故 `--capabilities` 这条 run 前置检查也会把坏配置挡下——不然要等到 job 模式里已经建好
+  // 云端浏览器会话、第一次调模型时才炸。返回值不用（真正取值在建连时的 modelConfig()）；这一步只为早失败。
+  modelFamily();
 
   // 批量 match 查询（ADR 0036 决策 4，plan 命中标注）：stdin 一行 JSON 数组（step 文本）→ stdout 一行
   // 逐条命中结果。匹配语义留在 worker（CLI 零复刻）；同样不建会话、零 AWS。

@@ -27,7 +27,44 @@ export function getRegion(): string {
 export function getBaseUrl(): string {
   return `https://bedrock-runtime.${getRegion()}.amazonaws.com/openai/v1`;
 }
-export const MODEL = "qwen.qwen3-vl-235b-a22b";
+// === 模型选择：默认钉死一个具体 id + env 覆盖（ADR 0044 决策 1/2）===
+// DEFAULT_MODEL 是「现值」：由本仓库评测集 A/B 选出、换默认只随发版（不用 latest 类别名——换模型是有评估的
+// 显式发布）。单独导出好让「默认是什么」被单测与调用方引用；MODEL 是**本进程真要喂给 SDK 的那个**（有覆盖即
+// 覆盖值），modelConfig() 与能力自述的 model_id 都取它，故两处天然跟 env 走、不会各自漂。
+// **模块级只取值、不校验、不抛**（同上面 region 的惰性 fail-loud 之律：import 本模块不该失败）；取不出 family
+// 那种坏配置由 modelFamily() 在 worker 启动期一次性挡下。
+export const DEFAULT_MODEL = "qwen.qwen3-vl-235b-a22b";
+export const MODEL = process.env.MIDSCENE_MODEL_ID || DEFAULT_MODEL;  // 空串当未设（镜像 ENV 留空 / export 空值）——与本文件 getRegion 的 `if (!r)`、modelFamily 的 `if (explicit)` 同一判据
+
+// 模型 id → Midscene family 的推断表，逐条对应 ADR 0044 决策 2 的那张表（**一处常量，别在别处再写一份**）。
+// 用正则而非通配串：ADR 表里带前导 `*` 的项不锚首——inference profile id 会带 region 前缀（`us.openai.gpt-6-astra`、
+// `global.openai.…`），锚首就漏；不带前导 `*` 的锚首（`^`）。右列 family 名的合法取值是 Midscene 的真值。
+const MODEL_FAMILY_PATTERNS: readonly (readonly [RegExp, string])[] = [
+  [/qwen\.qwen3-vl/, "qwen3-vl"],   // *qwen.qwen3-vl*（含 us./global. 前缀的 inference profile 形态）
+  [/openai\.gpt-6/, "gpt-6"],       // *openai.gpt-6*
+  [/openai\.gpt-5/, "gpt-5"],       // *openai.gpt-5*
+  [/kimi-k2/, "kimi"],              // *kimi-k2*
+  [/kimi-k3/, "kimi3"],             // *kimi-k3*
+  [/deepseek\./, "deepseek"],       // *deepseek.*
+  [/^zai\.glm-.*v/, "glm-v"],       // zai.glm-*v*
+];
+
+/** 交给 Midscene 的 family 名（ADR 0044 决策 2）：显式 env `MIDSCENE_MODEL_FAMILY` 优先，否则按上表按模型 id 推断。
+ *  family 决定 Midscene 用哪套提示词与请求参数，**猜错的后果是静默劣化而不是报错**，故推不出即抛、不兜底猜。
+ *  抛点被 worker 启动期调一次（run-scope.main，入口分派之前）→ 坏配置在建云端浏览器会话之前就被挡下。
+ *  显式值不在此校验取值：合法 family 清单随 Midscene 版本变、是 SDK 的真值，复刻即第二事实源，交 SDK 自己拒。 */
+export function modelFamily(modelId: string = MODEL): string {
+  const explicit = process.env.MIDSCENE_MODEL_FAMILY;
+  if (explicit) return explicit;
+  for (const [pattern, family] of MODEL_FAMILY_PATTERNS) {
+    if (pattern.test(modelId)) return family;
+  }
+  throw new Error(
+    `Midscene worker: 模型 ${modelId} 不在已知家族里——无法确定该按哪种模型去驱动浏览器。`
+    + `请设 MIDSCENE_MODEL_FAMILY 指明它属于哪个家族（可取值见 Midscene 文档 https://midscenejs.com/model-common-config.html），`
+    + `或把 MIDSCENE_MODEL_ID 换回已支持的模型。`
+  );
+}
 
 // === 模型连接：openai-node v6 的自定义 fetch，逐请求 SigV4 自签（service "bedrock"）===
 // 关键：只签最小手建请求 { host, content-type }，绝不签 SDK 整个 header 包（否则 403）。

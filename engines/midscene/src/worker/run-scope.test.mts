@@ -665,3 +665,70 @@ test("runStep: aiAct 抛异常 → error 的 step_done 仍带本 step 的 token 
   assert.equal(ev.status, "error");
   assert.deepEqual(ev.cost, { tokens: 150 });  // 曾整块丢掉 → total_tokens 低报
 });
+
+
+// ---- 模型选择（ADR 0044 决策 2/3）：喂 SDK 的家族键 + MIDSCENE_MODEL_ID 覆盖 + 坏配置在启动期就被挡下 ----
+// 家族键这条是纯逻辑（agentOpts 不碰 page/browser），env 那两条**必须真跑子进程**：MODEL 在模块 import 时定值
+// （模块级读 env），同进程里改 process.env 再 import 拿不到新值——「env 真的贯通到自述与 SDK 配置」只有另起
+// 一个带 env 的进程才照得出。
+test("agentOpts: modelConfig 喂 SDK 的是 MIDSCENE_MODEL_FAMILY（旧的单一家族硬开关不留）", async () => {
+  const savedRegion = process.env.AWS_REGION;
+  process.env.AWS_REGION = "us-east-1";  // modelConfig() 会求 region（缺则 fail-loud）
+  try {
+    const { agentOpts } = await importMod();
+    const { modelFamily, MODEL } = await import("../lib/agentcore-sigv4.mjs");
+    const cfg = agentOpts().modelConfig as Record<string, string>;
+    // 家族与模型名同源于 lib/agentcore-sigv4（不在这里写第二份字面量，否则测的只是「没变」而非「同源」）
+    assert.equal(cfg.MIDSCENE_MODEL_FAMILY, modelFamily(), "家族得由推断/显式 env 决定");
+    assert.equal(cfg.MIDSCENE_MODEL_NAME, MODEL);
+    // family 真跟 env 走（不是写死的字面量）：注入一个与默认模型推断值不同的家族，modelConfig 得跟着变
+    const savedFamily = process.env.MIDSCENE_MODEL_FAMILY;
+    process.env.MIDSCENE_MODEL_FAMILY = "gpt-6";
+    try {
+      assert.equal((agentOpts().modelConfig as Record<string, string>).MIDSCENE_MODEL_FAMILY, "gpt-6",
+                   "写死家族字面量 = 换了模型仍按旧家族驱动（静默劣化）");
+    } finally {
+      if (savedFamily === undefined) delete process.env.MIDSCENE_MODEL_FAMILY;
+      else process.env.MIDSCENE_MODEL_FAMILY = savedFamily;
+    }
+    // 旧开关只认一个家族（ADR 0044 被拒方案「单一 family 硬编码」）；两者同给还会被 SDK 当双模式冲突。
+    assert.ok(!("MIDSCENE_USE_QWEN3_VL" in cfg), `不该再给旧开关：${JSON.stringify(cfg)}`);
+  } finally {
+    if (savedRegion === undefined) delete process.env.AWS_REGION; else process.env.AWS_REGION = savedRegion;
+  }
+});
+
+/** 真跑 bin.mts 的入口，带定制 env（继承当前 env、但把模型那两个键按本条测试的意思显式置好，
+ *  免得跑测试的 shell 里已有的覆盖把结论污染）。 */
+async function spawnWorker(args: string[], modelEnv: Record<string, string | undefined>) {
+  const env: Record<string, string | undefined> = { ...process.env, ...modelEnv };
+  for (const [k, v] of Object.entries(modelEnv)) if (v === undefined) delete env[k];
+  const proc = spawn(process.execPath, [
+    "--import", import.meta.resolve("tsx"), path.join(import.meta.dirname, "..", "bin.mts"), ...args,
+  ], { stdio: ["ignore", "pipe", "pipe"], env: env as NodeJS.ProcessEnv });
+  const out: Buffer[] = []; const err: Buffer[] = [];
+  proc.stdout.on("data", (c) => out.push(c));
+  proc.stderr.on("data", (c) => err.push(c));
+  const code: number = await new Promise((r) => proc.on("close", r));
+  return { code, out: Buffer.concat(out).toString("utf-8"), err: Buffer.concat(err).toString("utf-8") };
+}
+
+test("--capabilities: MIDSCENE_MODEL_ID 覆盖时自报的 model_id 跟着变（ADR 0044 决策 2 的覆盖旋钮真生效）", async () => {
+  const { DEFAULT_MODEL } = await import("../lib/agentcore-sigv4.mjs");
+  const override = "us.openai.gpt-6-astra";  // inference profile 形态，且家族推得出（否则会被启动期校验挡下）
+  const { code, out, err } = await spawnWorker(["--capabilities"],
+    { MIDSCENE_MODEL_ID: override, MIDSCENE_MODEL_FAMILY: undefined });
+  assert.equal(code, 0, `应退 0，stderr=${err}`);
+  const got = JSON.parse(out);
+  assert.equal(got.model_id, override, "自报得反映 env 覆盖——doctor 正是拿这个键显示当前用哪个模型");
+  assert.notEqual(got.model_id, DEFAULT_MODEL, "覆盖了还等于默认 = 这个旋钮其实没接上");
+});
+
+test("模型家族推不出 → worker 启动期即非零退出，连自述入口都被挡下（不等到建了云端浏览器会话才炸）", async () => {
+  const { code, out, err } = await spawnWorker(["--capabilities"],
+    { MIDSCENE_MODEL_ID: "nonexistent.model-x", MIDSCENE_MODEL_FAMILY: undefined });
+  assert.notEqual(code, 0, `坏配置该被拒，stdout=${out}`);
+  assert.match(err, /MIDSCENE_MODEL_FAMILY/, `诊断得点名怎么办：${err}`);
+  // stdout 无 JSON 载荷 = 校验真的排在入口分派之前（挪到建连时这里会照出一个完整自述对象、rc 也回 0）。
+  assert.equal(/[{[]/.test(out), false, `stdout 不该有 JSON 载荷：${out}`);
+});
