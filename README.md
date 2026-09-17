@@ -54,6 +54,17 @@ flowchart TD
 
 全栈托管在 AWS 内。**被测 UI 的语言**：Midscene 引擎不限（中文 UI 上动作与 AI 断言实测与英文同级可靠）；Nova Act 引擎的支持范围是英文 UI——它在中文页面上能操作、能判页面级语义，但「正文里是否出现某个中文词」这类断言会稳定判否。非英文应用请用 `@engine:midscene` 路由。
 
+## 判定由谁做出：底层模型披露
+
+gherkai 自己不含模型，也不接收任何数据。每个 AI step 的操作与判定由下面两个模型完成，全部在**你的 AWS 账户、你选的 region** 里的托管服务上跑；发给模型的是 step 文本与被测页面的截图，浏览器会话也在你账户的 AgentCore Browser 里。唯一的第三方是可选的 ngrok：只有用 `--expose-local` 测本机应用时，云端浏览器到你本机应用的流量才经过 ngrok 的隧道。
+
+| 引擎 | 模型 | 服务 | 版本策略 | 怎么看 / 怎么换 |
+|---|---|---|---|---|
+| Nova Act（默认） | `nova-act-v1.0` | Amazon Nova Act | 钉死 GA 版本；换模型只随 gherkai 发版，并在 Release 说明里点明 | `gherkai doctor` 显示实际模型；环境变量 `NOVA_MODEL_ID` 可换（如 `nova-act-preview`，无支持承诺） |
+| Midscene | `qwen.qwen3-vl-235b-a22b` | Amazon Bedrock | 固定，随发版变 | `gherkai doctor` 显示；不可配置 |
+
+判定会随模型变：同一条断言在不同模型版本上可能翻转，所以我们不用「自动跟最新」的别名。费用来自模型调用与云端浏览器会话，按你账户的 AWS 账单计。
+
 ## 前置要求
 
 - AWS 凭证（默认 profile 即可），region **us-east-1**，需具备：

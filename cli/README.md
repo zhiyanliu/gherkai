@@ -21,6 +21,17 @@ pipx install --fetch-python missing gherkai   # 不用 uv 的人：pipx 回落�
 - 账号需开通：Bedrock 模型访问（Midscene 用 `qwen.qwen3-vl-235b-a22b`）、AgentCore Browser（`bedrock-agentcore`）、Nova Act（`nova-act` + 模型 `nova-act-v1.0`，默认钉此版本、环境变量 `NOVA_MODEL_ID` 可换）。
 - `--backend cloud` 还需要有人先跑过 `gherkai deploy` 把云端后端建好（见下「部署」）；只有用 `--expose-local` 测本机应用时才需要 [ngrok](https://ngrok.com/download) authtoken（免费账号即够，`ngrok config add-authtoken <token>` 或环境变量 `NGROK_AUTHTOKEN`）。
 
+## 底层模型
+
+AI step 的操作与判定由两个模型完成，都在你的 AWS 账户里跑，gherkai 自身不接收任何数据（只有 `--expose-local` 的隧道流量经过 ngrok）。
+
+| 引擎 | 模型 | 服务 | 版本策略 | 怎么看 / 怎么换 |
+|---|---|---|---|---|
+| Nova Act（默认） | `nova-act-v1.0` | Amazon Nova Act | 钉死，换模型只随发版并在 Release 说明里点明 | `gherkai doctor` 显示；环境变量 `NOVA_MODEL_ID` 可换（如 `nova-act-preview`，无支持承诺） |
+| Midscene | `qwen.qwen3-vl-235b-a22b` | Amazon Bedrock | 固定，随发版变 | `gherkai doctor` 显示；不可配置 |
+
+同一条断言在不同模型版本上可能翻转，所以不用「自动跟最新」的别名。
+
 ## 上手
 
 ```bash
