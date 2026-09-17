@@ -4,7 +4,7 @@
 push-worker 与 `gherkai deploy` 的基底同步之外，CLI / runtime / CDK 一概不碰容器引擎——口子收在这里，
 将来 podman（同形子命令）或「免容器引擎的 registry 直拷」（ADR 0038 重议闸门）都只改本文件。
 
-**这一期只实现 docker**：`--container-engine` / env `GHERKAI_CONTAINER_ENGINE` 认得别的名字，但给别的名字
+**当前只实现 docker**：`--container-engine` / env `GHERKAI_CONTAINER_ENGINE` 认得别的名字，但给别的名字
 是退 2（`UnsupportedContainerEngine`），不是静默回落 docker——静默回落会让人以为自己在用 podman。
 
 ## 两条与 ADR 绑死的事实（别「优化」掉）
@@ -31,7 +31,7 @@ from dataclasses import dataclass, field
 # `--container-engine` 的 env 等价物（flag 优先）。名字与 flag 同源，见 `resolve_container_engine`。
 CONTAINER_ENGINE_ENV = "GHERKAI_CONTAINER_ENGINE"
 DEFAULT_CONTAINER_ENGINE = "docker"
-# 这一期实装的引擎全集。podman 同形子命令、接得进来，但**没跑过就不敢说支持**（ADR 0038 重议闸门）。
+# 当前实装的引擎全集。podman 同形子命令、接得进来，但**没跑过就不敢说支持**（ADR 0038 重议闸门）。
 SUPPORTED_ENGINES = ("docker",)
 
 # worker 镜像的目标平台（ADR 0038「架构」：固定 linux/amd64，模板 revision 的 runtimePlatform = X86_64）。
@@ -181,7 +181,7 @@ class ContainerEngine:
 def resolve_container_engine(requested: str | None = None) -> ContainerEngine:
     """选容器引擎：`--container-engine` > env `GHERKAI_CONTAINER_ENGINE` > `docker`。
 
-    本期外的名字 → `UnsupportedContainerEngine`（调用方退 2）。**不静默回落 docker**：给了 `--container-engine
+    未实装的名字 → `UnsupportedContainerEngine`（调用方退 2）。**不静默回落 docker**：给了 `--container-engine
     podman` 却跑 docker，用户会以为自己验过 podman 路径（ADR 0038 只实现 docker）。
     """
     import os
@@ -189,8 +189,8 @@ def resolve_container_engine(requested: str | None = None) -> ContainerEngine:
     name = (requested or os.environ.get(CONTAINER_ENGINE_ENV) or DEFAULT_CONTAINER_ENGINE).strip()
     if name not in SUPPORTED_ENGINES:
         raise UnsupportedContainerEngine(
-            f"容器引擎 `{name}` 这一期未实装（只有 {'/'.join(SUPPORTED_ENGINES)}）。"
-            f"podman 等 docker 兼容引擎当前走不通；需要就提，别指望它已经能用。"
+            f"容器引擎 `{name}` 未实装，当前支持：{'/'.join(SUPPORTED_ENGINES)}。"
+            f"podman 等 docker 兼容引擎尚未支持；需要的话请提 issue。"
         )
     return ContainerEngine(name)
 

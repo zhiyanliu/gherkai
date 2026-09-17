@@ -940,8 +940,8 @@
     "semantic_hash": "c623737f256a98fc9e52ba4c647a14e8"
   },
   "cli/gherkai_cli/deploy.py": {
-    "mtime": 1789550271.677482,
-    "ast_hash": "71cb2c3c2403483c98b1b8a0d4541963",
+    "mtime": 1789651746.4603431,
+    "ast_hash": "0b38375d1417ad5fe4e6ef51fefddf6a",
     "semantic_hash": ""
   },
   "cli/tests/test_deploy_cmd.py": {
@@ -1151,7 +1151,7 @@
   },
   "engines/midscene/src/worker/fixtures/midscene_dump.json": {
     "mtime": 1789032560.2872798,
-    "ast_hash": "",
+    "ast_hash": "9f641f91ef686249b3f48414691e67e0",
     "semantic_hash": ""
   },
   "engines/novaact/gherkai_worker_novaact/evidence.py": {
@@ -1161,12 +1161,12 @@
   },
   "engines/novaact/tests/fixtures/nova_act_traj.json": {
     "mtime": 1789032560.2917712,
-    "ast_hash": "",
+    "ast_hash": "6ef1eea5b4ce11778547e2a61ac8376a",
     "semantic_hash": ""
   },
   "engines/novaact/tests/fixtures/nova_assert_traj.json": {
     "mtime": 1789032560.2911766,
-    "ast_hash": "",
+    "ast_hash": "395bd845d15c3095a69af066ff3e9022",
     "semantic_hash": ""
   },
   "engines/novaact/tests/test_evidence.py": {
@@ -1241,12 +1241,12 @@
   },
   "skills/gherkai-evals/evals.json": {
     "mtime": 1789438082.8485687,
-    "ast_hash": "",
+    "ast_hash": "4b1822eb00b272a0828ba0349d09c1d0",
     "semantic_hash": ""
   },
   "skills/gherkai-evals/trigger-eval.json": {
     "mtime": 1789366709.768668,
-    "ast_hash": "",
+    "ast_hash": "d6a7f7e29a3e9bb2ec8b603270468ae4",
     "semantic_hash": ""
   },
   "skills/gherkai-evals/run_evals.py": {
@@ -1311,7 +1311,7 @@
   },
   ".vscode/settings.json": {
     "mtime": 1789538913.1706197,
-    "ast_hash": "",
+    "ast_hash": "c65c2bb229c60f782cdb2f96f3e0985a",
     "semantic_hash": ""
   },
   "docs/adr/0044-engine-model-selection-and-override.md": {
@@ -1435,8 +1435,8 @@
     "semantic_hash": ""
   },
   "docs/user-guide/getting-started.md": {
-    "mtime": 1789650106.1276603,
-    "ast_hash": "b2ce614f2b913e6d31be6db63296603a",
+    "mtime": 1789651746.460871,
+    "ast_hash": "008be19147026e30c484fbfc51809251",
     "semantic_hash": ""
   },
   "docs/user-guide/local-app-testing.md": {
@@ -1450,8 +1450,8 @@
     "semantic_hash": ""
   },
   "docs/user-guide/troubleshooting.md": {
-    "mtime": 1789651562.428627,
-    "ast_hash": "e4dcc5d283b37feeca1cc0da21eeb525",
+    "mtime": 1789651746.4607027,
+    "ast_hash": "930c014928ad5f493365b87b4fe971f5",
     "semantic_hash": ""
   },
   "docs/user-guide/writing-deterministic-steps.md": {
