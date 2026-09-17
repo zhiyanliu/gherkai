@@ -410,8 +410,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0033-iac-aws-backend-and-composition-wiring.md": {
-    "mtime": 1789619869.2415874,
-    "ast_hash": "973ae67b35d982aa5c582dd5445f25ca",
+    "mtime": 1789629539.829638,
+    "ast_hash": "01845e9f0714d04a162a3fe8a2e68951",
     "semantic_hash": ""
   },
   "docs/adr/0034-detached-batch-reconciler.md": {
@@ -995,8 +995,8 @@
     "semantic_hash": ""
   },
   "deploy_aws/gherkai_deploy_aws/stack.py": {
-    "mtime": 1789619869.2405524,
-    "ast_hash": "34225b2b87e2a482cf4a66c52aff175d",
+    "mtime": 1789629539.828623,
+    "ast_hash": "fe25e71ee89a7bc5d31bee99cdf8bc17",
     "semantic_hash": ""
   },
   "deploy_aws/tests/synth_fixture.py": {
@@ -1015,8 +1015,8 @@
     "semantic_hash": ""
   },
   "deploy_aws/tests/test_stack.py": {
-    "mtime": 1789619947.81145,
-    "ast_hash": "fb3523e2f36e238f0a6183651847e579",
+    "mtime": 1789629539.8290825,
+    "ast_hash": "67ebac79cbae3f670f8b0160caf6977c",
     "semantic_hash": ""
   },
   ".github/workflows/README.md": {

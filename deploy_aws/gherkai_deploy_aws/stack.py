@@ -395,13 +395,17 @@ class BackendStack(Stack):
             # profile/*（GPT 系经跨区 inference profile 调用，IAM 要同时放行 profile ARN 与其路由到的各 region 模型 ARN）；
             # 可用集合由账户的 Bedrock 模型访问开关决定。仍锁死 service 与两种资源类型、不是裸 *（ADR 0033 IAM 表）。
             # foundation-model ARN 的 **account 段为空**（AWS 惯例），inference-profile 是账户资源；region 段用 `*`——
-            # region 是 code 可配运行期变量（AWS_REGION 注入，ADR 0016 决策 C）。曾 pin 单一 Qwen3-VL ARN、并靠跨语言对拍
-            # 测试盯 IaC 常量与 worker 常量一致——换模型即重部署 + IaC 耦合 worker 常量，被 ADR 0044 否掉。
+            # region 是 code 可配运行期变量（AWS_REGION 注入，ADR 0016 决策 C）；IAM 模拟器实证 `*` 也匹配 global 跨区
+            # 路由用的**无 region 段** FM ARN（`arn:aws:bedrock:::foundation-model/…`）。`project/default`：OpenAI 系模型在
+            # bedrock-runtime 端点上按 AWS 模型卡还要求对账户默认 project 的 InvokeModel（模拟器实证前两条覆盖不到它）。
+            # 曾 pin 单一 Qwen3-VL ARN、并靠跨语言对拍测试盯 IaC 常量与 worker 常量一致——换模型即重部署 + IaC 耦合
+            # worker 常量，被 ADR 0044 否掉。
             role.add_to_policy(iam.PolicyStatement(
                 actions=["bedrock:InvokeModel"],
                 resources=[
                     "arn:aws:bedrock:*::foundation-model/*",
                     f"arn:aws:bedrock:*:{self.account}:inference-profile/*",
+                    f"arn:aws:bedrock:*:{self.account}:project/default",
                 ],
             ))
 

@@ -364,6 +364,7 @@ def test_task_role_resource_arns_narrowed():
     for r in invoke:
         assert "foundation-model/*" in r, f"InvokeModel 应放到 foundation-model/*（模型是运行期选择）：{r}"
         assert "inference-profile/*" in r, f"InvokeModel 应含本账户 inference-profile/*（GPT 系经跨区 profile 调用）：{r}"
+        assert "project/default" in r, f"InvokeModel 应含账户默认 project（OpenAI 系模型在 bedrock-runtime 上的额外要求）：{r}"
         assert "foundation-model/qwen" not in r, f"InvokeModel 不应再 pin 具体模型（ADR 0044）：{r}"
         assert r != '"*"', "InvokeModel 不应是裸 *"
 
