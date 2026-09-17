@@ -154,9 +154,9 @@ scope features/login.feature:6  engine=novaact  status=failed  session=01a0…
 - 0027「消费端只当 URI 用、不 stat / open」写在皮层只打链接的年代，本 ADR 把它**按层收窄**：`model / wire / schedule / ReportStore` 永不 open / fetch / 改写 ref 不变；皮层侧（`compose.read_resource` 与 `explain`）**只对 gherkai 自有 schema 的 ref（`kind == "evidence"`）解引用**，对引擎原生产物（`report` / `trajectory` / `summary`）仍只当链接、永不解析。解引用许可绑在「内容是不是我们自己定义的 schema」上，不是「皮层就能随便打开产物」。0027 该条原地改写并反向链本 ADR。
 - 0027 留口子「trajectory 内部结构化提取」由本 ADR 落地，位置是 **worker**（引擎知识的唯一住处）。0027 的 kind 例举补 `evidence`、「Midscene 保持 scope 级」改为「Midscene 的 report 仍 scope 级，evidence 下沉 step 级」、留口子条目标已落地。
 
-### 六、SDK 格式漂移的防线
+### 六、SDK 版本钉死 + 格式漂移的防线
 
-两引擎依赖都不是钉死版本（Nova `nova-act>=3.4.187.0`，Midscene `@midscene/web ^1.9.8`）。防线四道：
+两引擎的 SDK 依赖**钉精确版本**（Nova `nova-act==3.4.187.0`；Midscene `@midscene/web 1.12.8`、`playwright` / `@playwright/test` 1.63.0），升级是有评估的显式发布动作——与 [0004](./0004-novaact-iam-auth-via-workflow.md)「模型版本选择策略」同一逻辑：用户拿到的就是我们测过的。**曾用范围版本（`>=` / `^`）的教训**：发行版 npm worker 与云端基底镜像都是装包时解析依赖、无 lock，2026-09 实查用户实际跑的是 `@midscene/web` 1.12.8，而仓库锁文件与全部测试停在 1.9.8——测试保护的不是用户跑的版本，本机 worker 与云端镜像还可能各装到不同版本。升级流程：改 pin → 全套测试 + 评测集真跑（两引擎各自的 wikipedia 用例与失败探针）→ 随发版并在 Release 正文点明。升级时的回归护栏四道：
 
 1. 映射函数只读表中列出的少数字段、每个字段当可选，读不到就 null、不抛；判别按值不按 SDK 标志（`is_tool` / `is_return` 之训）；Nova 的 `prompt` 被 SDK 改写、同属「不能照抄 SDK 字段」。
 2. 每引擎一份**由真产物裁成的 fixture**（Nova：真 `_trajectory.json` 去掉 base64；Midscene：真 execution 的 JSON），测试断言映射结果——格式漂移在升版跑测试时变红。
