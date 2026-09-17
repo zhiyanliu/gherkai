@@ -16,7 +16,7 @@ classifiers = [
 ]
 # worker 零 core 依赖（讲协议，ADR 0024/0037）；boto3 直接 import 就直接声明、不靠 nova-act 传递（ADR 0037 决策 2c）。
 dependencies = [
-    "nova-act>=3.4.187.0",
+    "nova-act==3.4.187.0",  # SDK 钉精确版本，升级随发版评估（ADR 0042 决策六）
     "boto3>=1.34",
 ]
 

@@ -14,7 +14,8 @@
     "rootDir": "src",
     "outDir": "dist",
     // `strict` 全开（含 useUnknownInCatchVariables）——现有 worker code 实测能过：`as any` 只用在桥接
-    // SDK 未导出的内部形状（agent._unstableLogContent）处，协议事件的 omit-when-None 用可选属性表达。
+    // SDK 类型与本地形状的接缝处（OpenAI client 交给 createOpenAIClient、Gherkin step 的 argument、Dirent 的
+    // parentPath），协议事件的 omit-when-None 用可选属性表达。
     "strict": true,
     // strict 之外的这一项显式关：AWS SDK v3 的 config 类型（`region?: string | Provider<string>`，不含
     // undefined）与本包「env 缺失即传 undefined 让 SDK 走默认解析」的写法不兼容，开了要么给每个 client

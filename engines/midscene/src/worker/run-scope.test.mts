@@ -22,7 +22,7 @@ function events(): any[] {
   return _events.slice(readOffset);  // 从本测试起点读增量（对齐旧"按偏移读"隔离语义）
 }
 
-// fake agent：aiBoolean 按预设布尔序列逐票回；aiAct 记录被调。无 _unstableLogContent → lastCost 返 undefined。
+// fake agent：aiBoolean 按预设布尔序列逐票回；aiAct 记录被调。无 metrics → 累计读 0、增量 0 → step_done 不带 cost。
 function fakeAgent(boolSeq: boolean[] = []) {
   let i = 0;
   const calls: string[] = [];
@@ -290,14 +290,14 @@ test("runScenario: failed 不触发短路（判据锁 error，非 failed）", as
 });
 
 // ---- token 成本：多票断言按增量合计全 N 票（修 lastCost 只算最后一票的欠计）----
-// fake agent：_unstableLogContent().executions 累积——每次 aiBoolean 追加一个带 usage 的 task。
+// fake agent：metrics 是**累计快照**（对齐 SDK 语义：自 agent 建起只增不清）——每次 aiBoolean/aiAct 把本次 token 累加进去。
 function costAgent(perCallTokens: number[]) {
-  const tasks: any[] = [];
+  let totalTokens = 0;
   let i = 0;
   return {
-    aiBoolean: async () => { tasks.push({ usage: { total_tokens: perCallTokens[i++] ?? 0 } }); return true; },
-    aiAct: async () => { tasks.push({ usage: { total_tokens: perCallTokens[i++] ?? 0 } }); },
-    _unstableLogContent: () => ({ executions: [{ tasks }] }),
+    aiBoolean: async () => { totalTokens += perCallTokens[i++] ?? 0; return true; },
+    aiAct: async () => { totalTokens += perCallTokens[i++] ?? 0; },
+    get metrics() { return { totalTokens }; },
   } as any;
 }
 
@@ -311,7 +311,7 @@ test("runStep: Then votesN=3 token 成本 = 三票之和（不是只算最后一
 
 test("runStep: 连续两 step token 各算各的增量（不双计前一 step）", async () => {
   const { runStep } = await importMod();
-  const agent = costAgent([100, 200]);  // step1 用 100，step2 用 200（累积 executions 不清）
+  const agent = costAgent([100, 200]);  // step1 用 100，step2 用 200（metrics 累计不清零）
   await runStep(agent, fakePage, "sc:0", step("When", '"做事1"', 0), 1, testSink);
   const ev1 = events().find((e) => e.type === "step_done");
   assert.deepEqual(ev1.cost, { tokens: 100 });
@@ -319,6 +319,21 @@ test("runStep: 连续两 step token 各算各的增量（不双计前一 step）
   // 第二 step 只算增量 200，不把 step1 的 100 双计进来
   const ev2 = events().reverse().find((e) => e.type === "step_done" && e.stepIndex === 1);
   assert.deepEqual(ev2.cost, { tokens: 200 });
+});
+
+
+// ---- PlaywrightAgent 构造项：forceChromeSelectRendering 必须显式关 ----
+// SDK 1.10.0 起这项默认开，注入样式那步在 CDP 远连的 AgentCore 云端浏览器上会 "Execution context was
+// destroyed"、每 run 往 stderr 打一段报错栈；功能面我们用不到 → 钉死显式 false（默认值回来了这条会红）。
+test("agentOpts: forceChromeSelectRendering 显式 false（CDP 远连浏览器上它只是噪声）", async () => {
+  const saved = process.env.AWS_REGION;
+  process.env.AWS_REGION = "us-east-1";  // agentOpts 里的 modelConfig() 会求 region（缺则 fail-loud）
+  try {
+    const { agentOpts } = await importMod();
+    assert.equal(agentOpts().forceChromeSelectRendering, false);
+  } finally {
+    if (saved === undefined) delete process.env.AWS_REGION; else process.env.AWS_REGION = saved;
+  }
 });
 
 
@@ -639,11 +654,11 @@ test("artifactFlushRoot: 常规档给解析后的 MIDSCENE_RUN_DIR；未设则 u
 // ---- 失败 act 的费用照报（ADR 0024「失败的 act 同样带 cost」）：agent 日志里的 usage 不因抛异常消失 ----
 test("runStep: aiAct 抛异常 → error 的 step_done 仍带本 step 的 token 增量", async () => {
   const { runStep } = await importMod();
-  const tasks: any[] = [];
+  let totalTokens = 0;
   const agent = {
-    aiAct: async () => { tasks.push({ usage: { total_tokens: 150 } }); throw new Error("AI boom"); },
+    aiAct: async () => { totalTokens += 150; throw new Error("AI boom"); },  // 抛之前调用已发生 → 已折进累计
     aiBoolean: async () => true,
-    _unstableLogContent: () => ({ executions: [{ tasks }] }),
+    get metrics() { return { totalTokens }; },
   } as any;
   assert.equal(await runStep(agent, fakePage, "sc:0", step("When", '"做事"'), 1, testSink), "error");
   const ev = events().find((e) => e.type === "step_done");

@@ -145,9 +145,9 @@
     "semantic_hash": "266fd17830ab56323d30fded81034ef3"
   },
   "engines/midscene/package.json": {
-    "mtime": 1788862853.9038107,
-    "ast_hash": "5e3beb6fdbe08cec7150f70757481fcd",
-    "semantic_hash": "5e3beb6fdbe08cec7150f70757481fcd"
+    "mtime": 1789617362.4861617,
+    "ast_hash": "b4f0098fe654d11948ae29cf8237fc01",
+    "semantic_hash": ""
   },
   "engines/midscene/spikes/01-model-sigv4.ts": {
     "mtime": 1788769605.9180694,
@@ -175,9 +175,9 @@
     "semantic_hash": "15d142e0fea29a0787fc9680d8b085c9"
   },
   "engines/novaact/pyproject.toml": {
-    "mtime": 1788862853.9041743,
-    "ast_hash": "71780c25d5794d90a5859ab44a85d876",
-    "semantic_hash": "71780c25d5794d90a5859ab44a85d876"
+    "mtime": 1789617362.4864757,
+    "ast_hash": "83044a108ea80ad1b89bfcac334bcf46",
+    "semantic_hash": ""
   },
   "engines/novaact/spikes/negative_assertions.py": {
     "mtime": 1788770065.6154056,
@@ -270,13 +270,13 @@
     "semantic_hash": ""
   },
   "README.md": {
-    "mtime": 1789612809.42405,
-    "ast_hash": "5b8a83964dd4810e737b2be05400c38f",
+    "mtime": 1789615327.563642,
+    "ast_hash": "f864878935e08e0e20d9093807fcb8f8",
     "semantic_hash": ""
   },
   "cli/README.md": {
-    "mtime": 1789612809.4241915,
-    "ast_hash": "6b92e7cb14af819f459c8e5337c6d7df",
+    "mtime": 1789615327.5638044,
+    "ast_hash": "d70138f5eb257bafe177c90ad207fbeb",
     "semantic_hash": ""
   },
   "docs/adr/0001-scope-limited-to-english-ui.md": {
@@ -295,8 +295,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0004-novaact-iam-auth-via-workflow.md": {
-    "mtime": 1789614627.630028,
-    "ast_hash": "f2283dc5c51666474660471805f47265",
+    "mtime": 1789618873.594324,
+    "ast_hash": "7a08d60f18b69142a2ce0f522317e04d",
     "semantic_hash": ""
   },
   "docs/adr/0005-single-shared-feature-file.md": {
@@ -375,8 +375,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0024-worker-core-protocol.md": {
-    "mtime": 1789550355.443071,
-    "ast_hash": "482be783b2ee88f620e33aa7785b66e4",
+    "mtime": 1789618873.5940325,
+    "ast_hash": "730ce45ae49b905555d0c230bd51941a",
     "semantic_hash": ""
   },
   "docs/adr/0026-schedule-module.md": {
@@ -425,9 +425,9 @@
     "semantic_hash": ""
   },
   "engines/midscene/README.md": {
-    "mtime": 1789476266.1657448,
-    "ast_hash": "3cdd1c87631f5dbe6e22e5ddb033c5e5",
-    "semantic_hash": "3cdd1c87631f5dbe6e22e5ddb033c5e5"
+    "mtime": 1789615327.5641716,
+    "ast_hash": "e2e2e04aa9157eb7a7522d63fe355808",
+    "semantic_hash": ""
   },
   "engines/midscene/spikes/SIGV4-FETCH-RECIPE.md": {
     "mtime": 1789444212.7857506,
@@ -460,8 +460,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0037-distribution-and-packaging.md": {
-    "mtime": 1789553271.8999362,
-    "ast_hash": "5ad74ea491a8dd520baa82616631b441",
+    "mtime": 1789617362.4857004,
+    "ast_hash": "d71267627ea9e8eb212910f935a17aa7",
     "semantic_hash": ""
   },
   "docs/adr/0038-worker-image-delivery.md": {
@@ -780,13 +780,13 @@
     "semantic_hash": "7d14876d49a0941e85307eddd6af45d8"
   },
   "engines/midscene/src/worker/run-scope.mts": {
-    "mtime": 1789614278.6108034,
-    "ast_hash": "d6aa6394ef8b182eb564197b01aa800c",
+    "mtime": 1789618810.487014,
+    "ast_hash": "8ce79f9ea03a43199f1806f5cb19c856",
     "semantic_hash": ""
   },
   "engines/midscene/src/worker/run-scope.test.mts": {
-    "mtime": 1789612973.238231,
-    "ast_hash": "2a6223417d151526366e612ecb16da95",
+    "mtime": 1789618810.4868178,
+    "ast_hash": "66789c3e43827e0e49c28952fd0ebb3b",
     "semantic_hash": ""
   },
   "engines/midscene/src/worker/user-steps.mts": {
@@ -800,9 +800,9 @@
     "semantic_hash": ""
   },
   "engines/midscene/tsconfig.json": {
-    "mtime": 1788769908.6318464,
-    "ast_hash": "9cbaaf7acb7225a1601f9aee5cf1b2d2",
-    "semantic_hash": "9cbaaf7acb7225a1601f9aee5cf1b2d2"
+    "mtime": 1789618810.4866445,
+    "ast_hash": "c5d9060b14b07a3f2cdf6eea33b2d15e",
+    "semantic_hash": ""
   },
   "engines/novaact/gherkai_worker_novaact/__init__.py": {
     "mtime": 1789550816.6751454,
@@ -1165,8 +1165,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0042-step-evidence-and-explain.md": {
-    "mtime": 1789548326.3024006,
-    "ast_hash": "ba6ab1fc76fb585b186b58e083eb5d22",
+    "mtime": 1789617362.48489,
+    "ast_hash": "abfea1826b8728e332fc2b4262b55a30",
     "semantic_hash": ""
   },
   "engines/midscene/src/worker/evidence.mts": {
@@ -1367,6 +1367,11 @@
   ".vscode/settings.json": {
     "mtime": 1789538913.1706197,
     "ast_hash": "c65c2bb229c60f782cdb2f96f3e0985a",
+    "semantic_hash": ""
+  },
+  "docs/adr/0044-engine-model-selection-and-override.md": {
+    "mtime": 1789618918.0699925,
+    "ast_hash": "58ea4952e049ee2e9446b8cad8c4b0d7",
     "semantic_hash": ""
   }
 }

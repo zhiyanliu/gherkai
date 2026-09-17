@@ -39,10 +39,10 @@
     "@aws-sdk/credential-providers": "^3.1074.0",
     "@aws-sdk/protocol-http": "^3.370.0",
     "@aws-sdk/signature-v4": "^3.370.0",
-    "@midscene/web": "^1.9.8",
-    "@playwright/test": "^1.61.0",
+    "@midscene/web": "1.12.8",
+    "@playwright/test": "1.63.0",
     "openai": "^6.3.0",
-    "playwright": "^1.61.0",
+    "playwright": "1.63.0",
     "tsx": "^4.22.4"
   },
   "devDependencies": {

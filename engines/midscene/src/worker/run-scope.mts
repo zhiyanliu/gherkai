@@ -6,8 +6,8 @@
 // 三通道分离（ADR 0024）：协议事件吐到 EVENTS_FD 指定的 fd（无则回落 stdout，便于手动直跑调试）；
 // Midscene/SDK 的 stdout 噪声留 stdout；worker 自身诊断走 stderr。
 //
-// cost（ADR 0024）：从 agent._unstableLogContent() 的 executions[].tasks[].usage.total_tokens 取原生
-// token 数，worker 只报 {tokens}；core 合计、美元折算交消费者（不追 Qwen 单价）。两个引擎对称：都只报原生量。
+// cost（ADR 0024）：从 agent.metrics（SDK 公开的累计用量快照）的 totalTokens 取原生 token 数，按 step 取前后
+// 差值，worker 只报 {tokens}；core 合计、美元折算交消费者（不追 Qwen 单价）。两个引擎对称：都只报原生量。
 //
 // **本模块不是进程入口**（ADR 0037 决策 3）：入口是 `bin.mts`（npm bin `gherkai-worker-midscene` /
 // 容器 CMD），它装 tsx loader + 注册裸 specifier 的 resolve hook 后调本模块的 `main`。故这里只导出
@@ -248,17 +248,18 @@ interface Job { scope: { id: string; name: string }; engine: string; scenarios: 
 
 
 // Midscene/Bedrock 原生量 token 累计（ADR 0024：engine 只报原生量，core 不算美元）。
-// _unstableLogContent().executions 是**整个 agent 会话累积**的——故按 step 取 token 必须用"增量"：
-// step 跑前记一次累计、跑后再记一次、差值才是本 step 的 token。否则：取末次 usage 会少报（多票断言只
-// 算最后一票，欠计 (N-1)/N）；或求和全部会双计（把前面 step 的也算进来）。返回 token 累计和。
+// 取 SDK 公开的 `agent.metrics.totalTokens`（MidsceneUsageMetrics）——**自 agent 建起的累计快照**，SDK 随 task
+// 推进把每次模型调用的 usage 折进去（含 searchAreaUsage、按 request_id 去重，比旧的手工求和更全）。
+// **在 metrics 与构造项 onLLMUsage 回调之间选 metrics，二选一不两套**：metrics 是快照、幂等可重复读，正好配
+// 下面「step 前后各读一次、差即本 step」的算法；onLLMUsage 是每次调用推一次的回调，worker 得自己攒计数器、
+// 管清零与归属，多一份可变状态却换不到更多信息。
+// 累计快照是**整个 agent 会话**的——故按 step 取 token 必须用"增量"：step 跑前记一次累计、跑后再记一次、差值
+// 才是本 step 的 token。否则：取末次 usage 会少报（多票断言只算最后一票，欠计 (N-1)/N）；或求和全部会双计
+// （把前面 step 的也算进来）。返回 token 累计和。
+// `?? 0` + try/catch 守「拿不到就不报」：本函数在 runStep 的 try **之外**被调（记起点），冒泡会连 step_done 都发不出。
 function cumulativeTokens(agent: PlaywrightAgent): number {
   try {
-    const execs = (agent as any)._unstableLogContent?.()?.executions ?? [];
-    let tokens = 0;
-    for (const ex of execs) for (const task of ex.tasks ?? []) {
-      if (task.usage?.total_tokens != null) tokens += task.usage.total_tokens;
-    }
-    return tokens;
+    return agent.metrics?.totalTokens ?? 0;
   } catch {
     return 0;
   }
@@ -296,6 +297,28 @@ export function artifactFlushRoot(): string | undefined {
   if (NO_ARTIFACTS) return undefined;
   const runRoot = process.env.MIDSCENE_RUN_DIR;
   return runRoot ? path.resolve(runRoot) : undefined;
+}
+
+/** PlaywrightAgent 的构造项。提成模块级函数（不碰 page/browser）好让单测钉住这几个开关；
+ *  **不纯、别随处调**——`modelConfig()` 里的 getBaseUrl 读 AWS_REGION（缺则 fail-loud 抛），故只在建连时调。 */
+function agentOpts(): NonNullable<ConstructorParameters<typeof PlaywrightAgent>[1]> {
+  return {
+    generateReport: !NO_ARTIFACTS,  // --no-report：不出 report.html（ADR 0037 决策 3）
+    // 让 SDK 把每张截图另落成独立文件 `report/screenshots/<id>.<扩展名>`（ADR 0042 决策一）：evidence 只
+    // 引用这些文件、零解码零复制，从而不必读 ScreenshotItem.base64（SDK 每个 task 后即 flush 报告并置空它，
+    // 之后读会对多 MB 的 report.html 做同步全文扫描且找不到即抛）。副作用是 report 目录多出
+    // `<n>.execution.json`，随 scope 末整目录 flush 一并上传，接受。
+    // **必须与 generateReport 同真同假**：SDK 在 generateReport=false 且此项为 true 时直接抛
+    // （`--no-report` 档不产 evidence，正好同为 false）。
+    persistExecutionDump: !NO_ARTIFACTS,
+    // SDK 默认开的「强制 Chrome 用 base-select 渲染原生下拉」（往页面注入一个 style 标签，让 select 在截图里
+    // 可见）——**我们显式关掉**：本 worker 连的是 AgentCore 云端浏览器（CDP 远连），注入用的 page.evaluate 常
+    // 撞上 "Execution context was destroyed"，SDK 每个 run 因此往 stderr 打一整段报错栈，纯噪声；而功能面这边
+    // 用不到它（AI 看的是截图里的元素、不依赖原生 select 的外观兼容）。
+    forceChromeSelectRendering: false,
+    modelConfig: modelConfig(),
+    createOpenAIClient: async () => new OpenAI({ baseURL: getBaseUrl(), apiKey: "unused", fetch: sigv4Fetch }) as any,
+  };
 }
 
 export async function main(): Promise<number> {
@@ -464,18 +487,7 @@ export async function main(): Promise<number> {
     const extraHeaders = process.env.GHERKAI_EXTRA_HTTP_HEADERS;
     if (extraHeaders) await ctx.setExtraHTTPHeaders(JSON.parse(extraHeaders));
     const page = ctx.pages()[0] ?? (await ctx.newPage());
-    const agent = new PlaywrightAgent(page, {
-      generateReport: !NO_ARTIFACTS,  // --no-report：不出 report.html（ADR 0037 决策 3）
-      // 让 SDK 把每张截图另落成独立文件 `report/screenshots/<id>.<扩展名>`（ADR 0042 决策一）：evidence 只
-      // 引用这些文件、零解码零复制，从而不必读 ScreenshotItem.base64（SDK 每个 task 后即 flush 报告并置空它，
-      // 之后读会对多 MB 的 report.html 做同步全文扫描且找不到即抛）。副作用是 report 目录多出
-      // `<n>.execution.json`，随 scope 末整目录 flush 一并上传，接受。
-      // **必须与 generateReport 同真同假**：SDK 在 generateReport=false 且此项为 true 时直接抛
-      // （`--no-report` 档不产 evidence，正好同为 false）。
-      persistExecutionDump: !NO_ARTIFACTS,
-      modelConfig: modelConfig(),
-      createOpenAIClient: async () => new OpenAI({ baseURL: getBaseUrl(), apiKey: "unused", fetch: sigv4Fetch }) as any,
-    });
+    const agent = new PlaywrightAgent(page, agentOpts());
     return { page, agent };
   }
 
@@ -753,7 +765,7 @@ async function runStep(
       type: "step_done", scenarioId, stepIndex: index,
       status: "error", errorType, message,
     };
-    // 失败的 act 费用已经发生（ADR 0024「失败的 act 同样带 cost」）：agent 日志里的 usage 不因抛异常消失，照报 token 增量
+    // 失败的 act 费用已经发生（ADR 0024「失败的 act 同样带 cost」）：抛异常前已发生的调用照样折进 agent.metrics，照报 token 增量
     const cost = stepCost(tokBefore, agent);
     if (cost) ev.cost = cost;
     // error step 的 evidence 最该产（抛错的 task 仍在 executions 里、带 errorMessage）；抽取失败也只是没 ref
@@ -772,4 +784,5 @@ function aggregate(statuses: string[]): string {
 // `main` 由 bin 调（见文件头「本模块不是进程入口」）；其余是单测面。
 export {
   runStep, runScenario, isTransientNetwork, aggregate, interruptSnapshot, drainArtifactQueue, shutdownSequence,
+  agentOpts,
 };

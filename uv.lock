@@ -823,7 +823,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "boto3", specifier = ">=1.34" },
-    { name = "nova-act", specifier = ">=3.4.187.0" },
+    { name = "nova-act", specifier = "==3.4.187.0" },
 ]
 
 [[package]]
