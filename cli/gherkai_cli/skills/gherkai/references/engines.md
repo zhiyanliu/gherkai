@@ -11,7 +11,7 @@ Midscene https://github.com/zhiyanliu/gherkai/blob/HEAD/engines/midscene/README.
 | 被测 UI 语言 | **英文 UI**。非英文页面上能导航、能判页面级语义，但「正文里是否出现某个词」这类断言会系统性判否，投票治不了 | 不限。中文 UI 上动作与 AI 断言实测与英文同级可靠 |
 | 本机安装 | `uv tool install 'gherkai[local]'` 与 CLI 同环境；正式发行版还能临时拉起 | `npm i -g @gherkai/worker-midscene`（Node ≥ 22），必须真装 |
 | 确定性 step 语言 | Python，`steps/*.py` | TypeScript / JS，`steps/*.mts` 或 `*.mjs` |
-| 云端依赖 | Nova Act 服务与模型 nova-act-v1.0（默认钉死，环境变量 NOVA_MODEL_ID 可换）、AgentCore Browser | Bedrock 模型 qwen.qwen3-vl-235b-a22b（默认钉死，环境变量 MIDSCENE_MODEL_ID 可换，家族识别不了时再给 MIDSCENE_MODEL_FAMILY）、AgentCore Browser |
+| 云端依赖 | Nova Act 服务与模型 nova-act-v1.0（默认钉死，环境变量 NOVA_MODEL_ID 可换）、AgentCore Browser | Bedrock 模型 us.openai.gpt-5.6-terra（默认钉死，环境变量 MIDSCENE_MODEL_ID 可换，家族识别不了时再给 MIDSCENE_MODEL_FAMILY）、AgentCore Browser |
 
 两者都纯 IAM 鉴权、不要 API key；region 要能解析出来（`--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > profile 配置，四级全空才响亮失败、不猜默认，见 `references/setup-and-diagnosis.md` 第 4 节）；浏览器跑在云端、本机不装 Chromium。
 

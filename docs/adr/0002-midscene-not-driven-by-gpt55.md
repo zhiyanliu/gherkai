@@ -1,6 +1,6 @@
 # Midscene 主力大脑不用 Bedrock GPT-5.5
 
-> **Status:** Partially-superseded-by 0044 ——核心事实已变：2026-09 实查 Bedrock 上 GPT-5.6 与 GPT-6 经 inference profile（如 `us.openai.gpt-6-astra`）支持 `/openai/v1/chat/completions` 且视觉通道可用（本文 2026-06 对 gpt-5.5 的结论对当时为真）；GPT 能否当 Midscene 主力 grounding 改由 [0044](./0044-engine-model-selection-and-override.md) 决策 1 的评测集 A/B 定——下文「次要理由」里的非拉丁文字定位弱项正是 A/B 中文 UI 探针要验的。
+> **Status:** Superseded-by 0044 ——Midscene 默认已改为 GPT-5.6 Terra（2026-09 评测集 A/B，见 0044「现值」）；核心事实已变：2026-09 实查 Bedrock 上 GPT-5.6 与 GPT-6 经 inference profile（如 `us.openai.gpt-6-astra`）支持 `/openai/v1/chat/completions` 且视觉通道可用（本文 2026-06 对 gpt-5.5 的结论对当时为真）；GPT 能否当 Midscene 主力 grounding 改由 [0044](./0044-engine-model-selection-and-override.md) 决策 1 的评测集 A/B 定——下文「次要理由」里的非拉丁文字定位弱项正是 A/B 中文 UI 探针要验的。
 
 项目最初的原型指导文档（已退役）指定 Midscene 用 Bedrock 上的 OpenAI GPT-5.5 做大脑。经核实，此方案行不通，**放弃**。
 

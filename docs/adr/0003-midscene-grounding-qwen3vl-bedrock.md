@@ -1,6 +1,6 @@
 # Midscene 主力视觉定位模型用 Bedrock 上的 Qwen3-VL
 
-> **Status:** Accepted
+> **Status:** Superseded-by 0044 ——2026-09 评测集 A/B 后 Midscene 默认改为 `us.openai.gpt-5.6-terra`（依据与成本 / 驻留取舍内联在 0044「现值」）；Qwen3-VL 留作 `MIDSCENE_MODEL_ID` 的可选模型，本文保留其选型历史与 Bedrock 侧机制事实。
 
 承接 [0002](./0002-midscene-not-driven-by-gpt55.md)：Midscene 的主力 grounding 大脑选 **Qwen3-VL 235B**（`qwen.qwen3-vl-235b-a22b`），托管在 **AWS Bedrock 原生**（serverless ON_DEMAND，在 `us-east-1`/`us-west-2` 均可用）。（**planning 也复用此模型、不引独立文本规划器**——见 [0012](./0012-planning-shares-qwen3vl-no-text-planner.md)。）**spike/实测阶段主要用 `us-east-1`**（AgentCore 会话 + 后续全链路 spike 在此，见 [0008](./0008-midscene-bedrock-auth-sigv4-selfsign.md) 06-23 全通）；**唯 qwen3-vl chat-completions 的最初协议坐实在 `us-west-2`**（06-22，见下方历史实测记录）——两 region 都验过、模型两区均可用。**region 现已全可配、无硬编码默认**（`--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > profile config，全 miss 则 fail-loud、不兜 east——见 [0016](./0016-execution-architecture-core-lib-run-model.md) 决策 C / [0033](./0033-iac-aws-backend-and-composition-wiring.md)）。
 

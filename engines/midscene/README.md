@@ -1,10 +1,10 @@
 # @gherkai/worker-midscene
 
-gherkai 的 **Midscene 执行引擎**：把 `.feature` 里的每个 step 在**云端浏览器**（Amazon Bedrock AgentCore Browser）上真跑一遍——自然语言 step 交给 **Qwen3-VL 235B on Bedrock** 看图定位并操作，你自己写的确定性 step 用 Playwright 精确判定。
+gherkai 的 **Midscene 执行引擎**：把 `.feature` 里的每个 step 在**云端浏览器**（Amazon Bedrock AgentCore Browser）上真跑一遍——自然语言 step 交给 **OpenAI GPT-5.6 Terra on Bedrock** 看图定位并操作，你自己写的确定性 step 用 Playwright 精确判定。
 
 它是一个被 `gherkai` CLI 拉起并驱动的 **worker 进程**：日常你敲的是 `gherkai run` / `gherkai submit`，**不用直接调用本包的命令**。装上它 = 让 `gherkai` 能在本机用 midscene 引擎跑起来。
 
-**被测 UI 的语言**：不限。中文 UI 上的动作与 AI 断言实测与英文同级可靠（Qwen3-VL 是多语种模型）；断言写成直白的语义陈述即可，别把段落边界、子串规则塞进 AI 断言。
+**被测 UI 的语言**：不限。中文 UI 上的动作与 AI 断言实测与英文同级可靠（GPT-5.6 Terra 与可选的 Qwen3-VL 都在中文探针上全过）；断言写成直白的语义陈述即可，别把段落边界、子串规则塞进 AI 断言。
 
 ## 安装
 
@@ -18,8 +18,8 @@ CLI 在 PATH 上找 `gherkai-worker-midscene` 命令（`npm i -g` 的结果）�
 
 - **纯 IAM 鉴权**：进程内 SigV4 自签，复用本机 AWS 默认凭证链（profile / 环境变量 / 实例角色皆可）。**不需要任何 API key**（无 bearer token）。
 - **region 必须解析得出**：`gherkai run --region <R>`，或 `AWS_REGION` / `AWS_DEFAULT_REGION`，或 profile 配置里的 region；四处都没有即报错，不猜默认 region。
-- 该 region 下账号需可用：**Bedrock 模型** `qwen.qwen3-vl-235b-a22b`（视觉定位大脑），以及 **AgentCore Browser**（`bedrock-agentcore`）。浏览器跑在云端，本机**不需要装 Chromium**。
-- **模型版本默认钉死**在上面这个 Bedrock 模型，换模型只随本工具的版本升级。想换（Bedrock 上 Midscene 支持的其它模型，如 `us.openai.gpt-6-astra`、`moonshotai.kimi-k2.5`），设环境变量 `MIDSCENE_MODEL_ID`：本机跑在 shell 里设即可，云端要写进你自定义 worker 镜像的 `ENV`；模型家族按 id 自动识别，识别不了时 worker 会拒绝启动并让你设 `MIDSCENE_MODEL_FAMILY`。`gherkai doctor` 会显示 worker 实际用的模型。
+- 该 region 下账号需可用：**Bedrock 模型** `us.openai.gpt-5.6-terra`（视觉定位大脑；经 Bedrock 跨区推理在美国境内三个 region 处理），以及 **AgentCore Browser**（`bedrock-agentcore`）。浏览器跑在云端，本机**不需要装 Chromium**。
+- **模型版本默认钉死**在上面这个 Bedrock 模型，换模型只随本工具的版本升级。想换（Bedrock 上 Midscene 支持的其它模型，如 `qwen.qwen3-vl-235b-a22b`、`moonshotai.kimi-k2.5`），设环境变量 `MIDSCENE_MODEL_ID`：本机跑在 shell 里设即可，云端要写进你自定义 worker 镜像的 `ENV`；模型家族按 id 自动识别，识别不了时 worker 会拒绝启动并让你设 `MIDSCENE_MODEL_FAMILY`。`gherkai doctor` 会显示 worker 实际用的模型。
 
 ## 写确定性 step（`steps/*.mts`）
 
@@ -103,7 +103,7 @@ Midscene 每个 worker 出一份 `report.html`（可视化回放：每步的截�
 |---|---|
 | `engine_error: 起 worker 失败` | worker 没装或版本与 CLI 不一致：`npm i -g @gherkai/worker-midscene`（Node ≥ 22） |
 | `import` 你的 step 文件时 `SyntaxError` | 文件扩展名改成 `.mts` / `.mjs`（`.ts` / `.js` 会被当 CJS） |
-| `AccessDenied` / 模型不可用 | 该 region 未开通 `qwen.qwen3-vl-235b-a22b`，或凭证缺 Bedrock / `bedrock-agentcore` 权限 |
+| `AccessDenied` / 模型不可用 | 该 region 未开通 OpenAI GPT-5.6 Terra，或凭证缺 Bedrock / `bedrock-agentcore` 权限 |
 | 启动即抱怨 region 未设 | 设 `AWS_REGION`（或给 `--region`）——本引擎不猜默认 region |
 | 明明写了 `steps/` 却全走 AI | 确认 `--steps-dir` 指对，并用 `gherkai list-deterministic --steps-dir …` 看清单里有没有你那条 |
 

@@ -36,7 +36,7 @@ flowchart TD
     end
 
     subgraph L3["③ 执行层 —— 两个独立 AI 引擎，平级"]
-        M["Midscene worker（Node）<br/>大脑：Qwen3-VL @ Bedrock"]
+        M["Midscene worker（Node）<br/>大脑：GPT-5.6 Terra @ Bedrock"]
         N["Nova Act worker（Python）<br/>大脑：nova-act-v1.0"]
     end
 
@@ -56,19 +56,19 @@ flowchart TD
 
 ## 判定由谁做出：底层模型披露
 
-gherkai 自己不含模型，也不接收任何数据。每个 AI step 的操作与判定由下面两个模型完成，全部在**你的 AWS 账户、你选的 region** 里的托管服务上跑；发给模型的是 step 文本与被测页面的截图，浏览器会话也在你账户的 AgentCore Browser 里。唯一的第三方是可选的 ngrok：只有用 `--expose-local` 测本机应用时，云端浏览器到你本机应用的流量才经过 ngrok 的隧道。
+gherkai 自己不含模型，也不接收任何数据。每个 AI step 的操作与判定由下面两个模型完成，全部在**你的 AWS 账户**里的托管服务上跑：Nova Act 在你选的 region，Midscene 默认的 GPT-5.6 经 Bedrock 跨区推理在**美国境内三个 region**（us-east-1 / us-east-2 / us-west-2）处理，浏览器会话与产物仍在你选的 region；发给模型的是 step 文本与被测页面的截图，浏览器会话也在你账户的 AgentCore Browser 里。唯一的第三方是可选的 ngrok：只有用 `--expose-local` 测本机应用时，云端浏览器到你本机应用的流量才经过 ngrok 的隧道。
 
 | 引擎 | 模型 | 服务 | 版本策略 | 怎么看 / 怎么换 |
 |---|---|---|---|---|
 | Nova Act（默认） | `nova-act-v1.0` | Amazon Nova Act | 钉死 GA 版本；换模型只随 gherkai 发版，并在 Release 说明里点明 | `gherkai doctor` 显示实际模型；环境变量 `NOVA_MODEL_ID` 可换（如 `nova-act-preview`，无支持承诺） |
-| Midscene | `qwen.qwen3-vl-235b-a22b` | Amazon Bedrock | 钉死；换模型只随 gherkai 发版，并在 Release 说明里点明 | `gherkai doctor` 显示实际模型；环境变量 `MIDSCENE_MODEL_ID` 可换成 Bedrock 上 Midscene 支持的其它模型（如 `us.openai.gpt-6-astra`、`moonshotai.kimi-k2.5`），家族一般自动识别、识别不了就再给 `MIDSCENE_MODEL_FAMILY` |
+| Midscene | `us.openai.gpt-5.6-terra`（OpenAI GPT-5.6 Terra） | Amazon Bedrock | 钉死；换模型只随 gherkai 发版，并在 Release 说明里点明 | `gherkai doctor` 显示实际模型；环境变量 `MIDSCENE_MODEL_ID` 可换成 Bedrock 上 Midscene 支持的其它模型（如 `qwen.qwen3-vl-235b-a22b`、`moonshotai.kimi-k2.5`），家族一般自动识别、识别不了就再给 `MIDSCENE_MODEL_FAMILY` |
 
 判定会随模型变：同一条断言在不同模型版本上可能翻转，所以我们不用「自动跟最新」的别名。费用来自模型调用与云端浏览器会话，按你账户的 AWS 账单计。
 
 ## 前置要求
 
 - AWS 凭证（默认 profile 即可），region **us-east-1**，需具备：
-  - Bedrock 模型访问：`qwen.qwen3-vl-235b-a22b`（Midscene 大脑）
+  - Bedrock 模型访问：OpenAI GPT-5.6 Terra（`us.openai.gpt-5.6-terra`，Midscene 大脑）
   - AgentCore Browser（`bedrock-agentcore` 服务）
   - Nova Act 服务（`nova-act`）+ 模型 `nova-act-v1.0`（默认钉此版本、换模型只随版本升级，环境变量 `NOVA_MODEL_ID` 可覆盖；所需的 workflow definition 首次运行时自动创建）
 - Node ≥22（Midscene worker；`gherkai deploy` 同一下限）、Python 3.13 + [uv](https://docs.astral.sh/uv/)

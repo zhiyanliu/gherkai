@@ -17,7 +17,7 @@
 
 不用 `MIDSCENE_MODEL_API_KEY` bearer，改用进程内 SigV4 自签（复用本机 AWS 默认凭证链，[ADR 0008](../../docs/adr/0008-midscene-bedrock-auth-sigv4-selfsign.md)）：
 
-- 模型：默认 `qwen.qwen3-vl-235b-a22b`（`lib/agentcore-sigv4.mts` 的 `DEFAULT_MODEL`），env `MIDSCENE_MODEL_ID` / `MIDSCENE_MODEL_FAMILY` 可覆盖、family 按 id 推断（[ADR 0044](../../docs/adr/0044-engine-model-selection-and-override.md)）；SDK 经 `modelConfig` 收 `MIDSCENE_MODEL_FAMILY`（[ADR 0003](../../docs/adr/0003-midscene-grounding-qwen3vl-bedrock.md)）
+- 模型：默认 `us.openai.gpt-5.6-terra`（`lib/agentcore-sigv4.mts` 的 `DEFAULT_MODEL`，选定依据 ADR 0044「现值」），env `MIDSCENE_MODEL_ID` / `MIDSCENE_MODEL_FAMILY` 可覆盖、family 按 id 推断（[ADR 0044](../../docs/adr/0044-engine-model-selection-and-override.md)）；SDK 经 `modelConfig` 收 `MIDSCENE_MODEL_FAMILY`（[ADR 0003](../../docs/adr/0003-midscene-grounding-qwen3vl-bedrock.md)）
 - base URL：`https://bedrock-runtime.${AWS_REGION}.amazonaws.com/openai/v1`（region 惰性读 `AWS_REGION`、未设即 fail-loud，不硬编码 east——见 `src/lib/agentcore-sigv4.mts` 的 `getRegion()` / `getBaseUrl()`、[ADR 0033](../../docs/adr/0033-iac-aws-backend-and-composition-wiring.md)）
 - 接线：经 Midscene `createOpenAIClient` 注入带 SigV4 签名的自定义 `fetch`
 - 配方与失败模式：[`spikes/SIGV4-FETCH-RECIPE.md`](./spikes/SIGV4-FETCH-RECIPE.md)
