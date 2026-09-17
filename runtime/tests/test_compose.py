@@ -457,10 +457,12 @@ def fresh_caps_cache(monkeypatch):
     monkeypatch.setattr(compose, "_CAPABILITIES_CACHE", {})
 
 
-def _caps_json(engine: str = "novaact", min_grace_s=150, steps: str = "[]") -> bytes:
-    """一份合契约的自述对象（四个键，ADR 0036「5.」）。"""
+def _caps_json(engine: str = "novaact", min_grace_s=150, steps: str = "[]",
+               model_id: str | None = None) -> bytes:
+    """一份合契约的自述对象（五个键，ADR 0036「5.」）；模型 id 不给就按引擎取该引擎真实会自报的那个。"""
+    model_id = model_id or ("nova-act-v1.0" if engine == "novaact" else "qwen.qwen3-vl-235b-a22b")
     return (f'{{"schema_version": 1, "engine": "{engine}", "min_grace_s": {min_grace_s}, '
-            f'"deterministic_steps": {steps}}}').encode()
+            f'"deterministic_steps": {steps}, "model_id": "{model_id}"}}').encode()
 
 
 def _fake_caps_proc(payload: bytes, returncode: int = 0, stderr: bytes = b""):
@@ -471,8 +473,8 @@ def _fake_caps_proc(payload: bytes, returncode: int = 0, stderr: bytes = b""):
 
 
 def test_query_capabilities_returns_whole_object(monkeypatch, novaact_env_cmd, fresh_caps_cache):
-    """整份自述对象原样返回（四个键：schema_version / engine / min_grace_s / deterministic_steps）——
-    清单、grace 下限、steps 加载结果都出自**这一次** spawn（ADR 0036「5.」「加键不加入口」）。
+    """整份自述对象原样返回（五个键：schema_version / engine / min_grace_s / deterministic_steps / model_id）——
+    清单、grace 下限、steps 加载结果、当前模型 id 都出自**这一次** spawn（ADR 0036「5.」「加键不加入口」）。
 
     Nova 查询**必须注入 NOVA_ACT_TIMEOUT_S**：worker 自报的下限 = 这个注入值 + 它自己的 margin，不注入则它按
     自带缺省算，operator 调大单 act 上界后下限静默偏低（组合根持单一真值的意义就在此）。
@@ -490,7 +492,8 @@ def test_query_capabilities_returns_whole_object(monkeypatch, novaact_env_cmd, f
     monkeypatch.setenv("GHERKAI_STEPS_DIR", "/host/steps")  # 先把宿主 shell 弄脏，否则下面「不含该键」的断言空过
     assert compose.query_capabilities("novaact") == {
         "schema_version": 1, "engine": "novaact", "min_grace_s": 150,
-        "deterministic_steps": [{"pattern": "p", "description": "d", "example": "e"}]}
+        "deterministic_steps": [{"pattern": "p", "description": "d", "example": "e"}],
+        "model_id": "nova-act-v1.0"}
     assert captured["cmd"] == ["/fake/novaact-worker", "--capabilities"]  # 定位链 cmd + 唯一的自述 flag
     assert captured["env"]["NOVA_ACT_TIMEOUT_S"] == str(compose.NOVA_ACT_TIMEOUT_S)
     # 未给 steps 目录：env 仍自建一份——组合根拥有的键「有值注、无值清」，宿主 shell 的 GHERKAI_STEPS_DIR 不得
@@ -559,26 +562,33 @@ def test_query_capabilities_worker_failure_fails_loud_verbatim(monkeypatch, nova
 
 _OK_HEAD = b'"schema_version": 1, "engine": "novaact"'  # 身份位合法，让每个用例只有一处缺陷
 _OK_STEPS = b', "deterministic_steps": []'
+_OK_MODEL = b', "model_id": "nova-act-v1.0"'
+_OK_TAIL = _OK_STEPS + _OK_MODEL  # 两个合法的尾键：拿它填「缺陷在下限/身份位」那批用例
 
 
 @pytest.mark.parametrize("payload", [
-    b'{' + _OK_HEAD + _OK_STEPS + b'}',                                  # 缺下限键
-    b'{' + _OK_HEAD + b', "min_grace_s": "150"' + _OK_STEPS + b'}',      # 字符串
-    b'{' + _OK_HEAD + b', "min_grace_s": true' + _OK_STEPS + b'}',       # bool（是 int 子类，须单独挡）
-    b'{' + _OK_HEAD + b', "min_grace_s": -1' + _OK_STEPS + b'}',         # 负数
-    b'{' + _OK_HEAD + b', "min_grace_s": Infinity' + _OK_STEPS + b'}',   # 非有限（json 认它）
-    b'{' + _OK_HEAD + b', "min_grace_s": 150}',                          # 缺清单键
-    b'{' + _OK_HEAD + b', "min_grace_s": 150, "deterministic_steps": {}}',  # 清单不是数组
-    b'[{' + _OK_HEAD + b', "min_grace_s": 150' + _OK_STEPS + b'}]',      # 不是 JSON 对象
-    b'{"schema_version": 1, "engine": "midscene", "min_grace_s": 31, "deterministic_steps": []}',  # 自称另一引擎
-    b'{"schema_version": 2, "engine": "novaact", "min_grace_s": 150, "deterministic_steps": []}',   # 版本不认识
-    b'{"engine": "novaact", "min_grace_s": 150, "deterministic_steps": []}',                        # 缺格式版本
+    b'{' + _OK_HEAD + _OK_TAIL + b'}',                                   # 缺下限键
+    b'{' + _OK_HEAD + b', "min_grace_s": "150"' + _OK_TAIL + b'}',       # 字符串
+    b'{' + _OK_HEAD + b', "min_grace_s": true' + _OK_TAIL + b'}',        # bool（是 int 子类，须单独挡）
+    b'{' + _OK_HEAD + b', "min_grace_s": -1' + _OK_TAIL + b'}',          # 负数
+    b'{' + _OK_HEAD + b', "min_grace_s": Infinity' + _OK_TAIL + b'}',    # 非有限（json 认它）
+    b'{' + _OK_HEAD + b', "min_grace_s": 150' + _OK_MODEL + b'}',        # 缺清单键
+    b'{' + _OK_HEAD + b', "min_grace_s": 150, "deterministic_steps": {}' + _OK_MODEL + b'}',  # 清单不是数组
+    b'{' + _OK_HEAD + b', "min_grace_s": 150' + _OK_STEPS + b'}',                   # 缺模型 id 键
+    b'{' + _OK_HEAD + b', "min_grace_s": 150' + _OK_STEPS + b', "model_id": ""}',   # 模型 id 空串
+    b'{' + _OK_HEAD + b', "min_grace_s": 150' + _OK_STEPS + b', "model_id": 1}',    # 模型 id 不是字符串
+    b'[{' + _OK_HEAD + b', "min_grace_s": 150' + _OK_TAIL + b'}]',       # 不是 JSON 对象
+    b'{"schema_version": 1, "engine": "midscene", "min_grace_s": 31' + _OK_TAIL + b'}',  # 自称另一引擎
+    b'{"schema_version": 2, "engine": "novaact", "min_grace_s": 150' + _OK_TAIL + b'}',   # 版本不认识
+    b'{"engine": "novaact", "min_grace_s": 150' + _OK_TAIL + b'}',                        # 缺格式版本
 ])
 def test_query_capabilities_rejects_off_contract_answer(monkeypatch, novaact_env_cmd, fresh_caps_cache, payload):
     """自述不合契约 → fail-loud（与「输出非 JSON」同档），且不写缓存。校验放在这一个函数里，**每个消费者
     （run 前置 / list-deterministic / doctor / engine_min_grace）都受同一道**：下限当 0 处理会让 core 的 grace
     护栏形同废除；身份位（engine / schema_version）不核则 `GHERKAI_WORKER_NOVAACT_CMD` 指到 midscene bin 时
-    Nova 静默拿 31s（grace < 单 act 上界 → SIGTERM 落 act 中途必被硬杀）；清单不是数组则消费者 len() 崩在无关处。
+    Nova 静默拿 31s（grace < 单 act 上界 → SIGTERM 落 act 中途必被硬杀）；清单不是数组则消费者 len() 崩在无关处；
+    模型 id 缺/空/非串则 doctor 的模型行显示成没信息的「模型 」，把「不知道用的哪个模型」伪装成「知道了」
+    （模型选择本身是 ADR 0004「模型版本选择策略」的显式决策，展示不实等于让 env 覆盖不可见）。
     """
     import subprocess
 

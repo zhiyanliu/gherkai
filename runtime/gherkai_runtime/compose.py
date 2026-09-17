@@ -498,11 +498,12 @@ def query_capabilities(engine: str, *, steps_dir: str | Path | None = None,
 
     **唯一的自述入口、一次 spawn 拿全**（ADR 0036 被拒方案末条「每个自述项一个独立 flag」）：steps 加载是否成功
     （`run`/`submit` 的跑前检查）、确定性 step 清单（`list-deterministic`、doctor 的加载计数）、grace 下限
-    （`engine_min_grace`）都取这同一份对象——本机 run 每引擎因此只 spawn 一次（进程内按「引擎 + steps 目录」缓存；
-    Nova 每次 spawn 都要 import SDK，自述项各占一个 flag 时 spawn 次数随项数增长）。
+    （`engine_min_grace`）、该 worker 实际会用的模型 id（doctor 的模型行，ADR 0004「模型版本选择策略」）都取这
+    同一份对象——本机 run 每引擎因此只 spawn 一次（进程内按「引擎 + steps 目录」缓存；Nova 每次 spawn 都要
+    import SDK，自述项各占一个 flag 时 spawn 次数随项数增长）。
     **契约校验全在这里**（不散到各消费者：每个取键的人都该受同一道）——`engine`/`schema_version` 两个身份位、
-    `min_grace_s` 非负有限数、`deterministic_steps` 是数组；**不合契约不写缓存**（一次坏自述不该被记成「这引擎
-    就这样」）。身份位当场核的理由见下方注释。
+    `min_grace_s` 非负有限数、`deterministic_steps` 是数组、`model_id` 是非空字符串；**不合契约不写缓存**
+    （一次坏自述不该被记成「这引擎就这样」）。身份位当场核的理由见下方注释。
     **Nova 查询也注入 `NOVA_ACT_TIMEOUT_S`**：它自报的下限 = 这个注入值 + worker 侧 margin，不注入则 worker 按
     自带缺省算——operator 调大单 act 上界后下限静默偏低，正是「两端同源」要挡的漂移（见该常量注释；两个真跑档
     build_engines / build_fargate_engines 注的是同一个值）。
@@ -548,6 +549,14 @@ def query_capabilities(engine: str, *, steps_dir: str | Path | None = None,
     if not isinstance(caps.get("deterministic_steps"), list):
         raise RuntimeError(
             f"引擎 {engine} 自述的确定性 step 清单不是数组：{caps.get('deterministic_steps')!r}"
+            "——worker 与命令行工具版本不一致？两者须同版本安装。"
+        )
+    # 模型 id 同档校验：doctor 据它显示「这台机器实际会用的模型」（ADR 0004「模型版本选择策略」的 env 覆盖因此
+    # 可见）。缺键 / 空串会让那一行显示成没信息的「模型 」，等于把「不知道」伪装成「知道了」——与下限、清单同为
+    # 版本/实现不一致的信号，一并 fail-loud。
+    if not isinstance(caps.get("model_id"), str) or not caps["model_id"]:
+        raise RuntimeError(
+            f"引擎 {engine} 自述的模型 id 不是非空字符串：{caps.get('model_id')!r}"
             "——worker 与命令行工具版本不一致？两者须同版本安装。"
         )
     _CAPABILITIES_CACHE[key] = caps

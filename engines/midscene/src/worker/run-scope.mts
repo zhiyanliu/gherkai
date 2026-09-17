@@ -319,15 +319,18 @@ export async function main(): Promise<number> {
   // 引擎能力自述（ADR 0036「5.」）：一个 JSON 对象即退，同样不建会话、不读 stdin、零费用。
   // min_grace_s = 本引擎收尾路径要的 grace 下限（ADR 0024「引擎自报下限」：真值住算它的这一侧，
   // 组合根只查询后聚合、不持引擎特定常量）。deterministic_steps = 注册表清单（ADR 0036「2.」：内建脚手架
-  // 在模块顶 import 时注册、使用方 steps 上面刚加载完，此刻注册表即真值）。
+  // 在模块顶 import 时注册、使用方 steps 上面刚加载完，此刻注册表即真值）。model_id = 起 job 时真交给
+  // Midscene SDK 的模型名，即 modelConfig() 的 MIDSCENE_MODEL_NAME，与它同源引用 lib/agentcore-sigv4 的 MODEL
+  // 常量、此处不另写字面量（否则自述会与实际用的模型漂移，而 doctor 正是拿这个键显示「当前用哪个模型」）。
   // **加键不加入口**（ADR 0036「5.」）：新增自述项都是本对象的新键、不再开第二个 flag——组合根一次 spawn
-  // 就同时拿到「steps 加载成功 / 清单 / grace 下限」。schema_version 只在既有键语义变化时递增（加键不递增）。
+  // 就同时拿到「steps 加载成功 / 清单 / grace 下限 / 模型」。schema_version 只在既有键语义变化时递增（加键不递增）。
   if (process.argv.includes("--capabilities")) {
     await writeStdoutFlushed(JSON.stringify({
       schema_version: 1,
       engine: "midscene",
       min_grace_s: minGraceSeconds(),
       deterministic_steps: listRegistry(),
+      model_id: MODEL,
     }) + "\n");
     return 0;
   }

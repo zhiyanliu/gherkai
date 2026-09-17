@@ -24,6 +24,8 @@ FAKE_DETERMINISTIC_STEPS = [
     {"pattern": '打开 "(?P<url>[^"]+)"', "description": "打开某个地址", "example": '当 打开 "https://x"'},
     {"pattern": "页面地址匹配 \"(?P<re>[^\"]+)\"", "description": "断言地址", "example": '那么 页面地址匹配 "x"'},
 ]
+# 假自报模型 id：形状对（非空字符串）、两引擎不同即够——doctor 的模型行断言的是「这个值出自自述对象」。
+FAKE_MODEL_ID = {"novaact": "nova-act-v1.0", "midscene": "qwen.qwen3-vl-235b-a22b"}
 
 
 @pytest.fixture(autouse=True)
@@ -33,7 +35,8 @@ def _stub_engine_capabilities(monkeypatch):
             raise ValueError(f"未知引擎 {engine!r}")  # 同 compose 定位链的引擎名校验
         compose.resolve_worker_cmd(engine)  # 定位链照真走：miss → WorkerNotFoundError，同真查询的第一步
         caps = {"schema_version": 1, "engine": engine, "min_grace_s": FAKE_MIN_GRACE_S[engine],
-                "deterministic_steps": [dict(e) for e in FAKE_DETERMINISTIC_STEPS]}
+                "deterministic_steps": [dict(e) for e in FAKE_DETERMINISTIC_STEPS],
+                "model_id": FAKE_MODEL_ID[engine]}
         # 真实现自己会按（引擎, steps 目录）缓存这份对象；替身照同一键写一份，好让「本机 run 每引擎只问一次」
         # 那条**生产行为**（engine_min_grace 复用已有自述、不再问 worker）在替身之上照样被测到。
         compose._CAPABILITIES_CACHE.setdefault((engine, None if steps_dir is None else str(steps_dir)), caps)

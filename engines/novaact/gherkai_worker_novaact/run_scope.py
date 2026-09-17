@@ -780,14 +780,18 @@ def _capabilities() -> dict[str, object]:
     这两段预算都只有 worker 知道；组合根持任何引擎特定的下限常量都会漂移。
     `deterministic_steps` = 此刻注册表的清单（ADR 0036「2.」）：内建脚手架（模块顶 import 的副作用）+
     `main()` 顶部加载的使用方 step——与真跑派发用的是同一张表，故复用 `list_registry()`、不另拼一份。
+    `model_id` = 这个 worker 起 job 时真会传给 `Workflow(model_id=...)` 的那个 id（`lib/constants.py` 的
+    MODEL_ID：缺省钉死的 GA 版本，或 env `NOVA_MODEL_ID` 的 opt-in 覆盖值——见 ADR 0004「模型版本选择策略」）。
+    **同一个常量、不另写字面量**：自述与真跑必须报同一个值，否则「doctor 显示的模型」就成了第二事实源。
     加键不加入口（如将来的 browser 后端能力）——故返回 dict、消费侧按键取；`run` 的前置检查因此只需
-    spawn 一次，同一份自述同时给出「steps 加载成功 / 清单 / grace 下限」（ADR 0036「5.」）。
+    spawn 一次，同一份自述同时给出「steps 加载成功 / 清单 / grace 下限 / 模型」（ADR 0036「5.」）。
     """
     return {
         "schema_version": CAPABILITIES_SCHEMA_VERSION,
         "engine": _evidence.ENGINE,  # 与 evidence 里报的引擎名同源，不另写字面量
         "min_grace_s": ACT_TIMEOUT_S + NOVA_GRACE_MARGIN_S,
         "deterministic_steps": _deterministic.list_registry(),  # 同一张注册表（ADR 0036「2.」真值单一）
+        "model_id": MODEL_ID,  # 与下面 Workflow(model_id=...) 同一常量（ADR 0004「模型版本选择策略」）
     }
 
 

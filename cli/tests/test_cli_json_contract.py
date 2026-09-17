@@ -123,7 +123,8 @@ def test_doctor_json_keys_are_documented(monkeypatch, capsys):
     monkeypatch.setattr(m._deploy, "provider_entry_points", lambda: [])
     monkeypatch.setattr(m._deploy, "resolve_provider", lambda name=None: (None, "没有可用的部署 provider"))
     monkeypatch.setattr(m.compose, "query_capabilities", lambda engine, *, steps_dir=None, timeout_s=60.0: {
-        "schema_version": 1, "engine": engine, "min_grace_s": 150.0, "deterministic_steps": []})
+        "schema_version": 1, "engine": engine, "min_grace_s": 150.0, "deterministic_steps": [],
+        "model_id": "nova-act-v1.0"})  # 自述五键齐（doctor 的模型行取 model_id，ADR 0036「5.」）
     assert m.main(["doctor", "--json"]) == 0
     _assert_documented(json.loads(capsys.readouterr().out), section="doctor --json")
 

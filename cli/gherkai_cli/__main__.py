@@ -660,26 +660,42 @@ def _cmd_doctor(args) -> int:
         required=(args.backend != "cloud"))
 
     steps_dir, steps_err = _steps_dir_or_error(args)
+    # 对每个可用引擎跑**一次** worker 自述，同一份对象供两段：engines 段的模型行、steps 段的加载结果。
+    # 先全部问完、再按段 add：文本视图按 add 的插入序逐行打（见下方渲染），模型行若挨着自己的 load 行插就会让
+    # engines / steps 两段交错、分组读不下去。
+    described: list[tuple[str, dict | None, str]] = []
+    if not steps_err:
+        for r in rows:
+            if not r["available"]:
+                continue
+            try:
+                described.append((r["engine"], compose.query_capabilities(r["engine"], steps_dir=steps_dir), ""))
+            except Exception as e:  # 自述失败 = 使用方 steps 加载失败 / 版本不一致 / 起不来：原样转述 + 点到成因（detail 要给「怎么办」）
+                described.append((r["engine"], None, str(e)))
+    # 模型行：worker 自报「它起 job 时实际会用哪个模型」，让 env 覆盖过的机器一眼可见（ADR 0004「模型版本选择
+    # 策略」）。纯展示故 required=False；自述失败时**不出这一行**——模型未知就别拿占位符冒充事实（失败本身已由
+    # steps.load 那行报）。
+    for engine, caps, _err in described:
+        if caps is not None:
+            add("engines", f"model.{engine}", True, f"模型 {caps['model_id']}（本机 worker 自报）", required=False)
+
     if steps_err:
         add("steps", "dir", False, steps_err)
     elif steps_dir is None:
         add("steps", "dir", True, "无 steps/ 目录：只有内建确定性 step（多数项目的常态）", required=False)
     else:
         add("steps", "dir", True, steps_dir, required=False)
-    if not steps_err:
-        # 对每个可用引擎跑一次 worker 自述：有 steps 目录 = 使用方 step 能否加载（必修——加载失败会静默降级成 AI，ADR 0037
-        # 决策 4 fail-loud）；没有 = 只验「worker 起得来、能自述」（可选：单引擎不连坐，与 engines.<engine> 同档）
-        for r in rows:
-            if not r["available"]:
-                continue
-            try:
-                n = len(compose.query_capabilities(r["engine"], steps_dir=steps_dir)["deterministic_steps"])
-                add("steps", f"load.{r['engine']}", True,
-                    f"{n} 条确定性 step（含内建）" + ("" if steps_dir else "；无 steps/ 目录，仅内建"),
-                    required=steps_dir is not None)
-            except Exception as e:  # 自述失败 = 使用方 steps 加载失败 / 版本不一致 / 起不来：原样转述 + 点到成因（detail 要给「怎么办」）
-                add("steps", f"load.{r['engine']}", False, f"worker 自述失败：{e}{_SELF_DESCRIBE_CAUSES}",
-                    required=steps_dir is not None)
+    # 加载结果：有 steps 目录 = 使用方 step 能否加载（必修——加载失败会静默降级成 AI，ADR 0037 决策 4 fail-loud）；
+    # 没有 = 只验「worker 起得来、能自述」（可选：单引擎不连坐，与 engines.<engine> 同档）
+    for engine, caps, err in described:
+        if caps is not None:
+            add("steps", f"load.{engine}", True,
+                f"{len(caps['deterministic_steps'])} 条确定性 step（含内建）"
+                + ("" if steps_dir else "；无 steps/ 目录，仅内建"),
+                required=steps_dir is not None)
+        else:
+            add("steps", f"load.{engine}", False, f"worker 自述失败：{err}{_SELF_DESCRIBE_CAUSES}",
+                required=steps_dir is not None)
 
     want_cloud = args.backend == "cloud" or args.prefix is not None
     if not want_cloud:

@@ -1,9 +1,10 @@
 """`--capabilities` 自述入口单测（ADR 0036「5.」/ ADR 0024「引擎自报下限」，Nova 侧）。
 
 全部走**真子进程**：这条入口的契约恰好都在进程边界上——argv 分派（含「`--list-deterministic` 不再被
-识别」这条不留别名的红线）、`NOVA_ACT_TIMEOUT_S` / `NOVA_GRACE_MARGIN_S` 两个 env 旋钮在 import 期读、
-stdout 只此一个 JSON 对象、不读 stdin、不建会话。in-process 调 `_capabilities()` 证不到这些（env 已在
-import 期定型、argv/stdin/AWS 更碰不到）。
+识别」这条不留别名的红线）、`NOVA_ACT_TIMEOUT_S` / `NOVA_GRACE_MARGIN_S` / `NOVA_MODEL_ID` 三个 env 旋钮
+在 import 期读、stdout 只此一个 JSON 对象、不读 stdin、不建会话。in-process 调 `_capabilities()` 证不到
+这些（env 已在 import 期定型、argv/stdin/AWS 更碰不到）；尤其 env 旋钮的缺省值——本进程继承的 env 里若
+设过同名变量，in-process 断言就是假绿。
 
 跑（从 repo 根）：uv run pytest -q engines/novaact/tests/test_capabilities.py
 """
@@ -31,7 +32,7 @@ def _clean_env(**extra: str) -> dict:
 
 
 def test_capabilities_shape_and_min_grace_from_injected_act_timeout():
-    """键集恰四个 + `min_grace_s` = 注入的 `NOVA_ACT_TIMEOUT_S` + worker 侧 margin（组合根查它当 grace 下限）。
+    """键集恰五个 + `min_grace_s` = 注入的 `NOVA_ACT_TIMEOUT_S` + worker 侧 margin（组合根查它当 grace 下限）。
 
     键集**全等**断言（非「至少含」）：ADR 0036「5.」的自述对象是消费侧按键取的契约面，多一个未声明的键
     或少一个键都要连 `schema_version` 一起议——「至少含」照不出多出来的键。
@@ -42,8 +43,8 @@ def test_capabilities_shape_and_min_grace_from_injected_act_timeout():
     out = proc.stdout.decode("utf-8")
     assert len(out.strip().splitlines()) == 1, out  # stdout 只此一个 JSON 对象（消费侧整段 json.loads）
     caps = json.loads(out)
-    assert set(caps) == {"schema_version", "engine", "min_grace_s", "deterministic_steps"}, caps
-    assert caps["schema_version"] == 1
+    assert set(caps) == {"schema_version", "engine", "min_grace_s", "deterministic_steps", "model_id"}, caps
+    assert caps["schema_version"] == 1  # 只加键不改既有键语义 → 版本不递增（ADR 0036「5.」）
     assert caps["engine"] == "novaact"
     assert caps["min_grace_s"] == 7 + NOVA_GRACE_MARGIN_S
     assert NOVA_GRACE_MARGIN_S > 0  # margin 须 > 0（ADR 0024：act 有界返回之后还要会话释放 + 截图排空）
@@ -52,6 +53,34 @@ def test_capabilities_shape_and_min_grace_from_injected_act_timeout():
     assert all(set(e) == {"pattern", "description", "example"} for e in steps), steps
     assert all(e["pattern"] and e["description"] and e["example"] for e in steps), steps
     assert any("页面地址" in e["pattern"] for e in steps), steps  # 脚手架注册的真锚点在表里
+    assert isinstance(caps["model_id"], str) and caps["model_id"], caps  # 组合根按「非空字符串」校验这一位
+
+
+def test_model_id_defaults_to_pinned_ga_version():
+    """不设 `NOVA_MODEL_ID` 时自报**钉死的 GA 版本 id，不是 `nova-act-latest` 别名**。
+
+    这是 ADR 0004「模型版本选择策略」的红线：别名意味着 AWS 发新 GA 时静默换模型，而 pass / fail 靠 AI
+    投票、换模型就换判定。字面量写在这里是**故意的闸门**——真要升 GA 就得连这条一起改，即「改常量 +
+    发版点明模型换代」那条流程；不是脆弱断言。
+    """
+    proc = subprocess.run(_CMD, capture_output=True, timeout=60, env=_clean_env())
+    assert proc.returncode == 0, proc.stderr.decode()[-500:]
+    model_id = json.loads(proc.stdout.decode("utf-8"))["model_id"]
+    assert model_id == "nova-act-v1.0", model_id
+
+
+def test_model_id_follows_env_override():
+    """`NOVA_MODEL_ID` 真穿到自述（opt-in 旋钮，ADR 0004「模型版本选择策略」）：`doctor` 据此显示当前模型，
+    烙了 env 的机器一眼可见。
+
+    取值用 `nova-act-preview` 别名——试新模型只有别名一条路（服务端拒绝直接引用带日期的 preview id）。
+    worker 侧**不校验取值**（合法性由服务端判），故这条只证「env 到自述」这一段：本入口不建会话、不碰
+    服务端，_clean_env 还剥掉了 AWS_*。
+    """
+    proc = subprocess.run(_CMD, capture_output=True, timeout=60,
+                          env=_clean_env(NOVA_MODEL_ID="nova-act-preview"))
+    assert proc.returncode == 0, proc.stderr.decode()[-500:]
+    assert json.loads(proc.stdout.decode("utf-8"))["model_id"] == "nova-act-preview"
 
 
 def test_min_grace_tracks_both_env_knobs():

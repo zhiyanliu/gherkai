@@ -549,11 +549,14 @@ test("--match-steps: 超 64KB payload 经 pipe 完整送出（ADR 0036，不被 
 // 且「不建会话、不读 stdin、零费用」只有真跑才看得见——本测试不喂 stdin、不给 AWS 凭证，照样该退 0。
 // 起源码形态的 bin 要有 TS 转译能力：`--import tsx` 传绝对 URL（与 cwd 无关），不靠 Node 原生 type stripping
 // （那要 Node ≥22.18，而包只声明 >=22——同 user-steps.test.mts 的真跑层）。
-test("--capabilities: 一个 JSON 对象即退 0；四键含 deterministic_steps；min_grace_s = 收尾各段预算之和 + 余量，当前 = 31s", async () => {
+test("--capabilities: 一个 JSON 对象即退 0；五键含 deterministic_steps/model_id；min_grace_s = 收尾各段预算之和 + 余量，当前 = 31s", async () => {
   const {
     INFLIGHT_SETTLE_MS, STOP_SESSION_BUDGET_MS, BROWSER_CLOSE_BUDGET_MS, QUEUE_DRAIN_EXIT_MS, MIN_GRACE_MARGIN_MS,
   } = await importMod();
   const { UPLOAD_TIMEOUT_MS } = await import("../lib/artifact-upload.mjs");
+  // 自报的 model_id 得与真跑时喂给 SDK 的模型名同源（modelConfig() 的 MIDSCENE_MODEL_NAME），故从那个模块取真值比对、
+  // 不在测试里写第二份字面量——写死了就只能证明「自述没变」，证不了「自述 = 实际用的模型」。
+  const { MODEL } = await import("../lib/agentcore-sigv4.mjs");
   const proc = spawn(process.execPath, [
     "--import", import.meta.resolve("tsx"), path.join(import.meta.dirname, "..", "bin.mts"), "--capabilities",
   ], { stdio: ["ignore", "pipe", "pipe"] });
@@ -564,12 +567,16 @@ test("--capabilities: 一个 JSON 对象即退 0；四键含 deterministic_steps
   const raw = Buffer.concat(out).toString("utf-8");
   assert.equal(code, 0, `应退 0，stderr=${Buffer.concat(err).toString("utf-8")}`);
   const got = JSON.parse(raw);
-  // 键集恰为四个（ADR 0036「5.」）：多一个键 = 自述契约变了（组合根核 schema_version 的前提），少一个 =
+  // 键集恰为五个（ADR 0036「5.」）：多一个键 = 自述契约变了（组合根核 schema_version 的前提），少一个 =
   // 消费侧读到 undefined；清单并入本对象后不再有独立的清单 flag（同 ADR 被拒方案「每个自述项一个独立 flag」）。
   assert.deepEqual(Object.keys(got).sort(),
-    ["deterministic_steps", "engine", "min_grace_s", "schema_version"], `键集：${raw}`);
+    ["deterministic_steps", "engine", "min_grace_s", "model_id", "schema_version"], `键集：${raw}`);
   assert.equal(got.schema_version, 1);
   assert.equal(got.engine, "midscene");
+  // model_id = 起 job 时交给 Midscene SDK 的那个模型名（ADR 0036「5.」：doctor 据此显示当前模型）。
+  assert.equal(typeof got.model_id, "string", `model_id 该是串：${raw}`);
+  assert.ok(got.model_id.length > 0, `model_id 不该空：${raw}`);
+  assert.equal(got.model_id, MODEL, "自报的模型得就是真交给 SDK 的那个，不是另写的字面量");
   // deterministic_steps = 注册表清单（ADR 0036「2.」，每项 pattern/description/example）。真跑才照得出「清单
   // 与 min_grace_s 同一份自述里一起给」——内建脚手架的注册副作用只在真进程里发生。
   assert.ok(Array.isArray(got.deterministic_steps) && got.deterministic_steps.length > 0,

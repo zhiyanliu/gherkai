@@ -22,5 +22,7 @@ Feature: 并发与 scope 共享会话验证
   @scope:search
   Scenario: 搜索并进入 Python 词条
     Given 打开 "https://www.wikipedia.org/"
-    When "在搜索框输入 Python 并提交搜索"
+    # 搜索词带上消歧限定：只搜 "Python" 会落到消歧页，断言步是否 pass 就取决于模型愿不愿替用例点进去（v1.0 会、v1.1 不会）——
+    # 用例该自己把导航写实，判定才只测判定。
+    When "在搜索框输入 Python programming language 并提交搜索"
     Then "当前页面是关于 Python 编程语言的维基百科词条"

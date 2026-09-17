@@ -12,7 +12,7 @@ from gherkai_core.model import JobResult, RunResult, Status
 from gherkai_cli import __main__ as m
 from gherkai_runtime import compose
 
-from conftest import FAKE_MIN_GRACE_S  # 假 worker 自报的 grace 下限（autouse 夹具注的那份）
+from conftest import FAKE_MIN_GRACE_S, FAKE_MODEL_ID  # 假 worker 自报的下限 / 模型 id（autouse 夹具注的那份）
 
 
 def _fake_schedule_factory():
@@ -645,7 +645,7 @@ def test_list_deterministic_text_and_json(monkeypatch, capsys):
     calls = []
     monkeypatch.setattr(m.compose, "query_capabilities",
                         lambda engine, *, steps_dir=None, timeout_s=60.0: calls.append(engine) or
-                        {"schema_version": 1, "engine": engine, "min_grace_s": 150.0,
+                        {"schema_version": 1, "engine": engine, "min_grace_s": 150.0, "model_id": "qwen.qwen3-vl-235b-a22b",
                          "deterministic_steps": entries})
     assert m.main(["list-deterministic", "--engine", "midscene"]) == 0
     out = capsys.readouterr().out
@@ -984,7 +984,7 @@ def test_plan_and_list_deterministic_pass_steps_dir_to_worker(tmp_path, monkeypa
                         lambda engine, texts, steps_dir=None: seen.update(match=steps_dir) or [None] * len(texts))
     monkeypatch.setattr(m.compose, "query_capabilities",
                         lambda engine, *, steps_dir=None, timeout_s=60.0: seen.update(query=steps_dir) or
-                        {"schema_version": 1, "engine": engine, "min_grace_s": 150.0, "deterministic_steps": []})
+                        {"schema_version": 1, "engine": engine, "min_grace_s": 150.0, "deterministic_steps": [], "model_id": "nova-act-v1.0"})
     assert m.main(["plan", str(_det_feature(tmp_path))]) == 0
     assert m.main(["list-deterministic"]) == 0
     assert seen["match"] == str(steps.resolve()) and seen["query"] == str(steps.resolve())
@@ -1284,7 +1284,7 @@ def test_doctor_local_json_checks_and_exit_codes(tmp_path, monkeypatch, capsys):
     _no_provider(monkeypatch)
     steps = tmp_path / "steps"; steps.mkdir()
     monkeypatch.setattr(m.compose, "query_capabilities", lambda engine, *, steps_dir=None, timeout_s=60.0: {
-        "schema_version": 1, "engine": engine, "min_grace_s": 150.0,
+        "schema_version": 1, "engine": engine, "min_grace_s": 150.0, "model_id": "nova-act-v1.0",
         "deterministic_steps": [{"pattern": "a"}, {"pattern": "b"}]})  # 计数取自述对象的清单键（ADR 0036「5.」）
     assert m.main(["doctor", "--json", "--steps-dir", str(steps)]) == 0
     doc = json.loads(capsys.readouterr().out)
@@ -1530,6 +1530,46 @@ def test_doctor_runs_worker_self_describe_even_without_steps_dir(monkeypatch, ca
     assert m.main(["doctor", "--json"]) == 0
     by = {(c["section"], c["name"]): c for c in json.loads(capsys.readouterr().out)["checks"]}
     assert not by[("steps", "load.novaact")]["ok"] and by[("steps", "load.novaact")]["required"] is False
+
+
+def test_doctor_reports_worker_self_reported_model(tmp_path, monkeypatch, capsys):
+    """doctor 出一行 engines.model.<engine>：模型 id 取自那份能力自述对象（ADR 0036「5.」的 `model_id` 键），
+    让 worker 侧 env 覆盖过默认模型的机器一眼可见（ADR 0004「模型版本选择策略」）。
+
+    纯展示故 required=False（模型不是「装没装」那种缺口）；不额外 spawn——与 steps.load 那行共用同一次自述
+    （本用例的替身在 conftest 的假自述之上只加计数）。
+    """
+    _fake_locator(monkeypatch, available=("novaact", "midscene")); _no_provider(monkeypatch)
+    monkeypatch.delenv("GHERKAI_STEPS_DIR", raising=False); monkeypatch.chdir(tmp_path)  # 不受跑测试的 cwd 里有没有 steps/ 影响
+    asked: list[str] = []
+    stubbed = compose.query_capabilities  # conftest autouse 的确定性假替身
+    monkeypatch.setattr(m.compose, "query_capabilities",
+                        lambda engine, **kw: asked.append(engine) or stubbed(engine, **kw))
+    assert m.main(["doctor", "--json"]) == 0
+    by = {(c["section"], c["name"]): c for c in json.loads(capsys.readouterr().out)["checks"]}
+    row = by[("engines", "model.novaact")]
+    assert row["ok"] is True and row["required"] is False and FAKE_MODEL_ID["novaact"] in row["detail"]
+    assert FAKE_MODEL_ID["midscene"] in by[("engines", "model.midscene")]["detail"]
+    assert sorted(asked) == ["midscene", "novaact"]  # 每引擎仍只问一次自述（模型行不是第二次 spawn）
+
+    assert m.main(["doctor"]) == 0  # 文本视图同一行
+    out = capsys.readouterr().out
+    assert f"✓ engines.model.novaact: 模型 {FAKE_MODEL_ID['novaact']}（本机 worker 自报）" in out
+    # 文本按 add 的插入序逐行打 → 模型行须落在 engines 段内（steps 段之前），否则两段交错
+    assert out.index("engines.model.novaact") < out.index("steps.dir")
+
+
+def test_doctor_omits_model_row_when_self_describe_fails(tmp_path, monkeypatch, capsys):
+    """自述失败（版本不一致 / 起不来 / 使用方 steps 报错）→ **没有** 模型行：模型未知就不出这一行，
+    不拿占位符冒充事实（失败本身由 steps.load 那行报）。"""
+    _fake_locator(monkeypatch); _no_provider(monkeypatch)
+    monkeypatch.delenv("GHERKAI_STEPS_DIR", raising=False); monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(m.compose, "query_capabilities", lambda engine, **kw: (_ for _ in ()).throw(
+        compose.WorkerSelfDescribeError(engine, 2, "unrecognized arguments: --capabilities", "能力自述")))
+    assert m.main(["doctor", "--json"]) == 0  # 无 steps/ 目录 → 自述失败只是可选项
+    by = {(c["section"], c["name"]): c for c in json.loads(capsys.readouterr().out)["checks"]}
+    assert ("engines", "model.novaact") not in by
+    assert not by[("steps", "load.novaact")]["ok"]
 
 
 def test_doctor_steps_dir_error_reason_lands_in_json_detail(tmp_path, monkeypatch, capsys):
