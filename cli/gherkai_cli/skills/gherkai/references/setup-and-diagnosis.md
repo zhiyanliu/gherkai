@@ -28,7 +28,7 @@
 | 段 | 查什么 | 何时查 |
 |---|---|---|
 | `cli.*` | CLI 版本与 Python | 总是 |
-| `engines.*` | 每个引擎的 worker 能否定位、至少一个可用 | 总是 |
+| `engines.*` | 每个引擎的 worker 能否定位、至少一个可用、本机 worker 各自自报的模型 | 总是 |
 | `steps.*` | steps 目录是否存在、每个引擎加载 steps 是否成功、几条 | 总是（`--steps-dir` 可改目录） |
 | `aws.*` | region、凭证身份 | 给了 `--backend cloud` 或 `--prefix` |
 | `backend.*` | 后端版本与 CLI 比对、资源齐全、报告前缀一致、默认 variant 与逐引擎镜像能否解析、本机 worker 自报的收尾宽限 vs 云端为它设的停止宽限（差距只标 `-`、不影响退出码） | 同上 |
@@ -40,7 +40,7 @@
 
 - 走本机 AWS 默认凭证链：profile / 环境变量 / 实例角色皆可，`--profile` 或 `AWS_PROFILE` 选 profile。**不需要任何 API key**。
 - **region 必须有出处**，按序解析：`--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > `--profile`（或 `AWS_PROFILE`）指的那个 profile 配置里的 region。四处都没有才报错；缺了不会替你兜一个 region。
-- 该 region 下账号要能用：Nova Act 引擎 = Nova Act 服务与模型 nova-act-latest；Midscene 引擎 = Bedrock 模型 qwen.qwen3-vl-235b-a22b；两者都要 AgentCore Browser。`AccessDenied` / 模型不可用多半是 region 未开通模型或凭证缺这些权限。
+- 该 region 下账号要能用：Nova Act 引擎 = Nova Act 服务与模型 nova-act-v1.0（默认钉死；环境变量 NOVA_MODEL_ID 可换，`doctor` 会显示实际模型）；Midscene 引擎 = Bedrock 模型 qwen.qwen3-vl-235b-a22b；两者都要 AgentCore Browser。`AccessDenied` / 模型不可用多半是 region 未开通模型或凭证缺这些权限。
 - 本机 `run` / `submit` 也要 AWS 凭证（浏览器与模型在云端）；只有 `plan` / `list-engines` / `list-deterministic` / `doctor`（不带 cloud 参数）纯本地。
 
 ## 5 隧道（`--expose-local`）前置

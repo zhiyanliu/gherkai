@@ -37,7 +37,7 @@ flowchart TD
 
     subgraph L3["③ 执行层 —— 两个独立 AI 引擎，平级"]
         M["Midscene worker（Node）<br/>大脑：Qwen3-VL @ Bedrock"]
-        N["Nova Act worker（Python）<br/>大脑：nova-act-latest"]
+        N["Nova Act worker（Python）<br/>大脑：nova-act-v1.0"]
     end
 
     B["④ 浏览器层<br/>AgentCore Browser（每引擎各一个会话）"]
@@ -59,7 +59,7 @@ flowchart TD
 - AWS 凭证（默认 profile 即可），region **us-east-1**，需具备：
   - Bedrock 模型访问：`qwen.qwen3-vl-235b-a22b`（Midscene 大脑）
   - AgentCore Browser（`bedrock-agentcore` 服务）
-  - Nova Act 服务（`nova-act`）+ 模型 `nova-act-latest`（所需的 workflow definition 首次运行时自动创建）
+  - Nova Act 服务（`nova-act`）+ 模型 `nova-act-v1.0`（默认钉此版本、换模型只随版本升级，环境变量 `NOVA_MODEL_ID` 可覆盖；所需的 workflow definition 首次运行时自动创建）
 - Node ≥22（Midscene worker；`gherkai deploy` 同一下限）、Python 3.13 + [uv](https://docs.astral.sh/uv/)
 - （可选，仅 `--expose-local` 需要）[ngrok](https://ngrok.com/download) + authtoken（免费账号即够；`ngrok config add-authtoken <token>`——是 dashboard 上的 **Authtoken**，不是 `cr_` 开头的 API key）
 

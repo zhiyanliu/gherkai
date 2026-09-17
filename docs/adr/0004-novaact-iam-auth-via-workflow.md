@@ -15,7 +15,7 @@
 
 ## ✅ 已实测全通（2026-06-23，`engines/novaact/spikes/wikipedia_benchmark.py`）
 
-纯 IAM 经 `@workflow` 端到端跑通：维基用例动作成功、AgentCore 云端浏览器连上、workflow run 状态 `SUCCEEDED`、`nova-act-latest` 模型访问授予。**ADR 早先标记的"IAM 经 Workflow 能否授权 nova-act 服务"残余风险——已关闭。**
+纯 IAM 经 `@workflow` 端到端跑通：维基用例动作成功、AgentCore 云端浏览器连上、workflow run 状态 `SUCCEEDED`、模型访问授予（当时经别名 `nova-act-latest` 拿到的 GA 模型 = 今天钉死的 `nova-act-v1.0`；别名已按下方「模型版本选择策略」弃用）。**ADR 早先标记的"IAM 经 Workflow 能否授权 nova-act 服务"残余风险——已关闭。**
 
 **关键前提**：`@workflow` 走 IAM 路径时，`workflow_definition_name` **必须指向一个 AWS 侧已注册存在的 workflow definition**，不能随便起名——否则 `CreateWorkflowRun` 报 `ResourceNotFoundException: Workflow definition not found` (404)。注意：IAM 鉴权本身此时已通过（不是 AccessDenied），仅仅是 definition 不存在。
 
@@ -26,11 +26,12 @@ definition 由 create-if-not-exists 的 `ensure_workflow_definition()` 自动建
 
 **退路**：若某账号/region IAM 路径不可用，退回 `NOVA_ACT_API_KEY`（从 nova.amazon.com/act 生成）。
 
-## 模型版本选择策略（待定，等 A/B 数据）
+## 模型版本选择策略：默认钉 GA 版本，换模型是有评估的显式升级
 
-`Workflow(model_id=...)` 现传别名 `nova-act-latest`（`lib/constants.py`）。服务端 `ListModels`（2026-09-17 实查，SDK 兼容版本 1）：GA 只有 `nova-act-v1.0`（ACTIVE），另有 preview `nova-act-v1.1_2026-02-09`；别名 `nova-act-latest` → v1.0、`nova-act-preview` → v1.1；SDK 3.4.187.0 两者都支持。两条路各有代价，**默认用哪条尚未定**：
+`Workflow(model_id=...)` 传**钉死的 GA 版本 id**（现为 `nova-act-v1.0`，住 `lib/constants.py`），不传 `nova-act-latest` 别名。服务端 `ListModels`（2026-09 实查，SDK 兼容版本 1）：GA 只有 `nova-act-v1.0`（ACTIVE，承诺支持至少一年），另有 preview `nova-act-v1.1_2026-02-09`；别名 `nova-act-latest` → 最新 GA、`nova-act-preview` → 最新 preview。
 
-- **别名（现状）**：AWS 发新 GA 时自动换模型，零改动跟进；代价是判定基线在零提交的情况下漂移——本工具的 pass / fail 靠 AI 投票，模型一换形态就变，且事后无从对照。
-- **钉版本（`nova-act-v1.0`）**：判定可复现、升级是一次有意识的提交（与包版本用 `==` 同版本 pin 同一逻辑），GA 承诺支持至少一年；代价是每个新 GA 要手动跟进、评估后再切。
+**为何钉而不是别名**：别名的语义是「AWS 发新 GA 时自动换模型」，换模型的时点由 AWS 定；而本工具的 pass / fail 靠 AI 投票，模型一换判定就变。2026-09 对 v1.0 与 v1.1 preview 做的 A/B（同一批 9 个 Nova scenario、各跑三遍、每次 run 经 `GetWorkflowRun.modelId` 坐实模型）：耗时等价（AI 步中位约 10 s、p90 约 28 s）、v1.1 无超时而 v1.0 一次单 act 越过 120 s 上界；但 **9 个 scenario 里有 1 个在两模型间三遍一致地翻转**——「搜索并进入 Python 词条」两模型都落在维基消歧页，布尔断言「当前页面是关于 Python 编程语言的词条」上 v1.0 先替用例点进目标词条再答 true、v1.1 停在原页如实答 false。这是行为差异不是噪声：换模型会稠密地改判定，且 v1.1 更守「断言不动作」，按 v1.0 写通的用例在 v1.1 上会翻红。这类变化必须随一次有 changelog 的显式发布落地，而不是藏在别名里在用户账户中静默发生。**升级流程**：新 GA 出现 → 按同一批用例重跑 A/B → 评估通过 → 改常量、发版并在 Release 正文点明模型换代。
 
-判据 = 同一批 Nova 用例在 v1.0 与 v1.1 上各跑三遍的 pass / fail 稳定性、单 act 耗时、超时率差异：差异明显 → 钉版本并把「切模型」当作有评估的升级动作；差异不明显 → 别名的漂移风险可接受。**preview 不作生产默认**（无支持承诺、不可钉），无论 A/B 结果如何。按项目选模型的旋钮（`NOVA_MODEL_ID` env 经组合根注入）暂不做：近期唯一消费者是这次 A/B，四个注入面就是四个会漂的地方，等有用户要按项目选模型或新 GA 需新旧并行验证时再加。
+**opt-in 旋钮 = worker 侧 env `NOVA_MODEL_ID`**（与 `NOVA_GRACE_MARGIN_S` 同形：worker 读、缺省即钉死值）：本机跑在 shell 里设即生效；云端 Fargate 容器 env 是显式枚举，要用就烙进定制 worker 镜像的 `ENV`——这正是 variant 机制（[0038](./0038-worker-image-delivery.md)）的用途。可设 `nova-act-preview` 试新模型，但 **preview 不作产品默认**：无支持承诺、随 AWS 移动，且**不可钉**——服务端拒绝直接引用带日期的 preview id（实测 400「Preview models cannot be referenced directly. Use the 'nova-act-preview' alias instead」），只有别名一条路，正是钉版本要消掉的那种不受控变化。**被拒方案**：经组合根四个注入面（本机 spawn / 前台 Fargate / detached Lambda / 能力自述）注入的产品级旋钮——近期无消费者，四个注入面就是四个会漂的地方；等有用户要按项目选模型或新 GA 需新旧并行验证时再议。
+
+worker 的能力自述（[0036](./0036-deterministic-capability-discovery.md)「5.」）自报 `model_id`，`doctor` 据此显示当前模型，让 env 覆盖可见。

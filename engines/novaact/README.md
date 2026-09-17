@@ -1,6 +1,6 @@
 # gherkai-worker-novaact
 
-gherkai 的 **Nova Act 执行引擎**：把 `.feature` 里的每个 step 在**云端浏览器**（Amazon Bedrock AgentCore Browser）上真跑一遍——自然语言 step 交给 Amazon 的 `nova-act-latest` 模型看图操作，你自己写的确定性 step 用 Playwright 精确判定。
+gherkai 的 **Nova Act 执行引擎**：把 `.feature` 里的每个 step 在**云端浏览器**（Amazon Bedrock AgentCore Browser）上真跑一遍——自然语言 step 交给 Amazon 的 `nova-act-v1.0` 模型看图操作，你自己写的确定性 step 用 Playwright 精确判定。
 
 它是一个被 `gherkai` CLI 拉起并驱动的 **worker 进程**：日常你敲的是 `gherkai run` / `gherkai submit`，**不用直接调用本包的命令**。装上它 = 让 `gherkai` 能在本机用 novaact 引擎跑起来。
 
@@ -18,7 +18,8 @@ CLI 按这个顺序找 worker，命中即用：① 环境变量 `GHERKAI_WORKER_
 
 - **纯 IAM 鉴权**：走本机 AWS 默认凭证链（profile / 环境变量 / 实例角色皆可）。**不需要 `NOVA_ACT_API_KEY`**——本引擎不用 API key。
 - **region 必须解析得出**：`gherkai run --region <R>`，或 `AWS_REGION` / `AWS_DEFAULT_REGION`，或 profile 配置里的 region；四处都没有即报错，不猜默认 region。
-- 该 region 下账号需可用：**Nova Act 服务**（`nova-act`）+ 模型 `nova-act-latest`，以及 **AgentCore Browser**（`bedrock-agentcore`）。浏览器跑在云端，本机**不需要装 Chromium**。
+- 该 region 下账号需可用：**Nova Act 服务**（`nova-act`）+ 模型 `nova-act-v1.0`，以及 **AgentCore Browser**（`bedrock-agentcore`）。浏览器跑在云端，本机**不需要装 Chromium**。
+- **模型版本默认钉死**在 `nova-act-v1.0`：判定结果不会因 AWS 换模型而悄悄变，换模型只随本工具的版本升级。想试别的（如 `nova-act-preview`，无支持承诺、会随 AWS 移动），设环境变量 `NOVA_MODEL_ID`：本机跑在 shell 里设即可，云端要写进你自定义 worker 镜像的 `ENV`；`gherkai doctor` 会显示实际用的模型。
 - Nova Act 的 workflow definition 由 worker **自动按需创建**（幂等，已存在即跳过），不必手工预建。
 
 ## 写确定性 step（`steps/*.py`）

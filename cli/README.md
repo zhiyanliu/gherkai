@@ -18,7 +18,7 @@ pipx install --fetch-python missing gherkai   # 不用 uv 的人：pipx 回落�
 ## 前置（AWS）
 
 - AWS 凭证（默认 profile 即可）与 region（`--region`，或 `AWS_REGION` / `AWS_DEFAULT_REGION` / profile 配置），当前验证过的 region 是 `us-east-1`。
-- 账号需开通：Bedrock 模型访问（Midscene 用 `qwen.qwen3-vl-235b-a22b`）、AgentCore Browser（`bedrock-agentcore`）、Nova Act（`nova-act` + 模型 `nova-act-latest`）。
+- 账号需开通：Bedrock 模型访问（Midscene 用 `qwen.qwen3-vl-235b-a22b`）、AgentCore Browser（`bedrock-agentcore`）、Nova Act（`nova-act` + 模型 `nova-act-v1.0`，默认钉此版本、环境变量 `NOVA_MODEL_ID` 可换）。
 - `--backend cloud` 还需要有人先跑过 `gherkai deploy` 把云端后端建好（见下「部署」）；只有用 `--expose-local` 测本机应用时才需要 [ngrok](https://ngrok.com/download) authtoken（免费账号即够，`ngrok config add-authtoken <token>` 或环境变量 `NGROK_AUTHTOKEN`）。
 
 ## 上手

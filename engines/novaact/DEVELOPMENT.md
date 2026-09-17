@@ -38,7 +38,7 @@ echo '["页面地址匹配 \"/wiki/OpenAI\""]' | uv run python -m gherkai_worker
 
 复用本机 AWS 凭证，经 Nova Act 的 `Workflow` 构造（见 [ADR 0004](../../docs/adr/0004-novaact-iam-auth-via-workflow.md)）：
 
-- `model_id="nova-act-latest"`，`boto_session_kwargs={"region_name": <AWS_REGION>}`（region 不硬编码：由组合根落实后经 `AWS_REGION` 注入，见 `gherkai_worker_novaact/run_scope.py` 的 `REGION`；[ADR 0016](../../docs/adr/0016-execution-architecture-core-lib-run-model.md) 决策 C / [ADR 0033](../../docs/adr/0033-iac-aws-backend-and-composition-wiring.md)）
+- `model_id=MODEL_ID`（`lib/constants.py`：钉死的 GA 版本，env `NOVA_MODEL_ID` 可覆盖，[ADR 0004](../../docs/adr/0004-novaact-iam-auth-via-workflow.md)「模型版本选择策略」），`boto_session_kwargs={"region_name": <AWS_REGION>}`（region 不硬编码：由组合根落实后经 `AWS_REGION` 注入，见 `gherkai_worker_novaact/run_scope.py` 的 `REGION`；[ADR 0016](../../docs/adr/0016-execution-architecture-core-lib-run-model.md) 决策 C / [ADR 0033](../../docs/adr/0033-iac-aws-backend-and-composition-wiring.md)）
 - workflow definition：**代码自动 create-if-not-exists**（`gherkai_worker_novaact/lib/workflow_setup.py` 的 `ensure_workflow_definition()`，worker 与 spike 已接入），无需手动 CLI。boto3 与 `aws nova-act create-workflow-definition` 等价。
 - **真踩过**：`provider.cdp_session()` 靠 contextvar 识别 workflow——用 `@workflow` 装饰器，或手动 `set_current_workflow(wf)`（worker 走 `with Workflow`，故须手动补，见 `gherkai_worker_novaact/run_scope.py` 的 `with wf` + `set_current_workflow`）。
 

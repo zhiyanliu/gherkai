@@ -48,11 +48,12 @@ worker 的能力自述入口（`--capabilities`，契约见「5.」）**不建�
 worker argv 带 `--capabilities` 时：**不建会话、不读 stdin、零费用**，把自己的能力声明作一个 JSON 对象打到 stdout、退出 0：
 
 ```json
-{"schema_version": 1, "engine": "<name>", "min_grace_s": <number>, "deterministic_steps": [{"pattern": "...", "description": "...", "example": "..."}]}
+{"schema_version": 1, "engine": "<name>", "min_grace_s": <number>, "deterministic_steps": [{"pattern": "...", "description": "...", "example": "..."}], "model_id": "<该 worker 实际会用的模型 id>"}
 ```
 
 - `min_grace_s` 是 [0024](./0024-worker-core-protocol.md) grace 硬约束的下限——Nova = `NOVA_ACT_TIMEOUT_S`（组合根注入的 env，缺省 120）+ margin（worker 常量，可 env 覆盖）；Midscene = SIGTERM 收尾序列各段超时预算之和 + 余量，由 worker 里那些预算常量算出、不另写字面量。
-- `deterministic_steps` 是注册表清单（「2.」）。该入口与 job 模式、match 查询一样**先加载 steps 目录**（[0037](./0037-distribution-and-packaging.md) 决策 4），故清单 = 内建脚手架 + 使用方定制，加载失败在这里就 fail-loud——`run` 的前置检查因此只需 spawn 一次：同一份自述同时给出「steps 加载成功、清单、grace 下限」。
+- `deterministic_steps` 是注册表清单（「2.」）。该入口与 job 模式、match 查询一样**先加载 steps 目录**（[0037](./0037-distribution-and-packaging.md) 决策 4），故清单 = 内建脚手架 + 使用方定制，加载失败在这里就 fail-loud——`run` 的前置检查因此只需 spawn 一次：同一份自述同时给出「steps 加载成功、清单、grace 下限、模型」。
+- `model_id` 是该 worker 起 job 时会用的模型 id（Nova = 钉死的 GA 版本或 env `NOVA_MODEL_ID` 的覆盖值，见 [0004](./0004-novaact-iam-auth-via-workflow.md)「模型版本选择策略」；Midscene = 它的 Bedrock 模型 id），`doctor` 据此显示当前模型——覆盖过 env 的机器一眼可见。
 - **worker 只有两个非 job 入口**：本入口（自述、无输入）与 `--match-steps`（查询、stdin 喂 step 文本，「4.」）。**加键不加入口**：将来的能力（如 browser 后端，[0037](./0037-distribution-and-packaging.md) 被拒方案 / 未来项）都是本对象的新键；`schema_version` 只在既有键语义变化时递增。
 
 组合根侧（`compose.query_capabilities(engine, steps_dir)`，进程内按「引擎 + steps 目录」缓存整份对象；`engine_min_grace` 从该引擎任一份缓存取 `min_grace_s`——下限与 step 无关——没有才无 steps 地问一次）**当场核两个身份位**：`engine` 须等于所问引擎（定位链第一级是 env 覆写，指错 worker 路径时不核就静默拿另一引擎的下限）、`schema_version` 须是它认识的版本；spawn 时 `stdin=DEVNULL`（不认该 flag 的 worker 会掉进 job 模式读 stdin，继承 TTY 就挂到超时、诊断指错方向）。query 失败（版本不一致不认 flag、非法 JSON、非零退出）与 match 查询同律 **fail-loud**（`WorkerSelfDescribeError`，不降级、不回落常量）。grace 下限**只在本机执行档查**——cloud 档的 worker 跑在 Fargate、运行期 grace 到不了它（真实宽限 = task-def 的 `stopTimeout`），且提交机器不必装 worker，见 [0024](./0024-worker-core-protocol.md)「引擎自报下限」条。

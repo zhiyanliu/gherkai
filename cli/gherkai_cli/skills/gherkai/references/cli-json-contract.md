@@ -187,7 +187,7 @@ step 级证据视图：判定树（**骨架 = 提交时的 job 定义**）+ 每�
 | 键 | 含义 |
 |---|---|
 | `section` | `cli` / `engines` / `steps` / `aws` / `backend` / `provider` |
-| `name` | 项名：`cli`：`version`；`engines`：`novaact` / `midscene` / `any`；`steps`：`dir` / `load.<engine>`；`aws`：`region` / `identity`；`backend`：`version` / `resources` / `worker.default` / `worker.<engine>` / `worker.any` / `worker.grace`（本机 worker 自报的收尾宽限 vs 云端 `stopTimeout`，缺口 ok=false/required=false）/ `reachability`（云端未查时的占位）；`provider`：`deploy-aws`（provider 不可用时的占位——没装 ok=true/required=false，装了但加载失败 ok=false）、provider 自报的 `node` / `cdk` / `container-engine`，或它的 name |
+| `name` | 项名：`cli`：`version`；`engines`：`novaact` / `midscene` / `any` / `model.<engine>`（本机该引擎 worker 自报的模型 id（云端 job 用的是镜像里的模型），仅自述成功时出现）；`steps`：`dir` / `load.<engine>`；`aws`：`region` / `identity`；`backend`：`version` / `resources` / `worker.default` / `worker.<engine>` / `worker.any` / `worker.grace`（本机 worker 自报的收尾宽限 vs 云端 `stopTimeout`，缺口 ok=false/required=false）/ `reachability`（云端未查时的占位）；`provider`：`deploy-aws`（provider 不可用时的占位——没装 ok=true/required=false，装了但加载失败 ok=false）、provider 自报的 `node` / `cdk` / `container-engine`，或它的 name |
 | `ok` | 该项通过 |
 | `required` | false = 可选能力缺失（另一个引擎没装、没装 deploy-aws extra、部署工具链缺项），不影响退出码；退出码 = 全部 required 项是否 ok |
 | `detail` | 一句人话：通过时是事实（命令、版本、ARN），失败时是怎么办 |
