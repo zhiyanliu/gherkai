@@ -30,7 +30,7 @@ AI step 的操作与判定由两个模型完成，都在你的 AWS 账户里跑�
 | Nova Act（默认） | `nova-act-v1.0` | Amazon Nova Act | 钉死，换模型只随发版并在 Release 说明里点明 | `gherkai doctor` 显示；环境变量 `NOVA_MODEL_ID` 可换（如 `nova-act-preview`，无支持承诺） |
 | Midscene | `us.openai.gpt-5.6-terra`（美国境内三个 region 处理） | Amazon Bedrock | 钉死，换模型只随发版并在 Release 说明里点明 | `gherkai doctor` 显示；环境变量 `MIDSCENE_MODEL_ID` 可换（Bedrock 上 Midscene 支持的模型；家族识别不了时再给 `MIDSCENE_MODEL_FAMILY`） |
 
-同一条断言在不同模型版本上可能翻转，所以不用「自动跟最新」的别名。
+同一条断言在不同模型版本上可能翻转，所以不用「自动跟最新」的别名。费用量级：一条 5 步左右的 scenario 在 Midscene 默认模型上约 5 美分、换成 Qwen3-VL 约 2 美分（按 2026-09 Bedrock 标价与实测 token 估算，以账单为准）。
 
 ## 上手
 

@@ -63,7 +63,7 @@ gherkai 自己不含模型，也不接收任何数据。每个 AI step 的操作
 | Nova Act（默认） | `nova-act-v1.0` | Amazon Nova Act | 钉死 GA 版本；换模型只随 gherkai 发版，并在 Release 说明里点明 | `gherkai doctor` 显示实际模型；环境变量 `NOVA_MODEL_ID` 可换（如 `nova-act-preview`，无支持承诺） |
 | Midscene | `us.openai.gpt-5.6-terra`（OpenAI GPT-5.6 Terra） | Amazon Bedrock | 钉死；换模型只随 gherkai 发版，并在 Release 说明里点明 | `gherkai doctor` 显示实际模型；环境变量 `MIDSCENE_MODEL_ID` 可换成 Bedrock 上 Midscene 支持的其它模型（如 `qwen.qwen3-vl-235b-a22b`、`moonshotai.kimi-k2.5`），家族一般自动识别、识别不了就再给 `MIDSCENE_MODEL_FAMILY` |
 
-判定会随模型变：同一条断言在不同模型版本上可能翻转，所以我们不用「自动跟最新」的别名。费用来自模型调用与云端浏览器会话，按你账户的 AWS 账单计。
+判定会随模型变：同一条断言在不同模型版本上可能翻转，所以我们不用「自动跟最新」的别名。费用来自模型调用与云端浏览器会话，按你账户的 AWS 账单计；量级上，一条 5 步左右的 scenario 在 Midscene 默认模型上约 5 美分、换成 `qwen.qwen3-vl-235b-a22b` 约 2 美分（按 2026-09 Bedrock 标价与实测 token 估算，以账单为准），Nova Act 引擎按 Nova Act 服务计费。
 
 ## 前置要求
 
