@@ -28,7 +28,7 @@ AI step 的操作与判定由两个模型完成，都在你的 AWS 账户里跑�
 | 引擎 | 模型 | 服务 | 版本策略 | 怎么看 / 怎么换 |
 |---|---|---|---|---|
 | Nova Act（默认） | `nova-act-v1.0` | Amazon Nova Act | 钉死，换模型只随发版并在 Release 说明里点明 | `gherkai doctor` 显示；环境变量 `NOVA_MODEL_ID` 可换（如 `nova-act-preview`，无支持承诺） |
-| Midscene | `qwen.qwen3-vl-235b-a22b` | Amazon Bedrock | 固定，随发版变 | `gherkai doctor` 显示；不可配置 |
+| Midscene | `qwen.qwen3-vl-235b-a22b` | Amazon Bedrock | 钉死，换模型只随发版并在 Release 说明里点明 | `gherkai doctor` 显示；环境变量 `MIDSCENE_MODEL_ID` 可换（Bedrock 上 Midscene 支持的模型；家族识别不了时再给 `MIDSCENE_MODEL_FAMILY`） |
 
 同一条断言在不同模型版本上可能翻转，所以不用「自动跟最新」的别名。
 

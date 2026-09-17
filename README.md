@@ -61,7 +61,7 @@ gherkai 自己不含模型，也不接收任何数据。每个 AI step 的操作
 | 引擎 | 模型 | 服务 | 版本策略 | 怎么看 / 怎么换 |
 |---|---|---|---|---|
 | Nova Act（默认） | `nova-act-v1.0` | Amazon Nova Act | 钉死 GA 版本；换模型只随 gherkai 发版，并在 Release 说明里点明 | `gherkai doctor` 显示实际模型；环境变量 `NOVA_MODEL_ID` 可换（如 `nova-act-preview`，无支持承诺） |
-| Midscene | `qwen.qwen3-vl-235b-a22b` | Amazon Bedrock | 固定，随发版变 | `gherkai doctor` 显示；不可配置 |
+| Midscene | `qwen.qwen3-vl-235b-a22b` | Amazon Bedrock | 钉死；换模型只随 gherkai 发版，并在 Release 说明里点明 | `gherkai doctor` 显示实际模型；环境变量 `MIDSCENE_MODEL_ID` 可换成 Bedrock 上 Midscene 支持的其它模型（如 `us.openai.gpt-6-astra`、`moonshotai.kimi-k2.5`），家族一般自动识别、识别不了就再给 `MIDSCENE_MODEL_FAMILY` |
 
 判定会随模型变：同一条断言在不同模型版本上可能翻转，所以我们不用「自动跟最新」的别名。费用来自模型调用与云端浏览器会话，按你账户的 AWS 账单计。
 

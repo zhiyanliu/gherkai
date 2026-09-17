@@ -60,7 +60,7 @@ Nova 的失败形态**不是读不出中文**：动作步的推理明确读出�
 ## Nova Act 解除英文限定的条件（重议闸门）
 
 - AWS 语言声明变更（发正式语言表含目标语言），**或** 模型迭代后用 `features/wikipedia_zh.feature` 以 `--assertion-votes 10` 独立跑 3 次，「词条首段提到了计算机或机器」≥ 9/10 且三次一致——两者任一成立即修订本 ADR，无需另立取代 ADR。
-- 视觉定位成为瓶颈时换大脑——**不需重设计架构**，但也不是纯配置：改 worker 侧模型常量（`engines/midscene/src/lib/agentcore-sigv4.mts` 的 `MODEL` + `engines/midscene/src/worker/run-scope.mts` 的 `MIDSCENE_USE_QWEN3_VL` family 开关）+改 IaC 里 `bedrock:InvokeModel` 的模型 ARN pin 并重新部署（[0003](./0003-midscene-grounding-qwen3vl-bedrock.md)「待观察（上游代际）」段同口径），受 [0009](./0009-maximize-aws-hard-constraint.md)「AWS 内托管」约束限于 Bedrock 可用模型。
+- 视觉定位成为瓶颈时换大脑——**不需重设计架构**：使用方本机经 env `MIDSCENE_MODEL_ID` 即可换（[0044](./0044-engine-model-selection-and-override.md)）；换默认 = 改 worker 侧 `DEFAULT_MODEL` 常量 + 改 IaC 里 `bedrock:InvokeModel` 的模型 ARN pin 并重新部署（[0003](./0003-midscene-grounding-qwen3vl-bedrock.md)「待观察（上游代际）」段同口径），受 [0009](./0009-maximize-aws-hard-constraint.md)「AWS 内托管」约束限于 Bedrock 可用且 Midscene 有 family 的模型。
 
 ## 影响
 

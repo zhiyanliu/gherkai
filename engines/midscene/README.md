@@ -19,7 +19,7 @@ CLI 在 PATH 上找 `gherkai-worker-midscene` 命令（`npm i -g` 的结果）�
 - **纯 IAM 鉴权**：进程内 SigV4 自签，复用本机 AWS 默认凭证链（profile / 环境变量 / 实例角色皆可）。**不需要任何 API key**（无 bearer token）。
 - **region 必须解析得出**：`gherkai run --region <R>`，或 `AWS_REGION` / `AWS_DEFAULT_REGION`，或 profile 配置里的 region；四处都没有即报错，不猜默认 region。
 - 该 region 下账号需可用：**Bedrock 模型** `qwen.qwen3-vl-235b-a22b`（视觉定位大脑），以及 **AgentCore Browser**（`bedrock-agentcore`）。浏览器跑在云端，本机**不需要装 Chromium**。
-- **模型固定**为上面这个 Bedrock 模型、不可配置，换模型只随本工具的版本升级；`gherkai doctor` 会显示 worker 实际用的模型。
+- **模型版本默认钉死**在上面这个 Bedrock 模型，换模型只随本工具的版本升级。想换（Bedrock 上 Midscene 支持的其它模型，如 `us.openai.gpt-6-astra`、`moonshotai.kimi-k2.5`），设环境变量 `MIDSCENE_MODEL_ID`：本机跑在 shell 里设即可，云端要写进你自定义 worker 镜像的 `ENV`；模型家族按 id 自动识别，识别不了时 worker 会拒绝启动并让你设 `MIDSCENE_MODEL_FAMILY`。`gherkai doctor` 会显示 worker 实际用的模型。
 
 ## 写确定性 step（`steps/*.mts`）
 
