@@ -295,8 +295,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0004-novaact-iam-auth-via-workflow.md": {
-    "mtime": 1789536369.8216617,
-    "ast_hash": "23d853dc1e47757b3ca1190335634ac7",
+    "mtime": 1789609257.7770417,
+    "ast_hash": "1f801ac907750ee314d6c1a620d861c2",
     "semantic_hash": ""
   },
   "docs/adr/0005-single-shared-feature-file.md": {
@@ -1230,8 +1230,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0043-agent-skill-for-driving-gherkai.md": {
-    "mtime": 1789540803.8748293,
-    "ast_hash": "721179ebcae005a9baaed00cdf8136b1",
+    "mtime": 1789557774.0255632,
+    "ast_hash": "6b712879fd9198d22c282820359786b7",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skill_install.py": {
@@ -1367,6 +1367,11 @@
   ".vscode/settings.json": {
     "mtime": 1789538913.1706197,
     "ast_hash": "c65c2bb229c60f782cdb2f96f3e0985a",
+    "semantic_hash": ""
+  },
+  "docs/journey/0007-nova-act-model-ab.md": {
+    "mtime": 1789611332.5086172,
+    "ast_hash": "7a34e73a4bdfc1bd892aa08ca964c841",
     "semantic_hash": ""
   }
 }

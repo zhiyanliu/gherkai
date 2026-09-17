@@ -25,3 +25,12 @@ definition 由 create-if-not-exists 的 `ensure_workflow_definition()` 自动建
 **幂等必须覆盖并发档**：worker 是**每 scope 一个进程**（本地并发 spawn / 云端多 task 同时起），definition 尚不存在的首跑会让多个进程同时 `get`→404→`create`，赢家外的进程吃 `CreateWorkflowDefinition` 的 `ConflictException`（409，nova-act 服务模型里是该 API 的声明错误之一；`get` 侧没有此错误）。**决定**：把 `ConflictException` 按「已存在」吞掉、归 `exists`——并发赢家已建即目标达成，对外语义仍是 create-if-not-exists。否则裸异常落在**会话尚未起、退出码通道未走**的时点：worker traceback exit 1 → core 归 `engine_error`（既不重试也归错类），且 [0028](./0028-transient-network-ssl-resilience.md) 把本 helper 列为「建连段可安全重放」的幂等依据只在串行下成立。
 
 **退路**：若某账号/region IAM 路径不可用，退回 `NOVA_ACT_API_KEY`（从 nova.amazon.com/act 生成）。
+
+## 模型版本选择策略（待定，等 A/B 数据）
+
+`Workflow(model_id=...)` 现传别名 `nova-act-latest`（`lib/constants.py`）。服务端 `ListModels`（2026-09-17 实查，SDK 兼容版本 1）：GA 只有 `nova-act-v1.0`（ACTIVE），另有 preview `nova-act-v1.1_2026-02-09`；别名 `nova-act-latest` → v1.0、`nova-act-preview` → v1.1；SDK 3.4.187.0 两者都支持。两条路各有代价，**默认用哪条尚未定**：
+
+- **别名（现状）**：AWS 发新 GA 时自动换模型，零改动跟进；代价是判定基线在零提交的情况下漂移——本工具的 pass / fail 靠 AI 投票，模型一换形态就变，且事后无从对照。
+- **钉版本（`nova-act-v1.0`）**：判定可复现、升级是一次有意识的提交（与包版本用 `==` 同版本 pin 同一逻辑），GA 承诺支持至少一年；代价是每个新 GA 要手动跟进、评估后再切。
+
+判据 = 同一批 Nova 用例在 v1.0 与 v1.1 上各跑三遍的 pass / fail 稳定性、单 act 耗时、超时率差异：差异明显 → 钉版本并把「切模型」当作有评估的升级动作；差异不明显 → 别名的漂移风险可接受。**preview 不作生产默认**（无支持承诺、不可钉），无论 A/B 结果如何。按项目选模型的旋钮（`NOVA_MODEL_ID` env 经组合根注入）暂不做：近期唯一消费者是这次 A/B，四个注入面就是四个会漂的地方，等有用户要按项目选模型或新 GA 需新旧并行验证时再加。
