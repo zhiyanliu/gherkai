@@ -390,13 +390,19 @@ class BackendStack(Stack):
                 resources=[_sys_browser, _browser_profiles],
             ))
         elif engine == "midscene":
-            # Midscene：Bedrock InvokeModel（Qwen3-VL）。收窄到该 foundation-model 单一 ARN（ADR 0033；文档格式 +
-            # CloudTrail 样本 + code 实际 modelId 三方对上）。foundation-model ARN 的 **account 段为空**（AWS 惯例）；
-            # region 段用 `*`——region 是 code 可配运行期变量（AWS_REGION 注入，ADR 0016 决策 C），model-id 才是稳定段，
-            # 故 pin model-id、通配 region（无跨区 inference profile：裸 modelId 直连 ON_DEMAND，该模型不支持 profile）。
+            # Midscene：Bedrock InvokeModel。**模型是运行期选择、不是部署期常量**（ADR 0044 决策 2：使用方只改定制镜像的
+            # ENV 就能换模型，部署侧不必跟着动），故不 pin 具体 model-id：放到 foundation-model/* 与本账户的 inference-
+            # profile/*（GPT 系经跨区 inference profile 调用，IAM 要同时放行 profile ARN 与其路由到的各 region 模型 ARN）；
+            # 可用集合由账户的 Bedrock 模型访问开关决定。仍锁死 service 与两种资源类型、不是裸 *（ADR 0033 IAM 表）。
+            # foundation-model ARN 的 **account 段为空**（AWS 惯例），inference-profile 是账户资源；region 段用 `*`——
+            # region 是 code 可配运行期变量（AWS_REGION 注入，ADR 0016 决策 C）。曾 pin 单一 Qwen3-VL ARN、并靠跨语言对拍
+            # 测试盯 IaC 常量与 worker 常量一致——换模型即重部署 + IaC 耦合 worker 常量，被 ADR 0044 否掉。
             role.add_to_policy(iam.PolicyStatement(
                 actions=["bedrock:InvokeModel"],
-                resources=[f"arn:aws:bedrock:*::foundation-model/{names.QWEN_MODEL_ID}"],
+                resources=[
+                    "arn:aws:bedrock:*::foundation-model/*",
+                    f"arn:aws:bedrock:*:{self.account}:inference-profile/*",
+                ],
             ))
 
     # ---- SSM：subnet/sg ID 写进含 prefix 路径（cli resolve_network 读，ADR 0033）----

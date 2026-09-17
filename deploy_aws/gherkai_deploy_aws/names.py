@@ -45,16 +45,6 @@ from gherkai_runtime.names import (  # noqa: F401
     worker_template_key,
 )
 
-# ---- provider 特有（不进 gherkai_runtime.names：只有 IAM 收窄 / CloudFormation 层用，cli/Lambda 不消费）----
-
-# IAM 资源 ARN 收窄用的稳定段（ADR 0033 IAM 表）：
-# QWEN_MODEL_ID 是**模型标识（部署期稳定、非运行期概念）**，故可安全 pin 进 IAM——**须与
-# `engines/midscene/src/lib/agentcore-sigv4.mts` 的 `MODEL` 逐字一致**（Midscene InvokeModel 的 foundation-model
-# ARN pin 到它）。裸 id、无跨区前缀（不走 inference profile）。跨语言共享不了常量，这条一致性由
-# `deploy_aws/tests/test_stack.py` 的对拍（读那个 `.mts` 抽 `MODEL` 比对本常量）钉住。
-# （对比：nova-act 的 workflow-definition 名是 worker 运行期概念、不 pin——IAM 用 workflow-definition/* 通配，
-#  避免 IaC 跨工程耦合 worker 常量，见 stack.py nova-act 权限注释。）
-QWEN_MODEL_ID = "qwen.qwen3-vl-235b-a22b"
 
 # Lambda asset 构建目录的落点 env——**命令进程 → cdk 起的 app 进程之间的管道**（`cli.Provider._run_cdk` 写、
 # `stack.BackendStack._build_lambda_asset` 读）。放在本模块是因为两侧唯一的共同 import 就是它（`cli.py` 不能
