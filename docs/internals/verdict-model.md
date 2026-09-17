@@ -137,14 +137,14 @@ skipped = -1  <  passed = 0  <  failed = 1  <  error = 2  <  aborted = 3
 | `list-engines` | 这台机器的引擎环境什么样 | **恒 0**（某引擎没装正是要展示的信息，不算命令失败——要判「装了没」就看那一行，或用 `run`/`list-deterministic` 的退 2） | — | — |
 | `skill install` | 技能包装好了吗 | 装好了（`--print` 则打完正文） | — | `--dir` 不是目录 / 目标目录里是别的东西 / 包内技能包缺失 / 写不进去（含指令文件那一行） |
 
-一句话记：**表判定的只有 `run` 与 `status`，也只有它们会退 1**；`submit`/`plan`/`explain`/`doctor`/`list-deterministic`/`skill install` 全是 0/2 的「做成了 / 没做成」，`list-engines` 更进一步——它恒 0（理由见表）。（部署方命令 `deploy`/`destroy` 不在本表口径内，但 `2` 与本表同源：`0` 成功；`2` 是它们自己的前置/校验失败（缺 Node 或找不到 cdk、`--vpc` 缺档或档不符、容器引擎名不认、`push-worker` 的架构/skew 拦截——都在动账户之前就拦下；唯一例外是 `push-worker` 推送途中的 AWS 调用失败，也归 `2`，但那时镜像/revision 可能已写进账户）；`1` = cdk 自己失败（cdk CLI 报错多为 1，原样透传）或 cdk 已成功而其后的 worker 镜像步骤失败——两者都意味账户可能已被改动，重跑 `gherkai deploy` 幂等收敛；其余码同样是 cdk CLI 自己的返回值原样透传——都别按判定码读。给使用者的口径见 `deploy_aws/README.md`「退出码与常见错误」。）`run` 的判定码读 `schedule` 返回的内存 `RunResult.status`（必是终态，不回读可能停在 pending 的落库态）；`status` 的判定码读回落库的 `RunState`——两路 `status`（local/cloud）共用同一个 `_render_status`，行为一致。
+一句话记：**表判定的只有 `run` 与 `status`，也只有它们会退 1**；`submit`/`plan`/`explain`/`doctor`/`list-deterministic`/`skill install` 全是 0/2 的「做成了 / 没做成」，`list-engines` 更进一步——它恒 0（理由见表）。（部署方命令 `deploy`/`destroy` 不在本表口径内，但 `2` 与本表同源：`0` 成功；`2` 是它们自己的前置/校验失败（缺 Node 或找不到 cdk、`--vpc` 缺档或档不符、容器引擎名不认、`push-worker` 的架构/skew 拦截——都在动账户之前就拦下；唯一例外是 `push-worker` 推送途中的 AWS 调用失败，也归 `2`，但那时镜像/revision 可能已写进账户）；`1` = cdk 自己失败（cdk CLI 报错多为 1，原样透传）或 cdk 已成功而其后的 worker 镜像步骤失败——两者都意味账户可能已被改动，重跑 `gherkai deploy` 幂等收敛；其余码同样是 cdk CLI 自己的返回值原样透传——都别按判定码读。给使用者的口径见 `docs/user-guide/cloud-backend.md`「常见错误」。）`run` 的判定码读 `schedule` 返回的内存 `RunResult.status`（必是终态，不回读可能停在 pending 的落库态）；`status` 的判定码读回落库的 `RunState`——两路 `status`（local/cloud）共用同一个 `_render_status`，行为一致。
 
 **CI 该接哪一条**：
 
 - **前台阻塞**：`gherkai run …` 一条命令即拿判定码。
 - **后台跑批**：`gherkai submit …` 拿 `run_id`（退 0 只说提交成功），再 `gherkai status <run_id> --wait` 拿判定码——CLI 脱离后不存在「内存 RunResult 终值」，判定只能来自读回的终态 `RunState`。
 - 别把 `explain` 当判定门（它是证据渲染器），也别把不带 `--wait` 的 `status` 当判定门（未达终态它退 0）。
-- 分界线是**有没有真的开跑**：开跑前的一切（feature 读不到、写法/参数不合法、worker 定位不到、凭证/region/资源/版本不对）退 `2`；跑起来之后的结论退 `0`/`1`。给使用者的口径见 `cli/README.md`「退出码」；`--json` 下**先按退出码分流再解析** stdout。
+- 分界线是**有没有真的开跑**：开跑前的一切（feature 读不到、写法/参数不合法、worker 定位不到、凭证/region/资源/版本不对）退 `2`；跑起来之后的结论退 `0`/`1`。给使用者的口径见 `docs/user-guide/running-and-results.md`「退出码」；`--json` 下**先按退出码分流再解析** stdout。
 
 > 权威：[ADR 0031](../adr/0031-job-lifecycle-states-and-severity.md) 决定五（退出码基于 run 级判定 + 数据源）、[ADR 0034](../adr/0034-detached-batch-reconciler.md)「命令形态」（退出码语义分层：submit=提交、判定归 `status --wait`）、[ADR 0041](../adr/0041-agent-facing-cli-affordances.md) 决策四（`doctor` 只看必修项的 0/2）、[ADR 0042](../adr/0042-step-evidence-and-explain.md) 决策四（`explain` 只 0/2、不重复表判定）；code：`cli/gherkai_cli/__main__.py` 各 `_cmd_*` 的 return 与 `_render_status`。
 

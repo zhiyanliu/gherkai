@@ -23,7 +23,7 @@ gherkai = "gherkai_cli.__main__:main"
 [project.urls]
 Homepage = "https://github.com/zhiyanliu/gherkai"
 Repository = "https://github.com/zhiyanliu/gherkai"
-Changelog = "https://github.com/zhiyanliu/gherkai/releases"
+Changelog = "https://github.com/zhiyanliu/gherkai/blob/HEAD/CHANGELOG.md"
 
 [tool.hatch.metadata.hooks.uv-dynamic-versioning]
 # 依赖产品本体 gherkai-runtime（它再依赖 core 窄腰）；引擎不在此声明——引擎是被 spawn 的子进程，

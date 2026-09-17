@@ -21,7 +21,7 @@ classifiers = [
 [project.urls]
 Homepage = "https://github.com/zhiyanliu/gherkai"
 Repository = "https://github.com/zhiyanliu/gherkai"
-Changelog = "https://github.com/zhiyanliu/gherkai/releases"
+Changelog = "https://github.com/zhiyanliu/gherkai/blob/HEAD/CHANGELOG.md"
 
 [tool.hatch.metadata.hooks.uv-dynamic-versioning]
 # 依赖窄腰 core（`==` 同版本 pin）；引擎不在此声明——引擎是被 spawn 的子进程，本包只持有起它们的 cmd

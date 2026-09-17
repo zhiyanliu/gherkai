@@ -47,9 +47,10 @@ def test_shipped_readme_is_for_users_only(readme: Path):
 
 
 def test_every_package_dir_has_a_development_md():
-    """contributor 内容有明确去处（不是被删掉）：根目录与每个包目录各一份 DEVELOPMENT.md。"""
-    missing = [pkg for pkg in ("",) + PY_PACKAGES + NPM_PACKAGES if not (REPO / pkg / "DEVELOPMENT.md").is_file()]
+    """contributor 内容有明确去处（不是被删掉）：根目录一份 CONTRIBUTING.md（GitHub 惯例名）、每个包目录各一份 DEVELOPMENT.md。"""
+    missing = [pkg for pkg in PY_PACKAGES + NPM_PACKAGES if not (REPO / pkg / "DEVELOPMENT.md").is_file()]
     assert not missing, f"缺 DEVELOPMENT.md：{missing}"
+    assert (REPO / "CONTRIBUTING.md").is_file(), "缺根 CONTRIBUTING.md（contributor 入口，原 DEVELOPMENT.md）"
 
 
 def test_root_readme_is_for_users_only():
@@ -75,28 +76,21 @@ def test_package_summaries_are_for_users_only():
     assert not hits, "包 Summary 不得含内部指代：\n" + "\n".join(hits)
 
 
-def _release_bodies() -> list[str]:
-    """release.yml 里 `body: |` 块标量的正文。不引 yaml 库（dev 依赖里没有它、别为一条护栏引入）：按缩进收块。"""
-    lines = (REPO / ".github/workflows/release.yml").read_text(encoding="utf-8").splitlines()
-    bodies, i = [], 0
-    while i < len(lines):
-        m = re.match(r"^(\s*)body:\s*\|", lines[i])
-        if not m:
-            i += 1
-            continue
-        indent, buf, i = len(m.group(1)), [], i + 1
-        while i < len(lines) and (not lines[i].strip() or len(lines[i]) - len(lines[i].lstrip()) > indent):
-            buf.append(lines[i])
-            i += 1
-        bodies.append("\n".join(buf))
-    return bodies
-
-
 def test_github_release_body_is_for_users_only():
-    """GitHub Release 正文 = Releases 页面，且是各包 pyproject `[project.urls] Changelog` 的落点——PyPI 上点 Changelog
-    直达，是没有仓库上下文的使用者面：零禁词、仓库内文件只用绝对 URL（同包 README）。找不到 body 即失败。"""
-    bodies = _release_bodies()
-    assert bodies, "release.yml 里找不到 `body: |`（workflow 改形态别让护栏静默变绿）"
-    hits = [f"release body:{i}: {line.strip()[:120]}" for body in bodies for i, line in enumerate(body.splitlines(), 1)
-            if FORBIDDEN.search(line) or RELATIVE_LINK.search(line)]
-    assert not hits, "Release 正文面向使用者，内部指代改成产品语言 + 指向 README 的绝对 URL：\n" + "\n".join(hits)
+    """GitHub Release 正文 = CHANGELOG.md 本版节 + `.github/release_body_footer.md`（`.github/scripts/release_notes.py`
+    渲染，占位符 `{{VERSION}}` / `{{OWNER}}` / `{{REPO}}`）。Releases 页面是没有仓库上下文的使用者面：零禁词、
+    仓库内文件只用绝对 URL 且钉 tag（`blob/v<版本>/`，不用 HEAD——本版说明要与它链到的文档同版）。
+    release.yml 必须还在用这条渲染链（改形态别让护栏静默变绿）。"""
+    footer_path = REPO / ".github/release_body_footer.md"
+    assert footer_path.is_file(), "缺 .github/release_body_footer.md（Release 正文的固定块）"
+    footer = footer_path.read_text(encoding="utf-8")
+    for ph in ("{{VERSION}}", "{{OWNER}}", "{{REPO}}"):
+        assert ph in footer, f"footer 模板缺占位符 {ph}"
+    rendered = footer.replace("{{VERSION}}", "9.9.9").replace("{{OWNER}}", "o").replace("{{REPO}}", "r")
+    hits = [f"release footer:{i}: {line.strip()[:120]}" for i, line in enumerate(rendered.splitlines(), 1)
+            if FORBIDDEN.search(line) or RELATIVE_LINK.search(line) or "blob/HEAD/" in line]
+    assert not hits, "Release 正文面向使用者：内部指代改产品语言、仓库文件用钉 tag 的绝对 URL：\n" + "\n".join(hits)
+    wf = (REPO / ".github/workflows/release.yml").read_text(encoding="utf-8")
+    assert "release_notes.py render" in wf and "body_path:" in wf, "release.yml 不再经 release_notes.py 渲染正文——护栏与实际形态脱节"
+    assert "release_notes.py check" in wf, "release.yml 的 gate 少了 CHANGELOG 节校验（每版说明「不写发不出」）"
+    assert re.search(r"^\s*body:\s*\|", wf, re.M) is None, "release.yml 里不该再有内联 body: |（正文只从 CHANGELOG + footer 渲染）"

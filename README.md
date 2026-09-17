@@ -1,206 +1,92 @@
-# Gherkin × (Midscene + Nova Act) × AgentCore Browser
+# gherkai
 
-**gherkai** 是一个 UI 自动化测试工具：测试用 **Gherkin**（`.feature` 文件）写成人话，交给 **AI 引擎**（Midscene 或 Nova Act，二选一或按用例混用）读懂后，在 **AWS Bedrock AgentCore** 承载的云端浏览器里真跑。
+**gherkai** 是一个 UI 自动化测试工具。测试用 Gherkin（`.feature` 文件）写成自然语言，由 AI 引擎（Midscene 或 Nova Act）读懂后，在 AWS Bedrock AgentCore 承载的云端浏览器里执行，并给出可复核的判定与证据。全部组件运行在你自己的 AWS 账户内，本机不需要安装浏览器。
 
-`.feature` 里的一个 step 有两种跑法：
+一个 step 有两种执行方式：
 
-- **交给 AI（默认）**：引擎读自然语言，自己操作页面、自己判断结果，QA 不用写代码。AI 的判断可能抖动，所以断言可以投多票取多数（`--assertion-votes`）。
-- **确定性 step**：必须精确的检查（当前 URL、某个 DOM 元素、精确文本）不该让 AI 猜。这类 step 是少数，由测试开发**按需**写成一个小函数放进项目的 `steps/` 目录：函数拿到的是浏览器页面对象（Playwright 的 `page`），直接查、不问 AI、结果可复现；QA 只需在 `.feature` 里照它登记的说法写一句（内建了「页面地址匹配」这类现成锚点，装上即可用）。
+- **交给 AI（默认）**：引擎读自然语言，自己操作页面、自己判断结果，写用例的人不写代码。AI 的判断可能抖动，断言可以投多票取多数。
+- **确定性 step**：必须精确的检查（当前 URL、某个页面元素、精确文本）不交给 AI 猜。测试开发把它写成一个小函数放进项目的 `steps/` 目录，函数直接查页面对象，结果可复现；写用例的人只需在 `.feature` 里照它登记的说法写一句。
 
-## 能做什么
-
-| 能力                | 说明                                                                                                                  |
-|---------------------|-----------------------------------------------------------------------------------------------------------------------|
-| 双引擎执行          | 同一份 `.feature`，按 `@engine` tag 路由到 Midscene 或 Nova Act；未标走默认引擎                                         |
-| 云端浏览器          | 两个引擎都接 AgentCore Browser（每个 scope 一个会话），本机不装 Chromium                                                 |
-| 本机 / 云端两档     | `--backend local`：worker 跑本机子进程、结果落 `reports/`；`--backend cloud`：worker 跑 Fargate、状态落 DynamoDB、结果落 S3 |
-| 前台 / 后台两种跑法 | `run` 在线守着出结果；`submit` 提交即走、`status --wait` 事后收——cloud 档提交完关机也跑完                               |
-| 投票治理            | AI 断言可配 N 次取多数票（`--assertion-votes`）                                                                         |
-| 确定性 step         | 项目里的 `steps/` 目录注册精确断言，`plan` 预检标注哪些 step 走确定性、哪些走 AI                                        |
-| 机读与自检          | 查询类命令都有 `--json`（plan / run / status / explain / list-* / doctor / deploy list-workers）；`explain` 把失败那一步的 AI 推理与截图指针机读化；`doctor` 一条命令自检环境；`--tags` / `--scenario` 只跑一部分；`--quiet` 把 worker 日志落盘——给脚本与 AI agent 驾驭用 |
-| 本机应用测试        | `--expose-local http://localhost:3000` 经 ngrok 隧道把本机可达的应用暴露给云端浏览器                                  |
-| 预算兜底            | 每个 job 有墙钟预算（缺省 300s，`@timeout:` tag 可改），卡死/超时自动停、不会计费失控                                      |
-| 跨引擎报告          | 每个 run 一份 RunReport（`index.html` 人看入口 + `manifest.json`）                                                      |
-
-## 架构速览
-
-```mermaid
-flowchart TD
-    F["① 用例层<br/>features/*.feature —— 共享 Gherkin"]
-
-    subgraph L2["② 产品层"]
-        CLI["gherkai 命令行<br/>plan / run / submit / status / explain / list-engines / doctor / list-deterministic / skill / deploy / destroy"]
-        G["gherkai-runtime —— 运行时层<br/>引擎拉起 · 资源命名 · 本机/云端存储 · 隧道"]
-        C["gherkai-core —— 执行核心库<br/>parse → scope 分组 → schedule 调度（零引擎依赖）"]
-        CLI --> G --> C
-    end
-
-    subgraph L3["③ 执行层 —— 两个独立 AI 引擎，平级"]
-        M["Midscene worker（Node）<br/>大脑：GPT-5.6 Terra @ Bedrock"]
-        N["Nova Act worker（Python）<br/>大脑：nova-act-v1.0"]
-    end
-
-    B["④ 浏览器层<br/>AgentCore Browser（每引擎各一个会话）"]
-    APP["⑤ 被测应用<br/>公网站点；或本机/内网应用经 ngrok 隧道（--expose-local）"]
-
-    F --> CLI
-    C -- "每个 scope 起一个 worker 子进程<br/>（本机进程或 Fargate 容器）" --> M
-    C -- " 同一协议 " --> N
-    M -- CDP --> B
-    N -- CDP --> B
-    B -- " 公网直达 " --> APP
-    B -. "ngrok 隧道回本机" .-> APP
-```
-
-全栈托管在 AWS 内。**被测 UI 的语言**：Midscene 引擎不限（中文 UI 上动作与 AI 断言实测与英文同级可靠）；Nova Act 引擎的支持范围是英文 UI——它在中文页面上能操作、能判页面级语义，但「正文里是否出现某个中文词」这类断言会稳定判否。非英文应用请用 `@engine:midscene` 路由。
-
-## 判定由谁做出：底层模型披露
-
-gherkai 自己不含模型，也不接收任何数据。每个 AI step 的操作与判定由下面两个模型完成，全部在**你的 AWS 账户**里的托管服务上跑：Nova Act 在你选的 region，Midscene 默认的 GPT-5.6 经 Bedrock 跨区推理在**美国境内三个 region**（us-east-1 / us-east-2 / us-west-2）处理，浏览器会话与产物仍在你选的 region；发给模型的是 step 文本与被测页面的截图，浏览器会话也在你账户的 AgentCore Browser 里。唯一的第三方是可选的 ngrok：只有用 `--expose-local` 测本机应用时，云端浏览器到你本机应用的流量才经过 ngrok 的隧道。
-
-| 引擎 | 模型 | 服务 | 版本策略 | 怎么看 / 怎么换 |
-|---|---|---|---|---|
-| Nova Act（默认） | `nova-act-v1.0` | Amazon Nova Act | 钉死 GA 版本；换模型只随 gherkai 发版，并在 Release 说明里点明 | `gherkai doctor` 显示实际模型；环境变量 `NOVA_MODEL_ID` 可换（如 `nova-act-preview`，无支持承诺） |
-| Midscene | `us.openai.gpt-5.6-terra`（OpenAI GPT-5.6 Terra） | Amazon Bedrock | 钉死；换模型只随 gherkai 发版，并在 Release 说明里点明 | `gherkai doctor` 显示实际模型；环境变量 `MIDSCENE_MODEL_ID` 可换成 Bedrock 上 Midscene 支持的其它模型（如 `qwen.qwen3-vl-235b-a22b`、`moonshotai.kimi-k2.5`），家族一般自动识别、识别不了就再给 `MIDSCENE_MODEL_FAMILY` |
-
-判定会随模型变：同一条断言在不同模型版本上可能翻转，所以我们不用「自动跟最新」的别名。费用来自模型调用与云端浏览器会话，按你账户的 AWS 账单计；量级上，一条 5 步左右的 scenario 在 Midscene 默认模型上约 5 美分、换成 `qwen.qwen3-vl-235b-a22b` 约 2 美分（按 2026-09 Bedrock 标价与实测 token 估算，以账单为准），Nova Act 引擎按 Nova Act 服务计费。
-
-## 前置要求
-
-- AWS 凭证（默认 profile 即可），region **us-east-1**，需具备：
-  - Bedrock 模型访问：OpenAI GPT-5.6 Terra（`us.openai.gpt-5.6-terra`，Midscene 大脑）
-  - AgentCore Browser（`bedrock-agentcore` 服务）
-  - Nova Act 服务（`nova-act`）+ 模型 `nova-act-v1.0`（默认钉此版本、换模型只随版本升级，环境变量 `NOVA_MODEL_ID` 可覆盖；所需的 workflow definition 首次运行时自动创建）
-- Node ≥22（Midscene worker；`gherkai deploy` 同一下限）、Python 3.13 + [uv](https://docs.astral.sh/uv/)
-- （可选，仅 `--expose-local` 需要）[ngrok](https://ngrok.com/download) + authtoken（免费账号即够；`ngrok config add-authtoken <token>`——是 dashboard 上的 **Authtoken**，不是 `cr_` 开头的 API key）
-
-## 谁用它
-
-角色是帽子不是人：本地开发时一个人常同时写被测应用、写对应的 step、build 完自己推，几顶帽子都在头上；团队分工时按下表拆开即可。
-
-| 要做的事                                                    | 角色             | 装什么                                                     | 需要什么                                       |
-|-------------------------------------------------------------|------------------|------------------------------------------------------------|------------------------------------------------|
-| 写 `.feature`（纯自然语言、零代码），提交、看结果                | feature 作者（QA） | `gherkai`；要在本机跑（`--backend local`）再加下面两个 worker | 写：不需要任何凭证；跑：按跑法，见「上手」开头的表   |
-| 写 `steps/` 里的确定性 step，本机验证，build 定制 worker 镜像 | 测试开发         | `gherkai[local]` + `@gherkai/worker-midscene` + docker     | 同上；不需要云端写权限，镜像交给部署方推         |
-| 建/改共享的云端后端，推 worker 镜像                          | 部署方           | `gherkai[deploy-aws]` + Node ≥22 + docker                  | AWS 账号的部署权限（CDK、ECR、ECS、SSM）；跑用例同上 |
-| 开发 gherkai 本身                                              | contributor      | clone 仓库                                                 | 见 [`DEVELOPMENT.md`](./DEVELOPMENT.md)        |
+同一份 `.feature` 可以在本机跑，也可以提交到团队共享的云端后端跑；查询类命令都有 `--json` 输出，AI coding agent 可以直接驾驭。
 
 ## 安装
 
 ```bash
-uv tool install gherkai                     # 只提交云端 run 的人：CLI 本体
-uv tool install 'gherkai[local]'            # 本机跑 Nova Act worker（--backend local）
-npm i -g @gherkai/worker-midscene           # 本机跑 Midscene worker（Node ≥22；CLI 按 PATH 定位）
-uv tool install 'gherkai[deploy-aws]'       # 部署方：gherkai deploy / push-worker（另需 Node ≥22、docker）
-uvx gherkai --version                       # 或免安装临时跑（uvx --from 'gherkai[local]' gherkai run …）
-pipx install --fetch-python missing gherkai   # 不用 uv 的人：pipx 回落（pipx 默认不下载解释器，本项目要 Python ≥ 3.13；装 extra 写 'gherkai[local]'）
+uv tool install gherkai                     # 命令行工具（只提交云端 run 的人装这一个即可）
+uv tool install 'gherkai[local]'            # 加上本机运行的 Nova Act worker
+npm i -g @gherkai/worker-midscene           # 本机运行的 Midscene worker（Node ≥ 22）
+uv tool install 'gherkai[deploy-aws]'       # 部署方：部署与维护云端后端
 ```
 
-版本由 git tag 派生、各包同号锁定；CLI 与已部署后端的版本在 `--backend cloud` 预检时比对，不一致会明确提示怎么办。各包页面：[`gherkai`](https://pypi.org/project/gherkai/)（CLI）· [`gherkai-worker-novaact`](https://pypi.org/project/gherkai-worker-novaact/) · [`@gherkai/worker-midscene`](https://www.npmjs.com/package/@gherkai/worker-midscene) · [`gherkai-deploy-aws`](https://pypi.org/project/gherkai-deploy-aws/) · 库层 [`gherkai-core`](https://pypi.org/project/gherkai-core/) / [`gherkai-runtime`](https://pypi.org/project/gherkai-runtime/)。
+需要 Python 3.13 与 [uv](https://docs.astral.sh/uv/)、Node ≥ 22，以及一个开通了 Bedrock、AgentCore Browser 与 Nova Act 的 AWS 账户。前置要求与逐步说明见 [用户指南：开始使用](./docs/user-guide/getting-started.md)。
 
-## 上手
+## 30 秒上手
 
-跑法由**两个正交旋钮**组合出来（四种组合都合法）：
-
-- **怎么跑**——前台 `run`（CLI 在线守着，跑完直接给结果）或后台 `submit` + `status`（提交即走，事后查/收）。
-- **跑在哪 / 落在哪**（`--backend`）——`local`（默认：worker 跑本机子进程，结果落本地 `reports/`）或 `cloud`（worker 跑 Fargate 容器，状态落 DynamoDB、结果落 S3；需先由部署方跑 `gherkai deploy --vpc <档> --prefix <前缀>` 建齐资源，见 [`deploy_aws/README.md`](./deploy_aws/README.md)）。
-
-四种组合需要的权限不同、费用记到谁头上也不同；凭证越少的跑法越适合 CI 与低权限机器：
-
-| 跑法                                  | 需要什么                                                                                                                            | 费用记到          |
-|---------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------|-------------------|
-| `plan`                                | 无凭证（装了 worker 才有确定性 step 标注）                                                                                            | 无                |
-| `run` / `submit`，`--backend local`    | 本机 AWS 凭证（见前置要求）+ 两个 worker                                                                                              | 自己的 AWS 账号   |
-| `submit` + `status`，`--backend cloud` | 最小云端权限：读写运行记录表、只读探活、调用后端 Lambda（用例含多行参数时还要 S3 写权限）；不需要任何 ECS 写权限，任务由后端的 Lambda 拉起 | 部署方的 AWS 账号 |
-| `run`，`--backend cloud`               | 上一档再加起停 Fargate task 与写结果桶的权限（CLI 进程自己起 task、自己上传任务、自己推进）                                             | 部署方的 AWS 账号 |
-
-### ① 先预检（纯本地、零费用）
+### 让 AI agent 替你做
 
 ```bash
-gherkai plan features/engine_routing.feature   # 看 scope/job 分组、engine 路由、校验配置；
-                                               # 每个 step 标注派发预期：命中确定性 step 的标「← 确定性: <说明>」，纯自然语言步走 AI
-gherkai list-engines                           # 列可用引擎（某引擎没装会原地给装法）
-gherkai doctor                                 # 一次自检：引擎、steps/ 加载；加 --backend cloud --prefix P 连带查凭证与后端
-gherkai plan features/x.feature --tags smoke   # 只看带 @smoke 的 scenario（run/submit 同样认 --scope / --tags / --scenario）
-gherkai list-deterministic --engine midscene   # 列该引擎支持的确定性 step（含你项目 steps/ 里的；--json 可选）
+gherkai skill install          # 装给 Claude Code；--agent codex 装给 Codex，--agent all 两处都装
 ```
 
-**先 `plan` 后跑**——真跑会产生真实 AWS 费用（模型调用 + AgentCore 会话），plan 是纯本地预检。
+然后告诉 agent 你要测什么，例如：「用 gherkai 给 `https://www.wikipedia.org` 的搜索功能写一条用例，跑通后把结果汇报给我。」agent 会写 `.feature`、先预检再运行、读失败证据、收窄重跑并汇报。
 
-### ② 前台跑：`run`
+### 自己敲命令
 
 ```bash
-AWS_REGION=us-east-1 gherkai run features/engine_routing.feature      # engine 由 @engine tag 选、未标用 --default-engine
-AWS_REGION=us-east-1 gherkai run features/wikipedia_generic.feature \
-  --default-engine midscene --assertion-votes 3 --max-concurrency 2 --json
+gherkai plan features/wikipedia_generic.feature       # 预检：分组、引擎路由、每一步走 AI 还是确定性；零费用
+gherkai run  features/wikipedia_generic.feature       # 运行；结果落在 reports/<run_id>/（index.html 是入口）
+gherkai explain <run_id>                           # 有用例没过：逐步看问了 AI 什么、AI 看见了什么、截图在哪
 ```
 
-默认（local）落盘到当前目录 `reports/<run_id>/`（`--report-dir` 可改）：判定真值（`jobs/`）+ 运行状态 + RunReport（`index.html` / `manifest.json`），边跑边写。加 `--backend cloud --prefix <前缀>` 即换云端档（`--prefix` 与部署时一致）。
+后台运行用 `submit` 提交、`status --wait` 收结果；加 `--backend cloud --prefix <前缀>` 切到团队的云端后端。四种跑法、常用选项与退出码见 [跑测试与看结果](./docs/user-guide/running-and-results.md)。
 
-### ③ 后台跑批：`submit` + `status`
+## 它是怎么跑的
 
-```bash
-# local 档：本机起一个脱离 CLI 的后台进程推进——不必守着终端，但本机需保持开机
-RUN_ID=$(gherkai submit features/wikipedia_generic.feature)
-gherkai status "$RUN_ID"            # 查一眼进度（只读）
-gherkai status "$RUN_ID" --wait     # 等到终态、按判定给退出码——CI 要 0/1 判定用这个
-gherkai explain "$RUN_ID"           # 有用例没过时看为什么：逐步打出问了 AI 什么、AI 看见了什么、截图在哪（云端档加同一套 --backend/--prefix）
-
-# cloud 档：提交即返回，之后由云端推进——提交完关机也跑完
-RUN_ID=$(gherkai submit features/wikipedia_generic.feature --backend cloud --prefix gherkai-)
-gherkai status "$RUN_ID" --backend cloud --prefix gherkai- --wait
+```mermaid
+flowchart LR
+    F["features/*.feature"] --> CLI["gherkai 命令行"]
+    CLI -- "本机：子进程" --> W["worker（Midscene 或 Nova Act）"]
+    CLI -- "云端：Fargate 任务" --> W
+    W -- CDP --> B["AgentCore Browser<br/>（每个 scope 一个会话）"]
+    B --> APP["被测应用<br/>公网站点，或经隧道到达的本机 / 内网应用"]
+    W --> R["结果<br/>本机：reports/ · 云端：DynamoDB + S3"]
 ```
 
-`status` 的 `--backend` / `--report-dir` / `--prefix` 须与 `submit` 时一致。常用选项与退出码见 [`cli/README.md`](./cli/README.md)，全部选项以 `gherkai <命令> --help` 为准。
+- **本机档**（默认）：worker 是本机子进程，结果落当前目录的 `reports/`。需要本机 AWS 凭证。
+- **云端档**：worker 在部署方建好的 Fargate 上运行，状态落 DynamoDB、结果落 S3；提交完关机也会跑完。团队成员只需最小的云端权限，见 [部署与维护云端后端](./docs/user-guide/cloud-backend.md)。
+- **费用**来自模型调用与云端浏览器会话，按你账户的 AWS 账单计。`plan` 是纯本地预检，不产生费用。
 
-### ④ 测本地/内网应用：`--expose-local`
+更完整的架构与执行模型见 [`docs/internals/architecture-overview.md`](./docs/internals/architecture-overview.md)。
 
-```bash
-# feature 里照写原始地址 http://localhost:3000；gherkai 起 ngrok 隧道后在提交时替换为公网 URL
-# （带每 run 一换的 basic-auth 凭据、run 结束即拆）
-gherkai run my_app.feature --expose-local http://localhost:3000
-RUN_ID=$(gherkai submit my_app.feature --expose-local http://localhost:3000)
-```
+## 判定由谁做出：底层模型披露
 
-`submit` 后隧道由本机后台进程持有——**本机需保持开机联网直到 run 终态**。
+gherkai 自己不含模型，也不接收任何数据。每个 AI step 的操作与判定由下面两个模型完成，全部在**你的 AWS 账户**里的托管服务上运行：Nova Act 在你选的 region；Midscene 默认的 GPT-5.6 经 Bedrock 跨区推理在**美国境内三个 region**（us-east-1 / us-east-2 / us-west-2）处理，浏览器会话与产物仍在你选的 region。发给模型的是 step 文本与被测页面的截图。唯一的第三方是可选的 ngrok：只有用 `--expose-local` 测本机应用时，云端浏览器到你本机应用的流量才经过 ngrok 的隧道。
 
-### 怎么写 `.feature`（QA 零代码）
+| 引擎 | 模型 | 服务 | 版本策略 | 怎么看 / 怎么换 |
+|---|---|---|---|---|
+| Nova Act（默认） | `nova-act-v1.0` | Amazon Nova Act | 固定 GA 版本；换模型只随 gherkai 发版，并在版本说明里点明 | `gherkai doctor` 显示实际模型；环境变量 `NOVA_MODEL_ID` 可换（如 `nova-act-preview`，无支持承诺） |
+| Midscene | `us.openai.gpt-5.6-terra`（OpenAI GPT-5.6 Terra） | Amazon Bedrock | 固定；换模型只随 gherkai 发版，并在版本说明里点明 | `gherkai doctor` 显示实际模型；环境变量 `MIDSCENE_MODEL_ID` 可换成 Bedrock 上 Midscene 支持的其它模型，模型家族一般自动识别，识别不了再设 `MIDSCENE_MODEL_FAMILY` |
 
-- 动作/断言都写**纯自然语言**：`When "搜索 OpenAI"` / `Then "进入了 OpenAI 词条页"` → 默认走 AI（断言按投票取多数）。
-- scope / 引擎 / 超时预算用 **tag**：`@scope:login`（同 scope 共享会话、串行）/ `@engine:midscene|novaact` / `@timeout:120`（该 scope 的墙钟预算秒）。
-- **确定性精确检查**（URL/DOM，不容 AI 抖动）：测试开发在项目的 `steps/` 目录注册（Nova Act 用 `*.py`、Midscene 用 `*.mts`，同一正则两侧对称），命中走精确判定、不投票；写法见 [`engines/novaact/README.md`](./engines/novaact/README.md) / [`engines/midscene/README.md`](./engines/midscene/README.md)。CLI 按 `--steps-dir` > 环境变量 `GHERKAI_STEPS_DIR` > `./steps` 找到它；任一文件加载失败即拒绝运行。云端跑时 steps 烙进 worker 镜像的 variant，见 [`deploy_aws/README.md`](./deploy_aws/README.md)。
-- **多行参数**：AI 动作/断言 step 可挂 DataTable / DocString，随 step 一起喂 AI。
-- **非英文 UI**：给 scenario 标 `@engine:midscene`（或 `--default-engine midscene`）。AI 断言写成直白的语义陈述（「当前是 X 的词条页」「页面没有报错」），别把段落边界、子串规则塞进断言——那是确定性 step 的活。中文探针见 [`features/wikipedia_zh.feature`](./features/wikipedia_zh.feature)。
+判定会随模型变：同一条断言在不同模型版本上可能翻转，所以默认不使用「自动跟随最新」的别名。量级上，一条 5 步左右的 scenario 在 Midscene 默认模型上约 5 美分、换成 `qwen.qwen3-vl-235b-a22b` 约 2 美分（按 2026-09 Bedrock 标价与实测 token 估算，以账单为准）；Nova Act 引擎按 Nova Act 服务计费。**被测 UI 的语言**：Midscene 引擎不限；Nova Act 引擎支持英文 UI，非英文应用请用 `@engine:midscene` 路由。配置方法见 [配置](./docs/user-guide/configuration.md)。
 
-示例 feature 在 [`features/`](./features/)。
+## 文档
 
-## 让 AI agent 驾驭
+| 你想 | 去这里 |
+|---|---|
+| 安装、前置要求、第一次跑通 | [开始使用](./docs/user-guide/getting-started.md) |
+| 写 `.feature`、写确定性 step | [编写 .feature](./docs/user-guide/writing-features.md) · [编写确定性 step](./docs/user-guide/writing-deterministic-steps.md) |
+| 四种跑法、选项、退出码、结果在哪 | [跑测试与看结果](./docs/user-guide/running-and-results.md) |
+| 测只在本机 / 内网可达的应用 | [测本机或内网里的被测应用](./docs/user-guide/local-app-testing.md) |
+| 部署与维护团队的云端后端 | [部署与维护云端后端](./docs/user-guide/cloud-backend.md) |
+| 环境变量与选项总表 | [配置](./docs/user-guide/configuration.md) |
+| 报错了先看哪 | [排错](./docs/user-guide/troubleshooting.md) |
+| 每个版本改了什么、升级要做什么 | [CHANGELOG](./CHANGELOG.md) |
+| 系统内部如何运转 | [`docs/internals/`](./docs/internals/README.md) |
+| 参与开发 | [`CONTRIBUTING.md`](./CONTRIBUTING.md) |
 
-装了 CLI 的项目可以把 gherkai 的 agent skill 装进来，让 Claude Code / Codex 这类 coding agent 替你写用例、跑、读失败证据、收窄重跑、汇报：
-
-```bash
-gherkai skill install                     # 装给 Claude Code：<项目>/.claude/skills/gherkai/，与已装的 CLI 同版本
-gherkai skill install --agent codex       # 装给 Codex：<项目>/.agents/skills/gherkai/；--agent all 两处都装
-gherkai skill install --global            # 装到用户级目录（~/.claude/skills/ 或 ~/.agents/skills/），对你所有项目生效
-gherkai skill install --print             # 只把正文打到 stdout，什么都不装
-```
-
-装完会问一句要不要往项目的 `CLAUDE.md` / `AGENTS.md` 追加一行提示（`--pointer yes|no` 免交互）。重装即收敛：整个目录换成当前 CLI 带的那份，不留上一版的残余；不是本命令装的同名目录不动、退 `2`。不装 CLI 也能拿到同一份：
-
-```bash
-npx skills add https://github.com/zhiyanliu/gherkai/tree/v<版本>/cli/gherkai_cli/skills/gherkai --agent claude-code
-```
-
-这条路不经 CLI、版本要自己钉：URL 里的 `v<版本>` 写成你要跟的 CLI 版本（tag 或 commit 都行；带斜杠的分支名不行，安装器会在第一个斜杠处切断 ref）；写 `HEAD` 拿的是默认分支最新、可能比装的 CLI 新。skill 教 agent 的是操作模型（何时先 `plan`、失败先 `explain`、退出码怎么分流、什么时候该写确定性 step），命令细节仍以 `gherkai <命令> --help` 为准。
+全部文档的地图在 [`docs/README.md`](./docs/README.md)。发行包页面：[`gherkai`](https://pypi.org/project/gherkai/) · [`gherkai-worker-novaact`](https://pypi.org/project/gherkai-worker-novaact/) · [`@gherkai/worker-midscene`](https://www.npmjs.com/package/@gherkai/worker-midscene) · [`gherkai-deploy-aws`](https://pypi.org/project/gherkai-deploy-aws/) · 库 [`gherkai-core`](https://pypi.org/project/gherkai-core/) / [`gherkai-runtime`](https://pypi.org/project/gherkai-runtime/)。示例用例在 [`features/`](./features/)。
 
 ## 注意
 
-- 运行会真实消耗 AWS 费用（模型调用 + AgentCore 会话）。
-- 生产用途前先用 `plan` 与骨架用例（wikipedia / example.com）确认环境与凭证。
-
-## 深入了解
-
-- 术语表：[`CONTEXT.md`](./CONTEXT.md)
-- 机制解读（给人读的横切文档）：[`docs/guides/`](./docs/guides/)
-- 架构决策记录：[`docs/adr/`](./docs/adr/)；外部一手来源：[`docs/REFERENCES.md`](./docs/REFERENCES.md)
-- **参与开发**：[`DEVELOPMENT.md`](./DEVELOPMENT.md)（目录结构、开发环境、测试、发布），各包目录另有各自的 `DEVELOPMENT.md`；项目约定见 [`CLAUDE.md`](./CLAUDE.md)
+- 运行会产生真实的 AWS 费用（模型调用与云端浏览器会话）。先用 `plan` 预检，再运行。
+- 用于生产之前，先用示例用例（`features/` 里的 wikipedia 用例）确认环境与凭证正常。

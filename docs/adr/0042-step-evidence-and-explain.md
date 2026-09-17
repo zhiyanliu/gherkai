@@ -210,7 +210,7 @@ agent / skill 只依赖 evidence schema 与 `explain` 输出，两者都是我�
 - [0029](./0029-engine-artifacts-to-s3.md)「reportRef 指向的文件」条、[0032](./0032-fargate-execution-environment.md)「上传失败处理」条：各加一行「step 级产物已有一个具名例外：evidence，见 0042」。
 - [0037](./0037-distribution-and-packaging.md) 决策 7 接线句：cloud 入口由 run / submit / status 三个改为四个、补 `explain`。
 - [0041](./0041-agent-facing-cli-affordances.md)：决策三查询类命令清单补 `explain --json`；「重议闸门」失败证据机读化一条标已由本 ADR 落地并反向链；Status 头**保持 Accepted**、按 0030 / 0034 的既有写法追加一句反向链——0041 无决策被反转，不写 Partially-superseded。
-- `docs/guides/cli-json-contract.md`：`run --json` steps 表补 `message`；step 级 `report_refs` 说明补 `kind=evidence`、两引擎皆有；新增 `explain --json` 一节（含 evidence 固定键与两个不透明节点、`record_missing` / `evidence_missing` 取值）。
+- `docs/internals/cli-json-contract.md`：`run --json` steps 表补 `message`；step 级 `report_refs` 说明补 `kind=evidence`、两引擎皆有；新增 `explain --json` 一节（含 evidence 固定键与两个不透明节点、`record_missing` / `evidence_missing` 取值）。
 - `cli/README.md`（explain 用法；退出码节补「explain 只说证据读出来了吗、不表判定」；index.html 描述含 evidence 行）、根 `README.md`、`cli/DEVELOPMENT.md`（RunReport 内部：清单含 evidence）、`DEVELOPMENT.md` ADR 范围、`engines/midscene/DEVELOPMENT.md` worker 模块枚举补 evidence。
 - `CONTEXT.md`：术语表 kind 枚举补 `evidence`、两引擎 step_done 带 evidence 一句（core 不透明搬运那句主语是 core、仍成立，只补皮层解引用半句）；版本单旋钮的 cloud 入口数三改四。
 

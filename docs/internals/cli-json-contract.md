@@ -16,7 +16,7 @@
 
 通则：`--json` 下 **stdout 只有一个 JSON 文档**，诊断/进度一律走 stderr；`null` 表示「无此值」（如无成本、未落值），
 省略键表示「此形态下不存在」（各节注明）。退出码非 0 的前置/读取失败路径 stdout 可为空、诊断在 stderr——**先按退出码分流再解析**。
-退出码含义见 `cli/README.md`「退出码」。
+退出码含义见 `docs/user-guide/running-and-results.md`「退出码」。
 
 ## `gherkai run … --json`
 
@@ -173,7 +173,7 @@ step 级证据视图：判定树（**骨架 = 提交时的 job 定义**）+ 每�
 | `screenshot` | string \| null | 该 frame 的截图（`file://` 或 `s3://`）；只有被截图策略选中的 frame 有，其余 null。**只给地址、不内嵌图**；云端档若 worker 中途被杀，地址可能取不到对象（按「读不到」处理） |
 | `actions[]` | array | 每项 `name`（动作名）+ `args`（**引擎原样透传的参数对象**：内部键随引擎版本变、**不属本契约**） |
 
-文本形态（不给 `--json`）是摘要、不是证据全文转写：超长推理会截断并指回 `--json` 或那份证据文件——要完整证据就用 `--json`。`--all` / `--full` 的语义见 `cli/README.md`「命令」节的 `explain` 行。
+文本形态（不给 `--json`）是摘要、不是证据全文转写：超长推理会截断并指回 `--json` 或那份证据文件——要完整证据就用 `--json`。`--all` / `--full` 的语义见 `docs/user-guide/running-and-results.md` 的 `explain` 一节。
 
 ## `gherkai list-engines --json`
 

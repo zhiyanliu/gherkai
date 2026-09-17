@@ -68,7 +68,7 @@
 | `engine_error`，起 worker 失败 | worker 版本与 CLI 不一致 | 重装到同版本（第 1 节） |
 | 启动即抱怨 region 未设 | `--region` / `AWS_REGION` / `AWS_DEFAULT_REGION` / profile 配置四处都没 region | 任选一处设上（第 4 节）；缺了不会自动兜一个 region |
 | `AccessDenied` / 模型不可用 | region 未开通模型，或凭证缺 Bedrock / AgentCore 权限 | 换 region 或补权限（第 4 节） |
-| Midscene import 你的 step 文件时 `SyntaxError` | 扩展名用了 `.ts` / `.js` | 改成 `.mts` / `.mjs` |
+| Midscene 侧某个 step 文件里的 step 全走了 AI、`list-deterministic` 清单里也没有它，且没有任何报错 | 扩展名用了 `.ts` / `.js`（收集阶段按扩展名过滤，静默跳过、不 import） | 改成 `.mts` / `.mjs` |
 | `plan` / `run` 退 2 点名某个 steps 文件 | 该文件加载失败 | 修那个文件，不是 feature |
 | 明明写了 `steps/` 却全走 AI | 目录没被读到或正则不匹配 | `list-deterministic --steps-dir …` 核对；对照 `example` 改 step 文本 |
 | `status` / `explain` 退 2 说找不到 run（提示只提 `submit`） | 三个参数与**产生这个 run 的那条命令**（`run` 或 `submit`）不一致 | 照那条命令逐字对齐 `--backend` / `--report-dir` / `--prefix` |

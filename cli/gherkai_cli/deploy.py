@@ -164,7 +164,7 @@ def add_parsers(sub, *, provider: object | None = None, provider_error: str | No
     dsp = sub.add_parser(
         "destroy", conflict_handler="resolve", epilog=epilog,
         help="[部署方] 拆掉云端后端（数据类资源保留、不随之删）",
-        description="拆掉云端后端 stack。数据类资源（runs 表/桶/ECR 仓库）按 IaC 的 RETAIN 标记保留、"
+        description="拆掉云端后端 stack。数据类资源（runs 表 / 事件表 / 产物桶 / ECR 仓库）按 IaC 的 RETAIN 标记保留、"
                     "不随 stack 删除；版本戳等 stack 自己的参数随删。",
     )
     _add_provider_flag(dsp)

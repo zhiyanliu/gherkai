@@ -10,7 +10,7 @@ skill 文案是 markdown，`test_user_facing_messages.py` 只扫 Python 字面�
 真值集三处，一处都不靠人读：
 - 命令面 = `_build_parser()` 的 `_actions` / `_SubParsersAction.choices` 递归展开（走 argparse 私有 API，
   先例 = `deploy_aws/tests/test_provider.py` 的全集护栏）；
-- JSON 键 = `docs/guides/cli-json-contract.md` 的字段记载（表 + 那几段散文，见 `_documented_keys`）；
+- JSON 键 = `docs/internals/cli-json-contract.md` 的字段记载（表 + 那几段散文，见 `_documented_keys`）；
 - 转换副本 = `tools/render_skill_contract.py` 的纯函数 `transform`。
 
 `deploy` / `destroy` 那批 token 不在这里比：provider 住 `[deploy-aws]` optional extra、只有部署方装，
@@ -39,7 +39,7 @@ from _doc_rules import (
 
 from gherkai_cli import __main__ as cli_main
 
-CONTRACT_SOURCE = REPO / "docs" / "guides" / "cli-json-contract.md"
+CONTRACT_SOURCE = REPO / "docs" / "internals" / "cli-json-contract.md"
 CONTRACT_COPY = SKILL_ROOT / "references" / "cli-json-contract.md"
 FIXTURES = REPO / "skills" / "gherkai-evals" / "fixtures"
 
@@ -314,7 +314,7 @@ def test_key_shaped_tokens_are_documented_keys():
             for token in re.findall(r"`([^`]+)`", line):
                 if KEY_TOKEN.match(token) and token not in documented and token not in NON_KEY_TOKENS:
                     unknown.append(f"{md.relative_to(REPO)}:{i}: `{token}`")
-    assert not unknown, ("这些 token 形如 JSON 键但契约页没记：真键 → 先写进 docs/guides/cli-json-contract.md；"
+    assert not unknown, ("这些 token 形如 JSON 键但契约页没记：真键 → 先写进 docs/internals/cli-json-contract.md；"
                          "不是键（引擎名/状态值/目录名…）→ 登记进 NON_KEY_TOKENS：\n" + "\n".join(sorted(set(unknown))))
 
 

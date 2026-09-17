@@ -27,7 +27,7 @@ gherkai-worker-novaact = "gherkai_worker_novaact.__main__:main"
 [project.urls]
 Homepage = "https://github.com/zhiyanliu/gherkai"
 Repository = "https://github.com/zhiyanliu/gherkai"
-Changelog = "https://github.com/zhiyanliu/gherkai/releases"
+Changelog = "https://github.com/zhiyanliu/gherkai/blob/HEAD/CHANGELOG.md"
 
 [build-system]
 requires = ["hatchling", "uv-dynamic-versioning>=0.7.0"]

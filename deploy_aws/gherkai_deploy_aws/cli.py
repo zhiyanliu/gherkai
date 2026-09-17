@@ -79,7 +79,7 @@ CDK_FEATURE_FLAGS: dict[str, object] = {
     "@aws-cdk/core:target-partitions": ["aws", "aws-cn"],
 }
 
-# VPC 档三态比对的四种判定（ADR 0037 决策 6「VPC 档持久化比对，三态齐全」；`classify_vpc_state` 的返回值）
+# VPC 档比对的四种判定（ADR 0037 决策 6「VPC 档持久化比对，三态齐全」——「三态」指 stack / 记录 / 参数三个输入；`classify_vpc_state` 的返回值）
 VPC_FIRST_DEPLOY = "first-deploy"  # ① stack 不存在 = 真首次部署 → 放行
 VPC_UNRECORDED = "unrecorded"      # ② 参数缺失且 stack 已存在 = 本机制之前部署的环境 → 退 2（最危险的那一次）
 VPC_MATCH = "match"                # ③ 档一致 → 放行
@@ -276,7 +276,7 @@ class Provider:
             "push-worker", help="[部署方] 推一个本地镜像并注册为某引擎的一个 variant",
             description="推送一个**已 build 好**的本地镜像到本 prefix 的 ECR，并把它注册成该引擎的一个 variant "
                         "（一个 task-def revision，镜像按 digest 引用）。一次一个引擎；两个引擎跑两次。"
-                        "镜像构建不归 gherkai——三行定制镜像模板见 deploy_aws/README.md。",
+                        "镜像构建不归 gherkai——定制镜像的 Dockerfile 模板见 https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/cloud-backend.md 。",
         )
         push.add_argument("image", metavar="<本地镜像>", help="本地镜像名（任何名字，如 acme-novaact:login）")
         push.add_argument("--engine", required=True, choices=names.ENGINES, help="这个镜像是哪个引擎的 worker")

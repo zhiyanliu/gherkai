@@ -21,7 +21,7 @@
 | 版本 | **五份** pyproject（`cli`/`core`/`gherkai` 三个发行包 + `engines/novaact`、`iac_aws_backend` 两个非包工程）全 `0.1.0`，`engines/midscene/package.json` 另写 `1.0.0`——六处手写版本、零真源；而 [0016](./0016-execution-architecture-core-lib-run-model.md) 版本切分已按 SemVer 宣布 v1.0-v1.3 完成，叙事完全脱钩 |
 | 依赖共解 | `nova-act>=3.4.187.0` + `boto3>=1.34` + `gherkin-official>=31` + `aws-cdk-lib>=2.150` 一个 venv 内 `uv lock`：107 包**零冲突**——「worker 必须独立 venv」不是依赖冲突所迫 |
 
-### 业界现状（2026，为选型提供的外部事实；一手来源登记在 [docs/REFERENCES.md](../REFERENCES.md)「发行与打包」节）
+### 业界现状（2026，为选型提供的外部事实；一手来源登记在 [docs/ai-eng/REFERENCES.md](../ai-eng/REFERENCES.md)「发行与打包」节）
 
 - **PyPI + uv 是事实默认**：uv 月下载量约为 pipx 的 28 倍（pypistats，2026-08 采样）；pipx 自己加了 uv backend；抽样的同类 Python CLI（harlequin / posting / llm 三个 README）均以 `uv tool install` 领头、pipx 作回落。PyPA 官方指南仍只写 pipx——官方与生态已分叉，本项目跟生态。
 - **`uvx <name>` 把 `<name>` 同时当发行名与命令名解析**（实测：发行名 `gherkai-cli` + 命令 `gherkai` 时 `uvx gherkai` 直接失败）→ 用户敲的那个发行包必须叫 `gherkai`。
@@ -102,14 +102,14 @@ gherkai ──hard──▶ gherkai-runtime[aws]=={{v}} ──▶ gherkai-core[a
 
 ### 2d. `requires-python >=3.13` 维持
 
-uv 缺 Python 时自动下载托管 CPython，对 uv-first 受众近乎免费；pipx 默认不下载解释器，README 须写 `pipx install --fetch-python missing gherkai` 作回落；裸 `pip install` 在 3.13 以下解释器上失败是接受的边界，不为迎合它降下限。
+uv 缺 Python 时自动下载托管 CPython，对 uv-first 受众近乎免费；pipx 默认不下载解释器，README 须写 `pipx install --python 3.13 --fetch-python missing gherkai` 作回落（`--fetch-python missing` 只在**点名的**版本本地没有时才下载，不点名则用默认解释器、低于 3.13 即失败）；裸 `pip install` 在 3.13 以下解释器上失败是接受的边界，不为迎合它降下限。
 
 ## 决策 3：worker 运行时的交付——安装与拉起正交，四级定位链，`repo_root()` 全部消费点退役
 
 **安装**（谁把 worker 放到机器上）与**拉起**（谁 spawn 它）是两件事。当前二者被 `repo_root()` 绑死：cmd 直指 repo 内 `engines/novaact/.venv/bin/python` 与 `node --import tsx engines/midscene/worker/run-scope.ts`、cwd = 各引擎目录。
 
 - **Python 侧（novaact）：包化 + 装进 CLI 同一个 venv**（经 `[local]`），并声明 console script `gherkai-worker-novaact`（定位链第三级的 Python 侧供给方）。spawn cmd = `[sys.executable, "-m", "gherkai_worker_novaact"]`——**无包装层**（EVENTS_FD 经 `pass_fds` 直达，midscene 换 `--import tsx` 那次踩的「包装进程吞 fd3」坑在此路径不存在）、离线可用、版本由 `==` pin 与 CLI 锁死。「worker 独立 venv」的三条理由逐条审过：依赖隔离（共解实测通过，不成立）、双语言（只影响 midscene）、架构边界（worker 零 core 依赖靠代码纪律不靠 venv）——前提松动，同 venv 成立。
-- **Node 侧（midscene）：npm 包 `@gherkai/worker-midscene`**，pip extras 够不到 Node 地盘。使用方 `npm i -g @gherkai/worker-midscene`（提供 bin `gherkai-worker-midscene`，即定位链第三级）；**midscene 无第四级兜底拉起**——npx 不把 EVENTS_FD 传给 node 子进程、事件全丢，理由见下「worker 定位链」第 4 级与「被拒方案」节『进程包装层的 fd 转发补丁（为救 npx 兜底）』条。**发布形态定死**：统一 ESM（`"type": "module"`、tsconfig 入库——当前刻意不带 tsconfig、靠 tsx 运行期扩展名重写，包化后不再成立）、tsc 产 `dist/`、`engines.node >= 22`（与基底镜像 `node:22-slim` 同源）、bin 入口在进程内注册 `tsx/esm/api`（进程不再由 `node --import tsx` 启动）。**使用方 step 文件只认 `.mts` / `.mjs` 两个扩展**：tsx 的 ESM register **只对 ESM 生效**——`.mts`/`.mjs` 恒为 ESM，而 `.ts`/`.js` 的模块体系由离文件最近的 `package.json#type` 决定，使用方（Python CLI 用户，项目 = `features/` + `steps/`）目录多半根本没有 package.json、会落进 CJS 域，step 文件里的 `import` 直接 SyntaxError。收敛到与使用方目录无关的两个扩展，比要求使用方维护 package.json 或双注册 cjs/esm loader 都简单可靠（脚手架与文档统一用 `.mts`）。**运行时依赖必须从 `devDependencies` 挪到 `dependencies`**：当前靠 `npm install` 全装才活（[0033](./0033-iac-aws-backend-and-composition-wiring.md) 记的「不能 `--production`」陷阱），作为被消费的 npm 包只会装 `dependencies`、不挪即崩；`tsx` 因此成为 runtime dependency。
+- **Node 侧（midscene）：npm 包 `@gherkai/worker-midscene`**，pip extras 够不到 Node 地盘。使用方 `npm i -g @gherkai/worker-midscene`（提供 bin `gherkai-worker-midscene`，即定位链第三级）；**midscene 无第四级兜底拉起**——npx 不把 EVENTS_FD 传给 node 子进程、事件全丢，理由见下「worker 定位链」第 4 级与「被拒方案」节『进程包装层的 fd 转发补丁（为救 npx 兜底）』条。**发布形态定死**：统一 ESM（`"type": "module"`、tsconfig 入库——当前刻意不带 tsconfig、靠 tsx 运行期扩展名重写，包化后不再成立）、tsc 产 `dist/`、`engines.node >= 22`（与基底镜像 `node:22-slim` 同源）、bin 入口在进程内注册 `tsx/esm/api`（进程不再由 `node --import tsx` 启动）。**使用方 step 文件只认 `.mts` / `.mjs` 两个扩展**：tsx 的 ESM register **只对 ESM 生效**——`.mts`/`.mjs` 恒为 ESM，而 `.ts`/`.js` 的模块体系由离文件最近的 `package.json#type` 决定，使用方（Python CLI 用户，项目 = `features/` + `steps/`）目录多半根本没有 package.json、会落进 CJS 域，step 文件里的 `import` 直接 SyntaxError。收敛到与使用方目录无关的两个扩展（当前实现在收集阶段就按扩展名过滤——`.ts` / `.js` 文件根本不会被 import，使用者观察到的是**静默跳过**、清单里没有它，不是 SyntaxError），比要求使用方维护 package.json 或双注册 cjs/esm loader 都简单可靠（脚手架与文档统一用 `.mts`）。**运行时依赖必须从 `devDependencies` 挪到 `dependencies`**：当前靠 `npm install` 全装才活（[0033](./0033-iac-aws-backend-and-composition-wiring.md) 记的「不能 `--production`」陷阱），作为被消费的 npm 包只会装 `dependencies`、不挪即崩；`tsx` 因此成为 runtime dependency。
 - **worker 定位链**（组合根 `compose.build_engines` 解析，**取代 `repo_root()`**，dev 与分发**同一条链、不设 dev 模式特判**——分发后没有 repo，任何靠 repo 结构的隐式行为都是漂移面）：
   1. env `GHERKAI_WORKER_<ENGINE>_CMD`（`NOVAACT` / `MIDSCENE`，`shlex` 拆分）+ 可选配套 `GHERKAI_WORKER_<ENGINE>_CWD`——显式覆写，contributor 指向 repo 内源码、调试、自定义 worker 都走这里（cwd 配套存在的原因：`node --import tsx` 的裸 specifier `tsx` 按 cwd 上溯 `node_modules` 解析，实测在无关目录下直接 `Cannot find package 'tsx'`）；
   2. 同 venv 入口（Python 引擎）：`importlib.util.find_spec("gherkai_worker_novaact")` 命中 → `sys.executable -m …`；

@@ -1,10 +1,11 @@
 """使用者面 markdown 的共享规则与扫描器：多处护栏共用的**单一事实源**。
 
-消费方四处，同源才不会各自漂（扫的都是「发到仓库外、读者没有仓库上下文」的文字，判据同一条——
+消费方五处，同源才不会各自漂（扫的都是「发到仓库外、读者没有仓库上下文」的文字，判据同一条——
 CLAUDE.md 代码纪律「产品面文案不带内部指代」+ 文档纪律「README / DEVELOPMENT 分层」；决策与理由见
 ADR 0039、ADR 0043 决策六）：
 
-- `test_package_readmes.py`：进包的 README / Summary / GitHub Release 正文（禁词 + 相对链接）；
+- `test_package_readmes.py`：进包的 README / Summary / GitHub Release 正文 footer（禁词 + 相对链接）；
+- `test_user_docs.py`：仓库内用户文档（`docs/user-guide/**` / 根 README / CHANGELOG，禁词；相对链接另查可达性）；
 - `test_skill.py`：随 wheel 发行、由 `skill install` 拷进使用方项目的 agent skill markdown（全部规则）；
 - `deploy_aws/tests/test_skill_deploy_tokens.py`：skill 里 `deploy` / `destroy` 那批命令 token 对照 provider
   真 parser（provider 住 optional extra、`cli/tests` 不许 import 它，故对照面分在两处、抽取器共用）；

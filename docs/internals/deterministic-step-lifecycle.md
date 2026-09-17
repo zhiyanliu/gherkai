@@ -13,7 +13,7 @@
 | ③ 查 | `list-deterministic` / `plan` 标注 / `doctor` | 三个命令都 spawn 一次瞬时 worker（自述或 match 查询），问的就是这张表 |
 | ④ 跑 | worker 派发每个 step | 先查这张表，命中即走你的 handler；不命中才落内建 URL 导航 / AI |
 
-怎么写一个 handler（签名、`ctx` 能拿到什么、正则具名组怎么传参）**不在本文**——看使用者向的两篇：[`engines/novaact/README.md`](../../engines/novaact/README.md)、[`engines/midscene/README.md`](../../engines/midscene/README.md)。本文讲的是这四段之间的接缝（handler 抛异常之后怎么落成判定，见 §1 的映射表）。
+怎么写一个 handler（签名、`ctx` 能拿到什么、正则具名组怎么传参）**不在本文**——看使用者向的 [`docs/user-guide/writing-deterministic-steps.md`](../user-guide/writing-deterministic-steps.md)（Python 与 TypeScript 两侧并排）。本文讲的是这四段之间的接缝（handler 抛异常之后怎么落成判定，见 §1 的映射表）。
 
 ```mermaid
 flowchart LR
@@ -89,7 +89,7 @@ cloud 侧的关键是**镜像是唯一载体**：你的 `steps/` 靠三行 Docke
 - **`--backend cloud` 下 `--steps-dir` 不生效**（`_resolve_steps_dir_for_backend`）：路径存在时只打一句提示、definition 里也不写这个字段——本机路径进不了容器；但**路径不是目录仍退 2**（那道校验排在清零之前，两档共用，见下 §4 表）。
 - **「我改了 `steps/`，云端跑出来还是老样子」是设计而非 bug**（新写的 step 会静默落 AI、改过的 step 仍按镜像里的老版本跑）：提交侧不比对镜像里 steps 的新旧（那是替使用方判断），改完必须重新 build + `push-worker`。想确认云端那套是什么，唯一诚实的问法是对镜像里的 worker 问——不是对本机问。
 
-variant / 默认指针 / revision / digest 这些载体本身（SSM 键、ECR tag、退休与清理）见 [`cloud-backend-carriers.md`](./cloud-backend-carriers.md) 与 [`deploy_aws/README.md`](../../deploy_aws/README.md)。
+variant / 默认指针 / revision / digest 这些载体本身（SSM 键、ECR tag、退休与清理）见 [`cloud-backend-carriers.md`](./cloud-backend-carriers.md) 与 [`docs/user-guide/cloud-backend.md`](../user-guide/cloud-backend.md)。
 
 > 权威：[ADR 0037](../adr/0037-distribution-and-packaging.md) 决策 4（解析在组合根、随 definition 持久化、worker 只认 env；cloud 档 steps 烙镜像）、[ADR 0038](../adr/0038-worker-image-delivery.md)（定制镜像模板、preflight variant 解析、「不比对 steps 内容」的不变量与被拒方案）、[ADR 0034](../adr/0034-detached-batch-reconciler.md)（三个宿主与各自 CWD）。
 
@@ -132,7 +132,7 @@ variant / 默认指针 / revision / digest 这些载体本身（SSM 键、ECR ta
 
 | 想深入的主题 | 去哪读 |
 |---|---|
-| 怎么写一个 handler（签名、正则、报错语义、带上云） | [`engines/novaact/README.md`](../../engines/novaact/README.md) / [`engines/midscene/README.md`](../../engines/midscene/README.md) |
+| 怎么写一个 handler（签名、正则、报错语义、带上云） | [`docs/user-guide/writing-deterministic-steps.md`](../user-guide/writing-deterministic-steps.md)（Python 与 TypeScript 两侧并排） |
 | 注册表即扩展点、匹配为何在 worker、冲突规则 | [ADR 0022](../adr/0022-bdd-runner-retired-core-parses-thin-worker.md) |
 | 默认 AI / 少数派显式、QA 与测试开发的角色边界 | [ADR 0020](../adr/0020-step-phrasing-default-ai-deterministic-scaffold.md)、[ADR 0040](../adr/0040-consumer-role-model-and-terminology.md) |
 | 能力自述、`list-deterministic`、`plan` 标注与降级 | [ADR 0036](../adr/0036-deterministic-capability-discovery.md) |

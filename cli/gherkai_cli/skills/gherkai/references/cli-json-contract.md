@@ -4,7 +4,7 @@
 
 通则：`--json` 下 **stdout 只有一个 JSON 文档**，诊断/进度一律走 stderr；`null` 表示「无此值」（如无成本、未落值），
 省略键表示「此形态下不存在」（各节注明）。退出码非 0 的前置/读取失败路径 stdout 可为空、诊断在 stderr——**先按退出码分流再解析**。
-退出码含义见 `SKILL.md` 的退出码一节，或 https://github.com/zhiyanliu/gherkai/blob/HEAD/cli/README.md 「退出码」。
+退出码含义见 `SKILL.md` 的退出码一节，或 https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/running-and-results.md 「退出码」。
 
 ## `gherkai run … --json`
 

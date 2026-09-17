@@ -66,7 +66,7 @@ flowchart LR
 
 **② 里的顺序也是定死的**：第 1 步（登记模板 revision ARN 进 SSM）是 **stack 资源**、随 cdk 事务；第 2/3/4 步在 cdk 之后跑。故 cdk 成功而后三步失败 → 退 **1** 且提示「stack 已生效；重跑 `gherkai deploy` 幂等收敛」——压成 2（= 什么都没发生）会误导。
 
-操作步骤与命令样例不在本文重复，见 [`deploy_aws/README.md`](../../deploy_aws/README.md)「版本与升级」与「worker 镜像」两节、以及 [`cli/README.md`](../../cli/README.md)「CLI 要和后端同版本」。
+操作步骤与命令样例不在本文重复，见 [`docs/user-guide/cloud-backend.md`](../user-guide/cloud-backend.md)（版本与升级、worker 镜像 variant 两节）。
 
 > 权威：[ADR 0037](../adr/0037-distribution-and-packaging.md) 决策 7（版本单旋钮、skew 三态与操作规则）、[ADR 0038](../adr/0038-worker-image-delivery.md)「与版本升级的交互」「命令族」；code：`runtime/gherkai_runtime/compose.py` 的 `check_version_skew` / `check_backend_skew`、`deploy_aws/gherkai_deploy_aws/workers.py` 的 `_skew_gate` / `run_deploy_steps`。
 
@@ -121,7 +121,7 @@ cloud 提交是**定义期解析、运行期照抄**，这条是「重推 varian
 
 | 想深入的主题 | 去哪读 |
 |---|---|
-| 部署命令的全部 flag、VPC 三档、权限清单、`destroy` 后的残留 | [`deploy_aws/README.md`](../../deploy_aws/README.md) |
+| 部署命令的全部 flag、VPC 三档、权限清单、`destroy` 后的残留 | [`docs/user-guide/cloud-backend.md`](../user-guide/cloud-backend.md) |
 | worker 镜像交付全部决策/护栏/被拒方案 | [ADR 0038](../adr/0038-worker-image-delivery.md) |
 | 分发形态、`gherkai deploy` 的 provider 接缝、版本单旋钮与 skew | [ADR 0037](../adr/0037-distribution-and-packaging.md) 决策 6-7 |
 | 云资源 IaC / 命名 / IAM / preflight | [ADR 0033](../adr/0033-iac-aws-backend-and-composition-wiring.md) |

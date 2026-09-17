@@ -29,7 +29,7 @@ aws = ["boto3>=1.34"]
 [project.urls]
 Homepage = "https://github.com/zhiyanliu/gherkai"
 Repository = "https://github.com/zhiyanliu/gherkai"
-Changelog = "https://github.com/zhiyanliu/gherkai/releases"
+Changelog = "https://github.com/zhiyanliu/gherkai/blob/HEAD/CHANGELOG.md"
 
 [build-system]
 requires = ["hatchling", "uv-dynamic-versioning>=0.7.0"]

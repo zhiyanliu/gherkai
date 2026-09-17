@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """把 `--json` 字段契约页渲染成 agent skill 里的那份副本（确定性转换，ADR 0043 决策四）。
 
-    docs/guides/cli-json-contract.md            ← 唯一**手写**源（给人的 guide）
+    docs/internals/cli-json-contract.md            ← 唯一**手写**源（给人的 guide）
       └─(本脚本)→ cli/gherkai_cli/skills/gherkai/references/cli-json-contract.md   ← 入库副本，随 wheel 发行
 
 **为什么不是 `cp`**：源页头部的引用块与姊妹页导航段带 ADR 编号、内部机制名和 `](./x.md)` 相对链接；
@@ -33,7 +33,7 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SOURCE = REPO_ROOT / "docs" / "guides" / "cli-json-contract.md"
+SOURCE = REPO_ROOT / "docs" / "internals" / "cli-json-contract.md"
 TARGET = REPO_ROOT / "cli" / "gherkai_cli" / "skills" / "gherkai" / "references" / "cli-json-contract.md"
 
 # 禁词 / 相对链接正则复用护栏那份单一事实源（两份表必漂，见该模块 docstring）。
@@ -46,10 +46,10 @@ LEAD = "本页讲 `--json` 各命令输出有哪些字段、什么意思、何�
 # 规则 2：仓库内文件指针 → 使用方拿得到的东西（`--help` 或绝对 URL）。key 是源页里的**原文片段**，
 # 逐字匹配、命中零次即红（源页改了措辞就该回来改这张表，而不是让替换悄悄失效）。
 POINTER_REWRITES: dict[str, str] = {
-    "退出码含义见 `cli/README.md`「退出码」。":
+    "退出码含义见 `docs/user-guide/running-and-results.md`「退出码」。":
         "退出码含义见 `SKILL.md` 的退出码一节，或 "
-        "https://github.com/zhiyanliu/gherkai/blob/HEAD/cli/README.md 「退出码」。",
-    "`--all` / `--full` 的语义见 `cli/README.md`「命令」节的 `explain` 行。":
+        "https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/running-and-results.md 「退出码」。",
+    "`--all` / `--full` 的语义见 `docs/user-guide/running-and-results.md` 的 `explain` 一节。":
         "`--all` / `--full` 的语义见 `gherkai explain --help`。",
 }
 

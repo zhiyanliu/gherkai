@@ -2,7 +2,7 @@
 
 **归属**：全部云端写操作（推 ECR、注册 task-def revision、写 SSM 指针）都是**部署变更**，故住
 `gherkai-deploy-aws`、不住 CLI 本体（ADR 0038「命令族」）。镜像**构建**不在这里、也不在任何 gherkai 命令里
-（三行定制镜像模板见 `deploy_aws/README.md`）——被拒方案「gherkai 拥有定制镜像的构建」。
+（定制镜像的 Dockerfile 模板见 `docs/user-guide/cloud-backend.md`）——被拒方案「gherkai 拥有定制镜像的构建」。
 
 ## 概念一句话（细节见 ADR 0038「概念模型」）
 
@@ -582,7 +582,7 @@ def _push_one(image: str, *, engine: str, variant: str, prefix: str, version: st
     if not info.exists:
         raise WorkerCommandError(
             f"本地找不到镜像 {image!r}：push-worker 只推**已 build 好**的镜像，不替你 build。\n"
-            f"定制镜像的三行 Dockerfile 模板见 deploy_aws/README.md。"
+            f"定制镜像的 Dockerfile 模板见 https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/cloud-backend.md 。"
         )
     if not info.matches_target_platform():
         raise WorkerCommandError(

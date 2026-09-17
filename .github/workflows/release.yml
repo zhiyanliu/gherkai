@@ -68,6 +68,13 @@ jobs:
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
+      - name: gate：CHANGELOG.md 里有本版本的节
+        # 每版说明「不写发不出」（ADR 0045 决策五）：Release 正文 = 该节正文 + 固定装法块（.github/release_body_footer.md）。
+        # 放在 build 之前：缺节是编辑动作能补的，别先花几分钟 build 再红。
+        run: uv run --no-project python .github/scripts/release_notes.py check --version "${VERSION}"
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
+
       - name: uv build --all-packages
         run: uv build --all-packages --out-dir dist
 
@@ -321,31 +328,36 @@ jobs:
           DIGEST: ${{ steps.push.outputs.digest }}
 
   release:
-    # ④ GitHub Release 作 changelog 锚点（各包 pyproject 的 `[project.urls] Changelog` 指 /releases）。
+    # ④ GitHub Release：正文 = CHANGELOG.md 本版节 + 固定装法 / 升级块，块里的文档链接钉 blob/vX.Y.Z/
+    # （ADR 0045 决策五；各包 pyproject 的 `[project.urls] Changelog` 指 CHANGELOG.md）。
+    # 不用 GitHub 自动生成的 release notes：本仓库无 PR 流、commit 信息是工程语言，生成物对使用者无用。
     name: GitHub Release
     needs: [build, pypi, npm, images]
     runs-on: ubuntu-latest
     permissions:
       contents: write # 建 Release
     steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          sparse-checkout: |
+            CHANGELOG.md
+            .github/scripts/release_notes.py
+            .github/release_body_footer.md
+          sparse-checkout-cone-mode: false
+
+      - name: 渲染 Release 正文（CHANGELOG 本版节 + 装法块）
+        run: |
+          python3 .github/scripts/release_notes.py render --version "${VERSION}" \
+            --owner "${OWNER}" --repo "${REPO_NAME}" --out release_body.md
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+          OWNER: ${{ github.repository_owner }}
+          REPO_NAME: ${{ github.event.repository.name }}
+
       - uses: softprops/action-gh-release@v3.0.3
         with:
           tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
-          generate_release_notes: true # 自动 changelog；下面 body 会前置在它上面
+          generate_release_notes: false
           make_latest: ${{ needs.build.outputs.is-latest }}
-          body: |
-            ```bash
-            uv tool install 'gherkai[local]==${{ needs.build.outputs.version }}'          # CLI + 本地 novaact worker
-            npm i -g @gherkai/worker-midscene@${{ needs.build.outputs.version }}          # 本地 midscene worker
-            uv tool install 'gherkai[deploy-aws]==${{ needs.build.outputs.version }}'     # 部署方：另装 AWS 供给包
-            ```
-
-            worker 基底镜像（linux/amd64）：
-            `ghcr.io/${{ github.repository_owner }}/gherkai-worker-novaact:${{ needs.build.outputs.version }}`
-            · `ghcr.io/${{ github.repository_owner }}/gherkai-worker-midscene:${{ needs.build.outputs.version }}`
-
-            升级是三步：① 部署方 `uv tool upgrade gherkai`（安装时带的 extras 沿用）→ ② 立刻 `gherkai deploy`
-            （①→② 之间提交会被拒，属预期）→ ③ 团队其他人再升自己的 CLI。有自定义 worker 镜像 variant 的，从新版本基底
-            重新 build 后 `gherkai deploy push-worker` 推一遍。细节见
-            https://github.com/zhiyanliu/gherkai/blob/HEAD/deploy_aws/README.md 的「版本与升级」。
+          body_path: release_body.md

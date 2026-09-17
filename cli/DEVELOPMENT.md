@@ -1,6 +1,6 @@
 # cli 包 —— contributor 文档
 
-用户面文档是同目录的 [`README.md`](./README.md)（逐字上 PyPI 页面）；本文件给改这个包的人，不进发行包。
+用户面文档有两处：同目录的 [`README.md`](./README.md)（发行包入口页，逐字上 PyPI）与 [`docs/user-guide/`](../docs/user-guide/README.md)（流程与选项细节的 owner）。本文件给改这个包的人，不进发行包。
 
 发行名 `gherkai` / import 名 `gherkai_cli` / 命令 `gherkai`（ADR 0037 决策 2a「三名分离」）。
 
@@ -21,10 +21,10 @@ cli/gherkai_cli/
 │                    JobResult + evidence → explain 的文本/JSON（两形态同源，见模块内 explain 节的注释）
 ├── skill_install.py ← `gherkai skill install`：importlib.resources 定位包内 skills/gherkai/、整目录收敛 + `.gherkai-skill-version` 标记、`--print`（ADR 0043 决策三）
 └── skills/gherkai/  ← 随 wheel 发行的 agent skill（SKILL.md + references/；hatchling 默认把包目录内非 .py 文件收进 sdist/wheel）。references/cli-json-contract.md **不手写**：
-                     由 `tools/render_skill_contract.py` 从 docs/guides/cli-json-contract.md 确定性生成（ADR 0043 决策四）
+                     由 `tools/render_skill_contract.py` 从 docs/internals/cli-json-contract.md 确定性生成（ADR 0043 决策四）
 ```
 
-组合根逻辑（compose/detached/names/tunnel/tunnel_host）住在平级的产品本体包 `runtime/gherkai_runtime/`（曾在本包内、被 Lambda/iac 的真实代价逼出抽包，ADR 0016「演进」节）：那是任何前端都要的接线，后者只是 argparse + 标准 IO。
+组合根逻辑（compose/detached/names/tunnel/tunnel_host）住在平级的产品本体包 `runtime/gherkai_runtime/`，**不留在本包里**：Lambda 与 IaC 也要用它，留在皮里会迫使它们依赖 argparse 层（ADR 0016「演进」节）。cli 这张皮只剩 argparse + 标准 IO。
 
 装了多个部署 provider（当前只有 aws 一个）时 `--provider <名>` 必给；装一个时不必给；一个都没装则报「装 `gherkai[deploy-aws]`」并退 `2`。
 
@@ -42,12 +42,20 @@ export GHERKAI_WORKER_MIDSCENE_CMD="node $PWD/engines/midscene/dist/bin.mjs"   #
 
 uv run gherkai plan features/wikipedia_generic.feature
 uv run gherkai run  features/wikipedia_generic.feature          # 真跑会产生 AWS 费用：模型调用 + AgentCore 会话
-uv run gherkai run  features/wikipedia_generic.feature \
-  --backend cloud --ddb-table ui-test-runs --s3-bucket ui-test-artifacts-<后缀>
+
+# cloud 档要先有部署好的后端（部署方做一次，dev 环境自己部一套即可）：
+uv run gherkai deploy --prefix dev- --vpc default
+uv run gherkai run features/wikipedia_generic.feature --backend cloud --prefix dev-
 ```
 
-> 一次性建表/建桶命令（`aws dynamodb create-table` / `aws s3 mb`，分区键 run_id + 排序键 item_type、按量计费）见
-> [`core/tests/README.md`](../core/tests/README.md) 的「一次性：建真表 + 真桶」一节——cli 云端后端与集成测试用同一套表/桶 schema。
+`--backend cloud` 的表 / 桶 / cluster / task-def / SSM 里的子网·安全组与 worker 镜像 variant 指针**全由 `gherkai deploy` 供给**，
+手工建一张表加一个桶跑不起来：起 worker 前依次过版本 skew 闸、资源 preflight（events 表 + cluster + 本 run 每个引擎的
+task-def + 桶，落库时另加 runs 表）、variant 解析、子网/安全组解析，任一项缺就退 `2`。名字统统由 `--prefix` 拼出，
+所以 `--prefix` 要与部署时的一致；只想覆盖表名/桶名时才用 `--ddb-table` / `--s3-bucket`（其余资源仍按 prefix 推导）。
+使用者侧的部署与排错步骤见 [`docs/user-guide/cloud-backend.md`](../docs/user-guide/cloud-backend.md)。
+
+> `core/tests/README.md` 的「一次性：建真表 + 真桶」只服务 core 集成测试（同一套表/桶 schema，但不足以支撑
+> `--backend cloud`）。
 
 ## 跑测试
 
@@ -56,7 +64,16 @@ uv run pytest              # 仓库根：全部 workspace 成员
 cd cli && uv run pytest -q # 只跑本包（cwd 决定收集范围）
 ```
 
-`cli/tests/test_package_readmes.py` 是「包 README = 发行包长描述」的护栏（零 ADR/决策号/内部机制名、零相对链接、每个包目录一份 `DEVELOPMENT.md`；另守根 `README.md` 与各包 pyproject/package.json 的 `description`——PyPI/npm 页顶 Summary——同样零内部指代）；`cli/tests/test_user_facing_messages.py` 管产品面文案不带内部指代。`cli/tests/test_skill.py` 管随 wheel 发行的 agent skill（同一禁词表与相对链接正则，共享常量在 `cli/tests/_doc_rules.py`；另对照 argparse 真值、契约页键名、转换副本相等、目录白名单与形态上限）——改了 `docs/guides/cli-json-contract.md` 后跑 `uv run python tools/render_skill_contract.py` 重生成副本，否则相等性断言红。
+文档/文案护栏有六份住在本包的 `tests/`（全仓清单见根 [`CONTRIBUTING.md`](../CONTRIBUTING.md) 的「测试」节）：
+
+- `test_package_readmes.py` —— 进包的 README = 发行包长描述（零 ADR/决策号/内部机制名、零相对链接、每个包目录一份 `DEVELOPMENT.md`；另守根 `README.md`、各包 pyproject/package.json 的 `description`——PyPI/npm 页顶 Summary——与 GitHub Release 正文的固定块）。
+- `test_user_docs.py` —— 仓库内的用户文档（`docs/user-guide/**`、根 `README.md`、`CHANGELOG.md`）：零内部指代、相对链接可达、owner 表与目录两向差集。
+- `test_release_notes.py` —— `.github/scripts/release_notes.py`：changelog 节的 gate 与 Release 正文渲染。
+- `test_user_facing_messages.py` —— 产品面文案不带内部指代（扫五个生产包的 Python 字面量 + Midscene 的 `.mts` 源）。
+- `test_skill.py` —— 随 wheel 发行的 agent skill（同一禁词表与相对链接正则，共享常量在 `cli/tests/_doc_rules.py`；另对照 argparse 真值、契约页键名、转换副本相等、目录白名单与形态上限）。
+- `test_cli_json_contract.py` —— `--json` 的全部键名对照 `docs/internals/cli-json-contract.md`，文档漏键即红（`list-workers` 的样例要 moto，那部分在 `deploy_aws/tests/test_workers.py`）。
+
+改了 `docs/internals/cli-json-contract.md` 后跑 `uv run python tools/render_skill_contract.py` 重生成 skill 副本，否则 `test_skill.py` 的相等性断言红。
 
 ## 实时落库
 
@@ -95,8 +112,8 @@ adapter、复用同一条 `RunPersistence`，把状态落 DynamoDB、判定真�
 cloud 由云端 Lambda 事件驱动链推进（submit 机器无 ECS 写/执行权限——仅 preflight 的只读探活，可立即关机）。
 `status --wait` 是三个推进触发源之一（人来查即接力），保证「推进即使中断、也能被查询者续到底」（ADR 0034）。
 
-`submit` 不收 `--subnet`/`--security-group`——cloud submit 只写 runs 表、不碰 SSM/ECS；Fargate 网络由 IaC
-注给 reconciler/kicker Lambda 的 env（曾在此声明过两个从不生效的 flag，已删）。
+`submit` **有意不收** `--subnet`/`--security-group`：cloud submit 只写 runs 表、不碰 SSM/ECS，Fargate 网络由 IaC
+注给 reconciler/kicker Lambda 的 env——在 `submit` 上声明这两个 flag 恒不生效。
 
 cloud submit 的 `--max-concurrency` 受部署侧 cap 钳制（kicker/reconciler Lambda 的 env `MAX_CONCURRENCY`，
 IaC 设、当前 8——task 计入部署方账单，故留一道上限）；声明超上限时 preflight 提示「本 run 将按上限并行」、不拦提交。
@@ -106,7 +123,7 @@ local 无此上限（worker 跑在提交者自己的机器、以自己的凭证�
 
 cloud 失败分层的切分线 = run 是否已真正开跑：起 worker 前的配置/可达问题退 `2`，跑到一半的云端故障退 `1`。
 `submit` 的退出码衡量「提交成功与否」、`status --wait` 衡量「这个 run 判定过没过」——`run` 一条命令里揉在一起的
-「提交 + 判定」被拆开了（ADR 0034）。`_cmd_plan` 与 `_cmd_run` 共用一个归码 helper（曾各手抄一份、会漂移）。
+「提交 + 判定」被拆开了（ADR 0034）。归码只有一处 helper，`_cmd_plan` 与 `_cmd_run` 共用：各写一份必漂。
 
 **preflight 次序是刻意的：版本 skew → 资源存在性 → variant 解析。** skew 的修复动作（`gherkai deploy`）正好也把
 资源补齐、也是重推镜像的前置；反过来先报「表不存在」或「variant 没推」只会让人白查一轮 `--prefix` / 白推一轮镜像。
@@ -128,20 +145,16 @@ deploy 会把自己的版本写成后端的版本戳，四个 cloud 入口（`ru
 `uvx --from 'gherkai==<后端版本>' gherkai …` 按版本临时跑零成本。版本是一个旋钮——`gherkai` 与后端被 `==`
 钉在同版本，没有「先升后端再升 CLI」这种次序。
 
-## VPC 档比对（三态）
+## VPC 档比对
 
-只强制显式给值挡不住「第二次 deploy 敲错档」，所以生效的档会记在后端。deploy 前比对：
+`--vpc` **不给隐式默认、且生效的档记在后端并在每次 deploy 前比对**，两道一起才够：只强制显式给值挡不住「第二次
+deploy 敲错档」，而漏档会合成「新建整套 VPC 并替换 worker 安全组」这类危险变更集——实际发生过。
+四种比对结果与各自的放行动作见 [`docs/user-guide/cloud-backend.md`](../docs/user-guide/cloud-backend.md)「VPC 三档」；
+比对实现与状态常量在 `deploy_aws/gherkai_deploy_aws/cli.py`（`classify_vpc_state`），contributor 侧说明见
+[`deploy_aws/DEVELOPMENT.md`](../deploy_aws/DEVELOPMENT.md)。
 
-| 情形 | 行为 |
-|---|---|
-| stack 不存在（真首次部署） | 放行 |
-| 后端没有记录、但 stack 已存在（本机制之前部署的环境） | 退 `2`——先 `--diff` 核对变更集，再带 `--allow-vpc-change` 放行一次 |
-| 有记录且与 `--vpc` 一致 | 放行 |
-| 有记录但与 `--vpc` 不一致 | 退 `2`（确认这确实是你要的网络变更后，用 `--allow-vpc-change` 放行） |
-
-`--vpc` **不给隐式默认是有意的**：漏了它会合成「新建整套 VPC + 替换 WorkerSg」这种危险变更集——真踩过的坑。
-`--refresh-context` 丢弃本机缓存的 CDK 环境查询结果（VPC/子网/AZ）重新查询，缓存语义见
-[`deploy_aws/README.md`](../deploy_aws/README.md)。
+`--refresh-context` 丢弃本机缓存的 CDK 环境查询结果（VPC/子网/AZ）重新查询，缓存位置与首次查询的那条 CDK 警告见
+同一页。
 
 ## 相关 ADR
 

@@ -128,7 +128,7 @@ sequenceDiagram
 
 最后一条不对称（**掐得掐不得**）：cloud 的 `--wait` 检测卡住时只是**踢一脚** kicker（fire-and-forget），踢完随时可离场——云端链自己跑完；local 的 `--wait` 接力者一旦接手**就是唯一推进者**，掐掉它 run 就地停摆（已 claim job 的计时也随进程一起丢，靠下次接力恢复）。根因：主推进器的位置不同（云端 Lambda vs 本机进程）。
 
-- **落了之后谁来读**：`status` 读投影 RunState（`--json` 时另附 `artifacts` 键给报告 / 判定明细 / 元信息的约定落点，无论终态都给、终态后才真有内容）；`explain` 读**已落库的判定明细**（step 级失败原因与 `kind=evidence` 的证据指针），回答「这步为什么这么判」。两者都受落地时机约束：detached run 的判定明细在提交点才一次性落地，未终态时 `explain` 无可渲染、只提示先用 `status --wait`（同步 `run` 逐 job 落，中途即可见已完成部分）。用法与退出码见 [`cli/README.md`](../../cli/README.md)，`--json` 字段见 [`cli-json-contract.md`](./cli-json-contract.md)。
+- **落了之后谁来读**：`status` 读投影 RunState（`--json` 时另附 `artifacts` 键给报告 / 判定明细 / 元信息的约定落点，无论终态都给、终态后才真有内容）；`explain` 读**已落库的判定明细**（step 级失败原因与 `kind=evidence` 的证据指针），回答「这步为什么这么判」。两者都受落地时机约束：detached run 的判定明细在提交点才一次性落地，未终态时 `explain` 无可渲染、只提示先用 `status --wait`（同步 `run` 逐 job 落，中途即可见已完成部分）。用法与退出码见 [`docs/user-guide/running-and-results.md`](../user-guide/running-and-results.md)，`--json` 字段见 [`cli-json-contract.md`](./cli-json-contract.md)。
 
 > 权威：[ADR 0034](../adr/0034-detached-batch-reconciler.md)（机制三：投影钳制与条件写；「命令形态」节：status/退出码）、[ADR 0030](../adr/0030-realtime-persistence-seam.md)（终态提交点）、[ADR 0031](../adr/0031-job-lifecycle-states-and-severity.md)（决定五：退出码语义）、[ADR 0041](../adr/0041-agent-facing-cli-affordances.md)（决策三：查询类命令的 `--json` 与 `artifacts`）、[ADR 0042](../adr/0042-step-evidence-and-explain.md)（决策四：`explain` 只读判定明细、不读事件流）。
 

@@ -905,7 +905,7 @@ def test_list_workers_json_shape(aws):
 
 def test_list_workers_json_keys_match_contract_doc(aws):
     """`--json` 字段契约护栏（ADR 0041 决策五，与 cli/tests/test_cli_json_contract.py 读同一份文档）：真输出递归收键，
-    逐个断言 docs/guides/cli-json-contract.md 里以反引号出现。样例含 variant 与退休 revision，键才收得全。"""
+    逐个断言 docs/internals/cli-json-contract.md 里以反引号出现。样例含 variant 与退休 revision，键才收得全。"""
     import json as _json
     import re
     from pathlib import Path
@@ -928,7 +928,7 @@ def test_list_workers_json_keys_match_contract_doc(aws):
                 leaf_keys(v, acc)
         return acc
 
-    contract = (Path(__file__).resolve().parents[2] / "docs" / "guides" / "cli-json-contract.md").read_text(encoding="utf-8")
+    contract = (Path(__file__).resolve().parents[2] / "docs" / "internals" / "cli-json-contract.md").read_text(encoding="utf-8")
     documented = set()
     for token in re.findall(r"`([A-Za-z_][A-Za-z0-9_.<>/ \[\]]*?)`", contract):
         for part in re.split(r"\s*/\s*", token):

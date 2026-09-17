@@ -1,5 +1,5 @@
 """`--json` 字段契约的护栏（ADR 0041 决策五）：真渲染器出样例 → 递归收全部键名 → 逐个断言出现在
-docs/guides/cli-json-contract.md 里（反引号包裹）。文档漏键即红——文档不靠人读维护，靠真值集对照（CLAUDE.md 文档纪律）。
+docs/internals/cli-json-contract.md 里（反引号包裹）。文档漏键即红——文档不靠人读维护，靠真值集对照（CLAUDE.md 文档纪律）。
 
 list-workers 的样例要 moto，护栏放 deploy_aws/tests/test_workers.py，读同一份文档。
 """
@@ -17,7 +17,7 @@ from gherkai_cli import __main__ as m
 from gherkai_cli import render
 from gherkai_runtime import compose
 
-DOC = Path(__file__).resolve().parents[2] / "docs" / "guides" / "cli-json-contract.md"
+DOC = Path(__file__).resolve().parents[2] / "docs" / "internals" / "cli-json-contract.md"
 
 
 def _documented_keys() -> set[str]:
@@ -52,7 +52,7 @@ def _assert_documented(sample, *, section: str, ignore: set[str] = frozenset(),
         for part in re.split(r"\s*/\s*", token):
             flat.add(part.split(".")[-1].rstrip("[]"))  # 文档里数组键写成 `jobs[]`，比对时按键名
     missing = sorted(k for k in _leaf_keys(sample, opaque=opaque) if k not in flat and k not in ignore)
-    assert not missing, f"[{section}] 这些键出现在真实输出里、文档没写：{missing}——改 docs/guides/cli-json-contract.md"
+    assert not missing, f"[{section}] 这些键出现在真实输出里、文档没写：{missing}——改 docs/internals/cli-json-contract.md"
 
 
 def _mk(cls, **kw):

@@ -1,140 +1,38 @@
 # gherkai
 
-用 Gherkin 写 UI 自动化测试，让 AI 浏览器代理去跑。你写 `.feature`（自然语言步骤 + 断言），`gherkai` 把它解析成可并发的执行批次，派给你选的 AI 引擎（Midscene / Nova Act）在 AWS 云端浏览器里真实操作页面、判定断言，最后把每条用例的判定、日志与可点开的报告归集成一份结果。两种跑法：**在本机跑**（worker 起在你的机器上、结果落本地目录），或**整批跑在云端**（worker 跑 Fargate 容器、状态与报告落 DynamoDB/S3，提交完就能关掉终端）。
+用 Gherkin `.feature` 写 UI 端到端测试，交给 AI 浏览器引擎（Nova Act 或 Midscene）在云端浏览器里操作页面、判定断言。本包是 gherkai 的命令行入口：解析 `.feature`、按 tag 分组成可并发的 job、派给引擎执行、汇总每条用例的判定与报告。测试跑在你自己的 AWS 账户里，会产生真实 AWS 费用，金额以你的 AWS 账单为准。
 
 ## 安装
 
 ```bash
-uv tool install gherkai                     # CLI 本体（只提交云端 run 的人装这一条就够）
-uv tool install 'gherkai[local]'            # 顺带装上在本机跑 Nova Act 引擎所需的 worker
-npm i -g @gherkai/worker-midscene           # 在本机跑 Midscene 引擎的 worker（Node ≥ 22）
-uv tool install 'gherkai[deploy-aws]'       # 部署方：要用 gherkai deploy 建/改云端后端（另需 Node ≥ 22 + 容器引擎）
-uvx gherkai --version                       # 或者不安装、临时跑一次
-pipx install --fetch-python missing gherkai   # 不用 uv 的人：pipx 回落（pipx 默认不下载解释器，本项目要 Python ≥ 3.13；装 extra 写 'gherkai[local]'）
+uv tool install gherkai                # 命令行本体，需 Python ≥ 3.13
+uv tool install 'gherkai[local]'       # 附带在本机跑 Nova Act 引擎所需的 worker
+npm i -g @gherkai/worker-midscene      # 在本机跑 Midscene 引擎所需的 worker，需 Node ≥ 22
 ```
 
-需要 Python ≥ 3.13。两个引擎的 worker 是各自独立的程序：Nova Act 走上面的 `[local]` extra，Midscene 是 Node 包走 npm；只用 `--backend cloud` 提交的人两个都不用装（worker 跑在云端）。`gherkai list-engines` 会告诉你当前哪个引擎可用、缺的那个怎么装。
+Midscene worker 与命令行须是同一个版本：用 `gherkai --version` 查版本号，再装 `npm i -g @gherkai/worker-midscene@<版本号>`。
 
-## 前置（AWS）
-
-- AWS 凭证（默认 profile 即可）与 region（`--region`，或 `AWS_REGION` / `AWS_DEFAULT_REGION` / profile 配置），当前验证过的 region 是 `us-east-1`。
-- 账号需开通：Bedrock 模型访问（Midscene 用 OpenAI GPT-5.6 Terra，`us.openai.gpt-5.6-terra`）、AgentCore Browser（`bedrock-agentcore`）、Nova Act（`nova-act` + 模型 `nova-act-v1.0`，默认钉此版本、环境变量 `NOVA_MODEL_ID` 可换）。
-- `--backend cloud` 还需要有人先跑过 `gherkai deploy` 把云端后端建好（见下「部署」）；只有用 `--expose-local` 测本机应用时才需要 [ngrok](https://ngrok.com/download) authtoken（免费账号即够，`ngrok config add-authtoken <token>` 或环境变量 `NGROK_AUTHTOKEN`）。
-
-## 底层模型
-
-AI step 的操作与判定由两个模型完成，都在你的 AWS 账户里跑，gherkai 自身不接收任何数据（只有 `--expose-local` 的隧道流量经过 ngrok）。
-
-| 引擎 | 模型 | 服务 | 版本策略 | 怎么看 / 怎么换 |
-|---|---|---|---|---|
-| Nova Act（默认） | `nova-act-v1.0` | Amazon Nova Act | 钉死，换模型只随发版并在 Release 说明里点明 | `gherkai doctor` 显示；环境变量 `NOVA_MODEL_ID` 可换（如 `nova-act-preview`，无支持承诺） |
-| Midscene | `us.openai.gpt-5.6-terra`（美国境内三个 region 处理） | Amazon Bedrock | 钉死，换模型只随发版并在 Release 说明里点明 | `gherkai doctor` 显示；环境变量 `MIDSCENE_MODEL_ID` 可换（Bedrock 上 Midscene 支持的模型；家族识别不了时再给 `MIDSCENE_MODEL_FAMILY`） |
-
-同一条断言在不同模型版本上可能翻转，所以不用「自动跟最新」的别名。费用量级：一条 5 步左右的 scenario 在 Midscene 默认模型上约 5 美分、换成 Qwen3-VL 约 2 美分（按 2026-09 Bedrock 标价与实测 token 估算，以账单为准）。
-
-## 上手
+## 最小用法
 
 ```bash
-gherkai plan features/checkout.feature                  # 预检：看分组、校验写法与配置，不连云、不花钱
-gherkai run  features/checkout.feature                  # 前台真跑（会产生模型调用与浏览器会话费用）
-RUN_ID=$(gherkai submit features/*.feature --max-concurrency 2)   # 提交完就走
-gherkai status "$RUN_ID" --wait --json                  # 事后轮询到跑完，输出机器可读结果
+export AWS_REGION=us-east-1               # region 必须有出处：--region、环境变量或 profile 配置
+gherkai doctor                            # 自检环境；加 --backend cloud 连带查凭证与云端后端
+gherkai plan features/checkout.feature    # 预检分组与派发预期，不连云端、不产生费用
+gherkai run features/checkout.feature     # 在本机起 worker 跑一批（浏览器与模型仍在云端）；退出码给出判定
+gherkai explain <run_id>                  # 读这个 run 的每步证据，看断言为什么这么判
 ```
 
-`plan` 不花钱，`run` 每次都花真钱——**先 plan 后 run** 能提前暴露写法冲突、把钱省在真跑之前。`plan` 还会逐步骤标注派发预期（哪些步骤会命中你写的确定性步骤、哪些交给 AI 判定）。
+全部命令与选项以 `gherkai --help`、`gherkai <命令> --help` 为准。`plan`、`run`、`status`、`explain`、`doctor` 等命令都支持 `--json`，便于脚本与 CI 解析。
 
-两个旋钮决定一次 run 长什么样：**跑在哪 / 落在哪** 由 `--backend` 定（`local` = worker 跑本机、结果落 `--report-dir`；`cloud` = worker 跑 Fargate 容器、状态落 DynamoDB、判定与报告落 S3）；**用哪个引擎** 在 feature 里逐 scope 标 `@engine:midscene` / `@engine:novaact`，没标的用 `--default-engine`（默认 `novaact`，标了 tag 的不受它影响）。
+用 AI coding agent 操作 gherkai 的话，先跑 `gherkai skill install` 把使用说明装进你的项目，之后直接告诉 agent 要测什么。
 
-## 命令
+## 文档
 
-| 命令 | 做什么 |
-|---|---|
-| `gherkai plan <feature...>` | 预检：分组、校验、逐步骤标注派发预期。不连云、不花钱 |
-| `gherkai run <feature...>` | 前台跑完这批：CLI 全程在线，跑完直接给判定与报告 |
-| `gherkai submit <feature...>` | 提交完就走：打印一个 `run_id` 后立即退出，后台继续推进 |
-| `gherkai status <run_id>` | 查这个 run 的进度/结果；`--wait` 轮询到跑完再返回；到终态时同时打出报告与判定明细的位置（本机路径或 S3；`--json` 里是 `artifacts` 键） |
-| `gherkai explain <run_id> [<scope_id>]` | 看这个 run 每一步的证据：问了 AI 什么、AI 看见了什么、为什么这么判——用例没过时第一个该敲的命令。`--scenario` / `--step` 缩到某条用例的某一步（点名的那一步连通过也展开），`--all` 连通过的步也展开，`--full` 逐帧全文，`--json` 机读 |
-| `gherkai list-engines` | 列出可用引擎（缺的那个原地给安装命令）；`--json` 机读 |
-| `gherkai doctor` | 只读自检：引擎 worker、`steps/` 加载、（给 `--backend cloud --prefix` 时）凭证、后端资源与版本、部署工具链；全过退 `0`、有必修项失败退 `2`；`--json` 机读 |
-| `gherkai list-deterministic --engine <名>` | 列出该引擎支持的确定性步骤（含你自己写的），写 feature 时查着复用 |
-| `gherkai skill install` | 把驾驭本工具的 agent skill 装进项目：Claude Code 落 `.claude/skills/gherkai/`、Codex 落 `.agents/skills/gherkai/`（`--agent claude-code|codex|all`、`--global` 装用户级、`--print` 只打正文）。与 CLI 同版本，重装即收敛；装完可选追加一行提示进 `CLAUDE.md` / `AGENTS.md` |
-| `gherkai deploy` / `gherkai destroy` | 建/改/拆云端后端。只有部署方需要，见下 |
+- 装什么、要哪些 AWS 前置、第一次怎么跑通：https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/getting-started.md
+- 四种跑法、结果在哪、退出码什么意思：https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/running-and-results.md
+- `.feature` 怎么写才跑得稳：https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/writing-features.md
+- 环境变量与选项总表：https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/configuration.md
+- 报错了先看哪：https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/troubleshooting.md
+- 每版变更：https://github.com/zhiyanliu/gherkai/blob/HEAD/CHANGELOG.md
 
-`run` 要求 CLI 全程在线（网断、关机即中止）。`submit` 把「提交」和「收结果」拆开：local 档在本机起一个脱离 CLI 的后台进程推进，cloud 档交给云端推进（提交完真关机也能跑完）。`status --wait` 既是查询也是接力——后台进程崩了或卡住，来查的这条命令会把它续到底。
-
-`status` 的 `--backend` / `--report-dir` / `--prefix`（cloud）必须与 `submit` 时一致，否则查不到这个 run（`--report-dir` 在 cloud 档是后端的报告前缀，默认 `reports`，同样用来拼终态时打出的 S3 位置）。`explain` 用同一套定位参数。
-
-`explain` 答的是「为什么这么判」：它按用例的书写顺序列出每一步，失败/出错/被跳过的步展开成「问了 AI 什么 → AI 每一步看见与想了什么 → 截图在哪」。文本形态是摘要（每次 AI 调用默认只打最后一段推理，`--full` 打全），`--json` 带完整证据。哪一步没有机读证据（确定性步本就不产，或抽取当时失败了），它会明说，并给出该步其它产物的链接。
-
-## `steps/` 目录：你自己的确定性步骤
-
-URL、DOM 这类不容 AI 抖动的检查，可以由你自己写成确定性步骤：在项目里建一个 `steps/` 目录，Nova Act 引擎放 `.py`、Midscene 引擎放 `.mts`（或 `.mjs`），命中的步骤走你的精确实现、不进 AI 判定。目录按 `--steps-dir` > 环境变量 `GHERKAI_STEPS_DIR` > `./steps` 解析。
-
-目录里**任何一个文件加载失败就整批拒跑**（`plan` / `run` / `submit` 都在起第一个 job 之前拒，并转述具体错误），显式给的 `--steps-dir` 不存在也直接退 `2`——静默跳过等于把这些步骤悄悄换回 AI 判定。`--backend cloud` 下这个 flag 不生效（只警告、不拦）：云端 worker 的步骤是烙进镜像的，见下。
-
-## 云端跑哪套步骤：worker 镜像 variant
-
-一个 **variant** = 一套具名的确定性步骤集 = 一个定制 worker 镜像（名字自取，如 `base` / `login` / `checkout-v2`；须合镜像 tag 字符集——字母/数字/下划线开头，其后可含 `.` `-`——不合法在开跑前就报错）。提交时用 `--worker-variant <名>` 选，不给就用后端的默认指针（部署时初始化为 `base` = 零步骤的基底）。提交侧会把这个名字定成本次 run 用的确切镜像，所以 run 期间别人重推同名 variant 不影响正在跑的 run；多人共用一个后端时各推各的、互不覆盖。某个引擎缺这个 variant 会直接退 `2` 并给出修复命令，**不会悄悄回落到默认**（那等于替你换掉一套步骤集）。镜像怎么 build 和推送见 [部署方页面](https://github.com/zhiyanliu/gherkai/blob/HEAD/deploy_aws/README.md)。
-
-## 常用选项（`run` / `submit`）
-
-| flag | 默认 | 说明 |
-|---|---|---|
-| `--default-engine {novaact,midscene}` | `novaact` | 未标 `@engine` 的 scope 用哪个引擎 |
-| `--scope ID` / `--tags TAG[,TAG…]` / `--scenario SEL` | — | 只跑一部分（`plan` 也认）：`--scope` = 报告/JSON 里的 `scope_id`（`@scope` 的名字，或未标时的 `<文件>:<行>`），重跑某个失败的 job 最直接；`--tags` 一个值内逗号 = 任一命中、重复给 = 都要命中、`@` 可省；`--scenario` = `<文件>:<行>`、行号（纯数字只当行号；Scenario Outline 给声明行选中全部 example）、或标题的一段文字，可重复（任一命中），与 `--tags` 同给两者都要满足。筛选只减少跑哪几条，scope 的引擎/超时仍按全量解析。筛空退 `2` 并列出全部候选。改一句断言只重跑那一条，别整文件重跑 |
-| `--max-concurrency N` | `1` | 同时在跑的 worker 上限（护成本与配额），须 ≥ 1。云端还受部署侧上限钳制，超出时按上限并行并提示 |
-| `--default-job-timeout S` | `300` | 单个 job 的墙钟预算秒（`<=0` 表示不超时）；用例上标 `@timeout:<秒>` 可逐 scope 覆盖。超预算的 job 会被停掉并判 error，本机挂死与云端计费失控都靠它止损 |
-| `--assertion-votes N` | `1` | AI 断言跑 N 次取多数票（如 3/5），治判定抖动 |
-| `--grace S` | 自动 | 仅 `run`。中止时留给 worker 关闭云端浏览器会话的秒数，不填按引擎自动取（novaact ≈150s、midscene ≈31s，由装在本机的 worker 自己报，须与 CLI 同版本）。**给得太小会漏关会话、继续计费**，过小的值在开跑前就报错。`--backend cloud` 下不接受本旋钮（给了就在开跑前退 `2`）：云端的停止宽限在部署侧定（`gherkai deploy --stop-timeout`），`doctor --backend cloud` 会比对它够不够 |
-| `--steps-dir DIR` | `./steps` | 你自己的确定性步骤目录（见上） |
-| `--report-dir DIR` / `--no-report` | `reports` / 关 | 报告落点（每次 run 落 `DIR/<run_id>/`，`status` 查同一个 run 要给同一路径；云端有自己的产物前缀，给了不一致的值会在提交前退 `2` 并点名两侧的值）/一点都不落盘：不归集报告，也不生成引擎自己的报告产物（仅 `run`；Nova Act 的 SDK 轨迹关不掉，它会写进自己的临时目录、不上报） |
-| `--expose-local ORIGIN` | — | 把「本机可达」的被测应用经隧道暴露给云端浏览器，值 = feature 里书写的原始地址（如 `http://localhost:3000`）。gherkai 会替换成一次性公网地址（带每 run 一换的用户名口令，跑完即拆）。页面资源全经隧道，ngrok 免费层配额约 1GB/月 + 2 万请求/月，重度使用可能碰顶（表现为 429 或断流）。**用它时本机要保持开机联网到 run 结束**，否则应用不可达、用例会以导航失败告终。云端 `submit` 时隧道另有一个兜底存活时间 `--tunnel-ttl S`（默认按这批用例的预算算，**调小有风险**：到点无条件拆隧道，短于实际时长会让剩下的用例跑成导航失败） |
-| `--fail-fast` / `--json` / `--quiet` | 关 | 任一 job 崩就中止整批/只输出机器可读 JSON（字段见 [`docs/guides/cli-json-contract.md`](https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/guides/cli-json-contract.md)）/少进屏幕：不打逐步进度，本机跑时 worker 日志改落 `<report-dir>/<run_id>/worker.log`（`--no-report` 时落系统临时目录）、只打一行位置；`--backend cloud` 没有本机 worker 日志（worker 在云端跑，日志在 CloudWatch）（都仅 `run`；`submit` 只打 `run_id`，进度看 `status`） |
-| `--region` / `--profile` | — | AWS region / profile（两种 backend 都用，也喂给 worker） |
-
-**云端专用**（`--backend cloud`）：`--prefix`（默认 `gherkai-`，须与部署时一致；环境变量 `AWS_RESOURCE_PREFIX`）一把决定表/桶/集群等资源名；要单独覆盖就用 `--ddb-table`（`AWS_DDB_TABLE`）/ `--s3-bucket`（`AWS_S3_BUCKET`）；`--worker-variant` 见上；`run` 还可用 `--events-table` / `--cluster` 覆盖资源名、`--subnet` / `--security-group` 覆盖网络（不给则读部署时写下的值）。`submit` 只按 `--prefix` 推事件表与集群名（那两个名字对提交无影响，给了会退 `2`）。
-
-## 输出与报告
-
-stdout 只放该命令的核心产出（`--json` 的 JSON、人看的文本汇总、列表），进度与诊断全走 stderr——所以 `gherkai run … --json > r.json` 拿到的是纯净 JSON，进度仍在终端可见。每次 `run` 默认在 `reports/<run_id>/` 留一份报告：`index.html` 是可点开的入口（判定明细 + 每条报告产物一行链接：引擎自己的报告产物与每个 AI 步骤的证据各一行），`manifest.json` 是给 CI/工具消费的清单。
-
-## 退出码
-
-| 码 | 含义 |
-|---|---|
-| `0` | 成功：`run` 全部通过 / `plan` 这批可跑 / `submit` 已提交 / `status` 查到了（未跑完时只表示查询成功）/ `explain` 渲染出来了 |
-| `1` | 跑完了但有用例失败或出错（断言没过、引擎异常）；云端跑到一半存储不可达也算这一档 |
-| `2` | 没跑起来：feature 读不到、写法或参数不合法、引擎 worker 没装、`steps/` 里有文件加载失败、`--steps-dir` 指的目录不存在；云端还包括凭证/region 缺失、`--prefix` 对应的资源不存在或无权限、版本与后端不匹配、请求的 worker variant 没推过 |
-
-分界线是「有没有真的开跑」：开跑前的配置与可达性问题退 `2`，跑到一半的故障退 `1`。`submit` 与 `status` 各答不同的问题——`submit` 的退出码只说「提交成功了吗」（判定此刻还没出），`status` 的退出码只在读到终态时才表判定（通过 `0` / 其余终态 `1` / 查不到这个 run `2`）；CI 想拿 `run` 那样的 0/1 判定码，用 `status --wait`。`explain` 只说「证据读出来了吗」、从不表判定：用例失败它照样退 `0`（判定看 `run` / `status --wait`），只有参数写错（如 `--step` 没同时给 `--scenario`）、run 或 scope 查不到、云端读不到才退 `2`。
-
-## CLI 要和后端同版本
-
-部署时后端记下自己的版本，`--backend cloud` 的每条命令在动任何资源之前先比对：
-
-- **CLI 比后端新 → 直接拒绝（退 `2`），没有强行放行的开关。** 两条出路：① 部署方跑 `gherkai deploy` 把后端升上来；② 用与后端同版本的 CLI 临时跑，不动本机安装：`uvx --from 'gherkai==<后端版本>' gherkai …`。
-- CLI 比后端旧 → 只警告不拦，`uv tool upgrade gherkai` 跟上即可。升级就是三步：① 部署方 `uv tool upgrade gherkai`（安装时带的 extras 会沿用）；② 立刻 `gherkai deploy`；③ 其他人再升自己的 CLI（中间窗口里提交会被拒，这是预期）。
-
-## 部署（只有部署方需要）
-
-云端那套后端（DynamoDB 表、S3 桶、ECS 集群与任务定义、推进用的 Lambda、VPC 与安全组）由 `gherkai deploy` 建。它装在单独的 extra 里，团队里只提交 run 的人不必装：
-
-```bash
-uv tool install 'gherkai[deploy-aws]'                       # 另需 Node ≥ 22 在 PATH
-gherkai deploy --bootstrap                                  # 每个账户 + region 一次性初始化
-gherkai deploy --diff --vpc default --prefix gherkai-       # 先看清这次会改什么（不改账户）
-gherkai deploy --vpc default --prefix gherkai-              # 真部署
-gherkai deploy --synth-only ./out --vpc default             # 只导模板给自己的审批流水线，不让本工具碰账户
-gherkai destroy --vpc default --prefix gherkai- --yes       # 拆掉（表/桶/镜像仓库保留、不随之删；--yes 是给脚本/非交互用的）
-```
-
-- `--vpc` 必给、**没有隐式默认**（只有 `--bootstrap` 不需要，那是账户级动作）：`default`（账户默认 VPC）/ `new`（本次新建，2 个可用区、零 NAT）/ `vpc-<id>`（复用现有）。**这是真踩过的坑**：漏掉它会合成出「新建整套 VPC + 换掉 worker 安全组」这种危险变更。生效的档记在后端，第二次敲错档会被拒（退 `2`）；确认这确实是你要的网络变更后加 `--allow-vpc-change` 放行一次（本机制之前部署的环境第一次也需要它，先 `--diff` 核对）。
-- `--prefix`（默认 `gherkai-`）是全部云资源的命名空间，**须与 `run`/`submit`/`status` 的 `--prefix` 一致**；换 prefix 就是换一套独立环境（`prod-` / `stage-`），闲置成本近零。
-- 其他 flag：`--require-approval never|any-change|broadening`（权限变更要不要人过目）、`--stop-timeout`（容器关闭宽限秒，标定 `--grace` 用）、`--refresh-context`（丢弃本机缓存的网络查询结果重查）、`--region` / `--profile`。`--diff` / `--synth-only DIR` / `--bootstrap` 三者互斥，都不给就是真部署。
-- worker 镜像的推送与管理（`gherkai deploy push-worker` / `list-workers`）、资源清单与费用见 [部署方页面](https://github.com/zhiyanliu/gherkai/blob/HEAD/deploy_aws/README.md)。
-
-## 遇到问题
-
-`gherkai --help` / `gherkai <命令> --help` 有全部选项，报错都带「怎么办」。项目主页 https://github.com/zhiyanliu/gherkai#readme ，问题反馈 https://github.com/zhiyanliu/gherkai/issues 。
-
-设计文档（架构决策记录）见 https://github.com/zhiyanliu/gherkai/tree/HEAD/docs/adr
+项目主页与问题反馈：https://github.com/zhiyanliu/gherkai#readme

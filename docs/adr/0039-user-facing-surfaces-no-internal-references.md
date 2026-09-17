@@ -1,6 +1,6 @@
 # 0039. 用户可见面不带内部指代：产品文案与文档分层
 
-> **Status:** Accepted（2026-09-09）—— 两面均已实装并有护栏：产品文案面（`cli/tests/test_user_facing_messages.py`）、文档面（`cli/tests/test_package_readmes.py`；随包发行的 agent skill 那一层另由 `cli/tests/test_skill.py` 扫）。本 ADR 是 CLAUDE.md 代码纪律「产品面文案不带内部指代」与文档纪律「README / DEVELOPMENT 分层」两条约定的决策与理由所在；约定文件只留规则与指针。
+> **Status:** Partially-superseded-by 0045 ——面二里「各包 README = 完整操作手册」被 [0045](./0045-documentation-layering-and-placement.md) 决策三反转为「入口页」（叙事归 `docs/user-guide/`）；面一（产品文案零内部指代）与两条护栏不变。原文：Accepted（2026-09-09）—— 两面均已实装并有护栏：产品文案面（`cli/tests/test_user_facing_messages.py`）、文档面（`cli/tests/test_package_readmes.py`；随包发行的 agent skill 那一层另由 `cli/tests/test_skill.py` 扫）。本 ADR 是 CLAUDE.md 代码纪律「产品面文案不带内部指代」与文档纪律「README / DEVELOPMENT 分层」两条约定的决策与理由所在；约定文件只留规则与指针。
 
 ## 背景与问题
 
@@ -26,13 +26,13 @@
 
 ### 面二：文档分层（README / DEVELOPMENT 成对）
 
-按**读者**切文件而非按目录切：使用者向 = 根 `README.md` + 各包 `README.md`；contributor 向 = 根 `DEVELOPMENT.md` + 各包 `DEVELOPMENT.md`。使用者向只写「这是什么、装法、用法、配置、退出码/错误怎么办」，不写 ADR 编号/决策号/内部机制名/目录结构/开发环境/测试/spike/发布流程/设计叙事；这些全归 contributor 向并带 ADR 指针。各层只差**去向与链接形态**：
+按**读者**切文件而非按目录切：使用者向 = 根 `README.md` + 各包 `README.md`；contributor 向 = 根 `CONTRIBUTING.md` + 各包 `DEVELOPMENT.md`。使用者向只写「这是什么、装法、用法、配置、退出码/错误怎么办」，不写 ADR 编号/决策号/内部机制名/目录结构/开发环境/测试/spike/发布流程/设计叙事；这些全归 contributor 向并带 ADR 指针。各层只差**去向与链接形态**：
 
 | 文件 | 去向 | 链接 |
 |---|---|---|
 | 根 `README.md` | 仓库首页（GitHub）；末尾「深入了解」一节链 CONTEXT / guides / adr / DEVELOPMENT | 相对链接可（GitHub 渲染） |
 | 各包 `README.md`（`cli/` `core/` `runtime/` `deploy_aws/` `engines/novaact/` `engines/midscene/`） | **逐字上 PyPI / npm 页面**（pyproject `readme` / npm `files`）；改动随**下一个 tag** 才生效——PyPI 已发版本的长描述不可改 | **只用绝对 URL**（页面上相对链接全是死链；仓库内文件用 `https://github.com/zhiyanliu/gherkai/blob/HEAD/<path>`，`HEAD` 跟默认分支、不绑分支名）；最多末尾一句「设计文档见仓库 docs/adr」 |
-| 根 `DEVELOPMENT.md` | contributor 入口：版本线叙事、目录结构、从 checkout 跑、测试、spike、发布与版本、各包 DEVELOPMENT 索引、纪律/术语/ADR 指针 | 相对链接 |
+| 根 `CONTRIBUTING.md` | contributor 入口：版本线叙事、目录结构、从 checkout 跑、测试、spike、发布与版本、各包 DEVELOPMENT 索引、纪律/术语/ADR 指针 | 相对链接 |
 | 各包 `DEVELOPMENT.md` | 该包 contributor 文档：模块布局、从 checkout 跑、测试、维护者踩坑（真踩过的坑一条不丢）；**不进发行包**（wheel 本就不含，sdist 经 hatch `exclude` 排除） | 相对链接 |
 | agent skill（`cli/gherkai_cli/skills/gherkai/**`：`SKILL.md` + `references/`） | 随 CLI wheel 发行、由 `gherkai skill install` 拷进使用方项目或用户级 agent 目录（[0043](./0043-agent-skill-for-driving-gherkai.md)）——**使用者面**，读者是 agent，安装态没有仓库上下文 | **只用绝对 URL**（相对链接在安装态必死）；跨文件指针写反引号裸路径（如 `references/engines.md`）；零 ADR / 决策号 / 内部机制名 |
 | GitHub Release 正文（`.github/workflows/release.yml` 的 `body:`） | Releases 页面；各包 pyproject `[project.urls] Changelog` 指它（[0037](./0037-distribution-and-packaging.md) 决策 8），即「装了包的人」点 Changelog 直达的页面——**使用者面**，没有仓库上下文 | 只用绝对 URL（同包 README）；升级/用法细节指使用者向 README，不写 ADR/决策号（首发正文曾漏一处「见 ADR 0037 决策 7」，已发 Release 需在 GitHub 上手工改） |
