@@ -270,13 +270,13 @@
     "semantic_hash": ""
   },
   "README.md": {
-    "mtime": 1789619869.2418015,
-    "ast_hash": "80ce09733abeee77399747b1773edc13",
+    "mtime": 1789629923.2032545,
+    "ast_hash": "a3f5378c57510e9ddab9af7cf17bb4e9",
     "semantic_hash": ""
   },
   "cli/README.md": {
-    "mtime": 1789619125.6181324,
-    "ast_hash": "5860c89e1cd0a28681a206cc7530a830",
+    "mtime": 1789629923.2035022,
+    "ast_hash": "fd9d3b89e671aa5ff46eb1fde0ca6413",
     "semantic_hash": ""
   },
   "docs/adr/0001-scope-limited-to-english-ui.md": {
@@ -285,13 +285,13 @@
     "semantic_hash": ""
   },
   "docs/adr/0002-midscene-not-driven-by-gpt55.md": {
-    "mtime": 1789619338.5699775,
-    "ast_hash": "5b476b4b4923bb0196756de8340a20a0",
+    "mtime": 1789629923.2027297,
+    "ast_hash": "fe9fcd9f5fdd632436f0b343113d0ce6",
     "semantic_hash": ""
   },
   "docs/adr/0003-midscene-grounding-qwen3vl-bedrock.md": {
-    "mtime": 1789619338.569062,
-    "ast_hash": "a739a9a0f107ba75137979506c35226c",
+    "mtime": 1789629923.2030656,
+    "ast_hash": "0b1123f5f5101796f94ba390add4d2b9",
     "semantic_hash": ""
   },
   "docs/adr/0004-novaact-iam-auth-via-workflow.md": {
@@ -425,8 +425,8 @@
     "semantic_hash": ""
   },
   "engines/midscene/README.md": {
-    "mtime": 1789619869.2418895,
-    "ast_hash": "fc921a67bd727be8a45d76a579c59e44",
+    "mtime": 1789629923.2036352,
+    "ast_hash": "afcb82ed626f78b06dcb75f7acc6c32f",
     "semantic_hash": ""
   },
   "engines/midscene/spikes/SIGV4-FETCH-RECIPE.md": {
@@ -710,8 +710,8 @@
     "semantic_hash": ""
   },
   "engines/midscene/src/lib/agentcore-sigv4.mts": {
-    "mtime": 1789621699.437202,
-    "ast_hash": "15094debffe999938c049ca143803d9e",
+    "mtime": 1789629923.201443,
+    "ast_hash": "715a83df4efc4459a533305c2a684f5b",
     "semantic_hash": ""
   },
   "engines/midscene/src/lib/artifact-upload.mts": {
@@ -735,8 +735,8 @@
     "semantic_hash": "590f288d9d90f0ddc849fb407974cc52"
   },
   "engines/midscene/src/worker/agentcore-sigv4.test.mts": {
-    "mtime": 1789621699.4373677,
-    "ast_hash": "38e2ee8e6a47fbf8ac3a03956b111b2c",
+    "mtime": 1789629923.2017925,
+    "ast_hash": "4d7c028d20f5e22f8cf1226a18e6aeaa",
     "semantic_hash": ""
   },
   "engines/midscene/src/worker/argument.mts": {
@@ -1090,8 +1090,8 @@
     "semantic_hash": "ad23452a31e78183c6dc63e773c9df71"
   },
   "engines/midscene/DEVELOPMENT.md": {
-    "mtime": 1789619338.569647,
-    "ast_hash": "4ccfe754eba7cd8029f33bb17d46f877",
+    "mtime": 1789629923.2037764,
+    "ast_hash": "485b1f118e794bffd1484c0038a22825",
     "semantic_hash": ""
   },
   "engines/novaact/DEVELOPMENT.md": {
@@ -1285,13 +1285,13 @@
     "semantic_hash": "59a3ed2f169cf869f0bfe14972b22de1"
   },
   "cli/gherkai_cli/skills/gherkai/references/engines.md": {
-    "mtime": 1789619125.6185935,
-    "ast_hash": "b62808f85dd01cf48e1d52087eff53c8",
+    "mtime": 1789629923.2039015,
+    "ast_hash": "6dddc924de119d082016dfe2f90c1925",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skills/gherkai/references/setup-and-diagnosis.md": {
-    "mtime": 1789619125.6186821,
-    "ast_hash": "e99b45b92aecf70c11714c8ac45d10b9",
+    "mtime": 1789629923.2040098,
+    "ast_hash": "2f128d935443e51864fd5dbd450cf478",
     "semantic_hash": ""
   },
   "skills/gherkai-evals/evals.json": {
@@ -1370,8 +1370,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0044-engine-model-selection-and-override.md": {
-    "mtime": 1789621654.992931,
-    "ast_hash": "4a936341a00842809ed733417eaf35b0",
+    "mtime": 1789629923.202614,
+    "ast_hash": "927ea23d8667b24bf18907f06dcae89f",
     "semantic_hash": ""
   }
 }

@@ -108,7 +108,7 @@ test("MODEL 缺省 = DEFAULT_MODEL（MIDSCENE_MODEL_ID 覆盖那条在 run-scope
 
 test("DEFAULT_MODEL 钉的是具体 id：换默认得连这条字面量一起改（刻意的升级闸门，对称 Nova 那条）", () => {
   // 换默认模型 = 换判定，流程是「评测集 A/B + 随发版并在 Release 正文点明」；字面量在这里是闸门、不是脆弱断言。
-  assert.equal(DEFAULT_MODEL, "qwen.qwen3-vl-235b-a22b");
+  assert.equal(DEFAULT_MODEL, "us.openai.gpt-5.6-terra");
 });
 
 test("modelFamily: inference profile 形态（us./global. 前缀）对 qwen / deepseek 也推得出", () => {
