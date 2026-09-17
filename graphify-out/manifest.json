@@ -475,8 +475,8 @@
     "semantic_hash": "c12c412fffd56114ffc2adb64b947ac4"
   },
   "cli/gherkai_cli/__main__.py": {
-    "mtime": 1789620451.271651,
-    "ast_hash": "95dd65e55c72a95cc6bef2d22dff11b5",
+    "mtime": 1789620720.8701997,
+    "ast_hash": "9bfb4eef8f58aa3040f81068d40234f3",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/render.py": {

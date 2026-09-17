@@ -543,8 +543,8 @@ def _resolve_steps_dir_for_backend(args) -> str | int | None:
 # worker 自述（--capabilities）非零退出的两种成因，三个消费点（run/submit 跑前检查、list-deterministic、doctor）同一句：
 # 该入口会加载使用方 steps，非零退出既可能是那些文件加载失败，也可能是 worker 与 CLI 版本不一致（不认该入口、掉进
 # job 模式读到空 stdin 即退）；只转述 worker 的 stderr 时，后一种只剩一句与版本无关的 JSON 解析错、用户不知升级哪一侧。
-_SELF_DESCRIBE_CAUSES = ("（可能是 steps/ 目录里的文件加载失败，也可能是这个引擎的 worker 与命令行工具"
-                         "版本不一致——两者须同版本安装；上面这句若点到了模型，按它说的做即可）")
+_SELF_DESCRIBE_CAUSES = ("（以 worker 自己的报错为准；若它只报了一句解析错误、没说原因，常见成因是 steps/ 目录里的"
+                         "文件加载失败，或 worker 与命令行工具版本不一致——两者须同版本安装）")
 
 
 def _preflight_worker_runtimes(jobs, steps_dir: str | None) -> int | None:
