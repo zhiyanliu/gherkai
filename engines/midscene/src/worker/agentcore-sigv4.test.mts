@@ -8,7 +8,7 @@
 // 故纯逻辑测试（run-scope 的派发/投票）import 链碰到它时不被误伤——本测试正是验「用时才 fail-loud」。
 import { test } from "node:test";
 import assert from "node:assert";
-import { getRegion, getBaseUrl, modelFamily, MODEL, DEFAULT_MODEL } from "../lib/agentcore-sigv4.mjs";
+import { getRegion, getBaseUrl, modelFamily, MODEL, DEFAULT_MODEL, bedrockCompatBody } from "../lib/agentcore-sigv4.mjs";
 
 function withRegion<T>(value: string | undefined, fn: () => T): T {
   const saved = process.env.AWS_REGION;
@@ -114,4 +114,22 @@ test("DEFAULT_MODEL 钉的是具体 id：换默认得连这条字面量一起改
 test("modelFamily: inference profile 形态（us./global. 前缀）对 qwen / deepseek 也推得出", () => {
   assert.equal(modelFamily("us.qwen.qwen3-vl-235b-a22b"), "qwen3-vl");
   assert.equal(modelFamily("global.deepseek.v4-flash-vision"), "deepseek");
+});
+
+// ---- Bedrock 兼容层方言：image_url.detail "original" 去掉（ADR 0044 决策 3；跳板机实测 Bedrock 对任何模型都拒该值）----
+test("bedrockCompatBody: 只删 detail:original，其余字段与顺序原样；high / 无 detail / 非 JSON 都不动", () => {
+  const body = JSON.stringify({ model: "us.openai.gpt-6-astra", reasoning_effort: "low", messages: [
+    { role: "system", content: "sys" },
+    { role: "user", content: [{ type: "text", text: "t" }, { type: "image_url", image_url: { url: "data:image/jpeg;base64,AAA", detail: "original" } }] },
+    { role: "user", content: [{ type: "image_url", image_url: { url: "data:image/png;base64,BBB", detail: "high" } }] },
+  ] });
+  const out = JSON.parse(bedrockCompatBody(body));
+  assert.equal(out.messages[1].content[1].image_url.detail, undefined, "original 该被去掉");
+  assert.equal(out.messages[1].content[1].image_url.url, "data:image/jpeg;base64,AAA");
+  assert.equal(out.messages[2].content[0].image_url.detail, "high", "high 不动");
+  assert.equal(out.reasoning_effort, "low");
+  const untouched = JSON.stringify({ model: "m", messages: [{ role: "user", content: "plain" }] });
+  assert.equal(bedrockCompatBody(untouched), untouched, "没有要改的就原样返回（同一字符串）");
+  assert.equal(bedrockCompatBody("not json"), "not json");
+  assert.equal(bedrockCompatBody(bedrockCompatBody(body)), bedrockCompatBody(body), "幂等");
 });

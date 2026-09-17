@@ -315,8 +315,8 @@
     "semantic_hash": "6b550ac4a3d5555107a9a8d2b27dbcdb"
   },
   "docs/adr/0008-midscene-bedrock-auth-sigv4-selfsign.md": {
-    "mtime": 1789619338.569409,
-    "ast_hash": "bc0a1740c019538af5a21909f242aef9",
+    "mtime": 1789621654.9935005,
+    "ast_hash": "f020bf32dcd23931a339fb74517dbe3a",
     "semantic_hash": ""
   },
   "docs/adr/0009-maximize-aws-hard-constraint.md": {
@@ -710,8 +710,8 @@
     "semantic_hash": ""
   },
   "engines/midscene/src/lib/agentcore-sigv4.mts": {
-    "mtime": 1789620451.2706845,
-    "ast_hash": "93deded864f11876ecf393a7d7e0416e",
+    "mtime": 1789621699.437202,
+    "ast_hash": "15094debffe999938c049ca143803d9e",
     "semantic_hash": ""
   },
   "engines/midscene/src/lib/artifact-upload.mts": {
@@ -735,8 +735,8 @@
     "semantic_hash": "590f288d9d90f0ddc849fb407974cc52"
   },
   "engines/midscene/src/worker/agentcore-sigv4.test.mts": {
-    "mtime": 1789620451.2708163,
-    "ast_hash": "d866692ba5b4997b2c91a9ceb4757a38",
+    "mtime": 1789621699.4373677,
+    "ast_hash": "38e2ee8e6a47fbf8ac3a03956b111b2c",
     "semantic_hash": ""
   },
   "engines/midscene/src/worker/argument.mts": {
@@ -1370,8 +1370,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0044-engine-model-selection-and-override.md": {
-    "mtime": 1789620451.2717733,
-    "ast_hash": "b39d2067fbf085c1b89b00d6c1c4dc41",
+    "mtime": 1789621654.992931,
+    "ast_hash": "4a936341a00842809ed733417eaf35b0",
     "semantic_hash": ""
   }
 }

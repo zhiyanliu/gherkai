@@ -82,10 +82,31 @@ function modelSigner_(): SignatureV4 {
   return _modelSigner;
 }
 
+/** Bedrock OpenAI 兼容层的方言适配（ADR 0044 决策 3 / ADR 0008）：去掉 `image_url.detail: "original"`。
+ *  OpenAI 原生认这个取值，Bedrock 对任何模型都 400「Invalid 'content': value did not match any expected variant」；
+ *  Midscene 的 gpt-5 / gpt-6 family 适配器对定位请求固定发它、无配置可关。只删这一个字段、其余原样；非 JSON /
+ *  无 messages 的体原样返回。**必须在签名之前改**（SigV4 含 payload hash，签完再改即 403）。导出供单测。 */
+export function bedrockCompatBody(body: string): string {
+  let parsed: unknown;
+  try { parsed = JSON.parse(body); } catch { return body; }
+  if (!parsed || typeof parsed !== "object" || !Array.isArray((parsed as { messages?: unknown }).messages)) return body;
+  let changed = false;
+  for (const m of (parsed as { messages: unknown[] }).messages) {
+    const content = (m as { content?: unknown })?.content;
+    if (!Array.isArray(content)) continue;
+    for (const part of content) {
+      const img = (part as { image_url?: { detail?: unknown } })?.image_url;
+      if (img && typeof img === "object" && img.detail === "original") { delete img.detail; changed = true; }
+    }
+  }
+  return changed ? JSON.stringify(parsed) : body;
+}
+
 export const sigv4Fetch: typeof fetch = async (input, init = {}) => {
   const urlStr = typeof input === "string" ? input : input.toString();
   const u = new URL(urlStr);
-  const body = (init.body as string | undefined) ?? undefined;
+  const rawBody = (init.body as string | undefined) ?? undefined;
+  const body = rawBody === undefined ? undefined : bedrockCompatBody(rawBody);
 
   const toSign = new HttpRequest({
     method: (init.method ?? "POST").toUpperCase(),
