@@ -13,13 +13,13 @@
 | 确定性 step 语言 | Python，`steps/*.py` | TypeScript / JS，`steps/*.mts` 或 `*.mjs` |
 | 云端依赖 | Nova Act 服务与模型 nova-act-v1.0（默认钉死，环境变量 NOVA_MODEL_ID 可换）、AgentCore Browser | Bedrock 模型 us.openai.gpt-5.6-terra（默认钉死，环境变量 MIDSCENE_MODEL_ID 可换，家族识别不了时再给 MIDSCENE_MODEL_FAMILY）、AgentCore Browser |
 
-两者都纯 IAM 鉴权、不要 API key；region 要能解析出来（`--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > profile 配置，四级全空才响亮失败、不猜默认，见 `references/setup-and-diagnosis.md` 第 4 节）；浏览器跑在云端、本机不装 Chromium。
+两者都纯 IAM 鉴权、不要 API key；region 要能解析出来（`--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > profile 配置，四级全空才响亮失败、不猜默认，见 `references/setup-and-diagnosis.md` 第 4 节）；浏览器运行在云端、本机不装 Chromium。
 
 **诊断规则**：Nova 档下非英文页面的断言判否，先排查语言面，再怀疑被测应用。三条出路：scenario 标 `@engine:midscene`（或整批 `--default-engine midscene`）；断言改写成页面级语义陈述（「当前是 X 的词条页」「页面没有报错」）；文本与结构检查改成确定性 step。
 
 ## 2 证据字段的引擎填充差异
 
-`explain --json` 的证据 schema 两引擎同形、读法一套，但填充有系统性差异。这些是引擎事实，不是抽取失败；判「这一步有没有判定记录」一律看 `record_missing`，`evidence_missing` 只回答「为什么没读到这一步的机读证据」；别把证据里的 `null` 或空数组读成「没导航 / 没跑 / 证据坏了」。
+`explain --json` 的证据 schema 两引擎同形、读法一套，但填充有系统性差异。这些是引擎事实，不是抽取失败；判「这一步有没有判定记录」一律看 `record_missing`，`evidence_missing` 只回答「为什么没读到这一步的机读证据」；别把证据里的 `null` 或空数组读成「没导航 / 没运行 / 证据坏了」。
 
 | 字段 | Nova Act | Midscene |
 |---|---|---|
@@ -71,7 +71,7 @@ deterministic(
 
 ## 4 两侧成对
 
-同一 feature 要在两个引擎上跑（或团队两引擎都用），每条确定性 step 两侧都要注册：正则语义相同、`description` / `example` 同文，只是方言不同。只写一侧，另一引擎上这一步会静默换回 AI 判定，前置检查不替你发现（它只查本次用到的引擎）。核对法：`gherkai list-deterministic --engine novaact` 与 `gherkai list-deterministic --engine midscene` 各查一遍，再 `gherkai plan` 看标注。
+同一 feature 要在两个引擎上运行（或团队两引擎都用），每条确定性 step 两侧都要注册：正则语义相同、`description` / `example` 同文，只是方言不同。只写一侧，另一引擎上这一步会静默换回 AI 判定，前置检查不替你发现（它只查本次用到的引擎）。核对法：`gherkai list-deterministic --engine novaact` 与 `gherkai list-deterministic --engine midscene` 各查一遍，再 `gherkai plan` 看标注。
 
 ## 5 用错了会怎样（一律响亮失败，不静默降级）
 
@@ -87,4 +87,4 @@ deterministic(
 
 ## 6 把 steps 带到云端
 
-`--backend cloud` 时 worker 跑在云端容器里、读不到本机 `steps/`，`--steps-dir` 只警告不生效。步骤要烙进一个定制 worker 镜像并 `gherkai deploy push-worker` 推上去，提交时用 `--worker-variant` 选。流程在 `references/cloud-backend.md`。
+`--backend cloud` 时 worker 运行在云端容器里、读不到本机 `steps/`，`--steps-dir` 只警告不生效。步骤要烙进一个定制 worker 镜像并 `gherkai deploy push-worker` 推上去，提交时用 `--worker-variant` 选。流程在 `references/cloud-backend.md`。

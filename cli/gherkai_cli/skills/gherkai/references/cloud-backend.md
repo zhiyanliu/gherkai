@@ -7,9 +7,9 @@ https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/cloud-backend.md 
 
 | 谁 | 做什么 | agent 的角色 |
 |---|---|---|
-| 部署方 | `gherkai deploy` 建 / 改后端，`gherkai destroy` 拆，管 IAM 与网络 | **不自己跑**。用 `doctor` 判缺什么，把命令与前置清单交给人 |
-| 测试开发 | 写确定性 step，build 定制 worker 镜像，`gherkai deploy push-worker` 推上去 | 可以跑（不改 IAM） |
-| QA / CI | `submit --backend cloud` → `status --wait` → `explain` | 直接跑 |
+| 部署方 | `gherkai deploy` 建 / 改后端，`gherkai destroy` 拆，管 IAM 与网络 | **不自己运行**。用 `doctor` 判缺什么，把命令与前置清单交给人 |
+| 测试开发 | 写确定性 step，build 定制 worker 镜像，`gherkai deploy push-worker` 推上去 | 可以运行（不改 IAM） |
+| QA / CI | `submit --backend cloud` → `status --wait` → `explain` | 直接运行 |
 
 ## 2 交给部署方的清单
 
@@ -26,7 +26,7 @@ gherkai destroy --vpc default --prefix gherkai- --yes       # 拆栈；表 / 桶
 - `--vpc` **必给、无隐式默认**（只有 `--bootstrap` 不需要）：`default`（账户默认 VPC）/ `new`（新建，2 可用区、零 NAT）/ `vpc-<id>`。生效的档记在后端，下次给错会退 2；确认要换网络时加 `--allow-vpc-change` 放行一次。
 - `--prefix`（默认 `gherkai-`）是全部云资源的命名空间，**必须与 `run` / `submit` / `status` / `explain` 的 `--prefix` 一致**。换 prefix = 换一套独立环境（`prod-` / `stage-`），闲置成本近零。
 - 其它：`--require-approval never|any-change|broadening`（IAM 变更要不要人过目）、`--stop-timeout N`（worker 容器停止宽限秒；默认值与上限见 `--help`，上限是平台限制、更大的值在命令期就被拒；云端对应本机 `run --grace`）、`--container-engine 名`（默认 docker）、`--refresh-context`、`--region` / `--profile`。
-- 退出码：0 成功；2 前置 / 校验失败（Node 缺失、VPC 档不符、容器引擎名不认、`push-worker` 架构或版本不符）；1 = cdk 已成功而 worker 镜像步骤失败，账户已改动，重跑 `gherkai deploy` 幂等收敛；其余原样透传 cdk。
+- 退出码：0 成功；2 前置 / 校验失败（Node 缺失、VPC 档不符、容器引擎名不认、`push-worker` 架构或版本不符）；1 = cdk 已成功而 worker 镜像步骤失败，账户已改动，重新运行 `gherkai deploy` 幂等收敛；其余原样透传 cdk。
 
 建出来的东西：DynamoDB 两张表（run 状态、事件）、S3 桶（判定结果、报告、引擎产物）、ECS 集群与每引擎一个 Fargate task 定义、每引擎一个 ECR 仓库、三个 Lambda 与调度规则（让 `submit` 的 run 在云上自我推进）、按 `--vpc` 档的子网与安全组、每引擎最小权限角色、SSM 参数（版本戳、VPC 档、worker 镜像映射与默认指针）。云端每个 run 的并行 job 数 = min(`--max-concurrency`, 部署侧上限 8)。
 
@@ -68,7 +68,7 @@ gherkai submit features/x.feature --backend cloud --prefix gherkai- --worker-var
 ```
 
 - arm Mac 上不带 `--platform linux/amd64` 会 build 出 arm64，容器启动期才报 exec format error；`push-worker` 会在推之前查架构与版本、不符退 2。
-- 提交时 `--worker-variant` 被解析成本 run 各引擎的精确 revision 写进提交记录：一个 run 内镜像固定，别人重推同名 variant 不影响在跑的 run。某引擎缺该 variant 即退 2、不回落默认。
+- 提交时 `--worker-variant` 被解析成本 run 各引擎的精确 revision 写进提交记录：一个 run 内镜像固定，别人重推同名 variant 不影响正在运行的 run。某引擎缺该 variant 即退 2、不回落默认。
 - **A→C 交接**：本机新写或改了确定性 step，`plan` 的标注会变，但云端不会，直到重新 build + `push-worker`。cloud 档「改了 steps 不推镜像等于没改」，且没有任何显式失败提醒。
 - `gherkai deploy delete-worker` 尚未提供（命令存在、会说明）。
 
@@ -89,4 +89,4 @@ gherkai submit features/x.feature --backend cloud --prefix gherkai- --worker-var
 
 ## 7 `--expose-local` 在 cloud 档的例外
 
-`submit --backend cloud --expose-local <原始 origin>` 时隧道由**本机**的守护进程持有，本机须保持开机联网到 run 终态，这是「提交完关机也跑完」的唯一例外。`--tunnel-ttl S` 是守护进程的兜底 TTL（默认 = 本批各 job 预算之和 + 启动余量），到点无条件拆隧道，调小可能在 run 未完时断隧道。
+`submit --backend cloud --expose-local <原始 origin>` 时隧道由**本机**的守护进程持有，本机须保持开机联网到 run 终态，这是「提交后关机也会运行到结束」的唯一例外。`--tunnel-ttl S` 是守护进程的兜底 TTL（默认 = 本批各 job 预算之和 + 启动余量），到点无条件拆隧道，调小可能在 run 未完时断隧道。

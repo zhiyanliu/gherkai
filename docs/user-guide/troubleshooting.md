@@ -1,8 +1,8 @@
 # 排错
 
-本页回答「报错了先看哪」：`gherkai doctor` 每一行的读法，以及安装与版本、凭证与 region、模型、引擎与判定、确定性 step 加载、云端后端、提交后进度停住、隧道这几类症状各自的原因与处置，还有定位参数不一致、筛选筛成空集、`.feature` 语法错误这类其它以退出码 2 结束的情况。每条命令的完整用法与退出码见[跑测试与看结果](./running-and-results.md)，环境变量与选项的总表见[配置](./configuration.md)，云端后端的部署与维护见[云端后端](./cloud-backend.md)。
+本页回答「报错了先看哪」：`gherkai doctor` 每一行的读法，以及安装与版本、凭证与 region、模型、引擎与判定、确定性 step 加载、云端后端、提交后进度停住、隧道这几类症状各自的原因与处置，还有定位参数不一致、筛选筛成空集、`.feature` 语法错误这类其它以退出码 2 结束的情况。每条命令的完整用法与退出码见[运行测试与查看结果](./running-and-results.md)，环境变量与选项的总表见[配置](./configuration.md)，云端后端的部署与维护见[云端后端](./cloud-backend.md)。
 
-## 先跑 gherkai doctor
+## 先运行 gherkai doctor
 
 ```bash
 gherkai doctor                    # 只查本机
@@ -26,21 +26,21 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 |---|---|---|
 | `cli.version` | 总是 | CLI 版本与 Python 版本。展示项 |
 | `engines.novaact`、`engines.midscene` | 总是 | 该引擎 worker 的拉起命令与来源；找不到时这一行就是该引擎的安装指引。单个引擎缺失只标 `-` |
-| `engines.any` | 总是 | 至少一个引擎的 worker 可用（本机跑的前提）。必修；`--backend cloud` 下降为可选，因为云端 worker 跑在容器里 |
+| `engines.any` | 总是 | 至少一个引擎的 worker 可用（本机运行的前提）。必修；`--backend cloud` 下降为可选，因为云端 worker 在容器里运行 |
 | `engines.model.<引擎>` | 该引擎 worker 自述成功时 | 这台机器起 job 时**实际会用**的模型 id，由 worker 自报。展示项 |
 | `steps.dir` | 总是 | 解析到的确定性 step 目录。没有 `steps/` 目录是多数项目的常态；`--steps-dir` 或 `GHERKAI_STEPS_DIR` 指的路径不是目录时是必修失败 |
 | `steps.load.<引擎>` | 每个可用引擎（`steps.dir` 判 `✗` 时不问自述，本行与 `engines.model.<引擎>` 都不出现） | 该引擎加载到多少条确定性 step（含内建）。有 steps 目录时必修，没有时只是可选 |
 | `aws.region` | 云端（region 只剩 profile 配置这一处可取时——`--profile` / `AWS_PROFILE` 指的 profile 读不出来，这一行不出现，失败报在 `aws.identity` 那行） | 落实到的 region。四处都没有 region 时必修失败 |
 | `aws.identity` | 总是（云端而 `aws.region` 判 `✗` 时不出现） | 调用者身份。凭证不可用或 profile 名不存在时必修失败；未给云端参数时这一行只标「未查（给 --backend cloud 或 --prefix 才查云端）」 |
 | `backend.reachability` | 未给云端参数时，或给了云端参数而 `aws.region`、`aws.identity` 先失败时（两者都通过就没有这一行，下面几行即实际探测结果） | 这一行只交代云端为什么没查：三种情形依次标「未查（同上）」/「未查：region 还没解析出来」/「未查：凭证先过不了」，后两种同时标 `-`——真正的失败在它上面那一行，`backend.*` 其余各行都不出现 |
-| `backend.version` | 云端 | 后端版本戳与 CLI 版本比对。本机 CLI 新于后端时必修失败（提交也会被拒）；读版本戳本身失败（凭证、权限、网络）时同样必修失败。后端没有版本戳只提示、不拦，按提示让部署方运行一次 `gherkai deploy` 把戳写上。两侧任一不是正式发行版本（含本机从源码直跑、取不到自身版本）时跳过比对，只提示、标 `✓` |
+| `backend.version` | 云端 | 后端版本戳与 CLI 版本比对。本机 CLI 新于后端时必修失败（提交也会被拒）；读版本戳本身失败（凭证、权限、网络）时同样必修失败。后端没有版本戳只提示、不拦，按提示让部署方运行一次 `gherkai deploy` 把戳写上。两侧任一不是正式发行版本（含本机从源码直接运行、取不到自身版本）时跳过比对，只提示、标 `✓` |
 | `backend.resources` | 云端 | 两张表、产物桶、cluster、两个引擎的 task 定义、三个 Lambda 是否都在，报告前缀与 `--report-dir` 是否一致。必修 |
 | `backend.worker.default` | 云端 | 部署级默认 worker 镜像 variant 指针。缺失或读不到时必修失败，云端这一段自检到此为止：下面三行 `backend.worker.*` 都不出现 |
 | `backend.worker.<引擎>` | 云端，且 `backend.worker.default` 通过后 | 该引擎在默认 variant 下解析到的 task 定义 revision。单引擎解析不到只标 `-` |
 | `backend.worker.any` | 云端，且 `backend.worker.default` 通过后 | 至少一个引擎解析到 worker 镜像。两个都解析不到时必修失败 |
 | `backend.worker.grace` | 云端，且 `backend.worker.default` 通过后 | 本机 worker 自报的收尾宽限与云端为它设的停止宽限比对，只比解析到镜像、且本机装了 worker 的引擎：一个引擎都没解析到镜像时整行标「未查」；解析到了、但本机没装对应 worker 的引擎会被跳过并在行内说明。差距只标 `-`、不影响退出码，这一行会说明云端宽限是否还能调高 |
 | `provider.deploy-aws` | 未装部署 extra、装了多个部署 provider、或装了却加载失败时 | 前两种只是说明（部署 extra 只有部署方需要）；**装了却加载失败**是必修失败 |
-| `provider.node`、`provider.cdk`、`provider.container-engine` | 部署 provider 可自检时 | Node ≥ 22、`cdk` 或 `npx`、容器引擎能否连上。三项都不是必修项：通过标 `✓`，缺失或连不上只标 `-`，不影响退出码；它们只影响 `gherkai deploy` 与 `gherkai deploy push-worker`，不影响提交与本机跑 |
+| `provider.node`、`provider.cdk`、`provider.container-engine` | 部署 provider 可自检时 | Node ≥ 22、`cdk` 或 `npx`、容器引擎能否连上。三项都不是必修项：通过标 `✓`，缺失或连不上只标 `-`，不影响退出码；它们只影响 `gherkai deploy` 与 `gherkai deploy push-worker`，不影响提交与本机运行 |
 
 给 `--backend cloud` 或 `--prefix` 才会查 `aws.*` 与 `backend.*` 两段；`--prefix` 与 `--report-dir` 都要与提交时用的值一致，否则查的是另一套资源。云端两段中途早退不影响 `provider.*` 段，它照常查。自检不查隧道前置。
 
@@ -63,7 +63,7 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 |---|---|---|
 | `没解析出 region`（自检的 `aws.region` 行），或 worker 启动即报 `AWS_REGION 未设` | `--region`、`AWS_REGION`、`AWS_DEFAULT_REGION`、`--profile` / `AWS_PROFILE` 指的 profile 配置，四处都没有 region | 任选一处设上。缺失时不会替你选一个 region |
 | `凭证/region 不可用（--region / AWS_REGION / AWS_DEFAULT_REGION / --profile / AWS_PROFILE）` | 本机凭证链取不到可用凭证，或 `--profile` / `AWS_PROFILE` 给的 profile 名不存在 | 配好 AWS 凭证（profile、环境变量、实例角色皆可），或改正 profile 名。两个引擎都用 IAM 鉴权，不需要 API key |
-| 本机跑也报凭证错 | 浏览器与模型都在云端，本机 `run` / `submit` 同样要凭证 | 不需要 AWS 凭证的命令只有 `plan`、`list-engines`、`list-deterministic`、`gherkai skill install`、不带云端参数的 `doctor`，以及本机后端下只读报告目录的 `status` 与 `explain`（`status --wait` 会接着推进这个 run，那时需要凭证） |
+| 本机运行也报凭证错 | 浏览器与模型都在云端，本机 `run` / `submit` 同样要凭证 | 不需要 AWS 凭证的命令只有 `plan`、`list-engines`、`list-deterministic`、`gherkai skill install`、不带云端参数的 `doctor`，以及本机后端下只读报告目录的 `status` 与 `explain`（`status --wait` 会接着推进这个 run，那时需要凭证） |
 
 ## 模型
 
@@ -80,18 +80,18 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 | job 判 `error`，归因是 `timeout`，说明是 `job 超时（>…s）` | 这个 job 的墙钟预算到点（未标 `@timeout` 的 scope 用 `--default-job-timeout`，默认 300 秒） | 给慢的 scope 标 `@timeout:600`，或调高 `--default-job-timeout`；也可以把长流程拆成多个 scope |
 | 某一步记 `error` 并标 `(timeout)`，job 级归因为空 | Nova Act 的单次 AI 操作到点（默认 120 秒），不是 job 墙钟到点 | 把这一步的动作写得更细，或调高 `NOVA_ACT_TIMEOUT_S`，见[配置](./configuration.md)。调高 `--default-job-timeout` 对这种超时无效 |
 | Nova Act 引擎下，非英文页面上「正文里出现某个中文词」这类文本包含断言系统性判否（同一页面上的英文词仍可靠） | Nova Act 在非英文页面上不适合做这类文本断言，提高投票次数无效 | 按[编写 .feature](./writing-features.md)的「按引擎选写法」选一种改法：改用 Midscene 引擎、把断言改写成页面级语义陈述，或改成确定性 step |
-| 同一条 AI 断言两次跑结论不同 | AI 判定本身会抖动 | 用 `--assertion-votes 3` 跑多次取多数票，或把这条判定改成确定性 step；取值与取舍见[编写 .feature](./writing-features.md)的「投票」 |
+| 同一条 AI 断言两次运行的结论不同 | AI 判定本身会抖动 | 用 `--assertion-votes 3` 运行多次取多数票，或把这条判定改成确定性 step；取值与取舍见[编写 .feature](./writing-features.md)的「投票」 |
 
 判 `error` 的 job 与 step 带一个归因标记：`gherkai status` 与 `run` 的文本输出把它显示成 `(<归因>: <说明>)`，`--json` 输出里它是 `error_type` 字段（机读字段全表见 [`../internals/cli-json-contract.md`](../internals/cli-json-contract.md)）。常见的四种：
 
 | 归因 | 含义与处置 |
 |---|---|
 | `timeout` | 墙钟预算到点，或 Nova Act 的单次 AI 操作到点。见上表前两行 |
-| `network_error` | 网络瞬时故障（建连失败，或跑到一半断网）。原样重跑通常就能过 |
-| `engine_error` | worker 起不来、跑到一半崩，或干净退出却没交完结果。先看 worker 日志，再用 `gherkai explain <run_id>` 看已有的证据 |
+| `network_error` | 网络瞬时故障（建连失败，或中途断网）。原样重新运行通常就能过 |
+| `engine_error` | worker 起不来、运行中途崩溃，或干净退出却没交完结果。先看 worker 日志，再用 `gherkai explain <run_id>` 看已有的证据 |
 | `guardrail` | Nova Act 的安全护栏拦下了这一步的操作。改写这一步的措辞，或把这条 scenario 标 `@engine:midscene` |
 
-本机跑时的 worker 日志：前台 `run` 直接打在终端里，加 `--quiet` 时落 `<report-dir>/<run_id>/worker.log`；`submit --backend local` 的后台进程把它写进同一目录的 `reconcile.log`。云端跑的日志位置见下面「云端后端」。
+本机运行时的 worker 日志：前台 `run` 直接打在终端里，加 `--quiet` 时落 `<report-dir>/<run_id>/worker.log`；`submit --backend local` 的后台进程把它写进同一目录的 `reconcile.log`。云端运行时的日志位置见下面「云端后端」。
 
 ## 确定性 step 加载
 
@@ -107,7 +107,7 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 | 症状 | 原因 | 处置 |
 |---|---|---|
 | cloud 命令以退出码 2 结束，提示「本机 CLI X 新于后端 Y」 | CLI 与后端不是同一版本，新 CLI 写的任务定义不能交给旧后端读 | 请部署方运行 `gherkai deploy` 把后端升级到同版本；也可以临时用 `uvx --from 'gherkai==<后端版本>' gherkai …` 提交，不改动本机安装。没有强行放行的开关。反过来，本机 CLI 旧于后端只提示、不拦截，用 `uv tool upgrade gherkai` 升级本机 CLI |
-| 提交以退出码 2 结束，`引擎 X 的 worker variant '…' 解析失败` | 当前 CLI 版本下，该引擎没有这个 variant 的镜像 | 临时用 `--worker-variant base` 先跑（部署方运行过本版本的 `gherkai deploy` 即有）；请部署方补推该 variant 的步骤见[云端后端](./cloud-backend.md)的「worker 镜像 variant」。报错说的是本机 CLI 旧于后端时，先升级 CLI，不要照旧版本推镜像 |
+| 提交以退出码 2 结束，`引擎 X 的 worker variant '…' 解析失败` | 当前 CLI 版本下，该引擎没有这个 variant 的镜像 | 临时改用 `--worker-variant base` 提交（部署方运行过本版本的 `gherkai deploy` 即有）；请部署方补推该 variant 的步骤见[云端后端](./cloud-backend.md)的「worker 镜像 variant」。报错说的是本机 CLI 旧于后端时，先升级 CLI，不要照旧版本推镜像 |
 | 提交以退出码 2 结束，提示后端没有默认 worker 镜像 variant 指针 | 这个 prefix 下的后端还没完成过本版本的初始化，或默认指针被清掉 | 请部署方运行一次 `gherkai deploy` 完成初始化；急用时提交方用 `--worker-variant base` 显式指定 |
 | `run` / `submit --backend cloud` 以退出码 2 结束，`--backend cloud 资源缺失：<资源>（用 --prefix=… 拼出）不存在`；或自检的 `backend.resources` 标 `✗` | `--prefix` 与部署用的不一致，或该 prefix 下还没部署过 | 用部署方给的 prefix，并确认 region 与账户也是部署时那一套；`--report-dir` 同样要与提交时一致 |
 | 自检的 `backend.version` 标 `✗`，`读不到后端版本戳（prefix 配错或后端未部署？）` | 读这个参数本身失败：凭证、权限或网络不通 | 先按上一行核对 prefix 与 region，再确认当前凭证有读 SSM 参数的权限 |
@@ -122,7 +122,7 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 
 | 症状 | 原因 | 处置 |
 |---|---|---|
-| `--expose-local 隧道未就绪：找不到 ngrok 可执行文件` | ngrok 没装，或不在 PATH 上 | 装好 ngrok（https://ngrok.com/download ）并确认 `ngrok version` 能跑 |
+| `--expose-local 隧道未就绪：找不到 ngrok 可执行文件` | ngrok 没装，或不在 PATH 上 | 装好 ngrok（https://ngrok.com/download ）并确认 `ngrok version` 能正常执行 |
 | `ngrok 隧道未就绪（…s 内拿不到公网 URL）`，提示 authtoken 未配置或无外网 | authtoken 没配，或本机连不上外网 | 运行 `ngrok config add-authtoken <token>`，或设 `NGROK_AUTHTOKEN`；两处任一即可。前置与限制见[测本机应用](./local-app-testing.md) |
 
 `gherkai doctor` 不查隧道前置，隧道问题只会在 `run` / `submit` 起隧道时暴露。隧道特有的其它症状见[测本机应用](./local-app-testing.md)的「常见故障」。

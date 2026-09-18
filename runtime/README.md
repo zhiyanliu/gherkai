@@ -1,6 +1,6 @@
 # gherkai-runtime
 
-gherkai 的运行时装配层：拉起两个 AI 引擎的 worker、解析云端资源名与网络、组装并推进一次 run，执行调度交给核心库 https://pypi.org/project/gherkai-core/ 。它是 gherkai 命令行与 AWS 部署包依赖的库，**一般不直接安装**——要跑测试请装命令行包 `gherkai`。要做另一个前端（Web 界面、自建调度服务、把执行嵌进现有平台）时才直接用它。
+gherkai 的运行时装配层：拉起两个 AI 引擎的 worker、解析云端资源名与网络、组装并推进一次 run，执行调度交给核心库 https://pypi.org/project/gherkai-core/ 。它是 gherkai 命令行与 AWS 部署包依赖的库，**一般不直接安装**——要运行测试请装命令行包 `gherkai`。要做另一个前端（Web 界面、自建调度服务、把执行嵌进现有平台）时才直接用它。
 
 ## 安装
 
@@ -31,7 +31,7 @@ resolver = compose.make_resolver(engines)
 | `gherkai_runtime.names` | 云端资源名、SSM 参数路径、worker 镜像 tag 的唯一命名实现 |
 | `gherkai_runtime.detached` / `tunnel` | 提交后在本机后台把一个 run 推到完成；把本机可达的被测应用暴露给云端浏览器 |
 
-引擎名是 `novaact` 与 `midscene`。运行时会启动 worker 子进程、读取环境变量、访问 AWS 服务，请在配好 AWS 凭证与 region 的环境里使用。云端资源需先由部署方跑 `gherkai deploy` 建好；调用方的版本不能新于已部署的后端（新于即拒绝执行），旧于时只提示、不拦——建议两侧保持同版本。
+引擎名是 `novaact` 与 `midscene`。运行时会启动 worker 子进程、读取环境变量、访问 AWS 服务，请在配好 AWS 凭证与 region 的环境里使用。云端资源需先由部署方执行 `gherkai deploy` 建好；调用方的版本不能新于已部署的后端（新于即拒绝执行），旧于时只提示、不拦——建议两侧保持同版本。
 
 ## 文档
 

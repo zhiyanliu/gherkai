@@ -1,6 +1,6 @@
 # @gherkai/worker-midscene
 
-gherkai 的 Midscene 执行引擎 worker：在云端浏览器（Amazon Bedrock AgentCore Browser）上执行 `.feature` 的每个 step——AI step 交给 Bedrock 上的视觉模型看图定位、操作与判定，确定性 step 走你自己写的 Playwright 函数。它由 `gherkai` 命令行按需拉起，**不必手动运行**；本机装上它，就是让 `gherkai` 能用 `midscene` 引擎跑。被测 UI 的语言不限，中文界面上的动作与断言与英文界面同级可靠。
+gherkai 的 Midscene 执行引擎 worker：在云端浏览器（Amazon Bedrock AgentCore Browser）上执行 `.feature` 的每个 step——AI step 交给 Bedrock 上的视觉模型看图定位、操作与判定，确定性 step 走你自己写的 Playwright 函数。它由 `gherkai` 命令行按需拉起，**不必手动运行**；本机装上它，就是让 `gherkai` 能用 `midscene` 引擎执行测试。被测 UI 的语言不限，中文界面上的动作与断言与英文界面同级可靠。
 
 ## 安装
 
@@ -33,9 +33,9 @@ deterministic(
 
 ## 文档
 
-- 装什么、要哪些 AWS 前置、第一次怎么跑通：https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/getting-started.md
+- 装什么、要哪些 AWS 前置、第一次怎么完整运行：https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/getting-started.md
 - 确定性 step 的完整写法与两侧对照：https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/writing-deterministic-steps.md
-- `.feature` 怎么写才跑得稳：https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/writing-features.md
+- `.feature` 怎么写才能稳定运行：https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/writing-features.md
 - 模型、region、超时等环境变量与选项：https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/configuration.md
 - 报错了先看哪：https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/troubleshooting.md
 - 每版变更：https://github.com/zhiyanliu/gherkai/blob/HEAD/CHANGELOG.md

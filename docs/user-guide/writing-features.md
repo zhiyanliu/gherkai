@@ -97,16 +97,16 @@ Scenario: 维基百科首页与 OpenAI 词条首段的 AI 断言
 - **未标 `@scope` 的 job 用 `<文件路径>:<行号>` 当编号**。因此 `@scope` 的值不要写成这个形状：正好等于同批某条未标 scope 的 scenario 编号时，整批拒绝运行。
 - **标了 tag 就得给值**：`@scope:`、`@engine:`、`@timeout:` 后面空着会被拒绝；想用默认值就删掉这个 tag。`@timeout` 的值必须是正数秒。连冒号和值一起漏掉、只写 `@scope` 不会报错：它会被当成普通标签忽略，这条 scenario 仍各自成为一个 job。分组没生效时先用 `gherkai plan` 看分组结果。
 - **预算从这个 job 启动时算起**，云端后端下包含拉取 worker 镜像等启动开销；到点这个 job 会被停下，判定记为出错、原因是超时。
-- **其它 tag 都是普通标签**，没有内置语义，用来配合 `--tags` 挑一部分 scenario 跑。
+- **其它 tag 都是普通标签**，没有内置语义，用来配合 `--tags` 挑一部分 scenario 运行。
 - 以上校验都在起第一个 job 之前完成，任一条不满足即整批拒绝运行，不产生模型与浏览器费用。用 `gherkai plan` 提前验。
 
 一批 `.feature` 里的 scenario 先按 `@scope` 归成 job，job 才是调度与执行的单位：
 
-![一批 .feature 里的 scenario 按 @scope 归成 job，job 再按并发上限决定同时开跑还是排队](../diagrams/writing-features-scenario-to-job.svg)
+![一批 .feature 里的 scenario 按 @scope 归成 job，job 再按并发上限决定同时运行还是排队](../diagrams/writing-features-scenario-to-job.svg)
 
-图注：job 编号在图上只写出形状，准确形状见上面的规则；两个 `.feature` 文件用同一个 scope 名，也会并进同一个 job。并发上限就是 `--max-concurrency`：上限内的 job 同时开跑，超出上限的排队等空位、有位子空出来再开跑，它的取值与写法见 [`running-and-results.md`](./running-and-results.md)。
+图注：job 编号在图上只写出形状，准确形状见上面的规则；两个 `.feature` 文件用同一个 scope 名，也会并进同一个 job。并发上限就是 `--max-concurrency`：上限内的 job 同时运行，超出上限的排队等空位、有位子空出来再运行，它的取值与写法见 [`running-and-results.md`](./running-and-results.md)。
 
-**scope 与并发**：并发只发生在 job 之间，所以互不相干的用例分到不同 scope，是并发执行的前提。并发上限默认是一个 job，即默认全部 job 依次跑；分好 scope 之后还要显式调高 `--max-concurrency` 才真的并发。用 `submit` 提交到云端后端时，并发还受部署侧设定的上限约束。
+**scope 与并发**：并发只发生在 job 之间，所以互不相干的用例分到不同 scope，是并发执行的前提。并发上限默认是一个 job，即默认全部 job 依次运行；分好 scope 之后还要显式调高 `--max-concurrency` 才真的并发。用 `submit` 提交到云端后端时，并发还受部署侧设定的上限约束。
 
 下面这段出自 [`features/concurrency_and_scope.feature`](../../features/concurrency_and_scope.feature)，第二条不重新导航，直接接着第一条的页面继续：
 
@@ -126,7 +126,7 @@ Scenario: 仍停留在 OpenAI 词条页
 | 写法 | 支持 | 说明 |
 |---|---|---|
 | `Feature` / `Scenario` | 支持 | |
-| `Background` | 支持 | 展开进同一 feature 下每条 scenario 的最前面。步号从 Background 的第一步 0 起数，scenario 里书写的步跟着后移。同一个 scope 里每条 scenario 都各自重跑一遍 Background，所以不要把导航放进 Background 又指望后一条接着前一条的页面状态 |
+| `Background` | 支持 | 展开进同一 feature 下每条 scenario 的最前面。步号从 Background 的第一步 0 起数，scenario 里书写的步跟着后移。同一个 scope 里每条 scenario 都各自重新运行一遍 Background，所以不要把导航放进 Background 又指望后一条接着前一条的页面状态 |
 | `Scenario Outline` + `Examples` | 支持 | 每行数据展开成一条独立 scenario、占位符已代入，标题末尾带一段 `[@<数据行行号>]` 以便区分。未标 `@scope` 时各自成为一个 job，编号比普通 scenario 多一段数据行行号 |
 | `Rule` | 支持 | 其下的 scenario 照常展开 |
 | DataTable | 支持 | 挂在 AI step 上，还原成表格文本接在该步文本后面，一起交给模型 |
@@ -145,9 +145,9 @@ Scenario: 仍停留在 OpenAI 词条页
 | 被测 UI 语言 | 英文 UI。非英文页面上能导航、能判页面级语义，但「正文里是否出现某个中文词」这类断言会系统性判否（同一页面上判断是否出现英文词仍然可靠） | 不限，中文 UI 上的动作与 AI 断言同样可靠 |
 | 确定性 step 语言 | Python（`steps/*.py`） | TypeScript / JavaScript（`steps/*.mts`、`steps/*.mjs`） |
 
-被测 UI 不是英文时有三条出路，按对用例的改动量从小到大：给 scenario 标 `@engine:midscene`（或整批用 `--default-engine midscene`），前提是要跑的环境里装了这个引擎的 worker；把断言改写成页面级语义陈述；把文本与结构检查改成确定性 step——改动最大，但这些 step 之后不再产生模型费用。
+被测 UI 不是英文时有三条出路，按对用例的改动量从小到大：给 scenario 标 `@engine:midscene`（或整批用 `--default-engine midscene`），前提是运行用例的环境里装了这个引擎的 worker；把断言改写成页面级语义陈述；把文本与结构检查改成确定性 step——改动最大，但这些 step 之后不再产生模型费用。
 
-同一份 `.feature` 要在两个引擎上跑时，用到的每条确定性 step 都要在两侧成对注册，否则在缺失的那一侧这一步会换回 AI 判定。见 [`writing-deterministic-steps.md`](./writing-deterministic-steps.md)。
+同一份 `.feature` 要在两个引擎上运行时，用到的每条确定性 step 都要在两侧成对注册，否则在缺失的那一侧这一步会换回 AI 判定。见 [`writing-deterministic-steps.md`](./writing-deterministic-steps.md)。
 
 中文 UI 的写法见 [`features/wikipedia_zh.feature`](../../features/wikipedia_zh.feature)：
 
@@ -172,6 +172,6 @@ Scenario: Midscene 在中文 UI 上搜索并断言
 
 ## 写完先自检
 
-写完先跑 `gherkai plan features/*.feature`。它不启动浏览器、不调用模型、不产生费用，会暴露 tag 值缺失与冲突、`@scope` 撞编号、语法错误，并逐步标出这一步走确定性 step 还是走 AI。
+写完先运行 `gherkai plan features/*.feature`。它不启动浏览器、不调用模型、不产生费用，会暴露 tag 值缺失与冲突、`@scope` 撞编号、语法错误，并逐步标出这一步走确定性 step 还是走 AI。
 
 确定性 step 的清单查法与命中标注的读法见 [`writing-deterministic-steps.md`](./writing-deterministic-steps.md)，`plan` 的完整选项见 [`running-and-results.md`](./running-and-results.md)。

@@ -6,17 +6,17 @@
 
 | 角色 | 装法 | 得到 |
 |---|---|---|
-| 只提交云端 run（不在本机跑） | `uv tool install gherkai` | 只要 CLI 本体，两个 worker 都不用装（worker 跑在云端）；代价是 `plan` 会打「标注降级」 |
-| 本机跑 Nova Act（推荐起点） | `uv tool install 'gherkai[local]'` | CLI 与 Nova worker 在同一环境 |
-| 本机跑 Midscene | `uv tool install gherkai` + `npm i -g @gherkai/worker-midscene`（Node ≥ 22） | CLI + Midscene worker |
-| 本机两引擎都跑 | `uv tool install 'gherkai[local]'` + `npm i -g @gherkai/worker-midscene`（Node ≥ 22） | CLI + 两个 worker |
+| 只提交云端 run（不在本机运行） | `uv tool install gherkai` | 只要 CLI 本体，两个 worker 都不用装（worker 运行在云端）；代价是 `plan` 会打「标注降级」 |
+| 本机运行 Nova Act（推荐起点） | `uv tool install 'gherkai[local]'` | CLI 与 Nova worker 在同一环境 |
+| 本机运行 Midscene | `uv tool install gherkai` + `npm i -g @gherkai/worker-midscene`（Node ≥ 22） | CLI + Midscene worker |
+| 本机运行两个引擎 | `uv tool install 'gherkai[local]'` + `npm i -g @gherkai/worker-midscene`（Node ≥ 22） | CLI + 两个 worker |
 | 部署方 | `uv tool install 'gherkai[deploy-aws]'`（另需 Node ≥ 22、docker） | 多出 `gherkai deploy` / `gherkai destroy` |
 
 升级：`uv tool upgrade gherkai`（安装时带的 extras 沿用）；Midscene worker 另 `npm i -g @gherkai/worker-midscene@<CLI 版本>`。worker 与 CLI 版本同号锁定。
 
 ## 2 CLI 怎么找 worker
 
-- **Nova Act**：① 环境变量 `GHERKAI_WORKER_NOVAACT_CMD`（+ 可选 `GHERKAI_WORKER_NOVAACT_CWD`）显式指定 → ② 与 CLI 同一个 Python 环境 → ③ PATH 上的 `gherkai-worker-novaact` → ④ 三级都没有、CLI 是正式发行版、机器上有 uvx 时临时拉起同版本 worker。四级都没命中：local 档的 `run` / `submit` 与 `list-deterministic` 退 2 并打印装法（`submit` 也在提交前就拒）；`--backend cloud` 的 `run` / `submit` 不看本机 worker（它跑在云端容器里）；`plan` 不拦，只少了那个引擎的派发标注。
+- **Nova Act**：① 环境变量 `GHERKAI_WORKER_NOVAACT_CMD`（+ 可选 `GHERKAI_WORKER_NOVAACT_CWD`）显式指定 → ② 与 CLI 同一个 Python 环境 → ③ PATH 上的 `gherkai-worker-novaact` → ④ 三级都没有、CLI 是正式发行版、机器上有 uvx 时临时拉起同版本 worker。四级都没命中：local 档的 `run` / `submit` 与 `list-deterministic` 退 2 并打印装法（`submit` 也在提交前就拒）；`--backend cloud` 的 `run` / `submit` 不看本机 worker（它运行在云端容器里）；`plan` 不拦，只少了那个引擎的派发标注。
 - **Midscene**：PATH 上的 `gherkai-worker-midscene`（`npm i -g` 的结果），或环境变量 `GHERKAI_WORKER_MIDSCENE_CMD`（+ 可选 `GHERKAI_WORKER_MIDSCENE_CWD`）显式覆写。**必须真装**，没有临时拉起的兜底。
 
 `gherkai list-engines` 打出每个引擎的探测结果与来源，缺的那个原地给安装命令；`--json` 机读（`engine` / `available` / `cmd` / `cwd` / `source` / `hint`）。
@@ -47,7 +47,7 @@
 
 要两样，缺哪样都是 `run` / `submit --expose-local` 在起隧道时失败，且 `doctor` 两样都不查（它不碰隧道）：
 
-- **ngrok 可执行文件**装好且在 PATH 上（`ngrok version` 能跑；下载 https://ngrok.com/download ）。没装的报错点名找不到 ngrok 可执行文件。
+- **ngrok 可执行文件**装好且在 PATH 上（`ngrok version` 能正常执行；下载 https://ngrok.com/download ）。没装的报错点名找不到 ngrok 可执行文件。
 - **ngrok 账号的 authtoken**（免费账号即够）：`ngrok config add-authtoken <token>` 写进 ngrok 自己的配置文件，或环境变量 `NGROK_AUTHTOKEN`，任一处即可。排障别只看环境变量在不在——配置文件里配过就够。
 
 隧道由本机进程持有：`run` 是 CLI 进程，`submit` 是后台进程，本机须保持开机联网到 run 终态。

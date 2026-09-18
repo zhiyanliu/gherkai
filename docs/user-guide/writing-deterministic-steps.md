@@ -135,9 +135,9 @@ handler 只拿到上下文与具名组。挂在这一步上的 DataTable / DocSt
 
 ## 两侧对称地写
 
-同一份 `.feature` 要能在两个引擎上跑，所以每条确定性 step 都在两侧各注册一份：正则语义相同、`description` 与 `example` 文字相同，只有语言方言不同。
+同一份 `.feature` 要能在两个引擎上运行，所以每条确定性 step 都在两侧各注册一份：正则语义相同、`description` 与 `example` 文字相同，只有语言方言不同。
 
-只写一侧时，另一个引擎上这一步会改由 AI 判定，跑前检查不会提示你（它只检查本次用到的引擎）。核对方法是两个引擎各查一遍清单，再用 `gherkai plan` 看标注。
+只写一侧时，另一个引擎上这一步会改由 AI 判定，运行前检查不会提示你（它只检查本次用到的引擎）。核对方法是两个引擎各查一遍清单，再用 `gherkai plan` 看标注。
 
 ## 在本机核对
 
@@ -166,17 +166,17 @@ gherkai doctor --steps-dir ./steps                                 # 目录与�
 | 启动即报错并点名某条模式 | 注册时缺 `description` 或 `example` | 补齐两个字段 |
 | Midscene 报某个文件一条确定性 step 都没注册 | 该文件没在顶层调用 `deterministic(...)`，或按文件路径导入了另一处安装的同名包 | 确认顶层有注册调用，且导入写的是包名 `@gherkai/worker-midscene` |
 | 命令退 2，说 `--steps-dir` 或 `GHERKAI_STEPS_DIR` 指的目录不存在 | 路径写错或目录被移走 | 改成正确路径 |
-| `list-deterministic`、`plan` 或跑前检查退 2，只有一句解析错误、没点名文件 | worker 与命令行工具版本不一致 | 把两侧装成同版本后重试 |
+| `list-deterministic`、`plan` 或运行前检查退 2，只有一句解析错误、没点名文件 | worker 与命令行工具版本不一致 | 把两侧装成同版本后重试 |
 | 写了 `steps/` 却全部走 AI，或少了几条 | 目录没被读到；Midscene 侧文件用了 `.mts` / `.mjs` 以外的扩展名（被跳过，不报错）；或正则与 step 文本不匹配 | 确认 `--steps-dir` 指对，扩展名改成 `.mts` 或 `.mjs`，再用 `list-deterministic` 核对清单条数，对照 `example` 改 step 文本 |
 
 更多症状与处置见 [`troubleshooting.md`](./troubleshooting.md)。
 
 ## 带到云端
 
-`--backend cloud` 时 worker 跑在云端容器里，读不到本机的 `steps/`：显式给了 `--steps-dir` 会打一句提示，用 `GHERKAI_STEPS_DIR` 或默认 `./steps` 时没有提示，本机目录一律不生效。云端要用的确定性 step 需要构建成一个 worker 镜像 variant（在基底镜像上复制 `steps/`），由部署方推送后用 `--worker-variant` 选用。构建、推送与默认指针见 [`cloud-backend.md`](./cloud-backend.md)。
+`--backend cloud` 时 worker 运行在云端容器里，读不到本机的 `steps/`：显式给了 `--steps-dir` 会打一句提示，用 `GHERKAI_STEPS_DIR` 或默认 `./steps` 时没有提示，本机目录一律不生效。云端要用的确定性 step 需要构建成一个 worker 镜像 variant（在基底镜像上复制 `steps/`），由部署方推送后用 `--worker-variant` 选用。构建、推送与默认指针见 [`cloud-backend.md`](./cloud-backend.md)。
 
 因此改完 `steps/` 之后必须重新构建并推送镜像，云端才会用上新版本：提交时不比对镜像里 step 的新旧，新写的 step 在云端会改由 AI 判定，改过的 step 仍按镜像里的旧版本执行。
 
 ## 更多
 
-想了解这套机制内部如何运转（同一张注册表怎么同时喂清单、`plan` 标注与真跑，本机与云端为什么是两个真值源），见 [`../internals/deterministic-step-lifecycle.md`](../internals/deterministic-step-lifecycle.md)。`--steps-dir` 之外的选项与环境变量见 [`configuration.md`](./configuration.md)。
+想了解这套机制内部如何运转（同一张注册表怎么同时喂清单、`plan` 标注与实际运行，本机与云端为什么是两个真值源），见 [`../internals/deterministic-step-lifecycle.md`](../internals/deterministic-step-lifecycle.md)。`--steps-dir` 之外的选项与环境变量见 [`configuration.md`](./configuration.md)。

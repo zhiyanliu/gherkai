@@ -59,7 +59,7 @@
     {
       "id": "sh",
       "type": "external",
-      "label": "跑命令的 shell",
+      "label": "运行命令的 shell",
       "sublabel": "由 export 设置",
       "stage": 0,
       "row": 0
@@ -211,7 +211,7 @@
       "dot": "cyan",
       "title": "生效位置",
       "items": [
-        "本机后端：在跑命令的 shell 里 export",
+        "本机后端：在运行命令的 shell 里 export",
         "云端后端：写进 worker 镜像 variant 后推送",
         "选项与环境变量同时给出：选项优先"
       ]

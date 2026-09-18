@@ -1,11 +1,11 @@
 # gherkai 用户指南
 
-给使用 gherkai 的人和替你操作它的 AI agent。这里讲**怎么用**：安装、写用例、跑、看结果、部署云端后端、配置、排错与常见问题。每个主题只在一篇里展开，其余页面只给链接。想了解内部机理请看 [`docs/internals/`](../internals/README.md)；仓库首页 [`README.md`](../../README.md) 是 30 秒版。
+给使用 gherkai 的人和替你操作它的 AI agent。这里讲**怎么用**：安装、写用例、运行、看结果、部署云端后端、配置、排错与常见问题。每个主题只在一篇里展开，其余页面只给链接。想了解内部机理请看 [`docs/internals/`](../internals/README.md)；仓库首页 [`README.md`](../../README.md) 是 30 秒版。
 
 | 页 | 回答什么问题 | 这一篇负责的主题（其余页只给链接、不展开） |
 |---|---|---|
-| [`getting-started.md`](./getting-started.md) | 装什么、要哪些 AWS 前置、第一次怎么跑通 | 安装形态（CLI、两个引擎 worker、部署 extra）、AWS 凭证与 region、需开通的服务、`doctor` 预检、用 AI agent 上手、手敲 CLI 的最小四步 |
-| [`writing-features.md`](./writing-features.md) | `.feature` 怎么写才跑得稳 | 最小 `.feature` 骨架与 Gherkin 支持范围（含中文关键字）、AI 步与确定性步的分工、断言怎么写、`@engine` / `@scope` / `@timeout` 标签、双引号地址直接导航的内建行为、按引擎选写法（含非英文 UI）、投票 |
+| [`getting-started.md`](./getting-started.md) | 装什么、要哪些 AWS 前置、第一次怎么完整运行 | 安装形态（CLI、两个引擎 worker、部署 extra）、AWS 凭证与 region、需开通的服务、`doctor` 预检、用 AI agent 上手、手敲 CLI 的最小四步 |
+| [`writing-features.md`](./writing-features.md) | `.feature` 怎么写才能稳定运行 | 最小 `.feature` 骨架与 Gherkin 支持范围（含中文关键字）、AI 步与确定性步的分工、断言怎么写、`@engine` / `@scope` / `@timeout` 标签、双引号地址直接导航的内建行为、按引擎选写法（含非英文 UI）、投票 |
 | [`writing-deterministic-steps.md`](./writing-deterministic-steps.md) | 精确判定的步骤怎么自己写 | `steps/` 目录约定、Python 与 TypeScript 两侧并排的注册 API、`description` / `example` 的作用、加载失败怎么表现、如何核对与带到云端 |
 | [`running-and-results.md`](./running-and-results.md) | 四种跑法怎么选、结果在哪、退出码什么意思 | `plan` / `run` / `submit` / `status` / `explain` 的用法与差别、本机与云端两档、常用选项、退出码、报告与证据在哪、费用量级、机读输出的入口 |
 | [`local-app-testing.md`](./local-app-testing.md) | 被测应用只在本机或内网时怎么测 | `--expose-local` 的前置、行为、限制与存活时间 |

@@ -1,6 +1,6 @@
 # 测本机或内网里的被测应用
 
-浏览器跑在云端，访问不到 `http://localhost:3000`。本机 local 与云端 cloud 两个后端在这一点上相同：local 只是把 worker 进程放在你的机器上，浏览器始终在云端，所以两个后端测本机应用都要用 `--expose-local`。
+浏览器运行在云端，访问不到 `http://localhost:3000`。本机 local 与云端 cloud 两个后端在这一点上相同：local 只是把 worker 进程放在你的机器上，浏览器始终在云端，所以两个后端测本机应用都要用 `--expose-local`。
 
 本页讲 `--expose-local` 的前置、行为、隧道的持有进程、存活时间上限与限制。四种跑法的选择、结果读法与退出码见 [`running-and-results.md`](./running-and-results.md)；选项与环境变量总表见 [`configuration.md`](./configuration.md)；按症状排障见 [`troubleshooting.md`](./troubleshooting.md)。
 
@@ -12,7 +12,7 @@
 
 图注（隧道拓扑）：浏览器 → 边缘 → 隧道进程 → 被测应用这条实线链是请求方向，响应沿同一路径返回；隧道是本机发起的出站长连，你的机器不开入站端口；命令行到隧道进程那条边只表示起进程。隧道服务商、凭据与请求头的具体形态见下文各节。
 
-`ORIGIN` 是「跑 CLI 的这台机器可达」的任意地址，不限 `localhost`：局域网另一台机器上的应用（如 `http://192.168.1.50:3000`）同样可以，目标机器不需要任何配置。
+`ORIGIN` 是「运行 CLI 的这台机器可达」的任意地址，不限 `localhost`：局域网另一台机器上的应用（如 `http://192.168.1.50:3000`）同样可以，目标机器不需要任何配置。
 
 隧道模式下，云端浏览器发出的请求恒带一个固定请求头 `ngrok-skip-browser-warning: 1`，用于跳过 ngrok 对浏览器返回的警告页（被测应用的访问日志里会看到它）；机读输出里对应 `extra_http_headers` 字段，应用侧不需要为它做任何处理。
 
@@ -20,7 +20,7 @@
 
 两项都要，缺任一项都会在起隧道时失败并退出码 2；`gherkai doctor` 不检查这两项。
 
-1. 安装 ngrok 并让它在 PATH 上（`ngrok version` 能跑）。下载地址：https://ngrok.com/download
+1. 安装 ngrok 并让它在 PATH 上（`ngrok version` 能执行）。下载地址：https://ngrok.com/download
 2. 配置 authtoken（免费账号即够），下面两种方式任选一种：
 
 ```bash
@@ -35,13 +35,13 @@ export NGROK_AUTHTOKEN=<token>       # 或者用环境变量
 feature 里照写原始地址，不要写隧道地址：
 
 ```bash
-# 前台跑：命令结束即拆隧道
+# 前台运行：命令结束即拆隧道
 gherkai run my_app.feature --expose-local http://localhost:3000
 
-# 提交到本机后台跑
+# 提交到本机后台运行
 RUN_ID=$(gherkai submit my_app.feature --expose-local http://localhost:3000)
 
-# 提交到云端后端跑
+# 提交到云端后端运行
 RUN_ID=$(gherkai submit my_app.feature --backend cloud --prefix gherkai- \
   --expose-local http://localhost:3000)
 
@@ -77,7 +77,7 @@ gherkai plan my_app.feature --expose-local http://localhost:3000
 
 - 默认值按这一批任务算：各 job 的墙钟预算之和，再加 900 秒固定余量（云端排队、拉镜像与收尾的时间）。job 预算来自 `@timeout` 标签或 `--default-job-timeout`（默认 300 秒）；把 `--default-job-timeout` 设成 0 或负数（不超时）时，算这个上限仍要给每个 job 记一个预算，按 3600 秒计。
 - `submit` 会把生效的秒数打印出来，不用自己算。
-- 到点**无条件**拆隧道。调小有风险：短于 run 实际耗时时，剩下的 scenario 在被测应用不可达的情况下继续跑，以导航失败告终。
+- 到点**无条件**拆隧道。调小有风险：短于 run 实际耗时时，剩下的 scenario 在被测应用不可达的情况下继续运行，以导航失败告终。
 - 值须为有限正数，否则退出码 2。
 - run 提前到终态时隧道也提前拆，不会等满这个时间。
 
@@ -95,7 +95,7 @@ gherkai plan my_app.feature --expose-local http://localhost:3000
 - 被测应用收到的 `Host` 头是隧道分配的 ngrok 域名，不是 `localhost`——「工作方式」的隧道拓扑图上，浏览器导航的是边缘分配的公网地址。校验 Host 的开发服务器要先放行这个域名（Vite 设 `server.allowedHosts`、Django 加 `ALLOWED_HOSTS`、Rails 放宽 host authorization），否则应用会在框架层拒绝请求。域名每个 run 一换，用通配写法（如 `.ngrok-free.app`）改动最小。
 - 隧道转发 HTTP、HTTPS 与 WebSocket 流量。被测应用自身域下的请求（HTML、脚本、样式、图片、接口）全部经隧道，吞吐与延迟受隧道链路影响，也都计入 ngrok 配额；页面引用的第三方域资源由云端浏览器直接访问，不经隧道（隧道拓扑图上通向第三方域资源的那条虚线）。
 - ngrok 免费层有配额（量级为每月 1 GB 流量与 2 万次请求，以 ngrok 的定价页为准），重度使用可能超出配额，表现为 429 或断流。
-- 隧道断了不会自动重连。受影响的 scenario 以导航失败告终，修好后重跑即可。
+- 隧道断了不会自动重连。受影响的 scenario 以导航失败告终，修好后重新运行即可。
 
 ## 常见故障
 
@@ -103,10 +103,10 @@ ngrok 没装、authtoken 没配这两类报错见[排错](./troubleshooting.md)�
 
 | 症状 | 原因 | 处置 |
 |---|---|---|
-| 隧道起来了，但每个 scenario 都在第一步导航失败 | 选项值与 feature 里书写的地址不一致；或被测应用没在监听该地址 | 跑 `gherkai plan my_app.feature --expose-local <ORIGIN>`，把回显的取值与打印出的 step 文本逐字符对照；再在本机直接访问一次该地址，确认应用在跑 |
-| 页面返回「Host 不被允许」一类的提示或 400，但 `plan` 对照无误、本机直连也正常 | 被测应用只接受自己配置的域名，拒绝了隧道域名 | 在应用的允许域名列表里加上隧道域名（地址见「隧道已建立」那一行），或临时放开该校验后重跑 |
-| run 跑到中途开始，之后每个 scenario 都导航失败 | 隧道已拆：本机关机或断网，或存活时间上限到点 | 保持本机开机联网；批量很大时用 `--tunnel-ttl` 显式给一个更长的值 |
-| 加载变慢、间歇 429 | 碰到免费层的配额或带宽限制 | 减少一次跑的 scenario 数，或升级 ngrok 套餐 |
+| 隧道起来了，但每个 scenario 都在第一步导航失败 | 选项值与 feature 里书写的地址不一致；或被测应用没在监听该地址 | 执行 `gherkai plan my_app.feature --expose-local <ORIGIN>`，把回显的取值与打印出的 step 文本逐字符对照；再在本机直接访问一次该地址，确认应用正在运行 |
+| 页面返回「Host 不被允许」一类的提示或 400，但 `plan` 对照无误、本机直连也正常 | 被测应用只接受自己配置的域名，拒绝了隧道域名 | 在应用的允许域名列表里加上隧道域名（地址见「隧道已建立」那一行），或临时放开该校验后重新运行 |
+| run 执行到中途开始，之后每个 scenario 都导航失败 | 隧道已拆：本机关机或断网，或存活时间上限到点 | 保持本机开机联网；批量很大时用 `--tunnel-ttl` 显式给一个更长的值 |
+| 加载变慢、间歇 429 | 碰到免费层的配额或带宽限制 | 减少单次运行的 scenario 数，或升级 ngrok 套餐 |
 | `submit` 打印「隧道已拆除（本机的被测应用不再对外暴露）」 | 提交过程中出错，接手隧道的后台进程没起来 | 先修同时打出的那条报错，再重新提交。如果上面已经打出提交成功（拿到了 run_id），这一批已经不可用：不要再等它的结果，它要访问的地址已随隧道失效，只会以导航失败告终 |
 
 起隧道失败时，报错只附 ngrok 日志的尾部。完整日志是系统临时目录下的 `gherkai-tunnel-*.log`，每起一次隧道一个文件，按修改时间取最新的那个。

@@ -21,7 +21,7 @@ gherkai destroy --vpc default --prefix gherkai-     # 拆掉后端；数据类�
 
 `destroy` 不删数据类资源：两张 DynamoDB 表、产物桶与镜像仓库都保留，防止误删历史与镜像。它们需要手动清理，用同一前缀重新部署前尤其要注意。
 
-`--vpc` 与 `--prefix` 必给，`--prefix` 须与提交侧 `gherkai run` / `submit` 的 `--prefix` 一致。三档 VPC 取值、某个 account 与 region 第一次要跑的 `gherkai deploy --bootstrap`、用 `gherkai deploy --diff` 预览将要改动哪些资源、以及拆除后的手动清理步骤，见云端后端文档：https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/cloud-backend.md 。
+`--vpc` 与 `--prefix` 必给，`--prefix` 须与提交侧 `gherkai run` / `submit` 的 `--prefix` 一致。三档 VPC 取值、某个 account 与 region 第一次要执行的 `gherkai deploy --bootstrap`、用 `gherkai deploy --diff` 预览将要改动哪些资源、以及拆除后的手动清理步骤，见云端后端文档：https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/cloud-backend.md 。
 
 ## 文档
 

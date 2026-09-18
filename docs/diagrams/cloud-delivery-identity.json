@@ -229,7 +229,7 @@
     {
       "id": "cleanup",
       "type": "security",
-      "label": "回收闸",
+      "label": "清理条件",
       "sublabel": "已退休 + 孤儿",
       "pos": [
         590,

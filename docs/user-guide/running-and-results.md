@@ -1,26 +1,26 @@
-# 跑测试与看结果
+# 运行测试与查看结果
 
-本页讲怎么把 `.feature` 跑起来、结果落在哪、退出码怎么读：四种跑法的选择、`plan` / `run` / `submit` / `status` / `explain` / `list-engines` / `list-deterministic` / `doctor` 的用途与常用选项、报告与证据的位置、费用量级、机读输出与 CI 用法。安装与 AWS 前置见 [`getting-started.md`](./getting-started.md)，`.feature` 的写法见 [`writing-features.md`](./writing-features.md)，`--expose-local` 测本机应用见 [`local-app-testing.md`](./local-app-testing.md)，云端后端的部署与维护见 [`cloud-backend.md`](./cloud-backend.md)，全部选项与环境变量的总表见 [`configuration.md`](./configuration.md)。任一命令的完整选项以 `gherkai <命令> --help` 为准。
+本页讲怎么运行 `.feature`、结果落在哪、退出码怎么读：四种跑法的选择、`plan` / `run` / `submit` / `status` / `explain` / `list-engines` / `list-deterministic` / `doctor` 的用途与常用选项、报告与证据的位置、费用量级、机读输出与 CI 用法。安装与 AWS 前置见 [`getting-started.md`](./getting-started.md)，`.feature` 的写法见 [`writing-features.md`](./writing-features.md)，`--expose-local` 测本机应用见 [`local-app-testing.md`](./local-app-testing.md)，云端后端的部署与维护见 [`cloud-backend.md`](./cloud-backend.md)，全部选项与环境变量的总表见 [`configuration.md`](./configuration.md)。任一命令的完整选项以 `gherkai <命令> --help` 为准。
 
-## 两个独立的选择：怎么跑、跑在哪
+## 两个独立的选择：怎么运行、在哪运行
 
 跑法由两个互不影响的选择组合出来，四种组合都合法。
 
-**怎么跑**
+**怎么运行**
 
 | 跑法 | 命令 | 特点 |
 |---|---|---|
-| 前台 | `gherkai run <feature...>` | CLI 全程在线，跑完直接输出判定与产物位置，退出码就是判定。CLI 进程结束（终端关闭、机器休眠）这一批即停止 |
-| 后台 | `gherkai submit <feature...>` 再 `gherkai status <run_id>` | `submit` 打印一个 `run_id` 后立即退出，后台继续跑；用 `status` 查进度，`status --wait` 等到跑完并拿判定 |
+| 前台 | `gherkai run <feature...>` | CLI 全程在线，运行结束后直接输出判定与产物位置，退出码就是判定。CLI 进程结束（终端关闭、机器休眠）这一批即停止 |
+| 后台 | `gherkai submit <feature...>` 再 `gherkai status <run_id>` | `submit` 打印一个 `run_id` 后立即退出，后台继续执行；用 `status` 查进度，`status --wait` 等到运行结束并拿判定 |
 
-**跑在哪、落在哪**（`--backend`）
+**在哪运行、落在哪**（`--backend`）
 
-| 后端 | worker 跑在 | 结果落在 | 前置 |
+| 后端 | worker 运行在 | 结果落在 | 前置 |
 |---|---|---|---|
 | `local`（默认） | 本机子进程 | `--report-dir` 指的本地目录 | 本机装好要用的引擎 worker，有 AWS 凭证 |
-| `cloud` | Fargate 容器 | 状态与提交记录落 DynamoDB，判定明细与报告落 S3 的产物桶（`<前缀>artifacts`） | 部署方先跑过 `gherkai deploy`，提交时给同一个 `--prefix` |
+| `cloud` | Fargate 容器 | 状态与提交记录落 DynamoDB，判定明细与报告落 S3 的产物桶（`<前缀>artifacts`） | 部署方先执行过 `gherkai deploy`，提交时给同一个 `--prefix` |
 
-`submit --backend local` 在本机起一个脱离 CLI 的后台进程推进，本机要保持开机；`submit --backend cloud` 提交完即可关机，云端自己把这批跑完；只有用 `--expose-local` 时例外——隧道在本机，要保持开机联网到这个 run 结束。
+`submit --backend local` 在本机起一个脱离 CLI 的后台进程推进，本机要保持开机；`submit --backend cloud` 提交完即可关机，云端自己把这批执行完；只有用 `--expose-local` 时例外——隧道在本机，要保持开机联网到这个 run 结束。
 
 四种组合需要的权限不同、费用记到的账户也不同。
 
@@ -41,16 +41,16 @@
 
 ```bash
 gherkai plan features/wikipedia_generic.feature            # 预检：分组、校验、派发标注（零费用）
-gherkai run  features/wikipedia_generic.feature            # 前台跑（产生模型调用与浏览器会话费用）
+gherkai run  features/wikipedia_generic.feature            # 前台运行（产生模型调用与浏览器会话费用）
 RUN_ID=$(gherkai submit features/*.feature --max-concurrency 2)
-gherkai status "$RUN_ID" --wait                            # 等到跑完，按判定给退出码
+gherkai status "$RUN_ID" --wait                            # 等到运行结束，按判定给退出码
 gherkai explain "$RUN_ID"                                  # 有用例没过时看每一步的证据
 ```
 
 | 命令 | 用途 | 常用选项 |
 |---|---|---|
 | `gherkai plan <feature...>` | 预检：打印 scope / job 分组，逐步标注哪些步由确定性 step 执行（行尾给出该 step 的说明），未标注的步交给 AI；同时校验写法与配置。不连云、不产生费用 | `--scope` / `--tags` / `--scenario`、`--default-engine`、`--assertion-votes`、`--default-job-timeout`、`--steps-dir`、`--json` |
-| `gherkai run <feature...>` | 前台跑完这批，输出文本汇总，并把报告、运行元信息、判定明细三处位置输出到标准错误（stderr） | 见下「常用选项」 |
+| `gherkai run <feature...>` | 前台运行完这批，输出文本汇总，并把报告、运行元信息、判定明细三处位置输出到标准错误（stderr） | 见下「常用选项」 |
 | `gherkai submit <feature...>` | 提交这批并立即返回，stdout 只有一个 `run_id` | `--backend`、`--max-concurrency`、`--report-dir`、`--prefix`、`--worker-variant`、`--tunnel-ttl` |
 | `gherkai status <run_id>` | 查这个 run 的进度与结果；到终态时同时输出三处产物位置 | `--wait`、`--backend`、`--report-dir`、`--prefix`、`--max-concurrency`、`--json` |
 | `gherkai explain <run_id> [<scope_id>]` | 看每一步的证据：问了 AI 什么、AI 看见了什么、为什么这么判。用例没过时先运行这个命令 | `--scenario`、`--step`、`--all`、`--full`、`--json` |
@@ -65,25 +65,25 @@ gherkai explain "$RUN_ID"                                  # 有用例没过时�
 
 ## 常用选项（`run` / `submit`）
 
-**只跑一部分**（`plan` 认同一组选项）
+**只运行一部分**（`plan` 认同一组选项）
 
 | 选项 | 说明 |
 |---|---|
-| `--scope ID` | 只跑这些 scope。值 = 报告与 JSON 里的 `scope_id`：`@scope` 的名字，或未标 scope 时的 `<文件>:<行号>`。可重复，任一命中。重跑某个失败的 job 用它最直接 |
-| `--tags TAG[,TAG...]` | 只跑带这些 tag 的 scenario。一个值内用逗号分隔表示任一命中，重复给本选项表示都要命中；`@` 可省。feature 行上的 tag 对其下每个 scenario 生效 |
-| `--scenario SEL` | 只跑这些 scenario。`SEL` = 完整 scenario id、行号（`12` 或 `:12`，纯数字只当行号）、或标题的一段文字（区分大小写）。可重复，任一命中 |
+| `--scope ID` | 只运行这些 scope。值 = 报告与 JSON 里的 `scope_id`：`@scope` 的名字，或未标 scope 时的 `<文件>:<行号>`。可重复，任一命中。重新运行某个失败的 job 用它最直接 |
+| `--tags TAG[,TAG...]` | 只运行带这些 tag 的 scenario。一个值内用逗号分隔表示任一命中，重复给本选项表示都要命中；`@` 可省。feature 行上的 tag 对其下每个 scenario 生效 |
+| `--scenario SEL` | 只运行这些 scenario。`SEL` = 完整 scenario id、行号（`12` 或 `:12`，纯数字只当行号）、或标题的一段文字（区分大小写）。可重复，任一命中 |
 
-三者同给时都要满足。筛掉一部分时命令会打印一行 `已选/总数`；一条都没选中时退 `2` 并列出本批全部候选（id、标题、tags），不会静默跑一个空批。
+三者同给时都要满足。筛掉一部分时命令会打印一行 `已选/总数`；一条都没选中时退 `2` 并列出本批全部候选（id、标题、tags），不会静默执行一个空批。
 
 **执行**
 
 | 选项 | 默认 | 说明 |
 |---|---|---|
 | `--default-engine {midscene,novaact}` | `novaact` | 未标 `@engine` 的 scope 用哪个引擎；标了 tag 的 scope 不受影响 |
-| `--assertion-votes N` | `1` | AI 断言跑 N 次取多数票（如 3 或 5），用于降低判定抖动 |
-| `--max-concurrency N` | `1` | 同时在跑的 worker 上限，须 ≥ 1。`submit --backend cloud` 提交时若超过部署方为单个 run 设的上限，命令会提示并按该上限并行；`run --backend cloud` 由本机命令进程直接调度，不受该上限约束 |
+| `--assertion-votes N` | `1` | AI 断言执行 N 次取多数票（如 3 或 5），用于降低判定抖动 |
+| `--max-concurrency N` | `1` | 同时运行的 worker 上限，须 ≥ 1。`submit --backend cloud` 提交时若超过部署方为单个 run 设的上限，命令会提示并按该上限并行；`run --backend cloud` 由本机命令进程直接调度，不受该上限约束 |
 | `--default-job-timeout S` | `300` | 单个 job 的墙钟预算秒（`<=0` 表示不超时）；用例上标 `@timeout:<秒>` 可逐 scope 覆盖。超预算的 job 被停掉并判 error |
-| `--grace S` | 自动 | 仅 `run --backend local`：中止时留给 worker 关闭云端浏览器会话的秒数，不给则按本批用到的引擎自报的最短宽限推导。值过小会漏关会话、继续计费，命令在开跑前退 `2`。`--backend cloud` 不接受这个选项（给了直接退 `2`），云端的停止宽限在部署时定 |
+| `--grace S` | 自动 | 仅 `run --backend local`：中止时留给 worker 关闭云端浏览器会话的秒数，不给则按本批用到的引擎自报的最短宽限推导。值过小会漏关会话、继续计费，命令在开始执行前退 `2`。`--backend cloud` 不接受这个选项（给了直接退 `2`），云端的停止宽限在部署时定 |
 | `--fail-fast` | 关 | 仅 `run`：任一 job 出错即中止整批 |
 
 单个 job 的网络故障只让那个 job 判 error，其余 job 继续；给了 `--fail-fast` 才会因此中止整批。
@@ -94,9 +94,9 @@ gherkai explain "$RUN_ID"                                  # 有用例没过时�
 |---|---|---|
 | `--report-dir DIR` | `reports` | 报告落点，每次 run 落 `DIR/<run_id>/`。`status` 与 `explain` 查同一个 run 要给同一个值。云端后端下它是后端的报告前缀，与部署侧不一致时 `submit` 在提交前退 `2` 并点名两侧的值 |
 | `--no-report` | 关 | 仅 `run`：报告目录下什么都不落，也不收集引擎自己的报告产物。适合 CI 只看退出码或 JSON |
-| `--quiet` | 关 | 仅 `run`：不输出逐事件进度，仍输出文本汇总。本机跑时 worker 日志改落 `<report-dir>/<run_id>/worker.log`（`--no-report` 时落系统临时目录），只打印一行位置；云端后端下没有本机 worker 日志 |
+| `--quiet` | 关 | 仅 `run`：不输出逐事件进度，仍输出文本汇总。在本机运行时 worker 日志改落 `<report-dir>/<run_id>/worker.log`（`--no-report` 时落系统临时目录），只打印一行位置；云端后端下没有本机 worker 日志 |
 | `--json` | 关 | 仅 `run`：只输出机器可读 JSON，不输出进度与文本汇总 |
-| `--steps-dir DIR` | `./steps` | 项目自己的确定性 step 目录，也可用环境变量 `GHERKAI_STEPS_DIR`。目录里任一文件加载失败即整批拒跑。云端后端下不生效（云端 worker 的 step 构建在镜像里，只警告不拦），写法见 [`writing-deterministic-steps.md`](./writing-deterministic-steps.md) |
+| `--steps-dir DIR` | `./steps` | 项目自己的确定性 step 目录，也可用环境变量 `GHERKAI_STEPS_DIR`。目录里任一文件加载失败即整批拒绝运行。云端后端下不生效（云端 worker 的 step 构建在镜像里，只警告不拦），写法见 [`writing-deterministic-steps.md`](./writing-deterministic-steps.md) |
 | `--expose-local ORIGIN` | — | 把本机可达的被测应用经隧道暴露给云端浏览器，配套的 `--tunnel`（两条命令都有）与 `--tunnel-ttl`（只有 `submit` 有）见 [`local-app-testing.md`](./local-app-testing.md) |
 
 **仅 `--backend cloud`**：`--prefix P`（默认 `gherkai-`，兜底环境变量 `AWS_RESOURCE_PREFIX`）须与部署时一致，统一决定表、桶、集群等资源名；`--worker-variant NAME` 选云端 worker 镜像的 variant，不给则用部署时的默认指针，某个引擎缺这个 variant 直接退 `2`、不回落到默认，见 [`cloud-backend.md`](./cloud-backend.md)。不给 `--subnet` / `--security-group` 时，Fargate 的子网与安全组按部署时写入的参数自动取用，一般不用给。单独覆盖某个资源名的选项见 [`configuration.md`](./configuration.md)。
@@ -107,17 +107,17 @@ gherkai explain "$RUN_ID"                                  # 有用例没过时�
 
 | 命令 | 退出码回答什么 | `0` | `1` | `2` |
 |---|---|---|---|---|
-| `run` | 判定 | 这批全部通过 | 有用例失败或出错；`--backend cloud` 跑到一半时运行记录存储不可达也退这个码 | 开跑前的配置或可达性问题 |
-| `status`（不带 `--wait`） | 查到了吗 | 查到了，含还没跑完 | 读到的终态不是全部通过 | run 不存在、云端不可达、CLI 与后端版本不匹配 |
-| `status --wait` | 判定 | 跑完且全部通过 | 跑完但有用例失败或出错 | 同上，另加后端没部署或 `--prefix` 配错 |
+| `run` | 判定 | 这批全部通过 | 有用例失败或出错；`--backend cloud` 执行到一半时运行记录存储不可达也退这个码 | 开始执行前的配置或可达性问题 |
+| `status`（不带 `--wait`） | 查到了吗 | 查到了，含还没结束的 run | 读到的终态不是全部通过 | run 不存在、云端不可达、CLI 与后端版本不匹配 |
+| `status --wait` | 判定 | 运行结束且全部通过 | 运行结束但有用例失败或出错 | 同上，另加后端没部署或 `--prefix` 配错 |
 | `submit` | 提交成功了吗 | 已提交，`run_id` 已打印 | — | 配置或可达性问题 |
-| `plan` | 这批能跑吗 | 能 | — | 配置错、写法错、`steps/` 里有文件加载失败 |
+| `plan` | 这批能运行吗 | 能 | — | 配置错、写法错、`steps/` 里有文件加载失败 |
 | `explain` | 证据读出来了吗 | 渲染出来了，用例判失败也退 `0`；判定明细还没落地同样退 `0` | — | 参数写错（例如 `--step` 没同时给 `--scenario`）、run 或 scope 查不到、云端读不到 |
 | `doctor` | 必修项都过了吗 | 全过 | — | 任一必修项失败（可选能力缺失只标 `-`，不影响退出码） |
 | `list-deterministic` | 这个引擎有哪些确定性 step | 列出来了 | — | `--steps-dir` 指的不是目录、worker 定位不到、`steps/` 加载失败、该引擎的 worker 自述失败（多为 worker 与 CLI 版本不一致，处置见 [`troubleshooting.md`](./troubleshooting.md)） |
 | `list-engines` | 这台机器的引擎环境什么样 | 恒 `0`（某个引擎没装正是要展示的信息，不算命令失败） | — | — |
 
-分界线在于是否已经开始执行：开跑前的一切（feature 读不到、写法或参数不合法、worker 没装、凭证与资源不对）退 `2`，跑起来之后的结论退 `0` 或 `1`。用 `--json` 时先按退出码分流，再解析 stdout。各判定状态的含义与聚合规则见 [`../internals/verdict-model.md`](../internals/verdict-model.md)。
+分界线在于是否已经开始执行：开始执行前的一切（feature 读不到、写法或参数不合法、worker 没装、凭证与资源不对）退 `2`，开始执行之后的结论退 `0` 或 `1`。用 `--json` 时先按退出码分流，再解析 stdout。各判定状态的含义与聚合规则见 [`../internals/verdict-model.md`](../internals/verdict-model.md)。
 
 ## 结果在哪
 
@@ -129,13 +129,13 @@ reports/<run_id>/
 ├─ manifest.json       机读的产物清单
 ├─ jobs/               每个 job 一份判定明细，文件名由 scope 名派生 —— 判定的权威在这里
 ├─ run_meta.json       这个 run 提交了什么（run_id、并发、每个 job 的用例原文与预算）
-├─ run_state.json      跑到哪了
+├─ run_state.json      运行到哪了
 ├─ nova-trajectories/  Nova Act 引擎的轨迹与会话汇总，以及每步的 AI 证据与截图
 ├─ midscene-run/       Midscene 引擎的报告与截图，以及每步的 AI 证据
-└─ worker.log          仅 `run --quiet` 且在本机跑时
+└─ worker.log          仅 `run --quiet` 且在本机运行时
 ```
 
-`submit --backend local` 还会在同一目录留后台进程日志 `reconcile.log`（后台跑批迟迟不推进时先看它）与事件库 `events.db`；用了 `--expose-local` 时另有隧道记录 `tunnel.json`。判定要读 `jobs/` 下的明细或退出码，别读 `index.html`——那是可以重建的展示视图。纯确定性的用例不产生引擎产物，但每一步的判定与耗时都在判定明细里。
+`submit --backend local` 还会在同一目录留后台进程日志 `reconcile.log`（后台运行迟迟不推进时先看它）与事件库 `events.db`；用了 `--expose-local` 时另有隧道记录 `tunnel.json`。判定要读 `jobs/` 下的明细或退出码，别读 `index.html`——那是可以重建的展示视图。纯确定性的用例不产生引擎产物，但每一步的判定与耗时都在判定明细里。
 
 `--backend cloud` 下没有这棵本地树：提交记录与运行状态在 DynamoDB 的运行记录表里，判定明细与报告在产物桶（`<前缀>artifacts`）的 `<报告前缀>/<run_id>/` 下，相对位置与上面这棵树一一对应；worker 日志在 CloudWatch 日志组 `/<前缀>worker/<引擎>`。
 
@@ -170,9 +170,9 @@ gherkai explain "$RUN_ID" --all --full --json > evidence.json
 
 ## 机读输出
 
-跑与查的命令都有 `--json`：`plan`、`run`、`status`、`explain`、`list-engines`、`list-deterministic`、`doctor`（部署方的 `gherkai deploy list-workers` 也有，见 [`cloud-backend.md`](./cloud-backend.md)）；`submit` 没有这个选项，它的 stdout 本来就只有一个 `run_id`。通则：stdout 只有一个 JSON 文档，进度与诊断一律走 stderr，所以 `gherkai run … --json > result.json` 拿到的是纯净 JSON、进度仍在终端可见。字段名、类型与出现条件见 [`../internals/cli-json-contract.md`](../internals/cli-json-contract.md)。
+运行与查询的命令都有 `--json`：`plan`、`run`、`status`、`explain`、`list-engines`、`list-deterministic`、`doctor`（部署方的 `gherkai deploy list-workers` 也有，见 [`cloud-backend.md`](./cloud-backend.md)）；`submit` 没有这个选项，它的 stdout 本来就只有一个 `run_id`。通则：stdout 只有一个 JSON 文档，进度与诊断一律走 stderr，所以 `gherkai run … --json > result.json` 拿到的是纯净 JSON、进度仍在终端可见。字段名、类型与出现条件见 [`../internals/cli-json-contract.md`](../internals/cli-json-contract.md)。
 
-## 在 CI 里跑
+## 在 CI 里运行
 
 前台一条命令即拿判定码：
 
@@ -180,7 +180,7 @@ gherkai explain "$RUN_ID" --all --full --json > evidence.json
 gherkai run features/*.feature --quiet --max-concurrency 2
 ```
 
-后台跑批把提交与收结果拆开，判定码来自 `status --wait`：
+后台运行把提交与收结果拆开，判定码来自 `status --wait`：
 
 ```bash
 RUN_ID=$(gherkai submit features/*.feature --backend cloud --prefix gherkai-)
@@ -192,4 +192,4 @@ fi
 exit "$rc"
 ```
 
-三条注意：不带 `--wait` 的 `status` 在还没跑完时退 `0`，不能当判定门；`explain` 只渲染证据、也不能当判定门；`submit` 的退出码只说提交成功了。示例 `.feature` 在 [`features/`](../../features/) 目录，可直接用来验证流水线是否接对。
+三条注意：不带 `--wait` 的 `status` 在 run 还没结束时退 `0`，不能当判定门；`explain` 只渲染证据、也不能当判定门；`submit` 的退出码只说提交成功了。示例 `.feature` 在 [`features/`](../../features/) 目录，可直接用来验证流水线是否接对。

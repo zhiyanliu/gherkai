@@ -1,14 +1,14 @@
 # 开始使用
 
-本页回答三个问题：装什么、需要哪些 AWS 前置、第一次怎么跑通。gherkai 把 `.feature` 里的每个 step 交给 AI 引擎，由引擎操作云端浏览器并做出判定；需要精确判定的 step 由确定性 step 代码接管（引擎自带一条判页面地址的，其余由项目自己写，见[编写确定性 step](./writing-deterministic-steps.md)）。各部件的归属见下面的 [AWS 前置](#aws-前置)。本页不讲 `.feature` 的写法（见[编写 .feature](./writing-features.md)）、四种跑法的差别与退出码（见[跑测试与看结果](./running-and-results.md)）、云端后端的部署（见[云端后端](./cloud-backend.md)）、选项与环境变量总表（见[配置](./configuration.md)）、报错处置（见[排错](./troubleshooting.md)）。
+本页回答三个问题：装什么、需要哪些 AWS 前置、第一次怎么完整运行。gherkai 把 `.feature` 里的每个 step 交给 AI 引擎，由引擎操作云端浏览器并做出判定；需要精确判定的 step 由确定性 step 代码接管（引擎自带一条判页面地址的，其余由项目自己写，见[编写确定性 step](./writing-deterministic-steps.md)）。各部件的归属见下面的 [AWS 前置](#aws-前置)。本页不讲 `.feature` 的写法（见[编写 .feature](./writing-features.md)）、四种跑法的差别与退出码（见[运行测试与查看结果](./running-and-results.md)）、云端后端的部署（见[云端后端](./cloud-backend.md)）、选项与环境变量总表（见[配置](./configuration.md)）、报错处置（见[排错](./troubleshooting.md)）。
 
 ## 按角色选安装形态
 
 | 你要做的事 | 角色 | 装什么 | 需要什么凭证 |
 |---|---|---|---|
-| 写 `.feature`、提交、看结果 | feature 作者（QA） | `gherkai`；要在本机跑再加下面两个 worker | 写用例不需要凭证；跑用例需要的凭证按跑法不同，见[跑测试与看结果](./running-and-results.md) |
+| 写 `.feature`、提交、看结果 | feature 作者（QA） | `gherkai`；要在本机运行再加下面两个 worker | 写用例不需要凭证；运行用例需要的凭证按跑法不同，见[运行测试与查看结果](./running-and-results.md) |
 | 写 `steps/` 里的确定性 step、在本机验证、构建定制 worker 镜像 | 测试开发 | `gherkai[local]` + `@gherkai/worker-midscene` + 容器引擎 | 本机 AWS 凭证；不需要云端写权限，镜像交部署方推 |
-| 建立和维护共享的云端后端、推 worker 镜像 | 部署方 | `gherkai[deploy-aws]` + Node ≥ 22 + 容器引擎 | AWS 账号的部署权限（CloudFormation、IAM 建角色与策略并 `PassRole`、ECR、ECS、Lambda、EventBridge、VPC、SSM 等；完整清单见[云端后端](./cloud-backend.md)）；跑用例的凭证同上 |
+| 建立和维护共享的云端后端、推 worker 镜像 | 部署方 | `gherkai[deploy-aws]` + Node ≥ 22 + 容器引擎 | AWS 账号的部署权限（CloudFormation、IAM 建角色与策略并 `PassRole`、ECR、ECS、Lambda、EventBridge、VPC、SSM 等；完整清单见[云端后端](./cloud-backend.md)）；运行用例的凭证同上 |
 | 参与 gherkai 本身的开发 | contributor | 克隆仓库 | 见 [`CONTRIBUTING.md`](../../CONTRIBUTING.md) |
 
 一个人可以同时承担多个角色：本机开发时常常自己写被测应用、自己写确定性 step、自己构建镜像。团队分工时按上表拆开。
@@ -17,18 +17,18 @@
 
 ```bash
 uv tool install gherkai                       # 命令行本体
-uv tool install 'gherkai[local]'              # 本体 + 在本机跑 Nova Act 引擎的 worker
-npm i -g @gherkai/worker-midscene             # 在本机跑 Midscene 引擎的 worker（需 Node ≥ 22）
+uv tool install 'gherkai[local]'              # 本体 + 在本机运行 Nova Act 引擎的 worker
+npm i -g @gherkai/worker-midscene             # 在本机运行 Midscene 引擎的 worker（需 Node ≥ 22）
 uv tool install 'gherkai[deploy-aws]'         # 部署方：gherkai deploy / destroy（另需 Node ≥ 22 与容器引擎）
-uvx gherkai --version                         # 免安装临时跑一次（uvx --from 'gherkai[local]' gherkai run …）
+uvx gherkai --version                         # 免安装临时运行一次（uvx --from 'gherkai[local]' gherkai run …）
 pipx install --python 3.13 --fetch-python missing gherkai   # 不用 uv 时的回落；本项目要 Python ≥ 3.13
 ```
 
 pipx 那一行的 `--python 3.13` 是必要的：pipx 只在请求了某个版本、而本机又没有它时才下载解释器，不指定版本就会用默认解释器，默认解释器低于 3.13 时安装失败。
 
-Nova Act 的 worker 随 `[local]` extra 装进同一个 Python 环境，Midscene 的 worker 是 Node 包、走 npm。只用 `--backend cloud` 提交的人两个都不用装，worker 跑在云端。`gherkai list-engines` 打印本机检测到哪个引擎可用，缺的那个原地给出安装命令。用 pipx 或 uvx 装 extra 时，包名写成 `'gherkai[local]'`。
+Nova Act 的 worker 随 `[local]` extra 装进同一个 Python 环境，Midscene 的 worker 是 Node 包、走 npm。只用 `--backend cloud` 提交的人两个都不用装，worker 运行在云端。`gherkai list-engines` 打印本机检测到哪个引擎可用，缺的那个原地给出安装命令。用 pipx 或 uvx 装 extra 时，包名写成 `'gherkai[local]'`。
 
-升级：`uv tool upgrade gherkai`（安装时带的 extra 会沿用）；Midscene worker 另跑 `npm i -g @gherkai/worker-midscene@<CLI 版本>`。CLI 与 worker 要求同版本，CLI 与已部署的云端后端也要求同版本，不一致时的处置见[排错](./troubleshooting.md)。
+升级：`uv tool upgrade gherkai`（安装时带的 extra 会沿用）；Midscene worker 另外执行 `npm i -g @gherkai/worker-midscene@<CLI 版本>`。CLI 与 worker 要求同版本，CLI 与已部署的云端后端也要求同版本，不一致时的处置见[排错](./troubleshooting.md)。
 
 各发行包的页面：[`gherkai`](https://pypi.org/project/gherkai/)、[`gherkai-worker-novaact`](https://pypi.org/project/gherkai-worker-novaact/)、[`@gherkai/worker-midscene`](https://www.npmjs.com/package/@gherkai/worker-midscene)、[`gherkai-deploy-aws`](https://pypi.org/project/gherkai-deploy-aws/)。
 
@@ -37,7 +37,7 @@ Nova Act 的 worker 随 `[local]` extra 装进同一个 Python 环境，Midscene
 | 组件 | 要求 | 什么时候需要 |
 |---|---|---|
 | Python | ≥ 3.13，配 [uv](https://docs.astral.sh/uv/) | 命令行本体与 Nova Act worker |
-| Node.js | ≥ 22 | 在本机跑 Midscene worker；`gherkai deploy` |
+| Node.js | ≥ 22 | 在本机运行 Midscene worker；`gherkai deploy` |
 | 容器引擎 | docker | `gherkai deploy`（同步官方 worker 基底镜像）；构建与推送定制 worker 镜像 |
 | [ngrok](https://ngrok.com/download) | 可执行文件在 PATH 上 + authtoken（免费账号即可） | 仅用 `--expose-local` 测本机可达的应用时，见[测本机应用](./local-app-testing.md) |
 
@@ -45,10 +45,10 @@ Nova Act 的 worker 随 `[local]` extra 装进同一个 Python 环境，Midscene
 
 ![你的机器与 AWS 账户各持有哪些部件：命令行与本机 worker 在你的机器上，云端 worker、浏览器会话与模型服务在 AWS 账户里，被测应用在两者之外](../diagrams/getting-started-component-ownership.svg)
 
-图注：**本机档** = `--backend local`（默认），**云端档** = `--backend cloud`。图上两档的差别只有一处——worker 在哪跑：云端档跑的是同样两个引擎，对浏览器会话与模型服务做同样的事。图上的「本机 worker」按引擎分开装，Nova Act 与 Midscene 各一份，见上面的[安装](#安装)。账户归属按档不同：本机档用你自己的账户，云端档用部署方建后端的那个账户（可能是团队共用）；跑法、结果落点、权限，以及哪种跑法记到谁的账户，见[跑测试与看结果](./running-and-results.md)。要开通哪些服务、模型在哪个 region 处理见下表。确定性 step 代码不在图上：本机档由 worker 从本机目录加载，云端档来自 worker 镜像，见[编写确定性 step](./writing-deterministic-steps.md)。被测应用不在公网时的隧道拓扑见[测本机应用](./local-app-testing.md)。
+图注：**本机档** = `--backend local`（默认），**云端档** = `--backend cloud`。图上两档的差别只有一处——worker 在哪运行：云端档运行的是同样两个引擎，对浏览器会话与模型服务做同样的事。图上的「本机 worker」按引擎分开装，Nova Act 与 Midscene 各一份，见上面的[安装](#安装)。账户归属按档不同：本机档用你自己的账户，云端档用部署方建后端的那个账户（可能是团队共用）；跑法、结果落点、权限，以及哪种跑法记到谁的账户，见[运行测试与查看结果](./running-and-results.md)。要开通哪些服务、模型在哪个 region 处理见下表。确定性 step 代码不在图上：本机档由 worker 从本机目录加载，云端档来自 worker 镜像，见[编写确定性 step](./writing-deterministic-steps.md)。被测应用不在公网时的隧道拓扑见[测本机应用](./local-app-testing.md)。
 
 - **凭证**走本机 AWS 默认凭证链：profile、环境变量、实例角色都可以，不需要额外的 API key。用 `--profile` 或 `AWS_PROFILE` 指定 profile。
-- **region 必须有出处**，按此顺序解析：`--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > profile 配置里的 region。四处都没有时不会自动补一个 region：命令照常开跑，引擎会在启动时因缺 region 报错，该 scope 判为 error。
+- **region 必须有出处**，按此顺序解析：`--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > profile 配置里的 region。四处都没有时不会自动补一个 region：命令照常开始执行，引擎会在启动时因缺 region 报错，该 scope 判为 error。
 - 当前验证过的 region 是 `us-east-1`。换其它 region 之前，先确认下表三项服务与你要用的模型在该 region 都可用：`gherkai doctor --backend cloud --prefix <前缀>` 报出凭证与 region 的解析结果，模型与服务的可用性在 AWS 控制台确认。
 - 该 region 下的账号需要能用以下服务与模型：
 
@@ -58,8 +58,8 @@ Nova Act 的 worker 随 `[local]` extra 装进同一个 Python 环境，Midscene
 | Nova Act 引擎 | Amazon Nova Act 服务 + 模型 `nova-act-v1.0` | 默认固定该版本，环境变量 `NOVA_MODEL_ID` 可指定其它模型；所需的 workflow definition 首次运行时自动创建 |
 | 两个引擎都要 | AgentCore Browser（`bedrock-agentcore`） | 每个 scope 一个会话 |
 
-- 在本机跑（`--backend local`）同样需要 AWS 凭证：浏览器会话与模型都在云端，本机只跑 worker 进程。纯本地、不需要凭证的命令：`plan`、`list-engines`、`list-deterministic`、`skill install`，不带云端参数的 `doctor`，以及本机后端下只读本地报告目录的 `explain` 与 `status`（`status --wait` 会在本机接着把这个 run 推完，那时需要凭证）。
-- 真跑产生 AWS 费用（模型调用 + 云端浏览器会话），以 AWS 账单为准。费用量级、以及哪种跑法记到谁的账户，见[跑测试与看结果](./running-and-results.md)。
+- 在本机运行（`--backend local`）同样需要 AWS 凭证：浏览器会话与模型都在云端，本机只运行 worker 进程。纯本地、不需要凭证的命令：`plan`、`list-engines`、`list-deterministic`、`skill install`，不带云端参数的 `doctor`，以及本机后端下只读本地报告目录的 `explain` 与 `status`（`status --wait` 会在本机接着把这个 run 推完，那时需要凭证）。
+- 实际运行产生 AWS 费用（模型调用 + 云端浏览器会话），以 AWS 账单为准。费用量级、以及哪种跑法记到谁的账户，见[运行测试与查看结果](./running-and-results.md)。
 - 用 `--backend cloud` 之前，需要有人先用 `gherkai deploy` 把云端后端建好，见[云端后端](./cloud-backend.md)。
 
 ## 用 doctor 预检
@@ -98,7 +98,7 @@ gherkai doctor --backend cloud --prefix gherkai-    # 连带查凭证、region �
 
 ## 上手路径一：交给 AI agent
 
-装好命令行后，把随包发行的 agent skill 装进项目，让 Claude Code、Codex 这类 AI agent 替你写用例、跑、读失败证据、收窄重跑并汇报：
+装好命令行后，把随包发行的 agent skill 装进项目，让 Claude Code、Codex 这类 AI agent 替你写用例、执行用例、读失败证据、收窄后重新运行并汇报：
 
 ```bash
 gherkai skill install                   # 装给 Claude Code：<项目>/.claude/skills/gherkai/
@@ -120,13 +120,13 @@ npx skills add https://github.com/zhiyanliu/gherkai/tree/v<版本>/cli/gherkai_c
 
 装完直接告诉 agent 要测什么，例如：
 
-> 用 gherkai 给结算流程写一条用例：打开 https://shop.example.com ，把一件商品加入购物车，检查购物车里有一件商品。先 plan，再在本机跑一次，没过就把证据给我。
+> 用 gherkai 给结算流程写一条用例：打开 https://shop.example.com ，把一件商品加入购物车，检查购物车里有一件商品。先 plan，再在本机运行一次，没过就把证据给我。
 
-agent 会自己预检、真跑前把这一批的规模报给你、失败时先读证据再收窄重跑。
+agent 会自己预检、实际运行前把这一批的规模报给你、失败时先读证据，再收窄重新运行。
 
 ## 上手路径二：自己敲命令
 
-四步跑通第一条用例。装包上手时手上还没有 `.feature`，先在项目里存一条最小用例，存成 `features/smoke.feature`：
+分四步完整运行第一条用例。装包上手时手上还没有 `.feature`，先在项目里存一条最小用例，存成 `features/smoke.feature`：
 
 ```gherkin
 Feature: 冒烟
@@ -142,7 +142,7 @@ Feature: 冒烟
 # ① 预检：看分组与每步的派发预期，不连云端、不产生费用
 gherkai plan features/smoke.feature
 
-# ② 真跑：产生模型调用与云端浏览器会话费用
+# ② 实际运行：产生模型调用与云端浏览器会话费用
 AWS_REGION=us-east-1 gherkai run features/smoke.feature
 
 # ③ 看结果：报告默认落在 reports/<run_id>/，用浏览器打开其中的 index.html
@@ -163,11 +163,11 @@ gherkai explain <run_id>
       [1] Then "页面包含 Example Domain 字样"
 ```
 
-它给出这一批会开几个 job（每个 job 对应一个云端浏览器会话）、各自用哪个引擎、每一步走确定性 step 还是走 AI。**先 plan 后跑**：`plan` 零费用，能在真跑产生费用之前暴露写法与配置问题。
+它给出这一批会开几个 job（每个 job 对应一个云端浏览器会话）、各自用哪个引擎、每一步走确定性 step 还是走 AI。**先 plan 后执行**：`plan` 零费用，能在实际运行产生费用之前暴露写法与配置问题。
 
-用 `@engine:` tag 指定了引擎的用例，在本机跑要求该引擎的 worker 已安装，否则 `run` 停下并退 `2`。仓库示例里的 `engine_routing.feature` 两个 scenario 分别指定两个引擎，只装了一个引擎时改用未标 `@engine` 的用例，或用 `--scope` 只跑其中一个。
+用 `@engine:` tag 指定了引擎的用例，在本机运行要求该引擎的 worker 已安装，否则 `run` 停下并退 `2`。仓库示例里的 `engine_routing.feature` 两个 scenario 分别指定两个引擎，只装了一个引擎时改用未标 `@engine` 的用例，或用 `--scope` 只运行其中一个。
 
-`run` 结束时打印判定汇总与报告位置，退出码即判定结果。`explain` 只读证据、从不改变判定：它按书写顺序列出每一步，把没过的那一步展开成「问了 AI 什么、AI 看见了什么、为什么这么判、截图在哪」。退出码的含义、`submit` + `status` 的后台跑法、本机与云端两档的差别、报告与证据的完整布局，都在[跑测试与看结果](./running-and-results.md)。
+`run` 结束时打印判定汇总与报告位置，退出码即判定结果。`explain` 只读证据、从不改变判定：它按书写顺序列出每一步，把没过的那一步展开成「问了 AI 什么、AI 看见了什么、为什么这么判、截图在哪」。退出码的含义、`submit` + `status` 的后台跑法、本机与云端两档的差别、报告与证据的完整布局，都在[运行测试与查看结果](./running-and-results.md)。
 
 ## 下一步
 
@@ -175,7 +175,7 @@ gherkai explain <run_id>
 |---|---|
 | 写 `.feature`，选引擎、scope 与超时 | [编写 .feature](./writing-features.md) |
 | 写自己的确定性 step | [编写确定性 step](./writing-deterministic-steps.md) |
-| 选跑法、读退出码、找报告与证据 | [跑测试与看结果](./running-and-results.md) |
+| 选跑法、读退出码、找报告与证据 | [运行测试与查看结果](./running-and-results.md) |
 | 测只在本机或内网可达的应用 | [测本机应用](./local-app-testing.md) |
 | 部署团队共享的云端后端 | [云端后端](./cloud-backend.md) |
 | 查某个选项或环境变量 | [配置](./configuration.md) |

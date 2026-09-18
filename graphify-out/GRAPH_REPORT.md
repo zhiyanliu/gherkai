@@ -1,7 +1,7 @@
 # Graph Report - yaozhou  (2026-09-18)
 
 ## Corpus Check
-- 316 files · ~524,520 words
+- 316 files · ~524,521 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -10,7 +10,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `09c81a53`
+- Built from commit: `3d0aa831`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -314,7 +314,7 @@
 - Step
 - STOP_SESSION_BUDGET_MS
 - _explain_emit
-- 跑测试与看结果
+- 运行测试与查看结果
 - 开始使用
 - ArgumentParser
 - _FakeSink
@@ -587,7 +587,7 @@ Nodes (20): CloudLauncher, Job, CloudLauncher（ADR 0034 cloud 侧）：cloud �
 
 ### Community 53 - "常见问题"
 Cohesion: 0.14
-Nodes (14): AI 做出的判定能当回归门禁吗？同一条用例会不会今天过、明天不过？, 一个 AWS 账号里能同时跑 stage 和 prod 两套后端吗？, 什么时候该从本机跑换成云端后端？, 几十条用例跑一轮大概多久？能同时跑几条？, 同一批用例在本机跑和在云端跑，结果会一样吗？, 和 Playwright、Cucumber 是什么关系？现有用例能迁过来吗？, 它在什么浏览器里跑？能测移动端视口，或换成 Firefox、Safari 吗？, 常见问题 (+6 more)
+Nodes (14): AI 做出的判定能当回归门禁吗？同一条用例会不会今天过、明天不过？, 一个 AWS 账号里能同时运行 stage 和 prod 两套后端吗？, 什么时候该从本机运行换成云端后端？, 几十条用例运行一轮大概多久？能同时执行几条？, 同一批用例在本机和在云端运行，结果会一样吗？, 和 Playwright、Cucumber 是什么关系？现有用例能迁过来吗？, 它在什么浏览器里运行？能测移动端视口，或换成 Firefox、Safari 吗？, 常见问题 (+6 more)
 
 ### Community 54 - "main"
 Cohesion: 0.16
@@ -979,7 +979,7 @@ Nodes (6): argumentText(), buildInstruction(), cleanCell(), ADR-0024, StepArgume
 
 ### Community 153 - "排错"
 Cohesion: 0.15
-Nodes (13): 云端后端, 仍未定位到原因时, 先跑 gherkai doctor, 其它以退出码 2 结束的错误, 凭证与 region, 各行查什么, 安装与版本, 引擎与判定 (+5 more)
+Nodes (13): 云端后端, 仍未定位到原因时, 先运行 gherkai doctor, 其它以退出码 2 结束的错误, 凭证与 region, 各行查什么, 安装与版本, 引擎与判定 (+5 more)
 
 ### Community 154 - "SqliteEventLog"
 Cohesion: 0.09
@@ -1189,9 +1189,9 @@ Nodes (4): local submit：create_run（文件）+ 建 events SQLite + setsid for
 Cohesion: 0.16
 Nodes (14): _cmd_explain(), _explain_cloud(), _explain_emit(), _explain_empty(), _explain_read_evidence(), _explain_scenario_matches(), explain 的 `--scenario` 匹配：id 全等 / 行号 / 标题子串，多个 SEL 之间「或」。 **另起一份、不复用…, 读该 step 的机读证据 → `(evidence | None, evidence_missing | None)`（ADR 0042 决策四）。… (+6 more)
 
-### Community 301 - "跑测试与看结果"
+### Community 301 - "运行测试与查看结果"
 Cohesion: 0.20
-Nodes (10): 两个独立的选择：怎么跑、跑在哪, 命令, 在 CI 里跑, 常用选项（`run` / `submit`）, 机读输出, 看失败原因：`explain`, 结果在哪, 费用量级 (+2 more)
+Nodes (10): 两个独立的选择：怎么运行、在哪运行, 命令, 在 CI 里运行, 常用选项（`run` / `submit`）, 机读输出, 看失败原因：`explain`, 结果在哪, 费用量级 (+2 more)
 
 ### Community 302 - "开始使用"
 Cohesion: 0.22
@@ -1216,7 +1216,7 @@ Nodes (5): ArtifactUploader 组件（from_env / to_report_ref / flush）, snapsh
   docs/adr/0001-scope-limited-to-english-ui.md · relation: references
 
 ## Knowledge Gaps
-- **562 isolated node(s):** `如何参与`, `现状与版本线`, `目录结构`, `开发环境（从 checkout 跑）`, `在有凭证的机器上验证未发布的工作树` (+557 more)
+- **562 isolated node(s):** `变化`, `修复`, `升级须知`, `变化`, `升级须知` (+557 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **97 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
@@ -1228,11 +1228,11 @@ _Questions this graph is uniquely positioned to answer:_
 - **What is the exact relationship between `ADR 0001 范围限定英文 UI` and `gherkai agent SKILL.md`?**
   _Edge tagged AMBIGUOUS (relation: references) - confidence is low._
 - **Why does `gherkai-worker-novaact (README)` connect `@gherkai/worker-midscene (README)` to `Midscene Worker 开发笔记`, `deterministic.py`, `test_user_steps.py`?**
-  _High betweenness centrality (0.159) - this node is a cross-community bridge._
+  _High betweenness centrality (0.197) - this node is a cross-community bridge._
 - **Why does `Nova Act Worker 开发笔记` connect `Midscene Worker 开发笔记` to `runtime 包 contributor 文档`, `CONTRIBUTING.md`, `@gherkai/worker-midscene (README)`?**
-  _High betweenness centrality (0.157) - this node is a cross-community bridge._
+  _High betweenness centrality (0.196) - this node is a cross-community bridge._
 - **Why does `deterministic()` connect `deterministic.py` to `ValueError`, `_run_step`?**
-  _High betweenness centrality (0.152) - this node is a cross-community bridge._
+  _High betweenness centrality (0.173) - this node is a cross-community bridge._
 - **Are the 56 inferred relationships involving `Job` (e.g. with `_explain_job()` and `test_explain_to_dict_drops_unmatched_scopes_and_keeps_job_fact()`) actually correct?**
   _`Job` has 56 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 40 inferred relationships involving `RunState` (e.g. with `_cmd_submit()` and `_explain_run()`) actually correct?**

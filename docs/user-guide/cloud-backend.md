@@ -12,7 +12,7 @@ CLI 与两个引擎 worker 的安装形态、AWS 凭证与 region 的配置见 [
 uv tool install 'gherkai[deploy-aws]'      # 部署包随 CLI 的 extra 一起装，不单独装
 ```
 
-`deploy` 与 `destroy` 两条命令一直列在 `gherkai --help` 里，装上这个 extra 后它们才能真跑；没装时执行会提示先装 `gherkai[deploy-aws]` 并退 `2`。另需：
+`deploy` 与 `destroy` 两条命令一直列在 `gherkai --help` 里，装上这个 extra 后它们才能实际运行；没装时执行会提示先装 `gherkai[deploy-aws]` 并退 `2`。另需：
 
 | 前置 | 说明 |
 |---|---|
@@ -34,7 +34,7 @@ uv tool install 'gherkai[deploy-aws]'      # 部署包随 CLI 的 extra 一起�
 - **网络与 IAM**：按 `--vpc` 档给 worker 的子网与安全组（优先用公有子网加公网 IP 出网，不建 NAT 网关），每个引擎一个最小权限角色，后端的三个 Lambda 各有自己的角色。
 - **SSM 参数**（`/<prefix>backend/*`）：后端版本戳、生效的 VPC 档、每个引擎的 worker 任务定义模板、worker 镜像映射与默认指针、子网与安全组 ID，供 `run` / `submit` 读取。
 
-两条云端跑法的差别都源自「谁拉起 worker 任务」：`submit` 的任务由后端拉起；`run --backend cloud` 的任务由你自己的 CLI 进程拉起并等到跑完。下面的并发上限与[团队成员的最小权限](#团队成员需要的最小云端权限)两档都由这一条决定。
+两条云端跑法的差别都源自「谁拉起 worker 任务」：`submit` 的任务由后端拉起；`run --backend cloud` 的任务由你自己的 CLI 进程拉起并等到运行结束。下面的并发上限与[团队成员的最小权限](#团队成员需要的最小云端权限)两档都由这一条决定。
 
 `submit --backend cloud` 提交的一个 run，并行 job 数 = `min(提交时 --max-concurrency 的值, 部署侧上限 8)`；给的值超过上限时提交命令打印一行提示，并按 8 并行。`run --backend cloud` 的并行度就是 `--max-concurrency`，不受这个上限约束。
 
@@ -46,7 +46,7 @@ gherkai deploy --diff --vpc default --prefix gherkai-                  # 先看�
 gherkai deploy --vpc default --prefix gherkai-                         # 真部署
 ```
 
-增量部署就是重复第三条命令：同一组选项重跑幂等收敛。中断后重跑会接着收敛，中断留下的多余任务定义 revision 由后续部署或 `push-worker` 顺带回收。每次部署前建议先跑一次 `--diff`。
+增量部署就是重复第三条命令：同一组选项重新运行即幂等收敛。中断后再次运行会接着收敛，中断留下的多余任务定义 revision 由后续部署或 `push-worker` 顺带回收。每次部署前建议先执行一次 `--diff`。
 
 `--diff`、`--synth-only DIR`、`--bootstrap` 三者互斥，各自把默认动作换成一个只读或准备动作；都不给就是真部署。`--synth-only DIR` 只把 CloudFormation 模板导出到 `DIR`、不改动账户里的任何资源，适合交给你自己的审批流水线；`--vpc default` 与 `--vpc vpc-<id>` 仍要向账户查一次网络信息，因此这两档也需要可用凭证。
 
@@ -75,7 +75,7 @@ gherkai deploy --vpc default --prefix gherkai-                         # 真部�
 | `--allow-vpc-change` | 放行一次 VPC 档变更或首次登记（仅 `deploy`） |
 | `--require-approval {never,any-change,broadening}` | 透传 CDK 的 IAM 变更审批档（仅 `deploy`；不给则用 CDK 自己的默认值） |
 | `--refresh-context` | 丢弃本机缓存的环境查询结果重新查询；默认复用缓存 |
-| `--stop-timeout N` | worker 容器从收到停止信号到被强制终止的宽限秒数（默认 120）。Fargate 硬上限就是 120，更大的值在命令期即被拒。云端跑时的停止宽限由这个值决定；提交侧的 `--grace` 只对本机跑有效，`--backend cloud` 带了它会直接报错退 `2` |
+| `--stop-timeout N` | worker 容器从收到停止信号到被强制终止的宽限秒数（默认 120）。Fargate 硬上限就是 120，更大的值在命令期即被拒。云端运行时的停止宽限由这个值决定；提交侧的 `--grace` 只对本机运行有效，`--backend cloud` 带了它会直接报错退 `2` |
 | `--container-engine 名` | 用哪个容器引擎（默认 `docker`，也可用 `GHERKAI_CONTAINER_ENGINE`）；当前只支持 `docker`，别的名字退 `2`、不静默回落 |
 | `--provider NAME` | 用哪个部署 provider；装了一个时不必给 |
 | `--region R` / `--profile P` | 与 `run` / `submit` 同名同义 |
@@ -91,7 +91,7 @@ gherkai deploy --vpc default --prefix gherkai-                         # 真部�
 | **variant** | 一套具名的确定性 step 集构建成的定制镜像，落 ECR 标签 `<CLI 版本>-<variant 名>`，对应一个任务定义 revision（镜像按 digest 引用） | 你的 `push-worker` |
 | **默认指针** | 提交时不给 `--worker-variant` 时用哪个 variant（一个部署一个） | `gherkai deploy` 初始化为 `base`；`push-worker --set-default` 改指 |
 
-云端跑哪套确定性 step 由镜像决定，不由提交侧的 `--steps-dir` 决定。怎么写这些 step 见 [`writing-deterministic-steps.md`](./writing-deterministic-steps.md)。
+云端运行哪套确定性 step 由镜像决定，不由提交侧的 `--steps-dir` 决定。怎么写这些 step 见 [`writing-deterministic-steps.md`](./writing-deterministic-steps.md)。
 
 镜像构建不由 gherkai 负责，三行即可：
 
@@ -104,7 +104,7 @@ ENV GHERKAI_STEPS_DIR=/app/steps
 **构建时必须带 `--platform linux/amd64`**：`docker build --platform linux/amd64 -t acme-novaact:login .`。云端 worker 任务固定 X86_64，在 arm 机器上漏掉这个参数会构建出 arm64 镜像，容器要到启动期才报 `exec format error`。`push-worker` 在推送前校验架构，不匹配即退 `2`。
 
 ```bash
-# 推一个本地镜像，注册为某引擎的一个 variant（一次一个引擎，两个引擎跑两次）
+# 推一个本地镜像，注册为某引擎的一个 variant（一次一个引擎，两个引擎分两次执行）
 gherkai deploy push-worker acme-novaact:login --engine novaact --variant login --prefix gherkai-
 gherkai deploy push-worker acme-midscene:login --engine midscene --variant login
 # 顺带把默认指针指过去（该 variant 在另一个引擎还没有时只警告、不阻止）
@@ -113,7 +113,7 @@ gherkai deploy list-workers                    # 当前版本有哪些 variant�
 gherkai submit features/login.feature --backend cloud --worker-variant login   # 提交时选 variant，缺省用默认指针
 ```
 
-- **重推同名 variant 直接放行**，只打印原 digest 到新 digest 的变化。正在跑的 run 手里的 revision 按 digest 指着旧镜像层，不受影响。
+- **重推同名 variant 直接放行**，只打印原 digest 到新 digest 的变化。正在运行的 run 手里的 revision 按 digest 指着旧镜像层，不受影响。
 - **variant 按版本隔离**：标签含 CLI 版本，旧版本的 variant 留在 ECR 作历史、不参与当前版本的解析。升级不重置默认指针。
 - **退休的旧 revision 顺带回收**：`push-worker` 与 `deploy` 末尾各回收一次，退休满 1 小时且没有未结束的 run 引用才真删，否则留到下一次。滞留不影响使用，`list-workers` 看得到。`delete-worker` 尚未提供（执行会退 `2` 并说明），旧版本 variant 的 ECR 标签目前请按需自行清理。
 
@@ -138,9 +138,9 @@ CDK 的资源变更打完之后，命令继续做 worker 镜像的三步，最�
 
 ![升级三步（部署方先升本机、再部署后端，成员最后升并重推自定义 variant）之间的两段降级窗口，以及每段里谁被拒、谁照常](../diagrams/cloud-backend-upgrade-windows.svg)
 
-图注：窗口一里被拦下的只有刚升级的那台部署机——它的提交、查结果与读证据（`explain`）、推镜像与列镜像都过不去；其他成员的 CLI 仍与后端同版本，提交前检查直接放行、不受影响。`deploy` 自己不过这道版本比对，所以第 2 步照跑。窗口二里被拦下的是已升到新版本的提交方——自定义 variant 在新版本下还没有镜像，止于第 3 步重推完成；这段里还没升级的成员，CLI 旧于后端只被打一行提示、不拦，而镜像标签由**提交方本机的 CLI 版本**拼出（对应上面「variant 按版本隔离」），他解析到的仍是自己那一版的镜像。窗口二只出现在默认指针指的是自定义 variant（或提交时显式选了自定义 variant）的情形——指针是 `base` 且不显式指定时，第 2 步已经把新版本的基底镜像备好了。图上只画这两段窗口的起止。
+图注：窗口一里被拦下的只有刚升级的那台部署机——它的提交、查结果与读证据（`explain`）、推镜像与列镜像都过不去；其他成员的 CLI 仍与后端同版本，提交前检查直接放行、不受影响。`deploy` 自己不过这道版本比对，所以第 2 步照常执行。窗口二里被拦下的是已升到新版本的提交方——自定义 variant 在新版本下还没有镜像，止于第 3 步重推完成；这段里还没升级的成员，CLI 旧于后端只被打一行提示、不拦，而镜像标签由**提交方本机的 CLI 版本**拼出（对应上面「variant 按版本隔离」），他解析到的仍是自己那一版的镜像。窗口二只出现在默认指针指的是自定义 variant（或提交时显式选了自定义 variant）的情形——指针是 `base` 且不显式指定时，第 2 步已经把新版本的基底镜像备好了。图上只画这两段窗口的起止。
 
-两段窗口里被拒的命令都退 `2`。窗口一等第 2 步跑完即恢复，不想动本机安装的部署方可以用 `uvx --from 'gherkai[deploy-aws]==X.Y.Z' gherkai deploy` 先把后端升上来；窗口二里可让提交方临时用 `--worker-variant base`。顺序不能倒过来：后端由 CLI 的部署包部署，版本戳的值就是发起该次部署的 CLI 的版本。第 3 步也不能提前到第 2 步之前：镜像标签含 CLI 版本，提前推等于推到一个后端还不识别的版本标签下，`push-worker` 与 `list-workers` 会拒绝并退 `2`。
+两段窗口里被拒的命令都退 `2`。窗口一在第 2 步执行完后即恢复，不想动本机安装的部署方可以用 `uvx --from 'gherkai[deploy-aws]==X.Y.Z' gherkai deploy` 先把后端升上来；窗口二里可让提交方临时用 `--worker-variant base`。顺序不能倒过来：后端由 CLI 的部署包部署，版本戳的值就是发起该次部署的 CLI 的版本。第 3 步也不能提前到第 2 步之前：镜像标签含 CLI 版本，提前推等于推到一个后端还不识别的版本标签下，`push-worker` 与 `list-workers` 会拒绝并退 `2`。
 
 ## 团队成员需要的最小云端权限
 
@@ -172,22 +172,22 @@ worker 镜像映射与默认 variant 指针这两族 SSM 参数也不随 destroy
 
 ## 费用
 
-后端闲置时的成本接近零：不建 NAT 网关，两张表按请求计费，S3 与日志按量。ECR 镜像存储按量计费：仓库不设自动过期，重推同名 variant 会留下旧镜像层，需要时按上面 worker 镜像一节的说明自行清理。费用主要产生在跑 run 时——Fargate 任务按运行时长计费，加上 AI step 调用模型的费用。量级见 [`running-and-results.md`](./running-and-results.md)，实际数字以你账户的 AWS 账单为准。
+后端闲置时的成本接近零：不建 NAT 网关，两张表按请求计费，S3 与日志按量。ECR 镜像存储按量计费：仓库不设自动过期，重推同名 variant 会留下旧镜像层，需要时按上面 worker 镜像一节的说明自行清理。费用主要产生在执行 run 时——Fargate 任务按运行时长计费，加上 AI step 调用模型的费用。量级见 [`running-and-results.md`](./running-and-results.md)，实际数字以你账户的 AWS 账单为准。
 
 ## 退出码与常见错误
 
-`0` 成功；`2` 前置或校验失败，都是你可修的，其中缺 Node、找不到 cdk、容器引擎名不认这几条在动你的账户之前就拦下；`1` CDK 已成功而 worker 镜像步骤失败，账户已被改动，带同一组选项重跑 `gherkai deploy` 幂等收敛；其余是 cdk 命令自己的返回码，原样透传。
+`0` 成功；`2` 前置或校验失败，都是你可修的，其中缺 Node、找不到 cdk、容器引擎名不认这几条在动你的账户之前就拦下；`1` CDK 已成功而 worker 镜像步骤失败，账户已被改动，带同一组选项重新运行 `gherkai deploy` 幂等收敛；其余是 cdk 命令自己的返回码，原样透传。
 
 | 现象 | 处置 |
 |---|---|
-| 找不到 node | 装 Node ≥ 22 后重跑 |
-| 找不到 cdk 也找不到 npx | 装 Node ≥ 22（自带 npx），或 `npm i -g aws-cdk`，再重跑 |
+| 找不到 node | 装 Node ≥ 22 后重新运行 |
+| 找不到 cdk 也找不到 npx | 装 Node ≥ 22（自带 npx），或 `npm i -g aws-cdk`，之后重新运行 |
 | 缺 `--vpc` | 补上三档之一。环境已存在时提示里会给出上次部署用的那一档 |
 | `--vpc` 取值不合法 | 只能是 `default`、`new`、`vpc-<id>` 三种形态 |
 | VPC 档与后端记录不符，或后端没有档记录 | 先 `gherkai deploy --diff`（带同一组选项）核对变更集，确认无误再带 `--allow-vpc-change` 放行一次 |
 | cdk deploy 失败且报错提到 bootstrap | 先 `gherkai deploy --bootstrap`（同 `--profile` / `--region`） |
-| 找不到容器引擎或连不上其守护进程 | 装好 docker 并让守护进程运行。stack 仍会照常部署，随后的基底同步退 `1`，带同一组选项重跑 `gherkai deploy` 幂等收敛 |
+| 找不到容器引擎或连不上其守护进程 | 装好 docker 并让守护进程运行。stack 仍会照常部署，随后的基底同步退 `1`，带同一组选项重新运行 `gherkai deploy` 幂等收敛 |
 | `push-worker` 说架构不对 | 带 `--platform linux/amd64` 重新构建 |
-| 提交时说后端没有默认 variant 指针 | 部署方跑一次 `gherkai deploy` 完成初始化，或提交时用 `--worker-variant` 显式指定 |
+| 提交时说后端没有默认 variant 指针 | 部署方运行一次 `gherkai deploy` 完成初始化，或提交时用 `--worker-variant` 显式指定 |
 
 提交侧遇到的症状（CLI 与后端版本不一致、variant 解析不到、读不到后端版本戳、云端 job 判 `error`）以及更多按症状分类的处置见 [`troubleshooting.md`](./troubleshooting.md)。`gherkai deploy --help` 与 `gherkai deploy push-worker --help` 列出全部选项。
