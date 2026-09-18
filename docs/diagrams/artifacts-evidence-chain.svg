@@ -415,7 +415,7 @@ svg[data-theme="light"] { --bg: #f8fafc; --grid: #e2e8f0; --text: #0f172a; --tex
 svg[data-theme="dark"] { --bg: #020617; --grid: #1e293b; --text: #ffffff; --text-muted: #94a3b8; --text-dim: #475569; --text-faint: #7d8da1; --panel: rgba(15, 23, 42, 0.5); --panel-border: #1e293b; --lane-fill: rgba(15, 23, 42, 0.22); --lane-stroke: #334155; --arrow: #64748b; --arrow-emphasis: #34d399; --mask: #0f172a; --frontend-fill: rgba(8, 51, 68, 0.4); --frontend-stroke: #22d3ee; --backend-fill: rgba(6, 78, 59, 0.4); --backend-stroke: #34d399; --database-fill: rgba(76, 29, 149, 0.4); --database-stroke: #a78bfa; --cloud-fill: rgba(120, 53, 15, 0.3); --cloud-stroke: #fbbf24; --security-fill: rgba(136, 19, 55, 0.4); --security-stroke: #fb7185; --messagebus-fill: rgba(251, 146, 60, 0.3); --messagebus-stroke: #fb923c; --external-fill: rgba(30, 41, 59, 0.5); --external-stroke: #94a3b8; --toolbar-bg: rgba(15, 23, 42, 0.8); --toolbar-border: #334155; --toolbar-text: #e2e8f0; --toolbar-hover: rgba(15, 23, 42, 0.95); --toolbar-menu-bg: #0f172a; }
 rect.c-bg-rect { fill: var(--bg); }
 </style><rect width="100%" height="100%" class="c-bg-rect"/>
-        <title id="archify-diagram-title">证据链：谁产、谁解引用、字节什么时候到</title>
+        <title id="archify-diagram-title">证据链：产出方、解引用范围、字节时序</title>
         <desc id="archify-diagram-description">由 Archify 生成的数据流图。</desc>
         <!-- Definitions -->
         <defs>
@@ -441,26 +441,26 @@ rect.c-bg-rect { fill: var(--bg); }
 
         <!-- Data Stages -->
         <rect data-graph-role="structural-frame" data-composition-frame-kind="stage" data-composition-frame-id="0" x="16" y="46" width="168" height="390" rx="10" class="c-lane" stroke-width="1"/>
-        <text x="100" y="68" class="t-dim" font-size="9" font-weight="600" text-anchor="middle">01 / 产出：判定成立那一刻</text>
+        <text x="100" y="68" class="t-dim" font-size="9" font-weight="600" text-anchor="middle">01 / 产出：判定成立时</text>
 
         <rect data-graph-role="structural-frame" data-composition-frame-kind="stage" data-composition-frame-id="1" x="231" y="46" width="168" height="390" rx="10" class="c-lane" stroke-width="1"/>
-        <text x="315" y="68" class="t-dim" font-size="9" font-weight="600" text-anchor="middle">02 / 落盘：各答一件事</text>
+        <text x="315" y="68" class="t-dim" font-size="9" font-weight="600" text-anchor="middle">02 / 落盘：按职责分类</text>
 
         <rect data-graph-role="structural-frame" data-composition-frame-kind="stage" data-composition-frame-id="2" x="446" y="46" width="168" height="390" rx="10" class="c-lane" stroke-width="1"/>
-        <text x="530" y="68" class="t-dim" font-size="9" font-weight="600" text-anchor="middle">03 / 顺指针取用</text>
+        <text x="530" y="68" class="t-dim" font-size="9" font-weight="600" text-anchor="middle">03 / 按指针取用</text>
 
         <!-- Flow paths -->
-        <path data-edge-from="worker" data-edge-to="native" data-edge-label="引擎 SDK 自己写" data-edge-key="0" data-composition-points="170,264;204.5,264;204.5,157;239,157" d="M 170 264 L 204.5 264 L 204.5 157 L 239 157" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
-        <path data-edge-from="worker" data-edge-to="verdict" data-edge-label="证据指针进判定" data-edge-key="1" data-composition-points="170,271;237,271" d="M 170 271 L 237 271" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path data-edge-from="worker" data-edge-to="native" data-edge-label="引擎 SDK 写出" data-edge-key="0" data-composition-points="170,264;204.5,264;204.5,157;239,157" d="M 170 264 L 204.5 264 L 204.5 157 L 239 157" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="worker" data-edge-to="verdict" data-edge-label="写入证据指针" data-edge-key="1" data-composition-points="170,271;237,271" d="M 170 271 L 237 271" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
         <path data-edge-from="worker" data-edge-to="evidence" data-edge-label="抽取现场落盘" data-edge-key="2" data-composition-points="170,278;205,278;205,385;240,385" d="M 170 278 L 205 278 L 205 385 L 240 385" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        <path data-edge-from="verdict" data-edge-to="explain" data-edge-label="指针从这里取" data-edge-key="3" data-composition-points="393,271;454,271" d="M 393 271 L 454 271" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        <path data-edge-from="evidence" data-edge-to="explain" data-edge-label="只这一份被解析" data-edge-key="4" data-composition-points="390,385;422,385;422,278;454,278" d="M 390 385 L 422 385 L 422 278 L 454 278" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        <path data-edge-from="native" data-edge-to="explain" data-edge-label="只搬链接、不解析" data-edge-key="5" data-composition-points="391,157;422.5,157;422.5,264;454,264" d="M 391 157 L 422.5 157 L 422.5 264 L 454 264" class="a-dashed" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
+        <path data-edge-from="verdict" data-edge-to="explain" data-edge-label="提供证据指针" data-edge-key="3" data-composition-points="393,271;454,271" d="M 393 271 L 454 271" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path data-edge-from="evidence" data-edge-to="explain" data-edge-label="唯一解析对象" data-edge-key="4" data-composition-points="390,385;422,385;422,278;454,278" d="M 390 385 L 422 385 L 422 278 L 454 278" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path data-edge-from="native" data-edge-to="explain" data-edge-label="只传链接、不解析" data-edge-key="5" data-composition-points="391,157;422.5,157;422.5,264;454,264" d="M 391 157 L 422.5 157 L 422.5 264 L 454 264" class="a-dashed" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
         <path data-edge-from="evidence" data-edge-to="shot" data-edge-label="地址确定性算出" data-edge-key="6" data-composition-points="390,385;456,385" d="M 390 385 L 456 385" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
 
         <!-- Nodes -->
-        <g id="node-worker" data-node-id="worker" data-node-label="worker" tabindex="0" role="button" aria-label="聚焦worker，手里还有引擎材料, 01 / 产出：判定成立那一刻" aria-pressed="false" data-node-kind="external" data-node-sublabel="手里还有引擎材料" data-node-tag="产证据的一方" data-node-context="01 / 产出：判定成立那一刻">
-          <title>worker · 手里还有引擎材料 · 01 / 产出：判定成立那一刻 · 产证据的一方</title>
+        <g id="node-worker" data-node-id="worker" data-node-label="worker" tabindex="0" role="button" aria-label="聚焦worker，引擎材料在进程内, 01 / 产出：判定成立时" aria-pressed="false" data-node-kind="external" data-node-sublabel="引擎材料在进程内" data-node-tag="证据产出方" data-node-context="01 / 产出：判定成立时">
+          <title>worker · 引擎材料在进程内 · 01 / 产出：判定成立时 · 证据产出方</title>
           <rect x="30" y="242" width="140" height="58" rx="6" class="c-mask"/>
           <rect x="30" y="242" width="140" height="58" rx="6" class="c-external" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(36 248) scale(0.6875)">
@@ -468,12 +468,12 @@ rect.c-bg-rect { fill: var(--bg); }
             <path d="M8 2.5h5.5V8M13.5 2.5 7.5 8.5"/>
           </g>
           <text data-node-label="" x="100" y="263" class="t-primary" font-size="10" font-weight="600" text-anchor="middle">worker</text>
-          <text x="100" y="279" class="t-muted" font-size="7" text-anchor="middle">手里还有引擎材料</text>
-        <text x="100" y="289" class="t-external" font-size="7" text-anchor="middle">产证据的一方</text>
+          <text x="100" y="279" class="t-muted" font-size="7" text-anchor="middle">引擎材料在进程内</text>
+        <text x="100" y="289" class="t-external" font-size="7" text-anchor="middle">证据产出方</text>
         </g>
 
-        <g id="node-native" data-node-id="native" data-node-label="引擎原生产物" tabindex="0" role="button" aria-label="聚焦引擎原生产物，报告 / 轨迹 / 会话汇总, 02 / 落盘：各答一件事" aria-pressed="false" data-node-kind="database" data-node-sublabel="报告 / 轨迹 / 会话汇总" data-node-tag="引擎自己的格式" data-node-context="02 / 落盘：各答一件事">
-          <title>引擎原生产物 · 报告 / 轨迹 / 会话汇总 · 02 / 落盘：各答一件事 · 引擎自己的格式</title>
+        <g id="node-native" data-node-id="native" data-node-label="引擎原生产物" tabindex="0" role="button" aria-label="聚焦引擎原生产物，报告 / 轨迹 / 会话汇总, 02 / 落盘：按职责分类" aria-pressed="false" data-node-kind="database" data-node-sublabel="报告 / 轨迹 / 会话汇总" data-node-tag="引擎自有格式" data-node-context="02 / 落盘：按职责分类">
+          <title>引擎原生产物 · 报告 / 轨迹 / 会话汇总 · 02 / 落盘：按职责分类 · 引擎自有格式</title>
           <rect x="239" y="128" width="152" height="58" rx="6" class="c-mask"/>
           <rect x="239" y="128" width="152" height="58" rx="6" class="c-database" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(245 134) scale(0.6875)">
@@ -482,11 +482,11 @@ rect.c-bg-rect { fill: var(--bg); }
           </g>
           <text data-node-label="" x="315" y="149" class="t-primary" font-size="10" font-weight="600" text-anchor="middle">引擎原生产物</text>
           <text x="315" y="165" class="t-muted" font-size="7" text-anchor="middle">报告 / 轨迹 / 会话汇总</text>
-        <text x="315" y="175" class="t-database" font-size="7" text-anchor="middle">引擎自己的格式</text>
+        <text x="315" y="175" class="t-database" font-size="7" text-anchor="middle">引擎自有格式</text>
         </g>
 
-        <g id="node-verdict" data-node-id="verdict" data-node-label="判定真值" tabindex="0" role="button" aria-label="聚焦判定真值，每个 job 一份 · 含证据指针, 02 / 落盘：各答一件事" aria-pressed="false" data-node-kind="database" data-node-sublabel="每个 job 一份 · 含证据指针" data-node-tag="唯一权威" data-node-context="02 / 落盘：各答一件事">
-          <title>判定真值 · 每个 job 一份 · 含证据指针 · 02 / 落盘：各答一件事 · 唯一权威</title>
+        <g id="node-verdict" data-node-id="verdict" data-node-label="判定真值" tabindex="0" role="button" aria-label="聚焦判定真值，每个 job 一份 · 含证据指针, 02 / 落盘：按职责分类" aria-pressed="false" data-node-kind="database" data-node-sublabel="每个 job 一份 · 含证据指针" data-node-tag="唯一权威" data-node-context="02 / 落盘：按职责分类">
+          <title>判定真值 · 每个 job 一份 · 含证据指针 · 02 / 落盘：按职责分类 · 唯一权威</title>
           <rect x="237" y="242" width="156" height="58" rx="6" class="c-mask"/>
           <rect x="237" y="242" width="156" height="58" rx="6" class="c-database" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(243 248) scale(0.6875)">
@@ -498,8 +498,8 @@ rect.c-bg-rect { fill: var(--bg); }
         <text x="315" y="289" class="t-database" font-size="7" text-anchor="middle">唯一权威</text>
         </g>
 
-        <g id="node-evidence" data-node-id="evidence" data-node-label="AI 证据明细" tabindex="0" role="button" aria-label="聚焦AI 证据明细，gherkai 自有格式, 02 / 落盘：各答一件事" aria-pressed="false" data-node-kind="database" data-node-sublabel="gherkai 自有格式" data-node-tag="step 级" data-node-context="02 / 落盘：各答一件事">
-          <title>AI 证据明细 · gherkai 自有格式 · 02 / 落盘：各答一件事 · step 级</title>
+        <g id="node-evidence" data-node-id="evidence" data-node-label="AI 证据明细" tabindex="0" role="button" aria-label="聚焦AI 证据明细，gherkai 自有格式, 02 / 落盘：按职责分类" aria-pressed="false" data-node-kind="database" data-node-sublabel="gherkai 自有格式" data-node-tag="step 级" data-node-context="02 / 落盘：按职责分类">
+          <title>AI 证据明细 · gherkai 自有格式 · 02 / 落盘：按职责分类 · step 级</title>
           <rect x="240" y="356" width="150" height="58" rx="6" class="c-mask"/>
           <rect x="240" y="356" width="150" height="58" rx="6" class="c-database" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(246 362) scale(0.6875)">
@@ -511,8 +511,8 @@ rect.c-bg-rect { fill: var(--bg); }
         <text x="315" y="403" class="t-database" font-size="7" text-anchor="middle">step 级</text>
         </g>
 
-        <g id="node-explain" data-node-id="explain" data-node-label="gherkai explain" tabindex="0" role="button" aria-label="聚焦gherkai explain，只解引用自有格式, 03 / 顺指针取用" aria-pressed="false" data-node-kind="frontend" data-node-sublabel="只解引用自有格式" data-node-tag="读证据的入口" data-node-context="03 / 顺指针取用">
-          <title>gherkai explain · 只解引用自有格式 · 03 / 顺指针取用 · 读证据的入口</title>
+        <g id="node-explain" data-node-id="explain" data-node-label="gherkai explain" tabindex="0" role="button" aria-label="聚焦gherkai explain，只解引用自有格式, 03 / 按指针取用" aria-pressed="false" data-node-kind="frontend" data-node-sublabel="只解引用自有格式" data-node-tag="证据读取入口" data-node-context="03 / 按指针取用">
+          <title>gherkai explain · 只解引用自有格式 · 03 / 按指针取用 · 证据读取入口</title>
           <rect x="454" y="242" width="152" height="58" rx="6" class="c-mask"/>
           <rect x="454" y="242" width="152" height="58" rx="6" class="c-frontend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="frontend" class="semantic-sigil s-frontend" transform="translate(460 248) scale(0.6875)">
@@ -523,11 +523,11 @@ rect.c-bg-rect { fill: var(--bg); }
           </g>
           <text data-node-label="" x="530" y="263" class="t-primary" font-size="10" font-weight="600" text-anchor="middle">gherkai explain</text>
           <text x="530" y="279" class="t-muted" font-size="7" text-anchor="middle">只解引用自有格式</text>
-        <text x="530" y="289" class="t-frontend" font-size="7" text-anchor="middle">读证据的入口</text>
+        <text x="530" y="289" class="t-frontend" font-size="7" text-anchor="middle">证据读取入口</text>
         </g>
 
-        <g id="node-shot" data-node-id="shot" data-node-label="截图文件" tabindex="0" role="button" aria-label="聚焦截图文件，file:// 或 s3://, 03 / 顺指针取用" aria-pressed="false" data-node-kind="database" data-node-sublabel="file:// 或 s3://" data-node-tag="地址先写 · 字节后到" data-node-context="03 / 顺指针取用">
-          <title>截图文件 · file:// 或 s3:// · 03 / 顺指针取用 · 地址先写 · 字节后到</title>
+        <g id="node-shot" data-node-id="shot" data-node-label="截图文件" tabindex="0" role="button" aria-label="聚焦截图文件，file:// 或 s3://, 03 / 按指针取用" aria-pressed="false" data-node-kind="database" data-node-sublabel="file:// 或 s3://" data-node-tag="地址先写 · 字节后到" data-node-context="03 / 按指针取用">
+          <title>截图文件 · file:// 或 s3:// · 03 / 按指针取用 · 地址先写 · 字节后到</title>
           <rect x="456" y="356" width="148" height="58" rx="6" class="c-mask"/>
           <rect x="456" y="356" width="148" height="58" rx="6" class="c-database" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(462 362) scale(0.6875)">
@@ -540,32 +540,32 @@ rect.c-bg-rect { fill: var(--bg); }
         </g>
 
         <!-- Flow labels -->
-        <g data-edge-from="worker" data-edge-to="native" data-edge-label="引擎 SDK 自己写" data-edge-key="0">
-          <rect x="161.75" y="189.5" width="85.5" height="27" rx="4" class="c-mask"/>
-          <text x="204.5" y="200.5" class="t-muted" font-size="8" text-anchor="middle">引擎 SDK 自己写</text>
-        <text x="204.5" y="211.5" class="t-dim" font-size="7" text-anchor="middle">格式随版本漂</text>
+        <g data-edge-from="worker" data-edge-to="native" data-edge-label="引擎 SDK 写出" data-edge-key="0">
+          <rect x="164.2" y="189.5" width="80.6" height="27" rx="4" class="c-mask"/>
+          <text x="204.5" y="200.5" class="t-muted" font-size="8" text-anchor="middle">引擎 SDK 写出</text>
+        <text x="204.5" y="211.5" class="t-dim" font-size="7" text-anchor="middle">格式随版本漂移</text>
         </g>
-        <g data-edge-from="worker" data-edge-to="verdict" data-edge-label="证据指针进判定" data-edge-key="1">
+        <g data-edge-from="worker" data-edge-to="verdict" data-edge-label="写入证据指针" data-edge-key="1">
           <rect x="258.3" y="208" width="90.4" height="27" rx="4" class="c-mask"/>
-          <text x="303.5" y="219" class="t-backend" font-size="8" text-anchor="middle">证据指针进判定</text>
+          <text x="303.5" y="219" class="t-backend" font-size="8" text-anchor="middle">写入证据指针</text>
         <text x="303.5" y="230" class="t-dim" font-size="7" text-anchor="middle">随 step 事件落库</text>
         </g>
         <g data-edge-from="worker" data-edge-to="evidence" data-edge-label="抽取现场落盘" data-edge-key="2">
-          <rect x="162.25" y="310.5" width="85.5" height="27" rx="4" class="c-mask"/>
+          <rect x="169.6" y="310.5" width="70.8" height="27" rx="4" class="c-mask"/>
           <text x="205" y="321.5" class="t-backend" font-size="8" text-anchor="middle">抽取现场落盘</text>
-        <text x="205" y="332.5" class="t-dim" font-size="7" text-anchor="middle">step 结束那一刻</text>
+        <text x="205" y="332.5" class="t-dim" font-size="7" text-anchor="middle">step 结束时</text>
         </g>
-        <g data-edge-from="verdict" data-edge-to="explain" data-edge-label="指针从这里取" data-edge-key="3">
+        <g data-edge-from="verdict" data-edge-to="explain" data-edge-label="提供证据指针" data-edge-key="3">
           <rect x="440.1" y="220" width="70.8" height="16" rx="4" class="c-mask"/>
-          <text x="475.5" y="231" class="t-backend" font-size="8" text-anchor="middle">指针从这里取</text>
+          <text x="475.5" y="231" class="t-backend" font-size="8" text-anchor="middle">提供证据指针</text>
         </g>
-        <g data-edge-from="evidence" data-edge-to="explain" data-edge-label="只这一份被解析" data-edge-key="4">
-          <rect x="381.7" y="310.5" width="80.6" height="16" rx="4" class="c-mask"/>
-          <text x="422" y="321.5" class="t-backend" font-size="8" text-anchor="middle">只这一份被解析</text>
+        <g data-edge-from="evidence" data-edge-to="explain" data-edge-label="唯一解析对象" data-edge-key="4">
+          <rect x="386.6" y="310.5" width="70.8" height="16" rx="4" class="c-mask"/>
+          <text x="422" y="321.5" class="t-backend" font-size="8" text-anchor="middle">唯一解析对象</text>
         </g>
-        <g data-edge-from="native" data-edge-to="explain" data-edge-label="只搬链接、不解析" data-edge-key="5">
+        <g data-edge-from="native" data-edge-to="explain" data-edge-label="只传链接、不解析" data-edge-key="5">
           <rect x="377.3" y="189.5" width="90.4" height="27" rx="4" class="c-mask"/>
-          <text x="422.5" y="200.5" class="t-messagebus" font-size="8" text-anchor="middle">只搬链接、不解析</text>
+          <text x="422.5" y="200.5" class="t-messagebus" font-size="8" text-anchor="middle">只传链接、不解析</text>
         <text x="422.5" y="211.5" class="t-dim" font-size="7" text-anchor="middle">指针来自判定真值</text>
         </g>
         <g data-edge-from="evidence" data-edge-to="shot" data-edge-label="地址确定性算出" data-edge-key="6">
@@ -583,16 +583,16 @@ rect.c-bg-rect { fill: var(--bg); }
           </g>
           <g data-legend-semantic-kind="dashed" data-legend-x="215" data-legend-baseline="474" data-legend-width="123">
             <path d="M 215 471 L 249 471" class="a-dashed" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
-            <text x="258" y="474" class="t-muted" font-size="10" font-weight="500">只搬链接、不解析</text>
+            <text x="258" y="474" class="t-muted" font-size="10" font-weight="500">只传链接、不解析</text>
           </g>
           <g data-legend-semantic-kind="database" data-legend-x="360" data-legend-baseline="474" data-legend-width="93">
             <rect x="360" y="466" width="14" height="9" rx="2" class="c-database" stroke-width="1"/>
             <text x="382" y="474" class="t-muted" font-size="10" font-weight="500">落盘的产物</text>
           </g>
-          <g data-legend-semantic-kind="default" data-legend-x="475" data-legend-baseline="474" data-legend-width="167">
+          <g data-legend-semantic-kind="default" data-legend-x="475" data-legend-baseline="474" data-legend-width="148">
             <path d="M 475 471 L 509 471" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
-            <text x="518" y="474" class="t-muted" font-size="10" font-weight="500">引擎自己写的 / 按地址取的</text>
+            <text x="518" y="474" class="t-muted" font-size="10" font-weight="500">引擎写出 / 按地址读取</text>
           </g>
         </g>
       </svg>
-<!-- gherkai:source-sha256=457a6842cbdf821da3b1ff1ea00334bedf42eeed8b5f719b5fd768dd79763258 -->
+<!-- gherkai:source-sha256=bfdedc7d27781236273da76d94f44d18753c1e9d5a00cf7cb01921b576eaa44e -->

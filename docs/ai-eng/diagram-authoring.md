@@ -9,7 +9,7 @@
 3. **作者化 JSON**：读 archify `SKILL.md` 的 fast authoring path，只读匹配类型的 `schemas/<type>.schema.json`、`schemas/common.schema.json` 与一个 `examples/*.<type>.json`；写 `docs/diagrams/<页面短名>-<主题>.json`；`meta.locale: "zh-CN"`、`meta.quality_profile: "showcase"`。
 4. **校验**：`node ~/.agents/skills/archify/bin/archify.mjs validate <type> docs/diagrams/<name>.json --quality showcase --json`，循环到 0 error 0 warning（9 项 artifact 检查全过）。
 5. **构建与目视**：`node tools/build_diagrams.mjs --png docs/diagrams/<name>.json`（deliver 出 HTML → 导出 SVG 与 PNG，SVG 末尾带图源指纹）。用 Read 打开 PNG，按第三节清单逐项过。**迭代时不要用 `--no-deliver`**：它复用旧 HTML，看不到 JSON 改动。看完**删掉 PNG**。
-6. **嵌入**：`![<一句话说明>](../diagrams/<name>.svg)`（根 README 用 `./docs/diagrams/`），图下一行图注交代图外事实与和别图的分工；只有发布到 Pages 的图在图注末尾加交互版链接。被图替代的散文删掉或压成一句，结论句与指针保留（user-guide / README 的读者含 AI agent，它读不了图）。
+6. **嵌入**：markdown 图片语法引用 `../diagrams/<name>.svg`，alt 写一句话说明（根 README 用 `./docs/diagrams/` 路径），图下一行图注交代图外事实与和别图的分工；只有发布到 Pages 的图在图注末尾加交互版链接。被图替代的散文删掉或压成一句，结论句与指针保留（user-guide / README 的读者含 AI agent，它读不了图）。
 7. **交付**：JSON 与 SVG 同 commit；已发布的图连 HTML 一起 `git add`；跑 `cli/tests/test_user_docs.py`（成对、指纹、禁词、无 mermaid、已发布 HTML 与 index 一致）。
 
 ## 二、本项目的图长什么样（内容规则）
@@ -51,6 +51,7 @@
 - **图上文字同守口吻**：节点与图例里的字读者直接看到，隐喻（「烙进」）、口头语一律不用，护栏 `test_user_docs.py` 对图源扫禁词与口头语表。
 - **相对的两个节点之间走直线（workflow v2）**：`straight` 要求两节点之间的净空 ≥ max(28, 标签遮罩宽 + 8)——标签是横在两点之间的，`labelDx` / `labelDy` 挪不掉这条判定；净空不够时缩短标签文字（如「派发一个 job」→「派发 job」）或拉开两节点（`yOffset` 会与别的边的显式 via 起 explicit-pin-conflict，先看哪条边钉了绝对坐标）。`validate --layout-json` 只在校验失败时给 diagnostics、不给几何，拿几何要先让它过校验。
 - **回传边（workflow v2）**：优先用预设 `route: "return-left"`；把目标节点对齐到同一列后预设会因端口被占而失效，此时改为 `fromSide` / `toSide` + `channelX` 钉一条走廊（走廊离任何节点边缘 ≥ 28 单位，否则报 route-preset-conflict）并用 `labelSegment` / `labelDx` 把标签放到竖段旁；`layout/constraint` 的 message 里带具体的 labelDy / labelAt 建议值，直接照抄。**别把回传边留给全自动路由**：它会为躲开走廊绕整张画布的外沿。
+- **改标签文字也会动布局（workflow v2）**：列间距是全图统一值、取自最宽的跨列边标签——缩短那条标签会让列距变窄，连带把别的直线边压到 28 单位下限而报错；改字时保持跨列边标签的宽度不变（等宽替换），或改后重新校验全图。lane 标题带是障碍：从最左列节点底边竖直下落会撞下一 lane 的标题文字（explicit-pin-conflict：lane/phase/group label clearance），自动路由的「先右再下」正是为此绕行。
 - **校验常见告警与含义**：`short-interior-segment`（< 16 单位的中间段，多由端口错位造成，调 row / yOffset 对齐）；`label-route-clearance`（标签离线 < 4 单位）；`unrelated collinear overlap`（共线重叠 > 8 单位）；`routesOverSuggestedBends`（拐点 > 2）；`desktop-readability`（画布太宽导致最小文字投影 < 6px）。
 
 ## 五、返回与记录

@@ -2,7 +2,7 @@
   "schema_version": 2,
   "diagram_type": "workflow",
   "meta": {
-    "title": "两道闸门：云端后台推进为什么不碰前台 run",
+    "title": "两道闸门：云端推进器为何不介入前台 run",
     "locale": "zh-CN",
     "quality_profile": "showcase",
     "legend": {
@@ -18,7 +18,7 @@
           "label": "挡在链外"
         },
         "backend": {
-          "label": "放行后照常做"
+          "label": "放行后的动作"
         }
       }
     }
@@ -26,15 +26,15 @@
   "lanes": [
     {
       "id": "laneKick",
-      "label": "冷启动这一路"
+      "label": "冷启动路径"
     },
     {
       "id": "laneStep",
-      "label": "主推进这一路"
+      "label": "主推进路径"
     },
     {
       "id": "laneExit",
-      "label": "退出观察这一路"
+      "label": "退出观察路径"
     },
     {
       "id": "laneBlocked",
@@ -45,20 +45,20 @@
   "phases": [
     {
       "id": "phSrc",
-      "label": "订阅侧就滤掉",
+      "label": "事件源层过滤",
       "fromCol": 0,
       "toCol": 1
     },
     {
       "id": "phJudge",
-      "label": "进了函数再判：判不过就挡下",
+      "label": "函数内判断：不通过即挡下",
       "fromCol": 2,
       "toCol": 4,
       "variant": "emphasis"
     },
     {
       "id": "phGo",
-      "label": "放行：链照常跑通",
+      "label": "放行：链正常贯通",
       "fromCol": 5,
       "toCol": 5
     }
@@ -97,7 +97,7 @@
       "col": 0,
       "type": "database",
       "label": "新 run 落库",
-      "sublabel": "带后台标记吗",
+      "sublabel": "后台标记过滤",
       "width": 148
     },
     {
@@ -113,8 +113,8 @@
       "lane": "laneStep",
       "col": 2,
       "type": "security",
-      "label": "是后台批次吗",
-      "sublabel": "事件上没有标记",
+      "label": "是否后台批次",
+      "sublabel": "事件不带此标记",
       "width": 152
     },
     {
@@ -122,8 +122,8 @@
       "lane": "laneStep",
       "col": 3,
       "type": "security",
-      "label": "这个 run 收尾了吗",
-      "sublabel": "防的是另一件事",
+      "label": "run 是否已结束",
+      "sublabel": "防范另一件事",
       "width": 176
     },
     {
@@ -131,7 +131,7 @@
       "lane": "laneStep",
       "col": 5,
       "type": "backend",
-      "label": "推进这一步",
+      "label": "推进一步",
       "width": 148
     },
     {
@@ -139,8 +139,8 @@
       "lane": "laneExit",
       "col": 4,
       "type": "security",
-      "label": "退出观察也判一次",
-      "sublabel": "判据同一个标记",
+      "label": "退出观察者判断",
+      "sublabel": "判据为同一标记",
       "width": 176
     },
     {
@@ -148,7 +148,7 @@
       "lane": "laneExit",
       "col": 5,
       "type": "backend",
-      "label": "记下这条退出",
+      "label": "写入退出记录",
       "width": 148
     },
     {
@@ -157,7 +157,7 @@
       "col": 1,
       "type": "external",
       "label": "不被唤醒",
-      "sublabel": "源头就滤掉",
+      "sublabel": "事件源过滤",
       "width": 148
     },
     {
@@ -165,8 +165,8 @@
       "lane": "laneBlocked",
       "col": 2,
       "type": "external",
-      "label": "整体不动作",
-      "sublabel": "只跳这个 run",
+      "label": "不执行推进",
+      "sublabel": "只跳过该 run",
       "width": 152
     },
     {
@@ -175,7 +175,7 @@
       "col": 3,
       "type": "external",
       "label": "不改写结果",
-      "sublabel": "已落定的不再动",
+      "sublabel": "已落定为终态",
       "width": 176
     },
     {
@@ -184,7 +184,7 @@
       "col": 4,
       "type": "external",
       "label": "不写退出记录",
-      "sublabel": "免得混进前台",
+      "sublabel": "避免混入前台",
       "width": 176
     }
   ],
@@ -209,7 +209,7 @@
       "id": "e-detached-settled",
       "from": "judgeDetached",
       "to": "judgeSettled",
-      "label": "是 → 再判一道",
+      "label": "是 → 下一判点",
       "fromSide": "right",
       "toSide": "left",
       "route": "straight",
@@ -232,7 +232,7 @@
       "id": "e-settled-go",
       "from": "judgeSettled",
       "to": "goStep",
-      "label": "还没收尾",
+      "label": "未结束",
       "variant": "emphasis",
       "role": "main"
     },
@@ -240,7 +240,7 @@
       "id": "e-settled-blk",
       "from": "judgeSettled",
       "to": "blkRewrite",
-      "label": "已经收尾",
+      "label": "已结束",
       "fromSide": "bottom",
       "toSide": "top",
       "route": "straight",
@@ -275,27 +275,27 @@
   "cards": [
     {
       "dot": "rose",
-      "title": "不加闸门会怎样",
+      "title": "无闸门时的后果",
       "items": [
-        "前台跑法在云端档也往同两张表里写，云端函数照样被它的记录唤醒",
-        "结果是同一个 scope 被起两个 task：前台在跑，云端又替它起一个"
+        "前台跑法在云端档同样写入这两张表，云端函数会被这些记录唤醒",
+        "结果是同一 scope 启动两个 task：前台已启动一个，云端推进器另启动一个"
       ]
     },
     {
       "dot": "cyan",
-      "title": "两道闸门，同一个判据",
+      "title": "两道闸门，判据同源",
       "items": [
-        "订阅侧那道写在事件源过滤里：只收带后台标记的新 run 落库",
-        "事件与任务停止事件上都没有这个标记，只能进了函数再回头查这个 run",
-        "后一道在装配前就判，被踢起来的冷启动同样要过"
+        "第一道位于事件源过滤：仅接收带后台标记的新 run 落库",
+        "事件批次与任务停止事件均不带此标记，只能进入函数后反查该 run",
+        "第二道在装配前判断，冷启动的各个入口同样经过"
       ]
     },
     {
       "dot": "violet",
-      "title": "另两个判点防的是别的事",
+      "title": "另两个判点防范其他情形",
       "items": [
-        "「收尾了吗」防的是改写已落定的结果",
-        "退出观察那道防的是没有正文的退出记录混进前台 run 的事件流"
+        "「是否已结束」防范的是改写已落定的结果",
+        "退出观察者这道防范的是无正文的退出记录混入前台 run 的事件流"
       ]
     }
   ]

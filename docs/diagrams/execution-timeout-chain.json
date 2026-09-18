@@ -2,7 +2,7 @@
   "schema_version": 1,
   "diagram_type": "sequence",
   "meta": {
-    "title": "云端超时兜底：从闹钟到点到停下 worker",
+    "title": "云端超时处置：从闹钟到点到停止 worker",
     "locale": "zh-CN",
     "quality_profile": "showcase",
     "column_fit": "spread",
@@ -14,16 +14,16 @@
       "mode": "auto",
       "entries": {
         "emphasis": {
-          "label": "到点唤醒"
+          "label": "到点调起"
         },
         "security": {
-          "label": "停它 / 记下退出"
+          "label": "停止 / 退出记录"
         },
         "dashed": {
-          "label": "写入唤醒（被事件串起）"
+          "label": "写入唤醒推进"
         },
         "default": {
-          "label": "起 task 时顺手做的"
+          "label": "起 task 时设置"
         }
       }
     }
@@ -51,7 +51,7 @@
       "id": "xo",
       "type": "security",
       "label": "exit-observer λ",
-      "sublabel": "看见任务停了"
+      "sublabel": "观察任务停止"
     },
     {
       "id": "events",
@@ -70,17 +70,17 @@
     {
       "from": 152,
       "to": 224,
-      "label": "起 task 时定下闹钟"
+      "label": "起 task 时设置闹钟"
     },
     {
       "from": 250,
       "to": 374,
-      "label": "到点：先判一次再停"
+      "label": "到点：复查后停止"
     },
     {
       "from": 400,
       "to": 560,
-      "label": "翻成退出记录后照原链收敛"
+      "label": "写退出记录后按既有链收敛"
     }
   ],
   "messages": [
@@ -89,27 +89,27 @@
       "from": "reconciler",
       "to": "alarm",
       "y": 180,
-      "label": "起 task 时定下这一次闹钟",
+      "label": "起 task 时设置一次性闹钟",
       "variant": "default",
-      "note": "到点 = 起跑那一刻 + 这个 job 的墙钟预算；谁起这个 job 谁定"
+      "note": "到点 = 启动时刻 + 该 job 的墙钟预算；由启动方设置"
     },
     {
       "id": "m-fire",
       "from": "alarm",
       "to": "kicker",
       "y": 270,
-      "label": "到点唤醒，点名这个 job",
+      "label": "到点调起，指定该 job",
       "variant": "emphasis",
-      "note": "一个 job 一个闹钟，触发即自动删——平时在控制台里看不到它"
+      "note": "一个 job 一个闹钟；触发后即自动删除，控制台中通常不可见"
     },
     {
       "id": "m-stop",
       "from": "kicker",
       "to": "worker",
       "y": 326,
-      "label": "仍在跑、且没有退出记录才停它",
+      "label": "仍在运行且无退出记录才停止",
       "variant": "security",
-      "note": "重复到点也安全：先查这个 job 的状态再动手"
+      "note": "重复到点无害：停止前先查该 job 状态"
     },
     {
       "id": "m-stopped",
@@ -124,7 +124,7 @@
       "from": "xo",
       "to": "events",
       "y": 475,
-      "label": "写退出记录，标成超时停的",
+      "label": "写退出记录并标记超时停止",
       "variant": "security"
     },
     {
@@ -132,7 +132,7 @@
       "from": "events",
       "to": "reconciler",
       "y": 530,
-      "label": "写入唤醒推进 → 这个 job 归因成超时失败",
+      "label": "写入唤醒推进 → 该 job 归因为超时失败",
       "variant": "dashed"
     }
   ],
@@ -183,26 +183,26 @@
   "cards": [
     {
       "dot": "orange",
-      "title": "闹钟是短命资源",
+      "title": "闹钟是短生命周期资源",
       "items": [
-        "一个 job 一个：起 task 时定下、到点触发即自动删",
-        "它只负责踢一脚；停不停由被踢的那一方现查状态决定"
+        "一个 job 一个：起 task 时设置，到点触发后即自动删除",
+        "闹钟只负责调起；是否停止由到点处置的一方现查状态决定"
       ]
     },
     {
       "dot": "cyan",
       "title": "本图只画云端这一路",
       "items": [
-        "前台跑法在自己的循环里计时，到点当场停 worker",
-        "本机后台跑批由起这个 job 的进程计时；接手的一方按库里的领取时刻复查是否超预算",
-        "三路同一形态：到点 → 停 worker → 归因成超时失败"
+        "前台跑法在 schedule 循环内计时，到点直接停止 worker",
+        "本机后台跑批由启动该 job 的进程计时；接力者按库里的领取时刻复查是否超预算",
+        "三路同一形态：到点 → 停止 worker → 归因为超时失败"
       ]
     },
     {
       "dot": "violet",
       "title": "双保险",
       "items": [
-        "闹钟没响也不会永远卡着：任何一次推进都会顺手复查有没有超预算的 job"
+        "闹钟未触发也不会永久停滞：任何一次推进都会复查是否存在超预算的 job"
       ]
     }
   ]

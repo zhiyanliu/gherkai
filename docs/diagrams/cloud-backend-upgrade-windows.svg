@@ -415,7 +415,7 @@ svg[data-theme="light"] { --bg: #f8fafc; --grid: #e2e8f0; --text: #0f172a; --tex
 svg[data-theme="dark"] { --bg: #020617; --grid: #1e293b; --text: #ffffff; --text-muted: #94a3b8; --text-dim: #475569; --text-faint: #7d8da1; --panel: rgba(15, 23, 42, 0.5); --panel-border: #1e293b; --lane-fill: rgba(15, 23, 42, 0.22); --lane-stroke: #334155; --arrow: #64748b; --arrow-emphasis: #34d399; --mask: #0f172a; --frontend-fill: rgba(8, 51, 68, 0.4); --frontend-stroke: #22d3ee; --backend-fill: rgba(6, 78, 59, 0.4); --backend-stroke: #34d399; --database-fill: rgba(76, 29, 149, 0.4); --database-stroke: #a78bfa; --cloud-fill: rgba(120, 53, 15, 0.3); --cloud-stroke: #fbbf24; --security-fill: rgba(136, 19, 55, 0.4); --security-stroke: #fb7185; --messagebus-fill: rgba(251, 146, 60, 0.3); --messagebus-stroke: #fb923c; --external-fill: rgba(30, 41, 59, 0.5); --external-stroke: #94a3b8; --toolbar-bg: rgba(15, 23, 42, 0.8); --toolbar-border: #334155; --toolbar-text: #e2e8f0; --toolbar-hover: rgba(15, 23, 42, 0.95); --toolbar-menu-bg: #0f172a; }
 rect.c-bg-rect { fill: var(--bg); }
 </style><rect width="100%" height="100%" class="c-bg-rect"/>
-        <title id="archify-diagram-title">升级的三步与两段降级窗口</title>
+        <title id="archify-diagram-title">升级三步与两段降级窗口</title>
         <desc id="archify-diagram-description">由 Archify 生成的时序图。</desc>
         <!-- Definitions -->
         <defs>
@@ -463,11 +463,11 @@ rect.c-bg-rect { fill: var(--bg); }
         <rect x="610.6666666666667" y="690" width="10" height="22" rx="3" class="c-cloud" stroke-width="1"/>
 
         <!-- Messages -->
-        <g data-edge-from="deployer" data-edge-to="backend" data-edge-label="提交与镜像命令照常" data-edge-key="0">
+        <g data-edge-from="deployer" data-edge-to="backend" data-edge-label="提交与镜像命令放行" data-edge-key="0">
           <path data-composition-edge-from="deployer" data-composition-edge-to="backend" data-composition-points="164,192;379.33333333333337,192" d="M 164 192 L 379.33333333333337 192" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
         <g>
           <rect x="218.86666666666667" y="172" width="105.60000000000001" height="16" rx="3" class="c-mask"/>
-          <text x="271.6666666666667" y="182" class="t-backend" font-size="9" text-anchor="middle">提交与镜像命令照常</text>
+          <text x="271.6666666666667" y="182" class="t-backend" font-size="9" text-anchor="middle">提交与镜像命令放行</text>
         </g>
         <text x="176" y="210" class="t-dim" font-size="7">两侧同版本，提交前检查放行</text>
         </g>
@@ -478,16 +478,16 @@ rect.c-bg-rect { fill: var(--bg); }
           <rect x="218.86666666666667" y="262" width="105.60000000000001" height="16" rx="3" class="c-mask"/>
           <text x="271.6666666666667" y="272" class="t-security" font-size="9" text-anchor="middle">提交与镜像命令被拒</text>
         </g>
-        <text x="176" y="300" class="t-dim" font-size="7">第 1 步只升了本机：CLI 新于后端一律拒绝，没有放行选项</text>
+        <text x="176" y="300" class="t-dim" font-size="7">第 1 步仅升级本机：CLI 新于后端一律拒绝，无放行选项</text>
         </g>
 
-        <g data-edge-from="member" data-edge-to="backend" data-edge-label="提交照常" data-edge-key="2">
+        <g data-edge-from="member" data-edge-to="backend" data-edge-label="提交放行" data-edge-key="2">
           <path data-composition-edge-from="member" data-composition-edge-to="backend" data-composition-points="838,328;393.33333333333337,328" d="M 838 328 L 393.33333333333337 328" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
         <g>
           <rect x="588.8666666666668" y="308" width="53.6" height="16" rx="3" class="c-mask"/>
-          <text x="615.6666666666667" y="318" class="t-backend" font-size="9" text-anchor="middle">提交照常</text>
+          <text x="615.6666666666667" y="318" class="t-backend" font-size="9" text-anchor="middle">提交放行</text>
         </g>
-        <text x="405.33333333333337" y="346" class="t-dim" font-size="7">这台还没升级，仍与后端同版本</text>
+        <text x="405.33333333333337" y="346" class="t-dim" font-size="7">该成员未升级，仍与后端同版本</text>
         </g>
 
         <g data-edge-from="deployer" data-edge-to="backend" data-edge-label="第 2 步：部署后端" data-edge-key="3">
@@ -496,7 +496,7 @@ rect.c-bg-rect { fill: var(--bg); }
           <rect x="221.4666666666667" y="382" width="100.4" height="16" rx="3" class="c-mask"/>
           <text x="271.6666666666667" y="392" class="t-backend" font-size="9" text-anchor="middle">第 2 步：部署后端</text>
         </g>
-        <text x="176" y="420" class="t-dim" font-size="7">写入新的版本戳；部署本身不做这道比对，窗口一里照跑</text>
+        <text x="176" y="420" class="t-dim" font-size="7">写入新版本戳；部署自身不做版本比对，窗口一内可执行</text>
         </g>
 
         <g data-edge-from="deployer" data-edge-to="registry" data-edge-label="同步新版本基底" data-edge-key="4">
@@ -508,22 +508,22 @@ rect.c-bg-rect { fill: var(--bg); }
         <text x="176" y="466" class="t-dim" font-size="7">本版本已有的 variant 按记录重新派生</text>
         </g>
 
-        <g data-edge-from="deployer" data-edge-to="backend" data-edge-label="没有这个 variant" data-edge-key="5">
+        <g data-edge-from="deployer" data-edge-to="backend" data-edge-label="variant 尚无镜像" data-edge-key="5">
           <path data-composition-edge-from="deployer" data-composition-edge-to="backend" data-composition-points="164,532;379.33333333333337,532" d="M 164 532 L 379.33333333333337 532" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
         <g>
           <rect x="224.0666666666667" y="512" width="95.2" height="16" rx="3" class="c-mask"/>
-          <text x="271.6666666666667" y="522" class="t-security" font-size="9" text-anchor="middle">没有这个 variant</text>
+          <text x="271.6666666666667" y="522" class="t-security" font-size="9" text-anchor="middle">variant 尚无镜像</text>
         </g>
-        <text x="176" y="550" class="t-dim" font-size="7">只在默认指向自定义 variant、或提交时显式选它时出现</text>
+        <text x="176" y="550" class="t-dim" font-size="7">仅在默认指向自定义 variant、或提交时显式指定时出现</text>
         </g>
 
-        <g data-edge-from="member" data-edge-to="backend" data-edge-label="提交照常" data-edge-key="6">
+        <g data-edge-from="member" data-edge-to="backend" data-edge-label="提交放行" data-edge-key="6">
           <path data-composition-edge-from="member" data-composition-edge-to="backend" data-composition-points="838,578;393.33333333333337,578" d="M 838 578 L 393.33333333333337 578" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
         <g>
           <rect x="588.8666666666668" y="558" width="53.6" height="16" rx="3" class="c-mask"/>
-          <text x="615.6666666666667" y="568" class="t-backend" font-size="9" text-anchor="middle">提交照常</text>
+          <text x="615.6666666666667" y="568" class="t-backend" font-size="9" text-anchor="middle">提交放行</text>
         </g>
-        <text x="405.33333333333337" y="596" class="t-dim" font-size="7">镜像标签由提交方本机的 CLI 版本拼出，这台仍解析到旧版本的镜像</text>
+        <text x="405.33333333333337" y="596" class="t-dim" font-size="7">镜像标签含提交方本机的 CLI 版本，该成员仍解析到旧版本镜像</text>
         </g>
 
         <g data-edge-from="member" data-edge-to="backend" data-edge-label="升级后同样被拒" data-edge-key="7">
@@ -532,7 +532,7 @@ rect.c-bg-rect { fill: var(--bg); }
           <rect x="573.2666666666668" y="604" width="84.8" height="16" rx="3" class="c-mask"/>
           <text x="615.6666666666667" y="614" class="t-security" font-size="9" text-anchor="middle">升级后同样被拒</text>
         </g>
-        <text x="405.33333333333337" y="642" class="t-dim" font-size="7">第 3 步先升自己的 CLI：升完即与部署方同处窗口二</text>
+        <text x="405.33333333333337" y="642" class="t-dim" font-size="7">第 3 步先升级成员 CLI：升级后与部署方同处窗口二</text>
         </g>
 
         <g data-edge-from="deployer" data-edge-to="registry" data-edge-label="第 3 步：重推 variant" data-edge-key="8">
@@ -541,7 +541,7 @@ rect.c-bg-rect { fill: var(--bg); }
           <rect x="325.73333333333335" y="678" width="121.2" height="16" rx="3" class="c-mask"/>
           <text x="386.33333333333337" y="688" class="t-backend" font-size="9" text-anchor="middle">第 3 步：重推 variant</text>
         </g>
-        <text x="176" y="716" class="t-dim" font-size="7">部署方从新版本基底重建后推送；不能提前到部署之前</text>
+        <text x="176" y="716" class="t-dim" font-size="7">部署方从新版本基底重建后推送；不可提前到部署之前</text>
         </g>
 
         <g data-edge-from="deployer" data-edge-to="backend" data-edge-label="提交与镜像命令恢复" data-edge-key="9">
@@ -550,16 +550,16 @@ rect.c-bg-rect { fill: var(--bg); }
           <rect x="218.86666666666667" y="762" width="105.60000000000001" height="16" rx="3" class="c-mask"/>
           <text x="271.6666666666667" y="772" class="t-backend" font-size="9" text-anchor="middle">提交与镜像命令恢复</text>
         </g>
-        <text x="176" y="800" class="t-dim" font-size="7">自定义 variant 在新版本下有镜像了</text>
+        <text x="176" y="800" class="t-dim" font-size="7">自定义 variant 在新版本已有镜像</text>
         </g>
 
-        <g data-edge-from="member" data-edge-to="backend" data-edge-label="提交照常" data-edge-key="10">
+        <g data-edge-from="member" data-edge-to="backend" data-edge-label="提交放行" data-edge-key="10">
           <path data-composition-edge-from="member" data-composition-edge-to="backend" data-composition-points="838,828;393.33333333333337,828" d="M 838 828 L 393.33333333333337 828" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
         <g>
           <rect x="588.8666666666668" y="808" width="53.6" height="16" rx="3" class="c-mask"/>
-          <text x="615.6666666666667" y="818" class="t-backend" font-size="9" text-anchor="middle">提交照常</text>
+          <text x="615.6666666666667" y="818" class="t-backend" font-size="9" text-anchor="middle">提交放行</text>
         </g>
-        <text x="405.33333333333337" y="846" class="t-dim" font-size="7">三方同版本，两段窗口都已关闭</text>
+        <text x="405.33333333333337" y="846" class="t-dim" font-size="7">三方同版本，两段窗口均已关闭</text>
         </g>
 
         <!-- Segment Labels -->
@@ -569,11 +569,11 @@ rect.c-bg-rect { fill: var(--bg); }
         </g>
         <g data-graph-role="segment-label" data-segment-id="1">
           <rect x="56" y="228" width="201.20000000000002" height="18" rx="3" class="c-mask"/>
-          <text x="62" y="241" class="t-dim" font-size="9" font-weight="600">第 1 步之后 → 窗口一：只拒这台部署机</text>
+          <text x="62" y="241" class="t-dim" font-size="9" font-weight="600">第 1 步之后 → 窗口一：仅拒部署方本机</text>
         </g>
         <g data-graph-role="segment-label" data-segment-id="2">
           <rect x="56" y="478" width="211.6" height="18" rx="3" class="c-mask"/>
-          <text x="62" y="491" class="t-dim" font-size="9" font-weight="600">第 2 步之后 → 窗口二：拒已升级的提交方</text>
+          <text x="62" y="491" class="t-dim" font-size="9" font-weight="600">第 2 步之后 → 窗口二：仅拒已升级提交方</text>
         </g>
         <g data-graph-role="segment-label" data-segment-id="3">
           <rect x="56" y="728" width="107.60000000000001" height="18" rx="3" class="c-mask"/>
@@ -581,8 +581,8 @@ rect.c-bg-rect { fill: var(--bg); }
         </g>
 
         <!-- Participants -->
-        <g id="node-deployer" data-node-id="deployer" data-node-label="部署方 CLI" tabindex="0" role="button" aria-label="聚焦部署方 CLI，发起升级的那台, 时序参与者" aria-pressed="false" data-node-kind="frontend" data-node-sublabel="发起升级的那台" data-node-context="时序参与者">
-          <title>部署方 CLI · 发起升级的那台 · 时序参与者</title>
+        <g id="node-deployer" data-node-id="deployer" data-node-label="部署方 CLI" tabindex="0" role="button" aria-label="聚焦部署方 CLI，发起升级的机器, 时序参与者" aria-pressed="false" data-node-kind="frontend" data-node-sublabel="发起升级的机器" data-node-context="时序参与者">
+          <title>部署方 CLI · 发起升级的机器 · 时序参与者</title>
           <rect x="62" y="72" width="190" height="54" rx="6" class="c-mask"/>
           <rect x="62" y="72" width="190" height="54" rx="6" class="c-frontend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="frontend" class="semantic-sigil s-frontend" transform="translate(68 78) scale(0.6875)">
@@ -592,18 +592,18 @@ rect.c-bg-rect { fill: var(--bg); }
             <circle cx="6.3" cy="4.8" r=".7" class="sigil-fill"/>
           </g>
           <text data-node-label="" x="157" y="94" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">部署方 CLI</text>
-          <text x="157" y="111" class="t-muted" font-size="7" text-anchor="middle">发起升级的那台</text>
+          <text x="157" y="111" class="t-muted" font-size="7" text-anchor="middle">发起升级的机器</text>
         </g>
 
-        <g id="node-backend" data-node-id="backend" data-node-label="云端后端" tabindex="0" role="button" aria-label="聚焦云端后端，记着版本戳, 时序参与者" aria-pressed="false" data-node-kind="backend" data-node-sublabel="记着版本戳" data-node-context="时序参与者">
-          <title>云端后端 · 记着版本戳 · 时序参与者</title>
+        <g id="node-backend" data-node-id="backend" data-node-label="云端后端" tabindex="0" role="button" aria-label="聚焦云端后端，保存版本戳, 时序参与者" aria-pressed="false" data-node-kind="backend" data-node-sublabel="保存版本戳" data-node-context="时序参与者">
+          <title>云端后端 · 保存版本戳 · 时序参与者</title>
           <rect x="291.33333333333337" y="72" width="190" height="54" rx="6" class="c-mask"/>
           <rect x="291.33333333333337" y="72" width="190" height="54" rx="6" class="c-backend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(297.33333333333337 78) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
           <text data-node-label="" x="386.33333333333337" y="94" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">云端后端</text>
-          <text x="386.33333333333337" y="111" class="t-muted" font-size="7" text-anchor="middle">记着版本戳</text>
+          <text x="386.33333333333337" y="111" class="t-muted" font-size="7" text-anchor="middle">保存版本戳</text>
         </g>
 
         <g id="node-registry" data-node-id="registry" data-node-label="你的 ECR 仓库" tabindex="0" role="button" aria-label="聚焦你的 ECR 仓库，worker 镜像, 时序参与者" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="worker 镜像" data-node-context="时序参与者">
@@ -617,8 +617,8 @@ rect.c-bg-rect { fill: var(--bg); }
           <text x="615.6666666666667" y="111" class="t-muted" font-size="7" text-anchor="middle">worker 镜像</text>
         </g>
 
-        <g id="node-member" data-node-id="member" data-node-label="其他成员 CLI" tabindex="0" role="button" aria-label="聚焦其他成员 CLI，晚一步再升, 时序参与者" aria-pressed="false" data-node-kind="frontend" data-node-sublabel="晚一步再升" data-node-context="时序参与者">
-          <title>其他成员 CLI · 晚一步再升 · 时序参与者</title>
+        <g id="node-member" data-node-id="member" data-node-label="其他成员 CLI" tabindex="0" role="button" aria-label="聚焦其他成员 CLI，延后升级, 时序参与者" aria-pressed="false" data-node-kind="frontend" data-node-sublabel="延后升级" data-node-context="时序参与者">
+          <title>其他成员 CLI · 延后升级 · 时序参与者</title>
           <rect x="750" y="72" width="190" height="54" rx="6" class="c-mask"/>
           <rect x="750" y="72" width="190" height="54" rx="6" class="c-frontend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="frontend" class="semantic-sigil s-frontend" transform="translate(756 78) scale(0.6875)">
@@ -628,7 +628,7 @@ rect.c-bg-rect { fill: var(--bg); }
             <circle cx="6.3" cy="4.8" r=".7" class="sigil-fill"/>
           </g>
           <text data-node-label="" x="845" y="94" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">其他成员 CLI</text>
-          <text x="845" y="111" class="t-muted" font-size="7" text-anchor="middle">晚一步再升</text>
+          <text x="845" y="111" class="t-muted" font-size="7" text-anchor="middle">延后升级</text>
         </g>
 
         <!-- Legend -->
@@ -644,8 +644,8 @@ rect.c-bg-rect { fill: var(--bg); }
           </g>
           <g data-legend-semantic-kind="default" data-legend-x="230" data-legend-baseline="886" data-legend-width="83">
             <path d="M 230 883 L 264 883" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
-            <text x="273" y="886" class="t-muted" font-size="10" font-weight="500">照常放行</text>
+            <text x="273" y="886" class="t-muted" font-size="10" font-weight="500">正常放行</text>
           </g>
         </g>
       </svg>
-<!-- gherkai:source-sha256=3c31f3ad3205dba201eb37e2b93e8e0607efa53358ec8b85d8310c87aa2ec10a -->
+<!-- gherkai:source-sha256=3aa02f6d1bd3b5bc2a2e388af06c3e4f95d0083ac4dcd2ce979560a3361cec49 -->

@@ -58,12 +58,12 @@ POINTER_REWRITES: dict[str, str] = {
 # 内部用词（推进器 / 投影 / definition …）机械层照不出、只能靠人眼发现后登记在此。
 FORBIDDEN_REWRITES: dict[str, str] = {
     "命中定位链的哪一级": "命中 worker 查找顺序的哪一级",
-    "已投影的事件水位（诊断用）；仅经推进器投影写过的 run 有":
-        "已处理到的事件水位（诊断用）；仅由后台推进写过的 run 有",
-    "（投影滞后一拍）": "（run 级状态比 job 级晚一拍）",
+    "已投影的事件水位（诊断用）；仅经推进器投影写入的 run 有":
+        "已处理到的事件水位（诊断用）；仅由后台推进写入的 run 有",
+    "（投影滞后于 job 级状态）": "（run 级状态滞后于 job 级状态）",
     "被推进器认领的时刻": "被后台推进认领的时刻",
-    "`run_meta`（definition）": "`run_meta`（提交时定死的这批任务本身）",
-    "本次 run 的 definition（提交时定死）": "本次 run 的任务定义（提交时定死）",
+    "`run_meta`（definition）": "`run_meta`（提交时固定的这批任务本身）",
+    "本次 run 的 definition（提交时固定）": "本次 run 的任务定义（提交时固定）",
     "definition / 运行态的落点": "任务定义 / 运行态的落点",
     "内嵌的完整 `job` definition": "内嵌的完整 `job` 定义",
 }

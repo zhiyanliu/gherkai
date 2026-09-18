@@ -2,7 +2,7 @@
   "schema_version": 1,
   "diagram_type": "dataflow",
   "meta": {
-    "title": "证据链：谁产、谁解引用、字节什么时候到",
+    "title": "证据链：产出方、解引用范围、字节时序",
     "locale": "zh-CN",
     "quality_profile": "showcase",
     "viewBox": [
@@ -16,10 +16,10 @@
           "label": "证据主链：产出与解引用"
         },
         "default": {
-          "label": "引擎自己写的 / 按地址取的"
+          "label": "引擎写出 / 按地址读取"
         },
         "dashed": {
-          "label": "只搬链接、不解析"
+          "label": "只传链接、不解析"
         },
         "database": {
           "label": "落盘的产物"
@@ -29,13 +29,13 @@
   },
   "stages": [
     {
-      "label": "产出：判定成立那一刻"
+      "label": "产出：判定成立时"
     },
     {
-      "label": "落盘：各答一件事"
+      "label": "落盘：按职责分类"
     },
     {
-      "label": "顺指针取用"
+      "label": "按指针取用"
     }
   ],
   "nodes": [
@@ -43,10 +43,10 @@
       "id": "worker",
       "type": "external",
       "label": "worker",
-      "sublabel": "手里还有引擎材料",
+      "sublabel": "引擎材料在进程内",
       "stage": 0,
       "row": 1,
-      "tag": "产证据的一方",
+      "tag": "证据产出方",
       "width": 140
     },
     {
@@ -56,7 +56,7 @@
       "sublabel": "报告 / 轨迹 / 会话汇总",
       "stage": 1,
       "row": 0,
-      "tag": "引擎自己的格式",
+      "tag": "引擎自有格式",
       "width": 152
     },
     {
@@ -86,7 +86,7 @@
       "sublabel": "只解引用自有格式",
       "stage": 2,
       "row": 1,
-      "tag": "读证据的入口",
+      "tag": "证据读取入口",
       "width": 152
     },
     {
@@ -104,13 +104,13 @@
     {
       "from": "worker",
       "to": "native",
-      "label": "引擎 SDK 自己写",
-      "classification": "格式随版本漂"
+      "label": "引擎 SDK 写出",
+      "classification": "格式随版本漂移"
     },
     {
       "from": "worker",
       "to": "verdict",
-      "label": "证据指针进判定",
+      "label": "写入证据指针",
       "classification": "随 step 事件落库",
       "variant": "emphasis",
       "route": "straight",
@@ -121,13 +121,13 @@
       "from": "worker",
       "to": "evidence",
       "label": "抽取现场落盘",
-      "classification": "step 结束那一刻",
+      "classification": "step 结束时",
       "variant": "emphasis"
     },
     {
       "from": "verdict",
       "to": "explain",
-      "label": "指针从这里取",
+      "label": "提供证据指针",
       "variant": "emphasis",
       "route": "straight",
       "labelDy": -30,
@@ -136,13 +136,13 @@
     {
       "from": "evidence",
       "to": "explain",
-      "label": "只这一份被解析",
+      "label": "唯一解析对象",
       "variant": "emphasis"
     },
     {
       "from": "native",
       "to": "explain",
-      "label": "只搬链接、不解析",
+      "label": "只传链接、不解析",
       "classification": "指针来自判定真值",
       "variant": "dashed"
     },
@@ -158,27 +158,27 @@
   "cards": [
     {
       "dot": "cyan",
-      "title": "为什么由 worker 产",
+      "title": "worker 作为产出方的原因",
       "items": [
-        "step 判定成立那一刻，引擎材料还在手上：刚落盘的轨迹、内存里的执行记录",
-        "不是命令行事后回头解析 SDK 产物",
-        "只有调过 AI 的 step 有这条链：确定性命中与导航步不产证据明细"
+        "step 判定成立时引擎材料仍可访问：刚落盘的轨迹、内存中的执行记录",
+        "而非由命令行事后解析 SDK 产物",
+        "只有调用过 AI 的 step 存在这条链：确定性命中与导航步不产出证据明细"
       ]
     },
     {
       "dot": "violet",
-      "title": "只解引用自有格式的那一份",
+      "title": "解引用范围限于自有格式",
       "items": [
-        "引擎原生产物只当链接原样搬出——它们的格式随 SDK 版本漂，解析它等于把引擎知识搬进命令行",
-        "读字节只有一个入口：本机路径与云端对象走同一套解析"
+        "引擎原生产物仅以链接原样输出：其格式随 SDK 版本漂移，解析它等于把引擎知识引入命令行",
+        "读取字节的入口只有一个：本机路径与云端对象共用同一套解析"
       ]
     },
     {
       "dot": "amber",
-      "title": "截图只写地址，不等字节",
+      "title": "截图写入地址、不等待字节",
       "items": [
-        "地址用上传器的同一套规则确定性算出，所以能先写进证据明细",
-        "判定因此不被网络拖住：本机档字节落盘即在，云端档随后异步补上"
+        "地址按上传器的同一套规则确定性计算得出，因此可先写入证据明细",
+        "判定因此不受网络阻塞：本机档字节落盘即可用，云端档随后异步上传"
       ]
     }
   ]

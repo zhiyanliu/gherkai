@@ -1,4 +1,4 @@
-<svg viewBox="0 0 963 652" role="img" lang="zh-CN" aria-labelledby="archify-diagram-title archify-diagram-description" data-preset="classic" data-quality-profile="showcase" style="" width="963" height="652" xmlns="http://www.w3.org/2000/svg"><style>
+<svg viewBox="0 0 944 652" role="img" lang="zh-CN" aria-labelledby="archify-diagram-title archify-diagram-description" data-preset="classic" data-quality-profile="showcase" style="" width="944" height="652" xmlns="http://www.w3.org/2000/svg"><style>
 /*
 JetBrains Mono variable WOFF2 subsets from Google Fonts service revision v24.
 These fixed bytes are shared by the viewer and its SVG/raster exports.
@@ -440,66 +440,66 @@ rect.c-bg-rect { fill: var(--bg); }
         <rect width="100%" height="100%" fill="url(#grid)"/>
 
         <!-- Swimlanes -->
-        <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-0" x="40" y="52" width="907" height="104" rx="10" class="c-lane" stroke-width="1"/>
-        <text x="54" y="74" class="t-dim" font-size="10" font-weight="600">01 / 标了 @scope 的 scenario</text>
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-0" x="40" y="52" width="888" height="104" rx="10" class="c-lane" stroke-width="1"/>
+        <text x="54" y="74" class="t-dim" font-size="10" font-weight="600">01 / 已标 @scope 的 scenario</text>
 
-        <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-1" x="40" y="176" width="907" height="104" rx="10" class="c-lane" stroke-width="1"/>
-        <text x="54" y="198" class="t-dim" font-size="10" font-weight="600">02 / 没标 @scope 的 scenario</text>
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-1" x="40" y="176" width="888" height="104" rx="10" class="c-lane" stroke-width="1"/>
+        <text x="54" y="198" class="t-dim" font-size="10" font-weight="600">02 / 未标 @scope 的 scenario</text>
 
-        <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-2" x="40" y="300" width="907" height="104" rx="10" class="c-lane" stroke-width="1"/>
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-2" x="40" y="300" width="888" height="104" rx="10" class="c-lane" stroke-width="1"/>
         <text x="54" y="322" class="t-dim" font-size="10" font-weight="600">03 / 调度与执行</text>
 
-        <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-3" x="40" y="424" width="907" height="104" rx="10" class="c-lane" stroke-width="1"/>
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-3" x="40" y="424" width="888" height="104" rx="10" class="c-lane" stroke-width="1"/>
         <text x="54" y="446" class="t-dim" font-size="10" font-weight="600">04 / 超出上限</text>
 
         <!-- Phase headers -->
-        <line x1="74" y1="35" x2="171.6" y2="35" class="a-default" stroke-width="1.1"/>
-        <rect x="74" y="27" width="97.6" height="16" rx="4" class="c-mask"/>
-        <text x="122.8" y="39" class="t-muted" font-size="8" font-weight="600" text-anchor="middle">写在 .feature 里</text>
-        <line x1="295.6" y1="35" x2="387.6" y2="35" class="a-emphasis" stroke-width="1.1"/>
-        <rect x="295.6" y="27" width="92" height="16" rx="4" class="c-mask"/>
-        <text x="341.6" y="39" class="t-backend" font-size="8" font-weight="600" text-anchor="middle">归成 job</text>
-        <line x1="415.59999999999997" y1="35" x2="694.4000000000001" y2="35" class="a-default" stroke-width="1.1"/>
-        <rect x="415.59999999999997" y="27" width="278.80000000000007" height="16" rx="4" class="c-mask"/>
-        <text x="555" y="39" class="t-muted" font-size="8" font-weight="600" text-anchor="middle">上限内才开跑</text>
+        <line x1="74" y1="35" x2="166" y2="35" class="a-default" stroke-width="1.1"/>
+        <rect x="74" y="27" width="92" height="16" rx="4" class="c-mask"/>
+        <text x="120" y="39" class="t-muted" font-size="8" font-weight="600" text-anchor="middle">.feature 中书写</text>
+        <line x1="276.4" y1="35" x2="368.4" y2="35" class="a-emphasis" stroke-width="1.1"/>
+        <rect x="276.4" y="27" width="92" height="16" rx="4" class="c-mask"/>
+        <text x="322.4" y="39" class="t-backend" font-size="8" font-weight="600" text-anchor="middle">归成 job</text>
+        <line x1="396.3999999999999" y1="35" x2="675.2" y2="35" class="a-default" stroke-width="1.1"/>
+        <rect x="396.3999999999999" y="27" width="278.80000000000007" height="16" rx="4" class="c-mask"/>
+        <text x="535.8" y="39" class="t-muted" font-size="8" font-weight="600" text-anchor="middle">上限内启动</text>
 
         <!-- Workflow groups -->
 
 
         <!-- Edge paths -->
-        <path data-edge-from="bareIn" data-edge-to="jobBare" data-edge-label="每条各自一个" data-edge-key="0" data-edge-id="e-bare-job" data-composition-points="192,243;267.6,243" d="M 192 243 L 267.6 243" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
-        <path data-edge-from="gate" data-edge-to="go" data-edge-label="上限内" data-edge-key="1" data-edge-id="e-gate-go" data-composition-points="531.6,367;578.4000000000001,367" d="M 531.6 367 L 578.4000000000001 367" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        <path data-edge-from="gate" data-edge-to="wait" data-edge-label="超出上限" data-edge-key="2" data-edge-id="e-gate-wait" data-composition-points="461.6,393;461.6,491;578.4000000000001,491" d="M 461.6 393 L 461.6 491 L 578.4000000000001 491" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
-        <path data-edge-from="jobBare" data-edge-to="gate" data-edge-key="3" data-edge-id="e-jobbare-gate" data-composition-points="341.6,269;341.6,367;391.6,367" d="M 341.6 269 L 341.6 367 L 391.6 367" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
-        <path data-edge-from="jobScope" data-edge-to="gate" data-edge-key="4" data-edge-id="e-jobscope-gate" data-composition-points="415.6,119;461.6,119;461.6,341" d="M 415.6 119 L 461.6 119 L 461.6 341" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        <path data-edge-from="scopedIn" data-edge-to="jobScope" data-edge-label="同名归一个" data-edge-key="5" data-edge-id="e-scoped-job" data-composition-points="192,119;267.6,119" d="M 192 119 L 267.6 119" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path data-edge-from="bareIn" data-edge-to="jobBare" data-edge-label="逐条分组" data-edge-key="0" data-edge-id="e-bare-job" data-composition-points="192,243;248.39999999999998,243" d="M 192 243 L 248.39999999999998 243" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="gate" data-edge-to="go" data-edge-label="上限内" data-edge-key="1" data-edge-id="e-gate-go" data-composition-points="512.4,367;559.2,367" d="M 512.4 367 L 559.2 367" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path data-edge-from="gate" data-edge-to="wait" data-edge-label="超出上限" data-edge-key="2" data-edge-id="e-gate-wait" data-composition-points="442.4,393;442.4,491;559.2,491" d="M 442.4 393 L 442.4 491 L 559.2 491" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="jobBare" data-edge-to="gate" data-edge-key="3" data-edge-id="e-jobbare-gate" data-composition-points="322.4,269;322.4,367;372.4,367" d="M 322.4 269 L 322.4 367 L 372.4 367" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="jobScope" data-edge-to="gate" data-edge-key="4" data-edge-id="e-jobscope-gate" data-composition-points="396.4,119;442.4,119;442.4,341" d="M 396.4 119 L 442.4 119 L 442.4 341" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path data-edge-from="scopedIn" data-edge-to="jobScope" data-edge-label="同名归并" data-edge-key="5" data-edge-id="e-scoped-job" data-composition-points="192,119;248.39999999999998,119" d="M 192 119 L 248.39999999999998 119" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
 
         <!-- Nodes -->
-        <g id="node-scopedIn" data-node-id="scopedIn" data-node-label="同一个 scope 名" tabindex="0" role="button" aria-label="聚焦同一个 scope 名，跨文件也算同名, 标了 @scope 的 scenario › 写在 .feature 里" aria-pressed="false" data-node-kind="external" data-node-sublabel="跨文件也算同名" data-node-context="标了 @scope 的 scenario › 写在 .feature 里">
-          <title>同一个 scope 名 · 跨文件也算同名 · 标了 @scope 的 scenario › 写在 .feature 里</title>
+        <g id="node-scopedIn" data-node-id="scopedIn" data-node-label="同一 scope 名" tabindex="0" role="button" aria-label="聚焦同一 scope 名，同名跨文件合并, 已标 @scope 的 scenario › .feature 中书写" aria-pressed="false" data-node-kind="external" data-node-sublabel="同名跨文件合并" data-node-context="已标 @scope 的 scenario › .feature 中书写">
+          <title>同一 scope 名 · 同名跨文件合并 · 已标 @scope 的 scenario › .feature 中书写</title>
           <rect x="48" y="93" width="144" height="52" rx="6" class="c-mask"/>
           <rect x="48" y="93" width="144" height="52" rx="6" class="c-external" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(54 99) scale(0.6875)">
             <rect x="2.5" y="5" width="8.5" height="8" rx="1.5"/>
             <path d="M8 2.5h5.5V8M13.5 2.5 7.5 8.5"/>
           </g>
-          <text data-node-label="" x="120" y="114" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">同一个 scope 名</text>
-          <text x="120" y="131" class="t-muted" font-size="8" text-anchor="middle">跨文件也算同名</text>
+          <text data-node-label="" x="120" y="114" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">同一 scope 名</text>
+          <text x="120" y="131" class="t-muted" font-size="8" text-anchor="middle">同名跨文件合并</text>
         </g>
 
-        <g id="node-jobScope" data-node-id="jobScope" data-node-label="合成一个 job" tabindex="0" role="button" aria-label="聚焦合成一个 job，一个会话 · 顺序串行, 标了 @scope 的 scenario › 归成 job" aria-pressed="false" data-node-kind="backend" data-node-sublabel="一个会话 · 顺序串行" data-node-context="标了 @scope 的 scenario › 归成 job">
-          <title>合成一个 job · 一个会话 · 顺序串行 · 标了 @scope 的 scenario › 归成 job</title>
-          <rect x="267.6" y="93" width="148" height="52" rx="6" class="c-mask"/>
-          <rect x="267.6" y="93" width="148" height="52" rx="6" class="c-backend" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(273.6 99) scale(0.6875)">
+        <g id="node-jobScope" data-node-id="jobScope" data-node-label="合成一个 job" tabindex="0" role="button" aria-label="聚焦合成一个 job，一个会话 · 顺序串行, 已标 @scope 的 scenario › 归成 job" aria-pressed="false" data-node-kind="backend" data-node-sublabel="一个会话 · 顺序串行" data-node-context="已标 @scope 的 scenario › 归成 job">
+          <title>合成一个 job · 一个会话 · 顺序串行 · 已标 @scope 的 scenario › 归成 job</title>
+          <rect x="248.39999999999998" y="93" width="148" height="52" rx="6" class="c-mask"/>
+          <rect x="248.39999999999998" y="93" width="148" height="52" rx="6" class="c-backend" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(254.39999999999998 99) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
-          <text data-node-label="" x="341.6" y="114" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">合成一个 job</text>
-          <text x="341.6" y="131" class="t-muted" font-size="8" text-anchor="middle">一个会话 · 顺序串行</text>
+          <text data-node-label="" x="322.4" y="114" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">合成一个 job</text>
+          <text x="322.4" y="131" class="t-muted" font-size="8" text-anchor="middle">一个会话 · 顺序串行</text>
         </g>
 
-        <g id="node-bareIn" data-node-id="bareIn" data-node-label="一条 scenario" tabindex="0" role="button" aria-label="聚焦一条 scenario，没有 scope 名, 没标 @scope 的 scenario › 写在 .feature 里" aria-pressed="false" data-node-kind="external" data-node-sublabel="没有 scope 名" data-node-context="没标 @scope 的 scenario › 写在 .feature 里">
-          <title>一条 scenario · 没有 scope 名 · 没标 @scope 的 scenario › 写在 .feature 里</title>
+        <g id="node-bareIn" data-node-id="bareIn" data-node-label="一条 scenario" tabindex="0" role="button" aria-label="聚焦一条 scenario，未标 scope 名, 未标 @scope 的 scenario › .feature 中书写" aria-pressed="false" data-node-kind="external" data-node-sublabel="未标 scope 名" data-node-context="未标 @scope 的 scenario › .feature 中书写">
+          <title>一条 scenario · 未标 scope 名 · 未标 @scope 的 scenario › .feature 中书写</title>
           <rect x="48" y="217" width="144" height="52" rx="6" class="c-mask"/>
           <rect x="48" y="217" width="144" height="52" rx="6" class="c-external" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(54 223) scale(0.6875)">
@@ -507,76 +507,76 @@ rect.c-bg-rect { fill: var(--bg); }
             <path d="M8 2.5h5.5V8M13.5 2.5 7.5 8.5"/>
           </g>
           <text data-node-label="" x="120" y="238" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">一条 scenario</text>
-          <text x="120" y="255" class="t-muted" font-size="8" text-anchor="middle">没有 scope 名</text>
+          <text x="120" y="255" class="t-muted" font-size="8" text-anchor="middle">未标 scope 名</text>
         </g>
 
-        <g id="node-jobBare" data-node-id="jobBare" data-node-label="各自一个 job" tabindex="0" role="button" aria-label="聚焦各自一个 job，编号 = 路径:行号, 没标 @scope 的 scenario › 归成 job" aria-pressed="false" data-node-kind="backend" data-node-sublabel="编号 = 路径:行号" data-node-context="没标 @scope 的 scenario › 归成 job">
-          <title>各自一个 job · 编号 = 路径:行号 · 没标 @scope 的 scenario › 归成 job</title>
-          <rect x="267.6" y="217" width="148" height="52" rx="6" class="c-mask"/>
-          <rect x="267.6" y="217" width="148" height="52" rx="6" class="c-backend" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(273.6 223) scale(0.6875)">
+        <g id="node-jobBare" data-node-id="jobBare" data-node-label="各自一个 job" tabindex="0" role="button" aria-label="聚焦各自一个 job，编号 = 路径:行号, 未标 @scope 的 scenario › 归成 job" aria-pressed="false" data-node-kind="backend" data-node-sublabel="编号 = 路径:行号" data-node-context="未标 @scope 的 scenario › 归成 job">
+          <title>各自一个 job · 编号 = 路径:行号 · 未标 @scope 的 scenario › 归成 job</title>
+          <rect x="248.39999999999998" y="217" width="148" height="52" rx="6" class="c-mask"/>
+          <rect x="248.39999999999998" y="217" width="148" height="52" rx="6" class="c-backend" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(254.39999999999998 223) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
-          <text data-node-label="" x="341.6" y="238" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">各自一个 job</text>
-          <text x="341.6" y="255" class="t-muted" font-size="8" text-anchor="middle">编号 = 路径:行号</text>
+          <text data-node-label="" x="322.4" y="238" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">各自一个 job</text>
+          <text x="322.4" y="255" class="t-muted" font-size="8" text-anchor="middle">编号 = 路径:行号</text>
         </g>
 
-        <g id="node-gate" data-node-id="gate" data-node-label="并发上限" tabindex="0" role="button" aria-label="聚焦并发上限，同时开跑几个 job, 调度与执行 › 上限内才开跑" aria-pressed="false" data-node-kind="security" data-node-sublabel="同时开跑几个 job" data-node-context="调度与执行 › 上限内才开跑">
-          <title>并发上限 · 同时开跑几个 job · 调度与执行 › 上限内才开跑</title>
-          <rect x="391.6" y="341" width="140" height="52" rx="6" class="c-mask"/>
-          <rect x="391.6" y="341" width="140" height="52" rx="6" class="c-security" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(397.6 347) scale(0.6875)">
+        <g id="node-gate" data-node-id="gate" data-node-label="并发上限" tabindex="0" role="button" aria-label="聚焦并发上限，同时执行的 job 数, 调度与执行 › 上限内启动" aria-pressed="false" data-node-kind="security" data-node-sublabel="同时执行的 job 数" data-node-context="调度与执行 › 上限内启动">
+          <title>并发上限 · 同时执行的 job 数 · 调度与执行 › 上限内启动</title>
+          <rect x="372.4" y="341" width="140" height="52" rx="6" class="c-mask"/>
+          <rect x="372.4" y="341" width="140" height="52" rx="6" class="c-security" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(378.4 347) scale(0.6875)">
             <path d="M8 2.2 13 4v3.5c0 3.1-1.8 5.4-5 6.5-3.2-1.1-5-3.4-5-6.5V4Z"/>
             <path d="m5.8 8 1.5 1.5 3-3"/>
           </g>
-          <text data-node-label="" x="461.6" y="362" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">并发上限</text>
-          <text x="461.6" y="379" class="t-muted" font-size="8" text-anchor="middle">同时开跑几个 job</text>
+          <text data-node-label="" x="442.4" y="362" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">并发上限</text>
+          <text x="442.4" y="379" class="t-muted" font-size="8" text-anchor="middle">同时执行的 job 数</text>
         </g>
 
-        <g id="node-go" data-node-id="go" data-node-label="同时开跑" tabindex="0" role="button" aria-label="聚焦同时开跑，每个 job 一个会话, 调度与执行 › 上限内才开跑" aria-pressed="false" data-node-kind="messagebus" data-node-sublabel="每个 job 一个会话" data-node-context="调度与执行 › 上限内才开跑">
-          <title>同时开跑 · 每个 job 一个会话 · 调度与执行 › 上限内才开跑</title>
-          <rect x="578.4000000000001" y="341" width="140" height="52" rx="6" class="c-mask"/>
-          <rect x="578.4000000000001" y="341" width="140" height="52" rx="6" class="c-messagebus" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="messagebus" class="semantic-sigil s-messagebus" transform="translate(584.4000000000001 347) scale(0.6875)">
+        <g id="node-go" data-node-id="go" data-node-label="并发执行" tabindex="0" role="button" aria-label="聚焦并发执行，每个 job 一个会话, 调度与执行 › 上限内启动" aria-pressed="false" data-node-kind="messagebus" data-node-sublabel="每个 job 一个会话" data-node-context="调度与执行 › 上限内启动">
+          <title>并发执行 · 每个 job 一个会话 · 调度与执行 › 上限内启动</title>
+          <rect x="559.2" y="341" width="140" height="52" rx="6" class="c-mask"/>
+          <rect x="559.2" y="341" width="140" height="52" rx="6" class="c-messagebus" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="messagebus" class="semantic-sigil s-messagebus" transform="translate(565.2 347) scale(0.6875)">
             <path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11"/>
             <circle cx="5" cy="4.5" r="1" class="sigil-fill"/>
             <circle cx="10.5" cy="8" r="1" class="sigil-fill"/>
             <circle cx="7" cy="11.5" r="1" class="sigil-fill"/>
           </g>
-          <text data-node-label="" x="648.4000000000001" y="362" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">同时开跑</text>
-          <text x="648.4000000000001" y="379" class="t-muted" font-size="8" text-anchor="middle">每个 job 一个会话</text>
+          <text data-node-label="" x="629.2" y="362" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">并发执行</text>
+          <text x="629.2" y="379" class="t-muted" font-size="8" text-anchor="middle">每个 job 一个会话</text>
         </g>
 
-        <g id="node-wait" data-node-id="wait" data-node-label="排队等空位" tabindex="0" role="button" aria-label="聚焦排队等空位，有空位再开跑, 超出上限 › 上限内才开跑" aria-pressed="false" data-node-kind="security" data-node-sublabel="有空位再开跑" data-node-context="超出上限 › 上限内才开跑">
-          <title>排队等空位 · 有空位再开跑 · 超出上限 › 上限内才开跑</title>
-          <rect x="578.4000000000001" y="465" width="140" height="52" rx="6" class="c-mask"/>
-          <rect x="578.4000000000001" y="465" width="140" height="52" rx="6" class="c-security" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(584.4000000000001 471) scale(0.6875)">
+        <g id="node-wait" data-node-id="wait" data-node-label="排队等待" tabindex="0" role="button" aria-label="聚焦排队等待，有空位时启动, 超出上限 › 上限内启动" aria-pressed="false" data-node-kind="security" data-node-sublabel="有空位时启动" data-node-context="超出上限 › 上限内启动">
+          <title>排队等待 · 有空位时启动 · 超出上限 › 上限内启动</title>
+          <rect x="559.2" y="465" width="140" height="52" rx="6" class="c-mask"/>
+          <rect x="559.2" y="465" width="140" height="52" rx="6" class="c-security" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(565.2 471) scale(0.6875)">
             <path d="M8 2.2 13 4v3.5c0 3.1-1.8 5.4-5 6.5-3.2-1.1-5-3.4-5-6.5V4Z"/>
             <path d="m5.8 8 1.5 1.5 3-3"/>
           </g>
-          <text data-node-label="" x="648.4000000000001" y="486" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">排队等空位</text>
-          <text x="648.4000000000001" y="503" class="t-muted" font-size="8" text-anchor="middle">有空位再开跑</text>
+          <text data-node-label="" x="629.2" y="486" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">排队等待</text>
+          <text x="629.2" y="503" class="t-muted" font-size="8" text-anchor="middle">有空位时启动</text>
         </g>
 
         <!-- Edge labels -->
-        <g data-edge-from="bareIn" data-edge-to="jobBare" data-edge-label="每条各自一个" data-edge-key="0" data-edge-id="e-bare-job">
-          <rect x="196" y="223" width="67.6" height="14" rx="3" class="c-mask"/>
-          <text x="229.8" y="233" class="t-muted" font-size="8" text-anchor="middle">每条各自一个</text>
+        <g data-edge-from="bareIn" data-edge-to="jobBare" data-edge-label="逐条分组" data-edge-key="0" data-edge-id="e-bare-job">
+          <rect x="196" y="223" width="48.4" height="14" rx="3" class="c-mask"/>
+          <text x="220.2" y="233" class="t-muted" font-size="8" text-anchor="middle">逐条分组</text>
         </g>
         <g data-edge-from="gate" data-edge-to="go" data-edge-label="上限内" data-edge-key="1" data-edge-id="e-gate-go">
-          <rect x="535.6" y="347" width="38.8" height="14" rx="3" class="c-mask"/>
-          <text x="555" y="357" class="t-backend" font-size="8" text-anchor="middle">上限内</text>
+          <rect x="516.4" y="347" width="38.8" height="14" rx="3" class="c-mask"/>
+          <text x="535.8" y="357" class="t-backend" font-size="8" text-anchor="middle">上限内</text>
         </g>
         <g data-edge-from="gate" data-edge-to="wait" data-edge-label="超出上限" data-edge-key="2" data-edge-id="e-gate-wait">
-          <rect x="495.8" y="471" width="48.4" height="14" rx="3" class="c-mask"/>
-          <text x="520" y="481" class="t-muted" font-size="8" text-anchor="middle">超出上限</text>
+          <rect x="476.6" y="471" width="48.4" height="14" rx="3" class="c-mask"/>
+          <text x="500.8" y="481" class="t-muted" font-size="8" text-anchor="middle">超出上限</text>
         </g>
 
 
-        <g data-edge-from="scopedIn" data-edge-to="jobScope" data-edge-label="同名归一个" data-edge-key="5" data-edge-id="e-scoped-job">
-          <rect x="200.8" y="99" width="58" height="14" rx="3" class="c-mask"/>
-          <text x="229.8" y="109" class="t-backend" font-size="8" text-anchor="middle">同名归一个</text>
+        <g data-edge-from="scopedIn" data-edge-to="jobScope" data-edge-label="同名归并" data-edge-key="5" data-edge-id="e-scoped-job">
+          <rect x="196" y="99" width="48.4" height="14" rx="3" class="c-mask"/>
+          <text x="220.2" y="109" class="t-backend" font-size="8" text-anchor="middle">同名归并</text>
         </g>
 
         <!-- Legend -->
@@ -590,14 +590,14 @@ rect.c-bg-rect { fill: var(--bg); }
             <rect x="127" y="564" width="14" height="9" rx="2" class="c-security" stroke-width="1"/>
             <text x="149" y="572" class="t-muted" font-size="7.5" font-weight="500">并发上限与排队</text>
           </g>
-          <g data-legend-semantic-kind="messagebus" data-legend-x="238" data-legend-baseline="572" data-legend-width="96">
+          <g data-legend-semantic-kind="messagebus" data-legend-x="238" data-legend-baseline="572" data-legend-width="78">
             <rect x="238" y="564" width="14" height="9" rx="2" class="c-messagebus" stroke-width="1"/>
-            <text x="260" y="572" class="t-muted" font-size="7.5" font-weight="500">开跑：起会话</text>
+            <text x="260" y="572" class="t-muted" font-size="7.5" font-weight="500">会话启动</text>
           </g>
-          <g data-legend-semantic-kind="external" data-legend-x="341" data-legend-baseline="572" data-legend-width="165">
-            <rect x="341" y="564" width="14" height="9" rx="2" class="c-external" stroke-width="1"/>
-            <text x="363" y="572" class="t-muted" font-size="7.5" font-weight="500">scenario（写在 .feature 里）</text>
+          <g data-legend-semantic-kind="external" data-legend-x="323" data-legend-baseline="572" data-legend-width="161">
+            <rect x="323" y="564" width="14" height="9" rx="2" class="c-external" stroke-width="1"/>
+            <text x="345" y="572" class="t-muted" font-size="7.5" font-weight="500">scenario（.feature 中书写）</text>
           </g>
         </g>
       </svg>
-<!-- gherkai:source-sha256=d30c7c56848466e1f02c2bfbfb74fdee34109090f6df67352ee99ff7847b587d -->
+<!-- gherkai:source-sha256=ea7f71bf6c34ee90e445bd535c58f21b5b51aa1d3cee7423246c466176373df2 -->

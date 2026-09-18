@@ -415,7 +415,7 @@ svg[data-theme="light"] { --bg: #f8fafc; --grid: #e2e8f0; --text: #0f172a; --tex
 svg[data-theme="dark"] { --bg: #020617; --grid: #1e293b; --text: #ffffff; --text-muted: #94a3b8; --text-dim: #475569; --text-faint: #7d8da1; --panel: rgba(15, 23, 42, 0.5); --panel-border: #1e293b; --lane-fill: rgba(15, 23, 42, 0.22); --lane-stroke: #334155; --arrow: #64748b; --arrow-emphasis: #34d399; --mask: #0f172a; --frontend-fill: rgba(8, 51, 68, 0.4); --frontend-stroke: #22d3ee; --backend-fill: rgba(6, 78, 59, 0.4); --backend-stroke: #34d399; --database-fill: rgba(76, 29, 149, 0.4); --database-stroke: #a78bfa; --cloud-fill: rgba(120, 53, 15, 0.3); --cloud-stroke: #fbbf24; --security-fill: rgba(136, 19, 55, 0.4); --security-stroke: #fb7185; --messagebus-fill: rgba(251, 146, 60, 0.3); --messagebus-stroke: #fb923c; --external-fill: rgba(30, 41, 59, 0.5); --external-stroke: #94a3b8; --toolbar-bg: rgba(15, 23, 42, 0.8); --toolbar-border: #334155; --toolbar-text: #e2e8f0; --toolbar-hover: rgba(15, 23, 42, 0.95); --toolbar-menu-bg: #0f172a; }
 rect.c-bg-rect { fill: var(--bg); }
 </style><rect width="100%" height="100%" class="c-bg-rect"/>
-        <title id="archify-diagram-title">判定是逐层归约出来的：一票 → run</title>
+        <title id="archify-diagram-title">判定的逐层归约：一票 → run</title>
         <desc id="archify-diagram-description">由 Archify 生成的数据流图。</desc>
         <!-- Definitions -->
         <defs>
@@ -488,8 +488,8 @@ rect.c-bg-rect { fill: var(--bg); }
         <text x="315" y="189" class="t-external" font-size="7" text-anchor="middle">worker 侧</text>
         </g>
 
-        <g id="node-scenario" data-node-id="scenario" data-node-label="scenario 结论" tabindex="0" role="button" aria-label="聚焦scenario 结论，本条逐步汇总, 03 / scenario" aria-pressed="false" data-node-kind="external" data-node-sublabel="本条逐步汇总" data-node-tag="worker 侧" data-node-context="03 / scenario">
-          <title>scenario 结论 · 本条逐步汇总 · 03 / scenario · worker 侧</title>
+        <g id="node-scenario" data-node-id="scenario" data-node-label="scenario 结论" tabindex="0" role="button" aria-label="聚焦scenario 结论，逐 step 汇总, 03 / scenario" aria-pressed="false" data-node-kind="external" data-node-sublabel="逐 step 汇总" data-node-tag="worker 侧" data-node-context="03 / scenario">
+          <title>scenario 结论 · 逐 step 汇总 · 03 / scenario · worker 侧</title>
           <rect x="474" y="142" width="112" height="58" rx="6" class="c-mask"/>
           <rect x="474" y="142" width="112" height="58" rx="6" class="c-external" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(480 148) scale(0.6875)">
@@ -497,19 +497,19 @@ rect.c-bg-rect { fill: var(--bg); }
             <path d="M8 2.5h5.5V8M13.5 2.5 7.5 8.5"/>
           </g>
           <text data-node-label="" x="530" y="163" class="t-primary" font-size="10" font-weight="600" text-anchor="middle">scenario 结论</text>
-          <text x="530" y="179" class="t-muted" font-size="7" text-anchor="middle">本条逐步汇总</text>
+          <text x="530" y="179" class="t-muted" font-size="7" text-anchor="middle">逐 step 汇总</text>
         <text x="530" y="189" class="t-external" font-size="7" text-anchor="middle">worker 侧</text>
         </g>
 
-        <g id="node-job" data-node-id="job" data-node-label="job 收场态" tabindex="0" role="button" aria-label="聚焦job 收场态，跑完了才归约, 04 / job（= scope）" aria-pressed="false" data-node-kind="backend" data-node-sublabel="跑完了才归约" data-node-tag="core 侧" data-node-context="04 / job（= scope）">
-          <title>job 收场态 · 跑完了才归约 · 04 / job（= scope） · core 侧</title>
+        <g id="node-job" data-node-id="job" data-node-label="job 收场态" tabindex="0" role="button" aria-label="聚焦job 收场态，跑完后才归约, 04 / job（= scope）" aria-pressed="false" data-node-kind="backend" data-node-sublabel="跑完后才归约" data-node-tag="core 侧" data-node-context="04 / job（= scope）">
+          <title>job 收场态 · 跑完后才归约 · 04 / job（= scope） · core 侧</title>
           <rect x="689" y="142" width="112" height="58" rx="6" class="c-mask"/>
           <rect x="689" y="142" width="112" height="58" rx="6" class="c-backend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(695 148) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
           <text data-node-label="" x="745" y="163" class="t-primary" font-size="10" font-weight="600" text-anchor="middle">job 收场态</text>
-          <text x="745" y="179" class="t-muted" font-size="7" text-anchor="middle">跑完了才归约</text>
+          <text x="745" y="179" class="t-muted" font-size="7" text-anchor="middle">跑完后才归约</text>
         <text x="745" y="189" class="t-backend" font-size="7" text-anchor="middle">core 侧</text>
         </g>
 
@@ -553,4 +553,4 @@ rect.c-bg-rect { fill: var(--bg); }
           </g>
         </g>
       </svg>
-<!-- gherkai:source-sha256=9b5e39c4569ab17a1c13a9012aa03bfbb2bc5d71940616260de117b79f7e42fc -->
+<!-- gherkai:source-sha256=cae6c00d230c3efcb1d2cfe14ef2be94e1773f396e2f022d47a4161430fb84e1 -->

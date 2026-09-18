@@ -18,7 +18,7 @@
           "exitWatch",
           "settle"
         ],
-        "note": "CLI 进程内的循环全程守着：起子进程、逐行读事件、当场看退出。关掉 CLI 即中止。"
+        "note": "CLI 进程内的循环全程在线：起子进程、逐行读取事件、当场观察退出。关闭 CLI 即中止。"
       },
       {
         "id": "run-cloud",
@@ -32,7 +32,7 @@
           "exitWatch",
           "settle"
         ],
-        "note": "同一个循环换云端载体：任务在云上跑、事件轮询读回。关掉 CLI 只是放弃收结果，任务照跑照计费。"
+        "note": "同一个循环换云端载体：任务在云端执行、事件经轮询读回。关闭 CLI 只是放弃接收结果，任务继续运行并持续计费。"
       },
       {
         "id": "submit-local",
@@ -48,7 +48,7 @@
           "exitWatch",
           "settle"
         ],
-        "note": "提交即返回；本机后台进程反复推一步，事件旁路落库、退出由它自己观察。本机须保持开机。"
+        "note": "提交即返回；本机后台进程反复推一步，事件旁路落库、退出由该进程自行观察。本机须保持运行。"
       },
       {
         "id": "submit-cloud",
@@ -64,7 +64,7 @@
           "exitWatch",
           "settle"
         ],
-        "note": "提交完可关机（用隧道测本机应用时除外）：事件写表触发推进、任务停止被翻成退出记录，谁来推都靠重放同一份日志。"
+        "note": "提交后可关机（经隧道测本机应用时除外）：事件写表触发推进、任务停止转写为退出记录，任一宿主均凭重放同一份日志推进。"
       }
     ],
     "legend": {
@@ -86,7 +86,7 @@
           "label": "事件载体"
         },
         "messagebus": {
-          "label": "派发起 worker"
+          "label": "派发 worker"
         },
         "security": {
           "label": "退出观察"
@@ -101,7 +101,7 @@
     },
     {
       "id": "laneCore",
-      "label": "同一份 core（四格共用的代码）"
+      "label": "同一份 core（四种跑法共用）"
     },
     {
       "id": "laneStep",
@@ -121,7 +121,7 @@
     },
     {
       "id": "phLoop",
-      "label": "驱动循环：每批事件再推一步",
+      "label": "驱动循环：每批事件推进一步",
       "fromCol": 1,
       "toCol": 4,
       "variant": "emphasis"
@@ -164,7 +164,7 @@
       "col": 0,
       "type": "backend",
       "label": "本机后台进程",
-      "sublabel": "submit 留下的 · 可被接手",
+      "sublabel": "submit 派生 · 可被接力",
       "width": 140
     },
     {
@@ -191,7 +191,7 @@
       "col": 5,
       "type": "database",
       "label": "本机事件库",
-      "sublabel": "旁路原样存下",
+      "sublabel": "旁路原样落库",
       "width": 140
     },
     {
@@ -209,7 +209,7 @@
       "col": 1,
       "type": "backend",
       "label": "前台在线循环",
-      "sublabel": "全程在线守着",
+      "sublabel": "全程在线接收",
       "width": 140
     },
     {
@@ -218,7 +218,7 @@
       "col": 2,
       "type": "messagebus",
       "label": "起 worker",
-      "sublabel": "每 scope 一个，有并发闸",
+      "sublabel": "每 scope 一个，并发闸门",
       "width": 144
     },
     {
@@ -227,7 +227,7 @@
       "col": 4,
       "type": "security",
       "label": "退出观察者",
-      "sublabel": "看见 worker 停了",
+      "sublabel": "观察 worker 终止",
       "width": 140
     },
     {
@@ -245,7 +245,7 @@
       "col": 1,
       "type": "backend",
       "label": "无状态推一步",
-      "sublabel": "重放 · 条件写 · 抢 job",
+      "sublabel": "重放 · 条件写抢占 job",
       "width": 144
     },
     {
@@ -254,7 +254,7 @@
       "col": 0,
       "type": "cloud",
       "label": "云端推进函数",
-      "sublabel": "提交与事件都会唤醒",
+      "sublabel": "提交与事件均可唤醒",
       "width": 140
     },
     {
@@ -272,7 +272,7 @@
       "col": 4,
       "type": "database",
       "label": "云端事件表",
-      "sublabel": "逐条写进表",
+      "sublabel": "逐条写入表",
       "width": 140
     },
     {
@@ -309,7 +309,7 @@
       "id": "e-bg-step",
       "from": "bgProc",
       "to": "stepOnce",
-      "label": "反复推到收敛",
+      "label": "反复推至收敛",
       "variant": "default",
       "role": "branch"
     },
@@ -333,7 +333,7 @@
       "id": "e-step-dispatch",
       "from": "stepOnce",
       "to": "dispatch",
-      "label": "抢到才派发",
+      "label": "抢占后派发",
       "variant": "default",
       "role": "branch"
     },
@@ -344,7 +344,16 @@
       "label": "本机：起子进程",
       "variant": "emphasis",
       "role": "main",
-      "toSide": "left"
+      "toSide": "left",
+      "fromSide": "top",
+      "via": [
+        [
+          494.4,
+          119
+        ]
+      ],
+      "labelSegment": 0,
+      "labelDx": -52
     },
     {
       "id": "e-dispatch-cloud",
@@ -375,7 +384,7 @@
       "id": "e-pipe-store",
       "from": "pipeLocal",
       "to": "storeLocal",
-      "label": "后台：旁路落下",
+      "label": "后台：旁路落库",
       "variant": "dashed",
       "role": "async",
       "route": "straight"
@@ -393,7 +402,7 @@
       "id": "e-pipe-settle",
       "from": "pipeLocal",
       "to": "settle",
-      "label": "前台：听完即用",
+      "label": "前台：在线消费",
       "variant": "dashed",
       "role": "async"
     },
@@ -401,7 +410,7 @@
       "id": "e-store-settle",
       "from": "storeLocal",
       "to": "settle",
-      "label": "全量重放算终态",
+      "label": "全量重放定终态",
       "variant": "dashed",
       "role": "async",
       "route": "straight",
@@ -412,7 +421,7 @@
       "id": "e-table-settle",
       "from": "tableCloud",
       "to": "settle",
-      "label": "前台：轮询读一段",
+      "label": "前台：分段轮询",
       "variant": "dashed",
       "role": "async"
     },
@@ -420,7 +429,7 @@
       "id": "e-stream-settle",
       "from": "streamCloud",
       "to": "settle",
-      "label": "唤醒推进直到收敛",
+      "label": "唤醒推进至收敛",
       "variant": "dashed",
       "role": "async"
     },
@@ -428,7 +437,7 @@
       "id": "e-local-exit",
       "from": "workerLocal",
       "to": "exitWatch",
-      "label": "本机：父进程收",
+      "label": "本机：父进程",
       "variant": "security",
       "role": "branch",
       "fromSide": "bottom",
@@ -438,7 +447,7 @@
       "id": "e-cloud-exit",
       "from": "workerCloud",
       "to": "exitWatch",
-      "label": "云端：平台记一条",
+      "label": "云端：平台记录",
       "variant": "security",
       "role": "branch",
       "fromSide": "top",
@@ -456,18 +465,18 @@
   "cards": [
     {
       "dot": "cyan",
-      "title": "同一份 core，四格只换注入件",
+      "title": "同一份 core，四种跑法只换注入件",
       "items": [
-        "解析 · 分组（plan 到此为止）· 投影 · 判定：四格共用一份代码",
-        "换掉的只是注入件：谁承载执行、事件从哪读、job 用什么起、谁看见 worker 停了"
+        "解析 · 分组（plan 到此为止）· 投影 · 判定：四种跑法共用一份代码",
+        "差别只在注入件：执行的承载进程、事件读取通道、job 的启动方式、退出观察者"
       ]
     },
     {
       "dot": "violet",
-      "title": "两处最容易读错",
+      "title": "两处常见误读",
       "items": [
-        "status --wait 两档不同：本机接手后就是唯一推进者（它一停，run 就地停摆），云端只踢一脚、踢完就能离场",
-        "退出码是父进程 / 平台观察来的，不是 worker 自己上报"
+        "status --wait 两档不同：本机接力后即唯一推进者（该进程停止则 run 停滞），云端仅在检测到停滞时唤醒推进函数、之后无需在线",
+        "退出码由父进程 / 平台观察得到，不由 worker 上报"
       ]
     }
   ]

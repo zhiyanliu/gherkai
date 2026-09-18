@@ -12,7 +12,7 @@
           "label": "命令入口"
         },
         "backend": {
-          "label": "gherkai 的包与进程"
+          "label": "gherkai 包与进程"
         },
         "cloud": {
           "label": "AWS 托管服务"
@@ -264,7 +264,7 @@
       "id": "browser-app",
       "from": "browser",
       "to": "app",
-      "label": "公网直达",
+      "label": "公网直连",
       "variant": "emphasis",
       "fromSide": "right",
       "toSide": "left",
@@ -284,7 +284,7 @@
       "id": "cli-deploy",
       "from": "cli",
       "to": "deploy",
-      "label": "部署与自检时才用",
+      "label": "仅部署与自检调用",
       "variant": "dashed",
       "fromSide": "left",
       "toSide": "right"
@@ -293,27 +293,27 @@
   "cards": [
     {
       "dot": "cyan",
-      "title": "两个引擎完全对称",
+      "title": "两个引擎对称",
       "items": [
-        "平级、同一套协议：核心不知道对面是 Node 还是 Python",
-        "scenario 没标引擎就走命令行给的缺省引擎",
-        "各自用的模型是当前值，真源在代码常量"
+        "平级、同一套协议：核心不感知 worker 的实现语言",
+        "scenario 未标引擎时采用命令行指定的缺省引擎",
+        "两个引擎的模型为当前值，真源在代码常量"
       ]
     },
     {
       "dot": "emerald",
       "title": "确定性 step 的加载者是 worker，不是 CLI",
       "items": [
-        "本机档：worker 启动时从你给的目录加载",
-        "云端档：build 进 variant 镜像，提交侧再给目录也无效"
+        "本机档：worker 启动时从指定目录加载",
+        "云端档：构建进 variant 镜像，提交侧指定目录无效"
       ]
     },
     {
       "dot": "violet",
       "title": "部署 provider 不在执行路径上",
       "items": [
-        "只有 deploy / destroy / doctor 会碰它",
-        "云端跑时参与的只是它的产出：栈资源、推进函数、任务定义"
+        "仅 deploy / destroy / doctor 访问它",
+        "云端执行时参与的只是它的产出：栈资源、推进函数、任务定义"
       ]
     }
   ]

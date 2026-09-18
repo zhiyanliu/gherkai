@@ -2,26 +2,26 @@
   "schema_version": 2,
   "diagram_type": "workflow",
   "meta": {
-    "title": "一条确定性 step 的四段路：写 · 装 · 查 · 跑",
+    "title": "一条确定性 step 的四段路径：写 · 装 · 查 · 跑",
     "locale": "zh-CN",
     "quality_profile": "showcase",
     "legend": {
       "mode": "auto",
       "entries": {
         "frontend": {
-          "label": "你写的 step"
+          "label": "使用方的 step"
         },
         "backend": {
-          "label": "worker 启动时装表"
+          "label": "worker 启动时注册"
         },
         "database": {
-          "label": "那张注册表"
+          "label": "注册表"
         },
         "external": {
-          "label": "命令来问一句"
+          "label": "查询入口"
         },
         "messagebus": {
-          "label": "真跑时的派发"
+          "label": "真跑时派发"
         }
       }
     }
@@ -29,28 +29,28 @@
   "lanes": [
     {
       "id": "laneMine",
-      "label": "你写的（项目 steps/ 里）"
+      "label": "使用方项目的 steps/"
     },
     {
       "id": "laneBuiltin",
-      "label": "随引擎包自带的"
+      "label": "引擎包内建"
     },
     {
       "id": "laneWorker",
-      "label": "worker 进程内：装表 · 答问 · 派发"
+      "label": "worker 进程内：注册 · 查询 · 派发"
     }
   ],
   "phases": [
     {
       "id": "phMake",
-      "label": "① 写 · ② 装：这张表怎么来的",
+      "label": "① 写 · ② 装：注册表的构成",
       "fromCol": 0,
       "toCol": 3,
       "variant": "emphasis"
     },
     {
       "id": "phUse",
-      "label": "③ 查 · ④ 跑：谁在用这张表",
+      "label": "③ 查 · ④ 跑：注册表的下游",
       "fromCol": 4,
       "toCol": 5
     }
@@ -87,7 +87,7 @@
       "lane": "laneMine",
       "col": 2,
       "type": "frontend",
-      "label": "① 你写的 step",
+      "label": "① 使用方 step",
       "sublabel": "模式 + 说明 + 示例",
       "width": 148
     },
@@ -97,7 +97,7 @@
       "col": 3,
       "type": "backend",
       "label": "内建脚手架",
-      "sublabel": "不用你写，随包来",
+      "sublabel": "随引擎包自带",
       "width": 148
     },
     {
@@ -105,8 +105,8 @@
       "lane": "laneWorker",
       "col": 2,
       "type": "backend",
-      "label": "② 加载你的目录",
-      "sublabel": "排序递归 · 出错就退",
+      "label": "② 加载目录",
+      "sublabel": "排序递归 · 失败退出",
       "width": 152
     },
     {
@@ -115,7 +115,7 @@
       "col": 3,
       "type": "database",
       "label": "同一张注册表",
-      "sublabel": "模式 → 你的 handler",
+      "sublabel": "模式 → handler",
       "width": 152
     },
     {
@@ -123,8 +123,8 @@
       "lane": "laneWorker",
       "col": 4,
       "type": "external",
-      "label": "③ 查这张表",
-      "sublabel": "清单 · 体检 · 预检标注",
+      "label": "③ 查询该表",
+      "sublabel": "清单 · 诊断 · 预检标注",
       "width": 152
     },
     {
@@ -133,7 +133,7 @@
       "col": 5,
       "type": "messagebus",
       "label": "④ 逐 step 派发",
-      "sublabel": "命中即走你的 handler",
+      "sublabel": "命中即调用 handler",
       "width": 152
     }
   ],
@@ -142,7 +142,7 @@
       "id": "e-write-load",
       "from": "write",
       "to": "load",
-      "label": "启动时按目录读",
+      "label": "启动时加载",
       "variant": "emphasis",
       "role": "main",
       "fromSide": "bottom",
@@ -153,7 +153,7 @@
       "id": "e-builtin-registry",
       "from": "builtin",
       "to": "registry",
-      "label": "先它自注册",
+      "label": "先自注册",
       "variant": "default",
       "role": "branch",
       "fromSide": "bottom",
@@ -164,7 +164,7 @@
       "id": "e-load-registry",
       "from": "load",
       "to": "registry",
-      "label": "随后叠进来",
+      "label": "随后注册",
       "variant": "emphasis",
       "role": "main"
     },
@@ -180,7 +180,7 @@
       "id": "e-registry-dispatch",
       "from": "registry",
       "to": "dispatch",
-      "label": "每步先查它",
+      "label": "每步先查表",
       "variant": "emphasis",
       "role": "main",
       "fromSide": "top",
@@ -191,26 +191,26 @@
   "cards": [
     {
       "dot": "cyan",
-      "title": "一张表，没有第二处真值",
+      "title": "一张注册表，无第二真值源",
       "items": [
-        "内建脚手架与你的 steps/ 写进同一张表：清单里列的、预检标的、真跑派发的是同一份",
-        "每个 worker 进程都先装表、再分流，所以这三种用法不可能各看一套"
+        "内建脚手架与使用方 steps/ 注册进同一张表：清单列出的、预检标注的、真跑派发的是同一份",
+        "每个 worker 进程先加载注册表、再按入口分流，三种用法不存在分叉"
       ]
     },
     {
       "dot": "amber",
-      "title": "装表只有两种结局",
+      "title": "加载注册表的两类失败",
       "items": [
-        "目录里任一文件出错 → worker 响亮退出，绝不静默少注册几条",
-        "注册时缺说明或示例 → 当场报错：写用例的人查清单时得看得见它"
+        "目录中任一文件出错 → worker 响亮退出，不静默少注册",
+        "注册时缺说明或示例 → 立即报错：清单对 feature 作者必须可见"
       ]
     },
     {
       "dot": "violet",
-      "title": "命中与不命中",
+      "title": "命中与未命中",
       "items": [
-        "命中就走你的 handler：不投票、不问 AI",
-        "表里没有的 step 才交给 AI；中间还有一条不查表的直达路径，见正文"
+        "命中即调用使用方 handler：不投票、不调用 AI",
+        "未命中的 step 交给 AI；其间另有一条不查注册表的直达路径，见正文"
       ]
     }
   ]

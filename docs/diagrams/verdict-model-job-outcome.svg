@@ -415,7 +415,7 @@ svg[data-theme="light"] { --bg: #f8fafc; --grid: #e2e8f0; --text: #0f172a; --tex
 svg[data-theme="dark"] { --bg: #020617; --grid: #1e293b; --text: #ffffff; --text-muted: #94a3b8; --text-dim: #475569; --text-faint: #7d8da1; --panel: rgba(15, 23, 42, 0.5); --panel-border: #1e293b; --lane-fill: rgba(15, 23, 42, 0.22); --lane-stroke: #334155; --arrow: #64748b; --arrow-emphasis: #34d399; --mask: #0f172a; --frontend-fill: rgba(8, 51, 68, 0.4); --frontend-stroke: #22d3ee; --backend-fill: rgba(6, 78, 59, 0.4); --backend-stroke: #34d399; --database-fill: rgba(76, 29, 149, 0.4); --database-stroke: #a78bfa; --cloud-fill: rgba(120, 53, 15, 0.3); --cloud-stroke: #fbbf24; --security-fill: rgba(136, 19, 55, 0.4); --security-stroke: #fb7185; --messagebus-fill: rgba(251, 146, 60, 0.3); --messagebus-stroke: #fb923c; --external-fill: rgba(30, 41, 59, 0.5); --external-stroke: #94a3b8; --toolbar-bg: rgba(15, 23, 42, 0.8); --toolbar-border: #334155; --toolbar-text: #e2e8f0; --toolbar-hover: rgba(15, 23, 42, 0.95); --toolbar-menu-bg: #0f172a; }
 rect.c-bg-rect { fill: var(--bg); }
 </style><rect width="100%" height="100%" class="c-bg-rect"/>
-        <title id="archify-diagram-title">一个 job 怎么收场：归因的优先级</title>
+        <title id="archify-diagram-title">job 收场态：归因的优先级</title>
         <desc id="archify-diagram-description">由 Archify 生成的工作流图。</desc>
         <!-- Definitions -->
         <defs>
@@ -441,7 +441,7 @@ rect.c-bg-rect { fill: var(--bg); }
 
         <!-- Swimlanes -->
         <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-0" x="40" y="52" width="1125" height="242" rx="10" class="c-lane" stroke-width="1"/>
-        <text x="54" y="74" class="t-dim" font-size="10" font-weight="600">01 / 判据：一串有序短路，前一问答上就不再往后看</text>
+        <text x="54" y="74" class="t-dim" font-size="10" font-weight="600">01 / 判据：有序短路链，前一判据命中即定案</text>
 
         <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-1" x="40" y="314" width="1125" height="242" rx="10" class="c-lane" stroke-width="1"/>
         <text x="54" y="336" class="t-dim" font-size="10" font-weight="600">02 / 定案</text>
@@ -449,30 +449,30 @@ rect.c-bg-rect { fill: var(--bg); }
         <!-- Phase headers -->
         <line x1="74" y1="35" x2="348" y2="35" class="a-default" stroke-width="1.1"/>
         <rect x="74" y="27" width="274" height="16" rx="4" class="c-mask"/>
-        <text x="211" y="39" class="t-muted" font-size="8" font-weight="600" text-anchor="middle">还没起来就定案</text>
+        <text x="211" y="39" class="t-muted" font-size="8" font-weight="600" text-anchor="middle">启动前定案</text>
         <line x1="448.79999999999995" y1="35" x2="1126.4" y2="35" class="a-emphasis" stroke-width="1.1"/>
         <rect x="448.79999999999995" y="27" width="677.6000000000001" height="16" rx="4" class="c-mask"/>
-        <text x="787.6" y="39" class="t-backend" font-size="8" font-weight="600" text-anchor="middle">起来之后：先看有没有被主动停，再看事件流怎么结束</text>
+        <text x="787.6" y="39" class="t-backend" font-size="8" font-weight="600" text-anchor="middle">启动后：先看是否主动中止，再看事件流如何结束</text>
 
         <!-- Workflow groups -->
 
 
         <!-- Edge paths -->
-        <path data-edge-from="q1" data-edge-to="q2" data-edge-label="没有" data-edge-key="0" data-edge-id="q1-q2" data-composition-points="192,188;230,188" d="M 192 188 L 230 188" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path data-edge-from="q1" data-edge-to="q2" data-edge-label="否" data-edge-key="0" data-edge-id="q1-q2" data-composition-points="192,188;230,188" d="M 192 188 L 230 188" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
         <path data-edge-from="q1" data-edge-to="sk" data-edge-key="1" data-edge-id="q1-sk" data-composition-points="120,214;120,424" d="M 120 214 L 120 424" class="a-dashed" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
         <path data-edge-from="q2" data-edge-to="ee1" data-edge-key="2" data-edge-id="q2-ee1" data-composition-points="302,214;302,424" d="M 302 214 L 302 424" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
-        <path data-edge-from="q2" data-edge-to="q3" data-edge-label="起来了" data-edge-key="3" data-edge-id="q2-q3" data-composition-points="374,188;420.8,188" d="M 374 188 L 420.8 188" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path data-edge-from="q2" data-edge-to="q3" data-edge-label="已启动" data-edge-key="3" data-edge-id="q2-q3" data-composition-points="374,188;420.8,188" d="M 374 188 L 420.8 188" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
         <path data-edge-from="q3" data-edge-to="ab" data-edge-label="fail-fast" data-edge-key="4" data-edge-id="q3-ab" data-composition-points="494.8,214;494.8,304;576.8,304;576.8,526;560.8,526" d="M 494.8 214 L 494.8 304 L 576.8 304 L 576.8 526 L 560.8 526" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
-        <path data-edge-from="q3" data-edge-to="q4" data-edge-label="都没有" data-edge-key="5" data-edge-id="q3-q4" data-composition-points="568.8,188;615.6,188" d="M 568.8 188 L 615.6 188" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path data-edge-from="q3" data-edge-to="q4" data-edge-label="无中止" data-edge-key="5" data-edge-id="q3-q4" data-composition-points="568.8,188;615.6,188" d="M 568.8 188 L 615.6 188" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
         <path data-edge-from="q3" data-edge-to="to" data-edge-label="墙钟到点" data-edge-key="6" data-edge-id="q3-to" data-composition-points="494.8,214;494.8,304;412.8,304;412.8,450;428.8,450" d="M 494.8 214 L 494.8 304 L 412.8 304 L 412.8 450 L 428.8 450" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
         <path data-edge-from="q4" data-edge-to="ne" data-edge-label="是" data-edge-key="7" data-edge-id="q4-ne" data-composition-points="691.6,214;691.6,304;691.6,424" d="M 691.6 214 L 691.6 304 L 691.6 424" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
-        <path data-edge-from="q4" data-edge-to="q5" data-edge-label="不是" data-edge-key="8" data-edge-id="q4-q5" data-composition-points="767.6,188;805.6,188" d="M 767.6 188 L 805.6 188" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        <path data-edge-from="q5" data-edge-to="agg" data-edge-label="都不是" data-edge-key="9" data-edge-id="q5-agg" data-composition-points="957.6,188;1004.4000000000001,188" d="M 957.6 188 L 1004.4000000000001 188" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path data-edge-from="q4" data-edge-to="q5" data-edge-label="否" data-edge-key="8" data-edge-id="q4-q5" data-composition-points="767.6,188;805.6,188" d="M 767.6 188 L 805.6 188" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path data-edge-from="q5" data-edge-to="agg" data-edge-label="均不是" data-edge-key="9" data-edge-id="q5-agg" data-composition-points="957.6,188;1004.4000000000001,188" d="M 957.6 188 L 1004.4000000000001 188" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
         <path data-edge-from="q5" data-edge-to="ee2" data-edge-label="是" data-edge-key="10" data-edge-id="q5-ee2" data-composition-points="881.6,214;881.6,304;881.6,424" d="M 881.6 214 L 881.6 304 L 881.6 424" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
 
         <!-- Nodes -->
-        <g id="node-q1" data-node-id="q1" data-node-label="fail-fast 中止？" tabindex="0" role="button" aria-label="聚焦fail-fast 中止？，起 worker 之前, 判据：一串有序短路，前一问答上就不再往后看 › 还没起来就定案" aria-pressed="false" data-node-kind="security" data-node-sublabel="起 worker 之前" data-node-context="判据：一串有序短路，前一问答上就不再往后看 › 还没起来就定案">
-          <title>fail-fast 中止？ · 起 worker 之前 · 判据：一串有序短路，前一问答上就不再往后看 › 还没起来就定案</title>
+        <g id="node-q1" data-node-id="q1" data-node-label="fail-fast 中止？" tabindex="0" role="button" aria-label="聚焦fail-fast 中止？，worker 启动前, 判据：有序短路链，前一判据命中即定案 › 启动前定案" aria-pressed="false" data-node-kind="security" data-node-sublabel="worker 启动前" data-node-context="判据：有序短路链，前一判据命中即定案 › 启动前定案">
+          <title>fail-fast 中止？ · worker 启动前 · 判据：有序短路链，前一判据命中即定案 › 启动前定案</title>
           <rect x="48" y="162" width="144" height="52" rx="6" class="c-mask"/>
           <rect x="48" y="162" width="144" height="52" rx="6" class="c-security" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(54 168) scale(0.6875)">
@@ -480,22 +480,22 @@ rect.c-bg-rect { fill: var(--bg); }
             <path d="m5.8 8 1.5 1.5 3-3"/>
           </g>
           <text data-node-label="" x="120" y="183" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">fail-fast 中止？</text>
-          <text x="120" y="200" class="t-muted" font-size="8" text-anchor="middle">起 worker 之前</text>
+          <text x="120" y="200" class="t-muted" font-size="8" text-anchor="middle">worker 启动前</text>
         </g>
 
-        <g id="node-q2" data-node-id="q2" data-node-label="worker 起得来？" tabindex="0" role="button" aria-label="聚焦worker 起得来？，判据：一串有序短路，前一问答上就不再往后看 › 还没起来就定案" aria-pressed="false" data-node-kind="security" data-node-context="判据：一串有序短路，前一问答上就不再往后看 › 还没起来就定案">
-          <title>worker 起得来？ · 判据：一串有序短路，前一问答上就不再往后看 › 还没起来就定案</title>
+        <g id="node-q2" data-node-id="q2" data-node-label="worker 能启动？" tabindex="0" role="button" aria-label="聚焦worker 能启动？，判据：有序短路链，前一判据命中即定案 › 启动前定案" aria-pressed="false" data-node-kind="security" data-node-context="判据：有序短路链，前一判据命中即定案 › 启动前定案">
+          <title>worker 能启动？ · 判据：有序短路链，前一判据命中即定案 › 启动前定案</title>
           <rect x="230" y="162" width="144" height="52" rx="6" class="c-mask"/>
           <rect x="230" y="162" width="144" height="52" rx="6" class="c-security" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(236 168) scale(0.6875)">
             <path d="M8 2.2 13 4v3.5c0 3.1-1.8 5.4-5 6.5-3.2-1.1-5-3.4-5-6.5V4Z"/>
             <path d="m5.8 8 1.5 1.5 3-3"/>
           </g>
-          <text data-node-label="" x="302" y="183" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">worker 起得来？</text>
+          <text data-node-label="" x="302" y="183" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">worker 能启动？</text>
         </g>
 
-        <g id="node-q3" data-node-id="q3" data-node-label="被主动中止？" tabindex="0" role="button" aria-label="聚焦被主动中止？，跑事件流，逐条复查, 判据：一串有序短路，前一问答上就不再往后看 › 起来之后：先看有没有被主动停，再看事件流怎么结束" aria-pressed="false" data-node-kind="security" data-node-sublabel="跑事件流，逐条复查" data-node-context="判据：一串有序短路，前一问答上就不再往后看 › 起来之后：先看有没有被主动停，再看事件流怎么结束">
-          <title>被主动中止？ · 跑事件流，逐条复查 · 判据：一串有序短路，前一问答上就不再往后看 › 起来之后：先看有没有被主动停，再看事件流怎么结束</title>
+        <g id="node-q3" data-node-id="q3" data-node-label="被主动中止？" tabindex="0" role="button" aria-label="聚焦被主动中止？，事件流逐条复查, 判据：有序短路链，前一判据命中即定案 › 启动后：先看是否主动中止，再看事件流如何结束" aria-pressed="false" data-node-kind="security" data-node-sublabel="事件流逐条复查" data-node-context="判据：有序短路链，前一判据命中即定案 › 启动后：先看是否主动中止，再看事件流如何结束">
+          <title>被主动中止？ · 事件流逐条复查 · 判据：有序短路链，前一判据命中即定案 › 启动后：先看是否主动中止，再看事件流如何结束</title>
           <rect x="420.8" y="162" width="148" height="52" rx="6" class="c-mask"/>
           <rect x="420.8" y="162" width="148" height="52" rx="6" class="c-security" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(426.8 168) scale(0.6875)">
@@ -503,11 +503,11 @@ rect.c-bg-rect { fill: var(--bg); }
             <path d="m5.8 8 1.5 1.5 3-3"/>
           </g>
           <text data-node-label="" x="494.8" y="183" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">被主动中止？</text>
-          <text x="494.8" y="200" class="t-muted" font-size="8" text-anchor="middle">跑事件流，逐条复查</text>
+          <text x="494.8" y="200" class="t-muted" font-size="8" text-anchor="middle">事件流逐条复查</text>
         </g>
 
-        <g id="node-q4" data-node-id="q4" data-node-label="网络专用退出码？" tabindex="0" role="button" aria-label="聚焦网络专用退出码？，worker 自己报的, 判据：一串有序短路，前一问答上就不再往后看 › 起来之后：先看有没有被主动停，再看事件流怎么结束" aria-pressed="false" data-node-kind="security" data-node-sublabel="worker 自己报的" data-node-context="判据：一串有序短路，前一问答上就不再往后看 › 起来之后：先看有没有被主动停，再看事件流怎么结束">
-          <title>网络专用退出码？ · worker 自己报的 · 判据：一串有序短路，前一问答上就不再往后看 › 起来之后：先看有没有被主动停，再看事件流怎么结束</title>
+        <g id="node-q4" data-node-id="q4" data-node-label="网络专用退出码？" tabindex="0" role="button" aria-label="聚焦网络专用退出码？，worker 上报, 判据：有序短路链，前一判据命中即定案 › 启动后：先看是否主动中止，再看事件流如何结束" aria-pressed="false" data-node-kind="security" data-node-sublabel="worker 上报" data-node-context="判据：有序短路链，前一判据命中即定案 › 启动后：先看是否主动中止，再看事件流如何结束">
+          <title>网络专用退出码？ · worker 上报 · 判据：有序短路链，前一判据命中即定案 › 启动后：先看是否主动中止，再看事件流如何结束</title>
           <rect x="615.6" y="162" width="152" height="52" rx="6" class="c-mask"/>
           <rect x="615.6" y="162" width="152" height="52" rx="6" class="c-security" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(621.6 168) scale(0.6875)">
@@ -515,33 +515,33 @@ rect.c-bg-rect { fill: var(--bg); }
             <path d="m5.8 8 1.5 1.5 3-3"/>
           </g>
           <text data-node-label="" x="691.6" y="183" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">网络专用退出码？</text>
-          <text x="691.6" y="200" class="t-muted" font-size="8" text-anchor="middle">worker 自己报的</text>
+          <text x="691.6" y="200" class="t-muted" font-size="8" text-anchor="middle">worker 上报</text>
         </g>
 
-        <g id="node-q5" data-node-id="q5" data-node-label="崩了或收尾不全？" tabindex="0" role="button" aria-label="聚焦崩了或收尾不全？，判据：一串有序短路，前一问答上就不再往后看 › 起来之后：先看有没有被主动停，再看事件流怎么结束" aria-pressed="false" data-node-kind="security" data-node-context="判据：一串有序短路，前一问答上就不再往后看 › 起来之后：先看有没有被主动停，再看事件流怎么结束">
-          <title>崩了或收尾不全？ · 判据：一串有序短路，前一问答上就不再往后看 › 起来之后：先看有没有被主动停，再看事件流怎么结束</title>
+        <g id="node-q5" data-node-id="q5" data-node-label="非零退出或不全？" tabindex="0" role="button" aria-label="聚焦非零退出或不全？，判据：有序短路链，前一判据命中即定案 › 启动后：先看是否主动中止，再看事件流如何结束" aria-pressed="false" data-node-kind="security" data-node-context="判据：有序短路链，前一判据命中即定案 › 启动后：先看是否主动中止，再看事件流如何结束">
+          <title>非零退出或不全？ · 判据：有序短路链，前一判据命中即定案 › 启动后：先看是否主动中止，再看事件流如何结束</title>
           <rect x="805.6" y="162" width="152" height="52" rx="6" class="c-mask"/>
           <rect x="805.6" y="162" width="152" height="52" rx="6" class="c-security" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(811.6 168) scale(0.6875)">
             <path d="M8 2.2 13 4v3.5c0 3.1-1.8 5.4-5 6.5-3.2-1.1-5-3.4-5-6.5V4Z"/>
             <path d="m5.8 8 1.5 1.5 3-3"/>
           </g>
-          <text data-node-label="" x="881.6" y="183" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">崩了或收尾不全？</text>
+          <text data-node-label="" x="881.6" y="183" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">非零退出或不全？</text>
         </g>
 
-        <g id="node-agg" data-node-id="agg" data-node-label="各 scenario 归约" tabindex="0" role="button" aria-label="聚焦各 scenario 归约，干净收尾、内容完整, 判据：一串有序短路，前一问答上就不再往后看 › 起来之后：先看有没有被主动停，再看事件流怎么结束" aria-pressed="false" data-node-kind="backend" data-node-sublabel="干净收尾、内容完整" data-node-context="判据：一串有序短路，前一问答上就不再往后看 › 起来之后：先看有没有被主动停，再看事件流怎么结束">
-          <title>各 scenario 归约 · 干净收尾、内容完整 · 判据：一串有序短路，前一问答上就不再往后看 › 起来之后：先看有没有被主动停，再看事件流怎么结束</title>
+        <g id="node-agg" data-node-id="agg" data-node-label="各 scenario 归约" tabindex="0" role="button" aria-label="聚焦各 scenario 归约，正常退出、内容完整, 判据：有序短路链，前一判据命中即定案 › 启动后：先看是否主动中止，再看事件流如何结束" aria-pressed="false" data-node-kind="backend" data-node-sublabel="正常退出、内容完整" data-node-context="判据：有序短路链，前一判据命中即定案 › 启动后：先看是否主动中止，再看事件流如何结束">
+          <title>各 scenario 归约 · 正常退出、内容完整 · 判据：有序短路链，前一判据命中即定案 › 启动后：先看是否主动中止，再看事件流如何结束</title>
           <rect x="1004.4000000000001" y="162" width="152" height="52" rx="6" class="c-mask"/>
           <rect x="1004.4000000000001" y="162" width="152" height="52" rx="6" class="c-backend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(1010.4000000000001 168) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
           <text data-node-label="" x="1080.4" y="183" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">各 scenario 归约</text>
-          <text x="1080.4" y="200" class="t-muted" font-size="8" text-anchor="middle">干净收尾、内容完整</text>
+          <text x="1080.4" y="200" class="t-muted" font-size="8" text-anchor="middle">正常退出、内容完整</text>
         </g>
 
-        <g id="node-sk" data-node-id="sk" data-node-label="skipped" tabindex="0" role="button" aria-label="聚焦skipped，从未启动 · 无归因, 定案 › 还没起来就定案" aria-pressed="false" data-node-kind="external" data-node-sublabel="从未启动 · 无归因" data-node-context="定案 › 还没起来就定案">
-          <title>skipped · 从未启动 · 无归因 · 定案 › 还没起来就定案</title>
+        <g id="node-sk" data-node-id="sk" data-node-label="skipped" tabindex="0" role="button" aria-label="聚焦skipped，从未启动 · 无归因, 定案 › 启动前定案" aria-pressed="false" data-node-kind="external" data-node-sublabel="从未启动 · 无归因" data-node-context="定案 › 启动前定案">
+          <title>skipped · 从未启动 · 无归因 · 定案 › 启动前定案</title>
           <rect x="54" y="424" width="132" height="52" rx="6" class="c-mask"/>
           <rect x="54" y="424" width="132" height="52" rx="6" class="c-external" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(60 430) scale(0.6875)">
@@ -552,8 +552,8 @@ rect.c-bg-rect { fill: var(--bg); }
           <text x="120" y="462" class="t-muted" font-size="8" text-anchor="middle">从未启动 · 无归因</text>
         </g>
 
-        <g id="node-ee1" data-node-id="ee1" data-node-label="engine_error" tabindex="0" role="button" aria-label="聚焦engine_error，起不来 · error, 定案 › 还没起来就定案" aria-pressed="false" data-node-kind="external" data-node-sublabel="起不来 · error" data-node-context="定案 › 还没起来就定案">
-          <title>engine_error · 起不来 · error · 定案 › 还没起来就定案</title>
+        <g id="node-ee1" data-node-id="ee1" data-node-label="engine_error" tabindex="0" role="button" aria-label="聚焦engine_error，启动失败 · error, 定案 › 启动前定案" aria-pressed="false" data-node-kind="external" data-node-sublabel="启动失败 · error" data-node-context="定案 › 启动前定案">
+          <title>engine_error · 启动失败 · error · 定案 › 启动前定案</title>
           <rect x="236" y="424" width="132" height="52" rx="6" class="c-mask"/>
           <rect x="236" y="424" width="132" height="52" rx="6" class="c-external" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(242 430) scale(0.6875)">
@@ -561,11 +561,11 @@ rect.c-bg-rect { fill: var(--bg); }
             <path d="M8 2.5h5.5V8M13.5 2.5 7.5 8.5"/>
           </g>
           <text data-node-label="" x="302" y="445" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">engine_error</text>
-          <text x="302" y="462" class="t-muted" font-size="8" text-anchor="middle">起不来 · error</text>
+          <text x="302" y="462" class="t-muted" font-size="8" text-anchor="middle">启动失败 · error</text>
         </g>
 
-        <g id="node-ab" data-node-id="ab" data-node-label="aborted" tabindex="0" role="button" aria-label="聚焦aborted，有现场 · 无归因, 定案 › 起来之后：先看有没有被主动停，再看事件流怎么结束" aria-pressed="false" data-node-kind="external" data-node-sublabel="有现场 · 无归因" data-node-context="定案 › 起来之后：先看有没有被主动停，再看事件流怎么结束">
-          <title>aborted · 有现场 · 无归因 · 定案 › 起来之后：先看有没有被主动停，再看事件流怎么结束</title>
+        <g id="node-ab" data-node-id="ab" data-node-label="aborted" tabindex="0" role="button" aria-label="聚焦aborted，有现场 · 无归因, 定案 › 启动后：先看是否主动中止，再看事件流如何结束" aria-pressed="false" data-node-kind="external" data-node-sublabel="有现场 · 无归因" data-node-context="定案 › 启动后：先看是否主动中止，再看事件流如何结束">
+          <title>aborted · 有现场 · 无归因 · 定案 › 启动后：先看是否主动中止，再看事件流如何结束</title>
           <rect x="428.8" y="500" width="132" height="52" rx="6" class="c-mask"/>
           <rect x="428.8" y="500" width="132" height="52" rx="6" class="c-external" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(434.8 506) scale(0.6875)">
@@ -576,8 +576,8 @@ rect.c-bg-rect { fill: var(--bg); }
           <text x="494.8" y="538" class="t-muted" font-size="8" text-anchor="middle">有现场 · 无归因</text>
         </g>
 
-        <g id="node-to" data-node-id="to" data-node-label="timeout" tabindex="0" role="button" aria-label="聚焦timeout，墙钟到点 · error, 定案 › 起来之后：先看有没有被主动停，再看事件流怎么结束" aria-pressed="false" data-node-kind="external" data-node-sublabel="墙钟到点 · error" data-node-context="定案 › 起来之后：先看有没有被主动停，再看事件流怎么结束">
-          <title>timeout · 墙钟到点 · error · 定案 › 起来之后：先看有没有被主动停，再看事件流怎么结束</title>
+        <g id="node-to" data-node-id="to" data-node-label="timeout" tabindex="0" role="button" aria-label="聚焦timeout，墙钟到点 · error, 定案 › 启动后：先看是否主动中止，再看事件流如何结束" aria-pressed="false" data-node-kind="external" data-node-sublabel="墙钟到点 · error" data-node-context="定案 › 启动后：先看是否主动中止，再看事件流如何结束">
+          <title>timeout · 墙钟到点 · error · 定案 › 启动后：先看是否主动中止，再看事件流如何结束</title>
           <rect x="428.8" y="424" width="132" height="52" rx="6" class="c-mask"/>
           <rect x="428.8" y="424" width="132" height="52" rx="6" class="c-external" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(434.8 430) scale(0.6875)">
@@ -588,8 +588,8 @@ rect.c-bg-rect { fill: var(--bg); }
           <text x="494.8" y="462" class="t-muted" font-size="8" text-anchor="middle">墙钟到点 · error</text>
         </g>
 
-        <g id="node-ne" data-node-id="ne" data-node-label="network_error" tabindex="0" role="button" aria-label="聚焦network_error，建连耗尽 · error, 定案 › 起来之后：先看有没有被主动停，再看事件流怎么结束" aria-pressed="false" data-node-kind="external" data-node-sublabel="建连耗尽 · error" data-node-context="定案 › 起来之后：先看有没有被主动停，再看事件流怎么结束">
-          <title>network_error · 建连耗尽 · error · 定案 › 起来之后：先看有没有被主动停，再看事件流怎么结束</title>
+        <g id="node-ne" data-node-id="ne" data-node-label="network_error" tabindex="0" role="button" aria-label="聚焦network_error，建连耗尽 · error, 定案 › 启动后：先看是否主动中止，再看事件流如何结束" aria-pressed="false" data-node-kind="external" data-node-sublabel="建连耗尽 · error" data-node-context="定案 › 启动后：先看是否主动中止，再看事件流如何结束">
+          <title>network_error · 建连耗尽 · error · 定案 › 启动后：先看是否主动中止，再看事件流如何结束</title>
           <rect x="625.6" y="424" width="132" height="52" rx="6" class="c-mask"/>
           <rect x="625.6" y="424" width="132" height="52" rx="6" class="c-external" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(631.6 430) scale(0.6875)">
@@ -600,8 +600,8 @@ rect.c-bg-rect { fill: var(--bg); }
           <text x="691.6" y="462" class="t-muted" font-size="8" text-anchor="middle">建连耗尽 · error</text>
         </g>
 
-        <g id="node-ee2" data-node-id="ee2" data-node-label="engine_error" tabindex="0" role="button" aria-label="聚焦engine_error，兜底 · error, 定案 › 起来之后：先看有没有被主动停，再看事件流怎么结束" aria-pressed="false" data-node-kind="external" data-node-sublabel="兜底 · error" data-node-context="定案 › 起来之后：先看有没有被主动停，再看事件流怎么结束">
-          <title>engine_error · 兜底 · error · 定案 › 起来之后：先看有没有被主动停，再看事件流怎么结束</title>
+        <g id="node-ee2" data-node-id="ee2" data-node-label="engine_error" tabindex="0" role="button" aria-label="聚焦engine_error，默认 · error, 定案 › 启动后：先看是否主动中止，再看事件流如何结束" aria-pressed="false" data-node-kind="external" data-node-sublabel="默认 · error" data-node-context="定案 › 启动后：先看是否主动中止，再看事件流如何结束">
+          <title>engine_error · 默认 · error · 定案 › 启动后：先看是否主动中止，再看事件流如何结束</title>
           <rect x="815.6" y="424" width="132" height="52" rx="6" class="c-mask"/>
           <rect x="815.6" y="424" width="132" height="52" rx="6" class="c-external" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(821.6 430) scale(0.6875)">
@@ -609,27 +609,27 @@ rect.c-bg-rect { fill: var(--bg); }
             <path d="M8 2.5h5.5V8M13.5 2.5 7.5 8.5"/>
           </g>
           <text data-node-label="" x="881.6" y="445" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">engine_error</text>
-          <text x="881.6" y="462" class="t-muted" font-size="8" text-anchor="middle">兜底 · error</text>
+          <text x="881.6" y="462" class="t-muted" font-size="8" text-anchor="middle">默认 · error</text>
         </g>
 
         <!-- Edge labels -->
-        <g data-edge-from="q1" data-edge-to="q2" data-edge-label="没有" data-edge-key="0" data-edge-id="q1-q2">
+        <g data-edge-from="q1" data-edge-to="q2" data-edge-label="否" data-edge-key="0" data-edge-id="q1-q2">
           <rect x="196" y="168" width="30" height="14" rx="3" class="c-mask"/>
-          <text x="211" y="178" class="t-backend" font-size="8" text-anchor="middle">没有</text>
+          <text x="211" y="178" class="t-backend" font-size="8" text-anchor="middle">否</text>
         </g>
 
 
-        <g data-edge-from="q2" data-edge-to="q3" data-edge-label="起来了" data-edge-key="3" data-edge-id="q2-q3">
+        <g data-edge-from="q2" data-edge-to="q3" data-edge-label="已启动" data-edge-key="3" data-edge-id="q2-q3">
           <rect x="378" y="168" width="38.8" height="14" rx="3" class="c-mask"/>
-          <text x="397.4" y="178" class="t-backend" font-size="8" text-anchor="middle">起来了</text>
+          <text x="397.4" y="178" class="t-backend" font-size="8" text-anchor="middle">已启动</text>
         </g>
         <g data-edge-from="q3" data-edge-to="ab" data-edge-label="fail-fast" data-edge-key="4" data-edge-id="q3-ab">
           <rect x="509.19999999999993" y="284" width="53.199999999999996" height="14" rx="3" class="c-mask"/>
           <text x="535.8" y="294" class="t-security" font-size="8" text-anchor="middle">fail-fast</text>
         </g>
-        <g data-edge-from="q3" data-edge-to="q4" data-edge-label="都没有" data-edge-key="5" data-edge-id="q3-q4">
+        <g data-edge-from="q3" data-edge-to="q4" data-edge-label="无中止" data-edge-key="5" data-edge-id="q3-q4">
           <rect x="572.8000000000001" y="168" width="38.8" height="14" rx="3" class="c-mask"/>
-          <text x="592.2" y="178" class="t-backend" font-size="8" text-anchor="middle">都没有</text>
+          <text x="592.2" y="178" class="t-backend" font-size="8" text-anchor="middle">无中止</text>
         </g>
         <g data-edge-from="q3" data-edge-to="to" data-edge-label="墙钟到点" data-edge-key="6" data-edge-id="q3-to">
           <rect x="429.6" y="284" width="48.4" height="14" rx="3" class="c-mask"/>
@@ -639,13 +639,13 @@ rect.c-bg-rect { fill: var(--bg); }
           <rect x="676.6" y="284" width="30" height="14" rx="3" class="c-mask"/>
           <text x="691.6" y="294" class="t-security" font-size="8" text-anchor="middle">是</text>
         </g>
-        <g data-edge-from="q4" data-edge-to="q5" data-edge-label="不是" data-edge-key="8" data-edge-id="q4-q5">
+        <g data-edge-from="q4" data-edge-to="q5" data-edge-label="否" data-edge-key="8" data-edge-id="q4-q5">
           <rect x="771.6" y="168" width="30" height="14" rx="3" class="c-mask"/>
-          <text x="786.6" y="178" class="t-backend" font-size="8" text-anchor="middle">不是</text>
+          <text x="786.6" y="178" class="t-backend" font-size="8" text-anchor="middle">否</text>
         </g>
-        <g data-edge-from="q5" data-edge-to="agg" data-edge-label="都不是" data-edge-key="9" data-edge-id="q5-agg">
+        <g data-edge-from="q5" data-edge-to="agg" data-edge-label="均不是" data-edge-key="9" data-edge-id="q5-agg">
           <rect x="961.6" y="168" width="38.8" height="14" rx="3" class="c-mask"/>
-          <text x="981" y="178" class="t-backend" font-size="8" text-anchor="middle">都不是</text>
+          <text x="981" y="178" class="t-backend" font-size="8" text-anchor="middle">均不是</text>
         </g>
         <g data-edge-from="q5" data-edge-to="ee2" data-edge-label="是" data-edge-key="10" data-edge-id="q5-ee2">
           <rect x="866.6" y="284" width="30" height="14" rx="3" class="c-mask"/>
@@ -661,12 +661,12 @@ rect.c-bg-rect { fill: var(--bg); }
           </g>
           <g data-legend-semantic-kind="security" data-legend-x="105" data-legend-baseline="600" data-legend-width="113">
             <rect x="105" y="592" width="14" height="9" rx="2" class="c-security" stroke-width="1"/>
-            <text x="127" y="600" class="t-muted" font-size="7.5" font-weight="500">判据：答上就定案</text>
+            <text x="127" y="600" class="t-muted" font-size="7.5" font-weight="500">判据：命中即定案</text>
           </g>
-          <g data-legend-semantic-kind="external" data-legend-x="225" data-legend-baseline="600" data-legend-width="104">
+          <g data-legend-semantic-kind="external" data-legend-x="225" data-legend-baseline="600" data-legend-width="96">
             <rect x="225" y="592" width="14" height="9" rx="2" class="c-external" stroke-width="1"/>
-            <text x="247" y="600" class="t-muted" font-size="7.5" font-weight="500">记下来的收场态</text>
+            <text x="247" y="600" class="t-muted" font-size="7.5" font-weight="500">记录的收场态</text>
           </g>
         </g>
       </svg>
-<!-- gherkai:source-sha256=9681005af5bdf323138e4fa155d0b9a47f4f667beb159160187db3ffc8d565d9 -->
+<!-- gherkai:source-sha256=127985bd2addf0588b5a4a344d5650e41fa0611c2a1f1963f17ab3f656d84faa -->

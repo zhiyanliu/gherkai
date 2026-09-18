@@ -104,6 +104,10 @@ _Avoid_: 把它当第二份文档源——机读字段页是契约页的确定�
 A = 同一页面 AI 判断飘忽（随机噪声）→ **投票可治**；B = 页面真变了但 AI 柔性照样跑过、不报警（灵敏度不足）→ **投票治不了**，v1.0 接受为已知边界（ADR 0015）。
 _Avoid_: 以为"投票能带来确定性"——它只压 A，给不了对变更的灵敏度（B）。
 
+**票 / 投票 (Vote / Voting)**:
+对一条 AI 断言的一次布尔判定结果称一票（引擎一次布尔调用的返回值）；`--assertion-votes N` 对同一断言取 N 票的多数作为该 step 的判定（ADR 0014），确定性 step 不投票。票是判定归约的最底层单位（票 → step → scenario → job → run，见 `docs/internals/verdict-model.md`）。
+_Avoid_: 把「一票」用作「一批 / 一次性」的口语义；把票数写成判定状态。
+
 **判定态与 severity 阶梯 (verdict states / severity)**:
 `Status` 七态被**两把正交的刀切成三组**（ADR 0031 决定一 / 一·补 / 二）：**判定终态** `passed`/`failed`/`error`（worker 经 wire 只报这三态，决定四）；**core 派生终态** `skipped`（fail-fast 下 worker 从未 spawn：没执行、没花钱、可无脑重跑；step 级同名 `skipped` 是另一层——scope 内被短路的 step，会话已起、钱已花，见下「连锁失败读法」条）/ `aborted`（跑一半被掐：有副作用、有现场可查）；**生命周期前置态** `pending`/`running`（只活在 `JobState`/`RunState`，不进 `JobResult.status`、无 severity）。两把刀别混：按**生命周期**切 = `TERMINAL_STATUSES`（还会不会变，含 skipped/aborted）；按**算不算判定结论**切 = `_NON_VERDICT`（skipped/aborted/pending/running），二者在 skipped/aborted 上有意重叠。**severity 数值序只对终态定义**：`skipped`(-1) < `passed`(0) < `failed`(1) < `error`(2) < `aborted`(3)，用于终态间的排序/着色/单调升级比较。**run 级判定不查这张表**：聚合入口先滤掉非判定态、再在三态间取 max（决定三），退出码按「是否 `passed`」取补、且各命令语义不同（决定五 / ADR 0034），故派生终态与前置态都不污染 run 判定。人读的四层归约全景见 `docs/internals/verdict-model.md`。
 _Avoid_: 拿 `Status` 字符串比大小（字母序把 `error` 排在 `failed` 前，一律查 severity 表）；把 `pending`/`running` 当判定结论；以为 run 级聚合会把 skipped/aborted 算进去。

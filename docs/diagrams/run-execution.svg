@@ -444,7 +444,7 @@ rect.c-bg-rect { fill: var(--bg); }
         <text x="54" y="74" class="t-dim" font-size="10" font-weight="600">01 / 本机档（local）</text>
 
         <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-1" x="40" y="176" width="1082" height="104" rx="10" class="c-lane" stroke-width="1"/>
-        <text x="54" y="198" class="t-dim" font-size="10" font-weight="600">02 / 同一份 core（四格共用的代码）</text>
+        <text x="54" y="198" class="t-dim" font-size="10" font-weight="600">02 / 同一份 core（四种跑法共用）</text>
 
         <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-2" x="40" y="300" width="1082" height="104" rx="10" class="c-lane" stroke-width="1"/>
         <text x="54" y="322" class="t-dim" font-size="10" font-weight="600">03 / 无状态推一步</text>
@@ -458,7 +458,7 @@ rect.c-bg-rect { fill: var(--bg); }
         <text x="118" y="39" class="t-muted" font-size="8" font-weight="600" text-anchor="middle">入口与承载进程</text>
         <line x1="250" y1="35" x2="854.8" y2="35" class="a-emphasis" stroke-width="1.1"/>
         <rect x="250" y="27" width="604.8" height="16" rx="4" class="c-mask"/>
-        <text x="552.4" y="39" class="t-backend" font-size="8" font-weight="600" text-anchor="middle">驱动循环：每批事件再推一步</text>
+        <text x="552.4" y="39" class="t-backend" font-size="8" font-weight="600" text-anchor="middle">驱动循环：每批事件推进一步</text>
         <line x1="997.5999999999999" y1="35" x2="1089.6" y2="35" class="a-default" stroke-width="1.1"/>
         <rect x="997.5999999999999" y="27" width="92" height="16" rx="4" class="c-mask"/>
         <text x="1043.6" y="39" class="t-muted" font-size="8" font-weight="600" text-anchor="middle">重放与收敛</text>
@@ -467,40 +467,40 @@ rect.c-bg-rect { fill: var(--bg); }
 
 
         <!-- Edge paths -->
-        <path data-edge-from="bgProc" data-edge-to="stepOnce" data-edge-label="反复推到收敛" data-edge-key="0" data-edge-id="e-bg-step" data-composition-points="48,119;32,119;32,420;289,420;289,393" d="M 48 119 L 32 119 L 32 420 L 289 420 L 289 393" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
-        <path data-edge-from="workerCloud" data-edge-to="exitWatch" data-edge-label="云端：平台记一条" data-edge-key="1" data-edge-id="e-cloud-exit" data-composition-points="614.4,465;614.4,243;738.8,243" d="M 614.4 465 L 614.4 243 L 738.8 243" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
+        <path data-edge-from="bgProc" data-edge-to="stepOnce" data-edge-label="反复推至收敛" data-edge-key="0" data-edge-id="e-bg-step" data-composition-points="48,119;32,119;32,420;289,420;289,393" d="M 48 119 L 32 119 L 32 420 L 289 420 L 289 393" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="workerCloud" data-edge-to="exitWatch" data-edge-label="云端：平台记录" data-edge-key="1" data-edge-id="e-cloud-exit" data-composition-points="614.4,465;614.4,243;738.8,243" d="M 614.4 465 L 614.4 243 L 738.8 243" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
         <path data-edge-from="workerCloud" data-edge-to="tableCloud" data-edge-label="逐条事件" data-edge-key="2" data-edge-id="e-cloud-table" data-composition-points="682.4,491;738.8,491" d="M 682.4 491 L 738.8 491" class="a-dashed" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
         <path data-edge-from="cloudFn" data-edge-to="stepOnce" data-edge-label="每批事件推一步" data-edge-key="3" data-edge-id="e-cloudfn-step" data-composition-points="188,491;303,491;303,393" d="M 188 491 L 303 491 L 303 393" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
         <path data-edge-from="dispatch" data-edge-to="workerCloud" data-edge-label="云端：起云上任务" data-edge-key="4" data-edge-id="e-dispatch-cloud" data-composition-points="494.4,269;494.4,352;530.4,352;530.4,491;546.4,491" d="M 494.4 269 L 494.4 352 L 530.4 352 L 530.4 491 L 546.4 491" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
-        <path data-edge-from="dispatch" data-edge-to="workerLocal" data-edge-label="本机：起子进程" data-edge-key="5" data-edge-id="e-dispatch-local" data-composition-points="494.4,217;494.4,166;530.4,166;530.4,119;546.4,119" d="M 494.4 217 L 494.4 166 L 530.4 166 L 530.4 119 L 546.4 119" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path data-edge-from="dispatch" data-edge-to="workerLocal" data-edge-label="本机：起子进程" data-edge-key="5" data-edge-id="e-dispatch-local" data-composition-points="494.4,217;494.4,119;546.4,119" d="M 494.4 217 L 494.4 119 L 546.4 119" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
         <path data-edge-from="exitWatch" data-edge-to="settle" data-edge-label="有退出记录才收敛" data-edge-key="6" data-edge-id="e-exit-settle" data-composition-points="878.8,243;973.5999999999999,243" d="M 878.8 243 L 973.5999999999999 243" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
         <path data-edge-from="foreLoop" data-edge-to="dispatch" data-edge-label="在线派发" data-edge-key="7" data-edge-id="e-fore-dispatch" data-composition-points="366,243;422.4,243" d="M 366 243 L 422.4 243" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        <path data-edge-from="workerLocal" data-edge-to="exitWatch" data-edge-label="本机：父进程收" data-edge-key="8" data-edge-id="e-local-exit" data-composition-points="614.4,145;614.4,166;808.8,166;808.8,217" d="M 614.4 145 L 614.4 166 L 808.8 166 L 808.8 217" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
+        <path data-edge-from="workerLocal" data-edge-to="exitWatch" data-edge-label="本机：父进程" data-edge-key="8" data-edge-id="e-local-exit" data-composition-points="614.4,145;614.4,166;808.8,166;808.8,217" d="M 614.4 145 L 614.4 166 L 808.8 166 L 808.8 217" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
         <path data-edge-from="workerLocal" data-edge-to="pipeLocal" data-edge-label="逐条事件" data-edge-key="9" data-edge-id="e-local-pipe" data-composition-points="682.4,119;738.8,119" d="M 682.4 119 L 738.8 119" class="a-dashed" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
-        <path data-edge-from="pipeLocal" data-edge-to="settle" data-edge-label="前台：听完即用" data-edge-key="10" data-edge-id="e-pipe-settle" data-composition-points="808.8,145;808.8,166;1043.6,166;1043.6,217" d="M 808.8 145 L 808.8 166 L 1043.6 166 L 1043.6 217" class="a-dashed" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
-        <path data-edge-from="pipeLocal" data-edge-to="storeLocal" data-edge-label="后台：旁路落下" data-edge-key="11" data-edge-id="e-pipe-store" data-composition-points="878.8,119;973.5999999999999,119" d="M 878.8 119 L 973.5999999999999 119" class="a-dashed" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
+        <path data-edge-from="pipeLocal" data-edge-to="settle" data-edge-label="前台：在线消费" data-edge-key="10" data-edge-id="e-pipe-settle" data-composition-points="808.8,145;808.8,166;1043.6,166;1043.6,217" d="M 808.8 145 L 808.8 166 L 1043.6 166 L 1043.6 217" class="a-dashed" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
+        <path data-edge-from="pipeLocal" data-edge-to="storeLocal" data-edge-label="后台：旁路落库" data-edge-key="11" data-edge-id="e-pipe-store" data-composition-points="878.8,119;973.5999999999999,119" d="M 878.8 119 L 973.5999999999999 119" class="a-dashed" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
         <path data-edge-from="entry" data-edge-to="foreLoop" data-edge-label="run" data-edge-key="12" data-edge-id="e-run" data-composition-points="188,243;226,243" d="M 188 243 L 226 243" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        <path data-edge-from="stepOnce" data-edge-to="dispatch" data-edge-label="抢到才派发" data-edge-key="13" data-edge-id="e-step-dispatch" data-composition-points="296,341;296,290;494.4,290;494.4,269" d="M 296 341 L 296 290 L 494.4 290 L 494.4 269" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
-        <path data-edge-from="storeLocal" data-edge-to="settle" data-edge-label="全量重放算终态" data-edge-key="14" data-edge-id="e-store-settle" data-composition-points="1043.6,145;1043.6,217" d="M 1043.6 145 L 1043.6 217" class="a-dashed" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
-        <path data-edge-from="streamCloud" data-edge-to="settle" data-edge-label="唤醒推进直到收敛" data-edge-key="15" data-edge-id="e-stream-settle" data-composition-points="1043.6,465;1043.6,269" d="M 1043.6 465 L 1043.6 269" class="a-dashed" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
+        <path data-edge-from="stepOnce" data-edge-to="dispatch" data-edge-label="抢占后派发" data-edge-key="13" data-edge-id="e-step-dispatch" data-composition-points="296,341;296,290;494.4,290;494.4,269" d="M 296 341 L 296 290 L 494.4 290 L 494.4 269" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="storeLocal" data-edge-to="settle" data-edge-label="全量重放定终态" data-edge-key="14" data-edge-id="e-store-settle" data-composition-points="1043.6,145;1043.6,217" d="M 1043.6 145 L 1043.6 217" class="a-dashed" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
+        <path data-edge-from="streamCloud" data-edge-to="settle" data-edge-label="唤醒推进至收敛" data-edge-key="15" data-edge-id="e-stream-settle" data-composition-points="1043.6,465;1043.6,269" d="M 1043.6 465 L 1043.6 269" class="a-dashed" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
         <path data-edge-from="entry" data-edge-to="stepOnce" data-edge-label="submit：落库即返回" data-edge-key="16" data-edge-id="e-submit" data-composition-points="118,269;118,290;208,290;208,367;224,367" d="M 118 269 L 118 290 L 208 290 L 208 367 L 224 367" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
-        <path data-edge-from="tableCloud" data-edge-to="settle" data-edge-label="前台：轮询读一段" data-edge-key="17" data-edge-id="e-table-settle" data-composition-points="808.8,465;808.8,352;1043.6,352;1043.6,269" d="M 808.8 465 L 808.8 352 L 1043.6 352 L 1043.6 269" class="a-dashed" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
+        <path data-edge-from="tableCloud" data-edge-to="settle" data-edge-label="前台：分段轮询" data-edge-key="17" data-edge-id="e-table-settle" data-composition-points="808.8,465;808.8,352;1043.6,352;1043.6,269" d="M 808.8 465 L 808.8 352 L 1043.6 352 L 1043.6 269" class="a-dashed" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
         <path data-edge-from="tableCloud" data-edge-to="streamCloud" data-edge-label="每批写入" data-edge-key="18" data-edge-id="e-table-stream" data-composition-points="878.8,491;973.5999999999999,491" d="M 878.8 491 L 973.5999999999999 491" class="a-dashed" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
 
         <!-- Nodes -->
-        <g id="node-bgProc" data-node-id="bgProc" data-node-label="本机后台进程" tabindex="0" role="button" aria-label="聚焦本机后台进程，submit 留下的 · 可被接手, 本机档（local） › 入口与承载进程" aria-pressed="false" data-node-kind="backend" data-node-sublabel="submit 留下的 · 可被接手" data-node-context="本机档（local） › 入口与承载进程">
-          <title>本机后台进程 · submit 留下的 · 可被接手 · 本机档（local） › 入口与承载进程</title>
+        <g id="node-bgProc" data-node-id="bgProc" data-node-label="本机后台进程" tabindex="0" role="button" aria-label="聚焦本机后台进程，submit 派生 · 可被接力, 本机档（local） › 入口与承载进程" aria-pressed="false" data-node-kind="backend" data-node-sublabel="submit 派生 · 可被接力" data-node-context="本机档（local） › 入口与承载进程">
+          <title>本机后台进程 · submit 派生 · 可被接力 · 本机档（local） › 入口与承载进程</title>
           <rect x="48" y="93" width="140" height="52" rx="6" class="c-mask"/>
           <rect x="48" y="93" width="140" height="52" rx="6" class="c-backend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(54 99) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
           <text data-node-label="" x="118" y="114" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">本机后台进程</text>
-          <text x="118" y="131" class="t-muted" font-size="8" text-anchor="middle">submit 留下的 · 可被接手</text>
+          <text x="118" y="131" class="t-muted" font-size="8" text-anchor="middle">submit 派生 · 可被接力</text>
         </g>
 
-        <g id="node-workerLocal" data-node-id="workerLocal" data-node-label="本机 worker" tabindex="0" role="button" aria-label="聚焦本机 worker，子进程, 本机档（local） › 驱动循环：每批事件再推一步" aria-pressed="false" data-node-kind="external" data-node-sublabel="子进程" data-node-context="本机档（local） › 驱动循环：每批事件再推一步">
-          <title>本机 worker · 子进程 · 本机档（local） › 驱动循环：每批事件再推一步</title>
+        <g id="node-workerLocal" data-node-id="workerLocal" data-node-label="本机 worker" tabindex="0" role="button" aria-label="聚焦本机 worker，子进程, 本机档（local） › 驱动循环：每批事件推进一步" aria-pressed="false" data-node-kind="external" data-node-sublabel="子进程" data-node-context="本机档（local） › 驱动循环：每批事件推进一步">
+          <title>本机 worker · 子进程 · 本机档（local） › 驱动循环：每批事件推进一步</title>
           <rect x="546.4" y="93" width="136" height="52" rx="6" class="c-mask"/>
           <rect x="546.4" y="93" width="136" height="52" rx="6" class="c-external" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(552.4 99) scale(0.6875)">
@@ -511,8 +511,8 @@ rect.c-bg-rect { fill: var(--bg); }
           <text x="614.4" y="131" class="t-muted" font-size="8" text-anchor="middle">子进程</text>
         </g>
 
-        <g id="node-pipeLocal" data-node-id="pipeLocal" data-node-label="事件管道" tabindex="0" role="button" aria-label="聚焦事件管道，专用通道，不落盘, 本机档（local） › 驱动循环：每批事件再推一步" aria-pressed="false" data-node-kind="database" data-node-sublabel="专用通道，不落盘" data-node-context="本机档（local） › 驱动循环：每批事件再推一步">
-          <title>事件管道 · 专用通道，不落盘 · 本机档（local） › 驱动循环：每批事件再推一步</title>
+        <g id="node-pipeLocal" data-node-id="pipeLocal" data-node-label="事件管道" tabindex="0" role="button" aria-label="聚焦事件管道，专用通道，不落盘, 本机档（local） › 驱动循环：每批事件推进一步" aria-pressed="false" data-node-kind="database" data-node-sublabel="专用通道，不落盘" data-node-context="本机档（local） › 驱动循环：每批事件推进一步">
+          <title>事件管道 · 专用通道，不落盘 · 本机档（local） › 驱动循环：每批事件推进一步</title>
           <rect x="738.8" y="93" width="140" height="52" rx="6" class="c-mask"/>
           <rect x="738.8" y="93" width="140" height="52" rx="6" class="c-database" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(744.8 99) scale(0.6875)">
@@ -523,8 +523,8 @@ rect.c-bg-rect { fill: var(--bg); }
           <text x="808.8" y="131" class="t-muted" font-size="8" text-anchor="middle">专用通道，不落盘</text>
         </g>
 
-        <g id="node-storeLocal" data-node-id="storeLocal" data-node-label="本机事件库" tabindex="0" role="button" aria-label="聚焦本机事件库，旁路原样存下, 本机档（local） › 重放与收敛" aria-pressed="false" data-node-kind="database" data-node-sublabel="旁路原样存下" data-node-context="本机档（local） › 重放与收敛">
-          <title>本机事件库 · 旁路原样存下 · 本机档（local） › 重放与收敛</title>
+        <g id="node-storeLocal" data-node-id="storeLocal" data-node-label="本机事件库" tabindex="0" role="button" aria-label="聚焦本机事件库，旁路原样落库, 本机档（local） › 重放与收敛" aria-pressed="false" data-node-kind="database" data-node-sublabel="旁路原样落库" data-node-context="本机档（local） › 重放与收敛">
+          <title>本机事件库 · 旁路原样落库 · 本机档（local） › 重放与收敛</title>
           <rect x="973.5999999999999" y="93" width="140" height="52" rx="6" class="c-mask"/>
           <rect x="973.5999999999999" y="93" width="140" height="52" rx="6" class="c-database" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(979.5999999999999 99) scale(0.6875)">
@@ -532,11 +532,11 @@ rect.c-bg-rect { fill: var(--bg); }
             <path d="M3 4v8c0 1.1 2.2 2 5 2s5-.9 5-2V4M3 8c0 1.1 2.2 2 5 2s5-.9 5-2"/>
           </g>
           <text data-node-label="" x="1043.6" y="114" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">本机事件库</text>
-          <text x="1043.6" y="131" class="t-muted" font-size="8" text-anchor="middle">旁路原样存下</text>
+          <text x="1043.6" y="131" class="t-muted" font-size="8" text-anchor="middle">旁路原样落库</text>
         </g>
 
-        <g id="node-entry" data-node-id="entry" data-node-label="命令入口" tabindex="0" role="button" aria-label="聚焦命令入口，解析 · 分组 · 落定义, 同一份 core（四格共用的代码） › 入口与承载进程" aria-pressed="false" data-node-kind="frontend" data-node-sublabel="解析 · 分组 · 落定义" data-node-context="同一份 core（四格共用的代码） › 入口与承载进程">
-          <title>命令入口 · 解析 · 分组 · 落定义 · 同一份 core（四格共用的代码） › 入口与承载进程</title>
+        <g id="node-entry" data-node-id="entry" data-node-label="命令入口" tabindex="0" role="button" aria-label="聚焦命令入口，解析 · 分组 · 落定义, 同一份 core（四种跑法共用） › 入口与承载进程" aria-pressed="false" data-node-kind="frontend" data-node-sublabel="解析 · 分组 · 落定义" data-node-context="同一份 core（四种跑法共用） › 入口与承载进程">
+          <title>命令入口 · 解析 · 分组 · 落定义 · 同一份 core（四种跑法共用） › 入口与承载进程</title>
           <rect x="48" y="217" width="140" height="52" rx="6" class="c-mask"/>
           <rect x="48" y="217" width="140" height="52" rx="6" class="c-frontend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="frontend" class="semantic-sigil s-frontend" transform="translate(54 223) scale(0.6875)">
@@ -549,19 +549,19 @@ rect.c-bg-rect { fill: var(--bg); }
           <text x="118" y="255" class="t-muted" font-size="8" text-anchor="middle">解析 · 分组 · 落定义</text>
         </g>
 
-        <g id="node-foreLoop" data-node-id="foreLoop" data-node-label="前台在线循环" tabindex="0" role="button" aria-label="聚焦前台在线循环，全程在线守着, 同一份 core（四格共用的代码） › 驱动循环：每批事件再推一步" aria-pressed="false" data-node-kind="backend" data-node-sublabel="全程在线守着" data-node-context="同一份 core（四格共用的代码） › 驱动循环：每批事件再推一步">
-          <title>前台在线循环 · 全程在线守着 · 同一份 core（四格共用的代码） › 驱动循环：每批事件再推一步</title>
+        <g id="node-foreLoop" data-node-id="foreLoop" data-node-label="前台在线循环" tabindex="0" role="button" aria-label="聚焦前台在线循环，全程在线接收, 同一份 core（四种跑法共用） › 驱动循环：每批事件推进一步" aria-pressed="false" data-node-kind="backend" data-node-sublabel="全程在线接收" data-node-context="同一份 core（四种跑法共用） › 驱动循环：每批事件推进一步">
+          <title>前台在线循环 · 全程在线接收 · 同一份 core（四种跑法共用） › 驱动循环：每批事件推进一步</title>
           <rect x="226" y="217" width="140" height="52" rx="6" class="c-mask"/>
           <rect x="226" y="217" width="140" height="52" rx="6" class="c-backend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(232 223) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
           <text data-node-label="" x="296" y="238" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">前台在线循环</text>
-          <text x="296" y="255" class="t-muted" font-size="8" text-anchor="middle">全程在线守着</text>
+          <text x="296" y="255" class="t-muted" font-size="8" text-anchor="middle">全程在线接收</text>
         </g>
 
-        <g id="node-dispatch" data-node-id="dispatch" data-node-label="起 worker" tabindex="0" role="button" aria-label="聚焦起 worker，每 scope 一个，有并发闸, 同一份 core（四格共用的代码） › 驱动循环：每批事件再推一步" aria-pressed="false" data-node-kind="messagebus" data-node-sublabel="每 scope 一个，有并发闸" data-node-context="同一份 core（四格共用的代码） › 驱动循环：每批事件再推一步">
-          <title>起 worker · 每 scope 一个，有并发闸 · 同一份 core（四格共用的代码） › 驱动循环：每批事件再推一步</title>
+        <g id="node-dispatch" data-node-id="dispatch" data-node-label="起 worker" tabindex="0" role="button" aria-label="聚焦起 worker，每 scope 一个，并发闸门, 同一份 core（四种跑法共用） › 驱动循环：每批事件推进一步" aria-pressed="false" data-node-kind="messagebus" data-node-sublabel="每 scope 一个，并发闸门" data-node-context="同一份 core（四种跑法共用） › 驱动循环：每批事件推进一步">
+          <title>起 worker · 每 scope 一个，并发闸门 · 同一份 core（四种跑法共用） › 驱动循环：每批事件推进一步</title>
           <rect x="422.4" y="217" width="144" height="52" rx="6" class="c-mask"/>
           <rect x="422.4" y="217" width="144" height="52" rx="6" class="c-messagebus" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="messagebus" class="semantic-sigil s-messagebus" transform="translate(428.4 223) scale(0.6875)">
@@ -571,11 +571,11 @@ rect.c-bg-rect { fill: var(--bg); }
             <circle cx="7" cy="11.5" r="1" class="sigil-fill"/>
           </g>
           <text data-node-label="" x="494.4" y="238" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">起 worker</text>
-          <text x="494.4" y="255" class="t-muted" font-size="8" text-anchor="middle">每 scope 一个，有并发闸</text>
+          <text x="494.4" y="255" class="t-muted" font-size="8" text-anchor="middle">每 scope 一个，并发闸门</text>
         </g>
 
-        <g id="node-exitWatch" data-node-id="exitWatch" data-node-label="退出观察者" tabindex="0" role="button" aria-label="聚焦退出观察者，看见 worker 停了, 同一份 core（四格共用的代码） › 驱动循环：每批事件再推一步" aria-pressed="false" data-node-kind="security" data-node-sublabel="看见 worker 停了" data-node-context="同一份 core（四格共用的代码） › 驱动循环：每批事件再推一步">
-          <title>退出观察者 · 看见 worker 停了 · 同一份 core（四格共用的代码） › 驱动循环：每批事件再推一步</title>
+        <g id="node-exitWatch" data-node-id="exitWatch" data-node-label="退出观察者" tabindex="0" role="button" aria-label="聚焦退出观察者，观察 worker 终止, 同一份 core（四种跑法共用） › 驱动循环：每批事件推进一步" aria-pressed="false" data-node-kind="security" data-node-sublabel="观察 worker 终止" data-node-context="同一份 core（四种跑法共用） › 驱动循环：每批事件推进一步">
+          <title>退出观察者 · 观察 worker 终止 · 同一份 core（四种跑法共用） › 驱动循环：每批事件推进一步</title>
           <rect x="738.8" y="217" width="140" height="52" rx="6" class="c-mask"/>
           <rect x="738.8" y="217" width="140" height="52" rx="6" class="c-security" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(744.8 223) scale(0.6875)">
@@ -583,11 +583,11 @@ rect.c-bg-rect { fill: var(--bg); }
             <path d="m5.8 8 1.5 1.5 3-3"/>
           </g>
           <text data-node-label="" x="808.8" y="238" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">退出观察者</text>
-          <text x="808.8" y="255" class="t-muted" font-size="8" text-anchor="middle">看见 worker 停了</text>
+          <text x="808.8" y="255" class="t-muted" font-size="8" text-anchor="middle">观察 worker 终止</text>
         </g>
 
-        <g id="node-settle" data-node-id="settle" data-node-label="收敛与提交点" tabindex="0" role="button" aria-label="聚焦收敛与提交点，一次落定终态, 同一份 core（四格共用的代码） › 重放与收敛" aria-pressed="false" data-node-kind="backend" data-node-sublabel="一次落定终态" data-node-context="同一份 core（四格共用的代码） › 重放与收敛">
-          <title>收敛与提交点 · 一次落定终态 · 同一份 core（四格共用的代码） › 重放与收敛</title>
+        <g id="node-settle" data-node-id="settle" data-node-label="收敛与提交点" tabindex="0" role="button" aria-label="聚焦收敛与提交点，一次落定终态, 同一份 core（四种跑法共用） › 重放与收敛" aria-pressed="false" data-node-kind="backend" data-node-sublabel="一次落定终态" data-node-context="同一份 core（四种跑法共用） › 重放与收敛">
+          <title>收敛与提交点 · 一次落定终态 · 同一份 core（四种跑法共用） › 重放与收敛</title>
           <rect x="973.5999999999999" y="217" width="140" height="52" rx="6" class="c-mask"/>
           <rect x="973.5999999999999" y="217" width="140" height="52" rx="6" class="c-backend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(979.5999999999999 223) scale(0.6875)">
@@ -597,30 +597,30 @@ rect.c-bg-rect { fill: var(--bg); }
           <text x="1043.6" y="255" class="t-muted" font-size="8" text-anchor="middle">一次落定终态</text>
         </g>
 
-        <g id="node-stepOnce" data-node-id="stepOnce" data-node-label="无状态推一步" tabindex="0" role="button" aria-label="聚焦无状态推一步，重放 · 条件写 · 抢 job, 无状态推一步 › 驱动循环：每批事件再推一步" aria-pressed="false" data-node-kind="backend" data-node-sublabel="重放 · 条件写 · 抢 job" data-node-context="无状态推一步 › 驱动循环：每批事件再推一步">
-          <title>无状态推一步 · 重放 · 条件写 · 抢 job · 无状态推一步 › 驱动循环：每批事件再推一步</title>
+        <g id="node-stepOnce" data-node-id="stepOnce" data-node-label="无状态推一步" tabindex="0" role="button" aria-label="聚焦无状态推一步，重放 · 条件写抢占 job, 无状态推一步 › 驱动循环：每批事件推进一步" aria-pressed="false" data-node-kind="backend" data-node-sublabel="重放 · 条件写抢占 job" data-node-context="无状态推一步 › 驱动循环：每批事件推进一步">
+          <title>无状态推一步 · 重放 · 条件写抢占 job · 无状态推一步 › 驱动循环：每批事件推进一步</title>
           <rect x="224" y="341" width="144" height="52" rx="6" class="c-mask"/>
           <rect x="224" y="341" width="144" height="52" rx="6" class="c-backend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(230 347) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
           <text data-node-label="" x="296" y="362" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">无状态推一步</text>
-          <text x="296" y="379" class="t-muted" font-size="8" text-anchor="middle">重放 · 条件写 · 抢 job</text>
+          <text x="296" y="379" class="t-muted" font-size="8" text-anchor="middle">重放 · 条件写抢占 job</text>
         </g>
 
-        <g id="node-cloudFn" data-node-id="cloudFn" data-node-label="云端推进函数" tabindex="0" role="button" aria-label="聚焦云端推进函数，提交与事件都会唤醒, 云端档（cloud） › 入口与承载进程" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="提交与事件都会唤醒" data-node-context="云端档（cloud） › 入口与承载进程">
-          <title>云端推进函数 · 提交与事件都会唤醒 · 云端档（cloud） › 入口与承载进程</title>
+        <g id="node-cloudFn" data-node-id="cloudFn" data-node-label="云端推进函数" tabindex="0" role="button" aria-label="聚焦云端推进函数，提交与事件均可唤醒, 云端档（cloud） › 入口与承载进程" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="提交与事件均可唤醒" data-node-context="云端档（cloud） › 入口与承载进程">
+          <title>云端推进函数 · 提交与事件均可唤醒 · 云端档（cloud） › 入口与承载进程</title>
           <rect x="48" y="465" width="140" height="52" rx="6" class="c-mask"/>
           <rect x="48" y="465" width="140" height="52" rx="6" class="c-cloud" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="cloud" class="semantic-sigil s-cloud" transform="translate(54 471) scale(0.6875)">
             <path d="M4.3 12.5h7.3a2.4 2.4 0 0 0 .2-4.8 4 4 0 0 0-7.5-1.3A3.1 3.1 0 0 0 4.3 12.5Z"/>
           </g>
           <text data-node-label="" x="118" y="486" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">云端推进函数</text>
-          <text x="118" y="503" class="t-muted" font-size="8" text-anchor="middle">提交与事件都会唤醒</text>
+          <text x="118" y="503" class="t-muted" font-size="8" text-anchor="middle">提交与事件均可唤醒</text>
         </g>
 
-        <g id="node-workerCloud" data-node-id="workerCloud" data-node-label="云端 worker" tabindex="0" role="button" aria-label="聚焦云端 worker，云上任务, 云端档（cloud） › 驱动循环：每批事件再推一步" aria-pressed="false" data-node-kind="external" data-node-sublabel="云上任务" data-node-context="云端档（cloud） › 驱动循环：每批事件再推一步">
-          <title>云端 worker · 云上任务 · 云端档（cloud） › 驱动循环：每批事件再推一步</title>
+        <g id="node-workerCloud" data-node-id="workerCloud" data-node-label="云端 worker" tabindex="0" role="button" aria-label="聚焦云端 worker，云上任务, 云端档（cloud） › 驱动循环：每批事件推进一步" aria-pressed="false" data-node-kind="external" data-node-sublabel="云上任务" data-node-context="云端档（cloud） › 驱动循环：每批事件推进一步">
+          <title>云端 worker · 云上任务 · 云端档（cloud） › 驱动循环：每批事件推进一步</title>
           <rect x="546.4" y="465" width="136" height="52" rx="6" class="c-mask"/>
           <rect x="546.4" y="465" width="136" height="52" rx="6" class="c-external" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(552.4 471) scale(0.6875)">
@@ -631,8 +631,8 @@ rect.c-bg-rect { fill: var(--bg); }
           <text x="614.4" y="503" class="t-muted" font-size="8" text-anchor="middle">云上任务</text>
         </g>
 
-        <g id="node-tableCloud" data-node-id="tableCloud" data-node-label="云端事件表" tabindex="0" role="button" aria-label="聚焦云端事件表，逐条写进表, 云端档（cloud） › 驱动循环：每批事件再推一步" aria-pressed="false" data-node-kind="database" data-node-sublabel="逐条写进表" data-node-context="云端档（cloud） › 驱动循环：每批事件再推一步">
-          <title>云端事件表 · 逐条写进表 · 云端档（cloud） › 驱动循环：每批事件再推一步</title>
+        <g id="node-tableCloud" data-node-id="tableCloud" data-node-label="云端事件表" tabindex="0" role="button" aria-label="聚焦云端事件表，逐条写入表, 云端档（cloud） › 驱动循环：每批事件推进一步" aria-pressed="false" data-node-kind="database" data-node-sublabel="逐条写入表" data-node-context="云端档（cloud） › 驱动循环：每批事件推进一步">
+          <title>云端事件表 · 逐条写入表 · 云端档（cloud） › 驱动循环：每批事件推进一步</title>
           <rect x="738.8" y="465" width="140" height="52" rx="6" class="c-mask"/>
           <rect x="738.8" y="465" width="140" height="52" rx="6" class="c-database" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(744.8 471) scale(0.6875)">
@@ -640,7 +640,7 @@ rect.c-bg-rect { fill: var(--bg); }
             <path d="M3 4v8c0 1.1 2.2 2 5 2s5-.9 5-2V4M3 8c0 1.1 2.2 2 5 2s5-.9 5-2"/>
           </g>
           <text data-node-label="" x="808.8" y="486" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">云端事件表</text>
-          <text x="808.8" y="503" class="t-muted" font-size="8" text-anchor="middle">逐条写进表</text>
+          <text x="808.8" y="503" class="t-muted" font-size="8" text-anchor="middle">逐条写入表</text>
         </g>
 
         <g id="node-streamCloud" data-node-id="streamCloud" data-node-label="事件表流" tabindex="0" role="button" aria-label="聚焦事件表流，写入即触发, 云端档（cloud） › 重放与收敛" aria-pressed="false" data-node-kind="database" data-node-sublabel="写入即触发" data-node-context="云端档（cloud） › 重放与收敛">
@@ -656,13 +656,13 @@ rect.c-bg-rect { fill: var(--bg); }
         </g>
 
         <!-- Edge labels -->
-        <g data-edge-from="bgProc" data-edge-to="stepOnce" data-edge-label="反复推到收敛" data-edge-key="0" data-edge-id="e-bg-step">
+        <g data-edge-from="bgProc" data-edge-to="stepOnce" data-edge-label="反复推至收敛" data-edge-key="0" data-edge-id="e-bg-step">
           <rect x="126.7" y="400" width="67.6" height="14" rx="3" class="c-mask"/>
-          <text x="160.5" y="410" class="t-muted" font-size="8" text-anchor="middle">反复推到收敛</text>
+          <text x="160.5" y="410" class="t-muted" font-size="8" text-anchor="middle">反复推至收敛</text>
         </g>
-        <g data-edge-from="workerCloud" data-edge-to="exitWatch" data-edge-label="云端：平台记一条" data-edge-key="1" data-edge-id="e-cloud-exit">
-          <rect x="633.1999999999999" y="223" width="86.8" height="14" rx="3" class="c-mask"/>
-          <text x="676.5999999999999" y="233" class="t-security" font-size="8" text-anchor="middle">云端：平台记一条</text>
+        <g data-edge-from="workerCloud" data-edge-to="exitWatch" data-edge-label="云端：平台记录" data-edge-key="1" data-edge-id="e-cloud-exit">
+          <rect x="637.9999999999999" y="223" width="77.2" height="14" rx="3" class="c-mask"/>
+          <text x="676.5999999999999" y="233" class="t-security" font-size="8" text-anchor="middle">云端：平台记录</text>
         </g>
         <g data-edge-from="workerCloud" data-edge-to="tableCloud" data-edge-label="逐条事件" data-edge-key="2" data-edge-id="e-cloud-table">
           <rect x="686.3999999999999" y="471" width="48.4" height="14" rx="3" class="c-mask"/>
@@ -677,8 +677,8 @@ rect.c-bg-rect { fill: var(--bg); }
           <text x="512.4" y="342" class="t-muted" font-size="8" text-anchor="middle">云端：起云上任务</text>
         </g>
         <g data-edge-from="dispatch" data-edge-to="workerLocal" data-edge-label="本机：起子进程" data-edge-key="5" data-edge-id="e-dispatch-local">
-          <rect x="473.79999999999995" y="146" width="77.2" height="14" rx="3" class="c-mask"/>
-          <text x="512.4" y="156" class="t-backend" font-size="8" text-anchor="middle">本机：起子进程</text>
+          <rect x="403.79999999999995" y="148" width="77.2" height="14" rx="3" class="c-mask"/>
+          <text x="442.4" y="158" class="t-backend" font-size="8" text-anchor="middle">本机：起子进程</text>
         </g>
         <g data-edge-from="exitWatch" data-edge-to="settle" data-edge-label="有退出记录才收敛" data-edge-key="6" data-edge-id="e-exit-settle">
           <rect x="882.8" y="223" width="86.8" height="14" rx="3" class="c-mask"/>
@@ -688,45 +688,45 @@ rect.c-bg-rect { fill: var(--bg); }
           <rect x="370" y="223" width="48.4" height="14" rx="3" class="c-mask"/>
           <text x="394.2" y="233" class="t-backend" font-size="8" text-anchor="middle">在线派发</text>
         </g>
-        <g data-edge-from="workerLocal" data-edge-to="exitWatch" data-edge-label="本机：父进程收" data-edge-key="8" data-edge-id="e-local-exit">
-          <rect x="672.9999999999999" y="146" width="77.2" height="14" rx="3" class="c-mask"/>
-          <text x="711.5999999999999" y="156" class="t-security" font-size="8" text-anchor="middle">本机：父进程收</text>
+        <g data-edge-from="workerLocal" data-edge-to="exitWatch" data-edge-label="本机：父进程" data-edge-key="8" data-edge-id="e-local-exit">
+          <rect x="677.8" y="146" width="67.6" height="14" rx="3" class="c-mask"/>
+          <text x="711.5999999999999" y="156" class="t-security" font-size="8" text-anchor="middle">本机：父进程</text>
         </g>
         <g data-edge-from="workerLocal" data-edge-to="pipeLocal" data-edge-label="逐条事件" data-edge-key="9" data-edge-id="e-local-pipe">
           <rect x="686.3999999999999" y="99" width="48.4" height="14" rx="3" class="c-mask"/>
           <text x="710.5999999999999" y="109" class="t-database" font-size="8" text-anchor="middle">逐条事件</text>
         </g>
-        <g data-edge-from="pipeLocal" data-edge-to="settle" data-edge-label="前台：听完即用" data-edge-key="10" data-edge-id="e-pipe-settle">
+        <g data-edge-from="pipeLocal" data-edge-to="settle" data-edge-label="前台：在线消费" data-edge-key="10" data-edge-id="e-pipe-settle">
           <rect x="887.5999999999999" y="146" width="77.2" height="14" rx="3" class="c-mask"/>
-          <text x="926.1999999999999" y="156" class="t-database" font-size="8" text-anchor="middle">前台：听完即用</text>
+          <text x="926.1999999999999" y="156" class="t-database" font-size="8" text-anchor="middle">前台：在线消费</text>
         </g>
-        <g data-edge-from="pipeLocal" data-edge-to="storeLocal" data-edge-label="后台：旁路落下" data-edge-key="11" data-edge-id="e-pipe-store">
+        <g data-edge-from="pipeLocal" data-edge-to="storeLocal" data-edge-label="后台：旁路落库" data-edge-key="11" data-edge-id="e-pipe-store">
           <rect x="887.5999999999999" y="99" width="77.2" height="14" rx="3" class="c-mask"/>
-          <text x="926.1999999999999" y="109" class="t-database" font-size="8" text-anchor="middle">后台：旁路落下</text>
+          <text x="926.1999999999999" y="109" class="t-database" font-size="8" text-anchor="middle">后台：旁路落库</text>
         </g>
         <g data-edge-from="entry" data-edge-to="foreLoop" data-edge-label="run" data-edge-key="12" data-edge-id="e-run">
           <rect x="192" y="223" width="30" height="14" rx="3" class="c-mask"/>
           <text x="207" y="233" class="t-backend" font-size="8" text-anchor="middle">run</text>
         </g>
-        <g data-edge-from="stepOnce" data-edge-to="dispatch" data-edge-label="抢到才派发" data-edge-key="13" data-edge-id="e-step-dispatch">
+        <g data-edge-from="stepOnce" data-edge-to="dispatch" data-edge-label="抢占后派发" data-edge-key="13" data-edge-id="e-step-dispatch">
           <rect x="366.2" y="270" width="58" height="14" rx="3" class="c-mask"/>
-          <text x="395.2" y="280" class="t-muted" font-size="8" text-anchor="middle">抢到才派发</text>
+          <text x="395.2" y="280" class="t-muted" font-size="8" text-anchor="middle">抢占后派发</text>
         </g>
-        <g data-edge-from="storeLocal" data-edge-to="settle" data-edge-label="全量重放算终态" data-edge-key="14" data-edge-id="e-store-settle">
+        <g data-edge-from="storeLocal" data-edge-to="settle" data-edge-label="全量重放定终态" data-edge-key="14" data-edge-id="e-store-settle">
           <rect x="949.3999999999999" y="186" width="77.2" height="14" rx="3" class="c-mask"/>
-          <text x="987.9999999999999" y="196" class="t-database" font-size="8" text-anchor="middle">全量重放算终态</text>
+          <text x="987.9999999999999" y="196" class="t-database" font-size="8" text-anchor="middle">全量重放定终态</text>
         </g>
-        <g data-edge-from="streamCloud" data-edge-to="settle" data-edge-label="唤醒推进直到收敛" data-edge-key="15" data-edge-id="e-stream-settle">
-          <rect x="1000.1999999999999" y="445" width="86.8" height="14" rx="3" class="c-mask"/>
-          <text x="1043.6" y="455" class="t-database" font-size="8" text-anchor="middle">唤醒推进直到收敛</text>
+        <g data-edge-from="streamCloud" data-edge-to="settle" data-edge-label="唤醒推进至收敛" data-edge-key="15" data-edge-id="e-stream-settle">
+          <rect x="1004.9999999999999" y="445" width="77.2" height="14" rx="3" class="c-mask"/>
+          <text x="1043.6" y="455" class="t-database" font-size="8" text-anchor="middle">唤醒推进至收敛</text>
         </g>
         <g data-edge-from="entry" data-edge-to="stepOnce" data-edge-label="submit：落库即返回" data-edge-key="16" data-edge-id="e-submit">
           <rect x="114.80000000000001" y="270" width="96.39999999999999" height="14" rx="3" class="c-mask"/>
           <text x="163" y="280" class="t-muted" font-size="8" text-anchor="middle">submit：落库即返回</text>
         </g>
-        <g data-edge-from="tableCloud" data-edge-to="settle" data-edge-label="前台：轮询读一段" data-edge-key="17" data-edge-id="e-table-settle">
-          <rect x="882.8" y="332" width="86.8" height="14" rx="3" class="c-mask"/>
-          <text x="926.1999999999999" y="342" class="t-database" font-size="8" text-anchor="middle">前台：轮询读一段</text>
+        <g data-edge-from="tableCloud" data-edge-to="settle" data-edge-label="前台：分段轮询" data-edge-key="17" data-edge-id="e-table-settle">
+          <rect x="887.5999999999999" y="332" width="77.2" height="14" rx="3" class="c-mask"/>
+          <text x="926.1999999999999" y="342" class="t-database" font-size="8" text-anchor="middle">前台：分段轮询</text>
         </g>
         <g data-edge-from="tableCloud" data-edge-to="streamCloud" data-edge-label="每批写入" data-edge-key="18" data-edge-id="e-table-stream">
           <rect x="901.9999999999999" y="471" width="48.4" height="14" rx="3" class="c-mask"/>
@@ -748,22 +748,22 @@ rect.c-bg-rect { fill: var(--bg); }
             <rect x="199" y="564" width="14" height="9" rx="2" class="c-security" stroke-width="1"/>
             <text x="221" y="572" class="t-muted" font-size="7.5" font-weight="500">退出观察</text>
           </g>
-          <g data-legend-semantic-kind="messagebus" data-legend-x="284" data-legend-baseline="572" data-legend-width="100">
+          <g data-legend-semantic-kind="messagebus" data-legend-x="284" data-legend-baseline="572" data-legend-width="91">
             <rect x="284" y="564" width="14" height="9" rx="2" class="c-messagebus" stroke-width="1"/>
-            <text x="306" y="572" class="t-muted" font-size="7.5" font-weight="500">派发起 worker</text>
+            <text x="306" y="572" class="t-muted" font-size="7.5" font-weight="500">派发 worker</text>
           </g>
-          <g data-legend-semantic-kind="database" data-legend-x="391" data-legend-baseline="572" data-legend-width="78">
-            <rect x="391" y="564" width="14" height="9" rx="2" class="c-database" stroke-width="1"/>
-            <text x="413" y="572" class="t-muted" font-size="7.5" font-weight="500">事件载体</text>
+          <g data-legend-semantic-kind="database" data-legend-x="382" data-legend-baseline="572" data-legend-width="78">
+            <rect x="382" y="564" width="14" height="9" rx="2" class="c-database" stroke-width="1"/>
+            <text x="404" y="572" class="t-muted" font-size="7.5" font-weight="500">事件载体</text>
           </g>
-          <g data-legend-semantic-kind="cloud" data-legend-x="476" data-legend-baseline="572" data-legend-width="96">
-            <rect x="476" y="564" width="14" height="9" rx="2" class="c-cloud" stroke-width="1"/>
-            <text x="498" y="572" class="t-muted" font-size="7.5" font-weight="500">云端推进函数</text>
+          <g data-legend-semantic-kind="cloud" data-legend-x="467" data-legend-baseline="572" data-legend-width="96">
+            <rect x="467" y="564" width="14" height="9" rx="2" class="c-cloud" stroke-width="1"/>
+            <text x="489" y="572" class="t-muted" font-size="7.5" font-weight="500">云端推进函数</text>
           </g>
-          <g data-legend-semantic-kind="external" data-legend-x="579" data-legend-baseline="572" data-legend-width="156">
-            <rect x="579" y="564" width="14" height="9" rx="2" class="c-external" stroke-width="1"/>
-            <text x="601" y="572" class="t-muted" font-size="7.5" font-weight="500">worker：子进程 或 云端任务</text>
+          <g data-legend-semantic-kind="external" data-legend-x="570" data-legend-baseline="572" data-legend-width="156">
+            <rect x="570" y="564" width="14" height="9" rx="2" class="c-external" stroke-width="1"/>
+            <text x="592" y="572" class="t-muted" font-size="7.5" font-weight="500">worker：子进程 或 云端任务</text>
           </g>
         </g>
       </svg>
-<!-- gherkai:source-sha256=c0fbdce6987b612043b80b02aa0960251728db1195a1b5eaf564ce29f74e6da3 -->
+<!-- gherkai:source-sha256=42dd63d255f48a78298f32dbc25577f80dda9bdf5f3559027b43fca1db568581 -->

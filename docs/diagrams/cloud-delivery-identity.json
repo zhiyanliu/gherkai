@@ -8,7 +8,7 @@
     "views": [
       {
         "id": "images-in",
-        "label": "镜像挂哪",
+        "label": "镜像入账",
         "focus": [
           "ghcr_base",
           "local_img",
@@ -16,40 +16,40 @@
           "derived",
           "mapping"
         ],
-        "note": "官方基底与你 build 的镜像怎么进账户、挂在哪个 revision 上？先同步或推送进你自己的 ECR，再从模板复制出这个 variant 的 revision 并登记进映射。"
+        "note": "官方基底与使用方 build 的镜像进入本账户、挂上 revision 的路径：先同步或推送进本账户 ECR，再从模板复制出该 variant 的 revision 并登记进映射。"
       },
       {
         "id": "who-points",
-        "label": "谁在指着",
+        "label": "指向关系",
         "focus": [
           "default_ptr",
           "mapping",
           "submit",
           "runs"
         ],
-        "note": "谁指着这个 revision？提交那一刻解析成显式 revision 写进 run 定义，之后起 task 照抄，不按 family 取最新。"
+        "note": "指向该 revision 的环节：提交时解析为显式 revision 并写入 run 定义，起 task 时沿用该值，不按 family 取最新。"
       },
       {
         "id": "why-rederive",
-        "label": "为何重派生",
+        "label": "重派生动因",
         "focus": [
           "stack",
           "template",
           "derived",
           "retired"
         ],
-        "note": "为什么重派生必要？revision 是快照、无继承：部署换了运行配置就得按新模板重注册，旧的转退休、镜像不动。"
+        "note": "重派生的必要性：revision 是不可变快照、无继承；部署变更运行配置后须按新模板重新注册，旧 revision 转退休、镜像不变。"
       },
       {
         "id": "when-delete",
-        "label": "何时能删",
+        "label": "删除条件",
         "focus": [
           "derived",
           "retired",
           "cleanup",
           "runs"
         ],
-        "note": "旧 revision 什么时候才允许删？被替换只打退休标记；满静默期且无未到终态的 run 引用它，才注销并删除。"
+        "note": "旧 revision 允许删除的条件：被替换时仅标记退休；满静默期且无未到终态的 run 引用，才注销并删除。"
       }
     ]
   },
@@ -71,8 +71,8 @@
     {
       "id": "local_img",
       "type": "external",
-      "label": "你 build 的镜像",
-      "sublabel": "基底 + 你的 step",
+      "label": "variant 镜像",
+      "sublabel": "基底 + 自带 step",
       "pos": [
         60,
         230
@@ -99,7 +99,7 @@
     {
       "id": "ecr",
       "type": "cloud",
-      "label": "你的 ECR 仓库",
+      "label": "ECR 仓库",
       "sublabel": "按引擎分仓",
       "tag": "无过期规则",
       "pos": [
@@ -173,7 +173,7 @@
       "id": "mapping",
       "type": "database",
       "label": "SSM 镜像映射",
-      "sublabel": "写完即生效",
+      "sublabel": "写入即生效",
       "pos": [
         834,
         230
@@ -216,7 +216,7 @@
       "id": "runs",
       "type": "database",
       "label": "runs 表",
-      "sublabel": "run 钉下的 revision",
+      "sublabel": "run 固定的 revision",
       "pos": [
         834,
         400
@@ -252,7 +252,7 @@
     },
     {
       "kind": "region",
-      "label": "你的机器（build 与推送）",
+      "label": "本机（build 与推送）",
       "wraps": [
         "local_img"
       ],
@@ -260,7 +260,7 @@
     },
     {
       "kind": "region",
-      "label": "你的 AWS 账户（一个 prefix 一套）",
+      "label": "本 AWS 账户（一个 prefix 一套）",
       "wraps": [
         "lambda_code",
         "ecr",
@@ -309,21 +309,21 @@
       "id": "stack-carries-lambda",
       "from": "stack",
       "to": "lambda_code",
-      "label": "同一次变更集带代码",
+      "label": "同一变更集含代码",
       "labelDy": 24
     },
     {
       "id": "image-by-digest",
       "from": "ecr",
       "to": "derived",
-      "label": "按 digest 入栏",
+      "label": "按 digest 引用",
       "variant": "emphasis"
     },
     {
       "id": "copy-template",
       "from": "template",
       "to": "derived",
-      "label": "复制成新 revision",
+      "label": "复制为新 revision",
       "labelDy": 24
     },
     {
@@ -337,7 +337,7 @@
       "id": "pointer-picks",
       "from": "default_ptr",
       "to": "mapping",
-      "label": "决定读哪条",
+      "label": "选定映射项",
       "variant": "dashed",
       "labelDy": 24
     },
@@ -352,7 +352,7 @@
       "id": "pin-into-run",
       "from": "submit",
       "to": "runs",
-      "label": "钉进 run 定义"
+      "label": "写入 run 定义"
     },
     {
       "id": "retire-old",
@@ -374,7 +374,7 @@
       "id": "live-run-guard",
       "from": "runs",
       "to": "cleanup",
-      "label": "有 run 引用则留",
+      "label": "有 run 引用不删",
       "variant": "security"
     }
   ],
@@ -383,20 +383,20 @@
       "dot": "cyan",
       "title": "gherkai deploy 的四步",
       "items": [
-        "① cdk 事务建资源，模板登记进 SSM",
-        "② 同步基底：纯发行版要容器引擎，非纯发行版跳过",
-        "③ 默认指针缺失才初始化，已有不动",
-        "④ 模板换了才重派生，末尾顺带回收"
+        "① cdk 事务创建资源，模板登记进 SSM",
+        "② 同步基底镜像：纯发行版需容器引擎，非纯发行版跳过",
+        "③ 默认指针缺失时初始化，已存在则不修改",
+        "④ 模板变更时重派生，末尾执行回收"
       ]
     },
     {
       "dot": "rose",
-      "title": "删 revision 的两道闸",
+      "title": "删除 revision 的两道闸门",
       "items": [
-        "退休或孤儿满静默期",
-        "无未到终态的 run 引用它",
-        "仍被某条映射引用的也留着",
-        "故重推同名 variant 不动在跑的 run"
+        "已退休或孤儿且满静默期",
+        "无未到终态的 run 引用",
+        "仍被映射引用的保留",
+        "因此重推同名 variant 不影响运行中的 run"
       ]
     }
   ]

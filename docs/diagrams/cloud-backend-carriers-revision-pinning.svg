@@ -415,7 +415,7 @@ svg[data-theme="light"] { --bg: #f8fafc; --grid: #e2e8f0; --text: #0f172a; --tex
 svg[data-theme="dark"] { --bg: #020617; --grid: #1e293b; --text: #ffffff; --text-muted: #94a3b8; --text-dim: #475569; --text-faint: #7d8da1; --panel: rgba(15, 23, 42, 0.5); --panel-border: #1e293b; --lane-fill: rgba(15, 23, 42, 0.22); --lane-stroke: #334155; --arrow: #64748b; --arrow-emphasis: #34d399; --mask: #0f172a; --frontend-fill: rgba(8, 51, 68, 0.4); --frontend-stroke: #22d3ee; --backend-fill: rgba(6, 78, 59, 0.4); --backend-stroke: #34d399; --database-fill: rgba(76, 29, 149, 0.4); --database-stroke: #a78bfa; --cloud-fill: rgba(120, 53, 15, 0.3); --cloud-stroke: #fbbf24; --security-fill: rgba(136, 19, 55, 0.4); --security-stroke: #fb7185; --messagebus-fill: rgba(251, 146, 60, 0.3); --messagebus-stroke: #fb923c; --external-fill: rgba(30, 41, 59, 0.5); --external-stroke: #94a3b8; --toolbar-bg: rgba(15, 23, 42, 0.8); --toolbar-border: #334155; --toolbar-text: #e2e8f0; --toolbar-hover: rgba(15, 23, 42, 0.95); --toolbar-menu-bg: #0f172a; }
 rect.c-bg-rect { fill: var(--bg); }
 </style><rect width="100%" height="100%" class="c-bg-rect"/>
-        <title id="archify-diagram-title">提交那一刻钉死 worker 身份，之后照抄</title>
+        <title id="archify-diagram-title">提交时刻固定 worker 身份，之后照抄</title>
         <desc id="archify-diagram-description">由 Archify 生成的时序图。</desc>
         <!-- Definitions -->
         <defs>
@@ -486,30 +486,30 @@ rect.c-bg-rect { fill: var(--bg); }
         </g>
         </g>
 
-        <g data-edge-from="cli" data-edge-to="taskdef" data-edge-label="revision 还能起吗" data-edge-key="2">
+        <g data-edge-from="cli" data-edge-to="taskdef" data-edge-label="revision 仍有效" data-edge-key="2">
           <path data-composition-edge-from="cli" data-composition-edge-to="taskdef" data-composition-points="122.5,284;385.5,284" d="M 122.5 284 L 385.5 284" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
         <g>
-          <rect x="203.8" y="264" width="100.4" height="16" rx="3" class="c-mask"/>
-          <text x="254" y="274" class="t-backend" font-size="9" text-anchor="middle">revision 还能起吗</text>
+          <rect x="209" y="264" width="90" height="16" rx="3" class="c-mask"/>
+          <text x="254" y="274" class="t-backend" font-size="9" text-anchor="middle">revision 仍有效</text>
         </g>
         </g>
 
-        <g data-edge-from="cli" data-edge-to="ecr" data-edge-label="digest 还在吗" data-edge-key="3">
+        <g data-edge-from="cli" data-edge-to="ecr" data-edge-label="digest 仍存在" data-edge-key="3">
           <path data-composition-edge-from="cli" data-composition-edge-to="ecr" data-composition-points="122.5,336;524,336" d="M 122.5 336 L 524 336" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
         <g>
           <rect x="283.45" y="316" width="79.60000000000001" height="16" rx="3" class="c-mask"/>
-          <text x="323.25" y="326" class="t-backend" font-size="9" text-anchor="middle">digest 还在吗</text>
+          <text x="323.25" y="326" class="t-backend" font-size="9" text-anchor="middle">digest 仍存在</text>
         </g>
-        <text x="134.5" y="354" class="t-dim" font-size="7">任一环缺即拒，不回落默认指针、不取 family 最新</text>
+        <text x="134.5" y="354" class="t-dim" font-size="7">任一环缺失即拒，不回落默认指针、不取 family 最新</text>
         </g>
 
-        <g data-edge-from="cli" data-edge-to="runrec" data-edge-label="写下引擎与 revision" data-edge-key="4">
+        <g data-edge-from="cli" data-edge-to="runrec" data-edge-label="写入引擎与 revision" data-edge-key="4">
           <path data-composition-edge-from="cli" data-composition-edge-to="runrec" data-composition-points="122.5,388;801,388" d="M 122.5 388 L 801 388" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
         <g>
           <rect x="406.35" y="368" width="110.8" height="16" rx="3" class="c-mask"/>
-          <text x="461.75" y="378" class="t-backend" font-size="9" text-anchor="middle">写下引擎与 revision</text>
+          <text x="461.75" y="378" class="t-backend" font-size="9" text-anchor="middle">写入引擎与 revision</text>
         </g>
-        <text x="134.5" y="406" class="t-dim" font-size="7">run 定义记一份，状态项另摊平一份</text>
+        <text x="134.5" y="406" class="t-dim" font-size="7">run 定义记一份，状态项另存扁平一份</text>
         </g>
 
         <g data-edge-from="ops" data-edge-to="ecr" data-edge-label="推同名 tag" data-edge-key="5">
@@ -518,7 +518,7 @@ rect.c-bg-rect { fill: var(--bg); }
           <rect x="568.25" y="460" width="64" height="16" rx="3" class="c-mask"/>
           <text x="600.25" y="470" class="t-backend" font-size="9" text-anchor="middle">推同名 tag</text>
         </g>
-        <text x="550" y="498" class="t-dim" font-size="7">得到新 digest；被顶掉的旧镜像层不过期</text>
+        <text x="550" y="498" class="t-dim" font-size="7">产生新 digest；被替换的旧镜像层不过期</text>
         </g>
 
         <g data-edge-from="ops" data-edge-to="taskdef" data-edge-label="注册新 revision" data-edge-key="6">
@@ -536,16 +536,16 @@ rect.c-bg-rect { fill: var(--bg); }
           <rect x="434.95" y="564" width="53.6" height="16" rx="3" class="c-mask"/>
           <text x="461.75" y="574" class="t-backend" font-size="9" text-anchor="middle">覆盖映射</text>
         </g>
-        <text x="273" y="602" class="t-dim" font-size="7">覆盖语义、最后写者赢；下一次提交才解析到新的</text>
+        <text x="273" y="602" class="t-dim" font-size="7">覆盖语义、最后写者赢；下一次提交才解析到新映射</text>
         </g>
 
-        <g data-edge-from="ops" data-edge-to="taskdef" data-edge-label="旧的标退休" data-edge-key="8">
+        <g data-edge-from="ops" data-edge-to="taskdef" data-edge-label="标记退休" data-edge-key="8">
           <path data-composition-edge-from="ops" data-composition-edge-to="taskdef" data-composition-points="662.5,636;399.5,636" d="M 662.5 636 L 399.5 636" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
         <g>
-          <rect x="499" y="616" width="64" height="16" rx="3" class="c-mask"/>
-          <text x="531" y="626" class="t-backend" font-size="9" text-anchor="middle">旧的标退休</text>
+          <rect x="504.2" y="616" width="53.6" height="16" rx="3" class="c-mask"/>
+          <text x="531" y="626" class="t-backend" font-size="9" text-anchor="middle">标记退休</text>
         </g>
-        <text x="411.5" y="654" class="t-dim" font-size="7">只打标记、不注销，等回收侧放行</text>
+        <text x="411.5" y="654" class="t-dim" font-size="7">只标记、不注销；注销待回收侧放行</text>
         </g>
 
         <g data-edge-from="launcher" data-edge-to="runrec" data-edge-label="照定义取 revision" data-edge-key="9">
@@ -556,11 +556,11 @@ rect.c-bg-rect { fill: var(--bg); }
         </g>
         </g>
 
-        <g data-edge-from="runrec" data-edge-to="launcher" data-edge-label="提交时钉下那一个" data-edge-key="10">
+        <g data-edge-from="runrec" data-edge-to="launcher" data-edge-label="提交时固定的结果" data-edge-key="10">
           <path data-composition-edge-from="runrec" data-composition-edge-to="launcher" data-composition-points="815,802;939.5,802" d="M 815 802 L 939.5 802" class="a-default" stroke-width="1.4" stroke-dasharray="3,5" marker-end="url(#arrowhead)"/>
         <g>
           <rect x="829.65" y="782" width="95.2" height="16" rx="3" class="c-mask"/>
-          <text x="877.25" y="792" class="t-muted" font-size="9" text-anchor="middle">提交时钉下那一个</text>
+          <text x="877.25" y="792" class="t-muted" font-size="9" text-anchor="middle">提交时固定的结果</text>
         </g>
         </g>
 
@@ -570,17 +570,17 @@ rect.c-bg-rect { fill: var(--bg); }
           <rect x="603.7" y="834" width="131.60000000000002" height="16" rx="3" class="c-mask"/>
           <text x="669.5" y="844" class="t-backend" font-size="9" text-anchor="middle">按显式 revision 起 task</text>
         </g>
-        <text x="411.5" y="872" class="t-dim" font-size="7">镜像栏按 digest 指着重推前那一层</text>
+        <text x="411.5" y="872" class="t-dim" font-size="7">镜像栏的 digest 指向重推前的镜像层</text>
         </g>
 
         <!-- Segment Labels -->
         <g data-graph-role="segment-label" data-segment-id="0">
-          <rect x="56" y="128" width="175.20000000000002" height="18" rx="3" class="c-mask"/>
-          <text x="62" y="141" class="t-dim" font-size="9" font-weight="600">提交那一刻：解析成显式 revision</text>
+          <rect x="56" y="128" width="164.8" height="18" rx="3" class="c-mask"/>
+          <text x="62" y="141" class="t-dim" font-size="9" font-weight="600">提交时刻：解析成显式 revision</text>
         </g>
         <g data-graph-role="segment-label" data-segment-id="1">
-          <rect x="56" y="428" width="190.8" height="18" rx="3" class="c-mask"/>
-          <text x="62" y="441" class="t-dim" font-size="9" font-weight="600">run 还在跑时：有人重推同名 variant</text>
+          <rect x="56" y="428" width="170" height="18" rx="3" class="c-mask"/>
+          <text x="62" y="441" class="t-dim" font-size="9" font-weight="600">run 运行期间：重推同名 variant</text>
         </g>
         <g data-graph-role="segment-label" data-segment-id="2">
           <rect x="56" y="698" width="154.4" height="18" rx="3" class="c-mask"/>
@@ -588,8 +588,8 @@ rect.c-bg-rect { fill: var(--bg); }
         </g>
 
         <!-- Participants -->
-        <g id="node-cli" data-node-id="cli" data-node-label="提交侧 CLI" tabindex="0" role="button" aria-label="聚焦提交侧 CLI，解析并钉死, 时序参与者" aria-pressed="false" data-node-kind="frontend" data-node-sublabel="解析并钉死" data-node-context="时序参与者">
-          <title>提交侧 CLI · 解析并钉死 · 时序参与者</title>
+        <g id="node-cli" data-node-id="cli" data-node-label="提交侧 CLI" tabindex="0" role="button" aria-label="聚焦提交侧 CLI，解析并固定, 时序参与者" aria-pressed="false" data-node-kind="frontend" data-node-sublabel="解析并固定" data-node-context="时序参与者">
+          <title>提交侧 CLI · 解析并固定 · 时序参与者</title>
           <rect x="62" y="72" width="107" height="54" rx="6" class="c-mask"/>
           <rect x="62" y="72" width="107" height="54" rx="6" class="c-frontend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="frontend" class="semantic-sigil s-frontend" transform="translate(68 78) scale(0.6875)">
@@ -599,7 +599,7 @@ rect.c-bg-rect { fill: var(--bg); }
             <circle cx="6.3" cy="4.8" r=".7" class="sigil-fill"/>
           </g>
           <text data-node-label="" x="115.5" y="94" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">提交侧 CLI</text>
-          <text x="115.5" y="111" class="t-muted" font-size="7" text-anchor="middle">解析并钉死</text>
+          <text x="115.5" y="111" class="t-muted" font-size="7" text-anchor="middle">解析并固定</text>
         </g>
 
         <g id="node-ssm" data-node-id="ssm" data-node-label="SSM 参数" tabindex="0" role="button" aria-label="聚焦SSM 参数，映射与默认指针, 时序参与者" aria-pressed="false" data-node-kind="database" data-node-sublabel="映射与默认指针" data-node-context="时序参与者">
@@ -688,4 +688,4 @@ rect.c-bg-rect { fill: var(--bg); }
           </g>
         </g>
       </svg>
-<!-- gherkai:source-sha256=d445f4a101bd6c3f33a70bd991482df8be306647265eb70b528223a4a7a6d066 -->
+<!-- gherkai:source-sha256=6c159f86b831b725bd56a80a3243bf03088723b51dd56c4e4614d8a272c5e42a -->

@@ -9,7 +9,7 @@
       "mode": "auto",
       "entries": {
         "backend": {
-          "label": "核心走的一步"
+          "label": "处理步骤"
         },
         "database": {
           "label": "落库与事件"
@@ -24,7 +24,7 @@
           "label": "退出观察"
         },
         "frontend": {
-          "label": "使用者拿到的结果"
+          "label": "使用者可见结果"
         }
       }
     }
@@ -32,7 +32,7 @@
   "lanes": [
     {
       "id": "laneMain",
-      "label": "主干：一个 run 走一遍"
+      "label": "主干：单次 run 全程"
     },
     {
       "id": "laneJob",
@@ -40,19 +40,19 @@
     },
     {
       "id": "laneBack",
-      "label": "worker 回传核心的两件事"
+      "label": "worker 回传的两类信息"
     }
   ],
   "phases": [
     {
       "id": "phPlan",
-      "label": "plan：到此为止",
+      "label": "plan：止于分组",
       "fromCol": 0,
       "toCol": 1
     },
     {
       "id": "phRun",
-      "label": "run / submit：接着走到底",
+      "label": "run / submit：执行到终态",
       "fromCol": 2,
       "toCol": 5,
       "variant": "emphasis"
@@ -136,7 +136,7 @@
       "col": 5,
       "type": "frontend",
       "label": "报告与退出码",
-      "sublabel": "run 的终态落定",
+      "sublabel": "run 的终态",
       "width": 148
     },
     {
@@ -145,7 +145,7 @@
       "col": 3,
       "type": "external",
       "label": "起 worker",
-      "sublabel": "每 scope 一个，起会话",
+      "sublabel": "每 scope 一个，建会话",
       "width": 152
     },
     {
@@ -154,7 +154,7 @@
       "col": 4,
       "type": "backend",
       "label": "逐 step 执行",
-      "sublabel": "确定性 或 交给 AI",
+      "sublabel": "确定性 或 交由 AI",
       "width": 144
     },
     {
@@ -172,7 +172,7 @@
       "col": 5,
       "type": "database",
       "label": "逐条事件",
-      "sublabel": "一条一条吐出来",
+      "sublabel": "随执行逐条上报",
       "width": 140
     }
   ],
@@ -197,7 +197,7 @@
       "id": "e-begin-drive",
       "from": "begin",
       "to": "drive",
-      "label": "运行态已落",
+      "label": "运行态就绪",
       "variant": "emphasis",
       "role": "main"
     },
@@ -217,7 +217,7 @@
       "id": "e-worker-step",
       "from": "worker",
       "to": "step",
-      "label": "开会话后逐 step",
+      "label": "会话内逐个 step",
       "route": "straight",
       "labelDy": -14,
       "role": "branch"
@@ -226,7 +226,7 @@
       "id": "e-step-events",
       "from": "step",
       "to": "events",
-      "label": "逐条吐出",
+      "label": "逐条上报",
       "variant": "dashed",
       "role": "async"
     },
@@ -234,7 +234,7 @@
       "id": "e-events-drive",
       "from": "events",
       "to": "drive",
-      "label": "回传核心：再推一步",
+      "label": "回传核心：推进一步",
       "fromSide": "right",
       "toSide": "top",
       "via": [
@@ -271,7 +271,7 @@
       "id": "e-exit-drive",
       "from": "exit",
       "to": "drive",
-      "label": "回传核心：可以收场",
+      "label": "回传核心：可判终态",
       "variant": "security",
       "role": "return",
       "fromSide": "left",
@@ -284,7 +284,7 @@
       "id": "e-drive-reduce",
       "from": "drive",
       "to": "reduce",
-      "label": "job 都收场",
+      "label": "job 全终结",
       "route": "straight",
       "variant": "emphasis",
       "role": "main"
@@ -300,26 +300,26 @@
   "cards": [
     {
       "dot": "cyan",
-      "title": "判定要两件都成立",
+      "title": "判定的两个必要条件",
       "items": [
         "事件完整 ∧ 进程干净终止",
-        "退出信号来自父进程或平台观察，不是 worker 自己上报"
+        "退出信号由父进程或平台观察给出，非 worker 自报"
       ]
     },
     {
       "dot": "violet",
-      "title": "循环里的两种驱动",
+      "title": "循环体的两种驱动",
       "items": [
-        "run：全程在线的循环，关掉命令即中止",
-        "submit：无状态地推一步，由本机后台进程或云端函数反复调用"
+        "run：全程在线的循环，命令终止则 run 中止",
+        "submit：无状态单步推进，由本机后台进程或云端函数反复调用"
       ]
     },
     {
       "dot": "emerald",
-      "title": "plan 到此为止",
+      "title": "plan 的覆盖范围",
       "items": [
         "解析与分组纯本地、零费用",
-        "另问每个引擎：这些 step 各命中哪条确定性模式"
+        "另向每个引擎查询这些 step 各命中哪条确定性模式"
       ]
     }
   ]

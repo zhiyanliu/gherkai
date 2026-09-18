@@ -9,7 +9,7 @@
       "mode": "auto",
       "entries": {
         "external": {
-          "label": "scenario（写在 .feature 里）"
+          "label": "scenario（.feature 中书写）"
         },
         "backend": {
           "label": "job：执行单位"
@@ -18,7 +18,7 @@
           "label": "并发上限与排队"
         },
         "messagebus": {
-          "label": "开跑：起会话"
+          "label": "会话启动"
         }
       }
     }
@@ -26,11 +26,11 @@
   "lanes": [
     {
       "id": "laneScoped",
-      "label": "标了 @scope 的 scenario"
+      "label": "已标 @scope 的 scenario"
     },
     {
       "id": "laneBare",
-      "label": "没标 @scope 的 scenario"
+      "label": "未标 @scope 的 scenario"
     },
     {
       "id": "laneSched",
@@ -44,7 +44,7 @@
   "phases": [
     {
       "id": "phWrite",
-      "label": "写在 .feature 里",
+      "label": ".feature 中书写",
       "fromCol": 0,
       "toCol": 0
     },
@@ -57,7 +57,7 @@
     },
     {
       "id": "phSched",
-      "label": "上限内才开跑",
+      "label": "上限内启动",
       "fromCol": 2,
       "toCol": 3
     }
@@ -94,8 +94,8 @@
       "lane": "laneScoped",
       "col": 0,
       "type": "external",
-      "label": "同一个 scope 名",
-      "sublabel": "跨文件也算同名",
+      "label": "同一 scope 名",
+      "sublabel": "同名跨文件合并",
       "width": 144
     },
     {
@@ -113,7 +113,7 @@
       "col": 0,
       "type": "external",
       "label": "一条 scenario",
-      "sublabel": "没有 scope 名",
+      "sublabel": "未标 scope 名",
       "width": 144
     },
     {
@@ -131,7 +131,7 @@
       "col": 2,
       "type": "security",
       "label": "并发上限",
-      "sublabel": "同时开跑几个 job",
+      "sublabel": "同时执行的 job 数",
       "width": 140
     },
     {
@@ -139,7 +139,7 @@
       "lane": "laneSched",
       "col": 3,
       "type": "messagebus",
-      "label": "同时开跑",
+      "label": "并发执行",
       "sublabel": "每个 job 一个会话",
       "width": 140
     },
@@ -148,8 +148,8 @@
       "lane": "laneWait",
       "col": 3,
       "type": "security",
-      "label": "排队等空位",
-      "sublabel": "有空位再开跑",
+      "label": "排队等待",
+      "sublabel": "有空位时启动",
       "width": 140
     }
   ],
@@ -158,7 +158,7 @@
       "id": "e-scoped-job",
       "from": "scopedIn",
       "to": "jobScope",
-      "label": "同名归一个",
+      "label": "同名归并",
       "variant": "emphasis",
       "role": "main"
     },
@@ -166,7 +166,7 @@
       "id": "e-bare-job",
       "from": "bareIn",
       "to": "jobBare",
-      "label": "每条各自一个",
+      "label": "逐条分组",
       "variant": "default",
       "role": "branch"
     },
@@ -208,17 +208,17 @@
       "dot": "cyan",
       "title": "分组的两条规则",
       "items": [
-        "标了同一个 scope 名的 scenario 合成一个 job：共享一个浏览器会话、按书写顺序串行",
-        "没标的每条各自成一个 job，编号取「文件路径:行号」的形状"
+        "标注同一 scope 名的 scenario 合成一个 job：共享一个浏览器会话，按书写顺序串行执行",
+        "未标注的 scenario 逐条成为一个 job，编号形如「文件路径:行号」"
       ]
     },
     {
       "dot": "violet",
-      "title": "并发只发生在 job 之间",
+      "title": "并发仅发生在 job 之间",
       "items": [
-        "互不相干的用例分到不同 scope 才可能并发；同一个 scope 里的 scenario 一定串行",
-        "分好 scope 之后还要把并发上限调高，才真的同时开跑；提交到云端跑时上限另受部署侧约束",
-        "分组没按预期生效，先用 plan 看归组结果"
+        "互不相干的用例分入不同 scope 才可能并发；同一 scope 内的 scenario 必定串行",
+        "完成分组后还需调高并发上限，才会并发执行；提交到云端后端时，上限另受部署侧设定约束",
+        "分组结果可通过 plan 在执行前查看"
       ]
     }
   ]

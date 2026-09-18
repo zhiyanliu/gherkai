@@ -415,7 +415,7 @@ svg[data-theme="light"] { --bg: #f8fafc; --grid: #e2e8f0; --text: #0f172a; --tex
 svg[data-theme="dark"] { --bg: #020617; --grid: #1e293b; --text: #ffffff; --text-muted: #94a3b8; --text-dim: #475569; --text-faint: #7d8da1; --panel: rgba(15, 23, 42, 0.5); --panel-border: #1e293b; --lane-fill: rgba(15, 23, 42, 0.22); --lane-stroke: #334155; --arrow: #64748b; --arrow-emphasis: #34d399; --mask: #0f172a; --frontend-fill: rgba(8, 51, 68, 0.4); --frontend-stroke: #22d3ee; --backend-fill: rgba(6, 78, 59, 0.4); --backend-stroke: #34d399; --database-fill: rgba(76, 29, 149, 0.4); --database-stroke: #a78bfa; --cloud-fill: rgba(120, 53, 15, 0.3); --cloud-stroke: #fbbf24; --security-fill: rgba(136, 19, 55, 0.4); --security-stroke: #fb7185; --messagebus-fill: rgba(251, 146, 60, 0.3); --messagebus-stroke: #fb923c; --external-fill: rgba(30, 41, 59, 0.5); --external-stroke: #94a3b8; --toolbar-bg: rgba(15, 23, 42, 0.8); --toolbar-border: #334155; --toolbar-text: #e2e8f0; --toolbar-hover: rgba(15, 23, 42, 0.95); --toolbar-menu-bg: #0f172a; }
 rect.c-bg-rect { fill: var(--bg); }
 </style><rect width="100%" height="100%" class="c-bg-rect"/>
-        <title id="archify-diagram-title">两道闸门：云端后台推进为什么不碰前台 run</title>
+        <title id="archify-diagram-title">两道闸门：云端推进器为何不介入前台 run</title>
         <desc id="archify-diagram-description">由 Archify 生成的工作流图。</desc>
         <!-- Definitions -->
         <defs>
@@ -441,13 +441,13 @@ rect.c-bg-rect { fill: var(--bg); }
 
         <!-- Swimlanes -->
         <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-0" x="40" y="52" width="1099" height="104" rx="10" class="c-lane" stroke-width="1"/>
-        <text x="54" y="74" class="t-dim" font-size="10" font-weight="600">01 / 冷启动这一路</text>
+        <text x="54" y="74" class="t-dim" font-size="10" font-weight="600">01 / 冷启动路径</text>
 
         <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-1" x="40" y="176" width="1099" height="104" rx="10" class="c-lane" stroke-width="1"/>
-        <text x="54" y="198" class="t-dim" font-size="10" font-weight="600">02 / 主推进这一路</text>
+        <text x="54" y="198" class="t-dim" font-size="10" font-weight="600">02 / 主推进路径</text>
 
         <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-2" x="40" y="300" width="1099" height="104" rx="10" class="c-lane" stroke-width="1"/>
-        <text x="54" y="322" class="t-dim" font-size="10" font-weight="600">03 / 退出观察这一路</text>
+        <text x="54" y="322" class="t-dim" font-size="10" font-weight="600">03 / 退出观察路径</text>
 
         <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-3" x="40" y="424" width="1099" height="104" rx="10" class="c-lane" stroke-width="1"/>
         <rect data-graph-role="structural-frame" data-composition-frame-kind="exception-lane" data-composition-frame-id="lane-3-exception" x="46" y="430" width="1087" height="92" rx="8" class="c-security-group" stroke-width="1"/>
@@ -456,30 +456,30 @@ rect.c-bg-rect { fill: var(--bg); }
         <!-- Phase headers -->
         <line x1="76" y1="35" x2="288" y2="35" class="a-default" stroke-width="1.1"/>
         <rect x="76" y="27" width="212" height="16" rx="4" class="c-mask"/>
-        <text x="182" y="39" class="t-muted" font-size="8" font-weight="600" text-anchor="middle">订阅侧就滤掉</text>
+        <text x="182" y="39" class="t-muted" font-size="8" font-weight="600" text-anchor="middle">事件源层过滤</text>
         <line x1="354.00000000000006" y1="35" x2="874.4000000000001" y2="35" class="a-emphasis" stroke-width="1.1"/>
         <rect x="354.00000000000006" y="27" width="520.4" height="16" rx="4" class="c-mask"/>
-        <text x="614.2" y="39" class="t-backend" font-size="8" font-weight="600" text-anchor="middle">进了函数再判：判不过就挡下</text>
+        <text x="614.2" y="39" class="t-backend" font-size="8" font-weight="600" text-anchor="middle">函数内判断：不通过即挡下</text>
         <line x1="1010.4000000000001" y1="35" x2="1108" y2="35" class="a-default" stroke-width="1.1"/>
         <rect x="1010.4000000000001" y="27" width="97.6" height="16" rx="4" class="c-mask"/>
-        <text x="1059.2" y="39" class="t-muted" font-size="8" font-weight="600" text-anchor="middle">放行：链照常跑通</text>
+        <text x="1059.2" y="39" class="t-muted" font-size="8" font-weight="600" text-anchor="middle">放行：链正常贯通</text>
 
         <!-- Workflow groups -->
 
 
         <!-- Edge paths -->
         <path data-edge-from="judgeDetached" data-edge-to="blkAct" data-edge-label="不是后台批次" data-edge-key="0" data-edge-id="e-detached-blk" data-composition-points="400,269;400,465" d="M 400 269 L 400 465" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
-        <path data-edge-from="judgeDetached" data-edge-to="judgeSettled" data-edge-label="是 → 再判一道" data-edge-key="1" data-edge-id="e-detached-settled" data-composition-points="476,243;556.4,243" d="M 476 243 L 556.4 243" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path data-edge-from="judgeDetached" data-edge-to="judgeSettled" data-edge-label="是 → 下一判点" data-edge-key="1" data-edge-id="e-detached-settled" data-composition-points="476,243;556.4,243" d="M 476 243 L 556.4 243" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
         <path data-edge-from="judgeExit" data-edge-to="blkExit" data-edge-label="不是后台批次" data-edge-key="2" data-edge-id="e-exit-blk" data-composition-points="828.4,393;828.4,465" d="M 828.4 393 L 828.4 465" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
         <path data-edge-from="judgeExit" data-edge-to="goExit" data-edge-label="是后台批次" data-edge-key="3" data-edge-id="e-exit-go" data-composition-points="916.4,367;982.4000000000001,367" d="M 916.4 367 L 982.4000000000001 367" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
         <path data-edge-from="srcNew" data-edge-to="blkKick" data-edge-label="不是后台 run" data-edge-key="4" data-edge-id="e-new-blk" data-composition-points="48,119;20,119;20,491;168,491" d="M 48 119 L 20 119 L 20 491 L 168 491" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
         <path data-edge-from="srcNew" data-edge-to="goKick" data-edge-label="是后台 run" data-edge-key="5" data-edge-id="e-new-go" data-composition-points="196,119;982.4000000000001,119" d="M 196 119 L 982.4000000000001 119" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
-        <path data-edge-from="judgeSettled" data-edge-to="blkRewrite" data-edge-label="已经收尾" data-edge-key="6" data-edge-id="e-settled-blk" data-composition-points="644.4,269;644.4,465" d="M 644.4 269 L 644.4 465" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
-        <path data-edge-from="judgeSettled" data-edge-to="goStep" data-edge-label="还没收尾" data-edge-key="7" data-edge-id="e-settled-go" data-composition-points="732.4,243;982.4000000000001,243" d="M 732.4 243 L 982.4000000000001 243" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path data-edge-from="judgeSettled" data-edge-to="blkRewrite" data-edge-label="已结束" data-edge-key="6" data-edge-id="e-settled-blk" data-composition-points="644.4,269;644.4,465" d="M 644.4 269 L 644.4 465" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
+        <path data-edge-from="judgeSettled" data-edge-to="goStep" data-edge-label="未结束" data-edge-key="7" data-edge-id="e-settled-go" data-composition-points="732.4,243;982.4000000000001,243" d="M 732.4 243 L 982.4000000000001 243" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
 
         <!-- Nodes -->
-        <g id="node-srcNew" data-node-id="srcNew" data-node-label="新 run 落库" tabindex="0" role="button" aria-label="聚焦新 run 落库，带后台标记吗, 冷启动这一路 › 订阅侧就滤掉" aria-pressed="false" data-node-kind="database" data-node-sublabel="带后台标记吗" data-node-context="冷启动这一路 › 订阅侧就滤掉">
-          <title>新 run 落库 · 带后台标记吗 · 冷启动这一路 › 订阅侧就滤掉</title>
+        <g id="node-srcNew" data-node-id="srcNew" data-node-label="新 run 落库" tabindex="0" role="button" aria-label="聚焦新 run 落库，后台标记过滤, 冷启动路径 › 事件源层过滤" aria-pressed="false" data-node-kind="database" data-node-sublabel="后台标记过滤" data-node-context="冷启动路径 › 事件源层过滤">
+          <title>新 run 落库 · 后台标记过滤 · 冷启动路径 › 事件源层过滤</title>
           <rect x="48" y="93" width="148" height="52" rx="6" class="c-mask"/>
           <rect x="48" y="93" width="148" height="52" rx="6" class="c-database" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(54 99) scale(0.6875)">
@@ -487,11 +487,11 @@ rect.c-bg-rect { fill: var(--bg); }
             <path d="M3 4v8c0 1.1 2.2 2 5 2s5-.9 5-2V4M3 8c0 1.1 2.2 2 5 2s5-.9 5-2"/>
           </g>
           <text data-node-label="" x="122" y="114" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">新 run 落库</text>
-          <text x="122" y="131" class="t-muted" font-size="8" text-anchor="middle">带后台标记吗</text>
+          <text x="122" y="131" class="t-muted" font-size="8" text-anchor="middle">后台标记过滤</text>
         </g>
 
-        <g id="node-goKick" data-node-id="goKick" data-node-label="起首批 worker" tabindex="0" role="button" aria-label="聚焦起首批 worker，冷启动这一路 › 放行：链照常跑通" aria-pressed="false" data-node-kind="backend" data-node-context="冷启动这一路 › 放行：链照常跑通">
-          <title>起首批 worker · 冷启动这一路 › 放行：链照常跑通</title>
+        <g id="node-goKick" data-node-id="goKick" data-node-label="起首批 worker" tabindex="0" role="button" aria-label="聚焦起首批 worker，冷启动路径 › 放行：链正常贯通" aria-pressed="false" data-node-kind="backend" data-node-context="冷启动路径 › 放行：链正常贯通">
+          <title>起首批 worker · 冷启动路径 › 放行：链正常贯通</title>
           <rect x="982.4000000000001" y="93" width="148" height="52" rx="6" class="c-mask"/>
           <rect x="982.4000000000001" y="93" width="148" height="52" rx="6" class="c-backend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(988.4000000000001 99) scale(0.6875)">
@@ -500,64 +500,64 @@ rect.c-bg-rect { fill: var(--bg); }
           <text data-node-label="" x="1056.4" y="114" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">起首批 worker</text>
         </g>
 
-        <g id="node-judgeDetached" data-node-id="judgeDetached" data-node-label="是后台批次吗" tabindex="0" role="button" aria-label="聚焦是后台批次吗，事件上没有标记, 主推进这一路 › 进了函数再判：判不过就挡下" aria-pressed="false" data-node-kind="security" data-node-sublabel="事件上没有标记" data-node-context="主推进这一路 › 进了函数再判：判不过就挡下">
-          <title>是后台批次吗 · 事件上没有标记 · 主推进这一路 › 进了函数再判：判不过就挡下</title>
+        <g id="node-judgeDetached" data-node-id="judgeDetached" data-node-label="是否后台批次" tabindex="0" role="button" aria-label="聚焦是否后台批次，事件不带此标记, 主推进路径 › 函数内判断：不通过即挡下" aria-pressed="false" data-node-kind="security" data-node-sublabel="事件不带此标记" data-node-context="主推进路径 › 函数内判断：不通过即挡下">
+          <title>是否后台批次 · 事件不带此标记 · 主推进路径 › 函数内判断：不通过即挡下</title>
           <rect x="324" y="217" width="152" height="52" rx="6" class="c-mask"/>
           <rect x="324" y="217" width="152" height="52" rx="6" class="c-security" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(330 223) scale(0.6875)">
             <path d="M8 2.2 13 4v3.5c0 3.1-1.8 5.4-5 6.5-3.2-1.1-5-3.4-5-6.5V4Z"/>
             <path d="m5.8 8 1.5 1.5 3-3"/>
           </g>
-          <text data-node-label="" x="400" y="238" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">是后台批次吗</text>
-          <text x="400" y="255" class="t-muted" font-size="8" text-anchor="middle">事件上没有标记</text>
+          <text data-node-label="" x="400" y="238" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">是否后台批次</text>
+          <text x="400" y="255" class="t-muted" font-size="8" text-anchor="middle">事件不带此标记</text>
         </g>
 
-        <g id="node-judgeSettled" data-node-id="judgeSettled" data-node-label="这个 run 收尾了吗" tabindex="0" role="button" aria-label="聚焦这个 run 收尾了吗，防的是另一件事, 主推进这一路 › 进了函数再判：判不过就挡下" aria-pressed="false" data-node-kind="security" data-node-sublabel="防的是另一件事" data-node-context="主推进这一路 › 进了函数再判：判不过就挡下">
-          <title>这个 run 收尾了吗 · 防的是另一件事 · 主推进这一路 › 进了函数再判：判不过就挡下</title>
+        <g id="node-judgeSettled" data-node-id="judgeSettled" data-node-label="run 是否已结束" tabindex="0" role="button" aria-label="聚焦run 是否已结束，防范另一件事, 主推进路径 › 函数内判断：不通过即挡下" aria-pressed="false" data-node-kind="security" data-node-sublabel="防范另一件事" data-node-context="主推进路径 › 函数内判断：不通过即挡下">
+          <title>run 是否已结束 · 防范另一件事 · 主推进路径 › 函数内判断：不通过即挡下</title>
           <rect x="556.4" y="217" width="176" height="52" rx="6" class="c-mask"/>
           <rect x="556.4" y="217" width="176" height="52" rx="6" class="c-security" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(562.4 223) scale(0.6875)">
             <path d="M8 2.2 13 4v3.5c0 3.1-1.8 5.4-5 6.5-3.2-1.1-5-3.4-5-6.5V4Z"/>
             <path d="m5.8 8 1.5 1.5 3-3"/>
           </g>
-          <text data-node-label="" x="644.4" y="238" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">这个 run 收尾了吗</text>
-          <text x="644.4" y="255" class="t-muted" font-size="8" text-anchor="middle">防的是另一件事</text>
+          <text data-node-label="" x="644.4" y="238" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">run 是否已结束</text>
+          <text x="644.4" y="255" class="t-muted" font-size="8" text-anchor="middle">防范另一件事</text>
         </g>
 
-        <g id="node-goStep" data-node-id="goStep" data-node-label="推进这一步" tabindex="0" role="button" aria-label="聚焦推进这一步，主推进这一路 › 放行：链照常跑通" aria-pressed="false" data-node-kind="backend" data-node-context="主推进这一路 › 放行：链照常跑通">
-          <title>推进这一步 · 主推进这一路 › 放行：链照常跑通</title>
+        <g id="node-goStep" data-node-id="goStep" data-node-label="推进一步" tabindex="0" role="button" aria-label="聚焦推进一步，主推进路径 › 放行：链正常贯通" aria-pressed="false" data-node-kind="backend" data-node-context="主推进路径 › 放行：链正常贯通">
+          <title>推进一步 · 主推进路径 › 放行：链正常贯通</title>
           <rect x="982.4000000000001" y="217" width="148" height="52" rx="6" class="c-mask"/>
           <rect x="982.4000000000001" y="217" width="148" height="52" rx="6" class="c-backend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(988.4000000000001 223) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
-          <text data-node-label="" x="1056.4" y="238" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">推进这一步</text>
+          <text data-node-label="" x="1056.4" y="238" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">推进一步</text>
         </g>
 
-        <g id="node-judgeExit" data-node-id="judgeExit" data-node-label="退出观察也判一次" tabindex="0" role="button" aria-label="聚焦退出观察也判一次，判据同一个标记, 退出观察这一路 › 进了函数再判：判不过就挡下" aria-pressed="false" data-node-kind="security" data-node-sublabel="判据同一个标记" data-node-context="退出观察这一路 › 进了函数再判：判不过就挡下">
-          <title>退出观察也判一次 · 判据同一个标记 · 退出观察这一路 › 进了函数再判：判不过就挡下</title>
+        <g id="node-judgeExit" data-node-id="judgeExit" data-node-label="退出观察者判断" tabindex="0" role="button" aria-label="聚焦退出观察者判断，判据为同一标记, 退出观察路径 › 函数内判断：不通过即挡下" aria-pressed="false" data-node-kind="security" data-node-sublabel="判据为同一标记" data-node-context="退出观察路径 › 函数内判断：不通过即挡下">
+          <title>退出观察者判断 · 判据为同一标记 · 退出观察路径 › 函数内判断：不通过即挡下</title>
           <rect x="740.4" y="341" width="176" height="52" rx="6" class="c-mask"/>
           <rect x="740.4" y="341" width="176" height="52" rx="6" class="c-security" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(746.4 347) scale(0.6875)">
             <path d="M8 2.2 13 4v3.5c0 3.1-1.8 5.4-5 6.5-3.2-1.1-5-3.4-5-6.5V4Z"/>
             <path d="m5.8 8 1.5 1.5 3-3"/>
           </g>
-          <text data-node-label="" x="828.4" y="362" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">退出观察也判一次</text>
-          <text x="828.4" y="379" class="t-muted" font-size="8" text-anchor="middle">判据同一个标记</text>
+          <text data-node-label="" x="828.4" y="362" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">退出观察者判断</text>
+          <text x="828.4" y="379" class="t-muted" font-size="8" text-anchor="middle">判据为同一标记</text>
         </g>
 
-        <g id="node-goExit" data-node-id="goExit" data-node-label="记下这条退出" tabindex="0" role="button" aria-label="聚焦记下这条退出，退出观察这一路 › 放行：链照常跑通" aria-pressed="false" data-node-kind="backend" data-node-context="退出观察这一路 › 放行：链照常跑通">
-          <title>记下这条退出 · 退出观察这一路 › 放行：链照常跑通</title>
+        <g id="node-goExit" data-node-id="goExit" data-node-label="写入退出记录" tabindex="0" role="button" aria-label="聚焦写入退出记录，退出观察路径 › 放行：链正常贯通" aria-pressed="false" data-node-kind="backend" data-node-context="退出观察路径 › 放行：链正常贯通">
+          <title>写入退出记录 · 退出观察路径 › 放行：链正常贯通</title>
           <rect x="982.4000000000001" y="341" width="148" height="52" rx="6" class="c-mask"/>
           <rect x="982.4000000000001" y="341" width="148" height="52" rx="6" class="c-backend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(988.4000000000001 347) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
-          <text data-node-label="" x="1056.4" y="362" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">记下这条退出</text>
+          <text data-node-label="" x="1056.4" y="362" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">写入退出记录</text>
         </g>
 
-        <g id="node-blkKick" data-node-id="blkKick" data-node-label="不被唤醒" tabindex="0" role="button" aria-label="聚焦不被唤醒，源头就滤掉, 挡在链外 › 订阅侧就滤掉" aria-pressed="false" data-node-kind="external" data-node-sublabel="源头就滤掉" data-node-context="挡在链外 › 订阅侧就滤掉">
-          <title>不被唤醒 · 源头就滤掉 · 挡在链外 › 订阅侧就滤掉</title>
+        <g id="node-blkKick" data-node-id="blkKick" data-node-label="不被唤醒" tabindex="0" role="button" aria-label="聚焦不被唤醒，事件源过滤, 挡在链外 › 事件源层过滤" aria-pressed="false" data-node-kind="external" data-node-sublabel="事件源过滤" data-node-context="挡在链外 › 事件源层过滤">
+          <title>不被唤醒 · 事件源过滤 · 挡在链外 › 事件源层过滤</title>
           <rect x="168" y="465" width="148" height="52" rx="6" class="c-mask"/>
           <rect x="168" y="465" width="148" height="52" rx="6" class="c-external" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(174 471) scale(0.6875)">
@@ -565,23 +565,23 @@ rect.c-bg-rect { fill: var(--bg); }
             <path d="M8 2.5h5.5V8M13.5 2.5 7.5 8.5"/>
           </g>
           <text data-node-label="" x="242" y="486" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">不被唤醒</text>
-          <text x="242" y="503" class="t-muted" font-size="8" text-anchor="middle">源头就滤掉</text>
+          <text x="242" y="503" class="t-muted" font-size="8" text-anchor="middle">事件源过滤</text>
         </g>
 
-        <g id="node-blkAct" data-node-id="blkAct" data-node-label="整体不动作" tabindex="0" role="button" aria-label="聚焦整体不动作，只跳这个 run, 挡在链外 › 进了函数再判：判不过就挡下" aria-pressed="false" data-node-kind="external" data-node-sublabel="只跳这个 run" data-node-context="挡在链外 › 进了函数再判：判不过就挡下">
-          <title>整体不动作 · 只跳这个 run · 挡在链外 › 进了函数再判：判不过就挡下</title>
+        <g id="node-blkAct" data-node-id="blkAct" data-node-label="不执行推进" tabindex="0" role="button" aria-label="聚焦不执行推进，只跳过该 run, 挡在链外 › 函数内判断：不通过即挡下" aria-pressed="false" data-node-kind="external" data-node-sublabel="只跳过该 run" data-node-context="挡在链外 › 函数内判断：不通过即挡下">
+          <title>不执行推进 · 只跳过该 run · 挡在链外 › 函数内判断：不通过即挡下</title>
           <rect x="324" y="465" width="152" height="52" rx="6" class="c-mask"/>
           <rect x="324" y="465" width="152" height="52" rx="6" class="c-external" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(330 471) scale(0.6875)">
             <rect x="2.5" y="5" width="8.5" height="8" rx="1.5"/>
             <path d="M8 2.5h5.5V8M13.5 2.5 7.5 8.5"/>
           </g>
-          <text data-node-label="" x="400" y="486" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">整体不动作</text>
-          <text x="400" y="503" class="t-muted" font-size="8" text-anchor="middle">只跳这个 run</text>
+          <text data-node-label="" x="400" y="486" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">不执行推进</text>
+          <text x="400" y="503" class="t-muted" font-size="8" text-anchor="middle">只跳过该 run</text>
         </g>
 
-        <g id="node-blkRewrite" data-node-id="blkRewrite" data-node-label="不改写结果" tabindex="0" role="button" aria-label="聚焦不改写结果，已落定的不再动, 挡在链外 › 进了函数再判：判不过就挡下" aria-pressed="false" data-node-kind="external" data-node-sublabel="已落定的不再动" data-node-context="挡在链外 › 进了函数再判：判不过就挡下">
-          <title>不改写结果 · 已落定的不再动 · 挡在链外 › 进了函数再判：判不过就挡下</title>
+        <g id="node-blkRewrite" data-node-id="blkRewrite" data-node-label="不改写结果" tabindex="0" role="button" aria-label="聚焦不改写结果，已落定为终态, 挡在链外 › 函数内判断：不通过即挡下" aria-pressed="false" data-node-kind="external" data-node-sublabel="已落定为终态" data-node-context="挡在链外 › 函数内判断：不通过即挡下">
+          <title>不改写结果 · 已落定为终态 · 挡在链外 › 函数内判断：不通过即挡下</title>
           <rect x="556.4" y="465" width="176" height="52" rx="6" class="c-mask"/>
           <rect x="556.4" y="465" width="176" height="52" rx="6" class="c-external" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(562.4 471) scale(0.6875)">
@@ -589,11 +589,11 @@ rect.c-bg-rect { fill: var(--bg); }
             <path d="M8 2.5h5.5V8M13.5 2.5 7.5 8.5"/>
           </g>
           <text data-node-label="" x="644.4" y="486" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">不改写结果</text>
-          <text x="644.4" y="503" class="t-muted" font-size="8" text-anchor="middle">已落定的不再动</text>
+          <text x="644.4" y="503" class="t-muted" font-size="8" text-anchor="middle">已落定为终态</text>
         </g>
 
-        <g id="node-blkExit" data-node-id="blkExit" data-node-label="不写退出记录" tabindex="0" role="button" aria-label="聚焦不写退出记录，免得混进前台, 挡在链外 › 进了函数再判：判不过就挡下" aria-pressed="false" data-node-kind="external" data-node-sublabel="免得混进前台" data-node-context="挡在链外 › 进了函数再判：判不过就挡下">
-          <title>不写退出记录 · 免得混进前台 · 挡在链外 › 进了函数再判：判不过就挡下</title>
+        <g id="node-blkExit" data-node-id="blkExit" data-node-label="不写退出记录" tabindex="0" role="button" aria-label="聚焦不写退出记录，避免混入前台, 挡在链外 › 函数内判断：不通过即挡下" aria-pressed="false" data-node-kind="external" data-node-sublabel="避免混入前台" data-node-context="挡在链外 › 函数内判断：不通过即挡下">
+          <title>不写退出记录 · 避免混入前台 · 挡在链外 › 函数内判断：不通过即挡下</title>
           <rect x="740.4" y="465" width="176" height="52" rx="6" class="c-mask"/>
           <rect x="740.4" y="465" width="176" height="52" rx="6" class="c-external" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(746.4 471) scale(0.6875)">
@@ -601,7 +601,7 @@ rect.c-bg-rect { fill: var(--bg); }
             <path d="M8 2.5h5.5V8M13.5 2.5 7.5 8.5"/>
           </g>
           <text data-node-label="" x="828.4" y="486" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">不写退出记录</text>
-          <text x="828.4" y="503" class="t-muted" font-size="8" text-anchor="middle">免得混进前台</text>
+          <text x="828.4" y="503" class="t-muted" font-size="8" text-anchor="middle">避免混入前台</text>
         </g>
 
         <!-- Edge labels -->
@@ -609,9 +609,9 @@ rect.c-bg-rect { fill: var(--bg); }
           <rect x="366.2" y="349" width="67.6" height="14" rx="3" class="c-mask"/>
           <text x="400" y="359" class="t-security" font-size="8" text-anchor="middle">不是后台批次</text>
         </g>
-        <g data-edge-from="judgeDetached" data-edge-to="judgeSettled" data-edge-label="是 → 再判一道" data-edge-key="1" data-edge-id="e-detached-settled">
+        <g data-edge-from="judgeDetached" data-edge-to="judgeSettled" data-edge-label="是 → 下一判点" data-edge-key="1" data-edge-id="e-detached-settled">
           <rect x="480.00000000000006" y="223" width="72.4" height="14" rx="3" class="c-mask"/>
-          <text x="516.2" y="233" class="t-backend" font-size="8" text-anchor="middle">是 → 再判一道</text>
+          <text x="516.2" y="233" class="t-backend" font-size="8" text-anchor="middle">是 → 下一判点</text>
         </g>
         <g data-edge-from="judgeExit" data-edge-to="blkExit" data-edge-label="不是后台批次" data-edge-key="2" data-edge-id="e-exit-blk">
           <rect x="794.6" y="427" width="67.6" height="14" rx="3" class="c-mask"/>
@@ -629,13 +629,13 @@ rect.c-bg-rect { fill: var(--bg); }
           <rect x="560.2" y="99" width="58" height="14" rx="3" class="c-mask"/>
           <text x="589.2" y="109" class="t-muted" font-size="8" text-anchor="middle">是后台 run</text>
         </g>
-        <g data-edge-from="judgeSettled" data-edge-to="blkRewrite" data-edge-label="已经收尾" data-edge-key="6" data-edge-id="e-settled-blk">
-          <rect x="620.1999999999999" y="349" width="48.4" height="14" rx="3" class="c-mask"/>
-          <text x="644.4" y="359" class="t-security" font-size="8" text-anchor="middle">已经收尾</text>
+        <g data-edge-from="judgeSettled" data-edge-to="blkRewrite" data-edge-label="已结束" data-edge-key="6" data-edge-id="e-settled-blk">
+          <rect x="625" y="349" width="38.8" height="14" rx="3" class="c-mask"/>
+          <text x="644.4" y="359" class="t-security" font-size="8" text-anchor="middle">已结束</text>
         </g>
-        <g data-edge-from="judgeSettled" data-edge-to="goStep" data-edge-label="还没收尾" data-edge-key="7" data-edge-id="e-settled-go">
-          <rect x="833.2" y="223" width="48.4" height="14" rx="3" class="c-mask"/>
-          <text x="857.4000000000001" y="233" class="t-backend" font-size="8" text-anchor="middle">还没收尾</text>
+        <g data-edge-from="judgeSettled" data-edge-to="goStep" data-edge-label="未结束" data-edge-key="7" data-edge-id="e-settled-go">
+          <rect x="838.0000000000001" y="223" width="38.8" height="14" rx="3" class="c-mask"/>
+          <text x="857.4000000000001" y="233" class="t-backend" font-size="8" text-anchor="middle">未结束</text>
         </g>
 
         <!-- Legend -->
@@ -643,7 +643,7 @@ rect.c-bg-rect { fill: var(--bg); }
           <text x="20" y="552" class="t-primary" font-size="12" font-weight="650">图例</text>
           <g data-legend-semantic-kind="backend" data-legend-x="20" data-legend-baseline="572" data-legend-width="96">
             <rect x="20" y="564" width="14" height="9" rx="2" class="c-backend" stroke-width="1"/>
-            <text x="42" y="572" class="t-muted" font-size="7.5" font-weight="500">放行后照常做</text>
+            <text x="42" y="572" class="t-muted" font-size="7.5" font-weight="500">放行后的动作</text>
           </g>
           <g data-legend-semantic-kind="security" data-legend-x="123" data-legend-baseline="572" data-legend-width="61">
             <rect x="123" y="564" width="14" height="9" rx="2" class="c-security" stroke-width="1"/>
@@ -659,4 +659,4 @@ rect.c-bg-rect { fill: var(--bg); }
           </g>
         </g>
       </svg>
-<!-- gherkai:source-sha256=9b3453d2a99506bedf3d3ffa4982a72df87997c0db8b8766acb09d25ae65a264 -->
+<!-- gherkai:source-sha256=5b913a62edc0832bbfc7b6a0de4e0c1663a93d13674325b00e6b80fc92bc95c7 -->

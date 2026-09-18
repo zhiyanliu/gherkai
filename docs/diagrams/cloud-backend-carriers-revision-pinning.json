@@ -2,7 +2,7 @@
   "schema_version": 1,
   "diagram_type": "sequence",
   "meta": {
-    "title": "提交那一刻钉死 worker 身份，之后照抄",
+    "title": "提交时刻固定 worker 身份，之后照抄",
     "locale": "zh-CN",
     "quality_profile": "showcase",
     "column_fit": "spread",
@@ -16,7 +16,7 @@
       "id": "cli",
       "type": "frontend",
       "label": "提交侧 CLI",
-      "sublabel": "解析并钉死"
+      "sublabel": "解析并固定"
     },
     {
       "id": "ssm",
@@ -59,12 +59,12 @@
     {
       "from": 150,
       "to": 430,
-      "label": "提交那一刻：解析成显式 revision"
+      "label": "提交时刻：解析成显式 revision"
     },
     {
       "from": 450,
       "to": 700,
-      "label": "run 还在跑时：有人重推同名 variant"
+      "label": "run 运行期间：重推同名 variant"
     },
     {
       "from": 720,
@@ -91,29 +91,29 @@
       "from": "cli",
       "to": "taskdef",
       "y": 284,
-      "label": "revision 还能起吗"
+      "label": "revision 仍有效"
     },
     {
       "from": "cli",
       "to": "ecr",
       "y": 336,
-      "label": "digest 还在吗",
-      "note": "任一环缺即拒，不回落默认指针、不取 family 最新"
+      "label": "digest 仍存在",
+      "note": "任一环缺失即拒，不回落默认指针、不取 family 最新"
     },
     {
       "from": "cli",
       "to": "runrec",
       "y": 388,
-      "label": "写下引擎与 revision",
+      "label": "写入引擎与 revision",
       "variant": "emphasis",
-      "note": "run 定义记一份，状态项另摊平一份"
+      "note": "run 定义记一份，状态项另存扁平一份"
     },
     {
       "from": "ops",
       "to": "ecr",
       "y": 480,
       "label": "推同名 tag",
-      "note": "得到新 digest；被顶掉的旧镜像层不过期"
+      "note": "产生新 digest；被替换的旧镜像层不过期"
     },
     {
       "from": "ops",
@@ -127,14 +127,14 @@
       "to": "ssm",
       "y": 584,
       "label": "覆盖映射",
-      "note": "覆盖语义、最后写者赢；下一次提交才解析到新的"
+      "note": "覆盖语义、最后写者赢；下一次提交才解析到新映射"
     },
     {
       "from": "ops",
       "to": "taskdef",
       "y": 636,
-      "label": "旧的标退休",
-      "note": "只打标记、不注销，等回收侧放行"
+      "label": "标记退休",
+      "note": "只标记、不注销；注销待回收侧放行"
     },
     {
       "from": "launcher",
@@ -146,7 +146,7 @@
       "from": "runrec",
       "to": "launcher",
       "y": 802,
-      "label": "提交时钉下那一个",
+      "label": "提交时固定的结果",
       "variant": "return"
     },
     {
@@ -155,7 +155,7 @@
       "y": 854,
       "label": "按显式 revision 起 task",
       "variant": "emphasis",
-      "note": "镜像栏按 digest 指着重推前那一层"
+      "note": "镜像栏的 digest 指向重推前的镜像层"
     }
   ],
   "activations": [
@@ -201,19 +201,19 @@
       "dot": "cyan",
       "title": "定义期解析、运行期照抄",
       "items": [
-        "提交那一刻把 variant 解析成本 run 每个引擎的显式 revision",
+        "提交时刻把 variant 解析为本 run 每个引擎的显式 revision",
         "起 task 一律照 run 定义抄，永不按 family 取最新",
         "缺任一环即拒，绝不回落默认指针或模板"
       ]
     },
     {
       "dot": "amber",
-      "title": "重推为什么踩不到在跑的 run",
+      "title": "重推不影响运行中 run 的根据",
       "items": [
         "映射是覆盖语义，只对下一次提交生效",
         "被替换的旧 revision 先退休、不立即注销",
-        "镜像仓库不设过期规则，旧镜像层留着",
-        "在跑的 run 还引用它，回收侧就不放行"
+        "镜像仓库不设过期规则，旧镜像层保留",
+        "运行中的 run 仍引用它时，回收侧不放行"
       ]
     }
   ]

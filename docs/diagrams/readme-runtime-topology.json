@@ -11,7 +11,7 @@
       "id": "feature",
       "type": "external",
       "label": ".feature 用例",
-      "sublabel": "自然语言写的测试",
+      "sublabel": "以自然语言描述",
       "pos": [
         60,
         60
@@ -40,7 +40,7 @@
       "type": "backend",
       "label": "worker",
       "sublabel": "Midscene 或 Nova Act",
-      "tag": "本机或云端跑",
+      "tag": "本机或云端",
       "pos": [
         390,
         260
@@ -110,7 +110,7 @@
       "id": "app_local",
       "type": "external",
       "label": "本机 / 内网应用",
-      "sublabel": "只在你的网络里可达",
+      "sublabel": "仅在你的网络内可达",
       "pos": [
         990,
         440
@@ -133,7 +133,7 @@
     },
     {
       "kind": "region",
-      "label": "你的 AWS 账户里的托管服务",
+      "label": "你的 AWS 账户内的托管服务",
       "wraps": [
         "model",
         "browser"
@@ -159,7 +159,7 @@
       "id": "run-local",
       "from": "cli",
       "to": "worker",
-      "label": "本机：起子进程",
+      "label": "本机：子进程",
       "variant": "emphasis",
       "labelDy": 16
     },
@@ -235,15 +235,15 @@
       "dot": "cyan",
       "title": "本机档（默认）",
       "items": [
-        "worker 是本机的子进程，结果落在当前目录",
-        "要本机的 AWS 凭证"
+        "worker 为本机子进程，结果写入当前目录",
+        "需要本机 AWS 凭证"
       ]
     },
     {
       "dot": "violet",
       "title": "云端档",
       "items": [
-        "worker 在团队共享的后端上跑，提交完关机也会跑完",
+        "worker 在团队共享的后端上运行，提交后本机关机不影响执行",
         "成员只需最小的云端权限"
       ]
     },
@@ -251,9 +251,9 @@
       "dot": "amber",
       "title": "费用与数据边界",
       "items": [
-        "模型与云端浏览器都在你自己的 AWS 账户里",
+        "模型与云端浏览器均在你自己的 AWS 账户内",
         "费用来自模型调用与云端浏览器会话",
-        "预检是纯本地的，不产生费用"
+        "预检为纯本地执行，不产生费用"
       ]
     }
   ]

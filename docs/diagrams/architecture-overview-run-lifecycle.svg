@@ -441,41 +441,41 @@ rect.c-bg-rect { fill: var(--bg); }
 
         <!-- Swimlanes -->
         <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-0" x="40" y="52" width="1167" height="104" rx="10" class="c-lane" stroke-width="1"/>
-        <text x="54" y="74" class="t-dim" font-size="10" font-weight="600">01 / 主干：一个 run 走一遍</text>
+        <text x="54" y="74" class="t-dim" font-size="10" font-weight="600">01 / 主干：单次 run 全程</text>
 
         <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-1" x="40" y="176" width="1167" height="104" rx="10" class="c-lane" stroke-width="1"/>
         <text x="54" y="198" class="t-dim" font-size="10" font-weight="600">02 / 循环体：逐 job 反复发生，可并发</text>
 
         <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-2" x="40" y="300" width="1167" height="104" rx="10" class="c-lane" stroke-width="1"/>
-        <text x="54" y="322" class="t-dim" font-size="10" font-weight="600">03 / worker 回传核心的两件事</text>
+        <text x="54" y="322" class="t-dim" font-size="10" font-weight="600">03 / worker 回传的两类信息</text>
 
         <!-- Phase headers -->
         <line x1="70" y1="35" x2="356.4" y2="35" class="a-default" stroke-width="1.1"/>
         <rect x="70" y="27" width="286.4" height="16" rx="4" class="c-mask"/>
-        <text x="213.2" y="39" class="t-muted" font-size="8" font-weight="600" text-anchor="middle">plan：到此为止</text>
+        <text x="213.2" y="39" class="t-muted" font-size="8" font-weight="600" text-anchor="middle">plan：止于分组</text>
         <line x1="460.79999999999995" y1="35" x2="1170.8" y2="35" class="a-emphasis" stroke-width="1.1"/>
         <rect x="460.79999999999995" y="27" width="710" height="16" rx="4" class="c-mask"/>
-        <text x="815.8" y="39" class="t-backend" font-size="8" font-weight="600" text-anchor="middle">run / submit：接着走到底</text>
+        <text x="815.8" y="39" class="t-backend" font-size="8" font-weight="600" text-anchor="middle">run / submit：执行到终态</text>
 
         <!-- Workflow groups -->
 
 
         <!-- Edge paths -->
-        <path data-edge-from="begin" data-edge-to="drive" data-edge-label="运行态已落" data-edge-key="0" data-edge-id="e-begin-drive" data-composition-points="576.8,119;642.8,119" d="M 576.8 119 L 642.8 119" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        <path data-edge-from="drive" data-edge-to="reduce" data-edge-label="job 都收场" data-edge-key="1" data-edge-id="e-drive-reduce" data-composition-points="790.8,119;886.8,119" d="M 790.8 119 L 886.8 119" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path data-edge-from="begin" data-edge-to="drive" data-edge-label="运行态就绪" data-edge-key="0" data-edge-id="e-begin-drive" data-composition-points="576.8,119;642.8,119" d="M 576.8 119 L 642.8 119" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path data-edge-from="drive" data-edge-to="reduce" data-edge-label="job 全终结" data-edge-key="1" data-edge-id="e-drive-reduce" data-composition-points="790.8,119;886.8,119" d="M 790.8 119 L 886.8 119" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
         <path data-edge-from="drive" data-edge-to="worker" data-edge-label="派发 job" data-edge-key="2" data-edge-id="e-drive-worker" data-composition-points="716.8,145;716.8,217" d="M 716.8 145 L 716.8 217" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
-        <path data-edge-from="events" data-edge-to="drive" data-edge-label="回传核心：再推一步" data-edge-key="3" data-edge-id="e-events-drive" data-composition-points="1194.8,367;1223,367;1223,77;716.8,77;716.8,93" d="M 1194.8 367 L 1223 367 L 1223 77 L 716.8 77 L 716.8 93" class="a-dashed" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
-        <path data-edge-from="exit" data-edge-to="drive" data-edge-label="回传核心：可以收场" data-edge-key="4" data-edge-id="e-exit-drive" data-composition-points="642.8,367;600,367;600,119;642.8,119" d="M 642.8 367 L 600 367 L 600 119 L 642.8 119" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
+        <path data-edge-from="events" data-edge-to="drive" data-edge-label="回传核心：推进一步" data-edge-key="3" data-edge-id="e-events-drive" data-composition-points="1194.8,367;1223,367;1223,77;716.8,77;716.8,93" d="M 1194.8 367 L 1223 367 L 1223 77 L 716.8 77 L 716.8 93" class="a-dashed" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
+        <path data-edge-from="exit" data-edge-to="drive" data-edge-label="回传核心：可判终态" data-edge-key="4" data-edge-id="e-exit-drive" data-composition-points="642.8,367;600,367;600,119;642.8,119" d="M 642.8 367 L 600 367 L 600 119 L 642.8 119" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
         <path data-edge-from="parse" data-edge-to="scope" data-edge-label="领域模型" data-edge-key="5" data-edge-id="e-parse-scope" data-composition-points="184,119;240.39999999999998,119" d="M 184 119 L 240.39999999999998 119" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
         <path data-edge-from="reduce" data-edge-to="report" data-edge-key="6" data-edge-id="e-reduce-report" data-composition-points="1022.8,119;1050.8,119" d="M 1022.8 119 L 1050.8 119" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
         <path data-edge-from="scope" data-edge-to="begin" data-edge-label="job 列表" data-edge-key="7" data-edge-id="e-scope-begin" data-composition-points="380.4,119;436.79999999999995,119" d="M 380.4 119 L 436.79999999999995 119" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        <path data-edge-from="step" data-edge-to="events" data-edge-label="逐条吐出" data-edge-key="8" data-edge-id="e-step-events" data-composition-points="1026.8,243;1124.8,243;1124.8,341" d="M 1026.8 243 L 1124.8 243 L 1124.8 341" class="a-dashed" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
+        <path data-edge-from="step" data-edge-to="events" data-edge-label="逐条上报" data-edge-key="8" data-edge-id="e-step-events" data-composition-points="1026.8,243;1124.8,243;1124.8,341" d="M 1026.8 243 L 1124.8 243 L 1124.8 341" class="a-dashed" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
         <path data-edge-from="worker" data-edge-to="exit" data-edge-label="终止时" data-edge-key="9" data-edge-id="e-worker-exit" data-composition-points="716.8,269;716.8,341" d="M 716.8 269 L 716.8 341" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
-        <path data-edge-from="worker" data-edge-to="step" data-edge-label="开会话后逐 step" data-edge-key="10" data-edge-id="e-worker-step" data-composition-points="792.8,243;882.8,243" d="M 792.8 243 L 882.8 243" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="worker" data-edge-to="step" data-edge-label="会话内逐个 step" data-edge-key="10" data-edge-id="e-worker-step" data-composition-points="792.8,243;882.8,243" d="M 792.8 243 L 882.8 243" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
 
         <!-- Nodes -->
-        <g id="node-parse" data-node-id="parse" data-node-label="parse" tabindex="0" role="button" aria-label="聚焦parse，文本 → 领域模型, 主干：一个 run 走一遍 › plan：到此为止" aria-pressed="false" data-node-kind="backend" data-node-sublabel="文本 → 领域模型" data-node-context="主干：一个 run 走一遍 › plan：到此为止">
-          <title>parse · 文本 → 领域模型 · 主干：一个 run 走一遍 › plan：到此为止</title>
+        <g id="node-parse" data-node-id="parse" data-node-label="parse" tabindex="0" role="button" aria-label="聚焦parse，文本 → 领域模型, 主干：单次 run 全程 › plan：止于分组" aria-pressed="false" data-node-kind="backend" data-node-sublabel="文本 → 领域模型" data-node-context="主干：单次 run 全程 › plan：止于分组">
+          <title>parse · 文本 → 领域模型 · 主干：单次 run 全程 › plan：止于分组</title>
           <rect x="48" y="93" width="136" height="52" rx="6" class="c-mask"/>
           <rect x="48" y="93" width="136" height="52" rx="6" class="c-backend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(54 99) scale(0.6875)">
@@ -485,8 +485,8 @@ rect.c-bg-rect { fill: var(--bg); }
           <text x="116" y="131" class="t-muted" font-size="8" text-anchor="middle">文本 → 领域模型</text>
         </g>
 
-        <g id="node-scope" data-node-id="scope" data-node-label="scope 分组" tabindex="0" role="button" aria-label="聚焦scope 分组，产出 job 列表, 主干：一个 run 走一遍 › plan：到此为止" aria-pressed="false" data-node-kind="backend" data-node-sublabel="产出 job 列表" data-node-context="主干：一个 run 走一遍 › plan：到此为止">
-          <title>scope 分组 · 产出 job 列表 · 主干：一个 run 走一遍 › plan：到此为止</title>
+        <g id="node-scope" data-node-id="scope" data-node-label="scope 分组" tabindex="0" role="button" aria-label="聚焦scope 分组，产出 job 列表, 主干：单次 run 全程 › plan：止于分组" aria-pressed="false" data-node-kind="backend" data-node-sublabel="产出 job 列表" data-node-context="主干：单次 run 全程 › plan：止于分组">
+          <title>scope 分组 · 产出 job 列表 · 主干：单次 run 全程 › plan：止于分组</title>
           <rect x="240.39999999999998" y="93" width="140" height="52" rx="6" class="c-mask"/>
           <rect x="240.39999999999998" y="93" width="140" height="52" rx="6" class="c-backend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(246.39999999999998 99) scale(0.6875)">
@@ -496,8 +496,8 @@ rect.c-bg-rect { fill: var(--bg); }
           <text x="310.4" y="131" class="t-muted" font-size="8" text-anchor="middle">产出 job 列表</text>
         </g>
 
-        <g id="node-begin" data-node-id="begin" data-node-label="begin" tabindex="0" role="button" aria-label="聚焦begin，落定义与运行态, 主干：一个 run 走一遍 › run / submit：接着走到底" aria-pressed="false" data-node-kind="database" data-node-sublabel="落定义与运行态" data-node-context="主干：一个 run 走一遍 › run / submit：接着走到底">
-          <title>begin · 落定义与运行态 · 主干：一个 run 走一遍 › run / submit：接着走到底</title>
+        <g id="node-begin" data-node-id="begin" data-node-label="begin" tabindex="0" role="button" aria-label="聚焦begin，落定义与运行态, 主干：单次 run 全程 › run / submit：执行到终态" aria-pressed="false" data-node-kind="database" data-node-sublabel="落定义与运行态" data-node-context="主干：单次 run 全程 › run / submit：执行到终态">
+          <title>begin · 落定义与运行态 · 主干：单次 run 全程 › run / submit：执行到终态</title>
           <rect x="436.79999999999995" y="93" width="140" height="52" rx="6" class="c-mask"/>
           <rect x="436.79999999999995" y="93" width="140" height="52" rx="6" class="c-database" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(442.79999999999995 99) scale(0.6875)">
@@ -508,8 +508,8 @@ rect.c-bg-rect { fill: var(--bg); }
           <text x="506.79999999999995" y="131" class="t-muted" font-size="8" text-anchor="middle">落定义与运行态</text>
         </g>
 
-        <g id="node-drive" data-node-id="drive" data-node-label="驱动一步" tabindex="0" role="button" aria-label="聚焦驱动一步，在线调度 或 单步推进, 主干：一个 run 走一遍 › run / submit：接着走到底" aria-pressed="false" data-node-kind="messagebus" data-node-sublabel="在线调度 或 单步推进" data-node-context="主干：一个 run 走一遍 › run / submit：接着走到底">
-          <title>驱动一步 · 在线调度 或 单步推进 · 主干：一个 run 走一遍 › run / submit：接着走到底</title>
+        <g id="node-drive" data-node-id="drive" data-node-label="驱动一步" tabindex="0" role="button" aria-label="聚焦驱动一步，在线调度 或 单步推进, 主干：单次 run 全程 › run / submit：执行到终态" aria-pressed="false" data-node-kind="messagebus" data-node-sublabel="在线调度 或 单步推进" data-node-context="主干：单次 run 全程 › run / submit：执行到终态">
+          <title>驱动一步 · 在线调度 或 单步推进 · 主干：单次 run 全程 › run / submit：执行到终态</title>
           <rect x="642.8" y="93" width="148" height="52" rx="6" class="c-mask"/>
           <rect x="642.8" y="93" width="148" height="52" rx="6" class="c-messagebus" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="messagebus" class="semantic-sigil s-messagebus" transform="translate(648.8 99) scale(0.6875)">
@@ -522,8 +522,8 @@ rect.c-bg-rect { fill: var(--bg); }
           <text x="716.8" y="131" class="t-muted" font-size="8" text-anchor="middle">在线调度 或 单步推进</text>
         </g>
 
-        <g id="node-reduce" data-node-id="reduce" data-node-label="判定归约" tabindex="0" role="button" aria-label="聚焦判定归约，逐层归到 run, 主干：一个 run 走一遍 › run / submit：接着走到底" aria-pressed="false" data-node-kind="backend" data-node-sublabel="逐层归到 run" data-node-context="主干：一个 run 走一遍 › run / submit：接着走到底">
-          <title>判定归约 · 逐层归到 run · 主干：一个 run 走一遍 › run / submit：接着走到底</title>
+        <g id="node-reduce" data-node-id="reduce" data-node-label="判定归约" tabindex="0" role="button" aria-label="聚焦判定归约，逐层归到 run, 主干：单次 run 全程 › run / submit：执行到终态" aria-pressed="false" data-node-kind="backend" data-node-sublabel="逐层归到 run" data-node-context="主干：单次 run 全程 › run / submit：执行到终态">
+          <title>判定归约 · 逐层归到 run · 主干：单次 run 全程 › run / submit：执行到终态</title>
           <rect x="886.8" y="93" width="136" height="52" rx="6" class="c-mask"/>
           <rect x="886.8" y="93" width="136" height="52" rx="6" class="c-backend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(892.8 99) scale(0.6875)">
@@ -533,8 +533,8 @@ rect.c-bg-rect { fill: var(--bg); }
           <text x="954.8" y="131" class="t-muted" font-size="8" text-anchor="middle">逐层归到 run</text>
         </g>
 
-        <g id="node-report" data-node-id="report" data-node-label="报告与退出码" tabindex="0" role="button" aria-label="聚焦报告与退出码，run 的终态落定, 主干：一个 run 走一遍 › run / submit：接着走到底" aria-pressed="false" data-node-kind="frontend" data-node-sublabel="run 的终态落定" data-node-context="主干：一个 run 走一遍 › run / submit：接着走到底">
-          <title>报告与退出码 · run 的终态落定 · 主干：一个 run 走一遍 › run / submit：接着走到底</title>
+        <g id="node-report" data-node-id="report" data-node-label="报告与退出码" tabindex="0" role="button" aria-label="聚焦报告与退出码，run 的终态, 主干：单次 run 全程 › run / submit：执行到终态" aria-pressed="false" data-node-kind="frontend" data-node-sublabel="run 的终态" data-node-context="主干：单次 run 全程 › run / submit：执行到终态">
+          <title>报告与退出码 · run 的终态 · 主干：单次 run 全程 › run / submit：执行到终态</title>
           <rect x="1050.8" y="93" width="148" height="52" rx="6" class="c-mask"/>
           <rect x="1050.8" y="93" width="148" height="52" rx="6" class="c-frontend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="frontend" class="semantic-sigil s-frontend" transform="translate(1056.8 99) scale(0.6875)">
@@ -544,11 +544,11 @@ rect.c-bg-rect { fill: var(--bg); }
             <circle cx="6.3" cy="4.8" r=".7" class="sigil-fill"/>
           </g>
           <text data-node-label="" x="1124.8" y="114" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">报告与退出码</text>
-          <text x="1124.8" y="131" class="t-muted" font-size="8" text-anchor="middle">run 的终态落定</text>
+          <text x="1124.8" y="131" class="t-muted" font-size="8" text-anchor="middle">run 的终态</text>
         </g>
 
-        <g id="node-worker" data-node-id="worker" data-node-label="起 worker" tabindex="0" role="button" aria-label="聚焦起 worker，每 scope 一个，起会话, 循环体：逐 job 反复发生，可并发 › run / submit：接着走到底" aria-pressed="false" data-node-kind="external" data-node-sublabel="每 scope 一个，起会话" data-node-context="循环体：逐 job 反复发生，可并发 › run / submit：接着走到底">
-          <title>起 worker · 每 scope 一个，起会话 · 循环体：逐 job 反复发生，可并发 › run / submit：接着走到底</title>
+        <g id="node-worker" data-node-id="worker" data-node-label="起 worker" tabindex="0" role="button" aria-label="聚焦起 worker，每 scope 一个，建会话, 循环体：逐 job 反复发生，可并发 › run / submit：执行到终态" aria-pressed="false" data-node-kind="external" data-node-sublabel="每 scope 一个，建会话" data-node-context="循环体：逐 job 反复发生，可并发 › run / submit：执行到终态">
+          <title>起 worker · 每 scope 一个，建会话 · 循环体：逐 job 反复发生，可并发 › run / submit：执行到终态</title>
           <rect x="640.8" y="217" width="152" height="52" rx="6" class="c-mask"/>
           <rect x="640.8" y="217" width="152" height="52" rx="6" class="c-external" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(646.8 223) scale(0.6875)">
@@ -556,22 +556,22 @@ rect.c-bg-rect { fill: var(--bg); }
             <path d="M8 2.5h5.5V8M13.5 2.5 7.5 8.5"/>
           </g>
           <text data-node-label="" x="716.8" y="238" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">起 worker</text>
-          <text x="716.8" y="255" class="t-muted" font-size="8" text-anchor="middle">每 scope 一个，起会话</text>
+          <text x="716.8" y="255" class="t-muted" font-size="8" text-anchor="middle">每 scope 一个，建会话</text>
         </g>
 
-        <g id="node-step" data-node-id="step" data-node-label="逐 step 执行" tabindex="0" role="button" aria-label="聚焦逐 step 执行，确定性 或 交给 AI, 循环体：逐 job 反复发生，可并发 › run / submit：接着走到底" aria-pressed="false" data-node-kind="backend" data-node-sublabel="确定性 或 交给 AI" data-node-context="循环体：逐 job 反复发生，可并发 › run / submit：接着走到底">
-          <title>逐 step 执行 · 确定性 或 交给 AI · 循环体：逐 job 反复发生，可并发 › run / submit：接着走到底</title>
+        <g id="node-step" data-node-id="step" data-node-label="逐 step 执行" tabindex="0" role="button" aria-label="聚焦逐 step 执行，确定性 或 交由 AI, 循环体：逐 job 反复发生，可并发 › run / submit：执行到终态" aria-pressed="false" data-node-kind="backend" data-node-sublabel="确定性 或 交由 AI" data-node-context="循环体：逐 job 反复发生，可并发 › run / submit：执行到终态">
+          <title>逐 step 执行 · 确定性 或 交由 AI · 循环体：逐 job 反复发生，可并发 › run / submit：执行到终态</title>
           <rect x="882.8" y="217" width="144" height="52" rx="6" class="c-mask"/>
           <rect x="882.8" y="217" width="144" height="52" rx="6" class="c-backend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(888.8 223) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
           <text data-node-label="" x="954.8" y="238" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">逐 step 执行</text>
-          <text x="954.8" y="255" class="t-muted" font-size="8" text-anchor="middle">确定性 或 交给 AI</text>
+          <text x="954.8" y="255" class="t-muted" font-size="8" text-anchor="middle">确定性 或 交由 AI</text>
         </g>
 
-        <g id="node-exit" data-node-id="exit" data-node-label="进程退出信号" tabindex="0" role="button" aria-label="聚焦进程退出信号，worker 终止即产生, worker 回传核心的两件事 › run / submit：接着走到底" aria-pressed="false" data-node-kind="security" data-node-sublabel="worker 终止即产生" data-node-context="worker 回传核心的两件事 › run / submit：接着走到底">
-          <title>进程退出信号 · worker 终止即产生 · worker 回传核心的两件事 › run / submit：接着走到底</title>
+        <g id="node-exit" data-node-id="exit" data-node-label="进程退出信号" tabindex="0" role="button" aria-label="聚焦进程退出信号，worker 终止即产生, worker 回传的两类信息 › run / submit：执行到终态" aria-pressed="false" data-node-kind="security" data-node-sublabel="worker 终止即产生" data-node-context="worker 回传的两类信息 › run / submit：执行到终态">
+          <title>进程退出信号 · worker 终止即产生 · worker 回传的两类信息 › run / submit：执行到终态</title>
           <rect x="642.8" y="341" width="148" height="52" rx="6" class="c-mask"/>
           <rect x="642.8" y="341" width="148" height="52" rx="6" class="c-security" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(648.8 347) scale(0.6875)">
@@ -582,8 +582,8 @@ rect.c-bg-rect { fill: var(--bg); }
           <text x="716.8" y="379" class="t-muted" font-size="8" text-anchor="middle">worker 终止即产生</text>
         </g>
 
-        <g id="node-events" data-node-id="events" data-node-label="逐条事件" tabindex="0" role="button" aria-label="聚焦逐条事件，一条一条吐出来, worker 回传核心的两件事 › run / submit：接着走到底" aria-pressed="false" data-node-kind="database" data-node-sublabel="一条一条吐出来" data-node-context="worker 回传核心的两件事 › run / submit：接着走到底">
-          <title>逐条事件 · 一条一条吐出来 · worker 回传核心的两件事 › run / submit：接着走到底</title>
+        <g id="node-events" data-node-id="events" data-node-label="逐条事件" tabindex="0" role="button" aria-label="聚焦逐条事件，随执行逐条上报, worker 回传的两类信息 › run / submit：执行到终态" aria-pressed="false" data-node-kind="database" data-node-sublabel="随执行逐条上报" data-node-context="worker 回传的两类信息 › run / submit：执行到终态">
+          <title>逐条事件 · 随执行逐条上报 · worker 回传的两类信息 › run / submit：执行到终态</title>
           <rect x="1054.8" y="341" width="140" height="52" rx="6" class="c-mask"/>
           <rect x="1054.8" y="341" width="140" height="52" rx="6" class="c-database" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(1060.8 347) scale(0.6875)">
@@ -591,29 +591,29 @@ rect.c-bg-rect { fill: var(--bg); }
             <path d="M3 4v8c0 1.1 2.2 2 5 2s5-.9 5-2V4M3 8c0 1.1 2.2 2 5 2s5-.9 5-2"/>
           </g>
           <text data-node-label="" x="1124.8" y="362" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">逐条事件</text>
-          <text x="1124.8" y="379" class="t-muted" font-size="8" text-anchor="middle">一条一条吐出来</text>
+          <text x="1124.8" y="379" class="t-muted" font-size="8" text-anchor="middle">随执行逐条上报</text>
         </g>
 
         <!-- Edge labels -->
-        <g data-edge-from="begin" data-edge-to="drive" data-edge-label="运行态已落" data-edge-key="0" data-edge-id="e-begin-drive">
+        <g data-edge-from="begin" data-edge-to="drive" data-edge-label="运行态就绪" data-edge-key="0" data-edge-id="e-begin-drive">
           <rect x="580.8" y="99" width="58" height="14" rx="3" class="c-mask"/>
-          <text x="609.8" y="109" class="t-backend" font-size="8" text-anchor="middle">运行态已落</text>
+          <text x="609.8" y="109" class="t-backend" font-size="8" text-anchor="middle">运行态就绪</text>
         </g>
-        <g data-edge-from="drive" data-edge-to="reduce" data-edge-label="job 都收场" data-edge-key="1" data-edge-id="e-drive-reduce">
+        <g data-edge-from="drive" data-edge-to="reduce" data-edge-label="job 全终结" data-edge-key="1" data-edge-id="e-drive-reduce">
           <rect x="809.8" y="99" width="58" height="14" rx="3" class="c-mask"/>
-          <text x="838.8" y="109" class="t-backend" font-size="8" text-anchor="middle">job 都收场</text>
+          <text x="838.8" y="109" class="t-backend" font-size="8" text-anchor="middle">job 全终结</text>
         </g>
         <g data-edge-from="drive" data-edge-to="worker" data-edge-label="派发 job" data-edge-key="2" data-edge-id="e-drive-worker">
           <rect x="744.5999999999999" y="165" width="48.4" height="14" rx="3" class="c-mask"/>
           <text x="768.8" y="175" class="t-muted" font-size="8" text-anchor="middle">派发 job</text>
         </g>
-        <g data-edge-from="events" data-edge-to="drive" data-edge-label="回传核心：再推一步" data-edge-key="3" data-edge-id="e-events-drive">
+        <g data-edge-from="events" data-edge-to="drive" data-edge-label="回传核心：推进一步" data-edge-key="3" data-edge-id="e-events-drive">
           <rect x="921.6999999999999" y="57" width="96.39999999999999" height="14" rx="3" class="c-mask"/>
-          <text x="969.9" y="67" class="t-database" font-size="8" text-anchor="middle">回传核心：再推一步</text>
+          <text x="969.9" y="67" class="t-database" font-size="8" text-anchor="middle">回传核心：推进一步</text>
         </g>
-        <g data-edge-from="exit" data-edge-to="drive" data-edge-label="回传核心：可以收场" data-edge-key="4" data-edge-id="e-exit-drive">
+        <g data-edge-from="exit" data-edge-to="drive" data-edge-label="回传核心：可判终态" data-edge-key="4" data-edge-id="e-exit-drive">
           <rect x="511.8" y="223" width="96.39999999999999" height="14" rx="3" class="c-mask"/>
-          <text x="560" y="233" class="t-security" font-size="8" text-anchor="middle">回传核心：可以收场</text>
+          <text x="560" y="233" class="t-security" font-size="8" text-anchor="middle">回传核心：可判终态</text>
         </g>
         <g data-edge-from="parse" data-edge-to="scope" data-edge-label="领域模型" data-edge-key="5" data-edge-id="e-parse-scope">
           <rect x="188" y="99" width="48.4" height="14" rx="3" class="c-mask"/>
@@ -624,46 +624,46 @@ rect.c-bg-rect { fill: var(--bg); }
           <rect x="384.4" y="99" width="48.4" height="14" rx="3" class="c-mask"/>
           <text x="408.59999999999997" y="109" class="t-backend" font-size="8" text-anchor="middle">job 列表</text>
         </g>
-        <g data-edge-from="step" data-edge-to="events" data-edge-label="逐条吐出" data-edge-key="8" data-edge-id="e-step-events">
+        <g data-edge-from="step" data-edge-to="events" data-edge-label="逐条上报" data-edge-key="8" data-edge-id="e-step-events">
           <rect x="1051.6" y="223" width="48.4" height="14" rx="3" class="c-mask"/>
-          <text x="1075.8" y="233" class="t-database" font-size="8" text-anchor="middle">逐条吐出</text>
+          <text x="1075.8" y="233" class="t-database" font-size="8" text-anchor="middle">逐条上报</text>
         </g>
         <g data-edge-from="worker" data-edge-to="exit" data-edge-label="终止时" data-edge-key="9" data-edge-id="e-worker-exit">
           <rect x="745.4" y="289" width="38.8" height="14" rx="3" class="c-mask"/>
           <text x="764.8" y="299" class="t-security" font-size="8" text-anchor="middle">终止时</text>
         </g>
-        <g data-edge-from="worker" data-edge-to="step" data-edge-label="开会话后逐 step" data-edge-key="10" data-edge-id="e-worker-step">
+        <g data-edge-from="worker" data-edge-to="step" data-edge-label="会话内逐个 step" data-edge-key="10" data-edge-id="e-worker-step">
           <rect x="796.8" y="209" width="82" height="14" rx="3" class="c-mask"/>
-          <text x="837.8" y="219" class="t-muted" font-size="8" text-anchor="middle">开会话后逐 step</text>
+          <text x="837.8" y="219" class="t-muted" font-size="8" text-anchor="middle">会话内逐个 step</text>
         </g>
 
         <!-- Legend -->
         <g data-legend="">
           <text x="20" y="428" class="t-primary" font-size="12" font-weight="650">图例</text>
-          <g data-legend-semantic-kind="frontend" data-legend-x="20" data-legend-baseline="448" data-legend-width="113">
+          <g data-legend-semantic-kind="frontend" data-legend-x="20" data-legend-baseline="448" data-legend-width="104">
             <rect x="20" y="440" width="14" height="9" rx="2" class="c-frontend" stroke-width="1"/>
-            <text x="42" y="448" class="t-muted" font-size="7.5" font-weight="500">使用者拿到的结果</text>
+            <text x="42" y="448" class="t-muted" font-size="7.5" font-weight="500">使用者可见结果</text>
           </g>
-          <g data-legend-semantic-kind="backend" data-legend-x="140" data-legend-baseline="448" data-legend-width="96">
-            <rect x="140" y="440" width="14" height="9" rx="2" class="c-backend" stroke-width="1"/>
-            <text x="162" y="448" class="t-muted" font-size="7.5" font-weight="500">核心走的一步</text>
+          <g data-legend-semantic-kind="backend" data-legend-x="131" data-legend-baseline="448" data-legend-width="78">
+            <rect x="131" y="440" width="14" height="9" rx="2" class="c-backend" stroke-width="1"/>
+            <text x="153" y="448" class="t-muted" font-size="7.5" font-weight="500">处理步骤</text>
           </g>
-          <g data-legend-semantic-kind="security" data-legend-x="243" data-legend-baseline="448" data-legend-width="78">
-            <rect x="243" y="440" width="14" height="9" rx="2" class="c-security" stroke-width="1"/>
-            <text x="265" y="448" class="t-muted" font-size="7.5" font-weight="500">退出观察</text>
+          <g data-legend-semantic-kind="security" data-legend-x="216" data-legend-baseline="448" data-legend-width="78">
+            <rect x="216" y="440" width="14" height="9" rx="2" class="c-security" stroke-width="1"/>
+            <text x="238" y="448" class="t-muted" font-size="7.5" font-weight="500">退出观察</text>
           </g>
-          <g data-legend-semantic-kind="messagebus" data-legend-x="328" data-legend-baseline="448" data-legend-width="87">
-            <rect x="328" y="440" width="14" height="9" rx="2" class="c-messagebus" stroke-width="1"/>
-            <text x="350" y="448" class="t-muted" font-size="7.5" font-weight="500">驱动与派发</text>
+          <g data-legend-semantic-kind="messagebus" data-legend-x="301" data-legend-baseline="448" data-legend-width="87">
+            <rect x="301" y="440" width="14" height="9" rx="2" class="c-messagebus" stroke-width="1"/>
+            <text x="323" y="448" class="t-muted" font-size="7.5" font-weight="500">驱动与派发</text>
           </g>
-          <g data-legend-semantic-kind="database" data-legend-x="422" data-legend-baseline="448" data-legend-width="87">
-            <rect x="422" y="440" width="14" height="9" rx="2" class="c-database" stroke-width="1"/>
-            <text x="444" y="448" class="t-muted" font-size="7.5" font-weight="500">落库与事件</text>
+          <g data-legend-semantic-kind="database" data-legend-x="395" data-legend-baseline="448" data-legend-width="87">
+            <rect x="395" y="440" width="14" height="9" rx="2" class="c-database" stroke-width="1"/>
+            <text x="417" y="448" class="t-muted" font-size="7.5" font-weight="500">落库与事件</text>
           </g>
-          <g data-legend-semantic-kind="external" data-legend-x="516" data-legend-baseline="448" data-legend-width="122">
-            <rect x="516" y="440" width="14" height="9" rx="2" class="c-external" stroke-width="1"/>
-            <text x="538" y="448" class="t-muted" font-size="7.5" font-weight="500">worker（独立进程）</text>
+          <g data-legend-semantic-kind="external" data-legend-x="489" data-legend-baseline="448" data-legend-width="122">
+            <rect x="489" y="440" width="14" height="9" rx="2" class="c-external" stroke-width="1"/>
+            <text x="511" y="448" class="t-muted" font-size="7.5" font-weight="500">worker（独立进程）</text>
           </g>
         </g>
       </svg>
-<!-- gherkai:source-sha256=066c47135d18d8f33ce3ed973beecc4f3333b0f6e70453abb8a999916c40e3ca -->
+<!-- gherkai:source-sha256=418ed75dba0e6c0785f556cdef122dacd50076ce4a9077a37fb3ed1400b3a6b5 -->

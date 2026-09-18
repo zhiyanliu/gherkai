@@ -2,30 +2,30 @@
   "schema_version": 1,
   "diagram_type": "dataflow",
   "meta": {
-    "title": "两个真值源，一个岔口：本机档看目录，云端档看镜像",
+    "title": "两个真值源、一个岔口：本机档由目录决定，云端档由镜像决定",
     "locale": "zh-CN",
     "quality_profile": "showcase",
     "viewBox": [1080, 520],
     "legend": {
       "mode": "auto",
       "entries": {
-        "default": { "label": "本机档的流向：看目录" },
-        "emphasis": { "label": "云端档的流向：看镜像" }
+        "default": { "label": "本机档流向：目录载体" },
+        "emphasis": { "label": "云端档流向：镜像载体" }
       }
     }
   },
   "stages": [
-    { "label": "你的 steps 目录" },
-    { "label": "提交之前：先构建、再推上去" },
-    { "label": "提交那一刻" },
-    { "label": "随 run 的定义走" },
+    { "label": "项目 steps 目录" },
+    { "label": "提交之前：构建并推送" },
+    { "label": "提交时刻" },
+    { "label": "随 run 的定义" },
     { "label": "worker 进程内" }
   ],
   "nodes": [
     {
       "id": "src",
       "type": "frontend",
-      "label": "你的 steps 目录",
+      "label": "项目 steps 目录",
       "sublabel": "模式与 handler",
       "stage": 0,
       "row": 1,
@@ -35,7 +35,7 @@
       "id": "image",
       "type": "cloud",
       "label": "构建进 variant 镜像",
-      "sublabel": "推上去 → 一条 revision",
+      "sublabel": "推送 → 一条 revision",
       "stage": 1,
       "row": 2,
       "width": 136
@@ -54,7 +54,7 @@
       "id": "resolveName",
       "type": "backend",
       "label": "只解析 variant 名",
-      "sublabel": "内容一个字节都不看",
+      "sublabel": "不读取 steps 内容",
       "stage": 2,
       "row": 2,
       "width": 136,
@@ -63,8 +63,8 @@
     {
       "id": "defPath",
       "type": "database",
-      "label": "记下绝对路径",
-      "sublabel": "随这个 run 的定义",
+      "label": "写入绝对路径",
+      "sublabel": "随此 run 的定义",
       "stage": 3,
       "row": 0,
       "width": 136
@@ -72,7 +72,7 @@
     {
       "id": "defRevision",
       "type": "database",
-      "label": "记下 revision",
+      "label": "写入 revision",
       "sublabel": "各引擎各一条",
       "stage": 3,
       "row": 2,
@@ -82,7 +82,7 @@
       "id": "workerLocal",
       "type": "external",
       "label": "本机 worker 的表",
-      "sublabel": "只认拿到的环境变量",
+      "sublabel": "只读注入的环境变量",
       "stage": 4,
       "row": 0,
       "width": 136
@@ -91,7 +91,7 @@
       "id": "workerCloud",
       "type": "cloud",
       "label": "云端 worker 的表",
-      "sublabel": "镜像里构建好的那份",
+      "sublabel": "镜像内构建的副本",
       "stage": 4,
       "row": 2,
       "width": 136
@@ -117,7 +117,7 @@
       "id": "f-src-image",
       "from": "src",
       "to": "image",
-      "label": "拷进镜像层",
+      "label": "复制进镜像",
       "variant": "emphasis",
       "fromSide": "bottom",
       "toSide": "left",
@@ -132,21 +132,21 @@
       "id": "f-image-name",
       "from": "image",
       "to": "resolveName",
-      "label": "只按名字对上",
+      "label": "只按名称匹配",
       "variant": "emphasis"
     },
     {
       "id": "f-dir-def",
       "from": "resolveDir",
       "to": "defPath",
-      "label": "路径落进定义",
+      "label": "路径写入定义",
       "variant": "default"
     },
     {
       "id": "f-name-def",
       "from": "resolveName",
       "to": "defRevision",
-      "label": "结果落进定义",
+      "label": "结果写入定义",
       "variant": "emphasis"
     },
     {
@@ -160,7 +160,7 @@
       "id": "f-def-cloud",
       "from": "defRevision",
       "to": "workerCloud",
-      "label": "按它起容器",
+      "label": "启动容器",
       "variant": "emphasis"
     }
   ],
@@ -169,24 +169,24 @@
       "dot": "cyan",
       "title": "同一件事，两个载体",
       "items": [
-        "「这个 run 用哪套确定性 step」：本机档由目录决定，云端档由镜像决定，岔口就在提交那一刻",
-        "两档都不让 worker 自己猜路径：它只认拿到手的那一个环境变量"
+        "「这个 run 用哪套确定性 step」：本机档由目录决定，云端档由镜像决定，岔口在提交时刻",
+        "两档均不允许 worker 自行推算路径：worker 只读传入的那一个环境变量"
       ]
     },
     {
       "dot": "amber",
       "title": "本机档：解析只做一次",
       "items": [
-        "提交时定死一个绝对路径；后台接手的进程读回来用，谁都不再解析一次相对目录",
-        "每个进程建环境时先清掉自己 shell 里的同名变量：export 越不过定义"
+        "提交时确定一个绝对路径；后台接手的进程读回该值，任何一处都不再解析相对目录",
+        "每个进程构造环境时先清除自身 shell 里的同名变量：定义优先于 export"
       ]
     },
     {
       "dot": "rose",
-      "title": "云端档：改了本机不算改",
+      "title": "云端档：本机改动不生效",
       "items": [
-        "提交侧只核对镜像在不在、对不对得上，一个字节的 steps 内容都不看",
-        "改完必须重新构建并推上去，否则云端仍按镜像里的老版本跑，新写的 step 会静默交给 AI"
+        "提交侧只校验镜像的存在性与一致性，不读取 steps 内容的任何字节",
+        "改完必须重新构建并推送，否则云端仍按镜像内的旧版本执行，新增的 step 会静默落到 AI"
       ]
     }
   ]

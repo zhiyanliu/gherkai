@@ -18,7 +18,7 @@
     {
       "id": "outsider",
       "type": "external",
-      "label": "公网上的访问者",
+      "label": "公网访问者",
       "sublabel": "不带凭据",
       "pos": [360, 90],
       "size": [186, 72]
@@ -53,7 +53,7 @@
       "id": "app",
       "type": "backend",
       "label": "被测应用",
-      "sublabel": "本机或局域网另一台",
+      "sublabel": "本机或局域网主机",
       "pos": [960, 280],
       "size": [186, 72]
     },
@@ -61,7 +61,7 @@
       "id": "cli",
       "type": "frontend",
       "label": "gherkai 命令行",
-      "sublabel": "起隧道并替换地址",
+      "sublabel": "启动隧道并换地址",
       "pos": [660, 440],
       "size": [186, 72]
     }
@@ -69,7 +69,7 @@
   "boundaries": [
     {
       "kind": "region",
-      "label": "云端（浏览器在这里）",
+      "label": "云端（浏览器所在）",
       "wraps": ["browser"],
       "pad": 20
     },
@@ -81,7 +81,7 @@
     },
     {
       "kind": "region",
-      "label": "跑 CLI 的这台机器",
+      "label": "CLI 所在机器",
       "wraps": ["tunnel", "cli"],
       "pad": 20
     }
@@ -112,7 +112,7 @@
       "id": "start-tunnel",
       "from": "cli",
       "to": "tunnel",
-      "label": "起进程"
+      "label": "启动"
     },
     {
       "id": "direct-external",
@@ -126,7 +126,7 @@
       "id": "blocked",
       "from": "outsider",
       "to": "edge",
-      "label": "校验不通过即拦下",
+      "label": "校验不通过即拒绝",
       "variant": "security",
       "labelDy": 24
     }
@@ -134,16 +134,16 @@
   "cards": [
     {
       "dot": "cyan",
-      "title": "方向怎么读",
+      "title": "流量方向",
       "items": [
         "实线链是请求方向，响应沿同一路径返回",
-        "隧道是出站长连，你的机器不开入站端口",
-        "命令行只管起进程与拆隧道，不转发流量"
+        "隧道为出站长连，本机不开入站端口",
+        "命令行负责隧道启停，不转发流量"
       ]
     },
     {
       "dot": "emerald",
-      "title": "什么经隧道、什么不经",
+      "title": "隧道覆盖范围",
       "items": [
         "被测应用自身域下的请求全部经隧道",
         "页面引用的第三方域由云端浏览器直连",
@@ -152,11 +152,11 @@
     },
     {
       "dot": "rose",
-      "title": "边缘那道闸",
+      "title": "边缘闸门",
       "items": [
-        "公网地址由服务商边缘分配，每个 run 一换",
-        "凭据随机生成、每个 run 一换，由边缘校验",
-        "不带凭据的请求到不了你的机器"
+        "公网地址由服务商边缘分配，每个 run 更换",
+        "凭据随机生成、每个 run 更换，由边缘校验",
+        "不带凭据的请求无法到达本机"
       ]
     }
   ]

@@ -442,9 +442,9 @@ rect.c-bg-rect { fill: var(--bg); }
         <!-- Boundaries (behind everything) -->
         <rect data-graph-role="structural-frame" data-composition-frame-kind="region" data-composition-frame-id="0" data-composition-frame-label="发行物（维护者侧）" x="40" y="36" width="226" height="116" rx="12" class="c-region" stroke-width="1"/>
 
-        <rect data-graph-role="structural-frame" data-composition-frame-kind="region" data-composition-frame-id="1" data-composition-frame-label="你的机器（build 与推送）" x="40" y="206" width="226" height="116" rx="12" class="c-region" stroke-width="1"/>
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="region" data-composition-frame-id="1" data-composition-frame-label="本机（build 与推送）" x="40" y="206" width="226" height="116" rx="12" class="c-region" stroke-width="1"/>
 
-        <rect data-graph-role="structural-frame" data-composition-frame-kind="region" data-composition-frame-id="2" data-composition-frame-label="你的 AWS 账户（一个 prefix 一套）" x="296" y="36" width="744" height="626" rx="12" class="c-region" stroke-width="1"/>
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="region" data-composition-frame-id="2" data-composition-frame-label="本 AWS 账户（一个 prefix 一套）" x="296" y="36" width="744" height="626" rx="12" class="c-region" stroke-width="1"/>
 
         <rect data-graph-role="structural-frame" data-composition-frame-kind="region" data-composition-frame-id="3" data-composition-frame-label="提交侧" x="1070" y="206" width="226" height="116" rx="12" class="c-region" stroke-width="1"/>
 
@@ -452,16 +452,16 @@ rect.c-bg-rect { fill: var(--bg); }
         <path data-edge-from="ghcr_base" data-edge-to="ecr" data-edge-label="部署时同步" data-edge-key="0" data-edge-id="sync-base" data-composition-points="246,96;409,96;409,230" d="M 246 96 L 401 96 Q 409 96 409 104 L 409 230" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
         <path data-edge-from="local_img" data-edge-to="ecr" data-edge-label="推送上传" data-edge-key="1" data-edge-id="push-image" data-composition-points="246,266;316,266" d="M 246 266 L 316 266" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
         <path data-edge-from="stack" data-edge-to="ecr" data-edge-label="变更集应用即生效" data-edge-key="2" data-edge-id="stack-creates-repo" data-composition-points="409,400;409,302" d="M 409 400 L 409 302" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
-        <path data-edge-from="stack" data-edge-to="lambda_code" data-edge-label="同一次变更集带代码" data-edge-key="3" data-edge-id="stack-carries-lambda" data-composition-points="409,472;409,570" d="M 409 472 L 409 570" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
-        <path data-edge-from="ecr" data-edge-to="derived" data-edge-label="按 digest 入栏" data-edge-key="4" data-edge-id="image-by-digest" data-composition-points="502,266;590,266" d="M 502 266 L 590 266" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        <path data-edge-from="template" data-edge-to="derived" data-edge-label="复制成新 revision" data-edge-key="5" data-edge-id="copy-template" data-composition-points="683,132;683,230" d="M 683 132 L 683 230" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="stack" data-edge-to="lambda_code" data-edge-label="同一变更集含代码" data-edge-key="3" data-edge-id="stack-carries-lambda" data-composition-points="409,472;409,570" d="M 409 472 L 409 570" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="ecr" data-edge-to="derived" data-edge-label="按 digest 引用" data-edge-key="4" data-edge-id="image-by-digest" data-composition-points="502,266;590,266" d="M 502 266 L 590 266" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path data-edge-from="template" data-edge-to="derived" data-edge-label="复制为新 revision" data-edge-key="5" data-edge-id="copy-template" data-composition-points="683,132;683,230" d="M 683 132 L 683 230" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
         <path data-edge-from="derived" data-edge-to="mapping" data-edge-label="登记映射" data-edge-key="6" data-edge-id="record-mapping" data-composition-points="776,266;834,266" d="M 776 266 L 834 266" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        <path data-edge-from="default_ptr" data-edge-to="mapping" data-edge-label="决定读哪条" data-edge-key="7" data-edge-id="pointer-picks" data-composition-points="927,132;927,230" d="M 927 132 L 927 230" class="a-dashed" stroke-width="1.5" marker-end="url(#arrowhead-dashed)"/>
+        <path data-edge-from="default_ptr" data-edge-to="mapping" data-edge-label="选定映射项" data-edge-key="7" data-edge-id="pointer-picks" data-composition-points="927,132;927,230" d="M 927 132 L 927 230" class="a-dashed" stroke-width="1.5" marker-end="url(#arrowhead-dashed)"/>
         <path data-edge-from="mapping" data-edge-to="submit" data-edge-label="提交时解析" data-edge-key="8" data-edge-id="resolve-at-submit" data-composition-points="1020,259;1090,259" d="M 1020 259 L 1090 259" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        <path data-edge-from="submit" data-edge-to="runs" data-edge-label="钉进 run 定义" data-edge-key="9" data-edge-id="pin-into-run" data-composition-points="1090,273;1055,273;1055,436;1020,436" d="M 1090 273 L 1063 273 Q 1055 273 1055 281 L 1055 428 Q 1055 436 1047 436 L 1020 436" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="submit" data-edge-to="runs" data-edge-label="写入 run 定义" data-edge-key="9" data-edge-id="pin-into-run" data-composition-points="1090,273;1055,273;1055,436;1020,436" d="M 1090 273 L 1063 273 Q 1055 273 1055 281 L 1055 428 Q 1055 436 1047 436 L 1020 436" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
         <path data-edge-from="derived" data-edge-to="retired" data-edge-label="被替换即退休" data-edge-key="10" data-edge-id="retire-old" data-composition-points="683,302;683,400" d="M 683 302 L 683 400" class="a-dashed" stroke-width="1.5" marker-end="url(#arrowhead-dashed)"/>
         <path data-edge-from="retired" data-edge-to="cleanup" data-edge-label="进入回收候选" data-edge-key="11" data-edge-id="enter-candidates" data-composition-points="683,472;683,570" d="M 683 472 L 683 570" class="a-dashed" stroke-width="1.5" marker-end="url(#arrowhead-dashed)"/>
-        <path data-edge-from="runs" data-edge-to="cleanup" data-edge-label="有 run 引用则留" data-edge-key="12" data-edge-id="live-run-guard" data-composition-points="834,436;805,436;805,606;776,606" d="M 834 436 L 813 436 Q 805 436 805 444 L 805 598 Q 805 606 797 606 L 776 606" class="a-security" stroke-width="1.5" marker-end="url(#arrowhead-security)"/>
+        <path data-edge-from="runs" data-edge-to="cleanup" data-edge-label="有 run 引用不删" data-edge-key="12" data-edge-id="live-run-guard" data-composition-points="834,436;805,436;805,606;776,606" d="M 834 436 L 813 436 Q 805 436 805 444 L 805 598 Q 805 606 797 606 L 776 606" class="a-security" stroke-width="1.5" marker-end="url(#arrowhead-security)"/>
 
         <!-- Components -->
         <g id="node-ghcr_base" data-node-id="ghcr_base" data-node-label="官方基底镜像" tabindex="0" role="button" aria-label="聚焦官方基底镜像，运行时不直连, 发行物（维护者侧）" aria-pressed="false" data-node-kind="external" data-node-sublabel="运行时不直连" data-node-context="发行物（维护者侧）">
@@ -476,20 +476,20 @@ rect.c-bg-rect { fill: var(--bg); }
         <text x="153" y="110" class="t-muted" font-size="9" text-anchor="middle">运行时不直连</text>
         </g>
 
-        <g id="node-local_img" data-node-id="local_img" data-node-label="你 build 的镜像" tabindex="0" role="button" aria-label="聚焦你 build 的镜像，基底 + 你的 step, 你的机器（build 与推送）" aria-pressed="false" data-node-kind="external" data-node-sublabel="基底 + 你的 step" data-node-context="你的机器（build 与推送）">
-          <title>你 build 的镜像 · 基底 + 你的 step · 你的机器（build 与推送）</title>
+        <g id="node-local_img" data-node-id="local_img" data-node-label="variant 镜像" tabindex="0" role="button" aria-label="聚焦variant 镜像，基底 + 自带 step, 本机（build 与推送）" aria-pressed="false" data-node-kind="external" data-node-sublabel="基底 + 自带 step" data-node-context="本机（build 与推送）">
+          <title>variant 镜像 · 基底 + 自带 step · 本机（build 与推送）</title>
           <rect x="60" y="230" width="186" height="72" rx="6" class="c-mask"/>
           <rect x="60" y="230" width="186" height="72" rx="6" class="c-external" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(66 236) scale(0.6875)">
             <rect x="2.5" y="5" width="8.5" height="8" rx="1.5"/>
             <path d="M8 2.5h5.5V8M13.5 2.5 7.5 8.5"/>
           </g>
-          <text data-node-label="" x="153" y="264" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">你 build 的镜像</text>
-        <text x="153" y="280" class="t-muted" font-size="9" text-anchor="middle">基底 + 你的 step</text>
+          <text data-node-label="" x="153" y="264" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">variant 镜像</text>
+        <text x="153" y="280" class="t-muted" font-size="9" text-anchor="middle">基底 + 自带 step</text>
         </g>
 
-        <g id="node-lambda_code" data-node-id="lambda_code" data-node-label="Lambda 代码" tabindex="0" role="button" aria-label="聚焦Lambda 代码，推进与判定, 你的 AWS 账户（一个 prefix 一套）" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="推进与判定" data-node-context="你的 AWS 账户（一个 prefix 一套）">
-          <title>Lambda 代码 · 推进与判定 · 你的 AWS 账户（一个 prefix 一套）</title>
+        <g id="node-lambda_code" data-node-id="lambda_code" data-node-label="Lambda 代码" tabindex="0" role="button" aria-label="聚焦Lambda 代码，推进与判定, 本 AWS 账户（一个 prefix 一套）" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="推进与判定" data-node-context="本 AWS 账户（一个 prefix 一套）">
+          <title>Lambda 代码 · 推进与判定 · 本 AWS 账户（一个 prefix 一套）</title>
           <rect x="316" y="570" width="186" height="72" rx="6" class="c-mask"/>
           <rect x="316" y="570" width="186" height="72" rx="6" class="c-cloud" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="cloud" class="semantic-sigil s-cloud" transform="translate(322 576) scale(0.6875)">
@@ -499,20 +499,20 @@ rect.c-bg-rect { fill: var(--bg); }
         <text x="409" y="620" class="t-muted" font-size="9" text-anchor="middle">推进与判定</text>
         </g>
 
-        <g id="node-ecr" data-node-id="ecr" data-node-label="你的 ECR 仓库" tabindex="0" role="button" aria-label="聚焦你的 ECR 仓库，按引擎分仓, 你的 AWS 账户（一个 prefix 一套）" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="按引擎分仓" data-node-tag="无过期规则" data-node-context="你的 AWS 账户（一个 prefix 一套）">
-          <title>你的 ECR 仓库 · 按引擎分仓 · 你的 AWS 账户（一个 prefix 一套） · 无过期规则</title>
+        <g id="node-ecr" data-node-id="ecr" data-node-label="ECR 仓库" tabindex="0" role="button" aria-label="聚焦ECR 仓库，按引擎分仓, 本 AWS 账户（一个 prefix 一套）" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="按引擎分仓" data-node-tag="无过期规则" data-node-context="本 AWS 账户（一个 prefix 一套）">
+          <title>ECR 仓库 · 按引擎分仓 · 本 AWS 账户（一个 prefix 一套） · 无过期规则</title>
           <rect x="316" y="230" width="186" height="72" rx="6" class="c-mask"/>
           <rect x="316" y="230" width="186" height="72" rx="6" class="c-cloud" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="cloud" class="semantic-sigil s-cloud" transform="translate(322 236) scale(0.6875)">
             <path d="M4.3 12.5h7.3a2.4 2.4 0 0 0 .2-4.8 4 4 0 0 0-7.5-1.3A3.1 3.1 0 0 0 4.3 12.5Z"/>
           </g>
-          <text data-node-label="" x="409" y="264" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">你的 ECR 仓库</text>
+          <text data-node-label="" x="409" y="264" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">ECR 仓库</text>
         <text x="409" y="280" class="t-muted" font-size="9" text-anchor="middle">按引擎分仓</text>
         <text x="409" y="294" class="t-cloud" font-size="7" text-anchor="middle">无过期规则</text>
         </g>
 
-        <g id="node-stack" data-node-id="stack" data-node-label="stack 资源与形态" tabindex="0" role="button" aria-label="聚焦stack 资源与形态，含模板与仓库, 你的 AWS 账户（一个 prefix 一套）" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="含模板与仓库" data-node-context="你的 AWS 账户（一个 prefix 一套）">
-          <title>stack 资源与形态 · 含模板与仓库 · 你的 AWS 账户（一个 prefix 一套）</title>
+        <g id="node-stack" data-node-id="stack" data-node-label="stack 资源与形态" tabindex="0" role="button" aria-label="聚焦stack 资源与形态，含模板与仓库, 本 AWS 账户（一个 prefix 一套）" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="含模板与仓库" data-node-context="本 AWS 账户（一个 prefix 一套）">
+          <title>stack 资源与形态 · 含模板与仓库 · 本 AWS 账户（一个 prefix 一套）</title>
           <rect x="316" y="400" width="186" height="72" rx="6" class="c-mask"/>
           <rect x="316" y="400" width="186" height="72" rx="6" class="c-cloud" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="cloud" class="semantic-sigil s-cloud" transform="translate(322 406) scale(0.6875)">
@@ -522,8 +522,8 @@ rect.c-bg-rect { fill: var(--bg); }
         <text x="409" y="450" class="t-muted" font-size="9" text-anchor="middle">含模板与仓库</text>
         </g>
 
-        <g id="node-template" data-node-id="template" data-node-label="任务定义模板" tabindex="0" role="button" aria-label="聚焦任务定义模板，永不起 task, 你的 AWS 账户（一个 prefix 一套）" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="永不起 task" data-node-tag="随部署事务" data-node-context="你的 AWS 账户（一个 prefix 一套）">
-          <title>任务定义模板 · 永不起 task · 你的 AWS 账户（一个 prefix 一套） · 随部署事务</title>
+        <g id="node-template" data-node-id="template" data-node-label="任务定义模板" tabindex="0" role="button" aria-label="聚焦任务定义模板，永不起 task, 本 AWS 账户（一个 prefix 一套）" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="永不起 task" data-node-tag="随部署事务" data-node-context="本 AWS 账户（一个 prefix 一套）">
+          <title>任务定义模板 · 永不起 task · 本 AWS 账户（一个 prefix 一套） · 随部署事务</title>
           <rect x="590" y="60" width="186" height="72" rx="6" class="c-mask"/>
           <rect x="590" y="60" width="186" height="72" rx="6" class="c-cloud" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="cloud" class="semantic-sigil s-cloud" transform="translate(596 66) scale(0.6875)">
@@ -534,8 +534,8 @@ rect.c-bg-rect { fill: var(--bg); }
         <text x="683" y="124" class="t-cloud" font-size="7" text-anchor="middle">随部署事务</text>
         </g>
 
-        <g id="node-default_ptr" data-node-id="default_ptr" data-node-label="SSM 默认指针" tabindex="0" role="button" aria-label="聚焦SSM 默认指针，升级不重置, 你的 AWS 账户（一个 prefix 一套）" aria-pressed="false" data-node-kind="database" data-node-sublabel="升级不重置" data-node-context="你的 AWS 账户（一个 prefix 一套）">
-          <title>SSM 默认指针 · 升级不重置 · 你的 AWS 账户（一个 prefix 一套）</title>
+        <g id="node-default_ptr" data-node-id="default_ptr" data-node-label="SSM 默认指针" tabindex="0" role="button" aria-label="聚焦SSM 默认指针，升级不重置, 本 AWS 账户（一个 prefix 一套）" aria-pressed="false" data-node-kind="database" data-node-sublabel="升级不重置" data-node-context="本 AWS 账户（一个 prefix 一套）">
+          <title>SSM 默认指针 · 升级不重置 · 本 AWS 账户（一个 prefix 一套）</title>
           <rect x="834" y="60" width="186" height="72" rx="6" class="c-mask"/>
           <rect x="834" y="60" width="186" height="72" rx="6" class="c-database" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(840 66) scale(0.6875)">
@@ -546,8 +546,8 @@ rect.c-bg-rect { fill: var(--bg); }
         <text x="927" y="110" class="t-muted" font-size="9" text-anchor="middle">升级不重置</text>
         </g>
 
-        <g id="node-derived" data-node-id="derived" data-node-label="派生的 revision" tabindex="0" role="button" aria-label="聚焦派生的 revision，引擎 × variant, 你的 AWS 账户（一个 prefix 一套）" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="引擎 × variant" data-node-tag="不可变快照" data-node-context="你的 AWS 账户（一个 prefix 一套）">
-          <title>派生的 revision · 引擎 × variant · 你的 AWS 账户（一个 prefix 一套） · 不可变快照</title>
+        <g id="node-derived" data-node-id="derived" data-node-label="派生的 revision" tabindex="0" role="button" aria-label="聚焦派生的 revision，引擎 × variant, 本 AWS 账户（一个 prefix 一套）" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="引擎 × variant" data-node-tag="不可变快照" data-node-context="本 AWS 账户（一个 prefix 一套）">
+          <title>派生的 revision · 引擎 × variant · 本 AWS 账户（一个 prefix 一套） · 不可变快照</title>
           <rect x="590" y="230" width="186" height="72" rx="6" class="c-mask"/>
           <rect x="590" y="230" width="186" height="72" rx="6" class="c-cloud" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="cloud" class="semantic-sigil s-cloud" transform="translate(596 236) scale(0.6875)">
@@ -558,8 +558,8 @@ rect.c-bg-rect { fill: var(--bg); }
         <text x="683" y="294" class="t-cloud" font-size="7" text-anchor="middle">不可变快照</text>
         </g>
 
-        <g id="node-mapping" data-node-id="mapping" data-node-label="SSM 镜像映射" tabindex="0" role="button" aria-label="聚焦SSM 镜像映射，写完即生效, 你的 AWS 账户（一个 prefix 一套）" aria-pressed="false" data-node-kind="database" data-node-sublabel="写完即生效" data-node-context="你的 AWS 账户（一个 prefix 一套）">
-          <title>SSM 镜像映射 · 写完即生效 · 你的 AWS 账户（一个 prefix 一套）</title>
+        <g id="node-mapping" data-node-id="mapping" data-node-label="SSM 镜像映射" tabindex="0" role="button" aria-label="聚焦SSM 镜像映射，写入即生效, 本 AWS 账户（一个 prefix 一套）" aria-pressed="false" data-node-kind="database" data-node-sublabel="写入即生效" data-node-context="本 AWS 账户（一个 prefix 一套）">
+          <title>SSM 镜像映射 · 写入即生效 · 本 AWS 账户（一个 prefix 一套）</title>
           <rect x="834" y="230" width="186" height="72" rx="6" class="c-mask"/>
           <rect x="834" y="230" width="186" height="72" rx="6" class="c-database" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(840 236) scale(0.6875)">
@@ -567,7 +567,7 @@ rect.c-bg-rect { fill: var(--bg); }
             <path d="M3 4v8c0 1.1 2.2 2 5 2s5-.9 5-2V4M3 8c0 1.1 2.2 2 5 2s5-.9 5-2"/>
           </g>
           <text data-node-label="" x="927" y="264" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">SSM 镜像映射</text>
-        <text x="927" y="280" class="t-muted" font-size="9" text-anchor="middle">写完即生效</text>
+        <text x="927" y="280" class="t-muted" font-size="9" text-anchor="middle">写入即生效</text>
         </g>
 
         <g id="node-submit" data-node-id="submit" data-node-label="提交侧 CLI" tabindex="0" role="button" aria-label="聚焦提交侧 CLI，解析出 revision, 提交侧" aria-pressed="false" data-node-kind="frontend" data-node-sublabel="解析出 revision" data-node-tag="缺一即拒" data-node-context="提交侧">
@@ -585,8 +585,8 @@ rect.c-bg-rect { fill: var(--bg); }
         <text x="1183" y="294" class="t-frontend" font-size="7" text-anchor="middle">缺一即拒</text>
         </g>
 
-        <g id="node-retired" data-node-id="retired" data-node-label="退休标记" tabindex="0" role="button" aria-label="聚焦退休标记，不立即删, 你的 AWS 账户（一个 prefix 一套）" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="不立即删" data-node-context="你的 AWS 账户（一个 prefix 一套）">
-          <title>退休标记 · 不立即删 · 你的 AWS 账户（一个 prefix 一套）</title>
+        <g id="node-retired" data-node-id="retired" data-node-label="退休标记" tabindex="0" role="button" aria-label="聚焦退休标记，不立即删, 本 AWS 账户（一个 prefix 一套）" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="不立即删" data-node-context="本 AWS 账户（一个 prefix 一套）">
+          <title>退休标记 · 不立即删 · 本 AWS 账户（一个 prefix 一套）</title>
           <rect x="590" y="400" width="186" height="72" rx="6" class="c-mask"/>
           <rect x="590" y="400" width="186" height="72" rx="6" class="c-cloud" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="cloud" class="semantic-sigil s-cloud" transform="translate(596 406) scale(0.6875)">
@@ -596,8 +596,8 @@ rect.c-bg-rect { fill: var(--bg); }
         <text x="683" y="450" class="t-muted" font-size="9" text-anchor="middle">不立即删</text>
         </g>
 
-        <g id="node-runs" data-node-id="runs" data-node-label="runs 表" tabindex="0" role="button" aria-label="聚焦runs 表，run 钉下的 revision, 你的 AWS 账户（一个 prefix 一套）" aria-pressed="false" data-node-kind="database" data-node-sublabel="run 钉下的 revision" data-node-context="你的 AWS 账户（一个 prefix 一套）">
-          <title>runs 表 · run 钉下的 revision · 你的 AWS 账户（一个 prefix 一套）</title>
+        <g id="node-runs" data-node-id="runs" data-node-label="runs 表" tabindex="0" role="button" aria-label="聚焦runs 表，run 固定的 revision, 本 AWS 账户（一个 prefix 一套）" aria-pressed="false" data-node-kind="database" data-node-sublabel="run 固定的 revision" data-node-context="本 AWS 账户（一个 prefix 一套）">
+          <title>runs 表 · run 固定的 revision · 本 AWS 账户（一个 prefix 一套）</title>
           <rect x="834" y="400" width="186" height="72" rx="6" class="c-mask"/>
           <rect x="834" y="400" width="186" height="72" rx="6" class="c-database" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(840 406) scale(0.6875)">
@@ -605,11 +605,11 @@ rect.c-bg-rect { fill: var(--bg); }
             <path d="M3 4v8c0 1.1 2.2 2 5 2s5-.9 5-2V4M3 8c0 1.1 2.2 2 5 2s5-.9 5-2"/>
           </g>
           <text data-node-label="" x="927" y="434" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">runs 表</text>
-        <text x="927" y="450" class="t-muted" font-size="9" text-anchor="middle">run 钉下的 revision</text>
+        <text x="927" y="450" class="t-muted" font-size="9" text-anchor="middle">run 固定的 revision</text>
         </g>
 
-        <g id="node-cleanup" data-node-id="cleanup" data-node-label="回收闸" tabindex="0" role="button" aria-label="聚焦回收闸，已退休 + 孤儿, 你的 AWS 账户（一个 prefix 一套）" aria-pressed="false" data-node-kind="security" data-node-sublabel="已退休 + 孤儿" data-node-context="你的 AWS 账户（一个 prefix 一套）">
-          <title>回收闸 · 已退休 + 孤儿 · 你的 AWS 账户（一个 prefix 一套）</title>
+        <g id="node-cleanup" data-node-id="cleanup" data-node-label="回收闸" tabindex="0" role="button" aria-label="聚焦回收闸，已退休 + 孤儿, 本 AWS 账户（一个 prefix 一套）" aria-pressed="false" data-node-kind="security" data-node-sublabel="已退休 + 孤儿" data-node-context="本 AWS 账户（一个 prefix 一套）">
+          <title>回收闸 · 已退休 + 孤儿 · 本 AWS 账户（一个 prefix 一套）</title>
           <rect x="590" y="570" width="186" height="72" rx="6" class="c-mask"/>
           <rect x="590" y="570" width="186" height="72" rx="6" class="c-security" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(596 576) scale(0.6875)">
@@ -633,33 +633,33 @@ rect.c-bg-rect { fill: var(--bg); }
           <rect x="365.6" y="380" width="86.8" height="14" rx="3" class="c-mask"/>
           <text x="409" y="390" class="t-muted" font-size="8" text-anchor="middle">变更集应用即生效</text>
         </g>
-        <g data-edge-from="stack" data-edge-to="lambda_code" data-edge-label="同一次变更集带代码" data-edge-key="3" data-edge-id="stack-carries-lambda">
-          <rect x="360.8" y="476" width="96.39999999999999" height="14" rx="3" class="c-mask"/>
-          <text x="409" y="486" class="t-muted" font-size="8" text-anchor="middle">同一次变更集带代码</text>
+        <g data-edge-from="stack" data-edge-to="lambda_code" data-edge-label="同一变更集含代码" data-edge-key="3" data-edge-id="stack-carries-lambda">
+          <rect x="365.6" y="476" width="86.8" height="14" rx="3" class="c-mask"/>
+          <text x="409" y="486" class="t-muted" font-size="8" text-anchor="middle">同一变更集含代码</text>
         </g>
-        <g data-edge-from="ecr" data-edge-to="derived" data-edge-label="按 digest 入栏" data-edge-key="4" data-edge-id="image-by-digest">
+        <g data-edge-from="ecr" data-edge-to="derived" data-edge-label="按 digest 引用" data-edge-key="4" data-edge-id="image-by-digest">
           <rect x="507.4" y="246" width="77.2" height="14" rx="3" class="c-mask"/>
-          <text x="546" y="256" class="t-backend" font-size="8" text-anchor="middle">按 digest 入栏</text>
+          <text x="546" y="256" class="t-backend" font-size="8" text-anchor="middle">按 digest 引用</text>
         </g>
-        <g data-edge-from="template" data-edge-to="derived" data-edge-label="复制成新 revision" data-edge-key="5" data-edge-id="copy-template">
+        <g data-edge-from="template" data-edge-to="derived" data-edge-label="复制为新 revision" data-edge-key="5" data-edge-id="copy-template">
           <rect x="637.2" y="136" width="91.6" height="14" rx="3" class="c-mask"/>
-          <text x="683" y="146" class="t-muted" font-size="8" text-anchor="middle">复制成新 revision</text>
+          <text x="683" y="146" class="t-muted" font-size="8" text-anchor="middle">复制为新 revision</text>
         </g>
         <g data-edge-from="derived" data-edge-to="mapping" data-edge-label="登记映射" data-edge-key="6" data-edge-id="record-mapping">
           <rect x="780.8" y="246" width="48.4" height="14" rx="3" class="c-mask"/>
           <text x="805" y="256" class="t-backend" font-size="8" text-anchor="middle">登记映射</text>
         </g>
-        <g data-edge-from="default_ptr" data-edge-to="mapping" data-edge-label="决定读哪条" data-edge-key="7" data-edge-id="pointer-picks">
+        <g data-edge-from="default_ptr" data-edge-to="mapping" data-edge-label="选定映射项" data-edge-key="7" data-edge-id="pointer-picks">
           <rect x="898" y="136" width="58" height="14" rx="3" class="c-mask"/>
-          <text x="927" y="146" class="t-messagebus" font-size="8" text-anchor="middle">决定读哪条</text>
+          <text x="927" y="146" class="t-messagebus" font-size="8" text-anchor="middle">选定映射项</text>
         </g>
         <g data-edge-from="mapping" data-edge-to="submit" data-edge-label="提交时解析" data-edge-key="8" data-edge-id="resolve-at-submit">
           <rect x="1026" y="239" width="58" height="14" rx="3" class="c-mask"/>
           <text x="1055" y="249" class="t-backend" font-size="8" text-anchor="middle">提交时解析</text>
         </g>
-        <g data-edge-from="submit" data-edge-to="runs" data-edge-label="钉进 run 定义" data-edge-key="9" data-edge-id="pin-into-run">
+        <g data-edge-from="submit" data-edge-to="runs" data-edge-label="写入 run 定义" data-edge-key="9" data-edge-id="pin-into-run">
           <rect x="1018.8" y="334.5" width="72.4" height="14" rx="3" class="c-mask"/>
-          <text x="1055" y="344.5" class="t-muted" font-size="8" text-anchor="middle">钉进 run 定义</text>
+          <text x="1055" y="344.5" class="t-muted" font-size="8" text-anchor="middle">写入 run 定义</text>
         </g>
         <g data-edge-from="derived" data-edge-to="retired" data-edge-label="被替换即退休" data-edge-key="10" data-edge-id="retire-old">
           <rect x="649.2" y="306" width="67.6" height="14" rx="3" class="c-mask"/>
@@ -669,9 +669,9 @@ rect.c-bg-rect { fill: var(--bg); }
           <rect x="649.2" y="476" width="67.6" height="14" rx="3" class="c-mask"/>
           <text x="683" y="486" class="t-messagebus" font-size="8" text-anchor="middle">进入回收候选</text>
         </g>
-        <g data-edge-from="runs" data-edge-to="cleanup" data-edge-label="有 run 引用则留" data-edge-key="12" data-edge-id="live-run-guard">
+        <g data-edge-from="runs" data-edge-to="cleanup" data-edge-label="有 run 引用不删" data-edge-key="12" data-edge-id="live-run-guard">
           <rect x="764" y="501" width="82" height="14" rx="3" class="c-mask"/>
-          <text x="805" y="511" class="t-security" font-size="8" text-anchor="middle">有 run 引用则留</text>
+          <text x="805" y="511" class="t-security" font-size="8" text-anchor="middle">有 run 引用不删</text>
         </g>
 
         <!-- Boundary labels (foreground masks keep routes out of titles) -->
@@ -680,14 +680,14 @@ rect.c-bg-rect { fill: var(--bg); }
           <text data-boundary-label="" x="48" y="53" class="t-cloud" font-size="9" font-weight="600">发行物（维护者侧）</text>
         </g>
 
-        <g data-graph-role="structural-frame-label" data-composition-frame-id="1" data-composition-frame-kind="region" data-composition-frame-label="你的机器（build 与推送）">
-          <rect data-graph-role="structural-frame-label-mask" x="44" y="210" width="139.6" height="16" rx="3" class="c-mask"/>
-          <text data-boundary-label="" x="48" y="223" class="t-cloud" font-size="9" font-weight="600">你的机器（build 与推送）</text>
+        <g data-graph-role="structural-frame-label" data-composition-frame-id="1" data-composition-frame-kind="region" data-composition-frame-label="本机（build 与推送）">
+          <rect data-graph-role="structural-frame-label-mask" x="44" y="210" width="118" height="16" rx="3" class="c-mask"/>
+          <text data-boundary-label="" x="48" y="223" class="t-cloud" font-size="9" font-weight="600">本机（build 与推送）</text>
         </g>
 
-        <g data-graph-role="structural-frame-label" data-composition-frame-id="2" data-composition-frame-kind="region" data-composition-frame-label="你的 AWS 账户（一个 prefix 一套）">
-          <rect data-graph-role="structural-frame-label-mask" x="300" y="40" width="188.2" height="16" rx="3" class="c-mask"/>
-          <text data-boundary-label="" x="304" y="53" class="t-cloud" font-size="9" font-weight="600">你的 AWS 账户（一个 prefix 一套）</text>
+        <g data-graph-role="structural-frame-label" data-composition-frame-id="2" data-composition-frame-kind="region" data-composition-frame-label="本 AWS 账户（一个 prefix 一套）">
+          <rect data-graph-role="structural-frame-label-mask" x="300" y="40" width="177.4" height="16" rx="3" class="c-mask"/>
+          <text data-boundary-label="" x="304" y="53" class="t-cloud" font-size="9" font-weight="600">本 AWS 账户（一个 prefix 一套）</text>
         </g>
 
         <g data-graph-role="structural-frame-label" data-composition-frame-id="3" data-composition-frame-kind="region" data-composition-frame-label="提交侧">
@@ -720,4 +720,4 @@ rect.c-bg-rect { fill: var(--bg); }
           </g>
         </g>
       </svg>
-<!-- gherkai:source-sha256=d2a1230db55eaa7307d7928683094aaa90c399cb18a9724edd9c97b501a11174 -->
+<!-- gherkai:source-sha256=ae775e938a0113cc2154673918493f8414707967657f138579a91bec9f14b104 -->

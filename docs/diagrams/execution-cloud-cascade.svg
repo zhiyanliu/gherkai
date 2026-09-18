@@ -415,7 +415,7 @@ svg[data-theme="light"] { --bg: #f8fafc; --grid: #e2e8f0; --text: #0f172a; --tex
 svg[data-theme="dark"] { --bg: #020617; --grid: #1e293b; --text: #ffffff; --text-muted: #94a3b8; --text-dim: #475569; --text-faint: #7d8da1; --panel: rgba(15, 23, 42, 0.5); --panel-border: #1e293b; --lane-fill: rgba(15, 23, 42, 0.22); --lane-stroke: #334155; --arrow: #64748b; --arrow-emphasis: #34d399; --mask: #0f172a; --frontend-fill: rgba(8, 51, 68, 0.4); --frontend-stroke: #22d3ee; --backend-fill: rgba(6, 78, 59, 0.4); --backend-stroke: #34d399; --database-fill: rgba(76, 29, 149, 0.4); --database-stroke: #a78bfa; --cloud-fill: rgba(120, 53, 15, 0.3); --cloud-stroke: #fbbf24; --security-fill: rgba(136, 19, 55, 0.4); --security-stroke: #fb7185; --messagebus-fill: rgba(251, 146, 60, 0.3); --messagebus-stroke: #fb923c; --external-fill: rgba(30, 41, 59, 0.5); --external-stroke: #94a3b8; --toolbar-bg: rgba(15, 23, 42, 0.8); --toolbar-border: #334155; --toolbar-text: #e2e8f0; --toolbar-hover: rgba(15, 23, 42, 0.95); --toolbar-menu-bg: #0f172a; }
 rect.c-bg-rect { fill: var(--bg); }
 </style><rect width="100%" height="100%" class="c-bg-rect"/>
-        <title id="archify-diagram-title">云端后台跑批：事件级联怎么把一个 run 推到收敛</title>
+        <title id="archify-diagram-title">云端后台跑批：事件级联把一个 run 推到收敛</title>
         <desc id="archify-diagram-description">由 Archify 生成的时序图。</desc>
         <!-- Definitions -->
         <defs>
@@ -478,7 +478,7 @@ rect.c-bg-rect { fill: var(--bg); }
           <rect x="150.7833333333333" y="160" width="79.60000000000001" height="16" rx="3" class="c-mask"/>
           <text x="190.58333333333331" y="170" class="t-backend" font-size="9" text-anchor="middle">落定义 + 状态</text>
         </g>
-        <text x="137.5" y="198" class="t-dim" font-size="7">（带后台标记）返回 run_id 后就能关机；只有用隧道测本机应用时本机要一直在线</text>
+        <text x="137.5" y="198" class="t-dim" font-size="7">（带后台标记）返回 run_id 后即可关机；仅隧道模式下本机须保持开机联网</text>
         </g>
 
         <g data-edge-from="runs" data-edge-to="kicker" data-edge-label="写入唤醒" data-edge-key="1" data-edge-id="m-wake-kicker">
@@ -487,16 +487,16 @@ rect.c-bg-rect { fill: var(--bg); }
           <rect x="307.95" y="206" width="53.6" height="16" rx="3" class="c-mask"/>
           <text x="334.75" y="216" class="t-messagebus" font-size="9" text-anchor="middle">写入唤醒</text>
         </g>
-        <text x="281.66666666666663" y="244" class="t-dim" font-size="7">（只收带标记的新 run）</text>
+        <text x="281.66666666666663" y="244" class="t-dim" font-size="7">（仅认领带标记的新 run）</text>
         </g>
 
-        <g data-edge-from="kicker" data-edge-to="worker" data-edge-label="抢到 job 才起 task" data-edge-key="2" data-edge-id="m-first-task">
+        <g data-edge-from="kicker" data-edge-to="worker" data-edge-label="条件写成功后起 task" data-edge-key="2" data-edge-id="m-first-task">
           <path data-composition-edge-from="kicker" data-composition-edge-to="worker" data-composition-edge-id="m-first-task" data-composition-points="413.8333333333333,272;544,272" d="M 413.8333333333333 272 L 544 272" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
         <g>
-          <rect x="426.1166666666666" y="252" width="105.60000000000001" height="16" rx="3" class="c-mask"/>
-          <text x="478.91666666666663" y="262" class="t-backend" font-size="9" text-anchor="middle">抢到 job 才起 task</text>
+          <rect x="423.51666666666665" y="252" width="110.8" height="16" rx="3" class="c-mask"/>
+          <text x="478.91666666666663" y="262" class="t-backend" font-size="9" text-anchor="middle">条件写成功后起 task</text>
         </g>
-        <text x="425.8333333333333" y="290" class="t-dim" font-size="7">每次起 task 都给这个 job 定一次超时闹钟</text>
+        <text x="425.8333333333333" y="290" class="t-dim" font-size="7">每次起 task 为该 job 设一次超时闹钟</text>
         </g>
 
         <g data-edge-from="worker" data-edge-to="events" data-edge-label="逐条写事件" data-edge-key="3" data-edge-id="m-events">
@@ -508,19 +508,19 @@ rect.c-bg-rect { fill: var(--bg); }
         <text x="570" y="336" class="t-dim" font-size="7">（序号递增）</text>
         </g>
 
-        <g data-edge-from="events" data-edge-to="reconciler" data-edge-label="每批写入都唤醒一次" data-edge-key="4" data-edge-id="m-wake-rec">
+        <g data-edge-from="events" data-edge-to="reconciler" data-edge-label="每批写入唤醒一次" data-edge-key="4" data-edge-id="m-wake-rec">
           <path data-composition-edge-from="events" data-composition-edge-to="reconciler" data-composition-edge-id="m-wake-rec" data-composition-points="702.1666666666666,364;832.3333333333333,364" d="M 702.1666666666666 364 L 832.3333333333333 364" class="a-dashed" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
         <g>
-          <rect x="714.45" y="344" width="105.60000000000001" height="16" rx="3" class="c-mask"/>
-          <text x="767.25" y="354" class="t-messagebus" font-size="9" text-anchor="middle">每批写入都唤醒一次</text>
+          <rect x="719.65" y="344" width="95.2" height="16" rx="3" class="c-mask"/>
+          <text x="767.25" y="354" class="t-messagebus" font-size="9" text-anchor="middle">每批写入唤醒一次</text>
         </g>
         </g>
 
-        <g data-edge-from="reconciler" data-edge-to="worker" data-edge-label="重放算出下一步 → 起下个 job" data-edge-key="5" data-edge-id="m-next-task">
+        <g data-edge-from="reconciler" data-edge-to="worker" data-edge-label="重放推算下一步 → 起下个 job" data-edge-key="5" data-edge-id="m-next-task">
           <path data-composition-edge-from="reconciler" data-composition-edge-to="worker" data-composition-edge-id="m-next-task" data-composition-points="832.3333333333333,410;558,410" d="M 832.3333333333333 410 L 558 410" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
         <g>
           <rect x="618.9666666666666" y="390" width="152.4" height="16" rx="3" class="c-mask"/>
-          <text x="695.1666666666666" y="400" class="t-backend" font-size="9" text-anchor="middle">重放算出下一步 → 起下个 job</text>
+          <text x="695.1666666666666" y="400" class="t-backend" font-size="9" text-anchor="middle">重放推算下一步 → 起下个 job</text>
         </g>
         </g>
 
@@ -539,14 +539,14 @@ rect.c-bg-rect { fill: var(--bg); }
           <rect x="807.3333333333333" y="482" width="64" height="16" rx="3" class="c-mask"/>
           <text x="839.3333333333333" y="492" class="t-security" font-size="9" text-anchor="middle">写退出记录</text>
         </g>
-        <text x="714.1666666666666" y="520" class="t-dim" font-size="7">（与事件分开放）</text>
+        <text x="714.1666666666666" y="520" class="t-dim" font-size="7">（独立键空间）</text>
         </g>
 
-        <g data-edge-from="events" data-edge-to="reconciler" data-edge-label="再唤醒一次：事件与退出都齐了" data-edge-key="8" data-edge-id="m-wake-again">
+        <g data-edge-from="events" data-edge-to="reconciler" data-edge-label="再唤醒一次：事件与退出齐备" data-edge-key="8" data-edge-id="m-wake-again">
           <path data-composition-edge-from="events" data-composition-edge-to="reconciler" data-composition-edge-id="m-wake-again" data-composition-points="702.1666666666666,548;832.3333333333333,548" d="M 702.1666666666666 548 L 832.3333333333333 548" class="a-dashed" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
         <g>
-          <rect x="688.45" y="528" width="157.6" height="16" rx="3" class="c-mask"/>
-          <text x="767.25" y="538" class="t-messagebus" font-size="9" text-anchor="middle">再唤醒一次：事件与退出都齐了</text>
+          <rect x="693.65" y="528" width="147.20000000000002" height="16" rx="3" class="c-mask"/>
+          <text x="767.25" y="538" class="t-messagebus" font-size="9" text-anchor="middle">再唤醒一次：事件与退出齐备</text>
         </g>
         </g>
 
@@ -564,8 +564,8 @@ rect.c-bg-rect { fill: var(--bg); }
           <text x="62" y="143" class="t-dim" font-size="9" font-weight="600">提交与冷启动</text>
         </g>
         <g data-graph-role="segment-label" data-segment-id="1">
-          <rect x="56" y="280" width="138.8" height="18" rx="3" class="c-mask"/>
-          <text x="62" y="293" class="t-dim" font-size="9" font-weight="600">事件级联：写一批、推一步</text>
+          <rect x="56" y="280" width="128.4" height="18" rx="3" class="c-mask"/>
+          <text x="62" y="293" class="t-dim" font-size="9" font-weight="600">事件级联：写入触发推进</text>
         </g>
         <g data-graph-role="segment-label" data-segment-id="2">
           <rect x="56" y="420" width="107.60000000000001" height="18" rx="3" class="c-mask"/>
@@ -599,15 +599,15 @@ rect.c-bg-rect { fill: var(--bg); }
           <text x="262.66666666666663" y="111" class="t-muted" font-size="7" text-anchor="middle">定义与状态</text>
         </g>
 
-        <g id="node-kicker" data-node-id="kicker" data-node-label="kicker λ" tabindex="0" role="button" aria-label="聚焦kicker λ，冷启动 + 被踢, 时序参与者" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="冷启动 + 被踢" data-node-context="时序参与者">
-          <title>kicker λ · 冷启动 + 被踢 · 时序参与者</title>
+        <g id="node-kicker" data-node-id="kicker" data-node-label="kicker λ" tabindex="0" role="button" aria-label="聚焦kicker λ，冷启动 + 调起, 时序参与者" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="冷启动 + 调起" data-node-context="时序参与者">
+          <title>kicker λ · 冷启动 + 调起 · 时序参与者</title>
           <rect x="350.3333333333333" y="72" width="113" height="54" rx="6" class="c-mask"/>
           <rect x="350.3333333333333" y="72" width="113" height="54" rx="6" class="c-cloud" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="cloud" class="semantic-sigil s-cloud" transform="translate(356.3333333333333 78) scale(0.6875)">
             <path d="M4.3 12.5h7.3a2.4 2.4 0 0 0 .2-4.8 4 4 0 0 0-7.5-1.3A3.1 3.1 0 0 0 4.3 12.5Z"/>
           </g>
           <text data-node-label="" x="406.8333333333333" y="94" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">kicker λ</text>
-          <text x="406.8333333333333" y="111" class="t-muted" font-size="7" text-anchor="middle">冷启动 + 被踢</text>
+          <text x="406.8333333333333" y="111" class="t-muted" font-size="7" text-anchor="middle">冷启动 + 调起</text>
         </g>
 
         <g id="node-worker" data-node-id="worker" data-node-label="worker" tabindex="0" role="button" aria-label="聚焦worker，Fargate task, 时序参与者" aria-pressed="false" data-node-kind="external" data-node-sublabel="Fargate task" data-node-context="时序参与者">
@@ -645,8 +645,8 @@ rect.c-bg-rect { fill: var(--bg); }
           <text x="839.3333333333333" y="111" class="t-muted" font-size="7" text-anchor="middle">主推进</text>
         </g>
 
-        <g id="node-xo" data-node-id="xo" data-node-label="exit-observer λ" tabindex="0" role="button" aria-label="聚焦exit-observer λ，看见任务停了, 时序参与者" aria-pressed="false" data-node-kind="security" data-node-sublabel="看见任务停了" data-node-context="时序参与者">
-          <title>exit-observer λ · 看见任务停了 · 时序参与者</title>
+        <g id="node-xo" data-node-id="xo" data-node-label="exit-observer λ" tabindex="0" role="button" aria-label="聚焦exit-observer λ，观察任务停止, 时序参与者" aria-pressed="false" data-node-kind="security" data-node-sublabel="观察任务停止" data-node-context="时序参与者">
+          <title>exit-observer λ · 观察任务停止 · 时序参与者</title>
           <rect x="927" y="72" width="113" height="54" rx="6" class="c-mask"/>
           <rect x="927" y="72" width="113" height="54" rx="6" class="c-security" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(933 78) scale(0.6875)">
@@ -654,7 +654,7 @@ rect.c-bg-rect { fill: var(--bg); }
             <path d="m5.8 8 1.5 1.5 3-3"/>
           </g>
           <text data-node-label="" x="983.5" y="94" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">exit-observer λ</text>
-          <text x="983.5" y="111" class="t-muted" font-size="7" text-anchor="middle">看见任务停了</text>
+          <text x="983.5" y="111" class="t-muted" font-size="7" text-anchor="middle">观察任务停止</text>
         </g>
 
         <!-- Legend -->
@@ -668,10 +668,10 @@ rect.c-bg-rect { fill: var(--bg); }
             <path d="M 225 703 L 259 703" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
             <text x="268" y="706" class="t-muted" font-size="10" font-weight="500">退出观察</text>
           </g>
-          <g data-legend-semantic-kind="dashed" data-legend-x="330" data-legend-baseline="706" data-legend-width="153">
+          <g data-legend-semantic-kind="dashed" data-legend-x="330" data-legend-baseline="706" data-legend-width="143">
             <path d="M 330 703 L 364 703" class="a-dashed" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
-            <text x="373" y="706" class="t-muted" font-size="10" font-weight="500">写入唤醒（被事件串起）</text>
+            <text x="373" y="706" class="t-muted" font-size="10" font-weight="500">写入唤醒（事件级联）</text>
           </g>
         </g>
       </svg>
-<!-- gherkai:source-sha256=37d53153c99da0fa6b0b62fb474f26ff1ec49549608e785d6025dbe7718e2326 -->
+<!-- gherkai:source-sha256=12225f5bc9a9a90db3f683a29812a1523f05dd112bf936b041ea26233ba0c6c9 -->

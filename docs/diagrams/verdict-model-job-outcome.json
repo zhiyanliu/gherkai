@@ -2,20 +2,20 @@
   "schema_version": 2,
   "diagram_type": "workflow",
   "meta": {
-    "title": "一个 job 怎么收场：归因的优先级",
+    "title": "job 收场态：归因的优先级",
     "locale": "zh-CN",
     "quality_profile": "showcase",
     "legend": {
       "mode": "auto",
       "entries": {
         "security": {
-          "label": "判据：答上就定案"
+          "label": "判据：命中即定案"
         },
         "backend": {
           "label": "照常归约"
         },
         "external": {
-          "label": "记下来的收场态"
+          "label": "记录的收场态"
         }
       }
     }
@@ -23,7 +23,7 @@
   "lanes": [
     {
       "id": "laneChain",
-      "label": "判据：一串有序短路，前一问答上就不再往后看"
+      "label": "判据：有序短路链，前一判据命中即定案"
     },
     {
       "id": "laneOut",
@@ -33,13 +33,13 @@
   "phases": [
     {
       "id": "phStart",
-      "label": "还没起来就定案",
+      "label": "启动前定案",
       "fromCol": 0,
       "toCol": 1
     },
     {
       "id": "phRun",
-      "label": "起来之后：先看有没有被主动停，再看事件流怎么结束",
+      "label": "启动后：先看是否主动中止，再看事件流如何结束",
       "fromCol": 2,
       "toCol": 5,
       "variant": "emphasis"
@@ -88,7 +88,7 @@
       "col": 0,
       "type": "security",
       "label": "fail-fast 中止？",
-      "sublabel": "起 worker 之前",
+      "sublabel": "worker 启动前",
       "width": 144
     },
     {
@@ -96,7 +96,7 @@
       "lane": "laneChain",
       "col": 1,
       "type": "security",
-      "label": "worker 起得来？",
+      "label": "worker 能启动？",
       "width": 144
     },
     {
@@ -105,7 +105,7 @@
       "col": 2,
       "type": "security",
       "label": "被主动中止？",
-      "sublabel": "跑事件流，逐条复查",
+      "sublabel": "事件流逐条复查",
       "width": 148
     },
     {
@@ -114,7 +114,7 @@
       "col": 3,
       "type": "security",
       "label": "网络专用退出码？",
-      "sublabel": "worker 自己报的",
+      "sublabel": "worker 上报",
       "width": 152
     },
     {
@@ -122,7 +122,7 @@
       "lane": "laneChain",
       "col": 4,
       "type": "security",
-      "label": "崩了或收尾不全？",
+      "label": "非零退出或不全？",
       "width": 152
     },
     {
@@ -131,7 +131,7 @@
       "col": 5,
       "type": "backend",
       "label": "各 scenario 归约",
-      "sublabel": "干净收尾、内容完整",
+      "sublabel": "正常退出、内容完整",
       "width": 152
     },
     {
@@ -149,7 +149,7 @@
       "col": 1,
       "type": "external",
       "label": "engine_error",
-      "sublabel": "起不来 · error",
+      "sublabel": "启动失败 · error",
       "width": 132
     },
     {
@@ -186,7 +186,7 @@
       "col": 4,
       "type": "external",
       "label": "engine_error",
-      "sublabel": "兜底 · error",
+      "sublabel": "默认 · error",
       "width": 132
     }
   ],
@@ -195,7 +195,7 @@
       "id": "q1-q2",
       "from": "q1",
       "to": "q2",
-      "label": "没有",
+      "label": "否",
       "variant": "emphasis",
       "role": "main",
       "route": "straight"
@@ -204,7 +204,7 @@
       "id": "q2-q3",
       "from": "q2",
       "to": "q3",
-      "label": "起来了",
+      "label": "已启动",
       "variant": "emphasis",
       "role": "main",
       "route": "straight"
@@ -213,7 +213,7 @@
       "id": "q3-q4",
       "from": "q3",
       "to": "q4",
-      "label": "都没有",
+      "label": "无中止",
       "variant": "emphasis",
       "role": "main",
       "route": "straight"
@@ -222,7 +222,7 @@
       "id": "q4-q5",
       "from": "q4",
       "to": "q5",
-      "label": "不是",
+      "label": "否",
       "variant": "emphasis",
       "role": "main",
       "route": "straight"
@@ -231,7 +231,7 @@
       "id": "q5-agg",
       "from": "q5",
       "to": "agg",
-      "label": "都不是",
+      "label": "均不是",
       "variant": "emphasis",
       "role": "main",
       "route": "straight"
@@ -306,20 +306,20 @@
   "cards": [
     {
       "dot": "amber",
-      "title": "顺序本身就是判据",
+      "title": "顺序即判据",
       "items": [
-        "先看它有没有起来，再看有没有被主动停下，最后才看事件流自己怎么结束",
-        "前一问一旦答上就地定案，不再往后看",
-        "两条主动停下的路径归因不同：只有 fail-fast 记 aborted，墙钟到点记 timeout"
+        "先判定是否启动，再判定是否被主动中止，最后才看事件流的结束方式",
+        "前一判据一旦命中即就地定案，不再进入后续判据",
+        "两条主动中止路径归因不同：仅 fail-fast 记 aborted，墙钟到点记 timeout"
       ]
     },
     {
       "dot": "rose",
-      "title": "一处例外，一条边界",
+      "title": "例外与边界",
       "items": [
-        "worker 崩着退出时不再复查中止与超时，即便中止已发起、墙钟已过，一律落兜底",
-        "建连失败的 job 已经开过会话、已经计费，所以不算 skipped，照常进整批聚合",
-        "skipped 与 aborted 不带归因，为什么没跑完只写在消息里"
+        "worker 以非零码异常退出时不再复查中止与超时，即便中止已发起、墙钟已过，一律记 engine_error",
+        "建连失败的 job 已建立会话并已计费，因此不记 skipped，照常进入整批聚合",
+        "skipped 与 aborted 不带归因，未产出判定的原因只写在 message 里"
       ]
     }
   ]

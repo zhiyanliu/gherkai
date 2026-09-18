@@ -9,16 +9,16 @@
       "mode": "all",
       "entries": {
         "default": {
-          "label": "继承：原样拿到"
+          "label": "继承：原样沿用"
         },
         "emphasis": {
-          "label": "由 gherkai 注入：压过继承"
+          "label": "gherkai 注入：优先于继承"
         },
         "security": {
           "label": "被覆盖：选项值改写"
         },
         "dashed": {
-          "label": "不传：要设在对面"
+          "label": "不传：由对侧设置"
         },
         "database": {
           "label": "构建进镜像的值"
@@ -32,7 +32,7 @@
   },
   "stages": [
     {
-      "label": "你设的地方"
+      "label": "设置位置"
     },
     {
       "label": "本机 CLI 进程"
@@ -60,7 +60,7 @@
       "id": "sh",
       "type": "external",
       "label": "跑命令的 shell",
-      "sublabel": "export 设的值",
+      "sublabel": "由 export 设置",
       "stage": 0,
       "row": 0
     },
@@ -199,30 +199,30 @@
   "cards": [
     {
       "dot": "emerald",
-      "title": "箭头怎么读",
+      "title": "箭头语义",
       "items": [
-        "继承 = 原样拿到上一级的值",
-        "注入 = 由起这个进程的那一方写入，压过继承来的值，也压过镜像里的同名项",
-        "被覆盖 = 起子进程时用解析后的选项值改写同名变量",
-        "不传 = 值到不了对面，要生效就设在对面"
+        "继承 = 原样沿用上一级的值",
+        "注入 = 由启动该进程的一方写入，优先于继承的值，也优先于镜像里的同名项",
+        "被覆盖 = 启动子进程时以解析后的选项值改写同名变量",
+        "不传 = 值不跨这条边界传递，需在对侧设置"
       ]
     },
     {
       "dot": "cyan",
-      "title": "设在哪才生效",
+      "title": "生效位置",
       "items": [
-        "本机跑：在跑命令的 shell 里 export",
-        "云端跑：写进 worker 镜像 variant，再推上去",
-        "选项与环境变量都给了：选项优先"
+        "本机后端：在跑命令的 shell 里 export",
+        "云端后端：写进 worker 镜像 variant 后推送",
+        "选项与环境变量同时给出：选项优先"
       ]
     },
     {
       "dot": "amber",
-      "title": "谁起云端任务",
+      "title": "云端任务的启动方",
       "items": [
-        "run --backend cloud：由本机 CLI 起，region 等信息由它注入",
-        "submit --backend cloud：由云端后端起",
-        "部署命令本身也是本机 CLI 进程，只是通常在另一台机器上跑"
+        "run --backend cloud：由本机 CLI 启动，region 等信息由本机 CLI 注入",
+        "submit --backend cloud：由云端后端启动",
+        "部署命令本身也是本机 CLI 进程，通常在另一台机器上执行"
       ]
     }
   ]

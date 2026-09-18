@@ -2,7 +2,7 @@
   "schema_version": 1,
   "diagram_type": "sequence",
   "meta": {
-    "title": "云端后台跑批：事件级联怎么把一个 run 推到收敛",
+    "title": "云端后台跑批：事件级联把一个 run 推到收敛",
     "locale": "zh-CN",
     "quality_profile": "showcase",
     "column_fit": "spread",
@@ -11,7 +11,7 @@
       "mode": "auto",
       "entries": {
         "emphasis": { "label": "落库 / 起 task（主动作）" },
-        "dashed": { "label": "写入唤醒（被事件串起）" },
+        "dashed": { "label": "写入唤醒（事件级联）" },
         "security": { "label": "退出观察" },
         "default": { "label": "其它调用" }
       }
@@ -20,27 +20,27 @@
   "participants": [
     { "id": "cli", "type": "frontend", "label": "submit（CLI）", "sublabel": "提交即返回" },
     { "id": "runs", "type": "database", "label": "runs 表", "sublabel": "定义与状态" },
-    { "id": "kicker", "type": "cloud", "label": "kicker λ", "sublabel": "冷启动 + 被踢" },
+    { "id": "kicker", "type": "cloud", "label": "kicker λ", "sublabel": "冷启动 + 调起" },
     { "id": "worker", "type": "external", "label": "worker", "sublabel": "Fargate task" },
     { "id": "events", "type": "database", "label": "events 表", "sublabel": "事件 + 退出记录" },
     { "id": "reconciler", "type": "cloud", "label": "reconciler λ", "sublabel": "主推进" },
-    { "id": "xo", "type": "security", "label": "exit-observer λ", "sublabel": "看见任务停了" }
+    { "id": "xo", "type": "security", "label": "exit-observer λ", "sublabel": "观察任务停止" }
   ],
   "segments": [
     { "from": 152, "to": 296, "label": "提交与冷启动" },
-    { "from": 302, "to": 436, "label": "事件级联：写一批、推一步" },
+    { "from": 302, "to": 436, "label": "事件级联：写入触发推进" },
     { "from": 442, "to": 620, "label": "退出观察与收敛提交" }
   ],
   "messages": [
-    { "id": "m-submit", "from": "cli", "to": "runs", "y": 180, "label": "落定义 + 状态", "variant": "emphasis", "note": "（带后台标记）返回 run_id 后就能关机；只有用隧道测本机应用时本机要一直在线" },
-    { "id": "m-wake-kicker", "from": "runs", "to": "kicker", "y": 226, "label": "写入唤醒", "variant": "dashed", "note": "（只收带标记的新 run）" },
-    { "id": "m-first-task", "from": "kicker", "to": "worker", "y": 272, "label": "抢到 job 才起 task", "variant": "emphasis", "note": "每次起 task 都给这个 job 定一次超时闹钟" },
+    { "id": "m-submit", "from": "cli", "to": "runs", "y": 180, "label": "落定义 + 状态", "variant": "emphasis", "note": "（带后台标记）返回 run_id 后即可关机；仅隧道模式下本机须保持开机联网" },
+    { "id": "m-wake-kicker", "from": "runs", "to": "kicker", "y": 226, "label": "写入唤醒", "variant": "dashed", "note": "（仅认领带标记的新 run）" },
+    { "id": "m-first-task", "from": "kicker", "to": "worker", "y": 272, "label": "条件写成功后起 task", "variant": "emphasis", "note": "每次起 task 为该 job 设一次超时闹钟" },
     { "id": "m-events", "from": "worker", "to": "events", "y": 318, "label": "逐条写事件", "variant": "dashed", "note": "（序号递增）" },
-    { "id": "m-wake-rec", "from": "events", "to": "reconciler", "y": 364, "label": "每批写入都唤醒一次", "variant": "dashed" },
-    { "id": "m-next-task", "from": "reconciler", "to": "worker", "y": 410, "label": "重放算出下一步 → 起下个 job", "variant": "emphasis" },
+    { "id": "m-wake-rec", "from": "events", "to": "reconciler", "y": 364, "label": "每批写入唤醒一次", "variant": "dashed" },
+    { "id": "m-next-task", "from": "reconciler", "to": "worker", "y": 410, "label": "重放推算下一步 → 起下个 job", "variant": "emphasis" },
     { "id": "m-stopped", "from": "worker", "to": "xo", "y": 456, "label": "任务停止", "variant": "security", "note": "（平台事件，带退出码）" },
-    { "id": "m-exit-item", "from": "xo", "to": "events", "y": 502, "label": "写退出记录", "variant": "security", "note": "（与事件分开放）" },
-    { "id": "m-wake-again", "from": "events", "to": "reconciler", "y": 548, "label": "再唤醒一次：事件与退出都齐了", "variant": "dashed" },
+    { "id": "m-exit-item", "from": "xo", "to": "events", "y": 502, "label": "写退出记录", "variant": "security", "note": "（独立键空间）" },
+    { "id": "m-wake-again", "from": "events", "to": "reconciler", "y": 548, "label": "再唤醒一次：事件与退出齐备", "variant": "dashed" },
     { "id": "m-finalize", "from": "reconciler", "to": "runs", "y": 594, "label": "全部 job 终态 → 一次落定终态", "variant": "emphasis" }
   ],
   "activations": [
@@ -53,8 +53,8 @@
     { "participant": "runs", "from": 586, "to": 620, "type": "database" }
   ],
   "cards": [
-    { "dot": "cyan", "title": "链条是被事件串起来的", "items": ["云端函数各订阅自己的事件源，彼此之间不互相调用", "事件既是数据也是心跳：写一批就唤醒一次推进，没有常驻轮询", "主动调起只来自云外：查进度时发现卡住踢一脚、超时闹钟到点踢一脚"] },
-    { "dot": "violet", "title": "多处同时被唤醒也安全", "items": ["抢 job 走条件写：同一个 job 只有一个赢家", "读模型只前进不后退，run 终态一次落定", "重复唤醒无害：每次都是从头重放事件算出该干什么"] },
-    { "dot": "orange", "title": "冷启动那处不是薄壳", "items": ["与主推进同一份代码、同一套权限，跑的是完整的一步推进", "它有三个入口：新 run 落库、查进度发现卡住、超时闹钟到点"] }
+    { "dot": "cyan", "title": "链条由事件串接", "items": ["云端函数各订阅自身事件源，彼此不互相调用", "事件既是数据也是心跳：每批写入唤醒一次推进，无常驻轮询", "主动调起只来自云外：查询进度发现停滞时调起、超时闹钟到点调起"] },
+    { "dot": "violet", "title": "多宿主并发唤醒安全", "items": ["job 抢占走条件写：只有一个写入方成功", "读模型只前进不后退，run 终态一次落定", "重复唤醒无害：每次均从头重放事件推算动作"] },
+    { "dot": "orange", "title": "冷启动器非精简实现", "items": ["与主推进同一份代码、同一套权限，执行完整的一步推进", "三个入口：新 run 落库、查询进度发现停滞、超时闹钟到点"] }
   ]
 }
