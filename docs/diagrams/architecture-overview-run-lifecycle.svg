@@ -463,7 +463,7 @@ rect.c-bg-rect { fill: var(--bg); }
         <!-- Edge paths -->
         <path data-edge-from="begin" data-edge-to="drive" data-edge-label="运行态已落" data-edge-key="0" data-edge-id="e-begin-drive" data-composition-points="576.8,119;642.8,119" d="M 576.8 119 L 642.8 119" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
         <path data-edge-from="drive" data-edge-to="reduce" data-edge-label="job 都收场" data-edge-key="1" data-edge-id="e-drive-reduce" data-composition-points="790.8,119;886.8,119" d="M 790.8 119 L 886.8 119" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        <path data-edge-from="drive" data-edge-to="worker" data-edge-label="派发一个 job" data-edge-key="2" data-edge-id="e-drive-worker" data-composition-points="716.8,145;716.8,166;632.8,166;632.8,243;640.8,243" d="M 716.8 145 L 716.8 166 L 632.8 166 L 632.8 243 L 640.8 243" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="drive" data-edge-to="worker" data-edge-label="派发 job" data-edge-key="2" data-edge-id="e-drive-worker" data-composition-points="716.8,145;716.8,217" d="M 716.8 145 L 716.8 217" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
         <path data-edge-from="events" data-edge-to="drive" data-edge-label="回传核心：再推一步" data-edge-key="3" data-edge-id="e-events-drive" data-composition-points="1194.8,367;1223,367;1223,77;716.8,77;716.8,93" d="M 1194.8 367 L 1223 367 L 1223 77 L 716.8 77 L 716.8 93" class="a-dashed" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
         <path data-edge-from="exit" data-edge-to="drive" data-edge-label="回传核心：可以收场" data-edge-key="4" data-edge-id="e-exit-drive" data-composition-points="880.8,367;614.8,367;614.8,119;642.8,119" d="M 880.8 367 L 614.8 367 L 614.8 119 L 642.8 119" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
         <path data-edge-from="parse" data-edge-to="scope" data-edge-label="领域模型" data-edge-key="5" data-edge-id="e-parse-scope" data-composition-points="184,119;240.39999999999998,119" d="M 184 119 L 240.39999999999998 119" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
@@ -603,9 +603,9 @@ rect.c-bg-rect { fill: var(--bg); }
           <rect x="809.8" y="99" width="58" height="14" rx="3" class="c-mask"/>
           <text x="838.8" y="109" class="t-backend" font-size="8" text-anchor="middle">job 都收场</text>
         </g>
-        <g data-edge-from="drive" data-edge-to="worker" data-edge-label="派发一个 job" data-edge-key="2" data-edge-id="e-drive-worker">
-          <rect x="641" y="146" width="67.6" height="14" rx="3" class="c-mask"/>
-          <text x="674.8" y="156" class="t-muted" font-size="8" text-anchor="middle">派发一个 job</text>
+        <g data-edge-from="drive" data-edge-to="worker" data-edge-label="派发 job" data-edge-key="2" data-edge-id="e-drive-worker">
+          <rect x="744.5999999999999" y="165" width="48.4" height="14" rx="3" class="c-mask"/>
+          <text x="768.8" y="175" class="t-muted" font-size="8" text-anchor="middle">派发 job</text>
         </g>
         <g data-edge-from="events" data-edge-to="drive" data-edge-label="回传核心：再推一步" data-edge-key="3" data-edge-id="e-events-drive">
           <rect x="921.6999999999999" y="57" width="96.39999999999999" height="14" rx="3" class="c-mask"/>
@@ -666,4 +666,4 @@ rect.c-bg-rect { fill: var(--bg); }
           </g>
         </g>
       </svg>
-<!-- gherkai:source-sha256=9c424c6750e2cd448a96d80dd6def4f2e9a6d6de0632ac487a731f807484f347 -->
+<!-- gherkai:source-sha256=b73e1e5414245bca23f7a84464bd20076004e64a1be1e21fe001ffb4fb22b23a -->

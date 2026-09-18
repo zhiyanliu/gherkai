@@ -1500,8 +1500,8 @@
     "semantic_hash": ""
   },
   "docs/diagrams/architecture-overview-run-lifecycle.svg": {
-    "mtime": 1789717106.884964,
-    "ast_hash": "a3238e03eae7c64c7429b562d9f67b71",
+    "mtime": 1789717822.6513586,
+    "ast_hash": "ccffc89f9ee8be9c4e22931cb3c5053d",
     "semantic_hash": ""
   },
   "docs/diagrams/artifacts-evidence-chain.svg": {
@@ -1600,8 +1600,8 @@
     "semantic_hash": ""
   },
   "docs/diagrams/artifacts-evidence-chain.json": {
-    "mtime": 1789702177.7026887,
-    "ast_hash": "",
+    "mtime": 1789711554.3256469,
+    "ast_hash": "341e4a287c44987c74a8df0e7b5c2734",
     "semantic_hash": ""
   },
   "docs/diagrams/cloud-backend-carriers-revision-pinning.json": {
@@ -1620,28 +1620,28 @@
     "semantic_hash": ""
   },
   "docs/diagrams/configuration-env-inheritance.json": {
-    "mtime": 1789706588.4753742,
-    "ast_hash": "",
+    "mtime": 1789717105.6320052,
+    "ast_hash": "fa1a60be31da3717afe2f93e78dfb5be",
     "semantic_hash": ""
   },
   "docs/diagrams/deterministic-steps-registry-overview.json": {
-    "mtime": 1789707622.9592962,
-    "ast_hash": "",
+    "mtime": 1789710974.5662122,
+    "ast_hash": "2603504a90d9893fdf33609625f05ac2",
     "semantic_hash": ""
   },
   "docs/diagrams/deterministic-steps-truth-sources.json": {
-    "mtime": 1789706522.9605381,
-    "ast_hash": "",
+    "mtime": 1789717159.9098015,
+    "ast_hash": "30c02b7532ed9f60907e09bdcb51d70a",
     "semantic_hash": ""
   },
   "docs/diagrams/execution-cloud-cascade.json": {
-    "mtime": 1789706500.303472,
-    "ast_hash": "",
+    "mtime": 1789709081.883792,
+    "ast_hash": "c2a01e932e17453189b47a6f07d9a13f",
     "semantic_hash": ""
   },
   "docs/diagrams/execution-detached-gates.json": {
-    "mtime": 1789706584.177425,
-    "ast_hash": "",
+    "mtime": 1789708671.1786706,
+    "ast_hash": "0964eab7548f364f4c89eec5d4a8b467",
     "semantic_hash": ""
   },
   "docs/diagrams/execution-timeout-chain.json": {
@@ -1650,8 +1650,8 @@
     "semantic_hash": ""
   },
   "docs/diagrams/getting-started-component-ownership.json": {
-    "mtime": 1789706334.0179317,
-    "ast_hash": "",
+    "mtime": 1789707909.7645228,
+    "ast_hash": "c7c41089ff6340a5dc92af2f3b1ceb29",
     "semantic_hash": ""
   },
   "docs/diagrams/local-app-testing-tunnel-topology.json": {
@@ -1661,22 +1661,22 @@
   },
   "docs/diagrams/readme-runtime-topology.json": {
     "mtime": 1789706174.1587691,
-    "ast_hash": "",
+    "ast_hash": "902b642039d333c7390111ad47744426",
     "semantic_hash": ""
   },
   "docs/diagrams/run-execution.json": {
-    "mtime": 1789706316.3585925,
-    "ast_hash": "",
+    "mtime": 1789710038.3173666,
+    "ast_hash": "26d0e75ae1c7954af0df9b8146f84be3",
     "semantic_hash": ""
   },
   "docs/diagrams/verdict-model-job-outcome.json": {
     "mtime": 1789706321.21219,
-    "ast_hash": "",
+    "ast_hash": "23b37d580b96165f748071c8dcb9db3c",
     "semantic_hash": ""
   },
   "docs/diagrams/verdict-model-reduction-layers.json": {
-    "mtime": 1789706120.3980973,
-    "ast_hash": "",
+    "mtime": 1789707963.7965865,
+    "ast_hash": "e2a6beb5c71da86ac1e6c7f823576017",
     "semantic_hash": ""
   },
   "docs/diagrams/writing-features-scenario-to-job.json": {
@@ -1700,8 +1700,8 @@
     "semantic_hash": ""
   },
   "docs/ai-eng/diagram-authoring.md": {
-    "mtime": 1789717159.9102652,
-    "ast_hash": "96f1a87709b357c3159fbb03a10abd7a",
+    "mtime": 1789717866.0461116,
+    "ast_hash": "e0135e62fe5ec8262bd3a1e3b9e0ae67",
     "semantic_hash": ""
   }
 }

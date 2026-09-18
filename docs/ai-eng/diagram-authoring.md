@@ -49,6 +49,7 @@
 - **改一条边的副作用**：把某条边改成 `straight` 或改侧后，自动路由会重算其它边，可能把别的边绕进已放置的标签而使 `straight` 被否（route-preset-conflict）——用 `toSide` / `fromSide` 把受影响的边钉回原侧。
 - **画布贴内容**：dataflow 横向几何固定（列距 215、容器宽 168），右侧留白由 `meta.viewBox[0]` 决定，最小宽度 = 图例单行宽度 + 80（图例换行会撞 legend/vertical-overflow）；收窄会改变长宽比，只对发布到 Pages 的交互版有 viewport-overflow 影响，静态 SVG 无碍。workflow v2 的画布由编译器算出，无 `meta.viewBox` 可调。
 - **图上文字同守口吻**：节点与图例里的字读者直接看到，隐喻（「烙进」）、口头语一律不用，护栏 `test_user_docs.py` 对图源扫禁词与口头语表。
+- **相对的两个节点之间走直线（workflow v2）**：`straight` 要求两节点之间的净空 ≥ max(28, 标签遮罩宽 + 8)——标签是横在两点之间的，`labelDx` / `labelDy` 挪不掉这条判定；净空不够时缩短标签文字（如「派发一个 job」→「派发 job」）或拉开两节点（`yOffset` 会与别的边的显式 via 起 explicit-pin-conflict，先看哪条边钉了绝对坐标）。`validate --layout-json` 只在校验失败时给 diagnostics、不给几何，拿几何要先让它过校验。
 - **校验常见告警与含义**：`short-interior-segment`（< 16 单位的中间段，多由端口错位造成，调 row / yOffset 对齐）；`label-route-clearance`（标签离线 < 4 单位）；`unrelated collinear overlap`（共线重叠 > 8 单位）；`routesOverSuggestedBends`（拐点 > 2）；`desktop-readability`（画布太宽导致最小文字投影 < 6px）。
 
 ## 五、返回与记录
