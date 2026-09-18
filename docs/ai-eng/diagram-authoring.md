@@ -52,6 +52,7 @@
 - **相对的两个节点之间走直线（workflow v2）**：`straight` 要求两节点之间的净空 ≥ max(28, 标签遮罩宽 + 8)——标签是横在两点之间的，`labelDx` / `labelDy` 挪不掉这条判定；净空不够时缩短标签文字（如「派发一个 job」→「派发 job」）或拉开两节点（`yOffset` 会与别的边的显式 via 起 explicit-pin-conflict，先看哪条边钉了绝对坐标）。`validate --layout-json` 只在校验失败时给 diagnostics、不给几何，拿几何要先让它过校验。
 - **回传边（workflow v2）**：优先用预设 `route: "return-left"`；把目标节点对齐到同一列后预设会因端口被占而失效，此时改为 `fromSide` / `toSide` + `channelX` 钉一条走廊（走廊离任何节点边缘 ≥ 28 单位，否则报 route-preset-conflict）并用 `labelSegment` / `labelDx` 把标签放到竖段旁；`layout/constraint` 的 message 里带具体的 labelDy / labelAt 建议值，直接照抄。**别把回传边留给全自动路由**：它会为躲开走廊绕整张画布的外沿。
 - **改标签文字也会动布局（workflow v2）**：列间距是全图统一值、取自最宽的跨列边标签——缩短那条标签会让列距变窄，连带把别的直线边压到 28 单位下限而报错；改字时保持跨列边标签的宽度不变（等宽替换），或改后重新校验全图。lane 标题带是障碍：从最左列节点底边竖直下落会撞下一 lane 的标题文字（explicit-pin-conflict：lane/phase/group label clearance），自动路由的「先右再下」正是为此绕行。
+- **同一侧要两个不同端口时只钉侧、不钉点**：`fromSide` / `toSide` 不会关掉自动端口分散，`via` / `channelX` / `channelY` / `labelAt` / 非 auto 的 `route` 才会。两条边共用一个节点的同一侧（一进一出也算），把两条都写成「只钉侧」的自动边，路由器会把端口错开 14 单位、各走各的竖线；一旦其中一条带 via，它就退回侧中点、与另一条共线。标签用 `labelSegment` / `labelDx` 收拾，不要为摆标签加 via。
 - **校验常见告警与含义**：`short-interior-segment`（< 16 单位的中间段，多由端口错位造成，调 row / yOffset 对齐）；`label-route-clearance`（标签离线 < 4 单位）；`unrelated collinear overlap`（共线重叠 > 8 单位）；`routesOverSuggestedBends`（拐点 > 2）；`desktop-readability`（画布太宽导致最小文字投影 < 6px）。
 
 ## 五、返回与记录

@@ -1485,8 +1485,8 @@
     "semantic_hash": ""
   },
   "docs/diagrams/run-execution.html": {
-    "mtime": 1789723935.818091,
-    "ast_hash": "8b9e60dc1771c3b2caa748c96f19e057",
+    "mtime": 1789724145.447624,
+    "ast_hash": "2b56330526022ea8111a79b11fdd4cc5",
     "semantic_hash": ""
   },
   "docs/user-guide/faq.md": {
@@ -1570,8 +1570,8 @@
     "semantic_hash": ""
   },
   "docs/diagrams/run-execution.svg": {
-    "mtime": 1789723893.953437,
-    "ast_hash": "9ca71bee275b96c524ffb620f26a9735",
+    "mtime": 1789724145.5839024,
+    "ast_hash": "6d52adb074ef144eb2e865246e77f539",
     "semantic_hash": ""
   },
   "docs/diagrams/verdict-model-job-outcome.svg": {
@@ -1666,7 +1666,7 @@
   },
   "docs/diagrams/run-execution.json": {
     "mtime": 1789723893.952955,
-    "ast_hash": "1bc745deecb793707eb3d8ed877ba169",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "docs/diagrams/verdict-model-job-outcome.json": {
@@ -1700,8 +1700,8 @@
     "semantic_hash": ""
   },
   "docs/ai-eng/diagram-authoring.md": {
-    "mtime": 1789722826.5689526,
-    "ast_hash": "172b4ae7bb03ace41bba32ea72492855",
+    "mtime": 1789724196.4781477,
+    "ast_hash": "5b100740298af677006687bd26590fc0",
     "semantic_hash": ""
   }
 }
