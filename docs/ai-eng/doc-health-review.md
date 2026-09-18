@@ -72,7 +72,7 @@ ADR/CONTEXT 是随构建**逐步长起来**的：每次在前人文档上叠加�
 - **技术笔记/配方 + 工具手册**（如 `engines/midscene/spikes/SIGV4-FETCH-RECIPE.md`、`tools/e2e_harness.md`）——与代码同居、AI 照它接线/照它操作，**极易 STALE**（含可运行代码片段 + 命令 + 前置条件 + 踩坑点 + 源码路径）。
 - 未来新增的 docs/ 与子工程根下文档同样纳入（本任务名"文档健康度"、不焊死在某几类上——每次 `find . -name "*.md"` 扫一遍、别漏新文件，排除项见下「明确排除」（唯一权威清单））。
 
-**明确排除**：`.claude/` 除 `commands/` 外的部分与 `.agents/`（`.claude/skills/`、settings 等个人工具配置，不入库；随 wheel 发行的 `cli/gherkai_cli/skills/` 与入口 `.claude/commands/` 都在范围内，见上覆盖范围）；`node_modules/`、`.venv/`、`.pytest_cache/`（依赖/缓存）；**`graphify-out/`**（graph.json / GRAPH_REPORT.md / wiki/ 全是 graphify 生成物，刷新走 DEVELOPMENT.md「知识图刷新」，不当文档审）；**repo 内 code 注释/docstring 的引用方向违规归姊妹任务 [`code-health-review.md`](./code-health-review.md)**（本任务只管 `.md`，分工线两侧一致）。
+**明确排除**：`.claude/` 除 `commands/` 外的部分与 `.agents/`（`.claude/skills/`、settings 等个人工具配置，不入库；随 wheel 发行的 `cli/gherkai_cli/skills/` 与入口 `.claude/commands/` 都在范围内，见上覆盖范围）；`node_modules/`、`.venv/`、`.pytest_cache/`（依赖/缓存）；**`graphify-out/`**（graph.json / GRAPH_REPORT.md / wiki/ 全是 graphify 生成物，刷新走 CONTRIBUTING.md「知识图刷新」，不当文档审）；**repo 内 code 注释/docstring 的引用方向违规归姊妹任务 [`code-health-review.md`](./code-health-review.md)**（本任务只管 `.md`，分工线两侧一致）。
 
 ### 第一层：片内审计（可用 workflow 并行）
 

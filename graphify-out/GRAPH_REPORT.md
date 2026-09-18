@@ -1,7 +1,7 @@
 # Graph Report - yaozhou  (2026-09-18)
 
 ## Corpus Check
-- 316 files · ~524,474 words
+- 316 files · ~524,495 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -10,7 +10,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `165e0c56`
+- Built from commit: `268ede9a`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -1067,7 +1067,7 @@ Nodes (12): 1. 心智模型：两种驱动、同一份 `core`, 2. 四组合一�
 
 ### Community 183 - "开发者指南（contributor 入口）"
 Cohesion: 0.18
-Nodes (11): Spike（可独立跑的技术验证脚本）, 发布与版本, 在有凭证的机器上验未发布的工作树, 如何参与, 开发环境（从 checkout 跑）, 开发者指南（contributor 入口）, 文档去哪读, 测试 (+3 more)
+Nodes (11): Spike（可独立运行的技术验证脚本）, 发布与版本, 在有凭证的机器上验证未发布的工作树, 如何参与, 开发环境（从 checkout 跑）, 开发者指南（contributor 入口）, 文档去哪读, 测试 (+3 more)
 
 ### Community 185 - "代码健康度复盘（全部生产代码）— 任务说明"
 Cohesion: 0.18
@@ -1216,7 +1216,7 @@ Nodes (5): ArtifactUploader 组件（from_env / to_report_ref / flush）, snapsh
   docs/adr/0001-scope-limited-to-english-ui.md · relation: references
 
 ## Knowledge Gaps
-- **562 isolated node(s):** `一、流程（每张图）`, `二、本项目的图长什么样（内容规则）`, `三、布局清单（PNG 自检项，也是评审验收项）`, `四、技法（archify 里怎么达成）`, `五、返回与记录` (+557 more)
+- **562 isolated node(s):** `如何参与`, `现状与版本线`, `目录结构`, `开发环境（从 checkout 跑）`, `在有凭证的机器上验证未发布的工作树` (+557 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **97 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
@@ -1228,11 +1228,11 @@ _Questions this graph is uniquely positioned to answer:_
 - **What is the exact relationship between `ADR 0001 范围限定英文 UI` and `gherkai agent SKILL.md`?**
   _Edge tagged AMBIGUOUS (relation: references) - confidence is low._
 - **Why does `gherkai-worker-novaact (README)` connect `@gherkai/worker-midscene (README)` to `Midscene Worker 开发笔记`, `deterministic.py`, `test_user_steps.py`?**
-  _High betweenness centrality (0.172) - this node is a cross-community bridge._
-- **Why does `Nova Act Worker 开发笔记` connect `Midscene Worker 开发笔记` to `runtime 包 contributor 文档`, `CONTRIBUTING.md`, `@gherkai/worker-midscene (README)`?**
   _High betweenness centrality (0.170) - this node is a cross-community bridge._
-- **Why does `deterministic()` connect `deterministic.py` to `ValueError`, `_run_step`?**
-  _High betweenness centrality (0.164) - this node is a cross-community bridge._
+- **Why does `Nova Act Worker 开发笔记` connect `Midscene Worker 开发笔记` to `runtime 包 contributor 文档`, `CONTRIBUTING.md`, `@gherkai/worker-midscene (README)`?**
+  _High betweenness centrality (0.168) - this node is a cross-community bridge._
+- **Why does `_fixture()` connect `_fixture` to `test_conditional_writes.py`, `test_workers.py`, `test_lambda_asset.py`, `evidence.py`, `test_evidence.py`, `test_cloud_integration.py`, `_Recorder`, `deterministic.py`, `_FakeSink`, `_RecUploader`, `test_interrupt_model.py`?**
+  _High betweenness centrality (0.140) - this node is a cross-community bridge._
 - **Are the 56 inferred relationships involving `Job` (e.g. with `_explain_job()` and `test_explain_to_dict_drops_unmatched_scopes_and_keeps_job_fact()`) actually correct?**
   _`Job` has 56 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 40 inferred relationships involving `RunState` (e.g. with `_cmd_submit()` and `_explain_run()`) actually correct?**
