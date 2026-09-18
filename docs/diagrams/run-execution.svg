@@ -471,7 +471,7 @@ rect.c-bg-rect { fill: var(--bg); }
         <path data-edge-from="workerCloud" data-edge-to="exitWatch" data-edge-label="云端：平台记录" data-edge-key="1" data-edge-id="e-cloud-exit" data-composition-points="614.4,465;614.4,243;738.8,243" d="M 614.4 465 L 614.4 243 L 738.8 243" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
         <path data-edge-from="workerCloud" data-edge-to="tableCloud" data-edge-label="逐条事件" data-edge-key="2" data-edge-id="e-cloud-table" data-composition-points="682.4,491;738.8,491" d="M 682.4 491 L 738.8 491" class="a-dashed" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
         <path data-edge-from="cloudFn" data-edge-to="stepOnce" data-edge-label="每批事件推一步" data-edge-key="3" data-edge-id="e-cloudfn-step" data-composition-points="188,491;303,491;303,393" d="M 188 491 L 303 491 L 303 393" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
-        <path data-edge-from="dispatch" data-edge-to="workerCloud" data-edge-label="云端：起云上任务" data-edge-key="4" data-edge-id="e-dispatch-cloud" data-composition-points="494.4,269;494.4,352;530.4,352;530.4,491;546.4,491" d="M 494.4 269 L 494.4 352 L 530.4 352 L 530.4 491 L 546.4 491" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="dispatch" data-edge-to="workerCloud" data-edge-label="云端：起云上任务" data-edge-key="4" data-edge-id="e-dispatch-cloud" data-composition-points="494.4,269;494.4,491;546.4,491" d="M 494.4 269 L 494.4 491 L 546.4 491" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
         <path data-edge-from="dispatch" data-edge-to="workerLocal" data-edge-label="本机：起子进程" data-edge-key="5" data-edge-id="e-dispatch-local" data-composition-points="494.4,217;494.4,119;546.4,119" d="M 494.4 217 L 494.4 119 L 546.4 119" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
         <path data-edge-from="exitWatch" data-edge-to="settle" data-edge-label="有退出记录才收敛" data-edge-key="6" data-edge-id="e-exit-settle" data-composition-points="878.8,243;973.5999999999999,243" d="M 878.8 243 L 973.5999999999999 243" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
         <path data-edge-from="foreLoop" data-edge-to="dispatch" data-edge-label="在线派发" data-edge-key="7" data-edge-id="e-fore-dispatch" data-composition-points="366,243;422.4,243" d="M 366 243 L 422.4 243" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
@@ -673,8 +673,8 @@ rect.c-bg-rect { fill: var(--bg); }
           <text x="245.5" y="481" class="t-muted" font-size="8" text-anchor="middle">每批事件推一步</text>
         </g>
         <g data-edge-from="dispatch" data-edge-to="workerCloud" data-edge-label="云端：起云上任务" data-edge-key="4" data-edge-id="e-dispatch-cloud">
-          <rect x="469" y="332" width="86.8" height="14" rx="3" class="c-mask"/>
-          <text x="512.4" y="342" class="t-muted" font-size="8" text-anchor="middle">云端：起云上任务</text>
+          <rect x="509" y="360" width="86.8" height="14" rx="3" class="c-mask"/>
+          <text x="552.4" y="370" class="t-muted" font-size="8" text-anchor="middle">云端：起云上任务</text>
         </g>
         <g data-edge-from="dispatch" data-edge-to="workerLocal" data-edge-label="本机：起子进程" data-edge-key="5" data-edge-id="e-dispatch-local">
           <rect x="403.79999999999995" y="148" width="77.2" height="14" rx="3" class="c-mask"/>
@@ -766,4 +766,4 @@ rect.c-bg-rect { fill: var(--bg); }
           </g>
         </g>
       </svg>
-<!-- gherkai:source-sha256=42dd63d255f48a78298f32dbc25577f80dda9bdf5f3559027b43fca1db568581 -->
+<!-- gherkai:source-sha256=e46c1b4e5b7f6bc6f922c251e5de1f6429589ddf580cd4f454876c9ecba559ca -->

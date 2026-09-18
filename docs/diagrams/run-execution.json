@@ -335,7 +335,19 @@
       "to": "dispatch",
       "label": "抢占后派发",
       "variant": "default",
-      "role": "branch"
+      "role": "branch",
+      "fromSide": "top",
+      "toSide": "bottom",
+      "via": [
+        [
+          296,
+          290
+        ],
+        [
+          494.4,
+          290
+        ]
+      ]
     },
     {
       "id": "e-dispatch-local",
@@ -362,7 +374,16 @@
       "label": "云端：起云上任务",
       "variant": "default",
       "role": "branch",
-      "toSide": "left"
+      "toSide": "left",
+      "fromSide": "bottom",
+      "via": [
+        [
+          494.4,
+          491
+        ]
+      ],
+      "labelSegment": 0,
+      "labelDx": 58
     },
     {
       "id": "e-local-pipe",
