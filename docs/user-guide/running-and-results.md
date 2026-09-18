@@ -96,7 +96,7 @@ gherkai explain "$RUN_ID"                                  # 有用例没过时�
 | `--no-report` | 关 | 仅 `run`：报告目录下什么都不落，也不收集引擎自己的报告产物。适合 CI 只看退出码或 JSON |
 | `--quiet` | 关 | 仅 `run`：不输出逐事件进度，仍输出文本汇总。本机跑时 worker 日志改落 `<report-dir>/<run_id>/worker.log`（`--no-report` 时落系统临时目录），只打印一行位置；云端后端下没有本机 worker 日志 |
 | `--json` | 关 | 仅 `run`：只输出机器可读 JSON，不输出进度与文本汇总 |
-| `--steps-dir DIR` | `./steps` | 项目自己的确定性 step 目录，也可用环境变量 `GHERKAI_STEPS_DIR`。目录里任一文件加载失败即整批拒跑。云端后端下不生效（云端 worker 的 step 烙在镜像里，只警告不拦），写法见 [`writing-deterministic-steps.md`](./writing-deterministic-steps.md) |
+| `--steps-dir DIR` | `./steps` | 项目自己的确定性 step 目录，也可用环境变量 `GHERKAI_STEPS_DIR`。目录里任一文件加载失败即整批拒跑。云端后端下不生效（云端 worker 的 step 构建在镜像里，只警告不拦），写法见 [`writing-deterministic-steps.md`](./writing-deterministic-steps.md) |
 | `--expose-local ORIGIN` | — | 把本机可达的被测应用经隧道暴露给云端浏览器，配套的 `--tunnel`（两条命令都有）与 `--tunnel-ttl`（只有 `submit` 有）见 [`local-app-testing.md`](./local-app-testing.md) |
 
 **仅 `--backend cloud`**：`--prefix P`（默认 `gherkai-`，兜底环境变量 `AWS_RESOURCE_PREFIX`）须与部署时一致，统一决定表、桶、集群等资源名；`--worker-variant NAME` 选云端 worker 镜像的 variant，不给则用部署时的默认指针，某个引擎缺这个 variant 直接退 `2`、不回落到默认，见 [`cloud-backend.md`](./cloud-backend.md)。不给 `--subnet` / `--security-group` 时，Fargate 的子网与安全组按部署时写入的参数自动取用，一般不用给。单独覆盖某个资源名的选项见 [`configuration.md`](./configuration.md)。

@@ -85,7 +85,7 @@ region 的完整解析链是 `--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > 
 - `NOVA_ACT_TIMEOUT_S` 由起 worker 的那一侧读取后注给 worker：`run`（两档后端都算）与 `submit --backend local` 用发起命令的 shell 里的值；`submit --backend local` 提交的 run 之后由 `gherkai status --wait` 接着推完时，用运行 `status` 的那个 shell 里的值；`submit --backend cloud` 的任务由云端起，固定用 120 秒。
 - `NOVA_ACT_TIMEOUT_S` 与 `NOVA_GRACE_MARGIN_S` 相加就是 Nova 引擎自报的最小停止宽限（默认 150 秒；Midscene 自报的是固定的 31 秒），调大前者会同时抬高本机跑允许的最小 `--grace`。
 - `NOVA_GRACE_MARGIN_S` 只影响本机跑允许的最小 `--grace`。云端 worker 的停止宽限由部署时的 `gherkai deploy --stop-timeout` 决定。
-- 云端 worker 读自己镜像里 `ENV GHERKAI_STEPS_DIR` 指的目录，确定性 step 随镜像一起烙进去（见 [`cloud-backend.md`](./cloud-backend.md)）；本机 shell 里的 `GHERKAI_STEPS_DIR` 与 `--steps-dir` 给了只提示一句、不拦截。step 的写法与目录约定见 [`writing-deterministic-steps.md`](./writing-deterministic-steps.md)。
+- 云端 worker 读自己镜像里 `ENV GHERKAI_STEPS_DIR` 指的目录，确定性 step 随镜像一起构建进去（见 [`cloud-backend.md`](./cloud-backend.md)）；本机 shell 里的 `GHERKAI_STEPS_DIR` 与 `--steps-dir` 给了只提示一句、不拦截。step 的写法与目录约定见 [`writing-deterministic-steps.md`](./writing-deterministic-steps.md)。
 
 ### 隧道与 worker 拉起
 

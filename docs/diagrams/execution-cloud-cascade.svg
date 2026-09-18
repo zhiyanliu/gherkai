@@ -472,21 +472,22 @@ rect.c-bg-rect { fill: var(--bg); }
         <rect x="257.66666666666663" y="586" width="10" height="34" rx="3" class="c-database" stroke-width="1"/>
 
         <!-- Messages -->
-        <g data-edge-from="cli" data-edge-to="runs" data-edge-label="落定义 + 状态（带后台标记）" data-edge-key="0" data-edge-id="m-submit">
+        <g data-edge-from="cli" data-edge-to="runs" data-edge-label="落定义 + 状态" data-edge-key="0" data-edge-id="m-submit">
           <path data-composition-edge-from="cli" data-composition-edge-to="runs" data-composition-edge-id="m-submit" data-composition-points="125.5,180;255.66666666666663,180" d="M 125.5 180 L 255.66666666666663 180" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
         <g>
-          <rect x="114.38333333333331" y="160" width="152.4" height="16" rx="3" class="c-mask"/>
-          <text x="190.58333333333331" y="170" class="t-backend" font-size="9" text-anchor="middle">落定义 + 状态（带后台标记）</text>
+          <rect x="150.7833333333333" y="160" width="79.60000000000001" height="16" rx="3" class="c-mask"/>
+          <text x="190.58333333333331" y="170" class="t-backend" font-size="9" text-anchor="middle">落定义 + 状态</text>
         </g>
-        <text x="137.5" y="198" class="t-dim" font-size="7">返回 run_id 后就能关机；只有用隧道测本机应用时本机要一直在线</text>
+        <text x="137.5" y="198" class="t-dim" font-size="7">（带后台标记）返回 run_id 后就能关机；只有用隧道测本机应用时本机要一直在线</text>
         </g>
 
-        <g data-edge-from="runs" data-edge-to="kicker" data-edge-label="写入唤醒（只收带标记的新 run）" data-edge-key="1" data-edge-id="m-wake-kicker">
+        <g data-edge-from="runs" data-edge-to="kicker" data-edge-label="写入唤醒" data-edge-key="1" data-edge-id="m-wake-kicker">
           <path data-composition-edge-from="runs" data-composition-edge-to="kicker" data-composition-edge-id="m-wake-kicker" data-composition-points="269.66666666666663,226;399.8333333333333,226" d="M 269.66666666666663 226 L 399.8333333333333 226" class="a-dashed" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
         <g>
-          <rect x="250.75" y="206" width="168" height="16" rx="3" class="c-mask"/>
-          <text x="334.75" y="216" class="t-messagebus" font-size="9" text-anchor="middle">写入唤醒（只收带标记的新 run）</text>
+          <rect x="307.95" y="206" width="53.6" height="16" rx="3" class="c-mask"/>
+          <text x="334.75" y="216" class="t-messagebus" font-size="9" text-anchor="middle">写入唤醒</text>
         </g>
+        <text x="281.66666666666663" y="244" class="t-dim" font-size="7">（只收带标记的新 run）</text>
         </g>
 
         <g data-edge-from="kicker" data-edge-to="worker" data-edge-label="抢到 job 才起 task" data-edge-key="2" data-edge-id="m-first-task">
@@ -498,12 +499,13 @@ rect.c-bg-rect { fill: var(--bg); }
         <text x="425.8333333333333" y="290" class="t-dim" font-size="7">每次起 task 都给这个 job 定一次超时闹钟</text>
         </g>
 
-        <g data-edge-from="worker" data-edge-to="events" data-edge-label="逐条写事件（序号递增）" data-edge-key="3" data-edge-id="m-events">
+        <g data-edge-from="worker" data-edge-to="events" data-edge-label="逐条写事件" data-edge-key="3" data-edge-id="m-events">
           <path data-composition-edge-from="worker" data-composition-edge-to="events" data-composition-edge-id="m-events" data-composition-points="558,318;688.1666666666666,318" d="M 558 318 L 688.1666666666666 318" class="a-dashed" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
         <g>
-          <rect x="559.8833333333332" y="298" width="126.4" height="16" rx="3" class="c-mask"/>
-          <text x="623.0833333333333" y="308" class="t-messagebus" font-size="9" text-anchor="middle">逐条写事件（序号递增）</text>
+          <rect x="591.0833333333333" y="298" width="64" height="16" rx="3" class="c-mask"/>
+          <text x="623.0833333333333" y="308" class="t-messagebus" font-size="9" text-anchor="middle">逐条写事件</text>
         </g>
+        <text x="570" y="336" class="t-dim" font-size="7">（序号递增）</text>
         </g>
 
         <g data-edge-from="events" data-edge-to="reconciler" data-edge-label="每批写入都唤醒一次" data-edge-key="4" data-edge-id="m-wake-rec">
@@ -522,20 +524,22 @@ rect.c-bg-rect { fill: var(--bg); }
         </g>
         </g>
 
-        <g data-edge-from="worker" data-edge-to="xo" data-edge-label="任务停止（平台事件，带退出码）" data-edge-key="6" data-edge-id="m-stopped">
+        <g data-edge-from="worker" data-edge-to="xo" data-edge-label="任务停止" data-edge-key="6" data-edge-id="m-stopped">
           <path data-composition-edge-from="worker" data-composition-edge-to="xo" data-composition-edge-id="m-stopped" data-composition-points="558,456;976.5,456" d="M 558 456 L 976.5 456" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
         <g>
-          <rect x="683.25" y="436" width="168" height="16" rx="3" class="c-mask"/>
-          <text x="767.25" y="446" class="t-security" font-size="9" text-anchor="middle">任务停止（平台事件，带退出码）</text>
+          <rect x="740.45" y="436" width="53.6" height="16" rx="3" class="c-mask"/>
+          <text x="767.25" y="446" class="t-security" font-size="9" text-anchor="middle">任务停止</text>
         </g>
+        <text x="570" y="474" class="t-dim" font-size="7">（平台事件，带退出码）</text>
         </g>
 
-        <g data-edge-from="xo" data-edge-to="events" data-edge-label="写退出记录（与事件分开放）" data-edge-key="7" data-edge-id="m-exit-item">
+        <g data-edge-from="xo" data-edge-to="events" data-edge-label="写退出记录" data-edge-key="7" data-edge-id="m-exit-item">
           <path data-composition-edge-from="xo" data-composition-edge-to="events" data-composition-edge-id="m-exit-item" data-composition-points="976.5,502;702.1666666666666,502" d="M 976.5 502 L 702.1666666666666 502" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
         <g>
-          <rect x="765.7333333333332" y="482" width="147.20000000000002" height="16" rx="3" class="c-mask"/>
-          <text x="839.3333333333333" y="492" class="t-security" font-size="9" text-anchor="middle">写退出记录（与事件分开放）</text>
+          <rect x="807.3333333333333" y="482" width="64" height="16" rx="3" class="c-mask"/>
+          <text x="839.3333333333333" y="492" class="t-security" font-size="9" text-anchor="middle">写退出记录</text>
         </g>
+        <text x="714.1666666666666" y="520" class="t-dim" font-size="7">（与事件分开放）</text>
         </g>
 
         <g data-edge-from="events" data-edge-to="reconciler" data-edge-label="再唤醒一次：事件与退出都齐了" data-edge-key="8" data-edge-id="m-wake-again">
@@ -670,3 +674,4 @@ rect.c-bg-rect { fill: var(--bg); }
           </g>
         </g>
       </svg>
+<!-- gherkai:source-sha256=37d53153c99da0fa6b0b62fb474f26ff1ec49549608e785d6025dbe7718e2326 -->

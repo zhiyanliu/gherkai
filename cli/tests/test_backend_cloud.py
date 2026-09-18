@@ -112,7 +112,7 @@ def _patch_cloud_handles(monkeypatch, record, *, preflight_err=None, skew=("ok",
     `check_version_skew`（默认判 `ok`=无提示行，让本文件其它断言不被 skew 噪声干扰）。`skew=` 可换判定，
     skew 自身的判据在 runtime 的 compose 测试里验、此处只验接线。
 
-    **worker variant 闸（ADR 0038）同理 patch `resolve_worker_variant`**：它真身要读 SSM 映射 + 探 ECS/ECR。
+    **worker variant 闸（ADR 0038）同理 patch `resolve_worker_variant`**：它的真实实现要读 SSM 映射 + 探 ECS/ECR。
     默认给每个被问到的引擎一条假 resolution（variant = 显式给的 `--worker-variant`，缺省则 `resolved_variant`
     ——模拟「解析到部署级默认指针」）；`variant_err=WorkerVariantError(...)` 改成拦下档。调用入参记进
     `made["variant"]`（可验次序、engines 只含本 run 用到的、backend_version 复用同一次读戳）。

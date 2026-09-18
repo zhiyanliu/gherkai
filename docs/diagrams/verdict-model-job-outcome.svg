@@ -465,10 +465,10 @@ rect.c-bg-rect { fill: var(--bg); }
         <path data-edge-from="q3" data-edge-to="ab" data-edge-label="fail-fast" data-edge-key="4" data-edge-id="q3-ab" data-composition-points="494.8,214;494.8,304;576.8,304;576.8,526;560.8,526" d="M 494.8 214 L 494.8 304 L 576.8 304 L 576.8 526 L 560.8 526" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
         <path data-edge-from="q3" data-edge-to="q4" data-edge-label="都没有" data-edge-key="5" data-edge-id="q3-q4" data-composition-points="568.8,188;615.6,188" d="M 568.8 188 L 615.6 188" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
         <path data-edge-from="q3" data-edge-to="to" data-edge-label="墙钟到点" data-edge-key="6" data-edge-id="q3-to" data-composition-points="494.8,214;494.8,304;412.8,304;412.8,450;428.8,450" d="M 494.8 214 L 494.8 304 L 412.8 304 L 412.8 450 L 428.8 450" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
-        <path data-edge-from="q4" data-edge-to="ne" data-edge-label="是" data-edge-key="7" data-edge-id="q4-ne" data-composition-points="767.6,188;783.6,188;783.6,304;691.6,304;691.6,424" d="M 767.6 188 L 783.6 188 L 783.6 304 L 691.6 304 L 691.6 424" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
+        <path data-edge-from="q4" data-edge-to="ne" data-edge-label="是" data-edge-key="7" data-edge-id="q4-ne" data-composition-points="691.6,214;691.6,304;691.6,424" d="M 691.6 214 L 691.6 304 L 691.6 424" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
         <path data-edge-from="q4" data-edge-to="q5" data-edge-label="不是" data-edge-key="8" data-edge-id="q4-q5" data-composition-points="767.6,188;805.6,188" d="M 767.6 188 L 805.6 188" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
         <path data-edge-from="q5" data-edge-to="agg" data-edge-label="都不是" data-edge-key="9" data-edge-id="q5-agg" data-composition-points="957.6,188;1004.4000000000001,188" d="M 957.6 188 L 1004.4000000000001 188" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        <path data-edge-from="q5" data-edge-to="ee2" data-edge-label="是" data-edge-key="10" data-edge-id="q5-ee2" data-composition-points="881.6,214;881.6,304;963.6,304;963.6,450;947.6,450" d="M 881.6 214 L 881.6 304 L 963.6 304 L 963.6 450 L 947.6 450" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
+        <path data-edge-from="q5" data-edge-to="ee2" data-edge-label="是" data-edge-key="10" data-edge-id="q5-ee2" data-composition-points="881.6,214;881.6,304;881.6,424" d="M 881.6 214 L 881.6 304 L 881.6 424" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
 
         <!-- Nodes -->
         <g id="node-q1" data-node-id="q1" data-node-label="fail-fast 中止？" tabindex="0" role="button" aria-label="聚焦fail-fast 中止？，起 worker 之前, 判据：一串有序短路，前一问答上就不再往后看 › 还没起来就定案" aria-pressed="false" data-node-kind="security" data-node-sublabel="起 worker 之前" data-node-context="判据：一串有序短路，前一问答上就不再往后看 › 还没起来就定案">
@@ -636,8 +636,8 @@ rect.c-bg-rect { fill: var(--bg); }
           <text x="453.8" y="294" class="t-security" font-size="8" text-anchor="middle">墙钟到点</text>
         </g>
         <g data-edge-from="q4" data-edge-to="ne" data-edge-label="是" data-edge-key="7" data-edge-id="q4-ne">
-          <rect x="722.6" y="284" width="30" height="14" rx="3" class="c-mask"/>
-          <text x="737.6" y="294" class="t-security" font-size="8" text-anchor="middle">是</text>
+          <rect x="676.6" y="284" width="30" height="14" rx="3" class="c-mask"/>
+          <text x="691.6" y="294" class="t-security" font-size="8" text-anchor="middle">是</text>
         </g>
         <g data-edge-from="q4" data-edge-to="q5" data-edge-label="不是" data-edge-key="8" data-edge-id="q4-q5">
           <rect x="771.6" y="168" width="30" height="14" rx="3" class="c-mask"/>
@@ -648,8 +648,8 @@ rect.c-bg-rect { fill: var(--bg); }
           <text x="981" y="178" class="t-backend" font-size="8" text-anchor="middle">都不是</text>
         </g>
         <g data-edge-from="q5" data-edge-to="ee2" data-edge-label="是" data-edge-key="10" data-edge-id="q5-ee2">
-          <rect x="907.6" y="284" width="30" height="14" rx="3" class="c-mask"/>
-          <text x="922.6" y="294" class="t-security" font-size="8" text-anchor="middle">是</text>
+          <rect x="866.6" y="284" width="30" height="14" rx="3" class="c-mask"/>
+          <text x="881.6" y="294" class="t-security" font-size="8" text-anchor="middle">是</text>
         </g>
 
         <!-- Legend -->
@@ -669,3 +669,4 @@ rect.c-bg-rect { fill: var(--bg); }
           </g>
         </g>
       </svg>
+<!-- gherkai:source-sha256=9681005af5bdf323138e4fa155d0b9a47f4f667beb159160187db3ffc8d565d9 -->

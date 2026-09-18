@@ -1,4 +1,4 @@
-<svg viewBox="0 0 1235 528" role="img" lang="zh-CN" aria-labelledby="archify-diagram-title archify-diagram-description" data-preset="classic" data-quality-profile="showcase" style="" width="1235" height="528" xmlns="http://www.w3.org/2000/svg"><style>
+<svg viewBox="0 0 1239 528" role="img" lang="zh-CN" aria-labelledby="archify-diagram-title archify-diagram-description" data-preset="classic" data-quality-profile="showcase" style="" width="1239" height="528" xmlns="http://www.w3.org/2000/svg"><style>
 /*
 JetBrains Mono variable WOFF2 subsets from Google Fonts service revision v24.
 These fixed bytes are shared by the viewer and its SVG/raster exports.
@@ -462,16 +462,16 @@ rect.c-bg-rect { fill: var(--bg); }
 
         <!-- Edge paths -->
         <path data-edge-from="begin" data-edge-to="drive" data-edge-label="运行态已落" data-edge-key="0" data-edge-id="e-begin-drive" data-composition-points="576.8,119;642.8,119" d="M 576.8 119 L 642.8 119" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        <path data-edge-from="drive" data-edge-to="reduce" data-edge-label="job 都收场" data-edge-key="1" data-edge-id="e-drive-reduce" data-composition-points="716.8,145;716.8,161;954.8,161;954.8,145" d="M 716.8 145 L 716.8 161 L 954.8 161 L 954.8 145" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        <path data-edge-from="drive" data-edge-to="worker" data-edge-label="派发一个 job" data-edge-key="2" data-edge-id="e-drive-worker" data-composition-points="716.8,145;716.8,166;624.8,166;624.8,243;640.8,243" d="M 716.8 145 L 716.8 166 L 624.8 166 L 624.8 243 L 640.8 243" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
-        <path data-edge-from="events" data-edge-to="drive" data-edge-label="回传核心：再推一步" data-edge-key="3" data-edge-id="e-events-drive" data-composition-points="1194.8,367;1219,367;1219,77;716.8,77;716.8,93" d="M 1194.8 367 L 1219 367 L 1219 77 L 716.8 77 L 716.8 93" class="a-dashed" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
+        <path data-edge-from="drive" data-edge-to="reduce" data-edge-label="job 都收场" data-edge-key="1" data-edge-id="e-drive-reduce" data-composition-points="790.8,119;886.8,119" d="M 790.8 119 L 886.8 119" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path data-edge-from="drive" data-edge-to="worker" data-edge-label="派发一个 job" data-edge-key="2" data-edge-id="e-drive-worker" data-composition-points="716.8,145;716.8,166;632.8,166;632.8,243;640.8,243" d="M 716.8 145 L 716.8 166 L 632.8 166 L 632.8 243 L 640.8 243" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="events" data-edge-to="drive" data-edge-label="回传核心：再推一步" data-edge-key="3" data-edge-id="e-events-drive" data-composition-points="1194.8,367;1223,367;1223,77;716.8,77;716.8,93" d="M 1194.8 367 L 1223 367 L 1223 77 L 716.8 77 L 716.8 93" class="a-dashed" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
         <path data-edge-from="exit" data-edge-to="drive" data-edge-label="回传核心：可以收场" data-edge-key="4" data-edge-id="e-exit-drive" data-composition-points="880.8,367;614.8,367;614.8,119;642.8,119" d="M 880.8 367 L 614.8 367 L 614.8 119 L 642.8 119" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
         <path data-edge-from="parse" data-edge-to="scope" data-edge-label="领域模型" data-edge-key="5" data-edge-id="e-parse-scope" data-composition-points="184,119;240.39999999999998,119" d="M 184 119 L 240.39999999999998 119" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
         <path data-edge-from="reduce" data-edge-to="report" data-edge-key="6" data-edge-id="e-reduce-report" data-composition-points="1022.8,119;1050.8,119" d="M 1022.8 119 L 1050.8 119" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
         <path data-edge-from="scope" data-edge-to="begin" data-edge-label="job 列表" data-edge-key="7" data-edge-id="e-scope-begin" data-composition-points="380.4,119;436.79999999999995,119" d="M 380.4 119 L 436.79999999999995 119" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
         <path data-edge-from="step" data-edge-to="events" data-edge-label="逐条吐出" data-edge-key="8" data-edge-id="e-step-events" data-composition-points="1026.8,243;1124.8,243;1124.8,341" d="M 1026.8 243 L 1124.8 243 L 1124.8 341" class="a-dashed" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
-        <path data-edge-from="worker" data-edge-to="exit" data-edge-label="终止时" data-edge-key="9" data-edge-id="e-worker-exit" data-composition-points="792.8,243;836.8,243;836.8,367;880.8,367" d="M 792.8 243 L 836.8 243 L 836.8 367 L 880.8 367" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
-        <path data-edge-from="worker" data-edge-to="step" data-edge-label="开会话后逐 step" data-edge-key="10" data-edge-id="e-worker-step" data-composition-points="716.8,217;716.8,201;954.8,201;954.8,217" d="M 716.8 217 L 716.8 201 L 954.8 201 L 954.8 217" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="worker" data-edge-to="exit" data-edge-label="终止时" data-edge-key="9" data-edge-id="e-worker-exit" data-composition-points="716.8,269;716.8,290;954.8,290;954.8,341" d="M 716.8 269 L 716.8 290 L 954.8 290 L 954.8 341" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
+        <path data-edge-from="worker" data-edge-to="step" data-edge-label="开会话后逐 step" data-edge-key="10" data-edge-id="e-worker-step" data-composition-points="792.8,243;882.8,243" d="M 792.8 243 L 882.8 243" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
 
         <!-- Nodes -->
         <g id="node-parse" data-node-id="parse" data-node-label="parse" tabindex="0" role="button" aria-label="聚焦parse，文本 → 领域模型, 主干：一个 run 走一遍 › plan：到此为止" aria-pressed="false" data-node-kind="backend" data-node-sublabel="文本 → 领域模型" data-node-context="主干：一个 run 走一遍 › plan：到此为止">
@@ -600,16 +600,16 @@ rect.c-bg-rect { fill: var(--bg); }
           <text x="609.8" y="109" class="t-backend" font-size="8" text-anchor="middle">运行态已落</text>
         </g>
         <g data-edge-from="drive" data-edge-to="reduce" data-edge-label="job 都收场" data-edge-key="1" data-edge-id="e-drive-reduce">
-          <rect x="806.8" y="141" width="58" height="14" rx="3" class="c-mask"/>
-          <text x="835.8" y="151" class="t-backend" font-size="8" text-anchor="middle">job 都收场</text>
+          <rect x="809.8" y="99" width="58" height="14" rx="3" class="c-mask"/>
+          <text x="838.8" y="109" class="t-backend" font-size="8" text-anchor="middle">job 都收场</text>
         </g>
         <g data-edge-from="drive" data-edge-to="worker" data-edge-label="派发一个 job" data-edge-key="2" data-edge-id="e-drive-worker">
-          <rect x="637" y="146" width="67.6" height="14" rx="3" class="c-mask"/>
-          <text x="670.8" y="156" class="t-muted" font-size="8" text-anchor="middle">派发一个 job</text>
+          <rect x="641" y="146" width="67.6" height="14" rx="3" class="c-mask"/>
+          <text x="674.8" y="156" class="t-muted" font-size="8" text-anchor="middle">派发一个 job</text>
         </g>
         <g data-edge-from="events" data-edge-to="drive" data-edge-label="回传核心：再推一步" data-edge-key="3" data-edge-id="e-events-drive">
-          <rect x="919.6999999999999" y="57" width="96.39999999999999" height="14" rx="3" class="c-mask"/>
-          <text x="967.9" y="67" class="t-database" font-size="8" text-anchor="middle">回传核心：再推一步</text>
+          <rect x="921.6999999999999" y="57" width="96.39999999999999" height="14" rx="3" class="c-mask"/>
+          <text x="969.9" y="67" class="t-database" font-size="8" text-anchor="middle">回传核心：再推一步</text>
         </g>
         <g data-edge-from="exit" data-edge-to="drive" data-edge-label="回传核心：可以收场" data-edge-key="4" data-edge-id="e-exit-drive">
           <rect x="699.5999999999999" y="347" width="96.39999999999999" height="14" rx="3" class="c-mask"/>
@@ -629,12 +629,12 @@ rect.c-bg-rect { fill: var(--bg); }
           <text x="1075.8" y="233" class="t-database" font-size="8" text-anchor="middle">逐条吐出</text>
         </g>
         <g data-edge-from="worker" data-edge-to="exit" data-edge-label="终止时" data-edge-key="9" data-edge-id="e-worker-exit">
-          <rect x="795.4" y="223" width="38.8" height="14" rx="3" class="c-mask"/>
-          <text x="814.8" y="233" class="t-security" font-size="8" text-anchor="middle">终止时</text>
+          <rect x="816.4" y="270" width="38.8" height="14" rx="3" class="c-mask"/>
+          <text x="835.8" y="280" class="t-security" font-size="8" text-anchor="middle">终止时</text>
         </g>
         <g data-edge-from="worker" data-edge-to="step" data-edge-label="开会话后逐 step" data-edge-key="10" data-edge-id="e-worker-step">
-          <rect x="794.8" y="181" width="82" height="14" rx="3" class="c-mask"/>
-          <text x="835.8" y="191" class="t-muted" font-size="8" text-anchor="middle">开会话后逐 step</text>
+          <rect x="796.8" y="209" width="82" height="14" rx="3" class="c-mask"/>
+          <text x="837.8" y="219" class="t-muted" font-size="8" text-anchor="middle">开会话后逐 step</text>
         </g>
 
         <!-- Legend -->
@@ -666,3 +666,4 @@ rect.c-bg-rect { fill: var(--bg); }
           </g>
         </g>
       </svg>
+<!-- gherkai:source-sha256=9c424c6750e2cd448a96d80dd6def4f2e9a6d6de0632ac487a731f807484f347 -->

@@ -97,7 +97,7 @@ _Avoid_: 把它当精确/像素级回归工具用。
 _Avoid_: 以为"不点名也能抓变更"；把它与 A/B 两种不确定性混为一谈；以为 QA 要学特殊措辞（QA 永远只写自然语言）。
 
 **agent skill (gherkai skill)**:
-教使用者侧 AI agent（Claude Code / Codex 这类工具）驾驭本工具的一份 `SKILL.md` + `references/`：从需求写 feature 与 steps、`plan → run / submit → status → explain` 的工作循环、退出码分流、失败汇报模板；三个任务域（测试 / 环境排障 / 云端交付）一个入口、按域拆 references。真身随 CLI wheel 发行（`cli/gherkai_cli/skills/gherkai/`），`gherkai skill install` 拷进使用方项目或用户级 agent 目录、与 CLI 同版本、重装整目录收敛（ADR 0043）。
+教使用者侧 AI agent（Claude Code / Codex 这类工具）驾驭本工具的一份 `SKILL.md` + `references/`：从需求写 feature 与 steps、`plan → run / submit → status → explain` 的工作循环、退出码分流、失败汇报模板；三个任务域（测试 / 环境排障 / 云端交付）一个入口、按域拆 references。源文件随 CLI wheel 发行（`cli/gherkai_cli/skills/gherkai/`），`gherkai skill install` 拷进使用方项目或用户级 agent 目录、与 CLI 同版本、重装整目录收敛（ADR 0043）。
 _Avoid_: 把它当第二份文档源——机读字段页是契约页的确定性转换副本、正文只写操作模型；把它当内部文档——它是产品面，零 ADR 编号 / 内部机制名、只用绝对 URL。
 
 **两种不确定性 (A: flakiness / B: 柔性吞变更)**:

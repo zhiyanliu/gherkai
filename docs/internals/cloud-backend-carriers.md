@@ -33,7 +33,7 @@
 | `core` 的判定/投影/序列化（`jobs/*.json` 的字段、状态聚合、RunReport 形态） | **前台 `run`**：提交者本机的 CLI；**`submit`**：Lambda asset 里那份 `gherkai_core`（云端 `jobs/*.json` 由 reconciler 投影产出） | 本机 `run` 立刻有、云端 `submit` 没有——同一次改动在两条路径上表现不一致，最像 bug 的一类 |
 | `runtime` 的组合根装配（`build_fargate_engines` 的 job-in 前缀、注入的 env、container 名） | 同上：本机 CLI + Lambda asset | 前台 cloud run 与 detached submit 起出来的 task 形态分叉 |
 | worker 侧的 step 执行、证据抽取、收尾排空、确定性 step 注册表 | **worker 镜像** | 云端跑出来就是旧行为（例如没有 `kind=evidence` 的证据），本机 `run --backend local` 却是新的 |
-| 你自己写的确定性 step | **worker 镜像**（烙进去，云端不读提交侧 `--steps-dir`——给了只警告不拦） | 云端仍跑镜像里那套旧 step |
+| 你自己写的确定性 step | **worker 镜像**（构建进去，云端不读提交侧 `--steps-dir`——给了只警告不拦） | 云端仍跑镜像里那套旧 step |
 | 资源形态：cpu/memory、`stopTimeout`、日志保留、GSI、Stream filter、IAM | **stack** | 资源没变；且已有 variant 的 revision 仍是旧模板派生的（见 §4「重派生」条） |
 | 部署侧 per-run 并发 cap、产物前缀 `REPORT_DIR`、子网/安全组 | **stack**（两个推进器 Lambda 的 env；cap 常量 = `BackendStack.DEPLOY_SIDE_MAX_CONCURRENCY`） | 提交侧 preflight 会当场提示：超 cap 只警告，`REPORT_DIR` 不一致直接退 2 |
 | 后端版本戳、默认 variant 指针 | **SSM** | 提交侧 skew 判定失真 / 默认 variant 解析不到（见 §4） |

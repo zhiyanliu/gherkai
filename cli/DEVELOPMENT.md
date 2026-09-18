@@ -168,4 +168,4 @@ deploy 敲错档」，而漏档会合成「新建整套 VPC 并替换 worker 安
 - [0037](../docs/adr/0037-distribution-and-packaging.md) 分发与打包（三名分离 / worker 定位链 / `steps/` 约定 / deploy 进 wheel / 版本 skew）
 - [0038](../docs/adr/0038-worker-image-delivery.md) worker 镜像交付（variant → 显式 task-def revision、被拒方案）
 - [0042](../docs/adr/0042-step-evidence-and-explain.md) step 级机读证据与 `explain`（证据 schema、文本预算、只用 0/2 的退出码）
-- [0043](../docs/adr/0043-agent-skill-for-driving-gherkai.md) agent skill（包内真身随 wheel 发行、`skill install` 整目录收敛、契约页确定性转换副本、护栏与评测）
+- [0043](../docs/adr/0043-agent-skill-for-driving-gherkai.md) agent skill（包内源文件随 wheel 发行、`skill install` 整目录收敛、契约页确定性转换副本、护栏与评测）

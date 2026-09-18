@@ -45,14 +45,14 @@
       "id": "phMake",
       "label": "① 写 · ② 装：这张表怎么来的",
       "fromCol": 0,
-      "toCol": 2,
+      "toCol": 3,
       "variant": "emphasis"
     },
     {
       "id": "phUse",
       "label": "③ 查 · ④ 跑：谁在用这张表",
-      "fromCol": 3,
-      "toCol": 4
+      "fromCol": 4,
+      "toCol": 5
     }
   ],
   "mainPath": [
@@ -85,7 +85,7 @@
     {
       "id": "write",
       "lane": "laneMine",
-      "col": 0,
+      "col": 2,
       "type": "frontend",
       "label": "① 你写的 step",
       "sublabel": "模式 + 说明 + 示例",
@@ -94,7 +94,7 @@
     {
       "id": "builtin",
       "lane": "laneBuiltin",
-      "col": 1,
+      "col": 3,
       "type": "backend",
       "label": "内建脚手架",
       "sublabel": "不用你写，随包来",
@@ -103,7 +103,7 @@
     {
       "id": "load",
       "lane": "laneWorker",
-      "col": 1,
+      "col": 2,
       "type": "backend",
       "label": "② 加载你的目录",
       "sublabel": "排序递归 · 出错就退",
@@ -112,7 +112,7 @@
     {
       "id": "registry",
       "lane": "laneWorker",
-      "col": 2,
+      "col": 3,
       "type": "database",
       "label": "同一张注册表",
       "sublabel": "模式 → 你的 handler",
@@ -121,7 +121,7 @@
     {
       "id": "ask",
       "lane": "laneWorker",
-      "col": 3,
+      "col": 4,
       "type": "external",
       "label": "③ 查这张表",
       "sublabel": "清单 · 体检 · 预检标注",
@@ -130,7 +130,7 @@
     {
       "id": "dispatch",
       "lane": "laneWorker",
-      "col": 4,
+      "col": 5,
       "type": "messagebus",
       "label": "④ 逐 step 派发",
       "sublabel": "命中即走你的 handler",
@@ -146,7 +146,8 @@
       "variant": "emphasis",
       "role": "main",
       "fromSide": "bottom",
-      "toSide": "left"
+      "toSide": "top",
+      "labelDy": 108
     },
     {
       "id": "e-builtin-registry",
@@ -154,7 +155,10 @@
       "to": "registry",
       "label": "先它自注册",
       "variant": "default",
-      "role": "branch"
+      "role": "branch",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelDy": 34
     },
     {
       "id": "e-load-registry",
@@ -178,7 +182,10 @@
       "to": "dispatch",
       "label": "每步先查它",
       "variant": "emphasis",
-      "role": "main"
+      "role": "main",
+      "fromSide": "top",
+      "toSide": "top",
+      "channelY": 325
     }
   ],
   "cards": [

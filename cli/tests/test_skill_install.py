@@ -14,7 +14,7 @@ import pytest
 from gherkai_cli import __main__ as m
 from gherkai_cli import skill_install
 
-# 包内那份 skill 的真身（安装的源）。定位与被测 code 一样只有这一条路：包目录下 skills/gherkai，无仓库根回落。
+# 包内那份 skill 的源文件（安装的源）。定位与被测 code 一样只有这一条路：包目录下 skills/gherkai，无仓库根回落。
 SRC = Path(m.__file__).resolve().parent / "skills" / "gherkai"
 CLAUDE_SKILLS = Path(".claude") / "skills" / "gherkai"
 CODEX_SKILLS = Path(".agents") / "skills" / "gherkai"

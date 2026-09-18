@@ -23,7 +23,7 @@ USER_DOCS = sorted(USER_GUIDE.glob("*.md")) + [REPO / "README.md", REPO / "CHANG
 
 LINK = re.compile(r"\]\(([^)\s]+)\)")
 BUILDER_ONLY = re.compile(r"(^|/)(docs/adr|docs/journey|docs/ai-eng)(/|$)|(^|/)(CONTEXT\.md|CLAUDE\.md)$")
-COLLOQUIAL = re.compile(r"帽子不是人|烧钱|锁步|lockstep")  # 已定改掉的口头语 / 隐喻 / 晦涩术语（ADR 0045 决策六）
+COLLOQUIAL = re.compile(r"帽子不是人|烧钱|锁步|lockstep|烙进|烙好|烙成|烙在")  # 已定改掉的口头语 / 隐喻 / 晦涩术语（ADR 0045 决策六）
 
 
 def _rel(p: Path) -> str:
@@ -90,8 +90,9 @@ def test_published_interactive_html_is_tracked_and_indexed():
 def test_diagram_source_has_no_internal_references(spec: Path):
     """图源里的文字会原样进 SVG / 站点，读者含使用者：零 ADR 编号 / 决策号 / 内部机制名。"""
     text = spec.read_text(encoding="utf-8")
-    hits = [f"{_rel(spec)}:{i}: {line.strip()[:120]}" for i, line in enumerate(text.splitlines(), 1) if FORBIDDEN.search(line)]
-    assert not hits, "图源不得含内部指代：\n" + "\n".join(hits)
+    hits = [f"{_rel(spec)}:{i}: {line.strip()[:120]}" for i, line in enumerate(text.splitlines(), 1)
+            if FORBIDDEN.search(line) or COLLOQUIAL.search(line)]
+    assert not hits, "图源不得含内部指代或口头语 / 隐喻（图上的字读者直接看到）：\n" + "\n".join(hits)
 
 
 def test_no_mermaid_blocks_remain():
@@ -99,3 +100,29 @@ def test_no_mermaid_blocks_remain():
     hits = [f"{_rel(doc)}:{i}" for doc in ALL_DOCS for i, line in enumerate(doc.read_text(encoding="utf-8").splitlines(), 1)
             if line.strip().startswith("```mermaid")]
     assert not hits, "仍有 mermaid 块，按 ADR 0045 决策七 转成 docs/diagrams 的 archify 图：\n" + "\n".join(hits)
+
+
+@pytest.mark.parametrize("spec", sorted(DIAGRAMS.glob("*.json")), ids=lambda p: p.name)
+def test_diagram_exports_match_their_sources(spec: Path):
+    """导出的 SVG 末尾带 `gherkai:source-sha256=<sha256(json)>` 指纹（tools/build_diagrams.mjs 写入）：
+    改了 JSON 图源没重导 SVG 在 CI 里就红（mtime 在 git checkout 后无意义，故用内容指纹）。"""
+    import hashlib
+    svg = spec.with_suffix(".svg")
+    assert svg.is_file(), f"缺 {svg.name}"
+    want = hashlib.sha256(spec.read_bytes()).hexdigest()
+    tail = svg.read_bytes()[-200:].decode("utf-8", "replace")
+    m = re.search(r"gherkai:source-sha256=([0-9a-f]{64})", tail)
+    assert m, f"{svg.name} 末尾没有图源指纹——用 tools/build_diagrams.mjs 重导（不要手工改 SVG）"
+    assert m.group(1) == want, f"{svg.name} 是旧图源导出的：跑 node tools/build_diagrams.mjs docs/diagrams/{spec.name}"
+
+
+def test_diagram_skill_points_at_the_method():
+    """作图入口 = 项目级 skill `.claude/skills/diagram/SKILL.md`，它只指向方法文档 docs/ai-eng/diagram-authoring.md 与
+    构建脚本，不复述规则（规则单一真源在方法文档；ADR 0045 决策七）。"""
+    skill = REPO / ".claude" / "skills" / "diagram" / "SKILL.md"
+    method = REPO / "docs" / "ai-eng" / "diagram-authoring.md"
+    assert skill.is_file() and method.is_file(), "缺作图 skill 入口或方法文档"
+    body = skill.read_text(encoding="utf-8")
+    assert "docs/ai-eng/diagram-authoring.md" in body and "tools/build_diagrams.mjs" in body, "skill 须指向方法文档与构建脚本"
+    assert body.count("\n") < 12, "skill 入口只放指令与指针（不复述方法，免同步漂移）"
+

@@ -272,7 +272,17 @@
       "to": "ne",
       "label": "是",
       "variant": "security",
-      "role": "error"
+      "role": "error",
+      "via": [
+        [
+          691.6,
+          304
+        ]
+      ],
+      "labelAt": [
+        691.6,
+        294
+      ]
     },
     {
       "id": "q5-ee2",
@@ -280,7 +290,17 @@
       "to": "ee2",
       "label": "是",
       "variant": "security",
-      "role": "error"
+      "role": "error",
+      "via": [
+        [
+          881.6,
+          304
+        ]
+      ],
+      "labelAt": [
+        881.6,
+        294
+      ]
     }
   ],
   "cards": [

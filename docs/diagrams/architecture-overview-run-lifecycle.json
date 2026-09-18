@@ -206,6 +206,22 @@
       "from": "drive",
       "to": "worker",
       "label": "派发一个 job",
+      "toSide": "left",
+      "via": [
+        [
+          716.8,
+          166
+        ],
+        [
+          632.8,
+          166
+        ],
+        [
+          632.8,
+          243
+        ]
+      ],
+      "labelSegment": 1,
       "role": "branch"
     },
     {
@@ -213,6 +229,8 @@
       "from": "worker",
       "to": "step",
       "label": "开会话后逐 step",
+      "route": "straight",
+      "labelDy": -14,
       "role": "branch"
     },
     {
@@ -228,6 +246,22 @@
       "from": "events",
       "to": "drive",
       "label": "回传核心：再推一步",
+      "fromSide": "right",
+      "toSide": "top",
+      "via": [
+        [
+          1223,
+          367
+        ],
+        [
+          1223,
+          77
+        ],
+        [
+          716.8,
+          77
+        ]
+      ],
       "variant": "dashed",
       "role": "return"
     },
@@ -236,6 +270,7 @@
       "from": "worker",
       "to": "exit",
       "label": "终止时",
+      "fromSide": "bottom",
       "variant": "security",
       "role": "branch"
     },
@@ -253,6 +288,7 @@
       "from": "drive",
       "to": "reduce",
       "label": "job 都收场",
+      "route": "straight",
       "variant": "emphasis",
       "role": "main"
     },

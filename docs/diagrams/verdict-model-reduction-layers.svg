@@ -1,4 +1,4 @@
-<svg viewBox="0 0 1080 400" role="img" lang="zh-CN" aria-labelledby="archify-diagram-title archify-diagram-description" data-preset="classic" data-quality-profile="showcase" style="" width="1080" height="400" xmlns="http://www.w3.org/2000/svg"><style>
+<svg viewBox="0 0 1080 360" role="img" lang="zh-CN" aria-labelledby="archify-diagram-title archify-diagram-description" data-preset="classic" data-quality-profile="showcase" style="" width="1080" height="360" xmlns="http://www.w3.org/2000/svg"><style>
 /*
 JetBrains Mono variable WOFF2 subsets from Google Fonts service revision v24.
 These fixed bytes are shared by the viewer and its SVG/raster exports.
@@ -440,116 +440,117 @@ rect.c-bg-rect { fill: var(--bg); }
         <rect width="100%" height="100%" fill="url(#grid)"/>
 
         <!-- Data Stages -->
-        <rect data-graph-role="structural-frame" data-composition-frame-kind="stage" data-composition-frame-id="0" x="16" y="46" width="168" height="280" rx="10" class="c-lane" stroke-width="1"/>
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="stage" data-composition-frame-id="0" x="16" y="46" width="168" height="240" rx="10" class="c-lane" stroke-width="1"/>
         <text x="100" y="68" class="t-dim" font-size="9" font-weight="600" text-anchor="middle">01 / 一票</text>
 
-        <rect data-graph-role="structural-frame" data-composition-frame-kind="stage" data-composition-frame-id="1" x="231" y="46" width="168" height="280" rx="10" class="c-lane" stroke-width="1"/>
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="stage" data-composition-frame-id="1" x="231" y="46" width="168" height="240" rx="10" class="c-lane" stroke-width="1"/>
         <text x="315" y="68" class="t-dim" font-size="9" font-weight="600" text-anchor="middle">02 / step</text>
 
-        <rect data-graph-role="structural-frame" data-composition-frame-kind="stage" data-composition-frame-id="2" x="446" y="46" width="168" height="280" rx="10" class="c-lane" stroke-width="1"/>
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="stage" data-composition-frame-id="2" x="446" y="46" width="168" height="240" rx="10" class="c-lane" stroke-width="1"/>
         <text x="530" y="68" class="t-dim" font-size="9" font-weight="600" text-anchor="middle">03 / scenario</text>
 
-        <rect data-graph-role="structural-frame" data-composition-frame-kind="stage" data-composition-frame-id="3" x="661" y="46" width="168" height="280" rx="10" class="c-lane" stroke-width="1"/>
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="stage" data-composition-frame-id="3" x="661" y="46" width="168" height="240" rx="10" class="c-lane" stroke-width="1"/>
         <text x="745" y="68" class="t-dim" font-size="9" font-weight="600" text-anchor="middle">04 / job（= scope）</text>
 
-        <rect data-graph-role="structural-frame" data-composition-frame-kind="stage" data-composition-frame-id="4" x="876" y="46" width="168" height="280" rx="10" class="c-lane" stroke-width="1"/>
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="stage" data-composition-frame-id="4" x="876" y="46" width="168" height="240" rx="10" class="c-lane" stroke-width="1"/>
         <text x="960" y="68" class="t-dim" font-size="9" font-weight="600" text-anchor="middle">05 / run</text>
 
         <!-- Flow paths -->
-        <path data-edge-from="vote" data-edge-to="step" data-edge-label="多数票" data-edge-key="0" data-edge-id="vote-step" data-composition-points="156,157;259,157" d="M 156 157 L 259 157" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        <path data-edge-from="step" data-edge-to="scenario" data-edge-label="任一 error 最重" data-edge-key="1" data-edge-id="step-scenario" data-composition-points="371,157;474,157" d="M 371 157 L 474 157" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        <path data-edge-from="scenario" data-edge-to="job" data-edge-label="上报给 core" data-edge-key="2" data-edge-id="scenario-job" data-composition-points="586,157;637.5,157;637.5,271;689,271" d="M 586 157 L 637.5 157 L 637.5 271 L 689 271" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        <path data-edge-from="job" data-edge-to="run" data-edge-label="同一条规则" data-edge-key="3" data-edge-id="job-run" data-composition-points="801,271;904,271" d="M 801 271 L 904 271" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path data-edge-from="vote" data-edge-to="step" data-edge-label="多数票" data-edge-key="0" data-edge-id="vote-step" data-composition-points="156,171;259,171" d="M 156 171 L 259 171" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path data-edge-from="step" data-edge-to="scenario" data-edge-label="任一 error 最重" data-edge-key="1" data-edge-id="step-scenario" data-composition-points="371,171;474,171" d="M 371 171 L 474 171" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path data-edge-from="scenario" data-edge-to="job" data-edge-label="上报给 core" data-edge-key="2" data-edge-id="scenario-job" data-composition-points="586,171;689,171" d="M 586 171 L 689 171" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path data-edge-from="job" data-edge-to="run" data-edge-label="同一条规则" data-edge-key="3" data-edge-id="job-run" data-composition-points="801,171;904,171" d="M 801 171 L 904 171" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
 
         <!-- Nodes -->
         <g id="node-vote" data-node-id="vote" data-node-label="布尔返回值" tabindex="0" role="button" aria-label="聚焦布尔返回值，一次 AI 调用, 01 / 一票" aria-pressed="false" data-node-kind="external" data-node-sublabel="一次 AI 调用" data-node-tag="worker 侧" data-node-context="01 / 一票">
           <title>布尔返回值 · 一次 AI 调用 · 01 / 一票 · worker 侧</title>
-          <rect x="44" y="128" width="112" height="58" rx="6" class="c-mask"/>
-          <rect x="44" y="128" width="112" height="58" rx="6" class="c-external" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(50 134) scale(0.6875)">
+          <rect x="44" y="142" width="112" height="58" rx="6" class="c-mask"/>
+          <rect x="44" y="142" width="112" height="58" rx="6" class="c-external" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(50 148) scale(0.6875)">
             <rect x="2.5" y="5" width="8.5" height="8" rx="1.5"/>
             <path d="M8 2.5h5.5V8M13.5 2.5 7.5 8.5"/>
           </g>
-          <text data-node-label="" x="100" y="149" class="t-primary" font-size="10" font-weight="600" text-anchor="middle">布尔返回值</text>
-          <text x="100" y="165" class="t-muted" font-size="7" text-anchor="middle">一次 AI 调用</text>
-        <text x="100" y="175" class="t-external" font-size="7" text-anchor="middle">worker 侧</text>
+          <text data-node-label="" x="100" y="163" class="t-primary" font-size="10" font-weight="600" text-anchor="middle">布尔返回值</text>
+          <text x="100" y="179" class="t-muted" font-size="7" text-anchor="middle">一次 AI 调用</text>
+        <text x="100" y="189" class="t-external" font-size="7" text-anchor="middle">worker 侧</text>
         </g>
 
         <g id="node-step" data-node-id="step" data-node-label="step 结论" tabindex="0" role="button" aria-label="聚焦step 结论，AI 断言 / 确定性 step, 02 / step" aria-pressed="false" data-node-kind="external" data-node-sublabel="AI 断言 / 确定性 step" data-node-tag="worker 侧" data-node-context="02 / step">
           <title>step 结论 · AI 断言 / 确定性 step · 02 / step · worker 侧</title>
-          <rect x="259" y="128" width="112" height="58" rx="6" class="c-mask"/>
-          <rect x="259" y="128" width="112" height="58" rx="6" class="c-external" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(265 134) scale(0.6875)">
+          <rect x="259" y="142" width="112" height="58" rx="6" class="c-mask"/>
+          <rect x="259" y="142" width="112" height="58" rx="6" class="c-external" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(265 148) scale(0.6875)">
             <rect x="2.5" y="5" width="8.5" height="8" rx="1.5"/>
             <path d="M8 2.5h5.5V8M13.5 2.5 7.5 8.5"/>
           </g>
-          <text data-node-label="" x="315" y="149" class="t-primary" font-size="10" font-weight="600" text-anchor="middle">step 结论</text>
-          <text x="315" y="165" class="t-muted" font-size="7" text-anchor="middle">AI 断言 / 确定性 step</text>
-        <text x="315" y="175" class="t-external" font-size="7" text-anchor="middle">worker 侧</text>
+          <text data-node-label="" x="315" y="163" class="t-primary" font-size="10" font-weight="600" text-anchor="middle">step 结论</text>
+          <text x="315" y="179" class="t-muted" font-size="7" text-anchor="middle">AI 断言 / 确定性 step</text>
+        <text x="315" y="189" class="t-external" font-size="7" text-anchor="middle">worker 侧</text>
         </g>
 
         <g id="node-scenario" data-node-id="scenario" data-node-label="scenario 结论" tabindex="0" role="button" aria-label="聚焦scenario 结论，本条逐步汇总, 03 / scenario" aria-pressed="false" data-node-kind="external" data-node-sublabel="本条逐步汇总" data-node-tag="worker 侧" data-node-context="03 / scenario">
           <title>scenario 结论 · 本条逐步汇总 · 03 / scenario · worker 侧</title>
-          <rect x="474" y="128" width="112" height="58" rx="6" class="c-mask"/>
-          <rect x="474" y="128" width="112" height="58" rx="6" class="c-external" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(480 134) scale(0.6875)">
+          <rect x="474" y="142" width="112" height="58" rx="6" class="c-mask"/>
+          <rect x="474" y="142" width="112" height="58" rx="6" class="c-external" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(480 148) scale(0.6875)">
             <rect x="2.5" y="5" width="8.5" height="8" rx="1.5"/>
             <path d="M8 2.5h5.5V8M13.5 2.5 7.5 8.5"/>
           </g>
-          <text data-node-label="" x="530" y="149" class="t-primary" font-size="10" font-weight="600" text-anchor="middle">scenario 结论</text>
-          <text x="530" y="165" class="t-muted" font-size="7" text-anchor="middle">本条逐步汇总</text>
-        <text x="530" y="175" class="t-external" font-size="7" text-anchor="middle">worker 侧</text>
+          <text data-node-label="" x="530" y="163" class="t-primary" font-size="10" font-weight="600" text-anchor="middle">scenario 结论</text>
+          <text x="530" y="179" class="t-muted" font-size="7" text-anchor="middle">本条逐步汇总</text>
+        <text x="530" y="189" class="t-external" font-size="7" text-anchor="middle">worker 侧</text>
         </g>
 
         <g id="node-job" data-node-id="job" data-node-label="job 收场态" tabindex="0" role="button" aria-label="聚焦job 收场态，跑完了才归约, 04 / job（= scope）" aria-pressed="false" data-node-kind="backend" data-node-sublabel="跑完了才归约" data-node-tag="core 侧" data-node-context="04 / job（= scope）">
           <title>job 收场态 · 跑完了才归约 · 04 / job（= scope） · core 侧</title>
-          <rect x="689" y="242" width="112" height="58" rx="6" class="c-mask"/>
-          <rect x="689" y="242" width="112" height="58" rx="6" class="c-backend" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(695 248) scale(0.6875)">
+          <rect x="689" y="142" width="112" height="58" rx="6" class="c-mask"/>
+          <rect x="689" y="142" width="112" height="58" rx="6" class="c-backend" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(695 148) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
-          <text data-node-label="" x="745" y="263" class="t-primary" font-size="10" font-weight="600" text-anchor="middle">job 收场态</text>
-          <text x="745" y="279" class="t-muted" font-size="7" text-anchor="middle">跑完了才归约</text>
-        <text x="745" y="289" class="t-backend" font-size="7" text-anchor="middle">core 侧</text>
+          <text data-node-label="" x="745" y="163" class="t-primary" font-size="10" font-weight="600" text-anchor="middle">job 收场态</text>
+          <text x="745" y="179" class="t-muted" font-size="7" text-anchor="middle">跑完了才归约</text>
+        <text x="745" y="189" class="t-backend" font-size="7" text-anchor="middle">core 侧</text>
         </g>
 
         <g id="node-run" data-node-id="run" data-node-label="run 判定" tabindex="0" role="button" aria-label="聚焦run 判定，整批的最终结论, 05 / run" aria-pressed="false" data-node-kind="backend" data-node-sublabel="整批的最终结论" data-node-tag="core 侧" data-node-context="05 / run">
           <title>run 判定 · 整批的最终结论 · 05 / run · core 侧</title>
-          <rect x="904" y="242" width="112" height="58" rx="6" class="c-mask"/>
-          <rect x="904" y="242" width="112" height="58" rx="6" class="c-backend" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(910 248) scale(0.6875)">
+          <rect x="904" y="142" width="112" height="58" rx="6" class="c-mask"/>
+          <rect x="904" y="142" width="112" height="58" rx="6" class="c-backend" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(910 148) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
-          <text data-node-label="" x="960" y="263" class="t-primary" font-size="10" font-weight="600" text-anchor="middle">run 判定</text>
-          <text x="960" y="279" class="t-muted" font-size="7" text-anchor="middle">整批的最终结论</text>
-        <text x="960" y="289" class="t-backend" font-size="7" text-anchor="middle">core 侧</text>
+          <text data-node-label="" x="960" y="163" class="t-primary" font-size="10" font-weight="600" text-anchor="middle">run 判定</text>
+          <text x="960" y="179" class="t-muted" font-size="7" text-anchor="middle">整批的最终结论</text>
+        <text x="960" y="189" class="t-backend" font-size="7" text-anchor="middle">core 侧</text>
         </g>
 
         <!-- Flow labels -->
         <g data-edge-from="vote" data-edge-to="step" data-edge-label="多数票" data-edge-key="0" data-edge-id="vote-step">
-          <rect x="186.8" y="136" width="41.4" height="16" rx="4" class="c-mask"/>
-          <text x="207.5" y="147" class="t-backend" font-size="8" text-anchor="middle">多数票</text>
+          <rect x="186.8" y="150" width="41.4" height="16" rx="4" class="c-mask"/>
+          <text x="207.5" y="161" class="t-backend" font-size="8" text-anchor="middle">多数票</text>
         </g>
         <g data-edge-from="step" data-edge-to="scenario" data-edge-label="任一 error 最重" data-edge-key="1" data-edge-id="step-scenario">
-          <rect x="379.75" y="136" width="85.5" height="16" rx="4" class="c-mask"/>
-          <text x="422.5" y="147" class="t-backend" font-size="8" text-anchor="middle">任一 error 最重</text>
+          <rect x="379.75" y="150" width="85.5" height="16" rx="4" class="c-mask"/>
+          <text x="422.5" y="161" class="t-backend" font-size="8" text-anchor="middle">任一 error 最重</text>
         </g>
         <g data-edge-from="scenario" data-edge-to="job" data-edge-label="上报给 core" data-edge-key="2" data-edge-id="scenario-job">
-          <rect x="604.55" y="193" width="65.9" height="27" rx="4" class="c-mask"/>
-          <text x="637.5" y="204" class="t-backend" font-size="8" text-anchor="middle">上报给 core</text>
-        <text x="637.5" y="215" class="t-dim" font-size="7" text-anchor="middle">跨进程事件</text>
+          <rect x="604.55" y="150" width="65.9" height="27" rx="4" class="c-mask"/>
+          <text x="637.5" y="161" class="t-backend" font-size="8" text-anchor="middle">上报给 core</text>
+        <text x="637.5" y="172" class="t-dim" font-size="7" text-anchor="middle">跨进程事件</text>
         </g>
         <g data-edge-from="job" data-edge-to="run" data-edge-label="同一条规则" data-edge-key="3" data-edge-id="job-run">
-          <rect x="822" y="250" width="61" height="16" rx="4" class="c-mask"/>
-          <text x="852.5" y="261" class="t-backend" font-size="8" text-anchor="middle">同一条规则</text>
+          <rect x="822" y="150" width="61" height="16" rx="4" class="c-mask"/>
+          <text x="852.5" y="161" class="t-backend" font-size="8" text-anchor="middle">同一条规则</text>
         </g>
 
         <!-- Legend -->
         <g data-legend="">
-          <text x="40" y="344" class="t-primary" font-size="12" font-weight="650">图例</text>
-          <g data-legend-semantic-kind="emphasis" data-legend-x="40" data-legend-baseline="364" data-legend-width="83">
-            <path d="M 40 361 L 74 361" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-            <text x="83" y="364" class="t-muted" font-size="10" font-weight="500">主要数据</text>
+          <text x="40" y="304" class="t-primary" font-size="12" font-weight="650">图例</text>
+          <g data-legend-semantic-kind="emphasis" data-legend-x="40" data-legend-baseline="324" data-legend-width="83">
+            <path d="M 40 321 L 74 321" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+            <text x="83" y="324" class="t-muted" font-size="10" font-weight="500">主要数据</text>
           </g>
         </g>
       </svg>
+<!-- gherkai:source-sha256=9b5e39c4569ab17a1c13a9012aa03bfbb2bc5d71940616260de117b79f7e42fc -->

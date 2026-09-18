@@ -4,7 +4,7 @@
 # ① skill 契约副本（ADR 0043 决策四）：源 docs/internals/cli-json-contract.md 或渲染器 tools/render_skill_contract.py 改了，
 #    副本 cli/gherkai_cli/skills/gherkai/references/cli-json-contract.md 就会漂——这里用渲染器 --check 发现漂移即重渲染，
 #    并经 hookSpecificOutput.additionalContext 告诉 agent（副本与源同 commit）。
-# ② 文档图（ADR 0045 决策七）：docs/diagrams/<name>.json 比同名 .svg 新 → 只提醒跑 tools/build_diagrams.mjs，不自动跑
+# ② 文档图（ADR 0045 决策七）：docs/diagrams/<name>.svg 末尾的图源指纹与 sha256(<name>.json) 不符 → 只提醒跑 tools/build_diagrams.mjs，不自动跑
 #    （重建要起 Chrome、20 秒量级，不该挂在每次工具调用上）。
 #
 # 为什么每次工具调用都跑、不按文件路径筛：检查本身 0.1 秒量级；Bash 里用脚本改文件的路径也能覆盖。
@@ -29,17 +29,22 @@ fi
 
 if [ -d docs/diagrams ]; then
   stale=$(python3 - <<'PY'
-import glob, os
+import glob, hashlib, os, re
 out = []
 for j in sorted(glob.glob("docs/diagrams/*.json")):
     s = j[:-5] + ".svg"
-    if not os.path.exists(s) or os.path.getmtime(j) > os.path.getmtime(s) + 1:
+    if not os.path.exists(s):
+        out.append(os.path.basename(j)); continue
+    want = hashlib.sha256(open(j, "rb").read()).hexdigest()
+    tail = open(s, "rb").read()[-200:].decode("utf-8", "replace")
+    m = re.search(r"gherkai:source-sha256=([0-9a-f]{64})", tail)
+    if not m or m.group(1) != want:
         out.append(os.path.basename(j))
 print(" ".join(out))
 PY
   )
   if [ -n "$stale" ]; then
-    notes+=("文档图源比导出的 SVG 新：${stale}——跑 node tools/build_diagrams.mjs docs/diagrams/<name>.json 重出 SVG；已发布到 Pages 的图连 HTML 一起重新 git add。")
+    notes+=("文档图源与导出的 SVG 不一致（指纹不符或缺失）：${stale}——跑 node tools/build_diagrams.mjs docs/diagrams/<name>.json 重出 SVG；已发布到 Pages 的图连 HTML 一起重新 git add。")
   fi
 fi
 

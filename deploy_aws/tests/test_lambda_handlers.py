@@ -329,7 +329,7 @@ def test_kicker_routes_timeout_scope_payload(monkeypatch):
 
 def test_kicker_timeout_path_builds_once(monkeypatch):
     """超时路径的组合根只装配一次（护栏）：_build 每次造 boto3 client + 读 META（可能连 S3 还原正文），
-    处置与随后的 tick 复用同一个。tick 只 stub 掉 gherkai_core.reconcile.tick，_tick_runs 走真身取 prebuilt。"""
+    处置与随后的 tick 复用同一个。tick 只 stub 掉 gherkai_core.reconcile.tick，_tick_runs 走真实实现取 prebuilt。"""
     builds = []
     monkeypatch.setattr(reconciler, "_build", lambda rid: builds.append(rid) or ("BUILT",) * 7)
     monkeypatch.setattr(reconciler, "_handle_timeout", lambda rid, sid, built: "stopped")

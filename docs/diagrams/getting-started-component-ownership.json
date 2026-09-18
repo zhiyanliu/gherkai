@@ -207,8 +207,8 @@
       "from": "worker_local",
       "to": "model",
       "label": "送 step 文本与截图",
-      "fromSide": "top",
-      "toSide": "bottom"
+      "fromSide": "right",
+      "toSide": "left"
     },
     {
       "id": "local-to-browser",
@@ -216,7 +216,8 @@
       "to": "browser",
       "label": "开会话、驱动浏览器",
       "fromSide": "right",
-      "toSide": "left"
+      "toSide": "left",
+      "labelDy": 22
     },
     {
       "id": "cloud-to-model",

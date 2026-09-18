@@ -32,14 +32,14 @@
     { "from": 442, "to": 620, "label": "退出观察与收敛提交" }
   ],
   "messages": [
-    { "id": "m-submit", "from": "cli", "to": "runs", "y": 180, "label": "落定义 + 状态（带后台标记）", "variant": "emphasis", "note": "返回 run_id 后就能关机；只有用隧道测本机应用时本机要一直在线" },
-    { "id": "m-wake-kicker", "from": "runs", "to": "kicker", "y": 226, "label": "写入唤醒（只收带标记的新 run）", "variant": "dashed" },
+    { "id": "m-submit", "from": "cli", "to": "runs", "y": 180, "label": "落定义 + 状态", "variant": "emphasis", "note": "（带后台标记）返回 run_id 后就能关机；只有用隧道测本机应用时本机要一直在线" },
+    { "id": "m-wake-kicker", "from": "runs", "to": "kicker", "y": 226, "label": "写入唤醒", "variant": "dashed", "note": "（只收带标记的新 run）" },
     { "id": "m-first-task", "from": "kicker", "to": "worker", "y": 272, "label": "抢到 job 才起 task", "variant": "emphasis", "note": "每次起 task 都给这个 job 定一次超时闹钟" },
-    { "id": "m-events", "from": "worker", "to": "events", "y": 318, "label": "逐条写事件（序号递增）", "variant": "dashed" },
+    { "id": "m-events", "from": "worker", "to": "events", "y": 318, "label": "逐条写事件", "variant": "dashed", "note": "（序号递增）" },
     { "id": "m-wake-rec", "from": "events", "to": "reconciler", "y": 364, "label": "每批写入都唤醒一次", "variant": "dashed" },
     { "id": "m-next-task", "from": "reconciler", "to": "worker", "y": 410, "label": "重放算出下一步 → 起下个 job", "variant": "emphasis" },
-    { "id": "m-stopped", "from": "worker", "to": "xo", "y": 456, "label": "任务停止（平台事件，带退出码）", "variant": "security" },
-    { "id": "m-exit-item", "from": "xo", "to": "events", "y": 502, "label": "写退出记录（与事件分开放）", "variant": "security" },
+    { "id": "m-stopped", "from": "worker", "to": "xo", "y": 456, "label": "任务停止", "variant": "security", "note": "（平台事件，带退出码）" },
+    { "id": "m-exit-item", "from": "xo", "to": "events", "y": 502, "label": "写退出记录", "variant": "security", "note": "（与事件分开放）" },
     { "id": "m-wake-again", "from": "events", "to": "reconciler", "y": 548, "label": "再唤醒一次：事件与退出都齐了", "variant": "dashed" },
     { "id": "m-finalize", "from": "reconciler", "to": "runs", "y": 594, "label": "全部 job 终态 → 一次落定终态", "variant": "emphasis" }
   ],

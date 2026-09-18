@@ -377,7 +377,8 @@
       "to": "storeLocal",
       "label": "后台：旁路落下",
       "variant": "dashed",
-      "role": "async"
+      "role": "async",
+      "route": "straight"
     },
     {
       "id": "e-table-stream",
@@ -385,7 +386,8 @@
       "to": "streamCloud",
       "label": "每批写入",
       "variant": "dashed",
-      "role": "async"
+      "role": "async",
+      "route": "straight"
     },
     {
       "id": "e-pipe-settle",
@@ -401,7 +403,10 @@
       "to": "settle",
       "label": "全量重放算终态",
       "variant": "dashed",
-      "role": "async"
+      "role": "async",
+      "route": "straight",
+      "labelDx": -55.6,
+      "labelDy": 61
     },
     {
       "id": "e-table-settle",

@@ -456,8 +456,8 @@ rect.c-bg-rect { fill: var(--bg); }
         <text x="960" y="68" class="t-dim" font-size="9" font-weight="600" text-anchor="middle">05 / worker 进程内</text>
 
         <!-- Flow paths -->
-        <path data-edge-from="src" data-edge-to="resolveDir" data-edge-label="提交时读目录" data-edge-key="0" data-edge-id="f-src-dir" data-composition-points="168,264;315,264;315,157;462,157" d="M 168 264 L 315 264 L 315 157 L 462 157" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
-        <path data-edge-from="src" data-edge-to="image" data-edge-label="拷进镜像层" data-edge-key="1" data-edge-id="f-src-image" data-composition-points="168,278;207.5,278;207.5,385;247,385" d="M 168 278 L 207.5 278 L 207.5 385 L 247 385" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path data-edge-from="src" data-edge-to="resolveDir" data-edge-label="提交时读目录" data-edge-key="0" data-edge-id="f-src-dir" data-composition-points="100,242;100,157;462,157" d="M 100 242 L 100 157 L 462 157" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="src" data-edge-to="image" data-edge-label="拷进镜像层" data-edge-key="1" data-edge-id="f-src-image" data-composition-points="100,300;100,385;247,385" d="M 100 300 L 100 385 L 247 385" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
         <path data-edge-from="image" data-edge-to="resolveName" data-edge-label="只按名字对上" data-edge-key="2" data-edge-id="f-image-name" data-composition-points="383,385;462,385" d="M 383 385 L 462 385" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
         <path data-edge-from="resolveDir" data-edge-to="defPath" data-edge-label="路径落进定义" data-edge-key="3" data-edge-id="f-dir-def" data-composition-points="598,157;677,157" d="M 598 157 L 677 157" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
         <path data-edge-from="resolveName" data-edge-to="defRevision" data-edge-label="结果落进定义" data-edge-key="4" data-edge-id="f-name-def" data-composition-points="598,385;677,385" d="M 598 385 L 677 385" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
@@ -479,14 +479,14 @@ rect.c-bg-rect { fill: var(--bg); }
           <text x="100" y="279" class="t-muted" font-size="7" text-anchor="middle">模式与 handler</text>
         </g>
 
-        <g id="node-image" data-node-id="image" data-node-label="烙进 variant 镜像" tabindex="0" role="button" aria-label="聚焦烙进 variant 镜像，推上去 → 一条 revision, 02 / 提交之前：先构建、再推上去" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="推上去 → 一条 revision" data-node-context="02 / 提交之前：先构建、再推上去">
-          <title>烙进 variant 镜像 · 推上去 → 一条 revision · 02 / 提交之前：先构建、再推上去</title>
+        <g id="node-image" data-node-id="image" data-node-label="构建进 variant 镜像" tabindex="0" role="button" aria-label="聚焦构建进 variant 镜像，推上去 → 一条 revision, 02 / 提交之前：先构建、再推上去" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="推上去 → 一条 revision" data-node-context="02 / 提交之前：先构建、再推上去">
+          <title>构建进 variant 镜像 · 推上去 → 一条 revision · 02 / 提交之前：先构建、再推上去</title>
           <rect x="247" y="356" width="136" height="58" rx="6" class="c-mask"/>
           <rect x="247" y="356" width="136" height="58" rx="6" class="c-cloud" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="cloud" class="semantic-sigil s-cloud" transform="translate(253 362) scale(0.6875)">
             <path d="M4.3 12.5h7.3a2.4 2.4 0 0 0 .2-4.8 4 4 0 0 0-7.5-1.3A3.1 3.1 0 0 0 4.3 12.5Z"/>
           </g>
-          <text data-node-label="" x="315" y="377" class="t-primary" font-size="10" font-weight="600" text-anchor="middle">烙进 variant 镜像</text>
+          <text data-node-label="" x="315" y="377" class="t-primary" font-size="10" font-weight="600" text-anchor="middle">构建进 variant 镜像</text>
           <text x="315" y="393" class="t-muted" font-size="7" text-anchor="middle">推上去 → 一条 revision</text>
         </g>
 
@@ -550,25 +550,25 @@ rect.c-bg-rect { fill: var(--bg); }
           <text x="960" y="165" class="t-muted" font-size="7" text-anchor="middle">只认拿到的环境变量</text>
         </g>
 
-        <g id="node-workerCloud" data-node-id="workerCloud" data-node-label="云端 worker 的表" tabindex="0" role="button" aria-label="聚焦云端 worker 的表，镜像里烙好的那份, 05 / worker 进程内" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="镜像里烙好的那份" data-node-context="05 / worker 进程内">
-          <title>云端 worker 的表 · 镜像里烙好的那份 · 05 / worker 进程内</title>
+        <g id="node-workerCloud" data-node-id="workerCloud" data-node-label="云端 worker 的表" tabindex="0" role="button" aria-label="聚焦云端 worker 的表，镜像里构建好的那份, 05 / worker 进程内" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="镜像里构建好的那份" data-node-context="05 / worker 进程内">
+          <title>云端 worker 的表 · 镜像里构建好的那份 · 05 / worker 进程内</title>
           <rect x="892" y="356" width="136" height="58" rx="6" class="c-mask"/>
           <rect x="892" y="356" width="136" height="58" rx="6" class="c-cloud" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="cloud" class="semantic-sigil s-cloud" transform="translate(898 362) scale(0.6875)">
             <path d="M4.3 12.5h7.3a2.4 2.4 0 0 0 .2-4.8 4 4 0 0 0-7.5-1.3A3.1 3.1 0 0 0 4.3 12.5Z"/>
           </g>
           <text data-node-label="" x="960" y="377" class="t-primary" font-size="10" font-weight="600" text-anchor="middle">云端 worker 的表</text>
-          <text x="960" y="393" class="t-muted" font-size="7" text-anchor="middle">镜像里烙好的那份</text>
+          <text x="960" y="393" class="t-muted" font-size="7" text-anchor="middle">镜像里构建好的那份</text>
         </g>
 
         <!-- Flow labels -->
         <g data-edge-from="src" data-edge-to="resolveDir" data-edge-label="提交时读目录" data-edge-key="0" data-edge-id="f-src-dir">
-          <rect x="279.6" y="189.5" width="70.8" height="16" rx="4" class="c-mask"/>
-          <text x="315" y="200.5" class="t-muted" font-size="8" text-anchor="middle">提交时读目录</text>
+          <rect x="245.6" y="136" width="70.8" height="16" rx="4" class="c-mask"/>
+          <text x="281" y="147" class="t-muted" font-size="8" text-anchor="middle">提交时读目录</text>
         </g>
         <g data-edge-from="src" data-edge-to="image" data-edge-label="拷进镜像层" data-edge-key="1" data-edge-id="f-src-image">
-          <rect x="177" y="310.5" width="61" height="16" rx="4" class="c-mask"/>
-          <text x="207.5" y="321.5" class="t-backend" font-size="8" text-anchor="middle">拷进镜像层</text>
+          <rect x="143" y="364" width="61" height="16" rx="4" class="c-mask"/>
+          <text x="173.5" y="375" class="t-backend" font-size="8" text-anchor="middle">拷进镜像层</text>
         </g>
         <g data-edge-from="image" data-edge-to="resolveName" data-edge-label="只按名字对上" data-edge-key="2" data-edge-id="f-image-name">
           <rect x="387.1" y="364" width="70.8" height="16" rx="4" class="c-mask"/>
@@ -608,3 +608,4 @@ rect.c-bg-rect { fill: var(--bg); }
           </g>
         </g>
       </svg>
+<!-- gherkai:source-sha256=a48e901ba0143d692ed737e4cb3b328a1f9e4ef1ffafc316ff87f309d9833ad8 -->

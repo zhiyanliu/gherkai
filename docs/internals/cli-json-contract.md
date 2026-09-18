@@ -59,7 +59,7 @@
 | `report_refs[]` | array | step 级产物指针：两引擎都有 `kind=evidence`（gherkai 自有格式的机读证据，`gherkai explain` 读它，见下节）；Nova 另有每次 act 的轨迹页 `kind=trajectory` |
 | `shortcircuited` | bool | true = 上游 step error 后被跳过、未执行（此时 status=skipped） |
 
-`run_meta`（definition）：`run_id`、`created_at`、`max_concurrency`、`steps_dir`（使用方确定性 step 目录的绝对路径；未解析到目录时**省略**该键——不是 null；cloud 档恒省略，steps 烙在镜像里）、
+`run_meta`（definition）：`run_id`、`created_at`、`max_concurrency`、`steps_dir`（使用方确定性 step 目录的绝对路径；未解析到目录时**省略**该键——不是 null；cloud 档恒省略，steps 构建在镜像里）、
 `worker_variant` / `worker_task_defs`（cloud 档：提交时解析的 variant 与各引擎 task-def revision ARN，local 档省略）、
 `extra_http_headers`（`--expose-local` 注入的请求头，无则省略）、`jobs[]`：
 

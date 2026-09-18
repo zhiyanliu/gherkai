@@ -12,7 +12,7 @@ Agent Skills 是现成的载体：Claude Code、Codex CLI、Cursor 等都认同�
 
 ## 决策
 
-### 一、skill 真身住 CLI 包内 `cli/gherkai_cli/skills/gherkai/`，随 wheel 天然带走；不单开 repo、不放仓库根、不用 force-include
+### 一、skill 源文件住 CLI 包内 `cli/gherkai_cli/skills/gherkai/`，随 wheel 天然带走；不单开 repo、不放仓库根、不用 force-include
 
 - 目录 = Agent Skills 标准布局：`SKILL.md` + `references/` +（按需）`scripts/`。**只放发行内容**——评测资产另立仓库根 `skills/gherkai-evals/`（决策七），结果工作区 `skills/gherkai-workspace/`（gitignore）。理由：两条安装腿都是**整目录递归拷贝**（包内拷 / `npx skills` 的拷贝与软链都先整棵树落地），排除名单由安装器硬编码、使用方无法配置，唯一可靠的隔离手段是不把评测放进被拷的目录；Agent Skills 规范也明说 skill 目录可含任意文件、宿主不替你剪。
 - **为什么住包内而不是仓库根**：hatchling 对包目录内的非 `.py` 文件默认收进 sdist 与 wheel，editable（uv workspace）开发态也在同一路径——运行期定位一律 `importlib.resources.files("gherkai_cli") / "skills" / "gherkai"`，dev 与发行同一条路径、**不设仓库根回落**（对齐 [0037](./0037-distribution-and-packaging.md) 决策 3「不设 dev 模式特判」）。**踩坑护栏**：wheel target 的 `force-include` 引用项目根之外的路径（`../skills/gherkai`），在 `uv build`（默认先出 sdist、再从 sdist 解包目录构 wheel）下必 `FileNotFoundError` 硬失败——CI 与发布链跑的正是无 flag 的 `uv build --all-packages`（实测复现）；只写 sdist target 的 force-include 能过，但 `uv build --wheel` 与 editable 树里该目录不存在、成静默漏文件。故不用 force-include。
@@ -97,7 +97,7 @@ Claude 的 plugin marketplace 只覆盖 Claude、仪式更多，现阶段不做�
 ## 被拒方案
 
 - **单独 `gherkai-skill` repo**：多一条发行轨，skill 与 CLI 版本必漂，护栏无法跨仓对照真值。
-- **仓库根 `skills/gherkai/` 作真身、hatch force-include 打进 wheel**：跨根 force-include 在 `uv build` 的 sdist→wheel 链下硬失败；只写 sdist target 又让 `uv build --wheel` 与 editable 树静默无 skill。
+- **仓库根 `skills/gherkai/` 作源文件位置、hatch force-include 打进 wheel**：跨根 force-include 在 `uv build` 的 sdist→wheel 链下硬失败；只写 sdist target 又让 `uv build --wheel` 与 editable 树静默无 skill。
 - **仓库根放一份生成镜像换 `npx skills add owner/repo --skill gherkai` 短命令**：git 里多一棵镜像树、多一条相等性护栏，换来的只是省一段 URL；直指路径形态官方支持、且能钉 tag。skills.sh 一类目录若将来成为真实需求再议（见「不做 / 延后」）。
 - **Claude plugin marketplace 作为主发行面**：只覆盖 Claude、需 `.claude-plugin/marketplace.json` 一套仪式；Agent Skills 标准已让一份 SKILL.md 通吃。
 - **AGENTS.md 里放一份 Codex 版内容**：双源必漂；Codex 原生读 SKILL.md，AGENTS.md 只该有一行指针。

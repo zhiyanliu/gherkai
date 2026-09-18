@@ -34,7 +34,7 @@
     {
       "id": "image",
       "type": "cloud",
-      "label": "烙进 variant 镜像",
+      "label": "构建进 variant 镜像",
       "sublabel": "推上去 → 一条 revision",
       "stage": 1,
       "row": 2,
@@ -91,7 +91,7 @@
       "id": "workerCloud",
       "type": "cloud",
       "label": "云端 worker 的表",
-      "sublabel": "镜像里烙好的那份",
+      "sublabel": "镜像里构建好的那份",
       "stage": 4,
       "row": 2,
       "width": 136
@@ -103,14 +103,30 @@
       "from": "src",
       "to": "resolveDir",
       "label": "提交时读目录",
-      "variant": "default"
+      "variant": "default",
+      "fromSide": "top",
+      "toSide": "left",
+      "via": [
+        [
+          100,
+          157
+        ]
+      ]
     },
     {
       "id": "f-src-image",
       "from": "src",
       "to": "image",
       "label": "拷进镜像层",
-      "variant": "emphasis"
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "left",
+      "via": [
+        [
+          100,
+          385
+        ]
+      ]
     },
     {
       "id": "f-image-name",

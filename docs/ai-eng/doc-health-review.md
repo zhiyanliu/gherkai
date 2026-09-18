@@ -61,11 +61,12 @@ ADR/CONTEXT 是随构建**逐步长起来**的：每次在前人文档上叠加�
 - `CONTEXT.md`（术语/概念总表）
 - `docs/ai-eng/REFERENCES.md`（外部一手来源 + 源码内点自查资料，AI 用）
 - **用户文档**：`docs/user-guide/*.md`（含 owner 表 `README.md`）、根 `README.md`、`CHANGELOG.md`、`.github/release_body_footer.md`、各包 README（`cli` / `core` / `runtime` / `deploy_aws` / `engines/*`，入口页、逐字上 PyPI/npm）——判据见上「按文档类型的复盘侧重」
-- 其余 README（`core/tests` / `.github/workflows` / `docs` / `docs/internals` / `docs/ai-eng`——不进发行包、按 contributor 向 / 索引页判，ADR 指针与相对链接在它们里合法；三个 `docs/*/README.md` 索引兼 owner 表，与目录内容两向差集）
+- 其余 README（`core/tests` / `.github/workflows` / `skills`（指路：源文件在 cli、这里只有评测资产）/ `docs` / `docs/internals` / `docs/ai-eng`——不进发行包、按 contributor 向 / 索引页判，ADR 指针与相对链接在它们里合法；三个 `docs/*/README.md` 索引兼 owner 表，与目录内容两向差集）
+- skill 评测资产里的文档：`skills/gherkai-evals/grader-prompt.md`（评分子代理的提示词模板，contributor 侧 AI agent 用；查 STALE——它点名的 CLI 命令 / 字段 / 退出码是否仍对得上真值，评测集 `evals.json` 的断言同理，资产清单见 ADR 0043 决策七）
 - 全部 contributor 文档（根 `CONTRIBUTING.md` + `cli` / `core` / `runtime` / `deploy_aws` / `engines/*` 的 `DEVELOPMENT.md`，与同目录 README 成对——判据见上「按文档类型的复盘侧重」）
 - `CLAUDE.md`（项目约定；**只查 DEADLINK / STALE**——它点名的护栏测试文件、ADR 编号、目录名是否仍存在、与所指 ADR 是否一致。规则内容本身是决策，不在复盘里改）
 - `docs/journey/`（staging 区，可为空；**只做生命周期审计**：非空时逐个判「该吸收进 ADR / code 后删」还是「任务仍在推进、留」，不做密度 / 提纯——判据在 CLAUDE.md 文档纪律 journey 条「任务收尾即审计点」）
-- `docs/ai-eng/doc-health-review.md` / `docs/ai-eng/code-health-review.md` 与它们的 Claude Code 入口 `.claude/commands/{doc,code}-health-review.md`（方法文档与入口都已入库：查 DEADLINK / STALE / 内部矛盾 / SEDIMENT + 入口是否仍只含指令与指针、没长出要点复制（入口不复述方法，免同步漂移）；方法内容本身是决策，不在复盘里改——SEDIMENT 只动措辞不动规则（亲历数字、轮次坐标、同一规则的第二遍重述），按主观类出提案待批；不进提纯审计集的 git 层读——与 CLAUDE.md 同款口径）
+- `docs/ai-eng/doc-health-review.md` / `docs/ai-eng/code-health-review.md` / `docs/ai-eng/diagram-authoring.md` 与它们的 Claude Code 入口 `.claude/commands/{doc,code}-health-review.md`、`.claude/skills/diagram/SKILL.md`（方法文档与入口都已入库：查 DEADLINK / STALE / 内部矛盾 / SEDIMENT + 入口是否仍只含指令与指针、没长出要点复制（入口不复述方法，免同步漂移）；方法内容本身是决策，不在复盘里改——SEDIMENT 只动措辞不动规则（亲历数字、轮次坐标、同一规则的第二遍重述），按主观类出提案待批；不进提纯审计集的 git 层读——与 CLAUDE.md 同款口径）
 - `docs/internals/*.md`（给人的阅读理解层，派生视图——判据侧重见上「按文档类型的复盘侧重」）
 - 随 CLI wheel 发行的 **agent skill markdown**（`cli/gherkai_cli/skills/gherkai/SKILL.md` + `references/*.md`，5 份入库）——使用者/agent 面，安装态没有仓库上下文；判据侧重见上「按文档类型的复盘侧重」。
 - **技术笔记/配方 + 工具手册**（如 `engines/midscene/spikes/SIGV4-FETCH-RECIPE.md`、`tools/e2e_harness.md`）——与代码同居、AI 照它接线/照它操作，**极易 STALE**（含可运行代码片段 + 命令 + 前置条件 + 踩坑点 + 源码路径）。

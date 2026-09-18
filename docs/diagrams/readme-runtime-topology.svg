@@ -448,7 +448,7 @@ rect.c-bg-rect { fill: var(--bg); }
         <path data-edge-from="feature" data-edge-to="cli" data-edge-label="读入用例" data-edge-key="0" data-edge-id="read-feature" data-composition-points="153,132;153,260" d="M 153 132 L 153 260" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
         <path data-edge-from="cli" data-edge-to="worker" data-edge-label="云端：提交到后端" data-edge-key="1" data-edge-id="run-cloud" data-composition-points="246,289;390,289" d="M 246 289 L 390 289" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
         <path data-edge-from="cli" data-edge-to="worker" data-edge-label="本机：起子进程" data-edge-key="2" data-edge-id="run-local" data-composition-points="246,303;390,303" d="M 246 303 L 390 303" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        <path data-edge-from="worker" data-edge-to="model" data-edge-label="AI step 的操作与判定" data-edge-key="3" data-edge-id="ask-model" data-composition-points="483,260;483,170;793,170;793,132" d="M 483 260 L 483 178 Q 483 170 491 170 L 785 170 Q 793 170 793 162 L 793 132" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="worker" data-edge-to="model" data-edge-label="AI step 的操作与判定" data-edge-key="3" data-edge-id="ask-model" data-composition-points="483,260;483,96;700,96" d="M 483 260 L 483 104 Q 483 96 491 96 L 700 96" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
         <path data-edge-from="worker" data-edge-to="browser" data-edge-label="CDP" data-edge-key="4" data-edge-id="drive-browser" data-composition-points="576,296;700,296" d="M 576 296 L 700 296" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
         <path data-edge-from="browser" data-edge-to="app_public" data-edge-label="公网直达" data-edge-key="5" data-edge-id="open-public" data-composition-points="886,296;990,296" d="M 886 296 L 990 296" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
         <path data-edge-from="browser" data-edge-to="app_local" data-edge-label="经隧道回本机" data-edge-key="6" data-edge-id="open-local" data-composition-points="793,332;793,476;990,476" d="M 793 332 L 793 468 Q 793 476 801 476 L 990 476" class="a-dashed" stroke-width="1.5" marker-end="url(#arrowhead-dashed)"/>
@@ -566,8 +566,8 @@ rect.c-bg-rect { fill: var(--bg); }
           <text x="318" y="309" class="t-backend" font-size="8" text-anchor="middle">本机：起子进程</text>
         </g>
         <g data-edge-from="worker" data-edge-to="model" data-edge-label="AI step 的操作与判定" data-edge-key="3" data-edge-id="ask-model">
-          <rect x="585" y="150" width="106" height="14" rx="3" class="c-mask"/>
-          <text x="638" y="160" class="t-muted" font-size="8" text-anchor="middle">AI step 的操作与判定</text>
+          <rect x="538.5" y="76" width="106" height="14" rx="3" class="c-mask"/>
+          <text x="591.5" y="86" class="t-muted" font-size="8" text-anchor="middle">AI step 的操作与判定</text>
         </g>
         <g data-edge-from="worker" data-edge-to="browser" data-edge-label="CDP" data-edge-key="4" data-edge-id="drive-browser">
           <rect x="623" y="276" width="30" height="14" rx="3" class="c-mask"/>
@@ -623,3 +623,4 @@ rect.c-bg-rect { fill: var(--bg); }
           </g>
         </g>
       </svg>
+<!-- gherkai:source-sha256=ed9ad232fc9972cfeca39344551486d8c3f1cde00b7103741ef8ca4374788e19 -->

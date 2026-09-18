@@ -21,7 +21,7 @@
           "label": "不传：要设在对面"
         },
         "database": {
-          "label": "镜像里烙进的值"
+          "label": "构建进镜像的值"
         }
       }
     },
@@ -92,7 +92,7 @@
       "id": "img",
       "type": "database",
       "label": "worker 镜像 ENV",
-      "sublabel": "烙进 variant 的值",
+      "sublabel": "构建进 variant 镜像的值",
       "stage": 3,
       "row": 2,
       "tag": "推镜像时定"
@@ -104,6 +104,7 @@
       "sublabel": "Fargate 上的 worker",
       "stage": 4,
       "row": 1,
+      "yOffset": -14,
       "tag": "云端"
     }
   ],
@@ -121,7 +122,8 @@
       "to": "child",
       "label": "继承",
       "variant": "default",
-      "labelSegment": 2
+      "labelSegment": 1,
+      "labelDy": -20
     },
     {
       "id": "cli-child-inject",
@@ -129,8 +131,23 @@
       "to": "child",
       "label": "注入",
       "variant": "emphasis",
-      "labelSegment": 0,
-      "labelDy": 26
+      "fromSide": "right",
+      "toSide": "top",
+      "via": [
+        [
+          450,
+          271
+        ],
+        [
+          450,
+          330
+        ],
+        [
+          530,
+          330
+        ]
+      ],
+      "labelSegment": 2
     },
     {
       "id": "opt-child",
@@ -146,7 +163,7 @@
       "label": "注入",
       "classification": "run --backend cloud",
       "variant": "emphasis",
-      "labelDy": -26
+      "labelDy": 36
     },
     {
       "id": "be-cw",
@@ -154,14 +171,20 @@
       "to": "cw",
       "label": "注入",
       "classification": "submit --backend cloud",
-      "variant": "emphasis"
+      "variant": "emphasis",
+      "toSide": "top",
+      "route": "vertical-channel",
+      "channelX": 960
     },
     {
       "id": "img-cw",
       "from": "img",
       "to": "cw",
       "label": "继承",
-      "variant": "default"
+      "variant": "default",
+      "toSide": "bottom",
+      "route": "vertical-channel",
+      "channelX": 960
     },
     {
       "id": "sh-cw",

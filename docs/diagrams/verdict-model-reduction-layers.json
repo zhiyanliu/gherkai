@@ -7,7 +7,7 @@
     "quality_profile": "showcase",
     "viewBox": [
       1080,
-      400
+      360
     ]
   },
   "stages": [
@@ -35,6 +35,7 @@
       "sublabel": "一次 AI 调用",
       "stage": 0,
       "row": 0,
+      "yOffset": 14,
       "tag": "worker 侧"
     },
     {
@@ -44,6 +45,7 @@
       "sublabel": "AI 断言 / 确定性 step",
       "stage": 1,
       "row": 0,
+      "yOffset": 14,
       "tag": "worker 侧"
     },
     {
@@ -53,6 +55,7 @@
       "sublabel": "本条逐步汇总",
       "stage": 2,
       "row": 0,
+      "yOffset": 14,
       "tag": "worker 侧"
     },
     {
@@ -61,7 +64,8 @@
       "label": "job 收场态",
       "sublabel": "跑完了才归约",
       "stage": 3,
-      "row": 1,
+      "row": 0,
+      "yOffset": 14,
       "tag": "core 侧"
     },
     {
@@ -70,7 +74,8 @@
       "label": "run 判定",
       "sublabel": "整批的最终结论",
       "stage": 4,
-      "row": 1,
+      "row": 0,
+      "yOffset": 14,
       "tag": "core 侧"
     }
   ],

@@ -72,15 +72,15 @@ worker 拿到的只有 `keyword` + 裸 `text`（+可选多行参数）。派发�
 | 档 | 真值源 | 解析规则与落点字段 |
 |---|---|---|
 | local（`--backend local`，含 `submit` 的后台推进） | 本机目录 | `--steps-dir` > env `GHERKAI_STEPS_DIR` > `./steps`（相对**提交时** CWD、存在才用），落 `RunMeta.steps_dir` |
-| cloud（`--backend cloud`） | **variant 镜像里烙进去的 `/app/steps`** | 解析出各引擎的 task-def revision；`RunMeta.steps_dir` 不写 |
+| cloud（`--backend cloud`） | **variant 镜像里构建进去的 `/app/steps`** | 解析出各引擎的 task-def revision；`RunMeta.steps_dir` 不写 |
 
-![local 档提交时解析一次目录、路径随定义走；cloud 档把 steps 烙进 variant 镜像，提交侧只解析镜像名](../diagrams/deterministic-steps-truth-sources.svg)
+![local 档提交时解析一次目录、路径随定义走；cloud 档把 steps 构建进 variant 镜像，提交侧只解析镜像名](../diagrams/deterministic-steps-truth-sources.svg)
 
 图注：图上那条「读回后注入」只发生在后台推进的两处；同步 `run` 与提交侧是同一个进程，直接用解析出的值、不读回。cloud 那条链在提交之前就完成：镜像由写 steps 的人按模板 build，推送与登记归部署方，两步都不在一次 run 的时间线上。提交侧解析 variant 时的存在性/一致性校验、两档各自的失败形态与提示，见下文与 §4 表。
 
 local 侧三处宿主（同步 `run`、`submit` 的后台推进进程、`status --wait` 接力者，见 [`execution-and-reconciliation.md`](./execution-and-reconciliation.md) §3 与 §4a）的 CWD 各不相同，所以**解析只能做一次**：谁再解析一次 `./steps`，同一个 run 就会用到两套 step。落点：后台两处读回 `meta.steps_dir`（`detached.build_local_reconcile`），同步 `run` 用提交侧那个值；注入与清同名在 `compose.build_engines` / `_scrubbed_environ`——**每个**宿主建 env 都先清掉自己 shell 里的同名 `GHERKAI_STEPS_DIR`（接力那台机器 export 过只是最易踩的一例），export 越不过 definition，worker 只认这一个 env、不猜 `./steps`。
 
-cloud 侧的关键是**镜像是唯一载体**：你的 `steps/` 靠三行 Dockerfile（模板唯一真源在 [ADR 0038](../adr/0038-worker-image-delivery.md)「概念模型」节）烙进一个 **variant**，由部署方 `gherkai deploy push-worker` 推上去；镜像里已经设好与本机档**同一个** `GHERKAI_STEPS_DIR`，容器里的 worker 装的就是烙进去的那份。提交时 `compose.resolve_worker_variant` 只做三环存在性/一致性校验（三环各查什么、缺哪一环怎么报，见 [`cloud-backend-carriers.md`](./cloud-backend-carriers.md) §5）——**一个字节的 steps 内容都不看**。
+cloud 侧的关键是**镜像是唯一载体**：你的 `steps/` 靠三行 Dockerfile（模板唯一真源在 [ADR 0038](../adr/0038-worker-image-delivery.md)「概念模型」节）构建进一个 **variant**，由部署方 `gherkai deploy push-worker` 推上去；镜像里已经设好与本机档**同一个** `GHERKAI_STEPS_DIR`，容器里的 worker 装的就是构建进去的那份。提交时 `compose.resolve_worker_variant` 只做三环存在性/一致性校验（三环各查什么、缺哪一环怎么报，见 [`cloud-backend-carriers.md`](./cloud-backend-carriers.md) §5）——**一个字节的 steps 内容都不看**。
 
 由此两条对使用者最要紧的推论：
 
@@ -89,7 +89,7 @@ cloud 侧的关键是**镜像是唯一载体**：你的 `steps/` 靠三行 Docke
 
 variant / 默认指针 / revision / digest 这些载体本身（SSM 键、ECR tag、退休与清理）见 [`cloud-backend-carriers.md`](./cloud-backend-carriers.md) 与 [`docs/user-guide/cloud-backend.md`](../user-guide/cloud-backend.md)。
 
-> 权威：[ADR 0037](../adr/0037-distribution-and-packaging.md) 决策 4（解析在组合根、随 definition 持久化、worker 只认 env；cloud 档 steps 烙镜像）、[ADR 0038](../adr/0038-worker-image-delivery.md)（定制镜像模板、preflight variant 解析、「不比对 steps 内容」的不变量与被拒方案）、[ADR 0034](../adr/0034-detached-batch-reconciler.md)（三个宿主与各自 CWD）。
+> 权威：[ADR 0037](../adr/0037-distribution-and-packaging.md) 决策 4（解析在组合根、随 definition 持久化、worker 只认 env；cloud 档 steps 构建进镜像）、[ADR 0038](../adr/0038-worker-image-delivery.md)（定制镜像模板、preflight variant 解析、「不比对 steps 内容」的不变量与被拒方案）、[ADR 0034](../adr/0034-detached-batch-reconciler.md)（三个宿主与各自 CWD）。
 
 ## 4. 响亮地失败：症状 → 原因 → 怎么办
 

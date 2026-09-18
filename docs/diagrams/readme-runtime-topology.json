@@ -169,15 +169,11 @@
       "to": "model",
       "label": "AI step 的操作与判定",
       "fromSide": "top",
-      "toSide": "bottom",
+      "toSide": "left",
       "via": [
         [
           483,
-          170
-        ],
-        [
-          793,
-          170
+          96
         ]
       ]
     },

@@ -18,7 +18,7 @@
 
 | 类 | 读者 | 内容 | 位置 |
 |---|---|---|---|
-| **contributor 侧 AI agent** | 在本仓库里干活的 AI agent（约 80% 读者，[CLAUDE.md](../../CLAUDE.md) 文档纪律「读者比例决定优化方向」条） | ADR、`CONTEXT.md`、`CLAUDE.md`、`.claude/commands/`、`docs/ai-eng/`（REFERENCES 外部一手来源 + 两份 health-review 方法）、`docs/journey/` | ADR / CONTEXT / CLAUDE.md 位置固定（工具有位置依赖）；方法文档与 REFERENCES 归 `docs/ai-eng/` |
+| **contributor 侧 AI agent** | 在本仓库里干活的 AI agent（约 80% 读者，[CLAUDE.md](../../CLAUDE.md) 文档纪律「读者比例决定优化方向」条） | ADR、`CONTEXT.md`、`CLAUDE.md`、`.claude/commands/`、`docs/ai-eng/`（REFERENCES 外部一手来源 + 两份 health-review 方法）、`docs/journey/`、skill 评测资产 `skills/gherkai-evals/`（评测集 / fixture / 评分提示词，归 [0043](./0043-agent-skill-for-driving-gherkai.md) 决策七；`skills/README.md` 只是指路） | ADR / CONTEXT / CLAUDE.md 位置固定（工具有位置依赖）；方法文档与 REFERENCES 归 `docs/ai-eng/` |
 | **技术文档** | contributor；想懂机理的技术人员 | contributor：根 `CONTRIBUTING.md` + 各包 `DEVELOPMENT.md` + `.github/workflows/README.md`；机理：`docs/internals/`（原 `docs/guides/`） | DEVELOPMENT 留包旁（见被拒方案） |
 | **用户文档** | 使用者，以及**使用者侧 AI agent** | `docs/user-guide/`（叙事主页）、根 `README.md`（门面）、各包 `README.md`（入口页，逐字上 PyPI / npm）、GitHub Release 正文、agent skill（[0043](./0043-agent-skill-for-driving-gherkai.md)） | 新建 `docs/user-guide/`，其余原位改写 |
 
@@ -61,7 +61,8 @@
 ### 七、图统一用 archify：JSON 图源 + 导出 SVG 入库，只有发布到 Pages 的交互版才入库 HTML
 
 - **全部文档里的图统一用 archify 生成**（architecture / workflow / sequence / dataflow / lifecycle 五类，showcase 档校验零告警才算成图），不再用 mermaid。理由：阅读质量——mermaid 自动布局无分组框、无图例、边交叉绕行，只算「够用」；archify 的布局经校验、有边界框 / 图例 / 卡片 / 明暗主题，是可发表的图。统一一种形态也免去两套约定。立图门槛不变：结构 / 顺序 / 状态 / 分支用文字确实费劲、且能指出它替代或压缩了哪段文字；能用一张表说清的不立图。图上只画结构与指向，会漂的字面量（默认值 / 键名 / 个数 / 函数名 / 模型名 / region）留正文或表。
-- **三段流程，只有第一段需要智能**：① 作者化——AI 按 archify schema 写 `docs/diagrams/<name>.json`（图源）；② 渲染——`archify deliver` 把 JSON 确定性地渲成可交互 HTML（纯 CLI、无 LLM，带 SHA-256 回执）；③ 导出——headless Chrome 从 HTML 点导出得到 `<name>.svg`（正文以 markdown 图片语法嵌入，双主题、字体内嵌）。②③ 由 `tools/build_diagrams.mjs` 一条命令完成。
+- **作图方法单列**：怎么一次画对（类型选择、内容规则、布局清单、archify 技法、自检）记在 [`docs/ai-eng/diagram-authoring.md`](../ai-eng/diagram-authoring.md)，入口是项目级 skill `.claude/skills/diagram/`——决策与方法分家，同 doc-health 那套（ADR 定规则、`docs/ai-eng/` 记方法、`.claude/` 做入口）。
+- **三段流程，只有第一段需要智能**：① 作者化——AI 按 archify schema 写 `docs/diagrams/<name>.json`（图源）；② 渲染——`archify deliver` 把 JSON 确定性地渲成可交互 HTML（纯 CLI、无 LLM，带 SHA-256 回执）；③ 导出——headless Chrome 从 HTML 点导出得到 `<name>.svg`（正文以 markdown 图片语法嵌入，双主题、字体内嵌）。②③ 由 `tools/build_diagrams.mjs` 一条命令完成。导出时在 SVG 末尾追加一行图源 sha256 指纹注释；护栏 `cli/tests/test_user_docs.py` 逐张比对指纹与 JSON，「改了图源没重导」在 CI 里就红（mtime 在 git checkout 后无意义，故用内容指纹）；本机 hook `.claude/hooks/sync-derived.sh` 用同一指纹在编辑时刻提醒（ADR 0043 决策四的同一套 hook）。
 - **入库什么**：每张图 **JSON + SVG 同 commit**——JSON 是唯一可读源（审稿核事实、护栏扫禁词、确定性重生成都靠它，没有它改图只能让 LLM 重新作者化、布局每次都变）；SVG 是 markdown 唯一可靠的嵌入形态（GitHub 打开仓库内 `.html` 只显示源码、raw 域以纯文本返回、内联 `<svg>` / `<script>` 会被消毒，只有 `<img>` 指向仓库内 `.svg` 可靠，字形丢失时退回 PNG）。**HTML 只对发布到 Pages 的图入库**（每张约 800 KB，作为交互版是产物本身、不入库就没法发布；其余图的 HTML 只是导出 SVG 的中间物，`.gitignore` 排除、白名单放行）。发布 = 三个动作同 commit：`.gitignore` 加白名单行、`index.html` 加链接、HTML 入库；护栏断言入库的每个 HTML 都在 `index.html` 里有链接。
 - **哪些图发布交互版**：读者需要「聚焦一格、追一条路径」的大图，首批两张——执行与推进全景（四组合叠加）、云端交付与 worker 身份拓扑。小图不发布：缩放聚焦对 7 到 12 个节点的图没有收益。
 - **GitHub Pages 只发布 `docs/diagrams/`**，经 `.github/workflows/pages.yml` 原样上传该目录（`index.html` + 已入库的 HTML + SVG），只在默认分支上部署，不依赖任何外部构建。不把整个仓库树站点化：ADR / CONTEXT 是给contributor 侧 AI agent 读的，不该多出一个仓库外入口；markdown 文档在 GitHub 上直接读。

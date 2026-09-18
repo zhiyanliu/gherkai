@@ -857,7 +857,7 @@ def test_plan_degrades_when_worker_runtime_missing(tmp_path, monkeypatch, capsys
 # ---- steps/ 定制面（ADR 0037 决策 4）：解析在组合根、随 definition 持久化、worker 只认 env ----
 
 def _spy_build_engines(monkeypatch):
-    """记录 build_engines 收到的 kwargs（仍调真身，保 cmd/env 接线真实）。"""
+    """记录 build_engines 收到的 kwargs（仍调真实实现，保 cmd/env 接线真实）。"""
     box = {}
     real = m.compose.build_engines
 

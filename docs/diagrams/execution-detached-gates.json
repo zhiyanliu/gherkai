@@ -210,6 +210,9 @@
       "from": "judgeDetached",
       "to": "judgeSettled",
       "label": "是 → 再判一道",
+      "fromSide": "right",
+      "toSide": "left",
+      "route": "straight",
       "variant": "emphasis",
       "role": "main"
     },
@@ -218,6 +221,10 @@
       "from": "judgeDetached",
       "to": "blkAct",
       "label": "不是后台批次",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "route": "straight",
+      "labelDy": 100,
       "variant": "security",
       "role": "error"
     },
@@ -234,6 +241,10 @@
       "from": "judgeSettled",
       "to": "blkRewrite",
       "label": "已经收尾",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "route": "straight",
+      "labelDy": 100,
       "variant": "security",
       "role": "error"
     },
@@ -242,6 +253,9 @@
       "from": "judgeExit",
       "to": "goExit",
       "label": "是后台批次",
+      "fromSide": "right",
+      "toSide": "left",
+      "route": "straight",
       "variant": "default",
       "role": "branch"
     },
@@ -250,6 +264,10 @@
       "from": "judgeExit",
       "to": "blkExit",
       "label": "不是后台批次",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "route": "straight",
+      "labelDy": 54,
       "variant": "security",
       "role": "error"
     }
