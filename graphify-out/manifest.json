@@ -1500,8 +1500,8 @@
     "semantic_hash": ""
   },
   "docs/diagrams/architecture-overview-run-lifecycle.svg": {
-    "mtime": 1789717822.6513586,
-    "ast_hash": "ccffc89f9ee8be9c4e22931cb3c5053d",
+    "mtime": 1789718612.8147318,
+    "ast_hash": "ceb9d238b49e989171042584d4cfb27a",
     "semantic_hash": ""
   },
   "docs/diagrams/artifacts-evidence-chain.svg": {
@@ -1700,8 +1700,8 @@
     "semantic_hash": ""
   },
   "docs/ai-eng/diagram-authoring.md": {
-    "mtime": 1789717866.0461116,
-    "ast_hash": "e0135e62fe5ec8262bd3a1e3b9e0ae67",
+    "mtime": 1789718357.590842,
+    "ast_hash": "5bda1e6f1efb964330e7a4076fedd62e",
     "semantic_hash": ""
   }
 }

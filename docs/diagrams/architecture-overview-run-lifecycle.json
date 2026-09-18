@@ -160,7 +160,7 @@
     {
       "id": "exit",
       "lane": "laneBack",
-      "col": 4,
+      "col": 3,
       "type": "security",
       "label": "进程退出信号",
       "sublabel": "worker 终止即产生",
@@ -261,7 +261,11 @@
       "label": "终止时",
       "fromSide": "bottom",
       "variant": "security",
-      "role": "branch"
+      "role": "branch",
+      "route": "straight",
+      "toSide": "top",
+      "labelDx": 48,
+      "labelDy": 40
     },
     {
       "id": "e-exit-drive",
@@ -270,7 +274,11 @@
       "label": "回传核心：可以收场",
       "variant": "security",
       "role": "return",
-      "route": "return-left"
+      "fromSide": "left",
+      "toSide": "left",
+      "channelX": 600,
+      "labelSegment": 1,
+      "labelDx": -40
     },
     {
       "id": "e-drive-reduce",

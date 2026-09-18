@@ -46495,7 +46495,7 @@
       "label": "\u4e94\u3001\u8fd4\u56de\u4e0e\u8bb0\u5f55",
       "file_type": "document",
       "source_file": "docs/ai-eng/diagram-authoring.md",
-      "source_location": "L55",
+      "source_location": "L56",
       "_origin": "ast",
       "id": "docs_ai_eng_diagram_authoring_\u4e94_\u8fd4\u56de\u4e0e\u8bb0\u5f55",
       "community": 30,
@@ -148056,7 +148056,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/ai-eng/diagram-authoring.md",
-      "source_location": "L55",
+      "source_location": "L56",
       "weight": 1.0,
       "_origin": "ast",
       "source": "docs_ai_eng_diagram_authoring_\u6587\u6863\u56fe\u4f5c\u8005\u5316\u65b9\u6cd5_archify_\u4efb\u52a1\u8bf4\u660e",
@@ -199848,5 +199848,5 @@
       "source_file": "docs/adr/0024-worker-core-protocol.md"
     }
   ],
-  "built_at_commit": "a79d6856517d0b522474c1b66fe7de5cfca8ecfe"
+  "built_at_commit": "22adf0ec701459c0440b64e252582cfb61becfad"
 }
