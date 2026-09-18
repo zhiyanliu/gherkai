@@ -702,7 +702,7 @@ def _cmd_doctor(args) -> int:
         add("aws", "identity", True, "未查（给 --backend cloud 或 --prefix 才查云端）", required=False)
         add("backend", "reachability", True, "未查（同上）", required=False)
     else:
-        cred_fail = "凭证/region 不可用（--region / AWS_REGION / --profile）：{e}"
+        cred_fail = "凭证/region 不可用（--region / AWS_REGION / AWS_DEFAULT_REGION / --profile / AWS_PROFILE）：{e}"
         try:
             # region 落实要读 profile config：profile 名不存在在这里就炸，与探针失败共用一句诊断（对 agent 是同一件事）
             target = compose.resolve_cloud_target(prefix=args.prefix, region=args.region, profile=args.profile)
