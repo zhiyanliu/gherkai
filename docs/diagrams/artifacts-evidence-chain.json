@@ -1,0 +1,185 @@
+{
+  "schema_version": 1,
+  "diagram_type": "dataflow",
+  "meta": {
+    "title": "证据链：谁产、谁解引用、字节什么时候到",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "viewBox": [
+      1060,
+      510
+    ],
+    "legend": {
+      "mode": "auto",
+      "entries": {
+        "emphasis": {
+          "label": "证据主链：产出与解引用"
+        },
+        "default": {
+          "label": "引擎自己写的 / 按地址取的"
+        },
+        "dashed": {
+          "label": "只搬链接、不解析"
+        },
+        "database": {
+          "label": "落盘的产物"
+        }
+      }
+    }
+  },
+  "stages": [
+    {
+      "label": "产出：判定成立那一刻"
+    },
+    {
+      "label": "落盘：各答一件事"
+    },
+    {
+      "label": "顺指针取用"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "worker",
+      "type": "external",
+      "label": "worker",
+      "sublabel": "手里还有引擎材料",
+      "stage": 0,
+      "row": 1,
+      "tag": "产证据的一方",
+      "width": 140
+    },
+    {
+      "id": "native",
+      "type": "database",
+      "label": "引擎原生产物",
+      "sublabel": "报告 / 轨迹 / 会话汇总",
+      "stage": 1,
+      "row": 0,
+      "tag": "引擎自己的格式",
+      "width": 152
+    },
+    {
+      "id": "verdict",
+      "type": "database",
+      "label": "判定真值",
+      "sublabel": "每个 job 一份 · 含证据指针",
+      "stage": 1,
+      "row": 1,
+      "tag": "唯一权威",
+      "width": 156
+    },
+    {
+      "id": "evidence",
+      "type": "database",
+      "label": "AI 证据明细",
+      "sublabel": "gherkai 自有格式",
+      "stage": 1,
+      "row": 2,
+      "tag": "step 级",
+      "width": 150
+    },
+    {
+      "id": "explain",
+      "type": "frontend",
+      "label": "gherkai explain",
+      "sublabel": "只解引用自有格式",
+      "stage": 2,
+      "row": 1,
+      "tag": "读证据的入口",
+      "width": 152
+    },
+    {
+      "id": "shot",
+      "type": "database",
+      "label": "截图文件",
+      "sublabel": "file:// 或 s3://",
+      "stage": 2,
+      "row": 2,
+      "tag": "地址先写 · 字节后到",
+      "width": 148
+    }
+  ],
+  "flows": [
+    {
+      "from": "worker",
+      "to": "native",
+      "label": "引擎 SDK 自己写",
+      "classification": "格式随版本漂"
+    },
+    {
+      "from": "worker",
+      "to": "verdict",
+      "label": "证据指针进判定",
+      "classification": "随 step 事件落库",
+      "variant": "emphasis",
+      "route": "straight",
+      "labelDy": -42,
+      "labelDx": 100
+    },
+    {
+      "from": "worker",
+      "to": "evidence",
+      "label": "抽取现场落盘",
+      "classification": "step 结束那一刻",
+      "variant": "emphasis"
+    },
+    {
+      "from": "verdict",
+      "to": "explain",
+      "label": "指针从这里取",
+      "variant": "emphasis",
+      "route": "straight",
+      "labelDy": -30,
+      "labelDx": 52
+    },
+    {
+      "from": "evidence",
+      "to": "explain",
+      "label": "只这一份被解析",
+      "variant": "emphasis"
+    },
+    {
+      "from": "native",
+      "to": "explain",
+      "label": "只搬链接、不解析",
+      "classification": "指针来自判定真值",
+      "variant": "dashed"
+    },
+    {
+      "from": "evidence",
+      "to": "shot",
+      "label": "地址确定性算出",
+      "classification": "云端档字节异步上传",
+      "route": "straight",
+      "labelDy": 58
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "为什么由 worker 产",
+      "items": [
+        "step 判定成立那一刻，引擎材料还在手上：刚落盘的轨迹、内存里的执行记录",
+        "不是命令行事后回头解析 SDK 产物",
+        "只有调过 AI 的 step 有这条链：确定性命中与导航步不产证据明细"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "只解引用自有格式的那一份",
+      "items": [
+        "引擎原生产物只当链接原样搬出——它们的格式随 SDK 版本漂，解析它等于把引擎知识搬进命令行",
+        "读字节只有一个入口：本机路径与云端对象走同一套解析"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "截图只写地址，不等字节",
+      "items": [
+        "地址用上传器的同一套规则确定性算出，所以能先写进证据明细",
+        "判定因此不被网络拖住：本机档字节落盘即在，云端档随后异步补上"
+      ]
+    }
+  ]
+}

@@ -30,19 +30,19 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 | `engines.model.<引擎>` | 该引擎 worker 自述成功时 | 这台机器起 job 时**实际会用**的模型 id，由 worker 自报。展示项 |
 | `steps.dir` | 总是 | 解析到的确定性 step 目录。没有 `steps/` 目录是多数项目的常态；`--steps-dir` 或 `GHERKAI_STEPS_DIR` 指的路径不是目录时是必修失败 |
 | `steps.load.<引擎>` | 每个可用引擎（`steps.dir` 判 `✗` 时不问自述，本行与 `engines.model.<引擎>` 都不出现） | 该引擎加载到多少条确定性 step（含内建）。有 steps 目录时必修，没有时只是可选 |
-| `aws.region` | 云端 | 落实到的 region。四处都没有 region 时必修失败 |
-| `aws.identity` | 云端 | 调用者身份。凭证不可用或 profile 名不存在时必修失败；未给云端参数时这一行只标「未查（给 --backend cloud 或 --prefix 才查云端）」 |
-| `backend.reachability` | 未给云端参数时，或给了云端参数而 region、凭证先失败时 | 前者标「未查（同上）」；后者标「未查：region 还没解析出来」或「未查：凭证先过不了」并标 `-`，真正的失败在它上面那一行 |
-| `backend.version` | 云端 | 后端版本戳与 CLI 版本比对。本机 CLI 新于后端时必修失败（提交也会被拒）；读版本戳本身失败（凭证、权限、网络）时同样必修失败。后端没有版本戳只提示、不拦，按提示让部署方运行一次 `gherkai deploy` 把戳写上 |
+| `aws.region` | 云端（region 只剩 profile 配置这一处可取时——`--profile` / `AWS_PROFILE` 指的 profile 读不出来，这一行不出现，失败报在 `aws.identity` 那行） | 落实到的 region。四处都没有 region 时必修失败 |
+| `aws.identity` | 总是（云端而 `aws.region` 判 `✗` 时不出现） | 调用者身份。凭证不可用或 profile 名不存在时必修失败；未给云端参数时这一行只标「未查（给 --backend cloud 或 --prefix 才查云端）」 |
+| `backend.reachability` | 未给云端参数时，或给了云端参数而 `aws.region`、`aws.identity` 先失败时（两者都通过就没有这一行，下面几行即实际探测结果） | 这一行只交代云端为什么没查：三种情形依次标「未查（同上）」/「未查：region 还没解析出来」/「未查：凭证先过不了」，后两种同时标 `-`——真正的失败在它上面那一行，`backend.*` 其余各行都不出现 |
+| `backend.version` | 云端 | 后端版本戳与 CLI 版本比对。本机 CLI 新于后端时必修失败（提交也会被拒）；读版本戳本身失败（凭证、权限、网络）时同样必修失败。后端没有版本戳只提示、不拦，按提示让部署方运行一次 `gherkai deploy` 把戳写上。两侧任一不是正式发行版本（含本机从源码直跑、取不到自身版本）时跳过比对，只提示、标 `✓` |
 | `backend.resources` | 云端 | 两张表、产物桶、cluster、两个引擎的 task 定义、三个 Lambda 是否都在，报告前缀与 `--report-dir` 是否一致。必修 |
-| `backend.worker.default` | 云端 | 部署级默认 worker 镜像 variant 指针。缺失时必修失败 |
-| `backend.worker.<引擎>` | 云端 | 该引擎在默认 variant 下解析到的 task 定义 revision。单引擎解析不到只标 `-` |
-| `backend.worker.any` | 云端 | 至少一个引擎解析到 worker 镜像。两个都解析不到时必修失败 |
-| `backend.worker.grace` | 云端 | 本机 worker 自报的收尾宽限与云端为它设的停止宽限比对。差距只标 `-`、不影响退出码，这一行会说明云端宽限是否还能调高 |
+| `backend.worker.default` | 云端 | 部署级默认 worker 镜像 variant 指针。缺失或读不到时必修失败，云端这一段自检到此为止：下面三行 `backend.worker.*` 都不出现 |
+| `backend.worker.<引擎>` | 云端，且 `backend.worker.default` 通过后 | 该引擎在默认 variant 下解析到的 task 定义 revision。单引擎解析不到只标 `-` |
+| `backend.worker.any` | 云端，且 `backend.worker.default` 通过后 | 至少一个引擎解析到 worker 镜像。两个都解析不到时必修失败 |
+| `backend.worker.grace` | 云端，且 `backend.worker.default` 通过后 | 本机 worker 自报的收尾宽限与云端为它设的停止宽限比对，只比解析到镜像、且本机装了 worker 的引擎：一个引擎都没解析到镜像时整行标「未查」；解析到了、但本机没装对应 worker 的引擎会被跳过并在行内说明。差距只标 `-`、不影响退出码，这一行会说明云端宽限是否还能调高 |
 | `provider.deploy-aws` | 未装部署 extra、装了多个部署 provider、或装了却加载失败时 | 前两种只是说明（部署 extra 只有部署方需要）；**装了却加载失败**是必修失败 |
 | `provider.node`、`provider.cdk`、`provider.container-engine` | 部署 provider 可自检时 | Node ≥ 22、`cdk` 或 `npx`、容器引擎能否连上。三项都不是必修项：通过标 `✓`，缺失或连不上只标 `-`，不影响退出码；它们只影响 `gherkai deploy` 与 `gherkai deploy push-worker`，不影响提交与本机跑 |
 
-给 `--backend cloud` 或 `--prefix` 才会查 `aws.*` 与 `backend.*` 两段；`--prefix` 与 `--report-dir` 都要与提交时用的值一致，否则查的是另一套资源。自检不查隧道前置。
+给 `--backend cloud` 或 `--prefix` 才会查 `aws.*` 与 `backend.*` 两段；`--prefix` 与 `--report-dir` 都要与提交时用的值一致，否则查的是另一套资源。云端两段中途早退不影响 `provider.*` 段，它照常查。自检不查隧道前置。
 
 ## 安装与版本
 
@@ -61,8 +61,8 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 
 | 症状 | 原因 | 处置 |
 |---|---|---|
-| `没解析出 region`（自检的 `aws.region` 行），或 worker 启动即报 `AWS_REGION 未设` | `--region`、`AWS_REGION`、`AWS_DEFAULT_REGION`、`--profile` 指的 profile 配置，四处都没有 region | 任选一处设上。缺失时不会替你选一个 region |
-| `凭证/region 不可用（--region / AWS_REGION / --profile）` | 本机凭证链取不到可用凭证，或 `--profile` 给的名字不存在 | 配好 AWS 凭证（profile、环境变量、实例角色皆可），或改正 profile 名。两个引擎都用 IAM 鉴权，不需要 API key |
+| `没解析出 region`（自检的 `aws.region` 行），或 worker 启动即报 `AWS_REGION 未设` | `--region`、`AWS_REGION`、`AWS_DEFAULT_REGION`、`--profile` / `AWS_PROFILE` 指的 profile 配置，四处都没有 region | 任选一处设上。缺失时不会替你选一个 region |
+| `凭证/region 不可用（--region / AWS_REGION / AWS_DEFAULT_REGION / --profile / AWS_PROFILE）` | 本机凭证链取不到可用凭证，或 `--profile` / `AWS_PROFILE` 给的 profile 名不存在 | 配好 AWS 凭证（profile、环境变量、实例角色皆可），或改正 profile 名。两个引擎都用 IAM 鉴权，不需要 API key |
 | 本机跑也报凭证错 | 浏览器与模型都在云端，本机 `run` / `submit` 同样要凭证 | 不需要 AWS 凭证的命令只有 `plan`、`list-engines`、`list-deterministic`、`gherkai skill install`、不带云端参数的 `doctor`，以及本机后端下只读报告目录的 `status` 与 `explain`（`status --wait` 会接着推进这个 run，那时需要凭证） |
 
 ## 模型

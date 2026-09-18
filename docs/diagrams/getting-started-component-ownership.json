@@ -1,0 +1,267 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "部件归属：你的机器与 AWS 账户",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "legend": {
+      "mode": "auto",
+      "entries": {
+        "frontend": {
+          "label": "命令行入口"
+        },
+        "backend": {
+          "label": "本机进程"
+        },
+        "cloud": {
+          "label": "账户里的云端资源"
+        },
+        "security": {
+          "label": "凭证"
+        },
+        "external": {
+          "label": "你的用例与被测应用"
+        }
+      }
+    }
+  },
+  "components": [
+    {
+      "id": "feature",
+      "type": "external",
+      "label": ".feature 用例",
+      "pos": [
+        60,
+        60
+      ],
+      "size": [
+        186,
+        72
+      ]
+    },
+    {
+      "id": "cli",
+      "type": "frontend",
+      "label": "gherkai 命令行",
+      "sublabel": "解析与分组",
+      "pos": [
+        400,
+        60
+      ],
+      "size": [
+        186,
+        72
+      ]
+    },
+    {
+      "id": "creds",
+      "type": "security",
+      "label": "凭证与 region",
+      "sublabel": "本机默认凭证链",
+      "pos": [
+        60,
+        300
+      ],
+      "size": [
+        186,
+        72
+      ]
+    },
+    {
+      "id": "worker_local",
+      "type": "backend",
+      "label": "本机 worker",
+      "sublabel": "按引擎分开装",
+      "pos": [
+        400,
+        470
+      ],
+      "size": [
+        186,
+        72
+      ]
+    },
+    {
+      "id": "worker_cloud",
+      "type": "cloud",
+      "label": "云端 worker",
+      "sublabel": "同一套引擎",
+      "pos": [
+        1140,
+        60
+      ],
+      "size": [
+        186,
+        72
+      ]
+    },
+    {
+      "id": "model",
+      "type": "cloud",
+      "label": "模型服务",
+      "sublabel": "按引擎不同",
+      "pos": [
+        900,
+        300
+      ],
+      "size": [
+        186,
+        72
+      ]
+    },
+    {
+      "id": "browser",
+      "type": "cloud",
+      "label": "云端浏览器会话",
+      "sublabel": "由引擎操作",
+      "pos": [
+        900,
+        470
+      ],
+      "size": [
+        186,
+        72
+      ]
+    },
+    {
+      "id": "app",
+      "type": "external",
+      "label": "被测应用",
+      "sublabel": "浏览器要能访问到",
+      "pos": [
+        900,
+        650
+      ],
+      "size": [
+        186,
+        72
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "你的机器",
+      "wraps": [
+        "feature",
+        "cli",
+        "creds",
+        "worker_local"
+      ],
+      "pad": 24
+    },
+    {
+      "kind": "region",
+      "label": "AWS 账户",
+      "wraps": [
+        "worker_cloud",
+        "model",
+        "browser"
+      ],
+      "pad": 24
+    }
+  ],
+  "connections": [
+    {
+      "id": "feature-into-cli",
+      "from": "feature",
+      "to": "cli",
+      "label": "读入用例"
+    },
+    {
+      "id": "creds-for-cli",
+      "from": "creds",
+      "to": "cli",
+      "label": "云端档用它",
+      "variant": "dashed",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "creds-for-worker",
+      "from": "creds",
+      "to": "worker_local",
+      "label": "本机档用它",
+      "variant": "dashed",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "spawn-local-worker",
+      "from": "cli",
+      "to": "worker_local",
+      "label": "本机档：拉起子进程",
+      "variant": "emphasis",
+      "labelDy": 180
+    },
+    {
+      "id": "start-cloud-worker",
+      "from": "cli",
+      "to": "worker_cloud",
+      "label": "云端档：任务在云端起",
+      "variant": "emphasis"
+    },
+    {
+      "id": "local-to-model",
+      "from": "worker_local",
+      "to": "model",
+      "label": "送 step 文本与截图",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "local-to-browser",
+      "from": "worker_local",
+      "to": "browser",
+      "label": "开会话、驱动浏览器",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "cloud-to-model",
+      "from": "worker_cloud",
+      "to": "model",
+      "label": "同样送 step 与截图",
+      "fromSide": "left",
+      "toSide": "top"
+    },
+    {
+      "id": "cloud-to-browser",
+      "from": "worker_cloud",
+      "to": "browser",
+      "label": "同样开会话与驱动",
+      "fromSide": "bottom",
+      "toSide": "right"
+    },
+    {
+      "id": "browser-visits-app",
+      "from": "browser",
+      "to": "app",
+      "label": "访问页面",
+      "labelDy": 84
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "两档只差一处：worker 在哪跑",
+      "items": [
+        "本机档：worker 是你机器上的子进程",
+        "云端档：worker 在账户里作为任务起",
+        "两档跑同样的引擎，对浏览器会话与模型服务做同样的事",
+        "只往云端提交的人不用装本机 worker"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "凭证与账户归属",
+      "items": [
+        "凭证走本机默认凭证链，不需要额外的 API key",
+        "region 必须有出处，没解析到就在引擎启动时报错",
+        "在本机跑也要凭证：本机 worker 自己去开会话、调模型",
+        "本机档记到你自己的账户，云端档记到建后端的那个账户"
+      ]
+    }
+  ]
+}

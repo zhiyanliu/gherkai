@@ -1,0 +1,220 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "提交那一刻钉死 worker 身份，之后照抄",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "column_fit": "spread",
+    "viewBox": [
+      1040,
+      1000
+    ]
+  },
+  "participants": [
+    {
+      "id": "cli",
+      "type": "frontend",
+      "label": "提交侧 CLI",
+      "sublabel": "解析并钉死"
+    },
+    {
+      "id": "ssm",
+      "type": "database",
+      "label": "SSM 参数",
+      "sublabel": "映射与默认指针"
+    },
+    {
+      "id": "taskdef",
+      "type": "cloud",
+      "label": "ECS 任务定义",
+      "sublabel": "revision 家族"
+    },
+    {
+      "id": "ecr",
+      "type": "cloud",
+      "label": "ECR 仓库",
+      "sublabel": "镜像层"
+    },
+    {
+      "id": "ops",
+      "type": "external",
+      "label": "另一位部署方",
+      "sublabel": "重推同名 variant"
+    },
+    {
+      "id": "runrec",
+      "type": "database",
+      "label": "run 记录",
+      "sublabel": "定义与状态项"
+    },
+    {
+      "id": "launcher",
+      "type": "cloud",
+      "label": "云端起 task 侧",
+      "sublabel": "事件驱动"
+    }
+  ],
+  "segments": [
+    {
+      "from": 150,
+      "to": 430,
+      "label": "提交那一刻：解析成显式 revision"
+    },
+    {
+      "from": 450,
+      "to": 700,
+      "label": "run 还在跑时：有人重推同名 variant"
+    },
+    {
+      "from": 720,
+      "to": 900,
+      "label": "之后起 task：照抄、不重解析"
+    }
+  ],
+  "messages": [
+    {
+      "from": "cli",
+      "to": "ssm",
+      "y": 180,
+      "label": "查 variant 映射",
+      "variant": "emphasis"
+    },
+    {
+      "from": "ssm",
+      "to": "cli",
+      "y": 232,
+      "label": "revision + digest",
+      "variant": "return"
+    },
+    {
+      "from": "cli",
+      "to": "taskdef",
+      "y": 284,
+      "label": "revision 还能起吗"
+    },
+    {
+      "from": "cli",
+      "to": "ecr",
+      "y": 336,
+      "label": "digest 还在吗",
+      "note": "任一环缺即拒，不回落默认指针、不取 family 最新"
+    },
+    {
+      "from": "cli",
+      "to": "runrec",
+      "y": 388,
+      "label": "写下引擎与 revision",
+      "variant": "emphasis",
+      "note": "run 定义记一份，状态项另摊平一份"
+    },
+    {
+      "from": "ops",
+      "to": "ecr",
+      "y": 480,
+      "label": "推同名 tag",
+      "note": "得到新 digest；被顶掉的旧镜像层不过期"
+    },
+    {
+      "from": "ops",
+      "to": "taskdef",
+      "y": 532,
+      "label": "注册新 revision",
+      "note": "从模板复制，镜像栏按新 digest"
+    },
+    {
+      "from": "ops",
+      "to": "ssm",
+      "y": 584,
+      "label": "覆盖映射",
+      "note": "覆盖语义、最后写者赢；下一次提交才解析到新的"
+    },
+    {
+      "from": "ops",
+      "to": "taskdef",
+      "y": 636,
+      "label": "旧的标退休",
+      "note": "只打标记、不注销，等回收侧放行"
+    },
+    {
+      "from": "launcher",
+      "to": "runrec",
+      "y": 750,
+      "label": "照定义取 revision"
+    },
+    {
+      "from": "runrec",
+      "to": "launcher",
+      "y": 802,
+      "label": "提交时钉下那一个",
+      "variant": "return"
+    },
+    {
+      "from": "launcher",
+      "to": "taskdef",
+      "y": 854,
+      "label": "按显式 revision 起 task",
+      "variant": "emphasis",
+      "note": "镜像栏按 digest 指着重推前那一层"
+    }
+  ],
+  "activations": [
+    {
+      "participant": "cli",
+      "from": 174,
+      "to": 396,
+      "type": "frontend"
+    },
+    {
+      "participant": "ssm",
+      "from": 176,
+      "to": 240,
+      "type": "database"
+    },
+    {
+      "participant": "runrec",
+      "from": 382,
+      "to": 412,
+      "type": "database"
+    },
+    {
+      "participant": "ops",
+      "from": 474,
+      "to": 644,
+      "type": "external"
+    },
+    {
+      "participant": "launcher",
+      "from": 744,
+      "to": 862,
+      "type": "cloud"
+    },
+    {
+      "participant": "runrec",
+      "from": 744,
+      "to": 810,
+      "type": "database"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "定义期解析、运行期照抄",
+      "items": [
+        "提交那一刻把 variant 解析成本 run 每个引擎的显式 revision",
+        "起 task 一律照 run 定义抄，永不按 family 取最新",
+        "缺任一环即拒，绝不回落默认指针或模板"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "重推为什么踩不到在跑的 run",
+      "items": [
+        "映射是覆盖语义，只对下一次提交生效",
+        "被替换的旧 revision 先退休、不立即注销",
+        "镜像仓库不设过期规则，旧镜像层留着",
+        "在跑的 run 还引用它，回收侧就不放行"
+      ]
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 # 判定是怎么算出来的：从一票到退出码
 
-> **文档定位（读前必知）**：本文是给**人**读的跨 ADR 合成导览——只讲**判定如何被算出来**（how），不复述决策理由与权衡（why 全在各 ADR，本文只给指针）。**权威永远在 ADR 与 code**，与本文冲突时以它们为准。为什么有这一层：一个 run 的「结论」要经过四层归约、两根正交的轴、七个状态和各命令不同语义的退出码，任何单个 ADR 只讲其中一片（0014 讲投票、0031 讲状态与 severity、0034 讲脱离后的退出码…），人要的那张全景图得自己拼——本文就是拼好的那一张。（本层的维护判据见 [CLAUDE.md](../../CLAUDE.md)「文档纪律」guides 条）
+> 本文讲**判定如何被算出来**（机制），不讨论为什么这样设计：设计决策与理由在各 ADR，本文只给指针；与代码或 ADR 不一致时以它们为准。一个 run 的「结论」要经过四层归约、两根正交的轴、七个状态和各命令不同语义的退出码，任何单个 ADR 只讲其中一片（0014 讲投票、0031 讲状态与 severity、0034 讲脱离后的退出码…），本文就是拼好的那一张全景图。
 
 姊妹页分工，本文不越界：worker 怎么被起来、事件怎么到 core、超时闹钟谁上、四种跑法的推进链 → [执行与推进模型导览](./execution-and-reconciliation.md)；`status` / `error_type` / `votes` 在 `--json` 里的**字段名、类型、何时出现** → [CLI `--json` 字段契约](./cli-json-contract.md)（本文不重复它的表）；每步证据怎么读 → [artifacts-and-evidence](./artifacts-and-evidence.md)；确定性 step 怎么写、怎么被派发 → [deterministic-step-lifecycle](./deterministic-step-lifecycle.md)；判定与运行态落在哪张表/哪个桶 → [cloud-backend-carriers](./cloud-backend-carriers.md)。
 
@@ -13,7 +13,7 @@
 | **一票** | 一次布尔 AI 调用的返回值 | Nova：`act_get(instruction, BOOL_SCHEMA)` → `bool(r.matches_schema and r.parsed_response)`；Midscene：`agent.aiBoolean(instr)` |
 | **step** | AI 断言（`Then`）：`yes > N/2` → `passed`/`failed`，事件带 `votes={yes,total}`。确定性注册表命中：`AssertionError`→`failed`、其它异常→`error`。引号内 URL 的导航步 / `When`·`Given` 动作步：正常返回→`passed`、抛异常→`error` | `_run_step`（Nova）/ `runStep`（Midscene） |
 | **scenario** | 任一 step `error`→`error`；任一 `failed`→`failed`；否则 `passed`。**被短路跳过的 step 不进这个列表** | worker 侧 `_aggregate` / `aggregate`；结论经 `scenario_done` 事件上报 |
-| **job**（= scope） | 同步 `run`：事件流正常 EOF **且**见过 `scope_done` → 各 scenario 归约；否则按中止来源分流（§3）。无状态跑批：「两件都要」谓词（内容完整 ∧ 进程干净终止） | `schedule._Worker._run_once` / `project._job_status` |
+| **job**（= scope） | 同步 `run`：事件流正常 EOF **且**见过 `scope_done` → 各 scenario 归约；否则按中止来源分流（§3c 图）。无状态跑批：「两件都要」谓词（内容完整 ∧ 进程干净终止） | `schedule._Worker._run_once` / `project._job_status` |
 | **run** | 任一 job `error`→`error`；任一 `failed`→`failed`；否则 `passed`。**入口先滤掉非判定态** | `project._aggregate`——唯一一份，`schedule._aggregate` 只是它的别名 |
 
 几个容易问到的点：
@@ -22,13 +22,9 @@
 - **core 只搬不判**：`project.reduce_event` 把 `StepDone` 的 `status`/`votes`/`error_type`/`message`/`report_refs` 原样搬进 `StepResult`；scenario 判定**只**由 `ScenarioDone` 事件写入 `scenario_status`，`step_done` 分支不碰它。
 - **同步与无状态两条路共用同一份归约**：`reduce_event`（单事件归约）和 `_aggregate`（终态聚合）都住 `core/gherkai_core/project.py`，`schedule` delegate 过去。同步 run 沿事件流实时喂，reconciler 从持久事件全量重放喂——两条路收敛到同一终值。
 
-```mermaid
-flowchart LR
-    V["一票<br/>aiBoolean / act_get(BOOL)"] -->|"yes > N/2"| S["step<br/>passed / failed / error"]
-    S -->|"任一 error → error<br/>任一 failed → failed"| SC["scenario"]
-    SC -->|"同一规则<br/>+ 内容完整 ∧ 干净终止"| J["job (= scope)"]
-    J -->|"同一规则<br/>+ 滤掉非判定态"| R["run<br/>passed / failed / error"]
-```
+![一票 → step → scenario 在 worker 侧逐层汇总，跨进程上报后由 core 归约出 job 与 run 的判定](../diagrams/verdict-model-reduction-layers.svg)
+
+> 图注：图给层次、方向与 worker / core 的分界；每层规则见上表，三处不走这条链的旁路见 §3a（短路 step）、§3c 图（job 被中止）、§4（run 归约入口过滤）。
 
 > 权威：[ADR 0014](../adr/0014-ai-first-assertions.md)（AI 断言与投票纪律）、[ADR 0024](../adr/0024-worker-core-protocol.md)（事件协议、三态、投票 tally 字段）、[ADR 0026](../adr/0026-schedule-module.md)（三级归约）、[ADR 0031](../adr/0031-job-lifecycle-states-and-severity.md) 决定三（`_aggregate` 入口过滤）；code：`core/gherkai_core/model.py`、`project.py`、`schedule.py`、`engines/novaact/gherkai_worker_novaact/run_scope.py`、`engines/midscene/src/worker/run-scope.mts`。
 
@@ -40,8 +36,8 @@ flowchart LR
 |---|---|---|---|---|
 | `passed` | worker 上报 / core 归约 | step·scenario·job·run | 断言都过了 | — |
 | `failed` | worker 上报（多数票没过 / 确定性 `AssertionError`） | step·scenario·job·run | **测试发现了问题** | 看现场，不要无脑重跑：`gherkai explain <run_id>` 逐步看「问了 AI 什么、AI 看见了什么」；报告里有引擎原生 report / trajectory |
-| `error` | worker 上报（act 抛异常）/ core 派生（超时、worker 崩、内容不完整、起 worker 失败） | step·scenario·job·run | **没能跑完测试** | 先看 `error_type` + `message` 分因（§3）：`timeout`/`network_error` 多半可原样重跑；`engine_error`/`guardrail` 先翻 worker 日志 |
-| `skipped` | **core 本地赋**（两处，见 §3） | job（fail-fast 下 worker 从未 spawn）· step（scope 内短路） | 这一单元没跑 | job 级：没执行、没花钱、可无脑重跑（但整批必伴随别人的 `error`，真凶在别处）。step 级：真凶是它上游那个 `error` step |
+| `error` | worker 上报（act 抛异常）/ core 派生（各条收场判据见 §3c 图） | step·scenario·job·run | **没能跑完测试** | 先看 `error_type` + `message` 分因（§3b）：`timeout`/`network_error` 多半可原样重跑；`engine_error`/`guardrail` 先翻 worker 日志 |
+| `skipped` | **core 本地赋**（两处，见 §3a / §3c 图） | job（fail-fast 下 worker 从未 spawn）· step（scope 内短路） | 这一单元没跑 | job 级：没执行、没花钱、可无脑重跑（但整批必伴随别人的 `error`，真凶在别处）。step 级：真凶是它上游那个 `error` step |
 | `aborted` | **core 本地赋**（`schedule` 的 fail-fast 分支） | job | 起过了、跑一半被掐 | **别无脑重跑**：会话动过、可能有副作用；先看现场（`session_id` 已保留，可对上 worker 日志/轨迹） |
 | `pending` | `create_run` 写初始态 | job（`JobState`）·run（`RunState`） | 还没起 | 等；提交较久仍**所有** job 都 pending 时 `status` 会提示用 `--wait` 接力推进 |
 | `running` | 收到 `scope_started` 后刷 / 无状态路径 CAS claim | job·run | 在跑 | 等 / `status --wait` |
@@ -79,18 +75,26 @@ flowchart LR
 | `error_type` | 伴随 status | 谁赋、在哪 |
 |---|---|---|
 | `assertion_failed` | `failed` | worker：AI 断言未过多数票（message 带 `yes/N` 与断言文）/ 确定性 `AssertionError` |
-| `timeout` | `error` | ① core：job 墙钟预算到点（`schedule` 的 deadline 分支；无状态路径经 `TaskExited.timed_out` → `_reduce_scope` 覆盖归因）② Nova worker：单次 act 到点（`_classify_act_error` 认 `ActTimeoutError`） |
+| `timeout` | `error` | ① core：job 墙钟预算到点（判据与无状态路径口径见 §3c 图）② Nova worker：单次 act 到点（`_classify_act_error` 认 `ActTimeoutError`） |
 | `guardrail` | `error` | Nova worker：SDK 护栏异常（`ActGuardrailsError`/`ActStateGuardrailError`）。Midscene 侧无此细分 |
-| `network_error` | `error` | 两侧 worker：act 中途的瞬时网络故障（**仅分类、不触发重试**——act 不幂等）；core：worker 以网络专用退出码退出（建连失败、退避耗尽） |
-| `engine_error` | `error` | 兜底：起 worker 失败、worker 迭代中崩、「干净退出却没发完 `scope_done`」、其余未细分异常 |
+| `network_error` | `error` | 两侧 worker：act 中途的瞬时网络故障（**仅分类、不触发重试**——act 不幂等）；core：worker 以网络专用退出码退出（判据见 §3c 图） |
+| `engine_error` | `error` | 兜底：worker 其余未细分异常；core 侧各条收场判据见 §3c 图 |
 | `navigation_error` | （`error`） | **协议里声明、当前无生产者**：两引擎的导航失败按异常性质落 `network_error` 或 `engine_error` |
 
 `skipped`/`aborted` 的 `error_type` 恒 `None`——「为什么没跑」只在 `message` 里，所以人读渲染在无分类时也照样显 `message`（否则只剩一个光秃的态）。
 
-### 3c. 两个常被问的分类边界
+### 3c. job 收场态与 `error_type`：归因的优先级
 
-- **超时的 job 是 `error` + `timeout`，不是 `aborted`。** code 里 `self_stopped` 这个布尔被超时与 fail-fast **两条路径共用**，所以回填判据锁的是 `abort_flag`：只有 fail-fast 触发的中止落 `aborted`，超时分支一律 `error` + `error_type="timeout"`。无状态路径同口径（`TaskExited.timed_out` → `ERROR`，归因由 `_reduce_scope` 覆盖成 `timeout`，因为 stop 本就是超时处置发起的）。为什么这么切见 [ADR 0031](../adr/0031-job-lifecycle-states-and-severity.md) 决定一的注（「aborted 只认 fail-fast」）。
-- **network 重试耗尽是 `error`，不是 `skipped`。** `skipped` 的边界严格是「worker 从未 spawn」。建连失败的 job 已经开过会话、已经计费；`saw_step == False` 只表「可安全重试（没有 act 副作用）」，不表「没花钱」——故它照常进 run 级聚合。补一条现状：`ScheduleOpts.network_retry` 默认 0 且 CLI 没接这个旋钮，所以今天 `run` **不做** job 级整批重跑；起效的是 worker 自己的建连退避（`_CONNECT_ATTEMPTS` / `_BACKOFF_S`，只裹幂等的建连段），退避耗尽即以网络专用退出码退出，core 记 `error` + `network_error`。
+同步 `run` 里一个 job 怎么收场，是一串**有序短路**的判据——先看它有没有起来，再看有没有被主动中止，最后才看事件流自己怎么结束：
+
+![四问一串有序短路：fail-fast 中止 → worker 起得来 → 被主动中止 → 事件流怎么结束；答上一问就地记下收场态，都不是才做 scenario 归约](../diagrams/verdict-model-job-outcome.svg)
+
+> 图注：本图只画同步 `run`；「事件流怎么收场」在图上摊成两问——先认网络专用退出码，其余非零退出与内容不完整落兜底。图上另有**一处例外**：worker 以非零码崩着退时不再复查中止 / 超时（即便中止已发起、墙钟已过），一律记 `error · engine_error`。无状态跑批走另一条链——退出记录回灌后在收敛时定终态：`skipped` / `aborted` 不出现（那条路没有 fail-fast），超时一路的归因与本图一致，其余非零退出与起 task 失败只落 `error`、job 级不细分 `error_type`（诊断在 `message` 与 worker 日志）。与姊妹页[执行与推进模型导览](./execution-and-reconciliation.md) §6 那张图的分工：那张讲**怎么把 worker 停下来**，本图讲**停下来之后记什么态**。
+
+几处判据的由来与边界：
+
+- **两条中止路径为什么分开归因**：code 里 `self_stopped` 这个布尔被超时与 fail-fast **两条路径共用**，所以图上那道分叉的判据锁的是 `abort_flag`（只有 fail-fast 落 `aborted`）；无状态路径同口径——`TaskExited.timed_out` → `ERROR`，归因由 `_reduce_scope` 覆盖成 `timeout`，因为 stop 本就是超时处置发起的。为什么这么切见 [ADR 0031](../adr/0031-job-lifecycle-states-and-severity.md) 决定一的注（「aborted 只认 fail-fast」）。
+- **`skipped` 为什么不覆盖建连失败**：建连失败的 job 已经开过会话、已经计费，`saw_step == False` 只表「可安全重试（没有 act 副作用）」、不表「没花钱」——故它照常进 run 级聚合，`skipped` 的边界严格停在「worker 从未 spawn」。补一条现状：`ScheduleOpts.network_retry` 默认 0 且 CLI 没接这个旋钮，所以今天 `run` **不做** job 级整批重跑；起效的只有 worker 自己的建连退避（`_CONNECT_ATTEMPTS` / `_BACKOFF_S`，只裹幂等的建连段），耗尽即以网络专用退出码退出。
 - 顺带：worker 收到停止信号时**不为没跑完的单元编造判定**——Nova 在投票循环与 step 循环顶查停止标志，票没投满就不 emit 带 verdict 的 `step_done`、也不发 `step_skipped`；Midscene 走 SIGTERM 收尾序列（释放会话 → 抢传 → 排空队列）。两侧都是「未完成的单元交 core 按派生态处理」，只是停止的处置形态不同。
 
 > 权威：[ADR 0031](../adr/0031-job-lifecycle-states-and-severity.md) 决定六（`step_skipped` 事件 + `shortcircuited` 正交布尔 + 「绝不写 `scenario_status`」不变量）、决定一（skipped/aborted 边界）、[ADR 0028](../adr/0028-transient-network-ssl-resilience.md)（两层重试、`network_error` 白名单、「绝不重试 act」、core 层 job 重试门槛）、[ADR 0024](../adr/0024-worker-core-protocol.md)（终止契约、退出码 out-of-band 通道）；code：`model.py` 的 `ErrorType`/`StepSkipped`/`StepResult.shortcircuited`、`project.reduce_event`、`schedule._Worker._run_once`、两个 worker 的 `_classify_act_error` / `isTransientNetwork`。

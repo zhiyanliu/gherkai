@@ -1,6 +1,6 @@
 # 编写 .feature
 
-本页讲 `.feature` 文件怎么写：一个最小骨架长什么样，哪些 step 交给 AI、哪些必须精确，AI 断言怎么写才稳定，投票次数怎么用，`@scope` / `@engine` / `@timeout` 三个 tag 的语义，Gherkin 各种写法的支持范围，以及按引擎调整写法（含非英文 UI）。确定性 step 的代码怎么写见 [`writing-deterministic-steps.md`](./writing-deterministic-steps.md)；运行命令、选项、退出码与结果位置见 [`running-and-results.md`](./running-and-results.md)。
+本页讲 `.feature` 文件怎么写：一个最小骨架长什么样，哪些 step 交给 AI、哪些必须精确，AI 断言怎么写才稳定，投票次数怎么用，`@scope` / `@engine` / `@timeout` 三个 tag 的语义，Gherkin 各种写法的支持范围，按引擎调整写法（含非英文 UI），以及哪些内容不该写进 `.feature`。确定性 step 的代码怎么写见 [`writing-deterministic-steps.md`](./writing-deterministic-steps.md)；运行命令、选项、退出码与结果位置见 [`running-and-results.md`](./running-and-results.md)。
 
 本页引用的片段出自仓库的 [`features/`](../../features/) 目录。
 
@@ -29,11 +29,9 @@ worker 拿到一个 step 后按固定顺序决定用哪种方式执行它：
 | ② 导航 | step 文本的双引号内**以** `http://` 或 `https://` 开头（小写；大写不命中） | 直接打开这个地址。不问 AI。引号内直到下一个双引号之间的全部内容都当成地址，所以引号里只写地址、不要再接别的话。单引号不触发 |
 | ③ AI（默认） | 以上都不命中 | `Then` 的文本当布尔断言交给模型判真假（可投票）；`Given` / `When` 的文本当动作交给模型执行 |
 
-关键字只决定第 ③ 档怎么派发：`Then` 是断言，`Given` / `When` 是动作，`And` / `But` 承接前一条的身份。
+表脚注：
 
-两条注意事项：
-
-- 断言里不要把地址单独写进双引号。`Then 页面地址是 "https://example.com/a"` 会被当成导航步：直接打开这个地址并记通过，断言不会发生。要判 URL 就用确定性 step：两个引擎各内建一条 `Then 页面地址匹配 "<正则>"`，装了对应引擎的 worker 即可用，无需写任何文件（见 [`writing-deterministic-steps.md`](./writing-deterministic-steps.md)）。
+- 关键字只决定第 ③ 档怎么派发：`Then` 是断言，`Given` / `When` 是动作，`And` / `But` 承接前一条的身份。前两档都不看关键字，所以 `Then 页面地址是 "https://example.com/a"` 也会被当成导航步——直接打开这个地址并记通过，断言不会发生。要判 URL 就用确定性 step：两个引擎各内建一条 `Then 页面地址匹配 "<正则>"`，装了对应引擎的 worker 即可用，无需写任何文件（见 [`writing-deterministic-steps.md`](./writing-deterministic-steps.md)）。
 - 外层双引号只是书写习惯。交给模型前会被去掉；确定性 step 的正则匹配的是关键字之后的原文、引号照留。
 
 ## 什么交给 AI，什么必须精确
@@ -95,14 +93,20 @@ Scenario: 维基百科首页与 OpenAI 词条首段的 AI 断言
 - **写在 Feature 行、`Rule` 行、`Examples` 块上的 tag 都会传给其下（或其展开出的）每一条 scenario**。`@scope` 标在 Feature 行等于把整个文件编成一个串行 job，标在 `Rule` 行等于把这条规则下的 scenario 编成一个。
 - **传下来的 `@scope` 不能被单条 scenario 覆盖**：同一条 scenario 解析出两个不同的 `@scope` 值即整批拒绝运行。要按 scenario 分组，就不要在 Feature 行或 `Rule` 行标 `@scope`。
 - **`@engine` 与 `@timeout` 按 scope 生效**：scope 里任一条 scenario 标了，整个 scope 继承；同一个 scope 出现两个不同值，整批拒绝运行（同一个会话不可能同时属于两个引擎，一个 job 也只能有一个预算）。都没标时用命令行的 `--default-engine`（默认 `novaact`）与 `--default-job-timeout`（默认 300 秒，`<=0` 表示不超时）。
-- **scope 名在整批里是全局的**：两个 `.feature` 文件写了同一个名字，会合并成一个 job，本来可以并发的用例只能串行共享一个会话。名字带上来源前缀（`checkout-happy-path`、`admin-login`），不要用 `login`、`smoke` 这类通名。
-- **没标 `@scope` 的 scenario 各自成为一个 job**，它的 scope 编号就是 `<文件路径>:<行号>`。因此 `@scope` 的值不要写成这个形状：正好等于同批某条未标 scope 的 scenario 编号时，整批拒绝运行。
+- **scope 名在整批里是全局的**：两个 `.feature` 文件写了同一个名字就合并成一个 job，本可并发的两条用例只能串行共享一个会话。名字带上来源前缀（`checkout-happy-path`、`admin-login`），不要用 `login`、`smoke` 这类通名。
+- **未标 `@scope` 的 job 用 `<文件路径>:<行号>` 当编号**。因此 `@scope` 的值不要写成这个形状：正好等于同批某条未标 scope 的 scenario 编号时，整批拒绝运行。
 - **标了 tag 就得给值**：`@scope:`、`@engine:`、`@timeout:` 后面空着会被拒绝；想用默认值就删掉这个 tag。`@timeout` 的值必须是正数秒。连冒号和值一起漏掉、只写 `@scope` 不会报错：它会被当成普通标签忽略，这条 scenario 仍各自成为一个 job。分组没生效时先用 `gherkai plan` 看分组结果。
 - **预算从这个 job 启动时算起**，云端后端下包含拉取 worker 镜像等启动开销；到点这个 job 会被停下，判定记为出错、原因是超时。
 - **其它 tag 都是普通标签**，没有内置语义，用来配合 `--tags` 挑一部分 scenario 跑。
 - 以上校验都在起第一个 job 之前完成，任一条不满足即整批拒绝运行，不产生模型与浏览器费用。用 `gherkai plan` 提前验。
 
-**scope 与并发**：scope 内串行；不同 scope 之间可以并发，但 `--max-concurrency` 默认 1，即默认全部 job 依次跑，要并发须显式调高（用 `submit` 提交到云端后端时还受部署侧设定的上限约束）。所以互不相干的用例分到不同 scope，是并发执行的前提。选项见 [`running-and-results.md`](./running-and-results.md)。
+一批 `.feature` 里的 scenario 先按 `@scope` 归成 job，job 才是调度与执行的单位：
+
+![一批 .feature 里的 scenario 按 @scope 归成 job，job 再按并发上限决定同时开跑还是排队](../diagrams/writing-features-scenario-to-job.svg)
+
+图注：job 编号在图上只写出形状，准确形状见上面的规则；两个 `.feature` 文件用同一个 scope 名，也会并进同一个 job。并发上限就是 `--max-concurrency`：上限内的 job 同时开跑，超出上限的排队等空位、有位子空出来再开跑，它的取值与写法见 [`running-and-results.md`](./running-and-results.md)。
+
+**scope 与并发**：并发只发生在 job 之间，所以互不相干的用例分到不同 scope，是并发执行的前提。并发上限默认是一个 job，即默认全部 job 依次跑；分好 scope 之后还要显式调高 `--max-concurrency` 才真的并发。用 `submit` 提交到云端后端时，并发还受部署侧设定的上限约束。
 
 下面这段出自 [`features/concurrency_and_scope.feature`](../../features/concurrency_and_scope.feature)，第二条不重新导航，直接接着第一条的页面继续：
 
@@ -156,6 +160,15 @@ Scenario: Midscene 在中文 UI 上搜索并断言
   Then "当前页面是关于人工智能的维基百科词条页"
   Then "词条首段提到了计算机或机器"
 ```
+
+## 敏感信息
+
+走 AI 的那些 step（三档表的第 ③ 档）文本会原样进模型提示（外层的双引号去掉，挂在这一步上的 DataTable / DocString 一并附上）；不论走哪一档，全部 step 原文都会写进这次运行的判定明细与运行元信息。AI 断言没过时，断言原文还会进失败原因，引擎的报告与证据里留着这次调用的指令原文和页面截图。所以：
+
+- **不要把密码、令牌、密钥、真实客户数据写进 `.feature`**，DataTable 与 DocString 里同样不要写。
+- 需要登录的用例用**只在测试环境有效**的凭据；凭据本身不写进 step 文本，由确定性 step 从环境变量读（环境变量在哪设见 [`configuration.md`](./configuration.md)）。
+- 报告目录（云端后端下是产物桶）按内部资料对待：里面有 step 原文、页面截图与引擎的 AI 证据。位置见 [`running-and-results.md`](./running-and-results.md)。
+- 一个例外是隧道凭据：用 `--expose-local` 测本机应用时，basic-auth 凭据由 gherkai 自动生成并内嵌在地址里，必然出现在提示与报告中——生成方式与失效时机见 [`local-app-testing.md`](./local-app-testing.md)。
 
 ## 写完先自检
 

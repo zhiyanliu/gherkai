@@ -1,0 +1,320 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "五层全景：从用例文本到被测应用",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "legend": {
+      "mode": "auto",
+      "entries": {
+        "frontend": {
+          "label": "命令入口"
+        },
+        "backend": {
+          "label": "gherkai 的包与进程"
+        },
+        "cloud": {
+          "label": "AWS 托管服务"
+        },
+        "external": {
+          "label": "使用方的用例与应用"
+        }
+      }
+    }
+  },
+  "components": [
+    {
+      "id": "feature",
+      "type": "external",
+      "label": ".feature 用例",
+      "sublabel": "+ 确定性 step",
+      "pos": [
+        440,
+        40
+      ],
+      "size": [
+        220,
+        76
+      ]
+    },
+    {
+      "id": "cli",
+      "type": "frontend",
+      "label": "gherkai CLI",
+      "sublabel": "命令行前端",
+      "pos": [
+        440,
+        240
+      ],
+      "size": [
+        220,
+        76
+      ]
+    },
+    {
+      "id": "runtime",
+      "type": "backend",
+      "label": "gherkai-runtime",
+      "sublabel": "接线与装配",
+      "pos": [
+        760,
+        240
+      ],
+      "size": [
+        220,
+        76
+      ]
+    },
+    {
+      "id": "core",
+      "type": "backend",
+      "label": "gherkai-core",
+      "sublabel": "解析 · 分组 · 判定",
+      "pos": [
+        1080,
+        240
+      ],
+      "size": [
+        220,
+        76
+      ],
+      "tag": "按引擎 tag 路由"
+    },
+    {
+      "id": "midscene",
+      "type": "backend",
+      "label": "Midscene worker",
+      "sublabel": "Node 引擎",
+      "pos": [
+        560,
+        440
+      ],
+      "size": [
+        240,
+        76
+      ]
+    },
+    {
+      "id": "novaact",
+      "type": "backend",
+      "label": "Nova Act worker",
+      "sublabel": "Python 引擎",
+      "pos": [
+        920,
+        440
+      ],
+      "size": [
+        240,
+        76
+      ]
+    },
+    {
+      "id": "browser",
+      "type": "cloud",
+      "label": "AgentCore Browser",
+      "sublabel": "每 scope 一个会话",
+      "pos": [
+        700,
+        640
+      ],
+      "size": [
+        220,
+        76
+      ]
+    },
+    {
+      "id": "app",
+      "type": "external",
+      "label": "被测应用",
+      "sublabel": "公网站点 或 本机 / 内网",
+      "pos": [
+        1020,
+        640
+      ],
+      "size": [
+        220,
+        76
+      ]
+    },
+    {
+      "id": "deploy",
+      "type": "backend",
+      "label": "部署 provider",
+      "sublabel": "gherkai-deploy-aws",
+      "pos": [
+        100,
+        40
+      ],
+      "size": [
+        220,
+        76
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "① 用例层（使用方项目）",
+      "wraps": [
+        "feature"
+      ],
+      "pad": 20
+    },
+    {
+      "kind": "region",
+      "label": "② 产品层",
+      "wraps": [
+        "cli",
+        "runtime",
+        "core"
+      ],
+      "pad": 20
+    },
+    {
+      "kind": "region",
+      "label": "③ 执行层：两个 worker 平级、同一套协议",
+      "wraps": [
+        "midscene",
+        "novaact"
+      ],
+      "pad": 20
+    },
+    {
+      "kind": "region",
+      "label": "④ 浏览器层",
+      "wraps": [
+        "browser"
+      ],
+      "pad": 20
+    },
+    {
+      "kind": "region",
+      "label": "⑤ 被测应用",
+      "wraps": [
+        "app"
+      ],
+      "pad": 20
+    }
+  ],
+  "connections": [
+    {
+      "id": "read-feature",
+      "from": "feature",
+      "to": "cli",
+      "label": "读入用例文本",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelDy": 24
+    },
+    {
+      "id": "cli-runtime",
+      "from": "cli",
+      "to": "runtime",
+      "label": "按参数装配",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "runtime-core",
+      "from": "runtime",
+      "to": "core",
+      "label": "注入实现并驱动",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "route-midscene",
+      "from": "core",
+      "to": "midscene",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "route-novaact",
+      "from": "core",
+      "to": "novaact",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "midscene-cdp",
+      "from": "midscene",
+      "to": "browser",
+      "label": "CDP 连入",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "novaact-cdp",
+      "from": "novaact",
+      "to": "browser",
+      "label": "CDP 连入",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "browser-app",
+      "from": "browser",
+      "to": "app",
+      "label": "公网直达",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left",
+      "labelDy": -20
+    },
+    {
+      "id": "browser-tunnel",
+      "from": "browser",
+      "to": "app",
+      "label": "经隧道回本机",
+      "variant": "dashed",
+      "fromSide": "right",
+      "toSide": "left",
+      "labelDy": 20
+    },
+    {
+      "id": "cli-deploy",
+      "from": "cli",
+      "to": "deploy",
+      "label": "部署与自检时才用",
+      "variant": "dashed",
+      "fromSide": "left",
+      "toSide": "right"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "两个引擎完全对称",
+      "items": [
+        "平级、同一套协议：核心不知道对面是 Node 还是 Python",
+        "scenario 没标引擎就走命令行给的缺省引擎",
+        "各自用的模型是当前值，真源在代码常量"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "确定性 step 的加载者是 worker，不是 CLI",
+      "items": [
+        "本机档：worker 启动时从你给的目录加载",
+        "云端档：build 进 variant 镜像，提交侧再给目录也无效"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "部署 provider 不在执行路径上",
+      "items": [
+        "只有 deploy / destroy / doctor 会碰它",
+        "云端跑时参与的只是它的产出：栈资源、推进函数、任务定义"
+      ]
+    }
+  ]
+}

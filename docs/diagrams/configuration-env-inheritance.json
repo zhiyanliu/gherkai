@@ -1,0 +1,206 @@
+{
+  "schema_version": 1,
+  "diagram_type": "dataflow",
+  "meta": {
+    "title": "环境变量归属与继承",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "legend": {
+      "mode": "all",
+      "entries": {
+        "default": {
+          "label": "继承：原样拿到"
+        },
+        "emphasis": {
+          "label": "由 gherkai 注入：压过继承"
+        },
+        "security": {
+          "label": "被覆盖：选项值改写"
+        },
+        "dashed": {
+          "label": "不传：要设在对面"
+        },
+        "database": {
+          "label": "镜像里烙进的值"
+        }
+      }
+    },
+    "viewBox": [
+      1080,
+      620
+    ]
+  },
+  "stages": [
+    {
+      "label": "你设的地方"
+    },
+    {
+      "label": "本机 CLI 进程"
+    },
+    {
+      "label": "CLI 起的子进程"
+    },
+    {
+      "label": "云端后端与镜像"
+    },
+    {
+      "label": "云端 worker 容器"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "opt",
+      "type": "external",
+      "label": "命令行选项",
+      "sublabel": "解析后的值",
+      "stage": 0,
+      "row": 3
+    },
+    {
+      "id": "sh",
+      "type": "external",
+      "label": "跑命令的 shell",
+      "sublabel": "export 设的值",
+      "stage": 0,
+      "row": 0
+    },
+    {
+      "id": "cli",
+      "type": "backend",
+      "label": "本机 CLI 进程",
+      "sublabel": "解析选项、起子进程",
+      "stage": 1,
+      "row": 1
+    },
+    {
+      "id": "child",
+      "type": "backend",
+      "label": "CLI 起的子进程",
+      "sublabel": "本机 worker、cdk",
+      "stage": 2,
+      "row": 2
+    },
+    {
+      "id": "be",
+      "type": "cloud",
+      "label": "云端后端",
+      "sublabel": "起云端任务",
+      "stage": 3,
+      "row": 0
+    },
+    {
+      "id": "img",
+      "type": "database",
+      "label": "worker 镜像 ENV",
+      "sublabel": "烙进 variant 的值",
+      "stage": 3,
+      "row": 2,
+      "tag": "推镜像时定"
+    },
+    {
+      "id": "cw",
+      "type": "cloud",
+      "label": "云端 worker 容器",
+      "sublabel": "Fargate 上的 worker",
+      "stage": 4,
+      "row": 1,
+      "tag": "云端"
+    }
+  ],
+  "flows": [
+    {
+      "id": "sh-cli",
+      "from": "sh",
+      "to": "cli",
+      "label": "继承",
+      "variant": "default"
+    },
+    {
+      "id": "cli-child-env",
+      "from": "cli",
+      "to": "child",
+      "label": "继承",
+      "variant": "default",
+      "labelSegment": 2
+    },
+    {
+      "id": "cli-child-inject",
+      "from": "cli",
+      "to": "child",
+      "label": "注入",
+      "variant": "emphasis",
+      "labelSegment": 0,
+      "labelDy": 26
+    },
+    {
+      "id": "opt-child",
+      "from": "opt",
+      "to": "child",
+      "label": "被覆盖",
+      "variant": "security"
+    },
+    {
+      "id": "cli-cw",
+      "from": "cli",
+      "to": "cw",
+      "label": "注入",
+      "classification": "run --backend cloud",
+      "variant": "emphasis",
+      "labelDy": -26
+    },
+    {
+      "id": "be-cw",
+      "from": "be",
+      "to": "cw",
+      "label": "注入",
+      "classification": "submit --backend cloud",
+      "variant": "emphasis"
+    },
+    {
+      "id": "img-cw",
+      "from": "img",
+      "to": "cw",
+      "label": "继承",
+      "variant": "default"
+    },
+    {
+      "id": "sh-cw",
+      "from": "sh",
+      "to": "cw",
+      "label": "不传",
+      "variant": "dashed",
+      "labelSegment": 2,
+      "labelDx": 80
+    }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "箭头怎么读",
+      "items": [
+        "继承 = 原样拿到上一级的值",
+        "注入 = 由起这个进程的那一方写入，压过继承来的值，也压过镜像里的同名项",
+        "被覆盖 = 起子进程时用解析后的选项值改写同名变量",
+        "不传 = 值到不了对面，要生效就设在对面"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "设在哪才生效",
+      "items": [
+        "本机跑：在跑命令的 shell 里 export",
+        "云端跑：写进 worker 镜像 variant，再推上去",
+        "选项与环境变量都给了：选项优先"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "谁起云端任务",
+      "items": [
+        "run --backend cloud：由本机 CLI 起，region 等信息由它注入",
+        "submit --backend cloud：由云端后端起",
+        "部署命令本身也是本机 CLI 进程，只是通常在另一台机器上跑"
+      ]
+    }
+  ]
+}

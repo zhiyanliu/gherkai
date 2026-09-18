@@ -1,6 +1,6 @@
 # 执行与推进模型导览：run / submit × local / cloud
 
-> **文档定位（读前必知）**：本文是给**人**读的跨 ADR 合成导览——只讲**机制如何协同工作**（how），不复述决策理由与权衡（why 全在各 ADR，本文只给指针）。**权威永远在 ADR 与 code**，与本文冲突时以它们为准。为什么有这一层：ADR 按决策切片组织、为 AI 检索优化，人理解系统需要的是横切视图——「四种跑法下推进器分别是什么」这类问题的答案散在五六个 ADR 里，本文就是拼合之后的那个横切面。（本层的维护判据见 [CLAUDE.md](../../CLAUDE.md)「文档纪律」guides 条）
+> 本文讲**机制如何协同工作**（机制），不讨论为什么这样设计：设计决策与理由在各 ADR，本文只给指针；与代码或 ADR 不一致时以它们为准。「四种跑法下推进器分别是什么」这类问题的答案散在五六个 ADR 里，本文就是拼合之后的那个横切面。
 
 ## 1. 心智模型：两种驱动、同一份 `core`
 
@@ -17,23 +17,9 @@ local 档没有也不需要这个标记：不存在共享基础设施上的常�
 
 `reconcile.tick` 有**四个宿主**在不同场景下调用它：local 的 per-run 进程（= `submit` 时 `setsid` fork 出的推进进程）、**local** `status --wait` 的接力者（cloud 的 `--wait` 只在检测卡住时 invoke kicker、绝不在本机跑 `tick`——保 status 机器零 ECS 权限，见 §4b）、cloud 的 kicker Lambda、cloud 的 reconciler Lambda。四处跑的是同一份代码，差别只在注入的 adapter（事件从 SQLite 还是 DDB 读、job 用子进程还是 ECS RunTask 起）。
 
-```mermaid
-flowchart TB
-    W["worker（每 scope 一个：本机子进程 或 Fargate task）"]
-    subgraph F["前台驱动：run"]
-        S["schedule()：CLI 进程内在线循环"]
-    end
-    subgraph B["后台驱动：submit + status"]
-        T["reconcile.tick：无状态推一步<br/>宿主 = per-run 进程 / local 接力者 / kicker λ / reconciler λ"]
-    end
-    C["同一份 core：parse · plan · project/plan_next · 判定模型"]
-    W -. "事件流<br/>（前台：在线听、听完即用）" .-> S
-    W -. "事件流<br/>（后台：先持久化、再重放）" .-> T
-    S --> C
-    T --> C
-```
+![执行与推进全景：run 的在线循环与 submit 的无状态推进共用同一份 core，只换事件通道与退出观察者](../diagrams/run-execution.svg)
 
-（图只画了第一条话语——事件流；第二条「进程退出信号」的观察者按组合各不相同，对照见 §5 的「退出观察者三对位」。）
+图注：图只画结构与指向——四个宿主分别是谁、四条物理通道各自的载体，真源是上面这几段文字与 §5 的表。**图上的退出信号不表示 worker 自己上报**：退出码是父进程/平台观察到 worker 终止后送到驱动者的，观察者按组合各不相同，对位见 §5 的「退出观察者三对位」。可交互版（缩放 / 聚焦一格 / 追一条路径）：https://zhiyanliu.github.io/gherkai/run-execution.html
 
 > why 与护栏：[ADR 0034](../adr/0034-detached-batch-reconciler.md)（整体设计）、[ADR 0026](../adr/0026-schedule-module.md)（同步 schedule）、[ADR 0016](../adr/0016-execution-architecture-core-lib-run-model.md)（分层）。
 
@@ -75,7 +61,7 @@ per-run 进程:run_reconcile_loop 循环调 tick
   ├─ tick 抢到 PENDING job → SubprocessLauncher 起本机 worker
   ├─ worker 的 fd3 原始事件行经 raw_sink 旁路落 SQLite(events 的持久通道)
   ├─ worker 退出 → 本进程 handle.wait() 拿 exitcode 写 task_exited(自兼"平台侧退出观察者")
-  └─ 全 job 终态 → tick 内先落判定明细(jobs/*.json,CAS 前) → try_finalize 落 run 总 status(提交点) → 宿主写派生 RunReport(失败隔离) → 拆临时物,退出
+  └─ 全 job 终态 → tick 收敛并提交(写序见 §4c) → 拆临时物,退出
 status [--wait]:只读投影查进度;--wait 还能接力推进——per-run 进程若死,接力者跑同一个 tick 把 run 推到收敛
 ```
 
@@ -85,29 +71,9 @@ status [--wait]:只读投影查进度;--wait 还能接力推进——per-run 进
 
 ### 4b. cloud 档：三 Lambda 链
 
-```mermaid
-sequenceDiagram
-    participant CLI as submit（CLI）
-    participant R as runs 表
-    participant K as kicker λ
-    participant W as worker（Fargate）
-    participant E as events 表
-    participant Rec as reconciler λ
-    participant XO as exit-observer λ
+![云端后台跑批的事件级联：提交落库唤醒 kicker，worker 写事件唤醒 reconciler，任务停止经 exit-observer 翻成退出记录后收敛](../diagrams/execution-cloud-cascade.svg)
 
-    CLI->>R: definition + STATE（detached=true）
-    Note over CLI: 返回 run_id，可关机（隧道模式例外，见 §2）
-    R-->>K: Stream（INSERT ∧ detached=true）
-    K->>K: tick：CAS 抢 job → RunTask
-    K->>W: 起首批 worker
-    Note over K,W: 每次起 task（kicker/reconciler 皆同）都给该 job 定一次性超时闹钟（见 §6）
-    W->>E: 逐事件 PutItem（seq 递增）
-    E-->>Rec: Stream（每批事件）
-    Rec->>Rec: tick：重放→投影→条件写→起下个 job
-    W-->>XO: ECS task STOPPED（EventBridge rule 路由、含 exitCode）
-    XO->>E: task_exited（独立键空间）
-    E-->>Rec: Stream → tick → 全终态 → 先落判定明细 → try_finalize（提交点）→ 派生 RunReport
-```
+图注：图画「链怎么跑通」，谁被挡在链外见 §7 那张图。图上画了三个 Lambda 各自的主入口，**没画的两处**：**kicker 的另两个入口**（查进度发现卡住时踢一脚、超时闹钟到点，见下条与 §6），以及退出观察那条路由背后是部署时就建好的常驻订阅、不由谁启动；并发安全的保证见下面几条。
 
 - **kicker**：冷启动器，但不是「只起首批的薄壳」——它与 reconciler 同 code、同权限，跑完整的 `tick`。除 runs 表 Stream 外还有两个入口：`status --wait` 检测卡住时的主动调起（kickoff invoke，卡死救活），以及 job timeout 到点的闹钟调起（§6）。
 - **reconciler**：主推进器。worker 每写一批事件，Stream 就触发它跑一次 `tick`——事件既是数据也是「心跳」，推进由事件级联驱动，无轮询常驻。
@@ -119,16 +85,20 @@ sequenceDiagram
 
 ### 4c. 读侧：进度怎么看、结果落在哪
 
-后台驱动的另一半是「怎么观察」。事件流是**写模型**，读模型是它的投影 **RunState**（cloud = runs 表的 STATE item，local = `run_state.json`）——投影只在 `tick` 里落一次，外部读者（`status`、`explain`、未来 WebUI）**都不自己重放事件**：`status` 只读投影；`explain` 读投影拿 run 级态、再读已落地的判定明细拿 step 记录与证据指针（故 detached run 未到终态时判定明细还没落地、被中止 job 里只留在事件记录上的证据它也看不到）。由此推出四件事：
+后台驱动的另一半是「怎么观察」。事件流是**写模型**，读模型是它的投影 **RunState**（cloud = runs 表的 STATE item，local = `run_state.json`）——投影只在 `tick` 里落一次，外部读者（`status`、`explain`、未来 WebUI）**都不自己重放事件**（各自读什么、什么时候才有内容，见本节末条）。读这一侧决定的是「读到的有多新、读到什么算数」：
 
 - **`status`（不带 `--wait`）纯只读、零副作用**——看到的新鲜度取决于最近一次 `tick` 是什么时候；它不推进、也不 kickoff。
 - **run 级 status 的取值语义**：投影写被钳在 `pending`/`running` 两档——投影里全部 job 仍 pending = `pending`，任一 job 已推进 = `running`；run 级**终态**由 `try_finalize` 一次落定（提交点），**读到终态 = run 已提交**。注意投影落后于抢占一拍：CAS 抢占只改那个 job 的态，run 级要等下一次 `tick` 才翻 `running`——故「run 仍 pending」≠「还没开始推进」；`status` 的「推进可能未启动」提示因此要求 run 级 `pending` **且所有 job 仍 pending** 才打。
 - **退出码分层**（CI 接线最易建错心智）：`submit` 的退出码只表示「提交成功与否」、**不是判定**；判定退出码由 `status --wait` 等到终态后给。根因：CLI 脱离后不再有内存里的判定终值——各命令退出码的完整分工见 [`verdict-model.md`](./verdict-model.md) §5（本篇不重复它的表）。
-- **结果落哪**：`try_finalize`（CAS）是**提交点**——同一次 `tick` 在它**之前**已把各 job 的判定明细（`jobs/*.json`）从本轮 records 聚合落库，故**读到终态即判定明细已齐**；提交点之后宿主才写派生的 RunReport（写失败被隔离、不击穿已提交的 run）。两段都幂等，local per-run 进程与 cloud reconciler 共用 `core` 的同一份收尾逻辑。**但 cloud 档的云端推进器对已提交终态的 run 整体不动作**（§7 里 reconciler 的第二道判）：故 RunReport 若恰在提交点之后没写成，云端不会再自己补写它（判定明细在提交点之前已落定，读到终态即已齐、不受影响）；local 档没有这道闸——`status --wait` 接力会把已终态的 run 再重放一遍、顺手把报告重写出来（本机事件不过期）。落点：local = `--report-dir/<run_id>/`，cloud = S3 桶下 `<report_dir>/<run_id>/`——cloud `submit` 的 `--report-dir` 须与推进器侧一致（提交前探活会比对、不一致退 2），否则「跑完了却在自己给的前缀下找不到结果」。
+
+收尾那一侧决定的是「什么时候能读到什么」——写序、由写序推出的读者保证、已终态 run 的两档重入，以及落地之后谁来读。
+
+- **收尾的写序**：三段有序——前两段在同一次 `tick` 里：① 各 job 的判定明细（`jobs/*.json`）从本轮 records 聚合落库 → ② `try_finalize`（CAS）落 run 终态，这一步是**提交点**；③ 提交点之后由宿主写派生的 RunReport（`tick` 返回 done 之后才写，写失败被隔离、不击穿已提交的 run）。三段都幂等，local per-run 进程与 cloud reconciler 共用 `core` 的同一份收尾逻辑。
+- **由写序推出的读者保证**：**读到终态 = 判定明细已齐**（它在提交点之前落定）；反过来 RunReport 是提交点之后的派生物，「终态已读到、报告文件却缺」是合法中间态，读者不该拿它当判定真源。落点：local = `--report-dir/<run_id>/`，cloud = S3 桶下 `<report_dir>/<run_id>/`——cloud `submit` 的 `--report-dir` 须与推进器侧一致（提交前探活会比对、不一致退 2），否则「跑完了却在自己给的前缀下找不到结果」。
+- **已终态 run 的两档重入**：cloud 档的云端推进器对已提交终态的 run 整体不动作（§7 里 reconciler 的第二道判）——RunReport 若恰在提交点之后没写成，云端不会再自己补写它（判定明细不受影响，见上条）；local 档没有这道闸，`status --wait` 接力会把已终态的 run 再重放一遍、顺手把报告重写出来（本机事件不过期）。
+- **落了之后谁来读**：`status` 读投影 RunState（`--json` 时另附 `artifacts` 键给报告 / 判定明细 / 元信息的约定落点，无论终态都给、终态后才真有内容）；`explain` 读**已落库的判定明细**（step 级失败原因与 `kind=evidence` 的证据指针），回答「这步为什么这么判」。两者都受落地时机约束：detached run 的判定明细在提交点才一次性落地，未终态时 `explain` 无可渲染、只提示先用 `status --wait`（同步 `run` 逐 job 落，中途即可见已完成部分）。用法与退出码见 [`docs/user-guide/running-and-results.md`](../user-guide/running-and-results.md)，`--json` 字段见 [`cli-json-contract.md`](./cli-json-contract.md)。
 
 最后一条不对称（**掐得掐不得**）：cloud 的 `--wait` 检测卡住时只是**踢一脚** kicker（fire-and-forget），踢完随时可离场——云端链自己跑完；local 的 `--wait` 接力者一旦接手**就是唯一推进者**，掐掉它 run 就地停摆（已 claim job 的计时也随进程一起丢，靠下次接力恢复）。根因：主推进器的位置不同（云端 Lambda vs 本机进程）。
-
-- **落了之后谁来读**：`status` 读投影 RunState（`--json` 时另附 `artifacts` 键给报告 / 判定明细 / 元信息的约定落点，无论终态都给、终态后才真有内容）；`explain` 读**已落库的判定明细**（step 级失败原因与 `kind=evidence` 的证据指针），回答「这步为什么这么判」。两者都受落地时机约束：detached run 的判定明细在提交点才一次性落地，未终态时 `explain` 无可渲染、只提示先用 `status --wait`（同步 `run` 逐 job 落，中途即可见已完成部分）。用法与退出码见 [`docs/user-guide/running-and-results.md`](../user-guide/running-and-results.md)，`--json` 字段见 [`cli-json-contract.md`](./cli-json-contract.md)。
 
 > 权威：[ADR 0034](../adr/0034-detached-batch-reconciler.md)（机制三：投影钳制与条件写；「命令形态」节：status/退出码）、[ADR 0030](../adr/0030-realtime-persistence-seam.md)（终态提交点）、[ADR 0031](../adr/0031-job-lifecycle-states-and-severity.md)（决定五：退出码语义）、[ADR 0041](../adr/0041-agent-facing-cli-affordances.md)（决策三：查询类命令的 `--json` 与 `artifacts`）、[ADR 0042](../adr/0042-step-evidence-and-explain.md)（决策四：`explain` 只读判定明细、不读事件流）。
 
@@ -143,7 +113,16 @@ sequenceDiagram
 | cloud run    | worker 直接 PutItem 进 DDB events 表 | CLI 进程 `FargateEngine` 轮询 Query（只扫 worker seq 段）                           |
 | cloud submit | 同上                                 | events 表 **Stream 触发 reconciler** Lambda；`tick` 从表里全量重放                 |
 
-events 表里有**两个键空间**：worker 的连续 seq 段（事件本体——seq 从 1 连续递增、每 PK 单写者，读端据此判漏读/乱序，即**断号检测**），和退出观察者写的 exit 记录（保留高位 SK + `item_type='exit'`，不入 seq 段、不参与断号检测）。读端各按形态处理：前台读端（`FargateEngine`）按段界排除 exit 记录；无状态读端（`DdbEventLog.records()`）全 PK 读、按 `item_type` 分流后喂重放；「只问某个 scope 退没退」的超时处置路径走 `has_exit` 单点查。
+events 表里有**两个键空间**，同一个 PK 下靠 SK 排序分开（`seq` 是 NUMBER 型 SK，Query 升序读）：
+
+```
+PK = run_id#scope_id
+  SK = 1, 2, 3 … n     worker 事件本体：每 PK 单写者、连续递增 → 断号检测（判漏读/乱序）只看这一段
+  …（大段空号）…
+  SK = 保留高位        退出观察者写的 exit 记录：不入 seq 段、不参与断号检测
+```
+
+两类 item 按 `item_type` 属性区分（事件本体不带此属性），高位常数与属性名的真源在 `fargate_engine` 的 schema 常量。读端各按形态处理：前台读端（`FargateEngine`）按段界排除 exit 记录；无状态读端（`DdbEventLog.records()`）全 PK 读、按 `item_type` 分流后喂重放；「只问某个 scope 退没退」的超时处置路径走 `has_exit` 单点查。
 
 **退出观察者三对位**（谁看见 worker 死了）：前台 = Engine adapter 自己看（subprocess 的 `proc.wait` / Fargate 的 `DescribeTasks`）；local `submit` = per-run 进程 `handle.wait()`；cloud `submit` = exit-observer Lambda。另有一个例外位：worker 压根没起来（`launch` 抛）时没有平台观察者可看，由 `tick` 自己补一条非 0 哨兵退出记录，下轮按「exit≠0 → error」收敛；不补则该 job 已抢占成 RUNNING 却永无事件与退出记录，整批卡死。
 
@@ -163,22 +142,9 @@ events 表里有**两个键空间**：worker 的连续 seq 段（事件本体—
 
 cloud 路径的超时处置是一条多跳链，时序如下。那个「闹钟」（ADR/code 里叫 arm/武装一个 one-time schedule）是 per-(run,scope) 的短命资源：schedule 名 = `{prefix}job-timeout-<sha1(run_id#scope_id) 摘要>`（前缀走 `gherkai_runtime.names` 命名真源、IaC 的 IAM 资源域同源推导），到点触发即自动删——所以控制台里平时看不到它：
 
-```mermaid
-sequenceDiagram
-    participant S as 超时触发器（Scheduler one-time schedule）
-    participant K as kicker λ（与 §4b 同一个——这是它的第三个入口）
-    participant W as worker（Fargate task）
-    participant XO as exit-observer λ
-    participant E as events 表
+![云端超时兜底链：起 task 时定下的一次性闹钟到点踢 kicker，停掉 worker 后由 exit-observer 写成带超时标记的退出记录，回到既有链收敛](../diagrams/execution-timeout-chain.svg)
 
-    Note over S: 起 task 时定下的一次性闹钟：at = now + timeout_s
-    S->>K: 到点 invoke（run_id + timeout_scope）
-    K->>K: 仍 RUNNING 且无退出记录才动手（幂等）
-    K->>W: StopTask（reason 带哨兵串）
-    W-->>XO: ECS task STOPPED（EventBridge rule 路由）
-    XO->>E: task_exited（timed_out=true）
-    Note over E: 既有链收敛：Stream → reconciler tick → 归因 error+timeout（§4b）
-```
+图注：本图只画云端这一路「怎么把 worker 停下来」，另两路的到点机制与停法见上表；闹钟的到点 = 起跑那一刻 + 该 job 的墙钟预算。到点那一方**先查这个 job 仍 RUNNING 且没有退出记录才动手**（重复到点、闹钟与防御扫同时命中都无害），`StopTask` 的 reason 里带一个哨兵串，exit-observer 据此把这条退出记录标成超时停的。停下来之后**记成什么态**（超时归因落在哪一档、与 fail-fast 共用哪个字段、按什么优先级定）见 [`verdict-model.md`](./verdict-model.md) §3c（归因优先级图）。
 
 > 权威：[ADR 0034](../adr/0034-detached-batch-reconciler.md)「job timeout」节（取舍/归因链/防御扫）、[ADR 0019](../adr/0019-feature-tags-scope-and-engine.md)（`@timeout:` tag）。
 
@@ -186,9 +152,13 @@ sequenceDiagram
 
 `run --backend cloud` 与 `submit --backend cloud` 共享同一套表和 Lambda——前台 run 照样往两张表里写（definition 落 runs 表、worker 事件落 events 表），Stream 里照样有它的记录——**若无闸门，云端推进器就会被这些记录唤醒、跑来推前台 run**（双开推进器：同一 scope 起两个 task）。两道闸门拦在不同层，判据同源（STATE 上的 `detached` 标记）：
 
-- **kicker 这扇门**：runs 表 Stream 的事件源 **filter**（`INSERT ∧ detached=true`）在**事件源层**就滤掉——前台 run 的 STATE 不带标记，kicker 根本不会被 invoke。
-- **reconciler 这扇门**：events 表的 item 身上没有 `detached` 标记、事件源层滤不了——Lambda 会被 invoke，闸门在 **handler 内**：`tick` 装配前先查 `is_detached`（**是不是 `submit` 提交的后台批次**），不是就直接不动作（日志会出现 `skip: run … 不是 submit 提交的后台批次`）。它后面还紧跟第二道判（管的不是本节这件事）：**这个 run 是否已收尾**——已收尾同样整体不动作、不再改写它已落定的结果（日志 `skip: run … 已结束，不再改写它的结果`）。
-- **exit-observer 的同源分流**（严格说不是第三扇推进器闸门——它不推进，防的是另一件事）：不给前台 run 写退出记录，免得无 `body` 的 exit item 混进前台 run 的事件流（前台的退出观察由 Engine adapter 自己做，§5）；判据同一个 `is_detached`。
+![两道闸门：新 run 落库那一路在订阅侧就滤掉，事件批次与任务停止事件只能进了函数再查这个 run 上的后台标记](../diagrams/execution-detached-gates.svg)
+
+图注：滤得掉的在事件源层就挡下，滤不掉的进 handler 再判——事件批次与任务停止事件上都不带 `detached`，只能回头查这个 run。图上四个判点里只有前两个（新 run 落库、handler 判是后台批次）是本节说的那两道闸门——「该 run 已收尾？」与 exit-observer 那道各防另一件事，见下三条。§4b 那张时序图画「链怎么跑通」，本图画「谁被挡在链外」。
+
+- **kicker**：runs 表 Stream 的事件源 **filter** 写死 `INSERT ∧ detached=true`——前台 run 的 STATE 不带这个标记。
+- **reconciler**：`tick` 装配前查 `is_detached`（日志 `skip: run … 不是 submit 提交的后台批次`）；紧跟的第二道判读 run 终态（日志 `skip: run … 已结束，不再改写它的结果`），管的不是本节这件事。这两道都在 reconciler 与 kicker **共用的装配**里，kicker 无论哪个入口（新 run 落库、`status --wait` 救活、超时闹钟到点）都要过——图上这两个判点因此不点 Lambda 名，冷启动那一路画成直达只为看清「谁在哪一层被挡」。
+- **exit-observer**：判据同一个 `is_detached`。它不推进，防的是另一件事：无 `body` 的 exit item 混进前台 run 的事件流（前台的退出观察由 Engine adapter 自己做，§5）。
 
 > 权威：[ADR 0034](../adr/0034-detached-batch-reconciler.md)（「filter 必须区分写入者」条）、[ADR 0033](../adr/0033-iac-aws-backend-and-composition-wiring.md)（Stream/filter 资源；events 表那条只滤得掉 TTL 删除，`detached` 那半只能在 handler 内判）。
 

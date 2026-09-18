@@ -1,6 +1,6 @@
 # 开始使用
 
-本页回答三个问题：装什么、需要哪些 AWS 前置、第一次怎么跑通。gherkai 把 `.feature` 里的每个 step 交给 AI 引擎，由引擎操作云端浏览器并做出判定；需要精确判定的 step 由确定性 step 代码接管（引擎自带一条判页面地址的，其余由项目自己写，见[编写确定性 step](./writing-deterministic-steps.md)）。测试跑在你自己的 AWS 账户里，本机不装浏览器。本页不讲 `.feature` 的写法（见[编写 .feature](./writing-features.md)）、四种跑法的差别与退出码（见[跑测试与看结果](./running-and-results.md)）、云端后端的部署（见[云端后端](./cloud-backend.md)）、选项与环境变量总表（见[配置](./configuration.md)）、报错处置（见[排错](./troubleshooting.md)）。
+本页回答三个问题：装什么、需要哪些 AWS 前置、第一次怎么跑通。gherkai 把 `.feature` 里的每个 step 交给 AI 引擎，由引擎操作云端浏览器并做出判定；需要精确判定的 step 由确定性 step 代码接管（引擎自带一条判页面地址的，其余由项目自己写，见[编写确定性 step](./writing-deterministic-steps.md)）。各部件的归属见下面的 [AWS 前置](#aws-前置)。本页不讲 `.feature` 的写法（见[编写 .feature](./writing-features.md)）、四种跑法的差别与退出码（见[跑测试与看结果](./running-and-results.md)）、云端后端的部署（见[云端后端](./cloud-backend.md)）、选项与环境变量总表（见[配置](./configuration.md)）、报错处置（见[排错](./troubleshooting.md)）。
 
 ## 按角色选安装形态
 
@@ -26,7 +26,7 @@ pipx install --python 3.13 --fetch-python missing gherkai   # 不用 uv 时的�
 
 pipx 那一行的 `--python 3.13` 是必要的：pipx 只在请求了某个版本、而本机又没有它时才下载解释器，不指定版本就会用默认解释器，默认解释器低于 3.13 时安装失败。
 
-两个引擎的 worker 是各自独立的程序：Nova Act 的 worker 随 `[local]` extra 装进同一个 Python 环境，Midscene 的 worker 是 Node 包、走 npm。只用 `--backend cloud` 提交的人两个都不用装，worker 跑在云端。`gherkai list-engines` 打印本机检测到哪个引擎可用，缺的那个原地给出安装命令。用 pipx 或 uvx 装 extra 时，包名写成 `'gherkai[local]'`。
+Nova Act 的 worker 随 `[local]` extra 装进同一个 Python 环境，Midscene 的 worker 是 Node 包、走 npm。只用 `--backend cloud` 提交的人两个都不用装，worker 跑在云端。`gherkai list-engines` 打印本机检测到哪个引擎可用，缺的那个原地给出安装命令。用 pipx 或 uvx 装 extra 时，包名写成 `'gherkai[local]'`。
 
 升级：`uv tool upgrade gherkai`（安装时带的 extra 会沿用）；Midscene worker 另跑 `npm i -g @gherkai/worker-midscene@<CLI 版本>`。CLI 与 worker 要求同版本，CLI 与已部署的云端后端也要求同版本，不一致时的处置见[排错](./troubleshooting.md)。
 
@@ -43,6 +43,10 @@ pipx 那一行的 `--python 3.13` 是必要的：pipx 只在请求了某个版�
 
 ## AWS 前置
 
+![你的机器与 AWS 账户各持有哪些部件：命令行与本机 worker 在你的机器上，云端 worker、浏览器会话与模型服务在 AWS 账户里，被测应用在两者之外](../diagrams/getting-started-component-ownership.svg)
+
+图注：**本机档** = `--backend local`（默认），**云端档** = `--backend cloud`。图上两档的差别只有一处——worker 在哪跑：云端档跑的是同样两个引擎，对浏览器会话与模型服务做同样的事。图上的「本机 worker」按引擎分开装，Nova Act 与 Midscene 各一份，见上面的[安装](#安装)。账户归属按档不同：本机档用你自己的账户，云端档用部署方建后端的那个账户（可能是团队共用）；跑法、结果落点、权限，以及哪种跑法记到谁的账户，见[跑测试与看结果](./running-and-results.md)。要开通哪些服务、模型在哪个 region 处理见下表。确定性 step 代码不在图上：本机档由 worker 从本机目录加载，云端档来自 worker 镜像，见[编写确定性 step](./writing-deterministic-steps.md)。被测应用不在公网时的隧道拓扑见[测本机应用](./local-app-testing.md)。
+
 - **凭证**走本机 AWS 默认凭证链：profile、环境变量、实例角色都可以，不需要额外的 API key。用 `--profile` 或 `AWS_PROFILE` 指定 profile。
 - **region 必须有出处**，按此顺序解析：`--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > profile 配置里的 region。四处都没有时不会自动补一个 region：命令照常开跑，引擎会在启动时因缺 region 报错，该 scope 判为 error。
 - 当前验证过的 region 是 `us-east-1`。换其它 region 之前，先确认下表三项服务与你要用的模型在该 region 都可用：`gherkai doctor --backend cloud --prefix <前缀>` 报出凭证与 region 的解析结果，模型与服务的可用性在 AWS 控制台确认。
@@ -52,9 +56,9 @@ pipx 那一行的 `--python 3.13` 是必要的：pipx 只在请求了某个版�
 |---|---|---|
 | Midscene 引擎 | Amazon Bedrock 上的模型 `us.openai.gpt-5.6-terra` | 默认模型。它经跨区推理在美国境内三个 region（us-east-1 / us-east-2 / us-west-2）处理，浏览器会话与产物仍在你选的 region。环境变量 `MIDSCENE_MODEL_ID` 可换成 Bedrock 上 Midscene 支持的其它模型 |
 | Nova Act 引擎 | Amazon Nova Act 服务 + 模型 `nova-act-v1.0` | 默认固定该版本，环境变量 `NOVA_MODEL_ID` 可指定其它模型；所需的 workflow definition 首次运行时自动创建 |
-| 两个引擎都要 | AgentCore Browser（`bedrock-agentcore`） | 承载云端浏览器会话，每个 scope 一个会话 |
+| 两个引擎都要 | AgentCore Browser（`bedrock-agentcore`） | 每个 scope 一个会话 |
 
-- 在本机跑（`--backend local`）同样需要 AWS 凭证——浏览器与模型都在云端，本机只跑 worker 进程。纯本地、不需要凭证的命令：`plan`、`list-engines`、`list-deterministic`、`skill install`，不带云端参数的 `doctor`，以及本机后端下只读本地报告目录的 `explain` 与 `status`（`status --wait` 会在本机接着把这个 run 推完，那时需要凭证）。
+- 在本机跑（`--backend local`）同样需要 AWS 凭证：浏览器会话与模型都在云端，本机只跑 worker 进程。纯本地、不需要凭证的命令：`plan`、`list-engines`、`list-deterministic`、`skill install`，不带云端参数的 `doctor`，以及本机后端下只读本地报告目录的 `explain` 与 `status`（`status --wait` 会在本机接着把这个 run 推完，那时需要凭证）。
 - 真跑产生 AWS 费用（模型调用 + 云端浏览器会话），以 AWS 账单为准。费用量级、以及哪种跑法记到谁的账户，见[跑测试与看结果](./running-and-results.md)。
 - 用 `--backend cloud` 之前，需要有人先用 `gherkai deploy` 把云端后端建好，见[云端后端](./cloud-backend.md)。
 
@@ -92,9 +96,9 @@ gherkai doctor --backend cloud --prefix gherkai-    # 连带查凭证、region �
 
 `steps.load.*` 的条数含引擎自带的那一条，所以没有 `steps/` 目录时它也不为零。每一行查什么、`✗` 与 `-` 分别怎么处置，见[排错](./troubleshooting.md)。
 
-## 上手路径一：交给 AI coding agent
+## 上手路径一：交给 AI agent
 
-装好命令行后，把随包发行的 agent skill 装进项目，让 Claude Code、Codex 这类 coding agent 替你写用例、跑、读失败证据、收窄重跑并汇报：
+装好命令行后，把随包发行的 agent skill 装进项目，让 Claude Code、Codex 这类 AI agent 替你写用例、跑、读失败证据、收窄重跑并汇报：
 
 ```bash
 gherkai skill install                   # 装给 Claude Code：<项目>/.claude/skills/gherkai/

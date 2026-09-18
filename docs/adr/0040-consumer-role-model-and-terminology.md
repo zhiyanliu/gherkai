@@ -1,6 +1,6 @@
 # 0040. 使用方角色模型与术语
 
-> **Status:** Accepted（2026-09-09）—— 术语面已落（全仓「test engineer」统一为「测试开发」）；README「谁用它」表与 CONTEXT.md「使用方角色」词条组是本 ADR 的派生视图，改这里再改那里。
+> **Status:** Accepted（2026-09-09；2026-09-18 增决策 6「两侧 AI agent 是执行者、不立新帽子」）—— 术语面已落（全仓「test engineer」统一为「测试开发」）；README「谁用它」表与 CONTEXT.md「使用方角色」词条组是本 ADR 的派生视图，改这里再改那里。
 
 ## 背景与问题
 
@@ -63,6 +63,13 @@
 - 本 ADR 是角色名与边界的单一真源；CONTEXT.md「使用方角色」词条组与 README「谁用它」表都是派生视图。
 - **立新角色的门槛 = 有独立权限边界或独立产物**。「只提交不写 feature 的人」「只看结果的人」是 feature 作者的子集、不另立；「提交者」维持为权限类别，不升格为帽子。
 - 长期文档与 code 注释用正名；产品面文案里的角色词按 0039 说人话（「部署方」「写 step 的人」可用，不出现帽子矩阵与决策号）。
+
+## 决策 6：两侧 AI agent 是执行者，不立新帽子
+
+- **AI agent（Claude Code、Codex 这类工具）在本项目里出现在两个位置，各是一个稳定角色名，按位置命名、不按活动命名**：**使用者侧 AI agent**——装了 gherkai skill（0043）、在使用方项目里替人操作 gherkai 的 agent；**contributor 侧 AI agent**——在本仓库里干活（写码、写文档、复盘）的 agent，是 ADR / CONTEXT / CLAUDE.md 约 80% 的读者。
+- **两者都不是第五顶帽子**：agent 替人戴帽子——使用者侧 agent 戴 feature 作者 / 测试开发 / 部署方，contributor 侧 agent 戴 contributor；帽子决定权限与产物，「人手敲还是 agent 代劳」属决策 3 那根正交的执行轴。判据同决策 5：它们没有独立权限边界或独立产物。
+- **用词规则**：角色名里不带「coding」——使用者侧 agent 多半不写代码，「coding」把活动说窄了；提到工具品类时写「AI agent（如 Claude Code、Codex）」，首次出现带括注即可，之后只写「AI agent」。「建造者 AI」（0045 曾用）废止，统一为「contributor 侧 AI agent」。撞词提醒：gherkai 自己的两个 AI 引擎一律称「引擎 / worker / 模型」，「AI agent」专指上述工具。
+- 用户文档（README / user-guide / skill）的读者就是使用者侧 AI agent 或它的主人，正文写「AI agent」即可；contributor 侧文档（ADR / CONTEXT / CLAUDE.md / ai-eng）区分两侧时用全名。
 
 ## 代价
 

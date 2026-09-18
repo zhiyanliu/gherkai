@@ -1,0 +1,293 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "一次 run 的生命周期主干",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "legend": {
+      "mode": "auto",
+      "entries": {
+        "backend": {
+          "label": "核心走的一步"
+        },
+        "database": {
+          "label": "落库与事件"
+        },
+        "messagebus": {
+          "label": "驱动与派发"
+        },
+        "external": {
+          "label": "worker（独立进程）"
+        },
+        "security": {
+          "label": "退出观察"
+        },
+        "frontend": {
+          "label": "使用者拿到的结果"
+        }
+      }
+    }
+  },
+  "lanes": [
+    {
+      "id": "laneMain",
+      "label": "主干：一个 run 走一遍"
+    },
+    {
+      "id": "laneJob",
+      "label": "循环体：逐 job 反复发生，可并发"
+    },
+    {
+      "id": "laneBack",
+      "label": "worker 回传核心的两件事"
+    }
+  ],
+  "phases": [
+    {
+      "id": "phPlan",
+      "label": "plan：到此为止",
+      "fromCol": 0,
+      "toCol": 1
+    },
+    {
+      "id": "phRun",
+      "label": "run / submit：接着走到底",
+      "fromCol": 2,
+      "toCol": 5,
+      "variant": "emphasis"
+    }
+  ],
+  "mainPath": [
+    "parse",
+    "scope",
+    "begin",
+    "drive",
+    "reduce",
+    "report"
+  ],
+  "semanticChecks": {
+    "allowedRoots": [
+      "parse"
+    ],
+    "allowedTerminals": [
+      "report"
+    ],
+    "requiredEdges": [
+      {
+        "from": "events",
+        "to": "drive"
+      },
+      {
+        "from": "exit",
+        "to": "drive"
+      }
+    ]
+  },
+  "nodes": [
+    {
+      "id": "parse",
+      "lane": "laneMain",
+      "col": 0,
+      "type": "backend",
+      "label": "parse",
+      "sublabel": "文本 → 领域模型",
+      "width": 136
+    },
+    {
+      "id": "scope",
+      "lane": "laneMain",
+      "col": 1,
+      "type": "backend",
+      "label": "scope 分组",
+      "sublabel": "产出 job 列表",
+      "width": 140
+    },
+    {
+      "id": "begin",
+      "lane": "laneMain",
+      "col": 2,
+      "type": "database",
+      "label": "begin",
+      "sublabel": "落定义与运行态",
+      "width": 140
+    },
+    {
+      "id": "drive",
+      "lane": "laneMain",
+      "col": 3,
+      "type": "messagebus",
+      "label": "驱动一步",
+      "sublabel": "在线调度 或 单步推进",
+      "width": 148
+    },
+    {
+      "id": "reduce",
+      "lane": "laneMain",
+      "col": 4,
+      "type": "backend",
+      "label": "判定归约",
+      "sublabel": "逐层归到 run",
+      "width": 136
+    },
+    {
+      "id": "report",
+      "lane": "laneMain",
+      "col": 5,
+      "type": "frontend",
+      "label": "报告与退出码",
+      "sublabel": "run 的终态落定",
+      "width": 148
+    },
+    {
+      "id": "worker",
+      "lane": "laneJob",
+      "col": 3,
+      "type": "external",
+      "label": "起 worker",
+      "sublabel": "每 scope 一个，起会话",
+      "width": 152
+    },
+    {
+      "id": "step",
+      "lane": "laneJob",
+      "col": 4,
+      "type": "backend",
+      "label": "逐 step 执行",
+      "sublabel": "确定性 或 交给 AI",
+      "width": 144
+    },
+    {
+      "id": "exit",
+      "lane": "laneBack",
+      "col": 4,
+      "type": "security",
+      "label": "进程退出信号",
+      "sublabel": "worker 终止即产生",
+      "width": 148
+    },
+    {
+      "id": "events",
+      "lane": "laneBack",
+      "col": 5,
+      "type": "database",
+      "label": "逐条事件",
+      "sublabel": "一条一条吐出来",
+      "width": 140
+    }
+  ],
+  "edges": [
+    {
+      "id": "e-parse-scope",
+      "from": "parse",
+      "to": "scope",
+      "label": "领域模型",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "id": "e-scope-begin",
+      "from": "scope",
+      "to": "begin",
+      "label": "job 列表",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "id": "e-begin-drive",
+      "from": "begin",
+      "to": "drive",
+      "label": "运行态已落",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "id": "e-drive-worker",
+      "from": "drive",
+      "to": "worker",
+      "label": "派发一个 job",
+      "role": "branch"
+    },
+    {
+      "id": "e-worker-step",
+      "from": "worker",
+      "to": "step",
+      "label": "开会话后逐 step",
+      "role": "branch"
+    },
+    {
+      "id": "e-step-events",
+      "from": "step",
+      "to": "events",
+      "label": "逐条吐出",
+      "variant": "dashed",
+      "role": "async"
+    },
+    {
+      "id": "e-events-drive",
+      "from": "events",
+      "to": "drive",
+      "label": "回传核心：再推一步",
+      "variant": "dashed",
+      "role": "return"
+    },
+    {
+      "id": "e-worker-exit",
+      "from": "worker",
+      "to": "exit",
+      "label": "终止时",
+      "variant": "security",
+      "role": "branch"
+    },
+    {
+      "id": "e-exit-drive",
+      "from": "exit",
+      "to": "drive",
+      "label": "回传核心：可以收场",
+      "variant": "security",
+      "role": "return",
+      "route": "return-left"
+    },
+    {
+      "id": "e-drive-reduce",
+      "from": "drive",
+      "to": "reduce",
+      "label": "job 都收场",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "id": "e-reduce-report",
+      "from": "reduce",
+      "to": "report",
+      "variant": "emphasis",
+      "role": "main"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "判定要两件都成立",
+      "items": [
+        "事件完整 ∧ 进程干净终止",
+        "退出信号来自父进程或平台观察，不是 worker 自己上报"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "循环里的两种驱动",
+      "items": [
+        "run：全程在线的循环，关掉命令即中止",
+        "submit：无状态地推一步，由本机后台进程或云端函数反复调用"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "plan 到此为止",
+      "items": [
+        "解析与分组纯本地、零费用",
+        "另问每个引擎：这些 step 各命中哪条确定性模式"
+      ]
+    }
+  ]
+}

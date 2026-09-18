@@ -1,6 +1,6 @@
 # 云端后端由哪些载体拼成：一次改动要传播到哪几处才生效
 
-> **文档定位（读前必知）**：本文是给**人**（部署方 / operator / contributor）读的跨 ADR 合成导览——只讲**机制如何协同工作**（how），不复述决策理由与权衡（why 全在各 ADR，本文只给指针）。**权威永远在 ADR 与 code**，与本文冲突时以它们为准。为什么有这一层：`--backend cloud` 的后端不是一个整体，而是五个各自独立更新的载体拼出来的，而这件事在任何单个 ADR 里都只露出自己那一角——「我升了版本 / 改了东西，为什么云端没变？」的答案要横切 0033 / 0037 / 0038 / 0034 / 0042 才拼得出来。（本层的维护判据见 [CLAUDE.md](../../CLAUDE.md)「文档纪律」guides 条）
+> 本文讲**机制如何协同工作**（机制），不讨论为什么这样设计：设计决策与理由在各 ADR，本文只给指针；与代码或 ADR 不一致时以它们为准。`--backend cloud` 的后端不是一个整体，而是五个各自独立更新的载体拼出来的，而这件事在任何单个 ADR 里都只露出自己那一角——「我升了版本 / 改了东西，为什么云端没变？」的答案要横切 0033 / 0037 / 0038 / 0034 / 0042 才拼得出来。
 
 本文只答「改动要落到哪几处」。**推进链本身**——谁在推 run、事件走哪条通道、超时怎么兜、云端 Lambda 为什么不抢前台 run——见 [`execution-and-reconciliation.md`](./execution-and-reconciliation.md)，本文不重复。
 
@@ -14,19 +14,9 @@
 | **使用方的 variant 镜像** | 基底 + 你 `COPY` 进去的确定性 step 目录（`GHERKAI_STEPS_DIR`）——**云端跑哪套 step 由镜像决定**，不由提交侧 `--steps-dir` 决定 | 你自己 build（gherkai 不拥有构建）+ `gherkai deploy push-worker`（推 ECR、从模板注册 revision、写 SSM 映射） | 写完 SSM 映射后，**下一次提交**解析到新 revision；已在跑的 run 不换（见 §5） | ECR tag = `names.image_tag(CLI 版本, variant)`；repo 名 = `names.ecr_repo_name` |
 | **SSM 参数** | `version`（后端版本戳）、`vpc`（生效 VPC 档）、`worker-template/<engine>`（模板 revision ARN）、`subnets`/`security-groups`——这四族是 **stack 资源**；`worker-image/<engine>/<tag>`（映射 JSON）、`worker-default`（默认 variant 指针）——这两族由命令 `put_parameter` 写 | 前四族随 cdk 事务；后两族由 `push-worker` / `deploy` 的第 2-4 步写 | `put_parameter` 即生效（**覆盖语义、最后写者赢**） | 路径全经 `names.ssm_path(prefix, key)`，键名常量在 `gherkai_runtime.names` |
 
-```mermaid
-flowchart LR
-    CI["维护者 CI（tag 触发）"] -->|发布| GHCR["基底镜像 @ GHCR"]
-    DEV["你：docker build（叠 steps）"] --> LOC["本地 variant 镜像"]
-    subgraph D["gherkai deploy（一条命令、两段）"]
-        CDK["① cdk 事务：资源 + Lambda asset + stack 资源类 SSM"]
-        STEPS["②③④ 同步基底为 base · 初始化默认指针 · 重派生 variant · 清理 pass"]
-    end
-    GHCR -->|pull→push| STEPS
-    LOC -->|gherkai deploy push-worker| ECR["你的 ECR + task-def revision + SSM 映射"]
-    CDK --> STACK["stack 资源"]
-    STEPS --> ECR
-```
+![官方基底与你 build 的镜像怎么进你自己的 ECR、挂上哪个 task-def revision、谁指着它，以及旧 revision 何时才允许回收](../diagrams/cloud-delivery-identity.svg)
+
+图注（云端交付与 worker 身份拓扑）：上表五行在图上各有落点，图只画从属与指向，每个载体「什么时候生效」的完整口径在上表第 4 列。图上的 SSM 镜像映射按版本分键（见 §6）——升级换掉版本命名空间后自定义 variant 必须重推，这正是 §3 第 ③ 步与 §4「默认 variant 在新版本尚无镜像」那行的同一个根因。本图只画交付与身份；谁在推 run、事件走哪条通道是另一张图的事，见 [`execution-and-reconciliation.md`](./execution-and-reconciliation.md)。可交互版（缩放 / 聚焦一格 / 追一条路径）：https://zhiyanliu.github.io/gherkai/cloud-delivery-identity.html
 
 三条容易踩的载体边界：
 
@@ -92,10 +82,14 @@ flowchart LR
 
 cloud 提交是**定义期解析、运行期照抄**，这条是「重推 variant 不会踩到在跑的 run」的全部根据：
 
-1. preflight 把 `--worker-variant`（缺省 = 默认指针）解析成**本 run 用到的每个引擎**的 task-def revision，三环校验：SSM 有当前版本的映射 → 该 revision 仍 `ACTIVE` → 该 digest 在 ECR 仍在。任一环缺即退 2，**绝不回落**默认指针 / family 最新 ACTIVE / 模板 revision。
+1. preflight 把 `--worker-variant`（缺省 = 默认指针）解析成**本 run 用到的每个引擎**的 task-def revision，三环校验：SSM 有当前版本的映射 → 该 revision 仍 `ACTIVE` → 该 digest 在 ECR 仍在（三相时序见下图）；任一环缺即退 2，**绝不回落**默认指针 / family 最新 ACTIVE / 模板 revision。
 2. 解析结果写进 definition：`RunMeta.worker_variant`（人读）+ `RunMeta.worker_task_defs`（引擎 → revision ARN），同一批 ARN 另摊平成 runs 表 STATE item 的顶层属性 `worker_task_def_arns`。
-3. 云端推进器（kicker / reconciler）与前台 `run` 的 `FargateEngine` 一律**照 definition 起 task**，用显式 revision、永不用 family 取最新；revision 的镜像栏是 `repo@sha256:<digest>`。于是 run 期间别人重推同名 variant → 新 digest、新 revision，**在跑的 run 手里那个 revision 仍按 digest 指着旧镜像层**。
+3. 云端推进器（kicker / reconciler）与前台 `run` 的 `FargateEngine` 一律**照 definition 起 task**，用显式 revision、永不用 family 取最新；revision 的镜像栏是 `repo@sha256:<digest>`。
 4. definition 里没有 `worker_task_defs` 的老 run（引入该机制前提交的、或旧 CLI 提交到新后端的）走**兼容路径**：按后端当前默认指针解析，并在 CloudWatch 打一行 `worker-compat:` 点名 variant/版本/引擎。解析不出只跳过该 run（events Stream 一批含多个 run，抛出去会让整批重投后丢弃）。
+
+![提交那一刻把 variant 解析成本 run 每个引擎的显式 revision 并写进 run 记录；之后有人重推同名 variant 只改出新 digest、新 revision 与新映射，起 task 仍照定义抄提交时钉下的那一个](../diagrams/cloud-backend-carriers-revision-pinning.svg)
+
+图注（提交时刻钉死 revision）：图上的「云端起 task 侧」= 正文第 3 条的云端推进器（kicker / reconciler 两个 Lambda），那条回读边是**云端侧**的——两个推进 Lambda 从 definition 读回那批 revision 再起 task。前台 `run --backend cloud` 不回读：它直接用本进程 preflight 解析出的同一批（与写进 definition 的同源，`--no-report` 时连 run 记录都没有），钉死的效果相同。三环解析的完整判据（缺任一环即拒、绝不回落）在上面第 1 条；definition 里没有那两个字段的老 run 走上面第 4 条的兼容路径，不在图上。两张图的分工：§1 那张画**静态从属**（镜像挂在哪个 revision、谁指着它），这张画**时间先后**（提交那一刻 / run 还在跑时被重推 / 之后起 task）；谁在推 run、事件走哪条通道两张都不画，见 [`execution-and-reconciliation.md`](./execution-and-reconciliation.md)。
 
 第 3 条的正确性有两道配套护栏，都在回收侧：
 

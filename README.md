@@ -7,7 +7,7 @@
 - **交给 AI（默认）**：引擎读自然语言，自己操作页面、自己判断结果，写用例的人不写代码。AI 的判断可能抖动，断言可以投多票取多数。
 - **确定性 step**：必须精确的检查（当前 URL、某个页面元素、精确文本）不交给 AI 猜。测试开发把它写成一个小函数放进项目的 `steps/` 目录，函数直接查页面对象，结果可复现；写用例的人只需在 `.feature` 里照它登记的说法写一句。
 
-同一份 `.feature` 可以在本机跑，也可以提交到团队共享的云端后端跑；查询类命令都有 `--json` 输出，AI coding agent 可以直接驾驭。
+同一份 `.feature` 可以在本机跑，也可以提交到团队共享的云端后端跑；查询类命令都有 `--json` 输出，AI agent（如 Claude Code、Codex）可以直接驾驭。
 
 ## 安装
 
@@ -42,15 +42,9 @@ gherkai explain <run_id>                           # 有用例没过：逐步看
 
 ## 它是怎么跑的
 
-```mermaid
-flowchart LR
-    F["features/*.feature"] --> CLI["gherkai 命令行"]
-    CLI -- "本机：子进程" --> W["worker（Midscene 或 Nova Act）"]
-    CLI -- "云端：Fargate 任务" --> W
-    W -- CDP --> B["AgentCore Browser<br/>（每个 scope 一个会话）"]
-    B --> APP["被测应用<br/>公网站点，或经隧道到达的本机 / 内网应用"]
-    W --> R["结果<br/>本机：reports/ · 云端：DynamoDB + S3"]
-```
+![本机档与云端档两条路径：命令行读入 .feature，起本机 worker 或提交到云端后端；worker 用你账户里的模型做 AI step 的操作与判定、经 CDP 驱动云端浏览器，浏览器直达公网被测应用或经隧道回本机应用；结果与证据由 explain / status 读回](./docs/diagrams/readme-runtime-topology.svg)
+
+两条路径各自把结果落在哪、要什么凭证与权限，见下面三条；判定由哪个模型做出，见下一节的披露表。浏览器会话按用例分组算：同一个分组（`.feature` 里的 `@scope` 标签）的用例串行共享一个云端浏览器会话，写法见 [编写 .feature](./docs/user-guide/writing-features.md)。
 
 - **本机档**（默认）：worker 是本机子进程，结果落当前目录的 `reports/`。需要本机 AWS 凭证。
 - **云端档**：worker 在部署方建好的 Fargate 上运行，状态落 DynamoDB、结果落 S3；提交完关机也会跑完。团队成员只需最小的云端权限，见 [部署与维护云端后端](./docs/user-guide/cloud-backend.md)。
@@ -60,7 +54,7 @@ flowchart LR
 
 ## 判定由谁做出：底层模型披露
 
-gherkai 自己不含模型，也不接收任何数据。每个 AI step 的操作与判定由下面两个模型完成，全部在**你的 AWS 账户**里的托管服务上运行：Nova Act 在你选的 region；Midscene 默认的 GPT-5.6 经 Bedrock 跨区推理在**美国境内三个 region**（us-east-1 / us-east-2 / us-west-2）处理，浏览器会话与产物仍在你选的 region。发给模型的是 step 文本与被测页面的截图。唯一的第三方是可选的 ngrok：只有用 `--expose-local` 测本机应用时，云端浏览器到你本机应用的流量才经过 ngrok 的隧道。
+gherkai 自己不含模型，也不接收任何数据。每个 AI step 的操作与判定由下面两个模型完成，全部在**你的 AWS 账户**里的托管服务上运行：Nova Act 在你选的 region；Midscene 默认的 GPT-5.6 经 Bedrock 跨区推理在**美国境内三个 region**（us-east-1 / us-east-2 / us-west-2）处理，浏览器会话与产物仍在你选的 region。发给模型的是 step 文本与被测页面的截图。唯一的第三方是可选的 ngrok：只有用 `--expose-local` 测本机应用时，云端浏览器到你本机应用的流量才经过 ngrok 的隧道。各部件与数据边界见 [开始使用 › AWS 前置](./docs/user-guide/getting-started.md#aws-前置)。
 
 | 引擎 | 模型 | 服务 | 版本策略 | 怎么看 / 怎么换 |
 |---|---|---|---|---|
@@ -80,6 +74,7 @@ gherkai 自己不含模型，也不接收任何数据。每个 AI step 的操作
 | 部署与维护团队的云端后端 | [部署与维护云端后端](./docs/user-guide/cloud-backend.md) |
 | 环境变量与选项总表 | [配置](./docs/user-guide/configuration.md) |
 | 报错了先看哪 | [排错](./docs/user-guide/troubleshooting.md) |
+| 上手前的疑问：要不要先部署云端后端、AI 判定能不能当门禁 | [常见问题](./docs/user-guide/faq.md) |
 | 每个版本改了什么、升级要做什么 | [CHANGELOG](./CHANGELOG.md) |
 | 系统内部如何运转 | [`docs/internals/`](./docs/internals/README.md) |
 | 参与开发 | [`CONTRIBUTING.md`](./CONTRIBUTING.md) |
@@ -90,3 +85,7 @@ gherkai 自己不含模型，也不接收任何数据。每个 AI step 的操作
 
 - 运行会产生真实的 AWS 费用（模型调用与云端浏览器会话）。先用 `plan` 预检，再运行。
 - 用于生产之前，先用示例用例（`features/` 里的 wikipedia 用例）确认环境与凭证正常。
+
+## 许可证
+
+MIT，见 [LICENSE](./LICENSE)。

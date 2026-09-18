@@ -1,0 +1,469 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "执行与推进全景：run / submit × local / cloud",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "run-local",
+        "label": "run × local",
+        "focus": [
+          "entry",
+          "foreLoop",
+          "dispatch",
+          "workerLocal",
+          "pipeLocal",
+          "exitWatch",
+          "settle"
+        ],
+        "note": "CLI 进程内的循环全程守着：起子进程、逐行读事件、当场看退出。关掉 CLI 即中止。"
+      },
+      {
+        "id": "run-cloud",
+        "label": "run × cloud",
+        "focus": [
+          "entry",
+          "foreLoop",
+          "dispatch",
+          "workerCloud",
+          "tableCloud",
+          "exitWatch",
+          "settle"
+        ],
+        "note": "同一个循环换云端载体：任务在云上跑、事件轮询读回。关掉 CLI 只是放弃收结果，任务照跑照计费。"
+      },
+      {
+        "id": "submit-local",
+        "label": "submit × local",
+        "focus": [
+          "entry",
+          "bgProc",
+          "stepOnce",
+          "dispatch",
+          "workerLocal",
+          "pipeLocal",
+          "storeLocal",
+          "exitWatch",
+          "settle"
+        ],
+        "note": "提交即返回；本机后台进程反复推一步，事件旁路落库、退出由它自己观察。本机须保持开机。"
+      },
+      {
+        "id": "submit-cloud",
+        "label": "submit × cloud",
+        "focus": [
+          "entry",
+          "cloudFn",
+          "stepOnce",
+          "dispatch",
+          "workerCloud",
+          "tableCloud",
+          "streamCloud",
+          "exitWatch",
+          "settle"
+        ],
+        "note": "提交完可关机（用隧道测本机应用时除外）：事件写表触发推进、任务停止被翻成退出记录，谁来推都靠重放同一份日志。"
+      }
+    ],
+    "legend": {
+      "mode": "auto",
+      "entries": {
+        "frontend": {
+          "label": "命令入口"
+        },
+        "backend": {
+          "label": "驱动与执行"
+        },
+        "cloud": {
+          "label": "云端推进函数"
+        },
+        "external": {
+          "label": "worker：子进程 或 云端任务"
+        },
+        "database": {
+          "label": "事件载体"
+        },
+        "messagebus": {
+          "label": "派发起 worker"
+        },
+        "security": {
+          "label": "退出观察"
+        }
+      }
+    }
+  },
+  "lanes": [
+    {
+      "id": "laneLocal",
+      "label": "本机档（local）"
+    },
+    {
+      "id": "laneCore",
+      "label": "同一份 core（四格共用的代码）"
+    },
+    {
+      "id": "laneStep",
+      "label": "无状态推一步"
+    },
+    {
+      "id": "laneCloud",
+      "label": "云端档（cloud）"
+    }
+  ],
+  "phases": [
+    {
+      "id": "phIntake",
+      "label": "入口与承载进程",
+      "fromCol": 0,
+      "toCol": 0
+    },
+    {
+      "id": "phLoop",
+      "label": "驱动循环：每批事件再推一步",
+      "fromCol": 1,
+      "toCol": 4,
+      "variant": "emphasis"
+    },
+    {
+      "id": "phSettle",
+      "label": "重放与收敛",
+      "fromCol": 5,
+      "toCol": 5
+    }
+  ],
+  "mainPath": [
+    "entry",
+    "foreLoop",
+    "dispatch",
+    "workerLocal",
+    "pipeLocal",
+    "settle"
+  ],
+  "semanticChecks": {
+    "allowedRoots": [
+      "entry",
+      "bgProc",
+      "cloudFn"
+    ],
+    "allowedTerminals": [
+      "settle"
+    ],
+    "requiredEdges": [
+      {
+        "from": "exitWatch",
+        "to": "settle"
+      }
+    ]
+  },
+  "nodes": [
+    {
+      "id": "bgProc",
+      "lane": "laneLocal",
+      "col": 0,
+      "type": "backend",
+      "label": "本机后台进程",
+      "sublabel": "submit 留下的 · 可被接手",
+      "width": 140
+    },
+    {
+      "id": "workerLocal",
+      "lane": "laneLocal",
+      "col": 3,
+      "type": "external",
+      "label": "本机 worker",
+      "sublabel": "子进程",
+      "width": 136
+    },
+    {
+      "id": "pipeLocal",
+      "lane": "laneLocal",
+      "col": 4,
+      "type": "database",
+      "label": "事件管道",
+      "sublabel": "专用通道，不落盘",
+      "width": 140
+    },
+    {
+      "id": "storeLocal",
+      "lane": "laneLocal",
+      "col": 5,
+      "type": "database",
+      "label": "本机事件库",
+      "sublabel": "旁路原样存下",
+      "width": 140
+    },
+    {
+      "id": "entry",
+      "lane": "laneCore",
+      "col": 0,
+      "type": "frontend",
+      "label": "命令入口",
+      "sublabel": "解析 · 分组 · 落定义",
+      "width": 140
+    },
+    {
+      "id": "foreLoop",
+      "lane": "laneCore",
+      "col": 1,
+      "type": "backend",
+      "label": "前台在线循环",
+      "sublabel": "全程在线守着",
+      "width": 140
+    },
+    {
+      "id": "dispatch",
+      "lane": "laneCore",
+      "col": 2,
+      "type": "messagebus",
+      "label": "起 worker",
+      "sublabel": "每 scope 一个，有并发闸",
+      "width": 144
+    },
+    {
+      "id": "exitWatch",
+      "lane": "laneCore",
+      "col": 4,
+      "type": "security",
+      "label": "退出观察者",
+      "sublabel": "看见 worker 停了",
+      "width": 140
+    },
+    {
+      "id": "settle",
+      "lane": "laneCore",
+      "col": 5,
+      "type": "backend",
+      "label": "收敛与提交点",
+      "sublabel": "一次落定终态",
+      "width": 140
+    },
+    {
+      "id": "stepOnce",
+      "lane": "laneStep",
+      "col": 1,
+      "type": "backend",
+      "label": "无状态推一步",
+      "sublabel": "重放 · 条件写 · 抢 job",
+      "width": 144
+    },
+    {
+      "id": "cloudFn",
+      "lane": "laneCloud",
+      "col": 0,
+      "type": "cloud",
+      "label": "云端推进函数",
+      "sublabel": "提交与事件都会唤醒",
+      "width": 140
+    },
+    {
+      "id": "workerCloud",
+      "lane": "laneCloud",
+      "col": 3,
+      "type": "external",
+      "label": "云端 worker",
+      "sublabel": "云上任务",
+      "width": 136
+    },
+    {
+      "id": "tableCloud",
+      "lane": "laneCloud",
+      "col": 4,
+      "type": "database",
+      "label": "云端事件表",
+      "sublabel": "逐条写进表",
+      "width": 140
+    },
+    {
+      "id": "streamCloud",
+      "lane": "laneCloud",
+      "col": 5,
+      "type": "database",
+      "label": "事件表流",
+      "sublabel": "写入即触发",
+      "width": 140
+    }
+  ],
+  "edges": [
+    {
+      "id": "e-run",
+      "from": "entry",
+      "to": "foreLoop",
+      "label": "run",
+      "variant": "emphasis",
+      "role": "main",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "e-submit",
+      "from": "entry",
+      "to": "stepOnce",
+      "label": "submit：落库即返回",
+      "variant": "default",
+      "role": "branch",
+      "toSide": "left"
+    },
+    {
+      "id": "e-bg-step",
+      "from": "bgProc",
+      "to": "stepOnce",
+      "label": "反复推到收敛",
+      "variant": "default",
+      "role": "branch"
+    },
+    {
+      "id": "e-cloudfn-step",
+      "from": "cloudFn",
+      "to": "stepOnce",
+      "label": "每批事件推一步",
+      "variant": "default",
+      "role": "branch"
+    },
+    {
+      "id": "e-fore-dispatch",
+      "from": "foreLoop",
+      "to": "dispatch",
+      "label": "在线派发",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "id": "e-step-dispatch",
+      "from": "stepOnce",
+      "to": "dispatch",
+      "label": "抢到才派发",
+      "variant": "default",
+      "role": "branch"
+    },
+    {
+      "id": "e-dispatch-local",
+      "from": "dispatch",
+      "to": "workerLocal",
+      "label": "本机：起子进程",
+      "variant": "emphasis",
+      "role": "main",
+      "toSide": "left"
+    },
+    {
+      "id": "e-dispatch-cloud",
+      "from": "dispatch",
+      "to": "workerCloud",
+      "label": "云端：起云上任务",
+      "variant": "default",
+      "role": "branch",
+      "toSide": "left"
+    },
+    {
+      "id": "e-local-pipe",
+      "from": "workerLocal",
+      "to": "pipeLocal",
+      "label": "逐条事件",
+      "variant": "dashed",
+      "role": "async"
+    },
+    {
+      "id": "e-cloud-table",
+      "from": "workerCloud",
+      "to": "tableCloud",
+      "label": "逐条事件",
+      "variant": "dashed",
+      "role": "async"
+    },
+    {
+      "id": "e-pipe-store",
+      "from": "pipeLocal",
+      "to": "storeLocal",
+      "label": "后台：旁路落下",
+      "variant": "dashed",
+      "role": "async"
+    },
+    {
+      "id": "e-table-stream",
+      "from": "tableCloud",
+      "to": "streamCloud",
+      "label": "每批写入",
+      "variant": "dashed",
+      "role": "async"
+    },
+    {
+      "id": "e-pipe-settle",
+      "from": "pipeLocal",
+      "to": "settle",
+      "label": "前台：听完即用",
+      "variant": "dashed",
+      "role": "async"
+    },
+    {
+      "id": "e-store-settle",
+      "from": "storeLocal",
+      "to": "settle",
+      "label": "全量重放算终态",
+      "variant": "dashed",
+      "role": "async"
+    },
+    {
+      "id": "e-table-settle",
+      "from": "tableCloud",
+      "to": "settle",
+      "label": "前台：轮询读一段",
+      "variant": "dashed",
+      "role": "async"
+    },
+    {
+      "id": "e-stream-settle",
+      "from": "streamCloud",
+      "to": "settle",
+      "label": "唤醒推进直到收敛",
+      "variant": "dashed",
+      "role": "async"
+    },
+    {
+      "id": "e-local-exit",
+      "from": "workerLocal",
+      "to": "exitWatch",
+      "label": "本机：父进程收",
+      "variant": "security",
+      "role": "branch",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "e-cloud-exit",
+      "from": "workerCloud",
+      "to": "exitWatch",
+      "label": "云端：平台记一条",
+      "variant": "security",
+      "role": "branch",
+      "fromSide": "top",
+      "toSide": "left"
+    },
+    {
+      "id": "e-exit-settle",
+      "from": "exitWatch",
+      "to": "settle",
+      "label": "有退出记录才收敛",
+      "variant": "security",
+      "role": "branch"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "同一份 core，四格只换注入件",
+      "items": [
+        "解析 · 分组（plan 到此为止）· 投影 · 判定：四格共用一份代码",
+        "换掉的只是注入件：谁承载执行、事件从哪读、job 用什么起、谁看见 worker 停了"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "两处最容易读错",
+      "items": [
+        "status --wait 两档不同：本机接手后就是唯一推进者（它一停，run 就地停摆），云端只踢一脚、踢完就能离场",
+        "退出码是父进程 / 平台观察来的，不是 worker 自己上报"
+      ]
+    }
+  ]
+}

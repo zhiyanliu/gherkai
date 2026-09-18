@@ -1,0 +1,284 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "两道闸门：云端后台推进为什么不碰前台 run",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "legend": {
+      "mode": "auto",
+      "entries": {
+        "database": {
+          "label": "订阅侧的事件源"
+        },
+        "security": {
+          "label": "判点"
+        },
+        "external": {
+          "label": "挡在链外"
+        },
+        "backend": {
+          "label": "放行后照常做"
+        }
+      }
+    }
+  },
+  "lanes": [
+    {
+      "id": "laneKick",
+      "label": "冷启动这一路"
+    },
+    {
+      "id": "laneStep",
+      "label": "主推进这一路"
+    },
+    {
+      "id": "laneExit",
+      "label": "退出观察这一路"
+    },
+    {
+      "id": "laneBlocked",
+      "label": "挡在链外",
+      "variant": "exception"
+    }
+  ],
+  "phases": [
+    {
+      "id": "phSrc",
+      "label": "订阅侧就滤掉",
+      "fromCol": 0,
+      "toCol": 1
+    },
+    {
+      "id": "phJudge",
+      "label": "进了函数再判：判不过就挡下",
+      "fromCol": 2,
+      "toCol": 4,
+      "variant": "emphasis"
+    },
+    {
+      "id": "phGo",
+      "label": "放行：链照常跑通",
+      "fromCol": 5,
+      "toCol": 5
+    }
+  ],
+  "mainPath": [
+    "judgeDetached",
+    "judgeSettled",
+    "goStep"
+  ],
+  "semanticChecks": {
+    "allowedRoots": [
+      "srcNew",
+      "judgeDetached",
+      "judgeExit"
+    ],
+    "allowedTerminals": [
+      "goKick",
+      "goStep",
+      "goExit",
+      "blkKick",
+      "blkAct",
+      "blkRewrite",
+      "blkExit"
+    ],
+    "requiredEdges": [
+      {
+        "from": "judgeDetached",
+        "to": "judgeSettled"
+      }
+    ]
+  },
+  "nodes": [
+    {
+      "id": "srcNew",
+      "lane": "laneKick",
+      "col": 0,
+      "type": "database",
+      "label": "新 run 落库",
+      "sublabel": "带后台标记吗",
+      "width": 148
+    },
+    {
+      "id": "goKick",
+      "lane": "laneKick",
+      "col": 5,
+      "type": "backend",
+      "label": "起首批 worker",
+      "width": 148
+    },
+    {
+      "id": "judgeDetached",
+      "lane": "laneStep",
+      "col": 2,
+      "type": "security",
+      "label": "是后台批次吗",
+      "sublabel": "事件上没有标记",
+      "width": 152
+    },
+    {
+      "id": "judgeSettled",
+      "lane": "laneStep",
+      "col": 3,
+      "type": "security",
+      "label": "这个 run 收尾了吗",
+      "sublabel": "防的是另一件事",
+      "width": 176
+    },
+    {
+      "id": "goStep",
+      "lane": "laneStep",
+      "col": 5,
+      "type": "backend",
+      "label": "推进这一步",
+      "width": 148
+    },
+    {
+      "id": "judgeExit",
+      "lane": "laneExit",
+      "col": 4,
+      "type": "security",
+      "label": "退出观察也判一次",
+      "sublabel": "判据同一个标记",
+      "width": 176
+    },
+    {
+      "id": "goExit",
+      "lane": "laneExit",
+      "col": 5,
+      "type": "backend",
+      "label": "记下这条退出",
+      "width": 148
+    },
+    {
+      "id": "blkKick",
+      "lane": "laneBlocked",
+      "col": 1,
+      "type": "external",
+      "label": "不被唤醒",
+      "sublabel": "源头就滤掉",
+      "width": 148
+    },
+    {
+      "id": "blkAct",
+      "lane": "laneBlocked",
+      "col": 2,
+      "type": "external",
+      "label": "整体不动作",
+      "sublabel": "只跳这个 run",
+      "width": 152
+    },
+    {
+      "id": "blkRewrite",
+      "lane": "laneBlocked",
+      "col": 3,
+      "type": "external",
+      "label": "不改写结果",
+      "sublabel": "已落定的不再动",
+      "width": 176
+    },
+    {
+      "id": "blkExit",
+      "lane": "laneBlocked",
+      "col": 4,
+      "type": "external",
+      "label": "不写退出记录",
+      "sublabel": "免得混进前台",
+      "width": 176
+    }
+  ],
+  "edges": [
+    {
+      "id": "e-new-go",
+      "from": "srcNew",
+      "to": "goKick",
+      "label": "是后台 run",
+      "variant": "default",
+      "role": "branch"
+    },
+    {
+      "id": "e-new-blk",
+      "from": "srcNew",
+      "to": "blkKick",
+      "label": "不是后台 run",
+      "variant": "security",
+      "role": "error"
+    },
+    {
+      "id": "e-detached-settled",
+      "from": "judgeDetached",
+      "to": "judgeSettled",
+      "label": "是 → 再判一道",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "id": "e-detached-blk",
+      "from": "judgeDetached",
+      "to": "blkAct",
+      "label": "不是后台批次",
+      "variant": "security",
+      "role": "error"
+    },
+    {
+      "id": "e-settled-go",
+      "from": "judgeSettled",
+      "to": "goStep",
+      "label": "还没收尾",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "id": "e-settled-blk",
+      "from": "judgeSettled",
+      "to": "blkRewrite",
+      "label": "已经收尾",
+      "variant": "security",
+      "role": "error"
+    },
+    {
+      "id": "e-exit-go",
+      "from": "judgeExit",
+      "to": "goExit",
+      "label": "是后台批次",
+      "variant": "default",
+      "role": "branch"
+    },
+    {
+      "id": "e-exit-blk",
+      "from": "judgeExit",
+      "to": "blkExit",
+      "label": "不是后台批次",
+      "variant": "security",
+      "role": "error"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "rose",
+      "title": "不加闸门会怎样",
+      "items": [
+        "前台跑法在云端档也往同两张表里写，云端函数照样被它的记录唤醒",
+        "结果是同一个 scope 被起两个 task：前台在跑，云端又替它起一个"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "两道闸门，同一个判据",
+      "items": [
+        "订阅侧那道写在事件源过滤里：只收带后台标记的新 run 落库",
+        "事件与任务停止事件上都没有这个标记，只能进了函数再回头查这个 run",
+        "后一道在装配前就判，被踢起来的冷启动同样要过"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "另两个判点防的是别的事",
+      "items": [
+        "「收尾了吗」防的是改写已落定的结果",
+        "退出观察那道防的是没有正文的退出记录混进前台 run 的事件流"
+      ]
+    }
+  ]
+}

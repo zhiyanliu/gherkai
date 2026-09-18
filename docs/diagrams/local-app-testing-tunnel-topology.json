@@ -1,0 +1,163 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "隧道拓扑与流量方向",
+    "locale": "zh-CN",
+    "quality_profile": "showcase"
+  },
+  "components": [
+    {
+      "id": "thirdparty",
+      "type": "external",
+      "label": "第三方域资源",
+      "sublabel": "页面引用的外部域",
+      "pos": [60, 90],
+      "size": [186, 72]
+    },
+    {
+      "id": "outsider",
+      "type": "external",
+      "label": "公网上的访问者",
+      "sublabel": "不带凭据",
+      "pos": [360, 90],
+      "size": [186, 72]
+    },
+    {
+      "id": "browser",
+      "type": "cloud",
+      "label": "云端浏览器会话",
+      "sublabel": "两个后端共用",
+      "pos": [60, 280],
+      "size": [186, 72]
+    },
+    {
+      "id": "edge",
+      "type": "security",
+      "label": "隧道服务商边缘",
+      "sublabel": "分配公网地址",
+      "tag": "校验凭据",
+      "pos": [360, 280],
+      "size": [186, 72]
+    },
+    {
+      "id": "tunnel",
+      "type": "backend",
+      "label": "隧道进程",
+      "sublabel": "出站长连",
+      "tag": "不开入站端口",
+      "pos": [660, 280],
+      "size": [186, 72]
+    },
+    {
+      "id": "app",
+      "type": "backend",
+      "label": "被测应用",
+      "sublabel": "本机或局域网另一台",
+      "pos": [960, 280],
+      "size": [186, 72]
+    },
+    {
+      "id": "cli",
+      "type": "frontend",
+      "label": "gherkai 命令行",
+      "sublabel": "起隧道并替换地址",
+      "pos": [660, 440],
+      "size": [186, 72]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "云端（浏览器在这里）",
+      "wraps": ["browser"],
+      "pad": 20
+    },
+    {
+      "kind": "region",
+      "label": "隧道服务商（公网侧）",
+      "wraps": ["edge"],
+      "pad": 20
+    },
+    {
+      "kind": "region",
+      "label": "跑 CLI 的这台机器",
+      "wraps": ["tunnel", "cli"],
+      "pad": 20
+    }
+  ],
+  "connections": [
+    {
+      "id": "navigate",
+      "from": "browser",
+      "to": "edge",
+      "label": "按公网地址导航",
+      "variant": "emphasis"
+    },
+    {
+      "id": "into-tunnel",
+      "from": "edge",
+      "to": "tunnel",
+      "label": "经隧道回本机",
+      "variant": "emphasis"
+    },
+    {
+      "id": "forward",
+      "from": "tunnel",
+      "to": "app",
+      "label": "转发到原始地址",
+      "variant": "emphasis"
+    },
+    {
+      "id": "start-tunnel",
+      "from": "cli",
+      "to": "tunnel",
+      "label": "起进程"
+    },
+    {
+      "id": "direct-external",
+      "from": "browser",
+      "to": "thirdparty",
+      "label": "直连，不经隧道",
+      "variant": "dashed",
+      "labelDy": -34
+    },
+    {
+      "id": "blocked",
+      "from": "outsider",
+      "to": "edge",
+      "label": "校验不通过即拦下",
+      "variant": "security",
+      "labelDy": 24
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "方向怎么读",
+      "items": [
+        "实线链是请求方向，响应沿同一路径返回",
+        "隧道是出站长连，你的机器不开入站端口",
+        "命令行只管起进程与拆隧道，不转发流量"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "什么经隧道、什么不经",
+      "items": [
+        "被测应用自身域下的请求全部经隧道",
+        "页面引用的第三方域由云端浏览器直连",
+        "feature、引擎与 AI 都不感知隧道"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "边缘那道闸",
+      "items": [
+        "公网地址由服务商边缘分配，每个 run 一换",
+        "凭据随机生成、每个 run 一换，由边缘校验",
+        "不带凭据的请求到不了你的机器"
+      ]
+    }
+  ]
+}

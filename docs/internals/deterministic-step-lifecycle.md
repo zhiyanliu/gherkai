@@ -1,6 +1,6 @@
 # 一条确定性 step 的一生：从你写下正则到它在云端命中
 
-> **文档定位（读前必知）**：本文是给**人**读的跨 ADR 合成导览——只讲**机制如何运转**（how），不复述决策理由、权衡与被拒方案（why 全在各 ADR，本文只给指针）。**权威永远在 ADR 与 code**，与本文冲突时以它们为准。为什么有这一层：确定性 step 的机制被切在五个 ADR 里（注册表在 0022、可发现性在 0036、定制面在 0037、镜像交付在 0038、产物缺口在 0027），而人真正想问的是一条纵向问题——「我写下一个正则，它经过什么才在云端命中？」本文就是那条纵切面。（本层的维护判据见 [CLAUDE.md](../../CLAUDE.md)「文档纪律」guides 条）
+> 本文讲**机制如何运转**（机制），不讨论为什么这样设计：设计决策与理由在各 ADR，本文只给指针；与代码或 ADR 不一致时以它们为准。确定性 step 的机制被切在五个 ADR 里（注册表在 0022、可发现性在 0036、定制面在 0037、镜像交付在 0038、产物缺口在 0027），而人真正想问的是一条纵向问题——「我写下一个正则，它经过什么才在云端命中？」本文就是那条纵切面。
 
 ## 0. 全景：四段路，一张表
 
@@ -15,15 +15,9 @@
 
 怎么写一个 handler（签名、`ctx` 能拿到什么、正则具名组怎么传参）**不在本文**——看使用者向的 [`docs/user-guide/writing-deterministic-steps.md`](../user-guide/writing-deterministic-steps.md)（Python 与 TypeScript 两侧并排）。本文讲的是这四段之间的接缝（handler 抛异常之后怎么落成判定，见 §1 的映射表）。
 
-```mermaid
-flowchart LR
-    A["steps/*.py · steps/*.mts<br/>（你写的正则 + handler）"] --> L["worker 启动加载<br/>user_steps.py / user-steps.mts"]
-    B["内建脚手架<br/>deterministic_steps.py<br/>deterministic.steps.mts"] --> R
-    L --> R["注册表（worker 进程内）<br/>_REGISTRY / REGISTRY"]
-    R --> Q1["--capabilities（deterministic_steps）<br/>→ list-deterministic / doctor / run 前置"]
-    R --> Q2["--match-steps<br/>→ plan 的「← 确定性」标注"]
-    R --> Q3["job 模式<br/>→ 真跑派发"]
-```
+![你写的 step 与内建脚手架在 worker 启动时装成同一张注册表，查清单与逐 step 派发问的都是它](../diagrams/deterministic-steps-registry-overview.svg)
+
+图注：三个入口各自的 flag 与输出形状见 §2 表。图上只有走注册表的那条路——派发的第 2 级（内建 URL 导航）不查注册表，故不在此图上（见 §1）。
 
 > 权威：[ADR 0022](../adr/0022-bdd-runner-retired-core-parses-thin-worker.md)（注册表即扩展点）、[ADR 0020](../adr/0020-step-phrasing-default-ai-deterministic-scaffold.md)（默认 AI / 少数派显式、角色边界）、[ADR 0037](../adr/0037-distribution-and-packaging.md) 决策 4（`steps/` 定制面）。
 
@@ -62,7 +56,7 @@ worker 拿到的只有 `keyword` + 裸 `text`（+可选多行参数）。派发�
 
 不可能分叉的两道结构保证：
 
-- **同一张表**：内建脚手架靠模块顶层 import 的副作用注册，你的 `steps/` 靠 `load_user_steps` / `loadUserSteps` 注册，两者写进的是同一个 `_REGISTRY` / `REGISTRY`；三个入口都在加载之后才分流。所以清单里有的、`plan` 标的、真跑派发的，是同一份真值——**没有第二事实源可漂移**（这也是「外置清单文件」被拒的理由，见 ADR 0036 被拒方案）。
+- **同一张表**：内建脚手架（Nova `deterministic_steps.py` / Midscene `deterministic.steps.mts`）靠模块顶层 import 的副作用注册，你的 `steps/` 靠 `load_user_steps` / `loadUserSteps` 注册，两者写进的是同一个 `_REGISTRY` / `REGISTRY`；三个入口都在加载之后才分流。所以清单里有的、`plan` 标的、真跑派发的，是同一份真值——**没有第二事实源可漂移**（这也是「外置清单文件」被拒的理由，见 ADR 0036 被拒方案）。
 - **同一个扫描面**：`match()` 与 `match_batch()` 共用 `_hits()`（Nova）、`match()` 与 `matchBatch()` 共用 `scan()`（Midscene）。两个消费者只在「命中数怎么处置」上分叉（真跑抛 `DeterministicConflict`，预检返回结构化 `{"conflict": [...]}`），匹配语义本身只有一份实现。
 
 `plan` 因此仍然是**零 AWS、零花费、零副作用**，但它确实会起进程：CLI 按引擎分组 step 文本，每个引擎至多 spawn 一次瞬时本地 worker（`compose.match_deterministic` → `compose._ask_worker`，带 `timeout_s` 预算，默认值见 code）。自述入口不建浏览器会话、不碰 AWS、秒级返回——所以「plan 不花钱」的承诺没破，破的只是早期那句「plan 不起 worker」。
@@ -75,14 +69,18 @@ worker 拿到的只有 `keyword` + 裸 `text`（+可选多行参数）。派发�
 
 同一件事（「这个 run 用哪套确定性 step」）在两个执行档里由**不同的载体**决定，岔口在提交那一刻：
 
-| 档 | 真值源 | 谁解析、什么时候 |
+| 档 | 真值源 | 解析规则与落点字段 |
 |---|---|---|
-| local（`--backend local`，含 `submit` 的后台推进） | 本机目录 | 提交侧 CLI 解析一次：`--steps-dir` > env `GHERKAI_STEPS_DIR` > `./steps`（相对**提交时** CWD、存在才用）→ 绝对路径写进 definition 的 `RunMeta.steps_dir` |
-| cloud（`--backend cloud`） | **variant 镜像里烙进去的 `/app/steps`** | 提交侧只解析 **variant 名** → 每个引擎的 task-def revision；`RunMeta.steps_dir` 不写 |
+| local（`--backend local`，含 `submit` 的后台推进） | 本机目录 | `--steps-dir` > env `GHERKAI_STEPS_DIR` > `./steps`（相对**提交时** CWD、存在才用），落 `RunMeta.steps_dir` |
+| cloud（`--backend cloud`） | **variant 镜像里烙进去的 `/app/steps`** | 解析出各引擎的 task-def revision；`RunMeta.steps_dir` 不写 |
 
-local 侧的关键是**解析只做一次、值随 definition 走**：起 worker 的三个宿主（同步 `run` 本进程、`submit` fork 的 per-run 进程、`status --wait` 接力者）CWD 各不相同，谁再解析一次 `./steps` 都会让同一个 run 在不同宿主下用到不同的 step 集。所以宿主一律**读回** `meta.steps_dir`（`runtime/gherkai_runtime/detached.py` `build_local_reconcile`）、经 env `GHERKAI_STEPS_DIR` 注给 worker（`compose.build_engines`）；worker 只认这一个 env，不认约定、不猜 `./steps`；宿主建这份 env 时还会先**清掉**自己 shell 里的同名 `GHERKAI_STEPS_DIR`，所以接力那台机器上 export 过这个变量也越不过 definition。三宿主是谁、为什么 CWD 不同，见 [`execution-and-reconciliation.md`](./execution-and-reconciliation.md) §4a。
+![local 档提交时解析一次目录、路径随定义走；cloud 档把 steps 烙进 variant 镜像，提交侧只解析镜像名](../diagrams/deterministic-steps-truth-sources.svg)
 
-cloud 侧的关键是**镜像是唯一载体**：你的 `steps/` 靠三行 Dockerfile（`FROM <基底>:X.Y.Z` + `COPY steps/ /app/steps` + `ENV GHERKAI_STEPS_DIR=/app/steps`，模板唯一真源在 [ADR 0038](../adr/0038-worker-image-delivery.md)「概念模型」节）烙进一个 **variant**，由部署方 `gherkai deploy push-worker` 推上去。提交时 `compose.resolve_worker_variant` 做三环存在性/一致性校验（三环各查什么、缺哪一环怎么报，见 [`cloud-backend-carriers.md`](./cloud-backend-carriers.md) §5）——**一个字节的 steps 内容都不看**。
+图注：图上那条「读回后注入」只发生在后台推进的两处；同步 `run` 与提交侧是同一个进程，直接用解析出的值、不读回。cloud 那条链在提交之前就完成：镜像由写 steps 的人按模板 build，推送与登记归部署方，两步都不在一次 run 的时间线上。提交侧解析 variant 时的存在性/一致性校验、两档各自的失败形态与提示，见下文与 §4 表。
+
+local 侧三处宿主（同步 `run`、`submit` 的后台推进进程、`status --wait` 接力者，见 [`execution-and-reconciliation.md`](./execution-and-reconciliation.md) §3 与 §4a）的 CWD 各不相同，所以**解析只能做一次**：谁再解析一次 `./steps`，同一个 run 就会用到两套 step。落点：后台两处读回 `meta.steps_dir`（`detached.build_local_reconcile`），同步 `run` 用提交侧那个值；注入与清同名在 `compose.build_engines` / `_scrubbed_environ`——**每个**宿主建 env 都先清掉自己 shell 里的同名 `GHERKAI_STEPS_DIR`（接力那台机器 export 过只是最易踩的一例），export 越不过 definition，worker 只认这一个 env、不猜 `./steps`。
+
+cloud 侧的关键是**镜像是唯一载体**：你的 `steps/` 靠三行 Dockerfile（模板唯一真源在 [ADR 0038](../adr/0038-worker-image-delivery.md)「概念模型」节）烙进一个 **variant**，由部署方 `gherkai deploy push-worker` 推上去；镜像里已经设好与本机档**同一个** `GHERKAI_STEPS_DIR`，容器里的 worker 装的就是烙进去的那份。提交时 `compose.resolve_worker_variant` 只做三环存在性/一致性校验（三环各查什么、缺哪一环怎么报，见 [`cloud-backend-carriers.md`](./cloud-backend-carriers.md) §5）——**一个字节的 steps 内容都不看**。
 
 由此两条对使用者最要紧的推论：
 

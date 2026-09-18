@@ -1,6 +1,6 @@
 # docs/ai-eng 索引
 
-给**构建本工具的 AI coding agent** 的工作文档，与 [`docs/adr/`](../adr/)、[`CONTEXT.md`](../../CONTEXT.md)、[`CLAUDE.md`](../../CLAUDE.md) 同属一类读者；那三处位置固定（工具有位置依赖），其余归本目录。分类的决策见 [ADR 0045](../adr/0045-documentation-layering-and-placement.md)。
+本目录存放维护本仓库时用的工作文档，主要读者是 contributor 侧 AI agent，维护者也会读。[`docs/adr/`](../adr/)、[`CONTEXT.md`](../../CONTEXT.md)、[`CLAUDE.md`](../../CLAUDE.md) 与它同属一类，只是位置固定（工具有位置依赖），其余归这里。分类的决策见 [ADR 0045](../adr/0045-documentation-layering-and-placement.md)。
 
 | 文件 | 是什么 | 谁在什么时候读 |
 |---|---|---|

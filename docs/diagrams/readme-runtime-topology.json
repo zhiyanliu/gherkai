@@ -1,0 +1,264 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "gherkai 运行拓扑：本机档与云端档",
+    "locale": "zh-CN",
+    "quality_profile": "showcase"
+  },
+  "components": [
+    {
+      "id": "feature",
+      "type": "external",
+      "label": ".feature 用例",
+      "sublabel": "自然语言写的测试",
+      "pos": [
+        60,
+        60
+      ],
+      "size": [
+        186,
+        72
+      ]
+    },
+    {
+      "id": "cli",
+      "type": "frontend",
+      "label": "gherkai 命令行",
+      "sublabel": "发起与读回",
+      "pos": [
+        60,
+        260
+      ],
+      "size": [
+        186,
+        72
+      ]
+    },
+    {
+      "id": "worker",
+      "type": "backend",
+      "label": "worker",
+      "sublabel": "Midscene 或 Nova Act",
+      "tag": "本机或云端跑",
+      "pos": [
+        390,
+        260
+      ],
+      "size": [
+        186,
+        72
+      ]
+    },
+    {
+      "id": "results",
+      "type": "database",
+      "label": "结果与证据",
+      "sublabel": "判定、截图、报告",
+      "pos": [
+        390,
+        470
+      ],
+      "size": [
+        186,
+        72
+      ]
+    },
+    {
+      "id": "model",
+      "type": "cloud",
+      "label": "AI 模型",
+      "sublabel": "托管服务",
+      "pos": [
+        700,
+        60
+      ],
+      "size": [
+        186,
+        72
+      ]
+    },
+    {
+      "id": "browser",
+      "type": "cloud",
+      "label": "AgentCore Browser",
+      "sublabel": "云端浏览器会话",
+      "tag": "每个分组一个会话",
+      "pos": [
+        700,
+        260
+      ],
+      "size": [
+        186,
+        72
+      ]
+    },
+    {
+      "id": "app_public",
+      "type": "external",
+      "label": "公网被测应用",
+      "pos": [
+        990,
+        260
+      ],
+      "size": [
+        186,
+        72
+      ]
+    },
+    {
+      "id": "app_local",
+      "type": "external",
+      "label": "本机 / 内网应用",
+      "sublabel": "只在你的网络里可达",
+      "pos": [
+        990,
+        440
+      ],
+      "size": [
+        186,
+        72
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "你的机器",
+      "wraps": [
+        "feature",
+        "cli"
+      ],
+      "pad": 20
+    },
+    {
+      "kind": "region",
+      "label": "你的 AWS 账户里的托管服务",
+      "wraps": [
+        "model",
+        "browser"
+      ],
+      "pad": 20
+    }
+  ],
+  "connections": [
+    {
+      "id": "read-feature",
+      "from": "feature",
+      "to": "cli",
+      "label": "读入用例",
+      "labelDy": 24
+    },
+    {
+      "id": "run-cloud",
+      "from": "cli",
+      "to": "worker",
+      "label": "云端：提交到后端"
+    },
+    {
+      "id": "run-local",
+      "from": "cli",
+      "to": "worker",
+      "label": "本机：起子进程",
+      "variant": "emphasis",
+      "labelDy": 16
+    },
+    {
+      "id": "ask-model",
+      "from": "worker",
+      "to": "model",
+      "label": "AI step 的操作与判定",
+      "fromSide": "top",
+      "toSide": "bottom",
+      "via": [
+        [
+          483,
+          170
+        ],
+        [
+          793,
+          170
+        ]
+      ]
+    },
+    {
+      "id": "drive-browser",
+      "from": "worker",
+      "to": "browser",
+      "label": "CDP",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "open-public",
+      "from": "browser",
+      "to": "app_public",
+      "label": "公网直达",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "open-local",
+      "from": "browser",
+      "to": "app_local",
+      "label": "经隧道回本机",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "left",
+      "via": [
+        [
+          793,
+          476
+        ]
+      ]
+    },
+    {
+      "id": "write-results",
+      "from": "worker",
+      "to": "results",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "read-back",
+      "from": "results",
+      "to": "cli",
+      "label": "explain / status 读回",
+      "fromSide": "left",
+      "toSide": "bottom",
+      "via": [
+        [
+          153,
+          506
+        ]
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "本机档（默认）",
+      "items": [
+        "worker 是本机的子进程，结果落在当前目录",
+        "要本机的 AWS 凭证"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "云端档",
+      "items": [
+        "worker 在团队共享的后端上跑，提交完关机也会跑完",
+        "成员只需最小的云端权限"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "费用与数据边界",
+      "items": [
+        "模型与云端浏览器都在你自己的 AWS 账户里",
+        "费用来自模型调用与云端浏览器会话",
+        "预检是纯本地的，不产生费用"
+      ]
+    }
+  ]
+}

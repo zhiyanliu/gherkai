@@ -1,0 +1,209 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "云端超时兜底：从闹钟到点到停下 worker",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "column_fit": "spread",
+    "viewBox": [
+      1000,
+      700
+    ],
+    "legend": {
+      "mode": "auto",
+      "entries": {
+        "emphasis": {
+          "label": "到点唤醒"
+        },
+        "security": {
+          "label": "停它 / 记下退出"
+        },
+        "dashed": {
+          "label": "写入唤醒（被事件串起）"
+        },
+        "default": {
+          "label": "起 task 时顺手做的"
+        }
+      }
+    }
+  },
+  "participants": [
+    {
+      "id": "alarm",
+      "type": "messagebus",
+      "label": "超时闹钟",
+      "sublabel": "一次性定时"
+    },
+    {
+      "id": "kicker",
+      "type": "cloud",
+      "label": "kicker λ",
+      "sublabel": "到点处置"
+    },
+    {
+      "id": "worker",
+      "type": "external",
+      "label": "worker",
+      "sublabel": "Fargate task"
+    },
+    {
+      "id": "xo",
+      "type": "security",
+      "label": "exit-observer λ",
+      "sublabel": "看见任务停了"
+    },
+    {
+      "id": "events",
+      "type": "database",
+      "label": "events 表",
+      "sublabel": "事件 + 退出记录"
+    },
+    {
+      "id": "reconciler",
+      "type": "cloud",
+      "label": "reconciler λ",
+      "sublabel": "主推进"
+    }
+  ],
+  "segments": [
+    {
+      "from": 152,
+      "to": 224,
+      "label": "起 task 时定下闹钟"
+    },
+    {
+      "from": 250,
+      "to": 374,
+      "label": "到点：先判一次再停"
+    },
+    {
+      "from": 400,
+      "to": 560,
+      "label": "翻成退出记录后照原链收敛"
+    }
+  ],
+  "messages": [
+    {
+      "id": "m-arm",
+      "from": "reconciler",
+      "to": "alarm",
+      "y": 180,
+      "label": "起 task 时定下这一次闹钟",
+      "variant": "default",
+      "note": "到点 = 起跑那一刻 + 这个 job 的墙钟预算；谁起这个 job 谁定"
+    },
+    {
+      "id": "m-fire",
+      "from": "alarm",
+      "to": "kicker",
+      "y": 270,
+      "label": "到点唤醒，点名这个 job",
+      "variant": "emphasis",
+      "note": "一个 job 一个闹钟，触发即自动删——平时在控制台里看不到它"
+    },
+    {
+      "id": "m-stop",
+      "from": "kicker",
+      "to": "worker",
+      "y": 326,
+      "label": "仍在跑、且没有退出记录才停它",
+      "variant": "security",
+      "note": "重复到点也安全：先查这个 job 的状态再动手"
+    },
+    {
+      "id": "m-stopped",
+      "from": "worker",
+      "to": "xo",
+      "y": 420,
+      "label": "任务停止（平台事件）",
+      "variant": "security"
+    },
+    {
+      "id": "m-exit-item",
+      "from": "xo",
+      "to": "events",
+      "y": 475,
+      "label": "写退出记录，标成超时停的",
+      "variant": "security"
+    },
+    {
+      "id": "m-settle",
+      "from": "events",
+      "to": "reconciler",
+      "y": 530,
+      "label": "写入唤醒推进 → 这个 job 归因成超时失败",
+      "variant": "dashed"
+    }
+  ],
+  "activations": [
+    {
+      "participant": "reconciler",
+      "from": 170,
+      "to": 202,
+      "type": "cloud"
+    },
+    {
+      "participant": "alarm",
+      "from": 176,
+      "to": 282,
+      "type": "messagebus"
+    },
+    {
+      "participant": "worker",
+      "from": 168,
+      "to": 432,
+      "type": "external"
+    },
+    {
+      "participant": "kicker",
+      "from": 262,
+      "to": 340,
+      "type": "cloud"
+    },
+    {
+      "participant": "xo",
+      "from": 412,
+      "to": 488,
+      "type": "security"
+    },
+    {
+      "participant": "events",
+      "from": 466,
+      "to": 542,
+      "type": "database"
+    },
+    {
+      "participant": "reconciler",
+      "from": 522,
+      "to": 556,
+      "type": "cloud"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "orange",
+      "title": "闹钟是短命资源",
+      "items": [
+        "一个 job 一个：起 task 时定下、到点触发即自动删",
+        "它只负责踢一脚；停不停由被踢的那一方现查状态决定"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "本图只画云端这一路",
+      "items": [
+        "前台跑法在自己的循环里计时，到点当场停 worker",
+        "本机后台跑批由起这个 job 的进程计时；接手的一方按库里的领取时刻复查是否超预算",
+        "三路同一形态：到点 → 停 worker → 归因成超时失败"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "双保险",
+      "items": [
+        "闹钟没响也不会永远卡着：任何一次推进都会顺手复查有没有超预算的 job"
+      ]
+    }
+  ]
+}

@@ -1,16 +1,20 @@
 # 测本机或内网里的被测应用
 
-浏览器跑在你 AWS 账户的云端，访问不到 `http://localhost:3000`。本机 local 与云端 cloud 两个后端在这一点上相同：local 只是把 worker 进程放在你的机器上，浏览器始终在云端，所以两个后端测本机应用都要用 `--expose-local`。
+浏览器跑在云端，访问不到 `http://localhost:3000`。本机 local 与云端 cloud 两个后端在这一点上相同：local 只是把 worker 进程放在你的机器上，浏览器始终在云端，所以两个后端测本机应用都要用 `--expose-local`。
 
 本页讲 `--expose-local` 的前置、行为、隧道的持有进程、存活时间上限与限制。四种跑法的选择、结果读法与退出码见 [`running-and-results.md`](./running-and-results.md)；选项与环境变量总表见 [`configuration.md`](./configuration.md)；按症状排障见 [`troubleshooting.md`](./troubleshooting.md)。
 
 ## 工作方式
 
-`--expose-local <ORIGIN>` 让 gherkai 在本机起一条出站隧道，把「跑 CLI 的这台机器可达」的地址暴露成一个公网地址，再在组装任务时把 feature 文本里的原始地址替换成它。云端浏览器看到的就是一个普通公网站点，feature、引擎与 AI 都不感知隧道。
+`--expose-local <ORIGIN>` 让 gherkai 在本机起一条出站隧道，并在组装任务时把 feature 文本里的 `ORIGIN` 替换成隧道分配的公网地址。feature、引擎与 AI 都不感知隧道。
 
-`ORIGIN` 不限 `localhost`：局域网另一台机器上的应用（如 `http://192.168.1.50:3000`）同样可以，目标机器不需要任何配置，前提是跑 CLI 的机器能访问该地址。
+![云端浏览器经隧道服务商边缘回到本机的隧道进程，再由它转发给被测应用；第三方域资源由浏览器直连、不经隧道，公网上不带凭据的访问者被拦在边缘](../diagrams/local-app-testing-tunnel-topology.svg)
 
-隧道模式下，云端浏览器发出的请求恒带一个固定请求头 `ngrok-skip-browser-warning: 1`，用于跳过 ngrok 对浏览器返回的警告页。被测应用的访问日志里会看到它，机读输出里对应 `extra_http_headers` 字段；应用侧不需要为它做任何处理。
+图注（隧道拓扑）：浏览器 → 边缘 → 隧道进程 → 被测应用这条实线链是请求方向，响应沿同一路径返回；隧道是本机发起的出站长连，你的机器不开入站端口；命令行到隧道进程那条边只表示起进程。隧道服务商、凭据与请求头的具体形态见下文各节。
+
+`ORIGIN` 是「跑 CLI 的这台机器可达」的任意地址，不限 `localhost`：局域网另一台机器上的应用（如 `http://192.168.1.50:3000`）同样可以，目标机器不需要任何配置。
+
+隧道模式下，云端浏览器发出的请求恒带一个固定请求头 `ngrok-skip-browser-warning: 1`，用于跳过 ngrok 对浏览器返回的警告页（被测应用的访问日志里会看到它）；机读输出里对应 `extra_http_headers` 字段，应用侧不需要为它做任何处理。
 
 ## 前置：ngrok 与 authtoken
 
@@ -55,7 +59,7 @@ gherkai plan my_app.feature --expose-local http://localhost:3000
 
 ## 隧道的持有进程与拆除时机
 
-隧道进程始终在跑 CLI 的这台机器上，云端浏览器的流量经它回到被测应用。
+隧道进程的位置见「工作方式」的隧道拓扑图；下表列各跑法由谁持有隧道、何时拆。
 
 | 跑法 | 持有隧道的进程 | 拆除时机 |
 |---|---|---|
@@ -63,7 +67,7 @@ gherkai plan my_app.feature --expose-local http://localhost:3000
 | `submit`（默认 `--backend local`） | 本机的后台进程（隧道进程号记在 `<report-dir>/<run_id>/tunnel.json`） | run 到终态即拆；该后台进程异常退出时，由 `gherkai status <run_id> --wait` 接力拆 |
 | `submit --backend cloud` | 本机的隧道守护进程（日志落系统临时目录的 `gherkai-tunnel-watch-<run_id>.log`） | run 到终态即拆；到存活时间上限也拆 |
 
-因此：**用了 `--expose-local`，本机要保持开机联网直到 run 达终态**。云端后端平时「提交完就可以关机」，这是唯一的例外——关机或断网等于隧道断，剩下的 scenario 会以导航失败告终。
+因此：**用了 `--expose-local`，本机要保持开机联网直到 run 达终态**。隧道拓扑图上从边缘回到被测应用那一段全在你的机器这一侧，关机或断网等于隧道断，剩下的 scenario 会以导航失败告终。云端后端平时可以提交完就关机，用了 `--expose-local` 时不行——这是那条便利的唯一例外。
 
 提交后用 `gherkai status <run_id> --wait` 等到 run 达终态：这条命令会一直等到 run 结束再返回。本机后端用过非默认 `--report-dir` 时要带上同一个值，否则查不到这个 run；云端后端还要带 `--backend cloud --prefix <前缀>`。两档的定位参数都与 `submit` 时一致，照抄 `submit` 打出的那行提示即可。
 
@@ -79,7 +83,7 @@ gherkai plan my_app.feature --expose-local http://localhost:3000
 
 ## 安全
 
-- 隧道存活期间，被测应用可从公网访问。gherkai 默认开启 basic-auth：凭据随机生成、每个 run 换一次，由 ngrok 在边缘节点校验，不带凭据的请求到不了你的机器。
+- 隧道存活期间，被测应用可从公网访问。gherkai 默认开启 basic-auth：凭据随机生成、每个 run 换一次，由 ngrok 在边缘节点校验，不带凭据的请求到不了你的机器（隧道拓扑图上被拦在边缘的那条支路）。
 - 凭据内嵌在替换后的地址里，因此会出现在提交的任务文本、发给模型的提示以及报告中的导航地址里。隧道一拆凭据即失效，但报告与日志仍应按内部资料对待。
 - 只把测试环境的实例接上隧道，不要暴露带生产数据或生产凭证的服务。
 - 隧道进程是本机上一个可见的独立进程。命令正常结束与 Ctrl-C 都会拆隧道；用 `kill` 结束 CLI 进程不会拆（SIGTERM 与 `kill -9` 都不会），此时在进程列表里找到 `ngrok` 结束它即可。
@@ -88,8 +92,8 @@ gherkai plan my_app.feature --expose-local http://localhost:3000
 
 - 一个 run 只能暴露一个地址。重复给 `--expose-local` 不会报错，只有最后一个取值生效——前面给的地址不会被替换，用到它的 scenario 会导航失败。被测应用依赖多个本机地址时，先让它们收敛到同一个入口再测。
 - 只替换与选项值完全相同的前缀，且按纯字符串命中（见上「用法」）。
-- 被测应用收到的 `Host` 头是隧道分配的 ngrok 域名，不是 `localhost`。校验 Host 的开发服务器要先放行这个域名（Vite 设 `server.allowedHosts`、Django 加 `ALLOWED_HOSTS`、Rails 放宽 host authorization），否则应用会在框架层拒绝请求。域名每个 run 一换，用通配写法（如 `.ngrok-free.app`）改动最小。
-- 隧道转发 HTTP、HTTPS 与 WebSocket 流量。被测应用自身域下的请求（HTML、脚本、样式、图片、接口）全部经隧道，吞吐与延迟受隧道链路影响，也都计入 ngrok 配额；页面引用的第三方域资源由云端浏览器直接访问，不经隧道。
+- 被测应用收到的 `Host` 头是隧道分配的 ngrok 域名，不是 `localhost`——「工作方式」的隧道拓扑图上，浏览器导航的是边缘分配的公网地址。校验 Host 的开发服务器要先放行这个域名（Vite 设 `server.allowedHosts`、Django 加 `ALLOWED_HOSTS`、Rails 放宽 host authorization），否则应用会在框架层拒绝请求。域名每个 run 一换，用通配写法（如 `.ngrok-free.app`）改动最小。
+- 隧道转发 HTTP、HTTPS 与 WebSocket 流量。被测应用自身域下的请求（HTML、脚本、样式、图片、接口）全部经隧道，吞吐与延迟受隧道链路影响，也都计入 ngrok 配额；页面引用的第三方域资源由云端浏览器直接访问，不经隧道（隧道拓扑图上通向第三方域资源的那条虚线）。
 - ngrok 免费层有配额（量级为每月 1 GB 流量与 2 万次请求，以 ngrok 的定价页为准），重度使用可能超出配额，表现为 429 或断流。
 - 隧道断了不会自动重连。受影响的 scenario 以导航失败告终，修好后重跑即可。
 

@@ -1,6 +1,6 @@
 # 产物与证据地理：跑完了东西在哪、哪一份答哪个问题（local × cloud）
 
-> **文档定位（读前必知）**：本文是给**人**（使用者 / contributor / operator）读的跨 ADR 合成导览——只讲**东西落在哪、哪一份该拿来回答哪个问题**（how），不复述决策理由与权衡（why 全在各 ADR，本文只给指针）。**权威永远在 ADR 与 code**，与本文冲突时以它们为准。为什么有这一层：一次 run 的产出横跨五个不同职责的载体（本地文件 / S3 / DynamoDB / CloudWatch / 引擎 SDK 自己的目录），每个载体的决策各归一个 ADR，而「排障时该打开哪个文件」这个问题的答案要把它们拼起来才有。（本层的维护判据见 [CLAUDE.md](../../CLAUDE.md)「文档纪律」guides 条）
+> 本文讲**东西落在哪、哪一份该拿来回答哪个问题**（机制），不讨论为什么这样设计：设计决策与理由在各 ADR，本文只给指针；与代码或 ADR 不一致时以它们为准。一次 run 的产出横跨五个不同职责的载体（本地文件 / S3 / DynamoDB / CloudWatch / 引擎 SDK 自己的目录），每个载体的决策各归一个 ADR，而「排障时该打开哪个文件」这个问题的答案要把它们拼起来才有。
 
 ## 1. 五类东西，各答一个问题
 
@@ -26,26 +26,29 @@
 
 **关键对称**：cloud 的 S3 key **按相对 run 目录的路径镜像 local 的树**——两个 worker 上传器都把「产物本地绝对路径」减去「本地 run 树根」得到相对路径，再拼 `<report_dir>/<run_id>/` 前缀成 key（`keyFor` / Nova 侧同规则）。所以你在本机看到的相对位置，在 S3 上就是同一个相对位置。
 
-```
-local：  <--report-dir>/<run_id>/            cloud：  s3://<bucket>/<report_dir>/<run_id>/
-├─ run_meta.json      definition            ├─ （不在 S3）→ runs 表 item run_id=<id>, item_type=META
-├─ run_state.json     运行态                 ├─ （不在 S3）→ runs 表 item run_id=<id>, item_type=STATE
-├─ jobs/<enc>.json    ★判定真值              ├─ jobs/<enc>.json          同形同名
-├─ manifest.json      派生                   ├─ manifest.json            同形同名
-├─ index.html         派生入口                ├─ index.html               同形同名
-├─ nova-trajectories/ Nova 产物              ├─ nova-trajectories/…      key 镜像相对路径
-│  ├─ <session_id>/  act_*.html + act_*_trajectory.json + session_summary.json │
-│  └─ evidence/<scenario 键>/step-<n>/       │  └─ evidence/…/step-<n>/evidence.json + act-<i>-frame-<j>.jpg
-├─ midscene-run/      Midscene 产物          ├─ midscene-run/…           key 镜像相对路径
-│  ├─ report/*.html + report/screenshots/    │
-│  ├─ log/                                   │
-│  └─ evidence/<scenario 键>/step-<n>/evidence.json
-├─ worker.log         仅 --quiet ∧ 本机执行   ├─ （无此文件）→ CloudWatch 日志组 /<prefix>worker/<engine>
-├─ reconcile.log      仅 local submit         ├─ jobs-in/                 job 输入 JSON（不是判定，别读混）
-├─ events.db          仅 local submit         ├─ args/                    docString/dataTable 正文（一律 offload、无 size 阈值）
-├─ tunnel.json        仅 local submit ∧ --expose-local  └─ （事件在 events 表，不在桶里）
-└─ .runstate.lock     run_state 写面互斥
-```
+下表逐行对齐两个载体，路径一律相对 run 目录根——local 的根是 `<report-dir>/<run_id>/`，cloud 的根是 `s3://<bucket>/<report_dir>/<run_id>/`。
+
+| 相对路径 | 类别 | cloud 落点 / 存在条件 |
+|---|---|---|
+| `run_meta.json` | definition | 不在桶里 → runs 表 `META` item |
+| `run_state.json` | 运行态 | 不在桶里 → runs 表 `STATE` item |
+| `jobs/<enc>.json` | ★判定真值 | 同形同名 |
+| `manifest.json` | 派生导航 | 同形同名 |
+| `index.html` | 派生导航（人的入口） | 同形同名 |
+| `nova-trajectories/<session_id>/` | 现场证据：Nova 原生（per-act 页 + 配套 trajectory json + 会话汇总） | key 镜像相对路径 |
+| `nova-trajectories/evidence/<scenario 键>/step-<n>/` | 现场证据：gherkai 自有（`evidence.json` + 帧截图 `act-<i>-frame-<j>.jpg`） | key 镜像相对路径 |
+| `midscene-run/report/` | 现场证据：Midscene 原生（SDK 报告 HTML + `screenshots/`） | key 镜像相对路径 |
+| `midscene-run/log/` | 现场证据：Midscene SDK 日志 | key 镜像相对路径 |
+| `midscene-run/evidence/<scenario 键>/step-<n>/evidence.json` | 现场证据：gherkai 自有 | key 镜像相对路径 |
+| `worker.log` | 诊断日志 | 仅 `--quiet` ∧ 本机执行才有；cloud 无此文件 → 进 CloudWatch（组名与真值见 §5） |
+| `reconcile.log` | 诊断日志（本机后台推进进程的输出） | 仅 local `submit`；cloud 档不产（推进不在本机） |
+| `events.db` | 事件通道（SQLite） | 仅 local `submit`；cloud 档事件在 events 表、不在桶里 |
+| `tunnel.json` | 隧道收尾凭据（pid） | 仅 local `submit` ∧ `--expose-local` |
+| `.runstate.lock` | `run_state` 写面互斥 | 本地文件载体独有 |
+| `jobs-in/` | job 输入（**不是判定**，别读混） | cloud 独有：起 task 时写 |
+| `args/` | definition 的外置正文 | cloud 独有：docString / dataTable 一律 offload、无 size 阈值 |
+
+日志、机制文件与 `jobs-in/` 不属 §1 的五类：它们不是判定材料，只在特定档下出现（`args/` 例外——它装的就是 definition 被外置的那部分正文）。
 
 几处容易踩的不对称：
 
@@ -60,21 +63,15 @@ local：  <--report-dir>/<run_id>/            cloud：  s3://<bucket>/<report_di
 
 ## 3. 证据链怎么串起来
 
-```mermaid
-flowchart LR
-    W["worker：step 判定已成的那一刻"] -->|"抽取 → 落 evidence.json"| E["evidence.json<br/>（gherkai 自有 schema）"]
-    W -->|"kind=evidence 的 ref 追加进 step_done"| J["jobs/*.json<br/>step.report_refs"]
-    J --> X["gherkai explain"]
-    X -->|"只解引用 kind=evidence"| E
-    E -->|"frames[].thought / screenshot 只是地址"| S["截图文件（file:// 或 s3://）"]
-    J -.->|"kind=report / trajectory / summary<br/>只当链接、永不解析"| N["引擎原生产物"]
-```
+![证据链：worker 在 step 判定成立那一刻把证据指针写进判定真值、把现场抽成自有格式的证据明细；explain 只解引用自有格式那一份，引擎原生产物只原样搬链接；截图地址确定性算出、字节随后到](../diagrams/artifacts-evidence-chain.svg)
+
+图注：只有**调过 AI 的 step** 走这条链——确定性命中与 URL 导航步的判定直接发事件、不产 evidence（`explain` 因此打「无 AI 证据」，见 §4）。local 档没有那条异步上传：截图字节在 `evidence.json` 落盘时已经在盘上，异步只发生在 cloud 档。图上四个落点的确切文件名与相对路径见 §2 表（`jobs/<enc>.json`、`evidence/<scenario 键>/step-<n>/evidence.json`、帧截图、两个引擎的原生产物子目录）；`explain` 与 `run` / `status` 各自在回答什么见 §4。
 
 四件事把这条链钉住：
 
-1. **谁产**：worker，在 step 结束那一刻——那时它手里才有引擎的材料（Nova 是刚写盘的 trajectory json，Midscene 是内存里的 `agent.dump.executions`）。不是 CLI 事后去解析 SDK 产物。
+1. **谁产**：worker，在 step 结束那一刻——那时它手里才有引擎的材料（Nova 是刚写盘的 trajectory json，Midscene 是内存里的 `agent.dump.executions`）。不是 CLI 事后去解析 SDK 产物。落盘分两处：`evidence.json` 由 worker 直接写进引擎产物目录，指向它的 `kind=evidence` 那条 `ref` 随 `step_done` 事件走判定链、进 `jobs/*.json` 的 `step.report_refs`。
 2. **只解引用 `kind=="evidence"`**：`explain` 拿到 step 的 `report_refs` 后只挑 `kind=="evidence"` 那条读（`_explain_read_evidence`），其余 `report` / `trajectory` / `summary` **只当链接原样搬出**。判据是「内容是不是我们自己定义的 schema」——引擎原生格式随 SDK 版本漂，解析它等于把引擎知识搬进 CLI。读字节的唯一入口是 `compose.read_resource`（`file://` 复用 report_store 的 URI→路径解析，`s3://` 走 `get_object`）。
-3. **截图只给地址、不内嵌图**：`frames[].screenshot` 是 `file://` 或 `s3://` URI。URI 用上传器的同一套 key 规则**确定性算出**后就写进 `evidence.json`，字节则在 `step_done` 发出**之后**交后台队列上传——判定不被网络拖住，字节多半在下个 step 跑完前就到了。
+3. **截图只给地址、不内嵌图**：`frames[].screenshot` 是 `file://` 或 `s3://` URI，用上传器的同一套 key 规则**确定性算出**，所以能先写进 `evidence.json`；字节则在这一步的 `step_done` 发出**之后**才交后台队列上传（cloud 档；local 档不走上传，截图字节写 `evidence.json` 那一刻就已在盘上）。判定因此不被网络拖住，字节多半在下个 step 跑完前就到了。
 4. **文本形态是摘要，不是全文**：`explain` 默认每个 act 只渲染最后一个带 `thought` 的 frame（超长推理截断并指回 `--json` 或那份 `evidence.json`），其余 frame 只报个数；`--full` 关掉预算、`--all` 也展开 passed step。文本里的 key 与 `--json` 字段名逐字相同，读文本再对 JSON 不需要翻译。
 
 > 权威：[ADR 0042](../adr/0042-step-evidence-and-explain.md)（决策一 evidence schema 与两引擎映射表、决策二 best-effort、决策四 `explain`、决策五「解引用许可按层收窄」）、[ADR 0027](../adr/0027-runreport-aggregation-index.md)（`ReportRef` 三元组、core 对它永久不透明搬运）。字段与取值全集见 [`./cli-json-contract.md`](./cli-json-contract.md)。
@@ -110,7 +107,7 @@ flowchart LR
 | **cloud 档没有 `worker.log`** | worker 在容器里跑，日志由 task 的 log driver 进 CloudWatch 日志组 `/<prefix>worker/<engine>`（stream 前缀 = 引擎名）。`--json` 的 `artifacts` 里因此**不出现** `worker_log` 键——它只在 `--quiet` 且本机执行时出现 | [ADR 0041](../adr/0041-agent-facing-cli-affordances.md) 决策二（`--quiet` 的落点）；日志组名不经 `names.py`、由 stack 建 task-def 时定（真值 = `deploy_aws/gherkai_deploy_aws/stack.py` 里 worker container 的 `LogDriver.aws_logs`：`log_group_name` = `/<prefix>worker/<engine>`、`stream_prefix` = 引擎名） |
 | **`--no-report` 下 `<report-dir>` 什么都不落** | 它的含义就是「不生成产物」，不是「落到别处」：不注入落点 + `GHERKAI_NO_ARTIFACTS=1` 令 worker 不生成、不上报；cloud 档同注此 env，因此也没有 S3 上传 | [ADR 0037](../adr/0037-distribution-and-packaging.md) 决策 3（含「落系统临时目录」这个被拒方案及其理由） |
 | **被中止的 job，`explain` 只给一行提示、给不出它已产的 evidence** | 没跑完的 scenario 不发 `scenario_done`，其 step 记录不进判定明细，evidence 指针**只留在事件记录里**；而 `explain` 按设计只读判定明细、不读事件流 | [ADR 0042](../adr/0042-step-evidence-and-explain.md)「已知缺口与重议闸门」（含触发信号与预案：给 core 开事件流读接缝） |
-| **cloud 档某张截图的 URI 偶尔取不到对象** | 截图 URI 是确定性算出来的、字节由后台队列随后上传；进程被**硬杀**（SIGKILL / 容器被收）时最后一个 step 在途的一两张可能没到。正常路径与收尾的有界排空已真跑覆盖到「中途被掐也不丢」 | [ADR 0042](../adr/0042-step-evidence-and-explain.md)「截图字节的残余风险」、[ADR 0032](../adr/0032-fargate-execution-environment.md)（容器盘停即销毁、grace 组成、孤儿产物 reaper 为何否决） |
+| **cloud 档某张截图的 URI 偶尔取不到对象** | 进程被**硬杀**（SIGKILL / 容器被收）时，最后一个 step 在途的一两张截图字节可能没赶上（URI 早已写进 `evidence.json`，见 §3）。正常路径与收尾的有界排空已真跑覆盖到「中途被掐也不丢」 | [ADR 0042](../adr/0042-step-evidence-and-explain.md)「截图字节的残余风险」、[ADR 0032](../adr/0032-fargate-execution-environment.md)（容器盘停即销毁、grace 组成、孤儿产物 reaper 为何否决） |
 | **报告写失败不会让 run 变红** | RunReport 是纯派生视图、可重建，故它的写在 commit point **之后**、异常被隔离；此时 `run --json` 的 `artifacts` **省略** `report_index` 键，人读档收尾行打「报告: <报告写入失败，已跳过；判定结果不受影响、仍已落库>」。`status` 不同：它给的是**约定落点**（写成没写成都照打、`--json` 的 `artifacts` 也恒含 `report_index`），不提写失败。cloud 档还多一层：`status --backend cloud` 打的 `s3://` 前缀直接取你这次给的 `--report-dir`、查询侧不与后端记录比对（那道比对只在 `submit` / `doctor` 的提交侧做），所以给错时打出的是一组指向不存在对象的位置 | [ADR 0030](../adr/0030-realtime-persistence-seam.md) 决定三 |
 | **`jobs/*.json` 里的 `ref` 是绝对路径，报告目录整拷到别的机器后那些链接会断** | 自包含只做到「半可移植」：`index.html` / `manifest.json` 的 `href` 相对化（可整目录搬走），判定真值里的 `ref` 保持绝对（provenance）。跨机器分享用 `index.html`，或直接用 cloud 档（全在 S3、`s3://` 全局可寻址） | [ADR 0027](../adr/0027-runreport-aggregation-index.md)「被拒方案：不做 materialize 式产物拷贝」 |
 

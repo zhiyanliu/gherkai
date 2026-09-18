@@ -1,0 +1,128 @@
+{
+  "schema_version": 1,
+  "diagram_type": "dataflow",
+  "meta": {
+    "title": "判定是逐层归约出来的：一票 → run",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "viewBox": [
+      1080,
+      400
+    ]
+  },
+  "stages": [
+    {
+      "label": "一票"
+    },
+    {
+      "label": "step"
+    },
+    {
+      "label": "scenario"
+    },
+    {
+      "label": "job（= scope）"
+    },
+    {
+      "label": "run"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "vote",
+      "type": "external",
+      "label": "布尔返回值",
+      "sublabel": "一次 AI 调用",
+      "stage": 0,
+      "row": 0,
+      "tag": "worker 侧"
+    },
+    {
+      "id": "step",
+      "type": "external",
+      "label": "step 结论",
+      "sublabel": "AI 断言 / 确定性 step",
+      "stage": 1,
+      "row": 0,
+      "tag": "worker 侧"
+    },
+    {
+      "id": "scenario",
+      "type": "external",
+      "label": "scenario 结论",
+      "sublabel": "本条逐步汇总",
+      "stage": 2,
+      "row": 0,
+      "tag": "worker 侧"
+    },
+    {
+      "id": "job",
+      "type": "backend",
+      "label": "job 收场态",
+      "sublabel": "跑完了才归约",
+      "stage": 3,
+      "row": 1,
+      "tag": "core 侧"
+    },
+    {
+      "id": "run",
+      "type": "backend",
+      "label": "run 判定",
+      "sublabel": "整批的最终结论",
+      "stage": 4,
+      "row": 1,
+      "tag": "core 侧"
+    }
+  ],
+  "flows": [
+    {
+      "id": "vote-step",
+      "from": "vote",
+      "to": "step",
+      "label": "多数票",
+      "variant": "emphasis"
+    },
+    {
+      "id": "step-scenario",
+      "from": "step",
+      "to": "scenario",
+      "label": "任一 error 最重",
+      "variant": "emphasis"
+    },
+    {
+      "id": "scenario-job",
+      "from": "scenario",
+      "to": "job",
+      "label": "上报给 core",
+      "classification": "跨进程事件",
+      "variant": "emphasis"
+    },
+    {
+      "id": "job-run",
+      "from": "job",
+      "to": "run",
+      "label": "同一条规则",
+      "variant": "emphasis"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "上层只归约",
+      "items": [
+        "core 不重算票、也不重判 step，只把 worker 报上来的结论原样搬到上一层",
+        "worker 只上报 step 与 scenario 两级；job 与 run 的判定在 core",
+        "前台在线跑与后台跑批共用同一份归约代码，两条路收敛到同一个终值"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "三处不走这条直链",
+      "items": [
+        "上游 step 报 error 之后被跳过的那些 step，不进 scenario 归约",
+        "job 没起来或跑一半被掐时，按中止来源直接定态，不做 scenario 归约",
+        "run 这一层入口先滤掉非判定态，再归约"
+      ]
+    }
+  ]
+}

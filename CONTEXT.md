@@ -72,6 +72,14 @@ _Avoid_: 把执行权限挂在帽子上；给「跑的人」单立角色。
 **提交者 (Submitter)**:
 不是帽子，是**权限类别**：跑法权限梯上两档云端跑法的权限持有者，人或机器身份都行。权限登记见 ADR 0033「资源清单」末段与 ADR 0038「权限面增量」。
 
+**使用者侧 AI agent (User-side AI agent)**:
+装了 gherkai skill（ADR 0043）、在使用方项目里替人操作 gherkai 的 AI agent（Claude Code、Codex 这类工具）。不是第五顶帽子：它替人戴 feature 作者 / 测试开发 / 部署方的帽子，权限与产物跟着帽子走，「人手敲还是 agent 代劳」属跑法那根正交轴（ADR 0040 决策 6）。用户文档里正文写「AI agent」即可。
+_Avoid_: 「AI coding agent」作角色名（coding 把活动说窄了，它多半不写代码）；把它和 gherkai 的 AI 引擎混称（引擎一律叫引擎 / worker / 模型）。
+
+**contributor 侧 AI agent (Contributor-side AI agent)**:
+在本仓库里干活（写码、写文档、复盘）的 AI agent，戴 contributor 的帽子；ADR / CONTEXT / CLAUDE.md 约 80% 的读者，`docs/ai-eng/` 是它的工作文档。与使用者侧 agent 合称「两侧 AI agent」。
+_Avoid_: 「建造者 AI」（ADR 0045 曾用，已废止）；把它当成独立于 contributor 的角色。
+
 ## 产品形态
 
 **通用 step (Generic step)**:
@@ -89,7 +97,7 @@ _Avoid_: 把它当精确/像素级回归工具用。
 _Avoid_: 以为"不点名也能抓变更"；把它与 A/B 两种不确定性混为一谈；以为 QA 要学特殊措辞（QA 永远只写自然语言）。
 
 **agent skill (gherkai skill)**:
-教 AI coding agent（Claude Code / Codex）驾驭本工具的一份 `SKILL.md` + `references/`：从需求写 feature 与 steps、`plan → run / submit → status → explain` 的工作循环、退出码分流、失败汇报模板；三个任务域（测试 / 环境排障 / 云端交付）一个入口、按域拆 references。真身随 CLI wheel 发行（`cli/gherkai_cli/skills/gherkai/`），`gherkai skill install` 拷进使用方项目或用户级 agent 目录、与 CLI 同版本、重装整目录收敛（ADR 0043）。
+教使用者侧 AI agent（Claude Code / Codex 这类工具）驾驭本工具的一份 `SKILL.md` + `references/`：从需求写 feature 与 steps、`plan → run / submit → status → explain` 的工作循环、退出码分流、失败汇报模板；三个任务域（测试 / 环境排障 / 云端交付）一个入口、按域拆 references。真身随 CLI wheel 发行（`cli/gherkai_cli/skills/gherkai/`），`gherkai skill install` 拷进使用方项目或用户级 agent 目录、与 CLI 同版本、重装整目录收敛（ADR 0043）。
 _Avoid_: 把它当第二份文档源——机读字段页是契约页的确定性转换副本、正文只写操作模型；把它当内部文档——它是产品面，零 ADR 编号 / 内部机制名、只用绝对 URL。
 
 **两种不确定性 (A: flakiness / B: 柔性吞变更)**:

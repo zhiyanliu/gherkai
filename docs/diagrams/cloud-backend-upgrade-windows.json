@@ -1,0 +1,120 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "升级的三步与两段降级窗口",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "column_fit": "spread",
+    "viewBox": [980, 940],
+    "legend": {
+      "mode": "auto",
+      "entries": {
+        "default": { "label": "照常放行" },
+        "emphasis": { "label": "升级动作" },
+        "security": { "label": "被拒" }
+      }
+    }
+  },
+  "participants": [
+    { "id": "deployer", "type": "frontend", "label": "部署方 CLI", "sublabel": "发起升级的那台" },
+    { "id": "backend", "type": "backend", "label": "云端后端", "sublabel": "记着版本戳" },
+    { "id": "registry", "type": "cloud", "label": "你的 ECR 仓库", "sublabel": "worker 镜像" },
+    { "id": "member", "type": "frontend", "label": "其他成员 CLI", "sublabel": "晚一步再升" }
+  ],
+  "segments": [
+    { "from": 158, "to": 220, "label": "升级前：三方同版本" },
+    { "from": 250, "to": 356, "label": "第 1 步之后 → 窗口一：只拒这台部署机" },
+    { "from": 500, "to": 652, "label": "第 2 步之后 → 窗口二：拒已升级的提交方" },
+    { "from": 750, "to": 858, "label": "第 3 步之后 → 恢复" }
+  ],
+  "messages": [
+    {
+      "from": "deployer", "to": "backend", "y": 192, "label": "提交与镜像命令照常", "variant": "default",
+      "note": "两侧同版本，提交前检查放行"
+    },
+    {
+      "from": "deployer", "to": "backend", "y": 282, "label": "提交与镜像命令被拒", "variant": "security",
+      "note": "第 1 步只升了本机：CLI 新于后端一律拒绝，没有放行选项"
+    },
+    {
+      "from": "member", "to": "backend", "y": 328, "label": "提交照常", "variant": "default",
+      "note": "这台还没升级，仍与后端同版本"
+    },
+    {
+      "from": "deployer", "to": "backend", "y": 402, "label": "第 2 步：部署后端", "variant": "emphasis",
+      "note": "写入新的版本戳；部署本身不做这道比对，窗口一里照跑"
+    },
+    {
+      "from": "deployer", "to": "registry", "y": 448, "label": "同步新版本基底", "variant": "emphasis",
+      "note": "本版本已有的 variant 按记录重新派生"
+    },
+    {
+      "from": "deployer", "to": "backend", "y": 532, "label": "没有这个 variant", "variant": "security",
+      "note": "只在默认指向自定义 variant、或提交时显式选它时出现"
+    },
+    {
+      "from": "member", "to": "backend", "y": 578, "label": "提交照常", "variant": "default",
+      "note": "镜像标签由提交方本机的 CLI 版本拼出，这台仍解析到旧版本的镜像"
+    },
+    {
+      "from": "member", "to": "backend", "y": 624, "label": "升级后同样被拒", "variant": "security",
+      "note": "第 3 步先升自己的 CLI：升完即与部署方同处窗口二"
+    },
+    {
+      "from": "deployer", "to": "registry", "y": 698, "label": "第 3 步：重推 variant", "variant": "emphasis",
+      "note": "部署方从新版本基底重建后推送；不能提前到部署之前"
+    },
+    {
+      "from": "deployer", "to": "backend", "y": 782, "label": "提交与镜像命令恢复", "variant": "default",
+      "note": "自定义 variant 在新版本下有镜像了"
+    },
+    {
+      "from": "member", "to": "backend", "y": 828, "label": "提交照常", "variant": "default",
+      "note": "三方同版本，两段窗口都已关闭"
+    }
+  ],
+  "activations": [
+    { "participant": "backend", "from": 394, "to": 422, "type": "backend" },
+    { "participant": "registry", "from": 440, "to": 462, "type": "cloud" },
+    { "participant": "registry", "from": 690, "to": 712, "type": "cloud" }
+  ],
+  "cards": [
+    {
+      "dot": "amber",
+      "title": "窗口一：只拒这台部署机",
+      "items": [
+        "起于部署方升级本机，止于后端部署完成",
+        "被拒的是提交、查结果与读证据，以及推镜像、列镜像",
+        "不想动本机安装时，可临时用与目标版本相同的 CLI 只跑部署"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "窗口二：只拒已升级的提交方",
+      "items": [
+        "起于后端升到新版本，止于自定义 variant 重推完成",
+        "默认指向官方基底又不显式指定时不出现——部署已备好新版本基底",
+        "这段里可让提交方临时改用官方基底的 variant"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "没升级的人为什么不受影响",
+      "items": [
+        "镜像标签含提交方本机的 CLI 版本，各人解析各自那一版",
+        "CLI 旧于后端只提示一行、不拦，所以团队可以晚一步再升",
+        "升级不重置默认指针"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "顺序不能换",
+      "items": [
+        "后端的版本戳取自发起那次部署的 CLI，所以先升本机再部署",
+        "重推 variant 提前到部署之前，等于推到后端还不认的版本标签下",
+        "两段窗口里被拒的都是同一种拒绝，按顺序做完即恢复"
+      ]
+    }
+  ]
+}

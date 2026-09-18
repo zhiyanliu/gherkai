@@ -19,7 +19,7 @@
 - Midscene 引擎的 token 用量改用引擎 SDK 公开的累计计数，元素定位时的区域搜索调用也计入。同一条用例的报告用量会比此前略高，是统计范围更全，不是模型消耗变多。
 - `gherkai deploy` 结束时改为逐行说明默认 worker 镜像 variant 与 worker 运行配置的更新结果，例如「已保留默认 worker 镜像 variant `base`」「各 variant 的 worker 运行配置已是最新」。
 - 仓库首页新增「判定由谁做出」一节，列出两个引擎各自使用的模型与服务、版本策略、查看与更换方式，以及费用来源。
-- 文档重组：面向使用者的完整说明集中到 [`docs/user-guide/`](./docs/user-guide/README.md)；各发行包在 PyPI / npm 上的页面改为入口页，只留定位、装法、最小用法与指向用户指南的链接；本文件是新增的变更记录。
+- 文档重组：面向使用者的完整说明集中到 [`docs/user-guide/`](./docs/user-guide/README.md)，新增[常见问题](./docs/user-guide/faq.md)页；文档里的图改为统一风格的架构 / 流程 / 时序图，执行与推进全景、云端交付与 worker 身份两张大图另有可交互版本（https://zhiyanliu.github.io/gherkai/ ）；各发行包在 PyPI / npm 上的页面改为入口页，只留定位、装法、最小用法与指向用户指南的链接；本文件是新增的变更记录。
 
 ### 修复
 

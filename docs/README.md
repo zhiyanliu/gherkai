@@ -7,7 +7,7 @@
 | **使用者**（写 `.feature`、跑测试、看结果的人，以及替你操作的 AI agent） | [`user-guide/`](./user-guide/README.md) | 仓库首页 [`README.md`](../README.md)（门面与 30 秒上手）；各发行包的页面（[`gherkai`](https://pypi.org/project/gherkai/)、[`@gherkai/worker-midscene`](https://www.npmjs.com/package/@gherkai/worker-midscene) 等，只是入口，细节都在 user guide）；每版变更 [`CHANGELOG.md`](../CHANGELOG.md)；随 CLI 发行的 agent skill（`gherkai skill install`） |
 | **contributor**（改代码、跑测试、发版的人） | 根 [`CONTRIBUTING.md`](../CONTRIBUTING.md) | 各包目录下的 `DEVELOPMENT.md`（该包的模块布局、从 checkout 跑、测试）；发布链与一次性前置 [`.github/workflows/README.md`](../.github/workflows/README.md) |
 | **想懂机理的技术读者**（架构、执行模型、云端载体） | [`internals/`](./internals/README.md) | 每篇只讲系统如何运转（how），权威在 ADR 与代码 |
-| **构建本工具的 AI coding agent** | [`CLAUDE.md`](../CLAUDE.md)（项目约定） | [`adr/`](./adr/)（稳定决策：what / why / trade-off）；[`CONTEXT.md`](../CONTEXT.md)（领域概念与术语）；[`ai-eng/`](./ai-eng/README.md)（外部一手来源、复盘方法）；`journey/`（跨会话任务的过程暂存，随任务收尾清空） |
+| **contributor 侧 AI agent**（在本仓库里干活的 AI agent） | [`CLAUDE.md`](../CLAUDE.md)（项目约定） | [`adr/`](./adr/)（稳定决策：what / why / trade-off）；[`CONTEXT.md`](../CONTEXT.md)（领域概念与术语）；[`ai-eng/`](./ai-eng/README.md)（外部一手来源、复盘方法）；`journey/`（跨会话任务的过程暂存，随任务收尾清空） |
 
 ## 三条阅读规则
 

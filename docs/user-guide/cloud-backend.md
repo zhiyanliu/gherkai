@@ -34,7 +34,9 @@ uv tool install 'gherkai[deploy-aws]'      # 部署包随 CLI 的 extra 一起�
 - **网络与 IAM**：按 `--vpc` 档给 worker 的子网与安全组（优先用公有子网加公网 IP 出网，不建 NAT 网关），每个引擎一个最小权限角色，后端的三个 Lambda 各有自己的角色。
 - **SSM 参数**（`/<prefix>backend/*`）：后端版本戳、生效的 VPC 档、每个引擎的 worker 任务定义模板、worker 镜像映射与默认指针、子网与安全组 ID，供 `run` / `submit` 读取。
 
-`submit --backend cloud` 提交的一个 run，并行 job 数 = `min(提交时 --max-concurrency 的值, 部署侧上限 8)`；给的值超过上限时提交命令打印一行提示，并按 8 并行。`run --backend cloud` 由提交者的命令进程自己拉起任务，并行度就是 `--max-concurrency`，不受这个上限约束。
+两条云端跑法的差别都源自「谁拉起 worker 任务」：`submit` 的任务由后端拉起；`run --backend cloud` 的任务由你自己的 CLI 进程拉起并等到跑完。下面的并发上限与[团队成员的最小权限](#团队成员需要的最小云端权限)两档都由这一条决定。
+
+`submit --backend cloud` 提交的一个 run，并行 job 数 = `min(提交时 --max-concurrency 的值, 部署侧上限 8)`；给的值超过上限时提交命令打印一行提示，并按 8 并行。`run --backend cloud` 的并行度就是 `--max-concurrency`，不受这个上限约束。
 
 ## 首次部署
 
@@ -130,18 +132,22 @@ CDK 的资源变更打完之后，命令继续做 worker 镜像的三步，最�
 
 1. 部署方 `uv tool upgrade gherkai`（安装时带的 extra 沿用）。
 2. 部署方立刻 `gherkai deploy --vpc <与上次相同的档> --prefix <同前缀>`：新模板、新版本基底同步进 ECR、对本版本已有的 variant 重新派生。
-3. 团队其他成员再升自己的 CLI。有自定义 variant 的，从新版本基底重新构建后 `gherkai deploy push-worker` 推一遍。
+3. 团队其他成员再升自己的 CLI；有自定义 variant 的，由部署方从新版本基底重新构建、再用 `gherkai deploy push-worker` 推一遍。
 
-第 1 步与第 2 步之间，用已升级的那台机器提交会被拒并退 `2`，这是预期，第 2 步跑完即恢复；其他成员的 CLI 仍与后端同版本，不受影响。不想动本机安装的部署方可以用 `uvx --from 'gherkai[deploy-aws]==X.Y.Z' gherkai deploy` 先把后端升上来。顺序不能倒过来：后端由 CLI 的部署包部署，版本戳的值就是发起该次部署的 CLI 的版本。第 3 步也不能提前到第 2 步之前：镜像标签含 CLI 版本，提前推等于推到一个后端还不识别的版本标签下，`push-worker` 与 `list-workers` 会拒绝并退 `2`。
+三步之间有两段窗口，被拒的人不同：
 
-默认指针指的是自定义 variant 时，第 2 步完成到第 3 步重推完成之间，云端提交会因该 variant 在新版本下还没有镜像而退 `2`；这段窗口里可让提交方临时用 `--worker-variant base`。
+![升级三步（部署方先升本机、再部署后端，成员最后升并重推自定义 variant）之间的两段降级窗口，以及每段里谁被拒、谁照常](../diagrams/cloud-backend-upgrade-windows.svg)
+
+图注：窗口一里被拦下的只有刚升级的那台部署机——它的提交、查结果与读证据（`explain`）、推镜像与列镜像都过不去；其他成员的 CLI 仍与后端同版本，提交前检查直接放行、不受影响。`deploy` 自己不过这道版本比对，所以第 2 步照跑。窗口二里被拦下的是已升到新版本的提交方——自定义 variant 在新版本下还没有镜像，止于第 3 步重推完成；这段里还没升级的成员，CLI 旧于后端只被打一行提示、不拦，而镜像标签由**提交方本机的 CLI 版本**拼出（对应上面「variant 按版本隔离」），他解析到的仍是自己那一版的镜像。窗口二只出现在默认指针指的是自定义 variant（或提交时显式选了自定义 variant）的情形——指针是 `base` 且不显式指定时，第 2 步已经把新版本的基底镜像备好了。图上只画这两段窗口的起止。
+
+两段窗口里被拒的命令都退 `2`。窗口一等第 2 步跑完即恢复，不想动本机安装的部署方可以用 `uvx --from 'gherkai[deploy-aws]==X.Y.Z' gherkai deploy` 先把后端升上来；窗口二里可让提交方临时用 `--worker-variant base`。顺序不能倒过来：后端由 CLI 的部署包部署，版本戳的值就是发起该次部署的 CLI 的版本。第 3 步也不能提前到第 2 步之前：镜像标签含 CLI 版本，提前推等于推到一个后端还不识别的版本标签下，`push-worker` 与 `list-workers` 会拒绝并退 `2`。
 
 ## 团队成员需要的最小云端权限
 
 同一套后端可以给团队成员两档不同大小的权限，凭证越少的跑法越适合 CI 与低权限机器。四种跑法的对照见 [`running-and-results.md`](./running-and-results.md)，这里只说云端两档的差别：
 
 - **`submit` + `status`**：运行记录表读写、只读探活（表、桶、集群、任务定义、后端 Lambda）、调用 `<prefix>kicker` Lambda、读 `/<prefix>backend/*` 参数、产物桶 `s3:PutObject`（用例含多行参数时才触发），以及 variant 解析要的只读 `ecr:DescribeImages` 与 `ecs:DescribeTaskDefinition`。**不需要任何 ECS 写权限**，worker 任务由后端的 Lambda 拉起。
-- **`run --backend cloud`**：运行记录表读写、只读探活、读 `/<prefix>backend/*` 参数、variant 解析的只读权限（同上），再加起停与查询 Fargate 任务的权限、把 worker 的任务角色与执行角色传给 ECS 的权限（`iam:PassRole`）、以及上传 job 到产物桶的权限——这条路径由提交者的 CLI 进程自己拉起任务并推进，不经过后端 Lambda，因此不需要调用 Lambda 的权限。
+- **`run --backend cloud`**：运行记录表读写、只读探活、读 `/<prefix>backend/*` 参数、variant 解析的只读权限（同上），再加起停与查询 Fargate 任务的权限、把 worker 的任务角色与执行角色传给 ECS 的权限（`iam:PassRole`）、以及上传 job 到产物桶的权限——起任务的是你自己的进程（见上「后端包含什么」），因此不需要调用 Lambda 的权限。
 
 ## 拆除与清理
 

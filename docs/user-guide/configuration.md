@@ -9,9 +9,15 @@
 | 位置 | 谁读它 | 怎么设 |
 |---|---|---|
 | 本机 CLI 进程 | `gherkai run` / `plan` / `submit` / `status` / `explain` / `doctor` / `list-engines` / `list-deterministic` 本身 | 在跑命令的 shell 里 export |
-| 本机 worker 进程 | 本机后端（`--backend local`）下由 CLI 起的引擎 worker。`plan`、`list-deterministic`、`doctor` 也各起一次本机 worker 读它的确定性 step 信息（`doctor` 还读它自报的模型），与 `--backend` 无关 | 同上：worker 继承这个 shell 的环境变量，少数变量由 CLI 按选项覆盖（见「由 gherkai 注入的环境变量」） |
-| 云端 worker 容器 | 云端后端（`--backend cloud`）下在 Fargate 上跑的 worker | 容器不继承你的 shell。把变量写进 worker 镜像 variant 的 `ENV`，再用 `gherkai deploy push-worker` 推上去（见 [`cloud-backend.md`](./cloud-backend.md)） |
+| 本机 worker 进程 | 本机后端（`--backend local`）下由 CLI 起的引擎 worker。`plan`、`list-deterministic`、`doctor` 也各起一次本机 worker 读它的确定性 step 信息（`doctor` 还读它自报的模型），与 `--backend` 无关 | 同上 |
+| 云端 worker 容器 | 云端后端（`--backend cloud`）下在 Fargate 上跑的 worker | 把变量写进 worker 镜像 variant 的 `ENV`，再用 `gherkai deploy push-worker` 推上去（见 [`cloud-backend.md`](./cloud-backend.md)） |
 | 部署机 | `gherkai deploy` / `destroy` / `push-worker` | 在跑部署命令的 shell 里 export |
+
+值怎么从你设的地方到真正读它的进程：
+
+![环境变量从你设的地方流到本机 CLI 进程、它起的子进程与云端 worker 容器，四类边分别是继承、由 gherkai 注入、被选项覆盖、不传](../diagrams/configuration-env-inheritance.svg)
+
+图注：你在 shell 里 export 的值由本机 CLI 进程继承，再传给它起的子进程；图里的「CLI 起的子进程」既指本机 worker 进程，也指部署时起的 cdk 子进程——两者都从 CLI 原样继承环境，也都会被 gherkai 注入的变量和解析后的选项值改写。云端 worker 容器不继承你的 shell，它的环境是 worker 镜像 `ENV` 里的值加上起这个任务的那一方注入的值。**继承** = 原样拿到上一级的值；**被覆盖** = 起子进程时用解析后的选项值改写同名变量；**不传** = 值到不了对面，要生效就设在对面；**由 gherkai 注入** = 由起这个进程的那一方写入，压过继承来的值（含镜像 `ENV` 里的同名项），清单见下文「由 gherkai 注入的环境变量」。部署命令（`deploy` / `destroy` / `push-worker`）本身也是本机 CLI 进程，只是通常在另一台机器上跑，上表把那台机器单列为「部署机」。云端任务在 `run --backend cloud` 下由本机 CLI 起，在 `submit --backend cloud` 下由后端起。哪个变量设在哪里生效，见下面各表的「在哪里设」栏。
 
 ## 模型选择
 
@@ -61,7 +67,7 @@ gherkai doctor
 | `AWS_DDB_TABLE` | 运行状态表名，`--ddb-table` 没给时用它 | `<prefix>runs` | 本机 CLI 进程 |
 | `AWS_S3_BUCKET` | 产物 S3 桶名，`--s3-bucket` 没给时用它 | `<prefix>artifacts` | 本机 CLI 进程 |
 
-region 的完整解析链是 `--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > profile 配置里的 region。四处都没有时 gherkai 不补一个默认 region，缺 region 的后果与处置见 [`getting-started.md`](./getting-started.md)。云端 worker 的 region 由后端在起任务时注入，不用写进镜像。
+region 的完整解析链是 `--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > profile 配置里的 region。四处都没有时 gherkai 不补一个默认 region，缺 region 的后果与处置见 [`getting-started.md`](./getting-started.md)。云端 worker 的 region 由起任务的那一方以 `AWS_REGION` 注入，不用写进 variant 镜像。
 
 凭证本身不经 gherkai 的变量传递，走 AWS 默认凭证链：profile、`AWS_ACCESS_KEY_ID` 等标准变量、实例角色都可以，配法见 [`getting-started.md`](./getting-started.md)。
 
@@ -76,10 +82,10 @@ region 的完整解析链是 `--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > 
 | `MIDSCENE_MODEL_FAMILY` | 显式指定模型家族，优先于自动推断 | 无（按模型 id 推断） | 本机 shell、variant 镜像 `ENV` |
 | `GHERKAI_STEPS_DIR` | 你自己的确定性 step 目录，`--steps-dir` 没给时用它 | `./steps` 存在即用 | 本机 shell、variant 镜像 `ENV` |
 
-- `NOVA_ACT_TIMEOUT_S` 由起 worker 的那一侧读取后注给 worker，因此写进 variant 镜像的 `ENV` 不生效。`run`（两档后端都算）与 `submit --backend local` 用发起命令的 shell 里的值；`submit --backend local` 提交的 run 之后由 `gherkai status --wait` 接着推完时，用运行 `status` 的那个 shell 里的值；`submit --backend cloud` 的任务由云端起，固定用 120 秒。
+- `NOVA_ACT_TIMEOUT_S` 由起 worker 的那一侧读取后注给 worker：`run`（两档后端都算）与 `submit --backend local` 用发起命令的 shell 里的值；`submit --backend local` 提交的 run 之后由 `gherkai status --wait` 接着推完时，用运行 `status` 的那个 shell 里的值；`submit --backend cloud` 的任务由云端起，固定用 120 秒。
 - `NOVA_ACT_TIMEOUT_S` 与 `NOVA_GRACE_MARGIN_S` 相加就是 Nova 引擎自报的最小停止宽限（默认 150 秒；Midscene 自报的是固定的 31 秒），调大前者会同时抬高本机跑允许的最小 `--grace`。
-- `NOVA_GRACE_MARGIN_S` 只影响本机跑允许的最小 `--grace`。云端 worker 的停止宽限由部署时的 `gherkai deploy --stop-timeout` 决定，把它写进 variant 镜像不起作用。
-- 本机 shell 里的 `GHERKAI_STEPS_DIR`（以及 `--steps-dir`）不会传给云端 worker，给了只提示一句、不拦截：云端 worker 读的是自己镜像里 `ENV GHERKAI_STEPS_DIR` 指的目录，确定性 step 随镜像一起烙进去（见 [`cloud-backend.md`](./cloud-backend.md)）。step 的写法与目录约定见 [`writing-deterministic-steps.md`](./writing-deterministic-steps.md)。
+- `NOVA_GRACE_MARGIN_S` 只影响本机跑允许的最小 `--grace`。云端 worker 的停止宽限由部署时的 `gherkai deploy --stop-timeout` 决定。
+- 云端 worker 读自己镜像里 `ENV GHERKAI_STEPS_DIR` 指的目录，确定性 step 随镜像一起烙进去（见 [`cloud-backend.md`](./cloud-backend.md)）；本机 shell 里的 `GHERKAI_STEPS_DIR` 与 `--steps-dir` 给了只提示一句、不拦截。step 的写法与目录约定见 [`writing-deterministic-steps.md`](./writing-deterministic-steps.md)。
 
 ### 隧道与 worker 拉起
 
@@ -100,7 +106,7 @@ region 的完整解析链是 `--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > 
 
 ## 由 gherkai 注入的环境变量
 
-下面这些变量由 gherkai 在起 worker、起云端任务、执行部署时自己写入，**使用者不要设**。其中一部分在起 worker 时会被清掉或覆盖，另一部分会被 worker 原样读到并改变它的行为——例如把 job 改成从 S3 读、把事件写到别的表、把产物传到别的桶，本机跑与云端跑因此不一致；`--no-report` 这类档下残留的产物落点还会把截图与报告写到你意料之外的目录。要调整对应行为请用括号里的选项。
+下面这些变量由 gherkai 自己写入，**使用者不要设**。设了不报错：一部分在起 worker 时被清掉或覆盖，另一部分会被 worker 原样读到，把 job 的来源、事件表、产物落点指到别处，本机跑与云端跑就此不一致。要调整对应行为，用括号里的选项。
 
 - worker 侧：`RUN_ID`、`SCOPE_ID`、`JOB_S3_URI`、`EVENTS_DDB_TABLE`、`EVENTS_FD`、`ARTIFACT_S3_BUCKET`、`ARTIFACT_S3_PREFIX`、`NOVA_LOGS_DIR` 与 `MIDSCENE_RUN_DIR`（产物落点用 `--report-dir` 定）、`GHERKAI_NO_ARTIFACTS`（用 `--no-report`）、`GHERKAI_EXTRA_HTTP_HEADERS`（由 `--expose-local` 决定）。
 - 云端后端侧：`REGION`、`CLUSTER`、`SUBNETS`、`SECURITY_GROUPS`、`RUNS_TABLE`、`EVENTS_TABLE`、`ARTIFACTS_BUCKET`、`PREFIX`、`MAX_CONCURRENCY`、`KICKER_ARN`、`SCHEDULER_ROLE_ARN`。`REPORT_DIR` 与 `ASSIGN_PUBLIC_IP` 云端不注入，走内置缺省（`reports` / 公网 IP 启用）；要改报告前缀或让 worker 走私有子网，由部署方在部署时调整。

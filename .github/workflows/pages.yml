@@ -1,0 +1,35 @@
+name: pages
+
+# 把 docs/diagrams/ 原样发布到 GitHub Pages（ADR 0045 决策七）：index.html + 已入库的可交互 HTML + 导出 SVG，不做任何构建。
+# 不发布整个仓库：ADR / CONTEXT 是给建造者 AI 读的，不该多出一个仓库外的站点入口；markdown 文档在 GitHub 上直接读。
+# 只在默认分支上部署：Pages 只有一个站点，非默认分支的改动不该覆盖它。
+on:
+  push:
+    paths: ["docs/diagrams/**", ".github/workflows/pages.yml"]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write # 部署站点
+      id-token: write # deploy-pages 用 OIDC 验证来源
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          sparse-checkout: docs/diagrams
+      - uses: actions/upload-pages-artifact@v5.0.0
+        with:
+          path: docs/diagrams
+      - id: deploy
+        uses: actions/deploy-pages@v5.0.1

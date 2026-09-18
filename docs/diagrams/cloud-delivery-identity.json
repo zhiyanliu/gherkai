@@ -1,0 +1,403 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "云端交付与 worker 身份拓扑",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "images-in",
+        "label": "镜像挂哪",
+        "focus": [
+          "ghcr_base",
+          "local_img",
+          "ecr",
+          "derived",
+          "mapping"
+        ],
+        "note": "官方基底与你 build 的镜像怎么进账户、挂在哪个 revision 上？先同步或推送进你自己的 ECR，再从模板复制出这个 variant 的 revision 并登记进映射。"
+      },
+      {
+        "id": "who-points",
+        "label": "谁在指着",
+        "focus": [
+          "default_ptr",
+          "mapping",
+          "submit",
+          "runs"
+        ],
+        "note": "谁指着这个 revision？提交那一刻解析成显式 revision 写进 run 定义，之后起 task 照抄，不按 family 取最新。"
+      },
+      {
+        "id": "why-rederive",
+        "label": "为何重派生",
+        "focus": [
+          "stack",
+          "template",
+          "derived",
+          "retired"
+        ],
+        "note": "为什么重派生必要？revision 是快照、无继承：部署换了运行配置就得按新模板重注册，旧的转退休、镜像不动。"
+      },
+      {
+        "id": "when-delete",
+        "label": "何时能删",
+        "focus": [
+          "derived",
+          "retired",
+          "cleanup",
+          "runs"
+        ],
+        "note": "旧 revision 什么时候才允许删？被替换只打退休标记；满静默期且无未到终态的 run 引用它，才注销并删除。"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "ghcr_base",
+      "type": "external",
+      "label": "官方基底镜像",
+      "sublabel": "运行时不直连",
+      "pos": [
+        60,
+        60
+      ],
+      "size": [
+        186,
+        72
+      ]
+    },
+    {
+      "id": "local_img",
+      "type": "external",
+      "label": "你 build 的镜像",
+      "sublabel": "基底 + 你的 step",
+      "pos": [
+        60,
+        230
+      ],
+      "size": [
+        186,
+        72
+      ]
+    },
+    {
+      "id": "lambda_code",
+      "type": "cloud",
+      "label": "Lambda 代码",
+      "sublabel": "推进与判定",
+      "pos": [
+        316,
+        570
+      ],
+      "size": [
+        186,
+        72
+      ]
+    },
+    {
+      "id": "ecr",
+      "type": "cloud",
+      "label": "你的 ECR 仓库",
+      "sublabel": "按引擎分仓",
+      "tag": "无过期规则",
+      "pos": [
+        316,
+        230
+      ],
+      "size": [
+        186,
+        72
+      ]
+    },
+    {
+      "id": "stack",
+      "type": "cloud",
+      "label": "stack 资源与形态",
+      "sublabel": "含模板与仓库",
+      "pos": [
+        316,
+        400
+      ],
+      "size": [
+        186,
+        72
+      ]
+    },
+    {
+      "id": "template",
+      "type": "cloud",
+      "label": "任务定义模板",
+      "sublabel": "永不起 task",
+      "pos": [
+        590,
+        60
+      ],
+      "size": [
+        186,
+        72
+      ],
+      "tag": "随部署事务"
+    },
+    {
+      "id": "default_ptr",
+      "type": "database",
+      "label": "SSM 默认指针",
+      "sublabel": "升级不重置",
+      "pos": [
+        834,
+        60
+      ],
+      "size": [
+        186,
+        72
+      ]
+    },
+    {
+      "id": "derived",
+      "type": "cloud",
+      "label": "派生的 revision",
+      "sublabel": "引擎 × variant",
+      "tag": "不可变快照",
+      "pos": [
+        590,
+        230
+      ],
+      "size": [
+        186,
+        72
+      ]
+    },
+    {
+      "id": "mapping",
+      "type": "database",
+      "label": "SSM 镜像映射",
+      "sublabel": "写完即生效",
+      "pos": [
+        834,
+        230
+      ],
+      "size": [
+        186,
+        72
+      ]
+    },
+    {
+      "id": "submit",
+      "type": "frontend",
+      "label": "提交侧 CLI",
+      "sublabel": "解析出 revision",
+      "tag": "缺一即拒",
+      "pos": [
+        1090,
+        230
+      ],
+      "size": [
+        186,
+        72
+      ]
+    },
+    {
+      "id": "retired",
+      "type": "cloud",
+      "label": "退休标记",
+      "sublabel": "不立即删",
+      "pos": [
+        590,
+        400
+      ],
+      "size": [
+        186,
+        72
+      ]
+    },
+    {
+      "id": "runs",
+      "type": "database",
+      "label": "runs 表",
+      "sublabel": "run 钉下的 revision",
+      "pos": [
+        834,
+        400
+      ],
+      "size": [
+        186,
+        72
+      ]
+    },
+    {
+      "id": "cleanup",
+      "type": "security",
+      "label": "回收闸",
+      "sublabel": "已退休 + 孤儿",
+      "pos": [
+        590,
+        570
+      ],
+      "size": [
+        186,
+        72
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "发行物（维护者侧）",
+      "wraps": [
+        "ghcr_base"
+      ],
+      "pad": 20
+    },
+    {
+      "kind": "region",
+      "label": "你的机器（build 与推送）",
+      "wraps": [
+        "local_img"
+      ],
+      "pad": 20
+    },
+    {
+      "kind": "region",
+      "label": "你的 AWS 账户（一个 prefix 一套）",
+      "wraps": [
+        "lambda_code",
+        "ecr",
+        "stack",
+        "template",
+        "default_ptr",
+        "derived",
+        "mapping",
+        "retired",
+        "runs",
+        "cleanup"
+      ],
+      "pad": 20
+    },
+    {
+      "kind": "region",
+      "label": "提交侧",
+      "wraps": [
+        "submit"
+      ],
+      "pad": 20
+    }
+  ],
+  "connections": [
+    {
+      "id": "sync-base",
+      "from": "ghcr_base",
+      "to": "ecr",
+      "label": "部署时同步",
+      "toSide": "top"
+    },
+    {
+      "id": "push-image",
+      "from": "local_img",
+      "to": "ecr",
+      "label": "推送上传",
+      "variant": "emphasis"
+    },
+    {
+      "id": "stack-creates-repo",
+      "from": "stack",
+      "to": "ecr",
+      "label": "变更集应用即生效"
+    },
+    {
+      "id": "stack-carries-lambda",
+      "from": "stack",
+      "to": "lambda_code",
+      "label": "同一次变更集带代码",
+      "labelDy": 24
+    },
+    {
+      "id": "image-by-digest",
+      "from": "ecr",
+      "to": "derived",
+      "label": "按 digest 入栏",
+      "variant": "emphasis"
+    },
+    {
+      "id": "copy-template",
+      "from": "template",
+      "to": "derived",
+      "label": "复制成新 revision",
+      "labelDy": 24
+    },
+    {
+      "id": "record-mapping",
+      "from": "derived",
+      "to": "mapping",
+      "label": "登记映射",
+      "variant": "emphasis"
+    },
+    {
+      "id": "pointer-picks",
+      "from": "default_ptr",
+      "to": "mapping",
+      "label": "决定读哪条",
+      "variant": "dashed",
+      "labelDy": 24
+    },
+    {
+      "id": "resolve-at-submit",
+      "from": "mapping",
+      "to": "submit",
+      "label": "提交时解析",
+      "variant": "emphasis"
+    },
+    {
+      "id": "pin-into-run",
+      "from": "submit",
+      "to": "runs",
+      "label": "钉进 run 定义"
+    },
+    {
+      "id": "retire-old",
+      "from": "derived",
+      "to": "retired",
+      "label": "被替换即退休",
+      "variant": "dashed",
+      "labelDy": 24
+    },
+    {
+      "id": "enter-candidates",
+      "from": "retired",
+      "to": "cleanup",
+      "label": "进入回收候选",
+      "variant": "dashed",
+      "labelDy": 24
+    },
+    {
+      "id": "live-run-guard",
+      "from": "runs",
+      "to": "cleanup",
+      "label": "有 run 引用则留",
+      "variant": "security"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "gherkai deploy 的四步",
+      "items": [
+        "① cdk 事务建资源，模板登记进 SSM",
+        "② 同步基底：纯发行版要容器引擎，非纯发行版跳过",
+        "③ 默认指针缺失才初始化，已有不动",
+        "④ 模板换了才重派生，末尾顺带回收"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "删 revision 的两道闸",
+      "items": [
+        "退休或孤儿满静默期",
+        "无未到终态的 run 引用它",
+        "仍被某条映射引用的也留着",
+        "故重推同名 variant 不动在跑的 run"
+      ]
+    }
+  ]
+}

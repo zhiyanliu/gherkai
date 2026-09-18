@@ -1,0 +1,306 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "一个 job 怎么收场：归因的优先级",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "legend": {
+      "mode": "auto",
+      "entries": {
+        "security": {
+          "label": "判据：答上就定案"
+        },
+        "backend": {
+          "label": "照常归约"
+        },
+        "external": {
+          "label": "记下来的收场态"
+        }
+      }
+    }
+  },
+  "lanes": [
+    {
+      "id": "laneChain",
+      "label": "判据：一串有序短路，前一问答上就不再往后看"
+    },
+    {
+      "id": "laneOut",
+      "label": "定案"
+    }
+  ],
+  "phases": [
+    {
+      "id": "phStart",
+      "label": "还没起来就定案",
+      "fromCol": 0,
+      "toCol": 1
+    },
+    {
+      "id": "phRun",
+      "label": "起来之后：先看有没有被主动停，再看事件流怎么结束",
+      "fromCol": 2,
+      "toCol": 5,
+      "variant": "emphasis"
+    }
+  ],
+  "mainPath": [
+    "q1",
+    "q2",
+    "q3",
+    "q4",
+    "q5",
+    "agg"
+  ],
+  "semanticChecks": {
+    "allowedRoots": [
+      "q1"
+    ],
+    "allowedTerminals": [
+      "sk",
+      "ee1",
+      "to",
+      "ab",
+      "ne",
+      "ee2",
+      "agg"
+    ],
+    "requiredEdges": [
+      {
+        "from": "q1",
+        "to": "sk"
+      },
+      {
+        "from": "q3",
+        "to": "ab"
+      },
+      {
+        "from": "q5",
+        "to": "agg"
+      }
+    ]
+  },
+  "nodes": [
+    {
+      "id": "q1",
+      "lane": "laneChain",
+      "col": 0,
+      "type": "security",
+      "label": "fail-fast 中止？",
+      "sublabel": "起 worker 之前",
+      "width": 144
+    },
+    {
+      "id": "q2",
+      "lane": "laneChain",
+      "col": 1,
+      "type": "security",
+      "label": "worker 起得来？",
+      "width": 144
+    },
+    {
+      "id": "q3",
+      "lane": "laneChain",
+      "col": 2,
+      "type": "security",
+      "label": "被主动中止？",
+      "sublabel": "跑事件流，逐条复查",
+      "width": 148
+    },
+    {
+      "id": "q4",
+      "lane": "laneChain",
+      "col": 3,
+      "type": "security",
+      "label": "网络专用退出码？",
+      "sublabel": "worker 自己报的",
+      "width": 152
+    },
+    {
+      "id": "q5",
+      "lane": "laneChain",
+      "col": 4,
+      "type": "security",
+      "label": "崩了或收尾不全？",
+      "width": 152
+    },
+    {
+      "id": "agg",
+      "lane": "laneChain",
+      "col": 5,
+      "type": "backend",
+      "label": "各 scenario 归约",
+      "sublabel": "干净收尾、内容完整",
+      "width": 152
+    },
+    {
+      "id": "sk",
+      "lane": "laneOut",
+      "col": 0,
+      "type": "external",
+      "label": "skipped",
+      "sublabel": "从未启动 · 无归因",
+      "width": 132
+    },
+    {
+      "id": "ee1",
+      "lane": "laneOut",
+      "col": 1,
+      "type": "external",
+      "label": "engine_error",
+      "sublabel": "起不来 · error",
+      "width": 132
+    },
+    {
+      "id": "to",
+      "lane": "laneOut",
+      "col": 2,
+      "type": "external",
+      "label": "timeout",
+      "sublabel": "墙钟到点 · error",
+      "width": 132
+    },
+    {
+      "id": "ab",
+      "lane": "laneOut",
+      "col": 2,
+      "type": "external",
+      "label": "aborted",
+      "sublabel": "有现场 · 无归因",
+      "width": 132,
+      "yOffset": 76
+    },
+    {
+      "id": "ne",
+      "lane": "laneOut",
+      "col": 3,
+      "type": "external",
+      "label": "network_error",
+      "sublabel": "建连耗尽 · error",
+      "width": 132
+    },
+    {
+      "id": "ee2",
+      "lane": "laneOut",
+      "col": 4,
+      "type": "external",
+      "label": "engine_error",
+      "sublabel": "兜底 · error",
+      "width": 132
+    }
+  ],
+  "edges": [
+    {
+      "id": "q1-q2",
+      "from": "q1",
+      "to": "q2",
+      "label": "没有",
+      "variant": "emphasis",
+      "role": "main",
+      "route": "straight"
+    },
+    {
+      "id": "q2-q3",
+      "from": "q2",
+      "to": "q3",
+      "label": "起来了",
+      "variant": "emphasis",
+      "role": "main",
+      "route": "straight"
+    },
+    {
+      "id": "q3-q4",
+      "from": "q3",
+      "to": "q4",
+      "label": "都没有",
+      "variant": "emphasis",
+      "role": "main",
+      "route": "straight"
+    },
+    {
+      "id": "q4-q5",
+      "from": "q4",
+      "to": "q5",
+      "label": "不是",
+      "variant": "emphasis",
+      "role": "main",
+      "route": "straight"
+    },
+    {
+      "id": "q5-agg",
+      "from": "q5",
+      "to": "agg",
+      "label": "都不是",
+      "variant": "emphasis",
+      "role": "main",
+      "route": "straight"
+    },
+    {
+      "id": "q1-sk",
+      "from": "q1",
+      "to": "sk",
+      "variant": "dashed",
+      "role": "branch"
+    },
+    {
+      "id": "q2-ee1",
+      "from": "q2",
+      "to": "ee1",
+      "variant": "security",
+      "role": "error"
+    },
+    {
+      "id": "q3-to",
+      "from": "q3",
+      "to": "to",
+      "label": "墙钟到点",
+      "variant": "security",
+      "role": "error"
+    },
+    {
+      "id": "q3-ab",
+      "from": "q3",
+      "to": "ab",
+      "label": "fail-fast",
+      "variant": "security",
+      "role": "error"
+    },
+    {
+      "id": "q4-ne",
+      "from": "q4",
+      "to": "ne",
+      "label": "是",
+      "variant": "security",
+      "role": "error"
+    },
+    {
+      "id": "q5-ee2",
+      "from": "q5",
+      "to": "ee2",
+      "label": "是",
+      "variant": "security",
+      "role": "error"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "amber",
+      "title": "顺序本身就是判据",
+      "items": [
+        "先看它有没有起来，再看有没有被主动停下，最后才看事件流自己怎么结束",
+        "前一问一旦答上就地定案，不再往后看",
+        "两条主动停下的路径归因不同：只有 fail-fast 记 aborted，墙钟到点记 timeout"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "一处例外，一条边界",
+      "items": [
+        "worker 崩着退出时不再复查中止与超时，即便中止已发起、墙钟已过，一律落兜底",
+        "建连失败的 job 已经开过会话、已经计费，所以不算 skipped，照常进整批聚合",
+        "skipped 与 aborted 不带归因，为什么没跑完只写在消息里"
+      ]
+    }
+  ]
+}
