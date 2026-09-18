@@ -30,7 +30,7 @@
 
 主干五步（图上末一步拆成「判定归约」与「报告与退出码」两格）。图上顶部两段标出命令的覆盖范围：`plan` 到分组为止；`run` / `submit` 同样从 `parse` 起，但不在分组处停止，一直执行到给出退出码。`循环体` 泳道内的步骤对每个 job 反复发生，且可并发。每步的细节各有 owner 页：
 
-![一次 run 的主干：parse → scope 分组 → begin → 驱动循环（起 worker、逐 step、事件与退出信号两条回传）→ 判定归约 → 报告与退出码](../diagrams/architecture-overview-run-lifecycle.svg)
+![一次 run 的主干：parse → scope 分组 → begin → 驱动循环（启动 worker、逐 step 执行、事件与退出信号两条回传）→ 判定归约 → 报告与退出码](../diagrams/architecture-overview-run-lifecycle.svg)
 
 图注：两条回传的**物理通道**在四种组合下各不相同（本机管道 / 云端表、父进程 / 平台观察），本图只画两条回传的方向；通道与推进链的详解见 [`execution-and-reconciliation.md`](./execution-and-reconciliation.md)。
 

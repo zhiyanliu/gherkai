@@ -14,7 +14,7 @@
 | **使用方的 variant 镜像** | 基底镜像 + 使用方 `COPY` 进去的确定性 step 目录（`GHERKAI_STEPS_DIR`）；**云端执行哪套 step 由镜像决定**，不由提交侧 `--steps-dir` 决定 | 使用方自行 build（gherkai 不拥有构建）+ `gherkai deploy push-worker`（推 ECR、从模板注册 revision、写 SSM 映射） | 写完 SSM 映射后，**下一次提交**解析到新 revision；已在运行的 run 不切换（见 §5） | ECR tag = `names.image_tag(CLI 版本, variant)`；repo 名 = `names.ecr_repo_name` |
 | **SSM 参数** | `version`（后端版本戳）、`vpc`（生效 VPC 档）、`worker-template/<engine>`（模板 revision ARN）、`subnets`/`security-groups` 这四族是 **stack 资源**；`worker-image/<engine>/<tag>`（映射 JSON）、`worker-default`（默认 variant 指针）这两族由命令 `put_parameter` 写 | 前四族随 cdk 事务；后两族由 `push-worker` / `deploy` 的第 2-4 步写 | `put_parameter` 即生效（**覆盖语义、最后写者赢**） | 路径全经 `names.ssm_path(prefix, key)`，键名常量在 `gherkai_runtime.names` |
 
-![官方基底镜像与使用方 build 的镜像如何进入本账户的 ECR、挂在哪个 task-def revision 上、由谁指向，以及旧 revision 何时才允许回收](../diagrams/cloud-delivery-identity.svg)
+![官方基底镜像与使用方 build 的镜像如何进入本账户的 ECR、挂在哪个 task-def revision 上、由哪些指针指向，以及旧 revision 何时允许回收](../diagrams/cloud-delivery-identity.svg)
 
 图注（云端交付与 worker 身份拓扑）：上表五行在图上各有落点；图只画从属与指向，每个载体的生效时机以上表第 4 列为完整口径。图上的 SSM 镜像映射按版本分键（见 §6）：升级更换版本命名空间后，自定义 variant 必须重推——§3 第 ③ 步与 §4「默认 variant 在新版本尚无镜像」那一行同出于此根因。本图只画交付与身份，不画推进链与事件通道，后者见 [`execution-and-reconciliation.md`](./execution-and-reconciliation.md)。可交互版（缩放 / 聚焦单个节点 / 追踪一条路径）：https://zhiyanliu.github.io/gherkai/cloud-delivery-identity.html
 

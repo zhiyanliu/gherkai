@@ -87,7 +87,7 @@
 
 同步 `run` 中一个 job 的收场态由一串**有序短路**的判据决定：先看它是否启动，再看是否被主动中止，最后才看事件流如何结束。
 
-![四问构成一串有序短路：fail-fast 中止 → worker 能否启动 → 是否被主动中止 → 事件流如何结束；任一问命中即就地记下收场态，全部未命中才做 scenario 归约](../diagrams/verdict-model-job-outcome.svg)
+![四问构成一串有序短路：fail-fast 中止 → worker 能否启动 → 是否被主动中止 → 事件流如何结束；任一条件命中即记录收场态，全部未命中才做 scenario 归约](../diagrams/verdict-model-job-outcome.svg)
 
 > 图注：本图只画同步 `run`；「事件流如何收场」在图上拆成两问——先识别网络专用退出码，其余非零退出与内容不完整归入 `engine_error`。图上另有**一处例外**：worker 以非零码异常退出时不再复查中止与超时（即便中止已发起、墙钟已过），一律记 `error · engine_error`。无状态跑批走另一条链，退出记录落库后，在收敛时确定终态：`skipped` / `aborted` 不出现（该路径没有 fail-fast），超时一路的归因与本图一致，其余非零退出与启动 task 失败只落 `error`、job 级不细分 `error_type`（诊断信息在 `message` 与 worker 日志）。与姊妹页[执行与推进模型导览](./execution-and-reconciliation.md) §6 那张图的分工：那张讲**如何把 worker 停下来**，本图讲**停下来之后记什么状态**。
 
