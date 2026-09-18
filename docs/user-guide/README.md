@@ -2,7 +2,7 @@
 
 给使用 gherkai 的人和替你操作它的 AI agent。这里讲**怎么用**：安装、写用例、跑、看结果、部署云端后端、配置、排错与常见问题。每个主题只在一篇里展开，其余页面只给链接。想了解内部机理请看 [`docs/internals/`](../internals/README.md)；仓库首页 [`README.md`](../../README.md) 是 30 秒版。
 
-| 页 | 回答什么问题 | 这一篇负责的主题（别处只链不讲） |
+| 页 | 回答什么问题 | 这一篇负责的主题（其余页只给链接、不展开） |
 |---|---|---|
 | [`getting-started.md`](./getting-started.md) | 装什么、要哪些 AWS 前置、第一次怎么跑通 | 安装形态（CLI、两个引擎 worker、部署 extra）、AWS 凭证与 region、需开通的服务、`doctor` 预检、用 AI agent 上手、手敲 CLI 的最小四步 |
 | [`writing-features.md`](./writing-features.md) | `.feature` 怎么写才跑得稳 | 最小 `.feature` 骨架与 Gherkin 支持范围（含中文关键字）、AI 步与确定性步的分工、断言怎么写、`@engine` / `@scope` / `@timeout` 标签、双引号地址直接导航的内建行为、按引擎选写法（含非英文 UI）、投票 |
