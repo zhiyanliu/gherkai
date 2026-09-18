@@ -1,7 +1,7 @@
 # Graph Report - yaozhou  (2026-09-18)
 
 ## Corpus Check
-- 316 files · ~524,495 words
+- 316 files · ~524,520 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -10,7 +10,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `268ede9a`
+- Built from commit: `09c81a53`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -198,7 +198,7 @@
 - 决策
 - 执行与推进模型导览：run / submit × local / cloud
 - sync-derived.sh
-- 开发者指南（contributor 入口）
+- 开发者指南
 - Adapters Package
 - 代码健康度复盘（全部生产代码）— 任务说明
 - CONTENT_TYPES
@@ -1065,9 +1065,9 @@ Nodes (13): 0045. 文档分层与归位：按读者三分类、目录归位、�
 Cohesion: 0.17
 Nodes (12): 1. 心智模型：两种驱动、同一份 `core`, 2. 四组合一览, 3. 前台 `run` 的生命周期, 4. 后台跑批 `submit` 的生命周期, 4a. local 档：per-run 推进进程, 4b. cloud 档：三 Lambda 链, 4c. 读侧：进度观察与结果落点, 5. 同一条事件流的四条物理通道（横切对照） (+4 more)
 
-### Community 183 - "开发者指南（contributor 入口）"
+### Community 183 - "开发者指南"
 Cohesion: 0.18
-Nodes (11): Spike（可独立运行的技术验证脚本）, 发布与版本, 在有凭证的机器上验证未发布的工作树, 如何参与, 开发环境（从 checkout 跑）, 开发者指南（contributor 入口）, 文档去哪读, 测试 (+3 more)
+Nodes (11): Spike（可独立运行的技术验证脚本）, 发布与版本, 在有凭证的机器上验证未发布的工作树, 如何参与, 开发环境（从 checkout 跑）, 开发者指南, 文档去哪读, 测试 (+3 more)
 
 ### Community 185 - "代码健康度复盘（全部生产代码）— 任务说明"
 Cohesion: 0.18
@@ -1228,11 +1228,11 @@ _Questions this graph is uniquely positioned to answer:_
 - **What is the exact relationship between `ADR 0001 范围限定英文 UI` and `gherkai agent SKILL.md`?**
   _Edge tagged AMBIGUOUS (relation: references) - confidence is low._
 - **Why does `gherkai-worker-novaact (README)` connect `@gherkai/worker-midscene (README)` to `Midscene Worker 开发笔记`, `deterministic.py`, `test_user_steps.py`?**
-  _High betweenness centrality (0.170) - this node is a cross-community bridge._
+  _High betweenness centrality (0.159) - this node is a cross-community bridge._
 - **Why does `Nova Act Worker 开发笔记` connect `Midscene Worker 开发笔记` to `runtime 包 contributor 文档`, `CONTRIBUTING.md`, `@gherkai/worker-midscene (README)`?**
-  _High betweenness centrality (0.168) - this node is a cross-community bridge._
-- **Why does `_fixture()` connect `_fixture` to `test_conditional_writes.py`, `test_workers.py`, `test_lambda_asset.py`, `evidence.py`, `test_evidence.py`, `test_cloud_integration.py`, `_Recorder`, `deterministic.py`, `_FakeSink`, `_RecUploader`, `test_interrupt_model.py`?**
-  _High betweenness centrality (0.140) - this node is a cross-community bridge._
+  _High betweenness centrality (0.157) - this node is a cross-community bridge._
+- **Why does `deterministic()` connect `deterministic.py` to `ValueError`, `_run_step`?**
+  _High betweenness centrality (0.152) - this node is a cross-community bridge._
 - **Are the 56 inferred relationships involving `Job` (e.g. with `_explain_job()` and `test_explain_to_dict_drops_unmatched_scopes_and_keeps_job_fact()`) actually correct?**
   _`Job` has 56 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 40 inferred relationships involving `RunState` (e.g. with `_cmd_submit()` and `_explain_run()`) actually correct?**

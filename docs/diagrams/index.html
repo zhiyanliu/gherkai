@@ -3,24 +3,34 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>gherkai · 可交互架构图</title>
+<title>gherkai 架构图</title>
 <style>
   body { font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Noto Sans CJK SC", sans-serif; max-width: 720px; margin: 3rem auto; padding: 0 1.25rem; color: #1f2328; }
   h1 { font-size: 1.5rem; margin-bottom: .25rem; }
   p.lead { color: #57606a; margin-top: 0; }
-  li { margin: .75rem 0; }
+  li { margin: .9rem 0; }
+  li p { margin: .2rem 0; }
   a { color: #0969da; }
   code { background: #f6f8fa; padding: .1em .35em; border-radius: 4px; font-size: .9em; }
-  @media (prefers-color-scheme: dark) { body { background: #0d1117; color: #e6edf3; } p.lead { color: #8b949e; } a { color: #58a6ff; } code { background: #161b22; } }
+  small { color: #57606a; }
+  @media (prefers-color-scheme: dark) { body { background: #0d1117; color: #e6edf3; } p.lead, small { color: #8b949e; } a { color: #58a6ff; } code { background: #161b22; } }
 </style>
 </head>
 <body>
-<h1>gherkai · 可交互架构图</h1>
-<p class="lead">这两张图太大、层次太多，读者需要缩放、聚焦一格、追一条路径，所以做成可交互页面；对应的机理说明与静态图在仓库 <code>docs/internals/</code> 里，图源是同目录的 JSON 规格。</p>
+<h1>gherkai 架构图</h1>
+<p class="lead">gherkai 是一个 UI 自动化测试工具：用 Gherkin 写用例，由 AI 引擎在云端浏览器中执行。下面两张图是它的可交互架构图，可以缩放、聚焦单个组件、追踪一条路径；每张图的文字说明在仓库的技术文档中。</p>
 <ul>
-  <li><a href="./run-execution.html">执行与推进全景</a>：同一份执行核心在 <code>run</code> / <code>submit</code> × 本机 / 云端四种组合下，谁在驱动、事件怎么流、进程退出如何被观察。配套说明：<code>docs/internals/execution-and-reconciliation.md</code>。</li>
-  <li><a href="./cloud-delivery-identity.html">云端交付与 worker 身份拓扑</a>：基底镜像、ECR、任务定义 revision、SSM 映射与默认指针如何相互指向，<code>gherkai deploy</code> 四步各改动哪一层，旧 revision 何时才允许清理。配套说明：<code>docs/internals/cloud-backend-carriers.md</code>。</li>
+  <li>
+    <a href="./run-execution.html">执行与推进模型</a>
+    <p>前台 <code>run</code> 与后台 <code>submit</code>、本机与云端两种后端组合出的四种运行方式下，由谁驱动执行、事件如何流转、worker 进程的退出如何被观察。</p>
+    <p><small>文字说明：<a href="https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/internals/execution-and-reconciliation.md">docs/internals/execution-and-reconciliation.md</a></small></p>
+  </li>
+  <li>
+    <a href="./cloud-delivery-identity.html">云端交付与 worker 身份</a>
+    <p>官方基底镜像、你的 ECR 仓库、任务定义 revision、SSM 映射与默认指针之间的关系；<code>gherkai deploy</code> 的每一步改动哪一层；旧 revision 何时可以清理。</p>
+    <p><small>文字说明：<a href="https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/internals/cloud-backend-carriers.md">docs/internals/cloud-backend-carriers.md</a></small></p>
+  </li>
 </ul>
-<p class="lead">仓库首页：<a href="https://github.com/zhiyanliu/gherkai#readme">github.com/zhiyanliu/gherkai</a></p>
+<p class="lead">项目主页：<a href="https://github.com/zhiyanliu/gherkai#readme">github.com/zhiyanliu/gherkai</a> · 用户指南：<a href="https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/README.md">docs/user-guide</a></p>
 </body>
 </html>

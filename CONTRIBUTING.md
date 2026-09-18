@@ -1,4 +1,4 @@
-# 开发者指南（contributor 入口）
+# 开发者指南
 
 > 使用者阅读 [`README.md`](./README.md)（仓库首页）与 [`docs/user-guide/`](./docs/user-guide/README.md)；本文面向 contributor，内容为如何参与、目录结构、开发环境、测试、spike、发布，以及设计决策的存放位置。项目约定（沟通/文档纪律/代码纪律/工作方式）在 [`CLAUDE.md`](./CLAUDE.md)，术语在 [`CONTEXT.md`](./CONTEXT.md)，全部文档的地图在 [`docs/README.md`](./docs/README.md)。
 
@@ -15,13 +15,13 @@
 
 架构：**核心库 `core/`（Python）自解析 Gherkin → 分组 scope/job → 调度**，每个 scope spawn 一个**薄 worker 子进程**（Midscene=TS / Nova Act=Python），worker 遵循统一的 worker↔core 协议（ADR 0024）。`cli/` 是核心库的第一个前端（argparse + render），组合根共享层在 `runtime/`（ADR 0016「演进」节）。v0.x 的 cucumber-js/pytest-bdd 双 runner 直跑已**退役**（ADR 0016 / 0022 / 0023）。关键约束：**全栈托管在 AWS 内**（ADR 0009）；**UI 语言支持范围按引擎划分**，Midscene 不限、Nova Act 限英文（ADR 0001）。部件全景先读 [`docs/internals/architecture-overview.md`](./docs/internals/architecture-overview.md)：开头的全景图给出五层与层间指向，其后依次是各层职责、一次 run 的生命周期、本机与云端两种载体、包与发行物的对应，较下面的目录树更快建立全局认识。
 
-| 版本线 | 内容 | 状态 |
-|---|---|---|
-| v1.0 核心库 | parse + scope 分组 + schedule + 4 ports（Engine/Run/Result/ReportStore）+ 实时写编排；双引擎薄 worker、AgentCore 会话、投票治理、RunReport、网络韧性 | ✅ 真 AWS 端到端 |
-| v1.1 云端 | store adapter（DynamoDB/S3，StepArgument offload 解 400KB 限）+ Fargate/ECS 执行面（`FargateEngine` + `gherkai-deploy-aws` 的 CDK stack）；boto3 只在云端路径懒加载（库层 extra `[aws]`，CLI 硬依赖 `gherkai-runtime[aws]`，ADR 0032/0033/0037） | ✅ 真部署真跑 |
-| v1.2 无状态跑批 | `submit` 提交即返回 + `status [--wait]`；local 档 per-run 后台进程 + SQLite events；cloud 档三 Lambda 事件驱动链（kicker / reconciler / exit-observer，DDB Stream + EventBridge）；job 墙钟预算作为最终保障（ADR 0034） | ✅ |
-| v1.3 本地应用测试 + 能力自述 | `--expose-local` ngrok 隧道（basic-auth 凭据每 run 轮换、终态即拆除，ADR 0035）；`list-deterministic` / `plan` 派发标注（worker 注册表自述，ADR 0036） | ✅ |
-| v1.4 分发与打包 | uv workspace 五包 + PyPI/npm 发行、git tag 版本单旋钮、`gherkai deploy` 内嵌 IaC、worker 镜像 variant 交付（ADR 0037 / 0038） | ✅ 已发行 |
+| 版本线                       | 内容                                                                                                                                                                                                                                   | 状态            |
+|------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-----------------|
+| v1.0 核心库                  | parse + scope 分组 + schedule + 4 ports（Engine/Run/Result/ReportStore）+ 实时写编排；双引擎薄 worker、AgentCore 会话、投票治理、RunReport、网络韧性                                                                                          | ✅ 真 AWS 端到端 |
+| v1.1 云端                    | store adapter（DynamoDB/S3，StepArgument offload 解 400KB 限）+ Fargate/ECS 执行面（`FargateEngine` + `gherkai-deploy-aws` 的 CDK stack）；boto3 只在云端路径懒加载（库层 extra `[aws]`，CLI 硬依赖 `gherkai-runtime[aws]`，ADR 0032/0033/0037） | ✅ 真部署真跑    |
+| v1.2 无状态跑批              | `submit` 提交即返回 + `status [--wait]`；local 档 per-run 后台进程 + SQLite events；cloud 档三 Lambda 事件驱动链（kicker / reconciler / exit-observer，DDB Stream + EventBridge）；job 墙钟预算作为最终保障（ADR 0034）                        | ✅               |
+| v1.3 本地应用测试 + 能力自述 | `--expose-local` ngrok 隧道（basic-auth 凭据每 run 轮换、终态即拆除，ADR 0035）；`list-deterministic` / `plan` 派发标注（worker 注册表自述，ADR 0036）                                                                                         | ✅               |
+| v1.4 分发与打包              | uv workspace 五包 + PyPI/npm 发行、git tag 版本单旋钮、`gherkai deploy` 内嵌 IaC、worker 镜像 variant 交付（ADR 0037 / 0038）                                                                                                               | ✅ 已发行        |
 
 v1 定位尚有一项验收未完成，前置条件是取得可用的真实业务系统：至少 3 个真实业务用例由 feature 作者零 step 代码写出并跑通，同时记录每一处不得不写代码的破例。该项自 v0.x 顺延至今，目前只有骨架用例（wikipedia / example.com）在验证方向。验收标准与顺延理由见 [ADR 0016](./docs/adr/0016-execution-architecture-core-lib-run-model.md)「版本切分」节，定位口径见 [ADR 0015](./docs/adr/0015-v1-positioning-smoke-not-regression.md)。
 
@@ -67,14 +67,14 @@ v1 定位尚有一项验收未完成，前置条件是取得可用的真实业�
 
 `tools/` 里的工具（做真跑、诊断、校验之前先检索本目录，避免重复实现；每个脚本的头注释写明用途、前置与判读；篇幅超过头注释的工具另有同目录手册 `tools/<name>.md`，属 contributor 文档、随脚本一起维护，下表为索引）：
 
-| 工具 | 用途 |
-|---|---|
-| `e2e_harness.py`（用法与判读见 `e2e_harness.md`） | worker 端到端真跑：真 spawn worker、真事件流、真会话，可注入中断时机；opt-in、不进 pytest、产生真实 AWS 费用 |
-| `ecs_task_timing.py` | 采集 ECS task 生命周期的时间字段，标定 SIGTERM → 退出的真实墙钟预算（用于校准 grace / stopTimeout） |
-| `events_wallclock.py` | 从 events 表还原 worker emit 时刻，计算单 act 墙钟分布（用于校准 grace margin） |
-| `build_diagrams.mjs` | 文档图两段式构建：`docs/diagrams/*.json` → `archify deliver` 出可交互 HTML（确定性渲染）→ 无头 Chrome 从 HTML 导出 SVG（`--png` 另导 PNG 供目视）；依赖 `engines/midscene` 的 Playwright 与本机 Chrome（见下文「图」） |
-| `render_skill_contract.py` | `--json` 契约页 → agent skill 里那份副本的确定性转换（ADR 0043 决策四） |
-| `graphify_refresh.sh` | 知识图的 LLM 侧刷新（见下文「知识图刷新」） |
+| 工具                                            | 用途                                                                                                                                                                                                         |
+|-------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `e2e_harness.py`（用法与判读见 `e2e_harness.md`） | worker 端到端真跑：真 spawn worker、真事件流、真会话，可注入中断时机；opt-in、不进 pytest、产生真实 AWS 费用                                                                                                        |
+| `ecs_task_timing.py`                            | 采集 ECS task 生命周期的时间字段，标定 SIGTERM → 退出的真实墙钟预算（用于校准 grace / stopTimeout）                                                                                                             |
+| `events_wallclock.py`                           | 从 events 表还原 worker emit 时刻，计算单 act 墙钟分布（用于校准 grace margin）                                                                                                                                 |
+| `build_diagrams.mjs`                            | 文档图两段式构建：`docs/diagrams/*.json` → `archify deliver` 出可交互 HTML（确定性渲染）→ 无头 Chrome 从 HTML 导出 SVG（`--png` 另导 PNG 供目视）；依赖 `engines/midscene` 的 Playwright 与本机 Chrome（见下文「图」） |
+| `render_skill_contract.py`                      | `--json` 契约页 → agent skill 里那份副本的确定性转换（ADR 0043 决策四）                                                                                                                                        |
+| `graphify_refresh.sh`                           | 知识图的 LLM 侧刷新（见下文「知识图刷新」）                                                                                                                                                                      |
 
 ## 开发环境（从 checkout 跑）
 
@@ -121,16 +121,16 @@ uv run pytest core/tests -m integration          # 集成测试：假定真表/�
 
 文档与文案护栏同样在单测里（修改文档、CLI 文案或 agent skill 之后一并运行）：
 
-| 护栏 | 覆盖范围 |
-|---|---|
-| `cli/tests/test_cli_json_contract.py` | `--json` 字段契约：真渲染器生成样例 → 递归收集全部键名 → 逐个断言出现在 `docs/internals/cli-json-contract.md`，文档缺键即失败 |
-| `deploy_aws/tests/test_workers.py` | 同一份契约页的 `list-workers` 字段（样例需要 moto，故断言留在 provider 包侧） |
-| `cli/tests/test_user_facing_messages.py` | 产品面文案不带内部指代：AST 扫五个生产包的 Python 字面量 + Midscene 的 `.mts` 源，注释与 docstring 放行 |
-| `cli/tests/test_package_readmes.py` | 进包的 README（各包 pyproject `readme` 指向的那份 + npm `files` 里的）与各包 Summary：零内部指代 + 零相对链接；根 `README.md`：只查零内部指代（它的相对链接在 GitHub 上正常渲染，可达性由 `test_user_docs.py` 断言）；另断言每个包目录一份 `DEVELOPMENT.md`、根一份 `CONTRIBUTING.md`，以及 GitHub Release 正文的固定块 |
-| `cli/tests/test_user_docs.py` | 仓库内的用户文档（`docs/user-guide/**`、根 `README.md`、`CHANGELOG.md`）：零内部指代、相对链接可达、不把读者引向 contributor 侧文档（ADR / CONTEXT / CLAUDE.md / journey / ai-eng）、owner 表与目录两向差集；另守图：`docs/diagrams/` 的 JSON 图源与导出 SVG 成对、图源零内部指代、README / 本文 / `docs/**` 里不留 mermaid 块 |
-| `cli/tests/test_release_notes.py` | `.github/scripts/release_notes.py` 两件事：「已发行 tag 在 `CHANGELOG.md` 里有非空节」的 gate 与 Release 正文渲染 |
-| `cli/tests/test_skill.py` | 随 wheel 发行的 agent skill：文案与指针形态、`gherkai <子命令> --flag` 组合对照 argparse 真值与「仅某命令」排他、反引号键名对照契约页、契约页转换副本相等、目录白名单与形态上限、评测 fixture 的 ignore 行为与可搬迁不变量 |
-| `deploy_aws/tests/test_skill_deploy_tokens.py` | skill 里 `deploy` / `destroy` 那批命令 token 对照 provider 的真 parser（provider 位于 `[deploy-aws]` extra，命令行前端的测试不应强依赖它） |
+| 护栏                                           | 覆盖范围                                                                                                                                                                                                                                                                                                         |
+|------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `cli/tests/test_cli_json_contract.py`          | `--json` 字段契约：真渲染器生成样例 → 递归收集全部键名 → 逐个断言出现在 `docs/internals/cli-json-contract.md`，文档缺键即失败                                                                                                                                                                                      |
+| `deploy_aws/tests/test_workers.py`             | 同一份契约页的 `list-workers` 字段（样例需要 moto，故断言留在 provider 包侧）                                                                                                                                                                                                                                       |
+| `cli/tests/test_user_facing_messages.py`       | 产品面文案不带内部指代：AST 扫五个生产包的 Python 字面量 + Midscene 的 `.mts` 源，注释与 docstring 放行                                                                                                                                                                                                            |
+| `cli/tests/test_package_readmes.py`            | 进包的 README（各包 pyproject `readme` 指向的那份 + npm `files` 里的）与各包 Summary：零内部指代 + 零相对链接；根 `README.md`：只查零内部指代（它的相对链接在 GitHub 上正常渲染，可达性由 `test_user_docs.py` 断言）；另断言每个包目录一份 `DEVELOPMENT.md`、根一份 `CONTRIBUTING.md`，以及 GitHub Release 正文的固定块     |
+| `cli/tests/test_user_docs.py`                  | 仓库内的用户文档（`docs/user-guide/**`、根 `README.md`、`CHANGELOG.md`）：零内部指代、相对链接可达、不把读者引向 contributor 侧文档（ADR / CONTEXT / CLAUDE.md / journey / ai-eng）、owner 表与目录两向差集；另守图：`docs/diagrams/` 的 JSON 图源与导出 SVG 成对、图源零内部指代、README / 本文 / `docs/**` 里不留 mermaid 块 |
+| `cli/tests/test_release_notes.py`              | `.github/scripts/release_notes.py` 两件事：「已发行 tag 在 `CHANGELOG.md` 里有非空节」的 gate 与 Release 正文渲染                                                                                                                                                                                                   |
+| `cli/tests/test_skill.py`                      | 随 wheel 发行的 agent skill：文案与指针形态、`gherkai <子命令> --flag` 组合对照 argparse 真值与「仅某命令」排他、反引号键名对照契约页、契约页转换副本相等、目录白名单与形态上限、评测 fixture 的 ignore 行为与可搬迁不变量                                                                                               |
+| `deploy_aws/tests/test_skill_deploy_tokens.py` | skill 里 `deploy` / `destroy` 那批命令 token 对照 provider 的真 parser（provider 位于 `[deploy-aws]` extra，命令行前端的测试不应强依赖它）                                                                                                                                                                          |
 
 禁词表、相对链接正则与 skill 的命令 token 抽取器位于 `cli/tests/_doc_rules.py`，五个消费方共用（四份护栏 `test_package_readmes.py` / `test_user_docs.py` / `test_skill.py` / `test_skill_deploy_tokens.py`，外加 `tools/render_skill_contract.py` 的自查），不应再复制第二份。单测通过不等于结论正确：凡结论依赖 mock 之外的真实行为（进程/信号/并发/真 AWS），按 CLAUDE.md「绿≠对」升级验证；端到端真跑的现成工具在 `tools/`，用前先检索该目录、避免重复实现。
 
@@ -184,12 +184,12 @@ CI（任意分支的 push、PR、手动触发）运行三件：全成员 `pytest
 
 全部文档的地图是 [`docs/README.md`](./docs/README.md)（按读者分类、每类的入口与 owner 表）。四层分工，决策与理由见 [ADR 0045](./docs/adr/0045-documentation-layering-and-placement.md)：
 
-| 层 | 位置 | 内容 |
-|---|---|---|
-| 决策 | [`docs/adr/`](./docs/adr/) | 稳定决策的 what / why / trade-off，每篇带 Status 头、Accepted 的自包含。与其它文档冲突时以 ADR 与 code 为准 |
-| 机理 | [`docs/internals/`](./docs/internals/README.md) | 给想懂机理的技术读者的横切解读：只讲 how、不复述 why，正文带 ADR 指针 |
-| 使用 | [`docs/user-guide/`](./docs/user-guide/README.md)、根 [`README.md`](./README.md)、各包 `README.md`、`CHANGELOG.md`、随 CLI 发行的 agent skill | 使用者与替使用者操作的 AI agent 读：产品说明口吻、零内部指代、包页面只作入口 |
-| 参与 | 本文、各包 `DEVELOPMENT.md`、[`.github/workflows/README.md`](./.github/workflows/README.md) | 在本仓库中的工作方式：布局、环境、测试、发布链 |
+| 层   | 位置                                                                                                                                      | 内容                                                                                                     |
+|------|-------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------|
+| 决策 | [`docs/adr/`](./docs/adr/)                                                                                                                | 稳定决策的 what / why / trade-off，每篇带 Status 头、Accepted 的自包含。与其它文档冲突时以 ADR 与 code 为准 |
+| 机理 | [`docs/internals/`](./docs/internals/README.md)                                                                                           | 给想懂机理的技术读者的横切解读：只讲 how、不复述 why，正文带 ADR 指针                                       |
+| 使用 | [`docs/user-guide/`](./docs/user-guide/README.md)、根 [`README.md`](./README.md)、各包 `README.md`、`CHANGELOG.md`、随 CLI 发行的 agent skill | 使用者与替使用者操作的 AI agent 读：产品说明口吻、零内部指代、包页面只作入口                                |
+| 参与 | 本文、各包 `DEVELOPMENT.md`、[`.github/workflows/README.md`](./.github/workflows/README.md)                                                 | 在本仓库中的工作方式：布局、环境、测试、发布链                                                               |
 
 另外两处：术语在 [`CONTEXT.md`](./CONTEXT.md)；contributor 侧 AI agent 的工作文档在 [`docs/ai-eng/`](./docs/ai-eng/README.md)，含外部一手来源 [`REFERENCES.md`](./docs/ai-eng/REFERENCES.md) 与两条复盘方法。
 

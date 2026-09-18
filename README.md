@@ -40,7 +40,7 @@ gherkai explain <run_id>                           # 有用例没过：逐步看
 
 后台运行用 `submit` 提交、`status --wait` 收结果；加 `--backend cloud --prefix <前缀>` 切到团队的云端后端。四种跑法、常用选项与退出码见 [跑测试与看结果](./docs/user-guide/running-and-results.md)。
 
-## 它是怎么跑的
+## 它是怎么工作的
 
 ![本机档与云端档两条路径：命令行读入 .feature，起本机 worker 或提交到云端后端；worker 用你账户里的模型做 AI step 的操作与判定、经 CDP 驱动云端浏览器，浏览器直达公网被测应用或经隧道回本机应用；结果与证据由 explain / status 读回](./docs/diagrams/readme-runtime-topology.svg)
 
@@ -56,28 +56,28 @@ gherkai explain <run_id>                           # 有用例没过：逐步看
 
 gherkai 自己不含模型，也不接收任何数据。每个 AI step 的操作与判定由下面两个模型完成，全部在**你的 AWS 账户**里的托管服务上运行：Nova Act 在你选的 region；Midscene 默认的 GPT-5.6 经 Bedrock 跨区推理在**美国境内三个 region**（us-east-1 / us-east-2 / us-west-2）处理，浏览器会话与产物仍在你选的 region。发给模型的是 step 文本与被测页面的截图。唯一的第三方是可选的 ngrok：只有用 `--expose-local` 测本机应用时，云端浏览器到你本机应用的流量才经过 ngrok 的隧道。各部件与数据边界见 [开始使用 › AWS 前置](./docs/user-guide/getting-started.md#aws-前置)。
 
-| 引擎 | 模型 | 服务 | 版本策略 | 怎么看 / 怎么换 |
-|---|---|---|---|---|
-| Nova Act（默认） | `nova-act-v1.0` | Amazon Nova Act | 固定 GA 版本；换模型只随 gherkai 发版，并在版本说明里点明 | `gherkai doctor` 显示实际模型；环境变量 `NOVA_MODEL_ID` 可换（如 `nova-act-preview`，无支持承诺） |
-| Midscene | `us.openai.gpt-5.6-terra`（OpenAI GPT-5.6 Terra） | Amazon Bedrock | 固定；换模型只随 gherkai 发版，并在版本说明里点明 | `gherkai doctor` 显示实际模型；环境变量 `MIDSCENE_MODEL_ID` 可换成 Bedrock 上 Midscene 支持的其它模型，模型家族一般自动识别，识别不了再设 `MIDSCENE_MODEL_FAMILY` |
+| 引擎           | 模型                                            | 服务            | 版本策略                                                | 怎么看 / 怎么换                                                                                                                                                |
+|----------------|-------------------------------------------------|-----------------|---------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Nova Act（默认） | `nova-act-v1.0`                                 | Amazon Nova Act | 固定 GA 版本；换模型只随 gherkai 发版，并在版本说明里点明 | `gherkai doctor` 显示实际模型；环境变量 `NOVA_MODEL_ID` 可换（如 `nova-act-preview`，无支持承诺）                                                                  |
+| Midscene       | `us.openai.gpt-5.6-terra`（OpenAI GPT-5.6 Terra） | Amazon Bedrock  | 固定；换模型只随 gherkai 发版，并在版本说明里点明         | `gherkai doctor` 显示实际模型；环境变量 `MIDSCENE_MODEL_ID` 可换成 Bedrock 上 Midscene 支持的其它模型，模型家族一般自动识别，识别不了再设 `MIDSCENE_MODEL_FAMILY` |
 
 判定会随模型变：同一条断言在不同模型版本上可能翻转，所以默认不使用「自动跟随最新」的别名。量级上，一条 5 步左右的 scenario 在 Midscene 默认模型上约 5 美分、换成 `qwen.qwen3-vl-235b-a22b` 约 2 美分（按 2026-09 Bedrock 标价与实测 token 估算，以账单为准）；Nova Act 引擎按 Nova Act 服务计费。**被测 UI 的语言**：Midscene 引擎不限；Nova Act 引擎支持英文 UI，非英文应用请用 `@engine:midscene` 路由。配置方法见 [配置](./docs/user-guide/configuration.md)。
 
 ## 文档
 
-| 你想 | 去这里 |
-|---|---|
-| 安装、前置要求、第一次跑通 | [开始使用](./docs/user-guide/getting-started.md) |
-| 写 `.feature`、写确定性 step | [编写 .feature](./docs/user-guide/writing-features.md) · [编写确定性 step](./docs/user-guide/writing-deterministic-steps.md) |
-| 四种跑法、选项、退出码、结果在哪 | [跑测试与看结果](./docs/user-guide/running-and-results.md) |
-| 测只在本机 / 内网可达的应用 | [测本机或内网里的被测应用](./docs/user-guide/local-app-testing.md) |
-| 部署与维护团队的云端后端 | [部署与维护云端后端](./docs/user-guide/cloud-backend.md) |
-| 环境变量与选项总表 | [配置](./docs/user-guide/configuration.md) |
-| 报错了先看哪 | [排错](./docs/user-guide/troubleshooting.md) |
-| 上手前的疑问：要不要先部署云端后端、AI 判定能不能当门禁 | [常见问题](./docs/user-guide/faq.md) |
-| 每个版本改了什么、升级要做什么 | [CHANGELOG](./CHANGELOG.md) |
-| 系统内部如何运转 | [`docs/internals/`](./docs/internals/README.md) |
-| 参与开发 | [`CONTRIBUTING.md`](./CONTRIBUTING.md) |
+| 你想                                                  | 去这里                                                                                                                       |
+|-------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------|
+| 安装、前置要求、第一次跑通                              | [开始使用](./docs/user-guide/getting-started.md)                                                                             |
+| 写 `.feature`、写确定性 step                           | [编写 .feature](./docs/user-guide/writing-features.md) · [编写确定性 step](./docs/user-guide/writing-deterministic-steps.md) |
+| 四种跑法、选项、退出码、结果在哪                         | [跑测试与看结果](./docs/user-guide/running-and-results.md)                                                                   |
+| 测只在本机 / 内网可达的应用                           | [测本机或内网里的被测应用](./docs/user-guide/local-app-testing.md)                                                           |
+| 部署与维护团队的云端后端                              | [部署与维护云端后端](./docs/user-guide/cloud-backend.md)                                                                     |
+| 环境变量与选项总表                                    | [配置](./docs/user-guide/configuration.md)                                                                                   |
+| 报错了先看哪                                          | [排错](./docs/user-guide/troubleshooting.md)                                                                                 |
+| 上手前的疑问：要不要先部署云端后端、AI 判定能不能当门禁 | [常见问题](./docs/user-guide/faq.md)                                                                                         |
+| 每个版本改了什么、升级要做什么                         | [CHANGELOG](./CHANGELOG.md)                                                                                                  |
+| 系统内部如何运转                                      | [`docs/internals/`](./docs/internals/README.md)                                                                              |
+| 参与开发                                              | [`CONTRIBUTING.md`](./CONTRIBUTING.md)                                                                                       |
 
 全部文档的地图在 [`docs/README.md`](./docs/README.md)。发行包页面：[`gherkai`](https://pypi.org/project/gherkai/) · [`gherkai-worker-novaact`](https://pypi.org/project/gherkai-worker-novaact/) · [`@gherkai/worker-midscene`](https://www.npmjs.com/package/@gherkai/worker-midscene) · [`gherkai-deploy-aws`](https://pypi.org/project/gherkai-deploy-aws/) · 库 [`gherkai-core`](https://pypi.org/project/gherkai-core/) / [`gherkai-runtime`](https://pypi.org/project/gherkai-runtime/)。示例用例在 [`features/`](./features/)。
 

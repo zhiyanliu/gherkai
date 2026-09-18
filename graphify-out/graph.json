@@ -36902,10 +36902,10 @@
       "source_file": "docs/ai-eng/doc-health-review.md",
       "source_location": "L103",
       "_origin": "ast",
-      "id": "docs_ai_eng_doc_health_review_status_\u5934_\u7b2c\u4e8c\u5c42\u7684\u914d\u5957_\u679a\u4e3e_\u5224\u5b9a\u4e0e\u8fde\u5e26\u5ba1\u8ba1_\u5934\u672c\u8eab\u662f\u6bcf\u4e2a_adr_\u5f00\u5934\u4e00\u884c",
       "community": 141,
       "community_name": "\u6587\u6863\u5065\u5eb7\u5ea6\u590d\u76d8\uff08\u5168\u90e8\u9879\u76ee\u6587\u6863\uff09\u2014 \u4efb\u52a1\u8bf4\u660e",
-      "norm_label": "status \u5934(\u7b2c\u4e8c\u5c42\u7684\u914d\u5957:\u679a\u4e3e\u3001\u5224\u5b9a\u4e0e\u8fde\u5e26\u5ba1\u8ba1;\u5934\u672c\u8eab\u662f\u6bcf\u4e2a adr \u5f00\u5934\u4e00\u884c)"
+      "norm_label": "status \u5934(\u7b2c\u4e8c\u5c42\u7684\u914d\u5957:\u679a\u4e3e\u3001\u5224\u5b9a\u4e0e\u8fde\u5e26\u5ba1\u8ba1;\u5934\u672c\u8eab\u662f\u6bcf\u4e2a adr \u5f00\u5934\u4e00\u884c)",
+      "id": "docs_ai_eng_doc_health_review_status_\u5934_\u7b2c\u4e8c\u5c42\u7684\u914d\u5957_\u679a\u4e3e_\u5224\u5b9a\u4e0e\u8fde\u5e26\u5ba1\u8ba1_\u5934\u672c\u8eab\u662f\u6bcf\u4e2a_adr_\u5f00\u5934\u4e00\u884c"
     },
     {
       "label": "\u4e3a\u4ec0\u4e48\u505a\uff08\u4ef7\u503c\uff09",
@@ -36913,10 +36913,10 @@
       "source_file": "docs/ai-eng/doc-health-review.md",
       "source_location": "L5",
       "_origin": "ast",
-      "id": "docs_ai_eng_doc_health_review_\u4e3a\u4ec0\u4e48\u505a_\u4ef7\u503c",
       "community": 141,
       "community_name": "\u6587\u6863\u5065\u5eb7\u5ea6\u590d\u76d8\uff08\u5168\u90e8\u9879\u76ee\u6587\u6863\uff09\u2014 \u4efb\u52a1\u8bf4\u660e",
-      "norm_label": "\u4e3a\u4ec0\u4e48\u505a(\u4ef7\u503c)"
+      "norm_label": "\u4e3a\u4ec0\u4e48\u505a(\u4ef7\u503c)",
+      "id": "docs_ai_eng_doc_health_review_\u4e3a\u4ec0\u4e48\u505a_\u4ef7\u503c"
     },
     {
       "label": "\u4ea7\u51fa\u4e0e\u63d0\u4ea4",
@@ -36924,10 +36924,10 @@
       "source_file": "docs/ai-eng/doc-health-review.md",
       "source_location": "L132",
       "_origin": "ast",
-      "id": "docs_ai_eng_doc_health_review_\u4ea7\u51fa\u4e0e\u63d0\u4ea4",
       "community": 141,
       "community_name": "\u6587\u6863\u5065\u5eb7\u5ea6\u590d\u76d8\uff08\u5168\u90e8\u9879\u76ee\u6587\u6863\uff09\u2014 \u4efb\u52a1\u8bf4\u660e",
-      "norm_label": "\u4ea7\u51fa\u4e0e\u63d0\u4ea4"
+      "norm_label": "\u4ea7\u51fa\u4e0e\u63d0\u4ea4",
+      "id": "docs_ai_eng_doc_health_review_\u4ea7\u51fa\u4e0e\u63d0\u4ea4"
     },
     {
       "label": "\u4f55\u65f6\u505a\uff08\u89e6\u53d1\uff09",
@@ -36935,10 +36935,10 @@
       "source_file": "docs/ai-eng/doc-health-review.md",
       "source_location": "L9",
       "_origin": "ast",
-      "id": "docs_ai_eng_doc_health_review_\u4f55\u65f6\u505a_\u89e6\u53d1",
       "community": 141,
       "community_name": "\u6587\u6863\u5065\u5eb7\u5ea6\u590d\u76d8\uff08\u5168\u90e8\u9879\u76ee\u6587\u6863\uff09\u2014 \u4efb\u52a1\u8bf4\u660e",
-      "norm_label": "\u4f55\u65f6\u505a(\u89e6\u53d1)"
+      "norm_label": "\u4f55\u65f6\u505a(\u89e6\u53d1)",
+      "id": "docs_ai_eng_doc_health_review_\u4f55\u65f6\u505a_\u89e6\u53d1"
     },
     {
       "label": "\u516d\u7c7b\u95ee\u9898\uff08\u5206\u7c7b\u627e\uff09",
@@ -36946,10 +36946,10 @@
       "source_file": "docs/ai-eng/doc-health-review.md",
       "source_location": "L26",
       "_origin": "ast",
-      "id": "docs_ai_eng_doc_health_review_\u516d\u7c7b\u95ee\u9898_\u5206\u7c7b\u627e",
       "community": 141,
       "community_name": "\u6587\u6863\u5065\u5eb7\u5ea6\u590d\u76d8\uff08\u5168\u90e8\u9879\u76ee\u6587\u6863\uff09\u2014 \u4efb\u52a1\u8bf4\u660e",
-      "norm_label": "\u516d\u7c7b\u95ee\u9898(\u5206\u7c7b\u627e)"
+      "norm_label": "\u516d\u7c7b\u95ee\u9898(\u5206\u7c7b\u627e)",
+      "id": "docs_ai_eng_doc_health_review_\u516d\u7c7b\u95ee\u9898_\u5206\u7c7b\u627e"
     },
     {
       "label": "\u6267\u884c\u65b9\u6cd5\uff08\u591a\u8f6e\u590d\u76d8\u9a8c\u8bc1\u8fc7\u7684\u6700\u4f73\u8def\u5f84\uff09",
@@ -36957,10 +36957,10 @@
       "source_file": "docs/ai-eng/doc-health-review.md",
       "source_location": "L55",
       "_origin": "ast",
-      "id": "docs_ai_eng_doc_health_review_\u6267\u884c\u65b9\u6cd5_\u591a\u8f6e\u590d\u76d8\u9a8c\u8bc1\u8fc7\u7684\u6700\u4f73\u8def\u5f84",
       "community": 141,
       "community_name": "\u6587\u6863\u5065\u5eb7\u5ea6\u590d\u76d8\uff08\u5168\u90e8\u9879\u76ee\u6587\u6863\uff09\u2014 \u4efb\u52a1\u8bf4\u660e",
-      "norm_label": "\u6267\u884c\u65b9\u6cd5(\u591a\u8f6e\u590d\u76d8\u9a8c\u8bc1\u8fc7\u7684\u6700\u4f73\u8def\u5f84)"
+      "norm_label": "\u6267\u884c\u65b9\u6cd5(\u591a\u8f6e\u590d\u76d8\u9a8c\u8bc1\u8fc7\u7684\u6700\u4f73\u8def\u5f84)",
+      "id": "docs_ai_eng_doc_health_review_\u6267\u884c\u65b9\u6cd5_\u591a\u8f6e\u590d\u76d8\u9a8c\u8bc1\u8fc7\u7684\u6700\u4f73\u8def\u5f84"
     },
     {
       "label": "\u6309\u6587\u6863\u7c7b\u578b\u7684\u590d\u76d8\u4fa7\u91cd\uff08\u7528\u5bf9\u5224\u636e\uff09",
@@ -36968,10 +36968,10 @@
       "source_file": "docs/ai-eng/doc-health-review.md",
       "source_location": "L45",
       "_origin": "ast",
-      "id": "docs_ai_eng_doc_health_review_\u6309\u6587\u6863\u7c7b\u578b\u7684\u590d\u76d8\u4fa7\u91cd_\u7528\u5bf9\u5224\u636e",
       "community": 141,
       "community_name": "\u6587\u6863\u5065\u5eb7\u5ea6\u590d\u76d8\uff08\u5168\u90e8\u9879\u76ee\u6587\u6863\uff09\u2014 \u4efb\u52a1\u8bf4\u660e",
-      "norm_label": "\u6309\u6587\u6863\u7c7b\u578b\u7684\u590d\u76d8\u4fa7\u91cd(\u7528\u5bf9\u5224\u636e)"
+      "norm_label": "\u6309\u6587\u6863\u7c7b\u578b\u7684\u590d\u76d8\u4fa7\u91cd(\u7528\u5bf9\u5224\u636e)",
+      "id": "docs_ai_eng_doc_health_review_\u6309\u6587\u6863\u7c7b\u578b\u7684\u590d\u76d8\u4fa7\u91cd_\u7528\u5bf9\u5224\u636e"
     },
     {
       "label": "\u6587\u6863\u5065\u5eb7\u5ea6\u590d\u76d8\uff08\u5168\u90e8\u9879\u76ee\u6587\u6863\uff09\u2014 \u4efb\u52a1\u8bf4\u660e",
@@ -36979,10 +36979,10 @@
       "source_file": "docs/ai-eng/doc-health-review.md",
       "source_location": "L1",
       "_origin": "ast",
-      "id": "docs_ai_eng_doc_health_review_\u6587\u6863\u5065\u5eb7\u5ea6\u590d\u76d8_\u5168\u90e8\u9879\u76ee\u6587\u6863_\u4efb\u52a1\u8bf4\u660e",
       "community": 141,
       "community_name": "\u6587\u6863\u5065\u5eb7\u5ea6\u590d\u76d8\uff08\u5168\u90e8\u9879\u76ee\u6587\u6863\uff09\u2014 \u4efb\u52a1\u8bf4\u660e",
-      "norm_label": "\u6587\u6863\u5065\u5eb7\u5ea6\u590d\u76d8(\u5168\u90e8\u9879\u76ee\u6587\u6863)\u2014 \u4efb\u52a1\u8bf4\u660e"
+      "norm_label": "\u6587\u6863\u5065\u5eb7\u5ea6\u590d\u76d8(\u5168\u90e8\u9879\u76ee\u6587\u6863)\u2014 \u4efb\u52a1\u8bf4\u660e",
+      "id": "docs_ai_eng_doc_health_review_\u6587\u6863\u5065\u5eb7\u5ea6\u590d\u76d8_\u5168\u90e8\u9879\u76ee\u6587\u6863_\u4efb\u52a1\u8bf4\u660e"
     },
     {
       "label": "\u76ee\u6807\u4e0e\u51c6\u7ef3",
@@ -36990,10 +36990,10 @@
       "source_file": "docs/ai-eng/doc-health-review.md",
       "source_location": "L13",
       "_origin": "ast",
-      "id": "docs_ai_eng_doc_health_review_\u76ee\u6807\u4e0e\u51c6\u7ef3",
       "community": 141,
       "community_name": "\u6587\u6863\u5065\u5eb7\u5ea6\u590d\u76d8\uff08\u5168\u90e8\u9879\u76ee\u6587\u6863\uff09\u2014 \u4efb\u52a1\u8bf4\u660e",
-      "norm_label": "\u76ee\u6807\u4e0e\u51c6\u7ef3"
+      "norm_label": "\u76ee\u6807\u4e0e\u51c6\u7ef3",
+      "id": "docs_ai_eng_doc_health_review_\u76ee\u6807\u4e0e\u51c6\u7ef3"
     },
     {
       "label": "\u7b2c\u4e00\u5c42\uff1a\u7247\u5185\u5ba1\u8ba1\uff08\u53ef\u7528 workflow \u5e76\u884c\uff09",
@@ -37001,10 +37001,10 @@
       "source_file": "docs/ai-eng/doc-health-review.md",
       "source_location": "L77",
       "_origin": "ast",
-      "id": "docs_ai_eng_doc_health_review_\u7b2c\u4e00\u5c42_\u7247\u5185\u5ba1\u8ba1_\u53ef\u7528_workflow_\u5e76\u884c",
       "community": 141,
       "community_name": "\u6587\u6863\u5065\u5eb7\u5ea6\u590d\u76d8\uff08\u5168\u90e8\u9879\u76ee\u6587\u6863\uff09\u2014 \u4efb\u52a1\u8bf4\u660e",
-      "norm_label": "\u7b2c\u4e00\u5c42:\u7247\u5185\u5ba1\u8ba1(\u53ef\u7528 workflow \u5e76\u884c)"
+      "norm_label": "\u7b2c\u4e00\u5c42:\u7247\u5185\u5ba1\u8ba1(\u53ef\u7528 workflow \u5e76\u884c)",
+      "id": "docs_ai_eng_doc_health_review_\u7b2c\u4e00\u5c42_\u7247\u5185\u5ba1\u8ba1_\u53ef\u7528_workflow_\u5e76\u884c"
     },
     {
       "label": "\u7b2c\u4e09\u5c42\uff1a\u6309\u4e8b\u5b9e\u65cf\u6a2a\u5207\uff08\u3010\u5f3a\u5236\u3011\uff0c\u4e0e\u6309\u6587\u6863\u5206\u7247\u6b63\u4ea4\uff09",
@@ -37012,10 +37012,10 @@
       "source_file": "docs/ai-eng/doc-health-review.md",
       "source_location": "L118",
       "_origin": "ast",
-      "id": "docs_ai_eng_doc_health_review_\u7b2c\u4e09\u5c42_\u6309\u4e8b\u5b9e\u65cf\u6a2a\u5207_\u5f3a\u5236_\u4e0e\u6309\u6587\u6863\u5206\u7247\u6b63\u4ea4",
       "community": 141,
       "community_name": "\u6587\u6863\u5065\u5eb7\u5ea6\u590d\u76d8\uff08\u5168\u90e8\u9879\u76ee\u6587\u6863\uff09\u2014 \u4efb\u52a1\u8bf4\u660e",
-      "norm_label": "\u7b2c\u4e09\u5c42:\u6309\u4e8b\u5b9e\u65cf\u6a2a\u5207(\u3010\u5f3a\u5236\u3011,\u4e0e\u6309\u6587\u6863\u5206\u7247\u6b63\u4ea4)"
+      "norm_label": "\u7b2c\u4e09\u5c42:\u6309\u4e8b\u5b9e\u65cf\u6a2a\u5207(\u3010\u5f3a\u5236\u3011,\u4e0e\u6309\u6587\u6863\u5206\u7247\u6b63\u4ea4)",
+      "id": "docs_ai_eng_doc_health_review_\u7b2c\u4e09\u5c42_\u6309\u4e8b\u5b9e\u65cf\u6a2a\u5207_\u5f3a\u5236_\u4e0e\u6309\u6587\u6863\u5206\u7247\u6b63\u4ea4"
     },
     {
       "label": "\u7b2c\u4e8c\u5c42\uff1across-ADR \u89c6\u89d2\uff08\u7247\u5185\u5ba1\u8ba1\u6f0f\u6389\u7684\u7ed3\u6784\u95ee\u9898\uff09",
@@ -37023,10 +37023,10 @@
       "source_file": "docs/ai-eng/doc-health-review.md",
       "source_location": "L95",
       "_origin": "ast",
-      "id": "docs_ai_eng_doc_health_review_\u7b2c\u4e8c\u5c42_cross_adr_\u89c6\u89d2_\u7247\u5185\u5ba1\u8ba1\u6f0f\u6389\u7684\u7ed3\u6784\u95ee\u9898",
       "community": 141,
       "community_name": "\u6587\u6863\u5065\u5eb7\u5ea6\u590d\u76d8\uff08\u5168\u90e8\u9879\u76ee\u6587\u6863\uff09\u2014 \u4efb\u52a1\u8bf4\u660e",
-      "norm_label": "\u7b2c\u4e8c\u5c42:cross-adr \u89c6\u89d2(\u7247\u5185\u5ba1\u8ba1\u6f0f\u6389\u7684\u7ed3\u6784\u95ee\u9898)"
+      "norm_label": "\u7b2c\u4e8c\u5c42:cross-adr \u89c6\u89d2(\u7247\u5185\u5ba1\u8ba1\u6f0f\u6389\u7684\u7ed3\u6784\u95ee\u9898)",
+      "id": "docs_ai_eng_doc_health_review_\u7b2c\u4e8c\u5c42_cross_adr_\u89c6\u89d2_\u7247\u5185\u5ba1\u8ba1\u6f0f\u6389\u7684\u7ed3\u6784\u95ee\u9898"
     },
     {
       "label": "\u7ea2\u7ebf\u62a4\u680f\uff08\u8fdd\u53cd=\u6539\u9519\u4e86\uff09",
@@ -37034,10 +37034,10 @@
       "source_file": "docs/ai-eng/doc-health-review.md",
       "source_location": "L19",
       "_origin": "ast",
-      "id": "docs_ai_eng_doc_health_review_\u7ea2\u7ebf\u62a4\u680f_\u8fdd\u53cd_\u6539\u9519\u4e86",
       "community": 141,
       "community_name": "\u6587\u6863\u5065\u5eb7\u5ea6\u590d\u76d8\uff08\u5168\u90e8\u9879\u76ee\u6587\u6863\uff09\u2014 \u4efb\u52a1\u8bf4\u660e",
-      "norm_label": "\u7ea2\u7ebf\u62a4\u680f(\u8fdd\u53cd=\u6539\u9519\u4e86)"
+      "norm_label": "\u7ea2\u7ebf\u62a4\u680f(\u8fdd\u53cd=\u6539\u9519\u4e86)",
+      "id": "docs_ai_eng_doc_health_review_\u7ea2\u7ebf\u62a4\u680f_\u8fdd\u53cd_\u6539\u9519\u4e86"
     },
     {
       "label": "\u843d\u5730\u7eaa\u5f8b",
@@ -37045,10 +37045,10 @@
       "source_file": "docs/ai-eng/doc-health-review.md",
       "source_location": "L125",
       "_origin": "ast",
-      "id": "docs_ai_eng_doc_health_review_\u843d\u5730\u7eaa\u5f8b",
       "community": 141,
       "community_name": "\u6587\u6863\u5065\u5eb7\u5ea6\u590d\u76d8\uff08\u5168\u90e8\u9879\u76ee\u6587\u6863\uff09\u2014 \u4efb\u52a1\u8bf4\u660e",
-      "norm_label": "\u843d\u5730\u7eaa\u5f8b"
+      "norm_label": "\u843d\u5730\u7eaa\u5f8b",
+      "id": "docs_ai_eng_doc_health_review_\u843d\u5730\u7eaa\u5f8b"
     },
     {
       "label": "arg_offload.py",
@@ -40329,7 +40329,7 @@
       "_origin": "ast",
       "id": "contributing_spike_\u53ef\u72ec\u7acb\u8fd0\u884c\u7684\u6280\u672f\u9a8c\u8bc1\u811a\u672c",
       "community": 183,
-      "community_name": "\u5f00\u53d1\u8005\u6307\u5357\uff08contributor \u5165\u53e3\uff09",
+      "community_name": "\u5f00\u53d1\u8005\u6307\u5357",
       "norm_label": "spike(\u53ef\u72ec\u7acb\u8fd0\u884c\u7684\u6280\u672f\u9a8c\u8bc1\u811a\u672c)"
     },
     {
@@ -40340,7 +40340,7 @@
       "_origin": "ast",
       "id": "contributing_\u53d1\u5e03\u4e0e\u7248\u672c",
       "community": 183,
-      "community_name": "\u5f00\u53d1\u8005\u6307\u5357\uff08contributor \u5165\u53e3\uff09",
+      "community_name": "\u5f00\u53d1\u8005\u6307\u5357",
       "norm_label": "\u53d1\u5e03\u4e0e\u7248\u672c"
     },
     {
@@ -40351,7 +40351,7 @@
       "_origin": "ast",
       "id": "contributing_\u5728\u6709\u51ed\u8bc1\u7684\u673a\u5668\u4e0a\u9a8c\u8bc1\u672a\u53d1\u5e03\u7684\u5de5\u4f5c\u6811",
       "community": 183,
-      "community_name": "\u5f00\u53d1\u8005\u6307\u5357\uff08contributor \u5165\u53e3\uff09",
+      "community_name": "\u5f00\u53d1\u8005\u6307\u5357",
       "norm_label": "\u5728\u6709\u51ed\u8bc1\u7684\u673a\u5668\u4e0a\u9a8c\u8bc1\u672a\u53d1\u5e03\u7684\u5de5\u4f5c\u6811"
     },
     {
@@ -40362,7 +40362,7 @@
       "_origin": "ast",
       "id": "contributing_\u5982\u4f55\u53c2\u4e0e",
       "community": 183,
-      "community_name": "\u5f00\u53d1\u8005\u6307\u5357\uff08contributor \u5165\u53e3\uff09",
+      "community_name": "\u5f00\u53d1\u8005\u6307\u5357",
       "norm_label": "\u5982\u4f55\u53c2\u4e0e"
     },
     {
@@ -40373,19 +40373,19 @@
       "_origin": "ast",
       "id": "contributing_\u5f00\u53d1\u73af\u5883_\u4ece_checkout_\u8dd1",
       "community": 183,
-      "community_name": "\u5f00\u53d1\u8005\u6307\u5357\uff08contributor \u5165\u53e3\uff09",
+      "community_name": "\u5f00\u53d1\u8005\u6307\u5357",
       "norm_label": "\u5f00\u53d1\u73af\u5883(\u4ece checkout \u8dd1)"
     },
     {
-      "label": "\u5f00\u53d1\u8005\u6307\u5357\uff08contributor \u5165\u53e3\uff09",
+      "label": "\u5f00\u53d1\u8005\u6307\u5357",
       "file_type": "document",
       "source_file": "CONTRIBUTING.md",
       "source_location": "L1",
       "_origin": "ast",
-      "id": "contributing_\u5f00\u53d1\u8005\u6307\u5357_contributor_\u5165\u53e3",
+      "id": "contributing_\u5f00\u53d1\u8005\u6307\u5357",
       "community": 183,
-      "community_name": "\u5f00\u53d1\u8005\u6307\u5357\uff08contributor \u5165\u53e3\uff09",
-      "norm_label": "\u5f00\u53d1\u8005\u6307\u5357(contributor \u5165\u53e3)"
+      "community_name": "\u5f00\u53d1\u8005\u6307\u5357",
+      "norm_label": "\u5f00\u53d1\u8005\u6307\u5357"
     },
     {
       "label": "\u6587\u6863\u53bb\u54ea\u8bfb",
@@ -40395,7 +40395,7 @@
       "_origin": "ast",
       "id": "contributing_\u6587\u6863\u53bb\u54ea\u8bfb",
       "community": 183,
-      "community_name": "\u5f00\u53d1\u8005\u6307\u5357\uff08contributor \u5165\u53e3\uff09",
+      "community_name": "\u5f00\u53d1\u8005\u6307\u5357",
       "norm_label": "\u6587\u6863\u53bb\u54ea\u8bfb"
     },
     {
@@ -40406,7 +40406,7 @@
       "_origin": "ast",
       "id": "contributing_\u6d4b\u8bd5",
       "community": 183,
-      "community_name": "\u5f00\u53d1\u8005\u6307\u5357\uff08contributor \u5165\u53e3\uff09",
+      "community_name": "\u5f00\u53d1\u8005\u6307\u5357",
       "norm_label": "\u6d4b\u8bd5"
     },
     {
@@ -40417,7 +40417,7 @@
       "_origin": "ast",
       "id": "contributing_\u73b0\u72b6\u4e0e\u7248\u672c\u7ebf",
       "community": 183,
-      "community_name": "\u5f00\u53d1\u8005\u6307\u5357\uff08contributor \u5165\u53e3\uff09",
+      "community_name": "\u5f00\u53d1\u8005\u6307\u5357",
       "norm_label": "\u73b0\u72b6\u4e0e\u7248\u672c\u7ebf"
     },
     {
@@ -40428,7 +40428,7 @@
       "_origin": "ast",
       "id": "contributing_\u76ee\u5f55\u7ed3\u6784",
       "community": 183,
-      "community_name": "\u5f00\u53d1\u8005\u6307\u5357\uff08contributor \u5165\u53e3\uff09",
+      "community_name": "\u5f00\u53d1\u8005\u6307\u5357",
       "norm_label": "\u76ee\u5f55\u7ed3\u6784"
     },
     {
@@ -40439,7 +40439,7 @@
       "_origin": "ast",
       "id": "contributing_\u77e5\u8bc6\u56fe\u5237\u65b0_graphify",
       "community": 183,
-      "community_name": "\u5f00\u53d1\u8005\u6307\u5357\uff08contributor \u5165\u53e3\uff09",
+      "community_name": "\u5f00\u53d1\u8005\u6307\u5357",
       "norm_label": "\u77e5\u8bc6\u56fe\u5237\u65b0(graphify)"
     },
     {
@@ -40470,10 +40470,10 @@
       "source_file": "docs/ai-eng/code-health-review.md",
       "source_location": "L21",
       "_origin": "ast",
-      "id": "docs_ai_eng_code_health_review_\u4e09\u7c7b\u95ee\u9898_\u5206\u7c7b\u627e",
       "community": 185,
       "community_name": "\u4ee3\u7801\u5065\u5eb7\u5ea6\u590d\u76d8\uff08\u5168\u90e8\u751f\u4ea7\u4ee3\u7801\uff09\u2014 \u4efb\u52a1\u8bf4\u660e",
-      "norm_label": "\u4e09\u7c7b\u95ee\u9898(\u5206\u7c7b\u627e)"
+      "norm_label": "\u4e09\u7c7b\u95ee\u9898(\u5206\u7c7b\u627e)",
+      "id": "docs_ai_eng_code_health_review_\u4e09\u7c7b\u95ee\u9898_\u5206\u7c7b\u627e"
     },
     {
       "label": "\u4e3a\u4ec0\u4e48\u505a\uff08\u4ef7\u503c\uff09",
@@ -40481,10 +40481,10 @@
       "source_file": "docs/ai-eng/code-health-review.md",
       "source_location": "L5",
       "_origin": "ast",
-      "id": "docs_ai_eng_code_health_review_\u4e3a\u4ec0\u4e48\u505a_\u4ef7\u503c",
       "community": 185,
       "community_name": "\u4ee3\u7801\u5065\u5eb7\u5ea6\u590d\u76d8\uff08\u5168\u90e8\u751f\u4ea7\u4ee3\u7801\uff09\u2014 \u4efb\u52a1\u8bf4\u660e",
-      "norm_label": "\u4e3a\u4ec0\u4e48\u505a(\u4ef7\u503c)"
+      "norm_label": "\u4e3a\u4ec0\u4e48\u505a(\u4ef7\u503c)",
+      "id": "docs_ai_eng_code_health_review_\u4e3a\u4ec0\u4e48\u505a_\u4ef7\u503c"
     },
     {
       "label": "\u4ea7\u51fa\u4e0e\u63d0\u4ea4",
@@ -40492,10 +40492,10 @@
       "source_file": "docs/ai-eng/code-health-review.md",
       "source_location": "L69",
       "_origin": "ast",
-      "id": "docs_ai_eng_code_health_review_\u4ea7\u51fa\u4e0e\u63d0\u4ea4",
       "community": 185,
       "community_name": "\u4ee3\u7801\u5065\u5eb7\u5ea6\u590d\u76d8\uff08\u5168\u90e8\u751f\u4ea7\u4ee3\u7801\uff09\u2014 \u4efb\u52a1\u8bf4\u660e",
-      "norm_label": "\u4ea7\u51fa\u4e0e\u63d0\u4ea4"
+      "norm_label": "\u4ea7\u51fa\u4e0e\u63d0\u4ea4",
+      "id": "docs_ai_eng_code_health_review_\u4ea7\u51fa\u4e0e\u63d0\u4ea4"
     },
     {
       "label": "\u4ee3\u7801\u5065\u5eb7\u5ea6\u590d\u76d8\uff08\u5168\u90e8\u751f\u4ea7\u4ee3\u7801\uff09\u2014 \u4efb\u52a1\u8bf4\u660e",
@@ -40503,10 +40503,10 @@
       "source_file": "docs/ai-eng/code-health-review.md",
       "source_location": "L1",
       "_origin": "ast",
-      "id": "docs_ai_eng_code_health_review_\u4ee3\u7801\u5065\u5eb7\u5ea6\u590d\u76d8_\u5168\u90e8\u751f\u4ea7\u4ee3\u7801_\u4efb\u52a1\u8bf4\u660e",
       "community": 185,
       "community_name": "\u4ee3\u7801\u5065\u5eb7\u5ea6\u590d\u76d8\uff08\u5168\u90e8\u751f\u4ea7\u4ee3\u7801\uff09\u2014 \u4efb\u52a1\u8bf4\u660e",
-      "norm_label": "\u4ee3\u7801\u5065\u5eb7\u5ea6\u590d\u76d8(\u5168\u90e8\u751f\u4ea7\u4ee3\u7801)\u2014 \u4efb\u52a1\u8bf4\u660e"
+      "norm_label": "\u4ee3\u7801\u5065\u5eb7\u5ea6\u590d\u76d8(\u5168\u90e8\u751f\u4ea7\u4ee3\u7801)\u2014 \u4efb\u52a1\u8bf4\u660e",
+      "id": "docs_ai_eng_code_health_review_\u4ee3\u7801\u5065\u5eb7\u5ea6\u590d\u76d8_\u5168\u90e8\u751f\u4ea7\u4ee3\u7801_\u4efb\u52a1\u8bf4\u660e"
     },
     {
       "label": "\u4f55\u65f6\u505a\uff08\u89e6\u53d1\uff09",
@@ -40514,10 +40514,10 @@
       "source_file": "docs/ai-eng/code-health-review.md",
       "source_location": "L9",
       "_origin": "ast",
-      "id": "docs_ai_eng_code_health_review_\u4f55\u65f6\u505a_\u89e6\u53d1",
       "community": 185,
       "community_name": "\u4ee3\u7801\u5065\u5eb7\u5ea6\u590d\u76d8\uff08\u5168\u90e8\u751f\u4ea7\u4ee3\u7801\uff09\u2014 \u4efb\u52a1\u8bf4\u660e",
-      "norm_label": "\u4f55\u65f6\u505a(\u89e6\u53d1)"
+      "norm_label": "\u4f55\u65f6\u505a(\u89e6\u53d1)",
+      "id": "docs_ai_eng_code_health_review_\u4f55\u65f6\u505a_\u89e6\u53d1"
     },
     {
       "label": "\u5206\u7247\u6df1\u8bfb\uff08\u53ef\u7528 workflow \u5e76\u884c\uff09",
@@ -40525,10 +40525,10 @@
       "source_file": "docs/ai-eng/code-health-review.md",
       "source_location": "L50",
       "_origin": "ast",
-      "id": "docs_ai_eng_code_health_review_\u5206\u7247\u6df1\u8bfb_\u53ef\u7528_workflow_\u5e76\u884c",
       "community": 185,
       "community_name": "\u4ee3\u7801\u5065\u5eb7\u5ea6\u590d\u76d8\uff08\u5168\u90e8\u751f\u4ea7\u4ee3\u7801\uff09\u2014 \u4efb\u52a1\u8bf4\u660e",
-      "norm_label": "\u5206\u7247\u6df1\u8bfb(\u53ef\u7528 workflow \u5e76\u884c)"
+      "norm_label": "\u5206\u7247\u6df1\u8bfb(\u53ef\u7528 workflow \u5e76\u884c)",
+      "id": "docs_ai_eng_code_health_review_\u5206\u7247\u6df1\u8bfb_\u53ef\u7528_workflow_\u5e76\u884c"
     },
     {
       "label": "\u5bf9\u6297\u9a8c\u8bc1",
@@ -40536,10 +40536,10 @@
       "source_file": "docs/ai-eng/code-health-review.md",
       "source_location": "L59",
       "_origin": "ast",
-      "id": "docs_ai_eng_code_health_review_\u5bf9\u6297\u9a8c\u8bc1",
       "community": 185,
       "community_name": "\u4ee3\u7801\u5065\u5eb7\u5ea6\u590d\u76d8\uff08\u5168\u90e8\u751f\u4ea7\u4ee3\u7801\uff09\u2014 \u4efb\u52a1\u8bf4\u660e",
-      "norm_label": "\u5bf9\u6297\u9a8c\u8bc1"
+      "norm_label": "\u5bf9\u6297\u9a8c\u8bc1",
+      "id": "docs_ai_eng_code_health_review_\u5bf9\u6297\u9a8c\u8bc1"
     },
     {
       "label": "\u6267\u884c\u65b9\u6cd5\uff08\u672c\u9879\u76ee\u8dd1\u901a\u7684\u6700\u4f73\u8def\u5f84\uff09",
@@ -40547,10 +40547,10 @@
       "source_file": "docs/ai-eng/code-health-review.md",
       "source_location": "L46",
       "_origin": "ast",
-      "id": "docs_ai_eng_code_health_review_\u6267\u884c\u65b9\u6cd5_\u672c\u9879\u76ee\u8dd1\u901a\u7684\u6700\u4f73\u8def\u5f84",
       "community": 185,
       "community_name": "\u4ee3\u7801\u5065\u5eb7\u5ea6\u590d\u76d8\uff08\u5168\u90e8\u751f\u4ea7\u4ee3\u7801\uff09\u2014 \u4efb\u52a1\u8bf4\u660e",
-      "norm_label": "\u6267\u884c\u65b9\u6cd5(\u672c\u9879\u76ee\u8dd1\u901a\u7684\u6700\u4f73\u8def\u5f84)"
+      "norm_label": "\u6267\u884c\u65b9\u6cd5(\u672c\u9879\u76ee\u8dd1\u901a\u7684\u6700\u4f73\u8def\u5f84)",
+      "id": "docs_ai_eng_code_health_review_\u6267\u884c\u65b9\u6cd5_\u672c\u9879\u76ee\u8dd1\u901a\u7684\u6700\u4f73\u8def\u5f84"
     },
     {
       "label": "\u76ee\u6807\u4e0e\u5224\u636e",
@@ -40558,10 +40558,10 @@
       "source_file": "docs/ai-eng/code-health-review.md",
       "source_location": "L13",
       "_origin": "ast",
-      "id": "docs_ai_eng_code_health_review_\u76ee\u6807\u4e0e\u5224\u636e",
       "community": 185,
       "community_name": "\u4ee3\u7801\u5065\u5eb7\u5ea6\u590d\u76d8\uff08\u5168\u90e8\u751f\u4ea7\u4ee3\u7801\uff09\u2014 \u4efb\u52a1\u8bf4\u660e",
-      "norm_label": "\u76ee\u6807\u4e0e\u5224\u636e"
+      "norm_label": "\u76ee\u6807\u4e0e\u5224\u636e",
+      "id": "docs_ai_eng_code_health_review_\u76ee\u6807\u4e0e\u5224\u636e"
     },
     {
       "label": "\u7ea2\u7ebf\u62a4\u680f",
@@ -40569,10 +40569,10 @@
       "source_file": "docs/ai-eng/code-health-review.md",
       "source_location": "L39",
       "_origin": "ast",
-      "id": "docs_ai_eng_code_health_review_\u7ea2\u7ebf\u62a4\u680f",
       "community": 185,
       "community_name": "\u4ee3\u7801\u5065\u5eb7\u5ea6\u590d\u76d8\uff08\u5168\u90e8\u751f\u4ea7\u4ee3\u7801\uff09\u2014 \u4efb\u52a1\u8bf4\u660e",
-      "norm_label": "\u7ea2\u7ebf\u62a4\u680f"
+      "norm_label": "\u7ea2\u7ebf\u62a4\u680f",
+      "id": "docs_ai_eng_code_health_review_\u7ea2\u7ebf\u62a4\u680f"
     },
     {
       "label": "\u843d\u5730\u7eaa\u5f8b",
@@ -40580,10 +40580,10 @@
       "source_file": "docs/ai-eng/code-health-review.md",
       "source_location": "L63",
       "_origin": "ast",
-      "id": "docs_ai_eng_code_health_review_\u843d\u5730\u7eaa\u5f8b",
       "community": 185,
       "community_name": "\u4ee3\u7801\u5065\u5eb7\u5ea6\u590d\u76d8\uff08\u5168\u90e8\u751f\u4ea7\u4ee3\u7801\uff09\u2014 \u4efb\u52a1\u8bf4\u660e",
-      "norm_label": "\u843d\u5730\u7eaa\u5f8b"
+      "norm_label": "\u843d\u5730\u7eaa\u5f8b",
+      "id": "docs_ai_eng_code_health_review_\u843d\u5730\u7eaa\u5f8b"
     },
     {
       "label": "CONTENT_TYPES",
@@ -46563,10 +46563,10 @@
       "source_file": "docs/ai-eng/code-health-review.md",
       "source_location": "L1",
       "_origin": "ast",
-      "id": "docs_ai_eng_code_health_review",
       "community": 30,
       "community_name": "CONTRIBUTING.md",
-      "norm_label": "code-health-review.md"
+      "norm_label": "code-health-review.md",
+      "id": "docs_ai_eng_code_health_review"
     },
     {
       "label": "diagram-authoring.md",
@@ -46651,10 +46651,10 @@
       "source_file": "docs/ai-eng/doc-health-review.md",
       "source_location": "L1",
       "_origin": "ast",
-      "id": "docs_ai_eng_doc_health_review",
       "community": 30,
       "community_name": "CONTRIBUTING.md",
-      "norm_label": "doc-health-review.md"
+      "norm_label": "doc-health-review.md",
+      "id": "docs_ai_eng_doc_health_review"
     },
     {
       "label": "ai-eng/README.md",
@@ -137049,7 +137049,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "contributing",
-      "target": "contributing_\u5f00\u53d1\u8005\u6307\u5357_contributor_\u5165\u53e3",
+      "target": "contributing_\u5f00\u53d1\u8005\u6307\u5357",
       "confidence_score": 1.0
     },
     {
@@ -137059,7 +137059,7 @@
       "source_location": "L114",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "contributing_\u5f00\u53d1\u8005\u6307\u5357_contributor_\u5165\u53e3",
+      "source": "contributing_\u5f00\u53d1\u8005\u6307\u5357",
       "target": "contributing_\u6d4b\u8bd5",
       "confidence_score": 1.0
     },
@@ -137070,7 +137070,7 @@
       "source_location": "L14",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "contributing_\u5f00\u53d1\u8005\u6307\u5357_contributor_\u5165\u53e3",
+      "source": "contributing_\u5f00\u53d1\u8005\u6307\u5357",
       "target": "contributing_\u73b0\u72b6\u4e0e\u7248\u672c\u7ebf",
       "confidence_score": 1.0
     },
@@ -137081,7 +137081,7 @@
       "source_location": "L141",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "contributing_\u5f00\u53d1\u8005\u6307\u5357_contributor_\u5165\u53e3",
+      "source": "contributing_\u5f00\u53d1\u8005\u6307\u5357",
       "target": "contributing_spike_\u53ef\u72ec\u7acb\u8fd0\u884c\u7684\u6280\u672f\u9a8c\u8bc1\u811a\u672c",
       "confidence_score": 1.0
     },
@@ -137092,7 +137092,7 @@
       "source_location": "L153",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "contributing_\u5f00\u53d1\u8005\u6307\u5357_contributor_\u5165\u53e3",
+      "source": "contributing_\u5f00\u53d1\u8005\u6307\u5357",
       "target": "contributing_\u77e5\u8bc6\u56fe\u5237\u65b0_graphify",
       "confidence_score": 1.0
     },
@@ -137103,7 +137103,7 @@
       "source_location": "L167",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "contributing_\u5f00\u53d1\u8005\u6307\u5357_contributor_\u5165\u53e3",
+      "source": "contributing_\u5f00\u53d1\u8005\u6307\u5357",
       "target": "contributing_\u53d1\u5e03\u4e0e\u7248\u672c",
       "confidence_score": 1.0
     },
@@ -137114,7 +137114,7 @@
       "source_location": "L183",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "contributing_\u5f00\u53d1\u8005\u6307\u5357_contributor_\u5165\u53e3",
+      "source": "contributing_\u5f00\u53d1\u8005\u6307\u5357",
       "target": "contributing_\u6587\u6863\u53bb\u54ea\u8bfb",
       "confidence_score": 1.0
     },
@@ -137125,7 +137125,7 @@
       "source_location": "L28",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "contributing_\u5f00\u53d1\u8005\u6307\u5357_contributor_\u5165\u53e3",
+      "source": "contributing_\u5f00\u53d1\u8005\u6307\u5357",
       "target": "contributing_\u76ee\u5f55\u7ed3\u6784",
       "confidence_score": 1.0
     },
@@ -137136,7 +137136,7 @@
       "source_location": "L5",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "contributing_\u5f00\u53d1\u8005\u6307\u5357_contributor_\u5165\u53e3",
+      "source": "contributing_\u5f00\u53d1\u8005\u6307\u5357",
       "target": "contributing_\u5982\u4f55\u53c2\u4e0e",
       "confidence_score": 1.0
     },
@@ -137147,7 +137147,7 @@
       "source_location": "L79",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "contributing_\u5f00\u53d1\u8005\u6307\u5357_contributor_\u5165\u53e3",
+      "source": "contributing_\u5f00\u53d1\u8005\u6307\u5357",
       "target": "contributing_\u5f00\u53d1\u73af\u5883_\u4ece_checkout_\u8dd1",
       "confidence_score": 1.0
     },
@@ -137158,7 +137158,7 @@
       "source_location": "L94",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "contributing_\u5f00\u53d1\u8005\u6307\u5357_contributor_\u5165\u53e3",
+      "source": "contributing_\u5f00\u53d1\u8005\u6307\u5357",
       "target": "contributing_\u5728\u6709\u51ed\u8bc1\u7684\u673a\u5668\u4e0a\u9a8c\u8bc1\u672a\u53d1\u5e03\u7684\u5de5\u4f5c\u6811",
       "confidence_score": 1.0
     },
@@ -147894,9 +147894,9 @@
       "source_location": "L1",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_ai_eng_code_health_review",
-      "target": "docs_ai_eng_code_health_review_\u4ee3\u7801\u5065\u5eb7\u5ea6\u590d\u76d8_\u5168\u90e8\u751f\u4ea7\u4ee3\u7801_\u4efb\u52a1\u8bf4\u660e",
-      "confidence_score": 1.0
+      "target": "docs_ai_eng_code_health_review_\u4ee3\u7801\u5065\u5eb7\u5ea6\u590d\u76d8_\u5168\u90e8\u751f\u4ea7\u4ee3\u7801_\u4efb\u52a1\u8bf4\u660e"
     },
     {
       "relation": "contains",
@@ -147905,9 +147905,9 @@
       "source_location": "L13",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_ai_eng_code_health_review_\u4ee3\u7801\u5065\u5eb7\u5ea6\u590d\u76d8_\u5168\u90e8\u751f\u4ea7\u4ee3\u7801_\u4efb\u52a1\u8bf4\u660e",
-      "target": "docs_ai_eng_code_health_review_\u76ee\u6807\u4e0e\u5224\u636e",
-      "confidence_score": 1.0
+      "target": "docs_ai_eng_code_health_review_\u76ee\u6807\u4e0e\u5224\u636e"
     },
     {
       "relation": "contains",
@@ -147916,9 +147916,9 @@
       "source_location": "L21",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_ai_eng_code_health_review_\u4ee3\u7801\u5065\u5eb7\u5ea6\u590d\u76d8_\u5168\u90e8\u751f\u4ea7\u4ee3\u7801_\u4efb\u52a1\u8bf4\u660e",
-      "target": "docs_ai_eng_code_health_review_\u4e09\u7c7b\u95ee\u9898_\u5206\u7c7b\u627e",
-      "confidence_score": 1.0
+      "target": "docs_ai_eng_code_health_review_\u4e09\u7c7b\u95ee\u9898_\u5206\u7c7b\u627e"
     },
     {
       "relation": "contains",
@@ -147927,9 +147927,9 @@
       "source_location": "L39",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_ai_eng_code_health_review_\u4ee3\u7801\u5065\u5eb7\u5ea6\u590d\u76d8_\u5168\u90e8\u751f\u4ea7\u4ee3\u7801_\u4efb\u52a1\u8bf4\u660e",
-      "target": "docs_ai_eng_code_health_review_\u7ea2\u7ebf\u62a4\u680f",
-      "confidence_score": 1.0
+      "target": "docs_ai_eng_code_health_review_\u7ea2\u7ebf\u62a4\u680f"
     },
     {
       "relation": "contains",
@@ -147938,9 +147938,9 @@
       "source_location": "L46",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_ai_eng_code_health_review_\u4ee3\u7801\u5065\u5eb7\u5ea6\u590d\u76d8_\u5168\u90e8\u751f\u4ea7\u4ee3\u7801_\u4efb\u52a1\u8bf4\u660e",
-      "target": "docs_ai_eng_code_health_review_\u6267\u884c\u65b9\u6cd5_\u672c\u9879\u76ee\u8dd1\u901a\u7684\u6700\u4f73\u8def\u5f84",
-      "confidence_score": 1.0
+      "target": "docs_ai_eng_code_health_review_\u6267\u884c\u65b9\u6cd5_\u672c\u9879\u76ee\u8dd1\u901a\u7684\u6700\u4f73\u8def\u5f84"
     },
     {
       "relation": "contains",
@@ -147949,9 +147949,9 @@
       "source_location": "L5",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_ai_eng_code_health_review_\u4ee3\u7801\u5065\u5eb7\u5ea6\u590d\u76d8_\u5168\u90e8\u751f\u4ea7\u4ee3\u7801_\u4efb\u52a1\u8bf4\u660e",
-      "target": "docs_ai_eng_code_health_review_\u4e3a\u4ec0\u4e48\u505a_\u4ef7\u503c",
-      "confidence_score": 1.0
+      "target": "docs_ai_eng_code_health_review_\u4e3a\u4ec0\u4e48\u505a_\u4ef7\u503c"
     },
     {
       "relation": "contains",
@@ -147960,9 +147960,9 @@
       "source_location": "L63",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_ai_eng_code_health_review_\u4ee3\u7801\u5065\u5eb7\u5ea6\u590d\u76d8_\u5168\u90e8\u751f\u4ea7\u4ee3\u7801_\u4efb\u52a1\u8bf4\u660e",
-      "target": "docs_ai_eng_code_health_review_\u843d\u5730\u7eaa\u5f8b",
-      "confidence_score": 1.0
+      "target": "docs_ai_eng_code_health_review_\u843d\u5730\u7eaa\u5f8b"
     },
     {
       "relation": "contains",
@@ -147971,9 +147971,9 @@
       "source_location": "L69",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_ai_eng_code_health_review_\u4ee3\u7801\u5065\u5eb7\u5ea6\u590d\u76d8_\u5168\u90e8\u751f\u4ea7\u4ee3\u7801_\u4efb\u52a1\u8bf4\u660e",
-      "target": "docs_ai_eng_code_health_review_\u4ea7\u51fa\u4e0e\u63d0\u4ea4",
-      "confidence_score": 1.0
+      "target": "docs_ai_eng_code_health_review_\u4ea7\u51fa\u4e0e\u63d0\u4ea4"
     },
     {
       "relation": "contains",
@@ -147982,9 +147982,9 @@
       "source_location": "L9",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_ai_eng_code_health_review_\u4ee3\u7801\u5065\u5eb7\u5ea6\u590d\u76d8_\u5168\u90e8\u751f\u4ea7\u4ee3\u7801_\u4efb\u52a1\u8bf4\u660e",
-      "target": "docs_ai_eng_code_health_review_\u4f55\u65f6\u505a_\u89e6\u53d1",
-      "confidence_score": 1.0
+      "target": "docs_ai_eng_code_health_review_\u4f55\u65f6\u505a_\u89e6\u53d1"
     },
     {
       "relation": "contains",
@@ -147993,9 +147993,9 @@
       "source_location": "L50",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_ai_eng_code_health_review_\u6267\u884c\u65b9\u6cd5_\u672c\u9879\u76ee\u8dd1\u901a\u7684\u6700\u4f73\u8def\u5f84",
-      "target": "docs_ai_eng_code_health_review_\u5206\u7247\u6df1\u8bfb_\u53ef\u7528_workflow_\u5e76\u884c",
-      "confidence_score": 1.0
+      "target": "docs_ai_eng_code_health_review_\u5206\u7247\u6df1\u8bfb_\u53ef\u7528_workflow_\u5e76\u884c"
     },
     {
       "relation": "contains",
@@ -148004,9 +148004,9 @@
       "source_location": "L59",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_ai_eng_code_health_review_\u6267\u884c\u65b9\u6cd5_\u672c\u9879\u76ee\u8dd1\u901a\u7684\u6700\u4f73\u8def\u5f84",
-      "target": "docs_ai_eng_code_health_review_\u5bf9\u6297\u9a8c\u8bc1",
-      "confidence_score": 1.0
+      "target": "docs_ai_eng_code_health_review_\u5bf9\u6297\u9a8c\u8bc1"
     },
     {
       "relation": "contains",
@@ -148081,9 +148081,9 @@
       "source_location": "L1",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_ai_eng_doc_health_review",
-      "target": "docs_ai_eng_doc_health_review_\u6587\u6863\u5065\u5eb7\u5ea6\u590d\u76d8_\u5168\u90e8\u9879\u76ee\u6587\u6863_\u4efb\u52a1\u8bf4\u660e",
-      "confidence_score": 1.0
+      "target": "docs_ai_eng_doc_health_review_\u6587\u6863\u5065\u5eb7\u5ea6\u590d\u76d8_\u5168\u90e8\u9879\u76ee\u6587\u6863_\u4efb\u52a1\u8bf4\u660e"
     },
     {
       "relation": "contains",
@@ -148092,9 +148092,9 @@
       "source_location": "L103",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_ai_eng_doc_health_review_\u6267\u884c\u65b9\u6cd5_\u591a\u8f6e\u590d\u76d8\u9a8c\u8bc1\u8fc7\u7684\u6700\u4f73\u8def\u5f84",
-      "target": "docs_ai_eng_doc_health_review_status_\u5934_\u7b2c\u4e8c\u5c42\u7684\u914d\u5957_\u679a\u4e3e_\u5224\u5b9a\u4e0e\u8fde\u5e26\u5ba1\u8ba1_\u5934\u672c\u8eab\u662f\u6bcf\u4e2a_adr_\u5f00\u5934\u4e00\u884c",
-      "confidence_score": 1.0
+      "target": "docs_ai_eng_doc_health_review_status_\u5934_\u7b2c\u4e8c\u5c42\u7684\u914d\u5957_\u679a\u4e3e_\u5224\u5b9a\u4e0e\u8fde\u5e26\u5ba1\u8ba1_\u5934\u672c\u8eab\u662f\u6bcf\u4e2a_adr_\u5f00\u5934\u4e00\u884c"
     },
     {
       "relation": "contains",
@@ -148103,9 +148103,9 @@
       "source_location": "L118",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_ai_eng_doc_health_review_\u6267\u884c\u65b9\u6cd5_\u591a\u8f6e\u590d\u76d8\u9a8c\u8bc1\u8fc7\u7684\u6700\u4f73\u8def\u5f84",
-      "target": "docs_ai_eng_doc_health_review_\u7b2c\u4e09\u5c42_\u6309\u4e8b\u5b9e\u65cf\u6a2a\u5207_\u5f3a\u5236_\u4e0e\u6309\u6587\u6863\u5206\u7247\u6b63\u4ea4",
-      "confidence_score": 1.0
+      "target": "docs_ai_eng_doc_health_review_\u7b2c\u4e09\u5c42_\u6309\u4e8b\u5b9e\u65cf\u6a2a\u5207_\u5f3a\u5236_\u4e0e\u6309\u6587\u6863\u5206\u7247\u6b63\u4ea4"
     },
     {
       "relation": "contains",
@@ -148114,9 +148114,9 @@
       "source_location": "L77",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_ai_eng_doc_health_review_\u6267\u884c\u65b9\u6cd5_\u591a\u8f6e\u590d\u76d8\u9a8c\u8bc1\u8fc7\u7684\u6700\u4f73\u8def\u5f84",
-      "target": "docs_ai_eng_doc_health_review_\u7b2c\u4e00\u5c42_\u7247\u5185\u5ba1\u8ba1_\u53ef\u7528_workflow_\u5e76\u884c",
-      "confidence_score": 1.0
+      "target": "docs_ai_eng_doc_health_review_\u7b2c\u4e00\u5c42_\u7247\u5185\u5ba1\u8ba1_\u53ef\u7528_workflow_\u5e76\u884c"
     },
     {
       "relation": "contains",
@@ -148125,9 +148125,9 @@
       "source_location": "L95",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_ai_eng_doc_health_review_\u6267\u884c\u65b9\u6cd5_\u591a\u8f6e\u590d\u76d8\u9a8c\u8bc1\u8fc7\u7684\u6700\u4f73\u8def\u5f84",
-      "target": "docs_ai_eng_doc_health_review_\u7b2c\u4e8c\u5c42_cross_adr_\u89c6\u89d2_\u7247\u5185\u5ba1\u8ba1\u6f0f\u6389\u7684\u7ed3\u6784\u95ee\u9898",
-      "confidence_score": 1.0
+      "target": "docs_ai_eng_doc_health_review_\u7b2c\u4e8c\u5c42_cross_adr_\u89c6\u89d2_\u7247\u5185\u5ba1\u8ba1\u6f0f\u6389\u7684\u7ed3\u6784\u95ee\u9898"
     },
     {
       "relation": "contains",
@@ -148136,9 +148136,9 @@
       "source_location": "L125",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_ai_eng_doc_health_review_\u6587\u6863\u5065\u5eb7\u5ea6\u590d\u76d8_\u5168\u90e8\u9879\u76ee\u6587\u6863_\u4efb\u52a1\u8bf4\u660e",
-      "target": "docs_ai_eng_doc_health_review_\u843d\u5730\u7eaa\u5f8b",
-      "confidence_score": 1.0
+      "target": "docs_ai_eng_doc_health_review_\u843d\u5730\u7eaa\u5f8b"
     },
     {
       "relation": "contains",
@@ -148147,9 +148147,9 @@
       "source_location": "L13",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_ai_eng_doc_health_review_\u6587\u6863\u5065\u5eb7\u5ea6\u590d\u76d8_\u5168\u90e8\u9879\u76ee\u6587\u6863_\u4efb\u52a1\u8bf4\u660e",
-      "target": "docs_ai_eng_doc_health_review_\u76ee\u6807\u4e0e\u51c6\u7ef3",
-      "confidence_score": 1.0
+      "target": "docs_ai_eng_doc_health_review_\u76ee\u6807\u4e0e\u51c6\u7ef3"
     },
     {
       "relation": "contains",
@@ -148158,9 +148158,9 @@
       "source_location": "L132",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_ai_eng_doc_health_review_\u6587\u6863\u5065\u5eb7\u5ea6\u590d\u76d8_\u5168\u90e8\u9879\u76ee\u6587\u6863_\u4efb\u52a1\u8bf4\u660e",
-      "target": "docs_ai_eng_doc_health_review_\u4ea7\u51fa\u4e0e\u63d0\u4ea4",
-      "confidence_score": 1.0
+      "target": "docs_ai_eng_doc_health_review_\u4ea7\u51fa\u4e0e\u63d0\u4ea4"
     },
     {
       "relation": "contains",
@@ -148169,9 +148169,9 @@
       "source_location": "L19",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_ai_eng_doc_health_review_\u6587\u6863\u5065\u5eb7\u5ea6\u590d\u76d8_\u5168\u90e8\u9879\u76ee\u6587\u6863_\u4efb\u52a1\u8bf4\u660e",
-      "target": "docs_ai_eng_doc_health_review_\u7ea2\u7ebf\u62a4\u680f_\u8fdd\u53cd_\u6539\u9519\u4e86",
-      "confidence_score": 1.0
+      "target": "docs_ai_eng_doc_health_review_\u7ea2\u7ebf\u62a4\u680f_\u8fdd\u53cd_\u6539\u9519\u4e86"
     },
     {
       "relation": "contains",
@@ -148180,9 +148180,9 @@
       "source_location": "L26",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_ai_eng_doc_health_review_\u6587\u6863\u5065\u5eb7\u5ea6\u590d\u76d8_\u5168\u90e8\u9879\u76ee\u6587\u6863_\u4efb\u52a1\u8bf4\u660e",
-      "target": "docs_ai_eng_doc_health_review_\u516d\u7c7b\u95ee\u9898_\u5206\u7c7b\u627e",
-      "confidence_score": 1.0
+      "target": "docs_ai_eng_doc_health_review_\u516d\u7c7b\u95ee\u9898_\u5206\u7c7b\u627e"
     },
     {
       "relation": "contains",
@@ -148191,9 +148191,9 @@
       "source_location": "L45",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_ai_eng_doc_health_review_\u6587\u6863\u5065\u5eb7\u5ea6\u590d\u76d8_\u5168\u90e8\u9879\u76ee\u6587\u6863_\u4efb\u52a1\u8bf4\u660e",
-      "target": "docs_ai_eng_doc_health_review_\u6309\u6587\u6863\u7c7b\u578b\u7684\u590d\u76d8\u4fa7\u91cd_\u7528\u5bf9\u5224\u636e",
-      "confidence_score": 1.0
+      "target": "docs_ai_eng_doc_health_review_\u6309\u6587\u6863\u7c7b\u578b\u7684\u590d\u76d8\u4fa7\u91cd_\u7528\u5bf9\u5224\u636e"
     },
     {
       "relation": "contains",
@@ -148202,9 +148202,9 @@
       "source_location": "L5",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_ai_eng_doc_health_review_\u6587\u6863\u5065\u5eb7\u5ea6\u590d\u76d8_\u5168\u90e8\u9879\u76ee\u6587\u6863_\u4efb\u52a1\u8bf4\u660e",
-      "target": "docs_ai_eng_doc_health_review_\u4e3a\u4ec0\u4e48\u505a_\u4ef7\u503c",
-      "confidence_score": 1.0
+      "target": "docs_ai_eng_doc_health_review_\u4e3a\u4ec0\u4e48\u505a_\u4ef7\u503c"
     },
     {
       "relation": "contains",
@@ -148213,9 +148213,9 @@
       "source_location": "L55",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_ai_eng_doc_health_review_\u6587\u6863\u5065\u5eb7\u5ea6\u590d\u76d8_\u5168\u90e8\u9879\u76ee\u6587\u6863_\u4efb\u52a1\u8bf4\u660e",
-      "target": "docs_ai_eng_doc_health_review_\u6267\u884c\u65b9\u6cd5_\u591a\u8f6e\u590d\u76d8\u9a8c\u8bc1\u8fc7\u7684\u6700\u4f73\u8def\u5f84",
-      "confidence_score": 1.0
+      "target": "docs_ai_eng_doc_health_review_\u6267\u884c\u65b9\u6cd5_\u591a\u8f6e\u590d\u76d8\u9a8c\u8bc1\u8fc7\u7684\u6700\u4f73\u8def\u5f84"
     },
     {
       "relation": "contains",
@@ -148224,9 +148224,9 @@
       "source_location": "L9",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_ai_eng_doc_health_review_\u6587\u6863\u5065\u5eb7\u5ea6\u590d\u76d8_\u5168\u90e8\u9879\u76ee\u6587\u6863_\u4efb\u52a1\u8bf4\u660e",
-      "target": "docs_ai_eng_doc_health_review_\u4f55\u65f6\u505a_\u89e6\u53d1",
-      "confidence_score": 1.0
+      "target": "docs_ai_eng_doc_health_review_\u4f55\u65f6\u505a_\u89e6\u53d1"
     },
     {
       "relation": "contains",
@@ -181675,9 +181675,9 @@
       "source_location": "L3",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_ai_eng_code_health_review",
-      "target": "docs_ai_eng_doc_health_review",
-      "confidence_score": 1.0
+      "target": "docs_ai_eng_doc_health_review"
     },
     {
       "relation": "references",
@@ -181686,9 +181686,9 @@
       "source_location": "L52",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_ai_eng_doc_health_review",
-      "target": "docs_adr_0043_agent_skill_for_driving_gherkai",
-      "confidence_score": 1.0
+      "target": "docs_adr_0043_agent_skill_for_driving_gherkai"
     },
     {
       "relation": "references",
@@ -199859,5 +199859,5 @@
       "source_file": "docs/adr/0024-worker-core-protocol.md"
     }
   ],
-  "built_at_commit": "268ede9a0ece8e612cca3b99f8aa8220ff13f87a"
+  "built_at_commit": "09c81a53c8f42751bcebb6ade916f8a8db22b1cc"
 }
