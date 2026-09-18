@@ -38,6 +38,7 @@ Claude 的 plugin marketplace 只覆盖 Claude、仪式更多，现阶段不做�
 - **副本 = 确定性转换，不是 `cp`**：`docs/internals/cli-json-contract.md` 是唯一**手写**源；`references/cli-json-contract.md` 由入库的生成器渲染，转换规则是稳定契约、逐条列举：① 剥掉头部「定位 / 权威在 code / 护栏」引用块与姊妹页导航段，换成一句产品语言（「本页讲 `--json` 各命令输出有哪些字段、什么意思、何时出现」）；② 正文里指向仓库内文件的指针改成 `gherkai <子命令> --help` 或 `https://github.com/zhiyanliu/gherkai/blob/HEAD/<path>` 绝对 URL；③ 禁词按一张入库的显式映射表改写（如「定位链」→ 产品语言），命中未登记禁词即红。护栏断言 `transform(源) == 入库副本`——仍是「改了源没同步就红」，也仍然否掉「手工维护副本」。契约页的键覆盖护栏继续只对源页断言。契约页头部加一句「驾驭本工具的 AI agent 请装 skill；本页有转换副本随 CLI 发行」。
 - **`SKILL.md` 正文**是给 agent 的新文档（操作模型），docs 里没有等价物、不算重复；它与 README 有事实重叠（flag 名、退出码），读者不同写法不同，漂移由护栏挡。guides 给人、skill 给 agent，同一机制两边各有一份是**按读者分层**，不是双源。
 - GitHub 上 docs 的绝对 URL 可留作**次级**指针，形态按 [0039](./0039-user-facing-surfaces-no-internal-references.md) 面二的发行物约定用 `blob/HEAD/`（不绑分支名 / tag）；版本一致性靠「装的 skill == 装的 CLI」（决策三）保证，不靠 URL 钉版本——也正因 `HEAD` 的 docs 可能比装的 CLI 新，它只能作次级指针。
+- **同步手段与护栏分工**（2026-09-18 补）：改了源页或渲染器后重渲染副本这件事，由项目级 Claude Code hook 自动做——`.claude/settings.json` 在 Edit / Write / MultiEdit / Bash 之后跑 `.claude/hooks/sync-derived.sh`：渲染器 `--check` 发现漂移即重渲染，并经 `additionalContext` 告知 agent「副本与源同 commit」（检查 0.1 秒量级，故每次工具调用都跑、不按路径筛，Bash 里改文件也覆盖）。hook 只在 Claude Code 里生效，**护栏 `cli/tests/test_skill.py` 的等值断言仍是唯一保证**（Codex / 人手编辑 / CI 都靠它）；hook 是把「发现漂移」前移到编辑时刻的便利层，不替代护栏。选 PostToolUse 而非 Stop：一轮中间就可能 commit，Stop 太晚。
 
 ### 五、内容重心：一个 skill 入口、三个任务域、按域拆 references；正文是 agent 的操作模型，不是复述 `--help`
 

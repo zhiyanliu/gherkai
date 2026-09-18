@@ -136,6 +136,8 @@ uv run pytest core/tests -m integration          # 集成测试：假定真表/�
 
 **图**：全部图统一用 archify，图源与静态图在 [`docs/diagrams/`](./docs/diagrams/)：改图 = 改 `<name>.json`，跑 `node tools/build_diagrams.mjs [docs/diagrams/<name>.json]`（deliver 出 HTML、再从 HTML 导出 SVG；`--png` 另导 PNG 只供目视、不入库），JSON 与 SVG 同 commit；正文以 markdown 图片语法嵌入 `docs/diagrams/<name>.svg`。HTML 默认不入库（`.gitignore` 排除）；只有发布到 GitHub Pages 的可交互大图才入库 HTML，发布 = `.gitignore` 加白名单行 + `docs/diagrams/index.html` 加链接 + HTML 入库三者同 commit，[`.github/workflows/pages.yml`](./.github/workflows/pages.yml) 把该目录原样上传。图上只画结构与指向，会漂的字面量留正文；图源零内部指代（护栏 `cli/tests/test_user_docs.py` 扫 JSON、断言 JSON 与 SVG 成对、正文无 mermaid 块、入库 HTML 有图源且在 index 有链接）。形态、立图门槛与被拒方案见 [ADR 0045](./docs/adr/0045-documentation-layering-and-placement.md) 决策七。
 
+**派生文件的自动同步（Claude Code）**：项目级 hook [`.claude/hooks/sync-derived.sh`](./.claude/hooks/sync-derived.sh)（由入库的 [`.claude/settings.json`](./.claude/settings.json) 挂在 Edit / Write / MultiEdit / Bash 之后）在每次工具调用后做两件事：skill 契约副本与源不同步就用 `tools/render_skill_contract.py` 重渲染并告知 agent；`docs/diagrams/*.json` 比同名 SVG 新就提醒跑 `tools/build_diagrams.mjs`（不自动重建）。首次进入仓库时 Claude Code 会请你确认一次项目 hook。这只是编辑时刻的便利层，Codex / 人手编辑与 CI 仍靠 `cli/tests/test_skill.py`、`cli/tests/test_user_docs.py` 兜底。个人配置（graphify 的 hook-guard、plugin 开关）放 `.claude/settings.local.json`，不入库。
+
 ## Spike（可独立跑的技术验证脚本）
 
 ```bash

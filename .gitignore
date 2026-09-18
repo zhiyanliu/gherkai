@@ -82,6 +82,9 @@ __pycache__/
 # （docs/{doc,code}-health-review.md）的 Claude Code 入口、属项目资产；skills / settings 是个人配置，不入库
 .claude/*
 !.claude/commands/
+# 项目级 hook 随仓库走（派生文件同步，ADR 0043 决策四 / ADR 0045 决策七）；个人项在 .claude/settings.local.json（不入库）
+!.claude/settings.json
+!.claude/hooks/
 skills-lock.json
 .agents/
 # MCP server 个人本地配置（可能含 API KEY 等密钥）

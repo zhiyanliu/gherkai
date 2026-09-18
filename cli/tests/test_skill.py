@@ -473,3 +473,24 @@ def test_fixtures_carry_no_absolute_paths():
                 hits.append(f"{path.relative_to(REPO)}:{i}: {m.group(0)[:120]}")
     assert not hits, ("fixture 里不得有产出机器的绝对路径（换成 `{{FIXTURE_ROOT}}` 占位符，评测前物化）：\n"
                       + "\n".join(hits))
+
+
+def test_sync_hook_is_wired_for_the_contract_copy():
+    """项目级 Claude Code hook 把「改源即重渲染副本」前移到编辑时刻（ADR 0043 决策四「同步手段与护栏分工」）：
+    settings.json 的 PostToolUse 必须挂着 .claude/hooks/sync-derived.sh，脚本存在、可执行、且真的调用渲染器的 --check 与重渲染。
+    护栏本身（本文件的等值断言）不因 hook 而放松。"""
+    import json as _json
+    import os as _os
+    settings = _json.loads((REPO / ".claude" / "settings.json").read_text(encoding="utf-8"))
+    post = settings.get("hooks", {}).get("PostToolUse", [])
+    entries = [e for e in post if any("sync-derived.sh" in h.get("command", "") for h in e.get("hooks", []))]
+    assert entries, "settings.json 的 PostToolUse 没挂 .claude/hooks/sync-derived.sh"
+    matchers = " ".join(e.get("matcher", "") for e in entries)
+    for tool in ("Edit", "Write", "Bash"):
+        assert tool in matchers, f"sync-derived hook 的 matcher 缺 {tool}（Bash 里改文件也要覆盖）"
+    script = REPO / ".claude" / "hooks" / "sync-derived.sh"
+    assert script.is_file() and _os.access(script, _os.X_OK), "缺 .claude/hooks/sync-derived.sh 或不可执行"
+    body = script.read_text(encoding="utf-8")
+    assert "render_skill_contract.py --check" in body and "render_skill_contract.py 2>&1" in body, "hook 脚本须先 --check 再重渲染"
+    assert "additionalContext" in body, "hook 须经 additionalContext 把结果告诉 agent"
+
