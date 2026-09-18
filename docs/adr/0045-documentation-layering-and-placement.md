@@ -19,7 +19,7 @@
 | 类 | 读者 | 内容 | 位置 |
 |---|---|---|---|
 | **contributor 侧 AI agent** | 在本仓库里干活的 AI agent（约 80% 读者，[CLAUDE.md](../../CLAUDE.md) 文档纪律「读者比例决定优化方向」条） | ADR、`CONTEXT.md`、`CLAUDE.md`、`.claude/commands/`、`docs/ai-eng/`（REFERENCES 外部一手来源 + 两份 health-review 方法）、`docs/journey/`、skill 评测资产 `skills/gherkai-evals/`（评测集 / fixture / 评分提示词，归 [0043](./0043-agent-skill-for-driving-gherkai.md) 决策七；`skills/README.md` 只是指路） | ADR / CONTEXT / CLAUDE.md 位置固定（工具有位置依赖）；方法文档与 REFERENCES 归 `docs/ai-eng/` |
-| **技术文档** | contributor；想懂机理的技术人员 | contributor：根 `CONTRIBUTING.md` + 各包 `DEVELOPMENT.md` + `.github/workflows/README.md`；机理：`docs/internals/`（原 `docs/guides/`） | DEVELOPMENT 留包旁（见被拒方案） |
+| **技术文档** | contributor；想懂机理的技术人员 | contributor：根 `CONTRIBUTING.md` + 各包 `DEVELOPMENT.md` + `.github/workflows/README.md` + 工具手册 `tools/<name>.md`（篇幅超过脚本头注释的工具才立，如 `e2e_harness.md`；`CONTRIBUTING.md` 的 tools 表是索引）；机理：`docs/internals/`（原 `docs/guides/`） | DEVELOPMENT 与工具手册留在代码旁（见被拒方案） |
 | **用户文档** | 使用者，以及**使用者侧 AI agent** | `docs/user-guide/`（叙事主页）、根 `README.md`（门面）、各包 `README.md`（入口页，逐字上 PyPI / npm）、GitHub Release 正文、agent skill（[0043](./0043-agent-skill-for-driving-gherkai.md)） | 新建 `docs/user-guide/`，其余原位改写 |
 
 使用者侧 AI agent 读的是产品说明（skill），它是用户文档的一种形态，不与 contributor 侧 AI agent 混类——两者的写法相反：前者产品语言、零内部指代（[0039](./0039-user-facing-surfaces-no-internal-references.md)），后者高密度、精确指针。
@@ -77,7 +77,7 @@ skill 正文与 references 是为使用者侧 agent **新写**的内容、不是
 ## 被拒方案（护栏）
 
 - **新造「codebase 说明」文档类**——仓库说明拆三层已够：根 README 门面留「仓库里有什么」一段、目录与模块细节归 CONTRIBUTING / DEVELOPMENT、文档地图归 `docs/README.md`。
-- **把各包 DEVELOPMENT 吸收进 `docs/`**——它讲「怎么在这个包里干活」，不是机理（internals）；搬走丢局部性（contributor 打开包目录就该看到它），且不进发行包本就无需与 README 同处 PyPI 语义。
+- **把各包 DEVELOPMENT 吸收进 `docs/`**——它讲「怎么在这个包里干活」，不是机理（internals）；搬走丢局部性（contributor 打开包目录就该看到它），且不进发行包本就无需与 README 同处 PyPI 语义。**工具手册（`tools/<name>.md`）同理不进 `docs/`**：它是某个脚本的用法与判读，随脚本改、随脚本删，放在脚本旁才不漂；也不另立「内部工具」文档类——它就是 contributor 文档的一种，索引在 `CONTRIBUTING.md` 的 tools 表。
 - **`docs/ops/` 作方法文档目录名**——`ops` 在工程语境是运维（本项目真有 deploy 这条运维线），撞义。
 - **包页维持完整手册、靠 owner 表约束重复**——纪律约束的重复迟早漂，结构消灭一次解决。
 - **搬 CONTEXT.md / CLAUDE.md / ADR**——有工具位置依赖，收益为零。

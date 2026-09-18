@@ -1345,8 +1345,8 @@
     "semantic_hash": ""
   },
   "CONTRIBUTING.md": {
-    "mtime": 1789711428.0232248,
-    "ast_hash": "f8c58f30eb76edfe10239941123eec77",
+    "mtime": 1789723976.8078105,
+    "ast_hash": "20489bb47a04c3ecb0fb1ff020767393",
     "semantic_hash": ""
   },
   "docs/README.md": {
@@ -1355,8 +1355,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0045-documentation-layering-and-placement.md": {
-    "mtime": 1789711428.0229392,
-    "ast_hash": "0fb776bc1c2de766acf9b83487323ec8",
+    "mtime": 1789723976.8074503,
+    "ast_hash": "18d84ad86eb11596a00e56ae95d0040c",
     "semantic_hash": ""
   },
   "docs/ai-eng/README.md": {
@@ -1485,7 +1485,7 @@
     "semantic_hash": ""
   },
   "docs/diagrams/run-execution.html": {
-    "mtime": 1789723564.9852726,
+    "mtime": 1789723935.818091,
     "ast_hash": "8b9e60dc1771c3b2caa748c96f19e057",
     "semantic_hash": ""
   },
@@ -1570,7 +1570,7 @@
     "semantic_hash": ""
   },
   "docs/diagrams/run-execution.svg": {
-    "mtime": 1789723565.1144586,
+    "mtime": 1789723893.953437,
     "ast_hash": "9ca71bee275b96c524ffb620f26a9735",
     "semantic_hash": ""
   },
@@ -1665,8 +1665,8 @@
     "semantic_hash": ""
   },
   "docs/diagrams/run-execution.json": {
-    "mtime": 1789722663.003907,
-    "ast_hash": "",
+    "mtime": 1789723893.952955,
+    "ast_hash": "1bc745deecb793707eb3d8ed877ba169",
     "semantic_hash": ""
   },
   "docs/diagrams/verdict-model-job-outcome.json": {

@@ -65,7 +65,7 @@ v1 定位还差一项验收没做，前置条件是拿到可得的真实业务�
 
 每个包目录都有两份文档：`README.md` = 发行包页面（逐字上 PyPI/npm，只写使用者内容）、`DEVELOPMENT.md` = 该包的 contributor 文档（模块布局、从 checkout 跑、测试、ADR 指针）——[`cli/`](./cli/DEVELOPMENT.md) · [`core/`](./core/DEVELOPMENT.md) · [`runtime/`](./runtime/DEVELOPMENT.md) · [`deploy_aws/`](./deploy_aws/DEVELOPMENT.md) · [`engines/novaact/`](./engines/novaact/DEVELOPMENT.md) · [`engines/midscene/`](./engines/midscene/DEVELOPMENT.md)。**文件级的模块布局只在各包 `DEVELOPMENT.md` 维护**，上面的目录树停在包级、不复述——两处都写迟早漂。
 
-`tools/` 里的工具（做真跑、诊断、校验之前先翻一眼，别重造；每个脚本的头注释写了用途、前置与判读）：
+`tools/` 里的工具（做真跑、诊断、校验之前先翻一眼，别重造；每个脚本的头注释写了用途、前置与判读；篇幅超过头注释的工具另有同目录手册 `tools/<name>.md`，属 contributor 文档、随脚本一起维护，下表是索引）：
 
 | 工具 | 干什么 |
 |---|---|
