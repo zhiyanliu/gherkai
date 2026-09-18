@@ -235,10 +235,10 @@ def run(engine: str, feature: str, votes: int, interrupt: str, run_id: str, grac
     interrupted = kill_sent["t"] is not None
     sample_valid = produced and (interrupt == "none" or interrupted)
     if not produced:
-        note = "无效样本：中断过早，盘与 S3 均无产物，n_lost=0 是『没东西可丢』非『抢传救回』——换更晚的中断时机重跑"
+        note = "无效样本：中断过早，盘与 S3 均无产物，n_lost=0 是『没东西可丢』非『抢传救回』——换更晚的中断时机重新运行"
     elif interrupt != "none" and not interrupted:
-        note = (f"无效样本：选了 --interrupt {interrupt} 但该时机未触发（未发 SIGTERM、跑成 baseline），"
-                "n_lost=0 不构成抢传证据——换时机，或换『多 scenario 归一个 @scope』的 feature 重跑")
+        note = (f"无效样本：选了 --interrupt {interrupt} 但该时机未触发（未发 SIGTERM、全程退化为 baseline），"
+                "n_lost=0 不构成抢传证据——换时机，或换『多 scenario 归一个 @scope』的 feature 重新运行")
     elif len(lost) == 0:
         note = "有效样本：产生了产物且 n_lost=0 → 抢传/上传真救回（非假阳性）"
     else:
@@ -264,7 +264,7 @@ def run(engine: str, feature: str, votes: int, interrupt: str, run_id: str, grac
 
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser(description="worker 端到端真跑验证 harness（opt-in、产生真实 AWS 费用；中断只是能力之一）")
+    ap = argparse.ArgumentParser(description="worker 端到端实际运行验证 harness（opt-in、产生真实 AWS 费用；中断只是能力之一）")
     ap.add_argument("--engine", choices=["novaact", "midscene"], default="novaact")
     ap.add_argument("--feature", default="wikipedia_assertions")
     ap.add_argument("--votes", type=int, default=1)

@@ -275,7 +275,7 @@ class Provider:
         push = sub.add_parser(
             "push-worker", help="[部署方] 推一个本地镜像并注册为某引擎的一个 variant",
             description="推送一个**已 build 好**的本地镜像到本 prefix 的 ECR，并把它注册成该引擎的一个 variant "
-                        "（一个 task-def revision，镜像按 digest 引用）。一次一个引擎；两个引擎跑两次。"
+                        "（一个 task-def revision，镜像按 digest 引用）。一次一个引擎；两个引擎要分两次执行本命令。"
                         "镜像构建不归 gherkai——定制镜像的 Dockerfile 模板见 https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/cloud-backend.md 。",
         )
         push.add_argument("image", metavar="<本地镜像>", help="本地镜像名（任何名字，如 acme-novaact:login）")
@@ -301,7 +301,7 @@ class Provider:
 
         delete = sub.add_parser(
             "delete-worker", help="[部署方] （尚未提供）删一个 variant 及其 ECR/SSM 残留",
-            description="尚未提供：落地时套 push-worker 同一套清理语义（退休 tag + 静默期 + 在跑 run 安全阀），"
+            description="尚未提供：落地时套 push-worker 同一套清理语义（退休 tag + 静默期 + 运行中 run 安全阀），"
                         "并连带清旧版本 variant 的 ECR tag / untagged 层与 SSM 映射。",
         )
         self._add_locator_flags(delete)
@@ -364,7 +364,7 @@ class Provider:
             probe = engine.probe()
             if probe:
                 print(f"警告：{probe}\n     stack 会照常部署，但之后的 worker 镜像步骤（同步基底）会失败"
-                      f"（退 1）；装好容器引擎后重跑 `gherkai deploy` 幂等收敛。", file=sys.stderr)
+                      f"（退 1）；装好容器引擎后重新运行 `gherkai deploy` 幂等收敛。", file=sys.stderr)
         blocked = self._guard_vpc_spec(args)
         if blocked is not None:
             return blocked
@@ -374,7 +374,7 @@ class Provider:
             # cdk 自己的报错已在上面原样打出；只补一条**中性**提示、不改写也不猜它的诊断（失败原因很多：
             # 权限、变更集被拒、模板错……）。未 bootstrap 是首次部署最常见的一种（ADR 0037 决策 6）。
             print("提示：cdk deploy 失败原因见上方 cdk 输出。首次在某账户/region 部署最常见的一种是环境未 bootstrap"
-                  "——若报错提到 bootstrap，先跑 `gherkai deploy --bootstrap`（同 --profile/--region）。",
+                  "——若报错提到 bootstrap，先运行 `gherkai deploy --bootstrap`（同 --profile/--region）。",
                   file=sys.stderr)
             return rc
         # cdk 成功 → worker 镜像四步（ADR 0038）。第 1 步（登记模板）已随 cdk 事务落地。
@@ -512,7 +512,7 @@ class Provider:
         """
         print("`delete-worker` 尚未提供。\n"
               "它要连带定回收策略（旧版本 variant 的 ECR tag / 重推顶掉的 untagged 层 / SSM 映射），"
-              "并套 push-worker 同一套清理语义（退休 tag + 静默期 + 在跑 run 安全阀），这些还没定。\n"
+              "并套 push-worker 同一套清理语义（退休 tag + 静默期 + 运行中 run 安全阀），这些还没定。\n"
               "当前可用的：`gherkai deploy list-workers` 看有哪些 variant 与待清理 revision；"
               "重推同名 variant 直接覆盖，无需先删。", file=sys.stderr)
         return EXIT_PRECONDITION
@@ -773,7 +773,7 @@ class Provider:
             return dist_version("gherkai-deploy-aws")
         except PackageNotFoundError as exc:  # 源码直跑、未装成包
             raise RuntimeError(
-                "取不到版本号：本包未以发行包形式安装（源码直跑）。后端版本戳无隐式默认——"
+                "取不到版本号：本包未以发行包形式安装（源码直接运行）。后端版本戳无隐式默认——"
                 "装成包（`uv tool install 'gherkai[deploy-aws]'` 或 workspace `uv sync`）后再部署"
             ) from exc
 

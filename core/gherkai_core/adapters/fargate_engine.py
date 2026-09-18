@@ -171,7 +171,7 @@ class FargateEngine:
         self._null_exit_grace_polls = null_exit_grace_polls
 
     def start_scope(self, job: Job) -> str:
-        """fire-and-forget 起一个 Fargate task 跑 job，返回 task_arn（ADR 0034：无状态跑批的 Engine 增出形状）。
+        """fire-and-forget 起一个 Fargate task 跑 job，返回 task_arn（ADR 0034：无状态批量运行的 Engine 增出形状）。
 
         = run_scope 的前半（PutObject job + RunTask），**不返回事件迭代器、不轮询**——cloud 无状态路径下 worker
         自 PutItem events 到 DDB、退出观察者 Lambda 补 task_exited、reconciler Lambda 从表重放，没有「调用方持续

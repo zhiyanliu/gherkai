@@ -17,7 +17,7 @@
 （五个 pyproject 走动态版本、无手写版本号；`engines/midscene/package.json` 只留 `0.0.0-dev` 占位——npm 的必填字段，发布时由 `npm version <tag>` 覆写，别手改），CI 从 tag 派生五个 wheel 的版本、npm 包版本、
 镜像 tag、Release 名。
 
-### `release.yml` 的 job 图与重跑语义
+### `release.yml` 的 job 图与重新运行语义
 
 ```
 build（gate + uv build --all-packages + 产物校验 + 上传 artifact）
@@ -31,10 +31,10 @@ build（gate + uv build --all-packages + 产物校验 + 上传 artifact）
 - **`images` 依赖 `pypi`/`npm` 且带「等索引可见」一步**：基底镜像的 CI 形态按版本装已发行的 worker 包
   （ADR 0037 决策 5「两态」），而上传成功 ≠ 立刻可装（索引过 CDN）。等待逻辑与完整理由在
   `.github/scripts/wait_for_index.sh` 的头注释里。
-- **单独重跑 `images` 是「PyPI 已发、镜像缺失」半发布态的修复动作**（ADR 0037 决策 8）：对同一 tag 幂等，
-  且**重跑旧版本不会动 `latest`**——`latest` 只在「本 tag 是全仓库版本序最大的**正式发行** tag」时才推。
-- **`pypi` 可重跑**：`uv publish --check-url` 跳过已存在且逐字节相同的文件（内容不同则报错，不静默覆盖）。
-- **`npm` 可重跑**：publish 前先 `npm view` 探一次，已发行就跳过（npm 不允许重发同版本）。
+- **单独重新运行 `images` 是「PyPI 已发、镜像缺失」半发布态的修复动作**（ADR 0037 决策 8）：对同一 tag 幂等，
+  且**重新运行旧版本不会动 `latest`**——`latest` 只在「本 tag 是全仓库版本序最大的**正式发行** tag」时才推。
+- **`pypi` 可重新运行**：`uv publish --check-url` 跳过已存在且逐字节相同的文件（内容不同则报错，不静默覆盖）。
+- **`npm` 可重新运行**：publish 前先 `npm view` 探一次，已发行就跳过（npm 不允许重发同版本）。
 - **fork 不会误发**：`pypi` / `npm` 两个 job 带 `if: github.repository == 'zhiyanliu/gherkai'`。
 - **只认正式发行 tag `vX.Y.Z`**：`v1.4.0rc1` 这类预发行在 gate 第一步就被拦——它是合法 PEP 440
   但不是合法 semver（npm 要 `1.4.0-rc.1`），而 ADR 0037 决策 2b 明确不做 PEP 440→semver 的转换件；
@@ -83,7 +83,7 @@ npm 侧已占（maintainer `liuzhiyan`）：`@gherkai/worker-midscene`（占名�
 ### 4. GHCR：首次推送后把两个 package 改成 public
 
 推 GHCR 用 `GITHUB_TOKEN`，**不需要任何 secret**。GitHub 文档说首次发布的 package 默认 private，**实测（v1.4.0 首发）
-两个 package 随公开仓库直接就是 public、可匿名 `docker manifest inspect`**——首个 release 跑完后核对一次
+两个 package 随公开仓库直接就是 public、可匿名 `docker manifest inspect`**——首个 release 完成后核对一次
 （`docker manifest inspect ghcr.io/zhiyanliu/gherkai-worker-novaact:<版本>` 匿名能读即可）；若为 private 才需进
 *Packages → 该 package → Package settings → Change visibility → Public*。基底镜像必须可匿名 pull——`gherkai deploy`
 的「同步基底」一步靶的就是它（ADR 0038）。
@@ -110,7 +110,7 @@ explicit = true
 ```bash
 uv build --all-packages --out-dir dist
 uv run --no-project python .github/scripts/check_dist_metadata.py --dist dist --expect-version 1.4.0
-uv publish --index testpypi          # 本地跑要 TestPyPI token（UV_PUBLISH_TOKEN）；CI 里配 TestPyPI 的 trusted publisher
+uv publish --index testpypi          # 本地执行要 TestPyPI token（UV_PUBLISH_TOKEN）；CI 里配 TestPyPI 的 trusted publisher
 ```
 
 注意三条：
@@ -153,7 +153,7 @@ CI 的 `images` job 用 index 态（按 tag 版本装已发行包）；发行前
 ## 维护
 
 - **版本旋钮**在两个 workflow 的 `env:` 里（`UV_VERSION` / `PYTHON_VERSION` / `NODE_VERSION`），
-  两边保持同值——发布路径与 CI 路径分叉了，CI 绿就不再代表发布链能跑。
+  两边保持同值——发布路径与 CI 路径分叉了，CI 绿就不再代表发布链能运行。
   `UV_VERSION` 还有个下限：`uv publish` 上传 PEP 740 attestation 需 ≥ 0.9.12。
 - **action 一律钉到精确 tag**（`astral-sh/setup-uv@v10.0.1` 这种），不用浮动大版本：
   `setup-uv` 从 v8 起就没再发浮动 `v8`/`v9`/`v10` tag，浮动写法在它身上直接解析失败；

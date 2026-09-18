@@ -60,7 +60,7 @@ if [[ -z "${AWS_PROFILE:-}${AWS_REGION:-}${AWS_DEFAULT_REGION:-}" ]]; then
   fi
 fi
 if command -v aws >/dev/null 2>&1 && ! aws sts get-caller-identity >/dev/null 2>&1; then
-  echo "错误：AWS 凭证不可用（aws sts get-caller-identity 失败）——请在有 Bedrock 凭证的机器上跑" >&2
+  echo "错误：AWS 凭证不可用（aws sts get-caller-identity 失败）——请在有 Bedrock 凭证的机器上运行" >&2
   exit 2
 fi
 

@@ -103,7 +103,7 @@ def readonly_flag_conflict(args) -> str | None:
     if not given:
         return None
     return (f"{' / '.join(given)} 是只读/准备动作，不能与 worker 镜像子命令同用（子命令会真推镜像、改账户）："
-            f"去掉它再跑子命令，或单独跑 `gherkai deploy {given[0]}` 看变更集。")
+            f"去掉它再运行子命令，或单独执行 `gherkai deploy {given[0]}` 看变更集。")
 
 
 def add_parsers(sub, *, provider: object | None = None, provider_error: str | None = None,

@@ -1866,7 +1866,7 @@ def test_explain_nonterminal_sync_run_says_partial(tmp_path, capsys):
     from gherkai_core.model import Status as S
     root, run_id = _explain_run(tmp_path, run_status=S.RUNNING)
     rc, out, err = _explain(capsys, root, run_id)
-    assert rc == 0 and "run 仍在跑，以下为已完成部分" in err and "scenario features/login.feature:12" in out
+    assert rc == 0 and "run 仍在运行，以下为已完成部分" in err and "scenario features/login.feature:12" in out
     rc, out, err = _explain(capsys, root, run_id, "--json")
     assert rc == 0 and err == "" and json.loads(out)["status"] == "running"
 

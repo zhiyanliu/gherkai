@@ -10,7 +10,7 @@
 > 逐个断言出现在本页，漏键即测试失败。本页只说明有哪些字段、各自的含义与出现条件，不说明理由——理由在 ADR。
 > **agent skill 里的那份是本页的确定性转换副本**（`cli/gherkai_cli/skills/gherkai/references/cli-json-contract.md`，随 CLI wheel 发行）：
 > 由 `tools/render_skill_contract.py` 生成，去掉本引用块与下方的姊妹页导航段，并把仓库内指针与内部用词改写成使用方可访问的形态；
-> 本页改动后需重跑生成器，`cli/tests/test_skill.py` 断言副本与转换结果相等（不用链接、不人工维护第二份的理由见 ADR 0043 决策四）。
+> 本页改动后需重新运行生成器，`cli/tests/test_skill.py` 断言副本与转换结果相等（不用链接、不人工维护第二份的理由见 ADR 0043 决策四）。
 
 姊妹页分工（本页只讲字段）：字段背后的判定语义（四层归约 / 状态 / 退出码）→ [`verdict-model.md`](./verdict-model.md)；`artifacts` 各键指向的落点与证据 → [`artifacts-and-evidence.md`](./artifacts-and-evidence.md)；字段何时具备内容（推进链与落地时机）→ [`execution-and-reconciliation.md`](./execution-and-reconciliation.md)。
 
@@ -110,7 +110,7 @@ RunState（控制面运行态）+ 附加 `artifacts`：
 
 step 级证据视图：判定树（**骨架 = 提交时的 job 定义**）+ 每个 AI step 的机读证据。**不表判定**：退出码只有 `0`
 （渲染成功，即使全部 step 没有证据、判定明细尚未落地）与 `2`（参数错 / run 或 scope 不存在 / 云端不可用）；
-判定码由 `run` 或 `status --wait` 给出。`--json` 下 stdout 只有这一个文档，「run 仍在执行」这类提示一律不输出（机读侧从顶层 `status` 读运行态）。
+判定码由 `run` 或 `status --wait` 给出。`--json` 下 stdout 只有这一个文档，「run 仍在运行」这类提示一律不输出（机读侧从顶层 `status` 读运行态）。
 
 | 键 | 类型 | 含义 |
 |---|---|---|

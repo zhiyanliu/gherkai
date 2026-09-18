@@ -166,7 +166,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"副本与源一致：{TARGET.relative_to(REPO_ROOT)}")
             return 0
         print(f"副本与源不一致（或不存在）：{TARGET.relative_to(REPO_ROOT)}"
-              f"——跑 `python3 tools/render_skill_contract.py` 重渲染", file=sys.stderr)
+              f"——运行 `python3 tools/render_skill_contract.py` 重渲染", file=sys.stderr)
         return 1
 
     TARGET.parent.mkdir(parents=True, exist_ok=True)

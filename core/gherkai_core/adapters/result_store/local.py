@@ -3,7 +3,7 @@
 数据面（追加为主）：一次 run 的每个 JobResult 落 `<root>/<run_id>/jobs/<encoded_scope_id>.json`，
 供 CI 读单 scope 判定真值。与 RunStore（控制面：run_meta.json + run_state.json）互补——数据面按 job 追加，
 单 job 文件自包含（嵌完整 Job def）。**两个写者、两种时序**：同步 `run` 由 `persist.RunPersistence.on_job_complete`
-每 job 完成即落、不等整 run 结束（ADR 0030 决定一/三）；detached / 无状态跑批由 `reconcile.tick` 的 finalize 分支在
+每 job 完成即落、不等整 run 结束（ADR 0030 决定一/三）；detached / 无状态批量运行由 `reconcile.tick` 的 finalize 分支在
 commit（CAS）**之前**从同一份 events 快照一次性落全部 job（ADR 0034 数据模型三件套表 / 0030 决定三「detached 路径同守」）——
 故 detached run 未达终态时本目录零文件，CLI 对用户说的「判定明细尚未落地」即此（ADR 0042 决策四）。
 
@@ -34,7 +34,7 @@ class LocalResultStore:
         """把单个 JobResult 落盘成 <root>/<run_id>/jobs/<encoded_scope_id>.json（追加，写面）。
 
         **原子写**（tmp+rename，见 `gherkai_core.adapters._atomic`）：读者是另一个进程且是设计内的——
-        `explain` 允许在 run 跑到一半时读已完成 job（ADR 0042 决策四），无状态跑批下两个推进者又会各写一遍
+        `explain` 允许在 run 跑到一半时读已完成 job（ADR 0042 决策四），无状态批量运行下两个推进者又会各写一遍
         全部 jobs/*.json（写面无跨进程锁，文件锁只护 run_state.json）。非原子写会让读者撞上 truncate 窗口、
         拿到空 JSON。
         """

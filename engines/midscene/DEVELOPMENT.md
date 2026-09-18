@@ -45,12 +45,12 @@ spikes/                ← 五段式自检脚本（不进包、不编译）
 
 进程入口是 `src/bin.mts`，**它本身即 worker 进程**：装好 loader 与 resolve hook 后直接调 `src/worker/run-scope.mts` 的 `main`，**不 spawn 子 node**（core 用 `pass_fds` 把事件通道 fd 继承给它直接启动的那个进程，中间多一层包装会导致 fd3 丢失，[ADR 0024](../../docs/adr/0024-worker-core-protocol.md) 三通道）。core 自行解析 `.feature`，把每个 step 经 ADR 0024 协议派发进来（[ADR 0022](../../docs/adr/0022-bdd-runner-retired-core-parses-thin-worker.md)）；cucumber-js 入口已随 v0.x BDD 层退役删除。
 
-正常经 `gherkai` CLI 运行；也可手动直跑调试：先按下节「从本 checkout 跑」执行 `npm ci && npm run build`，再在本目录下运行（`<job json>` 的字段说明与可直接改用的样例见 [ADR 0024](../../docs/adr/0024-worker-core-protocol.md)「输入（core → worker）」一节）：
+正常经 `gherkai` CLI 运行；调试时也可手动直接启动 worker：先按下节「从本 checkout 运行」执行 `npm ci && npm run build`，再在本目录下执行（`<job json>` 的字段说明与可直接改用的样例见 [ADR 0024](../../docs/adr/0024-worker-core-protocol.md)「输入（core → worker）」一节）：
 
 ```bash
 echo '<job json>' | AWS_REGION=us-east-1 node dist/bin.mjs
 
-# 两个非 job 入口（不建会话、不跑 job、零 AWS，[ADR 0036](../../docs/adr/0036-deterministic-capability-discovery.md)）；cli 的 `list-deterministic` / `doctor` / run 前置 / plan 标注即转述它们：
+# 两个非 job 入口（不建会话、不执行 job、零 AWS，[ADR 0036](../../docs/adr/0036-deterministic-capability-discovery.md)）；cli 的 `list-deterministic` / `doctor` / run 前置 / plan 标注即转述它们：
 node dist/bin.mjs --capabilities                          # 能力自述：{schema_version, engine, min_grace_s, deterministic_steps, model_id}（清单 = 注册表 pattern + description + example）
 echo '["页面地址匹配 \"/wiki/OpenAI\""]' | node dist/bin.mjs --match-steps   # 批量查询这些 step 各自命中的确定性 pattern
 ```
@@ -67,12 +67,12 @@ worker 侧**只有这两个 flag**：确定性清单是 `--capabilities` 对象�
 | `AWS_REGION` | 无（惰性读，未设即 fail-loud） | SigV4 签名与 base URL 的 region |
 | `GHERKAI_EXTRA_HTTP_HEADERS` | 无（未设即零行为变化） | JSON 对象；组合根在 `--expose-local` 档注入，worker 在 browser context 级设为额外请求头（[ADR 0035](../../docs/adr/0035-local-app-testing-via-tunnel.md)） |
 
-## 从本 checkout 跑
+## 从本 checkout 运行
 
 ```bash
 npm ci              # 装依赖（含 devDeps 里的 typescript，build 期需要）
 npm run build       # tsc → dist/*.mjs
-npm test            # node --import tsx --test "src/**/*.test.mts"（2026-09-17 实跑 183 pass / 0 fail）
+npm test            # node --import tsx --test "src/**/*.test.mts"（2026-09-17 实测 183 pass / 0 fail）
 ```
 
 让 CLI 指向本 checkout（dev 态没有已安装的 npm 包，走 worker 定位链**第一级** env 覆写，ADR 0037 决策 3）：
@@ -107,7 +107,7 @@ GHERKAI_WORKER_MIDSCENE_CMD="node $(pwd)/src/bin.mts"     # 需 Node ≥ 22.18�
 
 组合根经 `MIDSCENE_RUN_DIR` 注入 run 专属目录（`reports/<run_id>/midscene-run`，**必须绝对路径**：SDK 用 `path.resolve(process.cwd(), …)`），`report.html` 与 log/dump 全在其下；产物经 uploader 上传至 S3（[ADR 0029](../../docs/adr/0029-engine-artifacts-to-s3.md)），含 act 边界与中断时的 report 抢传（best-effort：失败不抛出、只记日志，不影响退出码）。`--no-report` 档由组合根经 env `GHERKAI_NO_ARTIFACTS=1` 告知：关闭 agent 的 `generateReport`、不抢传、不带 report ref；SDK 仍可能往 `./midscene_run` 写 log/dump，故该档下若无 `MIDSCENE_RUN_DIR`，即把它导向一次性临时目录，不写入用户 CWD。一次 run 的全部产物落点（两引擎横向、local 与 cloud 两档）见 [`docs/internals/artifacts-and-evidence.md`](../../docs/internals/artifacts-and-evidence.md)。
 
-## 跑 spike（五段式自检，可独立跑）
+## 运行 spike（五段式自检，可独立运行）
 
 ```bash
 AWS_REGION=us-east-1 node_modules/.bin/tsx spikes/01-model-sigv4.ts        # 模型连接（SigV4）
@@ -120,8 +120,8 @@ AWS_REGION=us-east-1 node_modules/.bin/tsx spikes/05-negative-assertions.ts # �
 ## 依赖分类（实测约束）
 
 - **运行时依赖全在 `dependencies`**（`@midscene/web`、`@playwright/test`、`playwright`、各 `@aws-sdk/*`、`@aws-crypto/sha256-js`（SigV4 签名所用的 sha256 实现，缺失则签名不可用）、`openai`、`tsx`）：npm 包的消费者只会装 `dependencies`，留在 `devDependencies` 里的运行时依赖必然在使用方环境失败（ADR 0033 记录的「不能 `--production`」陷阱在包化后成为必然）。`devDependencies` 只剩 build 与类型（`typescript`、`@types/node`）。
-- **SDK 与浏览器驱动钉精确版本**（`package.json` 里无 `^`）：`@midscene/web` `1.12.8`、`playwright` 与 `@playwright/test` 同为 `1.63.0`。发行的 npm 包与云端基底镜像都是装包时解析依赖、没有 lock，范围版本会使使用者运行的版本与验证过的版本不同（Nova 侧同口径：`nova-act==3.4.187.0`）。升级 = 改 pin → 全套测试 + 评测集真跑 → 随发版说明，见 [ADR 0042](../../docs/adr/0042-step-evidence-and-explain.md) 决策六。其余依赖（各 `@aws-sdk/*`、`@aws-crypto/sha256-js`、`openai`、`tsx`）仍用 `^`。
-- `@playwright/test` 是 `@midscene/web` 声明为 optional peer、但 `@midscene/web/playwright` 子入口**无条件 import** 的包，因此它也是运行时依赖（真跑打包安装才暴露）。
+- **SDK 与浏览器驱动钉精确版本**（`package.json` 里无 `^`）：`@midscene/web` `1.12.8`、`playwright` 与 `@playwright/test` 同为 `1.63.0`。发行的 npm 包与云端基底镜像都是装包时解析依赖、没有 lock，范围版本会使使用者运行的版本与验证过的版本不同（Nova 侧同口径：`nova-act==3.4.187.0`）。升级 = 改 pin → 全套测试 + 评测集实际运行 → 随发版说明，见 [ADR 0042](../../docs/adr/0042-step-evidence-and-explain.md) 决策六。其余依赖（各 `@aws-sdk/*`、`@aws-crypto/sha256-js`、`openai`、`tsx`）仍用 `^`。
+- `@playwright/test` 是 `@midscene/web` 声明为 optional peer、但 `@midscene/web/playwright` 子入口**无条件 import** 的包，因此它也是运行时依赖（打包安装后实际运行才暴露）。
 
 ## 容器镜像（维护者向）
 

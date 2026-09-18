@@ -200,7 +200,7 @@ def _print_human(result: dict) -> None:
     if not acts:
         # 无任何配对：中断过早（没跑到 step_done）/ run_id 不匹配。**注意**：votes>1 不会导致 acts 为空——它仍产
         # 一对 step_started/step_done（只是墙钟含 N act），会被下面标 multi_act 排除出分布、而非在此消失。
-        print("（无 step_started/step_done 配对——中断过早没跑到 step_done / run_id 不匹配？）")
+        print("（无 step_started/step_done 配对——中断过早未执行到 step_done / run_id 不匹配？）")
         return
     print(f"{'scope':<40} {'scenario':<28} {'step':>4} {'status':<8} {'wall_s':>7} {'worked_s':>9} {'seq':>12}  flag")
     for a in acts:
@@ -221,7 +221,7 @@ def _print_human(result: dict) -> None:
     if n_multi:
         # 硬约束违反告警（醒目）：votes>1 的 act 墙钟是 N 票合计、非单 act，已排除出分布——否则 p99 被膨胀。
         print(f"\n⚠️  {n_multi} 个 act 带 votes>1（MULTI-ACT）——其 wall_s 是 N 票（N 个 act）合计、非单 act，"
-              f"已排除出下面分布。单 act 墙钟标定须 --assertion-votes 1 重跑（见 docstring 硬约束）。")
+              f"已排除出下面分布。单 act 墙钟标定须 --assertion-votes 1 重新运行（见 docstring 硬约束）。")
     if s and s.get("n_acts", 0) > 0:
         print(f"\n=== 单 act wall_s 分布（n={s['n_acts']}，coarse≤1s={s['n_coarse_le_1s']}"
               f"{f'，已排除 {n_multi} 个 MULTI-ACT' if n_multi else ''}）===")
@@ -231,7 +231,7 @@ def _print_human(result: dict) -> None:
         print(f"对照 NOVA_ACT_TIMEOUT_S=120：p99={s['p99']}s → "
               f"{'单 act 远低于 act_timeout，grace margin 有压缩空间' if s['p99'] < 120 else '有 act 逼近/超 120，act_timeout 不宜降'}")
     elif n_multi:
-        print("\n（无干净单 act 可算分布——全部 votes>1 被排除。--assertion-votes 1 重跑。）")
+        print("\n（无干净单 act 可算分布——全部 votes>1 被排除。--assertion-votes 1 重新运行。）")
 
 
 def main() -> None:

@@ -100,17 +100,17 @@ def _add_selection_flags(p: argparse.ArgumentParser) -> None:
     """run / plan / submit 共用的筛选 flag（ADR 0041 决策一）。语义写在 help 里，解析在 `_build_selector`。"""
     p.add_argument(
         "--scope", action="append", default=None, metavar="ID",
-        help="只跑这些 scope（可重复，任一命中）：值 = 报告/JSON 里的 scope_id——@scope 的名字，或未标 scope 时的 <文件>:<行号>。"
-             "重跑某个失败的 job 用它最直接；与 --tags/--scenario 同给时都要满足",
+        help="只运行这些 scope（可重复，任一命中）：值 = 报告/JSON 里的 scope_id——@scope 的名字，或未标 scope 时的 <文件>:<行号>。"
+             "重新运行某个失败的 job 用它最直接；与 --tags/--scenario 同给时都要满足",
     )
     p.add_argument(
         "--tags", action="append", default=None, metavar="TAG[,TAG...]",
-        help="只跑带这些 tag 的 scenario：一个值内逗号分隔为「任一命中」，重复给本 flag 为「都要命中」；@ 可省。"
+        help="只运行带这些 tag 的 scenario：一个值内逗号分隔为「任一命中」，重复给本 flag 为「都要命中」；@ 可省。"
              "feature 行的 tag 已传给其下每个 scenario",
     )
     p.add_argument(
         "--scenario", action="append", default=None, metavar="SEL",
-        help="只跑这些 scenario（可重复，任一命中）：SEL = <文件>:<行号>，或 行号 / :行号，或标题的一段文字（区分大小写）。"
+        help="只运行这些 scenario（可重复，任一命中）：SEL = <文件>:<行号>，或 行号 / :行号，或标题的一段文字（区分大小写）。"
              "与 --tags 同给时两者都要满足",
     )
 
@@ -182,7 +182,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     p.add_argument("--version", action="version", version=f"%(prog)s {_dist_version()}")
     sub = p.add_subparsers(dest="command")
 
-    run = sub.add_parser("run", help="跑一个或多个 .feature")
+    run = sub.add_parser("run", help="运行一个或多个 .feature")
     run.add_argument("features", nargs="+", type=Path, help="一个或多个 .feature 路径")
     run.add_argument(
         "--default-engine", choices=sorted(_names.ENGINES), default="novaact",
@@ -190,11 +190,11 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     )
     run.add_argument(
         "--assertion-votes", type=int, default=1, metavar="N",
-        help="AI 断言（Then）投票次数（默认 1=单次判定）；调高（如 3/5）启用抖动检测：跑 N 次取多数票",
+        help="AI 断言（Then）投票次数（默认 1=单次判定）；调高（如 3/5）启用抖动检测：执行 N 次取多数票",
     )
     run.add_argument(
         "--max-concurrency", type=int, default=1,
-        help="同时在跑的 worker 上限（默认 1，护真实 AWS 成本/配额）",
+        help="同时运行的 worker 上限（默认 1，护真实 AWS 成本/配额）",
     )
     run.add_argument(
         "--default-job-timeout", type=float, default=300.0, metavar="S",
@@ -206,8 +206,8 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
         "--grace", type=float, default=None,
         help="停止后等 worker 优雅退出的宽限秒（默认按本 run 用到的引擎自己报的最短宽限推导，通常是分钟量级）；"
              "小于单个 AI 操作的时长会让浏览器会话泄漏，给过小值直接退 2。"
-             "只有本机跑才用它：--backend cloud 的停止宽限由部署侧的 gherkai deploy --stop-timeout 决定，"
-             "云端跑时给了本 flag 直接退 2",
+             "只有本机运行才用它：--backend cloud 的停止宽限由部署侧的 gherkai deploy --stop-timeout 决定，"
+             "在云端执行时给了本 flag 直接退 2",
     )
     # 隧道暴露本机应用的整套机制（凭据轮换、生命周期、谁负责拆）见 ADR 0035。
     run.add_argument(
@@ -224,8 +224,8 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     run.add_argument("--fail-fast", action="store_true", help="任一 job 崩则中止整批")
     run.add_argument("--json", action="store_true", help="只输出机器可读 JSON（不打进度/文本汇总）")
     run.add_argument("--quiet", action="store_true",
-                     help="少进屏幕/上下文：不打逐事件进度；本机跑时 worker 日志改落 <report-dir>/<run_id>/worker.log（--no-report 时落系统临时目录），"
-                          "只打一行位置（cloud 档 worker 在云端跑、日志在 CloudWatch，无此文件）；仍打文本汇总")
+                     help="少进屏幕/上下文：不打逐事件进度；本机执行时 worker 日志改落 <report-dir>/<run_id>/worker.log（--no-report 时落系统临时目录），"
+                          "只打一行位置（cloud 档 worker 在云端运行、日志在 CloudWatch，无此文件）；仍打文本汇总")
     # RunReport 是 run 的应得产物：默认总归集（manifest.json + index.html）到 <report-dir>/<run_id>/。
     run.add_argument(
         "--report-dir", default="reports", metavar="DIR",
@@ -267,7 +267,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
         "--worker-variant", default=None, metavar="NAME",
         help="[--backend cloud] 云端 worker 镜像 variant（= 一套具名的确定性 step 集烙成的定制镜像）："
              "缺省用部署的默认指针（`gherkai deploy` 初始化为 base）。提交时把它解析成本 run 各引擎的"
-             "精确 task-def revision 写进提交记录（一个 run 内镜像固定，别人重推同名 variant 不影响在跑的 run）；"
+             "精确 task-def revision 写进提交记录（一个 run 内镜像固定，别人重推同名 variant 不影响正在运行的 run）；"
              "某引擎缺该 variant 即退 2、不回落默认。variant 用 `gherkai deploy push-worker` 推（要装 deploy extra 并有 ECR 写权限，不改 IAM）。"
              "local 后端忽略（那边的确定性 step 直接从 --steps-dir 读、不经镜像）",
     )
@@ -290,12 +290,12 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
 
     # plan 预检（dry-run）：纯本地解析 + 分组；**零 AWS、零花费、零副作用**（ADR 0036——派发标注会起本地
     # 瞬时 worker 自述子进程做 match，不跑 job）。
-    pl = sub.add_parser("plan", help="预检 .feature：看 scope/job 分组 + 校验配置，不真跑（零费用）")
+    pl = sub.add_parser("plan", help="预检 .feature：看 scope/job 分组 + 校验配置，不实际运行（零费用）")
     pl.add_argument("features", nargs="+", type=Path, help="一个或多个 .feature 路径")
     pl.add_argument(
         "--default-job-timeout", type=float, default=300.0, metavar="S",
         help="未标 @timeout 的 scope 用的 job 墙钟超时秒（默认 300；<=0 表示不超时）——与 run/submit 同源，"
-             "让 plan 预检出的 Job 与真跑一致",
+             "让 plan 预检出的 Job 与实际运行一致",
     )
     pl.add_argument(
         "--default-engine", choices=sorted(_names.ENGINES), default="novaact",
@@ -313,19 +313,19 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     )
     pl.add_argument(
         "--expose-local", default=None, metavar="ORIGIN",
-        help="仅作标注：plan 显示替换前的原始地址（plan 不起隧道、零副作用；公网 URL 只在真跑时才有）",
+        help="仅作标注：plan 显示替换前的原始地址（plan 不起隧道、零副作用；公网 URL 只在实际运行时才有）",
     )
 
-    # ---- 无状态跑批（ADR 0034）：submit 提交完就走 / status 轮询收集 ----
+    # ---- 无状态批量运行（ADR 0034）：submit 提交完就走 / status 轮询收集 ----
     # local 档：submit setsid fork 一个 per-run 进程跑 reconcile loop（本机推进，无需常驻），CLI 立即退出。
-    sm = sub.add_parser("submit", help="[无状态跑批] 提交一批 .feature 到后台跑、立即返回 run_id（提交完就走）")
+    sm = sub.add_parser("submit", help="[后台运行] 提交一批 .feature 到后台运行、立即返回 run_id（提交完就走）")
     sm.add_argument("features", nargs="+", type=Path, help="一个或多个 .feature 路径")
     sm.add_argument("--default-engine", choices=sorted(_names.ENGINES), default="novaact",
                     help="未标 @engine 的 scope 用的默认引擎")
     _add_selection_flags(sm)
     sm.add_argument("--assertion-votes", type=int, default=1, metavar="N", help="AI 断言投票次数（默认 1）")
     sm.add_argument("--max-concurrency", type=int, default=1,
-                    help="同时在跑的 worker 上限（默认 1）；随提交记录生效，cloud 档受部署侧上限"
+                    help="同时运行的 worker 上限（默认 1）；随提交记录生效，cloud 档受部署侧上限"
                          "（后端 stack 的 MAX_CONCURRENCY）钳制")
     sm.add_argument(
         "--default-job-timeout", type=float, default=300.0, metavar="S",
@@ -353,7 +353,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     sm.add_argument("--profile", default=None, metavar="P", help="AWS profile（喂 subprocess worker）")
     # backend：local（默认，per-run 进程本机推进）/ cloud（Fargate + 云端 Lambda 事件驱动链推进，ADR 0034）。
     sm.add_argument("--backend", choices=["local", "cloud"], default="local",
-                    help="local=本机后台进程推进（默认）；cloud=Fargate + 云端 Lambda 事件驱动链推进（提交完真关机也跑完）")
+                    help="local=本机后台进程推进（默认）；cloud=Fargate + 云端 Lambda 事件驱动链推进（提交完真关机也会运行到结束）")
     sm.add_argument("--prefix", default=None, metavar="P", help="[cloud] 资源名前缀（默认 gherkai-；须与 CDK 一致）")
     sm.add_argument("--ddb-table", default=None, metavar="NAME", help="[cloud] 运行状态表（DynamoDB）名")
     # --s3-bucket 对 submit 有真实作用（run_store 挂的超大 step 参数卸载器写这个桶），故保留。
@@ -370,7 +370,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     # 伪装成「后端未部署」（那句诊断恒说「按 --prefix 拼出的名字不存在」，而显式给的名字并非 prefix 拼出）。
     # cloud submit 的探针一律按 --prefix 推——与部署侧同一套命名真源（ADR 0033 两层命名）。
 
-    st = sub.add_parser("status", help="[无状态跑批] 查一个 run 的进度/结果（--wait 轮询到完成）")
+    st = sub.add_parser("status", help="[后台运行] 查一个 run 的进度/结果（--wait 轮询到完成）")
     st.add_argument("run_id", help="submit 返回的 run_id")
     st.add_argument("--backend", choices=["local", "cloud"], default="local", help="须与 submit 一致")
     st.add_argument("--report-dir", default="reports", metavar="DIR",
@@ -722,7 +722,7 @@ def _cmd_doctor(args) -> int:
             mark = "✓" if c["ok"] else ("✗" if c["required"] else "-")
             print(f"{mark} {c['section']}.{c['name']}: {c['detail']}")
         if any(c["section"] == "provider" and not c["ok"] for c in checks):
-            print("\n部署工具链有缺口（provider 段）：只影响 gherkai deploy / push-worker，不影响提交与本机跑")
+            print("\n部署工具链有缺口（provider 段）：只影响 gherkai deploy / push-worker，不影响提交与本机运行")
         print("\n自检通过" if ok_all else "\n自检有失败项（✗ 为必修；- 为可选能力缺失）")
     return 0 if ok_all else 2
 
@@ -769,7 +769,7 @@ def _doctor_cloud(args, target, add, cred_fail: str) -> None:
         return
     if default_variant is None:
         add("backend", "worker.default", False,
-            "后端没有默认 worker variant 指针——请部署方跑一次 gherkai deploy 初始化；或提交时用 --worker-variant 显式指定")
+            "后端没有默认 worker variant 指针——请部署方运行一次 gherkai deploy 初始化；或提交时用 --worker-variant 显式指定")
         return
     add("backend", "worker.default", True, f"默认 variant {default_variant}", required=False)
     resolved_any = False
@@ -839,12 +839,12 @@ def _doctor_worker_grace(target, add, revisions: dict) -> None:
             ok_all = False
             details.append(
                 f"{eng}: 收尾需 {need:g}s > 云端停止宽限 {stop_timeout}s——极端情形（停止信号正好落在一次"
-                f"跑满时长上限的 AI 操作刚开始时）收尾会被强制终止：浏览器会话改由云端会话超时回收、该 scope 最后"
-                f"一两张截图可能没传上去。云端宽限还没顶到平台上限时，可让部署方跑一次 gherkai deploy --stop-timeout 抬高；"
+                f"耗满时长上限的 AI 操作刚开始时）收尾会被强制终止：浏览器会话改由云端会话超时回收、该 scope 最后"
+                f"一两张截图可能没传上去。云端宽限还没顶到平台上限时，可让部署方运行一次 gherkai deploy --stop-timeout 抬高；"
                 f"已经在上限了就抬不动了，这条差距是平台限制、属已知并接受的代价，不必处理"
             )
     if skipped:
-        details.append(f"本机没有 {'/'.join(skipped)} 的 worker，跳过（只提交、不在本机跑不需要它）")
+        details.append(f"本机没有 {'/'.join(skipped)} 的 worker，跳过（只提交、不在本机运行不需要它）")
     add("backend", "worker.grace", ok_all, "；".join(details), required=False)
 
 
@@ -887,7 +887,7 @@ def _load_and_plan(args) -> "list | int":
     # 筛选 flag 的空值拒收（ADR 0041 决策一）：空值静默降级成「不筛、跑全批」是最贵的静默错误（整批真跑）
     for raw in (getattr(args, "tags", None) or []):
         if not {t.strip().lstrip("@") for t in raw.split(",") if t.strip().lstrip("@")}:
-            _progress(f"--tags 的值不能为空（收到 {raw!r}）：想跑全部 scenario 就别给这个 flag")
+            _progress(f"--tags 的值不能为空（收到 {raw!r}）：想运行全部 scenario 就别给这个 flag")
             return 2
     for raw in (getattr(args, "scenario", None) or []):
         if not raw.strip():
@@ -1142,7 +1142,7 @@ def _cmd_plan(args) -> int:
         print(render.render_plan_text(jobs, args.default_engine, dispatch))
     if dispatch and any(p_ and "conflict" in p_ for p_ in dispatch.values()):
         # 「一条 step 最多命中一条模式」是注册表侧的硬约束（判据见 ADR 0022）；下面这句是产品面文案。
-        _progress("⚠ 存在命中多条确定性模式的 step（见上标注）：真跑时这些 step 将 error——"
+        _progress("⚠ 存在命中多条确定性模式的 step（见上标注）：实际执行时这些 step 将 error——"
                   "请收紧注册表模式，让每条 step 只命中一条。")
     if getattr(args, "expose_local", None):
         # 标注而不替换（ADR 0035 决策 2）：隧道 URL 是运行时产物，plan 零副作用、显示原始地址
@@ -1177,7 +1177,7 @@ def _print_artifact_lines(locations: dict) -> None:
 
 
 def _cmd_submit(args) -> int:
-    """[无状态跑批] 提交完就走（ADR 0034）：plan → 写 RunMeta+全 pending → 起首轮推进 → 打印 run_id → 立即退出。
+    """[无状态批量运行] 提交完就走（ADR 0034）：plan → 写 RunMeta+全 pending → 起首轮推进 → 打印 run_id → 立即退出。
 
     - **local**：setsid fork per-run 进程跑 reconcile loop 本机推进（无需常驻服务/云）；崩了 status --wait 接力。
     - **cloud**：只 create_run 写 definition 到 DDB（不起 task）→ 之后云端 Lambda 事件驱动链推进
@@ -1519,7 +1519,7 @@ def _render_status(state, args, *, wait_hint: str, locations: dict) -> int:
 
 
 def _cmd_status(args) -> int:
-    """[无状态跑批] 查 run 进度/结果。
+    """[无状态批量运行] 查 run 进度/结果。
 
     - local：读文件 RunState；--wait 则本机接力 tick 到终态（三触发源之一，per-run 崩了人来查也能续、须跑到底）。
     - cloud：读 DDB RunState；--wait 则检测卡住时 invoke kicker Lambda 做 kickoff 接力（踢一脚即可、云端链自接管）。
@@ -1771,7 +1771,7 @@ def _explain_emit(args, state, result_store, *, read_bytes, wait_hint: str) -> i
         return 0
     if state.status not in TERMINAL_STATUSES:
         # 同步 run 中途可见已完成的 job（逐 job 落盘）——说清「这只是已完成部分」，免得读者以为剩下的没跑
-        _progress("run 仍在跑，以下为已完成部分")
+        _progress("run 仍在运行，以下为已完成部分")
     print(render.render_explain_text(doc, expand_passed=expand_passed, full=args.full))
     return 0
 
@@ -1919,7 +1919,7 @@ def _cmd_run(args) -> int:
         # 是 task-def 期 stopTimeout，`FargateWorkerHandle.stop` 忽略运行期 grace），静默接受等于让用户以为设了
         # 一道会话泄漏防护——与 `--report-dir` 撞云端产物前缀即退 2 同口径：入口不许配无效值。
         _progress("--grace 在云端不生效：云端的停止宽限由部署侧的 gherkai deploy --stop-timeout 决定"
-                  "（gherkai doctor --backend cloud 会比对它够不够）；只有本机跑才用 --grace")
+                  "（gherkai doctor --backend cloud 会比对它够不够）；只有本机运行才用 --grace")
         return 2
     min_grace = 0.0
     if args.backend != "cloud":
@@ -2135,7 +2135,7 @@ def _cmd_run(args) -> int:
 
     # 这里起的是 schedule 的进程内驱动，非 reconcile.tick 那条推进路径（ADR 0034）。
     _progress(
-        f"run_id={run_id}  开始跑：启动 worker 建立 AgentCore 云端浏览器会话（将产生 AWS 费用）  "
+        f"run_id={run_id}  开始运行：启动 worker 建立 AgentCore 云端浏览器会话（将产生 AWS 费用）  "
         f"max_concurrency={args.max_concurrency} default_job_timeout={args.default_job_timeout}s ..."
     )
 
@@ -2163,7 +2163,7 @@ def _cmd_run(args) -> int:
                 result = _run_schedule()
             except Exception as e:
                 if compose.is_botocore_error(e):
-                    _progress(f"--backend cloud 运行期落库失败（DDB/S3 中途不可达，run 已开跑）：{e}")
+                    _progress(f"--backend cloud 运行期落库失败（DDB/S3 中途不可达，run 已开始运行）：{e}")
                     return 1
                 raise
         else:

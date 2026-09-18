@@ -11,7 +11,7 @@
 | ① 写 | 使用方项目的 `steps/*.py`（Nova）/ `steps/*.mts`（Midscene） | `@deterministic(正则, description=…, example=…)` / `deterministic(正则, handler, {description, example})` |
 | ② 装 | worker 进程启动的第一件事 | 内建脚手架先注册（模块 import 副作用），再按 env `GHERKAI_STEPS_DIR` 排序递归加载使用方的文件，注册进**同一张**表 |
 | ③ 查 | `list-deterministic` / `plan` 标注 / `doctor` | 三个命令都 spawn 一次瞬时 worker（自述或 match 查询），查询的都是这张表 |
-| ④ 跑 | worker 派发每个 step | 先查这张表，命中即调用使用方的 handler；未命中才落到内建 URL 导航 / AI |
+| ④ 执行 | worker 派发每个 step | 先查这张表，命中即调用使用方的 handler；未命中才落到内建 URL 导航 / AI |
 
 handler 怎么写（签名、`ctx` 提供什么、正则具名组如何传参）**不在本文范围**，见使用者向的 [`docs/user-guide/writing-deterministic-steps.md`](../user-guide/writing-deterministic-steps.md)（Python 与 TypeScript 两侧并排）。本文讲的是这四段之间的接缝，例如 handler 抛异常后如何落成判定（见 §1 的映射表）。
 
@@ -38,13 +38,13 @@ worker 收到的只有 `keyword` + 裸 `text`（+可选多行参数）。派发�
 | 抛其它异常（含 Nova 的「handler 是 async」→ `TypeError`） | `error` | `engine_error`；两侧都先经瞬时网络白名单判定（Nova `_classify_act_error` → `_is_transient_network`、Midscene `isTransientNetwork`），命中则细分 `network_error`（细分口径见 [`verdict-model.md`](./verdict-model.md) §3b） |
 | 一条 step 命中多条模式 → `DeterministicConflict` | `error` | 同上，冲突模式清单在 `message` 里 |
 
-两处容易误解的机制事实：**匹配是未锚定的 `search` / `exec`**（子串匹配，不是整句 `fullmatch`），**因此**模式写得过宽既容易误命中、也容易产生冲突；**第 2 级的 URL 导航不在注册表里**，故它既不出现在 `list-deterministic` 清单、也不会被 `plan` 标注（probe 只查询注册表，见 §2），但真跑时确实不发生 AI 调用，因此不产生 AI 费用。
+两处容易误解的机制事实：**匹配是未锚定的 `search` / `exec`**（子串匹配，不是整句 `fullmatch`），**因此**模式写得过宽既容易误命中、也容易产生冲突；**第 2 级的 URL 导航不在注册表里**，故它既不出现在 `list-deterministic` 清单、也不会被 `plan` 标注（probe 只查询注册表，见 §2），但实际执行时确实不发生 AI 调用，因此不产生 AI 费用。
 
-**匹配面只有 worker 一份**：CLI 与 `core` 不持有任何 step 正则，`core` 只下发裸 step 文本，命中与否全由 worker 的表判定（此项分工的理由见本节末权威行 ADR 0022「匹配放 worker，不放核心」条）。由此带来一条约束：两侧正则方言不同（Python `(?P<n>)` vs JS `(?<n>)`），CLI 侧任何「复刻一份匹配」的实现都会在某天与真跑结果不一致。
+**匹配面只有 worker 一份**：CLI 与 `core` 不持有任何 step 正则，`core` 只下发裸 step 文本，命中与否全由 worker 的表判定（此项分工的理由见本节末权威行 ADR 0022「匹配放 worker，不放核心」条）。由此带来一条约束：两侧正则方言不同（Python `(?P<n>)` vs JS `(?<n>)`），CLI 侧任何「复刻一份匹配」的实现都会在某天与实际运行结果不一致。
 
 > 权威：[ADR 0022](../adr/0022-bdd-runner-retired-core-parses-thin-worker.md)「设计要点」节「匹配放 worker，不放核心」条与冲突规则、[ADR 0020](../adr/0020-step-phrasing-default-ai-deterministic-scaffold.md) 决定 3（URL 形态自动分流）、[ADR 0024](../adr/0024-worker-core-protocol.md)（worker 收到的 step 形态）。判定语义（`failed` vs `error`、votes）见 [`verdict-model.md`](./verdict-model.md)。
 
-## 2. 三个入口，一张表：为什么清单、标注、真跑不可能分叉
+## 2. 三个入口，一张表：为什么清单、标注、实际执行不可能分叉
 
 同一个 worker 二进制有三个入口，全部在 `main()` 里**先加载 steps 目录、再分流**（Nova `run_scope.main()` 顶部；Midscene `run-scope.mts` `main()` 的 `await loadUserSteps()`）。加载位置本身即契约：
 
@@ -52,12 +52,12 @@ worker 收到的只有 `keyword` + 裸 `text`（+可选多行参数）。派发�
 |---|---|---|
 | `--capabilities`（自述） | `gherkai list-deterministic`、`doctor` 的 `steps.load.<engine>` 项、`run` 的本机前置（同一次 spawn 兼定 grace 下限）、`doctor --backend cloud` 比对云端停止宽限 | 输出一个 JSON 对象即退出：`deterministic_steps`（`list_registry()` / `listRegistry()`，每项 `pattern` / `description` / `example`）+ `min_grace_s` + `engine` / `schema_version`；先加载 steps 目录，加载失败同样 fail-loud |
 | `--match-steps`（查询） | `gherkai plan` 的派发标注 | 自 stdin 读入 step 文本数组 → `match_batch` / `matchBatch` → 输出一行 JSON 即退出 |
-| job 模式（无 flag） | `run` / `submit` 真跑 | 建立会话、按 §1 派发 |
+| job 模式（无 flag） | `run` / `submit` 实际执行 | 建立会话、按 §1 派发 |
 
 不可能分叉的两道结构保证：
 
-- **同一张表**：内建脚手架（Nova `deterministic_steps.py` / Midscene `deterministic.steps.mts`）靠模块顶层 import 的副作用注册，使用方的 `steps/` 靠 `load_user_steps` / `loadUserSteps` 注册，两者写进的是同一个 `_REGISTRY` / `REGISTRY`；三个入口都在加载之后才分流。所以清单列出的、`plan` 标注的、真跑派发的，是同一份真值，**没有第二事实源可漂移**（这也是「外置清单文件」被拒的理由，见 ADR 0036 被拒方案）。
-- **同一个扫描面**：`match()` 与 `match_batch()` 共用 `_hits()`（Nova）、`match()` 与 `matchBatch()` 共用 `scan()`（Midscene）。两个消费者只在「命中数如何处置」上分叉（真跑抛 `DeterministicConflict`，预检返回结构化 `{"conflict": [...]}`），匹配语义本身只有一份实现。
+- **同一张表**：内建脚手架（Nova `deterministic_steps.py` / Midscene `deterministic.steps.mts`）靠模块顶层 import 的副作用注册，使用方的 `steps/` 靠 `load_user_steps` / `loadUserSteps` 注册，两者写进的是同一个 `_REGISTRY` / `REGISTRY`；三个入口都在加载之后才分流。所以清单列出的、`plan` 标注的、实际执行时派发的，是同一份真值，**没有第二事实源可漂移**（这也是「外置清单文件」被拒的理由，见 ADR 0036 被拒方案）。
+- **同一个扫描面**：`match()` 与 `match_batch()` 共用 `_hits()`（Nova）、`match()` 与 `matchBatch()` 共用 `scan()`（Midscene）。两个消费者只在「命中数如何处置」上分叉（实际执行时抛 `DeterministicConflict`，预检返回结构化 `{"conflict": [...]}`），匹配语义本身只有一份实现。
 
 `plan` 因此仍然是**零 AWS、零花费、零副作用**，但它确实会启动进程：CLI 按引擎分组 step 文本，每个引擎至多 spawn 一次瞬时本地 worker（`compose.match_deterministic` → `compose._ask_worker`，带 `timeout_s` 预算，默认值见 code）。自述入口不建立浏览器会话、不访问 AWS、秒级返回，因此「plan 不花钱」这一承诺仍然成立；不再成立的只是早期的「plan 不起 worker」。
 
@@ -85,7 +85,7 @@ cloud 侧的关键是**镜像是唯一载体**：使用方的 `steps/` 靠三行
 由此得出两条对使用者最重要的推论：
 
 - **`--backend cloud` 下 `--steps-dir` 不生效**（`_resolve_steps_dir_for_backend`）：路径存在时只输出一句提示，definition 里也不写这个字段，因为本机路径无法进入容器；但**路径不是目录仍退 2**（那道校验排在清零之前，两档共用，见下 §4 表）。
-- **「改了 `steps/`，云端结果不变」是设计而非 bug**（新写的 step 会静默落到 AI，改过的 step 仍按镜像里的旧版本跑）：提交侧不比对镜像里 steps 的新旧（比对等于替使用方判断），改完必须重新 build + `push-worker`。要确认云端实际加载的是哪一套，唯一可靠的方式是向镜像里的 worker 查询，而非向本机查询。
+- **「改了 `steps/`，云端结果不变」是设计而非 bug**（新写的 step 会静默落到 AI，改过的 step 仍按镜像里的旧版本运行）：提交侧不比对镜像里 steps 的新旧（比对等于替使用方判断），改完必须重新 build + `push-worker`。要确认云端实际加载的是哪一套，唯一可靠的方式是向镜像里的 worker 查询，而非向本机查询。
 
 variant / 默认指针 / revision / digest 这些载体本身（SSM 键、ECR tag、退休与清理）见 [`cloud-backend-carriers.md`](./cloud-backend-carriers.md) 与 [`docs/user-guide/cloud-backend.md`](../user-guide/cloud-backend.md)。
 
@@ -102,7 +102,7 @@ variant / 默认指针 / revision / digest 这些载体本身（SSM 键、ECR ta
 | `--steps-dir` / `GHERKAI_STEPS_DIR` 指向的目录不存在 → 退 2 | 显式指定了一个位置，而该位置不存在或不是目录 = 配置错误（`_steps_dir_or_error`） | 改为正确路径。缺省的 `./steps` 不存在**不算错误**，多数项目本就没有确定性 step |
 | `plan` 直接退 2，提示「使用方 steps 加载失败」 | `plan` 自己的标注探活（`--match-steps`，`_probe_deterministic_dispatch` → `compose.match_deterministic`）遇到 `WorkerSelfDescribeError`；`run` 另有一道等价的本机前置，走 `--capabilities`（`_preflight_worker_runtimes`） | 同上，修复该文件。这是 `plan` 唯一**不降级**的失败：降级为「无标注」等于让读者误以为那些 step 会走 AI |
 | `plan` 只输出一行「（标注降级）引擎 X … 无派发标注」，计划本体照常输出 | 该引擎运行时未定位到（四级定位链全 miss），属环境问题 | 安装该引擎，或忽略（`plan` 对 miss 一律 best-effort；`run`/`submit`/`list-deterministic` 对同一件事退 2） |
-| 某 step 真跑记 `error`，`message` 里列出多条模式 | 一条 step 命中多条模式 | 收紧模式，或改 step 措辞避开；`plan` 会提前用 ⚠ 标出 |
+| 某 step 实际执行时记 `error`，`message` 里列出多条模式 | 一条 step 命中多条模式 | 收紧模式，或改 step 措辞避开；`plan` 会提前用 ⚠ 标出 |
 | `submit --backend cloud` 退 2，提示 variant 解析失败 | 请求的 variant 在该引擎当前版本下未推送过 / revision 已清理 / digest 已删除 | 由部署方 `push-worker` 推送；紧急情况下可临时用 `--worker-variant base`（`gherkai deploy` 已把本版本基底同步成 `base`）。CLI 旧于后端时提示改为「先升 CLI」，因为向旧版本命名空间推 tag 无法消除版本不一致 |
 | Midscene 报「某文件一条确定性 step 都没注册」 | 双实例守卫：裸 specifier 若解析到第二份包副本，注册会写进 worker 永不读取的表 | 确认文件 import 的是 `@gherkai/worker-midscene`，且在顶层调用了 `deterministic(...)` |
 
@@ -120,7 +120,7 @@ variant / 默认指针 / revision / digest 这些载体本身（SSM 键、ECR ta
 
 - 判定**不丢失**：RunReport 的判定树、`jobs/*.json`、退出码里，这一步的 `passed`/`failed`/`error` 与时长都在；
 - 但「它当时检查了哪个 URL、断言了什么」**不留痕迹**，只含确定性 step 的用例，其报告的人读部分是空的；
-- `gherkai explain` 里这一步的 `evidence_missing` 是 `no_ref`，与「导航步」「AI 跑了但抽取失败」在机读层同码，无法区分。
+- `gherkai explain` 里这一步的 `evidence_missing` 是 `no_ref`，与「导航步」「AI 执行过但抽取失败」在机读层同码，无法区分。
 
 「确定性 step 产物可观测性」这个缺口是**有意保留**的（保留的方向是让 handler 可选地产一条轻量产物，如当时 URL / 截图 / 检查描述），不是遗漏。证据/产物这一层的全貌见 [`artifacts-and-evidence.md`](./artifacts-and-evidence.md)。
 

@@ -62,7 +62,7 @@
       "id": "job",
       "type": "backend",
       "label": "job 收场态",
-      "sublabel": "跑完后才归约",
+      "sublabel": "运行结束后才归约",
       "stage": 3,
       "row": 0,
       "yOffset": 14,
@@ -117,7 +117,7 @@
       "items": [
         "core 不重算票、不重判 step，worker 上报的结论原样进入上一层归约",
         "worker 只上报 step 与 scenario 两级；job 与 run 的判定在 core",
-        "同步 run 与后台跑批共用同一份归约代码，两条路径收敛到同一终值"
+        "同步 run 与后台批量运行共用同一份归约代码，两条路径收敛到同一终值"
       ]
     },
     {

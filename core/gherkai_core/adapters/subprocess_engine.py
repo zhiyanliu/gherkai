@@ -48,7 +48,7 @@ class SubprocessWorkerHandle:
         _join_pumps(self._pumps, 0.5)
 
     def wait(self) -> int:
-        """阻塞等 worker 退出、返回 returncode（ADR 0034：local 无状态跑批的退出观察者用）。
+        """阻塞等 worker 退出、返回 returncode（ADR 0034：local 无状态批量运行的退出观察者用）。
 
         per-run 进程的 SubprocessLauncher 消费完 fd3 事件流后调此拿 exitcode 写 task_exited——扮演
         「平台侧退出观察者」（cloud 对位=ECS STOPPED 事件 payload 的 exitCode）。同步 run 路径不用（那条走
@@ -149,7 +149,7 @@ def _read_events(
     schedule 层的 `_heartbeat_wrap`（后台线程 + queue 超时）兜底唤醒并查超时（ADR 0026/0028）。
     心跳是「schedule 对任何慢/静默流的通用兜底」，不渗进端口契约，也不要每个 adapter 各写一遍。
 
-    raw_sink（可选，ADR 0034 无状态跑批）：非 None 时，每读到一行**原始 JSON 文本**（event_from_line 解析
+    raw_sink（可选，ADR 0034 无状态批量运行）：非 None 时，每读到一行**原始 JSON 文本**（event_from_line 解析
     **之前**）旁路调它一次——供 SubprocessLauncher 把原始行落 SqliteEventLog（存原样、读回复用 event_from_line，
     零新序列化、不破 wire 单向契约）。同步 run 路径不传（None）→ 零行为变化。sink 异常不打断事件流（吞掉，
     落库失败不该拖垮执行；reconciler 靠事件持久性推进、丢一条下轮 worker 不会重发，但那是 cloud 事件日志（DDB）
@@ -163,7 +163,7 @@ def _read_events(
                     continue
                 if raw_sink is not None:
                     try:
-                        raw_sink(line)  # 旁路落原始行（无状态跑批），解析前
+                        raw_sink(line)  # 旁路落原始行（无状态批量运行），解析前
                     except Exception:
                         pass
                 yield event_from_line(line)  # 解析失败 → 抛 ValueError，schedule 捕获记 error

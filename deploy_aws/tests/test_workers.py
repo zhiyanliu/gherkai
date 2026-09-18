@@ -501,7 +501,7 @@ def test_cleanup_keeps_a_retired_revision_still_referenced_by_a_mapping(aws):
 
 
 def test_cleanup_keeps_when_a_pending_run_references_it(aws):
-    """在跑 run 安全阀：STATE 顶层 `worker_task_def_arns` 里有它 + run 未到终态 → 留着。
+    """运行中 run 安全阀：STATE 顶层 `worker_task_def_arns` 里有它 + run 未到终态 → 留着。
 
     detached run 逐 job 起 task，删早了剩余 job 全起不来。查法 = status GSI 的 Query + `contains` 过滤（不 Scan）。
     """

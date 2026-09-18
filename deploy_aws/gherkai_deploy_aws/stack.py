@@ -74,7 +74,7 @@ class BackendStack(Stack):
         self._task_definitions()  # 2 引擎：ECR + task-def + task role + 模板 revision ARN 写 SSM
         self._ssm_network(vpc)   # 写 subnet/sg ID 供 cli 读
         self._ssm_deployment_stamp()  # 写 version / vpc 档（ADR 0037 决策 6，随事务同生死）
-        self._reconcile_lambdas(vpc)  # 无状态跑批（ADR 0034）：退出观察者 + reconciler + kicker 三 Lambda + EventBridge + Stream
+        self._reconcile_lambdas(vpc)  # 无状态批量运行（ADR 0034）：退出观察者 + reconciler + kicker 三 Lambda + EventBridge + Stream
 
     # ---- stopTimeout 解析（grace 真容器校准落点，ADR 0032）----
     def _resolve_stop_timeout(self) -> int:
@@ -161,7 +161,7 @@ class BackendStack(Stack):
         # events 表（events-out）：PK=pk(S，run_id#scope_id) / SK=seq(N)；body 非键属性不声明。
         # 开 TTL：expires_at（worker 写 now+7d epoch 秒，ADR 0033/0024）自动过期旧事件。
         # **开 Stream（NEW_IMAGE，ADR 0034）**：worker PutItem 执行事件 / 退出观察者写 task_exited → Stream 触发
-        # reconciler Lambda 推进（无状态跑批的事件驱动主链；同步 run 路径不消费 Stream，仍走 Query 轮询，ADR 0024）。
+        # reconciler Lambda 推进（无状态批量运行的事件驱动主链；同步 run 路径不消费 Stream，仍走 Query 轮询，ADR 0024）。
         self._events_table = dynamodb.Table(
             self, "EventsTable",
             table_name=names.default_name(self.prefix, names.BASE_EVENTS_TABLE),
@@ -457,7 +457,7 @@ class BackendStack(Stack):
             string_value=self._vpc_spec,  # 生效档，见 _network（new 档含所建 vpc-id、可回溯核对）
         )
 
-    # ---- 无状态跑批（ADR 0034）：退出观察者 + reconciler + kicker 三 Lambda + EventBridge + DDB Stream ----
+    # ---- 无状态批量运行（ADR 0034）：退出观察者 + reconciler + kicker 三 Lambda + EventBridge + DDB Stream ----
     def _reconcile_lambdas(self, vpc: ec2.IVpc) -> None:
         """事件驱动推进链（ADR 0034 端到端 cloud 流程）：
 
@@ -738,7 +738,7 @@ class BackendStack(Stack):
             return spec.origin
         raise RuntimeError(
             f"Lambda asset 缺依赖 {import_name!r}：当前 venv 里定位不到它。"
-            f"部署须在装了 `gherkai[deploy-aws]` 的同一个环境里跑——asset 从已安装包复制，"
+            f"部署须在装了 `gherkai[deploy-aws]` 的同一个环境里执行——asset 从已安装包复制，"
             f"漏一项的后果是 Lambda 运行期 ImportError、要到真起 run 才暴露"
         )
 

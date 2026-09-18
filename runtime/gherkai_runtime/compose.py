@@ -714,7 +714,7 @@ class CloudTarget:
 
     @property
     def detached_chain_lambdas(self) -> list[str]:
-        """无状态跑批事件驱动链的三 Lambda（ADR 0034）——detached submit 的 preflight 名单，顺序=链上顺序。"""
+        """无状态批量运行事件驱动链的三 Lambda（ADR 0034）——detached submit 的 preflight 名单，顺序=链上顺序。"""
         return [self.kicker_lambda, self.reconciler_lambda, self.exit_observer_lambda]
 
 
@@ -792,7 +792,7 @@ def build_cloud_stores(*, table: str, bucket: str, prefix: str = "",
         s3 = _make_s3_client(region=region, profile=profile)  # 一个 client 注入三个 S3 件套
 
     offloader = S3StepArgumentOffloader(s3, bucket, pfx)
-    # detached：无状态跑批 submit 传 True → create_run 的 STATE 带 detached 标记、触发 kicker 冷启动；
+    # detached：无状态批量运行 submit 传 True → create_run 的 STATE 带 detached 标记、触发 kicker 冷启动；
     # 同步 run 不传 → 不触发（否则双开推进器，ADR 0034）。
     run_store: RunStore = DynamoDBRunStore(ddb_table, arg_offloader=offloader, detached=detached)
     result_store: ResultStore = S3ResultStore(s3, bucket, pfx)
@@ -986,7 +986,7 @@ def build_fargate_engines(
             # 本 run 没解析该引擎的 worker revision（正常态：没用到它）——空腿，真去起才抛（见 _UnavailableEngine）。
             return _UnavailableEngine(WorkerVariantError(
                 f"引擎 {engine!r} 的 worker task-def revision 未随本 run 解析——提交时定死的任务定义里只解析了 "
-                f"{sorted(worker_task_defs) or '（空）'} 这些引擎。若本 run 真要跑该引擎，重新提交"
+                f"{sorted(worker_task_defs) or '（空）'} 这些引擎。若本 run 确实要运行该引擎，重新提交"
                 f"（提交时会按本 run 用到的引擎逐个解析 variant）。",
                 engine=engine))
         return FargateEngine(
@@ -1078,10 +1078,10 @@ def check_version_skew(ssm_version: str | None, cli_version: str | None) -> tupl
     if not ssm_version:
         return SKEW_WARN, (
             f"提示：后端没有版本戳（SSM /<prefix>backend/{_names.BACKEND_VERSION_KEY}）——这个部署早于版本戳机制，本次不比对版本、不拦。"
-            "请部署方跑一次 `gherkai deploy` 把戳写上。"
+            "请部署方运行一次 `gherkai deploy` 把戳写上。"
         )
     if not mine:
-        return SKEW_SKIP, "提示：跳过版本比对——本机未以包形式安装（源码直跑），取不到自身版本。"
+        return SKEW_SKIP, "提示：跳过版本比对——本机未以包形式安装（从源码直接运行），取不到自身版本。"
     cmp = _release_cmp(mine, ssm_version)  # None = 任一侧非纯发行版（判序 3）；补零比较在 _release_cmp
     if cmp is None:
         return SKEW_SKIP, (
@@ -1194,7 +1194,7 @@ def read_worker_default(*, prefix: str, region=None, profile=None, ssm=None) -> 
 def _no_default_pointer_error(prefix: str) -> WorkerVariantError:
     return WorkerVariantError(
         f"后端没有 worker 默认 variant 指针（SSM {ssm_path(prefix, _names.WORKER_DEFAULT_KEY)}）——"
-        f"这个部署还没走过 worker 镜像交付的初始化。请部署方跑一次 `gherkai deploy`（会把基底同步成 "
+        f"这个部署还没走过 worker 镜像交付的初始化。请部署方运行一次 `gherkai deploy`（会把基底同步成 "
         f"`base` 并把默认指针初始化为它），或提交时用 `--worker-variant <名>` 显式指定。"
     )
 
@@ -1241,8 +1241,8 @@ def _variant_miss_hint(*, engine: str, variant: str, tag: str, what: str,
                 f"再提交——**别**照旧版本推镜像（推的 tag 后端不解析）。")
     return (f"引擎 {engine} 的 worker variant {variant!r} 解析失败（{what}，镜像 tag {tag}）。"
             f"让部署方推上去：gherkai deploy push-worker <本地镜像> --engine {engine} --variant {variant}"
-            f"（build 镜像时必须带 --platform linux/amd64）；或临时用 --worker-variant base 先跑"
-            f"（部署方跑过本版本 gherkai deploy 即有）。")
+            f"（build 镜像时必须带 --platform linux/amd64）；或临时用 --worker-variant base 先运行"
+            f"（部署方执行过本版本 gherkai deploy 即有）。")
 
 
 def resolve_worker_variant(
@@ -1268,7 +1268,7 @@ def resolve_worker_variant(
     """
     if not cli_version:
         raise WorkerVariantError(
-            "取不到本机 CLI 版本（未以包形式安装、源码直跑）——worker 镜像 tag 含 CLI 版本，无从解析。"
+            "取不到本机 CLI 版本（未以包形式安装、从源码直接运行）——worker 镜像 tag 含 CLI 版本，无从解析。"
             "装成包（uv tool install gherkai / uvx）后再提交 cloud 档。")
     if ssm is None:
         ssm = _make_ssm_client(region=region, profile=profile)
@@ -1359,7 +1359,7 @@ def resolve_default_worker_task_defs(
     if not backend_version:
         raise WorkerVariantError(
             f"兼容路径无从解析 worker 镜像：读不到后端版本戳（SSM {ssm_path(prefix, _names.BACKEND_VERSION_KEY)}）——"
-            f"镜像 tag 含版本。请部署方跑一次 `gherkai deploy` 把戳写上。")
+            f"镜像 tag 含版本。请部署方运行一次 `gherkai deploy` 把戳写上。")
     variant = read_worker_default(prefix=prefix, ssm=ssm)
     if variant is None:
         raise _no_default_pointer_error(prefix)
@@ -1371,7 +1371,7 @@ def resolve_default_worker_task_defs(
             raise WorkerVariantError(
                 f"兼容路径解析失败：引擎 {engine} 在后端版本 {backend_version} 下没有默认 variant {variant!r} "
                 f"的镜像映射（SSM {ssm_path(prefix, _names.worker_image_key(engine, tag))}）。"
-                f"部署方跑 `gherkai deploy`（同步基底并初始化默认指针），或推上这个 variant："
+                f"部署方运行 `gherkai deploy`（同步基底并初始化默认指针），或推上这个 variant："
                 f"`gherkai deploy push-worker <本地镜像> --engine {engine} --variant {variant}`。",
                 engine=engine, variant=variant)
         out[engine] = rec["revision_arn"]
@@ -1457,7 +1457,7 @@ def preflight_cloud_resources(
             try:
                 resp = lam.get_function(FunctionName=fn)  # 返回体已含 Configuration.Environment，无需二次调用
             except (ClientError, BotoCoreError):
-                return _hint(f"Lambda 函数 {fn}（无状态跑批事件驱动链）")
+                return _hint(f"Lambda 函数 {fn}（无状态批量运行的事件驱动链）")
             if fn not in advancers:
                 continue
             env = (resp.get("Configuration", {}).get("Environment") or {}).get("Variables") or {}
@@ -1479,7 +1479,7 @@ def preflight_cloud_resources(
             remote = env.get("REPORT_DIR", "reports")  # 缺键 = Lambda 侧走自己的缺省
             if _normalize_prefix(remote) != _normalize_prefix(report_dir):
                 return (f"--backend cloud 产物前缀不一致：submit 侧 --report-dir={report_dir!r}，"
-                        f"后端 {fn} 的 REPORT_DIR={remote!r}。云端跑完的结果/报告按后端自己的 REPORT_DIR 落，"
+                        f"后端 {fn} 的 REPORT_DIR={remote!r}。云端运行产出的结果/报告按后端自己的 REPORT_DIR 落，"
                         f"你会在 --report-dir 下找不到结果。改用 --report-dir={remote!r}，"
                         f"或由部署方把后端 stack（gherkai-deploy-aws）的 REPORT_DIR 改成 {report_dir!r} 后重新部署。")
     return None

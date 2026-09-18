@@ -323,7 +323,7 @@ def _register_revision(ecs, *, template_arn: str, engine: str, image_ref: str, d
     if not hit:
         raise WorkerCommandError(
             f"模板 revision {template_arn} 里没有名为 {wanted!r} 的 container——container 名是 RunTask 逐字匹配的"
-            f"硬契约。模板不该被手工改过；重跑 `gherkai deploy` 让 stack 重建模板。"
+            f"硬契约。模板不该被手工改过；重新运行 `gherkai deploy` 让 stack 重建模板。"
         )
     for c in hit:
         c["image"] = image_ref  # `repo@sha256:<digest>`——按 digest 引用（被拒方案「revision 按 tag 引用镜像」）
@@ -350,7 +350,7 @@ def _retire(ecs, arn: str, *, now: datetime, out) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# 清理 pass（ADR 0038「不变量·清理 pass」）：静默期 + 在跑 run 安全阀，机会式、无定时任务
+# 清理 pass（ADR 0038「不变量·清理 pass」）：静默期 + 运行中 run 安全阀，机会式、无定时任务
 # ---------------------------------------------------------------------------
 
 @dataclass(frozen=True)
@@ -477,7 +477,7 @@ def _mapped_arn(raw: str):
     """映射 JSON → 它引用的 revision ARN（读不懂 → 不产出）。
 
     **读不懂时产出空** 有安全含义：那条映射保护不了它的 revision，于是该 revision 会被判成孤儿。可接受——
-    映射由本模块写、格式坏掉说明有人手改过 SSM；而静默期 + 在跑 run 安全阀仍然拦着。
+    映射由本模块写、格式坏掉说明有人手改过 SSM；而静默期 + 运行中 run 安全阀仍然拦着。
     """
     try:
         data = json.loads(raw)
@@ -560,7 +560,7 @@ def _template_arn(aws: Aws, *, prefix: str, engine: str) -> str:
         raise WorkerCommandError(
             f"读不到 {engine} 的 worker task-def 模板（SSM {path}）："
             f"这个参数由 stack 随 `gherkai deploy` 的 cdk 事务写入。\n"
-            f"出路：先跑 `gherkai deploy --prefix {prefix} …`（本 prefix 的后端可能还没部署，"
+            f"出路：先运行 `gherkai deploy --prefix {prefix} …`（本 prefix 的后端可能还没部署，"
             f"或上次部署用的 CLI 版本还没有 worker 镜像机制）。"
         )
     return arn
@@ -608,7 +608,7 @@ def _push_one(image: str, *, engine: str, variant: str, prefix: str, version: st
         )
     if previous_digest and previous_digest != digest:
         out(f"tag {tag} 原已存在：原 digest {names.short_digest(previous_digest)} → 新 digest {names.short_digest(digest)}"
-            f"（重推同名 variant 放行；在跑 run 手里的旧 revision 按 digest 指着旧镜像层、不受影响）")
+            f"（重推同名 variant 放行；运行中 run 手里的旧 revision 按 digest 指着旧镜像层、不受影响）")
 
     # 步 5：查重（模板 ARN、digest）二元组
     mapping = read_mapping(aws.ssm, prefix=prefix, engine=engine, tag=tag, version=version)
@@ -727,9 +727,9 @@ def _skew_gate(compose, *, prefix: str, cli_version: str | None, ssm, out) -> in
             out(message)
         return None
     out(message)
-    out(f"（本命令住 gherkai-deploy-aws，故临时跑同版本时要带 extra："
+    out(f"（本命令住 gherkai-deploy-aws，故临时运行同版本时要带 extra："
         f"uvx --from 'gherkai[deploy-aws]=={stamp}' gherkai deploy …）\n"
-        f"不放行的理由：CLI 跑在后端前面会把镜像推进一个没人解析的版本命名空间"
+        f"不放行的理由：CLI 版本新于后端会把镜像推进一个没人解析的版本命名空间"
         f"（tag 含 CLI 版本），而提交者那边的提交前检查又会提示他回到这一步、形成死循环。")
     return EXIT_PRECONDITION
 
@@ -768,7 +768,7 @@ def sync_base(*, prefix: str, engines, version: str, container, aws: Aws, now: d
     if not compose.is_pure_release(version):
         out(f"警告：CLI 版本 {version} 不是纯发行版（含 .dev/.post/本地段）——GHCR 上不存在对应基底镜像，"
             f"跳过基底同步。\n"
-            f"     dev 版要能跑：本地 build 一份镜像后 `gherkai deploy push-worker <镜像> --engine <e> "
+            f"     dev 版要能运行：本地 build 一份镜像后 `gherkai deploy push-worker <镜像> --engine <e> "
             f"--variant base`（默认指针已初始化为 base）。")
         return []
     results = []
@@ -852,7 +852,7 @@ def _repo_uri_from_template(ecs, *, template_arn: str, engine: str) -> str:
         head, _, last = ref.rpartition("/")
         return f"{head}/{last.split(':', 1)[0]}" if head else last.split(":", 1)[0]
     raise WorkerCommandError(
-        f"模板 revision {template_arn} 里没有名为 {wanted!r} 的 container，取不到 ECR repo——重跑 `gherkai deploy`。")
+        f"模板 revision {template_arn} 里没有名为 {wanted!r} 的 container，取不到 ECR repo——重新运行 `gherkai deploy`。")
 
 
 def run_deploy_steps(*, prefix: str, version: str, container, engines=None, region=None, profile=None,
@@ -875,7 +875,7 @@ def run_deploy_steps(*, prefix: str, version: str, container, engines=None, regi
         probe = container.probe()
         if probe:
             out(f"{probe}\nstack 已生效，但同步基底镜像要 pull/push——deploy 的机器需要容器引擎。\n"
-                f"装好后重跑 `gherkai deploy`（幂等收敛，不会重复注册）。")
+                f"装好后重新运行 `gherkai deploy`（幂等收敛，不会重复注册）。")
             return EXIT_FAILED
     try:
         sync_base(prefix=prefix, engines=engines, version=version, container=container,
@@ -883,7 +883,7 @@ def run_deploy_steps(*, prefix: str, version: str, container, engines=None, regi
         init_default_pointer(prefix=prefix, aws=aws, out=out)
         rederive_variants(prefix=prefix, engines=engines, version=version, aws=aws, now=now, out=out)
     except Exception as exc:  # 含 AWS 侧异常：cdk 已改过账户，一律归「四步失败」这一档、不抛 traceback
-        out(f"{exc}\nstack 已生效；worker 镜像步骤未完成——重跑 `gherkai deploy` 幂等收敛。")
+        out(f"{exc}\nstack 已生效；worker 镜像步骤未完成——重新运行 `gherkai deploy` 幂等收敛。")
         return EXIT_FAILED
     cleanup_pass(prefix=prefix, engines=engines, ssm=aws.ssm, ecs=aws.ecs, ddb=aws.ddb, now=now, out=out)
     return EXIT_OK
@@ -932,7 +932,7 @@ def list_workers(*, prefix: str, cli_version: str | None, engines=None, region=N
     if as_json:  # 机读形态（ADR 0041 决策三）：同一份 doc、不另拼
         out(json.dumps(doc, ensure_ascii=False, indent=2))
         return EXIT_OK
-    out(f"prefix {prefix}    版本 {version}    默认 variant {default or '（未初始化——跑一次 gherkai deploy）'}")
+    out(f"prefix {prefix}    版本 {version}    默认 variant {default or '（未初始化——运行一次 gherkai deploy）'}")
     for engine, info in doc["engines"].items():
         out(f"\n== {engine}（family {info['family']}，ECR repo {info['ecr_repo']}）==")
         variants = info["variants"]

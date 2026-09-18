@@ -156,7 +156,7 @@ def _dispatch_hint(dispatch: dict | None, scope_id: str, scenario_id: str, step_
     if not probe:
         return ""
     if "conflict" in probe:
-        return "  ← ⚠ 命中多条确定性模式（真跑该 step 将 error；请工程侧收紧注册表模式）"
+        return "  ← ⚠ 命中多条确定性模式（实际执行该 step 将 error；请工程侧收紧注册表模式）"
     return f"  ← 确定性: {probe.get('description', probe.get('pattern', ''))}"
 
 

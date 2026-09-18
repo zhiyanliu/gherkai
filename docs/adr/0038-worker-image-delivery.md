@@ -47,7 +47,7 @@ docker build --platform linux/amd64 -t acme-novaact:login .
 
 - **`gherkai deploy push-worker <本地镜像> --engine <novaact|midscene> --variant <名> [--set-default]`**：推送一个本地镜像并注册为该引擎的一个 variant。一次一个引擎，两个引擎跑两次（两引擎镜像本就分别 build）。
 - **`gherkai deploy list-workers`**：按 family 列 revision 并读 tags 与 SSM，输出各引擎当前版本的 variant、digest、推送时间、默认指针，以及已退休待清理与孤儿 revision；`--json` 出同一份内容的机读形态（字段表与 stdout/stderr 分流归 [0041](./0041-agent-facing-cli-affordances.md) 决策三）。
-- **`gherkai deploy delete-worker`**：留口子，落地时套同一套清理 pass 语义（退休 tag + 静默期 + 在跑 run 安全阀，见「不变量」）。
+- **`gherkai deploy delete-worker`**：留口子，落地时套同一套清理 pass 语义（退休 tag + 静默期 + 运行中 run 安全阀，见「不变量」）。
 - **`gherkai deploy` 的 worker 镜像四步**：登记模板（随 cdk 事务）、同步基底为 `base`、初始化默认指针、重派生既有 variant（后三步在 cdk 之后）。
 - **`push-worker` 与 `list-workers` 的前置**：先读 SSM `version` 戳与自身版本比对，**原样沿用** [0037](./0037-distribution-and-packaging.md) 决策 7 的三态——CLI **新于**后端 → 退 2 并指向「先 `gherkai deploy`，或用与后端同版本的 CLI（`uvx --from 'gherkai[deploy-aws]==X.Y.Z' gherkai deploy …`）」；CLI **旧于**后端 → 警告不拦；戳缺失 → 警告不拦；非纯净版本跳过；决策 7 不设放行口，此处同样没有。否则 CLI 跑在后端前面的人会把镜像静默推进一个没人解析的版本命名空间，而提交者的 preflight 提示又把他推回同一步、形成死循环。**`gherkai deploy` 的四步不做此前置**——deploy 本身就是改戳的动作（第 1 步随 cdk 事务写入新戳），前置在 cdk 前会把自己拦死、在 cdk 后恒真。
 - **定制镜像的构建不在命令族里**：模板见上。
@@ -78,7 +78,7 @@ docker build --platform linux/amd64 -t acme-novaact:login .
 - **revision 按 digest 引用镜像**，重推同名 variant 产生新 revision、在跑的 run 手里的旧 revision 不受影响；一个 run 内镜像固定。
 - **幂等**：push-worker 与 deploy 四步的每一步先查再做，中断后重跑收敛。ECR push 天然幂等（同 digest 无操作）；`RegisterTaskDefinition` 不幂等，故以二元组查重、孤儿 revision 按血缘 tags 复用而非重复注册；ECR 登录令牌 12 小时有效、重跑重登；SSM 写是覆盖语义。
 - **并发写者：最后写者赢，孤儿由对账回收**。SSM 无条件写，两人同时 push 同名 variant 会各注册一个 revision、后写者的映射赢；先写者的 revision 不在映射里也没被打退休 tag——**清理 pass 按 family 全量对账**（凡带血缘 tags、ACTIVE、不在 SSM **任何版本**的 `worker-image/*` 映射里的 revision 视作孤儿，视同退休、退休时刻取其 `registeredAt`；旧版本 variant 的 revision 仍在映射里、**不是**孤儿，其回收归 `delete-worker`），不只看映射。同一 variant 的并发 push 不建议但不禁止。
-- **清理 pass = 静默期 + 在跑 run 安全阀，机会式执行、无定时任务**：pass 由 `push-worker` 末步与 `gherkai deploy` 第四步末各跑一次（将来 `delete-worker` 也跑）；列 family 全部 revision 读 tags，对已退休（`gherkai:retired-at`）或对账出的孤儿，只在**退休满 1 小时**（覆盖「提交侧 preflight 刚解析成 R、definition 尚未落库」的窗口与注销后最多 10 分钟的生效延迟）且**无未到终态的 run 引用**时才 `DeregisterTaskDefinition` + `DeleteTaskDefinitions`；有引用或未满静默期 → 留到下次 pass。长期无人 push/deploy 时退休 revision 会滞留，无害（ACTIVE 但无人引用）。引用判定的访问路径定死：run 用到的 revision ARN 在 `create_run` 时**同时写成 STATE item 的顶层属性 `worker_task_def_arns`**（同 [0034](./0034-detached-batch-reconciler.md) 的 `detached` 顶层标记先例），runs 表加一个按 `status` 的稀疏 GSI（只索引 STATE item），清理用 `Query` 非终态状态 + `contains` 过滤——不扫全表（runs 表 `RETAIN`、无 TTL、随历史单调增长，Scan 成本无上界）。detached run 逐 job 起 task，删早了剩余 job 全部起不来。ECS 侧稳态只留每个 variant 当前一个 revision。**实装细则**：孤儿判据要枚举 SSM **全部版本**的映射，枚举失败 → **整趟放弃清理**（当作「没有映射」会把每个在用 revision 都判成孤儿，而真实 `registeredAt` 是过去时刻、静默期拦不住 → 批量误删）；`registeredAt` 取不到时按「此刻退休」（本次必然未满静默期，宁滞留不早删）；孤儿复用不含已退休 revision（退休 = 已判下岗，重注册一个干净的更便宜）。**退休 ≠ 可删**：已打 `retired-at` 但仍被任何版本的某个 `worker-image/*` 映射引用的 revision 不删（历史上曾被另一 variant 共用的状态），直到映射也不再引用——与在跑 run 引用并列为安全阀。**已知盲区**：`run --backend cloud --no-report`（有意的逃生舱）不写 STATE item，其 revision 引用对安全阀不可见——这样一个跑超过 1 小时的 run 期间别重推同名 variant。
+- **清理 pass = 静默期 + 运行中 run 安全阀，机会式执行、无定时任务**：pass 由 `push-worker` 末步与 `gherkai deploy` 第四步末各跑一次（将来 `delete-worker` 也跑）；列 family 全部 revision 读 tags，对已退休（`gherkai:retired-at`）或对账出的孤儿，只在**退休满 1 小时**（覆盖「提交侧 preflight 刚解析成 R、definition 尚未落库」的窗口与注销后最多 10 分钟的生效延迟）且**无未到终态的 run 引用**时才 `DeregisterTaskDefinition` + `DeleteTaskDefinitions`；有引用或未满静默期 → 留到下次 pass。长期无人 push/deploy 时退休 revision 会滞留，无害（ACTIVE 但无人引用）。引用判定的访问路径定死：run 用到的 revision ARN 在 `create_run` 时**同时写成 STATE item 的顶层属性 `worker_task_def_arns`**（同 [0034](./0034-detached-batch-reconciler.md) 的 `detached` 顶层标记先例），runs 表加一个按 `status` 的稀疏 GSI（只索引 STATE item），清理用 `Query` 非终态状态 + `contains` 过滤——不扫全表（runs 表 `RETAIN`、无 TTL、随历史单调增长，Scan 成本无上界）。detached run 逐 job 起 task，删早了剩余 job 全部起不来。ECS 侧稳态只留每个 variant 当前一个 revision。**实装细则**：孤儿判据要枚举 SSM **全部版本**的映射，枚举失败 → **整趟放弃清理**（当作「没有映射」会把每个在用 revision 都判成孤儿，而真实 `registeredAt` 是过去时刻、静默期拦不住 → 批量误删）；`registeredAt` 取不到时按「此刻退休」（本次必然未满静默期，宁滞留不早删）；孤儿复用不含已退休 revision（退休 = 已判下岗，重注册一个干净的更便宜）。**退休 ≠ 可删**：已打 `retired-at` 但仍被任何版本的某个 `worker-image/*` 映射引用的 revision 不删（历史上曾被另一 variant 共用的状态），直到映射也不再引用——与在跑 run 引用并列为安全阀。**已知盲区**：`run --backend cloud --no-report`（有意的逃生舱）不写 STATE item，其 revision 引用对安全阀不可见——这样一个跑超过 1 小时的 run 期间别重推同名 variant。
 - **默认指针不自动重置**（含版本升级）：它记的是团队意图。
 - **不判 steps 内容**：镜像里的 steps 是否最新由使用方管理；preflight 不比对镜像内 steps 与本地 steps——越权替使用方判断，且提交者（feature 作者、CI 机器）手头未必有 steps 目录、会被误拦。想区分就换 variant 名。
 
@@ -186,7 +186,7 @@ docker build --platform linux/amd64 -t acme-novaact:login .
 ## 重议闸门
 
 - 免容器引擎的基底同步（registry 到 registry 直拷）→ deploy 机器不再需要 docker，零 step 团队零容器工具链；podman 等其它容器引擎经同一口子接入。
-- `delete-worker` 落地：套退休 tag + 静默期 + 在跑 run 安全阀；顺带清旧版本 variant 的 ECR tag / untagged 层与 SSM 映射（届时才定 ECR 回收策略）。
+- `delete-worker` 落地：套退休 tag + 静默期 + 运行中 run 安全阀；顺带清旧版本 variant 的 ECR tag / untagged 层与 SSM 映射（届时才定 ECR 回收策略）。
 - ARM64 / Graviton 省钱需求成真 → 多架构基底 + 按 ZoneId 排除不支持的 AZ + variant 架构属性，方案已知、依赖侧静态核查已过；届时再评估复杂度是否值。
 - 出现「一个 run 内不同引擎用不同 variant」的真实需求 → `--worker-variant` 扩成 `engine=name` 形式，是加法。
 - Node 端 `module.registerHooks()` / 其它与镜像无关的 worker 运行时演进归 [0037](./0037-distribution-and-packaging.md)。

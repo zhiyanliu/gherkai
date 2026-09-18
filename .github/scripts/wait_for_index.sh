@@ -61,5 +61,5 @@ for i in $(seq 1 "$attempts"); do
   sleep "$interval"
 done
 
-echo "::error::等 ${name} ${version} 在 ${kind} 索引上可见超时（${attempts} × ${interval}s）。上游发布 job 若已成功，重跑本 job 即可（对同一 tag 幂等，ADR 0037 决策 8）"
+echo "::error::等 ${name} ${version} 在 ${kind} 索引上可见超时（${attempts} × ${interval}s）。上游发布 job 若已成功，重新运行本 job 即可（对同一 tag 幂等，ADR 0037 决策 8）"
 exit 1

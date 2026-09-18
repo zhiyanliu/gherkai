@@ -199,7 +199,7 @@ jobs:
           npm install -g npm@^11.5.1
           npm --version
 
-      - name: 已发行则跳过（本 job 可重跑）
+      - name: 已发行则跳过（本 job 可重新运行）
         id: check
         run: |
           set -euo pipefail

@@ -228,12 +228,12 @@ def test_cloud_rejects_explicit_grace_at_the_entrance(tmp_path, monkeypatch, cap
     assert called["n"] == 0 and record == [] and preflight_calls == [] and made["variant"] == []
     err = capsys.readouterr().err
     assert "--grace 在云端不生效" in err and "gherkai deploy --stop-timeout" in err
-    # flag 的自述与入口的拒绝不许漂移：--help 得自己说清「只有本机跑才用它」，否则用户是撞了才知道
+    # flag 的自述与入口的拒绝不许漂移：--help 得自己说清「只有本机运行才用它」，否则用户是撞了才知道
     import pytest
 
     with pytest.raises(SystemExit):
         m.main(["run", "--help"])
-    assert "只有本机跑" in capsys.readouterr().out
+    assert "只有本机运行" in capsys.readouterr().out
 
 
 def test_cloud_does_not_ask_local_worker_for_grace_floor(tmp_path, monkeypatch, capsys):

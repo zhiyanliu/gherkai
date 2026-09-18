@@ -6,24 +6,24 @@
 
 - **提 issue**：报告缺陷时附上可复现的最小 `.feature`、完整命令行与 `--json` 输出（`plan` / `run` / `status` / `explain` 均有机读形态）；提需求先写场景，再写期望的命令面。
 - **提 PR**：本仓库没有常驻 `main`，开发在版本线分支上（当前分支用 `git branch -a` 查看，如 `feat/v1.4-doc-skill`）；从该分支切出或 fork，PR 同样提回该分支；一个 PR 只做一件事。CI（`.github/workflows/ci.yml`）在 push 与 PR 上运行三件检查，清单与触发面见下文「发布与版本」节末。
-- **提交前必过**：仓库根 `uv run pytest` 与 `engines/midscene` 下 `npm test` 全部通过。单测通过不等于结论正确：结论一旦依赖 mock 之外的真实行为（进程与信号、并发时序、真实 IO 与网络、真 AWS），按 [`CLAUDE.md`](./CLAUDE.md)「代码纪律」把验证升级为真跑或对抗核查。
+- **提交前必过**：仓库根 `uv run pytest` 与 `engines/midscene` 下 `npm test` 全部通过。单测通过不等于结论正确：结论一旦依赖 mock 之外的真实行为（进程与信号、并发时序、真实 IO 与网络、真 AWS），按 [`CLAUDE.md`](./CLAUDE.md)「代码纪律」把验证升级为真实运行或对抗核查。
 - **commit 信息用中文、按逻辑批次**：一个成块的功能或一轮修正收口、测试通过后再提交，不为每次小改动提交；多行信息用 `git commit -F <文件>`。push 的时机由操作者决定（仓库公开）。
 - **改 code 前先对齐决策**：先确认相关 ADR（[`docs/adr/`](./docs/adr/)）里的契约与不变量；需要新决策时先落 ADR，再写实现。
 - **改完回头校准文档**：受影响的 ADR、`CONTEXT.md`、各包 `README.md` 与 `DEVELOPMENT.md`、`docs/` 下的页面一并修改。枚举型内容（目录树、选项表、模块清单、护栏清单）靠 `ls` / grep / `--help` 逐条对差集，不靠通读。
 
 ## 现状与版本线
 
-架构：**核心库 `core/`（Python）自解析 Gherkin → 分组 scope/job → 调度**，每个 scope spawn 一个**薄 worker 子进程**（Midscene=TS / Nova Act=Python），worker 遵循统一的 worker↔core 协议（ADR 0024）。`cli/` 是核心库的第一个前端（argparse + render），组合根共享层在 `runtime/`（ADR 0016「演进」节）。v0.x 的 cucumber-js/pytest-bdd 双 runner 直跑已**退役**（ADR 0016 / 0022 / 0023）。关键约束：**全栈托管在 AWS 内**（ADR 0009）；**UI 语言支持范围按引擎划分**，Midscene 不限、Nova Act 限英文（ADR 0001）。部件全景先读 [`docs/internals/architecture-overview.md`](./docs/internals/architecture-overview.md)：开头的全景图给出五层与层间指向，其后依次是各层职责、一次 run 的生命周期、本机与云端两种载体、包与发行物的对应，较下面的目录树更快建立全局认识。
+架构：**核心库 `core/`（Python）自解析 Gherkin → 分组 scope/job → 调度**，每个 scope spawn 一个**薄 worker 子进程**（Midscene=TS / Nova Act=Python），worker 遵循统一的 worker↔core 协议（ADR 0024）。`cli/` 是核心库的第一个前端（argparse + render），组合根共享层在 `runtime/`（ADR 0016「演进」节）。v0.x 的 cucumber-js/pytest-bdd 双 runner 直接执行的形态已**退役**（ADR 0016 / 0022 / 0023）。关键约束：**全栈托管在 AWS 内**（ADR 0009）；**UI 语言支持范围按引擎划分**，Midscene 不限、Nova Act 限英文（ADR 0001）。部件全景先读 [`docs/internals/architecture-overview.md`](./docs/internals/architecture-overview.md)：开头的全景图给出五层与层间指向，其后依次是各层职责、一次 run 的生命周期、本机与云端两种载体、包与发行物的对应，较下面的目录树更快建立全局认识。
 
 | 版本线                       | 内容                                                                                                                                                                                                                                   | 状态            |
 |------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-----------------|
 | v1.0 核心库                  | parse + scope 分组 + schedule + 4 ports（Engine/Run/Result/ReportStore）+ 实时写编排；双引擎薄 worker、AgentCore 会话、投票治理、RunReport、网络韧性                                                                                          | ✅ 真 AWS 端到端 |
-| v1.1 云端                    | store adapter（DynamoDB/S3，StepArgument offload 解 400KB 限）+ Fargate/ECS 执行面（`FargateEngine` + `gherkai-deploy-aws` 的 CDK stack）；boto3 只在云端路径懒加载（库层 extra `[aws]`，CLI 硬依赖 `gherkai-runtime[aws]`，ADR 0032/0033/0037） | ✅ 真部署真跑    |
-| v1.2 无状态跑批              | `submit` 提交即返回 + `status [--wait]`；local 档 per-run 后台进程 + SQLite events；cloud 档三 Lambda 事件驱动链（kicker / reconciler / exit-observer，DDB Stream + EventBridge）；job 墙钟预算作为最终保障（ADR 0034）                        | ✅               |
+| v1.1 云端                    | store adapter（DynamoDB/S3，StepArgument offload 解 400KB 限）+ Fargate/ECS 执行面（`FargateEngine` + `gherkai-deploy-aws` 的 CDK stack）；boto3 只在云端路径懒加载（库层 extra `[aws]`，CLI 硬依赖 `gherkai-runtime[aws]`，ADR 0032/0033/0037） | ✅ 真部署真运行  |
+| v1.2 无状态批量运行          | `submit` 提交即返回 + `status [--wait]`；local 档 per-run 后台进程 + SQLite events；cloud 档三 Lambda 事件驱动链（kicker / reconciler / exit-observer，DDB Stream + EventBridge）；job 墙钟预算作为最终保障（ADR 0034）                        | ✅               |
 | v1.3 本地应用测试 + 能力自述 | `--expose-local` ngrok 隧道（basic-auth 凭据每 run 轮换、终态即拆除，ADR 0035）；`list-deterministic` / `plan` 派发标注（worker 注册表自述，ADR 0036）                                                                                         | ✅               |
 | v1.4 分发与打包              | uv workspace 五包 + PyPI/npm 发行、git tag 版本单旋钮、`gherkai deploy` 内嵌 IaC、worker 镜像 variant 交付（ADR 0037 / 0038）                                                                                                               | ✅ 已发行        |
 
-v1 定位尚有一项验收未完成，前置条件是取得可用的真实业务系统：至少 3 个真实业务用例由 feature 作者零 step 代码写出并跑通，同时记录每一处不得不写代码的破例。该项自 v0.x 顺延至今，目前只有骨架用例（wikipedia / example.com）在验证方向。验收标准与顺延理由见 [ADR 0016](./docs/adr/0016-execution-architecture-core-lib-run-model.md)「版本切分」节，定位口径见 [ADR 0015](./docs/adr/0015-v1-positioning-smoke-not-regression.md)。
+v1 定位尚有一项验收未完成，前置条件是取得可用的真实业务系统：至少 3 个真实业务用例由 feature 作者零 step 代码写出并运行通过，同时记录每一处不得不写代码的破例。该项自 v0.x 顺延至今，目前只有骨架用例（wikipedia / example.com）在验证方向。验收标准与顺延理由见 [ADR 0016](./docs/adr/0016-execution-architecture-core-lib-run-model.md)「版本切分」节，定位口径见 [ADR 0015](./docs/adr/0015-v1-positioning-smoke-not-regression.md)。
 
 ## 目录结构
 
@@ -41,7 +41,7 @@ v1 定位尚有一项验收未完成，前置条件是取得可用的真实业�
 │   ├── README.md              ← 文档地图：使用者 / contributor / 想懂机理的人 / contributor 侧 AI agent 各自的入口
 │   ├── adr/                   ← 架构决策记录（0001-0045，每篇带 Status 头）
 │   ├── internals/             ← 机理横切解读（只讲 how、权威在 ADR + code）；篇目与主题归属见 docs/internals/README.md
-│   ├── user-guide/            ← 使用者文档（安装 / 写 feature / 跑与看结果 / 云端后端 / 配置 / 排错）；owner 表见 docs/user-guide/README.md
+│   ├── user-guide/            ← 使用者文档（安装 / 写 feature / 运行与看结果 / 云端后端 / 配置 / 排错）；owner 表见 docs/user-guide/README.md
 │   ├── ai-eng/                ← contributor 侧 AI agent 的工作文档：README.md（该层入口）+ REFERENCES.md（外部一手来源）+ {doc,code}-health-review.md（两条复盘方法）
 │   ├── journey/               ← 任务推进的 staging 区，按需创建（过程产物，吸收进 ADR/code 后即删，见 CLAUDE.md「文档纪律」）
 │   └── diagrams/              ← 文档里的图：图源 JSON + 导出 SVG + index.html（各层文档共用；GitHub Pages 只发布这一个目录）
@@ -50,7 +50,7 @@ v1 定位尚有一项验收未完成，前置条件是取得可用的真实业�
 │   ├── wikipedia_zh.feature                ← 非英文 UI 探针：中文维基 + 中文 step，两引擎同题（ADR 0001 的测量夹具与重议复测入口）
 │   ├── engine_routing.feature              ← @engine tag 路由验证
 │   ├── deterministic_anchor.feature        ← @deterministic 锚点验证（ADR 0022）
-│   └── concurrency_and_scope.feature       ← 手工真跑回归夹具：改调度/会话生命周期后重跑以验证 ADR 0019
+│   └── concurrency_and_scope.feature       ← 手工真实运行的回归夹具：改调度/会话生命周期后重新执行以验证 ADR 0019
 ├── core/                      ← 窄腰核心库（发行名 gherkai-core，Python，零引擎依赖，ADR 0016）
 ├── runtime/                   ← 产品本体 = 组合根共享层（发行名 gherkai-runtime；ADR 0016「演进」节；cli/Lambda/WebUI 的共同地基）
 ├── cli/                       ← 命令行前端（发行名 gherkai，命令 gherkai；ADR 0016）；随 wheel 发行的 agent skill 位于 gherkai_cli/skills/gherkai/（ADR 0043）
@@ -58,25 +58,25 @@ v1 定位尚有一项验收未完成，前置条件是取得可用的真实业�
 │   ├── midscene/              ← npm 包 @gherkai/worker-midscene（ESM）：薄 worker + 使用方 steps 文件唯一应 import 的公开 API
 │   └── novaact/               ← 发行包 gherkai-worker-novaact：薄 worker，`python -m` 入口
 ├── deploy_aws/                ← 发行包 gherkai-deploy-aws：`gherkai deploy` 的 AWS provider（Python CDK stack + 随部署打成 asset 的三个 Lambda handler 源 + worker 镜像交付命令，ADR 0033/0034/0037/0038）
-├── skills/                    ← 不是 skill 的源文件（源文件在 cli/、随 wheel 发行）：gherkai-evals/ = agent skill 的评测资产，维护者与 AI 侧、不分发，资产清单与跑法在 ADR 0043 决策七；结果工作区 gherkai-workspace/ 不入库
+├── skills/                    ← 不是 skill 的源文件（源文件在 cli/、随 wheel 发行）：gherkai-evals/ = agent skill 的评测资产，维护者与 AI 侧、不分发，资产清单与运行方法在 ADR 0043 决策七；结果工作区 gherkai-workspace/ 不入库
 ├── graphify-out/              ← 代码 + 文档知识图（供 AI agent 先查图再读源码；刷新见下文「知识图刷新」）
-└── tools/                     ← 复用工具库（真跑 / 诊断 / 校验 / 渲染，清单见下表；长期资产，见 CLAUDE.md「工作方式」）
+└── tools/                     ← 复用工具库（真实运行 / 诊断 / 校验 / 渲染，清单见下表；长期资产，见 CLAUDE.md「工作方式」）
 ```
 
-每个包目录都有两份文档：`README.md` = 发行包页面（逐字上 PyPI/npm，只写使用者内容）、`DEVELOPMENT.md` = 该包的 contributor 文档（模块布局、从 checkout 跑、测试、ADR 指针）——[`cli/`](./cli/DEVELOPMENT.md) · [`core/`](./core/DEVELOPMENT.md) · [`runtime/`](./runtime/DEVELOPMENT.md) · [`deploy_aws/`](./deploy_aws/DEVELOPMENT.md) · [`engines/novaact/`](./engines/novaact/DEVELOPMENT.md) · [`engines/midscene/`](./engines/midscene/DEVELOPMENT.md)。**文件级的模块布局只在各包 `DEVELOPMENT.md` 维护**，上面的目录树停在包级、不复述：两处并存必然漂移。
+每个包目录都有两份文档：`README.md` = 发行包页面（逐字上 PyPI/npm，只写使用者内容）、`DEVELOPMENT.md` = 该包的 contributor 文档（模块布局、从 checkout 运行、测试、ADR 指针）——[`cli/`](./cli/DEVELOPMENT.md) · [`core/`](./core/DEVELOPMENT.md) · [`runtime/`](./runtime/DEVELOPMENT.md) · [`deploy_aws/`](./deploy_aws/DEVELOPMENT.md) · [`engines/novaact/`](./engines/novaact/DEVELOPMENT.md) · [`engines/midscene/`](./engines/midscene/DEVELOPMENT.md)。**文件级的模块布局只在各包 `DEVELOPMENT.md` 维护**，上面的目录树停在包级、不复述：两处并存必然漂移。
 
-`tools/` 里的工具（做真跑、诊断、校验之前先检索本目录，避免重复实现；每个脚本的头注释写明用途、前置与判读；篇幅超过头注释的工具另有同目录手册 `tools/<name>.md`，属 contributor 文档、随脚本一起维护，下表为索引）：
+`tools/` 里的工具（做真实运行、诊断、校验之前先检索本目录，避免重复实现；每个脚本的头注释写明用途、前置与判读；篇幅超过头注释的工具另有同目录手册 `tools/<name>.md`，属 contributor 文档、随脚本一起维护，下表为索引）：
 
 | 工具                                            | 用途                                                                                                                                                                                                         |
 |-------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `e2e_harness.py`（用法与判读见 `e2e_harness.md`） | worker 端到端真跑：真 spawn worker、真事件流、真会话，可注入中断时机；opt-in、不进 pytest、产生真实 AWS 费用                                                                                                        |
+| `e2e_harness.py`（用法与判读见 `e2e_harness.md`） | worker 端到端真实运行：真 spawn worker、真事件流、真会话，可注入中断时机；opt-in、不进 pytest、产生真实 AWS 费用                                                                                                        |
 | `ecs_task_timing.py`                            | 采集 ECS task 生命周期的时间字段，标定 SIGTERM → 退出的真实墙钟预算（用于校准 grace / stopTimeout）                                                                                                             |
 | `events_wallclock.py`                           | 从 events 表还原 worker emit 时刻，计算单 act 墙钟分布（用于校准 grace margin）                                                                                                                                 |
 | `build_diagrams.mjs`                            | 文档图两段式构建：`docs/diagrams/*.json` → `archify deliver` 出可交互 HTML（确定性渲染）→ 无头 Chrome 从 HTML 导出 SVG（`--png` 另导 PNG 供目视）；依赖 `engines/midscene` 的 Playwright 与本机 Chrome（见下文「图」） |
 | `render_skill_contract.py`                      | `--json` 契约页 → agent skill 里那份副本的确定性转换（ADR 0043 决策四）                                                                                                                                        |
 | `graphify_refresh.sh`                           | 知识图的 LLM 侧刷新（见下文「知识图刷新」）                                                                                                                                                                      |
 
-## 开发环境（从 checkout 跑）
+## 开发环境（从 checkout 运行）
 
 前置工具链：Python ≥ 3.13 + [uv](https://docs.astral.sh/uv/)；Node ≥ 22（Midscene worker 与 `gherkai deploy` 均需要）；改部署侧另需容器引擎（docker）。各项安装方法与版本要求见 [`docs/user-guide/getting-started.md`](./docs/user-guide/getting-started.md)。
 
@@ -93,7 +93,7 @@ export GHERKAI_WORKER_MIDSCENE_CMD="node $PWD/engines/midscene/dist/bin.mjs"
 
 ## 在有凭证的机器上验证未发布的工作树
 
-本机没有 AWS 凭证时，真跑（本机档 `run` 同样要连 AgentCore 与模型）改在一台有凭证的开发机上进行；机器、前缀、region 这类环境事实不入 repo，由操作者自行留存备忘。流程如下，其后每条注意事项各对应一次真实发生过的失败：
+本机没有 AWS 凭证时，实际运行（本机档 `run` 同样要连 AgentCore 与模型）改在一台有凭证的开发机上进行；机器、前缀、region 这类环境事实不入 repo，由操作者自行留存备忘。流程如下，其后每条注意事项各对应一次真实发生过的失败：
 
 ```bash
 # 1) 同步工作树（半成品不 push 到 public repo）；排除本地产物，保留 .git 使版本可从 tag 派生
@@ -132,7 +132,7 @@ uv run pytest core/tests -m integration          # 集成测试：假定真表/�
 | `cli/tests/test_skill.py`                      | 随 wheel 发行的 agent skill：文案与指针形态、`gherkai <子命令> --flag` 组合对照 argparse 真值与「仅某命令」排他、反引号键名对照契约页、契约页转换副本相等、目录白名单与形态上限、评测 fixture 的 ignore 行为与可搬迁不变量                                                                                               |
 | `deploy_aws/tests/test_skill_deploy_tokens.py` | skill 里 `deploy` / `destroy` 那批命令 token 对照 provider 的真 parser（provider 位于 `[deploy-aws]` extra，命令行前端的测试不应强依赖它）                                                                                                                                                                          |
 
-禁词表、相对链接正则与 skill 的命令 token 抽取器位于 `cli/tests/_doc_rules.py`，五个消费方共用（四份护栏 `test_package_readmes.py` / `test_user_docs.py` / `test_skill.py` / `test_skill_deploy_tokens.py`，外加 `tools/render_skill_contract.py` 的自查），不应再复制第二份。单测通过不等于结论正确：凡结论依赖 mock 之外的真实行为（进程/信号/并发/真 AWS），按 CLAUDE.md「绿≠对」升级验证；端到端真跑的现成工具在 `tools/`，用前先检索该目录、避免重复实现。
+禁词表、相对链接正则与 skill 的命令 token 抽取器位于 `cli/tests/_doc_rules.py`，五个消费方共用（四份护栏 `test_package_readmes.py` / `test_user_docs.py` / `test_skill.py` / `test_skill_deploy_tokens.py`，外加 `tools/render_skill_contract.py` 的自查），不应再复制第二份。单测通过不等于结论正确：凡结论依赖 mock 之外的真实行为（进程/信号/并发/真 AWS），按 CLAUDE.md「绿≠对」升级验证；端到端真实运行的现成工具在 `tools/`，用前先检索该目录、避免重复实现。
 
 **图**：全部图统一用 archify，图源与静态图在 [`docs/diagrams/`](./docs/diagrams/)：改图 = 修改 `<name>.json`，运行 `node tools/build_diagrams.mjs [docs/diagrams/<name>.json]`（deliver 出 HTML、再从 HTML 导出 SVG；`--png` 另导 PNG 只供目视、不入库），JSON 与 SVG 同 commit；正文以 markdown 图片语法嵌入 `docs/diagrams/<name>.svg`。HTML 默认不入库（`.gitignore` 排除）；只有发布到 GitHub Pages 的可交互大图才入库 HTML，发布 = `.gitignore` 加白名单行 + `docs/diagrams/index.html` 加链接 + HTML 入库三者同 commit，[`.github/workflows/pages.yml`](./.github/workflows/pages.yml) 把该目录原样上传。图上只画结构与指向，易漂移的字面量留在正文；图源零内部指代（护栏 `cli/tests/test_user_docs.py` 扫 JSON、断言 JSON 与 SVG 成对且 SVG 末尾的图源 sha256 指纹与 JSON 一致——图源改动未重新导出即在 CI 中失败、正文无 mermaid 块、入库 HTML 有图源且在 index 有链接）。形态、立图门槛与被拒方案见 [ADR 0045](./docs/adr/0045-documentation-layering-and-placement.md) 决策七。作图方法（类型、内容规则、布局清单、archify 技法）见 [`docs/ai-eng/diagram-authoring.md`](./docs/ai-eng/diagram-authoring.md)；在 Claude Code 里 `/diagram` 或提到改图即自动加载该方法（项目级 skill [`.claude/skills/diagram/`](./.claude/skills/diagram/SKILL.md)）。
 
@@ -176,7 +176,7 @@ git tag vX.Y.Z && git push origin vX.Y.Z   # GitHub Actions 接手：gate（tag 
 
 发版前写 `CHANGELOG.md` 的该版节（Keep a Changelog 形态、使用者语言：小节名用 新增 / 变化 / 移除 / 修复，外加本项目自加的 升级须知）；发布 gate 校验本 tag 在 changelog 里有非空节，缺失则发版失败；GitHub Release 正文 = 该节 + `.github/release_body_footer.md` 的固定块，由 `.github/scripts/release_notes.py` 渲染（ADR 0045 决策五）。
 
-发版后的验证中有一项需手动执行：把新版本部署到验证环境后，用 agent skill 的云端命令链（`doctor --backend cloud --prefix <前缀>` → `plan` → `submit` → `status --wait` → `explain`）在有凭证的机器上完整执行一次；云端这一档是 skill 评测里唯一没被真实数据覆盖的部分（评测舞台刻意不配凭证），结论回填 ADR 0043「验证」节。同一次真跑另需核验一项：Nova Act 的 workflow definition 名已改为产品名 `gherkai-worker`（原 spike 期代号），首次 `run --engine novaact` 须在使用方账户自动建出该名的 definition 并 run 到终态；create-if-not-exists 跨真实 AWS 边界，单测通过不构成证据（ADR 0004）。
+发版后的验证中有一项需手动执行：把新版本部署到验证环境后，用 agent skill 的云端命令链（`doctor --backend cloud --prefix <前缀>` → `plan` → `submit` → `status --wait` → `explain`）在有凭证的机器上完整执行一次；云端这一档是 skill 评测里唯一没被真实数据覆盖的部分（评测舞台刻意不配凭证），结论回填 ADR 0043「验证」节。同一次实际运行另需核验一项：Nova Act 的 workflow definition 名已改为产品名 `gherkai-worker`（原 spike 期代号），首次 `run --engine novaact` 须在使用方账户自动建出该名的 definition 并 run 到终态；create-if-not-exists 跨真实 AWS 边界，单测通过不构成证据（ADR 0004）。
 
 CI（任意分支的 push、PR、手动触发）运行三件：全成员 `pytest`、midscene 的 `npm ci && npm run build && npm test`、`uv build --all-packages` 的打包元数据 smoke + 发布 gate 演练。一次性人工前置（PyPI trusted publisher、npm trusted publisher、GHCR 可见性核对）、TestPyPI 演练，以及**不推 tag 也可做的本地静态校验**，全在 [`.github/workflows/README.md`](./.github/workflows/README.md)；决策与理由在 [ADR 0037 决策 8](./docs/adr/0037-distribution-and-packaging.md)。
 
@@ -193,4 +193,4 @@ CI（任意分支的 push、PR、手动触发）运行三件：全成员 `pytest
 
 另外两处：术语在 [`CONTEXT.md`](./CONTEXT.md)；contributor 侧 AI agent 的工作文档在 [`docs/ai-eng/`](./docs/ai-eng/README.md)，含外部一手来源 [`REFERENCES.md`](./docs/ai-eng/REFERENCES.md) 与两条复盘方法。
 
-- 复盘方法（给 contributor 侧 AI agent 执行的任务指令，不是人手工清单）：[`docs/ai-eng/doc-health-review.md`](./docs/ai-eng/doc-health-review.md)（全部文档对照 code 去漂移）/ [`docs/ai-eng/code-health-review.md`](./docs/ai-eng/code-health-review.md)（全部生产代码查死代码 / 过时 / 违背 ADR）。事件驱动：显著构建里程碑或一批 ADR 增改后运行，不做周期性空跑。Claude Code 里执行 `/doc-health-review`、`/code-health-review`（入口在 [`.claude/commands/`](./.claude/commands/)，作用是把方法文档提供给 agent 并强调不可跳过的步骤）；其它 AI coding 工具把对应方法文档整份作为任务指令即可。客观类问题由 agent 直接修改，主观类出报告待批。
+- 复盘方法（给 contributor 侧 AI agent 执行的任务指令，不是人手工清单）：[`docs/ai-eng/doc-health-review.md`](./docs/ai-eng/doc-health-review.md)（全部文档对照 code 去漂移）/ [`docs/ai-eng/code-health-review.md`](./docs/ai-eng/code-health-review.md)（全部生产代码查死代码 / 过时 / 违背 ADR）。事件驱动：显著构建里程碑或一批 ADR 增改后运行，不做周期性空转。Claude Code 里执行 `/doc-health-review`、`/code-health-review`（入口在 [`.claude/commands/`](./.claude/commands/)，作用是把方法文档提供给 agent 并强调不可跳过的步骤）；其它 AI coding 工具把对应方法文档整份作为任务指令即可。客观类问题由 agent 直接修改，主观类出报告待批。

@@ -2,7 +2,7 @@
   "schema_version": 2,
   "diagram_type": "workflow",
   "meta": {
-    "title": "一条确定性 step 的四段路径：写 · 装 · 查 · 跑",
+    "title": "一条确定性 step 的四段路径：写 · 装 · 查 · 执行",
     "locale": "zh-CN",
     "quality_profile": "showcase",
     "legend": {
@@ -21,7 +21,7 @@
           "label": "查询入口"
         },
         "messagebus": {
-          "label": "真跑时派发"
+          "label": "实际执行时派发"
         }
       }
     }
@@ -50,7 +50,7 @@
     },
     {
       "id": "phUse",
-      "label": "③ 查 · ④ 跑：注册表的下游",
+      "label": "③ 查 · ④ 执行：注册表的下游",
       "fromCol": 4,
       "toCol": 5
     }
@@ -193,7 +193,7 @@
       "dot": "cyan",
       "title": "一张注册表，无第二真值源",
       "items": [
-        "内建脚手架与使用方 steps/ 注册进同一张表：清单列出的、预检标注的、真跑派发的是同一份",
+        "内建脚手架与使用方 steps/ 注册进同一张表：清单列出的、预检标注的、实际执行时派发的是同一份",
         "每个 worker 进程先加载注册表、再按入口分流，三种用法不存在分叉"
       ]
     },

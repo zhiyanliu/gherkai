@@ -1,4 +1,4 @@
-"""SqliteEventLog（ADR 0034）：local 无状态跑批的持久事件通道。
+"""SqliteEventLog（ADR 0034）：local 无状态批量运行的持久事件通道。
 
 worker 事件（原始 ADR 0024 JSON 行 + worker 段单调 seq）+ 平台侧退出记录（task_exited，独立键空间）
 都落一个本机 SQLite 文件；reconciler 从这里全量重放（`records()` → `project()` 的 EventRecord 列表）。

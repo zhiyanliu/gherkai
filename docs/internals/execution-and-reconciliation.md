@@ -7,7 +7,7 @@
 gherkai 执行一个 run 有**两种驱动模型**，按命令分流：
 
 - **同步驱动（`run`，下称前台）**：CLI 进程内的 `schedule()`（`core/gherkai_core/schedule.py`）全程在线，在一个循环内完成启动 worker、消费事件流、判定超时、收集结果。local 档关闭 CLI 即中止（worker 随事件管道断开而退出）；cloud 档关闭 CLI 只是放弃接收结果——已在运行的 Fargate task 没有调用方发起 StopTask，会运行至结束并持续计费。
-- **无状态驱动（`submit` + `status`，下称后台/后台跑批）**：没有常驻的「调度进程」。核心是一个**纯编排步骤 `reconcile.tick`**（`core/gherkai_core/reconcile.py`；判定与决策是 `gherkai_core.project` 的纯函数，副作用全经注入的 EventLog/RunStore/Launcher）：全量重放事件 → 推算当前应执行的动作 → 条件写落库 → 抢占启动下一个 job。**任何宿主都可以调用它推进一步**：它不保存自身状态、不假设上一步由谁推进，这是「无状态」的含义。
+- **无状态驱动（`submit` + `status`，下称后台/后台运行）**：没有常驻的「调度进程」。核心是一个**纯编排步骤 `reconcile.tick`**（`core/gherkai_core/reconcile.py`；判定与决策是 `gherkai_core.project` 的纯函数，副作用全经注入的 EventLog/RunStore/Launcher）：全量重放事件 → 推算当前应执行的动作 → 条件写落库 → 抢占启动下一个 job。**任何宿主都可以调用它推进一步**：它不保存自身状态、不假设上一步由谁推进，这是「无状态」的含义。
 
 不论哪种驱动，worker 与 `core` 之间的回传只有两类：**事件流**（`scope_started`/`step_done`/… 的逐条事件）与**进程退出信号**（退出码由父进程或平台观察得到，不由 worker 上报；[ADR 0024](../adr/0024-worker-core-protocol.md) 协议）。判定要求两者同时成立：事件内容完整 ∧ 进程干净终止，缺一即不判通过（防假绿）。两种驱动的本质差别在于**有没有在线的接收方**：前台有在线接收方，`schedule` 全程在线、收到事件即处理，退出信号由 Engine adapter 当场观察；后台没有常驻接收方，事件流被持久化、退出信号也被转写成 `task_exited` 记入同一份日志，于是任何宿主都能仅凭重放这份日志推进（各组合的物理通道见 §5）。
 
@@ -25,12 +25,12 @@ local 档没有也不需要这个标记：不存在共享基础设施上的常�
 
 ## 2. 四组合一览
 
-|           | **run（前台同步）**                                                                                                                                                        | **submit（后台跑批）**                                                                                                                                                                                                                                             |
+|           | **run（前台同步）**                                                                                                                                                        | **submit（后台运行）**                                                                                                                                                                                                                                             |
 |-----------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | **local** | CLI 进程内 `schedule()`；worker = 本机子进程（fd3 事件流直达）；超时 = schedule 循环内计时到点；关闭 CLI 即中止                                                            | **per-run 推进进程**（`setsid` 脱离 CLI）循环调用 `tick`；事件旁路落 SQLite；该进程自兼退出观察者；本机需保持开机                                                                                                                                                  |
 | **cloud** | 同一个进程内 `schedule()`，worker 改为 Fargate task（job-in 走 S3、事件走 DDB events 表、adapter 轮询读）；云端 Lambda 对这种 run **一律不动作**（no-op；两道闸门，见 §7） | **三 Lambda 事件驱动链**：kicker（冷启动）、reconciler（主推进）、exit-observer（退出观察），由事件串接、非调用链（§4b）；提交后关机也能执行至结束（例外：`--expose-local` 隧道模式下本机须保持开机联网，[ADR 0035](../adr/0035-local-app-testing-via-tunnel.md)） |
 
-此处明确一个贯穿全文的粒度：**job = scope**——一个 `@scope` 分组即一个调度/执行单位（上云后确立，[ADR 0017](../adr/0017-cloud-execution-fargate-over-runtime.md)），§6 超时闹钟的 per-(run,scope) 即 per-job。四种组合的详细解剖在 §3-§4，横切机制（事件通道/退出观察/超时）在 §5-§6。四种组合的权威：[ADR 0034](../adr/0034-detached-batch-reconciler.md)（两种驱动与后台跑批全部决策）、[ADR 0026](../adr/0026-schedule-module.md)（同步 schedule）、[ADR 0032](../adr/0032-fargate-execution-environment.md)（Fargate 执行面）。
+此处明确一个贯穿全文的粒度：**job = scope**——一个 `@scope` 分组即一个调度/执行单位（上云后确立，[ADR 0017](../adr/0017-cloud-execution-fargate-over-runtime.md)），§6 超时闹钟的 per-(run,scope) 即 per-job。四种组合的详细解剖在 §3-§4，横切机制（事件通道/退出观察/超时）在 §5-§6。四种组合的权威：[ADR 0034](../adr/0034-detached-batch-reconciler.md)（两种驱动与后台运行全部决策）、[ADR 0026](../adr/0026-schedule-module.md)（同步 schedule）、[ADR 0032](../adr/0032-fargate-execution-environment.md)（Fargate 执行面）。
 
 ## 3. 前台 `run` 的生命周期
 
@@ -47,11 +47,11 @@ local 与 cloud 在这条路径上的差别**只在 Engine adapter**：
 - **local**：`SubprocessEngine` spawn 本机 worker 子进程，事件走专用 fd（`EVENTS_FD`，三通道分离：事件、SDK 噪声、诊断各占一条）。
 - **cloud**：`FargateEngine` 把 job JSON 放 S3、以 `RunTask` 启动容器；worker 在容器内把事件逐条 PutItem 进 DDB events 表，adapter 侧**轮询 Query** 读回，同时以 `DescribeTasks` 监测 task 存活。事件读取只扫 worker 的连续 seq 段——events 表里还有另一类「退出记录」item，读端为什么要避开它、由谁保证前台 run 不会读到它，见 §5 的键空间对照与 §7。
 
-另有两项能力只存在于前台驱动循环，后台跑批**不具备**：`--fail-fast` 早停（及由它派生的 skipped/aborted 态），以及 `schedule` 中针对 network 瞬时故障的 job 级整批重试通道——后者**当前在 `run` 上并未启用**（`ScheduleOpts.network_retry` 默认 0，CLI 未暴露该参数），网络抖动的实际处置见 [`verdict-model.md`](./verdict-model.md) §3c，门控与两层分工见 [ADR 0028](../adr/0028-transient-network-ssl-resilience.md)。后台档失败一律隔离、逐 job 各自收敛（[ADR 0026](../adr/0026-schedule-module.md) 失败隔离、[ADR 0031](../adr/0031-job-lifecycle-states-and-severity.md) 决定一）。
+另有两项能力只存在于前台驱动循环，后台运行**不具备**：`--fail-fast` 早停（及由它派生的 skipped/aborted 态），以及 `schedule` 中针对 network 瞬时故障的 job 级整批重试通道——后者**当前在 `run` 上并未启用**（`ScheduleOpts.network_retry` 默认 0，CLI 未暴露该参数），网络抖动的实际处置见 [`verdict-model.md`](./verdict-model.md) §3c，门控与两层分工见 [ADR 0028](../adr/0028-transient-network-ssl-resilience.md)。后台档失败一律隔离、逐 job 各自收敛（[ADR 0026](../adr/0026-schedule-module.md) 失败隔离、[ADR 0031](../adr/0031-job-lifecycle-states-and-severity.md) 决定一）。
 
 > 权威：[ADR 0024](../adr/0024-worker-core-protocol.md)（worker↔core 协议、三通道、退出码）、[ADR 0026](../adr/0026-schedule-module.md)（调度/心跳/优雅终止）、[ADR 0032](../adr/0032-fargate-execution-environment.md)（Fargate 执行面）、[ADR 0030](../adr/0030-realtime-persistence-seam.md)（实时写）、[ADR 0028](../adr/0028-transient-network-ssl-resilience.md)（两层网络重试）。
 
-## 4. 后台跑批 `submit` 的生命周期
+## 4. 后台运行 `submit` 的生命周期
 
 ### 4a. local 档：per-run 推进进程
 
@@ -71,7 +71,7 @@ status [--wait]:只读投影查进度;--wait 还能接力推进——per-run 进
 
 ### 4b. cloud 档：三 Lambda 链
 
-![云端后台跑批的事件级联：提交落库唤醒 kicker，worker 写事件唤醒 reconciler，任务停止经 exit-observer 转写为退出记录后收敛](../diagrams/execution-cloud-cascade.svg)
+![云端后台运行的事件级联：提交落库唤醒 kicker，worker 写事件唤醒 reconciler，任务停止经 exit-observer 转写为退出记录后收敛](../diagrams/execution-cloud-cascade.svg)
 
 图注：本图画「链如何贯通」，谁被挡在链外见 §7 那张图。图上画了三个 Lambda 各自的主入口，**未画两处**：**kicker 的另两个入口**（查询进度时发现停滞而主动调起、超时闹钟到点，见下条与 §6），以及退出观察那条路由背后是部署时即建好的常驻订阅、不由任何一方启动；并发安全的保证见下面几条。
 
@@ -166,7 +166,7 @@ cloud 路径的超时处置是一条多跳链，时序如下图。这里的「�
 
 | 想深入的主题                                                      | 去哪读                                                                 |
 |-------------------------------------------------------------------|------------------------------------------------------------------------|
-| 无状态跑批全部决策/护栏/被拒方案                                  | [ADR 0034](../adr/0034-detached-batch-reconciler.md)                   |
+| 无状态批量运行全部决策/护栏/被拒方案                              | [ADR 0034](../adr/0034-detached-batch-reconciler.md)                   |
 | 同步调度器（并发/心跳/失败隔离/优雅终止/事件归约）                | [ADR 0026](../adr/0026-schedule-module.md)                             |
 | worker↔core 协议（事件三通道/job 入口 stdin·`JOB_S3_URI`/退出码） | [ADR 0024](../adr/0024-worker-core-protocol.md)                        |
 | job 生命周期状态机与严重度排序（severity）                        | [ADR 0031](../adr/0031-job-lifecycle-states-and-severity.md)           |

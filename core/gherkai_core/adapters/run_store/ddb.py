@@ -10,10 +10,10 @@ RunMeta 与 RunState **分两 item**（同 run_id、item_type 各异；同分区
   且躲开 DDB 原生 Map 对空串/嵌套 list 的挑剔（DataTable rows 常含空 cell）。第 4 步 offload 在 `json.dumps`
   **前**对 dict 里的 docString/dataTable 换指针，不需要 META 是原生 Map。
 - **STATE item**：`{run_id, item_type='STATE', status, started_at?, ended_at?, high_water_mark?,
-  jobs=<原生 Map>}`（`?` = omit-when-None；`high_water_mark` 只在无状态跑批的投影写时有值，是本 item 唯一的
+  jobs=<原生 Map>}`（`?` = omit-when-None；`high_water_mark` 只在无状态批量运行的投影写时有值，是本 item 唯一的
   数值属性——投影写的 ConditionExpression 按它做数值守卫、读回 Decimal 转 int，见 ADR 0034 机制三），另有两个
   **可选顶层标记**：`detached`（ADR 0034，kicker 的 Stream filter 认它）与 `worker_task_def_arns`（ADR 0038，
-  清理 pass 的在跑 run 安全阀按它 Query + `contains`）——两者都是「DDB 侧要查得动」才摊到顶层的。
+  清理 pass 的运行中 run 安全阀按它 Query + `contains`）——两者都是「DDB 侧要查得动」才摊到顶层的。
   jobs **必须原生 Map** 才能 `SET jobs.#sid=:js` 按 scope_id 单元素刷（决定六）；其 entry 全是 str（无 float），
   原生 Map 无 Decimal 顾虑。
 
@@ -40,7 +40,7 @@ _META = "META"    # item_type 取值：definition item
 _STATE = "STATE"  # item_type 取值：运行态 item
 
 # STATE item 顶层属性：本 run 用到的 worker task-def revision ARN 列表（ADR 0038「不变量」清理 pass 的
-# 在跑 run 安全阀按它判引用——definition 里也有同一批 ARN，但那在 meta_json 字符串内、DDB 查不动，故**同时**
+# 运行中 run 安全阀按它判引用——definition 里也有同一批 ARN，但那在 meta_json 字符串内、DDB 查不动，故**同时**
 # 摊平成顶层属性，沿用 `detached` 顶层标记先例）。
 # **写端在此、读端的命名真源在 `gherkai_runtime.names.STATE_WORKER_TASK_DEF_ARNS_ATTR`**：core 是窄腰下层、
 # 不 import 组合根共享层，故字面量两处各有；漂移由 runtime 侧的对拍测试挡（那里能同时 import 两边）。
@@ -70,7 +70,7 @@ def _state_scalars(state: RunState) -> dict:
     if state.ended_at is not None:
         d["ended_at"] = state.ended_at
     if state.high_water_mark is not None:
-        d["high_water_mark"] = state.high_water_mark  # ADR 0034 机制三（数值属性；无状态跑批投影写时有）
+        d["high_water_mark"] = state.high_water_mark  # ADR 0034 机制三（数值属性；无状态批量运行投影写时有）
     return d
 
 
@@ -84,7 +84,7 @@ class DynamoDBRunStore:
         docString/dataTable 正文搬 S3、META item 只留指针（解 DDB 400KB 限）；None（默认）则 argument
         原样内联进 meta_json（小 run / 单测省一层 S3）。只挂 RunMeta 写/读路径，RunState 无 argument、不涉及。
 
-        detached（ADR 0034）：本组合根是否「无状态跑批的 submit」——True 则 create_run 的 STATE item 带
+        detached（ADR 0034）：本组合根是否「无状态批量运行的 submit」——True 则 create_run 的 STATE item 带
         `detached=true` 顶层标记，kicker Lambda 的 Stream filter 只认它（同步 `run --backend cloud` 的
         create_run 无此标记、不触发 kicker——否则双开推进器、重复起 task）。执行环境属性、不进 core 模型。
         """
@@ -161,7 +161,7 @@ class DynamoDBRunStore:
         """
         self._table.load()
 
-    # ---- 无状态跑批的条件写三方（ADR 0034）----
+    # ---- 无状态批量运行的条件写三方（ADR 0034）----
     # DDB 原生 ConditionExpression 做原子 CAS——比 local 的 fcntl 文件锁更强（DDB 单 item 写天然原子、
     # 无需外部锁）。真 DDB 条件写行为已真 DDB 实测（moto 与真 DDB 对拍，见 test）。CCF=ConditionalCheckFailedException。
 
@@ -331,7 +331,7 @@ class DynamoDBRunStore:
         )
 
     def is_detached(self, run_id: str) -> bool:
-        """STATE item 上有没有 `detached` 标记（ADR 0034）：True = 无状态跑批的 submit 建的 run。
+        """STATE item 上有没有 `detached` 标记（ADR 0034）：True = 无状态批量运行的 submit 建的 run。
 
         **adapter-only 只读访问器、不在 RunStore port 上**——detached 是执行环境属性、不进 core 模型
         （ADR 0034 「filter 必须区分写入者」条），只有云端推进器组合根需要它做「只推进 detached run」的

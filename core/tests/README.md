@@ -1,24 +1,24 @@
 # core 测试：单元测试 + 集成测试
 
-两类测试，用 pytest marker 区分。**单测默认跑、绝不连真 AWS；集成测试连真 DDB/S3、须显式触发。**
+两类测试，用 pytest marker 区分。**单测默认运行、绝不连真 AWS；集成测试连真 DDB/S3、须显式触发。**
 
 | | 单元测试 | 集成测试 |
 |---|---|---|
 | 标记 | 无 | `@pytest.mark.integration` |
 | 后端 | moto 内存 mock | **真** DDB / S3 |
 | 凭证 | 假凭证硬隔离（autouse fixture） | 真凭证（default profile） |
-| 默认 `uv run pytest` | ✅ 跑 | ❌ deselect（不跑） |
-| 触发 | 裸命令即跑 | `-m integration` **且**设 `AWS_DDB_TABLE`/`AWS_S3_BUCKET` 环境变量 |
+| 默认 `uv run pytest` | ✅ 运行 | ❌ deselect（不运行） |
+| 触发 | 裸命令即运行 | `-m integration` **且**设 `AWS_DDB_TABLE`/`AWS_S3_BUCKET` 环境变量 |
 | 成本 | 0 | 极低（几个 DDB item + S3 小对象，<1 分钱；不碰引擎/AgentCore） |
 
 ## 单元测试（默认）
 
-pytest 配置在**仓库根** `pyproject.toml`（全部 workspace 成员共用一份，ADR 0037 决策 2）；根目录跑收集各成员的 `tests/`，
-在 `core/` 目录下跑只收集 core 的（cwd 决定收集范围）：
+pytest 配置在**仓库根** `pyproject.toml`（全部 workspace 成员共用一份，ADR 0037 决策 2）；在根目录运行时收集各成员的 `tests/`，
+在 `core/` 目录下运行只收集 core 的（cwd 决定收集范围）：
 
 ```bash
-uv run pytest              # 仓库根：只跑单测；集成测试被 deselect（-m 'not integration'，见根 pyproject）
-cd core && uv run pytest   # 只跑 core 的单测
+uv run pytest              # 仓库根：只运行单测；集成测试被 deselect（-m 'not integration'，见根 pyproject）
+cd core && uv run pytest   # 只运行 core 的单测
 uv run pytest -q           # 安静模式
 ```
 
@@ -35,7 +35,7 @@ moto 是模拟实现，与真 DDB/S3 在若干边界可能不一致（DDB 空串
 
 ### 一次性：建真表 + 真桶
 
-集成测试**假定表/桶已存在**（建表建桶归 IaC，adapter 不自建——ADR 0016/0030 决定六）。用你自己的测试账号建一次（us-east-1、default profile；名字自取，下面用示例名）。可在会话里用 `!` 前缀直接跑：
+集成测试**假定表/桶已存在**（建表建桶归 IaC，adapter 不自建——ADR 0016/0030 决定六）。用你自己的测试账号建一次（us-east-1、default profile；名字自取，下面用示例名）。可在会话里用 `!` 前缀直接执行：
 
 ```bash
 # DDB 表：分区键 run_id (HASH, S) + 排序键 item_type (RANGE, S)，按量计费（省钱）
@@ -52,7 +52,7 @@ moto 是模拟实现，与真 DDB/S3 在若干边界可能不一致（DDB 空串
 
 > 建议专门建一对**测试专用**表/桶（勿复用生产表）——集成测试会写入并自清理，但用独立资源最稳。
 
-### 跑集成测试
+### 运行集成测试
 
 ```bash
 # 仓库根（或 core/ 目录下，只收集 core）
@@ -60,12 +60,12 @@ export AWS_DDB_TABLE=ui-test-runs
 export AWS_S3_BUCKET=ui-test-artifacts-<你的后缀>
 # （凭证走 default profile；region 取 AWS_REGION/AWS_DEFAULT_REGION，默认 us-east-1）
 
-uv run pytest -m integration            # 跑集成测试
+uv run pytest -m integration            # 运行集成测试
 uv run pytest -m integration -v         # 逐用例可见
-uv run pytest                           # 仍只跑单测（集成默认 deselect，不受环境变量影响）
+uv run pytest                           # 仍只运行单测（集成默认 deselect，不受环境变量影响）
 ```
 
-**没设 `AWS_DDB_TABLE`/`AWS_S3_BUCKET` 时**，集成测试**自动 skip**（不误连、不报错）——所以 `-m integration` 在没配环境的机器上是安全的空跑。
+**没设 `AWS_DDB_TABLE`/`AWS_S3_BUCKET` 时**，集成测试**自动 skip**（不误连、不报错）——所以 `-m integration` 在没配环境的机器上是安全的空操作。
 
 ### 自清理
 

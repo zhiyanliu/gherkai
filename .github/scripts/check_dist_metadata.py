@@ -144,7 +144,7 @@ def main() -> int:
     wheels = sorted(dist_dir.glob("*.whl"))
     sdists = sorted(dist_dir.glob("*.tar.gz"))
     if not wheels:
-        fail(f"{dist_dir} 下没有 wheel——`uv build --all-packages` 没跑或产物目录传错了")
+        fail(f"{dist_dir} 下没有 wheel——`uv build --all-packages` 未运行或产物目录传错了")
         return 1
 
     errors: list[str] = []

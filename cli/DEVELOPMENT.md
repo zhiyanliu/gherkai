@@ -9,7 +9,7 @@
 WebUI 将来是另一个前端，**直接调 core、复用产品本体 `gherkai_runtime`（compose 等组合根逻辑所在的平级包 `runtime/`，ADR 0016「演进」节）**，不经本 cli。
 
 设计见 [ADR 0016](../docs/adr/0016-execution-architecture-core-lib-run-model.md)（执行架构 / 组合根注入）；
-无状态跑批（`submit`/`status` 的「提交完就走 → 事件驱动推进 → 轮询收集」）见 [ADR 0034](../docs/adr/0034-detached-batch-reconciler.md)。
+无状态批量运行（`submit`/`status` 的「提交完就走 → 事件驱动推进 → 轮询收集」）见 [ADR 0034](../docs/adr/0034-detached-batch-reconciler.md)。
 
 ## 模块
 
@@ -31,7 +31,7 @@ cli/gherkai_cli/
 **Node ≥ 22 是 `deploy` 的前置**（与 worker 的 `engines.node` 同一下限）：Python 版 CDK 是 jsii 绑定、import 时即启动
 node 子进程，cdk CLI 本身也以 npm 包形式分发；PATH 上存在 `cdk` 即使用它，否则回退到 `npx -y aws-cdk@2`。
 
-## 从 checkout 跑
+## 从 checkout 运行
 
 以下命令均从**仓库根**键入（feature 路径相对当前目录解析）：
 
@@ -41,7 +41,7 @@ uv sync                                            # 一次安装五个 workspac
 export GHERKAI_WORKER_MIDSCENE_CMD="node $PWD/engines/midscene/dist/bin.mjs"   # dev 态指向本仓库的 worker
 
 uv run gherkai plan features/wikipedia_generic.feature
-uv run gherkai run  features/wikipedia_generic.feature          # 真跑会产生 AWS 费用：模型调用 + AgentCore 会话
+uv run gherkai run  features/wikipedia_generic.feature          # 实际运行会产生 AWS 费用：模型调用 + AgentCore 会话
 
 # cloud 档需要已部署好的后端（部署方执行一次，dev 环境各自部署一套即可）：
 uv run gherkai deploy --prefix dev- --vpc default
@@ -57,11 +57,11 @@ task-def + 桶，落库时另加 runs 表）、variant 解析、子网/安全组
 > `core/tests/README.md` 的「一次性：建真表 + 真桶」只服务 core 集成测试（同一套表/桶 schema，但不足以支撑
 > `--backend cloud`）。
 
-## 跑测试
+## 运行测试
 
 ```bash
 uv run pytest              # 仓库根：全部 workspace 成员
-cd cli && uv run pytest -q # 只跑本包（cwd 决定收集范围）
+cd cli && uv run pytest -q # 只运行本包（cwd 决定收集范围）
 ```
 
 文档与文案护栏有六份位于本包的 `tests/`（全仓清单见根 [`CONTRIBUTING.md`](../CONTRIBUTING.md) 的「测试」节）：
@@ -77,9 +77,9 @@ cd cli && uv run pytest -q # 只跑本包（cwd 决定收集范围）
 
 ## 实时落库
 
-`run` 并非跑完才一次性落盘：`__main__` 注入 core 的 `RunPersistence`（组合根注入三个 Store adapter），
+`run` 并非等到运行结束才一次性落盘：`__main__` 注入 core 的 `RunPersistence`（组合根注入三个 Store adapter），
 run 开始即写 definition 与初始全 pending 态，每个 scope 开始执行时写入 RUNNING、完成即落该 scope 判定真值，
-最后 `finalize` 写总状态（commit point）。`--no-report` 时跳过整条落库（裸跑、零落盘逃生舱）。
+最后 `finalize` 写总状态（commit point）。`--no-report` 时跳过整条落库（零落盘运行的逃生舱）。
 
 落到哪由 `--backend` 决定：默认 `local`（文件落 `--report-dir`）；`--backend cloud` 让组合根改注入 DynamoDB/S3
 adapter、复用同一条 `RunPersistence`，把状态落 DynamoDB、判定真值与报告落 S3（表/桶需预先建好，由 `gherkai deploy` 供给）。
@@ -104,7 +104,7 @@ adapter、复用同一条 `RunPersistence`，把状态落 DynamoDB、判定真�
   引擎环境未安装则自动降级为无标注。
 - 文本模式对 DataTable/DocString 多行参数只标注尺寸（`+dataTable(行×列)` / `+docString(N 行)`）以保持紧凑；
   核对参数**完整内容**须用 `--json`（携带 content/rows 全文）。
-- `plan` 退出码 0=可跑 / 2=配置错（`PlanError`：uri 冲突 / 同 scope 多 engine 等）。
+- `plan` 退出码 0=可运行 / 2=配置错（`PlanError`：uri 冲突 / 同 scope 多 engine 等）。
 
 ## 为何拆 `submit` / `status`
 
@@ -117,11 +117,11 @@ cloud 由云端 Lambda 事件驱动链推进（submit 机器无 ECS 写/执行�
 
 cloud submit 的 `--max-concurrency` 受部署侧 cap 钳制（kicker/reconciler Lambda 的 env `MAX_CONCURRENCY`，
 由 IaC 设定、当前为 8；task 计入部署方账单，故设一道上限）；声明值超上限时 preflight 提示「本 run 将按上限并行」、不拦截提交。
-local 无此上限（worker 跑在提交者自己的机器、以自己的凭证计费）。
+local 无此上限（worker 运行在提交者自己的机器、以自己的凭证计费）。
 
 ## 退出码分层的切分线
 
-cloud 失败分层的切分线 = run 是否已真正开跑：启动 worker 前的配置或可达性问题退 `2`，已开跑之后的云端故障退 `1`。
+cloud 失败分层的切分线 = run 是否已真正开始执行：启动 worker 前的配置或可达性问题退 `2`，已开始执行之后的云端故障退 `1`。
 `submit` 的退出码衡量「提交成功与否」，`status --wait` 衡量「该 run 的判定是否通过」：`run` 在一条命令里合并的
 「提交 + 判定」由此被拆开（ADR 0034）。归码只有一处 helper，`_cmd_plan` 与 `_cmd_run` 共用：各写一份必然漂移。
 
@@ -139,7 +139,7 @@ deploy 会把自身版本写成后端的版本戳；四个 cloud 入口（`run`/
 | CLI 旧于后端 | 警告不拦截（以 `uv tool upgrade gherkai` 升级即可） |
 | 后端没有版本戳（早于本机制的部署） | 警告不拦截，并提示部署方执行一次 `gherkai deploy` 写入 |
 | 任一侧是开发版（含 `.dev`/`.post`/`+`） | 跳过比对，输出一条警告（dev 版逐提交前进，逐字比对会把每次都判成 skew） |
-| 取不到本机 CLI 版本（未以包形式安装、源码直跑） | 跳过比对，输出一条警告 |
+| 取不到本机 CLI 版本（未以包形式安装、从源码直接运行） | 跳过比对，输出一条警告 |
 
 **不设放行口是有意的**：放行等于让新 CLI 写入的任务定义被旧后端读取，后果不可知且静默；以
 `uvx --from 'gherkai==<后端版本>' gherkai …` 按指定版本临时运行的成本为零。版本是一个旋钮：`gherkai` 与后端被 `==`
@@ -162,7 +162,7 @@ deploy 选错档，而漏档会合成「新建整套 VPC 并替换 worker 安全
 - [0024](../docs/adr/0024-worker-core-protocol.md) worker↔core 协议（render 消费的事件）
 - [0027](../docs/adr/0027-runreport-aggregation-index.md) RunReport 归集索引 / [0030](../docs/adr/0030-realtime-persistence-seam.md) 实时写接缝
 - [0033](../docs/adr/0033-iac-aws-backend-and-composition-wiring.md) 云端资源清单与命名契约（`destroy` 后表/桶/ECR 是 RETAIN）
-- [0034](../docs/adr/0034-detached-batch-reconciler.md) 无状态跑批（submit/status、job timeout 两层声明与三路 enforce）
+- [0034](../docs/adr/0034-detached-batch-reconciler.md) 无状态批量运行（submit/status、job timeout 两层声明与三路 enforce）
 - [0035](../docs/adr/0035-local-app-testing-via-tunnel.md) `--expose-local` 隧道（凭据轮换、谁负责拆、TTL 算法）
 - [0036](../docs/adr/0036-deterministic-capability-discovery.md) 确定性能力自述（`list-deterministic`、plan 标注）
 - [0037](../docs/adr/0037-distribution-and-packaging.md) 分发与打包（三名分离 / worker 定位链 / `steps/` 约定 / deploy 进 wheel / 版本 skew）

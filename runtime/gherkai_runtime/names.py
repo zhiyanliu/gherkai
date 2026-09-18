@@ -14,7 +14,7 @@ BASE_RUNS_TABLE = "runs"
 BASE_EVENTS_TABLE = "events"
 BASE_BUCKET = "artifacts"
 BASE_CLUSTER = "cluster"
-# 无状态跑批 kicker（踢启器）Lambda 基名（ADR 0034）：CDK 建 `{prefix}kicker`（stack.py 用同名），cli status
+# 无状态批量运行 kicker（踢启器）Lambda 基名（ADR 0034）：CDK 建 `{prefix}kicker`（stack.py 用同名），cli status
 # --wait 据 --prefix 推理出它 invoke 接力 kickoff（Lambda 名单一真源、cli↔IaC 同源）。
 BASE_KICKER_LAMBDA = "kicker"
 BASE_RECONCILER_LAMBDA = "reconciler"
@@ -98,7 +98,7 @@ TAG_DIGEST = "gherkai:digest"
 TAG_TEMPLATE = "gherkai:template"
 TAG_RETIRED_AT = "gherkai:retired-at"
 
-# runs 表 STATE item 的顶层属性名：本 run 用到的 worker task-def revision ARN 列表（清理 pass 的在跑 run
+# runs 表 STATE item 的顶层属性名：本 run 用到的 worker task-def revision ARN 列表（清理 pass 的运行中 run
 # 安全阀按它判引用，沿用 ADR 0034 `detached` 顶层标记先例）。
 STATE_WORKER_TASK_DEF_ARNS_ATTR = "worker_task_def_arns"
 # runs 表按 `status` 的稀疏 GSI 名（只索引 STATE item）：清理 pass Query 非终态 run，不扫全表。

@@ -31,7 +31,7 @@
     （提交侧解析 variant → 各引擎 revision）·`resolve_default_worker_task_defs`（旧 definition 的兼容路径）/
     `read_task_def_stop_timeout`（doctor cloud 侧的对照值）/ `new_run_id`·`now_iso`·`run_duration_ms`（run_id 与时钟）/
     `load_feature`·`prune_empty_dirs`（入口共用的工具函数）。
-- `detached.py` —— local 无状态跑批宿主（ADR 0034）：`SubprocessLauncher` + `run_reconcile_loop`（per-run 推进循环）+
+- `detached.py` —— local 无状态批量运行宿主（ADR 0034）：`SubprocessLauncher` + `run_reconcile_loop`（per-run 推进循环）+
   `build_local_reconcile`·`drive_local_reconcile`（装配与驱动）+ 超时 claim 回收 + 隧道事实文件的读写
 - `names.py` —— 资源命名真源（零依赖；`deploy_aws/gherkai_deploy_aws/names.py` 直接 re-export 后再加 provider 特有常量，
   避免复刻）：资源名 / SSM 路径 / ECR repo 名 / 血缘 tag 键 / worker 镜像 tag（`image_tag` 是 PEP 440 → docker tag 字符集的
@@ -42,17 +42,17 @@
   （`TUNNEL_EXTRA_HTTP_HEADERS`）；cloud submit 守护进程的轮询循环与其 TTL 算法（`compute_watch_ttl_s` 按 definition 计算：
   Σ 各 job 预算 + 启动/级联余量 `CLOUD_STARTUP_MARGIN_S`，执行侧不超时的 job 按 `UNBOUNDED_JOB_BUDGET_S` 记账）
 
-## 从 checkout 跑 / 测试
+## 从 checkout 运行 / 测试
 
 ```bash
 uv sync                          # 仓库根：一次安装五个 workspace 成员 core/runtime/cli/engines/novaact/deploy_aws（editable）
-uv run pytest -q runtime/tests   # 仓库根：只跑本包单测（`uv run pytest` 不带路径 = 跑全部成员）
+uv run pytest -q runtime/tests   # 仓库根：只运行本包单测（`uv run pytest` 不带路径 = 覆盖全部成员）
 ```
 
 `build_cloud_stores` / `build_fargate_engines` 的 boto3 import 惰性收敛在 `_make_*` 钩子内：**纯 local 路径绝不
 触发该 import**（ADR 0016 窄腰 / 0030）。修改这些函数时须保持 `import boto3` 不上移到模块顶层。
 
-worker 定位链第四级（`uvx`）与 fd 传递的相互作用是真跑得出的约束：`uvx` 穿透 fd3，`npx -y` 会替换 fd
+worker 定位链第四级（`uvx`）与 fd 传递的相互作用是实际运行得出的约束：`uvx` 穿透 fd3，`npx -y` 会替换 fd
 并导致事件全部丢失（因此 midscene 无第四级）。细节与实测证据见 `resolve_worker_cmd` 的 docstring 与 ADR 0037 决策 3。
 
 ## 相关 ADR
@@ -61,7 +61,7 @@ worker 定位链第四级（`uvx`）与 fd 传递的相互作用是真跑得出�
 - [0026](../docs/adr/0026-schedule-module.md) schedule 契约（engines 注入形状）
 - [0030](../docs/adr/0030-realtime-persistence-seam.md) 实时写接缝（两套 store 装配复用同一写序）
 - [0033](../docs/adr/0033-iac-aws-backend-and-composition-wiring.md) 云端资源清单与命名契约
-- [0034](../docs/adr/0034-detached-batch-reconciler.md) 无状态跑批（`detached` 宿主、推进触发源、job timeout）
+- [0034](../docs/adr/0034-detached-batch-reconciler.md) 无状态批量运行（`detached` 宿主、推进触发源、job timeout）
 - [0035](../docs/adr/0035-local-app-testing-via-tunnel.md) 隧道暴露本机应用（`tunnel` / `tunnel_host`）
 - [0036](../docs/adr/0036-deterministic-capability-discovery.md) 确定性能力自述
 - [0037](../docs/adr/0037-distribution-and-packaging.md) 分发与打包（三名分离、worker 定位链、版本 skew）

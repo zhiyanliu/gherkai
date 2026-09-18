@@ -1,6 +1,6 @@
 """纯归约投影（ADR 0034）：events → JobResult/RunState，无 I/O、无执行编排、不 import boto3。
 
-无状态跑批（[0034](../../docs/adr/0034-detached-batch-reconciler.md)）的 core 侧纯函数层：reconciler
+无状态批量运行（[0034](../../docs/adr/0034-detached-batch-reconciler.md)）的 core 侧纯函数层：reconciler
 （cloud Lambda / local per-run 进程两宿主）从 events 表全量重放某 run 的事件，经这里纯推演出 RunState +
 各 JobResult，再由 adapter 侧条件写落库、CAS 推进。**副作用（CAS/RunTask/PutItem/落库）全在 adapter/
 组合根，本模块只吐「当前状态」与「建议动作」**（ADR 0034 core 拆分节；守 0026 纯 reducer 红线）。
@@ -127,7 +127,7 @@ def reduce_event(
 
 
 # ============================================================================
-# 无状态跑批投影（ADR 0034）：全量 events records → RunState + 各 JobResult
+# 无状态批量运行投影（ADR 0034）：全量 events records → RunState + 各 JobResult
 # ============================================================================
 
 

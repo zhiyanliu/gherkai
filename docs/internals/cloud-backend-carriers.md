@@ -54,7 +54,7 @@
 
 **③ 不能提前到 ② 之前**：镜像 tag 含 CLI 版本（`names.image_tag`），提前推送等于推入一个后端尚不解析的版本命名空间。`push-worker` / `list-workers` 各自带同一道 skew 闸（`workers._skew_gate`）拦截此情形：CLI 新于后端时退 2，并输出一行以「不放行的理由：」开头的说明。`gherkai deploy` 的四步**有意不做**这道前置——它本身就是修改版本戳的动作，前置放在 cdk 之前会拦住自己、放在 cdk 之后则恒真。
 
-**② 内部的顺序同样固定**：第 1 步（把模板 revision ARN 登记进 SSM）是 **stack 资源**、随 cdk 事务；第 2/3/4 步在 cdk 之后执行。故 cdk 成功而后三步失败 → 退 **1** 且提示「stack 已生效；重跑 `gherkai deploy` 幂等收敛」——归并为 2（语义是「什么都没发生」）会误导。
+**② 内部的顺序同样固定**：第 1 步（把模板 revision ARN 登记进 SSM）是 **stack 资源**、随 cdk 事务；第 2/3/4 步在 cdk 之后执行。故 cdk 成功而后三步失败 → 退 **1** 且提示「stack 已生效；重新运行 `gherkai deploy` 幂等收敛」——归并为 2（语义是「什么都没发生」）会误导。
 
 操作步骤与命令样例不在本文重复，见 [`docs/user-guide/cloud-backend.md`](../user-guide/cloud-backend.md)（版本与升级、worker 镜像 variant 两节）。
 
@@ -71,7 +71,7 @@
 | 退 2「读不到 worker task-def 模板（SSM `worker-template/<engine>`）」 | 本 prefix 从未执行过 `gherkai deploy`（或上次部署所用的 CLI 版本尚无镜像机制） | `workers._template_arn` |
 | `deploy` 调整了 cpu / `stopTimeout`，但 variant 仍以旧配置运行 | ② 的第 4 步（重派生）未完成：revision 是不可变快照、不继承模板变更 | `workers.rederive_variants`（按模板 ARN 判定、幂等；`pushed_at` 保留原值，镜像内容不变） |
 | 提交退 2「产物前缀不一致」 | 推进器 Lambda 的 `REPORT_DIR` 与提交侧 `--report-dir` 不同（前者 IaC 有意不注入、由 handler 缺省供给） | `compose.preflight_cloud_resources` |
-| `deploy` 退 1 并提示「stack 已生效，但同步基底镜像要 pull/push——deploy 的机器需要容器引擎」 | ② 的第 2 步未执行：纯发行版要求部署机具备容器引擎，探活失败即**硬失败**，第 3/4 步与清理 pass 均未执行——安装后重跑 `gherkai deploy`（幂等收敛）。非纯发行版不探测容器引擎，第 2 步整步跳过并输出一条警告，第 3/4 步照常执行 | `workers.run_deploy_steps`（探活分支退 1）/ `workers.sync_base`（非纯发行版跳过；判据 `compose.is_pure_release`）；cdk 前那句预告在 `cli.Provider.deploy` |
+| `deploy` 退 1 并提示「stack 已生效，但同步基底镜像要 pull/push——deploy 的机器需要容器引擎」 | ② 的第 2 步未执行：纯发行版要求部署机具备容器引擎，探活失败即**硬失败**，第 3/4 步与清理 pass 均未执行——安装后重新运行 `gherkai deploy`（幂等收敛）。非纯发行版不探测容器引擎，第 2 步整步跳过并输出一条警告，第 3/4 步照常执行 | `workers.run_deploy_steps`（探活分支退 1）/ `workers.sync_base`（非纯发行版跳过；判据 `compose.is_pure_release`）；cdk 前那句预告在 `cli.Provider.deploy` |
 | `list-workers` 里 revision 比 variant 多 | 正常现象：已退休 / 孤儿 revision 正等待清理 pass（见 §5），`_pending_cleanup` 逐条列出原因 | `workers.list_workers` |
 
 `gherkai doctor --backend cloud --prefix …` 是这张表的只读版：一次性输出身份、后端版本比对、资源与三个 Lambda、报告前缀一致性、默认 variant 指针与**逐引擎的 revision 解析**（即上表「默认 variant 在新版本尚无镜像」那行的只读探针，至少一个引擎解析成功即算通过），以及部署工具链（Node / cdk / 容器引擎）。

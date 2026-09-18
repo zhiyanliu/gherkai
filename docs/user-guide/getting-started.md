@@ -89,7 +89,7 @@ gherkai doctor --backend cloud --prefix gherkai-    # 连带查凭证、region �
 ✓ provider.cdk: /path/to/cdk
 - provider.container-engine: `docker` 在 PATH 上但连不上 daemon……
 
-部署工具链有缺口（provider 段）：只影响 gherkai deploy / push-worker，不影响提交与本机跑
+部署工具链有缺口（provider 段）：只影响 gherkai deploy / push-worker，不影响提交与本机运行
 
 自检通过
 ```

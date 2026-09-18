@@ -523,7 +523,7 @@ def test_stop_timeout_rejects_bool_and_float_typed_context():
             _template(context={"stop_timeout": bad})
 
 
-# ---- 无状态跑批事件驱动链（ADR 0034「端到端流程」cloud + 机制一/二）----
+# ---- 无状态批量运行事件驱动链（ADR 0034「端到端流程」cloud + 机制一/二）----
 def test_reconcile_lambdas_present():
     # 3 Lambda：退出观察者（ECS STOPPED→task_exited）+ reconciler（events Stream→推进+finalize）
     #          + kicker（runs Stream INSERT→冷启动起首批，ADR 0034）。

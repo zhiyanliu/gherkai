@@ -178,7 +178,7 @@ def plan(features: list[FeatureSource], config: PlanConfig, *,
         raise PlanError(
             f"@scope 的值和某条 scenario 的编号相同：{joined}。"
             f"没标 @scope 的 scenario 用自己的编号（文件:行号）当会话名，撞上会把两条 scenario 并进同一个会话、"
-            f"跑出来的结果互相覆盖。给这个 @scope 换个名字。"
+            f"运行结果互相覆盖。给这个 @scope 换个名字。"
         )
 
     # 3) 每组：engine/timeout 按**全量**成员解析（不变量：筛选只减少跑哪几条，不改 scope 的引擎、预算、会话身份），

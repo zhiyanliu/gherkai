@@ -415,7 +415,7 @@ svg[data-theme="light"] { --bg: #f8fafc; --grid: #e2e8f0; --text: #0f172a; --tex
 svg[data-theme="dark"] { --bg: #020617; --grid: #1e293b; --text: #ffffff; --text-muted: #94a3b8; --text-dim: #475569; --text-faint: #7d8da1; --panel: rgba(15, 23, 42, 0.5); --panel-border: #1e293b; --lane-fill: rgba(15, 23, 42, 0.22); --lane-stroke: #334155; --arrow: #64748b; --arrow-emphasis: #34d399; --mask: #0f172a; --frontend-fill: rgba(8, 51, 68, 0.4); --frontend-stroke: #22d3ee; --backend-fill: rgba(6, 78, 59, 0.4); --backend-stroke: #34d399; --database-fill: rgba(76, 29, 149, 0.4); --database-stroke: #a78bfa; --cloud-fill: rgba(120, 53, 15, 0.3); --cloud-stroke: #fbbf24; --security-fill: rgba(136, 19, 55, 0.4); --security-stroke: #fb7185; --messagebus-fill: rgba(251, 146, 60, 0.3); --messagebus-stroke: #fb923c; --external-fill: rgba(30, 41, 59, 0.5); --external-stroke: #94a3b8; --toolbar-bg: rgba(15, 23, 42, 0.8); --toolbar-border: #334155; --toolbar-text: #e2e8f0; --toolbar-hover: rgba(15, 23, 42, 0.95); --toolbar-menu-bg: #0f172a; }
 rect.c-bg-rect { fill: var(--bg); }
 </style><rect width="100%" height="100%" class="c-bg-rect"/>
-        <title id="archify-diagram-title">一条确定性 step 的四段路径：写 · 装 · 查 · 跑</title>
+        <title id="archify-diagram-title">一条确定性 step 的四段路径：写 · 装 · 查 · 执行</title>
         <desc id="archify-diagram-description">由 Archify 生成的工作流图。</desc>
         <!-- Definitions -->
         <defs>
@@ -455,7 +455,7 @@ rect.c-bg-rect { fill: var(--bg); }
         <text x="318.2" y="39" class="t-backend" font-size="8" font-weight="600" text-anchor="middle">① 写 · ② 装：注册表的构成</text>
         <line x1="714.4" y1="35" x2="966.4" y2="35" class="a-default" stroke-width="1.1"/>
         <rect x="714.4" y="27" width="252" height="16" rx="4" class="c-mask"/>
-        <text x="840.4" y="39" class="t-muted" font-size="8" font-weight="600" text-anchor="middle">③ 查 · ④ 跑：注册表的下游</text>
+        <text x="840.4" y="39" class="t-muted" font-size="8" font-weight="600" text-anchor="middle">③ 查 · ④ 执行：注册表的下游</text>
 
         <!-- Workflow groups -->
 
@@ -516,8 +516,8 @@ rect.c-bg-rect { fill: var(--bg); }
           <text x="542.4" y="379" class="t-muted" font-size="8" text-anchor="middle">模式 → handler</text>
         </g>
 
-        <g id="node-ask" data-node-id="ask" data-node-label="③ 查询该表" tabindex="0" role="button" aria-label="聚焦③ 查询该表，清单 · 诊断 · 预检标注, worker 进程内：注册 · 查询 · 派发 › ③ 查 · ④ 跑：注册表的下游" aria-pressed="false" data-node-kind="external" data-node-sublabel="清单 · 诊断 · 预检标注" data-node-context="worker 进程内：注册 · 查询 · 派发 › ③ 查 · ④ 跑：注册表的下游">
-          <title>③ 查询该表 · 清单 · 诊断 · 预检标注 · worker 进程内：注册 · 查询 · 派发 › ③ 查 · ④ 跑：注册表的下游</title>
+        <g id="node-ask" data-node-id="ask" data-node-label="③ 查询该表" tabindex="0" role="button" aria-label="聚焦③ 查询该表，清单 · 诊断 · 预检标注, worker 进程内：注册 · 查询 · 派发 › ③ 查 · ④ 执行：注册表的下游" aria-pressed="false" data-node-kind="external" data-node-sublabel="清单 · 诊断 · 预检标注" data-node-context="worker 进程内：注册 · 查询 · 派发 › ③ 查 · ④ 执行：注册表的下游">
+          <title>③ 查询该表 · 清单 · 诊断 · 预检标注 · worker 进程内：注册 · 查询 · 派发 › ③ 查 · ④ 执行：注册表的下游</title>
           <rect x="684.4" y="341" width="152" height="52" rx="6" class="c-mask"/>
           <rect x="684.4" y="341" width="152" height="52" rx="6" class="c-external" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(690.4 347) scale(0.6875)">
@@ -528,8 +528,8 @@ rect.c-bg-rect { fill: var(--bg); }
           <text x="760.4" y="379" class="t-muted" font-size="8" text-anchor="middle">清单 · 诊断 · 预检标注</text>
         </g>
 
-        <g id="node-dispatch" data-node-id="dispatch" data-node-label="④ 逐 step 派发" tabindex="0" role="button" aria-label="聚焦④ 逐 step 派发，命中即调用 handler, worker 进程内：注册 · 查询 · 派发 › ③ 查 · ④ 跑：注册表的下游" aria-pressed="false" data-node-kind="messagebus" data-node-sublabel="命中即调用 handler" data-node-context="worker 进程内：注册 · 查询 · 派发 › ③ 查 · ④ 跑：注册表的下游">
-          <title>④ 逐 step 派发 · 命中即调用 handler · worker 进程内：注册 · 查询 · 派发 › ③ 查 · ④ 跑：注册表的下游</title>
+        <g id="node-dispatch" data-node-id="dispatch" data-node-label="④ 逐 step 派发" tabindex="0" role="button" aria-label="聚焦④ 逐 step 派发，命中即调用 handler, worker 进程内：注册 · 查询 · 派发 › ③ 查 · ④ 执行：注册表的下游" aria-pressed="false" data-node-kind="messagebus" data-node-sublabel="命中即调用 handler" data-node-context="worker 进程内：注册 · 查询 · 派发 › ③ 查 · ④ 执行：注册表的下游">
+          <title>④ 逐 step 派发 · 命中即调用 handler · worker 进程内：注册 · 查询 · 派发 › ③ 查 · ④ 执行：注册表的下游</title>
           <rect x="844.4" y="341" width="152" height="52" rx="6" class="c-mask"/>
           <rect x="844.4" y="341" width="152" height="52" rx="6" class="c-messagebus" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="messagebus" class="semantic-sigil s-messagebus" transform="translate(850.4 347) scale(0.6875)">
@@ -575,18 +575,18 @@ rect.c-bg-rect { fill: var(--bg); }
             <rect x="127" y="440" width="14" height="9" rx="2" class="c-backend" stroke-width="1"/>
             <text x="149" y="448" class="t-muted" font-size="7.5" font-weight="500">worker 启动时注册</text>
           </g>
-          <g data-legend-semantic-kind="messagebus" data-legend-x="251" data-legend-baseline="448" data-legend-width="87">
+          <g data-legend-semantic-kind="messagebus" data-legend-x="251" data-legend-baseline="448" data-legend-width="104">
             <rect x="251" y="440" width="14" height="9" rx="2" class="c-messagebus" stroke-width="1"/>
-            <text x="273" y="448" class="t-muted" font-size="7.5" font-weight="500">真跑时派发</text>
+            <text x="273" y="448" class="t-muted" font-size="7.5" font-weight="500">实际执行时派发</text>
           </g>
-          <g data-legend-semantic-kind="database" data-legend-x="345" data-legend-baseline="448" data-legend-width="70">
-            <rect x="345" y="440" width="14" height="9" rx="2" class="c-database" stroke-width="1"/>
-            <text x="367" y="448" class="t-muted" font-size="7.5" font-weight="500">注册表</text>
+          <g data-legend-semantic-kind="database" data-legend-x="362" data-legend-baseline="448" data-legend-width="70">
+            <rect x="362" y="440" width="14" height="9" rx="2" class="c-database" stroke-width="1"/>
+            <text x="384" y="448" class="t-muted" font-size="7.5" font-weight="500">注册表</text>
           </g>
-          <g data-legend-semantic-kind="external" data-legend-x="422" data-legend-baseline="448" data-legend-width="78">
-            <rect x="422" y="440" width="14" height="9" rx="2" class="c-external" stroke-width="1"/>
-            <text x="444" y="448" class="t-muted" font-size="7.5" font-weight="500">查询入口</text>
+          <g data-legend-semantic-kind="external" data-legend-x="439" data-legend-baseline="448" data-legend-width="78">
+            <rect x="439" y="440" width="14" height="9" rx="2" class="c-external" stroke-width="1"/>
+            <text x="461" y="448" class="t-muted" font-size="7.5" font-weight="500">查询入口</text>
           </g>
         </g>
       </svg>
-<!-- gherkai:source-sha256=d1022397de5e00c82a1525ce9c98ead63ee0f017caa47c4a6877731cbd212ab2 -->
+<!-- gherkai:source-sha256=2a4d2560537c7baea5196e4b94e90d11ec138550f51e0e66850c683f035b27c5 -->

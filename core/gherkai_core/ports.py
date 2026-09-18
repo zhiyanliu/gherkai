@@ -2,7 +2,7 @@
 
 四个 port（关注点拆开，不揉成上帝 module）：
 - Engine        —— 真正跑一个 scope（spawn worker、讲 ADR 0024 协议）；adapter = 子进程/Fargate
-- RunStore      —— 控制面：run/job 状态、血缘、起止（频繁读写，撑轮询续跑与无状态跑批的条件写）
+- RunStore      —— 控制面：run/job 状态、血缘、起止（频繁读写，撑轮询续跑与无状态批量运行的条件写）
 - ResultStore   —— 数据面：每 scenario 判定真值、投票（追加为主）
 - ReportStore   —— 归集报告产物为派生只读导航视图（RunReport：manifest + index，ADR 0027）
 
@@ -122,7 +122,7 @@ class RunStore(Protocol):
     #    local adapter no-op（本地无「表不存在」问题）。RunPersistence.begin 在 create_run 前调。——
     def preflight(self) -> None: ...
 
-    # —— 无状态跑批的条件写三方（ADR 0034；reconciler 跨进程/跨实例并发调用，靠条件写而非进程内锁）——
+    # —— 无状态批量运行的条件写三方（ADR 0034；reconciler 跨进程/跨实例并发调用，靠条件写而非进程内锁）——
     # 与上面「实时写三段」并存、职责不同：那三段假定单编排进程内锁串行；这三方假定并发多写者、
     # 每个方法自身是原子条件写、返回是否成功让调用方（reconciler）据此决定要不要 RunTask/收尾。
     def try_claim_job(self, run_id: str, scope_id: str, *, claimed_at: str | None = None) -> bool:

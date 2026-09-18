@@ -29,11 +29,11 @@ gherkai_worker_novaact/
 **本目录没有自己的 `.venv`**：它是 repo 根 uv workspace 的一个成员，worker 装进**与 CLI 同一个 venv**。依据见 ADR 0037 决策 3：「安装」与「拉起」正交；同 venv 使组合根可用 `[sys.executable, "-m", "gherkai_worker_novaact"]` 直接拉起，无包装进程，EVENTS_FD 经 `pass_fds` 直达。
 
 ```bash
-uv sync            # 在 repo 根跑一次，core/runtime/cli + 本 worker 一并装为 editable
+uv sync            # 在 repo 根运行一次，core/runtime/cli + 本 worker 一并装为 editable
 ```
 
 依赖与版本钉法（`pyproject.toml`）：`requires-python = ">=3.13"`；SDK **钉精确版本** `nova-act==3.4.187.0`
-（升级 = 改 pin → 全套测试 + 评测集真跑 → 随发版说明，见 [ADR 0042](../../docs/adr/0042-step-evidence-and-explain.md) 决策六），
+（升级 = 改 pin → 全套测试 + 评测集实际运行 → 随发版说明，见 [ADR 0042](../../docs/adr/0042-step-evidence-and-explain.md) 决策六），
 `boto3>=1.34` 直接声明，不经 nova-act 传递依赖（ADR 0037 决策 2c）；包版本由 git tag 经 uv-dynamic-versioning 算出，不写入文件（ADR 0037 决策 2b）。
 
 ## 执行形态：薄 worker（pytest-bdd 已退役）
@@ -42,12 +42,12 @@ uv sync            # 在 repo 根跑一次，core/runtime/cli + 本 worker 一�
 
 `python -m gherkai_worker_novaact` 与 console script `gherkai-worker-novaact` 是**同一个 `main()`**（定位链第二、三级，ADR 0037 决策 3），行为逐字一致；**入口不做任何包装**（不起子进程、不改 fd）：worker 必须是组合根直接 spawn 的那个进程，中间任何包装层都会使 fd3 丢失（EVENTS_FD 经 `pass_fds` 继承，ADR 0024 三通道）。
 
-常规路径是经 `gherkai` CLI 运行；调试时也可手动直跑 worker（下列命令从 repo 根跑；`<job json>` 的字段说明与可直接改用的样例见 [ADR 0024](../../docs/adr/0024-worker-core-protocol.md)「输入（core → worker）」一节）：
+常规路径是经 `gherkai` CLI 运行；调试时也可手动直接运行 worker（下列命令从 repo 根执行；`<job json>` 的字段说明与可直接改用的样例见 [ADR 0024](../../docs/adr/0024-worker-core-protocol.md)「输入（core → worker）」一节）：
 
 ```bash
 echo '<job json>' | AWS_REGION=us-east-1 uv run python -m gherkai_worker_novaact
 
-# 两个非 job 入口（不建会话、不跑 job、零 AWS，[ADR 0036](../../docs/adr/0036-deterministic-capability-discovery.md)）；cli 的 `list-deterministic` / `doctor` / run 前置 / plan 标注即转述它们：
+# 两个非 job 入口（不建会话、不执行 job、零 AWS，[ADR 0036](../../docs/adr/0036-deterministic-capability-discovery.md)）；cli 的 `list-deterministic` / `doctor` / run 前置 / plan 标注即转述它们：
 uv run gherkai-worker-novaact --capabilities                          # 能力自述：{schema_version, engine, min_grace_s, deterministic_steps, model_id}（清单 = 注册表 pattern + description + example）
 echo '["页面地址匹配 \"/wiki/OpenAI\""]' | uv run python -m gherkai_worker_novaact --match-steps   # 批量查询这些 step 各命中什么
 ```
@@ -79,7 +79,7 @@ worker 侧**只有这两个 flag**：确定性清单是 `--capabilities` 对象�
 
 确定性注册表 = **本包内建脚手架**（`gherkai_worker_novaact/deterministic_steps.py`，一条 URL 锚点作范例）**+ 使用方项目里的 `steps/` 目录**（ADR 0037 决策 4）。使用方**不修改包内文件**（包内文件是发行内容，修改等同于 fork）；使用方侧的写法见 [user guide](../../docs/user-guide/writing-deterministic-steps.md)。
 
-steps 目录 worker **只认环境变量 `GHERKAI_STEPS_DIR`**：`--steps-dir` flag / 默认 `./steps` / 随 run definition 持久化，全部由 CLI 侧（组合根）解析后注入，worker 不自行推断路径（ADR 0037 决策 4）。手动直跑 worker 时须自行设置该 env：
+steps 目录 worker **只认环境变量 `GHERKAI_STEPS_DIR`**：`--steps-dir` flag / 默认 `./steps` / 随 run definition 持久化，全部由 CLI 侧（组合根）解析后注入，worker 不自行推断路径（ADR 0037 决策 4）。手动直接运行 worker 时须自行设置该 env：
 
 ```bash
 GHERKAI_STEPS_DIR=$PWD/steps uv run gherkai-worker-novaact --capabilities   # deterministic_steps 含使用方 step
@@ -96,16 +96,16 @@ Nova 侧**不需要** midscene 那条「加载完某文件若零注册即报错�
 
 云端档同样**只认 `GHERKAI_STEPS_DIR`**，但取值来自定制 worker 镜像的 `ENV GHERKAI_STEPS_DIR=/app/steps`（steps 随 `COPY` 构建进镜像），不由本机 shell 或 CLI 注入（[ADR 0038](../../docs/adr/0038-worker-image-delivery.md)）。
 
-## 跑测试
+## 运行测试
 
-从 **repo 根**跑（本目录没有独立 venv）：
+从 **repo 根**执行（本目录没有独立 venv）：
 
 ```bash
-uv run pytest -q engines/novaact/tests     # 只跑本引擎：2026-09-17 实跑 209 passed
-uv run pytest -q                           # 跑全 workspace（根 testpaths 已含本目录）
+uv run pytest -q engines/novaact/tests     # 只运行本引擎：2026-09-17 实测 209 passed
+uv run pytest -q                           # 运行全 workspace（根 testpaths 已含本目录）
 ```
 
-## 跑 spike（可独立跑，不进 wheel）
+## 运行 spike（可独立运行，不进 wheel）
 
 ```bash
 AWS_REGION=us-east-1 uv run python engines/novaact/spikes/wikipedia_benchmark.py    # 对标基准（维基百科端到端）
@@ -116,8 +116,8 @@ AWS_REGION=us-east-1 uv run python engines/novaact/spikes/negative_assertions.py
 
 Nova Act 每次 `act`/`act_get` 各产出一个 trajectory HTML。落点分两种：
 
-- **正常经 cli 跑**：组合根经环境变量 `NOVA_LOGS_DIR` 注入 run 专属持久目录 `reports/<run_id>/nova-trajectories`，worker 原样交给 `NovaAct(logs_directory=...)`（[ADR 0027](../../docs/adr/0027-runreport-aggregation-index.md)；scope 级 `session_summary.json` 落同一 base）；产物再经 `ArtifactUploader` 传 S3（[ADR 0029](../../docs/adr/0029-engine-artifacts-to-s3.md)）。
-- **手动直跑 worker / 跑 spike**（不设 `NOVA_LOGS_DIR`）：回落 SDK 默认的系统临时目录 `$TMPDIR/..._nova_act_logs/`（会被系统清理）；需持久化时自行传入 `NovaAct(logs_directory=...)`（见 [ADR 0010](../../docs/adr/0010-spike-as-apples-to-apples-benchmark.md)）。
+- **正常经 cli 运行**：组合根经环境变量 `NOVA_LOGS_DIR` 注入 run 专属持久目录 `reports/<run_id>/nova-trajectories`，worker 原样交给 `NovaAct(logs_directory=...)`（[ADR 0027](../../docs/adr/0027-runreport-aggregation-index.md)；scope 级 `session_summary.json` 落同一 base）；产物再经 `ArtifactUploader` 传 S3（[ADR 0029](../../docs/adr/0029-engine-artifacts-to-s3.md)）。
+- **手动直接运行 worker / spike**（不设 `NOVA_LOGS_DIR`）：回落 SDK 默认的系统临时目录 `$TMPDIR/..._nova_act_logs/`（会被系统清理）；需持久化时自行传入 `NovaAct(logs_directory=...)`（见 [ADR 0010](../../docs/adr/0010-spike-as-apples-to-apples-benchmark.md)）。
 
 `--no-report` 档由组合根经 env `GHERKAI_NO_ARTIFACTS=1` 告知：worker **不收集、不上报**引擎原生产物（不带 `session_summary.json`、不发任何 reportRef、不产 step 级 evidence）。Nova Act SDK 没有关闭 trajectory 的开关，此档下 worker 不传 `logs_directory`，SDK 仍把 trajectory 写入自己 `mkdtemp` 出的临时目录；这是 SDK 内部行为、不进项目（ADR 0037 决策 3）。一次 run 的全部产物落点（两引擎横向、local 与 cloud 两档）见 [`docs/internals/artifacts-and-evidence.md`](../../docs/internals/artifacts-and-evidence.md)。
 
@@ -143,7 +143,7 @@ docker build --platform linux/amd64 -f engines/novaact/Dockerfile \
 - **经典 builder（无 buildx）会连未选中的 stage 一并执行**，故两个 stage 都对「本 stage 的参数未给」保持容忍（`if [ -n … ]`）；把关点在 final stage 的冒烟（`--capabilities`，不需要 AWS）：未给 build-arg 时在此处 fail-loud，不延后到 Fargate 启动期。
 - wheel 必须以**原文件名**安装：pip 从文件名解析发行名 / 版本 / tag，改名后 pip 以「Invalid wheel filename」拒绝安装。
 
-**不装 chromium 二进制**：worker 连接的是 AgentCore 云浏览器（`cdp_session` → `connectOverCDP`），playwright 只作 CDP 客户端库、不 launch 本地 chromium；镜像因此省下几百 MB，已真跑验证。
+**不装 chromium 二进制**：worker 连接的是 AgentCore 云浏览器（`cdp_session` → `connectOverCDP`），playwright 只作 CDP 客户端库、不 launch 本地 chromium；镜像因此省下几百 MB，已实际运行验证。
 
 ## 相关 ADR
 

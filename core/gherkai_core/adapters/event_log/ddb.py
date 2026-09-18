@@ -1,4 +1,4 @@
-"""DdbEventLog（ADR 0034 cloud 侧）：cloud 无状态跑批的 EventLog——从 DDB events 表读全量重放 + 写 task_exited。
+"""DdbEventLog（ADR 0034 cloud 侧）：cloud 无状态批量运行的 EventLog——从 DDB events 表读全量重放 + 写 task_exited。
 
 cloud 对位 local 的 SqliteEventLog：reconciler Lambda 经它读某 run 全量 events（worker PutItem 的执行事件
 + 退出观察者写的 task_exited）→ project 重放推演。**worker 侧不改**——worker 仍按 [0024] PutItem 执行事件到

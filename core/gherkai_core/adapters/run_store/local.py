@@ -116,9 +116,9 @@ class LocalRunStore:
     def preflight(self) -> None:
         """探活 no-op（ADR 0030 决定七）：本地文件后端无「表不存在」问题，目录随写随建。"""
 
-    # ---- 无状态跑批的条件写三方（ADR 0034）----
+    # ---- 无状态批量运行的条件写三方（ADR 0034）----
     # 与上面 update_job_state/finalize_run（同步 run 路径、依赖 RunPersistence 进程内锁）并存、职责不同：
-    # 无状态跑批下多进程并发写（per-run 进程 + status --wait 接力），进程内锁跨不了进程边界，故这三方
+    # 无状态批量运行下多进程并发写（per-run 进程 + status --wait 接力），进程内锁跨不了进程边界，故这三方
     # 用 **fcntl 文件锁**（跨进程互斥）把「读 run_state.json → 判条件 → 写回」整段串成原子 RMW。
     # local 落地即校验条件写逻辑（单测），cloud DDB 用条件表达式复刻同一语义。
 

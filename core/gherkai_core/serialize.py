@@ -311,7 +311,7 @@ def run_state_to_dict(state: RunState) -> dict:
         d["started_at"] = state.started_at
     if state.ended_at is not None:
         d["ended_at"] = state.ended_at
-    # high_water_mark：仅无状态跑批投影写时有值（ADR 0034 机制三）；同步 run 路径为 None。
+    # high_water_mark：仅无状态批量运行投影写时有值（ADR 0034 机制三）；同步 run 路径为 None。
     # omit-when-None（同 started_at/ended_at）——旧 run_state.json 无此键、from_dict .get 容忍，round-trip 不破。
     if state.high_water_mark is not None:
         d["high_water_mark"] = state.high_water_mark

@@ -1,4 +1,4 @@
-"""无状态跑批的 local 执行接线（ADR 0034，local 档）：SubprocessLauncher + per-run reconciler 进程。
+"""无状态批量运行的 local 执行接线（ADR 0034，local 档）：SubprocessLauncher + per-run reconciler 进程。
 
 组合根职责（local 执行环境特有）：把 core 的 reconciler（纯编排）接到真 subprocess 世界——
 - **SubprocessLauncher**：机制四 CAS 抢占成功后被 reconciler 调，起一个 worker（复用 SubprocessEngine）、
@@ -225,7 +225,7 @@ def _recover_timed_out_claims(run_id, meta, event_log, run_store, launcher, now_
 
 
 def _paths(report_dir: str, run_id: str):
-    """local 无状态跑批的落点：events SQLite 与 RunStore/ResultStore 同在 <report_dir>/<run_id>/。"""
+    """local 无状态批量运行的落点：events SQLite 与 RunStore/ResultStore 同在 <report_dir>/<run_id>/。"""
     root = Path(report_dir)
     return root, root / run_id / "events.db"
 

@@ -1,4 +1,4 @@
-"""cloud 无状态跑批 core 侧测试（ADR 0034 P4a）：DdbEventLog + CloudLauncher + reconcile.tick(DDB 后端)。
+"""cloud 无状态批量运行 core 侧测试（ADR 0034 P4a）：DdbEventLog + CloudLauncher + reconcile.tick(DDB 后端)。
 
 moto mock DDB/ECS——验 DdbEventLog 读全量重放 + task_exited 独立键空间 + CloudLauncher start_scope 调对 +
 reconcile.tick 用 DdbEventLog/DynamoDBRunStore/CloudLauncher 跑通（与 local SqliteEventLog/LocalRunStore 对拍语义）。

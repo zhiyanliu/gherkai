@@ -12,7 +12,7 @@ ADR 0045 决策五：每版说明「不写发不出」——发布链 gate 断�
     python3 .github/scripts/release_notes.py render --version 1.4.4 --owner zhiyanliu --repo gherkai \
         [--changelog CHANGELOG.md] [--footer .github/release_body_footer.md] --out release_body.md
 
-只用标准库（发布链用 `uv run --no-project python` 跑它，不带任何项目依赖）。
+只用标准库（发布链用 `uv run --no-project python` 运行它，不带任何项目依赖）。
 """
 from __future__ import annotations
 

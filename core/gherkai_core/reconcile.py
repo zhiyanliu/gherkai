@@ -1,4 +1,4 @@
-"""reconciler（ADR 0034）：无状态跑批的推进编排——被事件唤醒、幂等、并发安全。
+"""reconciler（ADR 0034）：无状态批量运行的推进编排——被事件唤醒、幂等、并发安全。
 
 `tick(run_id, meta)` 一步推进：读 EventLog 全量 records → project() 推 RunState → 条件写落库 →
 plan_next() 决定动作 → 对每个 start 动作 CAS 抢占成功即经注入的 Launcher 起 job；全终态则 try_finalize。

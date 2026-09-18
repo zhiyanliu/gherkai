@@ -23,7 +23,7 @@ USER_DOCS = sorted(USER_GUIDE.glob("*.md")) + [REPO / "README.md", REPO / "CHANG
 
 LINK = re.compile(r"\]\(([^)\s]+)\)")
 BUILDER_ONLY = re.compile(r"(^|/)(docs/adr|docs/journey|docs/ai-eng)(/|$)|(^|/)(CONTEXT\.md|CLAUDE\.md)$")
-COLLOQUIAL = re.compile(r"帽子不是人|烧钱|锁步|lockstep|烙进|烙好|烙成|烙在")  # 已定改掉的口头语 / 隐喻 / 晦涩术语（ADR 0045 决策六）
+COLLOQUIAL = re.compile(r"帽子不是人|烧钱|锁步|lockstep|烙进|烙好|烙成|烙在|跑(?![法」])")  # 已定改掉的口头语 / 隐喻 / 晦涩术语（ADR 0045 决策六）；「跑」作动词禁用，术语「跑法」与提及词「跑」除外
 
 
 def _rel(p: Path) -> str:

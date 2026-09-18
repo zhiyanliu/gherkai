@@ -2,7 +2,7 @@
   "schema_version": 1,
   "diagram_type": "sequence",
   "meta": {
-    "title": "云端后台跑批：事件级联把一个 run 推到收敛",
+    "title": "云端后台运行：事件级联把一个 run 推到收敛",
     "locale": "zh-CN",
     "quality_profile": "showcase",
     "column_fit": "spread",
