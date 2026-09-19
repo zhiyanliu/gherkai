@@ -9,9 +9,9 @@
 **当前（施工前）**：每个引擎一个镜像；部署方用 `tools/build_push_workers.py` 从整个 repo 构建、推自己私有 ECR 的 `{prefix}{engine}-worker:latest`；task-def 由 IaC 建、镜像栏焊死 `tag="latest"`；RunTask 只传 task-def 的 **family 名**（ECS 取该 family 最新 ACTIVE revision）；CLI 完全不知道也不能选跑哪个镜像；「更新 steps」= 改 repo 里的脚手架文件、整体重建、重推 `latest`，下次起 task 自然拉到。使用方 build 时必须带 `--platform linux/amd64`，漏给的后果是 Fargate **启动期** `exec format error`（[0033](./0033-iac-aws-backend-and-composition-wiring.md) 记的坑）。
 
 **要解的问题**：
-- **多套 step 集并存**：不同开发者/分支在同一个共享后端上各跑各的确定性 step 集而互不覆盖；跑时可选。单 tag cover 不了。
+- **多套 step 集并存**：不同测试开发 / 分支在同一个共享后端上各跑各的确定性 step 集而互不覆盖；跑时可选。单 tag cover 不了。
 - **版本噩梦**：同一个 tag 名在不同人嘴里指不同内容。要让「用的是哪份」可见、可查、run 内一致。
-- **所有权**：改共享后端用的镜像是一次部署变更，应归部署方；镜像**构建**是 developer 自己的容器工作，gherkai 不该拥有。默认画像 = developer 兼测试开发与部署方两角（同一台机器 build 完就推）；团队拆角色时权限边界要现成（角色模型与「帽子不是人」的一般化见 [0040](./0040-consumer-role-model-and-terminology.md)）。
+- **所有权**：改共享后端用的镜像是一次部署变更，应归部署方；镜像**构建**是测试开发自己的容器工作，gherkai 不该拥有。默认画像 = 一人兼测试开发与部署方两顶帽子（同一台机器 build 完就推）；团队拆角色时权限边界要现成（角色模型与「帽子不是人」的一般化见 [0040](./0040-consumer-role-model-and-terminology.md)）。
 - **架构错误提前暴露**：`--platform` 漏给的错误不该拖到 Fargate 启动期才炸，应在推送前 fail-loud。**不支持 ARM64**（被拒方案，理由见下）。
 
 **AWS 事实（决定形状，均已对照官方文档）**：RunTask 的容器 override 字段全集是 command / environment / environmentFiles / cpu / memory / memoryReservation / resourceRequirements / name，**不能换镜像**；镜像与 `runtimePlatform` 都写在 task-def **revision** 里，revision 是不可变快照、无继承；RunTask 可传 `family`（最新 ACTIVE）或 `family:N`（精确）；task-def 镜像栏支持 `repo@sha256:<digest>`；`DeregisterTaskDefinition` 把 revision 置 INACTIVE——**不影响在跑的 task，但不能再用它起新 task，且注销后最多 10 分钟内这条限制可能尚未生效**；`DeleteTaskDefinitions` 永久删除 INACTIVE revision（有关联 task 时先 DELETE_IN_PROGRESS）；task-def 类 IAM 动作（Register / List / Describe）**不支持资源级权限，只能 `Resource: "*"`**；ECR 仓库 tag 可变性默认 MUTABLE；Fargate ARM64 的不可用面**按 AZ**（官方明列 us-east-1 的 `use1-az3`）。
@@ -21,7 +21,7 @@
 | 概念 | 定义 | 载体 |
 |---|---|---|
 | **基础镜像** | 维护者 CI 发布的镜像 `ghcr.io/zhiyanliu/gherkai-worker-<engine>:X.Y.Z`，linux/amd64 单架构，零使用方内容（[0037](./0037-distribution-and-packaging.md) 决策 5） | GHCR |
-| **variant** | 一套具名的确定性 step 集 = 一个定制镜像；名字由开发者自取（`login`、`checkout-v2`）；基础镜像同步进 ECR 的那份固定叫 `base` | 使用方私有 ECR，tag = `<CLI 版本>-<variant>` |
+| **variant** | 一套具名的确定性 step 集 = 一个定制镜像；名字由测试开发自取（`login`、`checkout-v2`）；基础镜像同步进 ECR 的那份固定叫 `base` | 使用方私有 ECR，tag = `<CLI 版本>-<variant>` |
 | **默认指针** | 提交时不给 `--worker-variant` 就用哪个 variant；部署级一个；deploy 初始化为 `base` | SSM |
 | **revision** | 每个（引擎，variant）一个 task-def revision：从模板复制、镜像栏换成 `repo@sha256:<digest>`、以 tags 记血缘与退休时刻 | ECS task-def family `{prefix}{engine}-worker` |
 | **模板 revision**（revision 的母本） | deploy 时 CDK 建出的那个 revision，承载 cpu / memory / task role / execution role / 日志组 / `runtimePlatform`（X86_64）等只有部署后才存在或全局固定的值；**镜像栏保留 `tag="latest"` 作占位**（CDK 必填；该 tag 在 ECR 里可以不存在）——它**永不被 RunTask**、只作复制母本；definition 缺字段时的兼容回落走默认指针（见「运行时与 preflight」节） | ECS；其 ARN 由 stack 资源写进 SSM |
@@ -31,7 +31,7 @@
 
 **tag 可变，replace 与否交给使用方**：重推同名 variant 直接放行、只在推送后打印「原 digest → 新 digest」。不设不可变仓库——bugfix 不想改 variant 名是正当需求，机制给到、用错不算产品欠缺。run 内一致性不靠 tag 靠 revision（下）。**护栏**：这条正确性依赖 ECR 保留被顶掉 tag 的 untagged 镜像（运行中 run 的旧 revision 按 digest 指着它），故 ECR 仓库**不设 untagged 过期的 lifecycle 规则**；代价是每次重推永久留一层 untagged 存储、随重推次数增长——记为已知运行期成本，回收与 `delete-worker` 同批设计（重议闸门）。
 
-**定制镜像模板（唯一真源，[0037](./0037-distribution-and-packaging.md) 只指向此处）**：developer 自己 build，任何本地名字，gherkai 不拥有构建；**必须 `--platform linux/amd64`**（arm Mac 上尤其）：
+**定制镜像模板（唯一真源，[0037](./0037-distribution-and-packaging.md) 只指向此处）**：测试开发自己 build，任何本地名字，gherkai 不拥有构建；**必须 `--platform linux/amd64`**（arm Mac 上尤其）：
 
 ```dockerfile
 FROM ghcr.io/zhiyanliu/gherkai-worker-novaact:1.4.0
@@ -155,7 +155,7 @@ docker build --platform linux/amd64 -t acme-novaact:login .
 
 ## 被拒方案（护栏，防未来重踩）
 
-- **gherkai 拥有定制镜像的构建（曾拟 `build-workers` 命令即时生成 Dockerfile、build、push 一体，且住 CLI 本体）**：镜像构建是 developer 自己的容器工作，gherkai 拥有它就得替所有构建方式与引擎负责；只保留三行模板，云端侧的推送与注册归部署方、归 `gherkai-deploy-aws`。
+- **gherkai 拥有定制镜像的构建（曾拟 `build-workers` 命令即时生成 Dockerfile、build、push 一体，且住 CLI 本体）**：镜像构建是测试开发自己的容器工作，gherkai 拥有它就得替所有构建方式与引擎负责；只保留三行模板，云端侧的推送与注册归部署方、归 `gherkai-deploy-aws`。
 - **支持 ARM64 / 多架构基础镜像、架构随 variant 走**：Fargate ARM64 的不可用面按 AZ（us-east-1 的 `use1-az3`），要按 ZoneId 排除子网、维护排除表、多架构 buildx、`--base-arch` 旋钮，换来约 20% 的 task 单价；复杂度不值，且使用方 build 仍需注意平台。固定 linux/amd64，push-worker 推送前校验把 `--platform` 漏给的错误提前 fail-loud。锁文件静态核查两侧依赖均有 linux/arm64 产物（Python 侧 playwright 等 18 个平台 wheel、Node 侧 esbuild/sharp），将来要省钱路是通的，见重议闸门。
 - **preflight 校验 steps 漂移（steps 目录摘要作第二个 tag 或存 SSM 比对）**：越权替使用方判断内容；提交者手头未必有 steps 目录会被误拦；需要区分就换 variant 名。
 - **variant 参数叫 `--tag`**：它只是 ECR tag 的后缀，与镜像 tag 混；`--variant` / `--worker-variant`。

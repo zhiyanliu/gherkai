@@ -75,8 +75,8 @@
     "semantic_hash": ""
   },
   "core/tests/test_fargate_engine.py": {
-    "mtime": 1789781774.4338448,
-    "ast_hash": "22ea5fe1a4c24c6d295468daf7a3a051",
+    "mtime": 1789807238.476247,
+    "ast_hash": "bca0afaf9c28928498eef7daaea5e9b0",
     "semantic_hash": ""
   },
   "core/tests/test_lifecycle_states.py": {
@@ -230,8 +230,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0020-step-phrasing-default-ai-deterministic-scaffold.md": {
-    "mtime": 1789801285.9708385,
-    "ast_hash": "832ccf853995bf4edf3c518021e389ad",
+    "mtime": 1789807238.4765005,
+    "ast_hash": "91d0b3c32c255c4333a5768158451e32",
     "semantic_hash": ""
   },
   "docs/adr/0025-plan-module-feature-to-jobs.md": {
@@ -440,13 +440,13 @@
     "semantic_hash": ""
   },
   "docs/adr/0037-distribution-and-packaging.md": {
-    "mtime": 1789804643.795483,
-    "ast_hash": "1f640d1178706ec5ed9cb9b4ad55d685",
+    "mtime": 1789807310.9516935,
+    "ast_hash": "49f49b7acab600f1cc14b8d141a1d59e",
     "semantic_hash": ""
   },
   "docs/adr/0038-worker-image-delivery.md": {
-    "mtime": 1789806360.5613415,
-    "ast_hash": "fe70c57fb01d0aa57f7ee0e8a356ff81",
+    "mtime": 1789807238.4767153,
+    "ast_hash": "e15f1924da94dfdc861e5b69b39f867b",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/__init__.py": {
@@ -849,11 +849,6 @@
     "ast_hash": "b31dc92afb541be0626148ab30264230",
     "semantic_hash": ""
   },
-  "engines/novaact/tests/test_antetheft.py": {
-    "mtime": 1789798622.2197855,
-    "ast_hash": "1dc0356856a5c72003b793f530e30cac",
-    "semantic_hash": ""
-  },
   "engines/novaact/tests/test_argument.py": {
     "mtime": 1788769776.0407612,
     "ast_hash": "150c55d3ffefb7f83033bdefb1d165ab",
@@ -1015,8 +1010,8 @@
     "semantic_hash": ""
   },
   "deploy_aws/tests/test_lambda_handlers.py": {
-    "mtime": 1789781774.4346573,
-    "ast_hash": "a1d576059ad2a7647c3f4a9908d501e8",
+    "mtime": 1789807238.4760544,
+    "ast_hash": "b11bbf29e9143dcc7cf5e52a58305ca9",
     "semantic_hash": ""
   },
   "deploy_aws/gherkai_deploy_aws/container.py": {
@@ -1345,8 +1340,8 @@
     "semantic_hash": ""
   },
   "CONTRIBUTING.md": {
-    "mtime": 1789804643.8256512,
-    "ast_hash": "d49018fbfb7ad433c4017188f0ad7cca",
+    "mtime": 1789807238.4756367,
+    "ast_hash": "88c54ace7b32099a93d45107090affd6",
     "semantic_hash": ""
   },
   "docs/README.md": {
@@ -1702,6 +1697,11 @@
   "docs/ai-eng/diagram-authoring.md": {
     "mtime": 1789724196.4781477,
     "ast_hash": "5b100740298af677006687bd26590fc0",
+    "semantic_hash": ""
+  },
+  "engines/novaact/tests/test_safe_point_upload.py": {
+    "mtime": 1789798622.2197855,
+    "ast_hash": "1dc0356856a5c72003b793f530e30cac",
     "semantic_hash": ""
   }
 }

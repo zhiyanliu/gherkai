@@ -49,7 +49,7 @@ v1 定位尚有一项验收未完成，前置条件是取得可用的真实业�
 │   ├── wikipedia_generic.feature / wikipedia_assertions.feature / wikipedia_robustness.feature
 │   ├── wikipedia_zh.feature                ← 非英文 UI 探针：中文维基 + 中文 step，两引擎同题（ADR 0001 的测量夹具与重议复测入口）
 │   ├── engine_routing.feature              ← @engine tag 路由验证
-│   ├── deterministic_anchor.feature        ← @deterministic 确定性 step 验证（ADR 0022）
+│   ├── deterministic_step.feature          ← @deterministic 确定性 step 验证（ADR 0022）
 │   └── concurrency_and_scope.feature       ← 手工真实运行的回归夹具：改调度/会话生命周期后重新执行以验证 ADR 0019
 ├── core/                      ← 窄腰核心库（发行名 gherkai-core，Python，零引擎依赖，ADR 0016）
 ├── runtime/                   ← 产品本体 = 组合根共享层（发行名 gherkai-runtime；ADR 0016「演进」节；cli/Lambda/WebUI 的共同地基）

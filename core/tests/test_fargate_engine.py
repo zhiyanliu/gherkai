@@ -119,9 +119,9 @@ def test_run_scope_job_key_quotes_scope_id(fargate):
     # 不造 S3 假子前缀、与 S3ResultStore（同 quote）一致（实际运行暴露的一致性缺陷回归守卫）。
     from urllib.parse import quote
     eng = _engine(fargate)
-    sid = "features/deterministic_anchor.feature:7"
+    sid = "features/deterministic_step.feature:7"
     handle, _events = eng.run_scope(_job(sid))
-    expected_key = f"{_RUN_ID}/jobs/{quote(sid, safe='')}.json"  # features%2Fdeterministic_anchor.feature%3A7.json
+    expected_key = f"{_RUN_ID}/jobs/{quote(sid, safe='')}.json"  # features%2Fdeterministic_step.feature%3A7.json
     obj = fargate["s3"].get_object(Bucket=fargate["bucket"], Key=expected_key)  # 能取到=key 用了 quote
     assert json.loads(obj["Body"].read().decode("utf-8"))["scope"]["id"] == sid
     assert "%2F" in expected_key and "%3A" in expected_key  # 确认 / 和 : 都被编码（不造子前缀）

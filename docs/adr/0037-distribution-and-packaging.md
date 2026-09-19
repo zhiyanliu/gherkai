@@ -98,7 +98,7 @@ gherkai ──hard──▶ gherkai-runtime[aws]=={{v}} ──▶ gherkai-core[a
 - **CLI 硬依赖 boto3（反转 [0016](./0016-execution-architecture-core-lib-run-model.md)「cli backend 选择」节 `build_cloud_stores` 条的「cli 主依赖不含 boto3，走 `cli[aws]→core[aws]` extra」）**：按用户画像过一遍，裸装 `gherkai` 时没有任何画像能跑起完整用法——提交 cloud run 要 boto3；local 跑 novaact 装 `[local]` 而 nova-act 自带 boto3；只剩「仅跑 midscene 的 local 用户」与「只 `plan`」两种边缘画像省下一次安装体积。而 `[aws]` 留在 CLI 上的摩擦落在头条用法：`uvx gherkai submit --backend cloud` 会因缺 boto3 失败、要改写成 `uvx --from 'gherkai[aws]' gherkai …`。**code 层不变量不动**：local 路径**绝不 import boto3**靠懒加载保证（`compose` 的 `_make_*` 钩子），与安装期是否装了 boto3 无关。
 - **`[aws]` 保留在 core 与 runtime 层**：[0030](./0030-realtime-persistence-seam.md) 决定六守的本来就是「core 作为库可轻量 import、不被 boto3 绑死」，针对的是库消费者；库层保留 extra 完整兑现它。
 - **`[local]` 存在且语义 = local 跑法的 Python 侧 worker**（决策 3）；**不设** `[local]` 曾是备选（理由「worker 独立 venv、extras 够不到」），被「安装与拉起正交 + 共解实测」推翻。
-- **`[deploy-aws]` 不叫 `[aws]`、不叫 `[deploy]`**：`[aws]` 会说谎——裸装已能用 AWS 后端，团队成员见 `[aws]` 必以为提交云端要装它、把 CDK 与 Node 依赖拉进机器；`[deploy]` 会关上 provider 那扇门（决策 6）。**`[deploy-aws]` 的语义 = 改云端环境所需**：供给后端（CDK）+ 变更后端用的 worker 镜像（[0038](./0038-worker-image-delivery.md) 的推送与注册都是云端写操作）；镜像**构建**是 developer 自己的容器工作、gherkai 不拥有。只提交 run 的人不需要装它。默认画像是 developer 兼测试开发与部署方两角、装它；团队拆角色时写 step 的人可不装、把本地镜像交给部署方。extras 名按 PEP 685 规范化，`deploy_aws` 等价。
+- **`[deploy-aws]` 不叫 `[aws]`、不叫 `[deploy]`**：`[aws]` 会说谎——裸装已能用 AWS 后端，团队成员见 `[aws]` 必以为提交云端要装它、把 CDK 与 Node 依赖拉进机器；`[deploy]` 会关上 provider 那扇门（决策 6）。**`[deploy-aws]` 的语义 = 改云端环境所需**：供给后端（CDK）+ 变更后端用的 worker 镜像（[0038](./0038-worker-image-delivery.md) 的推送与注册都是云端写操作）；镜像**构建**是测试开发自己的容器工作、gherkai 不拥有。只提交 run 的人不需要装它。默认画像是一人兼测试开发与部署方两顶帽子、装它；团队拆角色时写 step 的人可不装、把本地镜像交给部署方。extras 名按 PEP 685 规范化，`deploy_aws` 等价。
 
 ### 2d. `requires-python >=3.13` 维持
 

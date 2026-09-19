@@ -142,7 +142,7 @@ def test_run_ids_keeps_modify_and_records_without_event_name():
 
 def test_run_ids_scope_with_colon_not_hash():
     """scope_id 含 : （feature:行号）但不含 #——rsplit('#',1) 正确只切 run_id#scope 的分隔。"""
-    event = {"Records": [_stream_record("20260719T04Z-abc#features/deterministic_anchor.feature:7")]}
+    event = {"Records": [_stream_record("20260719T04Z-abc#features/deterministic_step.feature:7")]}
     assert reconciler._run_ids_from_stream(event) == {"20260719T04Z-abc"}
 
 
