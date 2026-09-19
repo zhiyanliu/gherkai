@@ -24,7 +24,7 @@
 2. **STALE_INEFFICIENT**：过时或低效——过时的注释/常量、局部最优的写法、该抽取的重复逻辑、不必要的复杂度、性能隐患。**含 code 注释的引用方向违规 / 悬空指针**，三件事：
    - **判据与修法不在此复述**：三形态（引 `docs/journey/` / 裸 WP 编号 / 只在某次会话成立的指代）与修法（改指稳定物或翻成自明事件描述）**详见 CLAUDE.md 文档纪律「悬空指针红线」条**（该条正文显式含 repo 内 code 注释与 docstring，一律守）。
    - **范围 = 全部 repo 代码文件的注释与 docstring**：`tools/`、产品树、测试、`deploy_aws`（CDK stack 与 lambdas）、`.mts`·TS、bash（`tools/*.sh`）、`.github/` 下的 workflow 与脚本等——一次性脚本/脚手架本该放系统临时目录（`/tmp`）、不入 repo，入了库就一律守此规；测试逻辑本身仍不 review（见红线护栏），但其注释的引用方向违规同报。`.md` 文档的同类违规归姊妹任务 [`doc-health-review.md`](./doc-health-review.md)。
-   - **术语与口吻同查**：code 注释、docstring 与用户可见字符串（`--help`、提示、错误、日志）按 CONTEXT.md 规范名与人读口吻判——出现 `_Avoid_` 登记的退役旧名或口头语即报 STALE；护栏是 `cli/tests/_doc_rules.py` 的 `COLLOQUIAL` / `RETIRED_TERMS` 两张表与 `cli/tests/test_user_facing_messages.py` 的禁词表，正则外的靠本任务。用户可见字符串改了要同批刷文档与 skill 里的逐字引文。
+   - **术语与口吻同查**：code 注释、docstring 与用户可见字符串（`--help`、提示、错误、日志）按 CONTEXT.md 规范名与人读口吻判——出现 `_Avoid_` 登记的退役旧名或口头语即报 STALE；护栏是 `cli/tests/_doc_rules.py` 的 `COLLOQUIAL` / `RETIRED_TERMS` 两张表与 `cli/tests/test_user_facing_messages.py` 的禁词表（两处都禁量词「档」，但注释与 docstring 不在任何一张的扫描面内），正则外的靠本任务。用户可见字符串改了要同批刷文档与 skill 里的逐字引文。
    - **检测法：必须直读源码注释全文**，grep 时排除 `.venv/`、`node_modules/` 等依赖树（否则命中的多是第三方包文本）。**不可用 graphify 图扫**——图里的 `rationale` 节点只存注释前被截断的部分内容，违规多半在截掉的后半截，扫图会给出"无违规"的假阴性，比不扫更坏。
 3. **VIOLATES_ADR**：与 ADR 已定设计违背/不符（最高价值）。**doc-health 移交的第③类不一致在此接收**（code 偏离 ADR 已定设计、且无任何 ADR 记录该偏离——doc-health 不得把 ADR 改成 code 的样子）：裁定为实现未对齐 → 改 code；裁定为设计该变 → 人拍板后显式改 ADR，不由复盘顺手抹平。常见形态（示例，按 ADR 号排便于反查，**以各 ADR 现状为准**——被 Superseded 的不再算基线；这些是深层架构不变量、较稳定，但 review 时仍以 ADR 正文为准）：
    - [0016] 本该组合根注入却在 module 里 env-sniff 自选。

@@ -60,10 +60,10 @@ worker 侧**只有这两个 flag**：确定性清单是 `--capabilities` 对象�
 |---|---|---|
 | `NOVA_MODEL_ID` | `nova-act-v1.0`（`lib/constants.py` 的 `MODEL_ID`） | 传给 `Workflow(model_id=...)` 的模型 id，同时是 `--capabilities` 的 `model_id`。默认锁定 GA 版本、不用 `nova-act-latest` 别名，更换默认值须随发版评估（[ADR 0044](../../docs/adr/0044-engine-model-selection-and-override.md) 决策 1/2 两引擎同律，现值登记在该 ADR）；Nova 侧的选型证据见 [ADR 0004](../../docs/adr/0004-novaact-iam-auth-via-workflow.md)「模型版本选择策略」 |
 | `NOVA_ACT_TIMEOUT_S` | `120`（`run_scope.ACT_TIMEOUT_S`） | 单个 `act` / `act_get` 的超时上界（SDK 允许 [2,1800]）；真值在组合根，由它注入 worker（[ADR 0024](../../docs/adr/0024-worker-core-protocol.md) act 有界返回） |
-| `NOVA_GRACE_MARGIN_S` | `30`（`lib/constants.py`） | 自报 grace 下限的收尾余量：`min_grace_s = NOVA_ACT_TIMEOUT_S + NOVA_GRACE_MARGIN_S`。30 由真容器标定得出（会话释放 ≤9 秒 + 截图队列退出档排空 6 秒，留约两倍余量；推导写在该常量旁注） |
+| `NOVA_GRACE_MARGIN_S` | `30`（`lib/constants.py`） | 自报 grace 下限的收尾余量：`min_grace_s = NOVA_ACT_TIMEOUT_S + NOVA_GRACE_MARGIN_S`。30 由真容器标定得出（会话释放 ≤9 秒 + 截图队列退出段排空 6 秒，留约两倍余量；推导写在该常量旁注） |
 | `NOVA_LOGS_DIR` | 无（不设即回落 SDK `mkdtemp` 出的临时目录） | Nova SDK 的 trajectory 落点，组合根注入 `<report_dir>/<run_id>/nova-trajectories` 绝对路径（子目录名的单一真源是 `runtime/gherkai_runtime/names.py` 的 `ARTIFACT_SUBDIR`）；worker 主流程与 uploader 都读它 |
 | `AWS_REGION` | 无（模块级读一次，未设则 `Workflow` 构造失败） | Workflow / AgentCore 会话 / 三条 I/O 边共用的 region，由组合根落实后注入（见 `run_scope.REGION`） |
-| `GHERKAI_EXTRA_HTTP_HEADERS` | 无（未设即零行为变化） | JSON 对象；组合根在 `--expose-local` 档注入，worker 在 browser context 级设为额外请求头（[ADR 0035](../../docs/adr/0035-local-app-testing-via-tunnel.md)） |
+| `GHERKAI_EXTRA_HTTP_HEADERS` | 无（未设即零行为变化） | JSON 对象；组合根在 `--expose-local` 方式下注入，worker 在 browser context 级设为额外请求头（[ADR 0035](../../docs/adr/0035-local-app-testing-via-tunnel.md)） |
 
 使 CLI 指向本 checkout（dev 覆写，定位链第一级）：`export GHERKAI_WORKER_NOVAACT_CMD="$(pwd)/.venv/bin/python -m gherkai_worker_novaact"`；workspace 已装 editable 时通常**不需要**（第二级同 venv 即命中）。本引擎还有**第四级**：CLI 版本是纯发行版、且 `uvx` 在 PATH 时，回落到 `uvx gherkai-worker-novaact==<CLI 版本>` 拉起（uvx 虽是包装进程，实测不丢弃 fd3，也转发 SIGTERM）；midscene 没有这一级（`npx` 实测会替换 fd，事件全部丢失）。
 
@@ -119,7 +119,7 @@ Nova Act 每次 `act`/`act_get` 各产出一个 trajectory HTML。落点分两�
 - **正常经 cli 运行**：组合根经环境变量 `NOVA_LOGS_DIR` 注入 run 专属持久目录 `reports/<run_id>/nova-trajectories`，worker 原样交给 `NovaAct(logs_directory=...)`（[ADR 0027](../../docs/adr/0027-runreport-aggregation-index.md)；scope 级 `session_summary.json` 落同一 base）；产物再经 `ArtifactUploader` 传 S3（[ADR 0029](../../docs/adr/0029-engine-artifacts-to-s3.md)）。
 - **手动直接运行 worker / spike**（不设 `NOVA_LOGS_DIR`）：回落 SDK 默认的系统临时目录 `$TMPDIR/..._nova_act_logs/`（会被系统清理）；需持久化时自行传入 `NovaAct(logs_directory=...)`（见 [ADR 0010](../../docs/adr/0010-spike-as-apples-to-apples-benchmark.md)）。
 
-`--no-report` 档由组合根经 env `GHERKAI_NO_ARTIFACTS=1` 告知：worker **不收集、不上报**引擎原生产物（不带 `session_summary.json`、不发任何 reportRef、不产 step 级 evidence）。Nova Act SDK 没有关闭 trajectory 的开关，此档下 worker 不传 `logs_directory`，SDK 仍把 trajectory 写入自己 `mkdtemp` 出的临时目录；这是 SDK 内部行为、不进项目（ADR 0037 决策 3）。一次 run 的全部产物落点（两引擎横向、local 与 cloud 两个后端）见 [`docs/internals/artifacts-and-evidence.md`](../../docs/internals/artifacts-and-evidence.md)。
+`--no-report` 方式由组合根经 env `GHERKAI_NO_ARTIFACTS=1` 告知：worker **不收集、不上报**引擎原生产物（不带 `session_summary.json`、不发任何 reportRef、不产 step 级 evidence）。Nova Act SDK 没有关闭 trajectory 的开关，此方式下 worker 不传 `logs_directory`，SDK 仍把 trajectory 写入自己 `mkdtemp` 出的临时目录；这是 SDK 内部行为、不进项目（ADR 0037 决策 3）。一次 run 的全部产物落点（两引擎横向、local 与 cloud 两个后端）见 [`docs/internals/artifacts-and-evidence.md`](../../docs/internals/artifacts-and-evidence.md)。
 
 ## 容器镜像（面向发布方）
 

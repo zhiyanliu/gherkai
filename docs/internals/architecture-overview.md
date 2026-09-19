@@ -55,7 +55,7 @@
 | `submit` 的推进器 | 本机 `setsid` 脱离出的后台进程，本机需保持开机 | 三个 Lambda（`{prefix}kicker` / `{prefix}reconciler` / `{prefix}exit-observer`）由两条表 Stream 与一条「ECS 任务已停止」事件规则串联（互不调用），提交后关机也能执行完毕 |
 | 确定性 step 来源 | `--steps-dir`（缺省 `./steps`，或 env `GHERKAI_STEPS_DIR`），worker 启动时加载 | 在构建 variant 镜像时打包进镜像，提交侧 `--steps-dir` 对它无效（给出时仅告警） |
 | worker 日志 | 输出到屏幕；`--quiet` 时写入 `<report-dir>/<run_id>/worker.log` | CloudWatch 日志组 `/<prefix>worker/<engine>` |
-| 前置 | 本机 AWS 凭证，以及所用引擎的 worker 已安装在本机 | 部署方已执行 `gherkai deploy --vpc <档> --prefix <前缀>`；提交侧只需最小云端权限 |
+| 前置 | 本机 AWS 凭证，以及所用引擎的 worker 已安装在本机 | 部署方已执行 `gherkai deploy --vpc <取值> --prefix <前缀>`；提交侧只需最小云端权限 |
 
 一个 `--prefix` = 一套完整环境，多环境通过多个 prefix 并存。云端侧由五种各自独立更新的载体构成（stack、Lambda asset、基础镜像、variant 镜像、SSM 参数），「改动为何未在云端生效」的反查表见 [`cloud-backend-carriers.md`](./cloud-backend-carriers.md)。
 

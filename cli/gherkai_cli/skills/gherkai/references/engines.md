@@ -15,7 +15,7 @@
 
 两者都纯 IAM 鉴权、不要 API key；region 要能解析出来（`--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > profile 配置，四级全空才响亮失败、不猜默认，见 `references/setup-and-diagnosis.md` 第 4 节）；浏览器运行在云端、本机不装 Chromium。
 
-**诊断规则**：Nova 档下非英文页面的断言判否，先排查语言面，再怀疑被测应用。三条出路：scenario 标 `@engine:midscene`（或整批 `--default-engine midscene`）；断言改写成页面级语义陈述（「当前是 X 的词条页」「页面没有报错」）；文本与结构检查改成确定性 step。
+**诊断规则**：Nova Act 引擎下非英文页面的断言判否，先排查语言面，再怀疑被测应用。三条出路：scenario 标 `@engine:midscene`（或整批 `--default-engine midscene`）；断言改写成页面级语义陈述（「当前是 X 的词条页」「页面没有报错」）；文本与结构检查改成确定性 step。
 
 ## 2 证据字段的引擎填充差异
 

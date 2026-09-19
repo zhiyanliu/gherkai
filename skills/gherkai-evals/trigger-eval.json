@@ -93,13 +93,13 @@
     "query": "给登录流程写个端到端 UI 测试，能自动跑的那种",
     "should_trigger": true,
     "project": "no-feature",
-    "note": "skill 装在本项目 = 项目级信号，第二档按测试意图触发"
+    "note": "skill 装在本项目 = 项目级信号，第二种情形按测试意图触发"
   },
   {
     "query": "我们的前端项目还没有任何自动化测试，帮我搭一套 e2e 测试",
     "should_trigger": true,
     "project": "no-feature",
-    "note": "skill 装在本项目 = 项目级信号，第二档按测试意图触发"
+    "note": "skill 装在本项目 = 项目级信号，第二种情形按测试意图触发"
   },
   {
     "query": "给 utils.py 里的三个函数补 Python 单元测试，用 pytest",

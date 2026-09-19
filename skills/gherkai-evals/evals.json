@@ -69,7 +69,7 @@
       "expectations": [
         "指出 submit 的退出码只表示提交成功、不是判定",
         "改好的脚本用 gherkai status <run_id> --wait 的退出码（或 gherkai run 的退出码）作为 CI 判定",
-        "脚本先校验 submit 的退出码并确认 run_id 非空，再进入 status --wait；submit / status / explain 的 --report-dir（cloud 档还有 --backend / --prefix）逐字一致",
+        "脚本先校验 submit 的退出码并确认 run_id 非空，再进入 status --wait；submit / status / explain 的 --report-dir（云端后端还有 --backend / --prefix）逐字一致",
         "explain 的退出码不参与门禁（它恒 0 / 2、从不表判定），脚本里显式丢弃它",
         "说明不带 --wait 的 status 未到终态也会退 0，不能拿它当通过",
         "不用 grep / 正则从人读输出里抠 run_id 或判定（submit 的 stdout 本身就是 run_id）；确需字段时用 status --json 或 run --json",

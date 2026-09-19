@@ -26,7 +26,7 @@ gherkai 把 Gherkin `.feature` 里的每一步交给云端浏览器里的 AI 引
 
 ## 2 引擎怎么选
 
-Midscene 对被测 UI 的语言不限。Nova Act 的支持范围是英文 UI：在非英文页面上能导航、能判页面级语义，但「正文里是否出现某个中文词」这类文本包含断言会系统性判否（同一页面上的英文词仍可靠），投票治不了。诊断规则：Nova 档下非英文页面的断言判否，先排查引擎语言面，别先当被测应用的 bug。三条出路：给 scenario 标 `@engine:midscene`（或 `--default-engine midscene`）、把断言改写成页面级语义陈述、把文本与结构检查改成确定性 step。默认引擎是 novaact；`gherkai list-engines` 看本机装了哪个。证据的 schema 两引擎同形，但填充有系统性差异（某些字段只有一侧给值），是引擎事实不是抽取失败，细表见 `references/engines.md`。
+Midscene 对被测 UI 的语言不限。Nova Act 的支持范围是英文 UI：在非英文页面上能导航、能判页面级语义，但「正文里是否出现某个中文词」这类文本包含断言会系统性判否（同一页面上的英文词仍可靠），投票治不了。诊断规则：Nova Act 引擎下非英文页面的断言判否，先排查引擎语言面，别先当被测应用的 bug。三条出路：给 scenario 标 `@engine:midscene`（或 `--default-engine midscene`）、把断言改写成页面级语义陈述、把文本与结构检查改成确定性 step。默认引擎是 novaact；`gherkai list-engines` 看本机装了哪个。证据的 schema 两引擎同形，但填充有系统性差异（某些字段只有一侧给值），是引擎事实不是抽取失败，细表见 `references/engines.md`。
 
 ## 3 本机还是云端，run 还是 submit
 
@@ -55,7 +55,7 @@ Midscene 对被测 UI 的语言不限。Nova Act 的支持范围是英文 UI：�
 2. `gherkai plan <feature…>`：看分组、引擎路由、派发标注、筛选结果。纯本地、零费用。**plan 打出的 job 数 = 这一批要开几个云端浏览器会话**，费用随 job 数与步数走，`--max-concurrency` 只改同时运行几个、不减总账。首次在这个项目实际运行、或 job 数明显超出人交代的范围（人只说一条、plan 列出一屏）时，先把分组与规模报给人再执行；只想验证刚写的那条就按第 6 条收窄到一条。
 3. `gherkai run <feature…>` 或 `gherkai submit <feature…>` + `gherkai status <run_id> --wait`。实际运行会产生 AWS 费用，先 `plan` 后运行。
 4. 有用例没过，**第一个命令是 `gherkai explain <run_id>`**（哪怕你能直接读 `jobs/*.json` 与 evidence.json 也先用它：它把判定、原因、模型看见了什么与截图位置拼成一份别人能复现的证据，手翻 JSON 容易漏 message 与截图位置）：按书写顺序列每一步，失败 / 出错 / 跳过的步展开成「问了 AI 什么 → 它看见与想了什么 → 截图在哪」；判定里已看出哪个 job 红了就直接 `gherkai explain <run_id> <scope_id>`（位置参数，值与重新运行时用的 `--scope` 同一个）；再往细走 `--scenario SEL` / `--step N`（0 起、与文本步号同口径，须与 `--scenario` 同给）缩到一步，`--all` 连通过的步也展开，`--full` 逐帧全文，`--json` 拿完整证据。要更多再读 `--json` 或 `jobs/*.json`，别解析 HTML 报告、别自己拼产物位置，顺 `ref` 走。
-5. 修：断言写法问题改 feature（只动要改的那一步、别增删其它行——未标 scope 的 scenario 用行号当 id，行号一漂，旧报告与 `--scope` 的值就都指不到了）；精确检查改成确定性 step；语言面问题换引擎；确是被测应用的 bug 就交给人定夺。**要说「是被测应用的 bug」之前先复投**：AI 断言默认只判一次（`explain` 里那步打 `votes 0/1` 就是只判了一次），判否也可能是模型这一次没看准——收窄到那一条再多投几票：`gherkai run <feature> --scope <scope_id> --assertion-votes 3`（票数作用于本 run 每条 AI 断言、费用随票数涨，所以务必先收窄）。三票一致判否才报 bug；出现分歧票就是抖动或断言措辞歧义，改成直白的语义陈述或落到确定性 step。**例外：Nova 档下非英文页面的词匹配判否是系统性的，复投只增加费用、不要给 `--assertion-votes`，直接走第 2 节的三条出路。****四种处置都按第 9 节汇报**——人要知道的不只「哪条是产品 bug」，还有「你替他改了什么、为什么」：改断言写法、换引擎都动了验收口径，不报等于悄悄放宽了这条用例。
+5. 修：断言写法问题改 feature（只动要改的那一步、别增删其它行——未标 scope 的 scenario 用行号当 id，行号一漂，旧报告与 `--scope` 的值就都指不到了）；精确检查改成确定性 step；语言面问题换引擎；确是被测应用的 bug 就交给人定夺。**要说「是被测应用的 bug」之前先复投**：AI 断言默认只判一次（`explain` 里那步打 `votes 0/1` 就是只判了一次），判否也可能是模型这一次没看准——收窄到那一条再多投几票：`gherkai run <feature> --scope <scope_id> --assertion-votes 3`（票数作用于本 run 每条 AI 断言、费用随票数涨，所以务必先收窄）。三票一致判否才报 bug；出现分歧票就是抖动或断言措辞歧义，改成直白的语义陈述或落到确定性 step。**例外：Nova Act 引擎下非英文页面的词匹配判否是系统性的，复投只增加费用、不要给 `--assertion-votes`，直接走第 2 节的三条出路。****四种处置都按第 9 节汇报**——人要知道的不只「哪条是产品 bug」，还有「你替他改了什么、为什么」：改断言写法、换引擎都动了验收口径，不报等于悄悄放宽了这条用例。
 6. **收窄后重新运行**（`run` / `submit` / `plan` 同一套）：`--scope ID` 值 = 判定明细里的 `scope_id`，重新运行失败的 job 最直接；`--scenario SEL`（完整 scenario id、行号、或标题片段，区分大小写；`Scenario Outline` 给声明行的行号 = 选中它展开的全部数据行）；`--tags TAG[,TAG]`（一个值内逗号 = 任一命中，重复给 = 都要命中，@ 可省）。`--scope` / `--scenario` 可重复、任一命中；`--tags` 重复给 = 都要命中；不同类同给时都要满足。筛成空集退 2 并列出全部候选，照着改。
 7. `steps/` 里任一文件加载失败，`plan` / `run` / `submit` 都会在起第一个 job 前整批拒绝运行并退 2，错误点名文件与异常。先修那个文件，不是怀疑 feature。显式给的 `--steps-dir` 不存在同样退 2；缺省 `./steps` 不存在不算错。
 8. 只写了一侧的确定性 step，在另一引擎上这一步会悄悄换回 AI 判定，执行前预检不替你发现（它只查本次用到的引擎）。两引擎都用时 `list-deterministic --engine` 各查一遍。

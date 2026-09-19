@@ -12,7 +12,7 @@
 | **三个 Lambda 的部署 asset** | `lambdas/` 的 handler 源（`reconciler.py` 一份两个入口 + `exit_observer.py`）+ `BackendStack.LAMBDA_ASSET_PACKAGES` 逐项**从当前 venv 已安装位置复制**的 import 包（含 `gherkai_core` / `gherkai_runtime`）。boto3 由 Lambda runtime 自带 | 同一条 `gherkai deploy`（asset 由 `stack._build_lambda_asset()` 在本次部署时复制到临时目录） | asset 内容变 → CDK 算出的 asset hash 变 → 本次 deploy 的变更集包含三个函数的代码更新 | `stack.BackendStack.LAMBDA_ASSET_PACKAGES`；落点经 env `names.LAMBDA_ASSET_DIR_ENV` 从命令进程传给 cdk 启动的 app 进程 |
 | **官方基础镜像** | 同版本 worker 包 + SDK 运行时 + 协议层，**零使用方内容**（`engines/*/Dockerfile`） | 发布方的 CI 按 tag 发到 GHCR（`workers.GHCR_BASE_IMAGE`） | 在 GHCR 就位**之后**，仍需 `gherkai deploy` 第 2 步 pull→push 进本账户的 ECR 才在云端可用；**运行时不直连 GHCR** | `ghcr.io/…/gherkai-worker-<engine>:<版本>` |
 | **使用方的 variant 镜像** | 基础镜像 + 使用方 `COPY` 进去的确定性 step 目录（`GHERKAI_STEPS_DIR`）；**云端执行哪套 step 由镜像决定**，不由提交侧 `--steps-dir` 决定 | 使用方自行 build（gherkai 不拥有构建）+ `gherkai deploy push-worker`（推 ECR、从模板注册 revision、写 SSM 映射） | 写完 SSM 映射后，**下一次提交**解析到新 revision；已在运行的 run 不切换（见 §5） | ECR tag = `names.image_tag(CLI 版本, variant)`；repo 名 = `names.ecr_repo_name` |
-| **SSM 参数** | `version`（后端版本戳）、`vpc`（生效 VPC 档）、`worker-template/<engine>`（模板 revision ARN）、`subnets`、`security-groups` 这五族是 **stack 资源**；`worker-image/<engine>/<tag>`（映射 JSON）、`worker-default`（默认 variant 指针）这两族由命令 `put_parameter` 写 | 前五族随 cdk 事务；后两族由 `push-worker` / `deploy` 的第 2-4 步写 | `put_parameter` 即生效（**覆盖语义、最后写者赢**） | 路径全经 `names.ssm_path(prefix, key)`，键名常量在 `gherkai_runtime.names` |
+| **SSM 参数** | `version`（后端版本戳）、`vpc`（生效 VPC 取值）、`worker-template/<engine>`（模板 revision ARN）、`subnets`、`security-groups` 这五族是 **stack 资源**；`worker-image/<engine>/<tag>`（映射 JSON）、`worker-default`（默认 variant 指针）这两族由命令 `put_parameter` 写 | 前五族随 cdk 事务；后两族由 `push-worker` / `deploy` 的第 2-4 步写 | `put_parameter` 即生效（**覆盖语义、最后写者赢**） | 路径全经 `names.ssm_path(prefix, key)`，键名常量在 `gherkai_runtime.names` |
 
 ![官方基础镜像与使用方 build 的镜像如何进入本账户的 ECR、挂在哪个 task-def revision 上、由哪些指针指向，以及旧 revision 何时允许回收](../diagrams/cloud-delivery-identity.svg)
 
@@ -24,7 +24,7 @@
 - **数据类资源不随 `gherkai destroy` 删**（两表、桶、两个 ECR repo 都是 `RETAIN`）；而 `worker-image/*` 与 `worker-default` 不是 stack 资源（由命令 `put_parameter` 写），`destroy` 同样不清除它们。同一 prefix 重建后这两族参数的原值仍在，记录的仍是上一套 stack 时期的 revision / 模板 ARN。
 - **asset 的来源是发起这次部署的那个 venv**，不是仓库相对路径，也不联网安装：dev 版部署得到的就是本机当前的那份 code。清单漏一个传递依赖，后果是 Lambda 运行期 `ImportError`（清单完整性由 `deploy_aws/tests/test_lambda_asset.py` 的「剥掉 site-packages 真 import」那条用例保证）。
 
-> 权威：[ADR 0033](../adr/0033-iac-aws-backend-and-composition-wiring.md)（资源清单/两层命名/IAM/preflight）、[ADR 0037](../adr/0037-distribution-and-packaging.md) 决策 6（部署形态、asset 来源、版本戳、VPC 档）、[ADR 0038](../adr/0038-worker-image-delivery.md)（概念模型、SSM 参数真源表）；code：`deploy_aws/gherkai_deploy_aws/stack.py`、`.../cli.py`、`.../names.py`（provider 专有名：stack 名 / asset 落点 env）、`runtime/gherkai_runtime/names.py`（共享命名纯函数）。
+> 权威：[ADR 0033](../adr/0033-iac-aws-backend-and-composition-wiring.md)（资源清单/两层命名/IAM/preflight）、[ADR 0037](../adr/0037-distribution-and-packaging.md) 决策 6（部署形态、asset 来源、版本戳、VPC 取值）、[ADR 0038](../adr/0038-worker-image-delivery.md)（概念模型、SSM 参数真源表）；code：`deploy_aws/gherkai_deploy_aws/stack.py`、`.../cli.py`、`.../names.py`（provider 专有名：stack 名 / asset 落点 env）、`runtime/gherkai_runtime/names.py`（共享命名纯函数）。
 
 ## 2. 行为归属哪个载体（改动前的定位表）
 

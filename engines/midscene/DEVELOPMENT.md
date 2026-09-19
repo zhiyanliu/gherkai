@@ -55,7 +55,7 @@ node dist/bin.mjs --capabilities                          # 能力自述：{sche
 echo '["页面地址匹配 \"/wiki/OpenAI\""]' | node dist/bin.mjs --match-steps   # 批量查询这些 step 各自命中的确定性 pattern
 ```
 
-worker 侧**只有这两个 flag**：确定性清单是 `--capabilities` 对象的 `deterministic_steps` 键，**没有 `--list-deterministic` 入口**（加键不加入口，ADR 0036「5.」）。`min_grace_s` 由 `worker/run-scope.mts` 的收尾各段预算常量算出（`minGraceSeconds()`：在途窗口 + 会话 Stop + 关 browser + 单次上传超时 + 截图队列退出档排空 + `MIN_GRACE_MARGIN_MS`），**不另写字面量**；缺省为 **31** 秒。模型 family 的校验同样在入口分派之前，因此非法配置在 `--capabilities` 这条 run 前置检查里即被拦下。
+worker 侧**只有这两个 flag**：确定性清单是 `--capabilities` 对象的 `deterministic_steps` 键，**没有 `--list-deterministic` 入口**（加键不加入口，ADR 0036「5.」）。`min_grace_s` 由 `worker/run-scope.mts` 的收尾各段预算常量算出（`minGraceSeconds()`：在途窗口 + 会话 Stop + 关 browser + 单次上传超时 + 截图队列退出段排空 + `MIN_GRACE_MARGIN_MS`），**不另写字面量**；缺省为 **31** 秒。模型 family 的校验同样在入口分派之前，因此非法配置在 `--capabilities` 这条 run 前置检查里即被拦下。
 
 下表列出引擎特定的 env（worker 侧读取）。使用者向的完整 env 清单与「在哪里设才生效」见 [`docs/user-guide/configuration.md`](../../docs/user-guide/configuration.md)；取值的权威在 code 与那一页。本表只补 contributor 所需的定位信息：常量与推断表所在文件、下限的计算方式。
 
@@ -65,7 +65,7 @@ worker 侧**只有这两个 flag**：确定性清单是 `--capabilities` 对象�
 | `MIDSCENE_MODEL_FAMILY` | 按模型 id 推断 | 覆盖 family 推断（推断表 `MODEL_FAMILY_PATTERNS` 在同一文件，唯一一份）；取值合法性由 SDK 自行拒绝 |
 | `MIDSCENE_RUN_DIR` | 无（SDK 写入进程 cwd 下的 `midscene_run`） | Midscene SDK 的 run 根目录（report / dump / log 全在其下），组合根注入绝对路径（子目录名的单一真源是 `runtime/gherkai_runtime/names.py` 的 `ARTIFACT_SUBDIR`） |
 | `AWS_REGION` | 无（惰性读，未设即 fail-loud） | SigV4 签名与 base URL 的 region |
-| `GHERKAI_EXTRA_HTTP_HEADERS` | 无（未设即零行为变化） | JSON 对象；组合根在 `--expose-local` 档注入，worker 在 browser context 级设为额外请求头（[ADR 0035](../../docs/adr/0035-local-app-testing-via-tunnel.md)） |
+| `GHERKAI_EXTRA_HTTP_HEADERS` | 无（未设即零行为变化） | JSON 对象；组合根在 `--expose-local` 方式下注入，worker 在 browser context 级设为额外请求头（[ADR 0035](../../docs/adr/0035-local-app-testing-via-tunnel.md)） |
 
 ## 从本 checkout 运行
 
@@ -105,7 +105,7 @@ GHERKAI_WORKER_MIDSCENE_CMD="node $(pwd)/src/bin.mts"     # 需 Node ≥ 22.18�
 
 ## 报告与产物落点
 
-组合根经 `MIDSCENE_RUN_DIR` 注入 run 专属目录（`reports/<run_id>/midscene-run`，**必须绝对路径**：SDK 用 `path.resolve(process.cwd(), …)`），`report.html` 与 log/dump 全在其下；产物经 uploader 上传至 S3（[ADR 0029](../../docs/adr/0029-engine-artifacts-to-s3.md)），含 act 边界与中断时的 report 安全点提前上传（best-effort：失败不抛出、只记日志，不影响退出码）。`--no-report` 档由组合根经 env `GHERKAI_NO_ARTIFACTS=1` 告知：关闭 agent 的 `generateReport`、不提前上传、不带 report ref；SDK 仍可能往 `./midscene_run` 写 log/dump，故该档下若无 `MIDSCENE_RUN_DIR`，即把它导向一次性临时目录，不写入用户 CWD。一次 run 的全部产物落点（两引擎横向、local 与 cloud 两个后端）见 [`docs/internals/artifacts-and-evidence.md`](../../docs/internals/artifacts-and-evidence.md)。
+组合根经 `MIDSCENE_RUN_DIR` 注入 run 专属目录（`reports/<run_id>/midscene-run`，**必须绝对路径**：SDK 用 `path.resolve(process.cwd(), …)`），`report.html` 与 log/dump 全在其下；产物经 uploader 上传至 S3（[ADR 0029](../../docs/adr/0029-engine-artifacts-to-s3.md)），含 act 边界与中断时的 report 安全点提前上传（best-effort：失败不抛出、只记日志，不影响退出码）。`--no-report` 方式由组合根经 env `GHERKAI_NO_ARTIFACTS=1` 告知：关闭 agent 的 `generateReport`、不提前上传、不带 report ref；SDK 仍可能往 `./midscene_run` 写 log/dump，故该方式下若无 `MIDSCENE_RUN_DIR`，即把它导向一次性临时目录，不写入用户 CWD。一次 run 的全部产物落点（两引擎横向、local 与 cloud 两个后端）见 [`docs/internals/artifacts-and-evidence.md`](../../docs/internals/artifacts-and-evidence.md)。
 
 ## 运行 spike（五段式自检，可独立运行）
 

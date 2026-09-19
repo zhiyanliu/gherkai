@@ -31,8 +31,8 @@ uv tool install 'gherkai[deploy-aws]'      # 部署包随 CLI 的 extra 一起�
 - **S3**：`<prefix>artifacts`（判定结果、报告、引擎产物；派给 worker 的输入对象 7 天自动过期）。
 - **ECS 与 ECR**：`<prefix>cluster`、每个引擎一个 Fargate 任务定义（1 vCPU / 2 GB）与一个镜像仓库 `<prefix><engine>-worker`。
 - **Lambda 三个 + EventBridge 规则与到点调度**：让 `gherkai submit` 提交完即返回的 run 在云端自行推进与收敛，提交者的机器不必在线。
-- **网络与 IAM**：按 `--vpc` 档给 worker 的子网与安全组（优先用公有子网加公网 IP 出网，不建 NAT 网关），每个引擎一个最小权限角色，后端的三个 Lambda 各有自己的角色。
-- **SSM 参数**（`/<prefix>backend/*`）：后端版本戳、生效的 VPC 档、每个引擎的 worker 任务定义模板、worker 镜像映射与默认指针、子网与安全组 ID，供 `run` / `submit` 读取。
+- **网络与 IAM**：按 `--vpc` 取值给 worker 的子网与安全组（优先用公有子网加公网 IP 出网，不建 NAT 网关），每个引擎一个最小权限角色，后端的三个 Lambda 各有自己的角色。
+- **SSM 参数**（`/<prefix>backend/*`）：后端版本戳、生效的 VPC 取值、每个引擎的 worker 任务定义模板、worker 镜像映射与默认指针、子网与安全组 ID，供 `run` / `submit` 读取。
 
 云端两种执行方式的差别都源自「谁拉起 worker 任务」：`submit` 的任务由后端拉起；`run --backend cloud` 的任务由你自己的 CLI 进程拉起并等到运行结束。下面的并发上限与[团队成员的最小权限](#团队成员需要的最小云端权限)两处都由这一条决定。
 
@@ -62,9 +62,9 @@ gherkai deploy --vpc default --prefix gherkai-                         # 真部�
 | `new` | 本 stack 新建一套（2 个可用区，不建 NAT 网关） |
 | `vpc-<id>` | 复用现有的某个 VPC。worker 落该 VPC 的公有子网；该 VPC 没有公有子网时 worker 落私有子网、没有出网路径，此时须自备 NAT 网关或 VPC 端点，否则 worker 连不上模型与浏览器服务 |
 
-生效的档记录在后端，每次部署前比对，结果分四种：档一致则放行；**不一致**则退 `2` 并打印两个档，确认要换就带 `--allow-vpc-change` 放行一次；**后端没有这条记录而 stack 已存在**（早于档记录机制的环境）则退 `2`，先用 `gherkai deploy --diff --vpc <档>` 核对变更集，再带 `--allow-vpc-change` 放行一次登记；stack 不存在（真首次部署）则放行。
+生效的取值记录在后端，每次部署前比对，结果分四种：取值一致则放行；**不一致**则退 `2` 并打印两个取值，确认要换就带 `--allow-vpc-change` 放行一次；**后端没有这条记录而 stack 已存在**（早于取值记录机制的环境）则退 `2`，先用 `gherkai deploy --diff --vpc <取值>` 核对变更集，再带 `--allow-vpc-change` 放行一次登记；stack 不存在（真首次部署）则放行。
 
-`--vpc` 没有默认值、且每次部署都与后端记录比对，原因是 VPC 的选择不记录在 stack 状态里：第二次部署漏带或敲错档，变更集里就会出现「新建整套 VPC 并替换 worker 安全组」这类高风险变更。`--diff` 自身不做比对，它是用来核对变更集的手段。变更集里出现 VPC 级资源时，先确认档再继续。
+`--vpc` 没有默认值、且每次部署都与后端记录比对，原因是 VPC 的选择不记录在 stack 状态里：第二次部署漏带或敲错取值，变更集里就会出现「新建整套 VPC 并替换 worker 安全组」这类高风险变更。`--diff` 自身不做比对，它是用来核对变更集的手段。变更集里出现 VPC 级资源时，先确认取值再继续。
 
 ## deploy 与 destroy 的选项
 
@@ -72,8 +72,8 @@ gherkai deploy --vpc default --prefix gherkai-                         # 真部�
 |---|---|
 | `--prefix P` | 资源名前缀（默认 `gherkai-`，也可用 `AWS_RESOURCE_PREFIX`）。**须与 `run` / `submit` 的 `--prefix` 一致**：建出来的资源名就是提交侧推导的默认名，不一致时提交前检查会报错并点名前缀 |
 | `--vpc` 取值 | 见上「VPC 的三种取值」，必给 |
-| `--allow-vpc-change` | 放行一次 VPC 档变更或首次登记（仅 `deploy`） |
-| `--require-approval {never,any-change,broadening}` | 透传 CDK 的 IAM 变更审批档（仅 `deploy`；不给则用 CDK 自己的默认值） |
+| `--allow-vpc-change` | 放行一次 VPC 取值变更或首次登记（仅 `deploy`） |
+| `--require-approval {never,any-change,broadening}` | 透传 CDK 的 IAM 变更审批级别（仅 `deploy`；不给则用 CDK 自己的默认值） |
 | `--refresh-context` | 丢弃本机缓存的环境查询结果重新查询；默认复用缓存 |
 | `--stop-timeout N` | worker 容器从收到停止信号到被强制终止的宽限秒数（默认 120）。Fargate 硬上限就是 120，更大的值在命令期即被拒。云端运行时的停止宽限由这个值决定；提交侧的 `--grace` 只对本机运行有效，`--backend cloud` 带了它会直接报错退 `2` |
 | `--container-engine 名` | 用哪个容器引擎（默认 `docker`，也可用 `GHERKAI_CONTAINER_ENGINE`）；当前只支持 `docker`，别的名字退 `2`、不静默回落 |
@@ -131,7 +131,7 @@ CDK 的资源变更打完之后，命令继续做 worker 镜像的三步，最�
 后端记一个版本戳，提交前检查拿它比对 CLI 版本。**CLI 比后端新时拒绝执行并退 `2`**（新 CLI 写的任务定义旧后端读不懂，没有放行选项）；CLI 比后端旧时只打印一行提示、照常提交，所以团队成员可以晚一步再升。任一侧不是发行版本、或后端还没有版本戳时跳过比对。CLI 与后端保持同版本，因此升级是三步：
 
 1. 部署方 `uv tool upgrade gherkai`（安装时带的 extra 沿用）。
-2. 部署方立刻 `gherkai deploy --vpc <与上次相同的档> --prefix <同前缀>`：新模板、新版本基础镜像同步进 ECR、对本版本已有的 variant 重新派生。
+2. 部署方立刻 `gherkai deploy --vpc <与上次相同的取值> --prefix <同前缀>`：新模板、新版本基础镜像同步进 ECR、对本版本已有的 variant 重新派生。
 3. 团队其他成员再升自己的 CLI；有自定义 variant 的，由测试开发从新版本基础镜像重新构建，交部署方用 `gherkai deploy push-worker` 推一遍。
 
 三步之间有两段窗口，被拒的人不同：
@@ -156,7 +156,7 @@ gherkai destroy --vpc default --prefix gherkai-          # 交互终端下会再
 gherkai destroy --vpc default --prefix gherkai- --yes    # 脚本或非交互终端
 ```
 
-集群、日志组、stack 建的那份任务定义模板、以及 SSM 里的版本戳与 VPC 档随 stack 销毁，不用管。`push-worker` 与 `deploy` 派生的各 variant 任务定义 revision 不由 stack 管理，destroy 之后留在账户里，不产生费用，可以不清理。**数据类资源不随 destroy 删除**，这是为了防误删。下面这些需要手动清理（把 `gherkai-` 换成你的前缀）：
+集群、日志组、stack 建的那份任务定义模板、以及 SSM 里的版本戳与 VPC 取值随 stack 销毁，不用管。`push-worker` 与 `deploy` 派生的各 variant 任务定义 revision 不由 stack 管理，destroy 之后留在账户里，不产生费用，可以不清理。**数据类资源不随 destroy 删除**，这是为了防误删。下面这些需要手动清理（把 `gherkai-` 换成你的前缀）：
 
 ```bash
 aws dynamodb delete-table --table-name gherkai-runs
@@ -184,7 +184,7 @@ worker 镜像映射与默认 variant 指针这两族 SSM 参数也不随 destroy
 | 找不到 cdk 也找不到 npx | 装 Node ≥ 22（自带 npx），或 `npm i -g aws-cdk`，之后重新运行 |
 | 缺 `--vpc` | 补上三个取值之一。环境已存在时提示里会给出上次部署用的那个取值 |
 | `--vpc` 取值不合法 | 只能是 `default`、`new`、`vpc-<id>` 三种形态 |
-| VPC 档与后端记录不符，或后端没有档记录 | 先 `gherkai deploy --diff`（带同一组选项）核对变更集，确认无误再带 `--allow-vpc-change` 放行一次 |
+| VPC 取值与后端记录不符，或后端没有取值记录 | 先 `gherkai deploy --diff`（带同一组选项）核对变更集，确认无误再带 `--allow-vpc-change` 放行一次 |
 | cdk deploy 失败且报错提到 bootstrap | 先 `gherkai deploy --bootstrap`（同 `--profile` / `--region`） |
 | 找不到容器引擎或连不上其守护进程 | 装好 docker 并让守护进程运行。stack 仍会照常部署，随后的基础镜像同步退 `1`，带同一组选项重新运行 `gherkai deploy` 幂等收敛 |
 | `push-worker` 说架构不对 | 带 `--platform linux/amd64` 重新构建 |

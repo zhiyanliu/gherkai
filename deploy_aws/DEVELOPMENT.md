@@ -12,7 +12,7 @@
 
 | 文件 | 职责 |
 |---|---|
-| `cli.py` | `Provider`：命令面 flag、context 拼装、`cdk.json` 生成、cdk CLI 调用（`deploy` / `destroy` / `diff` / `--synth-only` / `--bootstrap`）、VPC 档比对（四种判定）、工具链前置检查（Node ≥ 22 + cdk 可定位）、`gherkai doctor` 的部署方段（node / cdk / 容器引擎三项只读自检，全 `required=False`）、worker 镜像子动词分派 |
+| `cli.py` | `Provider`：命令面 flag、context 拼装、`cdk.json` 生成、cdk CLI 调用（`deploy` / `destroy` / `diff` / `--synth-only` / `--bootstrap`）、VPC 取值比对（四种判定）、工具链前置检查（Node ≥ 22 + cdk 可定位）、`gherkai doctor` 的部署方段（node / cdk / 容器引擎三项只读自检，全 `required=False`）、worker 镜像子动词分派 |
 | `stack.py` | `BackendStack`：全部云资源（含 `_reconcile_lambdas` 事件链、`_build_lambda_asset`、`_worker_subnet_ids`） |
 | `app.py` | cdk app 入口（`cdk.json` 的 `app` 指向它），按 context 建 stack |
 | `names.py` | 命名契约：**直接 re-export** `runtime/gherkai_runtime/names.py`（见下「命名真源」）+ provider 特有的 `stack_name`、`ssm_*` 路径 helper、`LAMBDA_ASSET_DIR_ENV`（命令进程 → cdk 起的 app 进程之间传 asset 落点的 env） |
@@ -24,11 +24,11 @@
 
 **唯一接缝的硬约束**：**CLI 前端绝不 import `aws_cdk`**（jsii 绑定，import 即起 node 子进程，ADR 0037 决策 6）。故 `cli.py` 自身也只 import 标准库 + `gherkai_runtime` + 本包 `names`（零 `aws_cdk`）；`stack.py` / `app.py` 只经 cdk CLI 起的子进程触达。改动时须确保 `aws_cdk` 不进入 `cli.py` 的 import 面：`gherkai --help` 的启动代价取决于这条约束。
 
-**`--require-approval` / `--allow-vpc-change` 是有意的两层声明**：CLI 前端先声明 provider 中立版（provider 缺席时 `deploy --help` 不残缺），`Provider.add_arguments` 再声明带 AWS 语义的版本（前者以 `choices` 校验 cdk 三档、后者的措辞明确指向 VPC 档三态）；前端的 subparser 开 `conflict_handler="resolve"`，同名以后声明的为准。两层不是重复真源，而是「中立占位 + provider 精确化」。两层都只声明在 `deploy` 上：`destroy` 不消费它们（不做 VPC 档三态比对、`cdk destroy` 也无 `--require-approval`），若声明在 `destroy` 上，只会让 `destroy --help` 出现两个恒无效的选项。`Provider` 另经 `getattr` 容忍它们彻底缺席（其它前端）：缺 `--allow-vpc-change` 即一律不放行（fail-closed）。
+**`--require-approval` / `--allow-vpc-change` 是有意的两层声明**：CLI 前端先声明 provider 中立版（provider 缺席时 `deploy --help` 不残缺），`Provider.add_arguments` 再声明带 AWS 语义的版本（前者以 `choices` 校验 cdk 的三个审批级别、后者的措辞明确指向 VPC 取值三态）；前端的 subparser 开 `conflict_handler="resolve"`，同名以后声明的为准。两层不是重复真源，而是「中立占位 + provider 精确化」。两层都只声明在 `deploy` 上：`destroy` 不消费它们（不做 VPC 取值三态比对、`cdk destroy` 也无 `--require-approval`），若声明在 `destroy` 上，只会让 `destroy --help` 出现两个恒无效的选项。`Provider` 另经 `getattr` 容忍它们彻底缺席（其它前端）：缺 `--allow-vpc-change` 即一律不放行（fail-closed）。
 
 ## 命名真源
 
-`names.py` 直接 re-export `runtime/gherkai_runtime/names.py`：此前曾因「CDK 独立工程、不能 import cli」复刻过一份、须两处同步修改，共享层抽为平级产品本体包后复刻消除（ADR [0016](../docs/adr/0016-execution-architecture-core-lib-run-model.md)「演进」节 / [0033](../docs/adr/0033-iac-aws-backend-and-composition-wiring.md)）。stack 名的推导（`names.stack_name`，`BackendStack-<prefix 去尾横线>`）同样单一真源：`app.py` 建 stack 用它，`cli.py` 做 VPC 档三态比对时 `DescribeStacks` 用同一个名。
+`names.py` 直接 re-export `runtime/gherkai_runtime/names.py`：此前曾因「CDK 独立工程、不能 import cli」复刻过一份、须两处同步修改，共享层抽为平级产品本体包后复刻消除（ADR [0016](../docs/adr/0016-execution-architecture-core-lib-run-model.md)「演进」节 / [0033](../docs/adr/0033-iac-aws-backend-and-composition-wiring.md)）。stack 名的推导（`names.stack_name`，`BackendStack-<prefix 去尾横线>`）同样单一真源：`app.py` 建 stack 用它，`cli.py` 做 VPC 取值三态比对时 `DescribeStacks` 用同一个名。
 
 ## 事件驱动推进（无状态批量运行）
 
@@ -62,7 +62,7 @@ asset 落在 `gherkai deploy` 的临时工作目录（`GHERKAI_LAMBDA_ASSET_DIR`
 - **DDB `{prefix}runs` 的稀疏 GSI `status-index`**：只有 STATE item 有顶层 `status`，投影含 `worker_task_def_arns`，供 worker revision 清理的「运行中 run 引用检查」`Query`（ADR 0038）。
 - **S3 lifecycle `expire-job-in` 按对象 tag `gherkai=job-in`**（7 天）而非 key 前缀：job-in 的 key 里 `run_id` 在中间，纯前缀 filter 无法精确匹配，且会误删判定真值与报告。tag 由编排进程打（worker task role 因此不需要 `s3:PutObjectTagging`，ADR 0033）。
 - **ECR 不设任何 lifecycle 规则**：重推同名 variant 会使旧 tag 变为 untagged，而运行中 run 的旧 task-def revision 仍按 digest 引用该镜像层，untagged 过期规则会静默删除它（ADR 0038 护栏；代价是永久留一层 untagged，回收与 `delete-worker` 同批设计）。
-- **SSM 部署戳是 stack 资源**、不是命令事后 `put_parameter`：随部署事务一起提交或回滚，回滚后不留错值（ADR 0037 决策 6）。参数族（都在 `/{prefix}backend/*`）：`version`（后端版本戳，供提交侧的版本 skew 比对，决策 7）、`vpc`（生效 VPC 档，供档比对）、`subnets` / `security-groups`（cli 读）、`worker-template/<engine>`（stack 写的模板 revision ARN，`Ref` 返回带 revision）、`worker-image/<engine>/<版本>-<variant>`（JSON：`template_arn` / `revision_arn` / `digest` / `pushed_at`，`push-worker` 写）、`worker-default`（默认 variant 名）。**退休时刻与血缘不进 SSM**，以 task-def 的 tags 承载（随 revision 一同建立与消失，清理对账只看一处）。`vpc` 对 `new` 档记成 `new:<所建 vpc-id>`（带出所建 id 以便回溯核对）；部署戳与档**有意不 RETAIN**：保留只会让下次 deploy 读到已消失环境的档与版本。
+- **SSM 部署戳是 stack 资源**、不是命令事后 `put_parameter`：随部署事务一起提交或回滚，回滚后不留错值（ADR 0037 决策 6）。参数族（都在 `/{prefix}backend/*`）：`version`（后端版本戳，供提交侧的版本 skew 比对，决策 7）、`vpc`（生效 VPC 取值，供取值比对）、`subnets` / `security-groups`（cli 读）、`worker-template/<engine>`（stack 写的模板 revision ARN，`Ref` 返回带 revision）、`worker-image/<engine>/<版本>-<variant>`（JSON：`template_arn` / `revision_arn` / `digest` / `pushed_at`，`push-worker` 写）、`worker-default`（默认 variant 名）。**退休时刻与血缘不进 SSM**，以 task-def 的 tags 承载（随 revision 一同建立与消失，清理对账只看一处）。`vpc` 对 `new` 取值记成 `new:<所建 vpc-id>`（带出所建 id 以便回溯核对）；部署戳与取值**有意不 RETAIN**：保留只会让下次 deploy 读到已消失环境的取值与版本。
 - **`_worker_subnet_ids` 是「优先公有子网、无则回落私有」的唯一落点**：三个消费者（SSM `subnets`、reconciler 与 kicker 的 `SUBNETS` env）最终写入同一个 `awsvpcConfiguration`，此前曾有三份复刻：单侧改动会使 cli 与 Lambda 起的 task 落进不同子网，且只在 RunTask 时暴露；合成测试比对三者恒等作护栏。真私有隔离（NAT / VPC endpoint）留 backlog，改动时须同步 `_worker_subnet_ids` 与 cli 的 `assignPublicIp`（跨组件联动）。
 - **worker task role 的模型权限不 pin 具体 model-id**（`stack._grant_task_role`，IAM 表在 ADR [0033](../docs/adr/0033-iac-aws-backend-and-composition-wiring.md)）：Midscene 侧 `bedrock:InvokeModel` 的资源共三条：`arn:aws:bedrock:*::foundation-model/*`（account 段按 AWS 惯例为空）、本账户 `inference-profile/*`（GPT 系经跨区 inference profile 调用，须同时放行 profile 与它路由到的模型 ARN）、本账户 `project/default`（OpenAI 系模型在 bedrock-runtime 端点上按模型卡还要求它，IAM 模拟器实证前两条覆盖不到）。模型是运行期选择（改镜像 ENV 即换，ADR [0044](../docs/adr/0044-engine-model-selection-and-override.md)），pin 具体 ARN 会让换模型变成重部署。Nova 侧收窄到本账户/region 的 `nova-act:workflow-definition/*` 与其 `workflow-run/*`（definition 名段放开：名字定义在 worker code 中，不应进入 IaC）。两引擎共享的 AgentCore 浏览器权限分为两条 statement：一条把 `StartBrowserSession` / `StopBrowserSession` / `GetBrowserProfile` 收窄到系统默认 browser（ARN **account 段是字面量 `aws`**、不是客户账户）与本账户 `browser-profile/*` 这两个资源；另一条覆盖四个 SAR 无资源类型的动作、保留 `*`，这是结构性的，不是待收窄项。Nova 侧另单授一条 `SaveBrowserSessionProfile`，资源与上述两个相同。
 - **`--stop-timeout` 的 120s 上限是 Fargate 平台硬限**，>120 会在部署期被 ECS 拒绝，故命令/synth 期即 fail-fast 并明确说明这是平台限制（Nova 的 grace 下限 150s > 120s 这一冲突受限于这条硬上限，见 ADR [0032](../docs/adr/0032-fargate-execution-environment.md)）。
@@ -83,18 +83,18 @@ asset 落在 `gherkai deploy` 的临时工作目录（`GHERKAI_LAMBDA_ASSET_DIR`
 uv run pytest -q deploy_aws/tests   # stack 合成断言 + Provider + Lambda asset + Lambda handler + worker 镜像族 + 容器引擎 + skill 的 deploy/destroy 选项文案（test_skill_deploy_tokens.py）
 ```
 
-默认档不访问 AWS、也不需要 docker，但需要 PATH 上有 Node ≥ 22：`tests/synth_fixture.py` 真调 cdk 合成，`aws_cdk` 是 jsii 绑定、构造 App 即起 node 子进程（缺 node 时报错落在 jsii 内部，难以看出真实原因）。真 docker 的三条（`tests/test_container.py` 末尾）在缺 docker daemon 或缺本地 `gherkai-worker-novaact:dev` 镜像时自动 skip，其余全绿。
+默认运行不访问 AWS、也不需要 docker，但需要 PATH 上有 Node ≥ 22：`tests/synth_fixture.py` 真调 cdk 合成，`aws_cdk` 是 jsii 绑定、构造 App 即起 node 子进程（缺 node 时报错落在 jsii 内部，难以看出真实原因）。真 docker 的三条（`tests/test_container.py` 末尾）在缺 docker daemon 或缺本地 `gherkai-worker-novaact:dev` 镜像时自动 skip，其余全绿。
 本包是根 uv workspace 的成员，一次 `uv sync` 即装齐依赖；命令在仓库任意位置都可运行（`uv run gherkai …`）。
 
 - `tests/synth_fixture.py`：真调 cdk 合成一次模板供多个测试共用（合成耗时，不在每个用例中各合成一次）。
 - worker 镜像族分两层：`tests/test_workers.py` 用 moto（SSM/ECS/ECR/DDB）+ 假容器引擎验**编排**（步序、幂等查重、血缘 tags、清理的两个前置条件）；`tests/test_container.py` 末尾三条用**真 docker** 验 mock 覆盖不到的引擎事实（本地未推送镜像 `RepoDigests` 为空、arm64 镜像被架构判据拒绝），无 docker 时自动 skip。
-- **真 ECR push / RunTask 拉起已注册的 revision / VPC 档比对与 skew 比对的真账户一侧不在单测里**：按「绿≠对」，这些结论依赖被 mock 掉的真实行为，改动这些路径时按 CLAUDE.md「代码纪律」升级到真实运行。
+- **真 ECR push / RunTask 拉起已注册的 revision / VPC 取值比对与 skew 比对的真账户一侧不在单测里**：按「绿≠对」，这些结论依赖被 mock 掉的真实行为，改动这些路径时按 CLAUDE.md「代码纪律」升级到真实运行。
 
 ## 设计文档
 
 - [0033](../docs/adr/0033-iac-aws-backend-and-composition-wiring.md)：IaC 定位、资源清单、命名契约、preflight、IAM 最小权限表、RETAIN 语义。
 - [0034](../docs/adr/0034-detached-batch-reconciler.md)：无状态批量运行的事件链、并发 cap、job timeout。
-- [0037](../docs/adr/0037-distribution-and-packaging.md)：包化与 `gherkai deploy` 命令面、版本真源与 skew 检查（逐档判序见 [`cli/DEVELOPMENT.md`](../cli/DEVELOPMENT.md) 的版本 skew 一节）、Lambda asset 来源、CDK 查询缓存。
+- [0037](../docs/adr/0037-distribution-and-packaging.md)：包化与 `gherkai deploy` 命令面、版本真源与 skew 检查（逐态判序见 [`cli/DEVELOPMENT.md`](../cli/DEVELOPMENT.md) 的版本 skew 一节）、Lambda asset 来源、CDK 查询缓存。
 - [0038](../docs/adr/0038-worker-image-delivery.md)：基础镜像 / variant / 默认指针、push-worker 流程、显式 revision、清理与权限增量。
 - [0032](../docs/adr/0032-fargate-execution-environment.md)：Fargate 执行环境的中断/grace 韧性。
 

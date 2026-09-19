@@ -27,7 +27,7 @@
     （提交前的资源存在性检查）/ `probe_aws_identity`（供 doctor 使用）/ `read_resource`（`file://` 与 `s3://` 同一读入口）/
     `local_artifact_locations`·`cloud_artifact_locations`（产物落点清单）。
   - **版本与 variant**：`check_version_skew`·`check_backend_skew`（四个状态常量 `SKEW_OK` / `SKEW_WARN` / `SKEW_BLOCK` /
-    `SKEW_SKIP`；六种比对结果如何映射到这四态、逐档措辞见 [`cli/DEVELOPMENT.md`](../cli/DEVELOPMENT.md) 的版本 skew 一节；ADR 0037 决策 7）/ `resolve_worker_variant`
+    `SKEW_SKIP`；六种比对结果如何映射到这四态、逐态措辞见 [`cli/DEVELOPMENT.md`](../cli/DEVELOPMENT.md) 的版本 skew 一节；ADR 0037 决策 7）/ `resolve_worker_variant`
     （提交侧解析 variant → 各引擎 revision）·`resolve_default_worker_task_defs`（旧 definition 的兼容路径）/
     `read_task_def_stop_timeout`（doctor cloud 侧的对照值）/ `new_run_id`·`now_iso`·`run_duration_ms`（run_id 与时钟）/
     `load_feature`·`prune_empty_dirs`（入口共用的工具函数）。

@@ -32,7 +32,7 @@ Job = {
 ### `parse`（藏第三方库 gherkin-official）
 
 - 每个 feature：`Parser().parse(text)` → 原始 AST → `Compiler().compile({**doc, "uri": uri})` → **pickles（完全展开）** → 映射成我们的领域模型 `{id, name, steps:[{index, keyword, text, argument?}]}`。（`Compiler().compile()` **要求 `gherkin_document` 带 `uri` 键**，缺则 `KeyError`——故 `uri` 是 parse 的必填燃料，不只是关联键元数据。）
-- **Background / Scenario Outline+Examples / DataTable / DocString 三档由 Compiler 展开**（实测 `gherkin-official` 已装版可一步给出：Background 前插每个 scenario、Outline 按 Examples 行笛卡尔展开成 N 个 scenario、`<placeholder>` 已插值、DataTable/DocString 已归入 step `argument`）。**不自己写展开**——其边角（And/But 的 Conjunction keywordType 继承、多 Examples 表 + 三层 tag 合并、Rule 层 background 叠加、占位符转义）cucumber 官方都处理好且有跨语言一致性测试背书，自己重写 = 维护一份 cucumber compiler，不值。
+- **Background / Scenario Outline+Examples / DataTable / DocString 三类结构由 Compiler 展开**（实测 `gherkin-official` 已装版可一步给出：Background 前插每个 scenario、Outline 按 Examples 行笛卡尔展开成 N 个 scenario、`<placeholder>` 已插值、DataTable/DocString 已归入 step `argument`）。**不自己写展开**——其边角（And/But 的 Conjunction keywordType 继承、多 Examples 表 + 三层 tag 合并、Rule 层 background 叠加、占位符转义）cucumber 官方都处理好且有跨语言一致性测试背书，自己重写 = 维护一份 cucumber compiler，不值。
 - **step 保持 pickle 内顺序 = feature 书写顺序**（见下「step 顺序」语义）。
 - **`keyword` 字段（实测要点，避免踩坑）**：pickle step **不含字面 keyword**，只暴露归一化 `type`（取值 `Context`/`Action`/`Outcome`，And/But 已折叠继承上一条非连接词的类型）。parse 把 `type` 映射成我们领域模型的 `keyword`，**统一取书写词 `Given`/`When`/`Then`**（`Context→Given`、`Action→When`、`Outcome→Then`）与 [0024](./0024-worker-core-protocol.md) 示例一致；worker 只需「是不是 `Then`（断言）」这个类别即足够派发（[0024](./0024-worker-core-protocol.md)），故 And/But 字面丢失无碍。
 - **`index`**：scenario 内 0-based 书写序号，由 parse 合成（pickle step 无此字段），作 [0024](./0024-worker-core-protocol.md) `stepIndex` 的回指键、不参与重排。
@@ -103,7 +103,7 @@ Job = {
 
 ## test cases（护栏，本模块强制）
 
-「三档全支持」必须有测试背书（否则边角易漏）。覆盖：
+「三类全支持」必须有测试背书（否则边角易漏）。覆盖：
 
 - Background 前插每个 scenario；
 - Scenario Outline 按 Examples 多行展开 + `<placeholder>` 插值；**且展开后 N 个 scenario 的 id 与 name 各自可区分**（id 靠 `:<example行号>`；name 追加 Examples 行标识，避免 N 个同名）；

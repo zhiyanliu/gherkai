@@ -76,5 +76,5 @@
 | 收窄参数退 2 并列出候选 | `--scope` / `--scenario` / `--tags` 筛成空集 | 从列出的候选里挑正确的值 |
 | cloud 命令退 2 说 CLI 新于后端 | 版本不一致 | 第 6 节 |
 | cloud 提交退 2 说 variant 没推过 | 某引擎缺该 `--worker-variant` | `gherkai deploy list-workers` 看有哪些；推它或换名（`references/cloud-backend.md`） |
-| Nova 档下非英文页面断言判否 | 引擎语言面 | `references/engines.md` 第 1 节 |
+| Nova Act 引擎下非英文页面断言判否 | 引擎语言面 | `references/engines.md` 第 1 节 |
 | `plan` 打「标注降级」 | 某引擎 worker 不可用，只影响标注 | 不阻塞 plan；要标注就把那个 worker 装上 |

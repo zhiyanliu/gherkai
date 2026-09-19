@@ -53,7 +53,7 @@
 
    **实测覆盖边界（诚实声明）**：4 次真跑的 act 均短（正常 4~11s、最坏 SIGTERM→退出 21s ≪ 120），**未撞上上述最坏长 act 情形**——即实测证明的是「典型/短 act 分布下 SIGKILL 不触发」，**非**「任何 act 下都不触发」。最坏长 act 的 Fargate SIGKILL 是**已识别、经权衡接受的结构性残余**（D+兜底），非被实测排除。
 
-   **据此的 code 决策**（两个下限当时是组合根 `compose.py` 里的常量；后按 [0024](./0024-worker-core-protocol.md)「引擎自报下限」改由 worker 自报——Nova 续为 `NOVA_ACT_TIMEOUT_S + NOVA_GRACE_MARGIN_S`，Midscene 改为收尾各段预算之和、无单一常量，本次校准的数值不变）：Nova `NOVA_GRACE_MARGIN_S` **60→30**（下限 180→150，主要收益在 subprocess 路径满足不变量 + 留 ~2x 余量：收尾预算 = 会话释放 ≤9 s + 截图队列退出档排空 6 s = 15 s，实测 21 s 里的 ~11 s 是结论 2 坐实的 ECS 记录滞后、subprocess 路径不存在，不计入分母；Fargate 路径 grace 被忽略、此改动不影响其行为）；**`ACT_TIMEOUT_S=120` 不动**（见上②③）；**Midscene 侧 grace 下限：本次校准判 25 s 够用**（实测 12.4s、~2x 余量；Midscene 无 greenlet、会话释放 0.2s，长 act 下也远快于 Nova），**后被 step 级 evidence（[0042](./0042-step-evidence-and-explain.md) 决策一）的有界截图队列排空顶到今值 31**——该排空（退出路径 6 s）排在会话释放之后，Nova 侧落在 `NOVA_GRACE_MARGIN_S=30` 内、不动，Midscene 的下限组成多一项。
+   **据此的 code 决策**（两个下限当时是组合根 `compose.py` 里的常量；后按 [0024](./0024-worker-core-protocol.md)「引擎自报下限」改由 worker 自报——Nova 续为 `NOVA_ACT_TIMEOUT_S + NOVA_GRACE_MARGIN_S`，Midscene 改为收尾各段预算之和、无单一常量，本次校准的数值不变）：Nova `NOVA_GRACE_MARGIN_S` **60→30**（下限 180→150，主要收益在 subprocess 路径满足不变量 + 留 ~2x 余量：收尾预算 = 会话释放 ≤9 s + 截图队列退出路径排空 6 s = 15 s，实测 21 s 里的 ~11 s 是结论 2 坐实的 ECS 记录滞后、subprocess 路径不存在，不计入分母；Fargate 路径 grace 被忽略、此改动不影响其行为）；**`ACT_TIMEOUT_S=120` 不动**（见上②③）；**Midscene 侧 grace 下限：本次校准判 25 s 够用**（实测 12.4s、~2x 余量；Midscene 无 greenlet、会话释放 0.2s，长 act 下也远快于 Nova），**后被 step 级 evidence（[0042](./0042-step-evidence-and-explain.md) 决策一）的有界截图队列排空顶到今值 31**——该排空（退出路径 6 s）排在会话释放之后，Nova 侧落在 `NOVA_GRACE_MARGIN_S=30` 内、不动，Midscene 的下限组成多一项。
 
 ## Fargate 特有问题：处置结论
 

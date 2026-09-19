@@ -23,12 +23,12 @@ gherkai deploy --synth-only ./out --vpc default             # 只导模板给自
 gherkai destroy --vpc default --prefix gherkai- --yes       # 拆栈；表 / 桶 / 镜像仓库保留
 ```
 
-- `--vpc` **必给、无隐式默认**（只有 `--bootstrap` 不需要）：`default`（账户默认 VPC）/ `new`（新建，2 可用区、零 NAT）/ `vpc-<id>`。生效的档记在后端，下次给错会退 2；确认要换网络时加 `--allow-vpc-change` 放行一次。
+- `--vpc` **必给、无隐式默认**（只有 `--bootstrap` 不需要）：`default`（账户默认 VPC）/ `new`（新建，2 可用区、零 NAT）/ `vpc-<id>`。生效的取值记在后端，下次给错会退 2；确认要换网络时加 `--allow-vpc-change` 放行一次。
 - `--prefix`（默认 `gherkai-`）是全部云资源的命名空间，**必须与 `run` / `submit` / `status` / `explain` 的 `--prefix` 一致**。换 prefix = 换一套独立环境（`prod-` / `stage-`），闲置成本近零。
 - 其它：`--require-approval never|any-change|broadening`（IAM 变更要不要人过目）、`--stop-timeout N`（worker 容器停止宽限秒；默认值与上限见 `--help`，上限是平台限制、更大的值在命令期就被拒；云端对应本机 `run --grace`）、`--container-engine 名`（默认 docker）、`--refresh-context`、`--region` / `--profile`。
-- 退出码：0 成功；2 前置 / 校验失败（Node 缺失、VPC 档不符、容器引擎名不认、`push-worker` 架构或版本不符）；1 账户可能已被改动，两种来源——cdk 自身失败（报错码多为 1、原样透传，处置看 cdk 输出），或 cdk 已成功而 worker 镜像步骤失败（重新运行 `gherkai deploy` 幂等收敛）；`destroy` 没有镜像步骤，它的 1 只来自 cdk；其余原样透传 cdk。
+- 退出码：0 成功；2 前置 / 校验失败（Node 缺失、VPC 取值不符、容器引擎名不认、`push-worker` 架构或版本不符）；1 账户可能已被改动，两种来源——cdk 自身失败（报错码多为 1、原样透传，处置看 cdk 输出），或 cdk 已成功而 worker 镜像步骤失败（重新运行 `gherkai deploy` 幂等收敛）；`destroy` 没有镜像步骤，它的 1 只来自 cdk；其余原样透传 cdk。
 
-建出来的东西：DynamoDB 两张表（run 状态、事件）、S3 桶（判定结果、报告、引擎产物）、ECS 集群与每引擎一个 Fargate task 定义、每引擎一个 ECR 仓库、三个 Lambda 与调度规则（让 `submit` 的 run 在云上自我推进）、按 `--vpc` 档的子网与安全组、每引擎最小权限角色、SSM 参数（版本戳、VPC 档、worker 镜像映射与默认指针）。`submit --backend cloud` 提交的一个 run，并行 job 数 = min(提交时 `--max-concurrency`, 部署侧上限 8)：超过上限时 `submit` 打印一行提示、本 run 按上限并行。`run --backend cloud` 的并行度就是 `--max-concurrency`，不受这个上限约束。
+建出来的东西：DynamoDB 两张表（run 状态、事件）、S3 桶（判定结果、报告、引擎产物）、ECS 集群与每引擎一个 Fargate task 定义、每引擎一个 ECR 仓库、三个 Lambda 与调度规则（让 `submit` 的 run 在云上自我推进）、按 `--vpc` 取值的子网与安全组、每引擎最小权限角色、SSM 参数（版本戳、VPC 取值、worker 镜像映射与默认指针）。`submit --backend cloud` 提交的一个 run，并行 job 数 = min(提交时 `--max-concurrency`, 部署侧上限 8)：超过上限时 `submit` 打印一行提示、本 run 按上限并行。`run --backend cloud` 的并行度就是 `--max-concurrency`，不受这个上限约束。
 
 ## 3 使用方一条线
 
@@ -77,7 +77,7 @@ gherkai submit features/x.feature --backend cloud --prefix gherkai- --worker-var
 后端记一个版本戳，cloud 命令动资源前比对：CLI 比后端新 → 退 2、无放行开关；旧 → 警告。所以升级是三步，顺序不能反：
 
 1. 部署方 `uv tool upgrade gherkai`。
-2. 立刻 `gherkai deploy --vpc <同档> --prefix <同前缀>`：新模板 + 新版本基础镜像进 ECR + 已有 variant 按新模板重派生。中间窗口里提交退 2 是预期。
+2. 立刻 `gherkai deploy --vpc <同一取值> --prefix <同前缀>`：新模板 + 新版本基础镜像进 ECR + 已有 variant 按新模板重派生。中间窗口里提交退 2 是预期。
 3. 有自定义 variant 的：从新版本基础镜像重新 build、`push-worker`。其他人再升自己的 CLI。
 
 不想动本机安装的部署方可用 `uvx --from 'gherkai[deploy-aws]==X.Y.Z' gherkai deploy` 先升后端。

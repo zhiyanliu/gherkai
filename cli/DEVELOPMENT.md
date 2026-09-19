@@ -141,11 +141,11 @@ deploy 会把自身版本写成后端的版本戳；四个 cloud 入口（`run`/
 `uvx --from 'gherkai==<后端版本>' gherkai …` 按指定版本临时运行的成本为零。版本只有一处可调：`gherkai` 与后端被 `==`
 约束在同一版本，不存在「先升后端再升 CLI」这种次序。
 
-## VPC 档比对
+## VPC 取值比对
 
-`--vpc` **不给隐式默认、且生效的档记在后端并在每次 deploy 前比对**，两道缺一不可：只强制显式给值无法防止第二次
-deploy 选错档，而漏档会合成「新建整套 VPC 并替换 worker 安全组」这类危险变更集（实际发生过）。
-四种比对结果与各自的放行动作见 [`docs/user-guide/cloud-backend.md`](../docs/user-guide/cloud-backend.md)「VPC 三档」；
+`--vpc` **不给隐式默认、且生效的取值记在后端并在每次 deploy 前比对**，两道缺一不可：只强制显式给值无法防止第二次
+deploy 选错取值，而取值一旦不符，就会合成「新建整套 VPC 并替换 worker 安全组」这类危险变更集（实际发生过）。
+四种比对结果与各自的放行动作见 [`docs/user-guide/cloud-backend.md`](../docs/user-guide/cloud-backend.md)「VPC 的三种取值」；
 比对实现与状态常量在 `deploy_aws/gherkai_deploy_aws/cli.py`（`classify_vpc_state`），contributor 侧说明见
 [`deploy_aws/DEVELOPMENT.md`](../deploy_aws/DEVELOPMENT.md)。
 
