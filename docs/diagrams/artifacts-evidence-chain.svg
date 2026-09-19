@@ -569,9 +569,9 @@ rect.c-bg-rect { fill: var(--bg); }
         <text x="422.5" y="211.5" class="t-dim" font-size="7" text-anchor="middle">指针来自判定真值</text>
         </g>
         <g data-edge-from="evidence" data-edge-to="shot" data-edge-label="地址确定性算出" data-edge-key="6">
-          <rect x="372.9" y="422" width="100.2" height="27" rx="4" class="c-mask"/>
+          <rect x="368" y="422" width="110" height="27" rx="4" class="c-mask"/>
           <text x="423" y="433" class="t-muted" font-size="8" text-anchor="middle">地址确定性算出</text>
-        <text x="423" y="444" class="t-dim" font-size="7" text-anchor="middle">云端档字节异步上传</text>
+        <text x="423" y="444" class="t-dim" font-size="7" text-anchor="middle">云端后端字节异步上传</text>
         </g>
 
         <!-- Legend -->
@@ -595,4 +595,4 @@ rect.c-bg-rect { fill: var(--bg); }
           </g>
         </g>
       </svg>
-<!-- gherkai:source-sha256=bfdedc7d27781236273da76d94f44d18753c1e9d5a00cf7cb01921b576eaa44e -->
+<!-- gherkai:source-sha256=03963cfef92f54856ec28e526ede3e094bf0307cc95a02b6055e1650a9950141 -->

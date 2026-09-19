@@ -38,7 +38,7 @@ v1.0 的产品定位是**柔性冒烟**——锚定在"精确度光谱"的**最�
 
 ## v1.0 包含（断言两层，按"默认 AI / 按需确定性"分）
 
-1. **默认 AI 判断（QA，零代码）**：QA 在 `.feature` 写纯自然语言断言 `Then "{自然语言}"`，**无需任何路由关键词**，框架默认走 AI 布尔判断（`aiBoolean`/`act_get`）+ 投票。这是绝大多数情况，符合"AI 柔性主导"。
+1. **默认 AI 判断（QA，零代码）**：QA 在 `.feature` 写纯自然语言断言 `Then "{自然语言}"`，**无需任何路由关键词**，工具默认走 AI 布尔判断（`aiBoolean`/`act_get`）+ 投票。这是绝大多数情况，符合"AI 柔性主导"。
    - "点名精确核对某项"（如"价格是 ¥99"）也走这层——QA 仍只写自然语言，AI 去看那一项。
 2. **确定性 step（测试开发，按需自建）**：少数"必须精确、不容 AI 抖动"的断言（如 URL 精确、关键 DOM），由**测试开发**（会写代码的角色）写在**使用方项目的 `steps/` 目录**（`steps/*.py` 与 `steps/*.mts` 成对、同一正则，经 `--steps-dir` / env `GHERKAI_STEPS_DIR` 加载进同一张注册表，见 [0037](./0037-distribution-and-packaging.md) 决策 4），用 Playwright 精确查、不走 AI。worker 包内的脚手架（`engines/novaact/gherkai_worker_novaact/deterministic_steps.py` / `engines/midscene/src/worker/deterministic.steps.mts`，含说明注释）是**发行包内容**，各只留一个通用的 URL 确定性 step（`页面地址匹配 "<正则>"`）作范例，**不承载任何项目专属的确定性 step**（改它等于 fork 发行包），也不要求 QA 学措辞（QA 也可用 `list-deterministic` 主动查已有的确定性 step，见 [0036](./0036-deterministic-capability-discovery.md)）。
    - 角色边界：QA 永远只写自然语言（"零代码"对 QA 成立）；确定性 step 是工程角色的活（BDD 原本的角色分工，见 [0019](./0019-feature-tags-scope-and-engine.md)/[0018](./0018-generic-steps-capability.md)）。

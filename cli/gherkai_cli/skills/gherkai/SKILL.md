@@ -31,11 +31,11 @@ Midscene 对被测 UI 的语言不限。Nova Act 的支持范围是英文 UI：�
 ## 3 本机还是云端，run 还是 submit
 
 - `run`：前台同步，CLI 全程在线，退出码即判定。人在等结果、批量小 → 用它。
-- `submit`：提交即返回，stdout 只打一个 `run_id`，退 0 只表示提交成功；判定看 `status <run_id> --wait`。local 档由本机一个脱离 CLI 的后台进程推进（本机需开机）；`--backend cloud` 档由云端推进，提交后关机也会运行到结束。
-- **cloud 一条线**：`doctor --backend cloud --prefix P` → `plan` → `submit --backend cloud --prefix P` → `status --backend cloud --prefix P --wait` → `explain --backend cloud --prefix P`。`plan` 不依赖后端、两档都要先执行一次；但它的确定性标注问的是**本机** steps，云端实际运行用的是 worker 镜像里那份，标注只代表本机视图。`status` / `explain` 的 `--backend` / `--report-dir` / `--prefix` 必须与**产生这个 run 的那条命令**（`run` 或 `submit`）逐字一致——本机 `run --report-dir out/` 之后也得 `explain <run_id> --report-dir out/`；不一致就退 2 说找不到这个 run（那句提示只提 `submit`，别被它带偏）。
+- `submit`：提交即返回，stdout 只打一个 `run_id`，退 0 只表示提交成功；判定看 `status <run_id> --wait`。local 后端由本机一个脱离 CLI 的后台进程推进（本机需开机）；cloud 后端由云端推进，提交后关机也会运行到结束。
+- **cloud 一条线**：`doctor --backend cloud --prefix P` → `plan` → `submit --backend cloud --prefix P` → `status --backend cloud --prefix P --wait` → `explain --backend cloud --prefix P`。`plan` 不依赖后端、两个后端都要先执行一次；但它的确定性标注问的是**本机** steps，云端实际运行用的是 worker 镜像里那份，标注只代表本机视图。`status` / `explain` 的 `--backend` / `--report-dir` / `--prefix` 必须与**产生这个 run 的那条命令**（`run` 或 `submit`）逐字一致——本机 `run --report-dir out/` 之后也得 `explain <run_id> --report-dir out/`；不一致就退 2 说找不到这个 run（那句提示只提 `submit`，别被它带偏）。
 - **部署云端后端是部署方的事，你不自己运行 `gherkai deploy`**（改 AWS 资源与 IAM）。用 `doctor` 判缺什么，把该运行的命令与前置交给人；推定制 variant 镜像的 `gherkai deploy push-worker` 不改 IAM，你可以运行。细节见 `references/cloud-backend.md`。
 - **被测应用在本机 / 内网时**：浏览器在云端，`http://localhost:3000` 不可达。唯一做法 = `--expose-local <feature 里书写的原始 origin>`，feature 照写原始地址，提交时替换成带每 run 一换凭据的公网 URL。`run` / `submit` / `plan` 都收（`plan` 只标注、不起隧道）。前置两条，`doctor` 都不查：本机装好 ngrok 且在 PATH 上（下载 https://ngrok.com/download ），以及配好 authtoken（`ngrok config add-authtoken <token>` 写进 ngrok 自己的配置文件，或环境变量 `NGROK_AUTHTOKEN`，任一处即可），少哪条都在起隧道时失败。`submit` 后隧道由本机后台进程持有，本机须保持开机联网到 run 终态，这是「提交后关机也会运行到结束」的唯一例外。
-- **`--tunnel-ttl`（仅 `submit`）**——只在 cloud 档且开了隧道时才有意义：隧道守护进程的兜底 TTL，缺省 = 本批各 job 预算之和加余量；到点**无条件**拆隧道，调小会在 run 未完时断掉被测应用的入口，别为「省一点」去调它。
+- **`--tunnel-ttl`（仅 `submit`）**——只在 cloud 后端且开了隧道时才有意义：隧道守护进程的兜底 TTL，缺省 = 本批各 job 预算之和加余量；到点**无条件**拆隧道，调小会在 run 未完时断掉被测应用的入口，别为「省一点」去调它。
 
 ## 4 编写 feature 与 steps
 
@@ -51,7 +51,7 @@ Midscene 对被测 UI 的语言不限。Nova Act 的支持范围是英文 UI：�
 
 ## 5 工作循环
 
-1. `gherkai doctor`（首次或环境变过；cloud 档加 `--backend cloud --prefix P`）。
+1. `gherkai doctor`（首次或环境变过；cloud 后端加 `--backend cloud --prefix P`）。
 2. `gherkai plan <feature…>`：看分组、引擎路由、派发标注、筛选结果。纯本地、零费用。**plan 打出的 job 数 = 这一批要开几个云端浏览器会话**，费用随 job 数与步数走，`--max-concurrency` 只改同时运行几个、不减总账。首次在这个项目实际运行、或 job 数明显超出人交代的范围（人只说一条、plan 列出一屏）时，先把分组与规模报给人再执行；只想验证刚写的那条就按第 6 条收窄到一条。
 3. `gherkai run <feature…>` 或 `gherkai submit <feature…>` + `gherkai status <run_id> --wait`。实际运行会产生 AWS 费用，先 `plan` 后运行。
 4. 有用例没过，**第一个命令是 `gherkai explain <run_id>`**（哪怕你能直接读 `jobs/*.json` 与 evidence.json 也先用它：它把判定、原因、模型看见了什么与截图位置拼成一份别人能复现的证据，手翻 JSON 容易漏 message 与截图位置）：按书写顺序列每一步，失败 / 出错 / 跳过的步展开成「问了 AI 什么 → 它看见与想了什么 → 截图在哪」；判定里已看出哪个 job 红了就直接 `gherkai explain <run_id> <scope_id>`（位置参数，值与重新运行时用的 `--scope` 同一个）；再往细走 `--scenario SEL` / `--step N`（0 起、与文本步号同口径，须与 `--scenario` 同给）缩到一步，`--all` 连通过的步也展开，`--full` 逐帧全文，`--json` 拿完整证据。要更多再读 `--json` 或 `jobs/*.json`，别解析 HTML 报告、别猜产物路径，顺 `ref` 走。
@@ -71,13 +71,13 @@ Midscene 对被测 UI 的语言不限。Nova Act 的支持范围是英文 UI：�
 | `run` / `submit` 共用，多数 `plan` 也收 | `--default-engine` `--assertion-votes` `--default-job-timeout` `--steps-dir` `--scope` `--tags` `--scenario` `--expose-local`（这 8 个 `plan` 也收：用例预检要与实际运行一致就照样给）；`--max-concurrency` `--report-dir`（`plan` 不收） | `--assertion-votes 3` 查 AI 断言抖动；`--max-concurrency` 默认很保守（护成本与配额），scope 多且互不相干时调大；`--default-job-timeout` 只管未标 `@timeout` 的 scope。默认值都以 `--help` 为准，别背数字 |
 | 仅 `run` | `--fail-fast` `--quiet` `--no-report` `--grace` | `--quiet` 少占屏幕与上下文、worker 日志改落文件，判定明细与证据照落；`--no-report` 连 `explain` 一起废掉——判定明细与 AI 证据都不落盘，事后 `explain` 找不到这个 run，失败原因只剩本次输出里每步那一句，想细看只能再花钱重新运行，所以只在确定不用读失败原因的纯 CI 门禁上用；`--grace` 别调小，过小直接退 2、且会泄漏浏览器会话 |
 | 仅 `submit` | `--tunnel-ttl` | 只在 cloud + `--expose-local` 时有意义 |
-| cloud 档：`doctor` / `run` / `submit` / `status` / `explain` 各要给（`plan` 不吃） | `--backend cloud` `--prefix` `--region` `--profile` `--worker-variant`（仅 `run` / `submit`） | `--backend` / `--prefix` / `--report-dir` 必须与产生这个 run 的那条命令逐字一致，不一致即退 2 说找不到这个 run；`--region` 要指同一个 region（换了就查不到），`--profile` 换成另一个指向同账号同 region 的 profile 不影响；`--worker-variant` 选云端 worker 镜像上的确定性 step 集，不给用部署侧默认指针 |
+| cloud 后端：`doctor` / `run` / `submit` / `status` / `explain` 各要给（`plan` 不吃） | `--backend cloud` `--prefix` `--region` `--profile` `--worker-variant`（仅 `run` / `submit`） | `--backend` / `--prefix` / `--report-dir` 必须与产生这个 run 的那条命令逐字一致，不一致即退 2 说找不到这个 run；`--region` 要指同一个 region（换了就查不到），`--profile` 换成另一个指向同账号同 region 的 profile 不影响；`--worker-variant` 选云端 worker 镜像上的确定性 step 集，不给用部署侧默认指针 |
 | 查询类各自有 | `status --json`、`explain --json`、`plan --json`、`doctor --json`、`list-engines --json`、`list-deterministic --json` | `run --json` 有、`submit` 没有：run_id 走 stdout，进度与判定看 `status --json` |
 
 ## 8 退出码分流
 
 - `run`：退出码即判定。0 全通过；1 已运行但有失败或出错；2 无法运行（feature 读不到、参数不合法、worker 没装、steps 加载失败、云端凭证 / 版本 / variant 问题）。
-- `status`：**只有读到终态才表判定**（通过 0、其余终态 1）；未到终态一律退 0、只表示查到了。要判定必须 `status --wait`，它同时是接力：后台推进卡住时由这条命令续到底。2 = 查不到这个 run（cloud 档还含云端读不到、版本不匹配）。
+- `status`：**只有读到终态才表判定**（通过 0、其余终态 1）；未到终态一律退 0、只表示查到了。要判定必须 `status --wait`，它同时是接力：后台推进卡住时由这条命令续到底。2 = 查不到这个 run（cloud 后端还含云端读不到、版本不匹配）。
 - `submit` / `plan` / `explain` / `doctor`：只表做成没做成（0 / 2）。`explain` 哪怕用例全红也退 0。
 - CI 接 `run` 的退出码，或 `submit` 之后接 `status --wait` 的退出码；别接 `submit`、`explain` 的。
 
@@ -111,9 +111,9 @@ job 级：
 - 别把 `submit` 退 0 当通过：它只说提交成功，判定还没出。
 - 别把不带 `--wait` 的 `status` 退 0 当通过：未到终态它也退 0。
 - 别解析 HTML 报告或引擎原生 trajectory 文件：`explain` 与 `--json` 才是稳定接口，报告是派生视图、文件名会变。
-- 别猜产物路径：顺判定明细里的 `ref` 走，本机与 S3 两档同律。
-- cloud 档改了 steps 不 `push-worker` 等于没改：云端 worker 读的是镜像里那份，本机 `plan` 的标注不代表云端。
+- 别猜产物路径：顺判定明细里的 `ref` 走，本机与 S3 两侧同律。
+- cloud 后端改了 steps 不 `push-worker` 等于没改：云端 worker 读的是镜像里那份，本机 `plan` 的标注不代表云端。
 - 别只写一侧的确定性 step：另一引擎上会静默落回 AI，run 还可能「通过」。
-- 别调小 `--grace`（仅 `run` 有，且只对本机档；cloud 档给了它即退 2）：云端的停止宽限在部署侧的 `gherkai deploy --stop-timeout`，归部署方。
+- 别调小 `--grace`（仅 `run` 有，且只对本机后端；cloud 后端给了它即退 2）：云端的停止宽限在部署侧的 `gherkai deploy --stop-timeout`，归部署方。
 - 别为了「验证一下改动」就 `run` / `submit`：每次实际运行都开云端浏览器会话、花真钱，改完用 `plan`（零费用）验写法与标注；实际运行只在人要结果时做。
 - 别自己运行 `gherkai deploy` / `gherkai destroy`：交给人，你负责准备命令与前置清单。

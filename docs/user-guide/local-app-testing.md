@@ -69,7 +69,7 @@ gherkai plan my_app.feature --expose-local http://localhost:3000
 
 因此：**用了 `--expose-local`，本机要保持开机联网直到 run 达终态**。隧道拓扑图上从边缘回到被测应用那一段全在你的机器这一侧，关机或断网等于隧道断，剩下的 scenario 会以导航失败告终。云端后端平时可以提交完就关机，用了 `--expose-local` 时不行——这是那条便利的唯一例外。
 
-提交后用 `gherkai status <run_id> --wait` 等到 run 达终态：这条命令会一直等到 run 结束再返回。本机后端用过非默认 `--report-dir` 时要带上同一个值，否则查不到这个 run；云端后端还要带 `--backend cloud --prefix <前缀>`。两档的定位参数都与 `submit` 时一致，照抄 `submit` 打出的那行提示即可。
+提交后用 `gherkai status <run_id> --wait` 等到 run 达终态：这条命令会一直等到 run 结束再返回。本机后端用过非默认 `--report-dir` 时要带上同一个值，否则查不到这个 run；云端后端还要带 `--backend cloud --prefix <前缀>`。两个后端的定位参数都与 `submit` 时一致，照抄 `submit` 打出的那行提示即可。
 
 ## 存活时间上限：`--tunnel-ttl S`
 

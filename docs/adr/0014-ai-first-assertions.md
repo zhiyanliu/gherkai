@@ -2,11 +2,11 @@
 
 > **Status:** Accepted
 
-测试用例的断言**默认走 AI**（Midscene `aiBoolean` / Nova Act `act_get(BOOL_SCHEMA)`，两侧对称布尔 + 投票；**不走** Midscene `aiAssert`——抛错黑盒、与 Nova Act 不对称，见下「抖动治理」条），让框架忠于其立身之本——「用 AI 引擎做自动化测试」。确定性断言（底层 Playwright `page`）退为**按需的高保真补充**，而非默认。
+测试用例的断言**默认走 AI**（Midscene `aiBoolean` / Nova Act `act_get(BOOL_SCHEMA)`，两侧对称布尔 + 投票；**不走** Midscene `aiAssert`——抛错黑盒、与 Nova Act 不对称，见下「抖动治理」条），让工具忠于其立身之本——「用 AI 引擎做自动化测试」。确定性断言（底层 Playwright `page`）退为**按需的高保真补充**，而非默认。
 
 ## 为什么 AI 为主（价值取向，非实测结论）
 
-本框架的卖点就是 AI 驱动（[0005](./0005-single-shared-feature-file.md)/[0006](./0006-form-a-two-subprojects-no-orchestrator.md)）。若判定环节退回确定性 Playwright 为主，则引擎模型只用于「执行动作」、判定把 AI 绕开，等于自废一半卖点。故断言也拥抱 AI。
+本工具的卖点就是 AI 驱动（[0005](./0005-single-shared-feature-file.md)/[0006](./0006-form-a-two-subprojects-no-orchestrator.md)）。若判定环节退回确定性 Playwright 为主，则引擎模型只用于「执行动作」、判定把 AI 绕开，等于自废一半卖点。故断言也拥抱 AI。
 
 ## 代价是真实的——必须配套纪律（否则 flaky 反噬）
 

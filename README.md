@@ -41,14 +41,14 @@ gherkai explain <run_id>                              # 有用例没过：逐步
 
 后台运行用 `submit` 提交、`status --wait` 收结果；加 `--backend cloud --prefix <前缀>` 切到团队的云端后端。执行方式与执行后端的四种组合、常用选项与退出码见 [运行测试与查看结果](./docs/user-guide/running-and-results.md)。
 
-## 它是怎么工作的
+## 它是如何工作的
 
-![本机档与云端档两档：命令行读入 .feature，起本机 worker 或提交到云端后端；worker 用你账户里的模型做 AI step 的操作与判定、经 CDP 驱动云端浏览器，浏览器直达公网被测应用或经隧道回本机应用；结果与证据由 explain / status 读回](./docs/diagrams/readme-runtime-topology.svg)
+![本机与云端两个后端：命令行读入 .feature，起本机 worker 或提交到云端后端；worker 用你账户里的模型做 AI step 的操作与判定、经 CDP 驱动云端浏览器，浏览器直达公网被测应用或经隧道回本机应用；结果与证据由 explain / status 读回](./docs/diagrams/readme-runtime-topology.svg)
 
-本机档与云端档各自把结果落在哪、要什么凭证与权限，见下面三条；判定由哪个模型做出，见下一节的披露表。浏览器会话按用例分组算：同一个分组（`.feature` 里的 `@scope` 标签）的用例串行共享一个云端浏览器会话，写法见 [编写 .feature](./docs/user-guide/writing-features.md)。
+本机后端与云端后端各自把结果落在哪、要什么凭证与权限，见下面三条；判定由哪个模型做出，见下一节的披露表。浏览器会话按用例分组算：同一个分组（`.feature` 里的 `@scope` 标签）的用例串行共享一个云端浏览器会话，写法见 [编写 .feature](./docs/user-guide/writing-features.md)。
 
-- **本机档**（默认）：worker 是本机子进程，结果落当前目录的 `reports/`。需要本机 AWS 凭证。
-- **云端档**：worker 在部署方建好的 Fargate 上运行，状态落 DynamoDB、结果落 S3；提交完关机也会继续运行到结束。团队成员只需最小的云端权限，见 [部署与维护云端后端](./docs/user-guide/cloud-backend.md)。
+- **本机后端**（默认）：worker 是本机子进程，结果落当前目录的 `reports/`。需要本机 AWS 凭证。
+- **云端后端**：worker 在部署方建好的 Fargate 上运行，状态落 DynamoDB、结果落 S3；提交完关机也会继续运行到结束。团队成员只需最小的云端权限，见 [部署与维护云端后端](./docs/user-guide/cloud-backend.md)。
 - **费用**来自模型调用与云端浏览器会话，按你账户的 AWS 账单计。`plan` 是纯本地的用例预检，不产生费用。
 
 更完整的架构与执行模型见 [`docs/internals/architecture-overview.md`](./docs/internals/architecture-overview.md)。
@@ -89,4 +89,4 @@ gherkai 自己不含模型，也不接收任何数据。每个 AI step 的操作
 
 ## 许可证
 
-MIT，见 [LICENSE](./LICENSE)。
+MIT [LICENSE](./LICENSE)。

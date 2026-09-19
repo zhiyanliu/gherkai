@@ -2,11 +2,11 @@
 
 > **Status:** Accepted
 
-整个框架的所有技术选型——模型托管、浏览器层、鉴权、未来的编排——都必须**优先落在 AWS 之内**（Bedrock / AgentCore / SageMaker / IAM 等）。这是项目的硬约束，不是可权衡的偏好。
+整个工具的所有技术选型——模型托管、浏览器层、鉴权、未来的编排——都必须**优先落在 AWS 之内**（Bedrock / AgentCore / SageMaker / IAM 等）。这是项目的硬约束，不是可权衡的偏好。
 
 **决定**：当某个能力在 AWS 内有可用方案时，即采用 AWS 方案，**即使 AWS 外存在质量/便利性更好的替代**。离开 AWS 的方案只有在「AWS 内确实无任何可行选项」时才进入考虑，且需另立 ADR 显式记录为对本约束的例外。
 
-**适用面** = 交付物的**运行栈**（模型托管 / 浏览器层 / 鉴权 / 存储 / 编排，即上文列举的轴）。维护者侧的源码托管、包索引、镜像 registry 与 CI（GitHub / PyPI / npm / GHCR，见 [0037](./0037-distribution-and-packaging.md) 决策 5、8）是发布通道、不在其内——运行期真正被拉起的 worker 镜像仍在使用方私有 ECR（[0038](./0038-worker-image-delivery.md)）。发布通道放 AWS 外不是例外、不进下面的例外清单。
+**适用面** = 交付物的**运行栈**（模型托管 / 浏览器层 / 鉴权 / 存储 / 编排，即上文列举的轴）。contributor 侧的源码托管与 CI、发布方侧的包索引与镜像 registry（GitHub / PyPI / npm / GHCR，见 [0037](./0037-distribution-and-packaging.md) 决策 5、8）是发布通道、不在其内——运行期真正被拉起的 worker 镜像仍在使用方私有 ECR（[0038](./0038-worker-image-delivery.md)）。发布通道放 AWS 外不是例外、不进下面的例外清单。
 
 **已据此约束做出的选择**：
 - [0003](./0003-midscene-grounding-qwen3vl-bedrock.md) / [0044](./0044-engine-model-selection-and-override.md)：Midscene 的引擎模型在 Bedrock 内选（原默认 Qwen3-VL，2026-09 评测集 A/B 后改为 `us.openai.gpt-5.6-terra`），而非 AWS 外的模型。引擎默认模型的候选集同受本约束界定（[0044](./0044-engine-model-selection-and-override.md) 决策 3：只用 Bedrock OpenAI 兼容端点调得到的模型）。

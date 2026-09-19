@@ -4,7 +4,7 @@
 
 ## 背景与问题
 
-[0037](./0037-distribution-and-packaging.md) 决策 5 定了 worker 镜像**两层分工**：维护者按版本发基础镜像到 GHCR，使用方在本地叠自己的确定性 step 构建定制镜像。本 ADR 定**最后一层怎么交付到云端后端并被 run 使用**。
+[0037](./0037-distribution-and-packaging.md) 决策 5 定了 worker 镜像**两层分工**：发布方按版本发基础镜像到 GHCR，使用方在本地叠自己的确定性 step 构建定制镜像。本 ADR 定**最后一层怎么交付到云端后端并被 run 使用**。
 
 **当前（施工前）**：每个引擎一个镜像；部署方用 `tools/build_push_workers.py` 从整个 repo 构建、推自己私有 ECR 的 `{prefix}{engine}-worker:latest`；task-def 由 IaC 建、镜像栏焊死 `tag="latest"`；RunTask 只传 task-def 的 **family 名**（ECS 取该 family 最新 ACTIVE revision）；CLI 完全不知道也不能选跑哪个镜像；「更新 steps」= 改 repo 里的脚手架文件、整体重建、重推 `latest`，下次起 task 自然拉到。使用方 build 时必须带 `--platform linux/amd64`，漏给的后果是 Fargate **启动期** `exec format error`（[0033](./0033-iac-aws-backend-and-composition-wiring.md) 记的坑）。
 
@@ -20,7 +20,7 @@
 
 | 概念 | 定义 | 载体 |
 |---|---|---|
-| **基础镜像** | 维护者 CI 发布的镜像 `ghcr.io/zhiyanliu/gherkai-worker-<engine>:X.Y.Z`，linux/amd64 单架构，零使用方内容（[0037](./0037-distribution-and-packaging.md) 决策 5） | GHCR |
+| **基础镜像** | 由发布链发布的镜像 `ghcr.io/zhiyanliu/gherkai-worker-<engine>:X.Y.Z`，linux/amd64 单架构，零使用方内容（[0037](./0037-distribution-and-packaging.md) 决策 5） | GHCR |
 | **variant** | 一套具名的确定性 step 集 = 一个定制镜像；名字由测试开发自取（`login`、`checkout-v2`）；基础镜像同步进 ECR 的那份固定叫 `base` | 使用方私有 ECR，tag = `<CLI 版本>-<variant>` |
 | **默认指针** | 提交时不给 `--worker-variant` 就用哪个 variant；部署级一个；deploy 初始化为 `base` | SSM |
 | **revision** | 每个（引擎，variant）一个 task-def revision：从模板复制、镜像栏换成 `repo@sha256:<digest>`、以 tags 记血缘与退休时刻 | ECS task-def family `{prefix}{engine}-worker` |

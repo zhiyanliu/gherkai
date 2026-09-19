@@ -173,7 +173,7 @@
       "id": "creds-for-cli",
       "from": "creds",
       "to": "cli",
-      "label": "云端档使用",
+      "label": "云端后端使用",
       "variant": "dashed",
       "fromSide": "right",
       "toSide": "left"
@@ -182,7 +182,7 @@
       "id": "creds-for-worker",
       "from": "creds",
       "to": "worker_local",
-      "label": "本机档使用",
+      "label": "本机后端使用",
       "variant": "dashed",
       "fromSide": "right",
       "toSide": "left"
@@ -191,7 +191,7 @@
       "id": "spawn-local-worker",
       "from": "cli",
       "to": "worker_local",
-      "label": "本机档：启动子进程",
+      "label": "本机后端：启动子进程",
       "variant": "emphasis",
       "labelDy": 180
     },
@@ -199,7 +199,7 @@
       "id": "start-cloud-worker",
       "from": "cli",
       "to": "worker_cloud",
-      "label": "云端档：云端启动任务",
+      "label": "云端后端：云端启动任务",
       "variant": "emphasis"
     },
     {
@@ -246,11 +246,11 @@
   "cards": [
     {
       "dot": "cyan",
-      "title": "两档唯一差异：worker 的运行位置",
+      "title": "两个后端唯一差异：worker 的运行位置",
       "items": [
-        "本机档：worker 为本机子进程",
-        "云端档：worker 以任务形式在账户内运行",
-        "两档使用同一套引擎，对浏览器会话与模型服务的调用一致",
+        "本机后端：worker 为本机子进程",
+        "云端后端：worker 以任务形式在账户内运行",
+        "两个后端使用同一套引擎，对浏览器会话与模型服务的调用一致",
         "仅提交到云端时无需安装本机 worker"
       ]
     },
@@ -260,8 +260,8 @@
       "items": [
         "凭证取自本机默认凭证链，无需额外 API key",
         "region 必须有明确来源，未解析到时在引擎启动时报错",
-        "本机档同样需要凭证：本机 worker 直接创建会话、调用模型",
-        "本机档的用量计入本机凭证所属账户，云端档计入部署后端的账户"
+        "本机后端同样需要凭证：本机 worker 直接创建会话、调用模型",
+        "本机后端的用量计入本机凭证所属账户，云端后端计入部署后端的账户"
       ]
     }
   ]

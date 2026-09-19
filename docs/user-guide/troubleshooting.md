@@ -137,4 +137,4 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 
 ## 仍未定位到原因时
 
-反馈问题时请附上三项信息：`gherkai doctor --json`（带上出问题那一档的参数）、`gherkai --version`、失败 run 的 `gherkai explain <run_id> --json`。问题反馈见 https://github.com/zhiyanliu/gherkai/issues 。
+反馈问题时请附上三项信息：`gherkai doctor --json`（带上出问题那个后端的参数）、`gherkai --version`、失败 run 的 `gherkai explain <run_id> --json`。问题反馈见 https://github.com/zhiyanliu/gherkai/issues 。

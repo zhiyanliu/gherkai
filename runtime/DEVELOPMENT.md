@@ -15,8 +15,8 @@
 - `compose.py` —— 组合根/引擎注册表，按职责分四组：
   - **worker 拉起**：`resolve_worker_cmd`（四级定位链，ADR 0037 决策 3——env 覆写 `GHERKAI_WORKER_<ENGINE>_CMD`（+ 可选
     `_CWD`）> 同 venv `-m`（仅 Python 引擎）> PATH 上 `gherkai-worker-<engine>` > `uvx` 按版本临时拉起（**仅 novaact**；
-    midscene 无本级，理由见下）；四级均未命中时抛 `WorkerNotFoundError`，交由调用点分叉）/ `build_engines`（local 档）/
-    `build_fargate_engines`（cloud 档，接受**显式 task-def revision ARN** 的映射，ADR 0038）。注入 worker 的 env 由本
+    midscene 无本级，理由见下）；四级均未命中时抛 `WorkerNotFoundError`，交由调用点分叉）/ `build_engines`（local 后端）/
+    `build_fargate_engines`（cloud 后端，接受**显式 task-def revision ARN** 的映射，ADR 0038）。注入 worker 的 env 由本
     模块独占（`GHERKAI_STEPS_DIR` / `GHERKAI_NO_ARTIFACTS` / `GHERKAI_EXTRA_HTTP_HEADERS`：有值显式注入、无值显式清除）。
   - **worker 的两个非 job 入口**（ADR 0036「4.」「5.」）：`query_capabilities`（spawn `worker --capabilities` 读取自述对象——
     steps 加载结果 / 确定性 step 清单 / grace 下限 / 模型 id；契约校验全在此、不合契约不写缓存；进程内按「引擎 + steps

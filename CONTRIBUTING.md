@@ -19,7 +19,7 @@
 |------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-----------------|
 | v1.0 核心库                  | parse + scope 分组 + schedule + 4 ports（Engine/Run/Result/ReportStore）+ 实时写编排；双引擎薄 worker、AgentCore 会话、投票治理、RunReport、网络韧性                                                                                          | ✅ 真 AWS 端到端 |
 | v1.1 云端                    | store adapter（DynamoDB/S3，StepArgument offload 解 400KB 限）+ Fargate/ECS 执行面（`FargateEngine` + `gherkai-deploy-aws` 的 CDK stack）；boto3 只在云端路径懒加载（库层 extra `[aws]`，CLI 硬依赖 `gherkai-runtime[aws]`，ADR 0032/0033/0037） | ✅ 真部署真运行  |
-| v1.2 无状态批量运行          | `submit` 提交即返回 + `status [--wait]`；local 档 per-run 后台进程 + SQLite events；cloud 档三 Lambda 事件驱动链（kicker / reconciler / exit-observer，DDB Stream + EventBridge）；job 墙钟预算作为最终保障（ADR 0034）                        | ✅               |
+| v1.2 无状态批量运行          | `submit` 提交即返回 + `status [--wait]`；local 后端 per-run 后台进程 + SQLite events；cloud 后端三 Lambda 事件驱动链（kicker / reconciler / exit-observer，DDB Stream + EventBridge）；job 墙钟预算作为最终保障（ADR 0034）                        | ✅               |
 | v1.3 本地应用测试 + 能力自述 | `--expose-local` ngrok 隧道（basic-auth 凭据每 run 轮换、终态即拆除，ADR 0035）；`list-deterministic` / `plan` 派发标注（worker 注册表自述，ADR 0036）                                                                                         | ✅               |
 | v1.4 分发与打包              | uv workspace 五包 + PyPI/npm 发行、git tag 版本真源、`gherkai deploy` 内嵌 IaC、worker 镜像 variant 交付（ADR 0037 / 0038）                                                                                                                 | ✅ 已发行        |
 
@@ -93,7 +93,7 @@ export GHERKAI_WORKER_MIDSCENE_CMD="node $PWD/engines/midscene/dist/bin.mjs"
 
 ## 在有凭证的机器上验证未发布的工作树
 
-本机没有 AWS 凭证时，实际运行（本机档 `run` 同样要连 AgentCore 与模型）改在一台有凭证的开发机上进行；机器、前缀、region 这类环境事实不入 repo，由操作者自行留存备忘。流程如下，其后每条注意事项各对应一次真实发生过的失败：
+本机没有 AWS 凭证时，实际运行（本机后端 `run` 同样要连 AgentCore 与模型）改在一台有凭证的开发机上进行；机器、前缀、region 这类环境事实不入 repo，由操作者自行留存备忘。流程如下，其后每条注意事项各对应一次真实发生过的失败：
 
 ```bash
 # 1) 同步工作树（半成品不 push 到 public repo）；排除本地产物，保留 .git 使版本可从 tag 派生
@@ -176,7 +176,7 @@ git tag vX.Y.Z && git push origin vX.Y.Z   # GitHub Actions 接手：gate（tag 
 
 发版前写 `CHANGELOG.md` 的该版节（Keep a Changelog 形态、使用者语言：小节名用 新增 / 变化 / 移除 / 修复，外加本项目自加的 升级须知）；发布 gate 校验本 tag 在 changelog 里有非空节，缺失则发版失败；GitHub Release 正文 = 该节 + `.github/release_body_footer.md` 的固定块，由 `.github/scripts/release_notes.py` 渲染（ADR 0045 决策五）。
 
-发版后的验证中有一项需手动执行：把新版本部署到验证环境后，用 agent skill 的云端命令链（`doctor --backend cloud --prefix <前缀>` → `plan` → `submit` → `status --wait` → `explain`）在有凭证的机器上完整执行一次；云端这一档是 skill 评测里唯一没被真实数据覆盖的部分（评测舞台刻意不配凭证），结论回填 ADR 0043「验证」节。同一次实际运行另需核验一项：Nova Act 的 workflow definition 名已改为产品名 `gherkai-worker`（原 spike 期代号），首次 `run --engine novaact` 须在使用方账户自动建出该名的 definition 并 run 到终态；create-if-not-exists 跨真实 AWS 边界，单测通过不构成证据（ADR 0004）。
+发版后的验证中有一项需手动执行：把新版本部署到验证环境后，用 agent skill 的云端命令链（`doctor --backend cloud --prefix <前缀>` → `plan` → `submit` → `status --wait` → `explain`）在有凭证的机器上完整执行一次；云端后端这一侧是 skill 评测里唯一没被真实数据覆盖的部分（评测舞台刻意不配凭证），结论回填 ADR 0043「验证」节。同一次实际运行另需核验一项：Nova Act 的 workflow definition 名已改为产品名 `gherkai-worker`（原 spike 期代号），首次 `run --engine novaact` 须在使用方账户自动建出该名的 definition 并 run 到终态；create-if-not-exists 跨真实 AWS 边界，单测通过不构成证据（ADR 0004）。
 
 CI（任意分支的 push、PR、手动触发）运行三件：全成员 `pytest`、midscene 的 `npm ci && npm run build && npm test`、`uv build --all-packages` 的打包元数据 smoke + 发布 gate 演练。一次性人工前置（PyPI trusted publisher、npm trusted publisher、GHCR 可见性核对）、TestPyPI 演练，以及**不推 tag 也可做的本地静态校验**，全在 [`.github/workflows/README.md`](./.github/workflows/README.md)；决策与理由在 [ADR 0037 决策 8](./docs/adr/0037-distribution-and-packaging.md)。
 

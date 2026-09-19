@@ -117,7 +117,7 @@ worker **边跑边流式上报**（每行一个事件），core 实时收。选�
 
 ## 成本信封（cost）：engine 只报原生量，core 只合计，不算美元
 
-**原则：core 不算、不折美元、不判可信度——engine 提供什么原生量就报什么，core 各自合计。** 实查（见下「实查依据」）证实两个引擎计费轴根本不同：**Nova Act 按 agent 工作时长**（SDK 原生给 `time_worked_s`）；**Midscene 按 LLM token**（Bedrock 原生给 token 用量）。两个引擎的**原生信号本就不同**，统一成美元需要一个费率——而费率（尤其 Midscene 的 Qwen token 单价）随 region/协商/版本变、billed 到用户账户，框架不该追那张会过期的单价表。**故 core 只如实搬运 + 合计原生量，美元折算交给消费者（用自己 AWS 账户的真实费率）。**
+**原则：core 不算、不折美元、不判可信度——engine 提供什么原生量就报什么，core 各自合计。** 实查（见下「实查依据」）证实两个引擎计费轴根本不同：**Nova Act 按 agent 工作时长**（SDK 原生给 `time_worked_s`）；**Midscene 按 LLM token**（Bedrock 原生给 token 用量）。两个引擎的**原生信号本就不同**，统一成美元需要一个费率——而费率（尤其 Midscene 的 Qwen token 单价）随 region/协商/版本变、billed 到用户账户，工具不该追那张会过期的单价表。**故 core 只如实搬运 + 合计原生量，美元折算交给消费者（用自己 AWS 账户的真实费率）。**
 
 `cost` 是**平铺、各 optional 的原生量**（无 `cost_usd`/`precision`/`basis`/`costRate`——这些都已删）：
 
@@ -138,7 +138,7 @@ worker **边跑边流式上报**（每行一个事件），core 实时收。选�
 
 - **Midscene**：`aiAct()→string|undefined`、`aiBoolean()→bare boolean`，**失败抛异常**（status 由 worker 捕获算出）；token 在 `agent.metrics.totalTokens`（`MidsceneUsageMetrics` 累计快照，@midscene/web 1.12 起公开；step 前后取差）；报告路径 `agent.reportFile`（destroy 后），1 个 html/worker。
 - **Nova Act**：`act()→ActResult`、`act_get()→ActGetResult(matches_schema/parsed_response)`，**失败抛异常树**（guardrail/timeout/agentFailed/限流…）；**token/cost 任何 SDK 路径都拿不到**（`ActResult`/`ActMetadata`/trajectory/wire 全无 token 字段；`InvokeActStepResponse` 只有 `calls`+`step_id`；pydantic 默认 ignore，即便服务端回 usage 也被静默丢弃）。
-- **Nova 原生量 `time_worked_s`**：SDK 原生给（= 工作时长扣除等人时间，自标 "Approx. Time Worked"）。它与 Nova 计费口径一致（Nova 按 **$4.75/agent-hour**、扣除等人时间，`aws.amazon.com/nova/pricing` 逐字核实）——故消费者可用 `time_worked_s/3600 × 费率` 高保真折美元。**但折算由消费者做、不由 worker/core 做**（框架只报原生量，不内置 $4.75）。
+- **Nova 原生量 `time_worked_s`**：SDK 原生给（= 工作时长扣除等人时间，自标 "Approx. Time Worked"）。它与 Nova 计费口径一致（Nova 按 **$4.75/agent-hour**、扣除等人时间，`aws.amazon.com/nova/pricing` 逐字核实）——故消费者可用 `time_worked_s/3600 × 费率` 高保真折美元。**但折算由消费者做、不由 worker/core 做**（工具只报原生量，不内置 $4.75）。
 - **两个 UNKNOWN（记为 SDK 外、v1.0 不依赖，非可用路径）**：① 线上 invoke-step 响应是否藏了被 SDK 丢弃的 usage——需真实抓包才能定；② CloudWatch/Cost Explorer 是否暴露可读的 per-act 成本指标——需 AWS Nova Act 用户指南（JS SPA，未能 fetch）。两者 v1.0 都不依赖；若未来追求精确 token 成本再探。
 
 ## 协议是测试面（skill：interface is the test surface）
@@ -255,9 +255,9 @@ core 的 `schedule`/汇总逻辑应能用一个**假 worker**（in-memory adapte
 
 - **现在做（v1.0，已落地）**：上述输入/输出 schema、cost 信封（engine 报原生量 time_worked_s/tokens、core 合计）、三态 status/votes 区分 AI 断言；worker 派发逻辑（确定性注册表 > 内建 URL 导航 > 默认 AI，[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)）；两个引擎对称的 `@deterministic` 注册表（命中走精确 handler、不投票）；两个引擎 worker 各自取会话血缘（Nova `nova.get_session_id()`；Midscene 取 `StartBrowserSession` 响应的 `sessionId`）、随 `scope_started` 首传、`scope_done` 兜底（机制见上「字段语义·`sessionId`」，[0028](./0028-transient-network-ssl-resilience.md)）；**两个引擎的 reportRefs（kind=产物类型、粒度由挂载层级表达；映射详见上「字段语义·`reportRefs`」）**——取值路径：Midscene `agent.reportFile`；Nova 设 `logs_directory` 持久化 trajectory 后取 `metadata.trajectory_file_path`；归集成 RunReport（[0027](./0027-runreport-aggregation-index.md)）。
 - **`errorType` 分类（已细化）**：建连层瞬时故障 → `network_error`（两个引擎 worker 建连重试 + 退出码约定,[0028](./0028-transient-network-ssl-resilience.md)）；act 中途失败 Nova worker 经 `_classify_act_error` 按 SDK 异常树细分——网络瞬时→`network_error`、`ActTimeoutError`→`timeout`、`ActGuardrailsError`/`ActStateGuardrailError`→`guardrail`、其余→`engine_error` 兜底（**仅诊断分类、不触发重试/恢复**，[0028](./0028-transient-network-ssl-resilience.md)）。`navigation_error` 暂无对应 SDK 类、留空槽位；Midscene 只抛通用 `Error`，act 中途仅区分 network_error vs engine_error。
-- **留口子不实现**：**协议面**的 per-vote 细节字段（每票的 thought/reason 不进 wire——`votes` 仍只传 tally，见上「为何只记 tally、不记 per-vote 序列」）；美元折算（交消费者，框架不做）。**产物面已兑现**：每票的 thought/reason 与 trajectory 内部结构的结构化提取由 [0042](./0042-step-evidence-and-explain.md) 决策一的 step 级 evidence 落地（worker 侧把每次 AI 调用裁成 gherkai 自有 schema 的 `kind=evidence`，逐 act 带 `vote`（AI 断言的每票各一个 act；动作步为 `null`）、逐 frame 带 `thought`），协议仍不加字段。
+- **留口子不实现**：**协议面**的 per-vote 细节字段（每票的 thought/reason 不进 wire——`votes` 仍只传 tally，见上「为何只记 tally、不记 per-vote 序列」）；美元折算（交消费者，工具不做）。**产物面已兑现**：每票的 thought/reason 与 trajectory 内部结构的结构化提取由 [0042](./0042-step-evidence-and-explain.md) 决策一的 step 级 evidence 落地（worker 侧把每次 AI 调用裁成 gherkai 自有 schema 的 `kind=evidence`，逐 act 带 `vote`（AI 断言的每票各一个 act；动作步为 `null`）、逐 frame 带 `thought`），协议仍不加字段。
 
 ## 重议
 
 - 第三个引擎 / 新计费轴的扩展方式见上「成本信封」扩展条。
-- 若产品确需框架直接给美元 → 在**消费层**（CLI/报告/WebUI）加费率配置做折算，而非在 worker/core 内置费率（保持 core 纯搬运）。
+- 若产品确需工具直接给美元 → 在**消费层**（CLI/报告/WebUI）加费率配置做折算，而非在 worker/core 内置费率（保持 core 纯搬运）。

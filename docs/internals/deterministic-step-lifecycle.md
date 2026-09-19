@@ -69,31 +69,31 @@ worker 收到的只有 `keyword` + 裸 `text`（+可选多行参数）。派发�
 
 同一件事（「这个 run 用哪套确定性 step」）在两个执行后端里由**不同的载体**决定，岔口在提交时刻：
 
-| 档 | 真值源 | 解析规则与落点字段 |
+| 后端 | 真值源 | 解析规则与落点字段 |
 |---|---|---|
 | local（`--backend local`，含 `submit` 的后台推进） | 本机目录 | `--steps-dir` > env `GHERKAI_STEPS_DIR` > `./steps`（相对**提交时** CWD、存在时才采用），写入 `RunMeta.steps_dir` |
 | cloud（`--backend cloud`） | **variant 镜像里构建进去的 `/app/steps`** | 解析出各引擎的 task-def revision；`RunMeta.steps_dir` 不写入 |
 
-![local 档提交时解析一次目录、路径随 definition 持久化；cloud 档把 steps 构建进 variant 镜像，提交侧只解析镜像名](../diagrams/deterministic-steps-truth-sources.svg)
+![local 后端提交时解析一次目录、路径随 definition 持久化；cloud 后端把 steps 构建进 variant 镜像，提交侧只解析镜像名](../diagrams/deterministic-steps-truth-sources.svg)
 
-图注：图上那条「读回后注入」只发生在后台推进的两处；同步 `run` 与提交侧是同一个进程，直接用解析出的值、不读回。cloud 那条链在提交之前就完成：镜像由编写 steps 的一方按模板 build，推送与登记归部署方，两步都不在一次 run 的时间线上。提交侧解析 variant 时的存在性/一致性校验、两档各自的失败形态与提示，见下文与 §4 表。
+图注：图上那条「读回后注入」只发生在后台推进的两处；同步 `run` 与提交侧是同一个进程，直接用解析出的值、不读回。cloud 那条链在提交之前就完成：镜像由编写 steps 的一方按模板 build，推送与登记归部署方，两步都不在一次 run 的时间线上。提交侧解析 variant 时的存在性/一致性校验、两个后端各自的失败形态与提示，见下文与 §4 表。
 
 local 侧三处宿主（同步 `run`、`submit` 的后台推进进程、`status --wait` 接力者，见 [`execution-and-reconciliation.md`](./execution-and-reconciliation.md) §3 与 §4a）的 CWD 各不相同，因此**解析只能做一次**：任何一处重新解析 `./steps`，同一个 run 就会用到两套 step。落点：后台两处读回 `meta.steps_dir`（`detached.build_local_reconcile`），同步 `run` 用提交侧解析出的值；注入与清除同名变量在 `compose.build_engines` / `_scrubbed_environ`。**每个**宿主构造 env 时都先清除自己 shell 里的同名 `GHERKAI_STEPS_DIR`（接力机器上 export 过是最常见的一例）；definition 优先于 export，worker 只读这一个 env、不回落 `./steps`。
 
-cloud 侧的关键是**镜像是唯一载体**：使用方的 `steps/` 靠三行 Dockerfile（模板唯一真源在 [ADR 0038](../adr/0038-worker-image-delivery.md)「概念模型」节）构建进一个 **variant**，由部署方 `gherkai deploy push-worker` 推送；镜像里已设定与本机档**同一个** `GHERKAI_STEPS_DIR`，容器里的 worker 加载的就是构建进去的那份。提交时 `compose.resolve_worker_variant` 只做三环存在性/一致性校验（三环各查什么、缺哪一环怎么报，见 [`cloud-backend-carriers.md`](./cloud-backend-carriers.md) §5），**不读取 steps 内容的任何一个字节**。
+cloud 侧的关键是**镜像是唯一载体**：使用方的 `steps/` 靠三行 Dockerfile（模板唯一真源在 [ADR 0038](../adr/0038-worker-image-delivery.md)「概念模型」节）构建进一个 **variant**，由部署方 `gherkai deploy push-worker` 推送；镜像里已设定与本机后端**同一个** `GHERKAI_STEPS_DIR`，容器里的 worker 加载的就是构建进去的那份。提交时 `compose.resolve_worker_variant` 只做三环存在性/一致性校验（三环各查什么、缺哪一环怎么报，见 [`cloud-backend-carriers.md`](./cloud-backend-carriers.md) §5），**不读取 steps 内容的任何一个字节**。
 
 由此得出两条对使用者最重要的推论：
 
-- **`--backend cloud` 下 `--steps-dir` 不生效**（`_resolve_steps_dir_for_backend`）：路径存在时只输出一句提示，definition 里也不写这个字段，因为本机路径无法进入容器；但**路径不是目录仍退 2**（那道校验排在清零之前，两档共用，见下 §4 表）。
+- **`--backend cloud` 下 `--steps-dir` 不生效**（`_resolve_steps_dir_for_backend`）：路径存在时只输出一句提示，definition 里也不写这个字段，因为本机路径无法进入容器；但**路径不是目录仍退 2**（那道校验排在清零之前，两个后端共用，见下 §4 表）。
 - **「改了 `steps/`，云端结果不变」是设计而非 bug**（新写的 step 会静默落到 AI，改过的 step 仍按镜像里的旧版本运行）：提交侧不比对镜像里 steps 的新旧（比对等于替使用方判断），改完必须重新 build + `push-worker`。要确认云端实际加载的是哪一套，唯一可靠的方式是向镜像里的 worker 查询，而非向本机查询。
 
 variant / 默认指针 / revision / digest 这些载体本身（SSM 键、ECR tag、退休与清理）见 [`cloud-backend-carriers.md`](./cloud-backend-carriers.md) 与 [`docs/user-guide/cloud-backend.md`](../user-guide/cloud-backend.md)。
 
-> 权威：[ADR 0037](../adr/0037-distribution-and-packaging.md) 决策 4（解析在组合根、随 definition 持久化、worker 只认 env；cloud 档 steps 构建进镜像）、[ADR 0038](../adr/0038-worker-image-delivery.md)（定制镜像模板、preflight variant 解析、「不比对 steps 内容」的不变量与被拒方案）、[ADR 0034](../adr/0034-detached-batch-reconciler.md)（三个宿主与各自 CWD）。
+> 权威：[ADR 0037](../adr/0037-distribution-and-packaging.md) 决策 4（解析在组合根、随 definition 持久化、worker 只认 env；cloud 后端 steps 构建进镜像）、[ADR 0038](../adr/0038-worker-image-delivery.md)（定制镜像模板、preflight variant 解析、「不比对 steps 内容」的不变量与被拒方案）、[ADR 0034](../adr/0034-detached-batch-reconciler.md)（三个宿主与各自 CWD）。
 
 ## 4. 响亮失败：症状 → 原因 → 处置
 
-**本机档**这条链上所有「可能把确定性判定静默换成 AI」的路径都做成了显式失败，因为静默降级的后果是**run 仍可能「通过」**（假绿），这是本项目最需要避免的形态。**cloud 档留了一处不做显式失败**：提交侧只解析 variant、不看镜像里 steps 的内容（见 §3），所以本机新写或改了一条确定性 step、未重新 build + `push-worker` 就提交 cloud 时，镜像里查不到它 → 这一步静默落回 AI，没有任何显式失败；确认云端实际加载的是哪一套只能向镜像里的 worker 查询。
+**本机后端**这条链上所有「可能把确定性判定静默换成 AI」的路径都做成了显式失败，因为静默降级的后果是**run 仍可能「通过」**（假绿），这是本项目最需要避免的形态。**cloud 后端留了一处不做显式失败**：提交侧只解析 variant、不看镜像里 steps 的内容（见 §3），所以本机新写或改了一条确定性 step、未重新 build + `push-worker` 就提交 cloud 时，镜像里查不到它 → 这一步静默落回 AI，没有任何显式失败；确认云端实际加载的是哪一套只能向镜像里的 worker 查询。
 
 | 症状 | 原因 | 处置 |
 |---|---|---|

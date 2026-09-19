@@ -6,7 +6,7 @@
 
 ## 判断
 
-**唯一跨引擎共享的是 `features/`（Gherkin 用例文本）**，即 [0005](./0005-single-shared-feature-file.md) 的单一事实源。跨引擎共享的**框架代码**仍止于此；使用方侧另有一个跨引擎共享的**约定面**——项目 `steps/` 目录（两引擎扫同一目录、正则成对、文件各按扩展名分属引擎），见 [0037](./0037-distribution-and-packaging.md) 决策 4。**引擎的实现代码不跨引擎共享**，各自留在 `engines/midscene/` / `engines/novaact/` 内。
+**唯一跨引擎共享的是 `features/`（Gherkin 用例文本）**，即 [0005](./0005-single-shared-feature-file.md) 的单一事实源。跨引擎共享的**工具自身代码**仍止于此；使用方侧另有一个跨引擎共享的**约定面**——项目 `steps/` 目录（两引擎扫同一目录、正则成对、文件各按扩展名分属引擎），见 [0037](./0037-distribution-and-packaging.md) 决策 4。**引擎的实现代码不跨引擎共享**，各自留在 `engines/midscene/` / `engines/novaact/` 内。
 
 ## 为什么代码不跨引擎共享——不只是"语言不同"
 
@@ -23,13 +23,13 @@
 
 ## 框架公共设施：落在核心库这一层，不靠跨引擎共享
 
-不属于任一引擎、属于"框架"本身的东西——**曾设想做成跨引擎共享层，实际落在核心库这一层**（下述三项各自的承载方式见本节末段）：
-- 报告归集 / 统一（M5）
+不属于任一引擎、属于"工具"本身的东西——**曾设想做成跨引擎共享层，实际落在核心库这一层**（下述三项各自的承载方式见本节末段）：
+- 报告归集 / 统一
 - AgentCore 会话生命周期编排（起/停/清理/配额）
 - 用例与测试数据的组织规范、跑批入口
 
-**这些落地的前提**原以为是「统一到一种语言（形态 B 编排器）」，但后续实查证伪了这个前提的可行性：**Nova Act acting 锁死 Python，全 TS 统一不可行**（[0023](./0023-novaact-acting-python-locked-no-ts-core.md)：`@aws-sdk/client-nova-act` 是客户端驱动的 REST 循环、非 `nova.act()` 等价物）。框架公共设施改由**核心库（Python）+ 两个引擎子进程 worker**承载（[0016](./0016-execution-architecture-core-lib-run-model.md)/[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)）：报告归集=`ReportStore`/RunReport、会话生命周期=各 worker 内、跑批入口=核心调度+CLI。即「跨引擎共享止于 `features/`」仍成立（worker 代码仍各属各引擎），公共设施落在**核心库**这一层、不靠跨引擎共享引擎代码。
+**这些落地的前提**原以为是「统一到一种语言（形态 B 编排器）」，但后续实查证伪了这个前提的可行性：**Nova Act acting 锁死 Python，全 TS 统一不可行**（[0023](./0023-novaact-acting-python-locked-no-ts-core.md)：`@aws-sdk/client-nova-act` 是客户端驱动的 REST 循环、非 `nova.act()` 等价物）。公共设施改由**核心库（Python）+ 两个引擎子进程 worker**承载（[0016](./0016-execution-architecture-core-lib-run-model.md)/[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)）：报告归集=`ReportStore`/RunReport、会话生命周期=各 worker 内、跑批入口=核心调度+CLI。即「跨引擎共享止于 `features/`」仍成立（worker 代码仍各属各引擎），公共设施落在**核心库**这一层、不靠跨引擎共享引擎代码。
 
 ## 何时重议
 
-仅当出现**必须在两引擎 worker 代码之间**共享的同质逻辑时，才重议跨引擎共享层、另立 ADR——「公共设施成硬需求」这个原触发条件已由核心库满足（见上节），「形态 B 统一语言路径可行」这个原前提已被 [0023](./0023-novaact-acting-python-locked-no-ts-core.md) 证伪（其重开条件见 0023「重议」节）。在那之前，跨引擎共享的框架代码止于 `features/`（使用方侧的 `steps/` 约定面见上「判断」节）。
+仅当出现**必须在两引擎 worker 代码之间**共享的同质逻辑时，才重议跨引擎共享层、另立 ADR——「公共设施成硬需求」这个原触发条件已由核心库满足（见上节），「形态 B 统一语言路径可行」这个原前提已被 [0023](./0023-novaact-acting-python-locked-no-ts-core.md) 证伪（其重开条件见 0023「重议」节）。在那之前，工具自身的代码跨引擎共享止于 `features/`（使用方侧的 `steps/` 约定面见上「判断」节）。

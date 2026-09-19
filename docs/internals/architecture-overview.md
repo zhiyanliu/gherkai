@@ -10,13 +10,13 @@
 
 ![五层全景：用例文本经 CLI / runtime / core 到两个对称的引擎 worker，再经云端浏览器连上被测应用](../diagrams/architecture-overview-layers.svg)
 
-图注：**部署 provider 不在 run 的执行路径上**。只有 `deploy` / `destroy` 与 `doctor` 的部署工具链自检会访问它；云端执行时参与的只是它的产出（stack 资源、Lambda、task-def）。图上 ① 只有一条去向 ②，即用例文本经 CLI 读入；`steps/` 的实际加载者是 ③ 的 worker。两档的差异见 §2 表 ① 行，`steps/` 的传递链见 [`deterministic-step-lifecycle.md`](./deterministic-step-lifecycle.md)。
+图注：**部署 provider 不在 run 的执行路径上**。只有 `deploy` / `destroy` 与 `doctor` 的部署工具链自检会访问它；云端执行时参与的只是它的产出（stack 资源、Lambda、task-def）。图上 ① 只有一条去向 ②，即用例文本经 CLI 读入；`steps/` 的实际加载者是 ③ 的 worker。两个后端的差异见 §2 表 ① 行，`steps/` 的传递链见 [`deterministic-step-lifecycle.md`](./deterministic-step-lifecycle.md)。
 
 ## 2. 五层各自的职责
 
 | 层 | code | 负责 | 不负责 | 权威 |
 |---|---|---|---|---|
-| ① 用例层 | 使用方项目的 `.feature` 与 `steps/`（仓库内示例见 [`features/`](../../features/)） | 用自然语言描述动作与断言；用 `@scope` / `@engine` / `@timeout` tag 表达分组、引擎与超时预算（未标 `@engine` 的 scenario 采用 `--default-engine`，缺省 `novaact`）；确定性 step 在 `steps/` 中注册正则 | 不含框架实现：这一层只有 `.feature` 文本与 `steps/` 里 import 注册 API 的少量胶水代码，调度、判定、引擎驱动都不在这一层。`steps/` 在本机档由 worker 直接加载，在云端档由镜像提供 | [ADR 0019](../adr/0019-feature-tags-scope-and-engine.md)（tag 语义）、[ADR 0036](../adr/0036-deterministic-capability-discovery.md) |
+| ① 用例层 | 使用方项目的 `.feature` 与 `steps/`（仓库内示例见 [`features/`](../../features/)） | 用自然语言描述动作与断言；用 `@scope` / `@engine` / `@timeout` tag 表达分组、引擎与超时预算（未标 `@engine` 的 scenario 采用 `--default-engine`，缺省 `novaact`）；确定性 step 在 `steps/` 中注册正则 | 不含框架实现：这一层只有 `.feature` 文本与 `steps/` 里 import 注册 API 的少量胶水代码，调度、判定、引擎驱动都不在这一层。`steps/` 在本机后端由 worker 直接加载，在云端后端由镜像提供 | [ADR 0019](../adr/0019-feature-tags-scope-and-engine.md)（tag 语义）、[ADR 0036](../adr/0036-deterministic-capability-discovery.md) |
 | ② 产品层：CLI | `cli/gherkai_cli/`（`__main__.py` argparse 入口、`render.py`、`deploy.py`、`skill_install.py`） | 解析参数 → 读取 feature → 注入引擎解析器 → 调用核心 → 渲染文本与 `--json`；退出码由它给出。另有两个隐藏子命令（`_reconcile` / `_tunnel_watch`），它们是 `submit` fork 出的后台进程与隧道守护的入口，不供使用者直接调用；完整命令面与各命令的选项见 [`docs/user-guide/`](../user-guide/README.md) 与 `gherkai --help` | 不含判定逻辑、不含引擎知识；核心库不依赖这一层命令行入口。当前 CLI 是唯一前端，未来若新增其他前端（如 Web 界面，尚未实装），同样按这一分层直接调用 `gherkai-core`，不 shell-out CLI | [ADR 0016](../adr/0016-execution-architecture-core-lib-run-model.md)、[ADR 0041](../adr/0041-agent-facing-cli-affordances.md) |
 | ② 产品层：gherkai-runtime | `runtime/gherkai_runtime/`（`compose.py` 组合根、`names.py` 命名、`detached.py` 后台推进进程、`tunnel*.py` 隧道） | 把抽象的核心接线到具体实现：解析各引擎 worker 的拉起命令（四级顺序：env 覆写 → 同 venv 的 import 模块 → PATH 上的命令 → 按版本临时拉起；第二级仅 Python 引擎有，第四级仅 Nova Act 有）、按 `--backend` 注入 adapter、由 `--prefix` 推导全部云资源名、启动隧道、`submit` 时 fork 出脱离 CLI 的推进进程 | 不做判定与调度决策；命名纯函数零依赖，部署 provider 直接 import 同一份实现 | [ADR 0037](../adr/0037-distribution-and-packaging.md) 决策 3、[ADR 0033](../adr/0033-iac-aws-backend-and-composition-wiring.md)（两层命名）、[ADR 0035](../adr/0035-local-app-testing-via-tunnel.md)（隧道） |
 | ② 产品层：gherkai-core | `core/gherkai_core/`（`parse` / `scope` / `schedule` / `reconcile` / `project` / `persist` / `model` / `ports` / `wire` / `serialize` / `errors` / `adapters`） | 解析 `.feature`、分组成 job、并发调度或单步推进、把事件归约成判定、落库与归集报告。全部外部能力经 `ports.py` 的 `Engine` / `RunStore` / `ResultStore` / `ReportStore` 与 `reconcile.py` 的 `EventLog` / `Launcher` 六个注入口 | **零引擎依赖**：不 import 引擎，不感知 worker 是子进程还是容器；编排模块内不 import `subprocess` / `boto3` | [ADR 0016](../adr/0016-execution-architecture-core-lib-run-model.md)、[ADR 0025](../adr/0025-plan-module-feature-to-jobs.md)、[ADR 0026](../adr/0026-schedule-module.md)、[ADR 0034](../adr/0034-detached-batch-reconciler.md) |
@@ -44,7 +44,7 @@
 
 ## 4. 本机与云端：同一条链的两种载体
 
-`--backend` 只替换 adapter，**不替换核心**：`parse` / 分组 / 归约 / 判定模型两档共用一份代码。
+`--backend` 只替换 adapter，**不替换核心**：`parse` / 分组 / 归约 / 判定模型两个后端共用一份代码。
 
 | 面 | `--backend local`（缺省） | `--backend cloud` |
 |---|---|---|

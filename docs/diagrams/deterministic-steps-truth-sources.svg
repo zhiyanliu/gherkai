@@ -415,7 +415,7 @@ svg[data-theme="light"] { --bg: #f8fafc; --grid: #e2e8f0; --text: #0f172a; --tex
 svg[data-theme="dark"] { --bg: #020617; --grid: #1e293b; --text: #ffffff; --text-muted: #94a3b8; --text-dim: #475569; --text-faint: #7d8da1; --panel: rgba(15, 23, 42, 0.5); --panel-border: #1e293b; --lane-fill: rgba(15, 23, 42, 0.22); --lane-stroke: #334155; --arrow: #64748b; --arrow-emphasis: #34d399; --mask: #0f172a; --frontend-fill: rgba(8, 51, 68, 0.4); --frontend-stroke: #22d3ee; --backend-fill: rgba(6, 78, 59, 0.4); --backend-stroke: #34d399; --database-fill: rgba(76, 29, 149, 0.4); --database-stroke: #a78bfa; --cloud-fill: rgba(120, 53, 15, 0.3); --cloud-stroke: #fbbf24; --security-fill: rgba(136, 19, 55, 0.4); --security-stroke: #fb7185; --messagebus-fill: rgba(251, 146, 60, 0.3); --messagebus-stroke: #fb923c; --external-fill: rgba(30, 41, 59, 0.5); --external-stroke: #94a3b8; --toolbar-bg: rgba(15, 23, 42, 0.8); --toolbar-border: #334155; --toolbar-text: #e2e8f0; --toolbar-hover: rgba(15, 23, 42, 0.95); --toolbar-menu-bg: #0f172a; }
 rect.c-bg-rect { fill: var(--bg); }
 </style><rect width="100%" height="100%" class="c-bg-rect"/>
-        <title id="archify-diagram-title">两个真值源、一个岔口：本机档由目录决定，云端档由镜像决定</title>
+        <title id="archify-diagram-title">两个真值源、一个岔口：本机后端由目录决定，云端后端由镜像决定</title>
         <desc id="archify-diagram-description">由 Archify 生成的数据流图。</desc>
         <!-- Definitions -->
         <defs>
@@ -490,8 +490,8 @@ rect.c-bg-rect { fill: var(--bg); }
           <text x="315" y="393" class="t-muted" font-size="7" text-anchor="middle">推送 → 一条 revision</text>
         </g>
 
-        <g id="node-resolveDir" data-node-id="resolveDir" data-node-label="解析一次目录" tabindex="0" role="button" aria-label="聚焦解析一次目录，按提交时的工作目录, 03 / 提交时刻" aria-pressed="false" data-node-kind="backend" data-node-sublabel="按提交时的工作目录" data-node-tag="本机档" data-node-context="03 / 提交时刻">
-          <title>解析一次目录 · 按提交时的工作目录 · 03 / 提交时刻 · 本机档</title>
+        <g id="node-resolveDir" data-node-id="resolveDir" data-node-label="解析一次目录" tabindex="0" role="button" aria-label="聚焦解析一次目录，按提交时的工作目录, 03 / 提交时刻" aria-pressed="false" data-node-kind="backend" data-node-sublabel="按提交时的工作目录" data-node-tag="本机后端" data-node-context="03 / 提交时刻">
+          <title>解析一次目录 · 按提交时的工作目录 · 03 / 提交时刻 · 本机后端</title>
           <rect x="462" y="128" width="136" height="58" rx="6" class="c-mask"/>
           <rect x="462" y="128" width="136" height="58" rx="6" class="c-backend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(468 134) scale(0.6875)">
@@ -499,11 +499,11 @@ rect.c-bg-rect { fill: var(--bg); }
           </g>
           <text data-node-label="" x="530" y="149" class="t-primary" font-size="10" font-weight="600" text-anchor="middle">解析一次目录</text>
           <text x="530" y="165" class="t-muted" font-size="7" text-anchor="middle">按提交时的工作目录</text>
-        <text x="530" y="175" class="t-backend" font-size="7" text-anchor="middle">本机档</text>
+        <text x="530" y="175" class="t-backend" font-size="7" text-anchor="middle">本机后端</text>
         </g>
 
-        <g id="node-resolveName" data-node-id="resolveName" data-node-label="只解析 variant 名" tabindex="0" role="button" aria-label="聚焦只解析 variant 名，不读取 steps 内容, 03 / 提交时刻" aria-pressed="false" data-node-kind="backend" data-node-sublabel="不读取 steps 内容" data-node-tag="云端档" data-node-context="03 / 提交时刻">
-          <title>只解析 variant 名 · 不读取 steps 内容 · 03 / 提交时刻 · 云端档</title>
+        <g id="node-resolveName" data-node-id="resolveName" data-node-label="只解析 variant 名" tabindex="0" role="button" aria-label="聚焦只解析 variant 名，不读取 steps 内容, 03 / 提交时刻" aria-pressed="false" data-node-kind="backend" data-node-sublabel="不读取 steps 内容" data-node-tag="云端后端" data-node-context="03 / 提交时刻">
+          <title>只解析 variant 名 · 不读取 steps 内容 · 03 / 提交时刻 · 云端后端</title>
           <rect x="462" y="356" width="136" height="58" rx="6" class="c-mask"/>
           <rect x="462" y="356" width="136" height="58" rx="6" class="c-backend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(468 362) scale(0.6875)">
@@ -511,7 +511,7 @@ rect.c-bg-rect { fill: var(--bg); }
           </g>
           <text data-node-label="" x="530" y="377" class="t-primary" font-size="10" font-weight="600" text-anchor="middle">只解析 variant 名</text>
           <text x="530" y="393" class="t-muted" font-size="7" text-anchor="middle">不读取 steps 内容</text>
-        <text x="530" y="403" class="t-backend" font-size="7" text-anchor="middle">云端档</text>
+        <text x="530" y="403" class="t-backend" font-size="7" text-anchor="middle">云端后端</text>
         </g>
 
         <g id="node-defPath" data-node-id="defPath" data-node-label="写入绝对路径" tabindex="0" role="button" aria-label="聚焦写入绝对路径，随此 run 的定义, 04 / 随 run 的定义" aria-pressed="false" data-node-kind="database" data-node-sublabel="随此 run 的定义" data-node-context="04 / 随 run 的定义">
@@ -594,18 +594,18 @@ rect.c-bg-rect { fill: var(--bg); }
         <!-- Legend -->
         <g data-legend="">
           <text x="40" y="464" class="t-primary" font-size="12" font-weight="650">图例</text>
-          <g data-legend-semantic-kind="emphasis" data-legend-x="40" data-legend-baseline="484" data-legend-width="143">
+          <g data-legend-semantic-kind="emphasis" data-legend-x="40" data-legend-baseline="484" data-legend-width="153">
             <path d="M 40 481 L 74 481" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-            <text x="83" y="484" class="t-muted" font-size="10" font-weight="500">云端档流向：镜像载体</text>
+            <text x="83" y="484" class="t-muted" font-size="10" font-weight="500">云端后端流向：镜像载体</text>
           </g>
-          <g data-legend-semantic-kind="database" data-legend-x="205" data-legend-baseline="484" data-legend-width="83">
-            <rect x="205" y="476" width="14" height="9" rx="2" class="c-database" stroke-width="1"/>
-            <text x="227" y="484" class="t-muted" font-size="10" font-weight="500">数据存储</text>
+          <g data-legend-semantic-kind="database" data-legend-x="215" data-legend-baseline="484" data-legend-width="83">
+            <rect x="215" y="476" width="14" height="9" rx="2" class="c-database" stroke-width="1"/>
+            <text x="237" y="484" class="t-muted" font-size="10" font-weight="500">数据存储</text>
           </g>
-          <g data-legend-semantic-kind="default" data-legend-x="310" data-legend-baseline="484" data-legend-width="143">
-            <path d="M 310 481 L 344 481" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
-            <text x="353" y="484" class="t-muted" font-size="10" font-weight="500">本机档流向：目录载体</text>
+          <g data-legend-semantic-kind="default" data-legend-x="320" data-legend-baseline="484" data-legend-width="153">
+            <path d="M 320 481 L 354 481" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+            <text x="363" y="484" class="t-muted" font-size="10" font-weight="500">本机后端流向：目录载体</text>
           </g>
         </g>
       </svg>
-<!-- gherkai:source-sha256=cb635e815905d4464a38bf1cae9ca4ca923ea65f9cb67eb8b45e9f160514b48d -->
+<!-- gherkai:source-sha256=e0c7094b769f71375ccde040506cbda2849652f6726841fc4533c91c830a9e2b -->

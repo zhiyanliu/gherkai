@@ -34,4 +34,4 @@ definition 由 create-if-not-exists 的 `ensure_workflow_definition()` 自动建
 
 **opt-in 旋钮 = worker 侧 env `NOVA_MODEL_ID`**（与 `NOVA_GRACE_MARGIN_S` 同形：worker 读、缺省即钉死值）：本机跑在 shell 里设即生效；云端 Fargate 容器 env 是显式枚举，要用就烙进定制 worker 镜像的 `ENV`——这正是 variant 机制（[0038](./0038-worker-image-delivery.md)）的用途。可设 `nova-act-preview` 试新模型，但 **preview 不作产品默认**：无支持承诺、随 AWS 移动，且**不可钉**——服务端拒绝直接引用带日期的 preview id（实测 400「Preview models cannot be referenced directly. Use the 'nova-act-preview' alias instead」），只有别名一条路，正是钉版本要消掉的那种不受控变化。**被拒方案**：经组合根四个注入面（本机 spawn / 前台 Fargate / detached Lambda / 能力自述）注入的产品级旋钮——近期无消费者，四个注入面就是四个会漂的地方；等有用户要按项目选模型或新 GA 需新旧并行验证时再议。
 
-worker 的能力自述（[0036](./0036-deterministic-capability-discovery.md)「5.」）自报 `model_id`，`doctor` 据此显示当前模型，让 env 覆盖可见。两引擎通用的「默认钉版 + 按引擎 env 覆盖」策略与 Midscene 侧旋钮见 [0044](./0044-engine-model-selection-and-override.md)；本节保留 Nova 特有的选型证据。
+worker 的能力自述（[0036](./0036-deterministic-capability-discovery.md)「5.」）自报 `model_id`，`doctor` 据此显示当前模型，让 env 覆盖可见。两引擎通用的「默认模型锁定 + 按引擎 env 覆盖」策略与 Midscene 侧旋钮见 [0044](./0044-engine-model-selection-and-override.md)；本节保留 Nova 特有的选型证据。

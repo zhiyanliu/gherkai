@@ -1586,7 +1586,7 @@
   },
   "docs/diagrams/architecture-overview-layers.json": {
     "mtime": 1789826991.9226716,
-    "ast_hash": "d9256aa031d7c4f156d47aca91c6b105",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "docs/diagrams/architecture-overview-run-lifecycle.json": {
@@ -1596,7 +1596,7 @@
   },
   "docs/diagrams/artifacts-evidence-chain.json": {
     "mtime": 1789826991.9229178,
-    "ast_hash": "d128ec2afc0d570d73c7626dc88f8b7d",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "docs/diagrams/cloud-backend-carriers-revision-pinning.json": {
@@ -1611,7 +1611,7 @@
   },
   "docs/diagrams/cloud-delivery-identity.json": {
     "mtime": 1789826991.922426,
-    "ast_hash": "926f1530b31d2ef779aea0f29c1718ec",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "docs/diagrams/configuration-env-inheritance.json": {
@@ -1626,7 +1626,7 @@
   },
   "docs/diagrams/deterministic-steps-truth-sources.json": {
     "mtime": 1789828517.9596744,
-    "ast_hash": "ad581c55ecb3066154f622b9a8bc38f2",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "docs/diagrams/execution-cloud-cascade.json": {
@@ -1636,7 +1636,7 @@
   },
   "docs/diagrams/execution-detached-gates.json": {
     "mtime": 1789826991.9225636,
-    "ast_hash": "bd67feb5f2bb980249c9b911b2960dbb",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "docs/diagrams/execution-timeout-chain.json": {
@@ -1646,7 +1646,7 @@
   },
   "docs/diagrams/getting-started-component-ownership.json": {
     "mtime": 1789827037.360204,
-    "ast_hash": "2f6b2596f9b6854c20f7b60297164cb3",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "docs/diagrams/local-app-testing-tunnel-topology.json": {
@@ -1656,12 +1656,12 @@
   },
   "docs/diagrams/readme-runtime-topology.json": {
     "mtime": 1789827037.35938,
-    "ast_hash": "bee02d06b6b1924ed3667ddaa9d9853a",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "docs/diagrams/run-execution.json": {
     "mtime": 1789828517.9593103,
-    "ast_hash": "80434a022a638d5302216a4c667b2a01",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "docs/diagrams/verdict-model-job-outcome.json": {

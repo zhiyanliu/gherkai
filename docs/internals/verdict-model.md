@@ -117,7 +117,7 @@ skipped = -1  <  passed = 0  <  failed = 1  <  error = 2  <  aborted = 3
 
 | 集合 | 切分维度 | 含 skipped/aborted？ | 引用方 |
 |---|---|---|---|
-| `TERMINAL_STATUSES` | 生命周期（状态是否还会变） | 含 | `--wait` 轮询、`status` 退出码判定与仅在终态打印的产物位置、`explain` 的「run 仍在运行」提示、`project_full` 的不变量检查、云端推进器 Lambda 的「已收尾的 run 不再推演」跳过判据（`deploy_aws/gherkai_deploy_aws/lambdas/reconciler.py`：读到终态即 no-op，见 [`execution-and-reconciliation.md`](./execution-and-reconciliation.md)「已终态 run 的两档重入」）、隧道守护的拆除判据（`runtime/gherkai_runtime/tunnel_host.py`：读到终态即提前拆除，否则等满 TTL）；另有一处**取补**用法——revision 清理的运行中 run 引用检查，判断是否仍有未达终态的 run 引用（`deploy_aws/gherkai_deploy_aws/workers.py`）。跨栈护栏要求消费方全部引用这一份、不各自维护白名单 |
+| `TERMINAL_STATUSES` | 生命周期（状态是否还会变） | 含 | `--wait` 轮询、`status` 退出码判定与仅在终态打印的产物位置、`explain` 的「run 仍在运行」提示、`project_full` 的不变量检查、云端推进器 Lambda 的「已收尾的 run 不再推演」跳过判据（`deploy_aws/gherkai_deploy_aws/lambdas/reconciler.py`：读到终态即 no-op，见 [`execution-and-reconciliation.md`](./execution-and-reconciliation.md)「已终态 run 在两个后端的重入」）、隧道守护的拆除判据（`runtime/gherkai_runtime/tunnel_host.py`：读到终态即提前拆除，否则等满 TTL）；另有一处**取补**用法——revision 清理的运行中 run 引用检查，判断是否仍有未达终态的 run 引用（`deploy_aws/gherkai_deploy_aws/workers.py`）。跨栈护栏要求消费方全部引用这一份、不各自维护白名单 |
 | `_NON_VERDICT` | run 级判定（是否算作结论） | 含（**另含** pending/running） | `_aggregate` 入口过滤 |
 
 **run 级永不出现 skipped/aborted**：`_aggregate` 在入口就把它们连同两个前置态滤掉，因此 `RunResult.status` ∈ {`passed`,`failed`,`error`}。这条过滤在无状态投影路径上是**承重**的：`project` 每轮 tick 全量重放，`jobs_state` 确实含 pending/running 的 job 并原样传入；同步 run 路径传入的全是终态，过滤为 no-op。
@@ -130,7 +130,7 @@ skipped = -1  <  passed = 0  <  failed = 1  <  error = 2  <  aborted = 3
 
 | 命令 | 退出码的语义 | `0` | `1` | `2` |
 |---|---|---|---|---|
-| `run` | **判定** | run 级 `passed` | 其余终态（`failed`/`error`，含伴随 error 的 skipped/aborted 批次）；另有一种情形：cloud 档运行中落库不可达 | 开始执行前的配置或可达性问题 |
+| `run` | **判定** | run 级 `passed` | 其余终态（`failed`/`error`，含伴随 error 的 skipped/aborted 批次）；另有一种情形：cloud 后端运行中落库不可达 | 开始执行前的配置或可达性问题 |
 | `status`（不带 `--wait`） | 查询是否成功（读到终态时才同时表达判定） | 已查到，**含未达终态**（查询本身成功） | 读到的终态非 `passed` | run 不存在 / 云端不可达 / 版本不匹配 |
 | `status --wait` | **判定** | 轮询到终态且为 `passed` | 轮询到终态但非 `passed` | 同上，另加「接力 Lambda 不存在（`--prefix` 配错或后端未部署）」 |
 | `submit` | 提交是否成功（≠ 判定） | 已提交、`run_id` 已打印 | — | 配置或可达性问题 |
@@ -162,7 +162,7 @@ skipped = -1  <  passed = 0  <  failed = 1  <  error = 2  <  aborted = 3
 |---|---|
 | 状态机与 severity 的全部决策、被拒方案、预留项（含「主动 skip 的退出码语义待定」） | [ADR 0031](../adr/0031-job-lifecycle-states-and-severity.md) |
 | AI 断言为主的取向、投票纪律、N 的缺省与阈值尚未确定的原因 | [ADR 0014](../adr/0014-ai-first-assertions.md) |
-| 事件协议、三态、成本可观测、协作式停止、退出码通道 | [ADR 0024](../adr/0024-worker-core-protocol.md) |
+| 事件协议、三态、成本可观测性、协作式停止、退出码通道 | [ADR 0024](../adr/0024-worker-core-protocol.md) |
 | 并发/失败隔离/fail-fast/心跳/优雅终止 | [ADR 0026](../adr/0026-schedule-module.md) |
 | 网络瞬时故障的两层重试与分类白名单 | [ADR 0028](../adr/0028-transient-network-ssl-resilience.md) |
 | 脱离式批量运行的「两件都要」谓词、投影写、job timeout 归因链 | [ADR 0034](../adr/0034-detached-batch-reconciler.md) |

@@ -16,7 +16,7 @@
 
 ## 2 CLI 怎么找 worker
 
-- **Nova Act**：① 环境变量 `GHERKAI_WORKER_NOVAACT_CMD`（+ 可选 `GHERKAI_WORKER_NOVAACT_CWD`）显式指定 → ② 与 CLI 同一个 Python 环境 → ③ PATH 上的 `gherkai-worker-novaact` → ④ 三级都没有、CLI 是正式发行版、机器上有 uvx 时临时拉起同版本 worker。四级都没命中：local 档的 `run` / `submit` 与 `list-deterministic` 退 2 并打印装法（`submit` 也在提交前就拒）；`--backend cloud` 的 `run` / `submit` 不看本机 worker（它运行在云端容器里）；`plan` 不拦，只少了那个引擎的派发标注。
+- **Nova Act**：① 环境变量 `GHERKAI_WORKER_NOVAACT_CMD`（+ 可选 `GHERKAI_WORKER_NOVAACT_CWD`）显式指定 → ② 与 CLI 同一个 Python 环境 → ③ PATH 上的 `gherkai-worker-novaact` → ④ 三级都没有、CLI 是正式发行版、机器上有 uvx 时临时拉起同版本 worker。四级都没命中：local 后端的 `run` / `submit` 与 `list-deterministic` 退 2 并打印装法（`submit` 也在提交前就拒）；`--backend cloud` 的 `run` / `submit` 不看本机 worker（它运行在云端容器里）；`plan` 不拦，只少了那个引擎的派发标注。
 - **Midscene**：PATH 上的 `gherkai-worker-midscene`（`npm i -g` 的结果），或环境变量 `GHERKAI_WORKER_MIDSCENE_CMD`（+ 可选 `GHERKAI_WORKER_MIDSCENE_CWD`）显式覆写。**必须真装**，没有临时拉起的兜底。
 
 `gherkai list-engines` 打出每个引擎的探测结果与来源，缺的那个原地给安装命令；`--json` 机读（`engine` / `available` / `cmd` / `cwd` / `source` / `hint`）。

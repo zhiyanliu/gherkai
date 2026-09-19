@@ -1,4 +1,4 @@
-# 引擎模型的选择与覆盖：默认钉版、按引擎 env 覆盖
+# 引擎模型的选择与覆盖：默认模型锁定、按引擎 env 覆盖
 
 > **Status:** Accepted（2026-09-17）
 
@@ -14,8 +14,8 @@
 
 ## 决策
 
-1. **默认钉版、随发版评估升级，两引擎同律**。每个引擎的默认模型是钉死的具体 id，由本仓库的评测集（`features/` 下两引擎各自的 wikipedia 用例，加两引擎 `spikes/` 目录里的失败探针；各跑三遍）A/B 选出；换默认只随 gherkai 发版并在 Release 正文点明。Nova 的选型理由与证据在 [0004](./0004-novaact-iam-auth-via-workflow.md)「模型版本选择策略」；Midscene 的默认见下「现值」。此处的评测集是**模型评测集**（升引擎 SDK 时同样用它做回归），与探针用例大体同一批文件、用途不同；驱动 gherkai 的 skill 评测集是另一套资产、不在本 ADR 的选型回路里，见 [0043](./0043-agent-skill-for-driving-gherkai.md)。
-2. **覆盖旋钮 = worker 侧 env，两引擎对称**。Nova：`NOVA_MODEL_ID`（[0004](./0004-novaact-iam-auth-via-workflow.md)）。Midscene：`MIDSCENE_MODEL_ID`（Bedrock 模型 id 或 inference profile id，如 `us.openai.gpt-6-astra`）+ 可选 `MIDSCENE_MODEL_FAMILY`（Midscene 的 family 名）。family 缺省时按 id 推断，表住 worker（`lib/agentcore-sigv4`）：`*qwen.qwen3-vl*` → `qwen3-vl`、`*openai.gpt-6*` → `gpt-6`、`*openai.gpt-5*` → `gpt-5`、`*kimi-k2*` → `kimi`、`*kimi-k3*` → `kimi3`、`*deepseek.*` → `deepseek`、`zai.glm-*v*` → `glm-v`（前导 `*` 让 `us.` / `global.` 前缀的 inference profile 形态同样命中——云端换模型的常见形态就是 profile id）；显式 `MIDSCENE_MODEL_FAMILY` 的取值不在 worker 侧校验（合法清单是 SDK 的真值，复刻即第二事实源），打错的家族名由 SDK 在建 agent 时拒；显式给了以显式为准；推不出且未给 → worker 启动即 fail-loud、点名要设 `MIDSCENE_MODEL_FAMILY`——family 决定 Midscene 的提示词与请求参数适配，猜错的后果是静默劣化而不是报错，所以宁可拒绝。生效面与 Nova 一致：本机跑在 shell 里设即生效（worker 继承 env，组合根不清这几个键）；云端 Fargate 容器 env 是显式枚举，烙进定制 worker 镜像的 `ENV`（[0038](./0038-worker-image-delivery.md) variant 机制）**即可，部署侧不必跟着动**：IaC 把 Fargate 任务角色的 `bedrock:InvokeModel` 放到 foundation-model/* 与本账户 inference-profile/*（[0033](./0033-iac-aws-backend-and-composition-wiring.md) IAM 表），可用集合由账户的 Bedrock 模型访问开关决定；仍锁死 service 与资源类型，不是裸 `*`。
+1. **默认模型锁定、随发版评估升级，两引擎同律**。每个引擎的默认模型是锁定的具体 id，由本仓库的评测集（`features/` 下两引擎各自的 wikipedia 用例，加两引擎 `spikes/` 目录里的失败探针；各跑三遍）A/B 选出；换默认只随 gherkai 发版并在 Release 正文点明。Nova 的选型理由与证据在 [0004](./0004-novaact-iam-auth-via-workflow.md)「模型版本选择策略」；Midscene 的默认见下「现值」。此处的评测集是**模型评测集**（升引擎 SDK 时同样用它做回归），与探针用例大体同一批文件、用途不同；驱动 gherkai 的 skill 评测集是另一套资产、不在本 ADR 的选型回路里，见 [0043](./0043-agent-skill-for-driving-gherkai.md)。
+2. **覆盖项 = worker 侧 env，两引擎对称**。Nova：`NOVA_MODEL_ID`（[0004](./0004-novaact-iam-auth-via-workflow.md)）。Midscene：`MIDSCENE_MODEL_ID`（Bedrock 模型 id 或 inference profile id，如 `us.openai.gpt-6-astra`）+ 可选 `MIDSCENE_MODEL_FAMILY`（Midscene 的 family 名）。family 缺省时按 id 推断，表住 worker（`lib/agentcore-sigv4`）：`*qwen.qwen3-vl*` → `qwen3-vl`、`*openai.gpt-6*` → `gpt-6`、`*openai.gpt-5*` → `gpt-5`、`*kimi-k2*` → `kimi`、`*kimi-k3*` → `kimi3`、`*deepseek.*` → `deepseek`、`zai.glm-*v*` → `glm-v`（前导 `*` 让 `us.` / `global.` 前缀的 inference profile 形态同样命中——云端换模型的常见形态就是 profile id）；显式 `MIDSCENE_MODEL_FAMILY` 的取值不在 worker 侧校验（合法清单是 SDK 的真值，复刻即第二事实源），打错的家族名由 SDK 在建 agent 时拒；显式给了以显式为准；推不出且未给 → worker 启动即 fail-loud、点名要设 `MIDSCENE_MODEL_FAMILY`——family 决定 Midscene 的提示词与请求参数适配，猜错的后果是静默劣化而不是报错，所以宁可拒绝。生效面与 Nova 一致：本机跑在 shell 里设即生效（worker 继承 env，组合根不清这几个键）；云端 Fargate 容器 env 是显式枚举，烙进定制 worker 镜像的 `ENV`（[0038](./0038-worker-image-delivery.md) variant 机制）**即可，部署侧不必跟着动**：IaC 把 Fargate 任务角色的 `bedrock:InvokeModel` 放到 foundation-model/* 与本账户 inference-profile/*（[0033](./0033-iac-aws-backend-and-composition-wiring.md) IAM 表），可用集合由账户的 Bedrock 模型访问开关决定；仍锁死 service 与资源类型，不是裸 `*`。
 3. **可用集合由接线决定，不另做适配**。Midscene 腿只能用 Bedrock OpenAI 兼容端点调得到、且 Midscene 有 family 的模型；GPT 系列须用 inference profile id（地理型 `us.` 或全球 `global.`，见「现值」的取舍）、参数走 `max_completion_tokens`（Midscene 的 `gpt-5` / `gpt-6` family 适配器负责，实测直接给模型 id 或用 `max_tokens` 都被端点 400）；IAM 上除 profile 与 FM ARN 外还需账户默认 project（[0033](./0033-iac-aws-backend-and-composition-wiring.md) IAM 表）；推理型模型的 token 成本含 reasoning tokens。**端点方言由接线层吸收**：Bedrock 的 OpenAI 兼容层不认 `image_url.detail: "original"`（对任何模型都 400「value did not match any expected variant」；OpenAI 原生认它），而 Midscene 的 `gpt-5` / `gpt-6` family 适配器对定位请求固定发这个值且无配置可关——`sigv4Fetch` 在签名前把该字段去掉，让服务端按默认处理（这是对端点方言的适配、不是对模型的适配，住 [0008](./0008-midscene-bedrock-auth-sigv4-selfsign.md) 那层）。preview 或无支持承诺的模型由使用方自担，同 [0004](./0004-novaact-iam-auth-via-workflow.md)。
 4. **可见性**。worker `--capabilities` 自报 `model_id`（[0036](./0036-deterministic-capability-discovery.md)「5.」），`doctor` 显示本机 worker 实际用的模型；使用者向披露在 README「判定由谁做出」一节。
 
@@ -49,6 +49,6 @@
 - [0004](./0004-novaact-iam-auth-via-workflow.md)：Nova 鉴权形态与 Nova 侧选型证据。
 - [0036](./0036-deterministic-capability-discovery.md)「5.」：自述对象的 `model_id` 键。
 - [0038](./0038-worker-image-delivery.md)：云端覆盖走 variant 镜像 `ENV`。
-- [0042](./0042-step-evidence-and-explain.md) 决策六：SDK 版本钉死，与本 ADR 的模型钉版同一逻辑。
+- [0042](./0042-step-evidence-and-explain.md) 决策六：SDK 版本钉死，与本 ADR 的模型锁定同一逻辑。
 - [0003](./0003-midscene-grounding-qwen3vl-bedrock.md)：被本 ADR 取代的前一代 Midscene 模型选型（其 Status 头已标 Superseded-by 本 ADR）；Bedrock `/openai/v1` 接线契约与被排除替代集仍有效。
-- [0012](./0012-planning-shares-qwen3vl-no-text-planner.md)：planning 不设独立模型槽、由本 ADR 的默认模型兼任。
+- [0012](./0012-planning-shares-qwen3vl-no-text-planner.md)：planning 不设独立模型槽、由本 ADR 的默认模型兼任（其 Status 头已改 Partially-superseded-by 本 ADR）。

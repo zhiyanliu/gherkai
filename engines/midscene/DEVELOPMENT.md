@@ -105,7 +105,7 @@ GHERKAI_WORKER_MIDSCENE_CMD="node $(pwd)/src/bin.mts"     # 需 Node ≥ 22.18�
 
 ## 报告与产物落点
 
-组合根经 `MIDSCENE_RUN_DIR` 注入 run 专属目录（`reports/<run_id>/midscene-run`，**必须绝对路径**：SDK 用 `path.resolve(process.cwd(), …)`），`report.html` 与 log/dump 全在其下；产物经 uploader 上传至 S3（[ADR 0029](../../docs/adr/0029-engine-artifacts-to-s3.md)），含 act 边界与中断时的 report 安全点提前上传（best-effort：失败不抛出、只记日志，不影响退出码）。`--no-report` 档由组合根经 env `GHERKAI_NO_ARTIFACTS=1` 告知：关闭 agent 的 `generateReport`、不提前上传、不带 report ref；SDK 仍可能往 `./midscene_run` 写 log/dump，故该档下若无 `MIDSCENE_RUN_DIR`，即把它导向一次性临时目录，不写入用户 CWD。一次 run 的全部产物落点（两引擎横向、local 与 cloud 两档）见 [`docs/internals/artifacts-and-evidence.md`](../../docs/internals/artifacts-and-evidence.md)。
+组合根经 `MIDSCENE_RUN_DIR` 注入 run 专属目录（`reports/<run_id>/midscene-run`，**必须绝对路径**：SDK 用 `path.resolve(process.cwd(), …)`），`report.html` 与 log/dump 全在其下；产物经 uploader 上传至 S3（[ADR 0029](../../docs/adr/0029-engine-artifacts-to-s3.md)），含 act 边界与中断时的 report 安全点提前上传（best-effort：失败不抛出、只记日志，不影响退出码）。`--no-report` 档由组合根经 env `GHERKAI_NO_ARTIFACTS=1` 告知：关闭 agent 的 `generateReport`、不提前上传、不带 report ref；SDK 仍可能往 `./midscene_run` 写 log/dump，故该档下若无 `MIDSCENE_RUN_DIR`，即把它导向一次性临时目录，不写入用户 CWD。一次 run 的全部产物落点（两引擎横向、local 与 cloud 两个后端）见 [`docs/internals/artifacts-and-evidence.md`](../../docs/internals/artifacts-and-evidence.md)。
 
 ## 运行 spike（五段式自检，可独立运行）
 
@@ -123,9 +123,9 @@ AWS_REGION=us-east-1 node_modules/.bin/tsx spikes/05-negative-assertions.ts # �
 - **SDK 与浏览器驱动锁定精确版本**（`package.json` 里无 `^`）：`@midscene/web` `1.12.8`、`playwright` 与 `@playwright/test` 同为 `1.63.0`。发行的 npm 包与云端基础镜像都是装包时解析依赖、没有 lock，范围版本会使使用者运行的版本与验证过的版本不同（Nova 侧同口径：`nova-act==3.4.187.0`）。升级 = 改 pin → 全套测试 + 模型评测集实际运行 → 随发版说明，见 [ADR 0042](../../docs/adr/0042-step-evidence-and-explain.md) 决策六。其余依赖（各 `@aws-sdk/*`、`@aws-crypto/sha256-js`、`openai`、`tsx`）仍用 `^`。
 - `@playwright/test` 是 `@midscene/web` 声明为 optional peer、但 `@midscene/web/playwright` 子入口**无条件 import** 的包，因此它也是运行时依赖（打包安装后实际运行才暴露）。
 
-## 容器镜像（维护者向）
+## 容器镜像（面向发布方）
 
-`Dockerfile` = Fargate 档的 worker **基础镜像**（同版本 `@gherkai/worker-midscene` + SDK 运行时 + 协议层，**零使用方内容**）；使用方的定制层模板（`FROM <基础镜像>` + `COPY steps/` + `GHERKAI_STEPS_DIR`）与推送流程见 [ADR 0038](../../docs/adr/0038-worker-image-delivery.md)（包 README 已降为入口页、不再带模板）。
+`Dockerfile` = 云端后端（Fargate）的 worker **基础镜像**（同版本 `@gherkai/worker-midscene` + SDK 运行时 + 协议层，**零使用方内容**）；使用方的定制层模板（`FROM <基础镜像>` + `COPY steps/` + `GHERKAI_STEPS_DIR`）与推送流程见 [ADR 0038](../../docs/adr/0038-worker-image-delivery.md)（包 README 已降为入口页、不再带模板）。
 
 同一份 Dockerfile 有**两态**，由 `--build-arg WORKER_SOURCE=` 选择（ADR 0037 决策 5）：
 

@@ -1,6 +1,6 @@
 # 0045. 文档分层与归位：按读者三分类、目录归位、包页面降为入口页、每版 changelog、按类别定口吻
 
-> **Status:** Accepted（2026-09-17）—— 本 ADR 是 CLAUDE.md 文档纪律「文档分层与归位」条的决策与理由所在；反转 [0039](./0039-user-facing-surfaces-no-internal-references.md) 面二「各包 README = 完整操作手册」为「入口页」（0039 Status 头已同步）；skill 与文档的关系维持 [0043](./0043-agent-skill-for-driving-gherkai.md) 决策四不变。
+> **Status:** Accepted（2026-09-17）—— 本 ADR 是 CLAUDE.md 文档纪律「文档分层与归位」条的决策与理由所在；反转 [0039](./0039-user-facing-surfaces-no-internal-references.md) 面二「各包 README = 完整操作手册」为「入口页」（0039 Status 头已同步）；skill 与文档的关系维持 [0043](./0043-agent-skill-for-driving-gherkai.md) 决策四不变；另反转 [0037](./0037-distribution-and-packaging.md) 决策 8 ④ 的 changelog 锚点（范围限该子句，0037 Status 头已同步）。
 
 ## 背景与问题
 
@@ -19,7 +19,7 @@
 | 类 | 读者 | 内容 | 位置 |
 |---|---|---|---|
 | **contributor 侧 AI agent** | 在本仓库里干活的 AI agent（约 80% 读者，[CLAUDE.md](../../CLAUDE.md) 文档纪律「读者比例决定优化方向」条） | ADR、`CONTEXT.md`、`CLAUDE.md`、`.claude/commands/`、`docs/ai-eng/`（REFERENCES 外部一手来源 + 可复用方法文档；清单与 owner 见 `docs/ai-eng/README.md`）、`docs/journey/`、skill 评测资产 `skills/gherkai-evals/`（评测集 / fixture / 评分提示词，归 [0043](./0043-agent-skill-for-driving-gherkai.md) 决策七；`skills/README.md` 只是指路） | ADR / CONTEXT / CLAUDE.md 位置固定（工具有位置依赖）；方法文档与 REFERENCES 归 `docs/ai-eng/` |
-| **技术文档** | contributor；想懂机理的技术人员 | contributor：根 `CONTRIBUTING.md` + 各包 `DEVELOPMENT.md` + `.github/workflows/README.md` + 工具手册 `tools/<name>.md`（篇幅超过脚本头注释的工具才立，如 `e2e_harness.md`；`CONTRIBUTING.md` 的 tools 表是索引）；机理：`docs/internals/`（原 `docs/guides/`） | DEVELOPMENT 与工具手册留在代码旁（见被拒方案） |
+| **技术文档** | contributor；想懂机理的技术人员 | contributor：根 `CONTRIBUTING.md` + 各包 `DEVELOPMENT.md` + `.github/workflows/README.md` + 工具手册 `tools/<name>.md`（篇幅超过脚本头注释的工具才立，如 `e2e_harness.md`；`CONTRIBUTING.md` 的 tools 表是索引）；机理：`docs/internals/`（原 `docs/guides/`）；`docs/internals/cli-json-contract.md` 是本层唯一的机读字段级参考页，读者含拿 `--json` 写脚本或 skill 的使用者；它是 skill 转换副本的手写源（[0041](./0041-agent-facing-cli-affordances.md) 决策五、[0043](./0043-agent-skill-for-driving-gherkai.md) 决策四），不按机制解读的立文门槛判 | DEVELOPMENT 与工具手册留在代码旁（见被拒方案） |
 | **用户文档** | 使用者，以及**使用者侧 AI agent** | `docs/user-guide/`（叙事主页）、根 `README.md`（门面）、各包 `README.md`（入口页，逐字上 PyPI / npm）、GitHub Release 正文、agent skill（[0043](./0043-agent-skill-for-driving-gherkai.md)） | 新建 `docs/user-guide/`，其余原位改写 |
 
 使用者侧 AI agent 读的是产品说明（skill），它是用户文档的一种形态，不与 contributor 侧 AI agent 混类——两者的写法相反：前者产品语言、零内部指代（[0039](./0039-user-facing-surfaces-no-internal-references.md)），后者高密度、精确指针。
@@ -99,5 +99,5 @@ skill 正文与 references 是为使用者侧 agent **新写**的内容、不是
 
 - 路径改动：`docs/guides → docs/internals`；`docs/{doc,code}-health-review.md`、`docs/REFERENCES.md` → `docs/ai-eng/`；根 `DEVELOPMENT.md → CONTRIBUTING.md`。指针同步点：`CLAUDE.md`（文档纪律三条 + kebab-case 例外清单）、`.claude/commands/*`、`tools/render_skill_contract.py` 的源路径、`cli/tests/test_skill.py` 与 `cli/tests/test_cli_json_contract.py`、`deploy_aws/tests/test_workers.py` 的契约页路径、各 DEVELOPMENT / README 里的相对链接、ADR 内指向 guides / REFERENCES 的指针。
 - 新增：`docs/README.md`、`docs/user-guide/**`（含 `faq.md`：只收跨页与选型类问题、一到三句 + 指针，答案完整存在于某页某节的不收）、`docs/ai-eng/README.md`、`docs/internals/architecture-overview.md`、`docs/diagrams/`（JSON 图源 + 导出 SVG + `index.html`）、`.github/workflows/pages.yml`、`tools/build_diagrams.mjs`、`CHANGELOG.md`、`.github/scripts/release_notes.py` + `.github/release_body_footer.md`（gate 的 changelog 校验、Release 正文渲染）、护栏 `cli/tests/test_user_docs.py` / `cli/tests/test_release_notes.py`；doc-health 方法加 TONE 类（第六类）并按新分类改写覆盖范围与侧重。
-- 反转 [0037](./0037-distribution-and-packaging.md) 决策 8 ④：changelog 锚点从 GitHub Release 正文移到根 `CHANGELOG.md`（各包 `[project.urls] Changelog` 改指它），发布链另加一道「本 tag 在 CHANGELOG 里有非空节」gate；0037 其余决策不变。
+- 反转 [0037](./0037-distribution-and-packaging.md) 决策 8 ④：changelog 锚点从 GitHub Release 正文移到根 `CHANGELOG.md`（各包 `[project.urls] Changelog` 改指它），发布链另加一道「本 tag 在 CHANGELOG 里有非空节」gate；0037 其余决策不变，其 Status 头已改 Partially-superseded-by 0045（范围限该子句）。
 - 0039 Status 头改 Partially-superseded-by 0045（面二「完整操作手册」被反转；面一与护栏不变）；CLAUDE.md 文档纪律「README / DEVELOPMENT 分层」条改写为「文档分层与归位」并指本 ADR。

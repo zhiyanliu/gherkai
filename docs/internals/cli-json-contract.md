@@ -30,7 +30,7 @@
 | `total_tokens` / `total_time_worked_s` | number \| null | 跨 job 的引擎原生量合计（Midscene 上报 tokens、Nova 上报 agent 工作秒）；无引擎上报时为 null，**不折算为美元** |
 | `jobs[]` | array | 每个 job（= 一个 scope，一条浏览器会话）的判定，见下 |
 | `run_meta` | object | 本次 run 的 definition（提交时固定），见下 |
-| `artifacts` | object | 产物落点，见下；`--no-report` 时**省略**（例外：local 档 `--no-report --quiet` 仍保留 `worker_log` 一个键） |
+| `artifacts` | object | 产物落点，见下；`--no-report` 时**省略**（例外：local 后端 `--no-report --quiet` 仍保留 `worker_log` 一个键） |
 
 `jobs[]` 每项：
 
@@ -59,8 +59,8 @@
 | `report_refs[]` | array | step 级产物指针：两引擎都有 `kind=evidence`（gherkai 自有格式的机读证据，由 `gherkai explain` 读取，见下节）；Nova 另有每次 act 的轨迹页 `kind=trajectory` |
 | `shortcircuited` | bool | true = 上游 step error 后被跳过、未执行（此时 status=skipped） |
 
-`run_meta`（definition）：`run_id`、`created_at`、`max_concurrency`、`steps_dir`（使用方确定性 step 目录的绝对路径；未解析到目录时**省略**该键——不是 null；cloud 档恒省略，steps 构建在镜像里）、
-`worker_variant` / `worker_task_defs`（cloud 档：提交时解析的 variant 与各引擎 task-def revision ARN，local 档省略）、
+`run_meta`（definition）：`run_id`、`created_at`、`max_concurrency`、`steps_dir`（使用方确定性 step 目录的绝对路径；未解析到目录时**省略**该键——不是 null；cloud 后端恒省略，steps 构建在镜像里）、
+`worker_variant` / `worker_task_defs`（cloud 后端：提交时解析的 variant 与各引擎 task-def revision ARN，local 后端省略）、
 `extra_http_headers`（`--expose-local` 注入的请求头，无则省略）、`jobs[]`：
 
 | 键 | 类型 | 含义 |
@@ -78,7 +78,7 @@
 | `run_meta` / `run_state` | definition / 运行态的落点 |
 | `jobs_dir` | 判定明细目录（每 job 一份 JSON，文件名 = URL 编码的 scope_id；形状 = 前述 `jobs[]` 的一项，但**顶层 `scope_id` 换成内嵌的完整 `job` definition**（同 `run_meta.jobs[]` 每项的形状）——scope 键取自 `job.scope_id`，单文件自包含、无需读 run_meta） |
 | `report_index` | RunReport `index.html`；报告写失败被隔离时**省略** |
-| `worker_log` | worker 日志落点；仅 `--quiet` 且本机执行（`--backend local`）时出现；cloud 档 worker 在云端执行、日志进 CloudWatch，此键不出现 |
+| `worker_log` | worker 日志落点；仅 `--quiet` 且本机执行（`--backend local`）时出现；cloud 后端 worker 在云端执行、日志进 CloudWatch，此键不出现 |
 
 ## `gherkai plan … --json`
 
@@ -170,7 +170,7 @@ step 级证据视图：判定树（**骨架 = 提交时的 job 定义**）+ 每�
 |---|---|---|
 | `url` | string \| null | 该 frame 的页面地址（只有 Nova 有；Midscene 恒 null） |
 | `thought` | string \| null | 模型这一步的推理原文；判定理由通常在最后一段 |
-| `screenshot` | string \| null | 该 frame 的截图（`file://` 或 `s3://`）；只有被截图策略选中的 frame 有，其余 null。**只记录地址、不内嵌图像**；云端档若 worker 中途被强制终止，该地址可能取不到对象（按「读不到」处理，同 `unreadable`） |
+| `screenshot` | string \| null | 该 frame 的截图（`file://` 或 `s3://`）；只有被截图策略选中的 frame 有，其余 null。**只记录地址、不内嵌图像**；云端后端若 worker 中途被强制终止，该地址可能取不到对象（按「读不到」处理，同 `unreadable`） |
 | `actions[]` | array | 每项 `name`（动作名）+ `args`（**引擎原样透传的参数对象**：内部键随引擎版本变化、**不属本契约**） |
 
 文本形态（未给 `--json`）是摘要，不是证据全文转写：超长推理会截断，并提示改用 `--json` 或直接读那份证据文件；需要完整证据时使用 `--json`。`--all` / `--full` 的语义见 `docs/user-guide/running-and-results.md` 的 `explain` 一节。

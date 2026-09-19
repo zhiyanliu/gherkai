@@ -78,7 +78,7 @@
 
 **落哪、怎么传**。evidence 落在**各引擎自己的产物目录**下：Nova `NOVA_LOGS_DIR/evidence/<scenario 键>/step-<n>/`，Midscene `MIDSCENE_RUN_DIR/evidence/<scenario 键>/step-<n>/`；目录内 `evidence.json`，Nova 的截图 `act-<i>-frame-<j>.jpg`（Midscene 的截图是 SDK 落在 `report/screenshots/` 的文件，只引用）。**`<scenario 键>` 由 `scenario_id`（`<uri>:<行>[:<example 行>]`）派生，不用显示名**：标题不唯一（同文件重名只靠 id 区分、`@scope` 又允许跨文件合并成一个 job），且产物目录按 run 共享、S3 key 按相对 run 目录镜像，同一 run 内所有 scope 共用这一命名空间；派生必须确定性且不二次撞名（分隔符转义 + 尾附 id 短哈希），撞了 key 的表现是 evidence 静默互相覆盖、`explain` 读到另一条 scenario 的 thought 且无从察觉。放在引擎目录内的理由：两引擎上传器的 S3 key 都相对各自 run 目录算，复用 [0029](./0029-engine-artifacts-to-s3.md) 的上传器（key 计算、幂等去重、scope 末整目录递归 flush）而不引入新的注入 env 与上传根。**不是零改动**：① 两引擎的后缀→Content-Type 映射现只有 `.html`，`.jpg` / `.json` 会落成 `binary/octet-stream`、浏览器直开变下载，故各加 `.jpg`/`.jpeg` → `image/jpeg`、`.png` → `image/png`、`.json` → `application/json`（两边同规则同步改）；② 上传器加一个「只算 ref 不上传」的方法（Nova `ref_for(path)`、Midscene `refFor(path)`），见下。
 
-**上传时机分两类**。`evidence.json` 的 ref 必须随 `step_done` 走 → emit 前经 `to_report_ref` 即时上传拿 ref。**截图不在判定临界路径上传，但也不等到 scope 末**：URI 用上传器同一 key 规则确定性算出（`ref_for`）写进 evidence.json；`step_done` **发出之后**把截图路径交给上传器的**后台队列**（单线程 FIFO、顺序上传、同一 key 规则、成功记入已传集合让 flush 跳过、失败重试一次后记一行日志放弃），主流程立即进下一 step。scope 末与三条提前退出路径（停止信号 / 网络耗尽 / 异常）都对队列做**有界排空**（scope 末 30 s、退出路径 6 s，见下），flush 只兜漏网。**有界的是队列排空、不是 flush**：排空超时后转静默的只有队列线程，scope 末的整目录 flush **不受**该放弃标志约束——排空超时正是「只兜漏网」最该生效的一档，若 flush 也被它 gate 掉，整目录一个字节都不再传、也不删（产物随容器盘销毁即永久丢）。被接受的代价：退化网络下 scope 末的墙钟只由「per-file 超时 × 剩余文件数」定界，不再由排空预算定界（[0029](./0029-engine-artifacts-to-s3.md)「上传必须套超时」的有界性论证按此校准）。理由：把 K × 票数次 PutObject 压在判定临界路径上会把已成的判定拖在网络上（[0029](./0029-engine-artifacts-to-s3.md)「上传套超时、退出时间有界」同向），而只靠 scope 末 flush 又有两面风险——中断路径不 flush、正常路径的 flush 是单次无重试的 best-effort，一次 S3 抖动就是一个永久 404 的 URI。后台队列让字节在下个 step 跑完前多半已到 S3，中断时只剩最后一个 step 的一两张在途；残余风险收窄到「进程被硬杀的那几秒」。**排空的位置守「会话释放优先」**（[0024](./0024-worker-core-protocol.md)）：Nova 在三层 with 退出（会话已释放）之后、Midscene 在 `shutdownSequence` 的 cleanup 之后，与既有的中断兜底提前上传并列，best-effort、不抛。退出路径的排空预算计入 grace：Nova 落在 worker 侧 margin 内，Midscene 自报的下限相应上调（收尾加数多一项；[0032](./0032-fargate-execution-environment.md) 的 grace 组成随之多一项）。本地档 `file://` 上传器是 no-op，队列与排空都直接返回。
+**上传时机分两类**。`evidence.json` 的 ref 必须随 `step_done` 走 → emit 前经 `to_report_ref` 即时上传拿 ref。**截图不在判定临界路径上传，但也不等到 scope 末**：URI 用上传器同一 key 规则确定性算出（`ref_for`）写进 evidence.json；`step_done` **发出之后**把截图路径交给上传器的**后台队列**（单线程 FIFO、顺序上传、同一 key 规则、成功记入已传集合让 flush 跳过、失败重试一次后记一行日志放弃），主流程立即进下一 step。scope 末与三条提前退出路径（停止信号 / 网络耗尽 / 异常）都对队列做**有界排空**（scope 末 30 s、退出路径 6 s，见下），flush 只兜漏网。**有界的是队列排空、不是 flush**：排空超时后转静默的只有队列线程，scope 末的整目录 flush **不受**该放弃标志约束——排空超时正是「只兜漏网」最该生效的一档，若 flush 也被它 gate 掉，整目录一个字节都不再传、也不删（产物随容器盘销毁即永久丢）。被接受的代价：退化网络下 scope 末的墙钟只由「per-file 超时 × 剩余文件数」定界，不再由排空预算定界（[0029](./0029-engine-artifacts-to-s3.md)「上传必须套超时」的有界性论证按此校准）。理由：把 K × 票数次 PutObject 压在判定临界路径上会把已成的判定拖在网络上（[0029](./0029-engine-artifacts-to-s3.md)「上传套超时、退出时间有界」同向），而只靠 scope 末 flush 又有两面风险——中断路径不 flush、正常路径的 flush 是单次无重试的 best-effort，一次 S3 抖动就是一个永久 404 的 URI。后台队列让字节在下个 step 跑完前多半已到 S3，中断时只剩最后一个 step 的一两张在途；残余风险收窄到「进程被硬杀的那几秒」。**排空的位置守「会话释放优先」**（[0024](./0024-worker-core-protocol.md)）：Nova 在三层 with 退出（会话已释放）之后、Midscene 在 `shutdownSequence` 的 cleanup 之后，与既有的中断兜底提前上传并列，best-effort、不抛。退出路径的排空预算计入 grace：Nova 落在 worker 侧 margin 内，Midscene 自报的下限相应上调（收尾加数多一项；[0032](./0032-fargate-execution-environment.md) 的 grace 组成随之多一项）。本机后端的 `file://` 上传器是 no-op，队列与排空都直接返回。
 
 **怎么挂**。evidence.json 的 ref 作为 `{kind: "evidence", ref, label: "evidence"}` **追加**进该 step 的 `step_done.reportRefs`（Nova 现有的 trajectory 挂载是整体赋值，两者不能各自赋值互相覆盖；Midscene 的 step 级 reportRefs 此前为空，evidence 是首条，`runStep` 需拿到 uploader 与 page）。截图 URI **只写在 evidence.json 内**，不进 reportRefs。协议不变：`ReportRef.kind` 本就是引擎自报的开放字符串（[0027](./0027-runreport-aggregation-index.md)）。**接受的连带影响**：evidence ref 经既有 `collect_report_index` 自动进 manifest 与 index.html 的产物导航节（每个 AI step 多一行 `[evidence]` 链接、计数上升），以及 `run` 文本输出的 step 行下——这正是人/agent 找到证据的入口；该节措辞从「引擎原生产物」放宽为「报告产物（引擎原生产物 + gherkai evidence）」，富渲染（缩略图 / thought 折叠）仍延后。
 
@@ -186,10 +186,11 @@ agent / skill 只依赖 evidence schema 与 `explain` 输出，两者都是我�
 
 ## 已知缺口与重议闸门
 
-两处缺口都是本 ADR 有意接受的取舍，不是遗漏；这里把「什么情况下该回来改」写成可对表的信号。
+三处缺口都是有意接受的取舍，不是遗漏；这里把「什么情况下该回来改」写成可对表的信号。
 
-- **截图字节的残余风险**（cloud 档；本机档不受影响）。决策一已改为「step_done 后进后台队列上传 + 收尾有界排空 + 重试一次」，取代最初「只靠 scope 末 flush」的形态——那个形态有两面风险：提前退出路径不 flush、正常路径 flush 单次无重试，一次 S3 抖动就是一个永久 404 的 URI。改后残余风险 = 进程被硬杀（SIGKILL / 容器被收）时最后一个 step 尚在途的一两张、以及排空预算内传不完的部分。**触发信号**：agent 顺 evidence 取截图仍撞 404 且不是硬杀场景。**预案**：evidence.json 里的截图 URI 改为上传成功后回写（evidence.json 二次上传覆盖），或 explain 对截图 URI 做存在性标注。
+- **截图字节的残余风险**（只在云端后端；本机后端不受影响）。决策一已改为「step_done 后进后台队列上传 + 收尾有界排空 + 重试一次」，取代最初「只靠 scope 末 flush」的形态——那个形态有两面风险：提前退出路径不 flush、正常路径 flush 单次无重试，一次 S3 抖动就是一个永久 404 的 URI。改后残余风险 = 进程被硬杀（SIGKILL / 容器被收）时最后一个 step 尚在途的一两张、以及排空预算内传不完的部分。**触发信号**：agent 顺 evidence 取截图仍撞 404 且不是硬杀场景。**预案**：evidence.json 里的截图 URI 改为上传成功后回写（evidence.json 二次上传覆盖），或 explain 对截图 URI 做存在性标注。
 - **被中止的 job，explain 找不到它已产的 evidence**。未完成 scenario 不发 `scenario_done`，其 step 记录不进 `jobs/*.json`，evidence 指针只留在事件记录里；explain 现在只打 `aborted_hint`。**触发信号**：skill 用起来后 agent 在被中止 job 上排障时反复撞到这行提示、要靠人去 S3 翻。**预案**：core 暴露事件流读接缝（RunStore / EventLog 层），explain 对 `aborted_hint` 的 job 从事件记录补取 evidence ref；与「detached run 中途可见」共用同一接缝，一并立项。
+- **云端 job 判 error(timeout) 且该 job 有 step 记录时，`explain` 文本不打 scope 级判定行**（一个 step 记录都没有的 job 仍单独打「判定：…」段；两种情况的原因都在 `--json` 里）：决策四的可读性缺口，v1.4.3 发版验证观察到。**触发信号**：使用者在文本输出里看到 `status=error`、却找不到该 job 判否的原因。
 
 ## 影响面
 
@@ -221,13 +222,13 @@ agent / skill 只依赖 evidence schema 与 `explain` 输出，两者都是我�
 
 ## 验证（已完成，结论内联）
 
-**本机档（跳板机本机 run、两引擎、故意失败的 AI 断言 + 强制 act 超时）**：
+**本机后端（跳板机本机 run、两引擎、故意失败的 AI 断言 + 强制 act 超时）**：
 
 - Nova 故意失败断言：trajectory json 真落盘、evidence.json 的 `frames` 非空、末帧 thought 原文「…there is no red banner… I should return false」、`vote=false`、`result={"value":"false"}`、截图 200 KB 有效 JPEG、prompt 不含 SDK 追加的 schema 样板；passed 动作步 2 帧、只末帧有截图；`explain` 三形态（默认 / `--scenario 3 --step 1 --full` / `--json`）正确、stderr 干净、`--json` 严格可解析；manifest kinds 含 `evidence`、index.html 显示 step 原因。
 - Nova 强制超时（`NOVA_ACT_TIMEOUT_S=2`）：error act 契约成立——`error` 非空、`frames == []`、`time_worked_s` 与 prompt 仍填，`explain` 退 0 并打 `error:` 行。同时暴露 SDK 异常 str() 是十几行 repr 加反馈链接 → 决策一 act.error 的「压成一行」规则由此而来，复跑确认为一行。
 - Midscene 故意失败断言（dev worker）：`Insight/Boolean` 的 thought 完整解释判否、截图为 SDK 落到 `report/screenshots/<id>.jpeg` 的 228 KB 文件、passed 动作步 4 帧只末帧有截图；同时核出 `Planning/Plan` 的推理在 `output.thought` → 映射表回落规则由此而来。
 
-**cloud 档（推两引擎 dev worker 镜像为 variant `base` 后，`run --backend cloud` 两引擎各一次故意失败断言）**：`explain --backend cloud` 文本与 `--json` 都能顺 `s3://` ref 读到 evidence（stderr 干净、JSON 严格可解析、`has_step_records` 在）；截图字节确实随 scope 末 flush 到达 S3——evidence.json 里的 `s3://…/act-0-frame-0.jpg`（Nova）与 `…/report/screenshots/<id>.jpeg`（Midscene）HEAD 均为 `image/jpeg`、约 230 KB，evidence.json 为 `application/json`——即「截图 URI 确定性算出、字节延后上传」这条设计在真 S3 上闭合，浏览器直开渲染而非下载。Nova 与 Midscene 的判否 thought、`vote=false`、passed 步只留末帧与本机档一致。
+**cloud 档（推两引擎 dev worker 镜像为 variant `base` 后，`run --backend cloud` 两引擎各一次故意失败断言）**：`explain --backend cloud` 文本与 `--json` 都能顺 `s3://` ref 读到 evidence（stderr 干净、JSON 严格可解析、`has_step_records` 在）；截图字节确实随 scope 末 flush 到达 S3——evidence.json 里的 `s3://…/act-0-frame-0.jpg`（Nova）与 `…/report/screenshots/<id>.jpeg`（Midscene）HEAD 均为 `image/jpeg`、约 230 KB，evidence.json 为 `application/json`——即「截图 URI 确定性算出、字节延后上传」这条设计在真 S3 上闭合，浏览器直开渲染而非下载。Nova 与 Midscene 的判否 thought、`vote=false`、passed 步只留末帧与本机后端一致。
 
 **submit 路径（reconciler Lambda 投影判定，asset 重传后）**：S3 上 Lambda 写出的 `jobs/*.json` 每个 step 都带 `message` 键（failed 步为断言原因原文）、step 级 `report_refs` 含 `trajectory` + `evidence`；`explain --backend cloud` 读该 run 与本机 CLI 落判定的 run 形态一致——决策三的 message 在两条投影路径上都到位。
 
@@ -237,4 +238,4 @@ agent / skill 只依赖 evidence schema 与 `explain` 输出，两者都是我�
 
 **验证暴露并已吸收的两处**：Nova SDK 异常 str() 为多行 repr → act.error / step message 压成一行（决策一映射表）；Midscene `Planning/Plan` 的推理在 `output.thought` → 映射回落（决策一映射表）。
 
-**单测护栏**：两引擎映射函数对真产物 fixture（含 Midscene 的 error task、Nova 的 N 票）；best-effort 路径（抽取 / 上传抛异常 → `step_done` 照发、无 evidence ref、status 不变）；serialize round-trip 带非默认 step message；`explain` 本地 / 云端两档读取、`record_missing` 与三种 `evidence_missing`、多命中 `--scenario` + `--step`、退出码；cloud 档 skew 三态；契约护栏含 evidence 夹具。
+**单测护栏**：两引擎映射函数对真产物 fixture（含 Midscene 的 error task、Nova 的 N 票）；best-effort 路径（抽取 / 上传抛异常 → `step_done` 照发、无 evidence ref、status 不变）；serialize round-trip 带非默认 step message；`explain` 本机 / 云端两个后端读取、`record_missing` 与三种 `evidence_missing`、多命中 `--scenario` + `--step`、退出码；cloud 档 skew 三态；契约护栏含 evidence 夹具。

@@ -2,7 +2,7 @@
   "schema_version": 1,
   "diagram_type": "architecture",
   "meta": {
-    "title": "gherkai 运行拓扑：本机档与云端档",
+    "title": "gherkai 运行拓扑：本机后端与云端后端",
     "locale": "zh-CN",
     "quality_profile": "showcase"
   },
@@ -233,7 +233,7 @@
   "cards": [
     {
       "dot": "cyan",
-      "title": "本机档（默认）",
+      "title": "本机后端（默认）",
       "items": [
         "worker 为本机子进程，结果写入当前目录",
         "需要本机 AWS 凭证"
@@ -241,7 +241,7 @@
     },
     {
       "dot": "violet",
-      "title": "云端档",
+      "title": "云端后端",
       "items": [
         "worker 在团队共享的后端上运行，提交后本机关机不影响执行",
         "成员只需最小的云端权限"

@@ -82,7 +82,7 @@ region 的完整解析链是 `--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > 
 | `MIDSCENE_MODEL_FAMILY` | 显式指定模型家族，优先于自动推断 | 无（按模型 id 推断） | 本机 shell、variant 镜像 `ENV` |
 | `GHERKAI_STEPS_DIR` | 你自己的确定性 step 目录，`--steps-dir` 没给时用它 | `./steps` 存在即用 | 本机 shell、variant 镜像 `ENV` |
 
-- `NOVA_ACT_TIMEOUT_S` 由起 worker 的那一侧读取后注给 worker：`run`（两档后端都算）与 `submit --backend local` 用发起命令的 shell 里的值；`submit --backend local` 提交的 run 之后由 `gherkai status --wait` 接着推完时，用运行 `status` 的那个 shell 里的值；`submit --backend cloud` 的任务由云端起，固定用 120 秒。
+- `NOVA_ACT_TIMEOUT_S` 由起 worker 的那一侧读取后注给 worker：`run`（两个后端都算）与 `submit --backend local` 用发起命令的 shell 里的值；`submit --backend local` 提交的 run 之后由 `gherkai status --wait` 接着推完时，用运行 `status` 的那个 shell 里的值；`submit --backend cloud` 的任务由云端起，固定用 120 秒。
 - `NOVA_ACT_TIMEOUT_S` 与 `NOVA_GRACE_MARGIN_S` 相加就是 Nova 引擎自报的最小停止宽限（默认 150 秒；Midscene 自报的是固定的 31 秒），调大前者会同时抬高本机运行所允许的最小 `--grace`。
 - `NOVA_GRACE_MARGIN_S` 只影响本机运行所允许的最小 `--grace`。云端 worker 的停止宽限由部署时的 `gherkai deploy --stop-timeout` 决定。
 - 云端 worker 读自己镜像里 `ENV GHERKAI_STEPS_DIR` 指的目录，确定性 step 随镜像一起构建进去（见 [`cloud-backend.md`](./cloud-backend.md)）；本机 shell 里的 `GHERKAI_STEPS_DIR` 与默认 `./steps` 在云端后端下静默不生效；显式给了 `--steps-dir` 会提示一句、不拦截。step 的写法与目录约定见 [`writing-deterministic-steps.md`](./writing-deterministic-steps.md)。
@@ -119,9 +119,9 @@ region 的完整解析链是 `--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > 
 | 选项 | 出现在 | 跨命令差异 |
 |---|---|---|
 | `--backend {local,cloud}` | `run`、`submit`、`status`、`explain`、`doctor` | 默认 `local`。查一个 run 的 `status` / `explain` 要给与 `submit` 相同的值 |
-| `--prefix P` | `run`、`submit`、`status`、`explain`、`doctor`、`deploy`、`destroy`、`deploy push-worker`、`deploy list-workers` | 在 `run` / `submit` / `status` / `explain` / `doctor` 上只对云端档起作用，部署命令用它给资源命名；两侧的值须一致。多环境切换（`prod-` / `stage-`）用它 |
+| `--prefix P` | `run`、`submit`、`status`、`explain`、`doctor`、`deploy`、`destroy`、`deploy push-worker`、`deploy list-workers` | 在 `run` / `submit` / `status` / `explain` / `doctor` 上只对云端后端起作用，部署命令用它给资源命名；两侧的值须一致。多环境切换（`prod-` / `stage-`）用它 |
 | `--report-dir DIR` | `run`、`submit`、`status`、`explain`、`doctor` | `status` / `explain` 要给与 `submit` 相同的值才查得到这个 run。`submit --backend cloud` 下这个值还须与后端部署时设的报告前缀一致，不一致在提交前即被拒；`run --backend cloud` 不做这项比对 |
-| `--steps-dir DIR` | `run`、`plan`、`submit`、`doctor`、`list-deterministic` | 五个命令上同义；云端档不生效（云端 worker 的 step 构建在镜像里） |
+| `--steps-dir DIR` | `run`、`plan`、`submit`、`doctor`、`list-deterministic` | 五个命令上同义；云端后端不生效（云端 worker 的 step 构建在镜像里） |
 | `--default-engine {midscene,novaact}` | `run`、`plan`、`submit` | 三个命令上同义 |
 | `--grace S` | `run` | 只有本机后端用它。云端的停止宽限在部署时由 `gherkai deploy --stop-timeout` 定，`--backend cloud` 给这个选项会退 `2` |
 | `--json` | `run`、`plan`、`status`、`explain`、`doctor`、`list-engines`、`list-deterministic`、`deploy list-workers` | 每个命令输出各自的 JSON 文档；`submit` 没有这个选项，它的输出本来就只有一个 `run_id` |

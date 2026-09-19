@@ -1,6 +1,6 @@
 # 0037. 分发与打包：PyPI 多包 workspace（uv-first）+ `gherkai deploy` 进 wheel
 
-> **Status:** Accepted（2026-09-08，随 v1.4.0 首发翻牌）—— 决策 1-8 全部实装：uv workspace 五包 + 三名分离 + git tag 版本 + 兄弟包 `==` 同版本 pin；worker 交付（novaact 包 / `@gherkai/worker-midscene` / 四级定位链——第四级经 fd 预演定为 uvx 保留、npx 废弃）；`steps/` 定制面；两态基础镜像 Dockerfile + GHCR；`gherkai deploy`（provider 发现、VPC 三态、版本戳、asset 从已安装包、CDK 查询缓存）；skew 三态；CI 发布链。**实测项除一项外已清零**（首个真 tag 全链一次全绿，发行版 CLI 在真账户完成部署升级 + 云端 run；唯一残留 = 「实测项」第 4 条末的「`destroy` 后同 prefix 重部署的冲突形态」待真账户）。「背景与问题」「现状实测」两节是**施工前快照、历史叙述**。worker 镜像交付的独立子系统见 [0038](./0038-worker-image-delivery.md)（**Accepted**，实测项 1-7 已清零）。
+> **Status:** Partially-superseded-by 0045（范围 = 决策 8 ④：changelog 真源移到根 `CHANGELOG.md`、发布链加 CHANGELOG gate，见 [0045](./0045-documentation-layering-and-placement.md) 决策五；其余决策不变）。原文：Accepted（2026-09-08，随 v1.4.0 首发翻牌）—— 决策 1-8 全部实装：uv workspace 五包 + 三名分离 + git tag 版本 + 兄弟包 `==` 同版本 pin；worker 交付（novaact 包 / `@gherkai/worker-midscene` / 四级定位链——第四级经 fd 预演定为 uvx 保留、npx 废弃）；`steps/` 定制面；两态基础镜像 Dockerfile + GHCR；`gherkai deploy`（provider 发现、VPC 三态、版本戳、asset 从已安装包、CDK 查询缓存）；skew 三态；CI 发布链。**实测项除一项外已清零**（首个真 tag 全链一次全绿，发行版 CLI 在真账户完成部署升级 + 云端 run；唯一残留 = 「实测项」第 4 条末的「`destroy` 后同 prefix 重部署的冲突形态」待真账户）。「背景与问题」「现状实测」两节是**施工前快照、历史叙述**。worker 镜像交付的独立子系统见 [0038](./0038-worker-image-delivery.md)（**Accepted**，实测项 1-7 已清零）。
 
 ## 背景与问题
 
@@ -26,20 +26,20 @@
 - **PyPI + uv 是事实默认**：uv 月下载量约为 pipx 的 28 倍（pypistats，2026-08 采样）；pipx 自己加了 uv backend；抽样的同类 Python CLI（harlequin / posting / llm 三个 README）均以 `uv tool install` 领头、pipx 作回落。PyPA 官方指南仍只写 pipx——官方与生态已分叉，本项目跟生态。
 - **`uvx <name>` 把 `<name>` 同时当发行名与命令名解析**（实测：发行名 `gherkai-cli` + 命令 `gherkai` 时 `uvx gherkai` 直接失败）→ 用户敲的那个发行包必须叫 `gherkai`。
 - **uv 不会把 path/workspace 依赖翻译成版本 pin**（astral-sh/uv#9811，`needs-design`、至今 open）；生产级绕法 = pydantic-ai 的形状：`uv-dynamic-versioning` 既从 git tag 算版本、又在 build 时经 hatch metadata hook 渲染 `pydantic-ai=={{ version }}`（`clai` 2.31.1 在 PyPI 上的元数据即 `Requires-Dist: pydantic-ai==2.31.1`）。
-- **同形工具的分工**（CLI + 用户自部署后端 + worker 容器）：Chalice 把 IaC 塞进 wheel 变 `chalice deploy` 并留 `package --pkg-format cloudformation` 导出阀；Dagster「chart 版本 = 包版本，镜像 tag 缺省跟 chart」一个旋钮；Prefect 用一句操作规则替代兼容矩阵；**内容属于用户的镜像一律由用户构建**（Dagster user-code deployment / Prefect flow image），内容属于维护者的由维护者发布。
+- **同形工具的分工**（CLI + 用户自部署后端 + worker 容器）：Chalice 把 IaC 塞进 wheel 变 `chalice deploy` 并留 `package --pkg-format cloudformation` 导出阀；Dagster「chart 版本 = 包版本，镜像 tag 缺省跟 chart」一个旋钮；Prefect 用一句操作规则替代兼容矩阵；**内容属于用户的镜像一律由用户构建**（Dagster user-code deployment / Prefect flow image），内容属于工具提供方的由工具提供方发布。
 - **Homebrew core 门槛**：≥75 star 或 30 fork，且仓库 ≥30 天；本仓库不达。第三方 tap 是第二个发布面。
 
 ## 决策总览
 
 | 交付物 | 通道 | 版本 | 谁构建 |
 |---|---|---|---|
-| `gherkai`（CLI；含随 wheel 带的 `gherkai_cli/skills/gherkai/` 包数据 = agent skill，[0043](./0043-agent-skill-for-driving-gherkai.md)） | PyPI，uv-first | git tag，单一旋钮 | 维护者 CI |
-| `gherkai-runtime` / `gherkai-core` | PyPI，被 `==` 同版本 pin；CLI 用户不直接装（集成方按层直依赖，见 2a） | 同号 | 维护者 CI |
-| `gherkai-worker-novaact` | PyPI，经 CLI extra `[local]` 装进 **同一个** venv | 同号 | 维护者 CI |
-| `@gherkai/worker-midscene` | npm（scope `@gherkai`） | 同号 | 维护者 CI |
-| worker **基础镜像** ×2 | **GHCR**（与 repo 同屋檐），linux/amd64，immutable `:X.Y.Z` | 同号 | 维护者 CI |
+| `gherkai`（CLI；含随 wheel 带的 `gherkai_cli/skills/gherkai/` 包数据 = agent skill，[0043](./0043-agent-skill-for-driving-gherkai.md)） | PyPI，uv-first | git tag，单一旋钮 | 发布方的 CI |
+| `gherkai-runtime` / `gherkai-core` | PyPI，被 `==` 同版本 pin；CLI 用户不直接装（集成方按层直依赖，见 2a） | 同号 | 发布方的 CI |
+| `gherkai-worker-novaact` | PyPI，经 CLI extra `[local]` 装进 **同一个** venv | 同号 | 发布方的 CI |
+| `@gherkai/worker-midscene` | npm（scope `@gherkai`） | 同号 | 发布方的 CI |
+| worker **基础镜像** ×2 | **GHCR**（与 repo 同屋檐），linux/amd64，immutable `:X.Y.Z` | 同号 | 发布方的 CI |
 | worker **定制镜像**（基础镜像 + 使用方 steps，按 variant 多套并存） | 使用方私有 ECR；机制全在 [0038](./0038-worker-image-delivery.md) | 跟 CLI | 使用方本地 build，部署方 `gherkai deploy push-worker` 推送注册 |
-| `gherkai-deploy-aws`（IaC + Lambda handler 源 + worker 镜像推送） | PyPI，经 CLI extra `[deploy-aws]`；命令 `gherkai deploy` / `destroy` 及 worker 镜像族（0038） | 同号 | 维护者 CI |
+| `gherkai-deploy-aws`（IaC + Lambda handler 源 + worker 镜像推送） | PyPI，经 CLI extra `[deploy-aws]`；命令 `gherkai deploy` / `destroy` 及 worker 镜像族（0038） | 同号 | 发布方的 CI |
 | `features/`（示例）· `tools/` · `docs/` · 根 `skills/`（agent skill 评测资产，0043） | 不分发 | — | — |
 
 八条决策展开如下。
@@ -133,11 +133,11 @@ uv 缺 Python 时自动下载托管 CPython，对 uv-first 受众近乎免费；
 - **内建脚手架 step**留在 worker 包内作为内建；使用方 step 与内建撞 pattern 按 [0036](./0036-deterministic-capability-discovery.md) 既定 conflict 语义处理（`plan` 预检暴露；排序遍历保证 conflict 清单可复现），**不引入「使用方覆盖内建」的优先级规则**。
 - **cloud 档：steps 烙进定制镜像**（模板见 [0038](./0038-worker-image-delivery.md)），`--backend cloud` 下 definition 里的 `steps_dir` 对云端 worker 无意义 → 提交侧不写该字段、给了 `--steps-dir` 则 preflight 警告不拦。镜像里的 steps 是否最新由使用方管理、preflight 不比对，规则与理由在 [0038](./0038-worker-image-delivery.md)「不变量」与「被拒方案」。基础镜像**零使用方内容**，正好支撑决策 5 的两层分工。
 
-## 决策 5：worker 镜像两层分工——维护者 GHCR 基础镜像 + 使用方定制层（机制见 0038）
+## 决策 5：worker 镜像两层分工——发布方 GHCR 基础镜像 + 使用方定制层（机制见 0038）
 
-worker 内容 = 框架脚手架 + 使用方确定性 step，属业界分类里的 **user-code image**，最后一层由使用方构建（Dagster user-code deployment / Prefect flow image 同理）；「维护者独占发布完整镜像、用户绝不自建」曾是备选，因抹掉定制面被拒。本 ADR 只定分工与基础镜像通道：
+worker 内容 = 工具自身的脚手架 + 使用方确定性 step，属业界分类里的 **user-code image**，最后一层由使用方构建（Dagster user-code deployment / Prefect flow image 同理）；「发布方独占发布完整镜像、用户绝不自建」曾是备选，因抹掉定制面被拒。本 ADR 只定分工与基础镜像通道：
 
-- **基础镜像**（维护者 CI 发布）：`ghcr.io/zhiyanliu/gherkai-worker-novaact:X.Y.Z` / `…-midscene:X.Y.Z`，内容 = 同版本 worker 包 + SDK 运行时 + 协议层，**零使用方内容**；**linux/amd64 单架构**（ARM64 被拒，理由与将来的路在 [0038](./0038-worker-image-delivery.md)）；tag = immutable `X.Y.Z` + 移动 `latest`（只跟随最新 tag；文档一律 `FROM …:X.Y.Z`）。Dockerfile 两态（与 Lambda asset 同源）：CI 态按版本从 PyPI / npm 装已发行包；本地态经 `--build-arg` 指向本地 `uv build` wheel / `npm pack` tarball（dev 版不在 PyPI，contributor 才造得出基础镜像）。 **基础镜像的 CI 必须排在 worker 包发行之后**（基础镜像装的是已发行的 worker 包）。
+- **基础镜像**（发布方的 CI 发布）：`ghcr.io/zhiyanliu/gherkai-worker-novaact:X.Y.Z` / `…-midscene:X.Y.Z`，内容 = 同版本 worker 包 + SDK 运行时 + 协议层，**零使用方内容**；**linux/amd64 单架构**（ARM64 被拒，理由与将来的路在 [0038](./0038-worker-image-delivery.md)）；tag = immutable `X.Y.Z` + 移动 `latest`（只跟随最新 tag；文档一律 `FROM …:X.Y.Z`）。Dockerfile 两态（与 Lambda asset 同源）：CI 态按版本从 PyPI / npm 装已发行包；本地态经 `--build-arg` 指向本地 `uv build` wheel / `npm pack` tarball（dev 版不在 PyPI，contributor 才造得出基础镜像）。 **基础镜像的 CI 必须排在 worker 包发行之后**（基础镜像装的是已发行的 worker 包）。
 - **为什么 GHCR 而非 ECR Public / Docker Hub**：运行时拉的是使用方私有 ECR 里的镜像，GHCR 只在使用方 `docker build` 与 deploy 同步基础镜像时各被拉一次，ECR Public 的免流量/免认证优势碰不到；Docker Hub 匿名限额是负项；GHCR 与 repo 同屋檐、`GITHUB_TOKEN` 推送零配置。（与 [0009](./0009-maximize-aws-hard-constraint.md)「最大化 AWS」的关系：GHCR 是发布通道、属其适用面之外，见 0009「适用面」句；不是例外。）
 - **定制镜像由使用方在本地 build，gherkai 不拥有构建**：Dockerfile 模板（唯一真源）见 [0038](./0038-worker-image-delivery.md)「概念模型」节；必须 `--platform linux/amd64`，push-worker 推送前校验。**推送、注册、选择、清理、权限**全部在 [0038](./0038-worker-image-delivery.md)：variant 命名、默认指针、按（引擎，variant）注册 digest 引用的 task-def revision、`gherkai deploy push-worker` / `list-workers` / `delete-worker`、容器引擎口子、preflight 的 variant 解析。
 - `tools/build_push_workers.py` 已随 0038 落地退役（`gherkai deploy push-worker` 取代）。
@@ -230,7 +230,7 @@ worker 内容 = 框架脚手架 + 使用方确定性 step，属业界分类里�
 - **不设 `[local]` / uvx 拉起作主路径**：同 venv 直调无包装层、离线、pin 锁死，三点全优；uvx 降为兜底，fd 预演后仅 novaact 保留第四级（见决策 3 第 4 级）。
 - **CLI 上保留 `[aws]`**：裸装无一画像完整可用，头条命令撞头条用法。
 - **`[deploy-aws]` 命名为 `[aws]` 或 `[deploy]`**：前者说谎（裸装已能用 AWS）并把 CDK+Node 引向不需要的人；后者关 provider 门。
-- **维护者独占发布完整 worker 镜像**：确定性 step 是使用方地盘，worker 是 user-code image。
+- **发布方独占发布完整 worker 镜像**：确定性 step 是使用方地盘，worker 是 user-code image。
 - **ECR Public / Docker Hub 作基础镜像 registry**：运行时拉的是私有 ECR 定制镜像，ECR Public 的免流量/免认证优势碰不到；Docker Hub 匿名限额是负项。
 - **IaC 单独 repo / 模板下载（Metaflow 式）**：第二 release train、第二版本号、硬编码值 bug 类（Dagster+ 模板硬编码 URL 致 EU 部署断）。
 - **clone repo + 裸 `cdk deploy` 作正式部署形态**：相对路径、context 坑外露、wheel 用户不可达。

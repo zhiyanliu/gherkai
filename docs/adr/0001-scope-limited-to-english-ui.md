@@ -19,7 +19,7 @@
 
 **官方声明的边界**：Nova Act 那句是**无 "only"、无宾语**的肯定式支持声明——未界定管的是 `act()` 指令语言还是被测 UI 语言，且**不在** README 的 *Known limitations* 节（该节列的是：不能操作非浏览器应用、不能操作浏览器窗口/模态框、屏幕分辨率范围）。逐个核对 AWS User Guide 全部页面、AI Service Card、repo FAQ、boto3 API reference、产品页：**零处**语言约束，API 无 language/locale 参数；SDK 源码无 `English` 字样、`act()` 无语言校验、浏览器 context 不设 locale/Accept-Language（不强制英文环境）。对照旁证：同族 Canvas/Reel 明写 "Supported Languages: English"、Sonic 列举五种语言——**AWS 要约束语言时会发正式语言表，Nova Act 没有**。故「supports English」应读作"声明/测试/支持的范围"，非"非英文会被拒绝"。
 
-**视觉定位的语言弱项属引擎模型、不属框架**：Midscene 官方把「非拉丁文字/小字定位偏弱」列为 **GPT-5 系的 per-model 注意事项**（原文 "GPT-5 may still struggle with non-Latin text and with text that is too small in the image."），Qwen 各行无此警告——与 [0002](./0002-midscene-not-driven-by-gpt55.md) 排除 GPT-5.5 的理由同源。故换引擎模型即换该弱项（现用模型见 [0044](./0044-engine-model-selection-and-override.md)「现值」：`us.openai.gpt-5.6-terra`，其中文 UI 探针 3/3）。
+**视觉定位的语言弱项属引擎模型、不属 Midscene 引擎本身**：Midscene 官方把「非拉丁文字/小字定位偏弱」列为 **GPT-5 系的 per-model 注意事项**（原文 "GPT-5 may still struggle with non-Latin text and with text that is too small in the image."），Qwen 各行无此警告——与 [0002](./0002-midscene-not-driven-by-gpt55.md) 排除 GPT-5.5 的理由同源。故换引擎模型即换该弱项（现用模型见 [0044](./0044-engine-model-selection-and-override.md)「现值」：`us.openai.gpt-5.6-terra`，其中文 UI 探针 3/3）。
 
 **中文 UI 首次实测**（纯中文页面 + 中文 step，经隧道打本机应用，[0035](./0035-local-app-testing-via-tunnel.md)）：
 

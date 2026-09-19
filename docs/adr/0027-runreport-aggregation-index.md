@@ -2,7 +2,7 @@
 
 > **Status:** Partially-superseded-by 0042 —— 归集索引语义/形态/扩展性契约与不透明搬运铁律不变；「消费端只当 URI 用、不 stat / open」一条由 [0042](./0042-step-evidence-and-explain.md) **按层收窄**（`model / wire / schedule / ReportStore` 永不解引用不变，皮层 `explain` / `read_resource` 只对 `kind == "evidence"` 的自有 schema 解引用），留口子「trajectory 内部结构化提取」亦由其落地（位置在 worker）。（正文两处已就地改写并反向链。）
 
-兑现 [0016](./0016-execution-architecture-core-lib-run-model.md) 一直 deferred 的「报告统一」（原里程碑 M5）。本 ADR 定 **RunReport 的语义、形态与扩展性契约**，并落地 `ReportStore` 的 local adapter。
+兑现 [0016](./0016-execution-architecture-core-lib-run-model.md) 一直 deferred 的「报告统一」。本 ADR 定 **RunReport 的语义、形态与扩展性契约**，并落地 `ReportStore` 的 local adapter。
 
 ## 决定：RunReport = 归集索引，不是内容融合
 

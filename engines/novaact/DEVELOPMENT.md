@@ -94,7 +94,7 @@ GHERKAI_STEPS_DIR=$PWD/steps uv run gherkai-worker-novaact --capabilities   # de
 
 Nova 侧**不需要** midscene 那条「加载完某文件若零注册即报错」的校验：同进程 + 绝对包 import 恒命中同一 module 对象，不存在 midscene 的「模块双实例导致注册写入一张不会被读取的表」风险。
 
-云端档同样**只认 `GHERKAI_STEPS_DIR`**，但取值来自定制 worker 镜像的 `ENV GHERKAI_STEPS_DIR=/app/steps`（steps 随 `COPY` 构建进镜像），不由本机 shell 或 CLI 注入（[ADR 0038](../../docs/adr/0038-worker-image-delivery.md)）。
+云端后端同样**只认 `GHERKAI_STEPS_DIR`**，但取值来自定制 worker 镜像的 `ENV GHERKAI_STEPS_DIR=/app/steps`（steps 随 `COPY` 构建进镜像），不由本机 shell 或 CLI 注入（[ADR 0038](../../docs/adr/0038-worker-image-delivery.md)）。
 
 ## 运行测试
 
@@ -119,11 +119,11 @@ Nova Act 每次 `act`/`act_get` 各产出一个 trajectory HTML。落点分两�
 - **正常经 cli 运行**：组合根经环境变量 `NOVA_LOGS_DIR` 注入 run 专属持久目录 `reports/<run_id>/nova-trajectories`，worker 原样交给 `NovaAct(logs_directory=...)`（[ADR 0027](../../docs/adr/0027-runreport-aggregation-index.md)；scope 级 `session_summary.json` 落同一 base）；产物再经 `ArtifactUploader` 传 S3（[ADR 0029](../../docs/adr/0029-engine-artifacts-to-s3.md)）。
 - **手动直接运行 worker / spike**（不设 `NOVA_LOGS_DIR`）：回落 SDK 默认的系统临时目录 `$TMPDIR/..._nova_act_logs/`（会被系统清理）；需持久化时自行传入 `NovaAct(logs_directory=...)`（见 [ADR 0010](../../docs/adr/0010-spike-as-apples-to-apples-benchmark.md)）。
 
-`--no-report` 档由组合根经 env `GHERKAI_NO_ARTIFACTS=1` 告知：worker **不收集、不上报**引擎原生产物（不带 `session_summary.json`、不发任何 reportRef、不产 step 级 evidence）。Nova Act SDK 没有关闭 trajectory 的开关，此档下 worker 不传 `logs_directory`，SDK 仍把 trajectory 写入自己 `mkdtemp` 出的临时目录；这是 SDK 内部行为、不进项目（ADR 0037 决策 3）。一次 run 的全部产物落点（两引擎横向、local 与 cloud 两档）见 [`docs/internals/artifacts-and-evidence.md`](../../docs/internals/artifacts-and-evidence.md)。
+`--no-report` 档由组合根经 env `GHERKAI_NO_ARTIFACTS=1` 告知：worker **不收集、不上报**引擎原生产物（不带 `session_summary.json`、不发任何 reportRef、不产 step 级 evidence）。Nova Act SDK 没有关闭 trajectory 的开关，此档下 worker 不传 `logs_directory`，SDK 仍把 trajectory 写入自己 `mkdtemp` 出的临时目录；这是 SDK 内部行为、不进项目（ADR 0037 决策 3）。一次 run 的全部产物落点（两引擎横向、local 与 cloud 两个后端）见 [`docs/internals/artifacts-and-evidence.md`](../../docs/internals/artifacts-and-evidence.md)。
 
-## 容器镜像（维护者向）
+## 容器镜像（面向发布方）
 
-`Dockerfile` = Fargate 档的 worker **基础镜像**（`gherkai-worker-novaact` + SDK 运行时 + 协议层，**零使用方内容**）；使用方的定制层模板（`FROM <基础镜像>` + `COPY steps/` + `GHERKAI_STEPS_DIR`）与推送流程见 [ADR 0038](../../docs/adr/0038-worker-image-delivery.md)（包 README 已降为入口页、不再带模板）。
+`Dockerfile` = 云端后端（Fargate）的 worker **基础镜像**（`gherkai-worker-novaact` + SDK 运行时 + 协议层，**零使用方内容**）；使用方的定制层模板（`FROM <基础镜像>` + `COPY steps/` + `GHERKAI_STEPS_DIR`）与推送流程见 [ADR 0038](../../docs/adr/0038-worker-image-delivery.md)（包 README 已降为入口页、不再带模板）。
 
 同一份 Dockerfile 有**两态**，由 `--build-arg WORKER_SOURCE=` 选择（ADR 0037 决策 5）：
 

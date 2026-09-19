@@ -304,8 +304,8 @@
       "dot": "emerald",
       "title": "确定性 step 的加载者是 worker，不是 CLI",
       "items": [
-        "本机档：worker 启动时从指定目录加载",
-        "云端档：构建进 variant 镜像，提交侧指定目录无效"
+        "本机后端：worker 启动时从指定目录加载",
+        "云端后端：构建进 variant 镜像，提交侧指定目录无效"
       ]
     },
     {

@@ -1,6 +1,6 @@
 # 云端后端：分工、交付清单、variant 镜像与升级
 
-本文给 agent 在云端档要知道的事。资源清单、费用、VPC 三档细节与权限清单以用户指南的云端后端页为准：
+本文给 agent 在云端后端要知道的事。资源清单、费用、VPC 三档细节与权限清单以用户指南的云端后端页为准：
 https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/cloud-backend.md 。
 
 ## 1 分工
@@ -40,7 +40,7 @@ gherkai status "$RUN_ID" --backend cloud --prefix gherkai- --wait   # 退出码�
 gherkai explain "$RUN_ID" --backend cloud --prefix gherkai-         # 失败证据；截图是 S3 地址
 ```
 
-`status` / `explain` 的 `--backend` / `--report-dir` / `--prefix` 与 `submit` 逐字一致，否则退 2 说找不到 run（`--report-dir` 在 cloud 档是后端的报告前缀，默认 `reports`）。`--region` / `--profile` 与本机命令同名同义。
+`status` / `explain` 的 `--backend` / `--report-dir` / `--prefix` 与 `submit` 逐字一致，否则退 2 说找不到 run（`--report-dir` 在 cloud 后端下是云端的报告前缀，默认 `reports`）。`--region` / `--profile` 与本机命令同名同义。
 
 ## 4 variant 与 `push-worker`：本机 steps 怎么进云端
 
@@ -69,7 +69,7 @@ gherkai submit features/x.feature --backend cloud --prefix gherkai- --worker-var
 
 - arm Mac 上不带 `--platform linux/amd64` 会 build 出 arm64，容器启动期才报 exec format error；`push-worker` 会在推之前查架构与版本、不符退 2。
 - 提交时 `--worker-variant` 被解析成本 run 各引擎的精确 revision 写进提交记录：一个 run 内镜像固定，别人重推同名 variant 不影响正在运行的 run。某引擎缺该 variant 即退 2、不回落默认。
-- **测试开发 → QA / CI 的交接**：本机新写或改了确定性 step，`plan` 的标注会变，但云端不会，直到重新 build + `push-worker`。cloud 档「改了 steps 不推镜像等于没改」，且没有任何显式失败提醒。
+- **测试开发 → QA / CI 的交接**：本机新写或改了确定性 step，`plan` 的标注会变，但云端不会，直到重新 build + `push-worker`。cloud 后端「改了 steps 不推镜像等于没改」，且没有任何显式失败提醒。
 - `gherkai deploy delete-worker` 尚未提供（命令存在、会说明）。
 
 ## 5 升级顺序
@@ -87,6 +87,6 @@ gherkai submit features/x.feature --backend cloud --prefix gherkai- --worker-var
 - 多环境靠 `--prefix`：`prod-` / `stage-` 各一套后端，互不影响；所有 cloud 命令带同一个 prefix。
 - `gherkai destroy` 之后两张 DynamoDB 表、S3 桶、两个 ECR 仓库**保留、需手动删**（防误删数据）。不手动删则同 prefix 重新 deploy 会因资源已存在而冲突。worker 镜像映射与默认指针也不随 destroy 删，ECR 留着则重建后照样能用。命令样例见部署方说明页「拆除与清理」节。
 
-## 7 `--expose-local` 在 cloud 档的例外
+## 7 `--expose-local` 在 cloud 后端的例外
 
 `submit --backend cloud --expose-local <原始 origin>` 时隧道由**本机**的守护进程持有，本机须保持开机联网到 run 终态，这是「提交后关机也会运行到结束」的唯一例外。`--tunnel-ttl S` 是守护进程的兜底 TTL（默认 = 本批各 job 预算之和 + 启动余量），到点无条件拆隧道，调小可能在 run 未完时断隧道。

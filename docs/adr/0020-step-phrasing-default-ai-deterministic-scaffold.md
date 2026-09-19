@@ -6,13 +6,13 @@
 
 ## 问题：路由关键词让 QA 写着别扭
 
-此前断言要写 `Then AI 确认 "..."`。但 `AI 确认` 这四个字**对 engine 毫无意义**（engine 只收到引号里的自然语言，根本不解析 Gherkin 文本）——它纯粹是给 step-definition 正则路由用的关键词。让 QA 写"给框架内部路由用的词"，既别扭又违背"AI 主导"（AI 是默认，不该要 QA 特意声明"用 AI"）。
+此前断言要写 `Then AI 确认 "..."`。但 `AI 确认` 这四个字**对 engine 毫无意义**（engine 只收到引号里的自然语言，根本不解析 Gherkin 文本）——它纯粹是给 step-definition 正则路由用的关键词。让 QA 写"给工具内部路由用的词"，既别扭又违背"AI 主导"（AI 是默认，不该要 QA 特意声明"用 AI"）。
 
 ## 决定：默认 AI / 少数派显式
 
 **让最常用的写法最省事，特例才需要标注**：
 
-1. **默认 AI 判断**：QA 写 `When "{自然语言}"` / `Then "{自然语言}"`——**不带任何关键词**，框架默认喂给 AI（动作 `aiAct`/`act`；断言 `aiBoolean` ↔ `act_get(BOOL_SCHEMA)` + 投票）。这是 ~90% 的情况。
+1. **默认 AI 判断**：QA 写 `When "{自然语言}"` / `Then "{自然语言}"`——**不带任何关键词**，工具默认喂给 AI（动作 `aiAct`/`act`；断言 `aiBoolean` ↔ `act_get(BOOL_SCHEMA)` + 投票）。这是 ~90% 的情况。
    - **两个引擎匹配机制不同**（已实测）：**Nova Act/pytest-bdd 原生区分 `@when`/`@then`**，裸字符串 step 直接可用。**Midscene/cucumber-js 不区分关键字、仅按 pattern**，故 `When "{string}"` 与 `Then "{string}"` 同 pattern → ambiguous → **靠本地补丁解决**（按 PickleStepType 收窄到关键字，见 [0021](./0021-local-cucumber-patch-step-keyword-disambiguation.md)）。**vanilla cucumber 跑不通裸字符串双 step；补丁是 Midscene 侧此设计的前提。**
 
 2. **确定性 step = 脚手架，QA 零预设**：少数"必须精确、不容 AI 抖动"的断言（URL/DOM 精确查），做成脚手架文件 `engines/midscene/src/worker/deterministic.steps.mts`（Midscene）/ `engines/novaact/gherkai_worker_novaact/deterministic_steps.py`（Nova Act），与各引擎 worker 主模块同级（分别与 `run-scope.mts` / `run_scope.py` 同目录；迁移史见 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)「迁移」条）；使用方自己的确定性 step 写在项目 `steps/` 目录（[0037](./0037-distribution-and-packaging.md) 决策 4），内含**说明注释**教测试开发怎么加、怎么和 `.feature` 呼应。
@@ -20,7 +20,7 @@
    - **落地现状**：脚手架现各内置**一个**演示/验证用的 URL 确定性 step `页面地址(?:精确)?匹配 "<正则>"`（`features/deterministic_step.feature` 实跑验证），取代当初"空脚手架、零具体 step"的设想；落地形态与真实路径见 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)「实现状态」段——**确定性 step 仍写在脚手架文件里、注册表只是收集机制**（实装偏差纠正见 0022「迁移」条），它由测试开发维护、非 QA 预设，"QA 零预设"不破。**注册表现同时是能力自述面**（[0036](./0036-deterministic-capability-discovery.md)：注册即暴露——`@deterministic` 的 description/example 必填、QA 可用 `list-deterministic` 主动查已有的确定性 step）：**「主动查」不等于「预设措辞」**，本条"QA 零预设"不变量仍成立。
    - 两个引擎脚手架对齐。
 
-3. **URL 形态自动分流（导航不写死动词）**：QA 写到 URL 时（如 `Given 打开 "https://..."` / `访问 "https://..."` / `前往 "https://..."`），框架**按 step 文本里有没有 URL 字面量**（引号内 `https?://…`）自动分流，**不锁动词**：
+3. **URL 形态自动分流（导航不写死动词）**：QA 写到 URL 时（如 `Given 打开 "https://..."` / `访问 "https://..."` / `前往 "https://..."`），工具**按 step 文本里有没有 URL 字面量**（引号内 `https?://…`）自动分流，**不锁动词**：
    - **含 URL → 内建确定性导航**（code 抽出 URL 直接 `goto`/`go_to_url`，精确、不浪费 AI、不会被理解成"搜索"而跑偏）。动词随便写，QA 不必记固定措辞——对齐本 ADR"QA 只写自然语言"。
    - **不含 URL → 回落默认 AI**（如 `访问 OpenAI 的维基页` / `回到首页` → `aiAct`/`act`，让引擎自己导航）。
    - 这是 A（确定性）+ B（AI）的组合：URL 已知时享受精确，未知时享受柔性。**退路**：若 URL 检测出现误伤（句中只是提及 URL、并非要导航），把 code 路退化成全 AI（B）。

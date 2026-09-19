@@ -43,7 +43,7 @@
 | **Run** | 一次执行，封装多个 job | `runId`、总状态、起止、墙钟时长、**RunResult**、**RunReport** |
 
 - **RunResult** = 机器可读汇总判定（退出码 / CI / WebUI 状态）= **definition（`run_meta`）+ 判定（`jobs`）的显式合成**（见下「三层切分」）。字段构成：`run_meta` + status 三态 + 各 job 结果 + `total_tokens`/`total_time_worked_s` 两个原生量各自跨 scope 合计 + `duration_ms` 总墙钟。其下 `JobResult` → `ScenarioResult` → `StepResult` 三层结果（core 保留 step 级粒度），各级带 `duration_ms` 墙钟时长（性能指标，与成本的 `time_worked_s` **正交**，见 [0024](./0024-worker-core-protocol.md)）。
-- **RunReport** = 人看的归集报告（把两个引擎割裂的 Midscene html / Nova trajectory 归到一处）。**这是原 M5「报告统一」的归宿**——**v1.0 已实现（[0027](./0027-runreport-aggregation-index.md)）**：定为**跨引擎归集索引**（`manifest.json` 机器可读 + `index.html` 人可导航入口），**只索引/链接原生产物、不解析融合其内容**；新引擎报任意 `kind` 零改 core。由 `ReportStore` 从 `RunResult` 一次归集（cli 每次 run **默认生成**，`--no-report` 跳过）。
+- **RunReport** = 人看的归集报告（把两个引擎割裂的 Midscene html / Nova trajectory 归到一处）。**这是「报告统一」的归宿**——**v1.0 已实现（[0027](./0027-runreport-aggregation-index.md)）**：定为**跨引擎归集索引**（`manifest.json` 机器可读 + `index.html` 人可导航入口），**只索引/链接原生产物、不解析融合其内容**；新引擎报任意 `kind` 零改 core。由 `ReportStore` 从 `RunResult` 一次归集（cli 每次 run **默认生成**，`--no-report` 跳过）。
 
 ### 三层切分：definition / 控制面运行态 / 数据面判定（数据流向不从结果反推）
 
@@ -67,9 +67,9 @@
 - 用例可配"用哪个引擎"（默认单引擎），经 `@engine:` tag 选引擎（ADR 0019）。**双引擎交叉验证 v1.0 不做**（价值可疑、复杂度高，见 ADR 0019）；未来若需，在跑批层展开两次独立运行。
 - 并发：**scope 内串行**（上下文依赖），**scope 间并行**（互相独立）。
 
-## 留口子：Ports & Adapters（六边形架构），组合根注入
+## 留口子：核心注入接口（ports），组合根注入
 
-可替换的外部依赖不散落成 `run_scope` 的一堆参数，而是收成一个 **ports 层**（类比 DAO 层）：导出稳定接口，核心只依赖接口、不知实现是谁。
+可替换的外部依赖不散落成 `run_scope` 的一堆参数，而是收成一组**核心注入接口**（业界称 ports & adapters 模式，此处只借其形）：导出稳定接口，核心只依赖接口、不知实现是谁。
 
 **按关注点拆成独立 port（不揉成上帝 module）**：
 - `Engine` —— 真正跑一个 scope 的地方（名 `Engine`，对齐 CONTEXT 「引擎」术语）。**实装收敛为单个参数化 adapter `SubprocessEngine`**（`core/gherkai_core/adapters/subprocess_engine.py`）：以 `cmd`/`cwd`/`env` 参数化,既能 spawn Node worker 也能 spawn Python worker——因两个引擎"spawn 子进程 + 讲同一套 0024 协议"的形状本就完全一致（[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)），无需 `MidsceneEngine`/`NovaActEngine` 两个类。哪个引擎由组合根传不同 `cmd` 决定（`EngineResolver` 按 `job.engine` 选）。**执行引擎 port 与执行后端不同层**：port 是核心之下的接缝、实装由组合根注入，执行后端是使用方可见的那一个档位（见下决策 A）。
@@ -124,16 +124,16 @@ core/gherkai_core/
 
 云端 store adapter（DDB/S3，[0030](./0030-realtime-persistence-seam.md) 决定六）落地后，cli 加 `--backend {local,cloud}`（默认 `local`；`run`/`submit`/`status` 有，读判定的 `explain` 同形（[0042](./0042-step-evidence-and-explain.md) 决策四）、`doctor` 也收它但只切换查哪些检查项、不注入 store（[0041](./0041-agent-facing-cli-affordances.md) 决策四）——`submit` 与 `status` 的 backend 须一致，见 [0034](./0034-detached-batch-reconciler.md)；`plan` 纯本地不落库、不加）在组合根按开关选注入哪套 adapter。`RunPersistence`/`schedule` 只认 Store **port**，local↔cloud 切换**零改** core——这正是本 ADR「选实现=组合根注入」的第一次真实兑现。
 
-**单一开关换齐存储三层 + 执行引擎、第一版不开混搭**：`--backend cloud` 一次把 RunStore→DDB、ResultStore/ReportStore→S3（+ 挂 offloader）三层存储全换，**并把执行引擎从 `SubprocessEngine` 换成 `FargateEngine`**（见下「决策 A：`--backend cloud` = 存储上云 + Fargate 执行（单旋钮）」）。理由：三层存储后端不对等（上文已证不存在 `S3RunStore`/`DDBReportStore`），无有意义的混搭矩阵；「Local store + Fargate worker」是 **store⊥worker 正交轴**（上文「worker 产物 ⊥ store」）、是**组合根内部/e2e 可拼的矩阵、非用户 CLI 旋钮**，不需要 `--run-backend`/`--result-backend` 拆开（那是提前盖机器 + 组合爆炸测试负担）。
+**单一开关换齐存储三层 + 执行引擎、第一版不开混搭**：`--backend cloud` 一次把 RunStore→DDB、ResultStore/ReportStore→S3（+ 挂 offloader）三层存储全换，**并把执行引擎从 `SubprocessEngine` 换成 `FargateEngine`**（见下「决策 A：`--backend cloud` = 存储上云 + Fargate 执行（单一选项）」）。理由：三层存储后端不对等（上文已证不存在 `S3RunStore`/`DDBReportStore`），无有意义的混搭矩阵；「Local store + Fargate worker」是 **store⊥worker 正交轴**（上文「worker 产物 ⊥ store」）、是**组合根内部/e2e 可拼的矩阵、非用户 CLI 旋钮**，不需要 `--run-backend`/`--result-backend` 拆开（那是提前盖机器 + 组合爆炸测试负担）。
 
-#### 决策 A：`--backend cloud` = 存储上云 + Fargate 执行（单旋钮，不暴露正交）
+#### 决策 A：`--backend cloud` = 存储上云 + Fargate 执行（单一选项，不暴露正交）
 
-**面向用户，`--backend cloud` 是一个旋钮，同时定存储（DDB/S3）与执行（Fargate）**——不把「执行环境（subprocess/fargate）」与「存储 backend（local/cloud）」拆成两个正交旋钮暴露给用户。用户档只有两档：
+**面向用户，`--backend cloud` 是单一选项，同时定存储（DDB/S3）与执行（Fargate）**——不把「执行环境（subprocess/fargate）」与「存储 backend（local/cloud）」拆成两个正交旋钮暴露给用户。用户档只有两档：
 
 - **`--backend local`** = subprocess 执行 + 本地盘存储（`Local*Store`）——**「本机」只指 worker 进程与本次运行的状态、产物落在本机、不等于全程在本机**：AgentCore 浏览器会话与引擎模型都在云端，故本机后端同样需要云端凭证；
 - **`--backend cloud`** = Fargate 执行（`FargateEngine`）+ 云存储（DDB/S3）。
 
-**为何不暴露正交**：技术上执行环境与存储确实正交（组合根内部/e2e 能任意拼，见上 store⊥worker 与下决策 B），但把四象限（subprocess/fargate × local/cloud）全摆给用户会**参数爆炸、增加理解负担**，且用户实际只需要「本地跑 / 云上跑」两个心智档。故 CLI 只暴露 `--backend` 一个旋钮，`cloud ⇒ Fargate 执行 + 云存储`绑定。
+**为何不暴露正交**：技术上执行环境与存储确实正交（组合根内部/e2e 能任意拼，见上 store⊥worker 与下决策 B），但把四象限（subprocess/fargate × local/cloud）全摆给用户会**参数爆炸、增加理解负担**，且用户实际只需要「本地跑 / 云上跑」两个心智档。故 CLI 只暴露 `--backend` 这一个选项，`cloud ⇒ Fargate 执行 + 云存储`绑定。
 
 > **被拒方案护栏（防未来重复进坑）**：曾考虑让**执行环境 ⊥ 存储 backend 完全正交**、用户可任意组合（如 `subprocess + cloud`、`fargate + local` 都作为面向用户的 CLI 档）。**否决**——参数爆炸 + 用户困惑，收益（灵活性）用户实际不需要。**内部矩阵仍正交**（组合根/e2e 可拼），只是 CLI 不把这层正交暴露成用户旋钮。若未来有人再提「为什么不让用户自由组合执行×存储」——答案在此：不是技术做不到，是用户体验刻意收窄。
 
@@ -244,7 +244,7 @@ Fargate 执行环境配置（cluster / task-def / subnet / security-group / even
   - **决定（边界，务必读）**：**v0.1.0 判「方向已证」，不补真实用例即进 v1.0.0**。理由——① 团队当前**拿不到真实业务用例**（站点登录态等不可得），强等是空等；② 没有真实用例 → 破例无从触发 → **「破例清单」这条验收无法在 v0.x 执行**。故把「真实业务用例验收 + 破例记录」**顺延并入 v1.0.0**：待有真实用例时在 v1.0 里跑出破例、据以校验「QA 零代码」承诺。**已知风险**：v1.0 架构基于「探针用例都很顺」的乐观假设设计，真实用例的破例（登录 / HITL / 动态内容 flaky）可能反过来要求调整 v1.0 架构——接受此返工风险，因前置条件（真实用例）确实不具备。
   - **报告**：v0.x 原目标含「报告能看」，当时**决定先「散着」**（手动查目录够用），归集形态待要求清晰再定。**v1.0 已落地为 RunReport 归集索引**（[0027](./0027-runreport-aggregation-index.md)）：不重渲染原生产物、只归集成统一清单 + 导航入口——回答了「先散着」时悬而未决的形态问题（索引而非融合）。
 - **v1.0.0（团队 QA 日常可用）— ✅ 完成（架构与实现均已落地，本 ADR + 0022/0023）**：跑批入口（CLI 阻塞跑一批）、scope 调度、抖动治理（投票）落地；本地执行。**唯一未结项 = 承接 v0.x 顺延的「真实业务用例验收 + 破例清单」**——前置条件（可得的真实业务用例）仍不具备，见上 v0.1.0「决定（边界）」条及其已知返工风险；同顺延项里的 RunReport 归集已落地（[0027](./0027-runreport-aggregation-index.md)）。（「多用例组织」中的按 tag / scenario 选子集已由 [0041](./0041-agent-facing-cli-affordances.md) 决策一落地，见下「现在做 / 现在不做」节。）
-- **v1.1.0（云端执行）— ✅ 完成**：CLI 提交 → Fargate 跑 → 轮询收集，**job = scope** 粒度（上云时坐实，见 [0017](./0017-cloud-execution-fargate-over-runtime.md)）；外置状态存储（DDB，主要服务 `RunStore`）+ 无状态核心。**存储后端 / 执行引擎替换=加 adapter+换注入、核心不动**（已证）；**但无状态提交-收集是驱动模型演进、核心要动**（[0034](./0034-detached-batch-reconciler.md) 纠正，见上「这样上云…」处的 ⚠️ 分层注）。**决策 A：`--backend cloud` = 存储上云 + Fargate 执行绑定**（单旋钮、不暴露 subprocess×cloud 等正交用户档，见上「cli backend 选择」节）。**已落地**（清单以各权威 ADR 为准）：实时写存储接缝 + 云端 store adapter（[0030](./0030-realtime-persistence-seam.md) 决定六）+ job 生命周期态/severity（[0031](./0031-job-lifecycle-states-and-severity.md)）+ `FargateEngine` 执行 adapter 与 Fargate 特有韧性校准（[0024](./0024-worker-core-protocol.md)/[0032](./0032-fargate-execution-environment.md)，4 次真跑标定）+ 组合根接线与 CDK 工程（v1.1 时为顶层独立工程 `iac_aws_backend/`，[0037](./0037-distribution-and-packaging.md) 后收编进发行包 `gherkai-deploy-aws`=`deploy_aws/`；[0033](./0033-iac-aws-backend-and-composition-wiring.md)，真部署真跑）——坐实了「换 adapter 核心不动」，真跑通 local↔cloud 端到端。曾是唯一剩项的**无状态批量运行（CLI submit → 事件驱动推进 → 轮询收集，job = scope 粒度）已作为 v1.2 完成、真部署真跑通**（见下 v1.2.0 行 + [0034](./0034-detached-batch-reconciler.md)）。
+- **v1.1.0（云端执行）— ✅ 完成**：CLI 提交 → Fargate 跑 → 轮询收集，**job = scope** 粒度（上云时坐实，见 [0017](./0017-cloud-execution-fargate-over-runtime.md)）；外置状态存储（DDB，主要服务 `RunStore`）+ 无状态核心。**存储后端 / 执行引擎替换=加 adapter+换注入、核心不动**（已证）；**但无状态提交-收集是驱动模型演进、核心要动**（[0034](./0034-detached-batch-reconciler.md) 纠正，见上「这样上云…」处的 ⚠️ 分层注）。**决策 A：`--backend cloud` = 存储上云 + Fargate 执行绑定**（单一选项、不暴露 subprocess×cloud 等正交用户档，见上「cli backend 选择」节）。**已落地**（清单以各权威 ADR 为准）：实时写存储接缝 + 云端 store adapter（[0030](./0030-realtime-persistence-seam.md) 决定六）+ job 生命周期态/severity（[0031](./0031-job-lifecycle-states-and-severity.md)）+ `FargateEngine` 执行 adapter 与 Fargate 特有韧性校准（[0024](./0024-worker-core-protocol.md)/[0032](./0032-fargate-execution-environment.md)，4 次真跑标定）+ 组合根接线与 CDK 工程（v1.1 时为顶层独立工程 `iac_aws_backend/`，[0037](./0037-distribution-and-packaging.md) 后收编进发行包 `gherkai-deploy-aws`=`deploy_aws/`；[0033](./0033-iac-aws-backend-and-composition-wiring.md)，真部署真跑）——坐实了「换 adapter 核心不动」，真跑通 local↔cloud 端到端。曾是唯一剩项的**无状态批量运行（CLI submit → 事件驱动推进 → 轮询收集，job = scope 粒度）已作为 v1.2 完成、真部署真跑通**（见下 v1.2.0 行 + [0034](./0034-detached-batch-reconciler.md)）。
 - **v1.2.0（无状态批量运行）— ✅ 完成**：**「CLI 提交完就走、异步收集」**（`submit` 提交即返回 run_id、`status [--wait]` 轮询/接力收集；同步 `run` 保留不变）——CQRS + 无状态事件驱动 reconciler，[0034](./0034-detached-batch-reconciler.md)。**驱动模型演进、非只换 adapter**（见上「这样上云…」处 ⚠️ 分层注的 (b)）：抽纯 `project`/`plan_next`（core，local/cloud 共用）+ `reconcile.tick`（幂等、多触发源、CAS/HWM 条件写）。local=per-run 进程（`setsid` 脱离）+ SQLite events sink；cloud=三 Lambda 事件驱动链（kicker 冷启动 / reconciler 主推进 / 退出观察者）+ DDB Stream + EventBridge（[0033](./0033-iac-aws-backend-and-composition-wiring.md) IaC 扩展）。**真部署真跑通**（真实 AWS 账户 us-east-1：local+cloud 两路 submit→推进→passed，含卡死救活真验）。演进 0016/0024/0026/0031（Partially-superseded-by 0034）+ 0030（重议条落地）。
 - **v1.3.0（本地应用测试 + 能力可发现）— ✅ 完成**：`--expose-local` 经隧道把开发机上的被测应用暴露给云端浏览器（[0035](./0035-local-app-testing-via-tunnel.md)：URL 映射在组合根做、worker/引擎对隧道无知；新增 `runtime/gherkai_runtime/tunnel.py`+`tunnel_host.py` + `RunMeta.extra_http_headers` 搬运 context 级请求头）；确定性能力暴露（[0036](./0036-deterministic-capability-discovery.md)：注册即暴露——`@deterministic` 的 description/example 必填，worker 两个非 job 入口 `--capabilities`（自述，清单住 `deterministic_steps` 键）/`--match-steps`，CLI `list-deterministic --engine` + `plan` 的派发标注与冲突预检；匹配语义仍 100% 在 worker，不复刻进 core/CLI）。
 - **v1.4.0（阅读理解层 + agent skill + 分发与打包）— ✅ 完成**：完成线三项齐备——`docs/internals/` 给人的阅读理解层（已建，篇目与主题归属见该目录索引；层定位与判据见 CLAUDE.md 文档纪律 internals 条）；agent skill（工具中立的一份 `SKILL.md` + references，随 CLI wheel 发行、`gherkai skill install` 装进使用方项目——[0043](./0043-agent-skill-for-driving-gherkai.md)，✅ 2026-09-14 Accepted）；分发与打包（PyPI 多包 uv workspace，git tag 唯一版本真源 + `==` 同版本 pin、worker 定位链取代 `repo_root()`、`steps/` 定制面、GHCR 基础镜像 + 使用方定制镜像（交付机制见 [0038](./0038-worker-image-delivery.md)）、`gherkai deploy`——[0037](./0037-distribution-and-packaging.md)，PyPI 首发即 1.4.0、已随该 tag 全链发行）。
@@ -261,7 +261,7 @@ G1/G2 是 v1.0 核心库 `.feature` 解析的前置——其声明语法**现已
 ## 现在做 / 现在不做
 
 - **现在做（v1.0）**：核心库 `core/` 可被调用（逻辑不焊死在 CLI main 里）；钉死上面数据模型；定义 ports 接口（`Engine`/`RunStore`/`ResultStore`/`ReportStore`）+ 组合根注入；核心自解析 Gherkin + 薄 worker（[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)）。模块设计：worker↔core 协议见 [0024](./0024-worker-core-protocol.md)；plan 模块见 [0025](./0025-plan-module-feature-to-jobs.md)；schedule 模块见 [0026](./0026-schedule-module.md)。
-  - **ports 落地状态**：四个 port 的 local adapter 均已建（详见上「留口子：Ports & Adapters」节）。**两个引擎 worker 均已落地**（落点见上「工程布局」树），两个引擎对称、同讲 0024 协议。
+  - **ports 落地状态**：四个 port 的 local adapter 均已建（详见上「留口子：核心注入接口（ports）」节）。**两个引擎 worker 均已落地**（落点见上「工程布局」树），两个引擎对称、同讲 0024 协议。
 - **现在不做**：无状态机制 / WebUI ——接口已留好，等云端真需要时填 adapter + 组合根换注入。**避免为想象中的云端预先盖机器。**（**已越过**：云端 store/执行 adapter + 组合根接线 + IaC 在 v1.1 填齐、**无状态批量运行机制 v1.2 已实装真跑通**——清单见上「版本切分」的 v1.1.0/v1.2.0 行；但无状态批量运行**不止「填 adapter」**、是驱动模型演进，故当初「等填 adapter」的乐观预期对它不成立，见上「这样上云…」处的 ⚠️ 分层注。）
 - **G1/G2**：声明语法（[0019](./0019-feature-tags-scope-and-engine.md)）与调度实现（[0025](./0025-plan-module-feature-to-jobs.md)/[0026](./0026-schedule-module.md)）均已落地——分工枚举见上「G1/G2 解析前置」节。
 - **多用例组织**：跑批入口（CLI 按路径跑一批）已落地；**按 tag / scenario 选子集已落地**——`--scope`/`--tags`/`--scenario` 三个可重复 flag 在 run/plan/submit 同形，谓词由皮组装、core `plan(features, config, select=…)` 在「scope 分组与 engine/timeout 解析之后、Job 组装之前」施加（不变量：筛选只减少「跑哪几条」，见 [0041](./0041-agent-facing-cli-affordances.md) 决策一）。旧的 cucumber `--tags` 选子集约定随 BDD runner 一并退役（见 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)）。**当初把它整体推给核心库的理由已被兑现**：选子集依赖核心库的调度层，在（已退役的）bdd 直跑层做只是临时件、核心库终究会重做；当初「真需要时加 CLI 选择面 + plan 入口过滤、是加法」的成本判断也应验了——0041 落的正是这个形状，`select` 缺省 None 即不筛，既有调用点不受影响。`features/` 目前是 v0.x 打磨用例 + v1.0 起补的手工真跑验证夹具（并发/scope 共享、确定性 step），仍未做目录/命名的有意组织。

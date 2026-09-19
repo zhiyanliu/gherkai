@@ -244,7 +244,7 @@
   "boundaries": [
     {
       "kind": "region",
-      "label": "发行物（维护者侧）",
+      "label": "发行物（发布方侧）",
       "wraps": [
         "ghcr_base"
       ],
