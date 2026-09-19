@@ -56,6 +56,7 @@ gherkai 的直接操作者越来越多是使用者侧 AI agent（Claude Code / C
 ### 五、JSON 字段契约文档 + 护栏
 
 - 文档住 repo：`docs/internals/cli-json-contract.md`（给使用者/agent 的参考层，读者是「拿 `--json` 写脚本或 skill 的人」；不进发行包、不写 why）。唯一手写源仍在这里、不进发行包；agent skill 带一份**确定性转换**的副本随 CLI 发行（为何不能 link、转换规则与相等性护栏见 [0043](./0043-agent-skill-for-driving-gherkai.md) 决策四）——手写第二份才是第二事实源，生成副本由护栏钉住。
+- **契约面只覆盖机读输出形状与退出码语义**：人读输出（终端流水、提示行、`index.html` 这类人看视图）与引擎原生产物的报告页，其**版式与内容不在其内**——加法兼容与本决策的契约护栏不承诺它们形状稳定（用户可见文案另有 [0039](./0039-user-facing-surfaces-no-internal-references.md) 的约束）；指向它们的机读字段（`report_index` / `report_refs[]`）仍在契约面内、照常受加法兼容保护。
 - **护栏 = 真值集对照**（CLAUDE.md 文档纪律）：`cli/tests/test_cli_json_contract.py` 用真渲染器生成各命令的 JSON 样例，递归收集全部键名，逐个断言文档里以反引号出现——文档漏键即红。
 - 被拒：`gherkai schema <cmd>` 输出 JSON Schema——更机读，但要维护一套 schema 生成；先用文档 + 护栏，需求出现再升级（重议闸门）。
 

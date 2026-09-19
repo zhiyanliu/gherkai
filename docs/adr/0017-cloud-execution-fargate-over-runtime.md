@@ -2,7 +2,7 @@
 
 > **Status:** Accepted —— 倾向已落地为实态：Fargate/ECS 就是 `--backend cloud` 的执行实现（`FargateEngine` + CDK 工程：v1.1 时为顶层独立工程 `iac_aws_backend/`，[0037](./0037-distribution-and-packaging.md) 后收编进发行包 `gherkai-deploy-aws`（`deploy_aws/`）、经 `gherkai deploy` 部署，真部署真跑；见 [0032](./0032-fargate-execution-environment.md)/[0033](./0033-iac-aws-backend-and-composition-wiring.md)）。本 ADR 保留为**选型理由**（判据、诚实修正、翻盘条件）。
 
-当执行面搬上云（v1.x+，见 [0016](./0016-execution-architecture-core-lib-run-model.md)），**倾向 Fargate/ECS（ECS RunTask）而非 AgentCore Runtime**。这是**倾向性结论**，上云时以实测复核为准——非现在锁死。（此句为上云前的原始表述，保留作决策史；已按此倾向落地，见 Status 头与下「何时坐实」的演进注。）
+当执行面搬上云（v1.x+，见 [0016](./0016-execution-architecture-core-lib-run-model.md)），**倾向 Fargate/ECS（ECS RunTask）而非 AgentCore Runtime**。这是**倾向性结论**，上云时以实测复核为准——非现在锁死。（此句为上云前的原始表述，保留作决策史；已按此倾向落地，见 Status 头与下「何时坐实」的演进注。）**本 ADR 说的「上云」只指执行进程这一级**：AgentCore 浏览器会话从来就在云端（[0011](./0011-agentcore-browser-system-default-vs-custom.md)），本机后端亦然——该档同样要本机 AWS 凭证（[0040](./0040-consumer-role-model-and-terminology.md) 决策 3 的执行权限梯级）；浏览器在云与执行进程在云是两级相互独立的上云，云端后端下两级皆在云、但仍是两件事（本机后端只有浏览器那一级在云）。
 
 ## 决定性理由：workload shape 是批处理
 

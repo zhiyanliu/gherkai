@@ -2,7 +2,7 @@
 
 > **Status:** Accepted
 
-核心库把一组 `.feature` 变成可调度的 **job 列表**的模块。它兑现 [0019](./0019-feature-tags-scope-and-engine.md)/[0016](./0016-execution-architecture-core-lib-run-model.md) 一直 defer 到核心库的「scope 分组 + engine 冲突校验 + Gherkin 解析」。输出的 Job 正是 [0024](./0024-worker-core-protocol.md) worker↔core 协议的输入形状。调度（scope 间串/并行、会话共享）另立 `schedule` 模块，见 [0026](./0026-schedule-module.md)，以本模块输出为输入。
+核心库把一组 `.feature` 变成可调度的 **job 列表**的模块。它兑现 [0019](./0019-feature-tags-scope-and-engine.md)/[0016](./0016-execution-architecture-core-lib-run-model.md) 一直 defer 到核心库的「scope 分组 + engine 冲突校验 + Gherkin 解析」。输出的 Job 正是 [0024](./0024-worker-core-protocol.md) worker↔core 协议的输入形状。调度（scope 间串/并行、会话共享）另立 `schedule` 模块，见 [0026](./0026-schedule-module.md)，以本模块输出为输入。**本模块承担用例预检的解析与校验那半**（另一半的派发标注由 worker 自述提供、匹配语义不进 core，见 [0036](./0036-deterministic-capability-discovery.md)）：不执行用例、不连云端、不调模型，故零费用、不需云端凭证、可反复运行。它与执行前预检（preflight，对所选执行后端做只读就位检查，见 [0033](./0033-iac-aws-backend-and-composition-wiring.md)）是两件事，也不是「照原样模拟执行一遍」的 dry-run。
 
 ## 接口（深模块，小）
 

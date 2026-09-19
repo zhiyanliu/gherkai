@@ -72,7 +72,7 @@
 可替换的外部依赖不散落成 `run_scope` 的一堆参数，而是收成一个 **ports 层**（类比 DAO 层）：导出稳定接口，核心只依赖接口、不知实现是谁。
 
 **按关注点拆成独立 port（不揉成上帝 module）**：
-- `Engine` —— 真正跑一个 scope 的地方（名 `Engine`，对齐 CONTEXT 「引擎」术语）。**实装收敛为单个参数化 adapter `SubprocessEngine`**（`core/gherkai_core/adapters/subprocess_engine.py`）：以 `cmd`/`cwd`/`env` 参数化,既能 spawn Node worker 也能 spawn Python worker——因两个引擎"spawn 子进程 + 讲同一套 0024 协议"的形状本就完全一致（[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)），无需 `MidsceneEngine`/`NovaActEngine` 两个类。哪个引擎由组合根传不同 `cmd` 决定（`EngineResolver` 按 `job.engine` 选）。
+- `Engine` —— 真正跑一个 scope 的地方（名 `Engine`，对齐 CONTEXT 「引擎」术语）。**实装收敛为单个参数化 adapter `SubprocessEngine`**（`core/gherkai_core/adapters/subprocess_engine.py`）：以 `cmd`/`cwd`/`env` 参数化,既能 spawn Node worker 也能 spawn Python worker——因两个引擎"spawn 子进程 + 讲同一套 0024 协议"的形状本就完全一致（[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)），无需 `MidsceneEngine`/`NovaActEngine` 两个类。哪个引擎由组合根传不同 `cmd` 决定（`EngineResolver` 按 `job.engine` 选）。**执行引擎 port 与执行后端不同层**：port 是核心之下的接缝、实装由组合根注入，执行后端是使用方可见的那一个档位（见下决策 A）。
 - `RunStore` —— **控制面**：持 **definition（`RunMeta`，执行前确定的身份 + `Job[]`）+ 运行态（`RunState`：status、起止、会话血缘 sessionId）**（频繁读写：轮询/续跑/WebUI 进度）。读写三套接口：①一次性 `save_run(meta, state)` + `load_run_meta`/`load_run_state`；②实时写三段（[0030](./0030-realtime-persistence-seam.md)）`create_run`（开始：写 definition + 初始全 pending）→ `update_job_state`（按 scope_id 增量刷单 job）→ `finalize_run`（commit point：写总 status + ended_at）；③无状态批量运行的条件写三方（[0034](./0034-detached-batch-reconciler.md)，与②并存、假定并发多写者）`try_claim_job`（CAS pending→running，严格并发闸）/ `project_state`（HWM 条件写整个 RunState、挡 stale 覆盖）/ `try_finalize`（终态单调条件写、保 commit 恰一次）。另有 `preflight()` 探活（[0030](./0030-realtime-persistence-seam.md) 决定七：begin 前探底层可达，local no-op）。definition 与运行态生命周期不同（前者执行前定、后者执行后产/随进度刷，见上「三层切分」）。**这才是未来 DynamoDB 真正要存的东西**（可恢复、可轮询）。
 - `ResultStore` —— **数据面**：每 scenario 的 pass/fail、投票抖动、原生报告指针（追加为主；CI 读判定真值靠它）。`save_job_result`/`load_job_result`/`load_all` 按 job 粒度读写（判定真值唯一权威）。云端后端 **S3**（每 job 一对象，赌 CI 按键取判定，见下三层 store 选型 + [0030](./0030-realtime-persistence-seam.md) 第五刀）。
 - `ReportStore` —— 把 `RunResult` 归集成 RunReport（manifest + index，派生只读导航视图；文件型 → 云端 **S3**）。**已实装** `LocalReportStore`（[0027](./0027-runreport-aggregation-index.md)）。
@@ -130,7 +130,7 @@ core/gherkai_core/
 
 **面向用户，`--backend cloud` 是一个旋钮，同时定存储（DDB/S3）与执行（Fargate）**——不把「执行环境（subprocess/fargate）」与「存储 backend（local/cloud）」拆成两个正交旋钮暴露给用户。用户档只有两档：
 
-- **`--backend local`** = subprocess 执行 + 本地盘存储（`Local*Store`）；
+- **`--backend local`** = subprocess 执行 + 本地盘存储（`Local*Store`）——**「本机」只指 worker 进程与本次运行的状态、产物落在本机、不等于全程在本机**：AgentCore 浏览器会话与引擎模型都在云端，故本机后端同样需要云端凭证；
 - **`--backend cloud`** = Fargate 执行（`FargateEngine`）+ 云存储（DDB/S3）。
 
 **为何不暴露正交**：技术上执行环境与存储确实正交（组合根内部/e2e 能任意拼，见上 store⊥worker 与下决策 B），但把四象限（subprocess/fargate × local/cloud）全摆给用户会**参数爆炸、增加理解负担**，且用户实际只需要「本地跑 / 云上跑」两个心智档。故 CLI 只暴露 `--backend` 一个旋钮，`cloud ⇒ Fargate 执行 + 云存储`绑定。
