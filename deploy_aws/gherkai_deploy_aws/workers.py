@@ -691,7 +691,7 @@ def push_worker(image: str, *, engine: str, variant: str, set_default: bool = Fa
     except (WorkerCommandError, ContainerError) as exc:
         out(str(exc))
         return EXIT_PRECONDITION
-    except Exception as exc:  # 凭证/权限/region/网络：对用户是「先修凭证」，与前置同一档、不该抛 traceback
+    except Exception as exc:  # 凭证/权限/region/网络：对用户是「先修凭证」，与前置同一类、不该抛 traceback
         out(f"AWS 调用失败：{exc}\n需要部署方权限（ECR 推送域 + ecr:GetAuthorizationToken/DescribeImages、"
             f"ecs:RegisterTaskDefinition/ListTaskDefinitions/DescribeTaskDefinition/TagResource、iam:PassRole、"
             f"SSM 读写 /{prefix}backend/*、runs 表 Query），以及可用的凭证/region。")
@@ -708,7 +708,7 @@ def push_worker(image: str, *, engine: str, variant: str, set_default: bool = Fa
 
 def _skew_gate(compose, *, prefix: str, cli_version: str | None, ssm, out) -> int | None:
     """版本 skew 前置：block → 退 2（无放行口）；warn/skip → 打一行继续；ok → 静默；**读不到戳（凭证/权限）
-    也退 2**（对用户是「先修凭证」，与前置同一档）。
+    也退 2**（对用户是「先修凭证」，与前置同一类）。
 
     判据与措辞的单一真源是 `compose.check_backend_skew`（ADR 0037 决策 7）。**block 时补一句本命令专属的出路**：
     push-worker 住 `gherkai-deploy-aws`，临时用同版本 CLI 要带 extra（`gherkai[deploy-aws]==X.Y.Z`），
@@ -718,7 +718,7 @@ def _skew_gate(compose, *, prefix: str, cli_version: str | None, ssm, out) -> in
         verdict, message, stamp = compose.check_backend_skew(prefix=prefix, cli_version=cli_version, ssm=ssm)
     except Exception as exc:
         # 读戳失败（凭证/权限/region/网络）——`read_backend_version` 有意把这类异常抛给入口前端归码，
-        # 本模块就是那个前端：归到「前置失败」这一档、不抛 traceback（同 `cli._guard_vpc_spec` 的口径）。
+        # 本模块就是那个前端：归到「前置失败」这一类、不抛 traceback（同 `cli._guard_vpc_spec` 的口径）。
         out(f"读不到后端版本戳（SSM {names.ssm_path(prefix, names.BACKEND_VERSION_KEY)}）：{exc}\n"
             f"需要可用的凭证与 region（--region / AWS_REGION / --profile），以及 ssm:GetParameter 权限。")
         return EXIT_PRECONDITION
@@ -882,7 +882,7 @@ def run_deploy_steps(*, prefix: str, version: str, container, engines=None, regi
                   aws=aws, now=now, out=out)
         init_default_pointer(prefix=prefix, aws=aws, out=out)
         rederive_variants(prefix=prefix, engines=engines, version=version, aws=aws, now=now, out=out)
-    except Exception as exc:  # 含 AWS 侧异常：cdk 已改过账户，一律归「四步失败」这一档、不抛 traceback
+    except Exception as exc:  # 含 AWS 侧异常：cdk 已改过账户，一律归「四步失败」这一类、不抛 traceback
         out(f"{exc}\nstack 已生效；worker 镜像步骤未完成——重新运行 `gherkai deploy` 幂等收敛。")
         return EXIT_FAILED
     cleanup_pass(prefix=prefix, engines=engines, ssm=aws.ssm, ecs=aws.ecs, ddb=aws.ddb, now=now, out=out)
@@ -975,7 +975,7 @@ def _pending_cleanup(aws: Aws, *, family: str, mapped: set) -> list[dict]:
 def _cell(text: str, width: int) -> str:
     """定宽列（**按显示宽度补，不按字符数**）：中文表头字符占两列，用 `f"{s:<28}"` 会让整张表歪掉。
 
-    只认「东亚宽/全角」这一档（`unicodedata.east_asian_width` 的 W/F）——够表头用；数据列受 tag 字符集约束、恒 ASCII。
+    只认「东亚宽/全角」这一类（`unicodedata.east_asian_width` 的 W/F）——够表头用；数据列受 tag 字符集约束、恒 ASCII。
     """
     import unicodedata
 

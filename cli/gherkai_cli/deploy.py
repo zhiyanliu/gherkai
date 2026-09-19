@@ -36,7 +36,7 @@ PROVIDER_GROUP = "gherkai.deploy"
 #                               只读、不返退出码（ADR 0041 决策四）。缺席则入口打一行「provider 未提供自检」。
 # 全部收**已解析的 argparse.Namespace**、返回**进程退出码**：provider 自己声明的 flag 自己读，前端声明的命令面
 # flag（`--require-approval` / `--allow-vpc-change`）也在同一个 Namespace 上，provider 按需取。
-# 前端**不代 provider 做**：VPC 档 SSM 三态比对、版本戳写入、Node 前置检查、cdk 调用——全在 provider 内
+# 前端**不代 provider 做**：VPC 取值的 SSM 三态比对、版本戳写入、Node 前置检查、cdk 调用——全在 provider 内
 # （它们要连 AWS / 起 node，是被 `[deploy-aws]` extra 隔离的那半边）。
 #
 # **子动词接缝**（`gherkai deploy push-worker` / `list-workers` 那族 worker 镜像命令，ADR 0038）：provider 在
@@ -58,7 +58,7 @@ def resolve_provider(name: str | None) -> tuple[object | None, str | None]:
     """按 `--provider` 值（或唯一性）选出 provider 并加载 → `(provider, None)`；失败 → `(None, 人读的一句)`。
 
     三分叉（ADR 0037 决策 6）：**零个** → 提示装 `gherkai[deploy-aws]`；**一个** → 直接用、无需 `--provider`；
-    **多个** → 必须 `--provider <名>`，否则列出名字让人选（前端不替用户猜「哪个云」）。全部失败档由调用点退 2。
+    **多个** → 必须 `--provider <名>`，否则列出名字让人选（前端不替用户猜「哪个云」）。全部失败情形由调用点退 2。
 
     加载 = `ep.load()`：拿到**类**则实例化（entry point 惯例指向 `Provider` 类），拿到现成对象/单例则原样用。
     加载失败（provider 包半装 / 版本不匹配 / 它自己的 import 链炸）不让 traceback 裸奔——翻成点名 entry point
@@ -151,13 +151,13 @@ def add_parsers(sub, *, provider: object | None = None, provider_error: str | No
     )
     dp.add_argument(
         "--require-approval", default=None, metavar="MODE",
-        help="权限/IAM 变更的审批档，原样透传给 provider（AWS provider = cdk 的 never / any-change / broadening）；"
+        help="权限/IAM 变更的审批级别，原样透传给 provider（AWS provider = cdk 的 never / any-change / broadening）；"
              "不给则用 provider 自己的默认",
     )
     dp.add_argument(
         "--allow-vpc-change", action="store_true",
-        help="放行 VPC 档变更：本次的档与后端记着的上次生效档不一致、或 stack 已存在但后端还没有档记录时，deploy 退 2、"
-             "要你先 `--diff` 核对变更集；核对完带本 flag 放行一次——漏给 VPC 档会合成"
+        help="放行 VPC 取值变更：本次的取值与后端记着的上次生效取值不一致、或 stack 已存在但后端还没有取值记录时，deploy 退 2、"
+             "要你先 `--diff` 核对变更集；核对完带本 flag 放行一次——漏给 VPC 取值会合成"
              "「新建整套 VPC + 替换安全组」的危险变更集（真踩过）",
     )
 

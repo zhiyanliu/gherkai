@@ -453,7 +453,7 @@ def test_resolve_region_no_boto3_returns_none_not_crash(monkeypatch):
 
 @pytest.fixture
 def fresh_caps_cache(monkeypatch):
-    """每个用例一份空缓存：模块级缓存跨用例泄漏会让「问了几次」的断言与失败档全部失真。"""
+    """每个用例一份空缓存：模块级缓存跨用例泄漏会让「问了几次」的断言与失败情形全部失真。"""
     monkeypatch.setattr(compose, "_CAPABILITIES_CACHE", {})
 
 
@@ -583,7 +583,7 @@ _OK_TAIL = _OK_STEPS + _OK_MODEL  # 两个合法的尾键：拿它填「缺陷�
     b'{"engine": "novaact", "min_grace_s": 150' + _OK_TAIL + b'}',                        # 缺格式版本
 ])
 def test_query_capabilities_rejects_off_contract_answer(monkeypatch, novaact_env_cmd, fresh_caps_cache, payload):
-    """自述不合契约 → fail-loud（与「输出非 JSON」同档），且不写缓存。校验放在这一个函数里，**每个消费者
+    """自述不合契约 → fail-loud（与「输出非 JSON」同类），且不写缓存。校验放在这一个函数里，**每个消费者
     （run 前置 / list-deterministic / doctor / engine_min_grace）都受同一道**：下限当 0 处理会让 core 的 grace
     护栏形同废除；身份位（engine / schema_version）不核则 `GHERKAI_WORKER_NOVAACT_CMD` 指到 midscene bin 时
     Nova 静默拿 31s（grace < 单 act 上界 → SIGTERM 落 act 中途必被硬杀）；清单不是数组则消费者 len() 崩在无关处；
@@ -988,7 +988,7 @@ def test_build_cloud_stores_builds_handles_when_not_injected(monkeypatch):
     assert made["s3"] == ("us-west-2", "myprof")
     assert seen["run_store"][0] == (made["ddb"],)               # 建出来的句柄就是喂进去的那个
     assert seen["result_store"][0] == (made["s3"], "prod-artifacts", "reports/")
-    assert seen["run_store"][1]["detached"] is True             # submit 档标记透传（ADR 0034）
+    assert seen["run_store"][1]["detached"] is True             # submit 方式标记透传（ADR 0034）
 
 
 # ---- preflight_cloud_resources（ADR 0033）：探资源存在性、缺则点名 prefix ----
@@ -1386,7 +1386,7 @@ def test_check_backend_skew_propagates_read_errors():
 
 
 def test_variant_miss_hint_offers_push_and_base_fallback():
-    """同版本档的 variant miss 提示须同时给两条出路（ADR 0038「升级不重置默认指针」条）：
+    """同版本这一种情形的 variant miss 提示须同时给两条出路（ADR 0038「升级不重置默认指针」条）：
     让部署方 push-worker，或临时用 --worker-variant base 先运行。"""
     from gherkai_runtime.compose import _variant_miss_hint
 
@@ -1397,7 +1397,7 @@ def test_variant_miss_hint_offers_push_and_base_fallback():
 
 
 def test_variant_miss_hint_older_cli_only_guides_upgrade():
-    """CLI 旧于后端那一档只引导升级 CLI，不给 push、也不给 base 兜底（推旧命名空间的 tag 是原地绕圈）。"""
+    """CLI 旧于后端那一种判定只引导升级 CLI，不给 push、也不给 base 兜底（推旧命名空间的 tag 是原地绕圈）。"""
     from gherkai_runtime.compose import _variant_miss_hint
 
     msg = _variant_miss_hint(engine="novaact", variant="common", tag="1.3.0-common",

@@ -35,9 +35,9 @@ WORKFLOW_DEF = "gherkai-worker"
 # = 组合根注入的 `NOVA_ACT_TIMEOUT_S`）+ 本余量，经自述入口 `--capabilities` 报给组合根（ADR 0024「引擎自报
 # 下限」——下限的真值是 worker 自己的收尾预算，住在算它的这一侧才不需要人工同步；曾住组合根）。
 # 余量要盖住「SIGTERM 落 act 中途、act 有界返回**之后**」的收尾串行段：会话释放（三层 with 的 `__exit__`）
-# + evidence 截图后台队列的退出档有界排空（`run_scope.EVIDENCE_DRAIN_EXIT_S`，排在会话释放之后，ADR 0042 决策一）。
+# + evidence 截图后台队列的退出段有界排空（`run_scope.EVIDENCE_DRAIN_EXIT_S`，排在会话释放之后，ADR 0042 决策一）。
 # **已真容器标定**（ADR 0032「真容器校准结论」，4 次实际运行）：SIGTERM→退出最坏 21s，但其中 ~11s 已坐实为 ECS
-# 记录 executionStoppedAt 的平台侧滞后（worker 已退），subprocess 档不存在该段——真实预算 = 会话释放 ≤9s
+# 记录 executionStoppedAt 的平台侧滞后（worker 已退），subprocess 路径不存在该段——真实预算 = 会话释放 ≤9s
 # + 截图排空 6s = 15s，故 60→30（Nova grace 下限 180→150），30 仍留 ~2x 余量。
 # （上传本体在队列线程内执行、`use_threads=False`，无 s3transfer 线程池被 atexit join 的尾巴——否则要再加一次
 # client 超时 ≈10s，实际运行中量过。）env 可覆盖（再标定/调优）。

@@ -51,7 +51,7 @@ STAGE_ROOT = Path("/tmp/gherkai-eval-stages")
 DEFAULT_FIXTURE = "wiki-search"
 # 只认这两个臂名：写错了会静默当 baseline 运行（提示里不给 skill），白费一整轮还看不出来。
 KNOWN_ARMS = ("with_skill", "without_skill")
-# 本会话模型即评测模型（env 覆写便于换档比对）。
+# 本会话模型即评测模型（env 覆写便于换模型比对）。
 DEFAULT_MODEL = os.environ.get("GHERKAI_EVAL_MODEL") or "global.anthropic.claude-fable-5-1[1m]"
 
 COMMON_SUFFIX = ("\n\n（这个目录就是项目本身。不要安装任何东西——npm i / uv tool install / pip install 一律不要执行。"

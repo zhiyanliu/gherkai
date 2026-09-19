@@ -74,7 +74,7 @@ export const QUEUE_DRAIN_EXIT_MS = 6_000;
 // SIGTERM cleanup 末尾关本地 browser 的超时预算（会话已 Stop 之后才执行，见下 cleanup）：close 易挂起，
 // 套预算别让它吃掉 grace 里留给后面几段的份额。本段同样是自报下限 minGraceSeconds 的加数之一。
 export const BROWSER_CLOSE_BUDGET_MS = 3000;
-// 自报 grace 下限的余量（ADR 0024 grace 硬约束的 margin）：收尾各段预算之和之外再留一档，吸收段间调度、
+// 自报 grace 下限的余量（ADR 0024 grace 硬约束的 margin）：收尾各段预算之和之外再多留一份，吸收段间调度、
 // SDK 抖动与不被上述预算覆盖的零碎（诊断写出、事件 flush、进程退出本身）。
 // **取值来路**：使下限落在已标定的 31 s 上（各段之和 23.5 + 本余量 7.5）——31 不是新数，是 ADR 0032 真容器校准
 // 判「25 够用」（实测约 2x 余量）后、又被 ADR 0042 决策一的 6 s 截图队列排空顶上来的今值。改本常量 = 改一个
@@ -94,7 +94,7 @@ export const MIN_GRACE_MARGIN_MS = 7500;
  *
  *  加数与顺序即 shutdownSequence 的逐段串行（见该函数）：在途窗口兜底 INFLIGHT_SETTLE_MS
  *  + 会话 Stop STOP_SESSION_BUDGET_MS + 关 browser BROWSER_CLOSE_BUDGET_MS + 中断兜底报告提前上传的单次
- *  上传超时 UPLOAD_TIMEOUT_MS + 截图队列退出档排空 QUEUE_DRAIN_EXIT_MS（ADR 0042 决策一：排在会话释放
+ *  上传超时 UPLOAD_TIMEOUT_MS + 截图队列退出段排空 QUEUE_DRAIN_EXIT_MS（ADR 0042 决策一：排在会话释放
  *  之后、与兜底提前上传并列）+ MIN_GRACE_MARGIN_MS。scenario 边界提前上传的 SCENARIO_LOG_SNAPSHOT_BUDGET_MS
  *  **不在其中**——它在主流程执行、不在收尾路径上（见该常量注释）。 */
 export function minGraceSeconds(): number {
@@ -293,12 +293,12 @@ async function writeStdoutFlushed(s: string): Promise<void> {
   });
 }
 
-// `--no-report` 档（组合根经 env GHERKAI_NO_ARTIFACTS=1 告知，ADR 0037 决策 3）：**不生成、不上报**引擎原生产物——
+// `--no-report` 方式（组合根经 env GHERKAI_NO_ARTIFACTS=1 告知，ADR 0037 决策 3）：**不生成、不上报**引擎原生产物——
 // 关 agent 的 generateReport、不提前上传 log、不带 report ref。Midscene SDK 即便不出 report 也可能往 run 目录写 log/dump
-// （相对 cwd 的 ./midscene_run），故此档下若无 MIDSCENE_RUN_DIR 就把它导到一次性临时目录、不进用户 CWD（SDK 内部行为，不上报）。
+// （相对 cwd 的 ./midscene_run），故这一方式下若无 MIDSCENE_RUN_DIR 就把它导到一次性临时目录、不进用户 CWD（SDK 内部行为，不上报）。
 const NO_ARTIFACTS = process.env.GHERKAI_NO_ARTIFACTS === "1";
 
-/** scope 末整目录 flush 的根：`--no-report` 档返回 undefined（不上报任何原生产物，ADR 0037 决策 3——此档下
+/** scope 末整目录 flush 的根：`--no-report` 方式返回 undefined（不上报任何原生产物，ADR 0037 决策 3——这一方式下
  *  MIDSCENE_RUN_DIR 只是给 SDK 内部 log/dump 的一次性落点，flush 会把它们传上 S3、违背「不上报」）。导出供单测。 */
 export function artifactFlushRoot(): string | undefined {
   if (NO_ARTIFACTS) return undefined;
@@ -316,7 +316,7 @@ function agentOpts(): NonNullable<ConstructorParameters<typeof PlaywrightAgent>[
     // 之后读会对多 MB 的 report.html 做同步全文扫描且找不到即抛）。副作用是 report 目录多出
     // `<n>.execution.json`，随 scope 末整目录 flush 一并上传，接受。
     // **必须与 generateReport 同真同假**：SDK 在 generateReport=false 且此项为 true 时直接抛
-    // （`--no-report` 档不产 evidence，正好同为 false）。
+    // （`--no-report` 方式不产 evidence，正好同为 false）。
     persistExecutionDump: !NO_ARTIFACTS,
     // SDK 默认开的「强制 Chrome 用 base-select 渲染原生下拉」（往页面注入一个 style 标签，让 select 在截图里
     // 可见）——**我们显式关掉**：本 worker 连的是 AgentCore 云端浏览器（CDP 远连），注入用的 page.evaluate 常
@@ -547,7 +547,7 @@ export async function main(): Promise<number> {
     // 单调增长、跨 scenario 累积，只传真变过的 topic 文件、不重发未变 log）。log 落 `<MIDSCENE_RUN_DIR>/log/`。
     const logSeen = new Map<string, number>();
     const logDir = (!NO_ARTIFACTS && process.env.MIDSCENE_RUN_DIR) ? path.join(path.resolve(process.env.MIDSCENE_RUN_DIR), "log") : undefined;
-    // step 级机读证据的注入（ADR 0042 决策一）：落点与 flush 根同一判据——`--no-report` 档（此档也没开
+    // step 级机读证据的注入（ADR 0042 决策一）：落点与 flush 根同一判据——`--no-report` 方式（这一方式也没开
     // persistExecutionDump、无截图文件可引）或没给产物落点 → undefined = 本 run 不产 evidence。
     const evidenceRoot = artifactFlushRoot();
     const evidence: EvidenceHook | undefined = evidenceRoot
@@ -568,7 +568,7 @@ export async function main(): Promise<number> {
           await uploader.snapshotLogs(logDir, logSeen, SCENARIO_LOG_SNAPSHOT_BUDGET_MS);
         } catch (e) {
           // 产品面一行：**不承诺「收尾再试」**——正常完成路径的 scope 末整目录 flush 会兜一次，但停止信号 /
-          // 网络耗尽 / 异常三条提前退出路径只排空队列、不 flush，那句在这些档上是假的（与 Nova 上传器同一判据）。
+          // 网络耗尽 / 异常三条提前退出路径只排空队列、不 flush，那句在这些路径上是假的（与 Nova 上传器同一判据）。
           log(`worker: 引擎诊断日志未能提前上传（不影响判定与报告；这些日志可能最终没能上传）：${(e as Error).message}`);
         }
       }
@@ -609,7 +609,7 @@ export async function main(): Promise<number> {
   // scope 末：整目录 flush 剩余产物（report.html 已实时传、跳过；log/ 等一并传）+ 全成功删整目录（ADR 0029）。
   // no-op（local/未注入落点）时直接返回、不碰本地。仅正常完成路径走到此；异常/网络耗尽的 catch 内 return 不 flush
   // ——中断产物保留本地（对称 Nova）。
-  const flushRoot = artifactFlushRoot();  // --no-report 档 → undefined，不 flush（对称 Nova 的 no-artifacts 分支）
+  const flushRoot = artifactFlushRoot();  // --no-report 方式 → undefined，不 flush（对称 Nova 的 no-artifacts 分支）
   // 先排空后台截图队列、再整目录 flush（ADR 0042 决策一）：flush 只兜漏网的那几张——若反过来，队列里
   // 在途的那张会被 flush 按「还没记 uploaded」重传一次（同 key 冗余）。
   await drainArtifactQueue(uploader, QUEUE_DRAIN_SCOPE_END_MS);
@@ -629,7 +629,7 @@ async function runScenario(
   agent: PlaywrightAgent, page: import("playwright").Page, scenarioId: string, steps: Step[], votesN: number,
   uploader: ArtifactUploader, snapState: { mtime: number },
   sink: { emit: (e: unknown) => Promise<void> },
-  evidence?: EvidenceHook,  // step 级机读证据（ADR 0042）；不注入 = 不产（`--no-report` 档 / 无产物落点）
+  evidence?: EvidenceHook,  // step 级机读证据（ADR 0042）；不注入 = 不产（`--no-report` 方式 / 无产物落点）
 ): Promise<string[]> {
   const statuses: string[] = [];
   let shortcircuit = false;

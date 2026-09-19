@@ -1,9 +1,9 @@
-"""ensure_workflow_definition 单测（ADR 0004 create-if-not-exists）：串行 + **并发**档都幂等。
+"""ensure_workflow_definition 单测（ADR 0004 create-if-not-exists）：串行 + **并发**两种情形都幂等。
 
 mock boto3 client（不连真 AWS）。护 ADR 0004/0028 的幂等断言：
 - 已存在 → 'exists' 且不 create；不存在 → create → 'created'（description 只在给了时进 kwargs）。
 - **并发赢家已建**（create 吃 ConflictException 409）→ 归 'exists'、不抛：worker 每 scope 一个进程，
-  首次运行时多进程同时 get→404→create 是真实档；裸抛会在会话未起、退出码通道未走时 traceback exit 1，
+  首次运行时多进程同时 get→404→create 是真实情形；裸抛会在会话未起、退出码通道未走时 traceback exit 1，
   被 core 归 engine_error（既不重试也归错类）。
 - 其它 create 错误照常抛（fail-loud，别把对 409 的宽容扩成吞一切）。
 """

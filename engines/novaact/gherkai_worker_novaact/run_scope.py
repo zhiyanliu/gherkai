@@ -186,7 +186,7 @@ def _collect_traj(r, sink: list[str]) -> None:
 
 
 def _no_artifacts() -> bool:
-    """`--no-report` 档（组合根经 env `GHERKAI_NO_ARTIFACTS=1` 告知，ADR 0037 决策 3）：**不生成、不上报**引擎原生产物。
+    """`--no-report` 方式（组合根经 env `GHERKAI_NO_ARTIFACTS=1` 告知，ADR 0037 决策 3）：**不生成、不上报**引擎原生产物。
     Nova Act SDK 没有关闭 trajectory 的开关——不传 logs_directory 时它写进自己 mkdtemp 的临时目录，那是 SDK 内部
     行为、不进项目；本 worker 此时不收集 trajectory、不带 summary、不发任何 reportRef。"""
     return os.environ.get("GHERKAI_NO_ARTIFACTS") == "1"
@@ -280,7 +280,7 @@ def _attach_evidence(ev: dict, *, scope_id: str | None, scenario_id: str, step: 
     """
     try:
         if _no_artifacts() or not acts:
-            return []  # `--no-report`：不产、不上报（与引擎原生产物同档）
+            return []  # `--no-report`：不产、不上报（与引擎原生产物同类）
         base = os.environ.get("NOVA_LOGS_DIR")
         if not base:
             return []  # 无产物落点（手动直接运行/脚手架）：SDK 只写它自己的临时目录，evidence 无处安身
@@ -348,7 +348,7 @@ def _drain_evidence_uploads(timeout_s: float, *, flush_follows: bool) -> None:
     try:
         u = _uploader_singleton
         if u is None or not u.enabled:
-            return  # 无队列（零 evidence）/ 本机 no-op 档（截图就在本地，无需上传）
+            return  # 无队列（零 evidence）/ 本机 no-op 路径（截图就在本地，无需上传）
         if not u.drain(timeout_s):
             log("部分证据截图未能在收尾时限内传完（剩余的改由收尾统一上传；判定与报告不受影响）" if flush_follows
                 else "部分证据截图未能在收尾时限内传完（这些截图的链接可能打不开；判定与报告不受影响）")

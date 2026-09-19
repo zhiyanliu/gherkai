@@ -1,4 +1,4 @@
-"""`Provider` 测试（ADR 0037 决策 6）：flag 面、context 拼装、生成的 cdk.json、cdk 调用、VPC 档三态。
+"""`Provider` 测试（ADR 0037 决策 6）：flag 面、context 拼装、生成的 cdk.json、cdk 调用、VPC 取值三态。
 
 **全部不碰 AWS、不起 cdk**：boto3 句柄与 `subprocess.run` 都打桩。故这里的证据边界是「拼出来的东西对不对」——
 cdk 实际运行（synth/deploy）、真 CloudFormation/SSM 的错误码形态，是另一层（实际运行 synth 见提交记录；deploy 需真账号）。
@@ -54,8 +54,8 @@ def _parse(*argv: str) -> argparse.Namespace:
 # ---------------------------------------------------------------- flag 面
 
 def test_vpc_absent_parses_but_every_synthesizing_verb_exits_2(cdk, monkeypatch, capsys):
-    """`--vpc` 无隐式默认（ADR 0037 决策 6：漏档曾被合成为新建整套 VPC 的变更集）——但校验在**运行期**、
-    不在 argparse：`--bootstrap` 是账户级动作、不合成 app，不该被拖着要一个无关选项。四个合成动词缺档 → 退 2、
+    """`--vpc` 无隐式默认（ADR 0037 决策 6：漏给曾被合成为新建整套 VPC 的变更集）——但校验在**运行期**、
+    不在 argparse：`--bootstrap` 是账户级动作、不合成 app，不该被拖着要一个无关选项。四个合成动词缺 `--vpc` → 退 2、
     **不调 cdk**。"""
     args = _parse("--prefix", "gherkai-", "--region", "us-east-1")
     assert args.vpc is None
@@ -65,14 +65,14 @@ def test_vpc_absent_parses_but_every_synthesizing_verb_exits_2(cdk, monkeypatch,
     for verb in (p.deploy, p.diff, p.destroy, p.synth_only):
         assert verb(args) == 2, verb.__name__
         err = capsys.readouterr().err
-        assert "--vpc default" in err and "--vpc new" in err and "vpc-<id>" in err  # 三档各是什么
+        assert "--vpc default" in err and "--vpc new" in err and "vpc-<id>" in err  # 三种取值各是什么
         assert "首次部署" in err
         assert "WorkerSg" not in err and "变更集" not in err  # 产品面不带 construct 名与 cdk 行话（ADR 0039）
     assert cdk.calls == []  # 一次都没起 cdk
 
 
 def test_vpc_absent_hint_names_the_recorded_tier_for_an_existing_environment(cdk, monkeypatch, capsys):
-    """环境已存在且后端记着上次的档 → 提示直接报出那一档（用户最需要的那句），仍退 2、不起 cdk。"""
+    """环境已存在且后端记着上次的取值 → 提示直接报出那个取值（用户最需要的那句），仍退 2、不起 cdk。"""
     _stub_backend(monkeypatch, stack_exists=True, stored="default")
     assert Provider().deploy(_parse("--prefix", "vfy-", "--region", "us-east-1")) == 2
     err = capsys.readouterr().err
@@ -80,11 +80,11 @@ def test_vpc_absent_hint_names_the_recorded_tier_for_an_existing_environment(cdk
 
 
 def test_vpc_absent_hint_for_existing_environment_without_record(cdk, monkeypatch, capsys):
-    """环境已存在但没有档记录（早于登记机制的部署）→ 说明要给当初那一档，不臆造。"""
+    """环境已存在但没有取值记录（早于登记机制的部署）→ 说明要给当初那个取值，不臆造。"""
     _stub_backend(monkeypatch, stack_exists=True, stored=None)
     assert Provider().deploy(_parse("--prefix", "vfy-", "--region", "us-east-1")) == 2
     err = capsys.readouterr().err
-    assert "没有网络档记录" in err and "上次部署用的是" not in err
+    assert "没有网络取值记录" in err and "上次部署用的是" not in err
 
 
 def test_vpc_absent_hint_is_best_effort_when_backend_unreadable(cdk, monkeypatch, capsys):
@@ -137,7 +137,7 @@ def test_vpc_accepts_three_dossiers(value):
 
 @pytest.mark.parametrize("value", ["", "defaults", "sg-123", "vpc", "vpc-", "new:vpc-1"])
 def test_vpc_rejects_anything_else(value):
-    # 含 `vpc-`（空 id，笔误）与 `new:vpc-1`（后者是 SSM 里的**记账**形态、不是用户可给的档——
+    # 含 `vpc-`（空 id，笔误）与 `new:vpc-1`（后者是 SSM 里的**记账**形态、不是用户可给的取值——
     # 给了就该报错、别静默当 new）
     with pytest.raises(SystemExit):
         _parse("--vpc", value)
@@ -160,7 +160,7 @@ def test_contributed_flag_surface_is_exactly_the_provider_specific_set():
 def test_the_two_action_knobs_are_only_on_deploy():
     """`--allow-vpc-change` / `--require-approval` **只贴 deploy**（枚举型全集比对，同上条口径）。
 
-    destroy 两个都不消费：它不做 VPC 档三态比对，`cdk destroy` 也没有 `--require-approval`——贴上去就是
+    destroy 两个都不消费：它不做 VPC 取值三态比对，`cdk destroy` 也没有 `--require-approval`——贴上去就是
     `--help` 里两个恒无效的选项，且措辞讲的是 deploy 的变更集。前端的中立版同样只在 deploy 上（见 cli 模块头
     「两层声明」），故 destroy 上这两个 flag 只可能来自本 provider。
     """
@@ -311,12 +311,12 @@ def test_generated_cdk_json_carries_app_and_feature_flags_verbatim(tmp_path):
     assert not {"prefix", "version", "vpc_id", "use_default_vpc", "stop_timeout"} & set(data["context"])
 
 
-# ---------------------------------------------------------------- VPC 档三态（纯逻辑）
+# ---------------------------------------------------------------- VPC 取值三态（纯逻辑）
 
 @pytest.mark.parametrize("stored,requested,expected", [
     ("default", "default", True),
     ("vpc-0abc", "vpc-0abc", True),
-    ("new:vpc-0abc", "new", True),          # new 档带出所建 id → 按 new: 前缀匹配
+    ("new:vpc-0abc", "new", True),          # new 取值带出所建 id → 按 new: 前缀匹配
     ("new", "new", True),                   # 兜住「值只写了 new」的历史形态
     ("default", "new", False),
     ("vpc-0abc", "vpc-0def", False),
@@ -337,7 +337,7 @@ def test_classify_four_states():
     assert classify_vpc_state(stack_exists=True, stored_spec="default", requested="new") == VPC_MISMATCH
 
 
-# ---------------------------------------------------------------- VPC 档三态（打桩 boto3）
+# ---------------------------------------------------------------- VPC 取值三态（打桩 boto3）
 
 class _ClientError(Exception):
     """botocore ClientError 的形状替身（`response["Error"]["Code"]` + 文案）——本包按鸭子类型读它。"""
@@ -395,18 +395,18 @@ def test_guard_unrecorded_allowed_once(monkeypatch, capsys):
 
 
 def test_guard_match_proceeds(monkeypatch):
-    # ③ 档一致 → 放行（含 new 档的 new:<id> 前缀匹配）
+    # ③ 取值一致 → 放行（含 new 取值的 new:<id> 前缀匹配）
     _stub_backend(monkeypatch, stack_exists=True, stored="new:vpc-0abc")
     assert Provider()._guard_vpc_spec(_parse("--vpc", "new", "--region", "us-east-1")) is None
 
 
 def test_guard_mismatch_blocks(monkeypatch, capsys):
-    # ③ 档不一致 → 退 2（只强制显式给值挡不住第二次 deploy 敲错档）
+    # ③ 取值不一致 → 退 2（只强制显式给值挡不住第二次 deploy 敲错取值）
     _stub_backend(monkeypatch, stack_exists=True, stored="vpc-0abc123")
     rc = Provider()._guard_vpc_spec(_parse("--vpc", "default", "--region", "us-east-1"))
     assert rc == EXIT_PRECONDITION
     err = capsys.readouterr().err
-    assert "vpc-0abc123" in err and "default" in err  # 两个档都点名，别让人猜
+    assert "vpc-0abc123" in err and "default" in err  # 两个取值都点名，别让人猜
 
 
 def test_guard_mismatch_allowed(monkeypatch):
@@ -416,7 +416,7 @@ def test_guard_mismatch_allowed(monkeypatch):
 
 
 def test_guard_unexpected_read_error_exits_2_not_traceback(monkeypatch, capsys):
-    """凭证/权限/网络故障 → 退 2 + 一句话（对用户是「先修凭证」，与 Node 缺失同一档），不抛 traceback。"""
+    """凭证/权限/网络故障 → 退 2 + 一句话（对用户是「先修凭证」，与 Node 缺失同一类），不抛 traceback。"""
     def boom(**kw):
         raise _ClientError("AccessDenied", "not authorized to perform cloudformation:DescribeStacks")
     monkeypatch.setattr(provider_cli, "_make_cfn_client", lambda **kw: boom())
@@ -564,7 +564,7 @@ def test_deploy_rejects_an_unimplemented_container_engine_before_touching_the_ac
     """`GHERKAI_CONTAINER_ENGINE=podman` → 退 2 且**不调 cdk**：纯参数问题，账户一个字节都不该动
     （区别于「docker 没装」——那只警告，退码归 cdk 之后的四步）。
 
-    位置与 Node 前置同一档（本地、不花网络、不要凭证）——**先于** VPC 档比对：给错引擎名的人不该先被要求
+    位置与 Node 前置同一类（本地、不花网络、不要凭证）——**先于** VPC 取值比对：给错引擎名的人不该先被要求
     配好 AWS 凭证才看到「这个引擎本期没实装」（同 `deploy` 里 check_node 先于三态比对的理由）。
     """
     rec = _Recorder()
@@ -696,7 +696,7 @@ def test_provider_module_does_not_import_aws_cdk():
 
 
 def test_tolerates_a_shell_that_declares_neither_command_face_flag(monkeypatch, capsys):
-    """别的前端（或编程式调用）没给 `--allow-vpc-change` 时**fail-closed**：档不符照拦、不因缺 flag 就放行。"""
+    """别的前端（或编程式调用）没给 `--allow-vpc-change` 时**fail-closed**：取值不符照拦、不因缺 flag 就放行。"""
     parser = argparse.ArgumentParser(prog="other-shell")
     Provider().add_arguments(parser)
     args = parser.parse_args(["--vpc", "default", "--region", "us-east-1"])

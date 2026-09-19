@@ -281,7 +281,7 @@ def _done(sink):
 
 @pytest.fixture
 def logs_dir(tmp_path, monkeypatch):
-    """注入产物落点（NOVA_LOGS_DIR），并重置 uploader 单例（no-op 档：ref 报 file://、不连 AWS）。"""
+    """注入产物落点（NOVA_LOGS_DIR），并重置 uploader 单例（no-op 路径：ref 报 file://、不连 AWS）。"""
     d = tmp_path / "reports" / "rid" / "nova-trajectories"
     d.mkdir(parents=True)
     monkeypatch.setenv("NOVA_LOGS_DIR", str(d))
@@ -442,7 +442,7 @@ class _TracingSink(list):
 
 def test_screenshots_enqueued_only_after_step_done_emit(logs_dir, monkeypatch):
     trace: list = []
-    u = rs._get_uploader()      # no-op 档的真上传器（单例已由 fixture 重置）
+    u = rs._get_uploader()      # no-op 路径的真上传器（单例已由 fixture 重置）
     monkeypatch.setattr(u, "enqueue", lambda paths: trace.append(("enqueue", list(paths))))
     traj = _write_traj(logs_dir, "act_0_x_trajectory.json", _synthetic(2, thought_at=(0,)))
     sink = _TracingSink(trace)
@@ -642,7 +642,7 @@ def test_scope_end_drains_before_flush(main_fakes, logs_dir):
 
 
 def test_stop_signal_path_drains_after_session_release(main_fakes):
-    """协作停：三层 with 已退出（会话已释放）之后才排空，用退出档预算；不 flush（中断产物留本地）。
+    """协作停：三层 with 已退出（会话已释放）之后才排空，用退出段预算；不 flush（中断产物留本地）。
     会话释放的两个 __exit__ 也进同一条 trace——把 drain 挪进 with 之内（会话未释放先排空）这里立刻变红。"""
     trace: list = []
     main_fakes.setattr(rs, "_uploader_singleton", _RecUploader(trace))

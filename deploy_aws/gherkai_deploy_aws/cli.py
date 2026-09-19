@@ -20,13 +20,13 @@ CLI 前端负责：
 
 Provider 负责（CLI 一概不懂）：`--prefix`/`--vpc`/`--stop-timeout` 三个 context 配置项 + AWS 概念的
 `--region`/`--profile`（CLI 前端不在 deploy/destroy 子命令上声明这五个）、context 拼装、`cdk.json` 生成、
-cdk CLI 调用、VPC 档三态比对、工具链前置检查（Node ≥ 22 与 cdk CLI 可定位，见 `_toolchain_gate`）。
+cdk CLI 调用、VPC 取值三态比对、工具链前置检查（Node ≥ 22 与 cdk CLI 可定位，见 `_toolchain_gate`）。
 
 **`--require-approval` / `--allow-vpc-change` 是有意的两层声明**：前端给中立版（provider 缺席时帮助不残缺），
-本类**再声明一次**带 AWS 语义的版本（`--require-approval` 的取值是 cdk 的三档，能 `choices` 校验；
-`--allow-vpc-change` 的措辞要点名 VPC 档三态）。前端的 subparser 开了 `conflict_handler="resolve"`，同名即
+本类**再声明一次**带 AWS 语义的版本（`--require-approval` 的取值是 cdk 的三个审批级别，能 `choices` 校验；
+`--allow-vpc-change` 的措辞要点名 VPC 取值三态）。前端的 subparser 开了 `conflict_handler="resolve"`，同名即
 以后贴的（本类）为准——两层不是重复真源，是「中立占位 + provider 精确化」。两层都**只贴 deploy**：destroy
-不消费它们（不做 VPC 档三态比对，cdk destroy 也没有 `--require-approval`），前端的中立版同样只在 deploy 上。
+不消费它们（不做 VPC 取值三态比对，cdk destroy 也没有 `--require-approval`），前端的中立版同样只在 deploy 上。
 本类另经 `getattr` 容忍它们彻底缺席（别的前端）：缺 `--allow-vpc-change` = 一律不放行（fail-closed）、
 缺 `--require-approval` = 交给 cdk 默认。
 
@@ -39,7 +39,7 @@ cdk CLI 调用、VPC 档三态比对、工具链前置检查（Node ≥ 22 与 c
 
 ## 退出码
 
-`0` 成功；`2` **前置/校验失败**（Node 缺失或 cdk CLI 定位不到、VPC 档不符或无记录、读后端失败、容器引擎名不认、push-worker
+`0` 成功；`2` **前置/校验失败**（Node 缺失或 cdk CLI 定位不到、VPC 取值不符或无记录、读后端失败、容器引擎名不认、push-worker
 的架构/skew 拦截——用户可修，对齐 CLI 既有 preflight 退 2 的口径）；**`1`** = cdk 已成功而 worker 镜像四步失败
 （账户已被改动，重新运行 `gherkai deploy` 幂等收敛，ADR 0038）；其余 = cdk CLI 自己的返回码（原样透传，
 别把 cdk 的失败压成自己的码）。
@@ -62,7 +62,7 @@ from gherkai_deploy_aws import names
 PROVIDER_NAME = "aws"
 
 EXIT_OK = 0
-EXIT_PRECONDITION = 2  # 前置/校验失败（与 CLI preflight 同一档，见模块头「退出码」）
+EXIT_PRECONDITION = 2  # 前置/校验失败（与 CLI preflight 同一类，见模块头「退出码」）
 
 # Node 下限：与 worker 的 `engines.node` 同一下限（ADR 0037 决策 6「Node 前置是硬事实」，README 一处说清）。
 NODE_MIN_MAJOR = 22
@@ -79,21 +79,21 @@ CDK_FEATURE_FLAGS: dict[str, object] = {
     "@aws-cdk/core:target-partitions": ["aws", "aws-cn"],
 }
 
-# VPC 档比对的四种判定（ADR 0037 决策 6「VPC 档持久化比对，三态齐全」——「三态」指 stack / 记录 / 参数三个输入；`classify_vpc_state` 的返回值）
+# VPC 取值比对的四种判定（ADR 0037 决策 6「VPC 取值持久化比对，三态齐全」——「三态」指 stack / 记录 / 参数三个输入；`classify_vpc_state` 的返回值）
 VPC_FIRST_DEPLOY = "first-deploy"  # ① stack 不存在 = 真首次部署 → 放行
 VPC_UNRECORDED = "unrecorded"      # ② 参数缺失且 stack 已存在 = 本机制之前部署的环境 → 退 2（最危险的那一次）
-VPC_MATCH = "match"                # ③ 档一致 → 放行
-VPC_MISMATCH = "mismatch"          # ③ 档不一致 → 退 2
+VPC_MATCH = "match"                # ③ 取值一致 → 放行
+VPC_MISMATCH = "mismatch"          # ③ 取值不一致 → 退 2
 
 
 # ---------------------------------------------------------------------------
-# VPC 档（纯逻辑，与 boto3 解耦——三态判定是这套机制的正确性核心，单测直打它）
+# VPC 取值（纯逻辑，与 boto3 解耦——三态判定是这套机制的正确性核心，单测直打它）
 # ---------------------------------------------------------------------------
 
 def vpc_spec_matches(stored: str, requested: str) -> bool:
-    """SSM 里记的生效档 `stored` 是否 == 本次 `--vpc requested`。
+    """SSM 里记的生效取值 `stored` 是否 == 本次 `--vpc requested`。
 
-    三档形态见 `names.ssm_vpc_path`。`new` 档在 SSM 里是 `new:<所建 vpc-id>`（带出所建 id 以便回溯核对），
+    三种取值形态见 `names.ssm_vpc_path`。`new` 取值在 SSM 里是 `new:<所建 vpc-id>`（带出所建 id 以便回溯核对），
     故 `--vpc new` 按 **`new:` 前缀** 匹配、不逐字比。
     **反过来不成立**：`stored="new:vpc-abc"` 与 `--vpc vpc-abc` **不算一致**——前者是「VPC 由本 stack 拥有」、
     后者是「复用一个 stack 外的 VPC」，切换会让 CloudFormation 把它从 stack 里摘出去（= 删掉那个 VPC）。
@@ -117,8 +117,8 @@ def classify_vpc_state(*, stack_exists: bool, stored_spec: str | None, requested
 
 
 def _vpc_flag(value: str) -> str:
-    """`--vpc` 的取值校验：`default` / `new` / `vpc-<id>` 三档，**无隐式默认**（ADR 0037 决策 6；
-    三档与 ADR 0033「VPC 来源：三档」一一对应）。"""
+    """`--vpc` 的取值校验：`default` / `new` / `vpc-<id>` 三种取值，**无隐式默认**（ADR 0037 决策 6；
+    三者与 ADR 0033「VPC 来源：三种取值」一节一一对应）。"""
     if value in ("default", "new") or (value.startswith("vpc-") and len(value) > len("vpc-")):
         return value
     raise argparse.ArgumentTypeError(
@@ -140,7 +140,7 @@ def _make_sts_client(*, region, profile):
 
 
 def _make_ssm_client(*, region, profile):
-    """boto3 ssm client（读生效 VPC 档参数）。"""
+    """boto3 ssm client（读生效 VPC 取值参数）。"""
     import boto3
     return boto3.session.Session(profile_name=profile, region_name=region).client("ssm")
 
@@ -172,7 +172,7 @@ def _stack_exists(cfn, stack_name: str) -> bool:
 
 
 def _read_stored_vpc_spec(ssm, prefix: str) -> str | None:
-    """读 SSM 里的生效 VPC 档；`ParameterNotFound` → None（= 本机制之前部署的环境，由三态判定处置）。"""
+    """读 SSM 里的生效 VPC 取值；`ParameterNotFound` → None（= 本机制之前部署的环境，由三态判定处置）。"""
     try:
         resp = ssm.get_parameter(Name=names.ssm_vpc_path(prefix))
     except Exception as exc:
@@ -200,8 +200,8 @@ class Provider:
             help="资源名前缀（默认 gherkai-，或 AWS_RESOURCE_PREFIX）；**须与 run/submit 的 --prefix 一致**",
         )
         parser.add_argument(
-            "--vpc", default=None, type=_vpc_flag, metavar="档",
-            help="VPC 来源三档：default（账户默认 VPC）/ new（本 stack 新建，2-AZ 零 NAT）/ vpc-<id>（复用现有）。"
+            "--vpc", default=None, type=_vpc_flag, metavar="取值",
+            help="VPC 来源三种取值：default（账户默认 VPC）/ new（本 stack 新建，2-AZ 零 NAT）/ vpc-<id>（复用现有）。"
                  "deploy / --diff / --synth-only / destroy 必给、无隐式默认；--bootstrap 不需要（账户级动作、不合成 stack）",
         )
         parser.add_argument(
@@ -214,19 +214,19 @@ class Provider:
                  "默认复用缓存（CDK 标准做法，也避免每次为缺失查询预合成占位模板）",
         )
         # 下面两个是**前端已声明的中立版的 AWS 精确化**（`conflict_handler="resolve"` 令本处生效，见模块头
-        # 「两层声明」）：一个加 cdk 的取值 `choices`、一个把措辞钉到 VPC 档三态上。
-        # **只贴 deploy**：destroy 两个都不消费（不做 VPC 档三态比对，cdk destroy 也没有 `--require-approval`），
+        # 「两层声明」）：一个加 cdk 的取值 `choices`、一个把措辞钉到 VPC 取值三态上。
+        # **只贴 deploy**：destroy 两个都不消费（不做 VPC 取值三态比对，cdk destroy 也没有 `--require-approval`），
         # 贴上去就是 `--help` 里两个恒无效的选项。`prog` 认不出时仍贴（同 `_is_destroy_parser` 的降级口径：
         # 无 prog 的 parser 要拿得到全集）。
         if not self._is_destroy_parser(parser):
             parser.add_argument(
                 "--allow-vpc-change", action="store_true",
-                help="放行一次 VPC 档变更/首次登记（默认拦：档与后端记录不符即退 2，先 --diff 核对变更集）",
+                help="放行一次 VPC 取值变更/首次登记（默认拦：取值与后端记录不符即退 2，先 --diff 核对变更集）",
             )
             parser.add_argument(
                 "--require-approval", default=None,
                 choices=("never", "any-change", "broadening"),
-                help="透传 cdk 的 IAM 变更审批档（不给则用 cdk 自己的默认值）",
+                help="透传 cdk 的 IAM 变更审批级别（不给则用 cdk 自己的默认值）",
             )
         # --region/--profile 归 provider（AWS 概念）：CLI 前端不在本子命令上声明，见模块头接缝契约。
         parser.add_argument("--region", default=None, metavar="R", help="AWS region（默认走 AWS_REGION/profile 配置）")
@@ -337,14 +337,14 @@ class Provider:
 
     # ---- 命令面（CLI 前端据它自己的 flag 选调；每个方法自成一次完整调用）----
     def deploy(self, args) -> int:
-        """供给/更新后端。**先过 VPC 档三态**（ADR 0037 决策 6），过了才调 `cdk deploy`。"""
-        # 工具链前置（Node + cdk CLI）先于 VPC 档比对，理由见 `_toolchain_gate`。**cdk 可定位性必须也在这一档**：
-        # 若只在 `_run_cdk` 里拦，就要等读过后端、比对过 VPC 档之后才退 2，而那条路径上 cdk 一行输出都没有——
+        """供给/更新后端。**先过 VPC 取值三态**（ADR 0037 决策 6），过了才调 `cdk deploy`。"""
+        # 工具链前置（Node + cdk CLI）先于 VPC 取值比对，理由见 `_toolchain_gate`。**cdk 可定位性必须也在这一关**：
+        # 若只在 `_run_cdk` 里拦，就要等读过后端、比对过 VPC 取值之后才退 2，而那条路径上 cdk 一行输出都没有——
         # 底下「失败原因见上方 cdk 输出」的提示会变成误导（它建议的 `--bootstrap` 也会以同样的原因失败）。
         toolchain = self._toolchain_gate()
         if toolchain is not None:
             return toolchain
-        # 容器引擎的两类问题也在这一档处置（本地、不花网络、不要凭证——这一期 deploy 机器需要容器引擎，
+        # 容器引擎的两类问题也在这一关处置（本地、不花网络、不要凭证——这一期 deploy 机器需要容器引擎，
         # 同步基础镜像要 pull/push，ADR 0038「容器引擎口子」）：
         # - **名字不认**（env/flag 给了 podman）→ 纯参数问题，退 2、绝不动账户；
         # - **装了但不可用 / 没装** → 只警告：退码语义归 cdk 之后的四步（账户已改 → 退 1、重新运行幂等收敛）。
@@ -383,8 +383,8 @@ class Provider:
     def destroy(self, args) -> int:
         """销毁 stack。**表/桶/ECR 是 `RETAIN`、不随之删**（防误删，ADR 0033）——残留清单见 README。
 
-        不过 VPC 档三态：destroy 不改 VPC 形态，比对只会拦住「档记错了但想删干净」的人。
-        但 `--vpc` 仍必给：destroy 也要合成 app（stack 的网络分支按档走），缺档合成不出同一个 stack。
+        不过 VPC 取值三态：destroy 不改 VPC 形态，比对只会拦住「取值记错了但想删干净」的人。
+        但 `--vpc` 仍必给：destroy 也要合成 app（stack 的网络分支按取值走），缺了它合成不出同一个 stack。
         """
         missing = self._require_vpc(args)
         if missing is not None:
@@ -393,7 +393,7 @@ class Provider:
         return self._run_cdk("destroy", args, extra=extra)
 
     def diff(self, args) -> int:
-        """只呈变更集（不改任何东西）。**它是 VPC 档三态的指定核对手段**，故自身不做三态比对——
+        """只呈变更集（不改任何东西）。**它是 VPC 取值三态的指定核对手段**，故自身不做三态比对——
         对本机制之前部署的环境，`deploy` 退 2 时让人运行的就是它，若它也被拦就无路可走。"""
         missing = self._require_vpc(args)
         if missing is not None:
@@ -569,8 +569,8 @@ class Provider:
         漏给曾被合成为「新建整套 VPC + 替换 WorkerSg」的变更集）；缺 → 退 2。不用 argparse 的 `required=True`：
         那会把 `--bootstrap`（账户级、不合成 app）也拖进来。
 
-        提示按 ADR 0039 只说三档各是什么、为什么不给默认、怎么办；「怎么办」尽量具体——环境已存在且后端记着上次的
-        档时直接报出那一档（读 SSM 是 best-effort：读不到就不给这半句，不因提示而多一种失败）。"""
+        提示按 ADR 0039 只说三种取值各是什么、为什么不给默认、怎么办；「怎么办」尽量具体——环境已存在且后端记着上次的
+        取值时直接报出那个取值（读 SSM 是 best-effort：读不到就不给这半句，不因提示而多一种失败）。"""
         if getattr(args, "vpc", None):
             return None
         print("缺 --vpc：部署要显式选网络——`--vpc default`（用账户的默认 VPC）/ `--vpc new`（新建一套）/ "
@@ -579,7 +579,7 @@ class Provider:
         return EXIT_PRECONDITION
 
     def _stored_vpc_hint(self, args) -> str:
-        """给缺 `--vpc` 的提示配「怎么办」：环境已存在 → 报后端记录的上次那一档；无记录 → 说明要给当初那一档；
+        """给缺 `--vpc` 的提示配「怎么办」：环境已存在 → 报后端记录的上次那个取值；无记录 → 说明要给当初那个取值；
         stack 不在 → 首次部署按需选。任何读取失败（凭证 / region / 权限）→ 空串，提示退回通用版。"""
         try:
             target = self._resolve_target(args)
@@ -591,7 +591,7 @@ class Provider:
             return ""
         if stored:
             return f"这个环境上次部署用的是 `--vpc {stored}`，沿用即可。"
-        return "这个环境已存在但后端没有网络档记录，请给当初部署用的那一档。"
+        return "这个环境已存在但后端没有网络取值记录，请给当初部署用的那个取值。"
 
     # ---- context / cdk.json（纯推导，单测直打）----
     def build_context(self, args) -> dict[str, str]:
@@ -605,7 +605,7 @@ class Provider:
         ctx: dict[str, str] = {"prefix": target.prefix, "version": self._resolve_version(args)}
         vpc = getattr(args, "vpc", None)
         if not vpc:  # 调用点已经 _require_vpc 过；这里是契约守卫，不是用户提示
-            raise ValueError("build_context 需要 args.vpc：VPC 档无隐式默认，调用前先做缺档检查")
+            raise ValueError("build_context 需要 args.vpc：VPC 取值无隐式默认，调用前先做缺值检查")
         if vpc == "default":
             ctx["use_default_vpc"] = "true"
         elif vpc != "new":
@@ -695,12 +695,12 @@ class Provider:
                 shutil.copyfile(work_ctx, ctx_cache)
             return rc
 
-    # ---- 内部：VPC 档三态 ----
+    # ---- 内部：VPC 取值三态 ----
     def _guard_vpc_spec(self, args) -> int | None:
-        """deploy 前的 VPC 档比对。放行 → None；拦 → 退出码（2）。
+        """deploy 前的 VPC 取值比对。放行 → None；拦 → 退出码（2）。
 
         只在 deploy 前执行（见 `diff`/`destroy` 的 docstring）。读失败（凭证/权限/网络）也退 2 而非抛 traceback：
-        对用户是「先修凭证」，与 Node 缺失同一档。
+        对用户是「先修凭证」，与 Node 缺失同一类。
         """
         target = self._resolve_target(args)
         stack = names.stack_name(target.prefix)
@@ -712,7 +712,7 @@ class Provider:
                 ssm = _make_ssm_client(region=target.region, profile=target.profile)
                 stored = _read_stored_vpc_spec(ssm, target.prefix)
         except Exception as exc:
-            print(f"读不到后端 VPC 档（stack {stack} / SSM {names.ssm_vpc_path(target.prefix)}）：{exc}\n"
+            print(f"读不到后端 VPC 取值（stack {stack} / SSM {names.ssm_vpc_path(target.prefix)}）：{exc}\n"
                   f"需要 cloudformation:DescribeStacks 与 ssm:GetParameter 权限，以及可用的凭证/region。",
                   file=sys.stderr)
             return EXIT_PRECONDITION
@@ -725,17 +725,17 @@ class Provider:
         path = names.ssm_vpc_path(target.prefix)
         if state == VPC_UNRECORDED:
             message = (
-                f"stack {stack} 已存在，但 {path} 没有 VPC 档记录——这个部署早于 VPC 档登记机制，"
+                f"stack {stack} 已存在，但 {path} 没有 VPC 取值记录——这个部署早于 VPC 取值登记机制，"
                 f"本次 deploy 无从核对 `--vpc {args.vpc}` 是否与当初一致。**这恰是最危险的那一次 deploy**："
-                f"档给错会被当成新建一套网络、把在用的整套换掉。"
+                f"取值给错会被当成新建一套网络、把在用的整套换掉。"
             )
         else:
             message = (
-                f"`--vpc {args.vpc}` 与后端记录的 VPC 档 `{stored}` 不一致（{path}）。换档 = VPC 级资源替换，"
+                f"`--vpc {args.vpc}` 与后端记录的 VPC 取值 `{stored}` 不一致（{path}）。改这个取值 = VPC 级资源替换，"
                 f"worker 网络会被重建。"
             )
         if allow:
-            print(f"警告：{message}\n已带 --allow-vpc-change，放行本次（deploy 成功后档会写成 `--vpc {args.vpc}`）。",
+            print(f"警告：{message}\n已带 --allow-vpc-change，放行本次（deploy 成功后，后端会把这次的 `--vpc {args.vpc}` 记下来）。",
                   file=sys.stderr)
             return None
         print(f"{message}\n出路：① 先 `gherkai deploy --diff`（带同一组 flag）核对变更集；"

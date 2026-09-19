@@ -34,16 +34,20 @@ FORBIDDEN = re.compile(
 )
 
 # 口头语 / 隐喻（ADR 0045 决策六）：给人读的文档与产品文案不用；「跑」作动词禁用，只放行提及词「跑」（后接 `」`）。
-COLLOQUIAL = re.compile(r"帽子不是人|烧钱|锁步|lockstep|烙进|烙好|烙成|烙在|逃生舱|旋钮|跑(?!」)")
+# 末项管量词「档」：作取值 / 级别 / 类别 / 情形 / 后端义一律不用（照句意写「取值 / 级别 / 判定 / 情形 / 后端」），
+# 只放行「文档 / 归档 / 存档 / 档案 / 档期」这类固定词。它是用词规则而非口吻规则，故 CHANGELOG 已发行节
+# 随退役词表一起豁免（见 `changelog_unreleased`）。
+COLLOQUIAL = re.compile(r"帽子不是人|烧钱|锁步|lockstep|烙进|烙好|烙成|烙在|逃生舱|旋钮|跑(?!」)"
+                        r"|(?<![文归存])档(?![案期])")
 
 # 已退役的旧名：CONTEXT.md 词表给了规范名、旧名列进该条 `_Avoid_` 的那批，使用者面一个都不许再出现。
 # 与 COLLOQUIAL 分表是因为判据不同——那张管「口吻」（口头语 / 隐喻，永久禁），这张管「用词版本」（旧名 →
 # 规范名，随词表增删）。逐词与词表同源由 `test_user_docs.test_retired_terms_are_all_in_the_glossary` 守：
 # 往这里加词必须先在 CONTEXT.md 对应词条的 `_Avoid_` 里落下，免得护栏与词表各自演化。
+# 退役后端简称的「… 档」形态（`cloud 档` / `本机档` …）不在此重列：已由 `COLLOQUIAL` 的量词「档」通则兜住。
 RETIRED_TERMS_WORDS = (
     "跑法", "抢传", "确定性锚点", "大脑", "穿刺", "骨架验证用例", "版本单旋钮", "无状态跑批", "在跑 run",
-    "逃生舱", "供给包", "提交方", "技能包", "建造者 AI", "AI coding agent",
-    "维护者", "本机档", "云端档", "cloud 档", "local 档",
+    "逃生舱", "供给包", "提交方", "技能包", "建造者 AI", "AI coding agent", "维护者",
 )
 RETIRED_TERMS = re.compile("|".join(re.escape(w) for w in RETIRED_TERMS_WORDS))
 
@@ -51,11 +55,12 @@ _CHANGELOG_RELEASED = re.compile(r"^## \[\d", re.M)  # 第一个已发行版本�
 
 
 def changelog_unreleased(text: str) -> str:
-    """CHANGELOG 交给退役词表扫的部分 = 截到第一个已发行版本节之前。
+    """CHANGELOG 交给退役词表与口头语表扫的部分 = 截到第一个已发行版本节之前。
 
     已发行节是**发行当时的原话**：改词表不回溯改写它，否则变更记录与使用者当年读到的说明不符。
-    截断保留前面的原始行，故调用方 `enumerate` 出的行号与原文一致。内部指代 / 口头语两张表仍扫全篇
-    （那是发行时就不该写的东西，不因过了一个版本而免责）。
+    截断保留前面的原始行，故调用方 `enumerate` 出的行号与原文一致。**内部指代那张表仍扫全篇**
+    （那是发行时就不该写的东西，不因过了一个版本而免责）；口头语表进这条豁免是因为它现在也管用词
+    （量词「档」，见 `COLLOQUIAL`）——用词规则是事后新立的，回溯扫已发行节只会拦出按规矩改不了的历史。
     """
     m = _CHANGELOG_RELEASED.search(text)
     return text[:m.start()] if m else text

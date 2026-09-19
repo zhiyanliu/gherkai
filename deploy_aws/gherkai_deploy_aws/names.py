@@ -57,9 +57,9 @@ LAMBDA_ASSET_DIR_ENV = "GHERKAI_LAMBDA_ASSET_DIR"
 def stack_name(prefix: str) -> str:
     """CloudFormation stack 名（= `app.py` 给 `BackendStack` 的 construct id，CDK 据此定 stack 名）。
 
-    **两个消费者必须恒等**：`app.py` 建 stack 用它；`cli.py` 的 VPC 档三态比对用它 `DescribeStacks`
+    **两个消费者必须恒等**：`app.py` 建 stack 用它；`cli.py` 的 VPC 取值三态比对用它 `DescribeStacks`
     探「stack 是否已存在」（ADR 0037 决策 6 三态①）。任一侧单独改推导 → 要么部署出第二套 stack、要么
-    三态误判成「真首次部署」而放行错档 —— 故收在此一处。
+    三态误判成「真首次部署」而放行了错的取值 —— 故收在此一处。
     **公式不得变更**：现网已部署的 stack 就叫这个名，改推导等于换 stack（旧 stack 遗留、新 stack 与旧资源撞名）。
     """
     return f"BackendStack-{prefix.rstrip('-') or 'default'}"
@@ -81,9 +81,9 @@ def ssm_version_path(prefix: str) -> str:
 
 
 def ssm_vpc_path(prefix: str) -> str:
-    """生效 VPC 档的 SSM 路径（ADR 0037 决策 6「VPC 档持久化比对，三态齐全」）。
+    """生效 VPC 取值的 SSM 路径（ADR 0037 决策 6「VPC 取值持久化比对，三态齐全」）。
 
-    值形态三档：`default` / `new:<所建 vpc-id>` / `<复用的 vpc-id>`——`new` 档也存出所建 vpc-id 使其可回溯核对。
+    值形态三种：`default` / `new:<所建 vpc-id>` / `<复用的 vpc-id>`——`new` 取值也存出所建 vpc-id 使其可回溯核对。
     比对逻辑（含 `new:` 前缀匹配）在 `cli.vpc_spec_matches`，与本路径同一批语义、别在别处重写。
     """
     return ssm_path(prefix, VPC_KEY)

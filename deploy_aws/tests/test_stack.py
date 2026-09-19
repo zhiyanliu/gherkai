@@ -1,7 +1,7 @@
 """BackendStack 合成断言测试（ADR 0033/0037 决策 6）：纯本地 synth、不碰 AWS。
 
 用 CDK assertions.Template 断言关键契约——尤其**与 cli 侧命名/schema 的单一事实源对齐点**（ADR 0033 护栏）：
-表/桶/task-def 名、events TTL 属性、container 名不带 prefix、SSM 路径（含 version / vpc 档 / worker-template
+表/桶/task-def 名、events TTL 属性、container 名不带 prefix、SSM 路径（含 version / vpc 取值 / worker-template
 三族部署戳）。防未来改 stack 时漂移。
 运行：uv run pytest（根或 deploy_aws/ 下皆可）。
 """
@@ -207,28 +207,28 @@ def test_version_context_must_be_pep440():
         _template(context={"version": "not a version"})
 
 
-# ---- 部署戳：生效 VPC 档三档（ADR 0037 决策 6「VPC 档持久化比对」写侧）----
+# ---- 部署戳：生效 VPC 取值三种形态（ADR 0037 决策 6「VPC 取值持久化比对」写侧）----
 def test_ssm_vpc_spec_default_dossier():
-    # -c use_default_vpc=true → 档记 "default"
+    # -c use_default_vpc=true → 取值记 "default"
     t = _template(context={"use_default_vpc": "true"})
     assert _ssm_params(t)["/gherkai-backend/vpc"]["Value"] == "default"
 
 
 def test_ssm_vpc_spec_reuse_existing_records_the_id():
-    # -c vpc_id=vpc-abc → 档记那个 id 原样（下次 deploy 逐字比对）
+    # -c vpc_id=vpc-abc → 取值记那个 id 原样（下次 deploy 逐字比对）
     t = _template(context={"vpc_id": "vpc-0abc123"})
     assert _ssm_params(t)["/gherkai-backend/vpc"]["Value"] == "vpc-0abc123"
 
 
 def test_ssm_vpc_spec_new_carries_created_vpc_id():
-    """建新档记 `new:<所建 vpc-id>`——**带出 id 才可回溯核对**（ADR 0037 决策 6）。
+    """建新时取值记 `new:<所建 vpc-id>`——**带出 id 才可回溯核对**（ADR 0037 决策 6）。
 
     id 是部署期才有值的 CDK token，故模板里是 Fn::Join（"new:" + Ref(VPC)）；断言其形态而非字面值。
     """
     value = _ssm_params(_template())["/gherkai-backend/vpc"]["Value"]
     parts = value["Fn::Join"][1]
-    assert parts[0] == "new:", f"档值应以 new: 起头：{value}"
-    assert any(isinstance(p, dict) and "Ref" in p for p in parts), f"档值应含所建 VPC 的 Ref：{value}"
+    assert parts[0] == "new:", f"取值应以 new: 起头：{value}"
+    assert any(isinstance(p, dict) and "Ref" in p for p in parts), f"取值应含所建 VPC 的 Ref：{value}"
 
 
 # ---- worker task-def 模板 revision ARN（ADR 0038 四步第 1 步）----

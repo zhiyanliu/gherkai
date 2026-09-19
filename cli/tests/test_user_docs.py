@@ -34,9 +34,15 @@ def _rel(p: Path) -> str:
 
 @pytest.mark.parametrize("doc", USER_DOCS, ids=_rel)
 def test_user_doc_has_no_internal_references(doc: Path):
+    """内部指代扫全篇；口头语 / 用词表（含量词「档」）在 CHANGELOG 上只扫未发布段。
+
+    豁免理由见 `_doc_rules.changelog_unreleased`：已发行节是发行当时的原话，不回溯改写。
+    """
     text = doc.read_text(encoding="utf-8")
+    scanned = changelog_unreleased(text) if doc.name == "CHANGELOG.md" else text
+    cutoff = len(scanned.splitlines())  # 口头语表扫到这一行为止（截断保前缀，故行号与原文一致）
     hits = [f"{_rel(doc)}:{i}: {line.strip()[:120]}" for i, line in enumerate(text.splitlines(), 1)
-            if FORBIDDEN.search(line) or COLLOQUIAL.search(line)]
+            if FORBIDDEN.search(line) or (i <= cutoff and COLLOQUIAL.search(line))]
     assert not hits, "用户文档面向使用者：不写 ADR 编号 / 决策号 / 内部机制名 / 口头语：\n" + "\n".join(hits)
 
 

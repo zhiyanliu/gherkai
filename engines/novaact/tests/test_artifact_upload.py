@@ -353,7 +353,7 @@ def test_drain_is_bounded_returns_false_while_item_in_flight(tmp_path):
 
 
 def test_noop_uploader_enqueue_and_drain_are_immediate(tmp_path):
-    """本机 no-op 档：截图就在本地，队列/排空都是直接返回（不起线程、不碰 boto3）。"""
+    """本机 no-op 路径：截图就在本地，队列/排空都是直接返回（不起线程、不碰 boto3）。"""
     u = ArtifactUploader(bucket=None, prefix="reports/rid/", run_dir=tmp_path)
     u.enqueue(["/nonexistent/act-0-frame-0.jpg"])
     assert u.drain(0.0) is True
@@ -421,7 +421,7 @@ def test_drain_timeout_abandons_queue_silently(tmp_path, capsys):
 def test_flush_still_uploads_after_drain_timeout(tmp_path):
     """drain 超时后主线程 flush **照传**剩余文件：放弃标志只约束队列线程，不该把兜底整条关掉。
 
-    这一档恰是最需要 flush 的一档（ADR 0042 决策一：队列有界排空、flush 只兜漏网）——若 flush 也被放弃标志
+    这一种情形恰是最需要 flush 的一种（ADR 0042 决策一：队列有界排空、flush 只兜漏网）——若 flush 也被放弃标志
     gate 掉，整目录一个字节都不再传、`_flush_ok` 也留 False 使目录不删，云端后端产物随容器盘销毁即永久 404。
     """
     root = tmp_path / "reports" / "rid"

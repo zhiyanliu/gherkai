@@ -7,7 +7,7 @@ contributor 想手工合成也走 `gherkai deploy --synth-only DIR`，别直接�
 
 context 配置项全由命令拼给（ADR 0037 决策 6「flag 面对齐 stack 与 app 的全部 context 旋钮」）：
 `prefix`（默认 `gherkai-`，**须与 cli `--prefix` 一致**，ADR 0033 护栏：CDK 建的名 = cli 推导名）、
-`vpc_id` / `use_default_vpc`（VPC 三档，见 `stack._network`）、`stop_timeout`（grace 标定，ADR 0032）、
+`vpc_id` / `use_default_vpc`（VPC 三种取值，见 `stack._network`）、`stop_timeout`（grace 标定，ADR 0032）、
 `version`（**必给**、无隐式默认，见 `stack._resolve_version`——直接运行时缺它即 fail-fast，这是有意的）。
 多环境（prod-/stage-）= 不同 prefix 各部署一套，stack 名随 prefix（`names.stack_name`）。
 
@@ -27,7 +27,7 @@ from gherkai_deploy_aws.stack import BackendStack
 def main() -> None:
     app = cdk.App()
     # prefix：-c prefix=xxx 覆盖，默认 gherkai-。stack 名带 prefix 以支持多环境并存（prod-/stage- 各一 stack）——
-    # 推导走 names.stack_name 单一真源（cli 的 VPC 档三态比对 DescribeStacks 用同一个名）。
+    # 推导走 names.stack_name 单一真源（cli 的 VPC 取值三态比对 DescribeStacks 用同一个名）。
     prefix = app.node.try_get_context("prefix") or names.DEFAULT_PREFIX
     BackendStack(
         app, names.stack_name(prefix),

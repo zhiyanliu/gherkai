@@ -159,7 +159,7 @@ def test_missing_mapping_hints_push_worker_when_same_version(aws):
 
 
 def test_missing_mapping_hints_cli_upgrade_when_cli_older(aws):
-    """CLI **旧于**后端（决策 7「警告不拦」那一档）→ 引导升级 CLI，**不**引导去推旧版本 tag 的镜像。
+    """CLI **旧于**后端（决策 7「警告不拦」那一种判定）→ 引导升级 CLI，**不**引导去推旧版本 tag 的镜像。
 
     理由（ADR 0038 preflight 条）：推一个旧版本命名空间的 tag，推完后端还是解析不到，原地绕圈。
     """
@@ -200,7 +200,7 @@ def test_digest_not_in_ecr_is_a_miss(aws):
 
 
 def test_one_engine_missing_fails_whole_resolution(aws):
-    """一个 run 一个 variant 名、某引擎缺该 variant 即严格失败（ADR 0038）——不给「另一引擎凑合运行」的静默档。"""
+    """一个 run 一个 variant 名、某引擎缺该 variant 即严格失败（ADR 0038）——不给「另一引擎凑合运行」的静默路径。"""
     _seed(aws, variant="base", engines=("novaact",))
     with pytest.raises(compose.WorkerVariantError) as e:
         _resolve(aws, engines=["novaact", "midscene"])

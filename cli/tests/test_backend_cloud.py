@@ -114,7 +114,7 @@ def _patch_cloud_handles(monkeypatch, record, *, preflight_err=None, skew=("ok",
 
     **worker variant 闸（ADR 0038）同理 patch `resolve_worker_variant`**：它的真实实现要读 SSM 映射 + 探 ECS/ECR。
     默认给每个被问到的引擎一条假 resolution（variant = 显式给的 `--worker-variant`，缺省则 `resolved_variant`
-    ——模拟「解析到部署级默认指针」）；`variant_err=WorkerVariantError(...)` 改成拦下档。调用入参记进
+    ——模拟「解析到部署级默认指针」）；`variant_err=WorkerVariantError(...)` 改成拦下的情形。调用入参记进
     `made["variant"]`（可验次序、engines 只含本 run 用到的、backend_version 复用同一次读戳）。
     """
     fake_s3 = _FakeS3(record)
@@ -771,13 +771,13 @@ def test_skew_warn_and_skip_pass_through_with_one_line(tmp_path, monkeypatch, ca
     for verdict in ("warn", "skip"):
         record: list = []
         _, _, preflight_calls = _patch_cloud_handles(
-            monkeypatch, record, skew=(verdict, f"提示：{verdict} 档一行"))
+            monkeypatch, record, skew=(verdict, f"提示：{verdict} 判定一行"))
         monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
         rc = m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud",
                      "--ddb-table", "T", "--s3-bucket", "B", "--region", "us-east-1", "--quiet"])
         assert rc == 0, verdict
         assert len(preflight_calls) == 1, verdict          # 闸放行 → 资源 preflight 照常执行
-        assert f"提示：{verdict} 档一行" in capsys.readouterr().err
+        assert f"提示：{verdict} 判定一行" in capsys.readouterr().err
 
 
 def test_skew_ok_is_silent(tmp_path, monkeypatch, capsys):

@@ -30,7 +30,7 @@ ENGINES = ("novaact", "midscene")
 BACKEND_VERSION_KEY = "version"        # 后端版本戳（stack 资源随部署事务写；提交侧 skew 比对读）
 SUBNETS_KEY = "subnets"                # worker 子网 ID 列表
 SECURITY_GROUPS_KEY = "security-groups"  # worker 安全组 ID
-VPC_KEY = "vpc"                       # 生效的 VPC 档（部署方三态比对读，ADR 0037 决策 6）
+VPC_KEY = "vpc"                       # 生效的 VPC 取值（部署方三态比对读，ADR 0037 决策 6）
 WORKER_IMAGE_ROOT_KEY = "worker-image"  # `worker-image/<engine>/<tag>` 映射族的根（按路径列举时用；单条键走 worker_image_key）
 
 # 引擎原生产物在 run 树下的子目录名（ADR 0029「S3 key 镜像本地 run 树」的前提）：同步 run / local per-run / cloud 容器内

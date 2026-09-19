@@ -379,7 +379,7 @@ export interface StepEvidenceInput {
 /** step 判定已成之后产本 step 的 evidence，返回 ref（挂进 step_done）+ 引用到的截图路径（emit 后入队）；
  *  **绝不抛**（ADR 0042 决策二）。
  *
- *  跳过的两种情形：① 无 hook（`--no-report` 档 / 没给产物落点）；② 本 step 没调过 AI（确定性 step、
+ *  跳过的两种情形：① 无 hook（`--no-report` 方式 / 没给产物落点）；② 本 step 没调过 AI（确定性 step、
  *  URL 导航 step——既无新 execution 也无指令），这类 step 本就不产 evidence。
  *  失败 → 一行日志 + 返 null（本 step 不带 evidence ref、也不入队），判定与其余事件字段照发。 */
 export async function stepEvidenceRef(

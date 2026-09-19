@@ -38,7 +38,7 @@ ENGINE = "novaact"
 
 # 截图上界（ADR 0042 决策一「截图策略（有上界）」）：单 act 帧数由 SDK 默认步数上限封顶（30）、再乘票数，
 # 不设界时单个 failed Then 可达 10 MB 量级。**只有 screenshot 受限**——frames 的 thought/actions/url 全留（文本很小）。
-MAX_SHOTS_PER_ACT = 3       # K：failed/error 档每 act 最多几张
+MAX_SHOTS_PER_ACT = 3       # K：failed/error 判定每 act 最多几张
 MAX_SHOTS_PER_STEP = 12     # M：每 step 总数上界
 
 _THINK = "think"
@@ -216,7 +216,7 @@ def select_screenshots(doc: dict) -> list[tuple[int, int]]:
       ADR 那组候选的第三项「出错帧」在 Nova 侧**无对应物**——抛错的 act 根本没有 json（frames 为空），
       frame 自身也不带错误标记；K 仍按 3 留着上界不动。
     - passed：每 act 只留末帧一张。
-    M 对 passed 档实际不可达（每 act 一张、票数远小于 M），仍统一施加，免出现第二条计数路径。
+    M 对 passed 判定实际不可达（每 act 一张、票数远小于 M），仍统一施加，免出现第二条计数路径。
     """
     per_act = MAX_SHOTS_PER_ACT if doc.get("status") in _FAILING else 1
     picks: list[tuple[int, int]] = []

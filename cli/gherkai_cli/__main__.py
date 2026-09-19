@@ -139,14 +139,14 @@ def _build_selector(args):
         tail = sid[len(p.uri) + 1:] if sid.startswith(p.uri + ":") else sid.rsplit(":", 1)[-1]
         lines = set(tail.split(":"))
         for s in sels:
-            if s == sid:  # 一档：完整 scenario id
+            if s == sid:  # ① id 匹配：完整 scenario id
                 return True
             bare = s.lstrip(":")
-            if bare.isascii() and bare.isdecimal():  # 二档：行号——纯数字只当行号，不回落标题子串（否则「重试3次」被 --scenario 3 连带选中）
+            if bare.isascii() and bare.isdecimal():  # ② 行号匹配：纯数字只当行号，不回落标题子串（否则「重试3次」被 --scenario 3 连带选中）
                 if bare in lines:
                     return True
                 continue
-            if s in name:  # 三档：标题子串
+            if s in name:  # ③ 标题匹配：标题子串
                 return True
         return False
 
@@ -691,7 +691,7 @@ def _cmd_doctor(args) -> int:
     else:
         add("steps", "dir", True, steps_dir, required=False)
     # 加载结果：有 steps 目录 = 使用方 step 能否加载（必修——加载失败会静默降级成 AI，ADR 0037 决策 4 fail-loud）；
-    # 没有 = 只验「worker 起得来、能自述」（可选：单引擎不连坐，与 engines.<engine> 同档）
+    # 没有 = 只验「worker 起得来、能自述」（可选：单引擎不连坐，与 engines.<engine> 同为可选）
     for engine, caps, err in described:
         if caps is not None:
             add("steps", f"load.{engine}", True,
@@ -1299,7 +1299,7 @@ def _cloud_skew_gate(target) -> "tuple[int | None, str | None]":
 
     **必须先于资源 preflight**（决策 7 的次序）：skew 的修复动作是部署方运行一次 `gherkai deploy`，而那一步同时
     把资源建齐/补齐——先报「表/task-def 不存在」只会把人引去查 `--prefix`，绕一圈回到同一个动作。
-    三个不拦的档（戳缺失 / CLI 偏旧 / 任一侧 dev 版）只打一行提示；**block 无放行 flag**（决策 7 明拒）。
+    三种不拦的情形（戳缺失 / CLI 偏旧 / 任一侧 dev 版）只打一行提示；**block 无放行 flag**（决策 7 明拒）。
 
     **戳一并返回、全程只读一次**：worker variant 解析（ADR 0038「运行时与 preflight」）要拿同一个戳给出
     skew 感知的提示语（与后端同版本 → 指向 `push-worker`；CLI 偏旧 → 指向升级 CLI，不引导去推一个旧版本
@@ -1494,7 +1494,7 @@ def _render_status(state, args, *, wait_hint: str, locations: dict) -> int:
 
     state 已确认非 None（调用方先查）。wait_hint = 各自的 `status --wait` 接力命令示例（local 用 --report-dir、
     cloud 用 --backend cloud --prefix，触发逻辑同、只命令示例异）。locations = 该 run 的产物落点（compose 单点拼，
-    与 `run` 结束时打的同一份）：人读档终态才打那三行——报告/判定明细在 finalize 才落，未终态打了是空指针。
+    与 `run` 结束时打的同一份）：人读方式下终态才打那三行——报告/判定明细在 finalize 才落，未终态打了是空指针。
     --json 机读：RunState 键形状不变，另**附加** `artifacts`（约定落点、无论终态都给，终态后才真有内容，ADR 0041 决策三）；
     人读提示一律不打（pending 提示的触发条件见下方注释）。
     退出码：PASSED→0 / pending·running（未达终态、非 --wait）→0（查询本身成功）/ 其余终态→1。
@@ -1654,9 +1654,9 @@ def _explain_scenario_matches(scenario, sels: list[str]) -> bool:
 
     **另起一份、不复用 `_build_selector`**：那个谓词按 `ParsedScenario` 的 uri 切尾、按 tags 判，而 explain
     只读 RunStore/ResultStore、不重解 `.feature`——uri 与 tags 都拿不到。可匹配的只有 job 定义里的
-    `Scenario.id` 与 `Scenario.name`。三档**按序试、互斥**（与 run/plan 的 `_scenario_hit` 同律）：id 全等 →
+    `Scenario.id` 与 `Scenario.name`。三种匹配**按序试、互斥**（与 run/plan 的 `_scenario_hit` 同律）：id 全等 →
     纯数字（可带前导 `:`）只当行号、**不回落标题子串**（否则 `--scenario 3` 会命中标题含 3 的 scenario）→ 标题子串。
-    行号档取 `scenario_id`（`<uri>:<行>[:<example 行>]`）尾部的连续数字段比对：uri 自身以「数字冒号段」结尾时
+    行号匹配取 `scenario_id`（`<uri>:<行>[:<example 行>]`）尾部的连续数字段比对：uri 自身以「数字冒号段」结尾时
     可能误命中，接受这个边角（ADR 0042 决策四明记为有损）。
     """
     tail: list[str] = []
@@ -1968,10 +1968,10 @@ def _cmd_run(args) -> int:
     worker_log_fh = None  # --quiet（本机后端）时打开的 worker 日志句柄，见 build_engines 处
     worker_log_path: Path | None = None
     # 两个引擎的产物落点（ADR 0027/0037 决策 3）：
-    # - 归集档（默认）：落 <report_dir>/<run_id>/ 下**本次 run 专属的绝对路径**目录，与 RunReport 同处、长期留存。
+    # - 归集方式（默认）：落 <report_dir>/<run_id>/ 下**本次 run 专属的绝对路径**目录，与 RunReport 同处、长期留存。
     #   **必须绝对路径**：worker 是 cwd 与 cli 不同的子进程，相对路径两侧解析到不同位置 → 产物落错地方，
     #   且 worker 产出的 file://<相对> 是坏 URI。
-    # - `--no-report` 档：**真不生成**——不注入落点，并经 no_artifacts 令 worker 不产生/不上报引擎原生产物
+    # - `--no-report` 方式：**真不生成**——不注入落点，并经 no_artifacts 令 worker 不产生/不上报引擎原生产物
     #   （Midscene 关 generateReport；Nova SDK 无关闭开关、不给目录时写进自己 mkdtemp 的临时目录、不上报）。
     #   曾一度改为「落系统临时目录、不清」，被否：用户要的 --no-report 就是不生成 report。
     report_root = Path(args.report_dir).resolve()
@@ -1982,7 +1982,7 @@ def _cmd_run(args) -> int:
     else:
         nova_logs_dir = midscene_run_dir = None
     # 产物 S3 落点：cloud（Fargate）由 build_fargate_engines 内部按 (bucket, <report_dir>/<run_id>/) 自算注入；
-    # local（subprocess）CLI 恒不注入（worker 报 file://、不上传）——「subprocess+注入 S3 落点」是内部预演档
+    # local（subprocess）CLI 恒不注入（worker 报 file://、不上传）——「subprocess+注入 S3 落点」是内部预演路径
     # （ADR 0016 决策 B / 0029），由 tools/e2e_harness.py 自拼 worker env 直起 worker 实现，不经 CLI/compose。
     cloud_fargate: dict | None = None  # cloud 分支置值（ADR 0033）：Fargate 执行配置，供 build_fargate_engines；None=走 subprocess
     # 目标解析（compose.resolve_cloud_target 一次吐 prefix + 各资源终名 + region/profile，ADR 0033 两层命名）。
@@ -2103,7 +2103,7 @@ def _cmd_run(args) -> int:
     else:
         if args.quiet:
             # --quiet 也管 worker 日志（ADR 0041 决策二）：落 <run_dir>/worker.log（--no-report 时落系统临时目录），
-            # 结束只打一行位置——agent 的上下文别被 SDK 的 think/act 流水灌满；人看流水走默认档。
+            # 结束只打一行位置——agent 的上下文别被 SDK 的 think/act 流水灌满；人看流水就用默认取值、不给这个 flag。
             import tempfile as _tf
             worker_log_path = ((report_root / run_id / "worker.log") if do_report
                                else Path(_tf.gettempdir()) / f"gherkai-worker-{run_id}.log")
@@ -2232,7 +2232,7 @@ def _deploy_provider(args) -> "object | None":
 def _cmd_deploy(args) -> int:
     """[部署方] 分派给 provider（ADR 0037 决策 6）：三个「不真部署」动作互斥，其余走真部署。前端零 IaC 知识。
 
-    退出码即 provider 的返回值——前端只在「provider 不可用」时自己退 2（VPC 档不一致/未 bootstrap 这类
+    退出码即 provider 的返回值——前端只在「provider 不可用」时自己退 2（VPC 取值不一致/未 bootstrap 这类
     诊断与退码归 provider，它才知道自己的账户状态）。
     """
     provider = _deploy_provider(args)

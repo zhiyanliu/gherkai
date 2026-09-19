@@ -2,7 +2,7 @@
 
 **全程 stub entry point 与 provider**：前端的契约只有「按 entry point group 发现 → 调 `add_arguments` 贴 flag →
 按自己的命令面 flag 选调方法 → 透传退出码」，真 provider（`gherkai-deploy-aws`，带 CDK + Node）不该是前端的
-测试依赖——它的 IaC 行为、VPC 档比对、cdk 调用都在它自己那边验。前端的硬不变量「**前端不 import `aws_cdk`**」
+测试依赖——它的 IaC 行为、VPC 取值比对、cdk 调用都在它自己那边验。前端的硬不变量「**前端不 import `aws_cdk`**」
 与「非 deploy 子命令**不加载** provider」也在此断言（后者是「别让 `gherkai run` 付 jsii 起 node 的代价」）。
 """
 from __future__ import annotations

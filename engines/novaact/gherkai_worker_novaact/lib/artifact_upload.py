@@ -86,7 +86,7 @@ class ArtifactUploader:
         self._flush_ok = True          # 剩余批量是否全成功（任一失败 → 整目录不删）
         # `_uploaded` 被主流程与队列线程同时读写 → 一律经这把锁（boto3 低层 client 自身线程安全，不必守）
         self._lock = threading.Lock()
-        # 后台上传队列（ADR 0042 决策一）：单线程 FIFO、惰性起（首次 enqueue 才起，no-op 档永不起）
+        # 后台上传队列（ADR 0042 决策一）：单线程 FIFO、惰性起（首次 enqueue 才起，no-op 上传器永不起）
         self._q: "queue.Queue[str]" = queue.Queue()
         self._worker: threading.Thread | None = None
         self._pending = 0              # 入队未处理完的项数（含在途那一项）——drain 等它归零
@@ -100,7 +100,7 @@ class ArtifactUploader:
         logs_dir = os.environ.get("NOVA_LOGS_DIR")
         run_dir = Path(logs_dir).parent if logs_dir else None
         if bucket is not None and run_dir is None:
-            # fail-loud：注入了桶却没给 SDK 落点（NOVA_LOGS_DIR）= 组合根配置矛盾，非降级档——静默 no-op
+            # fail-loud：注入了桶却没给 SDK 落点（NOVA_LOGS_DIR）= 组合根配置矛盾，非降级情形——静默 no-op
             # 会让产物报 file:// 且随容器盘销毁必丢（ADR 0033 实际运行事故「只注①不注②等于没上传」）。
             raise ValueError(
                 "产物上传：已注入 ARTIFACT_S3_BUCKET 但缺 NOVA_LOGS_DIR，算不出产物落点、无法上传"
@@ -180,7 +180,7 @@ class ArtifactUploader:
         排空的预算按此量级取（有界，ADR 0029「退出时间有界」）。
         `respect_abandon`：**只有队列线程传 True**（`drain` 超时后它须静默，见 `_abandoned`；留在重试循环内才
         继续抑制在途那一项的第二次尝试——drain 的预算即退出成本）。主线程的 `flush_and_cleanup` 用默认
-        False：ADR 0042 决策一是「队列有界排空、flush 只兜漏网」，drain 超时正是最需要 flush 兜底的一档，
+        False：ADR 0042 决策一是「队列有界排空、flush 只兜漏网」，drain 超时正是最需要 flush 兜底的一种情形，
         若它也被 `_abandoned` gate 掉，整目录一个字节都不再传、也不删（产物随容器盘销毁即永久丢）。
         """
         for _ in range(2):          # 首次 + 重试一次
@@ -197,7 +197,7 @@ class ArtifactUploader:
 
     # ---- 后台队列（ADR 0042 决策一「上传时机分两类」）----
     def enqueue(self, paths: Iterable[str]) -> None:
-        """把文件交给后台队列顺序上传（**不阻塞调用方**）；no-op 档直接返回。
+        """把文件交给后台队列顺序上传（**不阻塞调用方**）；no-op 时直接返回。
 
         调用点在 `step_done` **emit 之后**（ADR 0042 决策一：截图字节绝不压判定临界路径）。队列线程惰性起、
         daemon，且上传本体也在这个线程里执行（`use_threads=False`，见 `_transfer_config`）——否则 boto3 会把传输交给
@@ -219,7 +219,7 @@ class ArtifactUploader:
         """有界等队列传完（含在途那一项）：全部处理完 True，超时 False（剩下的交给 flush 兜）。
 
         收尾（scope 末 / 提前退出路径）调，位置**排在会话释放之后**（ADR 0024「会话释放优先」）——退出路径的
-        预算计入 grace（调用方给的 timeout_s 就是那份预算）。no-op 档立即 True（队列永远是空的）。
+        预算计入 grace（调用方给的 timeout_s 就是那份预算）。no-op 时立即 True（队列永远是空的）。
         """
         if not self.enabled:
             return True
@@ -238,7 +238,7 @@ class ArtifactUploader:
 
         默认的线程池是非 daemon 线程，解释器退出时被 join；后台队列的 daemon 语义与 `drain` 的有界退出都靠这一项
         才成立（实际运行：黑洞端点下 drain(1.0) 后进程 11.2 s 才退，改后 1.15 s）。主流程的 `to_report_ref` 同用，
-        统一一处。惰性 import（file:// no-op 档零 boto 依赖）。
+        统一一处。惰性 import（file:// no-op 路径零 boto 依赖）。
         """
         if self._tcfg is None:
             from boto3.s3.transfer import TransferConfig
@@ -274,7 +274,7 @@ class ArtifactUploader:
             if self._abandoned:
                 return          # 进程正在退出：不写 stderr（finalization 期写 buffered stderr 可能致命，见 _log）
             # 放弃：一行产品语言（发生了什么 + 不影响什么）。**不承诺「收尾再试」**——三条提前退出路径
-            # （停止信号 / 网络耗尽 / 异常）只 drain 不 flush，那句在这些档上是假的；文件仍在目录里，
+            # （停止信号 / 网络耗尽 / 异常）只 drain 不 flush，那句在这些路径上是假的；文件仍在目录里，
             # 正常完成路径的 flush 还会兜一次。文案与 Midscene 上传器同形（两引擎语义对称，ADR 0024）。
             _log(f"证据截图上传失败（已重试后放弃，不影响判定与报告；该截图链接可能打不开）：{p.name}")
 

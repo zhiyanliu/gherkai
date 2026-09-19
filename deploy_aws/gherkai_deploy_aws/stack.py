@@ -16,7 +16,7 @@
 - VPC + SSM：subnet/sg ID 写进 /{prefix}backend/subnets|security-groups（cli 读）
 - SSM 部署戳（**stack 资源、非命令事后 put_parameter**——与部署事务同生死、回滚不留错值，ADR 0037 决策 6）：
   /{prefix}backend/version（版本真源，供 preflight skew 比对，ADR 0037 决策 7）、
-  /{prefix}backend/vpc（生效 VPC 档，供下次 deploy 三态比对）、
+  /{prefix}backend/vpc（生效 VPC 取值，供下次 deploy 三态比对）、
   /{prefix}backend/worker-template/<engine>（task-def 模板 revision ARN，ADR 0038 四步第 1 步）
 
 命名走 `names`（re-export 产品本体 `gherkai_runtime.names`，与 cli compose 真同源，ADR 0033 护栏）。
@@ -68,12 +68,12 @@ class BackendStack(Stack):
         self.stop_timeout_s = self._resolve_stop_timeout()
         self.version = self._resolve_version()
 
-        vpc = self._network()    # 同时定 self._vpc_spec（生效 VPC 档，写进 SSM 供下次 deploy 三态比对）
+        vpc = self._network()    # 同时定 self._vpc_spec（生效 VPC 取值，写进 SSM 供下次 deploy 三态比对）
         self._storage()          # DDB ×2 + S3 ×1
         self._cluster(vpc)       # {prefix}cluster（RunTask 时 cli 按名指定，task-def 不绑 cluster）
         self._task_definitions()  # 2 引擎：ECR + task-def + task role + 模板 revision ARN 写 SSM
         self._ssm_network(vpc)   # 写 subnet/sg ID 供 cli 读
-        self._ssm_deployment_stamp()  # 写 version / vpc 档（ADR 0037 决策 6，随事务同生死）
+        self._ssm_deployment_stamp()  # 写 version / vpc 取值（ADR 0037 决策 6，随事务同生死）
         self._reconcile_lambdas(vpc)  # 无状态批量运行（ADR 0034）：退出观察者 + reconciler + kicker 三 Lambda + EventBridge + Stream
 
     # ---- stopTimeout 解析（grace 真容器校准落点，ADR 0032）----
@@ -195,17 +195,17 @@ class BackendStack(Stack):
             ],
         )
 
-    # ---- VPC（Fargate awsvpc 用）：三档 context 可指定（ADR 0033/0037 决策 6，`--vpc` 必给、命令侧无隐式默认）----
+    # ---- VPC（Fargate awsvpc 用）：三种取值 context 可指定（ADR 0033/0037 决策 6，`--vpc` 必给、命令侧无隐式默认）----
     def _network(self) -> ec2.IVpc:
-        """建/取 VPC，**并把生效的档记进 `self._vpc_spec`**（写 SSM 供下次 deploy 三态比对，ADR 0037 决策 6）。
+        """建/取 VPC，**并把生效的取值记进 `self._vpc_spec`**（写 SSM 供下次 deploy 三态比对，ADR 0037 决策 6）。
 
-        档值形态（与 `gherkai deploy --vpc` 三档一一对应，比对逻辑在 `cli.vpc_spec_matches`）：
+        取值形态（与 `gherkai deploy --vpc` 三种取值一一对应，比对逻辑在 `cli.vpc_spec_matches`）：
         `<vpc-id>` = 复用现有 / `default` = 账户默认 VPC / `new:<所建 vpc-id>` = 本 stack 新建（存出所建 id
-        使 `new` 档也可回溯核对）。**档必须在此一处推导**——它是「这次部署到底落在哪个 VPC」的唯一记账点，
+        使 `new` 取值也可回溯核对）。**取值必须在此一处推导**——它是「这次部署到底落在哪个 VPC」的唯一记账点，
         与真正建/取 VPC 的分支同生死；分两处写就会出现「SSM 说 default、资源建在新 VPC」的错账。
         """
         # 优先级：-c vpc_id=xxx（用现有 VPC）> -c use_default_vpc=true（用账户默认 VPC）> 建新。
-        # 三档都走**公有子网 + assignPublicIp=ENABLED** 出网连 AgentCore/Bedrock/S3/DDB（worker 只出不入），**零 NAT 成本**。
+        # 三种取值都走**公有子网 + assignPublicIp=ENABLED** 出网连 AgentCore/Bedrock/S3/DDB（worker 只出不入），**零 NAT 成本**。
         vpc_id = self.node.try_get_context("vpc_id")
         if vpc_id:
             self._vpc_spec = str(vpc_id)
@@ -215,7 +215,7 @@ class BackendStack(Stack):
             return ec2.Vpc.from_lookup(self, "BackendVpc", is_default=True)
         # 建新：2-AZ、**零 NAT**（nat_gateways=0）。worker 落公有子网 + 公网 IP 出网，与 _worker_subnet_ids 的
         # 「公有子网优先」及 cli assignPublicIp=ENABLED 一致——不建常驻计费的 NAT。**真私有子网隔离（NAT/VPC
-        # endpoint 出网）留 backlog**：现三档均公有子网出网，若未来要私有隔离需同步 _worker_subnet_ids 选私有
+        # endpoint 出网）留 backlog**：现三种取值均公有子网出网，若未来要私有隔离需同步 _worker_subnet_ids 选私有
         # 子网 + cli assignPublicIp=DISABLED（跨组件联动）。
         vpc = ec2.Vpc(self, "BackendVpc", max_azs=2, nat_gateways=0)
         # vpc_id 是 CDK token（部署期才有值）——拼进字符串由 CloudFormation 的 Fn::Join 解析，参数落地即真 id。
@@ -435,15 +435,15 @@ class BackendStack(Stack):
         CfnOutput(self, "Prefix", value=self.prefix)
         CfnOutput(self, "SubnetsSsmPath", value=names.ssm_subnets_path(self.prefix))
 
-    # ---- SSM 部署戳：版本 + 生效 VPC 档（ADR 0037 决策 6）----
+    # ---- SSM 部署戳：版本 + 生效 VPC 取值（ADR 0037 决策 6）----
     def _ssm_deployment_stamp(self) -> None:
         """把「这次部署是什么版本、落在哪个 VPC」写成 **stack 资源**（不是命令事后 `put_parameter`）。
 
         **为何是 stack 资源**：与部署事务同生死——CloudFormation 回滚时参数一起回滚，不会留下「戳说新版本、
         Lambda 还是旧代码」的错账；`gherkai destroy` 随 stack 删除（**不 RETAIN**，与表/桶的数据资源相反：
-        戳是部署元数据、留着只会让下次 deploy 拿到已消失环境的档）。
+        戳是部署元数据、留着只会让下次 deploy 拿到已消失环境的取值）。
         两个消费者：`version` 供提交侧 preflight 比对 CLI 版本（skew 三态，ADR 0037 决策 7）；`vpc` 供下次
-        `gherkai deploy` 比对 `--vpc`（三态，同决策 6——只强制显式给值挡不住第二次 deploy 敲错档）。
+        `gherkai deploy` 比对 `--vpc`（三态，同决策 6——只强制显式给值挡不住第二次 deploy 敲错取值）。
         两者都落在 [0033] 已授的 `/{prefix}backend/*` 通配内，CLI 侧不新增 SSM 授权。
         """
         ssm.StringParameter(
@@ -454,7 +454,7 @@ class BackendStack(Stack):
         ssm.StringParameter(
             self, "SsmVpcSpec",
             parameter_name=names.ssm_vpc_path(self.prefix),
-            string_value=self._vpc_spec,  # 生效档，见 _network（new 档含所建 vpc-id、可回溯核对）
+            string_value=self._vpc_spec,  # 生效取值，见 _network（new 取值含所建 vpc-id、可回溯核对）
         )
 
     # ---- 无状态批量运行（ADR 0034）：退出观察者 + reconciler + kicker 三 Lambda + EventBridge + DDB Stream ----

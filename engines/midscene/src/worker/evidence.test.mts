@@ -355,7 +355,7 @@ test("stepEvidenceRef：落盘到落点 + 经 toReportRef 即时上传拿 ref；
   assert.equal(doc.status, "failed");
 });
 
-test("stepEvidenceRef：无 hook（--no-report 档 / 无产物落点）→ 直接不产", async () => {
+test("stepEvidenceRef：无 hook（--no-report 方式 / 无产物落点）→ 直接不产", async () => {
   const produced = await stepEvidenceRef(undefined, {
     scenarioId: "s:1", step: STEP, status: "passed", message: null, agent: fixtureAgent,
     execFrom: 0, page: urlPage, prompt: STEP.text, votes: [], error: null,
@@ -561,7 +561,7 @@ test("runStep（best-effort 不变量）：上传失败也不改判定、不走 
   assert.equal(done.reportRefs, undefined);
 });
 
-test("runStep：不注入 evidence（--no-report 档）→ 事件与此前逐字一致，无 reportRefs", async () => {
+test("runStep：不注入 evidence（--no-report 方式）→ 事件与此前逐字一致，无 reportRefs", async () => {
   const { runStep } = await importRunScope();
   const { events, sink } = collector();
   const { agent } = dumpAgent([true]);

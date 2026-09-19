@@ -105,7 +105,7 @@ class NgrokTunnel:
             # start_new_session=True（setsid）= agent 脱离 CLI 的会话/进程组：隧道的生命周期由**宿主**决定
             # （ADR 0035 决策 3 三形态宿主 + stop_tunnel(pid)），不该由终端的信号转发决定。否则 submit 时
             # CLI 收 SIGINT/SIGHUP 会连坐杀掉「还要交棒给后台宿主」的 agent（local 交 per-run 进程、cloud 交
-            # 守护进程，两个宿主本身也都 setsid）。前台 run 档语义不变：Ctrl-C → KeyboardInterrupt → atexit
+            # 守护进程，两个宿主本身也都 setsid）。前台 run 方式语义不变：Ctrl-C → KeyboardInterrupt → atexit
             # 拆（决策 3 表格「有意选 atexit 而非 finally」），只是不再额外挨一发终端广播的 SIGINT。
             proc = self._popen(cmd, stdin=subprocess.DEVNULL,
                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,

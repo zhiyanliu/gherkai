@@ -636,8 +636,8 @@ test("--list-deterministic 已删、不留别名：非零退出且 stdout 不吐
 });
 
 
-// ---- artifactFlushRoot：非 --no-report 档 → 解析后的 MIDSCENE_RUN_DIR（--no-report 档见 no-artifacts.test.mts）----
-test("artifactFlushRoot: 常规档给解析后的 MIDSCENE_RUN_DIR；未设则 undefined（local/无落点 no-op）", async () => {
+// ---- artifactFlushRoot：非 --no-report 方式 → 解析后的 MIDSCENE_RUN_DIR（--no-report 方式见 no-artifacts.test.mts）----
+test("artifactFlushRoot: 常规方式给解析后的 MIDSCENE_RUN_DIR；未设则 undefined（local/无落点 no-op）", async () => {
   const { artifactFlushRoot } = await importMod();
   const prev = process.env.MIDSCENE_RUN_DIR;
   try {

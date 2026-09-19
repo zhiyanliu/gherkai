@@ -546,7 +546,7 @@ def test_no_report_disables_artifacts_instead_of_tempdir(tmp_path, monkeypatch):
 
 
 def test_report_run_passes_absolute_artifact_dirs_and_no_flag(tmp_path, monkeypatch):
-    """对照：默认归集档落 <report_dir>/<run_id>/ 下的绝对路径、no_artifacts=False。"""
+    """对照：默认归集方式落 <report_dir>/<run_id>/ 下的绝对路径、no_artifacts=False。"""
     box = {}
     real_build = m.compose.build_engines
 
@@ -1057,7 +1057,7 @@ def test_run_and_submit_exit_2_before_spawn_when_user_steps_fail(tmp_path, monke
 
 def test_plan_rejects_a_directory_as_feature(tmp_path, capsys):
     """给了目录 / 读不了的路径 → 退 2「读 feature 失败」，不是 IsADirectoryError traceback（退码语义 ADR 0021）。
-    读 feature 的失败面不止 FileNotFoundError：目录、权限、非 UTF-8 都属输入问题，同档处置。"""
+    读 feature 的失败面不止 FileNotFoundError：目录、权限、非 UTF-8 都属输入问题，同类处置。"""
     rc = m.main(["plan", str(tmp_path)])
     assert rc == 2
     assert "读 feature 失败" in capsys.readouterr().err
@@ -1764,7 +1764,7 @@ def test_explain_json_is_single_document_with_record_and_evidence_gaps(tmp_path,
 
 
 def test_explain_scenario_selector_matches_id_line_title_and_ors(tmp_path, capsys):
-    """--scenario：id 全等 / 行号（scenario_id 尾部数字段）/ 标题子串三档，可重复且彼此为或。"""
+    """--scenario：id 全等 / 行号（scenario_id 尾部数字段）/ 标题子串三种匹配，可重复且彼此为或。"""
     root, run_id = _explain_run(tmp_path)
     for sel in ("features/login.feature:12", "12", "密码错误"):
         rc, out, _ = _explain(capsys, root, run_id, "--scenario", sel)

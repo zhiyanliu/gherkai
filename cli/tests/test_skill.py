@@ -210,7 +210,7 @@ def test_bare_flags_exist_somewhere():
 #   ② 括注在 flag 之后：「`--worker-variant`（仅 `run` / `submit`）」——标记前**紧邻的那一个** flag；
 #   ③ 表格行：「| 仅 `submit` | `--tunnel-ttl` | 说明… |」——标记所在单元格的**下一格**里的 flag
 #      （「说明」格不算，否则 `只在 cloud + --expose-local 时有意义` 这种举例会被误当成排他声明）。
-# 三档按 ①→②→③ 取第一个能取到 flag 的：① 空且标记前有 flag → ②；都没有 → ③。
+# 三种形态按 ①→②→③ 取第一个能取到 flag 的：① 空且标记前有 flag → ②；都没有 → ③。
 # 「仅 `a` / `b`」表示这批 flag 恰好属这几个子命令（归属集相等，不是包含）。
 EXCLUSIVE_CLAIM = re.compile(r"仅\s*(?P<subs>`[a-z][a-z0-9-]*`(?:\s*/\s*`[a-z][a-z0-9-]*`)*)")
 FLAG_IN_TEXT = re.compile(r"--[A-Za-z][A-Za-z0-9-]*")
@@ -281,7 +281,7 @@ NON_KEY_TOKENS = frozenset({
     # doctor 的 section / name 取值
     "cli", "engines", "steps", "aws", "backend", "provider", "resources", "identity",
     "region", "reachability", "any", "node", "cdk", "load", "dir",
-    # flag 的取值（`--vpc` 三档 / `--pointer`）与默认 variant 名
+    # flag 的取值（`--vpc` / `--pointer`）与默认 variant 名
     "default", "new", "yes", "no", "base",
     # 子命令名 / 目录名 / 文件名片段
     "run", "plan", "submit", "status", "explain", "doctor", "install", "skill", "jobs", "reports", "references",

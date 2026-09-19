@@ -24,4 +24,4 @@ def test_trajectory_collection_is_skipped_under_no_artifacts(monkeypatch, tmp_pa
     assert sink == []
     monkeypatch.delenv("GHERKAI_NO_ARTIFACTS")
     rs._collect_traj(r, sink)
-    assert sink == [str(traj)]  # 对照：正常档照常收集（html 不存在回退 json）
+    assert sink == [str(traj)]  # 对照：正常情形照常收集（html 不存在回退 json）

@@ -65,7 +65,7 @@ def engine_min_grace(engine_name: str) -> float:
 
     **组合根不再持任何引擎特定的下限常量**：下限的真值是 worker 自己的收尾预算（Nova = 注入的
     `NOVA_ACT_TIMEOUT_S` + worker 侧 margin；Midscene = SIGTERM 收尾序列各段超时预算之和 + 余量），住在算它
-    的那一侧才不需要人工同步——收尾里多一段（如证据截图队列的退出档排空）时下限自己跟着涨。组合根只做三件事：
+    的那一侧才不需要人工同步——收尾里多一段（如证据截图队列的退出段排空）时下限自己跟着涨。组合根只做三件事：
     查询（`--capabilities`）、进程内缓存、把值作 `ScheduleOpts.min_grace_s` 传给 core（core 只 enforce
     「grace ≥ 此下限」的引擎无关关系）。混引擎 run 由调用方取各引擎下限的 max（grace 是 run 级单值）。
     **下限与使用方 step 无关**（它只是引擎自己的收尾预算）→ 该引擎**任一** steps 目录下的缓存对象都供得出这个
@@ -302,9 +302,9 @@ def _runtime_version() -> str | None:
 # 接线，只认本模块的入参、不认宿主 shell 的同名值。`GHERKAI_STEPS_DIR` / `GHERKAI_EXTRA_HTTP_HEADERS` 的值随
 # definition 持久化（`RunMeta.steps_dir` / `RunMeta.extra_http_headers`），宿主继承值越过它，同一个 run 在三个宿主
 # （同步 `run`、local per-run 进程、`status --wait` 接力者）下就用到不同的确定性 step 集/请求头、判定不可复现；
-# `GHERKAI_NO_ARTIFACTS` 不进 definition（`--no-report` 只挂在同步 `run`、该档什么都不落），清它挡的是另一件事：
+# `GHERKAI_NO_ARTIFACTS` 不进 definition（`--no-report` 只挂在同步 `run`、该方式什么都不落），清它挡的是另一件事：
 # 用户没给 `--no-report`、却因宿主导出过该值而收不到产物。
-# **只列 gherkai 自有键**：`NOVA_LOGS_DIR` / `MIDSCENE_RUN_DIR` 是 SDK 侧配置项，本模块的 None 档按 `build_engines`
+# **只列 gherkai 自有键**：`NOVA_LOGS_DIR` / `MIDSCENE_RUN_DIR` 是 SDK 侧配置项，本模块的 None 取值按 `build_engines`
 # docstring 的契约回落「SDK 默认」（SDK 默认本身就含读自己那个 env），清掉即改契约，故不在此列。
 _COMPOSE_OWNED_WORKER_ENV = ("GHERKAI_STEPS_DIR", "GHERKAI_NO_ARTIFACTS", "GHERKAI_EXTRA_HTTP_HEADERS")
 
@@ -343,8 +343,8 @@ def build_engines(
     **cmd/cwd 来自 `resolve_worker_cmd` 的四级定位链**（ADR 0037 决策 3），不再由仓库结构推导；
     某引擎 miss 只让那个引擎项变成「一用即报错」（见 `_UnavailableEngine`），不连坐另一条。
 
-    产物持久落点（两引擎对称，经环境变量传给 SDK，ADR 0027）——**归集档调用方须给绝对路径**；
-    `--no-report` 档恒给 None（真不生成，见上 no_artifacts 条）。绝对路径是硬要求：worker 已无专属 cwd
+    产物持久落点（两引擎对称，经环境变量传给 SDK，ADR 0027）——**归集方式下调用方须给绝对路径**；
+    `--no-report` 方式恒给 None（真不生成，见上 no_artifacts 条）。绝对路径是硬要求：worker 已无专属 cwd
     （定位链后 cwd 多为 None=继承调用者 CWD，ADR 0037 决策 3），落 SDK 默认相对目录会写进用户 CWD。
     两个都给 None 且 no_artifacts=False 时不注入落点 env，仅为兼容「真不关心产物落哪」的库层调用者
     （回落 SDK 默认，行为随 CWD 漂）：
@@ -505,11 +505,11 @@ def query_capabilities(engine: str, *, steps_dir: str | Path | None = None,
     `min_grace_s` 非负有限数、`deterministic_steps` 是数组、`model_id` 是非空字符串；**不合契约不写缓存**
     （一次坏自述不该被记成「这引擎就这样」）。身份位当场核的理由见下方注释。
     **Nova 查询也注入 `NOVA_ACT_TIMEOUT_S`**：它自报的下限 = 这个注入值 + worker 侧 margin，不注入则 worker 按
-    自带缺省算——operator 调大单 act 上界后下限静默偏低，正是「两端同源」要挡的漂移（见该常量注释；两个实际运行档
+    自带缺省算——operator 调大单 act 上界后下限静默偏低，正是「两端同源」要挡的漂移（见该常量注释；两个实际运行路径
     build_engines / build_fargate_engines 注的是同一个值）。
     steps_dir（ADR 0037 决策 4）：该入口同样加载 steps 目录，故 `deterministic_steps` = 内建脚手架 + 使用方定制、
     且使用方 steps 加载失败在这里就 fail-loud；不给时组合根拥有的键被显式清（见 `_ask_worker`），即「无使用方
-    step」档（grace 下限与 step 无关，故 `engine_min_grace` 走这一档）。
+    step」的情形（grace 下限与 step 无关，故 `engine_min_grace` 走这一种）。
     异常语义见 `_ask_worker`（调用方各自分叉：`run`/`submit`/`list-deterministic` 退 2、doctor 只报一行、
     `plan` 那侧走 match 查询）；输出不是 JSON 对象 → RuntimeError。
     """
@@ -538,20 +538,20 @@ def query_capabilities(engine: str, *, steps_dir: str | Path | None = None,
         )
     raw = caps.get("min_grace_s")
     # 契约校验：非负有限数（bool 是 int 子类、单独挡）。不合契约 = worker 与 CLI 不同版本 / 自述实现错，
-    # 与「输出非 JSON」同档 fail-loud——把它当 0 会让 core 的 grace 护栏形同废除。
+    # 与「输出非 JSON」同类 fail-loud——把它当 0 会让 core 的 grace 护栏形同废除。
     if isinstance(raw, bool) or not isinstance(raw, (int, float)) or not math.isfinite(raw) or raw < 0:
         raise RuntimeError(
             f"引擎 {engine} 自述的最短停止宽限不是非负有限数：{raw!r}"
             "——worker 与命令行工具版本不一致？两者须同版本安装。"
         )
-    # 清单同档校验：不是数组则消费者（list-deterministic / doctor 计数）会拿 len() 崩在无关处，
+    # 清单同类校验：不是数组则消费者（list-deterministic / doctor 计数）会拿 len() 崩在无关处，
     # 且「清单不可信」本身就是版本/实现不一致的信号。
     if not isinstance(caps.get("deterministic_steps"), list):
         raise RuntimeError(
             f"引擎 {engine} 自述的确定性 step 清单不是数组：{caps.get('deterministic_steps')!r}"
             "——worker 与命令行工具版本不一致？两者须同版本安装。"
         )
-    # 模型 id 同档校验：doctor 据它显示「这台机器实际会用的模型」（ADR 0004「模型版本选择策略」的 env 覆盖因此
+    # 模型 id 同类校验：doctor 据它显示「这台机器实际会用的模型」（ADR 0004「模型版本选择策略」的 env 覆盖因此
     # 可见）。缺键 / 空串会让那一行显示成没信息的「模型 」，等于把「不知道」伪装成「知道了」——与下限、清单同为
     # 版本/实现不一致的信号，一并 fail-loud。
     if not isinstance(caps.get("model_id"), str) or not caps["model_id"]:
@@ -821,7 +821,7 @@ def read_resource(uri: str, *, s3=None, region: str | None = None, profile: str 
 
     `file://` 复用 report_store 的 URI→路径解析（唯一一份，不写第三份）；`s3://` 走 boto `get_object`，
     client 经与 `build_cloud_stores` 同一个 `_make_s3_client` 钩子拿（测试可 monkeypatch）。**`s3` 参数优先**：
-    调用方读多个对象时建一次复用，别逐次建 session。boto3 仍只惰性 import（`file://` 档零 boto 依赖，
+    调用方读多个对象时建一次复用，别逐次建 session。boto3 仍只惰性 import（`file://` 路径零 boto 依赖，
     对齐「纯 local 路径绝不 import boto3」）。
     读不到/解不开一律抛（ValueError 或底层 OSError/botocore 异常），best-effort 由调用方裹 try 决定（0042 决策二）。
     """
@@ -1058,9 +1058,9 @@ def _release_cmp(a: str, b: str) -> int | None:
 def check_version_skew(ssm_version: str | None, cli_version: str | None) -> tuple[str, str]:
     """比 CLI 版本与后端版本戳 → `(verdict, message)`，verdict ∈ ok/warn/block/skip（ADR 0037 决策 7）。
 
-    message 是给人看的整句（ok 档为空串，调用点 `if message:` 即可）；**退码留给调用点**——`block` 一律退 2
+    message 是给人看的整句（ok 判定为空串，调用点 `if message:` 即可）；**退码留给调用点**——`block` 一律退 2
     且**无放行口**（决策 7 明拒 `--allow-version-skew`：放行 = 让新 CLI 写的 definition 进旧 Lambda runtime 读，
-    后果不可知且静默；uvx 按版本临时运行同版本 CLI 零成本，放行口没有真实需求）。其余三档只打一行、不拦。
+    后果不可知且静默；uvx 按版本临时运行同版本 CLI 零成本，放行口没有真实需求）。其余三种判定只打一行、不拦。
 
     判序——「无从比较」一律先于「比较结果」：
     1. **戳缺失**（`ssm_version` 为 None/空）→ warn + 提示部署方运行一次 `gherkai deploy` 写入。**不可退 2**：
@@ -1183,7 +1183,7 @@ def _ssm_get(ssm, path: str) -> str | None:
 def read_worker_default(*, prefix: str, region=None, profile=None, ssm=None) -> str | None:
     """读部署级默认 variant 指针（SSM `worker-default`，ADR 0038）。缺失 → None（调用方决定怎么报）。
 
-    单独公开是因为有三个消费者：两个解析函数（variant 缺省档）与推进器的兼容路径日志（要点名解析到了哪个
+    单独公开是因为有三个消费者：两个解析函数（variant 缺省取值）与推进器的兼容路径日志（要点名解析到了哪个
     variant——「用的是哪份」必须在日志里可见）。
     """
     if ssm is None:
@@ -1228,9 +1228,9 @@ def _variant_miss_hint(*, engine: str, variant: str, tag: str, what: str,
                        cli_version: str, backend_version: str | None) -> str:
     """variant 某一环 miss 时的整句提示——**按版本 skew 分叉**（ADR 0038「preflight」条）。
 
-    CLI **旧于**后端（决策 7 里「警告不拦」的那一档）时不能引导去 `push-worker`：那会让人推一个**旧版本
-    命名空间**的 tag，推完提交侧还是解析不到当前后端版本的映射、原地绕圈。此档一律引导升级 CLI。
-    其余档（同版本 / 无从比较 / 无戳）引导 push-worker——这是真正缺镜像时的修复动作；并给第二条出路
+    CLI **旧于**后端（决策 7 里「警告不拦」的那一种判定）时不能引导去 `push-worker`：那会让人推一个**旧版本
+    命名空间**的 tag，推完提交侧还是解析不到当前后端版本的映射、原地绕圈。这种情形一律引导升级 CLI。
+    其余情形（同版本 / 无从比较 / 无戳）引导 push-worker——这是真正缺镜像时的修复动作；并给第二条出路
     「临时 `--worker-variant base`」（ADR 0038「升级不重置默认指针」的配套：deploy 已把本版本基础镜像同步成 base，
     等不及部署方推自定义 variant 的人可以先这样运行）。
     """

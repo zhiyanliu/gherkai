@@ -957,7 +957,7 @@ def test_pending_cleanup_is_json_serializable_with_real_registered_at(monkeypatc
 
 
 def test_list_workers_json_sends_diagnostics_to_err_sink(aws):
-    """--json 下 stdout 只留一个 JSON 文档：skew 提示 / 读失败诊断走 err（stderr），文本档行为不变。"""
+    """--json 下 stdout 只留一个 JSON 文档：skew 提示 / 读失败诊断走 err（stderr），文本输出行为不变。"""
     seed_backend(aws, stamp="9.9.9")  # 后端戳 ≠ CLI 版本 → skew 提示
     out, text = _out()
     errs: list[str] = []
@@ -969,4 +969,4 @@ def test_list_workers_json_sends_diagnostics_to_err_sink(aws):
         _json.loads(body)  # stdout 可解析
         assert errs, "skew 提示应走 err"
     else:
-        assert body == "" and errs  # block 档：stdout 为空、诊断在 err
+        assert body == "" and errs  # block 判定：stdout 为空、诊断在 err
