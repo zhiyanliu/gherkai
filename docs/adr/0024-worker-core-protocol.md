@@ -117,7 +117,7 @@ worker **边跑边流式上报**（每行一个事件），core 实时收。选�
 
 ## 成本信封（cost）：engine 只报原生量，core 只合计，不算美元
 
-**原则：core 不算、不折美元、不判可信度——engine 提供什么原生量就报什么，core 各自合计。** 实查（见下「实查依据」）证实两个引擎计费轴根本不同：**Nova Act 按 agent 工作时长**（SDK 原生给 `time_worked_s`）；**Midscene 按 LLM token**（Bedrock 原生给 token 用量）。两个引擎的**原生信号本就不同**，统一成美元需要一个费率——而费率（尤其 Midscene 的 Qwen token 单价）随 region/协商/版本变、billed 到用户账户，工具不该追那张会过期的单价表。**故 core 只如实搬运 + 合计原生量，美元折算交给消费者（用自己 AWS 账户的真实费率）。**
+**原则：core 不算、不折美元、不判可信度——engine 提供什么原生量就报什么，core 各自合计。** 实查（见下「实查依据」）证实两个引擎计费轴根本不同：**Nova Act 按 agent 工作时长**（SDK 原生给 `time_worked_s`）；**Midscene 按 LLM token**（Bedrock 原生给 token 用量）。两个引擎的**原生信号本就不同**，统一成美元需要一个费率——而费率（尤其 Midscene 所用模型的 token 单价）随 region/协商/版本变、billed 到用户账户，工具不该追那张会过期的单价表。**故 core 只如实搬运 + 合计原生量，美元折算交给消费者（用自己 AWS 账户的真实费率）。**
 
 `cost` 是**平铺、各 optional 的原生量**（无 `cost_usd`/`precision`/`basis`/`costRate`——这些都已删）：
 

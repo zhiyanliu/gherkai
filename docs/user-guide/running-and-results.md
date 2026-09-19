@@ -84,9 +84,9 @@ gherkai explain "$RUN_ID"                                  # 有用例没过时�
 | `--max-concurrency N` | `1` | 同时运行的 worker 上限，须 ≥ 1。`submit --backend cloud` 提交时若超过部署方为单个 run 设的上限，命令会提示并按该上限并行；`run --backend cloud` 由本机命令进程直接调度，不受该上限约束 |
 | `--default-job-timeout S` | `300` | 单个 job 的墙钟预算秒（`<=0` 表示不超时）；用例上标 `@timeout:<秒>` 可逐 scope 覆盖。超预算的 job 被停掉并判 error |
 | `--grace S` | 自动 | 仅 `run --backend local`：中止时留给 worker 关闭云端浏览器会话的秒数，不给则按本批用到的引擎自报的最短宽限推导。值过小会漏关会话、继续计费，命令在开始执行前退 `2`。`--backend cloud` 不接受这个选项（给了直接退 `2`），云端的停止宽限在部署时定 |
-| `--fail-fast` | 关 | 仅 `run`：任一 job 出错即中止整批 |
+| `--fail-fast` | 关 | 仅 `run`：任一 job 出错即中止这个 run 的其余 job |
 
-单个 job 的网络故障只让那个 job 判 error，其余 job 继续；给了 `--fail-fast` 才会因此中止整批。
+单个 job 的网络故障只让那个 job 判 error，其余 job 继续；给了 `--fail-fast` 才会因此中止这个 run。
 
 **输出与落盘**
 
@@ -95,7 +95,7 @@ gherkai explain "$RUN_ID"                                  # 有用例没过时�
 | `--report-dir DIR` | `reports` | 报告落点，每次 run 落 `DIR/<run_id>/`。`status` 与 `explain` 查同一个 run 要给同一个值。云端后端下它是后端的报告前缀，与部署侧不一致时 `submit` 在提交前退 `2` 并点名两侧的值 |
 | `--no-report` | 关 | 仅 `run`：报告目录下什么都不落，也不收集引擎自己的报告产物。适合 CI 只看退出码或 JSON |
 | `--quiet` | 关 | 仅 `run`：不输出逐事件进度，仍输出文本汇总。在本机运行时 worker 日志改落 `<report-dir>/<run_id>/worker.log`（`--no-report` 时落系统临时目录），只打印一行位置；云端后端下没有本机 worker 日志 |
-| `--json` | 关 | 仅 `run`：只输出机器可读 JSON，不输出进度与文本汇总 |
+| `--json` | 关 | 仅 `run`：标准输出只打机器可读 JSON、不打文本汇总；进度与诊断照常走标准错误，逐事件进度可用 `--quiet` 静音 |
 | `--steps-dir DIR` | `./steps` | 项目自己的确定性 step 目录，也可用环境变量 `GHERKAI_STEPS_DIR`。目录里任一文件加载失败即整批拒绝运行。云端后端下不生效（云端 worker 的 step 构建在镜像里，只警告不拦），写法见 [`writing-deterministic-steps.md`](./writing-deterministic-steps.md) |
 | `--expose-local ORIGIN` | — | 把本机可达的被测应用经隧道暴露给云端浏览器，配套的 `--tunnel`（两条命令都有）与 `--tunnel-ttl`（只有 `submit` 有）见 [`local-app-testing.md`](./local-app-testing.md) |
 

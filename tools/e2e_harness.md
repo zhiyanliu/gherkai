@@ -39,7 +39,7 @@ HARNESS_S3_BUCKET=<你的可写桶> uv run python tools/e2e_harness.py \
 | `--feature`   | `wikipedia_assertions` | `features/<名>.feature`，**不含后缀**                                                 |
 | `--votes`     | `1`                    | AI 断言投票次数（ADR 0014）                                                            |
 | `--interrupt` | `none`                 | 中断时机，见下表                                                                      |
-| `--run-id`    | **必填**               | 本次唯一 id → S3 `harness/<run-id>/` + 本地 `$CLAUDE_JOB_DIR/harness-runs/<run-id>/` |
+| `--run-id`    | **必填**               | 本次唯一 id → S3 `harness/<run-id>/` + 本地 `/tmp/harness-runs/<run-id>/` |
 | `--grace-cap` | `30.0`                 | SIGTERM 后超过该墙钟 worker 仍未退出 → 判 `hung=true` 并发 SIGKILL 强制终止          |
 
 ### `--interrupt` 中断时机
@@ -104,4 +104,4 @@ print('deleted', len(objs))
 "
 ```
 
-本地临时产物落 `$CLAUDE_JOB_DIR/harness-runs/<run-id>/`（或 `/tmp/harness-runs/`），随 job 目录清理，通常无需手动删除。
+本地临时产物落 `/tmp/harness-runs/<run-id>/`（系统临时目录），用完自行删除。

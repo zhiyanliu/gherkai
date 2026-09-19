@@ -93,7 +93,7 @@
 
 几处判据的由来与边界：
 
-- **两条中止路径分开归因的原因**：代码里 `self_stopped` 这个布尔被超时与 fail-fast **两条路径共用**，因此图上那道分叉的判据取 `abort_flag`（只有 fail-fast 落 `aborted`）；无状态路径口径相同——`TaskExited.timed_out` → `ERROR`，归因由 `_reduce_scope` 覆盖为 `timeout`，因为该次 stop 本就由超时处置发起。这样切分的理由见 [ADR 0031](../adr/0031-job-lifecycle-states-and-severity.md) 决定一的注（「aborted 只认 fail-fast」）。
+- **两条中止路径分开归因的原因**：超时与 fail-fast **两条路径都会主动停 worker**（被停的 worker 随后可能以网络码退出），因此图上那道分叉的判据取 `abort_flag`（只有 fail-fast 落 `aborted`）、不看「是否被自己停过」这类笼统标志；无状态路径口径相同——`TaskExited.timed_out` → `ERROR`，归因由 `_reduce_scope` 覆盖为 `timeout`，因为该次 stop 本就由超时处置发起。这样切分的理由见 [ADR 0031](../adr/0031-job-lifecycle-states-and-severity.md) 决定一的注（「aborted 只认 fail-fast」）。
 - **`skipped` 不覆盖建连失败的原因**：建连失败的 job 已经建立过会话、已经计费，`saw_step == False` 只表示「可安全重试（无 act 副作用）」、不表示「未产生费用」，因此它照常进入 run 级聚合，`skipped` 的边界严格停在「worker 从未 spawn」。现状补充：`ScheduleOpts.network_retry` 默认 0 且 CLI 未暴露该参数，所以当前 `run` **不做** job 级整批重新运行；生效的只有 worker 自身的建连退避（`_CONNECT_ATTEMPTS` / `_BACKOFF_S`，只包裹幂等的建连段），重试耗尽即以网络专用退出码退出。
 - 另一条边界：worker 收到停止信号时**不为未执行完的单元生成判定**——Nova 在投票循环与 step 循环开头检查停止标志，票数未投满就不 emit 带判定的 `step_done`、也不发 `step_skipped`；Midscene 执行 SIGTERM 收尾序列（释放会话 → 安全点提前上传 → 排空队列）。两侧都把未完成的单元交由 core 按派生态处理，区别只在停止的处置形态。
 

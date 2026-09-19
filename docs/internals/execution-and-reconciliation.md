@@ -154,10 +154,10 @@ cloud 路径的超时处置是一条多跳链，时序如下图。这里的「�
 
 ![两道拦截：新 run 落库这一路在订阅侧即被过滤，事件批次与任务停止事件只能进入函数后再查询该 run 的后台标记](../diagrams/execution-detached-gates.svg)
 
-图注：能在事件源层过滤的即在该层挡下，不能过滤的进入 handler 后再判断——事件批次与任务停止事件上都不带 `detached`，只能反查这个 run。图上四个判点里只有前两个（新 run 落库、handler 判断是否为后台批次）是本节所说的那两道拦截；「该 run 已收尾？」与 exit-observer 那一道各自防范另一件事，见下面三条。§4b 那张时序图画「链如何贯通」，本图画「谁被挡在链外」。
+图注：能在事件源层过滤的即在该层挡下，不能过滤的进入 handler 后再判断——事件批次与任务停止事件上都不带 `detached`，只能反查这个 run。图上四个判点里只有前两个（新 run 落库、handler 判断是不是 submit 提交到后台执行的 run）是本节所说的那两道拦截；「该 run 已收尾？」与 exit-observer 那一道各自防范另一件事，见下面三条。§4b 那张时序图画「链如何贯通」，本图画「谁被挡在链外」。
 
 - **kicker**：runs 表 Stream 的事件源 **filter** 固定为 `INSERT ∧ detached=true`，前台 run 的 STATE 不带这个标记。
-- **reconciler**：`tick` 装配前查 `is_detached`（日志 `skip: run … 不是 submit 提交的后台批次`）；紧接的第二道判断读 run 终态（日志 `skip: run … 已结束，不再改写它的结果`），针对的不是本节这件事。两道判断都在 reconciler 与 kicker **共用的装配**里，kicker 无论从哪个入口进入（新 run 落库、`status --wait` 检测到停滞后的调起、超时定时器到点）都要经过，因此图上这两个判点不标注 Lambda 名；冷启动那一路画成直达，只为看清「谁在哪一层被挡」。
+- **reconciler**：`tick` 装配前查 `is_detached`（日志 `skip: run … 不是 submit 提交到后台执行的 run`）；紧接的第二道判断读 run 终态（日志 `skip: run … 已结束，不再改写它的结果`），针对的不是本节这件事。两道判断都在 reconciler 与 kicker **共用的装配**里，kicker 无论从哪个入口进入（新 run 落库、`status --wait` 检测到停滞后的调起、超时定时器到点）都要经过，因此图上这两个判点不标注 Lambda 名；冷启动那一路画成直达，只为看清「谁在哪一层被挡」。
 - **exit-observer**：判据同为 `is_detached`。它不推进，防范的是另一件事：无 `body` 的 exit item 混入前台 run 的事件流（前台的退出观察由 Engine adapter 自行完成，§5）。
 
 > 权威：[ADR 0034](../adr/0034-detached-batch-reconciler.md)（「filter 必须区分写入者」条）、[ADR 0033](../adr/0033-iac-aws-backend-and-composition-wiring.md)（Stream/filter 资源；events 表那条只滤得掉 TTL 删除，`detached` 那半只能在 handler 内判）。
