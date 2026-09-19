@@ -2,7 +2,7 @@
 // 目标：TS 侧 SigV4 自签 fetch + openai-node v6 → Bedrock qwen3-vl，拿 200。
 //   (a) 纯文本：证 SigV4 字节匹配 + 协议通
 //   (b) 视觉：用一张合格的真实 PNG（非 1x1 占位图）证 image_url 能过 Bedrock 图像 sanitize 并返回视觉应答
-// 运行：cd midscene && node_modules/.bin/tsx spikes/midscene-sigv4/01-model-sigv4.ts
+// 运行：cd engines/midscene && node_modules/.bin/tsx spikes/01-model-sigv4.ts
 import OpenAI from "openai";
 import { sigv4Fetch, getBaseUrl, MODEL, getRegion } from "../src/lib/agentcore-sigv4.mjs";
 // region 改惰性 getter（ADR 0033/0016 决策 C）；spike 直接运行时带 AWS_REGION=... 前缀，顶层求值 OK。

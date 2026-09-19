@@ -2,7 +2,7 @@
 // 断言信任的命门：一个"永远绿"的测试框架比没有还危险。这里故意造必假断言，
 // 验证 aiBoolean/aiNumber/aiString 在"不符"时确实给出 false / 不匹配的值（→ 上层会判失败）。
 // 一次性证伪探针，验完即可丢。
-// 运行：cd midscene && AWS_REGION=us-east-1 node_modules/.bin/tsx spikes/midscene-sigv4/05-negative-assertions.ts
+// 运行：cd engines/midscene && AWS_REGION=us-east-1 node_modules/.bin/tsx spikes/05-negative-assertions.ts
 import OpenAI from "openai";
 import { PlaywrightAgent } from "@midscene/web/playwright";
 import { chromium } from "playwright";

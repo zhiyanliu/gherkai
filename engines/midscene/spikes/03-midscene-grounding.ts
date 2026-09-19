@@ -8,7 +8,7 @@
 //   B AI 断言：agent.aiAssert("当前在 OpenAI 的维基词条页")，执行 N=10 次测抖动
 // 度量：动作成功率、A/B 是否一致、B 的 10 次抖动率、各步耗时。
 //
-// 运行：cd midscene && AWS_REGION=us-east-1 node_modules/.bin/tsx spikes/midscene-sigv4/03-midscene-grounding.ts
+// 运行：cd engines/midscene && AWS_REGION=us-east-1 node_modules/.bin/tsx spikes/03-midscene-grounding.ts
 import OpenAI from "openai";
 import { PlaywrightAgent } from "@midscene/web/playwright";
 import { chromium, type Browser } from "playwright";

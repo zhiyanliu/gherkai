@@ -2,7 +2,7 @@
 // 两关：(a) chat-completions 在本账号 200；(b) 容忍 image_url 部件——
 //   因为 Midscene 的 planner 即便不做定位也会无条件附带截图（调查 P1 挖出的真未知）。
 // 复用已验证的 SigV4 自签（service "bedrock"，与 grounding 同源）。
-// 运行：cd midscene && AWS_REGION=us-east-1 node_modules/.bin/tsx spikes/midscene-sigv4/04-planning-probe.ts
+// 运行：cd engines/midscene && AWS_REGION=us-east-1 node_modules/.bin/tsx spikes/04-planning-probe.ts
 import OpenAI from "openai";
 import { sigv4Fetch, getBaseUrl } from "../src/lib/agentcore-sigv4.mjs";
 // region 改惰性 getter（ADR 0033/0016 决策 C）；spike 直接运行时带 AWS_REGION=... 前缀，顶层求值 OK。

@@ -150,28 +150,28 @@
     "semantic_hash": ""
   },
   "engines/midscene/spikes/01-model-sigv4.ts": {
-    "mtime": 1789780403.3542116,
-    "ast_hash": "07611d248edbd0d36bd2d559f6762695",
+    "mtime": 1789782179.6055024,
+    "ast_hash": "9aa868bcb0c634977e5f0e3932e9afdc",
     "semantic_hash": ""
   },
   "engines/midscene/spikes/02-agentcore-cdp.ts": {
-    "mtime": 1789781334.776508,
-    "ast_hash": "9a2ff73e8d94e9002707607eb92f31f3",
+    "mtime": 1789782179.6075966,
+    "ast_hash": "3e59aadb32e086b52156b879ab6c60a7",
     "semantic_hash": ""
   },
   "engines/midscene/spikes/03-midscene-grounding.ts": {
-    "mtime": 1789780437.9398088,
-    "ast_hash": "7d78a5b4b4213d6cd19828e0f3cfcc27",
+    "mtime": 1789782179.609568,
+    "ast_hash": "412c8d086ed8c5bb312e49464beed1e0",
     "semantic_hash": ""
   },
   "engines/midscene/spikes/04-planning-probe.ts": {
-    "mtime": 1789780403.354713,
-    "ast_hash": "401589e9f5b849d2f4f1b5bdf35e4275",
+    "mtime": 1789782179.6117373,
+    "ast_hash": "180f0b98354b4223c5b2b6fe66c36568",
     "semantic_hash": ""
   },
   "engines/midscene/spikes/05-negative-assertions.ts": {
-    "mtime": 1789780403.354797,
-    "ast_hash": "f934e39fe44405b04702da8a15a6d93c",
+    "mtime": 1789782179.6138036,
+    "ast_hash": "2e07757e92b8f6fd91d396575e455fc6",
     "semantic_hash": ""
   },
   "engines/novaact/pyproject.toml": {
