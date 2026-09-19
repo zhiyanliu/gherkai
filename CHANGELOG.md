@@ -21,6 +21,7 @@
 - 仓库首页新增「判定由谁做出」一节，列出两个引擎各自使用的模型与服务、版本策略、查看与更换方式，以及费用来源。
 - 文档重组：面向使用者的完整说明集中到 [`docs/user-guide/`](./docs/user-guide/README.md)，新增[常见问题](./docs/user-guide/faq.md)页；文档里的图改为统一风格的架构 / 流程 / 时序图，执行与推进全景、云端交付与 worker 身份两张大图另有可交互版本（https://zhiyanliu.github.io/gherkai/ ）；各发行包在 PyPI / npm 上的页面改为入口页，只留定位、装法、最小用法与指向用户指南的链接；本文件是新增的变更记录。
 - 命令行的帮助、提示、警告、错误与 `gherkai deploy` 的步骤行统一了用词：口语的「跑」改为「运行」或「执行」；`--default-job-timeout` 的帮助改称「job 墙钟预算秒」；`gherkai skill` 各命令的帮助改称「agent skill」；`deploy` 里同步官方 worker 镜像的那一步改称「基础镜像同步」；`plan` 的输出表头改称「用例预检」。用户文档与随包发行的 agent skill 同批对齐了同一套用词：`plan` 一律称「用例预检」，前台与后台之别称「执行方式」、本机与云端之别称「执行后端」，两者的四种组合称「四种组合」。命令、选项、输出结构与退出码都没有变化。
+- `gherkai --help` 不再列出 `_reconcile` 与 `_tunnel_watch`：它们是 `submit` 在后台启动的子进程入口，不供直接使用；此前二者以「==SUPPRESS==」出现在命令列表里。
 
 ### 修复
 

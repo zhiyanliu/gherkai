@@ -10,8 +10,8 @@
     "semantic_hash": ""
   },
   "cli/tests/test_main.py": {
-    "mtime": 1789802682.2252893,
-    "ast_hash": "5071f64e23154602292e0302ee080cc3",
+    "mtime": 1789808790.337251,
+    "ast_hash": "899060281ddb4f3f9aa37e7b608a771e",
     "semantic_hash": ""
   },
   "cli/tests/test_render.py": {
@@ -455,8 +455,8 @@
     "semantic_hash": ""
   },
   "cli/gherkai_cli/__main__.py": {
-    "mtime": 1789799770.3051763,
-    "ast_hash": "d4d6b62c472860a05ae35a83a076b2ce",
+    "mtime": 1789808725.1057591,
+    "ast_hash": "886665a10cfdddfe3449f0ef0e85b305",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/render.py": {
@@ -1335,8 +1335,8 @@
     "semantic_hash": ""
   },
   "CHANGELOG.md": {
-    "mtime": 1789804643.7937257,
-    "ast_hash": "0ee234fd30b043864fb4626b7b7e11ff",
+    "mtime": 1789808725.1065028,
+    "ast_hash": "8c5a32c1b55c0942a657e4713e9811b1",
     "semantic_hash": ""
   },
   "CONTRIBUTING.md": {
@@ -1660,8 +1660,8 @@
     "semantic_hash": ""
   },
   "docs/diagrams/run-execution.json": {
-    "mtime": 1789800031.5016732,
-    "ast_hash": "",
+    "mtime": 1789808133.9940963,
+    "ast_hash": "03a7848abdd1011af73dfdee674291a7",
     "semantic_hash": ""
   },
   "docs/diagrams/verdict-model-job-outcome.json": {

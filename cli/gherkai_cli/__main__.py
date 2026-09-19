@@ -415,7 +415,9 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     ex.add_argument("--profile", default=None, metavar="P")
 
     # _reconcile：per-run 进程入口（submit setsid fork 它，非用户直接调）。执行 reconcile loop 到全 done。
-    rc = sub.add_parser("_reconcile", help=argparse.SUPPRESS)
+    # 内部入口**不传 help**：argparse 只为带 help 的子命令登记帮助条目，不传即不出现在 --help 的命令说明里；
+    # 传 help=argparse.SUPPRESS 反而会以「==SUPPRESS==」漏出（Python 3.13 仍如此）。命令集的花括号列表另由末尾的 metavar 收窄。
+    rc = sub.add_parser("_reconcile")
     rc.add_argument("run_id")
     rc.add_argument("--report-dir", default="reports")
     rc.add_argument("--max-concurrency", type=int, default=1)
@@ -424,7 +426,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
 
     # _tunnel_watch：cloud submit 的隧道守护进程入口（submit setsid fork 它，非用户直接调，ADR 0035 决策 3）：
     # 轮询 run 终态即拆隧道；TTL 兜底自杀防泄漏。
-    tw = sub.add_parser("_tunnel_watch", help=argparse.SUPPRESS)
+    tw = sub.add_parser("_tunnel_watch")  # 同 _reconcile：不传 help（见上）
     tw.add_argument("run_id")
     tw.add_argument("--tunnel-pid", type=int, required=True)
     # --ttl 必给、无默认：TTL 按 definition 算（submit 侧 tunnel_host.compute_watch_ttl_s，用户可用
@@ -486,6 +488,9 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     # 前端绝不 import aws_cdk——只发现 provider、贴它的 flag、分派动作（契约见 gherkai_cli/deploy.py 顶部）。
     _deploy.add_parsers(sub, provider=provider, provider_error=provider_error,
                         cli_version=_installed_version())
+    # --help 的命令集只列公开命令：以 _ 开头的是 submit 在后台启动的子进程入口，不供直接使用（帮助条目已靠不传 help 隐藏，
+    # 这里再把 usage 与列表首行的花括号收窄；错误提示「invalid choice … choose from」仍会列全，那是 argparse 的形态、可接受）。
+    sub.metavar = "{" + ",".join(name for name in sub.choices if not name.startswith("_")) + "}"
     return p
 
 

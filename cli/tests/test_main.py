@@ -2016,3 +2016,20 @@ def test_explain_scenario_matcher_digits_are_line_numbers_only():
     assert hit(sc, ["3"]) is False          # 标题含 3，但 3 不是行号 → 不命中
     assert hit(sc, [":12"]) and hit(sc, ["12"]) and hit(sc, ["重试"]) and hit(sc, ["f.feature:12"])
     assert hit(sc, ["3", "重试"]) is True   # 或
+
+
+def test_help_hides_internal_entry_points(capsys):
+    """`gherkai --help` 不列内部入口：_reconcile / _tunnel_watch 是 submit 在后台启动的子进程入口，不供直接使用。
+    argparse 对子命令传 help=SUPPRESS 会漏出「==SUPPRESS==」，故实现是「不传 help + 收窄 metavar」；本测试守住两条。"""
+    import pytest
+
+    with pytest.raises(SystemExit) as e:
+        m.main(["--help"])
+    assert e.value.code == 0
+    out = capsys.readouterr().out
+    assert "_reconcile" not in out and "_tunnel_watch" not in out and "SUPPRESS" not in out, out
+    assert "submit" in out and "status" in out  # 公开命令仍在
+    # 隐藏不等于禁用：内部入口照常可解析（submit fork 的子进程靠它）
+    with pytest.raises(SystemExit) as e2:
+        m.main(["_reconcile", "--help"])
+    assert e2.value.code == 0
