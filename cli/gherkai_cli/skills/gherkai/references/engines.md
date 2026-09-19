@@ -87,4 +87,4 @@ deterministic(
 
 ## 6 把 steps 带到云端
 
-`--backend cloud` 时 worker 运行在云端容器里、读不到本机 `steps/`，`--steps-dir` 只警告不生效。步骤要烙进一个定制 worker 镜像并 `gherkai deploy push-worker` 推上去，提交时用 `--worker-variant` 选。流程在 `references/cloud-backend.md`。
+`--backend cloud` 时 worker 运行在云端容器里、读不到本机 `steps/`，`--steps-dir` 只警告不生效。步骤要构建进一个定制 worker 镜像并 `gherkai deploy push-worker` 推上去，提交时用 `--worker-variant` 选。流程在 `references/cloud-backend.md`。

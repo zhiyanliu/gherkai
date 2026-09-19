@@ -79,7 +79,7 @@ cd cli && uv run pytest -q # 只运行本包（cwd 决定收集范围）
 
 `run` 并非等到运行结束才一次性落盘：`__main__` 注入 core 的 `RunPersistence`（组合根注入三个 Store adapter），
 run 开始即写 definition 与初始全 pending 态，每个 scope 开始执行时写入 RUNNING、完成即落该 scope 判定真值，
-最后 `finalize` 写总状态（commit point）。`--no-report` 时跳过整条落库（零落盘运行的逃生舱）。
+最后 `finalize` 写总状态（commit point）。`--no-report` 时跳过整条落库（零落盘运行路径）。
 
 落到哪由 `--backend` 决定：默认 `local`（文件落 `--report-dir`）；`--backend cloud` 让组合根改注入 DynamoDB/S3
 adapter、复用同一条 `RunPersistence`，把状态落 DynamoDB、判定真值与报告落 S3（表/桶需预先建好，由 `gherkai deploy` 供给）。

@@ -7,7 +7,7 @@
 - **prefix 两层命名（ADR 0033）**：--prefix 批量推导默认名（{prefix}runs/artifacts/events/cluster）、单资源 --xxx 覆盖；
 - **preflight fail-fast**：资源不存在退 2 + 错误点名 prefix；
 - **cloud ⇒ FargateEngine（决策 A）**：cloud 走 build_fargate_engines（非 build_engines）；
-- 缺 boto3 → 退 2；运行期 botocore 异常 → 退 1；cloud + --no-report → 跳过一切云端 + 走 subprocess（逃生舱）；
+- 缺 boto3 → 退 2；运行期 botocore 异常 → 退 1；cloud + --no-report → 跳过一切云端 + 走 subprocess（零落盘运行路径）；
 - artifacts 在 cloud 下是 s3://+ddb:// 形态；
 - **三道闸的次序与退出码（ADR 0037 决策 7 / 0038）**：版本 skew → 资源 preflight → worker 镜像 variant 解析，
   前一道拦下时后面的一次都不执行；variant miss 退 2 不回落，解析结果进 definition 与 build_fargate_engines。
@@ -436,7 +436,7 @@ def test_cloud_no_report_still_fargate_but_no_store(tmp_path, monkeypatch, capsy
     rc = m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud", "--no-report",
                  "--region", "us-east-1", "--quiet"])
     assert rc == 0
-    # 落库轴：不构造任何 store 钩子（need_cloud=False，逃生舱）
+    # 落库轴：不构造任何 store 钩子（need_cloud=False，零落盘运行路径）
     assert not any(r[0] == "make" for r in record)
     # 执行轴：仍走 Fargate（决策 A：cloud ⇒ Fargate，与 report 正交）
     assert len(made["fargate"]) == 1, "--no-report --backend cloud 仍应 Fargate 执行"
@@ -688,7 +688,7 @@ def test_cloud_run_does_not_consult_local_worker_chain(tmp_path, monkeypatch, ca
 
 
 def test_cloud_omits_steps_dir_and_warns_when_given(tmp_path, monkeypatch, capsys):
-    """cloud 档：definition **不写** steps_dir（本机路径对云端 worker 无意义——steps 烙在定制镜像里，
+    """cloud 档：definition **不写** steps_dir（本机路径对云端 worker 无意义——steps 构建在定制镜像里，
     ADR 0037 决策 4 / 0038）；用户显式给了 `--steps-dir` 则**警告不拦**（run 照常运行，只是这个 flag 无效）。"""
     record: list = []
     _patch_cloud_handles(monkeypatch, record)

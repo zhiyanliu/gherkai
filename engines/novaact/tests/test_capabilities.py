@@ -71,7 +71,7 @@ def test_model_id_defaults_to_pinned_ga_version():
 
 def test_model_id_follows_env_override():
     """`NOVA_MODEL_ID` 真穿到自述（opt-in 旋钮，ADR 0004「模型版本选择策略」）：`doctor` 据此显示当前模型，
-    烙了 env 的机器一眼可见。
+    写入了 env 的机器一眼可见。
 
     取值用 `nova-act-preview` 别名——试新模型只有别名一条路（服务端拒绝直接引用带日期的 preview id）。
     worker 侧**不校验取值**（合法性由服务端判），故这条只证「env 到自述」这一段：本入口不建会话、不碰

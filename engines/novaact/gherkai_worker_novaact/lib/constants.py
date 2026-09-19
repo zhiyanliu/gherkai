@@ -21,7 +21,7 @@ import os
 # 显式发布落地，而不是藏在别名里在使用方账户中静默发生；升级流程（新 GA → 重新运行同一批用例的 A/B → 改本常量
 # → 发版点明模型换代）见该 ADR，别在这里改成别名。
 # env `NOVA_MODEL_ID` 是 **opt-in 旋钮**（与下面的 NOVA_GRACE_MARGIN_S 同形：worker 读、缺省即钉死值）：
-# 本机执行时在 shell 里设即生效；云端 Fargate 容器 env 是显式枚举，要用就烙进定制 worker 镜像的 `ENV`（即
+# 本机执行时在 shell 里设即生效；云端 Fargate 容器 env 是显式枚举，要用就构建进定制 worker 镜像的 `ENV`（即
 # ADR 0038 的 variant 机制）。可设 `nova-act-preview` 试新模型，但 **preview 不作产品默认**：无支持承诺、
 # 随 AWS 移动，且**不可钉**——服务端拒绝直接引用带日期的 preview id（只能用 `nova-act-preview` 别名），
 # 正是钉版本要消掉的那种不受控变化。

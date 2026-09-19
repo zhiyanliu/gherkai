@@ -575,7 +575,7 @@ def test_on_job_complete_fires_once_per_job_with_final_jobresult():
 
 
 def test_on_job_complete_default_none_is_noop():
-    # 不传回调（默认 None）：行为与从前完全一致（逃生舱，保纯 reducer）
+    # 不传回调（默认 None）：行为与从前完全一致（无回调路径，保纯 reducer）
     engine = FakeEngine({"a": _passing_events("a", "a:0")})
     result = schedule(_rm([_job("a")]), FakeResolver(engine), CollectSink())  # 不传 on_job_complete
     assert result.status == Status.PASSED

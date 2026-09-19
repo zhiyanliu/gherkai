@@ -1,7 +1,7 @@
 """RunPersistence 应用服务直测（ADR 0030）：脱离 cli/schedule，用 fake store 直接验 core 层不变量。
 
 四刀审计发现 RunPersistence 此前零直接单测（只经 cli 端到端间接覆盖）。这里把它的核心契约钉到 core 层：
-commit-point 写序 / on_event 只对 ScopeStarted 刷 RUNNING / finalize 逃生舱 + 报告失败隔离 / begin 初始投影 / aborted 血缘保留。
+commit-point 写序 / on_event 只对 ScopeStarted 刷 RUNNING / finalize 的无报告路径 + 报告失败隔离 / begin 初始投影 / aborted 血缘保留。
 """
 from __future__ import annotations
 
@@ -80,7 +80,7 @@ def test_on_event_runs_only_on_scope_started():
     assert updates[0].scope_id == "a" and updates[0].status == Status.RUNNING and updates[0].session_id == "s1"
 
 
-# ---- 决定二/三：finalize 逃生舱——report_store=None 返回 None、仍 finalize_run、不崩 ----
+# ---- 决定二/三：finalize 的无报告路径——report_store=None 返回 None、仍 finalize_run、不崩 ----
 def test_finalize_without_report_store_returns_none():
     calls, run, result, _ = _recording()
     p = RunPersistence("r", run, result, report_store=None)  # WebUI/cron 皮可能不注入 report

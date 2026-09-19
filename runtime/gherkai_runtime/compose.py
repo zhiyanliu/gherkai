@@ -977,7 +977,7 @@ def build_fargate_engines(
     # 引擎特定 env（同 headers 走 extra_env 注 RunTask overrides）：Nova 的 act timeout **双端同源**
     # （ADR 0024 grace 硬约束）——容器不继承本地 env、RunTask overrides 逐条枚举，故 cloud 档必须显式注，
     # 否则 worker 落回自带字面量：operator 调 NOVA_ACT_TIMEOUT_S 改不动容器内的单 act 上界，
-    # ADR 0032 明写的逃生舱（「要更长 act 就调这个 env」）在云端静默失效、local/cloud 行为分叉。
+    # ADR 0032 明写的手动覆盖项（「要更长 act 就调这个 env」）在云端静默失效、local/cloud 行为分叉。
     engine_env = {"novaact": {"NOVA_ACT_TIMEOUT_S": str(NOVA_ACT_TIMEOUT_S)}}
 
     def _engine(engine: str) -> Engine:

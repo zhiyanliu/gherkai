@@ -459,7 +459,7 @@ def test_realtime_commit_point_write_order(tmp_path, monkeypatch, capsys):
 
 
 def test_no_report_skips_persistence_entirely(tmp_path, monkeypatch, capsys):
-    # --no-report：persistence=None，store 装配一次都不该被调（零落盘运行、逃生舱）
+    # --no-report：persistence=None，store 装配一次都不该被调（零落盘运行路径）
     constructed = {"n": 0}
     def boom(**kwargs):
         constructed["n"] += 1

@@ -124,7 +124,7 @@ def add_parsers(sub, *, provider: object | None = None, provider_error: str | No
     """
     # provider 缺席时把原因写进 epilog：不然「帮助里没有 --prefix/--vpc」看着像 flag 面残缺，
     # 而真相是 provider 没解析出来（没装 / 装坏了）——降级的帮助必须自解释。
-    epilog = (f"注意：provider 的旋钮（如 --prefix / --vpc / --stop-timeout）未列在上面——{provider_error}"
+    epilog = (f"注意：provider 的选项（如 --prefix / --vpc / --stop-timeout）未列在上面——{provider_error}"
               if provider is None and provider_error else None)
     dp = sub.add_parser(
         "deploy", conflict_handler="resolve", epilog=epilog,
@@ -143,7 +143,7 @@ def add_parsers(sub, *, provider: object | None = None, provider_error: str | No
     )
     act.add_argument(
         "--synth-only", default=None, metavar="DIR",
-        help="只把 IaC 合成的模板导出到 DIR、不连账户改动（逃生舱：交给自己的审批/发布流水线去 apply）",
+        help="只把 IaC 合成的模板导出到 DIR、不连账户改动（交给自己的审批 / 发布流水线去 apply）",
     )
     act.add_argument(
         "--bootstrap", action="store_true",

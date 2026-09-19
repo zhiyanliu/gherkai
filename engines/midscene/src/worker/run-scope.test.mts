@@ -713,7 +713,7 @@ async function spawnWorker(args: string[], modelEnv: Record<string, string | und
   return { code, out: Buffer.concat(out).toString("utf-8"), err: Buffer.concat(err).toString("utf-8") };
 }
 
-test("--capabilities: MIDSCENE_MODEL_ID 覆盖时自报的 model_id 跟着变（ADR 0044 决策 2 的覆盖旋钮真生效）", async () => {
+test("--capabilities: MIDSCENE_MODEL_ID 覆盖时自报的 model_id 跟着变（ADR 0044 决策 2 的覆盖项真生效）", async () => {
   const { DEFAULT_MODEL } = await import("../lib/agentcore-sigv4.mjs");
   const override = "us.openai.gpt-6-astra";  // inference profile 形态，且家族推得出（否则会被启动期校验挡下）
   const { code, out, err } = await spawnWorker(["--capabilities"],
@@ -721,7 +721,7 @@ test("--capabilities: MIDSCENE_MODEL_ID 覆盖时自报的 model_id 跟着变（
   assert.equal(code, 0, `应退 0，stderr=${err}`);
   const got = JSON.parse(out);
   assert.equal(got.model_id, override, "自报得反映 env 覆盖——doctor 正是拿这个键显示当前用哪个模型");
-  assert.notEqual(got.model_id, DEFAULT_MODEL, "覆盖了还等于默认 = 这个旋钮其实没接上");
+  assert.notEqual(got.model_id, DEFAULT_MODEL, "覆盖了还等于默认 = 这个覆盖项其实没接上");
 });
 
 test("模型家族推不出 → worker 启动期即非零退出，连自述入口都被挡下（不等到建了云端浏览器会话才炸）", async () => {

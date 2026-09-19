@@ -50,7 +50,7 @@ gherkai explain "$RUN_ID" --backend cloud --prefix gherkai-         # 失败证�
 | variant | 一套具名的确定性 step 集 = 一个定制镜像，ECR tag `<CLI 版本>-<variant 名>`，对应一个 task 定义 revision（按 digest 引用） | 你的 `push-worker` |
 | 默认指针 | 提交时不给 `--worker-variant` 用哪个（部署级一个） | `deploy` 初始化为 base；`push-worker --set-default` 改指 |
 
-云端 worker 读不到本机 `steps/`，`--steps-dir` 在 `--backend cloud` 下只警告不生效。步骤要烙进镜像（构建不归 gherkai，三行 Dockerfile）：
+云端 worker 读不到本机 `steps/`，`--steps-dir` 在 `--backend cloud` 下只警告不生效。步骤要构建进镜像（构建不归 gherkai，三行 Dockerfile）：
 
 ```dockerfile
 FROM ghcr.io/zhiyanliu/gherkai-worker-novaact:<你的 CLI 版本>   # 版本须与 gherkai --version 一致

@@ -109,7 +109,7 @@ def test_deploy_flags_are_attached_to_the_right_subverb():
 
 def test_provider_only_flag_table_is_backed_by_the_real_parser():
     """`cli/tests` 那边对 `PROVIDER_ONLY_FLAGS` 里的裸 flag 放行（它 import 不到 provider）。这条守住那张表：
-    每一项都必须真在 provider 的 parser 树上——否则它就成了「写错的 flag 也能过」的万能逃生舱。"""
+    每一项都必须真在 provider 的 parser 树上——否则它就成了「写错的 flag 也能过」的万能旁路。"""
     everywhere = {f for verb in VERBS for flags in NODES[verb].values() for f in flags}
     missing = sorted(PROVIDER_ONLY_FLAGS - everywhere)
     assert not missing, f"这些 flag 已不在 provider 上了，从 _doc_rules.PROVIDER_ONLY_FLAGS 里删掉：{missing}"

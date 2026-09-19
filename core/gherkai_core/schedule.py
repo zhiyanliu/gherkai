@@ -343,7 +343,7 @@ def schedule(
     engines:  按 job.engine 解析 Engine 的 resolver（schedule 对引擎数/引擎名无知）。
     sink:     接收 ADR 0024 原始流式事件的回调（与 RunResult 是同一事件流的两个视图）。被 sink_lock 串行化（进度显示）。
     on_job_complete: 每个 job 完成时回调它**已归约好的 JobResult**（ADR 0030 实时写接缝）。schedule 自己
-              不碰任何 store——落库/写序由组合根注入的回调编排（默认 None=no-op，逃生舱：测试/--no-report/
+              不碰任何 store——落库/写序由组合根注入的回调编排（默认 None=no-op，即零落盘路径：测试/--no-report/
               纯内存都不传，保 schedule 纯 reducer 与 fake-clock 可测）。**正常路径（产品）总会接 persistence**，
               None 不是常态。在 as_completed 主线程**串行** fire（非 worker 线程）。
     on_event: 每个事件的**旁路观察者**（实时落库 RUNNING 中间态用，ADR 0030）。与 sink 区别：on_event 在

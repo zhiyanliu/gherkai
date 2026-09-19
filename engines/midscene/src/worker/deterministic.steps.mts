@@ -1,7 +1,7 @@
 // **内建**确定性锚点（ADR 0020/0022）——随包发布、零使用方内容（ADR 0037 决策 5 基底镜像同理）。
 //
 // 用途：少数"必须精确、不容 AI 抖动"的断言（如 URL 精确、关键 DOM 存在/文本），
-// 用底层 Playwright（ctx.page）直接查、**不走 AI、不投票**。这是 ADR 0015 的"确定性逃生舱"。
+// 用底层 Playwright（ctx.page）直接查、**不走 AI、不投票**。这是 ADR 0015 所说的确定性 step 路径。
 //
 // 机制（ADR 0022）：worker 派发每个 step 时**先查确定性注册表**（命中走 handler），未命中才落 AI catch-all。
 // `deterministic(正则, handler, { description, example })` 注册（元数据必填、缺则 fail-loud——ADR 0036

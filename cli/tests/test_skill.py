@@ -26,6 +26,7 @@ from pathlib import Path
 
 import pytest
 from _doc_rules import (
+    COLLOQUIAL,
     FORBIDDEN,
     PROVIDER_ONLY_FLAGS,
     RELATIVE_LINK,
@@ -110,9 +111,13 @@ def test_scan_face_is_not_empty():
 @pytest.mark.parametrize("md", skill_markdown_files(), ids=lambda p: str(p.relative_to(SKILL_ROOT)))
 def test_skill_markdown_is_product_facing(md: Path):
     """零内部指代：skill 落在使用方项目里，ADR 编号 / 决策号 / 内部机制名对那边的 agent 是噪声。"""
+    lines = md.read_text(encoding="utf-8").splitlines()
+    # frontmatter 的 description 是触发匹配用的：里面转述用户口语（如「跑测试」）是有意的，口头语表只扫正文。
+    body_start = (lines.index("---", 1) + 1) if lines and lines[0].strip() == "---" and "---" in lines[1:] else 0
     hits = [f"{md.relative_to(REPO)}:{i}: {line.strip()[:120]}"
-            for i, line in enumerate(md.read_text(encoding="utf-8").splitlines(), 1) if FORBIDDEN.search(line)]
-    assert not hits, ("skill 随包发到使用方项目，不得含内部指代（改产品语言，设计指针留在 ADR）：\n"
+            for i, line in enumerate(lines, 1)
+            if FORBIDDEN.search(line) or (i > body_start and COLLOQUIAL.search(line))]
+    assert not hits, ("skill 随包发到使用方项目，不得含内部指代或口头语（改产品语言，设计指针留在 ADR）：\n"
                       + "\n".join(hits))
 
 

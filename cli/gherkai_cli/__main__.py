@@ -67,7 +67,7 @@ _STEPS_DIR_HELP = (
 _STEPS_DIR_HELP_RUN_SUBMIT = (
     _STEPS_DIR_HELP
     + "。值随提交记录走，本机后台推进/接力进程都读回同一份；"
-      "[--backend cloud] 不生效（云端 worker 的 steps 烙在定制镜像里，警告不拦）"
+      "[--backend cloud] 不生效（云端 worker 的 steps 构建在定制镜像里，警告不拦）"
 )
 
 
@@ -233,7 +233,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     )
     run.add_argument(
         "--no-report", action="store_true",
-        help="跳过报告归集（CI 只看退出码/JSON、或调试时不想落盘的逃生舱）",
+        help="跳过报告归集（CI 只看退出码/JSON、或调试时不想落盘）",
     )
     run.add_argument("--steps-dir", default=None, metavar="DIR", help=_STEPS_DIR_HELP_RUN_SUBMIT)
     # backend 选择（ADR 0016「cli backend 选择」/ 0030 决定七）：local=文件落盘（默认）；cloud=DDB/S3。
@@ -265,7 +265,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     )
     run.add_argument(
         "--worker-variant", default=None, metavar="NAME",
-        help="[--backend cloud] 云端 worker 镜像 variant（= 一套具名的确定性 step 集烙成的定制镜像）："
+        help="[--backend cloud] 云端 worker 镜像 variant（= 一套具名的确定性 step 集构建成的定制镜像）："
              "缺省用部署的默认指针（`gherkai deploy` 初始化为 base）。提交时把它解析成本 run 各引擎的"
              "精确 task-def revision 写进提交记录（一个 run 内镜像固定，别人重推同名 variant 不影响正在运行的 run）；"
              "某引擎缺该 variant 即退 2、不回落默认。variant 用 `gherkai deploy push-worker` 推（要装 deploy extra 并有 ECR 写权限，不改 IAM）。"
@@ -529,13 +529,13 @@ def _resolve_steps_dir(args) -> "str | int | None":
 
 
 def _resolve_steps_dir_for_backend(args) -> str | int | None:
-    """`_resolve_steps_dir` + cloud 档清零（ADR 0037 决策 4）：cloud 档 steps 烙在定制镜像里（0038），definition
+    """`_resolve_steps_dir` + cloud 档清零（ADR 0037 决策 4）：cloud 档 steps 构建在定制镜像里（0038），definition
     里的本机路径对云端 worker 无意义 → 不写该字段；用户显式给了则警告不拦（no-op，不改产物落点）。run/submit 共用。"""
     steps_dir = _resolve_steps_dir(args)
     if isinstance(steps_dir, int) or args.backend != "cloud":
         return steps_dir
     if args.steps_dir:
-        _progress("注：--backend cloud 下 --steps-dir 不生效——云端 worker 的确定性 step 烙在定制镜像里"
+        _progress("注：--backend cloud 下 --steps-dir 不生效——云端 worker 的确定性 step 构建在定制镜像里"
                   "（构建镜像时 COPY steps/），本机目录进不了容器")
     return None
 
@@ -1959,7 +1959,7 @@ def _cmd_run(args) -> int:
     #    + 注入具体引擎 resolver（core 引擎无关）
     run_meta = _build_run_meta(args, jobs, steps_dir, tunnel_headers)
     run_id = run_meta.run_id
-    do_report = not args.no_report  # RunReport 默认生成；--no-report 跳过（逃生舱）
+    do_report = not args.no_report  # RunReport 默认生成；--no-report 跳过（零落盘运行路径）
     worker_log_fh = None  # --quiet（local 执行档）时打开的 worker 日志句柄，见 build_engines 处
     worker_log_path: Path | None = None
     # 两个引擎的产物落点（ADR 0027/0037 决策 3）：
@@ -2046,7 +2046,7 @@ def _cmd_run(args) -> int:
                          "worker_task_defs": worker_meta["worker_task_defs"] or {}}
 
     # 3b) 落库轴（ADR 0030）：组合根按 --backend 注入 local/cloud 两套 store adapter，RunPersistence 负责「随进度落库」
-    #     的统一编排（commit-point 写序 / RUNNING 中间态 / 按 scope_id 增量刷）。--no-report 则不落库（逃生舱）：
+    #     的统一编排（commit-point 写序 / RUNNING 中间态 / 按 scope_id 增量刷）。--no-report 则不落库（零落盘运行路径）：
     #     persistence=None，schedule 不接回调、零落盘——**但执行仍按 3a 的 backend 走**（report 与执行正交）。
     #     **need_cloud gated**（ADR 0030 决定七）：云端 store 校验/import/异常只在 do_report and backend==cloud 时生效。
     need_cloud = do_report and args.backend == "cloud"
@@ -2083,7 +2083,7 @@ def _cmd_run(args) -> int:
     # **决策 A 落到 CLI（ADR 0016/0033）**：cloud ⇒ FargateEngine（云执行，产物落点内部自算）；否则 SubprocessEngine（本地，不注入 S3 落点）。
     # cloud_fargate 在 3a 的 `backend=='cloud'` 分支**无条件置值**（与 do_report 正交，report⊥执行）——故
     # `--backend cloud --no-report` 仍走 Fargate（cloud_fargate 非 None），只是不落库、不生成 report。
-    # `--no-report` 的逃生舱只作用于 store 轴（persistence=None、不构造三个 store），绝不改执行环境（见 3a 注释 + ADR 0016 决策 A）。
+    # `--no-report` 的零落盘运行路径只作用于 store 轴（persistence=None、不构造三个 store），绝不改执行环境（见 3a 注释 + ADR 0016 决策 A）。
     if cloud_fargate is not None:
         engines = compose.build_fargate_engines(
             no_artifacts=not do_report,  # --no-report：worker 不生成/不上报原生产物（ADR 0037 决策 3）

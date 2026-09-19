@@ -1,7 +1,7 @@
 """确定性锚点脚手架（ADR 0020/0022）—— **本包内建**的示范锚点，随 worker 发行。
 
 用途：少数"必须精确、不容 AI 抖动"的断言（如 URL 精确、关键 DOM），用底层 Playwright
-（`ctx.page`）直接查、**不走 AI、不投票**。这是 ADR 0015 的"确定性逃生舱"。
+（`ctx.page`）直接查、**不走 AI、不投票**。这是 ADR 0015 所说的确定性 step 路径。
 
 机制（ADR 0022）：worker 派发每个 step 时**先查确定性注册表**（命中走这里的 handler），
 未命中才落 AI catch-all。用 `@deterministic(正则)` 注册即可——worker 启动时 import

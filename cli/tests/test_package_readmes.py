@@ -12,7 +12,7 @@ import tomllib
 from pathlib import Path
 
 import pytest
-from _doc_rules import FORBIDDEN, RELATIVE_LINK  # 禁词 / 相对链接的单一事实源（见该模块 docstring）
+from _doc_rules import COLLOQUIAL, FORBIDDEN, RELATIVE_LINK  # 禁词 / 相对链接的单一事实源（见该模块 docstring）
 
 REPO = Path(__file__).resolve().parents[2]
 PY_PACKAGES = ("cli", "core", "runtime", "deploy_aws", "engines/novaact")
@@ -39,8 +39,8 @@ def _shipped_readmes() -> list[Path]:
 def test_shipped_readme_is_for_users_only(readme: Path):
     text = readme.read_text(encoding="utf-8")
     hits = [f"{readme.relative_to(REPO)}:{i}: {line.strip()[:120]}"
-            for i, line in enumerate(text.splitlines(), 1) if FORBIDDEN.search(line)]
-    assert not hits, "包 README 上 PyPI/npm 页面，不得含内部指代（ADR/决策号/内部机制名）——搬去同目录 DEVELOPMENT.md：\n" + "\n".join(hits)
+            for i, line in enumerate(text.splitlines(), 1) if FORBIDDEN.search(line) or COLLOQUIAL.search(line)]
+    assert not hits, "包 README 上 PyPI/npm 页面，不得含内部指代或口头语（ADR/决策号/内部机制名/隐喻）——搬去同目录 DEVELOPMENT.md：\n" + "\n".join(hits)
     rel = [f"{readme.relative_to(REPO)}:{i}: {line.strip()[:120]}"
            for i, line in enumerate(text.splitlines(), 1) if RELATIVE_LINK.search(line)]
     assert not rel, "包 README 里的相对链接在 PyPI/npm 页面上是死链，改绝对 URL：\n" + "\n".join(rel)
@@ -57,7 +57,8 @@ def test_root_readme_is_for_users_only():
     """根 README = 仓库首页、给使用者：不写 ADR 编号/决策号/内部机制名（目录结构、开发环境、测试、发布归 DEVELOPMENT.md）。
     相对链接在 GitHub 上正常渲染，故这里不查链接形态。"""
     text = (REPO / "README.md").read_text(encoding="utf-8")
-    hits = [f"README.md:{i}: {line.strip()[:120]}" for i, line in enumerate(text.splitlines(), 1) if FORBIDDEN.search(line)]
+    hits = [f"README.md:{i}: {line.strip()[:120]}" for i, line in enumerate(text.splitlines(), 1)
+            if FORBIDDEN.search(line) or COLLOQUIAL.search(line)]
     assert not hits, "根 README 面向使用者，内部指代搬去 DEVELOPMENT.md：\n" + "\n".join(hits)
 
 

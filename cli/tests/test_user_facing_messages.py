@@ -39,6 +39,7 @@ FORBIDDEN = re.compile(
     r"|不变量|定位链|实测项|被拒方案|重议闸门|接缝契约|模块头|组合根装配|窄腰"
     r"|preflight|per-run|\btick\b|清理\s*pass|武装|防御扫"  # 机制名 / 施工行话：产品面只说「提交前检查 / 本机后台进程 / 推进 / 清理」
     r"|best-effort|抢传|flush\s*兜底|不带\s*ref"  # 上传/收尾的失败语义行话：产品面只说「未能上传 + 不影响什么」
+    r"|逃生舱|烙进|烙在|烙成|烙好|旋钮"  # 比喻 / 口头语（ADR 0045 决策六）：产品面只说「跳过 / 构建进镜像 / 选项」
     r"|_require_vpc"
     r"|替换\s*WorkerSg"  # CDK construct 名进了叙事（stack.py 里作 construct id 的字面量是合法的，只抓成句形态）：产品面只说「worker 的网络 / 安全组」
 )

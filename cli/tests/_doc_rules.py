@@ -32,6 +32,9 @@ FORBIDDEN = re.compile(
     r"|不变量|定位链|被拒方案|重议闸门|实测项|接缝契约|模块头|组合根"
 )
 
+# 口头语 / 隐喻（ADR 0045 决策六）：给人读的文档与产品文案不用；「跑」作动词禁用，术语「跑法」与提及词「跑」除外。
+COLLOQUIAL = re.compile(r"帽子不是人|烧钱|锁步|lockstep|烙进|烙好|烙成|烙在|逃生舱|旋钮|跑(?![法」])")
+
 # `](../x)` / `](./x)` / `](foo.md)` / `](references/foo.md)`：PyPI/npm 页面与 skill 安装态都渲染不出仓库的目录树。
 RELATIVE_LINK = re.compile(r"\]\((?:\.\.?/|(?![a-z][a-z0-9+.-]*:|#)[^)\s]+\.md)")
 
@@ -42,7 +45,7 @@ CODE_SPAN = re.compile(r"`([^`\n]+)`")  # 单行反引号代码跨（跨行的�
 # provider 侧才有的 flag：贴在 `gherkai deploy` / `destroy` 上，provider 未加载时主 parser 上不存在。
 # `cli/tests` 的裸 flag 弱断言对它们放行（不 import provider——它住 `[deploy-aws]` optional extra、只有部署方装），
 # 真实性由 `deploy_aws/tests/test_skill_deploy_tokens.py` 对着 provider 真 parser 断：那边还断言本表每一项都真在
-# provider 上，防它退化成万能逃生舱。
+# provider 上，防它退化成万能旁路。
 PROVIDER_ONLY_FLAGS = frozenset({
     "--vpc", "--stop-timeout", "--refresh-context", "--container-engine", "--variant", "--set-default", "--yes",
 })
