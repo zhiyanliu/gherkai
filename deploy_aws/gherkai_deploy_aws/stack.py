@@ -645,9 +645,15 @@ class BackendStack(Stack):
             memory_size=256,
             environment=environment,
         )
-        # 权限：runs 表读写（RunState 条件写）+ events 表读（重放）+ 桶读写（ResultStore/ReportStore/job-in）
+        # 权限：runs 表读写（RunState 条件写）+ events 表读（重放）+ PutItem + 桶读写（ResultStore/ReportStore/job-in）
         self._runs_table.grant_read_write_data(fn)
         self._events_table.grant_read_data(fn)
+        # events 表**加一个 PutItem**：推进器有两条路径要自己追加退出记录——launch 失败补偿（起 task 失败即就地
+        # 写平台失败的退出事件，否则该 scope 永停 RUNNING、整批 wedge）与 job timeout 处置（超时后直写退出记录）。
+        # 两者都是 ADR 0034 的 Accepted 机制（机制二推论 +「job timeout」节）。窄语句形态与资源写法同
+        # `ExitObserverFn` 那处（为何只 PutItem 不用 `grant_write_data`、为何用 `table_arn`，理由见那段注释）。
+        fn.add_to_role_policy(iam.PolicyStatement(
+            actions=["dynamodb:PutItem"], resources=[self._events_table.table_arn]))
         self._bucket.grant_read_write(fn)
         # 起 worker task：RunTask（family 全部 revision）+ DescribeTasks/StopTask/ListTasks（超时处置定位/停 task、兜底读退出码）
         fn.add_to_role_policy(iam.PolicyStatement(actions=["ecs:RunTask"], resources=task_def_arns))

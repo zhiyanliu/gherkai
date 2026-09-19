@@ -220,8 +220,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0018-generic-steps-capability.md": {
-    "mtime": 1789798779.1533885,
-    "ast_hash": "c80ea01a1ecc5ab96fd646840d7e8fd2",
+    "mtime": 1789827102.7645802,
+    "ast_hash": "c3b3c061a1ee89a9972bf161d7606e8a",
     "semantic_hash": ""
   },
   "docs/adr/0019-feature-tags-scope-and-engine.md": {
@@ -230,8 +230,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0020-step-phrasing-default-ai-deterministic-scaffold.md": {
-    "mtime": 1789807238.4765005,
-    "ast_hash": "91d0b3c32c255c4333a5768158451e32",
+    "mtime": 1789827102.764696,
+    "ast_hash": "a1c556f3288e74612e7e938066a597b3",
     "semantic_hash": ""
   },
   "docs/adr/0025-plan-module-feature-to-jobs.md": {
@@ -250,18 +250,18 @@
     "semantic_hash": ""
   },
   "CLAUDE.md": {
-    "mtime": 1789807577.347712,
-    "ast_hash": "3f357b0c69d6ad78b4373e64363dbda5",
+    "mtime": 1789827539.4102921,
+    "ast_hash": "2b8a74dd87d6d991d544c750f3a0cff3",
     "semantic_hash": ""
   },
   "CONTEXT.md": {
-    "mtime": 1789819087.6811533,
-    "ast_hash": "b33b435b9b175a45a3ff0ecae0d25918",
+    "mtime": 1789827743.898138,
+    "ast_hash": "ed53b6b6c88ccc079bf964691aefff4a",
     "semantic_hash": ""
   },
   "README.md": {
-    "mtime": 1789818725.7621536,
-    "ast_hash": "13f005c275eb03405d64942228e3f177",
+    "mtime": 1789829665.959864,
+    "ast_hash": "232a124aa34f7e1549eded68a2c38aa8",
     "semantic_hash": ""
   },
   "cli/README.md": {
@@ -270,8 +270,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0001-scope-limited-to-english-ui.md": {
-    "mtime": 1789820111.1931815,
-    "ast_hash": "58265197c3929414b837c9ee9ba4d790",
+    "mtime": 1789828399.7303932,
+    "ast_hash": "ac3c7bf7bb0daebc01b20d9ed946389a",
     "semantic_hash": ""
   },
   "docs/adr/0002-midscene-not-driven-by-gpt55.md": {
@@ -285,13 +285,13 @@
     "semantic_hash": ""
   },
   "docs/adr/0004-novaact-iam-auth-via-workflow.md": {
-    "mtime": 1789618873.594324,
-    "ast_hash": "7a08d60f18b69142a2ce0f522317e04d",
+    "mtime": 1789829435.4867125,
+    "ast_hash": "077d964747581a981a621892cbe49bcc",
     "semantic_hash": ""
   },
   "docs/adr/0005-single-shared-feature-file.md": {
-    "mtime": 1789801338.9462614,
-    "ast_hash": "ac579423bd22c34f47ad9dc59d290cd6",
+    "mtime": 1789827102.7632499,
+    "ast_hash": "5bc1fe1dcb3a0f8395ba774176da11af",
     "semantic_hash": ""
   },
   "docs/adr/0006-form-a-two-subprojects-no-orchestrator.md": {
@@ -300,53 +300,53 @@
     "semantic_hash": "a90fa53f2455644fd567a71c555aecb8"
   },
   "docs/adr/0007-programmatic-login-hitl-as-escape-hatch.md": {
-    "mtime": 1789818647.2184334,
-    "ast_hash": "a1dbf421cbc733d179a39962f085ee32",
+    "mtime": 1789827102.7633712,
+    "ast_hash": "94561825afb05c464e68e7e37a288856",
     "semantic_hash": ""
   },
   "docs/adr/0008-midscene-bedrock-auth-sigv4-selfsign.md": {
-    "mtime": 1789818893.7054732,
-    "ast_hash": "b7a206139867142535cbab44d91df917",
+    "mtime": 1789827102.7634714,
+    "ast_hash": "590868ac44d7b001be2e1b2a0f929caf",
     "semantic_hash": ""
   },
   "docs/adr/0009-maximize-aws-hard-constraint.md": {
-    "mtime": 1789818682.9997542,
-    "ast_hash": "e4cc78e7cdc2713556e1d28af4b801ac",
+    "mtime": 1789828399.7309146,
+    "ast_hash": "718e327f30313cb7a16d0c5511b78942",
     "semantic_hash": ""
   },
   "docs/adr/0010-spike-as-apples-to-apples-benchmark.md": {
-    "mtime": 1789818731.7204497,
-    "ast_hash": "661223302321d5ccef09550b561a0f20",
+    "mtime": 1789828399.7308311,
+    "ast_hash": "337a3fa9b15d5b3dace669b992b32cf2",
     "semantic_hash": ""
   },
   "docs/adr/0011-agentcore-browser-system-default-vs-custom.md": {
-    "mtime": 1789818782.9244184,
-    "ast_hash": "f8d846200a4d55b629c17dfa3a8753c7",
+    "mtime": 1789827102.7637138,
+    "ast_hash": "e698a4482175df0484d64e43831ce756",
     "semantic_hash": ""
   },
   "docs/adr/0012-planning-shares-qwen3vl-no-text-planner.md": {
-    "mtime": 1789818626.9134805,
-    "ast_hash": "1e664f654543b6217d9c5754ba42da92",
+    "mtime": 1789827102.7637916,
+    "ast_hash": "5f8e6a218b2d9cefb1924ad40fff7f71",
     "semantic_hash": ""
   },
   "docs/adr/0013-cross-engine-sharing-boundary.md": {
-    "mtime": 1789818644.9368901,
-    "ast_hash": "d256b1ed976ef7aeafc5bb3999761fd7",
+    "mtime": 1789828399.7307472,
+    "ast_hash": "09636550ff99c358689be7cc80074b0e",
     "semantic_hash": ""
   },
   "docs/adr/0014-ai-first-assertions.md": {
-    "mtime": 1789818687.710293,
-    "ast_hash": "df870ca8ae10be15e1a353b9bf3b3cf5",
+    "mtime": 1789827102.7639556,
+    "ast_hash": "7b8a20c7b9a97a4df293ef4fd266594d",
     "semantic_hash": ""
   },
   "docs/adr/0015-v1-positioning-smoke-not-regression.md": {
-    "mtime": 1789818729.1665568,
-    "ast_hash": "af5a71d211410db684655882013f5a71",
+    "mtime": 1789827102.7640364,
+    "ast_hash": "1b445cfd7bdab7b40044400b8ef88f8f",
     "semantic_hash": ""
   },
   "docs/adr/0016-execution-architecture-core-lib-run-model.md": {
-    "mtime": 1789820038.5262115,
-    "ast_hash": "aa0101d9b431532ef0a34a8cf6bbd150",
+    "mtime": 1789828399.7302694,
+    "ast_hash": "6624dbdc6a4a51c24e9bc48bc64a0ac7",
     "semantic_hash": ""
   },
   "docs/adr/0021-local-cucumber-patch-step-keyword-disambiguation.md": {
@@ -365,8 +365,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0024-worker-core-protocol.md": {
-    "mtime": 1789818617.5800009,
-    "ast_hash": "3d359417818b99c0fbb3aaaaeb9b137d",
+    "mtime": 1789827084.0027387,
+    "ast_hash": "d0ddb80d3c85a130867f96dd9d7b7b30",
     "semantic_hash": ""
   },
   "docs/adr/0026-schedule-module.md": {
@@ -375,13 +375,13 @@
     "semantic_hash": ""
   },
   "docs/adr/0027-runreport-aggregation-index.md": {
-    "mtime": 1789820292.9852328,
-    "ast_hash": "a010300646acd5dccc7e32329b3f4e6a",
+    "mtime": 1789827084.0047257,
+    "ast_hash": "ee826ba29eb894e42b718a295ce2bdf5",
     "semantic_hash": ""
   },
   "docs/adr/0029-engine-artifacts-to-s3.md": {
-    "mtime": 1789820292.9855962,
-    "ast_hash": "4cdb657adf877ec241de59b28d0415e5",
+    "mtime": 1789828354.7414143,
+    "ast_hash": "dc0a9bb2206231da1158a2d4769eef0e",
     "semantic_hash": ""
   },
   "docs/adr/0030-realtime-persistence-seam.md": {
@@ -395,18 +395,18 @@
     "semantic_hash": ""
   },
   "docs/adr/0032-fargate-execution-environment.md": {
-    "mtime": 1789820119.3145347,
-    "ast_hash": "5112861c9cfe72536e9a4a1a4e1c491f",
+    "mtime": 1789828354.7422075,
+    "ast_hash": "6bdc8576adc8250f0508b9711b0486de",
     "semantic_hash": ""
   },
   "docs/adr/0033-iac-aws-backend-and-composition-wiring.md": {
-    "mtime": 1789819060.8202012,
-    "ast_hash": "2fc1f0dc0f32deb6862b4612cdea5e7b",
+    "mtime": 1789828354.7416663,
+    "ast_hash": "ff48eb9e3f21f3c2fc51308b23023d28",
     "semantic_hash": ""
   },
   "docs/adr/0034-detached-batch-reconciler.md": {
-    "mtime": 1789819128.842897,
-    "ast_hash": "ed152fcf8065e5a5312a623c70ed5c90",
+    "mtime": 1789828354.7419658,
+    "ast_hash": "19a3d25c1728735b2d5eacc8936bd61f",
     "semantic_hash": ""
   },
   "engines/midscene/README.md": {
@@ -425,8 +425,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0035-local-app-testing-via-tunnel.md": {
-    "mtime": 1789818831.9616194,
-    "ast_hash": "5a18588348c207b889e9b522023268ee",
+    "mtime": 1789828354.7420845,
+    "ast_hash": "cbf2d49bd1bb90bc346f2a1e7b0c8dee",
     "semantic_hash": ""
   },
   "cli/tests/test_tunnel_cli.py": {
@@ -435,18 +435,18 @@
     "semantic_hash": ""
   },
   "docs/adr/0036-deterministic-capability-discovery.md": {
-    "mtime": 1789820119.3146799,
-    "ast_hash": "bfd17184c0efc22a0cdbf9b96f295919",
+    "mtime": 1789828354.7410278,
+    "ast_hash": "b20568152255500d1424667d9938a241",
     "semantic_hash": ""
   },
   "docs/adr/0037-distribution-and-packaging.md": {
-    "mtime": 1789818720.0266433,
-    "ast_hash": "151352475d970d956201b9e770192a92",
+    "mtime": 1789828692.3223178,
+    "ast_hash": "fe228a90103eb268952eba0a70bd6f43",
     "semantic_hash": ""
   },
   "docs/adr/0038-worker-image-delivery.md": {
-    "mtime": 1789818780.1649096,
-    "ast_hash": "4ac16bd7031941a27b16c1de40d501fa",
+    "mtime": 1789827522.1686776,
+    "ast_hash": "199459a5927b30e1007860b0433d4da7",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/__init__.py": {
@@ -970,8 +970,8 @@
     "semantic_hash": ""
   },
   "deploy_aws/gherkai_deploy_aws/stack.py": {
-    "mtime": 1789800104.4814177,
-    "ast_hash": "9584a69d55b8e5f93ef5158d84ae2f56",
+    "mtime": 1789827897.6400263,
+    "ast_hash": "f769bed3e9db488bda99edfb1ef890fc",
     "semantic_hash": ""
   },
   "deploy_aws/tests/synth_fixture.py": {
@@ -990,8 +990,8 @@
     "semantic_hash": ""
   },
   "deploy_aws/tests/test_stack.py": {
-    "mtime": 1789798649.4556623,
-    "ast_hash": "c75848ea997539b0bcdbefd70383373a",
+    "mtime": 1789827862.34286,
+    "ast_hash": "8f1e6f701ec46e9453df467e719a9951",
     "semantic_hash": ""
   },
   ".github/workflows/README.md": {
@@ -1055,23 +1055,23 @@
     "semantic_hash": ""
   },
   "cli/DEVELOPMENT.md": {
-    "mtime": 1789818632.9804595,
-    "ast_hash": "9e469818c1b8849ae6970d11a0aaf18f",
+    "mtime": 1789827472.1768453,
+    "ast_hash": "1a37a4fcfd87bc5da67eda827acb6e50",
     "semantic_hash": ""
   },
   "deploy_aws/DEVELOPMENT.md": {
-    "mtime": 1789820716.1054268,
-    "ast_hash": "ed2dc248ba55a2b87a3c510e522bdaa0",
+    "mtime": 1789827539.410431,
+    "ast_hash": "03fc033e1e5f312de5666e3d00dff63a",
     "semantic_hash": ""
   },
   "engines/midscene/DEVELOPMENT.md": {
-    "mtime": 1789804682.6284788,
-    "ast_hash": "6f1ebd44d165fb8f6db2e132c8826090",
+    "mtime": 1789827539.409621,
+    "ast_hash": "171da332bbd89750bfc486fca578728a",
     "semantic_hash": ""
   },
   "engines/novaact/DEVELOPMENT.md": {
-    "mtime": 1789804682.6285746,
-    "ast_hash": "b537633c20ca2216326942e51b2f6722",
+    "mtime": 1789827539.4097486,
+    "ast_hash": "f5a5870bece39fa3fa414fd92820f30d",
     "semantic_hash": ""
   },
   "core/DEVELOPMENT.md": {
@@ -1080,8 +1080,8 @@
     "semantic_hash": ""
   },
   "runtime/DEVELOPMENT.md": {
-    "mtime": 1789734058.620782,
-    "ast_hash": "e22f02b994efd0b206c1d086d75bd0d9",
+    "mtime": 1789827472.1771574,
+    "ast_hash": "91dbccc09995214350b2af6645307c73",
     "semantic_hash": ""
   },
   "docs/adr/0039-user-facing-surfaces-no-internal-references.md": {
@@ -1095,8 +1095,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0040-consumer-role-model-and-terminology.md": {
-    "mtime": 1789818939.9091094,
-    "ast_hash": "309dfb51f719202bab37dab10d127670",
+    "mtime": 1789828692.322527,
+    "ast_hash": "76d9c38ddbd95916bba3b4773e0e8fc7",
     "semantic_hash": ""
   },
   ".claude/commands/code-health-review.md": {
@@ -1120,8 +1120,8 @@
     "semantic_hash": "858676ae05a719da76b86afa3fc81f35"
   },
   "docs/adr/0041-agent-facing-cli-affordances.md": {
-    "mtime": 1789806360.5611734,
-    "ast_hash": "b09c67934d521dee50efc8d1beac2f1d",
+    "mtime": 1789828692.3227346,
+    "ast_hash": "ba6ccb8257179b1438d88fb6c6cd2409",
     "semantic_hash": ""
   },
   "cli/tests/test_cli_json_contract.py": {
@@ -1130,8 +1130,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0042-step-evidence-and-explain.md": {
-    "mtime": 1789818975.3573816,
-    "ast_hash": "e7b35306aaad6fd28051a4d21241256d",
+    "mtime": 1789828692.3220572,
+    "ast_hash": "7de1b8cd894bdb18817c83f91e947159",
     "semantic_hash": ""
   },
   "engines/midscene/src/worker/evidence.mts": {
@@ -1170,8 +1170,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0043-agent-skill-for-driving-gherkai.md": {
-    "mtime": 1789820390.9668562,
-    "ast_hash": "beb7d47c4b5b46e0517928d1fb4a1384",
+    "mtime": 1789828692.3231208,
+    "ast_hash": "cc4a74b823694a35ebf433054cfcccdf",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skill_install.py": {
@@ -1180,8 +1180,8 @@
     "semantic_hash": ""
   },
   "cli/tests/_doc_rules.py": {
-    "mtime": 1789803013.4197233,
-    "ast_hash": "c5a63be270b6a319c9a597b3b4c1f512",
+    "mtime": 1789826926.6805592,
+    "ast_hash": "67cdcfd38a239605c71b9c113d9c2f85",
     "semantic_hash": ""
   },
   "cli/tests/test_skill.py": {
@@ -1210,18 +1210,18 @@
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skills/gherkai/SKILL.md": {
-    "mtime": 1789818920.1489527,
-    "ast_hash": "e7ef6d849244053feb5b0237de8662b6",
+    "mtime": 1789827711.768239,
+    "ast_hash": "58a3112da846fd9deea22702ea646c25",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skills/gherkai/references/cli-json-contract.md": {
-    "mtime": 1789820820.2119234,
-    "ast_hash": "c1cda77877ee519db689fd422cbb2605",
+    "mtime": 1789829040.2683542,
+    "ast_hash": "b50286b8d1d55dc3276043eee89c7acd",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skills/gherkai/references/cloud-backend.md": {
-    "mtime": 1789818944.795378,
-    "ast_hash": "068b8587b93009128311b1a81ecdcf40",
+    "mtime": 1789827711.7683504,
+    "ast_hash": "a368831090509cea73f424b21c9c60a0",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skills/gherkai/references/engines.md": {
@@ -1230,13 +1230,13 @@
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skills/gherkai/references/setup-and-diagnosis.md": {
-    "mtime": 1789798449.4237566,
-    "ast_hash": "4dd113852ee378199b65710dfd5506c9",
+    "mtime": 1789827515.0986924,
+    "ast_hash": "a50a9205eb6b31df6d3f473252704a1e",
     "semantic_hash": ""
   },
   "skills/gherkai-evals/evals.json": {
-    "mtime": 1789438082.8485687,
-    "ast_hash": "",
+    "mtime": 1789820716.105203,
+    "ast_hash": "361660ceebdaee3cbfa860c0978eece1",
     "semantic_hash": ""
   },
   "skills/gherkai-evals/trigger-eval.json": {
@@ -1255,8 +1255,8 @@
     "semantic_hash": ""
   },
   "skills/README.md": {
-    "mtime": 1789818732.157447,
-    "ast_hash": "64daefafd6586033689ec6ba4a347114",
+    "mtime": 1789829700.2759418,
+    "ast_hash": "451296625813b29fa72fc94a78184e5d",
     "semantic_hash": ""
   },
   "skills/gherkai-evals/summarize_runs.py": {
@@ -1310,8 +1310,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0044-engine-model-selection-and-override.md": {
-    "mtime": 1789820390.9670706,
-    "ast_hash": "16538c6e51593ae4268a8742a3365acf",
+    "mtime": 1789827398.6071155,
+    "ast_hash": "c16cc1e3c4c09890a0ed1580fe8c407f",
     "semantic_hash": ""
   },
   ".github/scripts/release_notes.py": {
@@ -1340,8 +1340,8 @@
     "semantic_hash": ""
   },
   "CONTRIBUTING.md": {
-    "mtime": 1789818586.494585,
-    "ast_hash": "754dca857cbdb574abee92dcb215581a",
+    "mtime": 1789827472.1766174,
+    "ast_hash": "6d7f20e737fef6e9f51bd6951a8e3ab6",
     "semantic_hash": ""
   },
   "docs/README.md": {
@@ -1350,8 +1350,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0045-documentation-layering-and-placement.md": {
-    "mtime": 1789820390.9666073,
-    "ast_hash": "9097c6ccabb7d7416306d6fe84a0d985",
+    "mtime": 1789828692.3232477,
+    "ast_hash": "0a9c12ebe0d7ccac0dd5011a91de1fc7",
     "semantic_hash": ""
   },
   "docs/ai-eng/README.md": {
@@ -1375,78 +1375,78 @@
     "semantic_hash": ""
   },
   "docs/internals/README.md": {
-    "mtime": 1789804643.8222742,
-    "ast_hash": "10b27b52d64b1f4c422c8deee45f8346",
+    "mtime": 1789827472.17785,
+    "ast_hash": "94b68c8fadaebe1ff3ff6f124e78fa7a",
     "semantic_hash": ""
   },
   "docs/internals/architecture-overview.md": {
-    "mtime": 1789818594.5350556,
-    "ast_hash": "d6b79c418d8445897717433a177f097c",
+    "mtime": 1789827472.178127,
+    "ast_hash": "e0c47d287d1b94b7e0357835cd9037cd",
     "semantic_hash": ""
   },
   "docs/internals/artifacts-and-evidence.md": {
-    "mtime": 1789798771.2031405,
-    "ast_hash": "261f6fcd640a57c56d34fa868feec72e",
+    "mtime": 1789827515.0943117,
+    "ast_hash": "03c751cde6dba2845b52641a0acf1281",
     "semantic_hash": ""
   },
   "docs/internals/cli-json-contract.md": {
-    "mtime": 1789818594.5355892,
-    "ast_hash": "377d205722c37d6eb70ce463abb7748e",
+    "mtime": 1789827515.0949216,
+    "ast_hash": "50b604fd89396064d528034a37b5d80c",
     "semantic_hash": ""
   },
   "docs/internals/cloud-backend-carriers.md": {
-    "mtime": 1789818594.5354702,
-    "ast_hash": "ad062c4db09e702e0acbb936352e2028",
+    "mtime": 1789827539.409437,
+    "ast_hash": "4713334d6db1525734e5f5241fa5c70b",
     "semantic_hash": ""
   },
   "docs/internals/deterministic-step-lifecycle.md": {
-    "mtime": 1789819318.6411936,
-    "ast_hash": "af6ceb1450784cf3cb47716639e9e1d8",
+    "mtime": 1789827515.0958471,
+    "ast_hash": "2b2590956b73667d1afb565f7605f1b5",
     "semantic_hash": ""
   },
   "docs/internals/execution-and-reconciliation.md": {
-    "mtime": 1789808133.9944494,
-    "ast_hash": "42ec875d5e8b91dee79475ca9495f731",
+    "mtime": 1789828945.9484,
+    "ast_hash": "a7692e438a22391bfda697ffb8e49ba0",
     "semantic_hash": ""
   },
   "docs/internals/verdict-model.md": {
-    "mtime": 1789819318.6413863,
-    "ast_hash": "5ba27c2fd390957c154ffe861fa55fc3",
+    "mtime": 1789827515.097449,
+    "ast_hash": "65a18ed9ee1690807df8516cbe7178cf",
     "semantic_hash": ""
   },
   "docs/user-guide/README.md": {
-    "mtime": 1789799984.3260238,
-    "ast_hash": "fa617bc0f3fc59d1afb6f7763ad6807e",
+    "mtime": 1789827472.173897,
+    "ast_hash": "c80a408bfd6dff794eb40a910eb22a88",
     "semantic_hash": ""
   },
   "docs/user-guide/cloud-backend.md": {
-    "mtime": 1789818684.780103,
-    "ast_hash": "9b0ac9dee1e764167b4c65734d8772a4",
+    "mtime": 1789827472.174197,
+    "ast_hash": "625ae7c45d61e454ead741569d95e20f",
     "semantic_hash": ""
   },
   "docs/user-guide/configuration.md": {
-    "mtime": 1789818619.788906,
-    "ast_hash": "145afaf1003542ddc9fe1fd5e1d25557",
+    "mtime": 1789827472.1745222,
+    "ast_hash": "941e8088bd2f633ae4e11aef4507bf42",
     "semantic_hash": ""
   },
   "docs/user-guide/getting-started.md": {
-    "mtime": 1789804643.799809,
-    "ast_hash": "d131b810aa4521c1a1c18122eb18e4e8",
+    "mtime": 1789827472.1749878,
+    "ast_hash": "dc64aa16c78e1e2b55086eac0c43559c",
     "semantic_hash": ""
   },
   "docs/user-guide/local-app-testing.md": {
-    "mtime": 1789799984.3256128,
-    "ast_hash": "696c71c0b156602d055c5da352ab8235",
+    "mtime": 1789827472.1752028,
+    "ast_hash": "8d51df227501610d16ae0f3a7def019d",
     "semantic_hash": ""
   },
   "docs/user-guide/running-and-results.md": {
-    "mtime": 1789819875.6629677,
-    "ast_hash": "f03d5234a42ee52509d0de051ffa4327",
+    "mtime": 1789828945.9485612,
+    "ast_hash": "7d4a090d34e85fa625a4ab4997ea1135",
     "semantic_hash": ""
   },
   "docs/user-guide/troubleshooting.md": {
-    "mtime": 1789799984.325935,
-    "ast_hash": "5a4a39a7d6f0e3db53603ad300790fee",
+    "mtime": 1789827472.1756637,
+    "ast_hash": "7923ad634afc306f52fc3cc2f5805dbb",
     "semantic_hash": ""
   },
   "docs/user-guide/writing-deterministic-steps.md": {
@@ -1470,8 +1470,8 @@
     "semantic_hash": ""
   },
   "docs/diagrams/cloud-delivery-identity.html": {
-    "mtime": 1789804683.573172,
-    "ast_hash": "81c37b689e3ab620ce05fe72df5f3ba6",
+    "mtime": 1789827069.150084,
+    "ast_hash": "1090389df1d1505fd853f0b76dc78523",
     "semantic_hash": ""
   },
   "docs/diagrams/index.html": {
@@ -1480,8 +1480,8 @@
     "semantic_hash": ""
   },
   "docs/diagrams/run-execution.html": {
-    "mtime": 1789808134.8018944,
-    "ast_hash": "2e04a75687b3068a7b5166124b55ee68",
+    "mtime": 1789828530.3990755,
+    "ast_hash": "ad6e10c61f8232c522b37a99e1c94356",
     "semantic_hash": ""
   },
   "docs/user-guide/faq.md": {
@@ -1490,8 +1490,8 @@
     "semantic_hash": ""
   },
   "docs/diagrams/architecture-overview-layers.svg": {
-    "mtime": 1789800092.1395402,
-    "ast_hash": "02bde02257b6ed74b3bc229b2d1ada0d",
+    "mtime": 1789827067.3841288,
+    "ast_hash": "deec1431950fc742b10c9dd75f2fe501",
     "semantic_hash": ""
   },
   "docs/diagrams/architecture-overview-run-lifecycle.svg": {
@@ -1500,8 +1500,8 @@
     "semantic_hash": ""
   },
   "docs/diagrams/artifacts-evidence-chain.svg": {
-    "mtime": 1789731830.2322745,
-    "ast_hash": "f3e520d878a45a25b64c97d87d2bd46f",
+    "mtime": 1789827067.632553,
+    "ast_hash": "2bcc9bad39d3efb6c47fced1f51c0535",
     "semantic_hash": ""
   },
   "docs/diagrams/cloud-backend-carriers-revision-pinning.svg": {
@@ -1515,8 +1515,8 @@
     "semantic_hash": ""
   },
   "docs/diagrams/cloud-delivery-identity.svg": {
-    "mtime": 1789804683.6747942,
-    "ast_hash": "b1a78c20fe686c52f4b7c68c6825f207",
+    "mtime": 1789827069.2518911,
+    "ast_hash": "3b9a81d5e3c74200739a2e614606ebe3",
     "semantic_hash": ""
   },
   "docs/diagrams/configuration-env-inheritance.svg": {
@@ -1530,8 +1530,8 @@
     "semantic_hash": ""
   },
   "docs/diagrams/deterministic-steps-truth-sources.svg": {
-    "mtime": 1789731831.2231255,
-    "ast_hash": "5911d33dabfb98373f0e62ffeeba39f5",
+    "mtime": 1789828530.7150066,
+    "ast_hash": "93fd45f965b6543e267b61bd2b38dee6",
     "semantic_hash": ""
   },
   "docs/diagrams/execution-cloud-cascade.svg": {
@@ -1540,8 +1540,8 @@
     "semantic_hash": ""
   },
   "docs/diagrams/execution-detached-gates.svg": {
-    "mtime": 1789804497.054257,
-    "ast_hash": "31b70bf701ff425946b031445c2e29e8",
+    "mtime": 1789827068.4024413,
+    "ast_hash": "e865e6c7a296533a749c0cdf587a2587",
     "semantic_hash": ""
   },
   "docs/diagrams/execution-timeout-chain.svg": {
@@ -1550,8 +1550,8 @@
     "semantic_hash": ""
   },
   "docs/diagrams/getting-started-component-ownership.svg": {
-    "mtime": 1789731831.8907378,
-    "ast_hash": "7276b76b990c7461991bc15181f31525",
+    "mtime": 1789827068.9846535,
+    "ast_hash": "facb725298e8af753ba45fa82122e12f",
     "semantic_hash": ""
   },
   "docs/diagrams/local-app-testing-tunnel-topology.svg": {
@@ -1560,13 +1560,13 @@
     "semantic_hash": ""
   },
   "docs/diagrams/readme-runtime-topology.svg": {
-    "mtime": 1789798532.0729585,
-    "ast_hash": "443c4a2d126bb524e9bad43a7f623770",
+    "mtime": 1789827068.1134803,
+    "ast_hash": "d044145e755b98f31fefdb38ea3ef9f6",
     "semantic_hash": ""
   },
   "docs/diagrams/run-execution.svg": {
-    "mtime": 1789808134.9384897,
-    "ast_hash": "261acdf3f37a8870be1add322e49d846",
+    "mtime": 1789828530.5528376,
+    "ast_hash": "3ad7724c58dba874ed958e67cb8127af",
     "semantic_hash": ""
   },
   "docs/diagrams/verdict-model-job-outcome.svg": {
@@ -1585,8 +1585,8 @@
     "semantic_hash": ""
   },
   "docs/diagrams/architecture-overview-layers.json": {
-    "mtime": 1789800031.5013201,
-    "ast_hash": "c7472b6d1222efca121ecbf47a4a479d",
+    "mtime": 1789826991.9226716,
+    "ast_hash": "d9256aa031d7c4f156d47aca91c6b105",
     "semantic_hash": ""
   },
   "docs/diagrams/architecture-overview-run-lifecycle.json": {
@@ -1595,8 +1595,8 @@
     "semantic_hash": ""
   },
   "docs/diagrams/artifacts-evidence-chain.json": {
-    "mtime": 1789721578.657608,
-    "ast_hash": "daa650babdd2a1e0441c23ba339def91",
+    "mtime": 1789826991.9229178,
+    "ast_hash": "d128ec2afc0d570d73c7626dc88f8b7d",
     "semantic_hash": ""
   },
   "docs/diagrams/cloud-backend-carriers-revision-pinning.json": {
@@ -1610,8 +1610,8 @@
     "semantic_hash": ""
   },
   "docs/diagrams/cloud-delivery-identity.json": {
-    "mtime": 1789804643.8215911,
-    "ast_hash": "a4d2aad296792280641369b9aa83d5d4",
+    "mtime": 1789826991.922426,
+    "ast_hash": "926f1530b31d2ef779aea0f29c1718ec",
     "semantic_hash": ""
   },
   "docs/diagrams/configuration-env-inheritance.json": {
@@ -1625,8 +1625,8 @@
     "semantic_hash": ""
   },
   "docs/diagrams/deterministic-steps-truth-sources.json": {
-    "mtime": 1789721659.044903,
-    "ast_hash": "f4c73c255adfa00ebf607eab1d1641a8",
+    "mtime": 1789828517.9596744,
+    "ast_hash": "ad581c55ecb3066154f622b9a8bc38f2",
     "semantic_hash": ""
   },
   "docs/diagrams/execution-cloud-cascade.json": {
@@ -1635,8 +1635,8 @@
     "semantic_hash": ""
   },
   "docs/diagrams/execution-detached-gates.json": {
-    "mtime": 1789804496.2068274,
-    "ast_hash": "c551d95bdc250864d59c679c2d754da6",
+    "mtime": 1789826991.9225636,
+    "ast_hash": "bd67feb5f2bb980249c9b911b2960dbb",
     "semantic_hash": ""
   },
   "docs/diagrams/execution-timeout-chain.json": {
@@ -1645,8 +1645,8 @@
     "semantic_hash": ""
   },
   "docs/diagrams/getting-started-component-ownership.json": {
-    "mtime": 1789721762.6686115,
-    "ast_hash": "c254112e22411326fc5d56789b1552e3",
+    "mtime": 1789827037.360204,
+    "ast_hash": "2f6b2596f9b6854c20f7b60297164cb3",
     "semantic_hash": ""
   },
   "docs/diagrams/local-app-testing-tunnel-topology.json": {
@@ -1655,13 +1655,13 @@
     "semantic_hash": ""
   },
   "docs/diagrams/readme-runtime-topology.json": {
-    "mtime": 1789798487.9174757,
-    "ast_hash": "966b0c0bca01ba9eefa57f0637a4e164",
+    "mtime": 1789827037.35938,
+    "ast_hash": "bee02d06b6b1924ed3667ddaa9d9853a",
     "semantic_hash": ""
   },
   "docs/diagrams/run-execution.json": {
-    "mtime": 1789808133.9940963,
-    "ast_hash": "03a7848abdd1011af73dfdee674291a7",
+    "mtime": 1789828517.9593103,
+    "ast_hash": "80434a022a638d5302216a4c667b2a01",
     "semantic_hash": ""
   },
   "docs/diagrams/verdict-model-job-outcome.json": {

@@ -5157,7 +5157,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
 
         <!-- Swimlanes -->
         <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-0" x="40" y="52" width="1082" height="104" rx="10" class="c-lane" stroke-width="1"/>
-        <text x="54" y="74" class="t-dim" font-size="10" font-weight="600">01 / 本机档（local）</text>
+        <text x="54" y="74" class="t-dim" font-size="10" font-weight="600">01 / 本机（local）</text>
 
         <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-1" x="40" y="176" width="1082" height="104" rx="10" class="c-lane" stroke-width="1"/>
         <text x="54" y="198" class="t-dim" font-size="10" font-weight="600">02 / 同一份 core（四种组合共用）</text>
@@ -5166,7 +5166,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <text x="54" y="322" class="t-dim" font-size="10" font-weight="600">03 / 无状态推一步</text>
 
         <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-3" x="40" y="424" width="1082" height="104" rx="10" class="c-lane" stroke-width="1"/>
-        <text x="54" y="446" class="t-dim" font-size="10" font-weight="600">04 / 云端档（cloud）</text>
+        <text x="54" y="446" class="t-dim" font-size="10" font-weight="600">04 / 云端（cloud）</text>
 
         <!-- Phase headers -->
         <line x1="72" y1="35" x2="164" y2="35" class="a-default" stroke-width="1.1"/>
@@ -5204,8 +5204,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <path data-edge-from="tableCloud" data-edge-to="streamCloud" data-edge-label="每批写入" data-edge-key="18" data-edge-id="e-table-stream" data-composition-points="878.8,491;973.5999999999999,491" d="M 878.8 491 L 973.5999999999999 491" class="a-dashed" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
 
         <!-- Nodes -->
-        <g id="node-bgProc" data-node-id="bgProc" data-node-label="本机后台进程" tabindex="0" role="button" aria-label="聚焦本机后台进程，submit 派生 · 可被接力, 本机档（local） › 入口与承载进程" aria-pressed="false" data-node-kind="backend" data-node-sublabel="submit 派生 · 可被接力" data-node-context="本机档（local） › 入口与承载进程">
-          <title>本机后台进程 · submit 派生 · 可被接力 · 本机档（local） › 入口与承载进程</title>
+        <g id="node-bgProc" data-node-id="bgProc" data-node-label="本机后台进程" tabindex="0" role="button" aria-label="聚焦本机后台进程，submit 派生 · 可被接力, 本机（local） › 入口与承载进程" aria-pressed="false" data-node-kind="backend" data-node-sublabel="submit 派生 · 可被接力" data-node-context="本机（local） › 入口与承载进程">
+          <title>本机后台进程 · submit 派生 · 可被接力 · 本机（local） › 入口与承载进程</title>
           <rect x="48" y="93" width="140" height="52" rx="6" class="c-mask"/>
           <rect x="48" y="93" width="140" height="52" rx="6" class="c-backend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(54 99) scale(0.6875)">
@@ -5215,8 +5215,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <text data-detail="context" x="118" y="131" class="t-muted" font-size="8" text-anchor="middle">submit 派生 · 可被接力</text>
         </g>
 
-        <g id="node-workerLocal" data-node-id="workerLocal" data-node-label="本机 worker" tabindex="0" role="button" aria-label="聚焦本机 worker，子进程, 本机档（local） › 驱动循环：每批事件推进一步" aria-pressed="false" data-node-kind="external" data-node-sublabel="子进程" data-node-context="本机档（local） › 驱动循环：每批事件推进一步">
-          <title>本机 worker · 子进程 · 本机档（local） › 驱动循环：每批事件推进一步</title>
+        <g id="node-workerLocal" data-node-id="workerLocal" data-node-label="本机 worker" tabindex="0" role="button" aria-label="聚焦本机 worker，子进程, 本机（local） › 驱动循环：每批事件推进一步" aria-pressed="false" data-node-kind="external" data-node-sublabel="子进程" data-node-context="本机（local） › 驱动循环：每批事件推进一步">
+          <title>本机 worker · 子进程 · 本机（local） › 驱动循环：每批事件推进一步</title>
           <rect x="546.4" y="93" width="136" height="52" rx="6" class="c-mask"/>
           <rect x="546.4" y="93" width="136" height="52" rx="6" class="c-external" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(552.4 99) scale(0.6875)">
@@ -5227,8 +5227,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <text data-detail="context" x="614.4" y="131" class="t-muted" font-size="8" text-anchor="middle">子进程</text>
         </g>
 
-        <g id="node-pipeLocal" data-node-id="pipeLocal" data-node-label="事件通道" tabindex="0" role="button" aria-label="聚焦事件通道，专用通道，不落盘, 本机档（local） › 驱动循环：每批事件推进一步" aria-pressed="false" data-node-kind="database" data-node-sublabel="专用通道，不落盘" data-node-context="本机档（local） › 驱动循环：每批事件推进一步">
-          <title>事件通道 · 专用通道，不落盘 · 本机档（local） › 驱动循环：每批事件推进一步</title>
+        <g id="node-pipeLocal" data-node-id="pipeLocal" data-node-label="事件通道" tabindex="0" role="button" aria-label="聚焦事件通道，专用通道，不落盘, 本机（local） › 驱动循环：每批事件推进一步" aria-pressed="false" data-node-kind="database" data-node-sublabel="专用通道，不落盘" data-node-context="本机（local） › 驱动循环：每批事件推进一步">
+          <title>事件通道 · 专用通道，不落盘 · 本机（local） › 驱动循环：每批事件推进一步</title>
           <rect x="738.8" y="93" width="140" height="52" rx="6" class="c-mask"/>
           <rect x="738.8" y="93" width="140" height="52" rx="6" class="c-database" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(744.8 99) scale(0.6875)">
@@ -5239,8 +5239,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <text data-detail="context" x="808.8" y="131" class="t-muted" font-size="8" text-anchor="middle">专用通道，不落盘</text>
         </g>
 
-        <g id="node-storeLocal" data-node-id="storeLocal" data-node-label="本机事件库" tabindex="0" role="button" aria-label="聚焦本机事件库，旁路原样落库, 本机档（local） › 重放与收敛" aria-pressed="false" data-node-kind="database" data-node-sublabel="旁路原样落库" data-node-context="本机档（local） › 重放与收敛">
-          <title>本机事件库 · 旁路原样落库 · 本机档（local） › 重放与收敛</title>
+        <g id="node-storeLocal" data-node-id="storeLocal" data-node-label="本机事件库" tabindex="0" role="button" aria-label="聚焦本机事件库，旁路原样落库, 本机（local） › 重放与收敛" aria-pressed="false" data-node-kind="database" data-node-sublabel="旁路原样落库" data-node-context="本机（local） › 重放与收敛">
+          <title>本机事件库 · 旁路原样落库 · 本机（local） › 重放与收敛</title>
           <rect x="973.5999999999999" y="93" width="140" height="52" rx="6" class="c-mask"/>
           <rect x="973.5999999999999" y="93" width="140" height="52" rx="6" class="c-database" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(979.5999999999999 99) scale(0.6875)">
@@ -5324,8 +5324,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <text data-detail="context" x="296" y="379" class="t-muted" font-size="8" text-anchor="middle">重放 · 条件写抢占 job</text>
         </g>
 
-        <g id="node-cloudFn" data-node-id="cloudFn" data-node-label="云端推进函数" tabindex="0" role="button" aria-label="聚焦云端推进函数，提交与事件均可唤醒, 云端档（cloud） › 入口与承载进程" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="提交与事件均可唤醒" data-node-context="云端档（cloud） › 入口与承载进程">
-          <title>云端推进函数 · 提交与事件均可唤醒 · 云端档（cloud） › 入口与承载进程</title>
+        <g id="node-cloudFn" data-node-id="cloudFn" data-node-label="云端推进函数" tabindex="0" role="button" aria-label="聚焦云端推进函数，提交与事件均可唤醒, 云端（cloud） › 入口与承载进程" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="提交与事件均可唤醒" data-node-context="云端（cloud） › 入口与承载进程">
+          <title>云端推进函数 · 提交与事件均可唤醒 · 云端（cloud） › 入口与承载进程</title>
           <rect x="48" y="465" width="140" height="52" rx="6" class="c-mask"/>
           <rect x="48" y="465" width="140" height="52" rx="6" class="c-cloud" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="cloud" class="semantic-sigil s-cloud" transform="translate(54 471) scale(0.6875)">
@@ -5335,8 +5335,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <text data-detail="context" x="118" y="503" class="t-muted" font-size="8" text-anchor="middle">提交与事件均可唤醒</text>
         </g>
 
-        <g id="node-workerCloud" data-node-id="workerCloud" data-node-label="云端 worker" tabindex="0" role="button" aria-label="聚焦云端 worker，云上任务, 云端档（cloud） › 驱动循环：每批事件推进一步" aria-pressed="false" data-node-kind="external" data-node-sublabel="云上任务" data-node-context="云端档（cloud） › 驱动循环：每批事件推进一步">
-          <title>云端 worker · 云上任务 · 云端档（cloud） › 驱动循环：每批事件推进一步</title>
+        <g id="node-workerCloud" data-node-id="workerCloud" data-node-label="云端 worker" tabindex="0" role="button" aria-label="聚焦云端 worker，云上任务, 云端（cloud） › 驱动循环：每批事件推进一步" aria-pressed="false" data-node-kind="external" data-node-sublabel="云上任务" data-node-context="云端（cloud） › 驱动循环：每批事件推进一步">
+          <title>云端 worker · 云上任务 · 云端（cloud） › 驱动循环：每批事件推进一步</title>
           <rect x="546.4" y="465" width="136" height="52" rx="6" class="c-mask"/>
           <rect x="546.4" y="465" width="136" height="52" rx="6" class="c-external" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(552.4 471) scale(0.6875)">
@@ -5347,8 +5347,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <text data-detail="context" x="614.4" y="503" class="t-muted" font-size="8" text-anchor="middle">云上任务</text>
         </g>
 
-        <g id="node-tableCloud" data-node-id="tableCloud" data-node-label="云端事件表" tabindex="0" role="button" aria-label="聚焦云端事件表，逐条写入表, 云端档（cloud） › 驱动循环：每批事件推进一步" aria-pressed="false" data-node-kind="database" data-node-sublabel="逐条写入表" data-node-context="云端档（cloud） › 驱动循环：每批事件推进一步">
-          <title>云端事件表 · 逐条写入表 · 云端档（cloud） › 驱动循环：每批事件推进一步</title>
+        <g id="node-tableCloud" data-node-id="tableCloud" data-node-label="云端事件表" tabindex="0" role="button" aria-label="聚焦云端事件表，逐条写入表, 云端（cloud） › 驱动循环：每批事件推进一步" aria-pressed="false" data-node-kind="database" data-node-sublabel="逐条写入表" data-node-context="云端（cloud） › 驱动循环：每批事件推进一步">
+          <title>云端事件表 · 逐条写入表 · 云端（cloud） › 驱动循环：每批事件推进一步</title>
           <rect x="738.8" y="465" width="140" height="52" rx="6" class="c-mask"/>
           <rect x="738.8" y="465" width="140" height="52" rx="6" class="c-database" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(744.8 471) scale(0.6875)">
@@ -5359,8 +5359,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <text data-detail="context" x="808.8" y="503" class="t-muted" font-size="8" text-anchor="middle">逐条写入表</text>
         </g>
 
-        <g id="node-streamCloud" data-node-id="streamCloud" data-node-label="事件表流" tabindex="0" role="button" aria-label="聚焦事件表流，写入即触发, 云端档（cloud） › 重放与收敛" aria-pressed="false" data-node-kind="database" data-node-sublabel="写入即触发" data-node-context="云端档（cloud） › 重放与收敛">
-          <title>事件表流 · 写入即触发 · 云端档（cloud） › 重放与收敛</title>
+        <g id="node-streamCloud" data-node-id="streamCloud" data-node-label="事件表流" tabindex="0" role="button" aria-label="聚焦事件表流，写入即触发, 云端（cloud） › 重放与收敛" aria-pressed="false" data-node-kind="database" data-node-sublabel="写入即触发" data-node-context="云端（cloud） › 重放与收敛">
+          <title>事件表流 · 写入即触发 · 云端（cloud） › 重放与收敛</title>
           <rect x="973.5999999999999" y="465" width="140" height="52" rx="6" class="c-mask"/>
           <rect x="973.5999999999999" y="465" width="140" height="52" rx="6" class="c-database" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(979.5999999999999 471) scale(0.6875)">
@@ -5684,7 +5684,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <h3>两处常见误读</h3>
         </div>
         <ul>
-          <li>&bull; status --wait 两档不同：本机 per-run 进程已终止时接力者才是唯一推进器（退出它 run 即停滞，per-run 仍在则两者并存），云端仅在检测到停滞时唤醒推进函数、之后无需在线</li>
+          <li>&bull; status --wait 两个后端不同：本机 per-run 进程已终止时接力者才是唯一推进器（退出它 run 即停滞，per-run 仍在则两者并存），云端仅在检测到停滞时唤醒推进函数、之后无需在线</li>
           <li>&bull; 退出码由父进程 / 平台观察得到，不由 worker 上报</li>
         </ul>
       </div>

@@ -646,23 +646,56 @@ def test_exit_observer_can_read_runs_table_only():
     assert not writes, f"退出观察者不应有 runs 表写权限：{writes}"
 
 
+# DynamoDB 只读动作白名单（`grant_read_data` 授的那一组）：下面按角色断言 events 表动作集时，用它把「读」与「写」分开——
+# 读面随 CDK 版本可能增项（加一个只读动作不构成权限风险），写面必须逐字锁死。
+_DDB_READ_ACTIONS = frozenset({
+    "dynamodb:BatchGetItem", "dynamodb:ConditionCheckItem", "dynamodb:DescribeTable", "dynamodb:GetItem",
+    "dynamodb:GetRecords", "dynamodb:GetShardIterator", "dynamodb:Query", "dynamodb:Scan",
+})
+
+
+def _events_table_actions(t: Template, role_hint: str) -> set[str]:
+    """某角色对 events **表**（不含其 Stream）的全部授权动作。Stream 语句另算：那是事件源订阅，不是表数据面。"""
+    out: set[str] = set()
+    hit = False
+    for _lid, p in t.find_resources("AWS::IAM::Policy").items():
+        if role_hint not in json.dumps(p["Properties"].get("Roles", [])):
+            continue
+        hit = True
+        for st in p["Properties"]["PolicyDocument"]["Statement"]:
+            rj = json.dumps(st.get("Resource"))
+            if "EventsTable" not in rj or "StreamArn" in rj:
+                continue
+            acts = st.get("Action")
+            out.update(acts if isinstance(acts, list) else [acts])
+    assert hit, f"找不到 Roles 含 {role_hint!r} 的 policy（角色改名别让护栏静默变绿）"
+    return out
+
+
 def test_exit_observer_can_only_putitem_on_events_table():
     """退出观察者对 events 表**只 PutItem**：events 是 append-only 的判定真值日志，观察者只追加 task_exited、
     不该能改/删（ADR 0033 资源清单「exit-observer 只需 events 表写（PutItem）」+「动作维度全最小」）。
 
-    按角色归属逐条取语句、断言动作**集合相等**（不是「含 PutItem」）——CDK 的 grant_write_data 会连带
+    断言动作**集合相等**（不是「含 PutItem」）——CDK 的 grant_write_data 会连带
     BatchWriteItem/UpdateItem/DeleteItem/DescribeTable，只查「含」照不出这条。
     """
-    t = _template()
-    events_actions: list[str] = []
-    for props in [p["Properties"] for p in t.find_resources("AWS::IAM::Policy").values()
-                  if "ExitObserver" in json.dumps(p["Properties"].get("Roles", []))]:
-        for st in props["PolicyDocument"]["Statement"]:
-            if "EventsTable" not in json.dumps(st.get("Resource", "")):
-                continue
-            acts = st.get("Action")
-            events_actions += acts if isinstance(acts, list) else [acts]
-    assert set(events_actions) == {"dynamodb:PutItem"}, f"events 表授权面应恰是 PutItem，实际 {sorted(events_actions)}"
+    acts = _events_table_actions(_template(), "ExitObserver")
+    assert acts == {"dynamodb:PutItem"}, f"events 表授权面应恰是 PutItem，实际 {sorted(acts)}"
+
+
+@pytest.mark.parametrize("role_hint", ["Reconciler", "Kicker"])
+def test_advancer_events_table_face_is_read_plus_putitem(role_hint):
+    """两个推进器对 events 表 = **读 + PutItem**，不得有 Update/Delete/BatchWrite。
+
+    读：重放该 run 的全部事件算现态。PutItem：两条路径要自己追加退出记录——launch 失败补偿与 job timeout 处置
+    （ADR 0034 机制二推论 +「job timeout」节）；缺它这两条路径在真实 IAM 下 AccessDenied，而 moto 不校验 IAM、
+    行为级测试照不出这类缺权限，故只能在合成模板的授权面上断。写面逐字锁死是本护栏的要点：`grant_write_data`
+    会连带 BatchWriteItem/UpdateItem/DeleteItem，破 events 的 append-only 写模型（ADR 0033「动作维度全最小」）。
+    """
+    acts = _events_table_actions(_template(), role_hint)
+    assert {"dynamodb:GetItem", "dynamodb:Query"} <= acts, f"{role_hint} 缺 events 表读权限（重放会 AccessDenied）：{sorted(acts)}"
+    assert acts - _DDB_READ_ACTIONS == {"dynamodb:PutItem"}, \
+        f"{role_hint} 对 events 表的写面应恰是 PutItem，实际 {sorted(acts - _DDB_READ_ACTIONS)}"
 
 
 def _advancer_stmts(t: Template, role_hint: str) -> set[str]:
