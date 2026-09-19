@@ -40,7 +40,7 @@ ADR/CONTEXT 是随构建**逐步长起来**的：每次在前人文档上叠加�
    - **留/删边界**：留「为何这样设计」（why/被拒方案/决策脉络，见红线护栏），删「分几步/施工节奏/过程编号」——判据即 CLAUDE.md 文档纪律首条给 ADR 划的内容边界「ADR 记稳定决策（what/why/trade-off），施工进度属实现计划、放对话或 PR」，写入与审计同一把尺、此处不另立标准。
    - **不误伤**：把某次实测/commit 当稳定证据内联引用的（如「据中断丢失实测预演」）是自包含证据、不是沉积；`docs/journey/` 里过程坐标合法、不在此类射程内。
    - **与 DEADLINK 的分工**：过程编号作为叙事内容归本类（删叙事保决策）；作为指向 journey 的悬空引用归 DEADLINK 引用方向违规条（内联证据+换自明描述）——同一句可能两症并发，按各自修法处理。
-6. **TONE（口吻 / 可读性 / 术语，对全部人读文档）**：使用者向文档（`docs/user-guide/**`、根 README、各包 README 入口页、`CHANGELOG.md`、Release 正文 footer、agent skill）里出现产品说明口吻之外的写法——隐喻与俏皮话（「帽子不是人」）、同事口头语、施工叙事（「我们这次 / 本轮」）、无动词的标签句、面向同事而非使用者的措辞、术语未定义就用、晦涩内部术语（「锁步」）。判据 = ADR 0045 决策六（按类别定口吻：用户文档 = 产品说明口吻，参照主流云服务文档）。**处置：主观类待批**——正则能抓的那一小部分（禁词、已定改掉的口头语）已由护栏 `cli/tests/test_user_docs.py` / `test_package_readmes.py` / `test_skill.py` 机械挡住，本类抓的是正则外的语义与可读性；报法 = 引原句 + 给改写句。技术文档（CONTRIBUTING / DEVELOPMENT / `.github/workflows/README.md` / internals / `tools/*.md`）报俏皮话与口头语（决策六：允许术语、不允许俏皮与口头语），不报密度。**术语面**：人读文档（含 internals 与图源）里出现 CONTEXT.md `_Avoid_` 登记的旧名或非规范名即报——用户文档、图源（`docs/diagrams/*.json`）、skill、包 README 四面已由护栏 RETIRED_TERMS 机械挡住（ADR 0045 决策六），本类补技术文档与 internals 那半；发现某个规范术语本身不合书面标准时**不就地改文档**，报为「词表项」交 owner，改名走 ADR 0045 决策八的顺序（先词表、再传播）。contributor 侧 AI agent 文档不在本类射程。
+6. **TONE（口吻 / 可读性 / 术语，对全部人读文档）**：使用者向文档（`docs/user-guide/**`、根 README、各包 README 入口页、`CHANGELOG.md`、Release 正文 footer、agent skill）里出现产品说明口吻之外的写法——隐喻与俏皮话（「帽子不是人」）、同事口头语、施工叙事（「我们这次 / 本轮」）、无动词的标签句、面向同事而非使用者的措辞、术语未定义就用、晦涩内部术语（「锁步」）。判据 = ADR 0045 决策六（按类别定口吻：用户文档 = 产品说明口吻，参照主流云服务文档）。**处置：主观类待批**——正则能抓的那一小部分（禁词、已定改掉的口头语）已由护栏 `cli/tests/test_user_docs.py` / `test_package_readmes.py` / `test_skill.py` 机械挡住，本类抓的是正则外的语义与可读性；报法 = 引原句 + 给改写句。技术文档（CONTRIBUTING / DEVELOPMENT / `.github/workflows/README.md` / internals / `tools/*.md`）报俏皮话与口头语（决策六：允许术语、不允许俏皮与口头语），不报密度。**术语面**：人读文档（含 internals 与图源）里出现 CONTEXT.md `_Avoid_` 登记的旧名或非规范名即报——用户文档、图源（`docs/diagrams/*.json`）、skill、包 README 四面已由护栏 RETIRED_TERMS 机械挡住（ADR 0045 决策六），本类补技术文档与 internals 那半。**分流判据**：退役名落在 ADR 散文里时先查它在护栏属哪张表——`COLLOQUIAL` 只约束人读层与产品文案、`RETIRED_TERMS` 管用词版本；`_Avoid_` 登记的是完整术语名时不推及其前缀或子串；同一退役名跨多篇时**必须一次做完并附全量落点**（只改一处 = 造新的跨篇不一致）。发现某个规范术语本身不合书面标准时**不就地改文档**，报为「词表项」交 owner，改名走 ADR 0045 决策八的顺序（先词表、再传播）。contributor 侧 AI agent 文档不在本类射程。
 
 ## 按文档类型的复盘侧重（用对判据）
 
@@ -68,21 +68,22 @@ ADR/CONTEXT 是随构建**逐步长起来**的：每次在前人文档上叠加�
 - `docs/journey/`（staging 区，可为空；**只做生命周期审计**：非空时逐个判「该吸收进 ADR / code 后删」还是「任务仍在推进、留」，不做密度 / 提纯——判据在 CLAUDE.md 文档纪律 journey 条「任务收尾即审计点」）
 - `docs/ai-eng/doc-health-review.md` / `docs/ai-eng/code-health-review.md` / `docs/ai-eng/diagram-authoring.md` 与它们的 Claude Code 入口 `.claude/commands/{doc,code}-health-review.md`、`.claude/skills/doc-diagram/SKILL.md`（方法文档与入口都已入库：查 DEADLINK / STALE / 内部矛盾 / SEDIMENT + 入口是否仍只含指令与指针、没长出要点复制（入口不复述方法，免同步漂移）；方法内容本身是决策，不在复盘里改——SEDIMENT 只动措辞不动规则（亲历数字、轮次坐标、同一规则的第二遍重述），按主观类出提案待批；不进提纯审计集的 git 层读——与 CLAUDE.md 同款口径）
 - `docs/internals/*.md`（给人的阅读理解层，派生视图——判据侧重见上「按文档类型的复盘侧重」）
+- `docs/diagrams/*.json`（图源，派生视图；既非 markdown 也非 code 注释、两侧任务都易漏收——判据在上「docs/internals」条的「图也是派生视图」句：节点 / 边 / 顺序对照 code 与正文，会漂的字面量与双写规则报 REDUNDANCY，改后重出 SVG 同 commit）
 - 随 CLI wheel 发行的 **agent skill markdown**（`cli/gherkai_cli/skills/gherkai/SKILL.md` + `references/*.md`，5 份入库）——使用者/agent 面，安装态没有仓库上下文；判据侧重见上「按文档类型的复盘侧重」。
 - **技术笔记/配方 + 工具手册**（如 `engines/midscene/spikes/SIGV4-FETCH-RECIPE.md`、`tools/e2e_harness.md`）——与代码同居、AI 照它接线/照它操作，**极易 STALE**（含可运行代码片段 + 命令 + 前置条件 + 踩坑点 + 源码路径）。
 - `docs/diagrams/*.json`（图源，派生视图；判据侧重见上 internals 条）
 - 未来新增的 docs/ 与子工程根下文档同样纳入（本任务名"文档健康度"、不焊死在某几类上——每次 `find . -name "*.md"` 扫一遍、别漏新文件，排除项见下「明确排除」（唯一权威清单））。
 
-**明确排除**：`.claude/` 里未入库的个人项（`settings.local.json`、个人 `skills/`）与 `.agents/`（已入库的项目级 markdown——`.claude/commands/` 两条入口、`.claude/skills/doc-diagram/SKILL.md`——与随 wheel 发行的 `cli/gherkai_cli/skills/` 都在范围内，见上覆盖范围；入库的 `.claude/settings.json` 与 `.claude/hooks/` 不是 markdown、不在射程）；`node_modules/`、`.venv/`、`.pytest_cache/`（依赖/缓存）；**`graphify-out/`**（graph.json / GRAPH_REPORT.md / wiki/ 全是 graphify 生成物，刷新走 CONTRIBUTING.md「知识图刷新」，不当文档审）；**repo 内 code 注释/docstring 的引用方向违规归姊妹任务 [`code-health-review.md`](./code-health-review.md)**（本任务只管 `.md` 与 `docs/diagrams/*.json` 图源，分工线两侧一致）。
+**明确排除**：`.claude/` 里未入库的个人项（`settings.local.json`、个人 `skills/`）与 `.agents/`（已入库的项目级 markdown——`.claude/commands/` 两条入口、`.claude/skills/doc-diagram/SKILL.md`——与随 wheel 发行的 `cli/gherkai_cli/skills/` 都在范围内，见上覆盖范围；入库的 `.claude/settings.json` 与 `.claude/hooks/` 不是 markdown、不在射程）；`node_modules/`、`.venv/`、`.pytest_cache/`（依赖/缓存）；**`graphify-out/`**（graph.json / GRAPH_REPORT.md / wiki/ 全是 graphify 生成物，刷新走 CONTRIBUTING.md「知识图刷新」，不当文档审）；**repo 内 code 注释/docstring 的引用方向违规归姊妹任务 [`code-health-review.md`](./code-health-review.md)**（本任务管 `.md` 与 `docs/diagrams/*.json` 图源 与 `docs/diagrams/*.json` 图源，分工线两侧一致）。
 
 ### 第一层：片内审计（可用 workflow 并行）
 
 - **分片按主题耦合分组**——把主题相关、易互相矛盾的 ADR 分在同一片，便于发现**跨片矛盾**（先看当前 ADR 集自行按主题聚类，别照抄某一时刻的固定分组；聚类真值 = ADR 互引图（第二层那张，先算）+ 各 ADR 点名的 code 文件重叠，知识图社区不作依据——见姊妹任务分片条）。
 - **【强制】STALE 类必须 Read/Grep 实际 code 核实**，禁止凭印象——本任务最大的一类问题就是"code 改了、文档没跟"，只有对照 code 才抓得到。
-  - **枚举型内容是最高收益的机械核对点：做「文档清单 vs 真值集」的差集、别靠读**——目录树 / flag·选项表 / 模块清单 / 字段·事件类型列表 / 交叉引用 / ADR 编号范围，每一项都拿文档清单去 `ls` / grep / 对照 argparse 逐条比对源真值。**为什么必须做差集**：遗漏项（实际有、文档漏列）在你读"已列出的内容"时是隐形的，读列表本身永远发现不了漏了什么（亲历：目录树、CLI 选项表、ADR 接口清单都曾漏列，全是散文读着没问题、逐条对真值集才现形）。
+  - **枚举型内容是最高收益的机械核对点：做「文档清单 vs 真值集」的差集、别靠读**——目录树 / flag·选项表 / 模块清单 / 字段·事件类型列表 / 交叉引用 / ADR 编号范围，每一项都拿文档清单去 `ls` / grep / 对照 argparse 逐条比对源真值。**为什么必须做差集**：遗漏项（实际有、文档漏列）在你读"已列出的内容"时是隐形的，读列表本身永远发现不了漏了什么（亲历：目录树、CLI 选项表、ADR 接口清单都曾漏列，全是散文读着没问题、逐条对真值集才现形）。**真值集构造命令自身要自检条数**（`wc -l` 与 `grep -c` 对账；CJK 词表做差集必须 `LC_ALL=C`、别用 `tr` 切多字节分隔符「、」）——假真值集比不做差集更危险：它看着做了（亲历：默认 locale 把 110 个 Avoid 词折叠成 37 个，第一遍漏掉一半命中、零报错）。
 - **【强制】矛盾/过时/坏链接等客观类，逐条对抗验证**：交一个独立视角读原文+code 尝试**证伪**（默认怀疑），只保留 CONFIRMED 的——防止误判（把有意历史记录/风格偏好当成 bug）。
 - **【强制】提纯/密度审计（审计集 = 全部 ADR + CONTEXT，选材与跨轮沿用规则见下）**——纠错抓「错」，这条抓「稀」；没有它，复盘会结构性偏向纠错、提纯永远被挤掉（亲历：曾有整轮发现全是纠错、零提纯）。**CONTEXT 的判据反向**：它是严格词表（ADR 0045 决策八），受保护要素（why / trade-off / 反模式）出现在词条里不是「保留」而是「搬回 ADR」，定义超两句或含实现细节即提纯候选；层读法同样适用：
-  - **选材（全量，同本任务「全部项目文档」基调）**：审计集 = **全部 ADR + CONTEXT**——「何时做」的事件驱动只定何时触发，不缩覆盖范围。**有界工作量靠跨轮沿用、不靠缩范围**：自上轮提纯审计以来无改动的 ADR 可沿用上轮对它的具名结论作判无依据（仍是内容锚定、可核）；动过的必须重审。**锚点 = 上轮落地提交**（删掉待批 journey 报告的那个），**它的定位不靠提交说明的自然语言、靠 trailer**——四步：
+  - **选材（全量，同本任务「全部项目文档」基调）**：审计集 = **全部 ADR + CONTEXT**——「何时做」的事件驱动只定何时触发，不缩覆盖范围。**有界工作量靠跨轮沿用、不靠缩范围**：自上轮提纯审计以来无改动的 ADR 可沿用上轮对它的具名结论作判无依据（仍是内容锚定、可核；**退场条：同一篇连续三轮沿用即须补一条本篇自身的内容锚**——点名受保护要素 + 定位，不许纯引用链，防依据退化成「引用链 + 一字未动」）；动过的必须重审。**锚点 = 上轮落地提交**（删掉待批 journey 报告的那个），**它的定位不靠提交说明的自然语言、靠 trailer**——四步：
     - ① 取锚点：`git log --format='%h %(trailers:key=Doc-Health-Round,valueonly)' | awk 'NF>1{print; exit}'`（**别用 `grep -m1 .` 过滤**——无 trailer 的提交也输出「`%h` + 空格」这一非空行，它必命中第一行、恒返回 HEAD，区间随之退化成本轮自己的提交、整条提纯审计失效；`Doc-Health-Round` / `Doc-Health-Records` 两个 trailer 的写法、哪个提交算落地提交见下「产出与提交」；trailer 缺失（早期轮次）时退回 `git log --grep=提纯` 找、同法取回）。
     - ② 取回上轮具名记录：`git show <锚点>^:<路径>` 从父提交取回（路径见锚点的 `Doc-Health-Records:` trailer）——记录随落地一起删、git 历史就是它的归宿，不另留永久 ledger（journey 不是永久文档）。
     - ③ 判动没动：`git log <锚点>^..HEAD -- <路径>` 取区间（起点用**锚点的父提交**——上轮的落地改动都在锚点里，从锚点起算会把上轮刚改过的文档误判成「未动」），零命中 = 可沿用、有命中 = 必重审；**动/没动清单写进报告**（可复核，不许沉默断言）。
@@ -98,7 +99,7 @@ ADR/CONTEXT 是随构建**逐步长起来**的：每次在前人文档上叠加�
 **【强制】** 这一层不能省——分片审计天然只查片内，结构问题只在整体视角暴露：
 
 - **构建引用图**（谁引用谁、入度/出度）：找孤儿节点（无人引用，可能已废）、超级枢纽（出入度都极高，可能过载——但高内聚总纲不该拆，只在"某段频繁独立变更且牵动无关段"时才是拆分信号）。**顺带标记反向违规边**：任何「长期文档 → `docs/journey/`」的引用都是方向违规（稳定物依赖了易删物），引用图里最易一眼看出——全部报（按 DEADLINK 引用方向违规条修）。
-- **Status 头一致性**：每个 ADR 有无标准 Status 头（见下）；被取代/证伪的是否标了历史，"被取代"链是否双向（新 ADR 指向旧的，旧 ADR 也标了 superseded-by、反向指针补全）。
+- **Status 头一致性**：每个 ADR 有无标准 Status 头（见下）；被取代/证伪的是否标了历史，"被取代"链是否双向（新 ADR 指向旧的，旧 ADR 也标了 superseded-by、反向指针补全）。**机械检查（两侧差集）**：凡某 ADR 的 Status 头出现 `Superseded-by NNNN` / `Partially-superseded-by NNNN`，NNNN 那篇必须 grep 得到旧编号；缺即报反向链缺口（亲历：新 ADR 收口时只写「我影响了谁」、漏登「我取代了谁」，三处同犯而两篇头都自陈「反向链已落」）。
 - **文件名合规（机械项，`ls` 一遍即可）**：`docs/` 下全部文件名英文 kebab-case；`docs/adr/`、`docs/journey/` 带四位编号且各自不复用；例外只有约定俗成的全大写入口文件（判据在 CLAUDE.md 文档纪律「文档文件名」条）。
 
 ### Status 头（第二层的配套：枚举、判定与连带审计；头本身是每个 ADR 开头一行）
@@ -114,7 +115,7 @@ ADR/CONTEXT 是随构建**逐步长起来**的：每次在前人文档上叠加�
 
 判定方法：Read 全文看自述 → 查**编号更大的引用源**有没有明说取代它（核心结论 vs 操作立场，只有后者变=Partial）→ 必要时对照 code → 拿不准标 UNCERTAIN 交人定，别硬猜。
 
-**Status 头连带审计——Accepted 必自包含**：一个 ADR 标（或本次将改为）**Accepted/冻结**态时，顺带查它是否已清掉 journey 引用/裸 WP 编号（Draft 可暂留、Accepted 必清——这条例外绑死 Status，判据与修法见「六类问题」DEADLINK 引用方向违规条）。**发现「Accepted ADR 仍引 journey/带 WP 编号」= 到期未还的债，必修**——按该条修法处理（内联证据 + 换自明描述）；这是该纪律唯一的定期审计点，别漏。
+**Status 头连带审计——Accepted 必自包含**：一个 ADR 标（或本次将改为）**Accepted/冻结**态时，顺带查它是否已清掉 journey 引用/裸 WP 编号（Draft 可暂留、Accepted 必清——这条例外绑死 Status，判据与修法见「六类问题」DEADLINK 引用方向违规条）。**发现「Accepted ADR 仍引 journey/带 WP 编号」= 到期未还的债，必修**——按该条修法处理（内联证据 + 换自明描述）；这是该纪律唯一的定期审计点，别漏。（本检查连续两轮零命中：执行 = 一次 grep，不单列步骤；保留是因为它承担「Accepted 必自包含」的防误伤职责。）
 
 ### 第三层：按事实族横切（【强制】，与按文档分片正交）
 
