@@ -115,7 +115,7 @@ cloud 提交是**定义期解析、运行期照抄**，这是「重推 variant �
 
 | 想深入的主题 | 去哪读 |
 |---|---|
-| 部署命令的全部 flag、VPC 三档、权限清单、`destroy` 后的残留 | [`docs/user-guide/cloud-backend.md`](../user-guide/cloud-backend.md) |
+| 部署命令的全部 flag、VPC 的三种取值、权限清单、`destroy` 后的残留 | [`docs/user-guide/cloud-backend.md`](../user-guide/cloud-backend.md) |
 | worker 镜像交付全部决策/护栏/被拒方案 | [ADR 0038](../adr/0038-worker-image-delivery.md) |
 | 分发形态、`gherkai deploy` 的 provider 接缝、版本真源与 skew | [ADR 0037](../adr/0037-distribution-and-packaging.md) 决策 6-7 |
 | 云资源 IaC / 命名 / IAM / preflight | [ADR 0033](../adr/0033-iac-aws-backend-and-composition-wiring.md) |

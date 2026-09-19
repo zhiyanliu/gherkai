@@ -1,6 +1,6 @@
 # 云端后端：分工、交付清单、variant 镜像与升级
 
-本文给 agent 在云端后端要知道的事。资源清单、费用、VPC 三档细节与权限清单以用户指南的云端后端页为准：
+本文给 agent 在云端后端要知道的事。资源清单、费用、VPC 三种取值的细节与权限清单以用户指南的云端后端页为准：
 https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/cloud-backend.md 。
 
 ## 1 分工

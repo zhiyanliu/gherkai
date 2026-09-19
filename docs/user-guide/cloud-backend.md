@@ -34,7 +34,7 @@ uv tool install 'gherkai[deploy-aws]'      # 部署包随 CLI 的 extra 一起�
 - **网络与 IAM**：按 `--vpc` 档给 worker 的子网与安全组（优先用公有子网加公网 IP 出网，不建 NAT 网关），每个引擎一个最小权限角色，后端的三个 Lambda 各有自己的角色。
 - **SSM 参数**（`/<prefix>backend/*`）：后端版本戳、生效的 VPC 档、每个引擎的 worker 任务定义模板、worker 镜像映射与默认指针、子网与安全组 ID，供 `run` / `submit` 读取。
 
-云端两种执行方式的差别都源自「谁拉起 worker 任务」：`submit` 的任务由后端拉起；`run --backend cloud` 的任务由你自己的 CLI 进程拉起并等到运行结束。下面的并发上限与[团队成员的最小权限](#团队成员需要的最小云端权限)两档都由这一条决定。
+云端两种执行方式的差别都源自「谁拉起 worker 任务」：`submit` 的任务由后端拉起；`run --backend cloud` 的任务由你自己的 CLI 进程拉起并等到运行结束。下面的并发上限与[团队成员的最小权限](#团队成员需要的最小云端权限)两处都由这一条决定。
 
 `submit --backend cloud` 提交的一个 run，并行 job 数 = `min(提交时 --max-concurrency 的值, 部署侧上限 8)`；给的值超过上限时提交命令打印一行提示，并按 8 并行。`run --backend cloud` 的并行度就是 `--max-concurrency`，不受这个上限约束。
 
@@ -48,11 +48,11 @@ gherkai deploy --vpc default --prefix gherkai-                         # 真部�
 
 增量部署就是重复第三条命令：同一组选项重新运行即幂等收敛。中断后再次运行会接着收敛，中断留下的多余任务定义 revision 由后续部署或 `push-worker` 顺带回收。每次部署前建议先执行一次 `--diff`。
 
-`--diff`、`--synth-only DIR`、`--bootstrap` 三者互斥，各自把默认动作换成一个只读或准备动作；都不给就是真部署。`--synth-only DIR` 只把 CloudFormation 模板导出到 `DIR`、不改动账户里的任何资源，适合交给你自己的审批流水线；`--vpc default` 与 `--vpc vpc-<id>` 仍要向账户查一次网络信息，因此这两档也需要可用凭证。
+`--diff`、`--synth-only DIR`、`--bootstrap` 三者互斥，各自把默认动作换成一个只读或准备动作；都不给就是真部署。`--synth-only DIR` 只把 CloudFormation 模板导出到 `DIR`、不改动账户里的任何资源，适合交给你自己的审批流水线；`--vpc default` 与 `--vpc vpc-<id>` 仍要向账户查一次网络信息，因此这两个取值也需要可用凭证。
 
 `--vpc default` 与 `--vpc vpc-<id>` 要向账户查 VPC、子网与可用区。结果按前缀缓存在 `$XDG_CACHE_HOME`（缺省 `~/.cache`）下的 `gherkai/cdk-context/`。首次查询某个前缀时会出现一条含 `Template validation found issues` 的告警，这是 CDK 在查询值就位前先用占位网络合成一遍所致，之后走缓存即不再出现。默认 VPC 的子网确实变了、或除这条警告之外真出现「新建或替换子网」的变更时，先 `--refresh-context` 再 `--diff`。
 
-## VPC 三档
+## VPC 的三种取值
 
 `--vpc` 必给，没有隐式默认（`deploy`、`--diff`、`--synth-only`、`destroy` 都要给；`--bootstrap` 不需要）：
 
@@ -71,7 +71,7 @@ gherkai deploy --vpc default --prefix gherkai-                         # 真部�
 | 选项 | 作用 |
 |---|---|
 | `--prefix P` | 资源名前缀（默认 `gherkai-`，也可用 `AWS_RESOURCE_PREFIX`）。**须与 `run` / `submit` 的 `--prefix` 一致**：建出来的资源名就是提交侧推导的默认名，不一致时提交前检查会报错并点名前缀 |
-| `--vpc 档` | 见上「VPC 三档」，必给 |
+| `--vpc` 取值 | 见上「VPC 的三种取值」，必给 |
 | `--allow-vpc-change` | 放行一次 VPC 档变更或首次登记（仅 `deploy`） |
 | `--require-approval {never,any-change,broadening}` | 透传 CDK 的 IAM 变更审批档（仅 `deploy`；不给则用 CDK 自己的默认值） |
 | `--refresh-context` | 丢弃本机缓存的环境查询结果重新查询；默认复用缓存 |
@@ -182,7 +182,7 @@ worker 镜像映射与默认 variant 指针这两族 SSM 参数也不随 destroy
 |---|---|
 | 找不到 node | 装 Node ≥ 22 后重新运行 |
 | 找不到 cdk 也找不到 npx | 装 Node ≥ 22（自带 npx），或 `npm i -g aws-cdk`，之后重新运行 |
-| 缺 `--vpc` | 补上三档之一。环境已存在时提示里会给出上次部署用的那一档 |
+| 缺 `--vpc` | 补上三个取值之一。环境已存在时提示里会给出上次部署用的那个取值 |
 | `--vpc` 取值不合法 | 只能是 `default`、`new`、`vpc-<id>` 三种形态 |
 | VPC 档与后端记录不符，或后端没有档记录 | 先 `gherkai deploy --diff`（带同一组选项）核对变更集，确认无误再带 `--allow-vpc-change` 放行一次 |
 | cdk deploy 失败且报错提到 bootstrap | 先 `gherkai deploy --bootstrap`（同 `--profile` / `--region`） |

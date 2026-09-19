@@ -25,7 +25,7 @@
 
 Nova 的失败形态**不是读不出中文**：动作步的推理明确读出「提交订单」「取消」两个中文按钮并区分、还主动确认结果文本「订单提交成功」已显示；紧接着的 `act_get` 布尔断言在同一页面却判定"看不到该文本"→ false。另见形近字错读（「格希凯」读成「格希列」）。
 
-**中文 UI 量化实测**（2026-09-09，cloud 档、v1.4.0 基础镜像；夹具 = `features/wikipedia_zh.feature`：zh.wikipedia.org 首页 → 中文搜索「人工智能」→ 三条中文 AI 断言，两引擎步骤完全相同；`--assertion-votes 10`、独立跑 3 次。**表内 Midscene 侧为当时的默认模型 Qwen3-VL**；换默认所依据的 [0044](./0044-engine-model-selection-and-override.md)「Midscene 默认的选定依据」A/B 里，GPT-5.6 Terra 的中文 UI 探针同样 3/3 通过，但票数粒度不及本表）：
+**中文 UI 量化实测**（2026-09-09，云端后端、v1.4.0 基础镜像；夹具 = `features/wikipedia_zh.feature`：zh.wikipedia.org 首页 → 中文搜索「人工智能」→ 三条中文 AI 断言，两引擎步骤完全相同；`--assertion-votes 10`、独立跑 3 次。**表内 Midscene 侧为当时的默认模型 Qwen3-VL**；换默认所依据的 [0044](./0044-engine-model-selection-and-override.md)「Midscene 默认的选定依据」A/B 里，GPT-5.6 Terra 的中文 UI 探针同样 3/3 通过，但票数粒度不及本表）：
 
 | 断言（页面事实） | Midscene | Nova Act |
 |---|---|---|

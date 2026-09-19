@@ -31,7 +31,7 @@ worker 拿到一个 step 后按固定顺序决定它走哪条执行路径：
 
 表脚注：
 
-- 关键字只决定第 ③ 档怎么派发：`Then` 是断言，`Given` / `When` 是动作，`And` / `But` 承接前一条的身份。前两档都不看关键字，所以 `Then 页面地址是 "https://example.com/a"` 也会被当成导航步——直接打开这个地址并记通过，断言不会发生。要判 URL 就用确定性 step：两个引擎各内建一条 `Then 页面地址匹配 "<正则>"`，装了对应引擎的 worker 即可用，无需写任何文件（见 [`writing-deterministic-steps.md`](./writing-deterministic-steps.md)）。
+- 关键字只决定第 ③ 条执行路径怎么派发：`Then` 是断言，`Given` / `When` 是动作，`And` / `But` 承接前一条的身份。前两条执行路径都不看关键字，所以 `Then 页面地址是 "https://example.com/a"` 也会被当成导航步——直接打开这个地址并记通过，断言不会发生。要判 URL 就用确定性 step：两个引擎各内建一条 `Then 页面地址匹配 "<正则>"`，装了对应引擎的 worker 即可用，无需写任何文件（见 [`writing-deterministic-steps.md`](./writing-deterministic-steps.md)）。
 - 外层双引号只是书写习惯。交给模型前会被去掉；确定性 step 的正则匹配的是关键字之后的原文、引号照留。
 
 ## 什么交给 AI，什么必须精确
@@ -163,7 +163,7 @@ Scenario: Midscene 在中文 UI 上搜索并断言
 
 ## 敏感信息
 
-走 AI 的那些 step（三档表的第 ③ 档）文本会原样进模型提示（外层的双引号去掉，挂在这一步上的 DataTable / DocString 一并附上）；不论走哪一档，全部 step 原文都会写进这次运行的判定明细与运行元信息。AI 断言没过时，断言原文还会进失败原因，引擎的报告与证据里留着这次调用的指令原文和页面截图。所以：
+走 AI 的那些 step（三种执行路径里的第 ③ 条）文本会原样进模型提示（外层的双引号去掉，挂在这一步上的 DataTable / DocString 一并附上）；不论走哪一条执行路径，全部 step 原文都会写进这次运行的判定明细与运行元信息。AI 断言没过时，断言原文还会进失败原因，引擎的报告与证据里留着这次调用的指令原文和页面截图。所以：
 
 - **不要把密码、令牌、密钥、真实客户数据写进 `.feature`**，DataTable 与 DocString 里同样不要写。
 - 需要登录的用例用**只在测试环境有效**的凭据；凭据本身不写进 step 文本，由确定性 step 从环境变量读（环境变量在哪设见 [`configuration.md`](./configuration.md)）。

@@ -238,7 +238,7 @@ def test_exclusive_claims_are_true():
             for m in EXCLUSIVE_CLAIM.finditer(line):
                 subs = set(re.findall(r"`([a-z][a-z0-9-]*)`", m.group("subs")))
                 if not subs & TOP_LEVEL:
-                    continue  # 「仅 `local` 档」这类不是子命令排他声明，本约定不管
+                    continue  # 「仅 `local` 后端」这类不是子命令排他声明，本约定不管
                 if unknown := sorted(subs - TOP_LEVEL):
                     problems.append(f"{md.relative_to(REPO)}:{i}: 「仅 …」里没有这些子命令：{unknown}")
                     continue

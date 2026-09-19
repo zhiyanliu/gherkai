@@ -5,8 +5,8 @@
     "semantic_hash": ""
   },
   "cli/tests/test_backend_cloud.py": {
-    "mtime": 1789836856.400208,
-    "ast_hash": "9b850109a94d3422dd1c00ca4861f4be",
+    "mtime": 1789837411.6812766,
+    "ast_hash": "b33b50b7e3979bfaf36fb36de0356930",
     "semantic_hash": ""
   },
   "cli/tests/test_main.py": {
@@ -400,8 +400,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0033-iac-aws-backend-and-composition-wiring.md": {
-    "mtime": 1789830705.7765954,
-    "ast_hash": "ee393f57eb1363344a2d9f4e8d91823d",
+    "mtime": 1789837511.7422824,
+    "ast_hash": "8cc40e56384dddbd55fc4d0c88b6f465",
     "semantic_hash": ""
   },
   "docs/adr/0034-detached-batch-reconciler.md": {
@@ -440,8 +440,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0037-distribution-and-packaging.md": {
-    "mtime": 1789836856.399367,
-    "ast_hash": "68f2a04be0a5a8c282f5e1196593b524",
+    "mtime": 1789837511.7420242,
+    "ast_hash": "6aee2905165ce50e58569ad984f93e60",
     "semantic_hash": ""
   },
   "docs/adr/0038-worker-image-delivery.md": {
@@ -455,8 +455,8 @@
     "semantic_hash": ""
   },
   "cli/gherkai_cli/__main__.py": {
-    "mtime": 1789830733.5132356,
-    "ast_hash": "1bb3578c87c32f1e437dde41c8058371",
+    "mtime": 1789837411.6807125,
+    "ast_hash": "8c2d2a09dd8f16bef178c2e9c132b0d8",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/render.py": {
@@ -625,8 +625,8 @@
     "semantic_hash": ""
   },
   "runtime/gherkai_runtime/compose.py": {
-    "mtime": 1789836856.40048,
-    "ast_hash": "a2c963cd2836e00238ee4d382ec0102d",
+    "mtime": 1789837411.6810772,
+    "ast_hash": "f1c8940b5910287ecdadfb52677bff7d",
     "semantic_hash": ""
   },
   "runtime/gherkai_runtime/detached.py": {
@@ -1045,8 +1045,8 @@
     "semantic_hash": ""
   },
   "cli/tests/test_user_facing_messages.py": {
-    "mtime": 1789830749.9102643,
-    "ast_hash": "954800af40eb8061cf729818e45b8665",
+    "mtime": 1789837411.6825275,
+    "ast_hash": "421d3dda5d6791fcc74e9279d0218fae",
     "semantic_hash": ""
   },
   "cli/tests/test_package_readmes.py": {
@@ -1220,8 +1220,8 @@
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skills/gherkai/references/cloud-backend.md": {
-    "mtime": 1789827711.7683504,
-    "ast_hash": "a368831090509cea73f424b21c9c60a0",
+    "mtime": 1789837411.6819232,
+    "ast_hash": "da8200d319a7354b0e45d0f57c79095d",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skills/gherkai/references/engines.md": {
@@ -1395,8 +1395,8 @@
     "semantic_hash": ""
   },
   "docs/internals/cloud-backend-carriers.md": {
-    "mtime": 1789827539.409437,
-    "ast_hash": "4713334d6db1525734e5f5241fa5c70b",
+    "mtime": 1789837411.6816466,
+    "ast_hash": "45d2b7f7464d1fc7b8d7ef7cbd04b1f3",
     "semantic_hash": ""
   },
   "docs/internals/deterministic-step-lifecycle.md": {
@@ -1415,13 +1415,13 @@
     "semantic_hash": ""
   },
   "docs/user-guide/README.md": {
-    "mtime": 1789830741.4034758,
-    "ast_hash": "383606f8434faf0eb9a20628ce4d9c65",
+    "mtime": 1789837411.6815076,
+    "ast_hash": "f3431a7d46701f4ce31573d983df4f62",
     "semantic_hash": ""
   },
   "docs/user-guide/cloud-backend.md": {
-    "mtime": 1789836856.3988628,
-    "ast_hash": "b36f4adde7c922b3abb8fdd4733ef18e",
+    "mtime": 1789837411.6814165,
+    "ast_hash": "524e3a6d388e9b7ae8032987b6bf3f2f",
     "semantic_hash": ""
   },
   "docs/user-guide/configuration.md": {

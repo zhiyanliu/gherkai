@@ -225,7 +225,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     run.add_argument("--json", action="store_true", help="只输出机器可读 JSON（不打进度/文本汇总）")
     run.add_argument("--quiet", action="store_true",
                      help="少进屏幕/上下文：不打逐事件进度；本机执行时 worker 日志改落 <report-dir>/<run_id>/worker.log（--no-report 时落系统临时目录），"
-                          "只打一行位置（cloud 档 worker 在云端运行、日志在 CloudWatch，无此文件）；仍打文本汇总")
+                          "只打一行位置（云端后端的 worker 在云端运行、日志在 CloudWatch，无此文件）；仍打文本汇总")
     # RunReport 是 run 的应得产物：默认总归集（manifest.json + index.html）到 <report-dir>/<run_id>/。
     run.add_argument(
         "--report-dir", default="reports", metavar="DIR",
@@ -325,7 +325,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     _add_selection_flags(sm)
     sm.add_argument("--assertion-votes", type=int, default=1, metavar="N", help="AI 断言投票次数（默认 1）")
     sm.add_argument("--max-concurrency", type=int, default=1,
-                    help="同时运行的 worker 上限（默认 1）；随提交记录生效，cloud 档受部署侧上限"
+                    help="同时运行的 worker 上限（默认 1）；随提交记录生效，云端后端受部署侧上限"
                          "（后端 stack 的 MAX_CONCURRENCY）钳制")
     sm.add_argument(
         "--default-job-timeout", type=float, default=300.0, metavar="S",
@@ -346,7 +346,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
              "给了就用本值。TTL 到点无条件拆隧道，调小可能在 run 未完时断隧道",
     )
     sm.add_argument("--report-dir", default="reports", metavar="DIR",
-                    help="归集报告落点（默认 reports/）；cloud 档须与后端部署的 REPORT_DIR 一致"
+                    help="归集报告落点（默认 reports/）；云端后端须与后端部署的 REPORT_DIR 一致"
                          "（提交前会比对，不一致退 2）")
     sm.add_argument("--steps-dir", default=None, metavar="DIR", help=_STEPS_DIR_HELP_RUN_SUBMIT)
     sm.add_argument("--region", default=None, metavar="R", help="AWS region（喂 worker）")
@@ -661,7 +661,7 @@ def _cmd_doctor(args) -> int:
     any_engine = any(r["available"] for r in rows)
     add("engines", "any", any_engine,
         "至少一个引擎的 worker 可用" if any_engine
-        else "两个引擎的 worker 都没定位到：local 档一个 job 也起不来（只提交 cloud 档的人可忽略本项）",
+        else "两个引擎的 worker 都没定位到：本机后端一个 job 也起不来（只提交云端后端的人可忽略本项）",
         required=(args.backend != "cloud"))
 
     steps_dir, steps_err = _steps_dir_or_error(args)
@@ -791,7 +791,7 @@ def _doctor_cloud(args, target, add, cred_fail: str) -> None:
             add("backend", f"worker.{eng}", False, str(e), required=False)
     add("backend", "worker.any", resolved_any,
         "至少一个引擎解析到 worker 镜像" if resolved_any
-        else "两个引擎都解析不到默认 variant 的镜像：cloud 档一个 job 也起不来（见上各引擎那行的指引）")
+        else "两个引擎都解析不到默认 variant 的镜像：云端后端一个 job 也起不来（见上各引擎那行的指引）")
     _doctor_worker_grace(target, add, revisions)
 
 
@@ -999,7 +999,7 @@ def _validate_worker_variant(args) -> bool:
         return True
     if getattr(args, "backend", None) != "cloud":
         _progress("--worker-variant 不生效：worker 镜像 variant 只作用于 --backend cloud"
-                  "（local 档的确定性 step 直接从 steps 目录读、不经镜像）")
+                  "（本机后端的确定性 step 直接从 steps 目录读、不经镜像）")
         return True
     try:
         _names.image_tag(_dist_version(), variant)

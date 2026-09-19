@@ -43,7 +43,7 @@ COLLOQUIAL = re.compile(r"帽子不是人|烧钱|锁步|lockstep|烙进|烙好|�
 RETIRED_TERMS_WORDS = (
     "跑法", "抢传", "确定性锚点", "大脑", "穿刺", "骨架验证用例", "版本单旋钮", "无状态跑批", "在跑 run",
     "逃生舱", "供给包", "提交方", "技能包", "建造者 AI", "AI coding agent",
-    "维护者", "本机档", "云端档",
+    "维护者", "本机档", "云端档", "cloud 档", "local 档",
 )
 RETIRED_TERMS = re.compile("|".join(re.escape(w) for w in RETIRED_TERMS_WORDS))
 

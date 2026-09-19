@@ -29,7 +29,7 @@ from gherkai_core.scope import FeatureSource
 
 
 # Nova 单 act 时间上界（ADR 0024 act 有界返回）——**组合根持单一真值**，注入 worker 的 NOVA_ACT_TIMEOUT_S env
-# （worker run_scope.py 读它，缺省也是 120、此处显式注入使两端同源）：subprocess 档见 build_engines、Fargate 档见
+# （worker run_scope.py 读它，缺省也是 120、此处显式注入使两端同源）：本机后端见 build_engines、云端后端见
 # build_fargate_engines、能力自述查询见 query_capabilities——**三处都注**，否则那条路上的 worker 落回自带字面量。
 # **grace 下限不在这里算**（ADR 0024「引擎自报下限」）：worker 按这同一个注入值 + 自己的 margin 自报下限
 # （见 engine_min_grace），故「worker 的单 act 上界」与「grace 下限」仍同源于本常量。env 可覆盖（实际运行标定/调优）。
@@ -1269,7 +1269,7 @@ def resolve_worker_variant(
     if not cli_version:
         raise WorkerVariantError(
             "取不到本机 CLI 版本（未以包形式安装、从源码直接运行）——worker 镜像 tag 含 CLI 版本，无从解析。"
-            "装成包（uv tool install gherkai / uvx）后再提交 cloud 档。")
+            "装成包（uv tool install gherkai / uvx）后再提交云端后端。")
     if ssm is None:
         ssm = _make_ssm_client(region=region, profile=profile)
     if variant is None:

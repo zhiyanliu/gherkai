@@ -7,7 +7,7 @@
 - 走**真实 skills 机制**（`gherkai skill install` 进 `.claude/skills/gherkai/`），不是 `.claude/commands/<name>.md`
   ——commands 早已不等于 skills，那条路在当前 Claude Code 上对本 skill 恒 0；
 - **容忍触发前先有别的工具调用**（前几次调用里出现即算触发），不是「首个工具调用必须是 Skill/Read」。
-查询集里 `project: no-feature` 的条目不放 `.feature`，覆盖「项目里没有 .feature 时只在用户明说 gherkai 才接管」那一档。
+查询集里 `project: no-feature` 的条目不放 `.feature`，覆盖「项目里没有 .feature 时只在用户明说 gherkai 才接管」那一条规则。
 
 用法：
   python skills/gherkai-evals/trigger_eval.py --runs 3

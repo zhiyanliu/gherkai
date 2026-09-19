@@ -96,7 +96,7 @@ def _get_uploader() -> ArtifactUploader:
     return _uploader_singleton
 
 
-# evidence 截图后台队列的**有界**排空预算（ADR 0042 决策一）。两档不同是因为两条路径的时间预算不同：
+# evidence 截图后台队列的**有界**排空预算（ADR 0042 决策一）。两段不同是因为两条路径的时间预算不同：
 # - scope 末（正常完成）：判定已全部 emit、无人在等，给足 30s 让字节到 S3，漏网的紧接着由整目录 flush 兜。
 # - 提前退出（停止信号 / 网络耗尽 / 异常）：整个收尾必须落在 grace 内，且**排在会话释放之后**（ADR 0024
 #   「会话释放优先」）。6s 是这条路径分给截图的份额——Nova grace 余量（`lib/constants.py` 的
@@ -338,7 +338,7 @@ def _drain_evidence_uploads(timeout_s: float, *, flush_follows: bool) -> None:
 
     调用位置守两条：①**在会话释放之后**（ADR 0024「会话释放优先」——三层 with 已退出），与既有的中断兜底
     提前上传并列；② scope 末排在 `flush_and_cleanup` **之前**（队列传完的文件 flush 会跳过，漏网的由它兜）——故
-    scope 末这档超时不等于丢：紧随的整目录 flush 会把剩下的传上去。
+    scope 末这一段超时不等于丢：紧随的整目录 flush 会把剩下的传上去。
     `flush_follows` 由调用点声明「我后面还跟着 flush 吗」（不在这里猜调用栈），超时提示据此分两句：会 flush 的
     只说改由收尾统一上传，不会 flush 的（提前退出路径只排空、不 flush）才说链接可能打不开。必传、无默认：
     默认值会让新调用点静默拿到一句可能为假的承诺。
@@ -945,7 +945,7 @@ def main() -> int:
     if network_exhausted:
         # 建连重试耗尽（ADR 0028）：with __exit__ 已清理。以网络专用退出码退出，core 据此记 network_error。不吐 scope_done。
         log("worker: connect retries exhausted, exiting with network code")
-        _drain_evidence_uploads(EVIDENCE_DRAIN_EXIT_S, flush_follows=False)  # 同上（本档多半也传不动，有界即可）
+        _drain_evidence_uploads(EVIDENCE_DRAIN_EXIT_S, flush_follows=False)  # 同上（这条路径多半也传不动，有界即可）
         return EX_WORKER_NETWORK
 
     # scope 级 reportRef：Nova SDK 落的 session_summary.json（session_id/time_worked_s/act_count 等）作

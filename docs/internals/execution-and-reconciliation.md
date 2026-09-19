@@ -47,7 +47,7 @@ local 与 cloud 在这条路径上的差别**只在 Engine adapter**：
 - **local**：`SubprocessEngine` spawn 本机 worker 子进程，事件走专用 fd（`EVENTS_FD`，三通道分离：事件、SDK 噪声、诊断各占一条）。
 - **cloud**：`FargateEngine` 把 job JSON 放 S3、以 `RunTask` 启动容器；worker 在容器内把事件逐条 PutItem 进 DDB events 表，adapter 侧**轮询 Query** 读回，同时以 `DescribeTasks` 监测 task 存活。事件读取只扫 worker 的连续 seq 段——events 表里还有另一类「退出记录」item，读端为什么要避开它、由谁保证前台 run 不会读到它，见 §5 的键空间对照与 §7。
 
-另有两项能力只存在于前台驱动循环，后台运行**不具备**：`--fail-fast` 早停（及由它派生的 skipped/aborted 态），以及 `schedule` 中针对 network 瞬时故障的 job 级整批重试通道——后者**当前在 `run` 上并未启用**（`ScheduleOpts.network_retry` 默认 0，CLI 未暴露该参数），网络抖动的实际处置见 [`verdict-model.md`](./verdict-model.md) §3c，门控与两层分工见 [ADR 0028](../adr/0028-transient-network-ssl-resilience.md)。后台档失败一律隔离、逐 job 各自收敛（[ADR 0026](../adr/0026-schedule-module.md) 失败隔离、[ADR 0031](../adr/0031-job-lifecycle-states-and-severity.md) 决定一）。
+另有两项能力只存在于前台驱动循环，后台运行**不具备**：`--fail-fast` 早停（及由它派生的 skipped/aborted 态），以及 `schedule` 中针对 network 瞬时故障的 job 级整批重试通道——后者**当前在 `run` 上并未启用**（`ScheduleOpts.network_retry` 默认 0，CLI 未暴露该参数），网络抖动的实际处置见 [`verdict-model.md`](./verdict-model.md) §3c，门控与两层分工见 [ADR 0028](../adr/0028-transient-network-ssl-resilience.md)。后台执行下失败一律隔离、逐 job 各自收敛（[ADR 0026](../adr/0026-schedule-module.md) 失败隔离、[ADR 0031](../adr/0031-job-lifecycle-states-and-severity.md) 决定一）。
 
 > 权威：[ADR 0024](../adr/0024-worker-core-protocol.md)（worker↔core 协议、三通道、退出码）、[ADR 0026](../adr/0026-schedule-module.md)（调度/心跳/优雅终止）、[ADR 0032](../adr/0032-fargate-execution-environment.md)（Fargate 执行面）、[ADR 0030](../adr/0030-realtime-persistence-seam.md)（实时写）、[ADR 0028](../adr/0028-transient-network-ssl-resilience.md)（两层网络重试）。
 
@@ -88,7 +88,7 @@ status [--wait]:只读投影查进度;--wait 还能接力推进——per-run 进
 后台驱动的另一半是观察。事件流是**写模型**，读模型是它的投影 **RunState**（cloud = runs 表的 STATE item，local = `run_state.json`）：投影只在 `tick` 里写一次，外部读者（`status`、`explain`、未来的 WebUI）**都不自行重放事件**（各自读什么、何时才有内容，见本节末条）。读侧决定的是「读到的数据有多新、读到什么才算定论」：
 
 - **`status`（不带 `--wait`）纯只读、零副作用**：数据新鲜度取决于最近一次 `tick` 的时刻；它不推进，也不 kickoff。
-- **run 级 status 的取值语义**：投影写入被钳在 `pending`/`running` 两档——投影里全部 job 仍 pending 为 `pending`，任一 job 已推进为 `running`；run 级**终态**由 `try_finalize` 一次落定（提交点），**读到终态即 run 已提交**。投影比抢占滞后一轮：CAS 抢占只改该 job 的状态，run 级要到下一次 `tick` 才转为 `running`，因此「run 仍 pending」不等于「尚未开始推进」；`status` 的「推进可能未启动」提示据此要求 run 级为 `pending` **且所有 job 仍 pending** 时才输出。
+- **run 级 status 的取值语义**：投影写入被钳在 `pending`/`running` 两个状态——投影里全部 job 仍 pending 为 `pending`，任一 job 已推进为 `running`；run 级**终态**由 `try_finalize` 一次落定（提交点），**读到终态即 run 已提交**。投影比抢占滞后一轮：CAS 抢占只改该 job 的状态，run 级要到下一次 `tick` 才转为 `running`，因此「run 仍 pending」不等于「尚未开始推进」；`status` 的「推进可能未启动」提示据此要求 run 级为 `pending` **且所有 job 仍 pending** 时才输出。
 - **退出码分层**（CI 接线时最易建立错误心智）：`submit` 的退出码只表示提交是否成功，**不是判定**；判定退出码由 `status --wait` 等到终态后给出。根因是 CLI 脱离后不再持有内存中的判定终值。各命令退出码的完整分工见 [`verdict-model.md`](./verdict-model.md) §5（本篇不重复它的表）。
 
 收尾一侧决定的是「什么时候能读到什么」：写序、由写序推出的读者保证、已终态 run 在两个后端的重入，以及落地之后由谁读取。
@@ -144,7 +144,7 @@ cloud 路径的超时处置是一条多跳链，时序如下图。这里的「�
 
 ![云端超时 enforce 链：启动 task 时设置的一次性定时器到点调起 kicker，停止 worker 后由 exit-observer 写成带超时标记的退出记录，回到既有链收敛](../diagrams/execution-timeout-chain.svg)
 
-图注：本图只画云端这一路「如何停止 worker」，另两路的到点机制与停止方式见上表；定时器的到点时刻 = 启动时刻 + 该 job 的墙钟预算。到点的一方**先确认这个 job 仍为 RUNNING 且没有退出记录才执行停止**（重复到点、定时器与防御扫描同时命中均无害），`StopTask` 的 reason 里带一个哨兵串，exit-observer 据此把这条退出记录标记为超时停止。停止之后**记为什么状态**（超时归因落在哪一档、与 fail-fast 共用哪个字段、按什么优先级判定）见 [`verdict-model.md`](./verdict-model.md) §3c（归因优先级图）。
+图注：本图只画云端这一路「如何停止 worker」，另两路的到点机制与停止方式见上表；定时器的到点时刻 = 启动时刻 + 该 job 的墙钟预算。到点的一方**先确认这个 job 仍为 RUNNING 且没有退出记录才执行停止**（重复到点、定时器与防御扫描同时命中均无害），`StopTask` 的 reason 里带一个哨兵串，exit-observer 据此把这条退出记录标记为超时停止。停止之后**记为什么状态**（超时归因落在哪一类、与 fail-fast 共用哪个字段、按什么优先级判定）见 [`verdict-model.md`](./verdict-model.md) §3c（归因优先级图）。
 
 > 权威：[ADR 0034](../adr/0034-detached-batch-reconciler.md)「job timeout」节（取舍/归因链/防御扫）、[ADR 0019](../adr/0019-feature-tags-scope-and-engine.md)（`@timeout:` tag）。
 

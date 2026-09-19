@@ -246,7 +246,7 @@ def test_cloud_does_not_ask_local_worker_for_grace_floor(tmp_path, monkeypatch, 
     """
     _patch_cloud_handles(monkeypatch, [])
     monkeypatch.setattr(m.compose, "query_capabilities", lambda engine, **kw: (_ for _ in ()).throw(
-        AssertionError("cloud 档不该向本机 worker 问下限")))
+        AssertionError("云端后端不该向本机 worker 问下限")))
     monkeypatch.setattr(m.compose, "resolve_worker_cmd", lambda engine, **kw: (_ for _ in ()).throw(
         m.compose.WorkerNotFoundError(engine, "本机没装 worker 运行时")))  # 提交机器没有 worker 也照常运行
     box, inner = {}, _fake_schedule_factory()
@@ -725,7 +725,7 @@ def test_cloud_ignores_default_steps_dir_silently(tmp_path, monkeypatch, capsys)
 
 
 # ---- 版本 skew 闸接线（ADR 0037 决策 7）：三态映射 + 「skew 先于资源 preflight」的次序 ----
-# skew 自身的判据（哪个版本组合判哪一档）在 runtime 的 test_compose 里验；这里只验前端的接线：
+# skew 自身的判据（哪个版本组合判哪一类）在 runtime 的 test_compose 里验；这里只验前端的接线：
 # 判定 → 退出码/提示，以及 block 时**资源 preflight 一次都不执行**。
 
 def test_skew_block_stops_run_before_resource_preflight(tmp_path, monkeypatch, capsys):
@@ -767,7 +767,7 @@ def test_skew_block_stops_status_before_reading_ddb(monkeypatch, capsys):
 
 
 def test_skew_warn_and_skip_pass_through_with_one_line(tmp_path, monkeypatch, capsys):
-    """warn（戳缺失 / CLI 偏旧）与 skip（dev 版）都只打一行、照常往下执行——决策 7 里这两档不拦。"""
+    """warn（戳缺失 / CLI 偏旧）与 skip（dev 版）都只打一行、照常往下执行——决策 7 里这两种情形不拦。"""
     for verdict in ("warn", "skip"):
         record: list = []
         _, _, preflight_calls = _patch_cloud_handles(
@@ -781,7 +781,7 @@ def test_skew_warn_and_skip_pass_through_with_one_line(tmp_path, monkeypatch, ca
 
 
 def test_skew_ok_is_silent(tmp_path, monkeypatch, capsys):
-    """ok 档不打任何东西（同版本是常态，别在每次 run 上加噪声）。"""
+    """ok 这一类不打任何东西（同版本是常态，别在每次 run 上加噪声）。"""
     record: list = []
     _patch_cloud_handles(monkeypatch, record, skew=("ok", ""))
     monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
@@ -824,7 +824,7 @@ def test_skew_real_judgement_end_to_end(tmp_path, monkeypatch, capsys):
 def test_skew_read_failure_exits_2_naming_the_parameter(tmp_path, monkeypatch, capsys):
     """读戳撞非 ParameterNotFound 的 AWS 错（凭证/region/权限）→ 退 2 且点名参数路径。
 
-    不静默跳过：决策 7 的 block 档没有放行口，「读不到就放过」等于给它开了一个。
+    不静默跳过：决策 7 的 block 这一类没有放行口，「读不到就放过」等于给它开了一个。
     """
     from botocore.exceptions import ClientError
 
