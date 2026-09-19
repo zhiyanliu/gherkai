@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-# Nova Act worker **基础镜像**（ADR 0037 决策 5「维护者 GHCR 基础镜像 + 使用方定制层」；0024 Fargate 执行；0033「2 镜像」）。
+# Nova Act worker **基础镜像**（ADR 0037 决策 5「发布方 GHCR 基础镜像 + 使用方定制层」；0024 Fargate 执行；0033「2 镜像」）。
 # 内容 = 同版本 worker 包（`gherkai-worker-novaact`）+ SDK 运行时 + 协议层，**零使用方内容**——使用方的确定性
 # step 由定制层（`FROM <基础镜像>` + COPY steps/ + `GHERKAI_STEPS_DIR`）叠上去，模板与推送注册在 ADR 0038。
 #

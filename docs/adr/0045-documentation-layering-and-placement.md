@@ -82,7 +82,7 @@
 
 ## 与 agent skill 的关系（0043 不变）
 
-skill 正文与 references 是为使用者侧 agent **新写**的内容、不是任何用户文档的复制；只有 `references/cli-json-contract.md` 由 `docs/internals/cli-json-contract.md` 经 `tools/render_skill_contract.py` 确定性渲染（源路径随本次改名同步）。「原始维护的文档」与「skill 引用的知识」的一致性由三层保：手写源唯一、渲染器只做登记过的替换、`cli/tests/test_skill.py` 断言副本等于渲染结果；其余 references 由同一测试对着 argparse 与真值集核。文档重组因此不影响 skill 的有效性。
+skill 正文与 references 是为使用者侧 AI agent **新写**的内容、不是任何用户文档的复制；只有 `references/cli-json-contract.md` 由 `docs/internals/cli-json-contract.md` 经 `tools/render_skill_contract.py` 确定性渲染（源路径随决策二的 `docs/guides → docs/internals` 改名同步；三条转换规则与「为什么不能 link」见 [0043](./0043-agent-skill-for-driving-gherkai.md) 决策四）。「原始维护的文档」与「skill 引用的知识」的一致性由三层保：手写源唯一、渲染器只做登记过的替换、`cli/tests/test_skill.py` 断言副本等于渲染结果；其余 references 由同一测试对着 argparse 与真值集核（护栏口径见 0043 决策六）。文档重组因此不影响 skill 的有效性。
 
 ## 被拒方案（护栏）
 

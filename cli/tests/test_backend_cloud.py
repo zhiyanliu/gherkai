@@ -49,7 +49,7 @@ def _fake_schedule_factory():
 class _FakeTable:
     """假 DDB table 句柄：DynamoDBRunStore 吃它（put_item/update_item/get_item/load/meta.client.exceptions）。
 
-    `puts` 留下每次 put_item 的 Item 原样——definition 真值只在 cloud 档的 DDB 写里（不落本地文件），
+    `puts` 留下每次 put_item 的 Item 原样——definition 真值只在云端后端的 DDB 写里（不落本地文件），
     要验「某字段真进了 definition」就从这里取（经 serialize，比断言构造入参更贴真实落库）。
     """
     def __init__(self, record):
@@ -166,7 +166,7 @@ def _patch_cloud_handles(monkeypatch, record, *, preflight_err=None, skew=("ok",
 
 
 def _definition(table) -> dict:
-    """从假 DDB table 的写入里取回 definition（META item 的 meta_json）——cloud 档 definition 的真值所在。"""
+    """从假 DDB table 的写入里取回 definition（META item 的 meta_json）——云端后端 definition 的真值所在。"""
     metas = [it for it in table.puts if it.get("item_type") == "META"]
     assert metas, "没有写 META item（definition 未落库）"
     return json.loads(metas[-1]["meta_json"])
@@ -211,7 +211,7 @@ def test_cloud_offloader_attached(tmp_path, monkeypatch, capsys):
 
 
 def test_cloud_rejects_explicit_grace_at_the_entrance(tmp_path, monkeypatch, capsys):
-    """cloud 档**拒绝**显式 `--grace`（ADR 0024「引擎自报下限」条）：那个值到不了任何机制面（Fargate 侧真实宽限
+    """云端后端**拒绝**显式 `--grace`（ADR 0024「引擎自报下限」条）：那个值到不了任何机制面（Fargate 侧真实宽限
     是 task-def 期 `stopTimeout`、`FargateWorkerHandle.stop` 忽略运行期 grace），静默接受等于让用户以为设了一道
     会话泄漏防护——与 `--report-dir` 撞云端产物前缀即退 2 同口径：入口不许配无效值。
 
@@ -237,10 +237,10 @@ def test_cloud_rejects_explicit_grace_at_the_entrance(tmp_path, monkeypatch, cap
 
 
 def test_cloud_does_not_ask_local_worker_for_grace_floor(tmp_path, monkeypatch, capsys):
-    """cloud 档**不问本机 worker** 要 grace 下限（ADR 0024「引擎自报下限」× ADR 0032 真容器校准结论 4 的两条路径之分）。
+    """云端后端**不问本机 worker** 要 grace 下限（ADR 0024「引擎自报下限」× ADR 0032 真容器校准结论 4 的两条路径之分）。
 
     两条前提各自成立：Fargate 侧真实宽限是 task-def 期 `stopTimeout`、`FargateWorkerHandle.stop` 忽略运行期
-    grace（查来的下限对这档没有作用面）；提交机器本就不必装 worker 运行时（ADR 0037 决策 3）——在此查等于让
+    grace（查来的下限对这个后端没有作用面）；提交机器本就不必装 worker 运行时（ADR 0037 决策 3）——在此查等于让
     「只提交、不在本机执行」的人被本机环境无理由挡住。故 `min_grace_s=0`、grace 回落 `ScheduleOpts` 默认；
     云端那侧下限够不够，由 `doctor --backend cloud` 的 worker.grace 行比对。
     """
@@ -652,10 +652,10 @@ def test_submit_cloud_tunnel_ttl_flag_overrides_computed(tmp_path, monkeypatch, 
     assert float(cmd[cmd.index("--ttl") + 1]) == 120.0
 
 
-# ---- cloud 档与 worker 定位链 / steps 定制面的边界（ADR 0037 决策 3/4）----
+# ---- 云端后端与 worker 定位链 / steps 定制面的边界（ADR 0037 决策 3/4）----
 
 def _spy_run_meta(monkeypatch):
-    """记录 definition 构造入参（cloud 档只写 DDB、不落本地文件，故从构造处取真值）。"""
+    """记录 definition 构造入参（云端后端只写 DDB、不落本地文件，故从构造处取真值）。"""
     box = {}
     real = m.RunMeta
 
@@ -668,7 +668,7 @@ def _spy_run_meta(monkeypatch):
 
 
 def test_cloud_run_does_not_consult_local_worker_chain(tmp_path, monkeypatch, capsys):
-    """cloud 档**不查本机 worker 定位链**（ADR 0037 决策 3 的 miss preflight 只管 local 执行）。
+    """云端后端**不查本机 worker 定位链**（ADR 0037 决策 3 的 miss preflight 只管 local 执行）。
 
     cloud 的 worker 在 Fargate 容器里运行（镜像/task-def 由 cloud preflight 探），提交机器压根不必装 worker
     运行时——若在此也 preflight，纯 cloud 用户会被本机环境无理由挡住。
@@ -688,7 +688,7 @@ def test_cloud_run_does_not_consult_local_worker_chain(tmp_path, monkeypatch, ca
 
 
 def test_cloud_omits_steps_dir_and_warns_when_given(tmp_path, monkeypatch, capsys):
-    """cloud 档：definition **不写** steps_dir（本机路径对云端 worker 无意义——steps 构建在定制镜像里，
+    """云端后端：definition **不写** steps_dir（本机路径对云端 worker 无意义——steps 构建在定制镜像里，
     ADR 0037 决策 4 / 0038）；用户显式给了 `--steps-dir` 则**警告不拦**（run 照常运行，只是这个 flag 无效）。"""
     record: list = []
     _patch_cloud_handles(monkeypatch, record)
@@ -709,7 +709,7 @@ def test_cloud_omits_steps_dir_and_warns_when_given(tmp_path, monkeypatch, capsy
 
 
 def test_cloud_ignores_default_steps_dir_silently(tmp_path, monkeypatch, capsys):
-    """默认 `./steps` 恰好存在时 cloud 档也不写、且**不警告**——用户没主动要什么，警告是噪声
+    """默认 `./steps` 恰好存在时云端后端也不写、且**不警告**——用户没主动要什么，警告是噪声
     （警告只针对显式给了 --steps-dir 的「你以为生效了」误解）。"""
     record: list = []
     _patch_cloud_handles(monkeypatch, record)
@@ -1041,7 +1041,7 @@ def test_variant_print_suppressed_by_quiet(tmp_path, monkeypatch, capsys):
     assert "novaact: variant base · digest sha256:" in capsys.readouterr().err
 
 
-# ---- 入口校验 + local 档忽略（ADR 0038）----
+# ---- 入口校验 + 本机后端忽略（ADR 0038）----
 
 def test_worker_variant_invalid_name_exits_2_before_any_cloud_call(tmp_path, monkeypatch, capsys):
     """名字不合 tag 字符集 → 入口就退 2（对齐 --max-concurrency 的入口校验惯例）：真零副作用——
@@ -1069,7 +1069,7 @@ def test_worker_variant_valid_names_pass_entry_validation(tmp_path, monkeypatch,
 
 
 def test_local_backend_ignores_worker_variant_with_one_note(tmp_path, monkeypatch, capsys):
-    """local 档忽略该 flag、只打一行提示（不拦、不校验——local 的确定性 step 直接从 steps 目录读、不经镜像）。"""
+    """本机后端忽略该 flag、只打一行提示（不拦、不校验——local 的确定性 step 直接从 steps 目录读、不经镜像）。"""
     record: list = []
     _, made, _ = _patch_cloud_handles(monkeypatch, record)
     monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
@@ -1087,7 +1087,7 @@ def test_local_backend_ignores_worker_variant_with_one_note(tmp_path, monkeypatc
 
 
 def test_local_definition_omits_worker_variant_fields(tmp_path, monkeypatch, capsys):
-    """local run 的 definition 不带这两个字段（omit-when-None，ADR 0038「local 档不写」）。"""
+    """local run 的 definition 不带这两个字段（omit-when-None，本机后端不写，见 ADR 0038「选择进 definition」条）。"""
     record: list = []
     _patch_cloud_handles(monkeypatch, record)
     monkeypatch.setattr(m, "schedule", _fake_schedule_factory())

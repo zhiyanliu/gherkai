@@ -1,12 +1,12 @@
 # e2e_harness 使用说明（worker 端到端实际运行验证）
 
-> **读者：** 后续接手 worker 端到端验证的 AI tool（也含人）。**本文是操作手册**：调用方式、结果判读、实际运行陷阱。
+> **读者：** 后续接手 worker 端到端验证的 contributor 侧 AI agent（也含人）。**本文是操作手册**：调用方式、结果判读、实际运行陷阱。
 > **机制原理**（harness 如何忠实复现 adapter spawn 环境、三通道、grace 测量）见 `e2e_harness.py` 顶部 docstring，不在此复述（单一事实源）。
 > **相关设计：** ADR 0024（worker↔core 协议 / 协作式停止 / grace / I/O 边缘可注入接口）、ADR 0029（产物→S3 / act·scenario 边界的安全点提前上传 / 固有残余）、ADR 0032（Fargate 中断丢失量级 + 真容器 grace 校准）。
 
 ## 定位与适用场景
 
-`e2e_harness.py` 是 **opt-in 手动端到端验证脚本，不进 pytest 默认套件**。它真 spawn worker、真下发 job（stdin）、真收事件流（`EVENTS_FD`）、真开 AgentCore 会话、真写 S3，因此**产生真实 AWS 费用、需网络+凭证、单次 ~1-2min**。它验证的是**单测的 mock 覆盖不到、只能真实运行**的那一层（对齐 CLAUDE.md「绿≠对：识别结论的证据边界」）：真 greenlet / 真会话 / 真进程退出码 / 真 grace 秒数 / 真事件流字节 / 真中断丢失量。
+`e2e_harness.py` 是 **opt-in 手动端到端验证脚本，不进 pytest 默认套件**：它跨真实边界运行，因此**产生真实 AWS 费用、需网络+凭证、单次 ~1-2min**，验证的是**单测的 mock 覆盖不到、只能真实运行**的那一层（对齐 CLAUDE.md「绿≠对：识别结论的证据边界」）。具体覆盖哪几项真实行为见 `e2e_harness.py` 顶部 docstring。
 
 **中断只是它的能力之一**（`--interrupt`）：`--interrupt none` 的 baseline 同样可运行，用于验证「事件流端到端正常 + 三通道分离 + 零行为变化」（如 worker I/O 重构后的回归）。纯逻辑回归仍由各引擎单测覆盖（Nova `engines/novaact/tests/test_*.py`、Midscene `engines/midscene/src/worker/*.test.mts`、`core/tests/test_subprocess_engine.py`）。
 

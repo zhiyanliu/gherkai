@@ -100,7 +100,7 @@ evidence 的抽取、落盘、上传任一环失败 → worker 日志一行、�
 
 ### 四、`gherkai explain <run_id> [<scope_id>]`：把 evidence 与判定树合成一份「哪步、问什么、看见什么、为什么」的文本或 JSON
 
-**输入**。`run_id` 必填；`scope_id` 可选（缺省 = 该 run 全部 job）；`--scenario SEL` 写法与 run / plan 一致（id 全等 / 行号 / 标题子串；可重复、彼此为或；Outline 声明行选中它全部 example）、**可命中多条**；`--step N` 是 scenario 内 **0 起**的书写序号（= JSON 里 step 的 `index`，与 `run` 文本 `step <index>`、`plan` 文本 `[<index>]` 同一口径，explain 不做 +1 展示），按每条命中的 scenario 各取其第 N 步渲染；`--step` 单给退 2（步号没有归属）；**显式点名的那一步一律展开证据**（点名即想看，不必再给 `--all`；v1.4.2 发版验证时按 ADR 首版口径需再加 `--all` 才展开、被判反直觉后改）；命中的 scenario 都没有第 N 步 → 退 2 并列出候选 id 与步数。`--all` 也展开 passed step（默认列出全部 step、只对 failed / error / skipped 展开；**无记录的 step 不走证据展开这条路**——它没有任何 ref，只在自己的状态位打一行「无记录（未执行或未上报）」，见下「记录缺口的两种情形」）；`--full` 关闭文本预算（见下）；`--json`。定位 flag 与 `status` 的全集同形：`--report-dir`（local = run 落点；cloud = 报告 / 判定明细前缀，须与 submit 一致）+ cloud 档 `--backend cloud --prefix --ddb-table --region --profile`；桶名同 `status` 不设 flag、由 prefix / env 推导。不提供 `--tags`（tags 在 scope 分组后即不进 job 定义）。
+**输入**。`run_id` 必填；`scope_id` 可选（缺省 = 该 run 全部 job）；`--scenario SEL` 写法与 run / plan 一致（id 全等 / 行号 / 标题子串；可重复、彼此为或；Outline 声明行选中它全部 example）、**可命中多条**；`--step N` 是 scenario 内 **0 起**的书写序号（= JSON 里 step 的 `index`，与 `run` 文本 `step <index>`、`plan` 文本 `[<index>]` 同一口径，explain 不做 +1 展示），按每条命中的 scenario 各取其第 N 步渲染；`--step` 单给退 2（步号没有归属）；**显式点名的那一步一律展开证据**（点名即想看，不必再给 `--all`；发版验证时按 ADR 首版口径需再加 `--all` 才展开、被判反直觉后改）；命中的 scenario 都没有第 N 步 → 退 2 并列出候选 id 与步数。`--all` 也展开 passed step（默认列出全部 step、只对 failed / error / skipped 展开；**无记录的 step 不走证据展开这条路**——它没有任何 ref，只在自己的状态位打一行「无记录（未执行或未上报）」，见下「记录缺口的两种情形」）；`--full` 关闭文本预算（见下）；`--json`。定位 flag 与 `status` 的全集同形：`--report-dir`（local = run 落点；cloud = 报告 / 判定明细前缀，须与 submit 一致）+ cloud 档 `--backend cloud --prefix --ddb-table --region --profile`；桶名同 `status` 不设 flag、由 prefix / env 推导。不提供 `--tags`（tags 在 scope 分组后即不进 job 定义）。
 
 **`--scenario` 的匹配器另起、不复用 run/plan 的**：那个谓词按 `ParsedScenario.uri` 切尾、按 `tags` 判（0041 决策一），explain 只读 RunStore / ResultStore、不重解 `.feature`，两者都拿不到。匹配对象 = job 定义里的 `Scenario.id` / `Scenario.name`：id 档全等；标题档对 `name` 子串；行号档从 `scenario_id` 尾部取连续数字段比对（有损：uri 自身以数字冒号段结尾时可能误命中，接受此边角）。
 
@@ -204,16 +204,14 @@ agent / skill 只依赖 evidence schema 与 `explain` 输出，两者都是我�
 - `runtime/gherkai_runtime/compose.py`：`read_resource(uri)`。
 - `cli/gherkai_cli/__main__.py`：`explain` 子命令（含 skew 闸门、结果树匹配器）；`render.py`：文本渲染 + step 行补原因；`cli/tests/test_cli_json_contract.py`：`_leaf_keys` 支持在指定键处停止下钻 + explain 样例（内嵌 evidence 夹具）。
 
-**文档（反向链逐处列出）**
+**文档（ADR 反向链逐处列出）**
 
 - [0024](./0024-worker-core-protocol.md)：kind 例举补 `evidence`；「Midscene 1 个 report html/worker（scope_done 带）；Nova 每 act 一个 trajectory（下沉 step_done）」改为「两引擎都在 `step_done` 带 `kind=evidence`；Midscene 的 report 仍 scope 级」；协议示例里「只有 Nova 有 step 级 reportRefs」的行内注释同改。
 - [0027](./0027-runreport-aggregation-index.md)：kind 例举补 `evidence`；「Midscene 保持 scope 级」句改写；「消费端不 stat / open」条按层收窄并反向链；留口子「trajectory 内部结构化提取」标已落地；index.html 形态 ② 条与空态条措辞同步。
 - [0029](./0029-engine-artifacts-to-s3.md)「reportRef 指向的文件」条、[0032](./0032-fargate-execution-environment.md)「上传失败处理」条：各加一行「step 级产物已有一个具名例外：evidence，见 0042」。
 - [0037](./0037-distribution-and-packaging.md) 决策 7 接线句：cloud 入口由 run / submit / status 三个改为四个、补 `explain`。
 - [0041](./0041-agent-facing-cli-affordances.md)：决策三查询类命令清单补 `explain --json`；「重议闸门」失败证据机读化一条标已由本 ADR 落地并反向链；Status 头**保持 Accepted**、按 0030 / 0034 的既有写法追加一句反向链——0041 无决策被反转，不写 Partially-superseded。
-- `docs/internals/cli-json-contract.md`：`run --json` steps 表补 `message`；step 级 `report_refs` 说明补 `kind=evidence`、两引擎皆有；新增 `explain --json` 一节（含 evidence 固定键与两个不透明节点、`record_missing` / `evidence_missing` 取值）。
-- `cli/README.md`（explain 用法；退出码节补「explain 只说证据读出来了吗、不表判定」；index.html 描述含 evidence 行）、根 `README.md`、`cli/DEVELOPMENT.md`（RunReport 内部：清单含 evidence）、`DEVELOPMENT.md` ADR 范围、`engines/midscene/DEVELOPMENT.md` worker 模块枚举补 evidence。
-- `CONTEXT.md`：术语表 kind 枚举补 `evidence`、两引擎 step_done 带 evidence 一句（core 不透明搬运那句主语是 core、仍成立，只补皮层解引用半句）；版本真源的 cloud 入口数三改四。
+- 其余文档面已落地：使用者面在 `docs/user-guide/running-and-results.md`，机读字段在 `docs/internals/cli-json-contract.md`，术语在 `CONTEXT.md`。
 
 **交付链（不改 IaC 资源，但不重部署云端看不到——cloud 档跑不出 message / evidence，易误判成 bug）**
 
@@ -235,7 +233,5 @@ agent / skill 只依赖 evidence schema 与 `explain` 输出，两者都是我�
 **截图后台队列 + 收尾排空（决策一修订）的 cloud 真跑**：用 `--default-job-timeout` 把两引擎的 run 掐断——Nova 掐在 scope 末收尾期（6 步全跑完、job 记 timeout）：5 份 evidence.json 引用的 5 张截图全部在 S3（`image/jpeg`）；Midscene 掐在 scope 中途（跑完 step 0-4、step 5 在途）：4 份 evidence.json 引用的 4 张截图全部在 S3，而此路径**不走 scope 末 flush**——修订前这 4 张必丢、URI 悬空。即「字节在下个 step 期间上传 + 退出路径 6 s 排空」在真 Fargate SIGTERM 上闭合。审查修正（传输落在队列线程内）后再跑一次：Nova 正常完成 2/2 张在 S3；Nova 掐在 scope 中途（step 0-4 跑完、step 5 在途）4/4 张在 S3——两引擎的中途中断路径都已坐实。
 
 **对抗审查真跑核出并已吸收**：Nova 侧 boto3 的 `upload_file` 默认把传输交给 s3transfer 的非 daemon 线程池，解释器退出时被 atexit join——黑洞端点下 `drain(1.0)` 返回后进程 11.2 s 才退（多拖一次 client 超时），「daemon 队列线程 + 有界 drain」的退出账目失真；改为 `TransferConfig(use_threads=False)` 让传输落在队列线程内后 1.15 s 退出，drain 预算即退出成本。同批：drain 超时后队列线程静默（不再上传、不写 stderr，避开 finalization 期写 buffered stderr 的致命错窗口）；Midscene 链尾结构性 `.catch`。
-
-**验证暴露并已吸收的两处**：Nova SDK 异常 str() 为多行 repr → act.error / step message 压成一行（决策一映射表）；Midscene `Planning/Plan` 的推理在 `output.thought` → 映射回落（决策一映射表）。
 
 **单测护栏**：两引擎映射函数对真产物 fixture（含 Midscene 的 error task、Nova 的 N 票）；best-effort 路径（抽取 / 上传抛异常 → `step_done` 照发、无 evidence ref、status 不变）；serialize round-trip 带非默认 step message；`explain` 本机 / 云端两个后端读取、`record_missing` 与三种 `evidence_missing`、多命中 `--scenario` + `--step`、退出码；cloud 档 skew 三态；契约护栏含 evidence 夹具。

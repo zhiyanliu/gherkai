@@ -37,6 +37,7 @@ v1 定位尚有一项验收未完成，前置条件是取得可用的真实业�
 ├── pyproject.toml / uv.lock   ← uv workspace 根（成员 = core / runtime / cli / engines/novaact / deploy_aws 五个发行包）：单一 lock + 共用 dev 依赖与 pytest 配置（ADR 0037）
 ├── .github/                   ← CI 与发布链（workflows/{ci,release,pages}.yml + scripts/ + release_body_footer.md（GitHub Release 正文的固定块）；pages.yml = 把 docs/diagrams/ 发到 GitHub Pages；一次性人工前置与本地校验见 .github/workflows/README.md，ADR 0037 决策 8）
 ├── .claude/                   ← Claude Code 项目级资产（入库）：commands/（两条复盘入口）、settings.json + hooks/sync-derived.sh（派生文件同步，见下文「测试」节）、skills/doc-diagram/（作图入口）；个人配置放 .claude/settings.local.json、不入库
+├── .vscode/settings.json      ← 放行中文排版符号的 unicodeHighlight（真同形字符仍高亮）
 ├── docs/                      ← 全部文档；按读者的分层与归位见 ADR 0045（三类读者、四个入口）
 │   ├── README.md              ← 文档地图：使用者 / contributor / 想懂机理的人 / contributor 侧 AI agent 各自的入口
 │   ├── adr/                   ← 架构决策记录（0001-0045，每篇带 Status 头）

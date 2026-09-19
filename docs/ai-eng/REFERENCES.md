@@ -1,6 +1,6 @@
 # 权威信息源（自查用）
 
-> 抢救自原 `midscene-novaact-prototype-guide.md` §10（该文档已退役），并补入本项目实测中用到的关键路径。
+> 本文登记本项目实测中用到的外部一手来源与源码内点。
 > 注意：决策与实装现状以 `docs/adr/` + code 为准（`CONTEXT.md` 只定术语，见 ADR 0045 决策八）——下面是**外部一手来源**，用于查证细节。
 
 ## Midscene（任意页加 `.md` 取 markdown）

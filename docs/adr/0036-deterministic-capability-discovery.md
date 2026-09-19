@@ -52,7 +52,7 @@ worker argv 带 `--capabilities` 时：**不建会话、不读 stdin、零费用
 ```
 
 - `min_grace_s` 是 [0024](./0024-worker-core-protocol.md) grace 硬约束的下限——Nova = `NOVA_ACT_TIMEOUT_S`（组合根注入的 env，缺省 120）+ margin（worker 常量，可 env 覆盖）；Midscene = SIGTERM 收尾序列各段超时预算之和 + 余量，由 worker 里那些预算常量算出、不另写字面量。
-- `deterministic_steps` 是注册表清单（「2.」）。该入口与 job 模式、match 查询一样**先加载 steps 目录**（[0037](./0037-distribution-and-packaging.md) 决策 4），故清单 = 内建脚手架 + 使用方定制，加载失败在这里就 fail-loud——`run` 的前置检查因此只需 spawn 一次：同一份自述同时给出「steps 加载成功、清单、grace 下限、模型」。
+- `deterministic_steps` 是注册表清单（「2.」）。该入口与 job 模式、match 查询一样**先加载 steps 目录**（[0037](./0037-distribution-and-packaging.md) 决策 4），故清单 = 内建脚手架 + 使用方定制，加载失败在这里就 fail-loud——`run` 的执行前预检因此只需 spawn 一次：同一份自述同时给出「steps 加载成功、清单、grace 下限、模型」。
 - `model_id` 是该 worker 起 job 时会用的模型 id——两引擎同律「默认锁定一个具体 id + worker 一侧 env 覆盖」，各自的默认值与覆盖 env 见 [0044](./0044-engine-model-selection-and-override.md) 决策 1/2；`doctor` 据此显示当前模型——覆盖过 env 的机器一眼可见。
 - **worker 只有两个非 job 入口**：本入口（自述、无输入）与 `--match-steps`（查询、stdin 喂 step 文本，「4.」）。**加键不加入口**：将来的能力（如 browser 后端，[0037](./0037-distribution-and-packaging.md) 被拒方案 / 未来项）都是本对象的新键；`schema_version` 只在既有键语义变化时递增。
 

@@ -4,7 +4,7 @@
 
 把「一次 run 的判定/状态**随进度实时落库**」做成正交接缝：执行编排（`schedule`，[0026](./0026-schedule-module.md)）只管跑、
 不碰存储；存储编排（新 `core/gherkai_core/persist.py` 的 `RunPersistence`）依赖 Store ports、由组合根注入具体 adapter。
-这是 v1.1 云端（DDB/S3）的前置：先在 local adapter 上把「实时写 + commit-point 写序」跑通，云端 DDB/S3 adapter 作新 adapter 接入（见决定六）。
+这是云端（DDB/S3）落库的前置（见决定六）。
 
 **定位**：本 ADR 解决「**怎么把实时落库接进来而不污染 reducer / 不让每个组合根各写一遍**」。
 job 生命周期态（`skipped`/`aborted`/`pending`/`running`/severity）见 [0031](./0031-job-lifecycle-states-and-severity.md)；

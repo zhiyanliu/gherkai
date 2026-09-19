@@ -143,7 +143,7 @@ class _FakeStartEngine:
 
 
 def test_cloud_launcher_arms_timeout_watch():
-    """job.timeout_s 非 None → launch 后 arm(run_id, scope_id, timeout_s)（ADR 0034「job timeout」节 cloud 档）。"""
+    """job.timeout_s 非 None → launch 后 arm(run_id, scope_id, timeout_s)（ADR 0034「job timeout」节的云端后端一侧）。"""
     from gherkai_core.adapters.cloud_launcher import CloudLauncher
 
     eng, watch = _FakeStartEngine(), _RecorderWatch()

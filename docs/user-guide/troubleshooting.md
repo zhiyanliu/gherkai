@@ -10,7 +10,7 @@ gherkai doctor --backend cloud --prefix gherkai- --report-dir reports/   # 连�
 gherkai doctor --json             # 机读 {ok, checks[]}
 ```
 
-自检只做读操作：不建浏览器会话、不调模型、不产生 AI 费用。输出每行一个检查项，行首三种标记：
+自检只做读操作：不建浏览器会话、不调模型，不产生模型费用。输出每行一个检查项，行首三种标记：
 
 | 标记 | 含义 |
 |---|---|
@@ -63,7 +63,7 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 |---|---|---|
 | `没解析出 region`（自检的 `aws.region` 行），或 worker 启动即报 `AWS_REGION 未设` | `--region`、`AWS_REGION`、`AWS_DEFAULT_REGION`、`--profile` / `AWS_PROFILE` 指的 profile 配置，四处都没有 region | 任选一处设上。缺失时不会替你选一个 region |
 | `凭证/region 不可用（--region / AWS_REGION / AWS_DEFAULT_REGION / --profile / AWS_PROFILE）` | 本机凭证链取不到可用凭证，或 `--profile` / `AWS_PROFILE` 给的 profile 名不存在 | 配好 AWS 凭证（profile、环境变量、实例角色皆可），或改正 profile 名。两个引擎都用 IAM 鉴权，不需要 API key |
-| 本机运行也报凭证错 | 浏览器与模型都在云端，本机 `run` / `submit` 同样要凭证 | 不需要 AWS 凭证的命令只有 `plan`、`list-engines`、`list-deterministic`、`gherkai skill install`、不带云端参数的 `doctor`，以及本机后端下只读报告目录的 `status` 与 `explain`（`status --wait` 会接着推进这个 run，那时需要凭证） |
+| 本机运行也报凭证错 | 浏览器与模型都在云端，本机 `run` / `submit` 同样要凭证 | 配好凭证。不需要 AWS 凭证的命令只有几条，清单见[开始使用](./getting-started.md#aws-前置)；其中 `status --wait` 会接着推进这个 run，那时需要凭证 |
 
 ## 模型
 

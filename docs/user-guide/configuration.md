@@ -1,6 +1,6 @@
 # 配置：环境变量与通用选项
 
-本页是 gherkai 全部环境变量与跨命令通用选项的清单：每一项做什么、默认值是多少、在哪里设才生效。命令怎么用、结果与退出码怎么读见 [`running-and-results.md`](./running-and-results.md)；安装与 AWS 前置见 [`getting-started.md`](./getting-started.md)；报错的处置见 [`troubleshooting.md`](./troubleshooting.md)。
+本页是 gherkai 环境变量与跨命令选项的清单：每一项做什么、默认值是多少、在哪里设才生效。命令怎么用、结果与退出码怎么读见 [`running-and-results.md`](./running-and-results.md)；安装与 AWS 前置见 [`getting-started.md`](./getting-started.md)；报错的处置见 [`troubleshooting.md`](./troubleshooting.md)。
 
 ## 配置生效的四个位置
 
@@ -114,7 +114,7 @@ region 的完整解析链是 `--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > 
 
 ## 跨命令通用选项
 
-下面这些选项在多个命令上同名同义。这一节只回答「哪些命令上有它、跨命令有什么差异」，语义、默认值与取舍见 [`running-and-results.md`](./running-and-results.md)；每个命令的完整选项表看 `gherkai <命令> --help`。
+下面这些选项在多个命令上同名同义（`deploy` / `destroy` **特有**的 `--vpc`、`--stop-timeout`、`--refresh-context`、`--container-engine` 见 [`cloud-backend.md`](./cloud-backend.md)；`--prefix` / `--region` / `--profile` 运行侧与部署侧都有，见下表）。这一节只回答「哪些命令上有它、跨命令有什么差异」，语义、默认值与取舍见 [`running-and-results.md`](./running-and-results.md)；每个命令的完整选项表看 `gherkai <命令> --help`。
 
 | 选项 | 出现在 | 跨命令差异 |
 |---|---|---|
@@ -123,6 +123,13 @@ region 的完整解析链是 `--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > 
 | `--report-dir DIR` | `run`、`submit`、`status`、`explain`、`doctor` | `status` / `explain` 要给与 `submit` 相同的值才查得到这个 run。`submit --backend cloud` 下这个值还须与后端部署时设的报告前缀一致，不一致在提交前即被拒；`run --backend cloud` 不做这项比对 |
 | `--steps-dir DIR` | `run`、`plan`、`submit`、`doctor`、`list-deterministic` | 五个命令上同义；云端后端不生效（云端 worker 的 step 构建在镜像里） |
 | `--default-engine {midscene,novaact}` | `run`、`plan`、`submit` | 三个命令上同义 |
+| `--scope ID`、`--tags TAG[,TAG...]`、`--scenario SEL` | `run`、`plan`、`submit`；`--scenario` 也在 `explain` 上 | 前三个命令上同义，都是选这批里哪些 scenario 要运行；`explain --scenario` 选的是看哪些 scenario 的证据，选择器写法与它们同一套 |
+| `--assertion-votes N` | `run`、`plan`、`submit` | 三个命令上同义。`plan` 不执行断言，给它是为了让预检算出的分组与实际运行一致 |
+| `--default-job-timeout S` | `run`、`plan`、`submit` | 三个命令上同义。`plan` 不实际运行 job，给它是为了让用例预检算出的 job 预算与实际运行一致 |
+| `--max-concurrency N` | `run`、`submit`、`status` | `run` / `submit` 上是这批的并发上限；`status` 上只在 `--wait` 接力本机后端时用得上。取值、云端上限与接力（含并发上限取哪个值）口径见 [`running-and-results.md`](./running-and-results.md) |
+| `--expose-local ORIGIN` | `run`、`plan`、`submit` | `run` / `submit` 上真起隧道，`plan` 上只做标注、不起隧道。前置与限制见 [`local-app-testing.md`](./local-app-testing.md) |
+| `--tunnel {ngrok}` | `run`、`submit` | 两个命令上同义，选 `--expose-local` 用哪个隧道服务，当前只有 `ngrok` 一个取值。存活时间上限 `--tunnel-ttl` 只有 `submit` 有，见 [`local-app-testing.md`](./local-app-testing.md) |
+| `--worker-variant NAME` | `run`、`submit` | 两个命令上同义，只在 `--backend cloud` 下起作用，本机后端忽略。variant 与默认指针见 [`cloud-backend.md`](./cloud-backend.md) |
 | `--grace S` | `run` | 只有本机后端用它。云端的停止宽限在部署时由 `gherkai deploy --stop-timeout` 定，`--backend cloud` 给这个选项会退 `2` |
 | `--json` | `run`、`plan`、`status`、`explain`、`doctor`、`list-engines`、`list-deterministic`、`deploy list-workers` | 每个命令输出各自的 JSON 文档；`submit` 没有这个选项，它的输出本来就只有一个 `run_id` |
 | `--quiet` | `run` | 只影响进度输出与本机 worker 日志的落点 |

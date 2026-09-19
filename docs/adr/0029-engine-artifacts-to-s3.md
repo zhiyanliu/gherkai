@@ -9,7 +9,7 @@
 - ② **传输层**（core 怎么把 job 喂给远程 worker、怎么收事件流）——见 [0024](./0024-worker-core-protocol.md)「远程传输演进」。
 - ③ **Fargate 执行环境特有**（容器盘停即销毁的中断丢失、grace/stopTimeout、安全点提前上传的粒度）——见 [0032](./0032-fargate-execution-environment.md)。
 
-**产物落点由注入驱动、机制上不依赖执行环境**：上传能力由「组合根有没有注入 S3 落点」触发、worker 对"我在哪跑"无知——故面向用户 `--backend cloud`=Fargate（[0016](./0016-execution-architecture-core-lib-run-model.md) 决策 A）会走这条上传链，而 `subprocess + 注入 S3 落点`（**e2e_harness/开发内部预演**，[0016](./0016-execution-architecture-core-lib-run-model.md) 决策 B）也能真跑验证**同一条**上传链、作 Fargate 忠实预演。故本 ADR 讲的"上传"现在就能在预演环境验证，不必等 Fargate——忠实预演论证不变。
+① 的机制与三态见下「决策核心」。
 
 ## 决策核心：上传由注入的 S3 落点驱动，不由"worker 在哪跑"决定
 
@@ -75,8 +75,6 @@ SDK 调查证实两引擎产物形态/上传能力不对称，"上传那一小�
 
 ## 第一期实现定论（subprocess 预演环境敲定，已实现）
 
-下面几点是第一期敲定的定论（「留口子」里对应项已标状态）：
-
 - **注入机制（组合根，非 env-sniff）**：cloud 时组合根给 worker 多注入一组 S3 落点 env——`ARTIFACT_S3_BUCKET` + `ARTIFACT_S3_PREFIX`（=`<report_dir>/<run_id>/`），对称现有 `NOVA_LOGS_DIR`/`MIDSCENE_RUN_DIR`。**注入点按组合分**（[0016](./0016-execution-architecture-core-lib-run-model.md) 决策 A/B）：cloud 后端在 `compose.build_fargate_engines`（经 RunTask overrides 注给容器）；内部预演由 `tools/e2e_harness.py` 自拼 worker env；**local 后端的 `compose.build_engines` 恒不注入**（它曾有个 `artifact_s3` 形参，无生产调用点、已删，见 [0016](./0016-execution-architecture-core-lib-run-model.md) 决策 B）。**local 不注入 → worker 走原 `file://` 路径、零行为变化**。worker 只认"有没有这组 env"，对"我在哪跑（subprocess/fargate）"无知（[0016](./0016-execution-architecture-core-lib-run-model.md) 注入红线）。
 - **两个引擎都 worker 手动上传（boto3 / @aws-sdk/client-s3）**：Nova 不用官方 `S3Writer` stop-hook，改 worker 手动 `upload_file`——与 Midscene 手动 `PutObject` 对称、时序完全可控（先确认上传成功再删本地）、上传错误直接可观测（不被 SDK 静默吞）。
 - **上传逻辑抽成对称的 uploader 组件（结构约束）**：每个引擎把"注入解析 + 上传 + 删本地 + 报 ref"的一整套逻辑**封装进一个 uploader**（Nova 一个 Python 模块、Midscene 一个 TS 模块，各语言各写、[0024](./0024-worker-core-protocol.md)），worker 只调它、不内联上传细节。**这是刻意的结构决策，不是随手实现**——理由：① 这套逻辑（no-op 退回 `file://` / key 镜像 run 树 / 实时传 + `flush_and_cleanup` 整目录 / 幂等去重 / 删本地护栏）**同一套语义必须两个引擎一致**，散在 worker 内联会漂移（一个引擎改了另一个引擎忘改）；封装成组件让"对称"由结构保证、review 时逐点对齐。② worker 引擎逻辑（派发/投票/短路）与"产物落哪/怎么传"解耦——uploader 是 worker 的**可注入 I/O 边缘**（对齐 [0024](./0024-worker-core-protocol.md)「worker I/O 边缘可注入」，为 Fargate 换传输铺路）。**接口形状（两个引擎对称、语义契约，非逐字签名）**：`from_env()` 从注入的 env 造（无 `ARTIFACT_S3_BUCKET` → no-op 实例、报 `file://`）；`to_report_ref(path)` reportRef 文件实时上传（幂等：已传直接返 `s3://`、不重传；失败抛→可观测）；`flush_and_cleanup(dir)` / `flushAndCleanup(dir)` scope 末整目录传剩余 + 全成功删整目录。**红线**：uploader 只认注入的落点配置、对"我在哪跑"无知（[0016](./0016-execution-architecture-core-lib-run-model.md)）；boto3/aws-sdk 惰性建（no-op 路径不 import/不 new client）。（具体类名/文件路径属实现、以 code 为准，不在此焊死以免漂移。）
@@ -105,11 +103,11 @@ SDK 调查证实两引擎产物形态/上传能力不对称，"上传那一小�
 - **上传错误分类 = 不进重试域、不静默吞**：上传失败不进重试域（act 不幂等，[0028](./0028-transient-network-ssl-resilience.md)），也绝不静默吞——step 内证据的上传失败落进该 step 的 `status=error`（错误类型细分见 [0032](./0032-fargate-execution-environment.md)「上传失败处理」层1）；scope 级 report/summary 的调用点已按同条层2 降 best-effort。worker 退出码不因上传失败改变。
 - **core / ReportStore 一行不改**：`s3://` ref 天然穿透（[0027](./0027-runreport-aggregation-index.md)，已核实 `href==ref` for `s3://`，见上「core 不改的代码级依据」条）。
 
-## 留口子 / 待真做时定
+## 已结项、被拒方案与归属转交（护栏）
 
-- **~~S3 key 命名 ↔ `ResourceUri` `s3://` 形态~~（第一期已定，见上「第一期实现定论」）**：定为「S3 key 镜像本地 run 树、与 report 同 `<prefix>/<run_id>/` 前缀、worker 报的 `s3://` ref 与上传 key 逐字一致」。不沿用 `S3Writer` 默认的 `<prefix><session_id>/` 布局（那与 report 的 `<run_id>/` 归集语义不匹配）。
-- **~~S3 上传错误的分类~~（第一期已定，见上）**：第一期=`engine_error`、不进重试域、可观测（不静默吞）。诊断精度的细分已在 [0032](./0032-fargate-execution-environment.md)「上传失败处理」结掉（S3 网络失败判 `network_error`、仅诊断不触发重试；scope 级 report/summary 降 best-effort）。
-- **~~`materialize` 在 `S3ReportStore` 下的目标语义~~（已废——materialize 整体移除，[0027](./0027-runreport-aggregation-index.md)）**：曾计划 S3 版 materialize 把产物 `copy_object` 收拢进 `s3://…/<run_id>/artifacts/` 求自包含（对标 Local 的 `artifacts/` 拷贝）。**现已废弃**：① cloud 报告决定用 `s3://` 绝对链接（不 presign、`href==ref`）——`s3://` 全局可寻址、拷/分享不断，`copy_object` 进 `artifacts/` 零收益；② materialize 概念整体移除（[0027](./0027-runreport-aggregation-index.md)「被拒方案」）。故 `S3ReportStore` 只把 RunReport 自身（manifest+index）写 S3、`href==ref`（`s3://`），不做任何产物拷贝——这从「第一版 no-op 的临时取舍」转正为「终态设计」。
+- **S3 key 命名 ↔ `ResourceUri` `s3://` 形态**（见上「第一期实现定论」）：定为「S3 key 镜像本地 run 树、与 report 同 `<prefix>/<run_id>/` 前缀、worker 报的 `s3://` ref 与上传 key 逐字一致」。不沿用 `S3Writer` 默认的 `<prefix><session_id>/` 布局（那与 report 的 `<run_id>/` 归集语义不匹配）。
+- **S3 上传错误的分类**（见上「第一期实现定论」）：第一期=`engine_error`、不进重试域、可观测（不静默吞）。诊断精度的细分已在 [0032](./0032-fargate-execution-environment.md)「上传失败处理」结掉（S3 网络失败判 `network_error`、仅诊断不触发重试；scope 级 report/summary 降 best-effort）。
+- **`materialize` 在 `S3ReportStore` 下的目标语义（已废——materialize 整体移除，[0027](./0027-runreport-aggregation-index.md)）**：曾计划 S3 版 materialize 把产物 `copy_object` 收拢进 `s3://…/<run_id>/artifacts/` 求自包含（对标 Local 的 `artifacts/` 拷贝）。**现已废弃**：① cloud 报告决定用 `s3://` 绝对链接（不 presign、`href==ref`）——`s3://` 全局可寻址、拷/分享不断，`copy_object` 进 `artifacts/` 零收益；② materialize 概念整体移除（[0027](./0027-runreport-aggregation-index.md)「被拒方案」）。故 `S3ReportStore` 只把 RunReport 自身（manifest+index）写 S3、`href==ref`（`s3://`），不做任何产物拷贝——这从「第一版 no-op 的临时取舍」转正为「终态设计」。
 - **act 粒度提前上传 / botocore retry vs grace / 中断韧性**（Fargate 特有）：这些是容器盘停即销毁逼出的，需求归 [0032](./0032-fargate-execution-environment.md)——第一期 subprocess+cloud 已按「上传时机」建到四级（reportRef 实时 + scope 末 flush + act/scenario 边界提前上传，**能力提前建好、需求仍属 Fargate**，见上「定位澄清」）、本地盘不销毁，故 Fargate 特有的校准/韧性部分不涉及。
 - **AgentCore 后端下产物真实落点（已由真跑证实）**：源码看 `logs_directory`/`reportFile` 都在 worker 进程本地盘（SDK 进程本地 `open`/`appendFile`），截图数据虽经 CDP 从云浏览器回传，但**文件确落 worker 本地盘**——subprocess+cloud 预演真跑产物落在本地 `cli/reports/<run_id>/{nova-trajectories,midscene-run}/`，report+run 元信息才上 S3/DDB。故"worker 上传其本地盘文件"前提成立（Fargate 下即容器盘）。
 

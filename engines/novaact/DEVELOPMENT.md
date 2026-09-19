@@ -101,7 +101,7 @@ Nova 侧**不需要** midscene 那条「加载完某文件若零注册即报错�
 从 **repo 根**执行（本目录没有独立 venv）：
 
 ```bash
-uv run pytest -q engines/novaact/tests     # 只运行本引擎：2026-09-17 实测 209 passed
+uv run pytest -q engines/novaact/tests     # 只运行本引擎
 uv run pytest -q                           # 运行全 workspace（根 testpaths 已含本目录）
 ```
 

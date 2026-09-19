@@ -153,7 +153,7 @@ class WorkerCmd:
     """一个引擎 worker 的拉起方式 = 定位链的解析结果（ADR 0037 决策 3）。
 
     cmd/cwd 直接喂 `SubprocessEngine`；**cwd 恒可为 None=继承当前进程 CWD**——worker 不再有专属 cwd
-    （故 local 档产物落点必须是绝对路径，见 build_engines）。source 是人读的命中级别描述，只供
+    （故本机后端产物落点必须是绝对路径，见 build_engines）。source 是人读的命中级别描述，只供
     `list-engines` 自省/诊断，**不参与任何分支判断**（别按它做逻辑，否则级别措辞成了隐式契约）。
     """
 
@@ -187,18 +187,18 @@ class WorkerNotFoundError(RuntimeError):
 
 
 class _UnavailableEngine:
-    """某引擎这次装配不出来时的「一用即抛」空占位项——两档共用（local: ADR 0037 决策 3；cloud: ADR 0038）。
+    """某引擎这次装配不出来时的「一用即抛」空占位项——两个后端共用（local: ADR 0037 决策 3；cloud: ADR 0038）。
 
     存在的理由：两个 builder 都恒建两个引擎项，而一次 run 往往只用一个引擎——某引擎装配不出**不该连坐**
-    （local 档 dev 下 midscene 无已安装 npm 包即常态，须走定位链第一级 env 覆写；cloud 档则是「本 run 没用到
+    （本机后端 dev 下 midscene 无已安装 npm 包即常态，须走定位链第一级 env 覆写；云端后端则是「本 run 没用到
     该引擎、故 definition 里也没解析它的 worker revision」，是正常态）。装一个空占位项保住「引擎名恒在册」
     （resolver / list-engines 语义不变），把 miss 的爆点挪到真要起它那一刻，且爆的是带修复指引的
     结构化异常——而非 resolver 的「未知引擎」（那会把「没装/未解析」误导成「名字拼错」）。
     正门仍是调用点 preflight：`run`/`submit` 先对本次 plan 用到的引擎 `resolve_worker_cmd`（local）/
     解析 worker variant（cloud）、miss 即退 2。
 
-    **`run_scope` 与 `start_scope` 都抛**：两档的宿主入口不同（同步 run 走 `run_scope`、无状态推进器的
-    CloudLauncher 走 `start_scope`），只堵一个会让另一档退化成 `AttributeError`（丢掉带指引的异常）。
+    **`run_scope` 与 `start_scope` 都抛**：两个后端的宿主入口不同（同步 run 走 `run_scope`、无状态推进器的
+    CloudLauncher 走 `start_scope`），只堵一个会让另一个后端退化成 `AttributeError`（丢掉带指引的异常）。
     """
 
     def __init__(self, miss: Exception) -> None:
@@ -359,8 +359,8 @@ def build_engines(
     （三个宿主 CWD 各不相同，重解析必分叉，ADR 0034）。None=无使用方 step（worker 只有内建脚手架）——
     此时宿主 shell 里继承来的同名 env 会被**清掉**、不得越过 definition（见 `_COMPOSE_OWNED_WORKER_ENV`）。
 
-    **不注入产物 S3 上传落点**（`ARTIFACT_S3_BUCKET`/`PREFIX`）：本函数是 local 档，worker 恒报 `file://`。
-    上传落点由 `build_fargate_engines` 注入（cloud 档，ADR 0029）；`subprocess worker + 注入 S3 落点` 的
+    **不注入产物 S3 上传落点**（`ARTIFACT_S3_BUCKET`/`PREFIX`）：本函数是本机后端，worker 恒报 `file://`。
+    上传落点由 `build_fargate_engines` 注入（云端后端，ADR 0029）；`subprocess worker + 注入 S3 落点` 的
     内部预演由 `tools/e2e_harness.py` 自拼 env 承载（ADR 0016 决策 B），不经本函数。
 
     region/profile（ADR 0016 决策 C）——组合根解析后的 AWS region（已由 `resolve_region` 落实成具体字符串：`--region` >
@@ -598,7 +598,7 @@ def make_resolver(engines: dict[str, Engine]):
 
 
 def local_artifact_locations(report_dir: str, run_id: str) -> dict:
-    """local 档一个 run 的产物落点（全 file:// URI）：run_meta / run_state / jobs_dir / report_index。**单点**：
+    """本机后端一个 run 的产物落点（全 file:// URI）：run_meta / run_state / jobs_dir / report_index。**单点**：
     `run` 结束打印、`status` 终态打印、`--json` 的 artifacts 都从这里拼（曾只在 run 路径的闭包里拼，status 到终态
     只打 ended_at、用户得自己找报告）。report_index 是**约定落点**（LocalReportStore 的 index.html），不代表已写成——
     run 路径拿 finalize 返回值覆盖/省略它（ADR 0030 决定三写失败隔离），status 路径按约定给。"""
@@ -612,13 +612,13 @@ def local_artifact_locations(report_dir: str, run_id: str) -> dict:
 
 
 def cloud_artifact_locations(*, bucket: str, report_prefix: str, table: str, run_id: str) -> dict:
-    """cloud 档一个 run 的产物落点：jobs_dir / report_index 为 s3://（对拍 S3ResultStore / S3ReportStore 的 key 布局
+    """云端后端一个 run 的产物落点：jobs_dir / report_index 为 s3://（对拍 S3ResultStore / S3ReportStore 的 key 布局
     `<report_prefix>/<run_id>/…`），run_meta / run_state 为 ddb:// 诊断指针（纯展示、不被解析）。单点理由同 local。
     report_prefix = 该 run 的产物前缀，**由调用方给、本函数只拼不校验**：同步 `run --backend cloud` 传自己的
     `--report-dir`（同一进程既写又拼、自洽）；`status --backend cloud` 原样取用户给的 `--report-dir`（该 flag 的
     help 已写明须与 submit 一致）。与推进侧 Lambda `REPORT_DIR` env 的一致性比对是**提交侧探针**（`submit` /
     `doctor` 经 `preflight_cloud_resources` 比，ADR 0033「产物前缀一致性」条），查询侧不重做——故这里给的 s3://
-    与 local 档一样是**约定落点**，不代表 key 已写成。"""
+    与本机后端一样是**约定落点**，不代表 key 已写成。"""
     pfx = _normalize_prefix(report_prefix)
     return {
         "run_meta": f"ddb://{table}/{run_id}#META",
@@ -938,7 +938,7 @@ def build_fargate_engines(
       具体字符串、经 RunTask overrides 注入 worker）。
     - job-in 落点 = (bucket, `{prefix_key}<run_id>/jobs-in/`)——**jobs-in/ 非 jobs/**（ResultStore 判定真值占 jobs/、
       load_all 枚举它；job-in 独立前缀避撞 key + 误读）。artifact 上传落点 = (bucket, `{prefix_key}<run_id>/`)——与
-      report 同前缀镜像 run 树。**artifact_s3 必注入**（cloud 档唯一的上传落点注入点——local 的 `build_engines`
+      report 同前缀镜像 run 树。**artifact_s3 必注入**（云端后端唯一的上传落点注入点——local 的 `build_engines`
       恒不注入）：否则 Fargate 容器盘停即销毁、引擎产物（trajectory/report）必丢（ADR 0029「cloud 注入不是可选」/0032）。
     句柄可注入（测试 monkeypatch），未注入则惰性建（区分 ecs/s3/ddb resource）。
     """
@@ -975,7 +975,7 @@ def build_fargate_engines(
     if no_artifacts:  # `--backend cloud --no-report`：worker 不生成/不上报原生产物 → 也就不会有 S3 上传（ADR 0037 决策 3）
         headers_env = {**headers_env, "GHERKAI_NO_ARTIFACTS": "1"}
     # 引擎特定 env（同 headers 走 extra_env 注 RunTask overrides）：Nova 的 act timeout **双端同源**
-    # （ADR 0024 grace 硬约束）——容器不继承本地 env、RunTask overrides 逐条枚举，故 cloud 档必须显式注，
+    # （ADR 0024 grace 硬约束）——容器不继承本地 env、RunTask overrides 逐条枚举，故云端后端必须显式注，
     # 否则 worker 落回自带字面量：operator 调 NOVA_ACT_TIMEOUT_S 改不动容器内的单 act 上界，
     # ADR 0032 明写的手动覆盖项（「要更长 act 就调这个 env」）在云端静默失效、local/cloud 行为分叉。
     engine_env = {"novaact": {"NOVA_ACT_TIMEOUT_S": str(NOVA_ACT_TIMEOUT_S)}}
@@ -1317,7 +1317,7 @@ def resolve_worker_variant(
 
 
 def read_task_def_stop_timeout(revision_arn: str, *, engine: str, region=None, profile=None, ecs=None) -> int | None:
-    """读某 task-def revision 上 worker container 的 `stopTimeout`（秒）= **cloud 档真实的停止宽限**。
+    """读某 task-def revision 上 worker container 的 `stopTimeout`（秒）= **云端后端真实的停止宽限**。
 
     只读、单次 `DescribeTaskDefinition`。用途只有一个：`doctor --backend cloud` 拿它跟本机 worker 自报的
     grace 下限比对——Fargate 的 `FargateWorkerHandle.stop` 忽略运行期 grace，宽限由这个 task-def 期常量决定
@@ -1397,7 +1397,7 @@ def preflight_cloud_resources(
     任一 botocore 异常都翻成「资源 X 不存在——是 --prefix 配错、还是后端未部署（`gherkai deploy`）？」。
 
     **`report_dir` 非 None 时另比对「推进器的产物前缀」一致性**（存在性之外的唯一语义探针，ADR 0033 preflight 条）：
-    detached cloud 档的产物前缀有**两个独立来源**——提交侧 `--report-dir`（offload 的 args/ 落它）与推进侧
+    detached 云端后端的产物前缀有**两个独立来源**——提交侧 `--report-dir`（offload 的 args/ 落它）与推进侧
     Lambda 的 `REPORT_DIR` env（判定真值 jobs/ 与 RunReport 落它，IaC 有意不注入、由 Lambda 内缺省 `reports` 供给）。
     不一致时提交照样成功、run 照样运行完成，但结果落在用户没指定的前缀下（用户在自己给的前缀里找不到报告、
     提交侧留下一批孤儿 args 对象），是典型「静默分裂」，故挡在提交前。只比 `lambda_fns` 里的**两个推进器**

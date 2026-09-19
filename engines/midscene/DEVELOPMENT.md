@@ -72,7 +72,7 @@ worker 侧**只有这两个 flag**：确定性清单是 `--capabilities` 对象�
 ```bash
 npm ci              # 装依赖（含 devDeps 里的 typescript，build 期需要）
 npm run build       # tsc → dist/*.mjs
-npm test            # node --import tsx --test "src/**/*.test.mts"（2026-09-17 实测 183 pass / 0 fail）
+npm test            # node --import tsx --test "src/**/*.test.mts"
 ```
 
 让 CLI 指向本 checkout（dev 态没有已安装的 npm 包，走 worker 定位链**第一级** env 覆写，ADR 0037 决策 3）：

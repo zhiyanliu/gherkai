@@ -64,7 +64,7 @@ Nova Act 的 worker 随 `[local]` extra 装进同一个 Python 环境，Midscene
 
 ## 用 doctor 自检
 
-`gherkai doctor` 是只读自检：不建浏览器会话、不调模型、不产生模型费用。
+`gherkai doctor` 是只读自检：不建浏览器会话、不调模型，不产生模型费用。
 
 ```bash
 gherkai doctor                                      # 只查本机

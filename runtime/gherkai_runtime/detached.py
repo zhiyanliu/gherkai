@@ -1,4 +1,4 @@
-"""无状态批量运行的 local 执行接线（ADR 0034，local 档）：SubprocessLauncher + per-run reconciler 进程。
+"""无状态批量运行的 local 执行接线（ADR 0034，本机后端）：SubprocessLauncher + per-run reconciler 进程。
 
 组合根职责（local 执行环境特有）：把 core 的 reconciler（纯编排）接到真 subprocess 世界——
 - **SubprocessLauncher**：机制四 CAS 抢占成功后被 reconciler 调，起一个 worker（复用 SubprocessEngine）、
@@ -7,7 +7,7 @@
 - **per-run reconciler 进程**：`submit` 时 setsid fork 出来的轻进程，循环 tick 直到全 done 自退。
 
 守窄腰：gherkai_core.reconcile 对「怎么起 worker」无知（经 Launcher 注入）；本模块在产品本体 gherkai 层（组合根共享层，
-ADR 0016「演进」节）、可 import SubprocessEngine/SqliteEventLog，core 不可。cloud 档的 Launcher =
+ADR 0016「演进」节）、可 import SubprocessEngine/SqliteEventLog，core 不可。云端后端的 Launcher =
 `gherkai_core.adapters.cloud_launcher.CloudLauncher`（ECS RunTask），与本模块共用同一 `gherkai_core.reconcile.tick`。
 """
 from __future__ import annotations
@@ -42,7 +42,7 @@ class SubprocessLauncher:
     退出后写 task_exited。非阻塞返回（reconciler 继续 tick，不等 worker 运行结束——那是 fire-and-forget，事件
     异步落 SQLite、下轮 tick 从 SQLite 重放看到进展）。
 
-    同时 enforce job timeout（ADR 0034「job timeout」节 local 档）：job.timeout_s 非 None 时起 deadline
+    同时 enforce job timeout（ADR 0034「job timeout」节的本机后端一侧）：job.timeout_s 非 None 时起 deadline
     timer——到点先置 timed_out 标志再 handle.stop(engine grace)（协作停，保会话清理、不持续计费），worker 退出后
     _pump 的 record_exit 带上标志，project 按归因链收敛 ERROR+timeout。
 

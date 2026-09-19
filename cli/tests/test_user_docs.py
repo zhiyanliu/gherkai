@@ -7,6 +7,8 @@
 另外 owner 表与页面文件一一对应：表里列的页必须存在、目录里的页必须登记，差集法两向都查。
 图统一用 archify（ADR 0045 决策七）：`docs/diagrams/` 里 JSON 图源与导出 SVG 成对入库、图源零内部指代；
 正文不再有 ```mermaid 块（两套图形态并存即漂移的开始）。
+`test_default_model_ids_match_the_engine_constants` 的扫描面多带上随包 agent skill：默认模型 id 的披露面
+横跨用户文档与 skill，真值在引擎常量，两边一起对着常量校才是完整差集（ADR 0044「现值」）。
 """
 from __future__ import annotations
 
@@ -14,9 +16,9 @@ import re
 from pathlib import Path
 
 import pytest
-from _doc_rules import COLLOQUIAL, FORBIDDEN, RETIRED_TERMS, RETIRED_TERMS_WORDS, changelog_unreleased
+from _doc_rules import (COLLOQUIAL, FORBIDDEN, REPO, RETIRED_TERMS, RETIRED_TERMS_WORDS,
+                        changelog_unreleased, skill_markdown_files)
 
-REPO = Path(__file__).resolve().parents[2]
 USER_GUIDE = REPO / "docs" / "user-guide"
 DIAGRAMS = REPO / "docs" / "diagrams"
 ALL_DOCS = [REPO / "README.md", REPO / "CONTRIBUTING.md"] + sorted((REPO / "docs").rglob("*.md"))
@@ -154,3 +156,91 @@ def test_diagram_skill_points_at_the_method():
     assert "docs/ai-eng/diagram-authoring.md" in body and "tools/build_diagrams.mjs" in body, "skill 须指向方法文档与构建脚本"
     assert body.count("\n") < 12, "skill 入口只放指令与指针（不复述方法，免同步漂移）"
 
+
+# ── 默认模型 id：从 code 常量校用户面（ADR 0044「现值」）────────────────────────────────────
+
+NOVA_CONSTANTS = REPO / "engines" / "novaact" / "gherkai_worker_novaact" / "lib" / "constants.py"
+MIDSCENE_CONSTANTS = REPO / "engines" / "midscene" / "src" / "lib" / "agentcore-sigv4.mts"
+
+# 模型 id 的书写形态，按引擎分。只认**完整 id**：Midscene 家族推断表里的片段（`openai.gpt-6` /
+# `qwen.qwen3-vl`）与不带版本的别名（`nova-act-preview`）不是默认值的候选，进扫描面只会制造假红。
+MODEL_ID_SHAPES = {
+    "novaact": re.compile(r"nova-act-v[0-9][0-9a-z.-]*"),
+    "midscene": re.compile(r"(?:us|eu|apac|global)\.openai\.[a-z0-9][a-z0-9.-]*"
+                           r"|(?:(?:us|eu|apac|global)\.)?qwen\.qwen3-vl-[0-9a-z-]+"),
+}
+# 「这个 id 不是在讲默认」的框定词：替代值（换成 / 设为 / 例如）与历史值（原默认 / 曾 / 此前）。
+NON_DEFAULT_MARKERS = re.compile(r"换成|换到|改成|设为|设成|原默认|原来的|此前|曾|不再|如\s*`")
+_MARKER_WINDOW = 16          # 框定词只在紧贴 id 前的这么多字里才算（同一行更远处的词管的是别的 id）
+_CLAUSE_END = re.compile(r"[，。；：|]")   # 从句边界：框定词管不过它（「、」是列举分隔、不切）
+_LIST_SEP_ONLY = re.compile(r"[`、,，/或\s]*")  # 列举分隔符：`A`、`B` 里的 B 沿用 A 的框定
+
+
+def _default_model_claims(line: str, shape: re.Pattern[str]) -> list[str]:
+    """一行里被当成「默认模型」讲的那些 id。
+
+    判据反着来——**没有非默认框定即算默认语境**：描述默认值的写法太多（「默认模型」「默认值是」
+    「默认锁定」「改为」、表格里干脆只有一列表头写着默认），逐种正则必漏；替代值与历史值反而总带
+    明确的框定词，枚举得完。漏判的方向因此是「多查一处」而不是「漏查一处」。
+    """
+    out, pos, framed = [], 0, False
+    for m in shape.finditer(line):
+        gap = line[pos:m.start()]
+        near = _CLAUSE_END.split(gap)[-1][-_MARKER_WINDOW:]   # 同一从句内、紧贴 id 前的那一小段
+        if NON_DEFAULT_MARKERS.search(near):
+            framed = True
+        elif not _LIST_SEP_ONLY.fullmatch(gap):
+            framed = False       # 隔着实义文字 = 新的一句，框定不延续
+        if not framed:
+            out.append(m.group(0).rstrip(".-"))
+        pos = m.end()
+    return out
+
+
+def _default_model_ids() -> dict[str, str]:
+    """两引擎的默认模型 id = 各自 code 常量的缺省值（env 覆盖的那一半与文档无关）。"""
+    nova = re.search(r"""MODEL_ID\s*=\s*os\.environ\.get\(\s*["']NOVA_MODEL_ID["']\s*,\s*["']([^"']+)["']""",
+                     NOVA_CONSTANTS.read_text(encoding="utf-8"))
+    midscene = re.search(r"""export const DEFAULT_MODEL\s*=\s*["']([^"']+)["']""",
+                         MIDSCENE_CONSTANTS.read_text(encoding="utf-8"))
+    assert nova and midscene, ("取不到引擎默认模型常量（常量写法变了？）——先修这里的抽取式，"
+                              f"别让护栏空转：{_rel(NOVA_CONSTANTS)} / {_rel(MIDSCENE_CONSTANTS)}")
+    return {"novaact": nova.group(1), "midscene": midscene.group(1)}
+
+
+def test_default_model_ids_match_the_engine_constants():
+    """换默认模型时漏改某份用户面文档即红：默认模型 id 的真值是引擎常量，披露面有十来处、靠人一次改齐。
+
+    扫描面 = 用户文档（CHANGELOG 只扫未发布段，已发行节是发行当时的原话）+ 随包 agent skill；
+    新增披露面（新页面、skill 新 reference）自动进面，不必维护清单。历史值与替代值由框定词放行，
+    见 `_default_model_claims`。code 侧另有两引擎各自的单测把默认常量钉在字面量上作升级闸门
+    （midscene 的 `DEFAULT_MODEL` 断言、nova 的 `--capabilities` 自报断言，换默认得连它们一起改），
+    本护栏只管文档面跟上常量，两层不重叠。
+    """
+    defaults = _default_model_ids()
+    surfaces: list[tuple[Path, str]] = []
+    for doc in USER_DOCS:
+        text = doc.read_text(encoding="utf-8")
+        surfaces.append((doc, changelog_unreleased(text) if doc.name == "CHANGELOG.md" else text))
+    skills = skill_markdown_files()
+    surfaces += [(p, p.read_text(encoding="utf-8")) for p in skills]
+
+    stale: list[str] = []
+    stated: dict[str, set[Path]] = {engine: set() for engine in MODEL_ID_SHAPES}
+    for path, text in surfaces:
+        for i, line in enumerate(text.splitlines(), 1):
+            for engine, shape in MODEL_ID_SHAPES.items():
+                for model_id in _default_model_claims(line, shape):
+                    if model_id == defaults[engine]:
+                        stated[engine].add(path)
+                    else:
+                        stale.append(f"{_rel(path)}:{i}: {model_id}（{engine} 现默认 = {defaults[engine]}）: "
+                                     f"{line.strip()[:100]}")
+    assert not stale, ("这些地方把旧模型 id 当默认在讲（换默认时漏改，或该给它「原默认 / 换成 / 例如」的框定）：\n"
+                       + "\n".join(stale))
+
+    blind = [f"{engine} 的默认 id {defaults[engine]} 在{where}一处都没出现"
+             for engine in MODEL_ID_SHAPES
+             for where, group in (("用户文档", set(USER_DOCS)), ("随包 skill", set(skills)))
+             if not (stated[engine] & group)]
+    assert not blind, "护栏空转（默认模型 id 的披露面消失了？先确认是有意删除，再改扫描面）：\n" + "\n".join(blind)

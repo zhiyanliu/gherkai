@@ -294,8 +294,8 @@ def run_meta_from_dict(d: dict) -> RunMeta:
         # 原样保序（键序已由写端规范化）；键缺失/空 → None（旧落盘兼容 + 空表即无）
         extra_http_headers=tuple(hdrs.items()) if hdrs else None,
         max_concurrency=d.get("max_concurrency"),  # 键缺失 → None（旧落盘兼容）
-        steps_dir=d.get("steps_dir"),  # 键缺失 → None（旧落盘 / cloud 档不写此键，ADR 0037 决策 4）
-        worker_variant=d.get("worker_variant"),  # 键缺失 → None（旧落盘 / local 档，ADR 0038）
+        steps_dir=d.get("steps_dir"),  # 键缺失 → None（旧落盘 / 云端后端不写此键，ADR 0037 决策 4）
+        worker_variant=d.get("worker_variant"),  # 键缺失 → None（旧落盘 / 本机后端，ADR 0038）
         # dict 原样复制（键=engine 名，值=revision ARN）；键缺失 → None ⇒ 宿主走默认指针兼容路径
         worker_task_defs=(dict(wtd) if (wtd := d.get("worker_task_defs")) is not None else None),
     )

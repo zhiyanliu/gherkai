@@ -40,7 +40,7 @@
 | worker **基础镜像** ×2 | **GHCR**（与 repo 同屋檐），linux/amd64，immutable `:X.Y.Z` | 同号 | 发布方的 CI |
 | worker **定制镜像**（基础镜像 + 使用方 steps，按 variant 多套并存） | 使用方私有 ECR；机制全在 [0038](./0038-worker-image-delivery.md) | 跟 CLI | 使用方本地 build，部署方 `gherkai deploy push-worker` 推送注册 |
 | `gherkai-deploy-aws`（IaC + Lambda handler 源 + worker 镜像推送） | PyPI，经 CLI extra `[deploy-aws]`；命令 `gherkai deploy` / `destroy` 及 worker 镜像族（0038） | 同号 | 发布方的 CI |
-| `features/`（示例）· `tools/` · `docs/` · 根 `skills/`（agent skill 评测资产，0043） | 不分发 | — | — |
+| 上表之外的仓库目录（`features/` 示例、`tools/`、`docs/`、`graphify-out/`、根 `skills/` 的评测资产等） | 不分发 | — | — |
 
 八条决策展开如下。
 
@@ -181,20 +181,20 @@ worker 内容 = 工具自身的脚手架 + 使用方确定性 step，属业界�
 ```
 ./
 ├── pyproject.toml          ← uv workspace 根：[tool.uv.workspace] members 五个 Python 包；根自身无发行物
-├── core/                   ← dist gherkai-core   · import gherkai_core   （今 core/）
-├── runtime/                ← dist gherkai-runtime · import gherkai_runtime（今 gherkai/；目录改名避免 gherkai/gherkai_runtime/ 的歧义；names 含 image_tag / ecr_repo_name，0038）
-├── cli/                    ← dist gherkai        · import gherkai_cli · 命令 gherkai（今 cli/）；gherkai_cli/skills/gherkai/ = 随 wheel 带的 agent skill（0043）
+├── core/                   ← dist gherkai-core   · import gherkai_core
+├── runtime/                ← dist gherkai-runtime · import gherkai_runtime（原 gherkai/；目录改名避免 gherkai/gherkai_runtime/ 的歧义；names 含 image_tag / ecr_repo_name，0038）
+├── cli/                    ← dist gherkai        · import gherkai_cli · 命令 gherkai；gherkai_cli/skills/gherkai/ = 随 wheel 带的 agent skill（0043）
 ├── deploy_aws/             ← dist gherkai-deploy-aws · import gherkai_deploy_aws（stack.py / app.py / names.py / cli.py=Provider / workers.py + container.py = worker 镜像族命令与容器引擎口子（0038）/ lambdas/ 两个 handler 源作 asset 原料）
 ├── engines/
-│   ├── novaact/            ← dist gherkai-worker-novaact · import gherkai_worker_novaact · console script 同名 · Dockerfile = 基础镜像（今 worker/ + lib/ 收进包）
+│   ├── novaact/            ← dist gherkai-worker-novaact · import gherkai_worker_novaact · console script 同名 · Dockerfile = 基础镜像（原 worker/ + lib/ 收进包）
 │   └── midscene/           ← npm @gherkai/worker-midscene · Dockerfile = 基础镜像（ESM + tsc dist/，tsconfig 入库，tsx 留 dependency，resolve hook 随 dist/）
-├── features/ · tools/ · docs/ · skills/gherkai-evals/   ← 不分发（tools/build_push_workers.py 已随 0038 退役；skills/gherkai-evals/ = agent skill 评测资产，0043）
 ```
 
+- 随包分发的只有各包源码目录与其 `pyproject.toml` / `package.json` 声明的内容；仓库其余目录（`features/`、`tools/`、`docs/`、`graphify-out/`、`skills/`、测试与 spike）都不进发行包（`tools/build_push_workers.py` 已随 [0038](./0038-worker-image-delivery.md) 退役；`skills/gherkai-evals/` = agent skill 评测资产，[0043](./0043-agent-skill-for-driving-gherkai.md)）。
 - 一个目录 = 一个 workspace 成员 = 一个 lock（根 `uv.lock`），当前五处各自的 `uv.lock` 合一；`uv run gherkai …`、`uv run pytest`（根跑全部）、`uv build --package <name>`。**单 lock 要求全员依赖共解**（已实测通过）；将来某成员升版引入冲突时用 `tool.uv.conflicts` 声明或把该成员移出 workspace，不回退到多 lock。
 - **contributor 体验净变好**：一次 `uv sync` 替代四处安装中的三处（midscene 仍 `npm install`）；console script 直接可用；部署与用户同一条 `uv run gherkai deploy --vpc default --prefix …`，context 坑对 contributor 也消失。代价见决策 3 末条。
 
-## 对既有 ADR 的影响（反向链已落各 Status 头；本 ADR 翻 Accepted 时标注已同步）
+## 对既有 ADR 的影响（反向链已落各 Status 头）
 
 - **[0016](./0016-execution-architecture-core-lib-run-model.md)（Partially-superseded-by 本 ADR）**：反转「cli backend 选择」节 `build_cloud_stores` 条的「cli 主依赖不含 boto3、走 `cli[aws]→core[aws]` extra」（CLI 发行包硬依赖 `gherkai-runtime[aws]`；库层 extra 保留）；「工程布局」树 `cli/` 行的「gherkai/core 作 path 依赖」→ uv workspace + build 时 `==` pin；工程布局的目录名/发行名/import 名重排；「数据模型」节 definition 行的 run 级字段枚举（已逐字段带 ADR 指针）落地时补 `steps_dir` → 本 ADR（扩展，属校准）。分层、窄腰、注入红线、决策 A/B/C **全部不动**。
 - **[0033](./0033-iac-aws-backend-and-composition-wiring.md)（Partially-superseded-by 本 ADR 与 0038）**：本 ADR 取代的部分——`iac_aws_backend/` 独立工程 + 裸 `cdk deploy` → 包化进 `gherkai-deploy-aws`、经 `gherkai deploy`（`prefix`/`vpc_id`/`use_default_vpc`/`stop_timeout` 四个 context 旋钮升为三个 flag，能力不减，另加 SSM 档比对）；Lambda asset 现场 copytree repo 相对路径 + 联网装 gherkin → 从已安装包取；「留待」CI 条闭环；SSM 参数族加 `version`、`vpc`。镜像/task-def/ECR/权限相关的取代见 [0038](./0038-worker-image-delivery.md)。两个镜像的容器入口随 worker 包化改为 `python -m gherkai_worker_novaact` 与包 bin `gherkai-worker-midscene`（→ `dist/bin.mjs`，决策 3）；资源清单/命名契约不动；preflight 加版本 skew 一项（variant 解析那项归 0038）。
@@ -209,7 +209,7 @@ worker 内容 = 工具自身的脚手架 + 使用方确定性 step，属业界�
 
 ## 对既有文档与 code 注释的影响
 
-- 发行重组 / worker 交付 / deploy 三层落地时，README·子 README·CONTEXT·`docs/internals/`（原 `docs/guides/`）与 code 注释里的旧包名与旧调用示例已随各层校准（逐文件到期点见当时的 commit）。
+- 发行重组 / worker 交付 / deploy 三层落地时，README·子 README·CONTEXT·`docs/internals/`（原 `docs/guides/`）与 code 注释里的旧包名与旧调用示例已随各层校准。
 - 唯一有再犯价值的反模式：用户可见错误文案里的旧 extra 名（`pip install core[aws]`）会教用户敲一个不存在的包，属最易漏的一类；规则与护栏见 [0039](./0039-user-facing-surfaces-no-internal-references.md)。
 
 ## 实测项（**除第 4 条末一项外全部已验**；唯一残留 = `destroy` 后同 prefix 重部署的冲突形态，待真账户。「绿≠对」——每条都依赖 mock 之外的真实行为，证据内联于各条）
@@ -225,7 +225,7 @@ worker 内容 = 工具自身的脚手架 + 使用方确定性 step，属业界�
 ## 被拒方案（护栏，防未来重踩）
 
 - **进程包装层的 fd 转发补丁（为救 npx 兜底）**：多一层包装 = 多一处吞 fd/吞信号的地方（ADR 0024 三通道的反面教材）；npx 实测不穿透即降级为安装指引，midscene 无第四级（证据见决策 3 第 4 级；npm 行为若变按同法重测）。
-- **Homebrew tap / 单文件二进制（PyApp、PyInstaller、shiv、pex）**：受众（装 AWS 凭证、Docker 的开发/测试工程师）能装 uv；homebrew-core 门槛不达、tap 是第二个发布面与 bottle 维护；二进制带不了双语言 worker 环境。用户需求出现再议。
+- **Homebrew tap / 单文件二进制（PyApp、PyInstaller、shiv、pex）**：受众（装 AWS 凭证与容器引擎的测试开发）能装 uv；homebrew-core 门槛不达、tap 是第二个发布面与 bottle 维护；二进制带不了双语言 worker 环境。用户需求出现再议。
 - **单发行包（三 import 包一 wheel）**：省 pin 机制，但集成方无法按层引用（WebUI 只要 runtime、第三方只要 core）；pin 机制已由 dynamic-versioning hook 一处解决，单包唯一优势消失。
 - **不设 `[local]` / uvx 拉起作主路径**：同 venv 直调无包装层、离线、pin 锁死，三点全优；uvx 降为兜底，fd 预演后仅 novaact 保留第四级（见决策 3 第 4 级）。
 - **CLI 上保留 `[aws]`**：裸装无一画像完整可用，头条命令撞头条用法。

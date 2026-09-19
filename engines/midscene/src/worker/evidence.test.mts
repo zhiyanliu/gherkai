@@ -28,7 +28,7 @@ const FIXTURE = JSON.parse(
 const RUN_DIR = "/tmp/run/midscene-run";  // 只参与拼路径，不落盘（映射是纯函数）
 const STEP = { index: 2, keyword: "Then", text: "页面上出现『订单提交成功』字样" };
 
-// 截图 uri：local 档上传器就是这么拼的（file:// + 绝对路径），这里同形以便断言路径本身。
+// 截图 uri：本机后端上传器就是这么拼的（file:// + 绝对路径），这里同形以便断言路径本身。
 function fileRef(p: string): string {
   return `file://${p}`;
 }
@@ -304,7 +304,7 @@ function tmpRun(): string {
   return path.join(d, "midscene-run");
 }
 
-// local 档上传器的行为形状：refFor / toReportRef 都报 file://，记录调用以分辨「传了字节」（即时）、
+// 本机后端上传器的行为形状：refFor / toReportRef 都报 file://，记录调用以分辨「传了字节」（即时）、
 // 「只算 ref」与「入了后台队列」（截图字节）。queued 收平铺后的路径，order 记跨调用的相对次序。
 function spyUploader(opts: { failUpload?: boolean } = {}) {
   const uploaded: string[] = [];

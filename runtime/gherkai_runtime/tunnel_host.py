@@ -80,7 +80,7 @@ def watch_run_and_stop_tunnel(
     region: str | None = None, profile: str | None = None,
     poll_interval_s: float = 5.0, on_warn=None,
 ) -> str:
-    """cloud submit 隧道守护进程的主体（ADR 0035 决策 3 cloud 档）：轮询 DDB run 终态 → 拆隧道；
+    """cloud submit 隧道守护进程的主体（ADR 0035 决策 3 云端后端）：轮询 DDB run 终态 → 拆隧道；
     TTL 到点 → 拆隧道自杀（防「run 卡死 / 查询持续异常」时 ngrok 进程泄漏）。返回拆除原因（调用方打印）。
 
     读库异常不致命（瞬时网络/限流）——经 `on_warn`（可选，前端层给打印口）报一句后继续轮询，TTL 是最终兜底。

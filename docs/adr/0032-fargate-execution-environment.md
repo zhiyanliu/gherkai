@@ -25,11 +25,11 @@
 
 ## 真容器校准结论（4 次真跑，2026-07-12，真实 AWS 账户/us-east-1、stopTimeout=120 已 deploy）
 
-**实测数据（4 次真跑，2026-07-12，真实 AWS 账户/us-east-1；`wikipedia_assertions`/`wikipedia_robustness` × Nova/Midscene，`--assertion-votes 1`，编排脚本毫秒级抢 events `step_started` 窗口发 StopTask）：**
+**实测数据（`wikipedia_assertions`/`wikipedia_robustness` × Nova/Midscene，`--assertion-votes 1`，编排脚本毫秒级抢 events `step_started` 窗口发 StopTask）：**
 
 | 量 | Nova（3 中断样本） | Midscene（1 样本） | 校准对象 |
 |---|---|---|---|
-| act 正常完成墙钟 | 4~11s（p99=10.8，run-1 baseline） | — | 对照 `NOVA_ACT_TIMEOUT_S`=120 |
+| act 正常完成墙钟 | 4~11s（p99=10.8，基线 act 样本） | — | 对照 `NOVA_ACT_TIMEOUT_S`=120 |
 | **SIGTERM→退出**（`stopping→executionStopped`） | 14 / 21.3 / 20.5s | 12.4s | 对照 `stopTimeout`=120 |
 | 会话释放（`signal received`→`session shutdown complete`） | 1.6 / 9.0 / 7.2s | **0.2s** | 随 act 复杂度 / 引擎模型变 |
 | ECS 记录延迟（`shutdown complete`→`executionStopped`） | ~11.5s | ~11s | 平台固定滞后、非 worker 耗时（跨 4 样本恒定 11.06~11.54s、跨引擎一致 → 测量滞后，见结论 2） |

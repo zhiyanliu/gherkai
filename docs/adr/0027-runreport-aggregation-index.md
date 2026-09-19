@@ -152,9 +152,8 @@ Nova worker 设 `NovaAct(logs_directory=<run 专属持久目录>)`，act/act_get
   `page.url`，**从不调引擎**，故**根本没有产物可归集**。RunReport 忠实反映「无产物」，不伪造内容。
 - **判定不丢**：`result` 树仍含每个确定性 step 的 pass/fail/error + 时长（CI、退出码、status 汇总
   全程可用）。空的只是「人看的原生轨迹链接」，不是判定数据。
-- 行为与含 AI step 的用例**一致**（都产有效 RunReport），产物差异**合理**（确定性 step 本就不产
-  引擎报告）。验证 Midscene scope 级归集必须用含 AI 的用例——这不是 walkaround，是 Midscene
-  报告天生 scope 级、且只在用 AI 时产生的客观事实。
+- **验证 Midscene scope 级归集必须用含 AI 的用例**——这不是 walkaround，是 Midscene 报告天生
+  scope 级、且只在用 AI 时产生的客观事实。
 
 **但这暴露一个上游缺口**（非本 ADR 范围）：确定性 step **不产任何可观测产物**——连「检查了哪个
 URL、断言了什么」都不落痕（只有 pass/fail 进 result 树）。大量用确定性 step 的团队，其 RunReport

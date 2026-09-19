@@ -61,7 +61,7 @@ _STEPS_DIR_HELP = (
     "你自己的确定性 step 目录（默认 ./steps 存在即用；亦可 env GHERKAI_STEPS_DIR）：worker 启动时排序递归"
     "加载其中的 step 定义文件、注册进它的确定性注册表"
 )
-# `run` / `submit`（实际运行与提交那一侧）另加两句：值随提交记录走、cloud 档不生效。
+# `run` / `submit`（实际运行与提交那一侧）另加两句：值随提交记录走、云端后端不生效。
 # 同一段措辞两处共用（曾字节级抄两份），改一处即两处生效。判据不是「带 --backend」——
 # `doctor` 也带 --backend，但它只查环境、不产提交记录，故用不加补充的公共段。
 _STEPS_DIR_HELP_RUN_SUBMIT = (
@@ -317,7 +317,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     )
 
     # ---- 无状态批量运行（ADR 0034）：submit 提交完就走 / status 轮询收集 ----
-    # local 档：submit setsid fork 一个 per-run 进程执行 reconcile loop（本机推进，无需常驻），CLI 立即退出。
+    # 本机后端：submit setsid fork 一个 per-run 进程执行 reconcile loop（本机推进，无需常驻），CLI 立即退出。
     sm = sub.add_parser("submit", help="[后台运行] 提交一批 .feature 到后台运行、立即返回 run_id（提交完就走）")
     sm.add_argument("features", nargs="+", type=Path, help="一个或多个 .feature 路径")
     sm.add_argument("--default-engine", choices=sorted(_names.ENGINES), default="novaact",
@@ -375,7 +375,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     st.add_argument("--backend", choices=["local", "cloud"], default="local", help="须与 submit 一致")
     st.add_argument("--report-dir", default="reports", metavar="DIR",
                     help="run 落点（local）/ 后端报告前缀（cloud）——须与 submit 一致；终态时据此打印报告与判定明细位置")
-    # 两档接力形态不同：local 由本机这个进程亲自执行 reconcile.tick 推进；cloud 只 invoke kicker Lambda，
+    # 两个后端接力形态不同：local 由本机这个进程亲自执行 reconcile.tick 推进；cloud 只 invoke kicker Lambda，
     # 保 status 机器零 ECS 权限（ADR 0034）。help 里只讲用户看得见的差别。
     st.add_argument("--wait", action="store_true",
                     help="轮询到 run 达终态再返回（两路都支持，接力方式不同：local=在本机接着把它推到底；"
@@ -534,7 +534,7 @@ def _resolve_steps_dir(args) -> "str | int | None":
 
 
 def _resolve_steps_dir_for_backend(args) -> str | int | None:
-    """`_resolve_steps_dir` + cloud 档清零（ADR 0037 决策 4）：cloud 档 steps 构建在定制镜像里（0038），definition
+    """`_resolve_steps_dir` + 云端后端清零（ADR 0037 决策 4）：云端后端 steps 构建在定制镜像里（0038），definition
     里的本机路径对云端 worker 无意义 → 不写该字段；用户显式给了则警告不拦（no-op，不改产物落点）。run/submit 共用。"""
     steps_dir = _resolve_steps_dir(args)
     if isinstance(steps_dir, int) or args.backend != "cloud":
@@ -563,7 +563,7 @@ def _preflight_worker_runtimes(jobs, steps_dir: str | None) -> int | None:
       grace 下限」（ADR 0036「5.」），恒问一次后 `_cmd_run` 的 grace 下限（`compose.engine_min_grace`）命中同一份
       进程内缓存——本机 run 每引擎只 spawn 一次自述。
     **只查本次用到的引擎**——另一个引擎没装不连坐（dev 下 midscene 常态未装）。返回 2 或 None。
-    cloud 档不调用本函数：那档 worker 在 Fargate 容器里运行，本机定位链无关。
+    云端后端不调用本函数：那个后端的 worker 在 Fargate 容器里运行，本机定位链无关。
     """
     for engine in sorted({j.engine for j in jobs}):
         try:
@@ -798,14 +798,14 @@ def _doctor_cloud(args, target, add, cred_fail: str) -> None:
 def _doctor_worker_grace(target, add, revisions: dict) -> None:
     """doctor 的 `backend.worker.grace` 行：引擎 worker 自报的最短收尾宽限 vs 云端 task-def 的停止宽限。
 
-    为何值得一行：cloud 档的真实宽限是 task-def 期 `stopTimeout`（`FargateWorkerHandle.stop` 忽略运行期
+    为何值得一行：云端后端的真实宽限是 task-def 期 `stopTimeout`（`FargateWorkerHandle.stop` 忽略运行期
     grace）、且受 Fargate 平台上限约束，而引擎自报的下限可能更大（Nova = 单 act 上界 + 收尾余量）——这个
     结构性不满足是 ADR 0032 真容器校准结论 4 的**既定接受**（最坏情形：SIGTERM 落在一次会耗尽上界的 act 早期
     → 收尾被 SIGKILL 截断、会话靠 AgentCore 会话 TTL 兜底），故按**可选能力缺失**口径报（`-`、required=False），
     不是必修失败：它不挡任何一次正常的批量运行，只是把「这台后端的宽限够不够最坏情形」变成看得见的一行。
     比对面两侧各有前置：**只比已解析到 revision 的引擎**（没解析到的，上面 worker.<engine> 行已报）；
     **本机没定位到该引擎 worker 就跳过**（下限是 worker 自报的，没 worker 就问不出来——纯 cloud 用户不必为
-    这一行装运行时，同 engines.any 在 cloud 档降为可选的判据）。
+    这一行装运行时，同 engines.any 在云端后端降为可选的判据）。
     文案不能只给「抬高」一条路：`stopTimeout` 的部署缺省就是 Fargate 平台硬顶（deploy_aws 的 DEFAULT_STOP_TIMEOUT_S
     = FARGATE_STOP_TIMEOUT_MAX_S），Nova 自报下限恒大于它 → 部署正常的后端上这一行对 Nova **恒为 `-`**；cli 不依赖
     deploy_aws、不知平台上限具体几秒，故文案分「未顶满可抬 / 顶满即接受」两支，别让用户追一个 ADR 0032 已记录接受的残余。
@@ -985,13 +985,13 @@ def _validate_max_concurrency(args) -> bool:
 
 
 def _validate_worker_variant(args) -> bool:
-    """`--worker-variant` 入口校验 + local 档提示（对齐 `--max-concurrency` 的入口校验惯例，ADR 0038）。
+    """`--worker-variant` 入口校验 + 本机后端提示（对齐 `--max-concurrency` 的入口校验惯例，ADR 0038）。
 
     **校验点复用 `names.image_tag`**：variant 名最终要拼进 ECR/docker 镜像 tag，字符集与归一化由那一处单点
     持有（ADR 0038「tag 命名 = 单一真源、同时是单一校验点」）——此处拿本 CLI 自己的版本试拼一次，坏名字在
     「没开始执行就被拒」层退 2，而不是拖到 preflight 读 SSM 后报一句绕远的「该 variant 没有映射」。
-    **local 档只提示不校验**：该 flag 在 local 完全不参与（确定性 step 直接从 steps 目录读、不经镜像），
-    对一个从不消费的值做硬校验没有意义——同 cloud 档遇到 `--steps-dir` 时「警告不拦」的口径。
+    **本机后端只提示不校验**：该 flag 在 local 完全不参与（确定性 step 直接从 steps 目录读、不经镜像），
+    对一个从不消费的值做硬校验没有意义——同云端后端遇到 `--steps-dir` 时「警告不拦」的口径。
     用 getattr 取值：`plan` 等子命令没有这个 flag（也没有 `--backend`），取不到就不校验。返回 False = 调用方退 2。
     """
     variant = getattr(args, "worker_variant", None)
@@ -1066,7 +1066,7 @@ def _setup_tunnel(args, jobs):
 
 def _plan_and_preflight(args, *, list_jobs: bool) -> "tuple[list, str | None] | int":
     """`run` 与 `submit` 的共享前置（同一序列，次序本身是判据）：入口 flag 校验 → plan → steps 目录解析
-    → local 档 worker 运行时 preflight。成功返回 `(jobs, steps_dir)`；任一步失败返回**退出码**（调用方原样返回）。
+    → 本机后端 worker 运行时 preflight。成功返回 `(jobs, steps_dir)`；任一步失败返回**退出码**（调用方原样返回）。
 
     **整块只碰本机、不碰隧道/云端/落库**（末步给了 steps 目录时会起本地瞬时 worker 子进程做自述——非执行 job）——
     故排在起隧道 / 探云端资源 / 落库之前，让配置错落在
@@ -1078,7 +1078,7 @@ def _plan_and_preflight(args, *, list_jobs: bool) -> "tuple[list, str | None] | 
     """
     if not _validate_max_concurrency(args):  # 最早：读 feature/起隧道/preflight 之前（真零副作用）
         return 2
-    if not _validate_worker_variant(args):   # 同上层（入口校验，ADR 0038）；local 档在此只打一行「不生效」
+    if not _validate_worker_variant(args):   # 同上层（入口校验，ADR 0038）；本机后端在此只打一行「不生效」
         return 2
     jobs = _load_and_plan(args)  # votes/筛选值校验 + 读 feature + plan（前置失败返回退出码 2）
     if isinstance(jobs, int):
@@ -1093,9 +1093,9 @@ def _plan_and_preflight(args, *, list_jobs: bool) -> "tuple[list, str | None] | 
     steps_dir = _resolve_steps_dir_for_backend(args)
     if isinstance(steps_dir, int):
         return steps_dir
-    # worker 运行时 preflight（ADR 0037 决策 3 miss 分叉）：**仅 local 档**——worker 在本机 spawn，定位链 miss
+    # worker 运行时 preflight（ADR 0037 决策 3 miss 分叉）：**仅本机后端**——worker 在本机 spawn，定位链 miss
     # 要在 spawn/提交之前退 2，不该变成一批 job 级 engine_error（submit 更坏：「提交成功」后逐 job error、
-    # 诊断只落后台日志）。cloud 档 worker 在 Fargate，本机没有也正常（那档探镜像/task-def，见各自的 cloud 分支）。
+    # 诊断只落后台日志）。云端后端 worker 在 Fargate，本机没有也正常（那个后端探镜像/task-def，见各自的 cloud 分支）。
     if args.backend != "cloud":
         miss = _preflight_worker_runtimes(jobs, steps_dir)
         if miss is not None:
@@ -1107,7 +1107,7 @@ def _build_run_meta(args, jobs, steps_dir: "str | None", tunnel_headers: "dict |
     """组装 definition（ADR 0016/0027）：新 run_id + 创建时刻 + plan 产出的 jobs + run 级执行参数。
 
     `run` 与 `submit` 共用（六个字段曾各抄一份）；run_id 在此生成，调用方从 `run_meta.run_id` 取回。
-    `steps_dir` 在 cloud 档恒 None（`_resolve_steps_dir_for_backend` 已清零）；`extra_http_headers` 是隧道
+    `steps_dir` 在云端后端恒 None（`_resolve_steps_dir_for_backend` 已清零）；`extra_http_headers` 是隧道
     注入的额外请求头（ADR 0035 决策 4），空表归一成 None。
     """
     return RunMeta(
@@ -1190,7 +1190,7 @@ def _cmd_submit(args) -> int:
       CLI 不留本机进程、submit 机器零 ECS 权限。
     退出码 = 提交成功与否（非 run 判定；判定由 status 查）。
     """
-    # 共享前置（与 run 同一份，见 _plan_and_preflight）：入口校验 → plan → steps 目录 → local 档 worker preflight。
+    # 共享前置（与 run 同一份，见 _plan_and_preflight）：入口校验 → plan → steps 目录 → 本机后端 worker preflight。
     # 整块**排在起隧道之前**——早拒才真零副作用。
     prepped = _plan_and_preflight(args, list_jobs=False)  # 逐 job 明细归 run；submit 只打计数行（进度看 status）
     if isinstance(prepped, int):
@@ -1225,8 +1225,8 @@ def _cmd_submit(args) -> int:
     # 隧道交棒的分界线 = 后台宿主 fork 成功那一刻（local=推进进程、cloud=隧道守护进程），由被调方经
     # `on_handoff` 通知。**分界线之前**没交上棒（返回非 0 或抛异常：解析 profile / 落库 / 建日志 / fork
     # 本身失败）→ 隧道没有宿主，就地拆掉，否则脱离进程组的 agent 会永久把本机应用留在公网（ADR 0035 决策 3）。
-    # **「没交棒」≠「没提交」**：cloud 档 `create_run` 已过、只是守护没 fork 起来这一格，云端链已经接管这个
-    # run；local 档同理（run 记录已在盘上、接力者会来推它）。这一格照样拆（没有任何收尾者，不拆就是永久公网
+    # **「没交棒」≠「没提交」**：云端后端 `create_run` 已过、只是守护没 fork 起来这一格，云端链已经接管这个
+    # run；本机后端同理（run 记录已在盘上、接力者会来推它）。这一格照样拆（没有任何收尾者，不拆就是永久公网
     # 暴露），但必须打一行说清楚——否则用户只看到一个栈、以为什么都没发生，而云端照常运行、照常烧钱。
     # **分界线之后**即便收尾几行抛（stdout 是坏管道、Ctrl-C 恰落此窗）也不能拆：宿主已经在运行，拆了会让
     # 剩余 job 在被测应用不可达下运行成假失败——兜底机制反成失败源，且烧真钱。
@@ -1645,7 +1645,7 @@ def _status_cloud(args) -> int:
 # ============================================================================
 # explain（ADR 0042 决策四）：判定明细 + step 级机读证据 → 「哪步、问什么、看见什么、为什么」
 # 只读、**退出码只 0/2**：它是证据渲染器、不重复表判定（判定码看 run / status --wait），故 run 判 failed 时
-# explain 仍退 0；2 只用于参数错 / run 或 scope 不存在 / cloud 档不可用。
+# explain 仍退 0；2 只用于参数错 / run 或 scope 不存在 / 云端后端不可用。
 # ============================================================================
 
 
@@ -1691,7 +1691,7 @@ def _explain_read_evidence(refs, read_bytes) -> "tuple[dict | None, str | None]"
         return None, "no_ref"
     try:
         doc = json.loads(read_bytes(ev_refs[0].ref))
-    except Exception:  # 文件不在（cloud 档 flush 前被杀）/ 权限 / 不是 JSON：一律归「读不到」
+    except Exception:  # 文件不在（云端后端 flush 前被杀）/ 权限 / 不是 JSON：一律归「读不到」
         return None, "unreadable"
     if not isinstance(doc, dict) or doc.get("schema_version") != 1:
         return None, "unsupported_schema"
@@ -1900,7 +1900,7 @@ def _cmd_run(args) -> int:
     use_json = args.json
 
     # 0/1/2) 共享前置（与 submit 同一份，见 _plan_and_preflight）：入口校验 → plan（+ 逐 job 明细）→
-    #        steps 目录 → local 档的 worker preflight。整块排在起隧道 / 云端探资源 / begin 之前。
+    #        steps 目录 → 本机后端的 worker preflight。整块排在起隧道 / 云端探资源 / begin 之前。
     prepped = _plan_and_preflight(args, list_jobs=True)  # run 逐 job 打一行（本机批量运行看得见分组）
     if isinstance(prepped, int):
         return prepped
@@ -1909,18 +1909,18 @@ def _cmd_run(args) -> int:
     # 2a) grace 硬约束（ADR 0024）：按本 run 各引擎的下限取 max（grace 是 run 级单值），**下限由各引擎 worker
     #     自报**（compose.engine_min_grace 查一次 `--capabilities`、进程内缓存；查不到即 fail-loud 退 2，不回落
     #     猜的常量——那等于让 core 的 grace 护栏形同废除）。
-    #     **只对本机档查**（ADR 0032 真容器校准结论 4 的两条路径之分）：cloud 档 worker 运行在 Fargate 里、
+    #     **只对本机后端查**（ADR 0032 真容器校准结论 4 的两条路径之分）：云端后端 worker 运行在 Fargate 里、
     #     `FargateWorkerHandle.stop` 忽略运行期 grace（真实宽限 = task-def 期 stopTimeout，`doctor --backend cloud`
-    #     的 worker.grace 行专门比对它），而提交机器本就不必装 worker 运行时（ADR 0037 决策 3「cloud 档不查本机
+    #     的 worker.grace 行专门比对它），而提交机器本就不必装 worker 运行时（ADR 0037 决策 3「云端后端不查本机
     #     定位链」，见 _preflight_worker_runtimes）——在此查会把纯 cloud 用户按本机环境无理由挡住。
-    #     **cloud 档还要拒绝显式 `--grace`**（同条 ADR）：那档没有它的作用面，配了无效值就在入口拒，别让用户
+    #     **云端后端还要拒绝显式 `--grace`**（同条 ADR）：那个后端没有它的作用面，配了无效值就在入口拒，别让用户
     #     以为设了一道防护——真正的云端宽限在部署侧（`gherkai deploy --stop-timeout`）。
     #     显式给了过小 grace → 入口友好拒绝（对齐 votes 校验惯例，退 2「没开始执行就被拒」）。core 侧还有 enforce
     #     兜底（任何前端都受同一护栏），此处只为在 cli 给出清晰诊断、避免 core ValueError 冒到用户面。
-    #     **必须排在起隧道 / cloud 探资源 / persistence.begin 之前**：只依赖 jobs（cloud 档连 worker 都不问），
+    #     **必须排在起隧道 / cloud 探资源 / persistence.begin 之前**：只依赖 jobs（云端后端连 worker 都不问），
     #     早拒才真「零副作用」——否则配置错也已起 ngrok、产生云端调用费用、并落下永不 finalize 的半成品 run 记录。
     if args.backend == "cloud" and args.grace is not None:
-        # 云端档**拒绝**显式 --grace（ADR 0024「引擎自报下限」条）：那个值到不了任何机制面（Fargate 侧真实宽限
+        # 云端后端**拒绝**显式 --grace（ADR 0024「引擎自报下限」条）：那个值到不了任何机制面（Fargate 侧真实宽限
         # 是 task-def 期 stopTimeout，`FargateWorkerHandle.stop` 忽略运行期 grace），静默接受等于让用户以为设了
         # 一道会话泄漏防护——与 `--report-dir` 撞云端产物前缀即退 2 同口径：入口不许配无效值。
         _progress("--grace 在云端不生效：云端的停止宽限由部署侧的 gherkai deploy --stop-timeout 决定"
@@ -1945,7 +1945,7 @@ def _cmd_run(args) -> int:
         )
         return 2
     # --grace 哨兵默认（None）→ 跟随本 run 引擎自报的下限（Nova 自然 ≥ 单 act 上界 + 收尾；midscene-only 回到小值；
-    #    cloud 档 min_grace=0 → 回落 ScheduleOpts 默认，反正 Fargate 侧忽略运行期 grace，见上 2a）。
+    #    云端后端 min_grace=0 → 回落 ScheduleOpts 默认，反正 Fargate 侧忽略运行期 grace，见上 2a）。
     grace = args.grace if args.grace is not None else max(min_grace, ScheduleOpts.grace_period_s)
 
     # 2b) --expose-local：起隧道 + 把 jobs 文本中的 origin 替换成公网 URL（ADR 0035）。前台 run 的隧道
@@ -1965,7 +1965,7 @@ def _cmd_run(args) -> int:
     run_meta = _build_run_meta(args, jobs, steps_dir, tunnel_headers)
     run_id = run_meta.run_id
     do_report = not args.no_report  # RunReport 默认生成；--no-report 跳过（零落盘运行路径）
-    worker_log_fh = None  # --quiet（local 档）时打开的 worker 日志句柄，见 build_engines 处
+    worker_log_fh = None  # --quiet（本机后端）时打开的 worker 日志句柄，见 build_engines 处
     worker_log_path: Path | None = None
     # 两个引擎的产物落点（ADR 0027/0037 决策 3）：
     # - 归集档（默认）：落 <report_dir>/<run_id>/ 下**本次 run 专属的绝对路径**目录，与 RunReport 同处、长期留存。
@@ -1986,7 +1986,7 @@ def _cmd_run(args) -> int:
     # （ADR 0016 决策 B / 0029），由 tools/e2e_harness.py 自拼 worker env 直起 worker 实现，不经 CLI/compose。
     cloud_fargate: dict | None = None  # cloud 分支置值（ADR 0033）：Fargate 执行配置，供 build_fargate_engines；None=走 subprocess
     # 目标解析（compose.resolve_cloud_target 一次吐 prefix + 各资源终名 + region/profile，ADR 0033 两层命名）。
-    # **local 档也解析**：region/profile 两路都要（喂 subprocess worker + store），云资源名多算几个纯字符串、不用即弃。
+    # **本机后端也解析**：region/profile 两路都要（喂 subprocess worker + store），云资源名多算几个纯字符串、不用即弃。
     # region/profile 是「正确的非对称」（ADR 0016 决策 C）：
     # - profile：--profile > AWS_PROFILE。仅 subprocess worker 注入（继承本机 ~/.aws、profile 合法）；
     #   **Fargate 绝不注入**（容器无 ~/.aws、用 task role，注入不存在的 profile 名会 ProfileNotFound 盖过 task role）。

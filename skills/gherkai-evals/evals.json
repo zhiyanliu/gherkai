@@ -1,14 +1,11 @@
 {
   "skill_name": "gherkai",
-  "notes": "缺省集只执行 plan / explain / doctor / list-deterministic，零条真 AWS；opt_in=true 的条目会真跑 run / submit、只由 contributor 在自己的部署上按需跑。fixture 路径相对本目录；评测前用 materialize.py 把 fixture 物化到仓库外的舞台，两臂都在舞台里以 `claude -p` 跑、cwd = 舞台、PATH 前置舞台 bin/。 第四轮前按第三轮评分者批评收紧：复合断言拆条（eval 2/9/10/11/13）、放行开关与投票的判据正向化（eval 9/14）、禁绕过式修复（eval 12）、正则须匹配真实落地地址（eval 1）、禁留新 run 目录（eval 13）；「--help 与只读命令不算执行」统一写进所有「没有执行」断言。断言总数随之变化，通过率与前一轮不可直接比。 第五轮前：eval 1 的四合一断言拆为「复用确定性 step」与「正则鲁棒（含对实测 301 终点与 evil 主机的机械判据）」；所有缺省 eval 加「不把评测脚手架当用户环境」；新增 eval 15（scope 跨文件撞名，fixture scope-collision）与 eval 16（Background + Outline 写用例）。 第五轮后：eval 16 断言 2 与 expected_output 对齐（确定性 URL step 或页面级语义断言二选一、各带判据），第五轮 fable/sonnet 的 with-skill 因旧断言被误判。 第五轮后尺子备忘已落：eval 1 正则加裸主机须命中；eval 2 三条条件式断言改为必须落盘；eval 16 步号口径与 Background 执行语义拆成两条（缺省集 122 条）。 第六轮前按 fixture 真值校准两条尺子：eval 13 的 job 级判定口径改为「判 error 且归因 timeout」（超时不归 aborted）；eval 14 的 prompt 复述改用 fixture 里真实的断言文本（原先那句「正文里没出现『图灵』」在 fixture 里零命中）。断言总数不变。",
+  "notes": "缺省集只执行 plan / explain / doctor / list-deterministic，零条真 AWS；opt_in=true 的条目会真跑 run / submit、只由 contributor 在自己的部署上按需跑。fixture 路径相对本目录；评测前用 materialize.py 把 fixture 物化到仓库外的舞台，两臂都在舞台里以 `claude -p` 跑、cwd = 舞台、PATH 前置舞台 bin/。 第四轮前按第三轮评分者批评收紧：复合断言拆条（eval 2/9/10/11/13）、放行开关与投票的判据正向化（eval 9/14）、禁绕过式修复（eval 12）、正则须匹配真实落地地址（eval 1）、禁留新 run 目录（eval 13）；「--help 与只读命令不算执行」统一写进所有「没有执行」断言。断言总数随之变化，通过率与前一轮不可直接比。 第五轮前：eval 1 的四合一断言拆为「复用确定性 step」与「正则鲁棒（含对实测 301 终点与 evil 主机的机械判据）」；所有缺省 eval 加「不把评测脚手架当用户环境」；新增 eval 15（scope 跨文件撞名，fixture scope-collision）与 eval 16（Background + Outline 写用例）。 第五轮后：eval 16 断言 2 与 expected_output 对齐（确定性 URL step 或页面级语义断言二选一、各带判据），第五轮 fable/sonnet 的 with-skill 因旧断言被误判。 第五轮后尺子备忘已落：eval 1 正则加裸主机须命中；eval 2 三条条件式断言改为必须落盘；eval 16 步号口径与 Background 执行语义拆成两条（缺省集 122 条）。 第六轮前按 fixture 真值校准两条尺子：eval 13 的 job 级判定口径改为「判 error 且归因 timeout」（超时不归 aborted）；eval 14 的 prompt 复述改用 fixture 里真实的断言文本（原先那句「正文里没出现『图灵』」在 fixture 里零命中）；另去重一处：eval 5 的断言 5 删掉与断言 3 重复的「真跑还缺 AWS region 与凭证」尾句（同一表现原本计两分、现只计一分）。断言总数不变（缺省集 122 条），通过率与前一轮不可直接比。",
   "evals": [
     {
       "id": 1,
       "prompt": "这个项目用 gherkai 做 UI 测试。按这段需求给我写一个用例并做预检，先别真跑：打开 https://example.com/ 首页能看到大标题 Example Domain；点击 More information... 链接后会到 iana.org 的页面——这一条 URL 检查要精确、不能靠 AI 猜。",
       "expected_output": "新建一个 .feature：导航步用 Given + 引号内 URL，标题检查写成页面级语义的 AI 断言，点链接是 AI 动作，URL 检查用内建确定性 step `Then 页面地址匹配 \"iana\\.org\"`（或自写一条并注册进 steps/）；跑 gherkai plan 看标注，报告哪步走确定性、哪步走 AI；不执行 run。",
-      "files": [
-        "fixtures/wiki-search"
-      ],
       "expectations": [
         "产出的 .feature 用 Given 加双引号内的 http(s) URL 作导航步",
         "URL 检查复用内建的『页面地址匹配』确定性 step（或 steps/ 里新注册的一条），不是自然语言断言",
@@ -27,9 +24,6 @@
       "id": 2,
       "prompt": "features/wiki_search.feature 上次在 reports/ 里那次跑有一条 scenario 没过。帮我看看为什么没过、是用例写错了还是网站的问题，给我改法。",
       "expected_output": "找到 reports/ 下的 run，用 gherkai explain <run_id> 读失败步（『词条首段说 OpenAI 成立于 1999 年』）的原因、模型看见了什么与截图位置；判断是断言事实写错（OpenAI 成立于 2015）而不是被测站点问题；给出改断言的建议与收窄重跑命令 gherkai run features/wiki_search.feature --scope search；按固定小结构汇报。",
-      "files": [
-        "fixtures/wiki-search"
-      ],
       "expectations": [
         "调用过 gherkai explain（文本或 --json）读取失败证据",
         "结论的依据来自 explain 输出或 evidence.json 的 thought / message，没有把 index.html 或引擎原生 session_summary / act_*.html 的内容当依据",
@@ -53,9 +47,6 @@
       "id": 3,
       "prompt": "给这个项目再加一条带参数的确定性 step：『页面地址以 \"<前缀>\" 开头』（引号里的前缀是参数，比如 https://en.wikipedia.org），两个引擎都要能用，加完确认一下真的注册上了、而且不会误伤别的步。",
       "expected_output": "在 steps/ 下分别新增 Python（Nova Act）与 .mts（Midscene）两份注册：同一正则语义（Python (?P<name>) / JS (?<name>) 具名组接参数）、description 与 example 同文、模式带引号与特征词、足够窄；分别执行 gherkai list-deterministic --engine novaact 与 --engine midscene 核对清单里有这条；用 gherkai plan 确认长句 AI 步没被它劫持。",
-      "files": [
-        "fixtures/wiki-search"
-      ],
       "expectations": [
         "新增的 Python step 用 @deterministic 装饰器注册、带 description 与 example，正则用具名组 (?P<...>) 接收前缀参数",
         "新增的 Midscene step 放在 .mts 或 .mjs 文件里（不是 .ts）、带 description 与 example，正则用具名组 (?<...>) 接收前缀参数",
@@ -75,9 +66,6 @@
       "id": 4,
       "prompt": "我们 CI 里是这样接 gherkai 的：先 gherkai submit features/wiki_search.feature，退出码 0 就算通过。可是报告里明明有用例失败，为什么？CI 应该怎么接才对？给我改好的脚本片段，但别在这台机器上真跑。",
       "expected_output": "解释 submit 退 0 只表示提交成功、判定未出；正确接法 = 保存 stdout 的 run_id 后 gherkai status <run_id> --wait 用其退出码（或直接用 gherkai run 的退出码）；取字段用 --json；不带 --wait 的 status 未到终态也退 0；explain 从不表判定。给出脚本片段，不执行。",
-      "files": [
-        "fixtures/wiki-search"
-      ],
       "expectations": [
         "指出 submit 的退出码只表示提交成功、不是判定",
         "改好的脚本用 gherkai status <run_id> --wait 的退出码（或 gherkai run 的退出码）作为 CI 判定",
@@ -96,15 +84,12 @@
       "id": 5,
       "prompt": "这个项目里的 gherkai 现在能不能用 midscene 引擎跑？如果不能，缺什么、怎么补？先别装任何东西。",
       "expected_output": "跑 gherkai doctor 与/或 gherkai list-engines，按 engines.midscene 一行给结论；不可用时给安装命令（npm i -g @gherkai/worker-midscene）与 region/凭证前置说明；不执行安装。",
-      "files": [
-        "fixtures/wiki-search"
-      ],
       "expectations": [
         "执行了 gherkai doctor 或 gherkai list-engines 来判断，而不是靠猜或只看文件",
         "没有执行 gherkai run 或 gherkai submit（`--help` 与只读命令不算执行）",
         "指出真跑还缺 AWS region 与凭证（舞台里两份 AWS 配置文件为空）、缺了会在起会话时失败，而不是只报「引擎可用」",
         "结论引用了 midscene 引擎那一行的探测结果",
-        "结论正确：判为可用并说出来源（这里 midscene worker 由环境变量指定），没有建议无用的 npm 安装；同时指出真跑还缺 AWS region 与凭证",
+        "结论正确：判为可用并说出来源（这里 midscene worker 由环境变量指定），没有建议无用的 npm 安装",
         "没有执行任何安装命令（npm ls 这类只读命令不算）",
         "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报",
         "没有把评测舞台的脚手架（bin/gherkai shim、.eval-aws 下的空凭证文件、环境变量注入）当成用户的真实环境写进汇报或当成阻塞项上报"
@@ -117,9 +102,6 @@
       "opt_in": true,
       "prompt": "把 features/wiki_search.feature 在本机用 Nova Act 跑一遍，跑完告诉我结果，没过的那步解释清楚为什么。",
       "expected_output": "先 plan 再 run（或 submit + status --wait），按退出码读判定，失败步用 explain 读证据并按固定小结构汇报，给出改法与 --scope 重跑命令。",
-      "files": [
-        "fixtures/wiki-search"
-      ],
       "expectations": [
         "真跑之前执行了 gherkai plan",
         "用 run 的退出码（或 status --wait 的退出码）读判定，而不是 submit 的退出码",
@@ -134,9 +116,6 @@
       "opt_in": true,
       "prompt": "把 features/wiki_search.feature 提交到云端后端跑（prefix 是 vfy-），我等会儿来收结果；先确认环境没问题。",
       "expected_output": "gherkai doctor --backend cloud --prefix vfy- 自检 → plan → submit --backend cloud --prefix vfy- 拿 run_id → 告诉用户之后用 status --backend cloud --prefix vfy- --wait 收判定、explain 同参数看证据；不自己跑 deploy。",
-      "files": [
-        "fixtures/wiki-search"
-      ],
       "expectations": [
         "提交前执行了 gherkai doctor --backend cloud --prefix vfy-",
         "submit 带了 --backend cloud --prefix vfy-，并保存了 stdout 的 run_id",

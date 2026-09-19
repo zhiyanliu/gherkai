@@ -38,7 +38,7 @@ worker 收到的只有 `keyword` + 裸 `text`（+可选多行参数）。派发�
 | 抛其它异常（含 Nova 的「handler 是 async」→ `TypeError`） | `error` | `engine_error`；两侧都先经瞬时网络白名单判定（Nova `_classify_act_error` → `_is_transient_network`、Midscene `isTransientNetwork`），命中则细分 `network_error`（细分口径见 [`verdict-model.md`](./verdict-model.md) §3b） |
 | 一条 step 命中多条模式 → `DeterministicConflict` | `error` | 同上，冲突模式清单在 `message` 里 |
 
-两处容易误解的机制事实：**匹配是未锚定的 `search` / `exec`**（子串匹配，不是整句 `fullmatch`），**因此**模式写得过宽既容易误命中、也容易产生冲突；**第 2 级的 URL 导航不在注册表里**，故它既不出现在 `list-deterministic` 清单、也不会被 `plan` 标注（probe 只查询注册表，见 §2），但实际执行时确实不发生 AI 调用，因此不产生 AI 费用。
+两处容易误解的机制事实：**匹配是未锚定的 `search` / `exec`**（子串匹配，不是整句 `fullmatch`），**因此**模式写得过宽既容易误命中、也容易产生冲突；**第 2 级的 URL 导航不在注册表里**，故它既不出现在 `list-deterministic` 清单、也不会被 `plan` 标注（probe 只查询注册表，见 §2），但实际执行时确实不发生 AI 调用，因此不产生模型费用。
 
 **匹配面只有 worker 一份**：CLI 与 `core` 不持有任何 step 正则，`core` 只下发裸 step 文本，命中与否全由 worker 的表判定（此项分工的理由见本节末权威行 ADR 0022「匹配放 worker，不放核心」条）。由此带来一条约束：两侧正则方言不同（Python `(?P<n>)` vs JS `(?<n>)`），CLI 侧任何「复刻一份匹配」的实现都会在某天与实际运行结果不一致。
 

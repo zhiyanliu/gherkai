@@ -71,7 +71,7 @@ deterministic(
 
 ## 4 两侧成对
 
-同一 feature 要在两个引擎上运行（或团队两引擎都用），每条确定性 step 两侧都要注册：正则语义相同、`description` / `example` 同文，只是方言不同。只写一侧，另一引擎上这一步会静默换回 AI 判定，前置检查不替你发现（它只查本次用到的引擎）。核对法：`gherkai list-deterministic --engine novaact` 与 `gherkai list-deterministic --engine midscene` 各查一遍，再 `gherkai plan` 看标注。
+同一 feature 要在两个引擎上运行（或团队两引擎都用），每条确定性 step 两侧都要注册：正则语义相同、`description` / `example` 同文，只是方言不同。只写一侧，另一引擎上这一步会静默换回 AI 判定，执行前预检不替你发现（它只查本次用到的引擎）。核对法：`gherkai list-deterministic --engine novaact` 与 `gherkai list-deterministic --engine midscene` 各查一遍，再 `gherkai plan` 看标注。
 
 ## 5 用错了会怎样（一律响亮失败，不静默降级）
 

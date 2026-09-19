@@ -175,7 +175,7 @@ def test_starter_run_ids_empty_when_neither():
     assert reconciler._run_ids_from_runs_stream({"test": "kick"}) == set()
 
 
-# ---------- job timeout（ADR 0034「job timeout」节 cloud 档）----------
+# ---------- job timeout（ADR 0034「job timeout」节的云端后端一侧）----------
 
 from gherkai_core.adapters.event_log import SqliteEventLog  # noqa: E402
 from gherkai_core.adapters.run_store.local import LocalRunStore  # noqa: E402
@@ -634,7 +634,7 @@ def test_report_still_written_when_the_run_duration_read_fails(cloud_env, monkey
 # ---------- 并发上限 = min(meta, 部署侧 cap)（ADR 0034 机制四）----------
 
 def test_build_takes_meta_max_concurrency_under_cap(cloud_env):
-    """definition 声明 ≤ cap → 按 definition 走（打通前 cloud 档静默忽略提交侧声明，是可用性缺陷）。"""
+    """definition 声明 ≤ cap → 按 definition 走（打通前云端后端静默忽略提交侧声明，是可用性缺陷）。"""
     _seed_run(cloud_env["runs"], detached=True, max_concurrency=2)  # cap=4（fixture env）
     assert reconciler._build("run-1")[4] == 2
 

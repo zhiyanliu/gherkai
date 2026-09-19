@@ -286,7 +286,7 @@ def test_build_local_reconcile_reads_steps_dir_from_definition(tmp_path, monkeyp
 
 
 def test_build_local_reconcile_no_steps_dir_when_definition_has_none(tmp_path, monkeypatch):
-    """对偶（防「恒注入」假绿）：definition 无 steps_dir（未给/旧落盘/cloud 档）→ 宿主不注入该 env，
+    """对偶（防「恒注入」假绿）：definition 无 steps_dir（未给/旧落盘/云端后端）→ 宿主不注入该 env，
     即便宿主 CWD 下恰好有个 `./steps`（宿主不重解析约定）。"""
     from gherkai_runtime.detached import build_local_reconcile
 

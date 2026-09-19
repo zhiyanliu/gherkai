@@ -52,7 +52,7 @@ def _run_ids_from_stream(event) -> set[str]:
 
 
 # ============================================================================
-# job timeout（ADR 0034「job timeout」节 cloud 档）：到点触发器 + 超时处置 + 防御扫
+# job timeout（ADR 0034「job timeout」节的云端后端一侧）：到点触发器 + 超时处置 + 防御扫
 # ============================================================================
 
 # StopTask reason 里的超时哨兵串：经 STOPPED 事件 detail.stoppedReason 原样出现（现成通道、零新键空间），
@@ -145,7 +145,7 @@ class EventBridgeTimeoutWatch:
 
 
 def _handle_timeout(run_id: str, scope_id: str, built, ecs_client=None) -> str:
-    """超时处置（ADR 0034「job timeout」节 cloud 档）：仍 running 才动手——ListTasks(startedBy=run_id) **同时列
+    """超时处置（ADR 0034「job timeout」节的云端后端一侧）：仍 running 才动手——ListTasks(startedBy=run_id) **同时列
     RUNNING 与 STOPPED**（后者 ECS 保留约 1h）→ DescribeTasks 按 overrides env SCOPE_ID 匹配 → 按 task 状态三路：
     - 运行中 → StopTask(reason 含哨兵) → STOPPED 事件 → exit_observer 记 task_exited(timed_out=True)（stop 后让观察链
       自然收敛 = 单一真源）；
@@ -306,7 +306,7 @@ def _build(run_id: str):
     run_store, result_store, report_store, _ = compose.build_cloud_stores(
         table=runs_table_name, bucket=bucket, prefix=report_dir,
         ddb_table=runs_table, s3=s3)
-    # `is_detached` 是 DDB adapter 上的方法、不在 RunStore 端口面上——cloud 档这个 store 恒是 DDB 实现。
+    # `is_detached` 是 DDB adapter 上的方法、不在 RunStore 端口面上——云端后端这个 store 恒是 DDB 实现。
     if not run_store.is_detached(run_id):
         # 只推进 detached run（ADR 0034 端到端 cloud 1b）：同步 `run --backend cloud` 由进程内 schedule 推进，
         # 推进器碰它就是双开推进器（抢 claim/RunTask/finalize）。kicker 那扇门由 Stream filter 挡，events 表

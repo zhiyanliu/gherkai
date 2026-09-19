@@ -67,16 +67,9 @@ uv run pytest              # 仓库根：全部 workspace 成员
 cd cli && uv run pytest -q # 只运行本包（cwd 决定收集范围）
 ```
 
-文档与文案护栏有六份位于本包的 `tests/`（全仓清单见根 [`CONTRIBUTING.md`](../CONTRIBUTING.md) 的「测试」节）：
+本包 `tests/` 下有六份文档与文案护栏：`test_package_readmes.py`、`test_user_docs.py`、`test_release_notes.py`、`test_user_facing_messages.py`、`test_skill.py`、`test_cli_json_contract.py`；各自的覆盖范围见根 [`CONTRIBUTING.md`](../CONTRIBUTING.md)「测试」节的护栏表。
 
-- `test_package_readmes.py` —— 进包的 README = 发行包长描述：零 ADR/决策号/内部机制名、零相对链接、每个包目录一份 `DEVELOPMENT.md`；另守根 `README.md`、各包 pyproject/package.json 的 `description`（PyPI/npm 页顶的 Summary）与 GitHub Release 正文的固定块。
-- `test_user_docs.py` —— 仓库内的用户文档（`docs/user-guide/**`、根 `README.md`、`CHANGELOG.md`）：零内部指代、相对链接可达、owner 表与目录两向差集。
-- `test_release_notes.py` —— `.github/scripts/release_notes.py`：changelog 节的 gate 与 Release 正文渲染。
-- `test_user_facing_messages.py` —— 产品面文案不带内部指代（扫描五个生产包的 Python 字面量与 Midscene 的 `.mts` 源）。
-- `test_skill.py` —— 随 wheel 发行的 agent skill（同一禁词表与相对链接正则，共享常量在 `cli/tests/_doc_rules.py`；另对照 argparse 真值、契约页键名、转换副本相等、目录白名单与形态上限）。
-- `test_cli_json_contract.py` —— `--json` 的全部键名对照 `docs/internals/cli-json-contract.md`，文档漏键即红（`list-workers` 的样例依赖 moto，该部分在 `deploy_aws/tests/test_workers.py`）。
-
-修改 `docs/internals/cli-json-contract.md` 后执行 `uv run python tools/render_skill_contract.py` 重新生成 skill 副本，否则 `test_skill.py` 的相等性断言会红。
+修改 `docs/internals/cli-json-contract.md` 后执行 `uv run python tools/render_skill_contract.py` 重新生成 skill 副本，否则 `test_skill.py` 的相等性断言会失败。
 
 ## 实时落库
 

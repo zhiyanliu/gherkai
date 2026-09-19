@@ -28,18 +28,18 @@ uv run pytest -q           # 安静模式
 
 moto 是模拟实现，与真 DDB/S3 在若干边界可能不一致（DDB 空串 SET / 保留字 / 空 Map / `SET jobs.#sid`；S3 中文·斜杠 key 编码 / `load_all` 全量；offload 真往返）。集成测试连真后端钉这些差异（`test_cloud_integration.py`）。
 
-**最高价值的两条是 DDB 400KB item 上限**——moto **只在 `put_item` 校验 400KB、`update_item` 增量路径零校验**（实测刷近 1.5MB 全 ACCEPT），故只有真 DDB 能证：
+**最高价值的两条是 DDB 400KB item 上限**——moto **只在 `put_item` 校验 400KB、`update_item` 增量路径零校验**（实测写到近 1.5MB 仍全部 ACCEPT），故只有真 DDB 能证：
 
 - STATE item 经反复 `SET jobs.#sid` 增量长大越过 400KB → `ValidationException`（钉「控制面 jobs Map 无上限保护」这个真实天花板，STATE 从不 offload）。
 - 含 >400KB docString 的 RunMeta：不挂 offloader 时 `create_run` 撞限抛错、挂 offloader 时成功且 META 只留 `s3://` 指针 —— **offloader 存在理由（解 400KB 限）的因果闭环**。
 
 ### 一次性：建真表 + 真桶
 
-集成测试**假定表/桶已存在**（建表建桶归 IaC，adapter 不自建——ADR 0016/0030 决定六）。用你自己的测试账号建一次（us-east-1、default profile；名字自取，下面用示例名）。可在会话里用 `!` 前缀直接执行：
+集成测试**假定表/桶已存在**（建表建桶归 IaC，adapter 不自建——ADR 0016/0030 决定六）。用你自己的测试账号建一次（us-east-1、default profile；名字自取，下面用示例名）。在会话里给下面各条加 `!` 前缀可直接执行：
 
 ```bash
 # DDB 表：分区键 run_id (HASH, S) + 排序键 item_type (RANGE, S)，按量计费（省钱）
-! aws dynamodb create-table \
+aws dynamodb create-table \
     --table-name ui-test-runs \
     --attribute-definitions AttributeName=run_id,AttributeType=S AttributeName=item_type,AttributeType=S \
     --key-schema AttributeName=run_id,KeyType=HASH AttributeName=item_type,KeyType=RANGE \
@@ -47,10 +47,10 @@ moto 是模拟实现，与真 DDB/S3 在若干边界可能不一致（DDB 空串
     --region us-east-1
 
 # S3 桶（桶名全局唯一，换成你自己的）
-! aws s3 mb s3://ui-test-artifacts-<你的后缀> --region us-east-1
+aws s3 mb s3://ui-test-artifacts-<你的后缀> --region us-east-1
 ```
 
-> 建议专门建一对**测试专用**表/桶（勿复用生产表）——集成测试会写入并自清理，但用独立资源最稳。
+> 建议专门建一对**测试专用**表/桶（勿复用生产表）——集成测试会写入并自清理，但用独立资源最可靠。
 
 ### 运行集成测试
 

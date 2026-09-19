@@ -34,7 +34,7 @@ result = schedule(run_meta, engine_resolver, event_sink)
 | `gherkai_core.model` | `RunMeta` / `RunResult` / `Status` 等判定与结果类型 |
 | `gherkai_core.ports` | 引擎、存储、进度回调的接口，由你注入实现 |
 | `gherkai_core.adapters` | 本机子进程引擎、Fargate 引擎、文件与 DynamoDB + S3 存储等现成实现 |
-| `gherkai_core.persist` / `gherkai_core.project` | 随进度实时落库，以及从事件归约出 run 状态（自建后台或无状态批量运行要用） |
+| `gherkai_core.persist` / `gherkai_core.project` / `gherkai_core.reconcile` | 随进度实时落库、从事件归约出 run 状态，以及幂等推进一次 run（自建后台或无状态批量运行要用） |
 | `gherkai_core.errors` | 计划期与执行期的异常类型 |
 
 引擎与存储按 `gherkai_core.ports` 里的接口注入。不想自己接线就用 https://pypi.org/project/gherkai-runtime/ ，它把引擎与存储组装好了。

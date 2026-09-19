@@ -42,7 +42,7 @@ EXIT_PRECONDITION = 2  # 用户可修的前置/校验失败
 
 # 基础镜像同步进 ECR 的那份固定叫 `base`（ADR 0038「概念模型」），也是默认指针的初始值。
 BASE_VARIANT = "base"
-# 维护者 CI 发布的基础镜像（ADR 0037 决策 5；`<engine>` + `:<版本>`）。**运行时不直接拉它**——task-def 只指
+# 发布方 CI 发布的基础镜像（ADR 0037 决策 5；`<engine>` + `:<版本>`）。**运行时不直接拉它**——task-def 只指
 # 使用方自己账号的 ECR（被拒方案「task-def 指向 GHCR 直接拉基础镜像」），这里只在 deploy 的基础镜像同步里 pull 一次。
 GHCR_BASE_IMAGE = "ghcr.io/zhiyanliu/gherkai-worker-{engine}"
 
@@ -383,7 +383,7 @@ def _referenced_by_live_run(ddb, table: str, arn: str) -> bool:
     访问路径定死（ADR 0038 不变量）：run 用到的 revision ARN 在 `create_run` 时同时写成 STATE item 的顶层属性
     `worker_task_def_arns`（list），runs 表按 `status` 建稀疏 GSI（只有 STATE 带顶层 status）。
     runs 表 `RETAIN`、无 TTL、随历史单调增长——Scan 成本无上界（被拒方案「清理靠全表 Scan runs 表」）。
-    属性缺失的 item（local 档 / 旧 definition）`contains` 天然不匹配，语义即「未引用」。
+    属性缺失的 item（本机后端 / 旧 definition）`contains` 天然不匹配，语义即「未引用」。
     """
     for status in _non_terminal_statuses():
         token = None

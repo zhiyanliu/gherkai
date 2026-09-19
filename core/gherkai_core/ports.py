@@ -1,4 +1,4 @@
-"""ports 层（ADR 0016 六边形架构）：核心的主要注入口在此（另两个见末段），具体 adapter 由组合根注入。
+"""核心注入接口（ADR 0016，业界称 ports & adapters）：核心的主要注入口在此（另两个见末段），具体 adapter 由组合根注入。
 
 四个 port（关注点拆开，不揉成上帝 module）：
 - Engine        —— 真正运行一个 scope（spawn worker、讲 ADR 0024 协议）；adapter = 子进程/Fargate

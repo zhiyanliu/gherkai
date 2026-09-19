@@ -24,6 +24,6 @@
 - 但 **step 定义侧的参数捕获语法不同**：cucumber-js 用 Cucumber Expressions（`{string}`），pytest-bdd 用 `parsers.parse('..."{term}"...')`。同一句 Gherkin 两边都能匹配，只是 step 定义写法各异——符合预期，纪律可控。
 
 **实测撞出的接线坑（固化备查）**：
-- TS：tsx 在 Node 22 须 `NODE_OPTIONS="--import tsx/esm"`（非废弃的 `--loader`）；`midscene` 子工程是 commonjs，故 `engines/midscene/bdd/` 加局部 `package.json` 标 `{"type":"module"}`，且 step 内联 SigV4 fetch 不跨目录引 CJS。
+- TS：tsx 在 Node 22 须 `NODE_OPTIONS="--import tsx/esm"`（非废弃的 `--loader`）；`midscene` 子工程是 commonjs，故 `engines/midscene/bdd/` 加局部 `package.json` 标 `{"type":"module"}`，且 step 内联 SigV4 fetch 不跨目录引 CJS。（当时子工程为 commonjs、`bdd/` 目录尚在；今整包统一 ESM、bin 在进程内注册 tsx，见 [0037](./0037-distribution-and-packaging.md) 决策 3。）
 - TS：Midscene `PlaywrightAgent` 的 `.page` 非原始 Playwright Page，导航/确定性断言要单独保存原始 `page`。
 - Python：`with Workflow(...)` 不设 contextvar，AgentCore `provider.cdp_session()` 靠 `get_current_workflow()` 鉴权——须 `@workflow` 装饰器，或手动 `set_current_workflow(wf)`（当时在 BDD fixture `test_generic_steps.py` 里做，该文件已随 BDD runner 退役删除、[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)；接线要求本身不变，现落在 worker 启动段）。

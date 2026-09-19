@@ -741,7 +741,7 @@ def test_submit_local_writes_max_concurrency_into_definition(tmp_path, monkeypat
     """submit 把 --max-concurrency 落进 definition（推进器读 meta，不靠 flag 通道）。
 
     fork 出的 per-run 进程仍收 flag（meta 缺值时的回落），但真源是落盘的 meta——推进器与提交进程可能分离
-    （cloud 档在 Lambda、local 接力者是另一个 CLI 调用），flag 到不了它们。
+    （云端后端在 Lambda、local 接力者是另一个 CLI 调用），flag 到不了它们。
     """
     import subprocess
 
@@ -870,7 +870,7 @@ def _spy_build_engines(monkeypatch):
 
 
 def _spy_run_meta(monkeypatch):
-    """记录 definition 构造入参（RunMeta 落库前的真值，cloud 档不落本地文件也验得到）。"""
+    """记录 definition 构造入参（RunMeta 落库前的真值，云端后端不落本地文件也验得到）。"""
     box = {}
     real = m.RunMeta
 
@@ -1139,7 +1139,7 @@ def test_artifact_lines_report_write_failure_falls_back_to_a_note(capsys):
 
 
 def test_run_lists_each_job_but_submit_only_prints_the_count(tmp_path, monkeypatch, capsys):
-    """run 与 submit 共享同一段前置（plan → steps 目录 → local 档 worker 检查），唯一的输出差别 = 逐 job 明细：
+    """run 与 submit 共享同一段前置（plan → steps 目录 → 本机后端 worker 检查），唯一的输出差别 = 逐 job 明细：
     run 打（本机批量运行要看得见分组），submit 不打（提交完就走、进度看 status）。计数行两处同款。"""
     import subprocess
 
@@ -1157,7 +1157,7 @@ def test_run_lists_each_job_but_submit_only_prints_the_count(tmp_path, monkeypat
 def test_run_and_submit_share_one_steps_dir_help_text(capsys):
     """`--steps-dir` 的 help 在 run/submit 两处是同一个常量（曾字节级抄两份）：措辞改一处即两处生效。
 
-    这两个子命令产提交记录、且值会随它到后台推进/接力进程，故要那两句补充（值随提交记录走 / cloud 档不
+    这两个子命令产提交记录、且值会随它到后台推进/接力进程，故要那两句补充（值随提交记录走 / 云端后端不
     生效）；`plan`、`doctor` 等不产提交记录的子命令用不加补充的公共段（`doctor` 同样带 `--backend`，判据不
     是它）。
     """
@@ -1311,7 +1311,7 @@ def test_doctor_no_engine_at_all_fails_locally_but_not_for_cloud(monkeypatch, ca
     _no_provider(monkeypatch)
     assert m.main(["doctor", "--json"]) == 2
     assert json.loads(capsys.readouterr().out)["ok"] is False
-    # cloud 档不需要本机 worker：engines.any 降为可选，其余云端项被 fake 成 ok
+    # 云端后端不需要本机 worker：engines.any 降为可选，其余云端项被 fake 成 ok
     monkeypatch.setattr(m.compose, "probe_aws_identity", lambda *, region, profile: {"account": "x", "arn": "arn:aws:sts::x:assumed-role/r", "region": region})
     monkeypatch.setattr(m.compose, "check_backend_skew", lambda **kw: (compose.SKEW_OK, "", "1.4.1"))
     monkeypatch.setattr(m.compose, "preflight_cloud_resources", lambda **kw: None)
@@ -1852,7 +1852,7 @@ def test_explain_detached_run_without_job_files_exits_0_with_one_hint(tmp_path, 
     from gherkai_core.model import Status as S
     root, run_id = _explain_run(tmp_path, with_results=False, run_status=S.RUNNING)
     rc, out, err = _explain(capsys, root, run_id)
-    # 建议命令要能原样运行成功：local 档必带 --report-dir（默认 reports/ 与本用例的 tmp 根不同，不带即查不到）
+    # 建议命令要能原样运行成功：本机后端必带 --report-dir（默认 reports/ 与本用例的 tmp 根不同，不带即查不到）
     assert rc == 0 and out == "" and "判定明细尚未落地" in err
     assert f"gherkai status {run_id} --report-dir {root} --wait" in err
     rc, out, err = _explain(capsys, root, run_id, "--json")
@@ -1904,7 +1904,7 @@ def _explain_cloud_stores(jr, state):
 
 
 def test_explain_cloud_blocks_on_version_skew_before_any_cloud_read(monkeypatch, capsys):
-    """cloud 档第一道闸是版本 skew（先于任何云端读）：block → 退 2，且根本没去装 store。"""
+    """云端后端第一道闸是版本 skew（先于任何云端读）：block → 退 2，且根本没去装 store。"""
     monkeypatch.setattr(m.compose, "check_backend_skew",
                         lambda **kw: (compose.SKEW_BLOCK, "本机 CLI 新于后端", "1.3.0"))
     monkeypatch.setattr(m.compose, "build_cloud_stores",
@@ -1914,7 +1914,7 @@ def test_explain_cloud_blocks_on_version_skew_before_any_cloud_read(monkeypatch,
 
 
 def test_explain_cloud_reads_evidence_from_s3(monkeypatch, capsys):
-    """cloud 档：判定明细经 ResultStore 读回，证据经注入的 s3 client `get_object` 读回（s3:// 解引用路径）。"""
+    """云端后端：判定明细经 ResultStore 读回，证据经注入的 s3 client `get_object` 读回（s3:// 解引用路径）。"""
     import io
 
     from gherkai_core.model import JobResult, JobState, ReportRef, RunState, ScenarioResult, StepResult, Votes
@@ -1944,8 +1944,8 @@ def test_explain_cloud_reads_evidence_from_s3(monkeypatch, capsys):
 
 
 def test_explain_cloud_not_landed_hint_carries_cloud_locator_flags(monkeypatch, capsys):
-    """cloud 档「判定明细尚未落地」给的 status 命令必带 --backend cloud --prefix：照抄要能运行成功，
-    否则落回 local 档、报「未找到 run」还把人引去查 --report-dir（方向指错）。prefix 取已解析的那个。"""
+    """云端后端「判定明细尚未落地」给的 status 命令必带 --backend cloud --prefix：照抄要能运行成功，
+    否则落回本机后端、报「未找到 run」还把人引去查 --report-dir（方向指错）。prefix 取已解析的那个。"""
     from gherkai_core.model import JobState, RunState
     job = _explain_job()
     state = RunState(run_id="r", status=Status.PENDING,

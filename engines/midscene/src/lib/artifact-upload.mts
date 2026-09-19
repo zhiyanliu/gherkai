@@ -145,8 +145,8 @@ export class ArtifactUploader {
   // 队列传（scope 末的整目录 flush 只兜漏网）。
   // 用途：evidence 里引用的截图（K × 票数张）若逐张即时上传，就是把串行 PutObject 压在判定临界路径上、
   // 把已成的判定拖在网络上；key 是确定性纯路径计算，先算 URI 后传字节即可。
-  // 残余风险（接受，ADR 0042 决策一）：cloud 档若 worker 被硬杀（SIGKILL / 容器被收），最后一个 step 尚在途的
-  // 一两张截图 URI 可能悬空（引用它的 json 已传、图没传）——消费端按「读不到」处理；local 档 file:// 无此问题。
+  // 残余风险（接受，ADR 0042 决策一）：云端后端若 worker 被硬杀（SIGKILL / 容器被收），最后一个 step 尚在途的
+  // 一两张截图 URI 可能悬空（引用它的 json 已传、图没传）——消费端按「读不到」处理；本机后端 file:// 无此问题。
   refFor(localPath: string): string {
     if (!this.enabled) return `file://${localPath}`;  // no-op 裸拼（与 Nova 对称、保旧行为）
     return `s3://${this.bucket}/${this.keyFor(path.resolve(localPath))}`;

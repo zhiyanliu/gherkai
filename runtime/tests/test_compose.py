@@ -318,8 +318,8 @@ def test_build_engines_nova_always_has_act_timeout(midscene_env_cmd):
 
 
 def test_build_engines_never_injects_artifact_s3_env(tmp_path: Path, midscene_env_cmd):
-    # local 档**恒不注入** S3 上传落点（worker 据「有没有这组 env」决定上传，无 → 报 file://，ADR 0029）：
-    # 上传落点只由 cloud 档的 build_fargate_engines 注入，预演由 e2e_harness 自拼 env（ADR 0016 决策 B）。
+    # 本机后端**恒不注入** S3 上传落点（worker 据「有没有这组 env」决定上传，无 → 报 file://，ADR 0029）：
+    # 上传落点只由云端后端的 build_fargate_engines 注入，预演由 e2e_harness 自拼 env（ADR 0016 决策 B）。
     nova_dir = tmp_path / "rid" / "nova-trajectories"
     mid_dir = tmp_path / "rid" / "midscene-run"
     engines = compose.build_engines(nova_logs_dir=nova_dir, midscene_run_dir=mid_dir)
@@ -917,7 +917,7 @@ def test_build_fargate_engines_per_engine_taskdef_and_region_no_profile(monkeypa
     assert nova["artifact_s3"] == ("prod-artifacts", "runs/rid-1/")
     # SDK 产物落点 env（按引擎、容器内路径）——**uploader 靠它算 run_dir，缺它 no-op 报 file://、产物丢**（实际运行暴露）。
     assert nova["sdk_artifact_dir_env"] == {"NOVA_LOGS_DIR": "/tmp/gherkai-run/rid-1/nova-trajectories"}
-    # Nova act timeout **双端同源**（ADR 0024 grace 硬约束）：cloud 档也须显式注入——容器不继承本地 env，
+    # Nova act timeout **双端同源**（ADR 0024 grace 硬约束）：云端后端也须显式注入——容器不继承本地 env，
     # 缺它则 worker 落回自带字面量、调 NOVA_ACT_TIMEOUT_S 只抬高 grace 下限、改不动容器内单 act 上界。
     assert nova["extra_env"]["NOVA_ACT_TIMEOUT_S"] == str(compose.NOVA_ACT_TIMEOUT_S)
     mid = by_engine[_REV["midscene"]]

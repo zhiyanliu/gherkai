@@ -313,7 +313,7 @@ def _patch_cloud_commit(monkeypatch):
 def test_submit_cloud_keeps_tunnel_after_daemon_fork(tmp_path, monkeypatch, capsys):
     """cloud submit 一路顺到守护 fork 成功 → **不拆**（对称于 local 的交棒边界用例）。
 
-    守护是 cloud 档隧道的唯一宿主：这里误拆等于让云端已接管的整批 job 在被测应用不可达下运行成假失败。
+    守护是云端后端隧道的唯一宿主：这里误拆等于让云端已接管的整批 job 在被测应用不可达下运行成假失败。
     """
     calls = []
     _patch_tunnel(monkeypatch, calls)

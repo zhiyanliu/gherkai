@@ -422,7 +422,7 @@ def test_flush_still_uploads_after_drain_timeout(tmp_path):
     """drain 超时后主线程 flush **照传**剩余文件：放弃标志只约束队列线程，不该把兜底整条关掉。
 
     这一档恰是最需要 flush 的一档（ADR 0042 决策一：队列有界排空、flush 只兜漏网）——若 flush 也被放弃标志
-    gate 掉，整目录一个字节都不再传、`_flush_ok` 也留 False 使目录不删，cloud 档产物随容器盘销毁即永久 404。
+    gate 掉，整目录一个字节都不再传、`_flush_ok` 也留 False 使目录不删，云端后端产物随容器盘销毁即永久 404。
     """
     root = tmp_path / "reports" / "rid"
     art = root / "nova-trajectories"

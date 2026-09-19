@@ -343,7 +343,7 @@ def test_run_meta_max_concurrency_round_trip():
 
 
 def test_run_meta_steps_dir_round_trip():
-    """RunMeta.steps_dir（ADR 0037 决策 4）：带值往返不丢；None 省键（旧落盘 / cloud 档不写该字段）。
+    """RunMeta.steps_dir（ADR 0037 决策 4）：带值往返不丢；None 省键（旧落盘 / 云端后端不写该字段）。
 
     载体在 definition 的理由：起 worker 的三个 local 宿主（同步 run / per-run 进程 / `status --wait` 接力者）
     CWD 各不相同，只有随 definition 走才对三者一致（core 只搬运、不消费语义）。
@@ -366,7 +366,7 @@ def test_run_meta_steps_dir_round_trip():
 
 
 def test_run_meta_worker_fields_round_trip():
-    """RunMeta.worker_variant / worker_task_defs（ADR 0038）：带值往返不丢；None 省键（local 档 / 旧落盘）。
+    """RunMeta.worker_variant / worker_task_defs（ADR 0038）：带值往返不丢；None 省键（本机后端 / 旧落盘）。
 
     载体在 definition 的理由与 max_concurrency 同源（ADR 0034「随 definition 走、宿主只读回」）：起 task 的宿主
     （同步 run 的 FargateEngine / kicker / reconciler）与提交进程分离，只有随 META 持久化才到得了推进器；

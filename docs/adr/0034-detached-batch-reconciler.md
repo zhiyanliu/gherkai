@@ -130,7 +130,7 @@ per-run 进程（观察者+reconciler 三合一）：spawn worker 子进程
    - **一句话**：cloud「kickoff即可离场」/ local「本机必须跑到底」。根因在**主推进器位置**（cloud 云端 Lambda / local 本机进程，见 1.）——三触发源「齐备」是表层对称，「本机是否必须跑到底」才是里层不对称。
 3. 三者同时触发也无害——靠下面 CAS + HWM 条件写。**`status` 对 cloud 是可选的查看+崩溃kickoff（非推进链必需环，云端链才是）；对 local，per-run 崩后 status --wait 是唯一本机推进器、此时反而是必需环**。
 
-## 四个关键机制（均已实装：机制二/三/四有地基实测支撑，机制一从 [0024](./0024-worker-core-protocol.md) seq 不变量推导、独立键空间存取由单测覆盖 `test_sqlite_event_log`/`test_cloud_reconcile`）
+## 四个关键机制（机制二/三/四有地基实测支撑，机制一从 [0024](./0024-worker-core-protocol.md) seq 不变量推导、独立键空间存取由单测覆盖 `test_sqlite_event_log`/`test_cloud_reconcile`）
 
 ### 机制一：`task_exited` 用独立键空间（不入 worker 数值 seq 段）
 
@@ -231,7 +231,7 @@ adapter/组合根（Lambda handler / per-run 进程，注入具体 client）：
 
 **时钟也只一份：三宿主（前台 `run` 的 CLI / local per-run 进程 / 推进器 Lambda）落库时间戳一律调 `compose.now_iso()`**，反向解析一律 `compose.parse_iso()`（core 不取时钟——时间戳由组合根算好传进 `tick`/`finalize_report`，[0016](./0016-execution-architecture-core-lib-run-model.md)）。曾各写一份 `_now_iso`、两种 ISO 格式（`isoformat()` 的 `+00:00` vs `strftime` 的 `…Z`），使**同一份 RunState 内** `started_at`（submit 侧写）与 `claimed_at`/`ended_at`（推进器写）格式不同——`status --json` 按 backend 给出不同格式的同名字段，机读消费者被迫兼容两种。「不复制归约逻辑」同理适用于「不复制取时钟」：多宿主同写一份数据结构时，**格式真源必须唯一**。
 
-## Engine port 演进：pull-iterate → 增出 fire-and-forget（已实装）
+## Engine port 演进：pull-iterate → 增出 fire-and-forget
 
 `Engine.run_scope(job) → (WorkerHandle, Iterator[Event])` 是 **pull 式**（调用方线程迭代事件流；FargateEngine 为满足 `Iterator` 而在线程内轮询 DDB），**同步 `run` 路径仍用它、不变**。无状态路径是 **fire-and-forget**：worker 自写持久 sink、观察者补 `task_exited`、reconciler 读表——不再有「调用方持续迭代」。**实装形态**：`FargateEngine` 增出 `start_scope(job) → task_arn`（只 PutObject job + RunTask、不返事件迭代器）；`run_scope` 与 `start_scope` 共用抽出的 `_put_job_and_run_task`（起 task 单一真源）。**未改 `Engine` Protocol 本身**——`reconcile.Launcher` 是无状态路径专用的注入口（local=`SubprocessLauncher` 起子进程旁路落 SQLite / cloud=`CloudLauncher` 经 resolver 选 FargateEngine 调 `start_scope`），故 core 的 `reconcile.tick` 只认 `Launcher.launch(job)`、对「怎么起」无知，不必给 `Engine` Protocol 强加 `start_scope`。**起 task 的能力（subprocess spawn / ECS RunTask）收进注入的 Launcher/Engine，core 绝不 import boto3/ecs**（reconcile.py 只 import core.model/ports/project）。
 

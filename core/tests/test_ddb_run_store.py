@@ -195,7 +195,7 @@ def test_worker_task_def_arns_on_state_item(aws):
     item = table.get_item(Key={"run_id": "wk-dup", "item_type": "STATE"}, ConsistentRead=True)["Item"]
     assert item[ATTR] == [nova]
 
-    # 旧 definition / local 档（无该字段）→ 属性缺席
+    # 旧 definition / 本机后端（无该字段）→ 属性缺席
     meta, state = _mk("wk-none")
     DynamoDBRunStore(table).create_run(meta, state)
     item = table.get_item(Key={"run_id": "wk-none", "item_type": "STATE"}, ConsistentRead=True)["Item"]

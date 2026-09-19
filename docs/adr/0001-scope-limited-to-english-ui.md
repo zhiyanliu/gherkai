@@ -21,12 +21,7 @@
 
 **视觉定位的语言弱项属引擎模型、不属 Midscene 引擎本身**：Midscene 官方把「非拉丁文字/小字定位偏弱」列为 **GPT-5 系的 per-model 注意事项**（原文 "GPT-5 may still struggle with non-Latin text and with text that is too small in the image."），Qwen 各行无此警告——与 [0002](./0002-midscene-not-driven-by-gpt55.md) 排除 GPT-5.5 的理由同源。故换引擎模型即换该弱项（现用模型见 [0044](./0044-engine-model-selection-and-override.md)「现值」：`us.openai.gpt-5.6-terra`，其中文 UI 探针 3/3）。
 
-**中文 UI 首次实测**（纯中文页面 + 中文 step，经隧道打本机应用，[0035](./0035-local-app-testing-via-tunnel.md)）：
-
-| 引擎 | 结果 |
-|---|---|
-| Midscene（Qwen3-VL） | 三步全过——中文按钮视觉定位 + 中文文本断言均成立 |
-| Nova Act | 动作成功、布尔断言失败 |
+**中文 UI 首次实测**（纯中文页面 + 中文 step，经隧道打本机应用，[0035](./0035-local-app-testing-via-tunnel.md)）：Midscene（当时的引擎模型 Qwen3-VL）三步全过——中文按钮视觉定位 + 中文文本断言均成立；Nova Act 动作成功、布尔断言失败。
 
 Nova 的失败形态**不是读不出中文**：动作步的推理明确读出「提交订单」「取消」两个中文按钮并区分、还主动确认结果文本「订单提交成功」已显示；紧接着的 `act_get` 布尔断言在同一页面却判定"看不到该文本"→ false。另见形近字错读（「格希凯」读成「格希列」）。
 

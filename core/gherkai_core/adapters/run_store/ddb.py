@@ -113,7 +113,7 @@ class DynamoDBRunStore:
             "run_id": initial_state.run_id,
             _ITEM_TYPE_ATTR: _STATE,
             **({"detached": True} if self._detached else {}),  # kicker filter 只认带此标记的 INSERT（ADR 0034）
-            # worker revision ARN 摊平进 STATE（ADR 0038）：omit-when-None/空 —— local 档与旧 definition
+            # worker revision ARN 摊平进 STATE（ADR 0038）：omit-when-None/空 —— 本机后端与旧 definition
             # 无此值时不落属性（清理 pass 的 `contains` 过滤对缺属性的 item 天然不匹配，语义即「未引用」）。
             # 值取 definition 的 worker_task_defs，**去重后排序**成 list：属性只服务「有没有引用某 ARN」的
             # 存在性判定，稳定顺序让 item 可比对（两引擎共用同一 revision 时不留重复项）。

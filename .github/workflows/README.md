@@ -121,7 +121,7 @@ uv publish --index testpypi          # 本地执行要 TestPyPI token（UV_PUBLI
 - **本地构建出的版本是非纯净的**（形如 `1.3.0.post16.dev0+<sha>`，ADR 0037 决策 2b 把
   `dirty`/`metadata` 显式打开了），**PyPI 与 TestPyPI 都拒收带 `+` 本地段的版本**——真要演练上传，
   得站在一个干净的 tag commit 上。演练用的 tag **只打本地、不 push**（`git push` 上来就触发
-  `release.yml` 往真 PyPI 发；即便被 gate 的形态检查拦下，也是一次没必要的红叉）。
+  `release.yml` 往真 PyPI 发；即便被 gate 的形态检查拦下，也是一次没必要的失败构建）。
   不打 tag 时用 `uv publish --dry-run` 走完除上传外的全部流程。
 
 ## 本地静态校验（不推 tag 也能查大部分）

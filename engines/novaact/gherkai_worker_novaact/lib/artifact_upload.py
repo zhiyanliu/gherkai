@@ -155,8 +155,8 @@ class ArtifactUploader:
         给 evidence 的截图用（ADR 0042 决策一「上传时机分两类」）：即时上传是逐文件串行 PutObject 且套了短超时，
         把 K×票数 次 PutObject 压在判定临界路径上会把已成的判定拖在网络上；key 是确定性纯路径计算，故可先算
         URI 写进 evidence.json、字节交给 `enqueue` 的后台队列（收尾有界 `drain`，漏网的由 flush 兜；总字节不变）。
-        代价：cloud 档若 worker 被硬杀，最后一个 step 在途的一两张截图 URI 可能悬空（json 已传、图没传）——
-        消费端按「读不到」处理；本地档 `file://` 无此问题。
+        代价：云端后端若 worker 被硬杀，最后一个 step 在途的一两张截图 URI 可能悬空（json 已传、图没传）——
+        消费端按「读不到」处理；本机后端 `file://` 无此问题。
         """
         if not self.enabled:
             return f"file://{local_path}"  # 与 to_report_ref 的 no-op 分支同形（不 resolve，保调用方 abspath 语义）
