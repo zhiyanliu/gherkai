@@ -1,185 +1,293 @@
 # Gherkin × (Midscene + Nova Act) × AgentCore 测试工具
 
-一套用 Gherkin 描述测试意图、由两个互相独立的 AI 引擎执行、由 AWS 云端浏览器承载的 UI 自动化测试工具（命令行 + 运行时 + 引擎 worker + 部署包，使用方写 `.feature` 跑命令、不对着它的 API 编程——故称工具不称框架）。三层正交，靠 CDP（Chrome DevTools Protocol）串联。
+一套用 Gherkin 描述测试意图、由两个互相独立的 AI 引擎执行、由 AWS 云端浏览器承载的 UI 自动化测试工具：用例、引擎、云端浏览器这三层彼此正交，引擎与云端浏览器之间靠 CDP（Chrome DevTools Protocol）串联。交付物共六个——执行核心库、运行时、命令行、部署包与 Nova Act worker 是五个 Python 发行包，Midscene worker 是一个 npm 包；使用方写 `.feature` 并用命令行执行、不对着它的 API 编程，故称工具不称框架。
 
 ## Language
 
-**引擎 (Engine)**:
-一个独立的「AI 大脑 + Playwright 驱动」组合，负责把自然语言意图变成浏览器动作。本项目有两个平级、互不替换的引擎：Midscene 与 Nova Act。
-_Avoid_: runner（脚本跑测试的工具，含义太窄）、driver（只指底层 Playwright）
+### 引擎与模型
 
-**大脑 / 模型角色 (Brain / Model role)**:
-引擎内部做决策的 AI 模型。一个引擎可拆成多个模型角色，最关键的是「视觉定位」这一非可选的主力角色。
-_Avoid_: 把「模型」与引擎混为一谈——Nova Act 是引擎不是模型。
+**引擎 (engine)**:
+依赖一个云端模型与浏览器驱动、把自然语言意图变成浏览器动作的独立执行体。本项目有两个平级、互不替换的引擎（Midscene 与 Nova Act），一个 scope 只由一个引擎执行（见 ADR 0019）。
+_Avoid_: runner、driver
 
-**视觉定位 (Grounding)**:
-把屏幕截图解析成可点击坐标的能力，是 Midscene 主力大脑的核心职责。质量随所选大脑而异（如小字/非拉丁文字的定位弱项属 GPT-5 系，见 ADR 0002）。
-_Avoid_: 把 grounding 与 planning（规划/推理角色）混用。
+**引擎模型 (engine model)**:
+引擎执行意图时依赖的那个云端 AI 模型，与引擎本身分属两层——同一个引擎可换用不同模型。引擎内的视觉定位与动作规划由它一并承担，不为各角色分别配置模型（见 ADR 0012）。
+_Avoid_: 大脑、模型角色
 
-**AgentCore 浏览器会话 (AgentCore Browser session)**:
-AWS 托管的、隔离的单个云端 Chromium 实例，暴露一个 CDP-over-WebSocket 自动化 endpoint（鉴权用 upgrade 请求上的 header-based SigV4）。一个会话只承载一个自动化客户端——两个引擎需各自一个会话，不共享。
-_Avoid_: 把「会话」与「endpoint 种类」混为一谈。注意此处的 CDP-endpoint SigV4 与 Midscene 调 Bedrock `/openai/v1` 的 SigV4 是两套不同的签名场景，别混。
+**视觉定位 (grounding)**:
+把屏幕截图解析成可操作坐标的能力，是引擎模型不可省的主力职责。它的强弱随所选模型而变——非拉丁文字与小字号文本上的定位弱项属具体模型、不属引擎，换模型即换该弱项（见 ADR 0001）。
+_Avoid_: 单写「定位」、planning
 
-**穿刺 / Spike**:
-一次性、风险优先的最小垂直切片，目的是用最小代价撞通最可能失败的环节、得到「成不成」的认知，而非交付可维护代码。
-_Avoid_: 把 spike 与版本里程碑（v0.x 起的工程推进，见 ADR 0016「版本切分」节）混用。
+**模型家族 (model family)**:
+Midscene 一侧对模型的适配分类，决定引擎发出哪套提示词与请求参数。它由模型 id 推断，推不出且未显式指定时 worker 启动即报错、不做猜测（见 ADR 0044）。
+_Avoid_: 模型系列、模型代号
 
-**用例描述层 (Feature)**:
-语言无关的 Gherkin `.feature` 文件，描述业务可读的测试意图。**核心库自解析**这份 `.feature`（单一事实源，ADR 0022/0025），分组成 scope/job 后把有序 step 派发给两个引擎 worker（BDD runner 已退役，ADR 0022）。
-_Avoid_: 把 feature（意图描述）与 step 派发执行混用。
+**默认模型锁定 (pinned default model)**:
+每个引擎的默认模型锁定在一个具体版本上，由模型评测集对比选出、只随发版更换。使用方改用别的模型经 worker 一侧的覆盖生效，两个引擎形态对称（见 ADR 0044）。
+_Avoid_: 钉版、钉死、旋钮
 
-**骨架验证用例 (Skeleton case)**:
-为证明链路本身活着而刻意挑选稳定、中立、无登录站点（如维基百科）写的探针用例；英文与中文各一组（`features/wikipedia_*.feature` / `features/wikipedia_zh.feature`，后者兼作 UI 语言支持范围的测量夹具，ADR 0001）。与「真实业务用例」分开看待，避免把站点不稳定的噪声误判成 gherkai 的缺陷。
-_Avoid_: 把骨架验证用例当成最终交付的业务测试。
+**AgentCore 浏览器会话 (AgentCore browser session)**:
+AWS 托管的单个隔离云端 Chromium 实例，经 CDP 接入、由执行该 scope 的 worker 建立与释放，两个引擎各有自己的建连方式（见 ADR 0011）。一个 scope 独占一个会话，会话不跨 scope 复用。
+_Avoid_: AgentCore Runtime
 
-**穿刺脚本落点（by-engine）**:
-spike 脚本**紧贴各自引擎的语言/依赖环境**，放在对应子工程内、诚实标记可丢弃：
-- Midscene（TS）→ `engines/midscene/spikes/`，复用 `engines/midscene/node_modules`（含其配方笔记 `SIGV4-FETCH-RECIPE.md`，与代码同居）。
-- Nova Act（Python）→ `engines/novaact/spikes/`，用仓库根 workspace 的 `.venv`（`uv run python engines/novaact/spikes/…`；novaact worker 已包化、无独立 venv，ADR 0037）。
-不设 git 根级 `spikes/`，spike 紧贴各自引擎子工程。**引擎内**复用的代码（如 Midscene 的 SigV4，仅 Midscene 的 spike 与 worker 共用）抽到该引擎的 `lib/`（见 `engines/midscene/src/lib/agentcore-sigv4.mts`）；这不是跨引擎共享——SigV4 是 Midscene 专属，Nova Act 走 IAM/Workflow 不碰它。跨引擎真正共享的是 `features/`（用例），见 [跨引擎共享边界](./docs/adr/0013-cross-engine-sharing-boundary.md)（ADR 0013）。
-_Avoid_: 把某一引擎专属的 spike/文档/代码放到根级或另一引擎目录下；也别误以为引擎内的 `lib/` 是两个引擎共享。
+**隧道暴露 (tunnel exposure)**:
+把只有运行命令那台机器能访问到的被测应用（它本身可以在同一内网的另一台机器上）转成云端浏览器可达的公网地址的能力。地址替换与随机访问凭据的生成都在核心之外完成、每次运行一换，故引擎与模型对隧道无知（见 ADR 0035）。
+_Avoid_: 本地应用暴露、内网穿透、ngrok
 
-**确定性断言 vs AI 断言 (Deterministic vs AI assertion)**:
-确定性断言用底层 Playwright（`nova.page` / Midscene 的 page）判定，结果可复现；AI 断言用自然语言（Midscene `aiBoolean` / Nova `act_get(BOOL_SCHEMA)`，对称布尔投票，ADR 0014；**不用** Midscene 的 `aiAssert`——抛错黑盒、机制与 Nova 不对称，是被拒方案）判定，贴合卖点但非确定性、且每次消耗模型调用。**已定（ADR 0014）：AI 断言为默认主力**（忠于本工具卖点），确定性断言退为高保真补充与逃生舱；代价是非确定性，须配套抖动治理（重试/投票/度量）。抖动治理的具体参数与"哪些判定强制走确定性"靠更难用例的数据迭代。
-_Avoid_: 把 AI 断言当成"无需治理就可信"——它为主，但必须配抖动监控。
+**模型评测集 (model evaluation set)**:
+更换引擎默认模型或升级引擎 SDK 时用来做 A/B 对比与回归的本仓库用例集合，含故意判否的失败探针。它与证明链路存活的探针用例大体是同一批用例文件，用途不同（见 ADR 0044）。
+_Avoid_: 评测集
 
-**报告产物模型 (Report artifact model)**:
-两个引擎的报告形态根本不同：**Midscene 出单一 `report.html`**（含每步截图+AI 决策+坐标，整 scope 一份，`kind=report`、挂 scope 级）；**Nova Act 每次 `act`/`act_get` 出一个 trajectory HTML**（`kind=trajectory`、挂到其所属 **step** 级）+ 一份 `session_summary.json` 数字汇总（`kind=summary`、挂 scope 级）；两引擎另在每个跑过 AI 的 step 上带一份 gherkai 自有 schema 的机读证据（`kind=evidence`、挂 step 级，CLI `explain` 是它唯一的解引用者，ADR 0042）。worker 经 0024 协议把产物**指针**报回 core（`reportRefs.ref`，core 内类型 `ResourceUri`=带 scheme 的统一资源指针：本地 `file://`、cloud 档 `s3://`（引擎原生产物与报告本体均已上传实装，ADR 0029/0030）、未来可 `https://`，故非裸本地路径；字段形状见 ADR 0024），core **不透明搬运**（不 stat/不 fetch/不打开 ref）。**`kind` 表产物类型（report/trajectory/summary/未来 video/trace），粒度由 report_ref 挂在 step/scenario/scope 哪级表达——二者正交**。同一 `ResourceUri` 也是 `ReportStore.write` 的返回类型（统一"资源指针"概念，ADR 0027）。**RunReport（ADR 0027）= 跨引擎归集索引**：`ReportStore` 把 `RunResult` 归集成 `manifest.json`（机器可读）+ `index.html`（人可导航入口），**不解析/不融合原生产物内容**，只索引/链接（cli 每次 run **默认生成**，`--no-report` 跳过）。index.html 的导航链接（`href`）local 相对化（产物本在 run 树内、目录可整体搬走）、cloud 恒为 `s3://`；`ref` 原始指针原样不改（不透明铁律）。新引擎报任意 `kind` 零改 core（永不按 kind 分支）。
-_Avoid_: 笼统说「两个引擎都出报告」而忽略其形态/落点的根本不同；把 `kind` 当粒度维度（它是产物类型，粒度由挂载层级表达）；把 RunReport 当成「解析两个引擎 html 融合成一个大报告」（它只归集索引、不碰产物内容）；以为 core 会按 `kind`/引擎分支处理产物（永不——扩展性契约，ADR 0027）。
+### 用例与断言
 
-## 使用方角色
+**`.feature` 文件 (feature file)**:
+用 Gherkin 写成的用例文件，承载业务可读的测试意图，与实现语言无关。同一份文件服务两个引擎、不各维护一份，解析由核心库单点完成（见 ADR 0005）。
+_Avoid_: 用例描述层、用例层
 
-**使用方 (Consumer) vs contributor**:
-使用方 = 用 gherkai 做测试的团队（下面三顶帽子的统称）；contributor = 开发 gherkai 本身的人。文档按此分层（使用者向 / contributor 向，ADR 0039）。角色是**帽子不是人**：本地开发时一个人常同时戴几顶（写被测应用、写 step、build 完自己推）；团队分工时按帽子拆权限与安装（ADR 0040）。
-_Avoid_: 把「使用方」当成单一画像；按岗位头衔而非按产物/权限划角色。
+**语义 tag (semantic feature tag)**:
+用例文件里带内置语义的三个 Gherkin tag，分别声明会话分组、引擎选择与 job 墙钟预算。其余 tag 没有内置语义，只用于挑选要执行的 scenario（见 ADR 0019）。
 
-**feature 作者 (Feature author，同义 QA)**:
-只写 `.feature` 纯自然语言、零代码；产物 = `.feature`，验证用 `plan`（不需要凭证）。要跑，按跑法权限梯取一档——跑不是这顶帽子独有的事。「QA 零代码」口号里的 QA 即此帽子。
-_Avoid_: 让 feature 作者学任何关键词措辞或碰 `steps/`。
+**通用 step (generic step)**:
+任何用例都能复用的极少数抽象原语——URL 导航、AI 动作、AI 布尔断言与确定性 step；场景细节写在引号内的自然语言里、不写进 step 措辞，故 feature 作者无需写代码，这组原语的能力边界即产品的能力边界。两个引擎对称实现，但对称只在命题清晰时成立，措辞有歧义时两侧可能给出不同判定（见 ADR 0018）。
 
-**测试开发 (Test developer)**:
-会写代码的测试帽子：在使用方项目 `steps/` 写确定性 step（两引擎各一份、模式对称）、本机 local 验证、build 定制 worker 镜像交给部署方推。不需要云端写权限。
-_Avoid_: test engineer / test-engineer（已弃用）；把「developer」当它的同义词（developer 只指被测应用的开发者）。
+**点名检查 (explicit check)**:
+feature 作者在用例里用自然语言直接写出要核对的那一项，判定仍由 AI 做出。能否抓到某类变更取决于有没有点名，而不是工具做不到（见 ADR 0015）。
+_Avoid_: 显式断言锚点
 
-**部署方 (Deployer)**:
-拥有 AWS 账号写权限、跑 `gherkai deploy` / `push-worker` 的帽子——唯一需要云端写权限的角色；装 `gherkai[deploy-aws]`。不拥有镜像构建。
-_Avoid_: 与「提交者」混用。
+**确定性 step (deterministic step)**:
+由测试开发注册、直接用代码操作浏览器执行的 step：不调用模型，行为与结论逐次可复现，既可做精确核对，也可做登录这类固定动作。项目专属的这类 step 由使用方在自己的项目里自建，工具只内建示范（见 ADR 0037）。
+_Avoid_: 确定性锚点、锚点、确定性逃生舱
 
-**跑法权限梯 (Execution tiers)**:
-执行是与帽子正交的轴（ADR 0040）：`plan`（无凭证）< `--backend local`（本机凭证、自己付费）< cloud detached `submit`/`status`（最小云端权限、无任何 ECS 写）< cloud 同步 `run`（另需起停 task）。任何帽子或机器身份按需取一档；CI 应走 detached 档。
-_Avoid_: 把执行权限挂在帽子上；给「跑的人」单立角色。
+**确定性断言 (deterministic assertion)**:
+确定性 step 中承担核对的那一类：用浏览器查询直接判真假，按需作为 AI 断言之外的高保真补充（见 ADR 0014）。
 
-**提交者 (Submitter)**:
-不是帽子，是**权限类别**：跑法权限梯上两档云端跑法的权限持有者，人或机器身份都行。权限登记见 ADR 0033「资源清单」末段与 ADR 0038「权限面增量」。
+**AI 断言 (AI assertion)**:
+用自然语言写出、交由引擎模型判真假的断言，是本工具默认的判定方式。代价是结论非确定性，且每次判定都消耗一次模型调用（见 ADR 0014）。
 
-**使用者侧 AI agent (User-side AI agent)**:
-装了 gherkai skill（ADR 0043）、在使用方项目里替人操作 gherkai 的 AI agent（Claude Code、Codex 这类工具）。不是第五顶帽子：它替人戴 feature 作者 / 测试开发 / 部署方的帽子，权限与产物跟着帽子走，「人手敲还是 agent 代劳」属跑法那根正交轴（ADR 0040 决策 6）。用户文档里正文写「AI agent」即可。
-_Avoid_: 「AI coding agent」作角色名（coding 把活动说窄了，它多半不写代码）；把它和 gherkai 的 AI 引擎混称（引擎一律叫引擎 / worker / 模型）。
+**票 / 投票 (vote / Voting)**:
+对一条 AI 断言的一次布尔判定结果称一票，它是判定归约的最底层单位。默认只取一票，按需多取时以多数作为该 step 的判定，确定性 step 不投票（见 ADR 0014）。
+_Avoid_: 重试
 
-**contributor 侧 AI agent (Contributor-side AI agent)**:
-在本仓库里干活（写码、写文档、复盘）的 AI agent，戴 contributor 的帽子；ADR / CONTEXT / CLAUDE.md 约 80% 的读者，`docs/ai-eng/` 是它的工作文档。与使用者侧 agent 合称「两侧 AI agent」。
-_Avoid_: 「建造者 AI」（ADR 0045 曾用，已废止）；把它当成独立于 contributor 的角色。
+**判定抖动 (flakiness)**:
+同一页面上同一条 AI 断言多次判定结论互不一致：随机噪声造成的不稳定，可用同一断言多票取多数压低（见 ADR 0015）。
+_Avoid_: 飘忽、种类 A、两种不确定性
 
-## 产品形态
+**柔性漏检 (tolerance-induced false negative)**:
+页面确实变了而 AI 仍柔性判过、不报警的漏检，源于灵敏度不足且稳定复现，故多票取多数治不了。它是柔性冒烟这一定位的必然代价，收窄靠点名检查或改走确定性 step（见 ADR 0015）。
+_Avoid_: 柔性吞变更、吞变更、种类 B
 
-**通用 step (Generic step)**:
-极少数**抽象原语**：URL 导航（确定性，含引号内 URL）/ AI 动作（When）/ AI 布尔断言（Then，+投票）/ 确定性锚点（脚手架）。任何用例复用，QA 不写代码——场景细节放进引号里的自然语言，不放进 step 措辞。这是"QA 只写 `.feature`、零代码"承诺的唯一载体，**其能力边界 = 产品能力边界**。两个引擎对称实现（函数签名见 ADR 0018/0020）。**「取数/取串」等原语已删**（ADR 0018：避免过度设计，QA 直接写自然语言让 AI 判，需精确数值走确定性锚点）。AI 动作/断言 step 可挂 **Gherkin DataTable/DocString 多行参数**（一次填多字段表单、粘一大段文本）——worker 拼成附加文本（dataTable→markdown 表格、docString 原样）随 step 自然语言一起喂 AI（确定性/URL 导航路径不接），两个引擎对称（ADR 0024）。
-_Avoid_: 写绑死具体场景的 step（如"语言版本数量"）——那不是通用 step；把它当成"任意动作都能稳跑"——开放性动作会引入页面瞬态 flaky（ADR 0018）。
+**柔性冒烟 (flexible smoke test)**:
+本工具的核心定位：只验证业务意图是否达成，对达成路径上未被点名的视觉、文案与布局变化高度宽容。它与「任何差异都报警」的精确回归本质对立，后者应交给专用工具（见 ADR 0015）。
+_Avoid_: 探索性回归、流程冒烟
 
-**柔性冒烟 (Flexible smoke)**:
-v1.0 的核心定位（ADR 0015）——只验证业务**意图是否达成**（流程能否走通），对达成路径上未被点名的视觉/文案/布局变化高度宽容。AI 柔性是差异化核心，与"精确回归（任何差异都报警）"本质对立。
-_Avoid_: 把它当精确/像素级回归工具用。
+**探针用例 (probe case)**:
+为验证链路本身通畅而刻意挑选稳定、中立、无需登录的站点写成的用例，英文与中文各一组，与真实业务用例分开看待。它同时是模型评测集里的正向基准（见 ADR 0001）。
+_Avoid_: 骨架验证用例、骨架用例、探针
 
-**点名检查 (Explicit check) vs 确定性锚点 (Deterministic anchor)**:
-两个不同层（ADR 0020）：
-- **点名检查**：QA 想精确核对某项时，直接写**纯自然语言** `Then "价格是 ¥99"`——仍走**默认 AI 判断**（QA 零代码、无路由关键词）。「能否抓某类变更」取决于 QA 点没点名，不是做不到。
-- **确定性锚点**：少数"不容 AI 抖动"的精确检查（URL/DOM），由**测试开发**在使用方项目的 `steps/` 目录写 `@deterministic` 注册（Playwright 查询；worker 包内的 `deterministic_steps` 脚手架只留内建示例），不走 AI、不预置（QA 不碰；ADR 0037 决策 4）。
-_Avoid_: 以为"不点名也能抓变更"；把它与 A/B 两种不确定性混为一谈；以为 QA 要学特殊措辞（QA 永远只写自然语言）。
+**用例预检 (plan)**:
+对一批用例在执行前做的检查：分组成 job、校验写法与配置、标注每个 step 走确定性 step 还是 AI。它不执行用例、不连云端、不调模型，因而零费用、可反复运行（见 ADR 0025）。
+_Avoid_: dry-run
+
+### 角色与权限
+
+**使用方 (consumer)**:
+用 gherkai 做测试的一方，是 feature 作者、测试开发、部署方三顶帽子的统称，与 contributor 相对。帽子按产物与权限划分、不按人划分：一个人可同时戴几顶，团队分工时按帽子拆开（见 ADR 0040）。
+
+**contributor**:
+开发 gherkai 本身的一方，与使用方那三顶帽子并列的第四顶帽子，沿用英文、不设中文正名。「维护者」不是它的同义词，只指 contributor 中负责发布的一侧——随版本把发行包发到 PyPI 与 npm、把基础镜像发到 GHCR 的那一方（见 ADR 0040）。
+_Avoid_: 维护者
+
+**feature 作者 (feature author，同义 QA)**:
+只写 `.feature` 文件、不写任何代码的帽子；写作本身不需要任何凭证，写法靠用例预检验证。要执行用例，按执行权限梯级取一档（见 ADR 0040）。
+
+**测试开发 (test developer)**:
+会写代码的测试帽子：在使用方项目里编写确定性 step（两个引擎各一份、匹配模式成对）、以本机后端验证，并构建定制 worker 镜像交部署方推送。不需要云端写权限（见 ADR 0040）。
+_Avoid_: test engineer、test-engineer、developer、开发者
+
+**部署方 (deployer)**:
+负责部署与更新云端后端的帽子，也是唯一需要云端写权限的帽子。不拥有 worker 镜像的构建，只负责推送与注册（见 ADR 0040）。
+
+**提交者 (submitter)**:
+持有某一档云端执行所需权限的主体，人或机器身份皆可；持续集成中的机器身份是典型持有者。它是权限类别、不是帽子（见 ADR 0040）。
+_Avoid_: 提交方
+
+**执行权限梯级 (execution tiers)**:
+执行方式与执行后端的四种组合按各自所需权限分出的档位，它与帽子正交——任何帽子或机器身份都按需取一档。两种云端组合所需的权限互不包含、本机组合要的又是另一套凭证，故各档不构成逐档累加的阶梯（见 ADR 0040）。
+_Avoid_: 跑法权限梯、跑法、权限梯、执行档
+
+**两侧 AI agent (AI agents on both sides)**:
+使用者侧 AI agent 与 contributor 侧 AI agent 的合称。两者都是替人操作的执行者、不另立帽子，权限与产物由它替人戴的那顶帽子决定（见 ADR 0040）。
+
+**使用者侧 AI agent (user-side AI agent)**:
+装了 agent skill、在使用方项目里替人操作 gherkai 的 AI agent（如 Claude Code、Codex 这类工具），它替人戴使用方的帽子（见 ADR 0040）。
+_Avoid_: AI coding agent、用户侧 AI agent、用户侧 agent
+
+**contributor 侧 AI agent (contributor-side AI agent)**:
+在本仓库从事编码、文档与复盘的 AI agent，戴 contributor 的帽子，也是本仓库长期文档的主要读者（见 ADR 0040）。
+_Avoid_: 建造者 AI
 
 **agent skill (gherkai skill)**:
-教使用者侧 AI agent（Claude Code / Codex 这类工具）驾驭本工具的一份 `SKILL.md` + `references/`：从需求写 feature 与 steps、`plan → run / submit → status → explain` 的工作循环、退出码分流、失败汇报模板；三个任务域（测试 / 环境排障 / 云端交付）一个入口、按域拆 references。源文件随 CLI wheel 发行（`cli/gherkai_cli/skills/gherkai/`），`gherkai skill install` 拷进使用方项目或用户级 agent 目录、与 CLI 同版本、重装整目录收敛（ADR 0043）。
-_Avoid_: 把它当第二份文档源——机读字段页是契约页的确定性转换副本、正文只写操作模型；把它当内部文档——它是产品面，零 ADR 编号 / 内部机制名、只用绝对 URL。
+教使用者侧 AI agent 驾驭本工具的一份操作指南，覆盖三个任务域：用它做测试（写用例与确定性 step，按用例预检、执行、判定、失败证据的循环推进并汇报）、环境就位与排障、云端后端交付。它随命令行发行、与命令行同版本，由使用方装进自己的项目或个人 agent 目录（见 ADR 0043）。
+_Avoid_: 技能包、agent 技能
 
-**两种不确定性 (A: flakiness / B: 柔性吞变更)**:
-A = 同一页面 AI 判断飘忽（随机噪声）→ **投票可治**；B = 页面真变了但 AI 柔性照样跑过、不报警（灵敏度不足）→ **投票治不了**，v1.0 接受为已知边界（ADR 0015）。
-_Avoid_: 以为"投票能带来确定性"——它只压 A，给不了对变更的灵敏度（B）。
+**skill 评测集 (skill evaluation set)**:
+迭代 agent skill 质量用的 contributor 侧资产：一批带判分断言的任务样例（装与不装 skill 两臂对照）加一套「该不该触发」的查询集。它不随 skill 发行，使用方接触不到（见 ADR 0043）。
+_Avoid_: 评测集
 
-**票 / 投票 (Vote / Voting)**:
-对一条 AI 断言的一次布尔判定结果称一票（引擎一次布尔调用的返回值）；`--assertion-votes N` 对同一断言取 N 票的多数作为该 step 的判定（ADR 0014），确定性 step 不投票。票是判定归约的最底层单位（票 → step → scenario → job → run，见 `docs/internals/verdict-model.md`）。
-_Avoid_: 把「一票」用作「一批 / 一次性」的口语义；把票数写成判定状态。
+### 执行与推进
 
-**判定态与 severity 阶梯 (verdict states / severity)**:
-`Status` 七态被**两把正交的刀切成三组**（ADR 0031 决定一 / 一·补 / 二）：**判定终态** `passed`/`failed`/`error`（worker 经 wire 只报这三态，决定四）；**core 派生终态** `skipped`（fail-fast 下 worker 从未 spawn：没执行、没花钱、可无脑重跑；step 级同名 `skipped` 是另一层——scope 内被短路的 step，会话已起、钱已花，见下「连锁失败读法」条）/ `aborted`（跑一半被掐：有副作用、有现场可查）；**生命周期前置态** `pending`/`running`（只活在 `JobState`/`RunState`，不进 `JobResult.status`、无 severity）。两把刀别混：按**生命周期**切 = `TERMINAL_STATUSES`（还会不会变，含 skipped/aborted）；按**算不算判定结论**切 = `_NON_VERDICT`（skipped/aborted/pending/running），二者在 skipped/aborted 上有意重叠。**severity 数值序只对终态定义**：`skipped`(-1) < `passed`(0) < `failed`(1) < `error`(2) < `aborted`(3)，用于终态间的排序/着色/单调升级比较。**run 级判定不查这张表**：聚合入口先滤掉非判定态、再在三态间取 max（决定三），退出码按「是否 `passed`」取补、且各命令语义不同（决定五 / ADR 0034），故派生终态与前置态都不污染 run 判定。人读的四层归约全景见 `docs/internals/verdict-model.md`。
-_Avoid_: 拿 `Status` 字符串比大小（字母序把 `error` 排在 `failed` 前，一律查 severity 表）；把 `pending`/`running` 当判定结论；以为 run 级聚合会把 skipped/aborted 算进去。
+**Run 数据模型 (run data model)**:
+一次执行的数据层级：Run 含多个 Job（即 Scope），Job 含多个 Scenario，Scenario 含多个 Step；Scope 是共享操作上下文的 Scenario 分组、也是执行单元（内部串行、彼此并行），Feature 是与之正交的组织轴。一个 run 产出两样结果：机读的汇总判定与人读的归集索引，后者只链接引擎原生产物、不融合其内容（见 ADR 0016）。
+_Avoid_: 批次、一批
 
-**连锁失败读法 (error → 后续 step 短路跳过)**:
-scope 内 step 串行，**上一 step `error`（如导航 SSL/网络故障）会短路本 scenario 后续 step**（ADR 0031 决定六 / 0028）——worker 不再对后续 step 调 AI（① 省钱；② 不在**已损坏的环境**（如停在 SSL 错误页）上跑出误导性假失败），而是为每个被跳过的 step 发独立 `step_skipped` 事件；core 据此本地赋 `StepResult(status=skipped, shortcircuited=True)`。**判据锁 `status==error`（不看 error_type）**——两个引擎对称、network/engine 错都触发；**只短路本 scenario**（下一 scenario 可能导航新页恢复，独立用例不牵连；跨 job 是 fail-fast 职责，正交）。`shortcircuited` 是与判定轴（status）正交的第二维（"为什么 skipped"），cli 文本汇总与 RunReport index.html 据此加视觉旁注"因前置 step error 被跳过"。**短路是 worker 行为**（因果只存在于 worker 的串行循环）；core 仍是纯 reducer（ADR 0026）——忠实归约 `step_skipped`、不臆断因果。**skipped 两级同名不同层**：job 级 skipped（fail-fast 整个 job 没 spawn、无 step 明细）vs step 级 shortcircuited（job 跑了一半、剩余 step 被短路、有 step 明细），语义都是"没跑"、层级不同。历史：早期无 step 短路时，"error 后的 failed"曾靠"按 status 顺序猜"加旁注（渲染层缓解）；现已升级为执行层短路 + 读 `shortcircuited` 精确判定。
-_Avoid_: 把 step 级 `shortcircuited`（scope 内短路）与 job 级 `skipped`（fail-fast 没 spawn）混为一谈；以为短路跨 scenario（只短路本 scenario）；以为 core 会臆断因果（短路判据在 worker，core 只归约）。
+**不透明标识符 (opaque identifier)**:
+把 worker 上报的事件挂回对应 scenario 与 scope 的关联键，规定为不透明：支持任意文本、只作键使用，核心既不把它解析成路径也不清洗其字符（清洗会把不同输入映射成同一输出、制造静默撞名）。唯一性由调用方保证；需要安全字符的消费层自行做可逆编码（见 ADR 0025）。
+_Avoid_: 标识符、key、主键、slug、安全名、路径
 
-**成本可观测 (Cost observability)**:
-产品价值之一：一次跑批花了多少（ADR 0024）。**原则——engine 只报原生量、core 只各自合计、不折美元**：两个引擎计费轴不同（Nova 按 agent 工作时长 `time_worked_s`、Midscene 按 LLM token），core 各自累加成 `total_time_worked_s` / `total_tokens`（step→scope→run，无引擎报则 None）。**美元折算交消费者**（用自己 AWS 账户的真实费率）——gherkai 不内置费率常量（避免追会过期的单价表）。与**墙钟时长** `duration_ms`（性能）正交：`time_worked_s` 是 Nova 计费量、`duration_ms` 是 core 测的执行墙钟，两个数不同。
-_Avoid_: 以为 gherkai 算美元（不折美元、只报原生量，美元交消费者）；混淆成本 `time_worked_s` 与性能 `duration_ms`。
+**执行方式 (execution mode)**:
+一次运行是前台同步执行还是提交后台执行：前者由命令阻塞等到判定，后者提交即返回、结果稍后另行收集。它与执行后端是两根正交的轴。
+_Avoid_: 跑法
 
-**Run 数据模型 (Run data model)**:
-执行的层级（ADR 0016）：**Run ⊃ Job(=Scope) ⊃ Scenario ⊃ Step**。Scope = 共享操作上下文的 scenario 分组，是执行单元（scope 内串行、scope 间并行）；Feature 是正交的组织轴。Step 是最细一级（core 经 `StepResult` 保留 step 级粒度）。各级带**墙钟时长** `duration_ms`（性能指标）。Run 产出两样：**RunResult**（机器可读汇总判定，给退出码/CI/WebUI；含 run_id、status、各级时长、原生量成本合计 `total_tokens`/`total_time_worked_s`）与 **RunReport**（人看的归集索引，原 M5「报告统一」的归宿，**v1.0 已实现**：manifest.json + index.html 入口，只索引/链接原生产物、不融合内容，ADR 0027）。
-_Avoid_: 把 Feature 当执行单元；**把 Job 当 scenario 粒度（破坏会话依赖）——Job = Scope，不是 scenario**；混淆 RunResult（数据）与 RunReport（报告）。
+**执行后端 (backend)**:
+一次运行的状态、产物与 worker 整体落在哪一侧：本机后端落在执行命令的那台机器，云端后端落在部署方的云端账户。两侧由单一选项二选一、不向使用方暴露混搭；解析、分组与判定模型则两侧共用同一份核心（见 ADR 0016）。
 
-**标识符 (id：scenarioId / scopeId)**:
-关联键（把 worker 事件挂回 scenario；`scopeId` 已是 cloud events 表主键的一半 `run_id#scope_id`、也是 DDB RunStore `STATE.jobs` Map 的 key），是**不透明标识符**——只在 JSON/dict key/DB key 用，全支持任意 UTF-8（空格、中文路径原样保留，**不 normalize**：任何清洗字符的转换都会把不同输入映射成同一输出、制造撞名，而撞名是静默灾难，比"id 含空格"严重得多）。core **不拿 id 当路径解析**。`scenarioId = <uri>:<行号>[:<example行号>]`；`uri` 由调用方原样传入、core 不解析。**唯一性责任在调用方**：plan 要求 `features` 列表 uri 互异（重复 = 接口违约 → 报错，ADR 0025）；`scopeId` 的唯一性由 plan 自己守——`@scope` 的值与未标 scope 的 scenario 编号**共用一个 `scopeId` 命名空间**，撞上即报错，故 plan 返回的 job 其 `scopeId` 两两互异（ADR 0025「id 派生」）。若未来某消费层（URL/文件名）需安全字符 id，由该层做**可逆**编码（urlencode 等、保唯一），不在 core 做有损 normalize。
-_Avoid_: 对 id 做有损 normalize（撞名风险 > 可读性收益）；把 id 当文件路径去读；以为 uri 重复会被 core 静默 merge（那是撞 id 的 bug，core 报错；跨文件同 `@scope` 合并是另一回事，见 ADR 0025「scope 全局命名空间（跨文件合并，撞名 warning）」节）；以为 `@scope` 的值可以随便取（值撞上同批某条未标 scope 的 scenario 编号 = 撞 `scopeId`，core 报错、不静默把两条并进一个会话）。
+**定位参数 (run addressing options)**:
+决定一条命令查的是哪一个 run 的那组参数：执行后端、报告落点与部署前缀。查询命令须与提交命令逐项一致，否则查不到这个 run。
+_Avoid_: 筛选参数、定位链
 
-**执行核心库窄腰 (Core-library narrow waist)**:
-真正的窄腰是**执行核心库**（解析 `.feature` → 分组 scope → 调度 → 收集结果），**不是 CLI**（见 ADR 0016）。CLI 是核心库的第一个、最薄的前端；WebUI 是另一个前端，**直接调核心、不 shell-out CLI**。CI/skill 通过 CLI 这个皮间接用核心。上层前端与可替换的执行引擎（`Engine` port，本地进程 / Fargate；见下「执行引擎 port」条）都围绕核心库解耦。
-_Avoid_: 把逻辑焊死在 CLI `main()` 里；以为"WebUI 要包 CLI"；把"选哪个执行引擎（`Engine`）"当成一锤定终身。
-（版本演进 spike→v0.x→v1.0→v1.x→v2.0 见 ADR 0016。）
+**部署前缀 (deployment prefix)**:
+一套云端后端的名字空间：该套后端各资源的默认名由它派生，同一个云端账户可按不同前缀并存多套环境。它是定位资源的输入，须与部署时所用的前缀一致（见 ADR 0033）。
+_Avoid_: 环境名、stack 名
 
-**执行引擎 port (Engine port)**:
-核心库之下真正跑一个 scope 的地方，是一个 **port**（`Engine`，对齐「引擎」术语，ADR 0016），由组合根注入。v1.0 实装为**单个参数化 `SubprocessEngine`**（`cmd`/`cwd`/`env` 参数化即可 spawn Node 或 Python worker——两个引擎"spawn 子进程 + 讲同一套 0024 协议"形状本就一致，无需两个具名 adapter 类；经 `EngineResolver` 按 `job.engine` 选）。演进：v1.0 本地进程（`SubprocessEngine`，浏览器仍在云端 AgentCore Browser）；执行进程上云已实装——`FargateEngine` + `gherkai-deploy-aws` 的 CDK stack（`gherkai deploy` 部署），`--backend cloud` 同时切 Fargate/ECS 执行（批处理 shape-fit 优于 AgentCore Runtime，ADR 0017；已建成真部署，ADR 0032/0033）。
-_Avoid_: 混淆"浏览器在云端"（spike 已验证）与"执行进程也在云端"（Fargate，已建成）——两者现皆在云、但仍是两件事；把它当成"核心 import 引擎"——核心永不 import 引擎，只 spawn worker。
+**执行前预检 (preflight)**:
+执行开始前对所选执行后端做的一轮只读就位检查：本机后端查这批要用的引擎 worker 能否启动，云端后端探这次运行必需的后端资源并解析出要用的 worker 镜像。作为执行闸门时任一项不过即拒绝执行、不产生费用（见 ADR 0033）。
+_Avoid_: 预检、环境自检
 
-**两个引擎都子进程 + 薄 worker (Both-legs-subprocess + thin worker)**:
-两引擎语言锁死（Midscene 锁 TS、Nova Act acting 锁 Python，ADR 0023 证伪了全 TS 核心），故核心（Python）**对每个 scope spawn 一个 worker 子进程**——两个引擎对称、核心零引擎依赖。worker = 被 spawn 的进程，一生 = 开 AgentCore 会话 → 按 scope 串行跑 scenarios（每 step 派发成 act/assert）→ 回 JSON → 退出（一次调用 = 一个 job = 一个 scope）。**核心自解析 Gherkin**（单一事实源），worker 只派发不解析——故 cucumber 补丁与 pytest-bdd 路由 hack 退役（ADR 0022）。
-_Avoid_: 以为子进程里跑整个 BDD runner（那是被否的 B2）；把 worker（运行时角色）与 engine（领域概念/目录名）混用。
-
-**确定性 step 注册表 (Deterministic step registry)**:
-测试开发扩展确定性锚点的落点：在对应 worker 里登记 `(模式 → handler)`（`@deterministic`）。核心发原始 step 文本，worker 先查注册表命中走精确 handler、未命中落 catch-all 走 AI。匹配放 worker（确定性 handler 引擎特定，碰 Playwright/CDP），核心对 step 语义无知。延续 ADR 0020 角色边界（QA 永不碰）。**注册即暴露**：`description`/`example` 是 `@deterministic` 的必填 kwarg，缺则注册时 fail-loud（ValueError）——裸正则对 feature 作者不可读（ADR 0036）。**能力可发现**：worker 另有两个非 job 入口——能力自述 `--capabilities`（一个对象：`deterministic_steps` 注册表清单 + grace 下限 `min_grace_s`，ADR 0024「引擎自报下限」）与查询 `--match-steps`（批量回答某批 step 命中什么），CLI `list-deterministic --engine`、`plan` 的派发标注（含多模式冲突预检）与 `doctor` 的 steps 段自检只是转述之——匹配语义仍 100% 在 worker，core/CLI 不持有 pattern。
-_Avoid_: 把匹配放进核心（核心只解析结构+调度，不懂 step 语义）；以为 QA 要写确定性 step；以为清单是另一份外置文件（那是双事实源、必与代码里的 pattern 漂移，ADR 0036 被拒方案）。
-
-**Ports 层 (Ports & adapters)**:
-核心库把可替换的外部依赖收成独立 port，导出稳定接口；核心只依赖接口。四个核心 port（ADR 0016）：`Engine`（跑 scope）、`RunStore`（**控制面**：run 的 definition(RunMeta) + 运行态(RunState：status/血缘/起止)，频繁读写、撑轮询续跑——DDB 主要服务它）、`ResultStore`（**数据面**：每 job(=scope) 判定真值/投票，追加为主——判定真值唯一权威）、`ReportStore`（把 `RunResult` 归集成 RunReport=manifest+index 的派生只读导航视图，ADR 0027）。`RunStore` 从原 `ResultStore` 拆出（控制面 vs 数据面访问模式不同）。**v1.2 无状态批量运行另加两个同性质 port**（ADR 0034，定义在 `core/gherkai_core/reconcile.py`——只服务无状态推进路径）：`EventLog`（事件日志：local SQLite / cloud DDB events 表，reconciler 全量重放推演状态的写模型）与 `Launcher`（起一个 job：subprocess / ECS RunTask），同样由组合根注入、同样可替换。**具体 adapter 由组合根（CLI main / WebUI bootstrap）注入**，不由 module 内部 env-sniff 自选（后者是本项目踩过的 Midscene `GlobalConfigManager` 反模式）。**两套 store 对称并存**：四个 port 的 local adapter 落文件（见 `core/gherkai_core/adapters/`，落盘形状以代码/ADR 0016 为准），cli 落 `<report-dir>/<run_id>/`；cloud 侧 RunStore→DynamoDB、Result/ReportStore→S3（+ StepArgument offload 解 DDB 400KB 限），**行为对拍 local**、boto3 走库层可选依赖 `gherkai-core[aws]` / `gherkai-runtime[aws]`（ADR 0030 决定六；CLI 发行包 `gherkai` 则**硬依赖** `gherkai-runtime[aws]`，ADR 0037 决策 2c——库层 extra 只留给库消费者，code 层「local 路径绝不 import boto3」的懒加载不变量不动）。两套都只持久化已成形模型，**未发明 ADR 有意 defer 的字段**（jobId 与 job 级结束时刻待真实需求逼出；run 级起止已由 ADR 0030 实装，job 级 claim 时刻已由 ADR 0034 的 job timeout 逼出为 `JobState.claimed_at`）。注哪套由 `--backend {local,cloud}`（默认 local，ADR 0030 决定七）定，两套 store 在产品本体 `runtime/gherkai_runtime/compose.py` 对称装配（cli/Lambda/未来 WebUI 共用，ADR 0016「演进」节）；`--backend cloud` 同时把执行面切到 `FargateEngine` + `gherkai-deploy-aws` 包的 CDK stack（`gherkai deploy`，ADR 0032/0033/0037）。**无状态批量运行（v1.2，ADR 0034）**：`submit` 提交完就走 + `status [--wait]` 轮询/接力收集（同步 `run` 保留）——CQRS + 无状态事件驱动 reconciler（core 抽纯 `project`/`plan_next` + `reconcile.tick`，local/cloud 共用；local=per-run 进程+SQLite events sink，cloud=三 Lambda 事件驱动链 + DDB Stream + EventBridge，链上分工见 ADR 0034）。**「续跑/轮询读取面」由此定型**：外部只读 `RunState`（reconciler 是唯一写者、纯从 events 推演）、`RunState` 加 `high_water_mark` 挡并发 stale 覆盖——不再是「待逼出」。
-_Avoid_: 把多个 port 揉成一个上帝 module；让 port-module 用全局单例自选实现；混淆控制面（RunStore）与数据面（ResultStore）。
-
-**本地应用暴露 / 隧道 (Local app exposure / tunnel)**:
-把「跑 CLI 的机器可达」的被测应用（`http://localhost:3000`，也可是局域网另一台机器）经隧道暴露给云端浏览器的能力，由 `--expose-local <origin>` 显式启用（ADR 0035；默认路径零新依赖、零出网变化）。`TunnelProvider` 是**组合根共享层（`runtime/gherkai_runtime/`）的可插拔口子**、不是 core port——首个也是当前唯一实现 ngrok（`runtime/gherkai_runtime/tunnel.py`；对 ADR 0009「最大化用 AWS」的登记例外，AWS 内实查无「开发机 → 云端浏览器」这条入站通道的等价物）。**URL 映射在组合根做**：起隧道拿到公网 URL 后，把 job 文本及其 argument 里该 origin 前缀替换成隧道 URL（前缀字符串级，`localhost` 与 `127.0.0.1` 不互认），故 core/worker/引擎/AI 对隧道无知；`plan` 显示替换前的原始地址（零副作用）。认证 = URL 内嵌随机 basic-auth 凭据（ngrok 边缘节点拦截），安全面靠随机 URL + 随机凭据 + **每 run 一换 + 终态即拆**。隧道宿主按跑法分三形态（前台 `run`=CLI 进程 atexit / local `submit`=per-run 进程 / cloud `submit`=setsid 守护进程 + TTL 兜底，编排见 `runtime/gherkai_runtime/tunnel_host.py`）。
-_Avoid_: 以为 core/worker 懂隧道（映射在组合根；definition 只多一个 `RunMeta.extra_http_headers`）；以为「提交完就走」=可以关机（关机/断网=隧道断=run 以导航失败告终，是明示边界不是 bug）；把守护进程 TTL 当可随手拍小的保险常数（TTL 到点无条件拆，短于实际预算会让剩余 job 在应用不可达下跑成假失败——故按 definition 算，见 ADR 0035 决策 3）。
+**无状态批量运行 (stateless batch execution)**:
+提交后台执行所依托的执行形态：一个 run 的状态全部持久在外部，推进由一个幂等的单步动作反复叠加而成，任何宿主都能接手下一步（见 ADR 0034）。
+_Avoid_: 无状态跑批
 
 **推进器 (advancer)**:
-把 run 从提交推到终态的执行体统称——**角色词、不是组件名**（code 里没有单一对应符号，这也是造词的原因）。按驱动模型分：同步驱动的推进器 = CLI 进程内的 `schedule()` 循环；无状态驱动的推进器 = 调 `reconcile.tick` 的宿主，共四个——local per-run 进程、local `status --wait` 接力者、cloud kicker λ、cloud reconciler λ（后两个同 code、都跑完整 `tick`——kicker 不是「只起首批的薄壳」，而是与 reconciler 等价的完整推进器，差别只在触发面：kicker 接 runs 表 Stream、`status --wait` 的踢一脚与超时闹钟到点，reconciler 接 events 表 Stream 的事件级联。冷启动时 kicker 的输出恰好是「起首批」——那是完整 `tick` 对空 run 的自然结果、非专用精简逻辑；其另两个入口做的接力推进与超时处置，靠的正是同一份完整 `tick`）。文档里两种计数并存、切面不同：「三路推进器」按跑法数（同步 `run` / local `submit` / cloud `submit`），「四个宿主」按进程数（只数 `tick` 的）。机制见 ADR 0034（核心思想与机制一-四），给人的导览见 `docs/internals/execution-and-reconciliation.md`。
-_Avoid_: 把「推进器」读作 reconciler 的中文名——reconciler（无论指 CQRS 机制角色还是同名 Lambda）只是推进器之一；在 README 层使用本词（内部抽象，README 用命令/组件的具体名，读者上下文里没有它）。
+把一个 run 从提交推进到终态的执行体统称，是角色词而非组件名（没有一个符号覆盖全部宿主）。按驱动模型分两类：同步驱动的进程内调度循环，与无状态驱动的若干宿主——后者共用同一段幂等的单步推进逻辑，差别在触发面与各自所在一侧的存储与执行面（见 ADR 0034）。
+_Avoid_: 推进者、驱动者、常驻推进器
+
+**接力推进 (relay advancement)**:
+后台推进中断或停滞后，由等待终态的查询命令接手把 run 推进到终态的机制。两个执行后端在此本质不对称：本机后端由查询方亲自推进、离开即停止，云端后端只需唤醒云端推进链一次（见 ADR 0034）。
+
+**退出观察者 (exit observer)**:
+观察到 worker 进程终止、并把退出结果送达推进方的角色，按执行方式与执行后端由不同承担者扮演。退出永不由 worker 自报，故「进程已干净终止」这个判定前提只能由它提供（见 ADR 0034）。
+
+**状态投影 (state projection)**:
+由已持久的全部事件重放推演出的 run 运行态只读视图，由推进器单点写出、只前进不倒退。外部读者一律只读它、不自行重放事件；run 级终态不由它落定（见 ADR 0034）。
+_Avoid_: 状态快照
+
+**终态提交点 (commit point)**:
+run 级终态被一次落定的那一步：它之前各 job 的判定真值已完整落库，它之后才写派生视图。故读到 run 已达终态，即保证判定可完整取用（见 ADR 0030）。
+_Avoid_: 提交时刻
+
+**事件流 (event stream)**:
+worker 向核心上报的唯一一类协议内容，与进程退出信号共同构成判定的必要条件。承载它的物理通道随执行方式与执行后端而变，事件流本身在各组合下同构（见 ADR 0024）。
+_Avoid_: 事件管道
+
+**协作式停止 (cooperative stop)**:
+停下一个执行中 job 的约定：核心只表达停的意图，worker 自行选择时机收尾、优先释放云端浏览器会话，再干净退出（见 ADR 0024）。
+_Avoid_: 终止契约
+
+**停止宽限期 (stop grace period)**:
+从请求停止到强制终止之间留给 worker 收尾的时间预算：本机执行时下限由各引擎自报，云端执行的宽限在部署时定。宽限不足会让会话释放落空、继续计费（见 ADR 0024）。
 
 **job 墙钟预算 (job timeout)**:
-「一个 job 最多跑多久」的用户预算（墙钟，从推进器起这个 job 时起算——detached 档即 claim 时刻，故含拉镜像/挂 ENI 等启动开销）。**两层声明、tag 优先**：scope 级 `@timeout:N` tag（ADR 0019；同 scope 声明不一致 → `PlanError`）+ CLI `--default-job-timeout`（未标 tag 的兜底，`<=0`=不超时），与 `@engine`/`--default-engine` 同构。**载体在 definition**（`Job.timeout_s`，随 RunMeta 持久化）——预算属 run 的定义、与推进方式无关，故必须随 run 走到任何推进器；三路推进器（同步 `run` / local per-run 进程 / cloud 事件驱动链）各自 enforce 同一形态「到点回调 → 仍未终态则 stop → 交既有退出观察链收敛」，worker 不消费 timeout（只守 flag-only 停止契约）。超时归因 = `error` + `error_type="timeout"`（主动中止而非引擎故障，ADR 0031 决定一）。两层取舍与三路 enforce 见 ADR 0034「job timeout」节。
-_Avoid_: 把它当运行参数（曾是 `ScheduleOpts` 参数、不进 definition，detached 推进器就拿不到它——已退役）；与 act 级超时（Nova 的 `NOVA_ACT_TIMEOUT_S`）或尚未做的 run 级总预算混为一谈；以为 worker 会自己超时自杀（enforce 全在推进器侧）。
+一个 job 最多执行多久的用户预算，按墙钟计时、自推进器启动这个 job 起算，故含启动开销。两层声明、用例内声明优先于命令侧默认值；预算随 run 的定义走到任何推进器，由推进器一侧强制执行（见 ADR 0034）。
+_Avoid_: job 墙钟超时、墙钟预算
 
-**三名分离：发行名 / import 名 / 命令名 (dist name / import name / command name)**:
-（ADR 0037 决策 2。目录↔发行名：`core/gherkai_core`=`gherkai-core`、`runtime/gherkai_runtime`=`gherkai-runtime`、`cli/gherkai_cli`=`gherkai`+命令 `gherkai`、`engines/novaact/gherkai_worker_novaact`=`gherkai-worker-novaact`、`deploy_aws/gherkai_deploy_aws`=`gherkai-deploy-aws`，均为根 uv workspace 成员；`engines/midscene` 是 npm 包、不在 workspace。）一个 Python 交付物有三个名字、各自独立取：**发行名**是 PyPI 上的包名（`gherkai` / `gherkai-runtime` / `gherkai-core` / `gherkai-worker-novaact` / `gherkai-deploy-aws`），**import 名**是 `site-packages` 里的顶层目录（一律 `gherkai_` 前缀：`gherkai_cli` / `gherkai_runtime` / `gherkai_core` / …），**命令名**是 console script（`gherkai`）。唯一硬约束：**用户敲的发行名 = 命令名**（`uvx <name>` 把 `<name>` 同时当发行名与命令名解析），故 CLI 发行包叫 `gherkai`、中间层让位叫 `gherkai-runtime`。版本真源 = git tag，兄弟包间 `==` 同版本 pin（ADR 0037 决策 2）。
-_Avoid_: 用裸通用词作发行名或 import 名（`core`/`cli`——前者 PyPI 已被占、后者与他人同名顶层包静默合并/互删）；把「发行名 ≠ import 名」当异常（`gherkin-official` 的 import 名就是 `gherkin`，是常态）；为兄弟包写 `>=` 范围依赖（装出未测混搭）。
+### 结果与证据
 
-**worker 定位链 (worker locate chain)**:
-（`repo_root()` 已整体退役，ADR 0037 决策 3。）组合根解析「用什么命令 spawn 某引擎 worker」的四级顺序：① env `GHERKAI_WORKER_<ENGINE>_CMD`（+ 可选 `_CWD`）显式覆写 → ② 同 venv 入口（Python 引擎：`sys.executable -m gherkai_worker_novaact`，经 CLI extra `[local]` 装进 CLI 自己的 venv）→ ③ PATH 上的可执行（`gherkai-worker-<engine>`，midscene 由 `npm i -g @gherkai/worker-midscene` 提供）→ ④ 兜底拉起 `uvx gherkai-worker-novaact==<CLI 版本>`（仅 novaact、仅纯发行版本；npx 实测不穿透 fd3，midscene 无此级）。四级全 miss 抛结构化异常、由调用点分叉处置（`run`/`submit`/`list-deterministic` 退 2，`plan` 保持 best-effort 降级）。dev 与分发**同一条链**、不设 dev 模式特判（ADR 0037 决策 3）。
-_Avoid_: 让 worker 定位依赖 repo 目录结构（分发后没有 repo）；把「安装」与「拉起」绑在一起（二者正交：`[local]` 负责装、定位链负责起）；给 worker 定专属 cwd（产物落点一律经绝对路径 env 注入；`--no-report` 档不注入落点并经 `GHERKAI_NO_ARTIFACTS` 令 worker 不生成/不上报产物）；在定位链里统一退码（`plan` 的降级契约是 ADR 0036 已定行为）。
+**判定状态与 severity 数值序 (verdict states / severity order)**:
+执行单元的状态按两条判据划分：按是否还会变化，分终态与前置态；按是否构成判定结论，只有通过、未通过与执行出错算，核心派生的跳过与中止不算。severity 数值序只在终态之间定义，用于排序与只升不降的比较；run 级判定先滤去不构成结论的状态，再在判定终态之间取最重的一个（见 ADR 0031）。
+_Avoid_: severity 阶梯、判定态
+
+**step 短路 (step short-circuit)**:
+一条 scenario 内某个 step 判为执行出错后，worker 跳过其余 step 并逐个报为跳过，避免在已损坏的环境上继续调用 AI 徒增费用与误导性结论。短路只作用于本 scenario，与判定状态正交：被跳过的 step 另带说明缘由的标记，核心据事件忠实归约、不自行推断因果（见 ADR 0031）。
+
+**错误归因 (error type)**:
+对未通过与执行出错这两类判定的规范化失败分类，回答这一步为什么没通过、或为什么没能执行完；类别集由两个引擎共用，含断言未过、超时、护栏拦截、网络故障等，可随真实失败样本扩充。判定为跳过或中止的单元没有归因（见 ADR 0024）。
+_Avoid_: 错误码、失败说明
+
+**判定真值 (verdict truth)**:
+每个 job 一份、自包含的判定明细，回答结果是什么、为什么是这个结果。它是判定的唯一权威、不可删除，与派生视图不一致时一律以它为准（见 ADR 0027）。
+
+**派生视图 (derived view)**:
+由判定真值派生出的只读导航与入口，供人与机器找到某次执行的判定明细与现场产物。它可删除、可随时重建，永不作判定来源，它自身写入失败也不改变已落定的判定（见 ADR 0027）。
+
+**step 证据 (step evidence)**:
+凡调用过 AI 的 step，在其结束时由执行它的 worker 产出的一份 gherkai 自有格式、两个引擎同形的机读证据：模型看到了什么、如何推理、这一步据何判定。它是 gherkai 唯一会解析的证据，未调用 AI 的 step 不产出它（见 ADR 0042）。
+
+**引擎原生产物 (native engine artifact)**:
+引擎 SDK 自己生成的现场产物，如报告页、轨迹页与数字汇总，类型由引擎自报、不是固定名单。gherkai 只搬运与索引，不解析、也不融合其内容；类型与挂载粒度正交，粒度由它挂在哪一级执行单元上表达（见 ADR 0027）。
+
+**产物指针 (artifact URI)**:
+指向一份产物的统一资源标识，同一种形式同时表达本机与云端载体、由开头的协议名区分，因此不可当作本地文件路径。它由产生方给出，核心与报告层只作不透明搬运：不打开、不校验、不按产物类型分支（见 ADR 0027）。
+_Avoid_: 路径、本地路径
+
+**安全点提前上传 (safe-point early upload)**:
+在执行途中的安全点——某个 step 的 AI 调用已返回、某条 scenario 已结束——把已落盘而尚未上传的引擎原生产物提前传走，收窄执行被中断即丢失现场的窗口。它是尽力而为的一层，产物链接的强保证不下放给它，仍锚在报出指针那一刻与正常收尾时的上传（见 ADR 0029）。
+_Avoid_: 抢传
+
+**成本可观测 (cost observability)**:
+一次执行的花费可被读出这一性质：两个引擎的计费轴不同，各自只上报自己的原生计量，核心只按执行层级分别累加、不折算货币金额（货币量级的估算另在用户文档给出，以账单为准）。成本计量与衡量性能的墙钟时长正交，二者不是同一个数（见 ADR 0024）。
+_Avoid_: 成本信封、耗时
+
+**机读输出契约 (machine-readable output contract)**:
+命令的机读输出形状与退出码语义合起来构成的对外接口面，读者是 AI agent 与 CI：数据与诊断分走两路输出，消费者须先按退出码分流、再解析输出。退出码语义按命令而异——同一个码在不同命令上未必表示判定；输出形状由护栏守住，扩展只做加法（见 ADR 0041）。
+
+### 架构与交付
+
+**执行核心库窄腰 (core-library narrow waist)**:
+系统的窄腰是执行核心库——解析用例、分组成 scope、调度执行、收集结果都在其中，上层前端与下层可替换的执行实现都围绕它解耦。命令行是它的第一个也是最薄的前端，将来若新增前端同样直接调用核心库、不经命令行转发（见 ADR 0016）。
+_Avoid_: 命令行窄腰、框架
+
+**核心注入接口 (core ports)**:
+核心库为可替换的外部依赖导出的注入接口，分两组：执行一个 job、控制面的 run 定义与运行态、数据面的判定真值、报告归集为一组；事件日志与起一个 job 另成一组，只服务无状态批量运行。实现一律由组合根注入，核心只依赖接口、不在模块内部按环境自选（见 ADR 0016）。
+_Avoid_: Ports 层、Ports & adapters、六边形架构、持久化层、DAO
+
+**执行引擎 port (engine port)**:
+核心库之下真正执行一个 scope 的接缝，由组合根注入具体实现：本机后端起一个本地进程，云端后端起一个容器任务，核心的调度逻辑不因此改变。它与 AI 引擎共用「引擎」这个名字，指的却是接缝本身——核心永不引入引擎的代码，只经它把一个 scope 交出去（见 ADR 0016）。
+
+**每 scope 一个 worker 进程 + 薄 worker (one worker process per scope / thin worker)**:
+核心为每个 scope 起恰好一个 worker 进程，由它串行承载该 scope 的全部 scenario，两侧后端都是这同一形态。worker 薄在只按核心派发的 step 调用引擎、不解析用例文本，执行途中以流式事件回报进展与结果（见 ADR 0016）。
+_Avoid_: 两个引擎都子进程、腿、两条腿、BDD runner
+
+**确定性 step 注册表 (deterministic step registry)**:
+worker 侧「模式 → 精确实现」的匹配真值：核心只发原始 step 文本，命中即走精确实现、未命中交 AI 处理。内建示例与使用方 steps 目录里的扩展进同一张表，匹配语义只在 worker、核心对 step 语义无知；注册时必须给出这步做什么的说明与可抄用的写法示例，缺一即报错（见 ADR 0036）。
+_Avoid_: step definitions、fixture
 
 **steps 目录 / 定制面 (steps dir / customization surface)**:
-（ADR 0037 决策 4；worker 包内的 `deterministic_steps.py` / `deterministic.steps.mts` 只留内建示例。）使用方放确定性 step 定义文件的目录（默认项目内 `steps/`，`--steps-dir` / env `GHERKAI_STEPS_DIR` 覆写），是**使用方的地盘**、与 features 同处。提交侧解析成绝对路径**随 definition 持久化**（`RunMeta.steps_dir`），所有起 worker 的宿主从 definition 读回、经 env 注给 worker；worker 启动时排序递归加载（Python `*.py` 顶层 `@deterministic` 副作用注册 / TS 只认 `.mts`/`.mjs`——模块体系不依赖使用方目录的 `package.json#type`——动态 import，裸 specifier `@gherkai/worker-midscene` 由 worker 随 dist 发布的 resolve hook 解析到自身同一 URL），**任一文件加载失败即 fail-loud 退出（两侧）；midscene 侧另有「加载后零注册即退出」的双实例护栏**，两个非 job 入口（`--capabilities` / `--match-steps`）同样加载，故 `list-deterministic` / `plan` 标注 / `doctor` 自检都反映定制。cloud 档：steps 烙进定制镜像（`COPY steps/` + `ENV`），镜像里的 steps 是否最新由使用方管理、preflight 不比对，想区分就换 variant（ADR 0037 决策 4、ADR 0038）。
-_Avoid_: 把「定制」理解为改 worker 包源码（那是 fork 模式，PyPI 化后不成立）；让约定逻辑进 worker（worker 只认 env）；加载失败静默跳过（确定性 step 会被静默换成 AI catch-all）；引入「使用方覆盖内建」优先级（撞 pattern 按 ADR 0036 conflict 语义处理）。
+使用方存放确定性 step 定义文件的目录，与用例同处、由使用方维护，是扩展确定性 step 的唯一落点。它随 run 的定义持久化并注给每个 worker；worker 启动时递归加载其中的定义文件，任一文件加载失败即报错退出，云端后端则把它构建进定制镜像（见 ADR 0037）。
+_Avoid_: 烙进镜像
 
-**worker 镜像：基底 / variant / 默认指针 (worker image: base / variant / default pointer)**:
-（ADR 0038：`gherkai deploy push-worker` / `list-workers`、`gherkai deploy` 的 worker 镜像四步。曾经的形态——`tools/build_push_workers.py` 全量 build、task-def 焊死 `latest`、RunTask 传 family——已退役。）**基底**由维护者 CI 发到 GHCR（`ghcr.io/zhiyanliu/gherkai-worker-{novaact,midscene}:X.Y.Z`，linux/amd64，零使用方内容，ADR 0037 决策 5）。**variant** = 一套具名的确定性 step 集 = 一个定制镜像：developer 本地 `FROM 基底` + `COPY steps/` 自己 build（必须 `--platform linux/amd64`），部署方 `gherkai deploy push-worker <本地镜像> --engine <e> --variant <名>` 推送到自己私有 ECR（tag = `<CLI 版本>-<variant>`，`gherkai_runtime.names.image_tag` 归一化 + 校验）（推送前校验架构、不是 amd64 即退 2）并为该（引擎，variant）注册一个 **按推送后取得的 digest 引用镜像、tags 记血缘**的 task-def revision，映射记进 SSM；基底同步进 ECR 的那份叫 `base`。**默认指针**（SSM，部署级一个）决定提交时不给 `--worker-variant` 用哪个，deploy 初始化为 `base`、`push-worker --set-default` 改指、升级不重置。运行时只用 definition 里解析好的显式 revision、永不用 family（旧 definition 缺字段时按后端默认指针解析）；tag 可变、replace 自决；旧 revision 先打 `retired-at` tag，由 push-worker / deploy 末尾的清理 pass 在静默期满且无在跑 run 引用时删；push 前先校版本 skew。多版本并存 = 多 prefix 多环境，CLI 经 `--prefix` 显式选择。
-_Avoid_: 让 gherkai 拥有镜像构建（只给三行模板）；把 variant 参数叫 `--tag`（它只是 tag 后缀）；task-def 引用 `latest` 或 RunTask 传 family（任何一次 push 都会劫持默认）；revision 按 tag 而非 digest 引用（重推会换掉在跑 run 的镜像）；让 preflight 比对镜像内 steps 与本地 steps（内容由使用方负责、提交者未必有 steps 目录）；支持 ARM64/多架构（Fargate ARM64 有按 AZ 的不可用面，复杂度不值，ADR 0038 被拒方案）；用 SSM 列表存退休名单（4KB 上限、与 revision 分家）；重派生后立即删旧 revision（INACTIVE 不能再起新 task、detached run 会断）；把基底 registry 的运行时拉取特性当选型依据（运行时只拉自己 ECR）。
+**worker 定位链 (worker resolution chain)**:
+组合根解析「用什么命令起某个引擎的 worker」的固定优先级顺序：显式覆写、与命令行同一环境里的 worker 模块、系统路径上的 worker 命令、按同版本临时拉取发行包（后两级仅 Python 引擎），逐级尝试、全部落空即报出带安装指引的错误。开发态与分发态同一条链、不设开发模式特判（见 ADR 0037）。
+_Avoid_: worker locate chain
+
+**基础镜像 / variant / 默认指针 (base image / variant / default pointer)**:
+云端 worker 镜像的三个层次：基础镜像由维护者随版本发布、不含任何使用方内容；variant 是把一套具名的确定性 step 集构建进基础镜像得到的定制镜像，由测试开发构建、部署方推送进使用方自己的镜像仓库并注册；默认指针是部署级选择，决定提交时未指定 variant 用哪一个。运行时只认 run 定义里已解析好的具体版本，不回头取最新（见 ADR 0038）。
+_Avoid_: 基底镜像、基底
 
 **部署 provider (deploy provider)**:
-（ADR 0037 决策 6。）`gherkai deploy` / `gherkai destroy` 是 provider 中立的命令面：CLI 前端只经 entry point group `gherkai.deploy` **发现**已装的 provider 包、把它的 flag 贴到子命令上、按动作分派——皮零 IaC 知识、不 import `aws_cdk`/boto3。当前唯一 provider = `gherkai-deploy-aws`（`gherkai_deploy_aws.cli:Provider`，经 CLI extra `[deploy-aws]` 装、只有部署方需要）：收编了 CDK stack 与 Lambda handler 源，命令拼 context、在临时工作目录生成 `cdk.json`、调 cdk CLI；`--vpc` 三档必给（运行期校验，`--bootstrap` 除外）并随 stack 写 SSM 供**三态比对**，版本戳同为 stack 资源。区分：**「提交者」**不装该 extra、只装 `gherkai` 即可跑 run/submit，两者靠 SSM 版本戳做 skew 比对（见下「版本单旋钮」；角色定义与权限梯见上「使用方角色」）。
+部署与销毁命令背后可插拔的部署实现：命令行前端只发现已装好的 provider、把它的选项贴到命令上并按动作分派，自身不含任何基础设施即代码知识。当前唯一实现面向 AWS，只有部署方需要安装它，提交者不装也能执行、提交与查询 run（见 ADR 0037）。
+_Avoid_: 皮、供给包、裸 provider
 
-**版本单旋钮 (single version knob)**:
-（ADR 0037 决策 7；实装 = 五个 Python 包 dynamic version、`uv-dynamic-versioning` 从 git tag 派生；skew 三态 = `runtime/gherkai_runtime/compose.check_backend_skew`，run/submit/status/explain 的 cloud 路径均先于资源 preflight 过闸（explain 无 preflight，先于任何云端读）。）一个 git tag `vX.Y.Z` 派生全部交付物的版本：五个 Python 包（`==` 同版本 pin）、npm 包、基底镜像 tag、定制镜像 tag 的版本前缀、部署 stack 的 SSM 版本戳（stack 资源、与部署事务同生死）、GitHub Release。不做兼容矩阵，替代物 = preflight skew **三态**检查（戳缺失 = 0037 前部署 → 警告不拦；CLI 新于后端 → 退 2、不设放行口（临时用 `uvx --from 'gherkai==<后端版本>'` 跑同版本 CLI）；旧于 → 警告；非纯净版本跳过——靠 `uv-dynamic-versioning` 的 `dirty=true` + metadata 默认行为保证非纯净构建必带 `+`；metadata **不**显式开——开了干净 tag 也带 `+sha`、发布 gate 必败），其后 preflight 再按本 run 引擎解析 worker variant（ADR 0038）。操作规则 = **升级即三步**：`uv tool upgrade gherkai` → 立刻 `gherkai deploy`（新模板、同步新版本 `base`、重派生）→ 有自定义 variant 的团队从新基底重 build 并 `push-worker`（默认指针不重置、推上去即恢复）；非部署者等部署者做完再升（ADR 0037 决策 7）。
-_Avoid_: 在 pyproject/package.json 手写版本号（双真源）；为 CLI↔后端↔镜像维护兼容矩阵；把 Prefect 的「先升 server 再升 client」直译过来（本架构后端由 CLI 的 `[deploy-aws]` 部署、同版本钉死，做不到反序）；升级只升 CLI 不 deploy 不重推 variant（preflight 会拦，别绕）。
+**三名分离：发行名 / import 名 / 命令名 (dist name / import name / command name)**:
+一个 Python 交付物的三个各自独立取的名字：发行名是包索引上的包名、import 名是导入时写的顶层包名、命令名是安装后可敲的命令。唯一硬约束是用户敲的发行名与命令名必须一致，故命令行发行包占用产品名、其下的中间层另取一名（见 ADR 0037）。
+
+**版本真源 (single version source)**:
+全部交付物的版本由同一个 git tag 派生：Python 发行包、npm 包、基础镜像与定制镜像的版本前缀、部署栈里记录的版本戳、发行说明都取自它，版本号从不手写，兄弟包之间按同版本严格锁定。不做兼容矩阵，替代物是执行前的版本一致性比对——命令行新于后端即拒绝执行、无放行口，旧于后端只告警（见 ADR 0037）。
+_Avoid_: 版本单旋钮、旋钮
+
+**spike**:
+风险优先的一次性验证切片：以最小代价先验证最可能失败的环节、取得可行性认知，不以交付可维护代码为目标。
+_Avoid_: 穿刺、穿刺针、版本里程碑
+
+**运行中 run 引用检查 (in-flight run reference check)**:
+回收已退休的 worker 镜像任务定义的两个前置条件之一：只要还有未到终态的 run 引用它即予保留，另一条是退休静默期已满；任一不满足即留到下一次回收。回收在推送镜像与部署时顺带执行，没有定时任务（见 ADR 0038）。
+_Avoid_: 安全阀、两道闸、在跑 run
