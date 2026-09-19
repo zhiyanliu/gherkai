@@ -19,7 +19,7 @@ npm i -g @gherkai/worker-midscene           # 本机运行的 Midscene worker（
 uv tool install 'gherkai[deploy-aws]'       # 部署方：部署与维护云端后端
 ```
 
-需要 Python 3.13 与 [uv](https://docs.astral.sh/uv/)、Node ≥ 22，以及一个开通了 Bedrock、AgentCore Browser 与 Nova Act 的 AWS 账户。前置要求与逐步说明见 [用户指南：开始使用](./docs/user-guide/getting-started.md)。
+需要 Python ≥ 3.13 与 [uv](https://docs.astral.sh/uv/)，以及一个开通了 AgentCore Browser 与所用引擎对应服务（Nova Act 服务 / Bedrock 上的默认模型）的 AWS 账户；在本机运行 Midscene worker 或部署云端后端另需 Node ≥ 22。前置要求与逐步说明见 [用户指南：开始使用](./docs/user-guide/getting-started.md)。
 
 ## 30 秒上手
 
@@ -36,7 +36,7 @@ gherkai skill install          # 装给 Claude Code；--agent codex 装给 Codex
 ```bash
 gherkai plan features/wikipedia_generic.feature       # 用例预检：分组、引擎路由、每一步走 AI 还是确定性；零费用
 gherkai run  features/wikipedia_generic.feature       # 运行；结果落在 reports/<run_id>/（index.html 是入口）
-gherkai explain <run_id>                           # 有用例没过：逐步看问了 AI 什么、AI 看见了什么、截图在哪
+gherkai explain <run_id>                              # 有用例没过：逐步看问了 AI 什么、AI 看见了什么、截图在哪
 ```
 
 后台运行用 `submit` 提交、`status --wait` 收结果；加 `--backend cloud --prefix <前缀>` 切到团队的云端后端。执行方式与执行后端的四种组合、常用选项与退出码见 [运行测试与查看结果](./docs/user-guide/running-and-results.md)。

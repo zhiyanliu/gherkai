@@ -15,7 +15,7 @@
 | 关注点 | Midscene 引擎 | Nova Act 引擎 | 可共享？ |
 |---|---|---|---|
 | 鉴权 | SigV4 自签（[0008](./0008-midscene-bedrock-auth-sigv4-selfsign.md)） | IAM + Workflow（[0004](./0004-novaact-iam-auth-via-workflow.md)） | ❌ 机制根本不同 |
-| 模型调用 | OpenAI chat-completions（Qwen3-VL） | Nova 自家 SDK | ❌ |
+| 模型调用 | OpenAI chat-completions（Bedrock 上的视觉模型，现值见 [0044](./0044-engine-model-selection-and-override.md)） | Nova 自家 SDK | ❌ |
 | 浏览器接入 | connectOverCDP + 自签 upgrade | provider.cdp_session() | ⚠️ 概念像、实现各异 |
 | 断言 | aiBoolean / page | act_get(BOOL_SCHEMA) / page | ⚠️ 语义对齐、API 不同 |
 

@@ -5,13 +5,13 @@
 > （版本真源见其决策 2b/7，worker 镜像两层分工见 [ADR 0038](../../docs/adr/0038-worker-image-delivery.md)）；
 > 冲突时以 ADR + workflow 文件本身为准，别在这里新立决策。
 
-## 两条工作流
+## 三条工作流
 
 | 文件 | 触发 | 干什么 |
 |---|---|---|
 | `ci.yml` | push 任意分支 / 所有 PR / 手动 | ① `uv sync --locked` + 根 `pytest`（全 workspace 成员，含 deploy_aws 的 CDK synth 测试）；② midscene `npm ci && npm run build && npm test`；③ `uv build --all-packages` smoke + 产物校验 + 发布 gate 演练（打本地临时 tag、不 push：版本必须逐字等于 tag） |
 | `release.yml` | push tag `v*` | gate（tag 形态 + CHANGELOG.md 有本版节 + 算出的版本==tag）→ ① PyPI → ② npm → ③ GHCR 基础镜像 → ④ GitHub Release（正文由 `.github/scripts/release_notes.py` 从 CHANGELOG.md 渲染） |
-| `pages.yml` | push 改动 `docs/diagrams/**`（只在默认分支部署）/ 手动 | 只把 `docs/diagrams/` 原样上传 GitHub Pages（`index.html` + 已入库的可交互 HTML + SVG，不做任何构建）；Pages 的 build type 已切为 workflow，不再从分支根目录做 Jekyll 构建（ADR 0045 决策七） |
+| `pages.yml` | push 改动 `docs/diagrams/**` 或 `pages.yml` 自身（只在默认分支部署）/ 手动 | 只把 `docs/diagrams/` 原样上传 GitHub Pages（`index.html` + 已入库的可交互 HTML + SVG，不做任何构建）；Pages 的 build type 已切为 workflow，不再从分支根目录做 Jekyll 构建（ADR 0045 决策七） |
 
 发布是**一个动作**：`git tag vX.Y.Z && git push origin vX.Y.Z`。版本真源只有 git tag
 （五个 pyproject 走动态版本、无手写版本号；`engines/midscene/package.json` 只留 `0.0.0-dev` 占位——npm 的必填字段，发布时由 `npm version <tag>` 覆写，别手改），CI 从 tag 派生五个 wheel 的版本、npm 包版本、
@@ -152,7 +152,7 @@ CI 的 `images` job 用 index 态（按 tag 版本装已发行包）；发行前
 
 ## 维护
 
-- **工具链版本**在两个 workflow 的 `env:` 里（`UV_VERSION` / `PYTHON_VERSION` / `NODE_VERSION`），
+- **工具链版本**在 `ci.yml` 与 `release.yml` 的 `env:` 里（`UV_VERSION` / `PYTHON_VERSION` / `NODE_VERSION`），
   两边保持同值——发布路径与 CI 路径分叉了，CI 绿就不再代表发布链能运行。
   `UV_VERSION` 还有个下限：`uv publish` 上传 PEP 740 attestation 需 ≥ 0.9.12。
 - **action 一律锁定到精确 tag**（`astral-sh/setup-uv@v10.0.1` 这种），不用浮动大版本：

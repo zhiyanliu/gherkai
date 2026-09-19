@@ -1,7 +1,7 @@
 # 权威信息源（自查用）
 
 > 抢救自原 `midscene-novaact-prototype-guide.md` §10（该文档已退役），并补入本项目实测中用到的关键路径。
-> 注意：决策与"事实现状"以 `CONTEXT.md` + `docs/adr/` 为准——下面是**外部一手来源**，用于查证细节。
+> 注意：决策与实装现状以 `docs/adr/` + code 为准（`CONTEXT.md` 只定术语，见 ADR 0045 决策八）——下面是**外部一手来源**，用于查证细节。
 
 ## Midscene（任意页加 `.md` 取 markdown）
 
@@ -10,10 +10,10 @@
 - https://midscenejs.com/model-common-config.md — family 列表 + 配置块
 - https://midscenejs.com/integrate-with-playwright.md
 - https://midscenejs.com/bridge-mode.md — 连桌面 Chrome（CDP 接法参考）
-- 安装的源码（本机 ground truth）：`engines/midscene/node_modules/@midscene/core/dist/`、`.../shared/dist/`
-  - `createOpenAIClient` 注入点：`@midscene/core .../service-caller/index`（见 ADR 0008）
-  - 隔离 ModelConfigManager：`@midscene/core .../agent/agent.js`（传 createOpenAIClient/modelConfig 即切隔离，见 `engines/midscene/spikes/SIGV4-FETCH-RECIPE.md` §7）
-  - planning 无条件附图：`@midscene/core .../ai-model/llm-planning.js`（见 ADR 0012）
+- 安装的源码（本机 ground truth，现为 1.12.8）：`engines/midscene/node_modules/@midscene/core/dist/`、`.../shared/dist/`
+  - `createOpenAIClient` 注入点：`@midscene/core .../ai-model/service-caller/openai-client`（`createAndWrapClient` 里 `await createOpenAIClient(baseOpenAI, openAIOptions)`，经同文件 `createChatClient` 调用；`service-caller/index` 只再导出 `createChatClient` 等符号、不含此回调；见 ADR 0008）
+  - 隔离 ModelConfigManager：`@midscene/core .../agent/agent.js`（传 `modelConfig` 即切隔离——我们的接线同时传 createOpenAIClient 与 modelConfig；1.12.8 起只传 createOpenAIClient 则是 agent 作用域包装、仍读全局 env，见 `engines/midscene/spikes/SIGV4-FETCH-RECIPE.md` §7）
+  - planning 无条件附图：`@midscene/core .../ai-model/workflows/planning/standard-planning.js`（`standardPlan()` 两个消息分支都附 `image_url`，`includeLocateInPlanning` 不去图、只改 system prompt 与定位解析；1.9.8 时此逻辑在 `ai-model/llm-planning.js`，见 ADR 0012）
   - 取结构化 API：`aiBoolean/aiNumber/aiString/aiQuery/aiAsk`（`.../agent/agent.d.ts`，见 ADR 0010/0014）
 
 ## Nova Act

@@ -12,7 +12,8 @@ plan(features: [{uri, text}], config: {defaultEngine, defaultAssertionVotes, def
 Job = {
   scopeId, scopeName, engine, assertionVotes,   // votes 维度语义权威在 ADR 0014，本模块只透传
   timeoutS,                                     // job 墙钟预算秒（null=不超时）；tag 语义权威在 ADR 0019、
-                                                // 设计取舍与三路 enforce 在 ADR 0034，本模块只解析 + 校验
+                                                // 设计取舍与三路 enforce 在 ADR 0034，本模块只解析 + 校验；
+                                                // 属 definition 层、不进 worker 的 job line（worker 不消费 timeoutS）
   scenarios: [
     { id, name, steps: [ { index, keyword, text, argument? } ] }
   ]
@@ -20,7 +21,7 @@ Job = {
 ```
 
 - **接受 feature 内容（`{uri, text}`）而非路径** → core 不碰文件系统（skill：accept dependencies, don't create them），纯数据 in / 纯数据 out，可被 test 直接喂字符串。读文件是组合根/CLI 的事。
-- **输出 `Job[]` = [0024](./0024-worker-core-protocol.md) 协议输入形状**：一个 Job = 一个 scope = 一个会话边界 = schedule 交给单个 worker 的活。
+- **输出 `Job[]` 承载 [0024](./0024-worker-core-protocol.md) 协议输入的全部内容（definition 层的 `timeoutS` 除外，不上线）**：一个 Job = 一个 scope = 一个会话边界 = schedule 交给单个 worker 的活。
 - **`select` 谓词（可选，[0041](./0041-agent-facing-cli-affordances.md) 决策一追加）**：scenario 筛选施加在**分组与 engine/timeout 解析之后、Job 组装之前**。不变量：**筛选只减少「跑哪几条」**——scope 的引擎、墙钟预算、会话身份一律按**全量**成员解析，与不筛时逐字一致；整组被筛空的 scope 不进任何 job（且在解析 engine/timeout 之前跳过），`_scope_key` 仍对全量成员校验。`None` = 不筛，下文其余语义均按不筛描述；谓词由调用方组装，core 不认 flag 语义——`--scope/--tags/--scenario` 的语义、设计取舍与被拒方案见 [0041](./0041-agent-facing-cli-affordances.md) 决策一。
 - **删除测试**：删掉本模块，「按 tag 分组 + engine 校验 + Gherkin 展开」会在 CLI / 未来 WebUI 各写一遍 → 它在挣钱。
 
@@ -125,7 +126,7 @@ Job = {
 ## 现在做 / 留口子
 
 - **现在做（v1.0）**：上文已描述的全部；边界由下条「留口子不实现」界定。
-- **留口子不实现**：`@id:` 显式 id tag；Rule 层级的特殊处理（Compiler 已展开；parse 仅为行号回查下钻 Rule 内节点，不把 Rule 概念暴露到领域模型）；feature 级 tag 的更多语义（现仅 `@scope`/`@engine`）。
+- **留口子不实现**：`@id:` 显式 id tag；Rule 层级的特殊处理（Compiler 已展开；parse 仅为行号回查下钻 Rule 内节点，不把 Rule 概念暴露到领域模型）；feature 级 tag 的更多语义（现仅 `@scope`/`@engine`/`@timeout`）。
 
 ## 重议
 

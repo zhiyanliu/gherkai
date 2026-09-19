@@ -10,7 +10,7 @@
 |---|---|---|
 | ① 写 | 使用方项目的 `steps/*.py`（Nova）/ `steps/*.mts`（Midscene） | `@deterministic(正则, description=…, example=…)` / `deterministic(正则, handler, {description, example})` |
 | ② 装 | worker 进程启动的第一件事 | 内建脚手架先注册（模块 import 副作用），再按 env `GHERKAI_STEPS_DIR` 排序递归加载使用方的文件，注册进**同一张**表 |
-| ③ 查 | `list-deterministic` / `plan` 标注 / `doctor` | 三个命令都 spawn 一次瞬时 worker（自述或 match 查询），查询的都是这张表 |
+| ③ 查 | `list-deterministic` / `plan` 标注 / `doctor` / `run`·`submit` 的本机前置 | 这些入口都 spawn 一次瞬时 worker（自述或 match 查询），查询的都是这张表 |
 | ④ 执行 | worker 派发每个 step | 先查这张表，命中即调用使用方的 handler；未命中才落到内建 URL 导航 / AI |
 
 handler 怎么写（签名、`ctx` 提供什么、正则具名组如何传参）**不在本文范围**，见使用者向的 [`docs/user-guide/writing-deterministic-steps.md`](../user-guide/writing-deterministic-steps.md)（Python 与 TypeScript 两侧并排）。本文讲的是这四段之间的接缝，例如 handler 抛异常后如何落成判定（见 §1 的映射表）。
@@ -50,7 +50,7 @@ worker 收到的只有 `keyword` + 裸 `text`（+可选多行参数）。派发�
 
 | 入口 | 调用者 | worker 做什么 |
 |---|---|---|
-| `--capabilities`（自述） | `gherkai list-deterministic`、`doctor` 的 `steps.load.<engine>` 项、`run` 的本机前置（同一次 spawn 兼定 grace 下限）、`doctor --backend cloud` 比对云端停止宽限 | 输出一个 JSON 对象即退出：`deterministic_steps`（`list_registry()` / `listRegistry()`，每项 `pattern` / `description` / `example`）+ `min_grace_s` + `engine` / `schema_version`；先加载 steps 目录，加载失败同样 fail-loud |
+| `--capabilities`（自述） | `gherkai list-deterministic`、`doctor` 的 `steps.load.<engine>` 与 `engines.model.<engine>` 两项（同一次自述）、`run` / `submit` 的本机前置（共用 `_plan_and_preflight`；`run` 侧同一次 spawn 兼定 grace 下限）、`doctor --backend cloud` 比对云端停止宽限 | 输出一个 JSON 对象即退出：`deterministic_steps`（`list_registry()` / `listRegistry()`，每项 `pattern` / `description` / `example`）+ `min_grace_s` + `model_id`（该 worker 起 job 时真会用的模型 id，`doctor` 的 `engines.model.<engine>` 行取它）+ `engine` / `schema_version`；先加载 steps 目录，加载失败同样 fail-loud |
 | `--match-steps`（查询） | `gherkai plan` 的派发标注 | 自 stdin 读入 step 文本数组 → `match_batch` / `matchBatch` → 输出一行 JSON 即退出 |
 | job 模式（无 flag） | `run` / `submit` 实际执行 | 建立会话、按 §1 派发 |
 
@@ -67,7 +67,7 @@ worker 收到的只有 `keyword` + 裸 `text`（+可选多行参数）。派发�
 
 ## 3. 两个真值源、一个岔口：为什么「改了 steps，云端没变」是设计
 
-同一件事（「这个 run 用哪套确定性 step」）在两个执行档里由**不同的载体**决定，岔口在提交时刻：
+同一件事（「这个 run 用哪套确定性 step」）在两个执行后端里由**不同的载体**决定，岔口在提交时刻：
 
 | 档 | 真值源 | 解析规则与落点字段 |
 |---|---|---|
@@ -100,7 +100,7 @@ variant / 默认指针 / revision / digest 这些载体本身（SSM 键、ECR ta
 | 注册时报「缺 description/example」 | 注册即暴露：元数据必填，缺失则这条 step 不进能力清单、feature 作者无法发现它 | 补一句说明 + 一条可直接复制的 step 文本 |
 | worker 启动即非零退出、stderr 指出某个文件 | 目录里**任一**文件 import 失败（语法/依赖错） | 修复该文件；Nova 用 `EX_STEPS_LOAD`（=2）、Midscene 由 `bin.mts` 统一返回非零码（有意不用 `80`，那是网络专用码） |
 | `--steps-dir` / `GHERKAI_STEPS_DIR` 指向的目录不存在 → 退 2 | 显式指定了一个位置，而该位置不存在或不是目录 = 配置错误（`_steps_dir_or_error`） | 改为正确路径。缺省的 `./steps` 不存在**不算错误**，多数项目本就没有确定性 step |
-| `plan` 直接退 2，提示「使用方 steps 加载失败」 | `plan` 自己的标注探活（`--match-steps`，`_probe_deterministic_dispatch` → `compose.match_deterministic`）遇到 `WorkerSelfDescribeError`；`run` 另有一道等价的本机前置，走 `--capabilities`（`_preflight_worker_runtimes`） | 同上，修复该文件。这是 `plan` 唯一**不降级**的失败：降级为「无标注」等于让读者误以为那些 step 会走 AI |
+| `plan` 直接退 2，提示「使用方 steps 加载失败」 | `plan` 自己的标注探活（`--match-steps`，`_probe_deterministic_dispatch` → `compose.match_deterministic`）遇到 `WorkerSelfDescribeError`；`run` / `submit` 另有一道等价的本机前置，走 `--capabilities`（`_preflight_worker_runtimes`；两命令共用 `_plan_and_preflight`） | 同上，修复该文件。这是 `plan` 唯一**不降级**的失败：降级为「无标注」等于让读者误以为那些 step 会走 AI |
 | `plan` 只输出一行「（标注降级）引擎 X … 无派发标注」，计划本体照常输出 | 该引擎运行时未定位到（四级定位链全 miss），属环境问题 | 安装该引擎，或忽略（`plan` 对 miss 一律 best-effort；`run`/`submit`/`list-deterministic` 对同一件事退 2） |
 | 某 step 实际执行时记 `error`，`message` 里列出多条模式 | 一条 step 命中多条模式 | 收紧模式，或改 step 措辞避开；`plan` 会提前用 ⚠ 标出 |
 | `submit --backend cloud` 退 2，提示 variant 解析失败 | 请求的 variant 在该引擎当前版本下未推送过 / revision 已清理 / digest 已删除 | 由部署方 `push-worker` 推送；紧急情况下可临时用 `--worker-variant base`（`gherkai deploy` 已把本版本基础镜像同步成 `base`）。CLI 旧于后端时提示改为「先升 CLI」，因为向旧版本命名空间推 tag 无法消除版本不一致 |

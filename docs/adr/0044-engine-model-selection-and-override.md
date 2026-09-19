@@ -21,19 +21,19 @@
 
 **现值**：Nova `nova-act-v1.0`；Midscene `us.openai.gpt-5.6-terra`（family `gpt-5`，地理型跨区 profile）。
 
-**Midscene 默认的选定依据（2026-09 评测集 A/B，每模型 7 个 feature / 9 个 scenario × 3 遍，Kimi 6 遍；provenance 每 pass 由 worker `--capabilities` 自报 model_id 核对）**：
+**Midscene 默认的选定依据（2026-09 评测集 A/B，每模型 7 个 feature / 10 个 scenario × 3 遍（`features/` 共 12 条 scenario，其中 2 条 `@engine:novaact` 不进 Midscene 侧），Kimi 6 遍；provenance 每 pass 由 worker `--capabilities` 自报 model_id 核对）**：
 
 | | Qwen3-VL 235B（旧默认） | GPT-5.6 sol | GPT-5.6 terra | GPT-5.6 luna | GPT-6 Astra | Kimi K2.5 |
 |---|---|---|---|---|---|---|
-| scenario 终态 | 28 passed / 2 failed | 30 / 0 | 30 / 0 | 29 / 1 | 30 / 0 | 48 passed / 2 failed / 6 timeout |
+| scenario 终态 | 28 passed / 2 failed | 30 / 0 | 30 / 0 | 29 / 1 | 30 / 0 | 48 passed / 2 failed / 6 timeout（共 56 个终态，余 4 条未跑到终态） |
 | 三遍不一致的 scenario | 1 | 0 | 0 | 1 | 0 | 4 |
 | AI 步耗时中位 / p90 | 10.1 s / 66 s | 8.0 s / 45 s | 6.8 s / 49 s | 8.1 s / 48 s | 7.1 s / 44 s | 7.7 s / 69 s（单步最长 220 s） |
 | tokens / run 中位 | 44.7k | 34.4k | 34.4k | 34.3k | 34.2k | 45.8k |
 | 中文 UI 探针 | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 | 6 遍 1 败 |
 
 - **Qwen3-VL** 的两次失败与 luna 的一次失败是同一条用例（首段被捐款横幅推出视口、模型如实判否），属用例视口敏感、已改用例；其余 scenario 两侧一致。**Kimi** 判定不差但尾延迟失控（6 次 300 s job 超时、后三遍不比前三遍好，非冷启动）。**GPT 系**三遍逐遍稳定、比 Qwen 快约三成、省约四分之一 token。
-- **成本**（同一条 5 步用例实测 token 折价，Terra 按 $2.20 / cache read $0.22 / $13.20 每百万，Qwen 按 $0.53 / $2.66）：Qwen 约 $0.023 / run，Terra 约 $0.054 / run（约 2.3 倍；Astra 单价更高被否）。Bedrock 对 GPT-5.6 的 chat-completions 响应报告 cached_tokens（重复的 system prompt 第二次起命中；Midscene 三类意图各用不同 system prompt，整条 run 命中 30% 到 54%）；Midscene 的 `gpt-5` 适配器默认关 reasoning，输出 token 极少，$13.20 的输出价几乎不起作用——若使用方打开 `MIDSCENE_MODEL_REASONING_ENABLED` 成本会显著上升。**判据**：每 run 多约 3 美分，换 63 次 run 零失败零抖动与三成提速，对判定工具值得；成本敏感者一个 env 切回 Qwen。
-- **地理型 vs 全球 profile**：`us.openai.gpt-5.6-terra` 的目的 region 固定为 us-east-1 / us-east-2 / us-west-2（AWS 承诺地理型 profile 目的集不变；CloudTrail `inferenceRegion` 实查本轮全部落在 us-east-2）。`global.openai.gpt-5.6-terra` 便宜约 9%（$2.00 / $12.00），但目的集是「全部商用 region」且会随 AWS 上线新 region 而变，可能路由到账号未启用的 opt-in region、且 AWS 声明「input prompts and output results may be stored in the opt-in Regions for abuse detection」；本轮实测 global 反而慢约 20%（从 us-east-1 被路由到 us-west-2）、cache 命中相当。**默认取地理型**：披露只需一句「美国境内三个 region」且不会过期，半美分的差价不值得把截图送往全球任一 region 写进用户文档；global 只作 `MIDSCENE_MODEL_ID` 的可选值、不进使用者向文档。
+- **成本**（同一条 5 步用例实测 token 折价，Terra 按 $2.20 / cache read $0.22 / $13.20 每百万，Qwen 按 $0.53 / $2.66）：Qwen 约 $0.023 / run，Terra 约 $0.054 / run（约 2.3 倍；Astra 单价更高被否）。Bedrock 对 GPT-5.6 的 chat-completions 响应报告 cached_tokens（重复的 system prompt 第二次起命中；Midscene 三类意图各用不同 system prompt，整条 run 命中 30% 到 54%）；Midscene 的 `gpt-5` 适配器默认关 reasoning，输出 token 极少，$13.20 的输出价几乎不起作用——reasoning 开关属 SDK 的 `MIDSCENE_MODEL_REASONING_*` 家族，而我们注入 `opts.modelConfig` 后 SDK 走隔离配置、不读 env（[0008](./0008-midscene-bedrock-auth-sigv4-selfsign.md)「关键实现坑」），故当前无法由使用方经 env 打开；将来若把它接进 worker 的 modelConfig，成本会显著上升。**判据**：每 run 多约 3 美分，换 63 次 run 零失败零抖动与三成提速，对判定工具值得；成本敏感者一个 env 切回 Qwen。
+- **地理型 vs 全球 profile**：`us.openai.gpt-5.6-terra` 的目的 region 固定为 us-east-1 / us-east-2 / us-west-2（AWS 承诺地理型 profile 目的集不变；CloudTrail `inferenceRegion` 实查在该批 A/B 里全部落在 us-east-2）。`global.openai.gpt-5.6-terra` 便宜约 9%（$2.00 / $12.00），但目的集是「全部商用 region」且会随 AWS 上线新 region 而变，可能路由到账号未启用的 opt-in region、且 AWS 声明「input prompts and output results may be stored in the opt-in Regions for abuse detection」；同批实测中 global 反而慢约 20%（从 us-east-1 被路由到 us-west-2）、cache 命中相当。**默认取地理型**：披露只需一句「美国境内三个 region」且不会过期，半美分的差价不值得把截图送往全球任一 region 写进用户文档；global 只作 `MIDSCENE_MODEL_ID` 的可选值、不进使用者向文档。
 - 数据驻留口径：Nova 模型与 Qwen 在所选 region 内处理；Midscene 默认的 GPT-5.6 经 Bedrock 地理型跨区 profile 在美国境内三个 region 处理；浏览器会话、产物存储仍在所选 region。
 
 ## 被拒 / 留口子
@@ -50,3 +50,5 @@
 - [0036](./0036-deterministic-capability-discovery.md)「5.」：自述对象的 `model_id` 键。
 - [0038](./0038-worker-image-delivery.md)：云端覆盖走 variant 镜像 `ENV`。
 - [0042](./0042-step-evidence-and-explain.md) 决策六：SDK 版本钉死，与本 ADR 的模型钉版同一逻辑。
+- [0003](./0003-midscene-grounding-qwen3vl-bedrock.md)：被本 ADR 取代的前一代 Midscene 模型选型（其 Status 头已标 Superseded-by 本 ADR）；Bedrock `/openai/v1` 接线契约与被排除替代集仍有效。
+- [0012](./0012-planning-shares-qwen3vl-no-text-planner.md)：planning 不设独立模型槽、由本 ADR 的默认模型兼任。

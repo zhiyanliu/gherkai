@@ -39,7 +39,7 @@
 3. **begin**：写入 definition（run 元数据）与初始运行态。此后一切写入都经 `RunStore` / `ResultStore`，落点由注入的 adapter 决定（见 §4）。
 4. **驱动**：`run` 采用 `schedule.py` 的在线循环（每个 worker 一个线程，`--max-concurrency` 即同时活跃的浏览器会话数上限，缺省 1）；`submit` 采用 `reconcile.py` 的无状态单步推进，由每个 run 一个的本机后台进程、`status --wait` 的接力者或云端 Lambda 反复调用。两种驱动的对照、四种组合的详解见 [`execution-and-reconciliation.md`](./execution-and-reconciliation.md)。循环内反复发生以下两件事：
    - **每 scope 一个 worker**：核心经 `Engine` 启动 worker，worker 建立浏览器会话，逐 step 判断走哪条路径。step 派发的决策链、`steps/` 目录的两个真值源、worker 的两个非 job 入口（能力自述 `--capabilities`、正则匹配查询 `--match-steps`）见 [`deterministic-step-lifecycle.md`](./deterministic-step-lifecycle.md)。
-   - **事件流与退出信号**：worker 对核心只上报两类信息，即逐条事件（`scope_started` / `step_done` / …）与进程退出信号；判定要求两者同时成立（事件完整 ∧ 进程干净终止）。四种组合下事件所走的四条物理通道、退出观察者由谁承担、job 超时如何处理，见 [`execution-and-reconciliation.md`](./execution-and-reconciliation.md) §5-§6。
+   - **事件流与退出信号**：核心对一个 worker 只看两类信息——worker 上报的逐条事件（`scope_started` / `step_done` / …），以及由父进程或平台观察到的进程退出信号（**退出永不由 worker 自报**）；判定要求两者同时成立（事件完整 ∧ 进程干净终止）。四种组合下事件所走的四条物理通道、退出观察者由谁承担、job 超时如何处理，见 [`execution-and-reconciliation.md`](./execution-and-reconciliation.md) §5-§6。
 5. **判定归约与报告**：一票 → step → scenario → job → run 四层归约，七个状态（五个终态，外加 `pending` / `running` 两个前置态）与各命令退出码的分工见 [`verdict-model.md`](./verdict-model.md)；判定真值、引擎产物、逐步证据与 RunReport 的落点、`explain` 解引用到哪一层，见 [`artifacts-and-evidence.md`](./artifacts-and-evidence.md)；`--json` 的字段级契约见 [`cli-json-contract.md`](./cli-json-contract.md)。
 
 ## 4. 本机与云端：同一条链的两种载体

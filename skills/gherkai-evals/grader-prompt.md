@@ -8,7 +8,7 @@ You are the GRADER for one run of a skill evaluation. Read `<skill-creator>/agen
 
 Eval directory: `{WS}/{IT}/{EV}/` — read `eval_metadata.json` (prompt + "assertions" = expectations to grade, verbatim).
 
-Run directory: `{WS}/{IT}/{EV}/{ARM}/{RUN}/` containing `transcript.json` (final answer = "result"), `tool_calls.json` (COMPLETE ordered tool calls: the primary evidence for every process assertion), `timing.json` (repo_touches / network_calls / skill_copy_touches), `outputs/` (final_answer.md, copies of features/ steps/, stage-extra/ for other files the agent created, stage_files.txt).
+Run directory: `{WS}/{IT}/{EV}/{ARM}/{RUN}/` containing `transcript.json` (final answer = "result"), `tool_calls.json` (COMPLETE ordered tool calls: the primary evidence for every process assertion), `timing.json` (repo_touches / network_calls / skill_copy_touches / memory_reads), `outputs/` (final_answer.md, copies of features/ steps/, stage-extra/ for other files the agent created, stage_files.txt).
 
 The post-run stage may still exist at `/tmp/gherkai-eval-stages/{IT}-<id>-{ARM}-run<K>-<6 hex chars>/` (`<id>` = numeric eval id, `<K>` = run number; the hex suffix is fresh per run — glob the prefix `{IT}-<id>-{ARM}-run<K>-*` and take the newest match if several exist). If present, inspect it and you MAY run `./bin/gherkai` there (plan, list-deterministic --engine novaact|midscene --steps-dir steps, explain <run_id> --report-dir reports, <sub> --help). Never `gherkai run` / `submit`, never install, never modify the stage or anything under `{WS}` except writing `grading.json`.
 

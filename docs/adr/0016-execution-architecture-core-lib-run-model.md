@@ -35,10 +35,10 @@
 
 | 概念 | 是什么 | 产出 |
 |---|---|---|
-| **Step** | scenario 内单步 | pass/fail/error（+ scope 内短路的 `skipped`，带正交 `shortcircuited` 标记，见 [0031](./0031-job-lifecycle-states-and-severity.md) 决定六）、投票 tally、墙钟时长（`StepResult`，core 首次保留 step 级粒度） |
-| **Scenario** | Gherkin 单个 `Scenario:` | pass/fail、A/B 断言、抖动数据（投票）、原生报告引用、墙钟时长 |
+| **Step** | scenario 内单步 | passed/failed/error（+ scope 内短路的 `skipped`，带正交 `shortcircuited` 标记，见 [0031](./0031-job-lifecycle-states-and-severity.md) 决定六）、投票 tally、原生报告引用（两引擎 evidence + Nova 每 act trajectory，见 [0042](./0042-step-evidence-and-explain.md)/[0027](./0027-runreport-aggregation-index.md)）、墙钟时长（`StepResult`，core 首次保留 step 级粒度） |
+| **Scenario** | Gherkin 单个 `Scenario:` | passed/failed/error（三态，见 [0024](./0024-worker-core-protocol.md)「`status` 三态」条）、A/B 断言、抖动数据（投票）、原生报告引用（字段保留、当前两引擎都不填——已下沉 step 级与 scope 级，见 [0027](./0027-runreport-aggregation-index.md)/[0042](./0042-step-evidence-and-explain.md)）、墙钟时长 |
 | **Feature**（`.feature`） | 含 1..N scenario | **组织轴**（正交，非执行单元） |
-| **Scope**（session scope） | 共享操作上下文的 scenario 分组 | **执行单元**：scope 内串行、scope 间并行；产出原生量成本合计 + 墙钟时长 |
+| **Scope**（session scope） | 共享操作上下文的 scenario 分组 | **执行单元**：scope 内串行、scope 间并行；产出原生量成本合计 + 原生报告引用（Midscene report + Nova session 汇总）+ 墙钟时长 |
 | **Job** | 提交给执行面的单元 | **= Scope**（被 session-scope 语义强制：若 job=scenario，有依赖的 scenario 会被拆到不同 microVM 无法共享会话） |
 | **Run** | 一次执行，封装多个 job | `runId`、总状态、起止、墙钟时长、**RunResult**、**RunReport** |
 
@@ -122,7 +122,7 @@ core/gherkai_core/
 
 ### cli `--backend {local,cloud}`：组合根按开关注入 store + 执行引擎（兑现「换 adapter 核心不动」）
 
-云端 store adapter（DDB/S3，[0030](./0030-realtime-persistence-seam.md) 决定六）落地后，cli 加 `--backend {local,cloud}`（默认 `local`；`run`/`submit`/`status` 三个子命令都有——`submit` 与 `status` 的 backend 须一致，见 [0034](./0034-detached-batch-reconciler.md)；`plan` 纯本地不落库、不加）在组合根按开关选注入哪套 adapter。`RunPersistence`/`schedule` 只认 Store **port**，local↔cloud 切换**零改** core——这正是本 ADR「选实现=组合根注入」的第一次真实兑现。
+云端 store adapter（DDB/S3，[0030](./0030-realtime-persistence-seam.md) 决定六）落地后，cli 加 `--backend {local,cloud}`（默认 `local`；`run`/`submit`/`status` 有，读判定的 `explain` 同形（[0042](./0042-step-evidence-and-explain.md) 决策四）、`doctor` 也收它但只切换查哪些检查项、不注入 store（[0041](./0041-agent-facing-cli-affordances.md) 决策四）——`submit` 与 `status` 的 backend 须一致，见 [0034](./0034-detached-batch-reconciler.md)；`plan` 纯本地不落库、不加）在组合根按开关选注入哪套 adapter。`RunPersistence`/`schedule` 只认 Store **port**，local↔cloud 切换**零改** core——这正是本 ADR「选实现=组合根注入」的第一次真实兑现。
 
 **单一开关换齐存储三层 + 执行引擎、第一版不开混搭**：`--backend cloud` 一次把 RunStore→DDB、ResultStore/ReportStore→S3（+ 挂 offloader）三层存储全换，**并把执行引擎从 `SubprocessEngine` 换成 `FargateEngine`**（见下「决策 A：`--backend cloud` = 存储上云 + Fargate 执行（单旋钮）」）。理由：三层存储后端不对等（上文已证不存在 `S3RunStore`/`DDBReportStore`），无有意义的混搭矩阵；「Local store + Fargate worker」是 **store⊥worker 正交轴**（上文「worker 产物 ⊥ store」）、是**组合根内部/e2e 可拼的矩阵、非用户 CLI 旋钮**，不需要 `--run-backend`/`--result-backend` 拆开（那是提前盖机器 + 组合爆炸测试负担）。
 
@@ -173,7 +173,7 @@ Fargate 执行环境配置（cluster / task-def / subnet / security-group / even
 - **Fargate 执行配置也走 CLI 参数注入（决策 C，与表/桶同模式）**：`--backend cloud` 换 `FargateEngine` 后，其执行环境配置（ECS cluster / task-def / subnet(s) / security-group(s) / assign-public-ip / events 表名 / container-name 等）同样经组合根注入 `FargateEngine` 构造（哪些项有裸 flag 见上决策 C 的『注』），**与 `--ddb-table`/`--s3-bucket` 是同一注入模式**（组合根注入、adapter 不 sniff env）。这批参数具体形状（哪些必填、默认值、兜底 env）随 Fargate adapter 接线落地时定、以 code 为准，不在此焊死以免漂移；**接线点在 `compose.build_fargate_engines`**（新增函数、对称只产 SubprocessEngine 的 `build_engines`，`--backend cloud` 用它替代）——组合根在 `new_run_id()` 后把 run_id + 这批 task 配置一起传进 `FargateEngine()`（run_id 是拼 events 表 PK 所需，对称 artifact 落点注入）。adapter 假定 cluster/task-def/events 表已存在（建表建 task-def 归 IaC）。
 - **`--region`/`--profile` 可选**：都传给 `boto3.session.Session(profile_name=..., region_name=...)`（都为 None = 默认行为，不显式介入）。**凭证仍不硬编码**——profile/region 是运维配置（选哪个 AWS 账户/区域），不是把 access key 写进代码，不违背「组合根不持 IAM 知识」。region 解析链：`--region` 显式 > `AWS_REGION`/`AWS_DEFAULT_REGION` > profile 的 config `region` 字段——故**给了 `--profile` 但该 profile 没配 region 时仍需 `--region`**（否则 `NoRegionError`）；两者都可选、各自独立兜底。
 - **单 S3 桶 + `--report-dir` 复用为 key 前缀**：Result(`jobs/`)、Report(`index.html`)、offloader(`args/`) 三者 key 前缀天然不撞，共用一个桶最简；不新增 `--s3-prefix`——local 的 `<report-dir>/<run_id>/…` 与 cloud 的 `s3://bucket/<report-dir>/<run_id>/…` 布局工整对应。**分隔符规范化**：`--report-dir` 默认 `reports`（无尾 `/`），组合根在传给 S3 adapter 前补 `/`（非空且不以 `/` 结尾则补），否则 `S3*Store` 拼 `f"{prefix}{run_id}"` 会静默生成粘连 key `reports<run_id>/…`。真需分桶（report 公开 serve vs result 私有的生命周期策略）再拆，加法不返工。
-- **`--backend cloud --no-report` 合法**：`--no-report` 既有语义=零落盘裸跑、与 backend 正交；所有云端校验/import/异常 gated 在 `need_cloud = do_report and cloud`，此组合跳过一切云端检查（保「三个 store 一次不构造」的逃生舱）。
+- **`--backend cloud --no-report` 合法**：`--no-report` 既有语义=零落盘裸跑、与 backend 正交，**但决策 A 下它仍在 Fargate 执行**，故云端检查只减 store 那一半：store 侧校验/import/异常 gated 在 `need_cloud = do_report and cloud`（保「三个 store 一次不构造」的逃生舱）、runs 表也只在 `do_report` 时探；版本 skew 闸、events 表/cluster/桶/task-def 的 preflight、worker variant 解析与 subnet/sg 的 SSM 读取照常执行；`--no-report` 在 cloud 档另经 `build_fargate_engines(no_artifacts=True)` 让 worker 不生成/不上报原生产物（[0037](./0037-distribution-and-packaging.md) 决策 3）。
 
 **artifacts 落点指针按 backend 分支组装、全 URI 化（不硬编码本地路径「说谎」）**：`--json` 的 `artifacts` dict（`report_index`/`run_meta`/`run_state`/`jobs_dir`）**原先**硬编码本地文件路径，cloud 下这些数据落 DDB/S3、本地路径不存在——故按 backend 分支组装（已实装，落点算式收在 `compose.local_artifact_locations`/`cloud_artifact_locations` 单点）：
 - local：四项均 `file://` 完整路径（从裸路径升级为 URI，与 cloud 同形工整）。
@@ -201,13 +201,13 @@ Fargate 执行环境配置（cluster / task-def / subnet / security-group / even
 │   └── gherkai_runtime/{compose.py（组合根/引擎注册表 + `resolve_cloud_target` 云目标解析）· detached.py（local 无状态批量运行宿主）· names.py（资源命名真源）· tunnel.py（`--expose-local` 隧道 provider，0035）· tunnel_host.py（隧道宿主编排 + 守护 TTL，0035）}
 ├── cli/                 ← 发行包 gherkai：纯皮 argparse + 渲染 + deploy provider 分派 + 包内 skill 安装（workspace 成员；对兄弟包的依赖在 build 时渲染成 `==` 同版本 pin，[0037](./0037-distribution-and-packaging.md) 决策 2）
 │   └── gherkai_cli/{__main__.py（argparse 皮）· deploy.py（`gherkai deploy`/`destroy` 的皮：provider 发现 + flag 贴接 + 分派，不含 IaC 知识，[0037](./0037-distribution-and-packaging.md) 决策 6）· render.py（事件/RunResult/RunState 渲染）· skill_install.py（`gherkai skill install`：整目录收敛把包内 skill 源文件装进使用方项目 / 用户级 agent 目录）· skills/gherkai/（随 wheel 发行的 agent skill 源文件：SKILL.md + references/，[0043](./0043-agent-skill-for-driving-gherkai.md)）}
-├── deploy_aws/          ← 发行包 gherkai-deploy-aws：AWS provider（`stack.py`/`app.py`=CDK · `names.py` · `cli.py`=Provider · `lambdas/{reconciler,exit_observer}.py` 作 Lambda asset 原料 · `workers.py`/`container.py`=worker 镜像族与容器引擎口，[0038](./0038-worker-image-delivery.md)），经 entry point group `gherkai.deploy` 被 cli 皮发现（[0037](./0037-distribution-and-packaging.md) 决策 6）
+├── deploy_aws/          ← 发行包 gherkai-deploy-aws：AWS provider（**import 名 `gherkai_deploy_aws/`**：`stack.py`/`app.py`=CDK · `names.py` · `cli.py`=Provider · `lambdas/{reconciler,exit_observer}.py` 作 Lambda asset 原料 · `workers.py`/`container.py`=worker 镜像族与容器引擎口，[0038](./0038-worker-image-delivery.md)），经 entry point group `gherkai.deploy` 被 cli 皮发现（[0037](./0037-distribution-and-packaging.md) 决策 6）
 └── engines/             ← 两个可插拔引擎，与 core 平级对标
     ├── midscene/        ← npm 包 @gherkai/worker-midscene（ESM，0037 决策 3）        worker：engines/midscene/src/worker/run-scope.mts
-    │   ├── src/bin.mts（入口：进程内注册 tsx 与 resolve hook）· src/index.mts（使用方 step 文件的 import 面）· src/resolve-hook.mts（裸 specifier `@gherkai/worker-midscene` 的解析 hook，[0037](./0037-distribution-and-packaging.md) 决策 4）· src/worker/{run-scope,deterministic,deterministic.steps,user-steps,argument,evidence}.mts（evidence=step 级机读证据抽取/落盘，供 `gherkai explain` 消费，[0042](./0042-step-evidence-and-explain.md)）· src/lib/（引擎内共享：agentcore-sigv4 · artifact-upload · event-sink · job-source）
+    │   ├── src/bin.mts（入口：进程内注册 tsx 与 resolve hook）· src/index.mts（使用方 step 文件的 import 面）· src/resolve-hook.mts（裸 specifier `@gherkai/worker-midscene` 的解析 hook，[0037](./0037-distribution-and-packaging.md) 决策 4）· src/worker/{run-scope,deterministic,deterministic.steps,user-steps,argument,evidence,error-text}.mts（evidence=step 级机读证据抽取/落盘，供 `gherkai explain` 消费 · error-text=失败原因压成一行有界文本，与 Nova 侧 `run_scope._error_text` 对称；两者见 [0042](./0042-step-evidence-and-explain.md)）· src/lib/（引擎内共享：agentcore-sigv4 · artifact-upload · event-sink · job-source）
     │   └── （node_modules / dist / spikes 随迁；tsconfig 入库）
     └── novaact/         ← 发行包 gherkai-worker-novaact（0037 决策 3）              worker：engines/novaact/gherkai_worker_novaact/run_scope.py
-        ├── gherkai_worker_novaact/{run_scope.py · deterministic.py · deterministic_steps.py · user_steps.py · evidence.py（step 级机读证据抽取/落盘，供 `gherkai explain` 消费，[0042](./0042-step-evidence-and-explain.md)）· __main__.py}（确定性注册表已拆出：deterministic.py=注册表+匹配、deterministic_steps.py=内建脚手架锚点、user_steps.py=加载使用方 steps/ 目录，两引擎对称，见 0022/0036/0037；仅 ai_steps 的进一步拆分仍是留口子）
+        ├── gherkai_worker_novaact/{run_scope.py · deterministic.py · deterministic_steps.py · user_steps.py · evidence.py（step 级机读证据抽取/落盘，供 `gherkai explain` 消费，[0042](./0042-step-evidence-and-explain.md)）· __main__.py}（确定性注册表已拆出：deterministic.py=注册表+匹配、deterministic_steps.py=内建示范的确定性 step、user_steps.py=加载使用方 steps/ 目录，两引擎对称，见 0022/0036/0037；仅 ai_steps 的进一步拆分仍是留口子）
         └── gherkai_worker_novaact/lib/（引擎内共享：workflow_setup · artifact_upload · event_sink · job_source · constants）· tests/（无独立 venv：随 CLI 的 [local] extra 装进根 .venv）
 ```
 

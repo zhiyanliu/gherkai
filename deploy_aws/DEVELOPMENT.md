@@ -51,7 +51,7 @@
 两条硬约束：
 
 - **来源必须是「已安装包」，不是仓库相对路径、也不是联网 `pip install`**（ADR 0037 决策 6）。相对路径只在 monorepo 里成立，wheel 用户的 site-packages 不具备该布局；联网安装在离线环境下不可用，且装到的是 PyPI 上的某个版本而非**运行中这一份**：dev 版不在 PyPI 上，contributor 部署自己的 dev 版会直接失败。
-- **清单是手写的，因此须有一条真 import 的测试作护栏**：`typing_extensions` 是 `gherkin-official>=42` 的传递依赖（`gherkin/parser_types.py` 无条件 import 它），旧的 `pip install --target` 会一并安装该依赖，改为「按名复制」后被漏掉：单测全绿，而真 synth 出的 asset 在 import 时即 `ModuleNotFoundError`。现在 `tests/test_lambda_asset.py::test_asset_imports_with_only_stdlib_beside_it` 在**剥离 site-packages 的子进程**里真 import asset，新增或更换依赖时它是判据。
+- **清单是手写的，因此须有一条真 import 的测试作护栏**：`typing_extensions` 是 `gherkin-official` 的传递依赖（`gherkin/parser_types.py` 无条件 import 它；该库自 31.0.0（core 的声明下限）起就声明 `typing-extensions>=4`），旧的 `pip install --target` 会一并安装该依赖，改为「按名复制」后被漏掉：单测全绿，而真 synth 出的 asset 在 import 时即 `ModuleNotFoundError`。现在 `tests/test_lambda_asset.py::test_asset_imports_with_only_stdlib_beside_it` 在**剥离 site-packages 的子进程**里真 import asset，新增或更换依赖时它是判据。
 
 asset 落在 `gherkai deploy` 的临时工作目录（`GHERKAI_LAMBDA_ASSET_DIR`，命令结束即删除），不再写进仓库或包目录。
 

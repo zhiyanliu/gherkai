@@ -1,6 +1,6 @@
 # 0042. step 级机读证据（evidence）与 `gherkai explain`
 
-> **Status:** Accepted（2026-09-11）—— 六项决策已实装并有护栏；两引擎本机与 cloud 档真跑证据见「验证」节；影响面所列反向链（0024 / 0027 / 0029 / 0032 / 0037 / 0041 / CONTEXT）已逐条落。
+> **Status:** Accepted（2026-09-11）—— 六项决策已实装并有护栏；两引擎本机与 cloud 档真跑证据见「验证」节；影响面所列反向链（0024 / 0027 / 0029 / 0032 / 0037 / 0041 / CONTEXT）已逐条落。后续修订：决策四的 `--step` 展开口径在 v1.4.2 发版验证后改为「显式 `--step` 即展开」（首版口径要求再加 `--all`、被判反直觉；见决策四「输入」段）。
 
 ## 背景
 
@@ -199,7 +199,7 @@ agent / skill 只依赖 evidence schema 与 `explain` 输出，两者都是我�
 - `core/gherkai_core/adapters/report_store/local.py`：step 行补 message；产物导航节标题 / tooltip / 空态 / docstring 措辞改「报告产物（引擎原生产物 + gherkai evidence）」；断言旧文案的 `core/tests/test_report_store.py`、`test_s3_report_store.py` 同改。URI→路径解析提升为公开小工具供 `read_resource` 复用。
 - `engines/novaact/gherkai_worker_novaact/run_scope.py`（evidence 钩子、追加 ref、删「SDK 在 finally 已写盘」的错误注释）+ 新模块 `evidence.py`；`lib/artifact_upload.py`（Content-Type 映射、`ref_for`、后台队列 `enqueue` / 有界 `drain`、队列与 flush 共用的「重试一次」）；`run_scope.py` 三条 emit 点之后入队、scope 末与三条退出路径排空；fixture 测试。
 - `engines/midscene/src/worker/run-scope.mts`（`persistExecutionDump: true`、`runStep` 拿 uploader 与 page、step 级 reportRefs 首次出现、emit 之后入队、scope 末 / `shutdownSequence` / catch 路径排空）+ 新模块 `evidence.mts`（自写结构类型）与 `error-text.mts`（失败原因压成一行、按码点封顶，与 Nova `_error_text` 同规则）；`src/lib/artifact-upload.mts`（Content-Type 映射、`refFor`、`enqueue` / `drain`、重试一次）；fixture 测试。
-- Midscene 的 grace 下限 25→31 s（收尾多一段 6 s 排空），Nova margin 不动。（当时该下限是 `compose.py` 里的常量、靛本条提醒同步；后按 [0024](./0024-worker-core-protocol.md)「引擎自报下限」改为 worker 经 `--capabilities` 由收尾预算常量算出、组合根不再持常量。）
+- Midscene 的 grace 下限 25→31 s（收尾多一段 6 s 排空），Nova margin 不动。（当时该下限是 `compose.py` 里的常量、靠本条提醒同步；后按 [0024](./0024-worker-core-protocol.md)「引擎自报下限」改为 worker 经 `--capabilities` 由收尾预算常量算出、组合根不再持常量。）
 - `runtime/gherkai_runtime/compose.py`：`read_resource(uri)`。
 - `cli/gherkai_cli/__main__.py`：`explain` 子命令（含 skew 闸门、结果树匹配器）；`render.py`：文本渲染 + step 行补原因；`cli/tests/test_cli_json_contract.py`：`_leaf_keys` 支持在指定键处停止下钻 + explain 样例（内嵌 evidence 夹具）。
 

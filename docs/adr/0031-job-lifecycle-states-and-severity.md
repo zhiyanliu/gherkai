@@ -7,7 +7,7 @@
 被误记成 `error` 区分出来。
 
 **定位**：本 ADR 是判定**数据模型**的扩展，是 [0024](./0024-worker-core-protocol.md)「status 三态」的延伸。
-它怎么被实时落库（`update_job_state` / severity 单调聚合）见 [0030](./0030-realtime-persistence-seam.md)。
+它怎么被实时落库（`update_job_state`，单写者一次写定该 job 终态）见 [0030](./0030-realtime-persistence-seam.md)；detached 路径防态倒退用的是生命周期推进序（`project._lifecycle_rank`，pending<running<终态），见 [0034](./0034-detached-batch-reconciler.md)。
 
 ## 背景：三态不够用，fail-fast 把两类「没跑成」都污染成 error
 
@@ -68,7 +68,7 @@ class Status(str, Enum):
   这条「单调」是**生命周期推进**意义上的，与决定二 run 级的「severity max 单调只升」是**两套不同的序**，不可混用。
 - `_STATUS_COLOR` / index.html 给 pending/running 上「进行中」色（两者**共用同一个蓝**、报告里无需区分——pending 当前到不了 report，只为未来 RunState 视图兜底），别走兜底灰。
 - **「终态」有正向真源、定义取补：`core.model.TERMINAL_STATUSES = frozenset(Status) - {PENDING, RUNNING}`**。
-  凡「等到终态 / 是否已终态」的消费方（`status --wait` 轮询、隧道守护的拆除判据、`status` 退出码判定）一律引它，
+  凡「等到终态 / 是否已终态」的消费方（CLI `status --wait` 轮询、`status` 退出码判定、`explain` 的「判定明细尚未落地」判断、隧道守护的拆除判据、云端推进器 Lambda 的「已收尾 run 不再推演」跳过判据（`lambdas/reconciler.py`）、worker 清理 pass 的「未终态 run 仍引用」检查——真值集即 `grep -rn TERMINAL_STATUSES`）一律引它，
   **不各自正列白名单**——正向白名单散写多份时，新增终态漏改哪份、那份就永远判不到终态（`--wait` 无限轮询、
   隧道守护只能等满 TTL 才拆，均曾真实存在两份逐字副本）。取补而非正列即为此：新增终态自动入集，只有新增**前置态**
   才需动（届时 `_NON_VERDICT` 同批要改）。**与 `_NON_VERDICT` 是两把不同的刀**：本集按生命周期切（含 skipped/aborted），
@@ -103,7 +103,7 @@ run 级聚合（`schedule._aggregate`——真源现居 `core.project._aggregate
 
 ```python
 # 入口过滤名单：终态判定之外的态（skipped/aborted 派生态 + pending/running 前置态）都不进 run 级聚合
-_NON_VERDICT = (Status.SKIPPED, Status.ABORTED, Status.PENDING, Status.RUNNING)
+_NON_VERDICT: frozenset[Status] = frozenset({Status.SKIPPED, Status.ABORTED, Status.PENDING, Status.RUNNING})
 
 def _aggregate(statuses):
     statuses = [s for s in statuses if s not in _NON_VERDICT]  # run 级只看真正出了判定的 job
@@ -184,7 +184,7 @@ cli 退出码从「`status.value == 'passed'` 才 0」改为**基于 run 级 sev
 - `core/gherkai_core/serialize.py`：JobResult/RunResult 链路靠 `Status(str,Enum)` 天然 round-trip 新值（单测覆盖 skipped/aborted）；StepResult to/from_dict 的 `shortcircuited`（`.get` 默认 False，向后兼容旧落盘）。（**注**：`RunState` 链路的 `run_state_to/from_dict` 归 [0030](./0030-realtime-persistence-seam.md) touch points，非本 enum 的落点。）
 - `core/gherkai_core/adapters/report_store/local.py`：`_STATUS_COLOR`（每态各一色 + 兜底灰 `#57606a`；着色意图见决定二「视觉映射」）；index.html 的连锁失败旁注读 `shortcircuited`。
 - `cli/gherkai_cli/render.py`：文本汇总的连锁失败旁注同读 `shortcircuited`（被短路 step 显 skipped 态 + 旁注）。
-- `cli/gherkai_cli/__main__.py`：同步 `run` 的退出码读内存 `RunResult.status`（决定五数据源）；`status`/`--wait` 的终态判定引 `TERMINAL_STATUSES`。
+- `cli/gherkai_cli/__main__.py`：同步 `run` 的退出码读内存 `RunResult.status`（决定五数据源）；`status`/`--wait` 与 `explain` 的终态判定引 `TERMINAL_STATUSES`。
 - `engines/novaact/gherkai_worker_novaact/run_scope.py` + `engines/midscene/src/worker/run-scope.mts`：scope 内上游 `status==error` 后短路后续 step、发 `step_skipped`（不调 AI）。
 - 交叉指针落在：[0024](./0024-worker-core-protocol.md)（「`status` 三态」条的 core 内态澄清 + wire 的 `step_skipped` 事件段）/ [0026](./0026-schedule-module.md)（「status 归约」段的 `_NON_VERDICT` 入口过滤与 job 级派生态）/ [0016](./0016-execution-architecture-core-lib-run-model.md)（数据模型表 Step 行的 skipped+`shortcircuited`）/ [0028](./0028-transient-network-ssl-resilience.md)（scope 内短路条：defer 转实现，判据/承载）。
 

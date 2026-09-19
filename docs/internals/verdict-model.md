@@ -117,7 +117,7 @@ skipped = -1  <  passed = 0  <  failed = 1  <  error = 2  <  aborted = 3
 
 | 集合 | 切分维度 | 含 skipped/aborted？ | 引用方 |
 |---|---|---|---|
-| `TERMINAL_STATUSES` | 生命周期（状态是否还会变） | 含 | `--wait` 轮询、`status` 退出码判定与仅在终态打印的产物位置、`explain` 的「run 仍在运行」提示、`project_full` 的不变量检查、隧道守护的拆除判据（`runtime/gherkai_runtime/tunnel_host.py`：读到终态即提前拆除，否则等满 TTL）；另有一处**取补**用法——revision 清理的运行中 run 引用检查，判断是否仍有未达终态的 run 引用（`deploy_aws/gherkai_deploy_aws/workers.py`）。跨栈护栏要求消费方全部引用这一份、不各自维护白名单 |
+| `TERMINAL_STATUSES` | 生命周期（状态是否还会变） | 含 | `--wait` 轮询、`status` 退出码判定与仅在终态打印的产物位置、`explain` 的「run 仍在运行」提示、`project_full` 的不变量检查、云端推进器 Lambda 的「已收尾的 run 不再推演」跳过判据（`deploy_aws/gherkai_deploy_aws/lambdas/reconciler.py`：读到终态即 no-op，见 [`execution-and-reconciliation.md`](./execution-and-reconciliation.md)「已终态 run 的两档重入」）、隧道守护的拆除判据（`runtime/gherkai_runtime/tunnel_host.py`：读到终态即提前拆除，否则等满 TTL）；另有一处**取补**用法——revision 清理的运行中 run 引用检查，判断是否仍有未达终态的 run 引用（`deploy_aws/gherkai_deploy_aws/workers.py`）。跨栈护栏要求消费方全部引用这一份、不各自维护白名单 |
 | `_NON_VERDICT` | run 级判定（是否算作结论） | 含（**另含** pending/running） | `_aggregate` 入口过滤 |
 
 **run 级永不出现 skipped/aborted**：`_aggregate` 在入口就把它们连同两个前置态滤掉，因此 `RunResult.status` ∈ {`passed`,`failed`,`error`}。这条过滤在无状态投影路径上是**承重**的：`project` 每轮 tick 全量重放，`jobs_state` 确实含 pending/running 的 job 并原样传入；同步 run 路径传入的全是终态，过滤为 no-op。
@@ -143,7 +143,7 @@ skipped = -1  <  passed = 0  <  failed = 1  <  error = 2  <  aborted = 3
 
 归纳：**表达判定的只有 `run` 与 `status`，也只有它们会退 1**；`submit`/`plan`/`explain`/`doctor`/`list-deterministic`/`skill install` 都是 0/2 的「成功 / 失败」；`list-engines` 恒 0（理由见表）。
 
-部署方命令 `deploy`/`destroy` 不在本表口径内，但 `2` 与本表同源。`0` 为成功；`2` 是它们自身的前置或校验失败：缺 Node 或找不到 cdk、`--vpc` 缺档或档不符、容器引擎名不被识别、`push-worker` 的架构与 skew 拦截，都在变更账户资源之前拦下；唯一例外是 `push-worker` 推送途中的 AWS 调用失败，也归 `2`，但那时镜像与 revision 可能已写入账户。`1` 有两种来源：cdk 自身失败（cdk CLI 报错多为 1，原样透传），或 cdk 已成功而其后的 worker 镜像步骤失败；两者都意味账户可能已被改动，重新运行 `gherkai deploy` 幂等收敛。其余退出码同样是 cdk CLI 返回值的原样透传，均不按判定码解读。给使用者的口径见 `docs/user-guide/cloud-backend.md`「常见错误」。
+部署方命令 `deploy`/`destroy` 不在本表口径内，但 `2` 与本表同源。`0` 为成功；`2` 是它们自身的前置或校验失败：缺 Node 或找不到 cdk、`--vpc` 缺档或档不符、容器引擎名不被识别、`push-worker` 的架构与 skew 拦截，都在变更账户资源之前拦下；唯一例外是 `push-worker` 推送途中的 AWS 调用失败，也归 `2`，但那时镜像与 revision 可能已写入账户。`1` 有两种来源：cdk 自身失败（cdk CLI 报错多为 1，原样透传），或 cdk 已成功而其后的 worker 镜像步骤失败；两者都意味账户可能已被改动，重新运行 `gherkai deploy` 幂等收敛。其余退出码同样是 cdk CLI 返回值的原样透传，均不按判定码解读。给使用者的口径见 `docs/user-guide/cloud-backend.md`「退出码与常见错误」。
 
 `run` 的判定码取 `schedule` 返回的内存 `RunResult.status`（必为终态，不回读可能停在 pending 的落库态）；`status` 的判定码取读回的落库 `RunState`。两路 `status`（local/cloud）共用同一个 `_render_status`，行为一致。
 

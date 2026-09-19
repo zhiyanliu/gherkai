@@ -1,6 +1,6 @@
 # 0035. 本地应用测试：自动隧道把开发机上的被测应用暴露给云端浏览器
 
-> **Status:** Accepted —— 设计与实现均已落地：`--expose-local` 在 run/plan/submit 三命令 + `runtime/gherkai_runtime/tunnel.py`（ngrok provider + URL 映射）与 `runtime/gherkai_runtime/tunnel_host.py`（宿主编排：起隧道/映射 definition/守护循环与其 TTL），四种「跑法 × backend」组合全支持（URL 映射、三形态隧道宿主 + 兜底拆除、额外请求头注入）。
+> **Status:** Accepted —— 设计与实现均已落地：`--expose-local` 在 run/plan/submit 三命令 + `runtime/gherkai_runtime/tunnel.py`（ngrok provider + URL 映射）与 `runtime/gherkai_runtime/tunnel_host.py`（宿主编排：起隧道/映射 definition/守护循环与其 TTL），四种「执行方式 × 执行后端」组合全支持（URL 映射、三形态隧道宿主 + 兜底拆除、额外请求头注入）。
 
 ## 背景与问题
 
@@ -42,7 +42,7 @@
 - **origin 语义 =「跑 CLI 的机器可达」的任意地址，不限 localhost**：局域网/内网另一台机器上的应用（如 `http://192.168.1.50:3000`）同样支持——ngrok agent 本就是转发器，upstream 可为任意本机可达 host:port；目标机器**零配置**，唯一前提是 CLI 机器 → 目标地址网络可达（隧道宿主始终在 CLI 机器，含 cloud submit 的守护进程——CLI 机器关机即断，同边界）。flag 名中的 "local" 取「CLI 视角的本地网络」义。
 - **`plan` 输出替换前的原始地址**：plan 是纯本地零副作用预检，隧道 URL 是运行时产物（每 run 一条、随机域名），plan 时起隧道既违背「不连外」也无意义。给了 `--expose-local` 时 plan 在输出中**标注**该 origin 将经隧道映射（可见性，零副作用）。
 
-### 3. 四种「跑法 × backend」组合全支持；隧道生命周期按宿主分三形态
+### 3. 四种「执行方式 × 执行后端」组合全支持；隧道生命周期按宿主分三形态
 
 | 组合 | 隧道宿主 | 拆除时机 |
 |---|---|---|

@@ -1,4 +1,4 @@
-# 开发者指南
+# contributor 指南
 
 > 使用者阅读 [`README.md`](./README.md)（仓库首页）与 [`docs/user-guide/`](./docs/user-guide/README.md)；本文面向 contributor，内容为如何参与、目录结构、开发环境、测试、spike、发布，以及设计决策的存放位置。项目约定（沟通/文档纪律/代码纪律/工作方式）在 [`CLAUDE.md`](./CLAUDE.md)，术语在 [`CONTEXT.md`](./CONTEXT.md)，全部文档的地图在 [`docs/README.md`](./docs/README.md)。
 
@@ -35,16 +35,16 @@ v1 定位尚有一项验收未完成，前置条件是取得可用的真实业�
 ├── CLAUDE.md                  ← 项目约定（沟通/文档纪律/代码纪律/工作方式）——给 contributor 侧 AI agent 与人
 ├── LICENSE                    ← 许可证（MIT）
 ├── pyproject.toml / uv.lock   ← uv workspace 根（成员 = core / runtime / cli / engines/novaact / deploy_aws 五个发行包）：单一 lock + 共用 dev 依赖与 pytest 配置（ADR 0037）
-├── .github/                   ← CI 与发布链（workflows/{ci,release}.yml + scripts/ + release_body_footer.md（GitHub Release 正文的固定块）；一次性人工前置与本地校验见 .github/workflows/README.md，ADR 0037 决策 8）
-├── .claude/commands/          ← Claude Code 项目命令：/doc-health-review、/code-health-review 两条复盘入口（.claude/ 其余为个人配置、不入库）
+├── .github/                   ← CI 与发布链（workflows/{ci,release,pages}.yml + scripts/ + release_body_footer.md（GitHub Release 正文的固定块）；pages.yml = 把 docs/diagrams/ 发到 GitHub Pages；一次性人工前置与本地校验见 .github/workflows/README.md，ADR 0037 决策 8）
+├── .claude/                   ← Claude Code 项目级资产（入库）：commands/（两条复盘入口）、settings.json + hooks/sync-derived.sh（派生文件同步，见下文「测试」节）、skills/doc-diagram/（作图入口）；个人配置放 .claude/settings.local.json、不入库
 ├── docs/                      ← 全部文档；按读者的分层与归位见 ADR 0045（三类读者、四个入口）
 │   ├── README.md              ← 文档地图：使用者 / contributor / 想懂机理的人 / contributor 侧 AI agent 各自的入口
 │   ├── adr/                   ← 架构决策记录（0001-0045，每篇带 Status 头）
 │   ├── internals/             ← 机理横切解读（只讲 how、权威在 ADR + code）；篇目与主题归属见 docs/internals/README.md
-│   ├── user-guide/            ← 使用者文档（安装 / 写 feature / 运行与看结果 / 云端后端 / 配置 / 排错）；owner 表见 docs/user-guide/README.md
-│   ├── ai-eng/                ← contributor 侧 AI agent 的工作文档：README.md（该层入口）+ REFERENCES.md（外部一手来源）+ {doc,code}-health-review.md（两条复盘方法）
+│   ├── user-guide/            ← 使用者文档，一个主题一篇 owner（篇目与 owner 表见 docs/user-guide/README.md）
+│   ├── ai-eng/                ← contributor 侧 AI agent 的工作文档：README.md（该层入口）+ REFERENCES.md（外部一手来源）+ {doc,code}-health-review.md（两条复盘方法）+ diagram-authoring.md（作图方法）
 │   ├── journey/               ← 任务推进的 staging 区，按需创建（过程产物，吸收进 ADR/code 后即删，见 CLAUDE.md「文档纪律」）
-│   └── diagrams/              ← 文档里的图：图源 JSON + 导出 SVG + index.html（各层文档共用；GitHub Pages 只发布这一个目录）
+│   └── diagrams/              ← 文档里的图：图源 JSON + 导出 SVG + 已发布到 Pages 的可交互 HTML + index.html（各层文档共用；GitHub Pages 只发布这一个目录）
 ├── features/                  ← 共享 .feature（同一份两个引擎同读；通用 step 风格，QA 零代码）
 │   ├── wikipedia_generic.feature / wikipedia_assertions.feature / wikipedia_robustness.feature
 │   ├── wikipedia_zh.feature                ← 非英文 UI 探针：中文维基 + 中文 step，两引擎同题（ADR 0001 的测量夹具与重议复测入口）
@@ -58,7 +58,7 @@ v1 定位尚有一项验收未完成，前置条件是取得可用的真实业�
 │   ├── midscene/              ← npm 包 @gherkai/worker-midscene（ESM）：薄 worker + 使用方 steps 文件唯一应 import 的公开 API
 │   └── novaact/               ← 发行包 gherkai-worker-novaact：薄 worker，`python -m` 入口
 ├── deploy_aws/                ← 发行包 gherkai-deploy-aws：`gherkai deploy` 的 AWS provider（Python CDK stack + 随部署打成 asset 的三个 Lambda handler 源 + worker 镜像交付命令，ADR 0033/0034/0037/0038）
-├── skills/                    ← 不是 skill 的源文件（源文件在 cli/、随 wheel 发行）：gherkai-evals/ = agent skill 的评测资产，维护者与 AI 侧、不分发，资产清单与运行方法在 ADR 0043 决策七；结果工作区 gherkai-workspace/ 不入库
+├── skills/                    ← 不是 skill 的源文件（源文件在 cli/、随 wheel 发行）：gherkai-evals/ = agent skill 的评测资产，contributor 与 AI 侧、不分发，资产清单与运行方法在 ADR 0043 决策七；结果工作区 gherkai-workspace/ 不入库
 ├── graphify-out/              ← 代码 + 文档知识图（供 AI agent 先查图再读源码；刷新见下文「知识图刷新」）
 └── tools/                     ← 复用工具库（真实运行 / 诊断 / 校验 / 渲染，清单见下表；长期资产，见 CLAUDE.md「工作方式」）
 ```
@@ -134,9 +134,9 @@ uv run pytest core/tests -m integration          # 集成测试：假定真表/�
 
 禁词表、相对链接正则与 skill 的命令 token 抽取器位于 `cli/tests/_doc_rules.py`，五个消费方共用（四份护栏 `test_package_readmes.py` / `test_user_docs.py` / `test_skill.py` / `test_skill_deploy_tokens.py`，外加 `tools/render_skill_contract.py` 的自查），不应再复制第二份。单测通过不等于结论正确：凡结论依赖 mock 之外的真实行为（进程/信号/并发/真 AWS），按 CLAUDE.md「绿≠对」升级验证；端到端真实运行的现成工具在 `tools/`，用前先检索该目录、避免重复实现。
 
-**图**：全部图统一用 archify，图源与静态图在 [`docs/diagrams/`](./docs/diagrams/)：改图 = 修改 `<name>.json`，运行 `node tools/build_diagrams.mjs [docs/diagrams/<name>.json]`（deliver 出 HTML、再从 HTML 导出 SVG；`--png` 另导 PNG 只供目视、不入库），JSON 与 SVG 同 commit；正文以 markdown 图片语法嵌入 `docs/diagrams/<name>.svg`。HTML 默认不入库（`.gitignore` 排除）；只有发布到 GitHub Pages 的可交互大图才入库 HTML，发布 = `.gitignore` 加白名单行 + `docs/diagrams/index.html` 加链接 + HTML 入库三者同 commit，[`.github/workflows/pages.yml`](./.github/workflows/pages.yml) 把该目录原样上传。图上只画结构与指向，易漂移的字面量留在正文；图源零内部指代（护栏 `cli/tests/test_user_docs.py` 扫 JSON、断言 JSON 与 SVG 成对且 SVG 末尾的图源 sha256 指纹与 JSON 一致——图源改动未重新导出即在 CI 中失败、正文无 mermaid 块、入库 HTML 有图源且在 index 有链接）。形态、立图门槛与被拒方案见 [ADR 0045](./docs/adr/0045-documentation-layering-and-placement.md) 决策七。作图方法（类型、内容规则、布局清单、archify 技法）见 [`docs/ai-eng/diagram-authoring.md`](./docs/ai-eng/diagram-authoring.md)；在 Claude Code 里 `/diagram` 或提到改图即自动加载该方法（项目级 skill [`.claude/skills/doc-diagram/`](./.claude/skills/doc-diagram/SKILL.md)）。
+**图**：全部图统一用 archify，图源与静态图在 [`docs/diagrams/`](./docs/diagrams/)：改图 = 修改 `<name>.json`，运行 `node tools/build_diagrams.mjs [docs/diagrams/<name>.json]`（deliver 出 HTML、再从 HTML 导出 SVG；`--png` 另导 PNG 只供目视、不入库），JSON 与 SVG 同 commit；正文以 markdown 图片语法嵌入 `docs/diagrams/<name>.svg`。HTML 默认不入库（`.gitignore` 排除）；只有发布到 GitHub Pages 的可交互大图才入库 HTML，发布 = `.gitignore` 加白名单行 + `docs/diagrams/index.html` 加链接 + HTML 入库三者同 commit，[`.github/workflows/pages.yml`](./.github/workflows/pages.yml) 把该目录原样上传。图上只画结构与指向，易漂移的字面量留在正文；图源零内部指代（护栏 `cli/tests/test_user_docs.py` 扫 JSON、断言 JSON 与 SVG 成对且 SVG 末尾的图源 sha256 指纹与 JSON 一致——图源改动未重新导出即在 CI 中失败、正文无 mermaid 块、入库 HTML 有图源且在 index 有链接）。形态、立图门槛与被拒方案见 [ADR 0045](./docs/adr/0045-documentation-layering-and-placement.md) 决策七。作图方法（类型、内容规则、布局清单、archify 技法）见 [`docs/ai-eng/diagram-authoring.md`](./docs/ai-eng/diagram-authoring.md)；在 Claude Code 里 `/doc-diagram` 或提到改图即自动加载该方法（项目级 skill [`.claude/skills/doc-diagram/`](./.claude/skills/doc-diagram/SKILL.md)）。
 
-**派生文件的自动同步（Claude Code）**：项目级 hook [`.claude/hooks/sync-derived.sh`](./.claude/hooks/sync-derived.sh)（由入库的 [`.claude/settings.json`](./.claude/settings.json) 挂在 Edit / Write / MultiEdit / Bash 之后）在每次工具调用后做两件事：skill 契约副本与源不同步时用 `tools/render_skill_contract.py` 重渲染并告知 agent；`docs/diagrams/*.json` 比同名 SVG 新时提醒运行 `tools/build_diagrams.mjs`（不自动重建）。首次进入仓库时 Claude Code 会要求确认一次项目 hook。它只是编辑时刻的便利层，Codex、人工编辑与 CI 仍由 `cli/tests/test_skill.py`、`cli/tests/test_user_docs.py` 保障。个人配置（graphify 的 hook-guard、plugin 开关）放 `.claude/settings.local.json`，不入库。
+**派生文件的自动同步（Claude Code）**：项目级 hook [`.claude/hooks/sync-derived.sh`](./.claude/hooks/sync-derived.sh)（由入库的 [`.claude/settings.json`](./.claude/settings.json) 挂在 Edit / Write / MultiEdit / Bash 之后）在每次工具调用后做两件事：skill 契约副本与源不同步时用 `tools/render_skill_contract.py` 重渲染并告知 agent；`docs/diagrams/*.json` 的 sha256 与同名 SVG 末尾的图源指纹不符（或 SVG 缺失）时提醒运行 `tools/build_diagrams.mjs`（不自动重建——与 CI 护栏同一指纹判据）。首次进入仓库时 Claude Code 会要求确认一次项目 hook。它只是编辑时刻的便利层，Codex、人工编辑与 CI 仍由 `cli/tests/test_skill.py`、`cli/tests/test_user_docs.py` 保障。个人配置（graphify 的 hook-guard、plugin 开关）放 `.claude/settings.local.json`，不入库。
 
 ## Spike（可独立运行的技术验证脚本）
 

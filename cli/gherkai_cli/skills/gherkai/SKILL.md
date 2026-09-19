@@ -22,7 +22,7 @@ gherkai 把 Gherkin `.feature` 里的每一步交给云端浏览器里的 AI 引
 - **一步三种执行路径**。默认走 AI：`Given` / `When` 的文本是动作，`Then` 的文本是布尔断言（可投票）。命中项目 `steps/` 里注册的正则则走确定性代码：不问 AI、不投票、可复现。另有一条内建捷径：文本里**双引号**内的内容以 `http://` / `https://` 开头时，整段引号内容当作地址、该步直接导航（本机应用照写的 `http://localhost:3000` 同样命中；单引号不触发），不耗 AI。派发优先级 = 确定性命中 → 双引号 URL 导航 → AI。
 - **边界**：精确检查（URL、DOM、数值、必须可复现、要快）→ 确定性 step；模糊、一次性、页面变化多、靠语义理解 → AI。
 - **scope 与 tag**：`@scope:<名>` 把多条 scenario 编进同一个 job，共享一个浏览器会话、串行执行（后一条接着前一条留下的页面状态）；未标 scope 的 scenario 各成一个 job，`scope_id` 就是这条 scenario 的 id：`<文件>:<行号>`，`Scenario Outline` 展开出的每条再多一段 Examples 数据行的行号——别自己拼，从判定明细 / `plan --json` / 筛空时打出的候选清单里逐字复制。**scope 名在整批里是全局的**：两个 feature 文件写了同一个名字就合并成一个 job（并发变串行、互不相干的用例锁进同一会话，`@engine` / `@timeout` 按合并后的全体解析、两边标了不同值整批拒绝运行），撞名只在 stderr 提示一行，所以名字带来源前缀（`checkout-happy-path`、`admin-login`），别用 `login` / `smoke` 这种通名；也别把 scope 名写成 `<文件>:<行号>` 这个形状——正好等于某条未标 scope 的 scenario 编号时整批拒绝运行并退 2。`@engine:novaact|midscene` 选引擎，`@timeout:<秒>` 给该 scope 的墙钟预算；其它 tag 只是普通标签，靠 `--tags` 筛。feature 行的 tag 会传给其下每条 scenario——`@scope` 标在 feature 行就是把整个文件塞进一个串行 job，要的是这个再标。
-- **引号只是书写习惯**：AI 步整段文本原样交给模型；确定性 step 的正则也在这段文本上匹配——对象是关键字之后的那段文本、引号照留，正则里别写关键字，写用例时的写法要与它的 `example` 一致。匹配是**子串搜索、不自动锚定**，所以模式要写窄：带上引号与特征词（像内建那条 `页面地址匹配 "<正则>"` 的形状），别只写一个动词——宽模式会顺带命中本该走 AI 的步、悄悄换掉它的判法，两条模式同时命中一个 step 则该步直接记 error；宽窄靠 `gherkai plan` 的标注验。`And` / `But` 承前一步的关键字；`*` 或开头就是 `And` 会被拒（判不出动作还是断言）。
+- **引号只是书写习惯**：AI 步把关键字之后那段文本交给模型（整段被双引号包起来时，外层那对引号会去掉）；确定性 step 的正则匹配的是没去引号的原文——对象是关键字之后的那段文本、引号照留，正则里别写关键字，写用例时的写法要与它的 `example` 一致。匹配是**子串搜索、不自动锚定**，所以模式要写窄：带上引号与特征词（像内建那条 `页面地址匹配 "<正则>"` 的形状），别只写一个动词——宽模式会顺带命中本该走 AI 的步、悄悄换掉它的判法，两条模式同时命中一个 step 则该步直接记 error；宽窄靠 `gherkai plan` 的标注验。`And` / `But` 承前一步的关键字；`*` 或开头就是 `And` 会被拒（判不出动作还是断言）。
 
 ## 2 引擎怎么选
 
@@ -71,7 +71,7 @@ Midscene 对被测 UI 的语言不限。Nova Act 的支持范围是英文 UI：�
 | `run` / `submit` 共用，多数 `plan` 也收 | `--default-engine` `--assertion-votes` `--default-job-timeout` `--steps-dir` `--scope` `--tags` `--scenario` `--expose-local`（这 8 个 `plan` 也收：用例预检要与实际运行一致就照样给）；`--max-concurrency` `--report-dir`（`plan` 不收） | `--assertion-votes 3` 查 AI 断言抖动；`--max-concurrency` 默认很保守（护成本与配额），scope 多且互不相干时调大；`--default-job-timeout` 只管未标 `@timeout` 的 scope。默认值都以 `--help` 为准，别背数字 |
 | 仅 `run` | `--fail-fast` `--quiet` `--no-report` `--grace` | `--quiet` 少占屏幕与上下文、worker 日志改落文件，判定明细与证据照落；`--no-report` 连 `explain` 一起废掉——判定明细与 AI 证据都不落盘，事后 `explain` 找不到这个 run，失败原因只剩本次输出里每步那一句，想细看只能再花钱重新运行，所以只在确定不用读失败原因的纯 CI 门禁上用；`--grace` 别调小，过小直接退 2、且会泄漏浏览器会话 |
 | 仅 `submit` | `--tunnel-ttl` | 只在 cloud + `--expose-local` 时有意义 |
-| cloud 档：`doctor` / `run` / `submit` / `status` / `explain` 各要给（`plan` 不吃） | `--backend cloud` `--prefix` `--region` `--profile` `--worker-variant`（仅 `run` / `submit`） | 同一个 run 上这几个值逐字一致（`--report-dir` 同理），任一处不同即退 2；`--worker-variant` 选云端 worker 镜像上的确定性 step 集，不给用部署侧默认指针 |
+| cloud 档：`doctor` / `run` / `submit` / `status` / `explain` 各要给（`plan` 不吃） | `--backend cloud` `--prefix` `--region` `--profile` `--worker-variant`（仅 `run` / `submit`） | `--backend` / `--prefix` / `--report-dir` 必须与产生这个 run 的那条命令逐字一致，不一致即退 2 说找不到这个 run；`--region` 要指同一个 region（换了就查不到），`--profile` 换成另一个指向同账号同 region 的 profile 不影响；`--worker-variant` 选云端 worker 镜像上的确定性 step 集，不给用部署侧默认指针 |
 | 查询类各自有 | `status --json`、`explain --json`、`plan --json`、`doctor --json`、`list-engines --json`、`list-deterministic --json` | `run --json` 有、`submit` 没有：run_id 走 stdout，进度与判定看 `status --json` |
 
 ## 8 退出码分流
@@ -83,7 +83,7 @@ Midscene 对被测 UI 的语言不限。Nova Act 的支持范围是英文 UI：�
 
 ## 9 失败汇报模板
 
-向人汇报每条没过的用例时用固定小结构，让人一眼能定夺。汇报是给人的：别提「按 skill 第几节」「见 references/…」这类你自己的读物，直接给内容。先认失败落在哪一层：**有某一步判 failed / error** → 步级模板；**没有任何一步判否、只有 job 级的 error / aborted**（超时、起 worker 失败、网络、被 `--fail-fast` 掐停）→ job 级模板。硬套错的那个会逼你编出不存在的步号与模型证据。
+向人汇报每条没过的用例时用固定小结构，让人一眼能定夺。汇报是给人的：别提「按 skill 第几节」「见 references/…」这类你自己的读物，直接给内容。先认失败落在哪一层：**有某一步判 failed / error** → 步级模板；**没有任何一步判否、只有 job 级的 error / aborted / skipped**（超时、起 worker 失败、网络、被 `--fail-fast` 中止，或中止前根本没启动）→ job 级模板。硬套错的那个会逼你编出不存在的步号与模型证据。
 
 步级：
 
@@ -101,7 +101,7 @@ job 级：
 
 ```
 用例：<scope_id>（整个 job，判否不落在某一步）  引擎：<engine>
-判定：<error(<error_type>)|aborted>  原因：<message 原文>
+判定：<error(<error_type>)|aborted|skipped>  原因：<message 原文>
 建议：<把这个 scope 拆小 | 给它加 @timeout:<秒>（或调 --default-job-timeout） | 被 fail-fast 掐停的：根因在先失败的那个 job，先汇报那条 | 环境或引擎的问题：<一句说清是哪一样，如 worker 版本与 CLI 不一致、region 或凭证缺失、隧道断开>>
 重新运行：gherkai run <feature> --scope <scope_id>
 ```
@@ -114,6 +114,6 @@ job 级：
 - 别猜产物路径：顺判定明细里的 `ref` 走，本机与 S3 两档同律。
 - cloud 档改了 steps 不 `push-worker` 等于没改：云端 worker 读的是镜像里那份，本机 `plan` 的标注不代表云端。
 - 别只写一侧的确定性 step：另一引擎上会静默落回 AI，run 还可能「通过」。
-- 别调小 `--grace`（仅 `run` 有）：云端 `submit` 的对应选项在部署侧的 `gherkai deploy --stop-timeout`，归部署方。
+- 别调小 `--grace`（仅 `run` 有，且只对本机档；cloud 档给了它即退 2）：云端的停止宽限在部署侧的 `gherkai deploy --stop-timeout`，归部署方。
 - 别为了「验证一下改动」就 `run` / `submit`：每次实际运行都开云端浏览器会话、花真钱，改完用 `plan`（零费用）验写法与标注；实际运行只在人要结果时做。
 - 别自己运行 `gherkai deploy` / `gherkai destroy`：交给人，你负责准备命令与前置清单。

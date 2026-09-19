@@ -1,6 +1,6 @@
 {
   "skill_name": "gherkai",
-  "notes": "缺省集只执行 plan / explain / doctor / list-deterministic，零条真 AWS；opt_in=true 的条目会真跑 run / submit、只由维护者在自己的部署上按需跑。fixture 路径相对本目录；评测前用 materialize.py 把 fixture 物化到仓库外的舞台，两臂都在舞台里以 `claude -p` 跑、cwd = 舞台、PATH 前置舞台 bin/。 第四轮前按第三轮评分者批评收紧：复合断言拆条（eval 2/9/10/11/13）、放行开关与投票的判据正向化（eval 9/14）、禁绕过式修复（eval 12）、正则须匹配真实落地地址（eval 1）、禁留新 run 目录（eval 13）；「--help 与只读命令不算执行」统一写进所有「没有执行」断言。断言总数随之变化，通过率与前一轮不可直接比。 第五轮前：eval 1 的四合一断言拆为「复用确定性 step」与「正则鲁棒（含对实测 301 终点与 evil 主机的机械判据）」；所有缺省 eval 加「不把评测脚手架当用户环境」；新增 eval 15（scope 跨文件撞名，fixture scope-collision）与 eval 16（Background + Outline 写用例）。 第五轮后：eval 16 断言 2 与 expected_output 对齐（确定性 URL step 或页面级语义断言二选一、各带判据），第五轮 fable/sonnet 的 with-skill 因旧断言被误判。 第五轮后尺子备忘已落：eval 1 正则加裸主机须命中；eval 2 三条条件式断言改为必须落盘；eval 16 步号口径与 Background 执行语义拆成两条（缺省集 122 条）。",
+  "notes": "缺省集只执行 plan / explain / doctor / list-deterministic，零条真 AWS；opt_in=true 的条目会真跑 run / submit、只由 contributor 在自己的部署上按需跑。fixture 路径相对本目录；评测前用 materialize.py 把 fixture 物化到仓库外的舞台，两臂都在舞台里以 `claude -p` 跑、cwd = 舞台、PATH 前置舞台 bin/。 第四轮前按第三轮评分者批评收紧：复合断言拆条（eval 2/9/10/11/13）、放行开关与投票的判据正向化（eval 9/14）、禁绕过式修复（eval 12）、正则须匹配真实落地地址（eval 1）、禁留新 run 目录（eval 13）；「--help 与只读命令不算执行」统一写进所有「没有执行」断言。断言总数随之变化，通过率与前一轮不可直接比。 第五轮前：eval 1 的四合一断言拆为「复用确定性 step」与「正则鲁棒（含对实测 301 终点与 evil 主机的机械判据）」；所有缺省 eval 加「不把评测脚手架当用户环境」；新增 eval 15（scope 跨文件撞名，fixture scope-collision）与 eval 16（Background + Outline 写用例）。 第五轮后：eval 16 断言 2 与 expected_output 对齐（确定性 URL step 或页面级语义断言二选一、各带判据），第五轮 fable/sonnet 的 with-skill 因旧断言被误判。 第五轮后尺子备忘已落：eval 1 正则加裸主机须命中；eval 2 三条条件式断言改为必须落盘；eval 16 步号口径与 Background 执行语义拆成两条（缺省集 122 条）。 第六轮前按 fixture 真值校准两条尺子：eval 13 的 job 级判定口径改为「判 error 且归因 timeout」（超时不归 aborted）；eval 14 的 prompt 复述改用 fixture 里真实的断言文本（原先那句「正文里没出现『图灵』」在 fixture 里零命中）。断言总数不变。",
   "evals": [
     {
       "id": 1,
@@ -235,10 +235,10 @@
       "slug": "job-level-failure-triage",
       "fixture": "job-failure",
       "prompt": "features/browse.feature 在 reports/ 里那次跑有一个 job 红了，但我在报告里找不到是哪一步失败的。帮我看看到底怎么回事、怎么改、怎么重跑。",
-      "expected_output": "用 gherkai explain 发现失败落在 job 级（scope deep-dive 超过 @timeout:20 的墙钟预算被中止），没有任何一步判 failed、后面的步没有记录（record_missing）；按 job 级模板汇报（scope_id、error/aborted、原因）、不编造步号与模型证据；建议加大 @timeout 或拆小 scope；重跑用 --scope deep-dive；顺带说明 Background 步展开进每条 scenario、Outline 每行是独立 scenario。",
+      "expected_output": "用 gherkai explain 发现失败落在 job 级（scope deep-dive 的 @timeout:20 墙钟预算到点被停止，判 error、归因 timeout），没有任何一步判 failed、后面的步没有记录（record_missing）；按 job 级模板汇报（scope_id、判定与归因、原因 message）、不编造步号与模型证据；建议加大 @timeout 或拆小 scope；重跑用 --scope deep-dive；顺带说明 Background 步展开进每条 scenario、Outline 每行是独立 scenario。",
       "expectations": [
-        "用 gherkai explain 读取，并正确判断失败落在 job 级（超时 / 被中止）而不是某一步的断言判否",
-        "汇报用 job 级结构（scope_id、判定 error/aborted、原因 message），没有为不存在的失败步编造步号、thought 或截图",
+        "用 gherkai explain 读取，并正确判断失败落在 job 级（job 墙钟预算到点，不是某一步的断言判否）",
+        "汇报用 job 级结构（scope_id、判定 error 且归因 timeout、原因 message），没有为不存在的失败步编造步号、thought 或截图",
         "指出没跑到的步是没有记录（record_missing），不是判否",
         "读对了 Background：它的导航步展开进每条 scenario 的第 0 步，长流程 scenario 因此是 5 步",
         "读对了 Scenario Outline：两行 Examples 各是一条独立 scenario / 独立 job，id 比普通 scenario 多一段数据行号（如 features/browse.feature:13:19），没有把它们当成同一条用例",
@@ -254,7 +254,7 @@
       "id": 14,
       "slug": "non-english-engine-diagnosis",
       "fixture": "nova-zh",
-      "prompt": "features/zh_terms.feature 两条 scenario 是一模一样的步骤，只是引擎不同。reports/ 里那次跑一条过了一条没过，没过的那条说正文里没出现「图灵」，可我打开页面明明有。是网站的问题还是我们哪里写错了？",
+      "prompt": "features/zh_terms.feature 两条 scenario 是一模一样的步骤，只是引擎不同。reports/ 里那次跑一条过了一条没过，没过的那条说词条首段没提到计算机或机器，可我打开页面首段明明写着「计算机」。是网站的问题还是我们哪里写错了？",
       "expected_output": "用 explain 对照：novaact 那条的词匹配断言判否、midscene 那条通过；归因到 Nova Act 的英文 UI 支持范围（非英文页面上『正文是否出现某个词』这类断言系统性判否、投票治不了），不是网站问题也不是用例写错；三条出路：该 scenario 标 @engine:midscene（或 --default-engine midscene）、把断言改写成页面级语义陈述、把词检查落到确定性 step；不建议加 --assertion-votes。",
       "expectations": [
         "用 gherkai explain 对照了两条 scenario 的证据，指出判否的是 novaact 引擎那条、midscene 那条通过",

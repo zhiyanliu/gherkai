@@ -26,9 +26,9 @@ gherkai destroy --vpc default --prefix gherkai- --yes       # 拆栈；表 / 桶
 - `--vpc` **必给、无隐式默认**（只有 `--bootstrap` 不需要）：`default`（账户默认 VPC）/ `new`（新建，2 可用区、零 NAT）/ `vpc-<id>`。生效的档记在后端，下次给错会退 2；确认要换网络时加 `--allow-vpc-change` 放行一次。
 - `--prefix`（默认 `gherkai-`）是全部云资源的命名空间，**必须与 `run` / `submit` / `status` / `explain` 的 `--prefix` 一致**。换 prefix = 换一套独立环境（`prod-` / `stage-`），闲置成本近零。
 - 其它：`--require-approval never|any-change|broadening`（IAM 变更要不要人过目）、`--stop-timeout N`（worker 容器停止宽限秒；默认值与上限见 `--help`，上限是平台限制、更大的值在命令期就被拒；云端对应本机 `run --grace`）、`--container-engine 名`（默认 docker）、`--refresh-context`、`--region` / `--profile`。
-- 退出码：0 成功；2 前置 / 校验失败（Node 缺失、VPC 档不符、容器引擎名不认、`push-worker` 架构或版本不符）；1 = cdk 已成功而 worker 镜像步骤失败，账户已改动，重新运行 `gherkai deploy` 幂等收敛；其余原样透传 cdk。
+- 退出码：0 成功；2 前置 / 校验失败（Node 缺失、VPC 档不符、容器引擎名不认、`push-worker` 架构或版本不符）；1 账户可能已被改动，两种来源——cdk 自身失败（报错码多为 1、原样透传，处置看 cdk 输出），或 cdk 已成功而 worker 镜像步骤失败（重新运行 `gherkai deploy` 幂等收敛）；`destroy` 没有镜像步骤，它的 1 只来自 cdk；其余原样透传 cdk。
 
-建出来的东西：DynamoDB 两张表（run 状态、事件）、S3 桶（判定结果、报告、引擎产物）、ECS 集群与每引擎一个 Fargate task 定义、每引擎一个 ECR 仓库、三个 Lambda 与调度规则（让 `submit` 的 run 在云上自我推进）、按 `--vpc` 档的子网与安全组、每引擎最小权限角色、SSM 参数（版本戳、VPC 档、worker 镜像映射与默认指针）。云端每个 run 的并行 job 数 = min(`--max-concurrency`, 部署侧上限 8)。
+建出来的东西：DynamoDB 两张表（run 状态、事件）、S3 桶（判定结果、报告、引擎产物）、ECS 集群与每引擎一个 Fargate task 定义、每引擎一个 ECR 仓库、三个 Lambda 与调度规则（让 `submit` 的 run 在云上自我推进）、按 `--vpc` 档的子网与安全组、每引擎最小权限角色、SSM 参数（版本戳、VPC 档、worker 镜像映射与默认指针）。`submit --backend cloud` 提交的一个 run，并行 job 数 = min(提交时 `--max-concurrency`, 部署侧上限 8)：超过上限时 `submit` 打印一行提示、本 run 按上限并行。`run --backend cloud` 的并行度就是 `--max-concurrency`，不受这个上限约束。
 
 ## 3 使用方一条线
 
@@ -85,7 +85,7 @@ gherkai submit features/x.feature --backend cloud --prefix gherkai- --worker-var
 ## 6 多环境与清理
 
 - 多环境靠 `--prefix`：`prod-` / `stage-` 各一套后端，互不影响；所有 cloud 命令带同一个 prefix。
-- `gherkai destroy` 之后两张 DynamoDB 表、S3 桶、两个 ECR 仓库**保留、需手动删**（防误删数据）。不手动删则同 prefix 重新 deploy 会因资源已存在而冲突。worker 镜像映射与默认指针也不随 destroy 删，ECR 留着则重建后照样能用。命令样例见部署方说明页「清理」节。
+- `gherkai destroy` 之后两张 DynamoDB 表、S3 桶、两个 ECR 仓库**保留、需手动删**（防误删数据）。不手动删则同 prefix 重新 deploy 会因资源已存在而冲突。worker 镜像映射与默认指针也不随 destroy 删，ECR 留着则重建后照样能用。命令样例见部署方说明页「拆除与清理」节。
 
 ## 7 `--expose-local` 在 cloud 档的例外
 

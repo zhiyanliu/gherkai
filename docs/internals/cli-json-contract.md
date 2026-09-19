@@ -46,7 +46,7 @@
 | `report_refs[]` | array | job 级原生产物指针：`kind`（`summary` / `report`）、`ref`（`file://` 或 `s3://` URI）、`label` |
 | `scenarios[]` | array | 见下 |
 
-`scenarios[]` 每项：`scenario_id`（`<uri>:<行>[:<example 行>]`——Scenario Outline 展开的每行 example 各成一条，以 example 行号消歧）、`status`、`duration_ms`、`report_refs[]`（同上形状）、`steps[]`：
+`scenarios[]` 每项：`scenario_id`（`<uri>:<行>[:<example 行>]`——Scenario Outline 展开的每行 example 各成一条，以 example 行号消歧）、`status`、`duration_ms`、`report_refs[]`（形状同上；**当前两引擎都不填 scenario 级产物，恒为空数组**——产物在 step 级与 job 级）、`steps[]`：
 
 | 键 | 类型 | 含义 |
 |---|---|---|

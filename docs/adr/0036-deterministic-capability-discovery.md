@@ -23,7 +23,7 @@ TS `deterministic(pattern, handler, { description, example })` / Python `@determ
 
 worker 的能力自述入口（`--capabilities`，契约见「5.」）**不建会话、不读 stdin、零费用**，返回对象里的 `deterministic_steps` 键就是注册表清单：JSON 数组，每项 `pattern`（原始串）+ `description` + `example`。
 
-- **真值单一**：清单直接从注册表代码生成，engine 侧加/改锚点，查询结果即时跟随——零第二事实源。
+- **真值单一**：清单直接从注册表代码生成，engine 侧加/改确定性 step，查询结果即时跟随——零第二事实源。
 - **跨语言被既有架构吸收**：TS/Python 注册表无法被 CLI（Python）直接 import，「spawn 子进程 + 结构化输出」正是本项目 worker 交互的既有形态（[0024](./0024-worker-core-protocol.md)）；自述是 worker 的第二个入口形态（第一个是跑 job），不触碰 job 协议本身。
 - 与 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)「设计要点」节「匹配放 worker，不放核心」条（核心对 step 语义无知）的红线相容：core/CLI 仍不持有、不解释 pattern——只是转述 worker 的自述。
 
@@ -36,7 +36,7 @@ worker 的能力自述入口（`--capabilities`，契约见「5.」）**不建�
 
 ### 4. plan 命中标注：「我写的这句会不会命中」
 
-清单查询解决「有什么可用」；feature 作者还需要「**我写的这句会不会命中**」——`plan` 预检对每个 step 标注路由预期。**不做 CLI 侧复刻匹配**（TS/Python 正则方言不同：`(?<n>)` vs `(?P<n>)`；复刻匹配语义 = 对 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)「设计要点」节「匹配放 worker，不放核心」条的漂移面），机制 = **worker 批量 match 查询**：
+**用例预检的派发标注那半归本 ADR**——[0025](./0025-plan-module-feature-to-jobs.md) 把它交割到这里（解析与校验那半留在 plan 模块，匹配语义不进 core）。清单查询解决「有什么可用」；feature 作者还需要「**我写的这句会不会命中**」——`plan` 预检对每个 step 标注路由预期。**不做 CLI 侧复刻匹配**（TS/Python 正则方言不同：`(?<n>)` vs `(?P<n>)`；复刻匹配语义 = 对 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)「设计要点」节「匹配放 worker，不放核心」条的漂移面），机制 = **worker 批量 match 查询**：
 
 - worker 第三入口 `--match-steps`：stdin 收 step 文本 JSON 数组，对每条用**同一注册表、同一 search 实现**回答 `null`（走 AI）/ `{pattern, description}`（命中）/ `{conflict:[patterns]}`（命中多条），stdout 一行 JSON 即退——匹配语义 100% 留在 worker。match 用**裸 step 文本**，与真跑派发的匹配面完全一致（不 unquote、不拼 argument，[0024](./0024-worker-core-protocol.md)）。
 - plan 按引擎分组 step、每引擎至多 spawn 一次；文本视图行尾标 `← 确定性: <description>`（AI 不标——噪声控制）、`--json` 给每 step 注 `deterministic` 键（plan 视图字段、非 definition）。
@@ -53,10 +53,10 @@ worker argv 带 `--capabilities` 时：**不建会话、不读 stdin、零费用
 
 - `min_grace_s` 是 [0024](./0024-worker-core-protocol.md) grace 硬约束的下限——Nova = `NOVA_ACT_TIMEOUT_S`（组合根注入的 env，缺省 120）+ margin（worker 常量，可 env 覆盖）；Midscene = SIGTERM 收尾序列各段超时预算之和 + 余量，由 worker 里那些预算常量算出、不另写字面量。
 - `deterministic_steps` 是注册表清单（「2.」）。该入口与 job 模式、match 查询一样**先加载 steps 目录**（[0037](./0037-distribution-and-packaging.md) 决策 4），故清单 = 内建脚手架 + 使用方定制，加载失败在这里就 fail-loud——`run` 的前置检查因此只需 spawn 一次：同一份自述同时给出「steps 加载成功、清单、grace 下限、模型」。
-- `model_id` 是该 worker 起 job 时会用的模型 id（Nova = 钉死的 GA 版本或 env `NOVA_MODEL_ID` 的覆盖值，见 [0004](./0004-novaact-iam-auth-via-workflow.md)「模型版本选择策略」；Midscene = 它的 Bedrock 模型 id），`doctor` 据此显示当前模型——覆盖过 env 的机器一眼可见。
+- `model_id` 是该 worker 起 job 时会用的模型 id——两引擎同律「默认锁定一个具体 id + worker 一侧 env 覆盖」，各自的默认值与覆盖 env 见 [0044](./0044-engine-model-selection-and-override.md) 决策 1/2；`doctor` 据此显示当前模型——覆盖过 env 的机器一眼可见。
 - **worker 只有两个非 job 入口**：本入口（自述、无输入）与 `--match-steps`（查询、stdin 喂 step 文本，「4.」）。**加键不加入口**：将来的能力（如 browser 后端，[0037](./0037-distribution-and-packaging.md) 被拒方案 / 未来项）都是本对象的新键；`schema_version` 只在既有键语义变化时递增。
 
-组合根侧（`compose.query_capabilities(engine, steps_dir)`，进程内按「引擎 + steps 目录」缓存整份对象；`engine_min_grace` 从该引擎任一份缓存取 `min_grace_s`——下限与 step 无关——没有才无 steps 地问一次）**当场核两个身份位**：`engine` 须等于所问引擎（定位链第一级是 env 覆写，指错 worker 路径时不核就静默拿另一引擎的下限）、`schema_version` 须是它认识的版本；spawn 时 `stdin=DEVNULL`（不认该 flag 的 worker 会掉进 job 模式读 stdin，继承 TTY 就挂到超时、诊断指错方向）。query 失败（版本不一致不认 flag、非法 JSON、非零退出）与 match 查询同律 **fail-loud**（`WorkerSelfDescribeError`，不降级、不回落常量）。grace 下限**只在本机执行档查**——cloud 档的 worker 跑在 Fargate、运行期 grace 到不了它（真实宽限 = task-def 的 `stopTimeout`），且提交机器不必装 worker，见 [0024](./0024-worker-core-protocol.md)「引擎自报下限」条。
+组合根侧（`compose.query_capabilities(engine, steps_dir)`，进程内按「引擎 + steps 目录」缓存整份对象；`engine_min_grace` 从该引擎任一份缓存取 `min_grace_s`——下限与 step 无关——没有才无 steps 地问一次）**当场核契约**：两个身份位（`engine` 须等于所问引擎——定位链第一级是 env 覆写，指错 worker 路径时不核就静默拿另一引擎的下限；`schema_version` 须是它认识的版本）+ 上列那几个载荷键的形态，**校验集中在这一处、不散到各消费者**，任一不合即 fail-loud 且**不写缓存**；spawn 时 `stdin=DEVNULL`（不认该 flag 的 worker 会掉进 job 模式读 stdin，继承 TTY 就挂到超时、诊断指错方向）。query 失败一律 fail-loud、不降级、不回落常量：worker 非零退出抛 `WorkerSelfDescribeError`，输出非 JSON / 不合契约抛 `RuntimeError`；`run`/`submit`/`list-deterministic` 两类都退 2，match 查询侧则据类名区分「使用方 steps 加载失败不降级」与「环境问题降级为无标注」（见「4.」）。grace 下限**只在本机执行档查**——cloud 档的 worker 跑在 Fargate、运行期 grace 到不了它（真实宽限 = task-def 的 `stopTimeout`），且提交机器不必装 worker，见 [0024](./0024-worker-core-protocol.md)「引擎自报下限」条。
 
 ## 被拒方案（护栏）
 

@@ -4,12 +4,12 @@
 
 承接 [0003](./0003-midscene-grounding-qwen3vl-bedrock.md)。两个引擎统一在纯 SigV4 / IAM 上，**不引入任何长期或短期 bearer key**。
 
-经核实 `@midscene/core 1.9.8` 源码：Midscene 有公开、带类型的逃生舱 **`createOpenAIClient`**，service-caller 会采纳你返回的 OpenAI client（`service-caller/index.mjs:154-157`），底层 OpenAI SDK v6.3.0 支持自定义 `fetch`。`fetch` 能拿到每次请求的 method+url+headers+body——足以在进程内自签 AWS SigV4。因此「Midscene 只能发静态 bearer」这一限制只对 env-var 路径成立，代码路径下可自签。
+经核实 `@midscene/core` 源码（首验 1.9.8，装机版 1.12.8 复核仍成立）：Midscene 有公开、带类型的逃生舱 **`createOpenAIClient`**，service-caller 会采纳你返回的 OpenAI client（`service-caller/openai-client.mjs` 的 `createAndWrapClient`，采纳返回值那段），底层 OpenAI SDK v6.3.0 支持自定义 `fetch`。`fetch` 能拿到每次请求的 method+url+headers+body——足以在进程内自签 AWS SigV4。因此「Midscene 只能发静态 bearer」这一限制只对 env-var 路径成立，代码路径下可自签。
 
 **决定**：
 - **必须用代码初始化 Agent**（不能纯靠 env-var）：Midscene 经 `createOpenAIClient` 返回一个 OpenAI client，其自定义 `fetch` 用 `@aws-sdk/signature-v4` + 默认凭证链对请求做 SigV4 签名（service `bedrock`，region 由注入的 `AWS_REGION` 决定——`getRegion()`/`getBaseUrl()` 惰性读、不硬编码 east，见 [0033](./0033-iac-aws-backend-and-composition-wiring.md)；base URL = `bedrock-runtime.<region>.amazonaws.com/openai/v1`。spike 当时用 `us-east-1`）。**SigV4 fetch 只能代码注入——env-var 路径（`MIDSCENE_MODEL_INIT_CONFIG_JSON` 的静态 headers）无法做逐请求签名。** **两套 SigV4 场景独立**：CDP endpoint 的 upgrade 请求签 service `bedrock-agentcore`（GET、无请求体、只手建 host；下「已实测」第 2 段），与这里的模型连接（service `bedrock`、POST 带体、只手建 host + content-type，`x-amz-date` 由 signer 补）是两套场景——凭证同走 AWS 默认链，但 signer 与签名代码各自一份、不可互用；签哪套由目标 endpoint 种类决定，AgentCore 浏览器会话与 endpoint 种类是两件事。
 - 自签 fetch 顺带吸收 Bedrock 兼容层的方言：签名前去掉请求体里 `image_url.detail: "original"`（Midscene 的 GPT family 适配器固定发它、Bedrock 对任何模型都拒；[0044](./0044-engine-model-selection-and-override.md) 决策 3）。改体必须在签名**之前**（签名含 payload hash）。
-- 模型名/family 也必须随 `opts.modelConfig` 进代码、**不能靠 env**：`MIDSCENE_MODEL_NAME=qwen.qwen3-vl-235b-a22b`、`MIDSCENE_USE_QWEN3_VL=true`（承载 qwen3-vl family 的 legacy 开关，实际 MODEL_CONFIG 与 `SIGV4-FETCH-RECIPE.md` 用的是它）。虽是静态值、看着 env 能承载，但注入 `createOpenAIClient` 会让 Agent 切隔离 ModelConfigManager（详见下「关键实现坑」），故上面「必须用代码初始化 Agent」这条不只管 fetch/鉴权，模型配置一并进代码。（[0044](./0044-engine-model-selection-and-override.md) 的 `MIDSCENE_MODEL_ID` / `MIDSCENE_MODEL_FAMILY` 是**我们的代码**读 env 后写进 `opts.modelConfig`，不是让 SDK 自己读 env，与本条不冲突。）
+- 模型名/family 也必须随 `opts.modelConfig` 进代码、**不能靠 env**：`MIDSCENE_MODEL_NAME` 与家族键（spike 期是 `MIDSCENE_MODEL_NAME=qwen.qwen3-vl-235b-a22b` + qwen3-vl 的 legacy 开关 `MIDSCENE_USE_QWEN3_VL=true`；现值与家族推断见 [0044](./0044-engine-model-selection-and-override.md) 决策 2，该 legacy 开关已列入其被拒方案）。虽是静态值、看着 env 能承载，但我们经 `opts.modelConfig` 给配置即让 Agent 切隔离 ModelConfigManager（隔离态不读 env，详见下「关键实现坑」），故上面「必须用代码初始化 Agent」这条不只管 fetch/鉴权，模型配置一并进代码。（[0044](./0044-engine-model-selection-and-override.md) 的 `MIDSCENE_MODEL_ID` / `MIDSCENE_MODEL_FAMILY` 是**我们的代码**读 env 后写进 `opts.modelConfig`，不是让 SDK 自己读 env，与本条不冲突。）
 - 凭证走 AWS 默认链（本地档 = 开发机自身的 AWS 凭证；云端档 = 按引擎分立的 Fargate task role，见 [0033](./0033-iac-aws-backend-and-composition-wiring.md)「IAM 最小权限」；两档都已实测默认链可解析）。**零长期/短期 bearer key。**
 - **spike 与生产同路**——不再走「spike 先用兜底 key」。
 
@@ -28,4 +28,4 @@
 - 第 1 段（模型连接）：openai-node + sigv4Fetch 调 qwen3-vl，文本 `"ok"` + 视觉 `"Red Blue"`，**一次过未撞 403**——SigV4 字节匹配正确。
 - 第 2 段（浏览器连接/CDP）：`StartBrowserSession` + SigV4 签 upgrade（service `bedrock-agentcore`）+ Playwright `connectOverCDP` 连上云端浏览器、导航维基。
 - 第 3 段（合体）：Midscene 经 `createOpenAIClient` 注入 sigv4Fetch，在 AgentCore 云端浏览器跑通 `aiAct` + 断言，出 `report.html`。
-- **关键实现坑**（配方笔记 §7）：传 `createOpenAIClient` 会让 Agent 切隔离 ModelConfigManager，模型配置必须随 `opts.modelConfig` 一起给，不能靠 `overrideAIConfig`/env。
+- **关键实现坑**（配方笔记 §7）：给 `opts.modelConfig` 即切隔离 ModelConfigManager——隔离态只读该对象、不读 `overrideAIConfig`/env，故模型配置必须随它一起给。（1.9.8 时给 `createOpenAIClient` 或 `modelConfig` 任一即切隔离；1.12.8 起只给前者会用 `AgentScopedModelConfigManager` 包住全局管理器、仍读 env——本项目两者都给，落在隔离支。）

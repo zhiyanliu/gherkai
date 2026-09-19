@@ -15,7 +15,7 @@ WebUI 将来是另一个前端，**直接调 core、复用产品本体 `gherkai_
 
 ```
 cli/gherkai_cli/
-├── __main__.py   ← argparse 前端：run/submit/status/explain/plan/list-engines/doctor/list-deterministic/deploy/destroy/skill（嵌套 `skill install`），外加两个内部隐藏子命令（`argparse.SUPPRESS`、由 submit 以 setsid fork 启动、不供用户直接调用）：`_reconcile`（local 档 per-run 推进进程入口，ADR 0034）/ `_tunnel_watch`（cloud submit 的隧道守护进程入口，ADR 0035 决策 3）——解析 → 调 gherkai_runtime.compose/gherkai_core → 注入 RunPersistence 实时落库 → 调 render；定义退出码
+├── __main__.py   ← argparse 前端：run/submit/status/explain/plan/list-engines/doctor/list-deterministic/deploy/destroy/skill（嵌套 `skill install`），外加两个内部隐藏子命令（靠不传 `help` + 收窄 subparsers 的 `metavar` 隐去，**别改用 `argparse.SUPPRESS`**——会以「==SUPPRESS==」漏进 `--help`，理由见 `__main__.py` 该处注释；由 submit 以 setsid fork 启动、不供用户直接调用）：`_reconcile`（local 档 per-run 推进进程入口，ADR 0034）/ `_tunnel_watch`（cloud submit 的隧道守护进程入口，ADR 0035 决策 3）——解析 → 调 gherkai_runtime.compose/gherkai_core → 注入 RunPersistence 实时落库 → 调 render；定义退出码
 ├── deploy.py     ← deploy/destroy 的命令面 + 部署 provider 发现（entry point group `gherkai.deploy`）；**零 IaC 知识**、不 import aws_cdk（ADR 0037 决策 6）
 ├── render.py     ← 表层渲染：0024 事件 → 进度行；RunResult → 文本汇总 / JSON；RunState → status 视图；
 │                    JobResult + evidence → explain 的文本/JSON（两形态同源，见模块内 explain 节的注释）
@@ -51,7 +51,10 @@ uv run gherkai run features/wikipedia_generic.feature --backend cloud --prefix d
 `--backend cloud` 的表 / 桶 / cluster / task-def / SSM 里的子网·安全组与 worker 镜像 variant 指针**全由 `gherkai deploy` 供给**，
 手工建一张表和一个桶不足以支撑运行：启动 worker 前依次通过版本 skew 闸、资源 preflight（events 表 + cluster + 本 run 每个引擎的
 task-def + 桶，落库时另加 runs 表）、variant 解析、子网/安全组解析，任一项缺失即退 `2`。资源名一律由 `--prefix` 拼接，
-因此 `--prefix` 须与部署时一致；仅覆盖表名/桶名时才用 `--ddb-table` / `--s3-bucket`（其余资源仍按 prefix 推导）。
+因此 `--prefix` 须与部署时一致；单独覆盖某个资源名或网络参数时才用 `run` 的六个单项覆盖 flag
+（`--ddb-table`/`--s3-bucket`/`--events-table`/`--cluster`/`--subnet`/`--security-group`；`submit` 只收前两个，其余取部署侧写进
+后端的值，三个 Lambda 无 flag、恒按 prefix 推导），逐项默认值与对应 SSM 参数见
+[`docs/user-guide/configuration.md`](../docs/user-guide/configuration.md) 的「云端资源名与网络的单项覆盖」表。
 使用者侧的部署与排错步骤见 [`docs/user-guide/cloud-backend.md`](../docs/user-guide/cloud-backend.md)。
 
 > `core/tests/README.md` 的「一次性：建真表 + 真桶」只服务 core 集成测试（同一套表/桶 schema，但不足以支撑

@@ -50,7 +50,7 @@ HARNESS_S3_BUCKET=<你的可写桶> uv run python tools/e2e_harness.py \
 | `connect`   | 建连中（scope_started 前，2s 定时）                    | 会话建立过程中被终止：不泄漏会话、进程干净退出                                                                                                                       |
 | `act`       | 第一个 act 执行中途（step_started 后 3s）             | act 中途中断：会话释放 + in-flight 产物处置                                                                                                                         |
 | `between`   | 第一个 step_done 后                                 | step 边界中断：已完成 act 产物已提前上传                                                                                                                            |
-| `scenario`  | **第一个 scenario_done 后 3s、下一 scenario 运行中** | **scenario 边界提前上传（Midscene log）**：已完成 scenario 的 log 应已进 S3。**需多 scenario 归一个 scope 的 feature**（见下「多 scenario 陷阱」），否则该时机不触发，记为无效样本 |
+| `scenario`  | **第一个 scenario_done 后 3s、下一 scenario 运行中** | **scenario 边界提前上传（Midscene log）**：已完成 scenario 的 log 应已进 S3。**需多 scenario 归一个 scope 的 feature**（见下「实际运行陷阱」第 1 条 `@scope:` 分组），否则该时机不触发，记为无效样本 |
 | `scope_end` | 所有 scenario 完成、scope 末 flush 前                | flush 前中断：暴露「只在 scope 末上传的剩余产物」残余（Nova summary / Midscene log）                                                                                  |
 
 ## 报告判读
@@ -69,7 +69,7 @@ harness 结尾打印 `=== HARNESS_REPORT_JSON ===` + 一段 JSON。关键字段�
 | `disk_files` / `s3_files`    | 中断后盘上与 S3 上的文件清单（含 size）                                                                                |
 | `scope_done_emitted`         | 中断路径应 `false`（不 emit scope_done、不走 flush）；正常完成 `true`                                                    |
 | `kill_phase`                 | SIGTERM 实际落在哪个时机（`connect`/`act_midway`/`between_steps`/`after_scenario1`/`scope_end`）。**非空 = 信号已真实投递**（时机已触发但 worker 已先退出时不予记录，避免「有 phase 无投递」的假阳性）。`--interrupt none` 本就为 `null`；**指定了中断时机却为 `null` = 本次未发出 SIGTERM**（该时机未触发或 worker 已先退出），此时任何丢失/提前上传结论都不成立 |
-| `counts`                     | `step_started`/`step_done`/`scenario_done`/`n_scenarios`：核对中断落点是否如预期；`scenario` 时机要求 `n_scenarios>1`，否则该时机不触发（见下「多 scenario 陷阱」） |
+| `counts`                     | `step_started`/`step_done`/`scenario_done`/`n_scenarios`：核对中断落点是否如预期；`scenario` 时机要求 `n_scenarios>1`，否则该时机不触发（见下「实际运行陷阱」第 1 条 `@scope:` 分组） |
 
 ### 判读要点（易误判处）
 

@@ -42,7 +42,7 @@ Midscene 还要知道模型属于哪个家族（家族决定它用哪套提示�
 | `deepseek.` | `deepseek` |
 | 以 `zai.glm-` 开头且后面还有 `v` | `glm-v` |
 
-匹配看的是片段出现在 id 里的任意位置，所以带 `us.` 或 `global.` 前缀的推理配置文件 id 同样命中。一条都不命中时 worker 启动即报错、不做猜测：家族推错不会报错，只会让模型在页面上找元素和判定的准确度下降，比直接失败更难发现。这时设 `MIDSCENE_MODEL_FAMILY` 指明家族，可取值见 Midscene 文档 <https://midscenejs.com/model-common-config.html>。
+除最后一行外，匹配看的是片段出现在 id 里的任意位置，所以带 `us.` 或 `global.` 前缀的推理配置文件 id 同样命中；最后一行要求 id 以 `zai.glm-` 开头，带前缀的 id 不命中。一条都不命中时 worker 启动即报错、不做猜测：家族推错不会报错，只会让模型在页面上找元素和判定的准确度下降，比直接失败更难发现。这时设 `MIDSCENE_MODEL_FAMILY` 指明家族，可取值见 Midscene 文档 <https://midscenejs.com/model-common-config.html>。
 
 查当前实际用的模型：
 
@@ -85,7 +85,7 @@ region 的完整解析链是 `--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > 
 - `NOVA_ACT_TIMEOUT_S` 由起 worker 的那一侧读取后注给 worker：`run`（两档后端都算）与 `submit --backend local` 用发起命令的 shell 里的值；`submit --backend local` 提交的 run 之后由 `gherkai status --wait` 接着推完时，用运行 `status` 的那个 shell 里的值；`submit --backend cloud` 的任务由云端起，固定用 120 秒。
 - `NOVA_ACT_TIMEOUT_S` 与 `NOVA_GRACE_MARGIN_S` 相加就是 Nova 引擎自报的最小停止宽限（默认 150 秒；Midscene 自报的是固定的 31 秒），调大前者会同时抬高本机运行所允许的最小 `--grace`。
 - `NOVA_GRACE_MARGIN_S` 只影响本机运行所允许的最小 `--grace`。云端 worker 的停止宽限由部署时的 `gherkai deploy --stop-timeout` 决定。
-- 云端 worker 读自己镜像里 `ENV GHERKAI_STEPS_DIR` 指的目录，确定性 step 随镜像一起构建进去（见 [`cloud-backend.md`](./cloud-backend.md)）；本机 shell 里的 `GHERKAI_STEPS_DIR` 与 `--steps-dir` 给了只提示一句、不拦截。step 的写法与目录约定见 [`writing-deterministic-steps.md`](./writing-deterministic-steps.md)。
+- 云端 worker 读自己镜像里 `ENV GHERKAI_STEPS_DIR` 指的目录，确定性 step 随镜像一起构建进去（见 [`cloud-backend.md`](./cloud-backend.md)）；本机 shell 里的 `GHERKAI_STEPS_DIR` 与默认 `./steps` 在云端后端下静默不生效；显式给了 `--steps-dir` 会提示一句、不拦截。step 的写法与目录约定见 [`writing-deterministic-steps.md`](./writing-deterministic-steps.md)。
 
 ### 隧道与 worker 拉起
 

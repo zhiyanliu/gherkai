@@ -39,19 +39,19 @@
 
 ## 确定性 step 怎么扩展（测试开发的扩展点）
 
-> **实现状态（v1.0 当前）**：下述 `@deterministic` 注册表**已落地**——Nova `engines/novaact/gherkai_worker_novaact/deterministic.py`（`@deterministic` 装饰器 + `match()`）、Midscene `engines/midscene/src/worker/deterministic.mts`（`deterministic()` + `match()`）。worker 派发每个 step 时**先查注册表**（命中走精确 handler、不投票、可复现），未命中才落 ②内建 URL 导航 / ③AI catch-all。脚手架（`engines/midscene/src/worker/deterministic.steps.mts` / `engines/novaact/gherkai_worker_novaact/deterministic_steps.py`，迁移史见下「迁移」条）现各注册一个真实 URL 锚点（`页面地址匹配 "<正则>"`）。命中后：成功→`passed`（无 votes）；handler 抛 `AssertionError`→`failed`/`assertion_failed`；抛其它→`error`；命中多条→`DeterministicConflict`（见下『冲突规则自定』条）。各有注册表单测背书。
+> **实现状态（v1.0 当前）**：下述 `@deterministic` 注册表**已落地**——Nova `engines/novaact/gherkai_worker_novaact/deterministic.py`（`@deterministic` 装饰器 + `match()`）、Midscene `engines/midscene/src/worker/deterministic.mts`（`deterministic()` + `match()`）。worker 派发每个 step 时**先查注册表**（命中走精确 handler、不投票、可复现），未命中才落 ②内建 URL 导航 / ③AI catch-all。脚手架（`engines/midscene/src/worker/deterministic.steps.mts` / `engines/novaact/gherkai_worker_novaact/deterministic_steps.py`，迁移史见下「迁移」条）现各注册一条真实的 URL 确定性 step（`页面地址匹配 "<正则>"`）。命中后：成功→`passed`（无 votes）；handler 抛 `AssertionError`→`failed`/`assertion_failed`；抛其它→`error`；命中多条→`DeterministicConflict`（见下『冲突规则自定』条）。各有注册表单测背书。
 
-**扩展点 = 对应 worker 里的一张 step 注册表**（`(模式 → handler + 人话元数据 description/example)`；元数据必填的理由见 [0036](./0036-deterministic-capability-discovery.md)）。延续 [0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md) 的脚手架定位与角色边界（QA 永远只写自然语言、不碰确定性 step）。**使用方（测试开发）的锚点不写进 worker 包内的脚手架**——写进使用方项目的 `steps/` 目录，worker 启动时加载进**同一张表**（`@deterministic` 注册机制同一条），包内脚手架只留内建示范锚点，见 [0037](./0037-distribution-and-packaging.md) 决策 4；下文「几乎零写法变化」描述的写法在 `steps/` 里逐字成立：
+**扩展点 = 对应 worker 里的一张 step 注册表**（`(模式 → handler + 人话元数据 description/example)`；元数据必填的理由见 [0036](./0036-deterministic-capability-discovery.md)）。延续 [0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md) 的脚手架定位与角色边界（QA 永远只写自然语言、不碰确定性 step）。**使用方（测试开发）的确定性 step 不写进 worker 包内的脚手架**——写进使用方项目的 `steps/` 目录，worker 启动时加载进**同一张表**（`@deterministic` 注册机制同一条），包内脚手架只留内建示范的确定性 step，见 [0037](./0037-distribution-and-packaging.md) 决策 4；下文「几乎零写法变化」描述的写法在 `steps/` 里逐字成立：
 
 ```python
-# novaact worker 内（midscene worker 是对称的 TS 版）
-@deterministic(r'当前 URL 匹配 "(?P<pattern>.+)"',
+# 使用方项目 steps/*.py 内（midscene 侧对称、写进 steps/*.mts）
+@deterministic(r'当前 URL 匹配 "(?P<pattern>[^"]+)"',
                description="断言当前页面 URL 匹配给定正则",       # description/example 必填（ADR 0036）
                example='Then 当前 URL 匹配 "/wiki/OpenAI"')
 def url_matches(ctx, pattern):
     assert re.search(pattern, ctx.page.url)          # 拿会话/CDP 句柄精确判定，不投票
 
-@deterministic(r'元素 "(?P<sel>.+)" 的颜色是 "(?P<hex>#[0-9a-fA-F]{6})"',
+@deterministic(r'元素 "(?P<sel>[^"]+)" 的颜色是 "(?P<hex>#[0-9a-fA-F]{6})"',
                description="断言选择器命中的元素颜色等于给定十六进制值",
                example='Then 元素 "#price" 的颜色是 "#00FF7F"')
 def color_is(ctx, sel, hex):

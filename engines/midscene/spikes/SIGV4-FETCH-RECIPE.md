@@ -12,7 +12,7 @@ import { HttpRequest } from "@aws-sdk/protocol-http";   // 漏这个 import = Re
 import { Sha256 } from "@aws-crypto/sha256-js";          // 传 CLASS，不是实例
 import { fromNodeProviderChain } from "@aws-sdk/credential-providers";
 
-const REGION = "us-east-1";   // ⚠️ spike 期硬编码；**生产已改惰性 getRegion()**（读 AWS_REGION、fail-loud、不硬编码 east——见 src/lib/agentcore-sigv4.mts / ADR 0033/0016 决策 C）。此处保留 spike 原样、勿照抄当现状
+const REGION = "us-east-1";   // ⚠️ spike 期硬编码；**生产已改惰性 getRegion()**（读 AWS_REGION、fail-loud、不硬编码 east——见 engines/midscene/src/lib/agentcore-sigv4.mts / ADR 0033/0016 决策 C）。此处保留 spike 原样、勿照抄当现状
 const HOST = `bedrock-runtime.${REGION}.amazonaws.com`;
 const BASE_URL = `https://${HOST}/openai/v1`;            // 保持 /openai/v1（裸 /v1 会 404）
 
@@ -55,13 +55,17 @@ const sigv4Fetch: typeof fetch = async (input, init = {}) => {
 //（`createOpenAIClient(baseOpenAI, options)`，入参可用于 langsmith 之类的包装），照抄下面这行会
 // `BaseOpenAI is not a constructor`。生产写法 = 忽略入参、直接新建带 SigV4 fetch 的 client：
 //   createOpenAIClient: async () => new OpenAI({ baseURL, apiKey: "unused", fetch: sigv4Fetch })
-// 见 §7 与 src/worker/run-scope.mts。此处保留 spike 原样、勿照抄当现状
+// 见 §7 与 engines/midscene/src/worker/run-scope.mts。此处保留 spike 原样、勿照抄当现状
 export const createOpenAIClient = (BaseOpenAI: typeof OpenAI) =>
   new BaseOpenAI({ baseURL: BASE_URL, apiKey: "unused", fetch: sigv4Fetch });
 
 // 请求体携带 model id（路径里不放、不用 inference-profile ARN）：
 //   { model: "qwen.qwen3-vl-235b-a22b", messages: [...] }   ← bare id, ON_DEMAND, us-east-1
 // 坑：bedrock-mantle/quickstart 示例用 "...-instruct" 后缀；bedrock-runtime 用裸 id。抄错 → 400/404（非 403）。
+// ⚠️ spike 期主体是 qwen3-vl 的裸 id；**生产默认模型已改**（`DEFAULT_MODEL` 见
+// engines/midscene/src/lib/agentcore-sigv4.mts、ADR 0044「现值」），GPT 系列须用带 us./global. 前缀的
+// inference profile id、参数走 max_completion_tokens（ADR 0044 决策 3）。「model 放请求体而非路径、
+// 不用 inference-profile ARN」两条与模型无关、仍成立；`-instruct` 那条是 qwen id 命名的坑。
 ```
 
 ## 2. npm 依赖
@@ -82,6 +86,7 @@ npm i @aws-sdk/signature-v4 @aws-sdk/protocol-http @aws-crypto/sha256-js @aws-sd
 | **400 ValidationException** | 签名 OK 但 payload 错：model id 错、`-instruct` 后缀错、字段不支持 | 用裸 `qwen.qwen3-vl-235b-a22b`，无 profile ARN |
 | 404 | 路径面错（`/v1` vs `/openai/v1`）或模型不在该 region | 保持 `/openai/v1`；确认 qwen3-vl 在 us-east-1 |
 | `ReferenceError: HttpRequest is not defined` | 漏 import | 加 `@aws-sdk/protocol-http` |
+| **400「value did not match any expected variant」** | Bedrock 的 OpenAI 兼容层不认 `image_url.detail: "original"`（OpenAI 原生认它；Midscene 的 gpt-5 / gpt-6 family 适配器对定位请求固定发它、无配置可关） | 签名**之前**从请求体删掉该字段（签名含 payload hash，签完再改即 403）——见 `engines/midscene/src/lib/agentcore-sigv4.mts` 的 `bedrockCompatBody()` / ADR 0044 决策 3 |
 
 ## 4. 首跑最可能的失败 + 最快诊断
 
@@ -106,7 +111,7 @@ npm i @aws-sdk/signature-v4 @aws-sdk/protocol-http @aws-crypto/sha256-js @aws-sd
 
 → ADR 0008「TS SigV4 字节匹配」与 ADR 0003「视觉成功应答待实证」两个承重未知**均已关闭**。
 
-## 7. 合体实测（第 3 段，`03-midscene-grounding.ts`）—— 全通
+## 7. 合体实测（第 3 段，`engines/midscene/spikes/03-midscene-grounding.ts`）—— 全通
 
 整条 Midscene 引擎端到端跑通（AgentCore 云端浏览器 + SigV4 自签 + 维基用例）：
 - `aiAct('type "OpenAI" into the search input and submit the search')` → 真进到 `https://en.wikipedia.org/wiki/OpenAI`（58.9s，含规划+定位+多步动作）
@@ -116,15 +121,20 @@ npm i @aws-sdk/signature-v4 @aws-sdk/protocol-http @aws-crypto/sha256-js @aws-sd
 
 ### ⚠️ 关键坑（实跑才挖出，配方原文没有）：createOpenAIClient → 隔离 ModelConfigManager
 
-源码 `@midscene/core agent.js:852-853`：
+spike 期（`@midscene/core` 1.9.8）`agent/agent.js` 读到的形态是二分支：
 ```js
 const hasCustomConfig = opts?.modelConfig || opts?.createOpenAIClient;
 this.modelConfigManager = hasCustomConfig
   ? new ModelConfigManager(opts?.modelConfig, opts?.createOpenAIClient)  // 隔离模式
   : globalModelConfigManager;                                            // 吃 overrideAIConfig/env
 ```
-**一旦给 Agent 传 `createOpenAIClient`，它切到隔离 ModelConfigManager，只读 `opts.modelConfig`，完全无视 `overrideAIConfig` 和全局 env。** 因此模型配置必须随 `opts.modelConfig` 一起给：
+**1.12.8 已改三分支**（新增 `AgentScopedModelConfigManager`；同文件，装机 dist 里是 `agent/agent.mjs`）：给 `modelConfig` → 隔离，只读 `opts.modelConfig`、无视 `overrideAIConfig` 与全局 env；只给 `createOpenAIClient` → 包住 `globalModelConfigManager`、仍读全局 env；都不给 → 全局。
+
+**两版下本项目的接线不变**：模型配置随 `opts.modelConfig` 一起给（本项目两者都给 → 落隔离支，隔离态不读 env）：
 ```ts
+// ⚠️ `MIDSCENE_USE_QWEN3_VL: "true"` 是 legacy 单家族硬开关，SDK 内部把它映射成 family `qwen3-vl`；
+// **生产已改 `MIDSCENE_MODEL_FAMILY: modelFamily()`**（见 engines/midscene/src/lib/agentcore-sigv4.mts / ADR 0044 决策 2）。
+// 默认模型已是 GPT 系，照抄这行会静默设错 family、两者同给还会被当双模式冲突。此处保留 spike 原样、勿照抄当现状
 new PlaywrightAgent(page, {
   modelConfig: { MIDSCENE_MODEL_NAME, MIDSCENE_MODEL_BASE_URL, MIDSCENE_MODEL_API_KEY: "unused", MIDSCENE_USE_QWEN3_VL: "true" },
   createOpenAIClient: async () => new OpenAI({ baseURL, apiKey: "unused", fetch: sigv4Fetch }),
@@ -133,5 +143,5 @@ new PlaywrightAgent(page, {
 否则报 `Model configuration is incomplete: MIDSCENE_MODEL_NAME is required`。
 另注：`process.env.MIDSCENE_*` 在 import 后再设无效（GlobalConfigManager import 时已缓存）；`aiAction` 已废弃，用 `aiAct`。
 
-### 剩余
-- `@aws-sdk/signature-v4` 版本未 pin（已实测当前装入版本可用）。
+### 依赖版本口径
+`@aws-sdk/*` / `@aws-crypto/sha256-js` / `openai` 有意保留 `^`（只两引擎 SDK 钉精确版本，见 ADR 0042 决策六与 `engines/midscene/DEVELOPMENT.md`「SDK 与浏览器驱动锁定精确版本」条）；入库的 `engines/midscene/package-lock.json` 把本地解析锁在 3.370.0（发行的 npm 包与云端基础镜像仍是装包时解析）。

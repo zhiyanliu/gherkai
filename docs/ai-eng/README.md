@@ -1,6 +1,6 @@
 # docs/ai-eng 索引
 
-本目录存放维护本仓库时用的工作文档，主要读者是 contributor 侧 AI agent，维护者也会读。[`docs/adr/`](../adr/)、[`CONTEXT.md`](../../CONTEXT.md)、[`CLAUDE.md`](../../CLAUDE.md) 与它同属一类，只是位置固定（工具有位置依赖），其余归这里。分类的决策见 [ADR 0045](../adr/0045-documentation-layering-and-placement.md)。
+本目录存放维护本仓库时用的工作文档，主要读者是 contributor 侧 AI agent，人类 contributor 也会读。[`docs/adr/`](../adr/)、[`CONTEXT.md`](../../CONTEXT.md)、[`CLAUDE.md`](../../CLAUDE.md) 与它同属一类，只是位置固定（工具有位置依赖）。方法文档与外部来源登记归这里；同类还有触发入口 [`.claude/commands/`](../../.claude/commands/)、过程暂存 `docs/journey/`、skill 评测资产 [`skills/gherkai-evals/`](../../skills/gherkai-evals/)，各因位置依赖或归属另在其处。分类的决策见 [ADR 0045](../adr/0045-documentation-layering-and-placement.md)。
 
 | 文件 | 是什么 | 谁在什么时候读 |
 |---|---|---|
