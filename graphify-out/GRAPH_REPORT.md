@@ -1,7 +1,7 @@
 # Graph Report - yaozhou  (2026-09-20)
 
 ## Corpus Check
-- 316 files · ~525,574 words
+- 316 files · ~525,639 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -10,7 +10,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `c5f0e60c`
+- Built from commit: `9aa3641e`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -350,14 +350,14 @@
 ## Surprising Connections (you probably didn't know these)
 - `README.md — 仓库首页（使用者向）` --conceptually_related_to--> `跑法权限梯 (Execution tiers)`  [INFERRED]
   README.md → CONTEXT.md
-- `gherkai agent SKILL.md` --references--> `ADR 0001 范围限定英文 UI`  [AMBIGUOUS]
-  cli/gherkai_cli/skills/gherkai/SKILL.md → docs/adr/0001-scope-limited-to-english-ui.md
 - `--expose-local 隧道` --conceptually_related_to--> `ADR 0035 经隧道测本机应用`  [INFERRED]
   cli/gherkai_cli/skills/gherkai/SKILL.md → docs/adr/0035-local-app-testing-via-tunnel.md
-- `_runtime_version()` --calls--> `_dist_version()`  [INFERRED]
-  runtime/gherkai_runtime/compose.py → cli/gherkai_cli/__main__.py
-- `_load_and_plan()` --calls--> `parse_feature()`  [INFERRED]
-  cli/gherkai_cli/__main__.py → core/gherkai_core/parse.py
+- `gherkai agent SKILL.md` --references--> `ADR 0001 范围限定英文 UI`  [AMBIGUOUS]
+  cli/gherkai_cli/skills/gherkai/SKILL.md → docs/adr/0001-scope-limited-to-english-ui.md
+- `ConflictException` --uses--> `Job`  [INFERRED]
+  deploy_aws/tests/test_lambda_handlers.py → core/gherkai_core/model.py
+- `exceptions` --uses--> `Job`  [INFERRED]
+  deploy_aws/tests/test_lambda_handlers.py → core/gherkai_core/model.py
 
 ## Import Cycles
 - None detected.
@@ -1243,29 +1243,29 @@ Cohesion: 0.04
 Nodes (85): ResultStore adapters（ADR 0016）：local（本包 `local.py`）+ S3（`s3.py`，ADR 0030 决定六）。…, LocalResultStore, Path, LocalResultStore（ADR 0016 数据面）：每 job 的判定结果追加落盘成单独 JSON。 数据面（追加为主）：一次 run 的每个…, ResultStore 的本地文件实现（组合根注入；S3 实装见同包 `s3.py`）。, 把单个 JobResult 落盘成 <root>/<run_id>/jobs/<encoded_scope_id>.json（追加，写面）。…, 读回单个 JobResult（读回面）；不存在返回 None。, 读回某 run 的全部 JobResult（CI 遍历用）。无则空 list。 (+77 more)
 
 ## Ambiguous Edges - Review These
-- `ADR 0001 范围限定英文 UI` → `gherkai agent SKILL.md`  [AMBIGUOUS]
-  docs/adr/0001-scope-limited-to-english-ui.md · relation: references
 - `成功重试对 RunResult 透明（可观测性缺口）` → `上传成功后删本地`  [AMBIGUOUS]
   docs/adr/0029-engine-artifacts-to-s3.md · relation: conceptually_related_to
+- `ADR 0001 范围限定英文 UI` → `gherkai agent SKILL.md`  [AMBIGUOUS]
+  docs/adr/0001-scope-limited-to-english-ui.md · relation: references
 
 ## Knowledge Gaps
-- **564 isolated node(s):** `1. 五类产物，各回答一个问题`, `2. 物理位置：local 与 cloud 是同一棵树的两种载体`, `3. 证据链的串接`, `4. 一次失败的三步读法`, `5. 边界（有意取舍，非遗漏）` (+559 more)
+- **564 isolated node(s):** `为什么做（价值）`, `何时做（触发）`, `目标与判据`, `三类问题（分类找）`, `红线护栏` (+559 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **105 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **What is the exact relationship between `ADR 0001 范围限定英文 UI` and `gherkai agent SKILL.md`?**
-  _Edge tagged AMBIGUOUS (relation: references) - confidence is low._
 - **What is the exact relationship between `成功重试对 RunResult 透明（可观测性缺口）` and `上传成功后删本地`?**
   _Edge tagged AMBIGUOUS (relation: conceptually_related_to) - confidence is low._
+- **What is the exact relationship between `ADR 0001 范围限定英文 UI` and `gherkai agent SKILL.md`?**
+  _Edge tagged AMBIGUOUS (relation: references) - confidence is low._
 - **Why does `gherkai-worker-novaact (README)` connect `Midscene Worker 开发笔记` to `deterministic.py`, `user_steps.py`?**
-  _High betweenness centrality (0.198) - this node is a cross-community bridge._
+  _High betweenness centrality (0.202) - this node is a cross-community bridge._
 - **Why does `Nova Act Worker 开发笔记` connect `Midscene Worker 开发笔记` to `runtime 包 contributor 文档`, `CONTRIBUTING.md`?**
-  _High betweenness centrality (0.195) - this node is a cross-community bridge._
+  _High betweenness centrality (0.202) - this node is a cross-community bridge._
 - **Why does `deterministic()` connect `deterministic.py` to `ValueError`, `_run_step`, `deterministic_steps.py`?**
-  _High betweenness centrality (0.159) - this node is a cross-community bridge._
+  _High betweenness centrality (0.182) - this node is a cross-community bridge._
 - **Are the 53 inferred relationships involving `Job` (e.g. with `CloudLauncher` and `FargateEngine`) actually correct?**
   _`Job` has 53 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 34 inferred relationships involving `RunState` (e.g. with `_cmd_submit()` and `DynamoDBRunStore`) actually correct?**
