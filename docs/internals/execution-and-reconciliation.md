@@ -98,7 +98,7 @@ status [--wait]:只读投影查进度;--wait 还能接力推进——per-run 进
 - **已终态 run 的两档重入**：cloud 档的云端推进器对已提交终态的 run 整体不动作（§7 里 reconciler 的第二道判）——RunReport 若在提交点之后写入失败，云端不会补写（判定明细不受影响，见上条）；local 档没有这道拦截，`status --wait` 接力会把已终态的 run 重放一次并重新写出报告（本机事件不过期）。
 - **落地之后由谁读取**：`status` 读投影 RunState（`--json` 时另附 `artifacts` 键，给出报告 / 判定明细 / 元信息的约定落点，无论是否终态都会给出，终态后才有内容）；`explain` 读**已落库的判定明细**（step 级失败原因与 `kind=evidence` 的证据指针），回答「这一步为何如此判定」。两者都受落地时机约束：detached run 的判定明细在提交点一次性落地，未到终态时 `explain` 无可渲染内容，只提示先用 `status --wait`（同步 `run` 逐 job 落库，中途即可读到已完成部分）。用法与退出码见 [`docs/user-guide/running-and-results.md`](../user-guide/running-and-results.md)，`--json` 字段见 [`cli-json-contract.md`](./cli-json-contract.md)。
 
-最后一条不对称（**能否中途终止**）：cloud 的 `--wait` 检测到停滞时只是调起 kicker（fire-and-forget），调起后随时可以离开，云端链会自行执行至结束；local 的 `--wait` 接力者一旦接手**就是唯一推进器**，终止它 run 即就地停止（已 claim job 的计时也随进程一起丢失，由下一次接力恢复）。根因是主推进器的位置不同（云端 Lambda 与本机进程）。
+最后一条不对称（**能否中途终止**）：cloud 的 `--wait` 检测到停滞时只是调起 kicker（fire-and-forget），调起后随时可以离开，云端链会自行执行至结束；local 的 `--wait` 接力者与 per-run 进程执行同一段幂等推进、可以并存，per-run 进程仍在时退出接力者无影响；per-run 进程已终止时接力者**才是唯一推进器**，终止它 run 即就地停止（已 claim job 的计时也随进程一起丢失，由下一次接力恢复）。根因是主推进器的位置不同（云端 Lambda 与本机进程）。
 
 > 权威：[ADR 0034](../adr/0034-detached-batch-reconciler.md)（机制三：投影钳制与条件写；「命令形态」节：status/退出码）、[ADR 0030](../adr/0030-realtime-persistence-seam.md)（终态提交点）、[ADR 0031](../adr/0031-job-lifecycle-states-and-severity.md)（决定五：退出码语义）、[ADR 0041](../adr/0041-agent-facing-cli-affordances.md)（决策三：查询类命令的 `--json` 与 `artifacts`）、[ADR 0042](../adr/0042-step-evidence-and-explain.md)（决策四：`explain` 只读判定明细、不读事件流）。
 

@@ -1405,8 +1405,8 @@
     "semantic_hash": ""
   },
   "docs/internals/execution-and-reconciliation.md": {
-    "mtime": 1789804496.2066908,
-    "ast_hash": "afffa83d968005d28c33431df610d5b6",
+    "mtime": 1789808133.9944494,
+    "ast_hash": "42ec875d5e8b91dee79475ca9495f731",
     "semantic_hash": ""
   },
   "docs/internals/verdict-model.md": {
@@ -1480,8 +1480,8 @@
     "semantic_hash": ""
   },
   "docs/diagrams/run-execution.html": {
-    "mtime": 1789800092.2687852,
-    "ast_hash": "0f990dc94948b05a1a8c360095fa2caf",
+    "mtime": 1789808134.8018944,
+    "ast_hash": "2e04a75687b3068a7b5166124b55ee68",
     "semantic_hash": ""
   },
   "docs/user-guide/faq.md": {
@@ -1565,8 +1565,8 @@
     "semantic_hash": ""
   },
   "docs/diagrams/run-execution.svg": {
-    "mtime": 1789800092.3711274,
-    "ast_hash": "46cc33462c8c8b1af5c1e1dd18455d14",
+    "mtime": 1789808134.9384897,
+    "ast_hash": "261acdf3f37a8870be1add322e49d846",
     "semantic_hash": ""
   },
   "docs/diagrams/verdict-model-job-outcome.svg": {
@@ -1661,7 +1661,7 @@
   },
   "docs/diagrams/run-execution.json": {
     "mtime": 1789800031.5016732,
-    "ast_hash": "5994941a2da9cde5cfb646aa26d42ff0",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "docs/diagrams/verdict-model-job-outcome.json": {

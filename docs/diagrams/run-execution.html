@@ -5684,7 +5684,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <h3>两处常见误读</h3>
         </div>
         <ul>
-          <li>&bull; status --wait 两档不同：本机接力后即唯一推进器（该进程停止则 run 停滞），云端仅在检测到停滞时唤醒推进函数、之后无需在线</li>
+          <li>&bull; status --wait 两档不同：本机 per-run 进程已终止时接力者才是唯一推进器（退出它 run 即停滞，per-run 仍在则两者并存），云端仅在检测到停滞时唤醒推进函数、之后无需在线</li>
           <li>&bull; 退出码由父进程 / 平台观察得到，不由 worker 上报</li>
         </ul>
       </div>
