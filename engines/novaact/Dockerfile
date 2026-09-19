@@ -54,6 +54,6 @@ FROM worker-${WORKER_SOURCE} AS final
 RUN python -m gherkai_worker_novaact --capabilities > /dev/null
 # 三通道分离（ADR 0024）：事件走 DDB（EventSink DDB 态）、诊断走 stderr、SDK 噪声走 stdout——容器日志（awslogs）
 # 抓 stdout/stderr 供调试，事件不依赖日志（走 DDB）。
-# region/凭证不焊镜像：AWS_REGION 经 RunTask overrides 注入、凭证走 task role（ADR 0033 决策 C）。
+# region/凭证不焊镜像：AWS_REGION 经 RunTask overrides 注入、凭证走 task role（ADR 0033「task-def 不焊 region/凭证」节；决策 C 见 ADR 0016）。
 # 入口 = 包的 `__main__`（**不加包装进程**：EVENTS_FD 经 pass_fds 继承，包装层会吞 fd3，ADR 0024/0037 决策 3）。
 CMD ["python", "-m", "gherkai_worker_novaact"]

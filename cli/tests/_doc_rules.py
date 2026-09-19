@@ -1,8 +1,8 @@
 """使用者面 markdown 的共享规则与扫描器：多处护栏共用的**单一事实源**。
 
 消费方五处，同源才不会各自漂（扫的都是「发到仓库外、读者没有仓库上下文」的文字，判据同一条——
-CLAUDE.md 代码纪律「产品面文案不带内部指代」+ 文档纪律「README / DEVELOPMENT 分层」；决策与理由见
-ADR 0039、ADR 0043 决策六）：
+CLAUDE.md 代码纪律「产品面文案不带内部指代」+ 文档纪律「文档按读者三分类归位」；决策与理由见
+ADR 0039、ADR 0045 决策一/三、ADR 0043 决策六）：
 
 - `test_package_readmes.py`：进包的 README / Summary / GitHub Release 正文 footer（禁词 + 退役旧名 + 相对链接）；
 - `test_user_docs.py`：仓库内用户文档（`docs/user-guide/**` / 根 README / CHANGELOG）与 `docs/diagrams/` 图源

@@ -417,7 +417,7 @@ export async function stepEvidenceRef(
   } catch (e) {
     const logFn = hook.logFn ?? ((m: string) => process.stderr.write(m + "\n"));
     // 产品面一行：说清发生了什么 + 不影响什么 + 人能怎么办（原生报告还在）。设计判据留在本文件注释里。
-    logFn(`worker: 本步的排障证据没能产出（已忽略，不影响本步判定结果；仍可看引擎原生报告）：${(e as Error).message}`);
+    logFn(`worker: 本步证据没能产出（已忽略，不影响本步判定结果；仍可看引擎原生报告）：${(e as Error).message}`);
     return null;
   }
 }

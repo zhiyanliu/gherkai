@@ -221,8 +221,10 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
         help="--expose-local 用的隧道 provider（默认 ngrok，当前唯一实现）",
     )
     _add_selection_flags(run)
-    run.add_argument("--fail-fast", action="store_true", help="任一 job 崩则中止整批")
-    run.add_argument("--json", action="store_true", help="只输出机器可读 JSON（不打进度/文本汇总）")
+    run.add_argument("--fail-fast", action="store_true", help="任一 job 出错即中止这个 run 的其余 job")
+    run.add_argument("--json", action="store_true",
+                     help="标准输出只打机器可读 JSON（不打文本汇总；进度与诊断照常走标准错误，"
+                          "逐事件进度可用 --quiet 静音）")
     run.add_argument("--quiet", action="store_true",
                      help="少进屏幕/上下文：不打逐事件进度；本机执行时 worker 日志改落 <report-dir>/<run_id>/worker.log（--no-report 时落系统临时目录），"
                           "只打一行位置（云端后端的 worker 在云端运行、日志在 CloudWatch，无此文件）；仍打文本汇总")
@@ -318,7 +320,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
 
     # ---- 无状态批量运行（ADR 0034）：submit 提交完就走 / status 轮询收集 ----
     # 本机后端：submit setsid fork 一个 per-run 进程执行 reconcile loop（本机推进，无需常驻），CLI 立即退出。
-    sm = sub.add_parser("submit", help="[后台运行] 提交一批 .feature 到后台运行、立即返回 run_id（提交完就走）")
+    sm = sub.add_parser("submit", help="[后台运行] 提交 .feature 到后台运行、立即返回 run_id（提交完就走）")
     sm.add_argument("features", nargs="+", type=Path, help="一个或多个 .feature 路径")
     sm.add_argument("--default-engine", choices=sorted(_names.ENGINES), default="novaact",
                     help="未标 @engine 的 scope 用的默认引擎")
@@ -342,7 +344,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     )
     sm.add_argument(
         "--tunnel-ttl", type=float, default=None, metavar="S",
-        help="[cloud + --expose-local] 隧道守护进程的兜底 TTL 秒（默认 = 本批各 job 预算之和 + 启动余量）；"
+        help="[cloud + --expose-local] 隧道守护进程的兜底 TTL 秒（默认 = 这个 run 各 job 预算之和 + 启动余量）；"
              "给了就用本值。TTL 到点无条件拆隧道，调小可能在 run 未完时断隧道",
     )
     sm.add_argument("--report-dir", default="reports", metavar="DIR",
@@ -380,10 +382,12 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     st.add_argument("--wait", action="store_true",
                     help="轮询到 run 达终态再返回（两路都支持，接力方式不同：local=在本机接着把它推到底；"
                          "cloud=检测卡住即触发云端接力）")
+    # 本 flag 只是回落值：RunMeta 带 max_concurrency 时以它为准（提交时定的并发闸才是这个 run 的口径）。
     st.add_argument("--max-concurrency", type=int, default=1,
-                    help="[local --wait] 接力推进并发上限的回落值（meta 带值时以 meta 为准）")
-    st.add_argument("--json", action="store_true", help="输出机器可读 JSON（RunState）")
-    st.add_argument("--prefix", default=None, metavar="P", help="[cloud] 资源名前缀（读 DDB RunState）")
+                    help="[local --wait] 接力推进的并发上限：默认按提交时的值走，提交记录里没有值才用这里给的")
+    st.add_argument("--json", action="store_true", help="输出机器可读 JSON（这个 run 的运行态 + 产物落点）")
+    st.add_argument("--prefix", default=None, metavar="P",
+                    help="[cloud] 资源名前缀（据此定位这个 run 所在的云端后端；--wait 的接力也照它找）")
     st.add_argument("--ddb-table", default=None, metavar="NAME", help="[cloud] 运行状态表（DynamoDB）名")
     st.add_argument("--region", default=None, metavar="R")
     st.add_argument("--profile", default=None, metavar="P")
@@ -882,14 +886,15 @@ def _load_and_plan(args) -> "list | int":
     """plan 与 run 的共享前置装配：votes 校验 → 读 feature → plan。
 
     成功返回 `Job[]`；任一前置失败返回**退出码 2**（配置矛盾/读不到/语法错，均"没开始执行就被拒"，
-    对齐 cli/README 退出码分层）。_cmd_plan 与 _cmd_run 都调它（曾各手抄一份、会漂移）。
+    对齐 docs/user-guide/running-and-results.md「退出码」一节的分层）。
+    _cmd_plan 与 _cmd_run 都调它（曾各手抄一份、会漂移）。
     """
     # 0) 校验：assertion_votes 必须 ≥1。否则 worker 执行 0 次 AI 断言——votes=0 全判失败（假阴性）、
     #    votes<0 更危险：0 > 负数/2 = True → **零 AI 调用却全绿**（假阳性）。入口拦截，不让坏值流进 worker。
     if args.assertion_votes < 1:
         _progress(f"--assertion-votes 必须 ≥ 1（收到 {args.assertion_votes}）：投票次数 <1 会让 AI 断言不被执行")
         return 2
-    # 筛选 flag 的空值拒收（ADR 0041 决策一）：空值静默降级成「不筛、全批都做」是最贵的静默错误（整批实际运行）
+    # 筛选 flag 的空值拒收（ADR 0041 决策一）：空值静默降级成「不筛、这个 run 全做」是最贵的静默错误（整个 run 实际运行）
     for raw in (getattr(args, "tags", None) or []):
         if not {t.strip().lstrip("@") for t in raw.split(",") if t.strip().lstrip("@")}:
             _progress(f"--tags 的值不能为空（收到 {raw!r}）：想运行全部 scenario 就别给这个 flag")
@@ -919,7 +924,8 @@ def _load_and_plan(args) -> "list | int":
             features.append(src)
     except (OSError, UnicodeDecodeError) as e:
         # 不止「文件不存在」：给了目录（IsADirectoryError）/ 无读权限 / 非 UTF-8 编码同属「没开始执行就被拒」
-        # 的输入问题，一律退 2（退码语义 ADR 0021），不让它们以 traceback 形态逃出。
+        # 的输入问题，一律退 2（退码分层见 ADR 0030 决定七「切分线 = run 是否已真正开跑」），
+        # 不让它们以 traceback 形态逃出。
         _progress(f"读 feature 失败：{e}")
         return 2
     if dup_paths:
@@ -947,7 +953,7 @@ def _load_and_plan(args) -> "list | int":
             everything = [p for f in features for p in parse_feature(f.uri, f.text)]
             picked = sum(len(j.scenarios) for j in jobs)
             if not jobs:
-                _progress(f"没有 scenario 匹配 {_selection_label(args)}。本批可选（id  标题  tags）：")
+                _progress(f"没有 scenario 匹配 {_selection_label(args)}。可选的 scenario（id  标题  tags）：")
                 for p in everything:
                     _progress(f"  {p.scenario.id}  {p.scenario.name}  {' '.join(p.tags)}")  # @scope:x 即 --scope x 的值
                 return 2
@@ -1148,7 +1154,7 @@ def _cmd_plan(args) -> int:
     if dispatch and any(p_ and "conflict" in p_ for p_ in dispatch.values()):
         # 「一条 step 最多命中一条模式」是注册表侧的硬约束（判据见 ADR 0022）；下面这句是产品面文案。
         _progress("⚠ 存在命中多条确定性模式的 step（见上标注）：实际执行时这些 step 将 error——"
-                  "请收紧注册表模式，让每条 step 只命中一条。")
+                  "请测试开发收紧注册表里的匹配模式，让每条 step 只命中一条。")
     if getattr(args, "expose_local", None):
         # 标注而不替换（ADR 0035 决策 2）：隧道 URL 是运行时产物，plan 零副作用、显示原始地址
         _progress(f"注：{args.expose_local} 将在 run/submit 时经隧道替换为公网 URL（plan 显示原始地址）")
@@ -1158,7 +1164,7 @@ def _cmd_plan(args) -> int:
 def _progress(*args, **kwargs) -> None:
     """进度/诊断输出 → stderr（业界惯例：stdout 留给该命令的核心产出/数据，stderr 给所有诊断）。
 
-    这样 `cli run … --json > r.json` 拿到纯净 JSON、`cli run … > summary.txt` 拿到纯净文本汇总，
+    这样 `gherkai run … --json > r.json` 拿到纯净 JSON、`gherkai run … > summary.txt` 拿到纯净文本汇总，
     进度（plan/event/run_id/RunReport 落点）照样在终端可见、不污染被重定向的主输出。
 
     **不上色（= 终端默认前景色）是有意约定**：默认色专属 cli main/core 的输出（含 `[core …:event]`），
@@ -1171,7 +1177,7 @@ def _progress(*args, **kwargs) -> None:
 
 def _print_artifact_lines(locations: dict) -> None:
     """产物落点三行（报告 / 运行元信息 / 判定明细）→ stderr：**`run` 结束与 `status` 终态共用这一份**
-    （两处对标输出，S3/本地路径可直接复制；曾各抄一份，文案或键名一改就分叉）。
+    （两处对标输出，两个后端的产物指针都可直接复制；曾各抄一份，文案或键名一改就分叉）。
 
     `locations` = compose 单点拼的落点表。缺 `report_index` 键 = 报告写入被隔离的失败（ADR 0030 决定三）
     → 该行给「写失败」提示、不打裸值；`status` 侧拿的是 compose 给的约定落点、必有该键，故只有 `run` 会走到回落。
@@ -1227,9 +1233,9 @@ def _cmd_submit(args) -> int:
     # 本身失败）→ 隧道没有宿主，就地拆掉，否则脱离进程组的 agent 会永久把本机应用留在公网（ADR 0035 决策 3）。
     # **「没交棒」≠「没提交」**：云端后端 `create_run` 已过、只是守护没 fork 起来这一格，云端链已经接管这个
     # run；本机后端同理（run 记录已在盘上、接力者会来推它）。这一格照样拆（没有任何收尾者，不拆就是永久公网
-    # 暴露），但必须打一行说清楚——否则用户只看到一个栈、以为什么都没发生，而云端照常运行、照常烧钱。
+    # 暴露），但必须打一行说清楚——否则用户只看到一个栈、以为什么都没发生，而云端照常运行、照常计费。
     # **分界线之后**即便收尾几行抛（stdout 是坏管道、Ctrl-C 恰落此窗）也不能拆：宿主已经在运行，拆了会让
-    # 剩余 job 在被测应用不可达下运行成假失败——兜底机制反成失败源，且烧真钱。
+    # 剩余 job 在被测应用不可达下运行成假失败——兜底机制反成失败源，且真实产生 AWS 费用。
     handed_off = False
 
     def _mark_handoff() -> None:
@@ -1245,7 +1251,7 @@ def _cmd_submit(args) -> int:
             from gherkai_runtime.tunnel import stop_tunnel
 
             stop_tunnel(tunnel_info.pid)  # 幂等（进程已不在则静默返回）；异常照常上抛、不吞
-            _progress("隧道已拆除（本机的被测应用不再对外暴露）。若上面已经打出提交成功，这一批就别再往下推"
+            _progress("隧道已拆除（本机的被测应用不再对外暴露）。若上面已经打出提交成功，这个 run 就别再往下推"
                       "——它要访问的地址已经失效、只会以导航失败告终：先修掉报出来的问题，再重新提交。")
     return rc_
 
@@ -1541,7 +1547,8 @@ def _cmd_status(args) -> int:
     run_store, _rs, _rp, _mk = compose.build_local_stores(report_dir=str(report_root))
 
     # run 存在性检查先于 --wait 接力：不存在的 run 走统一的「退 2 + 提示」，
-    # 别让 build_local_reconcile 的 FileNotFoundError 裸 traceback 退 1（README 契约：查不到 run → 2）。
+    # 别让 build_local_reconcile 的 FileNotFoundError 裸 traceback 退 1
+    # （退出码契约：查不到 run → 2，见 docs/user-guide/running-and-results.md「退出码」）。
     if run_store.load_run_state(args.run_id) is None:
         _progress(f"未找到 run：{args.run_id}（--report-dir 是否与 submit 一致？）")
         return 2

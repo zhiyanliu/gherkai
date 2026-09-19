@@ -749,7 +749,8 @@ def resolve_cloud_target(
     )
 
 
-# —— 造 boto3 句柄的两个钩子（抽出来供 cli 测试 monkeypatch，验接线而不连真 AWS）——
+# —— 造 boto3 句柄的钩子：compose 内各装配函数与入口侧的直接消费者（status 的 runs 表句柄、explain 的 s3 client、
+# 隧道守护的 runs 表句柄）共用，同时是测试 monkeypatch 的锚点——验接线而不连真 AWS ——
 def _make_ddb_table(table: str, *, region, profile):
     """boto3 dynamodb.Table 资源（DDB adapter 吃 resource.Table，非 client）。region/profile 走 Session。"""
     import boto3

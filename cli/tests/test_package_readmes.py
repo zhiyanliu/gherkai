@@ -1,4 +1,4 @@
-"""使用者向文档的护栏：根 README 与包 README（发行包长描述，逐字上 PyPI / npm 页面）、包 Summary（CLAUDE.md 文档纪律「README / DEVELOPMENT 分层」；决策与理由：ADR 0039）。
+"""使用者向文档的护栏：根 README 与包 README（发行包长描述，逐字上 PyPI / npm 页面）、包 Summary（CLAUDE.md 文档纪律「文档按读者三分类归位」；决策与理由：ADR 0039）。
 
 读者是「装了包、没有仓库的人」：ADR 编号 / 决策号 / 内部机制名对他们是噪声，`../docs/...` 这类相对链接在
 PyPI/npm 上全是死链。contributor 内容（布局、测试、spike、ADR 指针）归同目录 `DEVELOPMENT.md`，不进包。
@@ -56,12 +56,12 @@ def test_every_package_dir_has_a_development_md():
 
 
 def test_root_readme_is_for_users_only():
-    """根 README = 仓库首页、给使用者：不写 ADR 编号/决策号/内部机制名（目录结构、开发环境、测试、发布归 DEVELOPMENT.md）。
+    """根 README = 仓库首页、给使用者：不写 ADR 编号/决策号/内部机制名（目录结构、开发环境、测试、发布归根 CONTRIBUTING.md）。
     相对链接在 GitHub 上正常渲染，故这里不查链接形态。"""
     text = (REPO / "README.md").read_text(encoding="utf-8")
     hits = [f"README.md:{i}: {line.strip()[:120]}" for i, line in enumerate(text.splitlines(), 1)
             if FORBIDDEN.search(line) or COLLOQUIAL.search(line) or RETIRED_TERMS.search(line)]
-    assert not hits, "根 README 面向使用者：内部指代搬去 DEVELOPMENT.md，退役旧名换成词表里的规范名：\n" + "\n".join(hits)
+    assert not hits, "根 README 面向使用者：内部指代搬去根 CONTRIBUTING.md，退役旧名换成词表里的规范名：\n" + "\n".join(hits)
 
 
 def test_package_summaries_are_for_users_only():

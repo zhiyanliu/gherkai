@@ -60,7 +60,7 @@ class Job:
     scope_name: str  # @scope 原值（人写名）；无标用 scenario 标题
     engine: str  # 已完成冲突校验的引擎名（如 "midscene"/"novaact"）
     scenarios: tuple[Scenario, ...]
-    # AI 断言（Then）投票次数（治种类A抖动，ADR 0014）：worker 执行该断言 N 次取多数票。
+    # AI 断言（Then）投票次数（治判定抖动，ADR 0014）：worker 执行该断言 N 次取多数票。
     # 默认 1（不抖动检测，结果/日志最直观）；调高（如 3/5）才启用抖动治理。组合根经 --assertion-votes 设。
     assertion_votes: int = 1
     # job 墙钟预算秒（ADR 0034「job timeout」节）：@timeout:N tag 或组合根填充的 --default-job-timeout；
@@ -79,7 +79,7 @@ class Cost:
 
     原则：core 不算、不折美元、不判可信度——engine 提供什么就报什么，core 只各自合计。
     哪个量有值，本身就说明该 engine 按什么计费（Nova 报 time_worked_s、Midscene 报 tokens）；
-    美元折算交给消费者（用自己 AWS 账户的真实费率），框架不追会过期的单价表。
+    美元折算交给消费者（用自己 AWS 账户的真实费率），gherkai 不追会过期的单价表。
     """
 
     tokens: int | None = None          # LLM token 用量（Midscene/Bedrock 原生给；Nova 拿不到）

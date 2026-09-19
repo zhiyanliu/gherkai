@@ -1,5 +1,5 @@
 // 三段式自检 · 第 1 段：独立验「模型连接」
-// 目标：TS 侧 SigV4 自签 fetch + openai-node v6 → Bedrock qwen3-vl，拿 200。
+// 目标：TS 侧 SigV4 自签 fetch + openai-node v6 → Bedrock（模型取 lib/agentcore-sigv4 的 MODEL），拿 200。
 //   (a) 纯文本：证 SigV4 字节匹配 + 协议通
 //   (b) 视觉：用一张合格的真实 PNG（非 1x1 占位图）证 image_url 能过 Bedrock 图像 sanitize 并返回视觉应答
 // 运行：cd engines/midscene && node_modules/.bin/tsx spikes/01-model-sigv4.ts

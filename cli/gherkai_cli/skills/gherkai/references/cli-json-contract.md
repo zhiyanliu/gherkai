@@ -8,7 +8,7 @@
 
 ## `gherkai run … --json`
 
-顶层 = RunResult（判定）+ `run_meta`（提交时固定的这批任务本身）+ `artifacts`（落点）。
+顶层 = 这次运行的判定 + `run_meta`（提交时固定的这批任务本身）+ `artifacts`（落点）。
 
 | 键 | 类型 | 含义 |
 |---|---|---|
@@ -65,7 +65,7 @@
 |---|---|
 | `run_meta` / `run_state` | 任务定义 / 运行态的落点 |
 | `jobs_dir` | 判定明细目录（每 job 一份 JSON，文件名 = URL 编码的 scope_id；形状 = 前述 `jobs[]` 的一项，但**顶层 `scope_id` 换成内嵌的完整 `job` 定义**（同 `run_meta.jobs[]` 每项的形状）——scope 键取自 `job.scope_id`，单文件自包含、无需读 run_meta） |
-| `report_index` | RunReport `index.html`；报告写失败被隔离时**省略** |
+| `report_index` | 报告首页 `index.html`；报告写失败被隔离时**省略** |
 | `worker_log` | worker 日志落点；仅 `--quiet` 且本机执行（`--backend local`）时出现；cloud 后端 worker 在云端执行、日志进 CloudWatch，此键不出现 |
 
 ## `gherkai plan … --json`
@@ -83,7 +83,7 @@
 
 ## `gherkai status <run_id> --json`
 
-RunState（控制面运行态）+ 附加 `artifacts`：
+这个 run 的运行态 + 附加 `artifacts`：
 
 | 键 | 类型 | 含义 |
 |---|---|---|

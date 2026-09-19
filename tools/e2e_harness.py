@@ -45,7 +45,7 @@ from gherkai_core.scope import plan, PlanConfig, FeatureSource  # noqa: E402
 from gherkai_core.wire import job_to_line  # noqa: E402
 
 BUCKET = os.environ.get("HARNESS_S3_BUCKET")  # 可写桶，经 env 传（勿硬编码账号相关值）
-_TMP = Path(os.environ.get("CLAUDE_JOB_DIR", "/tmp")) / "harness-runs"
+_TMP = Path("/tmp") / "harness-runs"  # 系统临时目录（CLAUDE.md 工作方式「tools/ 是复用工具库」条）
 
 
 def build_job(feature: str, engine: str, votes: int):

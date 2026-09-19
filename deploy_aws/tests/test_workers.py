@@ -856,6 +856,22 @@ def test_skew_gate_read_failure_exits_2_without_a_traceback(aws):
     assert "读不到后端版本戳" in text2()
 
 
+def test_list_workers_reports_unreachable_aws_without_a_traceback():
+    """建不出 client（这里用不存在的 profile 名）→ 退 2 + 一句人话，不吐 botocore 堆栈。
+
+    `boto3.session.Session(profile_name=...)` 对不存在的 profile 在**构造期**就抛 `ProfileNotFound`，配不出
+    region 则要等到 `session.client(...)` 解析 endpoint 才抛——两者都发生在本模块自身的 `try` 之前，故建句柄
+    本身必须被包住（不接 `aws=` 的真实调用路径才走到这里，所以这条不用 moto 夹具）。
+
+    断言范围是**本层**：命令入口那一层还有更早的一口（解析 prefix/region/profile 时读 profile config 也会抛
+    同类异常），归 `cli.Provider._resolve_target_or_report`，其用例在 provider 测试里。
+    """
+    out, text = _out()
+    rc = workers.list_workers(prefix=PREFIX, cli_version=VERSION, profile="definitely-not-a-profile", out=out)
+    assert rc == 2
+    assert "连不上 AWS" in text()
+
+
 def test_list_workers_says_when_the_default_pointer_is_missing(aws):
     seed_backend(aws)
     out, text = _out()

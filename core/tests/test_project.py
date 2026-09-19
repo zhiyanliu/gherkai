@@ -1,7 +1,7 @@
 """gherkai_core.project 纯投影测试（ADR 0034）：project(records)→RunState 的「两件都要」谓词 + HWM + plan_next。
 
 纯逻辑、无 I/O、无 mock 外真实行为 → 绿即够（CLAUDE.md「绿≠对·别过度」：mock 内逻辑结论绿即足）。
-reconciler 的执行编排（Stream 触发/CAS 真写/进程脱离）不在此测——那是 P2/P3/P4 的真实运行边界。
+reconciler 的执行编排（Stream 触发/CAS 真写/进程脱离）不在此测——那是推进编排的真实运行边界。
 """
 from __future__ import annotations
 
@@ -76,14 +76,14 @@ def test_scope_started_running_without_exit():
 
 
 def test_clean_exit_without_scope_done_is_error():
-    """干净退出（exit=0）却没发完 scope_done（内容不完整）→ ERROR（矛盾态，不死循环，P3b crash 修正）。"""
+    """干净退出（exit=0）却没发完 scope_done（内容不完整）→ ERROR（矛盾态，不死循环；据 worker 崩溃的实际运行复现修正）。"""
     recs = [_ev("a", 1, ScopeStarted(scope_id="a", session_id="s")), _exit("a", 0)]
     state = project(_meta("a"), recs)
     assert state.jobs["a"].status == Status.ERROR
 
 
 def test_crash_no_scope_done_nonzero_exit_is_error():
-    """worker 崩溃（吐 scope_started 后非0退出、没 scope_done）→ ERROR（不等 scope_done，P3b 实际运行复现的死循环修正）。"""
+    """worker 崩溃（吐 scope_started 后非0退出、没 scope_done）→ ERROR（不等 scope_done；据 worker 崩溃致死循环的实际运行复现修正）。"""
     recs = [_ev("a", 1, ScopeStarted(scope_id="a", session_id="s")), _exit("a", 3)]
     state = project(_meta("a"), recs)
     assert state.jobs["a"].status == Status.ERROR
@@ -185,7 +185,7 @@ def test_error_clean_exit_incomplete_content_gets_attribution():
     recs = [_ev("a", 1, ScopeStarted(scope_id="a", session_id="s")), _exit("a", 0)]
     jr = project_full(_meta("a"), recs).jobs[0]
     assert jr.status == Status.ERROR
-    assert jr.message is not None and "scope_done" in jr.message
+    assert jr.message is not None and "没有报完" in jr.message
 
 
 # ---------- HWM（机制三）----------

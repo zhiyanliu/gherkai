@@ -26,7 +26,6 @@ def collect(iteration: str) -> dict[tuple[str, str], list[dict]]:
     for f in sorted((WORKSPACE / iteration).glob("eval-*/*/run-*/timing.json")):
         ev, arm = f.parts[-4], f.parts[-3]
         d = json.loads(f.read_text(encoding="utf-8"))
-        d["_run"] = f.parts[-2]
         g = f.with_name("grading.json")
         d["_pass_rate"] = json.loads(g.read_text(encoding="utf-8")).get("summary", {}).get("pass_rate") if g.is_file() else None
         rows[(ev, arm)].append(d)

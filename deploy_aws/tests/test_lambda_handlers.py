@@ -72,7 +72,7 @@ def test_extract_missing_exitcode_without_any_reason_still_gets_sentinel():
 
 
 def test_extract_missing_env_returns_none():
-    """非本框架起的 task（env 无 RUN_ID/SCOPE_ID）→ (None, None, ...)，handler 会跳过。"""
+    """非 gherkai 起的 task（env 无 RUN_ID/SCOPE_ID）→ (None, None, ...)，handler 会跳过。"""
     detail = {"overrides": {"containerOverrides": [{"environment": []}]}, "containers": []}
     run_id, scope_id, _e, _t, _reason = exit_observer._extract(detail)
     assert run_id is None and scope_id is None
@@ -242,19 +242,40 @@ def _timeout_built(tmp_path, *, status=Status.RUNNING, claimed_at=None, with_exi
 
 class _FakeEcs:
     """list_tasks/describe_tasks/stop_task 记录器。`task_arns` = 运行中的 task；`tasks` = 带状态的 task 描述
-    （dict：arn / lastStatus / desiredStatus / exitCode? / stoppedReason? / stopCode?）。list_tasks 按 desiredStatus 过滤
-    （ECS 语义：正在停止/已停止的不在 RUNNING 列表里）；describe 返回带 SCOPE_ID env 的 overrides。"""
+    （dict：arn / lastStatus / desiredStatus / exitCode? / stoppedReason? / stopCode? / scope_id?——后者缺省用
+    构造时的 `scope_id`，给多 task 场景造出「只有一个匹配目标」）。list_tasks 按 desiredStatus 过滤
+    （ECS 语义：正在停止/已停止的不在 RUNNING 列表里）；describe 返回带 SCOPE_ID env 的 overrides。
+
+    **两条真 ECS 上限照搬**（单页 100 与 tasks 硬上限 100，实现必须翻页 + 分批才过得去）：list_tasks 一页最多
+    `PAGE` 条、给了 `maxResults` 则按它（仍夹在 `PAGE` 以内，同真 API）、还有下页就带 `nextToken`（本替身里
+    就是页内偏移）；describe_tasks 收到超过 `PAGE` 个 ARN 直接抛，真 AWS 那边是 `InvalidParameterException`。
+    每批 ARN 记进 `described` 供断言分批与「找到即停」。"""
+
+    PAGE = 100
 
     def __init__(self, task_arns=(), scope_id="a", tasks=()):
         self._tasks = [{"arn": a, "lastStatus": "RUNNING", "desiredStatus": "RUNNING"} for a in task_arns] + list(tasks)
         self._scope_id = scope_id
         self.stopped: list[dict] = []
+        self.described: list[list[str]] = []
 
     def list_tasks(self, **kw):
         want = kw.get("desiredStatus", "RUNNING")
-        return {"taskArns": [t["arn"] for t in self._tasks if t.get("desiredStatus", "RUNNING") == want]}
+        arns = [t["arn"] for t in self._tasks if t.get("desiredStatus", "RUNNING") == want]
+        start = int(kw.get("nextToken") or 0)
+        # 页长按调用方给的 `maxResults` 走、夹到真上限：调小了就该翻更多页，替身照搬这条才测得出翻页逻辑
+        # （当前实现不传它、靠真 ECS 默认 100，这里先把行为对齐，别让将来调小页长时偏差无声通过）。
+        size = min(int(kw.get("maxResults") or self.PAGE), self.PAGE)
+        page = arns[start:start + size]
+        resp = {"taskArns": page}
+        if start + size < len(arns):
+            resp["nextToken"] = str(start + size)
+        return resp
 
     def describe_tasks(self, **kw):
+        if len(kw["tasks"]) > self.PAGE:
+            raise AssertionError(f"DescribeTasks 一次最多 {self.PAGE} 个 ARN，收到 {len(kw['tasks'])} 个")
+        self.described.append(list(kw["tasks"]))
         out = []
         for t in self._tasks:
             if t["arn"] not in kw["tasks"]:
@@ -262,9 +283,10 @@ class _FakeEcs:
             container = {"name": "novaact-worker"}
             if t.get("exitCode") is not None:
                 container["exitCode"] = t["exitCode"]
+            scope_id = t.get("scope_id", self._scope_id)
             d = {"taskArn": t["arn"], "lastStatus": t.get("lastStatus", "RUNNING"),
                  "desiredStatus": t.get("desiredStatus", "RUNNING"), "containers": [container],
-                 "overrides": {"containerOverrides": [{"environment": [{"name": "SCOPE_ID", "value": self._scope_id}]}]}}
+                 "overrides": {"containerOverrides": [{"environment": [{"name": "SCOPE_ID", "value": scope_id}]}]}}
             for k in ("stoppedReason", "stopCode"):
                 if t.get(k):
                     d[k] = t[k]
@@ -274,6 +296,12 @@ class _FakeEcs:
     def stop_task(self, **kw):
         self.stopped.append(kw)
         return {}
+
+
+def _stopped_filler(n, *, exit_code=0):
+    """n 个「别的 scope」的已停止 task——用来把 ListTasks 的 STOPPED 列表撑过一页。"""
+    return [{"arn": f"arn:task/stopped-{i}", "lastStatus": "STOPPED", "desiredStatus": "STOPPED",
+             "exitCode": exit_code, "scope_id": f"other-{i}"} for i in range(n)]
 
 
 def test_handle_timeout_stops_matching_task(tmp_path, monkeypatch):
@@ -312,6 +340,34 @@ def test_handle_timeout_converges_directly_when_task_gone(tmp_path, monkeypatch)
     assert r == "converged-directly"
     exits = [rec for rec in built[1].records() if rec.kind == "exit"]
     assert len(exits) == 1 and exits[0].exited.timed_out is True and exits[0].exited.exit_code is None
+
+
+def test_handle_timeout_pages_task_lists_and_batches_describe(tmp_path, monkeypatch):
+    """STOPPED task 多于一页时也要定位到运行中的目标：ListTasks 翻页取全、DescribeTasks 每批不超上限、命中即停。
+
+    ECS 保留已停止的 task 约 1 小时，故一个大 run 的 STOPPED 列表轻易超过单页 100 条；只取首页会把仍在运行的
+    目标判成「无踪」，把一个正常运行的 job 误判成超时。
+    """
+    monkeypatch.setenv("CLUSTER", "test-cluster")
+    ecs = _FakeEcs(task_arns=["arn:task/1"], tasks=_stopped_filler(120))
+    r = reconciler._handle_timeout("run-1", "a", _timeout_built(tmp_path), ecs_client=ecs)
+    assert r == "stopped"
+    assert ecs.stopped and ecs.stopped[0]["task"] == "arn:task/1"
+    assert all(len(batch) <= _FakeEcs.PAGE for batch in ecs.described)
+    assert len(ecs.described) == 1  # 目标在首批就命中 → 不再往下 describe
+
+
+def test_handle_timeout_finds_stopped_target_on_second_page(tmp_path, monkeypatch):
+    """目标落在 STOPPED 列表第二页、且没有退出记录 → 仍按 DescribeTasks 落它的真退出码，不臆造超时。"""
+    monkeypatch.setenv("CLUSTER", "test-cluster")
+    target = {"arn": "arn:task/target", "lastStatus": "STOPPED", "desiredStatus": "STOPPED", "exitCode": 7}
+    ecs = _FakeEcs(tasks=_stopped_filler(100) + [target])
+    built = _timeout_built(tmp_path)
+    r = reconciler._handle_timeout("run-1", "a", built, ecs_client=ecs)
+    assert r == "converged-from-describe"
+    exits = [rec for rec in built[1].records() if rec.kind == "exit"]
+    assert len(exits) == 1 and exits[0].exited.exit_code == 7 and exits[0].exited.timed_out is False
+    assert all(len(batch) <= _FakeEcs.PAGE for batch in ecs.described)
 
 
 def test_kicker_routes_timeout_scope_payload(monkeypatch):
@@ -365,6 +421,23 @@ def test_scan_overdue_timeouts_only_over_budget(tmp_path, monkeypatch):
     built = _timeout_built(tmp_path / "nocl")
     reconciler._scan_overdue_timeouts("run-1", built)
     assert calls == []
+
+
+def test_tick_runs_isolates_defensive_scan_failure(monkeypatch, capsys):
+    """防御性超时扫抛异常不连坐：本次调用仍成功返回，同一批里其它 run 照常推进（同 revision 解析失败的逐 run 隔离）。"""
+    ticked = []
+    monkeypatch.setattr(reconciler, "_build", lambda rid: ("BUILT",) * 7)
+    import gherkai_core.reconcile as _cr
+    monkeypatch.setattr(_cr, "tick", lambda run_id, *a, **kw: ticked.append(run_id) or False)
+
+    def _boom(run_id, built):
+        raise RuntimeError("DescribeTable 超时")
+
+    monkeypatch.setattr(reconciler, "_scan_overdue_timeouts", _boom)
+    result = reconciler._tick_runs({"run-1", "run-2"}, "reconciler")
+    assert result["ok"] is True and sorted(result["runs"]) == ["run-1", "run-2"]
+    assert sorted(ticked) == ["run-1", "run-2"]  # 一个 run 的扫失败不挡另一个 run 的推进
+    assert "超时兜底检查未完成" in capsys.readouterr().out
 
 
 # ---------- 只推进 detached run（ADR 0034 端到端 cloud 1b 的 handler 侧分流）----------

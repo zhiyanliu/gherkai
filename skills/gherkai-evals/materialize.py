@@ -121,6 +121,14 @@ def _now() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%S%z")
 
 
+def _rmtree_prepared(path: Path) -> None:
+    """删上次准备留下的树：它被 prepare_cli 末尾设成 a-w，只读目录里的条目 unlink 会被拒。"""
+    if not path.exists():
+        return
+    _run(["chmod", "-R", "u+w", str(path)])
+    shutil.rmtree(path)
+
+
 def prepare_cli(cli_dir: Path) -> None:
     """一次性把舞台要用的 CLI 与 midscene 装到仓库外（见模块头注释第 0 步）。"""
     uv = _uv()
@@ -130,8 +138,7 @@ def prepare_cli(cli_dir: Path) -> None:
         shutil.rmtree(dist)  # 版本号随 git 走，旧 wheel 留着会让下面「恰好一个」的挑选变歧义
     _run([uv, "build", "--all-packages", "--out-dir", str(dist)], cwd=REPO)
     venv = cli_dir / "venv"
-    if venv.exists():
-        shutil.rmtree(venv)
+    _rmtree_prepared(venv)
     _run([uv, "venv", "--python", "3.13", str(venv)])
     wheels = []
     for pkg in PREPARE_PACKAGES:
@@ -161,8 +168,7 @@ def prepare_cli(cli_dir: Path) -> None:
     if reused:
         print(f"materialize: 复用已拷好的 midscene：{midscene_dst}", file=sys.stderr)
     else:
-        if midscene_dst.exists():
-            shutil.rmtree(midscene_dst)
+        _rmtree_prepared(midscene_dst)
         midscene_dst.mkdir(parents=True)
         for name in MIDSCENE_COPY:
             src = MIDSCENE_SRC / name

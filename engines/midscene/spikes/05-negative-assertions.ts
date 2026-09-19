@@ -11,7 +11,7 @@ import {
   StartBrowserSessionCommand,
   StopBrowserSessionCommand,
 } from "@aws-sdk/client-bedrock-agentcore";
-import { sigv4Fetch, signCdpUpgrade, getBaseUrl, MODEL, getRegion } from "../src/lib/agentcore-sigv4.mjs";
+import { sigv4Fetch, signCdpUpgrade, getBaseUrl, MODEL, modelFamily, getRegion } from "../src/lib/agentcore-sigv4.mjs";
 // region 改惰性 getter（ADR 0033/0016 决策 C）；spike 直接运行时带 AWS_REGION=... 前缀，顶层求值 OK。
 const REGION = getRegion(), BASE_URL = getBaseUrl();
 
@@ -20,7 +20,7 @@ const MODEL_CONFIG = {
   MIDSCENE_MODEL_NAME: MODEL,
   MIDSCENE_MODEL_BASE_URL: BASE_URL,
   MIDSCENE_MODEL_API_KEY: "unused",
-  MIDSCENE_USE_QWEN3_VL: "true",
+  MIDSCENE_MODEL_FAMILY: modelFamily(),  // 模型家族：按模型 id 推断，与 worker 同一张表（ADR 0044 决策 2）
 };
 
 type Check = { name: string; expectRed: boolean; gotRed: boolean; detail: string };

@@ -156,7 +156,7 @@ def _dispatch_hint(dispatch: dict | None, scope_id: str, scenario_id: str, step_
     if not probe:
         return ""
     if "conflict" in probe:
-        return "  ← ⚠ 命中多条确定性模式（实际执行该 step 将 error；请工程侧收紧注册表模式）"
+        return "  ← ⚠ 命中多条确定性模式（实际执行该 step 将 error；请测试开发收紧注册表里的匹配模式）"
     return f"  ← 确定性: {probe.get('description', probe.get('pattern', ''))}"
 
 
@@ -215,7 +215,8 @@ _EVIDENCE_MISSING_TEXT = {
 
 
 def explain_step_expands(step: dict, *, expand_passed: bool) -> bool:
-    """这个 step 要不要展开证据（ADR 0042 决策四）：默认展开 failed / error / skipped，`--all` 也展开 passed。
+    """这个 step 要不要展开证据（ADR 0042 决策四）：默认展开 failed / error / skipped，
+    `--all` 或显式 `--step` 点名时也展开 passed（调用方把这两种情形归一成 `expand_passed`）。
 
     **同时兼作「要不要去读 evidence」的判据**（`explain_to_dict` 的 `wants_evidence`）：文本模式下不展开就不读，
     省掉云端逐 step 一次 GetObject 的白下载；`--json` 契约要求全给，那一路不传本谓词。

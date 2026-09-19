@@ -5,8 +5,8 @@
 `uv build` smoke 的断言体——把「元数据/metadata hook 回归」挡在推索引之前，而不是等发行后
 用户装不上才发现（ADR 0037「现状实测」记的原始故障就是 `Requires-Dist: core` 裸名）。
 
-四条断言都对照**真值集**（前三条：根 pyproject 的 `[tool.uv.workspace] members` → 各成员
-`[project] name`；第四条：源目录的文件系统遍历），不靠人读产物清单——新增一个 workspace 成员却忘了
+五条断言都对照**真值集**（前三条：根 pyproject 的 `[tool.uv.workspace] members` → 各成员
+`[project] name`；第四条：源目录的文件系统遍历；第五条：sdist 顶层目录集），不靠人读产物清单——新增一个 workspace 成员却忘了
 它进不进发布链，只有逐条比对真值集才照得出来：
 
 1. 每个成员都产出 sdist + wheel；
@@ -19,6 +19,8 @@
    发行，ADR 0043 决策一/六），且不含评测资产（`evals`）。为何必须是集合相等：hatchling 默认认从项目根
    向上找到的第一份 `.gitignore`（即 `cli/.gitignore`，今含 `reports/`），命中的路径**静默**不进
    sdist/wheel，`git add -f` 强跟踪也救不回来——「文件受 git 跟踪」式护栏对这一格无效。
+5. 每个 sdist 顶层不含 `tests/` 与 `spikes/`（ADR 0037 工程布局条「测试与 spike 不进发行包」）。sdist 靠各包
+   pyproject 的 `[tool.hatch.build.targets.sdist] exclude` 字面量排除，没有护栏就会静默漂回默认全收。
 
 用法：
     python3 .github/scripts/check_dist_metadata.py --dist dist [--expect-version 1.4.0]
@@ -29,6 +31,7 @@ from __future__ import annotations
 import argparse
 import re
 import sys
+import tarfile
 import tomllib
 import zipfile
 from email.parser import BytesParser
@@ -208,6 +211,14 @@ def main() -> int:
                     f"{name} 缺 sdist {expected_sdist.name}（现有：{[p.name for p in sdists]}）"
                 )
 
+    # 断言 5：sdist 顶层不含测试与 spike（ADR 0037 工程布局条；exclude 是字面量、无护栏会静默漂回）
+    for s in sdists:
+        with tarfile.open(s) as t:
+            tops = {p[1] for p in (m.name.split("/") for m in t.getmembers()) if len(p) > 1}
+        bad = sorted(tops & {"tests", "spikes"})
+        if bad:
+            errors.append(f"{s.name} 顶层含 {bad}：pyproject 的 sdist exclude 漏了（ADR 0037 工程布局条）")
+
     if args.expect_version and version and version != args.expect_version:
         errors.append(
             f"构建算出的版本 {version} ≠ 期望 {args.expect_version}。"
@@ -225,7 +236,7 @@ def main() -> int:
         for err in errors:
             fail(err)
         return 1
-    print("产物校验通过：成员齐、版本一致（无旧版本残留）、兄弟包 pin 已渲染、skill 文件集与源目录一致。")
+    print("产物校验通过：成员齐、版本一致（无旧版本残留）、兄弟包 pin 已渲染、skill 文件集与源目录一致、sdist 不含测试与 spike。")
     return 0
 
 

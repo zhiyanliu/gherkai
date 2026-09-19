@@ -291,9 +291,10 @@ def _reduce_scope(job: Job, recs: list[EventRecord]) -> tuple[JobResult, Status,
         elif exited.exit_code is None:
             result.message = "worker 已终止但退出码未知——无法判定为通过，按错误处理"
         elif exited.exit_code != 0:
-            result.message = f"worker 非正常退出（exit {exited.exit_code}；事件流无归因内容——详见 worker 日志）"
+            result.message = f"worker 非正常退出（exit {exited.exit_code}；事件流里没有失败原因——详见 worker 日志）"
         elif exited.exit_code == 0 and not saw_scope_done:
-            result.message = "worker 干净退出但内容不完整（无 scope_done）——矛盾形态，判 error"
+            # exit==0 却缺 scope_done = 进程声称成功、内容没发完的矛盾形态。
+            result.message = "worker 正常退出但没有报完这次运行的结果——按错误处理（详见 worker 日志）"
     return result, status, max_seq
 
 

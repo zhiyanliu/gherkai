@@ -7,13 +7,14 @@
 // Midscene/SDK 的 stdout 噪声留 stdout；worker 自身诊断走 stderr。
 //
 // cost（ADR 0024）：从 agent.metrics（SDK 公开的累计用量快照）的 totalTokens 取原生 token 数，按 step 取前后
-// 差值，worker 只报 {tokens}；core 合计、美元折算交消费者（不追 Qwen 单价）。两个引擎对称：都只报原生量。
+// 差值，worker 只报 {tokens}；core 合计、美元折算交消费者（不追模型单价——单价随 region / 协商 / 版本变）。
+// 两个引擎对称：都只报原生量。
 //
 // **本模块不是进程入口**（ADR 0037 决策 3）：入口是 `bin.mts`（npm bin `gherkai-worker-midscene` /
 // 容器 CMD），它装 tsx loader + 注册裸 specifier 的 resolve hook 后调本模块的 `main`。故这里只导出
 // `main`、不自带 `if 入口` 守卫——「装 loader」与「运行 worker」分层，且 import 本模块做单测时不触发 main。
 //
-// 运行（一般由 core adapter 按 ADR 0037 的定位链 spawn；也可手动）：
+// 运行（一般由 core adapter 按 ADR 0037 的 worker 定位链 spawn；也可手动）：
 //   echo '<job json>' | AWS_REGION=us-east-1 node dist/bin.mjs
 import OpenAI from "openai";
 import { PlaywrightAgent } from "@midscene/web/playwright";
@@ -207,12 +208,49 @@ async function drainArtifactQueue(
   try {
     if (!(await uploader.drain(budgetMs))) {
       // 产品面一行：发生了什么 + 不影响什么 + 还能看什么。
-      logFn("worker: 部分排障截图未能在收尾预算内传完（已放弃，不影响判定结果；仍可看引擎原生报告）");
+      logFn("worker: 部分证据截图未能在收尾预算内传完（已放弃，不影响判定结果；仍可看引擎原生报告）");
     }
   } catch (e) {
     // 产品面一行，与上面「排不完」那行同形（best-effort、绝不抛的判据见上函数头）。
-    logFn(`worker: 排障截图收尾上传失败（不影响判定结果；仍可看引擎原生报告）：${(e as Error).message}`);
+    logFn(`worker: 证据截图收尾上传失败（不影响判定结果；仍可看引擎原生报告）：${(e as Error).message}`);
   }
+}
+
+// cleanup 的重入守卫（ADR 0024 终止契约）——抽成纯函数供单测：信号 handler 与主流程 finally 会先后各调一次
+// cleanup，守卫既要「不重复发 StopBrowserSession」，又不能让重入者提前返回到「会话其实还没释放」。故记的是
+// **在途 promise**、不是一个布尔：
+//   ① 无在途 → 起一次清理，记住它的 promise；
+//   ② 有在途、本次是丢弃中间建连 attempt 的语义（discardAttempt）→ 直接等在途那次，不再发一遍 Stop；
+//   ③ 有在途、本次是 final 语义 → 等在途结束，若 hasLeftovers()（仍有未确认释放的会话）则忘掉记忆、以
+//      final 语义再清一次。缺这一步时，在途那次若是 discardAttempt 语义（其 Stop 失败只记日志、按约定不点亮
+//      最终态的泄漏标记），最终态会话的泄漏就永远不被记账、退出码照旧是 0；会话已全部确认释放则直接返回。
+//   ④ reset() 忘掉在途记忆（建连重试分支用：本次 attempt 的清理已结束，下一次要能再清）。
+// 布尔守卫的两处失真即上面②③要挡的：重入者见「已清过」立刻返回，而在途那次还在 await Stop（调用方据此
+// 以为会话已释放，接着做提前上传与退出）；且丢弃语义的一次清理会把后续 final 语义的清理整个吞掉。
+export function makeGuardedCleanup(
+  run: (discardAttempt: boolean) => Promise<void>,
+  hasLeftovers: () => boolean,
+): { cleanup: (discardAttempt?: boolean) => Promise<void>; reset: () => void } {
+  let inFlight: Promise<void> | null = null;
+  const start = (discardAttempt: boolean): Promise<void> => {
+    const p = run(discardAttempt);
+    inFlight = p;
+    return p;
+  };
+  return {
+    cleanup: async (discardAttempt = false): Promise<void> => {
+      const pending = inFlight;
+      if (pending === null) return await start(discardAttempt);
+      if (discardAttempt) return await pending;  // 丢弃语义的重入：在途那次已覆盖本次诉求
+      // final 语义的重入：在途那次的异常归它自己的调用方处置，这里只关心「会话到底释放没有」，故吞掉它再看
+      // leftovers——否则在途那次一抛，本次连补清一刀的机会都没有。
+      await pending.catch(() => {});
+      if (!hasLeftovers()) return;
+      inFlight = null;
+      await start(false);
+    },
+    reset: () => { inFlight = null; },
+  };
 }
 
 // SIGTERM/SIGINT 收尾序列（ADR 0024 终止契约 + 0029 中断兜底提前上传 + 0042 截图队列排空）——从 onSignal 提出为可测函数（依赖注入），
@@ -295,7 +333,7 @@ async function writeStdoutFlushed(s: string): Promise<void> {
 
 // `--no-report` 方式（组合根经 env GHERKAI_NO_ARTIFACTS=1 告知，ADR 0037 决策 3）：**不生成、不上报**引擎原生产物——
 // 关 agent 的 generateReport、不提前上传 log、不带 report ref。Midscene SDK 即便不出 report 也可能往 run 目录写 log/dump
-// （相对 cwd 的 ./midscene_run），故这一方式下若无 MIDSCENE_RUN_DIR 就把它导到一次性临时目录、不进用户 CWD（SDK 内部行为，不上报）。
+// （相对 cwd 的 ./midscene_run），故这一方式下若无 MIDSCENE_RUN_DIR 就把它导到一次性临时目录、不进使用方 CWD（SDK 内部行为，不上报）。
 const NO_ARTIFACTS = process.env.GHERKAI_NO_ARTIFACTS === "1";
 
 /** scope 末整目录 flush 的根：`--no-report` 方式返回 undefined（不上报任何原生产物，ADR 0037 决策 3——这一方式下
@@ -390,7 +428,6 @@ export async function main(): Promise<number> {
   let sessionId: string | undefined; // 最终成功会话 id（血缘，进 scope_done；非清理依据——清理看 pendingSessions）
   let startInFlight = false; // StartBrowserSession RPC 已发出、await 未返回（SIGTERM 兜底等待的精确信号，ADR 0028）
   let browser: Browser | undefined;
-  let cleanedUp = false;
   let cleanupFailed = false; // StopBrowserSession 失败 → worker 非 0 退出，让泄漏可观测（对照 Nova）
 
   async function stopSession(sid: string): Promise<boolean> {
@@ -416,7 +453,8 @@ export async function main(): Promise<number> {
   // 会话清理（ADR 0024 终止契约，对照 Nova 的 with __exit__）：
   //   顺序——**先发 StopBrowserSession 释放会话（最重要、优先）**，再关 browser；
   //   理由——不让易挂起的 browser.close 挟持会话释放。close 套超时预算，避免耗尽 grace。
-  //   幂等：cleanedUp 守卫，防 SIGTERM handler 与 finally 双调。
+  //   重入：在途 promise 记忆（makeGuardedCleanup）——信号 handler 与 finally 先后双调时，后来者等在途那次
+  //   执行完，既不重复发 Stop、也不提前返回到「会话其实还没释放」；见该函数头。
   //   **并行** Stop pendingSessions（每个套超时预算）；任一未确认释放 → cleanupFailed（除非 discardAttempt）。
   //   并行（Promise.all）而非串行：N 个会话累积时墙钟 ≈ 单个预算（3s）而非 N×3s——串行会让重试积累的
   //   多个泄漏会话把 cleanup 拖过 grace 被 SIGKILL 截断（正是 ADR 0028「重试放大的 in-flight 会话窗口」条
@@ -424,9 +462,7 @@ export async function main(): Promise<number> {
   //   discardAttempt=true（丢弃中间建连 attempt 的部分会话，ADR 0028）：Stop 失败只 log、**不点亮
   //   final cleanupFailed**——那个会话本就要丢、与「最终态会话是否泄漏」无关；否则一次中间失败会毒化
   //   后续成功 attempt 的退出码（误报泄漏 → core 当 engine_error）。final cleanup（默认）才管 cleanupFailed。
-  async function cleanup(discardAttempt = false): Promise<void> {
-    if (cleanedUp) return;
-    cleanedUp = true;
+  async function cleanupRun(discardAttempt: boolean): Promise<void> {
     await Promise.all([...pendingSessions].map(async (sid) => {
       const ok = await stopSession(sid);
       if (ok) pendingSessions.delete(sid);
@@ -440,6 +476,10 @@ export async function main(): Promise<number> {
       ]);
     }
   }
+  // 重入守卫（语义见 makeGuardedCleanup）：leftovers = pendingSessions 里还有没确认释放的会话，
+  // 有则 final 语义的重入者补清一次，让 Stop 失败点亮 cleanupFailed、泄漏可观测。
+  const cleanupGuard = makeGuardedCleanup(cleanupRun, () => pendingSessions.size > 0);
+  const cleanup = cleanupGuard.cleanup;
 
   // SIGTERM/SIGINT：清理会话再退（防 AgentCore 会话泄漏后持续计费）。
   let terminated = false;
@@ -513,11 +553,11 @@ export async function main(): Promise<number> {
         // 丢弃本次 attempt 部分建起的会话/browser（如 connectOverCDP 失败但 StartBrowserSession 成功）。
         // discardAttempt=true：Stop 失败不污染 final cleanupFailed（这个会话本就要丢，ADR 0028）。
         // cleanup 遍历 pendingSessions 逐个 Stop，成功的从集里删；未删的（Stop 失败/超时）留到后续 cleanup 再试。
-        cleanedUp = false; // 允许对本次 attempt 的部分会话再清一次
+        cleanupGuard.reset(); // 忘掉上一次 attempt 的清理记忆，允许对本次 attempt 的部分会话再清一次
         await cleanup(true);
         browser = undefined;
         const sid = sessionId; sessionId = undefined; // 清血缘：失败 attempt 的 id 不该进 scope_done
-        cleanedUp = false; // 重置守卫：留给后续 attempt 成功后的 final cleanup（否则被本次置 true 永久跳过）
+        cleanupGuard.reset(); // 重置守卫：让后续 attempt 成功后的 final cleanup 从「无在途」起（本次这趟丢弃语义的清理已结束，不必再等它）
         if (terminated) throw e;  // 已收 SIGTERM → 不重试
         // connecting=true：本分支即建连域，额外认 Playwright "has been closed"（连接被网络断的下游症状，ADR 0028，对称 Nova）
         if (!isTransientNetwork(e, true) || attempt >= CONNECT_ATTEMPTS - 1) {
@@ -652,9 +692,11 @@ async function runScenario(
           snapState.mtime = mt;
         }
       } catch (e) {
-        // 产品面一行：不承诺「一定会再传」——snapState.mtime 未更新，后续 step_done 安全点与 scope 末的
-        // 报告上传都会再试；但异常提前退出那条路径两者都不执行（与 Nova 上传器同一判据）。
-        log(`worker: 引擎原生报告未能提前上传（不影响判定；后面还会再试）：${(e as Error).message}`);
+        // 本行不作再传承诺（ADR 0039 产品面文案不变量，两引擎同形）：正常路径上 snapState.mtime 未更新，
+        // 后续 step_done 安全点与 scope 末的报告上传还会再传；停止信号路径有中断兜底提前上传
+        // （interruptSnapshot）再传一次；但网络耗尽与异常两条提前退出路径只排空截图队列、既不 snapshotReport
+        // 也不 flush，那份增量 report 就此丢。
+        log(`worker: 引擎原生报告未能提前上传（不影响判定；这份报告可能最终没能上传）：${(e as Error).message}`);
       }
     }
     if (status === "error") shortcircuit = true;  // 本 scenario 后续 step 短路

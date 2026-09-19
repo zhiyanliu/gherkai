@@ -249,7 +249,7 @@ export class ArtifactUploader {
     const err = await this.uploadWithRetry(abs);
     if (err !== null) {
       // 产品面一行：发生了什么 + 不影响什么 + 还能看什么（设计判据留在上面注释里）。
-      this.logFn(`worker: 排障截图上传失败（已重试后放弃，不影响判定结果；仍可看引擎原生报告）：`
+      this.logFn(`worker: 证据截图上传失败（已重试后放弃，不影响判定结果；仍可看引擎原生报告）：`
         + `${path.basename(abs)}：${String((err as { message?: unknown }).message ?? err)}`);
     }
   }

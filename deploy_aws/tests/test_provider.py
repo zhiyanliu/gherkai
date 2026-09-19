@@ -425,6 +425,22 @@ def test_guard_unexpected_read_error_exits_2_not_traceback(monkeypatch, capsys):
     assert "cloudformation:DescribeStacks" in capsys.readouterr().err
 
 
+def test_a_bad_profile_exits_2_at_the_entry_not_a_traceback(capsys):
+    """`--profile` 名不存在、且未给 `--region`/`AWS_REGION` → 退 2 + 一句人话，不抛 botocore 堆栈。
+
+    **这条有意不打桩**、走真实解析链：region 前三级都 miss 时解析会回落读 profile config，不存在的 profile 名
+    在 `boto3.session.Session(...)` 构造期就抛 `ProfileNotFound`——抛点排在 `workers._connect` 之前，
+    那一层的同款钩子照不到它（实际运行核过：没有这一口，`list-workers` / `push-worker` / `deploy` 三条
+    都吐裸堆栈）。故只读动作与 deploy 那条入口各断言一次。解析纯本地推导，这条不碰 AWS。
+    """
+    rc = Provider().list_workers(_parse("list-workers", "--profile", "definitely-not-a-profile"))
+    assert rc == EXIT_PRECONDITION
+    assert "连不上 AWS" in capsys.readouterr().err
+    rc = Provider()._guard_vpc_spec(_parse("--vpc", "default", "--profile", "definitely-not-a-profile"))
+    assert rc == EXIT_PRECONDITION
+    assert "连不上 AWS" in capsys.readouterr().err
+
+
 def test_stack_not_found_detection_needs_both_code_and_text():
     """`ValidationError` 也用于别的参数问题——只看错误码会把真正的参数错误当「真首次部署」放行，
     那正是三态要挡的那次危险 deploy。故文案不含 does not exist 时必须照抛。"""

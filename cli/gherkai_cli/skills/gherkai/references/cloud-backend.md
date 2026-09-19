@@ -89,4 +89,4 @@ gherkai submit features/x.feature --backend cloud --prefix gherkai- --worker-var
 
 ## 7 `--expose-local` 在 cloud 后端的例外
 
-`submit --backend cloud --expose-local <原始 origin>` 时隧道由**本机**的守护进程持有，本机须保持开机联网到 run 终态，这是「提交后关机也会运行到结束」的唯一例外。`--tunnel-ttl S` 是守护进程的兜底 TTL（默认 = 本批各 job 预算之和 + 启动余量），到点无条件拆隧道，调小可能在 run 未完时断隧道。
+`submit --backend cloud --expose-local <原始 origin>` 时隧道由**本机**的守护进程持有，本机须保持开机联网到 run 终态，这是「提交后关机也会运行到结束」的唯一例外。`--tunnel-ttl S` 是守护进程的兜底 TTL（默认 = 这个 run 各 job 预算之和 + 启动余量），到点无条件拆隧道，调小可能在 run 未完时断隧道。

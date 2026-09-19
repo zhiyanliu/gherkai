@@ -6,7 +6,7 @@
   拿 exitcode 写 task_exited（扮演平台侧退出观察者，机制二 local 对位）。worker 不改、对 SQLite 无知（0034）。
 - **per-run reconciler 进程**：`submit` 时 setsid fork 出来的轻进程，循环 tick 直到全 done 自退。
 
-守窄腰：gherkai_core.reconcile 对「怎么起 worker」无知（经 Launcher 注入）；本模块在产品本体 gherkai 层（组合根共享层，
+守窄腰：gherkai_core.reconcile 对「怎么起 worker」无知（经 Launcher 注入）；本模块在产品本体包 gherkai_runtime（组合根共享层，
 ADR 0016「演进」节）、可 import SubprocessEngine/SqliteEventLog，core 不可。云端后端的 Launcher =
 `gherkai_core.adapters.cloud_launcher.CloudLauncher`（ECS RunTask），与本模块共用同一 `gherkai_core.reconcile.tick`。
 """
@@ -22,7 +22,7 @@ from gherkai_core.adapters.run_store.local import LocalRunStore
 from gherkai_core.adapters.subprocess_engine import SubprocessEngine
 from gherkai_core.model import Job, RunMeta, Status
 from gherkai_core.reconcile import finalize_report, tick
-from gherkai_runtime import names  # 叶子模块（compose 要惰性 import 防环，names 不用）
+from gherkai_runtime import names  # 叶子模块（零依赖，见其模块头）
 
 # 接力恢复的判定余量秒（ADR 0034「job timeout」节 claimed_at ①）：超预算这么久才认定 owner 已死。
 # 口径 = **只挡时钟抖动与轮询粒度**：起算点 claimed_at 是 claim 时的墙钟、owner 的 deadline timer 起于其后的
@@ -79,7 +79,7 @@ class SubprocessLauncher:
         # grace 下限要 spawn 一次 worker 自述才问得到（ADR 0024「引擎自报下限」）、**会抛**（旧 worker 不认入口 /
         # 定位不到 / 答非契约）——故必须问在起 worker **之前**：抛在 run_scope 之后就是「worker 已起、_pump 没起」，
         # tick 的 launch 失败补偿（PLATFORM_FAILED_EXIT）前提是「进程没起、平台观察者无从观察」，那时留下的是
-        # 没人读 fd3、没人 wait、没人 stop 的孤儿 worker（真会话真计费）+ 泄漏的事件管道 fd。
+        # 没人读 fd3、没人 wait、没人 stop 的孤儿 worker（真会话真计费）+ 泄漏的事件通道 fd。
         grace = self._min_grace_fn(job.engine) if job.timeout_s else None
         handle, events = engine.run_scope(job, raw_sink=raw_sink)
         timer: threading.Timer | None = None
@@ -150,7 +150,7 @@ def run_reconcile_loop(
 
     result_store/report_store（可选）：判定真值（jobs/*.json）由 tick 在 finalize CAS **之前**落（注入给 tick，
     ADR 0030 决定三写序）；RunReport（index/manifest）在 done 后由 `finalize_report` 写（派生、失败隔离）。
-    两者都幂等（从 events 重放、覆盖写同 key）——多个推进者都 done 都写无害。注入 None（测试）则跳过。
+    两者都幂等（从 events 重放、覆盖写同 key）——多个推进器都 done 都写无害。注入 None（测试）则跳过。
     """
     while True:
         done = tick(run_id, meta, event_log, run_store, launcher, max_concurrency,
@@ -259,7 +259,7 @@ def build_local_reconcile(report_dir: str, run_id: str, max_concurrency: int,
     meta = store.load_run_meta(run_id)
     if meta is None:
         # 正常路径下 submit 的 create_run 早已落 RunStore，走到这里 = 落点被删/写坏或 report_dir 指错。
-        # 文案按产品语言给：常见形态已由 `_cmd_status` 的 run 存在性预检翻成退 2；这里兜住剩下的两条——
+        # 文案按产品语言给：常见形态已由 `_cmd_status` 的 run 存在性检查翻成退 2；这里兜住剩下的两条——
         # run_state 在而 definition 缺（落点被删/写坏）的裸 traceback，以及 per-run 后台进程把它写进 reconcile.log。
         raise FileNotFoundError(f"找不到这个 run 的提交记录，无法继续推进：{run_id}"
                                 f"（产物目录被删或写坏？也确认 --report-dir 与提交时一致）")

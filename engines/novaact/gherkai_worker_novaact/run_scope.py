@@ -336,9 +336,12 @@ def _emit_step_done(sink: EventSink, ev: dict, *, scope_id: str | None, scenario
 def _drain_evidence_uploads(timeout_s: float, *, flush_follows: bool) -> None:
     """收尾：**有界**等 evidence 截图的后台队列传完（ADR 0042 决策一）。best-effort、绝不抛。
 
-    调用位置守两条：①**在会话释放之后**（ADR 0024「会话释放优先」——三层 with 已退出），与既有的中断兜底
-    提前上传并列；② scope 末排在 `flush_and_cleanup` **之前**（队列传完的文件 flush 会跳过，漏网的由它兜）——故
-    scope 末这一段超时不等于丢：紧随的整目录 flush 会把剩下的传上去。
+    调用位置守两条：①**在会话释放之后**（ADR 0024「会话释放优先」——AgentCore 会话已释放：NovaAct /
+    cdp_session 两层 with 已退出；异常路径下最外层 with wf 尚在栈上），与安全点提前上传
+    （`_presend_act_siblings`）同属 best-effort 的产物保全层（那层在 act 边界提前传、本函数在收尾排空）。
+    Nova 没有中断 handler 内的兜底上传（greenlet 使然，见 ADR 0032）；② scope 末排在 `flush_and_cleanup`
+    **之前**（队列传完的文件 flush 会跳过，漏网的由它兜）——故 scope 末这一段超时不等于丢：紧随的整目录
+    flush 会把剩下的传上去。
     `flush_follows` 由调用点声明「我后面还跟着 flush 吗」（不在这里猜调用栈），超时提示据此分两句：会 flush 的
     只说改由收尾统一上传，不会 flush 的（提前退出路径只排空、不 flush）才说链接可能打不开。必传、无默认：
     默认值会让新调用点静默拿到一句可能为假的承诺。
@@ -930,8 +933,9 @@ def main() -> int:
                     if _backoff_interrupted(attempt):
                         break  # 退避中收到停止信号 → 不再重连
         except BaseException:
-            # 异常退出路径（ADR 0042 决策一第三条）：会话已在 _run_session 的三层 with 退出时释放，此处只给
-            # 在途截图同一份有界预算再传一把（best-effort，不改变冒泡的异常与退出码）。
+            # 异常退出路径（ADR 0042 决策一第三条）：AgentCore 会话已在 _run_session 内的两层
+            # with（NovaAct / cdp_session）退出时释放（第三层 with wf 仍在栈上、与会话无关），此处
+            # 只给在途截图同一份有界预算再传一把（best-effort，不改变冒泡的异常与退出码）。
             _drain_evidence_uploads(EVIDENCE_DRAIN_EXIT_S, flush_follows=False)
             raise
         finally:

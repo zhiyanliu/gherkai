@@ -248,7 +248,7 @@ def test_render_text_shows_reason_for_fail_fast_states():
     且 error_type 为 None 时不打裸 "None:" 前缀。"""
     jobs = [Job(scope_id=s, scope_name=s, engine="novaact", scenarios=[]) for s in ("checkout", "login")]
     a = JobResult(job=jobs[0], status=Status.SKIPPED)
-    a.message = "fail-fast：批次已中止，未启动（worker 未 spawn）"
+    a.message = "fail-fast：本次运行已中止，未启动（worker 未 spawn）"
     b = JobResult(job=jobs[1], status=Status.ABORTED)
     b.message = "fail-fast：其他 job 失败，本 job 被中止"
     meta = RunMeta(run_id="r1", created_at="2026-01-01T00:00:00Z", jobs=tuple(jobs))

@@ -8,7 +8,7 @@
 // 跟着 handler 走最内聚；core 只解析结构 + 调度，对 step 语义无知。
 //
 // 角色边界（ADR 0020）：QA 永远只写自然语言（默认走 AI）；确定性 step 由测试开发注册（QA 不碰）——
-// 框架内建的那几条在 deterministic.steps.mts，项目专属的写在使用方 `steps/` 目录（ADR 0037 决策 4，
+// 内建的那条在 deterministic.steps.mts，项目专属的写在使用方 `steps/` 目录（ADR 0037 决策 4，
 // 经本模块的公开导出面 index.mts 注册进**同一张**表）。
 //
 // handler 约定：

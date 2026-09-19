@@ -1,8 +1,8 @@
-"""cloud 无状态批量运行 core 侧测试（ADR 0034 P4a）：DdbEventLog + CloudLauncher + reconcile.tick(DDB 后端)。
+"""cloud 无状态批量运行 core 侧测试（ADR 0034 云端后端）：DdbEventLog + CloudLauncher + reconcile.tick(DDB 后端)。
 
 moto mock DDB/ECS——验 DdbEventLog 读全量重放 + task_exited 独立键空间 + CloudLauncher start_scope 调对 +
 reconcile.tick 用 DdbEventLog/DynamoDBRunStore/CloudLauncher 走通（与 local SqliteEventLog/LocalRunStore 对拍语义）。
-moto 抓不到的真 DDB Stream 触发/EventBridge/真 Fargate 是 P4d 真实运行边界。
+moto 抓不到的真 DDB Stream 触发 / EventBridge / 真 Fargate 是真实运行边界。
 """
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ def _meta(*sids: str) -> RunMeta:
 
 @pytest.fixture
 def events_table(aws):
-    """events 表（PK=pk/SK=seq，同 conftest 的 runs 表不同）——P4 单独建，schema 见 ADR 0033/0024。"""
+    """events 表（PK=pk/SK=seq，同 conftest 的 runs 表不同）——云端后端测试单独建，schema 见 ADR 0033/0024。"""
     import boto3
     ddb = boto3.resource("dynamodb", region_name="us-east-1")
     ddb.create_table(

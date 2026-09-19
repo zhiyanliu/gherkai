@@ -19,6 +19,7 @@
 //   node tools/build_diagrams.mjs --png                 # 另导 PNG（只供目视检查，不入库）
 //   node tools/build_diagrams.mjs --no-deliver          # 跳过 ①，只从现有 HTML 导出
 //   node tools/build_diagrams.mjs --html some.html      # 只导出一个现成 HTML（不需要 JSON）
+//   node tools/build_diagrams.mjs --dir <目录>          # 换图源目录（缺省 docs/diagrams）
 // 退出码：0 全成；1 有失败（逐张打出原因）。入库的是 JSON 与 SVG（同 commit）；HTML 只对发布到 Pages 的图入库。
 // 导出的 SVG 末尾带一行图源 sha256 指纹注释，护栏与 hook 靠它判「改了 JSON 没重导」。
 import { createRequire } from 'node:module';
@@ -55,11 +56,20 @@ function deliver(jsonPath, htmlPath) {
 // 导出的 SVG 末尾追加图源指纹（XML 允许根元素之后有注释；浏览器与 GitHub 的 <img> 都照常渲染）。
 // 用途：CI 与 hook 不只靠 mtime（git checkout 后 mtime 无意义）也能判「JSON 改了、SVG 没重导」——
 // cli/tests/test_user_docs.py 逐张比对 sha256(json) 与这行指纹（ADR 0045 决策七）。
-export function sourceFingerprint(jsonPath) {
+function sourceFingerprint(jsonPath) {
   return createHash('sha256').update(readFileSync(jsonPath)).digest('hex');
 }
-export function stampSource(svgPath, jsonPath) {
-  appendFileSync(svgPath, `\n<!-- gherkai:source-sha256=${sourceFingerprint(jsonPath)} -->\n`);
+function stampWith(svgPath, hex) {
+  appendFileSync(svgPath, `\n<!-- gherkai:source-sha256=${hex} -->\n`);
+}
+function stampSource(svgPath, jsonPath) {
+  stampWith(svgPath, sourceFingerprint(jsonPath));
+}
+// 读回既有 SVG 尾部那行指纹（没有 SVG、或它没盖过指纹，返回 null）。
+function readStampedFingerprint(svgPath) {
+  if (!existsSync(svgPath)) return null;
+  const m = readFileSync(svgPath, 'utf8').slice(-4096).match(/gherkai:source-sha256=([0-9a-f]{64})/);
+  return m ? m[1] : null;
 }
 
 async function exportFrom(page, htmlPath, format, outPath) {
@@ -106,9 +116,19 @@ async function main() {
       let type = '';
       if (job.json && !noDeliver) type = deliver(job.json, job.html);
       if (!existsSync(job.html)) throw new Error(`没有 HTML：${job.html}（先 deliver）`);
+      // --no-deliver 复用旧 HTML，导出的图形来自旧图源，指纹必须沿用旧的，否则会把「改了图源没重导」盖成绿
+      //（ADR 0045 决策七的护栏）。沿用值只能在导出覆写 SVG 之前读出来。
+      const carried = job.json && noDeliver ? readStampedFingerprint(`${job.stem}.svg`) : null;
       const svg = await exportFrom(page, job.html, 'svg', `${job.stem}.svg`);
-      if (job.json) stampSource(`${job.stem}.svg`, job.json);
-      let line = `ok   ${name}${type ? ` [${type}]` : ''}  svg ${svg.bytes} B`;
+      let note = '';
+      if (carried) {
+        stampWith(`${job.stem}.svg`, carried);
+        note = '  指纹沿用旧 SVG（--no-deliver 没重渲染 HTML，导出的图形仍来自旧图源）';
+      } else if (job.json) {
+        stampSource(`${job.stem}.svg`, job.json);
+        if (noDeliver) note = '  指纹按当前 JSON 算（旧 SVG 没有可沿用的指纹）';
+      }
+      let line = `ok   ${name}${type ? ` [${type}]` : ''}  svg ${svg.bytes} B${note}`;
       if (wantPng) { const png = await exportFrom(page, job.html, 'png', `${job.stem}.png`); line += `  png ${png.bytes} B`; }
       console.log(line);
     } catch (e) {

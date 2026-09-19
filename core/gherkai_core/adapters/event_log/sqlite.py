@@ -45,7 +45,7 @@ class SqliteEventLog:
                 "  seq INTEGER NOT NULL,"
                 "  line TEXT NOT NULL,"       # 原始 ADR 0024 JSON 行
                 "  emit_ts REAL NOT NULL,"    # worker emit 墙钟（reduce_event 的 now）
-                "  PRIMARY KEY (scope_id, seq)"  # 镜像 DDB PK=scope_id/SK=seq；幂等重写同 (scope,seq) 无副作用
+                "  PRIMARY KEY (scope_id, seq)"  # 镜像 DDB 的 (PK, SK) 段；幂等重写同 (scope,seq) 无副作用
                 ")"
             )
             conn.execute(

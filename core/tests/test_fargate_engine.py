@@ -661,7 +661,7 @@ def test_read_events_gap_beyond_grace_is_skipped_with_warning(caplog):
     with caplog.at_level(logging.WARNING, logger="gherkai_core.adapters.fargate_engine"):
         got = [type(e).__name__ for e in eng._read_events("browse", "arn:task/1")]
     assert got == ["ScopeStarted", "StepDone", "ScopeDone"]
-    assert "seq 2..2" in caplog.text and "越过继续" in caplog.text
+    assert "有 1 条执行记录" in caplog.text and "执行明细会缺失" in caplog.text
 
 
 def test_final_drain_logs_real_holes_under_consistent_read(caplog):
@@ -677,7 +677,7 @@ def test_final_drain_logs_real_holes_under_consistent_read(caplog):
     eng._events = _Table()
     with caplog.at_level(logging.WARNING, logger="gherkai_core.adapters.fargate_engine"):
         got = [type(e).__name__ for e in eng._final_drain(f"{_RUN_ID}#browse", 1)]
-    assert got == ["StepStarted", "ScopeDone"] and "终读断号" in caplog.text and "seq 3..4" in caplog.text
+    assert got == ["StepStarted", "ScopeDone"] and "scope browse" in caplog.text and "缺 2 条" in caplog.text
 
 
 def test_probe_task_missing_is_a_third_state_not_running():

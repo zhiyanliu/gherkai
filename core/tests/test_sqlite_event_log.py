@@ -1,4 +1,4 @@
-"""SqliteEventLog 测试（ADR 0034 P3）：持久事件通道往返 + 与 project 联通。
+"""SqliteEventLog 测试（ADR 0034）：持久事件通道往返 + 与 project 联通。
 
 存原始 JSON 行→读回解析成 Event、退出记录独立键空间、max_seq 续号；records() 喂 project() 得正确 RunState。
 纯逻辑 + 本地 SQLite（无 AWS、无 mock 外真实行为）→ 绿即够。

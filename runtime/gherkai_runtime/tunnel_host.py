@@ -1,7 +1,7 @@
 """隧道宿主编排（ADR 0035 决策 3）：起隧道 + 映射 definition、守隧道到 run 终态。
 
 **宿主** = 持有隧道 agent 进程生命周期的那个进程（ADR 0035 决策 3 的三形态：前台 `run` 的 CLI 进程 /
-local `submit` 的 per-run 进程 / cloud `submit` 的隧道守护进程）。本模块住产品本体层（`gherkai` 知道
+local `submit` 的 per-run 进程 / cloud `submit` 的隧道守护进程）。本模块住产品本体层（`gherkai_runtime` 知道
 run 生命周期，ADR 0016「演进」节）；入口前端（cli / 未来 WebUI）只负责 argparse 与打印：
 
 - `start_tunnel_for_jobs`：起隧道 → 映射 definition → 给出隧道模式恒注入的额外请求头（决策 1/2/4）。

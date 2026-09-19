@@ -7,7 +7,7 @@
 - 控制面 `run_state.json`：per-run 推进进程在文件锁内写它时，`gherkai status` / 接力进程**无锁**读同一文件
   （读面不持 `.runstate.lock`，只写面互斥；ADR 0030 决定四 / 0034）。
 - 数据面 `jobs/*.json`：`explain` 被允许在 run 执行到一半时读已完成 job（ADR 0042 决策四），读者是另一个进程。
-- 报告面 `manifest.json` / `index.html`：finalize 可被两个推进者各写一遍同一份报告（ADR 0027 派生视图、
+- 报告面 `manifest.json` / `index.html`：finalize 可被两个推进器各写一遍同一份报告（ADR 0027 派生视图、
   可重建），而人/CI 会在第一个写者退出后立刻读。
 
 **权限显式给**（调用方声明 `mode`）：`tempfile.mkstemp` 建的文件是 0600，直接 rename 会把产物静默收窄成

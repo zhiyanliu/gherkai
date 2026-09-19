@@ -102,8 +102,10 @@ def readonly_flag_conflict(args) -> str | None:
                                    ("--bootstrap", getattr(args, "bootstrap", False))) if on]
     if not given:
         return None
+    # 只指代、不拼命令：三个 flag 的单独用法各不相同（`--synth-only` 还要带输出目录、`--bootstrap` 不产出变更集），
+    # 把其中一个套进 `gherkai deploy <flag>` 模板会给出照抄即失败或答非所问的指令。
     return (f"{' / '.join(given)} 是只读/准备动作，不能与 worker 镜像子命令同用（子命令会真推镜像、改账户）："
-            f"去掉它再运行子命令，或单独执行 `gherkai deploy {given[0]}` 看变更集。")
+            "去掉它再运行子命令；要先做这个只读/准备动作，就不带子命令单独执行它。")
 
 
 def add_parsers(sub, *, provider: object | None = None, provider_error: str | None = None,

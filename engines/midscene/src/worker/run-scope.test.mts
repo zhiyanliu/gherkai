@@ -537,6 +537,70 @@ test("drainArtifactQueue: drain 抛（上传器坏了 / 没这个方法）→ �
 });
 
 
+// ---- makeGuardedCleanup（cleanup 的重入守卫，ADR 0024 终止契约）----
+// 守卫记的是「在途 promise」而非一个布尔：重入者要等在途那次执行完（不可提前返回到「会话其实还没释放」），
+// 且丢弃语义那次结束后若仍有未确认释放的会话，final 语义的重入者须再清一次（否则泄漏永不被记账）。
+test("makeGuardedCleanup: 在途时重入 → 等在途那次执行完才 resolve，且只清理一次", async () => {
+  const { makeGuardedCleanup } = await importMod();
+  let runs = 0;
+  let finished = false;
+  let release: (() => void) | undefined;
+  const guard = makeGuardedCleanup(async () => {
+    runs++;
+    await new Promise<void>((r) => { release = r; });
+    finished = true;
+  }, () => false);
+  const first = guard.cleanup();
+  let reentrantResolved = false;
+  const reentrant = guard.cleanup(true).then(() => { reentrantResolved = true; });
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(reentrantResolved, false, "在途未结束前重入者不该 resolve（布尔守卫正是在这里提前返回）");
+  assert.equal(finished, false);
+  release!();
+  await Promise.all([first, reentrant]);
+  assert.equal(finished, true, "重入者 resolve 时在途那次已执行完");
+  assert.equal(runs, 1, "不重复发 StopBrowserSession");
+});
+
+test("makeGuardedCleanup: 在途是丢弃语义、结束后仍有未释放会话 → final 重入者再清一次", async () => {
+  const { makeGuardedCleanup } = await importMod();
+  const seen: boolean[] = [];
+  let leftovers = true;                       // 丢弃那次没把会话收干净
+  let release: (() => void) | undefined;
+  const guard = makeGuardedCleanup(async (discardAttempt: boolean) => {
+    seen.push(discardAttempt);
+    if (discardAttempt) await new Promise<void>((r) => { release = r; });
+    else leftovers = false;                   // final 那次收干净
+  }, () => leftovers);
+  const discard = guard.cleanup(true);
+  await new Promise((r) => setTimeout(r, 10));
+  const final = guard.cleanup();              // final 语义重入：此刻在途仍是丢弃语义那次
+  release!();
+  await Promise.all([discard, final]);
+  assert.deepEqual(seen, [true, false],
+    "丢弃语义那次之后须以 final 语义再清一次——否则 Stop 失败只被当作「本就要丢的会话」、泄漏不可观测");
+});
+
+test("makeGuardedCleanup: 在途已把会话全部释放 → final 重入者不再清一次", async () => {
+  const { makeGuardedCleanup } = await importMod();
+  let runs = 0;
+  const guard = makeGuardedCleanup(async () => { runs++; }, () => false);
+  await guard.cleanup(true);
+  await guard.cleanup();
+  assert.equal(runs, 1, "无遗留会话 → 重入者直接返回，不重复发 Stop");
+});
+
+test("makeGuardedCleanup: reset() 忘掉在途记忆 → 可再清一次（建连重试分支）", async () => {
+  const { makeGuardedCleanup } = await importMod();
+  const seen: boolean[] = [];
+  const guard = makeGuardedCleanup(async (discardAttempt: boolean) => { seen.push(discardAttempt); }, () => false);
+  await guard.cleanup(true);
+  guard.reset();
+  await guard.cleanup(true);
+  assert.deepEqual(seen, [true, true], "reset 后下一次 attempt 的部分会话还能再清");
+});
+
+
 // ---- 自述入口（ADR 0036）的 stdout payload 完整性：真实运行子进程 + 真 pipe ----
 // **必须真实运行**：截断只发生在「真 pipe + 真 process.exit + 真 tsx 非阻塞 fd 1」的组合里，注 fake sink 的单测
 // 看不见它（写法看着都对、绿也照绿）。故这条 spawn 真 worker、喂超 64KB（pipe 缓冲）的 payload，断言 stdout

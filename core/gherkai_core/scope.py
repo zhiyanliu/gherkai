@@ -110,7 +110,7 @@ def _resolve_timeout(scope_id: str, members: list[ParsedScenario], default: floa
     if len(raws) > 1:
         raise PlanError(
             f"scope {scope_id!r} 出现多个 @timeout 值 {raws}："
-            f"同一 scope（一个 job）只能有一个墙钟预算，拒绝运行。"
+            f"同一 scope 只能有一个 job 墙钟预算，拒绝运行。"
         )
     if not raws:
         return default
@@ -131,7 +131,7 @@ def plan(features: list[FeatureSource], config: PlanConfig, *,
     """core 窄腰第一步：一组 .feature → 可调度的 Job 列表（ADR 0025）。
 
     select（ADR 0041 决策一）：scenario 筛选谓词，在 **scope 分组与 engine/timeout 解析之后、Job 组装之前**施加。
-    不变量：筛选只减少「运行哪几条」——scope 的引擎、墙钟预算、会话身份一律按**全量**成员解析，与不筛时逐字一致（否则筛后
+    不变量：筛选只减少「运行哪几条」——scope 的引擎、job 墙钟预算、会话身份一律按**全量**成员解析，与不筛时逐字一致（否则筛后
     执行的与全量执行的不是同一件事，迭代结论不可迁移）。整组被筛空的 scope 不进任何 job（且在解析 engine/timeout 之前跳过，
     它内部的 tag 冲突不拦本次迭代）；`_scope_key` 仍对全量成员校验（一个 scenario 多个 @scope 照样 fail-fast）。None = 不筛。
     谓词由调用方按 `--scope/--tags/--scenario` 组装，core 只收 `(ParsedScenario, scope_id) → bool`、不认 flag 语义

@@ -3,7 +3,7 @@
 **约定与解析不在这里**：`--steps-dir` flag > env > 默认 `./steps` 的解析、写进 definition、以及经
 `GHERKAI_STEPS_DIR` 注给 worker，全在组合根（ADR 0037 决策 4：约定逻辑不进 worker，worker 保持薄，
 ADR 0016 分层）。**worker 只认一个 env `GHERKAI_STEPS_DIR`**——没有 flag、不猜 `./steps`、不相对 worker
-自身找任何东西（worker 的 CWD 在分发形态下就是用户的 CWD，猜就是漂移面）。
+自身找任何东西（worker 的 CWD 在分发形态下就是使用方的 CWD，猜就是漂移面）。
 
 机制（与内建脚手架 `deterministic_steps` 的注册机制**完全同一**）：按排序递归遍历 `*.py`、逐个 import，
 文件顶层 `from gherkai_worker_novaact.deterministic import deterministic` 后的 `@deterministic` 副作用

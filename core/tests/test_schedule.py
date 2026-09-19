@@ -118,10 +118,10 @@ def test_failure_isolation_default():
     assert result.status == Status.ERROR  # 总状态：有 error
 
 
-# ---- fail-fast：一个 job 崩 → 批次 ERROR（中止生效）----
+# ---- fail-fast：一个 job 崩 → run 判 ERROR（中止生效）----
 # 注：fail-fast 对「在运行的其余 worker」是协作式中止，多 worker 的精确结局依赖线程时序
 # （slow 可能已完成/被拦在启动前/运行到一半被 stop——都合法），故此处只断言确定性保证：
-# 批次 ERROR + crash 一定 error。stop() 的调用路径由 test_timeout_with_fake_clock 确定性覆盖。
+# run 判 ERROR + crash 一定 error。stop() 的调用路径由 test_timeout_with_fake_clock 确定性覆盖。
 def test_fail_fast_batch_errors():
     def long_stream(scenario_id):
         evs = [ScenarioStarted(scenario_id=scenario_id)]
@@ -143,7 +143,7 @@ def test_fail_fast_batch_errors():
         _rm(jobs), FakeResolver(engine), CollectSink(),
         opts=ScheduleOpts(max_concurrency=2, fail_fast=True),
     )
-    assert result.status == Status.ERROR  # 确定性：批次报错
+    assert result.status == Status.ERROR  # 确定性：run 判错
     crash_jr = next(jr for jr in result.jobs if jr.scope_id == "crash")
     assert crash_jr.status == Status.ERROR
     # 被牵连的 slow：协作式中止下结局依时序（已完成 passed / 运行到一半 aborted / 排队没起 skipped 都合法），
@@ -629,7 +629,7 @@ def test_on_job_complete_exception_propagates_not_swallowed():
 
 
 def test_on_job_complete_exception_stops_inflight_workers_before_raise():
-    # review #2：回调抛异常时，冒泡前必须先 stop 所有运行中的 worker——否则异常跳出 with、shutdown(wait=True)
+    # 回调抛异常时，冒泡前必须先 stop 所有运行中的 worker——否则异常跳出 with、shutdown(wait=True)
     # 会等它们自然结束（真 AgentCore 会话持续计费）。验：异常仍抛 + in-flight worker 的 handle 被 stop。
     import pytest
     slow_started = threading.Event()  # slow 已 spawn 且在事件循环里

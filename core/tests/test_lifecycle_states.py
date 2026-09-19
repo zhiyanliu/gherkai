@@ -221,7 +221,7 @@ def test_aggregate_running_does_not_pollute_clean_pass():
 
 # ---- WorkerNetworkError 竞态块按 abort_flag 拆分（ADR 0031 决定一，最易回归的坑）----
 # schedule.py 的 except WorkerNetworkError 块有三子分支：abort_flag→ABORTED / 超时→error+timeout / else→network_error。
-# 这是 ADR 用整段文字警告的坑（self_stopped 被 timeout/fail-fast 共用、要看 abort_flag）。现有 network 测试只命中
+# 这是 ADR 用整段文字警告的坑（超时与 fail-fast 两条路径都会主动停 worker，故网络块的回填判据取 abort_flag）。现有 network 测试只命中
 # else 分支，timeout 测试命中的是事件循环里的 deadline 而非 network 块里的重判——故专门复现这两条竞态子分支。
 from gherkai_core.errors import WorkerNetworkError  # noqa: E402
 

@@ -94,6 +94,9 @@ def _task_scope_id(task: dict) -> str | None:
                 return e.get("value")
     return None
 
+# DescribeTasks 一次能收的 ARN 上限（AWS API 硬上限，超了直接 InvalidParameterException）——调用点据此分批。
+_DESCRIBE_TASKS_MAX = 100
+
 # 防御扫（claimed_at ②）的判定余量秒：Scheduler one-time schedule 是主机制（到点准时处置），扫是双保险——
 # 余量让主机制先行、避免与在途的 STOPPED→exit_observer 链形成竞态。非正确性参数（处置幂等、退出记录在即让路）。
 _DEFENSIVE_TIMEOUT_MARGIN_S = 60.0
@@ -171,16 +174,32 @@ def _handle_timeout(run_id: str, scope_id: str, built, ecs_client=None) -> str:
         "ecs", region_name=os.environ.get("REGION") or os.environ.get("AWS_REGION"))
     cluster = os.environ["CLUSTER"]
     arns: list[str] = []
+    seen: set[str] = set()
     for desired in ("RUNNING", "STOPPED"):  # 正在停止/刚停止的不在 RUNNING 列表里——必须两个都列，否则误判「无踪」
-        for arn in ecs.list_tasks(cluster=cluster, startedBy=run_id, desiredStatus=desired).get("taskArns", []):
-            if arn not in arns:
-                arns.append(arn)
+        # ListTasks 单页最多 100 条，必须翻页：大 run 的 STOPPED task（ECS 保留约 1h）会超过一页，只取首页
+        # 会把仍在运行的目标判成「无踪」、直写 timed_out，把正常运行完的 job 误判成超时。
+        token = None
+        while True:
+            kwargs = {"cluster": cluster, "startedBy": run_id, "desiredStatus": desired}
+            if token:
+                kwargs["nextToken"] = token
+            resp = ecs.list_tasks(**kwargs)
+            for arn in resp.get("taskArns", []):
+                if arn not in seen:  # 两个 desiredStatus 各翻一遍，中途转态的 task 会两边都出现
+                    seen.add(arn)
+                    arns.append(arn)
+            token = resp.get("nextToken")
+            if not token:
+                break
     target = None
-    if arns:
-        for t in ecs.describe_tasks(cluster=cluster, tasks=arns).get("tasks", []):
+    # DescribeTasks 的 tasks 硬上限 100 个 ARN，分批传；**找到即停**——RUNNING 的 ARN 排在前面，命中即无须再问
+    for i in range(0, len(arns), _DESCRIBE_TASKS_MAX):
+        for t in ecs.describe_tasks(cluster=cluster, tasks=arns[i:i + _DESCRIBE_TASKS_MAX]).get("tasks", []):
             if _task_scope_id(t) == scope_id:
                 target = t
                 break
+        if target is not None:
+            break
     if target is not None:
         arn = target["taskArn"]
         if target.get("lastStatus") == "STOPPED":
@@ -313,7 +332,7 @@ def _build(run_id: str):
         # Stream 这扇门滤不了（events item 无 detached 标记）——同一判据在此判，返回 None = 全 handler no-op。
         # 判在 load_run_meta **之前**：同步 run 的每条 worker 事件都会触发本 Lambda，先判省掉强一致 META
         # 读 + offload 正文的 S3 取回，且推进器在断定「不该碰」前不读对方 definition（STATE 缺失同落此支）。
-        print(f"skip: run {run_id} 不是 submit 提交的后台批次（同步的 `run --backend cloud` 由发起它的命令自己推进）")
+        print(f"skip: run {run_id} 不是 submit 提交到后台执行的 run（同步的 `run --backend cloud` 由发起它的命令自己推进）")
         return None
     # **已收尾的 run 不再推演**：run 到终态时判定真值与报告都已落库，再 tick 一次只会拿「此刻还剩下的事件」
     # 重算一遍并覆盖写（ADR 0030 决定三的写序无条件执行）——events 表开 TTL，7 天后 worker 事件已被删、只剩
@@ -436,7 +455,13 @@ def _tick_runs(run_ids: set[str], label: str, *, prebuilt: dict | None = None) -
             print(f"{label}: run {run_id} done + finalized")
         else:
             print(f"{label}: run {run_id} advanced (not done)")
-            _scan_overdue_timeouts(run_id, built)  # 防御性超时扫（claimed_at ②，Scheduler 双保险）
+            # 防御性超时扫（claimed_at ②）是 Scheduler 到点触发器的双保险、best-effort：它失败不该连坐已经
+            # 推进成功的这一步——抛出去会让本次 invocation 失败、events Stream 本批重试耗尽后整批丢弃，
+            # 同批其它 run 的事件一并永久丢失（同本函数另两处隔离的理由：WorkerVariantError 与 run 级墙钟）。
+            try:
+                _scan_overdue_timeouts(run_id, built)
+            except Exception as exc:
+                print(f"{label}: run {run_id} 超时兜底检查未完成，稍后重试：{exc}")
     return {"ok": True, "runs": list(run_ids)}
 
 

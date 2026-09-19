@@ -2,7 +2,7 @@
 # graphify 知识图的 LLM 侧刷新：文档语义抽取 → 社区命名 → wiki。可重复执行；无变化时只花几次命名调用。
 #
 # 为何需要它：post-commit hook（`graphify hook install` 装的）只做 AST 代码重抽 + 重聚类，不调 LLM。于是
-#   ① 文档改动（ADR / README / CLAUDE.md / guides…）不进图——它们要语义抽取；
+#   ① 文档改动（ADR / README / CLAUDE.md / docs/internals…）不进图——它们要语义抽取；
 #   ② 社区集合一变，hook 只能按枢纽节点起临时名（日志「renamed N community(ies) by their hub」）。
 # 两项都要 LLM，须周期性手动补。本脚本固化那条命令序列，免得每次重新对齐命令与顺序。
 #
@@ -17,7 +17,7 @@
 # 各 GRAPHIFY_* 与 PYTHONHASHSEED 有默认值、env 可覆盖；PYTHONHASHSEED=0 与 post-commit hook 一致，固定聚类随机性。
 #
 # 在别的机器（如有 Bedrock 凭证的开发跳板机）运行结束后再 rsync graphify-out/ 回来时，排除 .graphify_root——它存绝对路径，
-# 带回会让本地 post-commit hook 重建失败（脚本启动时也会把它校正为当前仓库根）。操作细节见 DEVELOPMENT.md「知识图刷新」。
+# 带回会让本地 post-commit hook 重建失败（脚本启动时也会把它校正为当前仓库根）。操作细节见 CONTRIBUTING.md「知识图刷新（graphify）」。
 set -euo pipefail
 
 usage() {

@@ -9,7 +9,7 @@
 //
 // **本文件不是使用方的定制面**（ADR 0037 决策 4 起）：测试开发的项目专属 step 写在**使用方项目的
 // `steps/` 目录**（`*.mts`，`import { deterministic } from "@gherkai/worker-midscene"`），由 worker 启动时
-// 加载（见 user-steps.mts）——不再靠改本文件（那是 clone-repo 分发时代的 fork 模式）。这里只留框架自带的
+// 加载（见 user-steps.mts）——不再靠改本文件（那是 clone-repo 分发时代的 fork 模式）。这里只留内建的
 // 那一条，兼作写法样例。角色边界不变（ADR 0020）：QA 永远只在 .feature 写自然语言、默认走 AI。
 //
 // handler 约定（见 deterministic.mts）：
@@ -36,7 +36,7 @@ deterministic(
   },
 );
 
-// 更多确定性 step 示例（需要时取消注释并改成你的项目所需）：
+// 更多确定性 step 写法示例（**抄进你项目的 `steps/*.mts` 里改**，别改本文件——见上「本文件不是使用方的定制面」）：
 //
 // deterministic('元素 "(?<sel>[^"]+)" 可见', async ({ page }, { sel }) => {
 //   if (!(await page.locator(sel).isVisible())) {

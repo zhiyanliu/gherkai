@@ -79,12 +79,12 @@ def handler(event, context):
     detail = event.get("detail", {})
     run_id, scope_id, exit_code, timed_out, reason = _extract(detail)
     if not run_id or not scope_id:
-        # 非本框架起的 task（同 cluster 别的负载）或 env 缺失 → 忽略（rule 已按 cluster 过滤，此为双保险）
+        # 非 gherkai 起的 task（同 cluster 别的负载）或 env 缺失 → 忽略（rule 已按 cluster 过滤，此为双保险）
         print(f"exit_observer: 跳过（缺 run_id/scope_id）taskArn={detail.get('taskArn')}")
         return {"skipped": True}
     if not _is_detached(run_id):
         # 分流判据与故障形态见 `_is_detached`（同步 `run --backend cloud` 的 task 同 cluster、同样触发本 rule）
-        print(f"exit_observer: 跳过（run {run_id} 不是 submit 提交的后台批次；同步的 `run --backend cloud` 由发起它的命令自己观察退出）")
+        print(f"exit_observer: 跳过（run {run_id} 不是 submit 提交到后台执行的 run；同步的 `run --backend cloud` 由发起它的命令自己观察退出）")
         return {"skipped": True, "reason": "not-detached"}
     log = _event_log(run_id, scope_id)
     log.record_exit(scope_id, exit_code, timed_out=timed_out, reason=reason)

@@ -1,8 +1,9 @@
 """`gherkai deploy` 的 AWS provider（entry point group `gherkai.deploy` 的 `aws` 项，ADR 0037 决策 6）。
 
 **本模块是 CLI 前端与 CDK 之间的唯一接缝**，形状由一条硬约束定死：**CLI 绝不 import `aws_cdk`**——它是 jsii 绑定，
-import 即起 node 子进程（ADR 0037 决策 6）。故本模块自身也只 import 标准库 + `gherkai_runtime` + 本包 `names`
-（零 `aws_cdk`）；stack/app 只经 **cdk CLI 起的子进程** 触达（`app.py`）。CLI 侧 `--help` 因此不付 node 代价。
+import 即起 node 子进程（ADR 0037 决策 6）。故本模块自身**模块级**只 import 标准库 + 本包 `names`，其余
+（`boto3`、`gherkai_runtime.compose`、本包 `container` / `workers`）一律函数内惰性 import——一律零 `aws_cdk`；
+stack/app 只经 **cdk CLI 起的子进程** 触达（`app.py`）。CLI 侧 `--help` 因此不付 node 代价。
 
 ## 接缝契约（CLI 前端 ↔ Provider）
 
@@ -39,8 +40,9 @@ cdk CLI 调用、VPC 取值三态比对、工具链前置检查（Node ≥ 22 �
 
 ## 退出码
 
-`0` 成功；`2` **前置/校验失败**（Node 缺失或 cdk CLI 定位不到、VPC 取值不符或无记录、读后端失败、容器引擎名不认、push-worker
-的架构/skew 拦截——用户可修，对齐 CLI 既有 preflight 退 2 的口径）；**`1`** = cdk 已成功而 worker 镜像四步失败
+`0` 成功；`2` **前置/校验失败**（Node 缺失或 cdk CLI 定位不到、VPC 取值不符或无记录、prefix/region/profile 解析不出
+（`--profile` 名不存在等，见 `_resolve_target_or_report`）、读后端失败、容器引擎名不认、push-worker 的架构/skew
+拦截——用户可修，对齐 CLI 既有 preflight 退 2 的口径）；**`1`** = cdk 已成功而 worker 镜像四步失败
 （账户已被改动，重新运行 `gherkai deploy` 幂等收敛，ADR 0038）；其余 = cdk CLI 自己的返回码（原样透传，
 别把 cdk 的失败压成自己的码）。
 """
@@ -425,7 +427,9 @@ class Provider:
         if blocked is not None:
             return blocked
         cdk_argv = cdk_command()
-        target = self._resolve_target(args)
+        target = self._resolve_target_or_report(args)
+        if target is None:
+            return EXIT_PRECONDITION
         try:
             sts = _make_sts_client(region=target.region, profile=target.profile)
             account = sts.get_caller_identity()["Account"]
@@ -459,7 +463,9 @@ class Provider:
         engine = self._container_engine(args)
         if engine is None:
             return EXIT_PRECONDITION
-        target = self._resolve_target(args)
+        target = self._resolve_target_or_report(args)
+        if target is None:
+            return EXIT_PRECONDITION
         return workers.push_worker(
             args.image, engine=args.engine, variant=args.variant,
             set_default=bool(getattr(args, "set_default", False)),
@@ -472,7 +478,9 @@ class Provider:
         """`gherkai deploy list-workers`——只读（SSM + ECS describe），不碰容器引擎。"""
         from gherkai_deploy_aws import workers
 
-        target = self._resolve_target(args)
+        target = self._resolve_target_or_report(args)
+        if target is None:
+            return EXIT_PRECONDITION
         return workers.list_workers(prefix=target.prefix, cli_version=self._resolve_version(args),
                                     region=target.region, profile=target.profile,
                                     as_json=getattr(args, "json", False))
@@ -544,7 +552,12 @@ class Provider:
         """
         from gherkai_deploy_aws import workers
 
-        target = self._resolve_target(args)
+        target = self._resolve_target_or_report(args)
+        if target is None:
+            # 归码按本方法契约（见 docstring）：cdk 之后的失败退 1，措辞与 `workers.run_deploy_steps`
+            # 建不出句柄时那一支同款——对用户是同一件事。
+            print("stack 已生效；worker 镜像步骤未完成——重新运行 `gherkai deploy` 幂等收敛。", file=sys.stderr)
+            return workers.EXIT_FAILED
         return workers.run_deploy_steps(
             prefix=target.prefix, version=self._resolve_version(args), container=engine,
             region=target.region, profile=target.profile,
@@ -652,7 +665,9 @@ class Provider:
             return blocked
         cdk_argv = cdk_command()
 
-        target = self._resolve_target(args)
+        target = self._resolve_target_or_report(args)
+        if target is None:
+            return EXIT_PRECONDITION
         ctx_cache = context_cache_path(target.prefix)
         with self._work_dir() as work_dir:
             self.write_cdk_json(work_dir)
@@ -699,10 +714,12 @@ class Provider:
     def _guard_vpc_spec(self, args) -> int | None:
         """deploy 前的 VPC 取值比对。放行 → None；拦 → 退出码（2）。
 
-        只在 deploy 前执行（见 `diff`/`destroy` 的 docstring）。读失败（凭证/权限/网络）也退 2 而非抛 traceback：
-        对用户是「先修凭证」，与 Node 缺失同一类。
+        只在 deploy 前执行（见 `diff`/`destroy` 的 docstring）。解析 prefix/region/profile 失败与读后端失败
+        （凭证/权限/网络）都退 2 而非抛 traceback：对用户是「先修凭证」，与 Node 缺失同一类。
         """
-        target = self._resolve_target(args)
+        target = self._resolve_target_or_report(args)
+        if target is None:
+            return EXIT_PRECONDITION
         stack = names.stack_name(target.prefix)
         try:
             cfn = _make_cfn_client(region=target.region, profile=target.profile)
@@ -755,6 +772,23 @@ class Provider:
             region=getattr(args, "region", None),
             profile=getattr(args, "profile", None),
         )
+
+    def _resolve_target_or_report(self, args):
+        """解析链的诊断归口：解析得出 → target；失败 → 打一句诊断、返 None（调用点归退出码）。
+
+        **每个动作在碰 AWS 之前都要经这一口**：不存在的 `--profile` 名在解析链回落读 profile config 的
+        `boto3.session.Session(...)` **构造期**就抛 `ProfileNotFound`（回落只在未给 `--region`/`AWS_REGION`
+        时发生，故 profile-only 用户是唯一撞得到的人——而 profile config 里写着 region 是被支持的形态，
+        见 `compose.resolve_region`）。这一层裸着就是裸 botocore 堆栈：实际运行核过 `list-workers` /
+        `push-worker` / `deploy` 三条都如此，且这一口**排在 `workers._connect` 之前**，那一层包不到它。
+        文案与 `workers._connect` 同款——对用户是同一件事「先修凭证/region」。
+        """
+        try:
+            return self._resolve_target(args)
+        except Exception as exc:
+            print(f"连不上 AWS：{exc}\n需要可用的凭证与 region（--region / AWS_REGION / --profile）。",
+                  file=sys.stderr)
+            return None
 
     @staticmethod
     def _resolve_version(args) -> str:

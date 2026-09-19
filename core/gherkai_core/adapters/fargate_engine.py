@@ -299,9 +299,14 @@ class FargateEngine:
                     if now - gap_since < self._gap_grace_s:
                         break  # 宽限内：等下轮
                     # 宽限已过 = 写者侧真洞（worker PutItem 失败但 seq 已耗）→ 记警告、越过继续，别让流式读无界停摆
-                    # （schedule 的静默兜底会把停摆误判成 worker 卡死）。
-                    logger.warning("events 断号：scope %s 的 seq %d..%d 在 %.0fs 内未出现，视为写者侧丢失、越过继续",
-                                   scope_id, last_seq + 1, seq - 1, self._gap_grace_s)
+                    # （schedule 的静默兜底会把停摆误判成 worker 卡死）。缺的区间 = seq [last_seq+1, seq-1]，日志只报条数
+                    # （产品面不谈 seq 与断号机制）；这里是最终一致读，故判据是「宽限已过仍没到」，终读里的强一致断洞另见 `_final_drain`。
+                    # 风险：缺的若是 scenario_done，该 scenario 不进 scenario_status、job 判定可能偏乐观（schedule 的
+                    # 完整性校验只看 scope_done），故日志只说明细会缺、不承诺判定不受影响。
+                    logger.warning(
+                        "scope %s 有 %d 条执行记录在 %.0fs 内没有到达，本次报告里这部分执行明细会缺失；"
+                        "如果反复出现，检查云端后端是否健康（worker 日志在 CloudWatch）",
+                        scope_id, seq - last_seq - 1, self._gap_grace_s)
                 gap_since = None
                 last_seq = seq
                 consumed += 1
@@ -345,8 +350,8 @@ class FargateEngine:
         missing_polls += 1
         if missing_polls > self._missing_task_grace_polls:
             raise RuntimeError(
-                f"DescribeTasks 连续 {missing_polls} 拍查不到 task {task_arn}（ECS MISSING）：task 已不在 ECS 里"
-                f"（已停超过保留期被清 / 被删 / ARN 错），无法再等其终态——按 error 收敛")
+                f"DescribeTasks 等待 {missing_polls} 次仍查不到 task {task_arn}（ECS MISSING）：task 已不在 ECS 里"
+                f"（已停超过保留期被清 / 被删 / ARN 错），无法再等其终态")
         return missing_polls
 
     def _final_drain(self, pk: str, last_seq: int) -> Iterator[Event]:
@@ -371,8 +376,11 @@ class FargateEngine:
             for it in resp.get("Items", []):
                 seq = int(it[SK_ATTR])
                 if seq != expected:
-                    # 强一致读里的断号 = 写者侧真洞（worker PutItem 失败但 seq 已耗），无从补、只记警告（ADR 0024 读一致性）
-                    logger.warning("events 终读断号：%s 的 seq %d..%d 缺失（强一致读、写者侧丢失）", pk, expected, seq - 1)
+                    # 强一致读里的断号 = 写者侧真洞（worker PutItem 失败但 seq 已耗），无从补、只记警告（ADR 0024 读一致性）。
+                    # 缺的区间 = seq [expected, seq-1]，日志只报条数；pk 形如 run_id#scope_id，产品面只给 scope 那一段。
+                    # 同流式期那条的风险：缺的若是 scenario_done，job 判定可能偏乐观，故不承诺判定不受影响。
+                    logger.warning("scope %s 的执行记录缺 %d 条（已确认不会再到达），本次报告里这部分执行明细会缺失",
+                                   pk.split("#", 1)[-1], seq - expected)
                 expected = seq + 1
                 yield event_from_line(it[BODY_ATTR])
             last_key = resp.get("LastEvaluatedKey")

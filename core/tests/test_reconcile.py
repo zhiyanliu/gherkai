@@ -1,11 +1,11 @@
-"""reconciler tick 测试（ADR 0034 P3）：推进编排 + 幂等 + CAS 起 job + finalize。
+"""reconciler tick 测试（ADR 0034）：推进编排 + 幂等 + CAS 起 job + finalize。
 
 用真 SqliteEventLog + LocalRunStore + fake Launcher（记录被 launch 的 job，不起真进程）验证 tick 逻辑：
 - 首 tick 从全 pending 起首批（≤max_concurrency）；
 - worker 事件落 log 后 tick 推进态、起下一个；
 - 全部两件都要齐 → finalize；
 - 幂等：重复 tick 不重复 launch（CAS 挡）。
-纯编排逻辑（launch 被 fake）→ 绿即够；真进程脱离/SQLite 并发是 P3 后半的真实运行边界。
+纯编排逻辑（launch 被 fake）→ 绿即够；真进程脱离 / SQLite 并发是真实运行边界。
 """
 from __future__ import annotations
 
@@ -118,8 +118,8 @@ def test_tick_nonzero_exit_finalizes_error(tmp_path):
 def test_double_finalize_idempotent(tmp_path):
     """两个 tick 都见全终态：都返回 done=True（run 确已达终态），但 commit 只一次（机制三，ended_at 仍首次）。
 
-    关键：第二个 tick 也返回 True——不能因「别人抢先 finalize」让接力推进者（status --wait）永远等不到 done
-    （P3b-2 实际运行 status --wait 死循环复现的修正）。commit 恰一次由 try_finalize 状态机单调条件写保证。"""
+    关键：第二个 tick 也返回 True——不能因「别人抢先 finalize」让接力推进器（status --wait）永远等不到 done
+    （据 status --wait 死循环的实际运行复现修正）。commit 恰一次由 try_finalize 状态机单调条件写保证。"""
     meta, log, store = _setup(tmp_path, "a")
     launcher = FakeLauncher()
     tick("run-1", meta, log, store, launcher, max_concurrency=2, now_iso="t1")

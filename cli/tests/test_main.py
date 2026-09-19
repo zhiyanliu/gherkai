@@ -68,7 +68,7 @@ def test_json_output_is_single_parseable_document(tmp_path, monkeypatch, capsys)
 
 def test_text_mode_summary_on_stdout_progress_on_stderr(tmp_path, monkeypatch, capsys):
     # 非 --json（人看模式）：核心产出=文本汇总 → stdout；进度/落点 → stderr。
-    # 这样 `cli run … > summary.txt` 拿到纯净汇总，进度照样在终端可见。
+    # 这样 `gherkai run … > summary.txt` 拿到纯净汇总，进度照样在终端可见。
     monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
     feat = _write_feature(tmp_path)
     rc = m.main(["run", str(feat), "--report-dir", str(tmp_path / "reports")])
@@ -691,7 +691,7 @@ def test_plan_conflict_annotated_and_warned(tmp_path, monkeypatch, capsys):
     assert m.main(["plan", str(_det_feature(tmp_path))]) == 0
     captured = capsys.readouterr()
     assert "⚠ 命中多条确定性模式" in captured.out
-    assert "收紧注册表模式" in captured.err
+    assert "收紧注册表里的匹配模式" in captured.err
 
 
 def test_plan_annotation_degrades_gracefully(tmp_path, monkeypatch, capsys):

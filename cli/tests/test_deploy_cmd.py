@@ -269,7 +269,15 @@ def test_readonly_flags_cannot_be_combined_with_a_provider_subverb(monkeypatch, 
     _patch_eps(monkeypatch, _FakeEP("aws", prov))
     for flags in (["--diff"], ["--synth-only", "/tmp/out"], ["--bootstrap"]):
         assert m.main(["deploy", *flags, "push-worker", "img:tag"]) == 2, flags
-        assert flags[0] in capsys.readouterr().err
+        err = capsys.readouterr().err
+        assert flags[0] in err, flags
+        # 两条出路都得说出来，否则诊断退化成只回显 flag 名：去掉 flag 走子命令 / 不带子命令单独执行这个只读动作。
+        assert "去掉它再运行子命令" in err, flags
+        assert "不带子命令单独执行" in err, flags
+        # 诊断只许指代、不许自造命令：--synth-only 还要带输出目录、--bootstrap 也不产出变更集，
+        # 把 flag 套进 `gherkai deploy <flag>` 模板会给出照抄即失败或答非所问的指令。
+        assert "看变更集" not in err, flags
+        assert f"gherkai deploy {flags[0]}" not in err, flags
     assert seen == [] and not prov.calls  # 子动词与 provider 的四路都没被调
 
 

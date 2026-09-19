@@ -136,7 +136,7 @@ def test_adapter_sigkill_backstop_on_deaf_worker():
     assert proc.returncode != 0  # 被信号杀（非协作退 0）——SIGKILL 惯例 -9
 
 
-# ---- #1（ADR 0028）：worker 静默卡死（吐 started 后不再吐事件）→ schedule 的 _heartbeat_wrap 让 job_timeout 能触发 ----
+# ---- ADR 0028「静默 worker 超时根治」条：worker 静默卡死（吐 started 后不再吐事件）→ schedule 的 _heartbeat_wrap 让 job_timeout 能触发 ----
 # 真跨进程验证：silent worker 卡在死循环、fd3 零新事件。adapter 的事件流是纯阻塞读，靠 schedule 层
 # _heartbeat_wrap（后台线程 + queue 超时）周期性醒来查 deadline——否则超时永不触发（曾致 300s 拖到 ~620s）。
 def test_silent_worker_timeout_fires_via_heartbeat():
@@ -154,7 +154,7 @@ def test_silent_worker_timeout_fires_via_heartbeat():
     assert elapsed < 15.0, f"超时应靠心跳准时触发，实际耗时 {elapsed:.1f}s（疑似退回阻塞死等）"
 
 
-# ---- #2（ADR 0028）：session_id 经 scope_started 提前回传 → 超时/中止 scope_done 缺席时仍记得到血缘 ----
+# ---- ADR 0028「会话血缘随首事件回传」条：session_id 经 scope_started 提前回传 → 超时/中止 scope_done 缺席时仍记得到血缘 ----
 def test_session_id_captured_from_scope_started_on_timeout():
     engine = _engine("silent")
     result = schedule(
@@ -166,7 +166,7 @@ def test_session_id_captured_from_scope_started_on_timeout():
     assert result.jobs[0].session_id == "echo-sess", "超时路径下 session_id 应仍从 scope_started 捕获到"
 
 
-# ---- #2 直接验证：scope_started 事件本身带 sessionId（协议层，不经超时）----
+# ---- 同条直接验证：scope_started 事件本身带 sessionId（协议层，不经超时）----
 def test_scope_started_carries_session_id():
     engine = _engine("silent")
     handle, events = engine.run_scope(_job("s"))

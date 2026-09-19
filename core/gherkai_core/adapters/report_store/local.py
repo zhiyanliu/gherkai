@@ -93,7 +93,7 @@ class LocalReportStore:
             "created_at": created_at,
             "report_index": index_entries,
         }
-        # 两个文件都**原子写**（tmp+rename，见 `gherkai_core.adapters._atomic`）：同一份报告允许被两个推进者
+        # 两个文件都**原子写**（tmp+rename，见 `gherkai_core.adapters._atomic`）：同一份报告允许被两个推进器
         # 各写一遍（派生视图、可重建，ADR 0027），而人/CI 会在第一个写者退出后立刻读——非原子写会让第二遍的
         # truncate 窗口把读者撞成空 manifest / 空白页。
         atomic_write_json(run_dir / "manifest.json", manifest)

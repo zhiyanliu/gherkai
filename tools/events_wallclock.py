@@ -4,7 +4,7 @@
 **为何存在**：Nova grace 下限 = `NOVA_ACT_TIMEOUT_S`（组合根注入，runtime/gherkai_runtime/compose.py）+ `NOVA_GRACE_MARGIN_S`
 （worker 侧 engines/novaact/gherkai_worker_novaact/lib/constants.py，经 `--capabilities` 自报），
 margin 的取值需实测「单 act 正常墙钟」与「act 中途中断退出耗时」来标定（是否过保守）。答它需要**单 act 墙钟分布**的实测——而
-events 表的每条 item 恰好带 `expires_at`（worker emit 时写 `int(time.time())+7d`，见 engines/*/lib/event_sink），
+events 表的每条 item 恰好带 `expires_at`（worker emit 时写 `int(time.time())+7d`，见下方 TTL 常量注释点名的两处 event sink 实现），
 减去 7d TTL 常量即还原 **worker emit 的 epoch 秒**（1s 分辨率、跨机一致、不受 core 侧 0.5s 轮询 + DDB 最终
 一致抖动污染——不像 `RunResult.StepResult.duration_ms` 含轮询噪声）。
 

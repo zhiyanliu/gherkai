@@ -163,7 +163,9 @@ class DynamoDBRunStore:
 
     # ---- 无状态批量运行的条件写三方（ADR 0034）----
     # DDB 原生 ConditionExpression 做原子 CAS——比 local 的 fcntl 文件锁更强（DDB 单 item 写天然原子、
-    # 无需外部锁）。真 DDB 条件写行为已真 DDB 实测（moto 与真 DDB 对拍，见 test）。CCF=ConditionalCheckFailedException。
+    # 无需外部锁）。真 DDB 条件写行为由 ADR 0034 地基实测坐实（真 DDB 上 stale HWM 写被 CCF 挡、同 hwm 重复写
+    # 幂等）；仓库内单测是 moto、与 local 逐条对拍（core/tests/test_conditional_writes.py）。
+    # CCF=ConditionalCheckFailedException。
 
     def try_claim_job(self, run_id: str, scope_id: str, *, claimed_at: str | None = None) -> bool:
         """CAS：仅当 jobs[scope_id].status == 'pending' 才置 'running'（机制四）。CCF → 已被抢/非 pending → False。

@@ -86,7 +86,7 @@ test("modelFamily: 推不出且未显式指定 → 抛，且信息点名 MIDSCEN
   withFamilyEnv(undefined, () => {
     for (const id of ["nonexistent.model-x", "anthropic.claude-sonnet-4-5-20250929-v1:0", "amazon.nova-lite-v1:0"]) {
       assert.throws(() => modelFamily(id), (e: Error) => {
-        assert.match(e.message, /MIDSCENE_MODEL_FAMILY/, `得告诉使用者怎么办：${e.message}`);
+        assert.match(e.message, /MIDSCENE_MODEL_FAMILY/, `得告诉使用方怎么办：${e.message}`);
         assert.ok(e.message.includes(id), `得说清是哪个模型：${e.message}`);
         return true;
       }, id);

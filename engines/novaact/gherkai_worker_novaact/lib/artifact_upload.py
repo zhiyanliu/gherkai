@@ -275,7 +275,8 @@ class ArtifactUploader:
                 return          # 进程正在退出：不写 stderr（finalization 期写 buffered stderr 可能致命，见 _log）
             # 放弃：一行产品语言（发生了什么 + 不影响什么）。**不承诺「收尾再试」**——三条提前退出路径
             # （停止信号 / 网络耗尽 / 异常）只 drain 不 flush，那句在这些路径上是假的；文件仍在目录里，
-            # 正常完成路径的 flush 还会兜一次。文案与 Midscene 上传器同形（两引擎语义对称，ADR 0024）。
+            # 正常完成路径的 flush 还会兜一次。与 Midscene 上传器同一判据：只说什么没传成 + 不影响什么，
+            # 不承诺收尾再传（ADR 0039）。
             _log(f"证据截图上传失败（已重试后放弃，不影响判定与报告；该截图链接可能打不开）：{p.name}")
 
     def flush_and_cleanup(self, artifact_dir: str | Path) -> None:

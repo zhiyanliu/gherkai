@@ -54,7 +54,7 @@ def finalize_report(run_id, meta, event_log, report_store, now_iso: str, *, run_
 
     判定真值（ResultStore 各 job）**不在此写**——它在 tick 的 finalize 分支、CAS 之前落（写序见 `tick`）；这里只剩
     派生的报告：从 events 全量重放 project_full → RunResult → report_store.write。幂等（重放 + 覆盖写同 key）——多个
-    推进者都 done 都写无害。写失败隔离：判定真值已随 commit 落定、报告可从 RunResult 重建，不让它击穿已 done 的 run。
+    推进器都 done 都写无害。写失败隔离：判定真值已随 commit 落定、报告可从 RunResult 重建，不让它击穿已 done 的 run。
     run_duration_ms：run 级墙钟（RunState started_at→ended_at），宿主算好传入（core 不解析时间戳）；缺则报告墙钟显「?」。
     **唯一一份**（cloud Lambda / local per-run 两宿主同调此处，ADR 0034 core 拆分）。纯编排：不 import boto3。
     """
@@ -119,12 +119,12 @@ def tick(
             # 全 job 达终态（plan_next 只在此时给 finalize 动作）→ run 已 done。
             # ① 判定真值先落（ADR 0030 决定三写序）：用本 tick 已读的 records（与 state 同一快照，不再读一次），
             #    project_full 逐 job 落 ResultStore；它对非终态 job 抛（ADR 0031 不变量守卫）——异常裸穿本 tick，
-            #    让触发源重试；绝不先 CAS 再补（CAS 之后无人重试，产物缺失即永久）。多推进者并发都落、幂等覆盖同 key。
+            #    让触发源重试；绝不先 CAS 再补（CAS 之后无人重试，产物缺失即永久）。多个推进器并发都落、幂等覆盖同 key。
             if result_store is not None:
                 for jr in project_full(meta, records).jobs:
                     result_store.save_job_result(run_id, jr)
             # ② try_finalize 状态机单调条件写：True=本实例抢到 commit；False=别人已 finalize（幂等）。
-            #    **两种都返回 done=True**——run 确已达终态，不能因「别人抢先 finalize」就让本推进者
+            #    **两种都返回 done=True**——run 确已达终态，不能因「别人抢先 finalize」就让本推进器
             #    （如 status --wait 接力）返回 False 而永远等不到 done（实际运行 status --wait 死循环复现）。
             run_store.try_finalize(run_id, state.status, now_iso)
             return True

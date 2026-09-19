@@ -194,7 +194,6 @@ class _Worker:
         scenario_status: dict[str, Status] = {}
         saw_step = False  # 是否观察到 step_done（会话已起、act 可能有副作用 → 不可 job 级重试，ADR 0028）
         saw_scope_done = False  # 是否见到 scope_done（内容完整，ADR 0024/0026——EOF 后落归约终态的前提）
-        self_stopped = False  # schedule 主动停了本 worker（timeout/fail-fast）→ 其后的退出码不当 network（ADR 0028）
         # 时长追踪（core 用事件到达时间戳算墙钟，ADR 0024；clock 与超时复用同一注入时钟）：
         timing = _Timing()
 
@@ -203,7 +202,7 @@ class _Worker:
         if self.abort_flag.is_set():
             result.status = Status.SKIPPED
             result.error_type = None
-            result.message = "fail-fast：批次已中止，未启动（worker 未 spawn）"
+            result.message = "fail-fast：本次运行已中止，未启动（worker 未 spawn）"
             return result, False, saw_step
 
         try:
@@ -225,14 +224,12 @@ class _Worker:
                 # 事件间检查：超时 / fail-fast → 优雅停 worker（ADR 0026）。
                 # 这两条优先于 network 重试：已主动中止的 job 不再重新运行（ADR 0028）。
                 if deadline is not None and clock() > deadline:
-                    self_stopped = True
                     self._stop()
                     result.status = Status.ERROR
                     result.error_type = "timeout"
                     result.message = f"job 超时（>{self.job.timeout_s}s）"
                     return result, False, saw_step
                 if self.abort_flag.is_set():
-                    self_stopped = True
                     self._stop()
                     # 已 spawn、执行到一半被 fail-fast 掐 → ABORTED（有副作用/有现场可查，ADR 0031），非 error。
                     # 注意与上面 timeout 分支区分：超时仍是 error+timeout，只有 abort_flag 触发的中止才 ABORTED。
@@ -262,13 +259,14 @@ class _Worker:
             # （for-event 阻塞在读），worker 最终退 80 直达此处。故在此**重新判**超时/fail-fast：
             # 若墙钟已超 / 已被 fail-fast 中止，则这是「主动中止」语义、**不重试**（主动中止优先于 network 重试），
             # 不能让超时预算被建连退避绕过。**按来源拆开**（ADR 0031）：fail-fast 中止→ABORTED，超时→error+timeout，
-            # 看 abort_flag 而非笼统 self_stopped（self_stopped 被 timeout/fail-fast 共用）；abort 先判，故 abort 优先。
+            # 按来源看 abort_flag、不看「是否被自己停过」（timeout 与 fail-fast 都会主动停 worker，混判即丢 timeout
+            # 分类）；abort 先判，故 abort 优先。
             if self.abort_flag.is_set():
                 result.status = Status.ABORTED
                 result.error_type = None
                 result.message = f"worker 被 fail-fast 中止后以网络码退出：{e}"
                 return result, False, saw_step
-            if self_stopped or (deadline is not None and clock() > deadline):
+            if deadline is not None and clock() > deadline:
                 result.error_type = "timeout"
                 result.message = f"job 超时（>{self.job.timeout_s}s）——建连退避期间超时"
                 return result, False, saw_step
@@ -298,8 +296,9 @@ class _Worker:
                 result.error_type = "timeout"
                 result.message = f"job 超时（>{self.job.timeout_s}s）——worker 收停后干净退出"
             else:
+                # exit==0 却缺 scope_done = 进程声称成功、内容没发完的矛盾形态。
                 result.error_type = "engine_error"
-                result.message = "worker 干净退出但未发完 scope_done（内容不完整、进程却说成功=矛盾）"
+                result.message = "worker 正常退出但没有报完这次运行的结果——按错误处理（详见 worker 日志）"
             return result, False, saw_step
 
         # 正常运行结束（内容完整）：job 状态 = 各 scenario 归约

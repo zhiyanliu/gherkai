@@ -335,7 +335,7 @@ def test_remote_ref_kept_as_ref(tmp_path: Path):
 
 
 def test_href_relativized_through_symlinked_run_dir(tmp_path: Path):
-    # 锚住 _relative_href 里 run_dir.resolve() 的 symlink 防御（review #3：否则 macOS /tmp↔/private/tmp
+    # 锚住 _relative_href 里 run_dir.resolve() 的 symlink 防御（否则 macOS /tmp↔/private/tmp
     # 或任何 symlinked 落点下，run_dir(经 symlink) 与 ref(已规范化绝对) 不一致 → relative_to 抛 ValueError →
     # 误回落绝对 href、报告失可移植性）。用真 os.symlink 构造：run_dir 经软链传入，产物 ref 用规范化绝对路径。
     real_base = tmp_path / "real"; real_base.mkdir()
@@ -360,7 +360,7 @@ def test_href_relativized_through_symlinked_run_dir(tmp_path: Path):
 
 
 def test_href_relativized_for_bare_path_ref(tmp_path: Path):
-    # 裸路径 ref（无 scheme）当本地文件相对化（review #6：_local_path 的防御性分支，锁定行为）。
+    # 裸路径 ref（无 scheme）当本地文件相对化（_local_path 的防御性分支，锁定行为）。
     # 生产 ref 恒带 scheme（ADR 0024），此为防御分支——显式测，避免它悄悄失效或被误删。
     run_dir = tmp_path / "reports" / "bare"
     sub = run_dir / "nova-trajectories"; sub.mkdir(parents=True)
@@ -392,11 +392,11 @@ def test_index_shows_fail_fast_reason_in_neutral_note_not_error_red(tmp_path):
     err 红（决定二：颜色跟 status 走，没运行 ≠ 出错）。与 render_text 的口径对齐。"""
     store = LocalReportStore(tmp_path)
     jr = _jr("checkout", "novaact", status=Status.SKIPPED)
-    jr.message = "fail-fast：批次已中止，未启动（worker 未 spawn）"
+    jr.message = "fail-fast：本次运行已中止，未启动（worker 未 spawn）"
     meta = RunMeta(run_id="r-ff", created_at="2026-06-29T00:00:00Z", jobs=(jr.job,))
     run = RunResult(run_meta=meta, status=Status.ERROR, jobs=[jr])
     html = _uri_to_path(store.write(run.run_id, run, created_at="2026-06-29T00:00:00Z")).read_text(encoding="utf-8")
-    assert '<span class="note">fail-fast：批次已中止，未启动（worker 未 spawn）</span>' in html
+    assert '<span class="note">fail-fast：本次运行已中止，未启动（worker 未 spawn）</span>' in html
     assert 'class="err"' not in html
 
 

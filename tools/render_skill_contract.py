@@ -58,6 +58,9 @@ POINTER_REWRITES: dict[str, str] = {
 # 内部用词（推进器 / 投影 / definition …）机械层照不出、只能靠人眼发现后登记在此。
 FORBIDDEN_REWRITES: dict[str, str] = {
     "命中定位链的哪一级": "命中 worker 查找顺序的哪一级",
+    "顶层 = RunResult（判定）+": "顶层 = 这次运行的判定 +",
+    "RunState（控制面运行态）+ 附加 `artifacts`：": "这个 run 的运行态 + 附加 `artifacts`：",
+    "| `report_index` | RunReport `index.html`": "| `report_index` | 报告首页 `index.html`",
     "已投影的事件水位（诊断用）；仅经推进器投影写入的 run 有":
         "已处理到的事件水位（诊断用）；仅由后台推进写入的 run 有",
     "（投影滞后于 job 级状态）": "（run 级状态滞后于 job 级状态）",

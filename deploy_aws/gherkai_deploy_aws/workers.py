@@ -86,6 +86,23 @@ def make_aws(*, region=None, profile=None) -> Aws:
                ecr=session.client("ecr"), ddb=session.client("dynamodb"))
 
 
+def _connect(*, region, profile, out) -> Aws | None:
+    """建四个 client；失败（profile 名不存在 / 配不出 region / 缺凭证配置）→ 打一句诊断、返 None（调用点归退出码）。
+
+    必须包住整个 `make_aws`、不是只包 client 调用：不存在的 profile 名在 `boto3.session.Session(...)` **构造期**
+    就抛 `ProfileNotFound`，配不出 region 则要到 `session.client(...)` 解析 endpoint 时才抛 `NoRegionError`；
+    留在入口 `try` 之外就成裸 traceback（同 `cli._guard_vpc_spec` 的口径：这类对用户是「先修凭证」）。
+
+    **本钩子不是唯一的一口**：更早一步——把 prefix/region/profile 解析成 target——也能抛同类异常（未给
+    region 时解析会回落读 profile config），那一步归 `cli.Provider._resolve_target_or_report`，排在本钩子之前。
+    """
+    try:
+        return make_aws(region=region, profile=profile)
+    except Exception as exc:
+        out(f"连不上 AWS：{exc}\n需要可用的凭证与 region（--region / AWS_REGION / --profile）。")
+        return None
+
+
 def _error_code(exc: Exception) -> str | None:
     """botocore `ClientError` 的 `Error.Code`（非 ClientError → None）。
 
@@ -334,7 +351,7 @@ def _register_revision(ecs, *, template_arn: str, engine: str, image_ref: str, d
     return resp["taskDefinition"]["taskDefinitionArn"]
 
 
-def _retire(ecs, arn: str, *, now: datetime, out) -> bool:
+def _retire(ecs, arn: str, *, now: datetime, out) -> None:
     """给被替换的旧 revision 打 `gherkai:retired-at`（**本次不删**，删归清理 pass 的那两个前置条件）。
 
     打不上（revision 已被删/无权限）→ 警告不拦：映射已经指向新 revision，旧的下一次 pass 会以**孤儿**
@@ -342,11 +359,9 @@ def _retire(ecs, arn: str, *, now: datetime, out) -> bool:
     """
     try:
         ecs.tag_resource(resourceArn=arn, tags=[{"key": names.TAG_RETIRED_AT, "value": now.isoformat()}])
-        return True
     except Exception as exc:
         out(f"警告：给旧 revision 打退休 tag 失败（{arn}）：{exc}\n"
             f"     不拦——它已不在映射里，下次 push-worker / deploy 末尾的清理会按孤儿回收它。")
-        return False
 
 
 # ---------------------------------------------------------------------------
@@ -669,7 +684,10 @@ def push_worker(image: str, *, engine: str, variant: str, set_default: bool = Fa
     """
     from gherkai_runtime import compose
 
-    aws = aws or make_aws(region=region, profile=profile)
+    if aws is None:
+        aws = _connect(region=region, profile=profile, out=out)
+        if aws is None:
+            return EXIT_PRECONDITION
     now = now or datetime.now(timezone.utc)
 
     # 步 1 的版本 skew 前置（ADR 0038「push-worker 与 list-workers 的前置」，沿用 0037 决策 7 三态、无放行口）
@@ -727,7 +745,7 @@ def _skew_gate(compose, *, prefix: str, cli_version: str | None, ssm, out) -> in
             out(message)
         return None
     out(message)
-    out(f"（本命令住 gherkai-deploy-aws，故临时运行同版本时要带 extra："
+    out(f"（本命令来自部署包，随 gherkai[deploy-aws] extra 安装，故临时用同版本 CLI 时要带上这个 extra："
         f"uvx --from 'gherkai[deploy-aws]=={stamp}' gherkai deploy …）\n"
         f"不放行的理由：CLI 版本新于后端会把镜像推进一个没人解析的版本命名空间"
         f"（tag 含 CLI 版本），而提交者那边的提交前检查又会提示他回到这一步、形成死循环。")
@@ -864,7 +882,13 @@ def run_deploy_steps(*, prefix: str, version: str, container, engines=None, regi
     """
     from gherkai_runtime import compose
 
-    aws = aws or make_aws(region=region, profile=profile)
+    if aws is None:
+        aws = _connect(region=region, profile=profile, out=out)
+        if aws is None:
+            # 本函数只在 cdk 成功之后执行，故按本函数契约（见 docstring）退 1 并点明 stack 已生效：
+            # 账户已被改动，退 2（= 什么都没发生）会误导。
+            out("stack 已生效；worker 镜像步骤未完成——重新运行 `gherkai deploy` 幂等收敛。")
+            return EXIT_FAILED
     now = now or datetime.now(timezone.utc)
     engines = tuple(engines or names.ENGINES)
 
@@ -902,10 +926,14 @@ def list_workers(*, prefix: str, cli_version: str | None, engines=None, region=N
     """
     from gherkai_runtime import compose
 
-    aws = aws or make_aws(region=region, profile=profile)
     engines = tuple(engines or names.ENGINES)
     err = err or (lambda *a: print(*a, file=sys.stderr))
+    # diag 在建句柄**之前**定好：连不上 AWS 的诊断与 skew 提示同属诊断面，--json 下同样不能污染那个 JSON 文档
     diag = err if as_json else out  # --json 下 stdout 只留一个 JSON 文档：skew 提示 / 读失败诊断走 stderr（ADR 0041 决策三）
+    if aws is None:
+        aws = _connect(region=region, profile=profile, out=diag)
+        if aws is None:
+            return EXIT_PRECONDITION
     blocked = _skew_gate(compose, prefix=prefix, cli_version=cli_version, ssm=aws.ssm, out=diag)
     if blocked is not None:
         return blocked

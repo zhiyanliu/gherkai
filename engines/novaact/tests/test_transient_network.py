@@ -93,7 +93,7 @@ def test_client_error_validation_is_permanent():
 
 
 def test_connect_read_timeout_are_transient():
-    # botocore ConnectTimeoutError/ReadTimeoutError（建连/读超时）→ 瞬时（本次新加白名单）
+    # botocore ConnectTimeoutError/ReadTimeoutError（建连/读超时）→ 瞬时（在 _is_transient_network 的瞬时白名单内）
     from botocore.exceptions import ConnectTimeoutError, ReadTimeoutError
     assert rs._is_transient_network(ConnectTimeoutError(endpoint_url="https://x")) is True
     assert rs._is_transient_network(ReadTimeoutError(endpoint_url="https://x")) is True

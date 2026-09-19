@@ -274,9 +274,10 @@ class BackendStack(Stack):
         self._grant_task_role(task_role, engine)
         self._task_roles.append(task_role)  # 供 reconciler Lambda PassRole（RunTask 传它给 worker task）
 
-        # Nova 需更大 cpu/memory（playwright+chromium）；Midscene 亦运行 chromium。取 1vCPU/2GB 起步（实际运行标定，
-        # 属运维配置）。stopTimeout（SIGTERM→SIGKILL 宽限）= self.stop_timeout_s（默认 120s、-c stop_timeout= 覆盖，
-        # Fargate ≤120s 硬上限——grace 真容器校准见 _resolve_stop_timeout / ADR 0032）。
+        # cpu/memory 是 **worker 进程自身**（Python/Node 运行时 + SDK）的余量——**容器内不运行浏览器**：两个引擎
+        # 都经 CDP 连 AgentCore 云浏览器、镜像不装 chromium 二进制（ADR 0033「2 镜像」条）。取 1vCPU/2GB 起步
+        # （实际运行标定，属运维配置）。stopTimeout（SIGTERM→SIGKILL 宽限）= self.stop_timeout_s（默认 120s、
+        # -c stop_timeout= 覆盖，Fargate ≤120s 硬上限——grace 真容器校准见 _resolve_stop_timeout / ADR 0032）。
         task_def = ecs.FargateTaskDefinition(
             self, f"TaskDef{engine.capitalize()}",
             family=names.task_def_name(self.prefix, engine),
@@ -660,7 +661,7 @@ class BackendStack(Stack):
         fn.add_to_role_policy(iam.PolicyStatement(
             # ListTasks：job timeout 处置按 startedBy=run_id 定位 task（ADR 0034「job timeout」节）
             actions=["ecs:DescribeTasks", "ecs:StopTask", "ecs:ListTasks"],
-            resources=["*"],  # task ARN 运行期生成、无法预知；条件可加 cluster ARN，从简保留 *（只读/停本框架 task）
+            resources=["*"],  # task ARN 运行期生成、无法预知；条件可加 cluster ARN，从简保留 *（只读/停 gherkai 自己起的 task）
         ))
         # job timeout：CreateSchedule（+ActionAfterCompletion=DELETE 前置的 DeleteSchedule）+ 把 Scheduler 执行 role 传给 schedule（PassRole）
         fn.add_to_role_policy(iam.PolicyStatement(

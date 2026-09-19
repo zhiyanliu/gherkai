@@ -52,7 +52,7 @@ dirty = true
 # `X.Y.Z+<sha>`，发布 gate（版本==tag）必败、PyPI 也拒收本地段——实际运行验过；ADR 0037 决策 2b。
 
 [tool.hatch.build.targets.sdist]
-exclude = ["DEVELOPMENT.md"]  # contributor 文档不进发行包（wheel 本就不含；sdist 默认全收）
+exclude = ["DEVELOPMENT.md", "tests"]  # contributor 文档与测试不进发行包（ADR 0037 工程布局条；wheel 靠 packages 白名单本就不含，sdist 默认全收故要显式排）
 
 [tool.hatch.build.targets.wheel]
 packages = ["gherkai_deploy_aws"]

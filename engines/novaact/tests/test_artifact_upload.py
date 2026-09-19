@@ -256,7 +256,8 @@ def test_s3_client_has_bounded_timeouts_and_no_retry():
     assert cfg.connect_timeout == 5
     assert cfg.read_timeout == 10
     # max_attempts=0 → botocore 归一化 total_max_attempts=1（真单次、零重试、零退避——「快速失败」意图）。
-    # 若误写 max_attempts=1 会变成 total=2（1 重试 + 退避 sleep），此断言会红——锁住 C1 修复。
+    # 若误写 max_attempts=1 会变成 total=2（1 重试 + 退避 sleep），此断言会红——锁住
+    # 「max_attempts=0 才是单次尝试」这一点（语义见 lib/artifact_upload.py _s3 的注释）。
     assert cfg.retries["total_max_attempts"] == 1
 
 

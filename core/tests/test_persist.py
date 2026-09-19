@@ -103,7 +103,7 @@ def test_finalize_with_report_store_returns_uri():
 
 
 def test_finalize_isolates_report_write_failure(tmp_path):
-    # #1（review）：ReportStore.write 失败不击穿已 commit 的 run——commit point（finalize_run）已落、
+    # ReportStore.write 失败不击穿已 commit 的 run——commit point（finalize_run）已落、
     # 判定真值在 ResultStore 安然无恙，故 write 抛异常被隔离：finalize 返回 None、不冒泡（报告可重建）。
     from gherkai_core.adapters.run_store.local import LocalRunStore
     from gherkai_core.adapters.result_store.local import LocalResultStore
