@@ -1,5 +1,5 @@
 ---
-name: diagram
+name: doc-diagram
 description: 在本仓库新增、修改或调整 docs/diagrams/ 下的文档图（架构 / 流程 / 时序 / 数据流 / 状态图）时用：给某页配图、把一段文字画成图、按评审意见改布局、重导 SVG。它先读本项目的作图方法与布局清单，再调 archify 作者化与校验，最后用 tools/build_diagrams.mjs 构建导出。用户提到「画图 / 配图 / 改图 / 调布局 / 出图 / 重导 SVG」或点名 docs/diagrams 里的图名时触发。
 ---
 

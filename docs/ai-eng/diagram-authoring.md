@@ -1,6 +1,6 @@
 # 文档图作者化方法（archify）— 任务说明
 
-> 给要在本仓库新增或修改 `docs/diagrams/` 下的图的 AI agent：本文是**可复用的任务指令**。形态与门槛的决策在 [ADR 0045](../adr/0045-documentation-layering-and-placement.md) 决策七，这里只记「怎么一次画对」：本项目的图长什么样、布局清单、archify 里达成它们的技法、交付前的自检。规则来自两轮人工评审（十余张图、二十来条布局意见）的提炼，每条技法都在仓库现有图源上验证过。入口 skill：`.claude/skills/diagram/SKILL.md`。
+> 给要在本仓库新增或修改 `docs/diagrams/` 下的图的 AI agent：本文是**可复用的任务指令**。形态与门槛的决策在 [ADR 0045](../adr/0045-documentation-layering-and-placement.md) 决策七，这里只记「怎么一次画对」：本项目的图长什么样、布局清单、archify 里达成它们的技法、交付前的自检。规则来自两轮人工评审（十余张图、二十来条布局意见）的提炼，每条技法都在仓库现有图源上验证过。入口 skill：`.claude/skills/doc-diagram/SKILL.md`。
 
 ## 一、流程（每张图）
 

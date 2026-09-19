@@ -250,8 +250,8 @@
     "semantic_hash": ""
   },
   "CLAUDE.md": {
-    "mtime": 1789805676.4795046,
-    "ast_hash": "ec91a6bb01e4082b54279604a87b5dbb",
+    "mtime": 1789807577.347712,
+    "ast_hash": "3f357b0c69d6ad78b4373e64363dbda5",
     "semantic_hash": ""
   },
   "CONTEXT.md": {
@@ -1325,8 +1325,8 @@
     "semantic_hash": ""
   },
   "cli/tests/test_user_docs.py": {
-    "mtime": 1789802915.6716008,
-    "ast_hash": "48b2c5e245a7771d0277d0382e3f726d",
+    "mtime": 1789807628.2298675,
+    "ast_hash": "b4ce8511da40089b2df8f43d243e9d8d",
     "semantic_hash": ""
   },
   ".github/release_body_footer.md": {
@@ -1340,8 +1340,8 @@
     "semantic_hash": ""
   },
   "CONTRIBUTING.md": {
-    "mtime": 1789807238.4756367,
-    "ast_hash": "88c54ace7b32099a93d45107090affd6",
+    "mtime": 1789807577.348945,
+    "ast_hash": "f02a2ffb35c436ac123b3204a72c04b3",
     "semantic_hash": ""
   },
   "docs/README.md": {
@@ -1350,13 +1350,13 @@
     "semantic_hash": ""
   },
   "docs/adr/0045-documentation-layering-and-placement.md": {
-    "mtime": 1789805676.4791071,
-    "ast_hash": "8ff1b279e611c466c9e6c618871b30e6",
+    "mtime": 1789807577.3482268,
+    "ast_hash": "d60444ac7c89cc588d5ae84372745f4d",
     "semantic_hash": ""
   },
   "docs/ai-eng/README.md": {
-    "mtime": 1789711428.0235286,
-    "ast_hash": "8c10c63bde9a0c13b72006df838bd0da",
+    "mtime": 1789807577.348523,
+    "ast_hash": "d6c76711ea5b589c5b78e964ff60450d",
     "semantic_hash": ""
   },
   "docs/ai-eng/REFERENCES.md": {
@@ -1370,8 +1370,8 @@
     "semantic_hash": ""
   },
   "docs/ai-eng/doc-health-review.md": {
-    "mtime": 1789726435.1412451,
-    "ast_hash": "912c5e1fd819def0a18e7f9e23d2865b",
+    "mtime": 1789807577.349315,
+    "ast_hash": "f7bcfcd78c08da67e413153d01e053b2",
     "semantic_hash": ""
   },
   "docs/internals/README.md": {
@@ -1689,19 +1689,19 @@
     "ast_hash": "c61f176790d22cecd0621960e6d011f5",
     "semantic_hash": ""
   },
-  ".claude/skills/diagram/SKILL.md": {
-    "mtime": 1789711428.021731,
-    "ast_hash": "8f534887e7888fcbddcd8198bec38a72",
-    "semantic_hash": ""
-  },
   "docs/ai-eng/diagram-authoring.md": {
-    "mtime": 1789724196.4781477,
-    "ast_hash": "5b100740298af677006687bd26590fc0",
+    "mtime": 1789807577.348758,
+    "ast_hash": "150804c483427a4333fd36c75a14929e",
     "semantic_hash": ""
   },
   "engines/novaact/tests/test_safe_point_upload.py": {
     "mtime": 1789798622.2197855,
     "ast_hash": "1dc0356856a5c72003b793f530e30cac",
+    "semantic_hash": ""
+  },
+  ".claude/skills/doc-diagram/SKILL.md": {
+    "mtime": 1789807577.347159,
+    "ast_hash": "45e6b87932fe3358152fe6ffe09f77db",
     "semantic_hash": ""
   }
 }

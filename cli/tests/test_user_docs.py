@@ -145,9 +145,9 @@ def test_diagram_exports_match_their_sources(spec: Path):
 
 
 def test_diagram_skill_points_at_the_method():
-    """作图入口 = 项目级 skill `.claude/skills/diagram/SKILL.md`，它只指向方法文档 docs/ai-eng/diagram-authoring.md 与
+    """作图入口 = 项目级 skill `.claude/skills/doc-diagram/SKILL.md`，它只指向方法文档 docs/ai-eng/diagram-authoring.md 与
     构建脚本，不复述规则（规则单一真源在方法文档；ADR 0045 决策七）。"""
-    skill = REPO / ".claude" / "skills" / "diagram" / "SKILL.md"
+    skill = REPO / ".claude" / "skills" / "doc-diagram" / "SKILL.md"
     method = REPO / "docs" / "ai-eng" / "diagram-authoring.md"
     assert skill.is_file() and method.is_file(), "缺作图 skill 入口或方法文档"
     body = skill.read_text(encoding="utf-8")
