@@ -98,7 +98,7 @@ def test_signal_handler_only_sets_flag_never_raises():
 
 def test_sigterm_and_sigint_both_installed_as_flag_only(monkeypatch):
     # main() 应给 SIGTERM + SIGINT 都装 flag-only handler（Ctrl-C 原走默认 KeyboardInterrupt 同样撞 greenlet）。
-    # 拦截 signal.signal 记录注册的 (signum, handler)，跑到装 handler 那步即可（不真建连）。
+    # 拦截 signal.signal 记录注册的 (signum, handler)，执行到装 handler 那步即可（不真建连）。
     installed = {}
     monkeypatch.setattr(rs.signal, "signal", lambda s, h: installed.__setitem__(s, h))
     # 让 main 在装完 handler 后、真干活前停下：stdin 给个 job，但 ensure_workflow_definition 打桩抛已知信号
@@ -164,7 +164,7 @@ def test_vote_loop_stops_midway_no_bogus_verdict(captured):
 
 
 def test_vote_loop_full_votes_then_stop_still_emits(captured):
-    # 判据是「票不完整」而非「此刻 _stop」（ADR 0024「安全点丢弃没跑完的单元的判定，但不丢弃已成的执行事实」）：
+    # 判据是「票不完整」而非「此刻 _stop」（ADR 0024：安全点丢弃未完成单元的判定，但不丢弃已成的执行事实）：
     # votes_n=1（默认）时最常见的形态就是停止信号落在唯一那次 act_get 期间、而 act 已带回判定——verdict 与
     # 已真实发生的 time_worked_s（计费量）都是执行事实，须照常 emit（对称 When/Given 分支），交上层安全点退出。
     # 护栏防回归成「标志位一置就丢弃投满票的判定」：那会让该 step 的 verdict 与时长一起静默消失、run 级合计低报。
@@ -192,13 +192,13 @@ def test_run_scenario_stops_on_flag_no_step_skipped(captured):
     rs._stop.set()  # 置位 → scenario 循环第一 step 前即 break
     steps = [_step("When", '"a"', 0), _step("When", '"b"', 1)]
     statuses = rs._run_scenario(nova, "sc:0", steps, 1, captured)
-    assert statuses == []  # 一步没跑
+    assert statuses == []  # 一步没执行
     assert nova.act_timeouts == []  # 确认没调 act
     assert not any(e["type"] == "step_skipped" for e in captured)  # 停止不发 step_skipped（那是 error 短路语义）
 
 
 def test_run_scenario_stops_midway(captured):
-    # 跑了第一步后置位 → 第二步前 break
+    # 执行了第一步后置位 → 第二步前 break
     nova = _RecordNova()
     steps = [_step("When", '"a"', 0), _step("When", '"b"', 1)]
 
@@ -208,19 +208,19 @@ def test_run_scenario_stops_midway(captured):
     def _wrap(n, sid, st, v, sink, **kw):  # **kw 透传（_run_step 的关键字参数与本测试无关，别随其增减而红）
         calls.append(st["index"])
         r = orig(n, sid, st, v, sink, **kw)
-        rs._stop.set()  # 第一步跑完就置位
+        rs._stop.set()  # 第一步执行完就置位
         return r
 
     import unittest.mock as m
     with m.patch.object(rs, "_run_step", _wrap):
         rs._run_scenario(nova, "sc:0", steps, 1, captured)
-    assert calls == [0]  # 只跑了第一步，第二步被 _stop break 掉
+    assert calls == [0]  # 只执行了第一步，第二步被 _stop break 掉
     assert not any(e["type"] == "step_skipped" for e in captured)
 
 
-# ---- scenario_done 出口 + 中止护栏：中途 _stop → 不 emit（不把没跑完的 scenario 标成假 passed）----
+# ---- scenario_done 出口 + 中止护栏：中途 _stop → 不 emit（不把没执行完的 scenario 标成假 passed）----
 def test_scenario_done_emitted_when_not_stopped(captured):
-    # 正常完成（_stop 未置）：emit scenario_done、带聚合判定；返 False（继续跑后续 scenario）。
+    # 正常完成（_stop 未置）：emit scenario_done、带聚合判定；返 False（继续执行后续 scenario）。
     aborted = rs._emit_scenario_done_unless_stopped(captured, "sc:0", ["passed", "passed"])
     assert aborted is False
     done = [e for e in captured if e["type"] == "scenario_done"]
@@ -229,7 +229,7 @@ def test_scenario_done_emitted_when_not_stopped(captured):
 
 def test_scenario_done_suppressed_when_stopped(captured):
     # 中途中止（_stop 置位，statuses 只含中止前的部分 step）：**不 emit** scenario_done（否则 _aggregate(["passed"])
-    # 会把没跑完的 scenario 标成确定 passed，假阳性），返 True 让 _run_session 停。（ADR 0031/0024「worker 不越权标注」）
+    # 会把没执行完的 scenario 标成确定 passed，假阳性），返 True 让 _run_session 停。（ADR 0031/0024「worker 不越权标注」）
     rs._stop.set()
     aborted = rs._emit_scenario_done_unless_stopped(captured, "sc:0", ["passed"])
     assert aborted is True
@@ -277,7 +277,7 @@ def test_raise_model_classes_removed():
 def test_on_signal_does_no_io_even_if_stderr_is_locked(monkeypatch):
     """handler 里绝不做 I/O：信号落在主线程正写 stderr 的瞬间，handler 再写 stderr 会撞 BufferedWriter 的非重入锁
     （`RuntimeError: reentrant call inside <_io.BufferedWriter>`）、从 handler 抛出把主流程打崩（rc=1）——CI runner
-    真跑抓到。把 log 与 sys.stderr.write 都换成一碰就炸的替身：handler 仍须只置标志、记信号号、不抛。"""
+    实际运行抓到。把 log 与 sys.stderr.write 都换成一碰就炸的替身：handler 仍须只置标志、记信号号、不抛。"""
     import sys
 
     def boom(*_a, **_k):

@@ -10,7 +10,7 @@
 - 缺 boto3 → 退 2；运行期 botocore 异常 → 退 1；cloud + --no-report → 跳过一切云端 + 走 subprocess（逃生舱）；
 - artifacts 在 cloud 下是 s3://+ddb:// 形态；
 - **三道闸的次序与退出码（ADR 0037 决策 7 / 0038）**：版本 skew → 资源 preflight → worker 镜像 variant 解析，
-  前一道拦下时后面的一次都不跑；variant miss 退 2 不回落，解析结果进 definition 与 build_fargate_engines。
+  前一道拦下时后面的一次都不执行；variant miss 退 2 不回落，解析结果进 definition 与 build_fargate_engines。
 """
 from __future__ import annotations
 
@@ -216,7 +216,7 @@ def test_cloud_rejects_explicit_grace_at_the_entrance(tmp_path, monkeypatch, cap
     会话泄漏防护——与 `--report-dir` 撞云端产物前缀即退 2 同口径：入口不许配无效值。
 
     退 2 且**零副作用**：schedule 没被调、一次云端调用（建 client / 探资源 / 解析镜像）都没发出。
-    对照「不给 --grace 照常跑」见 `test_cloud_does_not_ask_local_worker_for_grace_floor`。
+    对照「不给 --grace 照常运行」见 `test_cloud_does_not_ask_local_worker_for_grace_floor`。
     """
     record = []
     _fake_s3, made, preflight_calls = _patch_cloud_handles(monkeypatch, record)
@@ -241,14 +241,14 @@ def test_cloud_does_not_ask_local_worker_for_grace_floor(tmp_path, monkeypatch, 
 
     两条前提各自成立：Fargate 侧真实宽限是 task-def 期 `stopTimeout`、`FargateWorkerHandle.stop` 忽略运行期
     grace（查来的下限对这档没有作用面）；提交机器本就不必装 worker 运行时（ADR 0037 决策 3）——在此查等于让
-    「只提交、不在本机跑」的人被本机环境无理由挡住。故 `min_grace_s=0`、grace 回落 `ScheduleOpts` 默认；
+    「只提交、不在本机执行」的人被本机环境无理由挡住。故 `min_grace_s=0`、grace 回落 `ScheduleOpts` 默认；
     云端那侧下限够不够，由 `doctor --backend cloud` 的 worker.grace 行比对。
     """
     _patch_cloud_handles(monkeypatch, [])
     monkeypatch.setattr(m.compose, "query_capabilities", lambda engine, **kw: (_ for _ in ()).throw(
         AssertionError("cloud 档不该向本机 worker 问下限")))
     monkeypatch.setattr(m.compose, "resolve_worker_cmd", lambda engine, **kw: (_ for _ in ()).throw(
-        m.compose.WorkerNotFoundError(engine, "本机没装 worker 运行时")))  # 提交机器没有 worker 也照跑
+        m.compose.WorkerNotFoundError(engine, "本机没装 worker 运行时")))  # 提交机器没有 worker 也照常运行
     box, inner = {}, _fake_schedule_factory()
 
     def capturing(run_meta, engines, sink, opts=None, **kw):
@@ -381,7 +381,7 @@ def test_cloud_begin_probe_failure_exits_2(tmp_path, monkeypatch, capsys):
     assert "云端不可达" in capsys.readouterr().err
 
 
-# ---- 运行期 botocore 异常（run 已开跑）→ 退 1 ----
+# ---- 运行期 botocore 异常（run 已开始执行）→ 退 1 ----
 def test_cloud_runtime_botocore_error_exits_1(tmp_path, monkeypatch, capsys):
     from botocore.exceptions import ClientError
     record: list = []
@@ -429,7 +429,7 @@ def test_local_uses_subprocess_not_fargate(tmp_path, monkeypatch, capsys):
 
 # ---- cloud + --no-report：不落库（跳过 store）但**仍 Fargate 执行**（report 与执行正交，ADR 0016 决策 A）----
 def test_cloud_no_report_still_fargate_but_no_store(tmp_path, monkeypatch, capsys):
-    # --no-report 只关不落库、**不碰在哪执行**：--backend cloud --no-report 仍在 Fargate 跑，只是不生成 report。
+    # --no-report 只关不落库、**不碰在哪执行**：--backend cloud --no-report 仍在 Fargate 运行，只是不生成 report。
     record: list = []
     _, made, preflight_calls = _patch_cloud_handles(monkeypatch, record)
     monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
@@ -670,7 +670,7 @@ def _spy_run_meta(monkeypatch):
 def test_cloud_run_does_not_consult_local_worker_chain(tmp_path, monkeypatch, capsys):
     """cloud 执行档**不查本机 worker 定位链**（ADR 0037 决策 3 的 miss preflight 只管 local 执行）。
 
-    cloud 的 worker 在 Fargate 容器里跑（镜像/task-def 由 cloud preflight 探），提交机器压根不必装 worker
+    cloud 的 worker 在 Fargate 容器里运行（镜像/task-def 由 cloud preflight 探），提交机器压根不必装 worker
     运行时——若在此也 preflight，纯 cloud 用户会被本机环境无理由挡住。
     """
     record: list = []
@@ -689,7 +689,7 @@ def test_cloud_run_does_not_consult_local_worker_chain(tmp_path, monkeypatch, ca
 
 def test_cloud_omits_steps_dir_and_warns_when_given(tmp_path, monkeypatch, capsys):
     """cloud 档：definition **不写** steps_dir（本机路径对云端 worker 无意义——steps 烙在定制镜像里，
-    ADR 0037 决策 4 / 0038）；用户显式给了 `--steps-dir` 则**警告不拦**（run 照跑，只是这个 flag 无效）。"""
+    ADR 0037 决策 4 / 0038）；用户显式给了 `--steps-dir` 则**警告不拦**（run 照常运行，只是这个 flag 无效）。"""
     record: list = []
     _patch_cloud_handles(monkeypatch, record)
     monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
@@ -726,12 +726,12 @@ def test_cloud_ignores_default_steps_dir_silently(tmp_path, monkeypatch, capsys)
 
 # ---- 版本 skew 闸接线（ADR 0037 决策 7）：三态映射 + 「skew 先于资源 preflight」的次序 ----
 # skew 自身的判据（哪个版本组合判哪一档）在 runtime 的 test_compose 里验；这里只验皮的接线：
-# 判定 → 退出码/提示，以及 block 时**资源 preflight 一次都不跑**。
+# 判定 → 退出码/提示，以及 block 时**资源 preflight 一次都不执行**。
 
 def test_skew_block_stops_run_before_resource_preflight(tmp_path, monkeypatch, capsys):
-    """block → 退 2，且资源 preflight 一次都没跑（决策 7 的次序：skew 先）。
+    """block → 退 2，且资源 preflight 一次都没执行（决策 7 的次序：skew 先）。
 
-    次序不是审美：skew 的修复动作是部署方跑 `gherkai deploy`，那一步同时把资源建齐——先报「表/task-def
+    次序不是审美：skew 的修复动作是部署方运行 `gherkai deploy`，那一步同时把资源建齐——先报「表/task-def
     不存在」只会把人引去查 --prefix，绕一圈回到同一个动作。
     """
     record: list = []
@@ -767,7 +767,7 @@ def test_skew_block_stops_status_before_reading_ddb(monkeypatch, capsys):
 
 
 def test_skew_warn_and_skip_pass_through_with_one_line(tmp_path, monkeypatch, capsys):
-    """warn（戳缺失 / CLI 偏旧）与 skip（dev 版）都只打一行、照常往下跑——决策 7 里这两档不拦。"""
+    """warn（戳缺失 / CLI 偏旧）与 skip（dev 版）都只打一行、照常往下执行——决策 7 里这两档不拦。"""
     for verdict in ("warn", "skip"):
         record: list = []
         _, _, preflight_calls = _patch_cloud_handles(
@@ -776,7 +776,7 @@ def test_skew_warn_and_skip_pass_through_with_one_line(tmp_path, monkeypatch, ca
         rc = m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud",
                      "--ddb-table", "T", "--s3-bucket", "B", "--region", "us-east-1", "--quiet"])
         assert rc == 0, verdict
-        assert len(preflight_calls) == 1, verdict          # 闸放行 → 资源 preflight 照跑
+        assert len(preflight_calls) == 1, verdict          # 闸放行 → 资源 preflight 照常执行
         assert f"提示：{verdict} 档一行" in capsys.readouterr().err
 
 
@@ -965,7 +965,7 @@ def test_variant_resolution_read_failure_exits_2(tmp_path, monkeypatch, capsys):
 # ---- 次序：skew → 资源 preflight → variant（ADR 0038）----
 
 def test_skew_block_prevents_both_resource_preflight_and_variant(tmp_path, monkeypatch, capsys):
-    """skew block 时资源 preflight 与 variant 解析都一次不跑——skew 的修复动作（deploy）是镜像重推的前置，
+    """skew block 时资源 preflight 与 variant 解析都一次不执行——skew 的修复动作（deploy）是镜像重推的前置，
     反过来先报「variant 没推」会让用户白推一轮（ADR 0038）。"""
     for cmd in (["run", "--quiet"], ["submit"]):
         record: list = []

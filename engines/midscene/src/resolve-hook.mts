@@ -14,7 +14,7 @@
 // **静默**落回 AI catch-all（本项目最忌的静默降级）。因此 `target` 由 bin 传入、且只能从 `import.meta.resolve`
 // 派生，**禁止**用 cwd / argv 推算。第二道防线是 `worker/user-steps.mts` 的零注册检查（把静默降级变显式失败）。
 //
-// **为什么是独立入口文件而非闭包**：`module.register` 的 hook 跑在独立的 loader 线程里，只能按 URL 加载模块、
+// **为什么是独立入口文件而非闭包**：`module.register` 的 hook 运行在独立的 loader 线程里，只能按 URL 加载模块、
 // 拿不到主线程闭包；跨线程数据只能经 `register(spec, parent, { data })` 传（下面的 `initialize`）。
 
 let target: string | undefined;

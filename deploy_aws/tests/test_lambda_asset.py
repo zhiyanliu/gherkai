@@ -1,7 +1,7 @@
 """Lambda asset 构建测试（ADR 0037 决策 6「Lambda asset 来源」）：纯本地、不联网、不碰 AWS。
 
 护的是**来源与内容清单**这条契约：handler 源在包内、依赖从**当前 venv 已安装位置**复制、`__pycache__`/`tests`
-不进包、落点在临时目录而**非仓库/包目录**。漏一项的后果都要等到 Lambda 真跑才炸
+不进包、落点在临时目录而**非仓库/包目录**。漏一项的后果都要等到 Lambda 实际运行才炸
 （ImportError / zip 臃肿 / 往只读的 site-packages 写）。
 
 **证据边界（绿≠对）**：多数用例用**假**复制源验「摆放规则」；`test_asset_imports_with_only_stdlib_beside_it`
@@ -101,7 +101,7 @@ def test_asset_not_written_into_the_installed_package(asset_dir):
 
 
 def test_falls_back_to_tempdir_without_env(tmp_path, monkeypatch):
-    """没有命令给的工作目录（裸跑 cdk synth）→ 自建 mkdtemp，仍不写仓库。"""
+    """没有命令给的工作目录（直接运行 cdk synth）→ 自建 mkdtemp，仍不写仓库。"""
     src = tmp_path / "site-packages"
     _fake_installed_sources(src)
     _patch_sources(monkeypatch, src)

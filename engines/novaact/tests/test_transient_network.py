@@ -119,7 +119,7 @@ def test_agentcore_permanent_wrapping_chain_not_transient():
 
 
 # ---- Playwright TargetClosedError 按阶段判定（ADR 0028：CDP 连接被网络断的下游症状）----
-# 真跑 r2 复现：会话已 start_browser_session 成功，with NovaAct.__enter__ 内 CDPSession.send 撞网络断，
+# 实际运行 r2 复现：会话已 start_browser_session 成功，with NovaAct.__enter__ 内 CDPSession.send 撞网络断，
 # Playwright 抛 TargetClosedError（不继承 OSError、__cause__ 为 None，白名单无从穿透）→ 曾误判 engine_error。
 def _target_closed():
     from playwright._impl._errors import TargetClosedError

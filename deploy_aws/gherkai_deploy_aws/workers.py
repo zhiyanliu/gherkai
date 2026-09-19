@@ -8,13 +8,13 @@
 
 一个 **variant** = 一套具名确定性 step 集 = 一个定制镜像，落 ECR tag `<CLI 版本>-<variant>`，并对应一个
 task-def **revision**（从 deploy 登记的**模板** revision 复制、镜像栏换成 `repo@sha256:<digest>`）。run 起
-task 时用的是 revision（不可变快照），故重推同名 variant 不会把在跑的 run 换掉镜像。
+task 时用的是 revision（不可变快照），故重推同名 variant 不会把运行中的 run 换掉镜像。
 
 ## 三条正确性支点（改这个文件前先读）
 
 - **digest 只在推送后取，且要按仓库挑**：见 `container` 模块头两条事实。
 - **幂等 = 每步先查再做**：`RegisterTaskDefinition` 不幂等，故以（模板 ARN、digest）二元组查重、孤儿 revision
-  按血缘 tags 复用；SSM 写是覆盖语义；ECR push 同 digest 天然无操作。中断后重跑收敛，不堆垃圾 revision。
+  按血缘 tags 复用；SSM 写是覆盖语义；ECR push 同 digest 天然无操作。中断后重新运行收敛，不堆垃圾 revision。
 - **删 revision 前有两道闸**：退休满 `RETIRE_QUIET_PERIOD` + 无未到终态的 run 引用（`cleanup_pass`）。
   `DeregisterTaskDefinition` 让 revision 再也起不了新 task（且注销后最多 10 分钟才生效），detached run 逐 job
   起 task——删早了剩余 job 全起不来（ADR 0038 被拒方案「重派生/重推后立即删旧 revision」）。
@@ -22,7 +22,7 @@ task 时用的是 revision（不可变快照），故重推同名 variant 不会
 ## 退出码
 
 `push-worker` / `list-workers` 的用户可修失败 → **2**（对齐 provider 既有前置口径）。
-`gherkai deploy` 的四步失败 → **1** 且提示「stack 已生效；重跑 `gherkai deploy` 幂等收敛」（ADR 0038
+`gherkai deploy` 的四步失败 → **1** 且提示「stack 已生效；重新运行 `gherkai deploy` 幂等收敛」（ADR 0038
 「四步的失败语义」）——cdk 已经改了账户，压成 2 会让人以为什么都没发生。
 """
 from __future__ import annotations
@@ -356,7 +356,7 @@ def _retire(ecs, arn: str, *, now: datetime, out) -> bool:
 @dataclass(frozen=True)
 class CleanupOutcome:
     """一次 pass 的结果：删掉的 revision + 留到下次的（ARN、原因）。**生产调用点（push-worker / deploy 末步）
-    只看 pass 自己打的输出、丢弃本返回值**；它存在是为让测试直接断言两道闸（静默期 + 在跑 run 引用）的判定，
+    只看 pass 自己打的输出、丢弃本返回值**；它存在是为让测试直接断言两道闸（静默期 + 运行中 run 引用）的判定，
     不必去解析打印文本。`list-workers` 不走这里——它是只读命令，待清理/孤儿由 `_pending_cleanup` 现扫 family
     产出机读行、文本渲染在 `list_workers`（ADR 0038：清理 pass 机会式、由 push-worker/deploy 触发，无定时任务）。
     """
@@ -410,7 +410,7 @@ def _referenced_by_live_run(ddb, table: str, arn: str) -> bool:
 
 
 def cleanup_pass(*, prefix: str, engines, ssm, ecs, ddb, now: datetime, out=print) -> CleanupOutcome:
-    """回收退休/孤儿 revision（**机会式**：`push-worker` 末步与 `gherkai deploy` 第四步末各跑一次）。
+    """回收退休/孤儿 revision（**机会式**：`push-worker` 末步与 `gherkai deploy` 第四步末各执行一次）。
 
     候选两类（ADR 0038）：
     - **已退休**：带 `gherkai:retired-at`（被重推/重派生替换掉的那些）。
@@ -424,7 +424,7 @@ def cleanup_pass(*, prefix: str, engines, ssm, ecs, ddb, now: datetime, out=prin
     """
     # **枚举映射失败就整趟放弃**（不是「当作没有映射继续」）：孤儿判据是「不在任何映射里」，读不全映射会把
     # 别人在用的 revision 全判成孤儿；真实 ECS 的 `registeredAt` 是过去时刻，静默期这道闸拦不住它们。
-    # 少跑一次机会式 pass 无害（滞留的 revision ACTIVE 但无人引用），错删在跑 run 的 revision 是事故。
+    # 少执行一次机会式 pass 无害（滞留的 revision ACTIVE 但无人引用），错删运行中 run 的 revision 是事故。
     try:
         referenced_by_ssm = {m for _e, _t, raw in _iter_image_params(ssm, prefix)
                              for m in _mapped_arn(raw)}
@@ -446,7 +446,7 @@ def cleanup_pass(*, prefix: str, engines, ssm, ecs, ddb, now: datetime, out=prin
             retired_at, reason = rev.retired_at, "已退休"
             if retired_at is not None and rev.arn in referenced_by_ssm:
                 # 退休 tag 只说明「某次替换判它下岗」；若任何版本的某个映射仍指着它（历史上曾被另一 variant 共用），
-                # 删了就让那条映射悬空——留着，直到映射也不再引用。**安全阀之一，与在跑 run 引用并列。**
+                # 删了就让那条映射悬空——留着，直到映射也不再引用。**安全阀之一，与运行中 run 引用并列。**
                 kept.append((rev.arn, "已退休，但仍被某个 worker-image 映射引用"))
                 continue
             if retired_at is None:
@@ -520,7 +520,7 @@ class PushOutcome:
 def _ecr_login(aws: Aws, container) -> str:
     """ECR 登录（ADR 0038 步 3）→ **registry host**。
 
-    令牌是 base64 的 `user:password`（ECR 恒 `AWS:<token>`，12 小时有效、重跑重登、幂等）。
+    令牌是 base64 的 `user:password`（ECR 恒 `AWS:<token>`，12 小时有效、重新运行即重登、幂等）。
     registry host 取 `proxyEndpoint`——**不用 STS 拼 `<account>.dkr.ecr.<region>`**：授权响应里已经带着权威值，
     少一个 API、少一个「account/region 从哪来」的分叉。
     """
@@ -644,7 +644,7 @@ def _push_one(image: str, *, engine: str, variant: str, prefix: str, version: st
 def _find_reusable(ecs, *, prefix: str, engine: str, variant: str, template_arn: str, digest: str) -> str | None:
     """family 里有没有**本 variant** 同（模板 ARN、digest）、ACTIVE、**未退休**的 revision（ADR 0038 步 5 的孤儿复用）。
 
-    **限定同 variant**：复用的语义是「捡回上次中断留下的自己的孤儿」，不是「凡 digest 相同就共用」。真跑踩过：
+    **限定同 variant**：复用的语义是「捡回上次中断留下的自己的孤儿」，不是「凡 digest 相同就共用」。实际运行踩过：
     variant B 推的镜像 digest 恰与 A 相同，复用了 A 正在用的 revision → 之后 A 换 digest 重推会把它退休、
     满静默期被清理，B 的映射悬空。每个 variant 自己一个 revision（ECR 层共享、多一条 task-def 而已），
     退休与清理才能按 variant 独立判。
@@ -803,7 +803,7 @@ def rederive_variants(*, prefix: str, engines, version: str, aws: Aws, now: date
     """第 4 步：模板换了就用**新模板 + 已记录的 digest** 重注册各 variant 的 revision（镜像一个字节不动）。
 
     为何必须（ADR 0038 被拒方案「deploy 改模板后不重派生既有 variant」）：revision 是不可变快照、无继承——
-    deploy 调了 cpu / stopTimeout 后，旧 variant 会一直跑旧配置直到有人想起来重推。按模板 ARN 判定、幂等。
+    deploy 调了 cpu / stopTimeout 后，旧 variant 会一直以旧配置运行直到有人想起来重推。按模板 ARN 判定、幂等。
     `pushed_at` **保留原值**：它记的是镜像推上去的时刻，重派生没碰镜像。
     """
     results: list[PushOutcome] = []
@@ -897,7 +897,7 @@ def list_workers(*, prefix: str, cli_version: str | None, engines=None, region=N
                  aws: Aws | None = None, out=print, err=None, as_json: bool = False) -> int:
     """按引擎列**当前版本**的 variant（tag / digest / 推送时间 / revision）+ 默认指针 + 待清理与孤儿。
 
-    「当前版本」= 跑这条命令的 CLI 自身版本（与 push-worker 打 tag 用的同一个）——故本命令同样过 skew 前置：
+    「当前版本」= 运行这条命令的 CLI 自身版本（与 push-worker 打 tag 用的同一个）——故本命令同样过 skew 前置：
     版本对不上时列出来的是另一个命名空间的东西，比不列更误导。
     """
     from gherkai_runtime import compose

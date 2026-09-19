@@ -1,10 +1,10 @@
-"""schedule 模块（ADR 0026）：Job[] → 并发跑 → 收流式事件 → RunResult。
+"""schedule 模块（ADR 0026）：Job[] → 并发运行 → 收流式事件 → RunResult。
 
 job 间并行（maxConcurrency 上限）、失败隔离（默认）/ fail-fast（可配）、超时兜底、优雅停。
 schedule 只下逻辑「停」（handle.stop(grace)），不懂信号/进程——机制藏在 Engine adapter（ADR 0026）。
 
 并发模型：每个 worker 一个线程，ThreadPoolExecutor(max_workers=maxConcurrency) 自然限制
-同时在跑的 worker 数（= 同时活的 AgentCore 会话数，保护真实成本）。worker 线程内迭代 ADR 0024 事件流、
+同时运行的 worker 数（= 同时活的 AgentCore 会话数，保护真实成本）。worker 线程内迭代 ADR 0024 事件流、
 转 sink、归约成 JobResult。
 
 超时/fail-fast 用**事件间检查**：每收一个事件（或 _heartbeat_wrap 的存活心跳）后查 (clock.now()-start >
@@ -107,7 +107,7 @@ def _heartbeat_wrap(events, poll_interval_s, deadline):
 
 @dataclass
 class ScheduleOpts:
-    max_concurrency: int = 4  # 同时在跑的 worker 上限（保护真实 AWS 成本/配额）
+    max_concurrency: int = 4  # 同时运行的 worker 上限（保护真实 AWS 成本/配额）
     fail_fast: bool = False  # 任一 job 崩是否中止整批
     grace_period_s: float = 5.0  # 停止请求后等 worker 优雅退出的宽限秒
     # grace 下限（引擎无关的纯数，ADR 0024 grace 硬约束）：调用方（组合根）声明「本 run 的 grace 至少要这么大」，
@@ -132,7 +132,7 @@ _aggregate = _project_aggregate
 
 
 class _Worker:
-    """单个 job 的执行体：跑在线程里，迭代事件流、转 sink、归约成 JobResult。"""
+    """单个 job 的执行体：在线程里运行，迭代事件流、转 sink、归约成 JobResult。"""
 
     def __init__(
         self,
@@ -156,11 +156,11 @@ class _Worker:
         self.handle = None  # 暴露给 fail-fast：其他 job 崩时外部可 stop 本 worker
 
     def run(self) -> JobResult:
-        """跑一个 job，含网络瞬时故障的选择性重试（ADR 0028）。
+        """运行一个 job，含网络瞬时故障的选择性重试（ADR 0028）。
 
         重试门槛（双条件 AND，绝不放宽）：① 本次以 network_error 失败（worker 建连失败、
-        重试耗尽）② 「会话未起」= 本次零 step_done（证明 act 没跑、无副作用、不重复计费）。
-        fail_fast/timeout 优先级高于 network 重试（它们已主动中止，不再重跑）。
+        重试耗尽）② 「会话未起」= 本次零 step_done（证明 act 没执行、无副作用、不重复计费）。
+        fail_fast/timeout 优先级高于 network 重试（它们已主动中止，不再重新运行）。
         """
         # deadline 跨 attempt 共享（ADR 0028）：覆盖所有 attempt 之和，重试不重置——否则 N 次重试
         # 各拿一整份 timeout、绕过超时上限。run 级算一次，所有 _run_once 共用。
@@ -199,7 +199,7 @@ class _Worker:
         timing = _Timing()
 
         # 起 worker 前先看是否已被 fail-fast 中止（排队中的 job 不该再起、不产生费用）。
-        # worker 从未 spawn → SKIPPED（没执行/没花钱/可无脑重跑，ADR 0031），非 error。
+        # worker 从未 spawn → SKIPPED（没执行/没花钱/可无脑重新运行，ADR 0031），非 error。
         if self.abort_flag.is_set():
             result.status = Status.SKIPPED
             result.error_type = None
@@ -223,7 +223,7 @@ class _Worker:
         try:
             for event in events:
                 # 事件间检查：超时 / fail-fast → 优雅停 worker（ADR 0026）。
-                # 这两条优先于 network 重试：已主动中止的 job 不再重跑（ADR 0028）。
+                # 这两条优先于 network 重试：已主动中止的 job 不再重新运行（ADR 0028）。
                 if deadline is not None and clock() > deadline:
                     self_stopped = True
                     self._stop()
@@ -234,7 +234,7 @@ class _Worker:
                 if self.abort_flag.is_set():
                     self_stopped = True
                     self._stop()
-                    # 已 spawn、跑一半被 fail-fast 掐 → ABORTED（有副作用/有现场可查，ADR 0031），非 error。
+                    # 已 spawn、执行到一半被 fail-fast 掐 → ABORTED（有副作用/有现场可查，ADR 0031），非 error。
                     # 注意与上面 timeout 分支区分：超时仍是 error+timeout，只有 abort_flag 触发的中止才 ABORTED。
                     result.status = Status.ABORTED
                     result.error_type = None
@@ -242,7 +242,7 @@ class _Worker:
                     return result, False, saw_step
 
                 # _Heartbeat = _heartbeat_wrap 的静默心跳（worker 卡住不吐事件时，让上面的 deadline/abort
-                # 检查能周期性跑，ADR 0028）。不是领域事件、不 emit、不归约——查完超时即跳过，等下一个真事件或心跳。
+                # 检查能周期性执行，ADR 0028）。不是领域事件、不 emit、不归约——查完超时即跳过，等下一个真事件或心跳。
                 # 用 isinstance（而非 is _HEARTBEAT）使静态类型能把 event 收窄回 Event（消除下面 _emit/_reduce 的告警）。
                 if isinstance(event, _Heartbeat):
                     continue
@@ -289,7 +289,7 @@ class _Worker:
         if not saw_scope_done:
             self._stop()
             if self.abort_flag.is_set():
-                result.status = Status.ABORTED  # fail-fast 掐停（ADR 0031：跑一半被掐、有现场可查）
+                result.status = Status.ABORTED  # fail-fast 掐停（ADR 0031：执行到一半被掐、有现场可查）
                 result.error_type = None
                 result.message = "fail-fast：其他 job 失败，本 job 被中止（worker 收停后干净退出）"
                 return result, False, saw_step
@@ -302,7 +302,7 @@ class _Worker:
                 result.message = "worker 干净退出但未发完 scope_done（内容不完整、进程却说成功=矛盾）"
             return result, False, saw_step
 
-        # 正常跑完（内容完整）：job 状态 = 各 scenario 归约
+        # 正常运行结束（内容完整）：job 状态 = 各 scenario 归约
         result.status = _aggregate(list(scenario_status.values()))
         return result, False, saw_step
 
@@ -334,11 +334,11 @@ def schedule(
     on_job_complete: JobSink | None = None,
     on_event: Sink | None = None,
 ) -> RunResult:
-    """跑一次 run（RunMeta = definition）→ RunResult（ADR 0026）。
+    """执行一次 run（RunMeta = definition）→ RunResult（ADR 0026）。
 
     run_meta: 一次 run 的 definition（run_id + created_at + jobs），由组合根生成 run_id + plan
               产出 jobs 后构造传入（schedule 不自己生成 id、不取时钟——保 fake-clock 可确定性单测的
-              纯归约定位；WebUI「提交即返回 runId」也要求 definition 先于跑批存在，ADR 0027）。
+              纯归约定位；WebUI「提交即返回 runId」也要求 definition 先于批量运行存在，ADR 0027）。
               schedule 原样把 run_meta 放进 RunResult（definition + 判定的合成），不从结果反推身份。
     engines:  按 job.engine 解析 Engine 的 resolver（schedule 对引擎数/引擎名无知）。
     sink:     接收 ADR 0024 原始流式事件的回调（与 RunResult 是同一事件流的两个视图）。被 sink_lock 串行化（进度显示）。
@@ -379,15 +379,15 @@ def schedule(
             jr = future.result()
             job_results.append(jr)
             # 实时写接缝（ADR 0030）：job 一完成即回调它已归约好的 JobResult，供组合根落库（schedule 不碰 store）。
-            # 主线程串行 fire。默认 None=no-op。回调异常仍冒泡（落库失败=真问题），但**冒泡前先 stop 所有在跑
-            # worker**——否则异常跳出 with、shutdown(wait=True) 会等在跑 worker 自然跑完（真 AgentCore 会话持续计费）。
+            # 主线程串行 fire。默认 None=no-op。回调异常仍冒泡（落库失败=真问题），但**冒泡前先 stop 所有正在运行的
+            # worker**——否则异常跳出 with、shutdown(wait=True) 会等正在运行的 worker 自然结束（真 AgentCore 会话持续计费）。
             if on_job_complete is not None:
                 try:
                     on_job_complete(jr)
                 except BaseException:
-                    _stop_all()  # 止血：掐掉在跑会话，别空转计费
+                    _stop_all()  # 止血：掐掉正在运行的会话，别空转计费
                     raise
-            # fail-fast：一个 job 崩（error）→ 中止整批：设 abort + stop 所有在跑 worker（ADR 0026）
+            # fail-fast：一个 job 崩（error）→ 中止整批：设 abort + stop 所有正在运行的 worker（ADR 0026）
             if opts.fail_fast and jr.status == Status.ERROR and not abort_flag.is_set():
                 _stop_all()
     run_duration_ms = (opts.clock() - run_start) * 1000.0

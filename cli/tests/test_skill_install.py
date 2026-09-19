@@ -180,7 +180,7 @@ def test_tty_asks_once_and_honours_the_answer(tmp_path, monkeypatch, reply, appe
 
 
 def test_unknown_version_writes_the_unknown_token(tmp_path, monkeypatch):
-    # 源码直跑（未装成包）：标记记「版本未知」、安装照常完成；--version 显示用的占位串不许进标记
+    # 从源码直接运行（未装成包）：标记记「版本未知」、安装照常完成；--version 显示用的占位串不许进标记
     monkeypatch.setattr(m, "_installed_version", lambda: None)
     assert m.main(["skill", "install", "--dir", str(tmp_path)]) == 0
     dst = tmp_path / CLAUDE_SKILLS

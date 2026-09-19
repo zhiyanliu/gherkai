@@ -1,7 +1,7 @@
 """gherkai_core.project 纯投影测试（ADR 0034）：project(records)→RunState 的「两件都要」谓词 + HWM + plan_next。
 
 纯逻辑、无 I/O、无 mock 外真实行为 → 绿即够（CLAUDE.md「绿≠对·别过度」：mock 内逻辑结论绿即足）。
-reconciler 的执行编排（Stream 触发/CAS 真写/进程脱离）不在此测——那是 P2/P3/P4 的真跑边界。
+reconciler 的执行编排（Stream 触发/CAS 真写/进程脱离）不在此测——那是 P2/P3/P4 的真实运行边界。
 """
 from __future__ import annotations
 
@@ -36,7 +36,7 @@ def _exit(scope_id: str, code: int | None) -> EventRecord:
     return EventRecord(scope_id=scope_id, kind="exit", exited=TaskExited(scope_id=scope_id, exit_code=code))
 
 
-# 一个「跑完 passed」的完整 worker 事件序列（scope_started→scenario_done(passed)→scope_done）
+# 一个「运行完成 passed」的完整 worker 事件序列（scope_started→scenario_done(passed)→scope_done）
 def _passed_events(scope_id: str, base_seq: int = 1):
     scen = f"{scope_id}:1"
     return [
@@ -69,7 +69,7 @@ def test_scope_started_but_no_exit_is_running():
 
 
 def test_scope_started_running_without_exit():
-    """会话已起（scope_started）、进程还没终止（无 task_exited）→ RUNNING（在跑）。"""
+    """会话已起（scope_started）、进程还没终止（无 task_exited）→ RUNNING（在运行）。"""
     recs = [_ev("a", 1, ScopeStarted(scope_id="a", session_id="s"))]
     state = project(_meta("a"), recs)
     assert state.jobs["a"].status == Status.RUNNING
@@ -83,7 +83,7 @@ def test_clean_exit_without_scope_done_is_error():
 
 
 def test_crash_no_scope_done_nonzero_exit_is_error():
-    """worker 崩溃（吐 scope_started 后非0退出、没 scope_done）→ ERROR（不等 scope_done，P3b 真跑复现的死循环修正）。"""
+    """worker 崩溃（吐 scope_started 后非0退出、没 scope_done）→ ERROR（不等 scope_done，P3b 实际运行复现的死循环修正）。"""
     recs = [_ev("a", 1, ScopeStarted(scope_id="a", session_id="s")), _exit("a", 3)]
     state = project(_meta("a"), recs)
     assert state.jobs["a"].status == Status.ERROR
@@ -130,7 +130,7 @@ def test_exit_code_none_is_error_not_running():
 
 
 def test_platform_sentinel_exit_surfaces_reason_in_message():
-    """观察者落的平台哨兵（容器没跑起来）→ ERROR，且 reason（stopCode: stoppedReason）进 job message 给用户看归因。"""
+    """观察者落的平台哨兵（容器没能开始运行）→ ERROR，且 reason（stopCode: stoppedReason）进 job message 给用户看归因。"""
     exited = TaskExited(scope_id="a", exit_code=PLATFORM_FAILED_EXIT,
                         reason="TaskFailedToStart: CannotPullContainerError: not found")
     recs = [EventRecord(scope_id="a", kind="exit", exited=exited)]  # 零事件：容器根本没起
@@ -169,7 +169,7 @@ def test_timed_out_attribution_error_type_timeout():
 
 def test_error_without_reduce_message_gets_default_attribution():
     """worker 起来即崩（非 0 退出、零事件）→ message 不再全空——补默认归因指向 worker 日志
-    （detached 真跑教训：error 无任何线索、只能手工复刻排障）。"""
+    （detached 实际运行教训：error 无任何线索、只能手工复刻排障）。"""
     from gherkai_core.project import project_full
 
     recs = [_exit("a", 1)]  # 零事件 + exit 1

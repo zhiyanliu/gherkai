@@ -2,7 +2,7 @@
 // 断言信任的命门：一个"永远绿"的测试框架比没有还危险。这里故意造必假断言，
 // 验证 aiBoolean/aiNumber/aiString 在"不符"时确实给出 false / 不匹配的值（→ 上层会判失败）。
 // 一次性证伪探针，验完即可丢。
-// 跑：cd midscene && AWS_REGION=us-east-1 node_modules/.bin/tsx spikes/midscene-sigv4/05-negative-assertions.ts
+// 运行：cd midscene && AWS_REGION=us-east-1 node_modules/.bin/tsx spikes/midscene-sigv4/05-negative-assertions.ts
 import OpenAI from "openai";
 import { PlaywrightAgent } from "@midscene/web/playwright";
 import { chromium } from "playwright";
@@ -12,7 +12,7 @@ import {
   StopBrowserSessionCommand,
 } from "@aws-sdk/client-bedrock-agentcore";
 import { sigv4Fetch, signCdpUpgrade, getBaseUrl, MODEL, getRegion } from "../src/lib/agentcore-sigv4.mjs";
-// region 改惰性 getter（ADR 0033/0016 决策 C）；spike 直跑带 AWS_REGION=... 前缀，顶层求值 OK。
+// region 改惰性 getter（ADR 0033/0016 决策 C）；spike 直接运行时带 AWS_REGION=... 前缀，顶层求值 OK。
 const REGION = getRegion(), BASE_URL = getBaseUrl();
 
 const BROWSER_ID = "aws.browser.v1";

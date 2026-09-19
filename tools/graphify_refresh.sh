@@ -7,8 +7,8 @@
 # 两项都要 LLM，须周期性手动补。本脚本固化那条命令序列，免得每次重新对齐命令与顺序。
 #
 # 顺序有意义：抽取会重聚类，命名与 wiki 必须排在最后一次抽取之后。
-#   1. graphify . [--force]   增量语义抽取（Bedrock）。单遍后可能残留重复节点——零变化重跑仍报 Deduplicated/Pruned
-#                              时再跑一遍，直到不再变（上限 3 遍）。
+#   1. graphify . [--force]   增量语义抽取（Bedrock）。单遍后可能残留重复节点——零变化重新运行仍报 Deduplicated/Pruned
+#                              时再运行一遍，直到不再变（上限 3 遍）。
 #   2. graphify label .       重聚类 + LLM 命名全部社区 + 重生成 GRAPH_REPORT.md（涵盖 cluster-only 的全部效果）。
 #   3. graphify export wiki   graphify-out/wiki/（index + 每社区一篇），入库供 agent 导航。
 #
@@ -16,7 +16,7 @@
 # （~/.aws/config 的 region 不算），缺则本脚本回落 `aws configure get region`，仍无则退 2。
 # 各 GRAPHIFY_* 与 PYTHONHASHSEED 有默认值、env 可覆盖；PYTHONHASHSEED=0 与 post-commit hook 一致，钉死聚类随机性。
 #
-# 在别的机器（如有 Bedrock 凭证的开发跳板机）跑完再 rsync graphify-out/ 回来时，排除 .graphify_root——它存绝对路径，
+# 在别的机器（如有 Bedrock 凭证的开发跳板机）运行结束后再 rsync graphify-out/ 回来时，排除 .graphify_root——它存绝对路径，
 # 带回会让本地 post-commit hook 重建失败（脚本启动时也会把它校正为当前仓库根）。操作细节见 DEVELOPMENT.md「知识图刷新」。
 set -euo pipefail
 

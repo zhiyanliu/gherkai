@@ -148,7 +148,7 @@ class BackendStack(Stack):
         # 「有没有未到终态的 run 还引用这个 revision」，走 `Query` 非终态状态 + `contains` 过滤。
         # - **稀疏是构造出来的**：只有 STATE item 带顶层 `status`（META item 没有），故索引里天然只有 STATE。
         # - **projection = INCLUDE `worker_task_def_arns`**：过滤表达式 `contains(worker_task_def_arns, :arn)`
-        #   作用在**索引投影出的属性**上，不投影则恒不匹配、安全阀静默失效（会删掉在跑 run 手里的 revision）。
+        #   作用在**索引投影出的属性**上，不投影则恒不匹配、安全阀静默失效（会删掉运行中 run 手里的 revision）。
         #   不用 ALL：runs 表 STATE 的 `jobs` Map 随 job 数增长，全投影等于给每个 run 存第二份。
         # - **必须有索引、不能 Scan**：runs 表 `RETAIN`、无 TTL、随历史单调增长，Scan 成本无上界
         #   （ADR 0038 被拒方案「清理靠全表 Scan runs 表」）。
@@ -258,8 +258,8 @@ class BackendStack(Stack):
     def _one_task_def(self, engine: str, execution_role: iam.Role) -> None:
         # ECR repo（镜像由部署方 `gherkai deploy push-worker` 推；synth 不触发 docker build——from_ecr_repository
         # 只引用 repo）。**不设任何 lifecycle 规则**（ADR 0038 护栏「ECR 加 untagged 过期 lifecycle」被拒）：
-        # 重推同名 variant 会把旧 tag 顶成 untagged，而在跑 run 的旧 task-def revision 正按 digest 指着那一层
-        # ——untagged 过期规则会静默删掉它、让在跑 run 的后续 job 拉不到镜像。代价（每次重推永久留一层 untagged
+        # 重推同名 variant 会把旧 tag 顶成 untagged，而运行中 run 的旧 task-def revision 正按 digest 指着那一层
+        # ——untagged 过期规则会静默删掉它、让运行中 run 的后续 job 拉不到镜像。代价（每次重推永久留一层 untagged
         # 存储）是记在案的已知运行期成本，回收与 `delete-worker` 同批设计（ADR 0038 重议闸门）。
         repo = ecr.Repository(
             self, f"Ecr{engine.capitalize()}",
@@ -274,7 +274,7 @@ class BackendStack(Stack):
         self._grant_task_role(task_role, engine)
         self._task_roles.append(task_role)  # 供 reconciler Lambda PassRole（RunTask 传它给 worker task）
 
-        # Nova 需更大 cpu/memory（playwright+chromium）；Midscene 亦跑 chromium。取 1vCPU/2GB 起步（真跑标定，
+        # Nova 需更大 cpu/memory（playwright+chromium）；Midscene 亦运行 chromium。取 1vCPU/2GB 起步（实际运行标定，
         # 属运维配置）。stopTimeout（SIGTERM→SIGKILL 宽限）= self.stop_timeout_s（默认 120s、-c stop_timeout= 覆盖，
         # Fargate ≤120s 硬上限——grace 真容器校准见 _resolve_stop_timeout / ADR 0032）。
         task_def = ecs.FargateTaskDefinition(
@@ -326,7 +326,7 @@ class BackendStack(Stack):
         # **不给 DeleteObject**（worker 只 Put，ADR 0029）；但 **AbortMultipartUpload 必给**——Nova/Midscene worker 用
         # boto3/aws-sdk `upload_file`（TransferManager，multipart_threshold 默认 8MB），>8MB 产物（视频/大截图）走
         # 分段上传；某分段失败时 SDK 会调 AbortMultipartUpload 清理已传分段，缺此权限则 abort 报 AccessDenied、残留
-        # 未完成分段在桶内持续计费（真跑用 example.com 小产物 <8MB 未触发 multipart，故此动作真跑未暴露——绿≠对）。
+        # 未完成分段在桶内持续计费（实际运行时用的是 example.com 小产物 <8MB、未触发 multipart，故此动作未被暴露——绿≠对）。
         role.add_to_policy(iam.PolicyStatement(
             actions=["s3:GetObject", "s3:PutObject", "s3:AbortMultipartUpload"],
             resources=[f"arn:aws:s3:::{bucket}/*"],
@@ -349,9 +349,9 @@ class BackendStack(Stack):
         # 以下 4 个动作 SAR resource_types 为空、不支持 resource-level（模拟器实证：scope 到任何具体 ARN 均 implicitDeny，
         # 只在 Resource:"*" 下才授权），诚实保留 *（非"待标定"，是**结构上只能** *）：
         # - List/CreateBrowserProfile：控制面 List 枚举 / Write create（资源尚不存在，无 ARN 可 scope）。
-        #   List 真跑暴露（缺它误走 Create→已存在则 ConflictException）；Create 真跑暴露（SDK _resolve_or_create_profile）。
+        #   List 实际运行暴露（缺它误走 Create→已存在则 ConflictException）；Create 实际运行暴露（SDK _resolve_or_create_profile）。
         # - Connect{Automation,LiveView}Stream：数据面 CDP/live-view 流连接（无资源实体、无 data-event CloudTrail）。
-        #   真跑暴露（connect_over_cdp 到 browser-streams WebSocket 403 Forbidden 定位）。
+        #   实际运行暴露（connect_over_cdp 到 browser-streams WebSocket 403 Forbidden 定位）。
         role.add_to_policy(iam.PolicyStatement(
             actions=[
                 "bedrock-agentcore:ListBrowserProfiles",
@@ -376,14 +376,14 @@ class BackendStack(Stack):
                 actions=[
                     "nova-act:GetWorkflowDefinition", "nova-act:CreateWorkflowDefinition",
                     "nova-act:CreateWorkflowRun", "nova-act:UpdateWorkflowRun",
-                    "nova-act:CreateSession",  # 起 AgentCore 会话（真跑暴露；SDK NovaAct.start → CreateSession）
-                    # AI act 生命周期（真跑 AI step 逐个暴露；确定性用例不触发）。**删 GetAct**——AWS Service Reference
+                    "nova-act:CreateSession",  # 起 AgentCore 会话（实际运行暴露；SDK NovaAct.start → CreateSession）
+                    # AI act 生命周期（实际运行 AI step 逐个暴露；确定性用例不触发）。**删 GetAct**——AWS Service Reference
                     # v1.4 全动作集无 GetAct（此前误授一个不存在的 action，非资源维度问题）；实调是 Create→Update→InvokeActStep。
                     "nova-act:CreateAct", "nova-act:UpdateAct", "nova-act:InvokeActStep",
                 ],
                 resources=[f"{_wf}/*", f"{_wf}/*/workflow-run/*"],
             ))
-            # AgentCore 保存会话 profile（真跑暴露：Nova 会话结束想存 profile 优化下次；缺它只 WARNING、非致命，
+            # AgentCore 保存会话 profile（实际运行暴露：Nova 会话结束想存 profile 优化下次；缺它只 WARNING、非致命，
             # 但最小权限该有）。SAR resource_types = browser + browser-profile：触及来源系统 browser（account=aws）+ 目标 profile。
             role.add_to_policy(iam.PolicyStatement(
                 actions=["bedrock-agentcore:SaveBrowserSessionProfile"],
@@ -641,7 +641,7 @@ class BackendStack(Stack):
             runtime=lambda_.Runtime.PYTHON_3_13,
             handler=handler,
             code=code,
-            timeout=Duration.minutes(2),  # 起 task + 条件写；不等 worker 跑完（fire-and-forget）
+            timeout=Duration.minutes(2),  # 起 task + 条件写；不等 worker 运行结束（fire-and-forget）
             memory_size=256,
             environment=environment,
         )
@@ -677,7 +677,7 @@ class BackendStack(Stack):
     # `from typing_extensions import NotRequired`，即便 3.13 的 typing 已有该名），旧实现靠 `pip install --target`
     # 顺带装上、改成「按名复制已安装包」后就漏了。单测全绿、真 synth 出的 asset 一 import 就 ModuleNotFoundError
     # ——故 `tests/test_lambda_asset.py::test_asset_imports_with_only_stdlib_beside_it` 用**剥掉 site-packages 的
-    # 子进程**真 import 一遍 asset，把这类漏传递依赖从「真跑才暴露」拉回单测。加/换依赖时那条测试是判据。
+    # 子进程**真 import 一遍 asset，把这类漏传递依赖从「实际运行才暴露」拉回单测。加/换依赖时那条测试是判据。
     LAMBDA_ASSET_PACKAGES = ("gherkai_runtime", "gherkai_core", "gherkin", "packaging", "typing_extensions")
 
     def _build_lambda_asset(self) -> str:

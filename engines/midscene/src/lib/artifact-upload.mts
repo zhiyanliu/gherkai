@@ -1,8 +1,8 @@
 // 产物 S3 上传（Midscene worker，ADR 0029 第一期）：整目录上传 → 删本地 → reportRef 报 s3://。
 //
 // 由组合根注入的 S3 落点 env 驱动（ARTIFACT_S3_BUCKET + ARTIFACT_S3_PREFIX，跟 --backend cloud 走）——
-// **未注入落点（local 路径；或手动直跑/脚手架没给这组 env）→ toReportRef 原样报 file://、不上传、不删**（零行为变化；
-// 与 --no-report 正交——那管要不要渲染报告，不管产物上传落点）。worker 对"我在哪跑"无知，只认这组 env 有没有
+// **未注入落点（local 路径；或手动直接运行/脚手架没给这组 env）→ toReportRef 原样报 file://、不上传、不删**（零行为变化；
+// 与 --no-report 正交——那管要不要渲染报告，不管产物上传落点）。worker 对"我在哪运行"无知，只认这组 env 有没有
 // （ADR 0016 注入红线）。与 Nova 的 lib/artifact_upload.py 对称（各语言各写，ADR 0024）。
 //
 // S3 key 镜像本地 run 树（ADR 0029）：任一产物 key = <prefix><产物相对本地 run 目录的路径>，与 S3ReportStore/
@@ -71,7 +71,7 @@ export class ArtifactUploader {
     this.runDir = runDir;
   }
 
-  // 诊断输出（stderr）。**后台队列的失败无人可 catch**——enqueue 同步返回、上传在链上跑，主流程早走了，
+  // 诊断输出（stderr）。**后台队列的失败无人可 catch**——enqueue 同步返回、上传在链上执行，主流程早走了，
   // 故只有上传器自己能记那一行（其余方法仍是「抛给 worker 记」，本类不替它们记）。可替换：单测断言那一行、
   // 将来 worker 想换诊断出口也从这里注。
   logFn: (msg: string) => void = (m) => process.stderr.write(m + "\n");
@@ -166,7 +166,7 @@ export class ArtifactUploader {
   }
 
   // act 边界抢传单文件快照（ADR 0029「act 边界抢传」，为 Fargate 预演）：供 worker 在每个 step_done 安全点
-  // 反复抢传**增量增长的单份 report.html**（Midscene report 边跑边 append，中断落 destroy 前会整份丢）。
+  // 反复抢传**增量增长的单份 report.html**（Midscene report 运行中持续 append，中断落 destroy 前会整份丢）。
   // 与 toReportRef 三点区别（Midscene 单引擎增补、Nova 无需——见 ADR 0029 uploader 接口条）：
   //   ① **绕 uploaded 幂等守卫**：每次都真传（同 keyFor → S3 同 key overwrite），overwrite-latest 最新即最全；
   //   ② **不记 uploaded**：故 scope 末 toReportRef(reportFile) 仍传 destroy 后 finalize 的权威完整版、
@@ -174,7 +174,7 @@ export class ArtifactUploader {
   //   ③ **失败原样抛**（保 lib 纯净）——交调用方（worker）吞+log：抢传是 best-effort、不该打断 step 循环
   //      （对照 toReportRef 失败抛=报告链接强保证，语义相反）。
   // no-op（未注入落点）→ 直接返回，不碰盘、不产 ref（抢传不面向事件消费者，只求字节进 S3）。
-  // **绝不复用 flushAndCleanup**：那个成功后 rmSync 删整目录，会误删正被 SDK 增量 append 的 report、打断在跑的 main。
+  // **绝不复用 flushAndCleanup**：那个成功后 rmSync 删整目录，会误删正被 SDK 增量 append 的 report、打断正在运行的 main。
   async snapshotReport(localPath: string): Promise<void> {
     if (!this.enabled) return;
     await this.uploadOne(path.resolve(localPath));  // 同 keyFor → overwrite；不查/不加 uploaded
@@ -182,7 +182,7 @@ export class ArtifactUploader {
 
   // scenario 边界抢传诊断 log（ADR 0029「第四级：scenario 边界抢传」，Midscene 单引擎、为 Fargate 预演）：
   // 供 worker 在每个 scenario_done 安全点抢传该 scenario 期间**已在盘、尚未传**的 log/*.log——把 log 丢失窗口
-  // 从「整个 run」收窄到「当前正在跑的 scenario」。log 边跑边 createWriteStream append 写（`<MIDSCENE_RUN_DIR>/log/`），
+  // 从「整个 run」收窄到「当前正在运行的 scenario」。log 在运行中由 createWriteStream 持续 append 写（`<MIDSCENE_RUN_DIR>/log/`），
   // scenario 边界截至已完成 scenario 的字节已在盘、可抢。承 snapshotReport 的「绕 uploaded 幂等守卫 + 不记 uploaded」
   // （overwrite 同 key、让 scope 末 flush 仍传权威版并删本地），但**失败语义随多文件本质取 flushAndCleanup 那套**：
   // 逐文件 try/吞、继续下一个（非 snapshotReport 单文件的整体抛）——否则第一个失败的 log 会饿死本边界后续 log。
@@ -194,7 +194,7 @@ export class ArtifactUploader {
   //   ② 整次快照套总墙钟预算 `budgetMs`：单文件已被 uploadOne 的 AbortSignal.timeout 封顶，但 N 个 log 串行累加
   //      最坏 N×单文件超时、再 × scenario 数会拖垮 grace/延迟下一 scenario——超预算即停、放弃剩余（best-effort，
   //      scope 末 flush 兜底）。**budgetMs 是「不再发起新上传」的软界、非硬墙钟**：deadline 只在循环顶查，一个
-  //      已通过检查、正在途的 uploadOne 仍会跑满其 AbortSignal.timeout，故实际墙钟上界 ≈ budgetMs + 单文件超时。
+  //      已通过检查、正在途的 uploadOne 仍会耗满其 AbortSignal.timeout，故实际墙钟上界 ≈ budgetMs + 单文件超时。
   // 两个已知的可接受局限（均有 scope 末 flush 兜底、无数据丢失，故不特治）：
   //   · **非递归 + 只传文件**：假定 SDK 把 log 平铺为 `log/*.log`（当前如此）；若未来 SDK 在 log/ 下建子目录，
   //     嵌套 log 在此被漏，靠 scope 末 flushAndCleanup（recursive）兜底传。
@@ -206,7 +206,7 @@ export class ArtifactUploader {
     if (!fs.existsSync(logDir)) return;
     const deadline = Date.now() + budgetMs;  // 总墙钟软界（worker 生产代码，Date.now 可用）；见 docstring②
     for (const ent of fs.readdirSync(logDir, { withFileTypes: true })) {  // 非递归：假定 log 平铺，见 docstring
-      if (Date.now() >= deadline) break;  // 超预算 → 不再发起新上传（软界；在途的仍跑满自身超时）
+      if (Date.now() >= deadline) break;  // 超预算 → 不再发起新上传（软界；在途的仍耗满自身超时）
       if (!ent.isFile()) continue;
       const abs = path.resolve(logDir, ent.name);
       let mt: number;
@@ -222,7 +222,7 @@ export class ArtifactUploader {
   }
 
   // 截图字节入后台队列（ADR 0042 决策一「上传时机分两类」）：**调用点必须在 step_done emit 之后**——
-  // 判定不等字节，主流程入队即走、立刻进下一 step；字节在下个 step 跑的时候顺着链传上去。
+  // 判定不等字节，主流程入队即走、立刻进下一 step；字节在下个 step 运行的时候顺着链传上去。
   // 队列语义：单条链 FIFO 顺序传（不重叠）；每项已传过（实时 / 上一次入队）→ 跳过、不重复 PutObject；
   // 失败重试一次；再失败记一行日志放弃（不记 uploaded → scope 末 flush 还有一次机会）；成功记 uploaded
   // → 让 flush 跳过它。
@@ -254,7 +254,7 @@ export class ArtifactUploader {
     }
   }
 
-  // 后台队列的**有界排空**（ADR 0042 决策一）：等队列跑完，最多等 timeoutMs；返回是否在预算内排空完
+  // 后台队列的**有界排空**（ADR 0042 决策一）：等队列运行结束，最多等 timeoutMs；返回是否在预算内排空完
   // （false = 还有在途/未起的项，调用方记一行日志放弃即可，scope 末 flush 兜漏网）。
   // **调用位置守「会话释放优先」**（ADR 0024）：收尾路径上排在会话释放之后——退化网络下排空挂满预算，
   // 不该让 AgentCore 会话多泄漏那么久。

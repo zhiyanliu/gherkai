@@ -389,7 +389,7 @@ def test_empty_report_refs_still_valid_index(tmp_path: Path):
 
 def test_index_shows_fail_fast_reason_in_neutral_note_not_error_red(tmp_path):
     """skipped/aborted 的 error_type 恒 None、原因只在 message（ADR 0031 决定一）→ index 也得显；用中性 note 色而非
-    err 红（决定二：颜色跟 status 走，没跑 ≠ 出错）。与 render_text 的口径对齐。"""
+    err 红（决定二：颜色跟 status 走，没运行 ≠ 出错）。与 render_text 的口径对齐。"""
     store = LocalReportStore(tmp_path)
     jr = _jr("checkout", "novaact", status=Status.SKIPPED)
     jr.message = "fail-fast：批次已中止，未启动（worker 未 spawn）"

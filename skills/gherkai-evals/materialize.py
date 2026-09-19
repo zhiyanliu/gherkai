@@ -21,7 +21,7 @@
 4. 前置断言：舞台及其上溯路径、用户级目录下没有已装的 gherkai skill（dogfood 安装态与评测互斥）；
 5. 物化后隔离断言（恒开，`--no-check` 不关它）：舞台里没有任何文件含仓库根路径的字面量、舞台里找不到 SKILL.md
    （前者挡「顺着路径读原始教材」，后者挡「wheel 自带的 skill 混进 baseline 舞台」）；
-6. 物化后完整性断言（只挡物化真会造成的缺口）：对每个 run 跑 `explain --json`——有记录的 step 其 evidence_missing
+6. 物化后完整性断言（只挡物化真会造成的缺口）：对每个 run 执行 `explain --json`——有记录的 step 其 evidence_missing
    不得为 unreadable / unsupported_schema；至少一条 step 拿到非空 evidence；每个非 null 的 file:// 截图地址文件存在且非空。
 
 用法：
@@ -29,7 +29,7 @@
   python skills/gherkai-evals/materialize.py wiki-search            # 物化并打印舞台目录
   python skills/gherkai-evals/materialize.py wiki-search --stage /tmp/x --keep
   python skills/gherkai-evals/materialize.py --snapshot <录好的项目目录> wiki-search
-                                                                    # 反向：把真跑过的项目快照进 fixtures/<case>
+                                                                    # 反向：把实际运行过的项目快照进 fixtures/<case>
 物化与快照不联网、不装东西、不碰 AWS；只有 `--prepare-cli` 构建并联网取依赖。
 
 `--snapshot` 是物化的逆操作（录 fixture 用）：拷贝 features/ steps/ reports/，把项目目录的绝对路径（含 file:// 形态）换成
@@ -88,7 +88,7 @@ def copy_fixture(case: str, stage: Path) -> None:
     src = FIXTURES / case
     if not src.is_dir():
         fail(f"fixture 不存在：{src}")
-    # 本机对 fixture 跑过 plan / list-deterministic 就会在 steps/ 下留 .pyc（内嵌编译机绝对路径）——不能带进舞台
+    # 本机对 fixture 运行过 plan / list-deterministic 就会在 steps/ 下留 .pyc（内嵌编译机绝对路径）——不能带进舞台
     shutil.copytree(src, stage, dirs_exist_ok=True, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
 
 
@@ -146,7 +146,7 @@ def prepare_cli(cli_dir: Path) -> None:
     for p in stripped:
         shutil.rmtree(p)
     if not stripped:
-        fail("装完没找到 gherkai_cli/skills（wheel 布局变了？）——没确认剥掉就不能开跑，baseline 会发现 skill")
+        fail("装完没找到 gherkai_cli/skills（wheel 布局变了？）——没确认剥掉就不能开始评测，baseline 会发现 skill")
     # 这个目录里**不能**有 skill 副本：baseline 顺着 shim 指向的路径 `grep` 一下就翻到（第三轮 eval 3 实测）。
     # with-skill 臂要读的那份由 run_evals.py 每次运行拷进随机命名的临时目录、只出现在它的提示里。
     stale_skill = cli_dir / "skill"
@@ -205,16 +205,16 @@ def assert_prepared(cli_dir: Path) -> tuple[Path, Path]:
     missing = [str(x) for x in (cli_dir / "PREPARED.json", cli, midscene_bin) if not x.exists()]
     if missing:
         fail("舞台要用的 CLI 还没备好，缺：\n  " + "\n  ".join(missing)
-             + f"\n先跑：python skills/gherkai-evals/materialize.py --prepare-cli {cli_dir}")
+             + f"\n先运行：python skills/gherkai-evals/materialize.py --prepare-cli {cli_dir}")
     left = [str(x) for x in cli_dir.glob("venv/lib/python3.*/site-packages/gherkai_cli/skills")]
     if (cli_dir / "skill").exists():      # 旧版 --prepare-cli 放过一份副本，baseline 会 grep 到（第三轮实测）
         left.append(str(cli_dir / "skill"))
     if left:
-        fail("这套 CLI 里又出现了 wheel 自带的 skill（baseline 会发现它），重跑 --prepare-cli：\n  " + "\n  ".join(left))
+        fail("这套 CLI 里又出现了 wheel 自带的 skill（baseline 会发现它），重新运行 --prepare-cli：\n  " + "\n  ".join(left))
     recorded = json.loads((cli_dir / "PREPARED.json").read_text(encoding="utf-8")).get("cli_main_sha256")
     if recorded and recorded != _cli_main_digest(cli_dir):
-        fail(f"{cli_dir} 里的 CLI 入口被改过（哈希与 PREPARED.json 不一致）——某个被测 agent 动了共享 venv；重跑 --prepare-cli，"
-             "并把它改动之后跑的 run 全部作废")
+        fail(f"{cli_dir} 里的 CLI 入口被改过（哈希与 PREPARED.json 不一致）——某个被测 agent 动了共享 venv；重新运行 --prepare-cli，"
+             "并把改动之后产生的 run 全部作废")
     return cli, midscene_bin
 
 
@@ -309,7 +309,7 @@ MACHINE_ROOT = re.compile(r"(?:file://)?/(?:Users|home|private|var|tmp|opt|Volum
 
 
 def snapshot(project: Path, case: str) -> None:
-    """把一个真跑过的项目目录快照进 fixtures/<case>（物化的逆操作，见模块头注释）。"""
+    """把一个实际运行过的项目目录快照进 fixtures/<case>（物化的逆操作，见模块头注释）。"""
     # 录制机上的路径字面量可能与本机解析后的不同（macOS 的 /tmp → /private/tmp），两种写法都替。
     roots = {str(project), str(project.resolve())}
     project = project.resolve()
@@ -357,7 +357,7 @@ def main() -> None:
                          "剥掉 wheel 自带的 skill、拷 midscene（要联网、几分钟）")
     ap.add_argument("--cli-dir", default=str(DEFAULT_CLI_DIR),
                     help=f"物化时 shim 指向的、已备好的 CLI 目录（缺省 {DEFAULT_CLI_DIR}）")
-    ap.add_argument("--snapshot", metavar="PROJECT_DIR", help="反向：把真跑过的项目目录快照进 fixtures/<case>，不物化")
+    ap.add_argument("--snapshot", metavar="PROJECT_DIR", help="反向：把实际运行过的项目目录快照进 fixtures/<case>，不物化")
     ap.add_argument("--stage", help="舞台目录（缺省在 $TMPDIR 下新建；必须在仓库之外）")
     ap.add_argument("--keep", action="store_true", help="舞台已存在时不清空（缺省先删再拷）")
     ap.add_argument("--no-check", action="store_true", help="跳过物化后的完整性断言")
@@ -366,7 +366,7 @@ def main() -> None:
     if args.prepare_cli:
         if "/" not in args.prepare_cli and (FIXTURES / args.prepare_cli).is_dir():
             ap.error(f"--prepare-cli 的值是目标目录、不是用例名（你给的 {args.prepare_cli} 是个 fixture）："
-                     "准备与物化分两次跑")
+                     "准备与物化分两次执行")
         prepare_cli(Path(args.prepare_cli).resolve())
         return
     if not args.case:

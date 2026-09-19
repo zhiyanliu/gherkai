@@ -5,7 +5,7 @@
 //
 // 三通道分离（ADR 0024）：协议事件走专用 fd（core adapter 读这个），与 SDK 打到 stdout 的进度噪声、worker
 // 自己的诊断（stderr、走模块级 log()、**不经本 sink**）物理隔离。adapter 经环境变量 EVENTS_FD 告知 fd 号
-// （pass_fds 继承、号不固定）。无 / 非法 EVENTS_FD（手动直跑、无 adapter；或值非数字、fd 已关）时回落
+// （pass_fds 继承、号不固定）。无 / 非法 EVENTS_FD（手动直接运行、无 adapter；或值非数字、fd 已关）时回落
 // fd 1=stdout，便于调试（`echo job | worker` 仍见事件）。
 //
 // **emit 为 async（合理不对称，ADR 0024）**：Midscene worker 是 Node 事件循环模型、Fargate 化后 aws-sdk-js DDB

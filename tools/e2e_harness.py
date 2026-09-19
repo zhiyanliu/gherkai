@@ -1,29 +1,29 @@
 #!/usr/bin/env python
-"""worker 端到端真跑验证 harness（ADR 0024 worker↔core 协议 / 终止契约 / 0029 act 边界抢传；跨引擎）。
+"""worker 端到端实际运行验证 harness（ADR 0024 worker↔core 协议 / 终止契约 / 0029 act 边界抢传；跨引擎）。
 
 **这是 opt-in 手动端到端验证脚本，不进 pytest 默认套件**——它真 spawn worker、真喂 job（stdin）、真收
 事件流（EVENTS_FD）、真开 AgentCore 会话、真写 S3（**产生真实 AWS 费用、需网络/凭证、单次 ~1-2min**）。它补的是
-单测的 mock 覆盖不到、只能真跑的那层（对齐 CLAUDE.md「绿≠对」）：真 greenlet / 真会话 / 真进程退出码 /
+单测的 mock 覆盖不到、只能真实运行的那层（对齐 CLAUDE.md「绿≠对」）：真 greenlet / 真会话 / 真进程退出码 /
 真事件流字节 / 真中断丢失量。纯逻辑回归仍由各引擎单测覆盖（Nova engines/novaact/tests/test_*.py、Midscene engines/midscene/src/worker/*.test.mts、core/tests/ 等）。
 
 **中断只是能力之一**（--interrupt）：--interrupt none 的 baseline 可验「事件流端到端正常 + 三通道分离 +
 零行为变化」（如 worker I/O 边缘重构后的回归）；--interrupt <时机> 才验中断韧性。
 
 忠实复现 SubprocessEngine adapter 的 spawn 环境（自建 events pipe + EVENTS_FD、注入产物落点 env +
-S3 上传 env），起真 worker 跑一个 scope，按事件时机外部 SIGTERM 命中中断点，中断后快照：
+S3 上传 env），起真 worker 运行一个 scope，按事件时机外部 SIGTERM 命中中断点，中断后快照：
   - 盘上有什么（NOVA_LOGS_DIR / MIDSCENE_RUN_DIR 递归）
   - S3 有什么（list prefix）
   - 差集（盘有 S3 无）= **Fargate 容器盘销毁时会丢的**（subprocess 下留本地盘、非真丢）
 并测 grace 秒数（SIGTERM→worker 退出实测耗时）、检测 worker 是否 hung（SIGKILL 兜底）。
 
 用法（需 AWS 凭证 + region us-east-1）：
-  # 从仓库根跑：
+  # 从仓库根运行：
   HARNESS_S3_BUCKET=<你的可写桶> uv run python tools/e2e_harness.py \\
       --engine novaact --feature wikipedia_assertions --interrupt scope_end --run-id verify-1
-  # --interrupt: connect(建连中) / act(act 跑一半) / between(step 边界) / scenario(第一个 scenario 完成后、
+  # --interrupt: connect(建连中) / act(act 执行到一半) / between(step 边界) / scenario(第一个 scenario 完成后、
   #              下一 scenario 运行中——验 scenario 边界 log 抢传，需多 scenario feature) / scope_end(flush 前) /
   #              none(baseline 不中断)
-  # 桶经环境变量 HARNESS_S3_BUCKET 传（勿硬编码；跑完自行清理桶内 <prefix>）。
+  # 桶经环境变量 HARNESS_S3_BUCKET 传（勿硬编码；运行结束后自行清理桶内 <prefix>）。
 
 历史：中断丢失预演、Nova 中断模型改造验证、抢传验证都用它（实测结论/量级已内联 ADR 0024 终止契约 / 0029 抢传 / 0032 中断丢失量级）。
 """
@@ -53,7 +53,7 @@ def build_job(feature: str, engine: str, votes: int):
 
     取**匹配 `--engine` 的第一个 job** 作靶子（回退 jobs[0]）——否则混引擎 feature（如 engine_routing 用
     @engine: tag 把 scenario 分到不同引擎）下 jobs[0] 可能是另一引擎的 job，会拿它喂错引擎的 worker（worker
-    不看 engine tag、照跑，但语义错乱）。单引擎 feature 下 jobs 全同引擎、此选择 = jobs[0]，行为不变。
+    不看 engine tag、照样运行，但语义错乱）。单引擎 feature 下 jobs 全同引擎、此选择 = jobs[0]，行为不变。
     """
     txt = (REPO / "features" / f"{feature}.feature").read_text(encoding="utf-8")
     fs = FeatureSource(uri=f"features/{feature}.feature", text=txt)
@@ -135,7 +135,7 @@ def run(engine: str, feature: str, votes: int, interrupt: str, run_id: str, grac
 
     # 先起 pump、再写 stdin：与 `SubprocessEngine.run_scope` 同序（理由见该 adapter 同处注释——大 job 写 stdin
     # 阻塞 × worker 读 stdin 前先吐 stdout 噪声 = 父子互锁）。harness 要忠实复现 adapter 的 spawn 环境，
-    # 顺序分叉会让这里跑出的中断/丢失结论不可迁移到生产路径。
+    # 顺序分叉会让这里运行得出的中断/丢失结论不可迁移到生产路径。
     threading.Thread(target=log_pump, args=(proc.stdout, "out"), daemon=True).start()
     threading.Thread(target=log_pump, args=(proc.stderr, "err"), daemon=True).start()
 
@@ -202,11 +202,11 @@ def run(engine: str, feature: str, votes: int, interrupt: str, run_id: str, grac
         elif et == "scenario_done":
             scen_done += 1
             # scenario 边界抢传验证时机（ADR 0029「第四级」，Midscene 单引擎）：第一个 scenario 完成后延迟 kill——
-            # 让 scenario1 的 snapshotLogs 在其 scenario_done 后跑完（log 进 S3）、scenario2 起来，SIGTERM 落在
+            # 让 scenario1 的 snapshotLogs 在其 scenario_done 后执行完毕（log 进 S3）、scenario2 起来，SIGTERM 落在
             # scenario2 运行中。验证：S3 应已有 scenario1 期间的 log（对照单 scenario scope_end 中断 S3 log=0）。
             # 需 jobs[0] 有 >1 scenario——即**多 scenario 归一个 @scope 的 feature**（如 concurrency_and_scope
             # 的 @scope:browse）；无 @scope tag 的 scenario 各自独立成单 scenario scope（ADR 0025）、jobs[0]=1、
-            # 此时机不触发（跑成 baseline、无效样本）。选 feature 前用 gherkai_core.scope.plan 确认 jobs[0] 的 scenario 数。
+            # 此时机不触发（退化成 baseline、无效样本）。选 feature 前用 gherkai_core.scope.plan 确认 jobs[0] 的 scenario 数。
             if interrupt == "scenario" and scen_done == 1 and n_scen > 1:
                 threading.Timer(3.0, lambda: do_kill("after_scenario1")).start()
             if interrupt == "scope_end" and scen_done == n_scen:
@@ -228,7 +228,7 @@ def run(engine: str, feature: str, votes: int, interrupt: str, run_id: str, grac
     # 丢失/抢传测量样本**。判据：盘或 S3 上有产物 = 有效样本（实测踩过：Midscene act 时机中断太早、盘空、
     # n_lost=0 曾被误读成抢传生效，实为无效样本）。
     produced = bool(disk) or bool(s3)
-    # 第二类无效样本：**选了中断时机、但该时机根本没触发**（一路跑成 baseline）。两条已知路径：
+    # 第二类无效样本：**选了中断时机、但该时机根本没触发**（一路退化成 baseline）。两条已知路径：
     #   · --interrupt scenario 撞上单 scenario scope（n_scen=1，见上 scenario_done 分支的条件）；
     #   · --interrupt connect 的 2s 定时器发现 scope_started 已到（建连快于 2s）。
     # 此时 n_lost=0 与抢传无关，报告里只有 kill_phase=null 一个线索——别让它躺着靠人眼捞。

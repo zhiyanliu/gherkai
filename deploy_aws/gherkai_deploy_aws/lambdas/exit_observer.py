@@ -9,7 +9,7 @@ EventBridge rule（detail-type='ECS Task State Change'、lastStatus=STOPPED、�
 `_is_detached`；不变量与故障形态见 ADR 0034 端到端 cloud 1b 与机制一）。
 
 **缺 exitCode → 落哨兵（机制二「退出码缺失」条）**：STOPPED 事件锚在 stoppedAt（已过 exitCode 落值窗口），正常退出
-必带码（真验 4/4）；缺码 = 容器没跑起来（stopCode=TaskFailedToStart：拉不到镜像/缺 secret/放置失败），且本事件是观察者
+必带码（真验 4/4）；缺码 = 容器没能开始运行（stopCode=TaskFailedToStart：拉不到镜像/缺 secret/放置失败），且本事件是观察者
 **唯一一次机会**（ECS 不会再发）→ 写 `PLATFORM_FAILED_EXIT` 哨兵 + reason（`stopCode: stoppedReason`），投影走
 「exit≠0 → ERROR」收敛、用户在 job message 里看到归因。曾写 None 当宽限态等「下轮补」——没有下轮，run 永久 wedge。
 不在此重查 DescribeTasks（保持 handler 薄、无 ECS IAM；对 TaskFailedToStart 重查也永远拿不到码）。
@@ -30,7 +30,7 @@ def _extract(detail: dict) -> tuple[str | None, str | None, int | None, bool, st
 
     run_id/scope_id：RunTask 注入的 env 原样在 detail.overrides.containerOverrides[].environment（真验坐实）。
     exit_code：`exit_from_task` 从 detail.containers[] 取**首个带 exitCode 的**（worker 是 essential 单容器，无需按名匹配）；
-    **缺 → `PLATFORM_FAILED_EXIT` 哨兵**（容器没跑起来，见模块头），此时 reason = `stopCode: stoppedReason`
+    **缺 → `PLATFORM_FAILED_EXIT` 哨兵**（容器没能开始运行，见模块头），此时 reason = `stopCode: stoppedReason`
     （用户可见归因）；带码时 reason=None（worker 自己的日志才是归因源）。
     timed_out：detail.stoppedReason 含超时哨兵（reconciler 的超时处置 StopTask(reason) 原样出现在此，
     ADR 0034「job timeout」节归因链）→ task_exited 带 timed_out=True。

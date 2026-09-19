@@ -111,7 +111,7 @@ def add_parsers(sub, *, provider: object | None = None, provider_error: str | No
     """把 `deploy` / `destroy` 两个子命令贴到主 parser 上；`provider` 已解析则让它贴自己的 flag。
 
     解析结果经 `set_defaults` 落到两个 subparser 上（`_provider_obj` / `_provider_error`），分派侧直接取——
-    provider 只加载一次，不在「贴 flag」与「跑动作」之间解析两遍。
+    provider 只加载一次，不在「贴 flag」与「执行动作」之间解析两遍。
 
     `provider=None`（未解析或解析失败）时只有皮自己的命令面 flag——保住 `gherkai --help` / `gherkai deploy --help`
     **恒可用**（帮助不该因为没装 provider 而失败），真动作时再由调用点报 `provider_error` 并退 2。

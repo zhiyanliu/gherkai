@@ -1,6 +1,6 @@
 """LocalRunStore（ADR 0016 控制面 / 0027 落点对齐）：落 run 的 definition + 运行态，可读回。
 
-三层切分（ADR 0016）：RunStore 存**控制面**——`RunMeta`（definition：run_id/created_at/跑哪些 job，
+三层切分（ADR 0016）：RunStore 存**控制面**——`RunMeta`（definition：run_id/created_at/执行哪些 job，
 执行前确定）+ `RunState`（运行态：总 status/各 job status/血缘，执行后产生）。**不存判定明细**
 （那是数据面、由 ResultStore 持有，避免与 jobs/*.json 冗余真值）。
 
@@ -9,13 +9,13 @@
   不会漂移（两处都序列化同一次 plan 产出的同一个 Job 对象，共用 serialize.job_to_dict）。嵌它是为让 CI 读
   单 scope 不依赖 run_meta（上云对象存储按 key 取单 job 同理）。
 - **判定真值唯一权威 = jobs/*.json（数据面 ResultStore）**。run_state.json 的 status / 各 job status 是
-  **控制面投影摘要**（供 exit-code / 未来轮询续跑 / WebUI 进度），与 jobs/*.json 同源（均从同一 RunResult
+  **控制面投影摘要**（供 exit-code / 未来的轮询式恢复执行 / WebUI 进度），与 jobs/*.json 同源（均从同一 RunResult
   投影，不双写漂移）。要权威判定读 jobs/*.json；要快速总览/轮询读 run_state.json。
 
 **克制（ADR 0016）**：只忠实持久化已成形的 RunMeta/RunState（复用 serialize），**不发明 serialize 之外的字段**。
 已落地（ADR 0030 决定四/六）：起止时刻（started_at/ended_at）、实时写三段（create_run / update_job_state /
 finalize_run）+ 读回面（load_run_state，`status` 与 tick 的 baseline 都靠它）、DDB 实装（同包 `ddb.py`）。
-仍有意 defer：jobId、续跑/部分重跑的 attempt 维度（ADR 0030「留口子」）——待真实需求逼出再加。
+仍有意 defer：jobId、恢复执行/部分重新执行的 attempt 维度（ADR 0030「留口子」）——待真实需求逼出再加。
 落点与 LocalReportStore 对齐（同 `<root>/<run_id>/`）：run_meta.json + run_state.json。
 """
 from __future__ import annotations
@@ -151,7 +151,7 @@ class LocalRunStore:
         def mutate(state: RunState):
             js = state.jobs.get(scope_id)
             if js is None or js.status != Status.PENDING:
-                return None  # 不存在 / 已非 pending（别人抢了或已跑）→ 不改
+                return None  # 不存在 / 已非 pending（别人抢了或已运行）→ 不改
             jobs = dict(state.jobs)
             jobs[scope_id] = JobState(scope_id=scope_id, status=Status.RUNNING, session_id=js.session_id,
                                       claimed_at=claimed_at)

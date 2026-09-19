@@ -1,6 +1,6 @@
 """`.github/scripts/release_notes.py` 的行为护栏：gate 的「本 tag 在 CHANGELOG 里有节」与 Release 正文渲染（ADR 0045 决策五）。
 
-脚本只用标准库、在发布链里以 `uv run --no-project python` 跑；这里按模块直接 import 测纯函数，再跑一次 CLI 面
+脚本只用标准库、在发布链里以 `uv run --no-project python` 运行；这里按模块直接 import 测纯函数，再执行一次 CLI 面
 （子进程）确认退出码语义——gate 靠的就是非零退出。
 """
 from __future__ import annotations
@@ -29,7 +29,7 @@ SAMPLE = """# Changelog
 - Midscene 默认模型改为 GPT-5.6 Terra。
 
 ### 升级须知
-- 部署方须重跑 `gherkai deploy`。
+- 部署方须重新运行 `gherkai deploy`。
 
 ## [1.4.3] - 2026-09-16
 

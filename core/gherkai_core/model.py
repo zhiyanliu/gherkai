@@ -60,11 +60,11 @@ class Job:
     scope_name: str  # @scope 原值（人写名）；无标用 scenario 标题
     engine: str  # 已完成冲突校验的引擎名（如 "midscene"/"novaact"）
     scenarios: tuple[Scenario, ...]
-    # AI 断言（Then）投票次数（治种类A抖动，ADR 0014）：worker 跑该断言 N 次取多数票。
+    # AI 断言（Then）投票次数（治种类A抖动，ADR 0014）：worker 执行该断言 N 次取多数票。
     # 默认 1（不抖动检测，结果/日志最直观）；调高（如 3/5）才启用抖动治理。组合根经 --assertion-votes 设。
     assertion_votes: int = 1
     # job 墙钟预算秒（ADR 0034「job timeout」节）：@timeout:N tag 或组合根填充的 --default-job-timeout；
-    # None=不超时。载体=definition（timeout 是「要跑什么」的预算约束），推进器各自 enforce、worker 不消费。
+    # None=不超时。载体=definition（timeout 是「要运行什么」的预算约束），推进器各自 enforce、worker 不消费。
     timeout_s: float | None = None
 
 
@@ -102,9 +102,9 @@ class Status(str, Enum):
 
     PASSED = "passed"  # 测试通过
     FAILED = "failed"  # 断言投票没过 = 测试发现了问题
-    ERROR = "error"  # 引擎抛异常 = 没能跑完测试
-    SKIPPED = "skipped"  # core 派生终态：fail-fast 下 worker 从未 spawn。没执行/没花钱/可无脑重跑（ADR 0031）
-    ABORTED = "aborted"  # core 派生终态：fail-fast 下跑一半被掐。有副作用/有现场可查（ADR 0031）
+    ERROR = "error"  # 引擎抛异常 = 测试未能运行完成
+    SKIPPED = "skipped"  # core 派生终态：fail-fast 下 worker 从未 spawn。没执行/没花钱/可无脑重新运行（ADR 0031）
+    ABORTED = "aborted"  # core 派生终态：fail-fast 下执行到一半被掐。有副作用/有现场可查（ADR 0031）
     PENDING = "pending"  # 前置态：run 开始 create_run 时占位（ADR 0030/0031）
     RUNNING = "running"  # 前置态：worker 起了、收到 scope_started 后刷（ADR 0030/0031）
 
@@ -123,7 +123,7 @@ _STATUS_SEVERITY: dict[Status, int] = {
 # run 级聚合的过滤名单（ADR 0031 决定三）：终态判定之外的态都不进 run 级聚合。
 # 含 skipped/aborted（派生终态、单写者、必伴随 error 同批，见 ADR 0031）+ pending/running（前置态）。
 # 两路共用（ADR 0031 决定三 / 0034）：schedule 沿事件流实时聚合，喂的都是终态、过滤是 no-op；
-# project 的无状态投影真实喂入 pending/running（未起/在跑的 job），此处过滤**承重**——否则前置态会污染
+# project 的无状态投影真实喂入 pending/running（未起/正在运行的 job），此处过滤**承重**——否则前置态会污染
 # run 级 status。
 _NON_VERDICT: frozenset[Status] = frozenset(
     {Status.SKIPPED, Status.ABORTED, Status.PENDING, Status.RUNNING}
@@ -232,10 +232,10 @@ class StepDone:
 class StepSkipped:
     """scope 内短路事件（ADR 0031 决定六 / 0024）：上游 step error 后，worker 跳过本 step、不调 AI。
 
-    **独立事件、平行于 StepDone，不是 status 第 4 态**——wire 严格三态（ADR 0024），「这步没跑」是
-    执行事实、非判定结论，故不塞进 StepDone.status。无 status/votes/cost 字段（没跑，无从谈判定/成本）。
+    **独立事件、平行于 StepDone，不是 status 第 4 态**——wire 严格三态（ADR 0024），「这步没执行」是
+    执行事实、非判定结论，故不塞进 StepDone.status。无 status/votes/cost 字段（没执行，无从谈判定/成本）。
     core 收到它 → 本地构造 StepResult(status=SKIPPED, shortcircuited=True)：SKIPPED 复用既有枚举（在
-    StepResult 层直观表「没跑」），但由 core 本地赋、不经 wire（同 job 级 skipped/aborted 的 core 派生态性质）。
+    StepResult 层直观表「没执行」），但由 core 本地赋、不经 wire（同 job 级 skipped/aborted 的 core 派生态性质）。
     """
 
     scenario_id: str
@@ -286,7 +286,7 @@ class StepResult:
     message: str | None = None
     # step 级产物指针（原样搬自 StepDone，见那里的注释：两引擎的 kind=evidence + Nova 的 kind=trajectory）
     report_refs: tuple[ReportRef, ...] = ()
-    # 与判定轴（status）正交的第二维（ADR 0031 决定六）：True = 本 step 因上游 error 被 scope 内短路而跳过、没跑。
+    # 与判定轴（status）正交的第二维（ADR 0031 决定六）：True = 本 step 因上游 error 被 scope 内短路而跳过、没执行。
     # 仅在 status==SKIPPED（由 step_skipped 事件派生）时为 True；渲染层的连锁失败旁注据此判定（比"按 status 顺序猜"精确）。
     shortcircuited: bool = False
 
@@ -369,18 +369,18 @@ class RunResult:
 class RunMeta:
     """一次 run 的 **definition**（前置身份，执行前由 plan 产出 + 组合根生成确定，不从 RunResult 反推）。
 
-    含「要跑什么」的全部：run_id + created_at + 完整 Job 列表（Job 含 scope/engine/scenarios/steps）。
+    含「要运行什么」的全部：run_id + created_at + 完整 Job 列表（Job 含 scope/engine/scenarios/steps）。
     **不含 status/判定**（那是执行后才有，属控制面运行态 RunState / 数据面 ResultStore）。
     """
 
     run_id: str  # 组合根生成（RunReport 主键 / 未来 RunStore PK）
     created_at: str  # 组合根生成的时间戳（core 不取时钟）
-    jobs: tuple[Job, ...]  # 这次跑哪些 job（完整 definition，来自 plan 产出）
+    jobs: tuple[Job, ...]  # 这次运行哪些 job（完整 definition，来自 plan 产出）
     # 浏览器 context 级额外请求头（ADR 0035 决策 4，如 ngrok-skip-browser-warning）：组合根填充、engine
     # adapter 注 env、worker setExtraHTTPHeaders 消费——core 只搬运不消费语义。tuple pairs 保 frozen 惯例；
     # None=无（默认路径零变化）。载体=definition：cloud detached 下要跨进程到 Lambda 重建 engine，必须随 META 持久化。
     extra_http_headers: tuple[tuple[str, str], ...] | None = None
-    # 本 run 同时在跑的 job 上限（ADR 0034 机制四）：run 级执行参数、载体 definition（推进器与提交进程可能
+    # 本 run 同时运行的 job 上限（ADR 0034 机制四）：run 级执行参数、载体 definition（推进器与提交进程可能
     # 分离，必须随 META 持久化才到得了推进器）——core 只搬运不消费，消费者是各推进器组合根（cloud 侧还会
     # 与部署侧 cap 取 min）。None=旧 definition 无此值（推进器按各自兼容口径回落）。
     max_concurrency: int | None = None
@@ -391,7 +391,7 @@ class RunMeta:
     # 「用到哪套确定性 step」影响判定可复现性、本就属 run 定义。core 只搬运不消费（约定逻辑在组合根）。
     # None=无使用方 step（worker 只有内建脚手架注册）；cloud 档恒 None（steps 烙在定制镜像里，ADR 0038）。
     steps_dir: str | None = None
-    # 本 run 用的 worker variant 名（ADR 0038「运行时与 preflight」）：**人读用**——回答「这次跑的是哪套确定性
+    # 本 run 用的 worker variant 名（ADR 0038「运行时与 preflight」）：**人读用**——回答「这次用的是哪套确定性
     # step 集」。人读面只有 definition 自身：落库的 META（cloud 档 = runs 表 META item；local 档此字段恒 None、
     # 序列化省键）与 `gherkai run --json` 顶层的 `run_meta`；status 输出当前不带它（文本与 `--json` 都只吐
     # RunState + artifacts），报告页同样不展示。机器起 task 一律看下面的 worker_task_defs。提交侧 preflight
@@ -400,7 +400,7 @@ class RunMeta:
     # 引擎 → worker task-def **revision ARN**（ADR 0038 不变量「运行时只用 definition 里的显式 revision，
     # 永不用 family 取最新」）：提交侧 preflight 把 variant 解析成各引擎的精确 revision，写进 definition；
     # 所有起 task 的宿主（同步 run 的 FargateEngine / kicker / reconciler）原样用它 RunTask ⇒ 一个 run 内
-    # 镜像固定，期间别人重推同名 variant 不影响在跑的 run。core 只搬运不消费（解析逻辑在组合根 compose）。
+    # 镜像固定，期间别人重推同名 variant 不影响正在运行的 run。core 只搬运不消费（解析逻辑在组合根 compose）。
     # 载体=definition：推进器与提交进程分离（ADR 0034），不随 META 持久化就到不了推进器。
     # None=local 档 / 旧 definition（宿主按后端默认指针解析的兼容路径，见 ADR 0038「读侧兼容口径」）。
     worker_task_defs: dict[str, str] | None = None
@@ -423,7 +423,7 @@ class RunState:
     """一次 run 的**控制面运行态**（status/血缘/起止；执行后产生，ADR 0016 控制面）。
 
     与 RunMeta（definition）分开：definition 执行前确定、不变；运行态随执行产生。实时写下随进度增量更新
-    （ADR 0030：create_run 写初始全 pending → 每 job 完成/起跑刷 jobs[scope_id] → finalize 写总 status）。
+    （ADR 0030：create_run 写初始全 pending → 每 job 完成/开始执行时刷 jobs[scope_id] → finalize 写总 status）。
     started_at/ended_at 实时写下按生命周期出现（create_run 填 started、finalize 填 ended）。
 
     **jobs 是 Map（scope_id → JobState），非 list**（ADR 0030 决定五）：实时按单个 job 刷状态需「按 scope_id

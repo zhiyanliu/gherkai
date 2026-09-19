@@ -72,7 +72,7 @@ def test_realtime_write_lifecycle(ddb_run_store):
     assert all(js.status == Status.PENDING for js in s0.jobs.values())
     assert ddb_run_store.load_run_meta("rt-run") is not None  # definition 也落了
 
-    # 2) 一个 job 起跑 → running（带血缘）；中途读到部分完成态（Map 单元素刷不互相污染）
+    # 2) 一个 job 开始运行 → running（带血缘）；中途读到部分完成态（Map 单元素刷不互相污染）
     ddb_run_store.update_job_state("rt-run", JobState("features/wiki.feature:6", Status.RUNNING, session_id="sess-1"))
     mid = ddb_run_store.load_run_state("rt-run")
     assert mid.jobs["features/wiki.feature:6"].status == Status.RUNNING

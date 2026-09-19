@@ -43,7 +43,7 @@ from gherkai_core.model import (
 
 @dataclass
 class Timing:
-    """单个 scope 跑批中各级起始时间戳 + 暂存的 step 结果（core 算墙钟时长用，ADR 0024）。
+    """单个 scope 执行过程中各级起始时间戳 + 暂存的 step 结果（core 算墙钟时长用，ADR 0024）。
 
     从 `schedule._Timing` 提炼到 gherkai_core.project（reduce_event 的伴随累积态）。schedule 侧 `_Timing`
     保留为本类的别名（`_Timing = Timing`），零行为变化。
@@ -132,9 +132,9 @@ def reduce_event(
 
 
 # 平台侧退出哨兵（ADR 0034 机制二及其「launch 失败补偿」「退出码缺失」两条推论）：worker 进程**没有**给出退出码的两种形态
-# 都落它——①tick 起 task 失败（RunTask 抛/Popen OSError，进程根本没起）；②观察者收到 STOPPED 却缺 exitCode（容器没跑起来，
+# 都落它——①tick 起 task 失败（RunTask 抛/Popen OSError，进程根本没起）；②观察者收到 STOPPED 却缺 exitCode（容器没能开始运行，
 # 如拉不到镜像）。非 0 即走「exit≠0 → ERROR」既有谓词，值本身不进任何分支判断；选 255 避开 worker 真实语义码（如网络码 80），
-# 只为日志/归因可辨识「这是平台侧起不来、不是 worker 跑挂」。core 单点定义，tick 与观察者 Lambda 都 import 本常量、别各抄一份。
+# 只为日志/归因可辨识「这是平台侧起不来、不是 worker 执行中崩溃」。core 单点定义，tick 与观察者 Lambda 都 import 本常量、别各抄一份。
 PLATFORM_FAILED_EXIT = 255
 
 
@@ -279,13 +279,13 @@ def _reduce_scope(job: Job, recs: list[EventRecord]) -> tuple[JobResult, Status,
         result.message = (f"job 超时（预算 {job.timeout_s}s，已中止）"
                           if job.timeout_s else "job 超时（已中止）")
     elif status == Status.ERROR and result.message is None and exited is not None:
-        # 兜底归因（detached 真跑教训：worker 起来即崩 → 零事件、判 error、message 全空——用户无从排障）。
+        # 兜底归因（detached 实际运行教训：worker 起来即崩 → 零事件、判 error、message 全空——用户无从排障）。
         # `result.message is None` 是防御性守卫（当前恒真：job 级归因只在本函数写）——若将来 reduce 期开始写
         # job 级归因，它保证那份归因不被这里的兜底文案盖掉；`exited is not None` 供下面 `exited.exit_code`
         # 类型收窄（status==ERROR 已蕴含它非 None，见 `_job_status`）。诊断细节在 worker stderr（local 落
         # reconcile.log / cloud 落 CloudWatch task 日志），这里给指向。
         if exited.exit_code == PLATFORM_FAILED_EXIT:
-            # 平台侧哨兵：起 task 失败（tick 补偿）或容器没跑起来（观察者，带 reason）——不是 worker 自己的码
+            # 平台侧哨兵：起 task 失败（tick 补偿）或容器没能开始运行（观察者，带 reason）——不是 worker 自己的码
             why = f"：{exited.reason}" if exited.reason else "——详见部署侧日志"
             result.message = f"worker 未能启动或未正常结束（平台侧未取到退出码）{why}"
         elif exited.exit_code is None:
@@ -354,7 +354,7 @@ def _job_status(
 
     「两件都要」的**内容完整（scope_done）要求只对声称成功（exit==0）的进程成立**——exit≠0 时进程非干净
     终止（崩溃/网络码/SIGKILL），scope_done 本就不会来（worker 崩了没机会发），此时进程终止本身即终态信号，
-    不能再等 scope_done（否则 crash job 永远 RUNNING、reconciler 死循环——真跑 crash worker 复现）。
+    不能再等 scope_done（否则 crash job 永远 RUNNING、reconciler 死循环——实际运行 crash worker 复现）。
 
     **判定以「有无 task_exited」为一级键，不设 saw_scope_started 前置**（ADR 0034 机制二）——零事件 + exit==0
     （构造期 SIGTERM 干净退出，0024 设计内）若短路成 PENDING，会与已 claim 的 RUNNING 基线单调合并成永停
@@ -383,7 +383,7 @@ def _job_status(
             return Status.ERROR  # 干净退出却没发完 scope_done（含零事件）：矛盾 → error（不死循环）
         return _aggregate(list(scenario_status.values()))
     if saw_scope_started:
-        return Status.RUNNING  # 会话已起、进程还在跑
+        return Status.RUNNING  # 会话已起、进程还在运行
     return Status.PENDING  # 还没起/还没写事件（也无退出信号）
 
 

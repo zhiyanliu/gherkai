@@ -1,4 +1,4 @@
-"""隧道口子（ADR 0035）：把「跑 CLI 的机器可达」的被测应用暴露成云端浏览器可访问的公网 URL。
+"""隧道口子（ADR 0035）：把 CLI 所在机器可达的被测应用暴露成云端浏览器可访问的公网 URL。
 
 TunnelProvider 形状 = `start(local_origin) -> TunnelInfo`；停止用 `stop_tunnel(pid)`——隧道生命周期
 可能跨进程（local submit 的 per-run 进程 / cloud submit 的守护进程收尾），进程对象句柄传不过去，
@@ -23,7 +23,7 @@ from gherkai_core.model import Job
 
 
 class TunnelError(Exception):
-    """隧道起不来 / provider 未知 / 前置缺失——调用方接住归「没开跑就被拒」（退 2）。"""
+    """隧道起不来 / provider 未知 / 前置缺失——调用方接住归「没开始执行就被拒」（退 2）。"""
 
 
 @dataclass(frozen=True)
@@ -58,7 +58,7 @@ class NgrokTunnel:
 
     spawn `ngrok http <origin> --log <file> --log-format json` agent 进程 → 轮询日志文件、
     从 `started tunnel` 事件行拿公网 URL。**不走本地 agent API**——v3 的 `ngrok http` 无 `--web-addr`
-    flag（真跑暴露：unknown flag；web_addr 是配置文件项、注入需劫持用户 config），日志文件通道
+    flag（实际运行暴露：unknown flag；web_addr 是配置文件项、注入需劫持用户 config），日志文件通道
     无端口冲突、天然留诊断（authtoken 缺失等 err 行同在其中）。
     - **authtoken 前置**：用户自配（`NGROK_AUTHTOKEN` env 或 ngrok 配置文件）——未配时 agent 起不来，
       start() 以日志尾部报 TunnelError（点名 authtoken 引导排错）。
@@ -87,7 +87,7 @@ class NgrokTunnel:
             # 手写 YAML（结构固定且凭据纯字母数字，无转义面），不为此引 yaml 依赖。
             # 文件**有意不删**（与上面 log 文件同）：agent 可能在隧道存活期重读 policy，删掉就有把边缘
             # basic-auth 拆成裸公网口的风险；凭据只对本隧道有效、随 stop_tunnel 即成死凭据，且 mkstemp
-            # 建出来就是 0600（仅本用户可读）。真要清理须先真跑核实 agent 不重读——只跑单测证明不了。
+            # 建出来就是 0600（仅本用户可读）。真要清理须先在真实边界上核实 agent 不重读——只靠单测证明不了。
             policy = (
                 "on_http_request:\n"
                 "  - actions:\n"

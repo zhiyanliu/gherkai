@@ -38,7 +38,7 @@ class ParsedScenario:
 
     scenario: Scenario
     tags: tuple[str, ...]  # 已合并 feature 级 + scenario 级（gherkin Compiler 合并，ADR 0025）
-    uri: str  # 该 scenario 所属 .feature 的 uri（权威值，parse 时本就已知）——供 scope.plan 统计 named scope 要跑的成员
+    uri: str  # 该 scenario 所属 .feature 的 uri（权威值，parse 时本就已知）——供 scope.plan 统计 named scope 要运行的成员
     # 落在哪几个文件（跨文件合并 warning），也供 cli 的 `_build_selector` 从 scenario_id 切掉 uri 前缀取行号；两处都
     # 免于从 scenario_id 有损反解（uri 自身含冒号，如带端口的 URL，按冒号反解就会错——ADR 0025「id 派生」）
 

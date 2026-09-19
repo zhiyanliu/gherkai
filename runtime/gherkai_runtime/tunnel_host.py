@@ -8,7 +8,7 @@ run 生命周期，ADR 0016「演进」节）；入口皮（cli / 未来 WebUI�
 - `compute_watch_ttl_s` + `watch_run_and_stop_tunnel`：cloud submit 守护进程的 TTL 算法与主体循环。
 
 **术语护栏**（同 ADR 0016「演进」节的命名护栏）：叫 host（宿主，取自 ADR 0035 决策 3 的表头术语），
-不叫 worker——worker 在 ADR 0024 里专指被 spawn 跑 scope 的引擎进程，与隧道宿主无关。
+不叫 worker——worker 在 ADR 0024 里专指被 spawn 执行 scope 的引擎进程，与隧道宿主无关。
 """
 from __future__ import annotations
 
@@ -25,11 +25,11 @@ from gherkai_runtime import tunnel as _tunnel
 TUNNEL_EXTRA_HTTP_HEADERS = {"ngrok-skip-browser-warning": "1"}
 
 # —— cloud submit 隧道守护 TTL 的两个记账常量（ADR 0035 决策 3 的「TTL 兜底自杀」）——
-# TTL 只是**防 ngrok 进程泄漏的上界**，宁长不宜短：短于 run 实际预算时守护会在 run 还在跑时拆隧道，
-# 剩余 job 在被测应用不可达下继续跑、以「AI 报导航失败」的假失败告终（兜底机制反成失败源）。
+# TTL 只是**防 ngrok 进程泄漏的上界**，宁长不宜短：短于 run 实际预算时守护会在 run 尚未结束时拆隧道，
+# 剩余 job 在被测应用不可达下继续运行、以「AI 报导航失败」的假失败告终（兜底机制反成失败源）。
 #
 # 启动/级联余量（一次性）：submit 只写 runs 表，之后 Stream INSERT 投递 → kicker Lambda 冷启动 →
-# RunTask → Fargate 拉镜像/挂 ENI 才真开跑；job 之间还有云端事件链的固有尾延迟（ADR 0034 地基实测：
+# RunTask → Fargate 拉镜像/挂 ENI 才真正开始执行；job 之间还有云端事件链的固有尾延迟（ADR 0034 地基实测：
 # worker 真停到可归约 ~27s，瓶颈在 ECS `executionStoppedAt→stoppedAt` 的平台清理），末尾还有 finalize。
 # job.timeout_s 从 claim 起算、已含拉镜像（ADR 0034「job timeout」节），故此处兜的是「链路投递 + Lambda
 # 冷启动 + 每 job 尾延迟的累计 + 收尾」。取 900s：对常规批量留数倍余量；极大批量用显式 TTL 覆盖。
@@ -51,7 +51,7 @@ class TunnelSetup:
 def start_tunnel_for_jobs(jobs, *, local_origin: str, provider: str = "ngrok") -> TunnelSetup:
     """起隧道并把 definition 里的 origin 映射成公网 URL（ADR 0035 决策 1/2/4）。
 
-    起不来（provider 未知 / agent 不就绪 / 缺 authtoken）→ `tunnel.TunnelError`，调用方归「没开跑就被拒」。
+    起不来（provider 未知 / agent 不就绪 / 缺 authtoken）→ `tunnel.TunnelError`，调用方归「没开始执行就被拒」。
     映射产出新 Job（definition 不可变，见 `map_origin_in_jobs`）；原 jobs 不动。
     """
     info = _tunnel.make_tunnel(provider).start(local_origin)

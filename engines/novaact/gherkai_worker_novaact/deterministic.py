@@ -15,7 +15,7 @@ handler 约定：
 - 签名 `def handler(ctx, **groups)`：ctx 暴露 `page`（Playwright Page）；**groups = 正则的具名组**
   （`(?P<name>...)`）。无具名组则不传额外参数。
 - **必须是同步函数**（`def`，不能 `async def`）：本引擎同步执行 handler，返回 awaitable 会被 `run_scope._run_step`
-  检出并抛 TypeError（该 step 记 error）——因为 coroutine 不被 await 时里面的断言压根没跑，静默判 passed 是假阳性。
+  检出并抛 TypeError（该 step 记 error）——因为 coroutine 不被 await 时里面的断言压根没执行，静默判 passed 是假阳性。
   对侧 Midscene 的 handler 允许 async（那边是 async 执行模型），故这是引擎执行模型差异、不是可对齐项：
   需要异步的判定只能写在 Midscene 侧。
 - 判定失败抛 `AssertionError` → step 记 **failed**（断言没过）；抛其它异常 → step 记 **error**。
@@ -78,11 +78,11 @@ class DeterministicConflict(Exception):
 
 
 def _hits(text: str) -> list[tuple[_Entry, re.Match]]:
-    """扫注册表收**全部**命中——match（真跑派发）与 match_batch（plan 预检）唯一的扫描实现面。
+    """扫注册表收**全部**命中——match（实际运行派发）与 match_batch（plan 预检）唯一的扫描实现面。
 
     两个消费者只在「命中数怎么处置」上分叉，匹配语义本身不复制成两份：ADR 0036 的「同一注册表、
     同一 search 实现」由此结构保证，改匹配面（search→fullmatch、大小写归一、pattern 预处理）不会
-    漏改一处让 plan 标注对真跑撒谎。
+    漏改一处让 plan 标注对实际运行撒谎。
     """
     return [(e, m) for e in _REGISTRY if (m := e.pattern.search(text))]
 

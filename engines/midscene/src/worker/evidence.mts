@@ -164,7 +164,7 @@ function shotOf(task: TaskLike, shotsDir: string): { id: string; file: string } 
 function thoughtOf(task: TaskLike): string | null {
   const own = nonEmpty(task.thought);
   if (own !== null) return own;
-  // `Planning/Plan` 的推理不在 task.thought、而在 output.thought（真跑核出：Plan 的 output 形如
+  // `Planning/Plan` 的推理不在 task.thought、而在 output.thought（实际运行核出：Plan 的 output 形如
   // {actions, log, thought}）——不回落它，动作步的 frame 就全无推理可看（ADR 0042 决策一映射表）。
   const out = task.output;
   if (out && typeof out === "object" && !Array.isArray(out)) {
@@ -221,7 +221,7 @@ export interface BuildEvidenceInput {
   executions: unknown[];
   /** worker 自己构造的指令串（同送给引擎的那个）；本 step 各 act 共用。 */
   prompt: string | null;
-  /** 逐 act 的票；缺位 → null（非投票调用 / 该票没跑成）。 */
+  /** 逐 act 的票；缺位 → null（非投票调用 / 该票没运行成功）。 */
   votes: Array<boolean | null>;
   /** step 末取的 `page.url()`（worker 只取一次；同 step 各票之间页面通常不变）。 */
   url: string | null;
@@ -271,7 +271,7 @@ export function buildEvidence(input: BuildEvidenceInput): EvidenceDoc {
       url: input.url,
       frames,
       result: lastTask?.output ?? null,
-      // 首个非空 errorMessage；都没有则末个 act 兜住本 step 抛出的异常（抛的那一刻正在跑的就是它）
+      // 首个非空 errorMessage；都没有则末个 act 兜住本 step 抛出的异常（抛的那一刻正在运行的就是它）
       error: tasks.map(errorTextOf).find((m) => m !== null) ?? (isLast ? input.error : null),
       time_worked_s: null,
     });

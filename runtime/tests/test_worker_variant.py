@@ -138,7 +138,7 @@ def test_unused_engine_not_probed(aws):
 
 # ---- miss 分支：任一环缺 → 抛，**绝不回落** ----
 def test_missing_default_pointer_hints_deploy(aws):
-    """默认指针不存在（部署没走过 worker 镜像初始化）→ 提示跑 `gherkai deploy`，不猜 `base`。"""
+    """默认指针不存在（部署没走过 worker 镜像初始化）→ 提示运行 `gherkai deploy`，不猜 `base`。"""
     _seed(aws, variant="base", set_default=False)
     with pytest.raises(compose.WorkerVariantError) as e:
         _resolve(aws)
@@ -200,7 +200,7 @@ def test_digest_not_in_ecr_is_a_miss(aws):
 
 
 def test_one_engine_missing_fails_whole_resolution(aws):
-    """一个 run 一个 variant 名、某引擎缺该 variant 即严格失败（ADR 0038）——不给「另一引擎凑合跑」的静默档。"""
+    """一个 run 一个 variant 名、某引擎缺该 variant 即严格失败（ADR 0038）——不给「另一引擎凑合运行」的静默档。"""
     _seed(aws, variant="base", engines=("novaact",))
     with pytest.raises(compose.WorkerVariantError) as e:
         _resolve(aws, engines=["novaact", "midscene"])
@@ -218,7 +218,7 @@ def test_malformed_ssm_record_is_named(aws):
 
 
 def test_no_cli_version_fails_loud(aws):
-    """源码直跑取不到自身版本 → 抛（镜像 tag 含版本，无从拼）；fail-loud 好过静默解析成别的版本。"""
+    """从源码直接运行取不到自身版本 → 抛（镜像 tag 含版本，无从拼）；fail-loud 好过静默解析成别的版本。"""
     _seed(aws, variant="base")
     with pytest.raises(compose.WorkerVariantError) as e:
         _resolve(aws, cli_version="")
@@ -308,7 +308,7 @@ def test_worker_task_defs_is_required():
 def test_never_falls_back_to_healthy_default_when_requested_variant_broken(aws):
     """请求的 variant 坏了而默认 variant 健在 → **仍然抛**（ADR 0038 被拒方案「variant 缺失时静默回落默认」）。
 
-    这是「不回落」这条最容易被实现悄悄破掉的形状：手边正好有一个能跑的默认 variant，回落一下 run 就绿了——
+    这是「不回落」这条最容易被实现悄悄破掉的形状：手边正好有一个可运行的默认 variant，回落一下 run 就绿了——
     但那等于替使用方换了 step 集，判定结果不再是他声明的那套。
     """
     _seed(aws, variant="base")  # 默认 base 完整健康

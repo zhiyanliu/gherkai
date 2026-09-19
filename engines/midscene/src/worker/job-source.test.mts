@@ -1,11 +1,11 @@
 // JobSource 单测（Midscene，ADR 0024「I/O 边缘可注入接口」）：subprocess 态读 stdin 到 EOF、切首行 JSON。
-// 此前内联在 run-scope main（JSON.parse((await readStdin()).split("\n")[0])），无测试覆盖。跑：node --import tsx --test。
+// 此前内联在 run-scope main（JSON.parse((await readStdin()).split("\n")[0])），无测试覆盖。运行：node --import tsx --test。
 import { test } from "node:test";
 import assert from "node:assert";
 import { Readable } from "node:stream";
 import { JobSource } from "../lib/job-source.mjs";
 
-// 用一个 Readable 假冒 process.stdin（for await 可迭代），跑完恢复。
+// 用一个 Readable 假冒 process.stdin（for await 可迭代），运行结束后恢复。
 async function withStdin<T>(content: string, fn: () => Promise<T>): Promise<T> {
   const saved = Object.getOwnPropertyDescriptor(process, "stdin");
   Object.defineProperty(process, "stdin", { value: Readable.from([Buffer.from(content, "utf-8")]), configurable: true });

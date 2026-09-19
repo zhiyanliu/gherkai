@@ -98,7 +98,7 @@ def test_assertion_failed_is_failed_not_error():
     assert result.jobs[0].scenarios[0].status == Status.FAILED
 
 
-# ---- 失败隔离（默认）：一个 job 崩(error)，其余照跑 ----
+# ---- 失败隔离（默认）：一个 job 崩(error)，其余照常运行 ----
 def test_failure_isolation_default():
     jobs = [_job("crash"), _job("ok")]
     engine = FakeEngine(
@@ -119,8 +119,8 @@ def test_failure_isolation_default():
 
 
 # ---- fail-fast：一个 job 崩 → 批次 ERROR（中止生效）----
-# 注：fail-fast 对「在跑的其余 worker」是协作式中止，多 worker 的精确结局依赖线程时序
-# （slow 可能已完成/被拦在起跑前/跑到一半被 stop——都合法），故此处只断言确定性保证：
+# 注：fail-fast 对「在运行的其余 worker」是协作式中止，多 worker 的精确结局依赖线程时序
+# （slow 可能已完成/被拦在启动前/运行到一半被 stop——都合法），故此处只断言确定性保证：
 # 批次 ERROR + crash 一定 error。stop() 的调用路径由 test_timeout_with_fake_clock 确定性覆盖。
 def test_fail_fast_batch_errors():
     def long_stream(scenario_id):
@@ -128,7 +128,7 @@ def test_fail_fast_batch_errors():
         for i in range(50):
             evs.append(StepDone(scenario_id=scenario_id, step_index=i, status=Status.PASSED, votes=Votes(3, 3)))
         evs.append(ScenarioDone(scenario_id=scenario_id, status=Status.PASSED))
-        evs.append(ScopeDone(scope_id=scenario_id.split(":")[0]))  # 完整跑完必带（内容完整前置，0026）
+        evs.append(ScopeDone(scope_id=scenario_id.split(":")[0]))  # 完整运行结束必带（内容完整前置，0026）
         return evs
 
     jobs = [_job("crash"), _job("slow")]
@@ -146,16 +146,16 @@ def test_fail_fast_batch_errors():
     assert result.status == Status.ERROR  # 确定性：批次报错
     crash_jr = next(jr for jr in result.jobs if jr.scope_id == "crash")
     assert crash_jr.status == Status.ERROR
-    # 被牵连的 slow：协作式中止下结局依时序（已跑完 passed / 跑一半 aborted / 排队没起 skipped 都合法），
+    # 被牵连的 slow：协作式中止下结局依时序（已完成 passed / 运行到一半 aborted / 排队没起 skipped 都合法），
     # 但**绝不该是 error**——被牵连中止不是自身故障（ADR 0031；精确的 skipped/aborted 复现见 test_lifecycle_states）。
-    # 注：PASSED 只在「见到 scope_done（真跑完）」时可达——跑一半被掐、流 EOF 无 scope_done 必 ABORTED
+    # 注：PASSED 只在「见到 scope_done（真正完成）」时可达——运行到一半被掐、流 EOF 无 scope_done 必 ABORTED
     # （内容完整前置，0026），此断言不再可能掩盖「部分完成聚合成 PASSED」的假绿。
     slow_jr = next(jr for jr in result.jobs if jr.scope_id == "slow")
     assert slow_jr.status in (Status.PASSED, Status.ABORTED, Status.SKIPPED)
     assert slow_jr.status != Status.ERROR
 
 
-# ---- fail-fast 关闭（默认隔离）对照：crash 崩但 slow 跑完 → ERROR 但 slow passed ----
+# ---- fail-fast 关闭（默认隔离）对照：crash 崩但 slow 运行结束 → ERROR 但 slow passed ----
 def test_no_fail_fast_lets_others_finish():
     jobs = [_job("crash"), _job("ok")]
     engine = FakeEngine(
@@ -167,10 +167,10 @@ def test_no_fail_fast_lets_others_finish():
     )
     result = schedule(_rm(jobs), FakeResolver(engine), CollectSink(), opts=ScheduleOpts(fail_fast=False))
     ok_jr = next(jr for jr in result.jobs if jr.scope_id == "ok")
-    assert ok_jr.status == Status.PASSED  # 隔离：ok 跑完
+    assert ok_jr.status == Status.PASSED  # 隔离：ok 运行结束
 
 
-# ---- 超时（fake clock）：job 跑太久 → stop + error:timeout ----
+# ---- 超时（fake clock）：job 运行太久 → stop + error:timeout ----
 def test_timeout_with_fake_clock():
     # fake clock：每次被读 +10s。job_timeout=5s → 第一次事件间检查就超时
     ticks = {"t": 0.0}
@@ -330,7 +330,7 @@ def test_failed_and_error_steps_cost_still_aggregated():
     assert result.total_tokens == 2000
 
 
-# ---- 并发上限：max_concurrency=1 → 串行，仍全部跑完 ----
+# ---- 并发上限：max_concurrency=1 → 串行，仍全部运行完成 ----
 def test_serial_concurrency_one():
     jobs = [_job(f"j{i}") for i in range(5)]
     engine = FakeEngine({f"j{i}": _passing_events(f"j{i}", f"j{i}:0") for i in range(5)})
@@ -440,12 +440,12 @@ def test_step_skipped_reduced_to_skipped_shortcircuited():
     result = schedule(_rm([_job("n")]), FakeResolver(engine), CollectSink())
     steps = result.jobs[0].scenarios[0].steps
     assert len(steps) == 3
-    # step 0：真跑出的 error
+    # step 0：实际执行产生的 error
     assert steps[0].status == Status.ERROR and steps[0].shortcircuited is False
-    # step 1/2：被短路 → SKIPPED + shortcircuited=True（正交轴），没跑 → 无墙钟
+    # step 1/2：被短路 → SKIPPED + shortcircuited=True（正交轴），未执行 → 无墙钟
     assert steps[1].status == Status.SKIPPED and steps[1].shortcircuited is True
     assert steps[2].status == Status.SKIPPED and steps[2].shortcircuited is True
-    assert steps[1].duration_ms is None  # 被短路步没起跑（无 step_started）→ 无墙钟
+    assert steps[1].duration_ms is None  # 被短路步没开始运行（无 step_started）→ 无墙钟
 
 
 def test_step_skipped_does_not_pollute_scenario_or_run_status():
@@ -526,7 +526,7 @@ def test_network_error_not_retried_when_session_started():
                       opts=ScheduleOpts(network_retry=2, retry_sleep=_NOSLEEP))
     assert result.status == Status.ERROR
     assert result.jobs[0].error_type == "network_error"
-    assert engine.run_count["n"] == 1  # 会话已起 → 不重试，只跑 1 次
+    assert engine.run_count["n"] == 1  # 会话已起 → 不重试，只运行 1 次
 
 
 def test_network_retry_default_off():
@@ -585,7 +585,7 @@ def test_on_job_complete_streams_not_batched():
     # 流式：job 完成即回调，不是攒到最后一起。用 on_event 钩子让 a 先于 b 完成，
     # 断言回调到达时 job_results 尚未集齐全部（证明边完成边回调）。
     fired_at_len: list[int] = []
-    # max_concurrency=1 串行：a 完整跑完→回调→b 才开始。回调发生在 b 尚未完成时。
+    # max_concurrency=1 串行：a 完整运行结束→回调→b 才开始。回调发生在 b 尚未完成时。
     jobs = [_job("a"), _job("b")]
     engine = FakeEngine({"a": _passing_events("a", "a:0"), "b": _passing_events("b", "b:0")})
     order: list[str] = []
@@ -629,11 +629,11 @@ def test_on_job_complete_exception_propagates_not_swallowed():
 
 
 def test_on_job_complete_exception_stops_inflight_workers_before_raise():
-    # review #2：回调抛异常时，冒泡前必须先 stop 所有在跑 worker——否则异常跳出 with、shutdown(wait=True)
-    # 会等在跑 worker 自然跑完（真 AgentCore 会话持续计费）。验：异常仍抛 + 在跑 worker 的 handle 被 stop。
+    # review #2：回调抛异常时，冒泡前必须先 stop 所有运行中的 worker——否则异常跳出 with、shutdown(wait=True)
+    # 会等它们自然结束（真 AgentCore 会话持续计费）。验：异常仍抛 + in-flight worker 的 handle 被 stop。
     import pytest
     slow_started = threading.Event()  # slow 已 spawn 且在事件循环里
-    release_fast = threading.Event()  # 放行 fast 完成（确保 slow 先在跑）
+    release_fast = threading.Event()  # 放行 fast 完成（确保 slow 先在运行）
 
     def slow_stream(scope_id):
         # slow 先吐一个事件（证明已 spawn、在循环里）→ 宣告 started → 阻塞直到被 stop（handle.stopped 后协作退出）
@@ -644,7 +644,7 @@ def test_on_job_complete_exception_stops_inflight_workers_before_raise():
             yield StepDone(scenario_id=f"{scope_id}:0", step_index=i, status=Status.PASSED, votes=Votes(3, 3))
 
     def fast_stream(scope_id):
-        slow_started.wait(timeout=2)  # 等 slow 真在跑了，fast 才完成 → 保证 fast 回调抛错时 slow 是 in-flight
+        slow_started.wait(timeout=2)  # 等 slow 真的在运行了，fast 才完成 → 保证 fast 回调抛错时 slow 是 in-flight
         yield from _passing_events(scope_id, f"{scope_id}:0")
 
     engine = FakeEngine({"fast": fast_stream("fast"), "slow": slow_stream("slow")})
@@ -682,7 +682,7 @@ def test_grace_nonpositive_raises():
 
 
 def test_grace_at_or_above_min_grace_ok():
-    # grace == min_grace（边界）与 grace > min_grace 都放行（正常跑完）。
+    # grace == min_grace（边界）与 grace > min_grace 都放行（正常运行结束）。
     engine = FakeEngine({"a": _passing_events("a", "a:0")})
     result = schedule(_rm([_job("a")]), FakeResolver(engine), CollectSink(),
                       opts=ScheduleOpts(grace_period_s=180.0, min_grace_s=180.0))
@@ -702,7 +702,7 @@ def test_default_opts_no_min_grace_backcompat():
 def test_partial_completion_without_scope_done_not_passed():
     """假绿回归（对抗验证探针场景）：worker 干净 EOF 但没发 scope_done → error+engine_error，绝不 PASSED。
 
-    修复前：部分完成的 scenario 聚合出 PASSED（3 个 scenario 只跑完 1 个也报 passed）。
+    修复前：部分完成的 scenario 聚合出 PASSED（3 个 scenario 只完成 1 个也报 passed）。
     """
     partial = [
         ScenarioStarted(scenario_id="p:0"),
@@ -732,7 +732,7 @@ def test_abort_then_clean_eof_is_aborted_not_passed():
         ScenarioStarted(scenario_id="v:0"),
         StepDone(scenario_id="v:0", step_index=0, status=Status.PASSED, votes=Votes(3, 3)),
         ScenarioDone(scenario_id="v:0", status=Status.PASSED),
-        ScenarioStarted(scenario_id="v:1"),  # 第二个 scenario 跑到一半被掐
+        ScenarioStarted(scenario_id="v:1"),  # 第二个 scenario 运行到一半被掐
         StepDone(scenario_id="v:1", step_index=0, status=Status.PASSED, votes=Votes(3, 3)),
         ScenarioDone(scenario_id="v:1", status=Status.PASSED),
         ScopeDone(scope_id="v"),
@@ -753,7 +753,7 @@ def test_abort_then_clean_eof_is_aborted_not_passed():
     result = schedule(_rm([_job("c"), _job("v")]), FakeResolver(engine), sink,
                       opts=ScheduleOpts(max_concurrency=2, fail_fast=True))
     v_jr = next(jr for jr in result.jobs if jr.scope_id == "v")
-    # victim 结局依时序：真跑完（见 scope_done）→ PASSED 合法；被掐（EOF 无 scope_done）→ ABORTED。
+    # victim 结局依时序：真正完成（见 scope_done）→ PASSED 合法；被掐（EOF 无 scope_done）→ ABORTED。
     # 关键断言：绝不 ERROR（被牵连非自身故障）；PASSED 当且仅当 sink 真收到 v 的 scope_done（内容完整）。
     assert v_jr.status in (Status.PASSED, Status.ABORTED)
     v_scope_done_seen = any(isinstance(e, ScopeDone) and e.scope_id == "v" for e in sink.events)

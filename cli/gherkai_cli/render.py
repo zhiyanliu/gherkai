@@ -72,7 +72,7 @@ def render_text(result: RunResult) -> str:
     for jr in result.jobs:
         jbits = _cost_bits(jr.total_tokens, jr.total_time_worked_s)
         cost_str = f"  [{', '.join(jbits)}]" if jbits else ""
-        # 说明文字：error 类带分类前缀；fail-fast 派生态（skipped/aborted）的 error_type 恒 None、「为什么没跑」
+        # 说明文字：error 类带分类前缀；fail-fast 派生态（skipped/aborted）的 error_type 恒 None、「为什么没执行」
         # 只在 message 里（ADR 0031 决定一），故无分类时也显 message——否则人读视图只剩一个光秃的态、原因得改用 --json。
         if jr.error_type:
             err = f"  ({jr.error_type}: {jr.message})" if jr.message else f"  ({jr.error_type})"  # 空 message 不留吊着的冒号（与报告页同口径）
@@ -88,7 +88,7 @@ def render_text(result: RunResult) -> str:
                 # total>1 才显投票 tally（与 format_event/index.html 一致；1/1 无抖动意义，不显）
                 v = f" 投票 {st.votes.yes}/{st.votes.total}" if st.votes and st.votes.total > 1 else ""
                 # 连锁失败旁注（ADR 0031 决定六）：被 scope 内短路的 step（shortcircuited=True，status=skipped）——
-                # 上游 error 后 worker 跳过了它、没在损坏环境上跑。旁注解释"为何 skipped"，读 shortcircuited 这个
+                # 上游 error 后 worker 跳过了它、没在损坏环境上执行。旁注解释"为何 skipped"，读 shortcircuited 这个
                 # 正交布尔（比旧的"按 status 顺序猜 error 后 failed"精确）；不改判定/severity（守纯 reducer 红线）。
                 note = f"  {_SHORTCIRCUIT_NOTE}" if st.shortcircuited else ""
                 out.append(f"      step {st.index}: {st.status.value} ({_ms(st.duration_ms)}){v}{note}")
@@ -127,10 +127,10 @@ def render_run_state(state: RunState) -> str:
 # ---- plan 预检（dry-run）渲染：纯本地、零费用，展示 .feature → scope/job 分组 ----
 
 def render_plan_text(jobs: list[Job], default_engine: str, dispatch: dict | None = None) -> str:
-    """plan 产出 Job[] → 人看的多行预检视图（scope/engine/scenario/step，不真跑）。
+    """plan 产出 Job[] → 人看的多行预检视图（scope/engine/scenario/step，不实际运行）。
 
     dispatch（可选，ADR 0036 决策 4）：{(scope_id, scenario_id, step_index): probe}——worker 的命中
-    自述。命中 → 行尾标「← 确定性:」；冲突 → 标 ⚠（真跑该 step 将 error）；None/缺失 → 不标（默认 AI，少噪声）。
+    自述。命中 → 行尾标「← 确定性:」；冲突 → 标 ⚠（实际运行该 step 将 error）；None/缺失 → 不标（默认 AI，少噪声）。
     """
     n_scenarios = sum(len(j.scenarios) for j in jobs)
     out: list[str] = [
@@ -225,7 +225,7 @@ def explain_step_expands(step: dict, *, expand_passed: bool) -> bool:
     让这个导出的谓词对任意 step dict 都给出正确答案，当前没有调用点能进到那里。
     """
     if step["record_missing"]:
-        return False  # 无记录 = 没有 ref 可读，展不出东西（状态行已说明它没跑/没上报）
+        return False  # 无记录 = 没有 ref 可读，展不出东西（状态行已说明它未执行/未上报）
     return expand_passed or step["status"] != "passed"
 
 
@@ -235,7 +235,7 @@ def explain_to_dict(*, run_id: str, status: str | None, results: list[JobResult]
     """把 JobResult 列表 + evidence 合成 explain 的机读文档（形状即 ADR 0042 决策四的 JSON 形态）。
 
     **骨架 = job 定义**（`JobResult.job`）而非判定记录：worker 被外部中止时未完成的 scenario 不进 `jobs/*.json`，
-    以判定记录为骨架会让这些 step 直接消失（看不出「没跑」与「没这步」的区别）。故逐 scenario / 逐 step 按定义走、
+    以判定记录为骨架会让这些 step 直接消失（看不出「未执行」与「没这步」的区别）。故逐 scenario / 逐 step 按定义走、
     没有记录的给 `status: null` + `record_missing: true`。
 
     evidence_reader(report_refs) → `(evidence | None, evidence_missing | None)`：读 kind=evidence 的 ref（IO 在调用方）。
@@ -297,7 +297,7 @@ def explain_to_dict(*, run_id: str, status: str | None, results: list[JobResult]
             "message": jr.message,
             "session_id": jr.session_id,
             "report_refs": [ref_to_dict(rr) for rr in jr.report_refs],
-            # 中止的 job 里已跑完的 step 其证据已产，但 ref 只在事件记录里、不进判定记录 → 明说，别让读者以为没产
+            # 中止的 job 里已执行完的 step 其证据已产，但 ref 只在事件记录里、不进判定记录 → 明说，别让读者以为没产
             "aborted_hint": (_ABORTED_PARTIAL_HINT
                              if jr.status in (Status.ABORTED, Status.ERROR) and 0 < len(recorded) < total_steps
                              else None),
@@ -396,7 +396,7 @@ def _step_lines(step: dict, *, expand_passed: bool, full: bool) -> list[str]:
     ev = step["evidence"]
     if ev is None:
         miss = step["evidence_missing"]
-        # 短路的 step 不打「无 AI 证据」：它根本没跑，状态行的旁注已说明，再说一遍是废话
+        # 短路的 step 不打「无 AI 证据」：它根本没执行，状态行的旁注已说明，再说一遍是废话
         if miss and not (miss == "no_ref" and step["shortcircuited"]):
             lines.append(f"      {_EVIDENCE_MISSING_TEXT.get(miss, _EVIDENCE_MISSING_TEXT['no_ref'])}")
         # 兜底指针：证据缺了，把该 step 的其它产物 ref 列出来，让人还有地方看（ADR 0042 决策四「文本预算」末条）

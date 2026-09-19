@@ -39,7 +39,7 @@ def test_job_to_json_shape():
     d = job_to_json(job)
     assert d["scope"] == {"id": "login", "name": "login"}
     assert d["engine"] == "novaact"
-    assert d["assertionVotes"] == 1  # 默认投票次数随 job 进协议（worker 据此跑 AI 断言，ADR 0014/0024）
+    assert d["assertionVotes"] == 1  # 默认投票次数随 job 进协议（worker 据此执行 AI 断言，ADR 0014/0024）
     assert len(d["scenarios"]) == 1
     sc = d["scenarios"][0]
     assert sc["id"] == "t.feature:5"
@@ -49,7 +49,7 @@ def test_job_to_json_shape():
 
 
 def test_job_to_json_assertion_votes_passthrough():
-    # assertionVotes 原样透传进协议（组合根设的非默认值，worker 据此跑 N 次取多数票）
+    # assertionVotes 原样透传进协议（组合根设的非默认值，worker 据此执行 N 次取多数票）
     job = Job(scope_id="s", scope_name="s", engine="midscene", scenarios=(), assertion_votes=5)
     assert job_to_json(job)["assertionVotes"] == 5
 

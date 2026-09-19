@@ -198,7 +198,7 @@ def _print_human(result: dict) -> None:
     print(f"events_table={result['events_table']} run_id={result['run_id']} pk={result['pk']} "
           f"scopes={result['n_scopes']} acts={len(acts)}")
     if not acts:
-        # 无任何配对：中断过早（没跑到 step_done）/ run_id 不匹配。**注意**：votes>1 不会导致 acts 为空——它仍产
+        # 无任何配对：中断过早（没执行到 step_done）/ run_id 不匹配。**注意**：votes>1 不会导致 acts 为空——它仍产
         # 一对 step_started/step_done（只是墙钟含 N act），会被下面标 multi_act 排除出分布、而非在此消失。
         print("（无 step_started/step_done 配对——中断过早未执行到 step_done / run_id 不匹配？）")
         return
@@ -227,7 +227,7 @@ def _print_human(result: dict) -> None:
               f"{f'，已排除 {n_multi} 个 MULTI-ACT' if n_multi else ''}）===")
         print(f"min={s['min']}  p50={s['p50']}  p90={s['p90']}  p99={s['p99']}  max={s['max']}")
         # 下面的 120 是本脚本自带的对照基线（缺省值副本），**真值住 runtime/gherkai_runtime/compose.py 的 NOVA_ACT_TIMEOUT_S**
-        # （可经同名 env 覆盖）——用非缺省 act timeout 跑时，这里的判语只是参考，按真值重读分位数。
+        # （可经同名 env 覆盖）——用非缺省 act timeout 执行时，这里的判语只是参考，按真值重读分位数。
         print(f"对照 NOVA_ACT_TIMEOUT_S=120：p99={s['p99']}s → "
               f"{'单 act 远低于 act_timeout，grace margin 有压缩空间' if s['p99'] < 120 else '有 act 逼近/超 120，act_timeout 不宜降'}")
     elif n_multi:

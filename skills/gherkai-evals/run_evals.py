@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""跑 skill 的行为评测：每条 eval × 每臂（with_skill / without_skill）× --runs 次，各自一个独立舞台与
+"""运行 skill 的行为评测：每条 eval × 每臂（with_skill / without_skill）× --runs 次，各自一个独立舞台与
 独立 `claude -p` 进程。
 
 设计见 docs/adr/0043-agent-skill-for-driving-gherkai.md 决策七。要点：
 - **隔离**：舞台由 materialize.py 物化到仓库外，cwd = 舞台、PATH 前置舞台 `bin/`；舞台里的 CLI 来自装进仓库外
   目录的 wheel，任何路径都不指仓库（`--prepare-cli` 那步保证），两臂只差「有没有拿到 skill」一个变量。
-- **with-skill 臂只给中立路径**：每次运行把 skill 拷进一个随机命名的临时目录、提示里只给这个路径，跑完即删——给仓库路径
+- **with-skill 臂只给中立路径**：每次运行把 skill 拷进一个随机命名的临时目录、提示里只给这个路径，结束后即删——给仓库路径
   等于邀请它顺着仓库读原始教材；放在 `<cli-dir>/skill/` 也不行（第三轮 eval 3 的 baseline 顺着 shim 指向的 cli-dir
   `grep` 到了它、读了 references/engines.md），必须是 baseline 无从枚举到的位置。
-- **过程断言只认工具流水**：每次跑都存 `tool_calls.json`（用了哪些命令、有没有真跑、有没有装东西），答案自述不算证据；
+- **过程断言只认工具流水**：每次运行都存 `tool_calls.json`（用了哪些命令、有没有实际执行、有没有装东西），答案自述不算证据；
   `timing.json` 另记三个每轮必报的污染 / 效率指标（repo_touches / network_calls / skill_copy_touches）。
-- **一次跑多遍**：跨 run 的方差是判「两臂差值是不是噪声」的前提，缺省 3 次。
+- **一次运行多遍**：跨 run 的方差是判「两臂差值是不是噪声」的前提，缺省 3 次。
 
 结果布局（评分者再往同目录写 grading.json，聚合脚本按这棵树读）：
   <repo>/skills/gherkai-workspace/iteration-<N>/
@@ -23,7 +23,7 @@
 用法：
   python skills/gherkai-evals/run_evals.py --iteration 3 --runs 3
   python skills/gherkai-evals/run_evals.py --iteration 3 --ids 5 --arms with_skill --runs 1
-  python skills/gherkai-evals/run_evals.py --iteration 3 --include-opt-in --ids 6   # 真跑 run / submit，要真 AWS
+  python skills/gherkai-evals/run_evals.py --iteration 3 --include-opt-in --ids 6   # 实际运行 run / submit，要真 AWS
 """
 from __future__ import annotations
 
@@ -49,7 +49,7 @@ SKILL_SRC = REPO / "cli" / "gherkai_cli" / "skills" / "gherkai"
 DEFAULT_CLI_DIR = Path("/tmp/gherkai-eval-cli")
 STAGE_ROOT = Path("/tmp/gherkai-eval-stages")
 DEFAULT_FIXTURE = "wiki-search"
-# 只认这两个臂名：写错了会静默当 baseline 跑（提示里不给 skill），一整轮白跑还看不出来。
+# 只认这两个臂名：写错了会静默当 baseline 运行（提示里不给 skill），白费一整轮还看不出来。
 KNOWN_ARMS = ("with_skill", "without_skill")
 # 本会话模型即评测模型（env 覆写便于换档比对）。
 DEFAULT_MODEL = os.environ.get("GHERKAI_EVAL_MODEL") or "global.anthropic.claude-fable-5-1[1m]"
@@ -86,7 +86,7 @@ def load_evals(ids: str, include_opt_in: bool) -> list[dict]:
         elif ev.get("opt_in") and not include_opt_in:
             continue
         if ev.get("opt_in") and not include_opt_in:
-            fail(f"eval {ev['id']} 标了 opt_in（真跑 run / submit、要真 AWS），要跑就显式给 --include-opt-in")
+            fail(f"eval {ev['id']} 标了 opt_in（实际运行 run / submit、要真 AWS），要运行就显式给 --include-opt-in")
         if not ev.get("slug"):
             fail(f"eval {ev['id']} 没有 slug 字段（结果目录名由它派生），先在 evals.json 里补一条")
         picked.append(ev)
@@ -185,8 +185,8 @@ def run_one(ev: dict, arm: str, run_no: int, it_dir: Path, cli_dir: Path, model:
     eid, slug = ev["id"], ev["slug"]
     out_dir = it_dir / f"eval-{eid}-{slug}" / arm / f"run-{run_no}"
     out_dir.mkdir(parents=True, exist_ok=True)
-    # 舞台路径带随机后缀：Claude Code 按 cwd 给每个项目一个 ~/.claude/projects/<路径>/memory/，同名路径重跑会把上一次
-    # 的记忆（含上一次的结论）灌进新会话——第三轮 baseline 重跑就这样被自己的旧 run 喂了答案；跑前跑后再各清一次兜底
+    # 舞台路径带随机后缀：Claude Code 按 cwd 给每个项目一个 ~/.claude/projects/<路径>/memory/，同名路径重新运行会把上一次
+    # 的记忆（含上一次的结论）灌进新会话——第三轮 baseline 复用同名路径就这样被自己的旧 run 喂了答案；运行前后再各清一次兜底
     stage = STAGE_ROOT / f"{it_dir.name}-{eid}-{arm}-run{run_no}-{os.urandom(3).hex()}"
     _purge_session_dir(stage)
     stage = materialize(ev.get("fixture") or DEFAULT_FIXTURE, stage, cli_dir)
@@ -249,22 +249,22 @@ def main() -> None:
     ap.add_argument("--iteration", type=int, default=1, help="第几轮（结果落 iteration-<N>/）")
     ap.add_argument("--ids", default="", help="逗号分隔的 eval id；缺省 = 全部非 opt_in")
     ap.add_argument("--arms", default=",".join(KNOWN_ARMS), help=f"逗号分隔的臂名（{list(KNOWN_ARMS)}）")
-    ap.add_argument("--runs", type=int, default=3, help="每个 (eval, 臂) 跑几次（跨 run 方差是判噪声的前提）")
+    ap.add_argument("--runs", type=int, default=3, help="每个 (eval, 臂) 运行几次（跨 run 方差是判噪声的前提）")
     ap.add_argument("--parallel", type=int, default=10, help="并发的 claude -p 进程数上限")
     ap.add_argument("--timeout", type=int, default=1500, help="单次 claude -p 的墙钟上限（秒）")
     ap.add_argument("--model", default=DEFAULT_MODEL, help=f"两臂固定同一个模型（缺省 {DEFAULT_MODEL}）")
     ap.add_argument("--cli-dir", default=str(DEFAULT_CLI_DIR),
                     help=f"已备好的仓库外 CLI 目录（缺省 {DEFAULT_CLI_DIR}，见 materialize.py --prepare-cli）")
-    ap.add_argument("--include-opt-in", action="store_true", help="连 opt_in 的 eval 一起跑（真跑 run / submit、要真 AWS）")
+    ap.add_argument("--include-opt-in", action="store_true", help="连 opt_in 的 eval 一起运行（实际运行 run / submit、要真 AWS）")
     a = ap.parse_args()
 
     cli_dir = Path(a.cli_dir).resolve()
     if not (cli_dir / "venv" / "bin" / "gherkai").is_file():
-        fail(f"{cli_dir} 没备好——先跑：python skills/gherkai-evals/materialize.py --prepare-cli {cli_dir}")
+        fail(f"{cli_dir} 没备好——先运行：python skills/gherkai-evals/materialize.py --prepare-cli {cli_dir}")
     if not (SKILL_SRC / "SKILL.md").is_file():
         fail(f"仓库里没有 skill：{SKILL_SRC}")
     if not shutil.which("claude"):
-        fail("PATH 里没有 claude（两臂都靠 `claude -p` 跑）")
+        fail("PATH 里没有 claude（两臂都靠 `claude -p` 运行）")
     evals = load_evals(a.ids, a.include_opt_in)
     arms = [x for x in a.arms.replace(" ", "").split(",") if x]
     unknown = [x for x in arms if x not in KNOWN_ARMS]

@@ -18,10 +18,10 @@ import os
 # 模型版本（ADR 0004「模型版本选择策略」）：**缺省钉死 GA 版本 id，不用 `nova-act-latest` 别名**——别名的
 # 语义是「AWS 发新 GA 时自动换模型」、时点由 AWS 定；而本工具的 pass / fail 靠 AI 投票，模型一换判定就变
 # （已 A/B 实测：同一批用例里有 scenario 在两个模型间稳定翻转，不是噪声）。这类变化必须随一次有 changelog 的
-# 显式发布落地，而不是藏在别名里在使用方账户中静默发生；升级流程（新 GA → 重跑同一批用例的 A/B → 改本常量
+# 显式发布落地，而不是藏在别名里在使用方账户中静默发生；升级流程（新 GA → 重新运行同一批用例的 A/B → 改本常量
 # → 发版点明模型换代）见该 ADR，别在这里改成别名。
 # env `NOVA_MODEL_ID` 是 **opt-in 旋钮**（与下面的 NOVA_GRACE_MARGIN_S 同形：worker 读、缺省即钉死值）：
-# 本机跑在 shell 里设即生效；云端 Fargate 容器 env 是显式枚举，要用就烙进定制 worker 镜像的 `ENV`（即
+# 本机执行时在 shell 里设即生效；云端 Fargate 容器 env 是显式枚举，要用就烙进定制 worker 镜像的 `ENV`（即
 # ADR 0038 的 variant 机制）。可设 `nova-act-preview` 试新模型，但 **preview 不作产品默认**：无支持承诺、
 # 随 AWS 移动，且**不可钉**——服务端拒绝直接引用带日期的 preview id（只能用 `nova-act-preview` 别名），
 # 正是钉版本要消掉的那种不受控变化。
@@ -36,9 +36,9 @@ WORKFLOW_DEF = "gherkai-worker"
 # 下限」——下限的真值是 worker 自己的收尾预算，住在算它的这一侧才不需要人工同步；曾住组合根）。
 # 余量要盖住「SIGTERM 落 act 中途、act 有界返回**之后**」的收尾串行段：会话释放（三层 with 的 `__exit__`）
 # + evidence 截图后台队列的退出档有界排空（`run_scope.EVIDENCE_DRAIN_EXIT_S`，排在会话释放之后，ADR 0042 决策一）。
-# **已真容器标定**（ADR 0032「真容器校准结论」，4 次真跑）：SIGTERM→退出最坏 21s，但其中 ~11s 已坐实为 ECS
+# **已真容器标定**（ADR 0032「真容器校准结论」，4 次实际运行）：SIGTERM→退出最坏 21s，但其中 ~11s 已坐实为 ECS
 # 记录 executionStoppedAt 的平台侧滞后（worker 已退），subprocess 档不存在该段——真实预算 = 会话释放 ≤9s
 # + 截图排空 6s = 15s，故 60→30（Nova grace 下限 180→150），30 仍留 ~2x 余量。
-# （上传本体在队列线程内跑、`use_threads=False`，无 s3transfer 线程池被 atexit join 的尾巴——否则要再加一次
-# client 超时 ≈10s，真跑量过。）env 可覆盖（再标定/调优）。
+# （上传本体在队列线程内执行、`use_threads=False`，无 s3transfer 线程池被 atexit join 的尾巴——否则要再加一次
+# client 超时 ≈10s，实际运行中量过。）env 可覆盖（再标定/调优）。
 NOVA_GRACE_MARGIN_S = int(os.environ.get("NOVA_GRACE_MARGIN_S", "30"))

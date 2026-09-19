@@ -3,7 +3,7 @@
 用 CDK assertions.Template 断言关键契约——尤其**与 cli 侧命名/schema 的单一事实源对齐点**（ADR 0033 护栏）：
 表/桶/task-def 名、events TTL 属性、container 名不带 prefix、SSM 路径（含 version / vpc 档 / worker-template
 三族部署戳）。防未来改 stack 时漂移。
-跑：uv run pytest（根或 deploy_aws/ 下皆可）。
+运行：uv run pytest（根或 deploy_aws/ 下皆可）。
 """
 from __future__ import annotations
 
@@ -114,7 +114,7 @@ def test_runs_table_has_the_sparse_status_gsi_for_worker_cleanup():
     """runs 表按 `status` 的 GSI（ADR 0038 清理安全阀）：**投影必须含 `worker_task_def_arns`**。
 
     过滤表达式 `contains(worker_task_def_arns, :arn)` 作用在**索引投影出的属性**上——不投影则恒不匹配、
-    安全阀静默失效（会删掉在跑 run 手里的 revision，detached run 的剩余 job 全起不来）。
+    安全阀静默失效（会删掉运行中 run 手里的 revision，detached run 的剩余 job 全起不来）。
     稀疏是构造出来的：只有 STATE item 带顶层 `status`。不用 ALL：STATE 的 `jobs` Map 随 job 数增长。
     """
     t = _template()
@@ -144,7 +144,7 @@ def test_events_table_has_no_gsi():
 def test_ecr_repos_have_no_lifecycle_rules_and_are_retained():
     """ECR **不设任何 lifecycle 规则**（ADR 0038 护栏，被拒方案「ECR 加 untagged 过期 lifecycle」）。
 
-    重推同名 variant 会把旧 tag 顶成 untagged，而在跑 run 的旧 task-def revision 正按 digest 指着那一层——
+    重推同名 variant 会把旧 tag 顶成 untagged，而运行中 run 的旧 task-def revision 正按 digest 指着那一层——
     untagged 过期规则会静默删掉它，run 的后续 job 拉不到镜像。代价（永久留一层 untagged）是记在案的
     已知运行期成本，回收与 `delete-worker` 同批设计。`RETAIN` 则是防误删（destroy 不带走镜像）。
     """
@@ -172,7 +172,7 @@ def test_ssm_parameter_set_is_exactly_six():
     + 部署戳 2（version/vpc，ADR 0037 决策 6）+ 模板 revision ARN 2（每引擎一个，ADR 0038 四步第 1 步）。
 
     逐条比全集、不只验「存在」——「存在」式断言照不出**漏写**（少一个参数时子集匹配仍绿），而这些参数每一个
-    都有一个读侧消费者：漏了只在真跑时才炸（cli 连不上网络 / preflight 无戳 / push-worker 找不到模板）。
+    都有一个读侧消费者：漏了只在实际运行中才炸（cli 连不上网络 / preflight 无戳 / push-worker 找不到模板）。
     """
     t = _template()
     assert set(_ssm_params(t)) == {

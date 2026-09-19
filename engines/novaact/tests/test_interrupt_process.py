@@ -7,15 +7,15 @@
 
 范式对称 core/tests/test_subprocess_engine.py 的 test_adapter_stop_hanging_worker：
 真 Popen + 就绪握手 + 真 send_signal + wait(timeout) + 断言 (rc==0 且未超时被强杀)。
-零 AWS、零 greenlet、零 chromium、~秒级——默认单测跑（无 marker）。
+零 AWS、零 greenlet、零 chromium、~秒级——随默认单测运行（无 marker）。
 
 **这个哨兵护的是「rs._on_signal 保持 flag-only 协作语义」**：fixture 装的是真 `rs._on_signal`，故若有人把
 它从「只 _stop.set()」改回「raise」（即撞 playwright greenlet 切换区致死循环卡死的 raise 模型根因，见 ADR 0024 被拒方案），信号在 fixture 主循环里
 raise 未捕获异常 → 进程非 0 退出 / 行为改变 → 本测试 rc==0 断言失败、可见（此哨兵的关键设计：原先 fixture 装
-手抄副本、改真 handler 测试也不红、是假哨兵；改装真 `rs._on_signal` 才有护栏效力）。**边界诚实说明**：fixture 跑的是无 greenlet 的 fake act
+手抄副本、改真 handler 测试也不红、是假哨兵；改装真 `rs._on_signal` 才有护栏效力）。**边界诚实说明**：fixture 运行的是无 greenlet 的 fake act
 循环，故它验的是「handler 语义 + 协作退范式」，**不复现真 greenlet 卡死本身**（signal-raise 撞
 greenlet 切换区致死循环那条路概率性触发、不宜断言，机制见 ADR 0024 被拒方案）；真 greenlet 环境的
-干净退（flag-only 改造）已由真 spawn worker + 真 chromium/greenlet 的一次性真跑验证（见 ADR 0024
+干净退（flag-only 改造）已由真 spawn worker + 真 chromium/greenlet 的一次性实际运行验证（见 ADR 0024
 终止契约）。scenario/投票循环的
 _stop 检查回归由 test_interrupt_model.py 的单测覆盖，不靠本进程测试。
 """
@@ -72,7 +72,7 @@ def test_worker_cooperative_stop_on_signal(sig):
 def test_worker_runs_until_signaled():
     """反向确认：没有信号时 worker 不会自己退（证明上面的退出确由信号触发、非巧合）。"""
     proc = _spawn_and_wait_ready()
-    assert proc.poll() is None  # 就绪后仍在跑
+    assert proc.poll() is None  # 就绪后仍在运行
     time.sleep(0.3)
     assert proc.poll() is None, "无信号时 worker 不应自行退出"
     proc.send_signal(signal.SIGTERM)

@@ -56,7 +56,7 @@ class RunPersistence:
     def begin(self, run_meta: RunMeta, *, started_at: str) -> None:
         """run 开始（schedule 之前）：先探活三个 store，再写 definition + 初始全 pending 运行态。
 
-        满足 ADR 0027「提交即返回 runId」——definition 必先于跑批存在。各 job 摆 PENDING、总 PENDING、
+        满足 ADR 0027「提交即返回 runId」——definition 必先于批量运行存在。各 job 摆 PENDING、总 PENDING、
         started_at 填、ended_at 缺席（finalize 时填）。
 
         **create_run 前先 preflight（ADR 0030 决定七）**：探底层可达（云端探表/桶，local no-op）。桶/表名错

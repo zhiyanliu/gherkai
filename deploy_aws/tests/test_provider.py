@@ -1,7 +1,7 @@
 """`Provider` 测试（ADR 0037 决策 6）：flag 面、context 拼装、生成的 cdk.json、cdk 调用、VPC 档三态。
 
 **全部不碰 AWS、不起 cdk**：boto3 句柄与 `subprocess.run` 都打桩。故这里的证据边界是「拼出来的东西对不对」——
-cdk 真跑（synth/deploy）、真 CloudFormation/SSM 的错误码形态，是另一层（真跑 synth 见提交记录；deploy 需真账号）。
+cdk 实际运行（synth/deploy）、真 CloudFormation/SSM 的错误码形态，是另一层（实际运行 synth 见提交记录；deploy 需真账号）。
 """
 from __future__ import annotations
 
@@ -99,7 +99,7 @@ def test_vpc_absent_hint_is_best_effort_when_backend_unreadable(cdk, monkeypatch
 
 def test_bootstrap_needs_no_vpc_and_never_loads_the_app(cdk, monkeypatch):
     """bootstrap 走显式 `aws://<account>/<region>`、不带 `--app`——cdk 有显式环境又无 app 时直奔凭证，
-    不会跑 app（真跑核过：带 `--app` 则即使给了显式环境也先跑 app、那就又要 `--vpc`）。"""
+    不会执行 app（实际运行核过：带 `--app` 则即使给了显式环境也先执行 app、那就又要 `--vpc`）。"""
     class _Sts:
         class meta:
             region_name = "us-east-1"
@@ -452,7 +452,7 @@ class _Recorder:
 
 
 class _FakeEngine:
-    """容器引擎替身（`probe()` 说「可用」）——deploy 前的容器引擎前置不该在单测里真跑 docker。"""
+    """容器引擎替身（`probe()` 说「可用」）——deploy 前的容器引擎前置不该在单测里真实运行 docker。"""
 
     name = "docker"
 
@@ -465,8 +465,8 @@ def cdk(monkeypatch) -> _Recorder:
     """把 Node 前置、cdk 定位、容器引擎与 worker 镜像四步都打桩掉，只留「拼出的 argv/env」这一层给断言。
 
     **四步必须打桩**：`deploy` 在 cdk 成功后会去连真 SSM/ECR/ECS 并 `docker pull` 基底（ADR 0038）——单测里
-    那是「不碰 AWS」这条底线的破口（真跑过一次：测试直奔 NoCredentialsError 且真拉了一次 GHCR 镜像）。
-    调用次数记在 `rec.worker_steps` 上，供「cdk 成功才跑四步」那两条断言。
+    那是「不碰 AWS」这条底线的破口（实际运行过一次：测试直奔 NoCredentialsError 且真拉了一次 GHCR 镜像）。
+    调用次数记在 `rec.worker_steps` 上，供「cdk 成功才执行四步」那两条断言。
     """
     rec = _Recorder()
     monkeypatch.setattr(provider_cli, "check_node", lambda: None)
@@ -503,7 +503,7 @@ def test_diff_invokes_cdk_with_app_output_and_context(cdk):
 def test_cdk_runs_in_the_work_dir_which_holds_the_generated_cdk_json(cdk):
     Provider().diff(_parse("--vpc", "new", "--region", "us-east-1"))
     cwd = Path(cdk.calls[0]["cwd"])
-    # cdk 在工作目录里跑（生成的 cdk.json 在那儿，特性开关才生效）
+    # cdk 在工作目录里运行（生成的 cdk.json 在那儿，特性开关才生效）
     assert cwd.name.startswith("gherkai-deploy-")
     # 用完即删（不留临时目录，也不写仓库）
     assert not cwd.exists()
@@ -546,7 +546,7 @@ def test_deploy_blocked_by_vpc_guard_never_invokes_cdk(cdk, monkeypatch, capsys)
 
 
 def test_deploy_runs_the_worker_image_steps_after_a_successful_cdk(cdk, monkeypatch):
-    """cdk 成功 → 接着跑 worker 镜像第 2/3/4 步（第 1 步随 cdk 事务，ADR 0038）。"""
+    """cdk 成功 → 接着执行 worker 镜像第 2/3/4 步（第 1 步随 cdk 事务，ADR 0038）。"""
     _stub_backend(monkeypatch, stack_exists=False, stored=None)
     assert Provider().deploy(_parse("--vpc", "default", "--region", "us-east-1")) == 0
     assert len(cdk.worker_steps) == 1
@@ -586,7 +586,7 @@ def test_destroy_invokes_cdk_destroy_with_same_context(cdk):
 
 def test_synth_only_pins_a_relative_dir_to_the_callers_cwd(cdk, tmp_path, monkeypatch):
     """用户给**相对** DIR：必须钉成绝对路径再交 cdk——cdk 子进程 cwd 是随后被删的临时工作目录，相对路径
-    原样传会让导出物落进那里、随之消失而命令退 0（真跑踩过的假成功；早先的测试用绝对 tmp_path、照不出来）。"""
+    原样传会让导出物落进那里、随之消失而命令退 0（实际运行踩过的假成功；早先的测试用绝对 tmp_path、照不出来）。"""
     monkeypatch.chdir(tmp_path)
     args = _parse("--vpc", "new", "--region", "us-east-1")
     args.synth_only = "exported"  # CLI 皮的 --synth-only DIR（接缝契约），相对用户 cwd
@@ -733,14 +733,14 @@ def _cache_env(monkeypatch, tmp_path) -> Path:
 
 def test_context_cache_is_saved_after_the_run_and_seeded_into_the_next_fresh_work_dir(monkeypatch, tmp_path):
     """工作目录一次性 → 若每次空着进去，cdk 会对缺失的 lookup 值先用占位 VPC 预合成一遍（触发模板校验 warning、
-    多一轮查询）。缓存按 prefix 持久化在用户缓存目录：第一次跑完存回；第二次进全新工作目录前先放进去。"""
+    多一轮查询）。缓存按 prefix 持久化在用户缓存目录：第一次运行结束存回；第二次进全新工作目录前先放进去。"""
     cache = _cache_env(monkeypatch, tmp_path)
     rec = _CdkWritingContext()
     monkeypatch.setattr(provider_cli.subprocess, "run", rec)
     assert not cache.exists()
     assert Provider().diff(_parse("--vpc", "default", "--region", "us-east-1")) == 0
     assert rec.seeded_with == [None]                      # 首次：无缓存可放
-    assert cache.exists() and "vpc-cached" in cache.read_text()  # 跑完存回
+    assert cache.exists() and "vpc-cached" in cache.read_text()  # 运行结束存回
     assert Provider().diff(_parse("--vpc", "default", "--region", "us-east-1")) == 0
     assert rec.seeded_with[1] == rec.content              # 第二次：全新工作目录里已被放进缓存
 
@@ -786,7 +786,7 @@ def _parse_destroy(*argv: str) -> argparse.Namespace:
 
 
 def test_destroy_yes_passes_force_to_cdk_and_is_off_by_default(cdk):
-    """cdk destroy 在非 TTY 下拒绝无确认的销毁（真跑撞到）；`--yes` = `--force`，不给则让 cdk 自己问。"""
+    """cdk destroy 在非 TTY 下拒绝无确认的销毁（实际运行撞到）；`--yes` = `--force`，不给则让 cdk 自己问。"""
     Provider().destroy(_parse_destroy("--vpc", "default", "--region", "us-east-1"))
     assert "--force" not in _argv(cdk)
     cdk.calls.clear()

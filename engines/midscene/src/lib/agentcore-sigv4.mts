@@ -1,5 +1,5 @@
 // 共享：Midscene → Bedrock/AgentCore 的两套 SigV4 签名场景。
-// 被 spike（tsx 直跑）和 worker（run-scope）共用。
+// 被 spike（tsx 直接运行）和 worker（run-scope）共用。
 // 用 .mts 扩展名：模块体系不依赖 package.json#type（ADR 0037 决策 3，全包统一 .mts → .mjs）。
 //
 // 两套签名 service code 不同（CONTEXT「AgentCore 浏览器会话」已警示别混）：
@@ -18,7 +18,7 @@ import { fromNodeProviderChain } from "@aws-sdk/credential-providers";
 // **惰性校验、非模块级 throw**（关键，别学 GlobalConfigManager import 时求值的反模式）：region 读取/校验下沉到真正
 // 要连 AgentCore/Bedrock 的入口（getRegion/getBaseUrl/两个 signer/BedrockAgentCoreClient），使**纯逻辑测试**（run-scope
 // 的派发/投票/网络分类，不连 AWS）import 本模块时不被 region 缺失误伤。undefined → fail-loud（对齐 Nova
-// region=None→NoRegionError；组合根 resolve_region 落实后经 env 注入；spike 直跑须 AWS_REGION=... 前缀）。
+// region=None→NoRegionError；组合根 resolve_region 落实后经 env 注入；spike 直接运行须带 AWS_REGION=... 前缀）。
 export function getRegion(): string {
   const r = process.env.AWS_REGION;
   if (!r) throw new Error("Midscene worker: AWS_REGION 未设——连 AgentCore/Bedrock 需显式 region");

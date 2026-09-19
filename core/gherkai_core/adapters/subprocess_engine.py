@@ -25,7 +25,7 @@ from gherkai_core.wire import event_from_line, job_to_line, raise_for_worker_exi
 
 
 class SubprocessWorkerHandle:
-    """一个在跑的 worker 子进程的句柄。stop() 翻成 SIGTERM→宽限→SIGKILL（ADR 0026 机制层）。"""
+    """一个正在运行的 worker 子进程的句柄。stop() 翻成 SIGTERM→宽限→SIGKILL（ADR 0026 机制层）。"""
 
     def __init__(self, proc: subprocess.Popen, pumps: tuple = ()) -> None:
         self._proc = proc
@@ -36,7 +36,7 @@ class SubprocessWorkerHandle:
         if proc.poll() is not None:
             return  # 已退出
         # SIGTERM —— worker 侧**协作式**响应（ADR 0024 终止契约）：Nova 的 handler 只置停止标志（flag-only、绝不
-        # raise），主流程在 act 边界安全点正常退 with 释放 AgentCore 会话；Midscene 的 handler 跑显式 cleanup 序列
+        # raise），主流程在 act 边界安全点正常退 with 释放 AgentCore 会话；Midscene 的 handler 执行显式 cleanup 序列
         # （会话释放优先）后 process.exit。两侧都不靠异常穿透解栈（raise 模型是 ADR 0024 被拒方案）。
         proc.terminate()
         try:
@@ -102,7 +102,7 @@ class SubprocessEngine:
             )
         except BaseException:
             # 起 worker 失败（cmd 不存在 / cwd 无效 / 其他 OSError）：管道两端是**裸 fd、没有 GC 兜底**，不显式
-            # 关就永久泄漏。调用方（schedule）把「起 worker 失败」吞成本 job 的 error 后继续跑下一个 job，故
+            # 关就永久泄漏。调用方（schedule）把「起 worker 失败」吞成本 job 的 error 后继续执行下一个 job，故
             # worker 命令配错这类「每 job 必炸」的场景会按 job 数累积泄漏 → 撞进程 fd 上限。
             os.close(events_r)
             os.close(events_w)
@@ -189,7 +189,7 @@ def _read_events(
 # 12 色 = 31-36（红/绿/黄/蓝/品/青）+ 91-96（各自亮版）。
 # **有意排除 37/39/97（白/默认/亮白）**：默认前景色保留给 cli main/core 自己的输出
 # （`[core <scope>:event]` 进度、plan:/run_id=/RunReport: 等，它们一律不上色 = 默认色，见 cli/gherkai_cli/__main__.py
-# 的 _progress）。这样 core 行与 worker 行的颜色域**物理不相交**、并发跑批时一眼能分辨「core 说的」vs
+# 的 _progress）。这样 core 行与 worker 行的颜色域**物理不相交**、并发批量运行时一眼能分辨「core 说的」vs
 # 「worker 透传的」。改本调色板时**勿加入 37/39/97**，否则会与 core 的默认色撞、破坏这条约定。
 _ANSI_COLORS = (31, 32, 33, 34, 35, 36, 91, 92, 93, 94, 95, 96)
 

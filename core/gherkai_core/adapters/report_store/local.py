@@ -183,7 +183,7 @@ def _reason_html(error_type: str | None, message: str | None) -> str:
     两分支口径同 render_text（有分类 → err 红字带分类 `error_type: message`；无分类 → 中性 note；空 message
     两侧同律——只显分类、不留吊着的冒号，`gherkai_cli.render` 的 job 行与此处一致）；
     fail-fast 派生态（skipped/aborted）error_type 恒 None、原因只在 message（ADR 0031 决定一）→ 用
-    中性 note 色显出来，不复用 err 红（决定二：颜色跟 status 走，别把没跑染成出错）。step 级失败原因原文
+    中性 note 色显出来，不复用 err 红（决定二：颜色跟 status 走，别把未运行染成出错）。step 级失败原因原文
     （ADR 0042 决策三）走同一函数，故两处样式不再靠人肉同步（曾各抄一份、空 message 的处置已分叉过）。
     """
     esc = html.escape
@@ -288,7 +288,7 @@ def render_index_html(manifest: dict, result: RunResult) -> str:
                 )
                 serr = _reason_html(st.error_type, st.message)
                 # 连锁失败旁注（ADR 0031 决定六）：被 scope 内短路的 step（shortcircuited=True，status=skipped）——
-                # 上游 error 后 worker 跳过了它、没在损坏环境上跑。读 shortcircuited 正交布尔（比旧的"按 status 顺序猜"
+                # 上游 error 后 worker 跳过了它、没在损坏环境上运行。读 shortcircuited 正交布尔（比旧的"按 status 顺序猜"
                 # 精确）；不改判定/severity（守纯 reducer 红线）。
                 # 下面这句与 cli 文本渲染的旁注同款措辞（那边提成了 `gherkai_cli.render._SHORTCIRCUIT_NOTE`；
                 # core 不能 import cli，故跨包不共享常量）——改一处要改两处，由 cli 侧的

@@ -5,10 +5,10 @@
 //   打开 wikipedia.org → 搜 "OpenAI" → 断言进入 OpenAI 词条页。
 // 断言：
 //   A 确定性：page.url() 含 /wiki/OpenAI（Playwright，可复现）
-//   B AI 断言：agent.aiAssert("当前在 OpenAI 的维基词条页")，跑 N=10 次测抖动
+//   B AI 断言：agent.aiAssert("当前在 OpenAI 的维基词条页")，执行 N=10 次测抖动
 // 度量：动作成功率、A/B 是否一致、B 的 10 次抖动率、各步耗时。
 //
-// 跑：cd midscene && AWS_REGION=us-east-1 node_modules/.bin/tsx spikes/midscene-sigv4/03-midscene-grounding.ts
+// 运行：cd midscene && AWS_REGION=us-east-1 node_modules/.bin/tsx spikes/midscene-sigv4/03-midscene-grounding.ts
 import OpenAI from "openai";
 import { PlaywrightAgent } from "@midscene/web/playwright";
 import { chromium, type Browser } from "playwright";
@@ -18,7 +18,7 @@ import {
   StopBrowserSessionCommand,
 } from "@aws-sdk/client-bedrock-agentcore";
 import { sigv4Fetch, signCdpUpgrade, getBaseUrl, MODEL, getRegion } from "../src/lib/agentcore-sigv4.mjs";
-// region 改惰性 getter（ADR 0033/0016 决策 C）；spike 直跑带 AWS_REGION=... 前缀，顶层求值 OK。
+// region 改惰性 getter（ADR 0033/0016 决策 C）；spike 直接运行时带 AWS_REGION=... 前缀，顶层求值 OK。
 const REGION = getRegion(), BASE_URL = getBaseUrl();
 
 const BROWSER_ID = "aws.browser.v1";

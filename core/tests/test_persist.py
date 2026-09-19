@@ -197,7 +197,7 @@ def test_running_phase_has_no_data_plane_file_until_complete(tmp_path):
     jobs_dir = tmp_path / "r" / "jobs"
     job_file = jobs_dir / (quote("s", safe="") + ".json")
 
-    # —— RUNNING 阶段（job 起跑、尚未完成）——
+    # —— RUNNING 阶段（job 开始运行、尚未完成）——
     p.on_event(ScopeStarted(scope_id="s", session_id="sess-1"))
     # 控制面：run_state 显示 running（进度可见）
     assert run_store.load_run_state("r").jobs["s"].status == Status.RUNNING

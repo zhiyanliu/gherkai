@@ -244,7 +244,7 @@ def test_render_run_state_shows_ended_at_when_terminal():
 
 
 def test_render_text_shows_reason_for_fail_fast_states():
-    """skipped/aborted 的 error_type 恒 None（ADR 0031 决定一）——「为什么没跑」只在 message，人读文本必须显；
+    """skipped/aborted 的 error_type 恒 None（ADR 0031 决定一）——「为什么没执行」只在 message，人读文本必须显；
     且 error_type 为 None 时不打裸 "None:" 前缀。"""
     jobs = [Job(scope_id=s, scope_name=s, engine="novaact", scenarios=[]) for s in ("checkout", "login")]
     a = JobResult(job=jobs[0], status=Status.SKIPPED)

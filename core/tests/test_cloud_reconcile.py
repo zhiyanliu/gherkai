@@ -1,8 +1,8 @@
 """cloud 无状态批量运行 core 侧测试（ADR 0034 P4a）：DdbEventLog + CloudLauncher + reconcile.tick(DDB 后端)。
 
 moto mock DDB/ECS——验 DdbEventLog 读全量重放 + task_exited 独立键空间 + CloudLauncher start_scope 调对 +
-reconcile.tick 用 DdbEventLog/DynamoDBRunStore/CloudLauncher 跑通（与 local SqliteEventLog/LocalRunStore 对拍语义）。
-moto 抓不到的真 DDB Stream 触发/EventBridge/真 Fargate 是 P4d 真跑边界。
+reconcile.tick 用 DdbEventLog/DynamoDBRunStore/CloudLauncher 走通（与 local SqliteEventLog/LocalRunStore 对拍语义）。
+moto 抓不到的真 DDB Stream 触发/EventBridge/真 Fargate 是 P4d 真实运行边界。
 """
 from __future__ import annotations
 
@@ -209,7 +209,7 @@ def test_cloud_launcher_arm_failure_does_not_block_launch():
 # ---------- reconcile.tick 用 DDB 后端（与 local 对拍）----------
 
 def test_tick_with_ddb_backend(events_table, ddb_run_store):
-    """reconcile.tick 用 DdbEventLog + DynamoDBRunStore + CloudLauncher（fake engine）跑通：起 job → 推进 → finalize。"""
+    """reconcile.tick 用 DdbEventLog + DynamoDBRunStore + CloudLauncher（fake engine）走通：起 job → 推进 → finalize。"""
     from gherkai_core.adapters.cloud_launcher import CloudLauncher
     from gherkai_core.reconcile import tick
 
@@ -242,7 +242,7 @@ def test_tick_with_ddb_backend(events_table, ddb_run_store):
 
 def test_ddb_event_log_queries_with_consistent_read():
     """records() 是 reconcile 的投影输入：finalize 前 _final_drain / 退出观察者刚写的尾事件必须**立即**可读
-    （ADR 0030 决定四），最终一致读可能漏尾事件、把已完成 job 投成仍在跑——故 Query 必带 ConsistentRead。"""
+    （ADR 0030 决定四），最终一致读可能漏尾事件、把已完成 job 投成仍在运行——故 Query 必带 ConsistentRead。"""
     class _Rec:
         def __init__(self):
             self.calls = []

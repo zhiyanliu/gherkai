@@ -1,6 +1,6 @@
 // 失败原因的一行有界文本（ADR 0042 决策一映射表 `act.error` / 决策三 `step_done.message`）——两处同一
 // 规则，故规则住一处。Nova 引擎 run_scope.py 的 `_error_text` 是其对称版，两侧必须同形（同一份 feature
-// 在两个引擎上跑，`explain` 与报告页的「原因」不该一侧一行、另一侧上千字符）。
+// 在两个引擎上运行，`explain` 与报告页的「原因」不该一侧一行、另一侧上千字符）。
 //
 // 规则：取首个非空行 → 折叠内部空白 → 封顶 `ERROR_TEXT_MAX` 个**码点**（不是码元，见下）。**为什么要压**：Playwright / Midscene
 // 的异常 `.message` 惯常拖着多行 call log，SDK 的 `errorMessage` 同理；整段进 message 会把 run 的 step 行、

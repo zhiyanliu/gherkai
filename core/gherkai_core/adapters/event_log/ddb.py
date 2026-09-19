@@ -2,7 +2,7 @@
 
 cloud 对位 local 的 SqliteEventLog：reconciler Lambda 经它读某 run 全量 events（worker PutItem 的执行事件
 + 退出观察者写的 task_exited）→ project 重放推演。**worker 侧不改**——worker 仍按 [0024] PutItem 执行事件到
-events 表（FargateEngine 已真跑），本类只是**读**它们 + 提供 task_exited 的**写**（退出观察者 Lambda 调）。
+events 表（FargateEngine 已实际运行过），本类只是**读**它们 + 提供 task_exited 的**写**（退出观察者 Lambda 调）。
 
 **表 schema 复用现有 events 表**（[0024]/[0033]：PK=pk(run_id#scope_id) / SK=seq(NUMBER) / body=JSON行）——不加 GSI、
 不改 schema：
@@ -58,7 +58,7 @@ class DdbEventLog:
             pk = events_pk(self._run_id, scope_id)
             # 逐 scope 全量 Query（含翻页；SK 升序保序）。worker 段 + 可能的 task_exited 高位 item 都在同 PK 下。
             # ConsistentRead：本读面是 reconcile 的投影输入，且 finalize 前的 _final_drain / 退出观察者写入紧接着
-            # 就要被读到——最终一致读可能漏掉刚写的尾事件，让投影把已完成 job 判成仍在跑（ADR 0030 决定四）。
+            # 就要被读到——最终一致读可能漏掉刚写的尾事件，让投影把已完成 job 判成仍在运行（ADR 0030 决定四）。
             kwargs = {"KeyConditionExpression": Key(PK_ATTR).eq(pk), "ScanIndexForward": True, "ConsistentRead": True}
             while True:
                 resp = self._table.query(**kwargs)

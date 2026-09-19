@@ -2,7 +2,7 @@
 
 绿即够的边界（CLAUDE.md「绿≠对·别过度」）：TTL 是纯算术、起隧道/守护循环用 fake provider 与 fake DDB
 覆盖「接线 + 终态判定 + TTL 兜底」逻辑。真实边界（ngrok 真起得来、隧道真可达、agent 真脱离进程组）
-分别由真跑与 `test_tunnel.py::test_ngrok_agent_detaches_from_cli_process_group`（真 spawn）覆盖。
+分别由真实运行与 `test_tunnel.py::test_ngrok_agent_detaches_from_cli_process_group`（真 spawn）覆盖。
 """
 from __future__ import annotations
 
@@ -42,7 +42,7 @@ def test_start_tunnel_for_jobs_maps_and_injects_headers(monkeypatch):
 
 
 def test_start_tunnel_for_jobs_propagates_tunnel_error(monkeypatch):
-    """provider 起不来 → TunnelError 直接冒给调用方（皮归「没开跑就被拒」退 2，不在本层吞成哨兵）。"""
+    """provider 起不来 → TunnelError 直接冒给调用方（皮归「没开始执行就被拒」退 2，不在本层吞成哨兵）。"""
     import pytest
 
     def boom(name):
@@ -63,7 +63,7 @@ def test_ttl_sums_job_budgets_plus_margin():
 
 def test_ttl_scales_past_the_old_fixed_hour():
     """本条锁住被修的病根：12 个默认预算（300s）的 job 已超旧的恒定 1h TTL——TTL 必须随 definition 涨，
-    否则守护会在 run 还在跑时拆隧道，剩余 job 以「AI 报导航失败」的假失败告终（ADR 0035 决策 3）。"""
+    否则守护会在 run 尚未结束时拆隧道，剩余 job 以「AI 报导航失败」的假失败告终（ADR 0035 决策 3）。"""
     jobs = [_job(f"s{i}", 300.0) for i in range(12)]
     assert tunnel_host.compute_watch_ttl_s(jobs) > 3600.0
 

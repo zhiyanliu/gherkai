@@ -1,6 +1,6 @@
-"""SubprocessLauncher + reconcile loop 真跑集成测试（ADR 0034 P3b）。
+"""SubprocessLauncher + reconcile loop 真实运行集成测试（ADR 0034 P3b）。
 
-**真 spawn echo_worker 子进程**（不产生 AWS 费用，但真 fd3/真退出码/真 SQLite）——这是「绿≠对」里该真跑的：
+**真 spawn echo_worker 子进程**（不产生 AWS 费用，但真 fd3/真退出码/真 SQLite）——这是「绿≠对」里该真实运行的：
 launcher 读真 fd3 落 SQLite、真 handle.wait() 拿退出码写 task_exited、reconcile loop 真推进到终态。
 纯逻辑部分（project/plan_next/条件写）已在 core 单测覆盖；此处补 launcher 接线的真进程边界。
 
@@ -82,7 +82,7 @@ def test_two_jobs_concurrency_one(tmp_path):
 
 
 def test_job_timeout_stops_worker_and_attributes_timeout(tmp_path):
-    """job timeout local enforce 真跑（ADR 0034「job timeout」节）：silent worker 卡死不吐新事件、不自退——
+    """job timeout local enforce 真实运行（ADR 0034「job timeout」节）：silent worker 卡死不吐新事件、不自退——
     launcher 的 deadline timer 到点协作停（SIGTERM→echo 干净退 0）→ task_exited(timed_out=True)
     → project 判 ERROR + error_type=timeout。**协作退 0 也不误判 passed**（timed_out 短路内容判定）。"""
     from gherkai_core.project import project_full
@@ -145,7 +145,7 @@ def test_grace_query_failure_never_spawns_a_worker(tmp_path):
 
 
 def test_crash_worker_finalizes_error(tmp_path):
-    """echo_worker(crash) 非 0 退出 → task_exited 带非0 → project 判 error → run finalize error（机制二真跑）。"""
+    """echo_worker(crash) 非 0 退出 → task_exited 带非0 → project 判 error → run finalize error（机制二真实运行）。"""
     meta, log, store, launcher = _setup(tmp_path, "crash", "a")
     run_reconcile_loop("run-1", meta, log, store, launcher, max_concurrency=1,
                        poll_interval_s=0.05, now_iso_fn=_now)
@@ -160,7 +160,7 @@ def test_report_still_written_when_the_run_duration_read_fails(tmp_path):
     """run 级墙钟取数失败不得连坐报告收尾（ADR 0030 决定三：commit point 之后的失败无人重试）。
 
     墙钟是派生指标，取它要在 finalize commit **之后**多读一次 RunState——落盘读会因 IO 错/文件写坏抛。
-    裸抛出去 = 判定已 commit、报告没落，且 `drive_local_reconcile` 的拆隧道那步（在本函数返回后才跑）被跳过、
+    裸抛出去 = 判定已 commit、报告没落，且 `drive_local_reconcile` 的拆隧道那步（在本函数返回后才执行）被跳过、
     隧道留在公网。故按缺值走：循环正常返回、报告照写、报告里的 run 级墙钟为 None（渲染成「?」）。
     cloud 推进侧同形，两宿主各一条护栏。
     """
@@ -216,7 +216,7 @@ def test_report_still_written_when_the_run_duration_read_fails(tmp_path):
 def test_build_local_reconcile_resolves_region_like_foreground(tmp_path, monkeypatch):
     """region 走与前台 run 相同的解析链（ADR 0016 决策 C）：不显式给 --region 时 env/profile config 兜底、
     落实成字符串注入 worker env——曾原样透传 None：worker 里 AgentCore validate_region 见 None 即崩
-    （exit 1 零事件，detached 真跑复现）。"""
+    （exit 1 零事件，detached 实际运行复现）。"""
     from gherkai_runtime.detached import build_local_reconcile
 
     # 造最小 run 落盘（build_local_reconcile 要 load_run_meta 读回）
@@ -347,7 +347,7 @@ def test_run_state_timestamps_share_one_format(tmp_path):
 
 def test_drive_local_reconcile_drives_to_terminal_then_tears_down_tunnel(tmp_path, monkeypatch):
     """local 推进唯一入口的三步护栏（ADR 0034 三宿主同一套机制 + ADR 0035「终态即拆」）：装配 → 推到终态 → 拆隧道。
-    只把引擎替成 echo_worker、只桩掉「真杀 pid」这一 OS 边界，其余真跑——漏掉拆隧道那步即隧道留在公网。"""
+    只把引擎替成 echo_worker、只桩掉「真杀 pid」这一 OS 边界，其余真实运行——漏掉拆隧道那步即隧道留在公网。"""
     from gherkai_runtime import compose, detached
     from gherkai_runtime import tunnel as gtunnel
 

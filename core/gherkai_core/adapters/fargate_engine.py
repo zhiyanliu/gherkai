@@ -1,4 +1,4 @@
-"""Fargate Engine adapter（ADR 0024「远程传输演进」/ 0026 机制层）：在 ECS Fargate 上跑一个讲 ADR 0024 协议的 worker。
+"""Fargate Engine adapter（ADR 0024「远程传输演进」/ 0026 机制层）：在 ECS Fargate 上运行一个讲 ADR 0024 协议的 worker。
 
 对称 `subprocess_engine.py`（同一 `Engine` port、同一 `(WorkerHandle, Iterator[Event])` 形状），只把「进程世界」换成
 「ECS/DDB 世界」——四条 I/O 边缘各自换传输（ADR 0024 远程传输演进表）：
@@ -13,7 +13,7 @@
 **红线（ADR 0016/0024/0026）**：boto3 client 由组合根注入、adapter 不自建（`require_boto3` 首行守卫）；schedule 仍纯归约、
 对 ECS/DDB 无知（存活/退出码判定藏在本 adapter 的迭代器/handle 内，非 schedule）；port 签名/线格式/wire 一行不改（复用 `event_from_line`/`job_to_line`）。
 
-**PK 由 run_id + scope_id 复合**（防重复跑同一 feature 撞键——scope_id 只在 feature 内稳定、不含 run_id，见 ADR 0024）：
+**PK 由 run_id + scope_id 复合**（防重复运行同一 feature 撞键——scope_id 只在 feature 内稳定、不含 run_id，见 ADR 0024）：
 run_id 组合根构造期注入本 adapter（对称已有 artifact_s3 落点注入，__main__ 在 new_run_id 后才 build_engines）。
 
 **证据边界（CLAUDE.md「绿≠对」）**：moto 能验接线/RunTask 调对/Query 增量/退出码翻异常；但 moto 对 ECS `lastStatus`
@@ -74,12 +74,12 @@ class TaskProbe(NamedTuple):
 
 
 def events_pk(run_id: str, scope_id: str) -> str:
-    """events 表分区键 = run_id#scope_id（复合，防重复跑撞键）。worker/adapter 各自本地拼、须逐字一致。"""
+    """events 表分区键 = run_id#scope_id（复合，防重复运行撞键）。worker/adapter 各自本地拼、须逐字一致。"""
     return f"{run_id}#{scope_id}"
 
 
 class FargateWorkerHandle:
-    """一个在跑的 Fargate task 的句柄。stop() 翻成 StopTask（ADR 0026 机制层，对称 SubprocessWorkerHandle）。"""
+    """一个正在运行的 Fargate task 的句柄。stop() 翻成 StopTask（ADR 0026 机制层，对称 SubprocessWorkerHandle）。"""
 
     def __init__(self, ecs_client, cluster: str, task_arn: str) -> None:
         self._ecs = ecs_client
@@ -92,7 +92,7 @@ class FargateWorkerHandle:
         **grace_period_s 在 Fargate 上无法逐次传**（ADR 0024/0032）：容器 SIGTERM→SIGKILL 的宽限由 task-def 期
         常量 `stopTimeout`（≤120s）决定、StopTask 不收运行期 grace 参数。故此处忽略入参、只发 StopTask——
         Nova grace 下限 150s > stopTimeout 上限 120s：真容器标定（ADR 0032 结论 4）已厘清——subprocess 侧
-        150 满足不变量、Fargate 侧对最坏长 act（跑满 act_timeout）结构性接受 SIGKILL + AgentCore TTL 兜底。
+        150 满足不变量、Fargate 侧对最坏长 act（耗满 act_timeout）结构性接受 SIGKILL + AgentCore TTL 兜底。
         参数保留是为 port 对称。
         """
         self._ecs.stop_task(cluster=self._cluster, task=self._task_arn, reason="core requested stop")
@@ -108,7 +108,7 @@ class FargateEngine:
       （ADR 0033）产出、组合根注入**；本 adapter 只认字段、不知真 ARN（moto 测用假值验接线）。
       **`task_definition` 是一个显式 revision ARN、不是 family 名**（ADR 0038 不变量「运行时只用 definition 里的
       显式 revision，永不用 family 取最新」）：family 名下 ECS 取该 family 最新 ACTIVE revision，多 variant 并存时
-      任何一次 `push-worker` 都会劫持在跑的 run（中途换 step 集）。选哪个 revision 是组合根的事（`compose` 按
+      任何一次 `push-worker` 都会劫持正在运行的 run（中途换 step 集）。选哪个 revision 是组合根的事（`compose` 按
       definition 的 `worker_variant` 解析），本 adapter 原样传给 RunTask、不做任何名字推导。
     - job_s3：(bucket, prefix) job 对象落点；events_table_name：events 表名（worker PutItem 目标）。
     - region：组合根**落实成具体字符串**的 AWS region（`--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > profile config，
@@ -119,7 +119,7 @@ class FargateEngine:
       **不接收 profile**（正确的非对称，ADR 0016 决策 C）：Fargate 容器无 `~/.aws`、用 task role 凭证链——注入一个容器内
       不存在的 profile 名会让 boto3 在 client 创建期 `ProfileNotFound` 崩、且盖过 task role。profile 只对 subprocess
       有意义（继承本机 `~/.aws`），故只 `build_engines` 注入、本 adapter 绝不碰。
-    - poll_interval_s：Query 轮询间隔（延迟 vs 读放大权衡，ADR 0024，待真跑标定；默认 0.5s）。
+    - poll_interval_s：Query 轮询间隔（延迟 vs 读放大权衡，ADR 0024，待实际运行标定；默认 0.5s）。
     """
 
     def __init__(
@@ -140,7 +140,7 @@ class FargateEngine:
         extra_env: dict | None = None,  # 通用附加 env（组合根算好，如 GHERKAI_EXTRA_HTTP_HEADERS，ADR 0035）——逐条注 RunTask overrides
         sdk_artifact_dir_env: dict | None = None,  # 按引擎的 SDK 产物落点 env（如 {"NOVA_LOGS_DIR": "/容器内/…/nova-trajectories"}）——
                                    # worker ArtifactUploader 用其父级算 run_dir/相对 key。**缺它 uploader run_dir=None→no-op 报 file://→产物丢**
-                                   # （真跑暴露：只注 ARTIFACT_S3_* 不够，SDK 落点 env 也必注）。引擎无关：由组合根按引擎算好、本 adapter 只转发。
+                                   # （实际运行暴露：只注 ARTIFACT_S3_* 不够，SDK 落点 env 也必注）。引擎无关：由组合根按引擎算好、本 adapter 只转发。
         region: str | None = None, # 注入 worker 的 AWS_REGION（组合根已落实成具体字符串，ADR 0016 决策 C）；None=真无 region、worker fail-loud
         poll_interval_s: float = 0.5,
         gap_grace_s: float = EC_GAP_GRACE_S,  # 流式期断号宽限（ADR 0024「读一致性」，见模块常量注释）
@@ -171,7 +171,7 @@ class FargateEngine:
         self._null_exit_grace_polls = null_exit_grace_polls
 
     def start_scope(self, job: Job) -> str:
-        """fire-and-forget 起一个 Fargate task 跑 job，返回 task_arn（ADR 0034：无状态批量运行的 Engine 增出形状）。
+        """fire-and-forget 起一个 Fargate task 执行 job，返回 task_arn（ADR 0034：无状态批量运行的 Engine 增出形状）。
 
         = run_scope 的前半（PutObject job + RunTask），**不返回事件迭代器、不轮询**——cloud 无状态路径下 worker
         自 PutItem events 到 DDB、退出观察者 Lambda 补 task_exited、reconciler Lambda 从表重放，没有「调用方持续
@@ -191,7 +191,7 @@ class FargateEngine:
         # 挂 S3 lifecycle 过期清理（ADR 0033）。**用 tag 而非 key 前缀过滤**——job-in 落 `<prefix><run_id>/jobs-in/`，
         # run_id 在中间，lifecycle 的纯前缀 filter 框不住它、且不能误伤同前缀下的判定真值(jobs/)/报告；tag 精确只框 job-in。
         # Tagging 是 URL-encoded 查询串格式（`k=v`）。**打 tag 的是编排进程**（本 put_object 在 FargateEngine=组合根注入的
-        # s3_client 上跑、用运维凭证），非 worker task role（后者只 GetObject 读 job-in），故无需给 task role 加 PutObjectTagging。
+        # s3_client 上执行、用运维凭证），非 worker task role（后者只 GetObject 读 job-in），故无需给 task role 加 PutObjectTagging。
         self._s3.put_object(
             Bucket=self._job_bucket, Key=job_key,
             Body=(job_to_line(job) + "\n").encode("utf-8"),
@@ -213,7 +213,7 @@ class FargateEngine:
             env.append({"name": "ARTIFACT_S3_BUCKET", "value": self._artifact_s3[0]})
             env.append({"name": "ARTIFACT_S3_PREFIX", "value": self._artifact_s3[1]})
         # SDK 产物落点 env（NOVA_LOGS_DIR/MIDSCENE_RUN_DIR，组合根按引擎算好的容器内路径）：worker ArtifactUploader
-        # 用其父级算 run_dir/相对 key——**缺它 uploader run_dir=None→no-op→产物丢**（真跑暴露；只注 ARTIFACT_S3_* 不够）。
+        # 用其父级算 run_dir/相对 key——**缺它 uploader run_dir=None→no-op→产物丢**（实际运行暴露；只注 ARTIFACT_S3_* 不够）。
         for name, value in self._sdk_artifact_dir_env.items():
             env.append({"name": name, "value": value})
         for name, value in self._extra_env.items():  # 通用附加 env（如 GHERKAI_EXTRA_HTTP_HEADERS，ADR 0035）
@@ -246,7 +246,7 @@ class FargateEngine:
         return task_arn
 
     def run_scope(self, job: Job) -> tuple[FargateWorkerHandle, Iterator[Event]]:
-        """起一个 Fargate task 跑 job，返回 (句柄, DDB events 事件流迭代器)。对称 SubprocessEngine.run_scope。
+        """起一个 Fargate task 执行 job，返回 (句柄, DDB events 事件流迭代器)。对称 SubprocessEngine.run_scope。
 
         同步 run 路径用（schedule pull 式迭代）。delegate 到 _put_job_and_run_task 起 task（与 start_scope
         单一真源），再包 handle + 事件迭代器。cloud 无状态路径不用它、用 start_scope（fire-and-forget）。
@@ -279,7 +279,7 @@ class FargateEngine:
         while True:
             # 增量 Query：本 scope 的 **worker 段**、last_seq<SK<EXIT_SK、SK 升序（保序）。最终一致读（默认）——
             # 漏读靠「游标只越过连续前缀」补齐（见下断号分支）。**上界必须收在 EXIT_SK-1**：退出观察者的 task_exited
-            # item 挂同 PK 的保留高位 SK 且无 body（ADR 0034 机制一），读进 worker 段即 KeyError；ADR 0024 亦定「单调/断号只跑 worker 段」。
+            # item 挂同 PK 的保留高位 SK 且无 body（ADR 0034 机制一），读进 worker 段即 KeyError；ADR 0024 亦定「单调/断号只作用于 worker 段」。
             resp = self._events.query(
                 KeyConditionExpression=Key(PK_ATTR).eq(pk) & Key(SK_ATTR).between(last_seq + 1, EXIT_SK - 1),
                 ScanIndexForward=True,
@@ -335,7 +335,7 @@ class FargateEngine:
                     # 与 scope_done 路径复用同一读码逻辑（此刻已 STOPPED、几乎立即返回，除非撞落值延迟窗口）。
                     raise_for_worker_exit(self._await_exit_code(task_arn), code_label="exitCode")
                     return
-                time.sleep(self._poll)  # task 还在跑、暂无新事件 → 等一个轮询周期再拉（延迟 vs 读放大，ADR 0024）
+                time.sleep(self._poll)  # task 仍在运行、暂无新事件 → 等一个轮询周期再拉（延迟 vs 读放大，ADR 0024）
 
     def _count_missing(self, task_arn: str, missing_polls: int) -> int:
         """DescribeTasks 查不到 task 的有界宽限计数：超 `missing_task_grace_polls` 即抛（ADR 0024「exitCode 落值延迟」条第三态）。

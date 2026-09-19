@@ -14,7 +14,7 @@ classifiers = [
     "Operating System :: OS Independent",
     "Topic :: Software Development :: Testing",
 ]
-# 仅 Gherkin 解析依赖——核心不 import 任何引擎（ADR 0023/0024：引擎跑在 worker 子进程里）
+# 仅 Gherkin 解析依赖——核心不 import 任何引擎（ADR 0023/0024：引擎运行在 worker 子进程里）
 # 下限 31.0.0：parse.py 用顶层导出 `from gherkin import Parser, Compiler`，该导出 ≥31.0.0 才有（ADR 0025）
 dependencies = [
     "gherkin-official>=31.0.0",
@@ -48,7 +48,7 @@ style = "pep440"
 strict = true
 dirty = true
 # metadata 不显式开（用 dunamai 默认「非 tag commit / 脏树才带 +local」）：显式 true 会让**干净 tag commit** 也算出
-# `X.Y.Z+<sha>`，发布 gate（版本==tag）必败、PyPI 也拒收本地段——真跑验过；ADR 0037 决策 2b。
+# `X.Y.Z+<sha>`，发布 gate（版本==tag）必败、PyPI 也拒收本地段——实际运行验过；ADR 0037 决策 2b。
 
 [tool.hatch.build.targets.sdist]
 exclude = ["DEVELOPMENT.md"]  # contributor 文档不进发行包（wheel 本就不含；sdist 默认全收）

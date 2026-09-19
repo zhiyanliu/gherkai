@@ -10,7 +10,7 @@
 
 **版本由调用方传进来**（`__main__._cmd_skill_install` 交 `_installed_version()`，与后端版本 skew 比对同一取法，
 ADR 0037 决策 7）：本模块不自己去要版本，既避免与 `__main__` 循环 import，也让「版本怎么取」单点维护。
-源码直跑取不到 → 标记记 `UNKNOWN_VERSION`、安装照常完成（与「取不到就跳过比较」的分叉一致）；
+从源码直接运行取不到 → 标记记 `UNKNOWN_VERSION`、安装照常完成（与「取不到就跳过比较」的分叉一致）；
 `_dist_version()` 给 `--version` 显示用的占位串绝不写进标记。
 
 **输出面**：stdout 只属 `--print`（供管道），其余全部诊断走 stderr（同 `__main__._progress` 的约定）。

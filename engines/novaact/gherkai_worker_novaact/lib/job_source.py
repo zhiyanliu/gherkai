@@ -8,7 +8,7 @@
 
 两态（ADR 0024）：subprocess 态读 stdin 首行 JSON；S3 态（JOB_S3_URI 指针 + GetObject，因 RunTask overrides
 8192 上限塞不下含 feature 的 job）Fargate 化用。判据=有没有注入 JOB_S3_URI，非「是否 Fargate」（ADR 0016 红线）。
-**无「回落调试」分支**：stdin 本就是手动直跑入口，subprocess 态即调试态。
+**无「回落调试」分支**：stdin 本就是手动直接运行入口，subprocess 态即调试态。
 """
 from __future__ import annotations
 

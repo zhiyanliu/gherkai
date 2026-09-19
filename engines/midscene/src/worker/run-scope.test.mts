@@ -1,5 +1,5 @@
 // run-scope worker 单测（ADR 0024/0014/0028）——派发分支 + 投票多数票数学 + 网络瞬时分类。
-// 跑：npm test（node --import tsx --test "src/**/*.test.mts"）。
+// 运行：npm test（node --import tsx --test "src/**/*.test.mts"）。
 // 与 Nova 引擎 test_argument.py / test_transient_network.py 对称：纯逻辑、注 fake agent、不连 AWS。
 //
 // 事件经注入的 fake sink 收集（ADR 0024 I/O 边缘可注入接口：emit 从模块级 fd 写改为参数注入的 EventSink，
@@ -10,7 +10,7 @@ import assert from "node:assert";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { spawn } from "node:child_process";  // 自述入口的 stdout 完整性只能真跑子进程验（见文件末那条）
+import { spawn } from "node:child_process";  // 自述入口的 stdout 完整性只能真实运行子进程验（见文件末那条）
 
 const _events: any[] = [];
 const testSink = { emit: async (e: unknown) => { _events.push(e); } };  // 注入进 runStep/runScenario
@@ -37,7 +37,7 @@ function fakeAgent(boolSeq: boolean[] = []) {
 const fakePage = { goto: async () => {} } as any;
 
 async function importMod() {
-  // run-scope.mts 无入口守卫、也不在顶层跑 main（入口是 bin.mts，ADR 0037 决策 3）→ import 只拿具名导出。
+  // run-scope.mts 无入口守卫、也不在顶层执行 main（入口是 bin.mts，ADR 0037 决策 3）→ import 只拿具名导出。
   return await import("./run-scope.mjs");
 }
 
@@ -279,13 +279,13 @@ test("runScenario: 全 passed 时不短路、无 step_skipped", async () => {
 });
 
 test("runScenario: failed 不触发短路（判据锁 error，非 failed）", async () => {
-  // failed 是业务结论、环境没坏，后续步该照跑——只有 error（执行故障）才短路。
+  // failed 是业务结论、环境没坏，后续步该照常执行——只有 error（执行故障）才短路。
   const { runScenario } = await importMod();
   const { agent } = fakeAgent([false, true]);  // 第一个 Then failed，第二个 Then passed
   const steps = [step("Then", '"对吗A"', 0), step("Then", '"对吗B"', 1)];
   const statuses = await runScenario(agent, fakePage, "sc:0", steps, 1,
     { snapshotReport: async () => {} } as any, { mtime: -1 }, testSink);  // 抢传 no-op（这些 fake agent 无 reportFile、抢传跳过）
-  assert.deepEqual(statuses, ["failed", "passed"]);  // failed 不短路，第二步照跑
+  assert.deepEqual(statuses, ["failed", "passed"]);  // failed 不短路，第二步照常执行
   assert.equal(events().filter((e) => e.type === "step_skipped").length, 0);
 });
 
@@ -368,7 +368,7 @@ test("runScenario: 每变化 step 后抢传 report（snapshot overwrite）", asy
 });
 
 test("runScenario: 抢传失败（snapshotReport 抛）被吞、不打断 step 循环（best-effort 不变量）", async () => {
-  // 验 run-scope.mts 里 runScenario 的 try{snapshotReport}catch{log} 分工：lib 抛→worker 吞、继续跑完剩余 step。
+  // 验 run-scope.mts 里 runScenario 的 try{snapshotReport}catch{log} 分工：lib 抛→worker 吞、继续运行完剩余 step。
   // 若有人误删该 catch 或改 rethrow，本测试会红（抢传失败会打断 step 循环、statuses 不全）。
   const { runScenario } = await importMod();
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "snapfail-"));
@@ -381,7 +381,7 @@ test("runScenario: 抢传失败（snapshotReport 抛）被吞、不打断 step �
   const { snaps, uploader } = spyUploader(true);  // snapshotReport 每次抛
   const steps = [step("When", '"a"', 0), step("When", '"b"', 1), step("When", '"c"', 2)];
   const statuses = await runScenario(agent, fakePage, "sc:0", steps, 1, uploader, { mtime: -1 }, testSink);
-  // 抢传每步都抛，但被吞：三步全跑完、全 passed（statuses 完整），抢传也每步都试过（snaps 三次）
+  // 抢传每步都抛，但被吞：三步全部运行完、全 passed（statuses 完整），抢传也每步都试过（snaps 三次）
   assert.deepEqual(statuses, ["passed", "passed", "passed"], "抢传失败不影响 step 执行结果");
   assert.equal(snaps.length, 3, "每步都试了抢传（虽都抛，被吞后继续）");
 });
@@ -491,12 +491,12 @@ test("shutdownSequence: cleanupFailed → 退出码 1（泄漏可观测）", asy
   assert.equal(await shutdownSequence(deps), 1, "会话释放失败 → 退 1");
 });
 
-test("shutdownSequence: reportFile 空窗 → cleanup 照跑、抢传跳过", async () => {
+test("shutdownSequence: reportFile 空窗 → cleanup 照常执行、抢传跳过", async () => {
   const { shutdownSequence } = await importMod();
   const { order, deps } = shutdownSpy({ reportFile: null });
   await shutdownSequence(deps);
   assert.deepEqual(order, ["cleanup", "drain"],
-    "无 reportFile：cleanup 照跑、interruptSnapshot 内部跳过 snapshot，截图队列照排空");
+    "无 reportFile：cleanup 照常执行、interruptSnapshot 内部跳过 snapshot，截图队列照排空");
 });
 
 
@@ -537,8 +537,8 @@ test("drainArtifactQueue: drain 抛（上传器坏了 / 没这个方法）→ �
 });
 
 
-// ---- 自述入口（ADR 0036）的 stdout payload 完整性：真跑子进程 + 真 pipe ----
-// **必须真跑**：截断只发生在「真 pipe + 真 process.exit + 真 tsx 非阻塞 fd 1」的组合里，注 fake sink 的单测
+// ---- 自述入口（ADR 0036）的 stdout payload 完整性：真实运行子进程 + 真 pipe ----
+// **必须真实运行**：截断只发生在「真 pipe + 真 process.exit + 真 tsx 非阻塞 fd 1」的组合里，注 fake sink 的单测
 // 看不见它（写法看着都对、绿也照绿）。故这条 spawn 真 worker、喂超 64KB（pipe 缓冲）的 payload，断言 stdout
 // 是完整可解析 JSON——护住「写完再退」的机制（见 run-scope.mts writeStdoutFlushed 注释里两种失败写法）。
 test("--match-steps: 超 64KB payload 经 pipe 完整送出（ADR 0036，不被 exit 截断）", async () => {
@@ -560,16 +560,16 @@ test("--match-steps: 超 64KB payload 经 pipe 完整送出（ADR 0036，不被 
 
 
 // ---- 能力自述 --capabilities（ADR 0036「5.」）：JSON 形状 + min_grace_s 的来路（ADR 0024「引擎自报下限」）----
-// **真跑入口**：组合根消费的就是这条路（spawn worker → 读 stdout 一行 JSON → 拿 min_grace_s 当 grace 下限），
-// 且「不建会话、不读 stdin、零费用」只有真跑才看得见——本测试不喂 stdin、不给 AWS 凭证，照样该退 0。
+// **真实运行入口**：组合根消费的就是这条路（spawn worker → 读 stdout 一行 JSON → 拿 min_grace_s 当 grace 下限），
+// 且「不建会话、不读 stdin、零费用」只有真实运行才看得见——本测试不喂 stdin、不给 AWS 凭证，照样该退 0。
 // 起源码形态的 bin 要有 TS 转译能力：`--import tsx` 传绝对 URL（与 cwd 无关），不靠 Node 原生 type stripping
-// （那要 Node ≥22.18，而包只声明 >=22——同 user-steps.test.mts 的真跑层）。
+// （那要 Node ≥22.18，而包只声明 >=22——同 user-steps.test.mts 的真实运行层）。
 test("--capabilities: 一个 JSON 对象即退 0；五键含 deterministic_steps/model_id；min_grace_s = 收尾各段预算之和 + 余量，当前 = 31s", async () => {
   const {
     INFLIGHT_SETTLE_MS, STOP_SESSION_BUDGET_MS, BROWSER_CLOSE_BUDGET_MS, QUEUE_DRAIN_EXIT_MS, MIN_GRACE_MARGIN_MS,
   } = await importMod();
   const { UPLOAD_TIMEOUT_MS } = await import("../lib/artifact-upload.mjs");
-  // 自报的 model_id 得与真跑时喂给 SDK 的模型名同源（modelConfig() 的 MIDSCENE_MODEL_NAME），故从那个模块取真值比对、
+  // 自报的 model_id 得与实际运行中喂给 SDK 的模型名同源（modelConfig() 的 MIDSCENE_MODEL_NAME），故从那个模块取真值比对、
   // 不在测试里写第二份字面量——写死了就只能证明「自述没变」，证不了「自述 = 实际用的模型」。
   const { MODEL } = await import("../lib/agentcore-sigv4.mjs");
   const proc = spawn(process.execPath, [
@@ -592,7 +592,7 @@ test("--capabilities: 一个 JSON 对象即退 0；五键含 deterministic_steps
   assert.equal(typeof got.model_id, "string", `model_id 该是串：${raw}`);
   assert.ok(got.model_id.length > 0, `model_id 不该空：${raw}`);
   assert.equal(got.model_id, MODEL, "自报的模型得就是真交给 SDK 的那个，不是另写的字面量");
-  // deterministic_steps = 注册表清单（ADR 0036「2.」，每项 pattern/description/example）。真跑才照得出「清单
+  // deterministic_steps = 注册表清单（ADR 0036「2.」，每项 pattern/description/example）。实际运行才照得出「清单
   // 与 min_grace_s 同一份自述里一起给」——内建脚手架的注册副作用只在真进程里发生。
   assert.ok(Array.isArray(got.deterministic_steps) && got.deterministic_steps.length > 0,
     `清单该非空（内建脚手架至少一条）：${raw}`);
@@ -616,7 +616,7 @@ test("--capabilities: 一个 JSON 对象即退 0；五键含 deterministic_steps
 
 
 // ---- 删掉的 flag 不留别名：--list-deterministic（ADR 0036 被拒方案「每个自述项一个独立 flag」）----
-// **必须真跑**：「argv 里的某个 flag 不再被任何分支认领 → 掉进 job 模式」是进程 + argv + stdin 层的真实
+// **必须真实运行**：「argv 里的某个 flag 不再被任何分支认领 → 掉进 job 模式」是进程 + argv + stdin 层的真实
 // 行为，注 fake 的单测照不出（留个别名照样绿）。留了别名就等于保留第二个非 job 入口，run 前置每加一个自述项
 // 就多一次 spawn，正是那条被拒方案的坑。stdin 给 /dev/null（stdio ignore）：job 模式读到空载荷立刻非零退出、
 // 不挂在等 stdin 上。
@@ -668,7 +668,7 @@ test("runStep: aiAct 抛异常 → error 的 step_done 仍带本 step 的 token 
 
 
 // ---- 模型选择（ADR 0044 决策 2/3）：喂 SDK 的家族键 + MIDSCENE_MODEL_ID 覆盖 + 坏配置在启动期就被挡下 ----
-// 家族键这条是纯逻辑（agentOpts 不碰 page/browser），env 那两条**必须真跑子进程**：MODEL 在模块 import 时定值
+// 家族键这条是纯逻辑（agentOpts 不碰 page/browser），env 那两条**必须真实运行子进程**：MODEL 在模块 import 时定值
 // （模块级读 env），同进程里改 process.env 再 import 拿不到新值——「env 真的贯通到自述与 SDK 配置」只有另起
 // 一个带 env 的进程才照得出。
 test("agentOpts: modelConfig 喂 SDK 的是 MIDSCENE_MODEL_FAMILY（旧的单一家族硬开关不留）", async () => {
@@ -698,8 +698,8 @@ test("agentOpts: modelConfig 喂 SDK 的是 MIDSCENE_MODEL_FAMILY（旧的单一
   }
 });
 
-/** 真跑 bin.mts 的入口，带定制 env（继承当前 env、但把模型那两个键按本条测试的意思显式置好，
- *  免得跑测试的 shell 里已有的覆盖把结论污染）。 */
+/** 实际运行 bin.mts 的入口，带定制 env（继承当前 env、但把模型那两个键按本条测试的意思显式置好，
+ *  免得运行测试的 shell 里已有的覆盖把结论污染）。 */
 async function spawnWorker(args: string[], modelEnv: Record<string, string | undefined>) {
   const env: Record<string, string | undefined> = { ...process.env, ...modelEnv };
   for (const [k, v] of Object.entries(modelEnv)) if (v === undefined) delete env[k];

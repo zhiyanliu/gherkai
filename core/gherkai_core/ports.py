@@ -1,8 +1,8 @@
 """ports 层（ADR 0016 六边形架构）：核心的主要注入口在此（另两个见末段），具体 adapter 由组合根注入。
 
 四个 port（关注点拆开，不揉成上帝 module）：
-- Engine        —— 真正跑一个 scope（spawn worker、讲 ADR 0024 协议）；adapter = 子进程/Fargate
-- RunStore      —— 控制面：run/job 状态、血缘、起止（频繁读写，撑轮询续跑与无状态批量运行的条件写）
+- Engine        —— 真正运行一个 scope（spawn worker、讲 ADR 0024 协议）；adapter = 子进程/Fargate
+- RunStore      —— 控制面：run/job 状态、血缘、起止（频繁读写，撑轮询接力与无状态批量运行的条件写）
 - ResultStore   —— 数据面：每 scenario 判定真值、投票（追加为主）
 - ReportStore   —— 归集报告产物为派生只读导航视图（RunReport：manifest + index，ADR 0027）
 
@@ -35,12 +35,12 @@ from gherkai_core.model import (
 
 
 # ============================================================================
-# Engine port（ADR 0024/0026）：跑一个 scope，流式回事件，可优雅停
+# Engine port（ADR 0024/0026）：运行一个 scope，流式回事件，可优雅停
 # ============================================================================
 
 
 class WorkerHandle(Protocol):
-    """一个在跑的 worker 的句柄（schedule 持有，用于 stop）。
+    """一个正在运行的 worker 的句柄（schedule 持有，用于 stop）。
 
     不暴露进程/信号细节——「怎么停」的机制藏在 adapter 内部（ADR 0026）：子进程 SIGTERM→宽限→SIGKILL（真用运行期 grace）；
     Fargate `StopTask`（忽略运行期 grace 入参，宽限由 task-def 期 `stopTimeout` 定，ADR 0024「终止契约」）。
@@ -58,7 +58,7 @@ class Engine(Protocol):
     """
 
     def run_scope(self, job: Job) -> tuple[WorkerHandle, Iterator[Event]]:
-        """起一个 worker 跑这个 job，返回 (句柄, ADR 0024 事件流迭代器)。
+        """起一个 worker 运行这个 job，返回 (句柄, ADR 0024 事件流迭代器)。
 
         事件流逐条产出（ADR 0024 流式）；迭代结束 = worker 正常退出。
         句柄供 schedule 在超时/fail-fast 时 stop（ADR 0026）。
@@ -102,11 +102,11 @@ class JobSink(Protocol):
 class RunStore(Protocol):
     """控制面：一次 run 的 **definition（RunMeta）+ 运行态（RunState）**，不存判定明细（ADR 0016 三层切分）。
 
-    definition（run_id/created_at/跑哪些 job）执行前确定；运行态（总 status/各 job status/血缘/起止）
+    definition（run_id/created_at/执行哪些 job）执行前确定；运行态（总 status/各 job status/血缘/起止）
     执行后产生。判定明细真值在 ResultStore（不在此）。local adapter = LocalRunStore（落 run_meta.json + run_state.json）。
 
     实时写（ADR 0030）：run 生命周期按三段落库——create_run（开始：写 definition + 初始全 pending 态）→
-    update_job_state（每 job 起跑/完成：按 scope_id 刷单个 JobState）→ finalize_run（commit point：写总 status + ended_at）。
+    update_job_state（每 job 开始运行/完成：按 scope_id 刷单个 JobState）→ finalize_run（commit point：写总 status + ended_at）。
     save_run 保留作「一次性写完整态」便捷方法（可由 create_run+finalize 组合）。
     """
 

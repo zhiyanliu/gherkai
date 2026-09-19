@@ -322,20 +322,20 @@ def test_key_shaped_tokens_are_documented_keys():
 
 
 def test_contract_copy_equals_transform_of_source():
-    """副本必须逐字节等于 `transform(手写源)`：改了源没重跑生成器即红（副本不是第二事实源，是渲染产物）。"""
+    """副本必须逐字节等于 `transform(手写源)`：改了源没重新运行生成器即红（副本不是第二事实源，是渲染产物）。"""
     sys.path.insert(0, str(REPO / "tools"))
     import render_skill_contract as renderer
 
-    assert CONTRACT_COPY.is_file(), f"缺副本 {CONTRACT_COPY.relative_to(REPO)}——跑 tools/render_skill_contract.py"
+    assert CONTRACT_COPY.is_file(), f"缺副本 {CONTRACT_COPY.relative_to(REPO)}——运行 tools/render_skill_contract.py"
     expected = renderer.transform(CONTRACT_SOURCE.read_text(encoding="utf-8"))
     assert CONTRACT_COPY.read_text(encoding="utf-8") == expected, (
-        "skill 里的契约副本与源页不同步——跑 `python3 tools/render_skill_contract.py` 重渲染"
+        "skill 里的契约副本与源页不同步——运行 `python3 tools/render_skill_contract.py` 重渲染"
     )
 
 
 def test_rewrite_tables_are_all_used():
     """转换器的两张改写表（指针 / 禁词）里每条都得在源页命中：命中零次说明源页改了措辞、替换悄悄失效。
-    `transform` 自己会为此抛异常，这里显式跑一遍，让失败落在护栏而不是发布链上。"""
+    `transform` 自己会为此抛异常，这里显式运行一次，让失败落在护栏而不是发布链上。"""
     sys.path.insert(0, str(REPO / "tools"))
     import render_skill_contract as renderer
 
@@ -401,7 +401,7 @@ def test_skill_form_limits():
 
 # ── (g)(h)(i) 评测 fixture：ignore 行为、git 跟踪、可搬迁 ────────────────────
 
-# `.gitignore` 的派生品段会静默吞掉 fixture 里真跑产出的文件，且是**部分**吞（Nova 的 evidence 截图不在规则内）
+# `.gitignore` 的派生品段会静默吞掉 fixture 里实际运行产出的文件，且是**部分**吞（Nova 的 evidence 截图不在规则内）
 # ——比全缺更难发现。反白名单 + 其后重列的密钥规则由这两组探针**行为式**核：两向都测才同时挡住
 # 「新规则排到反白名单之后」与「收紧句被删」两种回归。探针路径无需真实存在（`--no-index`）。
 PROBE_NOT_IGNORED = ("reports/x.json", "screenshots/y.jpg", "a.log", "a.report.html", ".env.example")
@@ -418,7 +418,7 @@ def _is_ignored(rel: str) -> bool:
 @pytest.mark.parametrize("rel", PROBE_NOT_IGNORED)
 def test_fixture_derived_artifact_shapes_are_not_ignored(rel: str):
     probe = f"skills/gherkai-evals/fixtures/_probe/{rel}"
-    assert not _is_ignored(probe), (f"{probe} 被 .gitignore 吞了——fixture 里的真跑产物必须入库；"
+    assert not _is_ignored(probe), (f"{probe} 被 .gitignore 吞了——fixture 里实际运行产出的文件必须入库；"
                                    "检查派生品段之后的 `!skills/gherkai-evals/fixtures/**` 反白名单还在不在")
 
 
@@ -430,7 +430,7 @@ def test_fixture_secret_shapes_stay_ignored(rel: str):
 
 
 def _fixture_files() -> list[Path]:
-    # __pycache__ 不是 fixture 内容：本机对 fixture 跑一次 plan / list-deterministic，worker 就会在 steps/ 下编译出 .pyc
+    # __pycache__ 不是 fixture 内容：本机对 fixture 运行一次 plan / list-deterministic，worker 就会在 steps/ 下编译出 .pyc
     return [p for p in FIXTURES.rglob("*") if p.is_file() and "__pycache__" not in p.parts] if FIXTURES.is_dir() else []
 
 

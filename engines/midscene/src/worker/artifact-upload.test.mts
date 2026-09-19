@@ -1,6 +1,6 @@
 // ArtifactUploader 单测（ADR 0029 第一期，对称 Nova 的 test_artifact_upload.py）：
 // 整目录上传 + 删本地 + reportRef 报 s3://，无落点 env 时 no-op 报 file://。mock S3 client（不连真 AWS）。
-// 跑：node --import tsx --test worker/artifact-upload.test.ts（已接入 npm test 的 worker/*.test.ts）。
+// 运行：node --import tsx --test worker/artifact-upload.test.ts（已接入 npm test 的 worker/*.test.ts）。
 //
 // 重点护 ADR 0029：key 镜像 run 树、ref 逐字一致、两级时机（reportRef 实时传不删 / flush 传剩余+全成功删整目录）、
 // 整目录传不按文件挑（抗 SDK 升级）、失败护栏（reportRef 抛 / 剩余吞但不删目录）、no-op 报 file://。
@@ -560,7 +560,7 @@ test("drain: 有一项挂过预算 → false（有界，不拖住退出）", asy
   u.enqueue(files);
   const t0 = Date.now();
   assert.equal(await u.drain(30), false, "预算内没排空 → false（调用方记一行放弃）");
-  assert.ok(Date.now() - t0 < 5000, "drain 真的有界返回，不等在途上传跑完");
+  assert.ok(Date.now() - t0 < 5000, "drain 真的有界返回，不等在途上传结束");
   assert.equal(keys.length, 1, "链是顺序的：第二项还没起");
   released?.();  // 放掉在途那项，别把测试进程的事件循环吊住
   await u.drain(5000);

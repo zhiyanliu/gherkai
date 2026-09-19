@@ -1,6 +1,6 @@
 """gherkai 的 Nova Act 引擎 worker（发行包 `gherkai-worker-novaact`，ADR 0037 决策 3）。
 
-本包 = 被 spawn 的 worker 进程本体（ADR 0024 协议的另一端）：读一个 scope 的 job → 跑它 →
+本包 = 被 spawn 的 worker 进程本体（ADR 0024 协议的另一端）：读一个 scope 的 job → 执行它 →
 把事件吐进事件通道。三条路径同一个 `main()`（见 `__main__`）：job 模式 + 两个非 job 入口
 `--capabilities`（自述，ADR 0036「5.」）/ `--match-steps`（查询，ADR 0036「4.」）。
 

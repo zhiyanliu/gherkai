@@ -1,5 +1,5 @@
 // agentcore-sigv4 单测（ADR 0033 / 0016 决策 C：Midscene region 全可配、不再硬编码 us-east-1）。
-// 跑：node --import tsx --test worker/agentcore-sigv4.test.ts。纯逻辑、不连 AWS。
+// 运行：node --import tsx --test worker/agentcore-sigv4.test.ts。纯逻辑、不连 AWS。
 //
 // 锁住三点：① getBaseUrl/getRegion 跟 process.env.AWS_REGION 走（证明 region 不再硬编码 east——注入 west
 // 就该拿到 west 的 endpoint）；② 缺 AWS_REGION → fail-loud（对齐 Nova region=None→NoRegionError）；
@@ -101,7 +101,7 @@ test("modelFamily: 默认模型自身必须推得出家族（换默认却忘了�
 });
 
 test("MODEL 缺省 = DEFAULT_MODEL（MIDSCENE_MODEL_ID 覆盖那条在 run-scope 的真子进程用例里）", () => {
-  // MODEL 在 import 时定值（模块级读 env），故本条只在跑测试的 shell 未设覆盖时有意义。
+  // MODEL 在 import 时定值（模块级读 env），故本条只在运行测试的 shell 未设覆盖时有意义。
   if (process.env.MIDSCENE_MODEL_ID) return;
   assert.equal(MODEL, DEFAULT_MODEL);
 });

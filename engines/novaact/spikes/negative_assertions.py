@@ -4,7 +4,7 @@
 验证 act_get(各 schema) 在"不符"时给出 false / 不匹配的值（→ 上层会判失败），
 并带一个对照正向（防"全假"假象）。一次性证伪探针。
 
-跑（从 repo 根，worker 包已在根 venv 里）：AWS_REGION=us-east-1 uv run python engines/novaact/spikes/negative_assertions.py
+运行（从 repo 根，worker 包已在根 venv 里）：AWS_REGION=us-east-1 uv run python engines/novaact/spikes/negative_assertions.py
 """
 from __future__ import annotations
 

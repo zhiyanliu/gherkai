@@ -1,5 +1,5 @@
 // step argument（DataTable/DocString）拼接单测（ADR 0024/0025）。
-// 跑：node --import tsx --test worker/argument.test.ts
+// 运行：node --import tsx --test worker/argument.test.ts
 // 与 Nova 引擎 worker/test_argument.py **对称**——同一拼法、同一断言，保两个引擎同一 feature 行为一致。
 import { test } from "node:test";
 import assert from "node:assert";

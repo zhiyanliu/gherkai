@@ -1,7 +1,7 @@
 """RunStore 无状态批量运行条件写对拍测试（ADR 0034 P2）：try_claim_job / project_state / try_finalize。
 
-**local（fcntl 文件锁）与 ddb（moto，条件表达式）跑同一批断言**（parametrize）——保两 adapter 语义一致。
-moto 的条件写行为与真 DDB 可能有别（绿≠对边界）→ 真 DDB 复验单列（test 末 real_aws，需真凭证才跑）。
+**local（fcntl 文件锁）与 ddb（moto，条件表达式）运行同一批断言**（parametrize）——保两 adapter 语义一致。
+moto 的条件写行为与真 DDB 可能有别（绿≠对边界）→ 真 DDB 复验单列（test 末 real_aws，需真凭证才运行）。
 
 覆盖三机制的正确性核心：
 - 机制四 CAS：pending→running 只成功一次，并发抢占只一个赢。

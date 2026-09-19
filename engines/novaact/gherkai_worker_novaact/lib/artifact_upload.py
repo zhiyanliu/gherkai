@@ -1,9 +1,9 @@
 """产物 S3 上传（Nova worker，ADR 0029 第一期）：整目录上传 → 删本地 → reportRef 报 s3://。
 
 由组合根注入的 S3 落点 env 驱动（`ARTIFACT_S3_BUCKET` + `ARTIFACT_S3_PREFIX`，跟 `--backend cloud` 走）——
-**未注入落点（local 路径；或手动直跑/脚手架没给这组 env）→ `to_report_ref` 原样报 `file://`、不上传、不删**
+**未注入落点（local 路径；或手动直接运行/脚手架没给这组 env）→ `to_report_ref` 原样报 `file://`、不上传、不删**
 （零行为变化）。判据是「有没有注入落点」，与 `--no-report` **正交**——那个 flag 只管落库/渲染报告，不管产物
-上传落点。worker 对"我在哪跑"无知，只认这组 env 有没有（ADR 0016 注入红线）。
+上传落点。worker 对"我在哪运行"无知，只认这组 env 有没有（ADR 0016 注入红线）。
 
 S3 key 镜像本地 run 树（ADR 0029）：任一产物 key = `<prefix><产物相对本地 run 目录的路径>`，与 S3ReportStore/
 ResultStore 同 `<prefix>` 前缀。本地 run 目录 = 产物落点目录（`NOVA_LOGS_DIR`）的父级。key 是**确定性纯路径
@@ -14,7 +14,7 @@ ResultStore 同 `<prefix>` 前缀。本地 run 目录 = 产物落点目录（`NO
   可观测、engine_error）——报告链接强保证。
 - `ref_for(path)`：只算 ref、不上传（key 是确定性纯路径计算）。
 - `enqueue(paths)` / `drain(timeout_s)`：**后台单线程 FIFO 队列**（ADR 0042 决策一「上传时机分两类」）。evidence
-  的截图在 `step_done` 发出**之后**入队，字节在下个 step 跑的同时上传——既不压判定临界路径，也不拖到 scope 末
+  的截图在 `step_done` 发出**之后**入队，字节在下个 step 执行的同时上传——既不压判定临界路径，也不拖到 scope 末
   才第一次尝试。每项失败重试一次后记一行日志放弃（文件仍在目录里，flush 还有一次机会）；成功即记进 `_uploaded`
   让 flush 跳过。收尾（scope 末 / 提前退出路径）用 `drain` **有界**等它传完，超时就交给 flush 兜。
 - `flush_and_cleanup(dir)`：scope 末调。walk 整个产物目录**递归**上传剩余文件（已实时传/队列已传的**跳过**）——
@@ -101,7 +101,7 @@ class ArtifactUploader:
         run_dir = Path(logs_dir).parent if logs_dir else None
         if bucket is not None and run_dir is None:
             # fail-loud：注入了桶却没给 SDK 落点（NOVA_LOGS_DIR）= 组合根配置矛盾，非降级档——静默 no-op
-            # 会让产物报 file:// 且随容器盘销毁必丢（ADR 0033 真跑事故「只注①不注②等于没上传」）。
+            # 会让产物报 file:// 且随容器盘销毁必丢（ADR 0033 实际运行事故「只注①不注②等于没上传」）。
             raise ValueError(
                 "产物上传：已注入 ARTIFACT_S3_BUCKET 但缺 NOVA_LOGS_DIR，算不出产物落点、无法上传"
                 "（起 worker 的一方须同时注入两者，否则产物随容器盘销毁）")
@@ -200,8 +200,8 @@ class ArtifactUploader:
         """把文件交给后台队列顺序上传（**不阻塞调用方**）；no-op 档直接返回。
 
         调用点在 `step_done` **emit 之后**（ADR 0042 决策一：截图字节绝不压判定临界路径）。队列线程惰性起、
-        daemon，且上传本体也在这个线程里跑（`use_threads=False`，见 `_transfer_config`）——否则 boto3 会把传输交给
-        s3transfer 的非 daemon 线程池，解释器退出时被 atexit join、进程多拖一次 client 超时（≈10 s，真跑实测），
+        daemon，且上传本体也在这个线程里执行（`use_threads=False`，见 `_transfer_config`）——否则 boto3 会把传输交给
+        s3transfer 的非 daemon 线程池，解释器退出时被 atexit join、进程多拖一次 client 超时（≈10 s，实际运行测得），
         drain 的「有界」就名不副实。收尾靠 `drain` 有界等，drain 预算即退出成本。
         """
         if not self.enabled:
@@ -234,10 +234,10 @@ class ArtifactUploader:
         return True
 
     def _transfer_config(self):
-        """boto3 传输配置：`use_threads=False` → 传输在调用线程内跑（NonThreadedExecutor）。
+        """boto3 传输配置：`use_threads=False` → 传输在调用线程内执行（NonThreadedExecutor）。
 
         默认的线程池是非 daemon 线程，解释器退出时被 join；后台队列的 daemon 语义与 `drain` 的有界退出都靠这一项
-        才成立（真跑：黑洞端点下 drain(1.0) 后进程 11.2 s 才退，改后 1.15 s）。主流程的 `to_report_ref` 同用，
+        才成立（实际运行：黑洞端点下 drain(1.0) 后进程 11.2 s 才退，改后 1.15 s）。主流程的 `to_report_ref` 同用，
         统一一处。惰性 import（file:// no-op 档零 boto 依赖）。
         """
         if self._tcfg is None:

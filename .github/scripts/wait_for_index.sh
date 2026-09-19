@@ -5,12 +5,12 @@
 # 上传返回 200 之后到 `pip install <name>==<版本>` 能解析到，中间有秒级到分钟级的传播窗口。
 # 基底镜像的 CI 形态按版本装已发行的 worker 包（ADR 0037 决策 5「两态」），赶在窗口里 build
 # 会以「no matching distribution」/「No matching version found」形式随机失败——那是一次
-# 半发布态（PyPI 已发、镜像缺失），修起来要人工重跑镜像 job。等一下比重跑便宜。
+# 半发布态（PyPI 已发、镜像缺失），修起来要人工重新运行镜像 job。等一下比重新运行便宜。
 #
 # 用法：
 #   wait_for_index.sh pypi gherkai-worker-novaact 1.4.0
 #   wait_for_index.sh npm  @gherkai/worker-midscene 1.4.0
-# 退 0 = 已可见；退 1 = 超时（调用方应视作失败，重跑本 job 即可继续）。
+# 退 0 = 已可见；退 1 = 超时（调用方应视作失败，重新运行本 job 即可继续）。
 
 set -euo pipefail
 

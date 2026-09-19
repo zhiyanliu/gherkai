@@ -1,6 +1,6 @@
 """云端 adapter 集成测试（@pytest.mark.integration）：连**真** DDB/S3，专测 moto 抓不到的真 AWS 语义。
 
-**默认不跑**（pyproject addopts `-m 'not integration'`）。跑法（见 tests/README.md）：
+**默认不运行**（pyproject addopts `-m 'not integration'`）。运行方式（见 tests/README.md）：
     export AWS_DDB_TABLE=<你建的真表>  AWS_S3_BUCKET=<你建的真桶>
     uv run pytest -m integration
 没设环境变量 → `real_aws` fixture skip（不误连）。用真凭证（default profile），每用例自清理写入的数据。
@@ -24,7 +24,7 @@ _counter = itertools.count(1)  # 单进程内递增，给 run_id 去重
 
 
 def _uniq(prefix: str) -> str:
-    """给真表/真桶造一个本次运行专属的 run_id，避免多次跑撞名（无随机源，用递增计数）。
+    """给真表/真桶造一个本次运行专属的 run_id，避免多次执行撞名（无随机源，用递增计数）。
     跨进程靠 it- 前缀 + fixture 自清理兜底（真资源是你专用的测试表/桶）。"""
     return f"it-{prefix}-{next(_counter)}"
 
@@ -46,7 +46,7 @@ def _offloader(real_aws):
 
 # ---- DynamoDBRunStore：真 DDB 的生命周期 + 真语义边界 ----
 def test_ddb_run_store_lifecycle_real(real_aws):
-    """真 DDB 上跑完整实时写生命周期：create_run → update_job_state（RUNNING→终态）→ finalize_run → 读回。
+    """真 DDB 上执行完整实时写生命周期：create_run → update_job_state（RUNNING→终态）→ finalize_run → 读回。
     覆盖真语义：空 Map jobs 能存、SET jobs.#sid 单元素刷、finalize 无条件 SET status(保留字)/ended_at、含 /:中文 scope_id。"""
     store = _ddb_store(real_aws)
     rid = _uniq("ddb-life")

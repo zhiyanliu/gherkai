@@ -1,12 +1,12 @@
 // evidence 单测（ADR 0042 决策一/二/六，对称 Nova 的 fixture 映射测试）：
 // ① 引擎映射对**真产物裁成的 fixture**（sdkVersion 1.9.8 的 ReportActionDump，两个 execution：Act 与 Boolean）
-//    ——格式漂移在升 @midscene/web 后跑测试时变红（决策六第 2 道防线）；
+//    ——格式漂移在升 @midscene/web 后运行测试时变红（决策六第 2 道防线）；
 // ② 截图：路径由 id + 扩展名拼、`after-calling` 优先、按 id 去重、上界 K/M；
 // ③ scenario 键派生（确定性 + 不二次撞名）；
 // ④ best-effort（决策二）：落盘/上传抛 → step_done 照发、无 evidence ref、status 不变；
 // ⑤ 截图字节的时机（决策一「上传时机分两类」）：引用到的截图路径随 ref 一起回传，runStep 在 step_done
 //    **emit 之后**才交给上传器的后台队列（顺序反了就等于把字节压回判定前面）。
-// 纯逻辑 + 本地临时目录，不起浏览器、不连 AWS。跑：npm test。
+// 纯逻辑 + 本地临时目录，不起浏览器、不连 AWS。运行：npm test。
 import { test } from "node:test";
 import assert from "node:assert";
 import * as fs from "node:fs";
@@ -104,7 +104,7 @@ test("映射：act 的 frames 逐 task 一条，actions 名 = type/subType，arg
 test("映射：thought 按值判——Insight/Boolean 取 task.thought，Planning/Plan 回落 output.thought，Locate 空串 / Tap 无 → null", () => {
   const doc = build({ executions: FIXTURE.executions });
   const th = doc.acts[0].frames.map((f) => f.thought);
-  assert.ok(th[0]?.startsWith("The user instruction is to click"));   // Plan：推理在 output.thought（真跑核出）
+  assert.ok(th[0]?.startsWith("The user instruction is to click"));   // Plan：推理在 output.thought（实际运行核出）
   assert.equal(th[1], null);                                           // Locate：空串 → null
   assert.equal(th[2], null);                                           // Tap：无
   assert.ok(th[3]?.startsWith("The user's instruction was to click"));
@@ -128,8 +128,8 @@ test("映射：error = 首个非空 errorMessage；无 errorMessage 时末个 ac
   const boom = exec(task({ subType: "Plan" }), task({ subType: "Locate", errorMessage: "Element not found" }), task({ errorMessage: "后一个不该被取" }));
   const doc = build({ status: "error", executions: [exec(task()), boom], error: "ActError: timeout", votes: [] });
   assert.equal(doc.acts[1].error, "Element not found", "首个非空 errorMessage 优先于抛出的异常文本");
-  assert.equal(doc.acts[0].error, null, "非末 act 且自身无 errorMessage → null（不把异常抄给已跑完的前一票）");
-  // 全无 errorMessage 时：只有**末** act 兜住抛出的异常（抛的那一刻正在跑的就是它）
+  assert.equal(doc.acts[0].error, null, "非末 act 且自身无 errorMessage → null（不把异常抄给已完成的前一票）");
+  // 全无 errorMessage 时：只有**末** act 兜住抛出的异常（抛的那一刻正在运行的就是它）
   const doc2 = build({ status: "error", executions: [exec(task()), exec(task())], error: "ActError: timeout" });
   assert.deepEqual(doc2.acts.map((a) => a.error), [null, "ActError: timeout"]);
 });

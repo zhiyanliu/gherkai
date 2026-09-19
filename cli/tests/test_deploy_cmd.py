@@ -233,7 +233,7 @@ def test_cli_does_not_import_aws_cdk(monkeypatch):
 
     做法 = 往 `sys.modules` 塞毒（值为 `None` 时 `import aws_cdk` 立即 ImportError），**不是**事后断言
     `"aws_cdk" not in sys.modules`——后者依赖「本 session 没有别的测试 import 过它」，而 provider 包自己的
-    CDK 合成测试就会 import 它，跑全量时那种断言会因执行顺序假失败。塞毒与顺序无关：皮真去 import 就炸。
+    CDK 合成测试就会 import 它，运行全量时那种断言会因执行顺序假失败。塞毒与顺序无关：皮真去 import 就炸。
     只测皮这半边（provider 被 stub）：真 provider 的 import 面由它自己守（其模块头钉了同一条）。
     """
     monkeypatch.setitem(sys.modules, "aws_cdk", None)
@@ -253,7 +253,7 @@ def test_non_deploy_command_does_not_load_any_provider(monkeypatch):
 
 
 def test_readonly_flags_cannot_be_combined_with_a_provider_subverb(monkeypatch, capsys):
-    """`--diff/--synth-only/--bootstrap` 与写账户的子动词同给 → 退 2、子动词不跑（ADR 0037 决策 6：三 flag 是
+    """`--diff/--synth-only/--bootstrap` 与写账户的子动词同给 → 退 2、子动词不执行（ADR 0037 决策 6：三 flag 是
     reviewer 的只读靶点；子动词的分派优先级不得把它们静默吞成真推镜像）。"""
     seen: list[str] = []
 

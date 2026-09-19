@@ -1,7 +1,7 @@
 """step 级机读证据（evidence，ADR 0042 决策一/二/六）单测：映射 / 截图上界 / 目录键 / best-effort 钩子。
 
 纯 python：不连 AWS、不起浏览器、不解真 SDK。映射由**真产物裁成的 fixture** 钉住
-（`fixtures/nova_*_traj.json` = 真 `_trajectory.json`，base64 图裁成短前缀）——SDK 格式漂移在升版跑测试时变红
+（`fixtures/nova_*_traj.json` = 真 `_trajectory.json`，base64 图裁成短前缀）——SDK 格式漂移在升版后运行测试时变红
 （ADR 0042 决策六防线 2）。钩子侧注 fake nova + fake sink（与 test_run_step.py 同风格）。
 """
 from __future__ import annotations
@@ -413,7 +413,7 @@ def test_evidence_upload_failure_is_swallowed(logs_dir, monkeypatch, capsys):
 
 
 def test_error_text_prefers_sdk_message_and_is_single_line():
-    """SDK 异常的 str() 是多行 repr（真跑暴露：ActTimeoutError 把「原因」撑成十几行）——取 .message 首行、折叠空白、封顶。"""
+    """SDK 异常的 str() 是多行 repr（实际运行暴露：ActTimeoutError 把「原因」撑成十几行）——取 .message 首行、折叠空白、封顶。"""
     from gherkai_worker_novaact.run_scope import _error_text
 
     class ActTimeoutError(Exception):
@@ -605,7 +605,7 @@ class _FakeNovaAct:
 
 @pytest.fixture
 def main_fakes(monkeypatch, logs_dir):
-    """把 main() 的 SDK 面全 fake 掉（job 走 stdin、scenarios 空 → 只跑到收尾序列）。"""
+    """把 main() 的 SDK 面全 fake 掉（job 走 stdin、scenarios 空 → 只执行到收尾序列）。"""
     monkeypatch.setattr(rs.signal, "signal", lambda s, h: None)
     monkeypatch.setattr(rs.sys, "stdin", type("S", (), {"readline": staticmethod(
         lambda: json.dumps({"scope": {"id": "x"}, "scenarios": []}))})())

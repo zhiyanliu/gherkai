@@ -34,7 +34,7 @@ import sys
 import types
 from pathlib import Path
 
-# 「还没开跑就被拒」的退出码。ADR 0024 只给了一个专用码（`EX_WORKER_NETWORK=80`，建连耗尽的 out-of-band
+# 「还没开始执行就被拒」的退出码。ADR 0024 只给了一个专用码（`EX_WORKER_NETWORK=80`，建连耗尽的 out-of-band
 # 信号），装配/配置错没有专用码——用通用非 0 的 2，经 core 的 `raise_for_worker_exit` 落成 `RuntimeError`
 # → job 记 error。**要的是「响亮」而非「可分类」**：steps 加载失败是使用方本机的配置错，人看 stderr 那行
 # 诊断即知，不需要 core 侧按类型分支（真需要时再升专用码，别现在为它占码）。

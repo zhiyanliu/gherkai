@@ -6,7 +6,7 @@
 三面的并发读者都是**设计内的、真实存在的**（不是防御性假设）：
 - 控制面 `run_state.json`：per-run 推进进程在文件锁内写它时，`gherkai status` / 接力进程**无锁**读同一文件
   （读面不持 `.runstate.lock`，只写面互斥；ADR 0030 决定四 / 0034）。
-- 数据面 `jobs/*.json`：`explain` 被允许在 run 跑到一半时读已完成 job（ADR 0042 决策四），读者是另一个进程。
+- 数据面 `jobs/*.json`：`explain` 被允许在 run 执行到一半时读已完成 job（ADR 0042 决策四），读者是另一个进程。
 - 报告面 `manifest.json` / `index.html`：finalize 可被两个推进者各写一遍同一份报告（ADR 0027 派生视图、
   可重建），而人/CI 会在第一个写者退出后立刻读。
 

@@ -193,7 +193,7 @@ def test_run_state_timestamps_round_trip(tmp_path: Path):
 
 
 def test_run_state_omits_null_timestamps(tmp_path: Path):
-    # omit-when-None：起止为 None（未取时钟的裸跑路径；正常 run 由 RunPersistence.begin/finalize 落起止，
+    # omit-when-None：起止为 None（未取时钟的零落盘运行路径；正常 run 由 RunPersistence.begin/finalize 落起止，
     # ADR 0030）时，落盘 JSON **不写**这两个键（不是写 null）——避免"永远 null 的字段被当 bug"的体验
     # 噪音。round-trip 仍还原回 None。
     store = LocalRunStore(tmp_path / "runs")
@@ -258,7 +258,7 @@ def test_realtime_write_lifecycle(tmp_path: Path):
     assert all(js.status == Status.PENDING for js in s0.jobs.values())
     assert store.load_run_meta("rt-run") is not None  # definition 也落了
 
-    # 2) 第一个 job 起跑 → running（带血缘）；中途读得到「部分完成态」（pending/running 混存）
+    # 2) 第一个 job 开始运行 → running（带血缘）；中途读得到「部分完成态」（pending/running 混存）
     store.update_job_state("rt-run", JobState("features/wiki.feature:6", Status.RUNNING, session_id="sess-1"))
     mid = store.load_run_state("rt-run")
     assert mid is not None

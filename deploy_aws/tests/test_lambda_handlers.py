@@ -1,8 +1,8 @@
 """Lambda handler 事件解析测试（ADR 0034 P4b）：退出观察者 _extract + reconciler _run_ids_from_stream。
 
 主体测**事件格式解析**（最易错、最该测的纯逻辑）——用真验抓到的真实 ECS STOPPED event / DDB Stream event 形状；
-另有一组走 moto 内存表跑真 handler（末尾「只推进 detached run」——组合根侧分流是行为契约，解析测不出来）。
-真 Stream 触发 / 真 Fargate / 真 EventBridge 投递仍是 moto 之外的真跑边界（绿≠对的证据边界）。
+另有一组走 moto 内存表运行真 handler（末尾「只推进 detached run」——组合根侧分流是行为契约，解析测不出来）。
+真 Stream 触发 / 真 Fargate / 真 EventBridge 投递仍是 moto 之外的真实运行边界（绿≠对的证据边界）。
 
 handler 源与本测试同住 provider 包（`gherkai_deploy_aws/lambdas/`，AWS 专属胶水，ADR 0037 决策 6）——测试不寄居
 上游 runtime（ADR 0016 当年抽包的理由之一就是「handler 测试无处安身」）。经 sys.path 加那个目录——**摊平 import
@@ -50,7 +50,7 @@ def test_extract_nonzero_exit():
 
 
 def test_extract_missing_exitcode_becomes_platform_sentinel_with_reason():
-    """container 缺 exitCode = 容器没跑起来（TaskFailedToStart）→ 落 PLATFORM_FAILED_EXIT 哨兵 + `stopCode: stoppedReason`
+    """container 缺 exitCode = 容器没能开始运行（TaskFailedToStart）→ 落 PLATFORM_FAILED_EXIT 哨兵 + `stopCode: stoppedReason`
     归因（ADR 0034 机制二「退出码缺失」条）。曾写 None 当宽限态等下轮补——STOPPED 事件只来一次，run 会永久 wedge。"""
     from gherkai_core.project import PLATFORM_FAILED_EXIT
     detail = _stopped_detail("run-1", "a", 0)
@@ -122,7 +122,7 @@ def test_run_ids_multi_run():
 
 def test_run_ids_skips_ttl_remove_records():
     """events 表 TTL 过期删除同样进 Stream（带 Keys 的 REMOVE 记录）→ 必须不算 run：它不携带新信息，却会让
-    reconciler 对一个早已收尾的 run 重跑全量重放，而那时 worker 事件已被 TTL 删、只剩永不过期的退出记录，
+    reconciler 对一个早已收尾的 run 重新运行全量重放，而那时 worker 事件已被 TTL 删、只剩永不过期的退出记录，
     推演结果是「每个 job 都 error」并覆盖写 S3 的判定真值。"""
     removed = dict(_stream_record("run-1#a"), eventName="REMOVE")
     assert reconciler._run_ids_from_stream({"Records": [removed]}) == set()
@@ -241,7 +241,7 @@ def _timeout_built(tmp_path, *, status=Status.RUNNING, claimed_at=None, with_exi
 
 
 class _FakeEcs:
-    """list_tasks/describe_tasks/stop_task 记录器。`task_arns` = 在跑的 task；`tasks` = 带状态的 task 描述
+    """list_tasks/describe_tasks/stop_task 记录器。`task_arns` = 运行中的 task；`tasks` = 带状态的 task 描述
     （dict：arn / lastStatus / desiredStatus / exitCode? / stoppedReason? / stopCode?）。list_tasks 按 desiredStatus 过滤
     （ECS 语义：正在停止/已停止的不在 RUNNING 列表里）；describe 返回带 SCOPE_ID env 的 overrides。"""
 
@@ -277,7 +277,7 @@ class _FakeEcs:
 
 
 def test_handle_timeout_stops_matching_task(tmp_path, monkeypatch):
-    """仍 running + task 在跑 → StopTask(reason 含哨兵) → 让 STOPPED→exit_observer 既有链收敛（单一真源）。"""
+    """仍 running + task 运行中 → StopTask(reason 含哨兵) → 让 STOPPED→exit_observer 既有链收敛（单一真源）。"""
     monkeypatch.setenv("CLUSTER", "test-cluster")
     ecs = _FakeEcs(task_arns=["arn:task/1"])
     r = reconciler._handle_timeout("run-1", "a", _timeout_built(tmp_path), ecs_client=ecs)
@@ -288,7 +288,7 @@ def test_handle_timeout_stops_matching_task(tmp_path, monkeypatch):
 
 
 def test_handle_timeout_noop_when_job_terminal(tmp_path, monkeypatch):
-    """到点时 job 已终态（正常跑完）→ 幂等 no-op（不碰 ECS——schedule 到点即删，双方零残留）。"""
+    """到点时 job 已终态（正常运行结束）→ 幂等 no-op（不碰 ECS——schedule 到点即删，双方零残留）。"""
     monkeypatch.setenv("CLUSTER", "test-cluster")
     ecs = _FakeEcs(task_arns=["arn:task/1"])
     r = reconciler._handle_timeout("run-1", "a", _timeout_built(tmp_path, status=Status.PASSED), ecs_client=ecs)
@@ -370,7 +370,7 @@ def test_scan_overdue_timeouts_only_over_budget(tmp_path, monkeypatch):
 # ---------- 只推进 detached run（ADR 0034 端到端 cloud 1b 的 handler 侧分流）----------
 # 同步 `run --backend cloud` 与 detached 共用同一张 events 表、同一个 cluster，而 events item / STOPPED 事件里
 # 没有 detached 标记（标记只在 runs 表 STATE item 上）→ Stream/rule 层滤不掉，两个 handler 必须自己判。
-# 这组用 moto 内存表跑真 handler（含真 tick/真 CAS），**正负两面都验**：非 detached 零动作、detached 照常推进
+# 这组用 moto 内存表运行真 handler（含真 tick/真 CAS），**正负两面都验**：非 detached 零动作、detached 照常推进
 # （只验前者会放过「is_detached 恒 False」这种把整条链废掉的假绿）。
 
 import pytest  # noqa: E402
@@ -454,7 +454,7 @@ def test_reconciler_noop_for_non_detached_run(cloud_env):
 
 
 def test_reconciler_ticks_detached_run(cloud_env):
-    """对偶（防「gate 恒真」的假绿）：detached run 照常推进——tick 真跑、CAS 抢到那个 pending job。"""
+    """对偶（防「gate 恒真」的假绿）：detached run 照常推进——tick 真实运行、CAS 抢到那个 pending job。"""
     store = _seed_run(cloud_env["runs"], detached=True)
     reconciler.handler({"Records": [_stream_record("run-1#a")]}, None)
     assert store.load_run_state("run-1").jobs["a"].status == Status.RUNNING
@@ -489,7 +489,7 @@ def test_build_wires_arg_offloader_so_step_argument_bodies_read_back(cloud_env):
 
 
 def test_build_reuses_its_own_handles_and_builds_no_new_client(cloud_env, monkeypatch):
-    """`_build` 的三层 store 全用它自己已建的那批句柄装配——compose 里建句柄的两个钩子在此一次都不该跑。
+    """`_build` 的三层 store 全用它自己已建的那批句柄装配——compose 里建句柄的两个钩子在此一次都不该执行。
 
     这条同时是「region 不必传给 `build_cloud_stores`」的前提：region 在那边的唯一消费者就是这两个钩子。
     退回手工重造装配、或漏掉句柄注入，本用例即红（钩子被叫到就抛）。
@@ -506,7 +506,7 @@ def test_build_reuses_its_own_handles_and_builds_no_new_client(cloud_env, monkey
     built = reconciler._build("run-1")
 
     assert built is not None
-    assert built[0].run_id == "run-1"   # META 真读回来了（装配可用，不是「钩子没跑因为整条路都没走」）
+    assert built[0].run_id == "run-1"   # META 真读回来了（装配可用，不是「钩子没执行因为整条路都没走」）
 
 
 # ---------- 已收尾的 run 不再被改写（判定真值销毁的第二道闸，ADR 0030 决定三 / 0034）----------
@@ -561,12 +561,12 @@ def test_finished_run_gate_keys_on_the_committed_run_status_only(cloud_env):
     store, s3 = _seed_finished_run(cloud_env, status=Status.RUNNING)
     before = _report_bytes(s3)
     reconciler.handler({"Records": [_stream_record("run-1#a")]}, None)
-    assert store.load_run_state("run-1").status == Status.ERROR  # 本 tick 真跑到 finalize（exit=0 无 scope_done → error）
+    assert store.load_run_state("run-1").status == Status.ERROR  # 本 tick 真实运行到 finalize（exit=0 无 scope_done → error）
     assert _report_bytes(s3) != before                           # 判定真值与报告由本 tick 写出
 
 
 def test_timeout_payload_on_a_finished_run_is_a_noop(cloud_env):
-    """超时到点触发器的 payload 打到一个已收尾的 run（预算点前后跑完的常态）→ 不处置、不改写
+    """超时到点触发器的 payload 打到一个已收尾的 run（预算点前后运行结束的常态）→ 不处置、不改写
     （ADR 0034「到点时 job 已终态 → 处置 no-op」；run 终态的前提就是每个 job 都已有退出记录或已判超时）。"""
     _store, s3 = _seed_finished_run(cloud_env)
     before = _report_bytes(s3)
@@ -624,7 +624,7 @@ def test_report_still_written_when_the_run_duration_read_fails(cloud_env, monkey
     out = reconciler.handler({"Records": [_stream_record("run-1#a")]}, None)
 
     assert out == {"ok": True, "runs": ["run-1"]}       # 不抛 → Stream 本批不重试、不整批丢弃
-    assert committed, "run 没跑到 finalize，断言会空转"
+    assert committed, "run 未到 finalize，断言会空转"
     assert seen.get("run_duration_ms") is None          # 取数失败按缺值走（报告墙钟显「?」）
     import boto3
     s3 = boto3.client("s3", region_name="us-east-1")
@@ -698,7 +698,7 @@ def test_reconciler_writes_timestamps_in_compose_clock_format(cloud_env):
 
 # ---------- worker task-def revision：definition 优先，缺则按后端默认指针兼容（ADR 0038）----------
 # 不变量「运行时只用 definition 里的显式 revision，永不用 family 取最新」的 handler 侧落点。**正负两面都验**：
-# 只验兼容路径会放过「恒走兼容路径、无视 definition」（等于让在跑的 run 中途换 step 集）。
+# 只验兼容路径会放过「恒走兼容路径、无视 definition」（等于让运行中的 run 中途换 step 集）。
 # 真 RunTask 吃这个 ARN 起得来要真账号，是 moto 之外的边界（ADR 0038「实测项」）。
 
 def _seed_worker_ssm(*, version: str = "1.4.0", variant: str = "base", engine: str = "novaact",
@@ -757,7 +757,7 @@ def test_kicker_uses_definition_worker_task_defs(cloud_env):
     _seed_worker_ssm(revision_arn="arn:should-not-be-used:1")
     store = _seed_run(cloud_env["runs"], detached=True)
     reconciler.kicker_handler({"run_id": "run-1"}, None)
-    assert store.load_run_state("run-1").jobs["a"].status == Status.RUNNING  # 真 tick 跑到 CAS 抢占
+    assert store.load_run_state("run-1").jobs["a"].status == Status.RUNNING  # 真 tick 运行到 CAS 抢占
 
 
 def test_tick_runs_isolates_a_run_whose_worker_revision_cannot_be_resolved(monkeypatch, capsys):
@@ -790,7 +790,7 @@ def test_run_ids_scope_id_containing_hash_is_split_from_the_left():
 def test_handle_timeout_leaves_a_stopping_task_to_the_observer(tmp_path, monkeypatch):
     """task 正在停止（desiredStatus=STOPPED、lastStatus 未到 STOPPED）→ 不在 RUNNING 列表里，但**不是**无踪：不动、
     不直写，等观察者的真退出记录（ADR 0034「job timeout」节）。曾按 RUNNING 列表判「无踪」直写 timed_out，与几秒后
-    到达的真退出记录同键互覆——恰在预算点跑完的 passed job 可被终判成 timeout。"""
+    到达的真退出记录同键互覆——恰在预算点运行结束的 passed job 可被终判成 timeout。"""
     monkeypatch.setenv("CLUSTER", "test-cluster")
     ecs = _FakeEcs(tasks=[{"arn": "arn:task/1", "lastStatus": "DEPROVISIONING", "desiredStatus": "STOPPED"}])
     built = _timeout_built(tmp_path)

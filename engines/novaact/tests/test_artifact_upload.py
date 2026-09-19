@@ -391,7 +391,7 @@ def test_concurrent_report_ref_and_queue_share_uploaded_set(tmp_path):
 
 def test_uploads_run_in_calling_thread_not_s3transfer_pool(tmp_path):
     """upload_file 必带 TransferConfig(use_threads=False)（ADR 0042 决策一）：否则传输落在 s3transfer 的非 daemon
-    线程池，解释器退出被 atexit join、进程多拖一次 client 超时，drain 的「有界」名不副实（真跑量过 ≈10s）。
+    线程池，解释器退出被 atexit join、进程多拖一次 client 超时，drain 的「有界」名不副实（实际运行中量过 ≈10s）。
     队列与主流程 to_report_ref 两条路径都要带。"""
     root = tmp_path / "reports" / "rid"; d = root / "nova-trajectories" / "evidence"; d.mkdir(parents=True)
     a = d / "a.jpg"; a.write_bytes(b"x"); b = d / "b.json"; b.write_text("{}")
@@ -413,7 +413,7 @@ def test_drain_timeout_abandons_queue_silently(tmp_path, capsys):
     u, calls = _uploader_with_mock("bkt", "reports/rid/", root, delay_s=0.3)
     u.enqueue(files)
     assert u.drain(0.05) is False          # 首项在途即超时 → 放弃
-    time.sleep(1.2)                        # 给线程时间跑完剩余项（若它还在传，会多出 PutObject）
+    time.sleep(1.2)                        # 给线程时间执行完剩余项（若它还在传，会多出 PutObject）
     assert len(calls) == 1, calls           # 只有放弃前已发起的那一次；后两项被跳过
     assert "证据截图上传失败" not in capsys.readouterr().err
 

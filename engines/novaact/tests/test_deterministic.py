@@ -1,6 +1,6 @@
 """确定性注册表单测（ADR 0022）——纯单元，不连 AWS、不起浏览器。
 
-跑（从 repo 根）：uv run pytest -q engines/novaact/tests/test_deterministic.py
+运行（从 repo 根）：uv run pytest -q engines/novaact/tests/test_deterministic.py
 """
 import pytest
 

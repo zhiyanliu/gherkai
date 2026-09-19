@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """量 skill 的**触发率**（description 优化的那半个循环）：把真 skill 装进临时项目的真实安装位，对
-`trigger-eval.json` 的每条查询跑 `claude -p`，看它是否调用 `Skill(gherkai)` 或读了 SKILL.md。
+`trigger-eval.json` 的每条查询运行 `claude -p`，看它是否调用 `Skill(gherkai)` 或读了 SKILL.md。
 
 设计见 docs/adr/0043-agent-skill-for-driving-gherkai.md 决策七。与 skill-creator 自带的 `run_eval.py` 两点不同：
 - 走**真实 skills 机制**（`gherkai skill install` 进 `.claude/skills/gherkai/`），不是 `.claude/commands/<name>.md`
@@ -11,7 +11,7 @@
 
 用法：
   python skills/gherkai-evals/trigger_eval.py --runs 3
-  python skills/gherkai-evals/trigger_eval.py --runs 1 --limit 2      # 冒烟：只跑前两条
+  python skills/gherkai-evals/trigger_eval.py --runs 1 --limit 2      # 冒烟：只运行前两条
 产物：`--out` 指定的 JSON（缺省落 skills/gherkai-workspace/trigger/），每条查询一行 trigger_rate / passed + 工具流水。
 """
 from __future__ import annotations
@@ -65,7 +65,7 @@ def resolve_installer(cli_dir: Path) -> Path:
 
 
 def one(query: str, project: str, installer: Path, model: str, timeout: int) -> tuple[bool | None, list[str]]:
-    """跑一条查询，返回（是否触发, 前几次工具名）。"""
+    """运行一条查询，返回（是否触发, 前几次工具名）。"""
     proj = Path(tempfile.mkdtemp(prefix="gherkai-trig-"))
     triggered = False
     first_tools: list[str] = []
@@ -124,14 +124,14 @@ def one(query: str, project: str, installer: Path, model: str, timeout: int) -> 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--runs", type=int, default=3, help="每条查询跑几次（触发是随机变量，单次没有意义）")
+    ap.add_argument("--runs", type=int, default=3, help="每条查询运行几次（触发是随机变量，单次没有意义）")
     ap.add_argument("--parallel", type=int, default=4, help="并发的 claude -p 进程数上限")
     ap.add_argument("--timeout", type=int, default=150, help="单次的墙钟上限（秒）")
     ap.add_argument("--out", help="结果 JSON 路径（缺省 skills/gherkai-workspace/trigger/trigger-<时间戳>.json）")
     ap.add_argument("--model", default=DEFAULT_MODEL, help=f"固定模型（缺省 {DEFAULT_MODEL}）")
     ap.add_argument("--cli-dir", default=str(DEFAULT_CLI_DIR),
                     help=f"已备好的仓库外 CLI 目录（缺省 {DEFAULT_CLI_DIR}）；装不了就回落仓库 .venv")
-    ap.add_argument("--limit", type=int, default=0, help="只跑前 N 条查询（冒烟用；缺省全跑）")
+    ap.add_argument("--limit", type=int, default=0, help="只运行前 N 条查询（冒烟用；缺省全部运行）")
     a = ap.parse_args()
 
     if not shutil.which("claude"):

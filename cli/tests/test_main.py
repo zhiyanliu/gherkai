@@ -78,7 +78,7 @@ def test_text_mode_summary_on_stdout_progress_on_stderr(tmp_path, monkeypatch, c
     # 主输出（文本汇总）在 stdout
     assert "运行结果" in out and "总状态" in out
     # 进度/event/落点提示在 stderr，不污染 stdout。event 行前缀 `[core <scope>:event]`，与 worker 透传行
-    # `[worker <scope>:err]` 同骨架 `[producer scope:kind]`（并发跑批时区分来源、scope 同列可竖扫）。
+    # `[worker <scope>:err]` 同骨架 `[producer scope:kind]`（并发批量运行期间区分来源、scope 同列可竖扫）。
     assert "plan:" in err and ":event]" in err and "报告:" in err
     assert "plan:" not in out and ":event]" not in out
 
@@ -120,7 +120,7 @@ def test_no_report_skips_artifacts(tmp_path, monkeypatch, capsys):
 
 
 def test_assertion_votes_below_one_rejected(tmp_path, monkeypatch, capsys):
-    # --assertion-votes < 1 在入口被拒（退出码 2）：否则 worker 跑 0 次 AI 断言——
+    # --assertion-votes < 1 在入口被拒（退出码 2）：否则 worker 执行 0 次 AI 断言——
     # 0 → 全判失败（假阴性）；负数 → 0>负/2=True 全绿但零 AI 调用（假阳性，最危险）。绝不让坏值流进 worker。
     called = {"n": 0}
     def spy_schedule(*a, **k):
@@ -198,7 +198,7 @@ def test_plan_json_shape(tmp_path, capsys):
 
 
 def test_plan_rejects_engine_conflict(tmp_path, capsys):
-    # 同 scope 多 engine → PlanError，预检在真跑前拦截、退 2（省钱）
+    # 同 scope 多 engine → PlanError，预检在实际运行前拦截、退 2（省钱）
     feat = tmp_path / "conflict.feature"
     feat.write_text(
         "@scope:x @engine:midscene\nFeature: F\n  Scenario: a\n    When \"x\"\n"
@@ -243,7 +243,7 @@ def test_run_exit_code_1_on_failed(tmp_path, monkeypatch, capsys):
     box = {}
     monkeypatch.setattr(m, "schedule", _capturing_schedule(Status.FAILED, box))
     rc = m.main(["run", str(_write_feature(tmp_path)), "--no-report"])
-    assert rc == 1  # 跑完但有 failed → 退 1（CI 据此判红）
+    assert rc == 1  # 运行结束但有 failed → 退 1（CI 据此判红）
 
 
 def test_run_exit_code_1_on_error(tmp_path, monkeypatch, capsys):
@@ -273,12 +273,12 @@ def test_run_schedule_opts_mapping(tmp_path, monkeypatch, capsys):
 
 
 def test_run_grace_too_small_rejected(tmp_path, monkeypatch, capsys):
-    # 显式给过小 grace（< Nova 下限）→ 入口退 2「没开跑就被拒」（ADR 0024 grace 硬约束、对齐 votes 校验惯例）。
+    # 显式给过小 grace（< Nova 下限）→ 入口退 2「没开始执行就被拒」（ADR 0024 grace 硬约束、对齐 votes 校验惯例）。
     box = {}
     monkeypatch.setattr(m, "schedule", _capturing_schedule(Status.PASSED, box))
     rc = m.main(["run", str(_write_feature(tmp_path)), "--no-report", "--grace", "5"])
     assert rc == 2
-    assert "opts" not in box  # schedule 根本没被调（跑前就拒了）
+    assert "opts" not in box  # schedule 根本没被调（运行前就拒了）
     assert "--grace=5.0" in capsys.readouterr().err  # 诊断打到 stderr
 
 
@@ -327,7 +327,7 @@ def test_run_grace_mixed_engines_takes_max_of_self_reported(tmp_path, monkeypatc
 def test_local_run_asks_each_engine_for_capabilities_once(tmp_path, monkeypatch, capsys):
     """本机 run **每引擎只问一次能力自述**（ADR 0036「5.」一次 spawn 拿全：steps 加载结果 + 清单 + grace 下限）。
 
-    跑前检查带着解析出的 steps 目录问那一次，2a 的 grace 下限就复用同一份对象（compose 的进程内缓存，下限与
+    运行前检查带着解析出的 steps 目录问那一次，2a 的 grace 下限就复用同一份对象（compose 的进程内缓存，下限与
     使用方 step 无关）——两处各问一次等于每个引擎多 spawn 一个 worker（Nova 每次还要 import SDK）。
     计数装在假替身**外面**：替身只替掉「问 worker」那一跳，被测的是 cli 与 compose 的复用逻辑。
     """
@@ -353,7 +353,7 @@ def test_run_engine_self_describe_failure_refuses_to_run(tmp_path, monkeypatch, 
         compose.WorkerSelfDescribeError(engine, 2, "unrecognized arguments: --capabilities", "能力自述")))
     rc = m.main(["run", str(_write_feature(tmp_path)), "--no-report"])
     assert rc == 2
-    assert "opts" not in box  # schedule 根本没被调（跑前就拒了，零副作用）
+    assert "opts" not in box  # schedule 根本没被调（运行前就拒了，零副作用）
     err = capsys.readouterr().err
     assert "worker 自述失败，拒绝运行" in err and "novaact" in err
 
@@ -459,7 +459,7 @@ def test_realtime_commit_point_write_order(tmp_path, monkeypatch, capsys):
 
 
 def test_no_report_skips_persistence_entirely(tmp_path, monkeypatch, capsys):
-    # --no-report：persistence=None，store 装配一次都不该被调（裸跑、零落盘逃生舱）
+    # --no-report：persistence=None，store 装配一次都不该被调（零落盘运行、逃生舱）
     constructed = {"n": 0}
     def boom(**kwargs):
         constructed["n"] += 1
@@ -505,7 +505,7 @@ def test_run_state_shows_running_then_final(tmp_path, monkeypatch, capsys):
 
 def test_run_wires_artifact_dirs_to_build_engines(tmp_path, monkeypatch, capsys):
     # fail-fast 护栏（ADR 0027 产物归位）：钉住 __main__ 把两引擎产物落点算成 <report_dir>/<run_id>/<engine-dir>
-    # 并传给 build_engines。防止将来改坏 __main__ 那几行接线（否则产物落错地方，只有真跑 AWS 才发现）。
+    # 并传给 build_engines。防止将来改坏 __main__ 那几行接线（否则产物落错地方，只有在真实 AWS 上运行才发现）。
     box = {}
     real_build = m.compose.build_engines
 
@@ -587,7 +587,7 @@ def test_render_status_pending_hints_wait(capsys):
 
 
 def test_render_status_running_no_hint(capsys):
-    """running → 不提示（在跑、正常）。退出码 0。"""
+    """running → 不提示（在运行、正常）。退出码 0。"""
     rc = m._render_status(_mk_state(Status.RUNNING), _args(), wait_hint="x", locations=_LOCS)
     assert "仍 pending" not in capsys.readouterr().err
     assert rc == 0
@@ -685,7 +685,7 @@ def test_plan_annotates_deterministic_hits(tmp_path, monkeypatch, capsys):
 
 
 def test_plan_conflict_annotated_and_warned(tmp_path, monkeypatch, capsys):
-    """冲突预检（真跑将 error 的注册表配置错）：行内 ⚠ 标注 + stderr 警告；plan 本体仍 0。"""
+    """冲突预检（实际运行将 error 的注册表配置错）：行内 ⚠ 标注 + stderr 警告；plan 本体仍 0。"""
     monkeypatch.setattr(m.compose, "match_deterministic",
                         lambda engine, texts, steps_dir=None: [{"conflict": ["p1", "p2"]} for _ in texts])
     assert m.main(["plan", str(_det_feature(tmp_path))]) == 0
@@ -784,7 +784,7 @@ def _miss(engine: str = "novaact"):
 
 def test_run_exits_2_before_spawn_when_worker_runtime_missing(tmp_path, monkeypatch, capsys):
     """run 的分叉：定位链 miss → 打安装指引 + 退 2，**且在 spawn/落库之前**——不进 job 级 engine_error
-    （「运行时没装」属「没开跑就被拒」层；否则用户拿到一批 error 的 job 结果而非一句能照做的指引）。"""
+    （「运行时没装」属「没开始执行就被拒」层；否则用户拿到一批 error 的 job 结果而非一句能照做的指引）。"""
     monkeypatch.setattr(m.compose, "resolve_worker_cmd", lambda engine, **kw: (_ for _ in ()).throw(_miss(engine)))
     started = []
     monkeypatch.setattr(m, "schedule", lambda *a, **k: started.append(1))
@@ -792,12 +792,12 @@ def test_run_exits_2_before_spawn_when_worker_runtime_missing(tmp_path, monkeypa
     rc = m.main(["run", str(_write_feature(tmp_path)), "--report-dir", str(reports)])
     assert rc == 2
     assert "uv tool install" in capsys.readouterr().err
-    assert started == []            # 没开跑
+    assert started == []            # 没开始执行
     assert not reports.exists()     # 也没落库（拒在 persistence.begin 之前，不留半成品 run）
 
 
 def test_run_unused_engine_miss_does_not_block(tmp_path, monkeypatch, capsys):
-    """miss 只连坐**用到它**的 run：novaact-only 的 run 在 midscene 未装（dev 常态）下照跑退 0。
+    """miss 只连坐**用到它**的 run：novaact-only 的 run 在 midscene 未装（dev 常态）下照常运行退 0。
 
     preflight 只查本次 plan 用到的引擎；未用到那条腿即便 miss 也只是「一用即报错」的空腿。
     """
@@ -960,7 +960,7 @@ def test_submit_local_persists_steps_dir_into_definition(tmp_path, monkeypatch):
 
     forked = []
     monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: forked.append(cmd) or _FakeProc())
-    # 提交侧跑前检查会问一次能力自述（ADR 0037 决策 4）；本测只验持久化通道，那一跳由 conftest 的 autouse
+    # 提交侧运行前检查会问一次能力自述（ADR 0037 决策 4）；本测只验持久化通道，那一跳由 conftest 的 autouse
     # 假替身盖住（不 spawn 真 worker）。
     steps = tmp_path / "steps"
     steps.mkdir()
@@ -1031,7 +1031,7 @@ def test_plan_degrades_when_worker_missing(tmp_path, monkeypatch, capsys):
 
 
 def test_run_and_submit_exit_2_before_spawn_when_user_steps_fail(tmp_path, monkeypatch, capsys):
-    """run / submit：跑前先问一次能力自述，worker 非零退出 → 起任何 job 之前退 2（不进 job 级 error）。
+    """run / submit：运行前先问一次能力自述，worker 非零退出 → 起任何 job 之前退 2（不进 job 级 error）。
 
     **文案中性**：该入口现在会加载使用方 steps，非零退出既可能是那些文件加载失败、也可能是这个引擎的 worker
     与命令行工具版本不一致（不认该入口）——两种成因都得点到，别把用户往单一方向带。"""
@@ -1092,7 +1092,7 @@ def test_differently_written_same_file_is_deduped_with_a_hint(tmp_path, monkeypa
 
 def test_render_status_pending_run_with_claimed_job_does_not_hint(capsys):
     """run 级仍 pending 但已有 job 被 claim（running）→ 推进已开始，不提示「可能未启动」。这是 detached 的正常窗口：
-    claim 只动 job、run 级要等下一次投影写；Fargate 拉起期间恒如此（真跑 submit 后连查三次撞见误报）。"""
+    claim 只动 job、run 级要等下一次投影写；Fargate 拉起期间恒如此（实际运行 submit 后连查三次撞见误报）。"""
     from gherkai_core.model import JobState, RunState
     state = RunState(run_id="r", status=Status.PENDING,
                      jobs={"a": JobState("a", Status.RUNNING), "b": JobState("b", Status.PENDING)}, high_water_mark=0)
@@ -1140,7 +1140,7 @@ def test_artifact_lines_report_write_failure_falls_back_to_a_note(capsys):
 
 def test_run_lists_each_job_but_submit_only_prints_the_count(tmp_path, monkeypatch, capsys):
     """run 与 submit 共享同一段前置（plan → steps 目录 → local 档 worker 检查），唯一的输出差别 = 逐 job 明细：
-    run 打（本机跑批要看得见分组），submit 不打（提交完就走、进度看 status）。计数行两处同款。"""
+    run 打（本机批量运行要看得见分组），submit 不打（提交完就走、进度看 status）。计数行两处同款。"""
     import subprocess
 
     monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
@@ -1216,7 +1216,7 @@ def test_plan_scenario_by_id_line_or_title_substring(tmp_path, capsys):
 
 
 def test_plan_empty_selection_exits_2_and_lists_candidates(tmp_path, capsys):
-    """筛空 → 退 2 并列全部候选（id  标题），别静默跑空批。"""
+    """筛空 → 退 2 并列全部候选（id  标题），别静默运行空批。"""
     feat = _tagged_feature(tmp_path)
     assert m.main(["plan", str(feat), "--json", "--tags", "nope"]) == 2
     err = capsys.readouterr().err
@@ -1380,7 +1380,7 @@ def _doctor_cloud_json(capsys, expect_rc=0):
 def test_doctor_cloud_worker_grace_ok_and_skips_engine_without_local_worker(monkeypatch, capsys):
     """两态一测：本机装了的引擎（midscene）下限 ≤ 云端停止宽限 → ✓；本机没装的（novaact）**跳过**。
 
-    跳过而非失败：下限是 worker 自报的，本机没这个 worker 就问不出来——只提交、不在本机跑的人不该为这一行装运行时。
+    跳过而非失败：下限是 worker 自报的，本机没这个 worker 就问不出来——只提交、不在本机执行的人不该为这一行装运行时。
     比对只对**已解析到 revision** 的引擎做一次 describe（不去猜没解析到的那条腿）。
     """
     _fake_locator(monkeypatch, available=("midscene",))
@@ -1397,7 +1397,7 @@ def test_doctor_cloud_worker_grace_ok_and_skips_engine_without_local_worker(monk
 
 def test_doctor_cloud_worker_grace_shortfall_is_optional_gap_not_failure(monkeypatch, capsys):
     """下限 > 云端停止宽限 → `-`（可选能力缺失）、退出码仍 0：这是 ADR 0032 真容器校准结论 4 的既定接受
-    （Fargate stopTimeout 有平台上限、Nova 的下限更大），不挡任何一次正常跑批，只让它看得见 + 给出抬高的办法。
+    （Fargate stopTimeout 有平台上限、Nova 的下限更大），不挡任何一次正常的批量运行，只让它看得见 + 给出抬高的办法。
     处置分两支：未顶到平台上限可抬、顶满即「已知并接受」——部署缺省就是平台硬顶，Nova 在正常后端上恒落这一格，
     只给「抬高」会让用户追一个已接受的残余。"""
     _fake_locator(monkeypatch, available=("novaact", "midscene"))
@@ -1522,7 +1522,7 @@ def test_doctor_provider_installed_but_broken_is_required_failure(monkeypatch, c
 
 
 def test_doctor_runs_worker_self_describe_even_without_steps_dir(monkeypatch, capsys):
-    """无 steps/ 目录也对可用引擎跑一次自述（验 worker 起得来），但只作可选项：自述失败不改退出码。"""
+    """无 steps/ 目录也对可用引擎执行一次自述（验 worker 起得来），但只作可选项：自述失败不改退出码。"""
     _fake_locator(monkeypatch); _no_provider(monkeypatch)
     monkeypatch.chdir(monkeypatch._temp_dir if hasattr(monkeypatch, "_temp_dir") else ".")
     monkeypatch.delenv("GHERKAI_STEPS_DIR", raising=False)
@@ -1540,7 +1540,7 @@ def test_doctor_reports_worker_self_reported_model(tmp_path, monkeypatch, capsys
     （本用例的替身在 conftest 的假自述之上只加计数）。
     """
     _fake_locator(monkeypatch, available=("novaact", "midscene")); _no_provider(monkeypatch)
-    monkeypatch.delenv("GHERKAI_STEPS_DIR", raising=False); monkeypatch.chdir(tmp_path)  # 不受跑测试的 cwd 里有没有 steps/ 影响
+    monkeypatch.delenv("GHERKAI_STEPS_DIR", raising=False); monkeypatch.chdir(tmp_path)  # 不受运行测试的 cwd 里有没有 steps/ 影响
     asked: list[str] = []
     stubbed = compose.query_capabilities  # conftest autouse 的确定性假替身
     monkeypatch.setattr(m.compose, "query_capabilities",
@@ -1602,7 +1602,7 @@ def test_empty_selection_flag_values_are_rejected(tmp_path, capsys):
 
 
 def test_scope_filter_selects_whole_named_scope_by_id(tmp_path, capsys):
-    """--scope = 报告里的 scope_id：named scope 的名字选中整个 scope（两条都跑），未标 scope 的用 <文件>:<行>；
+    """--scope = 报告里的 scope_id：named scope 的名字选中整个 scope（两条都运行），未标 scope 的用 <文件>:<行>；
     与 --scenario 同给为且。plan 文本里 named scope 不再重复打 (name=…)。"""
     p = tmp_path / "s.feature"
     p.write_text("Feature: F\n"
@@ -1623,7 +1623,7 @@ def test_scope_filter_selects_whole_named_scope_by_id(tmp_path, capsys):
 
 # ---- explain（ADR 0042 决策四）：判定明细 + step 级机读证据的合成视图 ----
 # 夹具照 ADR 的文本样例搭（同一份 run 喂各用例）：一个 scope、两条 scenario——第一条 failed 且第 3 步无记录
-# （worker 被中止的形态）、第二条 error 后短路。evidence 是真文件、ref 是真 file:// URI（读路径全程真跑）。
+# （worker 被中止的形态）、第二条 error 后短路。evidence 是真文件、ref 是真 file:// URI（读路径全程真实运行）。
 
 def _evidence_fixture(*, step_index=2, thought="I am on the login page.\n看到「密码错误」。Returning false.",
                       screenshot="file:///tmp/act-0-frame-4.jpg", schema_version=1) -> dict:
@@ -1852,7 +1852,7 @@ def test_explain_detached_run_without_job_files_exits_0_with_one_hint(tmp_path, 
     from gherkai_core.model import Status as S
     root, run_id = _explain_run(tmp_path, with_results=False, run_status=S.RUNNING)
     rc, out, err = _explain(capsys, root, run_id)
-    # 建议命令要能原样跑通：local 档必带 --report-dir（默认 reports/ 与本用例的 tmp 根不同，不带即查不到）
+    # 建议命令要能原样运行成功：local 档必带 --report-dir（默认 reports/ 与本用例的 tmp 根不同，不带即查不到）
     assert rc == 0 and out == "" and "判定明细尚未落地" in err
     assert f"gherkai status {run_id} --report-dir {root} --wait" in err
     rc, out, err = _explain(capsys, root, run_id, "--json")
@@ -1944,7 +1944,7 @@ def test_explain_cloud_reads_evidence_from_s3(monkeypatch, capsys):
 
 
 def test_explain_cloud_not_landed_hint_carries_cloud_locator_flags(monkeypatch, capsys):
-    """cloud 档「判定明细尚未落地」给的 status 命令必带 --backend cloud --prefix：照抄要跑得通，
+    """cloud 档「判定明细尚未落地」给的 status 命令必带 --backend cloud --prefix：照抄要能运行成功，
     否则落回 local 档、报「未找到 run」还把人引去查 --report-dir（方向指错）。prefix 取已解析的那个。"""
     from gherkai_core.model import JobState, RunState
     job = _explain_job()

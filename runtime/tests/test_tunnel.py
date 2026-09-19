@@ -1,7 +1,7 @@
 """tunnel 模块单测（ADR 0035）：origin 映射（纯逻辑）+ NgrokTunnel 编排（fake spawn/API，不真起 ngrok）。
 
 绿即够的边界（CLAUDE.md「绿≠对·别过度」）：映射是纯函数、provider 编排的 fake 覆盖「参数拼装/
-轮询/超时/报错」逻辑；「ngrok 真起得来、URL 真可达」是真实边界，由真跑验证（本机应用 + 真 AgentCore）。
+轮询/超时/报错」逻辑；「ngrok 真起得来、URL 真可达」是真实边界，由真实运行验证（本机应用 + 真 AgentCore）。
 """
 from __future__ import annotations
 
@@ -101,7 +101,7 @@ def test_ngrok_start_spawns_agent_and_reads_log():
     assert info.auth and ":" in info.auth  # basic-auth 默认开启（ADR 0035 决策 4）
     cmd = spawned["cmd"]
     assert cmd[0] == "ngrok" and cmd[1] == "http" and cmd[2] == "http://localhost:3000"
-    assert "--log" in cmd and "--log-format" in cmd  # 日志文件通道（v3 无 --web-addr，真跑暴露）
+    assert "--log" in cmd and "--log-format" in cmd  # 日志文件通道（v3 无 --web-addr，实际运行暴露）
     assert "--traffic-policy-file" in cmd  # 凭据经 Traffic Policy 在边缘拦
     # policy 文件内容真含凭据
     policy = open(cmd[cmd.index("--traffic-policy-file") + 1], encoding="utf-8").read()

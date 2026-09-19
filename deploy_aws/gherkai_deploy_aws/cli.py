@@ -41,7 +41,7 @@ cdk CLI 调用、VPC 档三态比对、工具链前置检查（Node ≥ 22 与 c
 
 `0` 成功；`2` **前置/校验失败**（Node 缺失或 cdk CLI 定位不到、VPC 档不符或无记录、读后端失败、容器引擎名不认、push-worker
 的架构/skew 拦截——用户可修，对齐 CLI 既有 preflight 退 2 的口径）；**`1`** = cdk 已成功而 worker 镜像四步失败
-（账户已被改动，重跑 `gherkai deploy` 幂等收敛，ADR 0038）；其余 = cdk CLI 自己的返回码（原样透传，
+（账户已被改动，重新运行 `gherkai deploy` 幂等收敛，ADR 0038）；其余 = cdk CLI 自己的返回码（原样透传，
 别把 cdk 的失败压成自己的码）。
 """
 from __future__ import annotations
@@ -232,7 +232,7 @@ class Provider:
         parser.add_argument("--region", default=None, metavar="R", help="AWS region（默认走 AWS_REGION/profile 配置）")
         parser.add_argument("--profile", default=None, metavar="P", help="AWS profile（默认 AWS_PROFILE）")
         if self._is_destroy_parser(parser):
-            # destroy 专属：cdk destroy 在非 TTY 下**拒绝**无确认的销毁（「terminal (TTY) is not attached」退 1，真跑撞到）。
+            # destroy 专属：cdk destroy 在非 TTY 下**拒绝**无确认的销毁（「terminal (TTY) is not attached」退 1，实际运行撞到）。
             # 默认保留 cdk 的交互确认（销毁不可逆，两道确认不多）；脚本/跳板机 nohup 这类非交互场景显式 --yes。
             parser.add_argument(
                 "--yes", action="store_true",
@@ -347,8 +347,8 @@ class Provider:
         # 容器引擎的两类问题也在这一档处置（本地、不花网络、不要凭证——这一期 deploy 机器需要容器引擎，
         # 同步基底要 pull/push，ADR 0038「容器引擎口子」）：
         # - **名字不认**（env/flag 给了 podman）→ 纯参数问题，退 2、绝不动账户；
-        # - **装了但不可用 / 没装** → 只警告：退码语义归 cdk 之后的四步（账户已改 → 退 1、重跑幂等收敛）。
-        #   仍要提前说一声——cdk deploy 是分钟级动作，让人跑完才知道「还差个 docker」是白等。
+        # - **装了但不可用 / 没装** → 只警告：退码语义归 cdk 之后的四步（账户已改 → 退 1、重新运行幂等收敛）。
+        #   仍要提前说一声——cdk deploy 是分钟级动作，让人等到运行结束才知道「还差个 docker」是白等。
         engine = self._container_engine(args)
         if engine is None:
             return EXIT_PRECONDITION
@@ -394,7 +394,7 @@ class Provider:
 
     def diff(self, args) -> int:
         """只呈变更集（不改任何东西）。**它是 VPC 档三态的指定核对手段**，故自身不做三态比对——
-        对本机制之前部署的环境，`deploy` 退 2 时让人跑的就是它，若它也被拦就无路可走。"""
+        对本机制之前部署的环境，`deploy` 退 2 时让人运行的就是它，若它也被拦就无路可走。"""
         missing = self._require_vpc(args)
         if missing is not None:
             return missing
@@ -410,14 +410,14 @@ class Provider:
         if missing is not None:
             return missing
         # 用户给的 DIR 相对**用户的** cwd；`_run_cdk` 里把它钉成绝对路径再交给 cdk——cdk 子进程的 cwd 是随后
-        # 被删的临时工作目录，相对路径原样传会让导出物落进那里、随之消失而命令却退 0（真跑踩过）。
+        # 被删的临时工作目录，相对路径原样传会让导出物落进那里、随之消失而命令却退 0（实际运行踩过）。
         return self._run_cdk("synth", args, output=Path(out).expanduser())
 
     def bootstrap(self, args) -> int:
         """`cdk bootstrap`（首次在某 account/region 用 CDK 的前置）——**账户级动作，不合成 app、不需要 `--vpc`**。
 
         显式给 `aws://<account>/<region>` 且**不带 `--app`**：cdk 有显式环境又没有 app 时直奔凭证与 bootstrap
-        stack（真跑核过：带 `--app` 则即使给了显式环境也会先跑 app——那就又要 `--vpc` 了）。
+        stack（实际运行核过：带 `--app` 则即使给了显式环境也会先执行 app——那就又要 `--vpc` 了）。
         account 经 STS `GetCallerIdentity` 取（对任何主体恒可用、不算新增权限）；region 走同一条解析链
         （`--region` / AWS_REGION / profile 配置），取不到 → 退 2（bootstrap stack 是按 region 建的，不能猜）。
         """
@@ -615,7 +615,7 @@ class Provider:
         return ctx
 
     def app_command(self) -> str:
-        """生成的 `cdk.json` 里的 `app`：用**当前解释器**跑本包的 CDK app。
+        """生成的 `cdk.json` 里的 `app`：用**当前解释器**运行本包的 CDK app。
 
         必须是 `sys.executable`、不是裸 `python`——部署方多半用 `uv tool install` 装的隔离环境，PATH 上的
         `python` 未必装了 `gherkai-deploy-aws`（asset 还要从**本 venv** 已安装包复制，见 `stack._build_lambda_asset`）。
@@ -658,7 +658,7 @@ class Provider:
             self.write_cdk_json(work_dir)
             # **CDK 环境查询缓存（`cdk.context.json`）跨调用持久化**：工作目录是一次性的，若每次都空着进去，cdk 对
             # `from_lookup`（`--vpc default|<id>`）缺失的值会先用占位 VPC/子网**预合成一遍**再去真查——aws-cdk-lib 的
-            # 模板校验器对那份占位模板报错、降级成「Template validation found issues」warning 打出来（真跑抓到、
+            # 模板校验器对那份占位模板报错、降级成「Template validation found issues」warning 打出来（实际运行抓到、
             # 全新目录 100% 复现、有缓存即消失），而且每次多一轮查询 API。CDK 自己的标准做法就是把该文件保留
             # （它建议入库），这里放在用户缓存目录、按 prefix 一份；`--refresh-context` 丢弃重查（VPC/子网真变了时用）。
             work_ctx = work_dir / "cdk.context.json"
@@ -669,7 +669,7 @@ class Provider:
             elif ctx_cache.exists():
                 shutil.copyfile(ctx_cache, work_ctx)
             # 用户给的导出目录钉成**绝对**路径：cdk 子进程 cwd = 本次临时工作目录（用完即删），相对路径
-            # 原样传会让导出物落进那里、随目录消失而命令退 0（真跑踩过）。默认落工作目录、随之清理。
+            # 原样传会让导出物落进那里、随目录消失而命令退 0（实际运行踩过）。默认落工作目录、随之清理。
             out_dir = output.resolve() if output is not None else work_dir / "cdk.out"
             argv = [*cdk_argv, verb, "--app", self.app_command(), "--output", str(out_dir)]
             for key, value in self.build_context(args).items():
@@ -699,7 +699,7 @@ class Provider:
     def _guard_vpc_spec(self, args) -> int | None:
         """deploy 前的 VPC 档比对。放行 → None；拦 → 退出码（2）。
 
-        只在 deploy 前跑（见 `diff`/`destroy` 的 docstring）。读失败（凭证/权限/网络）也退 2 而非抛 traceback：
+        只在 deploy 前执行（见 `diff`/`destroy` 的 docstring）。读失败（凭证/权限/网络）也退 2 而非抛 traceback：
         对用户是「先修凭证」，与 Node 缺失同一档。
         """
         target = self._resolve_target(args)
@@ -771,7 +771,7 @@ class Provider:
         from importlib.metadata import version as dist_version
         try:
             return dist_version("gherkai-deploy-aws")
-        except PackageNotFoundError as exc:  # 源码直跑、未装成包
+        except PackageNotFoundError as exc:  # 从源码直接运行、未装成包
             raise RuntimeError(
                 "取不到版本号：本包未以发行包形式安装（源码直接运行）。后端版本戳无隐式默认——"
                 "装成包（`uv tool install 'gherkai[deploy-aws]'` 或 workspace `uv sync`）后再部署"

@@ -1,6 +1,6 @@
 {
   // 编译配置（ADR 0037 决策 3）：包化后 `dist/` 由 tsc 产出，**tsconfig 必须入库**——
-  // 早先刻意不带 tsconfig、靠 tsx 运行期扩展名重写的形态只在「repo 内直跑」下成立，
+  // 早先刻意不带 tsconfig、靠 tsx 运行期扩展名重写的形态只在「repo 内直接运行」下成立，
   // 作为被 npm 消费的包不再成立（消费者拿到的是 dist/*.mjs，没有 tsx 转译源码这一步）。
   //
   // 源码统一 `.mts`、产物统一 `.mjs`：模块体系不依赖 package.json#type（决策 3

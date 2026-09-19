@@ -298,7 +298,7 @@ class DynamoDBRunStore:
         elif has_pointers(meta_dict):
             # fail-loud（ADR 0030 决定七「不给生产选要不要正确」）：META 含 offload 指针而本实例没注入
             # offloader = 组合根装配错误（曾发生：Lambda 组合根漏注入 → 正文静默还原成 None、worker 拿
-            # 空参数跑错）。宁炸不静默降级。判据走 arg_offload 的**位置遍历**（与 restore 同源，决定六
+            # 空参数执行出错）。宁炸不静默降级。判据走 arg_offload 的**位置遍历**（与 restore 同源，决定六
             # 「位置区分、非值探测」）——对 meta_json 原始串做 '"content_ref"' 子串 sniff 会被「正文恰为
             # 该串」的 docString/dataTable cell 误命中，把好 run 判成装配错误、读不回来。
             raise RuntimeError(

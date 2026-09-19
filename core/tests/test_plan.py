@@ -347,7 +347,7 @@ def test_scope_id_collision_across_files_errors(named_first: bool):
 
 
 def test_scope_id_collision_errors_even_when_narrowed_away():
-    """撞名检测在施加 select 之前：收窄到只跑 named 那个 scope 也照样退——撞的是 scope_id 命名空间，不是本次跑哪几条。
+    """撞名检测在施加 select 之前：收窄到只执行 named 那个 scope 也照样退——撞的是 scope_id 命名空间，不是本次运行哪几条。
 
     与「整组被筛空的 scope 其 @engine/@timeout 冲突不拦本次迭代」相反，属对全量成员 fail-fast 那一族（同 _scope_key）。
     """
@@ -457,8 +457,8 @@ def test_plan_select_keeps_scope_engine_and_timeout():
     [s1] = plan([FeatureSource("t.feature", text)], CFG, select=lambda p, scope_id: scope_id == "s1")
     assert s1.scope_id == "s1" and [s.name for s in s1.scenarios] == ["a", "b"]
 
-    # 不变量：筛选只减少跑哪几条——scope 的 engine/timeout 按**全量**成员解析（曾在分组前筛：筛掉带 tag 的成员后
-    # 剩下的静默回落到缺省引擎/预算，迭代结论对全量跑不成立）
+    # 不变量：筛选只减少运行哪几条——scope 的 engine/timeout 按**全量**成员解析（曾在分组前筛：筛掉带 tag 的成员后
+    # 剩下的静默回落到缺省引擎/预算，迭代结论对全量运行不成立）
     text2 = ("Feature: F\n"
              "  @scope:s @engine:novaact @timeout:900\n  Scenario: a\n    When \"x\"\n"
              "  @scope:s\n  Scenario: b\n    When \"y\"\n")

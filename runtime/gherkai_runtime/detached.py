@@ -39,7 +39,7 @@ class SubprocessLauncher:
     """local Launcher（ADR 0034 机制四回调 + 机制二退出观察者）。
 
     launch(job)：起 worker（resolver 按 engine 选 SubprocessEngine）→ 后台线程消费 fd3 事件流落 SQLite +
-    退出后写 task_exited。非阻塞返回（reconciler 继续 tick，不等 worker 跑完——那是 fire-and-forget，事件
+    退出后写 task_exited。非阻塞返回（reconciler 继续 tick，不等 worker 运行结束——那是 fire-and-forget，事件
     异步落 SQLite、下轮 tick 从 SQLite 重放看到进展）。
 
     同时 enforce job timeout（ADR 0034「job timeout」节 local 档）：job.timeout_s 非 None 时起 deadline
@@ -69,7 +69,7 @@ class SubprocessLauncher:
         engine: SubprocessEngine = self._resolver(job.engine)
         # raw_sink：SubprocessEngine 读 fd3 每行原始 JSON（解析前）旁路调它——落 SQLite 存原样（存原始行、
         # 读回复用 wire.event_from_line，零新序列化）。seq 按到达序单调递增（worker 一个 scope 串行 emit）。
-        # 续号：从 SQLite 已有 max_seq 起（重试/续跑幂等）。闭包持 seq，_pump 的线程内单线程递增、无竞态。
+        # 续号：从 SQLite 已有 max_seq 起（重试/继续运行幂等）。闭包持 seq，_pump 的线程内单线程递增、无竞态。
         seq_box = [self._event_log.max_seq(scope_id)]
 
         def raw_sink(line: str) -> None:
@@ -105,7 +105,7 @@ class SubprocessLauncher:
 
     def _pump(self, scope_id: str, handle, events, timer: threading.Timer | None,
               timed_out: threading.Event) -> None:
-        """驱动一个 worker 的 fd3 事件流跑完（落库在 raw_sink 里做）；结束后 handle.wait() 拿 exitcode 写 task_exited。
+        """驱动一个 worker 的 fd3 事件流直到结束（落库在 raw_sink 里做）；结束后 handle.wait() 拿 exitcode 写 task_exited。
 
         迭代 events 只为驱动 fd3 读（每行触发 raw_sink 落库）——迭代产出的 Event 本身丢弃（我们要的是原始行、
         已落库）。异常（含 _read_events 对 rc>0 抛的 RuntimeError/WorkerNetworkError）吞掉：下面 handle.wait()
@@ -146,7 +146,7 @@ def run_reconcile_loop(
     now_iso_fn：**必传**的时间源（组合根传 `compose.now_iso`；测试传 fake 保确定性）——曾有个 strftime 的
     `…Z` 回落分支，漏传即让同一份 RunState 混两种时间戳格式（见 `compose.now_iso` docstring），故不留缺省。
     tick 幂等——崩了 status --wait 可接力（状态全持久）。全 done（tick 返回 True）即退出（batch shape：
-    跑完即停、不常驻）。
+    运行结束即停、不常驻）。
 
     result_store/report_store（可选）：判定真值（jobs/*.json）由 tick 在 finalize CAS **之前**落（注入给 tick，
     ADR 0030 决定三写序）；RunReport（index/manifest）在 done 后由 `finalize_report` 写（派生、失败隔离）。
@@ -160,9 +160,9 @@ def run_reconcile_loop(
             from gherkai_runtime import compose
 
             # run 级墙钟是**派生指标**（缺则报告里显「?」），取它要多读一次 RunState——落盘读会因 IO 错/文件写坏抛，
-            # 而这一步跑在 finalize 的 commit point **之后**：commit 后的失败无人重试（ADR 0030 决定三），抛出去会让
+            # 而这一步发生在 finalize 的 commit point **之后**：commit 后的失败无人重试（ADR 0030 决定三），抛出去会让
             # 本进程带着未写的报告退出、还会跳过拆隧道那步（`drive_local_reconcile` 的 cleanup_tunnel 在本函数返回
-            # 后才跑，ADR 0035「拆除时机」表 local `submit` 行）。故整段隔离、失败按缺值走（ADR 0034 收尾节把
+            # 后才执行，ADR 0035「拆除时机」表 local `submit` 行）。故整段隔离、失败按缺值走（ADR 0034 收尾节把
             # run 级墙钟划在「派生、失败隔离」那一侧；cloud 推进侧同形）。
             try:
                 duration_ms = compose.run_duration_ms(run_store.load_run_state(run_id))
@@ -220,7 +220,7 @@ def _recover_timed_out_claims(run_id, meta, event_log, run_store, launcher, now_
 
 
 # ============================================================================
-# per-run 进程：从 run_id + 本地落点重建装配、跑 reconcile loop（submit setsid fork 它）
+# per-run 进程：从 run_id + 本地落点重建装配、运行 reconcile loop（submit setsid fork 它）
 # ============================================================================
 
 
@@ -249,7 +249,7 @@ def build_local_reconcile(report_dir: str, run_id: str, max_concurrency: int,
 
     # region/profile 走与前台 run 完全相同的解析链（ADR 0016 决策 C：--region > AWS_REGION > AWS_DEFAULT_REGION >
     # profile config）——此前原样透传 None：profile-only/config-only 用户下 worker env 不注入 AWS_REGION，
-    # Nova worker 的 AgentCore validate_region 见 None 即崩（exit 1、零事件；detached 真跑复现）。
+    # Nova worker 的 AgentCore validate_region 见 None 即崩（exit 1、零事件；detached 实际运行复现）。
     # 单点修在此（而非各调用方）：submit fork 的 per-run / status --wait 接力 / 手动 _reconcile 三路全覆盖。
     profile = profile or os.environ.get("AWS_PROFILE")
     region = compose.resolve_region(region, profile)

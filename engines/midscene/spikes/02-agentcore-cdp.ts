@@ -2,7 +2,7 @@
 // 目标：TS 侧拿到 AgentCore 云端浏览器并用 Playwright 连上、导航维基、取标题、收尾停会话。
 //   流程：StartBrowserSession → 拿 automationStream.streamEndpoint(ws) → SigV4 签 CDP upgrade 头
 //        → Playwright connectOverCDP(ws, { headers }) → newPage → goto wikipedia → title → StopBrowserSession
-// 跑：cd midscene && AWS_REGION=us-east-1 node_modules/.bin/tsx spikes/midscene-sigv4/02-agentcore-cdp.ts
+// 运行：cd midscene && AWS_REGION=us-east-1 node_modules/.bin/tsx spikes/midscene-sigv4/02-agentcore-cdp.ts
 import { chromium } from "playwright";
 import {
   BedrockAgentCoreClient,

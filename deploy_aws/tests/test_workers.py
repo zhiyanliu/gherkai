@@ -52,7 +52,7 @@ def aws():
 
 
 def seed_backend(aws: workers.Aws, *, stamp: str | None = VERSION, cpu: str = "1024") -> dict[str, str]:
-    """把「`gherkai deploy` 已经跑过一次」的后端摆出来：ECR repo ×2 + 模板 revision ×2（SSM worker-template）
+    """把「`gherkai deploy` 已经运行过一次」的后端摆出来：ECR repo ×2 + 模板 revision ×2（SSM worker-template）
     + 版本戳 + runs 表（带 status GSI）。返回 {engine: 模板 revision ARN}。
 
     `cpu` 供「deploy 改了模板」那组测试造出**第二个**模板 revision。
@@ -368,7 +368,7 @@ def test_orphan_revision_is_reused_instead_of_registered(aws):
 
 
 def test_same_digest_under_another_variant_is_not_reused(aws):
-    """同 digest 但**另一个 variant** 的 revision 不复用（真跑抓到：probe 复用了 base 正在用的 revision，之后 base
+    """同 digest 但**另一个 variant** 的 revision 不复用（实际运行抓到：probe 复用了 base 正在用的 revision，之后 base
     换 digest 重推会把它退休、满静默期清掉，probe 的映射悬空）。每个 variant 自己一个 revision。"""
     seed_backend(aws)
     digest = "sha256:" + "a" * 64
@@ -416,7 +416,7 @@ def test_repush_retires_the_replaced_revision_and_prints_digest_change(aws):
     new_arn = _mapping(aws, "novaact", "login")["revision_arn"]
     assert rc == 0 and new_arn != old_arn
     assert _tags(aws, old_arn)[names.TAG_RETIRED_AT] == (NOW + timedelta(minutes=5)).isoformat()
-    assert old_arn in _revisions(aws, "novaact"), "退休 ≠ 立刻删（在跑 run 的后续 job 还要用它起 task）"
+    assert old_arn in _revisions(aws, "novaact"), "退休 ≠ 立刻删（运行中 run 的后续 job 还要用它起 task）"
     assert "原 digest" in text and "新 digest" in text
 
 
@@ -554,7 +554,7 @@ def test_cleanup_skips_the_whole_pass_when_the_mappings_cannot_be_listed(aws):
     """读不全 `worker-image/*` 映射 → **整趟放弃**，不把所有 revision 判成孤儿。
 
     「读不全就当没有映射」会让每个在用 revision 都变成孤儿，而真实 ECS 的 `registeredAt` 是过去时刻——
-    静默期那道闸拦不住，等于批量误删在跑 run 手里的 revision。
+    静默期那道闸拦不住，等于批量误删运行中 run 手里的 revision。
     """
     seed_backend(aws)
     _push(aws, FakeContainer())
@@ -659,7 +659,7 @@ def test_sync_base_pulls_ghcr_and_pushes_as_base(aws):
 
 
 def test_sync_base_skips_non_pure_release_but_deploy_continues(aws):
-    """dev 版（`.dev`/`.post`/本地段）**GHCR 上不存在对应基底** → 明确警告 + 跳过基底同步，第 3/4 步照跑。
+    """dev 版（`.dev`/`.post`/本地段）**GHCR 上不存在对应基底** → 明确警告 + 跳过基底同步，第 3/4 步照常执行。
 
     判据复用 `compose.is_pure_release`（决策 2b：非纯净版本一定带 `+`/`.dev`）。硬失败会逼 contributor 绕过命令。
     """
@@ -672,7 +672,7 @@ def test_sync_base_skips_non_pure_release_but_deploy_continues(aws):
     assert not any(k == "pull" for k, *_ in c.calls), "dev 版不该去拉 GHCR"
     assert "GHCR" in text() and "push-worker" in text()
     assert aws.ssm.get_parameter(Name=names.ssm_path(PREFIX, names.WORKER_DEFAULT_KEY)
-                                 )["Parameter"]["Value"] == "base", "第 3 步照跑"
+                                 )["Parameter"]["Value"] == "base", "第 3 步照常执行"
 
 
 def test_sync_base_pull_failure_points_at_the_half_published_state(aws):
@@ -682,7 +682,7 @@ def test_sync_base_pull_failure_points_at_the_half_published_state(aws):
     out, text = _out()
     rc = workers.run_deploy_steps(prefix=PREFIX, version=VERSION, container=c, aws=aws, now=NOW, out=out)
     assert rc == 1, "cdk 已成功而后续步骤失败 → 退 1"
-    # 断言用户能据以行动的两句：状态（stack 已生效）+ 重跑哪个命令。
+    # 断言用户能据以行动的两句：状态（stack 已生效）+ 重新运行哪个命令。
     assert "拉不到基底" in text() and "半发布态" in text()  # sync_base 自己那条（不是四步兜底行）
     assert "stack 已生效" in text() and "gherkai deploy" in text()
 
@@ -754,14 +754,14 @@ def test_rederive_enumerates_ssm_once_and_reads_the_template_once_per_engine(aws
     assert {(r.engine, r.variant) for r in results} == {("novaact", "base"), ("novaact", "login"),
                                                         ("midscene", "login")}
     assert ssm_spy.calls.count("get_parameters_by_path") == 1, \
-        f"全量枚举应只跑一次（两个引擎共用），实际 {ssm_spy.calls.count('get_parameters_by_path')} 次"
+        f"全量枚举应只执行一次（两个引擎共用），实际 {ssm_spy.calls.count('get_parameters_by_path')} 次"
     # 每引擎：取 repo URI 读模板一次 + 每个新 revision 从模板复制一次
     assert ecs_counter.described.count(new_templates["novaact"]) == 3, ecs_counter.described
     assert ecs_counter.described.count(new_templates["midscene"]) == 2, ecs_counter.described
 
 
 def test_rederive_does_not_read_the_template_when_nothing_is_stale(aws):
-    """模板没变（deploy 重跑的常态）→ 一次模板 describe 都不打：判定只用映射里记的模板 ARN。"""
+    """模板没变（deploy 重新运行的常态）→ 一次模板 describe 都不打：判定只用映射里记的模板 ARN。"""
     seed_backend(aws)
     _push(aws, FakeContainer())
     counter = CountingEcs(aws.ecs)
@@ -773,7 +773,7 @@ def test_rederive_does_not_read_the_template_when_nothing_is_stale(aws):
 
 
 def test_run_deploy_steps_reports_a_missing_container_engine_as_exit_1(aws):
-    """cdk 已成功、机器上没有容器引擎 → 退 1 + 「stack 已生效、重跑幂等收敛」（不是退 2：账户已被改过）。"""
+    """cdk 已成功、机器上没有容器引擎 → 退 1 + 「stack 已生效、重新运行幂等收敛」（不是退 2：账户已被改过）。"""
     seed_backend(aws)
     out, text = _out()
     rc = workers.run_deploy_steps(prefix=PREFIX, version=VERSION,
@@ -784,7 +784,7 @@ def test_run_deploy_steps_reports_a_missing_container_engine_as_exit_1(aws):
 
 
 def test_deploy_steps_are_idempotent(aws):
-    """四步重跑收敛：第二趟不该多出任何 revision（同二元组查重 + 指针不动 + 无需重派生）。"""
+    """四步重新运行收敛：第二趟不该多出任何 revision（同二元组查重 + 指针不动 + 无需重派生）。"""
     seed_backend(aws)
     c = FakeContainer(digests=["sha256:" + "4" * 64, "sha256:" + "5" * 64,
                                "sha256:" + "4" * 64, "sha256:" + "5" * 64])
@@ -839,7 +839,7 @@ def test_list_workers_is_blocked_by_skew(aws):
 def test_skew_gate_read_failure_exits_2_without_a_traceback(aws):
     """读戳失败（无凭证/无权限）→ 退 2 + 一句人话。
 
-    `compose.read_backend_version` 有意把这类异常抛给入口皮归码，**本模块就是那个皮**——真跑踩过：
+    `compose.read_backend_version` 有意把这类异常抛给入口皮归码，**本模块就是那个皮**——实际运行踩过：
     没有凭证时 `gherkai deploy list-workers` 直接吐 botocore 的 `NoCredentialsError` 堆栈。
     """
     class _BrokenSsm:
@@ -864,7 +864,7 @@ def test_list_workers_says_when_the_default_pointer_is_missing(aws):
 
 
 def test_list_workers_enumerates_ssm_once_for_all_engines(aws):
-    """`list-workers` 的全量枚举（待清理对账用的映射集 + 各引擎当前版本的 variant）只跑一次、两个引擎共用。
+    """`list-workers` 的全量枚举（待清理对账用的映射集 + 各引擎当前版本的 variant）只执行一次、两个引擎共用。
 
     **只断输出照不出这条**——逐引擎重走一遍枚举，列出来的东西一模一样，只是多花几趟分页
     （`GetParametersByPath` 每页 10 条）。
@@ -878,7 +878,7 @@ def test_list_workers_enumerates_ssm_once_for_all_engines(aws):
                                 aws=workers.Aws(ssm=spy, ecs=aws.ecs, ecr=aws.ecr, ddb=aws.ddb),
                                 out=out) == 0
     n = spy.calls.count("get_parameters_by_path")
-    assert n == 1, f"全量枚举应只跑一次（两个引擎共用），实际 {n} 次"
+    assert n == 1, f"全量枚举应只执行一次（两个引擎共用），实际 {n} 次"
     body = text()
     assert body.count("1.4.0-login") == 2, f"枚举一次不等于少列东西：两个引擎的 variant 都该在\n{body}"
 

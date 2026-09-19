@@ -1,6 +1,6 @@
 """--expose-local 的 CLI 接线测试（ADR 0035）：fake tunnel provider——不真起 ngrok、不连 AWS。
 
-「ngrok 真起得来 / 隧道 URL 真可达 / 浏览器真过 basic-auth」是真实边界，由真跑验证；
+「ngrok 真起得来 / 隧道 URL 真可达 / 浏览器真过 basic-auth」是真实边界，由真实运行验证；
 此处锁「接线 + 映射 + 生命周期交棒」的纯逻辑。
 """
 from __future__ import annotations
@@ -73,7 +73,7 @@ def test_run_without_expose_local_zero_change(tmp_path, monkeypatch):
 
 
 def test_run_tunnel_failure_exits_2(tmp_path, monkeypatch, capsys):
-    """隧道起不来（如 authtoken 缺失）→ 退 2「没开跑就被拒」，不产生引擎费用。"""
+    """隧道起不来（如 authtoken 缺失）→ 退 2「没开始执行就被拒」，不产生引擎费用。"""
     def boom(name):
         raise gtunnel.TunnelError("ngrok 隧道未就绪…authtoken 未配置")
 
@@ -229,8 +229,8 @@ def test_submit_local_fork_failure_tears_down_tunnel(tmp_path, monkeypatch):
 
 
 def test_submit_local_failure_after_handoff_keeps_tunnel(tmp_path, monkeypatch):
-    """fork **成功之后**的收尾行抛（stdout 是坏管道、Ctrl-C 恰落此窗）→ **不拆**：宿主已经在跑，
-    拆了会让剩余 job 在被测应用不可达下跑成假失败（兜底反成失败源，还烧真钱）。"""
+    """fork **成功之后**的收尾行抛（stdout 是坏管道、Ctrl-C 恰落此窗）→ **不拆**：宿主已经在运行，
+    拆了会让剩余 job 在被测应用不可达下运行成假失败（兜底反成失败源，还烧真钱）。"""
     import builtins
 
     import pytest
@@ -268,7 +268,7 @@ def test_submit_cloud_preflight_failure_tears_down_tunnel(tmp_path, monkeypatch,
     err = capsys.readouterr().err
     assert "gherkai-cluster" in err
     assert _stops(calls) == [("stop", INFO.pid)]
-    # 拆了必须说一声：这一格也可能是「已提交、只是没交上棒」（云端已接管、照跑照烧钱），用户光看一个栈
+    # 拆了必须说一声：这一格也可能是「已提交、只是没交上棒」（云端已接管、照常运行、照常烧钱），用户光看一个栈
     # 或一行 rc=2 判断不出隧道已经没了。
     assert "隧道已拆除" in err and "重新提交" in err
 
@@ -313,7 +313,7 @@ def _patch_cloud_commit(monkeypatch):
 def test_submit_cloud_keeps_tunnel_after_daemon_fork(tmp_path, monkeypatch, capsys):
     """cloud submit 一路顺到守护 fork 成功 → **不拆**（对称于 local 的交棒边界用例）。
 
-    守护是 cloud 档隧道的唯一宿主：这里误拆等于让云端已接管的整批 job 在被测应用不可达下跑成假失败。
+    守护是 cloud 档隧道的唯一宿主：这里误拆等于让云端已接管的整批 job 在被测应用不可达下运行成假失败。
     """
     calls = []
     _patch_tunnel(monkeypatch, calls)

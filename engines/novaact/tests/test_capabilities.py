@@ -6,7 +6,7 @@
 这些（env 已在 import 期定型、argv/stdin/AWS 更碰不到）；尤其 env 旋钮的缺省值——本进程继承的 env 里若
 设过同名变量，in-process 断言就是假绿。
 
-跑（从 repo 根）：uv run pytest -q engines/novaact/tests/test_capabilities.py
+运行（从 repo 根）：uv run pytest -q engines/novaact/tests/test_capabilities.py
 """
 import json
 import os
@@ -92,7 +92,7 @@ def test_min_grace_tracks_both_env_knobs():
 
 
 def test_default_min_grace_covers_act_timeout_default():
-    """不注入任何 env（旧宿主 / 手动直跑）：下限仍 ≥ 缺省 act 上界 120 + margin，不退化成小值。"""
+    """不注入任何 env（旧宿主 / 手动直接运行）：下限仍 ≥ 缺省 act 上界 120 + margin，不退化成小值。"""
     proc = subprocess.run(_CMD, capture_output=True, timeout=60, env=_clean_env())
     assert proc.returncode == 0, proc.stderr.decode()[-500:]
     assert json.loads(proc.stdout.decode("utf-8"))["min_grace_s"] == 120 + NOVA_GRACE_MARGIN_S

@@ -131,8 +131,8 @@ def plan(features: list[FeatureSource], config: PlanConfig, *,
     """core 窄腰第一步：一组 .feature → 可调度的 Job 列表（ADR 0025）。
 
     select（ADR 0041 决策一）：scenario 筛选谓词，在 **scope 分组与 engine/timeout 解析之后、Job 组装之前**施加。
-    不变量：筛选只减少「跑哪几条」——scope 的引擎、墙钟预算、会话身份一律按**全量**成员解析，与不筛时逐字一致（否则筛后
-    跑的与全量跑的不是同一件事，迭代结论不可迁移）。整组被筛空的 scope 不进任何 job（且在解析 engine/timeout 之前跳过，
+    不变量：筛选只减少「运行哪几条」——scope 的引擎、墙钟预算、会话身份一律按**全量**成员解析，与不筛时逐字一致（否则筛后
+    执行的与全量执行的不是同一件事，迭代结论不可迁移）。整组被筛空的 scope 不进任何 job（且在解析 engine/timeout 之前跳过，
     它内部的 tag 冲突不拦本次迭代）；`_scope_key` 仍对全量成员校验（一个 scenario 多个 @scope 照样 fail-fast）。None = 不筛。
     谓词由调用方按 `--scope/--tags/--scenario` 组装，core 只收 `(ParsedScenario, scope_id) → bool`、不认 flag 语义
     （scope_id 一并传入：业务概念「scope」的筛选按分组键判，不逼调用方从 tags 反推）。筛后为空返回 []。
@@ -181,11 +181,11 @@ def plan(features: list[FeatureSource], config: PlanConfig, *,
             f"运行结果互相覆盖。给这个 @scope 换个名字。"
         )
 
-    # 3) 每组：engine/timeout 按**全量**成员解析（不变量：筛选只减少跑哪几条，不改 scope 的引擎、预算、会话身份），
-    #    再施加 select 取本次要跑的成员；整组筛空则不进任何 job——且在解析之前跳过，被筛掉的 scope 里的 @engine/@timeout
+    # 3) 每组：engine/timeout 按**全量**成员解析（不变量：筛选只减少运行哪几条，不改 scope 的引擎、预算、会话身份），
+    #    再施加 select 取本次要运行的成员；整组筛空则不进任何 job——且在解析之前跳过，被筛掉的 scope 里的 @engine/@timeout
     #    冲突不拦本次迭代（ADR 0041 决策一）。
     jobs: list[Job] = []
-    picked_uris: dict[str, set[str]] = {}  # named scope 实际要跑的成员所在 uri（跨文件合并 warning 按它算，别报不会跑的文件）
+    picked_uris: dict[str, set[str]] = {}  # named scope 实际要运行的成员所在 uri（跨文件合并 warning 按它算，别报不会执行的文件）
     for (named, key), members in groups.items():
         picked = members if select is None else [m for m in members if select(m, key)]
         if not picked:
@@ -211,7 +211,7 @@ def plan(features: list[FeatureSource], config: PlanConfig, *,
         if named:
             picked_uris[key] = {m.uri for m in picked}  # 权威 uri（parse 时已知），不从 id 有损反解
 
-    # 4) 跨文件合并 warning（ADR 0025）：一个 named scope **要跑的**成员跨多个 uri
+    # 4) 跨文件合并 warning（ADR 0025）：一个 named scope **要运行的**成员跨多个 uri
     for key, uris in picked_uris.items():
         if len(uris) > 1:
             logger.warning(

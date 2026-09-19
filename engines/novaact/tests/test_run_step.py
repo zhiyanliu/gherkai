@@ -106,22 +106,22 @@ def test_when_natural_language_goes_to_act(captured):
 # 那个没人 await 的 coroutine 必然引出 RuntimeWarning——它正是本用例要护住的现象，不是测试脏
 @pytest.mark.filterwarnings("ignore:coroutine .* was never awaited:RuntimeWarning")
 def test_async_deterministic_handler_is_error_not_silent_pass(captured):
-    """`async def` 的 handler：coroutine 没人 await → 函数体里的断言压根不跑。
+    """`async def` 的 handler：coroutine 没人 await → 函数体里的断言压根不执行。
 
     必须显式记 error（并点明原因），绝不能因为「调用没抛异常」就判 passed——那是最坏的假阳性：
-    用例作者以为精确判定在跑，实际什么都没判。（Midscene 侧允许 async，故两侧写法不可互抄。）
+    用例作者以为精确判定在执行，实际什么都没判。（Midscene 侧允许 async，故两侧写法不可互抄。）
     """
     saved = list(_d._REGISTRY)
     try:
         @_d.deterministic(r"^异步判定$", description="测试用：async handler", example="Then 异步判定")
         async def _async_handler(ctx):
-            raise AssertionError("这行压根不会跑到")
+            raise AssertionError("这行不会执行到")
 
         r = rs._run_step(_FakeNova(), "sc:0", _step("Then", "异步判定"), 1, captured)
     finally:
         _d._REGISTRY[:] = saved
 
-    assert r == "error"                      # 不是 passed（静默假阳性），也不是 failed（断言没跑，无从判失败）
+    assert r == "error"                      # 不是 passed（静默假阳性），也不是 failed（断言没执行，无从判失败）
     done = _done(captured)
     assert done["status"] == "error" and "不能是 async" in done["message"]
     assert done.get("votes") is None         # 确定性分支命中：没走 AI、不投票
@@ -181,7 +181,7 @@ def test_act_non_network_is_engine_error(captured):
 # ---- _classify_act_error：SDK 异常树细分（ADR 0024 errorType 细化）----
 def test_classify_timeout():
     from nova_act.types.act_errors import ActTimeoutError
-    # __new__ 绕过 SDK 构造参数（只测 isinstance 映射，不跑 SDK 逻辑）
+    # __new__ 绕过 SDK 构造参数（只测 isinstance 映射，不执行 SDK 逻辑）
     e = ActTimeoutError.__new__(ActTimeoutError)
     assert rs._classify_act_error(e) == "timeout"
 
@@ -282,7 +282,7 @@ def test_run_scenario_shortcircuits_after_error(captured):
         _step("Then", '"页面有预期内容"', 2),                   # 应被短路（不调 act_get）
     ]
     statuses = rs._run_scenario(nova, "sc:0", steps, votes_n=1, sink=captured)
-    # 上游 error 后：AI 一次没调（省钱、不在损坏环境上跑）
+    # 上游 error 后：AI 一次没调（省钱、不在损坏环境上得出误导性假失败）
     assert nova.act_calls == 0 and nova.act_get_calls == 0
     # step 1/2 发 step_skipped（独立事件，非 step_done）
     skipped = [e for e in captured if e["type"] == "step_skipped"]
@@ -294,7 +294,7 @@ def test_run_scenario_shortcircuits_after_error(captured):
 
 
 def test_run_scenario_no_shortcircuit_when_all_pass(captured):
-    # 反向护栏：无 error 时不短路——每步照跑、无 step_skipped 事件。
+    # 反向护栏：无 error 时不短路——每步照常执行、无 step_skipped 事件。
     nova = _FakeNova(bool_seq=[True])
     steps = [_step("When", '"做事A"', 0), _step("Then", '"对吗"', 1)]
     statuses = rs._run_scenario(nova, "sc:0", steps, votes_n=1, sink=captured)
@@ -304,11 +304,11 @@ def test_run_scenario_no_shortcircuit_when_all_pass(captured):
 
 def test_run_scenario_failed_does_not_shortcircuit(captured):
     # 判据锁 status==error（不是 failed）：一个 failed 的断言步**不**短路后续——
-    # failed 是业务结论、环境没坏，后续步该照跑（只有 error=执行故障才短路）。
+    # failed 是业务结论、环境没坏，后续步该照常运行（只有 error=执行故障才短路）。
     nova = _FakeNova(bool_seq=[False, True])  # 第一个 Then failed，第二个 Then passed
     steps = [_step("Then", '"对吗A"', 0), _step("Then", '"对吗B"', 1)]
     statuses = rs._run_scenario(nova, "sc:0", steps, votes_n=1, sink=captured)
-    assert statuses == ["failed", "passed"]  # failed 不触发短路，第二步照跑
+    assert statuses == ["failed", "passed"]  # failed 不触发短路，第二步照常执行
     assert [e for e in captured if e["type"] == "step_skipped"] == []
 
 

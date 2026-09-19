@@ -5,10 +5,10 @@
 浏览器：AgentCore 云端（aws.browser.v1，ADR 0011），经 AgentCoreBrowserSessionProvider.cdp_session()。
 断言：
   A 确定性：nova.page.url 含 /wiki/OpenAI（底层 Playwright，可复现）
-  B AI 断言：nova.act("...", schema=BOOL_SCHEMA) 跑 N=10 次测抖动
+  B AI 断言：nova.act("...", schema=BOOL_SCHEMA) 运行 N=10 次测抖动
 度量：动作成功率、A/B 是否一致、B 的 10 次抖动率、各步耗时。
 
-跑（从 repo 根，worker 包已在根 venv 里）：AWS_REGION=us-east-1 uv run python engines/novaact/spikes/wikipedia_benchmark.py
+运行（从 repo 根，worker 包已在根 venv 里）：AWS_REGION=us-east-1 uv run python engines/novaact/spikes/wikipedia_benchmark.py
 """
 from __future__ import annotations
 

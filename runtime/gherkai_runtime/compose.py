@@ -32,7 +32,7 @@ from gherkai_core.scope import FeatureSource
 # （worker run_scope.py 读它，缺省也是 120、此处显式注入使两端同源）：subprocess 档见 build_engines、Fargate 档见
 # build_fargate_engines、能力自述查询见 query_capabilities——**三处都注**，否则那条路上的 worker 落回自带字面量。
 # **grace 下限不在这里算**（ADR 0024「引擎自报下限」）：worker 按这同一个注入值 + 自己的 margin 自报下限
-# （见 engine_min_grace），故「worker 的单 act 上界」与「grace 下限」仍同源于本常量。env 可覆盖（真跑标定/调优）。
+# （见 engine_min_grace），故「worker 的单 act 上界」与「grace 下限」仍同源于本常量。env 可覆盖（实际运行标定/调优）。
 NOVA_ACT_TIMEOUT_S = int(os.environ.get("NOVA_ACT_TIMEOUT_S", "120"))  # SDK 允许 [2,1800]
 
 
@@ -69,7 +69,7 @@ def engine_min_grace(engine_name: str) -> float:
     查询（`--capabilities`）、进程内缓存、把值作 `ScheduleOpts.min_grace_s` 传给 core（core 只 enforce
     「grace ≥ 此下限」的引擎无关关系）。混引擎 run 由调用方取各引擎下限的 max（grace 是 run 级单值）。
     **下限与使用方 step 无关**（它只是引擎自己的收尾预算）→ 该引擎**任一** steps 目录下的缓存对象都供得出这个
-    值；一份都没有时才无 steps 地问一次。故 `run` 的跑前检查带着 steps 目录问过之后，本机 run 每引擎只 spawn 一次。
+    值；一份都没有时才无 steps 地问一次。故 `run` 的运行前检查带着 steps 目录问过之后，本机 run 每引擎只 spawn 一次。
     **查不到即抛、绝不回落常量**（异常与契约校验见 `query_capabilities`；版本不一致的 worker 不认该 flag 即
     fail-loud，CLI 与 worker 须同版本安装）：静默回落一个猜的下限 = grace 默默不够、收尾被 SIGKILL 截断，
     正是本机制要消除的漂移。
@@ -242,7 +242,7 @@ def resolve_worker_cmd(engine: str, *, version: str | None = None) -> WorkerCmd:
        midscene **没有本级**：`npx -y <包>@<版本>` 实测把 fd 换掉（node 里该号上是 npm 自己的 FIFO、写即 EBADF），
        事件全丢，按「预演不过则降为报错 + 安装指引」处置（ADR 0037 决策 3）。
     version：第四级 pin 的版本，缺省取本包（gherkai-runtime）版本——worker 与 CLI `==` 同版本
-    （ADR 0037 决策 2b），未装成包（源码直跑）时取不到 → 第四级跳过。
+    （ADR 0037 决策 2b），未装成包（从源码直接运行）时取不到 → 第四级跳过。
     """
     if engine not in _names.ENGINES:
         raise ValueError(f"未知引擎：{engine!r}（可用：{sorted(_names.ENGINES)}）")
@@ -290,7 +290,7 @@ def _find_worker_spec(module: str) -> bool:
 
 
 def _runtime_version() -> str | None:
-    """本包（`gherkai-runtime`）的发行版本：定位链第四级的 pin 值。未装成包（源码直跑）→ None。"""
+    """本包（`gherkai-runtime`）的发行版本：定位链第四级的 pin 值。未装成包（从源码直接运行）→ None。"""
     try:
         return _dist_version("gherkai-runtime")
     except PackageNotFoundError:
@@ -497,7 +497,7 @@ def query_capabilities(engine: str, *, steps_dir: str | Path | None = None,
     """查某引擎 worker 的能力自述（ADR 0036「5.」）：spawn `worker --capabilities` 收一个 JSON 对象。
 
     **唯一的自述入口、一次 spawn 拿全**（ADR 0036 被拒方案末条「每个自述项一个独立 flag」）：steps 加载是否成功
-    （`run`/`submit` 的跑前检查）、确定性 step 清单（`list-deterministic`、doctor 的加载计数）、grace 下限
+    （`run`/`submit` 的运行前检查）、确定性 step 清单（`list-deterministic`、doctor 的加载计数）、grace 下限
     （`engine_min_grace`）、该 worker 实际会用的模型 id（doctor 的模型行，ADR 0004「模型版本选择策略」）都取这
     同一份对象——本机 run 每引擎因此只 spawn 一次（进程内按「引擎 + steps 目录」缓存；Nova 每次 spawn 都要
     import SDK，自述项各占一个 flag 时 spawn 次数随项数增长）。
@@ -505,7 +505,7 @@ def query_capabilities(engine: str, *, steps_dir: str | Path | None = None,
     `min_grace_s` 非负有限数、`deterministic_steps` 是数组、`model_id` 是非空字符串；**不合契约不写缓存**
     （一次坏自述不该被记成「这引擎就这样」）。身份位当场核的理由见下方注释。
     **Nova 查询也注入 `NOVA_ACT_TIMEOUT_S`**：它自报的下限 = 这个注入值 + worker 侧 margin，不注入则 worker 按
-    自带缺省算——operator 调大单 act 上界后下限静默偏低，正是「两端同源」要挡的漂移（见该常量注释；两个真跑档
+    自带缺省算——operator 调大单 act 上界后下限静默偏低，正是「两端同源」要挡的漂移（见该常量注释；两个实际运行档
     build_engines / build_fargate_engines 注的是同一个值）。
     steps_dir（ADR 0037 决策 4）：该入口同样加载 steps 目录，故 `deterministic_steps` = 内建脚手架 + 使用方定制、
     且使用方 steps 加载失败在这里就 fail-loud；不给时组合根拥有的键被显式清（见 `_ask_worker`），即「无使用方
@@ -568,7 +568,7 @@ def match_deterministic(engine: str, texts: list[str], *, steps_dir: str | Path 
     """批量问某引擎 worker「这些 step 文本各命中哪条确定性模式」（ADR 0036 决策 4，plan 标注用）。
 
     spawn `worker --match-steps`、stdin 喂 JSON 文本数组、收逐条结果（None=走 AI /
-    {"pattern","description"}=命中 / {"conflict":[...]}=命中多条——真跑将 error，plan 预检提前暴露）。
+    {"pattern","description"}=命中 / {"conflict":[...]}=命中多条——实际运行时将 error，plan 预检提前暴露）。
     匹配语义 100% 在 worker（同一注册表同一 search 实现），CLI 零复刻（ADR 0022「匹配放 worker」红线）。
     异常语义同 `query_capabilities`（调用方 plan 做 best-effort 降级）。
     """
@@ -677,7 +677,7 @@ def resolve_region(explicit_region: str | None, profile: str | None) -> str | No
     `InvalidRegionError` 崩。用 `boto3.Session(profile).region_name` 读 profile config 的 region（探针证实：有则返回、
     无则 None）。boto3 惰性 import（仅前三级都 miss 时才触发）——**缺 boto3（纯 local 未装 aws extra）也不硬依赖**：
     catch ImportError → 返回 None（等价于「无 region」，与真无 region 同走 fail-loud），保住「纯 local 路径绝不
-    依赖 boto3」不变量（否则纯 local + 无 region env 的用户跑会撞未捕获 ImportError，而非优雅 fail-loud）。
+    依赖 boto3」不变量（否则纯 local + 无 region env 的用户执行时会撞未捕获 ImportError，而非优雅 fail-loud）。
     真无 region（全 miss / 或缺 boto3 读不到 profile config）→ 返回 None=fail-loud（worker 报错、不硬编码 east，对齐 store 宽容边界）。
     """
     r = explicit_region or os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
@@ -927,7 +927,7 @@ def build_fargate_engines(
 
     **`worker_task_defs`（引擎 → task-def **revision** ARN）必给、无缺省**（ADR 0038 不变量「运行时只用
     definition 里的显式 revision，永不用 family 取最新」）：传 family 名会让 ECS 取该 family 最新 ACTIVE
-    revision——多 variant 下任何一次 `push-worker` 都会劫持在跑的 run（中途换 step 集）。**故意不给缺省值**：
+    revision——多 variant 下任何一次 `push-worker` 都会劫持正在运行的 run（中途换 step 集）。**故意不给缺省值**：
     缺省成 family 名就是把这条不变量做成「忘了传就静默破」，改成必给关键字 → 漏传即 `TypeError`，在装配点
     就炸。真值来源两条（都在调用方，本函数只认 ARN）：definition 的 `RunMeta.worker_task_defs`（正常路径，
     提交侧 preflight 解析）、`resolve_default_worker_task_defs`（旧 definition 的兼容路径）。
@@ -954,12 +954,12 @@ def build_fargate_engines(
     pfx = _normalize_prefix(report_dir)
     # job-in 落点用 **jobs-in/**（**不是 jobs/**）：ResultStore 判定真值写在 <run_id>/jobs/<quote(scope_id)>.json、
     # 且 load_all 用 `list jobs/ + unquote basename` 枚举判定——job-in（输入）与 ResultStore（输出判定）scope_id 编码
-    # 相同、若共用 jobs/ 前缀会撞 key（互相覆盖）+ 被 load_all 误当判定读。故 job-in 独立前缀 jobs-in/。（真跑暴露。）
+    # 相同、若共用 jobs/ 前缀会撞 key（互相覆盖）+ 被 load_all 误当判定读。故 job-in 独立前缀 jobs-in/。（实际运行暴露。）
     job_s3 = (bucket, f"{pfx}{run_id}/jobs-in/")
     # 产物上传落点（ADR 0029）：prefix = <report_dir>/<run_id>/（run 树根，worker 拼产物相对路径；与 report 同前缀镜像
     # run 树）。**cloud 必注入**——否则容器盘停即销毁、产物必丢（ADR 0029「cloud 注入不是可选」）。
     artifact_s3 = (bucket, f"{pfx}{run_id}/")
-    # SDK 产物落点 env（容器内路径）——**uploader 靠它算 run_dir/相对 key，缺它 no-op 报 file://、产物丢**（真跑暴露）。
+    # SDK 产物落点 env（容器内路径）——**uploader 靠它算 run_dir/相对 key，缺它 no-op 报 file://、产物丢**（实际运行暴露）。
     # 容器内固定 run 根 /tmp/gherkai-run/<run_id>/，按引擎子目录（names.ARTIFACT_SUBDIR，对称 subprocess 侧）：
     # uploader run_dir=父级=<run 根>，S3 key = ARTIFACT_S3_PREFIX(<report_dir>/<run_id>/) + 相对路径 → 与 subprocess 镜像一致。
     container_run_root = f"/tmp/gherkai-run/{run_id}"
@@ -1060,12 +1060,12 @@ def check_version_skew(ssm_version: str | None, cli_version: str | None) -> tupl
 
     message 是给人看的整句（ok 档为空串，调用点 `if message:` 即可）；**退码留给调用点**——`block` 一律退 2
     且**无放行口**（决策 7 明拒 `--allow-version-skew`：放行 = 让新 CLI 写的 definition 进旧 Lambda runtime 读，
-    后果不可知且静默；uvx 按版本临时跑同版本 CLI 零成本，放行口没有真实需求）。其余三档只打一行、不拦。
+    后果不可知且静默；uvx 按版本临时运行同版本 CLI 零成本，放行口没有真实需求）。其余三档只打一行、不拦。
 
     判序——「无从比较」一律先于「比较结果」：
-    1. **戳缺失**（`ssm_version` 为 None/空）→ warn + 提示部署方跑一次 `gherkai deploy` 写入。**不可退 2**：
+    1. **戳缺失**（`ssm_version` 为 None/空）→ warn + 提示部署方运行一次 `gherkai deploy` 写入。**不可退 2**：
        否则本机制之前部署的所有环境被 preflight 锁死（决策 7 明写要避免的后果）。
-    2. **自身版本取不到**（`cli_version` 为 None：未装成包、源码直跑）→ skip。**`cli_version` 必给、不缺省成本包
+    2. **自身版本取不到**（`cli_version` 为 None：未装成包、从源码直接运行）→ skip。**`cli_version` 必给、不缺省成本包
        版本**：比的对象是「写任务定义那一方」（CLI）的版本，由调用点提供；editable 开发树里各包版本各自漂
        （按各自 git 状态算），缺省读 `gherkai-runtime` 版本会埋一个只在各包同版本的发行态下才等价的第二真源。
     3. **任一侧非纯发行版**（含 `.dev`/`.post`/本地段，或压根解析不了）→ skip：dev 版逐提交前进，逐字比较
@@ -1107,7 +1107,7 @@ def check_backend_skew(*, prefix: str, cli_version: str | None, region=None, pro
                        ssm=None) -> tuple[str, str, str | None]:
     """读后端版本戳 + 判 skew 一步到位（ADR 0037 决策 7）——**编排住产品本体、不住入口皮**：CLI / WebUI /
     推进器任何组合根要做「自己 vs 后端」比对都调这一处，判据、措辞与「戳缺失→警告不拦」的分叉单点维护。
-    **调用次序约定：先于 `preflight_cloud_resources`**——skew 的修复动作是部署方跑一次 `gherkai deploy`，那一步
+    **调用次序约定：先于 `preflight_cloud_resources`**——skew 的修复动作是部署方运行一次 `gherkai deploy`，那一步
     同时把资源建齐/补齐；先报「表不存在」只会把人引去查 `--prefix`、绕一圈回到同一个动作。
     读戳的异常（凭证/region/权限）原样抛，由调用方归到自己的退出码层（与 `read_backend_version` 一致）。
     **戳一并返回**（第三元）：调用方后续的 worker variant 解析（ADR 0038）要拿同一个戳给出 skew 感知的提示语，
@@ -1130,7 +1130,7 @@ class WorkerResolution:
     """一个引擎的 worker variant 解析结果（ADR 0038「运行时与 preflight」）。
 
     `revision_arn` 是**唯一进 RunTask 的字段**（不变量：显式 revision、永不 family）；`digest` 供 preflight
-    打印「这次跑的到底是哪份镜像」——「用的是哪份可见、可查」是本 ADR 要解的问题之一，故一起带回来、
+    打印「这次运行的到底是哪份镜像」——「用的是哪份可见、可查」是本 ADR 要解的问题之一，故一起带回来、
     不让调用方二次读 SSM。（SSM 记录里的 `template_arn` 不带回：解析侧无消费者，「从哪个模板派生」由
     `gherkai deploy list-workers` 从 SSM/血缘 tags 直读展示。）
     """
@@ -1232,7 +1232,7 @@ def _variant_miss_hint(*, engine: str, variant: str, tag: str, what: str,
     命名空间**的 tag，推完提交侧还是解析不到当前后端版本的映射、原地绕圈。此档一律引导升级 CLI。
     其余档（同版本 / 无从比较 / 无戳）引导 push-worker——这是真正缺镜像时的修复动作；并给第二条出路
     「临时 `--worker-variant base`」（ADR 0038「升级不重置默认指针」的配套：deploy 已把本版本基底同步成 base，
-    等不及部署方推自定义 variant 的人可先跑）。
+    等不及部署方推自定义 variant 的人可以先这样运行）。
     """
     if _release_cmp(cli_version, backend_version or "") == -1:
         return (f"引擎 {engine} 的 worker variant {variant!r} 解析失败（{what}）：本机 CLI {cli_version} "
@@ -1261,8 +1261,8 @@ def resolve_worker_variant(
 
     **只按 `engines` 判**（= 本 run 实际用到的引擎），对齐既有 task-def preflight 的判据「不探全注册表——
     没用到的引擎不该拦」：单引擎团队不必为另一个引擎凭空推镜像。
-    `variant=None` → 取部署级默认指针（缺失即抛，提示跑 `gherkai deploy`）。tag 由 `names.image_tag`
-    单点拼（推送方与本函数同一个函数，键不会两边算法不同而对不上）；`cli_version` 取不到（源码直跑）时
+    `variant=None` → 取部署级默认指针（缺失即抛，提示运行 `gherkai deploy`）。tag 由 `names.image_tag`
+    单点拼（推送方与本函数同一个函数，键不会两边算法不同而对不上）；`cli_version` 取不到（从源码直接运行）时
     无从拼 tag，也抛——fail-loud 好过静默解析成别的版本。
     句柄可注入（测试/复用同一 session）；未注入则惰性建。
     """
@@ -1345,11 +1345,11 @@ def resolve_default_worker_task_defs(
     """**宿主的兼容路径**（ADR 0038「读侧兼容口径」）：definition 里没有 `worker_task_defs` 的 run，按**后端
     当前默认指针**解析出引擎 → revision ARN。解析不出即抛，**绝不回落 family 最新 ACTIVE、绝不回落模板 revision**。
 
-    这样的 run 有两个来源：引入本机制的那次升级前提交、升级窗口内仍在跑的 run；以及旧 CLI 提交到新后端的 run
+    这样的 run 有两个来源：引入本机制的那次升级前提交、升级窗口内仍在运行的 run；以及旧 CLI 提交到新后端的 run
     （ADR 0037 决策 7「CLI 旧于后端 → 警告不拦」允许）。用**后端**版本拼 tag（不是提交方 CLI 版本——definition
     里根本没记，且后端只解析自己版本命名空间下的映射）。
 
-    比 `resolve_worker_variant` 少两环（不 Describe revision、不查 ECR digest）是有意的：这里跑在推进器
+    比 `resolve_worker_variant` 少两环（不 Describe revision、不查 ECR digest）是有意的：这里运行在推进器
     Lambda 的热路径上，而**它拿到的 ARN 立刻要交给 RunTask** ——revision 被注销/镜像被删的话 RunTask 自己就会
     报，多两次 API 调用只是把同一个错误提前一点、换不来新信息。提交侧 preflight 的三环校验是为了「别让用户
     提交完才发现」，宿主没有这个动机。
@@ -1385,12 +1385,12 @@ def preflight_cloud_resources(
     region=None, profile=None, ecs=None, s3=None, ddb=None, lam=None,
 ) -> str | None:
     """fail-fast 探 cloud 资源存在性（ADR 0033 preflight 条）——用已解析 prefix 拼出的名去探，不存在返回一句
-    **点名 prefix** 的错误串（调用方退 2），全在返回 None。别跑到一半才因资源缺炸；错误要能指向「prefix 配错 /
+    **点名 prefix** 的错误串（调用方退 2），全在返回 None。别运行到一半才因资源缺炸；错误要能指向「prefix 配错 /
     CDK 没部署」。
 
     探**执行必需**（events 表 + cluster + 桶 + `task_defs`——本 run 用到引擎的 task-def）恒探；**runs 表仅落库
     需要**——`runs_table=None`（`--no-report`）时不探（report 与执行正交，ADR 0016 决策 A：`--no-report
-    --backend cloud` 仍 Fargate 跑、不落库、故不碰 runs 表）；**`lambda_fns` 仅 detached submit 需要**——事件
+    --backend cloud` 仍在 Fargate 上运行、不落库、故不碰 runs 表）；**`lambda_fns` 仅 detached submit 需要**——事件
     驱动链三 Lambda（kicker/reconciler/exit-observer），任一缺则提交成功但 run 永不推进/收敛，挡在提交前
     （同步 run 进程内推进、不依赖链、不传）。句柄可注入（测试）；未注入惰性建。探法全只读：DDB DescribeTable、
     S3 HeadBucket、ECS DescribeClusters/DescribeTaskDefinition、Lambda GetFunction。
@@ -1399,14 +1399,14 @@ def preflight_cloud_resources(
     **`report_dir` 非 None 时另比对「推进器的产物前缀」一致性**（存在性之外的唯一语义探针，ADR 0033 preflight 条）：
     detached cloud 档的产物前缀有**两个独立来源**——提交侧 `--report-dir`（offload 的 args/ 落它）与推进侧
     Lambda 的 `REPORT_DIR` env（判定真值 jobs/ 与 RunReport 落它，IaC 有意不注入、由 Lambda 内缺省 `reports` 供给）。
-    不一致时提交照样成功、run 照样跑完，但结果落在用户没指定的前缀下（用户在自己给的前缀里找不到报告、
+    不一致时提交照样成功、run 照样运行完成，但结果落在用户没指定的前缀下（用户在自己给的前缀里找不到报告、
     提交侧留下一批孤儿 args 对象），是典型「静默分裂」，故挡在提交前。只比 `lambda_fns` 里的**两个推进器**
     （kicker/reconciler——名按 prefix 从 `names` 真源推出；exit-observer 不读 REPORT_DIR、不比），
     env 缺该键视作 Lambda 侧缺省 `reports`，两侧都过 `_normalize_prefix` 再比（`reports` 与 `reports/` 不算冲突）。
 
     **`declared_max_concurrency` + `on_warn` 非 None 时另提示「声明超部署侧 cap」**（ADR 0034 机制四）：读同一批
     推进器的 `MAX_CONCURRENCY` env（缺键视作推进器侧缺省 1），声明 > cap 则经 `on_warn` 警一条（最多一条）、
-    **不构成 preflight 失败**。与上面 REPORT_DIR 退 2 的判据分野 = **分岔的后果**：超 cap 只是被钳制，run 照跑、
+    **不构成 preflight 失败**。与上面 REPORT_DIR 退 2 的判据分野 = **分岔的后果**：超 cap 只是被钳制，run 照常运行、
     结果照落用户给的前缀，分岔对产物是 no-op（只是慢），提示即够；REPORT_DIR 分岔会把产物写去别处（用户在自己
     给的前缀下找不到结果），必须挡在提交前。
     """

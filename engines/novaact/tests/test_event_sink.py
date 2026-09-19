@@ -36,7 +36,7 @@ def test_emit_preserves_chinese_ensure_ascii_false(tmp_path, monkeypatch):
 
 
 def test_from_env_falls_back_to_stdout_when_no_events_fd(monkeypatch, capsys):
-    # 无 EVENTS_FD（手动直跑）→ 回落 stdout，便于调试。
+    # 无 EVENTS_FD（手动直接运行）→ 回落 stdout，便于调试。
     monkeypatch.delenv("EVENTS_FD", raising=False)
     EventSink.from_env().emit({"type": "scope_started"})
     assert '"scope_started"' in capsys.readouterr().out
@@ -85,7 +85,7 @@ def test_ddb_state_putitem(monkeypatch):
 def test_ddb_state_binds_target_table_name(monkeypatch):
     # env→目标表接线（对称 Midscene event-sink.test.ts 断言 TableName=='ev'）：EVENTS_DDB_TABLE 必须真被用作
     # .Table(name) 的目标。上一条测试绕过了 _ddb()（直塞 _client），故表名接线无覆盖——若 _ddb() 绑错表名/读错
-    # env 仍会绿、只有真跑才炸。这里 mock boto3.resource 让真 _ddb() 跑一遍、断言 .Table 以 "ev" 调用。
+    # env 仍会绿、只有真实运行才炸。这里 mock boto3.resource 让真 _ddb() 执行一遍、断言 .Table 以 "ev" 调用。
     import boto3
     from unittest.mock import MagicMock
 

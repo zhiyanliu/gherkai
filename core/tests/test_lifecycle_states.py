@@ -1,6 +1,6 @@
 """job 生命周期态 + severity 单测（ADR 0031）：skipped/aborted/pending/running、severity 序、_aggregate 过滤。
 
-纯逻辑 + 内存假 Engine（不起子进程），验证 fail-fast 下两类「没跑成」被正确区分。
+纯逻辑 + 内存假 Engine（不起子进程），验证 fail-fast 下两类「未正常完成」被正确区分。
 """
 from __future__ import annotations
 
@@ -102,7 +102,7 @@ def test_aggregate_all_skipped_no_error_not_misjudged_passed():
 
 # ---- fail-fast：排队没起 → SKIPPED（worker 从未 spawn）----
 def test_fail_fast_queued_job_is_skipped():
-    # max_concurrency=1 串行：crash 先跑→崩→set abort_flag→第二个 job 还在排队→起跑前命中 abort 检查→SKIPPED
+    # max_concurrency=1 串行：crash 先运行→崩→set abort_flag→第二个 job 还在排队→启动前命中 abort 检查→SKIPPED
     jobs = [_job("crash"), _job("queued")]
     engine = FakeEngine(
         behaviors={
@@ -119,7 +119,7 @@ def test_fail_fast_queued_job_is_skipped():
     queued_jr = next(jr for jr in result.jobs if jr.scope_id == "queued")
     assert crash_jr.status == Status.ERROR          # 触发者：自身崩
     assert queued_jr.status == Status.SKIPPED       # 被牵连、worker 从未 spawn
-    assert queued_jr.error_type is None             # skipped 无错（可无脑重跑）
+    assert queued_jr.error_type is None             # skipped 无错（可无脑重新运行）
     assert engine.run_count.get("queued") is None   # 关键：queued 的 worker 从未被 run_scope（没花钱）
     assert result.status == Status.ERROR            # run 级仍 error（crash 顶上去），skipped 不污染
 
@@ -131,9 +131,9 @@ def test_fail_fast_queued_job_is_skipped():
 _DEADLOCK_ESCAPE_S = 30.0
 
 
-# ---- fail-fast：跑一半被掐 → ABORTED（已 spawn、有现场）----
+# ---- fail-fast：运行到一半被掐 → ABORTED（已 spawn、有现场）----
 # 标准 FakeEngine 在被 stop 时「协作式干净返回」→偏向 passed，且并发下 victim 常在 crash 崩之前/之后被
-# SKIPPED，无法确定性命中 ABORTED 分支。故用一个小专用 engine 确定性复现「已 spawn、跑到一半、收到 stop
+# SKIPPED，无法确定性命中 ABORTED 分支。故用一个小专用 engine 确定性复现「已 spawn、运行到一半、收到 stop
 # 后仍越过 abort 检查」：victim 先吐一个事件（已有现场）→ 阻塞等 crash 崩并 set abort_flag → 再吐事件，
 # 让 schedule 的事件间 abort 检查（schedule.py 的 abort_flag 分支）确定性命中 → ABORTED。
 class _AbortProbeEngine:
@@ -158,7 +158,7 @@ class _AbortProbeEngine:
         # 提前收尾）。关键（去 flake）：schedule 的 abort 检查在**事件间**（下一次迭代的循环顶），故 abort 生效后
         # 必须还有下一个事件被 next() 拉出来、触发那次检查 → 命中 abort 分支 → ABORTED。若像原来只吐一个 StepDone
         # 就自然结束（或一醒来见 stopped 就 return），for 可能在 abort 检查前 StopIteration 正常收尾 → 误判 PASSED。
-        # schedule 命中 abort 分支后 return、不再 next() 本生成器，故不会真跑满 range（1000 只是防御性上限）。
+        # schedule 命中 abort 分支后 return、不再 next() 本生成器，故实际不会走满 range（1000 只是防御性上限）。
         yield ScenarioStarted(scenario_id="victim:0")
         self.victim_started.set()
         # 接近无限等（_DEADLOCK_ESCAPE_S 仅死锁逃生）：**不用短超时兜底**——短超时会打破「被放行 ⟺ abort_flag
@@ -199,7 +199,7 @@ def test_fail_fast_inflight_job_is_aborted():
     assert engine.gate_released, "victim 未被真正放行（crashed 超时），耦合被打破——测试环境异常，非有效断言"
     victim_jr = next(jr for jr in result.jobs if jr.scope_id == "victim")
     assert engine.run_count.get("victim") == 1     # 已 spawn（区别于 skipped 的从未 spawn）
-    assert victim_jr.status == Status.ABORTED        # 跑一半被 fail-fast 掐
+    assert victim_jr.status == Status.ABORTED        # 运行到一半被 fail-fast 掐
     assert victim_jr.error_type is None              # aborted 不带 errorType（不是引擎故障，是被叫停）
     assert victim_jr.status != Status.ERROR          # 关键回归：被牵连中止绝不再记成 error（ADR 0031）
     assert result.status == Status.ERROR             # run 级仍 error（crash 顶上去），aborted 不进 run 级聚合
@@ -250,11 +250,11 @@ class _NetRaiseEngine:
 
     def _gen(self, job):
         if job.scope_id == "crash":
-            # crash 必须等 victim 先进入事件循环（过了起跑前 abort 检查）才崩——否则 victim 会被判 SKIPPED 而非 ABORTED
+            # crash 必须等 victim 先进入事件循环（过了启动前 abort 检查）才崩——否则 victim 会被判 SKIPPED 而非 ABORTED
             if self._entered is not None:
                 self._entered.wait(timeout=_DEADLOCK_ESCAPE_S)
             raise RuntimeError("crash 崩 → set abort_flag")
-        # victim：先吐一个事件证明已 spawn、在事件循环里（过了起跑前检查）；宣告 entered；
+        # victim：先吐一个事件证明已 spawn、在事件循环里（过了启动前检查）；宣告 entered；
         # 再 wait gate（被 fail-fast stop 时放行）→ 抛网络码 → 命中 except WorkerNetworkError 块的 abort 分支。
         yield ScopeStarted(scope_id="victim", session_id="sess-v")
         if self._entered is not None:

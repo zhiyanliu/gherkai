@@ -1,5 +1,5 @@
 // 确定性注册表单测（ADR 0022）——node:test via tsx，不连 AWS、不起浏览器。
-// 跑：npm test（node --import tsx --test "src/**/*.test.mts"）
+// 运行：npm test（node --import tsx --test "src/**/*.test.mts"）
 import { test, beforeEach } from "node:test";
 import assert from "node:assert";
 import {

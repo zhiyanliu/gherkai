@@ -9,7 +9,7 @@
 本 fixture **装 run_scope 的真 handler `rs._on_signal`（同一函数对象，非手抄副本）**——故若有人把
 `rs._on_signal` 从 flag-only 改回 raise 模型（sync-over-greenlet + signal-raise 反模式致死循环卡死，见 ADR 0024
 被拒方案），本进程测试会真变红（此前 fixture 装的是手抄的 handler 副本，即便真 handler 回退 raise 模型也不红，
-是假哨兵）。跑一个 fake act 紧循环
+是假哨兵）。运行一个 fake act 紧循环
 （每轮顶检查 _stop）——不接 AgentCore、不 import Workflow 真建连、不连 AWS、无 greenlet（纯进程+信号层）。
 
 就绪握手：装完 handler、进循环后往 stderr 打一行 READY——测试侧等到它再发信号

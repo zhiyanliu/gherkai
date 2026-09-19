@@ -113,7 +113,7 @@ def test_diagram_exports_match_their_sources(spec: Path):
     tail = svg.read_bytes()[-200:].decode("utf-8", "replace")
     m = re.search(r"gherkai:source-sha256=([0-9a-f]{64})", tail)
     assert m, f"{svg.name} 末尾没有图源指纹——用 tools/build_diagrams.mjs 重导（不要手工改 SVG）"
-    assert m.group(1) == want, f"{svg.name} 是旧图源导出的：跑 node tools/build_diagrams.mjs docs/diagrams/{spec.name}"
+    assert m.group(1) == want, f"{svg.name} 是旧图源导出的：运行 node tools/build_diagrams.mjs docs/diagrams/{spec.name}"
 
 
 def test_diagram_skill_points_at_the_method():

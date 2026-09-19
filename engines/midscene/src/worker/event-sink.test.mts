@@ -1,5 +1,5 @@
 // EventSink 单测（Midscene，ADR 0024「I/O 边缘可注入接口」）：subprocess 态写 EVENTS_FD fd + 回落 + 保序。
-// 此前 emit 内联在 run-scope（模块级、无法打桩、只能真写 fd 1），无测试覆盖。跑：node --import tsx --test。
+// 此前 emit 内联在 run-scope（模块级、无法打桩、只能真写 fd 1），无测试覆盖。运行：node --import tsx --test。
 import { test } from "node:test";
 import assert from "node:assert";
 import * as fs from "node:fs";
@@ -34,7 +34,7 @@ test("emit is one JSON object per line (JSON Lines)", async () => {
 });
 
 test("fromEnv 回落 fd 1 (stdout) when no EVENTS_FD; emit 不抛", async () => {
-  // 无 EVENTS_FD（手动直跑）→ 回落 fd 1=stdout。不做 fd 重定向（会污染 node:test 输出、脆弱）——
+  // 无 EVENTS_FD（手动直接运行）→ 回落 fd 1=stdout。不做 fd 重定向（会污染 node:test 输出、脆弱）——
   // 断言回落目标**确实是 fd 1**（读内部 fd）——否则改成 fd 2 也照绿（review：回落测试须验目标 fd）。
   // 不真写 stdout（会污染 node:test 输出），只验内部 fd 值 + emit 不抛。
   delete process.env.EVENTS_FD;

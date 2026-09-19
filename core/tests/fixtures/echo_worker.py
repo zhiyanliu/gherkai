@@ -28,7 +28,7 @@ _stopped = False
 def _on_sigterm(signum, frame):
     global _stopped
     _stopped = True
-    # 模拟 worker 的会话清理（ADR 0024 终止契约）：打一条到 stderr 证明 finally 跑了
+    # 模拟 worker 的会话清理（ADR 0024 终止契约）：打一条到 stderr 证明 finally 执行了
     sys.stderr.write("echo_worker: SIGTERM received, cleaning up session\n")
     sys.stderr.flush()
     sys.exit(0)

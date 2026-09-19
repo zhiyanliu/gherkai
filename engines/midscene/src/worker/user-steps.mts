@@ -19,7 +19,7 @@
 //      那个文件对 worker 毫无意义、多半是写错了；真正的共享代码走上面的 `_*` 面。）
 //
 // 另有一条 fail-loud 在进入遍历之前：env 已设但目录不存在 / 不是目录 → 抛。组合根只在目录存在时才注入，
-// 走到这里说明提交后目录被移走或写错，属「没开跑就被拒」的配置错（Nova 侧同一处理）。
+// 走到这里说明提交后目录被移走或写错，属「没开始执行就被拒」的配置错（Nova 侧同一处理）。
 //
 // 抛出而非自己 `process.exit`：退出码由入口（`bin.mts`）统一落地（非零、且不是 ADR 0028 的网络专用 80），
 // 本模块保持可单测。
@@ -70,7 +70,7 @@ export async function loadUserSteps(deps: LoadUserStepsDeps = {}): Promise<strin
   const logFn = deps.logFn ?? ((m: string) => process.stderr.write(m + "\n"));
   if (!fs.existsSync(stepsDir) || !fs.statSync(stepsDir).isDirectory()) {
     // 目录不存在不是静默降级面：组合根解析时已确认存在才注入，走到这里说明提交后目录被移走/写错，
-    // 属「没开跑就被拒」——报错退出，不装作没有确定性 step。
+    // 属「没开始执行就被拒」——报错退出，不装作没有确定性 step。
     throw new Error(`GHERKAI_STEPS_DIR 不是目录：${stepsDir}`);
   }
   const files = collectStepFiles(stepsDir);

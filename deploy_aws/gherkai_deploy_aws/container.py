@@ -31,7 +31,7 @@ from dataclasses import dataclass, field
 # `--container-engine` 的 env 等价物（flag 优先）。名字与 flag 同源，见 `resolve_container_engine`。
 CONTAINER_ENGINE_ENV = "GHERKAI_CONTAINER_ENGINE"
 DEFAULT_CONTAINER_ENGINE = "docker"
-# 当前实装的引擎全集。podman 同形子命令、接得进来，但**没跑过就不敢说支持**（ADR 0038 重议闸门）。
+# 当前实装的引擎全集。podman 同形子命令、接得进来，但**没实际运行过就不敢说支持**（ADR 0038 重议闸门）。
 SUPPORTED_ENGINES = ("docker",)
 
 # worker 镜像的目标平台（ADR 0038「架构」：固定 linux/amd64，模板 revision 的 runtimePlatform = X86_64）。
@@ -182,7 +182,7 @@ def resolve_container_engine(requested: str | None = None) -> ContainerEngine:
     """选容器引擎：`--container-engine` > env `GHERKAI_CONTAINER_ENGINE` > `docker`。
 
     未实装的名字 → `UnsupportedContainerEngine`（调用方退 2）。**不静默回落 docker**：给了 `--container-engine
-    podman` 却跑 docker，用户会以为自己验过 podman 路径（ADR 0038 只实现 docker）。
+    podman` 却运行 docker，用户会以为自己验过 podman 路径（ADR 0038 只实现 docker）。
     """
     import os
 

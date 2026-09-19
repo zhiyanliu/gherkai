@@ -176,7 +176,7 @@ def test_build_engines_has_both_legs(midscene_env_cmd):
 
 def test_build_engines_miss_leg_does_not_break_the_other(monkeypatch):
     """某引擎定位链 miss **不连坐**另一条腿（ADR 0037 决策 3）：dev 下 midscene 未装是常态，
-    novaact-only 的 run 必须照跑；miss 的那条腿一用即抛 WorkerNotFoundError（带安装指引），
+    novaact-only 的 run 必须照常运行；miss 的那条腿一用即抛 WorkerNotFoundError（带安装指引），
     **不是** resolver 的「未知引擎」（那会把「没装」误导成「拼错名」）。"""
     monkeypatch.delenv("GHERKAI_WORKER_MIDSCENE_CMD", raising=False)
     monkeypatch.setattr(compose.shutil, "which", lambda n: None)
@@ -497,7 +497,7 @@ def test_query_capabilities_returns_whole_object(monkeypatch, novaact_env_cmd, f
     assert captured["cmd"] == ["/fake/novaact-worker", "--capabilities"]  # 定位链 cmd + 唯一的自述 flag
     assert captured["env"]["NOVA_ACT_TIMEOUT_S"] == str(compose.NOVA_ACT_TIMEOUT_S)
     # 未给 steps 目录：env 仍自建一份——组合根拥有的键「有值注、无值清」，宿主 shell 的 GHERKAI_STEPS_DIR 不得
-    # 越过调用方解析出的结果（清单要与本次要跑的 step 集一致）；其余环境照常继承。
+    # 越过调用方解析出的结果（清单要与本次要运行的 step 集一致）；其余环境照常继承。
     assert "GHERKAI_STEPS_DIR" not in captured["env"]
     assert captured["env"].get("PATH") == os.environ.get("PATH")
 
@@ -660,7 +660,7 @@ def test_engine_min_grace_takes_worker_self_reported_value(monkeypatch, novaact_
 
 def test_engine_min_grace_reuses_capabilities_asked_with_steps_dir(
         monkeypatch, novaact_env_cmd, fresh_caps_cache, tmp_path):
-    """跑前检查带着 steps 目录问过 → 下限直接取那份缓存对象、**不再 spawn**（下限与 step 无关，故不挑目录）：
+    """运行前检查带着 steps 目录问过 → 下限直接取那份缓存对象、**不再 spawn**（下限与 step 无关，故不挑目录）：
     这就是「本机 run 每引擎只 spawn 一次自述」的落点。另一引擎不共用缓存项。"""
     import subprocess
 
@@ -672,7 +672,7 @@ def test_engine_min_grace_reuses_capabilities_asked_with_steps_dir(
         return _fake_caps_proc(_caps_json(engine, 150 if engine == "novaact" else 31))
 
     monkeypatch.setattr(subprocess, "run", fake_run)
-    compose.query_capabilities("novaact", steps_dir=tmp_path / "steps")  # run 的跑前检查那一次
+    compose.query_capabilities("novaact", steps_dir=tmp_path / "steps")  # run 的运行前检查那一次
     assert calls == ["/fake/novaact-worker"]
     assert compose.engine_min_grace("novaact") == 150.0
     assert calls == ["/fake/novaact-worker"]  # 没有第二次 spawn
@@ -911,11 +911,11 @@ def test_build_fargate_engines_per_engine_taskdef_and_region_no_profile(monkeypa
     assert nova["events_table_name"] == "prod-events"
     assert nova["region"] == "us-west-2"          # region 注入（决策 C）
     assert "profile" not in nova                    # **profile 不传 FargateEngine**（正确非对称，决策 C）
-    # job_s3 = (bucket, "{report_dir}/{run_id}/jobs-in/")——**jobs-in/ 非 jobs/**（避与 ResultStore 判定 key 撞，真跑暴露）
+    # job_s3 = (bucket, "{report_dir}/{run_id}/jobs-in/")——**jobs-in/ 非 jobs/**（避与 ResultStore 判定 key 撞，实际运行暴露）
     assert nova["job_s3"] == ("prod-artifacts", "runs/rid-1/jobs-in/")
     # artifact_s3 = (bucket, "{report_dir}/{run_id}/")——**cloud 必注入**（否则容器盘销毁产物必丢，ADR 0029）
     assert nova["artifact_s3"] == ("prod-artifacts", "runs/rid-1/")
-    # SDK 产物落点 env（按引擎、容器内路径）——**uploader 靠它算 run_dir，缺它 no-op 报 file://、产物丢**（真跑暴露）。
+    # SDK 产物落点 env（按引擎、容器内路径）——**uploader 靠它算 run_dir，缺它 no-op 报 file://、产物丢**（实际运行暴露）。
     assert nova["sdk_artifact_dir_env"] == {"NOVA_LOGS_DIR": "/tmp/gherkai-run/rid-1/nova-trajectories"}
     # Nova act timeout **双端同源**（ADR 0024 grace 硬约束）：cloud 档也须显式注入——容器不继承本地 env，
     # 缺它则 worker 落回自带字面量、调 NOVA_ACT_TIMEOUT_S 只抬高 grace 下限、改不动容器内单 act 上界。
@@ -1114,7 +1114,7 @@ def _preflight_report_dir(report_dir, env_by_fn=None):
 
 
 def test_preflight_report_dir_mismatch_fails_fast_naming_both_sides():
-    # --report-dir 与推进器 REPORT_DIR 分裂 = 跑完但结果落在用户没指定的前缀下（静默分裂）→ 挡在提交前、点名两侧值。
+    # --report-dir 与推进器 REPORT_DIR 分裂 = 运行完成但结果落在用户没指定的前缀下（静默分裂）→ 挡在提交前、点名两侧值。
     # kicker 对上、reconciler 没对上 → 两个推进器都比（不是只看第一个）
     err = _preflight_report_dir("mine", env_by_fn={"g-kicker": {"REPORT_DIR": "mine"},
                                                   "g-reconciler": {"REPORT_DIR": "reports"}})
@@ -1150,7 +1150,7 @@ def test_preflight_report_dir_not_checked_when_not_passed():
 # ---- preflight 的「声明超部署侧 cap」提示（ADR 0034 机制四）：警但不失败 ----
 
 def _preflight_cap(declared, cap_env, warns):
-    """跑一次带 cap 提示的 preflight：推进器 env 给 MAX_CONCURRENCY=cap_env；警告收进 warns。"""
+    """运行一次带 cap 提示的 preflight：推进器 env 给 MAX_CONCURRENCY=cap_env；警告收进 warns。"""
     return compose.preflight_cloud_resources(
         prefix="g-", runs_table="g-runs", events_table="g-events", bucket="g-artifacts",
         cluster="g-cluster", lambda_fns=_CHAIN,
@@ -1162,8 +1162,8 @@ def _preflight_cap(declared, cap_env, warns):
 
 
 def test_preflight_warns_once_when_declared_max_concurrency_exceeds_cap():
-    # 声明 8 > cap 4 → 提交时就告知「本 run 只会按 4 并行」（否则用户以为按 8 跑、只看到莫名慢）。
-    # 但**不构成 preflight 失败**：钳制不改产物落点、run 照跑（对照 REPORT_DIR 分岔的退 2——判据 = 分岔后果）。
+    # 声明 8 > cap 4 → 提交时就告知「本 run 只会按 4 并行」（否则用户以为按 8 运行、只看到莫名慢）。
+    # 但**不构成 preflight 失败**：钳制不改产物落点、run 照常运行（对照 REPORT_DIR 分岔的退 2——判据 = 分岔后果）。
     warns = []
     err = _preflight_cap(8, "4", warns)
     assert err is None                       # 只警不拦
@@ -1316,7 +1316,7 @@ def test_skew_block_when_cli_newer_names_both_exits():
     verdict, msg = compose.check_version_skew("1.3.0", "1.4.0")
     assert verdict == compose.SKEW_BLOCK
     assert "gherkai deploy" in msg                      # ① 部署方升后端
-    assert "uvx --from 'gherkai==1.3.0'" in msg         # ② 临时跑同版本 CLI（点名后端版本）
+    assert "uvx --from 'gherkai==1.3.0'" in msg         # ② 临时运行同版本 CLI（点名后端版本）
     assert "1.4.0" in msg
 
 
@@ -1326,7 +1326,7 @@ def test_skew_warn_when_cli_older():
 
 
 def test_skew_warn_when_stamp_missing_points_at_deploy():
-    """戳缺失 = 本机制之前部署的环境 → warn（不拦）+ 提示跑一次 `gherkai deploy` 写入。"""
+    """戳缺失 = 本机制之前部署的环境 → warn（不拦）+ 提示运行一次 `gherkai deploy` 写入。"""
     verdict, msg = compose.check_version_skew(None, "1.4.0")
     assert verdict == compose.SKEW_WARN and "gherkai deploy" in msg
 
@@ -1341,7 +1341,7 @@ def test_skew_skip_when_either_side_impure():
 
 
 def test_skew_skip_when_own_version_unknown():
-    """未装成包（源码直跑）→ 调用点取不到自身版本、传 None → skip，不误判成 skew。"""
+    """未装成包（从源码直接运行）→ 调用点取不到自身版本、传 None → skip，不误判成 skew。"""
     verdict, msg = compose.check_version_skew("1.4.0", None)
     assert verdict == compose.SKEW_SKIP and msg
 
@@ -1387,7 +1387,7 @@ def test_check_backend_skew_propagates_read_errors():
 
 def test_variant_miss_hint_offers_push_and_base_fallback():
     """同版本档的 variant miss 提示须同时给两条出路（ADR 0038「升级不重置默认指针」条）：
-    让部署方 push-worker，或临时 --worker-variant base 先跑。"""
+    让部署方 push-worker，或临时用 --worker-variant base 先运行。"""
     from gherkai_runtime.compose import _variant_miss_hint
 
     msg = _variant_miss_hint(engine="midscene", variant="common", tag="1.4.0-common",

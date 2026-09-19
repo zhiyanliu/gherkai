@@ -34,7 +34,7 @@ class LocalResultStore:
         """把单个 JobResult 落盘成 <root>/<run_id>/jobs/<encoded_scope_id>.json（追加，写面）。
 
         **原子写**（tmp+rename，见 `gherkai_core.adapters._atomic`）：读者是另一个进程且是设计内的——
-        `explain` 允许在 run 跑到一半时读已完成 job（ADR 0042 决策四），无状态批量运行下两个推进者又会各写一遍
+        `explain` 允许在 run 执行到一半时读已完成 job（ADR 0042 决策四），无状态批量运行下两个推进者又会各写一遍
         全部 jobs/*.json（写面无跨进程锁，文件锁只护 run_state.json）。非原子写会让读者撞上 truncate 窗口、
         拿到空 JSON。
         """

@@ -1,11 +1,11 @@
-"""Nova Act 薄 worker（ADR 0022/0024）：读入一个 scope 的 job JSON → 跑这个 scope → 吐 ADR 0024 事件到事件通道。
+"""Nova Act 薄 worker（ADR 0022/0024）：读入一个 scope 的 job JSON → 执行这个 scope → 吐 ADR 0024 事件到事件通道。
 
-不含 BDD runner 装饰器：会话/act/投票/派发逻辑直接在本进程跑（ADR 0022 薄 worker）。
+不含 BDD runner 装饰器：会话/act/投票/派发逻辑直接在本进程运行（ADR 0022 薄 worker）。
 core 经 adapter 起本 worker（子进程 / Fargate 任务，ADR 0026 机制层），讲 ADR 0024 协议。
 
 I/O 契约两态（判据一律是「注入了哪个 env」、非「是否 Fargate」，ADR 0016 红线）：
 - job 入：stdin 首行 JSON | `JOB_S3_URI` 指针 + GetObject（见 `lib/job_source.py`）。
-- events 出：`EVENTS_FD` 指定的 fd（无则回落 stdout，便于手动直跑调试）| `EVENTS_DDB_TABLE` PutItem 到
+- events 出：`EVENTS_FD` 指定的 fd（无则回落 stdout，便于手动直接运行调试）| `EVENTS_DDB_TABLE` PutItem 到
   events 表（见 `lib/event_sink.py`）。
 - 确定性 step 定制入：env `GHERKAI_STEPS_DIR`（使用方的 `steps/` 目录，组合根解析后注入；见
   `user_steps.py` / ADR 0037 决策 4）。
@@ -13,7 +13,7 @@ I/O 契约两态（判据一律是「注入了哪个 env」、非「是否 Farga
 三通道分离（ADR 0024）：协议事件只走上面那条事件通道；引擎 SDK 的进度噪声留 stdout；worker 自身诊断/日志走 stderr。
 
 一生（ADR 0024）：
-  读 job → 开 AgentCore 会话 → 按 scope 串行跑 scenarios（每 step 派发）→ 逐事件吐事件通道
+  读 job → 开 AgentCore 会话 → 按 scope 串行执行 scenarios（每 step 派发）→ 逐事件吐事件通道
   → scope_done → 退出。SIGTERM/SIGINT（ADR 0024 flag-only）：handler 只置 _stop 标志、绝不 raise；
   主流程在 act 边界安全点检测 → 正常 return 退出三层 with 释放会话（with 正常退出即触发 __exit__，
   不靠异常穿透——避免异步 raise 撞 playwright greenlet 切换区致死循环卡死；sync-over-greenlet + signal-raise 反模式，见 ADR 0024 被拒方案）。
@@ -28,7 +28,7 @@ I/O 契约两态（判据一律是「注入了哪个 env」、非「是否 Farga
 
 cost（ADR 0024）：Nova SDK 原生给 time_worked_s，worker 只报该原生量；core 合计、美元折算交消费者（不内置费率）。
 
-跑（一般由组合根 spawn `[sys.executable, "-m", "gherkai_worker_novaact"]`，也可手动）：
+运行（一般由组合根 spawn `[sys.executable, "-m", "gherkai_worker_novaact"]`，也可手动）：
   echo '<job json>' | AWS_REGION=us-east-1 uv run python -m gherkai_worker_novaact
 
 进程形态（ADR 0037 决策 3）：本模块的 `main()` 就是包入口 `__main__:main` 与 console script
@@ -63,12 +63,12 @@ from gherkai_worker_novaact import deterministic_steps  # noqa: F401  仅为触�
 from gherkai_worker_novaact import evidence as _evidence  # step 级机读证据（ADR 0042；SDK 格式耦合全关在那个模块）
 from gherkai_worker_novaact.user_steps import EX_STEPS_LOAD, UserStepsError, load_user_steps
 
-# region 不再硬编码兜底（ADR 0016 决策 C）：None 时不再抢在 profile config 前跑错区。**正常路径由组合根落实**——
+# region 不再硬编码兜底（ADR 0016 决策 C）：None 时不再抢在 profile config 前用错 region。**正常路径由组合根落实**——
 # compose.resolve_region 把 `--region > AWS_REGION > AWS_DEFAULT_REGION > profile config` 落实成具体字符串、经 AWS_REGION
 # env 注入 worker，故这里通常拿到具体 region。真无 region（全 miss）→ None → fail-loud：boto client 抛 NoRegionError；
 # 尤其 AgentCore 那条路径（下方 AgentCoreBrowserSessionProvider）的 validate_region **不吃 profile config、要显式字符串**，
 # region=None 起会话直接失败（实测报 BrowserAuthError: 'You must specify a region.'——文案/异常类随 SDK 版本可变、
-# 别按类名断言）——这正是组合根须在注入前把 profile-region 落实成字符串的原因（别静默跑错区）。
+# 别按类名断言）——这正是组合根须在注入前把 profile-region 落实成字符串的原因（别静默用错 region）。
 REGION = os.environ.get("AWS_REGION")
 
 # 停止标志（ADR 0024 flag-only 中断模型）：SIGTERM/SIGINT handler 只 set 它、绝不 raise——避免异步异常
@@ -79,7 +79,7 @@ _stop_signum: int | None = None  # 触发协作停的信号号（handler 只记�
 
 # 单 act 时间上界（ADR 0024「act 有界返回」）：给每个 act/act_get 设 timeout，到点 SDK 在 step 边界安全点抛
 # 可 catch 的 ActTimeoutError（非 greenlet 切换区）——使 in-flight act 有界返回、标志位总能在有限时间被检测。
-# 值：真跑标定的折中（够长不误杀正常 act、且 grace ≥ act_timeout+释放耗时，见 ADR 0028 grace 上调）。
+# 值：实际运行标定的折中（够长不误杀正常 act、且 grace ≥ act_timeout+释放耗时，见 ADR 0028 grace 上调）。
 ACT_TIMEOUT_S = int(os.environ.get("NOVA_ACT_TIMEOUT_S", "120"))  # SDK 允许 [2,1800]；默认 120s
 
 # 产物上传器（ADR 0029 第一期）：从组合根注入的 env（ARTIFACT_S3_BUCKET/PREFIX）造——cloud 时上传 S3+删本地+
@@ -140,7 +140,7 @@ def _on_signal(signum, frame):
     不靠异常穿透）。SIGTERM/SIGINT 共用（Ctrl-C 亦协作停）。
     **handler 内不做任何 I/O（含 stderr 日志）**：信号可能落在主线程正在 `sys.stderr.write` 的瞬间，handler 里再写
     stderr 会撞 Python BufferedWriter 的非重入锁——`RuntimeError: reentrant call inside <_io.BufferedWriter name='<stderr>'>`
-    从 handler 抛出、直接把主流程打崩（rc=1）；worker 常态大量写诊断，这不是理论风险（CI runner 上真跑抓到）。
+    从 handler 抛出、直接把主流程打崩（rc=1）；worker 常态大量写诊断，这不是理论风险（CI runner 上实际运行抓到）。
     故这里只记信号号 + 置标志，「收到信号」的日志由主流程在安全点补打（见 main 末尾与读 job 早退处）。
     **模块级函数（非 main 内闭包）**：只引用模块级 `_stop`/`_stop_signum`，提到模块级使 `test_interrupt_process.py`
     的 fixture worker 能 import 并装**这同一个真 handler**——回退 raise 模型时进程级测试真变红。
@@ -283,7 +283,7 @@ def _attach_evidence(ev: dict, *, scope_id: str | None, scenario_id: str, step: 
             return []  # `--no-report`：不产、不上报（与引擎原生产物同档）
         base = os.environ.get("NOVA_LOGS_DIR")
         if not base:
-            return []  # 无产物落点（手动直跑/脚手架）：SDK 只写它自己的临时目录，evidence 无处安身
+            return []  # 无产物落点（手动直接运行/脚手架）：SDK 只写它自己的临时目录，evidence 无处安身
         written = _evidence.write_step_evidence(
             base_dir=base, scope_id=scope_id, scenario_id=scenario_id, step_index=step["index"],
             keyword=step.get("keyword"), text=step.get("text"),
@@ -436,9 +436,9 @@ def _run_step(nova, scenario_id: str, step: dict, votes_n: int, sink: EventSink,
                 # 票没投满（只可能因循环顶 _stop 提前 break）→ **不 emit 带 verdict 的 step_done**：
                 # 用部分票 + 完整 votes_n 分母算 passed 会把「外部中止」误标成确定的断言判定（如 1/3→failed、
                 # 甚至 0/1），污染中止 run 的 RunReport。对齐 _run_scenario 停止语义「停止是外部中止、非执行事实、
-                # worker 不越权标注」——直接 return，交上层安全点协作退出、未跑完的 step 由 core 按派生态处理。
-                # **判据是票不完整、不是此刻 _stop**（ADR 0024「安全点丢弃没跑完的单元的判定，但不丢弃已成的
-                # 执行事实」）：停止信号落在最后一票的 act 期间时该票已带回判定，verdict 与已真实发生的
+                # worker 不越权标注」——直接 return，交上层安全点协作退出、未执行完的 step 由 core 按派生态处理。
+                # **判据是票不完整、不是此刻 _stop**（ADR 0024：安全点丢弃未完成单元的判定，但不丢弃已成的
+                # 执行事实）：停止信号落在最后一票的 act 期间时该票已带回判定，verdict 与已真实发生的
                 # time_worked_s 都是执行事实，照常 emit（对称 When/Given 分支）、再由上层安全点退出。
                 return "aborted"
             yes = sum(votes)
@@ -554,10 +554,10 @@ def _instruction(text: str, step: dict) -> str:
 
 def _run_scenario(nova, scenario_id: str, steps: list[dict], votes_n: int, sink: EventSink,
                   *, scope_id: str | None = None) -> list[str]:
-    """scope 内串行跑一个 scenario 的 steps，上游 error 后**短路**后续 step（ADR 0031 决定六 / 0028）。
+    """scope 内串行执行一个 scenario 的 steps，上游 error 后**短路**后续 step（ADR 0031 决定六 / 0028）。
 
     短路：scenario 内一旦某 step `status==error`（导航 SSL 失败等），后续 step 不再调 AI——
-    ① 节省费用（不再调用后续 AI 断言）；② 不在损坏环境（SSL 错误页）上跑出误导性假失败。被跳过的 step 发独立
+    ① 节省费用（不再调用后续 AI 断言）；② 不在损坏环境（SSL 错误页）上得出误导性假失败。被跳过的 step 发独立
     `step_skipped` 事件（非 step_done；core 据此本地赋 StepResult(SKIPPED, shortcircuited=True)）。
     判据锁 `status==error`（不看 error_type）——两个引擎对称、network/engine 错都触发。
 
@@ -571,9 +571,9 @@ def _run_scenario(nova, scenario_id: str, steps: list[dict], votes_n: int, sink:
     shortcircuit = False
     for st in steps:
         if _stop.is_set():
-            break  # 停止信号（ADR 0024 flag-only）：不再跑后续 step，交上层协作式退出释放会话。
+            break  # 停止信号（ADR 0024 flag-only）：不再执行后续 step，交上层协作式退出释放会话。
             # 不发 step_skipped（那是 error 短路的语义、表"因上游故障跳过"）；停止是外部中止、非执行事实，
-            # 未跑的 step 由 core 侧按 aborted/pending 派生态处理（wire 不传，ADR 0031），worker 不越权标注。
+            # 未执行的 step 由 core 侧按 aborted/pending 派生态处理（wire 不传，ADR 0031），worker 不越权标注。
         if shortcircuit:
             sink.emit({"type": "step_skipped", "scenarioId": scenario_id, "stepIndex": st["index"]})
             continue
@@ -596,10 +596,10 @@ def _aggregate(statuses: list[str]) -> str:
 
 
 def _emit_scenario_done_unless_stopped(sink: EventSink, scenario_id: str, statuses: list[str]) -> bool:
-    """scenario 跑完后的 scenario_done 出口 + 中止护栏（模块级、供单测直驱）。
+    """scenario 运行结束后的 scenario_done 出口 + 中止护栏（模块级、供单测直驱）。
 
-    返回 True=中止（调用方应停止本 session、不再跑后续 scenario）。**中止时绝不 emit scenario_done**：
-    scenario 中途收到 _stop 时 `_run_scenario` 返回**部分 statuses**，用它算判定会把没跑完的 scenario 标成
+    返回 True=中止（调用方应停止本 session、不再执行后续 scenario）。**中止时绝不 emit scenario_done**：
+    scenario 中途收到 _stop 时 `_run_scenario` 返回**部分 statuses**，用它算判定会把没执行完的 scenario 标成
     确定 passed（假阳性——`_aggregate([])`/`_aggregate(["passed"])` 都 == "passed"），违反「停止是外部中止、
     非执行事实、worker 不越权标注」（ADR 0031/0024）；未完成 scenario 交 core 按派生态处理。对称 step 级投票
     中止（**票没投满**时不 emit 带 verdict 的 step_done）+ scenario 循环顶护栏（不发 step_skipped）。
@@ -682,7 +682,7 @@ def _is_transient_network(e: BaseException, *, connecting: bool = False) -> bool
     **connecting=True（仅建连阶段传，ADR 0028）**：额外把 Playwright `TargetClosedError`
     （`CDPSession.send: Target ... has been closed`）判瞬时。它是 CDP/websocket 连接被网络断掉后的
     **下游症状**异常——Playwright 把底层 socket 故障吞掉、只抛这个不继承 OSError/__cause__ 为 None 的“干净”异常，
-    白名单无从穿透（真跑复现：会话已起、`with NovaAct.__enter__` 内撞网络断）。因它语义模糊
+    白名单无从穿透（实际运行复现：会话已起、`with NovaAct.__enter__` 内撞网络断）。因它语义模糊
     （网络断/会话正常关/浏览器真崩同报一句），**只在建连阶段认**（scope_started 未 emit、act 无副作用、重试安全，
     是已有重试域的物理边界）；act 中途（connecting=False）不认，守“拿不准→不归 network”铁律。
     """
@@ -733,7 +733,7 @@ def _error_text(e: BaseException) -> str:
     """异常 → 一行「类型: 信息」，作 step_done 的 message 与 evidence 的 act.error（ADR 0042 决策三/决策一）。
 
     Nova SDK 异常的 str() 是多行 repr（`ActTimeoutError(\n message = …\n metadata = ActMetadata(…)\n)` 再拖一段
-    反馈链接），整段进 message 会把 run 文本 / explain / jobs json 的「原因」撑成十几行——真跑暴露。SDK 异常带
+    反馈链接），整段进 message 会把 run 文本 / explain / jobs json 的「原因」撑成十几行——实际运行暴露。SDK 异常带
     `.message`（人话那一句），优先取它；没有则取 str() 的首个非空行。折叠空白、封顶 300 字：message 是一句原因、
     不是堆栈，完整对象在 worker 日志里。
     """
@@ -779,10 +779,10 @@ def _capabilities() -> dict[str, object]:
     下限」）：SIGTERM 落长 act 中途时，协作停要等这一次 in-flight act 有界返回才退三层 with 释放会话，
     这两段预算都只有 worker 知道；组合根持任何引擎特定的下限常量都会漂移。
     `deterministic_steps` = 此刻注册表的清单（ADR 0036「2.」）：内建脚手架（模块顶 import 的副作用）+
-    `main()` 顶部加载的使用方 step——与真跑派发用的是同一张表，故复用 `list_registry()`、不另拼一份。
+    `main()` 顶部加载的使用方 step——与实际运行派发用的是同一张表，故复用 `list_registry()`、不另拼一份。
     `model_id` = 这个 worker 起 job 时真会传给 `Workflow(model_id=...)` 的那个 id（`lib/constants.py` 的
     MODEL_ID：缺省钉死的 GA 版本，或 env `NOVA_MODEL_ID` 的 opt-in 覆盖值——见 ADR 0004「模型版本选择策略」）。
-    **同一个常量、不另写字面量**：自述与真跑必须报同一个值，否则「doctor 显示的模型」就成了第二事实源。
+    **同一个常量、不另写字面量**：自述与实际运行必须报同一个值，否则「doctor 显示的模型」就成了第二事实源。
     加键不加入口（如将来的 browser 后端能力）——故返回 dict、消费侧按键取；`run` 的前置检查因此只需
     spawn 一次，同一份自述同时给出「steps 加载成功 / 清单 / grace 下限 / 模型」（ADR 0036「5.」）。
     """
@@ -798,7 +798,7 @@ def _capabilities() -> dict[str, object]:
 def main() -> int:
     # 使用方确定性 step 目录（ADR 0037 决策 4）：内建脚手架已在模块顶 import 期注册完，这里把使用方的叠上去。
     # 位置是**契约的一部分**：先于下面任何一条路径（job 模式 / 两个非 job 入口 --capabilities 自述 /
-    # --match-steps 查询），故自述报的注册表与真跑派发用的是同一张表（ADR 0036「真值单一」不因定制而破）；
+    # --match-steps 查询），故自述报的注册表与实际运行派发用的是同一张表（ADR 0036「真值单一」不因定制而破）；
     # `--capabilities` 同样在这之后，故 steps 加载失败在它上面也 fail-loud（ADR 0037 决策 4）。
     # worker 只认 env、不解析约定（`--steps-dir` / 默认 `./steps` / 写进 definition 全在组合根）。
     # 加载失败 fail-loud（绝不静默跳过——跳过 = 把确定性 step 静默换成 AI catch-all、run 可能假「通过」）。
@@ -848,11 +848,11 @@ def main() -> int:
     ensure_workflow_definition(WORKFLOW_DEF, region=REGION, description="Nova Act worker")
     wf = Workflow(model_id=MODEL_ID, boto_session_kwargs={"region_name": REGION}, workflow_definition_name=WORKFLOW_DEF)
     # 建连重试状态（ADR 0028）：started 一旦 True（scope_started 已 emit、会话已起），
-    # 任何后续异常都不再当「可重试建连失败」——act 已可能跑、有副作用，绝不重试。
+    # 任何后续异常都不再当「可重试建连失败」——act 已可能执行、有副作用，绝不重试。
     started = False
 
     def _run_session() -> None:
-        """建连 + 跑完所有 scenarios。建连段异常可被外层重试；scope_started emit 后不可。
+        """建连 + 执行完所有 scenarios。建连段异常可被外层重试；scope_started emit 后不可。
 
         停止（_stop）在此协作式生效：scenario 循环顶检测 → 正常 return 出本函数 → `with NovaAct`/
         `with cdp_session` 正常退出触发 __exit__ 释放会话（ADR 0024 flag-only，不靠异常穿透）。
@@ -887,8 +887,8 @@ def main() -> int:
                 # session_id 随 scope_started 即回传（不只等 scope_done）——超时/SIGTERM 中途打断时
                 # scope_done 不会 emit，但血缘已先随首事件落到 core（ADR 0028 观测缺口修复）。
                 sink.emit({"type": "scope_started", "scopeId": scope["id"], "sessionId": session_id})  # 三级时长起点
-                started = True  # 越过此点 = 会话已起、act 即将跑 → 退出建连重试域（ADR 0028）
-                # scope 内串行跑 scenarios，共享同一会话（ADR 0019/0024）
+                started = True  # 越过此点 = 会话已起、act 即将执行 → 退出建连重试域（ADR 0028）
+                # scope 内串行执行 scenarios，共享同一会话（ADR 0019/0024）
                 for sc in scenarios:
                     if _stop.is_set():
                         return  # 停止信号（ADR 0024 flag-only）：正常 return 出本函数 → with __exit__ 释放会话
@@ -915,7 +915,7 @@ def main() -> int:
                     break  # 停止信号（ADR 0024 flag-only）：不再重试建连 → 干净退（下方按 _stop 返回 0）
                 try:
                     _run_session()
-                    break  # 成功（跑完，或 _run_session 内因 _stop 协作式 return）
+                    break  # 成功（运行结束，或 _run_session 内因 _stop 协作式 return）
                 except Exception as e:  # noqa: BLE001  建连域异常（_run_session 内 with __exit__ 已清本次部分会话）
                     # connecting=True：本分支即建连域（started=True 时下句直接 raise，走不到判定），
                     # 故额外认 Playwright TargetClosedError（连接被网络断的下游症状，ADR 0028）。
@@ -960,7 +960,7 @@ def main() -> int:
             # ref 经 uploader：cloud 上传 S3+删本地报 s3://，local no-op 报 file://（ADR 0029）。
             # **scope 级 summary 上传 best-effort：失败吞+log、不带 summary ref、不拖垮 scope_done**（ADR 0032）——
             # session_summary 是"锦上添花的数字汇总"（引擎特有富信息、非人看报告，ADR 0027），此刻 scope 判定
-            # 已 emit 完，不该因它上传失败（多为 S3 网络瞬时）把已跑完的 scope 拖成裸 traceback/engine_error。
+            # 已 emit 完，不该因它上传失败（多为 S3 网络瞬时）把已执行完的 scope 拖成裸 traceback/engine_error。
             # 对齐同文件抢传/flush 的 best-effort。**与 step 内 trajectory 的强保证不同**：trajectory 是判定现场
             # 证据（`to_report_ref` 失败抛、可观测）、summary 只是数字汇总，故此处降级、不动 to_report_ref 本身。
             try:

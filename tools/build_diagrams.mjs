@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // docs 图的两段式构建（ADR 0045 决策七）：
-//   ① 渲染  JSON 图源 --archify deliver--> 可交互 HTML   纯 CLI、确定性、无 LLM；Pages 上暴露的就是它，CI 也跑同一条命令
+//   ① 渲染  JSON 图源 --archify deliver--> 可交互 HTML   纯 CLI、确定性、无 LLM；Pages 上暴露的就是它，CI 也运行同一条命令
 //   ② 导出  HTML --headless Chrome 点导出菜单--> SVG      只为嵌进 markdown 的静态图；可选再导 PNG 供目视检查
 // 作者化（写 JSON）是唯一需要智能的一步，由 AI 在 push 前完成，本脚本不碰。
 //

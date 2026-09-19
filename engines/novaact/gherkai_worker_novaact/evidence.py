@@ -11,7 +11,7 @@ SDK 耦合被关在本模块（ADR 0042 决策六防线 1/2）：
   不 `model_validate`（其字段无默认值，一处漂移就整份 ValidationError，与「逐字段容缺」相悖）。
 - **prompt 用 worker 自己构造的指令串**，不取 json 的 `prompt`——`act_get` 时 SDK 在尾部追加了
   `, format output with jsonschema: {...}`。
-- 真产物裁成的 fixture 钉住映射（`tests/fixtures/nova_*_traj.json`），SDK 升版漂移在跑测试时变红。
+- 真产物裁成的 fixture 钉住映射（`tests/fixtures/nova_*_traj.json`），SDK 升版漂移在运行测试时变红。
 
 error act 的契约（ADR 0042 决策一）：act 抛错 → `error` 非空、`prompt` 与 `time_worked_s` 仍填、`frames == []`
 （SDK 只在 act 正常返回时写 json，异常对象的 `metadata.trajectory_file_path` 照给路径但文件不存在）。

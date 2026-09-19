@@ -31,7 +31,7 @@ def _run_ids_from_stream(event) -> set[str]:
     """从 DDB Stream records 提取涉及的 run_id 集（PK=run_id#scope_id，取 # 前段）。去重——一个 batch 可能多条同 run。
 
     **REMOVE 记录跳过**：events 表开 TTL（`expires_at`，两引擎的 event sink 写 emit+7d），TTL 过期删除同样进
-    Stream、同样带 Keys。它不携带任何新信息，却会让本 handler 对一个早已收尾的 run 重跑一次全量重放——那时
+    Stream、同样带 Keys。它不携带任何新信息，却会让本 handler 对一个早已收尾的 run 重新运行一次全量重放——那时
     worker 事件已被删、只剩不带 `expires_at`（永不过期）的退出记录，推演出的每个 job 都成 error 并按 ADR 0030
     决定三的写序覆盖 ResultStore 里的判定真值。用 `.get` 只排除 REMOVE、**不做 INSERT 白名单**：events 表虽只
     PutItem，同键重写（超时处置直写的退出记录被迟到的观察者以真退出码/归因重写）在 Stream 上是 MODIFY。
@@ -67,7 +67,7 @@ def exit_from_task(task: dict) -> tuple[int, bool, str | None]:
     STOPPED 事件的 `detail` 与 `DescribeTasks` 的 `tasks[i]` 是同一个 Task 形状，故同一 task 两边算出同一内容、
     PutItem 同键幂等——超时处置对「已 STOPPED 却无退出记录」（事件丢投）落的记录，与迟到的观察者写入不互撞。
     exit_code：containers[] 首个带 exitCode 的（worker 是 essential 单容器）；**缺 → PLATFORM_FAILED_EXIT 哨兵**
-    + reason=`stopCode: stoppedReason`（容器没跑起来，机制二「退出码缺失」条）。timed_out：stoppedReason 含本模块
+    + reason=`stopCode: stoppedReason`（容器没能开始运行，机制二「退出码缺失」条）。timed_out：stoppedReason 含本模块
     StopTask 时写入的哨兵串（「job timeout」节归因链）。
     """
     from gherkai_core.project import PLATFORM_FAILED_EXIT
@@ -95,7 +95,7 @@ def _task_scope_id(task: dict) -> str | None:
     return None
 
 # 防御扫（claimed_at ②）的判定余量秒：Scheduler one-time schedule 是主机制（到点准时处置），扫是双保险——
-# 余量让主机制先行、避免与在途的 STOPPED→exit_observer 链赛跑。非正确性参数（处置幂等、退出记录在即让路）。
+# 余量让主机制先行、避免与在途的 STOPPED→exit_observer 链形成竞态。非正确性参数（处置幂等、退出记录在即让路）。
 _DEFENSIVE_TIMEOUT_MARGIN_S = 60.0
 
 
@@ -147,10 +147,10 @@ class EventBridgeTimeoutWatch:
 def _handle_timeout(run_id: str, scope_id: str, built, ecs_client=None) -> str:
     """超时处置（ADR 0034「job timeout」节 cloud 档）：仍 running 才动手——ListTasks(startedBy=run_id) **同时列
     RUNNING 与 STOPPED**（后者 ECS 保留约 1h）→ DescribeTasks 按 overrides env SCOPE_ID 匹配 → 按 task 状态三路：
-    - 在跑 → StopTask(reason 含哨兵) → STOPPED 事件 → exit_observer 记 task_exited(timed_out=True)（stop 后让观察链
+    - 运行中 → StopTask(reason 含哨兵) → STOPPED 事件 → exit_observer 记 task_exited(timed_out=True)（stop 后让观察链
       自然收敛 = 单一真源）；
     - **正在停止**（desiredStatus=STOPPED、lastStatus 未到 STOPPED）→ 不动、等观察者。曾只列 RUNNING、把它判成
-      「无踪」直写 timed_out，与几秒后到达的真退出记录同键互覆——恰在预算点跑完的 passed job 可被终判成 timeout；
+      「无踪」直写 timed_out，与几秒后到达的真退出记录同键互覆——恰在预算点运行结束的 passed job 可被终判成 timeout；
     - **已 STOPPED 却无退出记录**（STOPPED 事件丢投）→ 用与观察者同一提取函数 `exit_from_task` 从 task 对象落真退出
       记录（同内容同键、幂等），不臆造 timed_out。
     两个列表都无踪且无退出记录：预算已尽仍无确认完成 → 直接 record_exit(timed_out=True) 收敛——对位 local 接力恢复，
@@ -231,8 +231,8 @@ def _resolve_worker_task_defs(meta, *, prefix: str, region: str | None, ssm=None
     """本 run 各引擎的 worker task-def **revision ARN**（ADR 0038「读侧兼容口径」）。
 
     ① definition 带 `worker_task_defs` → **原样用**（提交侧 preflight 解析的结果，一个 run 内镜像固定：期间
-       别人重推同名 variant 不影响在跑的 run）。
-    ② 缺该字段（引入本机制的升级前提交、升级窗口内仍在跑的 run；或旧 CLI 提交到新后端——ADR 0037 决策 7
+       别人重推同名 variant 不影响运行中的 run）。
+    ② 缺该字段（引入本机制的升级前提交、升级窗口内仍在运行的 run；或旧 CLI 提交到新后端——ADR 0037 决策 7
        「CLI 旧于后端 → 警告不拦」允许）→ 按**后端当前默认指针**解析，并**打一行点名兼容路径 + 解析到的
        variant** 的日志（「用的是哪份」必须可见、可查）。
 
@@ -249,7 +249,7 @@ def _resolve_worker_task_defs(meta, *, prefix: str, region: str | None, ssm=None
         ssm = boto3.client("ssm", region_name=region)
     backend_version = compose.read_backend_version(prefix=prefix, ssm=ssm)
     # 默认指针在此单独读一次**只为日志点名 variant**（`resolve_default_worker_task_defs` 内部还会读一次）——
-    # 多一次 GetParameter 换「这次跑的是哪份」在 CloudWatch 里可见，值得；且兼容路径是过渡态（所有新
+    # 多一次 GetParameter 换「这次运行的是哪份」在 CloudWatch 里可见，值得；且兼容路径是过渡态（所有新
     # definition 都带字段、直接走 ① 分支），不是热路径。
     variant = compose.read_worker_default(prefix=prefix, ssm=ssm)
     task_defs = compose.resolve_default_worker_task_defs(
@@ -275,7 +275,7 @@ def _build(run_id: str):
     **worker task-def revision 两条来源**（ADR 0038）：① definition 的 `meta.worker_task_defs`（正常路径，提交侧
     preflight 已把 variant 解析成各引擎的显式 revision）；② 缺该字段 → **兼容路径**（`_resolve_worker_task_defs`）
     按后端当前默认指针解析。解析不出即抛（本次 invoke 失败、Stream 重投），**不回落 family 最新 ACTIVE、不回落
-    模板 revision**——前者等于让在跑的 run 中途换 step 集，后者的 `latest` 占位在全新 prefix 上根本拉不到镜像。
+    模板 revision**——前者等于让运行中的 run 中途换 step 集，后者的 `latest` 占位在全新 prefix 上根本拉不到镜像。
     """
     import boto3
     from gherkai_core.adapters.event_log import DdbEventLog
@@ -300,7 +300,7 @@ def _build(run_id: str):
     # dataTable 正文 offload 到 S3、META 只留指针，漏挂则 load_run_meta 对含指针的 META 直接 fail-loud 抛，
     # 云端推进器整条链停在装配上。prefix 用 REPORT_DIR 与 submit 侧同源（restore 按绝对 URI 取回、实际不依赖
     # prefix，但写读两侧同构造零漂移）；**不含 run_id**——S3*Store 内部自拼 `{prefix}{run_id}/…`。
-    # region 不传：它在 build_cloud_stores 里只喂建句柄的那两个钩子，而此处两个句柄都已注入、钩子不会跑。
+    # region 不传：它在 build_cloud_stores 里只喂建句柄的那两个钩子，而此处两个句柄都已注入、钩子不会执行。
     # detached 不传（默认 False）：本 Lambda 只读已存在的 run，不 create_run、不写 detached 标记。
     # 第四项 make_artifacts 是同步 run 打落点用的，云端推进器不打、丢弃。
     run_store, result_store, report_store, _ = compose.build_cloud_stores(
@@ -360,9 +360,9 @@ def _build(run_id: str):
             kicker_arn=kicker_arn, role_arn=scheduler_role_arn, prefix=prefix)
     launcher = CloudLauncher(compose.make_resolver(engines), run_id=run_id, timeout_watch=timeout_watch)
     # 并发上限（ADR 0034 机制四）= min(definition 声明, 部署侧 cap)。cap = 本 Lambda 的 MAX_CONCURRENCY env
-    # （IaC 设）：语义是**部署侧 per-run 上限**、非真源——task 跑在部署方 cluster、计入部署方账单，故部署方保留
+    # （IaC 设）：语义是**部署侧 per-run 上限**、非真源——task 在部署方 cluster 上运行、计入部署方账单，故部署方保留
     # 总量控制权，提交侧声明再高也钳到 cap。meta 无值（打通前落的旧 definition）按 1，与打通前行为一致；
-    # `or` 顺带把 0 也当无值——0 会让 plan_next 永不提议起 job（run 卡死），按 1 跑是保守可收敛的兜底。
+    # `or` 顺带把 0 也当无值——0 会让 plan_next 永不提议起 job（run 卡死），按 1 运行是保守可收敛的兜底。
     # env 漏注（IaC 改坏/手工建的 Lambda）时保守回 **1**：cap 的数值真源在 IaC 一处，code 不复制部署值
     # （复制 = 两处各一份、IaC 调了 cap 而这里没跟就成隐形漂移）。缺省宁可慢（串行仍收敛），不替部署方放宽闸。
     cap = int(os.environ.get("MAX_CONCURRENCY", "1"))
@@ -423,7 +423,7 @@ def _tick_runs(run_ids: set[str], label: str, *, prebuilt: dict | None = None) -
             # 报告收尾走 core 唯一一份（曾在此双写、与 runtime/gherkai_runtime/detached.py 漂移风险，已合并）
             from gherkai_core.reconcile import finalize_report
             # run 级墙钟是**派生指标**（缺则报告里显「?」），取它要多读一次 RunState——强一致读、会因限流/
-            # 瞬时 5xx 抛，而这一步跑在 finalize 的 commit point **之后**：commit 后的失败无人重试（ADR 0030
+            # 瞬时 5xx 抛，而这一步在 finalize 的 commit point **之后**执行：commit 后的失败无人重试（ADR 0030
             # 决定三），抛出去还会让本次 invocation 失败、events Stream 本批重试耗尽后整批丢弃，连坐同批其它
             # run 的事件（同上面 WorkerVariantError 逐 run 隔离的理由）。故整段隔离、失败按缺值走
             # （ADR 0034 收尾节把 run 级墙钟划在「派生、失败隔离」那一侧）。

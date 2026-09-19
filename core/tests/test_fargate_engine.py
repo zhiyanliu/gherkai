@@ -86,7 +86,7 @@ def _delayed_stopped_ecs(container_name: str, running_polls: int, exit_code: int
 
 
 def _spy_run_task_env(fargate, monkeypatch, eng) -> dict:
-    """跑 run_scope、拦 run_task 抓 overrides env → 返回 {name: value} dict。"""
+    """执行 run_scope、拦 run_task 抓 overrides env → 返回 {name: value} dict。"""
     real = fargate["ecs"].run_task
     captured = {}
     monkeypatch.setattr(fargate["ecs"], "run_task", lambda **kw: captured.update(kw) or real(**kw))
@@ -94,10 +94,10 @@ def _spy_run_task_env(fargate, monkeypatch, eng) -> dict:
     return {e["name"]: e["value"] for e in captured["overrides"]["containerOverrides"][0]["environment"]}
 
 
-# ---- events_pk：复合键防重复跑撞（ADR 0024）----
+# ---- events_pk：复合键防重复运行相撞（ADR 0024）----
 def test_events_pk_composite_run_id_scope_id():
     assert events_pk("run-A", "browse") == "run-A#browse"
-    # 同 feature 重复跑（scope_id 同、run_id 异）→ PK 不同、不撞
+    # 同 feature 重复运行（scope_id 同、run_id 异）→ PK 不同、不撞
     assert events_pk("run-A", "browse") != events_pk("run-B", "browse")
 
 
@@ -116,7 +116,7 @@ def test_run_scope_puts_job_to_s3(fargate):
 
 def test_run_scope_job_key_quotes_scope_id(fargate):
     # scope_id 含 `/`:（如 feature 路径 features/x.feature:7）→ job key 用 quote(safe='')：/ 编码成 %2F、: 成 %3A，
-    # 不造 S3 假子前缀、与 S3ResultStore（同 quote）一致（真跑暴露的一致性缺陷回归守卫）。
+    # 不造 S3 假子前缀、与 S3ResultStore（同 quote）一致（实际运行暴露的一致性缺陷回归守卫）。
     from urllib.parse import quote
     eng = _engine(fargate)
     sid = "features/deterministic_anchor.feature:7"
@@ -218,7 +218,7 @@ def test_run_scope_omits_artifact_s3_when_none(fargate, monkeypatch):
 
 def test_run_scope_injects_sdk_artifact_dir_env(fargate, monkeypatch):
     # SDK 产物落点 env（NOVA_LOGS_DIR 等）也须注入——**否则 worker ArtifactUploader run_dir=None→no-op→产物随容器盘销毁丢**
-    # （真跑暴露：只注 ARTIFACT_S3_* 不够，uploader 还要 SDK 落点 env 算 run_dir/相对 key）。这条守卫防回归。
+    # （实际运行暴露：只注 ARTIFACT_S3_* 不够，uploader 还要 SDK 落点 env 算 run_dir/相对 key）。这条守卫防回归。
     env = _spy_run_task_env(fargate, monkeypatch,
                             _engine(fargate, sdk_artifact_dir_env={"NOVA_LOGS_DIR": "/tmp/gherkai-run/rid/nova-trajectories"}))
     assert env["NOVA_LOGS_DIR"] == "/tmp/gherkai-run/rid/nova-trajectories"
@@ -228,7 +228,7 @@ def test_run_scope_injects_sdk_artifact_dir_env(fargate, monkeypatch):
 def test_read_events_yields_in_seq_order_until_scope_done(fargate):
     eng = _engine(fargate)
     job = _job("browse")
-    # 先把整个事件流写进 events 表（模拟 worker 已跑完、事件都落了）——含 scope_done 作终止
+    # 先把整个事件流写进 events 表（模拟 worker 已运行结束、事件都落了）——含 scope_done 作终止
     _put_event(fargate["events_table"], _RUN_ID, "browse", 1, {"type": "scope_started", "scopeId": "browse", "sessionId": "s-1"})
     _put_event(fargate["events_table"], _RUN_ID, "browse", 2, {"type": "step_started", "scenarioId": "sc:0", "stepIndex": 0})
     _put_event(fargate["events_table"], _RUN_ID, "browse", 3, {"type": "step_done", "scenarioId": "sc:0", "stepIndex": 0, "status": "passed"})
@@ -345,7 +345,7 @@ def test_read_events_stopped_without_scope_done_drains_then_raises(fargate):
     assert state["describe_calls"] >= 1  # 确实走了 STOPPED 兜底、非 scope_done 主判
 
 
-# ---- 退出观察者的 task_exited item 不得混进 worker 段（ADR 0034 机制一独立键空间 / ADR 0024「单调只跑 worker 段」）----
+# ---- 退出观察者的 task_exited item 不得混进 worker 段（ADR 0034 机制一独立键空间 / ADR 0024 的单调 / 断号检测只作用于 worker 段）----
 # 同步 run 路径与 cloud 无状态路径**共用同一张 events 表**：退出观察者 Lambda 由「lastStatus=STOPPED」规则触发、
 # 不分同步/detached，故同步 run 的 task 停下后也会往**同 PK** 写一条 task_exited item（保留高位 SK、**无 body**）。
 # 读端若不把 Query 段界收在 worker 段，`it["body"]` 直接 KeyError('body')、异常穿出迭代器 → 本应 PASSED 的 job 被判
@@ -362,7 +362,7 @@ def test_read_events_ignores_exit_item_alongside_worker_events(fargate):
     _put_event(fargate["events_table"], _RUN_ID, "browse", 1, {"type": "scope_started", "scopeId": "browse"})
     _put_event(fargate["events_table"], _RUN_ID, "browse", 2, {"type": "scope_done", "scopeId": "browse"})
     _put_exit_item(fargate, "browse", exit_code=0)
-    # 前置断言：exit item 真在同 PK 下（否则本测试变空跑、守不住任何东西）
+    # 前置断言：exit item 真在同 PK 下（否则本测试变成空操作、守不住任何东西）
     assert fargate["events_table"].get_item(
         Key={"pk": events_pk(_RUN_ID, "browse"), "seq": EXIT_SK})["Item"]["item_type"] == "exit"
     _, events = eng.run_scope(_job("browse"))
@@ -515,7 +515,7 @@ class _FakeEcs:
 
 
 def _engine_with_fake_ecs(describe_response, container_name="worker") -> FargateEngine:
-    # 只测 _probe_task（+ 退出码翻译的接线），不跑 run_scope；其余注入 None（不触及）
+    # 只测 _probe_task（+ 退出码翻译的接线），不执行 run_scope；其余注入 None（不触及）
     eng = FargateEngine.__new__(FargateEngine)
     eng._ecs = _FakeEcs(describe_response)
     eng._cluster = "c"
