@@ -4,7 +4,7 @@
 
 ## 背景与问题
 
-gherkai 的直接操作者越来越多是 AI coding agent（Claude Code / Codex 这类），替人写 `.feature`、跑、读结果、改确定性 step。agent 的工作循环与人不同：每一轮都要把命令输出读进上下文，每一次真跑都花几分钟与真金白银的 AI 费用，且它只能靠机读输出与退出码分流、不会「看一眼」HTML。对照 [0039](./0039-user-facing-surfaces-no-internal-references.md)（产品面文案）、[0036](./0036-deterministic-capability-discovery.md)（worker 自述）与 [0037](./0037-distribution-and-packaging.md) 决策 3（定位链）已经给出的底子（退出码 0/1/2 边界清楚、错误带「怎么办」、`plan` 零费用预检、`run/plan/status/list-deterministic` 有 `--json`、stdout 只放数据），复盘一轮真实 agent 使用后仍有五个洞，全部落在「迭代循环成本」与「机读完备性」两条线上：
+gherkai 的直接操作者越来越多是使用者侧 AI agent（Claude Code / Codex 这类），替人写 `.feature`、跑、读结果、改确定性 step。agent 的工作循环与人不同：每一轮都要把命令输出读进上下文，每一次真跑都花几分钟与真金白银的 AI 费用，且它只能靠机读输出与退出码分流、不会「看一眼」HTML。对照 [0039](./0039-user-facing-surfaces-no-internal-references.md)（产品面文案）、[0036](./0036-deterministic-capability-discovery.md)（worker 自述）与 [0037](./0037-distribution-and-packaging.md) 决策 3（定位链）已经给出的底子（退出码 0/1/2 边界清楚、错误带「怎么办」、`plan` 零费用预检、`run/plan/status/list-deterministic` 有 `--json`、stdout 只放数据），复盘一轮真实 agent 使用后仍有五个洞，全部落在「迭代循环成本」与「机读完备性」两条线上：
 
 1. 只能整文件跑：改一句断言想验证，`.feature` 里全部 scenario 重跑一遍——最贵的一格。
 2. `--quiet` 只静音 core 的逐事件进度，worker 的 stdout/stderr（SDK 的 think/act 噪声，每步数百字符）无条件透传，agent 的上下文被灌满。

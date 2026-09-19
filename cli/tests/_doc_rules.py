@@ -4,8 +4,9 @@
 CLAUDE.md 代码纪律「产品面文案不带内部指代」+ 文档纪律「README / DEVELOPMENT 分层」；决策与理由见
 ADR 0039、ADR 0043 决策六）：
 
-- `test_package_readmes.py`：进包的 README / Summary / GitHub Release 正文 footer（禁词 + 相对链接）；
-- `test_user_docs.py`：仓库内用户文档（`docs/user-guide/**` / 根 README / CHANGELOG，禁词；相对链接另查可达性）；
+- `test_package_readmes.py`：进包的 README / Summary / GitHub Release 正文 footer（禁词 + 退役旧名 + 相对链接）；
+- `test_user_docs.py`：仓库内用户文档（`docs/user-guide/**` / 根 README / CHANGELOG）与 `docs/diagrams/` 图源
+  （禁词 + 退役旧名；相对链接另查可达性）；
 - `test_skill.py`：随 wheel 发行、由 `skill install` 拷进使用方项目的 agent skill markdown（全部规则）；
 - `deploy_aws/tests/test_skill_deploy_tokens.py`：skill 里 `deploy` / `destroy` 那批命令 token 对照 provider
   真 parser（provider 住 optional extra、`cli/tests` 不许 import 它，故对照面分在两处、抽取器共用）；
@@ -32,8 +33,32 @@ FORBIDDEN = re.compile(
     r"|不变量|定位链|被拒方案|重议闸门|实测项|接缝契约|模块头|组合根"
 )
 
-# 口头语 / 隐喻（ADR 0045 决策六）：给人读的文档与产品文案不用；「跑」作动词禁用，术语「跑法」与提及词「跑」除外。
-COLLOQUIAL = re.compile(r"帽子不是人|烧钱|锁步|lockstep|烙进|烙好|烙成|烙在|逃生舱|旋钮|跑(?![法」])")
+# 口头语 / 隐喻（ADR 0045 决策六）：给人读的文档与产品文案不用；「跑」作动词禁用，只放行提及词「跑」（后接 `」`）。
+COLLOQUIAL = re.compile(r"帽子不是人|烧钱|锁步|lockstep|烙进|烙好|烙成|烙在|逃生舱|旋钮|跑(?!」)")
+
+# 已退役的旧名：CONTEXT.md 词表给了规范名、旧名列进该条 `_Avoid_` 的那批，使用者面一个都不许再出现。
+# 与 COLLOQUIAL 分表是因为判据不同——那张管「口吻」（口头语 / 隐喻，永久禁），这张管「用词版本」（旧名 →
+# 规范名，随词表增删）。逐词与词表同源由 `test_user_docs.test_retired_terms_are_all_in_the_glossary` 守：
+# 往这里加词必须先在 CONTEXT.md 对应词条的 `_Avoid_` 里落下，免得护栏与词表各自演化。
+RETIRED_TERMS_WORDS = (
+    "跑法", "抢传", "确定性锚点", "大脑", "穿刺", "骨架验证用例", "版本单旋钮", "无状态跑批", "在跑 run",
+    "逃生舱", "供给包", "提交方", "技能包", "建造者 AI", "AI coding agent",
+)
+RETIRED_TERMS = re.compile("|".join(re.escape(w) for w in RETIRED_TERMS_WORDS))
+
+_CHANGELOG_RELEASED = re.compile(r"^## \[\d", re.M)  # 第一个已发行版本节的标题（`## [Unreleased]` 不匹配）
+
+
+def changelog_unreleased(text: str) -> str:
+    """CHANGELOG 交给退役词表扫的部分 = 截到第一个已发行版本节之前。
+
+    已发行节是**发行当时的原话**：改词表不回溯改写它，否则变更记录与使用者当年读到的说明不符。
+    截断保留前面的原始行，故调用方 `enumerate` 出的行号与原文一致。内部指代 / 口头语两张表仍扫全篇
+    （那是发行时就不该写的东西，不因过了一个版本而免责）。
+    """
+    m = _CHANGELOG_RELEASED.search(text)
+    return text[:m.start()] if m else text
+
 
 # `](../x)` / `](./x)` / `](foo.md)` / `](references/foo.md)`：PyPI/npm 页面与 skill 安装态都渲染不出仓库的目录树。
 RELATIVE_LINK = re.compile(r"\]\((?:\.\.?/|(?![a-z][a-z0-9+.-]*:|#)[^)\s]+\.md)")

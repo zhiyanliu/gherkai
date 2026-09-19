@@ -11,7 +11,7 @@
 | 被测 UI 语言 | **英文 UI**。非英文页面上能导航、能判页面级语义，但「正文里是否出现某个中文词」这类文本包含断言会系统性判否（同一页面上的英文词仍可靠），投票治不了 | 不限。中文 UI 上动作与 AI 断言实测与英文同级可靠 |
 | 本机安装 | `uv tool install 'gherkai[local]'` 与 CLI 同环境；正式发行版还能临时拉起 | `npm i -g @gherkai/worker-midscene`（Node ≥ 22），必须真装 |
 | 确定性 step 语言 | Python，`steps/*.py` | TypeScript / JS，`steps/*.mts` 或 `*.mjs` |
-| 云端依赖 | Nova Act 服务与模型 nova-act-v1.0（默认钉死，环境变量 NOVA_MODEL_ID 可换）、AgentCore Browser | Bedrock 模型 us.openai.gpt-5.6-terra（默认钉死，环境变量 MIDSCENE_MODEL_ID 可换，家族识别不了时再给 MIDSCENE_MODEL_FAMILY）、AgentCore Browser |
+| 云端依赖 | Nova Act 服务与模型 nova-act-v1.0（默认锁定，环境变量 NOVA_MODEL_ID 可换）、AgentCore Browser | Bedrock 模型 us.openai.gpt-5.6-terra（默认锁定，环境变量 MIDSCENE_MODEL_ID 可换，家族识别不了时再给 MIDSCENE_MODEL_FAMILY）、AgentCore Browser |
 
 两者都纯 IAM 鉴权、不要 API key；region 要能解析出来（`--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > profile 配置，四级全空才响亮失败、不猜默认，见 `references/setup-and-diagnosis.md` 第 4 节）；浏览器运行在云端、本机不装 Chromium。
 
@@ -67,7 +67,7 @@ deterministic(
 - `description` / `example` **必填**：它们就是 `gherkai list-deterministic` 与 `gherkai plan` 打给用例作者看的那两行，缺了启动即报错、点名 pattern。
 - 判定映射：Nova 抛 `AssertionError`、Midscene 抛 `DeterministicAssertion`（或 node:assert 的 AssertionError）→ 该步 **failed**；抛其它异常 → **error**。
 - 遍历：目录排序递归。两引擎都跳过**以 `_` 开头的文件或目录**（`_selectors.py` / `_pages/` 都算，整棵目录都不加载）——不注册 step 的辅助模块（页面对象、选择器常量、共享 helper）放那里，step 文件相对 import 它照样可用。Nova 只认 `*.py`、另跳过 `test_*.py`；Midscene 只认 `.mts` / `.mjs`（恒为 ESM，与项目 package.json 无关；`.ts` / `.js` 在收集阶段就被跳过——不 import、不报错、清单里没有）、另跳过 `*.test.*`。
-- 内建一条示范锚点 `Then 页面地址匹配 "<正则>"`，两引擎都带，装上即可用。撞上同一 pattern 不做覆盖，按冲突处理。
+- 内建一条示范确定性 step `Then 页面地址匹配 "<正则>"`，两引擎都带，装上即可用。撞上同一 pattern 不做覆盖，按冲突处理。
 
 ## 4 两侧成对
 

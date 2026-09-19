@@ -92,7 +92,7 @@ class Cost:
 
 
 class Status(str, Enum):
-    """判定态（ADR 0024 三态）+ core 派生态/前置态（ADR 0031）。
+    """判定状态（ADR 0024 三态）+ core 派生态/前置态（ADR 0031）。
 
     worker 经 wire 只报前三态（passed/failed/error，ADR 0024）；后四态是 **core 内态、永不进 wire**：
     - skipped/aborted：fail-fast 派生的 job 级**终态**（ADR 0031 决定一）。
@@ -110,7 +110,7 @@ class Status(str, Enum):
 
 
 # severity 数值序（ADR 0031 决定二）：**仅用于终态**的比较/排序/单调聚合。
-# 钉死 'error'<'failed' 字母序反向坑——绝不拿 Status 字符串比大小，一律查这张表。
+# 避开 'error'<'failed' 字母序反向坑——绝不拿 Status 字符串比大小，一律查这张表。
 # 前置态 pending/running 不在此表（它们不是判定结论，不参与 severity 比较，见 _NON_VERDICT）。
 _STATUS_SEVERITY: dict[Status, int] = {
     Status.SKIPPED: -1,  # 最轻：没执行，最该被无视
@@ -178,7 +178,7 @@ class ReportRef:
            未来可 "video"/"trace"/"har"…（非枚举）。**粒度不由 kind 表达**，而由
            report_ref 挂在 StepResult/ScenarioResult/JobResult 哪一级表达（二者正交，ADR 0027）。
     ref:   统一指针 URI（ResourceUri）——不假定是本地文件。本地产物用 file:// 前缀；未来可 s3://、https://。
-    label: 可选人类可读锚文本；缺省由消费端（cli/WebUI 皮层）回落 kind。
+    label: 可选人类可读锚文本；缺省由消费端（cli/WebUI 前端）回落 kind。
     """
 
     kind: str

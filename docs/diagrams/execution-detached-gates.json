@@ -2,7 +2,7 @@
   "schema_version": 2,
   "diagram_type": "workflow",
   "meta": {
-    "title": "两道闸门：云端推进器为何不介入前台 run",
+    "title": "两道拦截：云端推进器为何不介入前台 run",
     "locale": "zh-CN",
     "quality_profile": "showcase",
     "legend": {
@@ -113,7 +113,7 @@
       "lane": "laneStep",
       "col": 2,
       "type": "security",
-      "label": "是否后台批次",
+      "label": "是否后台执行",
       "sublabel": "事件不带此标记",
       "width": 152
     },
@@ -220,7 +220,7 @@
       "id": "e-detached-blk",
       "from": "judgeDetached",
       "to": "blkAct",
-      "label": "不是后台批次",
+      "label": "不是后台执行",
       "fromSide": "bottom",
       "toSide": "top",
       "route": "straight",
@@ -252,7 +252,7 @@
       "id": "e-exit-go",
       "from": "judgeExit",
       "to": "goExit",
-      "label": "是后台批次",
+      "label": "是后台执行",
       "fromSide": "right",
       "toSide": "left",
       "route": "straight",
@@ -263,7 +263,7 @@
       "id": "e-exit-blk",
       "from": "judgeExit",
       "to": "blkExit",
-      "label": "不是后台批次",
+      "label": "不是后台执行",
       "fromSide": "bottom",
       "toSide": "top",
       "route": "straight",
@@ -275,15 +275,15 @@
   "cards": [
     {
       "dot": "rose",
-      "title": "无闸门时的后果",
+      "title": "无拦截时的后果",
       "items": [
-        "前台跑法在云端档同样写入这两张表，云端函数会被这些记录唤醒",
+        "前台执行在云端档同样写入这两张表，云端函数会被这些记录唤醒",
         "结果是同一 scope 启动两个 task：前台已启动一个，云端推进器另启动一个"
       ]
     },
     {
       "dot": "cyan",
-      "title": "两道闸门，判据同源",
+      "title": "两道拦截，判据同源",
       "items": [
         "第一道位于事件源过滤：仅接收带后台标记的新 run 落库",
         "事件批次与任务停止事件均不带此标记，只能进入函数后反查该 run",

@@ -1,7 +1,7 @@
 """容器引擎口子（ADR 0038「容器引擎口子」）：worker 镜像交付碰容器引擎的**唯一落点**。
 
 **只五个动词**：`inspect`（存在 + 架构；**推送后**才取 digest）/ `tag` / `login` / `push` / `pull`。
-push-worker 与 `gherkai deploy` 的基底同步之外，CLI / runtime / CDK 一概不碰容器引擎——口子收在这里，
+push-worker 与 `gherkai deploy` 的基础镜像同步之外，CLI / runtime / CDK 一概不碰容器引擎——口子收在这里，
 将来 podman（同形子命令）或「免容器引擎的 registry 直拷」（ADR 0038 重议闸门）都只改本文件。
 
 **当前只实现 docker**：`--container-engine` / env `GHERKAI_CONTAINER_ENGINE` 认得别的名字，但给别的名字
@@ -14,7 +14,7 @@ push-worker 与 `gherkai deploy` 的基底同步之外，CLI / runtime / CDK 一
   需要的 manifest digest——拿它注册 ECS 只校格式、RunTask 拉镜像时才 `manifest unknown`
   （ADR 0038 被拒方案「推送前用本地 inspect 的 image Id 当 digest」）。故本类的 `inspect` 只负责「存在 + 架构」，
   digest 由调用方在**推送后**再 `inspect` 一次、经 `digest_for_repo` 按仓库挑。
-- **digest 要按仓库挑、不能取 `RepoDigests` 第一条**：基底同步路径先 `pull` 过 GHCR，同一个本地镜像会同时
+- **digest 要按仓库挑、不能取 `RepoDigests` 第一条**：基础镜像同步路径先 `pull` 过 GHCR，同一个本地镜像会同时
   挂着 GHCR 与 ECR 两条 repo digest（`docker pull` 后的 `alpine:3.20` 就带着 `alpine@sha256:…`，真机核过）。
 
 ## 密码永不进 argv
@@ -75,7 +75,7 @@ class ImageInfo:
 def digest_for_repo(repo_digests, repo_uri: str) -> str | None:
     """从 `RepoDigests` 里挑出**本仓库**那条的 digest（`sha256:<hex>`）；没有 → None。
 
-    **绝不取第一条**：基底同步先 `pull` 过 GHCR，同一镜像会挂着多个仓库的 digest，取错了写进 task-def 就是
+    **绝不取第一条**：基础镜像同步先 `pull` 过 GHCR，同一镜像会挂着多个仓库的 digest，取错了写进 task-def 就是
     「ECR 里不存在这个 digest」——RunTask 拉镜像时才炸（ADR 0038 步 4）。
     """
     for entry in repo_digests or ():
@@ -105,7 +105,7 @@ class ContainerEngine:
         要连 daemon，`--version` 不连、探不出「装了但没起」）。
         """
         if shutil.which(self.binary) is None:
-            return (f"找不到容器引擎 `{self.binary}`：push-worker 与 deploy 同步基底镜像都要用它推/拉。"
+            return (f"找不到容器引擎 `{self.binary}`：push-worker 与 deploy 同步基础镜像都要用它推/拉。"
                     f"装好后重试。")
         try:
             out = subprocess.run([self.binary, "version", "--format", "{{.Server.Version}}"],
@@ -152,7 +152,7 @@ class ContainerEngine:
         self._stream(["push", ref])
 
     def pull(self, ref: str, *, platform: str | None = None) -> None:
-        """拉镜像（基底同步用）。`platform` 给了就显式指定，避免在 arm Mac 上拉到 arm 变体。"""
+        """拉镜像（基础镜像同步用）。`platform` 给了就显式指定，避免在 arm Mac 上拉到 arm 变体。"""
         argv = ["pull", *(["--platform", platform] if platform else []), ref]
         self._stream(argv)
 

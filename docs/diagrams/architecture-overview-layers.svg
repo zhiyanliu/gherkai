@@ -440,7 +440,7 @@ rect.c-bg-rect { fill: var(--bg); }
         <rect width="100%" height="100%" fill="url(#grid)"/>
 
         <!-- Boundaries (behind everything) -->
-        <rect data-graph-role="structural-frame" data-composition-frame-kind="region" data-composition-frame-id="0" data-composition-frame-label="① 用例层（使用方项目）" x="420" y="16" width="260" height="120" rx="12" class="c-region" stroke-width="1"/>
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="region" data-composition-frame-id="0" data-composition-frame-label="① 用例文本（使用方项目）" x="420" y="16" width="260" height="120" rx="12" class="c-region" stroke-width="1"/>
 
         <rect data-graph-role="structural-frame" data-composition-frame-kind="region" data-composition-frame-id="1" data-composition-frame-label="② 产品层" x="420" y="216" width="900" height="120" rx="12" class="c-region" stroke-width="1"/>
 
@@ -463,8 +463,8 @@ rect.c-bg-rect { fill: var(--bg); }
         <path data-edge-from="cli" data-edge-to="deploy" data-edge-label="仅部署与自检调用" data-edge-key="9" data-edge-id="cli-deploy" data-composition-points="440,278;380,278;380,78;320,78" d="M 440 278 L 388 278 Q 380 278 380 270 L 380 86 Q 380 78 372 78 L 320 78" class="a-dashed" stroke-width="1.5" marker-end="url(#arrowhead-dashed)"/>
 
         <!-- Components -->
-        <g id="node-feature" data-node-id="feature" data-node-label=".feature 用例" tabindex="0" role="button" aria-label="聚焦.feature 用例，+ 确定性 step, ① 用例层（使用方项目）" aria-pressed="false" data-node-kind="external" data-node-sublabel="+ 确定性 step" data-node-context="① 用例层（使用方项目）">
-          <title>.feature 用例 · + 确定性 step · ① 用例层（使用方项目）</title>
+        <g id="node-feature" data-node-id="feature" data-node-label=".feature 用例" tabindex="0" role="button" aria-label="聚焦.feature 用例，+ 确定性 step, ① 用例文本（使用方项目）" aria-pressed="false" data-node-kind="external" data-node-sublabel="+ 确定性 step" data-node-context="① 用例文本（使用方项目）">
+          <title>.feature 用例 · + 确定性 step · ① 用例文本（使用方项目）</title>
           <rect x="440" y="40" width="220" height="76" rx="6" class="c-mask"/>
           <rect x="440" y="40" width="220" height="76" rx="6" class="c-external" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(446 46) scale(0.6875)">
@@ -605,9 +605,9 @@ rect.c-bg-rect { fill: var(--bg); }
         </g>
 
         <!-- Boundary labels (foreground masks keep routes out of titles) -->
-        <g data-graph-role="structural-frame-label" data-composition-frame-id="0" data-composition-frame-kind="region" data-composition-frame-label="① 用例层（使用方项目）">
-          <rect data-graph-role="structural-frame-label-mask" x="424" y="20" width="128.8" height="16" rx="3" class="c-mask"/>
-          <text data-boundary-label="" x="428" y="33" class="t-cloud" font-size="9" font-weight="600">① 用例层（使用方项目）</text>
+        <g data-graph-role="structural-frame-label" data-composition-frame-id="0" data-composition-frame-kind="region" data-composition-frame-label="① 用例文本（使用方项目）">
+          <rect data-graph-role="structural-frame-label-mask" x="424" y="20" width="139.6" height="16" rx="3" class="c-mask"/>
+          <text data-boundary-label="" x="428" y="33" class="t-cloud" font-size="9" font-weight="600">① 用例文本（使用方项目）</text>
         </g>
 
         <g data-graph-role="structural-frame-label" data-composition-frame-id="1" data-composition-frame-kind="region" data-composition-frame-label="② 产品层">
@@ -651,4 +651,4 @@ rect.c-bg-rect { fill: var(--bg); }
           </g>
         </g>
       </svg>
-<!-- gherkai:source-sha256=a7ce0135f1840aa72d3319a7e04d60e866a00d68fa6db3c5baf9268f5907d3d4 -->
+<!-- gherkai:source-sha256=5111b236446b6cea5e219e2a3d1be61dc6a2fb4c188c008dcb1c2fbd54309832 -->

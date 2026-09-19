@@ -14,7 +14,7 @@ skill 文案是 markdown，`test_user_facing_messages.py` 只扫 Python 字面�
 - 转换副本 = `tools/render_skill_contract.py` 的纯函数 `transform`。
 
 `deploy` / `destroy` 那批 token 不在这里比：provider 住 `[deploy-aws]` optional extra、只有部署方装，
-皮的测试不该强依赖它——对照面在 `deploy_aws/tests/test_skill_deploy_tokens.py`。
+前端的测试不该强依赖它——对照面在 `deploy_aws/tests/test_skill_deploy_tokens.py`。
 """
 from __future__ import annotations
 
@@ -30,6 +30,7 @@ from _doc_rules import (
     FORBIDDEN,
     PROVIDER_ONLY_FLAGS,
     RELATIVE_LINK,
+    RETIRED_TERMS,
     REPO,
     SKILL_ROOT,
     bare_flags,
@@ -97,7 +98,7 @@ def _allowed_flags(path: tuple[str, ...]) -> set[str]:
 # ── (a) 产品面文案与指针形态 ────────────────────────────────────────────────
 
 GITHUB_URL = re.compile(r"https://github\.com/zhiyanliu/gherkai(?P<rest>[^\s)\]<>，。；]*)")
-# 只允许指向仓库内容的三种钉法（ADR 0039 面二的发行物约定）：不绑分支名，HEAD 或 tag。
+# 只允许指向仓库内容的三种锁定写法（ADR 0039 面二的发行物约定）：不绑分支名，HEAD 或 tag。
 GITHUB_OK = re.compile(r"^(?:|/|/blob/HEAD/.+|/tree/HEAD/.*|/tree/v[^/]+/.*)$")
 
 
@@ -110,14 +111,18 @@ def test_scan_face_is_not_empty():
 
 @pytest.mark.parametrize("md", skill_markdown_files(), ids=lambda p: str(p.relative_to(SKILL_ROOT)))
 def test_skill_markdown_is_product_facing(md: Path):
-    """零内部指代：skill 落在使用方项目里，ADR 编号 / 决策号 / 内部机制名对那边的 agent 是噪声。"""
+    """零内部指代：skill 落在使用方项目里，ADR 编号 / 决策号 / 内部机制名对那边的 agent 是噪声。
+
+    用词同受词表约束：已退役的旧名（`_doc_rules.RETIRED_TERMS`）不许出现在正文。
+    """
     lines = md.read_text(encoding="utf-8").splitlines()
-    # frontmatter 的 description 是触发匹配用的：里面转述用户口语（如「跑测试」）是有意的，口头语表只扫正文。
+    # frontmatter 的 description 是触发匹配用的：里面转述用户口语（如「跑测试」）是有意的，口头语与旧名两表只扫正文。
     body_start = (lines.index("---", 1) + 1) if lines and lines[0].strip() == "---" and "---" in lines[1:] else 0
     hits = [f"{md.relative_to(REPO)}:{i}: {line.strip()[:120]}"
             for i, line in enumerate(lines, 1)
-            if FORBIDDEN.search(line) or (i > body_start and COLLOQUIAL.search(line))]
-    assert not hits, ("skill 随包发到使用方项目，不得含内部指代或口头语（改产品语言，设计指针留在 ADR）：\n"
+            if FORBIDDEN.search(line)
+            or (i > body_start and (COLLOQUIAL.search(line) or RETIRED_TERMS.search(line)))]
+    assert not hits, ("skill 随包发到使用方项目，不得含内部指代、口头语或退役旧名（改产品语言，设计指针留在 ADR）：\n"
                       + "\n".join(hits))
 
 
@@ -198,7 +203,7 @@ def test_bare_flags_exist_somewhere():
 
 
 # 排他性反向断言。成对比对对排他错误是**隐形**的——`(run, --json)` 存在即绿，哪怕 `--json` 同时挂在别处；
-# 这条才挡「把 run 独有的旋钮写成两边都有」。
+# 这条才挡「把 run 独有的选项写成两边都有」。
 #
 # **书写约定**（skill 里的排他声明按这三种形态之一写，护栏按同序解析）：
 #   ① 散文/列头：「仅 `run` = `--fail-fast` / `--quiet`」——标记之后到最近的 `；` / `）` / `|` / 行尾之间的 flag；
@@ -355,7 +360,7 @@ def test_rewrite_tables_are_all_used():
 
 def test_skill_directory_whitelist():
     """`SKILL.md` + `references/` +（按需）`scripts/`，别的一律红——挡评测资产悄悄长回发行树里
-    （两条安装腿都是整目录递归拷贝，排除名单由安装器硬编码、使用方改不了）。
+    （两条安装路径都是整目录递归拷贝，排除名单由安装器硬编码、使用方改不了）。
     `.gherkai-skill-version` 是安装态产物，包内不得有，故不在白名单里。"""
     allowed_top = {"SKILL.md", "references", "scripts"}
     extra = sorted(p.name for p in SKILL_ROOT.iterdir() if p.name not in allowed_top and p.name != "__pycache__")

@@ -33,7 +33,7 @@ Changelog = "https://github.com/zhiyanliu/gherkai/blob/HEAD/CHANGELOG.md"
 dependencies = [
     "gherkai-runtime[aws]=={{ version }}",
 ]
-# [local] = local 跑法的 Python 侧 worker，装进 CLI 同一个 venv（安装与拉起正交：装靠 extra、起靠定位链，
+# [local] = 本机后端的 Python 侧 worker，装进 CLI 同一个 venv（安装与拉起正交：装靠 extra、起靠定位链，
 # ADR 0037 决策 3）。midscene 是 Node 地盘，pip extra 够不到，走 npm。
 # [deploy-aws] = 改云端环境所需（供给后端 + worker 镜像推送），只有部署方装（ADR 0037 决策 2c/6）。
 optional-dependencies = { local = ["gherkai-worker-novaact=={{ version }}"], deploy-aws = ["gherkai-deploy-aws=={{ version }}"] }
@@ -50,7 +50,7 @@ build-backend = "hatchling.build"
 [tool.hatch.version]
 source = "uv-dynamic-versioning"
 
-# 版本唯一真源 = git tag vX.Y.Z（ADR 0037 决策 2b）。三项显式钉死（style / strict / dirty），metadata 有意留默认：
+# 版本唯一真源 = git tag vX.Y.Z（ADR 0037 决策 2b）。三项显式固定（style / strict / dirty），metadata 有意留默认：
 # style=pep440（镜像 tag 归一化与 skew 比较都建立在 PEP 440 形态上）；strict=true（无 tag 即 build 失败，
 # 不静默回落 0.0.0）；dirty=true（任何非纯净发行状态都带 + 本地段——默认下 tag commit 上带
 # 未提交改动构建出的版本与正式发行版逐字节相同，skew 的「非纯净版本跳过」就不会触发）。

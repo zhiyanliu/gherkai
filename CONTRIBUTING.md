@@ -21,9 +21,9 @@
 | v1.1 云端                    | store adapter（DynamoDB/S3，StepArgument offload 解 400KB 限）+ Fargate/ECS 执行面（`FargateEngine` + `gherkai-deploy-aws` 的 CDK stack）；boto3 只在云端路径懒加载（库层 extra `[aws]`，CLI 硬依赖 `gherkai-runtime[aws]`，ADR 0032/0033/0037） | ✅ 真部署真运行  |
 | v1.2 无状态批量运行          | `submit` 提交即返回 + `status [--wait]`；local 档 per-run 后台进程 + SQLite events；cloud 档三 Lambda 事件驱动链（kicker / reconciler / exit-observer，DDB Stream + EventBridge）；job 墙钟预算作为最终保障（ADR 0034）                        | ✅               |
 | v1.3 本地应用测试 + 能力自述 | `--expose-local` ngrok 隧道（basic-auth 凭据每 run 轮换、终态即拆除，ADR 0035）；`list-deterministic` / `plan` 派发标注（worker 注册表自述，ADR 0036）                                                                                         | ✅               |
-| v1.4 分发与打包              | uv workspace 五包 + PyPI/npm 发行、git tag 版本单旋钮、`gherkai deploy` 内嵌 IaC、worker 镜像 variant 交付（ADR 0037 / 0038）                                                                                                               | ✅ 已发行        |
+| v1.4 分发与打包              | uv workspace 五包 + PyPI/npm 发行、git tag 版本真源、`gherkai deploy` 内嵌 IaC、worker 镜像 variant 交付（ADR 0037 / 0038）                                                                                                                 | ✅ 已发行        |
 
-v1 定位尚有一项验收未完成，前置条件是取得可用的真实业务系统：至少 3 个真实业务用例由 feature 作者零 step 代码写出并运行通过，同时记录每一处不得不写代码的破例。该项自 v0.x 顺延至今，目前只有骨架用例（wikipedia / example.com）在验证方向。验收标准与顺延理由见 [ADR 0016](./docs/adr/0016-execution-architecture-core-lib-run-model.md)「版本切分」节，定位口径见 [ADR 0015](./docs/adr/0015-v1-positioning-smoke-not-regression.md)。
+v1 定位尚有一项验收未完成，前置条件是取得可用的真实业务系统：至少 3 个真实业务用例由 feature 作者零 step 代码写出并运行通过，同时记录每一处不得不写代码的破例。该项自 v0.x 顺延至今，目前只有探针用例（wikipedia / example.com）在验证方向。验收标准与顺延理由见 [ADR 0016](./docs/adr/0016-execution-architecture-core-lib-run-model.md)「版本切分」节，定位口径见 [ADR 0015](./docs/adr/0015-v1-positioning-smoke-not-regression.md)。
 
 ## 目录结构
 
@@ -49,7 +49,7 @@ v1 定位尚有一项验收未完成，前置条件是取得可用的真实业�
 │   ├── wikipedia_generic.feature / wikipedia_assertions.feature / wikipedia_robustness.feature
 │   ├── wikipedia_zh.feature                ← 非英文 UI 探针：中文维基 + 中文 step，两引擎同题（ADR 0001 的测量夹具与重议复测入口）
 │   ├── engine_routing.feature              ← @engine tag 路由验证
-│   ├── deterministic_anchor.feature        ← @deterministic 锚点验证（ADR 0022）
+│   ├── deterministic_anchor.feature        ← @deterministic 确定性 step 验证（ADR 0022）
 │   └── concurrency_and_scope.feature       ← 手工真实运行的回归夹具：改调度/会话生命周期后重新执行以验证 ADR 0019
 ├── core/                      ← 窄腰核心库（发行名 gherkai-core，Python，零引擎依赖，ADR 0016）
 ├── runtime/                   ← 产品本体 = 组合根共享层（发行名 gherkai-runtime；ADR 0016「演进」节；cli/Lambda/WebUI 的共同地基）
@@ -168,10 +168,10 @@ tools/graphify_refresh.sh --force    # 全量重抽（清残留节点时；费�
 
 **推 tag `vX.Y.Z` 不进 CI、直接进发布链**（`.github/workflows/release.yml`；CI 的分支过滤把 tag 排除在外）：发布路径上只有下述一道 gate，不运行 `pytest` 与 `npm test`，因此测试与本地校验必须在推 tag 之前全部完成并通过。
 
-**版本真源只有 git tag `vX.Y.Z`**——五个 Python 发行包、npm 包 `@gherkai/worker-midscene`、两个 worker 基底镜像同号（ADR 0037 决策 2b/7）。五个发行包的 pyproject 都写 `dynamic = ["version"]`、没有版本字段（uv-dynamic-versioning 从 tag 算；不发行的 workspace 根另写死 `0.0.0`）；`engines/midscene/package.json` 只留占位 `0.0.0-dev`，发布链在 `npm publish` 前按 tag 改写它，该行不应由人工维护。发布因此是一个动作，前提是该版的变更说明已写就：
+**版本真源只有 git tag `vX.Y.Z`**——五个 Python 发行包、npm 包 `@gherkai/worker-midscene`、两个 worker 基础镜像同号（ADR 0037 决策 2b/7）。五个发行包的 pyproject 都写 `dynamic = ["version"]`、没有版本字段（uv-dynamic-versioning 从 tag 算；不发行的 workspace 根另写死 `0.0.0`）；`engines/midscene/package.json` 只留占位 `0.0.0-dev`，发布链在 `npm publish` 前按 tag 改写它，该行不应由人工维护。发布因此是一个动作，前提是该版的变更说明已写就：
 
 ```bash
-git tag vX.Y.Z && git push origin vX.Y.Z   # GitHub Actions 接手：gate（tag 形态 + CHANGELOG 有本版节 + 版本==tag）→ PyPI → npm → GHCR 基底镜像 → GitHub Release
+git tag vX.Y.Z && git push origin vX.Y.Z   # GitHub Actions 接手：gate（tag 形态 + CHANGELOG 有本版节 + 版本==tag）→ PyPI → npm → GHCR 基础镜像 → GitHub Release
 ```
 
 发版前写 `CHANGELOG.md` 的该版节（Keep a Changelog 形态、使用者语言：小节名用 新增 / 变化 / 移除 / 修复，外加本项目自加的 升级须知）；发布 gate 校验本 tag 在 changelog 里有非空节，缺失则发版失败；GitHub Release 正文 = 该节 + `.github/release_body_footer.md` 的固定块，由 `.github/scripts/release_notes.py` 渲染（ADR 0045 决策五）。

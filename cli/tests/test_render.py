@@ -121,7 +121,7 @@ def test_index_html_shortcircuit_note_matches_cli_wording():
     """跨包措辞护栏（ADR 0031 决定六）：报告入口页的短路旁注与本模块的旁注是同一句。
 
     core 不能 import cli（分层方向），那句在两包各有一份字面量；测试两边都能 import，故护栏放 cli 侧——
-    改一处忘改另一处本条就红（此前两包各只被自己的字面量钉住，措辞可静默分叉）。
+    改一处忘改另一处本条就红（此前两包各只被自己的字面量守住，措辞可静默分叉）。
     比对前 unescape：core 那份内嵌进 HTML，将来措辞若带 & / < 也照样对得上。
     """
     import html as html_mod
@@ -219,7 +219,7 @@ def test_format_event_omits_scope_id():
     assert "scope_id=" not in s  # scope 归前缀，行内不再重复
 
 
-# ---- render_run_state：status 的 RunState 人读渲染（皮的事，从 gherkai 归位到此，ADR 0016「归属清算」条）----
+# ---- render_run_state：status 的 RunState 人读渲染（前端的事，从 gherkai 归位到此，ADR 0016「归属清算」条）----
 
 def test_render_run_state_lists_jobs_and_session_lineage():
     from gherkai_core.model import JobState, RunState

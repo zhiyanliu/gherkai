@@ -2,10 +2,10 @@
 
 > **Status:** Accepted
 
-两根穿刺针（Midscene 引擎、Nova Act 引擎）刻意用**同一用例、同一断言策略、同一度量**，使其不只是各自「证活着」，而是产出一份双引擎**对比基准**。
+两个 spike（Midscene 引擎、Nova Act 引擎）刻意用**同一用例、同一断言策略、同一度量**，使其不只是各自「证活着」，而是产出一份双引擎**对比基准**。
 
 **决定（三者必须对齐才能比）**：
-- **同一用例**：都用维基百科搜索场景（打开 wikipedia.org → 搜一个词 → 断言进入该词条页）——即 CONTEXT.md「骨架验证用例」。
+- **同一用例**：都用维基百科搜索场景（打开 wikipedia.org → 搜一个词 → 断言进入该词条页）——即 CONTEXT.md「探针用例」。
 - **同一断言策略**：都做 **A（确定性，Playwright `nova.page`/Midscene page）+ B（AI 断言，`act_get`/`aiAssert`）双断言**，并对 B 做 **N 次重复抖动探测**。
 - **同一度量**：grounding/动作成功率、A 与 B 对同一页结论是否一致、B 的 N 次抖动率、单次耗时、token/成本。
 
@@ -29,7 +29,7 @@
 
 ## 实测挖出的洞察（对报告统一关键，即原里程碑 M5）
 
-**① 报告产物模型两个引擎根本不同**（见 CONTEXT「报告产物模型」）：
+**① 引擎原生产物两个引擎根本不同**（见 CONTEXT「引擎原生产物」）：
 - Midscene → **单一 `report.html`**，落项目内 `midscene_run/report/`，含每步截图+AI 决策+坐标。
 - Nova Act → **每次 `act`/`act_get` 各一个 trajectory HTML**（本用例 11 个：1 动作 + 10 断言），默认落 **系统临时目录** `$TMPDIR/..._nova_act_logs/<sessionId>/`。
 - → 「报告统一」（原里程碑 M5）要面对三处差异：单文件 vs 多文件、项目内 vs 临时目录、截图+坐标 vs 逐 act trajectory。**v1.0 已由 [0027](./0027-runreport-aggregation-index.md) 兑现，且结论是「不弥合」**——只做跨引擎归集索引（`manifest.json` 机器可读 + `index.html` 人可导航入口），链接各自原生产物、不解析融合其内容，故这三处差异不必在报告层抹平。

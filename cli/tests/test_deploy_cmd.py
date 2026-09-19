@@ -1,8 +1,8 @@
-"""`gherkai deploy` / `gherkai destroy` 的命令皮测试（ADR 0037 决策 6）：provider 发现三分叉 + flag 贡献 + 分派。
+"""`gherkai deploy` / `gherkai destroy` 的命令行前端测试（ADR 0037 决策 6）：provider 发现三分叉 + flag 贡献 + 分派。
 
-**全程 stub entry point 与 provider**：皮的契约只有「按 entry point group 发现 → 调 `add_arguments` 贴 flag →
-按自己的命令面 flag 选调方法 → 透传退出码」，真 provider（`gherkai-deploy-aws`，带 CDK + Node）不该是皮的
-测试依赖——它的 IaC 行为、VPC 档比对、cdk 调用都在它自己那边验。皮的硬不变量「**皮不 import `aws_cdk`**」
+**全程 stub entry point 与 provider**：前端的契约只有「按 entry point group 发现 → 调 `add_arguments` 贴 flag →
+按自己的命令面 flag 选调方法 → 透传退出码」，真 provider（`gherkai-deploy-aws`，带 CDK + Node）不该是前端的
+测试依赖——它的 IaC 行为、VPC 档比对、cdk 调用都在它自己那边验。前端的硬不变量「**前端不 import `aws_cdk`**」
 与「非 deploy 子命令**不加载** provider」也在此断言（后者是「别让 `gherkai run` 付 jsii 起 node 的代价」）。
 """
 from __future__ import annotations
@@ -16,7 +16,7 @@ from gherkai_cli import deploy as dp
 
 
 class _StubProvider:
-    """按 deploy.py 契约块实现的假 provider：贴三个旋钮、记录被调的动作与拿到的 args。"""
+    """按 deploy.py 契约块实现的假 provider：贴三个选项、记录被调的动作与拿到的 args。"""
 
     name = "stub"
 
@@ -24,7 +24,7 @@ class _StubProvider:
         self.rc = rc
         self.calls: list[tuple[str, object]] = []
 
-    def add_arguments(self, parser):  # 模仿 AWS provider 的三 flag（ADR 0037 决策 6 的四个 context 旋钮）
+    def add_arguments(self, parser):  # 模仿 AWS provider 的三 flag（ADR 0037 决策 6 的四个 context 配置项）
         parser.add_argument("--prefix", default=None)
         parser.add_argument("--vpc", default=None)
         parser.add_argument("--stop-timeout", type=int, default=None)
@@ -79,7 +79,7 @@ def test_single_provider_needs_no_provider_flag(monkeypatch):
 
 
 def test_multiple_providers_require_provider_flag(monkeypatch, capsys):
-    """装多个 + 不给 `--provider` → 退 2 并列出名字（皮不替用户猜「往哪个云部署」）。"""
+    """装多个 + 不给 `--provider` → 退 2 并列出名字（前端不替用户猜「往哪个云部署」）。"""
     a, b = _StubProvider(), _StubProvider()
     _patch_eps(monkeypatch, _FakeEP("aws", a), _FakeEP("zzz", b))
     assert m.main(["deploy"]) == 2
@@ -115,7 +115,7 @@ def test_provider_load_failure_is_named_not_traceback(monkeypatch, capsys):
 
 
 def test_entry_point_class_gets_instantiated(monkeypatch):
-    """entry point 指向**类**（真 provider 就是 `…cli:Provider`）→ 皮实例化它；指向现成对象则原样用。"""
+    """entry point 指向**类**（真 provider 就是 `…cli:Provider`）→ 前端实例化它；指向现成对象则原样用。"""
     _patch_eps(monkeypatch, _FakeEP("aws", _StubProvider))
     prov, err = dp.resolve_provider(None)
     assert err is None and isinstance(prov, _StubProvider)
@@ -129,7 +129,7 @@ def test_entry_point_class_gets_instantiated(monkeypatch):
 # ---- flag 贡献与分派 ----
 
 def test_provider_flags_contributed_and_reach_provider(monkeypatch):
-    """provider 的旋钮由它自己贴（皮不认识 `--vpc`），解析结果原样进 provider 拿到的 args。"""
+    """provider 的选项由它自己贴（前端不认识 `--vpc`），解析结果原样进 provider 拿到的 args。"""
     prov = _StubProvider()
     _patch_eps(monkeypatch, _FakeEP("aws", prov))
     assert m.main(["deploy", "--vpc", "default", "--prefix", "p-", "--stop-timeout", "30"]) == 0
@@ -139,7 +139,7 @@ def test_provider_flags_contributed_and_reach_provider(monkeypatch):
 
 
 def test_command_face_flags_reach_provider(monkeypatch):
-    """皮自己的命令面 flag（`--require-approval` / `--allow-vpc-change`）也落在同一个 args 上给 provider 取。"""
+    """前端自己的命令面 flag（`--require-approval` / `--allow-vpc-change`）也落在同一个 args 上给 provider 取。"""
     prov = _StubProvider()
     _patch_eps(monkeypatch, _FakeEP("aws", prov))
     assert m.main(["deploy", "--require-approval", "never", "--allow-vpc-change"]) == 0
@@ -155,7 +155,7 @@ def test_command_face_flags_reach_provider(monkeypatch):
     (["destroy"], "destroy"),
 ])
 def test_dispatch_maps_command_face_to_provider_method(monkeypatch, argv, verb):
-    """命令面 → provider 方法的映射（决策 6 的四路 + destroy）。皮只做这一件事、零 IaC 知识。"""
+    """命令面 → provider 方法的映射（决策 6 的四路 + destroy）。前端只做这一件事、零 IaC 知识。"""
     prov = _StubProvider()
     _patch_eps(monkeypatch, _FakeEP("aws", prov))
     assert m.main(argv) == 0
@@ -163,7 +163,7 @@ def test_dispatch_maps_command_face_to_provider_method(monkeypatch, argv, verb):
 
 
 def test_synth_only_dir_lands_on_args(monkeypatch):
-    """`--synth-only DIR` 的 DIR 经 `args.synth_only` 交给 provider（皮不建目录、不碰模板）。"""
+    """`--synth-only DIR` 的 DIR 经 `args.synth_only` 交给 provider（前端不建目录、不碰模板）。"""
     prov = _StubProvider()
     _patch_eps(monkeypatch, _FakeEP("aws", prov))
     m.main(["deploy", "--synth-only", "/tmp/out"])
@@ -179,7 +179,7 @@ def test_three_actions_are_mutually_exclusive(monkeypatch):
 
 
 def test_provider_exit_code_is_passed_through(monkeypatch):
-    """退出码原样透传（provider 里 cdk 的失败码不被压成皮自己的码）。"""
+    """退出码原样透传（provider 里 cdk 的失败码不被压成前端自己的码）。"""
     prov = _StubProvider(rc=7)
     _patch_eps(monkeypatch, _FakeEP("aws", prov))
     assert m.main(["deploy"]) == 7
@@ -198,7 +198,7 @@ def test_cli_version_is_handed_to_provider(monkeypatch):
 
 def test_provider_subverb_seam_takes_precedence(monkeypatch):
     """0038 的子动词接缝：provider 在 `add_arguments` 里挂 subparser + `set_defaults(_deploy_verb=…)`，
-    皮先看它、不再走默认的真部署（`gherkai deploy push-worker …` 那族命令届时皮一行不改）。"""
+    前端先看它、不再走默认的真部署（`gherkai deploy push-worker …` 那族命令届时前端一行不改）。"""
     seen: list[str] = []
 
     class _WithVerb(_StubProvider):
@@ -219,7 +219,7 @@ def test_provider_subverb_seam_takes_precedence(monkeypatch):
 # ---- 不变量 ----
 
 def test_help_works_without_provider_and_explains_why(monkeypatch, capsys):
-    """`deploy --help` **恒可用**（帮助不该因没装 provider 而失败），且 epilog 自陈「旋钮为何没列出来」。"""
+    """`deploy --help` **恒可用**（帮助不该因没装 provider 而失败），且 epilog 自陈「选项为何没列出来」。"""
     _patch_eps(monkeypatch)
     with pytest.raises(SystemExit) as e:
         m.main(["deploy", "--help"])
@@ -229,12 +229,12 @@ def test_help_works_without_provider_and_explains_why(monkeypatch, capsys):
 
 
 def test_cli_does_not_import_aws_cdk(monkeypatch):
-    """**皮不 import `aws_cdk`**（jsii 绑定，import 即起 node 子进程，ADR 0037 决策 6）。
+    """**前端不 import `aws_cdk`**（jsii 绑定，import 即起 node 子进程，ADR 0037 决策 6）。
 
     做法 = 往 `sys.modules` 塞毒（值为 `None` 时 `import aws_cdk` 立即 ImportError），**不是**事后断言
     `"aws_cdk" not in sys.modules`——后者依赖「本 session 没有别的测试 import 过它」，而 provider 包自己的
-    CDK 合成测试就会 import 它，运行全量时那种断言会因执行顺序假失败。塞毒与顺序无关：皮真去 import 就炸。
-    只测皮这半边（provider 被 stub）：真 provider 的 import 面由它自己守（其模块头钉了同一条）。
+    CDK 合成测试就会 import 它，运行全量时那种断言会因执行顺序假失败。塞毒与顺序无关：前端真去 import 就炸。
+    只测前端这半边（provider 被 stub）：真 provider 的 import 面由它自己守（其模块头写明了同一条）。
     """
     monkeypatch.setitem(sys.modules, "aws_cdk", None)
     _patch_eps(monkeypatch, _FakeEP("aws", _StubProvider()))

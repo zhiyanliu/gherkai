@@ -227,6 +227,8 @@ adapter/组合根（Lambda handler / per-run 进程，注入具体 client）：
 
 **core 只吐「当前状态」与「建议动作」，绝不持 store、不 import boto3、不依赖执行环境。** Lambda handler 是 cloud 组合根（cold-start 读 env 造 adapter 注入纯 reconciler——**仍是组合根注入，不是 ports 内部 env-sniff 全局单例**，[0016](./0016-execution-architecture-core-lib-run-model.md) 禁的 GlobalConfigManager 反模式要在评审时守住别退化成它）；per-run 进程是 local 组合根。归约码作纯 core 函数被两宿主 import 复用 = 「不复制归约逻辑」的正解。
 
+**`project` 的全量重放反转了 [0031](./0031-job-lifecycle-states-and-severity.md) 决定三的一处立场**（反向链已记在 0031 的 Status 头）：那里把「`_aggregate` 只算一次、`pending`/`running` 的入口过滤只是为未来增量聚合预留的前向口子」当作现状，而每轮 tick 全量重放会把真实含 `pending`/`running` 的 `jobs_state` 原样喂进 `_aggregate`——那条过滤在此路径**已承重**（缺它前置态会污染 run 级 status）。决定三的**决策**因此反被印证、不是被推翻。
+
 **时钟也只一份：三宿主（前台 `run` 的 CLI / local per-run 进程 / 推进器 Lambda）落库时间戳一律调 `compose.now_iso()`**，反向解析一律 `compose.parse_iso()`（core 不取时钟——时间戳由组合根算好传进 `tick`/`finalize_report`，[0016](./0016-execution-architecture-core-lib-run-model.md)）。曾各写一份 `_now_iso`、两种 ISO 格式（`isoformat()` 的 `+00:00` vs `strftime` 的 `…Z`），使**同一份 RunState 内** `started_at`（submit 侧写）与 `claimed_at`/`ended_at`（推进器写）格式不同——`status --json` 按 backend 给出不同格式的同名字段，机读消费者被迫兼容两种。「不复制归约逻辑」同理适用于「不复制取时钟」：多宿主同写一份数据结构时，**格式真源必须唯一**。
 
 ## Engine port 演进：pull-iterate → 增出 fire-and-forget（已实装）

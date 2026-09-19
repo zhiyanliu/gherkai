@@ -49,7 +49,7 @@ from gherkai_runtime.names import (  # noqa: F401
 # Lambda asset 构建目录的落点 env——**命令进程 → cdk 起的 app 进程之间的管道**（`cli.Provider._run_cdk` 写、
 # `stack.BackendStack._build_lambda_asset` 读）。放在本模块是因为两侧唯一的共同 import 就是它（`cli.py` 不能
 # import `stack.py`：那会拉起 aws_cdk/jsii 的 node 子进程）。
-# **不做成 CDK context**：它是管道、不是设计旋钮，混进 context 会破坏「flag 面 == context 旋钮全集」这条对齐
+# **不做成 CDK context**：它是管道、不是设计参数，混进 context 会破坏「flag 面 == context 配置项全集」这条对齐
 # （ADR 0037 决策 6）。缺它（直接运行 cdk synth）→ app 侧自建 mkdtemp。
 LAMBDA_ASSET_DIR_ENV = "GHERKAI_LAMBDA_ASSET_DIR"
 

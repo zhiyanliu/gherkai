@@ -38,7 +38,7 @@ build-backend = "hatchling.build"
 [tool.hatch.version]
 source = "uv-dynamic-versioning"
 
-# 版本唯一真源 = git tag vX.Y.Z（ADR 0037 决策 2b）。三项显式钉死（style / strict / dirty），metadata 有意留默认：
+# 版本唯一真源 = git tag vX.Y.Z（ADR 0037 决策 2b）。三项显式固定（style / strict / dirty），metadata 有意留默认：
 # style=pep440（镜像 tag 归一化与 skew 比较都建立在 PEP 440 形态上）；strict=true（无 tag 即 build 失败，
 # 不静默回落 0.0.0）；dirty=true（任何非纯净发行状态都带 + 本地段——默认下 tag commit 上带
 # 未提交改动构建出的版本与正式发行版逐字节相同，skew 的「非纯净版本跳过」就不会触发）。

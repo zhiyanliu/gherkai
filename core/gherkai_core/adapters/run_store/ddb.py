@@ -13,7 +13,7 @@ RunMeta 与 RunState **分两 item**（同 run_id、item_type 各异；同分区
   jobs=<原生 Map>}`（`?` = omit-when-None；`high_water_mark` 只在无状态批量运行的投影写时有值，是本 item 唯一的
   数值属性——投影写的 ConditionExpression 按它做数值守卫、读回 Decimal 转 int，见 ADR 0034 机制三），另有两个
   **可选顶层标记**：`detached`（ADR 0034，kicker 的 Stream filter 认它）与 `worker_task_def_arns`（ADR 0038，
-  清理 pass 的运行中 run 安全阀按它 Query + `contains`）——两者都是「DDB 侧要查得动」才摊到顶层的。
+  清理 pass 的运行中 run 引用检查按它 Query + `contains`）——两者都是「DDB 侧要查得动」才摊到顶层的。
   jobs **必须原生 Map** 才能 `SET jobs.#sid=:js` 按 scope_id 单元素刷（决定六）；其 entry 全是 str（无 float），
   原生 Map 无 Decimal 顾虑。
 
@@ -40,8 +40,8 @@ _META = "META"    # item_type 取值：definition item
 _STATE = "STATE"  # item_type 取值：运行态 item
 
 # STATE item 顶层属性：本 run 用到的 worker task-def revision ARN 列表（ADR 0038「不变量」清理 pass 的
-# 运行中 run 安全阀按它判引用——definition 里也有同一批 ARN，但那在 meta_json 字符串内、DDB 查不动，故**同时**
-# 摊平成顶层属性，沿用 `detached` 顶层标记先例）。
+# 运行中 run 引用检查按它判断某 revision 是否仍被引用——definition 里也有同一批 ARN，但那在 meta_json
+# 字符串内、DDB 查不动，故**同时**摊平成顶层属性，沿用 `detached` 顶层标记先例）。
 # **写端在此、读端的命名真源在 `gherkai_runtime.names.STATE_WORKER_TASK_DEF_ARNS_ATTR`**：core 是窄腰下层、
 # 不 import 组合根共享层，故字面量两处各有；漂移由 runtime 侧的对拍测试挡（那里能同时 import 两边）。
 _WORKER_TASK_DEF_ARNS_ATTR = "worker_task_def_arns"

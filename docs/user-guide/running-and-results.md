@@ -1,14 +1,14 @@
 # 运行测试与查看结果
 
-本页讲怎么运行 `.feature`、结果落在哪、退出码怎么读：四种跑法的选择、`plan` / `run` / `submit` / `status` / `explain` / `list-engines` / `list-deterministic` / `doctor` 的用途与常用选项、报告与证据的位置、费用量级、机读输出与 CI 用法。安装与 AWS 前置见 [`getting-started.md`](./getting-started.md)，`.feature` 的写法见 [`writing-features.md`](./writing-features.md)，`--expose-local` 测本机应用见 [`local-app-testing.md`](./local-app-testing.md)，云端后端的部署与维护见 [`cloud-backend.md`](./cloud-backend.md)，全部选项与环境变量的总表见 [`configuration.md`](./configuration.md)。任一命令的完整选项以 `gherkai <命令> --help` 为准。
+本页讲怎么运行 `.feature`、结果落在哪、退出码怎么读：执行方式与执行后端四种组合的选择、`plan` / `run` / `submit` / `status` / `explain` / `list-engines` / `list-deterministic` / `doctor` 的用途与常用选项、报告与证据的位置、费用量级、机读输出与 CI 用法。安装与 AWS 前置见 [`getting-started.md`](./getting-started.md)，`.feature` 的写法见 [`writing-features.md`](./writing-features.md)，`--expose-local` 测本机应用见 [`local-app-testing.md`](./local-app-testing.md)，云端后端的部署与维护见 [`cloud-backend.md`](./cloud-backend.md)，全部选项与环境变量的总表见 [`configuration.md`](./configuration.md)。任一命令的完整选项以 `gherkai <命令> --help` 为准。
 
 ## 两个独立的选择：怎么运行、在哪运行
 
-跑法由两个互不影响的选择组合出来，四种组合都合法。
+执行方式与执行后端是两个互不影响的选择，四种组合都合法。
 
 **怎么运行**
 
-| 跑法 | 命令 | 特点 |
+| 执行方式 | 命令 | 特点 |
 |---|---|---|
 | 前台 | `gherkai run <feature...>` | CLI 全程在线，运行结束后直接输出判定与产物位置，退出码就是判定。CLI 进程结束（终端关闭、机器休眠）这一批即停止 |
 | 后台 | `gherkai submit <feature...>` 再 `gherkai status <run_id>` | `submit` 打印一个 `run_id` 后立即退出，后台继续执行；用 `status` 查进度，`status --wait` 等到运行结束并拿判定 |
@@ -22,9 +22,9 @@
 
 `submit --backend local` 在本机起一个脱离 CLI 的后台进程推进，本机要保持开机；`submit --backend cloud` 提交完即可关机，云端自己把这批执行完；只有用 `--expose-local` 时例外——隧道在本机，要保持开机联网到这个 run 结束。
 
-四种组合需要的权限不同、费用记到的账户也不同。
+下面各档需要的权限不同、费用记到的账户也不同（`plan` 不需要凭证，单列一行）。
 
-| 跑法 | 需要什么 | 费用记到 |
+| 档（命令与后端） | 需要什么 | 费用记到 |
 |---|---|---|
 | `plan` | 不需要凭证（装了 worker 才有确定性 step 的派发标注） | 不产生费用 |
 | `run` / `submit`，`--backend local` | 本机 AWS 凭证 + 要用的引擎 worker | 自己的 AWS 账户 |
@@ -40,7 +40,7 @@
 一次典型的流程：
 
 ```bash
-gherkai plan features/wikipedia_generic.feature            # 预检：分组、校验、派发标注（零费用）
+gherkai plan features/wikipedia_generic.feature            # 用例预检：分组、校验、派发标注（零费用）
 gherkai run  features/wikipedia_generic.feature            # 前台运行（产生模型调用与浏览器会话费用）
 RUN_ID=$(gherkai submit features/*.feature --max-concurrency 2)
 gherkai status "$RUN_ID" --wait                            # 等到运行结束，按判定给退出码
@@ -49,7 +49,7 @@ gherkai explain "$RUN_ID"                                  # 有用例没过时�
 
 | 命令 | 用途 | 常用选项 |
 |---|---|---|
-| `gherkai plan <feature...>` | 预检：打印 scope / job 分组，逐步标注哪些步由确定性 step 执行（行尾给出该 step 的说明），未标注的步交给 AI；同时校验写法与配置。不连云、不产生费用 | `--scope` / `--tags` / `--scenario`、`--default-engine`、`--assertion-votes`、`--default-job-timeout`、`--steps-dir`、`--json` |
+| `gherkai plan <feature...>` | 用例预检：打印 scope / job 分组，逐步标注哪些步由确定性 step 执行（行尾给出该 step 的说明），未标注的步交给 AI；同时校验写法与配置。不连云、不产生费用 | `--scope` / `--tags` / `--scenario`、`--default-engine`、`--assertion-votes`、`--default-job-timeout`、`--steps-dir`、`--json` |
 | `gherkai run <feature...>` | 前台运行完这批，输出文本汇总，并把报告、运行元信息、判定明细三处位置输出到标准错误（stderr） | 见下「常用选项」 |
 | `gherkai submit <feature...>` | 提交这批并立即返回，stdout 只有一个 `run_id` | `--backend`、`--max-concurrency`、`--report-dir`、`--prefix`、`--worker-variant`、`--tunnel-ttl` |
 | `gherkai status <run_id>` | 查这个 run 的进度与结果；到终态时同时输出三处产物位置 | `--wait`、`--backend`、`--report-dir`、`--prefix`、`--max-concurrency`、`--json` |

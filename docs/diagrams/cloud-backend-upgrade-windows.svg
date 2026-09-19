@@ -499,11 +499,11 @@ rect.c-bg-rect { fill: var(--bg); }
         <text x="176" y="420" class="t-dim" font-size="7">写入新版本戳；部署自身不做版本比对，窗口一内可执行</text>
         </g>
 
-        <g data-edge-from="deployer" data-edge-to="registry" data-edge-label="同步新版本基底" data-edge-key="4">
+        <g data-edge-from="deployer" data-edge-to="registry" data-edge-label="同步新版本基础镜像" data-edge-key="4">
           <path data-composition-edge-from="deployer" data-composition-edge-to="registry" data-composition-points="164,448;608.6666666666667,448" d="M 164 448 L 608.6666666666667 448" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
         <g>
-          <rect x="343.9333333333334" y="428" width="84.8" height="16" rx="3" class="c-mask"/>
-          <text x="386.33333333333337" y="438" class="t-backend" font-size="9" text-anchor="middle">同步新版本基底</text>
+          <rect x="333.53333333333336" y="428" width="105.60000000000001" height="16" rx="3" class="c-mask"/>
+          <text x="386.33333333333337" y="438" class="t-backend" font-size="9" text-anchor="middle">同步新版本基础镜像</text>
         </g>
         <text x="176" y="466" class="t-dim" font-size="7">本版本已有的 variant 按记录重新派生</text>
         </g>
@@ -523,7 +523,7 @@ rect.c-bg-rect { fill: var(--bg); }
           <rect x="588.8666666666668" y="558" width="53.6" height="16" rx="3" class="c-mask"/>
           <text x="615.6666666666667" y="568" class="t-backend" font-size="9" text-anchor="middle">提交放行</text>
         </g>
-        <text x="405.33333333333337" y="596" class="t-dim" font-size="7">镜像标签含提交方本机的 CLI 版本，该成员仍解析到旧版本镜像</text>
+        <text x="405.33333333333337" y="596" class="t-dim" font-size="7">镜像标签含提交者本机的 CLI 版本，该成员仍解析到旧版本镜像</text>
         </g>
 
         <g data-edge-from="member" data-edge-to="backend" data-edge-label="升级后同样被拒" data-edge-key="7">
@@ -541,7 +541,7 @@ rect.c-bg-rect { fill: var(--bg); }
           <rect x="325.73333333333335" y="678" width="121.2" height="16" rx="3" class="c-mask"/>
           <text x="386.33333333333337" y="688" class="t-backend" font-size="9" text-anchor="middle">第 3 步：重推 variant</text>
         </g>
-        <text x="176" y="716" class="t-dim" font-size="7">部署方从新版本基底重建后推送；不可提前到部署之前</text>
+        <text x="176" y="716" class="t-dim" font-size="7">部署方从新版本基础镜像重建后推送；不可提前到部署之前</text>
         </g>
 
         <g data-edge-from="deployer" data-edge-to="backend" data-edge-label="提交与镜像命令恢复" data-edge-key="9">
@@ -573,7 +573,7 @@ rect.c-bg-rect { fill: var(--bg); }
         </g>
         <g data-graph-role="segment-label" data-segment-id="2">
           <rect x="56" y="478" width="211.6" height="18" rx="3" class="c-mask"/>
-          <text x="62" y="491" class="t-dim" font-size="9" font-weight="600">第 2 步之后 → 窗口二：仅拒已升级提交方</text>
+          <text x="62" y="491" class="t-dim" font-size="9" font-weight="600">第 2 步之后 → 窗口二：仅拒已升级提交者</text>
         </g>
         <g data-graph-role="segment-label" data-segment-id="3">
           <rect x="56" y="728" width="107.60000000000001" height="18" rx="3" class="c-mask"/>
@@ -648,4 +648,4 @@ rect.c-bg-rect { fill: var(--bg); }
           </g>
         </g>
       </svg>
-<!-- gherkai:source-sha256=3aa02f6d1bd3b5bc2a2e388af06c3e4f95d0083ac4dcd2ce979560a3361cec49 -->
+<!-- gherkai:source-sha256=7b11ec17bf0fa29a6b70ff2a6e5febc9dc80dd9d10591e25f51d655211116d9c -->

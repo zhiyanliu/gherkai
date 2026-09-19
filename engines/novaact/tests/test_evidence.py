@@ -1,6 +1,6 @@
 """step 级机读证据（evidence，ADR 0042 决策一/二/六）单测：映射 / 截图上界 / 目录键 / best-effort 钩子。
 
-纯 python：不连 AWS、不起浏览器、不解真 SDK。映射由**真产物裁成的 fixture** 钉住
+纯 python：不连 AWS、不起浏览器、不解真 SDK。映射由**真产物裁成的 fixture** 锁定
 （`fixtures/nova_*_traj.json` = 真 `_trajectory.json`，base64 图裁成短前缀）——SDK 格式漂移在升版后运行测试时变红
 （ADR 0042 决策六防线 2）。钩子侧注 fake nova + fake sink（与 test_run_step.py 同风格）。
 """
@@ -153,7 +153,7 @@ def test_no_thought_frames_yields_only_last_frame():
 
 def test_failed_act_candidates_are_last_frame_and_first_thought_only():
     # Nova 侧候选恒 ≤ 2（末帧 + 首个含 thought 帧；第三项「出错帧」无对应物：抛错 act 无 json、frame 无出错标记），
-    # 故 K=3 的截断分支在本引擎不可达——钉住候选集形状，候选若膨胀成「所有含 thought 帧」立刻变红。
+    # 故 K=3 的截断分支在本引擎不可达——锁定候选集形状，候选若膨胀成「所有含 thought 帧」立刻变红。
     picks = _picks("failed", [_synthetic(30, thought_at=tuple(range(30)))])
     assert picks == [(0, 29), (0, 0)]
     assert len(picks) <= ev.MAX_SHOTS_PER_ACT

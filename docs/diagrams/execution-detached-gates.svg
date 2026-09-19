@@ -415,7 +415,7 @@ svg[data-theme="light"] { --bg: #f8fafc; --grid: #e2e8f0; --text: #0f172a; --tex
 svg[data-theme="dark"] { --bg: #020617; --grid: #1e293b; --text: #ffffff; --text-muted: #94a3b8; --text-dim: #475569; --text-faint: #7d8da1; --panel: rgba(15, 23, 42, 0.5); --panel-border: #1e293b; --lane-fill: rgba(15, 23, 42, 0.22); --lane-stroke: #334155; --arrow: #64748b; --arrow-emphasis: #34d399; --mask: #0f172a; --frontend-fill: rgba(8, 51, 68, 0.4); --frontend-stroke: #22d3ee; --backend-fill: rgba(6, 78, 59, 0.4); --backend-stroke: #34d399; --database-fill: rgba(76, 29, 149, 0.4); --database-stroke: #a78bfa; --cloud-fill: rgba(120, 53, 15, 0.3); --cloud-stroke: #fbbf24; --security-fill: rgba(136, 19, 55, 0.4); --security-stroke: #fb7185; --messagebus-fill: rgba(251, 146, 60, 0.3); --messagebus-stroke: #fb923c; --external-fill: rgba(30, 41, 59, 0.5); --external-stroke: #94a3b8; --toolbar-bg: rgba(15, 23, 42, 0.8); --toolbar-border: #334155; --toolbar-text: #e2e8f0; --toolbar-hover: rgba(15, 23, 42, 0.95); --toolbar-menu-bg: #0f172a; }
 rect.c-bg-rect { fill: var(--bg); }
 </style><rect width="100%" height="100%" class="c-bg-rect"/>
-        <title id="archify-diagram-title">两道闸门：云端推进器为何不介入前台 run</title>
+        <title id="archify-diagram-title">两道拦截：云端推进器为何不介入前台 run</title>
         <desc id="archify-diagram-description">由 Archify 生成的工作流图。</desc>
         <!-- Definitions -->
         <defs>
@@ -468,10 +468,10 @@ rect.c-bg-rect { fill: var(--bg); }
 
 
         <!-- Edge paths -->
-        <path data-edge-from="judgeDetached" data-edge-to="blkAct" data-edge-label="不是后台批次" data-edge-key="0" data-edge-id="e-detached-blk" data-composition-points="400,269;400,465" d="M 400 269 L 400 465" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
+        <path data-edge-from="judgeDetached" data-edge-to="blkAct" data-edge-label="不是后台执行" data-edge-key="0" data-edge-id="e-detached-blk" data-composition-points="400,269;400,465" d="M 400 269 L 400 465" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
         <path data-edge-from="judgeDetached" data-edge-to="judgeSettled" data-edge-label="是 → 下一判点" data-edge-key="1" data-edge-id="e-detached-settled" data-composition-points="476,243;556.4,243" d="M 476 243 L 556.4 243" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        <path data-edge-from="judgeExit" data-edge-to="blkExit" data-edge-label="不是后台批次" data-edge-key="2" data-edge-id="e-exit-blk" data-composition-points="828.4,393;828.4,465" d="M 828.4 393 L 828.4 465" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
-        <path data-edge-from="judgeExit" data-edge-to="goExit" data-edge-label="是后台批次" data-edge-key="3" data-edge-id="e-exit-go" data-composition-points="916.4,367;982.4000000000001,367" d="M 916.4 367 L 982.4000000000001 367" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="judgeExit" data-edge-to="blkExit" data-edge-label="不是后台执行" data-edge-key="2" data-edge-id="e-exit-blk" data-composition-points="828.4,393;828.4,465" d="M 828.4 393 L 828.4 465" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
+        <path data-edge-from="judgeExit" data-edge-to="goExit" data-edge-label="是后台执行" data-edge-key="3" data-edge-id="e-exit-go" data-composition-points="916.4,367;982.4000000000001,367" d="M 916.4 367 L 982.4000000000001 367" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
         <path data-edge-from="srcNew" data-edge-to="blkKick" data-edge-label="不是后台 run" data-edge-key="4" data-edge-id="e-new-blk" data-composition-points="48,119;20,119;20,491;168,491" d="M 48 119 L 20 119 L 20 491 L 168 491" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
         <path data-edge-from="srcNew" data-edge-to="goKick" data-edge-label="是后台 run" data-edge-key="5" data-edge-id="e-new-go" data-composition-points="196,119;982.4000000000001,119" d="M 196 119 L 982.4000000000001 119" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
         <path data-edge-from="judgeSettled" data-edge-to="blkRewrite" data-edge-label="已结束" data-edge-key="6" data-edge-id="e-settled-blk" data-composition-points="644.4,269;644.4,465" d="M 644.4 269 L 644.4 465" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
@@ -500,15 +500,15 @@ rect.c-bg-rect { fill: var(--bg); }
           <text data-node-label="" x="1056.4" y="114" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">起首批 worker</text>
         </g>
 
-        <g id="node-judgeDetached" data-node-id="judgeDetached" data-node-label="是否后台批次" tabindex="0" role="button" aria-label="聚焦是否后台批次，事件不带此标记, 主推进路径 › 函数内判断：不通过即挡下" aria-pressed="false" data-node-kind="security" data-node-sublabel="事件不带此标记" data-node-context="主推进路径 › 函数内判断：不通过即挡下">
-          <title>是否后台批次 · 事件不带此标记 · 主推进路径 › 函数内判断：不通过即挡下</title>
+        <g id="node-judgeDetached" data-node-id="judgeDetached" data-node-label="是否后台执行" tabindex="0" role="button" aria-label="聚焦是否后台执行，事件不带此标记, 主推进路径 › 函数内判断：不通过即挡下" aria-pressed="false" data-node-kind="security" data-node-sublabel="事件不带此标记" data-node-context="主推进路径 › 函数内判断：不通过即挡下">
+          <title>是否后台执行 · 事件不带此标记 · 主推进路径 › 函数内判断：不通过即挡下</title>
           <rect x="324" y="217" width="152" height="52" rx="6" class="c-mask"/>
           <rect x="324" y="217" width="152" height="52" rx="6" class="c-security" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(330 223) scale(0.6875)">
             <path d="M8 2.2 13 4v3.5c0 3.1-1.8 5.4-5 6.5-3.2-1.1-5-3.4-5-6.5V4Z"/>
             <path d="m5.8 8 1.5 1.5 3-3"/>
           </g>
-          <text data-node-label="" x="400" y="238" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">是否后台批次</text>
+          <text data-node-label="" x="400" y="238" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">是否后台执行</text>
           <text x="400" y="255" class="t-muted" font-size="8" text-anchor="middle">事件不带此标记</text>
         </g>
 
@@ -605,21 +605,21 @@ rect.c-bg-rect { fill: var(--bg); }
         </g>
 
         <!-- Edge labels -->
-        <g data-edge-from="judgeDetached" data-edge-to="blkAct" data-edge-label="不是后台批次" data-edge-key="0" data-edge-id="e-detached-blk">
+        <g data-edge-from="judgeDetached" data-edge-to="blkAct" data-edge-label="不是后台执行" data-edge-key="0" data-edge-id="e-detached-blk">
           <rect x="366.2" y="349" width="67.6" height="14" rx="3" class="c-mask"/>
-          <text x="400" y="359" class="t-security" font-size="8" text-anchor="middle">不是后台批次</text>
+          <text x="400" y="359" class="t-security" font-size="8" text-anchor="middle">不是后台执行</text>
         </g>
         <g data-edge-from="judgeDetached" data-edge-to="judgeSettled" data-edge-label="是 → 下一判点" data-edge-key="1" data-edge-id="e-detached-settled">
           <rect x="480.00000000000006" y="223" width="72.4" height="14" rx="3" class="c-mask"/>
           <text x="516.2" y="233" class="t-backend" font-size="8" text-anchor="middle">是 → 下一判点</text>
         </g>
-        <g data-edge-from="judgeExit" data-edge-to="blkExit" data-edge-label="不是后台批次" data-edge-key="2" data-edge-id="e-exit-blk">
+        <g data-edge-from="judgeExit" data-edge-to="blkExit" data-edge-label="不是后台执行" data-edge-key="2" data-edge-id="e-exit-blk">
           <rect x="794.6" y="427" width="67.6" height="14" rx="3" class="c-mask"/>
-          <text x="828.4" y="437" class="t-security" font-size="8" text-anchor="middle">不是后台批次</text>
+          <text x="828.4" y="437" class="t-security" font-size="8" text-anchor="middle">不是后台执行</text>
         </g>
-        <g data-edge-from="judgeExit" data-edge-to="goExit" data-edge-label="是后台批次" data-edge-key="3" data-edge-id="e-exit-go">
+        <g data-edge-from="judgeExit" data-edge-to="goExit" data-edge-label="是后台执行" data-edge-key="3" data-edge-id="e-exit-go">
           <rect x="920.4000000000001" y="347" width="58" height="14" rx="3" class="c-mask"/>
-          <text x="949.4000000000001" y="357" class="t-muted" font-size="8" text-anchor="middle">是后台批次</text>
+          <text x="949.4000000000001" y="357" class="t-muted" font-size="8" text-anchor="middle">是后台执行</text>
         </g>
         <g data-edge-from="srcNew" data-edge-to="blkKick" data-edge-label="不是后台 run" data-edge-key="4" data-edge-id="e-new-blk">
           <rect x="60.2" y="471" width="67.6" height="14" rx="3" class="c-mask"/>
@@ -659,4 +659,4 @@ rect.c-bg-rect { fill: var(--bg); }
           </g>
         </g>
       </svg>
-<!-- gherkai:source-sha256=5b913a62edc0832bbfc7b6a0de4e0c1663a93d13674325b00e6b80fc92bc95c7 -->
+<!-- gherkai:source-sha256=1b8b33722c24e889fa680d851417e6446f0ee0db371e3c315917f88cefd401f5 -->

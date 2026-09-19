@@ -1,7 +1,7 @@
 """`push-worker` 八步 / `deploy` 三步 / 清理 pass / `list-workers` 测试（ADR 0038）。
 
 **证据边界**：AWS 侧全走 moto（SSM/ECS/ECR/DynamoDB），容器引擎走假替身 —— 验的是**编排**（步序、幂等查重、
-血缘 tags、退休与清理两道闸、SSM 记录形状）。**mock 不出来的两类**另处交代：容器引擎的真实行为在
+血缘 tags、退休与清理的两个前置条件、SSM 记录形状）。**mock 不出来的两类**另处交代：容器引擎的真实行为在
 `test_container.py` 的真 docker 那三条；真 ECR push / RunTask 拉起注册出来的 revision 需要真账号，本机无凭证、
 **未验**（ADR 0038「实测项」6 的后半段仍挂着）。
 
@@ -105,8 +105,8 @@ class FakeContainer:
     """容器引擎替身。**只有 push 过的 ref 才有 `repo_digests`**——照抄真 docker 的行为（见 container 模块头：
     本地 build 的镜像 `RepoDigests` 为空，这是「推送后才取 digest」的根据）。
 
-    `ghcr_noise=True` 时 post-push 的 `repo_digests` **第一条是 GHCR 的**（基底同步路径的真实形态），
-    用来把「取第一条」这种实现方式钉死在红。
+    `ghcr_noise=True` 时 post-push 的 `repo_digests` **第一条是 GHCR 的**（基础镜像同步路径的真实形态），
+    用来让「取第一条」这种实现方式必然测红。
     """
 
     def __init__(self, *, arch: str = "amd64", os_: str = "linux", exists: bool = True,
@@ -501,7 +501,7 @@ def test_cleanup_keeps_a_retired_revision_still_referenced_by_a_mapping(aws):
 
 
 def test_cleanup_keeps_when_a_pending_run_references_it(aws):
-    """运行中 run 安全阀：STATE 顶层 `worker_task_def_arns` 里有它 + run 未到终态 → 留着。
+    """运行中 run 引用检查：STATE 顶层 `worker_task_def_arns` 里有它 + run 未到终态 → 留着。
 
     detached run 逐 job 起 task，删早了剩余 job 全起不来。查法 = status GSI 的 Query + `contains` 过滤（不 Scan）。
     """
@@ -520,7 +520,7 @@ def test_cleanup_keeps_when_a_pending_run_references_it(aws):
 
 
 def test_cleanup_deletes_when_the_referencing_run_is_terminal(aws):
-    """同一份数据、run 已到终态（passed）→ GSI 上换了分区、安全阀不再拦。"""
+    """同一份数据、run 已到终态（passed）→ GSI 上换了分区、引用检查不再拦。"""
     seed_backend(aws)
     _push(aws, FakeContainer())
     arn = _mapping(aws, "novaact", "login")["revision_arn"]
@@ -554,7 +554,7 @@ def test_cleanup_skips_the_whole_pass_when_the_mappings_cannot_be_listed(aws):
     """读不全 `worker-image/*` 映射 → **整趟放弃**，不把所有 revision 判成孤儿。
 
     「读不全就当没有映射」会让每个在用 revision 都变成孤儿，而真实 ECS 的 `registeredAt` 是过去时刻——
-    静默期那道闸拦不住，等于批量误删运行中 run 手里的 revision。
+    静默期这一条拦不住，等于批量误删运行中 run 手里的 revision。
     """
     seed_backend(aws)
     _push(aws, FakeContainer())
@@ -659,7 +659,7 @@ def test_sync_base_pulls_ghcr_and_pushes_as_base(aws):
 
 
 def test_sync_base_skips_non_pure_release_but_deploy_continues(aws):
-    """dev 版（`.dev`/`.post`/本地段）**GHCR 上不存在对应基底** → 明确警告 + 跳过基底同步，第 3/4 步照常执行。
+    """dev 版（`.dev`/`.post`/本地段）**GHCR 上不存在对应基础镜像** → 明确警告 + 跳过基础镜像同步，第 3/4 步照常执行。
 
     判据复用 `compose.is_pure_release`（决策 2b：非纯净版本一定带 `+`/`.dev`）。硬失败会逼 contributor 绕过命令。
     """
@@ -683,7 +683,7 @@ def test_sync_base_pull_failure_points_at_the_half_published_state(aws):
     rc = workers.run_deploy_steps(prefix=PREFIX, version=VERSION, container=c, aws=aws, now=NOW, out=out)
     assert rc == 1, "cdk 已成功而后续步骤失败 → 退 1"
     # 断言用户能据以行动的两句：状态（stack 已生效）+ 重新运行哪个命令。
-    assert "拉不到基底" in text() and "半发布态" in text()  # sync_base 自己那条（不是四步兜底行）
+    assert "拉不到基础镜像" in text() and "半发布态" in text()  # sync_base 自己那条（不是四步兜底行）
     assert "stack 已生效" in text() and "gherkai deploy" in text()
 
 
@@ -839,7 +839,7 @@ def test_list_workers_is_blocked_by_skew(aws):
 def test_skew_gate_read_failure_exits_2_without_a_traceback(aws):
     """读戳失败（无凭证/无权限）→ 退 2 + 一句人话。
 
-    `compose.read_backend_version` 有意把这类异常抛给入口皮归码，**本模块就是那个皮**——实际运行踩过：
+    `compose.read_backend_version` 有意把这类异常抛给入口前端归码，**本模块就是那个前端**——实际运行踩过：
     没有凭证时 `gherkai deploy list-workers` 直接吐 botocore 的 `NoCredentialsError` 堆栈。
     """
     class _BrokenSsm:

@@ -1,9 +1,9 @@
 """`--capabilities` 自述入口单测（ADR 0036「5.」/ ADR 0024「引擎自报下限」，Nova 侧）。
 
 全部走**真子进程**：这条入口的契约恰好都在进程边界上——argv 分派（含「`--list-deterministic` 不再被
-识别」这条不留别名的红线）、`NOVA_ACT_TIMEOUT_S` / `NOVA_GRACE_MARGIN_S` / `NOVA_MODEL_ID` 三个 env 旋钮
+识别」这条不留别名的红线）、`NOVA_ACT_TIMEOUT_S` / `NOVA_GRACE_MARGIN_S` / `NOVA_MODEL_ID` 三个 env 配置项
 在 import 期读、stdout 只此一个 JSON 对象、不读 stdin、不建会话。in-process 调 `_capabilities()` 证不到
-这些（env 已在 import 期定型、argv/stdin/AWS 更碰不到）；尤其 env 旋钮的缺省值——本进程继承的 env 里若
+这些（env 已在 import 期定型、argv/stdin/AWS 更碰不到）；尤其 env 配置项的缺省值——本进程继承的 env 里若
 设过同名变量，in-process 断言就是假绿。
 
 运行（从 repo 根）：uv run pytest -q engines/novaact/tests/test_capabilities.py
@@ -52,12 +52,12 @@ def test_capabilities_shape_and_min_grace_from_injected_act_timeout():
     assert isinstance(steps, list) and steps, caps
     assert all(set(e) == {"pattern", "description", "example"} for e in steps), steps
     assert all(e["pattern"] and e["description"] and e["example"] for e in steps), steps
-    assert any("页面地址" in e["pattern"] for e in steps), steps  # 脚手架注册的真锚点在表里
+    assert any("页面地址" in e["pattern"] for e in steps), steps  # 脚手架注册的真 step 在表里
     assert isinstance(caps["model_id"], str) and caps["model_id"], caps  # 组合根按「非空字符串」校验这一位
 
 
 def test_model_id_defaults_to_pinned_ga_version():
-    """不设 `NOVA_MODEL_ID` 时自报**钉死的 GA 版本 id，不是 `nova-act-latest` 别名**。
+    """不设 `NOVA_MODEL_ID` 时自报**锁定的 GA 版本 id，不是 `nova-act-latest` 别名**。
 
     这是 ADR 0004「模型版本选择策略」的红线：别名意味着 AWS 发新 GA 时静默换模型，而 pass / fail 靠 AI
     投票、换模型就换判定。字面量写在这里是**故意的闸门**——真要升 GA 就得连这条一起改，即「改常量 +
@@ -70,7 +70,7 @@ def test_model_id_defaults_to_pinned_ga_version():
 
 
 def test_model_id_follows_env_override():
-    """`NOVA_MODEL_ID` 真穿到自述（opt-in 旋钮，ADR 0004「模型版本选择策略」）：`doctor` 据此显示当前模型，
+    """`NOVA_MODEL_ID` 真穿到自述（opt-in 配置项，ADR 0004「模型版本选择策略」）：`doctor` 据此显示当前模型，
     写入了 env 的机器一眼可见。
 
     取值用 `nova-act-preview` 别名——试新模型只有别名一条路（服务端拒绝直接引用带日期的 preview id）。
@@ -84,7 +84,7 @@ def test_model_id_follows_env_override():
 
 
 def test_min_grace_tracks_both_env_knobs():
-    """两个旋钮都真参与（不是硬编码的 150）：act timeout 与 margin 各覆盖一次，结果按和变。"""
+    """两个配置项都真参与（不是硬编码的 150）：act timeout 与 margin 各覆盖一次，结果按和变。"""
     proc = subprocess.run(_CMD, capture_output=True, timeout=60,
                           env=_clean_env(NOVA_ACT_TIMEOUT_S="7", NOVA_GRACE_MARGIN_S="11"))
     assert proc.returncode == 0, proc.stderr.decode()[-500:]

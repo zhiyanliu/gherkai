@@ -15,7 +15,7 @@ task 时用的是 revision（不可变快照），故重推同名 variant 不会
 - **digest 只在推送后取，且要按仓库挑**：见 `container` 模块头两条事实。
 - **幂等 = 每步先查再做**：`RegisterTaskDefinition` 不幂等，故以（模板 ARN、digest）二元组查重、孤儿 revision
   按血缘 tags 复用；SSM 写是覆盖语义；ECR push 同 digest 天然无操作。中断后重新运行收敛，不堆垃圾 revision。
-- **删 revision 前有两道闸**：退休满 `RETIRE_QUIET_PERIOD` + 无未到终态的 run 引用（`cleanup_pass`）。
+- **删 revision 前有两个前置条件**：退休满 `RETIRE_QUIET_PERIOD` + 无未到终态的 run 引用（`cleanup_pass`）。
   `DeregisterTaskDefinition` 让 revision 再也起不了新 task（且注销后最多 10 分钟才生效），detached run 逐 job
   起 task——删早了剩余 job 全起不来（ADR 0038 被拒方案「重派生/重推后立即删旧 revision」）。
 
@@ -40,10 +40,10 @@ EXIT_OK = 0
 EXIT_FAILED = 1        # cdk 成功、四步失败（账户已被改动，见模块头「退出码」）
 EXIT_PRECONDITION = 2  # 用户可修的前置/校验失败
 
-# 基底同步进 ECR 的那份固定叫 `base`（ADR 0038「概念模型」），也是默认指针的初始值。
+# 基础镜像同步进 ECR 的那份固定叫 `base`（ADR 0038「概念模型」），也是默认指针的初始值。
 BASE_VARIANT = "base"
-# 维护者 CI 发布的基底镜像（ADR 0037 决策 5；`<engine>` + `:<版本>`）。**运行时不直接拉它**——task-def 只指
-# 使用方自己账号的 ECR（被拒方案「task-def 指向 GHCR 直接拉基底」），这里只在 deploy 的基底同步里 pull 一次。
+# 维护者 CI 发布的基础镜像（ADR 0037 决策 5；`<engine>` + `:<版本>`）。**运行时不直接拉它**——task-def 只指
+# 使用方自己账号的 ECR（被拒方案「task-def 指向 GHCR 直接拉基础镜像」），这里只在 deploy 的基础镜像同步里 pull 一次。
 GHCR_BASE_IMAGE = "ghcr.io/zhiyanliu/gherkai-worker-{engine}"
 
 # 退休静默期（ADR 0038「清理 pass」）：覆盖「提交侧 preflight 刚解析成某 revision、definition 尚未落库」的窗口
@@ -335,7 +335,7 @@ def _register_revision(ecs, *, template_arn: str, engine: str, image_ref: str, d
 
 
 def _retire(ecs, arn: str, *, now: datetime, out) -> bool:
-    """给被替换的旧 revision 打 `gherkai:retired-at`（**本次不删**，删归清理 pass 的两道闸）。
+    """给被替换的旧 revision 打 `gherkai:retired-at`（**本次不删**，删归清理 pass 的那两个前置条件）。
 
     打不上（revision 已被删/无权限）→ 警告不拦：映射已经指向新 revision，旧的下一次 pass 会以**孤儿**
     身份（不在任何映射里 + 带血缘 tags）被同样处置，退休时刻取其 `registeredAt`。
@@ -350,13 +350,13 @@ def _retire(ecs, arn: str, *, now: datetime, out) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# 清理 pass（ADR 0038「不变量·清理 pass」）：静默期 + 运行中 run 安全阀，机会式、无定时任务
+# 清理 pass（ADR 0038「不变量·清理 pass」）：静默期 + 运行中 run 引用检查，机会式、无定时任务
 # ---------------------------------------------------------------------------
 
 @dataclass(frozen=True)
 class CleanupOutcome:
     """一次 pass 的结果：删掉的 revision + 留到下次的（ARN、原因）。**生产调用点（push-worker / deploy 末步）
-    只看 pass 自己打的输出、丢弃本返回值**；它存在是为让测试直接断言两道闸（静默期 + 运行中 run 引用）的判定，
+    只看 pass 自己打的输出、丢弃本返回值**；它存在是为让测试直接断言这两个前置条件（静默期 + 运行中 run 引用）的判定，
     不必去解析打印文本。`list-workers` 不走这里——它是只读命令，待清理/孤儿由 `_pending_cleanup` 现扫 family
     产出机读行、文本渲染在 `list_workers`（ADR 0038：清理 pass 机会式、由 push-worker/deploy 触发，无定时任务）。
     """
@@ -368,7 +368,7 @@ class CleanupOutcome:
 def _non_terminal_statuses() -> list[str]:
     """未到终态的 run 级 status 全集（`Status` - `TERMINAL_STATUSES`，至少含 `pending`）。
 
-    **从 core 的枚举派生、不在此写死名单**：新增前置态时（ADR 0031 的 `_PRE_TERMINAL` 是那处的真源）安全阀
+    **从 core 的枚举派生、不在此写死名单**：新增前置态时（ADR 0031 的 `_PRE_TERMINAL` 是那处的真源）引用检查
     自动覆盖；写死会让新态的 run 被清理误判成「没人引用」。`gherkai_core` 经 `gherkai-runtime` 的 `==` 同版本 pin
     传递可用（ADR 0037 决策 2b）。
     """
@@ -417,13 +417,13 @@ def cleanup_pass(*, prefix: str, engines, ssm, ecs, ddb, now: datetime, out=prin
     - **孤儿**：带血缘 tags、ACTIVE、却不在 SSM **任何版本**的 `worker-image/*` 映射里 —— 覆盖「上次中断在
       注册与写 SSM 之间」与「两人并发推同名 variant，先写者的映射被顶掉」。退休时刻取其 `registeredAt`。
       **旧版本 variant 的 revision 仍在映射里、不是孤儿**（其回收归 `delete-worker`）。
-    删的两道闸：退休满 `RETIRE_QUIET_PERIOD` **且** 无未到终态的 run 引用；任一不满足 → 留到下次 pass
+    删的两个前置条件：退休满 `RETIRE_QUIET_PERIOD` **且** 无未到终态的 run 引用；任一不满足 → 留到下次 pass
     （长期无人 push/deploy 时会滞留，无害：ACTIVE 但无人引用）。
 
     **不抛**：清理是收尾动作，失败不该把一次成功的 push/deploy 变成失败（打警告、留给下次 pass）。
     """
     # **枚举映射失败就整趟放弃**（不是「当作没有映射继续」）：孤儿判据是「不在任何映射里」，读不全映射会把
-    # 别人在用的 revision 全判成孤儿；真实 ECS 的 `registeredAt` 是过去时刻，静默期这道闸拦不住它们。
+    # 别人在用的 revision 全判成孤儿；真实 ECS 的 `registeredAt` 是过去时刻，静默期这一条拦不住它们。
     # 少执行一次机会式 pass 无害（滞留的 revision ACTIVE 但无人引用），错删运行中 run 的 revision 是事故。
     try:
         referenced_by_ssm = {m for _e, _t, raw in _iter_image_params(ssm, prefix)
@@ -446,7 +446,7 @@ def cleanup_pass(*, prefix: str, engines, ssm, ecs, ddb, now: datetime, out=prin
             retired_at, reason = rev.retired_at, "已退休"
             if retired_at is not None and rev.arn in referenced_by_ssm:
                 # 退休 tag 只说明「某次替换判它下岗」；若任何版本的某个映射仍指着它（历史上曾被另一 variant 共用），
-                # 删了就让那条映射悬空——留着，直到映射也不再引用。**安全阀之一，与运行中 run 引用并列。**
+                # 删了就让那条映射悬空——留着，直到映射也不再引用。**前置条件之一，与运行中 run 引用并列。**
                 kept.append((rev.arn, "已退休，但仍被某个 worker-image 映射引用"))
                 continue
             if retired_at is None:
@@ -477,7 +477,7 @@ def _mapped_arn(raw: str):
     """映射 JSON → 它引用的 revision ARN（读不懂 → 不产出）。
 
     **读不懂时产出空** 有安全含义：那条映射保护不了它的 revision，于是该 revision 会被判成孤儿。可接受——
-    映射由本模块写、格式坏掉说明有人手改过 SSM；而静默期 + 运行中 run 安全阀仍然拦着。
+    映射由本模块写、格式坏掉说明有人手改过 SSM；而静默期 + 运行中 run 引用检查仍然拦着。
     """
     try:
         data = json.loads(raw)
@@ -502,7 +502,7 @@ def _short_arn(arn: str) -> str:
 
 @dataclass(frozen=True)
 class PushOutcome:
-    """一次「推一个引擎的一个 variant」的结果（deploy 的基底同步复用同一条路径、同一个结果类型）。
+    """一次「推一个引擎的一个 variant」的结果（deploy 的基础镜像同步复用同一条路径、同一个结果类型）。
 
     **不带 `template_arn`**（同 `gherkai_runtime.compose.WorkerResolution` 的取舍）：消费侧无人读，
     「从哪个模板派生」由 `gherkai deploy list-workers` 从 SSM/血缘 tags 直读展示。
@@ -568,7 +568,7 @@ def _template_arn(aws: Aws, *, prefix: str, engine: str) -> str:
 
 def _push_one(image: str, *, engine: str, variant: str, prefix: str, version: str,
               container, aws: Aws, now: datetime, out) -> PushOutcome:
-    """ADR 0038「push-worker 流程」步 2-8 的实现（步 1 的版本 skew 前置在 `push_worker` 里；deploy 的基底同步
+    """ADR 0038「push-worker 流程」步 2-8 的实现（步 1 的版本 skew 前置在 `push_worker` 里；deploy 的基础镜像同步
     与重派生共用本函数 / `_register_revision`，故这里**不做**任何 skew 判断）。"""
     try:
         tag = names.image_tag(version, variant)
@@ -717,8 +717,8 @@ def _skew_gate(compose, *, prefix: str, cli_version: str | None, ssm, out) -> in
     try:
         verdict, message, stamp = compose.check_backend_skew(prefix=prefix, cli_version=cli_version, ssm=ssm)
     except Exception as exc:
-        # 读戳失败（凭证/权限/region/网络）——`read_backend_version` 有意把这类异常抛给入口皮归码，
-        # 本模块就是那个皮：归到「前置失败」这一档、不抛 traceback（同 `cli._guard_vpc_spec` 的口径）。
+        # 读戳失败（凭证/权限/region/网络）——`read_backend_version` 有意把这类异常抛给入口前端归码，
+        # 本模块就是那个前端：归到「前置失败」这一档、不抛 traceback（同 `cli._guard_vpc_spec` 的口径）。
         out(f"读不到后端版本戳（SSM {names.ssm_path(prefix, names.BACKEND_VERSION_KEY)}）：{exc}\n"
             f"需要可用的凭证与 region（--region / AWS_REGION / --profile），以及 ssm:GetParameter 权限。")
         return EXIT_PRECONDITION
@@ -757,29 +757,29 @@ def _set_default(aws: Aws, *, prefix: str, variant: str, version: str, engine: s
 # ---------------------------------------------------------------------------
 
 def sync_base(*, prefix: str, engines, version: str, container, aws: Aws, now: datetime, out) -> list[PushOutcome]:
-    """第 2 步：从 GHCR 拉当前版本基底、走 push-worker 同一条内部路径推成 `<版本>-base`。
+    """第 2 步：从 GHCR 拉当前版本基础镜像、走 push-worker 同一条内部路径推成 `<版本>-base`。
 
-    **非纯发行版（`.dev`/`.post`/本地段）没有 GHCR 基底**——那些版本由 tag 之后的 commit 派生、不可能发布
+    **非纯发行版（`.dev`/`.post`/本地段）没有 GHCR 基础镜像**——那些版本由 tag 之后的 commit 派生、不可能发布
     （ADR 0037 决策 2b），拉必然失败。此时打一条明确警告、**跳过本步继续第 3/4 步**：contributor 在自己的 dev
     树上部署是正常用法，把 deploy 变成硬失败会逼他们绕过命令手工推。
     """
     from gherkai_runtime import compose
 
     if not compose.is_pure_release(version):
-        out(f"警告：CLI 版本 {version} 不是纯发行版（含 .dev/.post/本地段）——GHCR 上不存在对应基底镜像，"
-            f"跳过基底同步。\n"
+        out(f"警告：CLI 版本 {version} 不是纯发行版（含 .dev/.post/本地段）——GHCR 上不存在对应基础镜像，"
+            f"跳过基础镜像同步。\n"
             f"     dev 版要能运行：本地 build 一份镜像后 `gherkai deploy push-worker <镜像> --engine <e> "
             f"--variant base`（默认指针已初始化为 base）。")
         return []
     results = []
     for engine in engines:
         ref = f"{GHCR_BASE_IMAGE.format(engine=engine)}:{version}"
-        out(f"\n== 基底同步 {engine}：{ref} ==")
+        out(f"\n== 基础镜像同步 {engine}：{ref} ==")
         try:
             container.pull(ref, platform="linux/amd64")
         except ContainerError as exc:
             raise WorkerCommandError(
-                f"{exc}\n拉不到基底 {ref}：PyPI 已发、镜像还没发完的半发布态是已知情形——"
+                f"{exc}\n拉不到基础镜像 {ref}：PyPI 已发、镜像还没发完的半发布态是已知情形——"
                 f"等镜像发布完成后再 `gherkai deploy`（幂等收敛）。"
             ) from exc
         results.append(_push_one(ref, engine=engine, variant=BASE_VARIANT, prefix=prefix, version=version,
@@ -795,7 +795,7 @@ def init_default_pointer(*, prefix: str, aws: Aws, out) -> str:
         out(f"已保留默认 worker 镜像 variant `{current}`（部署不改动已有的默认设置）")
         return current
     _put_ssm(aws.ssm, names.ssm_path(prefix, names.WORKER_DEFAULT_KEY), BASE_VARIANT)
-    out(f"默认 worker 镜像 variant 初始化为 `{BASE_VARIANT}`（官方基底镜像，未定制）")
+    out(f"默认 worker 镜像 variant 初始化为 `{BASE_VARIANT}`（官方基础镜像，未定制）")
     return BASE_VARIANT
 
 
@@ -868,13 +868,13 @@ def run_deploy_steps(*, prefix: str, version: str, container, engines=None, regi
     now = now or datetime.now(timezone.utc)
     engines = tuple(engines or names.ENGINES)
 
-    # 容器引擎只有第 2 步（同步基底 pull/push）用；非纯发行版本步会整步跳过（见 `sync_base`），此时不探活——
+    # 容器引擎只有第 2 步（同步基础镜像 pull/push）用；非纯发行版本步会整步跳过（见 `sync_base`），此时不探活——
     # contributor 在没装 docker 的机器上 deploy dev 版，第 3/4 步照样收敛，不为用不到的东西退 1。
     # （纯发行版则 deploy 的机器必须有容器引擎；「免容器引擎的 registry 直拷」是 ADR 0038 重议闸门里的加法。）
     if compose.is_pure_release(version):
         probe = container.probe()
         if probe:
-            out(f"{probe}\nstack 已生效，但同步基底镜像要 pull/push——deploy 的机器需要容器引擎。\n"
+            out(f"{probe}\nstack 已生效，但同步基础镜像要 pull/push——deploy 的机器需要容器引擎。\n"
                 f"装好后重新运行 `gherkai deploy`（幂等收敛，不会重复注册）。")
             return EXIT_FAILED
     try:
@@ -937,7 +937,7 @@ def list_workers(*, prefix: str, cli_version: str | None, engines=None, region=N
         out(f"\n== {engine}（family {info['family']}，ECR repo {info['ecr_repo']}）==")
         variants = info["variants"]
         if not variants:
-            out("  （本版本还没有任何 variant——`gherkai deploy` 会同步基底，或 push-worker 推一个）")
+            out("  （本版本还没有任何 variant——`gherkai deploy` 会同步基础镜像，或 push-worker 推一个）")
         else:
             tag_w = max(28, max(len(v["tag"]) for v in variants) + 2)  # dev 版 tag 很长，列宽随内容
             out("  " + _cell("variant", 16) + _cell("tag", tag_w) + _cell("digest", 20)

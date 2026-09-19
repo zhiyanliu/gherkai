@@ -281,7 +281,7 @@ def test_projection_without_baseline_keeps_stored_lineage(run_store):
 def test_projection_with_unknown_scope_is_ignored_not_invented(run_store):
     """投影带一个 definition 外的 scope（不该发生：project 只吐 meta.jobs 的键）→ 两 adapter 都**不臆造** job、不抛：
     local 跳过、DDB 经 attribute_exists 走 CCF 跳过（曾整 entry SET 会补建，改逐属性后父路径不存在会 ValidationException
-    穿出、整 tick 失败——收敛成同一语义并钉住）。"""
+    穿出、整 tick 失败——收敛成同一语义并锁定）。"""
     meta = _meta()
     run_store.create_run(meta, _initial(meta, hwm=0))
     projected = RunState(run_id="run-1", status=Status.RUNNING,

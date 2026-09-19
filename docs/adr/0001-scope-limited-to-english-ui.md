@@ -11,7 +11,7 @@
 
 ## 为什么这样划（按证据强度排）
 
-1. **支持契约（Nova Act 独有，最硬）**：AWS 对 Nova Act 的语言声明只有一句「Note: Nova Act supports English.」（GitHub repo README 的 *Pre-requisites* 节，与 OS/Python 版本并列；2026-09-09 复核措辞未变）。非英文落在 AWS 声明的支持范围之外：模型迭代若在非英文上退化，我们没有立场主张 AWS 有义务修。Midscene 的大脑是 Bedrock 上的 Qwen3-VL（[0003](./0003-midscene-grounding-qwen3vl-bedrock.md)），多语种模型、无此声明。
+1. **支持契约（Nova Act 独有，最硬）**：AWS 对 Nova Act 的语言声明只有一句「Note: Nova Act supports English.」（GitHub repo README 的 *Pre-requisites* 节，与 OS/Python 版本并列；2026-09-09 复核措辞未变）。非英文落在 AWS 声明的支持范围之外：模型迭代若在非英文上退化，我们没有立场主张 AWS 有义务修。Midscene 的引擎模型是 Bedrock 上的 Qwen3-VL（[0003](./0003-midscene-grounding-qwen3vl-bedrock.md)），多语种模型、无此声明。
 2. **实测（两引擎都有）**：Midscene 在中文 UI 上直白断言 120 票一致且正确（另有边缘题 5 票 3/5 抖动，见下）；Nova Act 的中文词语包含类断言 0/45 系统性假阴性。**功能性可跑 ≠ 同等可靠**（[CLAUDE.md](../../CLAUDE.md)「绿≠对」的分流判据）——Nova 的中文动作能跑，断言不可靠。
 3. **AI 断言的语义面**：`Then` 走 AI 判定（[0014](./0014-ai-first-assertions.md)/[0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md)），断言文本与页面文本的语言组合会放大抖动面。中文实测显示这条对 Midscene 的直白断言不成立（零抖动），只在刻意刁难的边缘题上出现（见下「边缘题」）。
 
@@ -19,7 +19,7 @@
 
 **官方声明的边界**：Nova Act 那句是**无 "only"、无宾语**的肯定式支持声明——未界定管的是 `act()` 指令语言还是被测 UI 语言，且**不在** README 的 *Known limitations* 节（该节列的是：不能操作非浏览器应用、不能操作浏览器窗口/模态框、屏幕分辨率范围）。逐个核对 AWS User Guide 全部页面、AI Service Card、repo FAQ、boto3 API reference、产品页：**零处**语言约束，API 无 language/locale 参数；SDK 源码无 `English` 字样、`act()` 无语言校验、浏览器 context 不设 locale/Accept-Language（不强制英文环境）。对照旁证：同族 Canvas/Reel 明写 "Supported Languages: English"、Sonic 列举五种语言——**AWS 要约束语言时会发正式语言表，Nova Act 没有**。故「supports English」应读作"声明/测试/支持的范围"，非"非英文会被拒绝"。
 
-**视觉定位的语言弱项属大脑、不属框架**：Midscene 官方把「非拉丁文字/小字定位偏弱」列为 **GPT-5 系的 per-model 注意事项**（原文 "GPT-5 may still struggle with non-Latin text and with text that is too small in the image."），Qwen 各行无此警告——与 [0002](./0002-midscene-not-driven-by-gpt55.md) 排除 GPT-5.5 的理由同源。故换大脑即换该弱项（[0003](./0003-midscene-grounding-qwen3vl-bedrock.md) 现用 Qwen3-VL）。
+**视觉定位的语言弱项属引擎模型、不属框架**：Midscene 官方把「非拉丁文字/小字定位偏弱」列为 **GPT-5 系的 per-model 注意事项**（原文 "GPT-5 may still struggle with non-Latin text and with text that is too small in the image."），Qwen 各行无此警告——与 [0002](./0002-midscene-not-driven-by-gpt55.md) 排除 GPT-5.5 的理由同源。故换引擎模型即换该弱项（[0003](./0003-midscene-grounding-qwen3vl-bedrock.md) 现用 Qwen3-VL）。
 
 **中文 UI 首次实测**（纯中文页面 + 中文 step，经隧道打本机应用，[0035](./0035-local-app-testing-via-tunnel.md)）：
 
@@ -30,7 +30,7 @@
 
 Nova 的失败形态**不是读不出中文**：动作步的推理明确读出「提交订单」「取消」两个中文按钮并区分、还主动确认结果文本「订单提交成功」已显示；紧接着的 `act_get` 布尔断言在同一页面却判定"看不到该文本"→ false。另见形近字错读（「格希凯」读成「格希列」）。
 
-**中文 UI 量化实测**（2026-09-09，cloud 档、v1.4.0 基底镜像；夹具 = `features/wikipedia_zh.feature`：zh.wikipedia.org 首页 → 中文搜索「人工智能」→ 三条中文 AI 断言，两引擎步骤完全相同；`--assertion-votes 10`、独立跑 3 次）：
+**中文 UI 量化实测**（2026-09-09，cloud 档、v1.4.0 基础镜像；夹具 = `features/wikipedia_zh.feature`：zh.wikipedia.org 首页 → 中文搜索「人工智能」→ 三条中文 AI 断言，两引擎步骤完全相同；`--assertion-votes 10`、独立跑 3 次）：
 
 | 断言（页面事实） | Midscene | Nova Act |
 |---|---|---|
@@ -60,10 +60,10 @@ Nova 的失败形态**不是读不出中文**：动作步的推理明确读出�
 ## Nova Act 解除英文限定的条件（重议闸门）
 
 - AWS 语言声明变更（发正式语言表含目标语言），**或** 模型迭代后用 `features/wikipedia_zh.feature` 以 `--assertion-votes 10` 独立跑 3 次，「词条首段提到了计算机或机器」≥ 9/10 且三次一致——两者任一成立即修订本 ADR，无需另立取代 ADR。
-- 视觉定位成为瓶颈时换大脑——**不需重设计架构**：使用方本机经 env `MIDSCENE_MODEL_ID` 即可换（[0044](./0044-engine-model-selection-and-override.md)）；换默认 = 改 worker 侧 `DEFAULT_MODEL` 常量 + 改 IaC 里 `bedrock:InvokeModel` 的模型 ARN pin 并重新部署（[0003](./0003-midscene-grounding-qwen3vl-bedrock.md)「待观察（上游代际）」段同口径），受 [0009](./0009-maximize-aws-hard-constraint.md)「AWS 内托管」约束限于 Bedrock 可用且 Midscene 有 family 的模型。
+- 视觉定位成为瓶颈时换引擎模型——**不需重设计架构**：使用方本机经 env `MIDSCENE_MODEL_ID` 即可换（[0044](./0044-engine-model-selection-and-override.md)）；换默认 = 改 worker 侧 `DEFAULT_MODEL` 常量 + 改 IaC 里 `bedrock:InvokeModel` 的模型 ARN pin 并重新部署（[0003](./0003-midscene-grounding-qwen3vl-bedrock.md)「待观察（上游代际）」段同口径），受 [0009](./0009-maximize-aws-hard-constraint.md)「AWS 内托管」约束限于 Bedrock 可用且 Midscene 有 family 的模型。
 
 ## 影响
 
 - README 架构速览的范围句与「怎么写 `.feature`」节按引擎写语言支持与路由建议；两个引擎包的 README 各带一句语言支持说明（使用者向、不带本 ADR 编号）；随 CLI 发行的 agent skill 在 `references/engines.md` 同承载这条口径、诊断规则与三条出路（同为使用者面，[0043](./0043-agent-skill-for-driving-gherkai.md)）。
-- CONTEXT.md「骨架验证用例」词条：选站标准去掉「英文」，英文与中文探针各一组。
-- `features/wikipedia_zh.feature` 是本 ADR 的测量夹具与重议闸门的复测入口，与英文探针同构、不进日常 QA 流。
+- CONTEXT.md「探针用例」词条：选站标准去掉「英文」，英文与中文探针用例各一组。
+- `features/wikipedia_zh.feature` 是本 ADR 的测量夹具与重议闸门的复测入口，与英文探针用例同构、不进日常 QA 流。

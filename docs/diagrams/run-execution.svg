@@ -444,7 +444,7 @@ rect.c-bg-rect { fill: var(--bg); }
         <text x="54" y="74" class="t-dim" font-size="10" font-weight="600">01 / 本机档（local）</text>
 
         <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-1" x="40" y="176" width="1082" height="104" rx="10" class="c-lane" stroke-width="1"/>
-        <text x="54" y="198" class="t-dim" font-size="10" font-weight="600">02 / 同一份 core（四种跑法共用）</text>
+        <text x="54" y="198" class="t-dim" font-size="10" font-weight="600">02 / 同一份 core（四种组合共用）</text>
 
         <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-2" x="40" y="300" width="1082" height="104" rx="10" class="c-lane" stroke-width="1"/>
         <text x="54" y="322" class="t-dim" font-size="10" font-weight="600">03 / 无状态推一步</text>
@@ -511,15 +511,15 @@ rect.c-bg-rect { fill: var(--bg); }
           <text x="614.4" y="131" class="t-muted" font-size="8" text-anchor="middle">子进程</text>
         </g>
 
-        <g id="node-pipeLocal" data-node-id="pipeLocal" data-node-label="事件管道" tabindex="0" role="button" aria-label="聚焦事件管道，专用通道，不落盘, 本机档（local） › 驱动循环：每批事件推进一步" aria-pressed="false" data-node-kind="database" data-node-sublabel="专用通道，不落盘" data-node-context="本机档（local） › 驱动循环：每批事件推进一步">
-          <title>事件管道 · 专用通道，不落盘 · 本机档（local） › 驱动循环：每批事件推进一步</title>
+        <g id="node-pipeLocal" data-node-id="pipeLocal" data-node-label="事件通道" tabindex="0" role="button" aria-label="聚焦事件通道，专用通道，不落盘, 本机档（local） › 驱动循环：每批事件推进一步" aria-pressed="false" data-node-kind="database" data-node-sublabel="专用通道，不落盘" data-node-context="本机档（local） › 驱动循环：每批事件推进一步">
+          <title>事件通道 · 专用通道，不落盘 · 本机档（local） › 驱动循环：每批事件推进一步</title>
           <rect x="738.8" y="93" width="140" height="52" rx="6" class="c-mask"/>
           <rect x="738.8" y="93" width="140" height="52" rx="6" class="c-database" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(744.8 99) scale(0.6875)">
             <ellipse cx="8" cy="4" rx="5" ry="2"/>
             <path d="M3 4v8c0 1.1 2.2 2 5 2s5-.9 5-2V4M3 8c0 1.1 2.2 2 5 2s5-.9 5-2"/>
           </g>
-          <text data-node-label="" x="808.8" y="114" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">事件管道</text>
+          <text data-node-label="" x="808.8" y="114" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">事件通道</text>
           <text x="808.8" y="131" class="t-muted" font-size="8" text-anchor="middle">专用通道，不落盘</text>
         </g>
 
@@ -535,8 +535,8 @@ rect.c-bg-rect { fill: var(--bg); }
           <text x="1043.6" y="131" class="t-muted" font-size="8" text-anchor="middle">旁路原样落库</text>
         </g>
 
-        <g id="node-entry" data-node-id="entry" data-node-label="命令入口" tabindex="0" role="button" aria-label="聚焦命令入口，解析 · 分组 · 落定义, 同一份 core（四种跑法共用） › 入口与承载进程" aria-pressed="false" data-node-kind="frontend" data-node-sublabel="解析 · 分组 · 落定义" data-node-context="同一份 core（四种跑法共用） › 入口与承载进程">
-          <title>命令入口 · 解析 · 分组 · 落定义 · 同一份 core（四种跑法共用） › 入口与承载进程</title>
+        <g id="node-entry" data-node-id="entry" data-node-label="命令入口" tabindex="0" role="button" aria-label="聚焦命令入口，解析 · 分组 · 落定义, 同一份 core（四种组合共用） › 入口与承载进程" aria-pressed="false" data-node-kind="frontend" data-node-sublabel="解析 · 分组 · 落定义" data-node-context="同一份 core（四种组合共用） › 入口与承载进程">
+          <title>命令入口 · 解析 · 分组 · 落定义 · 同一份 core（四种组合共用） › 入口与承载进程</title>
           <rect x="48" y="217" width="140" height="52" rx="6" class="c-mask"/>
           <rect x="48" y="217" width="140" height="52" rx="6" class="c-frontend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="frontend" class="semantic-sigil s-frontend" transform="translate(54 223) scale(0.6875)">
@@ -549,8 +549,8 @@ rect.c-bg-rect { fill: var(--bg); }
           <text x="118" y="255" class="t-muted" font-size="8" text-anchor="middle">解析 · 分组 · 落定义</text>
         </g>
 
-        <g id="node-foreLoop" data-node-id="foreLoop" data-node-label="前台在线循环" tabindex="0" role="button" aria-label="聚焦前台在线循环，全程在线接收, 同一份 core（四种跑法共用） › 驱动循环：每批事件推进一步" aria-pressed="false" data-node-kind="backend" data-node-sublabel="全程在线接收" data-node-context="同一份 core（四种跑法共用） › 驱动循环：每批事件推进一步">
-          <title>前台在线循环 · 全程在线接收 · 同一份 core（四种跑法共用） › 驱动循环：每批事件推进一步</title>
+        <g id="node-foreLoop" data-node-id="foreLoop" data-node-label="前台在线循环" tabindex="0" role="button" aria-label="聚焦前台在线循环，全程在线接收, 同一份 core（四种组合共用） › 驱动循环：每批事件推进一步" aria-pressed="false" data-node-kind="backend" data-node-sublabel="全程在线接收" data-node-context="同一份 core（四种组合共用） › 驱动循环：每批事件推进一步">
+          <title>前台在线循环 · 全程在线接收 · 同一份 core（四种组合共用） › 驱动循环：每批事件推进一步</title>
           <rect x="226" y="217" width="140" height="52" rx="6" class="c-mask"/>
           <rect x="226" y="217" width="140" height="52" rx="6" class="c-backend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(232 223) scale(0.6875)">
@@ -560,8 +560,8 @@ rect.c-bg-rect { fill: var(--bg); }
           <text x="296" y="255" class="t-muted" font-size="8" text-anchor="middle">全程在线接收</text>
         </g>
 
-        <g id="node-dispatch" data-node-id="dispatch" data-node-label="起 worker" tabindex="0" role="button" aria-label="聚焦起 worker，每 scope 一个，并发闸门, 同一份 core（四种跑法共用） › 驱动循环：每批事件推进一步" aria-pressed="false" data-node-kind="messagebus" data-node-sublabel="每 scope 一个，并发闸门" data-node-context="同一份 core（四种跑法共用） › 驱动循环：每批事件推进一步">
-          <title>起 worker · 每 scope 一个，并发闸门 · 同一份 core（四种跑法共用） › 驱动循环：每批事件推进一步</title>
+        <g id="node-dispatch" data-node-id="dispatch" data-node-label="起 worker" tabindex="0" role="button" aria-label="聚焦起 worker，每 scope 一个，并发闸门, 同一份 core（四种组合共用） › 驱动循环：每批事件推进一步" aria-pressed="false" data-node-kind="messagebus" data-node-sublabel="每 scope 一个，并发闸门" data-node-context="同一份 core（四种组合共用） › 驱动循环：每批事件推进一步">
+          <title>起 worker · 每 scope 一个，并发闸门 · 同一份 core（四种组合共用） › 驱动循环：每批事件推进一步</title>
           <rect x="422.4" y="217" width="144" height="52" rx="6" class="c-mask"/>
           <rect x="422.4" y="217" width="144" height="52" rx="6" class="c-messagebus" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="messagebus" class="semantic-sigil s-messagebus" transform="translate(428.4 223) scale(0.6875)">
@@ -574,8 +574,8 @@ rect.c-bg-rect { fill: var(--bg); }
           <text x="494.4" y="255" class="t-muted" font-size="8" text-anchor="middle">每 scope 一个，并发闸门</text>
         </g>
 
-        <g id="node-exitWatch" data-node-id="exitWatch" data-node-label="退出观察者" tabindex="0" role="button" aria-label="聚焦退出观察者，观察 worker 终止, 同一份 core（四种跑法共用） › 驱动循环：每批事件推进一步" aria-pressed="false" data-node-kind="security" data-node-sublabel="观察 worker 终止" data-node-context="同一份 core（四种跑法共用） › 驱动循环：每批事件推进一步">
-          <title>退出观察者 · 观察 worker 终止 · 同一份 core（四种跑法共用） › 驱动循环：每批事件推进一步</title>
+        <g id="node-exitWatch" data-node-id="exitWatch" data-node-label="退出观察者" tabindex="0" role="button" aria-label="聚焦退出观察者，观察 worker 终止, 同一份 core（四种组合共用） › 驱动循环：每批事件推进一步" aria-pressed="false" data-node-kind="security" data-node-sublabel="观察 worker 终止" data-node-context="同一份 core（四种组合共用） › 驱动循环：每批事件推进一步">
+          <title>退出观察者 · 观察 worker 终止 · 同一份 core（四种组合共用） › 驱动循环：每批事件推进一步</title>
           <rect x="738.8" y="217" width="140" height="52" rx="6" class="c-mask"/>
           <rect x="738.8" y="217" width="140" height="52" rx="6" class="c-security" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(744.8 223) scale(0.6875)">
@@ -586,8 +586,8 @@ rect.c-bg-rect { fill: var(--bg); }
           <text x="808.8" y="255" class="t-muted" font-size="8" text-anchor="middle">观察 worker 终止</text>
         </g>
 
-        <g id="node-settle" data-node-id="settle" data-node-label="收敛与提交点" tabindex="0" role="button" aria-label="聚焦收敛与提交点，一次落定终态, 同一份 core（四种跑法共用） › 重放与收敛" aria-pressed="false" data-node-kind="backend" data-node-sublabel="一次落定终态" data-node-context="同一份 core（四种跑法共用） › 重放与收敛">
-          <title>收敛与提交点 · 一次落定终态 · 同一份 core（四种跑法共用） › 重放与收敛</title>
+        <g id="node-settle" data-node-id="settle" data-node-label="收敛与提交点" tabindex="0" role="button" aria-label="聚焦收敛与提交点，一次落定终态, 同一份 core（四种组合共用） › 重放与收敛" aria-pressed="false" data-node-kind="backend" data-node-sublabel="一次落定终态" data-node-context="同一份 core（四种组合共用） › 重放与收敛">
+          <title>收敛与提交点 · 一次落定终态 · 同一份 core（四种组合共用） › 重放与收敛</title>
           <rect x="973.5999999999999" y="217" width="140" height="52" rx="6" class="c-mask"/>
           <rect x="973.5999999999999" y="217" width="140" height="52" rx="6" class="c-backend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(979.5999999999999 223) scale(0.6875)">
@@ -766,4 +766,4 @@ rect.c-bg-rect { fill: var(--bg); }
           </g>
         </g>
       </svg>
-<!-- gherkai:source-sha256=201faf992910b1f6c37f25070ca879bcc74a43f0bcf616e6383211fc70d7a574 -->
+<!-- gherkai:source-sha256=2010f80a95925305620ab80208455b9137b991e6f26e83a76989100ebe9b3e73 -->

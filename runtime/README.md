@@ -35,7 +35,7 @@ resolver = compose.make_resolver(engines)
 
 ## 文档
 
-- 四种跑法、结果与退出码：https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/running-and-results.md
+- 四种组合（执行方式 × 执行后端）、结果与退出码：https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/running-and-results.md
 - 环境变量与选项总表：https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/configuration.md
 - 云端后端怎么部署：https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/cloud-backend.md
 - 每版变更：https://github.com/zhiyanliu/gherkai/blob/HEAD/CHANGELOG.md

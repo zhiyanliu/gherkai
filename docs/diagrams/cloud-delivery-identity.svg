@@ -464,20 +464,20 @@ rect.c-bg-rect { fill: var(--bg); }
         <path data-edge-from="runs" data-edge-to="cleanup" data-edge-label="有 run 引用不删" data-edge-key="12" data-edge-id="live-run-guard" data-composition-points="834,436;805,436;805,606;776,606" d="M 834 436 L 813 436 Q 805 436 805 444 L 805 598 Q 805 606 797 606 L 776 606" class="a-security" stroke-width="1.5" marker-end="url(#arrowhead-security)"/>
 
         <!-- Components -->
-        <g id="node-ghcr_base" data-node-id="ghcr_base" data-node-label="官方基底镜像" tabindex="0" role="button" aria-label="聚焦官方基底镜像，运行时不直连, 发行物（维护者侧）" aria-pressed="false" data-node-kind="external" data-node-sublabel="运行时不直连" data-node-context="发行物（维护者侧）">
-          <title>官方基底镜像 · 运行时不直连 · 发行物（维护者侧）</title>
+        <g id="node-ghcr_base" data-node-id="ghcr_base" data-node-label="官方基础镜像" tabindex="0" role="button" aria-label="聚焦官方基础镜像，运行时不直连, 发行物（维护者侧）" aria-pressed="false" data-node-kind="external" data-node-sublabel="运行时不直连" data-node-context="发行物（维护者侧）">
+          <title>官方基础镜像 · 运行时不直连 · 发行物（维护者侧）</title>
           <rect x="60" y="60" width="186" height="72" rx="6" class="c-mask"/>
           <rect x="60" y="60" width="186" height="72" rx="6" class="c-external" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(66 66) scale(0.6875)">
             <rect x="2.5" y="5" width="8.5" height="8" rx="1.5"/>
             <path d="M8 2.5h5.5V8M13.5 2.5 7.5 8.5"/>
           </g>
-          <text data-node-label="" x="153" y="94" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">官方基底镜像</text>
+          <text data-node-label="" x="153" y="94" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">官方基础镜像</text>
         <text x="153" y="110" class="t-muted" font-size="9" text-anchor="middle">运行时不直连</text>
         </g>
 
-        <g id="node-local_img" data-node-id="local_img" data-node-label="variant 镜像" tabindex="0" role="button" aria-label="聚焦variant 镜像，基底 + 自带 step, 本机（build 与推送）" aria-pressed="false" data-node-kind="external" data-node-sublabel="基底 + 自带 step" data-node-context="本机（build 与推送）">
-          <title>variant 镜像 · 基底 + 自带 step · 本机（build 与推送）</title>
+        <g id="node-local_img" data-node-id="local_img" data-node-label="variant 镜像" tabindex="0" role="button" aria-label="聚焦variant 镜像，基础镜像 + 自带 step, 本机（build 与推送）" aria-pressed="false" data-node-kind="external" data-node-sublabel="基础镜像 + 自带 step" data-node-context="本机（build 与推送）">
+          <title>variant 镜像 · 基础镜像 + 自带 step · 本机（build 与推送）</title>
           <rect x="60" y="230" width="186" height="72" rx="6" class="c-mask"/>
           <rect x="60" y="230" width="186" height="72" rx="6" class="c-external" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(66 236) scale(0.6875)">
@@ -485,7 +485,7 @@ rect.c-bg-rect { fill: var(--bg); }
             <path d="M8 2.5h5.5V8M13.5 2.5 7.5 8.5"/>
           </g>
           <text data-node-label="" x="153" y="264" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">variant 镜像</text>
-        <text x="153" y="280" class="t-muted" font-size="9" text-anchor="middle">基底 + 自带 step</text>
+        <text x="153" y="280" class="t-muted" font-size="9" text-anchor="middle">基础镜像 + 自带 step</text>
         </g>
 
         <g id="node-lambda_code" data-node-id="lambda_code" data-node-label="Lambda 代码" tabindex="0" role="button" aria-label="聚焦Lambda 代码，推进与判定, 本 AWS 账户（一个 prefix 一套）" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="推进与判定" data-node-context="本 AWS 账户（一个 prefix 一套）">
@@ -720,4 +720,4 @@ rect.c-bg-rect { fill: var(--bg); }
           </g>
         </g>
       </svg>
-<!-- gherkai:source-sha256=9c57643375e203716ada14970510a31cf052f0e0027c166d6ecbaabf566e3191 -->
+<!-- gherkai:source-sha256=1d8966545fc25b953a2bd2333d1dcf7c97d7943fed913fbe743fbf152f448b7b -->

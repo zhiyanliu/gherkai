@@ -140,7 +140,7 @@ def _relative_href(ref: str, resolved_run_dir: Path) -> str:
 def local_path_from_uri(ref: str) -> Path | None:
     """若 ref 指向本地文件（file:// 或裸路径），返回 Path；远端（http/s3 等）返回 None。
 
-    **公开小工具**（本模块 href 相对化之外的第二个消费者：皮层解引用自有 schema 的产物 ref，ADR 0042
+    **公开小工具**（本模块 href 相对化之外的第二个消费者：前端解引用自有 schema 的产物 ref，ADR 0042
     决策四）——`file://` → 路径的解析只此一份，别在别处再写第二份 urlparse+url2pathname。
     对 ReportRef 的不透明搬运铁律（ADR 0027）不受影响：本函数只算路径、不读内容、不按 kind 分支。
 
@@ -292,7 +292,7 @@ def render_index_html(manifest: dict, result: RunResult) -> str:
                 # 精确）；不改判定/severity（守纯 reducer 红线）。
                 # 下面这句与 cli 文本渲染的旁注同款措辞（那边提成了 `gherkai_cli.render._SHORTCIRCUIT_NOTE`；
                 # core 不能 import cli，故跨包不共享常量）——改一处要改两处，由 cli 侧的
-                # test_index_html_shortcircuit_note_matches_cli_wording 逐字钉住（那边两包都 import 得到）。
+                # test_index_html_shortcircuit_note_matches_cli_wording 逐字锁定（那边两包都 import 得到）。
                 taint = (
                     ' <span class="taint">⚠ 因前置 step error 被跳过（未执行）</span>'
                     if st.shortcircuited else ""

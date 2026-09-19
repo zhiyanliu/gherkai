@@ -26,7 +26,7 @@ import * as path from "node:path";
 // 单次 S3 上传超时（ADR 0029「上传必须套超时」）：远大于正常同区上传（亚秒~秒级）、且明显 < grace（worker
 // 优雅停宽限，ADR 0024）——退化网络下上传挂到此即 abort、best-effort 放弃，不拖住退出。**grace 是 run 级、随
 // 引擎组成变**：混引擎 run 取各引擎下限的 max（Nova 下限最大）。本超时 < grace 由构造保证、不靠人对数字：
-// 中断兜底抢传的这一段就是本 worker 自报下限的加数之一（`worker/run-scope.mts` 的 `minGraceSeconds`，
+// 中断兜底提前上传的这一段就是本 worker 自报下限的加数之一（`worker/run-scope.mts` 的 `minGraceSeconds`，
 // ADR 0024「引擎自报下限」），故 midscene-only run 的下限恒 > 本超时。故本常量导出给它引用。
 // （曾漏设 midscene 下限 → 回落 ScheduleOpts 默认 grace < 本超时、致 worker 被 SIGKILL。）
 export const UPLOAD_TIMEOUT_MS = 10_000;
@@ -112,7 +112,7 @@ export class ArtifactUploader {
   private async uploadOne(abs: string): Promise<void> {
     const body = fs.readFileSync(abs);
     // 套超时（ADR 0029「上传必须套超时」/ 退出时间有界护栏）：aws-sdk-js v3 默认无 request/socket 超时
-    // （近乎无限），退化网络下 PutObject 会挂起、拖住 worker 退出（尤其 SIGTERM handler 内兜底抢传）→ 等
+    // （近乎无限），退化网络下 PutObject 会挂起、拖住 worker 退出（尤其 SIGTERM handler 内兜底提前上传）→ 等
     // grace 耗尽被 SIGKILL 强杀 → 跳过会话清理 → 泄漏。用 Node 原生 AbortSignal.timeout（零依赖）硬性封顶：
     // 超时自动 abort 底层请求（比 Promise.race 更干净——race 只是不等、请求仍挂）。UPLOAD_TIMEOUT_MS « grace。
     await this.client_().send(
@@ -165,25 +165,25 @@ export class ArtifactUploader {
     return this.refFor(abs);
   }
 
-  // act 边界抢传单文件快照（ADR 0029「act 边界抢传」，为 Fargate 预演）：供 worker 在每个 step_done 安全点
-  // 反复抢传**增量增长的单份 report.html**（Midscene report 运行中持续 append，中断落 destroy 前会整份丢）。
+  // act 边界的安全点提前上传单文件快照（ADR 0029 上传时机第三级，为 Fargate 预演）：供 worker 在每个 step_done 安全点
+  // 反复提前上传**增量增长的单份 report.html**（Midscene report 运行中持续 append，中断落 destroy 前会整份丢）。
   // 与 toReportRef 三点区别（Midscene 单引擎增补、Nova 无需——见 ADR 0029 uploader 接口条）：
   //   ① **绕 uploaded 幂等守卫**：每次都真传（同 keyFor → S3 同 key overwrite），overwrite-latest 最新即最全；
   //   ② **不记 uploaded**：故 scope 末 toReportRef(reportFile) 仍传 destroy 后 finalize 的权威完整版、
   //      flushAndCleanup 仍按 uploaded 正确跳过——快照只是中途保险，不篡改两级上传账本；
-  //   ③ **失败原样抛**（保 lib 纯净）——交调用方（worker）吞+log：抢传是 best-effort、不该打断 step 循环
+  //   ③ **失败原样抛**（保 lib 纯净）——交调用方（worker）吞+log：提前上传是 best-effort、不该打断 step 循环
   //      （对照 toReportRef 失败抛=报告链接强保证，语义相反）。
-  // no-op（未注入落点）→ 直接返回，不碰盘、不产 ref（抢传不面向事件消费者，只求字节进 S3）。
+  // no-op（未注入落点）→ 直接返回，不碰盘、不产 ref（提前上传不面向事件消费者，只求字节进 S3）。
   // **绝不复用 flushAndCleanup**：那个成功后 rmSync 删整目录，会误删正被 SDK 增量 append 的 report、打断正在运行的 main。
   async snapshotReport(localPath: string): Promise<void> {
     if (!this.enabled) return;
     await this.uploadOne(path.resolve(localPath));  // 同 keyFor → overwrite；不查/不加 uploaded
   }
 
-  // scenario 边界抢传诊断 log（ADR 0029「第四级：scenario 边界抢传」，Midscene 单引擎、为 Fargate 预演）：
-  // 供 worker 在每个 scenario_done 安全点抢传该 scenario 期间**已在盘、尚未传**的 log/*.log——把 log 丢失窗口
+  // scenario 边界的安全点提前上传诊断 log（ADR 0029 上传时机第四级，Midscene 单引擎、为 Fargate 预演）：
+  // 供 worker 在每个 scenario_done 安全点提前上传该 scenario 期间**已在盘、尚未传**的 log/*.log——把 log 丢失窗口
   // 从「整个 run」收窄到「当前正在运行的 scenario」。log 在运行中由 createWriteStream 持续 append 写（`<MIDSCENE_RUN_DIR>/log/`），
-  // scenario 边界截至已完成 scenario 的字节已在盘、可抢。承 snapshotReport 的「绕 uploaded 幂等守卫 + 不记 uploaded」
+  // scenario 边界截至已完成 scenario 的字节已在盘、可传。承 snapshotReport 的「绕 uploaded 幂等守卫 + 不记 uploaded」
   // （overwrite 同 key、让 scope 末 flush 仍传权威版并删本地），但**失败语义随多文件本质取 flushAndCleanup 那套**：
   // 逐文件 try/吞、继续下一个（非 snapshotReport 单文件的整体抛）——否则第一个失败的 log 会饿死本边界后续 log。
   // **绝不复用 flushAndCleanup**（那个 rmSync 删整目录、会误删在写的 report/log 流）。

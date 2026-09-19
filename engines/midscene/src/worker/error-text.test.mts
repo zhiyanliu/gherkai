@@ -1,8 +1,8 @@
 // 一行有界原因文本的边界单测（ADR 0042 决策一映射表 `act.error` / 决策三 `step_done.message`）。
 // 运行：npm test（node --import tsx --test "src/**/*.test.mts"）。
 //
-// 主路径（多行超长 → 首个非空行 + 折叠空白 + 封顶）在 run-scope.test.mts 与 evidence.test.mts 各钉了一条，
-// 这里钉的是那两条照不出的抛出物形态与截断边界，逐条对称 Nova 侧 `_error_text` 的同名断言——两引擎同形
+// 主路径（多行超长 → 首个非空行 + 折叠空白 + 封顶）在 run-scope.test.mts 与 evidence.test.mts 各锁住一条，
+// 这里锁住的是那两条照不出的抛出物形态与截断边界，逐条对称 Nova 侧 `_error_text` 的同名断言——两引擎同形
 // 是 ADR 0042 的要求（同一份 feature 在两侧运行，「原因」不该一侧一行、另一侧上千字符），退回
 // `${name}: ${message}` 的朴素写法时这些语义要有一条变红。
 import { test } from "node:test";

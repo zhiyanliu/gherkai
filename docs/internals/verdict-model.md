@@ -2,7 +2,7 @@
 
 > 本文讲**判定如何被计算**（机制），不讨论为什么这样设计：设计决策与理由在各 ADR，本文只给指针；与代码或 ADR 不一致时以它们为准。一个 run 的「结论」要经过四层归约、两根正交的轴、七个状态，以及各命令语义不同的退出码。单个 ADR 各只覆盖其中一片（0014 投票、0031 状态与 severity、0034 脱离后的退出码等），本文是这些切片合成的全景视图。
 
-姊妹页分工，本文不越界：worker 如何被启动、事件如何送到 core、超时计时由谁负责、四种跑法的推进链 → [执行与推进模型导览](./execution-and-reconciliation.md)；`status` / `error_type` / `votes` 在 `--json` 里的**字段名、类型、出现条件** → [CLI `--json` 字段契约](./cli-json-contract.md)（本文不重复它的表）；每步证据的读法 → [artifacts-and-evidence](./artifacts-and-evidence.md)；确定性 step 的写法与派发 → [deterministic-step-lifecycle](./deterministic-step-lifecycle.md)；判定与运行态落在哪张表、哪个桶 → [cloud-backend-carriers](./cloud-backend-carriers.md)。
+姊妹页分工，本文不越界：worker 如何被启动、事件如何送到 core、超时计时由谁负责、四种组合的推进链 → [执行与推进模型导览](./execution-and-reconciliation.md)；`status` / `error_type` / `votes` 在 `--json` 里的**字段名、类型、出现条件** → [CLI `--json` 字段契约](./cli-json-contract.md)（本文不重复它的表）；每步证据的读法 → [artifacts-and-evidence](./artifacts-and-evidence.md)；确定性 step 的写法与派发 → [deterministic-step-lifecycle](./deterministic-step-lifecycle.md)；判定与运行态落在哪张表、哪个桶 → [cloud-backend-carriers](./cloud-backend-carriers.md)。
 
 ## 1. 四层归约：票 → step → scenario → job → run
 
@@ -14,7 +14,7 @@
 | **step** | AI 断言（`Then`）：`yes > N/2` → `passed`/`failed`，事件带 `votes={yes,total}`。确定性注册表命中：`AssertionError`→`failed`、其它异常→`error`。引号内 URL 的导航步 / `When`·`Given` 动作步：正常返回→`passed`、抛异常→`error` | `_run_step`（Nova）/ `runStep`（Midscene） |
 | **scenario** | 任一 step `error`→`error`；任一 `failed`→`failed`；否则 `passed`。**被短路跳过的 step 不进入该列表** | worker 侧 `_aggregate` / `aggregate`；结论经 `scenario_done` 事件上报 |
 | **job**（= scope） | 同步 `run`：事件流正常 EOF **且**出现过 `scope_done` → 各 scenario 归约；否则按中止来源分流（§3c 图）。无状态批量运行：「两件都要」谓词（内容完整 ∧ 进程干净终止） | `schedule._Worker._run_once` / `project._job_status` |
-| **run** | 任一 job `error`→`error`；任一 `failed`→`failed`；否则 `passed`。**入口先滤掉非判定态** | `project._aggregate`（唯一实现，`schedule._aggregate` 是它的别名） |
+| **run** | 任一 job `error`→`error`；任一 `failed`→`failed`；否则 `passed`。**入口先滤掉非判定状态** | `project._aggregate`（唯一实现，`schedule._aggregate` 是它的别名） |
 
 几点补充：
 
@@ -95,9 +95,9 @@
 
 - **两条中止路径分开归因的原因**：代码里 `self_stopped` 这个布尔被超时与 fail-fast **两条路径共用**，因此图上那道分叉的判据取 `abort_flag`（只有 fail-fast 落 `aborted`）；无状态路径口径相同——`TaskExited.timed_out` → `ERROR`，归因由 `_reduce_scope` 覆盖为 `timeout`，因为该次 stop 本就由超时处置发起。这样切分的理由见 [ADR 0031](../adr/0031-job-lifecycle-states-and-severity.md) 决定一的注（「aborted 只认 fail-fast」）。
 - **`skipped` 不覆盖建连失败的原因**：建连失败的 job 已经建立过会话、已经计费，`saw_step == False` 只表示「可安全重试（无 act 副作用）」、不表示「未产生费用」，因此它照常进入 run 级聚合，`skipped` 的边界严格停在「worker 从未 spawn」。现状补充：`ScheduleOpts.network_retry` 默认 0 且 CLI 未暴露该参数，所以当前 `run` **不做** job 级整批重新运行；生效的只有 worker 自身的建连退避（`_CONNECT_ATTEMPTS` / `_BACKOFF_S`，只包裹幂等的建连段），重试耗尽即以网络专用退出码退出。
-- 另一条边界：worker 收到停止信号时**不为未执行完的单元生成判定**——Nova 在投票循环与 step 循环开头检查停止标志，票数未投满就不 emit 带判定的 `step_done`、也不发 `step_skipped`；Midscene 执行 SIGTERM 收尾序列（释放会话 → 抢传 → 排空队列）。两侧都把未完成的单元交由 core 按派生态处理，区别只在停止的处置形态。
+- 另一条边界：worker 收到停止信号时**不为未执行完的单元生成判定**——Nova 在投票循环与 step 循环开头检查停止标志，票数未投满就不 emit 带判定的 `step_done`、也不发 `step_skipped`；Midscene 执行 SIGTERM 收尾序列（释放会话 → 安全点提前上传 → 排空队列）。两侧都把未完成的单元交由 core 按派生态处理，区别只在停止的处置形态。
 
-> 权威：[ADR 0031](../adr/0031-job-lifecycle-states-and-severity.md) 决定六（`step_skipped` 事件 + `shortcircuited` 正交布尔 + 「绝不写 `scenario_status`」不变量）、决定一（skipped/aborted 边界）、[ADR 0028](../adr/0028-transient-network-ssl-resilience.md)（两层重试、`network_error` 白名单、「绝不重试 act」、core 层 job 重试门槛）、[ADR 0024](../adr/0024-worker-core-protocol.md)（终止契约、退出码 out-of-band 通道）；code：`model.py` 的 `ErrorType`/`StepSkipped`/`StepResult.shortcircuited`、`project.reduce_event`、`schedule._Worker._run_once`、两个 worker 的 `_classify_act_error` / `isTransientNetwork`。
+> 权威：[ADR 0031](../adr/0031-job-lifecycle-states-and-severity.md) 决定六（`step_skipped` 事件 + `shortcircuited` 正交布尔 + 「绝不写 `scenario_status`」不变量）、决定一（skipped/aborted 边界）、[ADR 0028](../adr/0028-transient-network-ssl-resilience.md)（两层重试、`network_error` 白名单、「绝不重试 act」、core 层 job 重试门槛）、[ADR 0024](../adr/0024-worker-core-protocol.md)（协作式停止、退出码 out-of-band 通道）；code：`model.py` 的 `ErrorType`/`StepSkipped`/`StepResult.shortcircuited`、`project.reduce_event`、`schedule._Worker._run_once`、两个 worker 的 `_classify_act_error` / `isTransientNetwork`。
 
 ## 4. severity：数值序而非字母序；run 级为何不含 skipped/aborted
 
@@ -111,13 +111,13 @@ skipped = -1  <  passed = 0  <  failed = 1  <  error = 2  <  aborted = 3
 两点约束：
 
 1. **不得直接比较 `Status` 字符串的大小**。字母序 `'error' < 'failed' < 'passed'` 与严重度**完全相反**；比较须查表或调用 `severity()`。前置态查表会抛 `KeyError`（它们不是判定结论，无 severity）。
-2. **这张表当前的角色是约定，不是计算引擎**。`_aggregate` 用显式 `any(...)` 实现三态归约（在三个判定态上与「取 severity 最大值」等价）；报告配色是按同一序**手工映射**的另一张表（`core/gherkai_core/adapters/report_store/local.py` 的 `_STATUS_COLOR`：passed 绿 / failed 红 / error 琥珀 / skipped 弱化灰 / aborted 紫 / pending·running 蓝——每态各一色，均不落默认灰，否则 aborted 的严重度无法辨识）；`severity()` 本身当前只被单测引用（`core/tests/test_lifecycle_states.py` 有一行断言了完整的严重度序）。**新增终态时 `_STATUS_SEVERITY` 与 `_STATUS_COLOR` 两处须同时修改。**
+2. **这张表当前的角色是约定，不是计算引擎**。`_aggregate` 用显式 `any(...)` 实现三态归约（在三个判定状态上与「取 severity 最大值」等价）；报告配色是按同一序**手工映射**的另一张表（`core/gherkai_core/adapters/report_store/local.py` 的 `_STATUS_COLOR`：passed 绿 / failed 红 / error 琥珀 / skipped 弱化灰 / aborted 紫 / pending·running 蓝——每态各一色，均不落默认灰，否则 aborted 的严重度无法辨识）；`severity()` 本身当前只被单测引用（`core/tests/test_lifecycle_states.py` 有一行断言了完整的严重度序）。**新增终态时 `_STATUS_SEVERITY` 与 `_STATUS_COLOR` 两处须同时修改。**
 
 两个相邻但**判据不同**的集合不可混用（二者在 skipped/aborted 上有意重叠）：
 
 | 集合 | 切分维度 | 含 skipped/aborted？ | 引用方 |
 |---|---|---|---|
-| `TERMINAL_STATUSES` | 生命周期（状态是否还会变） | 含 | `--wait` 轮询、`status` 退出码判定与仅在终态打印的产物位置、`explain` 的「run 仍在运行」提示、`project_full` 的不变量检查、隧道守护的拆除判据（`runtime/gherkai_runtime/tunnel_host.py`：读到终态即提前拆除，否则等满 TTL）；另有一处**取补**用法——revision 清理的安全阀，判断是否仍有未达终态的 run 引用（`deploy_aws/gherkai_deploy_aws/workers.py`）。跨栈护栏要求消费方全部引用这一份、不各自维护白名单 |
+| `TERMINAL_STATUSES` | 生命周期（状态是否还会变） | 含 | `--wait` 轮询、`status` 退出码判定与仅在终态打印的产物位置、`explain` 的「run 仍在运行」提示、`project_full` 的不变量检查、隧道守护的拆除判据（`runtime/gherkai_runtime/tunnel_host.py`：读到终态即提前拆除，否则等满 TTL）；另有一处**取补**用法——revision 清理的运行中 run 引用检查，判断是否仍有未达终态的 run 引用（`deploy_aws/gherkai_deploy_aws/workers.py`）。跨栈护栏要求消费方全部引用这一份、不各自维护白名单 |
 | `_NON_VERDICT` | run 级判定（是否算作结论） | 含（**另含** pending/running） | `_aggregate` 入口过滤 |
 
 **run 级永不出现 skipped/aborted**：`_aggregate` 在入口就把它们连同两个前置态滤掉，因此 `RunResult.status` ∈ {`passed`,`failed`,`error`}。这条过滤在无状态投影路径上是**承重**的：`project` 每轮 tick 全量重放，`jobs_state` 确实含 pending/running 的 job 并原样传入；同步 run 路径传入的全是终态，过滤为 no-op。
@@ -139,7 +139,7 @@ skipped = -1  <  passed = 0  <  failed = 1  <  error = 2  <  aborted = 3
 | `doctor` | 必修项是否全部通过 | 全部通过 | — | 任一 `required` 项 fail（可选能力缺失只标 `-`，不影响退码） |
 | `list-deterministic` | 该引擎有哪些确定性 step（纯本地、零 AWS） | 已列出 | — | `--steps-dir`（或 env）不是目录 / worker 定位不到 / 使用方 steps 加载失败 / 该引擎自述失败 |
 | `list-engines` | 本机的引擎环境状况 | **恒 0**（某引擎未安装正是要展示的信息，不算命令失败；判断某引擎是否已安装需看对应那一行，或用 `run`/`list-deterministic` 的退 2） | — | — |
-| `skill install` | 技能包是否安装成功 | 已安装（`--print` 则已打印正文） | — | `--dir` 不是目录 / 目标目录里已有非本命令安装的内容（无安装标记且非空，或同名路径是文件） / 包内技能包缺失 / 写入失败（含指令文件那一行） |
+| `skill install` | agent skill 是否安装成功 | 已安装（`--print` 则已打印正文） | — | `--dir` 不是目录 / 目标目录里已有非本命令安装的内容（无安装标记且非空，或同名路径是文件） / 包内 agent skill 缺失 / 写入失败（含指令文件那一行） |
 
 归纳：**表达判定的只有 `run` 与 `status`，也只有它们会退 1**；`submit`/`plan`/`explain`/`doctor`/`list-deterministic`/`skill install` 都是 0/2 的「成功 / 失败」；`list-engines` 恒 0（理由见表）。
 
@@ -162,7 +162,7 @@ skipped = -1  <  passed = 0  <  failed = 1  <  error = 2  <  aborted = 3
 |---|---|
 | 状态机与 severity 的全部决策、被拒方案、预留项（含「主动 skip 的退出码语义待定」） | [ADR 0031](../adr/0031-job-lifecycle-states-and-severity.md) |
 | AI 断言为主的取向、投票纪律、N 的缺省与阈值尚未确定的原因 | [ADR 0014](../adr/0014-ai-first-assertions.md) |
-| 事件协议、三态、成本信封、终止契约、退出码通道 | [ADR 0024](../adr/0024-worker-core-protocol.md) |
+| 事件协议、三态、成本可观测、协作式停止、退出码通道 | [ADR 0024](../adr/0024-worker-core-protocol.md) |
 | 并发/失败隔离/fail-fast/心跳/优雅终止 | [ADR 0026](../adr/0026-schedule-module.md) |
 | 网络瞬时故障的两层重试与分类白名单 | [ADR 0028](../adr/0028-transient-network-ssl-resilience.md) |
 | 脱离式批量运行的「两件都要」谓词、投影写、job timeout 归因链 | [ADR 0034](../adr/0034-detached-batch-reconciler.md) |

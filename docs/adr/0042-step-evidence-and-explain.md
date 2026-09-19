@@ -78,7 +78,7 @@
 
 **落哪、怎么传**。evidence 落在**各引擎自己的产物目录**下：Nova `NOVA_LOGS_DIR/evidence/<scenario 键>/step-<n>/`，Midscene `MIDSCENE_RUN_DIR/evidence/<scenario 键>/step-<n>/`；目录内 `evidence.json`，Nova 的截图 `act-<i>-frame-<j>.jpg`（Midscene 的截图是 SDK 落在 `report/screenshots/` 的文件，只引用）。**`<scenario 键>` 由 `scenario_id`（`<uri>:<行>[:<example 行>]`）派生，不用显示名**：标题不唯一（同文件重名只靠 id 区分、`@scope` 又允许跨文件合并成一个 job），且产物目录按 run 共享、S3 key 按相对 run 目录镜像，同一 run 内所有 scope 共用这一命名空间；派生必须确定性且不二次撞名（分隔符转义 + 尾附 id 短哈希），撞了 key 的表现是 evidence 静默互相覆盖、`explain` 读到另一条 scenario 的 thought 且无从察觉。放在引擎目录内的理由：两引擎上传器的 S3 key 都相对各自 run 目录算，复用 [0029](./0029-engine-artifacts-to-s3.md) 的上传器（key 计算、幂等去重、scope 末整目录递归 flush）而不引入新的注入 env 与上传根。**不是零改动**：① 两引擎的后缀→Content-Type 映射现只有 `.html`，`.jpg` / `.json` 会落成 `binary/octet-stream`、浏览器直开变下载，故各加 `.jpg`/`.jpeg` → `image/jpeg`、`.png` → `image/png`、`.json` → `application/json`（两边同规则同步改）；② 上传器加一个「只算 ref 不上传」的方法（Nova `ref_for(path)`、Midscene `refFor(path)`），见下。
 
-**上传时机分两类**。`evidence.json` 的 ref 必须随 `step_done` 走 → emit 前经 `to_report_ref` 即时上传拿 ref。**截图不在判定临界路径上传，但也不等到 scope 末**：URI 用上传器同一 key 规则确定性算出（`ref_for`）写进 evidence.json；`step_done` **发出之后**把截图路径交给上传器的**后台队列**（单线程 FIFO、顺序上传、同一 key 规则、成功记入已传集合让 flush 跳过、失败重试一次后记一行日志放弃），主流程立即进下一 step。scope 末与三条提前退出路径（停止信号 / 网络耗尽 / 异常）都对队列做**有界排空**（scope 末 30 s、退出路径 6 s，见下），flush 只兜漏网。**有界的是队列排空、不是 flush**：排空超时后转静默的只有队列线程，scope 末的整目录 flush **不受**该放弃标志约束——排空超时正是「只兜漏网」最该生效的一档，若 flush 也被它 gate 掉，整目录一个字节都不再传、也不删（产物随容器盘销毁即永久丢）。被接受的代价：退化网络下 scope 末的墙钟只由「per-file 超时 × 剩余文件数」定界，不再由排空预算定界（[0029](./0029-engine-artifacts-to-s3.md)「上传必须套超时」的有界性论证按此校准）。理由：把 K × 票数次 PutObject 压在判定临界路径上会把已成的判定拖在网络上（[0029](./0029-engine-artifacts-to-s3.md)「上传套超时、退出时间有界」同向），而只靠 scope 末 flush 又有两面风险——中断路径不 flush、正常路径的 flush 是单次无重试的 best-effort，一次 S3 抖动就是一个永久 404 的 URI。后台队列让字节在下个 step 跑完前多半已到 S3，中断时只剩最后一个 step 的一两张在途；残余风险收窄到「进程被硬杀的那几秒」。**排空的位置守「会话释放优先」**（[0024](./0024-worker-core-protocol.md)）：Nova 在三层 with 退出（会话已释放）之后、Midscene 在 `shutdownSequence` 的 cleanup 之后，与既有的中断兜底抢传并列，best-effort、不抛。退出路径的排空预算计入 grace：Nova 落在 worker 侧 margin 内，Midscene 自报的下限相应上调（收尾加数多一项；[0032](./0032-fargate-execution-environment.md) 的 grace 组成随之多一项）。本地档 `file://` 上传器是 no-op，队列与排空都直接返回。
+**上传时机分两类**。`evidence.json` 的 ref 必须随 `step_done` 走 → emit 前经 `to_report_ref` 即时上传拿 ref。**截图不在判定临界路径上传，但也不等到 scope 末**：URI 用上传器同一 key 规则确定性算出（`ref_for`）写进 evidence.json；`step_done` **发出之后**把截图路径交给上传器的**后台队列**（单线程 FIFO、顺序上传、同一 key 规则、成功记入已传集合让 flush 跳过、失败重试一次后记一行日志放弃），主流程立即进下一 step。scope 末与三条提前退出路径（停止信号 / 网络耗尽 / 异常）都对队列做**有界排空**（scope 末 30 s、退出路径 6 s，见下），flush 只兜漏网。**有界的是队列排空、不是 flush**：排空超时后转静默的只有队列线程，scope 末的整目录 flush **不受**该放弃标志约束——排空超时正是「只兜漏网」最该生效的一档，若 flush 也被它 gate 掉，整目录一个字节都不再传、也不删（产物随容器盘销毁即永久丢）。被接受的代价：退化网络下 scope 末的墙钟只由「per-file 超时 × 剩余文件数」定界，不再由排空预算定界（[0029](./0029-engine-artifacts-to-s3.md)「上传必须套超时」的有界性论证按此校准）。理由：把 K × 票数次 PutObject 压在判定临界路径上会把已成的判定拖在网络上（[0029](./0029-engine-artifacts-to-s3.md)「上传套超时、退出时间有界」同向），而只靠 scope 末 flush 又有两面风险——中断路径不 flush、正常路径的 flush 是单次无重试的 best-effort，一次 S3 抖动就是一个永久 404 的 URI。后台队列让字节在下个 step 跑完前多半已到 S3，中断时只剩最后一个 step 的一两张在途；残余风险收窄到「进程被硬杀的那几秒」。**排空的位置守「会话释放优先」**（[0024](./0024-worker-core-protocol.md)）：Nova 在三层 with 退出（会话已释放）之后、Midscene 在 `shutdownSequence` 的 cleanup 之后，与既有的中断兜底提前上传并列，best-effort、不抛。退出路径的排空预算计入 grace：Nova 落在 worker 侧 margin 内，Midscene 自报的下限相应上调（收尾加数多一项；[0032](./0032-fargate-execution-environment.md) 的 grace 组成随之多一项）。本地档 `file://` 上传器是 no-op，队列与排空都直接返回。
 
 **怎么挂**。evidence.json 的 ref 作为 `{kind: "evidence", ref, label: "evidence"}` **追加**进该 step 的 `step_done.reportRefs`（Nova 现有的 trajectory 挂载是整体赋值，两者不能各自赋值互相覆盖；Midscene 的 step 级 reportRefs 此前为空，evidence 是首条，`runStep` 需拿到 uploader 与 page）。截图 URI **只写在 evidence.json 内**，不进 reportRefs。协议不变：`ReportRef.kind` 本就是引擎自报的开放字符串（[0027](./0027-runreport-aggregation-index.md)）。**接受的连带影响**：evidence ref 经既有 `collect_report_index` 自动进 manifest 与 index.html 的产物导航节（每个 AI step 多一行 `[evidence]` 链接、计数上升），以及 `run` 文本输出的 step 行下——这正是人/agent 找到证据的入口；该节措辞从「引擎原生产物」放宽为「报告产物（引擎原生产物 + gherkai evidence）」，富渲染（缩略图 / thought 折叠）仍延后。
 
@@ -156,7 +156,7 @@ scope features/login.feature:6  engine=novaact  status=failed  session=01a0…
 
 ### 六、SDK 版本钉死 + 格式漂移的防线
 
-两引擎的 SDK 依赖**钉精确版本**（Nova `nova-act==3.4.187.0`；Midscene `@midscene/web 1.12.8`、`playwright` / `@playwright/test` 1.63.0），升级是有评估的显式发布动作——与 [0004](./0004-novaact-iam-auth-via-workflow.md)「模型版本选择策略」同一逻辑：用户拿到的就是我们测过的。**曾用范围版本（`>=` / `^`）的教训**：发行版 npm worker 与云端基底镜像都是装包时解析依赖、无 lock，2026-09 实查用户实际跑的是 `@midscene/web` 1.12.8，而仓库锁文件与全部测试停在 1.9.8——测试保护的不是用户跑的版本，本机 worker 与云端镜像还可能各装到不同版本。升级流程：改 pin → 全套测试 + 评测集真跑（两引擎各自的 wikipedia 用例与失败探针）→ 随发版并在 Release 正文点明。升级时的回归护栏四道：
+两引擎的 SDK 依赖**钉精确版本**（Nova `nova-act==3.4.187.0`；Midscene `@midscene/web 1.12.8`、`playwright` / `@playwright/test` 1.63.0），升级是有评估的显式发布动作——与 [0004](./0004-novaact-iam-auth-via-workflow.md)「模型版本选择策略」同一逻辑：用户拿到的就是我们测过的。**曾用范围版本（`>=` / `^`）的教训**：发行版 npm worker 与云端基础镜像都是装包时解析依赖、无 lock，2026-09 实查用户实际跑的是 `@midscene/web` 1.12.8，而仓库锁文件与全部测试停在 1.9.8——测试保护的不是用户跑的版本，本机 worker 与云端镜像还可能各装到不同版本。升级流程：改 pin → 全套测试 + 评测集真跑（两引擎各自的 wikipedia 用例与失败探针）→ 随发版并在 Release 正文点明。升级时的回归护栏四道：
 
 1. 映射函数只读表中列出的少数字段、每个字段当可选，读不到就 null、不抛；判别按值不按 SDK 标志（`is_tool` / `is_return` 之训）；Nova 的 `prompt` 被 SDK 改写、同属「不能照抄 SDK 字段」。
 2. 每引擎一份**由真产物裁成的 fixture**（Nova：真 `_trajectory.json` 去掉 base64；Midscene：真 execution 的 JSON），测试断言映射结果——格式漂移在升版跑测试时变红。
@@ -172,7 +172,7 @@ agent / skill 只依赖 evidence schema 与 `explain` 输出，两者都是我�
 - **`run --json` / `status --json` 内嵌 evidence**：它们是判定视图，证据按需经 `explain` 取。
 - **只给原生 json 加 ref、格式由 skill 说明**：零抽取代码，但把两套 SDK 内部格式写进 skill 散文、无测试盯着，升版即漂。
 - **evidence 集中落 `reports/<run_id>/evidence/`**：两引擎上传器的 key 都相对各自 run 目录算，集中落要新增注入 env 与上传根，为目录美观开新路径不值。`explain` 顺 ref 找、落哪对消费者透明。
-- **Midscene 走 `outputFormat: "html-and-external-assets"` 目录模式取截图**：report 从单文件变目录，牵动 `kind=report` 的 ref 与中断抢传路径，比 `persistExecutionDump` 代价大得多。
+- **Midscene 走 `outputFormat: "html-and-external-assets"` 目录模式取截图**：report 从单文件变目录，牵动 `kind=report` 的 ref 与中断时的提前上传路径，比 `persistExecutionDump` 代价大得多。
 - **截图即时上传**：K × 票数次串行 PutObject 压在判定临界路径上；改为确定性 URI + `step_done` 之后的后台队列上传 + 收尾有界排空，scope 末 flush 只兜漏网（见决策一「上传时机分两类」）。
 - **evidence 用 SDK 的 `is_tool` / `is_return` 或 `ActResult.trajectory_file_path` 公开属性**：真产物 / 真会话下前者恒 False、后者恒 None。
 
@@ -212,12 +212,12 @@ agent / skill 只依赖 evidence schema 与 `explain` 输出，两者都是我�
 - [0041](./0041-agent-facing-cli-affordances.md)：决策三查询类命令清单补 `explain --json`；「重议闸门」失败证据机读化一条标已由本 ADR 落地并反向链；Status 头**保持 Accepted**、按 0030 / 0034 的既有写法追加一句反向链——0041 无决策被反转，不写 Partially-superseded。
 - `docs/internals/cli-json-contract.md`：`run --json` steps 表补 `message`；step 级 `report_refs` 说明补 `kind=evidence`、两引擎皆有；新增 `explain --json` 一节（含 evidence 固定键与两个不透明节点、`record_missing` / `evidence_missing` 取值）。
 - `cli/README.md`（explain 用法；退出码节补「explain 只说证据读出来了吗、不表判定」；index.html 描述含 evidence 行）、根 `README.md`、`cli/DEVELOPMENT.md`（RunReport 内部：清单含 evidence）、`DEVELOPMENT.md` ADR 范围、`engines/midscene/DEVELOPMENT.md` worker 模块枚举补 evidence。
-- `CONTEXT.md`：术语表 kind 枚举补 `evidence`、两引擎 step_done 带 evidence 一句（core 不透明搬运那句主语是 core、仍成立，只补皮层解引用半句）；版本单旋钮的 cloud 入口数三改四。
+- `CONTEXT.md`：术语表 kind 枚举补 `evidence`、两引擎 step_done 带 evidence 一句（core 不透明搬运那句主语是 core、仍成立，只补皮层解引用半句）；版本真源的 cloud 入口数三改四。
 
 **交付链（不改 IaC 资源，但不重部署云端看不到——cloud 档跑不出 message / evidence，易误判成 bug）**
 
 - cloud 档的 `jobs/*.json` 由 reconciler Lambda 投影产出，Lambda 里的 `gherkai_core` 是部署时从已安装包复制进 asset 的（[0037](./0037-distribution-and-packaging.md) 决策 6）→ `StepResult.message` 要重跑 `gherkai deploy` 才在云端生效。
-- evidence 住 worker 镜像 → 云端要产 evidence 必须推带新 worker 代码的镜像（dev 树 = `gherkai deploy push-worker`；发行版 = 新基底 + `gherkai deploy`）。
+- evidence 住 worker 镜像 → 云端要产 evidence 必须推带新 worker 代码的镜像（dev 树 = `gherkai deploy push-worker`；发行版 = 新基础镜像 + `gherkai deploy`）。
 
 ## 验证（已完成，结论内联）
 

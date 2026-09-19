@@ -77,7 +77,7 @@ export interface Match {
   groups: Record<string, string>;
 }
 
-/** 扫注册表收**全部**命中——match（实际运行中派发）与 matchBatch（plan 预检）唯一的扫描实现面。
+/** 扫注册表收**全部**命中——match（实际运行中派发）与 matchBatch（用例预检）唯一的扫描实现面。
  * 两个消费者只在「命中数怎么处置」上分叉，匹配语义本身不复制成两份：ADR 0036 的「同一注册表、同一
  * exec 实现」由此结构保证，改匹配面（加锚定/归一化/优先级）不会漏改一处让 plan 标注对实际运行撒谎。 */
 function scan(text: string): Array<{ entry: Entry; m: RegExpExecArray }> {
@@ -102,7 +102,7 @@ export function match(text: string): Match | null {
 }
 
 /** 批量 match 查询（ADR 0036 决策 4）：plan 命中标注用——对每条 step 文本回答「命中哪条 / 冲突 / 未命中」。
- * 与 match() 共用 scan()（同一扫描实现面），冲突不抛、结构化返回（plan 是预检不是执行）。 */
+ * 与 match() 共用 scan()（同一扫描实现面），冲突不抛、结构化返回（plan 是用例预检、不是执行）。 */
 export type MatchProbe = null | { pattern: string; description: string } | { conflict: string[] };
 
 export function matchBatch(texts: string[]): MatchProbe[] {

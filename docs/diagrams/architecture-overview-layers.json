@@ -155,7 +155,7 @@
   "boundaries": [
     {
       "kind": "region",
-      "label": "① 用例层（使用方项目）",
+      "label": "① 用例文本（使用方项目）",
       "wraps": [
         "feature"
       ],

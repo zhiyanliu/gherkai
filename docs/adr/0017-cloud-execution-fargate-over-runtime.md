@@ -26,7 +26,7 @@ Runtime 成为更优选，当且仅当 **workload 从批处理变成长驻服务
 
 ## 被否的相邻选项
 
-- **AgentCore Evaluations**（LLM-as-Judge 批量判定）：定位是评估**你自己构建/instrument 的** agent；而本项目的 agent（Midscene/Nova Act 大脑）是**集成进来的黑盒**，不天然适用。且其 LLM-as-Judge 判定我们已用 `aiBoolean`/`act_get` 原生覆盖（[0010](./0010-spike-as-apples-to-apples-benchmark.md)/[0014](./0014-ai-first-assertions.md)）。**去优先级**，除非将来要观测引擎内部。
+- **AgentCore Evaluations**（LLM-as-Judge 批量判定）：定位是评估**你自己构建/instrument 的** agent；而本项目的 agent（Midscene/Nova Act 的引擎模型）是**集成进来的黑盒**，不天然适用。且其 LLM-as-Judge 判定我们已用 `aiBoolean`/`act_get` 原生覆盖（[0010](./0010-spike-as-apples-to-apples-benchmark.md)/[0014](./0014-ai-first-assertions.md)）。**去优先级**，除非将来要观测引擎内部。
 
 ## 何时坐实
 

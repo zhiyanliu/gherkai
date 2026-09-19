@@ -1,7 +1,7 @@
-"""gherkai：执行核心库的命令行皮（ADR 0016）。
+"""gherkai：执行核心库的命令行前端（ADR 0016）。
 
-皮做四件事：解析参数 → 读 feature（compose）→ 注入引擎 resolver 执行 schedule → 渲染结果。
-逻辑全在 core；这里只接线 + 表层 IO。WebUI 是另一张皮，复用 compose、不经本文件。
+前端做四件事：解析参数 → 读 feature（compose）→ 注入引擎 resolver 执行 schedule → 渲染结果。
+逻辑全在 core；这里只接线 + 表层 IO。WebUI 是另一个前端，复用 compose、不经本文件。
 
 运行（开发期，仓库根）：uv run gherkai run <feature> [--default-engine novaact] [...]；装后直接 `gherkai run …`
 实际运行会产生 AWS 费用（模型调用 + AgentCore 会话）。
@@ -173,7 +173,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
 
     **为何 provider 由 `main` 先解析、而不是在这里按需解析**：贴 flag 必须先加载 provider，而加载 = import 一个
     带 CDK 的包（jsii，import 即起 node 子进程）——不能让 `gherkai run` 也付这个代价，故只在实际运行 deploy/destroy
-    时解析（见 `_peek_deploy_provider`）。两者都不给时 deploy/destroy 只有皮自己的命令面 flag。
+    时解析（见 `_peek_deploy_provider`）。两者都不给时 deploy/destroy 只有前端自己的命令面 flag。
     """
     p = argparse.ArgumentParser(
         prog="gherkai",
@@ -198,7 +198,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     )
     run.add_argument(
         "--default-job-timeout", type=float, default=300.0, metavar="S",
-        help="未标 @timeout 的 scope 用的 job 墙钟超时秒（默认 300；<=0 表示不超时）；"
+        help="未标 @timeout 的 scope 用的 job 墙钟预算秒（默认 300；<=0 表示不超时）；"
              "标了 @timeout:N tag 的按 tag 走（同 @engine/--default-engine 模式）",
     )
     # 下限判据（为何必须 ≥ 单个 act 时长 + 收尾预算、以及为何改由 worker 自报）见 ADR 0024；help 只讲怎么用。
@@ -213,7 +213,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     run.add_argument(
         "--expose-local", default=None, metavar="ORIGIN",
         help="把「本机可达」的被测应用经隧道暴露给云端浏览器：值=feature 中书写的原始 origin"
-             "（如 http://localhost:3000，也可是局域网地址），框架起隧道并把 job 文本中该前缀替换为公网 URL"
+             "（如 http://localhost:3000，也可是局域网地址），gherkai 会起隧道并把 job 文本中该前缀替换为公网 URL"
              "（含每 run 一换的 basic-auth 凭据）。需已配 ngrok authtoken（NGROK_AUTHTOKEN）",
     )
     run.add_argument(
@@ -288,28 +288,28 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
         help="AWS profile（--profile > AWS_PROFILE）；喂 store + subprocess worker（其 region 字段也作 --region 兜底）",
     )
 
-    # plan 预检（dry-run）：纯本地解析 + 分组；**零 AWS、零花费、零副作用**（ADR 0036——派发标注会起本地
+    # 用例预检（plan）：纯本地解析 + 分组；**零 AWS、零花费、零副作用**（ADR 0036——派发标注会起本地
     # 瞬时 worker 自述子进程做 match，不执行 job）。
-    pl = sub.add_parser("plan", help="预检 .feature：看 scope/job 分组 + 校验配置，不实际运行（零费用）")
+    pl = sub.add_parser("plan", help="对 .feature 做用例预检：看 scope/job 分组 + 校验配置，不实际运行（零费用）")
     pl.add_argument("features", nargs="+", type=Path, help="一个或多个 .feature 路径")
     pl.add_argument(
         "--default-job-timeout", type=float, default=300.0, metavar="S",
-        help="未标 @timeout 的 scope 用的 job 墙钟超时秒（默认 300；<=0 表示不超时）——与 run/submit 同源，"
-             "让 plan 预检出的 Job 与实际运行一致",
+        help="未标 @timeout 的 scope 用的 job 墙钟预算秒（默认 300；<=0 表示不超时）——与 run/submit 同源，"
+             "让 plan 算出的 Job 与实际运行一致",
     )
     pl.add_argument(
         "--default-engine", choices=sorted(_names.ENGINES), default="novaact",
-        help="未标 @engine 的 scope 用的默认引擎（默认 novaact）——影响分组结果，故预检也可设",
+        help="未标 @engine 的 scope 用的默认引擎（默认 novaact）——影响分组结果，故用例预检也可设",
     )
     pl.add_argument(
         "--assertion-votes", type=int, default=1, metavar="N",
-        help="AI 断言投票次数（默认 1）——影响分组产出的投票次数，故预检也可设",
+        help="AI 断言投票次数（默认 1）——影响分组产出的投票次数，故用例预检也可设",
     )
     _add_selection_flags(pl)
     pl.add_argument("--json", action="store_true", help="输出机器可读 JSON（scope/job 分组）")
     pl.add_argument(
         "--steps-dir", default=None, metavar="DIR",
-        help=_STEPS_DIR_HELP + "——预检的派发标注据此反映你自己的 step",
+        help=_STEPS_DIR_HELP + "——用例预检的派发标注据此反映你自己的 step",
     )
     pl.add_argument(
         "--expose-local", default=None, metavar="ORIGIN",
@@ -329,7 +329,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
                          "（后端 stack 的 MAX_CONCURRENCY）钳制")
     sm.add_argument(
         "--default-job-timeout", type=float, default=300.0, metavar="S",
-        help="未标 @timeout 的 scope 用的 job 墙钟超时秒（默认 300；<=0 表示不超时）；标了 @timeout:N 的按 tag 走",
+        help="未标 @timeout 的 scope 用的 job 墙钟预算秒（默认 300；<=0 表示不超时）；标了 @timeout:N 的按 tag 走",
     )
     sm.add_argument(
         "--expose-local", default=None, metavar="ORIGIN",
@@ -389,7 +389,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     st.add_argument("--profile", default=None, metavar="P")
 
     # explain：读判定明细 + step 级机读证据，合成「哪步、问什么、看见什么、为什么」（ADR 0042 决策四）。
-    # 定位 flag 与 status 全集同形（同一批 run 用同一套定位参数），另有筛选/展开/机读四个自己的旋钮。
+    # 定位 flag 与 status 全集同形（同一批 run 用同一套定位参数），另有筛选/展开/机读四个自己的选项。
     ex = sub.add_parser("explain", help="看一个 run 的每步证据：问了 AI 什么、AI 看见了什么、为什么这么判"
                                        "（只读；不表判定，退出码只有 0/2）")
     ex.add_argument("run_id", help="run/submit 打印的 run_id")
@@ -460,9 +460,9 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     # skill：把随 wheel 带的 agent skill 装到使用方项目/用户级 agent 目录（ADR 0043 决策三）。
     # 形态是**普通嵌套 subparser + 子动词必填**（裸 `gherkai skill` 由 argparse 自己报错退 2）；
     # 不套 deploy 的 `set_defaults` 间接层——那层是为 provider 中立设的，skill 无 provider。
-    sk = sub.add_parser("skill", help="装给 AI coding agent 用的 gherkai 技能包（教它怎么驾驭本工具）")
+    sk = sub.add_parser("skill", help="装给 AI agent 用的 gherkai agent skill（教它怎么驾驭本工具）")
     sk_sub = sk.add_subparsers(dest="skill_command", required=True)
-    si = sk_sub.add_parser("install", help="把技能包装进项目（或用户级）的 agent 目录")
+    si = sk_sub.add_parser("install", help="把 agent skill 装进项目（或用户级）的 agent 目录")
     si.add_argument(
         "--agent", choices=list(_skill_install.AGENT_CHOICES), default="claude-code",
         help="装给哪个 agent（默认 claude-code）：claude-code → .claude/skills/、codex → .agents/skills/、all → 两处都装",
@@ -475,15 +475,15 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     )
     si.add_argument(
         "--print", dest="print_only", action="store_true",
-        help="只把技能包正文打到 stdout（供管道/贴给别处），什么都不装",
+        help="只把 agent skill 正文打到 stdout（供管道/贴给别处），什么都不装",
     )
     si.add_argument(
         "--pointer", choices=["yes", "no"], default=None,
         help="非交互回答「要不要把那行提示追加进项目的 CLAUDE.md / AGENTS.md」（不给且在交互终端时会问一次，默认否）",
     )
 
-    # [部署方] 云端后端的供给面（ADR 0037 决策 6）：命令面在皮、IaC 在 provider 包（`gherkai[deploy-aws]`）。
-    # 皮绝不 import aws_cdk——只发现 provider、贴它的 flag、分派动作（契约见 gherkai_cli/deploy.py 顶部）。
+    # [部署方] 云端后端的供给面（ADR 0037 决策 6）：命令面在前端、IaC 在 provider 包（`gherkai[deploy-aws]`）。
+    # 前端绝不 import aws_cdk——只发现 provider、贴它的 flag、分派动作（契约见 gherkai_cli/deploy.py 顶部）。
     _deploy.add_parsers(sub, provider=provider, provider_error=provider_error,
                         cli_version=_installed_version())
     return p
@@ -558,7 +558,7 @@ def _preflight_worker_runtimes(jobs, steps_dir: str | None) -> int | None:
       grace 下限」（ADR 0036「5.」），恒问一次后 `_cmd_run` 的 grace 下限（`compose.engine_min_grace`）命中同一份
       进程内缓存——本机 run 每引擎只 spawn 一次自述。
     **只查本次用到的引擎**——另一个引擎没装不连坐（dev 下 midscene 常态未装）。返回 2 或 None。
-    cloud 执行档不调用本函数：那档 worker 在 Fargate 容器里运行，本机定位链无关。
+    cloud 档不调用本函数：那档 worker 在 Fargate 容器里运行，本机定位链无关。
     """
     for engine in sorted({j.engine for j in jobs}):
         try:
@@ -1069,7 +1069,7 @@ def _plan_and_preflight(args, *, list_jobs: bool) -> "tuple[list, str | None] | 
     `_load_and_plan` / `_resolve_steps_dir_for_backend` / `_preflight_worker_runtimes`）。抽出的理由同
     `_load_and_plan`：run 与 submit 曾各手抄一份、会漂移。
     `list_jobs`：`run` 在计数行后再逐 job 打一行（scope/engine/scenario 数）；`submit` 只打计数行（进度看 `status`）。
-    调用方各自的旋钮校验（`run` 的 `--grace`、`submit` 的 `--tunnel-ttl`）接在本函数之后、仍在起隧道之前。
+    调用方各自的选项校验（`run` 的 `--grace`、`submit` 的 `--tunnel-ttl`）接在本函数之后、仍在起隧道之前。
     """
     if not _validate_max_concurrency(args):  # 最早：读 feature/起隧道/preflight 之前（真零副作用）
         return 2
@@ -1114,7 +1114,7 @@ def _build_run_meta(args, jobs, steps_dir: "str | None", tunnel_headers: "dict |
 
 
 def _cmd_plan(args) -> int:
-    """plan 预检：读 feature → plan → 渲染 scope/job 分组 + 派发预期标注（ADR 0036）。
+    """用例预检：读 feature → plan → 渲染 scope/job 分组 + 派发预期标注（ADR 0036）。
     **零 AWS、零花费、零副作用**（标注会起本地瞬时 worker 子进程做 match 自述——非执行 job；失败自动降级）。
 
     与 _cmd_run 共用 `_load_and_plan`（votes 校验 + load_feature + plan），但到此为止——
@@ -1458,7 +1458,7 @@ def _submit_cloud(args, run_id: str, run_meta, initial, *, tunnel_info=None, on_
 
         # TTL 按 definition 算（tunnel_host.compute_watch_ttl_s）而非拍一个常数——TTL 短于 run 实际预算时
         # 守护会在 run 还在执行时拆隧道，剩余 job 在被测应用不可达下继续运行、以假失败告终（ADR 0035 决策 3）。
-        # `--tunnel-ttl` 给了就用用户值（显式覆盖旋钮）。
+        # `--tunnel-ttl` 给了就用用户值（显式覆盖算出的 TTL）。
         ttl_s = (args.tunnel_ttl if args.tunnel_ttl is not None
                  else tunnel_host.compute_watch_ttl_s(run_meta.jobs))
         watch_log = Path(_tf.gettempdir()) / f"gherkai-tunnel-watch-{run_id}.log"
@@ -1895,7 +1895,7 @@ def _cmd_run(args) -> int:
     use_json = args.json
 
     # 0/1/2) 共享前置（与 submit 同一份，见 _plan_and_preflight）：入口校验 → plan（+ 逐 job 明细）→
-    #        steps 目录 → local 执行档的 worker preflight。整块排在起隧道 / 云端探资源 / begin 之前。
+    #        steps 目录 → local 档的 worker preflight。整块排在起隧道 / 云端探资源 / begin 之前。
     prepped = _plan_and_preflight(args, list_jobs=True)  # run 逐 job 打一行（本机批量运行看得见分组）
     if isinstance(prepped, int):
         return prepped
@@ -1904,7 +1904,7 @@ def _cmd_run(args) -> int:
     # 2a) grace 硬约束（ADR 0024）：按本 run 各引擎的下限取 max（grace 是 run 级单值），**下限由各引擎 worker
     #     自报**（compose.engine_min_grace 查一次 `--capabilities`、进程内缓存；查不到即 fail-loud 退 2，不回落
     #     猜的常量——那等于让 core 的 grace 护栏形同废除）。
-    #     **只对本机执行档查**（ADR 0032 真容器校准结论 4 的两条路径之分）：cloud 档 worker 运行在 Fargate 里、
+    #     **只对本机档查**（ADR 0032 真容器校准结论 4 的两条路径之分）：cloud 档 worker 运行在 Fargate 里、
     #     `FargateWorkerHandle.stop` 忽略运行期 grace（真实宽限 = task-def 期 stopTimeout，`doctor --backend cloud`
     #     的 worker.grace 行专门比对它），而提交机器本就不必装 worker 运行时（ADR 0037 决策 3「cloud 档不查本机
     #     定位链」，见 _preflight_worker_runtimes）——在此查会把纯 cloud 用户按本机环境无理由挡住。
@@ -1960,7 +1960,7 @@ def _cmd_run(args) -> int:
     run_meta = _build_run_meta(args, jobs, steps_dir, tunnel_headers)
     run_id = run_meta.run_id
     do_report = not args.no_report  # RunReport 默认生成；--no-report 跳过（零落盘运行路径）
-    worker_log_fh = None  # --quiet（local 执行档）时打开的 worker 日志句柄，见 build_engines 处
+    worker_log_fh = None  # --quiet（local 档）时打开的 worker 日志句柄，见 build_engines 处
     worker_log_path: Path | None = None
     # 两个引擎的产物落点（ADR 0027/0037 决策 3）：
     # - 归集档（默认）：落 <report_dir>/<run_id>/ 下**本次 run 专属的绝对路径**目录，与 RunReport 同处、长期留存。
@@ -2225,9 +2225,9 @@ def _deploy_provider(args) -> "object | None":
 
 
 def _cmd_deploy(args) -> int:
-    """[部署方] 分派给 provider（ADR 0037 决策 6）：三个「不真部署」动作互斥，其余走真部署。皮零 IaC 知识。
+    """[部署方] 分派给 provider（ADR 0037 决策 6）：三个「不真部署」动作互斥，其余走真部署。前端零 IaC 知识。
 
-    退出码即 provider 的返回值——皮只在「provider 不可用」时自己退 2（VPC 档不一致/未 bootstrap 这类
+    退出码即 provider 的返回值——前端只在「provider 不可用」时自己退 2（VPC 档不一致/未 bootstrap 这类
     诊断与退码归 provider，它才知道自己的账户状态）。
     """
     provider = _deploy_provider(args)
@@ -2270,7 +2270,7 @@ def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     provider, provider_err = _peek_deploy_provider(argv)
     parser = _build_parser(provider=provider, provider_error=provider_err)
-    # provider 不可用时抢在 argparse 之前报它：它的旋钮没贴上，用户敲的 `--vpc default` 会被报成
+    # provider 不可用时抢在 argparse 之前报它：它的选项没贴上，用户敲的 `--vpc default` 会被报成
     # 「unrecognized arguments」、把真因（没装 / 装坏了）盖掉。**-h/--help 例外**——帮助恒可用，
     # 降级的帮助自己在 epilog 里交代原因（provider_err 只在子命令是 deploy/destroy 时才非 None）。
     if provider_err is not None and not any(a in ("-h", "--help") for a in argv):

@@ -151,7 +151,7 @@ test("fromEnv enabled when bucket set, runDir = MIDSCENE_RUN_DIR parent", () => 
 });
 
 
-// ---- snapshotReport（act 边界抢传，ADR 0029 为 Fargate 预演）：overwrite 同 key、不记 uploaded、不删目录 ----
+// ---- snapshotReport（act 边界提前上传，ADR 0029 为 Fargate 预演）：overwrite 同 key、不记 uploaded、不删目录 ----
 test("snapshotReport overwrites same key, does not touch uploaded ledger", async () => {
   const root = tmproot();
   const runDir = path.join(root, "reports", "rid");
@@ -162,7 +162,7 @@ test("snapshotReport overwrites same key, does not touch uploaded ledger", async
   const u = new (ArtifactUploader as any)("bkt", "reports/rid/", runDir);
   const keys = withMockClient(u);
   const K = "reports/rid/midscene-run/report/report.html";
-  // 连抢 3 次（模拟每 step_done 抢传增量增长的 report）→ 同 key overwrite 3 次
+  // 连传 3 次（模拟每 step_done 提前上传增量增长的 report）→ 同 key overwrite 3 次
   await u.snapshotReport(f);
   await u.snapshotReport(f);
   await u.snapshotReport(f);
@@ -183,7 +183,7 @@ test("snapshotReport keeps dir (never rmSync)", async () => {
   const u = new (ArtifactUploader as any)("bkt", "reports/rid/", runDir);
   withMockClient(u);
   await u.snapshotReport(f);
-  assert.ok(fs.existsSync(msDir));  // 抢传绝不删目录（不误删在写的 report）
+  assert.ok(fs.existsSync(msDir));  // 提前上传绝不删目录（不误删在写的 report）
   assert.ok(fs.existsSync(f));
 });
 
@@ -210,7 +210,7 @@ test("snapshotReport raises on upload failure (worker swallows)", async () => {
 });
 
 
-// ---- snapshotLogs（scenario 边界抢传 log，ADR 0029「第四级」）：多文件 + mtime 去重 + 总预算 + 逐文件吞失败 ----
+// ---- snapshotLogs（scenario 边界提前上传 log，ADR 0029 上传时机第四级）：多文件 + mtime 去重 + 总预算 + 逐文件吞失败 ----
 // 建一个 log 目录、塞若干 .log 文件，给定 mtime。返回 { logDir, mk(name, content, mtimeSec) }。
 function mkLogDir(): { logDir: string; runDir: string; mk: (name: string, content: string, mtimeSec: number) => string } {
   const root = tmproot();

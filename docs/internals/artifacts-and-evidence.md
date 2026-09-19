@@ -119,7 +119,7 @@
 |--------------------------------------------------------------------------|--------------------------------------------------------------------------|
 | 每个字段的类型与出现条件（`run` / `status` / `explain` / `evidence` 全集） | [`./cli-json-contract.md`](./cli-json-contract.md)                       |
 | 谁在推进、事件走哪条物理通道、超时由谁强制、诊断落在哪                      | [`./execution-and-reconciliation.md`](./execution-and-reconciliation.md) |
-| 各判定态的语义与聚合规则、短路与严重度                                    | [`./verdict-model.md`](./verdict-model.md)                               |
+| 各判定状态的语义与聚合规则、短路与严重度                                  | [`./verdict-model.md`](./verdict-model.md)                               |
 | 确定性 step 为什么不产产物、它的注册与发现                                | [`./deterministic-step-lifecycle.md`](./deterministic-step-lifecycle.md) |
 | 云端载体本身：两张表、桶、日志组、命名与权限面                               | [`./cloud-backend-carriers.md`](./cloud-backend-carriers.md)             |
 | RunReport 的语义与扩展性契约（新引擎零改 core）                            | [ADR 0027](../adr/0027-runreport-aggregation-index.md)                   |

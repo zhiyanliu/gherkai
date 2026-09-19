@@ -42,7 +42,7 @@ test("loadUserSteps: _* 辅助模块（文件与目录两形态）不进加载�
   let n = 0;
   const files = await loadUserSteps({
     stepsDir: root,
-    importer: async () => { n += 1; },   // 每个被加载的文件都让 size 涨一格：这条只钉「辅助模块不进加载清单」；守卫本身在下面的真实运行那条钉（fake 下守卫永不开火）
+    importer: async () => { n += 1; },   // 每个被加载的文件都让 size 涨一格：这条只锁住「辅助模块不进加载清单」；守卫本身由下面的真实运行那条锁住（fake 下守卫永不开火）
     size: () => n,
     logFn: () => {},
   });
@@ -126,17 +126,17 @@ function runBin(stepsDir: string, flag = "--capabilities"): Promise<{ code: numb
 test("实际运行: repo 外 steps 目录里的 .mts/.mjs 注册进**同一张**注册表（裸 specifier 经 resolve hook）", async () => {
   const root = tmpSteps({
     "demo.mts": `import { deterministic } from "@gherkai/worker-midscene";
-deterministic('自定义锚点 "(?<x>[^"]+)"', () => {}, { description: "d", example: "e" });\n`,
+deterministic('自定义 step "(?<x>[^"]+)"', () => {}, { description: "d", example: "e" });\n`,
     "sub/nested.mjs": `import { deterministic } from "@gherkai/worker-midscene";
-deterministic('嵌套锚点', () => {}, { description: "d2", example: "e2" });\n`,
+deterministic('嵌套 step', () => {}, { description: "d2", example: "e2" });\n`,
   });
   const { code, out, err } = await runBin(root);
   assert.equal(code, 0, `应退 0，stderr=${err}`);
   const patterns = JSON.parse(out).deterministic_steps.map((e: { pattern: string }) => e.pattern);
   // 内建脚手架 + 两个使用方 step 同在一张表里（ADR 0036「真值单一」：注册表 = 内建 + 使用方）。
   assert.ok(patterns.some((p: string) => p.includes("页面地址")), `内建该在：${patterns}`);
-  assert.ok(patterns.includes('自定义锚点 "(?<x>[^"]+)"'), `使用方 .mts 该在：${patterns}`);
-  assert.ok(patterns.includes("嵌套锚点"), `使用方 .mjs 该在：${patterns}`);
+  assert.ok(patterns.includes('自定义 step "(?<x>[^"]+)"'), `使用方 .mts 该在：${patterns}`);
+  assert.ok(patterns.includes("嵌套 step"), `使用方 .mjs 该在：${patterns}`);
 });
 
 test("实际运行: _* 辅助模块由 step 文件 import 后注册照样算（ESM 缓存不让零注册守卫误报）", async () => {
@@ -145,14 +145,14 @@ test("实际运行: _* 辅助模块由 step 文件 import 后注册照样算（E
   const root = tmpSteps({
     "_shared.mts": `import { deterministic } from "@gherkai/worker-midscene";
 export const SUBMIT = "#submit";
-deterministic('共享锚点 "(?<x>[^"]+)"', () => {}, { description: "d", example: "e" });\n`,
+deterministic('共享 step "(?<x>[^"]+)"', () => {}, { description: "d", example: "e" });\n`,
     "a.mts": `import { SUBMIT } from "./_shared.mts";
 export const used = SUBMIT;\n`,
   });
   const { code, out, err } = await runBin(root);
   assert.equal(code, 0, `应退 0（辅助模块不自动加载、注册经 import 链完成），stderr=${err}`);
   const patterns = JSON.parse(out).deterministic_steps.map((e: { pattern: string }) => e.pattern);
-  assert.ok(patterns.includes('共享锚点 "(?<x>[^"]+)"'), `经 import 链的注册该在表里：${patterns}`);
+  assert.ok(patterns.includes('共享 step "(?<x>[^"]+)"'), `经 import 链的注册该在表里：${patterns}`);
 });
 
 test("实际运行: `_*` 目录里的辅助模块不自动加载（不撞零注册守卫），step 文件相对 import 它照样可用", async () => {
@@ -163,12 +163,12 @@ test("实际运行: `_*` 目录里的辅助模块不自动加载（不撞零注�
     "_pages/selectors.mts": `export const SUBMIT = "#submit";\n`,
     "a.mts": `import { deterministic } from "@gherkai/worker-midscene";
 import { SUBMIT } from "./_pages/selectors.mts";
-deterministic('目录辅助模块锚点 "(?<x>[^"]+)"', () => { void SUBMIT; }, { description: "d", example: "e" });\n`,
+deterministic('目录辅助模块 step "(?<x>[^"]+)"', () => { void SUBMIT; }, { description: "d", example: "e" });\n`,
   });
   const { code, out, err } = await runBin(root);
   assert.equal(code, 0, `应退 0（辅助模块目录整棵不自动加载），stderr=${err}`);
   const patterns = JSON.parse(out).deterministic_steps.map((e: { pattern: string }) => e.pattern);
-  assert.ok(patterns.includes('目录辅助模块锚点 "(?<x>[^"]+)"'), `使用方 step 该在表里：${patterns}`);
+  assert.ok(patterns.includes('目录辅助模块 step "(?<x>[^"]+)"'), `使用方 step 该在表里：${patterns}`);
 });
 
 test("实际运行: 语法错的 steps 文件 → 非零退出 + stderr 点名该文件（绝不静默跳过）", async () => {
@@ -180,7 +180,7 @@ test("实际运行: 语法错的 steps 文件 → 非零退出 + stderr 点名�
 
 test("实际运行: --capabilities 同样先加载 steps：语法错的目录 → 非零退出 + 点名 + stdout 不吐半份能力声明", async () => {
   // 两个非 job 入口对称（ADR 0037 决策 4）：能力自述本身不需要 steps，「反正用不上、把分支挪到加载之前」是很自然的
-  // 想法——但那会让坏 steps 目录在 run 的下限查询这一步静默通过、到实际运行才炸。Nova 侧有同款用例，这里钉住位置契约。
+  // 想法——但那会让坏 steps 目录在 run 的下限查询这一步静默通过、到实际运行才炸。Nova 侧有同款用例，这里锁住位置契约。
   const root = tmpSteps({ "broken.mts": `import { deterministic } from "@gherkai/worker-midscene"; deterministic(\n` });
   const { code, out, err } = await runBin(root, "--capabilities");
   assert.notEqual(code, 0, "加载失败必须非零退出");

@@ -173,7 +173,7 @@ gherkai doctor --steps-dir ./steps                                 # 目录与�
 
 ## 带到云端
 
-`--backend cloud` 时 worker 运行在云端容器里，读不到本机的 `steps/`：显式给了 `--steps-dir` 会打一句提示，用 `GHERKAI_STEPS_DIR` 或默认 `./steps` 时没有提示，本机目录一律不生效。云端要用的确定性 step 需要构建成一个 worker 镜像 variant（在基底镜像上复制 `steps/`），由部署方推送后用 `--worker-variant` 选用。构建、推送与默认指针见 [`cloud-backend.md`](./cloud-backend.md)。
+`--backend cloud` 时 worker 运行在云端容器里，读不到本机的 `steps/`：显式给了 `--steps-dir` 会打一句提示，用 `GHERKAI_STEPS_DIR` 或默认 `./steps` 时没有提示，本机目录一律不生效。云端要用的确定性 step 需要构建成一个 worker 镜像 variant（在基础镜像上复制 `steps/`），由部署方推送后用 `--worker-variant` 选用。构建、推送与默认指针见 [`cloud-backend.md`](./cloud-backend.md)。
 
 因此改完 `steps/` 之后必须重新构建并推送镜像，云端才会用上新版本：提交时不比对镜像里 step 的新旧，新写的 step 在云端会改由 AI 判定，改过的 step 仍按镜像里的旧版本执行。
 

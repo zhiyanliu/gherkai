@@ -16,7 +16,7 @@
           "derived",
           "mapping"
         ],
-        "note": "官方基底与使用方 build 的镜像进入本账户、挂上 revision 的路径：先同步或推送进本账户 ECR，再从模板复制出该 variant 的 revision 并登记进映射。"
+        "note": "官方基础镜像与使用方 build 的镜像进入本账户、挂上 revision 的路径：先同步或推送进本账户 ECR，再从模板复制出该 variant 的 revision 并登记进映射。"
       },
       {
         "id": "who-points",
@@ -57,7 +57,7 @@
     {
       "id": "ghcr_base",
       "type": "external",
-      "label": "官方基底镜像",
+      "label": "官方基础镜像",
       "sublabel": "运行时不直连",
       "pos": [
         60,
@@ -72,7 +72,7 @@
       "id": "local_img",
       "type": "external",
       "label": "variant 镜像",
-      "sublabel": "基底 + 自带 step",
+      "sublabel": "基础镜像 + 自带 step",
       "pos": [
         60,
         230
@@ -384,14 +384,14 @@
       "title": "gherkai deploy 的四步",
       "items": [
         "① cdk 事务创建资源，模板登记进 SSM",
-        "② 同步基底镜像：纯发行版需容器引擎，非纯发行版跳过",
+        "② 同步基础镜像：纯发行版需容器引擎，非纯发行版跳过",
         "③ 默认指针缺失时初始化，已存在则不修改",
         "④ 模板变更时重派生，末尾执行回收"
       ]
     },
     {
       "dot": "rose",
-      "title": "删除 revision 的两道闸门",
+      "title": "删除 revision 的两个前置条件",
       "items": [
         "已退休或孤儿且满静默期",
         "无未到终态的 run 引用",

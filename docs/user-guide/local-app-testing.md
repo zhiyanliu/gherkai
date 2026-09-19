@@ -2,7 +2,7 @@
 
 浏览器运行在云端，访问不到 `http://localhost:3000`。本机 local 与云端 cloud 两个后端在这一点上相同：local 只是把 worker 进程放在你的机器上，浏览器始终在云端，所以两个后端测本机应用都要用 `--expose-local`。
 
-本页讲 `--expose-local` 的前置、行为、隧道的持有进程、存活时间上限与限制。四种跑法的选择、结果读法与退出码见 [`running-and-results.md`](./running-and-results.md)；选项与环境变量总表见 [`configuration.md`](./configuration.md)；按症状排障见 [`troubleshooting.md`](./troubleshooting.md)。
+本页讲 `--expose-local` 的前置、行为、隧道的持有进程、存活时间上限与限制。执行方式与执行后端四种组合的选择、结果读法与退出码见 [`running-and-results.md`](./running-and-results.md)；选项与环境变量总表见 [`configuration.md`](./configuration.md)；按症状排障见 [`troubleshooting.md`](./troubleshooting.md)。
 
 ## 工作方式
 
@@ -45,7 +45,7 @@ RUN_ID=$(gherkai submit my_app.feature --expose-local http://localhost:3000)
 RUN_ID=$(gherkai submit my_app.feature --backend cloud --prefix gherkai- \
   --expose-local http://localhost:3000)
 
-# 预检：plan 不起隧道，按原文打印每个 step，并回显你给的取值
+# 用例预检：plan 不起隧道，按原文打印每个 step，并回显你给的取值
 gherkai plan my_app.feature --expose-local http://localhost:3000
 ```
 
@@ -59,9 +59,9 @@ gherkai plan my_app.feature --expose-local http://localhost:3000
 
 ## 隧道的持有进程与拆除时机
 
-隧道进程的位置见「工作方式」的隧道拓扑图；下表列各跑法由谁持有隧道、何时拆。
+隧道进程的位置见「工作方式」的隧道拓扑图；下表列各组合由谁持有隧道、何时拆。
 
-| 跑法 | 持有隧道的进程 | 拆除时机 |
+| 组合 | 持有隧道的进程 | 拆除时机 |
 |---|---|---|
 | `run`（`--backend local` 或 `cloud`） | 前台的 CLI 进程 | 命令正常结束或 Ctrl-C 时拆 |
 | `submit`（默认 `--backend local`） | 本机的后台进程（隧道进程号记在 `<report-dir>/<run_id>/tunnel.json`） | run 到终态即拆；该后台进程异常退出时，由 `gherkai status <run_id> --wait` 接力拆 |

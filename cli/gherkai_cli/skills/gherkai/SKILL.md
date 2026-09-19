@@ -1,6 +1,6 @@
 ---
 name: gherkai
-description: 用 gherkai 做 AI 驱动的 UI 端到端测试：从需求与被测应用写出 Gherkin .feature 与确定性 steps 代码，plan 预检、本机 run 或 submit 后台或云端批量运行、status 收判定、explain 读失败证据、收窄后重新运行并汇报；也覆盖环境就位与排障（doctor、引擎 worker、AWS 凭证与 region、版本不一致）和云端后端交付（deploy 交人、variant 镜像与 push-worker）。触发规则：项目里有 .feature 且 gherkai 在场（装了 gherkai CLI、steps/ 里 import 了 gherkai 的 worker 包、或项目文档提到 gherkai）时，用户一提到跑测试、写用例、看为什么失败就用本 skill，哪怕没说出 gherkai；项目里还没有 .feature 时看项目级信号：本 skill 装在这个项目里、项目文档提到 gherkai、或有 gherkai 式 steps/，有其一就照测试意图触发（从零写第一条用例正是本 skill 的活）；只是机器上装了 gherkai CLI 不算信号，那时要用户明确提到 gherkai。不接管两类：纯 Cucumber / Playwright 项目（有自己的 step definitions 或配置）；用户点名别的测试工具（pytest、Selenium、Cypress、Playwright、Cucumber、behave……）的问题，哪怕项目里也有 .feature——除非他要把它们迁到 gherkai。English triggers - gherkai, run/plan/submit gherkai tests, .feature with AI steps, deterministic steps, explain a failed scenario, gherkai doctor, worker variant, push-worker.
+description: 用 gherkai 做 AI 驱动的 UI 端到端测试：从需求与被测应用写出 Gherkin .feature 与确定性 steps 代码，plan 用例预检、本机 run 或 submit 后台或云端批量运行、status 收判定、explain 读失败证据、收窄后重新运行并汇报；也覆盖环境就位与排障（doctor、引擎 worker、AWS 凭证与 region、版本不一致）和云端后端交付（deploy 交人、variant 镜像与 push-worker）。触发规则：项目里有 .feature 且 gherkai 在场（装了 gherkai CLI、steps/ 里 import 了 gherkai 的 worker 包、或项目文档提到 gherkai）时，用户一提到跑测试、写用例、看为什么失败就用本 skill，哪怕没说出 gherkai；项目里还没有 .feature 时看项目级信号：本 skill 装在这个项目里、项目文档提到 gherkai、或有 gherkai 式 steps/，有其一就照测试意图触发（从零写第一条用例正是本 skill 的活）；只是机器上装了 gherkai CLI 不算信号，那时要用户明确提到 gherkai。不接管两类：纯 Cucumber / Playwright 项目（有自己的 step definitions 或配置）；用户点名别的测试工具（pytest、Selenium、Cypress、Playwright、Cucumber、behave……）的问题，哪怕项目里也有 .feature——除非他要把它们迁到 gherkai。English triggers - gherkai, run/plan/submit gherkai tests, .feature with AI steps, deterministic steps, explain a failed scenario, gherkai doctor, worker variant, push-worker.
 ---
 
 # gherkai：替使用者把 UI 测试整条走通
@@ -19,7 +19,7 @@ gherkai 把 Gherkin `.feature` 里的每一步交给云端浏览器里的 AI 引
 
 ## 1 心智模型
 
-- **一步两种跑法**。默认走 AI：`Given` / `When` 的文本是动作，`Then` 的文本是布尔断言（可投票）。命中项目 `steps/` 里注册的正则则走确定性代码：不问 AI、不投票、可复现。另有一条内建捷径：文本里**双引号**内的内容以 `http://` / `https://` 开头时，整段引号内容当作地址、该步直接导航（本机应用照写的 `http://localhost:3000` 同样命中；单引号不触发），不耗 AI。派发优先级 = 确定性命中 → 双引号 URL 导航 → AI。
+- **一步三种执行路径**。默认走 AI：`Given` / `When` 的文本是动作，`Then` 的文本是布尔断言（可投票）。命中项目 `steps/` 里注册的正则则走确定性代码：不问 AI、不投票、可复现。另有一条内建捷径：文本里**双引号**内的内容以 `http://` / `https://` 开头时，整段引号内容当作地址、该步直接导航（本机应用照写的 `http://localhost:3000` 同样命中；单引号不触发），不耗 AI。派发优先级 = 确定性命中 → 双引号 URL 导航 → AI。
 - **边界**：精确检查（URL、DOM、数值、必须可复现、要快）→ 确定性 step；模糊、一次性、页面变化多、靠语义理解 → AI。
 - **scope 与 tag**：`@scope:<名>` 把多条 scenario 编进同一个 job，共享一个浏览器会话、串行执行（后一条接着前一条留下的页面状态）；未标 scope 的 scenario 各成一个 job，`scope_id` 就是这条 scenario 的 id：`<文件>:<行号>`，`Scenario Outline` 展开出的每条再多一段 Examples 数据行的行号——别自己拼，从判定明细 / `plan --json` / 筛空时打出的候选清单里逐字复制。**scope 名在整批里是全局的**：两个 feature 文件写了同一个名字就合并成一个 job（并发变串行、互不相干的用例锁进同一会话，`@engine` / `@timeout` 按合并后的全体解析、两边标了不同值整批拒绝运行），撞名只在 stderr 提示一行，所以名字带来源前缀（`checkout-happy-path`、`admin-login`），别用 `login` / `smoke` 这种通名；也别把 scope 名写成 `<文件>:<行号>` 这个形状——正好等于某条未标 scope 的 scenario 编号时整批拒绝运行并退 2。`@engine:novaact|midscene` 选引擎，`@timeout:<秒>` 给该 scope 的墙钟预算；其它 tag 只是普通标签，靠 `--tags` 筛。feature 行的 tag 会传给其下每条 scenario——`@scope` 标在 feature 行就是把整个文件塞进一个串行 job，要的是这个再标。
 - **引号只是书写习惯**：AI 步整段文本原样交给模型；确定性 step 的正则也在这段文本上匹配——对象是关键字之后的那段文本、引号照留，正则里别写关键字，写用例时的写法要与它的 `example` 一致。匹配是**子串搜索、不自动锚定**，所以模式要写窄：带上引号与特征词（像内建那条 `页面地址匹配 "<正则>"` 的形状），别只写一个动词——宽模式会顺带命中本该走 AI 的步、悄悄换掉它的判法，两条模式同时命中一个 step 则该步直接记 error；宽窄靠 `gherkai plan` 的标注验。`And` / `But` 承前一步的关键字；`*` 或开头就是 `And` 会被拒（判不出动作还是断言）。
@@ -34,7 +34,7 @@ Midscene 对被测 UI 的语言不限。Nova Act 的支持范围是英文 UI：�
 - `submit`：提交即返回，stdout 只打一个 `run_id`，退 0 只表示提交成功；判定看 `status <run_id> --wait`。local 档由本机一个脱离 CLI 的后台进程推进（本机需开机）；`--backend cloud` 档由云端推进，提交后关机也会运行到结束。
 - **cloud 一条线**：`doctor --backend cloud --prefix P` → `plan` → `submit --backend cloud --prefix P` → `status --backend cloud --prefix P --wait` → `explain --backend cloud --prefix P`。`plan` 不依赖后端、两档都要先执行一次；但它的确定性标注问的是**本机** steps，云端实际运行用的是 worker 镜像里那份，标注只代表本机视图。`status` / `explain` 的 `--backend` / `--report-dir` / `--prefix` 必须与**产生这个 run 的那条命令**（`run` 或 `submit`）逐字一致——本机 `run --report-dir out/` 之后也得 `explain <run_id> --report-dir out/`；不一致就退 2 说找不到这个 run（那句提示只提 `submit`，别被它带偏）。
 - **部署云端后端是部署方的事，你不自己运行 `gherkai deploy`**（改 AWS 资源与 IAM）。用 `doctor` 判缺什么，把该运行的命令与前置交给人；推定制 variant 镜像的 `gherkai deploy push-worker` 不改 IAM，你可以运行。细节见 `references/cloud-backend.md`。
-- **被测应用在本机 / 内网时**：浏览器在云端，`http://localhost:3000` 不可达。唯一跑法 = `--expose-local <feature 里书写的原始 origin>`，feature 照写原始地址，提交时替换成带每 run 一换凭据的公网 URL。`run` / `submit` / `plan` 都收（`plan` 只标注、不起隧道）。前置两条，`doctor` 都不查：本机装好 ngrok 且在 PATH 上（下载 https://ngrok.com/download ），以及配好 authtoken（`ngrok config add-authtoken <token>` 写进 ngrok 自己的配置文件，或环境变量 `NGROK_AUTHTOKEN`，任一处即可），少哪条都在起隧道时失败。`submit` 后隧道由本机后台进程持有，本机须保持开机联网到 run 终态，这是「提交后关机也会运行到结束」的唯一例外。
+- **被测应用在本机 / 内网时**：浏览器在云端，`http://localhost:3000` 不可达。唯一做法 = `--expose-local <feature 里书写的原始 origin>`，feature 照写原始地址，提交时替换成带每 run 一换凭据的公网 URL。`run` / `submit` / `plan` 都收（`plan` 只标注、不起隧道）。前置两条，`doctor` 都不查：本机装好 ngrok 且在 PATH 上（下载 https://ngrok.com/download ），以及配好 authtoken（`ngrok config add-authtoken <token>` 写进 ngrok 自己的配置文件，或环境变量 `NGROK_AUTHTOKEN`，任一处即可），少哪条都在起隧道时失败。`submit` 后隧道由本机后台进程持有，本机须保持开机联网到 run 终态，这是「提交后关机也会运行到结束」的唯一例外。
 - **`--tunnel-ttl`（仅 `submit`）**——只在 cloud 档且开了隧道时才有意义：隧道守护进程的兜底 TTL，缺省 = 本批各 job 预算之和加余量；到点**无条件**拆隧道，调小会在 run 未完时断掉被测应用的入口，别为「省一点」去调它。
 
 ## 4 编写 feature 与 steps
@@ -68,7 +68,7 @@ Midscene 对被测 UI 的语言不限。Nova Act 的支持范围是英文 UI：�
 
 | 谁有 | flag | 什么时候动 |
 |---|---|---|
-| `run` / `submit` 共用，多数 `plan` 也收 | `--default-engine` `--assertion-votes` `--default-job-timeout` `--steps-dir` `--scope` `--tags` `--scenario` `--expose-local`（这 8 个 `plan` 也收：预检要与实际运行一致就照样给）；`--max-concurrency` `--report-dir`（`plan` 不收） | `--assertion-votes 3` 查 AI 断言抖动；`--max-concurrency` 默认很保守（护成本与配额），scope 多且互不相干时调大；`--default-job-timeout` 只管未标 `@timeout` 的 scope。默认值都以 `--help` 为准，别背数字 |
+| `run` / `submit` 共用，多数 `plan` 也收 | `--default-engine` `--assertion-votes` `--default-job-timeout` `--steps-dir` `--scope` `--tags` `--scenario` `--expose-local`（这 8 个 `plan` 也收：用例预检要与实际运行一致就照样给）；`--max-concurrency` `--report-dir`（`plan` 不收） | `--assertion-votes 3` 查 AI 断言抖动；`--max-concurrency` 默认很保守（护成本与配额），scope 多且互不相干时调大；`--default-job-timeout` 只管未标 `@timeout` 的 scope。默认值都以 `--help` 为准，别背数字 |
 | 仅 `run` | `--fail-fast` `--quiet` `--no-report` `--grace` | `--quiet` 少占屏幕与上下文、worker 日志改落文件，判定明细与证据照落；`--no-report` 连 `explain` 一起废掉——判定明细与 AI 证据都不落盘，事后 `explain` 找不到这个 run，失败原因只剩本次输出里每步那一句，想细看只能再花钱重新运行，所以只在确定不用读失败原因的纯 CI 门禁上用；`--grace` 别调小，过小直接退 2、且会泄漏浏览器会话 |
 | 仅 `submit` | `--tunnel-ttl` | 只在 cloud + `--expose-local` 时有意义 |
 | cloud 档：`doctor` / `run` / `submit` / `status` / `explain` 各要给（`plan` 不吃） | `--backend cloud` `--prefix` `--region` `--profile` `--worker-variant`（仅 `run` / `submit`） | 同一个 run 上这几个值逐字一致（`--report-dir` 同理），任一处不同即退 2；`--worker-variant` 选云端 worker 镜像上的确定性 step 集，不给用部署侧默认指针 |

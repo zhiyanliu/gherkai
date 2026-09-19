@@ -1,7 +1,7 @@
 """RunPersistence（ADR 0030 决定二）：把「一次 run 如何随进度实时落库」收成一处应用服务。
 
 为什么是 core 应用服务、不是每个组合根各写一遍：实时写的编排（commit-point 写序 / RUNNING 中间态 /
-按 scope_id 增量刷）对 cli / WebUI / 未来 cron **完全一致，只有注入的 store adapter 不同**。让每个皮各写
+按 scope_id 增量刷）对 cli / WebUI / 未来 cron **完全一致，只有注入的 store adapter 不同**。让每个前端各写
 一遍必漂移。故收成依赖 Store **ports**（不含具体 adapter、不含执行 reducer）的服务，组合根只注入 adapter。
 
 架构对位：schedule 编排**执行**（Engine port），RunPersistence 编排**存储**（Store ports），两者平级、

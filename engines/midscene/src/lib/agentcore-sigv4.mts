@@ -27,13 +27,13 @@ export function getRegion(): string {
 export function getBaseUrl(): string {
   return `https://bedrock-runtime.${getRegion()}.amazonaws.com/openai/v1`;
 }
-// === 模型选择：默认钉死一个具体 id + env 覆盖（ADR 0044 决策 1/2）===
-// DEFAULT_MODEL 是「现值」：由本仓库评测集 A/B 选出、换默认只随发版（不用 latest 类别名——换模型是有评估的
+// === 模型选择：默认锁定一个具体 id + env 覆盖（ADR 0044 决策 1/2）===
+// DEFAULT_MODEL 是「现值」：由本仓库模型评测集 A/B 选出、换默认只随发版（不用 latest 类别名——换模型是有评估的
 // 显式发布）。单独导出好让「默认是什么」被单测与调用方引用；MODEL 是**本进程真要喂给 SDK 的那个**（有覆盖即
 // 覆盖值），modelConfig() 与能力自述的 model_id 都取它，故两处天然跟 env 走、不会各自漂。
 // **模块级只取值、不校验、不抛**（同上面 region 的惰性 fail-loud 之律：import 本模块不该失败）；取不出 family
 // 那种坏配置由 modelFamily() 在 worker 启动期一次性挡下。
-export const DEFAULT_MODEL = "us.openai.gpt-5.6-terra";  // 2026-09 评测集 A/B 选定（ADR 0044「现值」）；地理型 profile：美国境内三个 region 处理
+export const DEFAULT_MODEL = "us.openai.gpt-5.6-terra";  // 2026-09 模型评测集 A/B 选定（ADR 0044「现值」）；地理型 profile：美国境内三个 region 处理
 export const MODEL = process.env.MIDSCENE_MODEL_ID || DEFAULT_MODEL;  // 空串当未设（镜像 ENV 留空 / export 空值）——与本文件 getRegion 的 `if (!r)`、modelFamily 的 `if (explicit)` 同一判据
 
 // 模型 id → Midscene family 的推断表，逐条对应 ADR 0044 决策 2 的那张表（**一处常量，别在别处再写一份**）。

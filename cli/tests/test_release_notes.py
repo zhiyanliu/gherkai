@@ -72,7 +72,7 @@ def test_render_pins_links_to_the_tag():
     assert out.startswith("### 变化"), "正文以 CHANGELOG 节开头"
     assert "{{" not in out, "占位符须全部替换"
     assert "blob/v1.4.4/docs/user-guide/README.md" in out and "blob/v1.4.4/CHANGELOG.md" in out
-    assert "blob/HEAD/" not in out, "Release 正文的文档链接钉 tag，不随 HEAD 漂"
+    assert "blob/HEAD/" not in out, "Release 正文的文档链接锁定 tag，不随 HEAD 漂"
     assert "gherkai[local]==1.4.4" in out and "@gherkai/worker-midscene@1.4.4" in out
 
 

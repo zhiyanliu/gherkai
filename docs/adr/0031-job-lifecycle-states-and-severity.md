@@ -45,7 +45,7 @@ class Status(str, Enum):
 > `saw_step=False` 只表「可安全重试」、不表「没花钱/没起」。故它仍是 `error`、**正常进 run 级聚合**，不归 skipped/aborted。
 > skipped 的边界严格是「worker 从未 spawn」。
 
-- **加进同一个 `Status` enum**（而非新开 enum）：`Status` 是 scenario/step/job/run **一切判定态的统一承载**，
+- **加进同一个 `Status` enum**（而非新开 enum）：`Status` 是 scenario/step/job/run **一切判定状态的统一承载**，
   `serialize` 全靠 `Status(d["status"])` round-trip、`index.html`/`render` 全靠 `status.value` 渲染——单点扩 enum
   即全链路自然识别。新开 enum 会让 `JobResult.status` 变 `Union`，serialize/render/html 全要分两套分支，破坏「status 单一类型」的深模块性质。
 - **它们是 core 在 fail-fast 路径派生赋的 job 级态，不是 worker 上报态**：worker 只在 `*_done` 事件报三态
@@ -53,14 +53,14 @@ class Status(str, Enum):
   本地构造 `JobResult` 时赋。故 aborted **只活在 job 级（scope 级）**；**skipped 后来下探到 step 级**（scope 内短路，见决定六），
   但两级的 SKIPPED **都由 core 本地构造、永不经 `StepDone.status` 上报**（`step_skipped` 是独立事件、非 step_done 的 status 值）。
 
-## 决定一·补：`pending` / `running` —— 生命周期前置态，非判定态
+## 决定一·补：`pending` / `running` —— 生命周期前置态，非判定状态
 
 实时写（[0030](./0030-realtime-persistence-seam.md)）需要两个**前置态**表示「还没出判定」：`pending`（run 开始时 `create_run` 把每个 job 摆这态）
 / `running`（worker 起了、收到 `scope_started` 后刷这态）。它们和 skipped/aborted 一样**只活在 job 级（`JobState.status` / 进而 `RunState`）**、
 绝不进 `JobResult.status`（JobResult 是终态判定，只会是 passed/failed/error/skipped/aborted）、绝不进 wire。**不变量的强制点 = `project_full`**（detached 收尾聚合，[0034](./0034-detached-batch-reconciler.md)）：收尾快照里任一 job 仍非终态即抛、本轮不落任何判定真值（归约中间态用 JobResult 作载体不算违背——只有落库/上 wire 的那份受约束）；同步 run 路径由 schedule 的归约器天然只产终态。
 
 **承载方式**：加进同一个 `Status` enum（`PENDING="pending"` / `RUNNING="running"`），理由同 skipped/aborted（统一类型、serialize/render 单点识别）。
-但与判定态有**本质区别**——它们是**生命周期前置态、不是判定结论**：
+但与判定状态有**本质区别**——它们是**生命周期前置态、不是判定结论**：
 
 - **不进 severity 表、不参与任何 severity 比较**（severity 只给终态排序/聚合用，见决定二）。
 - **不进 run 级聚合**：`_aggregate` 的过滤名单除 skipped/aborted 外**也要含 pending/running**（决定三）——否则一个还在 `running` 的 job 会污染 run 级 status。
@@ -159,7 +159,7 @@ cli 退出码从「`status.value == 'passed'` 才 0」改为**基于 run 级 sev
 
 **关键不变量：step 级 SKIPPED 绝不写进 `scenario_status`**（守 severity/`_aggregate` 零污染）。`_reduce` 处理 `step_skipped`
 时只把 StepResult 暂存待挂（同 step_done 的暂存路径），**不碰 scenario_status**——故它不参与 scenario 归约、不进 `_aggregate`
-（决定三的 `_NON_VERDICT` 已含 SKIPPED，是双重保险；但真正的保证是「压根不喂进去」）。scenario/job 的判定态由「上游那个 error step」
+（决定三的 `_NON_VERDICT` 已含 SKIPPED，是双重保险；但真正的保证是「压根不喂进去」）。scenario/job 的判定状态由「上游那个 error step」
 决定，与「后面短路了几个 step」无关。
 
 **job 级 skipped（决定一）与 step 级 shortcircuited 是两个不同层次，别混**：

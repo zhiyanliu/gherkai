@@ -20,7 +20,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-# 生产包（含 CLI 皮、runtime 组合根、部署 provider + 其 Lambda、core、Nova worker）
+# 生产包（含 CLI 前端、runtime 组合根、部署 provider + 其 Lambda、core、Nova worker）
 PY_ROOTS = (
     "cli/gherkai_cli",
     "runtime/gherkai_runtime",
@@ -40,6 +40,7 @@ FORBIDDEN = re.compile(
     r"|preflight|per-run|\btick\b|清理\s*pass|武装|防御扫"  # 机制名 / 施工行话：产品面只说「提交前检查 / 本机后台进程 / 推进 / 清理」
     r"|best-effort|抢传|flush\s*兜底|不带\s*ref"  # 上传/收尾的失败语义行话：产品面只说「未能上传 + 不影响什么」
     r"|逃生舱|烙进|烙在|烙成|烙好|旋钮"  # 比喻 / 口头语（ADR 0045 决策六）：产品面只说「跳过 / 构建进镜像 / 选项」
+    r"|跑法|确定性锚点|技能包"  # 已退役的旧名（规范名见 CONTEXT.md 词表）：改说「执行方式 / 执行后端 / 确定性 step / agent skill」
     r"|_require_vpc"
     r"|替换\s*WorkerSg"  # CDK construct 名进了叙事（stack.py 里作 construct id 的字面量是合法的，只抓成句形态）：产品面只说「worker 的网络 / 安全组」
 )

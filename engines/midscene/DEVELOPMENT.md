@@ -101,11 +101,11 @@ GHERKAI_WORKER_MIDSCENE_CMD="node $(pwd)/src/bin.mts"     # 需 Node ≥ 22.18�
 
 抛出而非在本模块 `process.exit`：退出码由入口（`bin.mts`）统一落地（非零、且不是 [ADR 0028](../../docs/adr/0028-transient-network-ssl-resilience.md) 的网络专用 80），本模块保持可单测。
 
-内建脚手架 step 在 `src/worker/deterministic.steps.mts`（一条 URL 锚点作范例）；使用方 step 与内建 **pattern 冲突时不做覆盖**，按 ADR 0036 的 conflict 语义在 `plan` 预检暴露。使用方侧的写法见 [user guide](../../docs/user-guide/writing-deterministic-steps.md)。
+内建脚手架 step 在 `src/worker/deterministic.steps.mts`（一条 URL 确定性断言作范例）；使用方 step 与内建 **pattern 冲突时不做覆盖**，按 ADR 0036 的 conflict 语义在用例预检（`plan`）暴露。使用方侧的写法见 [user guide](../../docs/user-guide/writing-deterministic-steps.md)。
 
 ## 报告与产物落点
 
-组合根经 `MIDSCENE_RUN_DIR` 注入 run 专属目录（`reports/<run_id>/midscene-run`，**必须绝对路径**：SDK 用 `path.resolve(process.cwd(), …)`），`report.html` 与 log/dump 全在其下；产物经 uploader 上传至 S3（[ADR 0029](../../docs/adr/0029-engine-artifacts-to-s3.md)），含 act 边界与中断时的 report 抢传（best-effort：失败不抛出、只记日志，不影响退出码）。`--no-report` 档由组合根经 env `GHERKAI_NO_ARTIFACTS=1` 告知：关闭 agent 的 `generateReport`、不抢传、不带 report ref；SDK 仍可能往 `./midscene_run` 写 log/dump，故该档下若无 `MIDSCENE_RUN_DIR`，即把它导向一次性临时目录，不写入用户 CWD。一次 run 的全部产物落点（两引擎横向、local 与 cloud 两档）见 [`docs/internals/artifacts-and-evidence.md`](../../docs/internals/artifacts-and-evidence.md)。
+组合根经 `MIDSCENE_RUN_DIR` 注入 run 专属目录（`reports/<run_id>/midscene-run`，**必须绝对路径**：SDK 用 `path.resolve(process.cwd(), …)`），`report.html` 与 log/dump 全在其下；产物经 uploader 上传至 S3（[ADR 0029](../../docs/adr/0029-engine-artifacts-to-s3.md)），含 act 边界与中断时的 report 安全点提前上传（best-effort：失败不抛出、只记日志，不影响退出码）。`--no-report` 档由组合根经 env `GHERKAI_NO_ARTIFACTS=1` 告知：关闭 agent 的 `generateReport`、不提前上传、不带 report ref；SDK 仍可能往 `./midscene_run` 写 log/dump，故该档下若无 `MIDSCENE_RUN_DIR`，即把它导向一次性临时目录，不写入用户 CWD。一次 run 的全部产物落点（两引擎横向、local 与 cloud 两档）见 [`docs/internals/artifacts-and-evidence.md`](../../docs/internals/artifacts-and-evidence.md)。
 
 ## 运行 spike（五段式自检，可独立运行）
 
@@ -120,12 +120,12 @@ AWS_REGION=us-east-1 node_modules/.bin/tsx spikes/05-negative-assertions.ts # �
 ## 依赖分类（实测约束）
 
 - **运行时依赖全在 `dependencies`**（`@midscene/web`、`@playwright/test`、`playwright`、各 `@aws-sdk/*`、`@aws-crypto/sha256-js`（SigV4 签名所用的 sha256 实现，缺失则签名不可用）、`openai`、`tsx`）：npm 包的消费者只会装 `dependencies`，留在 `devDependencies` 里的运行时依赖必然在使用方环境失败（ADR 0033 记录的「不能 `--production`」陷阱在包化后成为必然）。`devDependencies` 只剩 build 与类型（`typescript`、`@types/node`）。
-- **SDK 与浏览器驱动钉精确版本**（`package.json` 里无 `^`）：`@midscene/web` `1.12.8`、`playwright` 与 `@playwright/test` 同为 `1.63.0`。发行的 npm 包与云端基底镜像都是装包时解析依赖、没有 lock，范围版本会使使用者运行的版本与验证过的版本不同（Nova 侧同口径：`nova-act==3.4.187.0`）。升级 = 改 pin → 全套测试 + 评测集实际运行 → 随发版说明，见 [ADR 0042](../../docs/adr/0042-step-evidence-and-explain.md) 决策六。其余依赖（各 `@aws-sdk/*`、`@aws-crypto/sha256-js`、`openai`、`tsx`）仍用 `^`。
+- **SDK 与浏览器驱动锁定精确版本**（`package.json` 里无 `^`）：`@midscene/web` `1.12.8`、`playwright` 与 `@playwright/test` 同为 `1.63.0`。发行的 npm 包与云端基础镜像都是装包时解析依赖、没有 lock，范围版本会使使用者运行的版本与验证过的版本不同（Nova 侧同口径：`nova-act==3.4.187.0`）。升级 = 改 pin → 全套测试 + 模型评测集实际运行 → 随发版说明，见 [ADR 0042](../../docs/adr/0042-step-evidence-and-explain.md) 决策六。其余依赖（各 `@aws-sdk/*`、`@aws-crypto/sha256-js`、`openai`、`tsx`）仍用 `^`。
 - `@playwright/test` 是 `@midscene/web` 声明为 optional peer、但 `@midscene/web/playwright` 子入口**无条件 import** 的包，因此它也是运行时依赖（打包安装后实际运行才暴露）。
 
 ## 容器镜像（维护者向）
 
-`Dockerfile` = Fargate 档的 worker **基底**镜像（同版本 `@gherkai/worker-midscene` + SDK 运行时 + 协议层，**零使用方内容**）；使用方的定制层模板（`FROM <基底>` + `COPY steps/` + `GHERKAI_STEPS_DIR`）与推送流程见 [ADR 0038](../../docs/adr/0038-worker-image-delivery.md)（包 README 已降为入口页、不再带模板）。
+`Dockerfile` = Fargate 档的 worker **基础镜像**（同版本 `@gherkai/worker-midscene` + SDK 运行时 + 协议层，**零使用方内容**）；使用方的定制层模板（`FROM <基础镜像>` + `COPY steps/` + `GHERKAI_STEPS_DIR`）与推送流程见 [ADR 0038](../../docs/adr/0038-worker-image-delivery.md)（包 README 已降为入口页、不再带模板）。
 
 同一份 Dockerfile 有**两态**，由 `--build-arg WORKER_SOURCE=` 选择（ADR 0037 决策 5）：
 
@@ -163,5 +163,5 @@ docker build --platform linux/amd64 -f engines/midscene/Dockerfile \
 [0036](../../docs/adr/0036-deterministic-capability-discovery.md) 能力自述 ·
 [0037](../../docs/adr/0037-distribution-and-packaging.md) 分发与打包 ·
 [0038](../../docs/adr/0038-worker-image-delivery.md) 镜像交付 ·
-[0042](../../docs/adr/0042-step-evidence-and-explain.md) step 级证据与 SDK 钉版本 ·
+[0042](../../docs/adr/0042-step-evidence-and-explain.md) step 级证据与 SDK 版本锁定 ·
 [0044](../../docs/adr/0044-engine-model-selection-and-override.md) 模型选择与覆盖

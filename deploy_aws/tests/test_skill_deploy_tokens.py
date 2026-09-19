@@ -1,14 +1,14 @@
 """agent skill 里 `deploy` / `destroy` 那批命令 token 对照 provider 的真 parser（ADR 0043 决策六）。
 
-**为什么这条护栏在这里、不在 `cli/tests/test_skill.py`**：`deploy` 段的 flag 按来源分两刀——皮自己声明的中立
+**为什么这条护栏在这里、不在 `cli/tests/test_skill.py`**：`deploy` 段的 flag 按来源分两刀——前端自己声明的中立
 flag（`--provider` / `--diff` / `--synth-only` / `--bootstrap` / `--require-approval` / `--allow-vpc-change`）
-在 provider 未加载时也挂在主 parser 上，仍在 `cli/tests` 比对；provider 贴的旋钮与子动词（`--prefix` /
+在 provider 未加载时也挂在主 parser 上，仍在 `cli/tests` 比对；provider 贴的选项与子动词（`--prefix` /
 `--vpc` / `--stop-timeout` / `--region` / `--profile`、`push-worker` / `list-workers`）在 provider=None 时**不存在**。
-provider 住 `gherkai[deploy-aws]` optional extra、只有部署方装（ADR 0037 决策 6），皮的测试不该强依赖它，故这批
+provider 住 `gherkai[deploy-aws]` optional extra、只有部署方装（ADR 0037 决策 6），前端的测试不该强依赖它，故这批
 放本包。
 
 parser 按**真实接线顺序**建（同 `test_provider.py::_parse`）：`prog` 末段是 `deploy` 还是 `destroy` 决定
-provider 贴什么（它按 prog 末段判 destroy 专属 flag 与 worker 子动词）→ 先贴皮的中立 flag → 再
+provider 贴什么（它按 prog 末段判 destroy 专属 flag 与 worker 子动词）→ 先贴前端的中立 flag → 再
 `Provider().add_arguments(parser)`，`conflict_handler="resolve"` 让 provider 的重声明生效。
 
 代码跨的抽取器与 `cli/tests` 共用（`cli/tests/_doc_rules.py`）：两处各写一份正则，迟早对同一段文字给出
@@ -37,12 +37,12 @@ VERBS = ("deploy", "destroy")
 
 
 def _build(verb: str) -> argparse.ArgumentParser:
-    """皮 + provider 拼出的真 parser。皮那半边逐条照 `cli/gherkai_cli/deploy.py` 的声明抄——
+    """前端 + provider 拼出的真 parser。前端那半边逐条照 `cli/gherkai_cli/deploy.py` 的声明抄——
     只抄 flag 面（名字/是否带值），help 与默认值归那边、这里不复述。"""
     parser = argparse.ArgumentParser(prog=f"gherkai {verb}", conflict_handler="resolve")
     parser.add_argument("--provider", default=None)
     if verb == "deploy":
-        # 三个互斥的「不真部署」动作 + 两个被 provider 精确化的中立 flag（destroy 上皮只声明 --provider）
+        # 三个互斥的「不真部署」动作 + 两个被 provider 精确化的中立 flag（destroy 上前端只声明 --provider）
         action = parser.add_mutually_exclusive_group()
         action.add_argument("--diff", action="store_true")
         action.add_argument("--synth-only", default=None)

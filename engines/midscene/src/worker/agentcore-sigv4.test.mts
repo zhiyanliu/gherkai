@@ -42,7 +42,7 @@ test("缺 AWS_REGION → fail-loud（对齐 Nova region=None→NoRegionError）"
 
 
 // ---- 模型家族推断 modelFamily（ADR 0044 决策 2）：显式 env 优先、否则按 id 推断、推不出即抛 ----
-// 家族决定 Midscene 用哪套提示词与请求参数，猜错是**静默劣化**（不报错、判定悄悄变差），故这里逐条钉住推断表：
+// 家族决定 Midscene 用哪套提示词与请求参数，猜错是**静默劣化**（不报错、判定悄悄变差），故这里逐条锁住推断表：
 // 表里少一项 / 锚错位置，对应那行即红。
 function withFamilyEnv<T>(value: string | undefined, fn: () => T): T {
   const saved = process.env.MIDSCENE_MODEL_FAMILY;
@@ -106,8 +106,8 @@ test("MODEL 缺省 = DEFAULT_MODEL（MIDSCENE_MODEL_ID 覆盖那条在 run-scope
   assert.equal(MODEL, DEFAULT_MODEL);
 });
 
-test("DEFAULT_MODEL 钉的是具体 id：换默认得连这条字面量一起改（刻意的升级闸门，对称 Nova 那条）", () => {
-  // 换默认模型 = 换判定，流程是「评测集 A/B + 随发版并在 Release 正文点明」；字面量在这里是闸门、不是脆弱断言。
+test("DEFAULT_MODEL 锁定的是具体 id：换默认得连这条字面量一起改（刻意的升级闸门，对称 Nova 那条）", () => {
+  // 换默认模型 = 换判定，流程是「模型评测集 A/B + 随发版并在 Release 正文点明」；字面量在这里是闸门、不是脆弱断言。
   assert.equal(DEFAULT_MODEL, "us.openai.gpt-5.6-terra");
 });
 

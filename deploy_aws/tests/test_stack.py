@@ -111,10 +111,10 @@ def test_two_ecr_repos():
 
 
 def test_runs_table_has_the_sparse_status_gsi_for_worker_cleanup():
-    """runs 表按 `status` 的 GSI（ADR 0038 清理安全阀）：**投影必须含 `worker_task_def_arns`**。
+    """runs 表按 `status` 的 GSI（ADR 0038 清理时的运行中 run 引用检查）：**投影必须含 `worker_task_def_arns`**。
 
     过滤表达式 `contains(worker_task_def_arns, :arn)` 作用在**索引投影出的属性**上——不投影则恒不匹配、
-    安全阀静默失效（会删掉运行中 run 手里的 revision，detached run 的剩余 job 全起不来）。
+    引用检查静默失效（会删掉运行中 run 手里的 revision，detached run 的剩余 job 全起不来）。
     稀疏是构造出来的：只有 STATE item 带顶层 `status`。不用 ALL：STATE 的 `jobs` Map 随 job 数增长。
     """
     t = _template()
@@ -168,7 +168,7 @@ def test_ssm_params_with_prefix_path():
 
 
 def test_ssm_parameter_set_is_exactly_six():
-    """SSM 参数**全集**钉死（枚举型护栏）：网络 2（subnets/security-groups，cli resolve_network 读）
+    """SSM 参数**全集**锁定（枚举型护栏）：网络 2（subnets/security-groups，cli resolve_network 读）
     + 部署戳 2（version/vpc，ADR 0037 决策 6）+ 模板 revision ARN 2（每引擎一个，ADR 0038 四步第 1 步）。
 
     逐条比全集、不只验「存在」——「存在」式断言照不出**漏写**（少一个参数时子集匹配仍绿），而这些参数每一个
@@ -342,7 +342,7 @@ def test_task_role_has_events_putitem_not_runs():
 def test_task_role_resource_arns_narrowed():
     """IAM 资源 ARN 已收窄（ADR 0033）——回归护栏：防将来改回 * 或踩 account=aws 陷阱。
 
-    收窄依据 = AWS SAR resource_types + IAM 策略模拟器实证。此测试钉死 CDK 生成的 ARN 形态。
+    收窄依据 = AWS SAR resource_types + IAM 策略模拟器实证。此测试锁定 CDK 生成的 ARN 形态。
     """
 
     t = _template()
@@ -491,7 +491,7 @@ def test_stop_timeout_accepts_lower_boundary_1():
 
 
 def test_stop_timeout_rejects_just_over_cap_121():
-    # **刚越上界 121** fail-fast：钉死上限 = 120（区分 <=120 / <=119 / <=130——180 太远、区分不了边界）。
+    # **刚越上界 121** fail-fast：锁定上限 = 120（区分 <=120 / <=119 / <=130——180 太远、区分不了边界）。
     with pytest.raises(ValueError, match="Fargate"):
         _template(context={"stop_timeout": "121"})
 

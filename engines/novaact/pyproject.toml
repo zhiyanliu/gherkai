@@ -16,12 +16,12 @@ classifiers = [
 ]
 # worker 零 core 依赖（讲协议，ADR 0024/0037）；boto3 直接 import 就直接声明、不靠 nova-act 传递（ADR 0037 决策 2c）。
 dependencies = [
-    "nova-act==3.4.187.0",  # SDK 钉精确版本，升级随发版评估（ADR 0042 决策六）
+    "nova-act==3.4.187.0",  # SDK 锁定精确版本，升级随发版评估（ADR 0042 决策六）
     "boto3>=1.34",
 ]
 
 [project.scripts]
-# 定位链第三级（PATH 可执行）的供给方；第二级是同 venv 的 `python -m gherkai_worker_novaact`（ADR 0037 决策 3）
+# 定位链第三级（PATH 可执行）由本包提供；第二级是同 venv 的 `python -m gherkai_worker_novaact`（ADR 0037 决策 3）
 gherkai-worker-novaact = "gherkai_worker_novaact.__main__:main"
 
 [project.urls]

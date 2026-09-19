@@ -158,7 +158,7 @@ def test_detached_flag_on_state_item(aws):
 
 
 def test_worker_task_def_arns_on_state_item(aws):
-    """create_run 把 definition 的 worker revision ARN 摊平成 STATE 顶层属性（ADR 0038 清理 pass 安全阀）。
+    """create_run 把 definition 的 worker revision ARN 摊平成 STATE 顶层属性（ADR 0038 清理 pass 的运行中 run 引用检查）。
 
     为什么必须摊平：同一批 ARN 也在 definition 里，但那在 META 的 `meta_json` 字符串内、DDB 查不动；清理 pass
     要按 `status` GSI Query 非终态 run + `contains` 过滤引用，只有顶层属性做得到（沿用 `detached` 顶层标记先例）。

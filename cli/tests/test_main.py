@@ -168,7 +168,7 @@ def test_submit_rejects_max_concurrency_below_one(tmp_path, monkeypatch, capsys)
     assert not report_dir.exists()   # definition 也没落库
 
 
-# ---- plan 预检（dry-run）：纯本地、不连 AWS、零费用 ----
+# ---- 用例预检（plan）：纯本地、不连 AWS、零费用 ----
 
 def test_plan_text_shows_scope_grouping(tmp_path, capsys):
     # plan 子命令：读 feature → 渲染 scope/job 分组，不起 worker（无需 monkeypatch schedule）。
@@ -180,7 +180,7 @@ def test_plan_text_shows_scope_grouping(tmp_path, capsys):
     rc = m.main(["plan", str(feat)])
     assert rc == 0
     out = capsys.readouterr().out
-    assert "plan（预检，未执行）" in out
+    assert "plan（用例预检，未执行）" in out
     assert "1 job(scope)" in out
     assert "engine=midscene" in out          # @engine tag 生效
     assert "Then" in out and "对吗" in out    # step 预览
@@ -306,13 +306,13 @@ def test_run_grace_sentinel_derives_from_engine_self_report(tmp_path, monkeypatc
 
 
 def test_run_grace_mixed_engines_takes_max_of_self_reported(tmp_path, monkeypatch, capsys):
-    """混引擎 run 取各引擎自报下限的 max（grace 是 run 级单值，ADR 0024）——两条腿都问、按大的那个定。"""
+    """混引擎 run 取各引擎自报下限的 max（grace 是 run 级单值，ADR 0024）——两个引擎都问、按大的那个定。"""
     feat = tmp_path / "mixed.feature"
     feat.write_text(
         "Feature: mixed\n"
         "  @engine:midscene\n  Scenario: a\n    When \"做点啥\"\n"
         "  @engine:novaact\n  Scenario: b\n    When \"做点啥\"\n", encoding="utf-8")
-    _fake_locator(monkeypatch, available=("novaact", "midscene"))  # 两条腿都得「装了」才问得到（dev 机常缺 midscene）
+    _fake_locator(monkeypatch, available=("novaact", "midscene"))  # 两个引擎都得「装了」才问得到（dev 机常缺 midscene）
     asked: list[str] = []
     stubbed = compose.query_capabilities  # conftest autouse 装的确定性假替身（不是真 spawn），此处只在它外面加计数
     monkeypatch.setattr(m.compose, "query_capabilities",
@@ -504,7 +504,7 @@ def test_run_state_shows_running_then_final(tmp_path, monkeypatch, capsys):
 
 
 def test_run_wires_artifact_dirs_to_build_engines(tmp_path, monkeypatch, capsys):
-    # fail-fast 护栏（ADR 0027 产物归位）：钉住 __main__ 把两引擎产物落点算成 <report_dir>/<run_id>/<engine-dir>
+    # fail-fast 护栏（ADR 0027 产物归位）：固定住 __main__ 把两引擎产物落点算成 <report_dir>/<run_id>/<engine-dir>
     # 并传给 build_engines。防止将来改坏 __main__ 那几行接线（否则产物落错地方，只有在真实 AWS 上运行才发现）。
     box = {}
     real_build = m.compose.build_engines
@@ -799,7 +799,7 @@ def test_run_exits_2_before_spawn_when_worker_runtime_missing(tmp_path, monkeypa
 def test_run_unused_engine_miss_does_not_block(tmp_path, monkeypatch, capsys):
     """miss 只连坐**用到它**的 run：novaact-only 的 run 在 midscene 未装（dev 常态）下照常运行退 0。
 
-    preflight 只查本次 plan 用到的引擎；未用到那条腿即便 miss 也只是「一用即报错」的空腿。
+    preflight 只查本次 plan 用到的引擎；未用到的那个引擎即便 miss 也只是「一用即报错」。
     """
     real = m.compose.resolve_worker_cmd
     asked = []
@@ -1078,7 +1078,7 @@ def test_differently_written_same_file_is_deduped_with_a_hint(tmp_path, monkeypa
     去重键必须取 load_feature 算出的 uri（路径归一后），不是原始路径字符串——glob + 显式并列常撞出这种混写。
     提示点名被忽略的那个写法（可能是打错了文件名）。
 
-    注：`./x.feature` 不足以钉住这条——argparse 的 `type=Path` 已把 `./` 折掉，两个入参到这里已是同一字符串。
+    注：`./x.feature` 不足以守住这条——argparse 的 `type=Path` 已把 `./` 折掉，两个入参到这里已是同一字符串。
     """
     _write_feature(tmp_path)
     (tmp_path / "sub").mkdir()
@@ -1172,7 +1172,7 @@ def test_run_and_submit_share_one_steps_dir_help_text(capsys):
     assert m._STEPS_DIR_HELP_RUN_SUBMIT.startswith(m._STEPS_DIR_HELP)
     assert steps_dir_help("plan").startswith(m._STEPS_DIR_HELP)
     assert steps_dir_help("plan") != m._STEPS_DIR_HELP_RUN_SUBMIT
-    # doctor 也带 --backend，却只查环境、不产提交记录 → 恒用不加补充的公共段（钉住「判据不是 --backend」）
+    # doctor 也带 --backend，却只查环境、不产提交记录 → 恒用不加补充的公共段（守住「判据不是 --backend」）
     assert steps_dir_help("doctor") == m._STEPS_DIR_HELP
 
 
@@ -1381,7 +1381,7 @@ def test_doctor_cloud_worker_grace_ok_and_skips_engine_without_local_worker(monk
     """两态一测：本机装了的引擎（midscene）下限 ≤ 云端停止宽限 → ✓；本机没装的（novaact）**跳过**。
 
     跳过而非失败：下限是 worker 自报的，本机没这个 worker 就问不出来——只提交、不在本机执行的人不该为这一行装运行时。
-    比对只对**已解析到 revision** 的引擎做一次 describe（不去猜没解析到的那条腿）。
+    比对只对**已解析到 revision** 的引擎做一次 describe（不去猜没解析到的那个引擎）。
     """
     _fake_locator(monkeypatch, available=("midscene",))
     _cloud_backend_ok(monkeypatch)
@@ -1409,7 +1409,7 @@ def test_doctor_cloud_worker_grace_shortfall_is_optional_gap_not_failure(monkeyp
     assert f"novaact: 收尾需 {FAKE_MIN_GRACE_S['novaact']:g}s > 云端停止宽限 120s" in row["detail"]
     assert "gherkai deploy --stop-timeout" in row["detail"]
     assert "已知并接受" in row["detail"]  # 顶满平台上限的那支处置也在（Nova 在部署缺省下恒落此格）
-    assert f"midscene: 收尾需 {FAKE_MIN_GRACE_S['midscene']:g}s ≤" in row["detail"]  # 另一条腿照过
+    assert f"midscene: 收尾需 {FAKE_MIN_GRACE_S['midscene']:g}s ≤" in row["detail"]  # 另一个引擎照过
     # 人读形态：- 标可选缺失、末行点明 - 的含义（同 provider 段可选项）
     _stub_stop_timeout(monkeypatch, 120)
     assert m.main(["doctor", "--backend", "cloud", "--prefix", "vfy-", "--region", "us-east-1"]) == 0
@@ -1698,7 +1698,7 @@ def _explain_run(tmp_path, *, evidence=..., run_status=None, with_results=True, 
     ]
     jr = JobResult(job=job, status=S.ABORTED if job_only else S.FAILED, scenarios=scenarios,
                    session_id="01a0deadbeef", error_type="timeout" if job_only else None,
-                   message="job 墙钟超时被停" if job_only else None,
+                   message="job 墙钟预算用尽被停" if job_only else None,
                    report_refs=(ReportRef(kind="summary", ref="file:///tmp/summary.json", label="summary"),))
     st = run_status or (S.ABORTED if job_only else S.FAILED)
     run_store, result_store, _rp, _mk = compose.build_local_stores(report_dir=str(root))
@@ -1877,7 +1877,7 @@ def test_explain_job_without_step_records_gets_a_job_block(tmp_path, capsys):
     root, run_id = _explain_run(tmp_path, job_only=True)
     rc, out, _ = _explain(capsys, root, run_id)
     assert rc == 0
-    assert "判定：aborted  (timeout: job 墙钟超时被停)" in out
+    assert "判定：aborted  (timeout: job 墙钟预算用尽被停)" in out
     assert "诊断细节见 worker 日志" in out
     assert "report（summary）: file:///tmp/summary.json" in out
     # 两条 scenario 各自也没有判定记录（scenario_done 没到）→ 2 条 scenario 行 + 4+2 条 step 行

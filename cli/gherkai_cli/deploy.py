@@ -1,9 +1,9 @@
-"""`gherkai deploy` / `gherkai destroy` 的命令皮：provider 发现 + 命令面 flag，**不含任何 IaC 知识**（ADR 0037 决策 6）。
+"""`gherkai deploy` / `gherkai destroy` 的命令行前端：provider 发现 + 命令面 flag，**不含任何 IaC 知识**（ADR 0037 决策 6）。
 
-本模块是「命令 provider 中立」那条决策在 code 里的落点：**皮只做三件事**——按 entry point group 发现已装的
+本模块是「命令 provider 中立」那条决策在 code 里的落点：**前端只做三件事**——按 entry point group 发现已装的
 provider 包、把 provider 的 flag 接到自己的 subparser 上、把动作分派给 provider。
-**皮绝不 import `aws_cdk` / 不碰 CDK 的 boto3 用法**：那些只住在 provider 包（`gherkai-deploy-aws`，经 CLI 的
-`[deploy-aws]` extra 隔离——只有部署方装它，只提交 run 的人不必背 CDK + Node）。皮对 provider 的全部认识 =
+**前端绝不 import `aws_cdk` / 不碰 CDK 的 boto3 用法**：那些只住在 provider 包（`gherkai-deploy-aws`，经 CLI 的
+`[deploy-aws]` extra 隔离——只有部署方装它，只提交 run 的人不必背 CDK + Node）。前端对 provider 的全部认识 =
 下面 `Provider` 契约那几个方法名。
 
 **为何有 provider 这层间接**：非 AWS 后端出现时新增一个 `gherkai-deploy-<provider>` 包即可，命令面不动
@@ -20,12 +20,12 @@ from importlib.metadata import EntryPoint, entry_points
 PROVIDER_GROUP = "gherkai.deploy"
 
 # ============================================================================
-# Provider 契约（皮对 provider 的全部要求；provider 侧的实现与 IaC 细节见 gherkai-deploy-aws）
+# Provider 契约（前端对 provider 的全部要求；provider 侧的实现与 IaC 细节见 gherkai-deploy-aws）
 # ----------------------------------------------------------------------------
-#   name                        provider 自述名（诊断/日志用）。**皮的选择键是 entry point 名、不是它**——
+#   name                        provider 自述名（诊断/日志用）。**前端的选择键是 entry point 名、不是它**——
 #                               选择要在「未加载」时就能做（见上 PROVIDER_GROUP）。
 #   add_arguments(parser)       往 deploy/destroy 两个 subparser 各贴一次自己的 flag。AWS provider 贴的是
-#                               stack+app 那四个 context 旋钮映射成的三 flag（`--prefix` / `--vpc` /
+#                               stack+app 那四个 context 配置项映射成的三 flag（`--prefix` / `--vpc` /
 #                               `--stop-timeout`），外加它自己的 AWS 概念 flag（`--region` / `--profile` 等）。
 #   deploy(args) -> int         默认动作：真部署/更新。
 #   destroy(args) -> int        拆栈（RETAIN 语义见 ADR 0033）。
@@ -34,17 +34,17 @@ PROVIDER_GROUP = "gherkai.deploy"
 #   bootstrap(args) -> int      `--bootstrap`：透传 provider 的账户初始化（cdk bootstrap）。
 #   doctor(args) -> list[dict]  **可选**：`gherkai doctor` 的 provider 段，每项 {name, ok, detail} + 可选 required（缺省 False）；
 #                               只读、不返退出码（ADR 0041 决策四）。缺席则入口打一行「provider 未提供自检」。
-# 全部收**已解析的 argparse.Namespace**、返回**进程退出码**：provider 自己声明的 flag 自己读，皮声明的命令面
+# 全部收**已解析的 argparse.Namespace**、返回**进程退出码**：provider 自己声明的 flag 自己读，前端声明的命令面
 # flag（`--require-approval` / `--allow-vpc-change`）也在同一个 Namespace 上，provider 按需取。
-# 皮**不代 provider 做**：VPC 档 SSM 三态比对、版本戳写入、Node 前置检查、cdk 调用——全在 provider 内
+# 前端**不代 provider 做**：VPC 档 SSM 三态比对、版本戳写入、Node 前置检查、cdk 调用——全在 provider 内
 # （它们要连 AWS / 起 node，是被 `[deploy-aws]` extra 隔离的那半边）。
 #
 # **子动词接缝**（`gherkai deploy push-worker` / `list-workers` 那族 worker 镜像命令，ADR 0038）：provider 在
 # `add_arguments(deploy_parser)` 里自己 `add_subparsers()`，并给每个子动词 `set_defaults(_deploy_verb=<可调用>)`；
-# 皮的分派**先看 `_deploy_verb`**，有就交给它、没有才走 `--diff/--synth-only/--bootstrap/deploy` 那四路。
-# **组合规则**：子动词与三个「不真部署」flag 同给 → 皮退 2（`readonly_flag_conflict`）——子动词会真写账户（推镜像/
+# 前端的分派**先看 `_deploy_verb`**，有就交给它、没有才走 `--diff/--synth-only/--bootstrap/deploy` 那四路。
+# **组合规则**：子动词与三个「不真部署」flag 同给 → 前端退 2（`readonly_flag_conflict`）——子动词会真写账户（推镜像/
 # 注册 task-def），若让它静默盖过用户点名要的只读预览，正是那三个 flag 要防的事（ADR 0037 决策 6 的 reviewer 靶点）。
-# 这样那族命令落地时**皮一行不改**（它们要读 SSM/ECR/task-def、碰容器引擎，全属 provider 那半边）。
+# 这样那族命令落地时**前端一行不改**（它们要读 SSM/ECR/task-def、碰容器引擎，全属 provider 那半边）。
 # 子动词 subparser 不可设 `required=True`——否则裸 `gherkai deploy`（默认动作 = 真部署）会被 argparse 拒。
 # ============================================================================
 
@@ -58,7 +58,7 @@ def resolve_provider(name: str | None) -> tuple[object | None, str | None]:
     """按 `--provider` 值（或唯一性）选出 provider 并加载 → `(provider, None)`；失败 → `(None, 人读的一句)`。
 
     三分叉（ADR 0037 决策 6）：**零个** → 提示装 `gherkai[deploy-aws]`；**一个** → 直接用、无需 `--provider`；
-    **多个** → 必须 `--provider <名>`，否则列出名字让人选（皮不替用户猜「哪个云」）。全部失败档由调用点退 2。
+    **多个** → 必须 `--provider <名>`，否则列出名字让人选（前端不替用户猜「哪个云」）。全部失败档由调用点退 2。
 
     加载 = `ep.load()`：拿到**类**则实例化（entry point 惯例指向 `Provider` 类），拿到现成对象/单例则原样用。
     加载失败（provider 包半装 / 版本不匹配 / 它自己的 import 链炸）不让 traceback 裸奔——翻成点名 entry point
@@ -113,14 +113,14 @@ def add_parsers(sub, *, provider: object | None = None, provider_error: str | No
     解析结果经 `set_defaults` 落到两个 subparser 上（`_provider_obj` / `_provider_error`），分派侧直接取——
     provider 只加载一次，不在「贴 flag」与「执行动作」之间解析两遍。
 
-    `provider=None`（未解析或解析失败）时只有皮自己的命令面 flag——保住 `gherkai --help` / `gherkai deploy --help`
+    `provider=None`（未解析或解析失败）时只有前端自己的命令面 flag——保住 `gherkai --help` / `gherkai deploy --help`
     **恒可用**（帮助不该因为没装 provider 而失败），真动作时再由调用点报 `provider_error` 并退 2。
 
-    **`conflict_handler="resolve"`**：命令面 flag 由皮声明、provider 旋钮由 provider 声明，两侧同名时以
-    provider 为准而非抛 `ArgumentError`——同名即同义（旋钮的真源在 provider 那半边），让 `--help` 因重名崩掉
+    **`conflict_handler="resolve"`**：命令面 flag 由前端声明、provider 的选项由 provider 声明，两侧同名时以
+    provider 为准而非抛 `ArgumentError`——同名即同义（选项的真源在 provider 那半边），让 `--help` 因重名崩掉
     是最没价值的失败方式。**这不是假想情形**：AWS provider 就重声明了 `--allow-vpc-change` /
-    `--require-approval`（带上自己的 choices 与措辞），resolve 让它的声明生效、皮的那份自然让位。
-    不同义的重名属集成 bug，会在分派读不到自己的 dest 时暴露（皮只读自己那三个动作 flag）。
+    `--require-approval`（带上自己的 choices 与措辞），resolve 让它的声明生效、前端的那份自然让位。
+    不同义的重名属集成 bug，会在分派读不到自己的 dest 时暴露（前端只读自己那三个动作 flag）。
     """
     # provider 缺席时把原因写进 epilog：不然「帮助里没有 --prefix/--vpc」看着像 flag 面残缺，
     # 而真相是 provider 没解析出来（没装 / 装坏了）——降级的帮助必须自解释。
@@ -169,8 +169,8 @@ def add_parsers(sub, *, provider: object | None = None, provider_error: str | No
     )
     _add_provider_flag(dsp)
 
-    # provider 的旋钮两个子命令都要（destroy 也得知道拆哪个 prefix、且 provider 合成时要同一套 context）。
-    # **贴两次是有意的**：argparse 的父子 parser 不共享 action 实例，且 provider 才知道自己有哪些旋钮。
+    # provider 的选项两个子命令都要（destroy 也得知道拆哪个 prefix、且 provider 合成时要同一套 context）。
+    # **贴两次是有意的**：argparse 的父子 parser 不共享 action 实例，且 provider 才知道自己有哪些选项。
     if provider is not None:
         provider.add_arguments(dp)
         provider.add_arguments(dsp)

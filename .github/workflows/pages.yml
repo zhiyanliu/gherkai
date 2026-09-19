@@ -1,7 +1,7 @@
 name: pages
 
 # 把 docs/diagrams/ 原样发布到 GitHub Pages（ADR 0045 决策七）：index.html + 已入库的可交互 HTML + 导出 SVG，不做任何构建。
-# 不发布整个仓库：ADR / CONTEXT 是给建造者 AI 读的，不该多出一个仓库外的站点入口；markdown 文档在 GitHub 上直接读。
+# 不发布整个仓库：ADR / CONTEXT 是给 contributor 侧 AI agent 读的，不该多出一个仓库外的站点入口；markdown 文档在 GitHub 上直接读。
 # 只在默认分支上部署：Pages 只有一个站点，非默认分支的改动不该覆盖它。
 on:
   push:

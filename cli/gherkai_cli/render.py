@@ -1,6 +1,6 @@
 """渲染：把 ADR 0024 事件流与 RunResult 变成人看的文本 / 机器读的 JSON（cli 表层）。
 
-core 产出纯数据（RunResult、Event）；怎么展示是皮的事，故渲染逻辑留在 cli。
+core 产出纯数据（RunResult、Event）；怎么展示是前端的事，故渲染逻辑留在 cli。
 """
 from __future__ import annotations
 
@@ -113,7 +113,7 @@ def render_text(result: RunResult) -> str:
 def render_run_state(state: RunState) -> str:
     """`status` 的 RunState 人读渲染（轻量；权威判定明细读 jobs/*.json 或 --json）。
 
-    local/cloud 两路共用一份（保两路一致，ADR 0034）——渲染是皮的事，故住这里而非产品本体层。
+    local/cloud 两路共用一份（保两路一致，ADR 0034）——渲染是前端的事，故住这里而非产品本体层。
     """
     lines = [f"run {state.run_id}: {state.status.value}"]
     for sid, js in state.jobs.items():
@@ -124,7 +124,7 @@ def render_run_state(state: RunState) -> str:
     return "\n".join(lines)
 
 
-# ---- plan 预检（dry-run）渲染：纯本地、零费用，展示 .feature → scope/job 分组 ----
+# ---- 用例预检（plan）渲染：纯本地、零费用，展示 .feature → scope/job 分组 ----
 
 def render_plan_text(jobs: list[Job], default_engine: str, dispatch: dict | None = None) -> str:
     """plan 产出 Job[] → 人看的多行预检视图（scope/engine/scenario/step，不实际运行）。
@@ -134,7 +134,7 @@ def render_plan_text(jobs: list[Job], default_engine: str, dispatch: dict | None
     """
     n_scenarios = sum(len(j.scenarios) for j in jobs)
     out: list[str] = [
-        "===== plan（预检，未执行）=====",
+        "===== plan（用例预检，未执行）=====",
         f"  {len(jobs)} job(scope)  ·  {n_scenarios} scenario  ·  default_engine={default_engine}",
     ]
     for j in jobs:
@@ -201,7 +201,7 @@ def plan_to_dict(jobs: list[Job], default_engine: str, dispatch: dict | None = N
 # ---- explain：step 级证据视图（ADR 0042 决策四）——判定树骨架 + evidence 合成 ----
 # 文本与 JSON **同源**：`explain_to_dict` 产一份文档，`--json` 直接 dump，文本模式喂 `render_explain_text`。
 # 两路分头组装必漂移（run/status 的教训），故这里只有一个组装器。IO（读 evidence）不在本模块：
-# 由调用方注入 `evidence_reader`（皮的 IO 归 __main__，渲染层保持无副作用、可测）。
+# 由调用方注入 `evidence_reader`（前端的 IO 归 __main__，渲染层保持无副作用、可测）。
 
 _NO_RECORD = "无记录（未执行或未上报）"          # 骨架有、判定记录没有的 step / scenario
 _THOUGHT_BUDGET = 800                            # 单段推理文本的字符预算（ADR 0042 决策四「文本预算」）
@@ -241,7 +241,7 @@ def explain_to_dict(*, run_id: str, status: str | None, results: list[JobResult]
     evidence_reader(report_refs) → `(evidence | None, evidence_missing | None)`：读 kind=evidence 的 ref（IO 在调用方）。
     wants_evidence(step_dict) → bool：None = 每个有记录的 step 都读（`--json` 契约要求全给）；文本模式传
     `explain_step_expands` 的绑定版，跳过不渲染的 step（见其 docstring）。
-    scenario_ids / step_index：`--scenario` / `--step` 的筛选结果（None = 不筛）；匹配器在皮层（它还要出候选清单）。
+    scenario_ids / step_index：`--scenario` / `--step` 的筛选结果（None = 不筛）；匹配器在前端（它还要出候选清单）。
     """
     scopes = []
     for jr in results:

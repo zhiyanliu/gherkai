@@ -38,16 +38,16 @@ def _clean_aws_env(monkeypatch):
 
 
 def _parse(*argv: str) -> argparse.Namespace:
-    """走**真 parser**、按真实接线顺序拼（皮先声明命令面 flag，provider 再贴自己的旋钮）——不用
+    """走**真 parser**、按真实接线顺序拼（前端先声明命令面 flag，provider 再贴自己的选项）——不用
     SimpleNamespace 手捏 args，那会让 flag 面与消费侧各自漂移（默认值/dest 名笔误在手捏的 namespace 里测不出来）。"""
-    # 皮那半边（cli/gherkai_cli/deploy.py）的中立版先贴、provider 再贴——`conflict_handler="resolve"` 令
+    # 前端那半边（cli/gherkai_cli/deploy.py）的中立版先贴、provider 再贴——`conflict_handler="resolve"` 令
     # provider 的声明生效（真实接线顺序，见 cli 模块头「两层声明」）。
     parser = argparse.ArgumentParser(prog="gherkai deploy", conflict_handler="resolve")
     parser.add_argument("--allow-vpc-change", action="store_true")
     parser.add_argument("--require-approval", default=None, metavar="MODE")
     Provider().add_arguments(parser)
     args = parser.parse_args(argv)
-    args.version = VERSION  # CLI 皮交进来的版本（接缝契约，见 cli 模块头）
+    args.version = VERSION  # CLI 前端交进来的版本（接缝契约，见 cli 模块头）
     return args
 
 
@@ -55,7 +55,7 @@ def _parse(*argv: str) -> argparse.Namespace:
 
 def test_vpc_absent_parses_but_every_synthesizing_verb_exits_2(cdk, monkeypatch, capsys):
     """`--vpc` 无隐式默认（ADR 0037 决策 6：漏档曾被合成为新建整套 VPC 的变更集）——但校验在**运行期**、
-    不在 argparse：`--bootstrap` 是账户级动作、不合成 app，不该被拖着要一个无关旋钮。四个合成动词缺档 → 退 2、
+    不在 argparse：`--bootstrap` 是账户级动作、不合成 app，不该被拖着要一个无关选项。四个合成动词缺档 → 退 2、
     **不调 cdk**。"""
     args = _parse("--prefix", "gherkai-", "--region", "us-east-1")
     assert args.vpc is None
@@ -144,10 +144,10 @@ def test_vpc_rejects_anything_else(value):
 
 
 def test_contributed_flag_surface_is_exactly_the_provider_specific_set():
-    """flag 面全集钉死（枚举型护栏）：三个 context 旋钮 flag + AWS 定位二件套 + 两个「皮的中立版的 AWS
-    精确化」（见 cli 模块头「两层声明」）+ 查询缓存旋钮 `--refresh-context`，**就这八个**。
+    """flag 面全集锁定（枚举型护栏）：三个 context 配置项 flag + AWS 定位二件套 + 两个「前端的中立版的 AWS
+    精确化」（见 cli 模块头「两层声明」）+ 查询缓存选项 `--refresh-context`，**就这八个**。
 
-    比全集而非「某个 flag 在不在」：少一个 → 用户够不到某个旋钮；多一个 → 越界抢皮的命令面 flag。
+    比全集而非「某个 flag 在不在」：少一个 → 用户够不到某个选项；多一个 → 越界抢走前端的命令面 flag。
     两种都只在接线后才暴露。
     """
     parser = argparse.ArgumentParser()
@@ -161,7 +161,7 @@ def test_the_two_action_knobs_are_only_on_deploy():
     """`--allow-vpc-change` / `--require-approval` **只贴 deploy**（枚举型全集比对，同上条口径）。
 
     destroy 两个都不消费：它不做 VPC 档三态比对，`cdk destroy` 也没有 `--require-approval`——贴上去就是
-    `--help` 里两个恒无效的旋钮，且措辞讲的是 deploy 的变更集。皮的中立版同样只在 deploy 上（见 cli 模块头
+    `--help` 里两个恒无效的选项，且措辞讲的是 deploy 的变更集。前端的中立版同样只在 deploy 上（见 cli 模块头
     「两层声明」），故 destroy 上这两个 flag 只可能来自本 provider。
     """
     def _flags(prog: str) -> set[str]:
@@ -170,7 +170,7 @@ def test_the_two_action_knobs_are_only_on_deploy():
         return {opt for action in parser._actions for opt in action.option_strings} - {"-h", "--help"}
 
     shared = {"--prefix", "--vpc", "--stop-timeout", "--region", "--profile", "--refresh-context"}
-    # deploy 还多一个 `--container-engine`（第 2 步同步基底要用它）、destroy 多一个 `--yes`——两者各自的专属项
+    # deploy 还多一个 `--container-engine`（第 2 步同步基础镜像要用它）、destroy 多一个 `--yes`——两者各自的专属项
     assert _flags("gherkai deploy") == shared | {"--allow-vpc-change", "--require-approval", "--container-engine"}
     assert _flags("gherkai destroy") == shared | {"--yes"}
     # 行为变化：destroy 上给这两个从「静默忽略」变成 argparse 报错（退 2，同 preflight 口径）
@@ -183,9 +183,9 @@ def test_the_two_action_knobs_are_only_on_deploy():
 
 
 def test_worker_subverb_surface_is_exactly_three_and_only_on_deploy():
-    """子动词全集钉死（枚举型护栏）+ **只挂 deploy**。
+    """子动词全集锁定（枚举型护栏）+ **只挂 deploy**。
 
-    挂到 destroy 上不是「多个没用的命令」而是危险：皮的 destroy 分派不看 `_deploy_verb`，
+    挂到 destroy 上不是「多个没用的命令」而是危险：前端的 destroy 分派不看 `_deploy_verb`，
     `gherkai destroy push-worker …` 会解析通过、然后去拆栈（见 `Provider._declares_worker_subverbs`）。
     """
     def _verbs(prog: str) -> set[str] | None:
@@ -255,7 +255,7 @@ def test_provider_name_is_aws():
 # ---------------------------------------------------------------- context 拼装
 
 def test_context_new_dossier_gives_neither_vpc_knob():
-    # `new` = stack 自建 → `vpc_id`/`use_default_vpc` 两个旋钮都不给（stack._network 的建新分支）
+    # `new` = stack 自建 → `vpc_id`/`use_default_vpc` 两个配置项都不给（stack._network 的建新分支）
     ctx = Provider().build_context(_parse("--vpc", "new"))
     assert ctx == {"prefix": "gherkai-", "version": VERSION}
 
@@ -285,7 +285,7 @@ def test_context_prefix_follows_the_runtime_resolution_chain(monkeypatch):
 
 
 def test_version_falls_back_to_installed_dist_version():
-    """CLI 皮没交版本 → 本包自报 dist 版本（`==` 同版本 pin 成同一个，不引入第二个真源）。"""
+    """CLI 前端没交版本 → 本包自报 dist 版本（`==` 同版本 pin 成同一个，不引入第二个真源）。"""
     args = _parse("--vpc", "new")
     del args.version
     assert Provider().build_context(args)["version"]  # 非空即可（dev 版形如 1.3.0.postN.devM+sha.dirty）
@@ -307,7 +307,7 @@ def test_generated_cdk_json_carries_app_and_feature_flags_verbatim(tmp_path):
     assert data["app"] == Provider().app_command()
     # 特性开关逐字沿用收编前那一组：换一组 = 给已部署 stack 造无意义变更集
     assert data["context"] == CDK_FEATURE_FLAGS
-    # 设计旋钮**不进** cdk.json（一律 `-c` 显式传，免被 cdk.json 静默兜住）
+    # 设计参数**不进** cdk.json（一律 `-c` 显式传，免被 cdk.json 静默兜住）
     assert not {"prefix", "version", "vpc_id", "use_default_vpc", "stop_timeout"} & set(data["context"])
 
 
@@ -464,7 +464,7 @@ class _FakeEngine:
 def cdk(monkeypatch) -> _Recorder:
     """把 Node 前置、cdk 定位、容器引擎与 worker 镜像四步都打桩掉，只留「拼出的 argv/env」这一层给断言。
 
-    **四步必须打桩**：`deploy` 在 cdk 成功后会去连真 SSM/ECR/ECS 并 `docker pull` 基底（ADR 0038）——单测里
+    **四步必须打桩**：`deploy` 在 cdk 成功后会去连真 SSM/ECR/ECS 并 `docker pull` 基础镜像（ADR 0038）——单测里
     那是「不碰 AWS」这条底线的破口（实际运行过一次：测试直奔 NoCredentialsError 且真拉了一次 GHCR 镜像）。
     调用次数记在 `rec.worker_steps` 上，供「cdk 成功才执行四步」那两条断言。
     """
@@ -589,7 +589,7 @@ def test_synth_only_pins_a_relative_dir_to_the_callers_cwd(cdk, tmp_path, monkey
     原样传会让导出物落进那里、随之消失而命令退 0（实际运行踩过的假成功；早先的测试用绝对 tmp_path、照不出来）。"""
     monkeypatch.chdir(tmp_path)
     args = _parse("--vpc", "new", "--region", "us-east-1")
-    args.synth_only = "exported"  # CLI 皮的 --synth-only DIR（接缝契约），相对用户 cwd
+    args.synth_only = "exported"  # CLI 前端的 --synth-only DIR（接缝契约），相对用户 cwd
     Provider().synth_only(args)
     argv = _argv(cdk)
     assert argv[1] == "synth"
@@ -696,12 +696,12 @@ def test_provider_module_does_not_import_aws_cdk():
 
 
 def test_tolerates_a_shell_that_declares_neither_command_face_flag(monkeypatch, capsys):
-    """别的皮（或编程式调用）没给 `--allow-vpc-change` 时**fail-closed**：档不符照拦、不因缺 flag 就放行。"""
+    """别的前端（或编程式调用）没给 `--allow-vpc-change` 时**fail-closed**：档不符照拦、不因缺 flag 就放行。"""
     parser = argparse.ArgumentParser(prog="other-shell")
     Provider().add_arguments(parser)
     args = parser.parse_args(["--vpc", "default", "--region", "us-east-1"])
     args.version = VERSION
-    del args.allow_vpc_change, args.require_approval  # 模拟「皮压根没这两个 flag」
+    del args.allow_vpc_change, args.require_approval  # 模拟「前端压根没这两个 flag」
     _stub_backend(monkeypatch, stack_exists=True, stored="vpc-0abc")
     assert Provider()._guard_vpc_spec(args) == EXIT_PRECONDITION
 
@@ -775,9 +775,9 @@ def test_context_cache_is_per_prefix(monkeypatch, tmp_path):
 # ---------------------------------------------------------------- destroy --yes（非交互销毁）
 
 def _parse_destroy(*argv: str) -> argparse.Namespace:
-    # 皮在 destroy parser 上**只**贴 provider 选择那一个 flag：`--allow-vpc-change` / `--require-approval`
+    # 前端在 destroy parser 上**只**贴 provider 选择那一个 flag：`--allow-vpc-change` / `--require-approval`
     # 的中立版只在 deploy 上（见 `_parse` 与 cli 模块头「两层声明」），故这里不能手工补——补了就掩盖
-    # 「destroy 侧根本没有这两个旋钮」这条接线事实。
+    # 「destroy 侧根本没有这两个选项」这条接线事实。
     parser = argparse.ArgumentParser(prog="gherkai destroy", conflict_handler="resolve")
     Provider().add_arguments(parser)
     args = parser.parse_args(argv)
@@ -811,7 +811,7 @@ class _AbsentEngine:
 
 
 def test_deploy_warns_about_missing_container_engine_only_for_pure_release_versions(cdk, monkeypatch, capsys):
-    """容器引擎缺失的前置警告只对**纯发行版**成立：dev/post/本地段版本的 worker 镜像步骤本就走不到「同步基底」
+    """容器引擎缺失的前置警告只对**纯发行版**成立：dev/post/本地段版本的 worker 镜像步骤本就走不到「基础镜像同步」
     （ADR 0038 定位链第四级门槛 = is_pure_release），那时警告「之后的镜像步骤会失败」是假警报。"""
     _stub_backend(monkeypatch, stack_exists=False, stored=None)
     monkeypatch.setattr(Provider, "_container_engine", staticmethod(lambda args: _AbsentEngine()))

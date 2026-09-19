@@ -2,7 +2,7 @@
 
 **宿主** = 持有隧道 agent 进程生命周期的那个进程（ADR 0035 决策 3 的三形态：前台 `run` 的 CLI 进程 /
 local `submit` 的 per-run 进程 / cloud `submit` 的隧道守护进程）。本模块住产品本体层（`gherkai` 知道
-run 生命周期，ADR 0016「演进」节）；入口皮（cli / 未来 WebUI）只负责 argparse 与打印：
+run 生命周期，ADR 0016「演进」节）；入口前端（cli / 未来 WebUI）只负责 argparse 与打印：
 
 - `start_tunnel_for_jobs`：起隧道 → 映射 definition → 给出隧道模式恒注入的额外请求头（决策 1/2/4）。
 - `compute_watch_ttl_s` + `watch_run_and_stop_tunnel`：cloud submit 守护进程的 TTL 算法与主体循环。
@@ -83,7 +83,7 @@ def watch_run_and_stop_tunnel(
     """cloud submit 隧道守护进程的主体（ADR 0035 决策 3 cloud 档）：轮询 DDB run 终态 → 拆隧道；
     TTL 到点 → 拆隧道自杀（防「run 卡死 / 查询持续异常」时 ngrok 进程泄漏）。返回拆除原因（调用方打印）。
 
-    读库异常不致命（瞬时网络/限流）——经 `on_warn`（可选，皮层给打印口）报一句后继续轮询，TTL 是最终兜底。
+    读库异常不致命（瞬时网络/限流）——经 `on_warn`（可选，前端层给打印口）报一句后继续轮询，TTL 是最终兜底。
     **拆隧道在 finally**：store 装配抛（region 解析不出 / 凭证坏）或轮询被非 Exception 中断，本进程带着异常死掉——
     它是隧道唯一宿主（ADR 0035 决策 3），不在此拆就没人拆、ngrok 永久留在公网。曾只在循环之后拆、装配段裸奔。
     """

@@ -1,39 +1,39 @@
 """`gherkai deploy` 的 AWS provider（entry point group `gherkai.deploy` 的 `aws` 项，ADR 0037 决策 6）。
 
-**本模块是 CLI 皮与 CDK 之间的唯一接缝**，形状由一条硬约束定死：**CLI 绝不 import `aws_cdk`**——它是 jsii 绑定，
+**本模块是 CLI 前端与 CDK 之间的唯一接缝**，形状由一条硬约束定死：**CLI 绝不 import `aws_cdk`**——它是 jsii 绑定，
 import 即起 node 子进程（ADR 0037 决策 6）。故本模块自身也只 import 标准库 + `gherkai_runtime` + 本包 `names`
 （零 `aws_cdk`）；stack/app 只经 **cdk CLI 起的子进程** 触达（`app.py`）。CLI 侧 `--help` 因此不付 node 代价。
 
-## 接缝契约（CLI 皮 ↔ Provider）
+## 接缝契约（CLI 前端 ↔ Provider）
 
-CLI 皮负责：
+CLI 前端负责：
 - 发现 provider（entry point group `gherkai.deploy`：零个 → 提示装 `gherkai[deploy-aws]`；一个 → 无需
   `--provider`；多个 → 必给），实例化，调 `add_arguments(subparser)` 让 provider 贡献自己的 flag；
 - 声明 **provider 中立的命令面 flag** 并据其选调本类哪个方法（ADR 0037 决策 6「命令面」）：
   `--diff` → `diff`、`--synth-only DIR` → `synth_only`（DIR 落 `args.synth_only`）、`--bootstrap` →
   `bootstrap`，都不给 → `deploy`；`gherkai destroy` → `destroy`；
 - 先声明 `--require-approval` 与 `--allow-vpc-change` 的**中立版**，使 `deploy --help` 在**没装任何 provider**
-  时也列得出这两个动作旋钮；
+  时也列得出这两个动作选项；
 - 可选把自身版本放进 `args.version`（缺则本包自报 dist 版本，见 `_resolve_version`）；
 - `gherkai doctor` 时若 provider 提供**可选**的 `doctor(args) -> list[dict]`（每项 `{name, ok, detail}` + 可选 `required`，
   缺省 False；只读、不返退出码），把它并进自检输出的 provider 段（ADR 0041 决策四）。
 
-Provider 负责（CLI 一概不懂）：`--prefix`/`--vpc`/`--stop-timeout` 三个 context 旋钮 + AWS 概念的
-`--region`/`--profile`（CLI 皮不在 deploy/destroy 子命令上声明这五个）、context 拼装、`cdk.json` 生成、
+Provider 负责（CLI 一概不懂）：`--prefix`/`--vpc`/`--stop-timeout` 三个 context 配置项 + AWS 概念的
+`--region`/`--profile`（CLI 前端不在 deploy/destroy 子命令上声明这五个）、context 拼装、`cdk.json` 生成、
 cdk CLI 调用、VPC 档三态比对、工具链前置检查（Node ≥ 22 与 cdk CLI 可定位，见 `_toolchain_gate`）。
 
-**`--require-approval` / `--allow-vpc-change` 是有意的两层声明**：皮给中立版（provider 缺席时帮助不残缺），
+**`--require-approval` / `--allow-vpc-change` 是有意的两层声明**：前端给中立版（provider 缺席时帮助不残缺），
 本类**再声明一次**带 AWS 语义的版本（`--require-approval` 的取值是 cdk 的三档，能 `choices` 校验；
-`--allow-vpc-change` 的措辞要点名 VPC 档三态）。皮的 subparser 开了 `conflict_handler="resolve"`，同名即
+`--allow-vpc-change` 的措辞要点名 VPC 档三态）。前端的 subparser 开了 `conflict_handler="resolve"`，同名即
 以后贴的（本类）为准——两层不是重复真源，是「中立占位 + provider 精确化」。两层都**只贴 deploy**：destroy
-不消费它们（不做 VPC 档三态比对，cdk destroy 也没有 `--require-approval`），皮的中立版同样只在 deploy 上。
-本类另经 `getattr` 容忍它们彻底缺席（别的皮）：缺 `--allow-vpc-change` = 一律不放行（fail-closed）、
+不消费它们（不做 VPC 档三态比对，cdk destroy 也没有 `--require-approval`），前端的中立版同样只在 deploy 上。
+本类另经 `getattr` 容忍它们彻底缺席（别的前端）：缺 `--allow-vpc-change` = 一律不放行（fail-closed）、
 缺 `--require-approval` = 交给 cdk 默认。
 
 ## worker 镜像子动词（ADR 0038 命令族）
 
 `add_arguments(deploy_parser)` 里自贴 `push-worker` / `list-workers` / `delete-worker` 三个子动词，各自
-`set_defaults(_deploy_verb=<本类方法>)`——皮的分派**先看 `_deploy_verb`**（皮一行不改，见其契约块）。
+`set_defaults(_deploy_verb=<本类方法>)`——前端的分派**先看 `_deploy_verb`**（前端一行不改，见其契约块）。
 云端写操作（推 ECR、注册 task-def revision、写 SSM 指针）全属部署变更，故住本包、不住 CLI 本体；实现在
 `workers.py`，容器引擎在 `container.py`。子动词只挂 deploy、不挂 destroy（理由见 `_declares_worker_subverbs`）。
 
@@ -69,7 +69,7 @@ NODE_MIN_MAJOR = 22
 
 # `cdk.json` 的 `context`：CDK **特性开关**（feature flags）。**逐字沿用收编前 `iac_aws_backend/cdk.json` 的那一组**——
 # 特性开关会改变合成出的资源形态，换一组就等于给已部署 stack 造出无意义的变更集。加/删任何一项前先 `--diff` 核对。
-# （设计旋钮不在这里：prefix/vpc/stop_timeout/version 一律经 `-c k=v` 显式传，不进生成的 cdk.json——见 `build_context`。）
+# （设计参数不在这里：prefix/vpc/stop_timeout/version 一律经 `-c k=v` 显式传，不进生成的 cdk.json——见 `build_context`。）
 CDK_FEATURE_FLAGS: dict[str, object] = {
     "@aws-cdk/aws-lambda:recognizeLayerVersion": True,
     "@aws-cdk/core:checkSecretUsage": True,
@@ -187,13 +187,13 @@ class Provider:
 
     name = PROVIDER_NAME
 
-    # ---- flag 面（ADR 0037 决策 6：三 flag 对齐 stack 与 app 的全部 context 旋钮）----
+    # ---- flag 面（ADR 0037 决策 6：三 flag 对齐 stack 与 app 的全部 context 配置项）----
     def add_arguments(self, parser: argparse.ArgumentParser) -> None:
         """把 provider 特有 flag 挂上 CLI 给的 parser。
 
-        `prefix`/`vpc_id`/`use_default_vpc`/`stop_timeout` 四个 context 旋钮映射为**三个** flag：`--vpc`
-        一个吞掉 `vpc_id` + `use_default_vpc` 两个旋钮（ADR 0037 决策 6）。`version` 旋钮不给 flag——
-        版本是单旋钮、由安装本身决定（决策 7），不让用户手填。
+        `prefix`/`vpc_id`/`use_default_vpc`/`stop_timeout` 四个 context 配置项映射为**三个** flag：`--vpc`
+        一个吞掉 `vpc_id` + `use_default_vpc` 两个配置项（ADR 0037 决策 6）。`version` 这一项不给 flag——
+        版本按版本真源来、由安装本身决定（决策 7），不让用户手填。
         """
         parser.add_argument(
             "--prefix", default=None, metavar="P",
@@ -213,10 +213,10 @@ class Provider:
             help="丢弃本机缓存的 CDK 环境查询结果（VPC/子网/AZ，见 --vpc default|<id> 的 from_lookup）重新查询；"
                  "默认复用缓存（CDK 标准做法，也避免每次为缺失查询预合成占位模板）",
         )
-        # 下面两个是**皮已声明的中立版的 AWS 精确化**（`conflict_handler="resolve"` 令本处生效，见模块头
+        # 下面两个是**前端已声明的中立版的 AWS 精确化**（`conflict_handler="resolve"` 令本处生效，见模块头
         # 「两层声明」）：一个加 cdk 的取值 `choices`、一个把措辞钉到 VPC 档三态上。
         # **只贴 deploy**：destroy 两个都不消费（不做 VPC 档三态比对，cdk destroy 也没有 `--require-approval`），
-        # 贴上去就是 `--help` 里两个恒无效的旋钮。`prog` 认不出时仍贴（同 `_is_destroy_parser` 的降级口径：
+        # 贴上去就是 `--help` 里两个恒无效的选项。`prog` 认不出时仍贴（同 `_is_destroy_parser` 的降级口径：
         # 无 prog 的 parser 要拿得到全集）。
         if not self._is_destroy_parser(parser):
             parser.add_argument(
@@ -228,7 +228,7 @@ class Provider:
                 choices=("never", "any-change", "broadening"),
                 help="透传 cdk 的 IAM 变更审批档（不给则用 cdk 自己的默认值）",
             )
-        # --region/--profile 归 provider（AWS 概念）：CLI 皮不在本子命令上声明，见模块头接缝契约。
+        # --region/--profile 归 provider（AWS 概念）：CLI 前端不在本子命令上声明，见模块头接缝契约。
         parser.add_argument("--region", default=None, metavar="R", help="AWS region（默认走 AWS_REGION/profile 配置）")
         parser.add_argument("--profile", default=None, metavar="P", help="AWS profile（默认 AWS_PROFILE）")
         if self._is_destroy_parser(parser):
@@ -240,7 +240,7 @@ class Provider:
             )
         # worker 镜像子动词（ADR 0038 命令族）——**只贴在 deploy 上**，见 `_declares_worker_subverbs`。
         if self._declares_worker_subverbs(parser):
-            # deploy 自己也消费容器引擎（第 2 步同步基底 pull/push）——flag 贴在 deploy 上，子动词 push-worker 再贴
+            # deploy 自己也消费容器引擎（第 2 步同步基础镜像 pull/push）——flag 贴在 deploy 上，子动词 push-worker 再贴
             # 一份（子 parser 是独立 namespace，SUPPRESS 默认值让「deploy --container-engine X push-worker …」不被覆写）。
             self._add_container_engine_flag(parser)
             self._add_worker_subverbs(parser)
@@ -250,15 +250,15 @@ class Provider:
         """这个 parser 是 **destroy** 的那个吗（`prog` 末段判，同 `_declares_worker_subverbs` 的口径）。"""
         return (parser.prog or "").split()[-1:] == ["destroy"]
 
-    # ---- worker 镜像子动词（ADR 0038「命令族」；接缝 = 皮先看 args._deploy_verb，见模块头/皮的契约块）----
+    # ---- worker 镜像子动词（ADR 0038「命令族」；接缝 = 前端先看 args._deploy_verb，见模块头/前端的契约块）----
     @staticmethod
     def _declares_worker_subverbs(parser: argparse.ArgumentParser) -> bool:
         """这个 parser 是 **deploy** 的那个吗？
 
-        皮对 deploy 与 destroy **各调一次** `add_arguments`（两者共用 provider 的 context 旋钮）。子动词只能挂
-        deploy：挂上 destroy 的后果不是「多个没用的命令」而是**危险**——皮的 destroy 分派根本不看
+        前端对 deploy 与 destroy **各调一次** `add_arguments`（两者共用 provider 的 context 配置项）。子动词只能挂
+        deploy：挂上 destroy 的后果不是「多个没用的命令」而是**危险**——前端的 destroy 分派根本不看
         `_deploy_verb`，于是 `gherkai destroy push-worker …` 会解析通过、然后**去拆栈**。
-        判据取 `prog` 末段（皮建的是 `sub.add_parser("deploy")` → prog = `<皮> deploy`）；认不出就不贴，
+        判据取 `prog` 末段（前端建的是 `sub.add_parser("deploy")` → prog = `<前端> deploy`）；认不出就不贴，
         降级是安全的（子动词本来也只经 deploy 这条路可达）。
         """
         return (parser.prog or "").split()[-1:] == ["deploy"]
@@ -267,7 +267,7 @@ class Provider:
         """`push-worker` / `list-workers` / `delete-worker` 三个子动词（ADR 0038）。
 
         **`required=False`（argparse 默认）是硬约束**：deploy 的默认动作是真部署，裸 `gherkai deploy` 必须照样
-        解析得过（皮的契约块明写）。每个子动词 `set_defaults(_deploy_verb=<绑定方法>)`，皮据此优先分派。
+        解析得过（前端的契约块明写）。每个子动词 `set_defaults(_deploy_verb=<绑定方法>)`，前端据此优先分派。
         """
         sub = parser.add_subparsers(
             title="worker 镜像子命令（不给则本命令 = 部署/更新后端）", metavar="[子命令]",
@@ -301,7 +301,7 @@ class Provider:
 
         delete = sub.add_parser(
             "delete-worker", help="[部署方] （尚未提供）删一个 variant 及其 ECR/SSM 残留",
-            description="尚未提供：落地时套 push-worker 同一套清理语义（退休 tag + 静默期 + 运行中 run 安全阀），"
+            description="尚未提供：落地时套 push-worker 同一套清理语义（退休 tag + 静默期 + 运行中 run 引用检查），"
                         "并连带清旧版本 variant 的 ECR tag / untagged 层与 SSM 映射。",
         )
         self._add_locator_flags(delete)
@@ -335,7 +335,7 @@ class Provider:
         parser.add_argument("--region", default=argparse.SUPPRESS, metavar="R", help="AWS region")
         parser.add_argument("--profile", default=argparse.SUPPRESS, metavar="P", help="AWS profile")
 
-    # ---- 命令面（CLI 皮据它自己的 flag 选调；每个方法自成一次完整调用）----
+    # ---- 命令面（CLI 前端据它自己的 flag 选调；每个方法自成一次完整调用）----
     def deploy(self, args) -> int:
         """供给/更新后端。**先过 VPC 档三态**（ADR 0037 决策 6），过了才调 `cdk deploy`。"""
         # 工具链前置（Node + cdk CLI）先于 VPC 档比对，理由见 `_toolchain_gate`。**cdk 可定位性必须也在这一档**：
@@ -345,7 +345,7 @@ class Provider:
         if toolchain is not None:
             return toolchain
         # 容器引擎的两类问题也在这一档处置（本地、不花网络、不要凭证——这一期 deploy 机器需要容器引擎，
-        # 同步基底要 pull/push，ADR 0038「容器引擎口子」）：
+        # 同步基础镜像要 pull/push，ADR 0038「容器引擎口子」）：
         # - **名字不认**（env/flag 给了 podman）→ 纯参数问题，退 2、绝不动账户；
         # - **装了但不可用 / 没装** → 只警告：退码语义归 cdk 之后的四步（账户已改 → 退 1、重新运行幂等收敛）。
         #   仍要提前说一声——cdk deploy 是分钟级动作，让人等到运行结束才知道「还差个 docker」是白等。
@@ -358,12 +358,12 @@ class Provider:
         # 探活警告放在 `--vpc` 校验之后：缺 `--vpc` 会直接退 2，先打两行 docker 警告只会盖住真因。
         # **只对纯发行版探**：非纯发行版（.dev/.post/本地段）第 2 步整步跳过、根本不碰容器引擎（判据与
         # `workers.run_deploy_steps` 共用同一个 `compose.is_pure_release`，ADR 0038「容器引擎口子」），对它们预告
-        # 「之后会失败（退 1）」是假警告，还会与 `sync_base` 的「跳过基底同步」自相矛盾。
+        # 「之后会失败（退 1）」是假警告，还会与 `sync_base` 的「跳过基础镜像同步」自相矛盾。
         from gherkai_runtime import compose
         if compose.is_pure_release(self._resolve_version(args)):
             probe = engine.probe()
             if probe:
-                print(f"警告：{probe}\n     stack 会照常部署，但之后的 worker 镜像步骤（同步基底）会失败"
+                print(f"警告：{probe}\n     stack 会照常部署，但之后的 worker 镜像步骤（同步基础镜像）会失败"
                       f"（退 1）；装好容器引擎后重新运行 `gherkai deploy` 幂等收敛。", file=sys.stderr)
         blocked = self._guard_vpc_spec(args)
         if blocked is not None:
@@ -402,7 +402,7 @@ class Provider:
 
     def synth_only(self, args) -> int:
         """导出 CloudFormation 模板到 `args.synth_only`（escape valve：不让 0.x 工具改自己生产账号的
-        reviewer 靶点，ADR 0037 决策 6）。目录由 CLI 皮的 `--synth-only DIR` 提供（接缝契约）。"""
+        reviewer 靶点，ADR 0037 决策 6）。目录由 CLI 前端的 `--synth-only DIR` 提供（接缝契约）。"""
         out = getattr(args, "synth_only", None)
         if not out:
             raise ValueError("synth_only 需要 args.synth_only（--synth-only DIR）")
@@ -451,7 +451,7 @@ class Provider:
                 print(f"起不动 cdk CLI：{exc}", file=sys.stderr)
                 return EXIT_PRECONDITION
 
-    # ---- 命令面（worker 镜像族，ADR 0038「命令族」；皮经 args._deploy_verb 分派到 push_worker / list_workers / delete_worker）----
+    # ---- 命令面（worker 镜像族，ADR 0038「命令族」；前端经 args._deploy_verb 分派到 push_worker / list_workers / delete_worker）----
     def push_worker(self, args) -> int:
         """`gherkai deploy push-worker <镜像> --engine … --variant …`（八步见 `workers.push_worker`）。"""
         from gherkai_deploy_aws import workers
@@ -497,7 +497,7 @@ class Provider:
             engine = resolve_container_engine(getattr(args, "container_engine", None))
             probe = engine.probe()
             checks.append({"name": "container-engine", "ok": probe is None, "required": False,
-                           "detail": probe or f"{engine.name} 可用（同步基底 / push-worker 用）"})
+                           "detail": probe or f"{engine.name} 可用（同步基础镜像 / push-worker 用）"})
         except UnsupportedContainerEngine as exc:
             checks.append({"name": "container-engine", "ok": False, "required": False, "detail": str(exc)})
         return checks
@@ -512,7 +512,7 @@ class Provider:
         """
         print("`delete-worker` 尚未提供。\n"
               "它要连带定回收策略（旧版本 variant 的 ECR tag / 重推顶掉的 untagged 层 / SSM 映射），"
-              "并套 push-worker 同一套清理语义（退休 tag + 静默期 + 运行中 run 安全阀），这些还没定。\n"
+              "并套 push-worker 同一套清理语义（退休 tag + 静默期 + 运行中 run 引用检查），这些还没定。\n"
               "当前可用的：`gherkai deploy list-workers` 看有哪些 variant 与待清理 revision；"
               "重推同名 variant 直接覆盖，无需先删。", file=sys.stderr)
         return EXIT_PRECONDITION
@@ -595,9 +595,9 @@ class Provider:
 
     # ---- context / cdk.json（纯推导，单测直打）----
     def build_context(self, args) -> dict[str, str]:
-        """flag → CDK context（app/stack 侧读的那四个旋钮 + 版本戳）。
+        """flag → CDK context（app/stack 侧读的那四个配置项 + 版本戳）。
 
-        `--vpc` 一个 flag 摊成两个旋钮：`default` → `use_default_vpc=true`；`vpc-<id>` → `vpc_id=<id>`；
+        `--vpc` 一个 flag 摊成两个配置项：`default` → `use_default_vpc=true`；`vpc-<id>` → `vpc_id=<id>`；
         `new` → **两个都不给**（stack 的建新分支，见 `stack._network`）。
         `--stop-timeout` 不给则不进 context（让 stack 的默认值说话，不在两处各写一个默认）。
         """
@@ -625,7 +625,7 @@ class Provider:
 
     def write_cdk_json(self, work_dir: Path) -> Path:
         """在临时工作目录生成 `cdk.json`（ADR 0037 决策 6）——**不再有入库的 cdk.json**：它曾假定自己躺在
-        monorepo 里（`app = "uv run python app.py"`），wheel 用户不可达。只写 app + 特性开关；设计旋钮走 `-c`。"""
+        monorepo 里（`app = "uv run python app.py"`），wheel 用户不可达。只写 app + 特性开关；设计参数走 `-c`。"""
         path = work_dir / "cdk.json"
         path.write_text(
             json.dumps({"app": self.app_command(), "context": dict(CDK_FEATURE_FLAGS)}, indent=2) + "\n",
@@ -758,9 +758,9 @@ class Provider:
 
     @staticmethod
     def _resolve_version(args) -> str:
-        """写进 SSM 版本戳的版本（ADR 0037 决策 6「版本戳」/ 决策 7 版本单旋钮）。
+        """写进 SSM 版本戳的版本（ADR 0037 决策 6「版本戳」/ 决策 7 版本真源）。
 
-        优先 CLI 皮交进来的 `args.version`（= 运行中的 CLI 的版本，决策 7 比对的正是它）；缺则本包自报 dist
+        优先 CLI 前端交进来的 `args.version`（= 运行中的 CLI 的版本，决策 7 比对的正是它）；缺则本包自报 dist
         版本——两者被 `==` 同版本 pin 成同一个（决策 2b），此回落不引入第二个真源。都取不到 → fail-fast：
         戳写错比缺失更坏（缺失是「警告不拦」，写错会让所有提交者的 skew 判定失真）。
         """

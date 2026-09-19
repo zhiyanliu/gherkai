@@ -275,7 +275,7 @@ def test_read_worker_default_missing_is_none(aws):
     assert compose.read_worker_default(prefix=_PREFIX, ssm=aws["ssm"]) == "login"  # strip
 
 
-# ---- build_fargate_engines：映射外的引擎装空腿、一用即抛（不 KeyError、不回落 family）----
+# ---- build_fargate_engines：映射外的引擎装空占位项、一用即抛（不 KeyError、不回落 family）----
 def test_engine_absent_from_mapping_gets_throwing_placeholder(monkeypatch):
     import gherkai_core.adapters.fargate_engine as fe
 

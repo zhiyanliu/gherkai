@@ -9,7 +9,7 @@
 **适用面** = 交付物的**运行栈**（模型托管 / 浏览器层 / 鉴权 / 存储 / 编排，即上文列举的轴）。维护者侧的源码托管、包索引、镜像 registry 与 CI（GitHub / PyPI / npm / GHCR，见 [0037](./0037-distribution-and-packaging.md) 决策 5、8）是发布通道、不在其内——运行期真正被拉起的 worker 镜像仍在使用方私有 ECR（[0038](./0038-worker-image-delivery.md)）。发布通道放 AWS 外不是例外、不进下面的例外清单。
 
 **已据此约束做出的选择**：
-- [0003](./0003-midscene-grounding-qwen3vl-bedrock.md)：Midscene 大脑选 Bedrock 上的 Qwen3-VL，而非 AWS 外的模型。
+- [0003](./0003-midscene-grounding-qwen3vl-bedrock.md)：Midscene 的引擎模型选 Bedrock 上的 Qwen3-VL，而非 AWS 外的模型。
 - [0004](./0004-novaact-iam-auth-via-workflow.md) / [0008](./0008-midscene-bedrock-auth-sigv4-selfsign.md)：两个引擎统一走 IAM/SigV4，不引入额外凭证体系。
 - [0003](./0003-midscene-grounding-qwen3vl-bedrock.md) 的被排除项：AWS 外的 VL 模型（Doubao、gemini 等）即便定位质量可能更好，也因在 AWS 外而不选。（注：gpt-5.5 的排除是另一回事——它在 Bedrock 内，但不支持 chat-completions，见 [0002](./0002-midscene-not-driven-by-gpt55.md)，与本 AWS 约束无关。）
 - [0012](./0012-planning-shares-qwen3vl-no-text-planner.md)：planning 角色复用 Bedrock 上的 Qwen3-VL 兼任，不引入 AWS 外的多模态推理模型作独立 planner（AWS 内「chat-completions + 收图像」的选项只有 VL 模型；离开 AWS 才有的选项按本约束不取，属需另立 ADR 的破例）。

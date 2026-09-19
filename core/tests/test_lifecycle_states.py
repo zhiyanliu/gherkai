@@ -35,7 +35,7 @@ def test_new_states_round_trip():
 
 # ---- severity 数值序（ADR 0031 决定二）----
 def test_severity_order_fixes_string_sort_trap():
-    # 钉死 'error' < 'failed' 字母序反向坑：severity 上 error 必须 > failed
+    # 避开 'error' < 'failed' 字母序反向坑：severity 上 error 必须 > failed
     assert severity(Status.ERROR) > severity(Status.FAILED) > severity(Status.PASSED)
     # 但字符串字母序是反的（证明「绝不拿 Status 字符串比大小」的必要性）
     assert Status.ERROR.value < Status.FAILED.value  # 'error' < 'failed' 字母序——若拿它比 severity 就错了
@@ -205,9 +205,9 @@ def test_fail_fast_inflight_job_is_aborted():
     assert result.status == Status.ERROR             # run 级仍 error（crash 顶上去），aborted 不进 run 级聚合
 
 
-# ---- severity 完整传递序（ADR 0031 决定二）：一行钉死全序，抗中间调换回归 ----
+# ---- severity 完整传递序（ADR 0031 决定二）：一行锁定全序，抗中间调换回归 ----
 def test_severity_full_chain():
-    # 现有 test_severity_* 只验两端极值 + 中间三态；这里钉死完整 5 态传递序
+    # 现有 test_severity_* 只验两端极值 + 中间三态；这里锁定完整 5 态传递序
     assert (severity(Status.SKIPPED) < severity(Status.PASSED) < severity(Status.FAILED)
             < severity(Status.ERROR) < severity(Status.ABORTED))
 
@@ -289,7 +289,7 @@ def test_network_error_during_abort_is_aborted_not_network():
     finally:
         FakeWorkerHandle.stop = orig_stop
     # 前置校验：victim 确被真正放行（gate.set()），而非死锁逃生超时——后者意味着「被放行 ⟺ abort_flag 已 set」
-    # 的耦合被超时旁路打破，此时下面的 ABORTED 断言即便偶然通过也不可信。钉死这一条，杜绝超时静默退化。
+    # 的耦合被超时旁路打破，此时下面的 ABORTED 断言即便偶然通过也不可信。锁定这一条，杜绝超时静默退化。
     assert engine.gate_released, "victim 未被真正放行（gate 超时），耦合被打破——测试环境异常，非有效断言"
     victim_jr = next(jr for jr in result.jobs if jr.scope_id == "victim")
     assert victim_jr.status == Status.ABORTED          # abort 分支优先：不记成 network_error

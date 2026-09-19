@@ -496,7 +496,7 @@ rect.c-bg-rect { fill: var(--bg); }
           <rect x="423.51666666666665" y="252" width="110.8" height="16" rx="3" class="c-mask"/>
           <text x="478.91666666666663" y="262" class="t-backend" font-size="9" text-anchor="middle">条件写成功后起 task</text>
         </g>
-        <text x="425.8333333333333" y="290" class="t-dim" font-size="7">每次起 task 为该 job 设一次超时闹钟</text>
+        <text x="425.8333333333333" y="290" class="t-dim" font-size="7">每次起 task 为该 job 设一次超时定时器</text>
         </g>
 
         <g data-edge-from="worker" data-edge-to="events" data-edge-label="逐条写事件" data-edge-key="3" data-edge-id="m-events">
@@ -674,4 +674,4 @@ rect.c-bg-rect { fill: var(--bg); }
           </g>
         </g>
       </svg>
-<!-- gherkai:source-sha256=67c90c0c42ce9a4b4ebc0f58c56575204a386db68c6a8bd66cf19c9ed6fee270 -->
+<!-- gherkai:source-sha256=f55b7a56648ee9fbea3b5390cec38c8f7dc248ccbeb087cda0a3c74fa48ce4e6 -->

@@ -1,4 +1,4 @@
-"""第二根穿刺针 · Nova Act 引擎 —— 对标 Midscene 引擎（ADR 0010 苹果对苹果）。
+"""第二个 spike · Nova Act 引擎 —— 对标 Midscene 引擎（ADR 0010 苹果对苹果）。
 
 用例（与 Midscene 同）：打开 wikipedia.org → 搜 "OpenAI" → 断言进入 OpenAI 词条页。
 鉴权：纯 IAM，经 @workflow 装饰器（ADR 0004），不用 NOVA_ACT_API_KEY。

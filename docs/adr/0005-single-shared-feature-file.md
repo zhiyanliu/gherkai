@@ -1,4 +1,4 @@
-# 用例描述层用单一共享的 .feature 文件
+# 用例写在单一共享的 .feature 文件里
 
 > **Status:** Accepted
 
@@ -8,7 +8,7 @@
 
 **为什么**：本框架的立身之本就是「一套业务可读用例，两个 AI 引擎都能跑」。退成两份同步只是口号，框架会退化成「两个各自为政的引擎恰好风格像」。
 
-**承受的代价（已知）**：两套 runner 对 Gherkin 方言/step 匹配语法支持不完全一致（cucumber-js 用 Cucumber Expressions/正则；pytest-bdd 用自己的 parser + `parsers.parse`/`re`），step 措辞需取两者交集。这个约束本身有价值：它逼迫 step 措辞保持中立、不绑定某引擎的能力。**现状（[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md) 起）**：BDD runner 层退役、核心库单一解析器，「两套方言取交集」这条代价已消解；「step 措辞保持中立、不绑定某引擎能力」的收益作原则保留（确定性锚点仍需两引擎正则成对，见 [0037](./0037-distribution-and-packaging.md) 决策 4）。
+**承受的代价（已知）**：两套 runner 对 Gherkin 方言/step 匹配语法支持不完全一致（cucumber-js 用 Cucumber Expressions/正则；pytest-bdd 用自己的 parser + `parsers.parse`/`re`），step 措辞需取两者交集。这个约束本身有价值：它逼迫 step 措辞保持中立、不绑定某引擎的能力。**现状（[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md) 起）**：BDD runner 层退役、核心库单一解析器，「两套方言取交集」这条代价已消解；「step 措辞保持中立、不绑定某引擎能力」的收益作原则保留（确定性 step 仍需两引擎正则成对，见 [0037](./0037-distribution-and-packaging.md) 决策 4）。
 
 ## ✅ 已实测（M2 起）：同一份 .feature 双 runner 加载，均通过
 
@@ -17,7 +17,7 @@
 同一份 `.feature` 被两套 runner 各自加载、各驱动一个引擎，都通过：
 - **Midscene 侧**：`engines/midscene/` 的 cucumber-js（配置 `cucumber.mjs` 的 `paths` 指 `../../features/`）。
 - **Nova Act 侧**：`engines/novaact/bdd/` 的 pytest-bdd（`scenarios(str(FEATURES_DIR))`，`FEATURES_DIR` 上溯到根 `features/`）。
-- 同一句自然语言 step 同时驱动了两个不同语言/不同大脑的引擎——本框架立身之本落地。
+- 同一句自然语言 step 同时驱动了两个实现语言不同、引擎模型不同的引擎——本框架立身之本落地。
 
 **方言交集结论（本 ADR 预言的代价，已实证「可行但需注意」）**：
 - `.feature` 文本完全共享、两边都正确匹配。

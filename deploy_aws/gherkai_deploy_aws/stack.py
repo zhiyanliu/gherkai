@@ -1,7 +1,7 @@
 """BackendStack（ADR 0033）：`--backend cloud` 需要的全部 AWS 资源。
 
 一套 stack 建齐（可按 prefix 多实例化，多环境 prod-/stage-）：
-- DynamoDB：{prefix}runs（控制面/RunStore，带按 status 的稀疏 GSI status-index 供 worker revision 清理安全阀，
+- DynamoDB：{prefix}runs（控制面/RunStore，带按 status 的稀疏 GSI status-index 供 worker revision 清理时的引用检查，
   ADR 0038）+ {prefix}events（events-out，开 expires_at TTL）；两表均开 Stream（NEW_IMAGE）供事件驱动链
 - S3：{prefix}artifacts（Result/Report/offload/job-in/artifact-upload，按 prefix key 分片）+ lifecycle
   规则 expire-job-in（按对象 tag gherkai=job-in 7 天过期）
@@ -15,12 +15,12 @@
   触发器的 Scheduler 执行角色 {prefix}timeout-scheduler
 - VPC + SSM：subnet/sg ID 写进 /{prefix}backend/subnets|security-groups（cli 读）
 - SSM 部署戳（**stack 资源、非命令事后 put_parameter**——与部署事务同生死、回滚不留错值，ADR 0037 决策 6）：
-  /{prefix}backend/version（版本单旋钮，供 preflight skew 比对，ADR 0037 决策 7）、
+  /{prefix}backend/version（版本真源，供 preflight skew 比对，ADR 0037 决策 7）、
   /{prefix}backend/vpc（生效 VPC 档，供下次 deploy 三态比对）、
   /{prefix}backend/worker-template/<engine>（task-def 模板 revision ARN，ADR 0038 四步第 1 步）
 
 命名走 `names`（re-export 产品本体 `gherkai_runtime.names`，与 cli compose 真同源，ADR 0033 护栏）。
-context 旋钮由 `gherkai deploy` 拼给（见 app.py 头 / ADR 0037 决策 6），本文件只读不定 flag 面。
+context 配置项由 `gherkai deploy` 拼给（见 app.py 头 / ADR 0037 决策 6），本文件只读不定 flag 面。
 """
 from __future__ import annotations
 
@@ -60,7 +60,7 @@ class BackendStack(Stack):
     # 部署方账单，故部署方保留总量控制权、钳住提交侧声明。reconciler 与 kicker 两个推进器**必须同值**（首批与续起并行度
     # 一致）——单点在此，两个推进器共用同一份 advancer_env（同值由结构保证，不靠人对齐）。
     DEPLOY_SIDE_MAX_CONCURRENCY = 8
-    DEFAULT_STOP_TIMEOUT_S = 120  # 默认贴 Fargate 上限：尽量给 worker 会话释放+抢传预算（grace 真容器校准见 ADR 0032），可 -c stop_timeout= 覆盖
+    DEFAULT_STOP_TIMEOUT_S = 120  # 默认贴 Fargate 上限：尽量给 worker 会话释放+安全点提前上传的预算（grace 真容器校准见 ADR 0032），可 -c stop_timeout= 覆盖
 
     def __init__(self, scope: Construct, construct_id: str, *, prefix: str, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
@@ -105,7 +105,7 @@ class BackendStack(Stack):
     def _resolve_version(self) -> str:
         """后端版本戳（PEP 440 字符串）：**`-c version=` 必给、无隐式默认**。
 
-        单一真源 = 发起这次部署的命令（`gherkai deploy` 传自己的版本，ADR 0037 决策 6/7 版本单旋钮）。
+        单一真源 = 发起这次部署的命令（`gherkai deploy` 传自己的版本，ADR 0037 决策 6/7 版本真源）。
         **不在此回落成「本包自报的 dist 版本」**：那会造出第二个真源——本 stack 由 cdk CLI 起的子进程合成，
         真要与命令进程分叉（换 interpreter / 混装），回落值会静默写错戳，而戳恰是 preflight 唯一判据（决策 7
         CLI 新于后端即退 2、不设放行口）。写错比缺失更坏，故缺即 fail-fast、点明该走 `gherkai deploy`。
@@ -144,11 +144,11 @@ class BackendStack(Stack):
             stream=dynamodb.StreamViewType.NEW_IMAGE,  # ADR 0034：INSERT 触发 kicker Lambda 冷启动
             removal_policy=RemovalPolicy.RETAIN,  # 保留数据、防误删（stack 销毁不带走表）
         )
-        # **按 `status` 的稀疏 GSI**（ADR 0038「不变量·清理 pass」）：worker revision 的清理安全阀要查
+        # **按 `status` 的稀疏 GSI**（ADR 0038「不变量·清理 pass」）：worker revision 清理时的运行中 run 引用检查要查
         # 「有没有未到终态的 run 还引用这个 revision」，走 `Query` 非终态状态 + `contains` 过滤。
         # - **稀疏是构造出来的**：只有 STATE item 带顶层 `status`（META item 没有），故索引里天然只有 STATE。
         # - **projection = INCLUDE `worker_task_def_arns`**：过滤表达式 `contains(worker_task_def_arns, :arn)`
-        #   作用在**索引投影出的属性**上，不投影则恒不匹配、安全阀静默失效（会删掉运行中 run 手里的 revision）。
+        #   作用在**索引投影出的属性**上，不投影则恒不匹配、引用检查静默失效（会删掉运行中 run 手里的 revision）。
         #   不用 ALL：runs 表 STATE 的 `jobs` Map 随 job 数增长，全投影等于给每个 run 存第二份。
         # - **必须有索引、不能 Scan**：runs 表 `RETAIN`、无 TTL、随历史单调增长，Scan 成本无上界
         #   （ADR 0038 被拒方案「清理靠全表 Scan runs 表」）。

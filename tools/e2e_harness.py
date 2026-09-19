@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""worker 端到端实际运行验证 harness（ADR 0024 worker↔core 协议 / 终止契约 / 0029 act 边界抢传；跨引擎）。
+"""worker 端到端实际运行验证 harness（ADR 0024 worker↔core 协议 / 终止契约 / 0029 act 边界提前上传；跨引擎）。
 
 **这是 opt-in 手动端到端验证脚本，不进 pytest 默认套件**——它真 spawn worker、真喂 job（stdin）、真收
 事件流（EVENTS_FD）、真开 AgentCore 会话、真写 S3（**产生真实 AWS 费用、需网络/凭证、单次 ~1-2min**）。它补的是
@@ -21,11 +21,11 @@ S3 上传 env），起真 worker 运行一个 scope，按事件时机外部 SIGT
   HARNESS_S3_BUCKET=<你的可写桶> uv run python tools/e2e_harness.py \\
       --engine novaact --feature wikipedia_assertions --interrupt scope_end --run-id verify-1
   # --interrupt: connect(建连中) / act(act 执行到一半) / between(step 边界) / scenario(第一个 scenario 完成后、
-  #              下一 scenario 运行中——验 scenario 边界 log 抢传，需多 scenario feature) / scope_end(flush 前) /
+  #              下一 scenario 运行中——验 scenario 边界 log 提前上传，需多 scenario feature) / scope_end(flush 前) /
   #              none(baseline 不中断)
   # 桶经环境变量 HARNESS_S3_BUCKET 传（勿硬编码；运行结束后自行清理桶内 <prefix>）。
 
-历史：中断丢失预演、Nova 中断模型改造验证、抢传验证都用它（实测结论/量级已内联 ADR 0024 终止契约 / 0029 抢传 / 0032 中断丢失量级）。
+历史：中断丢失预演、Nova 中断模型改造验证、提前上传验证都用它（实测结论/量级已内联 ADR 0024 终止契约 / 0029 安全点提前上传 / 0032 中断丢失量级）。
 """
 from __future__ import annotations
 
@@ -143,7 +143,7 @@ def run(engine: str, feature: str, votes: int, interrupt: str, run_id: str, grac
     proc.stdin.flush()
     proc.stdin.close()
 
-    # t0 = 事件/grace 相对时刻的基线，钉在「job 写完」这一刻（别跟着 pump 上移，否则实测时刻与历史报告不可比）
+    # t0 = 事件/grace 相对时刻的基线，固定在「job 写完」这一刻（别跟着 pump 上移，否则实测时刻与历史报告不可比）
     events, t0 = [], time.monotonic()
     kill_sent = {"t": None, "phase": None}
     hung = {"v": False}
@@ -201,7 +201,7 @@ def run(engine: str, feature: str, votes: int, interrupt: str, run_id: str, grac
                 do_kill("between_steps")
         elif et == "scenario_done":
             scen_done += 1
-            # scenario 边界抢传验证时机（ADR 0029「第四级」，Midscene 单引擎）：第一个 scenario 完成后延迟 kill——
+            # scenario 边界提前上传的验证时机（ADR 0029「第四级」，Midscene 单引擎）：第一个 scenario 完成后延迟 kill——
             # 让 scenario1 的 snapshotLogs 在其 scenario_done 后执行完毕（log 进 S3）、scenario2 起来，SIGTERM 落在
             # scenario2 运行中。验证：S3 应已有 scenario1 期间的 log（对照单 scenario scope_end 中断 S3 log=0）。
             # 需 jobs[0] 有 >1 scenario——即**多 scenario 归一个 @scope 的 feature**（如 concurrency_and_scope
@@ -224,23 +224,23 @@ def run(engine: str, feature: str, votes: int, interrupt: str, run_id: str, grac
     lost = sorted(disk_as_s3 - s3_names)  # 盘有 S3 无 → Fargate 会丢
 
     # 样本有效性（防假阳性）：`n_lost=0` 只在**确实产生过可丢的产物**时才有意义。若盘和 S3 都空——中断落得
-    # 太早（产物还没写盘、S3 也没抢传），此时 n_lost=0 是「没东西可丢」而非「抢传救回了」，**不构成有效的
-    # 丢失/抢传测量样本**。判据：盘或 S3 上有产物 = 有效样本（实测踩过：Midscene act 时机中断太早、盘空、
-    # n_lost=0 曾被误读成抢传生效，实为无效样本）。
+    # 太早（产物还没写盘、S3 也没提前上传），此时 n_lost=0 是「没东西可丢」而非「提前上传救回了」，**不构成有效的
+    # 丢失/提前上传测量样本**。判据：盘或 S3 上有产物 = 有效样本（实测踩过：Midscene act 时机中断太早、盘空、
+    # n_lost=0 曾被误读成提前上传生效，实为无效样本）。
     produced = bool(disk) or bool(s3)
     # 第二类无效样本：**选了中断时机、但该时机根本没触发**（一路退化成 baseline）。两条已知路径：
     #   · --interrupt scenario 撞上单 scenario scope（n_scen=1，见上 scenario_done 分支的条件）；
     #   · --interrupt connect 的 2s 定时器发现 scope_started 已到（建连快于 2s）。
-    # 此时 n_lost=0 与抢传无关，报告里只有 kill_phase=null 一个线索——别让它躺着靠人眼捞。
+    # 此时 n_lost=0 与提前上传无关，报告里只有 kill_phase=null 一个线索——别让它躺着靠人眼捞。
     interrupted = kill_sent["t"] is not None
     sample_valid = produced and (interrupt == "none" or interrupted)
     if not produced:
-        note = "无效样本：中断过早，盘与 S3 均无产物，n_lost=0 是『没东西可丢』非『抢传救回』——换更晚的中断时机重新运行"
+        note = "无效样本：中断过早，盘与 S3 均无产物，n_lost=0 是『没东西可丢』非『提前上传救回』——换更晚的中断时机重新运行"
     elif interrupt != "none" and not interrupted:
         note = (f"无效样本：选了 --interrupt {interrupt} 但该时机未触发（未发 SIGTERM、全程退化为 baseline），"
-                "n_lost=0 不构成抢传证据——换时机，或换『多 scenario 归一个 @scope』的 feature 重新运行")
+                "n_lost=0 不构成提前上传证据——换时机，或换『多 scenario 归一个 @scope』的 feature 重新运行")
     elif len(lost) == 0:
-        note = "有效样本：产生了产物且 n_lost=0 → 抢传/上传真救回（非假阳性）"
+        note = "有效样本：产生了产物且 n_lost=0 → 提前上传/正常上传真救回（非假阳性）"
     else:
         note = f"有效样本：丢失 {len(lost)} 文件 / {sum(sz for n, sz in disk if art_prefix + n in set(lost))} 字节"
 

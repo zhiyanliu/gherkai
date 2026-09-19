@@ -3,7 +3,7 @@
 
 ADR 0045 决策五：每版说明「不写发不出」——发布链 gate 断言 `## [X.Y.Z]` 节存在且非空；GitHub Release
 正文 = 该节正文 + 固定的装法 / 升级块（`.github/release_body_footer.md`，占位符 `{{VERSION}}` /
-`{{OWNER}}` / `{{REPO}}`），块里指向仓库文档的链接钉 `blob/vX.Y.Z/`，每版说明与它链到的文档永远同版。
+`{{OWNER}}` / `{{REPO}}`），块里指向仓库文档的链接锁定到 `blob/vX.Y.Z/`，每版说明与它链到的文档永远同版。
 护栏：`cli/tests/test_release_notes.py`（本脚本的行为）与 `cli/tests/test_package_readmes.py`（footer 的
 使用者面规则：零内部指代、零相对链接）。
 

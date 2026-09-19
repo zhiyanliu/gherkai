@@ -2,7 +2,7 @@
 
 > **读者：** 后续接手 worker 端到端验证的 AI tool（也含人）。**本文是操作手册**：调用方式、结果判读、实际运行陷阱。
 > **机制原理**（harness 如何忠实复现 adapter spawn 环境、三通道、grace 测量）见 `e2e_harness.py` 顶部 docstring，不在此复述（单一事实源）。
-> **相关设计：** ADR 0024（worker↔core 协议 / 终止契约 / grace / I/O 边缘可注入接口）、ADR 0029（产物→S3 / act·scenario 边界抢传 / 固有残余）、ADR 0032（Fargate 中断丢失量级 + 真容器 grace 校准）。
+> **相关设计：** ADR 0024（worker↔core 协议 / 协作式停止 / grace / I/O 边缘可注入接口）、ADR 0029（产物→S3 / act·scenario 边界的安全点提前上传 / 固有残余）、ADR 0032（Fargate 中断丢失量级 + 真容器 grace 校准）。
 
 ## 定位与适用场景
 
@@ -10,7 +10,7 @@
 
 **中断只是它的能力之一**（`--interrupt`）：`--interrupt none` 的 baseline 同样可运行，用于验证「事件流端到端正常 + 三通道分离 + 零行为变化」（如 worker I/O 重构后的回归）。纯逻辑回归仍由各引擎单测覆盖（Nova `engines/novaact/tests/test_*.py`、Midscene `engines/midscene/src/worker/*.test.mts`、`core/tests/test_subprocess_engine.py`）。
 
-**适用场景**：改动 worker 的中断路径 / 会话清理 / grace / 抢传 / 上传超时 / **job 入口·事件出口（I/O 边缘）**后，实际运行确认承重假设仍成立。日常逻辑改动先运行单测；只有涉及上述「只能真实运行验证」的真实边界才动 harness。
+**适用场景**：改动 worker 的中断路径 / 会话清理 / grace / 安全点提前上传 / 上传超时 / **job 入口·事件出口（I/O 边缘）**后，实际运行确认承重假设仍成立。日常逻辑改动先运行单测；只有涉及上述「只能真实运行验证」的真实边界才动 harness。
 
 ## 前置条件
 
@@ -49,8 +49,8 @@ HARNESS_S3_BUCKET=<你的可写桶> uv run python tools/e2e_harness.py \
 | `none`      | 不中断（baseline）                                    | 正常完成路径：所有产物应进 S3、`n_lost=0`、删本地                                                                                                                     |
 | `connect`   | 建连中（scope_started 前，2s 定时）                    | 会话建立过程中被终止：不泄漏会话、进程干净退出                                                                                                                       |
 | `act`       | 第一个 act 执行中途（step_started 后 3s）             | act 中途中断：会话释放 + in-flight 产物处置                                                                                                                         |
-| `between`   | 第一个 step_done 后                                 | step 边界中断：已完成 act 产物已抢传                                                                                                                                |
-| `scenario`  | **第一个 scenario_done 后 3s、下一 scenario 运行中** | **scenario 边界抢传（Midscene log）**：已完成 scenario 的 log 应已进 S3。**需多 scenario 归一个 scope 的 feature**（见下「多 scenario 陷阱」），否则该时机不触发，记为无效样本 |
+| `between`   | 第一个 step_done 后                                 | step 边界中断：已完成 act 产物已提前上传                                                                                                                            |
+| `scenario`  | **第一个 scenario_done 后 3s、下一 scenario 运行中** | **scenario 边界提前上传（Midscene log）**：已完成 scenario 的 log 应已进 S3。**需多 scenario 归一个 scope 的 feature**（见下「多 scenario 陷阱」），否则该时机不触发，记为无效样本 |
 | `scope_end` | 所有 scenario 完成、scope 末 flush 前                | flush 前中断：暴露「只在 scope 末上传的剩余产物」残余（Nova summary / Midscene log）                                                                                  |
 
 ## 报告判读
@@ -62,20 +62,20 @@ harness 结尾打印 `=== HARNESS_REPORT_JSON ===` + 一段 JSON。关键字段�
 | `hung`                       | **`true` = 失败**：worker SIGTERM 后 grace-cap 内没退、被 SIGKILL。中断正确性的首要红线                                 |
 | `exit_code`                  | 正常/协作停止应 `0`；网络耗尽 `80`（`EX_WORKER_NETWORK`）；会话释放失败 `1`                                              |
 | `grace_s`                    | SIGTERM→worker 退出实测秒数（`none` 时为 null）。应 « grace-cap                                                         |
-| `sample_valid`               | **判读的第一个字段**。`false` = 无效样本，两类：① 中断过早、盘与 S3 均为空（`n_lost=0` 源于无可丢失的文件，而非抢传已保全）→ 换更晚时机重新运行；② 指定了 `--interrupt <时机>` 但该时机未触发、全程退化为 baseline（`kill_phase=null`；已知两条：`scenario` 时机遇到单 scenario scope、`connect` 的 2s 定时器发现建连已完成）→ 换时机，或换「多 scenario 归一个 `@scope`」的 feature 重新运行。属哪一类见 `sample_note` |
+| `sample_valid`               | **判读的第一个字段**。`false` = 无效样本，两类：① 中断过早、盘与 S3 均为空（`n_lost=0` 源于无可丢失的文件，而非提前上传已保全）→ 换更晚时机重新运行；② 指定了 `--interrupt <时机>` 但该时机未触发、全程退化为 baseline（`kill_phase=null`；已知两条：`scenario` 时机遇到单 scenario scope、`connect` 的 2s 定时器发现建连已完成）→ 换时机，或换「多 scenario 归一个 `@scope`」的 feature 重新运行。属哪一类见 `sample_note` |
 | `sample_note`                | 以自然语言说明 `sample_valid` 的判定依据与丢失量                                                                     |
 | `lost_on_fargate` / `n_lost` | **盘上有、S3 无**的文件，即 Fargate 容器盘销毁时会真实丢失的部分；subprocess 下这些文件留在本地盘、**非真实丢失**       |
 | `bytes_lost`                 | 同上字节数                                                                                                           |
 | `disk_files` / `s3_files`    | 中断后盘上与 S3 上的文件清单（含 size）                                                                                |
 | `scope_done_emitted`         | 中断路径应 `false`（不 emit scope_done、不走 flush）；正常完成 `true`                                                    |
-| `kill_phase`                 | SIGTERM 实际落在哪个时机（`connect`/`act_midway`/`between_steps`/`after_scenario1`/`scope_end`）。**非空 = 信号已真实投递**（时机已触发但 worker 已先退出时不予记录，避免「有 phase 无投递」的假阳性）。`--interrupt none` 本就为 `null`；**指定了中断时机却为 `null` = 本次未发出 SIGTERM**（该时机未触发或 worker 已先退出），此时任何丢失/抢传结论都不成立 |
+| `kill_phase`                 | SIGTERM 实际落在哪个时机（`connect`/`act_midway`/`between_steps`/`after_scenario1`/`scope_end`）。**非空 = 信号已真实投递**（时机已触发但 worker 已先退出时不予记录，避免「有 phase 无投递」的假阳性）。`--interrupt none` 本就为 `null`；**指定了中断时机却为 `null` = 本次未发出 SIGTERM**（该时机未触发或 worker 已先退出），此时任何丢失/提前上传结论都不成立 |
 | `counts`                     | `step_started`/`step_done`/`scenario_done`/`n_scenarios`：核对中断落点是否如预期；`scenario` 时机要求 `n_scenarios>1`，否则该时机不触发（见下「多 scenario 陷阱」） |
 
 ### 判读要点（易误判处）
 
-- **判读顺序：`sample_valid` 先于 `n_lost`**。`sample_valid=false` 时 `n_lost=0` 不具含义。此前已发生过误判：Midscene `act` 时机中断过早、盘上为空、`n_lost=0` 被读成「抢传生效」，实为无效样本。
-- **`n_lost=0` 不等于「零残余」**。harness 的 lost 判据是**文件名**层面的「盘有 S3 无」。若某文件名已在 S3（被早先抢传过），而盘上是更大的版本（其后又有 append），`n_lost` 记 0，但存在**字节级增量残余**。要量化抢传实际已上传的数据量，需**逐文件对比 disk 与 S3 的 size**。scenario 抢传的验证即以此坐实：scenario1 的 log 已进 S3，scenario2 的增量为 disk>S3。
-- **验证「抢传因果」须交叉核对时序**：`kill_phase` 非空 + `scope_done_emitted=false` + worker stderr 出现 `signal received`/`session shutdown`，三者同时成立即表明确实走了中断退出路径；而 scope 末的整目录 flush 只在正常完成路径执行，中断路径在它之前已 return。据此才能证明 S3 里的产物只可能来自**边界抢传**，而非退出路径一并上传。**「flush 日志」不构成判据**：两个 worker 的 scope 末 flush 成功时不输出任何日志（只有失败与补救提示中出现 flush 字样），因此「未见 flush 日志」对正常路径同样成立。
+- **判读顺序：`sample_valid` 先于 `n_lost`**。`sample_valid=false` 时 `n_lost=0` 不具含义。此前已发生过误判：Midscene `act` 时机中断过早、盘上为空、`n_lost=0` 被读成「提前上传生效」，实为无效样本。
+- **`n_lost=0` 不等于「零残余」**。harness 的 lost 判据是**文件名**层面的「盘有 S3 无」。若某文件名已在 S3（已被提前上传过），而盘上是更大的版本（其后又有 append），`n_lost` 记 0，但存在**字节级增量残余**。要量化提前上传实际已上传的数据量，需**逐文件对比 disk 与 S3 的 size**。scenario 提前上传的验证即以此坐实：scenario1 的 log 已进 S3，scenario2 的增量为 disk>S3。
+- **验证「提前上传的因果」须交叉核对时序**：`kill_phase` 非空 + `scope_done_emitted=false` + worker stderr 出现 `signal received`/`session shutdown`，三者同时成立即表明确实走了中断退出路径；而 scope 末的整目录 flush 只在正常完成路径执行，中断路径在它之前已 return。据此才能证明 S3 里的产物只可能来自**边界提前上传**，而非退出路径一并上传。**「flush 日志」不构成判据**：两个 worker 的 scope 末 flush 成功时不输出任何日志（只有失败与补救提示中出现 flush 字样），因此「未见 flush 日志」对正常路径同样成立。
 
 ## 实际运行陷阱（实践中已遇到，需避开）
 
@@ -86,7 +86,7 @@ harness 结尾打印 `=== HARNESS_REPORT_JSON ===` + 一段 JSON。关键字段�
      uv run python -c "from gherkai_core.scope import plan,PlanConfig,FeatureSource; from pathlib import Path; f='features/concurrency_and_scope.feature'; print([len(j.scenarios) for j in plan([FeatureSource(uri=f,text=Path(f).read_text())],PlanConfig(default_engine='midscene',default_assertion_votes=1))])"
      ```
 2. **wikipedia 的 SSL 环境问题（Nova 侧更易命中）**：某些网络下到 `www.wikipedia.org` 的 SSL 握手会挂起（`SSLEOFError`，Nova SDK 本地 strict cert verify）。**Midscene 走 AgentCore 云浏览器、不受本地 SSL 影响**；Nova SDK 在本地建 CDP 时可能命中。若 Nova 全场景 SSL 失败，先直连测握手确认属环境问题，可临时改用访问简单站点的 feature 规避。
-3. **scenario 边界抢传只有 Midscene 具备**（Nova 侧 `session_summary.json` 在 scenario 边界尚不存在，无可抢传的对象，见 ADR 0029）。因此 Nova 的 `scenario` 时机无法验证 log 抢传。
+3. **scenario 边界提前上传只有 Midscene 具备**（Nova 侧 `session_summary.json` 在 scenario 边界尚不存在，无可提前上传的对象，见 ADR 0029）。因此 Nova 的 `scenario` 时机无法验证 log 的提前上传。
 4. **产生真实 AWS 费用**：AgentCore 会话 + 模型调用 + S3。质量优先，同时避免浪费：每个时机运行一次即可，不必穷举矩阵；用短 feature 控制成本。
 
 ## 清理（每次运行结束后）

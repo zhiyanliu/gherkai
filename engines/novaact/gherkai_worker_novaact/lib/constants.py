@@ -3,8 +3,8 @@
 生产 worker（本包 `run_scope.py`）与 spike 脚本（repo 里的 `engines/novaact/spikes/*.py`，不随包发行）
 共享同一 MODEL_ID / WORKFLOW_DEF，避免各处硬编码同一值漂移。（v0.x BDD 层已由 ADR 0022 退役删除，不再是共享方。）
 `NOVA_GRACE_MARGIN_S` 只被生产 worker 用（自述入口 `--capabilities` 报的 grace 下限的两个组成项之一），
-放这里是因为它与 MODEL_ID 同类：有标定/评估来历、缺省钉死值 + env 可 opt-in 覆盖的引擎常量
-（WORKFLOW_DEF 不给 env 旋钮——它是账户里那个 definition 的名字，改名是一次发版决定）。
+放这里是因为它与 MODEL_ID 同类：有标定/评估来历、缺省锁定值 + env 可 opt-in 覆盖的引擎常量
+（WORKFLOW_DEF 不给 env 配置项——它是账户里那个 definition 的名字，改名是一次发版决定）。
 
 WORKFLOW_DEF 取**产品名**：`workflow_setup.py` 的 create-if-not-exists 会在**每个使用方账户**里建出这个
 definition（ADR 0004），名字直接出现在使用方自己的 AWS 控制台，故不留试验期代号。
@@ -15,16 +15,16 @@ from __future__ import annotations
 
 import os
 
-# 模型版本（ADR 0004「模型版本选择策略」）：**缺省钉死 GA 版本 id，不用 `nova-act-latest` 别名**——别名的
+# 模型版本（ADR 0004「模型版本选择策略」）：**缺省锁定 GA 版本 id，不用 `nova-act-latest` 别名**——别名的
 # 语义是「AWS 发新 GA 时自动换模型」、时点由 AWS 定；而本工具的 pass / fail 靠 AI 投票，模型一换判定就变
 # （已 A/B 实测：同一批用例里有 scenario 在两个模型间稳定翻转，不是噪声）。这类变化必须随一次有 changelog 的
 # 显式发布落地，而不是藏在别名里在使用方账户中静默发生；升级流程（新 GA → 重新运行同一批用例的 A/B → 改本常量
 # → 发版点明模型换代）见该 ADR，别在这里改成别名。
-# env `NOVA_MODEL_ID` 是 **opt-in 旋钮**（与下面的 NOVA_GRACE_MARGIN_S 同形：worker 读、缺省即钉死值）：
+# env `NOVA_MODEL_ID` 是 **opt-in 配置项**（与下面的 NOVA_GRACE_MARGIN_S 同形：worker 读、缺省即锁定值）：
 # 本机执行时在 shell 里设即生效；云端 Fargate 容器 env 是显式枚举，要用就构建进定制 worker 镜像的 `ENV`（即
 # ADR 0038 的 variant 机制）。可设 `nova-act-preview` 试新模型，但 **preview 不作产品默认**：无支持承诺、
-# 随 AWS 移动，且**不可钉**——服务端拒绝直接引用带日期的 preview id（只能用 `nova-act-preview` 别名），
-# 正是钉版本要消掉的那种不受控变化。
+# 随 AWS 移动，且**不可锁定**——服务端拒绝直接引用带日期的 preview id（只能用 `nova-act-preview` 别名），
+# 正是锁定版本要消掉的那种不受控变化。
 # **worker 侧不校验取值**：非法 id 由服务端拒（起会话时报错），worker 再持一份合法值清单就是第二事实源、
 # 会随 AWS 上新漂移。本常量经自述入口 `--capabilities` 的 `model_id` 键报出（ADR 0036「5.」），`doctor`
 # 据此显示当前模型——覆盖过 env 的机器一眼可见。

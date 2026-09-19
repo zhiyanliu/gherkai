@@ -9,8 +9,8 @@ from gherkai_worker_novaact import deterministic as d
 
 @pytest.fixture(autouse=True)
 def _isolate():
-    # snapshot/restore（非 clear-only）：本文件测试用干净表，退出时还原真锚点——避免同 pytest 进程内
-    # 后续文件（若依赖脚手架真锚点）撞「注册表被上游文件清空」的顺序性假绿/假红。
+    # snapshot/restore（非 clear-only）：本文件测试用干净表，退出时还原真 step——避免同 pytest 进程内
+    # 后续文件（若依赖脚手架真 step）撞「注册表被上游文件清空」的顺序性假绿/假红。
     saved = list(d._REGISTRY)
     d.clear()
     yield
@@ -79,7 +79,7 @@ def test_list_registry_reflects_registrations():
 
 def test_registry_dump_via_capabilities_real_subprocess():
     """注册表清单经自述入口出去（ADR 0036「2.」/「5.」）真子进程：`--capabilities` 的 `deterministic_steps`
-    键含脚手架真锚点、每项元数据齐全（清单没有自己的 flag——加键不加入口，见「5.」）。"""
+    键含脚手架真 step、每项元数据齐全（清单没有自己的 flag——加键不加入口，见「5.」）。"""
     import json as _json
     import subprocess
     import sys as _sys
@@ -95,7 +95,7 @@ def test_registry_dump_via_capabilities_real_subprocess():
 
 
 def test_match_batch_hit_miss_conflict():
-    """match_batch（ADR 0036 决策 4）：命中/未命中/冲突结构化返回（冲突不抛——plan 是预检不是执行）。"""
+    """match_batch（ADR 0036 决策 4）：命中/未命中/冲突结构化返回（冲突不抛——plan 是用例预检、不是执行）。"""
     d.deterministic(r'页面地址匹配 "(?P<p>[^"]+)"', description="断言 URL", example="Then …")(lambda ctx, p: None)
     d.deterministic(r"地址(?P<a>.+)", description="x", example="y")(lambda ctx, a: None)
     got = d.match_batch(['页面地址匹配 "x"', "无关文本", "地址什么的"])
@@ -105,7 +105,7 @@ def test_match_batch_hit_miss_conflict():
 
 
 def test_worker_match_steps_mode_real_subprocess():
-    """--match-steps 自述模式真子进程：stdin JSON 数组 → 逐条命中结果（真锚点命中面与派发一致）。"""
+    """--match-steps 自述模式真子进程：stdin JSON 数组 → 逐条命中结果（真 step 命中面与派发一致）。"""
     import json as _json
     import subprocess
     import sys as _sys

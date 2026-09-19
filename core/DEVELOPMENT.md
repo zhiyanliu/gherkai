@@ -38,7 +38,7 @@ core/gherkai_core/
     ├── event_log/{sqlite,ddb}.py   ← 无状态批量运行持久事件通道（ADR 0034）：local=SQLite / cloud=DDB events 表，reconciler 从此处全量重放推演
     ├── _boto.py                    ← 云端 adapter 共享的 boto3 依赖守卫（boto3 缺失时给出可读报错，ADR 0016 窄腰）
     ├── _atomic.py                  ← 本地 adapter 共享的原子落盘（同目录 tmp + `os.replace` + 显式 mode）：run_state.json / jobs/*.json / 报告三面都有真实并发读者，truncate-then-write 会使读者读到空文件
-    ├── run_store/{local,ddb}.py    ← RunStore：本地文件 + DynamoDB（+ arg_offload.py：StepArgument→S3 指针，规避 DDB 400KB 限；+ 无状态批量运行条件写 try_claim_job/project_state/try_finalize，ADR 0034；+ STATE 顶层 worker_task_def_arns，供清理 pass 的「运行中 run 安全阀」使用，ADR 0038）
+    ├── run_store/{local,ddb}.py    ← RunStore：本地文件 + DynamoDB（+ arg_offload.py：StepArgument→S3 指针，规避 DDB 400KB 限；+ 无状态批量运行条件写 try_claim_job/project_state/try_finalize，ADR 0034；+ STATE 顶层 worker_task_def_arns，供清理 pass 的「运行中 run 引用检查」使用，ADR 0038）
     ├── result_store/{local,s3}.py  ← ResultStore：本地文件 + S3（每 job 一对象）
     └── report_store/{local,s3}.py  ← ReportStore：本地文件 + S3（manifest+index）
 ```

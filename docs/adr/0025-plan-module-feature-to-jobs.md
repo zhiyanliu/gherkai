@@ -83,7 +83,7 @@ Job = {
 
 ### id 派生（RunStore/RunReport 关联键：稳定 + 可追溯）
 
-**id 是不透明标识符**：`scenarioId`/`scopeId` 只在 JSON/dict key/未来 DB key 用（全支持任意 UTF-8），core **不拿它当路径解析**。**不对 id 做 normalize**——清洗字符（空格→下划线、删非 ASCII 等）会把不同输入映射成同一输出、**制造撞名**，而撞名是静默灾难（schedule 归位错乱、DB 主键冲突），远比「id 含空格/中文」严重。故含空格/中文的 uri **原样保留**。若未来某消费层（URL/文件名）需安全字符 id，由该层做**可逆**编码（urlencode 等、保唯一），不在 core 做有损转换。
+**id 是不透明标识符**：`scenarioId`/`scopeId` 只在 JSON/dict key/未来 DB key 用（全支持任意 UTF-8），core **不拿它当路径解析**。**不对 id 做 normalize**——清洗字符（空格→下划线、删非 ASCII 等）会把不同输入映射成同一输出、**制造撞名**，而撞名是静默灾难（schedule 归位错乱、DB 主键冲突），远比「id 含空格/中文」严重。故含空格/中文的 uri **原样保留**。需安全字符 id 的消费层由该层做**可逆**编码（urlencode 等、保唯一），core 一侧不做有损转换——已是既成事实：local ResultStore 落文件名用 `quote(scope_id, safe="")`，RunReport 的 `#fragment` 锚点 id 用位置序号拼成纯 ASCII（见 [0027](./0027-runreport-aggregation-index.md)「①②双向锚点关联」，理由正是 scope_id 可含中文/冒号）。
 
 **`uri` 约定 + 互异契约**：plan 把调用方传入的 `uri` **原样**用作 id 前缀，**不做路径解析**（plan 不碰 FS、无 base dir）。调用方（组合根/CLI）负责传**稳定可读且互异**的 `uri`。**plan 入口校验 uri 互异——重复 = 接口违约 → 报错**（同一文件喂两遍会撞 scenarioId、结果错乱；这是脏输入，fail-fast，不静默吞）。注意这与「跨文件同 `@scope` 合并」（领域语义、warning）**正交**：前者是 uri 重复（bug、报错），后者是不同 uri 但同 scope 值（有意、合并、warning）。收集去重等便利逻辑由调用方负责，core 窄腰只接 uri 互异的列表。**CLI 侧已履约**：组合根读完 feature 后按 `load_feature` 算出的 uri **保序去重**、并打一行点名被忽略路径的提示（`features/*.feature features/a.feature` 这类 glob 与显式路径并列同给不该撞库级违约）；去重键取 uri 而非原始路径字符串，免得调用方重抄一份路径归一规则（其单一事实源在 `load_feature`）。core 的报错**不是死分支**——uri 互异是库契约，其它调用方（未来 WebUI、直接喂字符串的 test）仍要守；被接受的代价是「路径写法归一不到同一 uri 的混写」两侧都不拦（同一文件的绝对路径与相对路径并列：CLI 去重键不同、core 按「不同 uri 即便内容相同 → 放行」，该文件的 scenario 跑两遍）。下文 id 规则统一以 `<uri>` 表示。
 

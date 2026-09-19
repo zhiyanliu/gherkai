@@ -415,7 +415,7 @@ svg[data-theme="light"] { --bg: #f8fafc; --grid: #e2e8f0; --text: #0f172a; --tex
 svg[data-theme="dark"] { --bg: #020617; --grid: #1e293b; --text: #ffffff; --text-muted: #94a3b8; --text-dim: #475569; --text-faint: #7d8da1; --panel: rgba(15, 23, 42, 0.5); --panel-border: #1e293b; --lane-fill: rgba(15, 23, 42, 0.22); --lane-stroke: #334155; --arrow: #64748b; --arrow-emphasis: #34d399; --mask: #0f172a; --frontend-fill: rgba(8, 51, 68, 0.4); --frontend-stroke: #22d3ee; --backend-fill: rgba(6, 78, 59, 0.4); --backend-stroke: #34d399; --database-fill: rgba(76, 29, 149, 0.4); --database-stroke: #a78bfa; --cloud-fill: rgba(120, 53, 15, 0.3); --cloud-stroke: #fbbf24; --security-fill: rgba(136, 19, 55, 0.4); --security-stroke: #fb7185; --messagebus-fill: rgba(251, 146, 60, 0.3); --messagebus-stroke: #fb923c; --external-fill: rgba(30, 41, 59, 0.5); --external-stroke: #94a3b8; --toolbar-bg: rgba(15, 23, 42, 0.8); --toolbar-border: #334155; --toolbar-text: #e2e8f0; --toolbar-hover: rgba(15, 23, 42, 0.95); --toolbar-menu-bg: #0f172a; }
 rect.c-bg-rect { fill: var(--bg); }
 </style><rect width="100%" height="100%" class="c-bg-rect"/>
-        <title id="archify-diagram-title">云端超时处置：从闹钟到点到停止 worker</title>
+        <title id="archify-diagram-title">云端超时处置：从定时器到点到停止 worker</title>
         <desc id="archify-diagram-description">由 Archify 生成的时序图。</desc>
         <!-- Definitions -->
         <defs>
@@ -471,11 +471,11 @@ rect.c-bg-rect { fill: var(--bg); }
         <rect x="894" y="522" width="10" height="34" rx="3" class="c-cloud" stroke-width="1"/>
 
         <!-- Messages -->
-        <g data-edge-from="reconciler" data-edge-to="alarm" data-edge-label="起 task 时设置一次性闹钟" data-edge-key="0" data-edge-id="m-arm">
+        <g data-edge-from="reconciler" data-edge-to="alarm" data-edge-label="起 task 时设置一次性定时器" data-edge-key="0" data-edge-id="m-arm">
           <path data-composition-edge-from="reconciler" data-composition-edge-to="alarm" data-composition-edge-id="m-arm" data-composition-points="892,180;130,180" d="M 892 180 L 130 180" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
         <g>
-          <rect x="442.6" y="160" width="136.8" height="16" rx="3" class="c-mask"/>
-          <text x="511" y="170" class="t-backend" font-size="9" text-anchor="middle">起 task 时设置一次性闹钟</text>
+          <rect x="437.4" y="160" width="147.20000000000002" height="16" rx="3" class="c-mask"/>
+          <text x="511" y="170" class="t-backend" font-size="9" text-anchor="middle">起 task 时设置一次性定时器</text>
         </g>
         <text x="142" y="198" class="t-dim" font-size="7">到点 = 启动时刻 + 该 job 的墙钟预算；由启动方设置</text>
         </g>
@@ -486,7 +486,7 @@ rect.c-bg-rect { fill: var(--bg); }
           <rect x="142.6" y="250" width="116" height="16" rx="3" class="c-mask"/>
           <text x="200.6" y="260" class="t-backend" font-size="9" text-anchor="middle">到点调起，指定该 job</text>
         </g>
-        <text x="142" y="288" class="t-dim" font-size="7">一个 job 一个闹钟；触发后即自动删除，控制台中通常不可见</text>
+        <text x="142" y="288" class="t-dim" font-size="7">一个 job 一个定时器；触发后即自动删除，控制台中通常不可见</text>
         </g>
 
         <g data-edge-from="kicker" data-edge-to="worker" data-edge-label="仍在运行且无退出记录才停止" data-edge-key="2" data-edge-id="m-stop">
@@ -524,8 +524,8 @@ rect.c-bg-rect { fill: var(--bg); }
 
         <!-- Segment Labels -->
         <g data-graph-role="segment-label" data-segment-id="0">
-          <rect x="56" y="130" width="107.60000000000001" height="18" rx="3" class="c-mask"/>
-          <text x="62" y="143" class="t-dim" font-size="9" font-weight="600">起 task 时设置闹钟</text>
+          <rect x="56" y="130" width="118" height="18" rx="3" class="c-mask"/>
+          <text x="62" y="143" class="t-dim" font-size="9" font-weight="600">起 task 时设置定时器</text>
         </g>
         <g data-graph-role="segment-label" data-segment-id="1">
           <rect x="56" y="228" width="97.2" height="18" rx="3" class="c-mask"/>
@@ -537,8 +537,8 @@ rect.c-bg-rect { fill: var(--bg); }
         </g>
 
         <!-- Participants -->
-        <g id="node-alarm" data-node-id="alarm" data-node-label="超时闹钟" tabindex="0" role="button" aria-label="聚焦超时闹钟，一次性定时, 时序参与者" aria-pressed="false" data-node-kind="messagebus" data-node-sublabel="一次性定时" data-node-context="时序参与者">
-          <title>超时闹钟 · 一次性定时 · 时序参与者</title>
+        <g id="node-alarm" data-node-id="alarm" data-node-label="超时定时器" tabindex="0" role="button" aria-label="聚焦超时定时器，一次性定时, 时序参与者" aria-pressed="false" data-node-kind="messagebus" data-node-sublabel="一次性定时" data-node-context="时序参与者">
+          <title>超时定时器 · 一次性定时 · 时序参与者</title>
           <rect x="62" y="72" width="122" height="54" rx="6" class="c-mask"/>
           <rect x="62" y="72" width="122" height="54" rx="6" class="c-messagebus" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="messagebus" class="semantic-sigil s-messagebus" transform="translate(68 78) scale(0.6875)">
@@ -547,7 +547,7 @@ rect.c-bg-rect { fill: var(--bg); }
             <circle cx="10.5" cy="8" r="1" class="sigil-fill"/>
             <circle cx="7" cy="11.5" r="1" class="sigil-fill"/>
           </g>
-          <text data-node-label="" x="123" y="94" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">超时闹钟</text>
+          <text data-node-label="" x="123" y="94" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">超时定时器</text>
           <text x="123" y="111" class="t-muted" font-size="7" text-anchor="middle">一次性定时</text>
         </g>
 
@@ -630,4 +630,4 @@ rect.c-bg-rect { fill: var(--bg); }
           </g>
         </g>
       </svg>
-<!-- gherkai:source-sha256=36b40c27e2a4fe2030dad98add2e02418fda914db479788d820d82402dabc042 -->
+<!-- gherkai:source-sha256=4b918d0d5cfbbc59521414b3f22a39f655018022fe45a944fbe513ca1cf2959b -->

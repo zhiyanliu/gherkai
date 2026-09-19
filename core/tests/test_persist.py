@@ -83,7 +83,7 @@ def test_on_event_runs_only_on_scope_started():
 # ---- 决定二/三：finalize 的无报告路径——report_store=None 返回 None、仍 finalize_run、不崩 ----
 def test_finalize_without_report_store_returns_none():
     calls, run, result, _ = _recording()
-    p = RunPersistence("r", run, result, report_store=None)  # WebUI/cron 皮可能不注入 report
+    p = RunPersistence("r", run, result, report_store=None)  # WebUI/cron 前端可能不注入 report
     rr = RunResult(run_meta=_meta("r", ["a"]), status=Status.PASSED, jobs=[_jr("a")])
     ret = p.finalize(rr, ended_at="t9")
     assert ret is None
@@ -181,7 +181,7 @@ def test_aborted_with_none_session_does_not_resurrect_but_documents_edge():
 
 
 def test_running_phase_has_no_data_plane_file_until_complete(tmp_path):
-    """钉死「两面分离」（ADR 0016 三层切分 + 0030）——用户实测会困惑的点：
+    """锁定「两面分离」（ADR 0016 三层切分 + 0030）——用户实测会困惑的点：
     job 处于 RUNNING 时，控制面 run_state.json 显示 running，但数据面 jobs/<scope>.json **还不存在**；
     只有 job 完成（on_job_complete）出了判定，jobs/<scope>.json 才落。
     数据面 = 判定真值，RUNNING 的 job 还没判定，故意不写半截——「jobs/ 里出现文件 = 判定已就绪」。"""

@@ -1,9 +1,9 @@
 name: release
 
 # 推 tag `vX.Y.Z` = 发布全链（ADR 0037 决策 8）：一个 git tag 派生五个 wheel 的版本、npm 包版本、
-# 基底镜像 tag、GitHub Release——版本单旋钮（ADR 0037 决策 2b/7）。
+# 基础镜像 tag、GitHub Release——版本真源（ADR 0037 决策 2b/7）。
 # 顺序与失败语义按 ADR 0037 决策 8：gate（tag 形态 + 算出的版本==tag）→ ① PyPI（build → attest → publish）
-# → ② npm → ③ GHCR 基底镜像（依赖 ①② 索引可见）→ ④ GitHub Release。
+# → ② npm → ③ GHCR 基础镜像（依赖 ①② 索引可见）→ ④ GitHub Release。
 # 一次性人工前置（PyPI trusted publisher / npm token / GHCR 包可见性）见 .github/workflows/README.md。
 on:
   push:
@@ -18,7 +18,7 @@ concurrency:
 permissions: {}
 
 env:
-  # uv 版本显式钉住：发布路径要可复现，且 `uv publish` 上传 PEP 740 attestation 需 ≥0.9.12。
+  # uv 版本显式锁定：发布路径要可复现，且 `uv publish` 上传 PEP 740 attestation 需 ≥0.9.12。
   # 升级是有意动作（改这一行，CI 与本地同步验一遍）。
   UV_VERSION: "0.12.3"
   PYTHON_VERSION: "3.13"
@@ -229,8 +229,8 @@ jobs:
           VERSION: ${{ needs.build.outputs.version }}
 
   images:
-    # ③ worker 基底镜像 → GHCR（ADR 0037 决策 5 两层分工；单架构 linux/amd64——ARM64 是被拒方案，ADR 0038）。
-    # 依赖 ①② 已发行**且索引可见**：基底的 CI 形态按版本装已发行的 worker 包（ADR 0037 决策 5「两态」），
+    # ③ worker 基础镜像 → GHCR（ADR 0037 决策 5 两层分工；单架构 linux/amd64——ARM64 是被拒方案，ADR 0038）。
+    # 依赖 ①② 已发行**且索引可见**：基础镜像的 CI 形态按版本装已发行的 worker 包（ADR 0037 决策 5「两态」），
     # 索引传播窗口内 build 会随机失败，故先等（下面 wait_for_index.sh 里写了完整理由）。
     name: base image ${{ matrix.engine }}
     needs: [build, pypi, npm]
@@ -306,7 +306,7 @@ jobs:
             WORKER_SOURCE=index
             WORKER_VERSION=${{ needs.build.outputs.version }}
           # 关掉 provenance/sbom attestation：开着会把推上去的东西变成带 unknown/unknown 附属 manifest
-          # 的 image index，而基底镜像下游要被 `gherkai deploy` pull 下来、重推进使用方 ECR、再按
+          # 的 image index，而基础镜像下游要被 `gherkai deploy` pull 下来、重推进使用方 ECR、再按
           # `RepoDigests` 取 manifest digest 注册 task-def，并做「架构必须是 linux/amd64」的 inspect 校验
           # （ADR 0038）——那条路径要的是一个干净的单 manifest 单架构镜像。
           provenance: false
@@ -328,7 +328,7 @@ jobs:
           DIGEST: ${{ steps.push.outputs.digest }}
 
   release:
-    # ④ GitHub Release：正文 = CHANGELOG.md 本版节 + 固定装法 / 升级块，块里的文档链接钉 blob/vX.Y.Z/
+    # ④ GitHub Release：正文 = CHANGELOG.md 本版节 + 固定装法 / 升级块，块里的文档链接锁定到 blob/vX.Y.Z/
     # （ADR 0045 决策五；各包 pyproject 的 `[project.urls] Changelog` 指 CHANGELOG.md）。
     # 不用 GitHub 自动生成的 release notes：本仓库无 PR 流、commit 信息是工程语言，生成物对使用者无用。
     name: GitHub Release

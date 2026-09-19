@@ -90,4 +90,4 @@ def color_is(ctx, sel, hex):
 
 ## 重议
 
-- 若将来通用 step 之外确实需要丰富的 step 库 / BDD 报告生态，重新评估是否引回某种 runner。当前「一条 catch-all + 少量确定性锚点」的模型不需要。
+- 若将来通用 step 之外确实需要丰富的 step 库 / BDD 报告生态，重新评估是否引回某种 runner。当前「一条 catch-all + 少量确定性 step」的模型不需要。

@@ -630,7 +630,7 @@ def test_submit_cloud_forks_tunnel_watch_daemon(tmp_path, monkeypatch, capsys):
 
 
 def test_submit_cloud_tunnel_ttl_flag_overrides_computed(tmp_path, monkeypatch, capsys):
-    """`--tunnel-ttl` 给了就用用户值（显式覆盖旋钮，不再走 definition 计算）。"""
+    """`--tunnel-ttl` 给了就用用户值（显式覆盖算出的 TTL，不再走 definition 计算）。"""
     import subprocess
 
     from gherkai_runtime import tunnel as gtunnel
@@ -668,7 +668,7 @@ def _spy_run_meta(monkeypatch):
 
 
 def test_cloud_run_does_not_consult_local_worker_chain(tmp_path, monkeypatch, capsys):
-    """cloud 执行档**不查本机 worker 定位链**（ADR 0037 决策 3 的 miss preflight 只管 local 执行）。
+    """cloud 档**不查本机 worker 定位链**（ADR 0037 决策 3 的 miss preflight 只管 local 执行）。
 
     cloud 的 worker 在 Fargate 容器里运行（镜像/task-def 由 cloud preflight 探），提交机器压根不必装 worker
     运行时——若在此也 preflight，纯 cloud 用户会被本机环境无理由挡住。
@@ -725,7 +725,7 @@ def test_cloud_ignores_default_steps_dir_silently(tmp_path, monkeypatch, capsys)
 
 
 # ---- 版本 skew 闸接线（ADR 0037 决策 7）：三态映射 + 「skew 先于资源 preflight」的次序 ----
-# skew 自身的判据（哪个版本组合判哪一档）在 runtime 的 test_compose 里验；这里只验皮的接线：
+# skew 自身的判据（哪个版本组合判哪一档）在 runtime 的 test_compose 里验；这里只验前端的接线：
 # 判定 → 退出码/提示，以及 block 时**资源 preflight 一次都不执行**。
 
 def test_skew_block_stops_run_before_resource_preflight(tmp_path, monkeypatch, capsys):
@@ -841,7 +841,7 @@ def test_skew_read_failure_exits_2_naming_the_parameter(tmp_path, monkeypatch, c
 
 
 # ---- worker 镜像 variant 闸接线（ADR 0038「运行时与 preflight」）----
-# 解析本体（读 SSM 映射 / revision ACTIVE / ECR digest 存在）在 runtime 的 compose 测试里验；这里只验皮：
+# 解析本体（读 SSM 映射 / revision ACTIVE / ECR digest 存在）在 runtime 的 compose 测试里验；这里只验前端：
 # 次序（skew → 资源 preflight → variant）、退 2、解析结果进 definition 与 build_fargate_engines、打印与静音。
 
 def _two_engine_feature(tmp_path: Path) -> Path:
@@ -1049,7 +1049,7 @@ def test_worker_variant_invalid_name_exits_2_before_any_cloud_call(tmp_path, mon
     record: list = []
     _, made, preflight_calls = _patch_cloud_handles(monkeypatch, record)
     for bad in ("有中文", "-leading-dash", "bad name", ".dotfirst"):
-        # `=` 形式给值：`-` 开头的值用空格分隔会被 argparse 当成另一个 flag（与本校验无关的皮层现实）
+        # `=` 形式给值：`-` 开头的值用空格分隔会被 argparse 当成另一个 flag（与本校验无关的前端侧现实）
         rc = m.main(["submit", str(_write_feature(tmp_path)), "--backend", "cloud",
                      "--region", "us-east-1", f"--worker-variant={bad}"])
         assert rc == 2, bad

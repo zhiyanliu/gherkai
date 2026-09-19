@@ -80,7 +80,7 @@ def test_lineage_tag_keys():
 
 # ---- 跨层对拍：STATE 顶层属性名的写端在 core、读端命名真源在 names（core 不 import 组合根共享层）----
 def test_state_worker_task_def_arns_attr_matches_ddb_writer():
-    """`names` 的读端常量与 `DynamoDBRunStore` 的写端字面量必须逐字一致（ADR 0038 清理 pass 的安全阀按它查）。
+    """`names` 的读端常量与 `DynamoDBRunStore` 的写端字面量必须逐字一致（ADR 0038 清理 pass 的运行中 run 引用检查按它查）。
 
     两处各有字面量是依赖方向逼出来的（core 是窄腰下层、不 import `gherkai_runtime`），本测试是那条注释里
     承诺的护栏——只有 runtime 侧同时看得见两边。

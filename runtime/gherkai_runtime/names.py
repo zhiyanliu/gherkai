@@ -99,7 +99,7 @@ TAG_TEMPLATE = "gherkai:template"
 TAG_RETIRED_AT = "gherkai:retired-at"
 
 # runs 表 STATE item 的顶层属性名：本 run 用到的 worker task-def revision ARN 列表（清理 pass 的运行中 run
-# 安全阀按它判引用，沿用 ADR 0034 `detached` 顶层标记先例）。
+# 引用检查按它判定，沿用 ADR 0034 `detached` 顶层标记先例）。
 STATE_WORKER_TASK_DEF_ARNS_ATTR = "worker_task_def_arns"
 # runs 表按 `status` 的稀疏 GSI 名（只索引 STATE item）：清理 pass Query 非终态 run，不扫全表。
 RUNS_STATUS_GSI = "status-index"

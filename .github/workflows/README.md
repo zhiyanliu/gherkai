@@ -2,7 +2,7 @@
 
 > **定位**：本文件讲**怎么用、怎么一次性配好、怎么本地校验**。决策与理由的权威在
 > [ADR 0037 决策 8「CI 发布链与占名」](../../docs/adr/0037-distribution-and-packaging.md)
-> （版本单旋钮见其决策 2b/7，worker 镜像两层分工见 [ADR 0038](../../docs/adr/0038-worker-image-delivery.md)）；
+> （版本真源见其决策 2b/7，worker 镜像两层分工见 [ADR 0038](../../docs/adr/0038-worker-image-delivery.md)）；
 > 冲突时以 ADR + workflow 文件本身为准，别在这里新立决策。
 
 ## 两条工作流
@@ -10,7 +10,7 @@
 | 文件 | 触发 | 干什么 |
 |---|---|---|
 | `ci.yml` | push 任意分支 / 所有 PR / 手动 | ① `uv sync --locked` + 根 `pytest`（全 workspace 成员，含 deploy_aws 的 CDK synth 测试）；② midscene `npm ci && npm run build && npm test`；③ `uv build --all-packages` smoke + 产物校验 + 发布 gate 演练（打本地临时 tag、不 push：版本必须逐字等于 tag） |
-| `release.yml` | push tag `v*` | gate（tag 形态 + CHANGELOG.md 有本版节 + 算出的版本==tag）→ ① PyPI → ② npm → ③ GHCR 基底镜像 → ④ GitHub Release（正文由 `.github/scripts/release_notes.py` 从 CHANGELOG.md 渲染） |
+| `release.yml` | push tag `v*` | gate（tag 形态 + CHANGELOG.md 有本版节 + 算出的版本==tag）→ ① PyPI → ② npm → ③ GHCR 基础镜像 → ④ GitHub Release（正文由 `.github/scripts/release_notes.py` 从 CHANGELOG.md 渲染） |
 | `pages.yml` | push 改动 `docs/diagrams/**`（只在默认分支部署）/ 手动 | 只把 `docs/diagrams/` 原样上传 GitHub Pages（`index.html` + 已入库的可交互 HTML + SVG，不做任何构建）；Pages 的 build type 已切为 workflow，不再从分支根目录做 Jekyll 构建（ADR 0045 决策七） |
 
 发布是**一个动作**：`git tag vX.Y.Z && git push origin vX.Y.Z`。版本真源只有 git tag
@@ -25,10 +25,10 @@ build（gate + uv build --all-packages + 产物校验 + 上传 artifact）
  ├─▶ npm    （npm version <tag> → npm ci → build → npm publish，trusted publishing、provenance 自动）
  │
  └─▶ images （needs: build + pypi + npm；matrix novaact/midscene → GHCR）
-      └─▶ release（GitHub Release：正文 = CHANGELOG.md 本版节 + 装法块，文档链接钉 tag）
+      └─▶ release（GitHub Release：正文 = CHANGELOG.md 本版节 + 装法块，文档链接固定到 tag）
 ```
 
-- **`images` 依赖 `pypi`/`npm` 且带「等索引可见」一步**：基底镜像的 CI 形态按版本装已发行的 worker 包
+- **`images` 依赖 `pypi`/`npm` 且带「等索引可见」一步**：基础镜像的 CI 形态按版本装已发行的 worker 包
   （ADR 0037 决策 5「两态」），而上传成功 ≠ 立刻可装（索引过 CDN）。等待逻辑与完整理由在
   `.github/scripts/wait_for_index.sh` 的头注释里。
 - **单独重新运行 `images` 是「PyPI 已发、镜像缺失」半发布态的修复动作**（ADR 0037 决策 8）：对同一 tag 幂等，
@@ -85,8 +85,8 @@ npm 侧已占（maintainer `liuzhiyan`）：`@gherkai/worker-midscene`（占名�
 推 GHCR 用 `GITHUB_TOKEN`，**不需要任何 secret**。GitHub 文档说首次发布的 package 默认 private，**实测（v1.4.0 首发）
 两个 package 随公开仓库直接就是 public、可匿名 `docker manifest inspect`**——首个 release 完成后核对一次
 （`docker manifest inspect ghcr.io/zhiyanliu/gherkai-worker-novaact:<版本>` 匿名能读即可）；若为 private 才需进
-*Packages → 该 package → Package settings → Change visibility → Public*。基底镜像必须可匿名 pull——`gherkai deploy`
-的「同步基底」一步靶的就是它（ADR 0038）。
+*Packages → 该 package → Package settings → Change visibility → Public*。基础镜像必须可匿名 pull——`gherkai deploy`
+的「同步基础镜像」一步靶的就是它（ADR 0038）。
 
 ### 5. 仓库本身必须是 public
 
@@ -143,20 +143,20 @@ WAIT_ATTEMPTS=1 bash .github/scripts/wait_for_index.sh npm @midscene/web 1.9.8
 **只有推真 tag 才能验的**：trusted publishing 的 OIDC 交换、attestation 真的落到 PyPI 上、
 npm provenance、GHCR 推送与包可见性、以及「等索引可见」在真实传播窗口下的表现。
 
-## 两态基底 Dockerfile 的本地态 build（不发行也能验镜像）
+## 两态基础镜像 Dockerfile 的本地态 build（不发行也能验镜像）
 
 CI 的 `images` job 用 index 态（按 tag 版本装已发行包）；发行前要验镜像内容，用 local 态喂本地产物——命令与 build-arg
 见各 `engines/*/Dockerfile` 头注释（`uv build --package gherkai-worker-novaact` 出 wheel、`npm pack` 出 tarball，
 `--build-arg WORKER_SOURCE=local`，context = 放产物的目录）。冒烟（不需要 AWS）：`docker run --rm --platform linux/amd64 <镜像> python -m gherkai_worker_novaact --capabilities` /
-`… <镜像> gherkai-worker-midscene --capabilities`（要给完整命令：node 基底的 entrypoint 会把以 `-` 开头的首参当 node 选项）。index 态只能在首个正式发行后验（占位 `0.0.0` 是空包）。
+`… <镜像> gherkai-worker-midscene --capabilities`（要给完整命令：上游 `node:22-slim` 镜像的 entrypoint 会把以 `-` 开头的首参当 node 选项）。index 态只能在首个正式发行后验（占位 `0.0.0` 是空包）。
 
 ## 维护
 
-- **版本旋钮**在两个 workflow 的 `env:` 里（`UV_VERSION` / `PYTHON_VERSION` / `NODE_VERSION`），
+- **工具链版本**在两个 workflow 的 `env:` 里（`UV_VERSION` / `PYTHON_VERSION` / `NODE_VERSION`），
   两边保持同值——发布路径与 CI 路径分叉了，CI 绿就不再代表发布链能运行。
   `UV_VERSION` 还有个下限：`uv publish` 上传 PEP 740 attestation 需 ≥ 0.9.12。
-- **action 一律钉到精确 tag**（`astral-sh/setup-uv@v10.0.1` 这种），不用浮动大版本：
+- **action 一律锁定到精确 tag**（`astral-sh/setup-uv@v10.0.1` 这种），不用浮动大版本：
   `setup-uv` 从 v8 起就没再发浮动 `v8`/`v9`/`v10` tag，浮动写法在它身上直接解析失败；
-  其余 action 有浮动 tag 也照钉，升级是有意动作。
+  其余 action 有浮动 tag 也照样锁定，升级是有意动作。
 - **`.github/scripts/` 是长期资产**（与 `tools/` 同性质）：改它守 CLAUDE.md 的代码/文档纪律，
   注释引 ADR 与稳定符号。

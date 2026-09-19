@@ -6,7 +6,7 @@
 
 ## 决定：RunReport = 归集索引，不是内容融合
 
-两个引擎的**原生**报告形态根本不同且不可统一（[0010](./0010-spike-as-apples-to-apples-benchmark.md) / CONTEXT「报告产物模型」）：Midscene 出单个 `report.html`（整 scope 一份），Nova 每次 act 出一个 trajectory（挂到其所属 step）+ 一份 session 汇总；未来引擎可能是录屏、外部 URL、JSON trace。
+两个引擎的**原生**报告形态根本不同且不可统一（[0010](./0010-spike-as-apples-to-apples-benchmark.md) / CONTEXT「引擎原生产物」）：Midscene 出单个 `report.html`（整 scope 一份），Nova 每次 act 出一个 trajectory（挂到其所属 step）+ 一份 session 汇总；未来引擎可能是录屏、外部 URL、JSON trace。
 
 **RunReport 不试图解析/重渲染这些产物**——那等于给每个引擎写一个 HTML 解析器，既脆又把 core 锁死到具体引擎。RunReport 是一份**跨引擎、跨产物的统一目录 + 导航入口**：
 
@@ -157,7 +157,7 @@ Nova worker 设 `NovaAct(logs_directory=<run 专属持久目录>)`，act/act_get
   报告天生 scope 级、且只在用 AI 时产生的客观事实。
 
 **但这暴露一个上游缺口**（非本 ADR 范围）：确定性 step **不产任何可观测产物**——连「检查了哪个
-URL、断言了什么」都不落痕（只有 pass/fail 进 result 树）。大量用确定性锚点的团队，其 RunReport
+URL、断言了什么」都不落痕（只有 pass/fail 进 result 树）。大量用确定性 step 的团队，其 RunReport
 人看部分会长期空。这是「确定性 step 产物可观测性」问题，留待后续（见下「留口子」），本 ADR 的 RunReport
 只负责归集**已有的**产物。
 
@@ -165,7 +165,7 @@ URL、断言了什么」都不落痕（只有 pass/fail 进 result 树）。大�
 
 - **现在做（v1.0）**：本 ADR 上述全部决策均已实装（单测 + 两引擎真 e2e 覆盖）。
 - **留口子不实现**：
-  - **确定性 step 产物可观测性**：让 `@deterministic` handler 可选地产一个轻量产物（当时 URL / 截图 / 检查描述），使纯确定性用例的 RunReport 也有内容可看。判定真值在 result 树已够；产物可观测另开一轮（与 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md) 确定性 step 设计一并演进）。**与 [0036](./0036-deterministic-capability-discovery.md) 的划界**：0036 解决的是「**跑前**知道有哪些确定性锚点」（注册表自述 → `list-deterministic` / `plan` 派发标注），本口子要的是「**跑后**看见那一步实际做了什么」（运行期产物）——同源于确定性 step 的不可观测，但非同一件事，0036 落地后本口子照旧敞着。
+  - **确定性 step 产物可观测性**：让 `@deterministic` handler 可选地产一个轻量产物（当时 URL / 截图 / 检查描述），使纯确定性用例的 RunReport 也有内容可看。判定真值在 result 树已够；产物可观测另开一轮（与 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md) 确定性 step 设计一并演进）。**与 [0036](./0036-deterministic-capability-discovery.md) 的划界**：0036 解决的是「**跑前**知道有哪些确定性 step」（注册表自述 → `list-deterministic` / `plan` 派发标注），本口子要的是「**跑后**看见那一步实际做了什么」（运行期产物）——同源于确定性 step 的不可观测，但非同一件事，0036 落地后本口子照旧敞着。
   - 按 `kind` 的富渲染（`<video>`/`<iframe>`，皮层将来做）。trajectory 内部结构化提取已由 [0042](./0042-step-evidence-and-explain.md) 落地——位置在 **worker**（引擎知识的唯一住处）、产物是 gherkai 自有 schema 的 `kind=evidence`，core 仍不解析任何产物。
 
 ## 重议

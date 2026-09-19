@@ -54,9 +54,9 @@ from gherkai_worker_novaact.lib.event_sink import EventSink  # 事件出口（AD
 from gherkai_worker_novaact.lib.job_source import JobSource  # job 入口（同上）
 from gherkai_worker_novaact.lib.artifact_upload import ArtifactUploader  # 产物 S3 上传（ADR 0029；无落点 env 时 no-op 报 file://）
 
-# 确定性 step 注册表（ADR 0022）+ 内建脚手架锚点（同在本包内）。
+# 确定性 step 注册表（ADR 0022）+ 内建的 step 脚手架（同在本包内）。
 # 先 import 注册机制（提供 @deterministic 装饰器），再 import 脚手架——脚手架顶层的
-# @deterministic 在 import 时执行，把锚点登记进 _deterministic._REGISTRY。
+# @deterministic 在 import 时执行，把这些 step 登记进 _deterministic._REGISTRY。
 # 使用方自己的 step 目录在 main() 里加载（本 import 之后 = 内建先注册，ADR 0037 决策 4）。
 from gherkai_worker_novaact import deterministic as _deterministic
 from gherkai_worker_novaact import deterministic_steps  # noqa: F401  仅为触发注册（其顶层 @deterministic 副作用）
@@ -207,7 +207,7 @@ def _traj_refs(step_traj: list[str]) -> list[dict]:
 
 
 def _attach_traj_refs(ev: dict, step_traj: list, *, protect_emit: bool = False) -> None:
-    """把本 step 的 trajectory 挂上 step_done 事件：抢传配套 json（ADR 0029）+ reportRefs（ADR 0027 下沉）。
+    """把本 step 的 trajectory 挂上 step_done 事件：安全点提前上传配套 json（ADR 0029）+ reportRefs（ADR 0027 下沉）。
 
     三个 emit 点（Then 投票/When 动作/except 失败）共用一份（曾三处重复、各自漂移风险）。
     protect_emit=True（失败路径）：上传若是本次失败源，_traj_refs 重建会再抛——吞掉、只丢 reportRefs 链接，
@@ -216,7 +216,7 @@ def _attach_traj_refs(ev: dict, step_traj: list, *, protect_emit: bool = False) 
     if not step_traj:
         return
     try:
-        _presend_act_siblings(step_traj)  # act 边界抢传配套 json（ADR 0029，为 Fargate 预演）
+        _presend_act_siblings(step_traj)  # act 边界提前上传配套 json（ADR 0029，为 Fargate 预演）
         ev["reportRefs"] = _traj_refs(step_traj)  # step 级 trajectory（ADR 0027 下沉）
     except Exception:  # noqa: BLE001
         if not protect_emit:
@@ -225,14 +225,14 @@ def _attach_traj_refs(ev: dict, step_traj: list, *, protect_emit: bool = False) 
 
 
 def _presend_act_siblings(step_traj: list[str]) -> None:
-    """act 边界抢传（ADR 0029「act 边界抢传」，为 Fargate 预演）：在 step_done 安全点，把本 step 各 act 的
-    配套 `_trajectory.json`（数据文件，非 reportRef 指向的 .html）也即时上传，**不等 scope 末 flush**。
+    """act 边界的安全点提前上传（ADR 0029 上传时机第三级，为 Fargate 预演）：在 step_done 安全点，把本 step 各 act 的
+    配套 `_trajectory.json`（数据文件，非 reportRef 指向的 .html）也提前传走，**不等 scope 末 flush**。
 
     否则中断落在 flush 前时这些 json 随容器盘销毁而丢（Fargate；subprocess 下留本地盘、非真丢）。
-    `step_traj` 存的是 .html 路径（`_collect_traj` 已把 json 推成 html）——此处反推配套 json 抢传。
+    `step_traj` 存的是 .html 路径（`_collect_traj` 已把 json 推成 html）——此处反推配套 json 提前上传。
     复用幂等 `to_report_ref`（distinct key、记 `_uploaded` → scope 末 flush 自动跳过、不重传）；
-    no-op（local/未注入落点）时 `to_report_ref` 原样返回不上传。**best-effort：失败吞掉**——抢传是保险，
-    报告链接强保证仍锚在 `_traj_refs`（.html 实时传，失败抛→可观测），不下放到抢传。
+    no-op（local/未注入落点）时 `to_report_ref` 原样返回不上传。**best-effort：失败吞掉**——提前上传是保险，
+    报告链接强保证仍锚在 `_traj_refs`（.html 实时传，失败抛→可观测），不下放到提前上传这一层。
     """
     for html in step_traj:
         if not html.endswith(".html"):
@@ -241,8 +241,8 @@ def _presend_act_siblings(step_traj: list[str]) -> None:
         if os.path.exists(js):
             try:
                 _get_uploader().to_report_ref(os.path.abspath(js))  # 幂等上传+记账；返回值丢弃（json 不进 reportRefs）
-            except Exception as e:  # noqa: BLE001  抢传 best-effort，失败不打断 step
-                log(f"引擎轨迹文件未能即时上传（不影响判定与报告链接）：{type(e).__name__}: {e}")
+            except Exception as e:  # noqa: BLE001  提前上传 best-effort，失败不打断 step
+                log(f"引擎轨迹文件未能提前上传（不影响判定与报告链接）：{type(e).__name__}: {e}")
 
 
 def _act_record(index: int, prompt: str | None, obj, *, vote: bool | None = None,
@@ -337,7 +337,7 @@ def _drain_evidence_uploads(timeout_s: float, *, flush_follows: bool) -> None:
     """收尾：**有界**等 evidence 截图的后台队列传完（ADR 0042 决策一）。best-effort、绝不抛。
 
     调用位置守两条：①**在会话释放之后**（ADR 0024「会话释放优先」——三层 with 已退出），与既有的中断兜底
-    抢传并列；② scope 末排在 `flush_and_cleanup` **之前**（队列传完的文件 flush 会跳过，漏网的由它兜）——故
+    提前上传并列；② scope 末排在 `flush_and_cleanup` **之前**（队列传完的文件 flush 会跳过，漏网的由它兜）——故
     scope 末这档超时不等于丢：紧随的整目录 flush 会把剩下的传上去。
     `flush_follows` 由调用点声明「我后面还跟着 flush 吗」（不在这里猜调用栈），超时提示据此分两句：会 flush 的
     只说改由收尾统一上传，不会 flush 的（提前退出路径只排空、不 flush）才说链接可能打不开。必传、无默认：
@@ -781,7 +781,7 @@ def _capabilities() -> dict[str, object]:
     `deterministic_steps` = 此刻注册表的清单（ADR 0036「2.」）：内建脚手架（模块顶 import 的副作用）+
     `main()` 顶部加载的使用方 step——与实际运行派发用的是同一张表，故复用 `list_registry()`、不另拼一份。
     `model_id` = 这个 worker 起 job 时真会传给 `Workflow(model_id=...)` 的那个 id（`lib/constants.py` 的
-    MODEL_ID：缺省钉死的 GA 版本，或 env `NOVA_MODEL_ID` 的 opt-in 覆盖值——见 ADR 0004「模型版本选择策略」）。
+    MODEL_ID：缺省锁定的 GA 版本，或 env `NOVA_MODEL_ID` 的 opt-in 覆盖值——见 ADR 0004「模型版本选择策略」）。
     **同一个常量、不另写字面量**：自述与实际运行必须报同一个值，否则「doctor 显示的模型」就成了第二事实源。
     加键不加入口（如将来的 browser 后端能力）——故返回 dict、消费侧按键取；`run` 的前置检查因此只需
     spawn 一次，同一份自述同时给出「steps 加载成功 / 清单 / grace 下限 / 模型」（ADR 0036「5.」）。
@@ -931,7 +931,7 @@ def main() -> int:
                         break  # 退避中收到停止信号 → 不再重连
         except BaseException:
             # 异常退出路径（ADR 0042 决策一第三条）：会话已在 _run_session 的三层 with 退出时释放，此处只给
-            # 在途截图同一份有界预算再抢一下（best-effort，不改变冒泡的异常与退出码）。
+            # 在途截图同一份有界预算再传一把（best-effort，不改变冒泡的异常与退出码）。
             _drain_evidence_uploads(EVIDENCE_DRAIN_EXIT_S, flush_follows=False)
             raise
         finally:
@@ -961,7 +961,7 @@ def main() -> int:
             # **scope 级 summary 上传 best-effort：失败吞+log、不带 summary ref、不拖垮 scope_done**（ADR 0032）——
             # session_summary 是"锦上添花的数字汇总"（引擎特有富信息、非人看报告，ADR 0027），此刻 scope 判定
             # 已 emit 完，不该因它上传失败（多为 S3 网络瞬时）把已执行完的 scope 拖成裸 traceback/engine_error。
-            # 对齐同文件抢传/flush 的 best-effort。**与 step 内 trajectory 的强保证不同**：trajectory 是判定现场
+            # 对齐同文件提前上传/flush 的 best-effort。**与 step 内 trajectory 的强保证不同**：trajectory 是判定现场
             # 证据（`to_report_ref` 失败抛、可观测）、summary 只是数字汇总，故此处降级、不动 to_report_ref 本身。
             try:
                 scope_refs.append({"kind": "summary", "ref": _get_uploader().to_report_ref(summary), "label": "Nova session summary"})

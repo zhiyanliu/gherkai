@@ -7,7 +7,7 @@ v1.0 的产品定位锚定在"精确度光谱"的**最左档**：只验证**核�
 ## 定位
 
 - **默认（不点名时）测什么**：业务意图是否达成——"能登录进去吗""能搜到商品吗"。流程断了（跳错页、崩溃、500、关键意图未达成）才报警。对达成路径上**未被点名**的视觉/文案/布局变化高度宽容。
-- **点名时也能测**：QA 在 `.feature` 里用**纯自然语言点名**要核对的项（如 `Then "价格是 ¥99"`、`Then "页面有'记住我'勾选框"`），走默认 AI 判断、**只对点名项精确核对**。所以"抓文案/数字/关键元素变更"**v1.0 做得到**——前提是 QA 点名（QA 零代码、无路由关键词，措辞见 [0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md)）。需精确不容抖动的核对则走确定性锚点（测试开发写，[0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md)）。
+- **点名时也能测**：QA 在 `.feature` 里用**纯自然语言点名**要核对的项（如 `Then "价格是 ¥99"`、`Then "页面有'记住我'勾选框"`），走默认 AI 判断、**只对点名项精确核对**。所以"抓文案/数字/关键元素变更"**v1.0 做得到**——前提是 QA 点名（QA 零代码、无路由关键词，措辞见 [0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md)）。需精确不容抖动的核对则走确定性 step（测试开发写，[0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md)）。
 - **不做**：像素级 / DOM 快照式精确回归（任何差异都报警）。这与 AI 柔性本质对立，应交给专用工具（Percy 类）。
 
 ## 关键澄清：「能否抓某类变更」取决于「点没点名」，不是 A/B
@@ -18,30 +18,30 @@ v1.0 的产品定位锚定在"精确度光谱"的**最左档**：只验证**核�
 | 文案/数字 "¥99"→"¥9.9" | ✅ 能抓（写了断言锚点） | ❌ 放过（没让 AI 看） |
 | 少了关键元素 | ✅ 能抓（写"必须有X"） | ❌ 放过 |
 | 粗粒度颜色（"是不是绿色"） | ✅ AI 点名能判断 | ❌ 放过 |
-| 精确色值（"是不是 #00FF7F"） | ⚠️ AI 做不好；须走 Playwright 取 CSS 值（确定性逃生舱） | ❌ 放过 |
-| 精确坐标/像素级位置 | ⚠️ AI 做不好；须走 Playwright 取 bounding box（确定性逃生舱） | ❌ 放过 |
+| 精确色值（"是不是 #00FF7F"） | ⚠️ AI 做不好；须走 Playwright 取 CSS 值（确定性 step） | ❌ 放过 |
+| 精确坐标/像素级位置 | ⚠️ AI 做不好；须走 Playwright 取 bounding box（确定性 step） | ❌ 放过 |
 | 布局挪位 | ⚠️ 难（柔性本就抹平位置） | ❌ 放过 |
-**点名 → A 种类（AI 判断，投票治抖动）；没点名 → 不在测试范围（不是做不到，是没要求它看）。**
-**颜色等"AI 粗粒度可判、精确需 CSS"的项**：粗粒度走 AI 锚点；要精确则用确定性逃生舱（`page` 取 computed style），见 [0014](./0014-ai-first-assertions.md)。
+**点名 → 走 AI 判断（投票治抖动）；没点名 → 不在测试范围（不是做不到，是没要求它看）。**
+**颜色等"AI 粗粒度可判、精确需 CSS"的项**：粗粒度走 AI 锚点；要精确则用确定性 step（`page` 取 computed style），见 [0014](./0014-ai-first-assertions.md)。
 
-## 两种"不确定性"——只治其一（关键澄清）
+## 判定抖动与柔性漏检——只治其一（关键澄清）
 
-- **种类 A：AI 判断飘忽**（同一页面，AI 这次/下次结论不一致）= flakiness。**v1.0 用投票治**（多跑几次取多数，见 [0014](./0014-ai-first-assertions.md) 抖动治理）。
-- **种类 B：柔性吞掉真实变更**（页面真变了，但 AI 宽容地跑过、不报警）= 灵敏度不足。**投票治不了**（AI 每次都稳定地柔性通过）。**v1.0 不解决，作为已知边界接受。**
+- **判定抖动**（同一页面，AI 这次/下次结论不一致）= flakiness。**v1.0 用投票治**（多跑几次取多数，见 [0014](./0014-ai-first-assertions.md) 抖动治理）。
+- **柔性漏检**（页面真变了，但 AI 宽容地判过、不报警）= 灵敏度不足。**投票治不了**（AI 每次都稳定地柔性通过）。**v1.0 不解决，作为已知边界接受。**
 
-种类 B 不是 bug，是最左档定位的必然代价。混淆 A/B 会误以为"投票能带来确定性"——投票只压随机噪声，给不了对变更的灵敏度。
+柔性漏检不是 bug，是最左档定位的必然代价。混淆这两类会误以为"投票能带来确定性"——投票只压随机噪声，给不了对变更的灵敏度。
 
 ## 已知边界（v1.0 明确不做）
 
-- **未点名不抓**（种类 B）：见上「两种"不确定性"——只治其一」。
+- **未点名不抓**（柔性漏检）：见上「判定抖动与柔性漏检——只治其一」。
 - 像素级回归见上「定位·不做」（含 Percy 理由）；精确色值/坐标见上「关键澄清」表。
 
-## v1.0 包含（断言两层，按"默认 AI / 逃生舱确定性"分）
+## v1.0 包含（断言两层，按"默认 AI / 按需确定性"分）
 
 1. **默认 AI 判断（QA，零代码）**：QA 在 `.feature` 写纯自然语言断言 `Then "{自然语言}"`，**无需任何路由关键词**，框架默认走 AI 布尔判断（`aiBoolean`/`act_get`）+ 投票。这是绝大多数情况，符合"AI 柔性主导"。
    - "点名精确核对某项"（如"价格是 ¥99"）也走这层——QA 仍只写自然语言，AI 去看那一项。
-2. **确定性锚点（测试开发，逃生舱，按需自建）**：少数"必须精确、不容 AI 抖动"的断言（如 URL 精确、关键 DOM），由**测试开发**（会写代码的角色）写在**使用方项目的 `steps/` 目录**（`steps/*.py` 与 `steps/*.mts` 成对、同一正则，经 `--steps-dir` / env `GHERKAI_STEPS_DIR` 加载进同一张注册表，见 [0037](./0037-distribution-and-packaging.md) 决策 4），用 Playwright 精确查、不走 AI。worker 包内的脚手架（`engines/novaact/gherkai_worker_novaact/deterministic_steps.py` / `engines/midscene/src/worker/deterministic.steps.mts`，含说明注释）是**发行包内容**，各只留一个通用 URL 锚点（`页面地址匹配 "<正则>"`）作范例，**不承载任何项目专属锚点**（改它等于 fork 发行包），也不要求 QA 学措辞（QA 也可用 `list-deterministic` 主动查已有锚点，见 [0036](./0036-deterministic-capability-discovery.md)）。
-   - 角色边界：QA 永远只写自然语言（"零代码"对 QA 成立）；确定性锚点是工程角色的活（BDD 原本的角色分工，见 [0019](./0019-feature-tags-scope-and-engine.md)/[0018](./0018-generic-steps-capability.md)）。
+2. **确定性 step（测试开发，按需自建）**：少数"必须精确、不容 AI 抖动"的断言（如 URL 精确、关键 DOM），由**测试开发**（会写代码的角色）写在**使用方项目的 `steps/` 目录**（`steps/*.py` 与 `steps/*.mts` 成对、同一正则，经 `--steps-dir` / env `GHERKAI_STEPS_DIR` 加载进同一张注册表，见 [0037](./0037-distribution-and-packaging.md) 决策 4），用 Playwright 精确查、不走 AI。worker 包内的脚手架（`engines/novaact/gherkai_worker_novaact/deterministic_steps.py` / `engines/midscene/src/worker/deterministic.steps.mts`，含说明注释）是**发行包内容**，各只留一个通用的 URL 确定性 step（`页面地址匹配 "<正则>"`）作范例，**不承载任何项目专属的确定性 step**（改它等于 fork 发行包），也不要求 QA 学措辞（QA 也可用 `list-deterministic` 主动查已有的确定性 step，见 [0036](./0036-deterministic-capability-discovery.md)）。
+   - 角色边界：QA 永远只写自然语言（"零代码"对 QA 成立）；确定性 step 是工程角色的活（BDD 原本的角色分工，见 [0019](./0019-feature-tags-scope-and-engine.md)/[0018](./0018-generic-steps-capability.md)）。
    - 详见措辞与脚手架设计：ADR 0020。
 
 ## 何时重议

@@ -57,22 +57,22 @@
 | worker 日志 | 输出到屏幕；`--quiet` 时写入 `<report-dir>/<run_id>/worker.log` | CloudWatch 日志组 `/<prefix>worker/<engine>` |
 | 前置 | 本机 AWS 凭证，以及所用引擎的 worker 已安装在本机 | 部署方已执行 `gherkai deploy --vpc <档> --prefix <前缀>`；提交侧只需最小云端权限 |
 
-一个 `--prefix` = 一套完整环境，多环境通过多个 prefix 并存。云端侧由五种各自独立更新的载体构成（stack、Lambda asset、基底镜像、variant 镜像、SSM 参数），「改动为何未在云端生效」的反查表见 [`cloud-backend-carriers.md`](./cloud-backend-carriers.md)。
+一个 `--prefix` = 一套完整环境，多环境通过多个 prefix 并存。云端侧由五种各自独立更新的载体构成（stack、Lambda asset、基础镜像、variant 镜像、SSM 参数），「改动为何未在云端生效」的反查表见 [`cloud-backend-carriers.md`](./cloud-backend-carriers.md)。
 
 ## 5. 包与发行物
 
-版本真源是一个 git tag：五个 Python 包同号，兄弟包之间以 `==` 钉死同版本，npm 包与两个基底镜像用同一个版本号。下表只给发行物与通道的对应关系；安装步骤、AWS 前置与 `doctor` 预检见 [`getting-started.md`](../user-guide/getting-started.md)。
+版本真源是一个 git tag：五个 Python 包同号，兄弟包之间以 `==` 锁定同版本，npm 包与两个基础镜像用同一个版本号。下表只给发行物与通道的对应关系；安装步骤、AWS 前置与 `doctor` 预检见 [`getting-started.md`](../user-guide/getting-started.md)。
 
 | 发行物 | 通道 | import / 命令名 | 安装在谁的机器上 |
 |---|---|---|---|
 | `gherkai` | PyPI（CLI 主包） | 包 `gherkai_cli`，命令 `gherkai`；随 wheel 带 agent skill 包数据 | 所有使用者 |
-| `gherkai-runtime` | PyPI，被 `==` 钉住 | 包 `gherkai_runtime` | 随 CLI 安装，使用者不单独安装 |
-| `gherkai-core` | PyPI，被 `==` 钉住 | 包 `gherkai_core` | 随 CLI 安装 |
+| `gherkai-runtime` | PyPI，被 `==` 锁定 | 包 `gherkai_runtime` | 随 CLI 安装，使用者不单独安装 |
+| `gherkai-core` | PyPI，被 `==` 锁定 | 包 `gherkai_core` | 随 CLI 安装 |
 | `gherkai-worker-novaact` | PyPI，经 CLI extra `[local]` 装进**同一个** venv | 包 `gherkai_worker_novaact`，命令 `gherkai-worker-novaact` | 需在本机运行 Nova Act 的使用者 |
 | `@gherkai/worker-midscene` | npm，Node ≥22 | 命令 `gherkai-worker-midscene` | 需在本机运行 Midscene 的使用者 |
 | `gherkai-deploy-aws` | PyPI，经 CLI extra `[deploy-aws]`；按 entry point group `gherkai.deploy` 被发现（名 `aws`） | 包 `gherkai_deploy_aws`，命令 `gherkai deploy` / `destroy` | 部署方（另需 Node ≥22 与容器引擎） |
-| 两个基底镜像 | GHCR：`ghcr.io/zhiyanliu/gherkai-worker-novaact:X.Y.Z`、`…-midscene:X.Y.Z`（linux/amd64） | — | 运行时不直接拉取；由 `gherkai deploy` 同步进使用方 ECR |
-| variant 镜像 | 使用方私有 ECR | — | 由使用方自行构建（基底镜像 + 自有 `steps/`），经 `gherkai deploy push-worker` 推送注册 |
+| 两个基础镜像 | GHCR：`ghcr.io/zhiyanliu/gherkai-worker-novaact:X.Y.Z`、`…-midscene:X.Y.Z`（linux/amd64） | — | 运行时不直接拉取；由 `gherkai deploy` 同步进使用方 ECR |
+| variant 镜像 | 使用方私有 ECR | — | 由使用方自行构建（基础镜像 + 自有 `steps/`），经 `gherkai deploy push-worker` 推送注册 |
 
 仓库里的 `features/`、`tools/`、`docs/`、`graphify-out/`、`skills/` 都不随包分发。CLI 与云端后端必须同版本：`--backend cloud` 在提交前检查里比对两侧的版本戳。CLI 比后端**新**时拒绝执行，并给出两种处理方式（部署方升级后端 / 临时使用与后端同版本的 CLI）；CLI 比后端**旧**时只输出一行提示，不阻断执行；后端没有版本戳，或任一侧不是纯发行版本，则跳过比对。升级的传播顺序见 [`cloud-backend-carriers.md`](./cloud-backend-carriers.md)。
 
@@ -88,8 +88,8 @@
 | `--json` 的字段级契约 | [`cli-json-contract.md`](./cli-json-contract.md) |
 | 云端浏览器为何采用系统默认、何时切换为自建 | [ADR 0011](../adr/0011-agentcore-browser-system-default-vs-custom.md) |
 | 分层总纲与三层切分的理由 | [ADR 0016](../adr/0016-execution-architecture-core-lib-run-model.md) |
-| worker↔核心协议（三通道分离：事件专用管道 / stdout / stderr；job 入口、退出码、终止契约） | [ADR 0024](../adr/0024-worker-core-protocol.md) |
-| 分发与打包（五包、三名分离、版本真源、worker 定位、基底镜像分工） | [ADR 0037](../adr/0037-distribution-and-packaging.md) |
+| worker↔核心协议（三通道分离：事件专用管道 / stdout / stderr；job 入口、退出码、协作式停止） | [ADR 0024](../adr/0024-worker-core-protocol.md) |
+| 分发与打包（五包、三名分离、版本真源、worker 定位、基础镜像分工） | [ADR 0037](../adr/0037-distribution-and-packaging.md) |
 | 云资源清单、两层命名、IAM、提交前检查 | [ADR 0033](../adr/0033-iac-aws-backend-and-composition-wiring.md) |
 | 引擎模型的选定与覆写 | [ADR 0044](../adr/0044-engine-model-selection-and-override.md) |
 | 使用方式（安装、编写用例、运行、查看结果、部署、配置） | [`docs/user-guide/`](../user-guide/README.md) |

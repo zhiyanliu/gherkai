@@ -1,7 +1,7 @@
 """共享原子落盘助手（`gherkai_core.adapters._atomic`）的通用性质：并发读者只看到完整内容、权限按声明、失败不留 tmp。
 
 三个 local adapter（RunStore 控制面 / ResultStore 数据面 / ReportStore 报告面）共用它，故原子性与权限在此
-统一钉一次；各 adapter 自己的用例只钉自己的落点与内容。文本面（index.html）与 JSON 面都要覆盖——只钉
+统一锁定一次；各 adapter 自己的用例只覆盖自己的落点与内容。文本面（index.html）与 JSON 面都要覆盖——只验
 `json.loads` 失败会漏掉 HTML 那一半（HTML 读者靠「非空且以 </html> 收尾」判完整）。
 
 真起子进程读、不 mock（绿≠对：进程间文件可见性是 mock 之外的真实行为）。

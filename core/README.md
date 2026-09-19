@@ -30,7 +30,7 @@ result = schedule(run_meta, engine_resolver, event_sink)
 | 模块 | 提供什么 |
 |---|---|
 | `gherkai_core.scope` | `plan(features, config)`：按 tag 分组成 job、校验冲突 |
-| `gherkai_core.schedule` | `schedule(...)`：并发执行完一批，带并发上限、失败隔离、超时、优雅停 |
+| `gherkai_core.schedule` | `schedule(...)`：并发执行完一个 run 的全部 job，带并发上限、失败隔离、超时、优雅停 |
 | `gherkai_core.model` | `RunMeta` / `RunResult` / `Status` 等判定与结果类型 |
 | `gherkai_core.ports` | 引擎、存储、进度回调的接口，由你注入实现 |
 | `gherkai_core.adapters` | 本机子进程引擎、Fargate 引擎、文件与 DynamoDB + S3 存储等现成实现 |

@@ -103,7 +103,7 @@ variant / 默认指针 / revision / digest 这些载体本身（SSM 键、ECR ta
 | `plan` 直接退 2，提示「使用方 steps 加载失败」 | `plan` 自己的标注探活（`--match-steps`，`_probe_deterministic_dispatch` → `compose.match_deterministic`）遇到 `WorkerSelfDescribeError`；`run` 另有一道等价的本机前置，走 `--capabilities`（`_preflight_worker_runtimes`） | 同上，修复该文件。这是 `plan` 唯一**不降级**的失败：降级为「无标注」等于让读者误以为那些 step 会走 AI |
 | `plan` 只输出一行「（标注降级）引擎 X … 无派发标注」，计划本体照常输出 | 该引擎运行时未定位到（四级定位链全 miss），属环境问题 | 安装该引擎，或忽略（`plan` 对 miss 一律 best-effort；`run`/`submit`/`list-deterministic` 对同一件事退 2） |
 | 某 step 实际执行时记 `error`，`message` 里列出多条模式 | 一条 step 命中多条模式 | 收紧模式，或改 step 措辞避开；`plan` 会提前用 ⚠ 标出 |
-| `submit --backend cloud` 退 2，提示 variant 解析失败 | 请求的 variant 在该引擎当前版本下未推送过 / revision 已清理 / digest 已删除 | 由部署方 `push-worker` 推送；紧急情况下可临时用 `--worker-variant base`（`gherkai deploy` 已把本版本基底同步成 `base`）。CLI 旧于后端时提示改为「先升 CLI」，因为向旧版本命名空间推 tag 无法消除版本不一致 |
+| `submit --backend cloud` 退 2，提示 variant 解析失败 | 请求的 variant 在该引擎当前版本下未推送过 / revision 已清理 / digest 已删除 | 由部署方 `push-worker` 推送；紧急情况下可临时用 `--worker-variant base`（`gherkai deploy` 已把本版本基础镜像同步成 `base`）。CLI 旧于后端时提示改为「先升 CLI」，因为向旧版本命名空间推 tag 无法消除版本不一致 |
 | Midscene 报「某文件一条确定性 step 都没注册」 | 双实例守卫：裸 specifier 若解析到第二份包副本，注册会写进 worker 永不读取的表 | 确认文件 import 的是 `@gherkai/worker-midscene`，且在顶层调用了 `deterministic(...)` |
 
 最后一条需要单独说明：Midscene 侧的正确性依靠**两道防线**。一是 `bin.mts` 注册的 resolve hook，把裸 specifier 固定到 worker 自身已加载的那个 URL（禁止从 cwd/argv 推算）；二是 `user-steps.mts` 的零注册检查，把「静默落回 AI」转成「启动失败」。Nova 侧没有这个风险（同进程、绝对包 import 命中同一 module 对象），因此也没有这一层防护，这是**有理由的不对称**，不是遗漏实现。
@@ -139,4 +139,4 @@ variant / 默认指针 / revision / digest 这些载体本身（SSM 键、ECR ta
 | `--json` 里 `deterministic` / `list-deterministic` / `doctor` 的字段 | [`cli-json-contract.md`](./cli-json-contract.md) |
 | step 判定怎么算（`failed` vs `error`、votes、短路） | [`verdict-model.md`](./verdict-model.md) |
 | 产物与证据（谁产什么、落在哪、怎么读） | [`artifacts-and-evidence.md`](./artifacts-and-evidence.md) |
-| 四种跑法下谁起 worker、definition 如何随 run 传递 | [`execution-and-reconciliation.md`](./execution-and-reconciliation.md) |
+| run / submit × local / cloud 四种组合下谁起 worker、definition 如何随 run 传递 | [`execution-and-reconciliation.md`](./execution-and-reconciliation.md) |

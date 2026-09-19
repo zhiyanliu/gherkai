@@ -3,7 +3,7 @@
 core 只认 `EngineResolver`（按 engine 名给一个 `Engine`）；这里 new 出每个引擎的
 `SubprocessEngine`（cmd 指向各自语言的 worker），core 永不 import 引擎、不知 worker 是子进程。
 
-WebUI 的 bootstrap 将来复用本模块——组合根逻辑（引擎注册表、读 feature）与命令行皮（argparse、
+WebUI 的 bootstrap 将来复用本模块——组合根逻辑（引擎注册表、读 feature）与命令行前端（argparse、
 渲染）分开，故放在 compose.py 而非 __main__.py。
 """
 from __future__ import annotations
@@ -187,11 +187,11 @@ class WorkerNotFoundError(RuntimeError):
 
 
 class _UnavailableEngine:
-    """某引擎这次装配不出来时的「一用即抛」空腿——两档共用（local: ADR 0037 决策 3；cloud: ADR 0038）。
+    """某引擎这次装配不出来时的「一用即抛」空占位项——两档共用（local: ADR 0037 决策 3；cloud: ADR 0038）。
 
-    存在的理由：两个 builder 都恒建两条腿，而一次 run 往往只用一个引擎——某引擎装配不出**不该连坐**
+    存在的理由：两个 builder 都恒建两个引擎项，而一次 run 往往只用一个引擎——某引擎装配不出**不该连坐**
     （local 档 dev 下 midscene 无已安装 npm 包即常态，须走定位链第一级 env 覆写；cloud 档则是「本 run 没用到
-    该引擎、故 definition 里也没解析它的 worker revision」，是正常态）。装一条空腿保住「引擎名恒在册」
+    该引擎、故 definition 里也没解析它的 worker revision」，是正常态）。装一个空占位项保住「引擎名恒在册」
     （resolver / list-engines 语义不变），把 miss 的爆点挪到真要起它那一刻，且爆的是带修复指引的
     结构化异常——而非 resolver 的「未知引擎」（那会把「没装/未解析」误导成「名字拼错」）。
     正门仍是调用点 preflight：`run`/`submit` 先对本次 plan 用到的引擎 `resolve_worker_cmd`（local）/
@@ -304,7 +304,7 @@ def _runtime_version() -> str | None:
 # （同步 `run`、local per-run 进程、`status --wait` 接力者）下就用到不同的确定性 step 集/请求头、判定不可复现；
 # `GHERKAI_NO_ARTIFACTS` 不进 definition（`--no-report` 只挂在同步 `run`、该档什么都不落），清它挡的是另一件事：
 # 用户没给 `--no-report`、却因宿主导出过该值而收不到产物。
-# **只列 gherkai 自有键**：`NOVA_LOGS_DIR` / `MIDSCENE_RUN_DIR` 是 SDK 侧旋钮，本模块的 None 档按 `build_engines`
+# **只列 gherkai 自有键**：`NOVA_LOGS_DIR` / `MIDSCENE_RUN_DIR` 是 SDK 侧配置项，本模块的 None 档按 `build_engines`
 # docstring 的契约回落「SDK 默认」（SDK 默认本身就含读自己那个 env），清掉即改契约，故不在此列。
 _COMPOSE_OWNED_WORKER_ENV = ("GHERKAI_STEPS_DIR", "GHERKAI_NO_ARTIFACTS", "GHERKAI_EXTRA_HTTP_HEADERS")
 
@@ -341,7 +341,7 @@ def build_engines(
     只是 cmd/cwd 不同——无需两个具名 adapter 类。
 
     **cmd/cwd 来自 `resolve_worker_cmd` 的四级定位链**（ADR 0037 决策 3），不再由仓库结构推导；
-    某引擎 miss 只让那条腿变成「一用即报错」（见 `_UnavailableEngine`），不连坐另一条。
+    某引擎 miss 只让那个引擎项变成「一用即报错」（见 `_UnavailableEngine`），不连坐另一条。
 
     产物持久落点（两引擎对称，经环境变量传给 SDK，ADR 0027）——**归集档调用方须给绝对路径**；
     `--no-report` 档恒给 None（真不生成，见上 no_artifacts 条）。绝对路径是硬要求：worker 已无专属 cwd
@@ -428,8 +428,8 @@ def build_engines(
         _inject_aws(midscene_env)
 
     def _leg(engine: str, env: dict | None) -> Engine:
-        # 定位链解析（ADR 0037 决策 3）。**per-engine 容错**：本函数恒建两条腿、一次 run 却可能只用一个
-        # 引擎，故 miss 不连坐——装成一用即报错的空腿（爆点挪到真 spawn 时，带安装指引）。
+        # 定位链解析（ADR 0037 决策 3）。**per-engine 容错**：本函数恒建两个引擎项、一次 run 却可能只用一个
+        # 引擎，故 miss 不连坐——装成一用即报错的空占位项（爆点挪到真 spawn 时，带安装指引）。
         # 「worker 必须是被直接 spawn 的那个进程」（fd3 经 pass_fds 继承，ADR 0024）是定位链的不变量，
         # 由各级供给方保证（见 resolve_worker_cmd 第 2 级注释）——本处只转发 cmd/cwd。
         try:
@@ -568,7 +568,7 @@ def match_deterministic(engine: str, texts: list[str], *, steps_dir: str | Path 
     """批量问某引擎 worker「这些 step 文本各命中哪条确定性模式」（ADR 0036 决策 4，plan 标注用）。
 
     spawn `worker --match-steps`、stdin 喂 JSON 文本数组、收逐条结果（None=走 AI /
-    {"pattern","description"}=命中 / {"conflict":[...]}=命中多条——实际运行时将 error，plan 预检提前暴露）。
+    {"pattern","description"}=命中 / {"conflict":[...]}=命中多条——实际运行时将 error，用例预检提前暴露）。
     匹配语义 100% 在 worker（同一注册表同一 search 实现），CLI 零复刻（ADR 0022「匹配放 worker」红线）。
     异常语义同 `query_capabilities`（调用方 plan 做 best-effort 降级）。
     """
@@ -696,7 +696,7 @@ def resolve_region(explicit_region: str | None, profile: str | None) -> str | No
 class CloudTarget:
     """一次 cloud 调用打到哪儿：prefix + 各资源终名 + region/profile（ADR 0033 两层命名 / 0016 决策 C）。
 
-    产品本体知识（`gherkai` 知道云资源，ADR 0016「演进」节）：入口皮只把已解析的 flag 值交进来，
+    产品本体知识（`gherkai` 知道云资源，ADR 0016「演进」节）：入口前端只把已解析的 flag 值交进来，
     「prefix 怎么推导默认名、哪个资源有 env 兜底、region 怎么落实成字符串」全在 `resolve_cloud_target`。
     名字类字段一律是**终名**（已叠 prefix / 已被单资源 override 取代），消费者直接用、不再拼。
     """
@@ -723,7 +723,7 @@ def resolve_cloud_target(
     runs_table: str | None = None, events_table: str | None = None,
     bucket: str | None = None, cluster: str | None = None,
 ) -> CloudTarget:
-    """把入口皮已解析的 flag 值解析成 `CloudTarget`（纯字符串推导 + region 落实，不连 AWS）。
+    """把入口前端已解析的 flag 值解析成 `CloudTarget`（纯字符串推导 + region 落实，不连 AWS）。
 
     解析链逐资源不同、**有意非齐整**（保既有 CLI 行为，别为对称乱加 env 兜底）：
     - prefix：flag > `AWS_RESOURCE_PREFIX` > `DEFAULT_PREFIX`；
@@ -812,10 +812,10 @@ def build_cloud_stores(*, table: str, bucket: str, prefix: str = "",
 
 
 def read_resource(uri: str, *, s3=None, region: str | None = None, profile: str | None = None) -> bytes:
-    """读一个 `ResourceUri` 的字节（`file://`、裸路径、`s3://`）——**皮层解引用产物 ref 的唯一入口**（ADR 0042 决策四）。
+    """读一个 `ResourceUri` 的字节（`file://`、裸路径、`s3://`）——**前端层解引用产物 ref 的唯一入口**（ADR 0042 决策四）。
 
     许可边界（ADR 0027 的消费端规则按层收窄、见 0042 决策五）：本函数只提供「按 URI 取字节」这一能力，
-    **该不该解引用由调用方按 ref 的 kind 判**——皮层只对 gherkai 自有 schema 的 ref（`kind == "evidence"`）
+    **该不该解引用由调用方按 ref 的 kind 判**——前端层只对 gherkai 自有 schema 的 ref（`kind == "evidence"`）
     解引用，引擎原生产物（report / trajectory / summary）仍只当链接；`model / wire / schedule / ReportStore`
     永不调本函数。
 
@@ -931,7 +931,7 @@ def build_fargate_engines(
     缺省成 family 名就是把这条不变量做成「忘了传就静默破」，改成必给关键字 → 漏传即 `TypeError`，在装配点
     就炸。真值来源两条（都在调用方，本函数只认 ARN）：definition 的 `RunMeta.worker_task_defs`（正常路径，
     提交侧 preflight 解析）、`resolve_default_worker_task_defs`（旧 definition 的兼容路径）。
-    映射里**没有的引擎装一条 `_UnavailableEngine` 空腿**（一用即抛、点名该引擎）——本 run 没用到的引擎不该
+    映射里**没有的引擎装一个 `_UnavailableEngine` 空占位项**（一用即抛、点名该引擎）——本 run 没用到的引擎不该
     连坐，而真去起它时爆的是带指引的异常、不是 `KeyError`。
     - run_id：拼 events PK（`new_run_id()` 后注入，对称 store）。
     - **profile 不传给 FargateEngine**（正确的非对称，ADR 0016 决策 C）：容器用 task role；region 传（已落实成
@@ -983,7 +983,7 @@ def build_fargate_engines(
     def _engine(engine: str) -> Engine:
         revision_arn = worker_task_defs.get(engine)
         if revision_arn is None:
-            # 本 run 没解析该引擎的 worker revision（正常态：没用到它）——空腿，真去起才抛（见 _UnavailableEngine）。
+            # 本 run 没解析该引擎的 worker revision（正常态：没用到它）——空占位项，真去起才抛（见 _UnavailableEngine）。
             return _UnavailableEngine(WorkerVariantError(
                 f"引擎 {engine!r} 的 worker task-def revision 未随本 run 解析——提交时定死的任务定义里只解析了 "
                 f"{sorted(worker_task_defs) or '（空）'} 这些引擎。若本 run 确实要运行该引擎，重新提交"
@@ -1005,7 +1005,7 @@ def build_fargate_engines(
 
 # ============================================================================
 # 版本 skew（ADR 0037 决策 7）：CLI 版本 vs 后端 SSM 版本戳，三态齐全 + 非纯净版本跳过。
-# **住产品本体、不住入口皮**：Lambda 推进器 / WebUI 将来同样要比「自己 vs 后端」，判据与措辞单点维护、
+# **住产品本体、不住入口前端**：Lambda 推进器 / WebUI 将来同样要比「自己 vs 后端」，判据与措辞单点维护、
 # 不在第二处复刻（同 names 抽包的理由）。比对是纯函数（不连 AWS）；读戳是下面 read_backend_version 的事。
 # ============================================================================
 
@@ -1020,7 +1020,7 @@ def read_backend_version(*, prefix: str, region=None, profile=None, ssm=None) ->
 
     **`ParameterNotFound` → 返回 None、不抛**：戳缺失是本机制之前部署环境的正常态，决策 7 判它「警告不拦」；
     若在此翻成异常一路退 2，所有现存部署会被 preflight 锁死（决策 7 明写要避免的那个后果）。其余 botocore
-    异常（凭证/region/权限/网络）照抛——由入口皮归到自己的退出码层（对齐 `resolve_network` 的处理）。
+    异常（凭证/region/权限/网络）照抛——由入口前端归到自己的退出码层（对齐 `resolve_network` 的处理）。
     ssm client 可注入（测试）；未注入则惰性建，与 subnet/sg 同一条 session/region 解析（`_make_ssm_client`）。
     """
     if ssm is None:
@@ -1105,7 +1105,7 @@ def check_version_skew(ssm_version: str | None, cli_version: str | None) -> tupl
 
 def check_backend_skew(*, prefix: str, cli_version: str | None, region=None, profile=None,
                        ssm=None) -> tuple[str, str, str | None]:
-    """读后端版本戳 + 判 skew 一步到位（ADR 0037 决策 7）——**编排住产品本体、不住入口皮**：CLI / WebUI /
+    """读后端版本戳 + 判 skew 一步到位（ADR 0037 决策 7）——**编排住产品本体、不住入口前端**：CLI / WebUI /
     推进器任何组合根要做「自己 vs 后端」比对都调这一处，判据、措辞与「戳缺失→警告不拦」的分叉单点维护。
     **调用次序约定：先于 `preflight_cloud_resources`**——skew 的修复动作是部署方运行一次 `gherkai deploy`，那一步
     同时把资源建齐/补齐；先报「表不存在」只会把人引去查 `--prefix`、绕一圈回到同一个动作。
@@ -1120,7 +1120,7 @@ def check_backend_skew(*, prefix: str, cli_version: str | None, region=None, pro
 
 # ============================================================================
 # worker variant 解析（ADR 0038）：variant 名 → 各引擎的 task-def **revision** ARN。
-# **住产品本体、不住入口皮**：提交侧 preflight（严格退 2 + 打印）与云端推进器的兼容回落读的是同一批 SSM
+# **住产品本体、不住入口前端**：提交侧 preflight（严格退 2 + 打印）与云端推进器的兼容回落读的是同一批 SSM
 # 参数、同一套 miss 判据、同一套提示语分叉——两处各写一遍必漂（同 names 抽包、同 check_backend_skew 的理由）。
 # ============================================================================
 
@@ -1166,7 +1166,7 @@ def _ssm_get(ssm, path: str) -> str | None:
     """读一个 SSM String 参数 → 值（strip 后空串视作缺失）；**`ParameterNotFound` → None，其余异常照抛**。
 
     把「参数不在」与「凭证/权限/网络坏了」分开：前者是本 ADR 各 miss 分支要翻成带指引提示的正常态，后者该
-    原样冒泡给入口皮归到自己的退出码层。**两个 ADR 的读侧共用本函数**：0038 各 variant miss 分支把 None 翻成带指引提示；
+    原样冒泡给入口前端归到自己的退出码层。**两个 ADR 的读侧共用本函数**：0038 各 variant miss 分支把 None 翻成带指引提示；
     0037 决策 7 的版本戳（`read_backend_version`）缺失必须是 None——翻成异常会把所有本机制之前的部署 preflight 锁死。
     """
     try:
@@ -1194,7 +1194,7 @@ def read_worker_default(*, prefix: str, region=None, profile=None, ssm=None) -> 
 def _no_default_pointer_error(prefix: str) -> WorkerVariantError:
     return WorkerVariantError(
         f"后端没有 worker 默认 variant 指针（SSM {ssm_path(prefix, _names.WORKER_DEFAULT_KEY)}）——"
-        f"这个部署还没走过 worker 镜像交付的初始化。请部署方运行一次 `gherkai deploy`（会把基底同步成 "
+        f"这个部署还没走过 worker 镜像交付的初始化。请部署方运行一次 `gherkai deploy`（会把基础镜像同步成 "
         f"`base` 并把默认指针初始化为它），或提交时用 `--worker-variant <名>` 显式指定。"
     )
 
@@ -1202,7 +1202,7 @@ def _no_default_pointer_error(prefix: str) -> WorkerVariantError:
 def _read_worker_image_record(ssm, *, prefix: str, engine: str, tag: str) -> dict | None:
     """读 `worker-image/<engine>/<tag>` 的 JSON 记录 → dict；参数不在 → None。
 
-    JSON 畸形（人手改坏参数）翻成 `WorkerVariantError`——不让 `json.JSONDecodeError` 裸奔到入口皮（那条
+    JSON 畸形（人手改坏参数）翻成 `WorkerVariantError`——不让 `json.JSONDecodeError` 裸奔到入口前端（那条
     错误看不出是哪个 SSM 参数坏了）。
     """
     import json as _json
@@ -1231,7 +1231,7 @@ def _variant_miss_hint(*, engine: str, variant: str, tag: str, what: str,
     CLI **旧于**后端（决策 7 里「警告不拦」的那一档）时不能引导去 `push-worker`：那会让人推一个**旧版本
     命名空间**的 tag，推完提交侧还是解析不到当前后端版本的映射、原地绕圈。此档一律引导升级 CLI。
     其余档（同版本 / 无从比较 / 无戳）引导 push-worker——这是真正缺镜像时的修复动作；并给第二条出路
-    「临时 `--worker-variant base`」（ADR 0038「升级不重置默认指针」的配套：deploy 已把本版本基底同步成 base，
+    「临时 `--worker-variant base`」（ADR 0038「升级不重置默认指针」的配套：deploy 已把本版本基础镜像同步成 base，
     等不及部署方推自定义 variant 的人可以先这样运行）。
     """
     if _release_cmp(cli_version, backend_version or "") == -1:
@@ -1346,7 +1346,7 @@ def resolve_default_worker_task_defs(
     当前默认指针**解析出引擎 → revision ARN。解析不出即抛，**绝不回落 family 最新 ACTIVE、绝不回落模板 revision**。
 
     这样的 run 有两个来源：引入本机制的那次升级前提交、升级窗口内仍在运行的 run；以及旧 CLI 提交到新后端的 run
-    （ADR 0037 决策 7「CLI 旧于后端 → 警告不拦」允许）。用**后端**版本拼 tag（不是提交方 CLI 版本——definition
+    （ADR 0037 决策 7「CLI 旧于后端 → 警告不拦」允许）。用**后端**版本拼 tag（不是提交者 CLI 版本——definition
     里根本没记，且后端只解析自己版本命名空间下的映射）。
 
     比 `resolve_worker_variant` 少两环（不 Describe revision、不查 ECR digest）是有意的：这里运行在推进器
@@ -1371,7 +1371,7 @@ def resolve_default_worker_task_defs(
             raise WorkerVariantError(
                 f"兼容路径解析失败：引擎 {engine} 在后端版本 {backend_version} 下没有默认 variant {variant!r} "
                 f"的镜像映射（SSM {ssm_path(prefix, _names.worker_image_key(engine, tag))}）。"
-                f"部署方运行 `gherkai deploy`（同步基底并初始化默认指针），或推上这个 variant："
+                f"部署方运行 `gherkai deploy`（同步基础镜像并初始化默认指针），或推上这个 variant："
                 f"`gherkai deploy push-worker <本地镜像> --engine {engine} --variant {variant}`。",
                 engine=engine, variant=variant)
         out[engine] = rec["revision_arn"]
@@ -1486,7 +1486,7 @@ def preflight_cloud_resources(
 
 
 def is_botocore_error(exc: BaseException) -> bool:
-    """是否 botocore 异常（云端不可达/权限/凭证/region 等）——入口皮据此把云端故障归到自己的退出码层。
+    """是否 botocore 异常（云端不可达/权限/凭证/region 等）——入口前端据此把云端故障归到自己的退出码层。
 
     惰性 import botocore（cli 主依赖不含 boto3，顶层 import 会在纯 local 环境炸；且只在 cloud 路径才会调到
     这里）。缺 botocore（不该发生，能走到 cloud 就装了 boto3）时保守返回 False。

@@ -7,13 +7,13 @@ https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/cloud-backend.md 
 
 | 谁 | 做什么 | agent 的角色 |
 |---|---|---|
-| 部署方 | `gherkai deploy` 建 / 改后端，`gherkai destroy` 拆，管 IAM 与网络 | **不自己运行**。用 `doctor` 判缺什么，把命令与前置清单交给人 |
-| 测试开发 | 写确定性 step，build 定制 worker 镜像，`gherkai deploy push-worker` 推上去 | 可以运行（不改 IAM） |
+| 部署方 | `gherkai deploy` 建 / 改后端，`gherkai deploy push-worker` 推 worker 镜像，`gherkai destroy` 拆，管 IAM 与网络 | **不自己运行**。用 `doctor` 判缺什么，把命令与前置清单交给人 |
+| 测试开发 | 写确定性 step，构建定制 worker 镜像，交部署方推送 | 可以运行（不改 IAM） |
 | QA / CI | `submit --backend cloud` → `status --wait` → `explain` | 直接运行 |
 
 ## 2 交给部署方的清单
 
-前置：`uv tool install 'gherkai[deploy-aws]'`；Node ≥ 22 在 PATH；容器引擎 docker 可用（要拉官方 worker 基底镜像并推进 ECR）；凭证有云端写权限（CloudFormation、DynamoDB、S3、ECS、ECR、Lambda、EventBridge、VPC、日志组、IAM 建角色与 PassRole）；region 已定。
+前置：`uv tool install 'gherkai[deploy-aws]'`；Node ≥ 22 在 PATH；容器引擎 docker 可用（要拉官方 worker 基础镜像并推进 ECR）；凭证有云端写权限（CloudFormation、DynamoDB、S3、ECS、ECR、Lambda、EventBridge、VPC、日志组、IAM 建角色与 PassRole）；region 已定。
 
 ```bash
 gherkai deploy --bootstrap                                  # 每个 account+region 首次一次
@@ -34,7 +34,7 @@ gherkai destroy --vpc default --prefix gherkai- --yes       # 拆栈；表 / 桶
 
 ```bash
 gherkai doctor --backend cloud --prefix gherkai-                    # 凭证、后端版本、资源、variant 能否解析
-gherkai plan features/x.feature                                     # 本机预检；确定性标注只代表本机 steps
+gherkai plan features/x.feature                                     # 本机用例预检；确定性标注只代表本机 steps
 RUN_ID=$(gherkai submit features/x.feature --backend cloud --prefix gherkai-)
 gherkai status "$RUN_ID" --backend cloud --prefix gherkai- --wait   # 退出码即判定
 gherkai explain "$RUN_ID" --backend cloud --prefix gherkai-         # 失败证据；截图是 S3 地址
@@ -46,7 +46,7 @@ gherkai explain "$RUN_ID" --backend cloud --prefix gherkai-         # 失败证�
 
 | 概念 | 是什么 | 谁写 |
 |---|---|---|
-| 基底 | 官方镜像 `ghcr.io/zhiyanliu/gherkai-worker-<engine>:X.Y.Z`，零使用方内容 | 官方发布；`gherkai deploy` 同步成 `<版本>-base` |
+| 基础镜像 | 官方镜像 `ghcr.io/zhiyanliu/gherkai-worker-<engine>:X.Y.Z`，零使用方内容 | 官方发布；`gherkai deploy` 同步成 `<版本>-base` |
 | variant | 一套具名的确定性 step 集 = 一个定制镜像，ECR tag `<CLI 版本>-<variant 名>`，对应一个 task 定义 revision（按 digest 引用） | 你的 `push-worker` |
 | 默认指针 | 提交时不给 `--worker-variant` 用哪个（部署级一个） | `deploy` 初始化为 base；`push-worker --set-default` 改指 |
 
@@ -69,7 +69,7 @@ gherkai submit features/x.feature --backend cloud --prefix gherkai- --worker-var
 
 - arm Mac 上不带 `--platform linux/amd64` 会 build 出 arm64，容器启动期才报 exec format error；`push-worker` 会在推之前查架构与版本、不符退 2。
 - 提交时 `--worker-variant` 被解析成本 run 各引擎的精确 revision 写进提交记录：一个 run 内镜像固定，别人重推同名 variant 不影响正在运行的 run。某引擎缺该 variant 即退 2、不回落默认。
-- **A→C 交接**：本机新写或改了确定性 step，`plan` 的标注会变，但云端不会，直到重新 build + `push-worker`。cloud 档「改了 steps 不推镜像等于没改」，且没有任何显式失败提醒。
+- **测试开发 → QA / CI 的交接**：本机新写或改了确定性 step，`plan` 的标注会变，但云端不会，直到重新 build + `push-worker`。cloud 档「改了 steps 不推镜像等于没改」，且没有任何显式失败提醒。
 - `gherkai deploy delete-worker` 尚未提供（命令存在、会说明）。
 
 ## 5 升级顺序
@@ -77,8 +77,8 @@ gherkai submit features/x.feature --backend cloud --prefix gherkai- --worker-var
 后端记一个版本戳，cloud 命令动资源前比对：CLI 比后端新 → 退 2、无放行开关；旧 → 警告。所以升级是三步，顺序不能反：
 
 1. 部署方 `uv tool upgrade gherkai`。
-2. 立刻 `gherkai deploy --vpc <同档> --prefix <同前缀>`：新模板 + 新版本基底进 ECR + 已有 variant 按新模板重派生。中间窗口里提交退 2 是预期。
-3. 有自定义 variant 的：从新版本基底重新 build、`push-worker`。其他人再升自己的 CLI。
+2. 立刻 `gherkai deploy --vpc <同档> --prefix <同前缀>`：新模板 + 新版本基础镜像进 ECR + 已有 variant 按新模板重派生。中间窗口里提交退 2 是预期。
+3. 有自定义 variant 的：从新版本基础镜像重新 build、`push-worker`。其他人再升自己的 CLI。
 
 不想动本机安装的部署方可用 `uvx --from 'gherkai[deploy-aws]==X.Y.Z' gherkai deploy` 先升后端。
 

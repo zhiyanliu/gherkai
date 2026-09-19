@@ -42,7 +42,7 @@ def test_start_tunnel_for_jobs_maps_and_injects_headers(monkeypatch):
 
 
 def test_start_tunnel_for_jobs_propagates_tunnel_error(monkeypatch):
-    """provider 起不来 → TunnelError 直接冒给调用方（皮归「没开始执行就被拒」退 2，不在本层吞成哨兵）。"""
+    """provider 起不来 → TunnelError 直接冒给调用方（前端归「没开始执行就被拒」退 2，不在本层吞成哨兵）。"""
     import pytest
 
     def boom(name):
@@ -133,7 +133,7 @@ def test_watch_ttl_fallback_when_run_never_settles(monkeypatch):
         "r1", tunnel_pid=777, runs_table="tbl", ttl_s=600.0, region="us-east-1",
         on_warn=warned.append)
     assert stopped == [777] and "TTL" in reason
-    assert warned and "读 run 状态失败" in warned[0]  # 诊断经 on_warn 交给皮打印
+    assert warned and "读 run 状态失败" in warned[0]  # 诊断经 on_warn 交给前端打印
 
 
 def test_watch_stops_tunnel_even_when_store_assembly_fails(monkeypatch):

@@ -5,14 +5,14 @@
 即可）——同步态 `FargateEngine._probe_task`/`_await_exit_code`（core/gherkai_core/adapters/fargate_engine.py）产
 `TaskProbe(stopped, exit_code, missing)` 供 `_read_events` 轮询判存活/退出；detached cloud 态由退出观察者 Lambda 从
 EventBridge 的 ECS STOPPED 事件读 `exitCode` 写 task_exited（ADR 0034 机制二，deploy_aws/gherkai_deploy_aws/lambdas/exit_observer.py）。
-grace/stopTimeout 校准要的是 SIGTERM→退出的**真实墙钟预算**（`stoppingAt`/`executionStoppedAt`/`stoppedAt`
+grace/stopTimeout 校准要的是 SIGTERM→退出的**真实墙钟耗时**（`stoppingAt`/`executionStoppedAt`/`stoppedAt`
 的差），属一次性标定、非运行期判定；混进任一条判定路径都会污染其单一职责、且改产品路径需回归。故独立脚本纯读。
 
 **测什么**（DescribeTasks 的时间字段，task STOPPED 后才全）：
 - `createdAt`：RunTask 收到请求。
 - `startedAt`：容器进入 RUNNING。
-- `stoppingAt`：ECS 开始停（发 SIGTERM 的锚点）。
-- `executionStoppedAt`：容器进程实际停（worker 退出的锚点）。**stoppingAt→executionStoppedAt = SIGTERM→退出真实耗时**
+- `stoppingAt`：ECS 开始停（发 SIGTERM 的时间基准）。
+- `executionStoppedAt`：容器进程实际停（worker 退出的时间基准）。**stoppingAt→executionStoppedAt = SIGTERM→退出真实耗时**
   ——这是校准 stopTimeout 的核心量（对照生效 stopTimeout；grace 下限 vs stopTimeout 的关系见 ADR 0032 结论 4）。
 - `stoppedAt`：task 完全 STOPPED（清理完）。
 - `stopCode` / `stoppedReason`：停因（`TaskFailedToStart` / `EssentialContainerExited` / `UserInitiated`(StopTask) 等）。

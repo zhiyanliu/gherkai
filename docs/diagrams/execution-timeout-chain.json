@@ -2,7 +2,7 @@
   "schema_version": 1,
   "diagram_type": "sequence",
   "meta": {
-    "title": "云端超时处置：从闹钟到点到停止 worker",
+    "title": "云端超时处置：从定时器到点到停止 worker",
     "locale": "zh-CN",
     "quality_profile": "showcase",
     "column_fit": "spread",
@@ -32,7 +32,7 @@
     {
       "id": "alarm",
       "type": "messagebus",
-      "label": "超时闹钟",
+      "label": "超时定时器",
       "sublabel": "一次性定时"
     },
     {
@@ -70,7 +70,7 @@
     {
       "from": 152,
       "to": 224,
-      "label": "起 task 时设置闹钟"
+      "label": "起 task 时设置定时器"
     },
     {
       "from": 250,
@@ -89,7 +89,7 @@
       "from": "reconciler",
       "to": "alarm",
       "y": 180,
-      "label": "起 task 时设置一次性闹钟",
+      "label": "起 task 时设置一次性定时器",
       "variant": "default",
       "note": "到点 = 启动时刻 + 该 job 的墙钟预算；由启动方设置"
     },
@@ -100,7 +100,7 @@
       "y": 270,
       "label": "到点调起，指定该 job",
       "variant": "emphasis",
-      "note": "一个 job 一个闹钟；触发后即自动删除，控制台中通常不可见"
+      "note": "一个 job 一个定时器；触发后即自动删除，控制台中通常不可见"
     },
     {
       "id": "m-stop",
@@ -183,17 +183,17 @@
   "cards": [
     {
       "dot": "orange",
-      "title": "闹钟是短生命周期资源",
+      "title": "定时器是短生命周期资源",
       "items": [
         "一个 job 一个：起 task 时设置，到点触发后即自动删除",
-        "闹钟只负责调起；是否停止由到点处置的一方现查状态决定"
+        "定时器只负责调起；是否停止由到点处置的一方现查状态决定"
       ]
     },
     {
       "dot": "cyan",
       "title": "本图只画云端这一路",
       "items": [
-        "前台跑法在 schedule 循环内计时，到点直接停止 worker",
+        "前台执行在 schedule 循环内计时，到点直接停止 worker",
         "本机后台批量运行由启动该 job 的进程计时；接力者按库里的领取时刻复查是否超预算",
         "三路同一形态：到点 → 停止 worker → 归因为超时失败"
       ]
@@ -202,7 +202,7 @@
       "dot": "violet",
       "title": "双保险",
       "items": [
-        "闹钟未触发也不会永久停滞：任何一次推进都会复查是否存在超预算的 job"
+        "定时器未触发也不会永久停滞：任何一次推进都会复查是否存在超预算的 job"
       ]
     }
   ]

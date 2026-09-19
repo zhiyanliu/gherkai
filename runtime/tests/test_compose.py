@@ -11,7 +11,7 @@ from gherkai_core.scope import FeatureSource
 
 
 # dev 环境里 midscene 恒走定位链第一级（env 覆写）——它没有已安装的 npm 包、也没有 PATH 上的 bin
-# （ADR 0037 决策 3「contributor 代价点」）。build_engines 的 env 注入类断言要两条腿都是真 SubprocessEngine，
+# （ADR 0037 决策 3「contributor 代价点」）。build_engines 的 env 注入类断言要两个引擎项都是真 SubprocessEngine，
 # 故这些用例统一用本 fixture 给 midscene 一个假 cmd（不 spawn，只查接线）。
 @pytest.fixture
 def midscene_env_cmd(monkeypatch):
@@ -175,8 +175,8 @@ def test_build_engines_has_both_legs(midscene_env_cmd):
 
 
 def test_build_engines_miss_leg_does_not_break_the_other(monkeypatch):
-    """某引擎定位链 miss **不连坐**另一条腿（ADR 0037 决策 3）：dev 下 midscene 未装是常态，
-    novaact-only 的 run 必须照常运行；miss 的那条腿一用即抛 WorkerNotFoundError（带安装指引），
+    """某引擎定位链 miss **不连坐**另一个引擎项（ADR 0037 决策 3）：dev 下 midscene 未装是常态，
+    novaact-only 的 run 必须照常运行；miss 的那个引擎项一用即抛 WorkerNotFoundError（带安装指引），
     **不是** resolver 的「未知引擎」（那会把「没装」误导成「拼错名」）。"""
     monkeypatch.delenv("GHERKAI_WORKER_MIDSCENE_CMD", raising=False)
     monkeypatch.setattr(compose.shutil, "which", lambda n: None)
@@ -198,7 +198,7 @@ def test_build_engines_injects_extra_http_headers_env(monkeypatch, midscene_env_
         env = engines[name]._env
         assert env is not None, name
         assert _json.loads(env["GHERKAI_EXTRA_HTTP_HEADERS"]) == {"ngrok-skip-browser-warning": "1"}
-    # 宿主 shell 里有同名值时不传 headers：两条腿都必须建 env（非 None）且该键已被清掉。
+    # 宿主 shell 里有同名值时不传 headers：两个引擎项都必须建 env（非 None）且该键已被清掉。
     # 断言不写成 `env2 is None or key not in env2`——env2 为 None 时那种写法空过，恰好照不出继承泄漏。
     monkeypatch.setenv("GHERKAI_EXTRA_HTTP_HEADERS", '{"leaked": "1"}')
     engines2 = compose.build_engines()
@@ -599,7 +599,7 @@ def test_query_capabilities_rejects_off_contract_answer(monkeypatch, novaact_env
 
 
 def test_query_capabilities_wrong_engine_names_the_misconfiguration(monkeypatch, novaact_env_cmd, fresh_caps_cache):
-    """自称的引擎对不上 → 诊断点名「路径指错」并给出要查的旋钮（而不是泛泛的「版本不一致」）。"""
+    """自称的引擎对不上 → 诊断点名「路径指错」并给出要查的配置项（而不是泛泛的「版本不一致」）。"""
     import subprocess
 
     monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: _fake_caps_proc(_caps_json("midscene", 31)))
@@ -629,7 +629,7 @@ def test_query_capabilities_unknown_engine_raises(fresh_caps_cache):
 
 
 def test_query_capabilities_midscene_gets_no_nova_env(monkeypatch, novaact_env_cmd, fresh_caps_cache):
-    """NOVA_ACT_TIMEOUT_S 只注给 Nova（它是 Nova 的旋钮）——Midscene 的下限由它自己的收尾预算算出。"""
+    """NOVA_ACT_TIMEOUT_S 只注给 Nova（它是 Nova 的配置项）——Midscene 的下限由它自己的收尾预算算出。"""
     import subprocess
 
     captured = {}
@@ -727,7 +727,7 @@ def test_ssm_path_contains_prefix():
     assert compose.ssm_path("gherkai-", "security-groups") == "/gherkai-backend/security-groups"
 
 
-# ---- resolve_cloud_target：入口皮的 flag/env → 各资源终名 + region/profile（ADR 0033 / 0016 决策 C）----
+# ---- resolve_cloud_target：入口前端的 flag/env → 各资源终名 + region/profile（ADR 0033 / 0016 决策 C）----
 def _clear_aws_env(monkeypatch):
     for k in ("AWS_REGION", "AWS_DEFAULT_REGION", "AWS_PROFILE", "AWS_RESOURCE_PREFIX",
               "AWS_DDB_TABLE", "AWS_S3_BUCKET"):
@@ -1192,7 +1192,7 @@ def test_preflight_missing_cluster_detected():
 
 @pytest.fixture
 def novaact_env_cmd(monkeypatch):
-    """定位链第一级钉死一个假 novaact cmd：自述用例只验「组合根怎么拼命令/收结果」，不依赖本机装了什么。"""
+    """定位链第一级固定一个假 novaact cmd：自述用例只验「组合根怎么拼命令/收结果」，不依赖本机装了什么。"""
     monkeypatch.setenv("GHERKAI_WORKER_NOVAACT_CMD", "/fake/novaact-worker")
     monkeypatch.setenv("GHERKAI_WORKER_MIDSCENE_CMD", "/fake/midscene-worker")
     monkeypatch.delenv("GHERKAI_WORKER_NOVAACT_CWD", raising=False)
@@ -1295,7 +1295,7 @@ def test_read_backend_version_missing_parameter_is_none_not_raise():
 
 
 def test_read_backend_version_other_aws_error_propagates():
-    """凭证/权限/region 类错误照抛——由入口皮归到自己的退出码层，不伪装成「没有戳」。"""
+    """凭证/权限/region 类错误照抛——由入口前端归到自己的退出码层，不伪装成「没有戳」。"""
     ssm = _StampSsm(None, error=_client_error("AccessDeniedException"))
     with pytest.raises(Exception) as e:
         compose.read_backend_version(prefix="g-", ssm=ssm)
@@ -1363,7 +1363,7 @@ def test_skew_cli_version_is_mandatory_no_runtime_fallback():
 
 
 def test_check_backend_skew_reads_stamp_then_judges():
-    """读戳 + 判定一步到位（编排住产品本体，入口皮只翻退出码）。"""
+    """读戳 + 判定一步到位（编排住产品本体，入口前端只翻退出码）。"""
     ssm = _StampSsm("1.3.0")
     verdict, msg, stamp = compose.check_backend_skew(prefix="prod-", cli_version="1.4.0", ssm=ssm)
     assert verdict == compose.SKEW_BLOCK and "gherkai deploy" in msg

@@ -14,7 +14,7 @@
 #
 # 后端 = AWS Bedrock，走标准凭证链。graphify 要求 AWS_PROFILE / AWS_REGION / AWS_DEFAULT_REGION 任一在 env 里
 # （~/.aws/config 的 region 不算），缺则本脚本回落 `aws configure get region`，仍无则退 2。
-# 各 GRAPHIFY_* 与 PYTHONHASHSEED 有默认值、env 可覆盖；PYTHONHASHSEED=0 与 post-commit hook 一致，钉死聚类随机性。
+# 各 GRAPHIFY_* 与 PYTHONHASHSEED 有默认值、env 可覆盖；PYTHONHASHSEED=0 与 post-commit hook 一致，固定聚类随机性。
 #
 # 在别的机器（如有 Bedrock 凭证的开发跳板机）运行结束后再 rsync graphify-out/ 回来时，排除 .graphify_root——它存绝对路径，
 # 带回会让本地 post-commit hook 重建失败（脚本启动时也会把它校正为当前仓库根）。操作细节见 DEVELOPMENT.md「知识图刷新」。

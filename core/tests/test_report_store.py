@@ -360,7 +360,7 @@ def test_href_relativized_through_symlinked_run_dir(tmp_path: Path):
 
 
 def test_href_relativized_for_bare_path_ref(tmp_path: Path):
-    # 裸路径 ref（无 scheme）当本地文件相对化（review #6：_local_path 的防御性分支，钉住行为）。
+    # 裸路径 ref（无 scheme）当本地文件相对化（review #6：_local_path 的防御性分支，锁定行为）。
     # 生产 ref 恒带 scheme（ADR 0024），此为防御分支——显式测，避免它悄悄失效或被误删。
     run_dir = tmp_path / "reports" / "bare"
     sub = run_dir / "nova-trajectories"; sub.mkdir(parents=True)

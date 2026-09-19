@@ -25,7 +25,7 @@
   "segments": [
     { "from": 158, "to": 220, "label": "升级前：三方同版本" },
     { "from": 250, "to": 356, "label": "第 1 步之后 → 窗口一：仅拒部署方本机" },
-    { "from": 500, "to": 652, "label": "第 2 步之后 → 窗口二：仅拒已升级提交方" },
+    { "from": 500, "to": 652, "label": "第 2 步之后 → 窗口二：仅拒已升级提交者" },
     { "from": 750, "to": 858, "label": "第 3 步之后 → 恢复" }
   ],
   "messages": [
@@ -46,7 +46,7 @@
       "note": "写入新版本戳；部署自身不做版本比对，窗口一内可执行"
     },
     {
-      "from": "deployer", "to": "registry", "y": 448, "label": "同步新版本基底", "variant": "emphasis",
+      "from": "deployer", "to": "registry", "y": 448, "label": "同步新版本基础镜像", "variant": "emphasis",
       "note": "本版本已有的 variant 按记录重新派生"
     },
     {
@@ -55,7 +55,7 @@
     },
     {
       "from": "member", "to": "backend", "y": 578, "label": "提交放行", "variant": "default",
-      "note": "镜像标签含提交方本机的 CLI 版本，该成员仍解析到旧版本镜像"
+      "note": "镜像标签含提交者本机的 CLI 版本，该成员仍解析到旧版本镜像"
     },
     {
       "from": "member", "to": "backend", "y": 624, "label": "升级后同样被拒", "variant": "security",
@@ -63,7 +63,7 @@
     },
     {
       "from": "deployer", "to": "registry", "y": 698, "label": "第 3 步：重推 variant", "variant": "emphasis",
-      "note": "部署方从新版本基底重建后推送；不可提前到部署之前"
+      "note": "部署方从新版本基础镜像重建后推送；不可提前到部署之前"
     },
     {
       "from": "deployer", "to": "backend", "y": 782, "label": "提交与镜像命令恢复", "variant": "default",
@@ -91,18 +91,18 @@
     },
     {
       "dot": "rose",
-      "title": "窗口二：仅拒已升级提交方",
+      "title": "窗口二：仅拒已升级提交者",
       "items": [
         "起于后端升到新版本，止于自定义 variant 重推完成",
-        "默认指向官方基底且未显式指定时不出现——部署已同步新版本基底",
-        "此期间可让提交方临时改用官方基底的 variant"
+        "默认指向官方基础镜像且未显式指定时不出现——部署已同步新版本",
+        "此期间可让提交者临时改用官方基础镜像的 variant"
       ]
     },
     {
       "dot": "cyan",
       "title": "未升级成员不受影响的原因",
       "items": [
-        "镜像标签含提交方本机的 CLI 版本，各方解析各自版本",
+        "镜像标签含提交者本机的 CLI 版本，各方解析各自版本",
         "CLI 旧于后端仅提示一行、不阻止，因此团队可延后升级",
         "升级不重置默认指针"
       ]

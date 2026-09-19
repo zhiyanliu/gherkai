@@ -15,7 +15,7 @@ dist/
 build/
 out/
 *.tsbuildinfo
-# npm pack 的本地产物（基底镜像本地态 build 用，不入库）——注：.gitignore 无行尾注释，故单独一行
+# npm pack 的本地产物（基础镜像本地态 build 用，不入库）——注：.gitignore 无行尾注释，故单独一行
 *.tgz
 
 # ── Package manager debug logs ──

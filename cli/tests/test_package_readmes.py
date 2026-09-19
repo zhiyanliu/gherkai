@@ -12,7 +12,7 @@ import tomllib
 from pathlib import Path
 
 import pytest
-from _doc_rules import COLLOQUIAL, FORBIDDEN, RELATIVE_LINK  # 禁词 / 相对链接的单一事实源（见该模块 docstring）
+from _doc_rules import COLLOQUIAL, FORBIDDEN, RELATIVE_LINK, RETIRED_TERMS  # 禁词 / 相对链接的单一事实源（见该模块 docstring）
 
 REPO = Path(__file__).resolve().parents[2]
 PY_PACKAGES = ("cli", "core", "runtime", "deploy_aws", "engines/novaact")
@@ -39,8 +39,10 @@ def _shipped_readmes() -> list[Path]:
 def test_shipped_readme_is_for_users_only(readme: Path):
     text = readme.read_text(encoding="utf-8")
     hits = [f"{readme.relative_to(REPO)}:{i}: {line.strip()[:120]}"
-            for i, line in enumerate(text.splitlines(), 1) if FORBIDDEN.search(line) or COLLOQUIAL.search(line)]
-    assert not hits, "包 README 上 PyPI/npm 页面，不得含内部指代或口头语（ADR/决策号/内部机制名/隐喻）——搬去同目录 DEVELOPMENT.md：\n" + "\n".join(hits)
+            for i, line in enumerate(text.splitlines(), 1)
+            if FORBIDDEN.search(line) or COLLOQUIAL.search(line) or RETIRED_TERMS.search(line)]
+    assert not hits, ("包 README 上 PyPI/npm 页面，不得含内部指代、口头语或退役旧名（ADR/决策号/内部机制名/隐喻）"
+                      "——内部内容搬去同目录 DEVELOPMENT.md，旧名换成 CONTEXT.md 词表里的规范名：\n" + "\n".join(hits))
     rel = [f"{readme.relative_to(REPO)}:{i}: {line.strip()[:120]}"
            for i, line in enumerate(text.splitlines(), 1) if RELATIVE_LINK.search(line)]
     assert not rel, "包 README 里的相对链接在 PyPI/npm 页面上是死链，改绝对 URL：\n" + "\n".join(rel)
@@ -58,8 +60,8 @@ def test_root_readme_is_for_users_only():
     相对链接在 GitHub 上正常渲染，故这里不查链接形态。"""
     text = (REPO / "README.md").read_text(encoding="utf-8")
     hits = [f"README.md:{i}: {line.strip()[:120]}" for i, line in enumerate(text.splitlines(), 1)
-            if FORBIDDEN.search(line) or COLLOQUIAL.search(line)]
-    assert not hits, "根 README 面向使用者，内部指代搬去 DEVELOPMENT.md：\n" + "\n".join(hits)
+            if FORBIDDEN.search(line) or COLLOQUIAL.search(line) or RETIRED_TERMS.search(line)]
+    assert not hits, "根 README 面向使用者：内部指代搬去 DEVELOPMENT.md，退役旧名换成词表里的规范名：\n" + "\n".join(hits)
 
 
 def test_package_summaries_are_for_users_only():
@@ -80,7 +82,7 @@ def test_package_summaries_are_for_users_only():
 def test_github_release_body_is_for_users_only():
     """GitHub Release 正文 = CHANGELOG.md 本版节 + `.github/release_body_footer.md`（`.github/scripts/release_notes.py`
     渲染，占位符 `{{VERSION}}` / `{{OWNER}}` / `{{REPO}}`）。Releases 页面是没有仓库上下文的使用者面：零禁词、
-    仓库内文件只用绝对 URL 且钉 tag（`blob/v<版本>/`，不用 HEAD——本版说明要与它链到的文档同版）。
+    仓库内文件只用绝对 URL 且锁定 tag（`blob/v<版本>/`，不用 HEAD——本版说明要与它链到的文档同版）。
     release.yml 必须还在用这条渲染链（改形态别让护栏静默变绿）。"""
     footer_path = REPO / ".github/release_body_footer.md"
     assert footer_path.is_file(), "缺 .github/release_body_footer.md（Release 正文的固定块）"
@@ -90,7 +92,7 @@ def test_github_release_body_is_for_users_only():
     rendered = footer.replace("{{VERSION}}", "9.9.9").replace("{{OWNER}}", "o").replace("{{REPO}}", "r")
     hits = [f"release footer:{i}: {line.strip()[:120]}" for i, line in enumerate(rendered.splitlines(), 1)
             if FORBIDDEN.search(line) or RELATIVE_LINK.search(line) or "blob/HEAD/" in line]
-    assert not hits, "Release 正文面向使用者：内部指代改产品语言、仓库文件用钉 tag 的绝对 URL：\n" + "\n".join(hits)
+    assert not hits, "Release 正文面向使用者：内部指代改产品语言、仓库文件用锁定 tag 的绝对 URL：\n" + "\n".join(hits)
     wf = (REPO / ".github/workflows/release.yml").read_text(encoding="utf-8")
     assert "release_notes.py render" in wf and "body_path:" in wf, "release.yml 不再经 release_notes.py 渲染正文——护栏与实际形态脱节"
     assert "release_notes.py check" in wf, "release.yml 的 gate 少了 CHANGELOG 节校验（每版说明「不写发不出」）"

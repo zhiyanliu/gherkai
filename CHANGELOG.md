@@ -20,7 +20,7 @@
 - `gherkai deploy` 结束时改为逐行说明默认 worker 镜像 variant 与 worker 运行配置的更新结果，例如「已保留默认 worker 镜像 variant `base`」「各 variant 的 worker 运行配置已是最新」。
 - 仓库首页新增「判定由谁做出」一节，列出两个引擎各自使用的模型与服务、版本策略、查看与更换方式，以及费用来源。
 - 文档重组：面向使用者的完整说明集中到 [`docs/user-guide/`](./docs/user-guide/README.md)，新增[常见问题](./docs/user-guide/faq.md)页；文档里的图改为统一风格的架构 / 流程 / 时序图，执行与推进全景、云端交付与 worker 身份两张大图另有可交互版本（https://zhiyanliu.github.io/gherkai/ ）；各发行包在 PyPI / npm 上的页面改为入口页，只留定位、装法、最小用法与指向用户指南的链接；本文件是新增的变更记录。
-- 命令行的帮助、提示、警告与错误文案统一了用词：口语的「跑」改写为「运行」或「执行」。命令、选项、输出结构与退出码都没有变化。
+- 命令行的帮助、提示、警告、错误与 `gherkai deploy` 的步骤行统一了用词：口语的「跑」改为「运行」或「执行」；`--default-job-timeout` 的帮助改称「job 墙钟预算秒」；`gherkai skill` 各命令的帮助改称「agent skill」；`deploy` 里同步官方 worker 镜像的那一步改称「基础镜像同步」；`plan` 的输出表头改称「用例预检」。用户文档与随包发行的 agent skill 同批对齐了同一套用词：`plan` 一律称「用例预检」，前台与后台之别称「执行方式」、本机与云端之别称「执行后端」，两者的四种组合称「四种组合」。命令、选项、输出结构与退出码都没有变化。
 
 ### 修复
 
@@ -30,7 +30,7 @@
 ### 升级须知
 
 - 在本机 local 后端运行用例的机器上，把命令行工具与你的用例用到的引擎 worker 升到同一版本（`uv tool upgrade gherkai`；Midscene worker 另外执行 `npm i -g @gherkai/worker-midscene@<CLI 版本>`），新的默认模型随 worker 一起升级；版本不一致会在运行前检查时退 2。安装形态见[开始使用](./docs/user-guide/getting-started.md)。
-- 部署方须重新执行 `gherkai deploy`：新的默认模型在新版本的 worker 基底镜像里，放宽后的模型调用权限也随部署更新。有自定义 worker 镜像 variant 的团队，从新版本的基底镜像重新构建后用 `gherkai deploy push-worker` 推送一次。升级步骤见[云端后端](./docs/user-guide/cloud-backend.md)。
+- 部署方须重新执行 `gherkai deploy`：新的默认模型在新版本的 worker 基础镜像里，放宽后的模型调用权限也随部署更新。有自定义 worker 镜像 variant 的团队，从新版本的基础镜像重新构建后用 `gherkai deploy push-worker` 推送一次。升级步骤见[云端后端](./docs/user-guide/cloud-backend.md)。
 - 想继续用原来的 Midscene 模型：把 `MIDSCENE_MODEL_ID` 设为 `qwen.qwen3-vl-235b-a22b`（本机 local 后端设在 shell 里，云端 cloud 后端写进定制镜像的环境变量）。
 
 ## [1.4.3] - 2026-09-16
@@ -109,7 +109,7 @@
 
 ### 新增
 
-- 发行包：命令行工具 `gherkai`（PyPI）、本机 Nova Act worker `gherkai-worker-novaact`（随 `gherkai[local]` 装）、本机 Midscene worker `@gherkai/worker-midscene`（npm）、云端部署 provider `gherkai-deploy-aws`（随 `gherkai[deploy-aws]` 装）、库层 `gherkai-core` 与 `gherkai-runtime`；worker 基底镜像发布到 `ghcr.io/zhiyanliu/gherkai-worker-novaact` 与 `ghcr.io/zhiyanliu/gherkai-worker-midscene`。各包同号发布，`gherkai --version` 查看版本。
+- 发行包：命令行工具 `gherkai`（PyPI）、本机 Nova Act worker `gherkai-worker-novaact`（随 `gherkai[local]` 装）、本机 Midscene worker `@gherkai/worker-midscene`（npm）、云端部署 provider `gherkai-deploy-aws`（随 `gherkai[deploy-aws]` 装）、库层 `gherkai-core` 与 `gherkai-runtime`；worker 基础镜像发布到 `ghcr.io/zhiyanliu/gherkai-worker-novaact` 与 `ghcr.io/zhiyanliu/gherkai-worker-midscene`。各包同号发布，`gherkai --version` 查看版本。
 - `gherkai deploy` / `gherkai destroy`：一条命令建起或拆掉云端后端（运行状态表、产物桶、cluster、任务定义、Lambda 函数、VPC）。`--vpc` 三档（`default` / `new` / `vpc-<id>`）必给；`--diff` 只看变更集、`--synth-only` 只导出模板、`--bootstrap` 只做账户初始化；`--stop-timeout` 设 worker 容器的停止宽限。非交互场景用 `gherkai destroy --yes`。
 - `gherkai deploy push-worker` / `list-workers`：把一套 `steps/` 构建成定制 worker 镜像、推成一个具名 variant，并查看各引擎当前的 variant、镜像 digest 与默认指针；提交时用 `--worker-variant` 选。
 - 使用方自己的确定性 step 目录（`--steps-dir`，默认 `./steps` 存在即用）：本机 local 后端直接加载，云端 cloud 后端把它构建进定制 worker 镜像。

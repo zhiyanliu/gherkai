@@ -40,7 +40,7 @@ midscene_run/
 **/nova_act_logs/
 **/*.trace
 **/traces/
-# RunReport / 跑批产物（cli 落 cli/reports/<run_id>/；worker 误落点兜底）——派生品，不入库
+# RunReport / 运行产物（cli 落 cli/reports/<run_id>/；worker 误落点兜底）——派生品，不入库
 reports/
 **/reports/
 # 通用
@@ -53,9 +53,9 @@ playwright-report/
 # ── agent skill 的评测资产（仓库根 skills/，开发期用、不随包发行）──
 # 结果工作区（每轮评测的 transcript / 日志 / 舞台残留）是派生品，不入库。
 skills/*-workspace/
-# fixtures/ 相反：它是入库资产（评测要能直读、diff、与真跑产出同形），但上面的派生品段会**部分**吞掉它
+# fixtures/ 相反：它是入库资产（评测要能直读、diff、与实际运行产出同形），但上面的派生品段会**部分**吞掉它
 # ——`reports/`、`*.log`、`screenshots/`、`*.report.html` 命中规则，而 Nova 的 evidence 截图不命中；
-# 部分吞比全缺更难发现，故整棵反白名单放行。护栏是行为式的：cli/tests/test_skill.py 拿探针路径跑
+# 部分吞比全缺更难发现，故整棵反白名单放行。护栏是行为式的：cli/tests/test_skill.py 拿探针路径运行
 # `git check-ignore --no-index`，两向都断（派生品形态未被忽略 + 密钥形态仍被忽略）。
 !skills/gherkai-evals/fixtures/**
 # 反白名单排在密钥块之后，会把密钥规则一起放开，故在此**重列**密钥块的每一条、只作用于这棵子树。
@@ -96,13 +96,13 @@ skills-lock.json
 
 # ── graphify 知识图谱产物 ──
 # 入库三件：GRAPH_REPORT.md（架构文档，人+agent 读）、graph.json（图本体，供
-# graphify query/path/explain 直接用，克隆/CI 无需重跑）、manifest.json（增量
-# 哈希，缺了会让首跑全量重抽语义层、花 API 钱）。
-# 其余是本地缓存与派生品（graph.html 可由 graph.json 重建；日期目录是每次跑
+# graphify query/path/explain 直接用，克隆/CI 无需重新构建）、manifest.json（增量
+# 哈希，缺了会让首次运行时全量重抽语义层、花 API 钱）。
+# 其余是本地缓存与派生品（graph.html 可由 graph.json 重建；日期目录是每次运行
 # 新增的滚动备份，入库会无限膨胀），按「派生品不入库」惯例排除。
 # wiki/ 是例外：它虽由 graph.json 派生，但是 AI agent 的导航入口（CLAUDE.md graphify 节让 agent 优先读
-# wiki/index.md），clone 下来就该能用、不该要求每个环境先跑一次 LLM 重建，故入库。
-# （**/ 前缀盖住任意子目录的 graphify-out——如在 core/ 里跑 graphify 的残留缓存；白名单以 / 锚定，只放根那份）
+# wiki/index.md），clone 下来就该能用、不该要求每个环境先执行一次 LLM 重建，故入库。
+# （**/ 前缀盖住任意子目录的 graphify-out——如在 core/ 里运行 graphify 的残留缓存；白名单以 / 锚定，只放根那份）
 **/graphify-out/*
 !/graphify-out/GRAPH_REPORT.md
 !/graphify-out/graph.json
