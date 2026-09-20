@@ -265,7 +265,7 @@ class DynamoDBRunStore:
         return True
 
     def try_finalize(self, run_id: str, status: Status, ended_at: str) -> bool:
-        """状态机单调条件写：仅当总 status ∈ {pending,running} 才写终态（机制三，commit 恰一次）。CCF → 已终态 → False。"""
+        """状态机单调条件写：仅当总 status 是 pending 或 running 才写终态（机制三，commit 恰一次）。CCF → 已终态 → False。"""
         try:
             self._table.update_item(
                 Key={"run_id": run_id, _ITEM_TYPE_ATTR: _STATE},

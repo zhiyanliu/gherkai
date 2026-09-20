@@ -10,7 +10,7 @@
   **无 lifecycle 规则**，见 _one_task_def）
 - Lambda/事件驱动链（ADR 0034，见 _reconcile_lambdas）：{prefix}exit-observer / {prefix}reconciler /
   {prefix}kicker 三 Function + EventBridge rule {prefix}ecs-stopped + 两表 Stream 的 event source mapping
-  （kicker 那条带 INSERT ∧ detached filter）
+  （kicker 那条带 INSERT 且 detached 的 filter）
 - IAM：每引擎一个 task role（最小权限）+ 共享 execution role + 3 个 Lambda 执行角色 + job timeout 到点
   触发器的 Scheduler 执行角色 {prefix}timeout-scheduler
 - VPC + SSM：subnet/sg ID 写进 /{prefix}backend/subnets|security-groups（cli 读）
@@ -609,7 +609,7 @@ class BackendStack(Stack):
             task_def_arns=task_def_arns, timeout_schedule_arns=timeout_schedule_arns,
             scheduler_role=scheduler_role, ssm_read=ssm_read,
         )
-        # runs 表 Stream → kicker，**INSERT ∧ NewImage.detached=true**（filter，ADR 0034）：
+        # runs 表 Stream → kicker，**INSERT 且 NewImage.detached=true**（filter，ADR 0034）：
         # - 仅 INSERT：reconciler 之后写 runs 表的 MODIFY（project_state/finalize）不触发——无自触发放大。
         # - 仅 detached 标记：同步 `run --backend cloud` 的 create_run 同样 INSERT、但由进程内 schedule 推进，
         #   误触发 kicker 会双开推进器（重复起 task）；submit 组合根写 STATE 时带 detached=true，同步 run 不带，

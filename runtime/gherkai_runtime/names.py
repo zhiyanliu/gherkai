@@ -143,7 +143,7 @@ def short_digest(digest: str | None, keep: int = 12) -> str:
 def worker_image_key(engine: str, tag: str) -> str:
     """（引擎，镜像 tag）→ revision 映射的 SSM 键（相对键，全路径为 `ssm_path(prefix, 本键)`）。
 
-    值是 JSON：`template_arn` / `revision_arn` / `digest` / `pushed_at`（ISO 8601 UTC）。键含版本 ⇒ variant
+    值是 JSON：`template_arn` / `revision_arn` / `digest` / `pushed_at`（ISO 8601 UTC）。键含版本，因此 variant
     **按版本隔离**：旧版本的 variant 留作历史、不参与当前版本解析。
     """
     return f"{WORKER_IMAGE_ROOT_KEY}/{engine}/{tag}"

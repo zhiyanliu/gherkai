@@ -147,7 +147,7 @@ def _acts_from_scope(pk: str, items: list[dict]) -> list[dict]:
 
 
 def _percentile(sorted_vals: list[float], q: float) -> float:
-    """线性插值分位数（q∈[0,1]）。sorted_vals 非空、已升序。"""
+    """线性插值分位数（q 在 [0,1] 内）。sorted_vals 非空、已升序。"""
     if len(sorted_vals) == 1:
         return sorted_vals[0]
     pos = q * (len(sorted_vals) - 1)

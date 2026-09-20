@@ -397,7 +397,7 @@ export async function stepEvidenceRef(
       url = null;  // 页面已关/CDP 断连：URL 缺了不影响其余证据
     }
     // 被引用的截图本地路径：**在算 URI 的同一处记**（refFor 只对真写进 json 的那几张调，截图预算/去重
-    // 都已生效）——「引用了 ⇒ 入了队」由此成立，不必在外面照着策略再挑一遍。
+    // 都已生效）——「引用了就入了队」由此成立，不必在外面照着策略再挑一遍。
     const screenshots: string[] = [];
     const doc = buildEvidence({
       scopeId: hook.scopeId,

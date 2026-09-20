@@ -364,7 +364,7 @@ def build_engines(
     （EventSink/JobSource/ArtifactUploader/Nova Workflow/Midscene fromNodeProviderChain 建 client 都读它们）、与 core store
     同源、消除分叉。None 表示不写（真无值、fail-loud，对齐 store 宽容）。**subprocess 两个引擎都注入**（Nova/Midscene 补建路径见下）。
     注意：本函数**只建 subprocess 两个引擎**（local 执行）。cloud 执行由 `build_fargate_engines` 接管——组合根
-    （`__main__`）按 `--backend` 分流：cloud ⇒ `build_fargate_engines`（FargateEngine）、否则本函数（SubprocessEngine）。
+    （`__main__`）按 `--backend` 分流：cloud 走 `build_fargate_engines`（FargateEngine）、否则本函数（SubprocessEngine）。
     **FargateEngine 侧只注入 region、不注入 profile**（容器用 task role，profile 是本机 `~/.aws` 概念、注入会
     ProfileNotFound 盖过 task role——正确的非对称，ADR 0016 决策 C）。
     """
@@ -930,7 +930,7 @@ def build_fargate_engines(
 ) -> dict[str, Engine]:
     """每引擎一个 FargateEngine（对称 build_engines 的 SubprocessEngine dict；core 引擎无关，ADR 0026）。
 
-    `--backend cloud` 用它替代 build_engines——决策 A（cloud ⇒ Fargate 执行）从设计落到 CLI 的动作点。
+    `--backend cloud` 用它替代 build_engines——决策 A（cloud 即 Fargate 执行）从设计落到 CLI 的动作点。
     boto3 句柄组合根注入（adapter 不自建，ADR 0016）。
 
     **`worker_task_defs`（引擎 → task-def **revision** ARN）必给、无缺省**（ADR 0038 不变量「运行时只用
@@ -1064,7 +1064,7 @@ def _release_cmp(a: str, b: str) -> int | None:
 
 
 def check_version_skew(ssm_version: str | None, cli_version: str | None) -> tuple[str, str]:
-    """比 CLI 版本与后端版本戳 → `(verdict, message)`，verdict ∈ ok/warn/block/skip（ADR 0037 决策 7）。
+    """比 CLI 版本与后端版本戳 → `(verdict, message)`，verdict 取 ok / warn / block / skip 之一（ADR 0037 决策 7）。
 
     message 是给人看的整句（ok 判定为空串，调用点 `if message:` 即可）；**退出码留给调用点**——`block` 一律以退出码 2 结束
     且**无放行口**（决策 7 明拒 `--allow-version-skew`：放行等于让新 CLI 写的 definition 进旧 Lambda runtime 读，

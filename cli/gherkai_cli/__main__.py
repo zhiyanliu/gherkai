@@ -2007,7 +2007,7 @@ def _cmd_run(args) -> int:
         bucket=args.s3_bucket, cluster=args.cluster,
     )
 
-    # 3a) 执行轴（ADR 0016 决策 A / 0033）：--backend cloud ⇒ Fargate 执行，**与 report 正交**——`--no-report` 只关
+    # 3a) 执行轴（ADR 0016 决策 A / 0033）：--backend cloud 即 Fargate 执行，**与 report 正交**——`--no-report` 只关
     #     不落库、不碰「在哪执行」。故 cloud 的 Fargate 执行配置解析在 do_report **之外**：`--no-report --backend cloud`
     #     仍在 Fargate 运行，只是不生成 report。cloud_fargate 置值表示下面 resolver 用 FargateEngine（否则 SubprocessEngine）。
     if args.backend == "cloud":
@@ -2092,7 +2092,7 @@ def _cmd_run(args) -> int:
             raise
 
     # 组合根注入引擎 resolver（延后到此：需 run_id + store 装配后）。
-    # **决策 A 落到 CLI（ADR 0016/0033）**：cloud ⇒ FargateEngine（云执行，产物落点内部自算）；否则 SubprocessEngine（本地，不注入 S3 落点）。
+    # **决策 A 落到 CLI（ADR 0016/0033）**：cloud 走 FargateEngine（云执行，产物落点内部自算）；否则 SubprocessEngine（本地，不注入 S3 落点）。
     # cloud_fargate 在 3a 的 `backend=='cloud'` 分支**无条件置值**（与 do_report 正交，report⊥执行）——故
     # `--backend cloud --no-report` 仍走 Fargate（cloud_fargate 非 None），只是不落库、不生成 report。
     # `--no-report` 的零落盘运行路径只作用于 store 轴（persistence=None、不构造三个 store），绝不改执行环境（见 3a 注释 + ADR 0016 决策 A）。

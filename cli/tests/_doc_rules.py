@@ -1,24 +1,19 @@
-"""使用者面 markdown 的共享规则与扫描器：多处护栏共用的**单一事实源**。
+"""人读文本的规则、扫描面与抽取器：护栏三层共用的**单一事实源**（ADR 0046）。
 
-markdown 规则的消费方五处，同源才不会各自漂（扫的都是「发到仓库外、读者没有仓库上下文」的文字，判据同一条——
-CLAUDE.md 代码纪律「产品面文案不带内部指代」+ 文档纪律「文档按读者三分类归位」；决策与理由见
-ADR 0039、ADR 0045 决策一/三、ADR 0043 决策六）：
+内容三类：①规则——内部指代表 FORBIDDEN、口吻表 COLLOQUIAL（含 ADR 0045 决策六形态②的自造复合词 COINAGES）、词表退役名
+RETIRED_TERMS（注释层用去掉「批」义三词的 RETIRED_TERMS_IN_CODE）、决策六形态①③的启发式 SYMBOL_PREDICATE /
+NUMERIC_SHORTHAND / ARROW、悬空指针形态 DANGLING_JOURNEY / BARE_WP、相对链接 RELATIVE_LINK、已知机器根 MACHINE_ROOTS；
+②扫描面——user_docs / technical_docs / ai_side_docs / code_comment_files / diagram_sources / skill_markdown_files /
+long_term_docs，与 classify(path)；③抽取器——prose_lines（markdown 正文，剥代码块与行内代码）、comment_units（注释与
+docstring）、skill 的命令 token 抽取。scan(kind, path, only_lines) 按面套规则束。
 
-- `test_package_readmes.py`：进包的 README / Summary / GitHub Release 正文 footer（禁词 + 退役旧名 + 相对链接）；
-- `test_user_docs.py`：仓库内用户文档（`docs/user-guide/**` / 根 README / CHANGELOG）与 `docs/diagrams/` 图源
-  （禁词 + 退役旧名；相对链接另查可达性）；
-- `test_skill.py`：随 wheel 发行、由 `skill install` 拷进使用方项目的 agent skill markdown（全部规则）；
-- `deploy_aws/tests/test_skill_deploy_tokens.py`：skill 里 `deploy` / `destroy` 那批命令 token 对照 provider
-  真 parser（provider 住 optional extra、`cli/tests` 不许 import 它，故对照面分在两处、抽取器共用）；
-- `tools/render_skill_contract.py`：契约页 → skill 副本的转换器，用禁词表自查有没有漏改的词。
+消费方三处，同源才不会各自漂：`cli/tests/test_*.py` 各面的护栏（CI 兜底）、`tools/doc_rules_check.py`（Claude Code 的
+写完即查 hook 与提交闸门，人类 contributor 的可选 git pre-commit）、`tools/render_skill_contract.py`（契约副本转换器的自查）；
+`deploy_aws/tests/test_skill_deploy_tokens.py` 与 `skills/gherkai-evals/materialize.py` 另复用命令 token 抽取与机器根。
+判据与理由各归其 ADR：产品文案 0039、分层与口吻 0045 决策一 / 三 / 六、词表 0045 决策八、skill 0043 决策六。
 
-另存一项非 markdown 的共享判据：**已知机器根**（`MACHINE_ROOTS`）。skill fixture 的绝对路径护栏
-（`test_skill.py`）与快照物化的漏扫（`skills/gherkai-evals/materialize.py`）必须认同一组根——各存一份就会
-各自补根，漏补的那份即假绿。
-
-放 `cli/tests/` 而非 `tools/`：它只服务护栏、不是运行期或开发期工具；仓库外的消费方（provider 测试、
-契约转换器、评测物化脚本）显式把这个目录加进 `sys.path` 来复用——宁可让它们多两行 import，也不要两份会漂的
-禁词表 / 抽取器 / 根集。
+放 `cli/tests/` 而非 `tools/`：它只服务护栏、不是运行期或开发期工具；仓库外的消费方显式把这个目录加进 `sys.path` 来复用——
+宁可让它们多两行 import，也不要两份会漂的禁词表 / 抽取器 / 根集。往这里加规则的顺序见 CONTRIBUTING.md「护栏三层」段。
 """
 from __future__ import annotations
 
@@ -91,7 +86,7 @@ RELATIVE_LINK = re.compile(r"\]\((?:\.\.?/|(?![a-z][a-z0-9+.-]*:|#)[^)\s]+\.md)"
 # 启发式：中文字紧邻 `=`（含全角）即视为把等号当「是 / 即」用；「退 <数字>」即省了中心词「退出码」。扫描前先剥掉代码块
 # 与行内代码（`prose_lines`）——代码里的赋值、命令示例、JSON 片段本来就该是符号。≠ / ⊆ 在中文正文里没有合法用法，
 # 直接禁。箭头只在用户文档与 skill 正文里禁（技术文档与注释允许它表顺序与因果），故单独一条。
-SYMBOL_PREDICATE = re.compile(r"[一-鿿]\s*[=＝]\s|\s[=＝]\s*[一-鿿]|(?<!绿)≠(?!对)|⊆")  # 「绿≠对」是 CLAUDE.md 立的判据名，放行
+SYMBOL_PREDICATE = re.compile(r"[一-鿿]\s*[=＝]\s|\s[=＝]\s*[一-鿿]|(?<!绿)≠(?!对)|[⊆∈∧∨⇒«»]")  # 「绿≠对」是 CLAUDE.md 立的判据名，放行；≥ / ≤ 是数值比较、不算
 NUMERIC_SHORTHAND = re.compile(r"退\s?[0-9]+(?![0-9.\-])")   # 「退出码 2」不命中：退 后面是 出
 ARROW = re.compile(r"→")
 

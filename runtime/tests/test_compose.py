@@ -229,7 +229,7 @@ def test_build_engines_scrubs_inherited_owned_env(monkeypatch, midscene_env_cmd)
     """组合根拥有的三个 env「有值注、无值清」（ADR 0037 决策 4/3 + ADR 0035 决策 4）：definition 说没有时，
     宿主 shell 里的同名值**不得**越过 definition 直达 worker。
 
-    真实触发形态：提交时既无 `--steps-dir`、也无 `./steps` ⇒ definition 里 steps_dir 为 None；之后在 export 了
+    真实触发形态：提交时既无 `--steps-dir`、也无 `./steps`，于是 definition 里 steps_dir 为 None；之后在 export 了
     GHERKAI_STEPS_DIR 的 shell 里 `status <run> --wait` 接力推进——只做加法的注入会让 worker 加载接力者那台机器的
     step 目录，本 run 用到的确定性 step 集与 definition 不符、判定不可复现。
     """
@@ -241,7 +241,7 @@ def test_build_engines_scrubs_inherited_owned_env(monkeypatch, midscene_env_cmd)
     engines = compose.build_engines()  # 三样都不传（即 definition 里都没有）
     for name in ("novaact", "midscene"):
         env = engines[name]._env
-        # 宿主带 owned 键 ⇒ 必须建一份 scrub 后的 env；回落 None 等于整份继承 os.environ（泄漏）
+        # 宿主带 owned 键则必须建一份 scrub 后的 env；回落 None 等于整份继承 os.environ（泄漏）
         assert env is not None, name
         for key in compose._COMPOSE_OWNED_WORKER_ENV:
             assert key not in env, (name, key)

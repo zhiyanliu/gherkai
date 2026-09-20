@@ -6,7 +6,7 @@
 - backend=cloud 构造了正确 store adapter：DDB 拿 table 句柄、三个 S3 件套共享同一个 client、offloader 挂；
 - **prefix 两层命名（ADR 0033）**：--prefix 批量推导默认名（{prefix}runs/artifacts/events/cluster）、单资源 --xxx 覆盖；
 - **preflight fail-fast**：资源不存在即以退出码 2 结束 + 错误点名 prefix；
-- **cloud ⇒ FargateEngine（决策 A）**：cloud 走 build_fargate_engines（非 build_engines）；
+- **cloud 走 FargateEngine（决策 A）**：cloud 走 build_fargate_engines（非 build_engines）；
 - 缺 boto3 → 退出码 2；运行期 botocore 异常 → 退出码 1；cloud + --no-report → 跳过一切云端 + 走 subprocess（零落盘运行路径）；
 - artifacts 在 cloud 下是 s3://+ddb:// 形态；
 - **三道闸的次序与退出码（ADR 0037 决策 7 / 0038）**：版本 skew → 资源 preflight → worker 镜像 variant 解析，
@@ -396,7 +396,7 @@ def test_cloud_runtime_botocore_error_exits_1(tmp_path, monkeypatch, capsys):
     assert "运行期落库失败" in capsys.readouterr().err
 
 
-# ---- cloud ⇒ FargateEngine（决策 A，ADR 0016/0033）----
+# ---- cloud 走 FargateEngine（决策 A，ADR 0016/0033）----
 def test_cloud_wires_fargate_engines(tmp_path, monkeypatch, capsys):
     # cloud 走 build_fargate_engines（非 build_engines）——决策 A 落到 CLI。验注入的参数正确。
     record: list = []
@@ -438,7 +438,7 @@ def test_cloud_no_report_still_fargate_but_no_store(tmp_path, monkeypatch, capsy
     assert rc == 0
     # 落库轴：不构造任何 store 钩子（need_cloud=False，零落盘运行路径）
     assert not any(r[0] == "make" for r in record)
-    # 执行轴：仍走 Fargate（决策 A：cloud ⇒ Fargate，与 report 正交）
+    # 执行轴：仍走 Fargate（决策 A：cloud 走 Fargate，与 report 正交）
     assert len(made["fargate"]) == 1, "--no-report --backend cloud 仍应 Fargate 执行"
     # preflight 探执行资源（events/cluster/桶）但 runs_table=None（不落库、不探 runs 表）
     assert preflight_calls[0]["runs_table"] is None

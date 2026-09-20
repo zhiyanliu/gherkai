@@ -114,7 +114,7 @@ export class ArtifactUploader {
     // 套超时（ADR 0029「上传必须套超时」/ 退出时间有界护栏）：aws-sdk-js v3 默认无 request/socket 超时
     // （近乎无限），退化网络下 PutObject 会挂起、拖住 worker 退出（尤其 SIGTERM handler 内兜底提前上传）→ 等
     // grace 耗尽被 SIGKILL 强杀 → 跳过会话清理 → 泄漏。用 Node 原生 AbortSignal.timeout（零依赖）硬性封顶：
-    // 超时自动 abort 底层请求（比 Promise.race 更干净——race 只是不等、请求仍挂）。UPLOAD_TIMEOUT_MS « grace。
+    // 超时自动 abort 底层请求（比 Promise.race 更干净——race 只是不等、请求仍挂）。UPLOAD_TIMEOUT_MS 远小于 grace。
     await this.client_().send(
       new PutObjectCommand({
         Bucket: this.bucket!, Key: this.keyFor(abs), Body: body,

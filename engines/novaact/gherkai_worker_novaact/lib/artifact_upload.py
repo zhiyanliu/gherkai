@@ -118,7 +118,7 @@ class ArtifactUploader:
             from botocore.config import Config
             # 套超时（ADR 0029「上传必须套超时」/ 退出时间有界护栏）：boto3 默认 connect/read 各 60s + 重试，
             # 退化网络下单次上传最坏分钟级、拖住 worker 退出 → 等 grace 耗尽被 SIGKILL → 跳过会话清理 → 泄漏。
-            # 显式设短超时 + 关重试，使上传快速失败、best-effort 放弃（提前上传/flush 均吞错）。超时 « grace（ADR 0024）。
+            # 显式设短超时 + 关重试，使上传快速失败、best-effort 放弃（提前上传/flush 均吞错）。超时远小于 grace（ADR 0024）。
             # **max_attempts=0 才是「关重试、单次尝试」**：botocore 语义里 max_attempts=N 是「重试次数」、总尝试
             # 为 N+1，故 =1 其实是「1 次重试即共 2 次尝试 + 中间退避 sleep」，与「快速失败」相悖；=0 → 总尝试 1、零退避。
             cfg = Config(connect_timeout=5, read_timeout=10, retries={"max_attempts": 0})

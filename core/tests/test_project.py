@@ -97,7 +97,7 @@ def test_network_exit_before_scope_started_is_error():
 
 
 def test_two_things_present_clean_exit_terminal_passed():
-    """两件都要齐（scope_done ∧ exit=0）→ 终态取 scenario 归约（passed）。"""
+    """两件都要齐（scope_done 与 exit=0 都齐）→ 终态取 scenario 归约（passed）。"""
     recs = _passed_events("a") + [_exit("a", 0)]
     state = project(_meta("a"), recs)
     assert state.jobs["a"].status == Status.PASSED
