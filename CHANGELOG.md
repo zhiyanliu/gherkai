@@ -8,6 +8,8 @@
 
 ## [Unreleased]
 
+## [1.4.4] - 2026-09-20
+
 ### 变化
 
 - Midscene 引擎的默认模型改为 `us.openai.gpt-5.6-terra`（OpenAI GPT-5.6 Terra，经 Amazon Bedrock 调用）。在同一批用例上重复运行，它的判定稳定不抖动，并且比原默认模型 `qwen.qwen3-vl-235b-a22b` 快约三成、少用约四分之一 token；调用请求已按 Bedrock 对 GPT 系模型的要求调整。费用相应上升：一条 5 步左右的 scenario 约 5 美分，原默认模型约 2 美分（以你账户的 AWS 账单为准），量级与口径见[运行测试与查看结果](./docs/user-guide/running-and-results.md)。该模型经 Bedrock 跨区推理调用，Midscene 的 AI step 模型调用在美国境内三个 region（us-east-1 / us-east-2 / us-west-2）处理；浏览器会话与产物仍在你选的 region，Nova Act 引擎不变。
@@ -23,10 +25,18 @@
 - 命令行的帮助、提示、警告、错误与 `gherkai deploy` 的步骤行统一了用词：口语的「跑」改为「运行」或「执行」；`--default-job-timeout` 的帮助改称「job 墙钟预算秒」；`gherkai skill` 各命令的帮助改称「agent skill」；`deploy` 里同步官方 worker 镜像的那一步改称「基础镜像同步」；`plan` 的输出表头改称「用例预检」。用户文档与随包发行的 agent skill 同批对齐了同一套用词：`plan` 一律称「用例预检」，前台与后台之别称「执行方式」、本机与云端之别称「执行后端」，两者的四种组合称「四种组合」；指一次运行时不再称「批」，统一称 `run` 或「本次运行」。`--vpc` 在帮助与用法行里的取值占位符改为 `取值`，`--require-approval` 的帮助改称「审批级别」，`gherkai deploy` 关于 VPC 的提示与报错统一说「VPC 取值」，与用户指南里的选项表用词一致。命令、选项、输出结构与退出码都没有变化。
 - `gherkai --help` 不再列出 `_reconcile` 与 `_tunnel_watch`：它们是 `submit` 在后台启动的子进程入口，不供直接使用；此前二者以「==SUPPRESS==」出现在命令列表里。
 
+- 命令行帮助、提示与两个引擎 worker 的日志继续统一措辞：不再用等号、箭头这类符号代替连词，「退 2」一律写成「退出码 2」；`gherkai status` 的几条帮助去掉了内部名词；两个引擎 worker 对同一种产物用同一个名字（「证据截图」）；产物上传失败的日志只说明什么没传成、不再承诺稍后重试；`gherkai deploy delete-worker` 的占位说明改为使用者语言。命令、选项、输出结构与退出码都没有变化。
+
 ### 修复
 
 - Midscene 引擎每个 run 在日志里打出的一段 `Execution context was destroyed` 报错栈已消除（关闭了对云端浏览器无意义的一项 SDK 渲染开关）。
 - 引擎无法回答能力查询时的提示改为先给出 worker 自己的报错原文，常见成因（版本不一致、模型配置不对）只在原文没有说明原因时补充。
+- `gherkai deploy` 及其 `list-workers` / `push-worker` 子命令：给了不存在的 `--profile` 名、或配不出 region 时，现在以退出码 2 结束并说明「连不上 AWS」；此前会打印一段 Python 报错栈。
+- 云端后端：一次 run 的 job 超过 100 个时，job 超时处置此前会失败，或把仍在运行的 task 误判为已不存在而直接记为超时；现在按页读取、分批查询。超时处置的兜底检查出错时，也不再影响同一批事件里其它 run 的推进。
+- Midscene worker 收到停止信号时若正在释放浏览器会话，此前可能提前退出而漏掉释放、会话继续计费且退出码仍为 0；现在等释放完成再退出。
+- `gherkai deploy` 同时给出只读选项（`--diff` / `--synth-only` / `--bootstrap`）与 worker 镜像子命令时的提示改为可执行的建议；此前对 `--bootstrap` 与 `--synth-only` 给出的建议命令无法运行。
+- `gherkai run --json` 的帮助此前写「不打进度」，实际进度与诊断仍走标准错误、只有 `--quiet` 静音逐事件进度；帮助已改准，用户指南同步。
+- 各 Python 发行包的源码包（sdist）不再包含测试目录，Nova Act worker 的源码包不再包含探针脚本；源码包内容改为显式白名单，不再受本机忽略规则影响。
 
 ### 升级须知
 
