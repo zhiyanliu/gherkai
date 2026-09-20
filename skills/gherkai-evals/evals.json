@@ -1,6 +1,6 @@
 {
   "skill_name": "gherkai",
-  "notes": "缺省集只执行 plan / explain / doctor / list-deterministic，零条真 AWS；opt_in=true 的条目会真跑 run / submit、只由 contributor 在自己的部署上按需跑。fixture 路径相对本目录；评测前用 materialize.py 把 fixture 物化到仓库外的舞台，两臂都在舞台里以 `claude -p` 跑、cwd = 舞台、PATH 前置舞台 bin/。 第四轮前按第三轮评分者批评收紧：复合断言拆条（eval 2/9/10/11/13）、放行开关与投票的判据正向化（eval 9/14）、禁绕过式修复（eval 12）、正则须匹配真实落地地址（eval 1）、禁留新 run 目录（eval 13）；「--help 与只读命令不算执行」统一写进所有「没有执行」断言。断言总数随之变化，通过率与前一轮不可直接比。 第五轮前：eval 1 的四合一断言拆为「复用确定性 step」与「正则鲁棒（含对实测 301 终点与 evil 主机的机械判据）」；所有缺省 eval 加「不把评测脚手架当用户环境」；新增 eval 15（scope 跨文件撞名，fixture scope-collision）与 eval 16（Background + Outline 写用例）。 第五轮后：eval 16 断言 2 与 expected_output 对齐（确定性 URL step 或页面级语义断言二选一、各带判据），第五轮 fable/sonnet 的 with-skill 因旧断言被误判。 第五轮后尺子备忘已落：eval 1 正则加裸主机须命中；eval 2 三条条件式断言改为必须落盘；eval 16 步号口径与 Background 执行语义拆成两条（缺省集 122 条）。 第六轮前按 fixture 真值校准两条尺子：eval 13 的 job 级判定口径改为「判 error 且归因 timeout」（超时不归 aborted）；eval 14 的 prompt 复述改用 fixture 里真实的断言文本（原先那句「正文里没出现『图灵』」在 fixture 里零命中）；另去重一处：eval 5 的断言 5 删掉与断言 3 重复的「真跑还缺 AWS region 与凭证」尾句（同一表现原本计两分、现只计一分）。断言总数不变（缺省集 122 条），通过率与前一轮不可直接比。 第七轮（2026-09-20）：新增 fixture step-craft（纯文本、无 run：cart.py / cart.mts 读瞬时值且失败消息无现场；title.py 写成 async def；title.ts 扩展名错）与 eval 17 / 18 / 19，对照臂改为旧版 skill 快照（run_evals.py 的 old_skill 臂），量的是 references/deterministic-steps.md 这次改动本身；「没有执行」断言把 playwright install 一并列入安装类。 第七轮 fable 评分后按评分者批评收紧：eval 17 / 18 的「几秒级上限」改为 1 到 10 秒的数值区间；eval 18 的 Midscene 失败异常放宽为 DeterministicAssertion 或 node:assert 的 AssertionError（与 worker 契约一致，原断言过窄造成假阴性）、单测位置允许 steps/ 之外、造页面允许等价方式、「只动那一步」改为两条 scenario 各一行；eval 17 / 18 各加一条「点出同目录既有埋点且不越界修改」；eval 19 的合取断言拆开、加「不残留 title.ts」。 第七轮 sonnet 评分后：eval 19 的合取断言拆成「面向以后的自查方法」与「不残留 title.ts 且内容逐字一致」两条；eval 17 补「Python handler 仍为同步 def」、区间写明含端点。",
+  "notes": "缺省集只执行 plan / explain / doctor / list-deterministic，零条真 AWS；opt_in=true 的条目会真跑 run / submit、只由 contributor 在自己的部署上按需跑。fixture 路径相对本目录；评测前用 materialize.py 把 fixture 物化到仓库外的舞台，两臂都在舞台里以 `claude -p` 跑、cwd = 舞台、PATH 前置舞台 bin/。 第四轮前按第三轮评分者批评收紧：复合断言拆条（eval 2/9/10/11/13）、放行开关与投票的判据正向化（eval 9/14）、禁绕过式修复（eval 12）、正则须匹配真实落地地址（eval 1）、禁留新 run 目录（eval 13）；「--help 与只读命令不算执行」统一写进所有「没有执行」断言。断言总数随之变化，通过率与前一轮不可直接比。 第五轮前：eval 1 的四合一断言拆为「复用确定性 step」与「正则鲁棒（含对实测 301 终点与 evil 主机的机械判据）」；所有缺省 eval 加「不把评测脚手架当用户环境」；新增 eval 15（scope 跨文件撞名，fixture scope-collision）与 eval 16（Background + Outline 写用例）。 第五轮后：eval 16 断言 2 与 expected_output 对齐（确定性 URL step 或页面级语义断言二选一、各带判据），第五轮 fable/sonnet 的 with-skill 因旧断言被误判。 第五轮后尺子备忘已落：eval 1 正则加裸主机须命中；eval 2 三条条件式断言改为必须落盘；eval 16 步号口径与 Background 执行语义拆成两条（缺省集 122 条）。 第六轮前按 fixture 真值校准两条尺子：eval 13 的 job 级判定口径改为「判 error 且归因 timeout」（超时不归 aborted）；eval 14 的 prompt 复述改用 fixture 里真实的断言文本（原先那句「正文里没出现『图灵』」在 fixture 里零命中）；另去重一处：eval 5 的断言 5 删掉与断言 3 重复的「真跑还缺 AWS region 与凭证」尾句（同一表现原本计两分、现只计一分）。断言总数不变（缺省集 122 条），通过率与前一轮不可直接比。 第七轮（2026-09-20）：新增 fixture step-craft（纯文本、无 run：cart.py / cart.mts 读瞬时值且失败消息无现场；title.py 写成 async def；title.ts 扩展名错）与 eval 17 / 18 / 19，对照臂改为旧版 skill 快照（run_evals.py 的 old_skill 臂），量的是 references/deterministic-steps.md 这次改动本身；「没有执行」断言把 playwright install 一并列入安装类。 第七轮 fable 评分后按评分者批评收紧：eval 17 / 18 的「几秒级上限」改为 1 到 10 秒的数值区间；eval 18 的 Midscene 失败异常放宽为 DeterministicAssertion 或 node:assert 的 AssertionError（与 worker 契约一致，原断言过窄造成假阴性）、单测位置允许 steps/ 之外、造页面允许等价方式、「只动那一步」改为两条 scenario 各一行；eval 17 / 18 各加一条「点出同目录既有埋点且不越界修改」；eval 19 的合取断言拆开、加「不残留 title.ts」。 第七轮 sonnet 评分后：eval 19 的合取断言拆成「面向以后的自查方法」与「不残留 title.ts 且内容逐字一致」两条；eval 17 补「Python handler 仍为同步 def」、区间写明含端点。 第七轮收尾：新增 fixture shop-steps（纯文本、无 run：三个 feature 共用一条写法正确的『页面标题包含』确定性 step；catalog.feature 另有三条 AI 断言——每条 scenario 重复的结构检查、精确价格、语义判断）与 eval 20（该不该写成确定性的判断，含成本与速度判据）、eval 21（改一条在用 step 的措辞与判定，example 即接口、过渡与冲突、云端重推）。",
   "evals": [
     {
       "id": 1,
@@ -333,6 +333,43 @@
         "修后执行了 gherkai plan features/checkout.feature，两条 scenario 的『页面标题包含』那步都标为确定性，汇报里引用了这个结果",
         "汇报里面向以后给出了自查方法（改完 steps/ 后对两个引擎各执行一次 list-deterministic，或用 plan 看标注），不只是回顾本次执行过的命令",
         "修后 steps/ 里不残留 title.ts（改名而非复制），且 title.mts 的内容与原 title.ts 逐字一致",
+        "没有执行 gherkai run 或 gherkai submit，也没有执行任何安装命令（npm i、uv tool install、pip install、playwright install）；`--help` 与只读命令不算执行",
+        "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报",
+        "没有把评测舞台的脚手架（bin/gherkai shim、.eval-aws 下的空凭证文件、环境变量注入）当成用户的真实环境写进汇报或当成阻塞项上报"
+      ]
+    },
+    {
+      "id": 20,
+      "slug": "decide-which-steps-go-deterministic",
+      "fixture": "shop-steps",
+      "prompt": "features/catalog.feature 里有三条 AI 断言我想尽量改成确定性 step：每条 scenario 开头都重复的『页面顶部有导航栏』（导航栏是 <nav id=\"main-nav\">）、『价格显示为 ¥ 199.00』（价格在 .price 元素里）、『这一页看起来不像出错页』。哪些该改、哪些不该、为什么？该改的两个引擎都做出来，改完确认注册上了、plan 标注对。先别真跑。",
+      "expected_output": "判断：导航栏可见是结构检查、选择器已知、且每条 scenario 都重复，改（并点出费用与速度：AI 步每判一次调一次模型且要几秒到几十秒，确定性零模型费用毫秒级）；价格是精确文本，改，数字当参数；『看起来不像出错页』是语义判断，不改、留给 AI，说明硬写只会得到脆弱选择器。两条新 step 两侧成对（Python 同步 def、.mts），带等待与几秒超时，失败消息带选择器、期望、实际、页面地址；catalog.feature 里对应步改成与 example 一致的文本、语义那步不动；两侧 list-deterministic 与 plan 核对，Outline 的『页面标题包含』仍标确定性；不真跑。",
+      "expectations": [
+        "判断正确：『页面顶部有导航栏』与『价格显示为 ¥ 199.00』改成确定性 step，『这一页看起来不像出错页』不改、留给 AI 判定，并说明后者是语义判断、写成代码只会得到脆弱的选择器或无法机械定义",
+        "给出了成本与速度的理由：点出导航栏检查每条 scenario 都重复出现（含 Outline 每行），AI 步每判一次调用一次模型、耗时几秒到几十秒，确定性 step 零模型费用、毫秒级完成",
+        "两条新 step 两侧成对：Python 用 @deterministic 注册且 handler 是同步 def，Midscene 放在 .mts（或 .mjs）文件里；模式带引号或特征词、够窄；两侧 description 与 example 同文，example 是含 Then 的完整 step 文本；价格那条把金额当参数（具名组）",
+        "判定带等待且有 1 到 10 秒（含端点）的显式超时（Python 用 expect(...) 一族或等价的带超时重试等待；Midscene 用 waitFor 等或等价），失败抛 AssertionError（Python）/ DeterministicAssertion 或 node:assert 的 AssertionError（Midscene），消息含选择器、期望值与实际值或页面地址",
+        "features/catalog.feature 里导航栏与价格那几步改成与各自 example 一致的文本，『这一页看起来不像出错页』那一步原文保留，其它行未增删；features/cart.feature 与 features/account.feature 未改",
+        "对 novaact 与 midscene 各执行了 gherkai list-deterministic --engine（至少一次）且两侧清单都含两条新 step；执行了 gherkai plan features/catalog.feature，导航栏与价格步标为确定性、『看起来不像出错页』无标注、Outline 两行的『页面标题包含』仍标确定性、无 ⚠ 冲突",
+        "没有执行 gherkai run 或 gherkai submit，也没有执行任何安装命令（npm i、uv tool install、pip install、playwright install）；`--help` 与只读命令不算执行",
+        "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报",
+        "没有把评测舞台的脚手架（bin/gherkai shim、.eval-aws 下的空凭证文件、环境变量注入）当成用户的真实环境写进汇报或当成阻塞项上报"
+      ]
+    },
+    {
+      "id": 21,
+      "slug": "rename-step-in-use-across-features",
+      "fixture": "shop-steps",
+      "prompt": "『Then 页面标题包含 \"…\"』这条确定性 step 我们三个 feature 都在用。产品那边要两处改动：一是措辞以后统一写成『标题里有 \"…\"』，QA 说更顺口；二是判定改成大小写不敏感。帮我改，别把现有用例弄坏，改完确认一下。先别真跑。",
+      "expected_output": "先全文搜索三个 feature 找出用到这条 step 的全部位置（catalog 两处含 Outline、cart、account）。新措辞的模式两侧成对注册、description / example 同文（example 用新措辞）；过渡二选一并说明：保留旧模式一段时间且两条模式不会同时命中同一句，或一次性把全部 feature 改成新措辞并删旧模式，不能出现 feature 仍用旧措辞而旧模式已删。大小写不敏感两侧都改。判定仍带等待与几秒超时，消息含期望文本、实际标题与页面地址。两侧 list-deterministic 与 plan 三个 feature，所有标题步都标确定性、无冲突。提醒云端 worker 读的是镜像里那份，要重新构建并 push-worker 才生效。不真跑。",
+      "expectations": [
+        "动手前先全文搜索了三个 feature 文件，找出用到『页面标题包含』的全部位置（catalog.feature 两处，其中一处在 Scenario Outline 里；cart.feature 一处；account.feature 一处），并在汇报里列出",
+        "新措辞的模式两侧成对注册（Python 同步 def 与 .mts），正则用具名组接文本、带引号、够窄；两侧 description 与 example 同文，example 用新措辞『标题里有 \"…\"』且含 Then",
+        "过渡处理二选一并说明理由：保留旧模式一段过渡期（且新旧两条模式不会同时命中同一句 step 文本），或一次性把全部 feature 改成新措辞并删掉旧模式；没有出现 feature 仍用旧措辞而旧模式已被删掉的情况",
+        "大小写不敏感两侧都实现（如 Python 的 re.IGNORECASE / casefold，TypeScript 的 toLowerCase / 正则 i 标志），若保留旧模式则旧模式的判定也一致",
+        "判定仍带等待且有 1 到 10 秒（含端点）的显式超时，失败消息含期望文本、实际标题与页面地址",
+        "对 novaact 与 midscene 各执行了 gherkai list-deterministic --engine（至少一次），两侧清单都含新措辞那条；对三个 feature 执行了 gherkai plan，全部标题步都标为确定性、无 ⚠ 冲突",
+        "汇报里提醒：云端 worker 读的是镜像里那份 steps，要重新构建镜像并 gherkai deploy push-worker 才会生效",
         "没有执行 gherkai run 或 gherkai submit，也没有执行任何安装命令（npm i、uv tool install、pip install、playwright install）；`--help` 与只读命令不算执行",
         "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报",
         "没有把评测舞台的脚手架（bin/gherkai shim、.eval-aws 下的空凭证文件、环境变量注入）当成用户的真实环境写进汇报或当成阻塞项上报"

@@ -1170,8 +1170,8 @@
     "semantic_hash": "ab624bd065760f8a1b9621c9bde6cf84"
   },
   "docs/adr/0043-agent-skill-for-driving-gherkai.md": {
-    "mtime": 1789887528.2337515,
-    "ast_hash": "d9d6c0b24623da341ee96757f893fb2c",
+    "mtime": 1789891572.3369086,
+    "ast_hash": "6a9963a507320458bda18709733582c0",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skill_install.py": {
@@ -1236,7 +1236,7 @@
   },
   "skills/gherkai-evals/evals.json": {
     "mtime": 1789886933.7808785,
-    "ast_hash": "b6cb1321ad6816672081758f6c2f2de4",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "skills/gherkai-evals/trigger-eval.json": {
@@ -1750,8 +1750,8 @@
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skills/gherkai/references/deterministic-steps.md": {
-    "mtime": 1789886971.881723,
-    "ast_hash": "e22f33cacbe2124ddf92f1ff25421a78",
+    "mtime": 1789891572.3360214,
+    "ast_hash": "6a134168fb319187acd662d355175b6b",
     "semantic_hash": ""
   }
 }
