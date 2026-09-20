@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# 可选的 git pre-commit：人类 contributor 的提交闸门（与 Claude Code 的 .claude/hooks/commit-gate.sh 同一份规则）。
+# 启用：git config core.hooksPath tools/git-hooks   （git hook 不随仓库分发，故 opt-in；CI 里的 uv run pytest 仍是兜底）
+# 做什么：对暂存区里的文件全扫 tools/doc_rules_check.py --staged，命中即拒绝提交并列出命中行。
+set -u
+cd "$(git rev-parse --show-toplevel)" || exit 0
+export PATH="$PATH:$HOME/.local/bin"
+command -v uv >/dev/null 2>&1 || exit 0
+uv run --quiet python tools/doc_rules_check.py --staged
+rc=$?
+if [ "$rc" -eq 1 ]; then
+  echo "pre-commit：暂存区里有措辞护栏命中（ADR 0045 决策六 / 悬空指针红线），先改再提交。" >&2
+  exit 1
+fi
+exit 0

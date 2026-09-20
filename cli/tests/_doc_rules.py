@@ -42,10 +42,12 @@ FORBIDDEN = re.compile(
 # 末项管量词「档」：作取值 / 级别 / 类别 / 情形 / 后端义一律不用（照句意写「取值 / 级别 / 判定 / 情形 / 后端」），
 # 只放行「文档 / 归档 / 存档 / 档案 / 档期」这类固定词。它是用词规则而非口吻规则，故 CHANGELOG 已发行节
 # 随退役词表一起豁免（见 `changelog_unreleased`）。
+# ADR 0045 决策六形态②：自造二字复合词与「码」缩略——歧义不是效率，AI 侧文档也不用（排版学义的「同形字符」与「协同调度」放行）。
+_COINAGES = r"同形(?!字)|同款|同律|(?<!协)同调|同口径|归码|退码|网络码|专用码|非零码|此码"
+COINAGES = re.compile(_COINAGES)
 COLLOQUIAL = re.compile(r"帽子不是人|烧钱|锁步|lockstep|烙进|烙好|烙成|烙在|逃生舱|旋钮|跑(?!」)"
                         r"|(?<![文归存])档(?![案期])"
-                        # ADR 0045 决策六形态②：自造二字复合词与「码」缩略（排版学义的「同形字符」与「协同调度」放行）
-                        r"|同形(?!字)|同款|同律|(?<!协)同调|同口径|归码|退码|网络码|专用码|非零码|此码")
+                        r"|" + _COINAGES)
 
 # 已退役的旧名：CONTEXT.md 词表给了规范名、旧名列进该条 `_Avoid_` 的那批，使用者面一个都不许再出现。
 # 与 COLLOQUIAL 分表是因为判据不同——那张管「口吻」（口头语 / 隐喻，永久禁），这张管「用词版本」（旧名 →
@@ -188,6 +190,161 @@ def comment_units(path: Path) -> list[tuple[int, str]]:
 MACHINE_ROOTS = ("Users", "home", "private", "var", "tmp", "opt", "Volumes", "root", "mnt", "srv", "app",
                  "workspace", "work", "data", "etc", "usr", "nix", "run")
 MACHINE_ROOT = re.compile(rf"(?:file://)?/(?:{'|'.join(MACHINE_ROOTS)})/")
+
+# ── 悬空指针（CLAUDE.md 文档纪律「悬空指针红线」）──────────────────────────────
+# 长期文档与 code 注释只指稳定物：指向某份 journey 文件的链接、裸 WP 编号在被吸收后都会悬空。只认「指向具体文件」
+# 的形态（`docs/journey/NNNN-…`），提到目录本身（「过程产物放 docs/journey/」）是合法的分层描述。
+DANGLING_JOURNEY = re.compile(r"docs/journey/\d{4}-")
+BARE_WP = re.compile(r"\bWP-?\d+[A-Za-z]?(?:-\d+)?\b")
+
+# ── 扫描面与规则束（测试与 tools/doc_rules_check.py 的单一事实源）────────────────
+# 每个人读面一束规则；hook 与提交闸门按 classify() 把改动文件映射到同一束，写完即查、提交前再查（ADR 0046）。
+PY_ROOTS_FOR_COMMENTS = (
+    "core", "runtime", "cli", "deploy_aws", "engines/novaact", "engines/midscene/src", "engines/midscene/spikes",
+    "tools", "skills/gherkai-evals", ".github", ".claude/hooks",
+)
+CODE_SUFFIXES = frozenset({".py", ".mts", ".ts", ".mjs", ".sh", ".yml"})
+_SKIP_DIRS = frozenset({".venv", "node_modules", "dist", "__pycache__", ".pytest_cache", "graphify-out"})
+# 定义禁词表 / 把这些词当数据讨论的文件，不扫自己。
+SELF_FILES = frozenset({
+    "cli/tests/_doc_rules.py", "cli/tests/test_user_facing_messages.py", "cli/tests/test_user_docs.py",
+    "cli/tests/test_skill.py", "cli/tests/test_package_readmes.py", "cli/tests/test_code_comments.py",
+    "cli/tests/test_technical_docs.py", "cli/tests/test_adr_hygiene.py", "cli/tests/test_context_glossary.py",
+    "tools/render_skill_contract.py", "tools/doc_rules_check.py",
+})
+
+
+def _rel(p: Path) -> str:
+    return str(p.relative_to(REPO)) if p.is_absolute() else str(p)
+
+
+def user_docs() -> list[Path]:
+    return sorted((REPO / "docs" / "user-guide").glob("*.md")) + [REPO / "README.md", REPO / "CHANGELOG.md"]
+
+
+def technical_docs() -> list[Path]:
+    docs = [REPO / "CONTRIBUTING.md", REPO / ".github" / "workflows" / "README.md", REPO / "docs" / "README.md",
+            REPO / "core" / "tests" / "README.md", REPO / "skills" / "README.md",
+            REPO / "engines" / "midscene" / "spikes" / "SIGV4-FETCH-RECIPE.md"]
+    docs += sorted((REPO / "docs" / "internals").glob("*.md"))
+    docs += sorted(REPO.glob("*/DEVELOPMENT.md")) + sorted(REPO.glob("engines/*/DEVELOPMENT.md"))
+    docs += sorted((REPO / "tools").glob("*.md"))
+    return sorted({p for p in docs if p.exists()})
+
+
+def diagram_sources() -> list[Path]:
+    return sorted((REPO / "docs" / "diagrams").glob("*.json"))
+
+
+def long_term_docs() -> list[Path]:
+    """寿命长、只许指稳定物的文档（悬空指针红线的适用面）。"""
+    docs = [REPO / "CONTEXT.md", REPO / "CLAUDE.md", REPO / "README.md", REPO / "CONTRIBUTING.md"]
+    docs += sorted((REPO / "docs" / "adr").glob("*.md")) + sorted((REPO / "docs" / "internals").glob("*.md"))
+    docs += sorted((REPO / "docs" / "user-guide").glob("*.md")) + sorted((REPO / "docs" / "ai-eng").glob("*.md"))
+    docs += sorted(REPO.glob("*/DEVELOPMENT.md")) + sorted(REPO.glob("engines/*/DEVELOPMENT.md"))
+    return sorted({p for p in docs if p.exists()})
+
+
+def ai_side_docs() -> list[Path]:
+    """contributor 侧 AI agent 文档：口吻放开，但形态②的自造词与悬空指针照样不许（ADR 0045 决策六 / 悬空指针红线）。"""
+    docs = [REPO / "CONTEXT.md", REPO / "CLAUDE.md"]
+    docs += sorted((REPO / "docs" / "adr").glob("*.md")) + sorted((REPO / "docs" / "ai-eng").glob("*.md"))
+    docs += sorted((REPO / ".claude" / "commands").glob("*.md"))
+    return sorted({p for p in docs if p.exists()})
+
+
+# 讨论这些词本身的文档：形态②的自造词在它们里是反例列举，不算使用。
+COINAGE_DISCUSSION = frozenset({
+    "docs/adr/0045-documentation-layering-and-placement.md", "docs/ai-eng/doc-health-review.md",
+    "docs/ai-eng/code-health-review.md",
+})
+
+
+def code_comment_files() -> list[Path]:
+    out: list[Path] = []
+    for root in PY_ROOTS_FOR_COMMENTS:
+        base = REPO / root
+        if not base.exists():
+            continue
+        for p in base.rglob("*"):
+            if not p.is_file() or _SKIP_DIRS & set(p.parts):
+                continue
+            if (p.suffix in CODE_SUFFIXES or p.name == "Dockerfile") and _rel(p) not in SELF_FILES:
+                out.append(p)
+    for p in REPO.glob("engines/*/Dockerfile"):
+        if p not in out:
+            out.append(p)
+    return sorted(set(out))
+
+
+def classify(path: Path) -> str | None:
+    """把一个文件归到某个人读面（None = 不在任何护栏扫描面内）。"""
+    p = path if path.is_absolute() else REPO / path
+    rel = _rel(p)
+    if rel in SELF_FILES:
+        return None
+    if p.suffix == ".md" and SKILL_ROOT in p.parents:
+        return "skill"
+    if p in diagram_sources():
+        return "diagram"
+    if p in user_docs():
+        return "user-doc"
+    if p in technical_docs():
+        return "technical-doc"
+    if p in ai_side_docs():
+        return "ai-doc"
+    if (p.suffix in CODE_SUFFIXES or p.name == "Dockerfile") and not (_SKIP_DIRS & set(p.parts)):
+        if any(_rel(p).startswith(root + "/") for root in PY_ROOTS_FOR_COMMENTS):
+            return "code"
+    return None
+
+
+def scan(kind: str, path: Path, only_lines: set[int] | None = None) -> list[tuple[int, str, str]]:
+    """按人读面的规则束扫一个文件，返回 (行号, 类别, 原文)。only_lines 给了就只报这些行（hook 的「只报本次改动的行」）。"""
+    p = path if path.is_absolute() else REPO / path
+    text = p.read_text(encoding="utf-8", errors="replace")
+    hits: list[tuple[int, str, str]] = []
+
+    def add(line_no: int, label: str, line: str) -> None:
+        if only_lines is None or line_no in only_lines:
+            hits.append((line_no, label, line.strip()[:110]))
+
+    def apply(units, rules):
+        for line_no, line in units:
+            for label, rx in rules:
+                if rx.search(line):
+                    add(line_no, label, line)
+
+    wording = (("口头语或自造复合词", COLLOQUIAL), ("符号当谓语", SYMBOL_PREDICATE),
+               ("省略中心词的「退 N」", NUMERIC_SHORTHAND))
+    pointers = (("指向 journey 文件的悬空指针", DANGLING_JOURNEY), ("裸 WP 编号", BARE_WP))
+    if kind == "code":
+        apply(comment_units(p), wording + (("退役旧名", RETIRED_TERMS_IN_CODE),) + pointers)
+    elif kind == "technical-doc":
+        apply(prose_lines(text), wording + (("退役旧名", RETIRED_TERMS),) + pointers)
+    elif kind in {"user-doc", "skill"}:
+        scanned = changelog_unreleased(text) if p.name == "CHANGELOG.md" else text
+        body_start = 0
+        if kind == "skill":
+            lines = text.splitlines()
+            if lines and lines[0].strip() == "---" and "---" in lines[1:]:
+                body_start = lines.index("---", 1) + 1
+        all_lines = [(i, line) for i, line in enumerate(scanned.splitlines(), 1)]
+        apply(all_lines, (("内部指代", FORBIDDEN),))
+        apply([(i, l) for i, l in all_lines if i > body_start],
+              (("口头语或自造复合词", COLLOQUIAL), ("退役旧名", RETIRED_TERMS)))
+        apply(prose_lines(scanned, skip_frontmatter=(kind == "skill")),
+              (("符号当谓语", SYMBOL_PREDICATE), ("省略中心词的「退 N」", NUMERIC_SHORTHAND), ("正文箭头", ARROW))
+              + pointers)
+    elif kind == "ai-doc":
+        rules = pointers if _rel(p) in COINAGE_DISCUSSION else pointers + (("自造二字复合词", COINAGES),)
+        apply(prose_lines(text), rules)
+    elif kind == "diagram":
+        apply([(i, line) for i, line in enumerate(text.splitlines(), 1)],
+              (("内部指代", FORBIDDEN), ("口头语或自造复合词", COLLOQUIAL), ("退役旧名", RETIRED_TERMS),
+               ("符号当谓语", SYMBOL_PREDICATE), ("省略中心词的「退 N」", NUMERIC_SHORTHAND)))
+    return hits
+
 
 # ── skill 扫描面与命令 token 抽取 ───────────────────────────────────────────
 

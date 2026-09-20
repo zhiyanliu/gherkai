@@ -250,13 +250,13 @@
     "semantic_hash": ""
   },
   "CLAUDE.md": {
-    "mtime": 1789871451.9477265,
-    "ast_hash": "77f37286f532bdb557d2111fe01f2552",
+    "mtime": 1789875291.7815266,
+    "ast_hash": "7effe4bdaef4fc681a10234bfbe6ebc1",
     "semantic_hash": ""
   },
   "CONTEXT.md": {
-    "mtime": 1789872727.3867805,
-    "ast_hash": "ce9169a20b210684dcc635c68a60c6d6",
+    "mtime": 1789875291.7808676,
+    "ast_hash": "46506796a3741a0992133c3ce390e125",
     "semantic_hash": ""
   },
   "README.md": {
@@ -1180,8 +1180,8 @@
     "semantic_hash": ""
   },
   "cli/tests/_doc_rules.py": {
-    "mtime": 1789871570.1801214,
-    "ast_hash": "236d05ad59cfacd9c0c19e90e97b18da",
+    "mtime": 1789874903.5841706,
+    "ast_hash": "83cd3829c587d7ccaa04981d647354a5",
     "semantic_hash": ""
   },
   "cli/tests/test_skill.py": {
@@ -1340,8 +1340,8 @@
     "semantic_hash": ""
   },
   "CONTRIBUTING.md": {
-    "mtime": 1789874305.8536115,
-    "ast_hash": "31b667a76169af09e01f120566de6f34",
+    "mtime": 1789875291.7820818,
+    "ast_hash": "10a1b6aba7db9d2672130b6c8064e882",
     "semantic_hash": ""
   },
   "docs/README.md": {
@@ -1355,8 +1355,8 @@
     "semantic_hash": ""
   },
   "docs/ai-eng/README.md": {
-    "mtime": 1789818711.876231,
-    "ast_hash": "485d6f3469771cea78e49a84aef86121",
+    "mtime": 1789875291.7807183,
+    "ast_hash": "461d20a9743a21dc47b85d5d283f43cc",
     "semantic_hash": ""
   },
   "docs/ai-eng/REFERENCES.md": {
@@ -1616,7 +1616,7 @@
   },
   "docs/diagrams/configuration-env-inheritance.json": {
     "mtime": 1789872010.518521,
-    "ast_hash": "",
+    "ast_hash": "1a92e33b2103106b45f2d1ca0ea12dd3",
     "semantic_hash": ""
   },
   "docs/diagrams/deterministic-steps-registry-overview.json": {
@@ -1641,7 +1641,7 @@
   },
   "docs/diagrams/execution-timeout-chain.json": {
     "mtime": 1789872010.518828,
-    "ast_hash": "",
+    "ast_hash": "cafe9a8e982ac6bed50bf5b16649dd28",
     "semantic_hash": ""
   },
   "docs/diagrams/getting-started-component-ownership.json": {
@@ -1666,17 +1666,17 @@
   },
   "docs/diagrams/verdict-model-job-outcome.json": {
     "mtime": 1789872010.5189803,
-    "ast_hash": "",
+    "ast_hash": "7da92ec276cd02a404b7c3ff97df3929",
     "semantic_hash": ""
   },
   "docs/diagrams/verdict-model-reduction-layers.json": {
     "mtime": 1789873461.3131845,
-    "ast_hash": "",
+    "ast_hash": "19436b796eae63a15184d01b5412a47a",
     "semantic_hash": ""
   },
   "docs/diagrams/writing-features-scenario-to-job.json": {
     "mtime": 1789872010.5192323,
-    "ast_hash": "",
+    "ast_hash": "88b03acd7726aa3952ad6abc8bfa247b",
     "semantic_hash": ""
   },
   ".claude/hooks/sync-derived.sh": {
@@ -1686,7 +1686,7 @@
   },
   ".claude/settings.json": {
     "mtime": 1789706506.2601664,
-    "ast_hash": "c61f176790d22cecd0621960e6d011f5",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "docs/ai-eng/diagram-authoring.md": {
@@ -1705,13 +1705,53 @@
     "semantic_hash": ""
   },
   "cli/tests/test_code_comments.py": {
-    "mtime": 1789874305.8534796,
-    "ast_hash": "0af2f364be1dda332b64d19956acddc4",
+    "mtime": 1789875066.6269934,
+    "ast_hash": "ed985b802bfa4442a4770102ef451f90",
     "semantic_hash": ""
   },
   "cli/tests/test_technical_docs.py": {
-    "mtime": 1789871419.3440948,
-    "ast_hash": "ae246ece38232c20efaaaf64654176de",
+    "mtime": 1789875066.6290696,
+    "ast_hash": "68252ee02a81952e2bf1b49cc1361338",
+    "semantic_hash": ""
+  },
+  ".claude/hooks/commit-gate.sh": {
+    "mtime": 1789875066.6237447,
+    "ast_hash": "f65052add8c2a43e40008c5c09b55812",
+    "semantic_hash": ""
+  },
+  ".claude/hooks/wording-guard.sh": {
+    "mtime": 1789874946.9561238,
+    "ast_hash": "928bf92cf788da76b380ce5c185f9096",
+    "semantic_hash": ""
+  },
+  "cli/tests/test_adr_hygiene.py": {
+    "mtime": 1789875066.6311665,
+    "ast_hash": "a47c438e9cf3270a1a06f05b53862262",
+    "semantic_hash": ""
+  },
+  "cli/tests/test_context_glossary.py": {
+    "mtime": 1789875066.6334743,
+    "ast_hash": "09714eb9a66ec76afd330c8d86630196",
+    "semantic_hash": ""
+  },
+  "tools/doc_rules_check.py": {
+    "mtime": 1789874932.275329,
+    "ast_hash": "01a293cda169d6476f7b080e460ac3f1",
+    "semantic_hash": ""
+  },
+  "tools/git-hooks/pre-commit": {
+    "mtime": 1789874959.0997052,
+    "ast_hash": "b1bbb3523f9fad35bd362d690d9385b5",
+    "semantic_hash": ""
+  },
+  "docs/adr/0046-guardrail-layers-tests-hooks-and-lean-claude-md.md": {
+    "mtime": 1789875215.0033355,
+    "ast_hash": "e2a4e8fd893b9f3f91ba27b9f38fa376",
+    "semantic_hash": ""
+  },
+  "docs/ai-eng/guardrails.md": {
+    "mtime": 1789875329.8847928,
+    "ast_hash": "2aecd4b99f6a6a2d5fc3d4f7af5f052e",
     "semantic_hash": ""
   }
 }
