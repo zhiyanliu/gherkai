@@ -1,6 +1,6 @@
 # 引擎：怎么选、语言限制、证据填充差异、确定性 step 模板
 
-本文给选引擎与写确定性 step 所需的最小事实，离线也能写。完整写法以用户指南为准：
+本文给选引擎与写确定性 step 所需的最小事实，离线也能写；把 step 代码写稳、写得能诊断、写得能单测，见 `references/deterministic-steps.md`。完整写法以用户指南为准：
 确定性 step（两引擎并排） https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/writing-deterministic-steps.md ，
 安装与前置 https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/getting-started.md 。
 
@@ -53,8 +53,10 @@ import { deterministic, DeterministicAssertion } from "@gherkai/worker-midscene"
 deterministic(
   '元素 "(?<sel>[^"]+)" 可见',
   async ({ page }, { sel }) => {
-    if (!(await page.locator(sel).isVisible())) {
-      throw new DeterministicAssertion(`元素 ${sel} 应可见，实际没找到或不可见`);
+    try {
+      await page.locator(sel).waitFor({ state: "visible", timeout: 5000 });   // 带等待，不读瞬时值
+    } catch (e) {
+      throw new DeterministicAssertion(`元素 ${sel} 应可见但没有（页面 ${page.url()}）`);  // 超时转成断言失败，带现场
     }
   },
   { description: "断言选择器命中的元素可见（精确判定，不走 AI）", example: 'Then 元素 "#submit" 可见' },

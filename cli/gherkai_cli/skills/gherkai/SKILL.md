@@ -12,7 +12,8 @@ gherkai 把 Gherkin `.feature` 里的每一步交给云端浏览器里的 AI 引
 | 你在做的事 | 去读 |
 |---|---|
 | 写用例、运行、判定、读证据、收窄后重新运行（最高频） | 本文正文全部 |
-| 选引擎、被测 UI 不是英文、写确定性 step 模板、证据字段两引擎为何填得不一样 | `references/engines.md` |
+| 选引擎、被测 UI 不是英文、确定性 step 的最小模板与契约、证据字段两引擎为何填得不一样 | `references/engines.md` |
+| 写好确定性 step 的代码：该不该写、等待与判定、失败消息、判定逻辑与注册分离、本地单测、改一条在用的 step | `references/deterministic-steps.md` |
 | 装不上、`doctor` 有红、凭证 / region、ngrok、版本不一致导致退出码 2 | `references/setup-and-diagnosis.md` |
 | 云端后端：部署交人、variant 镜像、`push-worker`、升级顺序、多环境、清理 | `references/cloud-backend.md` |
 | CI 接 `--json` 与退出码、字段含义、产物落点 | `references/cli-json-contract.md` |
@@ -20,7 +21,7 @@ gherkai 把 Gherkin `.feature` 里的每一步交给云端浏览器里的 AI 引
 ## 1 心智模型
 
 - **一步三种执行路径**。默认走 AI：`Given` / `When` 的文本是动作，`Then` 的文本是布尔断言（可投票）。命中项目 `steps/` 里注册的正则则走确定性代码：不问 AI、不投票、可复现。另有一条内建捷径：文本里**双引号**内的内容以 `http://` / `https://` 开头时，整段引号内容当作地址、该步直接导航（本机应用照写的 `http://localhost:3000` 同样命中；单引号不触发），不耗 AI。派发优先级依次是确定性命中、双引号 URL 导航、AI。
-- **边界**：精确检查（URL、DOM、数值、必须可复现、要快）交给确定性 step；模糊、一次性、页面变化多、靠语义理解的交给 AI。
+- **边界**：精确检查（URL、DOM、数值、必须可复现、要快）交给确定性 step，出现频次高的检查（`Background` 前置、`Scenario Outline` 每行、要投票的断言）也优先写成确定性——它零模型费用、毫秒级完成（AI 步一步要几秒到几十秒），整套用例的墙钟与会话时长跟着降；模糊、一次性、页面变化多、靠语义理解的交给 AI。
 - **scope 与 tag**：`@scope:<名>` 把多条 scenario 编进同一个 job，共享一个浏览器会话、串行执行（后一条接着前一条留下的页面状态）；未标 scope 的 scenario 各成一个 job，`scope_id` 就是这条 scenario 的 id：`<文件>:<行号>`，`Scenario Outline` 展开出的每条再多一段 Examples 数据行的行号——别自己拼，从判定明细 / `plan --json` / 筛空时打出的候选清单里逐字复制。**scope 名在整个 run 里是全局的**：两个 feature 文件写了同一个名字就合并成一个 job（并发变串行、互不相干的用例锁进同一会话，`@engine` / `@timeout` 按合并后的全体解析、两边标了不同值整个 run 拒绝运行），撞名只在 stderr 提示一行，所以名字带来源前缀（`checkout-happy-path`、`admin-login`），别用 `login` / `smoke` 这种通名；也别把 scope 名写成 `<文件>:<行号>` 这个形状——正好等于某条未标 scope 的 scenario 编号时整个 run 拒绝运行并以退出码 2 结束。`@engine:novaact|midscene` 选引擎，`@timeout:<秒>` 给该 scope 的墙钟预算；其它 tag 只是普通标签，靠 `--tags` 筛。feature 行的 tag 会传给其下每条 scenario——`@scope` 标在 feature 行就是把整个文件塞进一个串行 job，要的是这个再标。
 - **引号只是书写习惯**：AI 步把关键字之后那段文本交给模型（整段被双引号包起来时，外层那对引号会去掉）；确定性 step 的正则匹配的是没去引号的原文——对象是关键字之后的那段文本、引号照留，正则里别写关键字，写用例时的写法要与它的 `example` 一致。匹配是**子串搜索、不自动锚定**，所以模式要写窄：带上引号与特征词（像内建那条 `页面地址匹配 "<正则>"` 的形状），别只写一个动词——宽模式会顺带命中本该走 AI 的步、悄悄换掉它的判法，两条模式同时命中一个 step 则该步直接记 error；宽窄靠 `gherkai plan` 的标注验。`And` / `But` 承前一步的关键字；`*` 或开头就是 `And` 会被拒（判不出动作还是断言）。
 
@@ -46,7 +47,7 @@ Midscene 对被测 UI 的语言不限。Nova Act 的支持范围是英文 UI：�
 - DataTable / DocString 可以挂在 AI 步下，随 step 一起喂给模型。
 - 公共前置步（登录、导航到基线页）写 `Background`：它展开进同一 feature 下每条 scenario 的最前面，步号从它的第一步 0 起数、scenario 里书写的步跟着后移（`explain --step N` 同此口径）；同一 `@scope` 里每条 scenario 都各自重新运行一遍它，别把导航塞进 `Background` 又指望后一条接着前一条的页面状态。
 - 同一流程换数据运行多遍写 `Scenario Outline` + `Examples`：每行数据展开成一条独立 scenario（占位符已代入），未标 `@scope` 时各成一个 job、`scope_id` 比普通 scenario 多一段数据行号，收窄后重新运行时照抄判定明细里的完整值；`--scenario` 要一次选中该 Outline 的全部数据行就只给声明行的行号（纯数字或 `:行号`）。
-- **什么时候配确定性 step**：URL 匹配、元素存在、精确数值、必须可复现、要快。两引擎各有最小模板与必填元数据（`description` / `example`，缺了启动即报错），见 `references/engines.md`。同一 feature 要在两个引擎上运行时正则两侧要成对写。内建一条 `Then 页面地址匹配 "<正则>"` 可直接用。
+- **什么时候配确定性 step**：URL 匹配、元素存在、精确数值、必须可复现、要快、出现频次高。两引擎各有最小模板与必填元数据（`description` / `example`，缺了启动即报错），见 `references/engines.md`。同一 feature 要在两个引擎上运行时正则两侧要成对写。内建一条 `Then 页面地址匹配 "<正则>"` 可直接用。**写代码时**（等待与判定、失败消息带现场、判定逻辑放 `_` 前缀模块并本地单测）按 `references/deterministic-steps.md`；改完的汇报带根因与改法、两侧清单与 `plan` 标注的核对结果、以后的自查方法三样。
 - 写完先 `gherkai list-deterministic --engine <名>` 核对你的 step 在清单里，再 `gherkai plan <feature>` 看每步标注：命中确定性的标 `← 确定性: <说明>`，其余走 AI。
 
 ## 5 工作循环
