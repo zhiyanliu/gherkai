@@ -64,7 +64,7 @@ harness 结尾打印 `=== HARNESS_REPORT_JSON ===` + 一段 JSON。关键字段�
 |------------------------------|----------------------------------------------------------------------------------------------------------------------|
 | `hung`                       | **`true` 即失败**：worker SIGTERM 后 grace-cap 内没退、被 SIGKILL。中断正确性的首要红线                                 |
 | `exit_code`                  | 正常/协作停止应 `0`；网络耗尽 `80`（`EX_WORKER_NETWORK`）；会话释放失败 `1`                                              |
-| `grace_s`                    | SIGTERM→worker 退出实测秒数（`none` 时为 null）。应 « grace-cap                                                         |
+| `grace_s`                    | SIGTERM→worker 退出实测秒数（`none` 时为 null）。应远小于 grace-cap                                                         |
 | `sample_valid`               | **判读的第一个字段**。`false` 表示无效样本，两类：① 中断过早、盘与 S3 均为空（`n_lost=0` 源于无可丢失的文件，而非提前上传已保全）→ 换更晚时机重新运行；② 指定了 `--interrupt <时机>` 但该时机未触发、全程退化为 baseline（`kill_phase=null`；已知两条：`scenario` 时机遇到单 scenario scope、`connect` 的 2s 定时器发现建连已完成）→ 换时机，或换「多 scenario 归一个 `@scope`」的 feature 重新运行。属哪一类见 `sample_note` |
 | `sample_note`                | 以自然语言说明 `sample_valid` 的判定依据与丢失量                                                                     |
 | `lost_on_fargate` / `n_lost` | **盘上有、S3 无**的文件，即 Fargate 容器盘销毁时会真实丢失的部分；subprocess 下这些文件留在本地盘、**非真实丢失**       |

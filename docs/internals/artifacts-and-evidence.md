@@ -40,10 +40,10 @@
 | `midscene-run/report/`                                       | 现场证据：Midscene 原生（SDK 报告 HTML + `screenshots/`）                  | key 镜像相对路径                                                              |
 | `midscene-run/log/`                                          | 现场证据：Midscene SDK 日志                                              | key 镜像相对路径                                                              |
 | `midscene-run/evidence/<scenario 键>/step-<n>/evidence.json` | 现场证据：gherkai 自有                                                   | key 镜像相对路径                                                              |
-| `worker.log`                                                 | 诊断日志                                                                | 仅 `--quiet` ∧ 本机执行时存在；cloud 无此文件 → 进 CloudWatch（组名与真值见 §5） |
+| `worker.log`                                                 | 诊断日志                                                                | 仅 `--quiet` 且本机执行时存在；cloud 无此文件 → 进 CloudWatch（组名与真值见 §5） |
 | `reconcile.log`                                              | 诊断日志（本机后台推进进程的输出）                                        | 仅 local `submit`；cloud 后端不生成（推进不在本机）                                |
 | `events.db`                                                  | 事件通道（SQLite）                                                        | 仅 local `submit`；cloud 后端事件在 events 表、不在桶里                           |
-| `tunnel.json`                                                | 隧道收尾凭据（pid）                                                       | 仅 local `submit` ∧ `--expose-local`                                          |
+| `tunnel.json`                                                | 隧道收尾凭据（pid）                                                       | 仅 local `submit` 且带 `--expose-local`                                          |
 | `.runstate.lock`                                             | `run_state` 写面互斥                                                    | 本地文件载体独有                                                              |
 | `jobs-in/`                                                   | job 输入（**不是判定**，勿与 `jobs/` 混读）                                | cloud 独有：起 task 时写                                                       |
 | `args/`                                                      | definition 的外置正文                                                   | cloud 独有：docString / dataTable 一律 offload、无 size 阈值                    |

@@ -22,7 +22,7 @@ CLAUDE.md 里的多数纪律是**正向要求**：「写人读文本前按决策
 4. **人类 contributor**：同一份脚本给一个可选的 git pre-commit（`tools/git-hooks/pre-commit`，`git config core.hooksPath tools/git-hooks` 启用）；不启用的仍由 CI 兜底。git hook 不随仓库分发，故只能 opt-in，不能替代第一层。
 5. **第三层：CLAUDE.md 只留判据与指针**。凡已被第一、二层机械化的条目，CLAUDE.md 里精化为「判据一句 + 护栏 / hook 指针」，不再复述枚举；留在 CLAUDE.md 里作正向要求的只剩机器判不了的判断型规则——读者比例定压缩方向、绿≠对的证据边界、接口诚实优先于改动规模、AWS 免费的适用期、「改完 code 回头校准文档」的差集习惯。判据：一条规则若能写成「某文件某行命中某正则即错」，它就不该只活在 CLAUDE.md 里。
 
-**加一条规则的顺序**：先在规则所属的 ADR 立决策（口吻 → 0045 决策六；术语 → 0045 决策八；产品文案 → 0039），再在 `_doc_rules.py` 加规则或扩扫描面——测试与 hook 自动接上，不另配；最后看 CLAUDE.md 对应条能否因此精化。操作细节在 [`docs/ai-eng/guardrails.md`](../ai-eng/guardrails.md)。
+**加一条规则的顺序**：先在规则所属的 ADR 立决策（口吻 → 0045 决策六；术语 → 0045 决策八；产品文案 → 0039），再在 `_doc_rules.py` 加规则或扩扫描面——测试与 hook 自动接上，不另配；最后看 CLAUDE.md 对应条能否因此精化。操作细节在 CONTRIBUTING.md「护栏三层」段（人读的技术文档，contributor 的入口）。
 
 ## 边界与已知盲区
 
@@ -38,15 +38,15 @@ CLAUDE.md 里的多数纪律是**正向要求**：「写人读文本前按决策
 - **hook 只提醒不阻断**：与正向提示同一失败形态——被滚过去。阻断式的前提是低误报与只报改动行，两者本 ADR 都做了。
 - **hook 全文件扫**：改一行报出全文件历史命中，一次清扫进行中会刷屏；改动行判据用 `git diff -U0 HEAD` 直接给出、零成本。
 - **规则散在各测试文件里各写一份**：hook 与测试会漂；`_doc_rules.py` 已是四份护栏的单一事实源，扩它而不是复制。
-- **把新护栏做成 CLAUDE.md 里更长的清单**：那是把执行机制写回散文；护栏名单归 `docs/ai-eng/guardrails.md`，CLAUDE.md 只给一个指针。
+- **把新护栏做成 CLAUDE.md 里更长的清单**：那是把执行机制写回散文；护栏名单归 CONTRIBUTING.md「护栏三层」段，CLAUDE.md 只给一个指针。
 
 ## 与既有 ADR 的关系
 
-- [0039](./0039-user-facing-surfaces-no-internal-references.md) 护栏节：产品文案的正则表与「靠 review」那半，本 ADR 不改判据，只把「靶 review」的那部分前移到写完即查。
+- [0039](./0039-user-facing-surfaces-no-internal-references.md) 护栏节：产品文案的正则表与「靠 review」那半，本 ADR 不改判据，只把「靠 review」的那部分前移到写完即查。
 - [0045](./0045-documentation-layering-and-placement.md) 决策六 / 八：措辞标准与词表流程仍在那里；本 ADR 是它们的执行层。
 - [0043](./0043-agent-skill-for-driving-gherkai.md) 决策六：skill 的产品面护栏并入同一份规则源与 hook。
 
 ## 对既有文档与 code 的影响
 
-- 新增：`tools/doc_rules_check.py`、`.claude/hooks/wording-guard.sh`、`.claude/hooks/commit-gate.sh`、`tools/git-hooks/pre-commit`、`cli/tests/test_code_comments.py`、`test_technical_docs.py`、`test_adr_hygiene.py`、`test_context_glossary.py`、`docs/ai-eng/guardrails.md`；`.claude/settings.json` 挂两道新 hook。
-- CLAUDE.md：Status 头、journey、悬空指针、文件名、三分类、严格词表、commit 六条各精化为判据 + 护栏指针；CONTRIBUTING 补 opt-in git hook 与工具表两行；CONTEXT 立「护栏」词条。
+- 新增：`tools/doc_rules_check.py`、`.claude/hooks/wording-guard.sh`、`.claude/hooks/commit-gate.sh`、`tools/git-hooks/pre-commit`、`cli/tests/test_code_comments.py`、`test_technical_docs.py`、`test_adr_hygiene.py`、`test_context_glossary.py`；`.claude/settings.json` 挂两道新 hook。
+- CLAUDE.md：Status 头、journey、悬空指针、文件名、三分类、严格词表、commit 六条各精化为判据 + 护栏指针；CONTRIBUTING 补「护栏三层」段（操作手册）、开发环境里的 opt-in git hook 与工具表两行；CONTEXT 立「护栏」词条。
