@@ -4,6 +4,8 @@
 uv tool install 'gherkai[local]=={{VERSION}}'          # CLI + 本机 Nova Act worker
 npm i -g @gherkai/worker-midscene@{{VERSION}}          # 本机 Midscene worker
 uv tool install 'gherkai[deploy-aws]=={{VERSION}}'     # 部署方：云端后端的部署命令
+gherkai skill install                                  # 让 AI agent 替你做：把 agent skill 装进项目（Claude Code；--agent codex / all）
+npx skills add https://github.com/{{OWNER}}/{{REPO}}/tree/v{{VERSION}}/cli/gherkai_cli/skills/gherkai -a claude-code -a codex   # 不经 gherkai 命令的同一份
 ```
 
 worker 基础镜像（linux/amd64）：

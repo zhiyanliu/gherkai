@@ -7873,10 +7873,10 @@
       "source_location": "L77",
       "_callable": true,
       "_origin": "ast",
-      "id": "github_scripts_release_notes_main",
       "community": 127,
       "community_name": "release.yml \u53d1\u5e03\u94fe",
-      "norm_label": "main()"
+      "norm_label": "main()",
+      "id": "github_scripts_release_notes_main"
     },
     {
       "label": "render()",
@@ -7885,10 +7885,10 @@
       "source_location": "L71",
       "_callable": true,
       "_origin": "ast",
-      "id": "github_scripts_release_notes_render",
       "community": 127,
       "community_name": "release.yml \u53d1\u5e03\u94fe",
-      "norm_label": "render()"
+      "norm_label": "render()",
+      "id": "github_scripts_release_notes_render"
     },
     {
       "label": "section()",
@@ -7897,10 +7897,10 @@
       "source_location": "L35",
       "_callable": true,
       "_origin": "ast",
-      "id": "github_scripts_release_notes_section",
       "community": 127,
       "community_name": "release.yml \u53d1\u5e03\u94fe",
-      "norm_label": "section()"
+      "norm_label": "section()",
+      "id": "github_scripts_release_notes_section"
     },
     {
       "label": "skill_install_tag_problems()",
@@ -7909,10 +7909,10 @@
       "source_location": "L57",
       "_callable": true,
       "_origin": "ast",
-      "id": "github_scripts_release_notes_skill_install_tag_problems",
       "community": 127,
       "community_name": "release.yml \u53d1\u5e03\u94fe",
-      "norm_label": "skill_install_tag_problems()"
+      "norm_label": "skill_install_tag_problems()",
+      "id": "github_scripts_release_notes_skill_install_tag_problems"
     },
     {
       "label": "_log()",
@@ -9814,7 +9814,7 @@
       "label": "_check()",
       "file_type": "code",
       "source_file": "cli/tests/test_release_notes.py",
-      "source_location": "L98",
+      "source_location": "L99",
       "_callable": true,
       "_origin": "ast",
       "id": "cli_tests_test_release_notes_check",
@@ -9838,7 +9838,7 @@
       "label": "test_cli_check_exit_codes()",
       "file_type": "code",
       "source_file": "cli/tests/test_release_notes.py",
-      "source_location": "L111",
+      "source_location": "L112",
       "_callable": true,
       "_origin": "ast",
       "id": "cli_tests_test_release_notes_test_cli_check_exit_codes",
@@ -9862,7 +9862,7 @@
       "label": "test_repo_changelog_has_every_released_tag_and_unreleased()",
       "file_type": "code",
       "source_file": "cli/tests/test_release_notes.py",
-      "source_location": "L124",
+      "source_location": "L125",
       "_callable": true,
       "_origin": "ast",
       "id": "cli_tests_test_release_notes_test_repo_changelog_has_every_released_tag_and_unreleased",
@@ -9874,7 +9874,7 @@
       "label": "test_repo_readme_pins_skill_install_to_changelog_top_version()",
       "file_type": "code",
       "source_file": "cli/tests/test_release_notes.py",
-      "source_location": "L141",
+      "source_location": "L142",
       "_callable": true,
       "_origin": "ast",
       "id": "cli_tests_test_release_notes_test_repo_readme_pins_skill_install_to_changelog_top_version",
@@ -9910,7 +9910,7 @@
       "label": "test_skill_install_tag_problems()",
       "file_type": "code",
       "source_file": "cli/tests/test_release_notes.py",
-      "source_location": "L84",
+      "source_location": "L85",
       "_callable": true,
       "_origin": "ast",
       "id": "cli_tests_test_release_notes_test_skill_install_tag_problems",
@@ -36596,10 +36596,10 @@
       "source_file": ".github/scripts/release_notes.py",
       "source_location": "L1",
       "_origin": "ast",
-      "id": "github_scripts_release_notes",
       "community": 127,
       "community_name": "release.yml \u53d1\u5e03\u94fe",
-      "norm_label": "release_notes.py"
+      "norm_label": "release_notes.py",
+      "id": "github_scripts_release_notes"
     },
     {
       "label": "wait_for_index.sh",
@@ -36637,10 +36637,10 @@
       "source_file": ".github/scripts/release_notes.py",
       "source_location": "L36",
       "_origin": "ast",
-      "id": "github_scripts_release_notes_rationale_36",
       "community": 127,
       "community_name": "release.yml \u53d1\u5e03\u94fe",
-      "norm_label": "`## [version]` \u5230\u4e0b\u4e00\u4e2a `## ` \u4e4b\u95f4\u7684\u6b63\u6587(\u4e0d\u542b\u6807\u9898\u884c),\u4e24\u7aef\u7a7a\u884c\u53bb\u6389\u3002\u627e\u4e0d\u5230\u8282 \u2192 valueerror\u3002"
+      "norm_label": "`## [version]` \u5230\u4e0b\u4e00\u4e2a `## ` \u4e4b\u95f4\u7684\u6b63\u6587(\u4e0d\u542b\u6807\u9898\u884c),\u4e24\u7aef\u7a7a\u884c\u53bb\u6389\u3002\u627e\u4e0d\u5230\u8282 \u2192 valueerror\u3002",
+      "id": "github_scripts_release_notes_rationale_36"
     },
     {
       "label": "\u6587\u6863\u91cc skill \u5b89\u88c5\u547d\u4ee4\u9489\u7684\u7248\u672c\u9010\u5904\u5bf9\u7167 version\uff1brequired \u65f6\u4e00\u5904\u90fd\u6ca1\u6709\u4e5f\u7b97\u95ee\u9898\u3002\u8fd4\u56de\u5e26\u884c\u53f7\u7684\u95ee\u9898\u63cf\u8ff0\uff0c\u7a7a\u5217\u8868\u5373\u901a\u8fc7\u3002",
@@ -36648,10 +36648,10 @@
       "source_file": ".github/scripts/release_notes.py",
       "source_location": "L58",
       "_origin": "ast",
-      "id": "github_scripts_release_notes_rationale_58",
       "community": 127,
       "community_name": "release.yml \u53d1\u5e03\u94fe",
-      "norm_label": "\u6587\u6863\u91cc skill \u5b89\u88c5\u547d\u4ee4\u9489\u7684\u7248\u672c\u9010\u5904\u5bf9\u7167 version;required \u65f6\u4e00\u5904\u90fd\u6ca1\u6709\u4e5f\u7b97\u95ee\u9898\u3002\u8fd4\u56de\u5e26\u884c\u53f7\u7684\u95ee\u9898\u63cf\u8ff0,\u7a7a\u5217\u8868\u5373\u901a\u8fc7\u3002"
+      "norm_label": "\u6587\u6863\u91cc skill \u5b89\u88c5\u547d\u4ee4\u9489\u7684\u7248\u672c\u9010\u5904\u5bf9\u7167 version;required \u65f6\u4e00\u5904\u90fd\u6ca1\u6709\u4e5f\u7b97\u95ee\u9898\u3002\u8fd4\u56de\u5e26\u884c\u53f7\u7684\u95ee\u9898\u63cf\u8ff0,\u7a7a\u5217\u8868\u5373\u901a\u8fc7\u3002",
+      "id": "github_scripts_release_notes_rationale_58"
     },
     {
       "label": "test_sqlite_event_log.py",
@@ -38252,9 +38252,9 @@
       "label": "\u771f CHANGELOG.md \u5bf9\u7167\u771f\u503c\u96c6\uff1a\u6bcf\u4e2a\u5df2\u53d1\u884c tag `vX.Y.Z` \u90fd\u8981\u6709\u975e\u7a7a\u8282\uff1b`## [Unreleased]` \u8981\u5728\u3002",
       "file_type": "rationale",
       "source_file": "cli/tests/test_release_notes.py",
-      "source_location": "L125",
+      "source_location": "L126",
       "_origin": "ast",
-      "id": "cli_tests_test_release_notes_rationale_125",
+      "id": "cli_tests_test_release_notes_rationale_126",
       "community": 143,
       "community_name": "test_release_notes.py",
       "norm_label": "\u771f changelog.md \u5bf9\u7167\u771f\u503c\u96c6:\u6bcf\u4e2a\u5df2\u53d1\u884c tag `vx.y.z` \u90fd\u8981\u6709\u975e\u7a7a\u8282;`## [unreleased]` \u8981\u5728\u3002"
@@ -38263,9 +38263,9 @@
       "label": "\u771f README / user guide \u5bf9\u7167\u771f\u503c\u96c6\uff1askill \u5b89\u88c5\u547d\u4ee4\u9489\u7684 tag \u7b49\u4e8e CHANGELOG \u9876\u90e8\u5df2\u53d1\u884c\u7248\u672c\uff08\u53d1\u7248\u524d\u4e24\u5904\u540c\u4e00\u6b21\u6539\uff09\u3002",
       "file_type": "rationale",
       "source_file": "cli/tests/test_release_notes.py",
-      "source_location": "L142",
+      "source_location": "L143",
       "_origin": "ast",
-      "id": "cli_tests_test_release_notes_rationale_142",
+      "id": "cli_tests_test_release_notes_rationale_143",
       "community": 143,
       "community_name": "test_release_notes.py",
       "norm_label": "\u771f readme / user guide \u5bf9\u7167\u771f\u503c\u96c6:skill \u5b89\u88c5\u547d\u4ee4\u9489\u7684 tag \u7b49\u4e8e changelog \u9876\u90e8\u5df2\u53d1\u884c\u7248\u672c(\u53d1\u7248\u524d\u4e24\u5904\u540c\u4e00\u6b21\u6539)\u3002"
@@ -70033,7 +70033,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "cli/tests/test_release_notes.py",
-      "source_location": "L112",
+      "source_location": "L113",
       "weight": 1.0,
       "_origin": "ast",
       "source": "cli_tests_test_release_notes_test_cli_check_exit_codes",
@@ -70057,7 +70057,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "cli/tests/test_release_notes.py",
-      "source_location": "L126",
+      "source_location": "L127",
       "weight": 1.0,
       "_origin": "ast",
       "source": "cli_tests_test_release_notes_test_repo_changelog_has_every_released_tag_and_unreleased",
@@ -70069,7 +70069,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "cli/tests/test_release_notes.py",
-      "source_location": "L143",
+      "source_location": "L144",
       "weight": 1.0,
       "_origin": "ast",
       "source": "cli_tests_test_release_notes_test_repo_readme_pins_skill_install_to_changelog_top_version",
@@ -70105,7 +70105,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "cli/tests/test_release_notes.py",
-      "source_location": "L85",
+      "source_location": "L86",
       "weight": 1.0,
       "_origin": "ast",
       "source": "cli_tests_test_release_notes_test_skill_install_tag_problems",
@@ -107752,9 +107752,9 @@
       "source_location": "L108",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "github_scripts_release_notes_main",
-      "target": "github_scripts_release_notes_render",
-      "confidence_score": 1.0
+      "target": "github_scripts_release_notes_render"
     },
     {
       "relation": "calls",
@@ -107764,9 +107764,9 @@
       "source_location": "L97",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "github_scripts_release_notes_main",
-      "target": "github_scripts_release_notes_section",
-      "confidence_score": 1.0
+      "target": "github_scripts_release_notes_section"
     },
     {
       "relation": "calls",
@@ -107776,9 +107776,9 @@
       "source_location": "L99",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "github_scripts_release_notes_main",
-      "target": "github_scripts_release_notes_skill_install_tag_problems",
-      "confidence_score": 1.0
+      "target": "github_scripts_release_notes_skill_install_tag_problems"
     },
     {
       "relation": "calls",
@@ -107788,9 +107788,9 @@
       "source_location": "L72",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "github_scripts_release_notes_render",
-      "target": "github_scripts_release_notes_section",
-      "confidence_score": 1.0
+      "target": "github_scripts_release_notes_section"
     },
     {
       "relation": "calls",
@@ -115549,7 +115549,7 @@
       "context": "generic_arg",
       "confidence": "EXTRACTED",
       "source_file": "cli/tests/test_release_notes.py",
-      "source_location": "L98",
+      "source_location": "L99",
       "weight": 1.0,
       "_origin": "ast",
       "source": "cli_tests_test_release_notes_check",
@@ -125391,7 +125391,7 @@
       "context": "parameter_type",
       "confidence": "EXTRACTED",
       "source_file": "cli/tests/test_release_notes.py",
-      "source_location": "L98",
+      "source_location": "L99",
       "weight": 1.0,
       "_origin": "ast",
       "source": "cli_tests_test_release_notes_check",
@@ -125403,7 +125403,7 @@
       "context": "parameter_type",
       "confidence": "EXTRACTED",
       "source_file": "cli/tests/test_release_notes.py",
-      "source_location": "L111",
+      "source_location": "L112",
       "weight": 1.0,
       "_origin": "ast",
       "source": "cli_tests_test_release_notes_test_cli_check_exit_codes",
@@ -135845,7 +135845,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "cli/tests/test_release_notes.py",
-      "source_location": "L111",
+      "source_location": "L112",
       "weight": 1.0,
       "_origin": "ast",
       "source": "cli_tests_test_release_notes",
@@ -135856,7 +135856,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "cli/tests/test_release_notes.py",
-      "source_location": "L124",
+      "source_location": "L125",
       "weight": 1.0,
       "_origin": "ast",
       "source": "cli_tests_test_release_notes",
@@ -135867,7 +135867,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "cli/tests/test_release_notes.py",
-      "source_location": "L141",
+      "source_location": "L142",
       "weight": 1.0,
       "_origin": "ast",
       "source": "cli_tests_test_release_notes",
@@ -135922,7 +135922,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "cli/tests/test_release_notes.py",
-      "source_location": "L84",
+      "source_location": "L85",
       "weight": 1.0,
       "_origin": "ast",
       "source": "cli_tests_test_release_notes",
@@ -135933,7 +135933,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "cli/tests/test_release_notes.py",
-      "source_location": "L98",
+      "source_location": "L99",
       "weight": 1.0,
       "_origin": "ast",
       "source": "cli_tests_test_release_notes",
@@ -153921,9 +153921,9 @@
       "source_location": "L35",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "github_scripts_release_notes",
-      "target": "github_scripts_release_notes_section",
-      "confidence_score": 1.0
+      "target": "github_scripts_release_notes_section"
     },
     {
       "relation": "contains",
@@ -153932,9 +153932,9 @@
       "source_location": "L57",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "github_scripts_release_notes",
-      "target": "github_scripts_release_notes_skill_install_tag_problems",
-      "confidence_score": 1.0
+      "target": "github_scripts_release_notes_skill_install_tag_problems"
     },
     {
       "relation": "contains",
@@ -153943,9 +153943,9 @@
       "source_location": "L71",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "github_scripts_release_notes",
-      "target": "github_scripts_release_notes_render",
-      "confidence_score": 1.0
+      "target": "github_scripts_release_notes_render"
     },
     {
       "relation": "contains",
@@ -153954,9 +153954,9 @@
       "source_location": "L77",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "github_scripts_release_notes",
-      "target": "github_scripts_release_notes_main",
-      "confidence_score": 1.0
+      "target": "github_scripts_release_notes_main"
     },
     {
       "relation": "contains",
@@ -166292,10 +166292,10 @@
       "relation": "rationale_for",
       "confidence": "EXTRACTED",
       "source_file": "cli/tests/test_release_notes.py",
-      "source_location": "L125",
+      "source_location": "L126",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "cli_tests_test_release_notes_rationale_125",
+      "source": "cli_tests_test_release_notes_rationale_126",
       "target": "cli_tests_test_release_notes_test_repo_changelog_has_every_released_tag_and_unreleased",
       "confidence_score": 1.0
     },
@@ -166303,10 +166303,10 @@
       "relation": "rationale_for",
       "confidence": "EXTRACTED",
       "source_file": "cli/tests/test_release_notes.py",
-      "source_location": "L142",
+      "source_location": "L143",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "cli_tests_test_release_notes_rationale_142",
+      "source": "cli_tests_test_release_notes_rationale_143",
       "target": "cli_tests_test_release_notes_test_repo_readme_pins_skill_install_to_changelog_top_version",
       "confidence_score": 1.0
     },
@@ -177581,9 +177581,9 @@
       "source_location": "L36",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "github_scripts_release_notes_rationale_36",
-      "target": "github_scripts_release_notes_section",
-      "confidence_score": 1.0
+      "target": "github_scripts_release_notes_section"
     },
     {
       "relation": "rationale_for",
@@ -177592,9 +177592,9 @@
       "source_location": "L58",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "github_scripts_release_notes_rationale_58",
-      "target": "github_scripts_release_notes_skill_install_tag_problems",
-      "confidence_score": 1.0
+      "target": "github_scripts_release_notes_skill_install_tag_problems"
     },
     {
       "relation": "rationale_for",
@@ -195179,5 +195179,5 @@
       "source_file": "docs/user-guide/configuration.md"
     }
   ],
-  "built_at_commit": "cea17c0736cc248698e3152ee22fae97453d2d29"
+  "built_at_commit": "686161018c6393497d77d0cb508ca669e494c8ba"
 }

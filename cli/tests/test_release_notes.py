@@ -76,6 +76,7 @@ def test_render_pins_links_to_the_tag():
     assert "blob/v1.4.4/docs/user-guide/README.md" in out and "blob/v1.4.4/CHANGELOG.md" in out
     assert "blob/HEAD/" not in out, "Release 正文的文档链接锁定 tag，不随 HEAD 漂"
     assert "gherkai[local]==1.4.4" in out and "@gherkai/worker-midscene@1.4.4" in out
+    assert "github.com/zhiyanliu/gherkai/tree/v1.4.4/cli/gherkai_cli/skills/gherkai" in out, "Release 页的 skill 安装命令由渲染自动钉本版"
 
 
 SKILL_CMD = "npx skills add https://github.com/zhiyanliu/gherkai/tree/v{v}/cli/gherkai_cli/skills/gherkai -a claude-code -a codex"
