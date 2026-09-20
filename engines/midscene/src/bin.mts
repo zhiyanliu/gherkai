@@ -26,7 +26,7 @@ registerTsx();
 // 更糟的是**存在但与正在运行的源码是两份**（源码树一个实例、dist 一个实例 → 使用方注册进 dist 那张表，
 // 正是上面那条不变量要防的分裂）。故按「本进程自身运行的是哪一份」取同一份的公开入口：bin 与 index 恒同目录
 // （src/ 或 dist/ 各自成套），从 `import.meta.url` 取兄弟文件即天然同一份（仍不碰 cwd/argv）。
-// 发布形态（bin = `dist/bin.mjs`）走自引用那条，与 `exports` 保持一致。
+// 发布形态（bin 指 `dist/bin.mjs`）走自引用那条，与 `exports` 保持一致。
 const fromSource = import.meta.url.endsWith(".mts");
 const target = fromSource
   ? new URL("./index.mts", import.meta.url).href
@@ -41,7 +41,7 @@ try {
   process.exit(await main());
 } catch (e) {
   // 「没开始执行就被拒」类启动失败（steps 加载失败等）与运行期 fatal 都走这里：一行 stderr + 非零退出。
-  // 码用 1（**不能是 80**——80 是 ADR 0028 的网络专用码，core 会翻成可重试的 WorkerNetworkError）。
+  // 退出码用 1（**不能是 80**——80 是 ADR 0028 的网络故障退出码，core 会翻成可重试的 WorkerNetworkError）。
   process.stderr.write(`worker fatal: ${e}\n`);
   process.exit(1);
 }

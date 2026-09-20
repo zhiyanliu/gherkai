@@ -32,7 +32,7 @@ from gherkai_core.project import EventRecord, TaskExited
 from gherkai_core.wire import event_from_line
 
 # events 表 TTL（[0033] 决定：events 是进度脚手架、只留 7 天）——写端（worker 的 EventSink）给每条 event item
-# 写 `expires_at = emit 时刻 + 本值`，故读端反解 emit 墙钟 = expires_at - 本值（见 _emit_ts）。
+# 写 `expires_at = emit 时刻 + 本值`，故读端反解 emit 墙钟为 `expires_at - 本值`（见 _emit_ts）。
 # **与写端同一个数**：写端改 TTL 必须同步这里，否则反解出的墙钟整体偏移。
 _EVENTS_TTL_S = 7 * 24 * 60 * 60
 

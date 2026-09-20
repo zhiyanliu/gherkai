@@ -100,14 +100,14 @@ test("modelFamily: 默认模型自身必须推得出家族（换默认却忘了�
   });
 });
 
-test("MODEL 缺省 = DEFAULT_MODEL（MIDSCENE_MODEL_ID 覆盖那条在 run-scope 的真子进程用例里）", () => {
+test("MODEL 缺省即 DEFAULT_MODEL（MIDSCENE_MODEL_ID 覆盖那条在 run-scope 的真子进程用例里）", () => {
   // MODEL 在 import 时定值（模块级读 env），故本条只在运行测试的 shell 未设覆盖时有意义。
   if (process.env.MIDSCENE_MODEL_ID) return;
   assert.equal(MODEL, DEFAULT_MODEL);
 });
 
 test("DEFAULT_MODEL 锁定的是具体 id：换默认得连这条字面量一起改（刻意的升级闸门，对称 Nova 那条）", () => {
-  // 换默认模型 = 换判定，流程是「模型评测集 A/B + 随发版并在 Release 正文点明」；字面量在这里是闸门、不是脆弱断言。
+  // 换默认模型就是换判定，流程是「模型评测集 A/B + 随发版并在 Release 正文点明」；字面量在这里是闸门、不是脆弱断言。
   assert.equal(DEFAULT_MODEL, "us.openai.gpt-5.6-terra");
 });
 

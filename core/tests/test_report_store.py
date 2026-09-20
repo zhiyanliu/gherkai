@@ -32,7 +32,7 @@ def _jr(scope_id: str, engine: str, **kw) -> JobResult:
 
 
 def _rr(run_id: str, jobs: list[JobResult], **kw) -> RunResult:
-    """测试 helper：RunResult = RunMeta(definition) + 判定 jobs。run_meta.jobs 取自各 jr.job。"""
+    """测试 helper：RunResult 由 RunMeta(definition) 与判定 jobs 合成。run_meta.jobs 取自各 jr.job。"""
     meta = RunMeta(run_id=run_id, created_at="", jobs=tuple(jr.job for jr in jobs))
     return RunResult(run_meta=meta, jobs=jobs, **kw)
 
@@ -100,7 +100,7 @@ def test_writes_manifest_and_index(tmp_path: Path):
 def test_report_files_keep_explicit_mode_under_tight_umask(tmp_path: Path):
     """收紧 umask 也必须落 0644——这是「报告写面退回 write_text」的判别式护栏。
 
-    `write_text` 的权限随 umask 走（077 下 = 0600），原子助手显式 chmod 成声明的 mode；报告是给人/CI/
+    `write_text` 的权限随 umask 走（077 下落成 0600），原子助手显式 chmod 成声明的 mode；报告是给人/CI/
     静态 server 读的那一份（ADR 0027），权限不该随环境漂移。原子性本身由 test_atomic_write.py 的通用用例钉。
     """
     run = _run_with_refs(tmp_path)
@@ -309,7 +309,7 @@ def test_href_relativized_percent_encoded_path(tmp_path: Path):
 
 
 def test_file_uri_with_remote_host_kept_as_ref(tmp_path: Path):
-    # file://server/share/x.html（带非 localhost host = 远端/UNC）→ 不当本地文件、href 原样 ==ref
+    # file://server/share/x.html（带非 localhost host，属远端/UNC）→ 不当本地文件、href 原样等于 ref
     run = _rr("unc", [
         _jr("s", "e", status=Status.PASSED,
             report_refs=(ReportRef(kind="report", ref=ResourceUri("file://server/share/x.html")),)),
@@ -351,7 +351,7 @@ def test_href_relativized_through_symlinked_run_dir(tmp_path: Path):
         _jr("s", "midscene", status=Status.PASSED,
             report_refs=(ReportRef(kind="report", ref=ref),)),
     ], status=Status.PASSED)
-    # store 的 root 经软链传入 → run_dir = link/<run_id>（含软链段），与 ref（已规范化）字面不一致
+    # store 的 root 经软链传入 → run_dir 为 link/<run_id>（含软链段），与 ref（已规范化）字面不一致
     store = LocalReportStore(link_base)
     store.write(run.run_id, run)
     m = json.loads((real_base / run_id / "manifest.json").read_text("utf-8"))
@@ -389,7 +389,7 @@ def test_empty_report_refs_still_valid_index(tmp_path: Path):
 
 def test_index_shows_fail_fast_reason_in_neutral_note_not_error_red(tmp_path):
     """skipped/aborted 的 error_type 恒 None、原因只在 message（ADR 0031 决定一）→ index 也得显；用中性 note 色而非
-    err 红（决定二：颜色跟 status 走，没运行 ≠ 出错）。与 render_text 的口径对齐。"""
+    err 红（决定二：颜色跟 status 走，没运行不等于出错）。与 render_text 的口径对齐。"""
     store = LocalReportStore(tmp_path)
     jr = _jr("checkout", "novaact", status=Status.SKIPPED)
     jr.message = "fail-fast：本次运行已中止，未启动（worker 未 spawn）"

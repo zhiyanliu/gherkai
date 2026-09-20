@@ -74,7 +74,7 @@ class FakeEngine:
                 self.on_event(job.scope_id, i)
             yield ev
             i += 1
-        # 事件流走完后若仍要 network-crash（net_crash_at >= 事件数，模拟「零/少事件就建连失败」）
+        # 事件流走完后若仍要 network-crash（net_crash_at 不小于事件数，模拟「零/少事件就建连失败」）
         if net_crash_at is not None and i >= net_crash_at:
             raise WorkerNetworkError(f"fake worker {job.scope_id} 建连失败（attempt {attempt}）")
 

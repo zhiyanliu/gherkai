@@ -265,7 +265,7 @@ def test_backoff_interrupted_times_out_without_stop():
     interrupted = rs._backoff_interrupted(0)
     dt = time.monotonic() - t0
     assert interrupted is False  # 没被唤醒 → False
-    assert dt >= 0.5             # 睡满了 backoff（attempt 0 = 0.5s）
+    assert dt >= 0.5             # 睡满了 backoff（attempt 0 的退避是 0.5s）
 
 
 # ---- 无残留：模块不再定义 _Terminated/_NetworkExhausted（防回归到 raise 模型）----

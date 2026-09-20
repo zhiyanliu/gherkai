@@ -91,7 +91,7 @@ def test_artifacts_bucket_job_in_lifecycle():
 
 
 def test_two_task_defs_container_name_without_prefix():
-    # **container 名 = {engine}-worker（不带 prefix）**——cli RunTask containerOverrides[].name 逐字匹配（ADR 0033 硬契约）。
+    # **container 名是 {engine}-worker（不带 prefix）**——cli RunTask containerOverrides[].name 逐字匹配（ADR 0033 硬契约）。
     t = _template()
     t.resource_count_is("AWS::ECS::TaskDefinition", 2)
     for engine in ("novaact", "midscene"):
@@ -233,7 +233,7 @@ def test_ssm_vpc_spec_new_carries_created_vpc_id():
 
 # ---- worker task-def 模板 revision ARN（ADR 0038 四步第 1 步）----
 def test_ssm_worker_template_arn_per_engine_refs_task_def():
-    """每引擎一个 `worker-template/<engine>` 参数，值 = task-def 的 `Ref`（**带 revision** 的 ARN）。
+    """每引擎一个 `worker-template/<engine>` 参数，值为 task-def 的 `Ref`（**带 revision** 的 ARN）。
 
     `Ref` 而非拼 family 名是要点：push-worker 从它复制模板，family 名取到的是「最新 ACTIVE」——可能是别人某个
     variant 的 revision（ADR 0038 不变量）。
@@ -311,7 +311,7 @@ def test_worker_subnets_single_source_across_ssm_and_lambda_env():
             for name, fn in t.find_resources("AWS::Lambda::Function").items()
             if "SUBNETS" in fn["Properties"].get("Environment", {}).get("Variables", {})}
     assert len(envs) == 2, f"应恰有 reconciler/kicker 两个 Lambda 拿 SUBNETS，实际 {sorted(envs)}"
-    assert _joined_refs(ssm[0]), "SSM subnets 应是 subnet 资源 Ref 拼出来的（空=选取逻辑坏了）"
+    assert _joined_refs(ssm[0]), "SSM subnets 应是 subnet 资源 Ref 拼出来的（空表示选取逻辑坏了）"
     for name, env_val in envs.items():
         assert _joined_refs(env_val) == _joined_refs(ssm[0]), f"{name} 的 SUBNETS 与 SSM 不同源"
 
@@ -342,7 +342,7 @@ def test_task_role_has_events_putitem_not_runs():
 def test_task_role_resource_arns_narrowed():
     """IAM 资源 ARN 已收窄（ADR 0033）——回归护栏：防将来改回 * 或踩 account=aws 陷阱。
 
-    收窄依据 = AWS SAR resource_types + IAM 策略模拟器实证。此测试锁定 CDK 生成的 ARN 形态。
+    收窄依据是 AWS SAR resource_types + IAM 策略模拟器实证。此测试锁定 CDK 生成的 ARN 形态。
     """
 
     t = _template()
@@ -392,7 +392,7 @@ def test_task_role_resource_arns_narrowed():
             if "browser/aws.browser.v1" in res:
                 # 系统 browser 段的 account 必须是 aws、绝不是客户账户（copy-account 陷阱护栏）
                 assert ":aws:browser/aws.browser.v1" in res, f"系统 browser account 段应为字面量 aws：{res}"
-                assert "000000000000:browser/aws.browser.v1" not in res, "踩了 copy-account 陷阱（系统 browser 用了客户账户）"  # 000…0=本测试 synth env 的账号（第 21 行）——断言必须用它才抓得到陷阱（曾误用真实账号字面量、synth 产物里不可能出现、断言永真失效）
+                assert "000000000000:browser/aws.browser.v1" not in res, "踩了 copy-account 陷阱（系统 browser 用了客户账户）"  # 000…0 是本测试 synth env 的账号（第 21 行）——断言必须用它才抓得到陷阱（曾误用真实账号字面量、synth 产物里不可能出现、断言永真失效）
     # ④ List/Create/Connect×2 结构上不支持 resource-level，诚实保留 *（不因收窄而误删这条 * statement）
     for action in ("bedrock-agentcore:ListBrowserProfiles", "bedrock-agentcore:CreateBrowserProfile",
                    "bedrock-agentcore:ConnectBrowserAutomationStream", "bedrock-agentcore:ConnectBrowserLiveViewStream"):
@@ -453,7 +453,7 @@ def test_execution_role_and_two_task_roles():
 
 # ---- stopTimeout（grace 真容器校准入口，ADR 0032）----
 def test_stop_timeout_defaults_to_120s():
-    # 默认 stopTimeout = 120s（贴 Fargate 上限），两个 task-def 的 container 都带（SIGTERM→SIGKILL 宽限）。
+    # 默认 stopTimeout 为 120s（贴 Fargate 上限），两个 task-def 的 container 都带（SIGTERM→SIGKILL 宽限）。
     t = _template()
     for engine in ("novaact", "midscene"):
         t.has_resource_properties("AWS::ECS::TaskDefinition", {
@@ -474,7 +474,7 @@ def test_stop_timeout_context_override():
 
 
 def test_stop_timeout_accepts_upper_boundary_120():
-    # **上界含 120**（=Fargate 硬上限、=默认值）：走**校验路径**（显式 context "120"，非默认路径的 raw is None 短路）
+    # **上界含 120**（即 Fargate 硬上限，也是默认值）：走**校验路径**（显式 context "120"，非默认路径的 raw is None 短路）
     # 才真正锁住 `<= 120` 的「等于」一侧——off-by-one 改成 `< 120` 时本测试会红（默认路径测不到）。
     t = _template(context={"stop_timeout": "120"})
     t.has_resource_properties("AWS::ECS::TaskDefinition", {
@@ -491,7 +491,7 @@ def test_stop_timeout_accepts_lower_boundary_1():
 
 
 def test_stop_timeout_rejects_just_over_cap_121():
-    # **刚越上界 121** fail-fast：锁定上限 = 120（区分 <=120 / <=119 / <=130——180 太远、区分不了边界）。
+    # **刚越上界 121** fail-fast：锁定上限为 120（区分 <=120 / <=119 / <=130——180 太远、区分不了边界）。
     with pytest.raises(ValueError, match="Fargate"):
         _template(context={"stop_timeout": "121"})
 
@@ -614,7 +614,7 @@ def test_kicker_mapping_insert_filter():
 
 
 def test_reconcile_lambdas_share_per_run_concurrency_cap():
-    """reconciler/kicker 的 `MAX_CONCURRENCY` = **部署侧 per-run cap**（非并发真源——真源是 definition 的
+    """reconciler/kicker 的 `MAX_CONCURRENCY` 是**部署侧 per-run cap**（非并发真源——真源是 definition 的
     `max_concurrency`，推进器取 min，ADR 0034 机制四）。两个 Lambda 都起 task（kicker 起首批、reconciler 续起），
     值必须**同**——不同则「首批 N 个、续起 M 个」，同一 run 的并行度随谁触发而变。
     """
@@ -685,7 +685,7 @@ def test_exit_observer_can_only_putitem_on_events_table():
 
 @pytest.mark.parametrize("role_hint", ["Reconciler", "Kicker"])
 def test_advancer_events_table_face_is_read_plus_putitem(role_hint):
-    """两个推进器对 events 表 = **读 + PutItem**，不得有 Update/Delete/BatchWrite。
+    """两个推进器对 events 表只有 **读 + PutItem**，不得有 Update/Delete/BatchWrite。
 
     读：重放该 run 的全部事件算现态。PutItem：两条路径要自己追加退出记录——launch 失败补偿与 job timeout 处置
     （ADR 0034 机制二推论 +「job timeout」节）；缺它这两条路径在真实 IAM 下 AccessDenied，而 moto 不校验 IAM、

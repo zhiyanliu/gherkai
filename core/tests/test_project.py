@@ -57,7 +57,7 @@ def test_no_records_job_is_pending():
     """definition 里的 job 没有任何 record → PENDING（还没起）。"""
     state = project(_meta("a"), [])
     assert state.jobs["a"].status == Status.PENDING
-    assert state.status == Status.PASSED  # 全 pending 被 _NON_VERDICT 过滤，run 级空判定=passed
+    assert state.status == Status.PASSED  # 全 pending 被 _NON_VERDICT 过滤，run 级空判定即 passed
 
 
 def test_scope_started_but_no_exit_is_running():
@@ -146,7 +146,7 @@ def test_platform_sentinel_exit_surfaces_reason_in_message():
 # ---------- job timeout 归因链（ADR 0034「job timeout」节）----------
 
 def test_timed_out_exit_is_error_regardless_of_exit_code_shape():
-    """超时处置的 stop → ERROR，不论 exit_code 形态（SIGKILL 137 / 协作退 0 / 未落值 None——
+    """超时处置的 stop → ERROR，不论 exit_code 形态（SIGKILL 137 / 协作以退出码 0 退出 / 未落值 None——
     timed_out 归因优先：处置本身即终态信号，error_type 记 timeout 而非按码归因）。"""
     for code in (137, 0, None):
         recs = [_ev("a", 1, ScopeStarted(scope_id="a", session_id="s")), _timeout_exit("a", code)]
@@ -191,7 +191,7 @@ def test_error_clean_exit_incomplete_content_gets_attribution():
 # ---------- HWM（机制三）----------
 
 def test_hwm_is_max_worker_seq():
-    """high_water_mark = 所有 scope 的 worker 段 max seq（exit 记录无 seq、不参与）。"""
+    """high_water_mark 是所有 scope 的 worker 段 max seq（exit 记录无 seq、不参与）。"""
     recs = _passed_events("a", base_seq=1) + [_exit("a", 0)]  # worker seq 1,2,3
     state = project(_meta("a"), recs)
     assert state.high_water_mark == 3
@@ -284,7 +284,7 @@ def test_clean_exit_without_any_event_is_error():
     """零事件 + exit==0（构造期 SIGTERM 干净退出，0024 设计内）→ ERROR，不得判 PENDING。
 
     若判 PENDING：与已 claim 的 RUNNING 基线单调合并 → 永停 RUNNING → plan_next 空 → run 永不收敛
-    （对抗验证探针复现的死循环）。ERROR（内容不完整但进程说成功=矛盾）比死循环安全。
+    （对抗验证探针复现的死循环）。ERROR（内容不完整但进程说成功，两者矛盾）比死循环安全。
     """
     meta = _meta("a")
     state = project(meta, [_exit("a", 0)])

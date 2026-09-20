@@ -32,7 +32,7 @@ from gherkai_core.model import Event, Job, ScopeDone
 from gherkai_core.wire import event_from_line, job_to_line, raise_for_worker_exit
 
 # events 表 schema 的**单一事实源**（ADR 0024「DynamoDB 作 events-out」+ ADR 0034 机制一）：PK=run_id#scope_id、
-# SK=scope 内单调 seq。**读写两侧共用**——`DdbEventLog` import 这批常量，别在别处再抄一份（抄一份 = 两处漂移）。
+# SK=scope 内单调 seq。**读写两侧共用**——`DdbEventLog` import 这批常量，别在别处再抄一份（抄一份即两处漂移）。
 # 同属这份事实源的还有下方 `EXIT_SK` 起的那组 exit 键空间常量（中间隔着本模块自用的 logger 与宽限常量）。
 PK_ATTR = "pk"
 SK_ATTR = "seq"
@@ -41,14 +41,14 @@ BODY_ATTR = "body"  # 0024 事件的 JSON line 原样（DDB 不解析 body）
 logger = logging.getLogger("gherkai_core.adapters.fargate_engine")
 
 # 流式期最终一致读的断号宽限秒数（ADR 0024「读一致性」）：游标只越过连续前缀，页内断号处停住、下轮 re-query 补齐；
-# 断号持续超过此宽限 = 写者侧真洞（worker PutItem 失败但 seq 已耗——SDK 关重试、单次墙钟封顶）→ 记警告越过，别让流式读
+# 断号持续超过此宽限即写者侧真洞（worker PutItem 失败但 seq 已耗——SDK 关重试、单次墙钟封顶）→ 记警告越过，别让流式读
 # 无界停摆（schedule 的静默兜底会把停摆误判成 worker 卡死）。EC 滞后通常 <1s，5s 留足余量；构造期可覆盖（测试）。
 EC_GAP_GRACE_S = 5.0
 
 # 平台侧退出观察者写的 `task_exited` 的**独立键空间**（ADR 0034 机制一）：DDB SK 是 NUMBER、字符串前缀结构上
 # 不可行，故用保留高位数值 SK（worker seq 从 1 递增、永不到它）+ `item_type` 属性承载，退出记录不入 worker 段。
 # **该 item 没有 body**：读 worker 段的 Query 必须把 SK 上界收在 `EXIT_SK - 1`，否则读到它 → KeyError('body')。
-# 取值 10^18 = 远超任何真实 scope 事件数的大数（DDB Number 精度内；虽超 JSON 安全整数，但 DDB 线上存字符串数值故 OK）。
+# 取值 10^18 是远超任何真实 scope 事件数的大数（DDB Number 精度内；虽超 JSON 安全整数，但 DDB 线上存字符串数值故 OK）。
 EXIT_SK = 10 ** 18
 ITEM_TYPE_ATTR = "item_type"
 EXIT_ITEM_TYPE = "exit"     # item_type 取值：退出记录（worker 事件 item 不带此属性）
@@ -58,15 +58,15 @@ class TaskProbe(NamedTuple):
     """一次 DescribeTasks 探测的结果——**三个正交事实各自命名**（ADR 0024「exitCode 落值延迟」；前两个见下、第三个 `missing` 见末段）：
 
     - `stopped`：task 是否已到 STOPPED 终态。
-    - `exit_code`：container 的 exitCode；`None` = 尚未落值。
+    - `exit_code`：container 的 exitCode；`None` 表示尚未落值。
 
     **关键：`stopped` 与 `exit_code` 非原子**——DescribeTasks 的 `lastStatus==STOPPED` 翻转与 `containers[].exitCode`
     落值可分两次可见，STOPPED 瞬间 exit_code 可能短暂 `None`（AWS 有记录的时序）。故前两个字段有三种有意义组合：
-    `(False, None)`=未 STOPPED（继续轮询）；`(True, None)`=已 STOPPED 但码尚未落值（有界多等几拍，别当异常）；
-    `(True, int)`=已 STOPPED 且落值。用命名字段表达，避免把"到没到终态"与"码落没落值"挤进一个过载返回值。
+    `(False, None)` 表示未 STOPPED（继续轮询）；`(True, None)` 表示已 STOPPED 但码尚未落值（有界多等几拍，别当异常）；
+    `(True, int)` 表示已 STOPPED 且落值。用命名字段表达，避免把"到没到终态"与"码落没落值"挤进一个过载返回值。
 
     第三个正交事实 `missing`：DescribeTasks **查不到这个 task**（空 `tasks` + `failures[].reason=MISSING`）——不是「未 STOPPED」。
-    ECS API 最终一致，RunTask 刚返回时可能短暂 MISSING（有界多等 `missing_task_grace_polls`）；持续 MISSING = task 已不在
+    ECS API 最终一致，RunTask 刚返回时可能短暂 MISSING（有界多等 `missing_task_grace_polls`）；持续 MISSING 表示 task 已不在
     ECS（已停超 1h 被清 / 被删 / ARN 错），再轮询永远等不到 STOPPED，调用方抛可归因异常（ADR 0024「exitCode 落值延迟」条）。"""
     stopped: bool
     exit_code: int | None
@@ -74,7 +74,7 @@ class TaskProbe(NamedTuple):
 
 
 def events_pk(run_id: str, scope_id: str) -> str:
-    """events 表分区键 = run_id#scope_id（复合，防重复运行撞键）。worker/adapter 各自本地拼、须逐字一致。"""
+    """events 表分区键为 `run_id#scope_id`（复合，防重复运行撞键）。worker/adapter 各自本地拼、须逐字一致。"""
     return f"{run_id}#{scope_id}"
 
 
@@ -87,7 +87,7 @@ class FargateWorkerHandle:
         self._task_arn = task_arn
 
     def stop(self, grace_period_s: float) -> None:
-        """请求优雅停止 = StopTask。
+        """请求优雅停止即调 StopTask。
 
         **grace_period_s 在 Fargate 上无法逐次传**（ADR 0024/0032）：容器 SIGTERM→SIGKILL 的宽限由 task-def 期
         常量 `stopTimeout`（≤120s）决定、StopTask 不收运行期 grace 参数。故此处忽略入参、只发 StopTask——
@@ -136,18 +136,18 @@ class FargateEngine:
         events_table_name: str,    # 注入 worker 的 events 表名（worker PutItem 目标）
         container_name: str,       # RunTask overrides 要指定往哪个 container 注 env
         # 下面两个产物落点参数**必给关键字、无缺省**：cloud 下两者必注，漏传即静默丢产物（实际运行暴露过一次），
-        # 与 ADR 0038 的显式 revision 同口径——漏传即在装配点炸，不做成「忘了传就静默破」。
+        # 与 ADR 0038 的显式 revision 判法一致——漏传即在装配点炸，不做成「忘了传就静默破」。
         artifact_s3: tuple[str, str] | None,  # (bucket, prefix)：worker 产物上传落点（ADR 0029）——注入 worker 的
-                                   # ARTIFACT_S3_BUCKET/PREFIX，否则容器盘停即销毁、产物必丢（ADR 0029「cloud 下注入不是可选」）。None=显式不上传
+                                   # ARTIFACT_S3_BUCKET/PREFIX，否则容器盘停即销毁、产物必丢（ADR 0029「cloud 下注入不是可选」）。None 表示显式不上传
         sdk_artifact_dir_env: dict,  # 按引擎的 SDK 产物落点 env（如 {"NOVA_LOGS_DIR": "/容器内/…/nova-trajectories"}）——
                                    # worker ArtifactUploader 用其父级算 run_dir/相对 key。**缺它 uploader run_dir=None→no-op 报 file://→产物丢**
                                    # （实际运行暴露：只注 ARTIFACT_S3_* 不够，SDK 落点 env 也必注）。引擎无关：由组合根按引擎算好、本 adapter 只转发。
         extra_env: dict | None = None,  # 通用附加 env（组合根算好，如 GHERKAI_EXTRA_HTTP_HEADERS，ADR 0035）——逐条注 RunTask overrides
-        region: str | None = None, # 注入 worker 的 AWS_REGION（组合根已落实成具体字符串，ADR 0016 决策 C）；None=真无 region、worker fail-loud
+        region: str | None = None, # 注入 worker 的 AWS_REGION（组合根已落实成具体字符串，ADR 0016 决策 C）；None 表示真无 region、worker fail-loud
         poll_interval_s: float = 0.5,
         gap_grace_s: float = EC_GAP_GRACE_S,  # 流式期断号宽限（ADR 0024「读一致性」，见模块常量注释）
         missing_task_grace_polls: int = 20,  # DescribeTasks 连续 MISSING 的有界宽限拍数（ECS API 最终一致，RunTask 刚返回可短暂查不到；
-                                   # 20×0.5s≈10s）——超限 = task 已不在 ECS，抛而非无上界轮询（ADR 0024「exitCode 落值延迟」条）
+                                   # 20×0.5s≈10s）——超限表示 task 已不在 ECS，抛而非无上界轮询（ADR 0024「exitCode 落值延迟」条）
         null_exit_grace_polls: int = 5,  # STOPPED 但 exitCode 尚 null 时的有界宽限拍数（ADR 0024「exitCode 落值延迟」）——
                                    # 多等这么多拍等落值，超限才落定异常码 1（防把落值延迟误报 error）。5×0.5s≈2.5s，远大于落值瞬时窗口。
     ) -> None:
@@ -175,7 +175,7 @@ class FargateEngine:
     def start_scope(self, job: Job) -> str:
         """fire-and-forget 起一个 Fargate task 执行 job，返回 task_arn（ADR 0034：无状态批量运行的 Engine 增出形状）。
 
-        = run_scope 的前半（PutObject job + RunTask），**不返回事件迭代器、不轮询**——cloud 无状态路径下 worker
+        本方法是 run_scope 的前半（PutObject job + RunTask），**不返回事件迭代器、不轮询**——cloud 无状态路径下 worker
         自 PutItem events 到 DDB、退出观察者 Lambda 补 task_exited、reconciler Lambda 从表重放，没有「调用方持续
         迭代」（对照 run_scope 的 pull 式，同步 run 路径用）。CloudLauncher 在 reconciler CAS 抢占成功后调它。
         run_scope 现 delegate 到本方法拿 task_arn，再加事件迭代器（同步路径），保两路径起 task 逻辑单一真源。
@@ -192,7 +192,7 @@ class FargateEngine:
         # 打 tag `gherkai=job-in`：job-in 是喂 worker 的一次性输入（worker GetObject 读完即无用），桶按此 tag
         # 挂 S3 lifecycle 过期清理（ADR 0033）。**用 tag 而非 key 前缀过滤**——job-in 落 `<prefix><run_id>/jobs-in/`，
         # run_id 在中间，lifecycle 的纯前缀 filter 框不住它、且不能误伤同前缀下的判定真值(jobs/)/报告；tag 精确只框 job-in。
-        # Tagging 是 URL-encoded 查询串格式（`k=v`）。**打 tag 的是编排进程**（本 put_object 在 FargateEngine=组合根注入的
+        # Tagging 是 URL-encoded 查询串格式（`k=v`）。**打 tag 的是编排进程**（本 put_object 在组合根注入给 FargateEngine 的
         # s3_client 上执行、用运维凭证），非 worker task role（后者只 GetObject 读 job-in），故无需给 task role 加 PutObjectTagging。
         self._s3.put_object(
             Bucket=self._job_bucket, Key=job_key,
@@ -265,17 +265,17 @@ class FargateEngine:
 
         **纯事件流、不掺心跳**（Engine port 铁律）：静默时本迭代器阻塞在轮询上，schedule 的 _heartbeat_wrap 兜底唤醒查超时。
 
-        **终止 = 内容完整 + 进程终止两件事、都要**（ADR 0024「事件流结束信号」，与 subprocess「fd EOF + 无条件
-        proc.wait()」严格同构）：① 内容完整判据 = 读到本 scope 的 scope_done（最大 seq、最后一条），或 worker 崩溃没发；
+        **终止即内容完整 + 进程终止两件事、都要**（ADR 0024「事件流结束信号」，与 subprocess「fd EOF + 无条件
+        proc.wait()」严格同构）：① 内容完整的判据是读到本 scope 的 scope_done（最大 seq、最后一条），或 worker 崩溃没发；
         ② **无论哪种，都等 DescribeTasks STOPPED 读 exitCode 再翻异常**——scope_done 非终态，worker 可发完它又在会话
         释放阶段非 0 退出（Midscene cleanupFailed→exit 1），"读到 scope_done 即 break、不读码"会吞掉它、job 误报
-        PASSED（违「会话释放失败可观测」不变量）。代价 = 每 scope 收尾等 ~11s（ECS 记录 executionStoppedAt 平台滞后，
+        PASSED（违「会话释放失败可观测」不变量）。代价是每 scope 收尾等 ~11s（ECS 记录 executionStoppedAt 平台滞后，
         ADR 0032 结论 2）；一次性、事件早经 Query yield、不影响流式期进度。
         """
         from boto3.dynamodb.conditions import Key
 
         last_seq = 0  # 已消费的**连续前缀**末 seq（不是页内最大 seq）
-        gap_since: float | None = None  # 首次撞见当前断号的时刻；None = 当前无断号
+        gap_since: float | None = None  # 首次撞见当前断号的时刻；None 表示当前无断号
         missing_polls = 0  # DescribeTasks 连续 MISSING 计数（有界宽限，见 _count_missing）
         pk = events_pk(self._run_id, scope_id)
         while True:
@@ -300,8 +300,8 @@ class FargateEngine:
                         gap_since = now
                     if now - gap_since < self._gap_grace_s:
                         break  # 宽限内：等下轮
-                    # 宽限已过 = 写者侧真洞（worker PutItem 失败但 seq 已耗）→ 记警告、越过继续，别让流式读无界停摆
-                    # （schedule 的静默兜底会把停摆误判成 worker 卡死）。缺的区间 = seq [last_seq+1, seq-1]，日志只报条数
+                    # 宽限已过即写者侧真洞（worker PutItem 失败但 seq 已耗）→ 记警告、越过继续，别让流式读无界停摆
+                    # （schedule 的静默兜底会把停摆误判成 worker 卡死）。缺的区间为 seq [last_seq+1, seq-1]，日志只报条数
                     # （产品面不谈 seq 与断号机制）；这里是最终一致读，故判据是「宽限已过仍没到」，终读里的强一致断洞另见 `_final_drain`。
                     # 风险：缺的若是 scenario_done，该 scenario 不进 scenario_status、job 判定可能偏乐观（schedule 的
                     # 完整性校验只看 scope_done），故日志只说明细会缺、不承诺判定不受影响。
@@ -325,7 +325,7 @@ class FargateEngine:
                 return
 
             if consumed:
-                missing_polls = 0  # 有进展 = worker 活着在写，「连续 MISSING」断掉（与 _await_exit_code 同一语义）
+                missing_polls = 0  # 有进展表示 worker 活着在写，「连续 MISSING」断掉（与 _await_exit_code 同一语义）
             # 本轮无进展（无新事件，或停在断号处等补齐）且未见 scope_done：查 task 是否已 STOPPED（兜底：worker 崩溃没发 scope_done）
             if consumed == 0:
                 probe = self._probe_task(task_arn)
@@ -378,8 +378,8 @@ class FargateEngine:
             for it in resp.get("Items", []):
                 seq = int(it[SK_ATTR])
                 if seq != expected:
-                    # 强一致读里的断号 = 写者侧真洞（worker PutItem 失败但 seq 已耗），无从补、只记警告（ADR 0024 读一致性）。
-                    # 缺的区间 = seq [expected, seq-1]，日志只报条数；pk 形如 run_id#scope_id，产品面只给 scope 那一段。
+                    # 强一致读里的断号即写者侧真洞（worker PutItem 失败但 seq 已耗），无从补、只记警告（ADR 0024 读一致性）。
+                    # 缺的区间为 seq [expected, seq-1]，日志只报条数；pk 形如 run_id#scope_id，产品面只给 scope 那一段。
                     # 同流式期那条的风险：缺的若是 scenario_done，job 判定可能偏乐观，故不承诺判定不受影响。
                     logger.warning("scope %s 的执行记录缺 %d 条（已确认不会再到达），本次报告里这部分执行明细会缺失",
                                    pk.split("#", 1)[-1], seq - expected)
@@ -400,7 +400,7 @@ class FargateEngine:
         resp = self._ecs.describe_tasks(cluster=self._cluster, tasks=[task_arn])
         tasks = resp.get("tasks", [])
         if not tasks:
-            # 查不到 task（failures 里 reason=MISSING）≠ 未 STOPPED：单独成态，让调用方有界等 / 超限抛（见 TaskProbe.missing）。
+            # 查不到 task（failures 里 reason=MISSING）不等于未 STOPPED：单独成态，让调用方有界等 / 超限抛（见 TaskProbe.missing）。
             return TaskProbe(stopped=False, exit_code=None, missing=True)
         if tasks[0].get("lastStatus") != "STOPPED":
             return TaskProbe(stopped=False, exit_code=None)  # 未 STOPPED
@@ -413,7 +413,7 @@ class FargateEngine:
         """轮询 DescribeTasks 直到拿到确定的 exitCode——scope_done 后读退出码用（ADR 0024「事件流结束信号」）。
 
         scope_done 只表示事件流内容完整、非进程终态；等 STOPPED 读码才能捕获「worker 发完 scope_done 又会话释放失败
-        非 0 退出」（Midscene cleanupFailed→exit 1），与 subprocess 无条件 proc.wait() 同构。阻塞期 = worker 会话释放
+        非 0 退出」（Midscene cleanupFailed→exit 1），与 subprocess 无条件 proc.wait() 同构。阻塞期是 worker 会话释放
         + ECS 记录 executionStoppedAt 平台滞后（~11s，ADR 0032 结论 2）；轮询静默时由 schedule _heartbeat_wrap/deadline
         兜底唤醒（同主循环兜底路径的 sleep 轮询；task 可见时不会真无限——worker 已在退出路径、很快 STOPPED；MISSING 那一格
         另由下述有界宽限兜住）。

@@ -58,7 +58,7 @@ def test_loads_recursively_in_sorted_order_and_registers(tmp_path):
 
     assert [f.name for f in loaded] == ["a_first.py", "b_second.py", "nested.py"]  # 排序（子目录名 'sub' 在后）
     added = [e.raw for e in d._REGISTRY[before:]]
-    assert added == ["P-a", "P-b", "P-nested"]  # 注册进同一张表、顺序 = 加载顺序
+    assert added == ["P-a", "P-b", "P-nested"]  # 注册进同一张表、顺序即加载顺序
     # 自述入口看到的即这张表（ADR 0036 真值单一）
     assert "P-nested" in [e["pattern"] for e in d.list_registry()]
 
@@ -156,7 +156,7 @@ def test_broken_file_does_not_leave_half_module_in_sys_modules(tmp_path):
 
 
 def test_missing_dir_fails_loud(tmp_path):
-    """给了目录但不存在 = 配置错，不是「没定制」——必须响亮（否则确定性 step 全静默变 AI）。"""
+    """给了目录但不存在就是配置错，不是「没定制」——必须响亮（否则确定性 step 全静默变 AI）。"""
     with pytest.raises(UserStepsError) as ei:
         load_user_steps(str(tmp_path / "nope"))
     assert "nope" in str(ei.value)
@@ -245,7 +245,7 @@ def test_loaded_count_line_on_stderr_subprocess(tmp_path):
 
 
 def test_no_loaded_line_when_nothing_injected(tmp_path):
-    """未注入目录 = 使用方没定制，正常路径不打这行（诊断行不许变成人人都看见的噪声）。"""
+    """未注入目录表示使用方没定制，正常路径不打这行（诊断行不许变成人人都看见的噪声）。"""
     proc = subprocess.run(
         [sys.executable, "-m", "gherkai_worker_novaact", "--capabilities"],
         capture_output=True, timeout=60, env=_clean_env(),

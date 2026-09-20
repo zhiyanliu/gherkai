@@ -4,8 +4,8 @@
 装好的 wheel 是同一条路径，故**不设仓库根回落**（对齐 ADR 0037 决策 3「不设 dev 模式特判」）。
 
 **语义是整目录收敛、不是幂等覆盖**（ADR 0043 决策三）：先删目标 skill 目录、整份写入包内那份、再写
-`.gherkai-skill-version` 标记；装完的目录 = 包内那份 + 该标记（标记只存在于安装态，包内不得有），
-跨版本升级不会留下上一版多出来的 reference。删前只认三种目标：不存在 / 空 / 带标记——否则退 2，
+`.gherkai-skill-version` 标记；装完的目录是包内那份 + 该标记（标记只存在于安装态，包内不得有），
+跨版本升级不会留下上一版多出来的 reference。删前只认三种目标：不存在 / 空 / 带标记——否则以退出码 2 结束，
 防 `--dir` 打错把使用方自己的目录整掉。
 
 **版本由调用方传进来**（`__main__._cmd_skill_install` 交 `_installed_version()`，与后端版本 skew 比对同一取法，
@@ -23,9 +23,9 @@ import sys
 from importlib.resources import as_file, files
 from pathlib import Path
 
-# skill 名 = 目录名 = frontmatter 的 name（ADR 0043 决策六的形态护栏据此断言）
+# skill 名、目录名与 frontmatter 的 name 三者相同（ADR 0043 决策六的形态护栏据此断言）
 SKILL_NAME = "gherkai"
-# 安装态标记：值 = 已安装发行版本；它是「这个目录是本命令装的」的唯一凭据（删前判据）
+# 安装态标记：值为已安装发行版本；它是「这个目录是本命令装的」的唯一凭据（删前判据）
 MARKER_NAME = ".gherkai-skill-version"
 UNKNOWN_VERSION = "版本未知"
 
@@ -65,7 +65,7 @@ def _print_skill() -> int:
 
 
 def _converge(src: Path, dst: Path, version_text: str) -> None:
-    """整目录收敛：删旧 → 整份拷 → 写标记。`__pycache__` / `*.pyc` 不拷（保「装完 = 包内那份 + 标记」）。"""
+    """整目录收敛：删旧 → 整份拷 → 写标记。`__pycache__` / `*.pyc` 不拷（保「装完即包内那份 + 标记」）。"""
     if dst.exists():
         shutil.rmtree(dst)
     dst.parent.mkdir(parents=True, exist_ok=True)

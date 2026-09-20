@@ -1,7 +1,7 @@
 """核心注入接口（ADR 0016，业界称 ports & adapters）：核心的主要注入口在此（另两个见末段），具体 adapter 由组合根注入。
 
 四个 port（关注点拆开，不揉成上帝 module）：
-- Engine        —— 真正运行一个 scope（spawn worker、讲 ADR 0024 协议）；adapter = 子进程/Fargate
+- Engine        —— 真正运行一个 scope（spawn worker、讲 ADR 0024 协议）；adapter 有子进程与 Fargate 两种
 - RunStore      —— 控制面：run/job 状态、血缘、起止（频繁读写，撑轮询接力与无状态批量运行的条件写）
 - ResultStore   —— 数据面：每 scenario 判定真值、投票（追加为主）
 - ReportStore   —— 归集报告产物为派生只读导航视图（RunReport：manifest + index，ADR 0027）
@@ -13,8 +13,8 @@ local/s3、Engine: subprocess/fargate），组合根按 `--backend` 注入。
 **另两个 port 不在本模块**：`EventLog` 与 `Launcher` 定义在 `reconcile.py`、与消费它们的 reconciler 同处——
 只服务无状态推进路径，与本模块那批「同步 `run` 也用」的口生命周期不同（ADR 0016「`EventLog` / `Launcher`
 两个 port 定义在 `reconcile.py`」条；亦见 ADR 0034「Engine port 演进」）。同样组合根注入、各两个实装：
-`EventLog` = `adapters/event_log/sqlite.py`（local）/ `adapters/event_log/ddb.py`（cloud）；`Launcher` =
-`runtime/gherkai_runtime/detached.py` 的 `SubprocessLauncher`（local）/ `adapters/cloud_launcher.py` 的
+`EventLog` 的实装是 `adapters/event_log/sqlite.py`（local）与 `adapters/event_log/ddb.py`（cloud）；`Launcher` 的
+实装是 `runtime/gherkai_runtime/detached.py` 的 `SubprocessLauncher`（local）与 `adapters/cloud_launcher.py` 的
 `CloudLauncher`（cloud）。盘点 core 的注入接缝时**两处都要看**。
 """
 from __future__ import annotations
@@ -60,7 +60,7 @@ class Engine(Protocol):
     def run_scope(self, job: Job) -> tuple[WorkerHandle, Iterator[Event]]:
         """起一个 worker 运行这个 job，返回 (句柄, ADR 0024 事件流迭代器)。
 
-        事件流逐条产出（ADR 0024 流式）；迭代结束 = worker 正常退出。
+        事件流逐条产出（ADR 0024 流式）；迭代结束表示 worker 正常退出。
         句柄供 schedule 在超时/fail-fast 时 stop（ADR 0026）。
 
         **纯事件流**：adapter 只产领域事件，不掺心跳/哨兵——worker 静默卡死时迭代器自然阻塞在读上，
@@ -103,7 +103,7 @@ class RunStore(Protocol):
     """控制面：一次 run 的 **definition（RunMeta）+ 运行态（RunState）**，不存判定明细（ADR 0016 三层切分）。
 
     definition（run_id/created_at/执行哪些 job）执行前确定；运行态（总 status/各 job status/血缘/起止）
-    执行后产生。判定明细真值在 ResultStore（不在此）。local adapter = LocalRunStore（落 run_meta.json + run_state.json）。
+    执行后产生。判定明细真值在 ResultStore（不在此）。local adapter 是 LocalRunStore（落 run_meta.json + run_state.json）。
 
     实时写（ADR 0030）：run 生命周期按三段落库——create_run（开始：写 definition + 初始全 pending 态）→
     update_job_state（每 job 开始运行/完成：按 scope_id 刷单个 JobState）→ finalize_run（commit point：写总 status + ended_at）。
@@ -118,7 +118,7 @@ class RunStore(Protocol):
     def save_run(self, meta: RunMeta, state: RunState) -> None: ...
     def load_run_meta(self, run_id: str) -> RunMeta | None: ...
     def load_run_state(self, run_id: str) -> RunState | None: ...
-    # —— 探活（ADR 0030 决定七）：begin 前探底层可达（云端探表/桶），配置错一律 begin 暴露→退 2；
+    # —— 探活（ADR 0030 决定七）：begin 前探底层可达（云端探表/桶），配置错一律 begin 暴露 → 以退出码 2 结束；
     #    local adapter no-op（本地无「表不存在」问题）。RunPersistence.begin 在 create_run 前调。——
     def preflight(self) -> None: ...
 
@@ -155,9 +155,9 @@ class RunStore(Protocol):
 
 
 class ResultStore(Protocol):
-    """数据面：每 job(=scope) 判定真值，追加为主（**判定真值唯一权威**；CI 读判定靠它，ADR 0016）。
+    """数据面：每 job（即 scope）判定真值，追加为主（**判定真值唯一权威**；CI 读判定靠它，ADR 0016）。
 
-    local adapter = LocalResultStore（每 job 落 <root>/<run_id>/jobs/<encoded_scope_id>.json）。
+    local adapter 是 LocalResultStore（每 job 落 <root>/<run_id>/jobs/<encoded_scope_id>.json）。
     """
 
     def save_job_result(self, run_id: str, job: JobResult) -> None: ...
@@ -185,7 +185,7 @@ class ReportStore(Protocol):
         created_at: 组合根生成的时间戳字符串（core 不取时钟；进 manifest 信封）。
 
         index.html 的导航链接（href）指向产物原位、不拷贝产物：local adapter 把 run 树内的 file:// 产物
-        相对化（目录可整体搬走、链接不断）、否则 ==ref；S3 adapter 恒 ==ref。href 是 core 自算的导航链接、
+        相对化（目录可整体搬走、链接不断），其余情形 href 等于 ref；S3 adapter 的 href 恒等于 ref。href 是 core 自算的导航链接、
         不受不透明铁律约束；ref 永远原样保留（铁律圈的是 ref，ADR 0027）。（产物拷贝式 materialize 已否决。）
         """
         ...

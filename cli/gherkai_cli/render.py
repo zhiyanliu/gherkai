@@ -19,7 +19,7 @@ def format_event(ev: Event) -> str:
         if v is not None:
             parts.append(f"{attr}={getattr(v, 'value', v)}")
     votes = getattr(ev, "votes", None)
-    if votes and votes.total > 1:  # total==1=单次判定，无抖动 tally 意义，不显（避免 1/1 噪声）
+    if votes and votes.total > 1:  # total==1 即单次判定，无抖动 tally 意义，不显（避免 1/1 噪声）
         parts.append(f"votes={votes.yes}/{votes.total}")
     cost = getattr(ev, "cost", None)
     if cost:
@@ -50,7 +50,7 @@ def _ms(duration_ms: float | None) -> str:
 
 
 # 连锁失败旁注的措辞（ADR 0031 决定六）：run 的文本汇总（`render_text`）与 explain 的 step 行（`_step_lines`）
-# 共用这一句；RunReport index.html 里还有同款措辞的第三份，在 core 的 ReportStore 侧（跨包不共享常量），
+# 共用这一句；RunReport index.html 里还有措辞相同的第三份，在 core 的 ReportStore 侧（跨包不共享常量），
 # 改这句要一并改那边。
 _SHORTCIRCUIT_NOTE = "⚠ 因前置 step error 被跳过（未执行）"
 
@@ -75,7 +75,7 @@ def render_text(result: RunResult) -> str:
         # 说明文字：error 类带分类前缀；fail-fast 派生态（skipped/aborted）的 error_type 恒 None、「为什么没执行」
         # 只在 message 里（ADR 0031 决定一），故无分类时也显 message——否则人读视图只剩一个光秃的态、原因得改用 --json。
         if jr.error_type:
-            err = f"  ({jr.error_type}: {jr.message})" if jr.message else f"  ({jr.error_type})"  # 空 message 不留吊着的冒号（与报告页同口径）
+            err = f"  ({jr.error_type}: {jr.message})" if jr.message else f"  ({jr.error_type})"  # 空 message 不留吊着的冒号（与报告页判法一致）
         else:
             err = f"  ({jr.message})" if jr.message else ""
         out.append(f"  job {jr.scope_id!r}: {jr.status.value}{cost_str}{err}")
@@ -92,7 +92,7 @@ def render_text(result: RunResult) -> str:
                 # 正交布尔（比旧的"按 status 顺序猜 error 后 failed"精确）；不改判定/severity（守纯 reducer 红线）。
                 note = f"  {_SHORTCIRCUIT_NOTE}" if st.shortcircuited else ""
                 out.append(f"      step {st.index}: {st.status.value} ({_ms(st.duration_ms)}){v}{note}")
-                # step 级失败原因（ADR 0042 决策三）：与 job 行同款——有 message 就显，人读视图不只剩一个光秃的态
+                # step 级失败原因（ADR 0042 决策三）：与 job 行同样处理——有 message 就显，人读视图不只剩一个光秃的态
                 if st.message:
                     out.append(f"        原因: {_one_line(st.message)}")
                 # step 级原生报告产物（Nova trajectory 挂这层，来自 step_done 下沉，ADR 0027）——缩进深一级
@@ -139,7 +139,7 @@ def render_plan_text(jobs: list[Job], default_engine: str, dispatch: dict | None
     ]
     for j in jobs:
         votes = f"  votes={j.assertion_votes}" if j.assertion_votes != 1 else ""
-        # name 只在与 scope_id 不同时显示：named scope 二者同为 @scope 值（重复无信息）；未标 scope 时 id=uri:line、name=标题
+        # name 只在与 scope_id 不同时显示：named scope 二者同为 @scope 值（重复无信息）；未标 scope 时 id 是 uri:line、name 是标题
         name = f" (name={j.scope_name!r})" if j.scope_name != j.scope_id else ""
         out.append(f"  job scope={j.scope_id!r}{name} engine={j.engine}{votes}")
         for sc in j.scenarios:
@@ -179,7 +179,7 @@ def plan_to_dict(jobs: list[Job], default_engine: str, dispatch: dict | None = N
     """plan 产出 → 机器可读 dict（--json）。复用 gherkai_core.serialize 的 job 序列化保单一真理源。
 
     dispatch 非 None 时给每个 step dict 注入 "deterministic" 键（plan 视图字段、非 definition——
-    值 = worker 自述的命中结果：null / {"pattern","description"} / {"conflict":[...]}，ADR 0036）。
+    值为 worker 自述的命中结果：null / {"pattern","description"} / {"conflict":[...]}，ADR 0036）。
     """
     from gherkai_core.serialize import job_to_dict
     job_dicts = []
@@ -226,7 +226,7 @@ def explain_step_expands(step: dict, *, expand_passed: bool) -> bool:
     让这个导出的谓词对任意 step dict 都给出正确答案，当前没有调用点能进到那里。
     """
     if step["record_missing"]:
-        return False  # 无记录 = 没有 ref 可读，展不出东西（状态行已说明它未执行/未上报）
+        return False  # 无记录即没有 ref 可读，展不出东西（状态行已说明它未执行/未上报）
     return expand_passed or step["status"] != "passed"
 
 
@@ -235,14 +235,14 @@ def explain_to_dict(*, run_id: str, status: str | None, results: list[JobResult]
                     scenario_ids: "set[str] | None" = None, step_index: int | None = None) -> dict:
     """把 JobResult 列表 + evidence 合成 explain 的机读文档（形状即 ADR 0042 决策四的 JSON 形态）。
 
-    **骨架 = job 定义**（`JobResult.job`）而非判定记录：worker 被外部中止时未完成的 scenario 不进 `jobs/*.json`，
+    **骨架是 job 定义**（`JobResult.job`）而非判定记录：worker 被外部中止时未完成的 scenario 不进 `jobs/*.json`，
     以判定记录为骨架会让这些 step 直接消失（看不出「未执行」与「没这步」的区别）。故逐 scenario / 逐 step 按定义走、
     没有记录的给 `status: null` + `record_missing: true`。
 
     evidence_reader(report_refs) → `(evidence | None, evidence_missing | None)`：读 kind=evidence 的 ref（IO 在调用方）。
-    wants_evidence(step_dict) → bool：None = 每个有记录的 step 都读（`--json` 契约要求全给）；文本模式传
+    wants_evidence(step_dict) → bool：None 表示每个有记录的 step 都读（`--json` 契约要求全给）；文本模式传
     `explain_step_expands` 的绑定版，跳过不渲染的 step（见其 docstring）。
-    scenario_ids / step_index：`--scenario` / `--step` 的筛选结果（None = 不筛）；匹配器在前端（它还要出候选清单）。
+    scenario_ids / step_index：`--scenario` / `--step` 的筛选结果（None 表示不筛）；匹配器在前端（它还要出候选清单）。
     """
     scopes = []
     for jr in results:
@@ -289,7 +289,7 @@ def explain_to_dict(*, run_id: str, status: str | None, results: list[JobResult]
                 "steps": steps,
             })
         if (scenario_ids is not None or step_index is not None) and not scenarios:
-            continue  # 筛选生效且本 scope 无一命中：不产空壳 scope（文本/JSON 同律）
+            continue  # 筛选生效且本 scope 无一命中：不产空壳 scope（文本与 JSON 规则一致）
         scopes.append({
             "scope_id": jr.scope_id,
             "engine": jr.engine,
@@ -311,7 +311,7 @@ def explain_to_dict(*, run_id: str, status: str | None, results: list[JobResult]
 
 
 def _ref_line(rr: dict) -> str:
-    """产物 ref 一行（与 render_text 的 step/scope 行同款措辞，label 缺省回落 kind）。"""
+    """产物 ref 一行（与 render_text 的 step/scope 行措辞相同，label 缺省回落 kind）。"""
     return f"report（{rr.get('label') or rr['kind']}）: {rr['ref']}"
 
 
@@ -326,7 +326,7 @@ def _evidence_ref(step: dict) -> str:
 def _thought_lines(thought: str, indent: str, *, ref: str, full: bool) -> list[str]:
     """一段推理文本 → 文本行（超预算截断，除 --full；多行原文的续行对齐到 `thought: ` 之后）。
 
-    文本形态的 key 一律用 `--json` 的字段名（thought / screenshot / message / error，与 vote= / url= 同律）——
+    文本形态的 key 一律用 `--json` 的字段名（thought / screenshot / message / error，与 vote= / url= 规则一致）——
     agent 读文本再对 JSON 零翻译；中文只留给整句提示。
     """
     text = thought
@@ -346,7 +346,7 @@ def _act_lines(act: dict, *, ref: str, full: bool) -> list[str]:
     不当异常报——`error:` 那行才是这种 act 的信息所在。
     """
     vote = act.get("vote")
-    # vote 用 json 的写法（true/false/null）：null = 本次调用不是投票调用（Given/When 的动作），与「投否」不同
+    # vote 用 json 的写法（true/false/null）：null 表示本次调用不是投票调用（Given/When 的动作），与「投否」不同
     bits = [f"act {act.get('index')}", "vote=" + ("null" if vote is None else ("true" if vote else "false"))]
     if act.get("url"):
         bits.append(f"url={act['url']}")

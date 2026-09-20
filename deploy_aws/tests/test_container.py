@@ -199,7 +199,7 @@ def test_real_local_image_has_no_repo_digests_and_is_amd64():
 
 @real_docker
 def test_real_arm64_image_is_rejected_by_the_platform_gate():
-    """arm 变体真镜像 → 架构判据拒（= push-worker 退 2 那一支）。
+    """arm 变体真镜像 → 架构判据拒（即 push-worker 以退出码 2 结束那一支）。
 
     用 alpine（小）代替真 worker 镜像：判据只看 `Os`/`Architecture`，与镜像内容无关。arm Mac 上漏
     `--platform linux/amd64` build 出来的就是这个形态，其后果本会拖到 Fargate 启动期 `exec format error`。

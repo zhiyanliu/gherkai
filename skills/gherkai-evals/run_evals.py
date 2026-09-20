@@ -4,7 +4,7 @@
 独立 `claude -p` 进程。
 
 设计见 docs/adr/0043-agent-skill-for-driving-gherkai.md 决策七。要点：
-- **隔离**：舞台由 materialize.py 物化到仓库外，cwd = 舞台、PATH 前置舞台 `bin/`；舞台里的 CLI 来自装进仓库外
+- **隔离**：舞台由 materialize.py 物化到仓库外，cwd 为舞台、PATH 前置舞台 `bin/`；舞台里的 CLI 来自装进仓库外
   目录的 wheel，任何路径都不指仓库（`--prepare-cli` 那步保证），两臂只差「有没有拿到 skill」一个变量。
 - **with-skill 臂只给中立路径**：每次运行把 skill 拷进一个随机命名的临时目录、提示里只给这个路径，结束后即删——给仓库路径
   等于邀请它顺着仓库读原始教材；放在 `<cli-dir>/skill/` 也不行（ADR 0043 验证节第三轮 eval 3 的 baseline 顺着 shim 指向的 cli-dir
@@ -131,8 +131,8 @@ def _purge_session_dir(stage: Path) -> None:
 
 
 def pollution_metrics(calls: list[dict], skill_dirs: list[Path]) -> dict:
-    """每轮必报的三个指标：污染（触仓库 / 触 skill 副本）与不可重放（联网）。事后 grep 才知道 = 太晚。
-    skill_dirs = 本次运行的临时 skill 目录 + 旧版 `<cli-dir>/skill/`（若还在）；with-skill 臂天然 ≥1，baseline 臂 >0 即污染。"""
+    """每轮必报的三个指标：污染（触仓库 / 触 skill 副本）与不可重放（联网）。事后 grep 才知道就太晚了。
+    skill_dirs 为本次运行的临时 skill 目录 + 旧版 `<cli-dir>/skill/`（若还在）；with-skill 臂天然 ≥1，baseline 臂 >0 即污染。"""
     repo_touches = network_calls = skill_copy_touches = 0
     for c in calls:
         blob = json.dumps(c.get("input"), ensure_ascii=False)
@@ -247,7 +247,7 @@ def run_one(ev: dict, arm: str, run_no: int, it_dir: Path, cli_dir: Path, model:
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--iteration", type=int, default=1, help="第几轮（结果落 iteration-<N>/）")
-    ap.add_argument("--ids", default="", help="逗号分隔的 eval id；缺省 = 全部非 opt_in")
+    ap.add_argument("--ids", default="", help="逗号分隔的 eval id；缺省为全部非 opt_in")
     ap.add_argument("--arms", default=",".join(KNOWN_ARMS), help=f"逗号分隔的臂名（{list(KNOWN_ARMS)}）")
     ap.add_argument("--runs", type=int, default=3, help="每个 (eval, 臂) 运行几次（跨 run 方差是判噪声的前提）")
     ap.add_argument("--parallel", type=int, default=10, help="并发的 claude -p 进程数上限")

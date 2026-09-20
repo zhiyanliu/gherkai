@@ -1,9 +1,9 @@
 """`gherkai skill install` 的行为护栏（ADR 0043 决策三）：纯文件系统、零网络、零 AWS。
 
 覆盖：首装（包内那份逐字节 + 版本标记）、`--print`（stdout 只此一处）、跨版本收敛（旧 reference 必须消失）、
-自护判据（不像本命令装的目录 → 退 2 且一个字节都不动）、`--agent all` 两处落点、`--global` 认 HOME、
+自护判据（不像本命令装的目录 → 以退出码 2 结束且一个字节都不动）、`--agent all` 两处落点、`--global` 认 HOME、
 那行提示的追加语义（幂等、按 agent 挑 CLAUDE.md / AGENTS.md、非交互缺省不写）、取不到版本时的标记、
-裸 `gherkai skill` 由 argparse 退 2。
+裸 `gherkai skill` 由 argparse 以退出码 2 结束。
 """
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ CODEX_SKILLS = Path(".agents") / "skills" / "gherkai"
 
 
 def _tree(root: Path) -> dict[str, bytes]:
-    """{相对路径: 字节}（排除 __pycache__ / *.pyc，与拷贝侧同口径）。"""
+    """{相对路径: 字节}（排除 __pycache__ / *.pyc，与拷贝侧判法一致）。"""
     return {
         str(p.relative_to(root)): p.read_bytes()
         for p in sorted(root.rglob("*"))
@@ -40,7 +40,7 @@ def test_fresh_install_writes_packaged_tree_plus_marker(tmp_path, capsys):
     dst = tmp_path / CLAUDE_SKILLS
     installed = _tree(dst)
     marker = installed.pop(skill_install.MARKER_NAME)
-    assert installed == _tree(SRC)          # 装完 = 包内那份逐字节
+    assert installed == _tree(SRC)          # 装完即包内那份逐字节
     assert marker.decode("utf-8").strip() == (m._installed_version() or skill_install.UNKNOWN_VERSION)
     out, err = capsys.readouterr()
     assert out == ""                        # stdout 只属 --print
@@ -204,21 +204,21 @@ def test_dir_and_global_are_mutually_exclusive(tmp_path):
 
 
 def test_bare_skill_exits_2():
-    # 子动词必填：裸 `gherkai skill` 由 argparse 报错退 2
+    # 子动词必填：裸 `gherkai skill` 由 argparse 报错并以退出码 2 结束
     with pytest.raises(SystemExit) as e:
         m.main(["skill"])
     assert e.value.code == 2
 
 
 def test_write_failure_stays_inside_the_exit_code_set(tmp_path, capsys):
-    # 落盘失败（这里：.claude 位上是个文件）也只许退 2，不许抛栈给使用者
+    # 落盘失败（这里：.claude 位上是个文件）也只许以退出码 2 结束，不许抛栈给使用者
     (tmp_path / ".claude").write_text("这是个文件、不是目录", encoding="utf-8")
     assert m.main(["skill", "install", "--dir", str(tmp_path)]) == 2
     assert "装不进去" in capsys.readouterr().err
 
 
 def test_non_utf8_pointer_file_stays_inside_the_exit_code_set(tmp_path, capsys):
-    # 使用方的 CLAUDE.md 不是 UTF-8（中文环境用 GBK 的编辑器存出来的）：读侧同样只许退 2、不许抛栈
+    # 使用方的 CLAUDE.md 不是 UTF-8（中文环境用 GBK 的编辑器存出来的）：读侧同样只许以退出码 2 结束、不许抛栈
     claude_md = tmp_path / "CLAUDE.md"
     before = "中文\n".encode("gb18030")
     claude_md.write_bytes(before)

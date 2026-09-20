@@ -4,10 +4,10 @@
 # ① skill 契约副本（ADR 0043 决策四）：源 docs/internals/cli-json-contract.md 或渲染器 tools/render_skill_contract.py 改了，
 #    副本 cli/gherkai_cli/skills/gherkai/references/cli-json-contract.md 就会漂——这里用渲染器 --check 发现漂移即重渲染，
 #    并经 hookSpecificOutput.additionalContext 告诉 agent（副本与源同 commit）。
-# ② 文档图（ADR 0045 决策七）：docs/diagrams/<name>.svg 末尾的图源指纹与 sha256(<name>.json) 不符 → 只提醒跑 tools/build_diagrams.mjs，不自动跑
+# ② 文档图（ADR 0045 决策七）：docs/diagrams/<name>.svg 末尾的图源指纹与 sha256(<name>.json) 不符 → 只提醒运行 tools/build_diagrams.mjs，不自动运行
 #    （重建要起 Chrome、20 秒量级，不该挂在每次工具调用上）。
 #
-# 为什么每次工具调用都跑、不按文件路径筛：检查本身 0.1 秒量级；Bash 里用脚本改文件的路径也能覆盖。
+# 为什么每次工具调用都执行、不按文件路径筛：检查本身 0.1 秒量级；Bash 里用脚本改文件的路径也能覆盖。
 # 边界：只在 Claude Code 里生效；Codex / 人手编辑仍由 cli/tests/test_skill.py 与 cli/tests/test_user_docs.py 兜底。
 # 永远 exit 0：这是同步与提醒，不阻断任何工具。
 set -u

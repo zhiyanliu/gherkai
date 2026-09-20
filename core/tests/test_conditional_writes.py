@@ -320,7 +320,7 @@ def _real_run_id(real_aws, tag: str) -> str:
 def test_claim_is_exclusive_on_real_ddb(real_aws):
     """真 DDB 的机制四 CAS：两个推进器抢同一个 pending job，**恰一个**成功（另一个见条件失败）。
 
-    两个 store 实例 = 两个推进器各持自己的表句柄（对位 per-run 进程与 `status --wait` 接力者同时在推同一 run）。
+    两个 store 实例对应两个推进器各持自己的表句柄（对位 per-run 进程与 `status --wait` 接力者同时在推同一 run）。
     赢家是谁不重要、「只有一个」才是承重的：若真 DDB 的条件写放过第二次，就会重复 RunTask、同一 scope 执行两遍。
     """
     rid = _real_run_id(real_aws, "claim")

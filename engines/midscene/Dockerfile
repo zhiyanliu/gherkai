@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 # Midscene worker **基础镜像**（ADR 0037 决策 5「发布方 GHCR 基础镜像 + 使用方定制层」；0024 Fargate 执行；0033「2 镜像」）。
-# 内容 = 同版本 worker 包（`@gherkai/worker-midscene`）+ SDK 运行时 + 协议层，**零使用方内容**——使用方的确定性
+# 内容是同版本 worker 包（`@gherkai/worker-midscene`）加 SDK 运行时与协议层，**零使用方内容**——使用方的确定性
 # step 由定制层（`FROM <基础镜像>` + COPY steps/ + `GHERKAI_STEPS_DIR`）叠上去，模板与推送注册在 ADR 0038。
 #
 # **两态**（ADR 0037 决策 5）——同一份 Dockerfile，`--build-arg WORKER_SOURCE=` 选：
@@ -10,7 +10,7 @@
 #     (cd engines/midscene && npm ci && npm run build && npm pack --pack-destination ../../dist)
 #     docker build --platform linux/amd64 -f engines/midscene/Dockerfile \
 #       --build-arg WORKER_SOURCE=local --build-arg WORKER_TARBALL=gherkai-worker-midscene-<ver>.tgz \
-#       -t gherkai-worker-midscene:dev dist/         # ← context = 放 tarball 的目录（会被整体 COPY 进 local stage）
+#       -t gherkai-worker-midscene:dev dist/         # ← context 指放 tarball 的目录（会被整体 COPY 进 local stage）
 # **必须 `--platform linux/amd64`**：Fargate task-def 固定 X86_64（ARM64 是被拒方案，ADR 0038）；arm Mac 不加则 build 出
 # arm64、Fargate 启动期 exec format error 挂死（ADR 0033）。
 #

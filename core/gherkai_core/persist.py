@@ -9,7 +9,7 @@
 喂给本服务（ADR 0026/0030）。
 
 commit-point 写序（ADR 0030 决定三）：数据面 ResultStore 先逐 job 落 → 控制面 RunStore.finalize 最后写。
-「finalize 一落 = run 已提交、判定就绪」。
+「finalize 一落，就表示 run 已提交、判定就绪」。
 
 并发不变量（ADR 0030 决定三）：两条写 RunStore 的路径——RUNNING 中间态刷在 **worker 线程**（经 on_event，
 在 schedule 的 sink_lock **之外** fire，故落库 RMW 不堵别的 worker 的进度显示）、job 终态刷在 **主线程**
@@ -60,8 +60,8 @@ class RunPersistence:
         started_at 填、ended_at 缺席（finalize 时填）。
 
         **create_run 前先 preflight（ADR 0030 决定七）**：探底层可达（云端探表/桶，local no-op）。桶/表名错
-        一律在此暴露（不管有无 offload 内容），组合根 gated except 归到退 2——消除「桶名错因是否有 offload
-        内容分裂成退 2/退 1」的不一致。探活在 create_run（真写）之前、早于起 worker，不产生引擎费用。
+        一律在此暴露（不管有无 offload 内容），组合根 gated except 归到退出码 2——消除「桶名错因是否有 offload
+        内容分裂成退出码 2 还是退出码 1」的不一致。探活在 create_run（真写）之前、早于起 worker，不产生引擎费用。
         """
         initial = RunState(
             run_id=self._run_id,
@@ -109,13 +109,13 @@ class RunPersistence:
     def finalize(self, result: RunResult, *, ended_at: str) -> str | None:
         """run 结束（schedule 返回后）：commit point。
 
-        写总 status + ended_at（finalize_run = commit point，它一落 run 即已提交、判定就绪）；
+        写总 status + ended_at（finalize_run 就是 commit point，它一落 run 即已提交、判定就绪）；
         再归集 ReportStore（派生视图、永远最后、从终值 RunResult 派生）。返回 ReportStore.write 的 ResourceUri。
 
         **ReportStore.write 的失败被隔离**（ADR 0030 决定三：报告是派生只读视图、可重建、永不作判定源）——
         它若抛异常（磁盘满/路径不可写等），**不反向击穿已 commit 的 run**：commit point 已落、判定真值在
         ResultStore 安然无恙，故吞掉 write 异常、返回 None（报告可后续从 RunResult 重建），让调用方照常输出汇总/退出码。
-        finalize_run 本身**不**在此 try 内——它是 commit point，失败必须冒泡（控制面没落=真问题）。
+        finalize_run 本身**不**在此 try 内——它是 commit point，失败必须冒泡（控制面没落是真问题）。
         """
         with self._lock:
             self._run_store.finalize_run(self._run_id, result.status, ended_at)

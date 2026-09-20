@@ -108,7 +108,7 @@ const BIN = path.join(import.meta.dirname, "..", "bin.mts");
 // （ADR 0037 决策 3 实测过的坑），而本测试刻意把 cwd 放在 repo 外 → 故把 tsx 的 loader 解析成**绝对 URL**
 // 再传（从本文件解析，与 cwd 无关）。也不靠 Node 的原生 type stripping（那要 Node ≥22.18，而包只声明 >=22）。
 const TSX_LOADER = import.meta.resolve("tsx");
-// 缺省 flag = 自述入口 `--capabilities`（ADR 0036「5.」）：本文件的真实运行层要看的是「注册进了同一张表」，
+// 缺省 flag 是自述入口 `--capabilities`（ADR 0036「5.」）：本文件的真实运行层要看的是「注册进了同一张表」，
 // 而表的清单是自述对象的 `deterministic_steps` 键（没有独立的清单 flag）。
 function runBin(stepsDir: string, flag = "--capabilities"): Promise<{ code: number; out: string; err: string }> {
   const proc = spawn(process.execPath, ["--import", TSX_LOADER, BIN, flag], {
@@ -131,9 +131,9 @@ deterministic('自定义 step "(?<x>[^"]+)"', () => {}, { description: "d", exam
 deterministic('嵌套 step', () => {}, { description: "d2", example: "e2" });\n`,
   });
   const { code, out, err } = await runBin(root);
-  assert.equal(code, 0, `应退 0，stderr=${err}`);
+  assert.equal(code, 0, `应以退出码 0 结束，stderr=${err}`);
   const patterns = JSON.parse(out).deterministic_steps.map((e: { pattern: string }) => e.pattern);
-  // 内建脚手架 + 两个使用方 step 同在一张表里（ADR 0036「真值单一」：注册表 = 内建 + 使用方）。
+  // 内建脚手架 + 两个使用方 step 同在一张表里（ADR 0036「真值单一」：注册表是内建加使用方）。
   assert.ok(patterns.some((p: string) => p.includes("页面地址")), `内建该在：${patterns}`);
   assert.ok(patterns.includes('自定义 step "(?<x>[^"]+)"'), `使用方 .mts 该在：${patterns}`);
   assert.ok(patterns.includes("嵌套 step"), `使用方 .mjs 该在：${patterns}`);
@@ -150,7 +150,7 @@ deterministic('共享 step "(?<x>[^"]+)"', () => {}, { description: "d", example
 export const used = SUBMIT;\n`,
   });
   const { code, out, err } = await runBin(root);
-  assert.equal(code, 0, `应退 0（辅助模块不自动加载、注册经 import 链完成），stderr=${err}`);
+  assert.equal(code, 0, `应以退出码 0 结束（辅助模块不自动加载、注册经 import 链完成），stderr=${err}`);
   const patterns = JSON.parse(out).deterministic_steps.map((e: { pattern: string }) => e.pattern);
   assert.ok(patterns.includes('共享 step "(?<x>[^"]+)"'), `经 import 链的注册该在表里：${patterns}`);
 });
@@ -166,7 +166,7 @@ import { SUBMIT } from "./_pages/selectors.mts";
 deterministic('目录辅助模块 step "(?<x>[^"]+)"', () => { void SUBMIT; }, { description: "d", example: "e" });\n`,
   });
   const { code, out, err } = await runBin(root);
-  assert.equal(code, 0, `应退 0（辅助模块目录整棵不自动加载），stderr=${err}`);
+  assert.equal(code, 0, `应以退出码 0 结束（辅助模块目录整棵不自动加载），stderr=${err}`);
   const patterns = JSON.parse(out).deterministic_steps.map((e: { pattern: string }) => e.pattern);
   assert.ok(patterns.includes('目录辅助模块 step "(?<x>[^"]+)"'), `使用方 step 该在表里：${patterns}`);
 });
@@ -180,7 +180,7 @@ test("实际运行: 语法错的 steps 文件 → 非零退出 + stderr 点名�
 
 test("实际运行: --capabilities 同样先加载 steps：语法错的目录 → 非零退出 + 点名 + stdout 不吐半份能力声明", async () => {
   // 两个非 job 入口对称（ADR 0037 决策 4）：能力自述本身不需要 steps，「反正用不上、把分支挪到加载之前」是很自然的
-  // 想法——但那会让坏 steps 目录在 run 的下限查询这一步静默通过、到实际运行才炸。Nova 侧有同款用例，这里锁住位置契约。
+  // 想法——但那会让坏 steps 目录在 run 的下限查询这一步静默通过、到实际运行才炸。Nova 侧有同样的用例，这里锁住位置契约。
   const root = tmpSteps({ "broken.mts": `import { deterministic } from "@gherkai/worker-midscene"; deterministic(\n` });
   const { code, out, err } = await runBin(root, "--capabilities");
   assert.notEqual(code, 0, "加载失败必须非零退出");

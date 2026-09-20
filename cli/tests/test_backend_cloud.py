@@ -5,12 +5,12 @@
 + `build_fargate_engines`（cloud 执行）返回**记录调用的 fake**，验证：
 - backend=cloud 构造了正确 store adapter：DDB 拿 table 句柄、三个 S3 件套共享同一个 client、offloader 挂；
 - **prefix 两层命名（ADR 0033）**：--prefix 批量推导默认名（{prefix}runs/artifacts/events/cluster）、单资源 --xxx 覆盖；
-- **preflight fail-fast**：资源不存在退 2 + 错误点名 prefix；
+- **preflight fail-fast**：资源不存在即以退出码 2 结束 + 错误点名 prefix；
 - **cloud ⇒ FargateEngine（决策 A）**：cloud 走 build_fargate_engines（非 build_engines）；
-- 缺 boto3 → 退 2；运行期 botocore 异常 → 退 1；cloud + --no-report → 跳过一切云端 + 走 subprocess（零落盘运行路径）；
+- 缺 boto3 → 退出码 2；运行期 botocore 异常 → 退出码 1；cloud + --no-report → 跳过一切云端 + 走 subprocess（零落盘运行路径）；
 - artifacts 在 cloud 下是 s3://+ddb:// 形态；
 - **三道闸的次序与退出码（ADR 0037 决策 7 / 0038）**：版本 skew → 资源 preflight → worker 镜像 variant 解析，
-  前一道拦下时后面的一次都不执行；variant miss 退 2 不回落，解析结果进 definition 与 build_fargate_engines。
+  前一道拦下时后面的一次都不执行；variant miss 即以退出码 2 结束、不回落，解析结果进 definition 与 build_fargate_engines。
 """
 from __future__ import annotations
 
@@ -105,15 +105,15 @@ def _patch_cloud_handles(monkeypatch, record, *, preflight_err=None, skew=("ok",
     """patch store 钩子 + preflight（默认放行）+ 版本 skew 闸 + worker variant 闸（都默认放行）返回记录调用的
     fake（不连真 AWS）。
 
-    preflight_cloud_resources 默认 patch 成返回 preflight_err（None=资源都在、放行）——它自己建 boto client 探活，
-    测试里不真探，只验「接线调它 + 它的返回决定退 2」。返回 (fake_s3, made, preflight_calls)。
+    preflight_cloud_resources 默认 patch 成返回 preflight_err（None 表示资源都在、放行）——它自己建 boto client 探活，
+    测试里不真探，只验「接线调它 + 它的返回决定要不要以退出码 2 结束」。返回 (fake_s3, made, preflight_calls)。
 
     **版本 skew 闸（ADR 0037 决策 7）两处都 patch**：`read_backend_version`（否则真去建 ssm client 读 SSM）与
-    `check_version_skew`（默认判 `ok`=无提示行，让本文件其它断言不被 skew 噪声干扰）。`skew=` 可换判定，
+    `check_version_skew`（默认判 `ok`，即无提示行，让本文件其它断言不被 skew 噪声干扰）。`skew=` 可换判定，
     skew 自身的判据在 runtime 的 compose 测试里验、此处只验接线。
 
     **worker variant 闸（ADR 0038）同理 patch `resolve_worker_variant`**：它的真实实现要读 SSM 映射 + 探 ECS/ECR。
-    默认给每个被问到的引擎一条假 resolution（variant = 显式给的 `--worker-variant`，缺省则 `resolved_variant`
+    默认给每个被问到的引擎一条假 resolution（variant 取显式给的 `--worker-variant`，缺省则 `resolved_variant`
     ——模拟「解析到部署级默认指针」）；`variant_err=WorkerVariantError(...)` 改成拦下的情形。调用入参记进
     `made["variant"]`（可验次序、engines 只含本 run 用到的、backend_version 复用同一次读戳）。
     """
@@ -213,9 +213,9 @@ def test_cloud_offloader_attached(tmp_path, monkeypatch, capsys):
 def test_cloud_rejects_explicit_grace_at_the_entrance(tmp_path, monkeypatch, capsys):
     """云端后端**拒绝**显式 `--grace`（ADR 0024「引擎自报下限」条）：那个值到不了任何机制面（Fargate 侧真实宽限
     是 task-def 期 `stopTimeout`、`FargateWorkerHandle.stop` 忽略运行期 grace），静默接受等于让用户以为设了一道
-    会话泄漏防护——与 `--report-dir` 撞云端产物前缀即退 2 同口径：入口不许配无效值。
+    会话泄漏防护——与 `--report-dir` 撞云端产物前缀即以退出码 2 结束的判法一致：入口不许配无效值。
 
-    退 2 且**零副作用**：schedule 没被调、一次云端调用（建 client / 探资源 / 解析镜像）都没发出。
+    以退出码 2 结束且**零副作用**：schedule 没被调、一次云端调用（建 client / 探资源 / 解析镜像）都没发出。
     对照「不给 --grace 照常运行」见 `test_cloud_does_not_ask_local_worker_for_grace_floor`。
     """
     record = []
@@ -276,7 +276,7 @@ def test_cloud_prefix_derives_default_names(tmp_path, monkeypatch, capsys):
     rc = m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud",
                  "--region", "us-east-1", "--quiet", "--json"])
     assert rc == 0
-    # RunStore 表 = gherkai-runs（prefix 默认推导）
+    # RunStore 表是 gherkai-runs（prefix 默认推导）
     assert ("make", "ddb_table", "gherkai-runs", "us-east-1", None) in record
     # preflight 拿到全套 prefix 推导名
     pf = preflight_calls[0]
@@ -339,7 +339,7 @@ def test_cloud_table_bucket_from_env(tmp_path, monkeypatch, capsys):
 
 
 def test_cloud_missing_boto3_exits_2(tmp_path, monkeypatch, capsys):
-    # 缺 boto3：preflight 的 import boto3 抛 ImportError → 退 2 + 报错点名 boto3（CLI 只转述 ImportError；
+    # 缺 boto3：preflight 的 import boto3 抛 ImportError → 退出码 2 + 报错点名 boto3（CLI 只转述 ImportError；
     # 库消费者装 `gherkai-core[aws]` extra 补，ADR 0037 决策 2c 起 CLI 发行包自带）
     monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
     def boom_import(**k):
@@ -351,9 +351,9 @@ def test_cloud_missing_boto3_exits_2(tmp_path, monkeypatch, capsys):
     assert "boto3" in capsys.readouterr().err
 
 
-# ---- preflight fail-fast：资源不存在 → 退 2 + 错误点名 prefix ----
+# ---- preflight fail-fast：资源不存在 → 退出码 2 + 错误点名 prefix ----
 def test_cloud_preflight_missing_resource_exits_2_names_prefix(tmp_path, monkeypatch, capsys):
-    # preflight 返回非 None（某资源不存在）→ 退 2，错误串含 prefix（引导「prefix 配错/CDK 没部署」）。
+    # preflight 返回非 None（某资源不存在）→ 以退出码 2 结束，错误串含 prefix（引导「prefix 配错/CDK 没部署」）。
     record: list = []
     _patch_cloud_handles(monkeypatch, record,
                          preflight_err="--backend cloud 资源缺失：DynamoDB 表 gherkai-events（用 --prefix='gherkai-' 拼出）不存在——是 --prefix 配错、还是后端未部署（gherkai deploy）？")
@@ -365,9 +365,9 @@ def test_cloud_preflight_missing_resource_exits_2_names_prefix(tmp_path, monkeyp
     assert "资源缺失" in err and "--prefix" in err and "gherkai deploy" in err
 
 
-# ---- begin 探活失败（store 不可达）→ 退 2 ----
+# ---- begin 探活失败（store 不可达）→ 退出码 2 ----
 def test_cloud_begin_probe_failure_exits_2(tmp_path, monkeypatch, capsys):
-    # preflight 放行但 begin 的 head_bucket 抛 botocore（如权限）→ 退 2。
+    # preflight 放行但 begin 的 head_bucket 抛 botocore（如权限）→ 以退出码 2 结束。
     from botocore.exceptions import ClientError
     record: list = []
     fake_s3, _, _ = _patch_cloud_handles(monkeypatch, record)
@@ -381,7 +381,7 @@ def test_cloud_begin_probe_failure_exits_2(tmp_path, monkeypatch, capsys):
     assert "云端不可达" in capsys.readouterr().err
 
 
-# ---- 运行期 botocore 异常（run 已开始执行）→ 退 1 ----
+# ---- 运行期 botocore 异常（run 已开始执行）→ 退出码 1 ----
 def test_cloud_runtime_botocore_error_exits_1(tmp_path, monkeypatch, capsys):
     from botocore.exceptions import ClientError
     record: list = []
@@ -498,7 +498,7 @@ def test_local_does_not_inject_artifact_s3(tmp_path, monkeypatch):
 
 def test_submit_cloud_preflight_probes_taskdefs_and_lambda_chain(tmp_path, monkeypatch, capsys):
     """submit cloud 的 preflight 除表/桶/cluster 外还探：本 run 用到引擎的 task-def + 事件驱动链三 Lambda
-    （任一缺 = 提交成功但 run 永不推进/收敛，须挡在提交前）。"""
+    （任一缺就会提交成功但 run 永不推进/收敛，须挡在提交前）。"""
     record: list = []
     _, _, preflight_calls = _patch_cloud_handles(monkeypatch, record)
     monkeypatch.delenv("AWS_DDB_TABLE", raising=False)
@@ -515,7 +515,7 @@ def test_submit_cloud_preflight_probes_taskdefs_and_lambda_chain(tmp_path, monke
 
 
 def test_submit_does_not_accept_events_table_or_cluster(tmp_path):
-    """submit 不认 --events-table / --cluster（argparse 退 2），同它不认 --subnet/--security-group：
+    """submit 不认 --events-table / --cluster（argparse 以退出码 2 结束），同它不认 --subnet/--security-group：
 
     这两个名字真正的读者是云端推进链（从自己的 env 取），提交侧给了对这个 run 的执行零影响——唯一作用是
     改「提交前检查」探哪个资源，给错值会把「探针指错」伪装成「后端未部署」。故探针一律按 --prefix 推。
@@ -554,7 +554,7 @@ def test_submit_cloud_passes_custom_report_dir_to_preflight(tmp_path, monkeypatc
 
 
 def test_submit_cloud_preflight_failure_exits_2(tmp_path, monkeypatch, capsys):
-    """preflight 报资源缺（如链上 Lambda 不存在）→ 提交前退 2、不写任何东西。"""
+    """preflight 报资源缺（如链上 Lambda 不存在）→ 提交前以退出码 2 结束、不写任何东西。"""
     record: list = []
     _patch_cloud_handles(monkeypatch, record, preflight_err="Lambda 函数 gherkai-kicker 不存在——…")
     rc = m.main(["submit", str(_write_feature(tmp_path)), "--backend", "cloud", "--region", "us-east-1"])
@@ -563,7 +563,7 @@ def test_submit_cloud_preflight_failure_exits_2(tmp_path, monkeypatch, capsys):
 
 
 def test_status_wait_cloud_kicker_missing_fails_fast(monkeypatch, capsys):
-    """--wait 接力 invoke 的 kicker 不存在（ResourceNotFound）→ 点名 prefix 退 2，不再吞掉死等
+    """--wait 接力 invoke 的 kicker 不存在（ResourceNotFound）→ 点名 prefix 并以退出码 2 结束，不再吞掉死等
     （接力对象缺失时轮询永不终止；其他 AWS 瞬时错仍吞、下轮再踢——ADR 0033 preflight 条）。"""
     from botocore.exceptions import ClientError
 
@@ -626,7 +626,7 @@ def test_submit_cloud_forks_tunnel_watch_daemon(tmp_path, monkeypatch, capsys):
     assert float(cmd[cmd.index("--ttl") + 1]) == expected
     err = capsys.readouterr().err
     assert f"{expected:.0f}s" in err  # submit 打印该 TTL（可见性）
-    assert "保持开机" in err  # 明示边界（关机=隧道断）
+    assert "保持开机" in err  # 明示边界（关机就是隧道断）
 
 
 def test_submit_cloud_tunnel_ttl_flag_overrides_computed(tmp_path, monkeypatch, capsys):
@@ -729,7 +729,7 @@ def test_cloud_ignores_default_steps_dir_silently(tmp_path, monkeypatch, capsys)
 # 判定 → 退出码/提示，以及 block 时**资源 preflight 一次都不执行**。
 
 def test_skew_block_stops_run_before_resource_preflight(tmp_path, monkeypatch, capsys):
-    """block → 退 2，且资源 preflight 一次都没执行（决策 7 的次序：skew 先）。
+    """block → 以退出码 2 结束，且资源 preflight 一次都没执行（决策 7 的次序：skew 先）。
 
     次序不是审美：skew 的修复动作是部署方运行 `gherkai deploy`，那一步同时把资源建齐——先报「表/task-def
     不存在」只会把人引去查 --prefix，绕一圈回到同一个动作。
@@ -801,7 +801,7 @@ def test_skew_reads_stamp_with_resolved_prefix(tmp_path, monkeypatch):
 
 
 def test_skew_real_judgement_end_to_end(tmp_path, monkeypatch, capsys):
-    """接线的真判定一次（只 stub 读戳与 CLI 自报版本，skew 判定用真函数）：新于 → 退 2 且给两条出路。"""
+    """接线的真判定一次（只 stub 读戳与 CLI 自报版本，skew 判定用真函数）：新于 → 以退出码 2 结束且给两条出路。"""
     from gherkai_runtime.compose import check_version_skew as real_check
 
     record: list = []
@@ -822,7 +822,7 @@ def test_skew_real_judgement_end_to_end(tmp_path, monkeypatch, capsys):
 
 
 def test_skew_read_failure_exits_2_naming_the_parameter(tmp_path, monkeypatch, capsys):
-    """读戳撞非 ParameterNotFound 的 AWS 错（凭证/region/权限）→ 退 2 且点名参数路径。
+    """读戳撞非 ParameterNotFound 的 AWS 错（凭证/region/权限）→ 以退出码 2 结束且点名参数路径。
 
     不静默跳过：决策 7 的 block 这一类没有放行口，「读不到就放过」等于给它开了一个。
     """
@@ -842,7 +842,7 @@ def test_skew_read_failure_exits_2_naming_the_parameter(tmp_path, monkeypatch, c
 
 # ---- worker 镜像 variant 闸接线（ADR 0038「运行时与 preflight」）----
 # 解析本体（读 SSM 映射 / revision ACTIVE / ECR digest 存在）在 runtime 的 compose 测试里验；这里只验前端：
-# 次序（skew → 资源 preflight → variant）、退 2、解析结果进 definition 与 build_fargate_engines、打印与静音。
+# 次序（skew → 资源 preflight → variant）、退出码 2、解析结果进 definition 与 build_fargate_engines、打印与静音。
 
 def _two_engine_feature(tmp_path: Path) -> Path:
     """两个 scope 各走一个引擎 → 本 run「真用到」两个引擎（验 engines 参数按 job 取、不探全注册表）。"""
@@ -864,7 +864,7 @@ def test_run_cloud_resolves_variant_into_definition_and_engines(tmp_path, monkey
     rc = m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud",
                  "--ddb-table", "T", "--s3-bucket", "B", "--region", "us-east-1", "--quiet"])
     assert rc == 0
-    # definition：人读的 variant 名（缺省 = 解析到的默认指针）+ 引擎 → revision ARN
+    # definition：人读的 variant 名（缺省为解析到的默认指针）+ 引擎 → revision ARN
     meta = _definition(made["ddb_tables"][0])
     assert meta["worker_variant"] == "base"
     assert meta["worker_task_defs"] == {"novaact": _stub_revision("novaact")}
@@ -886,7 +886,7 @@ def test_submit_cloud_resolves_variant_into_definition(tmp_path, monkeypatch, ca
 
 
 def test_variant_gate_only_probes_engines_the_run_uses(tmp_path, monkeypatch, capsys):
-    """engines 参数 = **本 run 真用到的引擎**（对齐既有 task-def 判据「不探全注册表」，ADR 0038）：
+    """engines 参数是 **本 run 真用到的引擎**（对齐既有 task-def 判据「不探全注册表」，ADR 0038）：
     单引擎 run 不问另一个引擎（单引擎团队不必为它凭空推镜像）；两引擎 run 两个都问、都进 definition。"""
     record: list = []
     _, made, _ = _patch_cloud_handles(monkeypatch, record)
@@ -926,7 +926,7 @@ def test_variant_gate_reuses_the_one_stamp_read(tmp_path, monkeypatch, capsys):
 
 
 def test_variant_missing_exits_2_with_the_errors_message(tmp_path, monkeypatch, capsys):
-    """variant 在某引擎缺映射 → 退 2 且原样转述 WorkerVariantError 的提示语，**不回落默认**
+    """variant 在某引擎缺映射 → 以退出码 2 结束且原样转述 WorkerVariantError 的提示语，**不回落默认**
     （静默换一套确定性 step 集是 ADR 0038 明拒的）。run 与 submit 两个入口一致。"""
     from gherkai_runtime.compose import WorkerVariantError
 
@@ -950,7 +950,7 @@ def test_variant_missing_exits_2_with_the_errors_message(tmp_path, monkeypatch, 
 
 
 def test_variant_resolution_read_failure_exits_2(tmp_path, monkeypatch, capsys):
-    """解析时撞 AWS 错（凭证/权限/region）→ 退 2 并点名读的是哪族参数，不冒 traceback。"""
+    """解析时撞 AWS 错（凭证/权限/region）→ 以退出码 2 结束并点名读的是哪族参数，不冒 traceback。"""
     from botocore.exceptions import ClientError
 
     record: list = []
@@ -1044,8 +1044,8 @@ def test_variant_print_suppressed_by_quiet(tmp_path, monkeypatch, capsys):
 # ---- 入口校验 + 本机后端忽略（ADR 0038）----
 
 def test_worker_variant_invalid_name_exits_2_before_any_cloud_call(tmp_path, monkeypatch, capsys):
-    """名字不合 tag 字符集 → 入口就退 2（对齐 --max-concurrency 的入口校验惯例）：真零副作用——
-    连读戳都没发生。校验点复用 names.image_tag（ADR 0038「tag 命名 = 单一真源、同时是单一校验点」）。"""
+    """名字不合 tag 字符集 → 入口就以退出码 2 结束（对齐 --max-concurrency 的入口校验惯例）：真零副作用——
+    连读戳都没发生。校验点复用 names.image_tag（ADR 0038「tag 命名」条）。"""
     record: list = []
     _, made, preflight_calls = _patch_cloud_handles(monkeypatch, record)
     for bad in ("有中文", "-leading-dash", "bad name", ".dotfirst"):
@@ -1101,7 +1101,7 @@ def test_local_definition_omits_worker_variant_fields(tmp_path, monkeypatch, cap
 
 
 def test_bad_default_pointer_name_exits_2_pointing_at_the_parameter(tmp_path, monkeypatch, capsys):
-    """后端默认指针本身是个非法 variant 名（部署侧写坏）→ 退 2 并点名那个 SSM 参数，不冒 traceback。
+    """后端默认指针本身是个非法 variant 名（部署侧写坏）→ 以退出码 2 结束并点名那个 SSM 参数，不冒 traceback。
 
     显式 `--worker-variant` 的坏名字在入口就被拦（见上），故这条 ValueError 只可能来自后端的默认指针。
     """
@@ -1116,7 +1116,7 @@ def test_bad_default_pointer_name_exits_2_pointing_at_the_parameter(tmp_path, mo
 
 
 def test_status_cloud_terminal_prints_s3_and_ddb_locations(monkeypatch, capsys):
-    """cloud status 到终态打出与 `run --backend cloud` 同款的位置行（s3:// 报告与判定明细、ddb:// 元信息），
+    """cloud status 到终态打出与 `run --backend cloud` 相同的位置行（s3:// 报告与判定明细、ddb:// 元信息），
     落点按 --prefix 推理出的桶/表与 --report-dir 前缀拼——用户不用自己拼 S3 路径。"""
     class _PassedTable:
         def get_item(self, **kw):

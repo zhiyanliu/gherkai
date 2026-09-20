@@ -23,7 +23,7 @@ from gherkai_deploy_aws.stack import BackendStack
 from synth_fixture import make_stack
 
 # 假源里故意做成**单文件模块**的那一项（真实世界里 typing_extensions 就是 `typing_extensions.py`）——
-# 「包 = 目录」一刀切会把它判成「找不到」，这是踩过的坑，故两种形态都要有用例覆盖。
+# 「包即目录」一刀切会把它判成「找不到」，这是踩过的坑，故两种形态都要有用例覆盖。
 SINGLE_FILE_MODULE = "typing_extensions"
 
 

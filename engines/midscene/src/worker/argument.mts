@@ -40,7 +40,7 @@ export function unquote(text: string): string {
   return t.length >= 2 && t.startsWith('"') && t.endsWith('"') ? t.slice(1, -1) : t;
 }
 
-// 喂 AI 的完整指令 = 去引号自然语言 + （可选）多行参数。无参数时退化为仅去引号（行为不变）。
+// 喂 AI 的完整指令由去引号自然语言与（可选）多行参数拼成。无参数时退化为仅去引号（行为不变）。
 export function buildInstruction(text: string, arg: StepArgument | undefined | null): string {
   const base = unquote(text);
   const extra = argumentText(arg);

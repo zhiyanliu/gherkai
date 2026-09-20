@@ -1,7 +1,7 @@
 """step 级机读证据（evidence，ADR 0042 决策一/二/六）单测：映射 / 截图上界 / 目录键 / best-effort 钩子。
 
 纯 python：不连 AWS、不起浏览器、不解真 SDK。映射由**真产物裁成的 fixture** 锁定
-（`fixtures/nova_*_traj.json` = 真 `_trajectory.json`，base64 图裁成短前缀）——SDK 格式漂移在升版后运行测试时变红
+（`fixtures/nova_*_traj.json` 是真 `_trajectory.json`，base64 图裁成短前缀）——SDK 格式漂移在升版后运行测试时变红
 （ADR 0042 决策六防线 2）。钩子侧注 fake nova + fake sink（与 test_run_step.py 同风格）。
 """
 from __future__ import annotations
@@ -55,7 +55,7 @@ def test_act_fixture_maps_actions_by_name_and_last_frame_url():
     assert len(act["frames"]) == 2
     assert [a["name"] for a in act["frames"][0]["actions"]] == [
         "agentType", "waitForPageToSettle", "takeObservation"]
-    assert act["frames"][0]["actions"][0]["args"]["value"] == "OpenAI"     # args = kwargs 原样透传
+    assert act["frames"][0]["actions"][0]["args"]["value"] == "OpenAI"     # args 即 kwargs 原样透传
     assert act["frames"][0]["url"] == "https://www.wikipedia.org/"
     assert act["frames"][1]["actions"] == []                              # 末 frame 只有 think + return
     assert act["result"] == {"value": ""}                                 # 末 frame 的 return
@@ -160,7 +160,7 @@ def test_failed_act_candidates_are_last_frame_and_first_thought_only():
 
 
 def test_per_step_cap_truncates_at_twelve():
-    picks = _picks("failed", [_synthetic(5, thought_at=(1, 4)) for _ in range(9)])  # 9 act × 2 = 18 张候选
+    picks = _picks("failed", [_synthetic(5, thought_at=(1, 4)) for _ in range(9)])  # 9 act 各 2 张、共 18 张候选
     assert len(picks) == ev.MAX_SHOTS_PER_STEP == 12
     assert picks[-1] == (5, 1)                       # 逐 act 依序取满即停（第 6 个 act 的第二张为止）
     assert not any(i >= 6 for i, _ in picks)
@@ -178,7 +178,7 @@ def test_scenario_key_is_deterministic_and_escapes_separators():
 
 
 def test_scenario_key_no_collision_after_escaping():
-    """转义会把这两个 id 压成同一串（uri 里的分隔符差异），短哈希把它们分开——撞了 = evidence 静默互相覆盖。"""
+    """转义会把这两个 id 压成同一串（uri 里的分隔符差异），短哈希把它们分开——撞了就会让 evidence 静默互相覆盖。"""
     a = ev.scenario_key("features/login.feature:12")
     b = ev.scenario_key("features-login.feature-12")
     assert a != b
@@ -210,7 +210,7 @@ def test_write_step_evidence_layout_and_screenshots(tmp_path):
     path = written.json_path
     out = ev.step_dir(tmp_path, "features/login.feature:12", 2)
     assert Path(path) == out / "evidence.json"
-    # 回传的截图清单 = 真写下的那些（调用方拿它入队，ADR 0042 决策一）：与目录里的 .jpg 一一对应、顺序即帧序
+    # 回传的截图清单就是真写下的那些（调用方拿它入队，ADR 0042 决策一）：与目录里的 .jpg 一一对应、顺序即帧序
     assert [Path(x).name for x in written.screenshots] == ["act-0-frame-4.jpg", "act-0-frame-1.jpg"]
     assert sorted(written.screenshots) == sorted(str(x) for x in out.glob("*.jpg"))
     assert out.parent.parent == tmp_path / "evidence" and out.name == "step-2"
@@ -321,7 +321,7 @@ def test_failed_assertion_evidence_has_all_votes_and_message(logs_dir):
                         {"index": 0, "keyword": "Then", "text": '"对吗"'}, 3, sink, scope_id="sc") == "failed"
     doc = json.loads(Path(_done(sink)["reportRefs"][-1]["ref"][len("file://"):]).read_text(encoding="utf-8"))
     assert doc["status"] == "failed" and doc["message"].startswith("AI 断言未过多数票（0/3）")
-    assert [a["index"] for a in doc["acts"]] == [0, 1, 2]           # N 票 = N 个 act
+    assert [a["index"] for a in doc["acts"]] == [0, 1, 2]           # N 票对应 N 个 act
     assert all(a["vote"] is False for a in doc["acts"])
 
 
@@ -571,7 +571,7 @@ def test_drain_timeout_before_flush_promises_flush_not_broken_links(monkeypatch,
 class _FakeCdp:
     def __init__(self, on_enter=None, trace=None):
         self._on_enter = on_enter
-        self._trace = trace   # 传了才记 ("cdp_exit",)：Workflow 那个同形 fake 不传，免得多记一条
+        self._trace = trace   # 传了才记 ("cdp_exit",)：Workflow 那个结构相同的 fake 不传，免得多记一条
 
     def __enter__(self):
         if self._on_enter:

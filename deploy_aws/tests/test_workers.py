@@ -68,7 +68,7 @@ def seed_backend(aws: workers.Aws, *, stamp: str | None = VERSION, cpu: str = "1
             family=names.task_def_name(PREFIX, engine),
             containerDefinitions=[{
                 "name": names.container_name(engine),
-                # CDK 的模板镜像栏 = `<repo-uri>:latest` 占位（ADR 0038「模板 revision」）
+                # CDK 的模板镜像栏是 `<repo-uri>:latest` 占位（ADR 0038「模板 revision」）
                 "image": f"{REGISTRY}/{repo}:latest", "cpu": 0, "memory": 2048,
             }],
             requiresCompatibilities=["FARGATE"], networkMode="awsvpc", cpu=cpu, memory="2048",
@@ -289,7 +289,7 @@ def test_push_worker_happy_path(aws):
 
 
 def test_digest_comes_from_post_push_inspect_and_is_picked_by_repo(aws):
-    """digest 的唯一来源 = **推送后**那次 inspect，且在多条 `RepoDigests` 里**按本 repo 挑**（GHCR 那条在第一位）。"""
+    """digest 的唯一来源是 **推送后**那次 inspect，且在多条 `RepoDigests` 里**按本 repo 挑**（GHCR 那条在第一位）。"""
     seed_backend(aws)
     c = FakeContainer(digests=["sha256:" + "c" * 64], ghcr_noise=True)
     rc, text = _push(aws, c)
@@ -322,7 +322,7 @@ def test_missing_local_image_exits_2(aws):
 
 
 def test_skew_block_exits_2_before_any_container_call(aws):
-    """CLI **新于**后端 → 退 2、无放行口（ADR 0037 决策 7 三态原样沿用），且**一次容器引擎都不碰**：
+    """CLI **新于**后端 → 以退出码 2 结束、无放行口（ADR 0037 决策 7 三态原样沿用），且**一次容器引擎都不碰**：
     被拦下的人该去升后端，不该先被要求装 docker / build 镜像。提示按本命令所在的包给出 extra 形态。"""
     seed_backend(aws, stamp="1.3.0")
     c = FakeContainer()
@@ -416,7 +416,7 @@ def test_repush_retires_the_replaced_revision_and_prints_digest_change(aws):
     new_arn = _mapping(aws, "novaact", "login")["revision_arn"]
     assert rc == 0 and new_arn != old_arn
     assert _tags(aws, old_arn)[names.TAG_RETIRED_AT] == (NOW + timedelta(minutes=5)).isoformat()
-    assert old_arn in _revisions(aws, "novaact"), "退休 ≠ 立刻删（运行中 run 的后续 job 还要用它起 task）"
+    assert old_arn in _revisions(aws, "novaact"), "退休不等于立刻删（运行中 run 的后续 job 还要用它起 task）"
     assert "原 digest" in text and "新 digest" in text
 
 
@@ -503,7 +503,7 @@ def test_cleanup_keeps_a_retired_revision_still_referenced_by_a_mapping(aws):
 def test_cleanup_keeps_when_a_pending_run_references_it(aws):
     """运行中 run 引用检查：STATE 顶层 `worker_task_def_arns` 里有它 + run 未到终态 → 留着。
 
-    detached run 逐 job 起 task，删早了剩余 job 全起不来。查法 = status GSI 的 Query + `contains` 过滤（不 Scan）。
+    detached run 逐 job 起 task，删早了剩余 job 全起不来。查法是 status GSI 的 Query + `contains` 过滤（不 Scan）。
     """
     seed_backend(aws)
     _push(aws, FakeContainer())
@@ -607,7 +607,7 @@ class _StubEcs:
 
 
 def test_cleanup_deletes_an_old_orphan(aws):
-    """孤儿的退休时刻 := 它的 `registeredAt`；早于静默期且无 run 引用 → 回收。"""
+    """孤儿的退休时刻取它的 `registeredAt`；早于静默期且无 run 引用 → 回收。"""
     seed_backend(aws)
     family = names.task_def_name(PREFIX, "novaact")
     arn = f"arn:aws:ecs:{REGION}:{ACCOUNT}:task-definition/{family}:99"
@@ -681,7 +681,7 @@ def test_sync_base_pull_failure_points_at_the_half_published_state(aws):
     c.pull_fails = True
     out, text = _out()
     rc = workers.run_deploy_steps(prefix=PREFIX, version=VERSION, container=c, aws=aws, now=NOW, out=out)
-    assert rc == 1, "cdk 已成功而后续步骤失败 → 退 1"
+    assert rc == 1, "cdk 已成功而后续步骤失败 → 退出码 1"
     # 断言用户能据以行动的两句：状态（stack 已生效）+ 重新运行哪个命令。
     assert "拉不到基础镜像" in text() and "半发布态" in text()  # sync_base 自己那条（不是四步兜底行）
     assert "stack 已生效" in text() and "gherkai deploy" in text()
@@ -773,7 +773,7 @@ def test_rederive_does_not_read_the_template_when_nothing_is_stale(aws):
 
 
 def test_run_deploy_steps_reports_a_missing_container_engine_as_exit_1(aws):
-    """cdk 已成功、机器上没有容器引擎 → 退 1 + 「stack 已生效、重新运行幂等收敛」（不是退 2：账户已被改过）。"""
+    """cdk 已成功、机器上没有容器引擎 → 退出码 1 + 「stack 已生效、重新运行幂等收敛」（不是退出码 2：账户已被改过）。"""
     seed_backend(aws)
     out, text = _out()
     rc = workers.run_deploy_steps(prefix=PREFIX, version=VERSION,
@@ -837,9 +837,9 @@ def test_list_workers_is_blocked_by_skew(aws):
 
 
 def test_skew_gate_read_failure_exits_2_without_a_traceback(aws):
-    """读戳失败（无凭证/无权限）→ 退 2 + 一句人话。
+    """读戳失败（无凭证/无权限）→ 退出码 2 + 一句人话。
 
-    `compose.read_backend_version` 有意把这类异常抛给入口前端归码，**本模块就是那个前端**——实际运行踩过：
+    `compose.read_backend_version` 有意把这类异常抛给入口前端决定退出码，**本模块就是那个前端**——实际运行踩过：
     没有凭证时 `gherkai deploy list-workers` 直接吐 botocore 的 `NoCredentialsError` 堆栈。
     """
     class _BrokenSsm:
@@ -857,7 +857,7 @@ def test_skew_gate_read_failure_exits_2_without_a_traceback(aws):
 
 
 def test_list_workers_reports_unreachable_aws_without_a_traceback():
-    """建不出 client（这里用不存在的 profile 名）→ 退 2 + 一句人话，不吐 botocore 堆栈。
+    """建不出 client（这里用不存在的 profile 名）→ 退出码 2 + 一句人话，不吐 botocore 堆栈。
 
     `boto3.session.Session(profile_name=...)` 对不存在的 profile 在**构造期**就抛 `ProfileNotFound`，配不出
     region 则要等到 `session.client(...)` 解析 endpoint 才抛——两者都发生在本模块自身的 `try` 之前，故建句柄
@@ -974,7 +974,7 @@ def test_pending_cleanup_is_json_serializable_with_real_registered_at(monkeypatc
 
 def test_list_workers_json_sends_diagnostics_to_err_sink(aws):
     """--json 下 stdout 只留一个 JSON 文档：skew 提示 / 读失败诊断走 err（stderr），文本输出行为不变。"""
-    seed_backend(aws, stamp="9.9.9")  # 后端戳 ≠ CLI 版本 → skew 提示
+    seed_backend(aws, stamp="9.9.9")  # 后端戳与 CLI 版本不一致 → skew 提示
     out, text = _out()
     errs: list[str] = []
     rc = workers.list_workers(prefix=PREFIX, cli_version=VERSION, aws=aws, out=out,

@@ -1,7 +1,7 @@
 """StepArgument S3 offload（ADR 0030 决定六）：把 RunMeta 深树里的 docString/dataTable 换成 S3 指针，解 DDB 400KB 限。
 
 **DynamoDBRunStore 内部钩子、对 core 透明**：只加工 `serialize.run_meta_to_dict` 的**产物 dict**——写端 `json.dumps` 前把
-docString 的 `content` / dataTable 的 `rows` 搬去 S3、原键换成 `content_ref` / `rows_ref`（值=s3:// URI）；读端
+docString 的 `content` / dataTable 的 `rows` 搬去 S3、原键换成 `content_ref` / `rows_ref`（值为 s3:// URI）；读端
 `json.loads` 后按指针取回、消解回内联，再交 `run_meta_from_dict`。serialize/model 零感知。
 
 两条关键决策（ADR 0030 决定六）：

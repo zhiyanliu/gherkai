@@ -50,7 +50,7 @@ def test_extract_nonzero_exit():
 
 
 def test_extract_missing_exitcode_becomes_platform_sentinel_with_reason():
-    """container 缺 exitCode = 容器没能开始运行（TaskFailedToStart）→ 落 PLATFORM_FAILED_EXIT 哨兵 + `stopCode: stoppedReason`
+    """container 缺 exitCode 表示容器没能开始运行（TaskFailedToStart）→ 落 PLATFORM_FAILED_EXIT 哨兵 + `stopCode: stoppedReason`
     归因（ADR 0034 机制二「退出码缺失」条）。曾写 None 当宽限态等下轮补——STOPPED 事件只来一次，run 会永久 wedge。"""
     from gherkai_core.project import PLATFORM_FAILED_EXIT
     detail = _stopped_detail("run-1", "a", 0)
@@ -241,7 +241,7 @@ def _timeout_built(tmp_path, *, status=Status.RUNNING, claimed_at=None, with_exi
 
 
 class _FakeEcs:
-    """list_tasks/describe_tasks/stop_task 记录器。`task_arns` = 运行中的 task；`tasks` = 带状态的 task 描述
+    """list_tasks/describe_tasks/stop_task 记录器。`task_arns` 是运行中的 task；`tasks` 是带状态的 task 描述
     （dict：arn / lastStatus / desiredStatus / exitCode? / stoppedReason? / stopCode? / scope_id?——后者缺省用
     构造时的 `scope_id`，给多 task 场景造出「只有一个匹配目标」）。list_tasks 按 desiredStatus 过滤
     （ECS 语义：正在停止/已停止的不在 RUNNING 列表里）；describe 返回带 SCOPE_ID env 的 overrides。
@@ -492,7 +492,7 @@ def cloud_env(monkeypatch):
 
 
 # 提交侧 preflight 解析出的 novaact worker revision ARN（ADR 0038）——**显式 revision、非 family 名**。
-# 绝大多数用例只关心「推进器认不认 definition 里的这一份」，故 _seed_run 默认带上它（= 打通后的正常形态）；
+# 绝大多数用例只关心「推进器认不认 definition 里的这一份」，故 _seed_run 默认带上它（即打通后的正常形态）；
 # 兼容路径（definition 缺该字段）由下面专门那组用例显式置 None 来验。
 _WORKER_REV = "arn:aws:ecs:us-east-1:000000000000:task-definition/gherkai-novaact-worker:7"
 _SENTINEL = object()
@@ -585,7 +585,7 @@ def test_build_reuses_its_own_handles_and_builds_no_new_client(cloud_env, monkey
 # ---------- 已收尾的 run 不再被改写（判定真值销毁的第二道闸，ADR 0030 决定三 / 0034）----------
 
 def _seed_finished_run(cloud_env, *, status=Status.PASSED):
-    """造「run 已收尾 + events 表只剩永不过期的退出记录」的形态 = worker 事件被 TTL 删掉约 7 天后的真实样子，
+    """造「run 已收尾 + events 表只剩永不过期的退出记录」的形态，即 worker 事件被 TTL 删掉约 7 天后的真实样子，
     并预置那时已在 S3 的判定真值与报告。返回 (store, s3 client)。"""
     import boto3
     from gherkai_core.adapters.event_log import DdbEventLog
@@ -704,7 +704,7 @@ def test_report_still_written_when_the_run_duration_read_fails(cloud_env, monkey
     assert s3.get_object(Bucket=_BUCKET, Key="reports/run-1/index.html")["Body"].read()  # 报告仍被写出
 
 
-# ---------- 并发上限 = min(meta, 部署侧 cap)（ADR 0034 机制四）----------
+# ---------- 并发上限取 min(meta, 部署侧 cap)（ADR 0034 机制四）----------
 
 def test_build_takes_meta_max_concurrency_under_cap(cloud_env):
     """definition 声明 ≤ cap → 按 definition 走（打通前云端后端静默忽略提交侧声明，是可用性缺陷）。"""
@@ -754,7 +754,7 @@ def test_exit_observer_records_exit_for_detached_run(cloud_env):
 
 
 def test_reconciler_writes_timestamps_in_compose_clock_format(cloud_env):
-    """推进器 Lambda 落库的时间戳格式 = `compose.now_iso`（三宿主一份时钟，ADR 0034「时钟也只一份」）。
+    """推进器 Lambda 落库的时间戳格式是 `compose.now_iso`（三宿主一份时钟，ADR 0034「时钟也只一份」）。
 
     曾在本文件自带 `_now_iso`（`strftime` 的 `…Z`），与 submit 侧 `compose.now_iso`（`isoformat` 的 `+00:00`）
     并存 → 同一份 RunState 内 started_at 与 claimed_at 格式不同、`status --json` 机读消费者要兼容两种。
@@ -776,7 +776,7 @@ def test_reconciler_writes_timestamps_in_compose_clock_format(cloud_env):
 
 def _seed_worker_ssm(*, version: str = "1.4.0", variant: str = "base", engine: str = "novaact",
                      revision_arn: str = "arn:compat-rev:1"):
-    """把「后端版本戳 + 默认指针 + (引擎,tag)→revision 映射」落进 moto SSM（= deploy 四步走完的稳态）。"""
+    """把「后端版本戳 + 默认指针 + (引擎,tag)→revision 映射」落进 moto SSM（即 deploy 四步走完的稳态）。"""
     import json
 
     import boto3
@@ -835,7 +835,7 @@ def test_kicker_uses_definition_worker_task_defs(cloud_env):
 
 def test_tick_runs_isolates_a_run_whose_worker_revision_cannot_be_resolved(monkeypatch, capsys):
     """兼容路径解析不出的 run 只跳过它自己、不连坐同批其它 run：events Stream 一个 batch 含多个 run，抛出去
-    = ESM 重试后整批丢弃、别的 run 事件永久丢失。「不回落 family/模板」不变——拒的是换镜像、不是拒隔离。"""
+    就是 ESM 重试后整批丢弃、别的 run 事件永久丢失。「不回落 family/模板」不变——拒的是换镜像、不是拒隔离。"""
     from gherkai_runtime.compose import WorkerVariantError
 
     built_for = []
@@ -844,7 +844,7 @@ def test_tick_runs_isolates_a_run_whose_worker_revision_cannot_be_resolved(monke
         if rid == "bad":
             raise WorkerVariantError("默认 variant 在 novaact 无映射", engine="novaact", variant="base")
         built_for.append(rid)
-        return None  # None = 非 detached / 本批无事可做
+        return None  # None 表示非 detached 或本批无事可做
 
     monkeypatch.setattr(reconciler, "_build", fake_build)
     out = reconciler._tick_runs({"bad", "good"}, "t")

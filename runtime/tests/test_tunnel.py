@@ -76,7 +76,7 @@ class _FakeProc:
 
 
 def _fake_popen_writing_log(url_value: str | None, spawned: dict, alive: bool = True):
-    """fake agent：spawn 时往 --log 指定的文件写 started tunnel 行（None=不写，覆盖超时路径）。"""
+    """fake agent：spawn 时往 --log 指定的文件写 started tunnel 行（None 表示不写，覆盖超时路径）。"""
     from pathlib import Path
 
     def popen(cmd, **kw):
@@ -164,7 +164,7 @@ def test_ngrok_agent_detaches_from_cli_process_group(tmp_path):
     info = NgrokTunnel(binary=str(fake), sleep=lambda s: None).start("http://localhost:3000")
     try:
         assert info.url == "https://fake.ngrok-free.app"
-        assert os.getpgid(info.pid) != os.getpgid(0)  # 自成进程组 = 不吃终端广播的信号
+        assert os.getpgid(info.pid) != os.getpgid(0)  # 自成进程组，不吃终端广播的信号
         assert os.getpgid(info.pid) == info.pid       # setsid 后自身即组长
     finally:
         stop_tunnel(info.pid)  # 宿主按 pid 收尾（唯一拆除面，ADR 0035 决策 1）

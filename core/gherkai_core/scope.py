@@ -6,11 +6,11 @@
 语义（ADR 0025）：
 - @scope 全局命名空间：相同值同 scope，跨文件合并（合并时 warning log）；未标各自单元素 scope。
 - engine：scope 内缺省用 config.default_engine；任一 scenario 标了则全 scope 继承；多个不同值报错。
-- timeout：scope 内缺省用 config.default_job_timeout_s（未给=不超时）；任一 scenario 标了 @timeout:N 则全 scope 继承；
+- timeout：scope 内缺省用 config.default_job_timeout_s（未给即不超时）；任一 scenario 标了 @timeout:N 则全 scope 继承；
   同 scope 多个不同值 / 非有限正数 → 报错（tag 语义权威在 ADR 0019）。
 - 一个 scenario 多个不同 @scope 值（feature 级传播 + scenario 级）→ 报错（与 engine 冲突对称）。
 - id 派生：有 @scope 用其值；无标用 scenario 的 id/标题；两者共用一个 scope_id 命名空间（下游主键），
-  @scope 的值撞上某条未标 scenario 的 id → 报错（撞 id = 静默丢结果，与裸 `@scope:` 同立场）。
+  @scope 的值撞上某条未标 scenario 的 id → 报错（撞 id 意味着静默丢结果，与裸 `@scope:` 同立场）。
 """
 from __future__ import annotations
 
@@ -45,12 +45,12 @@ class PlanConfig:
     # 与 default_engine 对称——未来可由 @votes: tag per-scope 覆盖（留口子，现不实现）。
     default_assertion_votes: int = 1
     # job 墙钟预算秒缺省（ADR 0019 @timeout / ADR 0034「job timeout」节）：未标 @timeout: 的 scope 用它，
-    # 与 default_engine 同构。None=不超时。
+    # 与 default_engine 同构。None 表示不超时。
     default_job_timeout_s: float | None = None
 
 
 def _values_with_prefix(tags: tuple[str, ...], prefix: str, where: str) -> list[str]:
-    """从 tags 取某前缀的去重值（保序）。如 prefix='@scope:' → ['login']。where = 出错时的定位（scenario id，即 uri:line）。"""
+    """从 tags 取某前缀的去重值（保序）。如 prefix='@scope:' → ['login']。where 是出错时的定位（scenario id，即 uri:line）。"""
     seen: list[str] = []
     for t in tags:
         if t.startswith(prefix):
@@ -89,7 +89,7 @@ def _resolve_engine(scope_id: str, members: list[ParsedScenario], default_engine
     if len(engines) > 1:
         raise PlanError(
             f"scope {scope_id!r} 出现多个 @engine 值 {engines}："
-            f"同一 scope 跨引擎 = 物理自相矛盾（共享会话又是两个不共享的会话），拒绝运行。"
+            f"同一 scope 跨引擎在物理上自相矛盾（共享会话又是两个不共享的会话），拒绝运行。"
         )
     return engines[0] if engines else default_engine
 
@@ -133,7 +133,7 @@ def plan(features: list[FeatureSource], config: PlanConfig, *,
     select（ADR 0041 决策一）：scenario 筛选谓词，在 **scope 分组与 engine/timeout 解析之后、Job 组装之前**施加。
     不变量：筛选只减少「运行哪几条」——scope 的引擎、job 墙钟预算、会话身份一律按**全量**成员解析，与不筛时逐字一致（否则筛后
     执行的与全量执行的不是同一件事，迭代结论不可迁移）。整组被筛空的 scope 不进任何 job（且在解析 engine/timeout 之前跳过，
-    它内部的 tag 冲突不拦本次迭代）；`_scope_key` 仍对全量成员校验（一个 scenario 多个 @scope 照样 fail-fast）。None = 不筛。
+    它内部的 tag 冲突不拦本次迭代）；`_scope_key` 仍对全量成员校验（一个 scenario 多个 @scope 照样 fail-fast）。None 表示不筛。
     谓词由调用方按 `--scope/--tags/--scenario` 组装，core 只收 `(ParsedScenario, scope_id) → bool`、不认 flag 语义
     （scope_id 一并传入：业务概念「scope」的筛选按分组键判，不逼调用方从 tags 反推）。筛后为空返回 []。
 
@@ -158,7 +158,7 @@ def plan(features: list[FeatureSource], config: PlanConfig, *,
         all_parsed.extend(parse_feature(f.uri, f.text))
 
     # 2) 按 @scope 分组（全局命名空间）；未标的各自单元素 scope
-    #    分组键 = (是否来自显式 @scope, 键值)：有 @scope → 其值；无标 → scenario_id（ADR 0025）。
+    #    分组键是 (是否来自显式 @scope, 键值) 二元组：有 @scope → 其值；无标 → scenario_id（ADR 0025）。
     #    「是否 named」进键、由结构承载——曾用一张 key→bool 边表，两类键撞上时被后写的成员覆盖，
     #    scope_name 与跨文件 warning 都随遍历顺序摆动（顺序依赖的静默错）。
     groups: dict[tuple[bool, str], list[ParsedScenario]] = {}
@@ -167,9 +167,9 @@ def plan(features: list[FeatureSource], config: PlanConfig, *,
         group_key = (True, scope_value) if scope_value is not None else (False, scenario_id)
         groups.setdefault(group_key, []).append(parsed)
 
-    # 2.1) 两类键共用 scope_id 命名空间（scope_id = 键值，ADR 0025「id 派生」）：@scope 的值若等于某条未标
+    # 2.1) 两类键共用 scope_id 命名空间（scope_id 就是键值，ADR 0025「id 派生」）：@scope 的值若等于某条未标
     #      scenario 的 id，两个组会派生出同一个 scope_id，而 scope_id 是下游主键（RunState.jobs 的 key、每 job
-    #      一个结果文件、claim 的键）→ 状态只剩一个、结果互相覆盖。撞名=静默灾难，故 fail-fast（与裸 `@scope:`
+    #      一个结果文件、claim 的键）→ 状态只剩一个、结果互相覆盖。撞名就是静默灾难，故 fail-fast（与裸 `@scope:`
     #      同立场）。判据用集合交、与遍历顺序无关；且只比**当了分组键**的 id，不误伤「那条 scenario 自己也标了
     #      别的 @scope」的无害输入（它的 id 根本不当键）。
     collided = sorted({k for named, k in groups if named} & {k for named, k in groups if not named})
@@ -196,7 +196,7 @@ def plan(features: list[FeatureSource], config: PlanConfig, *,
         if named:
             scope_name = key  # @scope 原值（人写名）
         else:
-            # 未标 scope：scope_id = scenario_id；scope_name = scenario 标题（人写名，不复用机器键，ADR 0025）
+            # 未标 scope：scope_id 取 scenario_id；scope_name 取 scenario 标题（人写名，不复用机器键，ADR 0025）
             scope_name = picked[0].scenario.name
         jobs.append(
             Job(

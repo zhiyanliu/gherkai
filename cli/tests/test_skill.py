@@ -26,6 +26,7 @@ from pathlib import Path
 
 import pytest
 from _doc_rules import (
+    ARROW,
     COLLOQUIAL,
     FORBIDDEN,
     MACHINE_ROOTS,
@@ -38,6 +39,9 @@ from _doc_rules import (
     extract_command_spans,
     is_placeholder,
     skill_markdown_files,
+    NUMERIC_SHORTHAND,
+    SYMBOL_PREDICATE,
+    prose_lines,
 )
 
 from gherkai_cli import __main__ as cli_main
@@ -125,6 +129,23 @@ def test_skill_markdown_is_product_facing(md: Path):
             or (i > body_start and (COLLOQUIAL.search(line) or RETIRED_TERMS.search(line)))]
     assert not hits, ("skill 随包发到使用方项目，不得含内部指代、口头语或退役旧名（改产品语言，设计指针留在 ADR）：\n"
                       + "\n".join(hits))
+
+
+@pytest.mark.parametrize("md", skill_markdown_files(), ids=lambda p: str(p.relative_to(SKILL_ROOT)))
+def test_skill_prose_has_no_symbolic_shorthand(md: Path):
+    """正文不把 = 当谓语、不写「退 N」、不用箭头（ADR 0045 决策六形态①③）；代码块、行内代码与 frontmatter 不算。
+
+    skill 的读者是替使用者操作的 agent，读的是自然语言而非程序式记法；契约副本由源页渲染而来，源页同受此约束。
+    """
+    hits = []
+    for line_no, line in prose_lines(md.read_text(encoding="utf-8"), skip_frontmatter=True):
+        if SYMBOL_PREDICATE.search(line):
+            hits.append(f"{md.relative_to(REPO)}:{line_no}: 符号当谓语 · {line.strip()[:110]}")
+        if NUMERIC_SHORTHAND.search(line):
+            hits.append(f"{md.relative_to(REPO)}:{line_no}: 省略中心词的「退 N」 · {line.strip()[:110]}")
+        if ARROW.search(line):
+            hits.append(f"{md.relative_to(REPO)}:{line_no}: 正文箭头 · {line.strip()[:110]}")
+    assert not hits, "skill 正文写完整句（即 / 是 / 表示；退出码 N；然后 / 得到），符号留给代码块：\n" + "\n".join(hits)
 
 
 @pytest.mark.parametrize("md", skill_markdown_files(), ids=lambda p: str(p.relative_to(SKILL_ROOT)))

@@ -73,7 +73,7 @@ def test_run_without_expose_local_zero_change(tmp_path, monkeypatch):
 
 
 def test_run_tunnel_failure_exits_2(tmp_path, monkeypatch, capsys):
-    """隧道起不来（如 authtoken 缺失）→ 退 2「没开始执行就被拒」，不产生引擎费用。"""
+    """隧道起不来（如 authtoken 缺失）→ 给退出码 2「没开始执行就被拒」，不产生引擎费用。"""
     def boom(name):
         raise gtunnel.TunnelError("ngrok 隧道未就绪…authtoken 未配置")
 
@@ -150,7 +150,7 @@ def test_plan_expose_local_annotates_not_replaces(tmp_path, capsys):
 
 
 def test_submit_rejects_nonpositive_tunnel_ttl_before_starting_tunnel(tmp_path, monkeypatch, capsys):
-    """--tunnel-ttl <=0 → 退 2 且**没起隧道**（早拒才真零副作用，对齐 --grace 的入口校验惯例）。"""
+    """--tunnel-ttl <=0 → 以退出码 2 结束且**没起隧道**（早拒才真零副作用，对齐 --grace 的入口校验惯例）。"""
     calls = []
     _patch_tunnel(monkeypatch, calls)
     rc = m.main(["submit", str(_write_feature(tmp_path)), "--backend", "cloud",
@@ -161,7 +161,7 @@ def test_submit_rejects_nonpositive_tunnel_ttl_before_starting_tunnel(tmp_path, 
 
 
 def test_submit_rejects_nonfinite_tunnel_ttl(tmp_path, monkeypatch, capsys):
-    """--tunnel-ttl nan/inf → 退 2（float() 会收下它们；nan 使守护的 monotonic()<deadline 首轮
+    """--tunnel-ttl nan/inf → 以退出码 2 结束（float() 会收下它们；nan 使守护的 monotonic()<deadline 首轮
     即 False → 隧道 submit 后立刻被拆——与 @timeout: 的 isfinite 校验同一理由）。"""
     calls = []
     _patch_tunnel(monkeypatch, calls)
@@ -173,7 +173,7 @@ def test_submit_rejects_nonfinite_tunnel_ttl(tmp_path, monkeypatch, capsys):
         assert "--tunnel-ttl" in capsys.readouterr().err
 
 
-# ---- 隧道就地拆：边界 = 后台宿主 fork 成功（ADR 0035 决策 3） ----
+# ---- 隧道就地拆：边界是后台宿主 fork 成功（ADR 0035 决策 3） ----
 def _stops(calls) -> list:
     return [c for c in calls if c[0] == "stop"]
 
@@ -258,7 +258,7 @@ def test_submit_local_failure_after_handoff_keeps_tunnel(tmp_path, monkeypatch):
 
 
 def test_submit_cloud_preflight_failure_tears_down_tunnel(tmp_path, monkeypatch, capsys):
-    """cloud submit 被 preflight 拦下（退 2，各道闸都在守护 fork 之前）→ 隧道无宿主可交棒，就地拆。"""
+    """cloud submit 被 preflight 拦下（退出码 2，各道闸都在守护 fork 之前）→ 隧道无宿主可交棒，就地拆。"""
     calls = []
     _patch_tunnel(monkeypatch, calls)
     _patch_cloud_gates(monkeypatch, preflight_err="资源缺失：ECS cluster gherkai-cluster 不存在")
@@ -274,7 +274,7 @@ def test_submit_cloud_preflight_failure_tears_down_tunnel(tmp_path, monkeypatch,
 
 
 def test_submit_cloud_target_resolution_failure_tears_down_tunnel(tmp_path, monkeypatch):
-    """--profile 打错这类解析失败是**抛**（不是退 2）、且在守护 fork 之前 → 同样就地拆。"""
+    """--profile 打错这类解析失败是**抛**（不是退出码 2）、且在守护 fork 之前 → 同样就地拆。"""
     import pytest
 
     calls = []

@@ -141,7 +141,7 @@ def test_index_html_shortcircuit_note_matches_cli_wording():
     )
     manifest = {"run_id": run.run_id, "created_at": "", "report_index": []}
     txt = html_mod.unescape(render_index_html(manifest, run))
-    assert txt.count(render._SHORTCIRCUIT_NOTE) == 1   # 只挂被短路那一步，且与文本渲染逐字同款
+    assert txt.count(render._SHORTCIRCUIT_NOTE) == 1   # 只挂被短路那一步，且与文本渲染逐字相同
 
 
 def test_render_text_no_annotation_on_plain_failed():
@@ -274,7 +274,7 @@ def test_render_text_step_reason_line_is_single_line_and_only_when_present():
 
 
 def test_job_line_with_error_type_but_no_message_has_no_orphan_colon():
-    """job 行有分类、message 为 None → 只显分类 `(worker_crashed)`，不打 `(worker_crashed: None)`——与报告页 index.html 同口径。"""
+    """job 行有分类、message 为 None → 只显分类 `(worker_crashed)`，不打 `(worker_crashed: None)`——与报告页 index.html 判法一致。"""
     job = Job(scope_id="s", scope_name="s", engine="novaact", scenarios=[])
     jr = JobResult(job=job, status=Status.ERROR)
     jr.error_type = "worker_crashed"

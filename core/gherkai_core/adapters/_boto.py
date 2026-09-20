@@ -2,7 +2,7 @@
 
 凡走 `aws` extra 的 adapter 共用一处，不各抄一份（消除同一 bug 修多遍的系统性重复）——存储侧
 DynamoDBRunStore / S3ResultStore / S3ReportStore / S3StepArgumentOffloader、events 读侧 DdbEventLog、
-执行侧 FargateEngine（真值集 = `grep -rn require_boto3 core/gherkai_core/adapters`，加新 adapter 时以它为准）。
+执行侧 FargateEngine（真值集由 `grep -rn require_boto3 core/gherkai_core/adapters` 给出，加新 adapter 时以它为准）。
 
 **定位（务必读清）**：这是**冗余兜底、非主要拦截点**。缺 boto3 的真正早失败发生在**组合根**——是组合根
 `import boto3` 造 client/表资源再注入 adapter；缺 boto3 时组合根先炸，根本走不到 adapter 构造。adapter 内部

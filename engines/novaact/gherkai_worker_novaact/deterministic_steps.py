@@ -20,7 +20,7 @@ worker 启动时按 env `GHERKAI_STEPS_DIR` 加载进**同一张表**（见 `use
   - 仅当某断言确需精确、不能容忍 AI 非确定性时才加确定性 step。
 
 handler 约定（见 `deterministic.py`）：
-  - 签名 `def h(ctx, **groups)`：ctx.page = Playwright Page；groups = 正则具名组 (?P<name>...)。
+  - 签名 `def h(ctx, **groups)`：ctx.page 是 Playwright Page；groups 是正则具名组 (?P<name>...)。
   - 判定失败抛 AssertionError → step 记 failed；抛其它 → error。
 
 Midscene 侧的对齐脚手架见 `@gherkai/worker-midscene` 的 `worker/deterministic.steps` 模块。

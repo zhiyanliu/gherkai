@@ -6,7 +6,7 @@
 上传落点。worker 对"我在哪运行"无知，只认这组 env 有没有（ADR 0016 注入红线）。
 
 S3 key 镜像本地 run 树（ADR 0029）：任一产物 key = `<prefix><产物相对本地 run 目录的路径>`，与 S3ReportStore/
-ResultStore 同 `<prefix>` 前缀。本地 run 目录 = 产物落点目录（`NOVA_LOGS_DIR`）的父级。key 是**确定性纯路径
+ResultStore 同 `<prefix>` 前缀。本地 run 目录是产物落点目录（`NOVA_LOGS_DIR`）的父级。key 是**确定性纯路径
 计算**，不依赖上传，故 `to_report_ref` 可先算 s3:// ref、实时报出。
 
 上传/删除策略（ADR 0029 混合两级 + 整目录，抗 SDK 升级；后台队列一级由 ADR 0042 决策一加入）：
@@ -72,7 +72,7 @@ class ArtifactUploader:
     """按注入的 S3 落点上传产物、生成 report ref。无落点配置时是 no-op（报 file://、不上传）。
 
     组合根经 env 注入（ADR 0029）：`ARTIFACT_S3_BUCKET` / `ARTIFACT_S3_PREFIX`（`<report_dir>/<run_id>/`，
-    已含尾 /）；`run_dir`（本地 run 树根 = NOVA_LOGS_DIR 父级）用于算产物相对路径 → 镜像成 S3 key。
+    已含尾 /）；`run_dir`（本地 run 树根，即 NOVA_LOGS_DIR 的父级）用于算产物相对路径 → 镜像成 S3 key。
     """
 
     def __init__(self, *, bucket: str | None, prefix: str, run_dir: Path | None) -> None:
@@ -100,7 +100,7 @@ class ArtifactUploader:
         logs_dir = os.environ.get("NOVA_LOGS_DIR")
         run_dir = Path(logs_dir).parent if logs_dir else None
         if bucket is not None and run_dir is None:
-            # fail-loud：注入了桶却没给 SDK 落点（NOVA_LOGS_DIR）= 组合根配置矛盾，非降级情形——静默 no-op
+            # fail-loud：注入了桶却没给 SDK 落点（NOVA_LOGS_DIR）即组合根配置矛盾，非降级情形——静默 no-op
             # 会让产物报 file:// 且随容器盘销毁必丢（ADR 0033 实际运行事故「只注①不注②等于没上传」）。
             raise ValueError(
                 "产物上传：已注入 ARTIFACT_S3_BUCKET 但缺 NOVA_LOGS_DIR，算不出产物落点、无法上传"
@@ -120,7 +120,7 @@ class ArtifactUploader:
             # 退化网络下单次上传最坏分钟级、拖住 worker 退出 → 等 grace 耗尽被 SIGKILL → 跳过会话清理 → 泄漏。
             # 显式设短超时 + 关重试，使上传快速失败、best-effort 放弃（提前上传/flush 均吞错）。超时 « grace（ADR 0024）。
             # **max_attempts=0 才是「关重试、单次尝试」**：botocore 语义里 max_attempts=N 是「重试次数」、总尝试
-            # = N+1，故 =1 其实是「1 次重试=共 2 次尝试 + 中间退避 sleep」，与「快速失败」相悖；=0 → 总尝试 1、零退避。
+            # 为 N+1，故 =1 其实是「1 次重试即共 2 次尝试 + 中间退避 sleep」，与「快速失败」相悖；=0 → 总尝试 1、零退避。
             cfg = Config(connect_timeout=5, read_timeout=10, retries={"max_attempts": 0})
             self._client = boto3.client("s3", region_name=os.environ.get("AWS_REGION"), config=cfg)
         return self._client
@@ -159,7 +159,7 @@ class ArtifactUploader:
         消费端按「读不到」处理；本机后端 `file://` 无此问题。
         """
         if not self.enabled:
-            return f"file://{local_path}"  # 与 to_report_ref 的 no-op 分支同形（不 resolve，保调用方 abspath 语义）
+            return f"file://{local_path}"  # 与 to_report_ref 的 no-op 分支写法相同（不 resolve，保调用方 abspath 语义）
         return f"s3://{self._bucket}/{self._key_for(Path(local_path))}"
 
     # ---- 已传集合的两个访问点（主流程 + 队列线程共用，故一律经锁）----
@@ -253,7 +253,7 @@ class ArtifactUploader:
                 self._worker.start()
 
     def _queue_loop(self) -> None:
-        """队列线程主体：FIFO 逐个传，**绝不因单项失败而死**（死了 = 后面的截图全不传且无人察觉）。"""
+        """队列线程主体：FIFO 逐个传，**绝不因单项失败而死**（死了意味着后面的截图全不传且无人察觉）。"""
         while True:
             item = self._q.get()
             try:

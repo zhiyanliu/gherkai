@@ -45,7 +45,7 @@ import { loadUserSteps } from "./user-steps.mjs";  // 使用方 steps/ 目录的
 
 const BROWSER_ID = "aws.browser.v1";
 // 网络专用退出码（ADR 0028）：与 core/gherkai_core/wire.py 的 EX_WORKER_NETWORK 同值（协议层单一事实源，两 Engine adapter 共用翻译）。
-// worker 建连失败、重试耗尽时以此码退出，作 out-of-band 信号（建连失败先于任何事件 emit）。
+// worker 建连失败、重试耗尽时以这个退出码退出，作 out-of-band 信号（建连失败先于任何事件 emit）。
 const EX_WORKER_NETWORK = 80;
 // 建连重试上限（ADR 0028）；退避 [0.5,1,2]s，总 ~3.5s，远小于本 worker 自报的 grace 下限（见下 minGraceSeconds）。
 const CONNECT_ATTEMPTS = 4;
@@ -78,8 +78,8 @@ export const BROWSER_CLOSE_BUDGET_MS = 3000;
 // 自报 grace 下限的余量（ADR 0024 grace 硬约束的 margin）：收尾各段预算之和之外再多留一份，吸收段间调度、
 // SDK 抖动与不被上述预算覆盖的零碎（诊断写出、事件 flush、进程退出本身）。
 // **取值来路**：使下限落在已标定的 31 s 上（各段之和 23.5 + 本余量 7.5）——31 不是新数，是 ADR 0032 真容器校准
-// 判「25 够用」（实测约 2x 余量）后、又被 ADR 0042 决策一的 6 s 截图队列排空顶上来的今值。改本常量 = 改一个
-// 已标定的下限，要有意识地改。与 Nova 侧不对称的一点：Nova 的 margin 可 env 覆盖（再标定免改码），本常量是
+// 判「25 够用」（实测约 2x 余量）后、又被 ADR 0042 决策一的 6 s 截图队列排空顶上来的今值。改本常量就是改一个
+// 已标定的下限，要有意识地改。与 Nova 侧不对称的一点：Nova 的 margin 可 env 覆盖（再标定免改代码），本常量是
 // 编译期值、再标定要改这里重编。
 export const MIN_GRACE_MARGIN_MS = 7500;
 // 自述对象的 schema 版本（ADR 0036「5.」：只在既有键语义变化时递增；加键不递增）。
@@ -91,7 +91,7 @@ const CAPABILITIES_SCHEMA_VERSION = 1;
  *  Midscene worker 没有「可控的单 act 超时」概念（不像 Nova 的 act 时间上界），但它的 **SIGTERM 收尾路径
  *  本身有确定的超时预算**，grace 必须够这条路径运行完：不够则收尾被 SIGKILL 截断——会话释放本身有
  *  「先释放会话、再提前上传」的排序 + Stop 预算保底不泄漏，但 worker 退不干净、中断兜底的引擎报告提前上传与
- *  截图队列排空会被拦腰砍掉。故下限 = 收尾最坏串行路径各段预算之和 + 余量，**由那些预算常量算出、
+ *  截图队列排空会被拦腰砍掉。故下限是收尾最坏串行路径各段预算之和加余量，**由那些预算常量算出、
  *  不另写字面量**：谁改某段预算，下限自动跟着走（曾把这个下限当常量放在组合根，收尾里加进截图队列排空后
  *  只能靠人记得把它改大；漏一次就是 grace 默默不够、收尾被硬杀截断）。
  *
@@ -135,7 +135,7 @@ function isTransientNetwork(e: unknown, connecting = false): boolean {
     const code = cur.code ?? "";
     if (code === "ENOTFOUND") return false; // DNS 未找到（永久），此层直接否决
     if (["ECONNRESET", "ECONNREFUSED", "ETIMEDOUT", "EPIPE", "EAI_AGAIN", "ECONNABORTED"].includes(code)) {
-      return true; // EAI_AGAIN = DNS 临时失败，当瞬时
+      return true; // EAI_AGAIN 即 DNS 临时失败，当瞬时
     }
     // AWS SDK v3 服务端瞬时（AgentCore 起会话节流/5xx，ADR 0028）：name 节流集 / 5xx 状态 / $retryable.throttling
     if (cur.name && AWS_TRANSIENT_NAMES.has(cur.name)) return true;
@@ -199,11 +199,11 @@ async function interruptSnapshot(
   }
 }
 
-// 截图后台队列的有界排空（ADR 0042 决策一）——与 interruptSnapshot 同形的可测小函数：只管「排空那一步」的
+// 截图后台队列的有界排空（ADR 0042 决策一）——与 interruptSnapshot 结构相同的可测小函数：只管「排空那一步」的
 // 决策（排不完记一行、放弃），**位置**（必须排在会话释放之后）由调用方保证。
 // best-effort、**绝不抛**：收尾路径上抛会跳过后面的 exit / flush；排不完不是错，正常路径还有整目录 flush 兜。
 // flushFollows 由调用点声明「我后面还跟着整目录 flush 吗」（不在这里猜调用栈）。分句按调用点是否真跟着整目录
-// flush：只在会 flush 的路径上说「改由收尾上传」（ADR 0039 面一的文案不变量例外条，两引擎同形）；不跟 flush 的
+// flush：只在会 flush 的路径上说「改由收尾上传」（ADR 0039 面一的文案不变量例外条，两引擎措辞一致）；不跟 flush 的
 // 提前退出路径说这些截图已放弃。必传、无默认——默认值会让新调用点静默拿到一句可能为假的承诺。
 async function drainArtifactQueue(
   uploader: { drain: (timeoutMs: number) => Promise<boolean> },
@@ -219,7 +219,7 @@ async function drainArtifactQueue(
         : "worker: 部分证据截图未能在收尾预算内传完（已放弃，不影响判定结果；仍可看引擎原生报告）");
     }
   } catch (e) {
-    // 产品面一行，与上面「排不完」那行同形（best-effort、绝不抛的判据见上函数头）。
+    // 产品面一行，与上面「排不完」那行措辞一致（best-effort、绝不抛的判据见上函数头）。
     logFn(`worker: 证据截图收尾上传失败（不影响判定结果；仍可看引擎原生报告）：${(e as Error).message}`);
   }
 }
@@ -266,7 +266,7 @@ export function makeGuardedCleanup(
 //   会话释放（cleanup）**必须先于**中断兜底提前上传（interruptSnapshot）与截图队列排空（drainArtifactQueue）
 //   ——ADR 0024「会话释放优先」铁律，那两件都是 best-effort、绝不延迟会话释放（退化网络下各自挂满自己的
 //   预算，也不该让会话多泄漏那么久）。
-// 返回该退出的码（cleanupFailed→1 让泄漏可观测、否则 0）；不自己 process.exit（交调用方，便于测试不真退进程）。
+// 返回该退出的退出码（cleanupFailed→1 让泄漏可观测、否则 0）；不自己 process.exit（交调用方，便于测试不真退进程）。
 // deps 全注入（cleanup/getCleanupFailed/uploader/reportFile...）→ 单测可传 spy 断言调用序列，无需真信号/真进程。
 interface ShutdownDeps {
   inflightPending: () => boolean;      // startInFlight：Start RPC 在途则先等 settle，让 id 落进待清理集
@@ -318,7 +318,7 @@ function cumulativeTokens(agent: PlaywrightAgent): number {
   }
 }
 
-// 本 step 的 token 成本 = 运行后累计 - 运行前累计（增量）。增量 0（无新 usage）→ undefined（不假装 0）。
+// 本 step 的 token 成本是运行后累计减运行前累计的增量。增量 0（无新 usage）→ undefined（不假装 0）。
 function stepCost(beforeTokens: number, agent: PlaywrightAgent): Record<string, unknown> | undefined {
   const after = cumulativeTokens(agent);
   const delta = after - beforeTokens;
@@ -380,7 +380,7 @@ export async function main(): Promise<number> {
   }
   // 使用方 steps/ 目录的注册（ADR 0037 决策 4）：**内建脚手架之后**（模块顶 import 已注册完）、
   // **两个非 job 入口与 job 循环之前**——故 --capabilities / --match-steps / plan 标注都反映使用方定制
-  // （ADR 0036「真值单一」不变：注册表 = 内建 + 使用方）。加载失败 fail-loud（抛 → bin 一行 stderr + 非零退出）。
+  // （ADR 0036「真值单一」不变：注册表是内建加使用方）。加载失败 fail-loud（抛 → bin 一行 stderr + 非零退出）。
   await loadUserSteps();
 
   // 模型家族的启动期校验（ADR 0044 决策 2）：推不出即抛 → bin 一行 stderr + 非零退出。**位置 load-bearing**：
@@ -398,9 +398,9 @@ export async function main(): Promise<number> {
     return 0;
   }
   // 引擎能力自述（ADR 0036「5.」）：一个 JSON 对象即退，同样不建会话、不读 stdin、零费用。
-  // min_grace_s = 本引擎收尾路径要的 grace 下限（ADR 0024「引擎自报下限」：真值住算它的这一侧，
-  // 组合根只查询后聚合、不持引擎特定常量）。deterministic_steps = 注册表清单（ADR 0036「2.」：内建脚手架
-  // 在模块顶 import 时注册、使用方 steps 上面刚加载完，此刻注册表即真值）。model_id = 起 job 时真交给
+  // min_grace_s 是本引擎收尾路径要的 grace 下限（ADR 0024「引擎自报下限」：真值住算它的这一侧，
+  // 组合根只查询后聚合、不持引擎特定常量）。deterministic_steps 是注册表清单（ADR 0036「2.」：内建脚手架
+  // 在模块顶 import 时注册、使用方 steps 上面刚加载完，此刻注册表即真值）。model_id 是起 job 时真交给
   // Midscene SDK 的模型名，即 modelConfig() 的 MIDSCENE_MODEL_NAME，与它同源引用 lib/agentcore-sigv4 的 MODEL
   // 常量、此处不另写字面量（否则自述会与实际用的模型漂移，而 doctor 正是拿这个键显示「当前用哪个模型」）。
   // **加键不加入口**（ADR 0036「5.」）：新增自述项都是本对象的新键、不再开第二个 flag——组合根一次 spawn
@@ -418,12 +418,12 @@ export async function main(): Promise<number> {
 
   // 早期信号护栏（对称 Nova：handler 先于 JobSource.read 装载，ADR 0024）——S3 态下 read 含一次网络往返，
   // 窗口内 SIGTERM 若走 Node 默认处置会以信号终止（非 0）→ adapter 误归 engine_error。此阶段无会话、无产物，
-  // 直接干净退 0（零事件 + exit 0，core 判 error 不误归因）；真正的 onSignal（提前上传+释放会话）建好后替换本 handler。
+  // 直接以退出码 0 干净退出（零事件 + exit 0，core 判 error 不误归因）；真正的 onSignal（提前上传+释放会话）建好后替换本 handler。
   const earlySignal = () => process.exit(0);
   process.on("SIGTERM", earlySignal);
   process.on("SIGINT", earlySignal);
 
-  // I/O 边缘可注入接口（ADR 0024）：job 入口 / 事件出口从内联收进 lib 组件，subprocess 态=读 stdin / 写 EVENTS_FD。
+  // I/O 边缘可注入接口（ADR 0024）：job 入口 / 事件出口从内联收进 lib 组件，subprocess 态即读 stdin、写 EVENTS_FD。
   const job = (await JobSource.fromEnv().read()) as Job;
   const eventSink = EventSink.fromEnv();  // main 级单例（对称 uploader）；作参数注入 runScenario/runStep
   const scope = job.scope;
@@ -440,7 +440,7 @@ export async function main(): Promise<number> {
 
   async function stopSession(sid: string): Promise<boolean> {
     // 单个会话 Stop，套超时预算（ADR 0028）：退化网络下 Stop 可能挂死、超 grace 被 SIGKILL 打断 → 泄漏。
-    // 超时即放弃（返回 false=未确认释放），让 worker 能干净退出。timedOut 哨兵区分「超时」与「Stop 成功」。
+    // 超时即放弃（返回 false 表示未确认释放），让 worker 能干净退出。timedOut 哨兵区分「超时」与「Stop 成功」。
     const timedOut = Symbol("timeout");
     try {
       const r = await Promise.race([
@@ -484,7 +484,7 @@ export async function main(): Promise<number> {
       ]);
     }
   }
-  // 重入守卫（语义见 makeGuardedCleanup）：leftovers = pendingSessions 里还有没确认释放的会话，
+  // 重入守卫（语义见 makeGuardedCleanup）：leftovers 指 pendingSessions 里还有没确认释放的会话，
   // 有则 final 语义的重入者补清一次，让 Stop 失败点亮 cleanupFailed、泄漏可观测。
   const cleanupGuard = makeGuardedCleanup(cleanupRun, () => pendingSessions.size > 0);
   const cleanup = cleanupGuard.cleanup;
@@ -590,7 +590,7 @@ export async function main(): Promise<number> {
     // 但血缘已先随首事件落到 core（ADR 0028 观测缺口修复，对称 Nova）。
     await eventSink.emit({ type: "scope_started", scopeId: scope.id, sessionId });  // 三级时长起点（越过此点不再重试建连）
     // scope 内串行运行 scenarios，共享同一会话（ADR 0019/0024）
-    const votesN = job.assertionVotes ?? 1;  // AI 断言投票次数（ADR 0014/0024，组合根经 --assertion-votes 设）；缺省 1 = 单次判定、不做抖动检测
+    const votesN = job.assertionVotes ?? 1;  // AI 断言投票次数（ADR 0014/0024，组合根经 --assertion-votes 设）；缺省 1 表示单次判定、不做抖动检测
     // report 提前上传的 mtime 去重状态：**scope 级共享**（单份 report.html 跨 scenario 累积增长，共享才准）。
     const snapState = { mtime: -1 };
     // scenario 边界 log 提前上传的 per-file mtime 去重表（ADR 0029 上传时机第四级）：**scope 级共享**（log append-only
@@ -598,7 +598,7 @@ export async function main(): Promise<number> {
     const logSeen = new Map<string, number>();
     const logDir = (!NO_ARTIFACTS && process.env.MIDSCENE_RUN_DIR) ? path.join(path.resolve(process.env.MIDSCENE_RUN_DIR), "log") : undefined;
     // step 级机读证据的注入（ADR 0042 决策一）：落点与 flush 根同一判据——`--no-report` 方式（这一方式也没开
-    // persistExecutionDump、无截图文件可引）或没给产物落点 → undefined = 本 run 不产 evidence。
+    // persistExecutionDump、无截图文件可引）或没给产物落点 → undefined，即本 run 不产 evidence。
     const evidenceRoot = artifactFlushRoot();
     const evidence: EvidenceHook | undefined = evidenceRoot
       ? { runDir: evidenceRoot, scopeId: scope.id, uploader, logFn: log }
@@ -645,7 +645,7 @@ export async function main(): Promise<number> {
     // 会话已释放，再排空截图后台队列（会话释放优先，ADR 0024；对齐 onSignal 里的③）——网络耗尽与异常
     // 这两条提前退出路径都**不 flush**（中断产物留本地），队列里没传完的字节就此丢，故给有界预算兜一把。
     await drainArtifactQueue(uploader, QUEUE_DRAIN_EXIT_MS, false);
-    // 建连重试耗尽（网络瞬时故障）→ 退网络专用码（ADR 0028）；但 cleanupFailed（会话泄漏）优先级更高。
+    // 建连重试耗尽（网络瞬时故障）→ 以网络故障退出码退出（ADR 0028）；但 cleanupFailed（会话泄漏）优先级更高。
     if (networkExhausted && !cleanupFailed) {
       log("worker: connect retries exhausted, exiting with network code");
       return EX_WORKER_NETWORK;
@@ -681,7 +681,7 @@ async function runScenario(
   agent: PlaywrightAgent, page: import("playwright").Page, scenarioId: string, steps: Step[], votesN: number,
   uploader: ArtifactUploader, snapState: { mtime: number },
   sink: { emit: (e: unknown) => Promise<void> },
-  evidence?: EvidenceHook,  // step 级机读证据（ADR 0042）；不注入 = 不产（`--no-report` 方式 / 无产物落点）
+  evidence?: EvidenceHook,  // step 级机读证据（ADR 0042）；不注入即不产（`--no-report` 方式 / 无产物落点）
 ): Promise<string[]> {
   const statuses: string[] = [];
   let shortcircuit = false;
@@ -704,7 +704,7 @@ async function runScenario(
           snapState.mtime = mt;
         }
       } catch (e) {
-        // 本行不作再传承诺（ADR 0039 产品面文案不变量，两引擎同形）：正常路径上 snapState.mtime 未更新，
+        // 本行不作再传承诺（ADR 0039 产品面文案不变量，两引擎措辞一致）：正常路径上 snapState.mtime 未更新，
         // 后续 step_done 安全点与 scope 末的报告上传还会再传；停止信号路径有中断兜底提前上传
         // （interruptSnapshot）再传一次；但网络耗尽与异常两条提前退出路径只排空截图队列、既不 snapshotReport
         // 也不 flush，那份增量 report 就此丢。
@@ -730,7 +730,7 @@ function appendReportRef(
 async function runStep(
   agent: PlaywrightAgent, page: import("playwright").Page, scenarioId: string, step: Step, votesN: number,
   sink: { emit: (e: unknown) => Promise<void> },
-  evidence?: EvidenceHook,  // step 级机读证据（ADR 0042）；不注入 = 不产
+  evidence?: EvidenceHook,  // step 级机读证据（ADR 0042）；不注入即不产
 ): Promise<string> {
   const { index, keyword, text } = step;
   await sink.emit({ type: "step_started", scenarioId, stepIndex: index });  // step 时长起点
@@ -740,7 +740,7 @@ async function runStep(
   // **在 try 之外**：executionsLength 自己吞异常，绝不能让「记起点」这步冒泡（那会连 step_done 都发不出）。
   const execFrom = executionsLength(agent);
   const votes: boolean[] = [];        // 逐票结果（进 evidence 的 act.vote；多数票数学仍看 yes 计数）
-  let instr: string | null = null;    // 交给引擎的指令（进 evidence 的 act.prompt）；null = 本 step 没调 AI
+  let instr: string | null = null;    // 交给引擎的指令（进 evidence 的 act.prompt）；null 表示本 step 没调 AI
   // 本 step 判定已成之后的收尾出口（三条出口共用）：产 evidence → 挂 ref → **emit** → 才把截图交后台队列。
   // **这个顺序是契约**（ADR 0042 决策一「上传时机分两类」）：evidence.json 的 ref 必须随 step_done 走，故它
   // 即时传；截图字节反过来——emit 之前入队就是把字节又压回判定前面，主流程该做的是发完判定立刻进下一 step。
@@ -790,7 +790,7 @@ async function runStep(
       // AI 断言 + N 次投票（ADR 0014/0024）；votesN=1 即单次判定（仍发 votes 标记这是 AI 断言）
       instr = buildInstruction(step.text, step.argument as any);  // 自然语言 + 多行参数（DataTable/DocString，ADR 0024）
       let yes = 0;
-      // 逐票记进 votes：evidence 要「本次调用计入判定的那一票」（ADR 0042 映射表 act.vote = aiBoolean 返回值），
+      // 逐票记进 votes：evidence 要「本次调用计入判定的那一票」（ADR 0042 映射表里 act.vote 取 aiBoolean 返回值），
       // 光有 yes 计数分不清是哪几票投的 no。
       for (let i = 0; i < votesN; i++) {
         const vote = await agent.aiBoolean(instr);

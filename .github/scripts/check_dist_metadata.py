@@ -11,7 +11,7 @@
 它进不进发布链，只有逐条比对真值集才照得出来：
 
 1. 每个成员都产出 sdist + wheel；
-2. 全部产物同一个版本，且给了 `--expect-version` 时逐字等于它（版本真源 = git tag，
+2. 全部产物同一个版本，且给了 `--expect-version` 时逐字等于它（版本真源是 git tag，
    ADR 0037 决策 2b）；
 3. wheel METADATA 里凡指向兄弟发行包的 `Requires-Dist` 都带 `==<版本>` 同版本 pin
    （ADR 0037 决策 2b；uv-dynamic-versioning 的 metadata hook 没生效时这里会退化成裸名，
@@ -108,7 +108,7 @@ def sdist_whitelists(repo_root: Path, members: dict[str, str]) -> dict[str, set[
 
 
 SKILL_DIST_NAME = "gherkai"                          # 带 skill 的那个发行包（CLI）
-SKILL_PACKAGE_DIR = "gherkai_cli/skills/gherkai"     # 包内路径 = wheel 内路径（hatchling 直收包目录下的非 .py）
+SKILL_PACKAGE_DIR = "gherkai_cli/skills/gherkai"     # 包内路径与 wheel 内路径相同（hatchling 直收包目录下的非 .py）
 SKILL_SOURCE_DIR = "cli/" + SKILL_PACKAGE_DIR
 
 
@@ -247,7 +247,7 @@ def main() -> int:
     for s in sdists:
         with tarfile.open(s) as t:
             tops = {p[1] for p in (m.name.split("/") for m in t.getmembers()) if len(p) > 1}
-        # 产物名形态 = `<规范化发行名>-<版本>.tar.gz`（PEP 625），版本段不含 `-`
+        # 产物名形态为 `<规范化发行名>-<版本>.tar.gz`（PEP 625），版本段不含 `-`
         sdist_dist_name = normalized_to_dist.get(s.name[: -len(".tar.gz")].rsplit("-", 1)[0])
         if sdist_dist_name is None:
             errors.append(f"{s.name} 的发行名不是任何 workspace 成员——产物目录不干净（旧产物没清）")
@@ -276,7 +276,7 @@ def main() -> int:
 
     if args.expect_version and version and version != args.expect_version:
         errors.append(
-            f"构建算出的版本 {version} ≠ 期望 {args.expect_version}。"
+            f"构建算出的版本 {version} 不等于期望的 {args.expect_version}。"
             "常见原因：checkout 不在 tag commit 上；工作树非纯净（dirty=true 会带 `+` 本地段，"
             "而 PyPI 拒收带本地段的版本）；tag 不是 `vX.Y.Z` 形态。版本真源是 git tag，"
             "对不上就绝不往索引上推（ADR 0037 决策 2b/8）"

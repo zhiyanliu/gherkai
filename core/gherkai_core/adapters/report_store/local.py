@@ -1,10 +1,10 @@
 """LocalReportStore（ADR 0027）：把一次 run 的报告产物归集成本地一份自包含目录。
 
 产出 <report_root>/<run_id>/{manifest.json, index.html}：
-- manifest.json = 薄信封（schema_version/run_id/created_at）+ report_index（扁平投影，便于 CI/WebUI 遍历）。
+- manifest.json 是薄信封（schema_version/run_id/created_at）+ report_index（扁平投影，便于 CI/WebUI 遍历）。
   **不内嵌 result 真值副本**——靠 run_id 软引用那次 run，判定真值由 ResultStore 持有（report 是纯派生视图、
   可删可重建、永不作判定源，ADR 0027/0016）。
-- index.html = 最小人可导航入口：每条报告产物一行链接（引擎原生产物 + gherkai 自有 schema 的 step 级 evidence），点开看**原样**文件。摘要直接用内存 RunResult。
+- index.html 是最小人可导航入口：每条报告产物一行链接（引擎原生产物 + gherkai 自有 schema 的 step 级 evidence），点开看**原样**文件。摘要直接用内存 RunResult。
 
 不透明搬运（ADR 0027）：对 ReportRef 只「算一个链接」，绝不解析/重写/抽内容、不按 kind 分支。
 href 是 core 自算的导航链接（不受不透明铁律约束，铁律圈的是 ref）：local 把落在 run 树内的
@@ -31,11 +31,11 @@ SCHEMA_VERSION = 1
 def collect_report_index(result: RunResult, *, make_href: Callable[[ReportRef], str]) -> list[dict]:
     """遍历 result 树，把每个 ReportRef 投影成一条扁平 index 项（三级，ADR 0027）——**local/s3 共享的单一真理源**。
 
-    粒度由 scenario_id/step_index 是否为 None 表达：都 None=scope 级；仅 step_index None=scenario 级；
-    两者都非 None=step 级（Nova trajectory 下沉，同 scenario 多 trajectory 靠 step_index 区分）。
+    粒度由 scenario_id/step_index 是否为 None 表达：都为 None 即 scope 级；仅 step_index 为 None 即 scenario 级；
+    两者都非 None 即 step 级（Nova trajectory 下沉，同 scenario 多 trajectory 靠 step_index 区分）。
     遍历顺序（每 job：scope 级 report_refs → 各 scenario 级 → 各 step 级）两 adapter 必须一致，故抽此共享函数。
 
-    href（导航链接）由 make_href(rr) 回调注入：Local 把 run 树内 file:// 产物相对化、否则 ==ref；S3 恒 ==ref。
+    href（导航链接）由 make_href(rr) 回调注入：Local 把 run 树内 file:// 产物相对化，其余情形 href 等于 ref；S3 版 href 恒等于 ref。
     **注意**：投影只产 href（导航用），不产 ref——原始 ref 的权威落盘处是 jobs/*.json（ResultStore 判定真值）
     与内存 RunResult，manifest（派生视图）不留 ref（无人读 + href 相对后 ref 会成绝对泄漏，ADR 0027）。
     """
@@ -45,10 +45,10 @@ def collect_report_index(result: RunResult, *, make_href: Callable[[ReportRef], 
         return {
             "scope_id": scope_id,
             "scenario_id": scenario_id,
-            "step_index": step_index,  # None=scope/scenario 级；非 None=step 级（同 scenario 多 trajectory 区分）
+            "step_index": step_index,  # 为 None 即 scope/scenario 级；非 None 即 step 级（同 scenario 多 trajectory 区分）
             "engine": engine,
             "kind": rr.kind,
-            "href": make_href(rr),    # 导航用链接（Local 相对化 / S3 恒 ==ref）；原始 ref 不进 manifest
+            "href": make_href(rr),    # 导航用链接（Local 相对化；S3 恒等于 ref）；原始 ref 不进 manifest
             "label": rr.label,
         }
 
@@ -73,7 +73,7 @@ class LocalReportStore:
     def write(self, run_id: str, result: RunResult, *, created_at: str = "") -> ResourceUri:
         """归集出 <root>/<run_id>/{manifest.json, index.html}，返回 index.html 的 file:// ResourceUri。
 
-        返回 file:// URI（而非裸 Path）以对齐 ReportStore 契约：与 S3 adapter（同包 `s3.py`）的 s3:// 返回同形（ADR 0027）。
+        返回 file:// URI（而非裸 Path）以对齐 ReportStore 契约：与 S3 adapter（同包 `s3.py`）的 s3:// 返回结构相同（ADR 0027）。
         resolve() 成绝对路径再 as_uri()——as_uri 要求绝对路径，而 cli 默认 report_dir 是相对的（"reports"）。
         """
         run_dir = self._root / run_id
@@ -83,8 +83,8 @@ class LocalReportStore:
         # href 把 run 树内的 file:// 产物相对化（目录可整体搬走、链接不断，ADR 0027）；不拷贝产物。
         index_entries = self._collect(result, run_dir)
 
-        # manifest = **纯派生导航视图**（ADR 0027）：不内嵌 result 真值副本——靠 run_id 软引用那次 run。
-        # 判定真值由 ResultStore（local 的 jobs/*.json 或 S3ResultStore 的同形 key）持有，运行态/身份由 RunStore
+        # manifest 是**纯派生导航视图**（ADR 0027）：不内嵌 result 真值副本——靠 run_id 软引用那次 run。
+        # 判定真值由 ResultStore（local 的 jobs/*.json 或 S3ResultStore 里结构相同的 key）持有，运行态/身份由 RunStore
         # （local 的 run_meta.json + run_state.json 或 DynamoDBRunStore 的两 item）持有（三层切分，ADR 0016）。这样 RunReport 是真·派生品（可删可重建、
         # 永不作判定源），无真值冗余、无一致性风险。CI 要判定 → 用 run_id 找 ResultStore。
         manifest = {
@@ -110,8 +110,8 @@ class LocalReportStore:
         """遍历 result 树投影 report_index（复用共享 collect_report_index）。
 
         make_href：把落在 run 树内的本地产物相对化（→ index.html 所在 run_dir 的相对路径，目录可整体
-        搬走、链接不断）；远端（s3/http…）或落在树外的产物回落 ==ref（绝对，该条不可移植）。ref 全程不改写
-        （不透明铁律圈的是 ref、不是 href，ADR 0027）。（S3ReportStore 传自己的 make_href：href 恒==ref，见 s3.py。）
+        搬走、链接不断）；远端（s3/http…）或落在树外的产物回落成 ref 本身（绝对，该条不可移植）。ref 全程不改写
+        （不透明铁律圈的是 ref、不是 href，ADR 0027）。（S3ReportStore 传自己的 make_href：href 恒等于 ref，见 s3.py。）
 
         run_dir.resolve() 循环外算一次（run 期间不变）——避免逐 ref 重复同一系统调用。
         """
@@ -181,7 +181,7 @@ def _reason_html(error_type: str | None, message: str | None) -> str:
     """渲染一行的「原因」片段——job 行与 step 行共用同一份，**别再造第三种样式**。
 
     两分支口径同 render_text（有分类 → err 红字带分类 `error_type: message`；无分类 → 中性 note；空 message
-    两侧同律——只显分类、不留吊着的冒号，`gherkai_cli.render` 的 job 行与此处一致）；
+    两侧规则一致——只显分类、不留吊着的冒号，`gherkai_cli.render` 的 job 行与此处一致）；
     fail-fast 派生态（skipped/aborted）error_type 恒 None、原因只在 message（ADR 0031 决定一）→ 用
     中性 note 色显出来，不复用 err 红（决定二：颜色跟 status 走，别把未运行染成出错）。step 级失败原因原文
     （ADR 0042 决策三）走同一函数，故两处样式不再靠人肉同步（曾各抄一份、空 message 的处置已分叉过）。
@@ -213,7 +213,7 @@ def render_index_html(manifest: dict, result: RunResult) -> str:
 
     # 判定明细树 ↔ 原生产物列表的**结构关联**（锚点双向链接）：产物列表是平铺的，但判定明细树有 job→scenario→
     # step 层级；用锚点把每条产物和它所属的树节点互相链上，读者点 📎 从树跳到产物、点 ↑ 从产物跳回树节点。
-    # 关联键 = 产物挂载层级的 (scope_id, scenario_id, step_index) 三元组（None 表该级为止，对齐 report_index 投影）。
+    # 关联键是产物挂载层级的 (scope_id, scenario_id, step_index) 三元组（None 表该级为止，对齐 report_index 投影）。
     # node_anchor：把三元组编成 html-safe 的稳定 id（不含任意 UTF-8——scope_id 可能是中文/带 : 的路径，直接进
     # id/#fragment 易踩坑，故用层级前缀 + 在 report_index 里的序号，纯 ASCII、稳定、两边一致）。
     def _node_anchor(scope_id: str, scenario_id, step_index) -> str:
@@ -290,7 +290,7 @@ def render_index_html(manifest: dict, result: RunResult) -> str:
                 # 连锁失败旁注（ADR 0031 决定六）：被 scope 内短路的 step（shortcircuited=True，status=skipped）——
                 # 上游 error 后 worker 跳过了它、没在损坏环境上运行。读 shortcircuited 正交布尔（比旧的"按 status 顺序猜"
                 # 精确）；不改判定/severity（守纯 reducer 红线）。
-                # 下面这句与 cli 文本渲染的旁注同款措辞（那边提成了 `gherkai_cli.render._SHORTCIRCUIT_NOTE`；
+                # 下面这句与 cli 文本渲染的旁注措辞相同（那边提成了 `gherkai_cli.render._SHORTCIRCUIT_NOTE`；
                 # core 不能 import cli，故跨包不共享常量）——改一处要改两处，由 cli 侧的
                 # test_index_html_shortcircuit_note_matches_cli_wording 逐字锁定（那边两包都 import 得到）。
                 taint = (

@@ -1,14 +1,14 @@
 #!/usr/bin/env python
 """events 表单 act 墙钟分析（Fargate grace 校准数据前置，ADR 0032 / 0024「DynamoDB 作 events-out」）。
 
-**为何存在**：Nova grace 下限 = `NOVA_ACT_TIMEOUT_S`（组合根注入，runtime/gherkai_runtime/compose.py）+ `NOVA_GRACE_MARGIN_S`
+**为何存在**：Nova grace 下限是 `NOVA_ACT_TIMEOUT_S`（组合根注入，runtime/gherkai_runtime/compose.py）+ `NOVA_GRACE_MARGIN_S`
 （worker 侧 engines/novaact/gherkai_worker_novaact/lib/constants.py，经 `--capabilities` 自报），
 margin 的取值需实测「单 act 正常墙钟」与「act 中途中断退出耗时」来标定（是否过保守）。答它需要**单 act 墙钟分布**的实测——而
 events 表的每条 item 恰好带 `expires_at`（worker emit 时写 `int(time.time())+7d`，见下方 TTL 常量注释点名的两处 event sink 实现），
 减去 7d TTL 常量即还原 **worker emit 的 epoch 秒**（1s 分辨率、跨机一致、不受 core 侧 0.5s 轮询 + DDB 最终
 一致抖动污染——不像 `RunResult.StepResult.duration_ms` 含轮询噪声）。
 
-**单 act 墙钟** = 同一 scope（pk）内、同一 (scenario_id, step_index) 的 `step_done.emit - step_started.emit`。
+**单 act 墙钟**指同一 scope（pk）内、同一 (scenario_id, step_index) 的 `step_done.emit - step_started.emit`。
 **硬约束**：`--assertion-votes 1` 才能拆出单 act——votes>1 时 worker 把 N 次 act 合进一个 step_done（见
 run_scope.py 的 tw_total 累加），墙钟会是 N 个 act 之和、拆不出单 act。测单 act 墙钟时务必 votes=1。
 
@@ -32,8 +32,8 @@ import argparse
 import json
 import sys
 
-# events 表 TTL 常量：emit_epoch = expires_at - 此值。须与**两端 worker**（写端）TTL 常量一致（各引擎符号名不同）：
-# Nova = engines/novaact/gherkai_worker_novaact/lib/event_sink.py 的 `_EVENTS_TTL_S`；Midscene = engines/midscene/src/lib/event-sink.mts 的
+# events 表 TTL 常量：emit_epoch 由 expires_at 减此值还原。须与**两端 worker**（写端）TTL 常量一致（各引擎符号名不同）：
+# Nova 侧在 engines/novaact/gherkai_worker_novaact/lib/event_sink.py 的 `_EVENTS_TTL_S`；Midscene 侧在 engines/midscene/src/lib/event-sink.mts 的
 # `EVENTS_TTL_S`（无前导下划线）。另一个读端同样反解：core/gherkai_core/adapters/event_log/ddb.py 的 `_EVENTS_TTL_S`
 # （`_emit_ts`）。四端各自硬编码 7d、语义契约对齐（ADR 0033/0024）；此处复刻、改动须同步全部解码方。
 _EVENTS_TTL_S = 7 * 24 * 60 * 60
@@ -83,7 +83,7 @@ def _query_by_pk(table, pk: str) -> list[dict]:
 
 
 def _emit_epoch(item: dict) -> int | None:
-    """从 item 的 expires_at 还原 worker emit epoch 秒（= expires_at - 7d）。缺 expires_at（老数据/异常）→ None。"""
+    """从 item 的 expires_at 还原 worker emit epoch 秒（即 expires_at - 7d）。缺 expires_at（老数据/异常）→ None。"""
     raw = item.get(_TTL_ATTR)
     if raw is None:
         return None
@@ -123,7 +123,7 @@ def _acts_from_scope(pk: str, items: list[dict]) -> list[dict]:
             # votes.total（AI 断言投票次数；step_done 的 votes 字段，见 core/gherkai_core/wire.py 与 Nova worker _run_step
             # 的投票循环）：**硬约束检测**——votes>1 时 worker 把 N 次 act 合进一对 step_started/step_done
             # （emit 在 N 票循环之后），此时 wall 是 N 个 act 之和、**不是单 act**。
-            # 单 act 墙钟标定要求 --assertion-votes 1；votes 缺省(动作 step 无投票)或 =1 才是干净单 act。打 multi_act
+            # 单 act 墙钟标定要求 --assertion-votes 1；votes 缺省(动作 step 无投票)或为 1 才是干净单 act。打 multi_act
             # 标记，供 _summary/_print_human 把这些排除出分位数 + 醒目告警（否则 p99 被膨胀、误判 grace 过保守）。
             votes = ev.get("votes") or {}
             votes_total = votes.get("total")

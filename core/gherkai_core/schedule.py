@@ -4,7 +4,7 @@ job 间并行（maxConcurrency 上限）、失败隔离（默认）/ fail-fast�
 schedule 只下逻辑「停」（handle.stop(grace)），不懂信号/进程——机制藏在 Engine adapter（ADR 0026）。
 
 并发模型：每个 worker 一个线程，ThreadPoolExecutor(max_workers=maxConcurrency) 自然限制
-同时运行的 worker 数（= 同时活的 AgentCore 会话数，保护真实成本）。worker 线程内迭代 ADR 0024 事件流、
+同时运行的 worker 数（也就是同时活的 AgentCore 会话数，保护真实成本）。worker 线程内迭代 ADR 0024 事件流、
 转 sink、归约成 JobResult。
 
 超时/fail-fast 用**事件间检查**：每收一个事件（或 _heartbeat_wrap 的存活心跳）后查 (clock.now()-start >
@@ -110,12 +110,12 @@ class ScheduleOpts:
     # grace 下限（引擎无关的纯数，ADR 0024 grace 硬约束）：调用方（组合根）声明「本 run 的 grace 至少要这么大」，
     # schedule 起 worker 前 enforce grace_period_s >= min_grace_s。**core 不认这个下限从何而来**（引擎特定的
     # 「Nova 需 ≥act_timeout+余量」由组合根算好传入）——core 只校验「传入 grace ≥ 声明下限」这个引擎无关的关系，
-    # 保 core 纯 reducer/引擎无知（ADR 0016/0026）。默认 0.0=无下限（不破现有直接构造 ScheduleOpts 的调用方）。
+    # 保 core 纯 reducer/引擎无知（ADR 0016/0026）。默认 0.0 表示无下限（不破现有直接构造 ScheduleOpts 的调用方）。
     min_grace_s: float = 0.0
     clock: Callable[[], float] = _time.monotonic  # 时间源（可注入 fake clock 测超时/grace 路径）
     # 网络瞬时故障的 job 级重试（ADR 0028）：仅对 error_type==network_error 且「会话未起（零 step_done）」
-    # 的 job 重试整批。默认 0=关（本地 smoke 不需要；CI/抖动环境可开）。
-    network_retry: int = 0  # 额外重试次数（总尝试 = network_retry + 1）
+    # 的 job 重试整批。默认 0 表示关（本地 smoke 不需要；CI/抖动环境可开）。
+    network_retry: int = 0  # 额外重试次数（总尝试次数为 network_retry + 1）
     retry_sleep: Callable[[float], None] = _time.sleep  # 重试间隔（可注入 no-op，保 fake-clock 单测纯净）
     # 心跳轮询间隔（秒，ADR 0028）：worker 静默卡死（不吐事件）时，_heartbeat_wrap 每隔这么久让事件循环
     # 醒一次查 deadline/abort——否则裸迭代阻塞在读上、超时永不触发（曾致 300s 超时拖到 ~620s）。
@@ -156,7 +156,7 @@ class _Worker:
         """运行一个 job，含网络瞬时故障的选择性重试（ADR 0028）。
 
         重试门槛（双条件 AND，绝不放宽）：① 本次以 network_error 失败（worker 建连失败、
-        重试耗尽）② 「会话未起」= 本次零 step_done（证明 act 没执行、无副作用、不重复计费）。
+        重试耗尽）② 「会话未起」指本次零 step_done（证明 act 没执行、无副作用、不重复计费）。
         fail_fast/timeout 优先级高于 network 重试（它们已主动中止，不再重新运行）。
         """
         # deadline 跨 attempt 共享（ADR 0028）：覆盖所有 attempt 之和，重试不重置——否则 N 次重试
@@ -170,7 +170,7 @@ class _Worker:
                 self.opts.retry_sleep(min(2.0 * attempt, 4.0))
             result, is_network, saw_step = self._run_once(deadline)
             last = result
-            # 可重试 = network_error + 会话未起（零 step_done）+ 未被 fail-fast 中止 + 还有重试额度
+            # 可重试的条件是 network_error + 会话未起（零 step_done）+ 未被 fail-fast 中止 + 还有重试额度
             retriable = (
                 is_network
                 and not saw_step
@@ -184,7 +184,7 @@ class _Worker:
     def _run_once(self, deadline: float | None) -> tuple[JobResult, bool, bool]:
         """单次执行 job。返回 (JobResult, 是否 network_error, 是否 emit 过 step_done)。
 
-        deadline：run 级共享的超时截止（None=不超时）；跨 attempt 不重置（ADR 0028）。
+        deadline：run 级共享的超时截止（None 表示不超时）；跨 attempt 不重置（ADR 0028）。
         """
         job = self.job
         result = JobResult(job=job, status=Status.PASSED)
@@ -235,7 +235,7 @@ class _Worker:
                     result.message = "fail-fast：其他 job 失败，本 job 被中止"
                     return result, False, saw_step
 
-                # _Heartbeat = _heartbeat_wrap 的静默心跳（worker 卡住不吐事件时，让上面的 deadline/abort
+                # _Heartbeat 是 _heartbeat_wrap 的静默心跳（worker 卡住不吐事件时，让上面的 deadline/abort
                 # 检查能周期性执行，ADR 0028）。不是领域事件、不 emit、不归约——查完超时即跳过，等下一个真事件或心跳。
                 # 用 isinstance（而非 is _HEARTBEAT）使静态类型能把 event 收窄回 Event（消除下面 _emit/_reduce 的告警）。
                 if isinstance(event, _Heartbeat):
@@ -253,7 +253,7 @@ class _Worker:
             self._stop()
             result.status = Status.ERROR
             # 竞态防护（ADR 0028）：worker 卡在建连退避里不吐事件时，上面的 timeout/abort 分支没机会执行
-            # （for-event 阻塞在读），worker 最终退 80 直达此处。故在此**重新判**超时/fail-fast：
+            # （for-event 阻塞在读），worker 最终以退出码 80 结束、直达此处。故在此**重新判**超时/fail-fast：
             # 若墙钟已超 / 已被 fail-fast 中止，则这是「主动中止」语义、**不重试**（主动中止优先于 network 重试），
             # 不能让超时预算被建连退避绕过。**按来源拆开**（ADR 0031）：fail-fast 中止→ABORTED，超时→error+timeout，
             # 按来源看 abort_flag、不看「是否被自己停过」（timeout 与 fail-fast 都会主动停 worker，混判即丢 timeout
@@ -261,7 +261,7 @@ class _Worker:
             if self.abort_flag.is_set():
                 result.status = Status.ABORTED
                 result.error_type = None
-                result.message = f"worker 被 fail-fast 中止后以网络码退出：{e}"
+                result.message = f"worker 被 fail-fast 中止后以网络故障退出码退出：{e}"
                 return result, False, saw_step
             if deadline is not None and clock() > deadline:
                 result.error_type = "timeout"
@@ -293,12 +293,12 @@ class _Worker:
                 result.error_type = "timeout"
                 result.message = f"job 超时（>{self.job.timeout_s}s）——worker 收停后干净退出"
             else:
-                # exit==0 却缺 scope_done = 进程声称成功、内容没发完的矛盾形态。
+                # exit==0 却缺 scope_done，这是进程声称成功、内容没发完的矛盾形态。
                 result.error_type = "engine_error"
                 result.message = "worker 正常退出但没有报完这次运行的结果——按错误处理（详见 worker 日志）"
             return result, False, saw_step
 
-        # 正常运行结束（内容完整）：job 状态 = 各 scenario 归约
+        # 正常运行结束（内容完整）：job 状态取各 scenario 归约
         result.status = _aggregate(list(scenario_status.values()))
         return result, False, saw_step
 
@@ -330,7 +330,7 @@ def schedule(
     on_job_complete: JobSink | None = None,
     on_event: Sink | None = None,
 ) -> RunResult:
-    """执行一次 run（RunMeta = definition）→ RunResult（ADR 0026）。
+    """执行一次 run（RunMeta 即 definition）→ RunResult（ADR 0026）。
 
     run_meta: 一次 run 的 definition（run_id + created_at + jobs），由组合根生成 run_id + plan
               产出 jobs 后构造传入（schedule 不自己生成 id、不取时钟——保 fake-clock 可确定性单测的
@@ -339,7 +339,7 @@ def schedule(
     engines:  按 job.engine 解析 Engine 的 resolver（schedule 对引擎数/引擎名无知）。
     sink:     接收 ADR 0024 原始流式事件的回调（与 RunResult 是同一事件流的两个视图）。被 sink_lock 串行化（进度显示）。
     on_job_complete: 每个 job 完成时回调它**已归约好的 JobResult**（ADR 0030 实时写接缝）。schedule 自己
-              不碰任何 store——落库/写序由组合根注入的回调编排（默认 None=no-op，即零落盘路径：测试/--no-report/
+              不碰任何 store——落库/写序由组合根注入的回调编排（默认 None 表示 no-op，即零落盘路径：测试/--no-report/
               纯内存都不传，保 schedule 纯 reducer 与 fake-clock 可测）。**正常路径（产品）总会接 persistence**，
               None 不是常态。在 as_completed 主线程**串行** fire（非 worker 线程）。
     on_event: 每个事件的**旁路观察者**（实时落库 RUNNING 中间态用，ADR 0030）。与 sink 区别：on_event 在
@@ -375,7 +375,7 @@ def schedule(
             jr = future.result()
             job_results.append(jr)
             # 实时写接缝（ADR 0030）：job 一完成即回调它已归约好的 JobResult，供组合根落库（schedule 不碰 store）。
-            # 主线程串行 fire。默认 None=no-op。回调异常仍冒泡（落库失败=真问题），但**冒泡前先 stop 所有正在运行的
+            # 主线程串行 fire。默认 None 表示 no-op。回调异常仍冒泡（落库失败是真问题），但**冒泡前先 stop 所有正在运行的
             # worker**——否则异常跳出 with、shutdown(wait=True) 会等正在运行的 worker 自然结束（真 AgentCore 会话持续计费）。
             if on_job_complete is not None:
                 try:
@@ -394,7 +394,7 @@ def schedule(
 
     run_status = _aggregate([jr.status for jr in job_results])
     # 成本归约（ADR 0024）：core 只各自合计 engine 报的原生量，不算美元、不判可信度。
-    #   total_tokens / total_time_worked_s = 跨 job 求和；None=无引擎报这个量（不假装 0）。
+    #   total_tokens / total_time_worked_s 都是跨 job 求和；None 表示无引擎报这个量（不假装 0）。
     tok = [jr.total_tokens for jr in job_results if jr.total_tokens is not None]
     tw = [jr.total_time_worked_s for jr in job_results if jr.total_time_worked_s is not None]
     return RunResult(

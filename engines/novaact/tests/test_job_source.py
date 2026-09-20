@@ -26,7 +26,7 @@ def test_read_takes_only_first_line_not_eof(monkeypatch):
 
 
 def test_s3_state_getobject(monkeypatch):
-    # S3 态（Fargate 化，ADR 0024）：注入 JOB_S3_URI → read() = GetObject + 解析首行 JSON（不走 stdin）。
+    # S3 态（Fargate 化，ADR 0024）：注入 JOB_S3_URI → read() 走 GetObject 再解析首行 JSON（不走 stdin）。
     # mock boto3.client（不加 moto 依赖——对称 test_artifact_upload.py 惯例）；验解析出 bucket/key + 首行 JSON。
     from unittest.mock import MagicMock
     import io as _io

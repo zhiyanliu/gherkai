@@ -6,14 +6,14 @@
 
 ## 概念一句话（细节见 ADR 0038「概念模型」）
 
-一个 **variant** = 一套具名确定性 step 集 = 一个定制镜像，落 ECR tag `<CLI 版本>-<variant>`，并对应一个
+一个 **variant** 就是一套具名确定性 step 集、也就是一个定制镜像，落 ECR tag `<CLI 版本>-<variant>`，并对应一个
 task-def **revision**（从 deploy 登记的**模板** revision 复制、镜像栏换成 `repo@sha256:<digest>`）。run 起
 task 时用的是 revision（不可变快照），故重推同名 variant 不会把运行中的 run 换掉镜像。
 
 ## 三条正确性支点（改这个文件前先读）
 
 - **digest 只在推送后取，且要按仓库挑**：见 `container` 模块头两条事实。
-- **幂等 = 每步先查再做**：`RegisterTaskDefinition` 不幂等，故以（模板 ARN、digest）二元组查重、孤儿 revision
+- **幂等靠每步先查再做**：`RegisterTaskDefinition` 不幂等，故以（模板 ARN、digest）二元组查重、孤儿 revision
   按血缘 tags 复用；SSM 写是覆盖语义；ECR push 同 digest 天然无操作。中断后重新运行收敛，不堆垃圾 revision。
 - **删 revision 前有两个前置条件**：退休满 `RETIRE_QUIET_PERIOD` + 无未到终态的 run 引用（`cleanup_pass`）。
   `DeregisterTaskDefinition` 让 revision 再也起不了新 task（且注销后最多 10 分钟才生效），detached run 逐 job
@@ -60,7 +60,7 @@ _READ_ONLY_TASK_DEF_KEYS = (
 
 
 class WorkerCommandError(Exception):
-    """部署方可修的失败（`str(exc)` 即给人看的整句）。**退码归调用方**：push-worker 退 2、deploy 四步退 1。"""
+    """部署方可修的失败（`str(exc)` 即给人看的整句）。**退出码归调用方**：push-worker 给退出码 2、deploy 四步给退出码 1。"""
 
 
 # ---------------------------------------------------------------------------
@@ -327,7 +327,7 @@ def _lineage_tags(*, variant: str, version: str, digest: str, template_arn: str)
 
 def _register_revision(ecs, *, template_arn: str, engine: str, image_ref: str, digest: str,
                        variant: str, version: str) -> str:
-    """从**模板 revision** 复制出一个新 revision（镜像栏 = `image_ref`）+ 打血缘 tags → 新 revision ARN。
+    """从**模板 revision** 复制出一个新 revision（镜像栏是 `image_ref`）+ 打血缘 tags → 新 revision ARN。
 
     **永远从模板复制、不抄「最近一次」revision**（ADR 0038 被拒方案）：最近一次可能是别人某个 variant 的、
     或模板改过后已过期。只读字段见 `_READ_ONLY_TASK_DEF_KEYS`，其余原样（`runtimePlatform` 因此自动继承 X86_64）。
@@ -612,7 +612,7 @@ def _push_one(image: str, *, engine: str, variant: str, prefix: str, version: st
     repo_uri = f"{registry}/{repo}"
     target = f"{repo_uri}:{tag}"
 
-    # 步 4：tag + push；**digest 的唯一来源 = 推送后再 inspect、按本 repo 挑**
+    # 步 4：tag + push；**digest 的唯一来源是推送后再 inspect、按本 repo 挑**
     container.tag(image, target)
     container.push(target)
     digest = digest_for_repo(container.inspect(target).repo_digests, repo_uri)
@@ -725,8 +725,8 @@ def push_worker(image: str, *, engine: str, variant: str, set_default: bool = Fa
 
 
 def _skew_gate(compose, *, prefix: str, cli_version: str | None, ssm, out) -> int | None:
-    """版本 skew 前置：block → 退 2（无放行口）；warn/skip → 打一行继续；ok → 静默；**读不到戳（凭证/权限）
-    也退 2**（对部署方是「先修凭证」，与前置同一类）。
+    """版本 skew 前置：block → 以退出码 2 结束（无放行口）；warn/skip → 打一行继续；ok → 静默；**读不到戳（凭证/权限）
+    也以退出码 2 结束**（对部署方是「先修凭证」，与前置同一类）。
 
     判据与措辞的单一真源是 `compose.check_backend_skew`（ADR 0037 决策 7）。**block 时补一句本命令专属的出路**：
     push-worker 住 `gherkai-deploy-aws`，临时用同版本 CLI 要带 extra（`gherkai[deploy-aws]==X.Y.Z`），
@@ -735,7 +735,7 @@ def _skew_gate(compose, *, prefix: str, cli_version: str | None, ssm, out) -> in
     try:
         verdict, message, stamp = compose.check_backend_skew(prefix=prefix, cli_version=cli_version, ssm=ssm)
     except Exception as exc:
-        # 读戳失败（凭证/权限/region/网络）——`read_backend_version` 有意把这类异常抛给入口前端归码，
+        # 读戳失败（凭证/权限/region/网络）——`read_backend_version` 有意把这类异常抛给入口前端决定退出码，
         # 本模块就是那个前端：归到「前置失败」这一类、不抛 traceback（同 `cli._guard_vpc_spec` 的口径）。
         out(f"读不到后端版本戳（SSM {names.ssm_path(prefix, names.BACKEND_VERSION_KEY)}）：{exc}\n"
             f"需要可用的凭证与 region（--region / AWS_REGION / --profile），以及 ssm:GetParameter 权限。")
@@ -759,7 +759,7 @@ def _set_default(aws: Aws, *, prefix: str, variant: str, version: str, engine: s
     「按本 run 用到的引擎判」同一判据，单引擎团队不该被逼着凭空推另一个引擎的镜像。
     """
     _put_ssm(aws.ssm, names.ssm_path(prefix, names.WORKER_DEFAULT_KEY), variant)
-    out(f"默认指针 → {variant}（提交时不给 --worker-variant 即用它）")
+    out(f"默认指针已设为 {variant}（提交时不给 --worker-variant 即用它）")
     tag = names.image_tag(version, variant)
     for other in names.ENGINES:
         if other == engine:
@@ -845,7 +845,7 @@ def rederive_variants(*, prefix: str, engines, version: str, aws: Aws, now: date
                      _record_json(template_arn=template_arn, revision_arn=new_arn,
                                   digest=mapping.digest, pushed_at=mapping.pushed_at))
             _retire(aws.ecs, mapping.revision_arn, now=now, out=out)
-            out(f"{engine}/{mapping.variant} 的 worker 运行配置已按本次部署更新 → {_short_arn(new_arn)}"
+            out(f"{engine}/{mapping.variant} 的 worker 运行配置已按本次部署更新为 {_short_arn(new_arn)}"
                 f"（旧配置 {_short_arn(mapping.revision_arn)} 已标记待清理）")
             results.append(PushOutcome(engine=engine, variant=mapping.variant, tag=mapping.tag,
                                        digest=mapping.digest, revision_arn=new_arn))
@@ -878,22 +878,22 @@ def run_deploy_steps(*, prefix: str, version: str, container, engines=None, regi
     """`gherkai deploy` 的 worker 镜像第 2/3/4 步 + 清理 pass（第 1 步是 stack 资源、随 cdk 事务）。
 
     **不做版本 skew 前置**（ADR 0038）：deploy 本身就是改戳的动作——前置在 cdk 前会把自己拦死、在 cdk 后恒真。
-    失败 → 退 1 且点明「stack 已生效」：cdk 已经改了账户，退 2（= 什么都没发生）会误导。
+    失败 → 以退出码 1 结束且点明「stack 已生效」：cdk 已经改了账户，退出码 2（即什么都没发生）会误导。
     """
     from gherkai_runtime import compose
 
     if aws is None:
         aws = _connect(region=region, profile=profile, out=out)
         if aws is None:
-            # 本函数只在 cdk 成功之后执行，故按本函数契约（见 docstring）退 1 并点明 stack 已生效：
-            # 账户已被改动，退 2（= 什么都没发生）会误导。
+            # 本函数只在 cdk 成功之后执行，故按本函数契约（见 docstring）给退出码 1 并点明 stack 已生效：
+            # 账户已被改动，退出码 2（即什么都没发生）会误导。
             out("stack 已生效；worker 镜像步骤未完成——重新运行 `gherkai deploy` 幂等收敛。")
             return EXIT_FAILED
     now = now or datetime.now(timezone.utc)
     engines = tuple(engines or names.ENGINES)
 
     # 容器引擎只有第 2 步（同步基础镜像 pull/push）用；非纯发行版本步会整步跳过（见 `sync_base`），此时不探活——
-    # contributor 在没装 docker 的机器上 deploy dev 版，第 3/4 步照样收敛，不为用不到的东西退 1。
+    # contributor 在没装 docker 的机器上 deploy dev 版，第 3/4 步照样收敛，不为用不到的东西给退出码 1。
     # （纯发行版则 deploy 的机器必须有容器引擎；「免容器引擎的 registry 直拷」是 ADR 0038 重议闸门里的加法。）
     if compose.is_pure_release(version):
         probe = container.probe()
@@ -921,7 +921,7 @@ def list_workers(*, prefix: str, cli_version: str | None, engines=None, region=N
                  aws: Aws | None = None, out=print, err=None, as_json: bool = False) -> int:
     """按引擎列**当前版本**的 variant（tag / digest / 推送时间 / revision）+ 默认指针 + 待清理与孤儿。
 
-    「当前版本」= 运行这条命令的 CLI 自身版本（与 push-worker 打 tag 用的同一个）——故本命令同样过 skew 前置：
+    「当前版本」指运行这条命令的 CLI 自身版本（与 push-worker 打 tag 用的同一个）——故本命令同样过 skew 前置：
     版本对不上时列出来的是另一个命名空间的东西，比不列更误导。
     """
     from gherkai_runtime import compose
@@ -985,7 +985,7 @@ def list_workers(*, prefix: str, cli_version: str | None, engines=None, region=N
 
 def _pending_cleanup(aws: Aws, *, family: str, mapped: set) -> list[dict]:
     """已退休（带 retired-at）与孤儿（带血缘 tags、不在任何版本的映射里）——清理 pass 的候选，列出来才可解释
-    「为什么 family 里 revision 比 variant 多」。`mapped` = 全部版本映射引用的 revision ARN 集合（调用方算一次）。
+    「为什么 family 里 revision 比 variant 多」。`mapped` 是全部版本映射引用的 revision ARN 集合（调用方算一次）。
     机读行 {revision_arn, reason: retired|orphan, variant, retired_at, registered_at}；文本渲染在 list_workers。"""
     items: list[dict] = []
     for rev in scan_family(aws.ecs, family):

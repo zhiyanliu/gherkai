@@ -31,7 +31,7 @@ _IT_BUCKET_ENV = "AWS_S3_BUCKET"
 
 @pytest.fixture(autouse=True)
 def _fake_aws_creds(request, monkeypatch):
-    """硬隔离：设假凭证 + 固定 region，绝不误连真 AWS（moto 官方推荐套装）。autouse=每个测试都先生效。
+    """硬隔离：设假凭证 + 固定 region，绝不误连真 AWS（moto 官方推荐套装）。autouse 表示每个测试都先生效。
 
     **对 `@pytest.mark.integration` 让路**：集成测试要连真 AWS，若给它盖假凭证会连不上——故检测到
     integration 标记就直接返回、不覆盖凭证（让真 default profile 生效）。单测无此标记，照旧硬隔离。
@@ -216,7 +216,7 @@ def real_aws():
     传入。用真凭证（default profile，`_fake_aws_creds` 对 integration 标记让路）。region 取 AWS_REGION/
     AWS_DEFAULT_REGION，默认 us-east-1。
 
-    产出 dict：{ddb, table_name, s3, bucket}——与单测 `aws` fixture 同形，故集成用例可复用单测的构造逻辑。
+    产出 dict：{ddb, table_name, s3, bucket}——与单测 `aws` fixture 结构相同，故集成用例可复用单测的构造逻辑。
     **自清理**：yield 后删本次用例经 adapter 写进真表/真桶的所有条目（按 run_id / key 前缀），不留垃圾。
     整批清理 key 由用例登记进返回 dict 的 `_cleanup_run_ids` / `_cleanup_prefixes`（helper 见下）。
     """

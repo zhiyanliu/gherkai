@@ -61,7 +61,7 @@ def test_outline_expands_and_distinguishable():
 def test_rule_nested_scenarios_get_distinct_ids():
     # gherkin Compiler 把 Rule 下 scenario 完全展开成真 pickle（真 job）；其 astNodeIds 指向 Rule 内节点。
     # 曾 bug：_index_ast_lines 只遍历 feature 顶层、不下钻 rule → Rule 内 scenario 回查行号得 None →
-    # id 塌成 "t.feature:None"、多个 Rule 场景静默撞名（ADR 0025 撞名=静默灾难）。此测护住递归下钻。
+    # id 塌成 "t.feature:None"、多个 Rule 场景静默撞名（ADR 0025：撞名就是静默灾难）。此测护住递归下钻。
     jobs = _plan(
         """Feature: F
   Rule: R1
@@ -152,7 +152,7 @@ def test_cross_file_scope_merge_warns(caplog):
 def test_duplicate_uri_errors():
     f = FeatureSource("dup.feature", "Feature: D\n  Scenario: s\n    When \"x\"\n")
     with pytest.raises(PlanError, match="给了两次"):
-        plan([f, f], CFG)  # 同一文件喂两遍 = 调用方 bug，fail-fast
+        plan([f, f], CFG)  # 同一文件喂两遍属调用方 bug，fail-fast
 
 
 def test_distinct_uri_ok():
@@ -298,14 +298,14 @@ def test_unlabeled_scope_independent_jobs():
     assert len(set(scope_ids)) == 2  # scope_id 不撞（继承 scenario_id 的 example 消歧）
 
 
-# ---- scope_id 命名空间：@scope 的值撞上未标 scenario 的 id → 报错（ADR 0025：撞 id = 静默灾难）----
+# ---- scope_id 命名空间：@scope 的值撞上未标 scenario 的 id → 报错（ADR 0025：撞 id 就是静默灾难）----
 def test_named_scope_colliding_with_unlabeled_scenario_id_errors():
-    """未标 scope 的 scenario 拿自己的 id 当 scope_id；@scope 标成同一个字符串 = 两组派生出同一个 scope_id。
+    """未标 scope 的 scenario 拿自己的 id 当 scope_id；@scope 标成同一个字符串，两组就派生出同一个 scope_id。
 
-    曾静默并成一个 job（= 一个共享会话）、同文件内连跨文件合并 warning 都不打；scope_id 是下游主键
+    曾静默并成一个 job（即一个共享会话）、同文件内连跨文件合并 warning 都不打；scope_id 是下游主键
     （状态 Map / 结果文件 / claim），撞上等于丢结果，故 fail-fast。
     """
-    # `Scenario: plain` 在第 2 行 → 它的 scope_id = t.feature:2
+    # `Scenario: plain` 在第 2 行 → 它的 scope_id 是 t.feature:2
     with pytest.raises(PlanError, match="编号相同"):
         _plan(
             """Feature: T
@@ -406,7 +406,7 @@ def test_assertion_votes_from_config_propagates_to_all_jobs():
     assert all(j.assertion_votes == 3 for j in jobs)  # 缺省值贯穿到每个 job
 
 
-# ---- 步骤关键字判不出 → fail-fast（ADR 0025：keyword 只决定派发,判不出=拒绝猜）----
+# ---- 步骤关键字判不出 → fail-fast（ADR 0025：keyword 只决定派发,判不出就拒绝猜）----
 
 
 def test_star_step_keyword_fails_fast():

@@ -8,7 +8,7 @@
 - definition 唯一真值在 run_meta.json。jobs/*.json 内嵌的 job def 是其**自包含副本**——非独立维护的第二真值、
   不会漂移（两处都序列化同一次 plan 产出的同一个 Job 对象，共用 serialize.job_to_dict）。嵌它是为让 CI 读
   单 scope 不依赖 run_meta（上云对象存储按 key 取单 job 同理）。
-- **判定真值唯一权威 = jobs/*.json（数据面 ResultStore）**。run_state.json 的 status / 各 job status 是
+- **判定真值的唯一权威是 jobs/*.json（数据面 ResultStore）**。run_state.json 的 status / 各 job status 是
   **控制面投影摘要**（供 exit-code / 未来的轮询式恢复执行 / WebUI 进度），与 jobs/*.json 同源（均从同一 RunResult
   投影，不双写漂移）。要权威判定读 jobs/*.json；要快速总览/轮询读 run_state.json。
 
@@ -124,7 +124,7 @@ class LocalRunStore:
 
     def _locked_rmw(self, run_id: str, mutate) -> bool:
         """在 run_state.json 上做跨进程原子 read-modify-write：持文件锁 → 读 state → mutate(state)→
-        (新 state | None)；None=条件不满足不写、返回 False；否则写回、返回 True。state 不存在 → False。"""
+        (新 state | None)；None 表示条件不满足、不写并返回 False；否则写回、返回 True。state 不存在 → False。"""
         import fcntl
 
         path = self._root / run_id / "run_state.json"

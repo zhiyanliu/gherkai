@@ -67,7 +67,7 @@ def test_on_job_complete_saves_result_before_job_state():
 # ---- 决定三：on_event 旁路观察者只对 ScopeStarted 刷 RUNNING（反向不变量）----
 def test_on_event_runs_only_on_scope_started():
     # on_event 不再装饰/转发 sink（进度转发是 schedule 的 progress_sink 的事）——它只是事件观察者：
-    # 仅 ScopeStarted 触发一次 RUNNING 刷（带血缘），其余事件零落库（否则每个 step 都刷 = RMW 风暴）。
+    # 仅 ScopeStarted 触发一次 RUNNING 刷（带血缘），其余事件零落库（否则每个 step 都刷，就成了 RMW 风暴）。
     calls, run, result, report = _recording()
     p = RunPersistence("r", run, result, report)
 
@@ -120,7 +120,7 @@ def test_finalize_isolates_report_write_failure(tmp_path):
     # 不抛、返回 None（run 已 commit，对外输出/退出码不被派生视图写失败拖垮）
     ret = p.finalize(rr, ended_at="t9")
     assert ret is None
-    # commit point 仍落了：run_state 终态 = PASSED + ended_at（finalize_run 不在隔离范围内）
+    # commit point 仍落了：run_state 终态是 PASSED 加 ended_at（finalize_run 不在隔离范围内）
     state = run_store.load_run_state("r")
     assert state is not None and state.status == Status.PASSED and state.ended_at == "t9"
     # 核心不变量：ReportStore.write 抛异常被隔离、run 照常 commit（返回 None + 控制面终态已落），
@@ -132,7 +132,7 @@ def test_begin_writes_all_pending_initial_state():
     calls, run, result, report = _recording()
     p = RunPersistence("r", run, result, report)
     p.begin(_meta("r", ["a", "b"]), started_at="t0")
-    # create_run 收到的 initial_state：总 pending、各 job pending、key 集 == run_meta、起止按生命周期
+    # create_run 收到的 initial_state：总 pending、各 job pending、key 集与 run_meta 一致、起止按生命周期
     initial = next(arg for (s, m, arg) in calls if m == "create_run")
     assert initial.status == Status.PENDING
     assert set(initial.jobs.keys()) == {"a", "b"}
@@ -184,7 +184,7 @@ def test_running_phase_has_no_data_plane_file_until_complete(tmp_path):
     """锁定「两面分离」（ADR 0016 三层切分 + 0030）——提交者实测会困惑的点：
     job 处于 RUNNING 时，控制面 run_state.json 显示 running，但数据面 jobs/<scope>.json **还不存在**；
     只有 job 完成（on_job_complete）出了判定，jobs/<scope>.json 才落。
-    数据面 = 判定真值，RUNNING 的 job 还没判定，故意不写半截——「jobs/ 里出现文件 = 判定已就绪」。"""
+    数据面存的是判定真值，RUNNING 的 job 还没判定，故意不写半截——「jobs/ 里出现文件就表示判定已就绪」。"""
     from urllib.parse import quote
     from gherkai_core.adapters.run_store.local import LocalRunStore
     from gherkai_core.adapters.result_store.local import LocalResultStore
@@ -207,7 +207,7 @@ def test_running_phase_has_no_data_plane_file_until_complete(tmp_path):
 
     # —— complete 阶段（on_job_complete 出了判定）——
     p.on_job_complete(_jr("s", Status.PASSED))
-    # 数据面：现在才出现 jobs/<scope>.json（= 判定就绪，commit-point 语义）
+    # 数据面：现在才出现 jobs/<scope>.json（即判定就绪，commit-point 语义）
     assert job_file.exists()
     assert [jr.scope_id for jr in result_store.load_all("r")] == ["s"]
     # 控制面：同步刷成终态

@@ -1,4 +1,4 @@
-"""`--no-report` = 真不生成（ADR 0037 决策 3）：env GHERKAI_NO_ARTIFACTS=1 时 worker 不收集/不上报引擎原生产物。"""
+"""`--no-report` 即真不生成（ADR 0037 决策 3）：env GHERKAI_NO_ARTIFACTS=1 时 worker 不收集/不上报引擎原生产物。"""
 from __future__ import annotations
 
 from types import SimpleNamespace

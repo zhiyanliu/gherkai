@@ -84,7 +84,7 @@ def job_to_dict(job: Job) -> dict:
         "engine": job.engine,
         "scenarios": [_scenario_def_to_dict(sc) for sc in job.scenarios],
         "assertion_votes": job.assertion_votes,
-        # timeout_s：omit-when-None（无预算=键缺失，旧落盘兼容；ADR 0034「job timeout」节）
+        # timeout_s：omit-when-None（无预算就不写这个键，旧落盘兼容；ADR 0034「job timeout」节）
         **({"timeout_s": job.timeout_s} if job.timeout_s is not None else {}),
     }
 
@@ -96,7 +96,7 @@ def job_from_dict(d: dict) -> Job:
         engine=d["engine"],
         scenarios=tuple(_scenario_def_from_dict(sc) for sc in d.get("scenarios", [])),
         assertion_votes=d.get("assertion_votes", 1),  # 向后兼容旧落盘（无此键 → 默认 1）
-        timeout_s=d.get("timeout_s"),  # 向后兼容：旧落盘无此键 → None=不超时（ADR 0034）
+        timeout_s=d.get("timeout_s"),  # 向后兼容：旧落盘无此键 → None，表示不超时（ADR 0034）
     )
 
 
@@ -136,7 +136,7 @@ def job_result_to_dict(jr: JobResult, *, include_job: bool = True) -> dict:
     if include_job:
         d["job"] = job_to_dict(jr.job)   # 自包含：def 真值全在此，顶层不再抄
     else:
-        d["scope_id"] = jr.scope_id      # 聚合：唯一的顶层 def 字段 = join key（from_dict 据此 join run_meta）
+        d["scope_id"] = jr.scope_id      # 聚合：唯一的顶层 def 字段就是 join key（from_dict 据此 join run_meta）
     d.update({
         "status": jr.status.value,
         "duration_ms": jr.duration_ms,
@@ -272,10 +272,10 @@ def run_meta_to_dict(meta: RunMeta) -> dict:
         **({"extra_http_headers": dict(sorted(meta.extra_http_headers))}
            if meta.extra_http_headers else {}),
         # max_concurrency（ADR 0034 机制四）omit-when-None：`is not None` 判而非判真——0 这类无意义值也须
-        # 忠实往返（不在序列化层悄悄变形成「缺失」，语义把关归组合根/推进器）。省键=旧落盘兼容。
+        # 忠实往返（不在序列化层悄悄变形成「缺失」，语义把关归组合根/推进器）。省键同时兼容旧落盘。
         **({"max_concurrency": meta.max_concurrency} if meta.max_concurrency is not None else {}),
         # steps_dir（ADR 0037 决策 4）omit-when-None，同 max_concurrency 的判据：`is not None`——空串这类
-        # 无意义值也忠实往返，语义把关归组合根（提交侧解析）。省键=旧落盘兼容（读端 .get → None）。
+        # 无意义值也忠实往返，语义把关归组合根（提交侧解析）。省键同时兼容旧落盘（读端 .get → None）。
         **({"steps_dir": meta.steps_dir} if meta.steps_dir is not None else {}),
         # worker_variant / worker_task_defs（ADR 0038）omit-when-None，同 steps_dir 的判据。两者成对出现但
         # **各自独立 omit**：序列化层不替语义层做「有 A 必有 B」的把关（那是提交侧组合根的事），忠实往返优先。
@@ -296,14 +296,14 @@ def run_meta_from_dict(d: dict) -> RunMeta:
         max_concurrency=d.get("max_concurrency"),  # 键缺失 → None（旧落盘兼容）
         steps_dir=d.get("steps_dir"),  # 键缺失 → None（旧落盘 / 云端后端不写此键，ADR 0037 决策 4）
         worker_variant=d.get("worker_variant"),  # 键缺失 → None（旧落盘 / 本机后端，ADR 0038）
-        # dict 原样复制（键=engine 名，值=revision ARN）；键缺失 → None ⇒ 宿主走默认指针兼容路径
+        # dict 原样复制（键是 engine 名，值是 revision ARN）；键缺失 → None，宿主走默认指针兼容路径
         worker_task_defs=(dict(wtd) if (wtd := d.get("worker_task_defs")) is not None else None),
     )
 
 
 def run_state_to_dict(state: RunState) -> dict:
     # started_at/ended_at 用 omit-when-None：无值时（如 --no-report 下零落盘运行不取时钟、或未来接力推进的部分态）
-    # 写成永远的 "null" 是噪音（读者会当 bug）。键缺失语义（=未取时钟）比 null（=取了为空）更诚实；
+    # 写成永远的 "null" 是噪音（读者会当 bug）。键缺失语义（即未取时钟）比 null（即取了为空）更诚实；
     # 有值时（正常 run 经 RunPersistence.begin/finalize 落 started_at/ended_at，ADR 0030）键自然出现
     # （from_dict 用 .get 容忍缺失，round-trip 不破）。
     d: dict = {"run_id": state.run_id, "status": state.status.value}

@@ -5,13 +5,13 @@
 //
 // 加载规则：**排序**递归遍历 `*.mts` / `*.mjs`（排除 `_*` 与 `*.test.*`），逐个 `await import(fileURL)`，
 // 文件顶层 `deterministic(...)` 的副作用完成注册。排序保证 conflict 清单可复现（ADR 0036）。
-// `_*` = 使用方的辅助模块（页面对象、选择器常量、共享 helper），不自动加载、供 step 文件相对 import——
+// `_*` 是使用方的辅助模块（页面对象、选择器常量、共享 helper），不自动加载、供 step 文件相对 import——
 // 与 Nova 侧同义（同一份 `steps/` 目录在两个引擎上能承载的内容必须对称）。**`_` 判在路径的任一段上**：
 // `_selectors.mts` 与 `_pages/selectors.mts` 都不自动加载，故辅助模块既可按文件前缀标、也可按目录分组
 // （目录级排除两侧同时在，否则同一个 `_pages/login.mts` 会在一侧注册、在另一侧静默落回 AI）。它同时挡住
 // 下面零注册检查的一类误报：辅助模块自己一条都不注册，被自动加载就会撞上那条 fail-loud。
 //
-// 两条 fail-loud（本项目最忌静默降级——跳过一个 step 文件 = 把确定性判定静默换成 AI catch-all、run 可能「通过」）：
+// 两条 fail-loud（本项目最忌静默降级——跳过一个 step 文件就等于把确定性判定静默换成 AI catch-all、run 可能「通过」）：
 //   ① import 失败（语法/依赖错）→ 立刻抛，带文件名与原异常；
 //   ② **零注册检查**：某文件加载后注册表条数没涨 → 抛。这是 ADR 0037 决策 4「双实例」的显式化——
 //      裸 specifier 若解析到第二份包副本，注册会落进 worker 永远不读的表，症状本来是「全部 step 静默走 AI」；
@@ -60,7 +60,7 @@ export interface LoadUserStepsDeps {
 }
 
 /** 加载使用方 steps 目录。env 未设 / 空串 → no-op（使用方没定制，正常路径）；env 已设但目录不存在 / 不是目录 → 抛
- * （fail-loud：明确指了一个地方而那里没东西 = 配置错，不是「没定制」，ADR 0037 决策 4）。
+ * （fail-loud：明确指了一个地方而那里没东西就是配置错，不是「没定制」，ADR 0037 决策 4）。
  * 返回加载了的文件列表（诊断用）。 */
 export async function loadUserSteps(deps: LoadUserStepsDeps = {}): Promise<string[]> {
   const stepsDir = deps.stepsDir ?? process.env.GHERKAI_STEPS_DIR;

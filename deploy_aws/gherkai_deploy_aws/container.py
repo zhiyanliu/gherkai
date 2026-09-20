@@ -2,10 +2,10 @@
 
 **只五个动词**：`inspect`（存在 + 架构；**推送后**才取 digest）/ `tag` / `login` / `push` / `pull`。
 push-worker 与 `gherkai deploy` 的基础镜像同步之外，CLI / runtime / CDK 一概不碰容器引擎——口子收在这里，
-将来 podman（同形子命令）或「免容器引擎的 registry 直拷」（ADR 0038 重议闸门）都只改本文件。
+将来 podman（子命令结构相同）或「免容器引擎的 registry 直拷」（ADR 0038 重议闸门）都只改本文件。
 
 **当前只实现 docker**：`--container-engine` / env `GHERKAI_CONTAINER_ENGINE` 认得别的名字，但给别的名字
-是退 2（`UnsupportedContainerEngine`），不是静默回落 docker——静默回落会让人以为自己在用 podman。
+是以退出码 2 结束（`UnsupportedContainerEngine`），不是静默回落 docker——静默回落会让人以为自己在用 podman。
 
 ## 两条与 ADR 绑死的事实（别「优化」掉）
 
@@ -31,10 +31,10 @@ from dataclasses import dataclass, field
 # `--container-engine` 的 env 等价物（flag 优先）。名字与 flag 同源，见 `resolve_container_engine`。
 CONTAINER_ENGINE_ENV = "GHERKAI_CONTAINER_ENGINE"
 DEFAULT_CONTAINER_ENGINE = "docker"
-# 当前实装的引擎全集。podman 同形子命令、接得进来，但**没实际运行过就不敢说支持**（ADR 0038 重议闸门）。
+# 当前实装的引擎全集。podman 子命令结构相同、接得进来，但**没实际运行过就不敢说支持**（ADR 0038 重议闸门）。
 SUPPORTED_ENGINES = ("docker",)
 
-# worker 镜像的目标平台（ADR 0038「架构」：固定 linux/amd64，模板 revision 的 runtimePlatform = X86_64）。
+# worker 镜像的目标平台（ADR 0038「架构」：固定 linux/amd64，模板 revision 的 runtimePlatform 为 X86_64）。
 TARGET_OS = "linux"
 TARGET_ARCH = "amd64"
 
@@ -42,7 +42,7 @@ TARGET_ARCH = "amd64"
 class ContainerError(Exception):
     """容器引擎侧的失败（**用户可修**：引擎没装、daemon 没起、镜像不存在、push 被拒……）。
 
-    `str(exc)` 即给人看的整句；调用方按自己的退出码层归码（push-worker 退 2、deploy 四步退 1）。
+    `str(exc)` 即给人看的整句；调用方按自己的退出码层决定退出码（push-worker 给退出码 2、deploy 四步给退出码 1）。
     """
 
 
@@ -86,7 +86,7 @@ def digest_for_repo(repo_digests, repo_uri: str) -> str | None:
 
 
 class ContainerEngine:
-    """docker CLI 的五动词薄壳（子进程调用；不用 SDK——多一个依赖、且 podman 的 SDK 不同形）。
+    """docker CLI 的五动词薄壳（子进程调用；不用 SDK——多一个依赖、且 podman 的 SDK 结构不同）。
 
     `binary` 是可执行名/路径（测试可指向假脚本）。构造**不探活**（构造在参数解析期发生、探活要花时间且需要
     daemon）；探活是显式的 `probe()`——调用方在真要用之前调一次，把「引擎没装/daemon 没起」与「push 失败」
@@ -181,7 +181,7 @@ class ContainerEngine:
 def resolve_container_engine(requested: str | None = None) -> ContainerEngine:
     """选容器引擎：`--container-engine` > env `GHERKAI_CONTAINER_ENGINE` > `docker`。
 
-    未实装的名字 → `UnsupportedContainerEngine`（调用方退 2）。**不静默回落 docker**：给了 `--container-engine
+    未实装的名字 → `UnsupportedContainerEngine`（调用方以退出码 2 结束）。**不静默回落 docker**：给了 `--container-engine
     podman` 却运行 docker，用户会以为自己验过 podman 路径（ADR 0038 只实现 docker）。
     """
     import os

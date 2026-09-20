@@ -12,11 +12,11 @@
 // 经本模块的公开导出面 index.mts 注册进**同一张**表）。
 //
 // handler 约定：
-//   - 签名 (ctx, groups) => void | Promise<void>：ctx.page = Playwright Page；
-//     groups = 正则具名组 (?<name>...) 的对象。
+//   - 签名 (ctx, groups) => void | Promise<void>：ctx.page 是 Playwright Page；
+//     groups 是正则具名组 (?<name>...) 的对象。
 //   - 判定失败抛 DeterministicAssertion（或 node:assert 的 AssertionError）→ step 记 failed；
 //     抛其它 → step 记 error。
-//   - 不投票（确定性 = 无抖动，与 AI 断言的 votes 区分）。
+//   - 不投票（确定性即无抖动，与 AI 断言的 votes 区分）。
 import type { Page } from "playwright";
 
 export interface DeterministicCtx {

@@ -149,7 +149,7 @@ def test_launch_failure_does_not_wedge_run(tmp_path):
     done = tick("run-1", meta, log, store, boom, max_concurrency=2, now_iso="t1")
     assert done is False
     assert boom.attempts == ["a", "b"]  # 第一个炸不拖垮第二个（失败隔离）
-    # tick2：重放看到 exit≠0 → 两 job ERROR → 全终态 → finalize，run 收敛
+    # tick2：重放看到退出码非零 → 两 job ERROR → 全终态 → finalize，run 收敛
     done = tick("run-1", meta, log, store, boom, max_concurrency=2, now_iso="t2")
     assert done is True
     state = store.load_run_state("run-1")

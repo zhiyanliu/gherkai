@@ -18,7 +18,7 @@ import pytest
 from gherkai_core.model import JobState, RunMeta, RunState, Status
 from tests.test_stores import _sample_run
 
-pytestmark = pytest.mark.integration  # 本文件全部用例 = 集成测试（默认 deselect）
+pytestmark = pytest.mark.integration  # 本文件全部用例都是集成测试（默认 deselect）
 
 _counter = itertools.count(1)  # 单进程内递增，给 run_id 去重
 

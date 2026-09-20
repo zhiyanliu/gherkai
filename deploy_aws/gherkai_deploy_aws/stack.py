@@ -105,10 +105,10 @@ class BackendStack(Stack):
     def _resolve_version(self) -> str:
         """后端版本戳（PEP 440 字符串）：**`-c version=` 必给、无隐式默认**。
 
-        单一真源 = 发起这次部署的命令（`gherkai deploy` 传自己的版本，ADR 0037 决策 6/7 版本真源）。
+        单一真源是发起这次部署的命令（`gherkai deploy` 传自己的版本，ADR 0037 决策 6/7 版本真源）。
         **不在此回落成「本包自报的 dist 版本」**：那会造出第二个真源——本 stack 由 cdk CLI 起的子进程合成，
         真要与命令进程分叉（换 interpreter / 混装），回落值会静默写错戳，而戳恰是 preflight 唯一判据（决策 7
-        CLI 新于后端即退 2、不设放行口）。写错比缺失更坏，故缺即 fail-fast、点明该走 `gherkai deploy`。
+        CLI 新于后端即以退出码 2 结束、不设放行口）。写错比缺失更坏，故缺即 fail-fast、点明该走 `gherkai deploy`。
         **synth 期校验 PEP 440**：戳的消费者用 `packaging.version.Version` 比较（决策 7），非法串会让 preflight
         在每个提交者那里炸；这里花一次校验换那边永不炸。
         """
@@ -147,7 +147,7 @@ class BackendStack(Stack):
         # **按 `status` 的稀疏 GSI**（ADR 0038「不变量·清理 pass」）：worker revision 清理时的运行中 run 引用检查要查
         # 「有没有未到终态的 run 还引用这个 revision」，走 `Query` 非终态状态 + `contains` 过滤。
         # - **稀疏是构造出来的**：只有 STATE item 带顶层 `status`（META item 没有），故索引里天然只有 STATE。
-        # - **projection = INCLUDE `worker_task_def_arns`**：过滤表达式 `contains(worker_task_def_arns, :arn)`
+        # - **projection 取 INCLUDE `worker_task_def_arns`**：过滤表达式 `contains(worker_task_def_arns, :arn)`
         #   作用在**索引投影出的属性**上，不投影则恒不匹配、引用检查静默失效（会删掉运行中 run 手里的 revision）。
         #   不用 ALL：runs 表 STATE 的 `jobs` Map 随 job 数增长，全投影等于给每个 run 存第二份。
         # - **必须有索引、不能 Scan**：runs 表 `RETAIN`、无 TTL、随历史单调增长，Scan 成本无上界
@@ -200,7 +200,7 @@ class BackendStack(Stack):
         """建/取 VPC，**并把生效的取值记进 `self._vpc_spec`**（写 SSM 供下次 deploy 三态比对，ADR 0037 决策 6）。
 
         取值形态（与 `gherkai deploy --vpc` 三种取值一一对应，比对逻辑在 `cli.vpc_spec_matches`）：
-        `<vpc-id>` = 复用现有 / `default` = 账户默认 VPC / `new:<所建 vpc-id>` = 本 stack 新建（存出所建 id
+        `<vpc-id>` 表示复用现有、`default` 表示账户默认 VPC、`new:<所建 vpc-id>` 表示本 stack 新建（存出所建 id
         使 `new` 取值也可回溯核对）。**取值必须在此一处推导**——它是「这次部署到底落在哪个 VPC」的唯一记账点，
         与真正建/取 VPC 的分支同生死；分两处写就会出现「SSM 说 default、资源建在新 VPC」的错账。
         """
@@ -263,7 +263,7 @@ class BackendStack(Stack):
         # 存储）是记在案的已知运行期成本，回收与 `delete-worker` 同批设计（ADR 0038 重议闸门）。
         repo = ecr.Repository(
             self, f"Ecr{engine.capitalize()}",
-            repository_name=names.ecr_repo_name(self.prefix, engine),  # repo 名 == task-def family 名（命名真源，ADR 0038）
+            repository_name=names.ecr_repo_name(self.prefix, engine),  # repo 名与 task-def family 名相同（命名真源，ADR 0038）
             removal_policy=RemovalPolicy.RETAIN,
         )
         # task role（容器内 worker 凭证）——**最小权限、按引擎分立**（ADR 0033：一个引擎被攻破不波及另一个引擎模型权限）。
@@ -276,7 +276,7 @@ class BackendStack(Stack):
 
         # cpu/memory 是 **worker 进程自身**（Python/Node 运行时 + SDK）的余量——**容器内不运行浏览器**：两个引擎
         # 都经 CDP 连 AgentCore 云浏览器、镜像不装 chromium 二进制（ADR 0033「2 镜像」条）。取 1vCPU/2GB 起步
-        # （实际运行标定，属运维配置）。stopTimeout（SIGTERM→SIGKILL 宽限）= self.stop_timeout_s（默认 120s、
+        # （实际运行标定，属运维配置）。stopTimeout（SIGTERM→SIGKILL 宽限）取 self.stop_timeout_s（默认 120s、
         # -c stop_timeout= 覆盖，Fargate ≤120s 硬上限——grace 真容器校准见 _resolve_stop_timeout / ADR 0032）。
         task_def = ecs.FargateTaskDefinition(
             self, f"TaskDef{engine.capitalize()}",
@@ -286,7 +286,7 @@ class BackendStack(Stack):
             task_role=task_role,
         )
         task_def.add_container(
-            names.container_name(engine),  # **container 名 = {engine}-worker（不带 prefix）**——cli RunTask 逐字匹配（ADR 0033 硬契约）
+            names.container_name(engine),  # **container 名是 {engine}-worker（不带 prefix）**——cli RunTask 逐字匹配（ADR 0033 硬契约）
             image=ecs.ContainerImage.from_ecr_repository(repo, tag="latest"),
             logging=ecs.LogDriver.aws_logs(
                 stream_prefix=engine,
@@ -336,7 +336,7 @@ class BackendStack(Stack):
         # 收窄（ADR 0033；SAR + IAM 策略模拟器对本账户实证）——拆两条 statement：
         # 系统默认 browser（aws.browser.v1，非自建 custom，ADR 0011）的 ARN **account 段是字面量 `aws`**（非客户账户！
         # 官方人读文档误写成 <account_id>，实测 get-browser 返回 aws、模拟器验证填客户账户会 implicitDeny——copy-account 陷阱）。
-        # browser-profile 是客户自建资源（account=客户账户，profileId 运行期生成 → * 通配）。
+        # browser-profile 是客户自建资源（account 是客户账户，profileId 运行期生成 → * 通配）。
         _sys_browser = f"arn:aws:bedrock-agentcore:{region}:aws:browser/aws.browser.v1"
         _browser_profiles = f"arn:aws:bedrock-agentcore:{region}:{acct}:browser-profile/*"
         role.add_to_policy(iam.PolicyStatement(
@@ -385,7 +385,7 @@ class BackendStack(Stack):
                 resources=[f"{_wf}/*", f"{_wf}/*/workflow-run/*"],
             ))
             # AgentCore 保存会话 profile（实际运行暴露：Nova 会话结束想存 profile 优化下次；缺它只 WARNING、非致命，
-            # 但最小权限该有）。SAR resource_types = browser + browser-profile：触及来源系统 browser（account=aws）+ 目标 profile。
+            # 但最小权限该有）。SAR resource_types 取 browser + browser-profile：触及来源系统 browser（account=aws）+ 目标 profile。
             role.add_to_policy(iam.PolicyStatement(
                 actions=["bedrock-agentcore:SaveBrowserSessionProfile"],
                 resources=[_sys_browser, _browser_profiles],
@@ -492,7 +492,7 @@ class BackendStack(Stack):
         # 曾短暂注入过的 `WORKER_TEMPLATE_ARNS` env 随本决策撤掉。模板 ARN 只经 SSM 给部署方的 `push-worker`
         # 复制母本用（见 `_one_task_def`）。
         # 推进器读 SSM：兼容回落要读默认指针与 worker-image 映射（ADR 0038「权限面增量·云端推进器」）。
-        # 资源域 = 本 prefix 的参数子树（路径形态走 `names.ssm_path`，别在此复刻 `/{prefix}backend/` 串）。
+        # 资源域是本 prefix 的参数子树（路径形态走 `names.ssm_path`，别在此复刻 `/{prefix}backend/` 串）。
         ssm_read = iam.PolicyStatement(
             actions=["ssm:GetParameter", "ssm:GetParametersByPath"],
             resources=[f"arn:aws:ssm:{self.region}:{self.account}:parameter{names.ssm_path(self.prefix, '*')}"],
@@ -562,16 +562,16 @@ class BackendStack(Stack):
             f"arn:aws:ecs:{self.region}:{self.account}:task-definition/{names.task_def_name(self.prefix, e)}:*"
             for e in names.ENGINES
         ]
-        # ② reconciler Lambda（重；读全量重放 + 起 task + finalize 聚合）与 ③ kicker（踢启器）Lambda 是**同款装配**
+        # ② reconciler Lambda（重；读全量重放 + 起 task + finalize 聚合）与 ③ kicker（踢启器）Lambda 是**同一套装配**
         #    （env + 表/桶 grant + 起 task/停 task/超时 schedule 全套策略），只差入口 handler 与触发源——分工：kicker「让 run
         #    动起来」（runs 表 Stream INSERT 冷启动 + status --wait kickoff）/ reconciler「推着走」（events 表 Stream）。
         #    两侧 env 与权限面**必须同**（kicker 起首批、reconciler 续起，权限/并发不一致就会「首批能起、续起失败」），
         #    故装配抽成 _advancer_function 一份、别复写两遍。
-        # env = common_env + 起 task 所需（SUBNETS/SG/MAX_CONCURRENCY）。本包 lambdas/reconciler.py docstring 的 env
+        # env 是 common_env 加上起 task 所需的几项（SUBNETS/SG/MAX_CONCURRENCY）。本包 lambdas/reconciler.py docstring 的 env
         # 清单里还有 **REPORT_DIR / ASSIGN_PUBLIC_IP——IaC 有意不注入**，由该文件内缺省供给（reports / ENABLED）；
         # 改产物落点前缀或走私有子网（NAT 出网、assignPublicIp=DISABLED）时才需在此显式给。
         # 注：真要改 REPORT_DIR，用户侧 `submit --report-dir` 须跟着改成同值——detached submit 的 preflight
-        # 比对两侧、不一致即退 2（ADR 0033 preflight 条「产物前缀一致性」）。
+        # 比对两侧、不一致即以退出码 2 结束（ADR 0033 preflight 条「产物前缀一致性」）。
         advancer_env = {
             **common_env,
             "SUBNETS": subnets_env,
@@ -631,7 +631,7 @@ class BackendStack(Stack):
 
     def _advancer_function(self, construct_id: str, *, function_name: str, handler: str, code, environment: dict,
                            task_def_arns: list, timeout_schedule_arns: list, scheduler_role, ssm_read):
-        """推进器 Lambda（reconciler / kicker）的同款装配：Function + 表/桶 grant + 起 task/停 task/超时 schedule 全套策略。
+        """推进器 Lambda（reconciler / kicker）的同一套装配：Function + 表/桶 grant + 起 task/停 task/超时 schedule 全套策略。
 
         两个推进器分工不同、权限面与 env 相同（ADR 0034）——曾整段复写两遍，单侧改漏即权限分叉（首批能起、续起失败）。
         触发源（events/runs 表 Stream）不在此挂：那是两者唯一的差别，留在调用点。
@@ -690,10 +690,10 @@ class BackendStack(Stack):
     def _build_lambda_asset(self) -> str:
         """把 Lambda 代码摊到一个目录，返回其路径（`Code.from_asset` 用）。
 
-        内容 = 本包 `lambdas/` 的 handler 源（asset 原料，ADR 0037 决策 6）+ `LAMBDA_ASSET_PACKAGES` 逐项
+        内容是本包 `lambdas/` 的 handler 源（asset 原料，ADR 0037 决策 6）+ `LAMBDA_ASSET_PACKAGES` 逐项
         **从当前 venv 已安装位置**复制过来的 import 名（包 → 目录、单文件模块 → `.py`，见 `_installed_import_source`）。
 
-        **来源 = 已安装包、不是仓库相对路径、不联网装**（ADR 0037 决策 6）：
+        **来源是已安装包、不是仓库相对路径、不联网装**（ADR 0037 决策 6）：
         - 仓库相对路径（`../core/gherkai_core` 一类）只在 monorepo 里成立，wheel 用户的 site-packages 里没有
           这种布局——那是「IaC 工程假定自己躺在 monorepo 里」的残留；
         - 联网 `pip install gherkin-official` 会在离线环境断、且装到的是 PyPI 上的某个版本而非**运行中这一份**；
@@ -730,7 +730,7 @@ class BackendStack(Stack):
         """当前 venv 里某个 import 名的源路径（`find_spec`）——Lambda asset 的复制源，见 `_build_lambda_asset`。
 
         **两种形态都要认**：包 → 目录（`submodule_search_locations`）；**单文件模块 → `.py` 文件**
-        （`typing_extensions` 就是这形态——按「包 = 目录」一刀切会把它判成「找不到」，实测踩过）。
+        （`typing_extensions` 就是这形态——按「包即目录」一刀切会把它判成「找不到」，实测踩过）。
         """
         import importlib.util
 

@@ -7,7 +7,7 @@
 **注意区分**（[0027]/[0029]）：S3ReportStore 是把 **RunReport 自身**（core 派生的 manifest/index）写 S3，
 与「worker 把**自己的产物**（trajectory/report.html）上传 S3」是两回事（后者是 per-worker by-design、[0029]）。
 
-**href 恒 ==ref（[0027]/[0029]）**：cloud 报告用 `s3://` 绝对链接——`s3://` 全局可寻址、拷/分享不断，
+**href 恒等于 ref（[0027]/[0029]）**：cloud 报告用 `s3://` 绝对链接——`s3://` 全局可寻址、拷/分享不断，
 无相对化必要（不 presign、不做产物拷贝）。故 make_href 恒返 rr.ref。（产物拷贝式 materialize 已否决，
 见 [0027]「被拒方案」——曾计划 S3 版 copy_object 进 artifacts/，因 s3:// 已可移植而零收益。）
 
@@ -39,10 +39,10 @@ class S3ReportStore:
         """把 manifest.json + index.html 写到 `s3://bucket/<prefix><run_id>/`，返回 index.html 的 s3:// ResourceUri。"""
         base = f"{self._prefix}{run_id}"
         # report_index：复用共享三级投影（与 Local 同一真理源，形状/顺序不再靠人肉同步）。
-        # href 恒 ==ref：s3:// 全局可寻址、无相对化必要（见模块 docstring）。
+        # href 恒等于 ref：s3:// 全局可寻址、无相对化必要（见模块 docstring）。
         index_entries = collect_report_index(result, make_href=lambda rr: rr.ref)
 
-        # manifest = 纯派生导航视图（同 Local，[0027]）：不内嵌 result 真值，靠 run_id 软引用
+        # manifest 是纯派生导航视图（同 Local，[0027]）：不内嵌 result 真值，靠 run_id 软引用
         manifest = {
             "schema_version": SCHEMA_VERSION,
             "run_id": run_id,
@@ -63,5 +63,5 @@ class S3ReportStore:
         return ResourceUri(f"s3://{self._bucket}/{base}/index.html")
 
     def preflight(self) -> None:
-        """探活（ADR 0030 决定七）：begin 前探桶可达，桶不存在/无权限即抛（cli 接住→退 2）。"""
+        """探活（ADR 0030 决定七）：begin 前探桶可达，桶不存在/无权限即抛（cli 接住→以退出码 2 结束）。"""
         self._s3.head_bucket(Bucket=self._bucket)

@@ -28,7 +28,7 @@ const FIXTURE = JSON.parse(
 const RUN_DIR = "/tmp/run/midscene-run";  // 只参与拼路径，不落盘（映射是纯函数）
 const STEP = { index: 2, keyword: "Then", text: "页面上出现『订单提交成功』字样" };
 
-// 截图 uri：本机后端上传器就是这么拼的（file:// + 绝对路径），这里同形以便断言路径本身。
+// 截图 uri：本机后端上传器就是这么拼的（file:// + 绝对路径），这里写法相同以便断言路径本身。
 function fileRef(p: string): string {
   return `file://${p}`;
 }
@@ -89,7 +89,7 @@ test("映射：fixture 两个 execution → 两个 act，文档骨架按 schema 
   assert.deepEqual(doc.acts.map((a) => a.vote), [null, false]);  // 动作 act 无票；断言 act 那一票
 });
 
-test("映射：act 的 frames 逐 task 一条，actions 名 = type/subType，args = param 原样", () => {
+test("映射：act 的 frames 逐 task 一条，actions 名取 type/subType，args 是 param 原样", () => {
   const doc = build({ executions: FIXTURE.executions });
   const actNames = doc.acts[0].frames.map((f) => f.actions.map((a) => a.name).join(","));
   assert.deepEqual(actNames, ["Planning/Plan", "Planning/Locate", "Action Space/Tap", "Planning/Plan"]);
@@ -111,7 +111,7 @@ test("映射：thought 按值判——Insight/Boolean 取 task.thought，Plannin
   assert.ok(doc.acts[1].frames[0].thought?.includes("订单提交成功"));    // Boolean：task.thought
 });
 
-test("映射：result = 末个 task 的 output（Boolean 的 output 即那一票的布尔）", () => {
+test("映射：result 取末个 task 的 output（Boolean 的 output 即那一票的布尔）", () => {
   const doc = build({ executions: FIXTURE.executions });
   assert.equal(doc.acts[1].result, true);
   // Act 的末 task 是 Planning/Plan，其 output 原样（含 actions/log/thought）
@@ -124,7 +124,7 @@ test("映射：output=false 不被 ?? 吞成 null（判否那一票的 result �
   assert.equal(doc.acts[0].result, false);
 });
 
-test("映射：error = 首个非空 errorMessage；无 errorMessage 时末个 act 兜住抛出的异常", () => {
+test("映射：error 取首个非空 errorMessage；无 errorMessage 时末个 act 兜住抛出的异常", () => {
   const boom = exec(task({ subType: "Plan" }), task({ subType: "Locate", errorMessage: "Element not found" }), task({ errorMessage: "后一个不该被取" }));
   const doc = build({ status: "error", executions: [exec(task()), boom], error: "ActError: timeout", votes: [] });
   assert.equal(doc.acts[1].error, "Element not found", "首个非空 errorMessage 优先于抛出的异常文本");
@@ -134,7 +134,7 @@ test("映射：error = 首个非空 errorMessage；无 errorMessage 时末个 ac
   assert.deepEqual(doc2.acts.map((a) => a.error), [null, "ActError: timeout"]);
 });
 
-test("映射：多行超长 errorMessage 压成一行有界文本（与 step_done.message 同形）", () => {
+test("映射：多行超长 errorMessage 压成一行有界文本（与 step_done.message 格式相同）", () => {
   // SDK 的 errorMessage 与抛出异常的 message 同源（Playwright 的「一句原因 + 多行 call log」），act.error
   // 无论从哪条来源填，形状都必须一样——否则 explain / 报告页的「原因」会因来源不同而一行 / 上千字符不定。
   const firstLine = "Element not found：等" + "候元素可见".repeat(100);  // 首行本身就超上界
@@ -166,7 +166,7 @@ test("映射：容缺——execution 缺 tasks / task 缺全部字段都不抛",
 
 // ---- ② 截图：路径、after-calling 优先、去重、上界 ----
 
-test("截图：路径 = <run 目录>/report/screenshots/<id>.<扩展名>，jpeg / png 各按其 mime", () => {
+test("截图：路径是 <run 目录>/report/screenshots/<id>.<扩展名>，jpeg / png 各按其 mime", () => {
   assert.equal(screenshotsDir(RUN_DIR), path.join(RUN_DIR, "report", "screenshots"));
   const jpg = build({ executions: [exec(task({ shot: "aaa" }))] });
   assert.equal(jpg.acts[0].frames[0].screenshot, fileRef(shotPath("aaa")));
@@ -237,7 +237,7 @@ test("截图上界：failed / error → 每 act 最多三张（末帧、首个�
 });
 
 test("截图上界：每 step 总数封顶（超出的 frame 只丢 screenshot、thought 照留）", () => {
-  // 5 个 act × 3 张互不相同 = 15 张候选 → 只有前 12 张拿到 uri
+  // 5 个 act 各 3 张互不相同的截图、共 15 张候选 → 只有前 12 张拿到 uri
   const acts = Array.from({ length: 5 }, (_, a) => exec(
     task({ shot: `a${a}-0`, thought: "t" }),
     task({ shot: `a${a}-1`, errorMessage: "boom" }),

@@ -67,7 +67,7 @@ def test_json_output_is_single_parseable_document(tmp_path, monkeypatch, capsys)
 
 
 def test_text_mode_summary_on_stdout_progress_on_stderr(tmp_path, monkeypatch, capsys):
-    # 非 --json（人看模式）：核心产出=文本汇总 → stdout；进度/落点 → stderr。
+    # 非 --json（人看模式）：核心产出是文本汇总 → stdout；进度/落点 → stderr。
     # 这样 `gherkai run … > summary.txt` 拿到纯净汇总，进度照样在终端可见。
     monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
     feat = _write_feature(tmp_path)
@@ -137,7 +137,7 @@ def test_assertion_votes_below_one_rejected(tmp_path, monkeypatch, capsys):
 
 
 def test_run_rejects_max_concurrency_below_one(tmp_path, monkeypatch, capsys):
-    # --max-concurrency < 1 在入口被拒（退 2）：<=0 会让 plan_next 永不提议起 job → run 卡死在 pending
+    # --max-concurrency < 1 在入口被拒（退出码 2）：<=0 会让 plan_next 永不提议起 job → run 卡死在 pending
     # （比「慢一点」严重得多）。**零副作用**：schedule 一次没调、落点目录都没建（拒在读 feature/落库之前）。
     called = {"n": 0}
     monkeypatch.setattr(m, "schedule", lambda *a, **k: called.__setitem__("n", called["n"] + 1))
@@ -152,7 +152,7 @@ def test_run_rejects_max_concurrency_below_one(tmp_path, monkeypatch, capsys):
 
 
 def test_submit_rejects_max_concurrency_below_one(tmp_path, monkeypatch, capsys):
-    # 同上，submit 侧（坏值会随 definition 到达推进器 → 三路推进器全空转）。零副作用 = 没 fork per-run 进程、
+    # 同上，submit 侧（坏值会随 definition 到达推进器 → 三路推进器全空转）。零副作用即没 fork per-run 进程、
     # 没写 run 目录（对齐 test_tunnel_cli 的「隧道一次都没起」断言风格：早拒才真零副作用）。
     import subprocess
 
@@ -198,7 +198,7 @@ def test_plan_json_shape(tmp_path, capsys):
 
 
 def test_plan_rejects_engine_conflict(tmp_path, capsys):
-    # 同 scope 多 engine → PlanError，预检在实际运行前拦截、退 2（省钱）
+    # 同 scope 多 engine → PlanError，预检在实际运行前拦截、以退出码 2 结束（省钱）
     feat = tmp_path / "conflict.feature"
     feat.write_text(
         "@scope:x @engine:midscene\nFeature: F\n  Scenario: a\n    When \"x\"\n"
@@ -243,7 +243,7 @@ def test_run_exit_code_1_on_failed(tmp_path, monkeypatch, capsys):
     box = {}
     monkeypatch.setattr(m, "schedule", _capturing_schedule(Status.FAILED, box))
     rc = m.main(["run", str(_write_feature(tmp_path)), "--no-report"])
-    assert rc == 1  # 运行结束但有 failed → 退 1（CI 据此判红）
+    assert rc == 1  # 运行结束但有 failed → 退出码 1（CI 据此判红）
 
 
 def test_run_exit_code_1_on_error(tmp_path, monkeypatch, capsys):
@@ -256,7 +256,7 @@ def test_run_exit_code_1_on_error(tmp_path, monkeypatch, capsys):
 def test_run_schedule_opts_mapping(tmp_path, monkeypatch, capsys):
     box = {}
     monkeypatch.setattr(m, "schedule", _capturing_schedule(Status.PASSED, box))
-    # grace 用合法值（≥ Nova 下限）；默认引擎 novaact → min_grace = 该引擎 worker 自报的下限（假 worker 见 conftest）。
+    # grace 用合法值（≥ Nova 下限）；默认引擎 novaact → min_grace 取该引擎 worker 自报的下限（假 worker 见 conftest）。
     good_grace = FAKE_MIN_GRACE_S["novaact"] + 10
     m.main(["run", str(_write_feature(tmp_path)), "--no-report",
             "--max-concurrency", "3", "--default-job-timeout", "120", "--grace", str(good_grace), "--fail-fast"])
@@ -273,7 +273,7 @@ def test_run_schedule_opts_mapping(tmp_path, monkeypatch, capsys):
 
 
 def test_run_grace_too_small_rejected(tmp_path, monkeypatch, capsys):
-    # 显式给过小 grace（< Nova 下限）→ 入口退 2「没开始执行就被拒」（ADR 0024 grace 硬约束、对齐 votes 校验惯例）。
+    # 显式给过小 grace（< Nova 下限）→ 入口给退出码 2「没开始执行就被拒」（ADR 0024 grace 硬约束、对齐 votes 校验惯例）。
     box = {}
     monkeypatch.setattr(m, "schedule", _capturing_schedule(Status.PASSED, box))
     rc = m.main(["run", str(_write_feature(tmp_path)), "--no-report", "--grace", "5"])
@@ -283,8 +283,8 @@ def test_run_grace_too_small_rejected(tmp_path, monkeypatch, capsys):
 
 
 def test_run_grace_nan_inf_rejected(tmp_path, monkeypatch, capsys):
-    """--grace inf/nan 同拒（退 2）：inf 会让 SIGKILL 兜底永不触发、软停失效即挂死（ADR 0024/0026）；
-    与 --tunnel-ttl、@timeout 的「有限正数」判据同形。"""
+    """--grace inf/nan 同拒（退出码 2）：inf 会让 SIGKILL 兜底永不触发、软停失效即挂死（ADR 0024/0026）；
+    与 --tunnel-ttl、@timeout 的「有限正数」判据相同。"""
     for bad in ("inf", "nan"):
         box = {}
         monkeypatch.setattr(m, "schedule", _capturing_schedule(Status.PASSED, box))
@@ -296,7 +296,7 @@ def test_run_grace_nan_inf_rejected(tmp_path, monkeypatch, capsys):
 
 def test_run_grace_sentinel_derives_from_engine_self_report(tmp_path, monkeypatch, capsys):
     """不给 --grace（哨兵默认 None）→ 按本 run 引擎**自报**的下限推导（ADR 0024「引擎自报下限」）：
-    novaact-only run 的 grace = min_grace = 该引擎 worker 报的值，不再是组合根算的常量、也不是旧的硬编码 10。"""
+    novaact-only run 的 grace 等于 min_grace，即该引擎 worker 报的值，不再是组合根算的常量、也不是旧的硬编码 10。"""
     box = {}
     monkeypatch.setattr(m, "schedule", _capturing_schedule(Status.PASSED, box))
     m.main(["run", str(_write_feature(tmp_path)), "--no-report"])
@@ -345,8 +345,8 @@ def test_local_run_asks_each_engine_for_capabilities_once(tmp_path, monkeypatch,
 
 
 def test_run_engine_self_describe_failure_refuses_to_run(tmp_path, monkeypatch, capsys):
-    """问不到引擎自报的下限（版本不一致的 worker 不认该入口 / 起不来 / 输出不合契约）→ **退 2、绝不回落猜的下限**
-    （ADR 0024「引擎自报下限」fail-loud；回落 = grace 默默不够、收尾被强杀）。文案与自述失败同一口径。"""
+    """问不到引擎自报的下限（版本不一致的 worker 不认该入口 / 起不来 / 输出不合契约）→ **以退出码 2 结束、绝不回落猜的下限**
+    （ADR 0024「引擎自报下限」fail-loud；回落就是 grace 默默不够、收尾被强杀）。文案与自述失败同一口径。"""
     box = {}
     monkeypatch.setattr(m, "schedule", _capturing_schedule(Status.PASSED, box))
     monkeypatch.setattr(m.compose, "query_capabilities", lambda engine, **kw: (_ for _ in ()).throw(
@@ -366,21 +366,21 @@ def test_run_timeout_nonpositive_maps_to_none(tmp_path, monkeypatch, capsys):
     assert all(j.timeout_s is None for j in box["run_meta"].jobs)
 
 
-# ---- #8 畸形 feature → 友好诊断、退 2、无 traceback ----
+# ---- #8 畸形 feature → 友好诊断、以退出码 2 结束、无 traceback ----
 def test_malformed_feature_friendly_diagnostic(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(m, "schedule", _fake_schedule_factory())  # 不该走到 schedule
     bad = tmp_path / "bad.feature"
     bad.write_text("this is not gherkin\n  garbage\n", encoding="utf-8")
     for cmd in ("plan", "run"):
         rc = m.main([cmd, str(bad), "--no-report"] if cmd == "run" else [cmd, str(bad)])
-        assert rc == 2, f"{cmd} 畸形 feature 应退 2"
+        assert rc == 2, f"{cmd} 畸形 feature 应以退出码 2 结束"
         err = capsys.readouterr().err
         assert "语法错误" in err and "Traceback" not in err  # 友好诊断、非 Python traceback
 
 
 # ---- 第四刀：实时写 commit-point 写序（ADR 0030）----
 # 用 fake store 记录调用序（共享一个有序 log），注入真 RunPersistence 编排——测真实写序、非 mock 行为。
-# 注入点 = patch compose.build_local_stores（ADR 0016：local 装配下沉 compose 后的注入锚，取代旧的 m.Local*）。
+# 注入点是 patch compose.build_local_stores（ADR 0016：local 装配下沉 compose 后的注入锚，取代旧的 m.Local*）。
 def _recording_build_local_stores(calls: list):
     """返回一个替换 compose.build_local_stores 的 fake：产出三个记录调用的 fake store + make_artifacts。"""
     class FakeRunStore:
@@ -446,7 +446,7 @@ def test_realtime_commit_point_write_order(tmp_path, monkeypatch, capsys):
     last_save = max(i for i, (s, mth) in enumerate(methods) if mth == "save_job_result")
     finalize_idx = methods.index(("run", "finalize_run"))
     assert finalize_idx > last_save
-    # ③ 每 job 一次 save_job_result（两个 scope=两次），且与终态刷 update_job_state 配对
+    # ③ 每 job 一次 save_job_result（两个 scope 即两次），且与终态刷 update_job_state 配对
     saves = [scope for (s, mth, scope) in calls if mth == "save_job_result"]
     assert sorted(saves) == ["a", "b"]
     # ④ 每个 save_job_result 紧跟其 update_job_state（commit-point：数据面先于该 job 的控制面态）
@@ -521,7 +521,7 @@ def test_run_wires_artifact_dirs_to_build_engines(tmp_path, monkeypatch, capsys)
 
     nova = box["kwargs"]["nova_logs_dir"]
     mid = box["kwargs"]["midscene_run_dir"]
-    # 落点 = <report_dir 绝对化>/<run_id>/<engine 子目录>，两引擎对称、run_id 一致
+    # 落点是 <report_dir 绝对化>/<run_id>/<engine 子目录>，两引擎对称、run_id 一致
     assert nova is not None and mid is not None
     assert str(nova).endswith("/nova-trajectories") and str(mid).endswith("/midscene-run")
     assert Path(nova).parent == Path(mid).parent          # 同一 <report_dir>/<run_id> 下
@@ -529,7 +529,7 @@ def test_run_wires_artifact_dirs_to_build_engines(tmp_path, monkeypatch, capsys)
 
 
 def test_no_report_disables_artifacts_instead_of_tempdir(tmp_path, monkeypatch):
-    """`--no-report` = 真不生成（ADR 0037 决策 3）：不注入任何落点、并以 no_artifacts 告知 worker 不产生/不上报
+    """`--no-report` 即真不生成（ADR 0037 决策 3）：不注入任何落点、并以 no_artifacts 告知 worker 不产生/不上报
     引擎原生产物——而不是「落系统临时目录」（曾如此、被否）。"""
     box = {}
     real_build = m.compose.build_engines
@@ -762,7 +762,7 @@ def test_submit_local_writes_max_concurrency_into_definition(tmp_path, monkeypat
 
 
 def test_version_flag_prints_dist_version(capsys):
-    """--version 打印「gherkai <发行版本>」并退 0——版本真源是包元数据（git tag → uv-dynamic-versioning），
+    """--version 打印「gherkai <发行版本>」并以退出码 0 结束——版本真源是包元数据（git tag → uv-dynamic-versioning），
     代码内不复制版本号（ADR 0037 决策 2b）。"""
     import pytest
 
@@ -783,7 +783,7 @@ def _miss(engine: str = "novaact"):
 
 
 def test_run_exits_2_before_spawn_when_worker_runtime_missing(tmp_path, monkeypatch, capsys):
-    """run 的分叉：定位链 miss → 打安装指引 + 退 2，**且在 spawn/落库之前**——不进 job 级 engine_error
+    """run 的分叉：定位链 miss → 打安装指引 + 以退出码 2 结束，**且在 spawn/落库之前**——不进 job 级 engine_error
     （「运行时没装」属「没开始执行就被拒」层；否则用户拿到一批 error 的 job 结果而非一句能照做的指引）。"""
     monkeypatch.setattr(m.compose, "resolve_worker_cmd", lambda engine, **kw: (_ for _ in ()).throw(_miss(engine)))
     started = []
@@ -797,7 +797,7 @@ def test_run_exits_2_before_spawn_when_worker_runtime_missing(tmp_path, monkeypa
 
 
 def test_run_unused_engine_miss_does_not_block(tmp_path, monkeypatch, capsys):
-    """miss 只连坐**用到它**的 run：novaact-only 的 run 在 midscene 未装（dev 常态）下照常运行退 0。
+    """miss 只连坐**用到它**的 run：novaact-only 的 run 在 midscene 未装（dev 常态）下照常运行并以退出码 0 结束。
 
     preflight 只查本次 plan 用到的引擎；未用到的那个引擎即便 miss 也只是「一用即报错」。
     """
@@ -817,7 +817,7 @@ def test_run_unused_engine_miss_does_not_block(tmp_path, monkeypatch, capsys):
 
 
 def test_submit_local_exits_2_when_worker_runtime_missing(tmp_path, monkeypatch, capsys):
-    """submit local 同 run（per-run 进程在本机 spawn worker）：提交前退 2、不 fork、不落库——否则「提交成功」
+    """submit local 同 run（per-run 进程在本机 spawn worker）：提交前以退出码 2 结束、不 fork、不落库——否则「提交成功」
     之后后台每个 job 都 engine_error，用户要去翻 reconcile.log 才知道是没装 worker。"""
     import subprocess
 
@@ -832,7 +832,7 @@ def test_submit_local_exits_2_when_worker_runtime_missing(tmp_path, monkeypatch,
 
 
 def test_list_deterministic_worker_not_found_exits_2(monkeypatch, capsys):
-    # list-deterministic 的分叉：退 2、消息带安装指引（自述查不了就是查不了，无降级余地）
+    # list-deterministic 的分叉：以退出码 2 结束、消息带安装指引（自述查不了就是查不了，无降级余地）
     def boom(engine, *, steps_dir=None, timeout_s=60.0):
         raise _miss(engine)
 
@@ -843,7 +843,7 @@ def test_list_deterministic_worker_not_found_exits_2(monkeypatch, capsys):
 
 def test_plan_degrades_when_worker_runtime_missing(tmp_path, monkeypatch, capsys):
     """plan 的分叉与 run/submit **相反**（ADR 0037 决策 3 明示 + ADR 0036 决策 4）：保持 best-effort 降级——
-    只丢该引擎的派发标注 + stderr 警告，plan 本体照出、退 0（feature 作者没装引擎运行时也该能预检写法）。"""
+    只丢该引擎的派发标注 + stderr 警告，plan 本体照出、以退出码 0 结束（feature 作者没装引擎运行时也该能预检写法）。"""
     def boom(engine, texts, steps_dir=None):
         raise _miss("midscene")
 
@@ -937,7 +937,7 @@ def test_run_default_steps_dir_used_only_when_it_exists(tmp_path, monkeypatch):
 
 
 def test_steps_dir_explicit_but_missing_exits_2(tmp_path, monkeypatch, capsys):
-    """显式给的（flag/env）不是目录 → 退 2，**不静默忽略**：忽略等于把该目录里的确定性 step 悄悄换成
+    """显式给的（flag/env）不是目录 → 以退出码 2 结束，**不静默忽略**：忽略等于把该目录里的确定性 step 悄悄换成
     AI 判定、run 还可能「通过」（假绿），是本项目最忌的静默降级（ADR 0037 决策 4 fail-loud 同源）。"""
     monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
     monkeypatch.delenv("GHERKAI_STEPS_DIR", raising=False)
@@ -1002,7 +1002,7 @@ def _fake_worker_cmd(engine: str, **kw):
 
 
 def test_plan_exits_2_when_user_steps_fail_to_load(tmp_path, monkeypatch, capsys):
-    """steps 文件加载失败（worker 自述非零退出）→ plan 退 2、不降级成「无标注」（ADR 0037 决策 4 提交侧前置）。"""
+    """steps 文件加载失败（worker 自述非零退出）→ plan 以退出码 2 结束、不降级成「无标注」（ADR 0037 决策 4 提交侧前置）。"""
     feat = tmp_path / "t.feature"
     feat.write_text('Feature: t\n  Scenario: s\n    When "做点啥"\n', encoding="utf-8")
     steps = _steps_dir_with_file(tmp_path)
@@ -1017,7 +1017,7 @@ def test_plan_exits_2_when_user_steps_fail_to_load(tmp_path, monkeypatch, capsys
 
 
 def test_plan_degrades_when_worker_missing(tmp_path, monkeypatch, capsys):
-    """对照：定位链 miss（运行时没装）plan 仍降级退 0（ADR 0036 决策 4 / 0037 决策 3 的分叉保留）。"""
+    """对照：定位链 miss（运行时没装）plan 仍降级并以退出码 0 结束（ADR 0036 决策 4 / 0037 决策 3 的分叉保留）。"""
     feat = tmp_path / "t.feature"
     feat.write_text('Feature: t\n  Scenario: s\n    When "做点啥"\n', encoding="utf-8")
 
@@ -1031,7 +1031,7 @@ def test_plan_degrades_when_worker_missing(tmp_path, monkeypatch, capsys):
 
 
 def test_run_and_submit_exit_2_before_spawn_when_user_steps_fail(tmp_path, monkeypatch, capsys):
-    """run / submit：运行前先问一次能力自述，worker 非零退出 → 起任何 job 之前退 2（不进 job 级 error）。
+    """run / submit：运行前先问一次能力自述，worker 非零退出 → 起任何 job 之前以退出码 2 结束（不进 job 级 error）。
 
     **文案中性**：该入口现在会加载使用方 steps，非零退出既可能是那些文件加载失败、也可能是这个引擎的 worker
     与命令行工具版本不一致（不认该入口）——两种成因都得点到，别把用户往单一方向带。"""
@@ -1056,7 +1056,7 @@ def test_run_and_submit_exit_2_before_spawn_when_user_steps_fail(tmp_path, monke
 
 
 def test_plan_rejects_a_directory_as_feature(tmp_path, capsys):
-    """给了目录 / 读不了的路径 → 退 2「读 feature 失败」，不是 IsADirectoryError traceback（退码语义 ADR 0021）。
+    """给了目录 / 读不了的路径 → 以退出码 2 结束并报「读 feature 失败」，不是 IsADirectoryError traceback（退出码语义见 ADR 0021）。
     读 feature 的失败面不止 FileNotFoundError：目录、权限、非 UTF-8 都属输入问题，同类处置。"""
     rc = m.main(["plan", str(tmp_path)])
     assert rc == 2
@@ -1064,7 +1064,7 @@ def test_plan_rejects_a_directory_as_feature(tmp_path, capsys):
 
 
 def test_same_feature_given_twice_is_deduped_not_rejected(tmp_path, capsys):
-    """同一个 .feature 传两遍：CLI 按一次算 + 打一行提示，不再撞 core 窄腰的 uri 互异违约退 2
+    """同一个 .feature 传两遍：CLI 按一次算 + 打一行提示，不再撞 core 窄腰的 uri 互异违约而以退出码 2 结束
     （收集去重是调用方的责任，ADR 0025）。"""
     feat = _write_feature(tmp_path)
     rc = m.main(["plan", str(feat), str(feat), "--json"])
@@ -1139,8 +1139,8 @@ def test_artifact_lines_report_write_failure_falls_back_to_a_note(capsys):
 
 
 def test_run_lists_each_job_but_submit_only_prints_the_count(tmp_path, monkeypatch, capsys):
-    """run 与 submit 共享同一段前置（plan → steps 目录 → 本机后端 worker 检查），唯一的输出差别 = 逐 job 明细：
-    run 打（本机批量运行要看得见分组），submit 不打（提交完就走、进度看 status）。计数行两处同款。"""
+    """run 与 submit 共享同一段前置（plan → steps 目录 → 本机后端 worker 检查），唯一的输出差别是逐 job 明细：
+    run 打（本机批量运行要看得见分组），submit 不打（提交完就走、进度看 status）。计数行两处相同。"""
     import subprocess
 
     monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
@@ -1192,7 +1192,7 @@ def _plan_names(capsys, *extra):
 
 
 def test_plan_tags_any_within_value_and_all_across_flags(tmp_path, capsys):
-    """一个 --tags 值内逗号 = 任一命中；重复 --tags = 都要命中；@ 可省。"""
+    """一个 --tags 值内逗号表示任一命中；重复 --tags 表示都要命中；@ 可省。"""
     feat = _tagged_feature(tmp_path)
     assert m.main(["plan", str(feat), "--json", "--tags", "smoke"]) == 0
     assert _plan_names(capsys) == ["搜索", "登录成功"]
@@ -1207,7 +1207,7 @@ def test_plan_scenario_by_id_line_or_title_substring(tmp_path, capsys):
     feat = _tagged_feature(tmp_path)
     assert m.main(["plan", str(feat), "--json", "--scenario", "结账"]) == 0
     assert _plan_names(capsys) == ["结账"]
-    assert m.main(["plan", str(feat), "--json", "--scenario", "3", "--scenario", ":9"]) == 0  # 行 3 = 登录成功，行 9 = 搜索
+    assert m.main(["plan", str(feat), "--json", "--scenario", "3", "--scenario", ":9"]) == 0  # 行 3 是登录成功，行 9 是搜索
     assert _plan_names(capsys) == ["搜索", "登录成功"]
     assert m.main(["plan", str(feat), "--json", "--scenario", f"{feat}:6"]) == 0
     assert _plan_names(capsys) == ["结账"]
@@ -1216,7 +1216,7 @@ def test_plan_scenario_by_id_line_or_title_substring(tmp_path, capsys):
 
 
 def test_plan_empty_selection_exits_2_and_lists_candidates(tmp_path, capsys):
-    """筛空 → 退 2 并列全部候选（id  标题），别静默运行空批。"""
+    """筛空 → 以退出码 2 结束并列出全部候选（id  标题），别静默运行空批。"""
     feat = _tagged_feature(tmp_path)
     assert m.main(["plan", str(feat), "--json", "--tags", "nope"]) == 2
     err = capsys.readouterr().err
@@ -1298,7 +1298,7 @@ def test_doctor_local_json_checks_and_exit_codes(tmp_path, monkeypatch, capsys):
     assert by[("provider", "deploy-aws")]["ok"] and "只有部署方需要" in by[("provider", "deploy-aws")]["detail"]
 
     def boom(engine, *, steps_dir=None, timeout_s=60.0):
-        raise RuntimeError("worker 自述退 1：steps/login.py 第 3 行 SyntaxError")  # doctor 对任何加载异常都原样转述
+        raise RuntimeError("worker 自述以退出码 1 结束：steps/login.py 第 3 行 SyntaxError")  # doctor 对任何加载异常都原样转述
     monkeypatch.setattr(m.compose, "query_capabilities", boom)
     assert m.main(["doctor", "--json", "--steps-dir", str(steps)]) == 2
     doc = json.loads(capsys.readouterr().out)
@@ -1427,7 +1427,7 @@ def test_doctor_cloud_worker_grace_unset_stop_timeout_is_reported(monkeypatch, c
 
 def test_doctor_cloud_worker_grace_query_failure_lands_in_detail(monkeypatch, capsys):
     """问不到本机 worker 的下限（版本不一致的 worker 不认该入口 / 起不来）→ 转述诊断、不静默按「够用」放过；
-    doctor 是只读自检，一行报到底，不像 run 那样退 2。"""
+    doctor 是只读自检，一行报到底，不像 run 那样以退出码 2 结束。"""
     _fake_locator(monkeypatch, available=("midscene",))
     _cloud_backend_ok(monkeypatch)
     monkeypatch.setattr(m.compose, "query_capabilities", lambda engine, **kw: (_ for _ in ()).throw(
@@ -1439,7 +1439,7 @@ def test_doctor_cloud_worker_grace_query_failure_lands_in_detail(monkeypatch, ca
 
 
 def test_doctor_provider_section_comes_from_provider_doctor(monkeypatch, capsys):
-    """装了 deploy-aws extra → 经 provider 接缝调它的 doctor(args)，required 项失败让整体退 2。"""
+    """装了 deploy-aws extra → 经 provider 接缝调它的 doctor(args)，required 项失败让整体以退出码 2 结束。"""
     _fake_locator(monkeypatch)
 
     class _Prov:
@@ -1462,7 +1462,7 @@ def test_doctor_provider_section_comes_from_provider_doctor(monkeypatch, capsys)
 
 
 def test_doctor_cloud_credential_failure_is_required_and_exits_2(monkeypatch, capsys):
-    """凭证探针抛 → aws.identity 必修失败、backend 标未查（可选）、退 2；不去碰后端。"""
+    """凭证探针抛 → aws.identity 必修失败、backend 标未查（可选）、以退出码 2 结束；不去碰后端。"""
     _fake_locator(monkeypatch); _no_provider(monkeypatch)
     monkeypatch.setattr(m.compose, "probe_aws_identity", lambda **kw: (_ for _ in ()).throw(RuntimeError("Unable to locate credentials")))
     touched = []
@@ -1487,7 +1487,7 @@ def test_doctor_cloud_without_region_fails_region_check_first(monkeypatch, capsy
 
 
 def test_doctor_cloud_profile_error_at_target_resolution_is_a_credential_failure(monkeypatch, capsys):
-    """--profile 打错在 resolve_cloud_target 就炸（读 profile config）→ 与探针失败同一句诊断、退 2，不冒 traceback。"""
+    """--profile 打错在 resolve_cloud_target 就炸（读 profile config）→ 与探针失败同一句诊断、以退出码 2 结束，不冒 traceback。"""
     _fake_locator(monkeypatch); _no_provider(monkeypatch)
     monkeypatch.setattr(m.compose, "resolve_cloud_target", lambda **kw: (_ for _ in ()).throw(RuntimeError("The config profile (nope) could not be found")))
     assert m.main(["doctor", "--prefix", "vfy-", "--profile", "nope", "--json"]) == 2
@@ -1602,7 +1602,7 @@ def test_empty_selection_flag_values_are_rejected(tmp_path, capsys):
 
 
 def test_scope_filter_selects_whole_named_scope_by_id(tmp_path, capsys):
-    """--scope = 报告里的 scope_id：named scope 的名字选中整个 scope（两条都运行），未标 scope 的用 <文件>:<行>；
+    """--scope 即报告里的 scope_id：named scope 的名字选中整个 scope（两条都运行），未标 scope 的用 <文件>:<行>；
     与 --scenario 同给为且。plan 文本里 named scope 不再重复打 (name=…)。"""
     p = tmp_path / "s.feature"
     p.write_text("Feature: F\n"
@@ -1611,7 +1611,7 @@ def test_scope_filter_selects_whole_named_scope_by_id(tmp_path, capsys):
                  "  Scenario: 独立\n    When \"c\"\n", encoding="utf-8")
     assert m.main(["plan", str(p), "--json", "--scope", "browse"]) == 0
     assert _plan_names(capsys) == ["停留", "进入"]
-    assert m.main(["plan", str(p), "--json", "--scope", f"{p}:8"]) == 0   # 未标 scope：scope_id = uri:line
+    assert m.main(["plan", str(p), "--json", "--scope", f"{p}:8"]) == 0   # 未标 scope：scope_id 形如 uri:line
     assert _plan_names(capsys) == ["独立"]
     assert m.main(["plan", str(p), "--json", "--scope", "browse", "--scenario", "停留"]) == 0
     assert _plan_names(capsys) == ["停留"]
@@ -1721,7 +1721,7 @@ def test_explain_text_renders_reason_thought_screenshot_and_gaps(tmp_path, capsy
     短路旁注只在 shortcircuited 的 step 上、无记录 step、证据缺失的 step 打「无 AI 证据」+ 兜底 ref。"""
     root, run_id = _explain_run(tmp_path)
     rc, out, err = _explain(capsys, root, run_id)
-    assert rc == 0  # 证据渲染器不表判定：run 判 failed 也退 0
+    assert rc == 0  # 证据渲染器不表判定：run 判 failed 也以退出码 0 结束
     assert f"run {run_id}  status=failed" in out
     assert "scope features/login.feature:6  engine=novaact  status=failed  session=01a0deadbeef" in out
     assert "scenario features/login.feature:12  密码错误时不放行  failed" in out
@@ -1777,7 +1777,7 @@ def test_explain_scenario_selector_matches_id_line_title_and_ors(tmp_path, capsy
 
 
 def test_explain_step_needs_scenario_and_lists_candidates_when_absent(tmp_path, capsys):
-    """--step 单给退 2（步号没有归属）；命中的 scenario 都没有第 N 步 → 退 2 并列出候选 id 与步数；
+    """--step 单给即以退出码 2 结束（步号没有归属）；命中的 scenario 都没有第 N 步 → 同样以退出码 2 结束并列出候选 id 与步数；
     正常时只渲染每条命中 scenario 的第 N 步。"""
     root, run_id = _explain_run(tmp_path)
     rc, _out, err = _explain(capsys, root, run_id, "--step", "2")
@@ -1847,7 +1847,7 @@ def test_explain_unknown_run_and_scope_exit_2(tmp_path, capsys):
 
 
 def test_explain_detached_run_without_job_files_exits_0_with_one_hint(tmp_path, capsys):
-    """detached run 未终态时零判定明细（全 job 终态才一次性落）→ 退 0 + 一行提示；--json 不打提示、
+    """detached run 未终态时零判定明细（全 job 终态才一次性落）→ 退出码 0 + 一行提示；--json 不打提示、
     stdout 仍只有一个文档（机读侧靠顶层 status 自明）。"""
     from gherkai_core.model import Status as S
     root, run_id = _explain_run(tmp_path, with_results=False, run_status=S.RUNNING)
@@ -1904,7 +1904,7 @@ def _explain_cloud_stores(jr, state):
 
 
 def test_explain_cloud_blocks_on_version_skew_before_any_cloud_read(monkeypatch, capsys):
-    """云端后端第一道闸是版本 skew（先于任何云端读）：block → 退 2，且根本没去装 store。"""
+    """云端后端第一道闸是版本 skew（先于任何云端读）：block → 以退出码 2 结束，且根本没去装 store。"""
     monkeypatch.setattr(m.compose, "check_backend_skew",
                         lambda **kw: (compose.SKEW_BLOCK, "本机 CLI 新于后端", "1.3.0"))
     monkeypatch.setattr(m.compose, "build_cloud_stores",
@@ -1982,7 +1982,7 @@ def test_explain_filter_to_unrecorded_step_does_not_fake_job_verdict_block(tmp_p
 
 
 def test_explain_to_dict_drops_unmatched_scopes_and_keeps_job_fact():
-    """多 scope 下 --scenario 只命中其一：未命中的 scope 不产空壳条目（文本/JSON 同律）；命中的 scope 的
+    """多 scope 下 --scenario 只命中其一：未命中的 scope 不产空壳条目（文本与 JSON 规则一致）；命中的 scope 的
     has_step_records 不随筛选变化。"""
     from gherkai_core.model import Job, JobResult, Scenario, ScenarioResult, Status as S, Step, StepResult
     from gherkai_cli import render
@@ -2009,7 +2009,7 @@ def test_explain_to_dict_drops_unmatched_scopes_and_keeps_job_fact():
 
 
 def test_explain_scenario_matcher_digits_are_line_numbers_only():
-    """纯数字 / :数字 只当行号、不回落标题子串（与 run/plan 同律）；标题子串、id 全等照常。"""
+    """纯数字 / :数字 只当行号、不回落标题子串（与 run/plan 规则一致）；标题子串、id 全等照常。"""
     from gherkai_core.model import Scenario
     sc = Scenario(id="f.feature:12", name="重试3次后放行", steps=())
     hit = m._explain_scenario_matches

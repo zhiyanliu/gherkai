@@ -34,7 +34,7 @@ def test_chain_level1_env_cmd_wins_with_optional_cwd(monkeypatch):
 
 
 def test_chain_level1_env_cmd_without_cwd_gives_none(monkeypatch):
-    # _CWD 是**可选**配套：不给则 cwd=None=继承调用者 CWD（worker 不再有专属 cwd）
+    # _CWD 是**可选**配套：不给则 cwd 为 None，即继承调用者 CWD（worker 不再有专属 cwd）
     monkeypatch.setenv("GHERKAI_WORKER_MIDSCENE_CMD", "node worker.mjs")
     monkeypatch.delenv("GHERKAI_WORKER_MIDSCENE_CWD", raising=False)
     assert compose.resolve_worker_cmd("midscene").cwd is None
@@ -128,7 +128,7 @@ def test_chain_level4_skipped_when_launcher_absent(monkeypatch):
 
 
 def test_chain_all_miss_raises_with_install_hint(monkeypatch):
-    """四级全 miss → WorkerNotFoundError 带引擎名 + 该引擎的安装指引 + env 覆写指引（退码交调用点）。"""
+    """四级全 miss → WorkerNotFoundError 带引擎名 + 该引擎的安装指引 + env 覆写指引（退出码交调用点）。"""
     monkeypatch.delenv("GHERKAI_WORKER_MIDSCENE_CMD", raising=False)
     monkeypatch.setattr(compose.shutil, "which", lambda n: None)
     monkeypatch.setattr(compose, "_runtime_version", lambda: None)
@@ -238,7 +238,7 @@ def test_build_engines_scrubs_inherited_owned_env(monkeypatch, midscene_env_cmd)
     monkeypatch.setenv("GHERKAI_STEPS_DIR", "/host/steps")
     monkeypatch.setenv("GHERKAI_NO_ARTIFACTS", "1")
     monkeypatch.setenv("GHERKAI_EXTRA_HTTP_HEADERS", '{"leaked": "1"}')
-    engines = compose.build_engines()  # 三样都不传（= definition 里都没有）
+    engines = compose.build_engines()  # 三样都不传（即 definition 里都没有）
     for name in ("novaact", "midscene"):
         env = engines[name]._env
         # 宿主带 owned 键 ⇒ 必须建一份 scrub 后的 env；回落 None 等于整份继承 os.environ（泄漏）
@@ -257,7 +257,7 @@ def test_resolver_known_and_unknown(midscene_env_cmd):
 
 
 def test_load_feature_uri_is_given_path_normalized(tmp_path: Path, monkeypatch):
-    """uri = 使用方给出的路径规范化后原样（ADR 0037 决策 3）：相对给相对（`./` 折掉、`..` 保留），不相对任何根。"""
+    """uri 即使用方给出的路径规范化后原样（ADR 0037 决策 3）：相对给相对（`./` 折掉、`..` 保留），不相对任何根。"""
     feat = tmp_path / "features" / "demo.feature"
     feat.parent.mkdir(parents=True)
     feat.write_text("Feature: x\n  Scenario: y\n    When \"做点啥\"\n", encoding="utf-8")
@@ -303,7 +303,7 @@ def test_build_engines_injects_artifact_dirs_symmetrically(tmp_path: Path, midsc
 
 def test_build_engines_no_dirs_midscene_env_none(monkeypatch, midscene_env_cmd):
     # 不传落点、也无共注 env：midscene env 保持 None，SubprocessEngine 回落继承 os.environ（不硬替换）。
-    # 前提 = 宿主 env 干净：宿主带组合根拥有的键时，按契约会建一份 scrub 后的 env（非 None），见上面 scrub 用例。
+    # 前提是宿主 env 干净：宿主带组合根拥有的键时，按契约会建一份 scrub 后的 env（非 None），见上面 scrub 用例。
     for key in compose._COMPOSE_OWNED_WORKER_ENV:
         monkeypatch.delenv(key, raising=False)
     engines = compose.build_engines()
@@ -374,7 +374,7 @@ def test_build_engines_midscene_no_rebuild_when_no_region_profile(monkeypatch, m
     # 本就够，免无谓拷贝）——补建只为 region/profile 覆盖，无值则不建。Nova 仍补建（NOVA_ACT_TIMEOUT_S 恒需）。
     monkeypatch.delenv("AWS_REGION", raising=False)
     monkeypatch.delenv("AWS_DEFAULT_REGION", raising=False)
-    for key in compose._COMPOSE_OWNED_WORKER_ENV:  # 前提 = 宿主 env 干净（带 owned 键时按契约会建 scrub 后的 env）
+    for key in compose._COMPOSE_OWNED_WORKER_ENV:  # 前提是宿主 env 干净（带 owned 键时按契约会建 scrub 后的 env）
         monkeypatch.delenv(key, raising=False)
     engines = compose.build_engines(region=None, profile=None)
     assert engines["midscene"]._env is None       # 不补建
@@ -417,7 +417,7 @@ def test_resolve_region_falls_back_to_profile_config(monkeypatch):
 
 
 def test_resolve_region_none_when_all_miss(monkeypatch):
-    # 全 miss（无 --region/env、profile config 也无 region）→ None=fail-loud（worker 报错、不硬编码 east）。
+    # 全 miss（无 --region/env、profile config 也无 region）→ 返回 None，即 fail-loud（worker 报错、不硬编码 east）。
     monkeypatch.delenv("AWS_REGION", raising=False)
     monkeypatch.delenv("AWS_DEFAULT_REGION", raising=False)
 
@@ -500,7 +500,7 @@ def test_query_capabilities_returns_whole_object(monkeypatch, novaact_env_cmd, f
     """整份自述对象原样返回（五个键：schema_version / engine / min_grace_s / deterministic_steps / model_id）——
     清单、grace 下限、steps 加载结果、当前模型 id 都出自**这一次** spawn（ADR 0036「5.」「加键不加入口」）。
 
-    Nova 查询**必须注入 NOVA_ACT_TIMEOUT_S**：worker 自报的下限 = 这个注入值 + 它自己的 margin，不注入则它按
+    Nova 查询**必须注入 NOVA_ACT_TIMEOUT_S**：worker 自报的下限是这个注入值 + 它自己的 margin，不注入则它按
     自带缺省算，operator 调大单 act 上界后下限静默偏低（组合根持单一真值的意义就在此）。
     """
     import os
@@ -542,7 +542,7 @@ def test_query_capabilities_injects_steps_dir_env(monkeypatch, novaact_env_cmd, 
 
 
 def test_query_capabilities_caches_per_engine_and_steps_dir(monkeypatch, novaact_env_cmd, fresh_caps_cache, tmp_path):
-    """缓存键 =（引擎, steps 目录）：同键第二次不 spawn；换引擎、换目录、无目录各自一份（清单随目录变，
+    """缓存键是（引擎, steps 目录）二元组：同键第二次不 spawn；换引擎、换目录、无目录各自一份（清单随目录变，
     Nova 每次 spawn 都要 import SDK，多问一次不便宜）。"""
     import subprocess
 
@@ -667,7 +667,7 @@ def test_query_capabilities_midscene_gets_no_nova_env(monkeypatch, novaact_env_c
 # ---- engine_min_grace：下限取自自述对象、复用该引擎任一份缓存（ADR 0024「引擎自报下限」）----
 
 def test_engine_min_grace_takes_worker_self_reported_value(monkeypatch, novaact_env_cmd, fresh_caps_cache):
-    """下限 = worker 自报值（组合根不再持任何引擎特定常量）；一份缓存都没有时**不带 steps 目录**问一次
+    """下限取 worker 自报值（组合根不再持任何引擎特定常量）；一份缓存都没有时**不带 steps 目录**问一次
     （下限是引擎自己的收尾预算、与使用方 step 无关）。"""
     import subprocess
 
@@ -705,7 +705,7 @@ def test_engine_min_grace_reuses_capabilities_asked_with_steps_dir(
 
 
 def test_engine_min_grace_worker_failure_fails_loud(monkeypatch, novaact_env_cmd, fresh_caps_cache):
-    """问不到就抛（异常原样冒上去、由调用点退 2）——**绝不回落猜的常量**：那等于 grace 默默不够、收尾被强杀。"""
+    """问不到就抛（异常原样冒上去、调用点以退出码 2 结束）——**绝不回落猜的常量**：那等于 grace 默默不够、收尾被强杀。"""
     import subprocess
 
     monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: _fake_caps_proc(b"", returncode=2))
@@ -721,7 +721,7 @@ def test_engine_min_grace_unknown_engine_raises(fresh_caps_cache):
 
 
 def test_engine_min_grace_miss_raises_worker_not_found(monkeypatch, fresh_caps_cache):
-    """本机没定位到该引擎 worker → WorkerNotFoundError（doctor 据此跳过比对、run 据此退 2 带安装指引）。"""
+    """本机没定位到该引擎 worker → WorkerNotFoundError（doctor 据此跳过比对、run 据此以退出码 2 结束并带安装指引）。"""
     monkeypatch.delenv("GHERKAI_WORKER_MIDSCENE_CMD", raising=False)
     monkeypatch.setattr(compose.shutil, "which", lambda n: None)
     monkeypatch.setattr(compose, "_runtime_version", lambda: None)
@@ -764,7 +764,7 @@ def test_resolve_cloud_target_derives_all_names_from_prefix(monkeypatch):
     assert (t.prefix, t.region, t.profile) == ("prod-", "us-west-2", None)
     assert (t.runs_table, t.events_table, t.bucket, t.cluster) == (
         "prod-runs", "prod-events", "prod-artifacts", "prod-cluster")
-    # 三 Lambda 名同源推导；detached_chain_lambdas 顺序 = 链上顺序（kicker→reconciler→exit-observer）
+    # 三 Lambda 名同源推导；detached_chain_lambdas 顺序即链上顺序（kicker→reconciler→exit-observer）
     assert t.detached_chain_lambdas == ["prod-kicker", "prod-reconciler", "prod-exit-observer"]
 
 
@@ -1052,7 +1052,7 @@ class _FakeEcsClient:
 class _FakeLambdaClient:
     def __init__(self, existing, env_by_fn=None):
         self._existing = set(existing)
-        self._env_by_fn = env_by_fn or {}  # fn → env dict（缺项 = 该 Lambda 没配 env，同真实返回体省略 Environment）
+        self._env_by_fn = env_by_fn or {}  # fn → env dict（缺项表示该 Lambda 没配 env，同真实返回体省略 Environment）
 
     def get_function(self, FunctionName):
         if FunctionName not in self._existing:
@@ -1088,7 +1088,7 @@ def test_preflight_missing_events_table_names_prefix():
 
 
 def test_preflight_missing_task_def_names_prefix():
-    # task-def 维度的 prefix 配错（原漏到 RunTask 才炸、退 1 不点名）→ 现 preflight 点名 fail-fast（ADR 0033）
+    # task-def 维度的 prefix 配错（原漏到 RunTask 才炸、退出码 1 不点名）→ 现 preflight 点名 fail-fast（ADR 0033）
     err = compose.preflight_cloud_resources(
         prefix="prod-", events_table="prod-events", bucket="prod-artifacts", cluster="prod-cluster",
         task_defs=["prod-novaact-worker"],
@@ -1100,7 +1100,7 @@ def test_preflight_missing_task_def_names_prefix():
 
 
 def test_preflight_missing_chain_lambda_names_prefix():
-    # detached 链三 Lambda 任一缺 = 提交成功但 run 永不推进/收敛 → 挡在提交前（ADR 0033）
+    # detached 链三 Lambda 任一缺即提交成功但 run 永不推进/收敛 → 挡在提交前（ADR 0033）
     err = compose.preflight_cloud_resources(
         prefix="g-", events_table="g-events", bucket="g-artifacts", cluster="g-cluster",
         lambda_fns=["g-kicker", "g-reconciler", "g-exit-observer"],
@@ -1138,7 +1138,7 @@ def _preflight_report_dir(report_dir, env_by_fn=None):
 
 
 def test_preflight_report_dir_mismatch_fails_fast_naming_both_sides():
-    # --report-dir 与推进器 REPORT_DIR 分裂 = 运行完成但结果落在提交者没指定的前缀下（静默分裂）→ 挡在提交前、点名两侧值。
+    # --report-dir 与推进器 REPORT_DIR 分裂即运行完成但结果落在提交者没指定的前缀下（静默分裂）→ 挡在提交前、点名两侧值。
     # kicker 对上、reconciler 没对上 → 两个推进器都比（不是只看第一个）
     err = _preflight_report_dir("mine", env_by_fn={"g-kicker": {"REPORT_DIR": "mine"},
                                                   "g-reconciler": {"REPORT_DIR": "reports"}})
@@ -1187,7 +1187,7 @@ def _preflight_cap(declared, cap_env, warns):
 
 def test_preflight_warns_once_when_declared_max_concurrency_exceeds_cap():
     # 声明 8 > cap 4 → 提交时就告知「本 run 只会按 4 并行」（否则提交者以为按 8 运行、只看到莫名慢）。
-    # 但**不构成 preflight 失败**：钳制不改产物落点、run 照常运行（对照 REPORT_DIR 分岔的退 2——判据 = 分岔后果）。
+    # 但**不构成 preflight 失败**：钳制不改产物落点、run 照常运行（对照 REPORT_DIR 分岔的退出码为 2——判据是分岔后果）。
     warns = []
     err = _preflight_cap(8, "4", warns)
     assert err is None                       # 只警不拦
@@ -1225,7 +1225,7 @@ def novaact_env_cmd(monkeypatch):
 
 def test_self_describe_miss_raises_worker_not_found(monkeypatch, fresh_caps_cache):
     """定位链 miss 时**两个非 job 入口**都抛 WorkerNotFoundError（而非「起不来」的通用 RuntimeError）——
-    调用点据此分叉：list-deterministic / run 退 2 打安装指引、plan 标注降级。"""
+    调用点据此分叉：list-deterministic / run 以退出码 2 结束并打安装指引、plan 标注降级。"""
     monkeypatch.delenv("GHERKAI_WORKER_MIDSCENE_CMD", raising=False)
     monkeypatch.setattr(compose.shutil, "which", lambda n: None)
     monkeypatch.setattr(compose, "_runtime_version", lambda: None)
@@ -1350,7 +1350,7 @@ def test_skew_warn_when_cli_older():
 
 
 def test_skew_warn_when_stamp_missing_points_at_deploy():
-    """戳缺失 = 本机制之前部署的环境 → warn（不拦）+ 提示运行一次 `gherkai deploy` 写入。"""
+    """戳缺失表示本机制之前部署的环境 → warn（不拦）+ 提示运行一次 `gherkai deploy` 写入。"""
     verdict, msg = compose.check_version_skew(None, "1.4.0")
     assert verdict == compose.SKEW_WARN and "gherkai deploy" in msg
 
@@ -1402,7 +1402,7 @@ def test_check_backend_skew_missing_stamp_warns_not_raises():
 
 
 def test_check_backend_skew_propagates_read_errors():
-    """凭证/权限类读错误原样抛（调用方归到自己的退出码层），不吞成「放行」——block 无放行口，读不到≠放过。"""
+    """凭证/权限类读错误原样抛（调用方归到自己的退出码层），不吞成「放行」——block 无放行口，读不到不等于放过。"""
     from botocore.exceptions import ClientError
     ssm = _StampSsm(None, error=_client_error("AccessDeniedException"))
     with pytest.raises(ClientError):
@@ -1430,7 +1430,7 @@ def test_variant_miss_hint_older_cli_only_guides_upgrade():
     assert "push-worker" not in msg and "--worker-variant base" not in msg
 
 
-# ---- run_duration_ms：detached run 级墙钟 = RunState ended_at - started_at（ADR 0024「三级执行时长」detached 条）----
+# ---- run_duration_ms：detached run 级墙钟取 RunState ended_at 减 started_at（ADR 0024「三级执行时长」detached 条）----
 def test_run_duration_ms_from_run_state_timestamps():
     from gherkai_core.model import RunState, Status
 

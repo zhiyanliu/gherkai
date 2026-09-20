@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 等某个包版本在索引上「可见」——基础镜像 build 依赖已发行包索引可见（ADR 0037 决策 8）。
 #
-# 为什么要等：上传成功 ≠ 立刻可装。PyPI / npm 的 simple index 与 registry 元数据都过 CDN，
+# 为什么要等：上传成功不等于立刻可装。PyPI / npm 的 simple index 与 registry 元数据都过 CDN，
 # 上传返回 200 之后到 `pip install <name>==<版本>` 能解析到，中间有秒级到分钟级的传播窗口。
 # 基础镜像的 CI 形态按版本装已发行的 worker 包（ADR 0037 决策 5「两态」），赶在窗口里 build
 # 会以「no matching distribution」/「No matching version found」形式随机失败——那是一次
@@ -10,7 +10,7 @@
 # 用法：
 #   wait_for_index.sh pypi gherkai-worker-novaact 1.4.0
 #   wait_for_index.sh npm  @gherkai/worker-midscene 1.4.0
-# 退 0 = 已可见；退 1 = 超时（调用方应视作失败，重新运行本 job 即可继续）。
+# 退出码 0 表示已可见；退出码 1 表示超时（调用方应视作失败，重新运行本 job 即可继续）。
 
 set -euo pipefail
 
@@ -28,7 +28,7 @@ case "$kind" in
     header='Accept: application/vnd.pypi.simple.v1+json'
     ;;
   npm)
-    # registry 的 packument 按版本取：404 = 还没可见，200 = 该版本已在元数据里。
+    # registry 的 packument 按版本取：404 表示还没可见，200 表示该版本已在元数据里。
     url="https://registry.npmjs.org/${name//\//%2F}/${version}"
     header='Accept: application/json'
     ;;

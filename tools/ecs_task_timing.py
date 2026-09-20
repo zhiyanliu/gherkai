@@ -12,7 +12,7 @@ grace/stopTimeout 校准要的是 SIGTERM→退出的**真实墙钟耗时**（`s
 - `createdAt`：RunTask 收到请求。
 - `startedAt`：容器进入 RUNNING。
 - `stoppingAt`：ECS 开始停（发 SIGTERM 的时间基准）。
-- `executionStoppedAt`：容器进程实际停（worker 退出的时间基准）。**stoppingAt→executionStoppedAt = SIGTERM→退出真实耗时**
+- `executionStoppedAt`：容器进程实际停（worker 退出的时间基准）。**stoppingAt→executionStoppedAt 即 SIGTERM→退出真实耗时**
   ——这是校准 stopTimeout 的核心量（对照生效 stopTimeout；grace 下限 vs stopTimeout 的关系见 ADR 0032 结论 4）。
 - `stoppedAt`：task 完全 STOPPED（清理完）。
 - `stopCode` / `stoppedReason`：停因（`TaskFailedToStart` / `EssentialContainerExited` / `UserInitiated`(StopTask) 等）。
@@ -108,7 +108,7 @@ def capture(cluster: str, task: str, region: str | None, wait: bool,
         "stopped_reason": t.get("stoppedReason"),
         "wait_timed_out": wait_timed_out,
         "container_warning": container_warning,
-        "stop_timeout_ref": stop_timeout,  # 用户告知的 task-def 生效 stopTimeout（判 SIGKILL 截断用；None=未告知，回落 120 上限）
+        "stop_timeout_ref": stop_timeout,  # 用户告知的 task-def 生效 stopTimeout（判 SIGKILL 截断用；None 表示未告知，回落 120 上限）
         "times_iso": {f: _iso(times[f]) for f in _TIME_FIELDS},
         "durations_s": {
             "created_to_started": _delta_s(times, "createdAt", "startedAt"),
@@ -147,7 +147,7 @@ def _print_human(r: dict) -> None:
         print(f"--- container {c['name']} ---  exitCode={c['exit_code']} reason={c['reason']}")
     ste = d["stopping_to_execution_stopped"]
     if ste is not None:
-        # 判 SIGKILL 截断的阈值 = **实际生效的 stopTimeout**（--stop-timeout 告知），非写死 120——校准时本就会试不同
+        # 判 SIGKILL 截断的阈值取**实际生效的 stopTimeout**（--stop-timeout 告知），非写死 120——校准时本就会试不同
         # stop_timeout 值，写死 120 会在 -c stop_timeout=60 时把「达 60 被 SIGKILL」误判成「远低于 120、过保守」（方向反）。
         # 未告知则回落 Fargate 上限 120（保守）。再交叉 exitCode（137≈128+9=SIGKILL）辅助消歧。
         # 用 `is not None`（非 `or`）判在场：--stop-timeout 已在 main() 校验 [1,120]（0/负被拒），此处不会遇非法值；
@@ -162,7 +162,7 @@ def _print_human(r: dict) -> None:
             verdict = f"逼近/达生效 stopTimeout({cap}s)，疑被 SIGKILL 截断、worker 没在宽限内退干净{killed_hint}"
         else:
             verdict = f"明显低于生效 stopTimeout({cap}s)，grace 有余量；对照本 run 引擎的 grace 下限看是否过保守"
-        print(f"\n对照生效 stopTimeout（{cap_src}）：SIGTERM→退出={ste}s → {verdict}")
+        print(f"\n对照生效 stopTimeout（{cap_src}）：SIGTERM→退出耗时 {ste}s → {verdict}")
 
 
 def main() -> None:

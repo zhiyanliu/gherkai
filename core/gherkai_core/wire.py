@@ -119,7 +119,7 @@ def _report_refs_from_json(items: list | None) -> tuple[ReportRef, ...]:
 def event_from_json(d: dict) -> Event:
     """JSON dict（worker 事件通道一行）→ model.Event，按 "type" 分派（ADR 0024）。
 
-    事件通道随形态而异：子进程态 = 专用 fd（号经 EVENTS_FD 传给 worker）；Fargate 态 = DDB events 表
+    事件通道随形态而异：子进程态下是专用 fd（号经 EVENTS_FD 传给 worker）；Fargate 态下是 DDB events 表
     记录的 body（ADR 0024 三通道分离）。两态的行内容同一形状，故都归这里反序列化。
     """
     t = d.get("type")
@@ -160,7 +160,7 @@ def event_from_json(d: dict) -> Event:
 
 
 def event_from_line(line: str) -> Event:
-    """worker 事件通道一行（子进程态 = EVENTS_FD 的 fd；Fargate 态 = DDB events 表 body）→ model.Event。"""
+    """worker 事件通道一行（子进程态下取 EVENTS_FD 的 fd，Fargate 态下取 DDB events 表 body）→ model.Event。"""
     return event_from_json(json.loads(line))
 
 
@@ -168,11 +168,11 @@ def event_from_line(line: str) -> Event:
 # worker → core：退出码（out-of-band 信号，ADR 0024「退出码约定」/ 0028）
 # ============================================================================
 
-# worker 网络专用退出码：建连失败、重试耗尽时 worker 以此码退出（建连早于任何事件 emit，无法走事件通道）。
+# worker 网络故障专用退出码：建连失败、重试耗尽时 worker 以这个退出码退出（建连早于任何事件 emit，无法走事件通道）。
 # 值避开 POSIX sysexits(64-78)/shell 保留(126-128+n)/信号区。**两个引擎 worker 各自硬编码同一个值**
 # （Nova: engines/novaact/gherkai_worker_novaact/run_scope.py；Midscene: engines/midscene/src/worker/run-scope.mts
 #  ——语言边界抄不掉）；core 侧只此一处，Engine adapter 一律 import 本常量与下面的翻译函数，别各抄一份
-# （抄一份 = 两处漂移，靠注释维持一致的人工约束）。
+# （抄一份即两处漂移，靠注释维持一致的人工约束）。
 EX_WORKER_NETWORK = 80
 
 

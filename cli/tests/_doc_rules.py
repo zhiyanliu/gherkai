@@ -43,7 +43,9 @@ FORBIDDEN = re.compile(
 # 只放行「文档 / 归档 / 存档 / 档案 / 档期」这类固定词。它是用词规则而非口吻规则，故 CHANGELOG 已发行节
 # 随退役词表一起豁免（见 `changelog_unreleased`）。
 COLLOQUIAL = re.compile(r"帽子不是人|烧钱|锁步|lockstep|烙进|烙好|烙成|烙在|逃生舱|旋钮|跑(?!」)"
-                        r"|(?<![文归存])档(?![案期])")
+                        r"|(?<![文归存])档(?![案期])"
+                        # ADR 0045 决策六形态②：自造二字复合词与「码」缩略（排版学义的「同形字符」与「协同调度」放行）
+                        r"|同形(?!字)|同款|同律|(?<!协)同调|同口径|归码|退码|网络码|专用码|非零码|此码")
 
 # 已退役的旧名：CONTEXT.md 词表给了规范名、旧名列进该条 `_Avoid_` 的那批，使用者面一个都不许再出现。
 # 与 COLLOQUIAL 分表是因为判据不同——那张管「口吻」（口头语 / 隐喻，永久禁），这张管「用词版本」（旧名 →
@@ -58,6 +60,11 @@ RETIRED_TERMS_WORDS = (
     "本批", "这一批", "整批",
 )
 RETIRED_TERMS = re.compile("|".join(re.escape(w) for w in RETIRED_TERMS_WORDS))
+# 注释与 docstring 用的退役表去掉「批」义三词：Lambda 与 Stream 侧的注释里「本批 / 整批」指 DynamoDB Stream 一次投递的
+# 事件批（「本批重试耗尽后整批丢弃」），是机制义、不是 Run 的旧名，正则分不出两义；注释里指一次 run 的「整批」交
+# code-health 复盘的术语维度人判（ADR 0045 决策八：AI 侧与注释只换作为术语名的短语）。
+_BATCH_WORDS = {"本批", "这一批", "整批"}
+RETIRED_TERMS_IN_CODE = re.compile("|".join(re.escape(w) for w in RETIRED_TERMS_WORDS if w not in _BATCH_WORDS))
 
 _CHANGELOG_RELEASED = re.compile(r"^## \[\d", re.M)  # 第一个已发行版本节的标题（`## [Unreleased]` 不匹配）
 
@@ -76,6 +83,102 @@ def changelog_unreleased(text: str) -> str:
 
 # `](../x)` / `](./x)` / `](foo.md)` / `](references/foo.md)`：PyPI/npm 页面与 skill 安装态都渲染不出仓库的目录树。
 RELATIVE_LINK = re.compile(r"\]\((?:\.\.?/|(?![a-z][a-z0-9+.-]*:|#)[^)\s]+\.md)")
+
+# ── ADR 0045 决策六形态①③：符号当谓语与省略中心词的数字缩写 ─────────────────────
+# 决策六把三种漏进人读层的 AI 侧缩写立为口吻规则：②的固定词已进上面的 COLLOQUIAL；①③是形态、不是固定词，只能靶向
+# 启发式：中文字紧邻 `=`（含全角）即视为把等号当「是 / 即」用；「退 <数字>」即省了中心词「退出码」。扫描前先剥掉代码块
+# 与行内代码（`prose_lines`）——代码里的赋值、命令示例、JSON 片段本来就该是符号。≠ / ⊆ 在中文正文里没有合法用法，
+# 直接禁。箭头只在用户文档与 skill 正文里禁（技术文档与注释允许它表顺序与因果），故单独一条。
+SYMBOL_PREDICATE = re.compile(r"[一-鿿]\s*[=＝]\s|\s[=＝]\s*[一-鿿]|(?<!绿)≠(?!对)|⊆")  # 「绿≠对」是 CLAUDE.md 立的判据名，放行
+NUMERIC_SHORTHAND = re.compile(r"退\s?[0-9]+(?![0-9.\-])")   # 「退出码 2」不命中：退 后面是 出
+ARROW = re.compile(r"→")
+
+_FENCE = re.compile(r"^\s*(```|~~~)")
+
+
+def prose_lines(text: str, *, skip_frontmatter: bool = False) -> list[tuple[int, str]]:
+    """markdown 的正文行：剥掉围栏代码块、行内反引号代码，可选剥掉 YAML frontmatter；行号与原文一致。
+
+    表格行保留（表格里的字也是人读的）；HTML 注释不另处理（本仓库文档不用它）。
+    """
+    lines = text.splitlines()
+    start = 0
+    if skip_frontmatter and lines and lines[0].strip() == "---":
+        for i in range(1, len(lines)):
+            if lines[i].strip() == "---":
+                start = i + 1
+                break
+    out: list[tuple[int, str]] = []
+    in_fence = False
+    for i, line in enumerate(lines[start:], start + 1):
+        if _FENCE.match(line):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        out.append((i, CODE_SPAN.sub(" ", line)))
+    return out
+
+
+# 注释与 docstring 的抽取（`test_code_comments.py` 用）：Python 走 tokenize + ast（注释与三种 docstring），
+# TS / JS 走遮蔽字符串后的 // 与 /* */，shell / YAML / Dockerfile 走行内 #。返回 (行号, 文本) 列表。
+_JS_STRING = re.compile(r"'(?:\\.|[^'\\\n])*'|\"(?:\\.|[^\"\\\n])*\"|`(?:\\.|[^`\\])*`", re.S)
+_HASH_COMMENT = re.compile(r"(?<![\"'])#(.*)$")
+
+
+def comment_units(path: Path) -> list[tuple[int, str]]:
+    text = path.read_text(encoding="utf-8", errors="replace")
+    suffix = path.suffix
+    out: list[tuple[int, str]] = []
+    if suffix == ".py":
+        import ast
+        import io
+        import tokenize
+        try:
+            for tok in tokenize.generate_tokens(io.StringIO(text).readline):
+                if tok.type == tokenize.COMMENT:
+                    out.append((tok.start[0], tok.string))
+            tree = ast.parse(text)
+        except (SyntaxError, tokenize.TokenError):
+            return out
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+                doc = ast.get_docstring(node, clean=False)
+                if doc:
+                    first = node.body[0].lineno if node.body else 1
+                    for k, line in enumerate(doc.splitlines()):
+                        out.append((first + k, line))
+        return out
+    if suffix in {".mts", ".ts", ".mjs", ".js"}:
+        masked = _JS_STRING.sub(lambda m: " " * len(m.group(0)), text)
+        in_block = False
+        for i, line in enumerate(masked.splitlines(), 1):
+            rest = line
+            while rest:
+                if in_block:
+                    end = rest.find("*/")
+                    if end < 0:
+                        out.append((i, rest))
+                        break
+                    out.append((i, rest[:end]))
+                    rest = rest[end + 2:]
+                    in_block = False
+                    continue
+                s1, s2 = rest.find("//"), rest.find("/*")
+                if s1 < 0 and s2 < 0:
+                    break
+                if s2 < 0 or (0 <= s1 < s2):
+                    out.append((i, rest[s1 + 2:]))
+                    break
+                in_block = True
+                rest = rest[s2 + 2:]
+        return out
+    for i, line in enumerate(text.splitlines(), 1):  # .sh / .yml / Dockerfile
+        m = _HASH_COMMENT.search(line)
+        if m and not line.lstrip().startswith("#!"):
+            out.append((i, m.group(1)))
+    return out
+
 
 # ── 机器绝对路径的判据 ──────────────────────────────────────────────────────
 

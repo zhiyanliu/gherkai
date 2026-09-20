@@ -21,11 +21,11 @@ ADR 0016 分层）。**worker 只认一个 env `GHERKAI_STEPS_DIR`**——没有
   step 文件；判整条相对路径而非仅文件名，两引擎同一条规则。
 - **加载失败 fail-loud**（ADR 0037 决策 4）：任一文件 import 失败 → 带文件名与异常退出，**绝不静默跳过**。
   跳过等于把该文件里的确定性 step 静默换成 AI catch-all、run 可能「通过」——本项目最忌的静默降级。
-  同理「给了目录但目录不存在」也是 fail-loud：使用方明确指了一个地方，那里没东西 = 配置错，不是「没定制」。
+  同理「给了目录但目录不存在」也是 fail-loud：使用方明确指了一个地方，那里没东西就是配置错，不是「没定制」。
 
 两个非 job 入口（`--capabilities` 自述 / `--match-steps` 查询；ADR 0037 决策 4）与 job 模式**同样**先加载
 （调用点在 `run_scope.main()` 顶部），故能力自述里的确定性清单与 plan 标注反映使用方定制（ADR 0036
-「真值单一」仍成立：注册表 = 内建脚手架 + 加载的使用方模块）。
+「真值单一」仍成立：注册表是内建脚手架加上加载的使用方模块）。
 """
 from __future__ import annotations
 
@@ -34,10 +34,10 @@ import sys
 import types
 from pathlib import Path
 
-# 「还没开始执行就被拒」的退出码。ADR 0024 只给了一个专用码（`EX_WORKER_NETWORK=80`，建连耗尽的 out-of-band
-# 信号），装配/配置错没有专用码——用通用非 0 的 2，经 core 的 `raise_for_worker_exit` 落成 `RuntimeError`
+# 「还没开始执行就被拒」的退出码。ADR 0024 只给了一个专用退出码（`EX_WORKER_NETWORK=80`，建连耗尽的 out-of-band
+# 信号），装配/配置错没有专用退出码——用通用非 0 的 2，经 core 的 `raise_for_worker_exit` 落成 `RuntimeError`
 # → job 记 error。**要的是「响亮」而非「可分类」**：steps 加载失败是使用方本机的配置错，人看 stderr 那行
-# 诊断即知，不需要 core 侧按类型分支（真需要时再升专用码，别现在为它占码）。
+# 诊断即知，不需要 core 侧按类型分支（真需要时再升专用退出码，别现在为它占一个退出码）。
 EX_STEPS_LOAD = 2
 
 # 合成命名空间根：使用方 step 文件被挂在这个名字下（`gherkai_user_steps.<相对路径转模块名>`）。
@@ -91,13 +91,13 @@ def _is_step_file(rel: Path) -> bool:
 def load_user_steps(root: str | None) -> list[Path]:
     """加载 `root` 下的使用方确定性 step 文件，返回实际加载的文件列表（排序后）。
 
-    `root` = env `GHERKAI_STEPS_DIR` 的值（由组合根注入）。None / 空串 → no-op（没定制，返回空表）。
+    `root` 是 env `GHERKAI_STEPS_DIR` 的值（由组合根注入）。None / 空串 → no-op（没定制，返回空表）。
     目录不存在、或任一文件 import 失败 → 抛 `UserStepsError`（fail-loud，见模块文档）。
     返回的文件列表是**诊断用**：调用点（`run_scope.main()`）据它打一行「已加载使用方 steps N 个文件（目录）」，
-    与 Midscene 侧同形——「写了 steps 却全走 AI」时使用方靠这行分清是目录没被读到还是 pattern 没命中。
+    与 Midscene 侧措辞一致——「写了 steps 却全走 AI」时使用方靠这行分清是目录没被读到还是 pattern 没命中。
     """
     if not root or not root.strip():
-        return []  # 未注入 = 使用方没有定制 step，正常路径（不是错）
+        return []  # 未注入表示使用方没有定制 step，正常路径（不是错）
 
     base = Path(root).expanduser()
     if not base.is_dir():

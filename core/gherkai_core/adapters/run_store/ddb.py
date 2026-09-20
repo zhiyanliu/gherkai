@@ -154,10 +154,10 @@ class DynamoDBRunStore:
             raise FileNotFoundError(f"finalize_run：STATE 不存在（须先 create_run）：{run_id}") from e
 
     def preflight(self) -> None:
-        """探活（ADR 0030 决定七）：begin 前探表可达，表不存在/无权限即抛（cli 接住→退 2）。
+        """探活（ADR 0030 决定七）：begin 前探表可达，表不存在/无权限即抛（cli 接住→以退出码 2 结束）。
 
-        用 `table.load()`（= DescribeTable）——轻量、只读、不写数据；表不存在抛 ResourceNotFoundException、
-        无权限抛 AccessDenied，都原样冒泡由组合根 gated except 归到退 2。
+        用 `table.load()`（即 DescribeTable）——轻量、只读、不写数据；表不存在抛 ResourceNotFoundException、
+        无权限抛 AccessDenied，都原样冒泡由组合根 gated except 归到退出码 2。
         """
         self._table.load()
 
@@ -203,7 +203,7 @@ class DynamoDBRunStore:
         条件写，被挡的单个 job 静默跳过（库中已更推进，正确态在库、无信息丢失）。逐属性而非整 entry：update_item 不碰未提及
         属性，投影没带的 session_id/claimed_at（claimed_at 只由 try_claim_job 落库、事件推演不出）天然保留——对拍 local 的
         「投影缺字段回填库中值」兜底，不再依赖调用方总传 baseline。两步非原子，但每步各自条件守卫、次序（先标量后
-        jobs）保证中间态只会「标量新、job 旧」= 等价于一次携带旧 job 视图的合法投影，下轮重放收敛。
+        jobs）保证中间态只会「标量新、job 旧」，等价于一次携带旧 job 视图的合法投影，下轮重放收敛。
         update_item 天然不碰未提及属性——started_at 由 create_run 落、此处不再传（修「put_item 整 item 覆盖把
         started_at 抹掉」的对拍不一致）。"""
         from gherkai_core.project import _lifecycle_rank, projected_run_status
@@ -247,7 +247,7 @@ class DynamoDBRunStore:
                     cond, vals = "jobs.#sid.#jst = :pending", {":pending": Status.PENDING.value}
                 sets = ["jobs.#sid.#jst = :st"]
                 vals[":st"] = js.status.value
-                if js.session_id is not None:  # omit-when-None = 不提及 = 保留库中值（回填兜底）
+                if js.session_id is not None:  # omit-when-None 即不提及，也就是保留库中值（回填兜底）
                     sets.append("jobs.#sid.session_id = :sess")
                     vals[":sess"] = js.session_id
                 if js.claimed_at is not None:
@@ -284,7 +284,7 @@ class DynamoDBRunStore:
     # ---- 一次性写便捷方法（保留，对拍 local）----
 
     def save_run(self, meta: RunMeta, state: RunState) -> None:
-        """一次性写完整态（= create_run 的两 item 一起 put；语义同 local save_run）。"""
+        """一次性写完整态（即 create_run 的两 item 一起 put；语义同 local save_run）。"""
         self.create_run(meta, state)
 
     def load_run_meta(self, run_id: str) -> RunMeta | None:
@@ -299,7 +299,7 @@ class DynamoDBRunStore:
             meta_dict = self._arg_offloader.restore(meta_dict, run_id)
         elif has_pointers(meta_dict):
             # fail-loud（ADR 0030 决定七「不给生产选要不要正确」）：META 含 offload 指针而本实例没注入
-            # offloader = 组合根装配错误（曾发生：Lambda 组合根漏注入 → 正文静默还原成 None、worker 拿
+            # offloader 属组合根装配错误（曾发生：Lambda 组合根漏注入 → 正文静默还原成 None、worker 拿
             # 空参数执行出错）。宁炸不静默降级。判据走 arg_offload 的**位置遍历**（与 restore 同源，决定六
             # 「位置区分、非值探测」）——对 meta_json 原始串做 '"content_ref"' 子串 sniff 会被「正文恰为
             # 该串」的 docString/dataTable cell 误命中，把好 run 判成装配错误、读不回来。
@@ -333,7 +333,7 @@ class DynamoDBRunStore:
         )
 
     def is_detached(self, run_id: str) -> bool:
-        """STATE item 上有没有 `detached` 标记（ADR 0034）：True = 无状态批量运行的 submit 建的 run。
+        """STATE item 上有没有 `detached` 标记（ADR 0034）：True 表示无状态批量运行的 submit 建的 run。
 
         **adapter-only 只读访问器、不在 RunStore port 上**——detached 是执行环境属性、不进 core 模型
         （ADR 0034 「filter 必须区分写入者」条），只有云端推进器组合根需要它做「只推进 detached run」的

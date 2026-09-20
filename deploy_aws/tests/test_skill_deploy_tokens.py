@@ -54,7 +54,7 @@ def _build(verb: str) -> argparse.ArgumentParser:
 
 
 def _nodes(parser: argparse.ArgumentParser) -> dict[tuple[str, ...], set[str]]:
-    """子动词路径 → 该节点声明的 `--flag` 集（`()` = `gherkai <verb>` 本身）。"""
+    """子动词路径 → 该节点声明的 `--flag` 集（`()` 表示 `gherkai <verb>` 本身）。"""
     out: dict[tuple[str, ...], set[str]] = {}
 
     def walk(p: argparse.ArgumentParser, path: tuple[str, ...]) -> None:
@@ -79,7 +79,7 @@ def _deploy_spans():
 
 def test_deploy_flags_are_attached_to_the_right_subverb():
     """`gherkai deploy [<子动词>] --flag` 逐对比对。父层给法合法（`deploy --prefix p push-worker …`），
-    故允许集 = 路径上各级之并；挂到别的子动词上即红。"""
+    故允许集是路径上各级之并；挂到别的子动词上即红。"""
     spans = _deploy_spans()
     if not spans:
         pytest.skip("skill 里没有 deploy / destroy 的命令 token")

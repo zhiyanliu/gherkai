@@ -46,7 +46,7 @@ function step(keyword: string, text: string, index = 0): any {
 }
 
 // ---- isTransientNetwork：白名单 + cause 链 + ENOTFOUND/EAI_AGAIN（对称 Nova test_transient_network）----
-test("isTransientNetwork: ECONNRESET/ETIMEDOUT 等瞬时码 → true", async () => {
+test("isTransientNetwork: ECONNRESET/ETIMEDOUT 等瞬时错误码 → true", async () => {
   const { isTransientNetwork } = await importMod();
   for (const code of ["ECONNRESET", "ECONNREFUSED", "ETIMEDOUT", "EPIPE", "EAI_AGAIN", "ECONNABORTED"]) {
     assert.equal(isTransientNetwork({ code }), true, code);
@@ -301,7 +301,7 @@ function costAgent(perCallTokens: number[]) {
   } as any;
 }
 
-test("runStep: Then votesN=3 token 成本 = 三票之和（不是只算最后一票）", async () => {
+test("runStep: Then votesN=3 的 token 成本是三票之和（不是只算最后一票）", async () => {
   const { runStep } = await importMod();
   const agent = costAgent([100, 200, 300]);  // 三票各 100/200/300
   await runStep(agent, fakePage, "sc:0", step("Then", '"对吗"'), 3, testSink);
@@ -474,7 +474,7 @@ test("shutdownSequence: cleanup 先于中断提前上传（会话释放优先铁
   // 核心不变量：会话释放（cleanup）必须排在提前上传（snapshot）与截图队列排空（drain）之前——退化网络下这两件
   // 各自挂满预算，也不该延迟会话释放。
   assert.deepEqual(order, ["cleanup", "snapshot", "drain"], "顺序须 cleanup→snapshot→drain，绝不可颠倒");
-  assert.equal(code, 0, "cleanup 未失败 → 退 0");
+  assert.equal(code, 0, "cleanup 未失败 → 退出码 0");
 });
 
 test("shutdownSequence: 在途窗口兜底 → sleep 在 cleanup 之前", async () => {
@@ -488,7 +488,7 @@ test("shutdownSequence: 在途窗口兜底 → sleep 在 cleanup 之前", async 
 test("shutdownSequence: cleanupFailed → 退出码 1（泄漏可观测）", async () => {
   const { shutdownSequence } = await importMod();
   const { deps } = shutdownSpy({ cleanupFailed: true });
-  assert.equal(await shutdownSequence(deps), 1, "会话释放失败 → 退 1");
+  assert.equal(await shutdownSequence(deps), 1, "会话释放失败 → 退出码 1");
 });
 
 test("shutdownSequence: reportFile 空窗 → cleanup 照常执行、提前上传跳过", async () => {
@@ -501,7 +501,7 @@ test("shutdownSequence: reportFile 空窗 → cleanup 照常执行、提前上�
 
 
 // ---- 截图后台队列的有界排空（drainArtifactQueue，ADR 0042 决策一）----
-// 与 interruptSnapshot 同形的收尾小函数：排不空只记一行、绝不抛（收尾路径抛会跳过后面的 exit/flush）。
+// 与 interruptSnapshot 结构相同的收尾小函数：排不空只记一行、绝不抛（收尾路径抛会跳过后面的 exit/flush）。
 test("shutdownSequence: 排空截图队列排在会话释放之后，且预算有界（计入 grace）", async () => {
   const { shutdownSequence } = await importMod();
   const { deps, drainBudgets, order } = shutdownSpy();
@@ -529,7 +529,7 @@ test("drainArtifactQueue: 队列已空（drain 返 true）→ 不记日志", asy
 
 test("drainArtifactQueue: 排不完的提示按 flushFollows 分两句（会 flush 的才许说『改由收尾统一上传』）", async () => {
   // 两句话承诺的事不同：后面跟着整目录 flush 时剩余字节还会被传上去；提前退出路径不 flush、那些截图就此丢。
-  // 调用点声明、函数不猜调用栈——错句 = 给使用方一个假承诺（说「改由收尾上传」而其实没人再传）。
+  // 调用点声明、函数不猜调用栈——错句就是给使用方一个假承诺（说「改由收尾上传」而其实没人再传）。
   const { drainArtifactQueue } = await importMod();
   const notDrained = { drain: async () => false };
   const withFlush: string[] = [];
@@ -544,7 +544,7 @@ test("drainArtifactQueue: 排不完的提示按 flushFollows 分两句（会 flu
 });
 
 test("drainArtifactQueue: drain 抛（上传器坏了 / 没这个方法）→ 吞掉、只记一行，绝不抛", async () => {
-  // 收尾路径上抛 = 跳过后面的 process.exit / flush，比丢几张截图严重得多（best-effort 语义）。
+  // 收尾路径上抛就会跳过后面的 process.exit / flush，比丢几张截图严重得多（best-effort 语义）。
   const { drainArtifactQueue } = await importMod();
   const logs: string[] = [];
   await drainArtifactQueue({ drain: async () => { throw new Error("boom"); } }, 6000, false, (m) => logs.push(m));
@@ -632,7 +632,7 @@ test("--match-steps: 超 64KB payload 经 pipe 完整送出（ADR 0036，不被 
   proc.stdout.on("data", (c) => out.push(c));
   const code: number = await new Promise((r) => proc.on("close", r));
   const raw = Buffer.concat(out).toString("utf-8");
-  assert.equal(code, 0, `worker 应退 0，stdout ${raw.length} 字符`);
+  assert.equal(code, 0, `worker 应以退出码 0 结束，stdout ${raw.length} 字符`);
   assert.ok(Buffer.byteLength(raw) > 65536, `payload 须超 pipe 缓冲才有意义，实际 ${Buffer.byteLength(raw)} 字节`);
   const got = JSON.parse(raw);  // 截断时这里抛（rc 仍 0，故只靠退出码守不住）
   assert.equal(got.length, texts.length, "逐条命中结果不该丢");
@@ -641,16 +641,16 @@ test("--match-steps: 超 64KB payload 经 pipe 完整送出（ADR 0036，不被 
 
 // ---- 能力自述 --capabilities（ADR 0036「5.」）：JSON 形状 + min_grace_s 的来路（ADR 0024「引擎自报下限」）----
 // **真实运行入口**：组合根消费的就是这条路（spawn worker → 读 stdout 一行 JSON → 拿 min_grace_s 当 grace 下限），
-// 且「不建会话、不读 stdin、零费用」只有真实运行才看得见——本测试不喂 stdin、不给 AWS 凭证，照样该退 0。
+// 且「不建会话、不读 stdin、零费用」只有真实运行才看得见——本测试不喂 stdin、不给 AWS 凭证，照样该以退出码 0 结束。
 // 起源码形态的 bin 要有 TS 转译能力：`--import tsx` 传绝对 URL（与 cwd 无关），不靠 Node 原生 type stripping
 // （那要 Node ≥22.18，而包只声明 >=22——同 user-steps.test.mts 的真实运行层）。
-test("--capabilities: 一个 JSON 对象即退 0；五键含 deterministic_steps/model_id；min_grace_s = 收尾各段预算之和 + 余量，当前 = 31s", async () => {
+test("--capabilities: 一个 JSON 对象即以退出码 0 结束；五键含 deterministic_steps/model_id；min_grace_s 是收尾各段预算之和加余量、当前为 31s", async () => {
   const {
     INFLIGHT_SETTLE_MS, STOP_SESSION_BUDGET_MS, BROWSER_CLOSE_BUDGET_MS, QUEUE_DRAIN_EXIT_MS, MIN_GRACE_MARGIN_MS,
   } = await importMod();
   const { UPLOAD_TIMEOUT_MS } = await import("../lib/artifact-upload.mjs");
   // 自报的 model_id 得与实际运行中喂给 SDK 的模型名同源（modelConfig() 的 MIDSCENE_MODEL_NAME），故从那个模块取真值比对、
-  // 不在测试里写第二份字面量——写死了就只能证明「自述没变」，证不了「自述 = 实际用的模型」。
+  // 不在测试里写第二份字面量——写死了就只能证明「自述没变」，证不了「自述就是实际用的模型」。
   const { MODEL } = await import("../lib/agentcore-sigv4.mjs");
   const proc = spawn(process.execPath, [
     "--import", import.meta.resolve("tsx"), path.join(import.meta.dirname, "..", "bin.mts"), "--capabilities",
@@ -660,19 +660,19 @@ test("--capabilities: 一个 JSON 对象即退 0；五键含 deterministic_steps
   proc.stderr.on("data", (c) => err.push(c));
   const code: number = await new Promise((r) => proc.on("close", r));
   const raw = Buffer.concat(out).toString("utf-8");
-  assert.equal(code, 0, `应退 0，stderr=${Buffer.concat(err).toString("utf-8")}`);
+  assert.equal(code, 0, `应以退出码 0 结束，stderr=${Buffer.concat(err).toString("utf-8")}`);
   const got = JSON.parse(raw);
-  // 键集恰为五个（ADR 0036「5.」）：多一个键 = 自述契约变了（组合根核 schema_version 的前提），少一个 =
+  // 键集恰为五个（ADR 0036「5.」）：多一个键就意味着自述契约变了（组合根核 schema_version 的前提），少一个则
   // 消费侧读到 undefined；清单并入本对象后不再有独立的清单 flag（同 ADR 被拒方案「每个自述项一个独立 flag」）。
   assert.deepEqual(Object.keys(got).sort(),
     ["deterministic_steps", "engine", "min_grace_s", "model_id", "schema_version"], `键集：${raw}`);
   assert.equal(got.schema_version, 1);
   assert.equal(got.engine, "midscene");
-  // model_id = 起 job 时交给 Midscene SDK 的那个模型名（ADR 0036「5.」：doctor 据此显示当前模型）。
+  // model_id 是起 job 时交给 Midscene SDK 的那个模型名（ADR 0036「5.」：doctor 据此显示当前模型）。
   assert.equal(typeof got.model_id, "string", `model_id 该是串：${raw}`);
   assert.ok(got.model_id.length > 0, `model_id 不该空：${raw}`);
   assert.equal(got.model_id, MODEL, "自报的模型得就是真交给 SDK 的那个，不是另写的字面量");
-  // deterministic_steps = 注册表清单（ADR 0036「2.」，每项 pattern/description/example）。实际运行才照得出「清单
+  // deterministic_steps 是注册表清单（ADR 0036「2.」，每项 pattern/description/example）。实际运行才照得出「清单
   // 与 min_grace_s 同一份自述里一起给」——内建脚手架的注册副作用只在真进程里发生。
   assert.ok(Array.isArray(got.deterministic_steps) && got.deterministic_steps.length > 0,
     `清单该非空（内建脚手架至少一条）：${raw}`);
@@ -766,7 +766,7 @@ test("agentOpts: modelConfig 喂 SDK 的是 MIDSCENE_MODEL_FAMILY（旧的单一
     process.env.MIDSCENE_MODEL_FAMILY = "gpt-6";
     try {
       assert.equal((agentOpts().modelConfig as Record<string, string>).MIDSCENE_MODEL_FAMILY, "gpt-6",
-                   "写死家族字面量 = 换了模型仍按旧家族驱动（静默劣化）");
+                   "写死家族字面量会让换了模型仍按旧家族驱动（静默劣化）");
     } finally {
       if (savedFamily === undefined) delete process.env.MIDSCENE_MODEL_FAMILY;
       else process.env.MIDSCENE_MODEL_FAMILY = savedFamily;
@@ -798,10 +798,10 @@ test("--capabilities: MIDSCENE_MODEL_ID 覆盖时自报的 model_id 跟着变（
   const override = "us.openai.gpt-6-astra";  // inference profile 形态，且家族推得出（否则会被启动期校验挡下）
   const { code, out, err } = await spawnWorker(["--capabilities"],
     { MIDSCENE_MODEL_ID: override, MIDSCENE_MODEL_FAMILY: undefined });
-  assert.equal(code, 0, `应退 0，stderr=${err}`);
+  assert.equal(code, 0, `应以退出码 0 结束，stderr=${err}`);
   const got = JSON.parse(out);
   assert.equal(got.model_id, override, "自报得反映 env 覆盖——doctor 正是拿这个键显示当前用哪个模型");
-  assert.notEqual(got.model_id, DEFAULT_MODEL, "覆盖了还等于默认 = 这个覆盖项其实没接上");
+  assert.notEqual(got.model_id, DEFAULT_MODEL, "覆盖了还等于默认，说明这个覆盖项其实没接上");
 });
 
 test("模型家族推不出 → worker 启动期即非零退出，连自述入口都被挡下（不等到建了云端浏览器会话才炸）", async () => {
@@ -809,6 +809,6 @@ test("模型家族推不出 → worker 启动期即非零退出，连自述入�
     { MIDSCENE_MODEL_ID: "nonexistent.model-x", MIDSCENE_MODEL_FAMILY: undefined });
   assert.notEqual(code, 0, `坏配置该被拒，stdout=${out}`);
   assert.match(err, /MIDSCENE_MODEL_FAMILY/, `诊断得点名怎么办：${err}`);
-  // stdout 无 JSON 载荷 = 校验真的排在入口分派之前（挪到建连时这里会照出一个完整自述对象、rc 也回 0）。
+  // stdout 无 JSON 载荷，说明校验真的排在入口分派之前（挪到建连时这里会照出一个完整自述对象、rc 也回 0）。
   assert.equal(/[{[]/.test(out), false, `stdout 不该有 JSON 载荷：${out}`);
 });

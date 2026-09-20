@@ -35,7 +35,7 @@
 `--snapshot` 是物化的逆操作（录 fixture 用）：拷贝 features/ steps/ reports/，把项目目录的绝对路径（含 file:// 形态）换成
 占位符，删掉 worker.log / reconcile.log（含绝对路径、对评测无用），把截图裁成极小的合法 PNG（评测只要求文件存在且非空），
 最后扫一遍不得再有绝对路径。录制约束：录时 feature 必须用**相对路径**调用（scope_id / scenario_id 与 jobs/ 文件名里都带
-它，绝对路径进了文件名占位符救不了），且 cwd = 项目目录、`--report-dir reports`。
+它，绝对路径进了文件名占位符救不了），且 cwd 为项目目录、`--report-dir reports`。
 """
 from __future__ import annotations
 

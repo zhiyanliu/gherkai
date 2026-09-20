@@ -19,7 +19,7 @@
 
 ## 2 证据字段的引擎填充差异
 
-`explain --json` 的证据 schema 两引擎同形、读法一套，但填充有系统性差异。这些是引擎事实，不是抽取失败；判「这一步有没有判定记录」一律看 `record_missing`，`evidence_missing` 只回答「为什么没读到这一步的机读证据」；别把证据里的 `null` 或空数组读成「没导航 / 没运行 / 证据坏了」。
+`explain --json` 的证据 schema 两引擎结构相同、读法一套，但填充有系统性差异。这些是引擎事实，不是抽取失败；判「这一步有没有判定记录」一律看 `record_missing`，`evidence_missing` 只回答「为什么没读到这一步的机读证据」；别把证据里的 `null` 或空数组读成「没导航 / 没运行 / 证据坏了」。
 
 | 字段 | Nova Act | Midscene |
 |---|---|---|
@@ -63,9 +63,9 @@ deterministic(
 
 共同规则：
 
-- 签名 = `(ctx, 具名组…)`：Nova 是 `handler(ctx, **groups)`，Midscene 是 `(ctx, groups) => …`；`ctx.page` 都是 Playwright 的 Page，具名组 Python 写 `(?P<name>…)`、JS 写 `(?<name>…)`。**Nova 的 handler 必须是同步函数**（不能 `async def`——写成 async 的那一步直接记 error，不会静默通过）；Midscene 的可以是 async 箭头函数（上面示例就是）。要写异步判定，只能落在 Midscene 侧。
+- 签名为 `(ctx, 具名组…)`：Nova 是 `handler(ctx, **groups)`，Midscene 是 `(ctx, groups) => …`；`ctx.page` 都是 Playwright 的 Page，具名组 Python 写 `(?P<name>…)`、JS 写 `(?<name>…)`。**Nova 的 handler 必须是同步函数**（不能 `async def`——写成 async 的那一步直接记 error，不会静默通过）；Midscene 的可以是 async 箭头函数（上面示例就是）。要写异步判定，只能落在 Midscene 侧。
 - `description` / `example` **必填**：它们就是 `gherkai list-deterministic` 与 `gherkai plan` 打给用例作者看的那两行，缺了启动即报错、点名 pattern。
-- 判定映射：Nova 抛 `AssertionError`、Midscene 抛 `DeterministicAssertion`（或 node:assert 的 AssertionError）→ 该步 **failed**；抛其它异常 → **error**。
+- 判定映射：Nova 抛 `AssertionError`、Midscene 抛 `DeterministicAssertion`（或 node:assert 的 AssertionError）时该步判 **failed**；抛其它异常时判 **error**。
 - 遍历：目录排序递归。两引擎都跳过**以 `_` 开头的文件或目录**（`_selectors.py` / `_pages/` 都算，整棵目录都不加载）——不注册 step 的辅助模块（页面对象、选择器常量、共享 helper）放那里，step 文件相对 import 它照样可用。Nova 只认 `*.py`、另跳过 `test_*.py`；Midscene 只认 `.mts` / `.mjs`（恒为 ESM，与项目 package.json 无关；`.ts` / `.js` 在收集阶段就被跳过——不 import、不报错、清单里没有）、另跳过 `*.test.*`。
 - 内建一条示范确定性 step `Then 页面地址匹配 "<正则>"`，两引擎都带，装上即可用。撞上同一 pattern 不做覆盖，按冲突处理。
 
@@ -78,9 +78,9 @@ deterministic(
 | 情况 | 表现 | 怎么办 |
 |---|---|---|
 | 注册时缺 `description` / `example` | 启动即报错退出，点名那条 pattern | 补齐元数据 |
-| `steps/` 下某个文件 import 失败（语法错、缺依赖、Midscene 用了 `.ts`） | `plan` / `run` / `submit` 在起第一个 job 前整个 run 退 2，点名文件与异常，**不跳过** | 先修那个文件，不是怀疑 feature |
+| `steps/` 下某个文件 import 失败（语法错、缺依赖、Midscene 用了 `.ts`） | `plan` / `run` / `submit` 在起第一个 job 前整个 run 以退出码 2 结束，点名文件与异常，**不跳过** | 先修那个文件，不是怀疑 feature |
 | Midscene 某个 step 文件一条都没注册 | 非 0 退出并点名 | 多半 import 到了第二份 `@gherkai/worker-midscene`，检查项目里有没有另一份 |
-| `--steps-dir`（或 `GHERKAI_STEPS_DIR`）指的目录不存在 | 直接退 2：明确指了一个地方而那里没东西 | 改路径；缺省 `./steps` 不存在不算错 |
+| `--steps-dir`（或 `GHERKAI_STEPS_DIR`）指的目录不存在 | 直接以退出码 2 结束：明确指了一个地方而那里没东西 | 改路径；缺省 `./steps` 不存在不算错 |
 | 一个 step 文本命中多条 pattern | 该步记 error 并列出撞上的 pattern；`plan` 会提前暴露 | 收窄其中一条正则 |
 | 明明写了 `steps/` 却全走 AI | 目录没被读到、或正则与 step 文本不匹配 | 确认 `--steps-dir` 指对；`list-deterministic --steps-dir …` 看清单里有没有你那条；对照 `example` 改 step 文本 |
 | `engine_error` 说起 worker 失败 | worker 没装或版本与 CLI 不一致 | 见 `references/setup-and-diagnosis.md` |

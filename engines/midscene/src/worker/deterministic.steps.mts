@@ -13,7 +13,7 @@
 // 那一条，兼作写法样例。角色边界不变（ADR 0020）：QA 永远只在 .feature 写自然语言、默认走 AI。
 //
 // handler 约定（见 deterministic.mts）：
-//   - 签名 (ctx, groups) => void | Promise<void>：ctx.page = Playwright Page；groups = 正则具名组。
+//   - 签名 (ctx, groups) => void | Promise<void>：ctx.page 是 Playwright Page；groups 是正则具名组。
 //   - 判定失败抛 DeterministicAssertion（或 node:assert AssertionError）→ step 记 failed；抛其它 → error。
 //
 // Nova Act 侧的对称内建 step 见 gherkai_worker_novaact 的 deterministic_steps 模块。

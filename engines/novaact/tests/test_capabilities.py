@@ -22,7 +22,7 @@ def _clean_env(**extra: str) -> dict:
     """子进程 env：保留运行必需项，剥掉 GHERKAI_* / AWS_* / NOVA_*（含本机 region 与凭证落点）。
 
     剥 AWS 是断言的一部分——「不建会话、零费用」在这个 env 下若被违背（起 Workflow / AgentCore 会话）
-    必炸或挂，退 0 才成立。
+    必炸或挂，退出码 0 才成立。
     """
     keep = ("PATH", "PYTHONPATH", "PYTHONHOME", "HOME", "TMPDIR", "LANG", "LC_ALL", "SYSTEMROOT", "VIRTUAL_ENV")
     env = {k: v for k, v in os.environ.items() if k in keep}
@@ -32,7 +32,7 @@ def _clean_env(**extra: str) -> dict:
 
 
 def test_capabilities_shape_and_min_grace_from_injected_act_timeout():
-    """键集恰五个 + `min_grace_s` = 注入的 `NOVA_ACT_TIMEOUT_S` + worker 侧 margin（组合根查它当 grace 下限）。
+    """键集恰五个，且 `min_grace_s` 是注入的 `NOVA_ACT_TIMEOUT_S` 加 worker 侧 margin（组合根查它当 grace 下限）。
 
     键集**全等**断言（非「至少含」）：ADR 0036「5.」的自述对象是消费侧按键取的契约面，多一个未声明的键
     或少一个键都要连 `schema_version` 一起议——「至少含」照不出多出来的键。

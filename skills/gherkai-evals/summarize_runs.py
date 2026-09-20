@@ -3,7 +3,7 @@
 """汇总一轮（或几轮）评测的 timing.json：每条 eval × 每臂的次数、平均用时、花费、三个污染 / 可重放指标与错误数。
 
 run_evals.py 运行结束后先看这张表再评分（设计见 docs/adr/0043-agent-skill-for-driving-gherkai.md 决策七）：
-baseline 臂的 repo_touches / skill_copy_touches 非零 = 污染样本，先隔离再谈通过率；network_calls 非零 = 结果依赖活网、不可重放。
+baseline 臂的 repo_touches / skill_copy_touches 非零即污染样本，先隔离再谈通过率；network_calls 非零说明结果依赖活网、不可重放。
 
 用法：
   python skills/gherkai-evals/summarize_runs.py iteration-3            # 一轮

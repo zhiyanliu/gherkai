@@ -42,7 +42,7 @@ def test_start_tunnel_for_jobs_maps_and_injects_headers(monkeypatch):
 
 
 def test_start_tunnel_for_jobs_propagates_tunnel_error(monkeypatch):
-    """provider 起不来 → TunnelError 直接冒给调用方（前端归「没开始执行就被拒」退 2，不在本层吞成哨兵）。"""
+    """provider 起不来 → TunnelError 直接冒给调用方（前端归「没开始执行就被拒」、退出码 2，不在本层吞成哨兵）。"""
     import pytest
 
     def boom(name):

@@ -62,7 +62,7 @@ def test_no_named_groups_empty_dict():
 
 
 def test_missing_metadata_fails_loud():
-    """description/example 必填（ADR 0036：注册即暴露，缺元数据 = 能力不可发现，fail-loud）。"""
+    """description/example 必填（ADR 0036：注册即暴露，缺元数据意味着能力不可发现，fail-loud）。"""
     with pytest.raises(TypeError):
         d.deterministic(r"x")  # 旧签名（无元数据）直接不成立
     with pytest.raises(ValueError, match="description/example"):

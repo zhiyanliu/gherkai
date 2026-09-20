@@ -68,9 +68,9 @@ class WrittenEvidence:
 
 @dataclass(frozen=True)
 class ActRecord:
-    """一次 AI 调用（`act` / `act_get`）的 worker 侧材料：evidence 的 act = 本记录 + 该 act 的 trajectory。
+    """一次 AI 调用（`act` / `act_get`）的 worker 侧材料：evidence 的 act 由本记录与该 act 的 trajectory 合成。
 
-    `vote`：本次调用计入判定的那一票；None = 本 act 不投票（When/Given 的动作）。票源表达式与 `step_done`
+    `vote`：本次调用计入判定的那一票；None 表示本 act 不投票（When/Given 的动作）。票源表达式与 `step_done`
     同一个（`bool(matches_schema and parsed_response)`）——**不从 `result` 反推**：模型回非 JSON 或不过 schema 时
     该票记 no，而 return call 的 kwargs 里仍留着看似为真的原文（ADR 0042 决策一映射表）。
     `trajectory_path`：`metadata.trajectory_file_path`（**不用**公开属性 `ActResult.trajectory_file_path`——
@@ -116,7 +116,7 @@ def _calls(frame: dict) -> list[dict]:
 
 
 def _thought(calls: Sequence[dict]) -> str | None:
-    """模型逐步推理原文 = `name == "think"` 的 call 的 `kwargs.value`；多个换行拼接，无则 None。"""
+    """模型逐步推理原文取自 `name == "think"` 的 call 的 `kwargs.value`；多个换行拼接，无则 None。"""
     values = [
         str(_kwargs(c)["value"])
         for c in calls
@@ -126,7 +126,7 @@ def _thought(calls: Sequence[dict]) -> str | None:
 
 
 def _actions(calls: Sequence[dict]) -> list[dict]:
-    """引擎动作 = `name` 不为 think / return 的 call（如 agentType / waitForPageToSettle / takeObservation）。
+    """引擎动作指 `name` 不为 think / return 的 call（如 agentType / waitForPageToSettle / takeObservation）。
 
     `args` 是 SDK 原样透传的对象、内部键随 SDK 版本漂——不属本 schema 的契约面（消费端不许下钻）。
     """
@@ -168,7 +168,7 @@ def act_evidence(record: ActRecord, trajectory: dict | None) -> dict:
         "index": record.index,
         "prompt": record.prompt,
         "vote": record.vote,
-        "url": frames[-1]["url"] if frames else None,   # 调用结束时的页面 = 末 frame 的 active_url
+        "url": frames[-1]["url"] if frames else None,   # 调用结束时的页面即末 frame 的 active_url
         "frames": frames,
         "result": result,
         "error": record.error,
@@ -212,7 +212,7 @@ def step_evidence(
 def select_screenshots(doc: dict) -> list[tuple[int, int]]:
     """选出要落盘的截图 `(act 位序, frame 位序)`，带上界（ADR 0042 决策一 截图策略）。
 
-    - failed / error：每 act 候选 = 末帧、首个含 thought 的帧，去重后取前 K；每 step 总数再封 M。
+    - failed / error：每 act 的候选是末帧与首个含 thought 的帧，去重后取前 K；每 step 总数再封 M。
       ADR 那组候选的第三项「出错帧」在 Nova 侧**无对应物**——抛错的 act 根本没有 json（frames 为空），
       frame 自身也不带错误标记；K 仍按 3 留着上界不动。
     - passed：每 act 只留末帧一张。

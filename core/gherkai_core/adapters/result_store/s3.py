@@ -1,13 +1,13 @@
 """S3ResultStore（ADR 0030 决定六 / 0016 三层选型）：ResultStore port 的 S3 实装。
 
-数据面判定真值——每个 job(=scope) 一个 S3 对象。对拍 `LocalResultStore` 行为（save/load/load_all round-trip、
+数据面判定真值——每个 job（即 scope）一个 S3 对象。对拍 `LocalResultStore` 行为（save/load/load_all round-trip、
 scope_id 不透明编码），只把落点从本地文件换成 S3 对象。**云端 adapter，需 boto3**（`gherkai-core[aws]` extra，缺它
 import 本模块不崩、构造时才友好报错，守 [0016] 窄腰）。
 
-**这坐实 ADR 里原「待定」的 ResultStore 后端 = S3**：赌 CI 按 run_id+scope_id 键取判定（key 直接算得出、
+**这坐实 ADR 里原「待定」的 ResultStore 后端就是 S3**：赌 CI 按 run_id+scope_id 键取判定（key 直接算得出、
 无需查询）；将来若需「跨 scope 查询/过滤」再加 DDB 索引层（加法不返工，[0016]）。
 
-**key = `<prefix><run_id>/jobs/<quote(scope_id, safe='')>.json`**：scope_id 是不透明标识（可含 `/`:空格/中文，
+**key 为 `<prefix><run_id>/jobs/<quote(scope_id, safe='')>.json`**：scope_id 是不透明标识（可含 `/`:空格/中文，
 [0025]），`quote(safe='')` 把 `/` 也编码成 `%2F`——否则 scope_id 里的 `/` 会在 S3 里造出假的子前缀、
 让 `load_all` 的 prefix 反解歧义。对拍 LocalResultStore 的可逆编码。`load_all` 用 list_objects prefix + unquote basename 还原。
 
@@ -42,7 +42,7 @@ class S3ResultStore:
         return f"{self._jobs_prefix(run_id)}{quote(scope_id, safe='')}.json"
 
     def save_job_result(self, run_id: str, job: JobResult) -> None:
-        """把单个 JobResult 存成一个 S3 对象（写面，追加语义=同 key 覆盖，幂等）。"""
+        """把单个 JobResult 存成一个 S3 对象（写面，追加语义即同 key 覆盖，幂等）。"""
         self._s3.put_object(
             Bucket=self._bucket,
             Key=self._key(run_id, job.scope_id),
@@ -79,5 +79,5 @@ class S3ResultStore:
         return results
 
     def preflight(self) -> None:
-        """探活（ADR 0030 决定七）：begin 前探桶可达，桶不存在/无权限即抛（cli 接住→退 2）。"""
+        """探活（ADR 0030 决定七）：begin 前探桶可达，桶不存在/无权限即抛（cli 接住→以退出码 2 结束）。"""
         self._s3.head_bucket(Bucket=self._bucket)

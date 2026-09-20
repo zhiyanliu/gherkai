@@ -16,8 +16,8 @@ import re
 from pathlib import Path
 
 import pytest
-from _doc_rules import (COLLOQUIAL, FORBIDDEN, REPO, RETIRED_TERMS, RETIRED_TERMS_WORDS,
-                        changelog_unreleased, skill_markdown_files)
+from _doc_rules import (ARROW, COLLOQUIAL, FORBIDDEN, NUMERIC_SHORTHAND, REPO, RETIRED_TERMS, RETIRED_TERMS_WORDS,
+                        SYMBOL_PREDICATE, changelog_unreleased, prose_lines, skill_markdown_files)
 
 USER_GUIDE = REPO / "docs" / "user-guide"
 DIAGRAMS = REPO / "docs" / "diagrams"
@@ -57,6 +57,25 @@ def test_user_doc_uses_current_terminology(doc: Path):
     hits = [f"{_rel(doc)}:{i}: {line.strip()[:120]}" for i, line in enumerate(scanned.splitlines(), 1)
             if RETIRED_TERMS.search(line)]
     assert not hits, "用户文档里还有已退役的旧名，换成 CONTEXT.md 词表里的规范名：\n" + "\n".join(hits)
+
+
+@pytest.mark.parametrize("doc", USER_DOCS, ids=_rel)
+def test_user_doc_prose_has_no_symbolic_shorthand(doc: Path):
+    """正文不把 = 当谓语、不写「退 N」、不用箭头（ADR 0045 决策六形态①③）；代码块与行内代码不算。
+
+    读者含非技术的使用者：「job = scope」「命令退 2」「A → B」是程序式写法，改成完整句。CHANGELOG 只查未发布段。
+    """
+    text = doc.read_text(encoding="utf-8")
+    scanned = changelog_unreleased(text) if doc.name == "CHANGELOG.md" else text
+    hits = []
+    for line_no, line in prose_lines(scanned):
+        if SYMBOL_PREDICATE.search(line):
+            hits.append(f"{_rel(doc)}:{line_no}: 符号当谓语 · {line.strip()[:110]}")
+        if NUMERIC_SHORTHAND.search(line):
+            hits.append(f"{_rel(doc)}:{line_no}: 省略中心词的「退 N」 · {line.strip()[:110]}")
+        if ARROW.search(line):
+            hits.append(f"{_rel(doc)}:{line_no}: 正文箭头 · {line.strip()[:110]}")
+    assert not hits, "用户文档正文写完整句（即 / 是 / 表示；退出码 N；然后 / 得到），符号留给代码块：\n" + "\n".join(hits)
 
 
 def test_retired_terms_are_all_in_the_glossary():
@@ -126,8 +145,9 @@ def test_diagram_source_has_no_internal_references(spec: Path):
     """图源里的文字会原样进 SVG / 站点，读者含使用者：零 ADR 编号 / 决策号 / 内部机制名 / 退役旧名。"""
     text = spec.read_text(encoding="utf-8")
     hits = [f"{_rel(spec)}:{i}: {line.strip()[:120]}" for i, line in enumerate(text.splitlines(), 1)
-            if FORBIDDEN.search(line) or COLLOQUIAL.search(line) or RETIRED_TERMS.search(line)]
-    assert not hits, ("图源不得含内部指代、口头语 / 隐喻或退役旧名（图上的字读者直接看到，改图源后记得重导 SVG）：\n"
+            if FORBIDDEN.search(line) or COLLOQUIAL.search(line) or RETIRED_TERMS.search(line)
+            or SYMBOL_PREDICATE.search(line) or NUMERIC_SHORTHAND.search(line)]
+    assert not hits, ("图源不得含内部指代、口头语 / 隐喻、退役旧名或 = / 「退 N」式缩写（图上的字读者直接看到，改图源后记得重导 SVG）：\n"
                       + "\n".join(hits))
 
 

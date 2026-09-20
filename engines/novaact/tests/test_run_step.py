@@ -304,7 +304,7 @@ def test_run_scenario_no_shortcircuit_when_all_pass(captured):
 
 def test_run_scenario_failed_does_not_shortcircuit(captured):
     # 判据锁 status==error（不是 failed）：一个 failed 的断言步**不**短路后续——
-    # failed 是业务结论、环境没坏，后续步该照常运行（只有 error=执行故障才短路）。
+    # failed 是业务结论、环境没坏，后续步该照常运行（只有 error 这种执行故障才短路）。
     nova = _FakeNova(bool_seq=[False, True])  # 第一个 Then failed，第二个 Then passed
     steps = [_step("Then", '"对吗A"', 0), _step("Then", '"对吗B"', 1)]
     statuses = rs._run_scenario(nova, "sc:0", steps, votes_n=1, sink=captured)
@@ -330,7 +330,7 @@ def test_failed_act_reports_time_worked_from_exception_metadata(captured):
 
 
 def test_failed_vote_keeps_already_billed_votes_in_cost(captured):
-    """Then 三票：第 1 票成功（2.0s）、第 2 票抛（1.5s）→ error 事件 cost = 已投票 + 失败票 = 3.5s，不丢前票。"""
+    """Then 三票：第 1 票成功（2.0s）、第 2 票抛（1.5s）→ error 事件的 cost 是已投票加失败票、共 3.5s，不丢前票。"""
     class _Nova(_FakeNova):
         def act_get(self, instr, schema, timeout=None):
             self._i += 1

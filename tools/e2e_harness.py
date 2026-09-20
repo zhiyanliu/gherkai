@@ -11,10 +11,10 @@
 
 忠实复现 SubprocessEngine adapter 的 spawn 环境（自建 events pipe + EVENTS_FD、注入产物落点 env + S3 上传 env；
 组合根拥有的 worker env——GHERKAI_STEPS_DIR / GHERKAI_NO_ARTIFACTS / GHERKAI_EXTRA_HTTP_HEADERS——先显式清除、再按
-参数显式注回，与 adapter 两步同形），起真 worker 运行一个 scope，按事件时机外部 SIGTERM 命中中断点，中断后快照：
+参数显式注回，与 adapter 两步写法相同），起真 worker 运行一个 scope，按事件时机外部 SIGTERM 命中中断点，中断后快照：
   - 盘上有什么（NOVA_LOGS_DIR / MIDSCENE_RUN_DIR 递归）
   - S3 有什么（list prefix）
-  - 差集（盘有 S3 无）= **Fargate 容器盘销毁时会丢的**（subprocess 下留本地盘、非真丢）
+  - 差集（盘有 S3 无）即 **Fargate 容器盘销毁时会丢的**（subprocess 下留本地盘、非真丢）
 并测 grace 秒数（SIGTERM→worker 退出实测耗时）、检测 worker 是否 hung（SIGKILL 兜底）。
 
 用法（需 AWS 凭证 + region us-east-1）：
@@ -57,7 +57,7 @@ def build_job(feature: str, engine: str, votes: int):
 
     取**匹配 `--engine` 的第一个 job** 作靶子（回退 jobs[0]）——否则混引擎 feature（如 engine_routing 用
     @engine: tag 把 scenario 分到不同引擎）下 jobs[0] 可能是另一引擎的 job，会拿它喂错引擎的 worker（worker
-    不看 engine tag、照样运行，但语义错乱）。单引擎 feature 下 jobs 全同引擎、此选择 = jobs[0]，行为不变。
+    不看 engine tag、照样运行，但语义错乱）。单引擎 feature 下 jobs 全同引擎、此选择就是 jobs[0]，行为不变。
     """
     txt = (REPO / "features" / f"{feature}.feature").read_text(encoding="utf-8")
     fs = FeatureSource(uri=f"features/{feature}.feature", text=txt)
@@ -124,7 +124,7 @@ def run(engine: str, feature: str, votes: int, interrupt: str, run_id: str, grac
     env = {**scrubbed_environ(), local_key: str(artifact_dir),
            "ARTIFACT_S3_BUCKET": BUCKET, "ARTIFACT_S3_PREFIX": prefix,
            "EVENTS_FD": str(events_w), "AWS_REGION": "us-east-1"}
-    # steps 目录与 `compose.build_engines` 同形的两步：`scrubbed_environ` 已显式清掉宿主继承值，这里按参数显式注回
+    # steps 目录与 `compose.build_engines` 写法相同的两步：`scrubbed_environ` 已显式清掉宿主继承值，这里按参数显式注回
     # 绝对路径。只有清除没有注回的话，「使用方 steps 目录在真 worker 下被加载」这条就验不了，而且是静默验不了
     # （加载失败 worker 会降级成 AI step，看不出差别）。
     if steps_dir:
@@ -133,7 +133,7 @@ def run(engine: str, feature: str, votes: int, interrupt: str, run_id: str, grac
             sys.exit(f"错误：--steps-dir 指向的目录不存在：{resolved_steps}")
         env["GHERKAI_STEPS_DIR"] = str(resolved_steps)
 
-    # 回显注入后的 steps 目录（未给时打 None = 已显式清空）：操作者一眼看出宿主 export 没有越过参数。
+    # 回显注入后的 steps 目录（未给时打 None，表示已显式清空）：操作者一眼看出宿主 export 没有越过参数。
     print(f"[harness] engine={engine} feature={feature} interrupt={interrupt} run_id={run_id} "
           f"steps_dir={env.get('GHERKAI_STEPS_DIR')}", flush=True)
     print(f"[harness] scope={job.scope_id} scenarios={len(job.scenarios)} "
@@ -149,7 +149,7 @@ def run(engine: str, feature: str, votes: int, interrupt: str, run_id: str, grac
             print(f"[worker {tag}] {line.rstrip()}", flush=True)
 
     # 先起 pump、再写 stdin：与 `SubprocessEngine.run_scope` 同序（理由见该 adapter 同处注释——大 job 写 stdin
-    # 阻塞 × worker 读 stdin 前先吐 stdout 噪声 = 父子互锁）。harness 要忠实复现 adapter 的 spawn 环境，
+    # 阻塞 × worker 读 stdin 前先吐 stdout 噪声，即父子互锁）。harness 要忠实复现 adapter 的 spawn 环境，
     # 顺序分叉会让这里运行得出的中断/丢失结论不可迁移到生产路径。
     threading.Thread(target=log_pump, args=(proc.stdout, "out"), daemon=True).start()
     threading.Thread(target=log_pump, args=(proc.stderr, "err"), daemon=True).start()
@@ -158,7 +158,7 @@ def run(engine: str, feature: str, votes: int, interrupt: str, run_id: str, grac
     proc.stdin.flush()
     proc.stdin.close()
 
-    # t0 = 事件/grace 相对时刻的基线，固定在「job 写完」这一刻（别跟着 pump 上移，否则实测时刻与历史报告不可比）
+    # t0 是事件/grace 相对时刻的基线，固定在「job 写完」这一刻（别跟着 pump 上移，否则实测时刻与历史报告不可比）
     events, t0 = [], time.monotonic()
     kill_sent = {"t": None, "phase": None}
     hung = {"v": False}
@@ -220,7 +220,7 @@ def run(engine: str, feature: str, votes: int, interrupt: str, run_id: str, grac
             # 让 scenario1 的 snapshotLogs 在其 scenario_done 后执行完毕（log 进 S3）、scenario2 起来，SIGTERM 落在
             # scenario2 运行中。验证：S3 应已有 scenario1 期间的 log（对照单 scenario scope_end 中断 S3 log=0）。
             # 需 jobs[0] 有 >1 scenario——即**多 scenario 归一个 @scope 的 feature**（如 concurrency_and_scope
-            # 的 @scope:browse）；无 @scope tag 的 scenario 各自独立成单 scenario scope（ADR 0025）、jobs[0]=1、
+            # 的 @scope:browse）；无 @scope tag 的 scenario 各自独立成单 scenario scope（ADR 0025）、jobs[0] 只含 1 个 scenario、
             # 此时机不触发（退化成 baseline、无效样本）。选 feature 前用 gherkai_core.scope.plan 确认 jobs[0] 的 scenario 数。
             if interrupt == "scenario" and scen_done == 1 and n_scen > 1:
                 threading.Timer(3.0, lambda: do_kill("after_scenario1")).start()
@@ -240,7 +240,7 @@ def run(engine: str, feature: str, votes: int, interrupt: str, run_id: str, grac
 
     # 样本有效性（防假阳性）：`n_lost=0` 只在**确实产生过可丢的产物**时才有意义。若盘和 S3 都空——中断落得
     # 太早（产物还没写盘、S3 也没提前上传），此时 n_lost=0 是「没东西可丢」而非「提前上传救回了」，**不构成有效的
-    # 丢失/提前上传测量样本**。判据：盘或 S3 上有产物 = 有效样本（实测踩过：Midscene act 时机中断太早、盘空、
+    # 丢失/提前上传测量样本**。判据：盘或 S3 上有产物才算有效样本（实测踩过：Midscene act 时机中断太早、盘空、
     # n_lost=0 曾被误读成提前上传生效，实为无效样本）。
     produced = bool(disk) or bool(s3)
     # 第二类无效样本：**选了中断时机、但该时机根本没触发**（一路退化成 baseline）。两条已知路径：

@@ -133,7 +133,7 @@ def test_adapter_sigkill_backstop_on_deaf_worker():
     # 进程确被强杀：adapter 的 proc.kill() 是异步 SIGKILL、不 wait，故给 OS 一点回收时间再确认终止。
     proc = handle._proc  # type: ignore[attr-defined]
     assert proc.wait(timeout=3.0) is not None  # 已终止（SIGKILL 下 returncode 为负 signal，非 None）
-    assert proc.returncode != 0  # 被信号杀（非协作退 0）——SIGKILL 惯例 -9
+    assert proc.returncode != 0  # 被信号杀（非协作以退出码 0 退出）——SIGKILL 惯例 -9
 
 
 # ---- ADR 0028「静默 worker 超时根治」条：worker 静默卡死（吐 started 后不再吐事件）→ schedule 的 _heartbeat_wrap 让 job_timeout 能触发 ----

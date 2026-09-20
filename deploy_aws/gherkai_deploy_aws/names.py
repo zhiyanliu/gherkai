@@ -49,13 +49,13 @@ from gherkai_runtime.names import (  # noqa: F401
 # Lambda asset 构建目录的落点 env——**命令进程 → cdk 起的 app 进程之间的管道**（`cli.Provider._run_cdk` 写、
 # `stack.BackendStack._build_lambda_asset` 读）。放在本模块是因为两侧唯一的共同 import 就是它（`cli.py` 不能
 # import `stack.py`：那会拉起 aws_cdk/jsii 的 node 子进程）。
-# **不做成 CDK context**：它是管道、不是设计参数，混进 context 会破坏「flag 面 == context 配置项全集」这条对齐
+# **不做成 CDK context**：它是管道、不是设计参数，混进 context 会破坏「flag 面与 context 配置项全集相等」这条对齐
 # （ADR 0037 决策 6）。缺它（直接运行 cdk synth）→ app 侧自建 mkdtemp。
 LAMBDA_ASSET_DIR_ENV = "GHERKAI_LAMBDA_ASSET_DIR"
 
 
 def stack_name(prefix: str) -> str:
-    """CloudFormation stack 名（= `app.py` 给 `BackendStack` 的 construct id，CDK 据此定 stack 名）。
+    """CloudFormation stack 名（即 `app.py` 给 `BackendStack` 的 construct id，CDK 据此定 stack 名）。
 
     **两个消费者必须恒等**：`app.py` 建 stack 用它；`cli.py` 的 VPC 取值三态比对用它 `DescribeStacks`
     探「stack 是否已存在」（ADR 0037 决策 6 三态①）。任一侧单独改推导 → 要么部署出第二套 stack、要么
@@ -66,12 +66,12 @@ def stack_name(prefix: str) -> str:
 
 
 def ssm_subnets_path(prefix: str) -> str:
-    """subnet ID 列表的 SSM 路径（= gherkai_runtime.names.ssm_path(prefix, SUBNETS_KEY) 的便捷形式）。"""
+    """subnet ID 列表的 SSM 路径（即 gherkai_runtime.names.ssm_path(prefix, SUBNETS_KEY) 的便捷形式）。"""
     return ssm_path(prefix, SUBNETS_KEY)
 
 
 def ssm_security_groups_path(prefix: str) -> str:
-    """sg ID 列表的 SSM 路径（= gherkai_runtime.names.ssm_path(prefix, SECURITY_GROUPS_KEY) 的便捷形式）。"""
+    """sg ID 列表的 SSM 路径（即 gherkai_runtime.names.ssm_path(prefix, SECURITY_GROUPS_KEY) 的便捷形式）。"""
     return ssm_path(prefix, SECURITY_GROUPS_KEY)
 
 
@@ -92,7 +92,7 @@ def ssm_vpc_path(prefix: str) -> str:
 def ssm_worker_template_path(prefix: str, engine: str) -> str:
     """引擎 worker task-def **模板 revision ARN** 的 SSM 路径（ADR 0038「SSM 参数与命名真源」第 1 行）。
 
-    写者 = stack 资源（随 `gherkai deploy` 的 cdk 事务同生死、回滚不留错值），值取 CDK 内
+    写者是 stack 资源（随 `gherkai deploy` 的 cdk 事务同生死、回滚不留错值），值取 CDK 内
     `taskDefinition.taskDefinitionArn`（`AWS::ECS::TaskDefinition` 的 `Ref` 返回带 revision 的 ARN）。
     `push-worker` 永远从它复制模板，不抄「最近一次」revision。
     """

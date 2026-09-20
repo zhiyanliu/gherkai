@@ -54,7 +54,7 @@ class Scenario:
 
 @dataclass(frozen=True)
 class Job:
-    """一个 job = 一个 scope = 一个会话边界 = schedule 交给单个 worker 的活（ADR 0016/0024/0025）。"""
+    """一个 job 就是一个 scope、一个会话边界，也就是 schedule 交给单个 worker 的活（ADR 0016/0024/0025）。"""
 
     scope_id: str  # 有 @scope:X 用 X；无标用 scenario 的 id
     scope_name: str  # @scope 原值（人写名）；无标用 scenario 标题
@@ -64,7 +64,7 @@ class Job:
     # 默认 1（不抖动检测，结果/日志最直观）；调高（如 3/5）才启用抖动治理。组合根经 --assertion-votes 设。
     assertion_votes: int = 1
     # job 墙钟预算秒（ADR 0034「job timeout」节）：@timeout:N tag 或组合根填充的 --default-job-timeout；
-    # None=不超时。载体=definition（timeout 是「要运行什么」的预算约束），推进器各自 enforce、worker 不消费。
+    # None 表示不超时。载体是 definition（timeout 是「要运行什么」的预算约束），推进器各自 enforce、worker 不消费。
     timeout_s: float | None = None
 
 
@@ -101,8 +101,8 @@ class Status(str, Enum):
     """
 
     PASSED = "passed"  # 测试通过
-    FAILED = "failed"  # 断言投票没过 = 测试发现了问题
-    ERROR = "error"  # 引擎抛异常 = 测试未能运行完成
+    FAILED = "failed"  # 断言投票没过，即测试发现了问题
+    ERROR = "error"  # 引擎抛异常，即测试未能运行完成
     SKIPPED = "skipped"  # core 派生终态：fail-fast 下 worker 从未 spawn。没执行/没花钱/可无脑重新运行（ADR 0031）
     ABORTED = "aborted"  # core 派生终态：fail-fast 下执行到一半被掐。有副作用/有现场可查（ADR 0031）
     PENDING = "pending"  # 前置态：run 开始 create_run 时占位（ADR 0030/0031）
@@ -136,7 +136,7 @@ _PRE_TERMINAL: frozenset[Status] = frozenset({Status.PENDING, Status.RUNNING})
 # 不各自枚举——正向白名单散写多份时，新增终态漏改哪份，那份就永远判不到终态（死等/假绿）。
 # **定义取补而非正列**：新增终态自动入集（对未来新态稳健，同 `_render_status` 退出码判定的取补立场）；
 # 只有新增**前置态**才需动 `_PRE_TERMINAL`（届时 `_NON_VERDICT` 同批要改，两处紧邻放正为此）。
-# **与 `_NON_VERDICT` 是两把不同的刀，别混**：本集按**生命周期**切（还会不会变 → 不会 = 终态，含
+# **与 `_NON_VERDICT` 是两把不同的刀，别混**：本集按**生命周期**切（还会不会变 → 不会变的即终态，含
 # skipped/aborted）；`_NON_VERDICT` 按**run 级判定**切（算不算判定结论 → skipped/aborted 是终态但不算），
 # 故两集在 skipped/aborted 上有意重叠。恒等于 `_STATUS_SEVERITY` 的键集（severity 只给终态定义，决定二）。
 TERMINAL_STATUSES: frozenset[Status] = frozenset(Status) - _PRE_TERMINAL
@@ -273,7 +273,7 @@ Event = (
 class StepResult:
     """单个 step 的归约结果（core 保留 step 级粒度，ADR 0024）。
 
-    duration_ms = step 墙钟时长（core 用 step_started→step_done 的事件到达时间戳算）。
+    duration_ms 是 step 墙钟时长（core 用 step_started→step_done 的事件到达时间戳算）。
     """
 
     index: int
@@ -286,7 +286,7 @@ class StepResult:
     message: str | None = None
     # step 级产物指针（原样搬自 StepDone，见那里的注释：两引擎的 kind=evidence + Nova 的 kind=trajectory）
     report_refs: tuple[ReportRef, ...] = ()
-    # 与判定轴（status）正交的第二维（ADR 0031 决定六）：True = 本 step 因上游 error 被 scope 内短路而跳过、没执行。
+    # 与判定轴（status）正交的第二维（ADR 0031 决定六）：True 表示本 step 因上游 error 被 scope 内短路而跳过、没执行。
     # 仅在 status==SKIPPED（由 step_skipped 事件派生）时为 True；渲染层的连锁失败旁注据此判定（比"按 status 顺序猜"精确）。
     shortcircuited: bool = False
 
@@ -304,7 +304,7 @@ class ScenarioResult:
 
 @dataclass
 class JobResult:
-    """单个 job(=scope) 的归约结果（数据面判定 + 持有它的 definition）。
+    """单个 job（即 scope）的归约结果（数据面判定 + 持有它的 definition）。
 
     **持有 `job`（definition）而非重复抄它的字段**（ADR 0016 三层切分）：scope_id/scope_name/engine
     经 property 从 `job` 取，消除「抄字段抄漏」病根（旧版抄了 engine 漏了 scope_name）。
@@ -315,7 +315,7 @@ class JobResult:
     status: Status  # 汇总：任一 scenario error→error；任一 failed→failed；全 passed→passed
     scenarios: list[ScenarioResult] = field(default_factory=list)
     session_id: str | None = None
-    # 成本：core 只各自合计 engine 报的原生量（None=该引擎没报这个量）。美元折算交消费者。
+    # 成本：core 只各自合计 engine 报的原生量（None 表示该引擎没报这个量）。美元折算交消费者。
     total_tokens: int | None = None  # scope 级 token 合计（如 Midscene）
     total_time_worked_s: float | None = None  # scope 级 agent 工作时长合计（如 Nova）
     duration_ms: float | None = None  # scope 墙钟时长（scope_started→scope_done；性能指标，与成本正交）
@@ -339,21 +339,21 @@ class JobResult:
 
 @dataclass
 class RunResult:
-    """一次执行的机器可读汇总判定 = **definition（run_meta）+ 判定（jobs）的显式合成**（ADR 0016/0026）。
+    """一次执行的机器可读汇总判定，即 **definition（run_meta）与判定（jobs）的显式合成**（ADR 0016/0026）。
 
     RunResult 是 schedule 对事件流的归约终值；sink 收的是同一事件流的原始流式视图（ADR 0026）。
 
     成本（ADR 0024）：core 不算、不折美元——只各自合计 engine 报的**原生量**
     （token 用量 / agent 工作时长）。哪个有值取决于哪些引擎报了它（Nova 报时长、Midscene 报 token）；
-    美元折算交给消费者（用自己 AWS 账户的真实费率）。None=无任何引擎报这个量。
+    美元折算交给消费者（用自己 AWS 账户的真实费率）。None 表示无任何引擎报这个量。
     """
 
     run_meta: RunMeta  # 这次 run 的 definition（run_id/created_at/jobs；执行前确定，不从结果反推）
     status: Status  # 总判定：任一 job error→error；任一 failed→failed；全 passed→passed
     jobs: list[JobResult] = field(default_factory=list)
-    total_tokens: int | None = None  # 跨 job 的 token 合计（None=无引擎报 token）
-    total_time_worked_s: float | None = None  # 跨 job 的 agent 工作时长合计（None=无引擎报时长）
-    duration_ms: float | None = None  # 整个 run 的墙钟时长（schedule 整体包住；含并发，≠ 各 scope 时长之和）
+    total_tokens: int | None = None  # 跨 job 的 token 合计（None 表示无引擎报 token）
+    total_time_worked_s: float | None = None  # 跨 job 的 agent 工作时长合计（None 表示无引擎报时长）
+    duration_ms: float | None = None  # 整个 run 的墙钟时长（schedule 整体包住；含并发，不等于各 scope 时长之和）
 
     @property
     def run_id(self) -> str:
@@ -378,31 +378,31 @@ class RunMeta:
     jobs: tuple[Job, ...]  # 这次运行哪些 job（完整 definition，来自 plan 产出）
     # 浏览器 context 级额外请求头（ADR 0035 决策 4，如 ngrok-skip-browser-warning）：组合根填充、engine
     # adapter 注 env、worker setExtraHTTPHeaders 消费——core 只搬运不消费语义。tuple pairs 保 frozen 惯例；
-    # None=无（默认路径零变化）。载体=definition：cloud detached 下要跨进程到 Lambda 重建 engine，必须随 META 持久化。
+    # None 表示无（默认路径零变化）。载体是 definition：cloud detached 下要跨进程到 Lambda 重建 engine，必须随 META 持久化。
     extra_http_headers: tuple[tuple[str, str], ...] | None = None
     # 本 run 同时运行的 job 上限（ADR 0034 机制四）：run 级执行参数、载体 definition（推进器与提交进程可能
     # 分离，必须随 META 持久化才到得了推进器）——core 只搬运不消费，消费者是各推进器组合根（cloud 侧还会
-    # 与部署侧 cap 取 min）。None=旧 definition 无此值（推进器按各自兼容口径回落）。
+    # 与部署侧 cap 取 min）。None 表示旧 definition 无此值（推进器按各自兼容口径回落）。
     max_concurrency: int | None = None
     # 使用方确定性 step 目录的绝对路径（ADR 0037 决策 4）：提交侧（run/submit 的 CLI 进程）按
     # `--steps-dir` > env `GHERKAI_STEPS_DIR` > 默认 `./steps`（存在才用）解析成绝对路径后填这里，
     # 所有起 worker 的宿主（同步 run / local per-run 进程 / status --wait 接力者）从 definition 读回、
     # 经 env 注给 worker——三宿主 CWD 各不相同（ADR 0034），只有随 definition 走才对三者一致，且
     # 「用到哪套确定性 step」影响判定可复现性、本就属 run 定义。core 只搬运不消费（约定逻辑在组合根）。
-    # None=无使用方 step（worker 只有内建脚手架注册）；云端后端恒 None（steps 构建在定制镜像里，ADR 0038）。
+    # None 表示无使用方 step（worker 只有内建脚手架注册）；云端后端恒 None（steps 构建在定制镜像里，ADR 0038）。
     steps_dir: str | None = None
     # 本 run 用的 worker variant 名（ADR 0038「运行时与 preflight」）：**人读用**——回答「这次用的是哪套确定性
-    # step 集」。人读面只有 definition 自身：落库的 META（云端后端 = runs 表 META item；本机后端此字段恒 None、
+    # step 集」。人读面只有 definition 自身：落库的 META（云端后端下是 runs 表 META item；本机后端此字段恒 None、
     # 序列化省键）与 `gherkai run --json` 顶层的 `run_meta`；status 输出当前不带它（文本与 `--json` 都只吐
     # RunState + artifacts），报告页同样不展示。机器起 task 一律看下面的 worker_task_defs。提交侧 preflight
-    # 解析 `--worker-variant`（缺省取部署级默认指针）后填。None=本机后端 / 引入本 ADR 前提交的旧 definition。
+    # 解析 `--worker-variant`（缺省取部署级默认指针）后填。None 表示本机后端或引入本 ADR 前提交的旧 definition。
     worker_variant: str | None = None
     # 引擎 → worker task-def **revision ARN**（ADR 0038 不变量「运行时只用 definition 里的显式 revision，
     # 永不用 family 取最新」）：提交侧 preflight 把 variant 解析成各引擎的精确 revision，写进 definition；
-    # 所有起 task 的宿主（同步 run 的 FargateEngine / kicker / reconciler）原样用它 RunTask ⇒ 一个 run 内
+    # 所有起 task 的宿主（同步 run 的 FargateEngine / kicker / reconciler）原样用它 RunTask，于是一个 run 内
     # 镜像固定，期间别人重推同名 variant 不影响正在运行的 run。core 只搬运不消费（解析逻辑在组合根 compose）。
-    # 载体=definition：推进器与提交进程分离（ADR 0034），不随 META 持久化就到不了推进器。
-    # None=本机后端 / 旧 definition（宿主按后端默认指针解析的兼容路径，见 ADR 0038「读侧兼容口径」）。
+    # 载体是 definition：推进器与提交进程分离（ADR 0034），不随 META 持久化就到不了推进器。
+    # None 表示本机后端或旧 definition（宿主按后端默认指针解析的兼容路径，见 ADR 0038「读侧兼容口径」）。
     worker_task_defs: dict[str, str] | None = None
 
 
@@ -437,7 +437,7 @@ class RunState:
     started_at: str | None = None
     ended_at: str | None = None
     # 无状态批量运行的并发写守卫（ADR 0034 机制三）：reconciler 跨进程/跨 Lambda 并发投影写 RunState 时，
-    # high_water_mark = 本次投影已处理的 worker 段 max seq。RunStore 条件写「我处理到的 seq ≥ 库中记录的才写」，
+    # high_water_mark 是本次投影已处理的 worker 段 max seq。RunStore 条件写「我处理到的 seq ≥ 库中记录的才写」，
     # 挡 stale 实例的 lost-update（把 passed 刷回 running）。仅无状态路径（submit/reconciler）用；同步 run
     # 路径单进程内 RunPersistence._lock 串行、不并发写，此字段留 None（不参与、不落盘键，向后兼容旧 run_state.json）。
     high_water_mark: int | None = None

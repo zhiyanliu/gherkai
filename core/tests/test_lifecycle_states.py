@@ -58,7 +58,7 @@ def test_pending_running_have_no_severity():
 
 
 def test_non_verdict_filter_set():
-    # 过滤名单 = 派生终态 + 前置态（ADR 0031 决定三）
+    # 过滤名单是派生终态加前置态（ADR 0031 决定三）
     assert _NON_VERDICT == frozenset(
         {Status.SKIPPED, Status.ABORTED, Status.PENDING, Status.RUNNING}
     )
@@ -96,7 +96,7 @@ def test_aggregate_filters_non_verdict():
 
 
 def test_aggregate_all_skipped_no_error_not_misjudged_passed():
-    # 防御：未来若引入非-fail-fast 的 skip，「全 skipped 无 error」不该被误判（过滤后空=passed，但至少不崩、语义明确）
+    # 防御：未来若引入非-fail-fast 的 skip，「全 skipped 无 error」不该被误判（过滤后为空即 passed，但至少不崩、语义明确）
     assert _aggregate([Status.SKIPPED, Status.SKIPPED]) == Status.PASSED
 
 
@@ -181,7 +181,7 @@ def test_fail_fast_inflight_job_is_aborted():
     orig_stop = FakeWorkerHandle.stop
 
     def stop_hook(self, grace_period_s):
-        if self is engine.handles.get("victim"):  # 只认 victim 被停（= _stop_all，abort_flag 已 set），不认 crash 自停
+        if self is engine.handles.get("victim"):  # 只认 victim 被停（即 _stop_all，abort_flag 已 set），不认 crash 自停
             engine.crashed.set()
         return orig_stop(self, grace_period_s)
 
@@ -194,7 +194,7 @@ def test_fail_fast_inflight_job_is_aborted():
     finally:
         FakeWorkerHandle.stop = orig_stop
 
-    # 前置校验：victim 确被真正放行（crashed.set()，= _stop_all 已 abort_flag.set()），而非死锁逃生超时——
+    # 前置校验：victim 确被真正放行（crashed.set()，即 _stop_all 已 abort_flag.set()），而非死锁逃生超时——
     # 后者意味着「被放行 ⟺ abort_flag 已 set」耦合被超时旁路打破，此时 ABORTED 断言即便偶过也不可信。
     assert engine.gate_released, "victim 未被真正放行（crashed 超时），耦合被打破——测试环境异常，非有效断言"
     victim_jr = next(jr for jr in result.jobs if jr.scope_id == "victim")
@@ -227,7 +227,7 @@ from gherkai_core.errors import WorkerNetworkError  # noqa: E402
 
 
 class _NetRaiseEngine:
-    """victim job 的 worker：等一个 gate 放行后才抛 WorkerNetworkError（模拟「建连退避期间」被中止/超时后退 80）。
+    """victim job 的 worker：等一个 gate 放行后才抛 WorkerNetworkError（模拟「建连退避期间」被中止/超时后以退出码 80 结束）。
     crash job：立刻崩，让 schedule set abort_flag（fail-fast 场景用）。
 
     **确定性同步（去 flake 关键）**：victim 对 gate 用**接近无限**的等待（_DEADLOCK_ESCAPE_S，仅作死锁逃生），
@@ -255,13 +255,13 @@ class _NetRaiseEngine:
                 self._entered.wait(timeout=_DEADLOCK_ESCAPE_S)
             raise RuntimeError("crash 崩 → set abort_flag")
         # victim：先吐一个事件证明已 spawn、在事件循环里（过了启动前检查）；宣告 entered；
-        # 再 wait gate（被 fail-fast stop 时放行）→ 抛网络码 → 命中 except WorkerNetworkError 块的 abort 分支。
+        # 再 wait gate（被 fail-fast stop 时放行）→ 抛网络故障 → 命中 except WorkerNetworkError 块的 abort 分支。
         yield ScopeStarted(scope_id="victim", session_id="sess-v")
         if self._entered is not None:
             self._entered.set()
         # 接近无限等（仅死锁逃生）：正常必被 gate.set() 唤醒。记录是否真放行（非超时）供断言。
         self.gate_released = self._gate.wait(timeout=_DEADLOCK_ESCAPE_S)
-        raise WorkerNetworkError("victim 建连失败、以网络码退出")
+        raise WorkerNetworkError("victim 建连失败、以网络故障退出码退出")
 
 
 def test_network_error_during_abort_is_aborted_not_network():
@@ -269,7 +269,7 @@ def test_network_error_during_abort_is_aborted_not_network():
     gate = threading.Event()
     entered = threading.Event()
     engine = _NetRaiseEngine(gate, set_on_victim_entry=entered)
-    # victim 被 stop 时（schedule fail-fast → 调 handle.stop）放行 gate，让它在 abort 已生效后才抛网络码。
+    # victim 被 stop 时（schedule fail-fast → 调 handle.stop）放行 gate，让它在 abort 已生效后才抛网络故障。
     # **只认 victim 自己的 handle.stop**——否则 crash 崩溃时它 except 里的 self._stop() 也会触发本 hook、
     # 提前 set gate（那发生在主线程 _stop_all 的 abort_flag.set() 之前），victim 会在 abort_flag 未 set 时
     # 就抛 WorkerNetworkError → 误落 network_error 分支（曾致本测试 ~44% 误判，根因是共享 gate 被计划外路径放行）。
@@ -297,8 +297,8 @@ def test_network_error_during_abort_is_aborted_not_network():
 
 
 def test_network_error_during_timeout_is_timeout_not_aborted():
-    # 竞态：单 job，worker 在建连退避里以网络码退出，但此刻墙钟已过 deadline → 走 timeout 分支 → error+timeout（非 aborted、非 network_error）
-    gate = threading.Event(); gate.set()  # 立刻放行：victim 一进来就抛网络码
+    # 竞态：单 job，worker 在建连退避里以网络故障退出码退出，但此刻墙钟已过 deadline → 走 timeout 分支 → error+timeout（非 aborted、非 network_error）
+    gate = threading.Event(); gate.set()  # 立刻放行：victim 一进来就抛网络故障
     engine = _NetRaiseEngine(gate)
     # _IncClock 每读 +10s，job_timeout=5 → schedule 内首次读 clock 建 deadline≈10，网络块重判 clock()>deadline 必真
     clock = _IncClock(10.0)
@@ -308,4 +308,4 @@ def test_network_error_during_timeout_is_timeout_not_aborted():
     )
     victim_jr = result.jobs[0]
     assert victim_jr.status == Status.ERROR
-    assert victim_jr.error_type == "timeout"           # 超时不被网络码绕过、不归 aborted
+    assert victim_jr.error_type == "timeout"           # 超时不被网络故障绕过、不归 aborted

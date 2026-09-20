@@ -20,7 +20,7 @@ I/O 契约两态（判据一律是「注入了哪个 env」、非「是否 Farga
   单 act 套 timeout=ACT_TIMEOUT_S 使 in-flight act 有界返回，标志位总能在有限时间被检测。
 
 派发（优先级顺序，ADR 0022/0020/0024）：
-  ① 确定性注册表命中（不投票、可复现，ADR 0022）——表 = 本包内建脚手架 `deterministic_steps.py`
+  ① 确定性注册表命中（不投票、可复现，ADR 0022）——表即本包内建脚手架 `deterministic_steps.py`
      + 使用方 `GHERKAI_STEPS_DIR` 目录下的注册（ADR 0037 决策 4）
   ② step.text 含 URL 字面量（引号内 https?://）→ 内建确定性导航 go_to_url（不浪费 AI）
   ③ AI catch-all：keyword=Then → act_get(BOOL) + N 次投票（AI 断言，带 votes）；
@@ -57,7 +57,7 @@ from gherkai_worker_novaact.lib.artifact_upload import ArtifactUploader  # 产�
 # 确定性 step 注册表（ADR 0022）+ 内建的 step 脚手架（同在本包内）。
 # 先 import 注册机制（提供 @deterministic 装饰器），再 import 脚手架——脚手架顶层的
 # @deterministic 在 import 时执行，把这些 step 登记进 _deterministic._REGISTRY。
-# 使用方自己的 step 目录在 main() 里加载（本 import 之后 = 内建先注册，ADR 0037 决策 4）。
+# 使用方自己的 step 目录在 main() 里加载（排在本 import 之后，故内建先注册，ADR 0037 决策 4）。
 from gherkai_worker_novaact import deterministic as _deterministic
 from gherkai_worker_novaact import deterministic_steps  # noqa: F401  仅为触发注册（其顶层 @deterministic 副作用）
 from gherkai_worker_novaact import evidence as _evidence  # step 级机读证据（ADR 0042；SDK 格式耦合全关在那个模块）
@@ -167,7 +167,7 @@ def _collect_traj(r, sink: list[str]) -> None:
     Nova 每次 act 出一对产物：`act_<id>_<prompt>_trajectory.json`（数据）+ `act_<id>_<prompt>.html`
     （人看的轨迹页）。metadata.trajectory_file_path 给的是 .json；归集索引要指向人能看的 .html，
     故从 json 路径推导 html（去 `_trajectory.json` 加 `.html`）。html 不存在则回退 json。
-    收集进 sink（=本 step 的累积器）；step_done 边界报成 step 级 reportRefs（kind=trajectory，下沉，ADR 0027）。
+    收集进 sink（即本 step 的累积器）；step_done 边界报成 step 级 reportRefs（kind=trajectory，下沉，ADR 0027）。
     """
     if _no_artifacts():
         return  # --no-report：不收集、不上报（SDK 仍会写进自己的临时目录，那是 SDK 内部行为）
@@ -247,7 +247,7 @@ def _presend_act_siblings(step_traj: list[str]) -> None:
 
 def _act_record(index: int, prompt: str | None, obj, *, vote: bool | None = None,
                 error: str | None = None) -> _evidence.ActRecord:
-    """一次 AI 调用 → evidence 的 act 输入材料（`obj` = act 的结果对象，抛错时是异常对象——两者都带 metadata）。
+    """一次 AI 调用 → evidence 的 act 输入材料（`obj` 是 act 的结果对象，抛错时是异常对象——两者都带 metadata）。
 
     trajectory 路径取 `metadata.trajectory_file_path`（json，沿用 `_collect_traj` 的同一来源；**不用**公开属性
     `ActResult.trajectory_file_path`，未开 replayable 时它恒 None，见 ADR 0042 决策一映射表）。抛错的 act 该
@@ -365,7 +365,7 @@ def _run_step(nova, scenario_id: str, step: dict, votes_n: int, sink: EventSink,
 
     sink：事件出口（ADR 0024 I/O 边缘可注入接口，参数注入使测试可注 fake）——本函数所有事件经 sink.emit 吐。
 
-    votes_n：AI 断言（Then）投票次数（来自 job.assertionVotes，ADR 0014）；1=不抖动检测。
+    votes_n：AI 断言（Then）投票次数（来自 job.assertionVotes，ADR 0014）；1 表示不做抖动检测。
     trajectory 收集在**本 step 局部**（每次 AI act 一个），随该 step 的 step_done 报出 step 级 reportRefs
     （ADR 0027 下沉：act 挂到其所属 step，不再聚合到 scenario 级）。确定性命中/URL 导航步不调 act、无 trajectory。
 
@@ -381,7 +381,7 @@ def _run_step(nova, scenario_id: str, step: dict, votes_n: int, sink: EventSink,
     keyword = step["keyword"]
     text = step["text"]
     step_traj: list[str] = []  # 本 step 的 trajectory 路径（act 逐个收进来）
-    acts: list = []  # 本 step 各 AI 调用的 evidence 材料（ADR 0042 决策一：一个 act = 一次 act/act_get）
+    acts: list = []  # 本 step 各 AI 调用的 evidence 材料（ADR 0042 决策一：一个 act 对应一次 act/act_get）
     inflight: str | None = None  # 已发出、尚未拿到结果的 act 的指令：抛错时据它补一条 error act（其余时刻为 None）
     tw_total = 0.0  # 本 step 已真实计费的 time_worked_s 累计（多票逐票加；except 分支也要报——费用不随异常蒸发，ADR 0024）
 
@@ -501,7 +501,7 @@ def _run_step(nova, scenario_id: str, step: dict, votes_n: int, sink: EventSink,
         # 失败 act 的 trajectory 最该留（ADR 0027/0028）——protect_emit：上传再失败也绝不吞 engine_error 事件
         _attach_traj_refs(ev, step_traj, protect_emit=True)
         # 抛错的那次 AI 调用也进 evidence（ADR 0042 决策一 error act 契约：error 非空、prompt/time_worked_s 仍填、
-        # frames 为空）。inflight 非空 = 异常出自某次 act/act_get；为空则异常在确定性 handler/指令拼装等处，无 act 可记。
+        # frames 为空）。inflight 非空表示异常出自某次 act/act_get；为空则异常在确定性 handler/指令拼装等处，无 act 可记。
         if inflight is not None:
             acts.append(_act_record(len(acts), inflight, e, error=ev["message"]))
         _emit_step_done(sink, ev, scope_id=scope_id, scenario_id=scenario_id, step=step, acts=acts)
@@ -549,7 +549,7 @@ def _argument_text(arg: dict | None) -> str:
 
 
 def _instruction(text: str, step: dict) -> str:
-    """喂 AI 的完整指令 = 去引号的 step 自然语言 + （可选）多行参数（ADR 0024：text(+argument) 一起喂引擎）。"""
+    """喂 AI 的完整指令由去引号的 step 自然语言与（可选）多行参数拼成（ADR 0024：text(+argument) 一起喂引擎）。"""
     base = _unquote(text)
     extra = _argument_text(step.get("argument"))
     return f"{base}\n{extra}" if extra else base
@@ -601,7 +601,7 @@ def _aggregate(statuses: list[str]) -> str:
 def _emit_scenario_done_unless_stopped(sink: EventSink, scenario_id: str, statuses: list[str]) -> bool:
     """scenario 运行结束后的 scenario_done 出口 + 中止护栏（模块级、供单测直驱）。
 
-    返回 True=中止（调用方应停止本 session、不再执行后续 scenario）。**中止时绝不 emit scenario_done**：
+    返回 True 表示中止（调用方应停止本 session、不再执行后续 scenario）。**中止时绝不 emit scenario_done**：
     scenario 中途收到 _stop 时 `_run_scenario` 返回**部分 statuses**，用它算判定会把没执行完的 scenario 标成
     确定 passed（假阳性——`_aggregate([])`/`_aggregate(["passed"])` 都 == "passed"），违反「停止是外部中止、
     非执行事实、worker 不越权标注」（ADR 0031/0024）；未完成 scenario 交 core 按派生态处理。对称 step 级投票
@@ -627,7 +627,7 @@ _BACKOFF_S = [0.5, 1.0, 2.0]  # attempt 失败后的退避：固定退避、不�
 
 
 def _backoff_interrupted(attempt: int) -> bool:
-    """建连重试的退避（ADR 0028 + 0024 flag-only）。返回 True=退避中收到停止信号（应停止重连）。
+    """建连重试的退避（ADR 0028 + 0024 flag-only）。返回 True 表示退避中收到停止信号（应停止重连）。
 
     用 `_stop.wait(backoff)` 而非 `time.sleep(backoff)`：SIGTERM/SIGINT handler `set` 标志后 wait 立即
     返回 True（flag-only 下 time.sleep 不被打断、会睡满，PEP 475）——使建连退避期间收到信号能即时协作停。
@@ -640,9 +640,9 @@ def _backoff_interrupted(attempt: int) -> bool:
 # boto ClientError 的瞬时/节流错误码集（ADR 0028）——**对齐 botocore 权威常量、借判据不借 API**：
 # 以 TransientRetryableChecker._TRANSIENT_ERROR_CODES + ThrottledRetryableChecker._THROTTLED_ERROR_CODES
 # 为基线，另**有意增补** ServiceUnavailable / ServiceUnavailableException（botocore 那两个常量集里没有——
-# 它靠 _TRANSIENT_STATUS_CODES 的 503 兜；我们照抄了那组状态码，但服务端不带 HTTP 状态只给码时兜不住，故显式补）。
+# 它靠 _TRANSIENT_STATUS_CODES 的 503 兜；我们照抄了那组状态码，但服务端不带 HTTP 状态只给错误码时兜不住，故显式补）。
 # AgentCore 起会话（start_browser_session）是 boto3 调用，服务端瞬时不可用/限流抛 ClientError（直接继承
-# Exception、混着永久错），故按码细分、不整类当瞬时。内联这张稳定的码表而非硬构造 botocore RetryContext 去
+# Exception、混着永久错），故按错误码细分、不整类当瞬时。内联这张稳定的错误码表而非硬构造 botocore RetryContext 去
 # 调它的 is_retryable（那要请求栈内部对象、跨版本脆，且我们 catch 到的是被 Nova SDK 包两层的异常、没有 RetryContext）。
 _BOTO_TRANSIENT_CODES = frozenset({
     "RequestTimeout", "RequestTimeoutException", "PriorRequestNotComplete",  # 瞬时
@@ -776,14 +776,14 @@ CAPABILITIES_SCHEMA_VERSION = 1  # 只在键语义变化时递增（ADR 0036「5
 def _capabilities() -> dict[str, object]:
     """本 worker 的能力声明（`--capabilities` 的 stdout，ADR 0036「5.」）。
 
-    `min_grace_s` = grace 硬约束的下限（ADR 0024）= 单 act 上界 `ACT_TIMEOUT_S`（组合根注入的
+    `min_grace_s` 是 grace 硬约束的下限（ADR 0024），取单 act 上界 `ACT_TIMEOUT_S`（组合根注入的
     `NOVA_ACT_TIMEOUT_S`，缺省 120）+ 收尾余量 `NOVA_GRACE_MARGIN_S`（见 `lib/constants.py` 那个常量的
     注释：会话释放 + 截图队列排空，已真容器标定）。**worker 自己算、组合根只查询**（ADR 0024「引擎自报
     下限」）：SIGTERM 落长 act 中途时，协作停要等这一次 in-flight act 有界返回才退三层 with 释放会话，
     这两段预算都只有 worker 知道；组合根持任何引擎特定的下限常量都会漂移。
-    `deterministic_steps` = 此刻注册表的清单（ADR 0036「2.」）：内建脚手架（模块顶 import 的副作用）+
+    `deterministic_steps` 是此刻注册表的清单（ADR 0036「2.」）：内建脚手架（模块顶 import 的副作用）+
     `main()` 顶部加载的使用方 step——与实际运行派发用的是同一张表，故复用 `list_registry()`、不另拼一份。
-    `model_id` = 这个 worker 起 job 时真会传给 `Workflow(model_id=...)` 的那个 id（`lib/constants.py` 的
+    `model_id` 是这个 worker 起 job 时真会传给 `Workflow(model_id=...)` 的那个 id（`lib/constants.py` 的
     MODEL_ID：缺省锁定的 GA 版本，或 env `NOVA_MODEL_ID` 的 opt-in 覆盖值——见 ADR 0004「模型版本选择策略」）。
     **同一个常量、不另写字面量**：自述与实际运行必须报同一个值，否则「doctor 显示的模型」就成了第二事实源。
     加键不加入口（如将来的 browser 后端能力）——故返回 dict、消费侧按键取；`run` 的前置检查因此只需
@@ -804,7 +804,7 @@ def main() -> int:
     # --match-steps 查询），故自述报的注册表与实际运行派发用的是同一张表（ADR 0036「真值单一」不因定制而破）；
     # `--capabilities` 同样在这之后，故 steps 加载失败在它上面也 fail-loud（ADR 0037 决策 4）。
     # worker 只认 env、不解析约定（`--steps-dir` / 默认 `./steps` / 写进 definition 全在组合根）。
-    # 加载失败 fail-loud（绝不静默跳过——跳过 = 把确定性 step 静默换成 AI catch-all、run 可能假「通过」）。
+    # 加载失败 fail-loud（绝不静默跳过——跳过意味着把确定性 step 静默换成 AI catch-all、run 可能假「通过」）。
     steps_dir = os.environ.get("GHERKAI_STEPS_DIR")
     try:
         loaded = load_user_steps(steps_dir)
@@ -812,7 +812,7 @@ def main() -> int:
         log(f"worker: {e}")
         return EX_STEPS_LOAD
     if loaded:
-        # 一行 stderr 确认「目录被读到了、读了几个文件」（与 Midscene worker 的 user-steps 诊断行同形）：
+        # 一行 stderr 确认「目录被读到了、读了几个文件」（与 Midscene worker 的 user-steps 诊断行措辞一致）：
         # 「写了 steps 却全走 AI」的头号原因是目录没被注入，没这行使用方分不清是没读到还是没命中。
         log(f"worker: 已加载使用方 steps {len(loaded)} 个文件（{steps_dir}）")
 
@@ -836,7 +836,7 @@ def main() -> int:
     signal.signal(signal.SIGTERM, _on_signal)
     signal.signal(signal.SIGINT, _on_signal)  # Ctrl-C 也走 flag-only（原走默认 KeyboardInterrupt 同样撞 greenlet）
 
-    # I/O 边缘可注入接口（ADR 0024）：job 入口 / 事件出口从内联收进 lib 组件，subprocess 态=读 stdin / 写 EVENTS_FD。
+    # I/O 边缘可注入接口（ADR 0024）：job 入口 / 事件出口从内联收进 lib 组件，subprocess 态即读 stdin、写 EVENTS_FD。
     job = JobSource.from_env().read()
     if _stop.is_set():
         log(f"worker: signal {_stop_signum} received before job start, cooperative stop")
@@ -890,7 +890,7 @@ def main() -> int:
                 # session_id 随 scope_started 即回传（不只等 scope_done）——超时/SIGTERM 中途打断时
                 # scope_done 不会 emit，但血缘已先随首事件落到 core（ADR 0028 观测缺口修复）。
                 sink.emit({"type": "scope_started", "scopeId": scope["id"], "sessionId": session_id})  # 三级时长起点
-                started = True  # 越过此点 = 会话已起、act 即将执行 → 退出建连重试域（ADR 0028）
+                started = True  # 越过此点表示会话已起、act 即将执行 → 退出建连重试域（ADR 0028）
                 # scope 内串行执行 scenarios，共享同一会话（ADR 0019/0024）
                 for sc in scenarios:
                     if _stop.is_set():

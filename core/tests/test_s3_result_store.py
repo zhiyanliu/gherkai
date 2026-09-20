@@ -85,7 +85,7 @@ def test_load_all_paginates_beyond_1000(s3_result_store):
         sid = f"scope-{i:05d}"
         s3_result_store.save_job_result("big", JobResult(job=_job_def(sid, sid, "midscene"), status=Status.PASSED))
     got = s3_result_store.load_all("big")
-    assert len(got) == n, f"load_all 应翻页收全部 {n} 个，实际 {len(got)}（单页截断=丢判定）"
+    assert len(got) == n, f"load_all 应翻页收全部 {n} 个，实际 {len(got)}（单页截断就会丢判定）"
     # 且仍是全量、稳定序（不是"返回某 1000 个"）
     assert [jr.scope_id for jr in got] == sorted(f"scope-{i:05d}" for i in range(n))
 

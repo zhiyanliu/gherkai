@@ -6,7 +6,7 @@
 // （ADR 0016 注入红线）。与 Nova 的 lib/artifact_upload.py 对称（各语言各写，ADR 0024）。
 //
 // S3 key 镜像本地 run 树（ADR 0029）：任一产物 key = <prefix><产物相对本地 run 目录的路径>，与 S3ReportStore/
-// ResultStore 同 <prefix> 前缀。本地 run 目录 = 产物落点目录（MIDSCENE_RUN_DIR）的父级。key 确定性纯路径计算、
+// ResultStore 同 <prefix> 前缀。本地 run 目录是产物落点目录（MIDSCENE_RUN_DIR）的父级。key 确定性纯路径计算、
 // 不依赖上传，故 toReportRef 可先算 s3:// ref 实时报出。
 //
 // 上传/删除策略（ADR 0029 混合两级 + 整目录，抗 SDK 升级）：
@@ -31,7 +31,7 @@ import * as path from "node:path";
 // （曾漏设 midscene 下限 → 回落 ScheduleOpts 默认 grace < 本超时、致 worker 被 SIGKILL。）
 export const UPLOAD_TIMEOUT_MS = 10_000;
 
-// 单文件的上传尝试次数（ADR 0042 决策一「失败重试一次后记一行日志放弃」）= 首传 + 重试一次。
+// 单文件的上传尝试次数（ADR 0042 决策一「失败重试一次后记一行日志放弃」）是首传加重试一次。
 // 后台队列与 scope 末 flush 共用：两处都是 best-effort 且**无人替它们重试**，而截图 URI 一旦悬空就是永久
 // 404（evidence.json 里已经写着那个 URI 了）——一次 S3 抖动不该换来一个永久悬空的链接。
 // **toReportRef 不走这条**：它的契约是「失败即抛」（报告链接强保证，交 worker 观测），重试语义归调用方。
@@ -56,11 +56,11 @@ function contentTypeFor(localAbs: string): string | undefined {
 export class ArtifactUploader {
   private bucket: string | undefined;
   private prefix: string;
-  private runDir: string | undefined; // 本地 run 树根（= MIDSCENE_RUN_DIR 父级），算相对 key 用
+  private runDir: string | undefined; // 本地 run 树根（即 MIDSCENE_RUN_DIR 的父级），算相对 key 用
   private client: S3Client | undefined; // 惰性建（仅真上传时）
   private uploaded = new Set<string>(); // 已成功上传的绝对路径（重复引用 / 后台队列 / flush 时跳过）
   private flushOk = true;               // 剩余批量是否全成功（任一失败 → 整目录不删）
-  // 后台上传队列（ADR 0042 决策一）：**单条 promise 链** = 单线程 FIFO、顺序上传、永不重叠——退化网络下
+  // 后台上传队列（ADR 0042 决策一）：**单条 promise 链**即单线程 FIFO、顺序上传、永不重叠——退化网络下
   // 不会把 K × 票数个 PutObject 并发挤在一起（每个还各套 10s 超时）。链上每一项都吞掉自己的失败、故此链
   // 永不 reject（一项 reject 会毁掉其后所有项与 drain）。
   private chain: Promise<void> = Promise.resolve();
@@ -83,7 +83,7 @@ export class ArtifactUploader {
     const runRoot = process.env.MIDSCENE_RUN_DIR;
     const runDir = runRoot ? path.dirname(path.resolve(runRoot)) : undefined;
     if (bucket !== undefined && runDir === undefined) {
-      // fail-loud（对称 Nova artifact_upload.py）：注入了桶却没给 MIDSCENE_RUN_DIR = 组合根配置矛盾，
+      // fail-loud（对称 Nova artifact_upload.py）：注入了桶却没给 MIDSCENE_RUN_DIR 即组合根配置矛盾，
       // 静默 no-op 会让产物报 file:// 且随容器盘销毁必丢（ADR 0033「只注①不注②等于没上传」）。
       throw new Error(
         "产物上传：已注入 ARTIFACT_S3_BUCKET 但缺 MIDSCENE_RUN_DIR，算不出产物落点、无法上传"
@@ -104,7 +104,7 @@ export class ArtifactUploader {
   }
 
   private client_(): S3Client {
-    // maxAttempts: 1 = 关 SDK 重试（对称 Nova boto Config max_attempts=0，ADR 0032）；AbortSignal 仍兜单次墙钟。
+    // maxAttempts: 1 表示关掉 SDK 重试（对称 Nova boto Config max_attempts=0，ADR 0032）；AbortSignal 仍兜单次墙钟。
     if (!this.client) this.client = new S3Client({ region: process.env.AWS_REGION, maxAttempts: 1 });
     return this.client;
   }
@@ -172,7 +172,7 @@ export class ArtifactUploader {
   //   ② **不记 uploaded**：故 scope 末 toReportRef(reportFile) 仍传 destroy 后 finalize 的权威完整版、
   //      flushAndCleanup 仍按 uploaded 正确跳过——快照只是中途保险，不篡改两级上传账本；
   //   ③ **失败原样抛**（保 lib 纯净）——交调用方（worker）吞+log：提前上传是 best-effort、不该打断 step 循环
-  //      （对照 toReportRef 失败抛=报告链接强保证，语义相反）。
+  //      （对照 toReportRef 失败即抛、是报告链接的强保证，语义相反）。
   // no-op（未注入落点）→ 直接返回，不碰盘、不产 ref（提前上传不面向事件消费者，只求字节进 S3）。
   // **绝不复用 flushAndCleanup**：那个成功后 rmSync 删整目录，会误删正被 SDK 增量 append 的 report、打断正在运行的 main。
   async snapshotReport(localPath: string): Promise<void> {
@@ -255,7 +255,7 @@ export class ArtifactUploader {
   }
 
   // 后台队列的**有界排空**（ADR 0042 决策一）：等队列运行结束，最多等 timeoutMs；返回是否在预算内排空完
-  // （false = 还有在途/未起的项，调用方记一行日志放弃即可，scope 末 flush 兜漏网）。
+  // （false 表示还有在途/未起的项，调用方记一行日志放弃即可，scope 末 flush 兜漏网）。
   // **调用位置守「会话释放优先」**（ADR 0024）：收尾路径上排在会话释放之后——退化网络下排空挂满预算，
   // 不该让 AgentCore 会话多泄漏那么久。
   // 超时**不取消在途上传**（单文件已被 uploadOne 的 AbortSignal 封顶），只是不再等 → 真墙钟上界 ≈

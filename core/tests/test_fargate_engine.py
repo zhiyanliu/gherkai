@@ -108,7 +108,7 @@ def test_run_scope_puts_job_to_s3(fargate):
     # worker 尚未写事件；先只验 run_scope 的 job-in 侧（不消费迭代器、避免阻塞等 STOPPED）
     handle, _events = eng.run_scope(job)
     assert isinstance(handle, FargateWorkerHandle)
-    # job 已 PutObject 到 s3://bucket/<run_id>/jobs/<scope_id>.json，内容 = job_to_line
+    # job 已 PutObject 到 s3://bucket/<run_id>/jobs/<scope_id>.json，内容就是 job_to_line 的输出
     obj = fargate["s3"].get_object(Bucket=fargate["bucket"], Key=f"{_RUN_ID}/jobs/browse.json")
     body = obj["Body"].read().decode("utf-8").strip()
     assert json.loads(body)["scope"]["id"] == "browse"
@@ -122,7 +122,7 @@ def test_run_scope_job_key_quotes_scope_id(fargate):
     sid = "features/deterministic_step.feature:7"
     handle, _events = eng.run_scope(_job(sid))
     expected_key = f"{_RUN_ID}/jobs/{quote(sid, safe='')}.json"  # features%2Fdeterministic_step.feature%3A7.json
-    obj = fargate["s3"].get_object(Bucket=fargate["bucket"], Key=expected_key)  # 能取到=key 用了 quote
+    obj = fargate["s3"].get_object(Bucket=fargate["bucket"], Key=expected_key)  # 能取到就说明 key 用了 quote
     assert json.loads(obj["Body"].read().decode("utf-8"))["scope"]["id"] == sid
     assert "%2F" in expected_key and "%3A" in expected_key  # 确认 / 和 : 都被编码（不造子前缀）
 
@@ -179,7 +179,7 @@ def test_runtask_injects_extra_env(fargate, monkeypatch):
 def test_artifact_injection_kwargs_are_mandatory(fargate):
     """产物落点两参数**必给关键字、无缺省**：cloud 下两者必注，漏传即静默丢产物（实际运行暴露过一次）。
 
-    与 ADR 0038 的显式 revision 同口径——漏传即在装配点 TypeError 炸，不做成「忘了传就静默破」。
+    与 ADR 0038 的显式 revision 判法一致——漏传即在装配点 TypeError 炸，不做成「忘了传就静默破」。
     显式给 None（不上传）/ 空 dict（无 SDK 落点）仍可构造：本条锁的是「不许省」，不是「不许为空」。
     """
     base = dict(
@@ -298,10 +298,10 @@ def test_read_events_incremental_across_polls(fargate):
 def test_read_events_midscene_lowlevel_marshalling_and_ascending_read(fargate):
     # 跨引擎编组同构 + 升序读（ADR 0024）：Midscene 那个引擎走**低层** PutItemCommand（attribute 显式 {N:String(seq)}/{S}），
     # Nova 那个引擎走 resource.put_item（原生 int）——两条不同 API 层，都须落成 core Query 能读的**同构** item。现有测试的
-    # _put_event 走 resource（=Nova 形态），此处补 Midscene 低层形态：直接经低层 client 写 {N:"..."}。
+    # _put_event 走 resource（即 Nova 形态），此处补 Midscene 低层形态：直接经低层 client 写 {N:"..."}。
     # **本测试真正锁住的（诚实边界，勿夸大）**：
     #   ① 跨层编组同构——低层 client 写的 {N}/{S} item，core 的 resource.Table Query 能读出（len==11、类型对）。
-    #      若两个引擎编组不兼容（如 Midscene 误写 {S} 进 N-key），moto 直接 ClientError 拒；core 读不出则 len≠11。
+    #      若两个引擎编组不兼容（如 Midscene 误写 {S} 进 N-key），moto 直接 ClientError 拒；core 读不出则条数不等于 11。
     #   ② 升序读——引擎若误用 ScanIndexForward=False（降序）本测试会红（实测变异确认）。
     # **不锁的**：① 「漏 ScanIndexForward」不会红——moto 默认即按 sort-key 升序返回（本测试预写也是升序），故这条
     #   决策靠此测试守不住（记账诚实，别声称锁了跨 9/10 数值重排）；② 「seq 误存 String」不由本测试兜——它全程手写
@@ -325,7 +325,7 @@ def test_read_events_midscene_lowlevel_marshalling_and_ascending_read(fargate):
     _, events = eng.run_scope(_job("browse"))
     eng._ecs = _stopped_ecs(fargate["container_name"])  # scope_done 后等 STOPPED 读码（见 _stopped_ecs docstring）
     got = list(events)
-    # 11 条全读出（低层写的 item core 能 Query=跨层编组同构）、升序（step 0..9 依次——引擎误用降序读会红）
+    # 11 条全读出（低层写的 item core 能 Query，说明跨层编组同构）、升序（step 0..9 依次——引擎误用降序读会红）
     assert len(got) == 11
     assert [type(e).__name__ for e in got] == ["StepDone"] * 10 + ["ScopeDone"]
     assert [e.step_index for e in got[:10]] == list(range(10))  # 升序读（跨 9/10 边界；moto 默认即升序，故此断言守降序误用、不守漏 ScanIndexForward）
@@ -341,7 +341,7 @@ def test_read_events_stopped_without_scope_done_drains_then_raises(fargate):
     # 已落事件：seq 1（scope_started），**无 scope_done**（模拟 worker 中途崩）
     _put_event(fargate["events_table"], _RUN_ID, "browse", 1, {"type": "scope_started", "scopeId": "browse"})
 
-    # 假 ecs：describe_tasks 首次调用（= 主循环第二轮 not items 后查退出码）才「变 STOPPED」，并在此刻补写一条
+    # 假 ecs：describe_tasks 首次调用（也就是主循环第二轮 not items 后查退出码那次）才「变 STOPPED」，并在此刻补写一条
     # 末尾事件 seq 2（模拟：STOPPED 后强一致 drain 才看得到的、最终一致主循环漏掉的末尾 PutItem）。
     state = {"describe_calls": 0}
 
@@ -467,7 +467,7 @@ def test_read_events_scope_done_then_nonzero_exit_raises(fargate):
     with pytest.raises(RuntimeError, match=r"exitCode=1\b") as ei:  # 非 0 退出必抛——与 subprocess 无条件 proc.wait()+rc 检查同构
         for e in events:
             got.append(e)
-    assert not isinstance(ei.value, WorkerNetworkError)  # exit 1 走 RuntimeError、非网络码 80（锁分类，别混进 WorkerNetworkError 子类）
+    assert not isinstance(ei.value, WorkerNetworkError)  # exit 1 走 RuntimeError、非网络故障退出码 80（锁分类，别混进 WorkerNetworkError 子类）
     # scope_done 已 yield（内容完整）、但终止判定读到 exit 1 → 抛（不吞、不误报 PASSED）
     assert [type(e).__name__ for e in got] == ["ScopeStarted", "ScopeDone"]
 
@@ -495,7 +495,7 @@ def test_read_events_scope_done_waits_for_stopped_before_reading_exit(fargate, m
 
 
 def test_read_events_scope_done_then_network_exit_raises_network_error(fargate):
-    """scope_done 后 exit 80（网络专用码，ADR 0028）→ 翻 WorkerNetworkError（与 subprocess/STOPPED 兜底同一分类）。"""
+    """scope_done 后 exit 80（网络故障专用退出码，ADR 0028）→ 翻 WorkerNetworkError（与 subprocess/STOPPED 兜底同一分类）。"""
     eng = _engine(fargate)
     _put_event(fargate["events_table"], _RUN_ID, "browse", 1, {"type": "scope_done", "scopeId": "browse"})
     _, events = eng.run_scope(_job("browse"))
@@ -573,7 +573,7 @@ def test_raise_for_worker_exit_maps_codes_with_fargate_label():
 
     raise_for_worker_exit(0, code_label="exitCode")  # 正常，不抛
     with pytest.raises(WorkerNetworkError):
-        raise_for_worker_exit(80, code_label="exitCode")  # 网络专用码（ADR 0028）
+        raise_for_worker_exit(80, code_label="exitCode")  # 网络故障专用退出码（ADR 0028）
     with pytest.raises(RuntimeError, match=r"exitCode=1\b"):
         raise_for_worker_exit(1, code_label="exitCode")   # 其余正非零
 
@@ -668,7 +668,7 @@ def test_read_events_gap_within_grace_waits_and_fills_in_order(caplog):
 
 
 def test_read_events_gap_beyond_grace_is_skipped_with_warning(caplog):
-    """洞在宽限后仍在 = 写者侧真丢（PutItem 失败、seq 已耗）→ 记警告、越过继续，流式读不无界停摆。"""
+    """洞在宽限后仍在，就是写者侧真丢（PutItem 失败、seq 已耗）→ 记警告、越过继续，流式读不无界停摆。"""
     import logging
 
     class _Table:

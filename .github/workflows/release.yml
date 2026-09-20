@@ -1,6 +1,6 @@
 name: release
 
-# 推 tag `vX.Y.Z` = 发布全链（ADR 0037 决策 8）：一个 git tag 派生五个 wheel 的版本、npm 包版本、
+# 推 tag `vX.Y.Z` 即触发发布全链（ADR 0037 决策 8）：一个 git tag 派生五个 wheel 的版本、npm 包版本、
 # 基础镜像 tag、GitHub Release——版本真源（ADR 0037 决策 2b/7）。
 # 顺序与失败语义按 ADR 0037 决策 8：gate（tag 形态 + 算出的版本==tag）→ ① PyPI（build → attest → publish）
 # → ② npm → ③ GHCR 基础镜像（依赖 ①② 索引可见）→ ④ GitHub Release。
@@ -69,7 +69,7 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: gate：CHANGELOG.md 里有本版本的节
-        # 每版说明「不写发不出」（ADR 0045 决策五）：Release 正文 = 该节正文 + 固定装法块（.github/release_body_footer.md）。
+        # 每版说明「不写发不出」（ADR 0045 决策五）：Release 正文为该节正文 + 固定装法块（.github/release_body_footer.md）。
         # 放在 build 之前：缺节是编辑动作能补的，别先花几分钟 build 再红。
         run: uv run --no-project python .github/scripts/release_notes.py check --version "${VERSION}"
         env:
@@ -91,7 +91,7 @@ jobs:
             --dist dist --expect-version "$version"
 
           # `latest` 只跟随最新 tag（ADR 0037 决策 8）：重新运行旧版本时不许把 latest 拽回去——
-          # 判据 = 本 tag 就是全仓库按版本序最大的那个 tag（重新运行旧 tag 时不成立）。
+          # 判据是本 tag 就是全仓库按版本序最大的那个 tag（重新运行旧 tag 时不成立）。
           # `|| true` 防 grep 无匹配撞上 pipefail。
           newest="$(git tag --list 'v*' --sort=version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | tail -n1 || true)"
           if [ "$newest" = "$tag" ]; then
@@ -328,7 +328,7 @@ jobs:
           DIGEST: ${{ steps.push.outputs.digest }}
 
   release:
-    # ④ GitHub Release：正文 = CHANGELOG.md 本版节 + 固定装法 / 升级块，块里的文档链接锁定到 blob/vX.Y.Z/
+    # ④ GitHub Release：正文为 CHANGELOG.md 本版节 + 固定装法 / 升级块，块里的文档链接锁定到 blob/vX.Y.Z/
     # （ADR 0045 决策五；各包 pyproject 的 `[project.urls] Changelog` 指 CHANGELOG.md）。
     # 不用 GitHub 自动生成的 release notes：本仓库无 PR 流、commit 信息是工程语言，生成物对使用者无用。
     name: GitHub Release

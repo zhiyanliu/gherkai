@@ -29,7 +29,7 @@ import { oneLineError } from "./error-text.mjs";  // act.error 与 step_done.mes
 export const EVIDENCE_SCHEMA_VERSION = 1;
 /** step_done 上这条 ref 的 kind 与 label（ADR 0042 决策一；kind 本就是引擎自报的开放字符串）。 */
 export const EVIDENCE_KIND = "evidence";
-/** 引擎名（evidence 的 engine 字段与 `--capabilities` 自述的 engine 同源；两引擎同形、各报自己的名）。 */
+/** 引擎名（evidence 的 engine 字段与 `--capabilities` 自述的 engine 同源；两引擎格式相同、各报自己的名）。 */
 export const ENGINE = "midscene";
 
 // 截图上界（ADR 0042 决策一「截图策略（有上界）」）：**只有 screenshot 受限**，frames 的 thought / actions
@@ -48,7 +48,7 @@ const KEY_SLUG_MAX = 80;
 interface ShotLike { id?: string; extension?: string; mimeType?: string }
 /** task 的动作录像项：只关心 timing（挑「动作后」那张）与其 screenshot。 */
 interface RecorderLike { timing?: string; screenshot?: unknown }
-/** 一个 ExecutionTask = evidence 的一个 frame。 */
+/** 一个 ExecutionTask 即 evidence 的一个 frame。 */
 interface TaskLike {
   type?: string;
   subType?: string;
@@ -60,16 +60,16 @@ interface TaskLike {
   uiContext?: { screenshot?: unknown };
   recorder?: RecorderLike[];
 }
-/** 一个 execution = evidence 的一个 act（一次 `aiAct` / `aiBoolean` / `aiQuery`）。 */
+/** 一个 execution 即 evidence 的一个 act（一次 `aiAct` / `aiBoolean` / `aiQuery`）。 */
 interface ExecutionLike { name?: string; tasks?: TaskLike[] }
 
-// ---- evidence 文档（schema 由 gherkai 定义，两引擎同形；键名/类型即契约，不承诺每次填满）----
+// ---- evidence 文档（schema 由 gherkai 定义，两引擎格式相同；键名/类型即契约，不承诺每次填满）----
 
 export interface EvidenceFrame {
   /** 逐 frame URL 仅 Nova 有；Midscene 的 task 不带 URL → 恒 null（ADR 0042 映射表）。 */
   url: string | null;
   thought: string | null;
-  /** args = 引擎原样透传的对象，内部键随 SDK、不属本契约。 */
+  /** args 是引擎原样透传的对象，内部键随 SDK、不属本契约。 */
   actions: Array<{ name: string; args: unknown }>;
   /** 只有被截图策略选中的 frame 非 null。 */
   screenshot: string | null;
@@ -79,7 +79,7 @@ export interface EvidenceAct {
   index: number;
   /** gherkai 交给引擎的指令（step 文本 + 多行参数）；**不取** execution.name——那是 SDK 展示名。 */
   prompt: string | null;
-  /** 本次调用计入判定的那一票；null = 本 act 不是投票调用（When / Given 的动作）。 */
+  /** 本次调用计入判定的那一票；null 表示本 act 不是投票调用（When / Given 的动作）。 */
   vote: boolean | null;
   url: string | null;
   frames: EvidenceFrame[];
@@ -189,7 +189,7 @@ function actionsOf(task: TaskLike): Array<{ name: string; args: unknown }> {
 
 /** 非空错误文本判据（按值，不按 SDK 标志）——同时是 act.error 与「出错帧」的**同一个**判据。
  *  取到的文本过 `oneLineError`：SDK 的 `errorMessage` 与抛出异常的 message 同源（多行 call log），两条来源
- *  须同形，否则同一个 `act.error` 字段会因文本从哪儿来而一行 / 上千字符不定（ADR 0042 决策一映射表）。 */
+ *  须格式相同，否则同一个 `act.error` 字段会因文本从哪儿来而一行 / 上千字符不定（ADR 0042 决策一映射表）。 */
 function errorTextOf(task: TaskLike): string | null {
   const m = task.errorMessage;
   return typeof m === "string" && m.trim() !== "" ? oneLineError(m) : null;
@@ -227,7 +227,7 @@ export interface BuildEvidenceInput {
   url: string | null;
   /** 本 step 抛出的异常文本（`<name>: <message>`）；没有 → null。 */
   error: string | null;
-  /** 产物落点根（= MIDSCENE_RUN_DIR），用于拼 SDK 已落盘的截图路径。 */
+  /** 产物落点根（即 MIDSCENE_RUN_DIR），用于拼 SDK 已落盘的截图路径。 */
   runDir: string;
   /** 截图 URI：上传器「只算 ref 不上传」的方法（文件头③）。 */
   refFor: (localPath: string) => string;
@@ -301,7 +301,7 @@ export function buildEvidence(input: BuildEvidenceInput): EvidenceDoc {
 
 // ---- 落盘 + 上传（IO；失败交上层的 best-effort 兜，见文件头④）----
 
-/** 上传器接口 = evidence 这条链要用到的三种上传时机（ADR 0042 决策一；`ArtifactUploader` 满足之）。
+/** 上传器接口即 evidence 这条链要用到的三种上传时机（ADR 0042 决策一；`ArtifactUploader` 满足之）。
  *
  *  前两个由本模块调（都在 step 判定之后的临界路径上，故一个即时传小文件、一个只算 URI）；
  *  `enqueue` **由调用方在 step_done emit 之后调**、本模块自己不碰——入队早于 emit 就把「判定先出、字节后传」
@@ -315,9 +315,9 @@ export interface EvidenceUploader {
   enqueue(paths: string[]): void;
 }
 
-/** runStep 的 evidence 依赖（注入；undefined = 本 run 不产 evidence）。 */
+/** runStep 的 evidence 依赖（注入；undefined 表示本 run 不产 evidence）。 */
 export interface EvidenceHook {
-  /** 产物落点根（= MIDSCENE_RUN_DIR，已 resolve）。 */
+  /** 产物落点根（即 MIDSCENE_RUN_DIR，已 resolve）。 */
   runDir: string;
   scopeId: string;
   uploader: EvidenceUploader;
@@ -351,7 +351,7 @@ export function executionsLength(agent: unknown): number {
 
 /** `stepEvidenceRef` 的产出。
  *
- *  `screenshots` = 本 step 的 evidence **真正引用到**的截图本地路径（URI 已算好写进 json、字节还没传）：
+ *  `screenshots` 是本 step 的 evidence **真正引用到**的截图本地路径（URI 已算好写进 json、字节还没传）：
  *  调用方在 step_done emit 之后把它交给 `uploader.enqueue`（ADR 0042 决策一）。**在算 URI 的同一处收集**
  *  （见 `stepEvidenceRef` 里包装的 refFor），故「json 里引用了」与「入了队」不会因两处各挑一次而漂移。 */
 export interface StepEvidence {

@@ -10,12 +10,12 @@
 //
 // **emit 为 async（合理不对称，ADR 0024）**：Midscene worker 是 Node 事件循环模型、Fargate 化后 aws-sdk-js DDB
 // PutItem 本就 async——emit 定 async 免二次改签名 + 污染调用点。Nova 那个引擎 emit 同步（Nova 同步 + greenlet 模型、
-// boto3 同步 SDK）。根源=语言/SDK 执行模型差异，非「该对称却漏」。
+// boto3 同步 SDK）。根源是语言/SDK 执行模型差异，非「该对称却漏」。
 //
 // **两态（ADR 0024「DynamoDB 作 events-out」）**：
 // - fd 态（subprocess）：写 EVENTS_FD fd（fs.writeSync 同步保序——async 签名下 await 立即完成的同步写、时序不变）；无 / 非法 → 回落 fd 1=stdout。
 // - DDB 态（Fargate 化）：EVENTS_DDB_TABLE+RUN_ID+SCOPE_ID 注入 → PutItem 到 events 表（PK=run_id#scope_id、
-//   SK=进程内自增 seq、body=JSON line）。判据=有没有注入 EVENTS_DDB_TABLE，非「是否 Fargate」（ADR 0016 红线）。
+//   SK=进程内自增 seq、body=JSON line）。判据是有没有注入 EVENTS_DDB_TABLE，非「是否 Fargate」（ADR 0016 红线）。
 import * as fs from "node:fs";
 import { DynamoDBClient, PutItemCommand } from "@aws-sdk/client-dynamodb";
 
@@ -33,7 +33,7 @@ const EVENTS_TTL_S = 7 * 24 * 60 * 60;
 // EVENTS_FD 解析（ADR 0024「EVENTS_FD 无 / 非法 → 回落 stdout」调试兜底；语义对称 Nova 的
 // `try: os.fdopen(int(events_fd)) except (OSError, ValueError): sys.stdout`）：无 / 非整数 / 负 / 已关闭的
 // fd 号一律回落 1=stdout。**不能只判「有没有」**——fs.writeSync 对非法 fd 直抛（NaN→ERR_OUT_OF_RANGE、
-// 坏 fd→EBADF），而首条 emit 是 scope_started，抛在那里 = 整个 scope 零事件的 engine_error。
+// 坏 fd→EBADF），而首条 emit 是 scope_started，抛在那里就等于整个 scope 零事件的 engine_error。
 // fstatSync 是廉价的存活探测（Node 无「这个 fd 可写吗」的直接问法，坏 fd 在此即 EBADF）。
 function resolveEventsFd(raw: string | undefined): number {
   const n = Number(raw);
@@ -55,7 +55,7 @@ export class EventSink {
   private seq = 0;                              // DDB 态：scope 内自增序号（SK）——单进程串行 emit 天然单调
 
   private constructor(opts: { fd?: number; tableName?: string; runId?: string; scopeId?: string }) {
-    // 私有构造只吃已解析值（对称 ArtifactUploader 不碰 env）。fd 有=fd 态；tableName 有=DDB 态。
+    // 私有构造只吃已解析值（对称 ArtifactUploader 不碰 env）。有 fd 即 fd 态；有 tableName 即 DDB 态。
     this.fd = opts.fd;
     this.tableName = opts.tableName;
     this.runId = opts.runId;
@@ -63,7 +63,7 @@ export class EventSink {
   }
 
   // 从注入的 env 造（唯一读 env 处）。EVENTS_DDB_TABLE 非空 → DDB 态；否则 fd 态（EVENTS_FD 合法→写该 fd、无 / 非法→回落 fd 1=stdout）。
-  // DDB 态判据 = 有没有注入 EVENTS_DDB_TABLE（非「是否 Fargate」，ADR 0016 红线）；空串（|| undefined）当未注入。
+  // DDB 态判据是有没有注入 EVENTS_DDB_TABLE（非「是否 Fargate」，ADR 0016 红线）；空串（|| undefined）当未注入。
   static fromEnv(): EventSink {
     const tableName = process.env.EVENTS_DDB_TABLE || undefined;
     if (tableName !== undefined) {
@@ -81,7 +81,7 @@ export class EventSink {
   }
 
   private client_(): DynamoDBClient {
-    // maxAttempts: 1 = 关 SDK 重试（对称 Nova boto Config max_attempts=0，ADR 0032）；AbortSignal 仍兜单次墙钟。
+    // maxAttempts: 1 表示关掉 SDK 重试（对称 Nova boto Config max_attempts=0，ADR 0032）；AbortSignal 仍兜单次墙钟。
     if (!this.client) this.client = new DynamoDBClient({ region: process.env.AWS_REGION, maxAttempts: 1 });
     return this.client;
   }

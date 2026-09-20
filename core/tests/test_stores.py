@@ -127,7 +127,7 @@ def test_aggregate_to_dict_normalized_no_def_duplication():
     assert "scenarios" in d["run_meta"]["jobs"][0]      # def 唯一真值在 run_meta
     for jr_d in d["jobs"]:
         assert "job" not in jr_d                         # 判定项不嵌完整 def
-        assert "scope_id" in jr_d                         # 唯一保留的顶层 def 字段 = join key
+        assert "scope_id" in jr_d                         # 唯一保留的顶层 def 字段就是 join key
         assert "scope_name" not in jr_d and "engine" not in jr_d  # 其余 def 冗余已去（def 在 run_meta）
     # 仍能 round-trip：from_dict 按 scope_id 从 run_meta join 回 def
     r2 = from_dict(d)
@@ -137,7 +137,7 @@ def test_aggregate_to_dict_normalized_no_def_duplication():
 
 
 def test_result_store_single_job_file_is_self_contained():
-    # ResultStore 单 job 文件 = 自包含形态（include_job=True 默认）：嵌完整 def，
+    # ResultStore 单 job 文件是自包含形态（include_job=True 默认）：嵌完整 def，
     # CI 单独读一个 jobs/<scope_id>.json 不依赖 run_meta 即可重建（与聚合 normalize 形态相对）。
     jr = _sample_run().jobs[0]
     d = job_result_to_dict(jr)                            # 默认 include_job=True
@@ -334,7 +334,7 @@ def test_run_meta_max_concurrency_round_trip():
     assert run_meta_to_dict(meta3)["max_concurrency"] == 3
     assert run_meta_from_dict(run_meta_to_dict(meta3)).max_concurrency == 3
     # 1 也必须落键（判真会把它当 None 省掉是另一码事，但 0 才是判真的真陷阱）：
-    # `is not None` 判 ⇒ 0 忠实往返、不被悄悄变形成 None（语义校验归组合根，序列化层不改值）
+    # `is not None` 判，于是 0 忠实往返、不被悄悄变形成 None（语义校验归组合根，序列化层不改值）
     zero = dataclasses.replace(meta, max_concurrency=0)
     assert run_meta_to_dict(zero)["max_concurrency"] == 0
     assert run_meta_from_dict(run_meta_to_dict(zero)).max_concurrency == 0
@@ -407,7 +407,7 @@ def test_run_meta_worker_fields_round_trip():
 def test_run_meta_extra_http_headers_multiple_normalize_at_write_side():
     """≥2 个 header：写端按键排序规范化、读端原样保序 → 键值不丢、落盘键序确定，再往返逐字恒等。
 
-    单 header 遮不住的两处：读端若 sorted 则「落盘顺序 ≠ 读回顺序」（from_dict 不是 to_dict 的逆）；
+    单 header 遮不住的两处：读端若 sorted 则「落盘顺序不等于读回顺序」（from_dict 不是 to_dict 的逆）；
     写端若原样则落盘内容随内存键序漂（同一份 header 表两种落盘形态）。
     """
     import dataclasses
@@ -421,7 +421,7 @@ def test_run_meta_extra_http_headers_multiple_normalize_at_write_side():
     got = run_meta_from_dict(d)
     assert dict(got.extra_http_headers) == dict(hdrs)  # 键值不丢
     assert got.extra_http_headers == (("ngrok-skip-browser-warning", "1"), ("x-tunnel", "b"))  # 读端保落盘序
-    # 规范形上往返逐字恒等（写端规范化 ⇒ 幂等）
+    # 规范形上往返逐字恒等（写端规范化，故幂等）
     assert run_meta_from_dict(run_meta_to_dict(got)).extra_http_headers == got.extra_http_headers
     # 读端忠实还原落盘键序（旧落盘由写端排序前落的、键序未必字典序）——若读端也 sorted，这条即挂
     legacy = {"run_id": "legacy", "created_at": "", "jobs": [],

@@ -85,7 +85,7 @@ async function exportFrom(page, htmlPath, format, outPath) {
     return { format: h.getAttribute('data-last-export-format'), canonical: h.getAttribute('data-last-export-canonical'), bytes: h.getAttribute('data-last-export-bytes'), error: h.getAttribute('data-last-export-error') };
   });
   if (receipt.error) throw new Error(`viewer 报导出错误：${receipt.error}`);
-  if (receipt.format !== format) throw new Error(`回执格式 ${receipt.format} ≠ ${format}`);
+  if (receipt.format !== format) throw new Error(`回执格式 ${receipt.format} 与期望的 ${format} 不一致`);
   if (receipt.canonical !== 'true') throw new Error('回执 canonical=false：导出时 viewer 状态不干净');
   return receipt;
 }

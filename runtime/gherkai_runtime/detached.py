@@ -7,7 +7,7 @@
 - **per-run reconciler 进程**：`submit` 时 setsid fork 出来的轻进程，循环 tick 直到全 done 自退。
 
 守窄腰：gherkai_core.reconcile 对「怎么起 worker」无知（经 Launcher 注入）；本模块在产品本体包 gherkai_runtime（组合根共享层，
-ADR 0016「演进」节）、可 import SubprocessEngine/SqliteEventLog，core 不可。云端后端的 Launcher =
+ADR 0016「演进」节）、可 import SubprocessEngine/SqliteEventLog，core 不可。云端后端的 Launcher 是
 `gherkai_core.adapters.cloud_launcher.CloudLauncher`（ECS RunTask），与本模块共用同一 `gherkai_core.reconcile.tick`。
 """
 from __future__ import annotations
@@ -26,7 +26,7 @@ from gherkai_runtime import compose
 from gherkai_runtime import names  # 叶子模块（零依赖，见其模块头）
 
 # 接力恢复的判定余量秒（ADR 0034「job timeout」节 claimed_at ①）：超预算这么久才认定 owner 已死。
-# 口径 = **只挡时钟抖动与轮询粒度**：起算点 claimed_at 是 claim 时的墙钟、owner 的 deadline timer 起于其后的
+# 本余量**只挡时钟抖动与轮询粒度**：起算点 claimed_at 是 claim 时的墙钟、owner 的 deadline timer 起于其后的
 # launch，且本判据每 poll_interval 才查一次。**不覆盖**活 owner 的 stop→协作退收尾——SIGTERM 是 flag-only、
 # 只在 act 边界被检测（in-flight act 要有界返回才退），之后还有会话释放与证据有界排空，故引擎 grace 下限本身
 # 就取到数十秒级（各引擎 worker 经自述入口 `--capabilities` 自报、compose.engine_min_grace 只查询聚合；今值
@@ -97,7 +97,7 @@ class SubprocessLauncher:
             timer = threading.Timer(job.timeout_s, _on_deadline)
             timer.daemon = True
             timer.start()
-        # 不持线程引用：daemon 线程无人 join（收尾判据是 run_reconcile_loop 的「全 done」= 每 job 都有
+        # 不持线程引用：daemon 线程无人 join（收尾判据是 run_reconcile_loop 的「全 done」，即每 job 都有
         # _pump 写的退出记录），存下来只会随 job 数单调增长。
         threading.Thread(
             target=self._pump, args=(scope_id, handle, events, timer, timed_out), daemon=True,
@@ -162,7 +162,7 @@ def run_reconcile_loop(
             # 而这一步发生在 finalize 的 commit point **之后**：commit 后的失败无人重试（ADR 0030 决定三），抛出去会让
             # 本进程带着未写的报告退出、还会跳过拆隧道那步（`drive_local_reconcile` 的 cleanup_tunnel 在本函数返回
             # 后才执行，ADR 0035「拆除时机」表 local `submit` 行）。故整段隔离、失败按缺值走（ADR 0034 收尾节把
-            # run 级墙钟划在「派生、失败隔离」那一侧；cloud 推进侧同形）。
+            # run 级墙钟划在「派生、失败隔离」那一侧；cloud 推进侧做法相同）。
             try:
                 duration_ms = compose.run_duration_ms(run_store.load_run_state(run_id))
             except Exception:
@@ -249,8 +249,8 @@ def build_local_reconcile(report_dir: str, run_id: str, max_concurrency: int,
     store = LocalRunStore(root)
     meta = store.load_run_meta(run_id)
     if meta is None:
-        # 正常路径下 submit 的 create_run 早已落 RunStore，走到这里 = 落点被删/写坏或 report_dir 指错。
-        # 文案按产品语言给：常见形态已由 `_cmd_status` 的 run 存在性检查翻成退 2；这里兜住剩下的两条——
+        # 正常路径下 submit 的 create_run 早已落 RunStore，走到这里说明落点被删/写坏或 report_dir 指错。
+        # 文案按产品语言给：常见形态已由 `_cmd_status` 的 run 存在性检查翻成退出码 2；这里兜住剩下的两条——
         # run_state 在而 definition 缺（落点被删/写坏）的裸 traceback，以及 per-run 后台进程把它写进 reconcile.log。
         raise FileNotFoundError(f"找不到这个 run 的提交记录，无法继续推进：{run_id}"
                                 f"（产物目录被删或写坏？也确认 --report-dir 与提交时一致）")

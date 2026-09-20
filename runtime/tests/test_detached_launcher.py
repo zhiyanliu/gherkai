@@ -83,8 +83,8 @@ def test_two_jobs_concurrency_one(tmp_path):
 
 def test_job_timeout_stops_worker_and_attributes_timeout(tmp_path):
     """job timeout local enforce 真实运行（ADR 0034「job timeout」节）：silent worker 卡死不吐新事件、不自退——
-    launcher 的 deadline timer 到点协作停（SIGTERM→echo 干净退 0）→ task_exited(timed_out=True)
-    → project 判 ERROR + error_type=timeout。**协作退 0 也不误判 passed**（timed_out 短路内容判定）。"""
+    launcher 的 deadline timer 到点协作停（SIGTERM→echo 干净地以退出码 0 退出）→ task_exited(timed_out=True)
+    → project 判 ERROR + error_type=timeout。**协作停后退出码 0 也不误判 passed**（timed_out 短路内容判定）。"""
     from gherkai_core.project import project_full
 
     meta, log, store, launcher = _setup(tmp_path, "silent", "a", timeout_s=0.5)
@@ -160,9 +160,9 @@ def test_report_still_written_when_the_run_duration_read_fails(tmp_path):
     """run 级墙钟取数失败不得连坐报告收尾（ADR 0030 决定三：commit point 之后的失败无人重试）。
 
     墙钟是派生指标，取它要在 finalize commit **之后**多读一次 RunState——落盘读会因 IO 错/文件写坏抛。
-    裸抛出去 = 判定已 commit、报告没落，且 `drive_local_reconcile` 的拆隧道那步（在本函数返回后才执行）被跳过、
+    裸抛出去意味着判定已 commit、报告没落，且 `drive_local_reconcile` 的拆隧道那步（在本函数返回后才执行）被跳过、
     隧道留在公网。故按缺值走：循环正常返回、报告照写、报告里的 run 级墙钟为 None（渲染成「?」）。
-    cloud 推进侧同形，两宿主各一条护栏。
+    cloud 推进侧做法相同，两宿主各一条护栏。
     """
     from gherkai_core.model import TERMINAL_STATUSES
     from gherkai_runtime import compose
@@ -200,7 +200,7 @@ def test_report_still_written_when_the_run_duration_read_fails(tmp_path):
     launcher = SubprocessLauncher(_echo_resolver("pass"), log, min_grace_fn=lambda _engine: 1.0)
     store = _FailsOnTerminalRead(inner)
 
-    # 不抛 = 第一件要钉的事（退回「实参里直接取数」的写法即 OSError 裸穿）
+    # 不抛是第一件要钉的事（退回「实参里直接取数」的写法即 OSError 裸穿）
     run_reconcile_loop("run-1", meta, log, store, launcher, max_concurrency=1,
                        poll_interval_s=0.05, now_iso_fn=compose.now_iso,
                        report_store=_RecordingReportStore())

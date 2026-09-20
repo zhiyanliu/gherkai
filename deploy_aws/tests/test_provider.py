@@ -55,7 +55,7 @@ def _parse(*argv: str) -> argparse.Namespace:
 
 def test_vpc_absent_parses_but_every_synthesizing_verb_exits_2(cdk, monkeypatch, capsys):
     """`--vpc` 无隐式默认（ADR 0037 决策 6：漏给曾被合成为新建整套 VPC 的变更集）——但校验在**运行期**、
-    不在 argparse：`--bootstrap` 是账户级动作、不合成 app，不该被拖着要一个无关选项。四个合成动词缺 `--vpc` → 退 2、
+    不在 argparse：`--bootstrap` 是账户级动作、不合成 app，不该被拖着要一个无关选项。四个合成动词缺 `--vpc` → 以退出码 2 结束、
     **不调 cdk**。"""
     args = _parse("--prefix", "gherkai-", "--region", "us-east-1")
     assert args.vpc is None
@@ -72,7 +72,7 @@ def test_vpc_absent_parses_but_every_synthesizing_verb_exits_2(cdk, monkeypatch,
 
 
 def test_vpc_absent_hint_names_the_recorded_tier_for_an_existing_environment(cdk, monkeypatch, capsys):
-    """环境已存在且后端记着上次的取值 → 提示直接报出那个取值（用户最需要的那句），仍退 2、不起 cdk。"""
+    """环境已存在且后端记着上次的取值 → 提示直接报出那个取值（用户最需要的那句），仍以退出码 2 结束、不起 cdk。"""
     _stub_backend(monkeypatch, stack_exists=True, stored="default")
     assert Provider().deploy(_parse("--prefix", "vfy-", "--region", "us-east-1")) == 2
     err = capsys.readouterr().err
@@ -88,7 +88,7 @@ def test_vpc_absent_hint_for_existing_environment_without_record(cdk, monkeypatc
 
 
 def test_vpc_absent_hint_is_best_effort_when_backend_unreadable(cdk, monkeypatch, capsys):
-    """读后端失败（凭证 / 权限）→ 提示退回通用版：仍退 2、不抛栈、不多一种失败。"""
+    """读后端失败（凭证 / 权限）→ 提示退回通用版：仍以退出码 2 结束、不抛栈、不多一种失败。"""
     def boom(**kw):
         raise RuntimeError("no credentials")
     monkeypatch.setattr(provider_cli, "_make_hint_clients", boom)
@@ -103,7 +103,7 @@ def test_hint_clients_carry_a_bounded_timeout_budget():
 
     这里不打桩、真建两个 boto3 句柄——建句柄不发请求、也不要凭证，只要显式 region。
     重试按总尝试次数断：botocore 解析后落在 `total_max_attempts`，原始配置里的 `max_attempts` 是
-    legacy 语义的重试次数（总尝试 = 重试 + 1），两种形状折算成同一个数再比。
+    legacy 语义的重试次数（总尝试等于重试次数加一），两种形状折算成同一个数再比。
     """
     clients = provider_cli._make_hint_clients(region="us-east-1", profile=None)
     assert len(clients) == 2
@@ -191,7 +191,7 @@ def test_the_two_action_knobs_are_only_on_deploy():
     # deploy 还多一个 `--container-engine`（第 2 步同步基础镜像要用它）、destroy 多一个 `--yes`——两者各自的专属项
     assert _flags("gherkai deploy") == shared | {"--allow-vpc-change", "--require-approval", "--container-engine"}
     assert _flags("gherkai destroy") == shared | {"--yes"}
-    # 行为变化：destroy 上给这两个从「静默忽略」变成 argparse 报错（退 2，同 preflight 口径）
+    # 行为变化：destroy 上给这两个从「静默忽略」变成 argparse 报错（退出码 2，与 preflight 一致）
     destroy = argparse.ArgumentParser(prog="gherkai destroy", conflict_handler="resolve")
     Provider().add_arguments(destroy)
     for argv in (["--vpc", "default", "--require-approval", "never"],
@@ -258,7 +258,7 @@ def test_list_and_delete_worker_bind_their_verbs():
 
 
 def test_delete_worker_is_a_documented_placeholder(capsys):
-    """留口子：退 2 并说清「押后的是回收策略」，而不是让人只看到 argparse 的 invalid choice。"""
+    """留口子：以退出码 2 结束并说清「押后的是回收策略」，而不是让人只看到 argparse 的 invalid choice。"""
     rc = Provider().delete_worker(_parse("delete-worker"))
     assert rc == EXIT_PRECONDITION
     err = capsys.readouterr().err
@@ -273,7 +273,7 @@ def test_provider_name_is_aws():
 # ---------------------------------------------------------------- context 拼装
 
 def test_context_new_dossier_gives_neither_vpc_knob():
-    # `new` = stack 自建 → `vpc_id`/`use_default_vpc` 两个配置项都不给（stack._network 的建新分支）
+    # `new` 表示 stack 自建 → `vpc_id`/`use_default_vpc` 两个配置项都不给（stack._network 的建新分支）
     ctx = Provider().build_context(_parse("--vpc", "new"))
     assert ctx == {"prefix": "gherkai-", "version": VERSION}
 
@@ -323,7 +323,7 @@ def test_generated_cdk_json_carries_app_and_feature_flags_verbatim(tmp_path):
     data = json.loads(path.read_text(encoding="utf-8"))
     assert path.name == "cdk.json" and path.parent == tmp_path
     assert data["app"] == Provider().app_command()
-    # 特性开关逐字沿用收编前那一组：换一组 = 给已部署 stack 造无意义变更集
+    # 特性开关逐字沿用收编前那一组：换一组就是给已部署 stack 造无意义变更集
     assert data["context"] == CDK_FEATURE_FLAGS
     # 设计参数**不进** cdk.json（一律 `-c` 显式传，免被 cdk.json 静默兜住）
     assert not {"prefix", "version", "vpc_id", "use_default_vpc", "stop_timeout"} & set(data["context"])
@@ -338,7 +338,7 @@ def test_generated_cdk_json_carries_app_and_feature_flags_verbatim(tmp_path):
     ("new", "new", True),                   # 兜住「值只写了 new」的历史形态
     ("default", "new", False),
     ("vpc-0abc", "vpc-0def", False),
-    ("new:vpc-0abc", "vpc-0abc", False),    # 不对称：stack 拥有 ≠ 复用外部 VPC（切换会删掉那个 VPC）
+    ("new:vpc-0abc", "vpc-0abc", False),    # 不对称：stack 拥有不等于复用外部 VPC（切换会删掉那个 VPC）
 ])
 def test_vpc_spec_matches(stored, requested, expected):
     assert vpc_spec_matches(stored, requested) is expected
@@ -395,13 +395,13 @@ def _stub_backend(monkeypatch, *, stack_exists: bool, stored: str | None) -> Non
 
 
 def test_guard_first_deploy_proceeds(monkeypatch):
-    # ① stack 不存在 = 真首次部署 → 放行
+    # ① stack 不存在即真首次部署 → 放行
     _stub_backend(monkeypatch, stack_exists=False, stored=None)
     assert Provider()._guard_vpc_spec(_parse("--vpc", "new", "--region", "us-east-1")) is None
 
 
 def test_guard_unrecorded_blocks_and_points_at_diff(monkeypatch, capsys):
-    # ② 参数缺失 + stack 已存在 = 本机制之前部署的环境（最危险的那一次）→ 退 2，指路 --diff
+    # ② 参数缺失 + stack 已存在即本机制之前部署的环境（最危险的那一次）→ 以退出码 2 结束，指路 --diff
     _stub_backend(monkeypatch, stack_exists=True, stored=None)
     rc = Provider()._guard_vpc_spec(_parse("--vpc", "default", "--region", "us-east-1"))
     assert rc == EXIT_PRECONDITION
@@ -423,7 +423,7 @@ def test_guard_match_proceeds(monkeypatch):
 
 
 def test_guard_mismatch_blocks(monkeypatch, capsys):
-    # ③ 取值不一致 → 退 2（只强制显式给值挡不住第二次 deploy 敲错取值）
+    # ③ 取值不一致 → 以退出码 2 结束（只强制显式给值挡不住第二次 deploy 敲错取值）
     _stub_backend(monkeypatch, stack_exists=True, stored="vpc-0abc123")
     rc = Provider()._guard_vpc_spec(_parse("--vpc", "default", "--region", "us-east-1"))
     assert rc == EXIT_PRECONDITION
@@ -438,7 +438,7 @@ def test_guard_mismatch_allowed(monkeypatch):
 
 
 def test_guard_unexpected_read_error_exits_2_not_traceback(monkeypatch, capsys):
-    """凭证/权限/网络故障 → 退 2 + 一句话（对用户是「先修凭证」，与 Node 缺失同一类），不抛 traceback。"""
+    """凭证/权限/网络故障 → 退出码 2 + 一句话（对用户是「先修凭证」，与 Node 缺失同一类），不抛 traceback。"""
     def boom(**kw):
         raise _ClientError("AccessDenied", "not authorized to perform cloudformation:DescribeStacks")
     monkeypatch.setattr(provider_cli, "_make_cfn_client", lambda **kw: boom())
@@ -448,11 +448,11 @@ def test_guard_unexpected_read_error_exits_2_not_traceback(monkeypatch, capsys):
 
 
 def test_a_bad_profile_exits_2_at_the_entry_not_a_traceback(capsys):
-    """`--profile` 名不存在、且未给 `--region`/`AWS_REGION` → 退 2 + 一句人话，不抛 botocore 堆栈。
+    """`--profile` 名不存在、且未给 `--region`/`AWS_REGION` → 退出码 2 + 一句人话，不抛 botocore 堆栈。
 
     **这条有意不打桩**、走真实解析链：region 前三级都 miss 时解析会回落读 profile config，不存在的 profile 名
     在 `boto3.session.Session(...)` 构造期就抛 `ProfileNotFound`——抛点排在 `workers._connect` 之前，
-    那一层的同款钩子照不到它（实际运行核过：没有这一口，`list-workers` / `push-worker` / `deploy` 三条
+    那一层的同类钩子照不到它（实际运行核过：没有这一口，`list-workers` / `push-worker` / `deploy` 三条
     都吐裸堆栈）。故只读动作与 deploy 那条入口各断言一次。解析纯本地推导，这条不碰 AWS。
     """
     rc = Provider().list_workers(_parse("list-workers", "--profile", "definitely-not-a-profile"))
@@ -591,7 +591,7 @@ def test_deploy_runs_the_worker_image_steps_after_a_successful_cdk(cdk, monkeypa
 
 
 def test_deploy_skips_the_worker_image_steps_when_cdk_fails(cdk, monkeypatch):
-    """cdk 失败 → 不碰镜像（stack 没生效，推上去的 revision 会指着不存在的模板）。退码透传 cdk 自己的。"""
+    """cdk 失败 → 不碰镜像（stack 没生效，推上去的 revision 会指着不存在的模板）。退出码透传 cdk 自己的。"""
     cdk.returncode = 7
     _stub_backend(monkeypatch, stack_exists=False, stored=None)
     assert Provider().deploy(_parse("--vpc", "default", "--region", "us-east-1")) == 7
@@ -599,8 +599,8 @@ def test_deploy_skips_the_worker_image_steps_when_cdk_fails(cdk, monkeypatch):
 
 
 def test_deploy_rejects_an_unimplemented_container_engine_before_touching_the_account(monkeypatch, capsys):
-    """`GHERKAI_CONTAINER_ENGINE=podman` → 退 2 且**不调 cdk**：纯参数问题，账户一个字节都不该动
-    （区别于「docker 没装」——那只警告，退码归 cdk 之后的四步）。
+    """`GHERKAI_CONTAINER_ENGINE=podman` → 以退出码 2 结束且**不调 cdk**：纯参数问题，账户一个字节都不该动
+    （区别于「docker 没装」——那只警告，退出码归 cdk 之后的四步）。
 
     位置与 Node 前置同一类（本地、不花网络、不要凭证）——**先于** VPC 取值比对：给错引擎名的人不该先被要求
     配好 AWS 凭证才看到「这个引擎本期没实装」（同 `deploy` 里 check_node 先于三态比对的理由）。
@@ -624,7 +624,7 @@ def test_destroy_invokes_cdk_destroy_with_same_context(cdk):
 
 def test_synth_only_pins_a_relative_dir_to_the_callers_cwd(cdk, tmp_path, monkeypatch):
     """用户给**相对** DIR：必须钉成绝对路径再交 cdk——cdk 子进程 cwd 是随后被删的临时工作目录，相对路径
-    原样传会让导出物落进那里、随之消失而命令退 0（实际运行踩过的假成功；早先的测试用绝对 tmp_path、照不出来）。"""
+    原样传会让导出物落进那里、随之消失而命令以退出码 0 结束（实际运行踩过的假成功；早先的测试用绝对 tmp_path、照不出来）。"""
     monkeypatch.chdir(tmp_path)
     args = _parse("--vpc", "new", "--region", "us-east-1")
     args.synth_only = "exported"  # CLI 前端的 --synth-only DIR（接缝契约），相对用户 cwd
@@ -665,7 +665,7 @@ def test_missing_node_reports_cleanly_and_skips_cdk(monkeypatch, capsys):
 
 
 def test_missing_cdk_stops_deploy_before_any_aws_read(monkeypatch, capsys):
-    """有 node、`cdk` 与 `npx` 都定位不到（如装了 nodejs 没装 npm）：`deploy` 在读后端之前退 2。
+    """有 node、`cdk` 与 `npx` 都定位不到（如装了 nodejs 没装 npm）：`deploy` 在读后端之前以退出码 2 结束。
 
     **不能落到 cdk 调用那一层再退**：那时会多打一条「失败原因见上方 cdk 输出……最常见的是未 bootstrap」，
     而这条路径上 cdk 一行输出都没有，且它建议的 `gherkai deploy --bootstrap` 会以同样的「找不到 cdk」失败。
@@ -825,7 +825,7 @@ def _parse_destroy(*argv: str) -> argparse.Namespace:
 
 
 def test_destroy_yes_passes_force_to_cdk_and_is_off_by_default(cdk):
-    """cdk destroy 在非 TTY 下拒绝无确认的销毁（实际运行撞到）；`--yes` = `--force`，不给则让 cdk 自己问。"""
+    """cdk destroy 在非 TTY 下拒绝无确认的销毁（实际运行撞到）；`--yes` 等同于 `--force`，不给则让 cdk 自己问。"""
     Provider().destroy(_parse_destroy("--vpc", "default", "--region", "us-east-1"))
     assert "--force" not in _argv(cdk)
     cdk.calls.clear()
@@ -851,7 +851,7 @@ class _AbsentEngine:
 
 def test_deploy_warns_about_missing_container_engine_only_for_pure_release_versions(cdk, monkeypatch, capsys):
     """容器引擎缺失的前置警告只对**纯发行版**成立：dev/post/本地段版本的 worker 镜像步骤本就走不到「基础镜像同步」
-    （ADR 0038 定位链第四级门槛 = is_pure_release），那时警告「之后的镜像步骤会失败」是假警报。"""
+    （ADR 0038 定位链第四级门槛是 is_pure_release），那时警告「之后的镜像步骤会失败」是假警报。"""
     _stub_backend(monkeypatch, stack_exists=False, stored=None)
     monkeypatch.setattr(Provider, "_container_engine", staticmethod(lambda args: _AbsentEngine()))
 

@@ -28,8 +28,8 @@ cdk CLI 调用、VPC 取值三态比对、工具链前置检查（Node ≥ 22 �
 `--allow-vpc-change` 的措辞要点名 VPC 取值三态）。前端的 subparser 开了 `conflict_handler="resolve"`，同名即
 以后贴的（本类）为准——两层不是重复真源，是「中立占位 + provider 精确化」。两层都**只贴 deploy**：destroy
 不消费它们（不做 VPC 取值三态比对，cdk destroy 也没有 `--require-approval`），前端的中立版同样只在 deploy 上。
-本类另经 `getattr` 容忍它们彻底缺席（别的前端）：缺 `--allow-vpc-change` = 一律不放行（fail-closed）、
-缺 `--require-approval` = 交给 cdk 默认。
+本类另经 `getattr` 容忍它们彻底缺席（别的前端）：缺 `--allow-vpc-change` 即一律不放行（fail-closed）、
+缺 `--require-approval` 即交给 cdk 默认。
 
 ## worker 镜像子动词（ADR 0038 命令族）
 
@@ -42,8 +42,8 @@ cdk CLI 调用、VPC 取值三态比对、工具链前置检查（Node ≥ 22 �
 
 `0` 成功；`2` **前置/校验失败**（Node 缺失或 cdk CLI 定位不到、VPC 取值不符或无记录、prefix/region/profile 解析不出
 （`--profile` 名不存在等，见 `_resolve_target_or_report`）、读后端失败、容器引擎名不认、push-worker 的架构/skew
-拦截——部署方可修，对齐 CLI 既有 preflight 退 2 的口径）；**`1`** = cdk 已成功而 worker 镜像四步失败
-（账户已被改动，重新运行 `gherkai deploy` 幂等收敛，ADR 0038）；其余 = cdk CLI 自己的返回码（原样透传，
+拦截——部署方可修，对齐 CLI 既有 preflight 退出码 2 的口径）；**`1`** 表示 cdk 已成功而 worker 镜像四步失败
+（账户已被改动，重新运行 `gherkai deploy` 幂等收敛，ADR 0038）；其余是 cdk CLI 自己的返回码（原样透传，
 别把 cdk 的失败压成自己的码）。
 """
 from __future__ import annotations
@@ -82,10 +82,10 @@ CDK_FEATURE_FLAGS: dict[str, object] = {
 }
 
 # VPC 取值比对的四种判定（ADR 0037 决策 6「VPC 取值持久化比对，三态齐全」——「三态」指 stack / 记录 / 参数三个输入；`classify_vpc_state` 的返回值）
-VPC_FIRST_DEPLOY = "first-deploy"  # ① stack 不存在 = 真首次部署 → 放行
-VPC_UNRECORDED = "unrecorded"      # ② 参数缺失且 stack 已存在 = 本机制之前部署的环境 → 退 2（最危险的那一次）
+VPC_FIRST_DEPLOY = "first-deploy"  # ① stack 不存在即真首次部署 → 放行
+VPC_UNRECORDED = "unrecorded"      # ② 参数缺失且 stack 已存在即本机制之前部署的环境 → 以退出码 2 结束（最危险的那一次）
 VPC_MATCH = "match"                # ③ 取值一致 → 放行
-VPC_MISMATCH = "mismatch"          # ③ 取值不一致 → 退 2
+VPC_MISMATCH = "mismatch"          # ③ 取值不一致 → 以退出码 2 结束
 
 # `delete-worker` 的占位文案（ADR 0038「命令族」）：`--help` 的 description 与真敲下去看到的那句**同源**，
 # 别让帮助与运行时给出两种说法。清理规则不写死时长——真源是 `workers.RETIRE_QUIET_PERIOD`，写死即漂移。
@@ -103,12 +103,12 @@ DELETE_WORKER_PLACEHOLDER = (
 # ---------------------------------------------------------------------------
 
 def vpc_spec_matches(stored: str, requested: str) -> bool:
-    """SSM 里记的生效取值 `stored` 是否 == 本次 `--vpc requested`。
+    """SSM 里记的生效取值 `stored` 是否与本次 `--vpc requested` 一致。
 
     三种取值形态见 `names.ssm_vpc_path`。`new` 取值在 SSM 里是 `new:<所建 vpc-id>`（带出所建 id 以便回溯核对），
     故 `--vpc new` 按 **`new:` 前缀** 匹配、不逐字比。
     **反过来不成立**：`stored="new:vpc-abc"` 与 `--vpc vpc-abc` **不算一致**——前者是「VPC 由本 stack 拥有」、
-    后者是「复用一个 stack 外的 VPC」，切换会让 CloudFormation 把它从 stack 里摘出去（= 删掉那个 VPC）。
+    后者是「复用一个 stack 外的 VPC」，切换会让 CloudFormation 把它从 stack 里摘出去（即删掉那个 VPC）。
     """
     if requested == "new":
         return stored == "new" or stored.startswith("new:")
@@ -173,7 +173,7 @@ def _make_hint_clients(*, region, profile):
 
 def _error_code(exc: Exception) -> str | None:
     """botocore ClientError 的 `Error.Code`（非 ClientError → None）。不 import botocore：本包不该为读一个
-    错误码把 botocore 变成 import 期依赖，鸭子类型足够（compose.read_backend_version 同款处理）。"""
+    错误码把 botocore 变成 import 期依赖，鸭子类型足够（compose.read_backend_version 同样处理）。"""
     resp = getattr(exc, "response", None)
     if not isinstance(resp, dict):
         return None
@@ -198,7 +198,7 @@ def _stack_exists(cfn, stack_name: str) -> bool:
 
 
 def _read_stored_vpc_spec(ssm, prefix: str) -> str | None:
-    """读 SSM 里的生效 VPC 取值；`ParameterNotFound` → None（= 本机制之前部署的环境，由三态判定处置）。"""
+    """读 SSM 里的生效 VPC 取值；`ParameterNotFound` → None（即本机制之前部署的环境，由三态判定处置）。"""
     try:
         resp = ssm.get_parameter(Name=names.ssm_vpc_path(prefix))
     except Exception as exc:
@@ -247,7 +247,7 @@ class Provider:
         if not self._is_destroy_parser(parser):
             parser.add_argument(
                 "--allow-vpc-change", action="store_true",
-                help="放行一次 VPC 取值变更/首次登记（默认拦：取值与后端记录不符即退 2，先 --diff 核对变更集）",
+                help="放行一次 VPC 取值变更/首次登记（默认拦：取值与后端记录不符即以退出码 2 结束，先 --diff 核对变更集）",
             )
             parser.add_argument(
                 "--require-approval", default=None,
@@ -258,11 +258,11 @@ class Provider:
         parser.add_argument("--region", default=None, metavar="R", help="AWS region（默认走 AWS_REGION/profile 配置）")
         parser.add_argument("--profile", default=None, metavar="P", help="AWS profile（默认 AWS_PROFILE）")
         if self._is_destroy_parser(parser):
-            # destroy 专属：cdk destroy 在非 TTY 下**拒绝**无确认的销毁（「terminal (TTY) is not attached」退 1，实际运行撞到）。
+            # destroy 专属：cdk destroy 在非 TTY 下**拒绝**无确认的销毁（「terminal (TTY) is not attached」，以退出码 1 结束，实际运行撞到）。
             # 默认保留 cdk 的交互确认（销毁不可逆，两道确认不多）；脚本/跳板机 nohup 这类非交互场景显式 --yes。
             parser.add_argument(
                 "--yes", action="store_true",
-                help="不再询问确认（= cdk destroy --force）；非交互/脚本用，交互终端下默认由 cdk 询问一次",
+                help="不再询问确认（即 cdk destroy --force）；非交互/脚本用，交互终端下默认由 cdk 询问一次",
             )
         # worker 镜像子动词（ADR 0038 命令族）——**只贴在 deploy 上**，见 `_declares_worker_subverbs`。
         if self._declares_worker_subverbs(parser):
@@ -276,7 +276,7 @@ class Provider:
         """这个 parser 是 **destroy** 的那个吗（`prog` 末段判，同 `_declares_worker_subverbs` 的口径）。"""
         return (parser.prog or "").split()[-1:] == ["destroy"]
 
-    # ---- worker 镜像子动词（ADR 0038「命令族」；接缝 = 前端先看 args._deploy_verb，见模块头/前端的契约块）----
+    # ---- worker 镜像子动词（ADR 0038「命令族」；接缝是前端先看 args._deploy_verb，见模块头/前端的契约块）----
     @staticmethod
     def _declares_worker_subverbs(parser: argparse.ArgumentParser) -> bool:
         """这个 parser 是 **deploy** 的那个吗？
@@ -284,7 +284,7 @@ class Provider:
         前端对 deploy 与 destroy **各调一次** `add_arguments`（两者共用 provider 的 context 配置项）。子动词只能挂
         deploy：挂上 destroy 的后果不是「多个没用的命令」而是**危险**——前端的 destroy 分派根本不看
         `_deploy_verb`，于是 `gherkai destroy push-worker …` 会解析通过、然后**去拆栈**。
-        判据取 `prog` 末段（前端建的是 `sub.add_parser("deploy")` → prog = `<前端> deploy`）；认不出就不贴，
+        判据取 `prog` 末段（前端建的是 `sub.add_parser("deploy")` → prog 是 `<前端> deploy`）；认不出就不贴，
         降级是安全的（子动词本来也只经 deploy 这条路可达）。
         """
         return (parser.prog or "").split()[-1:] == ["deploy"]
@@ -296,7 +296,7 @@ class Provider:
         解析得过（前端的契约块明写）。每个子动词 `set_defaults(_deploy_verb=<绑定方法>)`，前端据此优先分派。
         """
         sub = parser.add_subparsers(
-            title="worker 镜像子命令（不给则本命令 = 部署/更新后端）", metavar="[子命令]",
+            title="worker 镜像子命令（不给则本命令是部署/更新后端）", metavar="[子命令]",
         )
         push = sub.add_parser(
             "push-worker", help="[部署方] 推一个本地镜像并注册为某引擎的一个 variant",
@@ -308,7 +308,7 @@ class Provider:
         push.add_argument("--engine", required=True, choices=names.ENGINES, help="这个镜像是哪个引擎的 worker")
         push.add_argument("--variant", required=True, metavar="名",
                           help="variant 名（一套具名的确定性 step 集，自取：login / checkout-v2；"
-                               "ECR tag = <CLI 版本>-<名>）")
+                               "ECR tag 形如 <CLI 版本>-<名>）")
         push.add_argument("--set-default", action="store_true",
                           help="同时把默认指针指向这个 variant（提交时不给 --worker-variant 就用它）")
         self._add_container_engine_flag(push)
@@ -317,7 +317,7 @@ class Provider:
 
         listing = sub.add_parser(
             "list-workers", help="[部署方] 列各引擎当前版本的 variant / digest / 默认指针 / 待清理 revision",
-            description="按引擎列出**当前版本**（= 本 CLI 自身版本）的 variant、digest、推送时间与 revision，"
+            description="按引擎列出**当前版本**（即本 CLI 自身版本）的 variant、digest、推送时间与 revision，"
                         "加上默认指针，以及已退休待清理与孤儿 revision。",
         )
         self._add_locator_flags(listing)
@@ -335,7 +335,7 @@ class Provider:
 
     @staticmethod
     def _add_container_engine_flag(parser: argparse.ArgumentParser) -> None:
-        """`--container-engine`（ADR 0038「容器引擎口子」）：这一期只 docker，别的名字退 2、不静默回落。"""
+        """`--container-engine`（ADR 0038「容器引擎口子」）：这一期只 docker，别的名字以退出码 2 结束、不静默回落。"""
         from gherkai_deploy_aws.container import (
             CONTAINER_ENGINE_ENV,
             DEFAULT_CONTAINER_ENGINE,
@@ -354,7 +354,7 @@ class Provider:
 
         **`default=SUPPRESS` 是必须的**：argparse 的子 parser 在**新 namespace** 里解析、再整体覆盖回父
         namespace——带普通默认值（None）会把父层已经解析到的 `deploy --prefix prod- push-worker …` 覆写成 None
-        （argparse 的经典坑）。SUPPRESS = 子层没给就不产出这个属性、父层的值自然留住，两处给法都成立。
+        （argparse 的经典坑）。SUPPRESS 表示子层没给就不产出这个属性、父层的值自然留住，两处给法都成立。
         """
         parser.add_argument("--prefix", default=argparse.SUPPRESS, metavar="P",
                             help="资源名前缀（须与 `gherkai deploy` / run/submit 的 --prefix 一致）")
@@ -365,15 +365,15 @@ class Provider:
     def deploy(self, args) -> int:
         """供给/更新后端。**先过 VPC 取值三态**（ADR 0037 决策 6），过了才调 `cdk deploy`。"""
         # 工具链前置（Node + cdk CLI）先于 VPC 取值比对，理由见 `_toolchain_gate`。**cdk 可定位性必须也在这一关**：
-        # 若只在 `_run_cdk` 里拦，就要等读过后端、比对过 VPC 取值之后才退 2，而那条路径上 cdk 一行输出都没有——
+        # 若只在 `_run_cdk` 里拦，就要等读过后端、比对过 VPC 取值之后才以退出码 2 结束，而那条路径上 cdk 一行输出都没有——
         # 底下「失败原因见上方 cdk 输出」的提示会变成误导（它建议的 `--bootstrap` 也会以同样的原因失败）。
         toolchain = self._toolchain_gate()
         if toolchain is not None:
             return toolchain
         # 容器引擎的两类问题也在这一关处置（本地、不花网络、不要凭证——这一期 deploy 机器需要容器引擎，
         # 同步基础镜像要 pull/push，ADR 0038「容器引擎口子」）：
-        # - **名字不认**（env/flag 给了 podman）→ 纯参数问题，退 2、绝不动账户；
-        # - **装了但不可用 / 没装** → 只警告：退码语义归 cdk 之后的四步（账户已改 → 退 1、重新运行幂等收敛）。
+        # - **名字不认**（env/flag 给了 podman）→ 纯参数问题，以退出码 2 结束、绝不动账户；
+        # - **装了但不可用 / 没装** → 只警告：退出码语义归 cdk 之后的四步（账户已改 → 退出码 1、重新运行幂等收敛）。
         #   仍要提前说一声——cdk deploy 是分钟级动作，让人等到运行结束才知道「还差个 docker」是白等。
         engine = self._container_engine(args)
         if engine is None:
@@ -381,16 +381,16 @@ class Provider:
         missing = self._require_vpc(args)
         if missing is not None:
             return missing
-        # 探活警告放在 `--vpc` 校验之后：缺 `--vpc` 会直接退 2，先打两行 docker 警告只会盖住真因。
+        # 探活警告放在 `--vpc` 校验之后：缺 `--vpc` 会直接以退出码 2 结束，先打两行 docker 警告只会盖住真因。
         # **只对纯发行版探**：非纯发行版（.dev/.post/本地段）第 2 步整步跳过、根本不碰容器引擎（判据与
         # `workers.run_deploy_steps` 共用同一个 `compose.is_pure_release`，ADR 0038「容器引擎口子」），对它们预告
-        # 「之后会失败（退 1）」是假警告，还会与 `sync_base` 的「跳过基础镜像同步」自相矛盾。
+        # 「之后会失败（退出码 1）」是假警告，还会与 `sync_base` 的「跳过基础镜像同步」自相矛盾。
         from gherkai_runtime import compose
         if compose.is_pure_release(self._resolve_version(args)):
             probe = engine.probe()
             if probe:
                 print(f"警告：{probe}\n     stack 会照常部署，但之后的 worker 镜像步骤（同步基础镜像）会失败"
-                      f"（退 1）；装好容器引擎后重新运行 `gherkai deploy` 幂等收敛。", file=sys.stderr)
+                      f"（退出码 1）；装好容器引擎后重新运行 `gherkai deploy` 幂等收敛。", file=sys.stderr)
         blocked = self._guard_vpc_spec(args)
         if blocked is not None:
             return blocked
@@ -420,7 +420,7 @@ class Provider:
 
     def diff(self, args) -> int:
         """只呈变更集（不改任何东西）。**它是 VPC 取值三态的指定核对手段**，故自身不做三态比对——
-        对本机制之前部署的环境，`deploy` 退 2 时让人运行的就是它，若它也被拦就无路可走。"""
+        对本机制之前部署的环境，`deploy` 以退出码 2 结束时让人运行的就是它，若它也被拦就无路可走。"""
         missing = self._require_vpc(args)
         if missing is not None:
             return missing
@@ -436,7 +436,7 @@ class Provider:
         if missing is not None:
             return missing
         # 部署方给的 DIR 相对**他的** cwd；`_run_cdk` 里把它钉成绝对路径再交给 cdk——cdk 子进程的 cwd 是随后
-        # 被删的临时工作目录，相对路径原样传会让导出物落进那里、随之消失而命令却退 0（实际运行踩过）。
+        # 被删的临时工作目录，相对路径原样传会让导出物落进那里、随之消失而命令却以退出码 0 结束（实际运行踩过）。
         return self._run_cdk("synth", args, output=Path(out).expanduser())
 
     def bootstrap(self, args) -> int:
@@ -445,7 +445,7 @@ class Provider:
         显式给 `aws://<account>/<region>` 且**不带 `--app`**：cdk 有显式环境又没有 app 时直奔凭证与 bootstrap
         stack（实际运行核过：带 `--app` 则即使给了显式环境也会先执行 app——那就又要 `--vpc` 了）。
         account 经 STS `GetCallerIdentity` 取（对任何主体恒可用、不算新增权限）；region 走同一条解析链
-        （`--region` / AWS_REGION / profile 配置），取不到 → 退 2（bootstrap stack 是按 region 建的，不能猜）。
+        （`--region` / AWS_REGION / profile 配置），取不到 → 以退出码 2 结束（bootstrap stack 是按 region 建的，不能猜）。
         """
         blocked = self._toolchain_gate()
         if blocked is not None:
@@ -493,7 +493,7 @@ class Provider:
         return workers.push_worker(
             args.image, engine=args.engine, variant=args.variant,
             set_default=bool(getattr(args, "set_default", False)),
-            # tag 用的版本 = **CLI 自身版本**（与写进 SSM 的戳同一个，ADR 0038「preflight」按它解析）
+            # tag 用的版本是 **CLI 自身版本**（与写进 SSM 的戳同一个，ADR 0038「preflight」按它解析）
             cli_version=self._resolve_version(args),
             prefix=target.prefix, region=target.region, profile=target.profile, container=engine,
         )
@@ -536,7 +536,7 @@ class Provider:
 
     # ---- 命令面（worker 镜像族续，ADR 0038「命令族」）----
     def delete_worker(self, args) -> int:
-        """留的口子（ADR 0038「命令族」）：**尚未提供**，退 2 说清为什么与将来怎么落。
+        """留的口子（ADR 0038「命令族」）：**尚未提供**，以退出码 2 结束并说清为什么与将来怎么落。
 
         为何占位而不干脆不给这个子命令：不给的话部署方敲了只会得到 argparse 的「invalid choice」，读不出
         「这件事是被想过、押后了」——而它押后的是**回收策略**（ECR untagged 层、旧版本 variant），不是忘了
@@ -548,7 +548,7 @@ class Provider:
     # ---- 内部：容器引擎（ADR 0038「容器引擎口子」）----
     @staticmethod
     def _container_engine(args):
-        """解析 `--container-engine` / env → 引擎对象；本期未实装的名字 → 打诊断并返回 None（调用点退 2）。
+        """解析 `--container-engine` / env → 引擎对象；本期未实装的名字 → 打诊断并返回 None（调用点以退出码 2 结束）。
 
         **只解析、不探活**：探活（`probe()`）归真要用它的那一步——push-worker 在 skew 前置之后探（skew 拦下的
         人不该先被要求装 docker），deploy 的四步在 cdk 之后探（见 `_worker_image_steps`）。
@@ -564,18 +564,18 @@ class Provider:
     def _worker_image_steps(self, args, engine) -> int:
         """cdk 成功之后的 worker 镜像第 2/3/4 步 + 清理 pass（第 1 步是 stack 资源、随 cdk 事务）。
 
-        `engine` 由 `deploy` 解析好传进来：名字不认在 cdk 之前就退 2 了（ADR 0038「容器引擎口子」），到这里必是
-        已实装的引擎；「装了但不可用」归 `workers.run_deploy_steps`（退 1）。
+        `engine` 由 `deploy` 解析好传进来：名字不认在 cdk 之前就以退出码 2 结束了（ADR 0038「容器引擎口子」），到这里必是
+        已实装的引擎；「装了但不可用」归 `workers.run_deploy_steps`（退出码 1）。
 
-        **不做版本 skew 前置**：deploy 就是改戳的那个动作（ADR 0038）。失败退 1（不是 2）——账户已经被 cdk
+        **不做版本 skew 前置**：deploy 就是改戳的那个动作（ADR 0038）。失败给退出码 1（不是 2）——账户已经被 cdk
         改过了，压成「前置失败」会让人以为什么都没发生。
         """
         from gherkai_deploy_aws import workers
 
         target = self._resolve_target_or_report(args)
         if target is None:
-            # 归码按本方法契约（见 docstring）：cdk 之后的失败退 1，措辞与 `workers.run_deploy_steps`
-            # 建不出句柄时那一支同款——对部署方是同一件事。
+            # 退出码归属按本方法契约（见 docstring）：cdk 之后的失败给退出码 1，措辞与 `workers.run_deploy_steps`
+            # 建不出句柄时那一支相同——对部署方是同一件事。
             print("stack 已生效；worker 镜像步骤未完成——重新运行 `gherkai deploy` 幂等收敛。", file=sys.stderr)
             return workers.EXIT_FAILED
         return workers.run_deploy_steps(
@@ -586,7 +586,7 @@ class Provider:
     # ---- 内部：部署工具链前置（Node / cdk；ADR 0037 决策 6）——与下面的容器引擎口子无关 ----
     @staticmethod
     def _toolchain_gate() -> int | None:
-        """Node 与 cdk CLI 两个前置：缺 → 打一句话、退 2；齐 → None。
+        """Node 与 cdk CLI 两个前置：缺 → 打一句话、以退出码 2 结束；齐 → None。
 
         `deploy` / `bootstrap` / `_run_cdk` 三处共用（每条命令都要过这一关，不靠调用者记得）。**排在动任何
         AWS 读之前**：工具链缺失不花网络、不要凭证——缺工具的人不该先被要求配好 AWS 凭证才看到「你缺工具」。
@@ -599,7 +599,7 @@ class Provider:
 
     def _require_vpc(self, args) -> int | None:
         """凡要合成 app 的动作（deploy / diff / synth / destroy）都必须有 `--vpc`（无隐式默认，ADR 0037 决策 6：
-        漏给曾被合成为「新建整套 VPC + 替换 WorkerSg」的变更集）；缺 → 退 2。不用 argparse 的 `required=True`：
+        漏给曾被合成为「新建整套 VPC + 替换 WorkerSg」的变更集）；缺 → 以退出码 2 结束。不用 argparse 的 `required=True`：
         那会把 `--bootstrap`（账户级、不合成 app）也拖进来。
 
         提示按 ADR 0039 只说三种取值各是什么、为什么不给默认、怎么办；「怎么办」尽量具体——环境已存在且后端记着上次的
@@ -703,8 +703,8 @@ class Provider:
                     print(f"已丢弃 CDK 环境查询缓存 {ctx_cache}，本次重新查询。", file=sys.stderr)
             elif ctx_cache.exists():
                 shutil.copyfile(ctx_cache, work_ctx)
-            # 部署方给的导出目录钉成**绝对**路径：cdk 子进程 cwd = 本次临时工作目录（用完即删），相对路径
-            # 原样传会让导出物落进那里、随目录消失而命令退 0（实际运行踩过）。默认落工作目录、随之清理。
+            # 部署方给的导出目录钉成**绝对**路径：cdk 子进程 cwd 是本次临时工作目录（用完即删），相对路径
+            # 原样传会让导出物落进那里、随目录消失而命令以退出码 0 结束（实际运行踩过）。默认落工作目录、随之清理。
             out_dir = output.resolve() if output is not None else work_dir / "cdk.out"
             argv = [*cdk_argv, verb, "--app", self.app_command(), "--output", str(out_dir)]
             for key, value in self.build_context(args).items():
@@ -735,7 +735,7 @@ class Provider:
         """deploy 前的 VPC 取值比对。放行 → None；拦 → 退出码（2）。
 
         只在 deploy 前执行（见 `diff`/`destroy` 的 docstring）。解析 prefix/region/profile 失败与读后端失败
-        （凭证/权限/网络）都退 2 而非抛 traceback：对部署方是「先修凭证」，与 Node 缺失同一类。
+        （凭证/权限/网络）都以退出码 2 结束而非抛 traceback：对部署方是「先修凭证」，与 Node 缺失同一类。
         """
         target = self._resolve_target_or_report(args)
         if target is None:
@@ -768,7 +768,7 @@ class Provider:
             )
         else:
             message = (
-                f"`--vpc {args.vpc}` 与后端记录的 VPC 取值 `{stored}` 不一致（{path}）。改这个取值 = VPC 级资源替换，"
+                f"`--vpc {args.vpc}` 与后端记录的 VPC 取值 `{stored}` 不一致（{path}）。改这个取值就是 VPC 级资源替换，"
                 f"worker 网络会被重建。"
             )
         if allow:
@@ -801,7 +801,7 @@ class Provider:
         时发生，故 profile-only 的部署方是唯一撞得到的人——而 profile config 里写着 region 是被支持的形态，
         见 `compose.resolve_region`）。这一层裸着就是裸 botocore 堆栈：实际运行核过 `list-workers` /
         `push-worker` / `deploy` 三条都如此，且这一口**排在 `workers._connect` 之前**，那一层包不到它。
-        文案与 `workers._connect` 同款——对部署方是同一件事「先修凭证/region」。
+        文案与 `workers._connect` 相同——对部署方是同一件事「先修凭证/region」。
         """
         try:
             return self._resolve_target(args)
@@ -814,7 +814,7 @@ class Provider:
     def _resolve_version(args) -> str:
         """写进 SSM 版本戳的版本（ADR 0037 决策 6「版本戳」/ 决策 7 版本真源）。
 
-        优先 CLI 前端交进来的 `args.version`（= 运行中的 CLI 的版本，决策 7 比对的正是它）；缺则本包自报 dist
+        优先 CLI 前端交进来的 `args.version`（即运行中的 CLI 的版本，决策 7 比对的正是它）；缺则本包自报 dist
         版本——两者被 `==` 同版本 pin 成同一个（决策 2b），此回落不引入第二个真源。都取不到 → fail-fast：
         戳写错比缺失更坏（缺失是「警告不拦」，写错会让所有提交者的 skew 判定失真）。
         """
@@ -867,7 +867,7 @@ def _node_major(node: str) -> int | None:
 def check_cdk() -> str | None:
     """cdk CLI 前置：PATH 上既无 `cdk` 也无 `npx` → 返回给人看的一句话；能定位 → None。
 
-    与 `check_node()` 同形（**不抛 traceback**，ADR 0037 决策 6）。消息在此单点维护——`deploy` / `bootstrap` /
+    与 `check_node()` 写法相同（**不抛 traceback**，ADR 0037 决策 6）。消息在此单点维护——`deploy` / `bootstrap` /
     `_run_cdk` 三处共用（`doctor` 的 detail 是自检清单的另一种措辞，另写）。
     """
     if cdk_command():

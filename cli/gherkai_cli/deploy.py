@@ -3,7 +3,7 @@
 本模块是「命令 provider 中立」那条决策在 code 里的落点：**前端只做三件事**——按 entry point group 发现已装的
 provider 包、把 provider 的 flag 接到自己的 subparser 上、把动作分派给 provider。
 **前端绝不 import `aws_cdk` / 不碰 CDK 的 boto3 用法**：那些只住在 provider 包（`gherkai-deploy-aws`，经 CLI 的
-`[deploy-aws]` extra 隔离——只有部署方装它，只提交 run 的人不必背 CDK + Node）。前端对 provider 的全部认识 =
+`[deploy-aws]` extra 隔离——只有部署方装它，只提交 run 的人不必背 CDK + Node）。前端对 provider 的全部认识就是
 下面 `Provider` 契约那几个方法名。
 
 **为何有 provider 这层间接**：非 AWS 后端出现时新增一个 `gherkai-deploy-<provider>` 包即可，命令面不动
@@ -42,10 +42,10 @@ PROVIDER_GROUP = "gherkai.deploy"
 # **子动词接缝**（`gherkai deploy push-worker` / `list-workers` 那族 worker 镜像命令，ADR 0038）：provider 在
 # `add_arguments(deploy_parser)` 里自己 `add_subparsers()`，并给每个子动词 `set_defaults(_deploy_verb=<可调用>)`；
 # 前端的分派**先看 `_deploy_verb`**，有就交给它、没有才走 `--diff/--synth-only/--bootstrap/deploy` 那四路。
-# **组合规则**：子动词与三个「不真部署」flag 同给 → 前端退 2（`readonly_flag_conflict`）——子动词会真写账户（推镜像/
+# **组合规则**：子动词与三个「不真部署」flag 同给 → 前端以退出码 2 结束（`readonly_flag_conflict`）——子动词会真写账户（推镜像/
 # 注册 task-def），若让它静默盖过部署方点名要的只读预览，正是那三个 flag 要防的事（ADR 0037 决策 6 的 reviewer 靶点）。
 # 这样那族命令落地时**前端一行不改**（它们要读 SSM/ECR/task-def、碰容器引擎，全属 provider 那半边）。
-# 子动词 subparser 不可设 `required=True`——否则裸 `gherkai deploy`（默认动作 = 真部署）会被 argparse 拒。
+# 子动词 subparser 不可设 `required=True`——否则裸 `gherkai deploy`（默认动作是真部署）会被 argparse 拒。
 # ============================================================================
 
 
@@ -58,9 +58,9 @@ def resolve_provider(name: str | None) -> tuple[object | None, str | None]:
     """按 `--provider` 值（或唯一性）选出 provider 并加载 → `(provider, None)`；失败 → `(None, 人读的一句)`。
 
     三分叉（ADR 0037 决策 6）：**零个** → 提示装 `gherkai[deploy-aws]`；**一个** → 直接用、无需 `--provider`；
-    **多个** → 必须 `--provider <名>`，否则列出名字让人选（前端不替部署方猜「哪个云」）。全部失败情形由调用点退 2。
+    **多个** → 必须 `--provider <名>`，否则列出名字让人选（前端不替部署方猜「哪个云」）。全部失败情形由调用点以退出码 2 结束。
 
-    加载 = `ep.load()`：拿到**类**则实例化（entry point 惯例指向 `Provider` 类），拿到现成对象/单例则原样用。
+    加载即 `ep.load()`：拿到**类**则实例化（entry point 惯例指向 `Provider` 类），拿到现成对象/单例则原样用。
     加载失败（provider 包半装 / 版本不匹配 / 它自己的 import 链炸）不让 traceback 裸奔——翻成点名 entry point
     的一句诊断（部署方视角这是「装了但不可用」，与「没装」是两回事，措辞必须分开）。
     """
@@ -93,7 +93,7 @@ def resolve_provider(name: str | None) -> tuple[object | None, str | None]:
 
 def readonly_flag_conflict(args) -> str | None:
     """provider 子动词（`_deploy_verb`，worker 镜像族、会真写账户）与 `--diff/--synth-only/--bootstrap` 同给 →
-    一句产品语言的诊断（调用点退 2）；否则 None。三 flag 是「先看清再改账户」的只读/准备靶点（ADR 0037 决策 6），
+    一句产品语言的诊断（调用点以退出码 2 结束）；否则 None。三 flag 是「先看清再改账户」的只读/准备靶点（ADR 0037 决策 6），
     子动词的分派优先级若把它们静默吞掉，部署方要的预览会变成真推镜像——见模块头「组合规则」。"""
     if getattr(args, "_deploy_verb", None) is None:
         return None
@@ -116,7 +116,7 @@ def add_parsers(sub, *, provider: object | None = None, provider_error: str | No
     provider 只加载一次，不在「贴 flag」与「执行动作」之间解析两遍。
 
     `provider=None`（未解析或解析失败）时只有前端自己的命令面 flag——保住 `gherkai --help` / `gherkai deploy --help`
-    **恒可用**（帮助不该因为没装 provider 而失败），真动作时再由调用点报 `provider_error` 并退 2。
+    **恒可用**（帮助不该因为没装 provider 而失败），真动作时再由调用点报 `provider_error` 并以退出码 2 结束。
 
     **`conflict_handler="resolve"`**：命令面 flag 由前端声明、provider 的选项由 provider 声明，两侧同名时以
     provider 为准而非抛 `ArgumentError`——同名即同义（选项的真源在 provider 那半边），让 `--help` 因重名崩掉
@@ -133,7 +133,7 @@ def add_parsers(sub, *, provider: object | None = None, provider_error: str | No
         help="[部署方] 部署/更新云端后端",
         description="部署/更新云端后端（表/桶/cluster/task-def/Lambda 链/VPC 等）。"
                     "IaC 由 provider 包供给（装 `gherkai[deploy-aws]`；需 Node ≥22 在 PATH）。"
-                    "默认动作 = 真部署；下面三个 flag 各自换成一个只读/准备动作。",
+                    "默认动作是真部署；下面三个 flag 各自换成一个只读/准备动作。",
     )
     _add_provider_flag(dp)
     # 三个互斥的「不真部署」动作（ADR 0037 决策 6 的命令面）：给 reviewer/谨慎的人留靶点——
@@ -149,16 +149,16 @@ def add_parsers(sub, *, provider: object | None = None, provider_error: str | No
     )
     act.add_argument(
         "--bootstrap", action="store_true",
-        help="只做 provider 的账户初始化（AWS = cdk bootstrap，每账户+region 一次）；未初始化就 deploy 会报错指回本 flag",
+        help="只做 provider 的账户初始化（在 AWS 上即 cdk bootstrap，每账户 + region 一次）；未初始化就 deploy 会报错指回本 flag",
     )
     dp.add_argument(
         "--require-approval", default=None, metavar="MODE",
-        help="权限/IAM 变更的审批级别，原样透传给 provider（AWS provider = cdk 的 never / any-change / broadening）；"
+        help="权限/IAM 变更的审批级别，原样透传给 provider（AWS provider 上的取值是 cdk 的 never / any-change / broadening）；"
              "不给则用 provider 自己的默认",
     )
     dp.add_argument(
         "--allow-vpc-change", action="store_true",
-        help="放行 VPC 取值变更：本次的取值与后端记着的上次生效取值不一致、或 stack 已存在但后端还没有取值记录时，deploy 退 2、"
+        help="放行 VPC 取值变更：本次的取值与后端记着的上次生效取值不一致、或 stack 已存在但后端还没有取值记录时，deploy 以退出码 2 结束、"
              "要你先 `--diff` 核对变更集；核对完带本 flag 放行一次——漏给 VPC 取值会合成"
              "「新建整套 VPC + 替换安全组」的危险变更集（真踩过）",
     )
@@ -177,7 +177,7 @@ def add_parsers(sub, *, provider: object | None = None, provider_error: str | No
         provider.add_arguments(dp)
         provider.add_arguments(dsp)
     for p in (dp, dsp):
-        # `version` = **CLI 自己的**发行版本，交给 provider 写进后端版本戳（ADR 0037 决策 6/7）：戳必须是
+        # `version` 是 **CLI 自己的**发行版本，交给 provider 写进后端版本戳（ADR 0037 决策 6/7）：戳必须是
         # 「写任务定义那一方」的版本，因为 run/submit 的 skew 闸拿它比。发行态下五个包经 `==` pin 恒同版本，
         # 但 editable 的开发树里各包版本会各自漂（各自按 git 状态算），故显式传、不让 provider 自报。
         p.set_defaults(_provider_obj=provider, _provider_error=provider_error, version=cli_version)

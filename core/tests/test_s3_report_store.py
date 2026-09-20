@@ -1,11 +1,11 @@
 """S3ReportStore 对拍测试（ADR 0030 决定六 / 0027 / 0029）：与 LocalReportStore 同一批行为断言，moto mock、不产生真实 AWS 费用。
 
-对拍**后端无关的行为契约**（manifest 形态 = 纯派生视图不内嵌 result、report_index 扁平投影、index.html 渲染判定明细+链接、
+对拍**后端无关的行为契约**（manifest 形态是纯派生视图、不内嵌 result、report_index 扁平投影、index.html 渲染判定明细+链接、
 空态有效页）——即 test_report_store.py 里那批。物理落点断言从「文件系统路径」换成「S3 对象 get」。
 
-**S3 专属差异 = href 恒等原始 ref（[0027]/[0029]）**：Local 把 run 树内的 file:// 产物相对化 href；S3 版
-**不相对化**（`s3://` 全局可寻址、无相对必要，只按 scheme 分支且 file:// 也不由 S3 store 相对化）——href 恒
-== worker 报的原始 ref。不拷贝产物（无 artifacts/ 对象）。这条对照 Local 的相对化，是本文件的 S3 专属重点。
+**S3 专属差异在于 href 恒等于原始 ref（[0027]/[0029]）**：Local 把 run 树内的 file:// 产物相对化 href；S3 版
+**不相对化**（`s3://` 全局可寻址、无相对必要，只按 scheme 分支且 file:// 也不由 S3 store 相对化）——href 恒等于
+worker 报的原始 ref。不拷贝产物（无 artifacts/ 对象）。这条对照 Local 的相对化，是本文件的 S3 专属重点。
 
 复用 test_report_store 的 _run_with_refs/_rr/_jr 造数据（同一份 fixture 真理源）。
 """

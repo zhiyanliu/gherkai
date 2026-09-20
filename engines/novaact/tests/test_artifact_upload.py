@@ -18,7 +18,7 @@ from gherkai_worker_novaact.lib.artifact_upload import ArtifactUploader
 
 
 class _Calls(list):
-    """upload_file 调用记录：list 元素 = (local, bucket, key)，`extra_by_key` 另记 ExtraArgs。"""
+    """upload_file 调用记录：list 元素是 (local, bucket, key)，`extra_by_key` 另记 ExtraArgs。"""
 
     def __init__(self) -> None:
         super().__init__()
@@ -230,7 +230,7 @@ def test_content_type_suffix_match_is_case_insensitive(tmp_path):
     assert calls.extra_by_key["reports/rid/nova-trajectories/REPORT.HTML"] == {"ContentType": "text/html; charset=utf-8"}
 
 
-# ---- from_env：读注入 env，run_dir = NOVA_LOGS_DIR 父级 ----
+# ---- from_env：读注入 env，run_dir 取 NOVA_LOGS_DIR 的父级 ----
 def test_from_env_enabled_when_bucket_set(monkeypatch, tmp_path):
     logs = tmp_path / "reports" / "rid" / "nova-trajectories"
     monkeypatch.setenv("ARTIFACT_S3_BUCKET", "bkt")
@@ -239,7 +239,7 @@ def test_from_env_enabled_when_bucket_set(monkeypatch, tmp_path):
     u = ArtifactUploader.from_env()
     assert u.enabled is True
     assert u._bucket == "bkt" and u._prefix == "reports/rid/"
-    assert u._run_dir == logs.parent  # run 树根 = NOVA_LOGS_DIR 父级
+    assert u._run_dir == logs.parent  # run 树根即 NOVA_LOGS_DIR 的父级
 
 
 def test_from_env_noop_when_no_bucket(monkeypatch):

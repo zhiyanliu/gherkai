@@ -1,6 +1,6 @@
 """隧道口子（ADR 0035）：把 CLI 所在机器可达的被测应用暴露成云端浏览器可访问的公网 URL。
 
-TunnelProvider 形状 = `start(local_origin) -> TunnelInfo`；停止用 `stop_tunnel(pid)`——隧道生命周期
+TunnelProvider 的形状为 `start(local_origin) -> TunnelInfo`；停止用 `stop_tunnel(pid)`——隧道生命周期
 可能跨进程（local submit 的 per-run 进程 / cloud submit 的守护进程收尾），进程对象句柄传不过去，
 故 TunnelInfo 携带 pid、由收尾者 kill（ADR 0035 决策 3 的三形态宿主）。
 
@@ -23,7 +23,7 @@ from gherkai_core.model import Job
 
 
 class TunnelError(Exception):
-    """隧道起不来 / provider 未知 / 前置缺失——调用方接住归「没开始执行就被拒」（退 2）。"""
+    """隧道起不来 / provider 未知 / 前置缺失——调用方接住归「没开始执行就被拒」（退出码 2）。"""
 
 
 @dataclass(frozen=True)
@@ -31,7 +31,7 @@ class TunnelInfo:
     """一条已建立隧道的事实（可序列化落盘 tunnel.json，供跨进程收尾）。"""
 
     url: str  # 公网 URL（不含凭据），进度行/诊断展示用
-    auth: str | None  # "user:pass"（basic-auth 凭据，ADR 0035 决策 4；None=未开认证）
+    auth: str | None  # "user:pass"（basic-auth 凭据，ADR 0035 决策 4；None 表示未开认证）
     pid: int  # 隧道 agent 进程 pid（收尾者 stop_tunnel(pid)）
     local_origin: str  # 被暴露的原始 origin（替换源，如 http://localhost:3000）
 
@@ -102,7 +102,7 @@ class NgrokTunnel:
             cmd += ["--traffic-policy-file", policy_path]
 
         try:
-            # start_new_session=True（setsid）= agent 脱离 CLI 的会话/进程组：隧道的生命周期由**宿主**决定
+            # start_new_session=True（setsid）让 agent 脱离 CLI 的会话/进程组：隧道的生命周期由**宿主**决定
             # （ADR 0035 决策 3 三形态宿主 + stop_tunnel(pid)），不该由终端的信号转发决定。否则 submit 时
             # CLI 收 SIGINT/SIGHUP 会连坐杀掉「还要交棒给后台宿主」的 agent（local 交 per-run 进程、cloud 交
             # 守护进程，两个宿主本身也都 setsid）。前台 run 方式语义不变：Ctrl-C → KeyboardInterrupt → atexit
@@ -174,7 +174,7 @@ def make_tunnel(name: str):
 def map_origin_in_jobs(jobs: list[Job], origin: str, base: str) -> list[Job]:
     """把 job 文本中的 origin 前缀替换成隧道 base（ADR 0035 决策 2：job-in 前、worker/AI 无感）。
 
-    替换面 = step.text + step.argument（docString content / dataTable 各单元格）——URL 可能出现在任一处。
+    替换面为 step.text + step.argument（docString content / dataTable 各单元格）——URL 可能出现在任一处。
     前缀字符串级匹配（flag 值须与 feature 书写一致——`localhost` vs `127.0.0.1` 不互认，文档写明）。
     frozen dataclass 逐层重建，原 jobs 不变（definition 不可变惯例）。
     """

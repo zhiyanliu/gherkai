@@ -22,7 +22,7 @@ skill 的消费现场是使用方项目里的一份拷贝，那些指代对使�
 
 用法：
     python3 tools/render_skill_contract.py             # 渲染并写入副本
-    python3 tools/render_skill_contract.py --check     # 只比对（漂了退 1），CI / 本地自查用
+    python3 tools/render_skill_contract.py --check     # 只比对（漂了以退出码 1 结束），CI / 本地自查用
 """
 
 from __future__ import annotations
@@ -58,8 +58,8 @@ POINTER_REWRITES: dict[str, str] = {
 # 内部用词（推进器 / 投影 / definition …）机械层照不出、只能靠人眼发现后登记在此。
 FORBIDDEN_REWRITES: dict[str, str] = {
     "命中定位链的哪一级": "命中 worker 查找顺序的哪一级",
-    "顶层 = RunResult（判定）+": "顶层 = 这次运行的判定 +",
-    "RunState（控制面运行态）+ 附加 `artifacts`：": "这个 run 的运行态 + 附加 `artifacts`：",
+    "顶层由三部分组成：RunResult（判定）、": "顶层由三部分组成：这次运行的判定、",
+    "RunState（控制面运行态）": "这个 run 的运行态",
     "| `report_index` | RunReport `index.html`": "| `report_index` | 报告首页 `index.html`",
     "已投影的事件水位（诊断用）；仅经推进器投影写入的 run 有":
         "已处理到的事件水位（诊断用）；仅由后台推进写入的 run 有",
@@ -154,7 +154,7 @@ def render() -> str:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="渲染 skill 里的 `--json` 字段契约副本")
-    ap.add_argument("--check", action="store_true", help="只比对入库副本、不写（漂了退 1）")
+    ap.add_argument("--check", action="store_true", help="只比对入库副本、不写（漂了以退出码 1 结束）")
     args = ap.parse_args(argv)
 
     try:

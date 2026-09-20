@@ -72,7 +72,7 @@ def _push_image(ecr, engine: str, tag: str) -> str:
 
 def _seed(aws, *, variant: str, engines=("novaact",), version: str = _VERSION,
           set_default: bool = True) -> dict[str, dict]:
-    """把一个 variant 完整落到 SSM + ECS + ECR（= push-worker 走完八步后的稳态）。返回各引擎的记录。"""
+    """把一个 variant 完整落到 SSM + ECS + ECR（即 push-worker 走完八步后的稳态）。返回各引擎的记录。"""
     tag = names.image_tag(version, variant)
     out: dict[str, dict] = {}
     for engine in engines:

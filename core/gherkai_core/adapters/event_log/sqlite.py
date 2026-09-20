@@ -7,10 +7,10 @@ worker 事件（原始 ADR 0024 JSON 行 + worker 段单调 seq）+ 平台侧退
 `wire.event_from_line`（零新序列化，不在 wire 加 event_to_json 破坏其 worker→core 单向契约）。
 
 **表结构镜像 DDB events 表**（[0024]/[0034]）：
-- events 表：(scope_id, seq) 复合主键，line=原始 JSON 行，emit_ts=worker emit 墙钟（reduce_event 的 now）。
+- events 表：(scope_id, seq) 复合主键，line 存原始 JSON 行，emit_ts 存 worker emit 墙钟（reduce_event 的 now）。
   worker 段单调数值 seq——per-run 进程读 fd3 时按到达顺序 1,2,3… 赋（worker 一个 scope 串行 emit）。
-- exits 表：(scope_id) 主键，exit_code（NULL=退出码未知，仅超时处置直写时出现；投影判 ERROR、非宽限）+ timed_out（超时处置
-  所致退出的归因标志，[0034]「job timeout」节）+ reason（平台侧归因串，cloud 观察者落哨兵时带；local 恒空）。独立表 = 独立键空间（机制一：退出记录不占 worker 数值 seq 段、不参与断号）。
+- exits 表：(scope_id) 主键，exit_code（NULL 表示退出码未知，仅超时处置直写时出现；投影判 ERROR、非宽限）+ timed_out（超时处置
+  所致退出的归因标志，[0034]「job timeout」节）+ reason（平台侧归因串，cloud 观察者落哨兵时带；local 恒空）。独立表即独立键空间（机制一：退出记录不占 worker 数值 seq 段、不参与断号）。
 
 并发：per-run 进程写、reconciler 读（同进程内两职责，也可能 status --wait 另进程读）。SQLite WAL 模式 +
 短事务，多读单写足够；跨进程写并发不在 local 目标内（写只有 per-run 进程一个）。
@@ -51,14 +51,14 @@ class SqliteEventLog:
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS exits ("
                 "  scope_id TEXT PRIMARY KEY,"  # 独立键空间（机制一）：退出记录不占 events 的 seq 段
-                "  exit_code INTEGER,"          # NULL = 退出码未知（仅超时处置直写；投影判 ERROR，机制二「退出码缺失」条）
+                "  exit_code INTEGER,"          # NULL 表示退出码未知（仅超时处置直写；投影判 ERROR，机制二「退出码缺失」条）
                 "  timed_out INTEGER NOT NULL DEFAULT 0,"  # 超时归因（ADR 0034「job timeout」节）
                 "  reason TEXT"                 # 平台侧归因串（观察者落哨兵时带）
                 ")"
             )
             # 旧库迁移（加列幂等）：只保留**已发行版本建过缺列 schema** 的那一列——v1.4.0 建的 exits 表没有 reason，新版接力
             # （status --wait）同一 run 的 events.db 时补列；已有列 → OperationalError，忽略。timed_out 的补列已删：首个含本文件
-            # 的发行版 v1.3.0 的 CREATE TABLE 就带它、迁移不可达（判据 = git tag 真值集；新加列时照此加一条 ALTER，等最老
+            # 的发行版 v1.3.0 的 CREATE TABLE 就带它、迁移不可达（判据是 git tag 真值集；新加列时照此加一条 ALTER，等最老
             # 受支持发行版都带它时再删）。
             try:
                 conn.execute("ALTER TABLE exits ADD COLUMN reason TEXT")
@@ -86,7 +86,7 @@ class SqliteEventLog:
             )
 
     def has_exit(self, scope_id: str) -> bool:
-        """单个 scope 有没有退出记录（**只读**，exits 主键点查）——对位 `DdbEventLog.has_exit`，两侧同形。"""
+        """单个 scope 有没有退出记录（**只读**，exits 主键点查）——对位 `DdbEventLog.has_exit`，两侧结构相同。"""
         with self._connect() as conn:
             return conn.execute(
                 "SELECT 1 FROM exits WHERE scope_id = ?", (scope_id,)).fetchone() is not None

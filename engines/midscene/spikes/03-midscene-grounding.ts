@@ -1,5 +1,5 @@
 // 三段式自检 · 第 3 段：合体 —— Midscene(SigV4 自签) + AgentCore 云端浏览器 + 维基用例
-// = 模型连接(01) + 浏览器连接/CDP(02) + Midscene grounding，并产出对标基准数据（ADR 0010）。
+// 即模型连接(01) 加浏览器连接/CDP(02) 加 Midscene grounding，并产出对标基准数据（ADR 0010）。
 //
 // 用例（与 Nova Act 引擎同一个，苹果对苹果）：
 //   打开 wikipedia.org → 搜 "OpenAI" → 断言进入 OpenAI 词条页。

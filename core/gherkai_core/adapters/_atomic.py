@@ -28,7 +28,7 @@ from pathlib import Path
 
 def atomic_write_text(path: Path, text: str, *, mode: int = 0o644) -> None:
     """把 text 原子落到 path（UTF-8）：写同目录 tmp → chmod 成 mode → `os.replace` 顶上。失败清理 tmp、异常冒泡。"""
-    # 前缀截断到 200 字符：tmp 名 = prefix + 8 随机 + ".tmp"，不截断会把「目标名本身已接近 NAME_MAX」的落点
+    # 前缀截断到 200 字符：tmp 名由 prefix + 8 位随机字符 + ".tmp" 组成，不截断会把「目标名本身已接近 NAME_MAX」的落点
     # （jobs/<urlencode 后的 scope_id>.json——scope_id 可含中文、每字 9 字符，ADR 0025「id 派生」）在建 tmp 时
     # 就 ENAMETOOLONG，比非原子写更早失败。mkstemp 自身保唯一，截断不会撞名。
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=path.name[:200] + ".", suffix=".tmp")

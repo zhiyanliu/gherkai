@@ -1,4 +1,4 @@
-"""`gherkai_runtime.names` 的 worker 镜像交付命名（ADR 0038「tag 命名 = 单一真源、同时是单一校验点」）。
+"""`gherkai_runtime.names` 的 worker 镜像交付命名（ADR 0038「tag 命名」条：单一真源、同时是单一校验点）。
 
 这批命名是**跨包硬契约**：`push-worker` 用它拼推送目标与 SSM 键、提交侧 preflight 与云端推进器用同一函数
 反向解析。故断言落在「同一入参恒得同一串」与「非法入参一定抛」两件事上——任一侧单独改算法即两边对不上。
@@ -60,7 +60,7 @@ def test_image_tag_rejects_version_with_illegal_leading_char():
         names.image_tag(".1.4.0", "base")
 
 
-# ---- SSM 键（相对键，全路径 = ssm_path(prefix, key)）----
+# ---- SSM 键（相对键，全路径为 ssm_path(prefix, key)）----
 def test_worker_ssm_keys():
     assert names.WORKER_DEFAULT_KEY == "worker-default"
     assert names.worker_template_key("novaact") == "worker-template/novaact"

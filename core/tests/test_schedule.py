@@ -221,7 +221,7 @@ def test_engine_start_failure():
     assert b_jr.status == Status.PASSED  # 隔离：b 不受 a 影响
 
 
-# ---- 输出顺序 = 输入 jobs 顺序（即便完成序不同）----
+# ---- 输出顺序与输入 jobs 顺序一致（即便完成序不同）----
 def test_output_order_stable():
     jobs = [_job("z"), _job("a"), _job("m")]
     engine = FakeEngine({
@@ -261,8 +261,8 @@ def _events_with_tokens(scenario_id: str, step_tokens: list[int]) -> list:
 def test_time_worked_aggregation_step_to_job_to_run():
     # Nova 形态：time_worked_s 累加 step→scope→run
     engine = FakeEngine({
-        "a": _events_with_time("a:0", [9.0, 3.0]),   # scope a = 12.0s
-        "b": _events_with_time("b:0", [5.0]),         # scope b = 5.0s
+        "a": _events_with_time("a:0", [9.0, 3.0]),   # scope a 合计 12.0s
+        "b": _events_with_time("b:0", [5.0]),         # scope b 合计 5.0s
     })
     result = schedule(_rm([_job("a"), _job("b")]), FakeResolver(engine), CollectSink())
     a_jr = next(jr for jr in result.jobs if jr.scope_id == "a")
@@ -450,7 +450,7 @@ def test_step_skipped_reduced_to_skipped_shortcircuited():
 
 def test_step_skipped_does_not_pollute_scenario_or_run_status():
     # 关键不变量（ADR 0031 决定六）：step 级 SKIPPED 绝不写 scenario_status → 不参与 scenario 归约/severity。
-    # 一个 [error, skipped, skipped] 的 scenario，其 scenario/job/run 判定必须 = error（skipped 零污染），
+    # 一个 [error, skipped, skipped] 的 scenario，其 scenario/job/run 判定必须是 error（skipped 零污染），
     # 且不会被 SKIPPED 拉低（severity -1）也不会误当 passed。
     from gherkai_core.model import StepSkipped
     events = [
@@ -462,9 +462,9 @@ def test_step_skipped_does_not_pollute_scenario_or_run_status():
     ]
     engine = FakeEngine({"n": events})
     result = schedule(_rm([_job("n")]), FakeResolver(engine), CollectSink())
-    assert result.jobs[0].scenarios[0].status == Status.ERROR  # scenario 判定 = error（未被 skipped 影响）
-    assert result.jobs[0].status == Status.ERROR               # job 判定 = error
-    assert result.status == Status.ERROR                        # run 判定 = error
+    assert result.jobs[0].scenarios[0].status == Status.ERROR  # scenario 判定是 error（未被 skipped 影响）
+    assert result.jobs[0].status == Status.ERROR               # job 判定是 error
+    assert result.status == Status.ERROR                        # run 判定是 error
 
 
 def test_step_skipped_without_scenario_done_still_recorded():
@@ -616,7 +616,7 @@ def test_on_job_complete_fires_for_skipped_job():
 
 
 def test_on_job_complete_exception_propagates_not_swallowed():
-    # ADR 0030：回调异常不应被吞——落库失败=真问题，必须冒泡（而非被 ThreadPoolExecutor/as_completed 静默丢）。
+    # ADR 0030：回调异常不应被吞——落库失败是真问题，必须冒泡（而非被 ThreadPoolExecutor/as_completed 静默丢）。
     # 若有人给回调加 try/except 兜底（看似稳健、实则掩盖落库失败），此测试变红。
     import pytest
     engine = FakeEngine({"a": _passing_events("a", "a:0")})

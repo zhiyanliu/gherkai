@@ -12,8 +12,8 @@
 #   2. graphify label .       重聚类 + LLM 命名全部社区 + 重生成 GRAPH_REPORT.md（涵盖 cluster-only 的全部效果）。
 #   3. graphify export wiki   graphify-out/wiki/（index + 每社区一篇），入库供 agent 导航。
 #
-# 后端 = AWS Bedrock，走标准凭证链。graphify 要求 AWS_PROFILE / AWS_REGION / AWS_DEFAULT_REGION 任一在 env 里
-# （~/.aws/config 的 region 不算），缺则本脚本回落 `aws configure get region`，仍无则退 2。
+# 后端是 AWS Bedrock，走标准凭证链。graphify 要求 AWS_PROFILE / AWS_REGION / AWS_DEFAULT_REGION 任一在 env 里
+# （~/.aws/config 的 region 不算），缺则本脚本回落 `aws configure get region`，仍无则以退出码 2 结束。
 # 各 GRAPHIFY_* 与 PYTHONHASHSEED 有默认值、env 可覆盖；PYTHONHASHSEED=0 与 post-commit hook 一致，固定聚类随机性。
 #
 # 在别的机器（如有 Bedrock 凭证的开发跳板机）运行结束后再 rsync graphify-out/ 回来时，排除 .graphify_root——它存绝对路径，
@@ -84,13 +84,13 @@ echo "仓库根：$ROOT"
 echo "完整日志：$LOG"
 echo "env：AWS_REGION=${AWS_REGION:-} AWS_PROFILE=${AWS_PROFILE:-} PYTHONHASHSEED=$PYTHONHASHSEED GRAPHIFY_BEDROCK_MODEL=$GRAPHIFY_BEDROCK_MODEL GRAPHIFY_MAX_OUTPUT_TOKENS=$GRAPHIFY_MAX_OUTPUT_TOKENS GRAPHIFY_API_TIMEOUT=$GRAPHIFY_API_TIMEOUT GRAPHIFY_LLM_TEMPERATURE=$GRAPHIFY_LLM_TEMPERATURE"
 
-# step <名称> <命令...>：全输出进 $LOG，终端过滤噪声；失败即退出（退出码 = graphify 的）
+# step <名称> <命令...>：全输出进 $LOG，终端过滤噪声；失败即退出（退出码取 graphify 的）
 step() {
   local name=$1; shift
   echo
   echo "===== [$(date -u +%FT%TZ)] $name: $*"
   # `|| rc=…` 列表里 set -e 不触发（否则壳在下一行取 rc 之前就退了、这条指向 $LOG 的诊断永远打不出来）；
-  # 取 PIPESTATUS[0] 而非 $? 是为守住「退出码 = graphify 的」——右侧 tee/grep 的状态不该顶替它。
+  # 取 PIPESTATUS[0] 而非 $? 是为守住「退出码取 graphify 的」——右侧 tee/grep 的状态不该顶替它。
   local rc=0
   "$@" </dev/null 2>&1 | tee -a "$LOG" | { grep -Ev "$NOISE" || true; } || rc=${PIPESTATUS[0]}
   if (( rc != 0 )); then

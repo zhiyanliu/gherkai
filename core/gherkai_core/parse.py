@@ -55,7 +55,7 @@ def _step_keyword(pickle_step: dict, scenario_id: str) -> str:
     Compiler 对 `*` 步骤与「无前驱非连接词」的首条 And/But 给 type='Unknown'（实测 gherkin 41.0）——
     此时 Given/When/Then 语义**无从判定**，静默兜底成 Given 会把本该是断言的 step 当动作派发、断言
     永不执行（假绿方向的静默错标）。fail-fast 让 feature 作者写明关键字（ADR 0025「keyword 只决定派发」，
-    判不出=拒绝猜）。
+    判不出就拒绝猜）。
     """
     kw = _TYPE_TO_KEYWORD.get(pickle_step.get("type", ""))
     if kw is None:
@@ -71,7 +71,7 @@ def _index_ast_lines(gherkin_document: dict) -> dict[str, int]:
     只记 **scenario 节点**与其 **examples.tableBody 行**（pickle 顶层 astNodeIds 只有这两类，见
     `_scenario_line_and_example_line`）。遍历 feature 顶层及 **Rule 下**（Compiler 把 Rule 场景完全展开成真实
     pickle，其 astNodeIds 指向 Rule 内节点，ADR 0025）——**必须下钻 rule**，否则 Rule 内 scenario 回查行号得
-    None → sid 塌成 `<uri>:None`、多个 Rule 场景静默撞名（ADR 0025 撞名=静默灾难）。
+    None → sid 塌成 `<uri>:None`、多个 Rule 场景静默撞名（ADR 0025：撞名就是静默灾难）。
 
     被拒方案：顺手把 background 节点与每个 step 的行号也记进来。实测 gherkin 42.0.1 的 Compiler，pickle 顶层
     astNodeIds 恒为 `[scenario]` 或 `[scenario, Examples 数据行]`：step 自己的 astNodeIds 挂在 pickle step 上、

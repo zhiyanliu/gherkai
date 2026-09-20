@@ -1,4 +1,4 @@
-"""gherkai：产品本体 = 组合根共享层（ADR 0016「演进」节）。
+"""gherkai：产品本体即组合根共享层（ADR 0016「演进」节）。
 
 持有产品级知识——引擎注册表与装配（compose）、local 无状态批量运行宿主（detached）、资源命名真源（names）、
 隧道与其宿主编排（tunnel / tunnel_host，ADR 0035）。

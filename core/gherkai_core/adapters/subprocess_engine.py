@@ -51,14 +51,14 @@ class SubprocessWorkerHandle:
         """阻塞等 worker 退出、返回 returncode（ADR 0034：local 无状态批量运行的退出观察者用）。
 
         per-run 进程的 SubprocessLauncher 消费完 fd3 事件流后调此拿 exitcode 写 task_exited——扮演
-        「平台侧退出观察者」（cloud 对位=ECS STOPPED 事件 payload 的 exitCode）。同步 run 路径不用（那条走
+        「平台侧退出观察者」（cloud 对位是 ECS STOPPED 事件 payload 的 exitCode）。同步 run 路径不用（那条走
         schedule 迭代事件流、_read_events 内部 proc.wait）。SIGKILL 硬杀 → 负码（Python subprocess 约定）。
         """
         return self._proc.wait()
 
 
 class SubprocessEngine:
-    """Engine port 的子进程实现。cmd = 启 worker 的命令行（如 ['uv','run','python','run_scope.py']）。"""
+    """Engine port 的子进程实现。cmd 是启 worker 的命令行（如 ['uv','run','python','run_scope.py']）。"""
 
     def __init__(self, cmd: list[str], cwd: str | None = None, env: dict | None = None,
                  log_sink=None) -> None:
@@ -78,9 +78,9 @@ class SubprocessEngine:
         self, job: Job, raw_sink: "Callable[[str], None] | None" = None
     ) -> tuple[SubprocessWorkerHandle, Iterator[Event]]:
         # 三通道分离（fd3）：
-        #   fd3   = 纯 ADR 0024 事件（adapter 读这个）—— 自建管道，写端映射到子进程 fd3
-        #   stdout= 引擎 SDK 的进度噪声（adapter 当日志透传，不解析）
-        #   stderr= worker 自己的诊断/错误（独立，不被 SDK 噪声淹）
+        #   fd3   ：纯 ADR 0024 事件（adapter 读这个）—— 自建管道，写端映射到子进程 fd3
+        #   stdout：引擎 SDK 的进度噪声（adapter 当日志透传，不解析）
+        #   stderr：worker 自己的诊断/错误（独立，不被 SDK 噪声淹）
         events_r, events_w = os.pipe()
         # pass_fds 只保证写端被子进程继承，但 fd 号不变（不会重映射成 3）。
         # 故把实际 fd 号通过环境变量 EVENTS_FD 告诉 worker，worker 据此打开事件通道——
@@ -171,24 +171,24 @@ def _read_events(
         # 自然 EOF 与被放弃（GeneratorExit，schedule 主动停后不再 next）两条路都有界等 pump 落完日志尾部，
         # 再轮到调用方关 sink 句柄（ADR 0041 决策二）；stop() 路径另有一次 join，两处都在、哪条先到都不裸奔。
         _join_pumps(pumps, 2.0)
-    # fd3 耗尽 = worker 关了事件通道。等它真正退出，拿 returncode。
+    # fd3 耗尽表示 worker 关了事件通道。等它真正退出，拿 returncode。
     proc.wait()
     rc = proc.returncode
     if rc is not None and rc > 0:
         # 此 rc 检查仅在 fd3 自然 EOF（worker 自行退出）后执行——schedule 主动停 worker 走 _stop() 后
         # 即 return、放弃此 generator（GeneratorExit 在 yield 处冒出，不到这里），故主动停的退出码不经此。
-        # 0 = 正常；负 = 被 SIGKILL 强杀（grace 超时，schedule 主动停的尾路径，不到此检查）；
-        # 正非零 = worker 自行异常退出（崩溃/会话清理失败 exit 1 / 网络码 80）→ 抛错让 schedule 记 error。
+        # 0 表示正常；负码表示被 SIGKILL 强杀（grace 超时，schedule 主动停的尾路径，不到此检查）；
+        # 正非零表示 worker 自行异常退出（崩溃/会话清理失败 exit 1 / 网络故障退出码 80）→ 抛错让 schedule 记 error。
         # 注：两个引擎 worker 与 echo_worker 均自装 SIGTERM handler 后 process.exit/sys.exit（正码），
-        # 故「负码=SIGTERM」不成立——负码只来自 SIGKILL，且那条路径不经此检查（见上）。
+        # 故「负码即 SIGTERM」不成立——负码只来自 SIGKILL，且那条路径不经此检查（见上）。
         # 码→异常的翻译在 wire（协议级，与 Fargate adapter 共用一份，ADR 0024「退出码约定」）。
         raise_for_worker_exit(rc, code_label="returncode")
 
 
 # worker 行的 ANSI 前景色调色板（按 scope_id 哈希挑一个，保证同一 worker 每次同色）。
-# 12 色 = 31-36（红/绿/黄/蓝/品/青）+ 91-96（各自亮版）。
+# 12 色分别是 31-36（红/绿/黄/蓝/品/青）与 91-96（各自亮版）。
 # **有意排除 37/39/97（白/默认/亮白）**：默认前景色保留给 cli main/core 自己的输出
-# （`[core <scope>:event]` 进度、plan:/run_id=/RunReport: 等，它们一律不上色 = 默认色，见 cli/gherkai_cli/__main__.py
+# （`[core <scope>:event]` 进度、plan:/run_id=/RunReport: 等，它们一律不上色、即默认色，见 cli/gherkai_cli/__main__.py
 # 的 _progress）。这样 core 行与 worker 行的颜色域**物理不相交**、并发批量运行时一眼能分辨「core 说的」vs
 # 「worker 透传的」。改本调色板时**勿加入 37/39/97**，否则会与 core 的默认色撞、破坏这条约定。
 _ANSI_COLORS = (31, 32, 33, 34, 35, 36, 91, 92, 93, 94, 95, 96)
@@ -209,7 +209,7 @@ def _pump_log(stream, scope_id: str, tag: str, sink=None) -> None:
                 sink.write(f"{prefix} {line}")
                 sink.flush()
             except ValueError:
-                return  # 句柄已关 = 本进程正在收尾（join 超时后仍有尾巴的残余路径）：静默停转发，别把 traceback 打到 stderr
+                return  # 句柄已关表示本进程正在收尾（join 超时后仍有尾巴的残余路径）：静默停转发，别把 traceback 打到 stderr
         return
     if sys.stderr.isatty():
         color = _ANSI_COLORS[hash(scope_id) % len(_ANSI_COLORS)]

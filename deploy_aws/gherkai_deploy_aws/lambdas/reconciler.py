@@ -10,10 +10,10 @@ project → 条件写 → plan_next → CAS 抢占起下一个 job / finalize）
 此处每次 handler 显式构造、无隐式全局态）。core 一行不为 cloud 改（同 local，只换注入的 EventLog/Launcher/RunStore）。
 
 打包：本文件是 **asset 原料**（住在 provider 包 `gherkai_deploy_aws/lambdas/`，摊到 zip 根，ADR 0037 决策 6）。
-env：**IaC 注入**（`gherkai_deploy_aws/stack.py` 的 reconciler/kicker Function）=
+env：**IaC 注入**（`gherkai_deploy_aws/stack.py` 的 reconciler/kicker Function）的有：
 RUNS_TABLE / EVENTS_TABLE / ARTIFACTS_BUCKET / CLUSTER / PREFIX / REGION / SUBNETS / SECURITY_GROUPS /
 MAX_CONCURRENCY（**部署侧 per-run 并发 cap**、非真源——真源是 definition 的 `RunMeta.max_concurrency`，取
-min，ADR 0034 机制四；数值真源在 IaC 一处，本文件缺省只在 env 漏注时保守回 1、不复制部署值）/ KICKER_ARN / SCHEDULER_ROLE_ARN（job timeout 到点触发器用，ADR 0034「job timeout」节）；**本文件缺省供给、IaC 不注入** = REPORT_DIR（reports）/ ASSIGN_PUBLIC_IP（ENABLED，与公有子网
+min，ADR 0034 机制四；数值真源在 IaC 一处，本文件缺省只在 env 漏注时保守回 1、不复制部署值）/ KICKER_ARN / SCHEDULER_ROLE_ARN（job timeout 到点触发器用，ADR 0034「job timeout」节）；**本文件缺省供给、IaC 不注入** 的是 REPORT_DIR（reports）/ ASSIGN_PUBLIC_IP（ENABLED，与公有子网
 配套）——要改产物落点前缀或走私有子网时才在 IaC 显式给。
 
 **worker 镜像用哪个 task-def revision 不经 env**（ADR 0038 不变量「运行时只用 definition 里的显式 revision」）：
@@ -104,10 +104,10 @@ _DEFENSIVE_TIMEOUT_MARGIN_S = 60.0
 
 class EventBridgeTimeoutWatch:
     """job timeout 的云端到点触发器（ADR 0034「job timeout」节）：CloudLauncher 起 task 后 arm 一个
-    EventBridge Scheduler **one-time schedule**（at = now+timeout、ActionAfterCompletion=DELETE 到点自动删
+    EventBridge Scheduler **one-time schedule**（at 取 now+timeout、ActionAfterCompletion=DELETE 到点自动删
     ——无常驻轮询、idle 零成本）→ 到点 invoke kicker（payload {"run_id","timeout_scope"}）走超时处置。
 
-    schedule 名 = `names.job_timeout_schedule_prefix(prefix)` + sha1(run_id#scope_id)[:20]：确定性（重复 arm
+    schedule 名是 `names.job_timeout_schedule_prefix(prefix)` + sha1(run_id#scope_id)[:20]：确定性（重复 arm
     幂等，ConflictException 视作已武装）、合法字符集（scope_id 可含中文/路径，不能直接入名）、≤64 字符。
     名字空间前缀走命名真源 `gherkai_runtime.names`——IaC 的 IAM 资源域同源推导（ADR 0033「两层命名」，两侧硬契约）。
     best-effort：调用方（CloudLauncher）兜异常。
@@ -151,7 +151,7 @@ def _handle_timeout(run_id: str, scope_id: str, built, ecs_client=None) -> str:
     """超时处置（ADR 0034「job timeout」节的云端后端一侧）：仍 running 才动手——ListTasks(startedBy=run_id) **同时列
     RUNNING 与 STOPPED**（后者 ECS 保留约 1h）→ DescribeTasks 按 overrides env SCOPE_ID 匹配 → 按 task 状态三路：
     - 运行中 → StopTask(reason 含哨兵) → STOPPED 事件 → exit_observer 记 task_exited(timed_out=True)（stop 后让观察链
-      自然收敛 = 单一真源）；
+      自然收敛，保住单一真源）；
     - **正在停止**（desiredStatus=STOPPED、lastStatus 未到 STOPPED）→ 不动、等观察者。曾只列 RUNNING、把它判成
       「无踪」直写 timed_out，与几秒后到达的真退出记录同键互覆——恰在预算点运行结束的 passed job 可被终判成 timeout；
     - **已 STOPPED 却无退出记录**（STOPPED 事件丢投）→ 用与观察者同一提取函数 `exit_from_task` 从 task 对象落真退出
@@ -283,7 +283,7 @@ def _build(run_id: str):
 
     返回 (meta, event_log, run_store, launcher, max_concurrency, result_store, report_store)——同 local
     build_local_reconcile 的形状，供 tick + finalize 聚合。meta 从 RunStore 读回（definition）。
-    **None = 本 run 云端推进器不该动**（非 detached / 已收尾 / definition 不在库，三支见下）——两个 handler
+    **None 表示本 run 云端推进器不该动**（非 detached / 已收尾 / definition 不在库，三支见下）——两个 handler
     据此整体 no-op。
 
     **store 与 FargateEngine 装配都复用 compose（`build_cloud_stores` / `build_fargate_engines`，单一真源、
@@ -329,7 +329,7 @@ def _build(run_id: str):
     if not run_store.is_detached(run_id):
         # 只推进 detached run（ADR 0034 端到端 cloud 1b）：同步 `run --backend cloud` 由进程内 schedule 推进，
         # 推进器碰它就是双开推进器（抢 claim/RunTask/finalize）。kicker 那扇门由 Stream filter 挡，events 表
-        # Stream 这扇门滤不了（events item 无 detached 标记）——同一判据在此判，返回 None = 全 handler no-op。
+        # Stream 这扇门滤不了（events item 无 detached 标记）——同一判据在此判，返回 None 表示全 handler no-op。
         # 判在 load_run_meta **之前**：同步 run 的每条 worker 事件都会触发本 Lambda，先判省掉强一致 META
         # 读 + offload 正文的 S3 取回，且推进器在断定「不该碰」前不读对方 definition（STATE 缺失同落此支）。
         print(f"skip: run {run_id} 不是 submit 提交到后台执行的 run（同步的 `run --backend cloud` 由发起它的命令自己推进）")
@@ -378,12 +378,12 @@ def _build(run_id: str):
             boto3.client("scheduler", region_name=region),
             kicker_arn=kicker_arn, role_arn=scheduler_role_arn, prefix=prefix)
     launcher = CloudLauncher(compose.make_resolver(engines), run_id=run_id, timeout_watch=timeout_watch)
-    # 并发上限（ADR 0034 机制四）= min(definition 声明, 部署侧 cap)。cap = 本 Lambda 的 MAX_CONCURRENCY env
+    # 并发上限（ADR 0034 机制四）取 min(definition 声明, 部署侧 cap)。cap 是本 Lambda 的 MAX_CONCURRENCY env
     # （IaC 设）：语义是**部署侧 per-run 上限**、非真源——task 在部署方 cluster 上运行、计入部署方账单，故部署方保留
     # 总量控制权，提交侧声明再高也钳到 cap。meta 无值（打通前落的旧 definition）按 1，与打通前行为一致；
     # `or` 顺带把 0 也当无值——0 会让 plan_next 永不提议起 job（run 卡死），按 1 运行是保守可收敛的兜底。
     # env 漏注（IaC 改坏/手工建的 Lambda）时保守回 **1**：cap 的数值真源在 IaC 一处，code 不复制部署值
-    # （复制 = 两处各一份、IaC 调了 cap 而这里没跟就成隐形漂移）。缺省宁可慢（串行仍收敛），不替部署方放宽闸。
+    # （复制就是两处各一份、IaC 调了 cap 而这里没跟就成隐形漂移）。缺省宁可慢（串行仍收敛），不替部署方放宽闸。
     cap = int(os.environ.get("MAX_CONCURRENCY", "1"))
     max_concurrency = min(meta.max_concurrency or 1, cap)
     return meta, event_log, run_store, launcher, max_concurrency, result_store, report_store
@@ -412,7 +412,7 @@ def _run_ids_from_runs_stream(event) -> set[str]:
 def _tick_runs(run_ids: set[str], label: str, *, prebuilt: dict | None = None) -> dict:
     """对每个 run tick 一步；done 则聚合收尾。reconciler（events Stream）与 kicker（runs Stream）共用。
 
-    prebuilt：本次 invoke 已装配好的组合根（run_id → `_build` 结果，**含 None**=该 run 不由云端推进器管），
+    prebuilt：本次 invoke 已装配好的组合根（run_id → `_build` 结果，**含 None**，表示该 run 不由云端推进器管），
     有则复用、不重装——超时路径先 `_build` 做处置再落到此处 tick 同一个 run，重装一次是纯重复工作
     （每次 `_build` 造 4 个 boto3 client + 强一致读 META + 可能的 S3 offload 正文还原）。
     """
@@ -425,7 +425,7 @@ def _tick_runs(run_ids: set[str], label: str, *, prebuilt: dict | None = None) -
     for run_id in run_ids:
         # 逐 run 隔离：一个 run 的 worker revision 解析不出（兼容路径：旧 definition 撞上「默认 variant 在某引擎
         # 无映射」这种合法稳态，ADR 0038 `--set-default` 只警告不拦）不能连坐同批其它 run——events Stream 一个
-        # batch 含多个 run，抛出去 = ESM 重试后整批丢弃、别的 run 事件永久丢失。该 run 记一行、留给下批。
+        # batch 含多个 run，抛出去就是 ESM 重试后整批丢弃、别的 run 事件永久丢失。该 run 记一行、留给下批。
         # 「不回落 family/模板」不受影响：拒的是换镜像，不是拒隔离失败。
         try:
             built = prebuilt[run_id] if run_id in prebuilt else _build(run_id)
@@ -474,7 +474,7 @@ def kicker_handler(event, context):
     """kicker（踢启器）入口——两个触发源：runs 表 Stream 的 **INSERT**（冷启动：submit create_run 写 definition
     即触发 → tick 起首批）+ status --wait 的直接 invoke kickoff（卡住救活：payload `{"run_id":...}`）。
 
-    与 reconciler 共用 tick（起首批 = tick 的 CAS start 分支）——四宿主一份 tick（submit-local / kicker /
+    与 reconciler 共用 tick（起首批就是 tick 的 CAS start 分支）——四宿主一份 tick（submit-local / kicker /
     reconciler / status 接力）。kicker **只被 runs Stream 的 INSERT 触发**（filter 在 IaC 配），故 reconciler
     之后写 runs 表（MODIFY）不触发它——无自触发放大（ADR 0034 被拒方案「runs Stream 触发 reconciler」）。
     与 reconciler 的分工：kicker 负责「让 run 动起来」（冷启动第一脚 + 卡住时补 kickoff），reconciler 负责

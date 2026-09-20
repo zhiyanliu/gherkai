@@ -4,10 +4,10 @@
 的结构骨架（from_env 唯一读 env、退化态是同类实例、外部 client 惰性建）。
 
 `read()` 返回**已解析的 job dict**（非流/句柄）——否则「从哪读」漏进 worker 主流程，S3/stdin 两态就无法
-对主流程同形。subprocess 态：读 stdin 首行 JSON（core 侧 job_to_line 写单行 + \\n，ADR 0024）。
+对主流程呈现同一形态。subprocess 态：读 stdin 首行 JSON（core 侧 job_to_line 写单行 + \\n，ADR 0024）。
 
 两态（ADR 0024）：subprocess 态读 stdin 首行 JSON；S3 态（JOB_S3_URI 指针 + GetObject，因 RunTask overrides
-8192 上限塞不下含 feature 的 job）Fargate 化用。判据=有没有注入 JOB_S3_URI，非「是否 Fargate」（ADR 0016 红线）。
+8192 上限塞不下含 feature 的 job）Fargate 化用。判据是有没有注入 JOB_S3_URI，非「是否 Fargate」（ADR 0016 红线）。
 **无「回落调试」分支**：stdin 本就是手动直接运行入口，subprocess 态即调试态。
 """
 from __future__ import annotations
@@ -21,7 +21,7 @@ class JobSource:
     """按注入的 env 读一个 scope 的 job。subprocess 态：json.loads(sys.stdin.readline())；S3 态：GetObject(JOB_S3_URI)。"""
 
     def __init__(self, *, uri: str | None) -> None:
-        # 私有构造只吃已解析值（对称 ArtifactUploader）：uri 为 None = subprocess 态（读 stdin）、非 None = S3 态。
+        # 私有构造只吃已解析值（对称 ArtifactUploader）：uri 为 None 即 subprocess 态（读 stdin）、非 None 即 S3 态。
         self._uri = uri
 
     @classmethod

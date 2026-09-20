@@ -4,11 +4,11 @@
 // （fromEnv 唯一读 env、退化态是同类实例、外部 client 惰性建）。
 //
 // read() 返回**已解析的 job 对象**（非流/句柄）——否则「从哪读」漏进 worker 主流程，S3/stdin 两态就无法对
-// 主流程同形。read 为 async（stdin 聚合本就 async + S3 态的 GetObject 也 async）。
+// 主流程呈现同一形态。read 为 async（stdin 聚合本就 async + S3 态的 GetObject 也 async）。
 // subprocess 态：读整个 stdin 到 EOF 再切首行 JSON（core 侧 job_to_line 写单行 + \n，ADR 0024）。
 //
 // 两态（ADR 0024）：subprocess 态读 stdin 首行 JSON；S3 态（JOB_S3_URI 指针 + GetObject，因 RunTask overrides
-// 8192 上限塞不下含 feature 的 job）Fargate 化用。判据=有没有注入 JOB_S3_URI，非「是否 Fargate」（ADR 0016 红线）。
+// 8192 上限塞不下含 feature 的 job）Fargate 化用。判据是有没有注入 JOB_S3_URI，非「是否 Fargate」（ADR 0016 红线）。
 // **无「回落调试」分支**：stdin 本就是手动直接运行的入口，subprocess 态即调试态。
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 
@@ -18,7 +18,7 @@ export class JobSource {
   private uri: string | undefined;
 
   private constructor(uri: string | undefined) {
-    // 私有构造只吃已解析值（对称 ArtifactUploader）：uri 为 undefined = subprocess 态（读 stdin）。
+    // 私有构造只吃已解析值（对称 ArtifactUploader）：uri 为 undefined 即 subprocess 态（读 stdin）。
     this.uri = uri;
   }
 
@@ -50,7 +50,7 @@ export class JobSource {
     }
     const bucket = rest.slice(0, slash);
     const key = rest.slice(slash + 1);
-    // maxAttempts: 1 = 关 SDK 重试（对称 Nova boto Config max_attempts=0，ADR 0032）。
+    // maxAttempts: 1 表示关掉 SDK 重试（对称 Nova boto Config max_attempts=0，ADR 0032）。
     const s3 = client ?? new S3Client({ region: process.env.AWS_REGION, maxAttempts: 1 });
     const resp = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }),
       { abortSignal: AbortSignal.timeout(10_000) });

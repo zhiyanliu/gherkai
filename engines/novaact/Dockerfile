@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 # Nova Act worker **基础镜像**（ADR 0037 决策 5「发布方 GHCR 基础镜像 + 使用方定制层」；0024 Fargate 执行；0033「2 镜像」）。
-# 内容 = 同版本 worker 包（`gherkai-worker-novaact`）+ SDK 运行时 + 协议层，**零使用方内容**——使用方的确定性
+# 内容是同版本 worker 包（`gherkai-worker-novaact`）加 SDK 运行时与协议层，**零使用方内容**——使用方的确定性
 # step 由定制层（`FROM <基础镜像>` + COPY steps/ + `GHERKAI_STEPS_DIR`）叠上去，模板与推送注册在 ADR 0038。
 #
 # **两态**（ADR 0037 决策 5）——同一份 Dockerfile，`--build-arg WORKER_SOURCE=` 选：
@@ -11,7 +11,7 @@
 #     uv build --package gherkai-worker-novaact --out-dir dist
 #     docker build --platform linux/amd64 -f engines/novaact/Dockerfile \
 #       --build-arg WORKER_SOURCE=local --build-arg WORKER_WHEEL=gherkai_worker_novaact-<ver>-py3-none-any.whl \
-#       -t gherkai-worker-novaact:dev dist/          # ← context = 放 wheel 的目录（会被整体 COPY 进 local stage）
+#       -t gherkai-worker-novaact:dev dist/          # ← context 指放 wheel 的目录（会被整体 COPY 进 local stage）
 # **必须 `--platform linux/amd64`**：Fargate task-def 固定 X86_64（ARM64 是被拒方案，ADR 0038）；arm Mac 不加则 build 出
 # arm64、Fargate 启动期 exec format error 挂死（ADR 0033）。
 #
@@ -54,5 +54,5 @@ RUN python -m gherkai_worker_novaact --capabilities > /dev/null
 # 三通道分离（ADR 0024）：事件走 DDB（EventSink DDB 态）、诊断走 stderr、SDK 噪声走 stdout——容器日志（awslogs）
 # 抓 stdout/stderr 供调试，事件不依赖日志（走 DDB）。
 # region/凭证不焊镜像：AWS_REGION 经 RunTask overrides 注入、凭证走 task role（ADR 0033「task-def 不焊 region/凭证」节；决策 C 见 ADR 0016）。
-# 入口 = 包的 `__main__`（**不加包装进程**：EVENTS_FD 经 pass_fds 继承，包装层会吞 fd3，ADR 0024/0037 决策 3）。
+# 入口是包的 `__main__`（**不加包装进程**：EVENTS_FD 经 pass_fds 继承，包装层会吞 fd3，ADR 0024/0037 决策 3）。
 CMD ["python", "-m", "gherkai_worker_novaact"]

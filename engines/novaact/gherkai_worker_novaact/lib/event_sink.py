@@ -14,7 +14,7 @@ Nova 用 boto3（同步 SDK）put_item、同步 emit 天然容纳，无需 async
 **两态（ADR 0024「DynamoDB 作 events-out」）**：
 - **fd 态（subprocess）**：写 EVENTS_FD fd（无/非法 → 回落 stdout 调试）。
 - **DDB 态（Fargate 化）**：`EVENTS_DDB_TABLE`+`RUN_ID`+`SCOPE_ID` 注入 → PutItem 到 events 表（PK=run_id#scope_id、
-  SK=进程内自增 seq、body=JSON line）。判据=有没有注入 `EVENTS_DDB_TABLE`，非「是否 Fargate」（ADR 0016 红线）。
+  SK=进程内自增 seq、body=JSON line）。判据是有没有注入 `EVENTS_DDB_TABLE`，非「是否 Fargate」（ADR 0016 红线）。
 """
 from __future__ import annotations
 
@@ -42,7 +42,7 @@ class EventSink:
 
     def __init__(self, *, out: TextIO | None = None, table_name: str | None = None,
                  run_id: str | None = None, scope_id: str | None = None) -> None:
-        # 私有构造只吃已解析好的值（对称 ArtifactUploader.__init__ 不碰 env）。out 有=fd 态；table_name 有=DDB 态。
+        # 私有构造只吃已解析好的值（对称 ArtifactUploader.__init__ 不碰 env）。有 out 即 fd 态；有 table_name 即 DDB 态。
         self._out = out
         self._table_name = table_name
         self._run_id = run_id
@@ -54,7 +54,7 @@ class EventSink:
     def from_env(cls) -> "EventSink":
         """从注入的 env 造（唯一读 env 处）。EVENTS_DDB_TABLE 非空 → DDB 态；否则 fd 态（EVENTS_FD 无/非法 → 回落 stdout）。
 
-        DDB 态判据 = 有没有注入 `EVENTS_DDB_TABLE`（非「是否 Fargate」，ADR 0016 红线）；空串当未注入（`or None`）。
+        DDB 态判据是有没有注入 `EVENTS_DDB_TABLE`（非「是否 Fargate」，ADR 0016 红线）；空串当未注入（`or None`）。
         DDB 态还需 `RUN_ID`+`SCOPE_ID` 拼 PK=run_id#scope_id（组合根/FargateEngine RunTask overrides 注入）。
         """
         table_name = os.environ.get("EVENTS_DDB_TABLE") or None

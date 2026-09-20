@@ -63,7 +63,7 @@ def _patch_eps(monkeypatch, *eps):
 # ---- provider 发现：零个 / 一个 / 多个（ADR 0037 决策 6）----
 
 def test_zero_providers_points_at_the_extra(monkeypatch, capsys):
-    """没装 provider → 退 2 且提示装 `gherkai[deploy-aws]`（不是「未知命令」也不是 traceback）。"""
+    """没装 provider → 以退出码 2 结束且提示装 `gherkai[deploy-aws]`（不是「未知命令」也不是 traceback）。"""
     _patch_eps(monkeypatch)
     assert m.main(["deploy"]) == 2
     err = capsys.readouterr().err
@@ -79,7 +79,7 @@ def test_single_provider_needs_no_provider_flag(monkeypatch):
 
 
 def test_multiple_providers_require_provider_flag(monkeypatch, capsys):
-    """装多个 + 不给 `--provider` → 退 2 并列出名字（前端不替用户猜「往哪个云部署」）。"""
+    """装多个 + 不给 `--provider` → 以退出码 2 结束并列出名字（前端不替用户猜「往哪个云部署」）。"""
     a, b = _StubProvider(), _StubProvider()
     _patch_eps(monkeypatch, _FakeEP("aws", a), _FakeEP("zzz", b))
     assert m.main(["deploy"]) == 2
@@ -89,7 +89,7 @@ def test_multiple_providers_require_provider_flag(monkeypatch, capsys):
 
 
 def test_multiple_providers_selected_by_name(monkeypatch):
-    """装多个 + `--provider <名>` → 用点名的那个（名 = entry point 名）。"""
+    """装多个 + `--provider <名>` → 用点名的那个（名即 entry point 名）。"""
     a, b = _StubProvider(), _StubProvider()
     _patch_eps(monkeypatch, _FakeEP("aws", a), _FakeEP("zzz", b))
     assert m.main(["deploy", "--provider", "zzz"]) == 0
@@ -104,7 +104,7 @@ def test_unknown_provider_name_lists_installed(monkeypatch, capsys):
 
 
 def test_provider_load_failure_is_named_not_traceback(monkeypatch, capsys):
-    """provider 装了但加载炸（半装/版本不匹配）→ 退 2 + 点名 entry point，不让 traceback 裸奔。
+    """provider 装了但加载炸（半装/版本不匹配）→ 以退出码 2 结束并点名 entry point，不让 traceback 裸奔。
 
     「装了但不可用」与「没装」是两种处境、措辞必须分开（前者不该被劝去 `pip install`）。
     """
@@ -171,7 +171,7 @@ def test_synth_only_dir_lands_on_args(monkeypatch):
 
 
 def test_three_actions_are_mutually_exclusive(monkeypatch):
-    """`--diff` / `--synth-only` / `--bootstrap` 三个动作互斥（同时给 → argparse 退 2，不猜意图）。"""
+    """`--diff` / `--synth-only` / `--bootstrap` 三个动作互斥（同时给 → argparse 以退出码 2 结束，不猜意图）。"""
     _patch_eps(monkeypatch, _FakeEP("aws", _StubProvider()))
     with pytest.raises(SystemExit) as e:
         m.main(["deploy", "--diff", "--bootstrap"])
@@ -231,7 +231,7 @@ def test_help_works_without_provider_and_explains_why(monkeypatch, capsys):
 def test_cli_does_not_import_aws_cdk(monkeypatch):
     """**前端不 import `aws_cdk`**（jsii 绑定，import 即起 node 子进程，ADR 0037 决策 6）。
 
-    做法 = 往 `sys.modules` 塞毒（值为 `None` 时 `import aws_cdk` 立即 ImportError），**不是**事后断言
+    做法是往 `sys.modules` 塞毒（值为 `None` 时 `import aws_cdk` 立即 ImportError），**不是**事后断言
     `"aws_cdk" not in sys.modules`——后者依赖「本 session 没有别的测试 import 过它」，而 provider 包自己的
     CDK 合成测试就会 import 它，运行全量时那种断言会因执行顺序假失败。塞毒与顺序无关：前端真去 import 就炸。
     只测前端这半边（provider 被 stub）：真 provider 的 import 面由它自己守（其模块头写明了同一条）。
@@ -253,7 +253,7 @@ def test_non_deploy_command_does_not_load_any_provider(monkeypatch):
 
 
 def test_readonly_flags_cannot_be_combined_with_a_provider_subverb(monkeypatch, capsys):
-    """`--diff/--synth-only/--bootstrap` 与写账户的子动词同给 → 退 2、子动词不执行（ADR 0037 决策 6：三 flag 是
+    """`--diff/--synth-only/--bootstrap` 与写账户的子动词同给 → 以退出码 2 结束、子动词不执行（ADR 0037 决策 6：三 flag 是
     reviewer 的只读靶点；子动词的分派优先级不得把它们静默吞成真推镜像）。"""
     seen: list[str] = []
 

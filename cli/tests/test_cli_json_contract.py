@@ -27,7 +27,7 @@ def _documented_keys() -> set[str]:
 def _leaf_keys(o, out: set[str] | None = None, *, opaque: "set[str]" = frozenset()) -> set[str]:
     """递归收全部 dict 键名（只取键名本身，不含路径——文档按键名解释）。
 
-    opaque = 「到这个键就停止下钻」的键名集（该键本身仍要文档化，它的子键不属本契约）：用于引擎原样透传的
+    opaque 是「到这个键就停止下钻」的键名集（该键本身仍要文档化，它的子键不属本契约）：用于引擎原样透传的
     对象（explain 的 `args` / `result`，内部键随 SDK 漂移，ADR 0042 决策四）。**与 ignore 不同**：ignore 是
     「这个键名不用写进文档」，会连同名的真契约键一起放过；opaque 只切断该节点以下的递归。
     """

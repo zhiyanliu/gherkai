@@ -134,7 +134,7 @@ test("flush failure swallowed but dir kept", async () => {
   assert.ok(fs.existsSync(html) && fs.existsSync(log));
 });
 
-// ---- fromEnv：读注入 env，runDir = MIDSCENE_RUN_DIR 父级 ----
+// ---- fromEnv：读注入 env，runDir 取 MIDSCENE_RUN_DIR 的父级 ----
 test("fromEnv enabled when bucket set, runDir = MIDSCENE_RUN_DIR parent", () => {
   const root = tmproot();
   const runDir = path.join(root, "reports", "rid", "midscene-run");
@@ -144,7 +144,7 @@ test("fromEnv enabled when bucket set, runDir = MIDSCENE_RUN_DIR parent", () => 
   const u = ArtifactUploader.fromEnv();
   assert.equal(u.enabled, true);
   assert.equal((u as any).bucket, "bkt");
-  assert.equal((u as any).runDir, path.dirname(runDir));  // run 树根 = MIDSCENE_RUN_DIR 父级
+  assert.equal((u as any).runDir, path.dirname(runDir));  // run 树根即 MIDSCENE_RUN_DIR 的父级
   delete process.env.ARTIFACT_S3_BUCKET;
   delete process.env.ARTIFACT_S3_PREFIX;
   delete process.env.MIDSCENE_RUN_DIR;

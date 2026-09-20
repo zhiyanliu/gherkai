@@ -30,12 +30,12 @@ def test_value_error_not_transient():
 
 # ---- gaierror errno 细分（核心护栏）----
 def test_gaierror_eai_again_is_transient():
-    # EAI_AGAIN = DNS 临时失败 → 瞬时（对齐 Midscene），可重试
+    # EAI_AGAIN 即 DNS 临时失败 → 瞬时（对齐 Midscene），可重试
     assert rs._is_transient_network(socket.gaierror(socket.EAI_AGAIN, "Temporary failure")) is True
 
 
 def test_gaierror_eai_noname_is_permanent():
-    # EAI_NONAME = DNS 永久（域名不存在，≈ENOTFOUND）→ 不重试
+    # EAI_NONAME 即 DNS 永久（域名不存在，≈ENOTFOUND）→ 不重试
     assert rs._is_transient_network(socket.gaierror(socket.EAI_NONAME, "Name or service not known")) is False
 
 
@@ -57,7 +57,7 @@ def test_eai_again_in_context_chain():
     assert rs._is_transient_network(outer) is True
 
 
-# ---- botocore ClientError 按码/状态码细分（ADR 0028：AgentCore 起会话服务端瞬时故障）----
+# ---- botocore ClientError 按错误码/状态码细分（ADR 0028：AgentCore 起会话服务端瞬时故障）----
 def _client_error(code=None, status=None):
     """造一个 botocore ClientError（response 里带 Error.Code / ResponseMetadata.HTTPStatusCode）。"""
     from botocore.exceptions import ClientError
@@ -70,7 +70,7 @@ def _client_error(code=None, status=None):
 
 
 def test_client_error_throttling_is_transient():
-    # 节流码 → 瞬时（AgentCore 起会话限流，可重试）
+    # 节流错误码 → 瞬时（AgentCore 起会话限流，可重试）
     assert rs._is_transient_network(_client_error(code="ThrottlingException")) is True
     assert rs._is_transient_network(_client_error(code="TooManyRequestsException")) is True
     assert rs._is_transient_network(_client_error(code="SlowDown")) is True

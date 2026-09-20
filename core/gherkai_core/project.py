@@ -65,10 +65,10 @@ def reduce_event(
     """把单个 worker 事件归约进 JobResult（就地累积，ADR 0024/0026）。
 
     **这是 `schedule._Worker._reduce` 提炼出的同一份逻辑**（schedule delegate 到此，零行为变化）。
-    now = 事件到达 core 的墙钟（同步路径 = schedule 的注入 clock()；无状态路径 = reconciler 从 events
+    now 是事件到达 core 的墙钟（同步路径下取 schedule 注入的 clock()；无状态路径下由 reconciler 从 events
     表 item 的 emit 时刻还原）。纯函数：只改传入的 result/scenario_status/timing，无 I/O。
     """
-    # started 事件：记各级起始时间戳（now = 事件到达 core 的墙钟，ADR 0024）
+    # started 事件：记各级起始时间戳（now 是事件到达 core 的墙钟，ADR 0024）
     if isinstance(event, ScopeStarted):
         timing.scope_start = now
         # 会话血缘随首事件即落（ADR 0028）：超时/中止时 scope_done 不会到，但 session_id 此刻已记下。
@@ -133,7 +133,7 @@ def reduce_event(
 
 # 平台侧退出哨兵（ADR 0034 机制二及其「launch 失败补偿」「退出码缺失」两条推论）：worker 进程**没有**给出退出码的两种形态
 # 都落它——①tick 起 task 失败（RunTask 抛/Popen OSError，进程根本没起）；②观察者收到 STOPPED 却缺 exitCode（容器没能开始运行，
-# 如拉不到镜像）。非 0 即走「exit≠0 → ERROR」既有谓词，值本身不进任何分支判断；选 255 避开 worker 真实语义码（如网络码 80），
+# 如拉不到镜像）。非 0 即走「退出码非零 → ERROR」既有谓词，值本身不进任何分支判断；选 255 避开 worker 真实语义码（如网络故障退出码 80），
 # 只为日志/归因可辨识「这是平台侧起不来、不是 worker 执行中崩溃」。core 单点定义，tick 与观察者 Lambda 都 import 本常量、别各抄一份。
 PLATFORM_FAILED_EXIT = 255
 
@@ -143,15 +143,15 @@ class TaskExited:
     """平台侧退出观察者写入 events 表**独立键空间**的退出记录（ADR 0034 机制一/二）。
 
     **不是 worker 的 wire 事件**（不在 model.Event union、不进 wire.py 的 worker↔core 协议）——它由
-    平台侧观察者产生：cloud = ECS Task STOPPED 事件的极薄 Lambda（从事件 payload 读 exitCode）；
-    local = per-run 进程 `proc.wait()`。走独立键空间（cloud = 保留高位数值 SK + 属性 `item_type='exit'`——
-    events 表 SK 是 NUMBER、字符串前缀结构上不可行；local = 独立 `exits` 表；见 ADR 0034 机制一），不占
+    平台侧观察者产生：云端后端下是 ECS Task STOPPED 事件的极薄 Lambda（从事件 payload 读 exitCode）；
+    本机后端下是 per-run 进程 `proc.wait()`。走独立键空间（云端后端下是保留高位数值 SK 加属性 `item_type='exit'`——
+    events 表 SK 是 NUMBER、字符串前缀结构上不可行；本机后端下是独立 `exits` 表；见 ADR 0034 机制一），不占
     worker 的连续数值 seq 段，故不参与 adapter 的单调 seq/断号检测（机制一：免撞号覆盖 scope_done）。
 
-    exit_code=None = 退出码未知（有退出记录、却没取到码）。**不是宽限态**（ADR 0034 机制二「退出码缺失」条）：
+    exit_code 为 None 表示退出码未知（有退出记录、却没取到码）。**不是宽限态**（ADR 0034 机制二「退出码缺失」条）：
     观察者只有一次机会看到 STOPPED，缺码时它应落 `PLATFORM_FAILED_EXIT` 哨兵 + reason；仍写 None 的（老版本观察者/
     未知写者）由 `_job_status` 判 ERROR，绝不判 RUNNING（否则 run 永久 wedge）。
-    reason：平台侧归因（cloud = `stopCode: stoppedReason`），只在观察者落哨兵时带；投影进 job message 给使用方看。
+    reason：平台侧归因（云端后端下是 `stopCode: stoppedReason`），只在观察者落哨兵时带；投影进 job message 给使用方看。
     """
 
     scope_id: str
@@ -190,8 +190,8 @@ def project(meta: RunMeta, records: list[EventRecord], baseline: RunState | None
 
     全量重放（非增量）→ 天然幂等、抗乱序、抗重投（ADR 0034 机制三前提）。步骤：
     1. 按 scope_id 分组 records；每组内 kind='event' 的按 seq 升序喂 reduce_event 归约出 JobResult；
-    2. 「两件都要」纯谓词（机制二，谓词全文单一真源 = `_job_status`，别在两处各写一份）：以「有无
-       task_exited」为一级键——有退出记录时进程终止本身即终态信号（exit≠0 → ERROR；exit==0 且见
+    2. 「两件都要」纯谓词（机制二，谓词全文的单一真源是 `_job_status`，别在两处各写一份）：以「有无
+       task_exited」为一级键——有退出记录时进程终止本身即终态信号（退出码非零 → ERROR；exit==0 且见
        scope_done → scenario 归约终态；exit==0 无 scope_done（含零事件）→ ERROR；退出码未知 →
        ERROR）；无退出记录时见 scope_started → RUNNING、否则 PENDING。
     3. 聚合成 RunState：各 JobState（scope_id→status/session_id）+ run 总 status（_aggregate 终态）+
@@ -293,7 +293,7 @@ def _reduce_scope(job: Job, recs: list[EventRecord]) -> tuple[JobResult, Status,
         elif exited.exit_code != 0:
             result.message = f"worker 非正常退出（exit {exited.exit_code}；事件流里没有失败原因——详见 worker 日志）"
         elif exited.exit_code == 0 and not saw_scope_done:
-            # exit==0 却缺 scope_done = 进程声称成功、内容没发完的矛盾形态。
+            # exit==0 却缺 scope_done，这是进程声称成功、内容没发完的矛盾形态。
             result.message = "worker 正常退出但没有报完这次运行的结果——按错误处理（详见 worker 日志）"
     return result, status, max_seq
 
@@ -301,7 +301,7 @@ def _reduce_scope(job: Job, recs: list[EventRecord]) -> tuple[JobResult, Status,
 class NonTerminalSnapshot(RuntimeError):
     """收尾快照里有 job 仍非终态（ADR 0031 决定一·补：JobResult.status 只许终态，强制点在 project_full）。
 
-    正常到不了：tick 只在 plan_next 判全终态时才聚合。到了 = 本次读到的 events 快照落后于判定依据（或写者违约），
+    正常到不了：tick 只在 plan_next 判全终态时才聚合。到了就说明本次读到的 events 快照落后于判定依据（或写者违约），
     本轮不落任何判定真值、让触发源重试——绝不把 running/pending 写进 jobs/*.json。"""
 
 
@@ -353,32 +353,32 @@ def _job_status(
 ) -> Status:
     """单个 job 的态（ADR 0034 机制二「两件都要」纯谓词，含 worker 崩溃修正）。
 
-    「两件都要」的**内容完整（scope_done）要求只对声称成功（exit==0）的进程成立**——exit≠0 时进程非干净
-    终止（崩溃/网络码/SIGKILL），scope_done 本就不会来（worker 崩了没机会发），此时进程终止本身即终态信号，
+    「两件都要」的**内容完整（scope_done）要求只对声称成功（exit==0）的进程成立**——退出码非零时进程非干净
+    终止（崩溃/网络故障/SIGKILL），scope_done 本就不会来（worker 崩了没机会发），此时进程终止本身即终态信号，
     不能再等 scope_done（否则 crash job 永远 RUNNING、reconciler 死循环——实际运行 crash worker 复现）。
 
     **判定以「有无 task_exited」为一级键，不设 saw_scope_started 前置**（ADR 0034 机制二）——零事件 + exit==0
     （构造期 SIGTERM 干净退出，0024 设计内）若短路成 PENDING，会与已 claim 的 RUNNING 基线单调合并成永停
     RUNNING、run 永不收敛（对抗验证探针复现）：
     - 有 task_exited（进程已终止，退出即终态信号，不论生命周期到哪）：
-        · exit_code != 0 → ERROR（崩溃/网络码/SIGKILL/launch 失败哨兵；也防"发完 scope_done 又非0退出"
+        · exit_code != 0 → ERROR（崩溃/网络故障/SIGKILL/launch 失败哨兵；也防"发完 scope_done 又非0退出"
           的误报 PASSED）；
         · exit_code is None → ERROR（有退出记录却无码：不可判定为通过；机制二「退出码缺失」条——观察者本应落
           哨兵，此分支是防 wedge 的防御。曾判 RUNNING「等观察者补」，但 STOPPED 事件只来一次、永远补不上）；
         · exit_code == 0 且 saw_scope_done → scenario 归约的终态（passed/failed/error）；
-        · exit_code == 0 但没 scope_done（含零事件干净退出）→ ERROR（内容不完整但进程说成功=矛盾，
+        · exit_code == 0 但没 scope_done（含零事件干净退出）→ ERROR（内容不完整但进程说成功，两者矛盾，
           judged as error 比 running 死循环安全）。
     - 无 task_exited（进程还没终止）：saw_scope_started → RUNNING；否则 PENDING（还没起/还没写事件）。
     """
     if exited is not None:
         if exited.timed_out:
-            # 超时处置的 stop（ADR 0034「job timeout」节）：不论 exit_code 形态（协作退 0/SIGKILL/未落值），
+            # 超时处置的 stop（ADR 0034「job timeout」节）：不论 exit_code 形态（协作以退出码 0 退出 / SIGKILL / 未落值），
             # 处置本身即终态信号——归 ERROR，归因由 _reduce_scope 补 error_type="timeout"。
             return Status.ERROR
         if exited.exit_code is None:
             return Status.ERROR  # 有退出记录却无码 → 不可判定为通过；判 RUNNING 会永久 wedge（补码没有第二次机会）
         if exited.exit_code != 0:
-            return Status.ERROR  # 进程非干净终止 → 终态（crash/网络码/SIGKILL/launch 失败统一收敛）
+            return Status.ERROR  # 进程非干净终止 → 终态（crash/网络故障/SIGKILL/launch 失败统一收敛）
         # 到此 exit_code == 0（干净退出）：内容完整才算数
         if not saw_scope_done:
             return Status.ERROR  # 干净退出却没发完 scope_done（含零事件）：矛盾 → error（不死循环）
@@ -427,8 +427,8 @@ def projected_run_status(jobs: dict[str, JobState]) -> Status:
     **判据只看传入的 job 态、不读库、不看传入的 run 级值**：两个 RunStore adapter 须落同一规则，而 DDB 侧
     标量条件写发生在 per-job 条件写之前（那一刻库中 job 态还没更新、读它无意义），判据依赖库就没法对拍。
     真实 tick 流里已 claim 的 job 必在投影中现 `running`（`project` 以 RunStore 态为基线单调合并），故
-    「全 pending」= 这个 run 还没起过任何 job——status 如实显示 `pending` 才有诊断价值（读到仍 pending
-    = 推进可能没启动）。两端取值都是非终态，commit point 的专属性不受影响。
+    「全 pending」说明这个 run 还没起过任何 job——status 如实显示 `pending` 才有诊断价值（读到仍 pending
+    就意味着推进可能没启动）。两端取值都是非终态，commit point 的专属性不受影响。
     """
     if all(js.status == Status.PENDING for js in jobs.values()):
         return Status.PENDING
