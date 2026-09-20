@@ -60,7 +60,9 @@ def main() -> None:
                 "pass_rate": (round(sum(x["_pass_rate"] for x in ds if x["_pass_rate"] is not None)
                                     / max(1, sum(1 for x in ds if x["_pass_rate"] is not None)), 3)
                               if any(x["_pass_rate"] is not None for x in ds) else None),
-                "contaminated": arm == "without_skill" and any((x.get("repo_touches", 0) or x.get("skill_copy_touches", 0)) for x in ds),
+                # 触仓库对任何臂都是污染（仓库里有 skill 想替代的原始教材）；触 skill 副本只对 baseline 臂算污染（skill 臂本该读它）。
+                "contaminated": any(x.get("repo_touches", 0) for x in ds)
+                                or (arm == "without_skill" and any(x.get("skill_copy_touches", 0) for x in ds)),
             }
             out.append(rec)
             if not a.json:
@@ -69,7 +71,7 @@ def main() -> None:
                 print(f"{ev[:40]:40} {arm:14} {n:>2} {rec['avg_seconds']:>5} {rec['cost_usd']:>6.2f} {rec['repo_touches']:>4} "
                       f"{rec['skill_copy_touches']:>5} {rec['network_calls']:>3} {rec['errors']:>3} {pr:>5}{flag}")
         if not a.json:
-            for arm in ("with_skill", "without_skill"):
+            for arm in ("with_skill", "old_skill", "without_skill"):
                 ds = [x for (ev, a_), xs in rows.items() if a_ == arm for x in xs]
                 if ds:
                     print(f"{'合计 ' + arm:55} {len(ds):>2} {round(sum(x['total_duration_seconds'] for x in ds) / len(ds)):>5} "

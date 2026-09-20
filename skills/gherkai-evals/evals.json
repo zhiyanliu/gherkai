@@ -1,6 +1,6 @@
 {
   "skill_name": "gherkai",
-  "notes": "缺省集只执行 plan / explain / doctor / list-deterministic，零条真 AWS；opt_in=true 的条目会真跑 run / submit、只由 contributor 在自己的部署上按需跑。fixture 路径相对本目录；评测前用 materialize.py 把 fixture 物化到仓库外的舞台，两臂都在舞台里以 `claude -p` 跑、cwd = 舞台、PATH 前置舞台 bin/。 第四轮前按第三轮评分者批评收紧：复合断言拆条（eval 2/9/10/11/13）、放行开关与投票的判据正向化（eval 9/14）、禁绕过式修复（eval 12）、正则须匹配真实落地地址（eval 1）、禁留新 run 目录（eval 13）；「--help 与只读命令不算执行」统一写进所有「没有执行」断言。断言总数随之变化，通过率与前一轮不可直接比。 第五轮前：eval 1 的四合一断言拆为「复用确定性 step」与「正则鲁棒（含对实测 301 终点与 evil 主机的机械判据）」；所有缺省 eval 加「不把评测脚手架当用户环境」；新增 eval 15（scope 跨文件撞名，fixture scope-collision）与 eval 16（Background + Outline 写用例）。 第五轮后：eval 16 断言 2 与 expected_output 对齐（确定性 URL step 或页面级语义断言二选一、各带判据），第五轮 fable/sonnet 的 with-skill 因旧断言被误判。 第五轮后尺子备忘已落：eval 1 正则加裸主机须命中；eval 2 三条条件式断言改为必须落盘；eval 16 步号口径与 Background 执行语义拆成两条（缺省集 122 条）。 第六轮前按 fixture 真值校准两条尺子：eval 13 的 job 级判定口径改为「判 error 且归因 timeout」（超时不归 aborted）；eval 14 的 prompt 复述改用 fixture 里真实的断言文本（原先那句「正文里没出现『图灵』」在 fixture 里零命中）；另去重一处：eval 5 的断言 5 删掉与断言 3 重复的「真跑还缺 AWS region 与凭证」尾句（同一表现原本计两分、现只计一分）。断言总数不变（缺省集 122 条），通过率与前一轮不可直接比。",
+  "notes": "缺省集只执行 plan / explain / doctor / list-deterministic，零条真 AWS；opt_in=true 的条目会真跑 run / submit、只由 contributor 在自己的部署上按需跑。fixture 路径相对本目录；评测前用 materialize.py 把 fixture 物化到仓库外的舞台，两臂都在舞台里以 `claude -p` 跑、cwd = 舞台、PATH 前置舞台 bin/。 第四轮前按第三轮评分者批评收紧：复合断言拆条（eval 2/9/10/11/13）、放行开关与投票的判据正向化（eval 9/14）、禁绕过式修复（eval 12）、正则须匹配真实落地地址（eval 1）、禁留新 run 目录（eval 13）；「--help 与只读命令不算执行」统一写进所有「没有执行」断言。断言总数随之变化，通过率与前一轮不可直接比。 第五轮前：eval 1 的四合一断言拆为「复用确定性 step」与「正则鲁棒（含对实测 301 终点与 evil 主机的机械判据）」；所有缺省 eval 加「不把评测脚手架当用户环境」；新增 eval 15（scope 跨文件撞名，fixture scope-collision）与 eval 16（Background + Outline 写用例）。 第五轮后：eval 16 断言 2 与 expected_output 对齐（确定性 URL step 或页面级语义断言二选一、各带判据），第五轮 fable/sonnet 的 with-skill 因旧断言被误判。 第五轮后尺子备忘已落：eval 1 正则加裸主机须命中；eval 2 三条条件式断言改为必须落盘；eval 16 步号口径与 Background 执行语义拆成两条（缺省集 122 条）。 第六轮前按 fixture 真值校准两条尺子：eval 13 的 job 级判定口径改为「判 error 且归因 timeout」（超时不归 aborted）；eval 14 的 prompt 复述改用 fixture 里真实的断言文本（原先那句「正文里没出现『图灵』」在 fixture 里零命中）；另去重一处：eval 5 的断言 5 删掉与断言 3 重复的「真跑还缺 AWS region 与凭证」尾句（同一表现原本计两分、现只计一分）。断言总数不变（缺省集 122 条），通过率与前一轮不可直接比。 第七轮（2026-09-20）：新增 fixture step-craft（纯文本、无 run：cart.py / cart.mts 读瞬时值且失败消息无现场；title.py 写成 async def；title.ts 扩展名错）与 eval 17 / 18 / 19，对照臂改为旧版 skill 快照（run_evals.py 的 old_skill 臂），量的是 references/deterministic-steps.md 这次改动本身；「没有执行」断言把 playwright install 一并列入安装类。 第七轮 fable 评分后按评分者批评收紧：eval 17 / 18 的「几秒级上限」改为 1 到 10 秒的数值区间；eval 18 的 Midscene 失败异常放宽为 DeterministicAssertion 或 node:assert 的 AssertionError（与 worker 契约一致，原断言过窄造成假阴性）、单测位置允许 steps/ 之外、造页面允许等价方式、「只动那一步」改为两条 scenario 各一行；eval 17 / 18 各加一条「点出同目录既有埋点且不越界修改」；eval 19 的合取断言拆开、加「不残留 title.ts」。 第七轮 sonnet 评分后：eval 19 的合取断言拆成「面向以后的自查方法」与「不残留 title.ts 且内容逐字一致」两条；eval 17 补「Python handler 仍为同步 def」、区间写明含端点。",
   "evals": [
     {
       "id": 1,
@@ -274,6 +274,66 @@
         "正确解释步号口径：Background 的导航步是每条 scenario 的第 0 步，scenario 里书写的步跟着后移（explain --step N 同此口径）",
         "正确说明 Background 的执行语义：同一 scope 里每条 scenario 都各自重跑一遍 Background，不能靠它承接上一条的页面状态",
         "没有执行 gherkai run 或 gherkai submit（`--help` 与只读命令不算执行）",
+        "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报",
+        "没有把评测舞台的脚手架（bin/gherkai shim、.eval-aws 下的空凭证文件、环境变量注入）当成用户的真实环境写进汇报或当成阻塞项上报"
+      ]
+    },
+    {
+      "id": 17,
+      "slug": "flaky-visible-step",
+      "fixture": "step-craft",
+      "prompt": "steps/cart.py 和 steps/cart.mts 里那条『元素 \"#cart-count\" 可见』的确定性 step 时不时判否，可我手动打开 https://shop.example.test/ 加购之后角标明明就在那里。features/checkout.feature 的两条 scenario 都用它。帮我看看 step 代码哪里有问题、把两侧都改好；改完在本机不花钱地确认它还注册着、plan 的标注没变。",
+      "expected_output": "根因是判定读了瞬时值：Python 的 is_visible() 与 TypeScript 的 isVisible() 都不等待，页面还在加载就判否。两侧改成带等待、带几秒超时的判定（Python 用 expect(...).to_be_visible(timeout=...) 或等价；Midscene 用 locator.waitFor 并把 TimeoutError 转成 DeterministicAssertion），失败消息带选择器与页面地址；模式、description、example 不动，feature 不用改；两侧各 list-deterministic 一遍、plan 一遍确认标注不变；不真跑。",
+      "expectations": [
+        "根因判定正确：两侧的判定读的是瞬时值（Python is_visible() / TypeScript isVisible() 不等待），不是被测应用、feature 写法或选择器写错的问题",
+        "Python 侧改成带等待的判定（Playwright 的 expect(...).to_be_visible(timeout=...) 一族，或等价的带超时等待），handler 仍是同步 def，并且失败仍以 AssertionError 抛出（等待超时的 TimeoutError 没有直接穿出去）",
+        "Midscene 侧改成带等待的判定（locator.waitFor / page.waitForURL 等），超时被捕获后转成 DeterministicAssertion 抛出，而不是让 TimeoutError 直接穿出去",
+        "两侧的等待都给了显式上限，且取值在 1 到 10 秒之间（含端点；不是 Playwright 默认的 30 秒，也不是固定 sleep）",
+        "两侧的失败消息都带现场：至少含选择器与当前页面地址（Python 的 page.url / TypeScript 的 page.url()）",
+        "Midscene 侧 step 文件运行期没有 import playwright 或 @playwright/test（type-only import 不算）；仍从包名 @gherkai/worker-midscene 导入",
+        "模式、description、example 两侧保持同文且未改动，features/checkout.feature 与 fixture 一致（没有为修 step 去改用例）",
+        "改完对 novaact 与 midscene 各执行了 gherkai list-deterministic --engine（至少一次），且执行了 gherkai plan features/checkout.feature，并在汇报里说明标注与改前一致（两条 scenario 的『元素可见』步仍标确定性）",
+        "汇报里点出同目录另外埋着的问题至少一处（steps/title.py 的 handler 是 async def；steps/title.ts 的扩展名让 Midscene 静默跳过），且没有擅自修改它们（用户只要修『元素可见』、并要求 plan 标注不变）",
+        "没有执行 gherkai run 或 gherkai submit，也没有执行任何安装命令（npm i、uv tool install、pip install、playwright install）；`--help` 与只读命令不算执行",
+        "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报",
+        "没有把评测舞台的脚手架（bin/gherkai shim、.eval-aws 下的空凭证文件、环境变量注入）当成用户的真实环境写进汇报或当成阻塞项上报"
+      ]
+    },
+    {
+      "id": 18,
+      "slug": "new-step-with-unit-test",
+      "fixture": "step-craft",
+      "prompt": "把 features/checkout.feature 里那条老被 AI 判错的『Then \"购物车里有 1 件商品\"』改成确定性 step：数量显示在 #cart-count 这个元素的文本里，数字要当参数（以后会有 2 件、3 件的用例）。两个引擎都要能用；判定逻辑要写成能在本地用真浏览器单测的形态，单测也写出来——不要在这台机器上装任何东西，写好告诉我怎么装依赖、怎么运行。改完确认注册上了、plan 的标注对。",
+      "expected_output": "新增两侧成对的确定性 step（Python 同步 def + .mts），正则用具名组接数字、模式带引号或特征词；description / example 同文，feature 那步改成与 example 一致的文本。判定逻辑放 _ 前缀辅助模块（如 _checks.py / _checks.mts），注册文件只做薄壳相对导入；判定带等待与几秒超时，失败抛 AssertionError / DeterministicAssertion 且消息含选择器、期望值与实际值。单测文件命名让 worker 跳过（test_*.py / *.test.mts），用真浏览器 + set_content 造页面，覆盖通过与失败两条路；给出安装开发依赖与运行命令但不执行。两侧 list-deterministic、plan 确认标注；不真跑、不安装。",
+      "expectations": [
+        "新 step 两侧都有：Python 用 @deterministic 注册且 handler 是同步 def；Midscene 放在 .mts（或 .mjs）文件里；两侧正则都用具名组接收数字参数（Python (?P<...>\\d+) / JS (?<...>\\d+) 或等价），模式带引号或特征词、够窄",
+        "两侧 description 与 example 同文，example 是可直接抄进 feature 的完整 step 文本（含 Then）；features/checkout.feature 里那一步（两条 scenario 各一行）改成与 example 一致的文本，其它行未增删",
+        "判定逻辑与注册分离：判定函数放在 _ 前缀的辅助模块（或 _ 开头目录）里，注册文件只做薄壳并相对导入它",
+        "判定带等待（Python 用 expect(...).to_have_text 一族或等价的带显式超时的重试等待；Midscene 用 waitFor 等或等价），显式超时取值在 1 到 10 秒之间（含端点）；失败抛 AssertionError（Python）/ DeterministicAssertion 或 node:assert 的 AssertionError（Midscene），消息含选择器、期望值与实际值",
+        "单测测的是辅助模块里的判定函数，用真浏览器加 set_content / setContent（或等价方式）造出页面，至少覆盖通过与失败两条路；单测文件要么不落在 steps/ 里，要么落在 steps/ 时文件名让 worker 加载时跳过（Python 以 test_ 开头；Midscene 含 .test.）",
+        "给出了安装开发依赖与运行单测的命令（Python 侧 pytest 与 playwright；Midscene 侧 node --test 或 vitest 加 playwright），但没有在本机执行安装",
+        "对 novaact 与 midscene 各执行了 gherkai list-deterministic --engine（至少一次）且两侧清单都含新 step；执行了 gherkai plan features/checkout.feature，新 step 那步标为确定性、其余 AI 步没有被新模式误伤",
+        "汇报里点出同目录既有的问题至少一处（cart.py / cart.mts 读瞬时值且失败消息无现场；title.py 的 async def；title.ts 的扩展名），并说明是否修改、为什么",
+        "没有执行 gherkai run 或 gherkai submit，也没有执行任何安装命令（npm i、uv tool install、pip install、playwright install）；`--help` 与只读命令不算执行",
+        "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报",
+        "没有把评测舞台的脚手架（bin/gherkai shim、.eval-aws 下的空凭证文件、环境变量注入）当成用户的真实环境写进汇报或当成阻塞项上报"
+      ]
+    },
+    {
+      "id": 19,
+      "slug": "async-handler-and-wrong-extension",
+      "fixture": "step-craft",
+      "prompt": "features/checkout.feature 里『Then 页面标题包含 \"示例商店\"』这一步很怪：用 Nova Act 的那条 scenario 上这一步直接记 error，用 Midscene 的那条 scenario 上 gherkai plan 连确定性标注都没有、像是走了 AI。steps/title.py 和 steps/title.ts 我都写了呀。怎么回事？帮我修好并确认。",
+      "expected_output": "两个独立根因：Nova Act 侧 handler 写成了 async def（必须同步，写成 async 的那一步直接记 error）；Midscene 侧文件扩展名是 .ts，收集时被静默跳过（只加载 .mts / .mjs），所以那一步在 Midscene 上改由 AI 判定、plan 没标注。修法：title.py 改成同步 def；title.ts 改名为 title.mts。修后两侧 list-deterministic 都含『页面标题包含』，plan 两条 scenario 该步都标确定性。不改 feature、不删 step、不真跑。",
+      "expectations": [
+        "Nova Act 侧根因判定正确：steps/title.py 的 handler 写成了 async def，同步函数才会执行断言，写成 async 的那一步直接记 error；修法是改成同步 def（判定逻辑保留）",
+        "Midscene 侧根因判定正确：steps/title.ts 的扩展名不在加载范围内（只加载 .mts / .mjs），被静默跳过、不报错，所以这一步改由 AI 判定；解释了为什么此前没有任何报错（不在加载范围就不会被读，也就没有失败可报）；修法是改成 .mts（内容基本不动）",
+        "没有把问题归到 feature 写法或被测应用，也没有用改 feature 措辞、删掉这条 step、或把它交回 AI 判定的方式绕过",
+        "修后对 novaact 与 midscene 各执行了一次 gherkai list-deterministic --engine，两侧清单都含『页面标题包含』",
+        "修后执行了 gherkai plan features/checkout.feature，两条 scenario 的『页面标题包含』那步都标为确定性，汇报里引用了这个结果",
+        "汇报里面向以后给出了自查方法（改完 steps/ 后对两个引擎各执行一次 list-deterministic，或用 plan 看标注），不只是回顾本次执行过的命令",
+        "修后 steps/ 里不残留 title.ts（改名而非复制），且 title.mts 的内容与原 title.ts 逐字一致",
+        "没有执行 gherkai run 或 gherkai submit，也没有执行任何安装命令（npm i、uv tool install、pip install、playwright install）；`--help` 与只读命令不算执行",
         "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报",
         "没有把评测舞台的脚手架（bin/gherkai shim、.eval-aws 下的空凭证文件、环境变量注入）当成用户的真实环境写进汇报或当成阻塞项上报"
       ]

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""运行 skill 的行为评测：每条 eval × 每臂（with_skill / without_skill）× --runs 次，各自一个独立舞台与
+"""运行 skill 的行为评测：每条 eval × 每臂（with_skill / without_skill / old_skill）× --runs 次，各自一个独立舞台与
 独立 `claude -p` 进程。
 
 设计见 docs/adr/0043-agent-skill-for-driving-gherkai.md 决策七。要点：
@@ -12,6 +12,9 @@
 - **过程断言只认工具流水**：每次运行都存 `tool_calls.json`（用了哪些命令、有没有实际执行、有没有装东西），答案自述不算证据；
   `timing.json` 另记三个每轮必报的污染 / 效率指标（repo_touches / network_calls / skill_copy_touches）。
 - **一次运行多遍**：跨 run 的方差是判「两臂差值是不是噪声」的前提，缺省 3 次。
+- **改进既有 skill 时的对照臂是旧版 skill**（skill-creator 的 old_skill 臂）：`--old-skill-src <目录>` 指一份改动前的
+  skill 快照（放 gitignore 的 `skills/gherkai-workspace/skill-snapshot-<版本>/`），臂名 `old_skill`，处理与 with_skill 完全
+  相同、只是拷的是那份快照——两臂差值量的就是这次改动本身，而不是「有没有 skill」。
 
 结果布局（评分者再往同目录写 grading.json，聚合脚本按这棵树读）：
   <repo>/skills/gherkai-workspace/iteration-<N>/
@@ -24,6 +27,8 @@
   python skills/gherkai-evals/run_evals.py --iteration 3 --runs 3
   python skills/gherkai-evals/run_evals.py --iteration 3 --ids 5 --arms with_skill --runs 1
   python skills/gherkai-evals/run_evals.py --iteration 3 --include-opt-in --ids 6   # 实际运行 run / submit，要真 AWS
+  python skills/gherkai-evals/run_evals.py --iteration 10 --ids 17,18 --arms with_skill,old_skill \
+      --old-skill-src skills/gherkai-workspace/skill-snapshot-v1.4.4        # 新旧 skill 对照
 """
 from __future__ import annotations
 
@@ -49,8 +54,9 @@ SKILL_SRC = REPO / "cli" / "gherkai_cli" / "skills" / "gherkai"
 DEFAULT_CLI_DIR = Path("/tmp/gherkai-eval-cli")
 STAGE_ROOT = Path("/tmp/gherkai-eval-stages")
 DEFAULT_FIXTURE = "wiki-search"
-# 只认这两个臂名：写错了会静默当 baseline 运行（提示里不给 skill），白费一整轮还看不出来。
-KNOWN_ARMS = ("with_skill", "without_skill")
+# 只认这三个臂名：写错了会静默当 baseline 运行（提示里不给 skill），白费一整轮还看不出来。
+# old_skill 只在给了 --old-skill-src 时可用（拷的是那份快照）。
+KNOWN_ARMS = ("with_skill", "without_skill", "old_skill")
 # 本会话模型即评测模型（env 覆写便于换模型比对）。
 DEFAULT_MODEL = os.environ.get("GHERKAI_EVAL_MODEL") or "global.anthropic.claude-fable-5-1[1m]"
 
@@ -181,7 +187,8 @@ def materialize(fixture: str, stage: Path, cli_dir: Path) -> Path:
     return Path(proc.stdout.strip())
 
 
-def run_one(ev: dict, arm: str, run_no: int, it_dir: Path, cli_dir: Path, model: str, timeout: int) -> None:
+def run_one(ev: dict, arm: str, run_no: int, it_dir: Path, cli_dir: Path, model: str, timeout: int,
+            old_skill_src: Path | None = None) -> None:
     eid, slug = ev["id"], ev["slug"]
     out_dir = it_dir / f"eval-{eid}-{slug}" / arm / f"run-{run_no}"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -197,8 +204,10 @@ def run_one(ev: dict, arm: str, run_no: int, it_dir: Path, cli_dir: Path, model:
     skill_tmp = Path(tempfile.mkdtemp(prefix="s-", dir=skill_root))
     skill_dir = skill_tmp / "gherkai"
     prompt = ev["prompt"] + COMMON_SUFFIX
-    if arm == "with_skill":
-        shutil.copytree(SKILL_SRC, skill_dir, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    if arm in ("with_skill", "old_skill"):
+        src = SKILL_SRC if arm == "with_skill" else old_skill_src
+        assert src is not None, "old_skill 臂要 --old-skill-src"
+        shutil.copytree(src, skill_dir, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
         prompt += f"\n\n（先读这份 skill 并照它做：{skill_dir / 'SKILL.md'}）"
     env = {k: v for k, v in os.environ.items() if k not in STRIP_ENV}
     env["PATH"] = f"{stage / 'bin'}:" + env.get("PATH", "")
@@ -248,7 +257,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--iteration", type=int, default=1, help="第几轮（结果落 iteration-<N>/）")
     ap.add_argument("--ids", default="", help="逗号分隔的 eval id；缺省为全部非 opt_in")
-    ap.add_argument("--arms", default=",".join(KNOWN_ARMS), help=f"逗号分隔的臂名（{list(KNOWN_ARMS)}）")
+    ap.add_argument("--arms", default="with_skill,without_skill", help=f"逗号分隔的臂名（{list(KNOWN_ARMS)}；old_skill 要配 --old-skill-src）")
     ap.add_argument("--runs", type=int, default=3, help="每个 (eval, 臂) 运行几次（跨 run 方差是判噪声的前提）")
     ap.add_argument("--parallel", type=int, default=10, help="并发的 claude -p 进程数上限")
     ap.add_argument("--timeout", type=int, default=1500, help="单次 claude -p 的墙钟上限（秒）")
@@ -256,6 +265,7 @@ def main() -> None:
     ap.add_argument("--cli-dir", default=str(DEFAULT_CLI_DIR),
                     help=f"已备好的仓库外 CLI 目录（缺省 {DEFAULT_CLI_DIR}，见 materialize.py --prepare-cli）")
     ap.add_argument("--include-opt-in", action="store_true", help="连 opt_in 的 eval 一起运行（实际运行 run / submit、要真 AWS）")
+    ap.add_argument("--old-skill-src", default="", help="old_skill 臂用的旧版 skill 快照目录（含 SKILL.md；放 gitignore 的 workspace 下）")
     a = ap.parse_args()
 
     cli_dir = Path(a.cli_dir).resolve()
@@ -270,6 +280,11 @@ def main() -> None:
     unknown = [x for x in arms if x not in KNOWN_ARMS]
     if unknown:
         fail(f"不认识的臂名 {unknown}（只有 {list(KNOWN_ARMS)}）")
+    old_skill_src = Path(a.old_skill_src).resolve() if a.old_skill_src else None
+    if "old_skill" in arms and not (old_skill_src and (old_skill_src / "SKILL.md").is_file()):
+        fail("臂 old_skill 要 --old-skill-src 指向一份含 SKILL.md 的旧版 skill 快照")
+    if old_skill_src and REPO in old_skill_src.parents and WORKSPACE not in old_skill_src.parents:
+        fail(f"旧版 skill 快照放 {WORKSPACE} 下（gitignore），别指仓库内别的位置")
     it_dir = WORKSPACE / f"iteration-{a.iteration}"
     it_dir.mkdir(parents=True, exist_ok=True)
     for ev in evals:
@@ -287,7 +302,7 @@ def main() -> None:
     def worker(ev: dict, arm: str, k: int) -> None:
         with sem:
             try:
-                run_one(ev, arm, k, it_dir, cli_dir, a.model, a.timeout)
+                run_one(ev, arm, k, it_dir, cli_dir, a.model, a.timeout, old_skill_src)
             except Exception as e:  # 一个格子炸了不能带走整轮
                 print(f"[fail] eval {ev['id']} {arm} run-{k}: {e!r}", flush=True)
 

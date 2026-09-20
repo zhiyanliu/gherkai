@@ -1170,8 +1170,8 @@
     "semantic_hash": "ab624bd065760f8a1b9621c9bde6cf84"
   },
   "docs/adr/0043-agent-skill-for-driving-gherkai.md": {
-    "mtime": 1789882150.310221,
-    "ast_hash": "e2b94bb137c4c5636aec0c140c351d45",
+    "mtime": 1789887528.2337515,
+    "ast_hash": "d9d6c0b24623da341ee96757f893fb2c",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skill_install.py": {
@@ -1210,9 +1210,9 @@
     "semantic_hash": "3524df935b2e2f3423a244a3c54906fe"
   },
   "cli/gherkai_cli/skills/gherkai/SKILL.md": {
-    "mtime": 1789873013.0848327,
-    "ast_hash": "76ca9ae04de1b71de155ed37d647cff4",
-    "semantic_hash": "76ca9ae04de1b71de155ed37d647cff4"
+    "mtime": 1789886933.780461,
+    "ast_hash": "47d2d3f272397d2f289fba4ead364dcf",
+    "semantic_hash": ""
   },
   "cli/gherkai_cli/skills/gherkai/references/cli-json-contract.md": {
     "mtime": 1789872989.773038,
@@ -1225,9 +1225,9 @@
     "semantic_hash": "59d575bbdf7ed251852e840b4a8905f7"
   },
   "cli/gherkai_cli/skills/gherkai/references/engines.md": {
-    "mtime": 1789871875.0611572,
-    "ast_hash": "144c0f72b18b6c3906e40c2fb50cf339",
-    "semantic_hash": "144c0f72b18b6c3906e40c2fb50cf339"
+    "mtime": 1789883801.6045735,
+    "ast_hash": "a83ba7b5fcc4d62c49fa1d9cff7a19ff",
+    "semantic_hash": ""
   },
   "cli/gherkai_cli/skills/gherkai/references/setup-and-diagnosis.md": {
     "mtime": 1789873013.0849776,
@@ -1236,7 +1236,7 @@
   },
   "skills/gherkai-evals/evals.json": {
     "mtime": 1789869981.3664546,
-    "ast_hash": "c8711d664fbe44225d1ea226499bf3f5",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "skills/gherkai-evals/trigger-eval.json": {
@@ -1245,9 +1245,9 @@
     "semantic_hash": ""
   },
   "skills/gherkai-evals/run_evals.py": {
-    "mtime": 1789871974.8933604,
-    "ast_hash": "53a044cd22b2dc294c83d73e4139ace3",
-    "semantic_hash": "53a044cd22b2dc294c83d73e4139ace3"
+    "mtime": 1789883339.0188684,
+    "ast_hash": "63f65f639ad5f9df8efd4a908224a7b2",
+    "semantic_hash": ""
   },
   "skills/gherkai-evals/trigger_eval.py": {
     "mtime": 1789869004.83166,
@@ -1260,9 +1260,9 @@
     "semantic_hash": "451296625813b29fa72fc94a78184e5d"
   },
   "skills/gherkai-evals/summarize_runs.py": {
-    "mtime": 1789871974.8934433,
-    "ast_hash": "ca9d897671dc189ab30ff80f698c42cd",
-    "semantic_hash": "ca9d897671dc189ab30ff80f698c42cd"
+    "mtime": 1789884783.9701054,
+    "ast_hash": "df6a317b610ba50fa03501696fe20ac3",
+    "semantic_hash": ""
   },
   "skills/gherkai-evals/grader-prompt.md": {
     "mtime": 1789831445.2032063,
@@ -1335,8 +1335,8 @@
     "semantic_hash": ""
   },
   "CHANGELOG.md": {
-    "mtime": 1789878273.2238643,
-    "ast_hash": "6286bb484d61d40c5b9c7f98f507fcbf",
+    "mtime": 1789884115.2323182,
+    "ast_hash": "70e200d2b54bb013a31d1d967edc7916",
     "semantic_hash": ""
   },
   "CONTRIBUTING.md": {
@@ -1415,9 +1415,9 @@
     "semantic_hash": "a792e5b3fa9486568fb5dbc3316973ff"
   },
   "docs/user-guide/README.md": {
-    "mtime": 1789837411.6815076,
-    "ast_hash": "f3431a7d46701f4ce31573d983df4f62",
-    "semantic_hash": "f3431a7d46701f4ce31573d983df4f62"
+    "mtime": 1789884115.232017,
+    "ast_hash": "e3644445a4cedfee2ada993be6e6c93d",
+    "semantic_hash": ""
   },
   "docs/user-guide/cloud-backend.md": {
     "mtime": 1789872950.3574562,
@@ -1450,9 +1450,9 @@
     "semantic_hash": "ee2eb40c2db990eee95652ea7519c92d"
   },
   "docs/user-guide/writing-deterministic-steps.md": {
-    "mtime": 1789871875.060894,
-    "ast_hash": "b8a41fd7529ab2169aed3416606fa94f",
-    "semantic_hash": "b8a41fd7529ab2169aed3416606fa94f"
+    "mtime": 1789883844.3741999,
+    "ast_hash": "0c2764dd34f432a4387f1350a7b14014",
+    "semantic_hash": ""
   },
   "docs/user-guide/writing-features.md": {
     "mtime": 1789872058.8606725,
@@ -1747,6 +1747,11 @@
   ".claude/skills/doc-diagram/SKILL.md": {
     "mtime": 1789845655.5868738,
     "ast_hash": "d0588defa51fb674296bb29b0263c896",
+    "semantic_hash": ""
+  },
+  "cli/gherkai_cli/skills/gherkai/references/deterministic-steps.md": {
+    "mtime": 1789886971.881723,
+    "ast_hash": "e22f33cacbe2124ddf92f1ff25421a78",
     "semantic_hash": ""
   }
 }
