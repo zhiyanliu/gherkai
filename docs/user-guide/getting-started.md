@@ -171,7 +171,7 @@ gherkai explain <run_id>
 
 ## 下一步
 
-| 想做什么                                   | 去读                                                |
+| 任务                                       | 对应文档                                            |
 |--------------------------------------------|-----------------------------------------------------|
 | 写 `.feature`，选引擎、scope 与超时          | [编写 .feature](./writing-features.md)              |
 | 写自己的确定性 step                        | [编写确定性 step](./writing-deterministic-steps.md) |
