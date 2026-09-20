@@ -7,7 +7,7 @@
 - **隔离**：舞台由 materialize.py 物化到仓库外，cwd = 舞台、PATH 前置舞台 `bin/`；舞台里的 CLI 来自装进仓库外
   目录的 wheel，任何路径都不指仓库（`--prepare-cli` 那步保证），两臂只差「有没有拿到 skill」一个变量。
 - **with-skill 臂只给中立路径**：每次运行把 skill 拷进一个随机命名的临时目录、提示里只给这个路径，结束后即删——给仓库路径
-  等于邀请它顺着仓库读原始教材；放在 `<cli-dir>/skill/` 也不行（第三轮 eval 3 的 baseline 顺着 shim 指向的 cli-dir
+  等于邀请它顺着仓库读原始教材；放在 `<cli-dir>/skill/` 也不行（ADR 0043 验证节第三轮 eval 3 的 baseline 顺着 shim 指向的 cli-dir
   `grep` 到了它、读了 references/engines.md），必须是 baseline 无从枚举到的位置。
 - **过程断言只认工具流水**：每次运行都存 `tool_calls.json`（用了哪些命令、有没有实际执行、有没有装东西），答案自述不算证据；
   `timing.json` 另记三个每轮必报的污染 / 效率指标（repo_touches / network_calls / skill_copy_touches）。
@@ -186,12 +186,12 @@ def run_one(ev: dict, arm: str, run_no: int, it_dir: Path, cli_dir: Path, model:
     out_dir = it_dir / f"eval-{eid}-{slug}" / arm / f"run-{run_no}"
     out_dir.mkdir(parents=True, exist_ok=True)
     # 舞台路径带随机后缀：Claude Code 按 cwd 给每个项目一个 ~/.claude/projects/<路径>/memory/，同名路径重新运行会把上一次
-    # 的记忆（含上一次的结论）灌进新会话——第三轮 baseline 复用同名路径就这样被自己的旧 run 喂了答案；运行前后再各清一次兜底
+    # 的记忆（含上一次的结论）灌进新会话——ADR 0043 验证节第三轮的 baseline 复用同名路径就这样被自己的旧 run 喂了答案；运行前后再各清一次兜底
     stage = STAGE_ROOT / f"{it_dir.name}-{eid}-{arm}-run{run_no}-{os.urandom(3).hex()}"
     _purge_session_dir(stage)
     stage = materialize(ev.get("fixture") or DEFAULT_FIXTURE, stage, cli_dir)
     # skill 副本只给 with-skill 臂建，放 ~/.cache 下随机命名的目录（不在 cli-dir、不在舞台、也不在 $TMPDIR——
-    # baseline 会 `ls $TMPDIR`，第三轮 eval 9 的一次 baseline 就这样翻到了并发 with-skill 运行的副本），只有提示知道它在哪
+    # baseline 会 `ls $TMPDIR`，ADR 0043 验证节第三轮 eval 9 的一次 baseline 就这样翻到了并发 with-skill 运行的副本），只有提示知道它在哪
     skill_root = Path.home() / ".cache" / "gherkai-eval-skill"
     skill_root.mkdir(parents=True, exist_ok=True)
     skill_tmp = Path(tempfile.mkdtemp(prefix="s-", dir=skill_root))

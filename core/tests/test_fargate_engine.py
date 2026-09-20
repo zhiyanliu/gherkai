@@ -168,11 +168,31 @@ def test_runtask_injects_extra_env(fargate, monkeypatch):
         run_id=_RUN_ID, cluster=fargate["cluster"], task_definition=fargate["task_def"],
         network_config=fargate["network_config"], job_s3=(fargate["bucket"], f"{_RUN_ID}/jobs/"),
         events_table_name=fargate["events_table_name"], container_name=fargate["container_name"],
+        artifact_s3=None, sdk_artifact_dir_env={},  # 必给关键字（本例不测产物注入，显式给空）
         extra_env={"GHERKAI_EXTRA_HTTP_HEADERS": '{"ngrok-skip-browser-warning": "1"}'},
         poll_interval_s=0.01,
     )
     env = _spy_run_task_env(fargate, monkeypatch, eng)
     assert env["GHERKAI_EXTRA_HTTP_HEADERS"] == '{"ngrok-skip-browser-warning": "1"}'
+
+
+def test_artifact_injection_kwargs_are_mandatory(fargate):
+    """产物落点两参数**必给关键字、无缺省**：cloud 下两者必注，漏传即静默丢产物（实际运行暴露过一次）。
+
+    与 ADR 0038 的显式 revision 同口径——漏传即在装配点 TypeError 炸，不做成「忘了传就静默破」。
+    显式给 None（不上传）/ 空 dict（无 SDK 落点）仍可构造：本条锁的是「不许省」，不是「不许为空」。
+    """
+    base = dict(
+        ecs_client=fargate["ecs"], s3_client=fargate["s3"], ddb_events_table=fargate["events_table"],
+        run_id=_RUN_ID, cluster=fargate["cluster"], task_definition=fargate["task_def"],
+        network_config=fargate["network_config"], job_s3=(fargate["bucket"], f"{_RUN_ID}/jobs/"),
+        events_table_name=fargate["events_table_name"], container_name=fargate["container_name"],
+        artifact_s3=None, sdk_artifact_dir_env={}, poll_interval_s=0.01,
+    )
+    assert FargateEngine(**base) is not None  # 前提：显式给空值照样构造得出
+    for omitted in ("artifact_s3", "sdk_artifact_dir_env"):
+        with pytest.raises(TypeError):
+            FargateEngine(**{k: v for k, v in base.items() if k != omitted})  # type: ignore[call-arg]
 
 
 def test_runtask_sets_started_by_run_id(fargate, monkeypatch):

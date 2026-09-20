@@ -22,6 +22,7 @@ from gherkai_core.adapters.run_store.local import LocalRunStore
 from gherkai_core.adapters.subprocess_engine import SubprocessEngine
 from gherkai_core.model import Job, RunMeta, Status
 from gherkai_core.reconcile import finalize_report, tick
+from gherkai_runtime import compose
 from gherkai_runtime import names  # 叶子模块（零依赖，见其模块头）
 
 # 接力恢复的判定余量秒（ADR 0034「job timeout」节 claimed_at ①）：超预算这么久才认定 owner 已死。
@@ -157,8 +158,6 @@ def run_reconcile_loop(
                     now_iso=now_iso_fn(), result_store=result_store)
         if done:
             # 报告收尾走 core 唯一一份（曾在此双写一份、与 deploy_aws/gherkai_deploy_aws/lambdas/reconciler.py 漂移风险，已合并）
-            from gherkai_runtime import compose
-
             # run 级墙钟是**派生指标**（缺则报告里显「?」），取它要多读一次 RunState——落盘读会因 IO 错/文件写坏抛，
             # 而这一步发生在 finalize 的 commit point **之后**：commit 后的失败无人重试（ADR 0030 决定三），抛出去会让
             # 本进程带着未写的报告退出、还会跳过拆隧道那步（`drive_local_reconcile` 的 cleanup_tunnel 在本函数返回
@@ -179,8 +178,6 @@ def drive_local_reconcile(report_dir: str, run_id: str, max_concurrency: int, *,
                           poll_interval_s: float = 0.5) -> None:
     """local 推进的**唯一入口**（ADR 0034 三宿主同一套机制）：装配 → tick 到终态 → 拆隧道。per-run 进程与
     `status --wait` 接力都调这里——曾在 cli 两处逐字复写这三句装配，改一处漏一处就让接力者与 per-run 行为分叉。"""
-    from gherkai_runtime import compose
-
     meta, log, store, launcher, mc, rstore, pstore = build_local_reconcile(
         report_dir, run_id, max_concurrency, region=region, profile=profile)
     run_reconcile_loop(run_id, meta, log, store, launcher, mc, poll_interval_s=poll_interval_s,
@@ -198,8 +195,6 @@ def _recover_timed_out_claims(run_id, meta, event_log, run_store, launcher, now_
     已死、直接写是唯一收敛路径。若 owner 其实尚活（余量误判）：其 timer 同一 deadline 早已触发、真退出
     记录同带 timed_out=True，后到覆盖本记录归因不变（INSERT OR REPLACE 同 key）。
     """
-    from gherkai_runtime import compose
-
     state = run_store.load_run_state(run_id)
     if state is None:
         return
@@ -243,16 +238,12 @@ def build_local_reconcile(report_dir: str, run_id: str, max_concurrency: int,
     worker cmd 走定位链（ADR 0037 决策 3，不再由仓库结构推导，故本函数不收 repo）；env 覆写对两宿主自然可见
     （per-run 继承提交进程 env、接力者用自己的 env）。
     """
-    import os
-
-    from gherkai_runtime import compose
-
     # region/profile 走与前台 run 完全相同的解析链（ADR 0016 决策 C：--region > AWS_REGION > AWS_DEFAULT_REGION >
-    # profile config）——此前原样透传 None：profile-only/config-only 用户下 worker env 不注入 AWS_REGION，
+    # profile config）——此前原样透传 None：profile-only/config-only 的使用方下 worker env 不注入 AWS_REGION，
     # Nova worker 的 AgentCore validate_region 见 None 即崩（exit 1、零事件；detached 实际运行复现）。
-    # 单点修在此（而非各调用方）：submit fork 的 per-run / status --wait 接力 / 手动 _reconcile 三路全覆盖。
-    profile = profile or os.environ.get("AWS_PROFILE")
-    region = compose.resolve_region(region, profile)
+    # 单点在 `compose.resolve_aws_identity`（而非各调用方各写一份）：submit fork 的 per-run /
+    # status --wait 接力 / 手动 _reconcile 三路全覆盖。
+    region, profile = compose.resolve_aws_identity(region, profile)
 
     root, db_path = _paths(report_dir, run_id)
     store = LocalRunStore(root)

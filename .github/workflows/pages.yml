@@ -19,6 +19,7 @@ jobs:
     if: github.ref_name == github.event.repository.default_branch
     runs-on: ubuntu-latest
     permissions:
+      contents: read # checkout 拉 docs/diagrams
       pages: write # 部署站点
       id-token: write # deploy-pages 用 OIDC 验证来源
     environment:

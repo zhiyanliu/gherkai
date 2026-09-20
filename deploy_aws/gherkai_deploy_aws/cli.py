@@ -42,7 +42,7 @@ cdk CLI 调用、VPC 取值三态比对、工具链前置检查（Node ≥ 22 �
 
 `0` 成功；`2` **前置/校验失败**（Node 缺失或 cdk CLI 定位不到、VPC 取值不符或无记录、prefix/region/profile 解析不出
 （`--profile` 名不存在等，见 `_resolve_target_or_report`）、读后端失败、容器引擎名不认、push-worker 的架构/skew
-拦截——用户可修，对齐 CLI 既有 preflight 退 2 的口径）；**`1`** = cdk 已成功而 worker 镜像四步失败
+拦截——部署方可修，对齐 CLI 既有 preflight 退 2 的口径）；**`1`** = cdk 已成功而 worker 镜像四步失败
 （账户已被改动，重新运行 `gherkai deploy` 幂等收敛，ADR 0038）；其余 = cdk CLI 自己的返回码（原样透传，
 别把 cdk 的失败压成自己的码）。
 """
@@ -87,6 +87,16 @@ VPC_UNRECORDED = "unrecorded"      # ② 参数缺失且 stack 已存在 = 本�
 VPC_MATCH = "match"                # ③ 取值一致 → 放行
 VPC_MISMATCH = "mismatch"          # ③ 取值不一致 → 退 2
 
+# `delete-worker` 的占位文案（ADR 0038「命令族」）：`--help` 的 description 与真敲下去看到的那句**同源**，
+# 别让帮助与运行时给出两种说法。清理规则不写死时长——真源是 `workers.RETIRE_QUIET_PERIOD`，写死即漂移。
+DELETE_WORKER_PLACEHOLDER = (
+    "`delete-worker` 尚未提供。\n"
+    "将来提供时会沿用 push-worker 的同一套清理规则（退休一段时间、且没有未结束的 run 还在用它才真删），"
+    "并一并回收旧版本 variant 的 ECR 标签、重推时被顶掉的旧镜像层与 worker 镜像映射。\n"
+    "当前可用的：`gherkai deploy list-workers` 看有哪些 variant 与待清理 revision；"
+    "重推同名 variant 直接覆盖，无需先删。"
+)
+
 
 # ---------------------------------------------------------------------------
 # VPC 取值（纯逻辑，与 boto3 解耦——三态判定是这套机制的正确性核心，单测直打它）
@@ -109,7 +119,7 @@ def classify_vpc_state(*, stack_exists: bool, stored_spec: str | None, requested
     """三态判定（ADR 0037 决策 6）。返回上面四个 `VPC_*` 之一。
 
     判序里 **stack 是否存在先于参数是否存在**：真首次部署时两者都缺，若先看参数就会把首次部署误判成
-    「本机制之前部署的环境」而拦下每一个新用户的第一次 deploy。
+    「本机制之前部署的环境」而拦下每一个新环境的第一次 deploy。
     """
     if not stack_exists:
         return VPC_FIRST_DEPLOY
@@ -128,7 +138,7 @@ def _vpc_flag(value: str) -> str:
     )
 
 
-# —— 造 boto3 句柄的两个钩子（抽出来供测试 monkeypatch，验三态逻辑而不连真 AWS；同 compose 的 `_make_*` 惯例）——
+# —— 造 boto3 句柄的几个钩子（抽出来供测试 monkeypatch，验三态逻辑而不连真 AWS；同 compose 的 `_make_*` 惯例）——
 def _make_cfn_client(*, region, profile):
     """boto3 cloudformation client（`DescribeStacks` 探 stack 是否已存在）。"""
     import boto3
@@ -145,6 +155,20 @@ def _make_ssm_client(*, region, profile):
     """boto3 ssm client（读生效 VPC 取值参数）。"""
     import boto3
     return boto3.session.Session(profile_name=profile, region_name=region).client("ssm")
+
+
+def _make_hint_clients(*, region, profile):
+    """「缺 --vpc」提示专用的短超时句柄：纯参数错误不该被网络拖住（连不上即放弃、不重试）。
+
+    与 `_make_cfn_client` / `_make_ssm_client` 分开是有意的：那两个服务的是机制正确性（VPC 取值三态）、
+    值得等；这一个只为把提示写具体，超时预算必须有上限。
+    """
+    import boto3
+    session = boto3.session.Session(profile_name=profile, region_name=region)
+    # `total_max_attempts` 数的是**总尝试次数**；legacy 语义的 `max_attempts` 数的是重试次数
+    # （给 1 就是共两次尝试、超时预算翻倍），这里要的是「只试一次」。
+    config = boto3.session.Config(connect_timeout=2, read_timeout=3, retries={"total_max_attempts": 1})
+    return session.client("cloudformation", config=config), session.client("ssm", config=config)
 
 
 def _error_code(exc: Exception) -> str | None:
@@ -195,7 +219,7 @@ class Provider:
 
         `prefix`/`vpc_id`/`use_default_vpc`/`stop_timeout` 四个 context 配置项映射为**三个** flag：`--vpc`
         一个吞掉 `vpc_id` + `use_default_vpc` 两个配置项（ADR 0037 决策 6）。`version` 这一项不给 flag——
-        版本按版本真源来、由安装本身决定（决策 7），不让用户手填。
+        版本按版本真源来、由安装本身决定（决策 7），不让部署方手填。
         """
         parser.add_argument(
             "--prefix", default=None, metavar="P",
@@ -303,8 +327,8 @@ class Provider:
 
         delete = sub.add_parser(
             "delete-worker", help="[部署方] （尚未提供）删一个 variant 及其 ECR/SSM 残留",
-            description="尚未提供：落地时套 push-worker 同一套清理语义（退休 tag + 静默期 + 运行中 run 引用检查），"
-                        "并连带清旧版本 variant 的 ECR tag / untagged 层与 SSM 映射。",
+            # 取占位文案的前两句（末句「当前可用的…」是敲下去之后的出路，帮助里由别的子命令自陈）
+            description="\n".join(DELETE_WORKER_PLACEHOLDER.splitlines()[:2]),
         )
         self._add_locator_flags(delete)
         delete.set_defaults(_deploy_verb=self.delete_worker)
@@ -411,7 +435,7 @@ class Provider:
         missing = self._require_vpc(args)
         if missing is not None:
             return missing
-        # 用户给的 DIR 相对**用户的** cwd；`_run_cdk` 里把它钉成绝对路径再交给 cdk——cdk 子进程的 cwd 是随后
+        # 部署方给的 DIR 相对**他的** cwd；`_run_cdk` 里把它钉成绝对路径再交给 cdk——cdk 子进程的 cwd 是随后
         # 被删的临时工作目录，相对路径原样传会让导出物落进那里、随之消失而命令却退 0（实际运行踩过）。
         return self._run_cdk("synth", args, output=Path(out).expanduser())
 
@@ -514,15 +538,11 @@ class Provider:
     def delete_worker(self, args) -> int:
         """留的口子（ADR 0038「命令族」）：**尚未提供**，退 2 说清为什么与将来怎么落。
 
-        为何占位而不干脆不给这个子命令：不给的话用户敲了只会得到 argparse 的「invalid choice」，读不出
+        为何占位而不干脆不给这个子命令：不给的话部署方敲了只会得到 argparse 的「invalid choice」，读不出
         「这件事是被想过、押后了」——而它押后的是**回收策略**（ECR untagged 层、旧版本 variant），不是忘了
         （属 ADR 0038 重议闸门）。
         """
-        print("`delete-worker` 尚未提供。\n"
-              "它要连带定回收策略（旧版本 variant 的 ECR tag / 重推顶掉的 untagged 层 / SSM 映射），"
-              "并套 push-worker 同一套清理语义（退休 tag + 静默期 + 运行中 run 引用检查），这些还没定。\n"
-              "当前可用的：`gherkai deploy list-workers` 看有哪些 variant 与待清理 revision；"
-              "重推同名 variant 直接覆盖，无需先删。", file=sys.stderr)
+        print(DELETE_WORKER_PLACEHOLDER, file=sys.stderr)
         return EXIT_PRECONDITION
 
     # ---- 内部：容器引擎（ADR 0038「容器引擎口子」）----
@@ -555,7 +575,7 @@ class Provider:
         target = self._resolve_target_or_report(args)
         if target is None:
             # 归码按本方法契约（见 docstring）：cdk 之后的失败退 1，措辞与 `workers.run_deploy_steps`
-            # 建不出句柄时那一支同款——对用户是同一件事。
+            # 建不出句柄时那一支同款——对部署方是同一件事。
             print("stack 已生效；worker 镜像步骤未完成——重新运行 `gherkai deploy` 幂等收敛。", file=sys.stderr)
             return workers.EXIT_FAILED
         return workers.run_deploy_steps(
@@ -596,10 +616,10 @@ class Provider:
         stack 不在 → 首次部署按需选。任何读取失败（凭证 / region / 权限）→ 空串，提示退回通用版。"""
         try:
             target = self._resolve_target(args)
-            cfn = _make_cfn_client(region=target.region, profile=target.profile)
+            cfn, ssm = _make_hint_clients(region=target.region, profile=target.profile)
             if not _stack_exists(cfn, names.stack_name(target.prefix)):
                 return "首次部署按需选一个。"
-            stored = _read_stored_vpc_spec(_make_ssm_client(region=target.region, profile=target.profile), target.prefix)
+            stored = _read_stored_vpc_spec(ssm, target.prefix)
         except Exception:
             return ""
         if stored:
@@ -617,7 +637,7 @@ class Provider:
         target = self._resolve_target(args)
         ctx: dict[str, str] = {"prefix": target.prefix, "version": self._resolve_version(args)}
         vpc = getattr(args, "vpc", None)
-        if not vpc:  # 调用点已经 _require_vpc 过；这里是契约守卫，不是用户提示
+        if not vpc:  # 调用点已经 _require_vpc 过；这里是契约守卫，不是给部署方看的提示
             raise ValueError("build_context 需要 args.vpc：VPC 取值无隐式默认，调用前先做缺值检查")
         if vpc == "default":
             ctx["use_default_vpc"] = "true"
@@ -638,7 +658,7 @@ class Provider:
 
     def write_cdk_json(self, work_dir: Path) -> Path:
         """在临时工作目录生成 `cdk.json`（ADR 0037 决策 6）——**不再有入库的 cdk.json**：它曾假定自己躺在
-        monorepo 里（`app = "uv run python app.py"`），wheel 用户不可达。只写 app + 特性开关；设计参数走 `-c`。"""
+        monorepo 里（`app = "uv run python app.py"`），以 wheel 安装的部署方到不了那里。只写 app + 特性开关；设计参数走 `-c`。"""
         path = work_dir / "cdk.json"
         path.write_text(
             json.dumps({"app": self.app_command(), "context": dict(CDK_FEATURE_FLAGS)}, indent=2) + "\n",
@@ -651,7 +671,7 @@ class Provider:
     def _work_dir(self):
         """一次调用的临时工作目录：生成的 `cdk.json` + `cdk.out` + Lambda asset 都在里面，用完即删。
 
-        **不写进仓库/包目录**：wheel 装的包目录不该被写，且 `.lambda_build` 那种仓库内落点对 wheel 用户不存在。
+        **不写进仓库/包目录**：wheel 装的包目录不该被写，且 `.lambda_build` 那种仓库内落点对以 wheel 安装的部署方不存在。
         """
         path = Path(tempfile.mkdtemp(prefix="gherkai-deploy-"))
         try:
@@ -683,7 +703,7 @@ class Provider:
                     print(f"已丢弃 CDK 环境查询缓存 {ctx_cache}，本次重新查询。", file=sys.stderr)
             elif ctx_cache.exists():
                 shutil.copyfile(ctx_cache, work_ctx)
-            # 用户给的导出目录钉成**绝对**路径：cdk 子进程 cwd = 本次临时工作目录（用完即删），相对路径
+            # 部署方给的导出目录钉成**绝对**路径：cdk 子进程 cwd = 本次临时工作目录（用完即删），相对路径
             # 原样传会让导出物落进那里、随目录消失而命令退 0（实际运行踩过）。默认落工作目录、随之清理。
             out_dir = output.resolve() if output is not None else work_dir / "cdk.out"
             argv = [*cdk_argv, verb, "--app", self.app_command(), "--output", str(out_dir)]
@@ -715,7 +735,7 @@ class Provider:
         """deploy 前的 VPC 取值比对。放行 → None；拦 → 退出码（2）。
 
         只在 deploy 前执行（见 `diff`/`destroy` 的 docstring）。解析 prefix/region/profile 失败与读后端失败
-        （凭证/权限/网络）都退 2 而非抛 traceback：对用户是「先修凭证」，与 Node 缺失同一类。
+        （凭证/权限/网络）都退 2 而非抛 traceback：对部署方是「先修凭证」，与 Node 缺失同一类。
         """
         target = self._resolve_target_or_report(args)
         if target is None:
@@ -778,10 +798,10 @@ class Provider:
 
         **每个动作在碰 AWS 之前都要经这一口**：不存在的 `--profile` 名在解析链回落读 profile config 的
         `boto3.session.Session(...)` **构造期**就抛 `ProfileNotFound`（回落只在未给 `--region`/`AWS_REGION`
-        时发生，故 profile-only 用户是唯一撞得到的人——而 profile config 里写着 region 是被支持的形态，
+        时发生，故 profile-only 的部署方是唯一撞得到的人——而 profile config 里写着 region 是被支持的形态，
         见 `compose.resolve_region`）。这一层裸着就是裸 botocore 堆栈：实际运行核过 `list-workers` /
         `push-worker` / `deploy` 三条都如此，且这一口**排在 `workers._connect` 之前**，那一层包不到它。
-        文案与 `workers._connect` 同款——对用户是同一件事「先修凭证/region」。
+        文案与 `workers._connect` 同款——对部署方是同一件事「先修凭证/region」。
         """
         try:
             return self._resolve_target(args)
@@ -818,7 +838,7 @@ class Provider:
 
 def context_cache_path(prefix: str) -> Path:
     """CDK 环境查询缓存（`cdk.context.json`）的持久化位置：`$XDG_CACHE_HOME`（缺省 `~/.cache`）`/gherkai/cdk-context/<prefix>cdk.context.json`。
-    按 prefix 一份（各环境可各自 `--refresh-context`，互不牵连）；不入仓库/包目录（wheel 用户没有可写的源码树）。"""
+    按 prefix 一份（各环境可各自 `--refresh-context`，互不牵连）；不入仓库/包目录（以 wheel 安装的部署方没有可写的源码树）。"""
     base = os.environ.get("XDG_CACHE_HOME") or os.path.join(os.path.expanduser("~"), ".cache")
     return Path(base) / "gherkai" / "cdk-context" / f"{prefix}cdk.context.json"
 
@@ -859,7 +879,7 @@ def check_node() -> str | None:
     """Node 前置：缺失/过低 → 返回给人看的一句话；OK → None。**不抛 traceback**（ADR 0037 决策 6）。
 
     为何必查：`aws-cdk-lib` 是 jsii 绑定，**app 子进程 import 即起 node**；cdk CLI 本身也是 npm 物。
-    缺 node 的原生症状是 jsii 在子进程里抛一段与 Node 无关的堆栈，对用户是纯噪声。
+    缺 node 的原生症状是 jsii 在子进程里抛一段与 Node 无关的堆栈，对部署方是纯噪声。
     """
     node = shutil.which("node")
     if node is None:

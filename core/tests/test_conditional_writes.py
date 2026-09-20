@@ -1,7 +1,8 @@
 """RunStore 无状态批量运行条件写对拍测试（ADR 0034 机制三/机制四）：try_claim_job / project_state / try_finalize。
 
 **local（fcntl 文件锁）与 ddb（moto，条件表达式）运行同一批断言**（parametrize）——保两 adapter 语义一致。
-moto 的条件写行为与真 DDB 可能有别（绿≠对边界）→ 真 DDB 复验单列（test 末 real_aws，需真凭证才运行）。
+moto 的条件写行为与真 DDB 可能有别（绿≠对边界）→ 真 DDB 复验单列在文件末（integration 标记，需真凭证才运行；
+地基实测见 ADR 0034）。
 
 覆盖三机制的正确性核心：
 - 机制四 CAS：pending→running 只成功一次，并发抢占只一个赢。
@@ -9,6 +10,8 @@ moto 的条件写行为与真 DDB 可能有别（绿≠对边界）→ 真 DDB �
 - 机制三 finalize 单调：已终态不被重复 finalize / 不被刷回。
 """
 from __future__ import annotations
+
+import itertools
 
 import pytest
 
@@ -291,3 +294,74 @@ def test_projection_with_unknown_scope_is_ignored_not_invented(run_store):
     assert run_store.project_state("run-1", projected) is True
     got = run_store.load_run_state("run-1")
     assert set(got.jobs) == {"a", "b"} and got.jobs["a"].status == Status.PASSED
+
+
+# ---------- 真 DDB 复验（integration 标记，默认 deselect；需真表 + 真凭证）----------
+# moto 的条件表达式是模拟实现——CAS 抢占的排他性与 job 级单调条件写是**机制三/四的承重面**（ADR 0034），
+# 绿≠对：这两条在真 DDB 上复验同一语义，只挑「moto 失真就会静默放过」的那两个断言，不复刻全部对拍。
+# 运行：`uv run pytest core/tests -m integration`（真表/真桶名经 AWS_DDB_TABLE / AWS_S3_BUCKET 传，见 tests/README.md）。
+
+_real_counter = itertools.count(1)  # 单进程内递增，给真表上的 run_id 去重（无随机源）
+
+
+def _real_store(real_aws):
+    from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore
+    return DynamoDBRunStore(real_aws["ddb"].Table(real_aws["table_name"]))
+
+
+def _real_run_id(real_aws, tag: str) -> str:
+    """真表上本次运行专属的 run_id，并登记自清理（多次执行不撞名、不留垃圾）。"""
+    rid = f"it-cw-{tag}-{next(_real_counter)}"
+    real_aws["cleanup_run_id"](rid)
+    return rid
+
+
+@pytest.mark.integration
+def test_claim_is_exclusive_on_real_ddb(real_aws):
+    """真 DDB 的机制四 CAS：两个推进器抢同一个 pending job，**恰一个**成功（另一个见条件失败）。
+
+    两个 store 实例 = 两个推进器各持自己的表句柄（对位 per-run 进程与 `status --wait` 接力者同时在推同一 run）。
+    赢家是谁不重要、「只有一个」才是承重的：若真 DDB 的条件写放过第二次，就会重复 RunTask、同一 scope 执行两遍。
+    """
+    rid = _real_run_id(real_aws, "claim")
+    store_a, store_b = _real_store(real_aws), _real_store(real_aws)
+    meta = _meta(rid)
+    store_a.create_run(meta, _initial(meta))
+
+    claims = [store_a.try_claim_job(rid, "a"), store_b.try_claim_job(rid, "a")]
+    assert claims.count(True) == 1, f"CAS 不排他：{claims}"
+    state = store_a.load_run_state(rid)
+    assert state.jobs["a"].status == Status.RUNNING
+    assert state.jobs["b"].status == Status.PENDING  # 另一个 job 不受污染
+
+
+@pytest.mark.integration
+def test_stale_projection_never_regresses_terminal_job_on_real_ddb(real_aws):
+    """真 DDB 的机制三②：终态 job 不被 stale 投影刷回 running——两道闸各验一遍。
+
+    - 同 HWM（task_exited 无数值 seq，两投影 HWM 相等）→ run 级 HWM 闸挡不住，靠 job 级单调条件写挡；
+    - 更小 HWM → run 级 HWM 闸直接挡下整次投影（返回 False）。
+    刷回的后果是永久错态（run=passed 而 job 恒 running），故这两道闸的真 DDB 行为必须实证、不能只信 moto。
+    """
+    rid = _real_run_id(real_aws, "stale")
+    store = _real_store(real_aws)
+    meta = _meta(rid)
+    store.create_run(meta, _initial(meta, hwm=0))
+
+    fresh = RunState(run_id=rid, status=Status.RUNNING,
+                     jobs={"a": JobState("a", Status.PASSED), "b": JobState("b", Status.RUNNING)},
+                     high_water_mark=3)
+    assert store.project_state(rid, fresh) is True
+
+    same_hwm = RunState(run_id=rid, status=Status.RUNNING,
+                        jobs={"a": JobState("a", Status.RUNNING), "b": JobState("b", Status.RUNNING)},
+                        high_water_mark=3)
+    store.project_state(rid, same_hwm)  # 整体返回值不限（HWM 相等本就允许写）——看的是终态有没有被刷回
+    assert store.load_run_state(rid).jobs["a"].status == Status.PASSED
+
+    older = RunState(run_id=rid, status=Status.RUNNING,
+                     jobs={"a": JobState("a", Status.RUNNING), "b": JobState("b", Status.PENDING)},
+                     high_water_mark=2)
+    assert store.project_state(rid, older) is False  # 更小 HWM：整次投影被挡
+    got = store.load_run_state(rid)
+    assert got.jobs["a"].status == Status.PASSED and got.high_water_mark == 3

@@ -39,7 +39,7 @@ ARTIFACT_SUBDIR = {"novaact": "nova-trajectories", "midscene": "midscene-run"}
 
 
 def default_name(prefix: str, base: str) -> str:
-    """prefix + 基名（原样拼，prefix 含分隔符由用户负责）。CDK 与 cli 共用此推导 → 单一事实源。"""
+    """prefix + 基名（原样拼，prefix 含分隔符由部署方负责）。CDK 与 cli 共用此推导 → 单一事实源。"""
     return f"{prefix}{base}"
 
 

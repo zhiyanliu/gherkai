@@ -179,7 +179,7 @@ def test_index_html_votes_tally_shown_only_when_multi_vote(tmp_path: Path):
 
 
 def test_index_html_shows_verdict_even_without_report_refs(tmp_path: Path):
-    # 用户痛点护栏：纯确定性 run（无报告产物 report_refs=[]）的 index.html 也要能看懂结果——
+    # 使用方痛点护栏：纯确定性 run（无报告产物 report_refs=[]）的 index.html 也要能看懂结果——
     # 判定明细（job/scenario/step status + 时长 + sessionId）直接渲染，不再是一张白纸。
     run = _rr(
         "det-run",

@@ -59,7 +59,7 @@ def render_text(result: RunResult) -> str:
     """RunResult → 人看的多行汇总（嵌套 job/scenario/step + 时长 + 成本 + 报告指针）。
 
     面向人的文本模式：用自然的词、不用变量名式术语（RunResult/sessionId/step[0] 这类）；
-    但 job/scenario/step/scope 是领域概念（用户写 feature/看 plan 都在用），保留原词。JSON 模式（to_dict）是
+    但 job/scenario/step/scope 是领域概念（feature 作者写 feature、看 plan 都在用），保留原词。JSON 模式（to_dict）是
     机器读的、字段名照旧。
     """
     out: list[str] = ["", "===== 运行结果 =====", f"  总状态: {result.status.value}"]

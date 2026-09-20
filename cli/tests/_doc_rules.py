@@ -1,6 +1,6 @@
 """使用者面 markdown 的共享规则与扫描器：多处护栏共用的**单一事实源**。
 
-消费方五处，同源才不会各自漂（扫的都是「发到仓库外、读者没有仓库上下文」的文字，判据同一条——
+markdown 规则的消费方五处，同源才不会各自漂（扫的都是「发到仓库外、读者没有仓库上下文」的文字，判据同一条——
 CLAUDE.md 代码纪律「产品面文案不带内部指代」+ 文档纪律「文档按读者三分类归位」；决策与理由见
 ADR 0039、ADR 0045 决策一/三、ADR 0043 决策六）：
 
@@ -12,8 +12,13 @@ ADR 0039、ADR 0045 决策一/三、ADR 0043 决策六）：
   真 parser（provider 住 optional extra、`cli/tests` 不许 import 它，故对照面分在两处、抽取器共用）；
 - `tools/render_skill_contract.py`：契约页 → skill 副本的转换器，用禁词表自查有没有漏改的词。
 
-放 `cli/tests/` 而非 `tools/`：它只服务护栏、不是运行期或开发期工具；仓库外的两个消费方（provider 测试、
-转换器）显式把这个目录加进 `sys.path` 来复用——宁可让它们多两行 import，也不要两份会漂的禁词表 / 抽取器。
+另存一项非 markdown 的共享判据：**已知机器根**（`MACHINE_ROOTS`）。skill fixture 的绝对路径护栏
+（`test_skill.py`）与快照物化的漏扫（`skills/gherkai-evals/materialize.py`）必须认同一组根——各存一份就会
+各自补根，漏补的那份即假绿。
+
+放 `cli/tests/` 而非 `tools/`：它只服务护栏、不是运行期或开发期工具；仓库外的消费方（provider 测试、
+契约转换器、评测物化脚本）显式把这个目录加进 `sys.path` 来复用——宁可让它们多两行 import，也不要两份会漂的
+禁词表 / 抽取器 / 根集。
 """
 from __future__ import annotations
 
@@ -45,9 +50,12 @@ COLLOQUIAL = re.compile(r"帽子不是人|烧钱|锁步|lockstep|烙进|烙好|�
 # 规范名，随词表增删）。逐词与词表同源由 `test_user_docs.test_retired_terms_are_all_in_the_glossary` 守：
 # 往这里加词必须先在 CONTEXT.md 对应词条的 `_Avoid_` 里落下，免得护栏与词表各自演化。
 # 退役后端简称的「… 档」形态（`cloud 档` / `本机档` …）不在此重列：已由 `COLLOQUIAL` 的量词「档」通则兜住。
+# 一次 run 的「批」义旧名收在末三项。同词条 `_Avoid_` 里的「批次」与裸「一批」不进表：前者在事件流语境下
+# 指 DynamoDB Stream 一次投递的事件批、后者有「一组用例 / 一组文件」的正当用法，正则分不出两义。
 RETIRED_TERMS_WORDS = (
     "跑法", "抢传", "确定性锚点", "大脑", "穿刺", "骨架验证用例", "版本单旋钮", "无状态跑批", "在跑 run",
     "逃生舱", "供给包", "提交方", "技能包", "建造者 AI", "AI coding agent", "维护者",
+    "本批", "这一批", "整批",
 )
 RETIRED_TERMS = re.compile("|".join(re.escape(w) for w in RETIRED_TERMS_WORDS))
 
@@ -68,6 +76,15 @@ def changelog_unreleased(text: str) -> str:
 
 # `](../x)` / `](./x)` / `](foo.md)` / `](references/foo.md)`：PyPI/npm 页面与 skill 安装态都渲染不出仓库的目录树。
 RELATIVE_LINK = re.compile(r"\]\((?:\.\.?/|(?![a-z][a-z0-9+.-]*:|#)[^)\s]+\.md)")
+
+# ── 机器绝对路径的判据 ──────────────────────────────────────────────────────
+
+# 已知机器根（本机 / Linux / 容器上常见的一级目录）：`(?:file://)?/<根>/` 即判定为产出机器的绝对路径。
+# 为什么只认这组根、不认「以 `/` 打头的字符串」：step 原文（`Then 页面地址匹配 "/wiki/OpenAI"`）会以转义字串
+# 嵌进运行元信息与判定明细，URL 路径与机器路径在形态上分不开，只有根目录名能分。录制机出现新的根就补这里。
+MACHINE_ROOTS = ("Users", "home", "private", "var", "tmp", "opt", "Volumes", "root", "mnt", "srv", "app",
+                 "workspace", "work", "data", "etc", "usr", "nix", "run")
+MACHINE_ROOT = re.compile(rf"(?:file://)?/(?:{'|'.join(MACHINE_ROOTS)})/")
 
 # ── skill 扫描面与命令 token 抽取 ───────────────────────────────────────────
 

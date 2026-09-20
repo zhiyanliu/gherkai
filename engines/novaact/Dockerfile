@@ -20,8 +20,7 @@
 ARG WORKER_SOURCE=index
 
 FROM python:3.13-slim AS base
-ENV DEBIAN_FRONTEND=noninteractive \
-    PYTHONUNBUFFERED=1 \
+ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1
 # /app 留给定制层放 steps/（基础镜像不预置 GHERKAI_STEPS_DIR、不猜路径，ADR 0037 决策 4/5）
 WORKDIR /app

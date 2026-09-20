@@ -21,7 +21,7 @@ task 时用的是 revision（不可变快照），故重推同名 variant 不会
 
 ## 退出码
 
-`push-worker` / `list-workers` 的用户可修失败 → **2**（对齐 provider 既有前置口径）。
+`push-worker` / `list-workers` 的部署方可修的失败 → **2**（对齐 provider 既有前置口径）。
 `gherkai deploy` 的四步失败 → **1** 且提示「stack 已生效；重新运行 `gherkai deploy` 幂等收敛」（ADR 0038
 「四步的失败语义」）——cdk 已经改了账户，压成 2 会让人以为什么都没发生。
 """
@@ -38,7 +38,7 @@ from gherkai_deploy_aws.container import ContainerError, digest_for_repo
 
 EXIT_OK = 0
 EXIT_FAILED = 1        # cdk 成功、四步失败（账户已被改动，见模块头「退出码」）
-EXIT_PRECONDITION = 2  # 用户可修的前置/校验失败
+EXIT_PRECONDITION = 2  # 部署方可修的前置/校验失败
 
 # 基础镜像同步进 ECR 的那份固定叫 `base`（ADR 0038「概念模型」），也是默认指针的初始值。
 BASE_VARIANT = "base"
@@ -60,7 +60,7 @@ _READ_ONLY_TASK_DEF_KEYS = (
 
 
 class WorkerCommandError(Exception):
-    """用户可修的失败（`str(exc)` 即给人看的整句）。**退码归调用方**：push-worker 退 2、deploy 四步退 1。"""
+    """部署方可修的失败（`str(exc)` 即给人看的整句）。**退码归调用方**：push-worker 退 2、deploy 四步退 1。"""
 
 
 # ---------------------------------------------------------------------------
@@ -91,7 +91,7 @@ def _connect(*, region, profile, out) -> Aws | None:
 
     必须包住整个 `make_aws`、不是只包 client 调用：不存在的 profile 名在 `boto3.session.Session(...)` **构造期**
     就抛 `ProfileNotFound`，配不出 region 则要到 `session.client(...)` 解析 endpoint 时才抛 `NoRegionError`；
-    留在入口 `try` 之外就成裸 traceback（同 `cli._guard_vpc_spec` 的口径：这类对用户是「先修凭证」）。
+    留在入口 `try` 之外就成裸 traceback（同 `cli._guard_vpc_spec` 的口径：这类对部署方是「先修凭证」）。
 
     **本钩子不是唯一的一口**：更早一步——把 prefix/region/profile 解析成 target——也能抛同类异常（未给
     region 时解析会回落读 profile config），那一步归 `cli.Provider._resolve_target_or_report`，排在本钩子之前。
@@ -709,7 +709,7 @@ def push_worker(image: str, *, engine: str, variant: str, set_default: bool = Fa
     except (WorkerCommandError, ContainerError) as exc:
         out(str(exc))
         return EXIT_PRECONDITION
-    except Exception as exc:  # 凭证/权限/region/网络：对用户是「先修凭证」，与前置同一类、不该抛 traceback
+    except Exception as exc:  # 凭证/权限/region/网络：对部署方是「先修凭证」，与前置同一类、不该抛 traceback
         out(f"AWS 调用失败：{exc}\n需要部署方权限（ECR 推送域 + ecr:GetAuthorizationToken/DescribeImages、"
             f"ecs:RegisterTaskDefinition/ListTaskDefinitions/DescribeTaskDefinition/TagResource、iam:PassRole、"
             f"SSM 读写 /{prefix}backend/*、runs 表 Query），以及可用的凭证/region。")
@@ -726,7 +726,7 @@ def push_worker(image: str, *, engine: str, variant: str, set_default: bool = Fa
 
 def _skew_gate(compose, *, prefix: str, cli_version: str | None, ssm, out) -> int | None:
     """版本 skew 前置：block → 退 2（无放行口）；warn/skip → 打一行继续；ok → 静默；**读不到戳（凭证/权限）
-    也退 2**（对用户是「先修凭证」，与前置同一类）。
+    也退 2**（对部署方是「先修凭证」，与前置同一类）。
 
     判据与措辞的单一真源是 `compose.check_backend_skew`（ADR 0037 决策 7）。**block 时补一句本命令专属的出路**：
     push-worker 住 `gherkai-deploy-aws`，临时用同版本 CLI 要带 extra（`gherkai[deploy-aws]==X.Y.Z`），

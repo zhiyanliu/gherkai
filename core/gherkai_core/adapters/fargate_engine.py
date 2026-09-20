@@ -135,12 +135,14 @@ class FargateEngine:
         job_s3: tuple[str, str],   # (bucket, prefix)：job 对象落 s3://bucket/prefix<scope_id>.json
         events_table_name: str,    # 注入 worker 的 events 表名（worker PutItem 目标）
         container_name: str,       # RunTask overrides 要指定往哪个 container 注 env
-        artifact_s3: tuple[str, str] | None = None,  # (bucket, prefix)：worker 产物上传落点（ADR 0029）——注入 worker 的
-                                   # ARTIFACT_S3_BUCKET/PREFIX，否则容器盘停即销毁、产物必丢（ADR 0029「cloud 下注入不是可选」）。None=不上传
-        extra_env: dict | None = None,  # 通用附加 env（组合根算好，如 GHERKAI_EXTRA_HTTP_HEADERS，ADR 0035）——逐条注 RunTask overrides
-        sdk_artifact_dir_env: dict | None = None,  # 按引擎的 SDK 产物落点 env（如 {"NOVA_LOGS_DIR": "/容器内/…/nova-trajectories"}）——
+        # 下面两个产物落点参数**必给关键字、无缺省**：cloud 下两者必注，漏传即静默丢产物（实际运行暴露过一次），
+        # 与 ADR 0038 的显式 revision 同口径——漏传即在装配点炸，不做成「忘了传就静默破」。
+        artifact_s3: tuple[str, str] | None,  # (bucket, prefix)：worker 产物上传落点（ADR 0029）——注入 worker 的
+                                   # ARTIFACT_S3_BUCKET/PREFIX，否则容器盘停即销毁、产物必丢（ADR 0029「cloud 下注入不是可选」）。None=显式不上传
+        sdk_artifact_dir_env: dict,  # 按引擎的 SDK 产物落点 env（如 {"NOVA_LOGS_DIR": "/容器内/…/nova-trajectories"}）——
                                    # worker ArtifactUploader 用其父级算 run_dir/相对 key。**缺它 uploader run_dir=None→no-op 报 file://→产物丢**
                                    # （实际运行暴露：只注 ARTIFACT_S3_* 不够，SDK 落点 env 也必注）。引擎无关：由组合根按引擎算好、本 adapter 只转发。
+        extra_env: dict | None = None,  # 通用附加 env（组合根算好，如 GHERKAI_EXTRA_HTTP_HEADERS，ADR 0035）——逐条注 RunTask overrides
         region: str | None = None, # 注入 worker 的 AWS_REGION（组合根已落实成具体字符串，ADR 0016 决策 C）；None=真无 region、worker fail-loud
         poll_interval_s: float = 0.5,
         gap_grace_s: float = EC_GAP_GRACE_S,  # 流式期断号宽限（ADR 0024「读一致性」，见模块常量注释）

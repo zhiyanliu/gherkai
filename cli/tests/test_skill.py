@@ -28,6 +28,7 @@ import pytest
 from _doc_rules import (
     COLLOQUIAL,
     FORBIDDEN,
+    MACHINE_ROOTS,
     PROVIDER_ONLY_FLAGS,
     RELATIVE_LINK,
     RETIRED_TERMS,
@@ -460,11 +461,10 @@ def test_every_fixture_file_is_tracked():
 
 # fixture 可搬迁契约的兜底：逐文件枚举字段总会漏新字段，这条按不变量兜——文本里出现的绝对路径必须是
 # 占位符形态 `{{FIXTURE_ROOT}}/…`（评测前由 materialize 换成舞台目录）。
-# 判据 = 已知机器根（本机 / Linux / 容器常见根）。曾试过「JSON 里以 `/` 打头的字符串值一律算路径」：
-# 假红——step 原文 `Then 页面地址匹配 "/wiki/OpenAI"` 会以转义字串嵌进 run_meta / jobs，URL 路径与机器路径
-# 在形态上分不开，只有根目录名能分。录制机换了新根就补进这张表（materialize.py 的 snapshot 漏扫用同一组根）。
-ABSOLUTE_PATH = re.compile(
-    r"(?:file://)?/(?:Users|home|private|var|tmp|opt|Volumes|root|mnt|srv|app|workspace|work|data|etc|usr|nix|run)/[^\s\"'\\]*")
+# 判据 = 已知机器根，根集与理由见 `_doc_rules.MACHINE_ROOTS`（快照物化的漏扫认同一组根）。曾试过「JSON 里
+# 以 `/` 打头的字符串值一律算路径」：假红——step 原文 `Then 页面地址匹配 "/wiki/OpenAI"` 会以转义字串嵌进运行
+# 元信息与判定明细，URL 路径与机器路径在形态上分不开。这里在根之后多收一段路径尾巴，报错时能打出整条路径。
+ABSOLUTE_PATH = re.compile(rf"(?:file://)?/(?:{'|'.join(MACHINE_ROOTS)})/[^\s\"'\\]*")
 TEXT_SUFFIXES = {".json", ".md", ".txt", ".html", ".feature", ".py", ".ts", ".mts", ".log", ".csv", ".yml", ".yaml"}
 
 

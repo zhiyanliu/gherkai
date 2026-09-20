@@ -11,6 +11,10 @@
 （本脚本把 skill 装进临时项目的真实安装位，故该信号成立，测试意图即应触发）；只有「机器上装了 CLI」这种用户级
 信号才要求明说 gherkai。
 
+本线按 ADR 0043 决策七「触发率的测法」**不切宿主设置**（不传 `--setting-sources project`）：那是两臂行为评测的
+隔离要求，加了会让历史触发率读数失去可比性；只做一件事——运行前断言用户级与上溯路径没有已装的 gherkai skill
+（dogfood 安装态与评测互斥）。
+
 用法：
   python skills/gherkai-evals/trigger_eval.py --runs 3
   python skills/gherkai-evals/trigger_eval.py --runs 1 --limit 2      # 冒烟：只运行前两条
@@ -30,6 +34,8 @@ from pathlib import Path
 
 # 与行为评测同一份 env 剥离表与缺省模型（同源，避免两个脚本漂）。
 from run_evals import DEFAULT_MODEL, STRIP_ENV
+# 「上溯路径与用户级目录没有已装 skill」的前置断言与物化那边同一份（见模块头注释）。
+from materialize import assert_no_installed_skill
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
@@ -138,6 +144,9 @@ def main() -> None:
 
     if not shutil.which("claude"):
         fail("PATH 里没有 claude")
+    # 临时项目建在系统临时目录下，它的上溯路径与用户级目录里若已装着 skill，被测会话会在临时项目之外也发现一份，
+    # 触发读数就不再只反映这次装进去的那份。断言放在建项目与挑安装器之前：不满足就别开销。
+    assert_no_installed_skill(Path(tempfile.gettempdir()))
     installer = resolve_installer(Path(a.cli_dir).resolve())
     items = json.loads(EVAL_SET.read_text(encoding="utf-8"))
     if a.limit:

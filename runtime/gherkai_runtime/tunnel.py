@@ -58,9 +58,9 @@ class NgrokTunnel:
 
     spawn `ngrok http <origin> --log <file> --log-format json` agent 进程 → 轮询日志文件、
     从 `started tunnel` 事件行拿公网 URL。**不走本地 agent API**——v3 的 `ngrok http` 无 `--web-addr`
-    flag（实际运行暴露：unknown flag；web_addr 是配置文件项、注入需劫持用户 config），日志文件通道
+    flag（实际运行暴露：unknown flag；web_addr 是配置文件项、注入需劫持使用方 config），日志文件通道
     无端口冲突、天然留诊断（authtoken 缺失等 err 行同在其中）。
-    - **authtoken 前置**：用户自配（`NGROK_AUTHTOKEN` env 或 ngrok 配置文件）——未配时 agent 起不来，
+    - **authtoken 前置**：使用方自配（`NGROK_AUTHTOKEN` env 或 ngrok 配置文件）——未配时 agent 起不来，
       start() 以日志尾部报 TunnelError（点名 authtoken 引导排错）。
     - **basic-auth 默认开启**：Traffic Policy 文件（边缘节点拦截，不带凭据的请求到不了本机）。
     """
@@ -139,10 +139,7 @@ class NgrokTunnel:
             self._sleep(0.2)
 
         if url is None:
-            try:
-                os.kill(proc.pid, signal.SIGTERM)
-            except ProcessLookupError:
-                pass
+            stop_tunnel(proc.pid)  # 唯一拆除面（幂等：进程已退则静默，ADR 0035 决策 3）
             tail = ""
             try:
                 tail = log_path.read_text(encoding="utf-8", errors="replace")[-500:]

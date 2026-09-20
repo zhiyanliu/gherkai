@@ -8,7 +8,7 @@
 
 ## `gherkai run … --json`
 
-顶层 = 这次运行的判定 + `run_meta`（提交时固定的这批任务本身）+ `artifacts`（落点）。
+顶层 = 这次运行的判定 + `run_meta`（提交时固定的本次运行任务本身）+ `artifacts`（落点）。
 
 | 键 | 类型 | 含义 |
 |---|---|---|
@@ -47,7 +47,7 @@
 | `report_refs[]` | array | step 级产物指针：两引擎都有 `kind=evidence`（gherkai 自有格式的机读证据，由 `gherkai explain` 读取，见下节）；Nova 另有每次 act 的轨迹页 `kind=trajectory` |
 | `shortcircuited` | bool | true = 上游 step error 后被跳过、未执行（此时 status=skipped） |
 
-`run_meta`（提交时固定的这批任务本身）：`run_id`、`created_at`、`max_concurrency`、`steps_dir`（使用方确定性 step 目录的绝对路径；未解析到目录时**省略**该键——不是 null；cloud 后端恒省略，steps 构建在镜像里）、
+`run_meta`（提交时固定的本次运行任务本身）：`run_id`、`created_at`、`max_concurrency`、`steps_dir`（使用方确定性 step 目录的绝对路径；未解析到目录时**省略**该键——不是 null；cloud 后端恒省略，steps 构建在镜像里）、
 `worker_variant` / `worker_task_defs`（cloud 后端：提交时解析的 variant 与各引擎 task-def revision ARN，local 后端省略）、
 `extra_http_headers`（`--expose-local` 注入的请求头，无则省略）、`jobs[]`：
 
@@ -78,7 +78,7 @@
 
 `steps[].deterministic` 三态：至少一个引擎自述成功时，该键在**每个** step 上都出现。`null` = 该 step 交由 AI 执行；带 `pattern` + `description`
 = 命中该确定性 step；带 `conflict`（命中的模式列表）= 多条模式同时命中，实际执行该 step 会记 error（需先调整模式或 step 措辞）。
-**全部引擎都取不到 worker 自述时该键整批省略**（不是 null；stderr 有「标注降级」提示）。部分引擎降级时，该引擎的 step 同样是
+**全部引擎都取不到 worker 自述时该键在每个 step 上一律省略**（不是 null；stderr 有「标注降级」提示）。部分引擎降级时，该引擎的 step 同样是
 `null`、机读层与「交由 AI」不可区分；降级的引擎名见 stderr 的提示行。
 
 ## `gherkai status <run_id> --json`

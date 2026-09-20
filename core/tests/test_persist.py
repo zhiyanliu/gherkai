@@ -181,7 +181,7 @@ def test_aborted_with_none_session_does_not_resurrect_but_documents_edge():
 
 
 def test_running_phase_has_no_data_plane_file_until_complete(tmp_path):
-    """锁定「两面分离」（ADR 0016 三层切分 + 0030）——用户实测会困惑的点：
+    """锁定「两面分离」（ADR 0016 三层切分 + 0030）——提交者实测会困惑的点：
     job 处于 RUNNING 时，控制面 run_state.json 显示 running，但数据面 jobs/<scope>.json **还不存在**；
     只有 job 完成（on_job_complete）出了判定，jobs/<scope>.json 才落。
     数据面 = 判定真值，RUNNING 的 job 还没判定，故意不写半截——「jobs/ 里出现文件 = 判定已就绪」。"""
@@ -201,7 +201,7 @@ def test_running_phase_has_no_data_plane_file_until_complete(tmp_path):
     p.on_event(ScopeStarted(scope_id="s", session_id="sess-1"))
     # 控制面：run_state 显示 running（进度可见）
     assert run_store.load_run_state("r").jobs["s"].status == Status.RUNNING
-    # 数据面：jobs/<scope>.json **还不存在**（RUNNING 的 job 没判定，不写半截）——这正是用户看到的现象
+    # 数据面：jobs/<scope>.json **还不存在**（RUNNING 的 job 没判定，不写半截）——这正是提交者看到的现象
     assert not job_file.exists()
     assert result_store.load_all("r") == []
 

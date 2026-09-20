@@ -65,7 +65,7 @@ FORBIDDEN_REWRITES: dict[str, str] = {
         "已处理到的事件水位（诊断用）；仅由后台推进写入的 run 有",
     "（投影滞后于 job 级状态）": "（run 级状态滞后于 job 级状态）",
     "被推进器认领的时刻": "被后台推进认领的时刻",
-    "`run_meta`（definition）": "`run_meta`（提交时固定的这批任务本身）",
+    "`run_meta`（definition）": "`run_meta`（提交时固定的本次运行任务本身）",
     "本次 run 的 definition（提交时固定）": "本次 run 的任务定义（提交时固定）",
     "definition / 运行态的落点": "任务定义 / 运行态的落点",
     "内嵌的完整 `job` definition": "内嵌的完整 `job` 定义",

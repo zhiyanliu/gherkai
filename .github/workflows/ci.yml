@@ -40,6 +40,12 @@ jobs:
           enable-cache: true
           cache-dependency-glob: uv.lock
 
+      - uses: actions/setup-node@v7.0.0
+        with:
+          # deploy_aws 的 CDK synth 测试经 jsii 起 node 子进程：Node 版本与产品声明的下限同源
+          # （NODE_VERSION），不吃 runner 默认值。
+          node-version: ${{ env.NODE_VERSION }}
+
       - name: uv sync（单 lock 装齐全成员）
         # --locked：uv.lock 与 pyproject 不一致就失败，别让 CI 悄悄用一份现算的解（ADR 0037「工程布局」单 lock）。
         run: uv sync --locked

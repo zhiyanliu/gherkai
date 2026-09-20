@@ -91,10 +91,28 @@ def test_vpc_absent_hint_is_best_effort_when_backend_unreadable(cdk, monkeypatch
     """读后端失败（凭证 / 权限）→ 提示退回通用版：仍退 2、不抛栈、不多一种失败。"""
     def boom(**kw):
         raise RuntimeError("no credentials")
-    monkeypatch.setattr(provider_cli, "_make_cfn_client", boom)
+    monkeypatch.setattr(provider_cli, "_make_hint_clients", boom)
     assert Provider().deploy(_parse("--prefix", "vfy-", "--region", "us-east-1")) == 2
     err = capsys.readouterr().err
     assert "缺 --vpc" in err and "上次部署用的是" not in err and "首次部署" not in err and "Traceback" not in err
+
+
+def test_hint_clients_carry_a_bounded_timeout_budget():
+    """提示专用句柄的超时预算要钉住取值：打桩 `_make_hint_clients` 的用例把它整体换掉，超时值被改大或
+    重试配置被摘掉都照不出来。
+
+    这里不打桩、真建两个 boto3 句柄——建句柄不发请求、也不要凭证，只要显式 region。
+    重试按总尝试次数断：botocore 解析后落在 `total_max_attempts`，原始配置里的 `max_attempts` 是
+    legacy 语义的重试次数（总尝试 = 重试 + 1），两种形状折算成同一个数再比。
+    """
+    clients = provider_cli._make_hint_clients(region="us-east-1", profile=None)
+    assert len(clients) == 2
+    for client in clients:
+        config = client.meta.config
+        assert (config.connect_timeout, config.read_timeout) == (2, 3)
+        retries = config.retries
+        total_attempts = retries.get("total_max_attempts", retries.get("max_attempts", 0) + 1)
+        assert total_attempts == 1, retries  # 连不上即放弃：一次尝试，不重试
 
 
 def test_bootstrap_needs_no_vpc_and_never_loads_the_app(cdk, monkeypatch):
@@ -368,8 +386,12 @@ class _Ssm:
 
 
 def _stub_backend(monkeypatch, *, stack_exists: bool, stored: str | None) -> None:
+    """打桩后端读取。**三个钩子都要打**：VPC 取值三态比对走 `_make_cfn_client` / `_make_ssm_client`，
+    「缺 --vpc」提示走短超时的 `_make_hint_clients`——同一批桩数据喂两条路径各自的句柄来源。"""
     monkeypatch.setattr(provider_cli, "_make_cfn_client", lambda **kw: _Cfn(stack_exists))
     monkeypatch.setattr(provider_cli, "_make_ssm_client", lambda **kw: _Ssm(stored))
+    monkeypatch.setattr(provider_cli, "_make_hint_clients",
+                        lambda **kw: (_Cfn(stack_exists), _Ssm(stored)))
 
 
 def test_guard_first_deploy_proceeds(monkeypatch):
@@ -662,6 +684,7 @@ def test_missing_cdk_stops_deploy_before_any_aws_read(monkeypatch, capsys):
 
     monkeypatch.setattr(provider_cli, "_make_cfn_client", _no_aws)
     monkeypatch.setattr(provider_cli, "_make_ssm_client", _no_aws)
+    monkeypatch.setattr(provider_cli, "_make_hint_clients", _no_aws)  # 建句柄的入口有三个，漏一个就留洞
 
     rc = Provider().deploy(_parse("--vpc", "default", "--region", "us-east-1"))
     assert rc == EXIT_PRECONDITION

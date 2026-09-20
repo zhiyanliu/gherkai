@@ -130,7 +130,7 @@ def test_exit_code_none_is_error_not_running():
 
 
 def test_platform_sentinel_exit_surfaces_reason_in_message():
-    """观察者落的平台哨兵（容器没能开始运行）→ ERROR，且 reason（stopCode: stoppedReason）进 job message 给用户看归因。"""
+    """观察者落的平台哨兵（容器没能开始运行）→ ERROR，且 reason（stopCode: stoppedReason）进 job message 给使用方看归因。"""
     exited = TaskExited(scope_id="a", exit_code=PLATFORM_FAILED_EXIT,
                         reason="TaskFailedToStart: CannotPullContainerError: not found")
     recs = [EventRecord(scope_id="a", kind="exit", exited=exited)]  # 零事件：容器根本没起

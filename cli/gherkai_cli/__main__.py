@@ -246,7 +246,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     )
     run.add_argument(
         "--prefix", default=None, metavar="P",
-        help=f"[--backend cloud] 资源名前缀（默认 {compose.DEFAULT_PREFIX!r}）：批量决定表/桶/cluster/task-def 默认名；"
+        help=f"[--backend cloud] 资源名前缀（默认 {_names.DEFAULT_PREFIX!r}）：批量决定表/桶/cluster/task-def 默认名；"
              "须与 `gherkai deploy --prefix` 一致。多环境切换（prod-/stage-）用它。兜底 AWS_RESOURCE_PREFIX",
     )
     run.add_argument(
@@ -378,7 +378,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     st.add_argument("--report-dir", default="reports", metavar="DIR",
                     help="run 落点（local）/ 后端报告前缀（cloud）——须与 submit 一致；终态时据此打印报告与判定明细位置")
     # 两个后端接力形态不同：local 由本机这个进程亲自执行 reconcile.tick 推进；cloud 只 invoke kicker Lambda，
-    # 保 status 机器零 ECS 权限（ADR 0034）。help 里只讲用户看得见的差别。
+    # 保 status 机器零 ECS 权限（ADR 0034）。help 里只讲提交者看得见的差别。
     st.add_argument("--wait", action="store_true",
                     help="轮询到 run 达终态再返回（两路都支持，接力方式不同：local=在本机接着把它推到底；"
                          "cloud=检测卡住即触发云端接力）")
@@ -418,7 +418,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     ex.add_argument("--region", default=None, metavar="R")
     ex.add_argument("--profile", default=None, metavar="P")
 
-    # _reconcile：per-run 进程入口（submit setsid fork 它，非用户直接调）。执行 reconcile loop 到全 done。
+    # _reconcile：per-run 进程入口（submit setsid fork 它，非使用方直接调）。执行 reconcile loop 到全 done。
     # 内部入口**不传 help**：argparse 只为带 help 的子命令登记帮助条目，不传即不出现在 --help 的命令说明里；
     # 传 help=argparse.SUPPRESS 反而会以「==SUPPRESS==」漏出（Python 3.13 仍如此）。命令集的花括号列表另由末尾的 metavar 收窄。
     rc = sub.add_parser("_reconcile")
@@ -428,12 +428,12 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     rc.add_argument("--region", default=None)
     rc.add_argument("--profile", default=None)
 
-    # _tunnel_watch：cloud submit 的隧道守护进程入口（submit setsid fork 它，非用户直接调，ADR 0035 决策 3）：
+    # _tunnel_watch：cloud submit 的隧道守护进程入口（submit setsid fork 它，非使用方直接调，ADR 0035 决策 3）：
     # 轮询 run 终态即拆隧道；TTL 兜底自杀防泄漏。
     tw = sub.add_parser("_tunnel_watch")  # 同 _reconcile：不传 help（见上）
     tw.add_argument("run_id")
     tw.add_argument("--tunnel-pid", type=int, required=True)
-    # --ttl 必给、无默认：TTL 按 definition 算（submit 侧 tunnel_host.compute_watch_ttl_s，用户可用
+    # --ttl 必给、无默认：TTL 按 definition 算（submit 侧 tunnel_host.compute_watch_ttl_s，提交者可用
     # submit --tunnel-ttl 覆盖）。给个「没有生产写入者的默认值」正是本 flag 曾恒为 1h 的病根，故不留默认。
     tw.add_argument("--ttl", type=float, required=True)
     tw.add_argument("--ddb-table", required=True)
@@ -539,7 +539,7 @@ def _resolve_steps_dir(args) -> "str | int | None":
 
 def _resolve_steps_dir_for_backend(args) -> str | int | None:
     """`_resolve_steps_dir` + 云端后端清零（ADR 0037 决策 4）：云端后端 steps 构建在定制镜像里（0038），definition
-    里的本机路径对云端 worker 无意义 → 不写该字段；用户显式给了则警告不拦（no-op，不改产物落点）。run/submit 共用。"""
+    里的本机路径对云端 worker 无意义 → 不写该字段；提交者显式给了则警告不拦（no-op，不改产物落点）。run/submit 共用。"""
     steps_dir = _resolve_steps_dir(args)
     if isinstance(steps_dir, int) or args.backend != "cloud":
         return steps_dir
@@ -551,7 +551,7 @@ def _resolve_steps_dir_for_backend(args) -> str | int | None:
 
 # worker 自述（--capabilities）非零退出的两种成因，三个消费点（run/submit 运行前检查、list-deterministic、doctor）同一句：
 # 该入口会加载使用方 steps，非零退出既可能是那些文件加载失败，也可能是 worker 与 CLI 版本不一致（不认该入口、掉进
-# job 模式读到空 stdin 即退）；只转述 worker 的 stderr 时，后一种只剩一句与版本无关的 JSON 解析错、用户不知升级哪一侧。
+# job 模式读到空 stdin 即退）；只转述 worker 的 stderr 时，后一种只剩一句与版本无关的 JSON 解析错、使用方不知升级哪一侧。
 _SELF_DESCRIBE_CAUSES = ("（以 worker 自己的报错为准；若它只报了一句解析错误、没说原因，常见成因是 steps/ 目录里的"
                          "文件加载失败，或 worker 与命令行工具版本不一致——两者须同版本安装）")
 
@@ -762,7 +762,7 @@ def _doctor_cloud(args, target, add, cred_fail: str) -> None:
         err = compose.preflight_cloud_resources(
             prefix=target.prefix, events_table=target.events_table, bucket=target.bucket,
             cluster=target.cluster, runs_table=target.runs_table,
-            task_defs=[compose.task_def_name(target.prefix, e) for e in sorted(_names.ENGINES)],
+            task_defs=[_names.task_def_name(target.prefix, e) for e in sorted(_names.ENGINES)],
             lambda_fns=target.detached_chain_lambdas, report_dir=args.report_dir,
             region=target.region, profile=target.profile)
         add("backend", "resources", err is None,
@@ -808,11 +808,11 @@ def _doctor_worker_grace(target, add, revisions: dict) -> None:
     → 收尾被 SIGKILL 截断、会话靠 AgentCore 会话 TTL 兜底），故按**可选能力缺失**口径报（`-`、required=False），
     不是必修失败：它不挡任何一次正常的批量运行，只是把「这台后端的宽限够不够最坏情形」变成看得见的一行。
     比对面两侧各有前置：**只比已解析到 revision 的引擎**（没解析到的，上面 worker.<engine> 行已报）；
-    **本机没定位到该引擎 worker 就跳过**（下限是 worker 自报的，没 worker 就问不出来——纯 cloud 用户不必为
+    **本机没定位到该引擎 worker 就跳过**（下限是 worker 自报的，没 worker 就问不出来——只用云端后端的提交者不必为
     这一行装运行时，同 engines.any 在云端后端降为可选的判据）。
     文案不能只给「抬高」一条路：`stopTimeout` 的部署缺省就是 Fargate 平台硬顶（deploy_aws 的 DEFAULT_STOP_TIMEOUT_S
     = FARGATE_STOP_TIMEOUT_MAX_S），Nova 自报下限恒大于它 → 部署正常的后端上这一行对 Nova **恒为 `-`**；cli 不依赖
-    deploy_aws、不知平台上限具体几秒，故文案分「未顶满可抬 / 顶满即接受」两支，别让用户追一个 ADR 0032 已记录接受的残余。
+    deploy_aws、不知平台上限具体几秒，故文案分「未顶满可抬 / 顶满即接受」两支，别让部署方追一个 ADR 0032 已记录接受的残余。
     比对左侧用的是**本机** worker 自报的值：Nova 的 margin 可经宿主 env 覆盖、但 Fargate 容器 env 是显式枚举、
     容器内恒按缺省算——宿主覆盖过 margin 时这行偏保守（不会漏报）。
     """
@@ -867,7 +867,7 @@ def _doctor_provider(args, add) -> None:
         return
     provider, perr = _deploy.resolve_provider(None)
     if provider is None and len(eps) > 1:
-        add("provider", "deploy-aws", True, perr or "装了多个部署 provider：本项未查", required=False)  # 不是故障，doctor 不替用户猜哪个云
+        add("provider", "deploy-aws", True, perr or "装了多个部署 provider：本项未查", required=False)  # 不是故障，doctor 不替部署方猜哪个云
         return
     if provider is None:
         add("provider", "deploy-aws", False, perr or "provider 不可用")
@@ -929,7 +929,7 @@ def _load_and_plan(args) -> "list | int":
         _progress(f"读 feature 失败：{e}")
         return 2
     if dup_paths:
-        # 点名被忽略的路径：用户多半是 glob 撞了显式并列，也可能是打错了文件名，看得见才好判断。
+        # 点名被忽略的路径：使用方多半是 glob 撞了显式并列，也可能是打错了文件名，看得见才好判断。
         _progress(
             f"同一个 .feature 传了多次，已按一次算（忽略 {len(dup_paths)} 个重复路径："
             + "、".join(str(p) for p in dup_paths) + "）"
@@ -1233,7 +1233,7 @@ def _cmd_submit(args) -> int:
     # 本身失败）→ 隧道没有宿主，就地拆掉，否则脱离进程组的 agent 会永久把本机应用留在公网（ADR 0035 决策 3）。
     # **「没交棒」≠「没提交」**：云端后端 `create_run` 已过、只是守护没 fork 起来这一格，云端链已经接管这个
     # run；本机后端同理（run 记录已在盘上、接力者会来推它）。这一格照样拆（没有任何收尾者，不拆就是永久公网
-    # 暴露），但必须打一行说清楚——否则用户只看到一个栈、以为什么都没发生，而云端照常运行、照常计费。
+    # 暴露），但必须打一行说清楚——否则提交者只看到一个栈、以为什么都没发生，而云端照常运行、照常计费。
     # **分界线之后**即便收尾几行抛（stdout 是坏管道、Ctrl-C 恰落此窗）也不能拆：宿主已经在运行，拆了会让
     # 剩余 job 在被测应用不可达下运行成假失败——兜底机制反成失败源，且真实产生 AWS 费用。
     handed_off = False
@@ -1337,7 +1337,7 @@ def _cloud_worker_variant_gate(args, target, engines, *, backend_version) -> "in
     每个引擎的 task-def revision（ADR 0038「运行时与 preflight」）。放行 → `{engine: WorkerResolution}`；拦下 → 2。
 
     **次序 = 版本 skew → 资源 preflight → 本闸**（ADR 0038 明写）：skew 的修复动作（`gherkai deploy`）本身就是
-    镜像重推的前置，反过来先报「variant 没推」会让用户白推一轮（推完还得因 skew 重来）。
+    镜像重推的前置，反过来先报「variant 没推」会让部署方白推一轮（推完还得因 skew 重来）。
     **engines 只含本 run 真用到的引擎**——对齐既有 task-def 判据「不探全注册表，没用到的引擎不该拦」：单引擎
     团队不必为另一个引擎凭空推镜像。
     **严格退 2、不回落默认**：静默换一套确定性 step 集与「不判 steps 内容」的分工矛盾（ADR 0038 被拒方案）；
@@ -1414,12 +1414,12 @@ def _submit_cloud(args, run_id: str, run_meta, initial, *, tunnel_info=None, on_
     # preflight（events 表/cluster/桶/runs 表 + 本 run 用到引擎的 task-def + 事件驱动链三 Lambda + 推进器
     # REPORT_DIR 与 --report-dir 一致性）——配置错在提交前暴露、退 2。链上任一 Lambda 缺 = 提交成功但 run 永不
     # 推进/收敛（kicker 缺=卡 pending、reconciler 缺=无人接力、exit-observer 缺=退出信号断链）；前缀不一致 =
-    # 运行结束但结果落在用户没指定的前缀下。都必须挡在提交前（ADR 0033 preflight 条）。探针全只读，权限收窄不破。
+    # 运行结束但结果落在提交者没指定的前缀下。都必须挡在提交前（ADR 0033 preflight 条）。探针全只读，权限收窄不破。
     try:
         err = compose.preflight_cloud_resources(
             prefix=target.prefix, events_table=target.events_table, bucket=target.bucket,
             cluster=target.cluster, runs_table=target.runs_table,
-            task_defs=[compose.task_def_name(target.prefix, e)
+            task_defs=[_names.task_def_name(target.prefix, e)
                        for e in sorted({j.engine for j in run_meta.jobs})],
             lambda_fns=target.detached_chain_lambdas, report_dir=args.report_dir,
             # 声明超部署侧 cap 时提示（ADR 0034 机制四）：钳制不改产物落点、run 照常运行，故只警不退 2
@@ -1469,7 +1469,7 @@ def _submit_cloud(args, run_id: str, run_meta, initial, *, tunnel_info=None, on_
 
         # TTL 按 definition 算（tunnel_host.compute_watch_ttl_s）而非拍一个常数——TTL 短于 run 实际预算时
         # 守护会在 run 还在执行时拆隧道，剩余 job 在被测应用不可达下继续运行、以假失败告终（ADR 0035 决策 3）。
-        # `--tunnel-ttl` 给了就用用户值（显式覆盖算出的 TTL）。
+        # `--tunnel-ttl` 给了就用提交者给的值（显式覆盖算出的 TTL）。
         ttl_s = (args.tunnel_ttl if args.tunnel_ttl is not None
                  else tunnel_host.compute_watch_ttl_s(run_meta.jobs))
         watch_log = Path(_tf.gettempdir()) / f"gherkai-tunnel-watch-{run_id}.log"
@@ -1515,7 +1515,7 @@ def _render_status(state, args, *, wait_hint: str, locations: dict) -> int:
         if state.status in TERMINAL_STATUSES:
             _print_artifact_lines(locations)  # 与 `run` 结束时同一份（见其 docstring）
     # 疑似卡住诊断（两路一致）：非 --wait、非 json、**所有 job 仍 pending** → 提示 --wait 接力（**只提示、不自动
-    # kickoff/tick**——保「查看」纯只读无副作用；救活决定权留用户，走 --wait）。判据不能只看 run 级 status：
+    # kickoff/tick**——保「查看」纯只读无副作用；救活决定权留提交者，走 --wait）。判据不能只看 run 级 status：
     # 推进器 claim（CAS pending→running）只动那个 job、run 级 status 要等下一次 tick 的投影写才翻 running，而
     # 下一次 tick 要等 worker 发出第一个事件——Fargate 拉起那几十秒里恒是「job running、run pending」，此时推进
     # 早已开始，提示「推进可能未启动」是误报（实际运行 submit 后连查三次撞见）。任一 job 已 claim 即闭嘴。
@@ -1573,14 +1573,14 @@ def _status_cloud(args) -> int:
 
     **接力 invoke kicker（非本机 tick）保 status 机器零 ECS 权限**：起 task 走 Lambda 的角色（有 RunTask/PassRole），
     status 机器只需 `lambda:InvokeFunction`。kicker 名 `{prefix}kicker` 从 --prefix 确定性推理（compose 单一命名
-    真源、cli↔IaC 同源）——用户无感。检测卡住（状态连续 K 轮无变化才 kickoff、非每轮无脑踢）：正常推进时不 kickoff、
+    真源、cli↔IaC 同源）——提交者无感。检测卡住（状态连续 K 轮无变化才 kickoff、非每轮无脑踢）：正常推进时不 kickoff、
     避免无效 invoke；卡住（冷启动丢投卡 pending / 中途丢投卡 running）时 kickoff 救回。kickoff 幂等（CAS/HWM 兜底）。
     """
     import time as _time
 
     target = compose.resolve_cloud_target(prefix=args.prefix, region=args.region,
                                           profile=args.profile, runs_table=args.ddb_table)
-    kicker_fn = target.kicker_lambda  # {prefix}kicker，从 prefix 推理出、无需用户配
+    kicker_fn = target.kicker_lambda  # {prefix}kicker，从 prefix 推理出、无需提交者配
 
     # 版本 skew 先于任何云端读（ADR 0037 决策 7 的次序）。**status 不解析 variant**（ADR 0038）：它只读运行态、
     # 不起 task，definition 里的 revision 是提交时定死的，重解析既无用又会把「镜像已退休」误报成查询失败。
@@ -1870,7 +1870,7 @@ def _explain_cloud(args) -> int:
 
 
 def _cmd_reconcile(args) -> int:
-    """per-run 进程入口（submit setsid fork 它，非用户直接调）：执行 reconcile loop 到全 done 自退（ADR 0034）。
+    """per-run 进程入口（submit setsid fork 它，非使用方直接调）：执行 reconcile loop 到全 done 自退（ADR 0034）。
 
     **无 `--steps-dir` flag**：使用方 step 目录随 definition 走（`RunMeta.steps_dir`），由
     `build_local_reconcile` 从 RunStore 读回——本进程 CWD 与提交进程不同，重解析 `./steps` 必分叉
@@ -1887,7 +1887,7 @@ def _cmd_reconcile(args) -> int:
 
 
 def _cmd_tunnel_watch(args) -> int:
-    """隧道守护进程入口（cloud submit setsid fork 它，非用户直接调，ADR 0035 决策 3）。
+    """隧道守护进程入口（cloud submit setsid fork 它，非使用方直接调，ADR 0035 决策 3）。
 
     守护主体在 `gherkai_runtime.tunnel_host.watch_run_and_stop_tunnel`（产品本体）；此处只接线 + 打印
     （stdout 已被 submit 重定向到 /tmp 的守护日志，故诊断走 print 而非 _progress 的 stderr 惯例）。
@@ -1919,16 +1919,16 @@ def _cmd_run(args) -> int:
     #     **只对本机后端查**（ADR 0032 真容器校准结论 4 的两条路径之分）：云端后端 worker 运行在 Fargate 里、
     #     `FargateWorkerHandle.stop` 忽略运行期 grace（真实宽限 = task-def 期 stopTimeout，`doctor --backend cloud`
     #     的 worker.grace 行专门比对它），而提交机器本就不必装 worker 运行时（ADR 0037 决策 3「云端后端不查本机
-    #     定位链」，见 _preflight_worker_runtimes）——在此查会把纯 cloud 用户按本机环境无理由挡住。
-    #     **云端后端还要拒绝显式 `--grace`**（同条 ADR）：那个后端没有它的作用面，配了无效值就在入口拒，别让用户
+    #     定位链」，见 _preflight_worker_runtimes）——在此查会把只用云端后端的提交者按本机环境无理由挡住。
+    #     **云端后端还要拒绝显式 `--grace`**（同条 ADR）：那个后端没有它的作用面，配了无效值就在入口拒，别让提交者
     #     以为设了一道防护——真正的云端宽限在部署侧（`gherkai deploy --stop-timeout`）。
     #     显式给了过小 grace → 入口友好拒绝（对齐 votes 校验惯例，退 2「没开始执行就被拒」）。core 侧还有 enforce
-    #     兜底（任何前端都受同一护栏），此处只为在 cli 给出清晰诊断、避免 core ValueError 冒到用户面。
+    #     兜底（任何前端都受同一护栏），此处只为在 cli 给出清晰诊断、避免 core ValueError 冒到提交者面前。
     #     **必须排在起隧道 / cloud 探资源 / persistence.begin 之前**：只依赖 jobs（云端后端连 worker 都不问），
     #     早拒才真「零副作用」——否则配置错也已起 ngrok、产生云端调用费用、并落下永不 finalize 的半成品 run 记录。
     if args.backend == "cloud" and args.grace is not None:
         # 云端后端**拒绝**显式 --grace（ADR 0024「引擎自报下限」条）：那个值到不了任何机制面（Fargate 侧真实宽限
-        # 是 task-def 期 stopTimeout，`FargateWorkerHandle.stop` 忽略运行期 grace），静默接受等于让用户以为设了
+        # 是 task-def 期 stopTimeout，`FargateWorkerHandle.stop` 忽略运行期 grace），静默接受等于让提交者以为设了
         # 一道会话泄漏防护——与 `--report-dir` 撞云端产物前缀即退 2 同口径：入口不许配无效值。
         _progress("--grace 在云端不生效：云端的停止宽限由部署侧的 gherkai deploy --stop-timeout 决定"
                   "（gherkai doctor --backend cloud 会比对它够不够）；只有本机运行才用 --grace")
@@ -1980,7 +1980,7 @@ def _cmd_run(args) -> int:
     #   且 worker 产出的 file://<相对> 是坏 URI。
     # - `--no-report` 方式：**真不生成**——不注入落点，并经 no_artifacts 令 worker 不产生/不上报引擎原生产物
     #   （Midscene 关 generateReport；Nova SDK 无关闭开关、不给目录时写进自己 mkdtemp 的临时目录、不上报）。
-    #   曾一度改为「落系统临时目录、不清」，被否：用户要的 --no-report 就是不生成 report。
+    #   曾一度改为「落系统临时目录、不清」，被否：提交者要的 --no-report 就是不生成 report。
     report_root = Path(args.report_dir).resolve()
     if do_report:
         artifact_root = report_root / run_id
@@ -2022,7 +2022,7 @@ def _cmd_run(args) -> int:
             err = compose.preflight_cloud_resources(
                 prefix=target.prefix, events_table=target.events_table, bucket=target.bucket,
                 cluster=target.cluster,
-                task_defs=[compose.task_def_name(target.prefix, e) for e in sorted({j.engine for j in jobs})],
+                task_defs=[_names.task_def_name(target.prefix, e) for e in sorted({j.engine for j in jobs})],
                 runs_table=target.runs_table if do_report else None,  # runs 表仅 do_report 探（落库需要）
                 region=target.region, profile=target.profile,
             )
@@ -2282,7 +2282,7 @@ def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     provider, provider_err = _peek_deploy_provider(argv)
     parser = _build_parser(provider=provider, provider_error=provider_err)
-    # provider 不可用时抢在 argparse 之前报它：它的选项没贴上，用户敲的 `--vpc default` 会被报成
+    # provider 不可用时抢在 argparse 之前报它：它的选项没贴上，部署方敲的 `--vpc default` 会被报成
     # 「unrecognized arguments」、把真因（没装 / 装坏了）盖掉。**-h/--help 例外**——帮助恒可用，
     # 降级的帮助自己在 epilog 里交代原因（provider_err 只在子命令是 deploy/destroy 时才非 None）。
     if provider_err is not None and not any(a in ("-h", "--help") for a in argv):

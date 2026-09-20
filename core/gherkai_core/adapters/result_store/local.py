@@ -5,7 +5,7 @@
 单 job 文件自包含（嵌完整 Job def）。**两个写者、两种时序**：同步 `run` 由 `persist.RunPersistence.on_job_complete`
 每 job 完成即落、不等整 run 结束（ADR 0030 决定一/三）；detached / 无状态批量运行由 `reconcile.tick` 的 finalize 分支在
 commit（CAS）**之前**从同一份 events 快照一次性落全部 job（ADR 0034 数据模型三件套表 / 0030 决定三「detached 路径同守」）——
-故 detached run 未达终态时本目录零文件，CLI 对用户说的「判定明细尚未落地」即此（ADR 0042 决策四）。
+故 detached run 未达终态时本目录零文件，CLI 对提交者说的「判定明细尚未落地」即此（ADR 0042 决策四）。
 
 **克制（ADR 0016）**：只忠实落已成形的 `JobResult`（复用 serialize.job_to_dict/from_dict），
 不发明 ADR 有意 defer 的数据面新字段。

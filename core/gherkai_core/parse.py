@@ -54,7 +54,7 @@ def _step_keyword(pickle_step: dict, scenario_id: str) -> str:
 
     Compiler 对 `*` 步骤与「无前驱非连接词」的首条 And/But 给 type='Unknown'（实测 gherkin 41.0）——
     此时 Given/When/Then 语义**无从判定**，静默兜底成 Given 会把本该是断言的 step 当动作派发、断言
-    永不执行（假绿方向的静默错标）。fail-fast 让用户写明关键字（ADR 0025「keyword 只决定派发」，
+    永不执行（假绿方向的静默错标）。fail-fast 让 feature 作者写明关键字（ADR 0025「keyword 只决定派发」，
     判不出=拒绝猜）。
     """
     kw = _TYPE_TO_KEYWORD.get(pickle_step.get("type", ""))

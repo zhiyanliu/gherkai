@@ -20,7 +20,6 @@
 ARG WORKER_SOURCE=index
 
 FROM node:22-slim AS base
-ENV DEBIAN_FRONTEND=noninteractive
 # /app 留给定制层放 steps/（基础镜像不预置 GHERKAI_STEPS_DIR、不猜路径，ADR 0037 决策 4/5）
 WORKDIR /app
 # **不装 chromium 二进制**：worker 连的是 AgentCore 云浏览器（chromium.connectOverCDP(wsUrl)，浏览器运行在云端），

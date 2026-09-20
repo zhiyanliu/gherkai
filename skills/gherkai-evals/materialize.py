@@ -42,7 +42,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import shutil
 import stat
 import subprocess
@@ -66,6 +65,10 @@ PREPARE_PACKAGES = ("gherkai", "gherkai-core", "gherkai-runtime", "gherkai-worke
 # midscene 要拷的三样：dist（含 bin.mjs 与 index.mjs）、package.json（包自引用靠它的 name/exports 解析裸
 # specifier）、node_modules（tsx loader 与 midscene 运行时都在里面）。约 222 MB，源侧没更新就复用。
 MIDSCENE_COPY = ("dist", "package.json", "node_modules")
+
+# 快照漏扫的判据（已知机器根）复用护栏那份单一事实源：两份根集必漂，漏补根的那份即假绿（见该模块 docstring）。
+sys.path.insert(0, str(REPO / "cli" / "tests"))
+from _doc_rules import MACHINE_ROOT  # noqa: E402
 
 
 def fail(msg: str) -> None:
@@ -154,7 +157,7 @@ def prepare_cli(cli_dir: Path) -> None:
         shutil.rmtree(p)
     if not stripped:
         fail("装完没找到 gherkai_cli/skills（wheel 布局变了？）——没确认剥掉就不能开始评测，baseline 会发现 skill")
-    # 这个目录里**不能**有 skill 副本：baseline 顺着 shim 指向的路径 `grep` 一下就翻到（第三轮 eval 3 实测）。
+    # 这个目录里**不能**有 skill 副本：baseline 顺着 shim 指向的路径 `grep` 一下就翻到（ADR 0043 验证节第三轮 eval 3 实测）。
     # with-skill 臂要读的那份由 run_evals.py 每次运行拷进随机命名的临时目录、只出现在它的提示里。
     stale_skill = cli_dir / "skill"
     if stale_skill.exists():
@@ -213,7 +216,7 @@ def assert_prepared(cli_dir: Path) -> tuple[Path, Path]:
         fail("舞台要用的 CLI 还没备好，缺：\n  " + "\n  ".join(missing)
              + f"\n先运行：python skills/gherkai-evals/materialize.py --prepare-cli {cli_dir}")
     left = [str(x) for x in cli_dir.glob("venv/lib/python3.*/site-packages/gherkai_cli/skills")]
-    if (cli_dir / "skill").exists():      # 旧版 --prepare-cli 放过一份副本，baseline 会 grep 到（第三轮实测）
+    if (cli_dir / "skill").exists():      # 旧版 --prepare-cli 放过一份副本，baseline 会 grep 到（ADR 0043 验证节第三轮实测）
         left.append(str(cli_dir / "skill"))
     if left:
         fail("这套 CLI 里又出现了 wheel 自带的 skill（baseline 会发现它），重新运行 --prepare-cli：\n  " + "\n  ".join(left))
@@ -310,8 +313,6 @@ DROP_NAMES = {"worker.log", "reconcile.log"}
 # 引擎 SDK 的原生产物（Nova 每次 act 一份 HTML + trajectory JSON；Midscene 一份 playwright-*.html 报告 + 每次执行一份 *.execution.json，动辄几 MB、内嵌截图）：skill 教 agent 不去解析它们，
 # 评测只靠 evidence.json + 截图 + session_summary.json，故不入库。判定明细里指向它们的 ref 保留原样（只是指向不存在的文件）。
 DROP_GLOBS = ("act_*.html", "act_*_trajectory.json", "playwright-*.html", "*.execution.json")
-# 漏扫判据 = 已知机器根（与 cli/tests/test_skill.py 的 ABSOLUTE_PATH 同一组；URL 路径与机器路径只有根目录名能分）。
-MACHINE_ROOT = re.compile(r"(?:file://)?/(?:Users|home|private|var|tmp|opt|Volumes|root|mnt|srv|app|workspace|work|data|etc|usr|nix|run)/")
 
 
 def snapshot(project: Path, case: str) -> None:

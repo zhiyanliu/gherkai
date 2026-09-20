@@ -38,7 +38,7 @@ import { JobSource } from "../lib/job-source.mjs";  // job 入口（同上）
 import { match as matchDeterministic, DeterministicAssertion, listRegistry, matchBatch } from "./deterministic.mjs";
 import { buildInstruction } from "./argument.mjs";
 // step 级机读证据（ADR 0042）：SDK 结构 → gherkai 自有 schema 的映射与落盘全住那个模块；此处只挂钩子。
-import { stepEvidenceRef, executionsLength, EVIDENCE_KIND, type EvidenceHook } from "./evidence.mjs";
+import { stepEvidenceRef, executionsLength, EVIDENCE_KIND, ENGINE, type EvidenceHook } from "./evidence.mjs";
 import { errorText } from "./error-text.mjs";  // 失败原因压成一行有界文本（ADR 0042；与 evidence 侧同一规则）
 import "./deterministic.steps.mjs";  // 内建脚手架（ADR 0022 退役 bdd 层后迁入 worker/）——**先于**使用方 steps 注册
 import { loadUserSteps } from "./user-steps.mjs";  // 使用方 steps/ 目录的加载（ADR 0037 决策 4）
@@ -82,6 +82,8 @@ export const BROWSER_CLOSE_BUDGET_MS = 3000;
 // 已标定的下限，要有意识地改。与 Nova 侧不对称的一点：Nova 的 margin 可 env 覆盖（再标定免改码），本常量是
 // 编译期值、再标定要改这里重编。
 export const MIN_GRACE_MARGIN_MS = 7500;
+// 自述对象的 schema 版本（ADR 0036「5.」：只在既有键语义变化时递增；加键不递增）。
+const CAPABILITIES_SCHEMA_VERSION = 1;
 
 /** 本引擎自报给组合根的 grace 下限，单位秒（ADR 0024「引擎自报下限」，经 `--capabilities` 出口，
  *  契约见 ADR 0036「5. worker 自述：--capabilities」）。
@@ -200,15 +202,21 @@ async function interruptSnapshot(
 // 截图后台队列的有界排空（ADR 0042 决策一）——与 interruptSnapshot 同形的可测小函数：只管「排空那一步」的
 // 决策（排不完记一行、放弃），**位置**（必须排在会话释放之后）由调用方保证。
 // best-effort、**绝不抛**：收尾路径上抛会跳过后面的 exit / flush；排不完不是错，正常路径还有整目录 flush 兜。
+// flushFollows 由调用点声明「我后面还跟着整目录 flush 吗」（不在这里猜调用栈）。分句按调用点是否真跟着整目录
+// flush：只在会 flush 的路径上说「改由收尾上传」（ADR 0039 面一的文案不变量例外条，两引擎同形）；不跟 flush 的
+// 提前退出路径说这些截图已放弃。必传、无默认——默认值会让新调用点静默拿到一句可能为假的承诺。
 async function drainArtifactQueue(
   uploader: { drain: (timeoutMs: number) => Promise<boolean> },
   budgetMs: number,
+  flushFollows: boolean,
   logFn: (m: string) => void = log,
 ): Promise<void> {
   try {
     if (!(await uploader.drain(budgetMs))) {
-      // 产品面一行：发生了什么 + 不影响什么 + 还能看什么。
-      logFn("worker: 部分证据截图未能在收尾预算内传完（已放弃，不影响判定结果；仍可看引擎原生报告）");
+      // 产品面一行：发生了什么 + 剩下的谁传 / 还能看什么 + 不影响什么。
+      logFn(flushFollows
+        ? "worker: 部分证据截图未能在收尾预算内传完（剩余的改由收尾统一上传；判定与报告不受影响）"
+        : "worker: 部分证据截图未能在收尾预算内传完（已放弃，不影响判定结果；仍可看引擎原生报告）");
     }
   } catch (e) {
     // 产品面一行，与上面「排不完」那行同形（best-effort、绝不抛的判据见上函数头）。
@@ -261,7 +269,7 @@ export function makeGuardedCleanup(
 // 返回该退出的码（cleanupFailed→1 让泄漏可观测、否则 0）；不自己 process.exit（交调用方，便于测试不真退进程）。
 // deps 全注入（cleanup/getCleanupFailed/uploader/reportFile...）→ 单测可传 spy 断言调用序列，无需真信号/真进程。
 interface ShutdownDeps {
-  inflightPending: () => boolean;      // startInFlight && pendingSessions.size===0：在途窗口兜底是否需等
+  inflightPending: () => boolean;      // startInFlight：Start RPC 在途则先等 settle，让 id 落进待清理集
   settleMs: number;                    // 在途兜底等待（INFLIGHT_SETTLE_MS）
   sleep: (ms: number) => Promise<void>;
   cleanup: () => Promise<void>;        // 释放会话（**先执行**）
@@ -281,7 +289,7 @@ async function shutdownSequence(deps: ShutdownDeps): Promise<number> {
   await interruptSnapshot(deps.uploader, deps.reportFile(), logFn);  // ② 提前上传排其后（best-effort、不延迟①）
   // ③ 截图后台队列的有界排空（ADR 0042 决策一）：同样排在①之后、与②并列。本路径**不 flush**，队列里
   //    没传完的截图就此丢，故给一小段计入 grace 的预算把在途的落地。
-  await drainArtifactQueue(deps.uploader, QUEUE_DRAIN_EXIT_MS, logFn);
+  await drainArtifactQueue(deps.uploader, QUEUE_DRAIN_EXIT_MS, false, logFn);
   const failed = deps.getCleanupFailed();
   logFn(`worker: session shutdown complete after signal${failed ? " (WITH FAILURE)" : ""}`);
   return failed ? 1 : 0;
@@ -396,11 +404,11 @@ export async function main(): Promise<number> {
   // Midscene SDK 的模型名，即 modelConfig() 的 MIDSCENE_MODEL_NAME，与它同源引用 lib/agentcore-sigv4 的 MODEL
   // 常量、此处不另写字面量（否则自述会与实际用的模型漂移，而 doctor 正是拿这个键显示「当前用哪个模型」）。
   // **加键不加入口**（ADR 0036「5.」）：新增自述项都是本对象的新键、不再开第二个 flag——组合根一次 spawn
-  // 就同时拿到「steps 加载成功 / 清单 / grace 下限 / 模型」。schema_version 只在既有键语义变化时递增（加键不递增）。
+  // 就同时拿到「steps 加载成功 / 清单 / grace 下限 / 模型」。
   if (process.argv.includes("--capabilities")) {
     await writeStdoutFlushed(JSON.stringify({
-      schema_version: 1,
-      engine: "midscene",
+      schema_version: CAPABILITIES_SCHEMA_VERSION,
+      engine: ENGINE,  // 与 evidence 报的引擎名同源，不另写字面量
       min_grace_s: minGraceSeconds(),
       deterministic_steps: listRegistry(),
       model_id: MODEL,
@@ -494,7 +502,9 @@ export async function main(): Promise<number> {
     // 收尾序列提出为可测的 shutdownSequence（cleanup 先于提前上传的顺序不变量在那里被单测锁住）；此处只做
     // 「守卫去重 + 唤醒退避 + 真 process.exit」这层 handler 外壳（进程副作用，不进纯函数）。
     const code = await shutdownSequence({
-      inflightPending: () => startInFlight && pendingSessions.size === 0,
+      // 不要再加 pendingSessions.size === 0：上一 attempt Stop 失败的遗留会话会让集非空，那恰恰是重试场景下
+      // 最需要兜底的时刻；1.5 s 已计入 minGraceSeconds 的加数，等它不超 grace（ADR 0028）。
+      inflightPending: () => startInFlight,
       settleMs: INFLIGHT_SETTLE_MS,
       sleep: (ms) => new Promise<void>((r) => setTimeout(r, ms)),
       cleanup,
@@ -634,7 +644,7 @@ export async function main(): Promise<number> {
     await cleanup();
     // 会话已释放，再排空截图后台队列（会话释放优先，ADR 0024；对齐 onSignal 里的③）——网络耗尽与异常
     // 这两条提前退出路径都**不 flush**（中断产物留本地），队列里没传完的字节就此丢，故给有界预算兜一把。
-    await drainArtifactQueue(uploader, QUEUE_DRAIN_EXIT_MS);
+    await drainArtifactQueue(uploader, QUEUE_DRAIN_EXIT_MS, false);
     // 建连重试耗尽（网络瞬时故障）→ 退网络专用码（ADR 0028）；但 cleanupFailed（会话泄漏）优先级更高。
     if (networkExhausted && !cleanupFailed) {
       log("worker: connect retries exhausted, exiting with network code");
@@ -652,7 +662,9 @@ export async function main(): Promise<number> {
   const flushRoot = artifactFlushRoot();  // --no-report 方式 → undefined，不 flush（对称 Nova 的 no-artifacts 分支）
   // 先排空后台截图队列、再整目录 flush（ADR 0042 决策一）：flush 只兜漏网的那几张——若反过来，队列里
   // 在途的那张会被 flush 按「还没记 uploaded」重传一次（同 key 冗余）。
-  await drainArtifactQueue(uploader, QUEUE_DRAIN_SCOPE_END_MS);
+  // flushFollows=true：本路径的排空后面就跟着整目录 flush。flushRoot 为 undefined（`--no-report` 方式）时
+  // 不 flush，但那一方式与 evidence 落点同一判据（见上 evidenceRoot）、队列必空，这句提示不会发出。
+  await drainArtifactQueue(uploader, QUEUE_DRAIN_SCOPE_END_MS, true);
   if (flushRoot) await uploader.flushAndCleanup(flushRoot);
   // 正常路径若会话释放失败 → 非 0 退出，让 schedule 记 error、泄漏可观测
   // （ADR 0024「会话释放失败可观测」，对照 Nova）

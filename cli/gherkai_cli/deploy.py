@@ -43,7 +43,7 @@ PROVIDER_GROUP = "gherkai.deploy"
 # `add_arguments(deploy_parser)` 里自己 `add_subparsers()`，并给每个子动词 `set_defaults(_deploy_verb=<可调用>)`；
 # 前端的分派**先看 `_deploy_verb`**，有就交给它、没有才走 `--diff/--synth-only/--bootstrap/deploy` 那四路。
 # **组合规则**：子动词与三个「不真部署」flag 同给 → 前端退 2（`readonly_flag_conflict`）——子动词会真写账户（推镜像/
-# 注册 task-def），若让它静默盖过用户点名要的只读预览，正是那三个 flag 要防的事（ADR 0037 决策 6 的 reviewer 靶点）。
+# 注册 task-def），若让它静默盖过部署方点名要的只读预览，正是那三个 flag 要防的事（ADR 0037 决策 6 的 reviewer 靶点）。
 # 这样那族命令落地时**前端一行不改**（它们要读 SSM/ECR/task-def、碰容器引擎，全属 provider 那半边）。
 # 子动词 subparser 不可设 `required=True`——否则裸 `gherkai deploy`（默认动作 = 真部署）会被 argparse 拒。
 # ============================================================================
@@ -58,11 +58,11 @@ def resolve_provider(name: str | None) -> tuple[object | None, str | None]:
     """按 `--provider` 值（或唯一性）选出 provider 并加载 → `(provider, None)`；失败 → `(None, 人读的一句)`。
 
     三分叉（ADR 0037 决策 6）：**零个** → 提示装 `gherkai[deploy-aws]`；**一个** → 直接用、无需 `--provider`；
-    **多个** → 必须 `--provider <名>`，否则列出名字让人选（前端不替用户猜「哪个云」）。全部失败情形由调用点退 2。
+    **多个** → 必须 `--provider <名>`，否则列出名字让人选（前端不替部署方猜「哪个云」）。全部失败情形由调用点退 2。
 
     加载 = `ep.load()`：拿到**类**则实例化（entry point 惯例指向 `Provider` 类），拿到现成对象/单例则原样用。
     加载失败（provider 包半装 / 版本不匹配 / 它自己的 import 链炸）不让 traceback 裸奔——翻成点名 entry point
-    的一句诊断（用户视角这是「装了但不可用」，与「没装」是两回事，措辞必须分开）。
+    的一句诊断（部署方视角这是「装了但不可用」，与「没装」是两回事，措辞必须分开）。
     """
     eps = provider_entry_points()
     if not eps:
@@ -94,7 +94,7 @@ def resolve_provider(name: str | None) -> tuple[object | None, str | None]:
 def readonly_flag_conflict(args) -> str | None:
     """provider 子动词（`_deploy_verb`，worker 镜像族、会真写账户）与 `--diff/--synth-only/--bootstrap` 同给 →
     一句产品语言的诊断（调用点退 2）；否则 None。三 flag 是「先看清再改账户」的只读/准备靶点（ADR 0037 决策 6），
-    子动词的分派优先级若把它们静默吞掉，用户要的预览会变成真推镜像——见模块头「组合规则」。"""
+    子动词的分派优先级若把它们静默吞掉，部署方要的预览会变成真推镜像——见模块头「组合规则」。"""
     if getattr(args, "_deploy_verb", None) is None:
         return None
     given = [flag for flag, on in (("--diff", getattr(args, "diff", False)),

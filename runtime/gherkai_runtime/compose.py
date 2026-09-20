@@ -39,16 +39,10 @@ NOVA_ACT_TIMEOUT_S = int(os.environ.get("NOVA_ACT_TIMEOUT_S", "120"))  # SDK 允
 # ============================================================================
 # 两层命名（ADR 0033）：`--prefix`（默认 gherkai-）批量决定所有名字类资源的默认名；单资源 override 给完整终值。
 # **单一事实源**：CDK 部署吃同一 prefix → CDK 建的名 = cli 推导的默认名，不漂移。覆盖时 prefix 自然不参与
-# （覆盖 = 直接给完整名 = 不走「拼默认名」路径，无特判）。prefix 含分隔符、原样拼（用户负责，防粘连——同 S3 prefix 先例）。
+# （覆盖 = 直接给完整名 = 不走「拼默认名」路径，无特判）。prefix 含分隔符、原样拼（使用方负责，防粘连——同 S3 prefix 先例）。
 # ============================================================================
-# 资源命名真源已拆到 gherkai_runtime.names（零依赖，iac 直接 import）；此处 re-export 保既有引用不动。
-from gherkai_runtime.names import (  # noqa: E402
-    DEFAULT_PREFIX,
-    default_name,
-    task_def_name,
-    container_name,
-    ssm_path,
-)
+# 资源命名真源在 gherkai_runtime.names（零依赖，iac 与 Lambda 直接 import）；本模块一律经 _names 访问、**不设
+# re-export**：同一命名真源不该有两条 import 路径，包外消费者一律直接 import names。
 from gherkai_runtime import names as _names  # noqa: E402
 
 
@@ -141,7 +135,7 @@ _WORKER_BIN = {  # ③ PATH 上的可执行名（Python 侧由 console script �
 _WORKER_FALLBACK = {
     "novaact": ("uvx", lambda v: ["uvx", f"gherkai-worker-novaact=={v}"]),
 }
-# 全 miss 时给用户的安装指引（每引擎一条，两种语言的地盘不同）。
+# 全 miss 时给使用方的安装指引（每引擎一条，两种语言的地盘不同）。
 _WORKER_INSTALL_HINT = {
     "novaact": "装法：uv tool install 'gherkai[local]'（worker 与 CLI 同一个 venv，离线可用）",
     "midscene": "装法：npm i -g @gherkai/worker-midscene（需 Node ≥ 22）",
@@ -252,7 +246,7 @@ def resolve_worker_cmd(engine: str, *, version: str | None = None) -> WorkerCmd:
         try:
             argv = shlex.split(raw)
         except ValueError as e:
-            # 引号不配对之类：**不静默落到下一级**——用户明确指了一个 worker，悄悄换成别的（或报「没装」）
+            # 引号不配对之类：**不静默落到下一级**——使用方明确指了一个 worker，悄悄换成别的（或报「没装」）
             # 是最难查的那种错。点名 env 让他修（miss 语义走同一条分叉：调用点退 2 / plan 降级）。
             raise WorkerNotFoundError(
                 engine, f"env {env_key} 的值无法解析（{e}）：{raw!r}——修正引号，"
@@ -262,7 +256,7 @@ def resolve_worker_cmd(engine: str, *, version: str | None = None) -> WorkerCmd:
     module = _WORKER_PY_MODULE.get(engine)
     if module is not None and _find_worker_spec(module):
         # cwd=None：同 venv 的 `-m` 入口不依赖任何相对路径，继承调用者 CWD 即可（也让相对 `steps/` 等
-        # 用户视角的路径不被 worker 侧的隐式 cwd 扭曲——落点/steps 一律绝对路径注入）。
+        # 使用方视角的路径不被 worker 侧的隐式 cwd 扭曲——落点/steps 一律绝对路径注入）。
         return WorkerCmd(cmd=[sys.executable, "-m", module], cwd=None, source=f"同 venv 模块 {module}")
     bin_name = _WORKER_BIN[engine]
     found = shutil.which(bin_name)
@@ -303,17 +297,18 @@ def _runtime_version() -> str | None:
 # definition 持久化（`RunMeta.steps_dir` / `RunMeta.extra_http_headers`），宿主继承值越过它，同一个 run 在三个宿主
 # （同步 `run`、local per-run 进程、`status --wait` 接力者）下就用到不同的确定性 step 集/请求头、判定不可复现；
 # `GHERKAI_NO_ARTIFACTS` 不进 definition（`--no-report` 只挂在同步 `run`、该方式什么都不落），清它挡的是另一件事：
-# 用户没给 `--no-report`、却因宿主导出过该值而收不到产物。
+# 使用方没给 `--no-report`、却因宿主导出过该值而收不到产物。
 # **只列 gherkai 自有键**：`NOVA_LOGS_DIR` / `MIDSCENE_RUN_DIR` 是 SDK 侧配置项，本模块的 None 取值按 `build_engines`
 # docstring 的契约回落「SDK 默认」（SDK 默认本身就含读自己那个 env），清掉即改契约，故不在此列。
 _COMPOSE_OWNED_WORKER_ENV = ("GHERKAI_STEPS_DIR", "GHERKAI_NO_ARTIFACTS", "GHERKAI_EXTRA_HTTP_HEADERS")
 
 
-def _scrubbed_environ() -> dict[str, str]:
+def scrubbed_environ() -> dict[str, str]:
     """继承一份 os.environ、抹掉组合根拥有的那些键（见 `_COMPOSE_OWNED_WORKER_ENV`）——所有注入 env 的起手式。
 
     只做加法的注入会让宿主 shell 的 `GHERKAI_STEPS_DIR` 直达 worker（definition 说「无使用方 step」也拦不住）。
     `build_fargate_engines` 侧不需要对称处理：RunTask overrides 是逐条显式枚举、容器不继承宿主 env，没有继承面。
+    **公开接缝**：`tools/e2e_harness` 复用它，保证 harness 的 spawn 环境与 adapter 同一起手式。
     """
     return {k: v for k, v in os.environ.items() if k not in _COMPOSE_OWNED_WORKER_ENV}
 
@@ -345,7 +340,7 @@ def build_engines(
 
     产物持久落点（两引擎对称，经环境变量传给 SDK，ADR 0027）——**归集方式下调用方须给绝对路径**；
     `--no-report` 方式恒给 None（真不生成，见上 no_artifacts 条）。绝对路径是硬要求：worker 已无专属 cwd
-    （定位链后 cwd 多为 None=继承调用者 CWD，ADR 0037 决策 3），落 SDK 默认相对目录会写进用户 CWD。
+    （定位链后 cwd 多为 None=继承调用者 CWD，ADR 0037 决策 3），落 SDK 默认相对目录会写进使用方的 CWD。
     两个都给 None 且 no_artifacts=False 时不注入落点 env，仅为兼容「真不关心产物落哪」的库层调用者
     （回落 SDK 默认，行为随 CWD 漂）：
     - nova_logs_dir → `NOVA_LOGS_DIR` → Nova SDK `logs_directory`，trajectory 落这里。
@@ -374,7 +369,7 @@ def build_engines(
     ProfileNotFound 盖过 task role——正确的非对称，ADR 0016 决策 C）。
     """
     # 继承当前环境（AWS 凭证等）再叠加产物落点——SubprocessEngine 的 env 非 None 时整体替换，故须带 os.environ；
-    # 唯独组合根拥有的那些键先抹掉（`_scrubbed_environ`），它们只认本函数的入参、不认宿主继承值。
+    # 唯独组合根拥有的那些键先抹掉（`scrubbed_environ`），它们只认本函数的入参、不认宿主继承值。
     # 两引擎共注的附加 env（都是「有值就注、无值就清宿主继承值」）：
     # - 浏览器 context 级额外请求头（ADR 0035 决策 4，如 ngrok-skip-browser-warning）：JSON 经 env 注给
     #   两个 worker，worker 在 browser context 上 setExtraHTTPHeaders（纯 CDP 命令，无回调）。
@@ -403,7 +398,7 @@ def build_engines(
         if (local_dir is None and not common_env
                 and not any(k in os.environ for k in _COMPOSE_OWNED_WORKER_ENV)):
             return None
-        env = _scrubbed_environ()
+        env = scrubbed_environ()
         if local_dir is not None:
             env[local_key] = str(local_dir)
         env.update(common_env)
@@ -417,14 +412,14 @@ def build_engines(
     # 也是按注入值算的，见 engine_min_grace / query_capabilities）。
     # nova_env 为 None（调用方未给产物落点）时也要建一份注入——故补一份 scrub 后的继承 env（同 `_env` 的起手式）。
     if nova_env is None:
-        nova_env = _scrubbed_environ()
+        nova_env = scrubbed_environ()
         _inject_aws(nova_env)  # 补建路径也须叠加 --region/--profile（Nova Workflow 的 nova-act client 读 AWS_REGION/凭证）
     nova_env["NOVA_ACT_TIMEOUT_S"] = str(NOVA_ACT_TIMEOUT_S)
     # Midscene 补建同理（对称，ADR 0016 决策 C）：midscene_env 为 None（未给落点、无共注 env）且 --region/--profile
     # 有值时也须建 env 注入——否则 midscene worker 继承 os.environ、拿不到 --profile 覆盖，而它经 fromNodeProviderChain()
     # 消费凭证做 AgentCore/Bedrock 鉴权（真消费、非无害）。仅在有值时补建（无值则继承 os.environ 本就够、免无谓拷贝）。
     if midscene_env is None and (region is not None or profile is not None):
-        midscene_env = _scrubbed_environ()
+        midscene_env = scrubbed_environ()
         _inject_aws(midscene_env)
 
     def _leg(engine: str, env: dict | None) -> Engine:
@@ -464,7 +459,7 @@ def _ask_worker(engine: str, flag: str, *, what: str, steps_dir: str | Path | No
     cmd = list(wc.cmd) + [flag]
     # env 恒自建：steps 目录同样「有值显式注、无值显式清」（见 `_COMPOSE_OWNED_WORKER_ENV`）——自述/标注要反映
     # 调用方解析出的那份 step 集，不受宿主 shell 里同名 env 影响。
-    env = _scrubbed_environ()
+    env = scrubbed_environ()
     if steps_dir is not None:
         env["GHERKAI_STEPS_DIR"] = str(steps_dir)
     if extra_env:
@@ -472,7 +467,7 @@ def _ask_worker(engine: str, flag: str, *, what: str, steps_dir: str | Path | No
     try:
         # payload 为 None 的入口（`--capabilities`）显式给 DEVNULL、**不继承调用者 stdin**：
         # 不认该 flag 的 worker（版本不一致）会掉进 job 模式读 stdin——继承来的 stdin 是 TTY 时它挂到 timeout_s
-        # 才被判超时（诊断成「自述超时」而非「版本不一致」）、还会吞掉用户在终端敲的内容；DEVNULL 让它立刻读到
+        # 才被判超时（诊断成「自述超时」而非「版本不一致」）、还会吞掉使用方在终端敲的内容；DEVNULL 让它立刻读到
         # EOF、非零退出 → WorkerSelfDescribeError，「不认该入口即 fail-loud」才真落地（实测：不认该 flag 的
         # Nova worker 接常开的 stdin 管子阻塞 >20s 不退）。
         proc = subprocess.run(cmd, cwd=wc.cwd, env=env, capture_output=True, timeout=timeout_s,
@@ -600,7 +595,7 @@ def make_resolver(engines: dict[str, Engine]):
 def local_artifact_locations(report_dir: str, run_id: str) -> dict:
     """本机后端一个 run 的产物落点（全 file:// URI）：run_meta / run_state / jobs_dir / report_index。**单点**：
     `run` 结束打印、`status` 终态打印、`--json` 的 artifacts 都从这里拼（曾只在 run 路径的闭包里拼，status 到终态
-    只打 ended_at、用户得自己找报告）。report_index 是**约定落点**（LocalReportStore 的 index.html），不代表已写成——
+    只打 ended_at、使用方得自己找报告）。report_index 是**约定落点**（LocalReportStore 的 index.html），不代表已写成——
     run 路径拿 finalize 返回值覆盖/省略它（ADR 0030 决定三写失败隔离），status 路径按约定给。"""
     run_dir = (Path(report_dir) / run_id).resolve()
     return {
@@ -615,7 +610,7 @@ def cloud_artifact_locations(*, bucket: str, report_prefix: str, table: str, run
     """云端后端一个 run 的产物落点：jobs_dir / report_index 为 s3://（对拍 S3ResultStore / S3ReportStore 的 key 布局
     `<report_prefix>/<run_id>/…`），run_meta / run_state 为 ddb:// 诊断指针（纯展示、不被解析）。单点理由同 local。
     report_prefix = 该 run 的产物前缀，**由调用方给、本函数只拼不校验**：同步 `run --backend cloud` 传自己的
-    `--report-dir`（同一进程既写又拼、自洽）；`status --backend cloud` 原样取用户给的 `--report-dir`（该 flag 的
+    `--report-dir`（同一进程既写又拼、自洽）；`status --backend cloud` 原样取提交者给的 `--report-dir`（该 flag 的
     help 已写明须与 submit 一致）。与推进侧 Lambda `REPORT_DIR` env 的一致性比对是**提交侧探针**（`submit` /
     `doctor` 经 `preflight_cloud_resources` 比，ADR 0033「产物前缀一致性」条），查询侧不重做——故这里给的 s3://
     与本机后端一样是**约定落点**，不代表 key 已写成。"""
@@ -673,11 +668,11 @@ def resolve_region(explicit_region: str | None, profile: str | None) -> str | No
     """把 region 解析成**具体字符串**（ADR 0016 决策 C）：--region > AWS_REGION > AWS_DEFAULT_REGION > profile config。
 
     **profile config 回落是关键**：Nova worker 的 AgentCore `validate_region` 要求显式合法 region 字符串、不查 boto
-    默认链/profile config——若不在此把 profile 里的 region 落实成字符串，profile-only 用户下 worker region=None 会
+    默认链/profile config——若不在此把 profile 里的 region 落实成字符串，只在 profile 里配了 region 的使用方下 worker region=None 会
     `InvalidRegionError` 崩。用 `boto3.Session(profile).region_name` 读 profile config 的 region（探针证实：有则返回、
     无则 None）。boto3 惰性 import（仅前三级都 miss 时才触发）——**缺 boto3（纯 local 未装 aws extra）也不硬依赖**：
     catch ImportError → 返回 None（等价于「无 region」，与真无 region 同走 fail-loud），保住「纯 local 路径绝不
-    依赖 boto3」不变量（否则纯 local + 无 region env 的用户执行时会撞未捕获 ImportError，而非优雅 fail-loud）。
+    依赖 boto3」不变量（否则纯 local + 无 region env 的使用方执行时会撞未捕获 ImportError，而非优雅 fail-loud）。
     真无 region（全 miss / 或缺 boto3 读不到 profile config）→ 返回 None=fail-loud（worker 报错、不硬编码 east，对齐 store 宽容边界）。
     """
     r = explicit_region or os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
@@ -690,6 +685,18 @@ def resolve_region(explicit_region: str | None, profile: str | None) -> str | No
     except ImportError:
         return None
     return boto3.session.Session(profile_name=profile).region_name
+
+
+def resolve_aws_identity(region: str | None, profile: str | None) -> tuple[str | None, str | None]:
+    """AWS 身份解析链的唯一实现：profile = flag > `AWS_PROFILE`；region 经 `resolve_region` 落实成具体字符串。
+
+    `resolve_cloud_target` 与 `detached.build_local_reconcile` 都经此、不各写一份——两份就会漂移，
+    而漂移的后果是同一个 run 在提交进程与后台宿主下拿到不同的 region/profile。
+    解析顺序有依赖：profile 先定，region 的末级回落（profile config）要用它。
+    region 可为 None（全 miss = 真无 region，按 `resolve_region` 的 fail-loud 口径原样透出、不在此兜）。
+    """
+    profile = profile or os.environ.get("AWS_PROFILE")
+    return resolve_region(region, profile), profile
 
 
 @dataclass(frozen=True)
@@ -729,23 +736,23 @@ def resolve_cloud_target(
     - prefix：flag > `AWS_RESOURCE_PREFIX` > `DEFAULT_PREFIX`；
     - runs_table / bucket：flag > `AWS_DDB_TABLE` / `AWS_S3_BUCKET` > prefix 默认名（历史 env 面）；
     - events_table / cluster / 三 Lambda：flag（Lambda 无 flag）> prefix 默认名，**无 env 兜底**；
-    - profile：flag > `AWS_PROFILE`；region 经 `resolve_region` 落实成具体字符串（见其 docstring）。
+    - profile / region：经 `resolve_aws_identity`（flag > `AWS_PROFILE`；region 落实成具体字符串，见其 docstring）。
     """
-    profile = profile or os.environ.get("AWS_PROFILE")
-    prefix = prefix or os.environ.get("AWS_RESOURCE_PREFIX") or DEFAULT_PREFIX
+    region, profile = resolve_aws_identity(region, profile)
+    prefix = prefix or os.environ.get("AWS_RESOURCE_PREFIX") or _names.DEFAULT_PREFIX
     return CloudTarget(
         prefix=prefix,
-        region=resolve_region(region, profile),
+        region=region,
         profile=profile,
         runs_table=(runs_table or os.environ.get("AWS_DDB_TABLE")
-                    or default_name(prefix, _names.BASE_RUNS_TABLE)),
-        events_table=events_table or default_name(prefix, _names.BASE_EVENTS_TABLE),
+                    or _names.default_name(prefix, _names.BASE_RUNS_TABLE)),
+        events_table=events_table or _names.default_name(prefix, _names.BASE_EVENTS_TABLE),
         bucket=(bucket or os.environ.get("AWS_S3_BUCKET")
-                or default_name(prefix, _names.BASE_BUCKET)),
-        cluster=cluster or default_name(prefix, _names.BASE_CLUSTER),
-        kicker_lambda=default_name(prefix, _names.BASE_KICKER_LAMBDA),
-        reconciler_lambda=default_name(prefix, _names.BASE_RECONCILER_LAMBDA),
-        exit_observer_lambda=default_name(prefix, _names.BASE_EXIT_OBSERVER_LAMBDA),
+                or _names.default_name(prefix, _names.BASE_BUCKET)),
+        cluster=cluster or _names.default_name(prefix, _names.BASE_CLUSTER),
+        kicker_lambda=_names.default_name(prefix, _names.BASE_KICKER_LAMBDA),
+        reconciler_lambda=_names.default_name(prefix, _names.BASE_RECONCILER_LAMBDA),
+        exit_observer_lambda=_names.default_name(prefix, _names.BASE_EXIT_OBSERVER_LAMBDA),
     )
 
 
@@ -907,9 +914,9 @@ def resolve_network(
         if ssm is None:
             ssm = _make_ssm_client(region=region, profile=profile)
         if subnets is None:
-            subnets = _read_ssm_list(ssm, ssm_path(prefix, _names.SUBNETS_KEY))
+            subnets = _read_ssm_list(ssm, _names.ssm_path(prefix, _names.SUBNETS_KEY))
         if security_groups is None:
-            security_groups = _read_ssm_list(ssm, ssm_path(prefix, _names.SECURITY_GROUPS_KEY))
+            security_groups = _read_ssm_list(ssm, _names.ssm_path(prefix, _names.SECURITY_GROUPS_KEY))
     return {"subnets": subnets, "securityGroups": security_groups, "assignPublicIp": assign_public_ip}
 
 
@@ -995,7 +1002,7 @@ def build_fargate_engines(
             # 显式 revision ARN（ADR 0038 不变量）——**绝不传 family 名**。
             run_id=run_id, cluster=cluster, task_definition=revision_arn,
             network_config=network_config, job_s3=job_s3, events_table_name=events_table,
-            container_name=container_name(engine), artifact_s3=artifact_s3,
+            container_name=_names.container_name(engine), artifact_s3=artifact_s3,
             sdk_artifact_dir_env=sdk_env_by_engine.get(engine, {}),
             extra_env={**headers_env, **engine_env.get(engine, {})},
             region=region,  # profile 不传（决策 C 非对称）
@@ -1026,7 +1033,7 @@ def read_backend_version(*, prefix: str, region=None, profile=None, ssm=None) ->
     """
     if ssm is None:
         ssm = _make_ssm_client(region=region, profile=profile)
-    return _ssm_get(ssm, ssm_path(prefix, _names.BACKEND_VERSION_KEY))  # 「不在 → None、其余照抛、空串视缺失」与 _ssm_get 同一份
+    return _ssm_get(ssm, _names.ssm_path(prefix, _names.BACKEND_VERSION_KEY))  # 「不在 → None、其余照抛、空串视缺失」与 _ssm_get 同一份
 
 
 def _release_key(v: str) -> tuple[int, ...]:
@@ -1143,7 +1150,7 @@ class WorkerResolution:
 
 
 class WorkerVariantError(Exception):
-    """worker variant 解析失败（ADR 0038）——**消息本身即给用户看的整句**（含修复动作），调用点直接打印后退 2。
+    """worker variant 解析失败（ADR 0038）——**消息本身即给使用方看的整句**（含修复动作），调用点直接打印后退 2。
 
     `engine` / `variant` 供调用点做分组/结构化展示（如「哪个引擎缺」）；两者都可能是 None——默认指针本身缺失
     时还没轮到任何引擎、也没有 variant 名可言。
@@ -1189,12 +1196,12 @@ def read_worker_default(*, prefix: str, region=None, profile=None, ssm=None) -> 
     """
     if ssm is None:
         ssm = _make_ssm_client(region=region, profile=profile)
-    return _ssm_get(ssm, ssm_path(prefix, _names.WORKER_DEFAULT_KEY))
+    return _ssm_get(ssm, _names.ssm_path(prefix, _names.WORKER_DEFAULT_KEY))
 
 
 def _no_default_pointer_error(prefix: str) -> WorkerVariantError:
     return WorkerVariantError(
-        f"后端没有 worker 默认 variant 指针（SSM {ssm_path(prefix, _names.WORKER_DEFAULT_KEY)}）——"
+        f"后端没有 worker 默认 variant 指针（SSM {_names.ssm_path(prefix, _names.WORKER_DEFAULT_KEY)}）——"
         f"这个部署还没走过 worker 镜像交付的初始化。请部署方运行一次 `gherkai deploy`（会把基础镜像同步成 "
         f"`base` 并把默认指针初始化为它），或提交时用 `--worker-variant <名>` 显式指定。"
     )
@@ -1208,7 +1215,7 @@ def _read_worker_image_record(ssm, *, prefix: str, engine: str, tag: str) -> dic
     """
     import json as _json
 
-    path = ssm_path(prefix, _names.worker_image_key(engine, tag))
+    path = _names.ssm_path(prefix, _names.worker_image_key(engine, tag))
     raw = _ssm_get(ssm, path)
     if raw is None:
         return None
@@ -1331,7 +1338,7 @@ def read_task_def_stop_timeout(revision_arn: str, *, engine: str, region=None, p
     if ecs is None:
         ecs = _make_ecs_client(region=region, profile=profile)
     td = ecs.describe_task_definition(taskDefinition=revision_arn).get("taskDefinition", {})
-    want = container_name(engine)
+    want = _names.container_name(engine)
     for c in td.get("containerDefinitions") or []:
         if c.get("name") == want:
             raw = c.get("stopTimeout")
@@ -1352,14 +1359,14 @@ def resolve_default_worker_task_defs(
 
     比 `resolve_worker_variant` 少两环（不 Describe revision、不查 ECR digest）是有意的：这里运行在推进器
     Lambda 的热路径上，而**它拿到的 ARN 立刻要交给 RunTask** ——revision 被注销/镜像被删的话 RunTask 自己就会
-    报，多两次 API 调用只是把同一个错误提前一点、换不来新信息。提交侧 preflight 的三环校验是为了「别让用户
+    报，多两次 API 调用只是把同一个错误提前一点、换不来新信息。提交侧 preflight 的三环校验是为了「别让提交者
     提交完才发现」，宿主没有这个动机。
     """
     if ssm is None:
         ssm = _make_ssm_client(region=region, profile=profile)
     if not backend_version:
         raise WorkerVariantError(
-            f"兼容路径无从解析 worker 镜像：读不到后端版本戳（SSM {ssm_path(prefix, _names.BACKEND_VERSION_KEY)}）——"
+            f"兼容路径无从解析 worker 镜像：读不到后端版本戳（SSM {_names.ssm_path(prefix, _names.BACKEND_VERSION_KEY)}）——"
             f"镜像 tag 含版本。请部署方运行一次 `gherkai deploy` 把戳写上。")
     variant = read_worker_default(prefix=prefix, ssm=ssm)
     if variant is None:
@@ -1371,7 +1378,7 @@ def resolve_default_worker_task_defs(
         if rec is None:
             raise WorkerVariantError(
                 f"兼容路径解析失败：引擎 {engine} 在后端版本 {backend_version} 下没有默认 variant {variant!r} "
-                f"的镜像映射（SSM {ssm_path(prefix, _names.worker_image_key(engine, tag))}）。"
+                f"的镜像映射（SSM {_names.ssm_path(prefix, _names.worker_image_key(engine, tag))}）。"
                 f"部署方运行 `gherkai deploy`（同步基础镜像并初始化默认指针），或推上这个 variant："
                 f"`gherkai deploy push-worker <本地镜像> --engine {engine} --variant {variant}`。",
                 engine=engine, variant=variant)
@@ -1400,7 +1407,7 @@ def preflight_cloud_resources(
     **`report_dir` 非 None 时另比对「推进器的产物前缀」一致性**（存在性之外的唯一语义探针，ADR 0033 preflight 条）：
     detached 云端后端的产物前缀有**两个独立来源**——提交侧 `--report-dir`（offload 的 args/ 落它）与推进侧
     Lambda 的 `REPORT_DIR` env（判定真值 jobs/ 与 RunReport 落它，IaC 有意不注入、由 Lambda 内缺省 `reports` 供给）。
-    不一致时提交照样成功、run 照样运行完成，但结果落在用户没指定的前缀下（用户在自己给的前缀里找不到报告、
+    不一致时提交照样成功、run 照样运行完成，但结果落在提交者没指定的前缀下（提交者在自己给的前缀里找不到报告、
     提交侧留下一批孤儿 args 对象），是典型「静默分裂」，故挡在提交前。只比 `lambda_fns` 里的**两个推进器**
     （kicker/reconciler——名按 prefix 从 `names` 真源推出；exit-observer 不读 REPORT_DIR、不比），
     env 缺该键视作 Lambda 侧缺省 `reports`，两侧都过 `_normalize_prefix` 再比（`reports` 与 `reports/` 不算冲突）。
@@ -1408,7 +1415,7 @@ def preflight_cloud_resources(
     **`declared_max_concurrency` + `on_warn` 非 None 时另提示「声明超部署侧 cap」**（ADR 0034 机制四）：读同一批
     推进器的 `MAX_CONCURRENCY` env（缺键视作推进器侧缺省 1），声明 > cap 则经 `on_warn` 警一条（最多一条）、
     **不构成 preflight 失败**。与上面 REPORT_DIR 退 2 的判据分野 = **分岔的后果**：超 cap 只是被钳制，run 照常运行、
-    结果照落用户给的前缀，分岔对产物是 no-op（只是慢），提示即够；REPORT_DIR 分岔会把产物写去别处（用户在自己
+    结果照落提交者给的前缀，分岔对产物是 no-op（只是慢），提示即够；REPORT_DIR 分岔会把产物写去别处（提交者在自己
     给的前缀下找不到结果），必须挡在提交前。
     """
     import boto3
@@ -1451,8 +1458,8 @@ def preflight_cloud_resources(
         lam = lam or sess.client("lambda")
         # 读 REPORT_DIR / MAX_CONCURRENCY 的只有两个推进器（前者拼 Result/Report/artifact/job-in 前缀，
         # 后者是部署侧 per-run 并发 cap）——exit-observer 两个都不读，不参与比对/提示。
-        advancers = {default_name(prefix, _names.BASE_KICKER_LAMBDA),
-                     default_name(prefix, _names.BASE_RECONCILER_LAMBDA)}
+        advancers = {_names.default_name(prefix, _names.BASE_KICKER_LAMBDA),
+                     _names.default_name(prefix, _names.BASE_RECONCILER_LAMBDA)}
         warned_cap = False
         for fn in lambda_fns:
             try:
@@ -1519,7 +1526,7 @@ def load_feature(path: Path) -> FeatureSource:
     """读 .feature 文件 → core 要的 FeatureSource（uri+text）。
 
     core 不碰文件系统（ADR 0025）：读文件、推导 uri 是组合根的事。uri 是 `scenario_id`/`scope_id` 的前缀
-    （`<uri>:<line>`，会进报告目录名与 DDB 键），**取用户给出的路径经规范化后原样**——相对给相对、绝对给绝对，
+    （`<uri>:<line>`，会进报告目录名与 DDB 键），**取使用方给出的路径经规范化后原样**——相对给相对、绝对给绝对，
     不相对任何「根」（ADR 0037 决策 3：分发后没有 repo 根，任何根都随安装位置/CWD 漂移；曾相对仓库根算、
     仓库外退用绝对路径，wheel 装法下会让 scope_id 形状随安装形态变）。
     """

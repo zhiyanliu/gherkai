@@ -15,7 +15,7 @@
 
 两者都纯 IAM 鉴权、不要 API key；region 要能解析出来（`--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > profile 配置，四级全空才响亮失败、不猜默认，见 `references/setup-and-diagnosis.md` 第 4 节）；浏览器运行在云端、本机不装 Chromium。
 
-**诊断规则**：Nova Act 引擎下非英文页面的断言判否，先排查语言面，再怀疑被测应用。三条出路：scenario 标 `@engine:midscene`（或整批 `--default-engine midscene`）；断言改写成页面级语义陈述（「当前是 X 的词条页」「页面没有报错」）；文本与结构检查改成确定性 step。
+**诊断规则**：Nova Act 引擎下非英文页面的断言判否，先排查语言面，再怀疑被测应用。三条出路：scenario 标 `@engine:midscene`（或整个 run 用 `--default-engine midscene`）；断言改写成页面级语义陈述（「当前是 X 的词条页」「页面没有报错」）；文本与结构检查改成确定性 step。
 
 ## 2 证据字段的引擎填充差异
 
@@ -78,7 +78,7 @@ deterministic(
 | 情况 | 表现 | 怎么办 |
 |---|---|---|
 | 注册时缺 `description` / `example` | 启动即报错退出，点名那条 pattern | 补齐元数据 |
-| `steps/` 下某个文件 import 失败（语法错、缺依赖、Midscene 用了 `.ts`） | `plan` / `run` / `submit` 在起第一个 job 前整批退 2，点名文件与异常，**不跳过** | 先修那个文件，不是怀疑 feature |
+| `steps/` 下某个文件 import 失败（语法错、缺依赖、Midscene 用了 `.ts`） | `plan` / `run` / `submit` 在起第一个 job 前整个 run 退 2，点名文件与异常，**不跳过** | 先修那个文件，不是怀疑 feature |
 | Midscene 某个 step 文件一条都没注册 | 非 0 退出并点名 | 多半 import 到了第二份 `@gherkai/worker-midscene`，检查项目里有没有另一份 |
 | `--steps-dir`（或 `GHERKAI_STEPS_DIR`）指的目录不存在 | 直接退 2：明确指了一个地方而那里没东西 | 改路径；缺省 `./steps` 不存在不算错 |
 | 一个 step 文本命中多条 pattern | 该步记 error 并列出撞上的 pattern；`plan` 会提前暴露 | 收窄其中一条正则 |

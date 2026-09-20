@@ -6,7 +6,7 @@
 **语义是整目录收敛、不是幂等覆盖**（ADR 0043 决策三）：先删目标 skill 目录、整份写入包内那份、再写
 `.gherkai-skill-version` 标记；装完的目录 = 包内那份 + 该标记（标记只存在于安装态，包内不得有），
 跨版本升级不会留下上一版多出来的 reference。删前只认三种目标：不存在 / 空 / 带标记——否则退 2，
-防 `--dir` 打错把用户自己的目录整掉。
+防 `--dir` 打错把使用方自己的目录整掉。
 
 **版本由调用方传进来**（`__main__._cmd_skill_install` 交 `_installed_version()`，与后端版本 skew 比对同一取法，
 ADR 0037 决策 7）：本模块不自己去要版本，既避免与 `__main__` 循环 import，也让「版本怎么取」单点维护。
@@ -168,8 +168,8 @@ def install(args, *, version: str | None) -> int:
                 added = _append_pointer(p)
             except UnicodeDecodeError:
                 # 使用方的指令文件不是 UTF-8（GBK 存出的 CLAUDE.md 等）：读侧一个
-                # `read_text(encoding="utf-8")` 抛的栈不该冲到使用者面前（同 `__main__` 读 feature 处的写法）。
-                # 宁可不写也不改用 errors="replace"：那会把用户文件里的非 UTF-8 段落写坏。
+                # `read_text(encoding="utf-8")` 抛的栈不该冲到使用方眼前（同 `__main__` 读 feature 处的写法）。
+                # 宁可不写也不改用 errors="replace"：那会把使用方文件里的非 UTF-8 段落写坏。
                 # 与下面的 OSError 分开报：混在「写不进去」里会把人引去查写权限/磁盘，真因（文件编码）只剩一句
                 # 英文 codec 报文。skill 本身已装好，退出码照「没全做成」算。
                 _stderr(f"skill 已装好，但 {p} 不是 UTF-8 编码、不敢改它（怕把原文写坏）。这一行请自己贴：{POINTER_LINE}")

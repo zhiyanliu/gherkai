@@ -81,28 +81,25 @@ def _heartbeat_wrap(events, poll_interval_s, deadline):
 
     t = threading.Thread(target=_reader, daemon=True)
     t.start()
-    try:
-        while True:
-            try:
-                kind, payload = q.get(timeout=poll_interval_s)
-            except _queue.Empty:
-                yield _HEARTBEAT  # 静默：让 _run_once 醒来查 deadline/abort（ADR 0028）
-                continue
-            if kind == "ev":
-                yield payload
-            elif kind == "exc":
-                raise payload  # 透传内层异常（schedule 的 except WorkerNetworkError/Exception 据此分类）
-            else:  # done：内层正常迭代完（adapter 的事件流自然终止，engine 无关，ADR 0024/0026）——
-                   # subprocess 是管道 EOF+proc.wait returncode 0；Fargate 无论走 scope_done 主判还是 STOPPED 兜底，都
-                   # 等 DescribeTasks STOPPED 读 exitCode（与 subprocess 无条件 proc.wait() 同构，ADR 0024「事件流结束信号」），
-                   # 其中 exit>0 经 wire.raise_for_worker_exit 走上面的 exc 分支、唯 exit==0 落此 done。
-                return
-    finally:
-        # 主侧不再拉取（schedule 主动 stop/超时后放弃本生成器）：reader 线程仍可能阻塞在 next(events) 上，
-        # 靠 schedule 已调的 handle.stop() 让 adapter 侧终止事件流解除其阻塞（subprocess：SIGTERM→worker 退出→
-        # 管道 EOF；Fargate：StopTask→DescribeTasks STOPPED→迭代器停）。daemon 线程不挡进程退出；这里不 join
-        # （避免在 stop 尚未生效时阻塞 schedule），与既有「放弃 generator」语义一致。engine 无关（ADR 0026）。
-        pass
+    # 主侧不再拉取（schedule 主动 stop/超时后放弃本生成器）：reader 线程仍可能阻塞在 next(events) 上，
+    # 靠 schedule 已调的 handle.stop() 让 adapter 侧终止事件流解除其阻塞（subprocess：SIGTERM→worker 退出→
+    # 管道 EOF；Fargate：StopTask→DescribeTasks STOPPED→迭代器停）。daemon 线程不挡进程退出；这里不 join
+    # （避免在 stop 尚未生效时阻塞 schedule），与既有「放弃 generator」语义一致。engine 无关（ADR 0026）。
+    while True:
+        try:
+            kind, payload = q.get(timeout=poll_interval_s)
+        except _queue.Empty:
+            yield _HEARTBEAT  # 静默：让 _run_once 醒来查 deadline/abort（ADR 0028）
+            continue
+        if kind == "ev":
+            yield payload
+        elif kind == "exc":
+            raise payload  # 透传内层异常（schedule 的 except WorkerNetworkError/Exception 据此分类）
+        else:  # done：内层正常迭代完（adapter 的事件流自然终止，engine 无关，ADR 0024/0026）——
+               # subprocess 是管道 EOF+proc.wait returncode 0；Fargate 无论走 scope_done 主判还是 STOPPED 兜底，都
+               # 等 DescribeTasks STOPPED 读 exitCode（与 subprocess 无条件 proc.wait() 同构，ADR 0024「事件流结束信号」），
+               # 其中 exit>0 经 wire.raise_for_worker_exit 走上面的 exc 分支、唯 exit==0 落此 done。
+            return
 
 
 @dataclass

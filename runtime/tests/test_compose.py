@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from gherkai_runtime import compose
+from gherkai_runtime import names
 from gherkai_core.scope import FeatureSource
 
 
@@ -49,7 +50,7 @@ def test_chain_level1_blank_env_falls_through(monkeypatch):
 def test_chain_level1_unparsable_env_fails_loud(monkeypatch):
     """第一级 env 值 shlex 解析不了（引号不配对）→ **不静默落下一级**，报 miss 并点名该 env。
 
-    悄悄换用别的 worker（或报「没装」）是最难查的错：用户明确指了一个，就该告诉他这一个哪儿不对。
+    悄悄换用别的 worker（或报「没装」）是最难查的错：使用方明确指了一个，就该指明这一个哪儿不对。
     """
     monkeypatch.setenv("GHERKAI_WORKER_NOVAACT_CMD", 'python -m "unclosed')
     with pytest.raises(compose.WorkerNotFoundError, match="GHERKAI_WORKER_NOVAACT_CMD"):
@@ -256,7 +257,7 @@ def test_resolver_known_and_unknown(midscene_env_cmd):
 
 
 def test_load_feature_uri_is_given_path_normalized(tmp_path: Path, monkeypatch):
-    """uri = 用户给出的路径规范化后原样（ADR 0037 决策 3）：相对给相对（`./` 折掉、`..` 保留），不相对任何根。"""
+    """uri = 使用方给出的路径规范化后原样（ADR 0037 决策 3）：相对给相对（`./` 折掉、`..` 保留），不相对任何根。"""
     feat = tmp_path / "features" / "demo.feature"
     feat.parent.mkdir(parents=True)
     feat.write_text("Feature: x\n  Scenario: y\n    When \"做点啥\"\n", encoding="utf-8")
@@ -281,7 +282,7 @@ def test_no_repo_root_consumer_remains():
     """`repo_root()` 已整体退役（ADR 0037 决策 3）：分发后没有 repo，任何靠仓库结构的隐式行为都是漂移面。
 
     结构性护栏——名字回来（连同「从本文件上溯几层」的推导）就是回归，且这种回归在单测里天然隐形
-    （dev 树下上溯恰好成立、wheel 用户才炸）。
+    （dev 树下上溯恰好成立、wheel 安装的使用方才炸）。
     """
     assert not hasattr(compose, "repo_root")
     src = Path(compose.__file__).read_text(encoding="utf-8")
@@ -399,7 +400,7 @@ def test_resolve_region_env_chain(monkeypatch):
 
 def test_resolve_region_falls_back_to_profile_config(monkeypatch):
     # 关键（profile-only region 落实）：--region/env 全 miss → 回落 boto3.Session(profile).region_name 读 profile config 的 region。
-    # 不落实则 profile-only 用户下 worker AgentCore validate_region(None) → InvalidRegionError 崩。
+    # 不落实则只配了 profile 的使用方下 worker AgentCore validate_region(None) → InvalidRegionError 崩。
     monkeypatch.delenv("AWS_REGION", raising=False)
     monkeypatch.delenv("AWS_DEFAULT_REGION", raising=False)
     captured = {}
@@ -447,6 +448,29 @@ def test_resolve_region_no_boto3_returns_none_not_crash(monkeypatch):
 
     monkeypatch.setattr(builtins, "__import__", _no_boto3)
     assert compose.resolve_region(None, "someprofile") is None  # 缺 boto3 读不到 profile config → None、不崩
+
+
+# ---- resolve_aws_identity：profile + region 解析链的唯一实现（ADR 0016 决策 C）----
+def test_resolve_aws_identity_takes_profile_from_env(monkeypatch):
+    """profile 入参为 None 时取 `AWS_PROFILE`，并把它喂给 region 解析（profile config 那一级要用它）。"""
+    monkeypatch.setenv("AWS_PROFILE", "env-prof")
+    monkeypatch.setattr(compose, "resolve_region", lambda r, p: f"region-of-{p}")  # 不摸真 ~/.aws
+    assert compose.resolve_aws_identity(None, None) == ("region-of-env-prof", "env-prof")
+
+
+def test_resolve_aws_identity_flag_wins_over_env(monkeypatch):
+    """对偶（防「恒取 env」的假绿反面）：显式 profile 覆盖 `AWS_PROFILE`；显式 region 照样过 resolve_region。"""
+    monkeypatch.setenv("AWS_PROFILE", "env-prof")
+    monkeypatch.setattr(compose, "resolve_region", lambda r, p: r)
+    assert compose.resolve_aws_identity("us-west-2", "flag-prof") == ("us-west-2", "flag-prof")
+
+
+def test_resolve_cloud_target_goes_through_resolve_aws_identity(monkeypatch):
+    """cloud 目标解析不自写一份身份解析链——换掉唯一实现即整条链改变（单一事实源锁定）。"""
+    monkeypatch.delenv("AWS_PROFILE", raising=False)
+    monkeypatch.setattr(compose, "resolve_aws_identity", lambda r, p: ("region-x", "profile-x"))
+    t = compose.resolve_cloud_target(prefix="p-")
+    assert (t.region, t.profile) == ("region-x", "profile-x")
 
 
 # ---- query_capabilities：整份自述对象 + 契约校验 + 按（引擎, steps 目录）缓存（ADR 0036「5.」）----
@@ -547,7 +571,7 @@ def test_query_capabilities_worker_failure_fails_loud_verbatim(monkeypatch, nova
 
     **组合根不再追加「不认识能力自述 → 须同版本安装」那句断言**：该入口现在会加载使用方 steps（ADR 0037
     决策 4），非零退出不再只剩「版本不一致的 worker 不认这个 flag」一种成因（更常见的是使用方 steps 文件报错）
-    ——在这里替用户断定成因会误导，两种可能由调用点用中性文案一起点到。
+    ——在这里替使用方断定成因会误导，两种可能由调用点用中性文案一起点到。
     """
     import subprocess
 
@@ -609,7 +633,7 @@ def test_query_capabilities_wrong_engine_names_the_misconfiguration(monkeypatch,
 
 def test_ask_worker_no_payload_entry_does_not_inherit_stdin(monkeypatch, novaact_env_cmd, fresh_caps_cache):
     """无 stdin 载荷的入口（`--capabilities`）显式 stdin=DEVNULL、不继承调用者 stdin：不认该 flag 的 worker
-    （版本不一致）会掉进 job 模式读 stdin，继承来的 TTY 让它挂到超时才被判「自述超时」（诊断指错方向、还吞用户
+    （版本不一致）会掉进 job 模式读 stdin，继承来的 TTY 让它挂到超时才被判「自述超时」（诊断指错方向、还吞使用方
     键入）；DEVNULL 让它立刻读到 EOF 非零退出 → 「不认该入口即 fail-loud」才真落地。
     `--match-steps` 有 stdin 载荷（input=…），subprocess 不许同时给 stdin，故那条不设。"""
     import subprocess
@@ -707,24 +731,24 @@ def test_engine_min_grace_miss_raises_worker_not_found(monkeypatch, fresh_caps_c
 
 # ---- 两层命名（ADR 0033）：prefix + 基名推导 / task-def / container / SSM 路径 ----
 def test_default_name_prefix_original_concat():
-    # prefix 原样拼基名（含分隔符由用户负责，防粘连——同 S3 prefix 先例）
-    assert compose.default_name("gherkai-", "runs") == "gherkai-runs"
-    assert compose.default_name("prod-", "events") == "prod-events"
-    assert compose.default_name("nodash", "runs") == "nodashruns"  # 无分隔符 → 粘连（用户负责）
+    # prefix 原样拼基名（含分隔符由部署方负责，防粘连——同 S3 prefix 先例）
+    assert names.default_name("gherkai-", "runs") == "gherkai-runs"
+    assert names.default_name("prod-", "events") == "prod-events"
+    assert names.default_name("nodash", "runs") == "nodashruns"  # 无分隔符 → 粘连（部署方负责）
 
 
 def test_task_def_and_container_name():
     # task-def family 带 prefix、按引擎；container 名不带 prefix（随 task-def 走，避冗余）
-    assert compose.task_def_name("prod-", "novaact") == "prod-novaact-worker"
-    assert compose.task_def_name("gherkai-", "midscene") == "gherkai-midscene-worker"
-    assert compose.container_name("novaact") == "novaact-worker"
-    assert compose.container_name("midscene") == "midscene-worker"
+    assert names.task_def_name("prod-", "novaact") == "prod-novaact-worker"
+    assert names.task_def_name("gherkai-", "midscene") == "gherkai-midscene-worker"
+    assert names.container_name("novaact") == "novaact-worker"
+    assert names.container_name("midscene") == "midscene-worker"
 
 
 def test_ssm_path_contains_prefix():
     # SSM 路径含 prefix（cli 已知 prefix 拼路径读 subnet/sg，无循环——ADR 0033）
-    assert compose.ssm_path("prod-", "subnets") == "/prod-backend/subnets"
-    assert compose.ssm_path("gherkai-", "security-groups") == "/gherkai-backend/security-groups"
+    assert names.ssm_path("prod-", "subnets") == "/prod-backend/subnets"
+    assert names.ssm_path("gherkai-", "security-groups") == "/gherkai-backend/security-groups"
 
 
 # ---- resolve_cloud_target：入口前端的 flag/env → 各资源终名 + region/profile（ADR 0033 / 0016 决策 C）----
@@ -777,7 +801,7 @@ def test_resolve_cloud_target_default_prefix_when_nothing_given(monkeypatch):
     _clear_aws_env(monkeypatch)
     monkeypatch.setattr(compose, "resolve_region", lambda r, p: None)  # 不摸真 ~/.aws
     t = compose.resolve_cloud_target()
-    assert t.prefix == compose.DEFAULT_PREFIX and t.runs_table == f"{compose.DEFAULT_PREFIX}runs"
+    assert t.prefix == names.DEFAULT_PREFIX and t.runs_table == f"{names.DEFAULT_PREFIX}runs"
     assert t.region is None and t.profile is None  # 真无 → fail-loud，不硬编码 east
 
 
@@ -1114,7 +1138,7 @@ def _preflight_report_dir(report_dir, env_by_fn=None):
 
 
 def test_preflight_report_dir_mismatch_fails_fast_naming_both_sides():
-    # --report-dir 与推进器 REPORT_DIR 分裂 = 运行完成但结果落在用户没指定的前缀下（静默分裂）→ 挡在提交前、点名两侧值。
+    # --report-dir 与推进器 REPORT_DIR 分裂 = 运行完成但结果落在提交者没指定的前缀下（静默分裂）→ 挡在提交前、点名两侧值。
     # kicker 对上、reconciler 没对上 → 两个推进器都比（不是只看第一个）
     err = _preflight_report_dir("mine", env_by_fn={"g-kicker": {"REPORT_DIR": "mine"},
                                                   "g-reconciler": {"REPORT_DIR": "reports"}})
@@ -1162,7 +1186,7 @@ def _preflight_cap(declared, cap_env, warns):
 
 
 def test_preflight_warns_once_when_declared_max_concurrency_exceeds_cap():
-    # 声明 8 > cap 4 → 提交时就告知「本 run 只会按 4 并行」（否则用户以为按 8 运行、只看到莫名慢）。
+    # 声明 8 > cap 4 → 提交时就告知「本 run 只会按 4 并行」（否则提交者以为按 8 运行、只看到莫名慢）。
     # 但**不构成 preflight 失败**：钳制不改产物落点、run 照常运行（对照 REPORT_DIR 分岔的退 2——判据 = 分岔后果）。
     warns = []
     err = _preflight_cap(8, "4", warns)
@@ -1247,7 +1271,7 @@ class _StopTimeoutEcs:
 def test_read_task_def_stop_timeout_reads_worker_container():
     # 按 container 名（与 IaC 同源的 `{engine}-worker`）认，不取碰巧第一个 container 的值
     ecs = _StopTimeoutEcs([{"name": "sidecar", "stopTimeout": 5},
-                           {"name": compose.container_name("novaact"), "stopTimeout": 120}])
+                           {"name": names.container_name("novaact"), "stopTimeout": 120}])
     assert compose.read_task_def_stop_timeout("arn:td:7", engine="novaact", ecs=ecs) == 120
     assert ecs.asked == ["arn:td:7"]
 
@@ -1256,7 +1280,7 @@ def test_read_task_def_stop_timeout_none_when_unset_or_container_absent():
     # 没设 stopTimeout / task-def 里没这个 container → None（「比不了」，调用方不猜值）
     assert compose.read_task_def_stop_timeout(
         "arn:td:7", engine="novaact",
-        ecs=_StopTimeoutEcs([{"name": compose.container_name("novaact")}])) is None
+        ecs=_StopTimeoutEcs([{"name": names.container_name("novaact")}])) is None
     assert compose.read_task_def_stop_timeout(
         "arn:td:7", engine="novaact", ecs=_StopTimeoutEcs([{"name": "other", "stopTimeout": 90}])) is None
 

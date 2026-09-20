@@ -300,7 +300,7 @@ def _build(run_id: str):
     from gherkai_core.adapters.event_log import DdbEventLog
     from gherkai_core.adapters.cloud_launcher import CloudLauncher
     from gherkai_core.model import TERMINAL_STATUSES
-    from gherkai_runtime import compose
+    from gherkai_runtime import compose, names
 
     region = os.environ.get("REGION") or os.environ.get("AWS_REGION")
     ddb = boto3.resource("dynamodb", region_name=region)
@@ -311,7 +311,7 @@ def _build(run_id: str):
     events_table = ddb.Table(os.environ["EVENTS_TABLE"])
     bucket = os.environ["ARTIFACTS_BUCKET"]
     report_dir = os.environ.get("REPORT_DIR", "reports")
-    prefix = os.environ.get("PREFIX", compose.DEFAULT_PREFIX)
+    prefix = os.environ.get("PREFIX", names.DEFAULT_PREFIX)
 
     # 三层 store 走 compose.build_cloud_stores（与 submit 侧同一真源、不重造：prefix 规范化、三个 S3 件套共享
     # 一个 client、**arg_offloader 默认挂载**都由它保证），句柄注入以复用本函数已建的 ddb resource / s3 client。

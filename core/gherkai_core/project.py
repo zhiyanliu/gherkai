@@ -151,7 +151,7 @@ class TaskExited:
     exit_code=None = 退出码未知（有退出记录、却没取到码）。**不是宽限态**（ADR 0034 机制二「退出码缺失」条）：
     观察者只有一次机会看到 STOPPED，缺码时它应落 `PLATFORM_FAILED_EXIT` 哨兵 + reason；仍写 None 的（老版本观察者/
     未知写者）由 `_job_status` 判 ERROR，绝不判 RUNNING（否则 run 永久 wedge）。
-    reason：平台侧归因（cloud = `stopCode: stoppedReason`），只在观察者落哨兵时带；投影进 job message 给用户看。
+    reason：平台侧归因（cloud = `stopCode: stoppedReason`），只在观察者落哨兵时带；投影进 job message 给使用方看。
     """
 
     scope_id: str
@@ -279,7 +279,7 @@ def _reduce_scope(job: Job, recs: list[EventRecord]) -> tuple[JobResult, Status,
         result.message = (f"job 超时（预算 {job.timeout_s}s，已中止）"
                           if job.timeout_s else "job 超时（已中止）")
     elif status == Status.ERROR and result.message is None and exited is not None:
-        # 兜底归因（detached 实际运行教训：worker 起来即崩 → 零事件、判 error、message 全空——用户无从排障）。
+        # 兜底归因（detached 实际运行教训：worker 起来即崩 → 零事件、判 error、message 全空——使用方无从排障）。
         # `result.message is None` 是防御性守卫（当前恒真：job 级归因只在本函数写）——若将来 reduce 期开始写
         # job 级归因，它保证那份归因不被这里的兜底文案盖掉；`exited is not None` 供下面 `exited.exit_code`
         # 类型收窄（status==ERROR 已蕴含它非 None，见 `_job_status`）。诊断细节在 worker stderr（local 落

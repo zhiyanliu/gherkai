@@ -9,8 +9,9 @@
 **中断只是能力之一**（--interrupt）：--interrupt none 的 baseline 可验「事件流端到端正常 + 三通道分离 +
 零行为变化」（如 worker I/O 边缘重构后的回归）；--interrupt <时机> 才验中断韧性。
 
-忠实复现 SubprocessEngine adapter 的 spawn 环境（自建 events pipe + EVENTS_FD、注入产物落点 env +
-S3 上传 env），起真 worker 运行一个 scope，按事件时机外部 SIGTERM 命中中断点，中断后快照：
+忠实复现 SubprocessEngine adapter 的 spawn 环境（自建 events pipe + EVENTS_FD、注入产物落点 env + S3 上传 env；
+组合根拥有的 worker env——GHERKAI_STEPS_DIR / GHERKAI_NO_ARTIFACTS / GHERKAI_EXTRA_HTTP_HEADERS——先显式清除、再按
+参数显式注回，与 adapter 两步同形），起真 worker 运行一个 scope，按事件时机外部 SIGTERM 命中中断点，中断后快照：
   - 盘上有什么（NOVA_LOGS_DIR / MIDSCENE_RUN_DIR 递归）
   - S3 有什么（list prefix）
   - 差集（盘有 S3 无）= **Fargate 容器盘销毁时会丢的**（subprocess 下留本地盘、非真丢）
@@ -23,6 +24,8 @@ S3 上传 env），起真 worker 运行一个 scope，按事件时机外部 SIGT
   # --interrupt: connect(建连中) / act(act 执行到一半) / between(step 边界) / scenario(第一个 scenario 完成后、
   #              下一 scenario 运行中——验 scenario 边界 log 提前上传，需多 scenario feature) / scope_end(flush 前) /
   #              none(baseline 不中断)
+  # --steps-dir: 使用方确定性 step 目录（ADR 0037 决策 4），也可经环境变量 HARNESS_STEPS_DIR 给；不给则显式清空，
+  #              **宿主 export 的 GHERKAI_* 一律不生效**（与 adapter 同）。
   # 桶经环境变量 HARNESS_S3_BUCKET 传（勿硬编码；运行结束后自行清理桶内 <prefix>）。
 
 历史：中断丢失预演、Nova 中断模型改造验证、提前上传验证都用它（实测结论/量级已内联 ADR 0024 终止契约 / 0029 安全点提前上传 / 0032 中断丢失量级）。
@@ -43,6 +46,7 @@ REPO = Path(__file__).resolve().parent.parent  # 只用来算 features/ 等仓�
 
 from gherkai_core.scope import plan, PlanConfig, FeatureSource  # noqa: E402
 from gherkai_core.wire import job_to_line  # noqa: E402
+from gherkai_runtime.compose import scrubbed_environ  # noqa: E402  与 adapter 同一起手式（公开接缝）
 
 BUCKET = os.environ.get("HARNESS_S3_BUCKET")  # 可写桶，经 env 传（勿硬编码账号相关值）
 _TMP = Path("/tmp") / "harness-runs"  # 系统临时目录（CLAUDE.md 工作方式「tools/ 是复用工具库」条）
@@ -99,7 +103,8 @@ def snapshot_s3(prefix: str) -> list[tuple[str, int]]:
     return sorted(out)
 
 
-def run(engine: str, feature: str, votes: int, interrupt: str, run_id: str, grace_cap: float):
+def run(engine: str, feature: str, votes: int, interrupt: str, run_id: str, grace_cap: float,
+        steps_dir: str | None = None):
     from gherkai_runtime.names import ARTIFACT_SUBDIR  # 子目录名单点（与三宿主同名，ADR 0029）——harness 忠实复现生产布局
     if not BUCKET:
         sys.exit("错误：需经环境变量 HARNESS_S3_BUCKET 提供可写 S3 桶")
@@ -116,11 +121,21 @@ def run(engine: str, feature: str, votes: int, interrupt: str, run_id: str, grac
     prefix = f"harness/{run_id}/"
 
     events_r, events_w = os.pipe()
-    env = {**os.environ, local_key: str(artifact_dir),
+    env = {**scrubbed_environ(), local_key: str(artifact_dir),
            "ARTIFACT_S3_BUCKET": BUCKET, "ARTIFACT_S3_PREFIX": prefix,
            "EVENTS_FD": str(events_w), "AWS_REGION": "us-east-1"}
+    # steps 目录与 `compose.build_engines` 同形的两步：`scrubbed_environ` 已显式清掉宿主继承值，这里按参数显式注回
+    # 绝对路径。只有清除没有注回的话，「使用方 steps 目录在真 worker 下被加载」这条就验不了，而且是静默验不了
+    # （加载失败 worker 会降级成 AI step，看不出差别）。
+    if steps_dir:
+        resolved_steps = Path(steps_dir).expanduser().resolve()
+        if not resolved_steps.is_dir():
+            sys.exit(f"错误：--steps-dir 指向的目录不存在：{resolved_steps}")
+        env["GHERKAI_STEPS_DIR"] = str(resolved_steps)
 
-    print(f"[harness] engine={engine} feature={feature} interrupt={interrupt} run_id={run_id}", flush=True)
+    # 回显注入后的 steps 目录（未给时打 None = 已显式清空）：操作者一眼看出宿主 export 没有越过参数。
+    print(f"[harness] engine={engine} feature={feature} interrupt={interrupt} run_id={run_id} "
+          f"steps_dir={env.get('GHERKAI_STEPS_DIR')}", flush=True)
     print(f"[harness] scope={job.scope_id} scenarios={len(job.scenarios)} "
           f"steps={sum(len(s.steps) for s in job.scenarios)}", flush=True)
 
@@ -272,5 +287,7 @@ if __name__ == "__main__":
                     default="none")
     ap.add_argument("--run-id", required=True)
     ap.add_argument("--grace-cap", type=float, default=30.0)
+    ap.add_argument("--steps-dir", default=os.environ.get("HARNESS_STEPS_DIR"),
+                    help="使用方确定性 step 目录（缺省取环境变量 HARNESS_STEPS_DIR；不给则 worker 一侧无使用方 step）")
     a = ap.parse_args()
-    run(a.engine, a.feature, a.votes, a.interrupt, a.run_id, a.grace_cap)
+    run(a.engine, a.feature, a.votes, a.interrupt, a.run_id, a.grace_cap, a.steps_dir)

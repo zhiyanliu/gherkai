@@ -234,6 +234,31 @@ def test_build_local_reconcile_resolves_region_like_foreground(tmp_path, monkeyp
     assert eng._env.get("AWS_REGION") == "us-test-9"
 
 
+def test_build_local_reconcile_goes_through_resolve_aws_identity(tmp_path, monkeypatch):
+    """后台重建端与前台 run 共用**同一个** region/profile 解析实现（ADR 0016 决策 C）：本函数不自写一份。
+
+    换掉 `compose.resolve_aws_identity` 即换掉后台这条链——两处各写一份时，改一处漏一处就让同一个 run 在
+    提交进程与后台宿主下注入不同的 AWS_REGION/AWS_PROFILE。
+    """
+    from gherkai_runtime import compose
+    from gherkai_runtime.detached import build_local_reconcile
+
+    _seed_for_build(tmp_path, "run-id", max_concurrency=None)
+    seen = []
+
+    def _fake_identity(region, profile):
+        seen.append((region, profile))
+        return "us-test-1", "prof-x"
+
+    monkeypatch.setattr(compose, "resolve_aws_identity", _fake_identity)
+    _m, _l, _s, launcher, _mc, _rs, _rp = build_local_reconcile(
+        str(tmp_path), "run-id", max_concurrency=1, region=None, profile=None)
+    assert seen == [(None, None)]  # 入参原样交给唯一实现，不在本函数预处理
+    eng = launcher._resolver("novaact")  # 解析结果最终注进 worker spawn env
+    assert eng._env.get("AWS_REGION") == "us-test-1"
+    assert eng._env.get("AWS_PROFILE") == "prof-x"
+
+
 def _seed_for_build(tmp_path, run_id: str, *, max_concurrency: int | None):
     """落一个最小 run（单 pending job）供 build_local_reconcile 读回，meta 的 max_concurrency 按参数。"""
     meta = RunMeta(run_id=run_id, created_at="t0", jobs=(_job("a"),), max_concurrency=max_concurrency)

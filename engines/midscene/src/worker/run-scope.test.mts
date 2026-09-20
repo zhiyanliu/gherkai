@@ -523,15 +523,31 @@ test("shutdownSequence: 预算内没排空 → 一行日志、退出码不受影
 test("drainArtifactQueue: 队列已空（drain 返 true）→ 不记日志", async () => {
   const { drainArtifactQueue } = await importMod();
   const logs: string[] = [];
-  await drainArtifactQueue({ drain: async () => true }, 6000, (m) => logs.push(m));
+  await drainArtifactQueue({ drain: async () => true }, 6000, false, (m) => logs.push(m));
   assert.deepEqual(logs, []);
+});
+
+test("drainArtifactQueue: 排不完的提示按 flushFollows 分两句（会 flush 的才许说『改由收尾统一上传』）", async () => {
+  // 两句话承诺的事不同：后面跟着整目录 flush 时剩余字节还会被传上去；提前退出路径不 flush、那些截图就此丢。
+  // 调用点声明、函数不猜调用栈——错句 = 给使用方一个假承诺（说「改由收尾上传」而其实没人再传）。
+  const { drainArtifactQueue } = await importMod();
+  const notDrained = { drain: async () => false };
+  const withFlush: string[] = [];
+  await drainArtifactQueue(notDrained, 6000, true, (m) => withFlush.push(m));
+  assert.equal(withFlush.length, 1);
+  assert.ok(withFlush[0].includes("剩余的改由收尾统一上传"), `会 flush 的路径该说剩余的由收尾传：${withFlush[0]}`);
+  const noFlush: string[] = [];
+  await drainArtifactQueue(notDrained, 6000, false, (m) => noFlush.push(m));
+  assert.equal(noFlush.length, 1);
+  assert.ok(noFlush[0].includes("已放弃"), `不 flush 的路径该说已放弃：${noFlush[0]}`);
+  assert.ok(!noFlush[0].includes("改由收尾"), "不 flush 的路径不许承诺还有人传");
 });
 
 test("drainArtifactQueue: drain 抛（上传器坏了 / 没这个方法）→ 吞掉、只记一行，绝不抛", async () => {
   // 收尾路径上抛 = 跳过后面的 process.exit / flush，比丢几张截图严重得多（best-effort 语义）。
   const { drainArtifactQueue } = await importMod();
   const logs: string[] = [];
-  await drainArtifactQueue({ drain: async () => { throw new Error("boom"); } }, 6000, (m) => logs.push(m));
+  await drainArtifactQueue({ drain: async () => { throw new Error("boom"); } }, 6000, false, (m) => logs.push(m));
   assert.equal(logs.length, 1);
   assert.ok(logs[0].includes("boom"));
 });

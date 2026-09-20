@@ -29,8 +29,8 @@ import { oneLineError } from "./error-text.mjs";  // act.error 与 step_done.mes
 export const EVIDENCE_SCHEMA_VERSION = 1;
 /** step_done 上这条 ref 的 kind 与 label（ADR 0042 决策一；kind 本就是引擎自报的开放字符串）。 */
 export const EVIDENCE_KIND = "evidence";
-/** 引擎名（evidence 的 engine 字段；两引擎同形、各报自己的名）。 */
-const ENGINE = "midscene";
+/** 引擎名（evidence 的 engine 字段与 `--capabilities` 自述的 engine 同源；两引擎同形、各报自己的名）。 */
+export const ENGINE = "midscene";
 
 // 截图上界（ADR 0042 决策一「截图策略（有上界）」）：**只有 screenshot 受限**，frames 的 thought / actions
 // 全保留（文本很小）。单次 AI 调用的帧数由 SDK 默认步数上限封顶、再乘投票次数，不设上界时单个 failed Then

@@ -6,7 +6,8 @@
 用户装不上才发现（ADR 0037「现状实测」记的原始故障就是 `Requires-Dist: core` 裸名）。
 
 五条断言都对照**真值集**（前三条：根 pyproject 的 `[tool.uv.workspace] members` → 各成员
-`[project] name`；第四条：源目录的文件系统遍历；第五条：sdist 顶层目录集），不靠人读产物清单——新增一个 workspace 成员却忘了
+`[project] name`；第四条：源目录的文件系统遍历；
+第五条：各包 pyproject 的 `[tool.hatch.build.targets.sdist] include`），不靠人读产物清单——新增一个 workspace 成员却忘了
 它进不进发布链，只有逐条比对真值集才照得出来：
 
 1. 每个成员都产出 sdist + wheel；
@@ -18,9 +19,14 @@
 4. `gherkai` wheel 内 `gherkai_cli/skills/gherkai/` 的文件集**逐条等于**源目录（agent skill 随 wheel
    发行，ADR 0043 决策一/六），且不含评测资产（`evals`）。为何必须是集合相等：hatchling 默认认从项目根
    向上找到的第一份 `.gitignore`（即 `cli/.gitignore`，今含 `reports/`），命中的路径**静默**不进
-   sdist/wheel，`git add -f` 强跟踪也救不回来——「文件受 git 跟踪」式护栏对这一格无效。
-5. 每个 sdist 顶层不含 `tests/` 与 `spikes/`（ADR 0037 工程布局条「测试与 spike 不进发行包」）。sdist 靠各包
-   pyproject 的 `[tool.hatch.build.targets.sdist] exclude` 字面量排除，没有护栏就会静默漂回默认全收。
+   wheel（sdist 侧已改 include 白名单 + `ignore-vcs`、不再受它影响，见断言 5），`git add -f` 强跟踪
+   也救不回来——「文件受 git 跟踪」式护栏对这一格无效。
+5. 每个 sdist 的顶层条目集**逐条等于**该包 pyproject 的 `[tool.hatch.build.targets.sdist] include`
+   白名单（去前导 `/`）加 `PKG-INFO`（ADR 0037 工程布局条：随包分发的只有各包源码目录与其声明的内容）。
+   白名单是字面量，没有护栏就会静默漂回默认全收——而默认全收不只多带测试与 spike，还会把本机未跟踪的
+   产物一并封进 sdist（hatchling 只认从项目根向上第一份 `.gitignore`，包内那份会挡住仓库根的规则）。
+   例外一项：hatchling 把它认到的 `.gitignore` 强制塞进 sdist，不受 include / exclude / ignore-vcs 约束，
+   故该文件只容许、不要求。没写 include 白名单的包只剩「顶层不含 `tests` / `spikes`」这条恒真红线。
 
 用法：
     python3 .github/scripts/check_dist_metadata.py --dist dist [--expect-version 1.4.0]
@@ -73,6 +79,31 @@ def member_dist_names(repo_root: Path) -> dict[str, str]:
             if not name:
                 raise SystemExit(f"{pyproject} 的 [project] 没有 name")
             result[str(member_dir.relative_to(repo_root))] = name
+    return result
+
+
+# hatchling 的 sdist 里恒有两样超出白名单的东西：`PKG-INFO`（它按元数据生成）与它认到的 `.gitignore`
+# （sdist target 的默认 force-include，不受 include / exclude / ignore-vcs 约束；包内没有就认仓库根那份）。
+# 前者必须在，后者只容许不要求——哪天 hatchling 不再塞它，这道闸门不该因此变红。
+SDIST_GENERATED = frozenset({"PKG-INFO"})
+SDIST_TOLERATED = frozenset({".gitignore"})
+
+
+def sdist_whitelists(repo_root: Path, members: dict[str, str]) -> dict[str, set[str]]:
+    """真值集：发行名 → 该包 pyproject 的 sdist `include` 白名单（去前导 `/`，模式锚在包根）。
+
+    没写 `include` 的成员不进这张表，其 sdist 只受「顶层不含 `tests` / `spikes`」那条恒真红线约束
+    （见模块 docstring 断言 5）。
+    """
+    result: dict[str, set[str]] = {}
+    for member_dir, name in members.items():
+        with (repo_root / member_dir / "pyproject.toml").open("rb") as fh:
+            data = tomllib.load(fh)
+        sdist_target = (
+            data.get("tool", {}).get("hatch", {}).get("build", {}).get("targets", {}).get("sdist", {})
+        )
+        if include := sdist_target.get("include"):
+            result[name] = {entry.lstrip("/") for entry in include}
     return result
 
 
@@ -211,13 +242,37 @@ def main() -> int:
                     f"{name} 缺 sdist {expected_sdist.name}（现有：{[p.name for p in sdists]}）"
                 )
 
-    # 断言 5：sdist 顶层不含测试与 spike（ADR 0037 工程布局条；exclude 是字面量、无护栏会静默漂回）
+    # 断言 5：sdist 顶层 == 该包的打包白名单（include 是字面量、无护栏会静默漂回默认全收）
+    whitelists = sdist_whitelists(repo_root, members)
     for s in sdists:
         with tarfile.open(s) as t:
             tops = {p[1] for p in (m.name.split("/") for m in t.getmembers()) if len(p) > 1}
-        bad = sorted(tops & {"tests", "spikes"})
-        if bad:
-            errors.append(f"{s.name} 顶层含 {bad}：pyproject 的 sdist exclude 漏了（ADR 0037 工程布局条）")
+        # 产物名形态 = `<规范化发行名>-<版本>.tar.gz`（PEP 625），版本段不含 `-`
+        sdist_dist_name = normalized_to_dist.get(s.name[: -len(".tar.gz")].rsplit("-", 1)[0])
+        if sdist_dist_name is None:
+            errors.append(f"{s.name} 的发行名不是任何 workspace 成员——产物目录不干净（旧产物没清）")
+            continue
+        # 恒真红线（与白名单无关，防「把 /tests 写进白名单」这类自洽却违 ADR 的改动）
+        if hard := sorted(tops & {"tests", "spikes"}):
+            errors.append(
+                f"{s.name} 顶层含 {hard}：测试与 spike 恒不进发行包（ADR 0037 工程布局条）"
+                "——白名单里若列了它们，是白名单写错了"
+            )
+        expected = whitelists.get(sdist_dist_name)
+        if expected is None:
+            # 该包还没写 include 白名单：顶层集合相等这一格照不出来，只剩上面那条红线
+            continue
+        expected = expected | SDIST_GENERATED
+        if missing := sorted(expected - tops):
+            errors.append(
+                f"{s.name} 顶层缺 {missing}：该包 pyproject 的 sdist include 列了、产物里没有"
+                "（磁盘上不存在，或被 readme / license-files 字段的改动带走了）"
+            )
+        if extra := sorted(tops - expected - SDIST_TOLERATED):
+            errors.append(
+                f"{s.name} 顶层多出 {extra}（白名单外）：pyproject 的 sdist include 漂回默认全收，"
+                "或有人往白名单外的顶层塞了东西（ADR 0037 工程布局条）"
+            )
 
     if args.expect_version and version and version != args.expect_version:
         errors.append(
@@ -236,7 +291,7 @@ def main() -> int:
         for err in errors:
             fail(err)
         return 1
-    print("产物校验通过：成员齐、版本一致（无旧版本残留）、兄弟包 pin 已渲染、skill 文件集与源目录一致、sdist 不含测试与 spike。")
+    print("产物校验通过：成员齐、版本一致（无旧版本残留）、兄弟包 pin 已渲染、skill 文件集与源目录一致、sdist 顶层与打包白名单一致。")
     return 0
 
 
