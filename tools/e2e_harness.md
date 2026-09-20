@@ -10,11 +10,12 @@
 
 **中断只是它的能力之一**（`--interrupt`）：`--interrupt none` 的 baseline 同样可运行，用于验证「事件流端到端正常 + 三通道分离 + 零行为变化」（如 worker I/O 重构后的回归）。纯逻辑回归仍由各引擎单测覆盖（Nova `engines/novaact/tests/test_*.py`、Midscene `engines/midscene/src/worker/*.test.mts`、`core/tests/test_subprocess_engine.py`）。
 
-**适用场景**：改动 worker 的中断路径 / 会话清理 / grace / 安全点提前上传 / 上传超时 / **job 入口·事件出口（I/O 边缘）**后，实际运行确认承重假设仍成立。日常逻辑改动先运行单测；只有涉及上述「只能真实运行验证」的真实边界才动 harness。
+**适用场景**：改动 worker 的中断路径 / 会话清理 / grace / 安全点提前上传 / 上传超时 / **job 入口·事件出口（I/O 边缘）**后，实际运行确认承重假设仍成立；另可验**使用方确定性 step 目录在真 worker 下被加载**（`--steps-dir`，ADR 0037 决策 4——加载失败 worker 会降级成 AI step，单测照不出）。日常逻辑改动先运行单测；只有涉及上述「只能真实运行验证」的真实边界才动 harness。
 
 ## 前置条件
 
 - **AWS 凭证 + region us-east-1**（default profile 即可）。
+- **宿主 export 的 `GHERKAI_*` 一律不生效**：harness 与 adapter 同一起手式，组合根拥有的 worker env（`GHERKAI_STEPS_DIR` / `GHERKAI_NO_ARTIFACTS` / `GHERKAI_EXTRA_HTTP_HEADERS`）先被显式清空；只有 `--steps-dir`（或环境变量 `HARNESS_STEPS_DIR`）给的值会被显式注回。起手行会回显 `steps_dir=…`（`None` = 已清空），据此确认注入生效。
 - **一个可写 S3 桶**，经环境变量 `HARNESS_S3_BUCKET` 传入（**勿硬编码**账号相关值）。运行结束后自行清理桶内 `harness/<run-id>/` 前缀（见下「清理」）。
 - 用**仓库根的 workspace venv** 运行（`uv run python …`，等价 `.venv/bin/python`）：harness 复用真实 `gherkai_core.scope.plan` 生成 job（避免手写 JSON 造成漂移），并复用 `gherkai_runtime.compose` 的 worker 定位链；根 `uv sync` 已把 `gherkai_core` 与 `gherkai_runtime` 都装成 editable（ADR 0037 决策 2）。**cwd 与 `PYTHONPATH` 都不限**，这由 editable 安装保证：harness 不改 `sys.path`，只由 `__file__` 派生仓库根推导 `features/` 路径。worker 路径不由它推导，见下条四级定位链。
 - **worker 经四级定位链启动**（与 CLI 同一真源，ADR 0037 决策 3），harness 不按仓库布局拼接路径：novaact 随仓库根 `uv sync` 装进同一 workspace venv，即命中「同 venv `-m` 入口」，无需独立 venv；midscene 需先在 `engines/midscene/` 执行 `npm install && npm run build` 生成 `dist/bin.mjs`，再用 `GHERKAI_WORKER_MIDSCENE_CMD="node <仓库根绝对路径>/engines/midscene/dist/bin.mjs"` 显式覆写（第一级）。四级全 miss 抛 `WorkerNotFoundError`，并附安装指引。
@@ -28,7 +29,8 @@ HARNESS_S3_BUCKET=<你的可写桶> uv run python tools/e2e_harness.py \
     --feature <feature 名，不含 .feature 后缀> \
     --interrupt <none|connect|act|between|scenario|scope_end> \
     --run-id <本次唯一 id，作 S3 prefix + 本地临时目录名> \
-    --grace-cap <秒，SIGTERM 到 SIGKILL 的墙钟上限，默认 30>
+    --grace-cap <秒，SIGTERM 到 SIGKILL 的墙钟上限，默认 30> \
+    --steps-dir <使用方确定性 step 目录，可选>
 ```
 
 参数：
@@ -41,6 +43,7 @@ HARNESS_S3_BUCKET=<你的可写桶> uv run python tools/e2e_harness.py \
 | `--interrupt` | `none`                 | 中断时机，见下表                                                                      |
 | `--run-id`    | **必填**               | 本次唯一 id → S3 `harness/<run-id>/` + 本地 `/tmp/harness-runs/<run-id>/` |
 | `--grace-cap` | `30.0`                 | SIGTERM 后超过该墙钟 worker 仍未退出 → 判 `hung=true` 并发 SIGKILL 强制终止          |
+| `--steps-dir` | `HARNESS_STEPS_DIR` / 空 | 使用方确定性 step 目录（ADR 0037 决策 4），注给 worker 的绝对路径；不给则 worker 一侧无使用方 step；目录不存在直接报错退出 |
 
 ### `--interrupt` 中断时机
 

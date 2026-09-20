@@ -132,7 +132,7 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 | 症状 | 原因 | 处置 |
 |---|---|---|
 | `未找到 run：<run_id>（--report-dir 是否与 submit 一致？）` | 定位参数与产生这个 run 的那条命令不一致 | 照那条命令逐字对齐 `--backend`、`--report-dir`、`--prefix` |
-| `没有 scenario 匹配 …`，随后列出本批全部候选 | `--scope` / `--tags` / `--scenario` 把范围筛成了空集 | 从列出的候选里挑正确的值 |
+| `没有 scenario 匹配 …`，随后列出这个 run 的全部候选 | `--scope` / `--tags` / `--scenario` 把范围筛成了空集 | 从列出的候选里挑正确的值 |
 | `feature 语法错误（gherkin 解析失败，含行:列）` | `.feature` 文件语法有误 | 按报出的行列改；写法见[编写 .feature](./writing-features.md) |
 
 ## 仍未定位到原因时

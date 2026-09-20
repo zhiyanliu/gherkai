@@ -122,7 +122,7 @@ npx skills add https://github.com/zhiyanliu/gherkai/tree/v<版本>/cli/gherkai_c
 
 > 用 gherkai 给结算流程写一条用例：打开 https://shop.example.com ，把一件商品加入购物车，检查购物车里有一件商品。先 plan，再在本机运行一次，没过就把证据给我。
 
-agent 会自己做用例预检、实际运行前把这一批的规模报给你、失败时先读证据，再收窄重新运行。
+agent 会自己做用例预检、实际运行前把本次运行的规模报给你、失败时先读证据，再收窄重新运行。
 
 ## 上手路径二：自己敲命令
 
@@ -163,7 +163,7 @@ gherkai explain <run_id>
       [1] Then "页面包含 Example Domain 字样"
 ```
 
-它给出这一批会开几个 job（每个 job 对应一个云端浏览器会话）、各自用哪个引擎、每一步走确定性 step 还是走 AI。**先 plan 后执行**：`plan` 零费用，能在实际运行产生费用之前暴露写法与配置问题。
+它给出本次运行会开几个 job（每个 job 对应一个云端浏览器会话）、各自用哪个引擎、每一步走确定性 step 还是走 AI。**先 plan 后执行**：`plan` 零费用，能在实际运行产生费用之前暴露写法与配置问题。
 
 用 `@engine:` tag 指定了引擎的用例，在本机运行要求该引擎的 worker 已安装，否则 `run` 停下并退 `2`。仓库示例里的 `engine_routing.feature` 两个 scenario 分别指定两个引擎，只装了一个引擎时改用未标 `@engine` 的用例，或用 `--scope` 只运行其中一个。
 

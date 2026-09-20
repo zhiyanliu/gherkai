@@ -10,7 +10,7 @@
 
 | 执行方式 | 命令 | 特点 |
 |---|---|---|
-| 前台 | `gherkai run <feature...>` | CLI 全程在线，运行结束后直接输出判定与产物位置，退出码就是判定。CLI 进程结束（终端关闭、机器休眠）这一批即停止 |
+| 前台 | `gherkai run <feature...>` | CLI 全程在线，运行结束后直接输出判定与产物位置，退出码就是判定。CLI 进程结束（终端关闭、机器休眠）这个 run 即停止 |
 | 后台 | `gherkai submit <feature...>` 再 `gherkai status <run_id>` | `submit` 打印一个 `run_id` 后立即退出，后台继续执行；用 `status` 查进度，`status --wait` 等到运行结束并拿判定 |
 
 **在哪运行、落在哪**（`--backend`）
@@ -20,7 +20,7 @@
 | `local`（默认） | 本机子进程 | `--report-dir` 指的本地目录 | 本机装好要用的引擎 worker，有 AWS 凭证 |
 | `cloud` | Fargate 容器 | 状态与提交记录落 DynamoDB，判定明细与报告落 S3 的产物桶（`<前缀>artifacts`） | 部署方先执行过 `gherkai deploy`，提交时给同一个 `--prefix` |
 
-`submit --backend local` 在本机起一个脱离 CLI 的后台进程推进，本机要保持开机；`submit --backend cloud` 提交完即可关机，云端自己把这批执行完；只有用 `--expose-local` 时例外——隧道在本机，要保持开机联网到这个 run 结束。
+`submit --backend local` 在本机起一个脱离 CLI 的后台进程推进，本机要保持开机；`submit --backend cloud` 提交完即可关机，云端自己把这个 run 执行完；只有用 `--expose-local` 时例外——隧道在本机，要保持开机联网到这个 run 结束。
 
 下面各级需要的权限不同、费用记到的账户也不同（`plan` 不需要凭证，单列一行）。
 
@@ -50,8 +50,8 @@ gherkai explain "$RUN_ID"                                  # 有用例没过时�
 | 命令 | 用途 | 常用选项 |
 |---|---|---|
 | `gherkai plan <feature...>` | 用例预检：打印 scope / job 分组，逐步标注哪些步由确定性 step 执行（行尾给出该 step 的说明），未标注的步交给 AI；同时校验写法与配置。不连云、不产生费用 | `--scope` / `--tags` / `--scenario`、`--default-engine`、`--assertion-votes`、`--default-job-timeout`、`--steps-dir`、`--json` |
-| `gherkai run <feature...>` | 前台运行完这批，输出文本汇总，并把报告、运行元信息、判定明细三处位置输出到标准错误（stderr） | 见下「常用选项」 |
-| `gherkai submit <feature...>` | 提交这批并立即返回，stdout 只有一个 `run_id` | `--backend`、`--max-concurrency`、`--report-dir`、`--prefix`、`--worker-variant`、`--tunnel-ttl` |
+| `gherkai run <feature...>` | 前台运行完这个 run，输出文本汇总，并把报告、运行元信息、判定明细三处位置输出到标准错误（stderr） | 见下「常用选项」 |
+| `gherkai submit <feature...>` | 提交这个 run 并立即返回，stdout 只有一个 `run_id` | `--backend`、`--max-concurrency`、`--report-dir`、`--prefix`、`--worker-variant`、`--tunnel-ttl` |
 | `gherkai status <run_id>` | 查这个 run 的进度与结果；到终态时同时输出三处产物位置 | `--wait`、`--backend`、`--report-dir`、`--prefix`、`--max-concurrency`、`--json` |
 | `gherkai explain <run_id> [<scope_id>]` | 看每一步的证据：问了 AI 什么、AI 看见了什么、为什么这么判。用例没过时先运行这个命令 | `--scenario`、`--step`、`--all`、`--full`、`--json` |
 | `gherkai list-engines` | 列出本机两个引擎 worker 的拉起命令与来源，没装的那个原地给安装提示 | `--json` |
@@ -73,7 +73,7 @@ gherkai explain "$RUN_ID"                                  # 有用例没过时�
 | `--tags TAG[,TAG...]` | 只运行带这些 tag 的 scenario。一个值内用逗号分隔表示任一命中，重复给本选项表示都要命中；`@` 可省。feature 行上的 tag 对其下每个 scenario 生效 |
 | `--scenario SEL` | 只运行这些 scenario。`SEL` = 完整 scenario id、行号（`12` 或 `:12`，纯数字只当行号）、或标题的一段文字（区分大小写）。可重复，任一命中 |
 
-三者同给时都要满足。筛掉一部分时命令会打印一行 `筛选：<已选>/<总数> scenario`，后面附上你给的筛选条件；一条都没选中时退 `2` 并列出本批全部候选（id、标题、tags），不会静默执行一个空批。
+三者同给时都要满足。筛掉一部分时命令会打印一行 `筛选：<已选>/<总数> scenario`，后面附上你给的筛选条件；一条都没选中时退 `2` 并列出这个 run 的全部候选（id、标题、tags），不会静默执行一个空 run。
 
 **执行**
 
@@ -83,7 +83,7 @@ gherkai explain "$RUN_ID"                                  # 有用例没过时�
 | `--assertion-votes N` | `1` | AI 断言执行 N 次取多数票（如 3 或 5），用于降低判定抖动 |
 | `--max-concurrency N` | `1` | 同时运行的 worker 上限，须 ≥ 1。`submit --backend cloud` 提交时若超过部署方为单个 run 设的上限，命令会提示并按该上限并行；`run --backend cloud` 由本机命令进程直接调度，不受该上限约束 |
 | `--default-job-timeout S` | `300` | 单个 job 的墙钟预算秒（`<=0` 表示不超时）；用例上标 `@timeout:<秒>` 可逐 scope 覆盖。超预算的 job 被停掉并判 error |
-| `--grace S` | 自动 | 仅 `run --backend local`：中止时留给 worker 关闭云端浏览器会话的秒数，不给则按本批用到的引擎自报的最短宽限推导。值过小会漏关会话、继续计费，命令在开始执行前退 `2`。`--backend cloud` 不接受这个选项（给了直接退 `2`），云端的停止宽限在部署时定 |
+| `--grace S` | 自动 | 仅 `run --backend local`：中止时留给 worker 关闭云端浏览器会话的秒数，不给则按这个 run 用到的引擎自报的最短宽限推导。值过小会漏关会话、继续计费，命令在开始执行前退 `2`。`--backend cloud` 不接受这个选项（给了直接退 `2`），云端的停止宽限在部署时定 |
 | `--fail-fast` | 关 | 仅 `run`：任一 job 出错即中止这个 run 的其余 job |
 
 单个 job 的网络故障只让那个 job 判 error，其余 job 继续；给了 `--fail-fast` 才会因此中止这个 run。
@@ -96,7 +96,7 @@ gherkai explain "$RUN_ID"                                  # 有用例没过时�
 | `--no-report` | 关 | 仅 `run`：报告目录下什么都不落，也不收集引擎自己的报告产物。适合 CI 只看退出码或 JSON |
 | `--quiet` | 关 | 仅 `run`：不输出逐事件进度，仍输出文本汇总。在本机运行时 worker 日志改落 `<report-dir>/<run_id>/worker.log`（`--no-report` 时落系统临时目录），只打印一行位置；云端后端下没有本机 worker 日志 |
 | `--json` | 关 | 仅 `run`：标准输出只打机器可读 JSON、不打文本汇总；进度与诊断照常走标准错误，逐事件进度可用 `--quiet` 静音 |
-| `--steps-dir DIR` | `./steps` | 项目自己的确定性 step 目录，也可用环境变量 `GHERKAI_STEPS_DIR`。目录里任一文件加载失败即整批拒绝运行。云端后端下不生效（云端 worker 的 step 构建在镜像里，只警告不拦），写法见 [`writing-deterministic-steps.md`](./writing-deterministic-steps.md) |
+| `--steps-dir DIR` | `./steps` | 项目自己的确定性 step 目录，也可用环境变量 `GHERKAI_STEPS_DIR`。目录里任一文件加载失败即整个 run 拒绝运行。云端后端下不生效（云端 worker 的 step 构建在镜像里，只警告不拦），写法见 [`writing-deterministic-steps.md`](./writing-deterministic-steps.md) |
 | `--expose-local ORIGIN` | — | 把本机可达的被测应用经隧道暴露给云端浏览器，配套的 `--tunnel`（两条命令都有）与 `--tunnel-ttl`（只有 `submit` 有）见 [`local-app-testing.md`](./local-app-testing.md) |
 
 **仅 `--backend cloud`**：`--prefix P`（默认 `gherkai-`，兜底环境变量 `AWS_RESOURCE_PREFIX`）须与部署时一致，统一决定表、桶、集群等资源名；`--worker-variant NAME` 选云端 worker 镜像的 variant，不给则用部署时的默认指针，某个引擎缺这个 variant 直接退 `2`、不回落到默认，见 [`cloud-backend.md`](./cloud-backend.md)。不给 `--subnet` / `--security-group` 时，Fargate 的子网与安全组按部署时写入的参数自动取用，一般不用给。单独覆盖某个资源名的选项见 [`configuration.md`](./configuration.md)。
@@ -107,11 +107,11 @@ gherkai explain "$RUN_ID"                                  # 有用例没过时�
 
 | 命令 | 退出码回答什么 | `0` | `1` | `2` |
 |---|---|---|---|---|
-| `run` | 判定 | 这批全部通过 | 有用例失败或出错；`--backend cloud` 执行到一半时运行记录存储不可达也退这个码 | 开始执行前的配置或可达性问题 |
+| `run` | 判定 | 这个 run 全部通过 | 有用例失败或出错；`--backend cloud` 执行到一半时运行记录存储不可达也退这个码 | 开始执行前的配置或可达性问题 |
 | `status`（不带 `--wait`） | 查到了吗 | 查到了，含还没结束的 run | 读到的终态不是全部通过 | run 不存在、云端不可达、CLI 与后端版本不匹配 |
 | `status --wait` | 判定 | 运行结束且全部通过 | 运行结束但有用例失败或出错 | 同上，另加后端没部署或 `--prefix` 配错 |
 | `submit` | 提交成功了吗 | 已提交，`run_id` 已打印 | — | 配置或可达性问题 |
-| `plan` | 这批能运行吗 | 能 | — | 配置错、写法错、`steps/` 里有文件加载失败 |
+| `plan` | 这个 run 能运行吗 | 能 | — | 配置错、写法错、`steps/` 里有文件加载失败 |
 | `explain` | 证据读出来了吗 | 渲染出来了，用例判失败也退 `0`；判定明细还没落地同样退 `0` | — | 参数写错（例如 `--step` 没同时给 `--scenario`）、run 或 scope 查不到、云端读不到、CLI 与后端版本不匹配 |
 | `doctor` | 必修项都过了吗 | 全过 | — | 任一必修项失败（可选能力缺失只标 `-`，不影响退出码） |
 | `list-deterministic` | 这个引擎有哪些确定性 step | 列出来了 | — | `--steps-dir` 指的不是目录、worker 定位不到、`steps/` 加载失败、该引擎的 worker 自述失败（多为 worker 与 CLI 版本不一致，处置见 [`troubleshooting.md`](./troubleshooting.md)） |

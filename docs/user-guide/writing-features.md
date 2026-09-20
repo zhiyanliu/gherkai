@@ -75,7 +75,7 @@ Scenario: 维基百科首页与 OpenAI 词条首段的 AI 断言
 | 取值 | 整数，最小 1（1 = 单次判定，不做波动检测）。用奇数：4 票里 2 票赞成不过半数，判否 |
 | 作用范围 | 本次运行的**每一条** AI 断言。暂不支持按 scenario 或 scope 单独设置 |
 | 代价 | AI 断言的模型调用次数与该步耗时随 N 成倍增长，费用随之上升。动作步与确定性 step 不投票，不受影响 |
-| 用法 | 怀疑某条断言结果波动时，先把范围收窄到那一条 scenario 或那一个 scope，再调高票数，不要整批调高 |
+| 用法 | 怀疑某条断言结果波动时，先把范围收窄到那一条 scenario 或那一个 scope，再调高票数，不要给整个 run 一次性调高 |
 | 无效场景 | Nova Act 在非英文页面上对「正文里是否出现某个中文词」这类断言会系统性判否，增加票数不改变结果（同一页面上判断是否出现英文词仍然可靠）。改法见「按引擎选写法」 |
 
 收窄范围的选项见 [`running-and-results.md`](./running-and-results.md)。
@@ -91,14 +91,14 @@ Scenario: 维基百科首页与 OpenAI 词条首段的 AI 断言
 规则：
 
 - **写在 Feature 行、`Rule` 行、`Examples` 块上的 tag 都会传给其下（或其展开出的）每一条 scenario**。`@scope` 标在 Feature 行等于把整个文件编成一个串行 job，标在 `Rule` 行等于把这条规则下的 scenario 编成一个。
-- **传下来的 `@scope` 不能被单条 scenario 覆盖**：同一条 scenario 解析出两个不同的 `@scope` 值即整批拒绝运行。要按 scenario 分组，就不要在 Feature 行或 `Rule` 行标 `@scope`。
-- **`@engine` 与 `@timeout` 按 scope 生效**：scope 里任一条 scenario 标了，整个 scope 继承；同一个 scope 出现两个不同值，整批拒绝运行（同一个会话不可能同时属于两个引擎，一个 job 也只能有一个预算）。都没标时用命令行的 `--default-engine`（默认 `novaact`）与 `--default-job-timeout`（默认 300 秒，`<=0` 表示不超时）。
-- **scope 名在整批里是全局的**：两个 `.feature` 文件写了同一个名字就合并成一个 job，本可并发的两条用例只能串行共享一个会话。名字带上来源前缀（`checkout-happy-path`、`admin-login`），不要用 `login`、`smoke` 这类通名。
-- **未标 `@scope` 的 job 用 `<文件路径>:<行号>` 当编号**。因此 `@scope` 的值不要写成这个形状：正好等于同批某条未标 scope 的 scenario 编号时，整批拒绝运行。
+- **传下来的 `@scope` 不能被单条 scenario 覆盖**：同一条 scenario 解析出两个不同的 `@scope` 值即整个 run 拒绝运行。要按 scenario 分组，就不要在 Feature 行或 `Rule` 行标 `@scope`。
+- **`@engine` 与 `@timeout` 按 scope 生效**：scope 里任一条 scenario 标了，整个 scope 继承；同一个 scope 出现两个不同值，整个 run 拒绝运行（同一个会话不可能同时属于两个引擎，一个 job 也只能有一个预算）。都没标时用命令行的 `--default-engine`（默认 `novaact`）与 `--default-job-timeout`（默认 300 秒，`<=0` 表示不超时）。
+- **scope 名在整个 run 里是全局的**：两个 `.feature` 文件写了同一个名字就合并成一个 job，本可并发的两条用例只能串行共享一个会话。名字带上来源前缀（`checkout-happy-path`、`admin-login`），不要用 `login`、`smoke` 这类通名。
+- **未标 `@scope` 的 job 用 `<文件路径>:<行号>` 当编号**。因此 `@scope` 的值不要写成这个形状：正好等于同一个 run 里某条未标 scope 的 scenario 编号时，整个 run 拒绝运行。
 - **标了 tag 就得给值**：`@scope:`、`@engine:`、`@timeout:` 后面空着会被拒绝；想用默认值就删掉这个 tag。`@timeout` 的值必须是正数秒。连冒号和值一起漏掉、只写 `@scope` 不会报错：它会被当成普通标签忽略，这条 scenario 仍各自成为一个 job。分组没生效时先用 `gherkai plan` 看分组结果。
 - **预算从这个 job 启动时算起**，云端后端下包含拉取 worker 镜像等启动开销；到点这个 job 会被停下，判定记为出错、原因是超时。
 - **其它 tag 都是普通标签**，没有内置语义，用来配合 `--tags` 挑一部分 scenario 运行。
-- 以上校验都在起第一个 job 之前完成，任一条不满足即整批拒绝运行，不产生模型与浏览器费用。用 `gherkai plan` 提前验。
+- 以上校验都在起第一个 job 之前完成，任一条不满足即整个 run 拒绝运行，不产生模型与浏览器费用。用 `gherkai plan` 提前验。
 
 一批 `.feature` 里的 scenario 先按 `@scope` 归成 job，job 才是调度与执行的单位：
 
@@ -134,9 +134,9 @@ Scenario: 仍停留在 OpenAI 词条页
 | `And` / `But` | 支持 | 承接前一条 `Given` / `When` / `Then` 的派发身份 |
 | `Example:`、`Scenario Template:`、`Scenarios:` | 支持 | 分别是 `Scenario:`、`Scenario Outline:`、`Examples:` 的同义写法 |
 | 中文关键字（`功能:` / `背景:` / `场景:` / `场景大纲:` / `例子:` / `假如` / `当` / `那么` / `并且` / `而且` / `但是`） | 支持 | 文件第一行须写 `# language: zh-CN`；不写这一行时中文关键字解析失败，报错指向第 1 行。关键字用哪种语言写不影响派发：`那么` 等于 `Then`（断言），`假如` / `当` 等于 `Given` / `When`（动作） |
-| `*` 开头的步；前面没有可继承关键字的 `And` / `But`（scenario 第一步且这个 feature 没有 `Background`，或紧跟在 `*` 之后） | 不支持 | 判不出是动作还是断言，整批拒绝运行；改成写明关键字 |
+| `*` 开头的步；前面没有可继承关键字的 `And` / `But`（scenario 第一步且这个 feature 没有 `Background`，或紧跟在 `*` 之后） | 不支持 | 判不出是动作还是断言，整个 run 拒绝运行；改成写明关键字 |
 
-三点补充：step 文本用什么语言与关键字用什么语言无关，中文 step 文本配英文关键字是本页所有示例的写法；命中确定性 step 的那一步，挂在它上面的 DataTable / DocString 不会传给函数，多行参数只对 AI step 有效；`.feature` 有语法错误时整批拒绝运行，消息带出错的行号与列号。
+三点补充：step 文本用什么语言与关键字用什么语言无关，中文 step 文本配英文关键字是本页所有示例的写法；命中确定性 step 的那一步，挂在它上面的 DataTable / DocString 不会传给函数，多行参数只对 AI step 有效；`.feature` 有语法错误时整个 run 拒绝运行，消息带出错的行号与列号。
 
 ## 按引擎选写法
 
@@ -145,7 +145,7 @@ Scenario: 仍停留在 OpenAI 词条页
 | 被测 UI 语言 | 英文 UI。非英文页面上能导航、能判页面级语义，但「正文里是否出现某个中文词」这类断言会系统性判否（同一页面上判断是否出现英文词仍然可靠） | 不限，中文 UI 上的动作与 AI 断言同样可靠 |
 | 确定性 step 语言 | Python（`steps/*.py`） | TypeScript / JavaScript（`steps/*.mts`、`steps/*.mjs`） |
 
-被测 UI 不是英文时有三条出路，按对用例的改动量从小到大：给 scenario 标 `@engine:midscene`（或整批用 `--default-engine midscene`），前提是运行用例的环境里装了这个引擎的 worker；把断言改写成页面级语义陈述；把文本与结构检查改成确定性 step——改动最大，但这些 step 之后不再产生模型费用。
+被测 UI 不是英文时有三条出路，按对用例的改动量从小到大：给 scenario 标 `@engine:midscene`（或整个 run 用 `--default-engine midscene`），前提是运行用例的环境里装了这个引擎的 worker；把断言改写成页面级语义陈述；把文本与结构检查改成确定性 step——改动最大，但这些 step 之后不再产生模型费用。
 
 同一份 `.feature` 要在两个引擎上运行时，用到的每条确定性 step 都要在两侧成对注册，否则在缺失的那一侧这一步会换回 AI 判定。见 [`writing-deterministic-steps.md`](./writing-deterministic-steps.md)。
 

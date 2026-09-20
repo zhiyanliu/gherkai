@@ -143,7 +143,7 @@ _Avoid_: 评测集
 
 **Run 数据模型 (run data model)**:
 一次执行的数据层级：Run 含多个 Job（即 Scope），Job 含多个 Scenario，Scenario 含多个 Step；Scope 是共享操作上下文的 Scenario 分组、也是执行单元（内部串行、彼此并行），Feature 是与之正交的组织轴（见 ADR 0016）。其结果面分判定真值与派生视图两条（各自见本表）。
-_Avoid_: 批次、一批
+_Avoid_: 批次、一批、本批、整批、这一批
 
 **不透明标识符 (opaque identifier)**:
 把 worker 上报的事件挂回对应 scenario 与 scope 的关联键，规定为不透明：支持任意文本、只作键使用，核心既不把它解析成路径也不清洗其字符。唯一性由调用方保证；需要安全字符的消费层自行做可逆编码（见 ADR 0025）。

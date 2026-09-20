@@ -4,7 +4,7 @@
 
 ### 和 Playwright、Cucumber 是什么关系？现有用例能迁过来吗？
 
-gherkai 不是它们的插件，也没有迁移命令：`.feature` 的语法基本通用（少数写法不支持），但 Cucumber、behave 的 step definitions 不会被认成 gherkai 的确定性 step（注册要用 gherkai 自己的 API），已有的 Playwright 代码可以搬进确定性 step——handler 拿到的就是 Playwright 的页面对象。两套框架能在同一个仓库里各用自己的命令运行，只是别让别的框架的 Python step 文件落进 gherkai 读的 `steps/`（那里任一文件加载失败会让整批无法运行），必要时用 `--steps-dir` 把 gherkai 指到别处。见[编写 .feature](./writing-features.md#gherkin-写法的支持范围)。
+gherkai 不是它们的插件，也没有迁移命令：`.feature` 的语法基本通用（少数写法不支持），但 Cucumber、behave 的 step definitions 不会被认成 gherkai 的确定性 step（注册要用 gherkai 自己的 API），已有的 Playwright 代码可以搬进确定性 step——handler 拿到的就是 Playwright 的页面对象。两套框架能在同一个仓库里各用自己的命令运行，只是别让别的框架的 Python step 文件落进 gherkai 读的 `steps/`（那里任一文件加载失败会让整个 run 无法运行），必要时用 `--steps-dir` 把 gherkai 指到别处。见[编写 .feature](./writing-features.md#gherkin-写法的支持范围)。
 
 ### 必须用 AWS 吗？能不能接自己的模型 API key？
 

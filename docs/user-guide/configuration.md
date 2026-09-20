@@ -123,10 +123,10 @@ region 的完整解析链是 `--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > 
 | `--report-dir DIR` | `run`、`submit`、`status`、`explain`、`doctor` | `status` / `explain` 要给与 `submit` 相同的值才查得到这个 run。`submit --backend cloud` 下这个值还须与后端部署时设的报告前缀一致，不一致在提交前即被拒；`run --backend cloud` 不做这项比对 |
 | `--steps-dir DIR` | `run`、`plan`、`submit`、`doctor`、`list-deterministic` | 五个命令上同义；云端后端不生效（云端 worker 的 step 构建在镜像里） |
 | `--default-engine {midscene,novaact}` | `run`、`plan`、`submit` | 三个命令上同义 |
-| `--scope ID`、`--tags TAG[,TAG...]`、`--scenario SEL` | `run`、`plan`、`submit`；`--scenario` 也在 `explain` 上 | 前三个命令上同义，都是选这批里哪些 scenario 要运行；`explain --scenario` 选的是看哪些 scenario 的证据，选择器写法与它们同一套 |
+| `--scope ID`、`--tags TAG[,TAG...]`、`--scenario SEL` | `run`、`plan`、`submit`；`--scenario` 也在 `explain` 上 | 前三个命令上同义，都是选这个 run 里哪些 scenario 要运行；`explain --scenario` 选的是看哪些 scenario 的证据，选择器写法与它们同一套 |
 | `--assertion-votes N` | `run`、`plan`、`submit` | 三个命令上同义。`plan` 不执行断言，给它是为了让预检算出的分组与实际运行一致 |
 | `--default-job-timeout S` | `run`、`plan`、`submit` | 三个命令上同义。`plan` 不实际运行 job，给它是为了让用例预检算出的 job 预算与实际运行一致 |
-| `--max-concurrency N` | `run`、`submit`、`status` | `run` / `submit` 上是这批的并发上限；`status` 上只在 `--wait` 接力本机后端时用得上。取值、云端上限与接力（含并发上限取哪个值）口径见 [`running-and-results.md`](./running-and-results.md) |
+| `--max-concurrency N` | `run`、`submit`、`status` | `run` / `submit` 上是这个 run 的并发上限；`status` 上只在 `--wait` 接力本机后端时用得上。取值、云端上限与接力（含并发上限取哪个值）口径见 [`running-and-results.md`](./running-and-results.md) |
 | `--expose-local ORIGIN` | `run`、`plan`、`submit` | `run` / `submit` 上真起隧道，`plan` 上只做标注、不起隧道。前置与限制见 [`local-app-testing.md`](./local-app-testing.md) |
 | `--tunnel {ngrok}` | `run`、`submit` | 两个命令上同义，选 `--expose-local` 用哪个隧道服务，当前只有 `ngrok` 一个取值。存活时间上限 `--tunnel-ttl` 只有 `submit` 有，见 [`local-app-testing.md`](./local-app-testing.md) |
 | `--worker-variant NAME` | `run`、`submit` | 两个命令上同义，只在 `--backend cloud` 下起作用，本机后端忽略。variant 与默认指针见 [`cloud-backend.md`](./cloud-backend.md) |

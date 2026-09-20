@@ -90,7 +90,7 @@
 
 `steps[].deterministic` 三态：至少一个引擎自述成功时，该键在**每个** step 上都出现。`null` = 该 step 交由 AI 执行；带 `pattern` + `description`
 = 命中该确定性 step；带 `conflict`（命中的模式列表）= 多条模式同时命中，实际执行该 step 会记 error（需先调整模式或 step 措辞）。
-**全部引擎都取不到 worker 自述时该键整批省略**（不是 null；stderr 有「标注降级」提示）。部分引擎降级时，该引擎的 step 同样是
+**全部引擎都取不到 worker 自述时该键在每个 step 上一律省略**（不是 null；stderr 有「标注降级」提示）。部分引擎降级时，该引擎的 step 同样是
 `null`、机读层与「交由 AI」不可区分；降级的引擎名见 stderr 的提示行。
 
 ## `gherkai status <run_id> --json`

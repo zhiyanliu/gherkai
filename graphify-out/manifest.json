@@ -1235,8 +1235,8 @@
     "semantic_hash": ""
   },
   "skills/gherkai-evals/evals.json": {
-    "mtime": 1789843744.3355865,
-    "ast_hash": "",
+    "mtime": 1789869981.3664546,
+    "ast_hash": "c8711d664fbe44225d1ea226499bf3f5",
     "semantic_hash": ""
   },
   "skills/gherkai-evals/trigger-eval.json": {
@@ -1666,12 +1666,12 @@
   },
   "docs/diagrams/verdict-model-job-outcome.json": {
     "mtime": 1789870554.9342053,
-    "ast_hash": "212017e8212b8dfdb486b072f2ab5262",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "docs/diagrams/verdict-model-reduction-layers.json": {
     "mtime": 1789870554.9344535,
-    "ast_hash": "186360098b9db73c4b754607c17fba44",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "docs/diagrams/writing-features-scenario-to-job.json": {
@@ -1702,11 +1702,6 @@
   ".claude/skills/doc-diagram/SKILL.md": {
     "mtime": 1789845655.5868738,
     "ast_hash": "d0588defa51fb674296bb29b0263c896",
-    "semantic_hash": ""
-  },
-  "docs/journey/0010-code-health-round5-pending-approval.md": {
-    "mtime": 1789859469.678021,
-    "ast_hash": "d1ab38c0536a829d21752126caac3885",
     "semantic_hash": ""
   }
 }

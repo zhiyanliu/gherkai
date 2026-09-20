@@ -513,15 +513,15 @@ rect.c-bg-rect { fill: var(--bg); }
         <text x="745" y="189" class="t-backend" font-size="7" text-anchor="middle">core 侧</text>
         </g>
 
-        <g id="node-run" data-node-id="run" data-node-label="run 判定" tabindex="0" role="button" aria-label="聚焦run 判定，整批的最终结论, 05 / run" aria-pressed="false" data-node-kind="backend" data-node-sublabel="整批的最终结论" data-node-tag="core 侧" data-node-context="05 / run">
-          <title>run 判定 · 整批的最终结论 · 05 / run · core 侧</title>
+        <g id="node-run" data-node-id="run" data-node-label="run 判定" tabindex="0" role="button" aria-label="聚焦run 判定，整个 run 的最终结论, 05 / run" aria-pressed="false" data-node-kind="backend" data-node-sublabel="整个 run 的最终结论" data-node-tag="core 侧" data-node-context="05 / run">
+          <title>run 判定 · 整个 run 的最终结论 · 05 / run · core 侧</title>
           <rect x="904" y="142" width="112" height="58" rx="6" class="c-mask"/>
           <rect x="904" y="142" width="112" height="58" rx="6" class="c-backend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(910 148) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
           <text data-node-label="" x="960" y="163" class="t-primary" font-size="10" font-weight="600" text-anchor="middle">run 判定</text>
-          <text x="960" y="179" class="t-muted" font-size="7" text-anchor="middle">整批的最终结论</text>
+          <text x="960" y="179" class="t-muted" font-size="7" text-anchor="middle">整个 run 的最终结论</text>
         <text x="960" y="189" class="t-backend" font-size="7" text-anchor="middle">core 侧</text>
         </g>
 
@@ -553,4 +553,4 @@ rect.c-bg-rect { fill: var(--bg); }
           </g>
         </g>
       </svg>
-<!-- gherkai:source-sha256=acb2fca75433bd7e30816eb9670895f234a3b970fca8d79bcd071e802284aa9f -->
+<!-- gherkai:source-sha256=a9bf4b538b4c1ea07961f6f9578ee8c30f22ffa198f90f157d8c577138238611 -->

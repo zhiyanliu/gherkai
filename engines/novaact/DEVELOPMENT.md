@@ -4,7 +4,7 @@
 
 ## 包身份
 
-本目录即发行包 **`gherkai-worker-novaact`**（import 名 `gherkai_worker_novaact`、console script `gherkai-worker-novaact`，见 [ADR 0037](../../docs/adr/0037-distribution-and-packaging.md) 决策 3）：worker 代码位于 `gherkai_worker_novaact/`，`spikes/` 与 `tests/` 不进 wheel（安装后的包内没有这两个目录；sdist 按 hatch 默认仍收录）。
+本目录即发行包 **`gherkai-worker-novaact`**（import 名 `gherkai_worker_novaact`、console script `gherkai-worker-novaact`，见 [ADR 0037](../../docs/adr/0037-distribution-and-packaging.md) 决策 3）：worker 代码位于 `gherkai_worker_novaact/`，`spikes/` 与 `tests/` 不进发行包（安装后的包内没有这两个目录；sdist 也按 hatch 白名单 `include` 只收源码目录与 README / LICENSE / pyproject）。
 
 > 目录名取 `novaact`（无下划线），以避开与 pip 包的 import 名 `nova_act` 同名。
 

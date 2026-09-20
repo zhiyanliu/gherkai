@@ -20,7 +20,7 @@ cli/gherkai_cli/
 ├── render.py     ← 表层渲染：0024 事件 → 进度行；RunResult → 文本汇总 / JSON；RunState → status 视图；
 │                    JobResult + evidence → explain 的文本/JSON（两形态同源，见模块内 explain 节的注释）
 ├── skill_install.py ← `gherkai skill install`：importlib.resources 定位包内 skills/gherkai/、整目录收敛 + `.gherkai-skill-version` 标记、`--print`（ADR 0043 决策三）
-└── skills/gherkai/  ← 随 wheel 发行的 agent skill（SKILL.md + references/；hatchling 默认把包目录内非 .py 文件收进 sdist/wheel）。references/cli-json-contract.md **不手写**：
+└── skills/gherkai/  ← 随 wheel 发行的 agent skill（SKILL.md + references/；hatchling 把包目录内的非 `.py` 文件一并收进 wheel；sdist 侧由 `include` 白名单整目录收录）。references/cli-json-contract.md **不手写**：
                      由 `tools/render_skill_contract.py` 从 docs/internals/cli-json-contract.md 确定性生成（ADR 0043 决策四）
 ```
 

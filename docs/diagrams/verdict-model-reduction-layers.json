@@ -72,7 +72,7 @@
       "id": "run",
       "type": "backend",
       "label": "run 判定",
-      "sublabel": "整批的最终结论",
+      "sublabel": "整个 run 的最终结论",
       "stage": 4,
       "row": 0,
       "yOffset": 14,

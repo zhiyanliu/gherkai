@@ -78,7 +78,7 @@ worker 收到的只有 `keyword` + 裸 `text`（+可选多行参数）。派发�
 
 图注：图上那条「读回后注入」只发生在后台推进的两处；同步 `run` 与提交侧是同一个进程，直接用解析出的值、不读回。cloud 那条链在提交之前就完成：镜像由编写 steps 的一方按模板 build，推送与登记归部署方，两步都不在一次 run 的时间线上。提交侧解析 variant 时的存在性/一致性校验、两个后端各自的失败形态与提示，见下文与 §4 表。
 
-local 侧三处宿主（同步 `run`、`submit` 的后台推进进程、`status --wait` 接力者，见 [`execution-and-reconciliation.md`](./execution-and-reconciliation.md) §3 与 §4a）的 CWD 各不相同，因此**解析只能做一次**：任何一处重新解析 `./steps`，同一个 run 就会用到两套 step。落点：后台两处读回 `meta.steps_dir`（`detached.build_local_reconcile`），同步 `run` 用提交侧解析出的值；注入与清除同名变量在 `compose.build_engines` / `_scrubbed_environ`。**每个**宿主构造 env 时都先清除自己 shell 里的同名 `GHERKAI_STEPS_DIR`（接力机器上 export 过是最常见的一例）；definition 优先于 export，worker 只读这一个 env、不回落 `./steps`。
+local 侧三处宿主（同步 `run`、`submit` 的后台推进进程、`status --wait` 接力者，见 [`execution-and-reconciliation.md`](./execution-and-reconciliation.md) §3 与 §4a）的 CWD 各不相同，因此**解析只能做一次**：任何一处重新解析 `./steps`，同一个 run 就会用到两套 step。落点：后台两处读回 `meta.steps_dir`（`detached.build_local_reconcile`），同步 `run` 用提交侧解析出的值；注入与清除同名变量在 `compose.build_engines` / `scrubbed_environ`。**每个**宿主构造 env 时都先清除自己 shell 里的同名 `GHERKAI_STEPS_DIR`（接力机器上 export 过是最常见的一例）；definition 优先于 export，worker 只读这一个 env、不回落 `./steps`。
 
 cloud 侧的关键是**镜像是唯一载体**：使用方的 `steps/` 靠三行 Dockerfile（模板唯一真源在 [ADR 0038](../adr/0038-worker-image-delivery.md)「概念模型」节）构建进一个 **variant**，由部署方 `gherkai deploy push-worker` 推送；镜像里已设定与本机后端**同一个** `GHERKAI_STEPS_DIR`，容器里的 worker 加载的就是构建进去的那份。提交时 `compose.resolve_worker_variant` 只做三环存在性/一致性校验（三环各查什么、缺哪一环怎么报，见 [`cloud-backend-carriers.md`](./cloud-backend-carriers.md) §5），**不读取 steps 内容的任何一个字节**。
 
