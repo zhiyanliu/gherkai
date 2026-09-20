@@ -26,16 +26,16 @@
 - **记录 drain / flush 调用的假上传器（顺序与超时参数都是契约）。** (1 connections) — `engines/novaact/tests/test_evidence.py`
 - **提前退出路径（其后不 flush）：超时提示说链接可能打不开——不承诺任何后续兜底。** (1 connections) — `engines/novaact/tests/test_evidence.py`
 - **scope 末（其后紧跟整目录 flush）：超时不等于丢，提示只说改由收尾统一上传、不吓人。** (1 connections) — `engines/novaact/tests/test_evidence.py`
-- **把 main() 的 SDK 面全 fake 掉（job 走 stdin、scenarios 空 → 只跑到收尾序列）。** (1 connections) — `engines/novaact/tests/test_evidence.py`
+- **把 main() 的 SDK 面全 fake 掉（job 走 stdin、scenarios 空 → 只执行到收尾序列）。** (1 connections) — `engines/novaact/tests/test_evidence.py`
 - **正常完成：先有界排空队列（30s）、再整目录 flush（flush 只兜漏网的）。顺序反了就等于没有队列。** (1 connections) — `engines/novaact/tests/test_evidence.py`
-- **协作停：三层 with 已退出（会话已释放）之后才排空，用退出档预算；不 flush（中断产物留本地）。 会话释放的两个 __exit__ 也进同一条…** (1 connections) — `engines/novaact/tests/test_evidence.py`
+- **协作停：三层 with 已退出（会话已释放）之后才排空，用退出段预算；不 flush（中断产物留本地）。 会话释放的两个 __exit__ 也进同一条…** (1 connections) — `engines/novaact/tests/test_evidence.py`
 - *... and 5 more nodes in this community*
 
 ## Relationships
 
-- [Scenario Key & Evidence Tests](Scenario_Key_%26_Evidence_Tests.md) (12 shared connections)
-- [Nova Act Worker Package](Nova_Act_Worker_Package.md) (6 shared connections)
-- [AWS Test Fixtures](AWS_Test_Fixtures.md) (1 shared connections)
+- [Evidence Artifact Upload](Evidence_Artifact_Upload.md) (12 shared connections)
+- [Nova Act Worker Entry](Nova_Act_Worker_Entry.md) (6 shared connections)
+- [AWS Test Fixtures (moto)](AWS_Test_Fixtures_%28moto%29.md) (1 shared connections)
 
 ## Source Files
 

@@ -16,10 +16,10 @@
 
 ## Relationships
 
-- [TypeScript Deterministic Hooks](TypeScript_Deterministic_Hooks.md) (3 shared connections)
-- [TS Event Sink & Upload](TS_Event_Sink_%26_Upload.md) (3 shared connections)
-- [Run Scope (TS Worker)](Run_Scope_%28TS_Worker%29.md) (2 shared connections)
-- [Run Scope Integration Tests](Run_Scope_Integration_Tests.md) (1 shared connections)
+- [Deterministic Step Resolution (TS)](Deterministic_Step_Resolution_%28TS%29.md) (3 shared connections)
+- [TS Artifact & Event Sink](TS_Artifact_%26_Event_Sink.md) (3 shared connections)
+- [TypeScript Worker Run Scope](TypeScript_Worker_Run_Scope.md) (2 shared connections)
+- [Run Scope Tests](Run_Scope_Tests.md) (1 shared connections)
 
 ## Source Files
 

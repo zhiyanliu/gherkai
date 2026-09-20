@@ -1,6 +1,6 @@
 # Container Engine Adapter
 
-> 73 nodes · cohesion 0.05
+> 77 nodes · cohesion 0.04
 
 ## Key Concepts
 
@@ -11,6 +11,7 @@
 - **resolve_container_engine()** (14 connections) — `deploy_aws/gherkai_deploy_aws/container.py`
 - **_Fake** (14 connections) — `deploy_aws/tests/test_container.py`
 - **container.py** (12 connections) — `deploy_aws/gherkai_deploy_aws/container.py`
+- **Spy** (9 connections) — `deploy_aws/tests/test_workers.py`
 - **digest_for_repo()** (8 connections) — `deploy_aws/gherkai_deploy_aws/container.py`
 - **UnsupportedContainerEngine** (8 connections) — `deploy_aws/gherkai_deploy_aws/container.py`
 - **._run()** (6 connections) — `deploy_aws/gherkai_deploy_aws/container.py`
@@ -28,22 +29,17 @@
 - **test_digest_picked_by_repo_not_first_entry()** (3 connections) — `deploy_aws/tests/test_container.py`
 - **test_inspect_parses_os_arch_and_repo_digests()** (3 connections) — `deploy_aws/tests/test_container.py`
 - **test_login_password_goes_through_stdin_never_argv()** (3 connections) — `deploy_aws/tests/test_container.py`
-- **test_unsupported_engine_is_rejected_not_silently_downgraded()** (3 connections) — `deploy_aws/tests/test_container.py`
-- *... and 48 more nodes in this community*
+- *... and 52 more nodes in this community*
 
 ## Relationships
 
-- [Worker Image Management](Worker_Image_Management.md) (9 shared connections)
-- [Container Worker Tests](Container_Worker_Tests.md) (7 shared connections)
-- [ECS Call Counting Stub](ECS_Call_Counting_Stub.md) (2 shared connections)
-- [AWS Call Spy](AWS_Call_Spy.md) (2 shared connections)
-- [Task Definition Cleanup Stub](Task_Definition_Cleanup_Stub.md) (2 shared connections)
-- [CDK App & AWS Provider CLI](CDK_App_%26_AWS_Provider_CLI.md) (2 shared connections)
-- [Deploy Provider Tests](Deploy_Provider_Tests.md) (1 shared connections)
-- [Task Definition Revision Lineage](Task_Definition_Revision_Lineage.md) (1 shared connections)
-- [VPC State & Deploy Flow](VPC_State_%26_Deploy_Flow.md) (1 shared connections)
-- [CDK Toolchain Preflight](CDK_Toolchain_Preflight.md) (1 shared connections)
-- [AWS Deploy Provider](AWS_Deploy_Provider.md) (1 shared connections)
+- [Worker Image Tests](Worker_Image_Tests.md) (11 shared connections)
+- [AWS Worker Image Management](AWS_Worker_Image_Management.md) (9 shared connections)
+- [Task Definition Revisions](Task_Definition_Revisions.md) (3 shared connections)
+- [Deploy CLI Doctor Checks](Deploy_CLI_Doctor_Checks.md) (3 shared connections)
+- [Deploy Provider Interface](Deploy_Provider_Interface.md) (2 shared connections)
+- [Counting ECS Spy](Counting_ECS_Spy.md) (2 shared connections)
+- [Provider Deploy Subverbs](Provider_Deploy_Subverbs.md) (1 shared connections)
 
 ## Source Files
 
@@ -53,8 +49,8 @@
 
 ## Audit Trail
 
-- EXTRACTED: 129 (87%)
-- INFERRED: 19 (13%)
+- EXTRACTED: 136 (88%)
+- INFERRED: 19 (12%)
 - AMBIGUOUS: 0 (0%)
 
 ---

@@ -25,18 +25,17 @@
 - **真 DDB：STATE item 经反复 `SET jobs.#sid` 增量长大、整个 item 越过 400KB 时 update_item 抛…** (1 connections) — `core/tests/test_cloud_integration.py`
 - **真 DDB+S3 因果闭环：含 >400KB docString 的 RunMeta——不挂 offloader 时 create_run 撞 400KB…** (1 connections) — `core/tests/test_cloud_integration.py`
 - **真 DDB（2026）空串行为的回归基线：finalize 写 ended_at=""（顶层标量 SET）、update 写 session_id=""…** (1 connections) — `core/tests/test_cloud_integration.py`
-- **给真表/真桶造一个本次运行专属的 run_id，避免多次跑撞名（无随机源，用递增计数）。 跨进程靠 it- 前缀 + fixture…** (1 connections) — `core/tests/test_cloud_integration.py`
-- **真 DDB 上跑完整实时写生命周期：create_run → update_job_state（RUNNING→终态）→ finalize_run → 读回。…** (1 connections) — `core/tests/test_cloud_integration.py`
+- **给真表/真桶造一个本次运行专属的 run_id，避免多次执行撞名（无随机源，用递增计数）。 跨进程靠 it- 前缀 + fixture…** (1 connections) — `core/tests/test_cloud_integration.py`
+- **真 DDB 上执行完整实时写生命周期：create_run → update_job_state（RUNNING→终态）→ finalize_run →…** (1 connections) — `core/tests/test_cloud_integration.py`
 - **真 DDB：未 create 就 update/finalize → ConditionalCheckFailedException 转…** (1 connections) — `core/tests/test_cloud_integration.py`
 - **真 DDB：session_id=None omit-when-None，读回仍 None（真 Map entry 缺键的读回语义）。** (1 connections) — `core/tests/test_cloud_integration.py`
 
 ## Relationships
 
-- [Job Explain & S3 Offload](Job_Explain_%26_S3_Offload.md) (19 shared connections)
-- [DynamoDB RunStore Adapter](DynamoDB_RunStore_Adapter.md) (13 shared connections)
-- [Run State Rendering](Run_State_Rendering.md) (7 shared connections)
-- [Cloud Boto3 Guards & EventLog](Cloud_Boto3_Guards_%26_EventLog.md) (2 shared connections)
-- [S3 Result Store](S3_Result_Store.md) (2 shared connections)
+- [Run Metadata & S3 Offload](Run_Metadata_%26_S3_Offload.md) (19 shared connections)
+- [Run State Rendering](Run_State_Rendering.md) (15 shared connections)
+- [Local & S3 Result Stores](Local_%26_S3_Result_Stores.md) (7 shared connections)
+- [S3 Result Store Port](S3_Result_Store_Port.md) (2 shared connections)
 
 ## Source Files
 

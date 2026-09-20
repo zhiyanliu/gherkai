@@ -19,7 +19,7 @@
 
 ## Relationships
 
-- [Doc Command Scanning Rules](Doc_Command_Scanning_Rules.md) (1 shared connections)
+- [Doc Scanning Rules](Doc_Scanning_Rules.md) (1 shared connections)
 
 ## Source Files
 

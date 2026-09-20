@@ -1,15 +1,16 @@
 # Cloud Backend CLI Tests
 
-> 98 nodes · cohesion 0.05
+> 102 nodes · cohesion 0.05
 
 ## Key Concepts
 
-- **test_backend_cloud.py** (67 connections) — `cli/tests/test_backend_cloud.py`
-- **_patch_cloud_handles()** (50 connections) — `cli/tests/test_backend_cloud.py`
-- **_write_feature()** (48 connections) — `cli/tests/test_backend_cloud.py`
-- **_fake_schedule_factory()** (33 connections) — `cli/tests/test_backend_cloud.py`
+- **test_backend_cloud.py** (69 connections) — `cli/tests/test_backend_cloud.py`
+- **_patch_cloud_handles()** (52 connections) — `cli/tests/test_backend_cloud.py`
+- **_write_feature()** (50 connections) — `cli/tests/test_backend_cloud.py`
+- **_fake_schedule_factory()** (34 connections) — `cli/tests/test_backend_cloud.py`
 - **test_variant_gate_only_probes_engines_the_run_uses()** (9 connections) — `cli/tests/test_backend_cloud.py`
 - **test_run_cloud_resolves_variant_into_definition_and_engines()** (8 connections) — `cli/tests/test_backend_cloud.py`
+- **test_cloud_does_not_ask_local_worker_for_grace_floor()** (7 connections) — `cli/tests/test_backend_cloud.py`
 - **test_cloud_ignores_default_steps_dir_silently()** (7 connections) — `cli/tests/test_backend_cloud.py`
 - **test_cloud_omits_steps_dir_and_warns_when_given()** (7 connections) — `cli/tests/test_backend_cloud.py`
 - **test_cloud_run_does_not_consult_local_worker_chain()** (7 connections) — `cli/tests/test_backend_cloud.py`
@@ -28,23 +29,22 @@
 - **test_variant_gate_reuses_the_one_stamp_read()** (6 connections) — `cli/tests/test_backend_cloud.py`
 - **test_variant_print_suppressed_by_quiet()** (6 connections) — `cli/tests/test_backend_cloud.py`
 - **test_variant_resolution_prints_one_line_per_engine()** (6 connections) — `cli/tests/test_backend_cloud.py`
-- **_definition()** (5 connections) — `cli/tests/test_backend_cloud.py`
-- *... and 73 more nodes in this community*
+- *... and 77 more nodes in this community*
 
 ## Relationships
 
-- [CLI Main Flow Tests](CLI_Main_Flow_Tests.md) (50 shared connections)
-- [Cloud Status Artifacts](Cloud_Status_Artifacts.md) (5 shared connections)
+- [CLI Plan Command Behavior](CLI_Plan_Command_Behavior.md) (52 shared connections)
+- [Cloud Status Command](Cloud_Status_Command.md) (5 shared connections)
 - [Fake S3 Client](Fake_S3_Client.md) (2 shared connections)
-- [Cloud Boto3 Guards & EventLog](Cloud_Boto3_Guards_%26_EventLog.md) (1 shared connections)
-- [Deploy CLI Shell](Deploy_CLI_Shell.md) (1 shared connections)
-- [CLI Command Entry Points](CLI_Command_Entry_Points.md) (1 shared connections)
+- [CLI Entry Wiring Tests](CLI_Entry_Wiring_Tests.md) (2 shared connections)
+- [Run State Rendering](Run_State_Rendering.md) (1 shared connections)
+- [Deploy Command Frontend](Deploy_Command_Frontend.md) (1 shared connections)
+- [CLI Command Dispatch](CLI_Command_Dispatch.md) (1 shared connections)
 - [Fake DynamoDB Table](Fake_DynamoDB_Table.md) (1 shared connections)
 - [Backend CDK Stack](Backend_CDK_Stack.md) (1 shared connections)
-- [CLI Run Command Tests](CLI_Run_Command_Tests.md) (1 shared connections)
-- [Submit & Tunnel CLI Tests](Submit_%26_Tunnel_CLI_Tests.md) (1 shared connections)
-- [CLI Parser Construction](CLI_Parser_Construction.md) (1 shared connections)
-- [Runtime Composition Root](Runtime_Composition_Root.md) (1 shared connections)
+- [Submit & Tunnel CLI Wiring](Submit_%26_Tunnel_CLI_Wiring.md) (1 shared connections)
+- [CLI Parser Assembly](CLI_Parser_Assembly.md) (1 shared connections)
+- [SSM Paths & Composition Root](SSM_Paths_%26_Composition_Root.md) (1 shared connections)
 
 ## Source Files
 
@@ -52,8 +52,8 @@
 
 ## Audit Trail
 
-- EXTRACTED: 294 (99%)
-- INFERRED: 4 (1%)
+- EXTRACTED: 305 (98%)
+- INFERRED: 5 (2%)
 - AMBIGUOUS: 0 (0%)
 
 ---

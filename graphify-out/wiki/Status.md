@@ -1,8 +1,8 @@
 # Status
 
-> God node · 105 connections · `core/gherkai_core/model.py`
+> God node · 106 connections · `core/gherkai_core/model.py`
 
-**Community:** [Cloud Boto3 Guards & EventLog](Cloud_Boto3_Guards_%26_EventLog.md)
+**Community:** [Run State Rendering](Run_State_Rendering.md)
 
 ## Connections by Relation
 
@@ -24,27 +24,27 @@
 - test_stores.py `EXTRACTED`
 - test_lifecycle_states.py `EXTRACTED`
 - serialize.py `EXTRACTED`
+- test_conditional_writes.py `EXTRACTED`
 - project.py `EXTRACTED`
 - test_cloud_reconcile.py `EXTRACTED`
 - test_report_store.py `EXTRACTED`
 - wire.py `EXTRACTED`
-- test_conditional_writes.py `EXTRACTED`
 - test_reconcile.py `EXTRACTED`
 - test_wire.py `EXTRACTED`
 - test_subprocess_engine.py `EXTRACTED`
+- ports.py `EXTRACTED`
 - schedule.py `EXTRACTED`
 - test_cloud_integration.py `EXTRACTED`
 - test_persist.py `EXTRACTED`
 - run_store/local.py `EXTRACTED`
 - test_ddb_run_store.py `EXTRACTED`
-- test_arg_offload.py `EXTRACTED`
 
 ### inherits
 - Enum `EXTRACTED`
 - str `EXTRACTED`
 
 ### rationale_for
-- 判定态（ADR 0024 三态）+ core 派生态/前置态（ADR 0031）。 worker 经 wire… `EXTRACTED`
+- 判定状态（ADR 0024 三态）+ core 派生态/前置态（ADR 0031）。 worker 经 wire… `EXTRACTED`
 
 ### references
 - _aggregate() `EXTRACTED`
@@ -70,15 +70,15 @@
 - DynamoDBRunStore `INFERRED`
 - EventRecord `INFERRED`
 - RunStore `INFERRED`
-- TaskExited `INFERRED`
 - RunPersistence `INFERRED`
+- TaskExited `INFERRED`
 - ResultStore `INFERRED`
 - _IncClock `INFERRED`
-- Timing `INFERRED`
 - _FakeEcs `INFERRED`
+- Timing `INFERRED`
+- Aws `INFERRED`
 - Engine `INFERRED`
 - ReportStore `INFERRED`
-- Aws `INFERRED`
 - Action `INFERRED`
 - NonTerminalSnapshot `INFERRED`
 - _Worker `INFERRED`

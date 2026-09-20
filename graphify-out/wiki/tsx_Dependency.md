@@ -1,4 +1,4 @@
-# TSX Dependency
+# tsx Dependency
 
 > 2 nodes · cohesion 1.00
 
@@ -9,7 +9,7 @@
 
 ## Relationships
 
-- [Node Dependencies](Node_Dependencies.md) (1 shared connections)
+- [NPM Dependencies](NPM_Dependencies.md) (1 shared connections)
 
 ## Source Files
 

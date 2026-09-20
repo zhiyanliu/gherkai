@@ -1,14 +1,13 @@
 # Backend CDK Stack
 
-> 39 nodes · cohesion 0.08
+> 37 nodes · cohesion 0.09
 
 ## Key Concepts
 
 - **BackendStack** (26 connections) — `deploy_aws/gherkai_deploy_aws/stack.py`
-- **ValueError** (20 connections)
+- **ValueError** (21 connections)
 - **.__init__()** (11 connections) — `deploy_aws/gherkai_deploy_aws/stack.py`
 - **._reconcile_lambdas()** (7 connections) — `deploy_aws/gherkai_deploy_aws/stack.py`
-- **._installed_import_source()** (5 connections) — `deploy_aws/gherkai_deploy_aws/stack.py`
 - **._worker_subnet_ids()** (5 connections) — `deploy_aws/gherkai_deploy_aws/stack.py`
 - **IVpc** (5 connections)
 - **._build_lambda_asset()** (4 connections) — `deploy_aws/gherkai_deploy_aws/stack.py`
@@ -23,39 +22,41 @@
 - **._advancer_function()** (3 connections) — `deploy_aws/gherkai_deploy_aws/stack.py`
 - **._ssm_deployment_stamp()** (3 connections) — `deploy_aws/gherkai_deploy_aws/stack.py`
 - **._task_definitions()** (3 connections) — `deploy_aws/gherkai_deploy_aws/stack.py`
-- **.from_env()** (3 connections) — `engines/novaact/gherkai_worker_novaact/lib/event_sink.py`
+- **test_value_error_not_transient()** (3 connections) — `engines/novaact/tests/test_transient_network.py`
 - **._storage()** (2 connections) — `deploy_aws/gherkai_deploy_aws/stack.py`
 - **._worker_sg_id()** (2 connections) — `deploy_aws/gherkai_deploy_aws/stack.py`
+- **test_version_context_is_required()** (2 connections) — `deploy_aws/tests/test_stack.py`
 - **Role** (2 connections)
 - **Cluster** (1 connections)
 - **Construct** (1 connections)
-- *... and 14 more nodes in this community*
+- *... and 12 more nodes in this community*
 
 ## Relationships
 
-- [CDK App & AWS Provider CLI](CDK_App_%26_AWS_Provider_CLI.md) (4 shared connections)
-- [Lambda Asset Build Tests](Lambda_Asset_Build_Tests.md) (4 shared connections)
+- [Lambda Asset Build](Lambda_Asset_Build.md) (5 shared connections)
+- [CDK App & Backend Stack](CDK_App_%26_Backend_Stack.md) (3 shared connections)
+- [SSM Paths & Composition Root](SSM_Paths_%26_Composition_Root.md) (3 shared connections)
 - [CDK Stack Synth Tests](CDK_Stack_Synth_Tests.md) (2 shared connections)
-- [Cloud Target & Worker Resolution](Cloud_Target_%26_Worker_Resolution.md) (2 shared connections)
-- [Runtime Composition Root](Runtime_Composition_Root.md) (2 shared connections)
-- [Step Execution & Error Classification](Step_Execution_%26_Error_Classification.md) (2 shared connections)
-- [Worker IO Edge Components](Worker_IO_Edge_Components.md) (1 shared connections)
-- [Scope Parsing & Plan Errors](Scope_Parsing_%26_Plan_Errors.md) (1 shared connections)
+- [Transient Network Detection](Transient_Network_Detection.md) (2 shared connections)
+- [Worker Locator & AWS Resolution](Worker_Locator_%26_AWS_Resolution.md) (2 shared connections)
+- [Provider Deploy Subverbs](Provider_Deploy_Subverbs.md) (2 shared connections)
+- [Step Dispatch & Voting](Step_Dispatch_%26_Voting.md) (2 shared connections)
+- [Scope Tag Resolution](Scope_Tag_Resolution.md) (1 shared connections)
 - [Cloud Backend CLI Tests](Cloud_Backend_CLI_Tests.md) (1 shared connections)
-- [Schedule Core & Fakes](Schedule_Core_%26_Fakes.md) (1 shared connections)
-- [Cloud Boto3 Guards & EventLog](Cloud_Boto3_Guards_%26_EventLog.md) (1 shared connections)
-- [VPC State & Deploy Flow](VPC_State_%26_Deploy_Flow.md) (1 shared connections)
+- [Run Scheduling Core](Run_Scheduling_Core.md) (1 shared connections)
+- [Wire Protocol Serialization](Wire_Protocol_Serialization.md) (1 shared connections)
 
 ## Source Files
 
 - `deploy_aws/gherkai_deploy_aws/stack.py`
-- `engines/novaact/gherkai_worker_novaact/lib/event_sink.py`
+- `deploy_aws/tests/test_stack.py`
+- `engines/novaact/tests/test_transient_network.py`
 - `runtime/gherkai_runtime/compose.py`
 
 ## Audit Trail
 
-- EXTRACTED: 70 (79%)
-- INFERRED: 19 (21%)
+- EXTRACTED: 68 (77%)
+- INFERRED: 20 (23%)
 - AMBIGUOUS: 0 (0%)
 
 ---

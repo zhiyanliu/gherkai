@@ -2,7 +2,7 @@
 
 > God node · 119 connections · `core/gherkai_core/model.py`
 
-**Community:** [Job Explain & S3 Offload](Job_Explain_%26_S3_Offload.md)
+**Community:** [Run Metadata & S3 Offload](Run_Metadata_%26_S3_Offload.md)
 
 ## Connections by Relation
 
@@ -14,11 +14,11 @@
 - _timeout_built() `EXTRACTED`
 - _setup() `EXTRACTED`
 - _seed_finished_run() `EXTRACTED`
+- _seed_for_build() `EXTRACTED`
 - test_report_still_written_when_the_run_duration_read_fails() `EXTRACTED`
 - test_run_state_timestamps_share_one_format() `EXTRACTED`
 - test_offload_unblocks_oversized_docstring_real() `EXTRACTED`
 - test_report_still_written_when_the_run_duration_read_fails() `EXTRACTED`
-- _seed_for_build() `EXTRACTED`
 - _sample_run() `EXTRACTED`
 - test_offload_round_trip_real() `EXTRACTED`
 - test_build_wires_arg_offloader_so_step_argument_bodies_read_back() `EXTRACTED`
@@ -36,19 +36,19 @@
 - test_project.py `EXTRACTED`
 - test_stores.py `EXTRACTED`
 - serialize.py `EXTRACTED`
+- test_conditional_writes.py `EXTRACTED`
 - project.py `EXTRACTED`
 - test_cloud_reconcile.py `EXTRACTED`
 - test_report_store.py `EXTRACTED`
-- test_conditional_writes.py `EXTRACTED`
 - test_reconcile.py `EXTRACTED`
 - test_subprocess_engine.py `EXTRACTED`
+- ports.py `EXTRACTED`
 - schedule.py `EXTRACTED`
 - test_cloud_integration.py `EXTRACTED`
 - test_persist.py `EXTRACTED`
 - run_store/local.py `EXTRACTED`
 - test_ddb_run_store.py `EXTRACTED`
 - test_arg_offload.py `EXTRACTED`
-- ports.py `EXTRACTED`
 - test_sqlite_event_log.py `EXTRACTED`
 - run_store/ddb.py `EXTRACTED`
 - reconcile.py `EXTRACTED`
@@ -84,12 +84,12 @@
 - DynamoDBRunStore `INFERRED`
 - EventRecord `INFERRED`
 - RunStore `INFERRED`
-- TaskExited `INFERRED`
 - RunPersistence `INFERRED`
+- TaskExited `INFERRED`
 - ResultStore `INFERRED`
 - _IncClock `INFERRED`
-- Timing `INFERRED`
 - _FakeEcs `INFERRED`
+- Timing `INFERRED`
 - Engine `INFERRED`
 - ReportStore `INFERRED`
 - Action `INFERRED`
@@ -97,8 +97,8 @@
 - _Worker `INFERRED`
 - FakeLauncher `INFERRED`
 - _FakeSchedulerClient `INFERRED`
-- EngineResolver `INFERRED`
 - SubprocessLauncher `INFERRED`
+- EngineResolver `INFERRED`
 
 ---
 

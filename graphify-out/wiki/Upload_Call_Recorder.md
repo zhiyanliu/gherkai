@@ -7,12 +7,12 @@
 - **_Calls** (6 connections) — `engines/novaact/tests/test_artifact_upload.py`
 - **.__init__()** (1 connections) — `engines/novaact/tests/test_artifact_upload.py`
 - **list** (1 connections)
-- **upload_file 调用记录：list 元素 = (local, bucket, key)，`extra_by_key` 另记 ExtraArgs。** (1 connections) — `engines/novaact/tests/test_artifact_upload.py`
+- **upload_file 调用记录：list 元素是 (local, bucket, key)，`extra_by_key` 另记 ExtraArgs。** (1 connections) — `engines/novaact/tests/test_artifact_upload.py`
 
 ## Relationships
 
 - [Artifact Upload Tests](Artifact_Upload_Tests.md) (2 shared connections)
-- [Artifact Uploader (Python)](Artifact_Uploader_%28Python%29.md) (1 shared connections)
+- [Python Artifact Uploader](Python_Artifact_Uploader.md) (1 shared connections)
 
 ## Source Files
 

@@ -1,10 +1,10 @@
 # Evidence Schema (TS)
 
-> 33 nodes · cohesion 0.09
+> 34 nodes · cohesion 0.09
 
 ## Key Concepts
 
-- **evidence.mts** (30 connections) — `engines/midscene/src/worker/evidence.mts`
+- **evidence.mts** (31 connections) — `engines/midscene/src/worker/evidence.mts`
 - **buildEvidence()** (9 connections) — `engines/midscene/src/worker/evidence.mts`
 - **stepEvidenceRef()** (5 connections) — `engines/midscene/src/worker/evidence.mts`
 - **EvidenceUploader** (4 connections) — `engines/midscene/src/worker/evidence.mts`
@@ -23,17 +23,17 @@
 - **screenshotsDir()** (2 connections) — `engines/midscene/src/worker/evidence.mts`
 - **url()** (2 connections) — `engines/midscene/src/worker/evidence.mts`
 - **BuildEvidenceInput** (1 connections) — `engines/midscene/src/worker/evidence.mts`
+- **ENGINE** (1 connections) — `engines/midscene/src/worker/evidence.mts`
 - **EVIDENCE_KIND** (1 connections) — `engines/midscene/src/worker/evidence.mts`
 - **EVIDENCE_SCHEMA_VERSION** (1 connections) — `engines/midscene/src/worker/evidence.mts`
 - **EvidenceAct** (1 connections) — `engines/midscene/src/worker/evidence.mts`
 - **EvidenceDoc** (1 connections) — `engines/midscene/src/worker/evidence.mts`
 - **EvidenceFrame** (1 connections) — `engines/midscene/src/worker/evidence.mts`
-- **EvidenceHook** (1 connections) — `engines/midscene/src/worker/evidence.mts`
-- *... and 8 more nodes in this community*
+- *... and 9 more nodes in this community*
 
 ## Relationships
 
-- [Artifact Upload & Error Text](Artifact_Upload_%26_Error_Text.md) (1 shared connections)
+- [Artifact Upload Tests (TS)](Artifact_Upload_Tests_%28TS%29.md) (1 shared connections)
 
 ## Source Files
 
@@ -41,7 +41,7 @@
 
 ## Audit Trail
 
-- EXTRACTED: 50 (98%)
+- EXTRACTED: 51 (98%)
 - INFERRED: 1 (2%)
 - AMBIGUOUS: 0 (0%)
 

@@ -11,7 +11,7 @@
 
 ## Relationships
 
-- [Midscene Worker Package Manifest](Midscene_Worker_Package_Manifest.md) (1 shared connections)
+- [Worker Package Manifest](Worker_Package_Manifest.md) (1 shared connections)
 
 ## Source Files
 

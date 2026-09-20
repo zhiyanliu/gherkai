@@ -1,11 +1,12 @@
 # Interrupt & Termination Model
 
-> 48 nodes · cohesion 0.06
+> 49 nodes · cohesion 0.06
 
 ## Key Concepts
 
 - **test_interrupt_model.py** (26 connections) — `engines/novaact/tests/test_interrupt_model.py`
 - **_RecordNova** (13 connections) — `engines/novaact/tests/test_interrupt_model.py`
+- **_run_scenario()** (9 connections) — `engines/novaact/gherkai_worker_novaact/run_scope.py`
 - **_FakeSink** (8 connections) — `engines/novaact/tests/test_interrupt_model.py`
 - **_step()** (8 connections) — `engines/novaact/tests/test_interrupt_model.py`
 - **_emit_scenario_done_unless_stopped()** (7 connections) — `engines/novaact/gherkai_worker_novaact/run_scope.py`
@@ -20,22 +21,21 @@
 - **test_vote_loop_full_votes_then_stop_still_emits()** (4 connections) — `engines/novaact/tests/test_interrupt_model.py`
 - **test_vote_loop_stops_before_any_vote()** (4 connections) — `engines/novaact/tests/test_interrupt_model.py`
 - **test_vote_loop_stops_midway_no_bogus_verdict()** (4 connections) — `engines/novaact/tests/test_interrupt_model.py`
+- **EventSink** (4 connections)
 - **_aggregate()** (3 connections) — `engines/novaact/gherkai_worker_novaact/run_scope.py`
 - **_Meta** (3 connections) — `engines/novaact/tests/test_interrupt_model.py`
-- **_reset_stop()** (3 connections) — `engines/novaact/tests/test_interrupt_model.py`
 - **test_on_signal_does_no_io_even_if_stderr_is_locked()** (3 connections) — `engines/novaact/tests/test_interrupt_model.py`
 - **.__init__()** (2 connections) — `engines/novaact/tests/test_interrupt_model.py`
 - **.act()** (2 connections) — `engines/novaact/tests/test_interrupt_model.py`
 - **.act_get()** (2 connections) — `engines/novaact/tests/test_interrupt_model.py`
 - **test_backoff_interrupted_times_out_without_stop()** (2 connections) — `engines/novaact/tests/test_interrupt_model.py`
-- **test_backoff_interrupted_wakes_on_stop()** (2 connections) — `engines/novaact/tests/test_interrupt_model.py`
-- *... and 23 more nodes in this community*
+- *... and 24 more nodes in this community*
 
 ## Relationships
 
-- [Step Execution & Error Classification](Step_Execution_%26_Error_Classification.md) (9 shared connections)
-- [Nova Act Worker Package](Nova_Act_Worker_Package.md) (9 shared connections)
-- [AWS Test Fixtures](AWS_Test_Fixtures.md) (2 shared connections)
+- [Step Dispatch & Voting](Step_Dispatch_%26_Voting.md) (11 shared connections)
+- [Nova Act Worker Entry](Nova_Act_Worker_Entry.md) (11 shared connections)
+- [AWS Test Fixtures (moto)](AWS_Test_Fixtures_%28moto%29.md) (2 shared connections)
 
 ## Source Files
 
@@ -44,7 +44,7 @@
 
 ## Audit Trail
 
-- EXTRACTED: 88 (99%)
+- EXTRACTED: 95 (99%)
 - INFERRED: 1 (1%)
 - AMBIGUOUS: 0 (0%)
 

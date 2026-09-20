@@ -2,7 +2,7 @@
 
 > God node · 83 connections · `core/gherkai_core/model.py`
 
-**Community:** [S3 Result Store](S3_Result_Store.md)
+**Community:** [S3 Result Store Port](S3_Result_Store_Port.md)
 
 ## Connections by Relation
 
@@ -36,9 +36,9 @@
 - serialize.py `EXTRACTED`
 - project.py `EXTRACTED`
 - test_report_store.py `EXTRACTED`
+- ports.py `EXTRACTED`
 - schedule.py `EXTRACTED`
 - test_persist.py `EXTRACTED`
-- ports.py `EXTRACTED`
 - persist.py `EXTRACTED`
 - test_s3_result_store.py `EXTRACTED`
 - test_local_result_store_atomic.py `EXTRACTED`
@@ -51,7 +51,7 @@
 - .scope_name() `EXTRACTED`
 
 ### rationale_for
-- 单个 job(=scope) 的归约结果（数据面判定 + 持有它的 definition）。 **持有… `EXTRACTED`
+- 单个 job（即 scope）的归约结果（数据面判定 + 持有它的 definition）。 **持有… `EXTRACTED`
 
 ### references
 - job_result_from_dict() `EXTRACTED`
@@ -79,8 +79,8 @@
 - ScheduleOpts `INFERRED`
 - EventRecord `INFERRED`
 - RunStore `INFERRED`
-- TaskExited `INFERRED`
 - RunPersistence `INFERRED`
+- TaskExited `INFERRED`
 - ResultStore `INFERRED`
 - Timing `INFERRED`
 - LocalResultStore `INFERRED`

@@ -22,13 +22,13 @@
 - **step 自然语言外层若整体被引号包裹（QA 写 When "搜索 X"），剥掉外引号喂引擎。** (1 connections) — `engines/novaact/gherkai_worker_novaact/run_scope.py`
 - **单元格清洗（与 Midscene cleanCell 同一规则）：cell 内 | 与换行会破坏 markdown 表格行结构 → | 转义成…** (1 connections) — `engines/novaact/gherkai_worker_novaact/run_scope.py`
 - **把 step 的多行参数（DataTable/DocString，ADR 0024/0025）拼成附加文本，接在 step 指令后喂 AI。 -…** (1 connections) — `engines/novaact/gherkai_worker_novaact/run_scope.py`
-- **喂 AI 的完整指令 = 去引号的 step 自然语言 + （可选）多行参数（ADR 0024：text(+argument) 一起喂引擎）。** (1 connections) — `engines/novaact/gherkai_worker_novaact/run_scope.py`
+- **喂 AI 的完整指令由去引号的 step 自然语言与（可选）多行参数拼成（ADR 0024：text(+argument) 一起喂引擎）。** (1 connections) — `engines/novaact/gherkai_worker_novaact/run_scope.py`
 - **step argument（DataTable/DocString）拼接单测（ADR 0024/0025）。 验证 _argument_text /…** (1 connections) — `engines/novaact/tests/test_argument.py`
 
 ## Relationships
 
-- [Nova Act Worker Package](Nova_Act_Worker_Package.md) (6 shared connections)
-- [Step Execution & Error Classification](Step_Execution_%26_Error_Classification.md) (1 shared connections)
+- [Nova Act Worker Entry](Nova_Act_Worker_Entry.md) (6 shared connections)
+- [Step Dispatch & Voting](Step_Dispatch_%26_Voting.md) (1 shared connections)
 
 ## Source Files
 

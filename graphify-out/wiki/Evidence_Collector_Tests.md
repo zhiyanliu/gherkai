@@ -24,8 +24,8 @@
 
 ## Relationships
 
-- [Run Scope (TS Worker)](Run_Scope_%28TS_Worker%29.md) (2 shared connections)
-- [Artifact Upload & Error Text](Artifact_Upload_%26_Error_Text.md) (1 shared connections)
+- [TypeScript Worker Run Scope](TypeScript_Worker_Run_Scope.md) (2 shared connections)
+- [Artifact Upload Tests (TS)](Artifact_Upload_Tests_%28TS%29.md) (1 shared connections)
 
 ## Source Files
 

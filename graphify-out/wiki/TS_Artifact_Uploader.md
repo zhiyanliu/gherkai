@@ -25,7 +25,7 @@
 
 ## Relationships
 
-- [TS Event Sink & Upload](TS_Event_Sink_%26_Upload.md) (2 shared connections)
+- [TS Artifact & Event Sink](TS_Artifact_%26_Event_Sink.md) (2 shared connections)
 
 ## Source Files
 

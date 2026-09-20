@@ -1,8 +1,8 @@
 # Provider
 
-> God node · 89 connections · `deploy_aws/gherkai_deploy_aws/cli.py`
+> God node · 95 connections · `deploy_aws/gherkai_deploy_aws/cli.py`
 
-**Community:** [AWS Deploy Provider](AWS_Deploy_Provider.md)
+**Community:** [Deploy Provider Interface](Deploy_Provider_Interface.md)
 
 ## Connections by Relation
 
@@ -23,10 +23,10 @@
 - test_diff_invokes_cdk_with_app_output_and_context() `EXTRACTED`
 - test_missing_node_reports_cleanly_and_skips_cdk() `EXTRACTED`
 - test_refresh_context_discards_the_cache_before_running() `EXTRACTED`
+- test_vpc_absent_hint_for_existing_environment_without_record() `EXTRACTED`
+- test_vpc_absent_hint_names_the_recorded_tier_for_an_existing_environment() `EXTRACTED`
+- test_vpc_absent_parses_but_every_synthesizing_verb_exits_2() `EXTRACTED`
 - _parse_destroy() `EXTRACTED`
-- test_cdk_returncode_is_passed_through() `EXTRACTED`
-- test_cdk_runs_in_the_work_dir_which_holds_the_generated_cdk_json() `EXTRACTED`
-- test_delete_worker_is_a_documented_placeholder() `EXTRACTED`
 
 ### contains
 - cli.py `EXTRACTED`
@@ -39,14 +39,15 @@
 - ._run_cdk() `EXTRACTED`
 - .deploy() `EXTRACTED`
 - ._guard_vpc_spec() `EXTRACTED`
-- ._resolve_target() `EXTRACTED`
+- ._resolve_target_or_report() `EXTRACTED`
 - .add_arguments() `EXTRACTED`
 - .bootstrap() `EXTRACTED`
 - .synth_only() `EXTRACTED`
 - ._toolchain_gate() `EXTRACTED`
+- ._require_vpc() `EXTRACTED`
+- ._stored_vpc_hint() `EXTRACTED`
 - ._resolve_version() `EXTRACTED`
 - ._add_worker_subverbs() `EXTRACTED`
-- ._require_vpc() `EXTRACTED`
 - .build_context() `EXTRACTED`
 - ._add_container_engine_flag() `EXTRACTED`
 - .diff() `EXTRACTED`
@@ -55,7 +56,6 @@
 - ._container_engine() `EXTRACTED`
 - ._worker_image_steps() `EXTRACTED`
 - .write_cdk_json() `EXTRACTED`
-- ._work_dir() `EXTRACTED`
 
 ### rationale_for
 - AWS provider——`gherkai deploy` 族命令在 AWS 上的实现（接缝契约见模块头）。 `EXTRACTED`

@@ -1,6 +1,6 @@
 # RunState
 
-> God node · 125 connections · `core/gherkai_core/model.py`
+> God node · 127 connections · `core/gherkai_core/model.py`
 
 **Community:** [Run State Rendering](Run_State_Rendering.md)
 
@@ -14,11 +14,11 @@
 - _setup() `EXTRACTED`
 - test_explain_cloud_reads_evidence_from_s3() `EXTRACTED`
 - _seed_finished_run() `EXTRACTED`
+- _seed_for_build() `EXTRACTED`
 - test_report_still_written_when_the_run_duration_read_fails() `EXTRACTED`
 - test_run_state_timestamps_share_one_format() `EXTRACTED`
 - test_offload_unblocks_oversized_docstring_real() `EXTRACTED`
 - test_report_still_written_when_the_run_duration_read_fails() `EXTRACTED`
-- _seed_for_build() `EXTRACTED`
 - test_offload_round_trip_real() `EXTRACTED`
 - test_finalize_writes_verdicts_before_commit_point() `EXTRACTED`
 - test_build_wires_arg_offloader_so_step_argument_bodies_read_back() `EXTRACTED`
@@ -35,15 +35,15 @@
 - test_project.py `EXTRACTED`
 - test_stores.py `EXTRACTED`
 - serialize.py `EXTRACTED`
+- test_conditional_writes.py `EXTRACTED`
 - project.py `EXTRACTED`
 - test_cloud_reconcile.py `EXTRACTED`
-- test_conditional_writes.py `EXTRACTED`
 - test_reconcile.py `EXTRACTED`
+- ports.py `EXTRACTED`
 - test_cloud_integration.py `EXTRACTED`
 - run_store/local.py `EXTRACTED`
 - test_ddb_run_store.py `EXTRACTED`
 - test_arg_offload.py `EXTRACTED`
-- ports.py `EXTRACTED`
 - run_store/ddb.py `EXTRACTED`
 - persist.py `EXTRACTED`
 - test_local_run_store_atomic.py `EXTRACTED`
@@ -78,11 +78,11 @@
 - DynamoDBRunStore `INFERRED`
 - EventRecord `INFERRED`
 - RunStore `INFERRED`
-- TaskExited `INFERRED`
 - RunPersistence `INFERRED`
+- TaskExited `INFERRED`
 - ResultStore `INFERRED`
-- Timing `INFERRED`
 - _FakeEcs `INFERRED`
+- Timing `INFERRED`
 - Engine `INFERRED`
 - ReportStore `INFERRED`
 - Action `INFERRED`

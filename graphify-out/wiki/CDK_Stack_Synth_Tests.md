@@ -1,10 +1,10 @@
 # CDK Stack Synth Tests
 
-> 64 nodes · cohesion 0.06
+> 61 nodes · cohesion 0.06
 
 ## Key Concepts
 
-- **test_stack.py** (57 connections) — `deploy_aws/tests/test_stack.py`
+- **test_stack.py** (58 connections) — `deploy_aws/tests/test_stack.py`
 - **make_template()** (50 connections) — `deploy_aws/tests/synth_fixture.py`
 - **_ssm_params()** (10 connections) — `deploy_aws/tests/test_stack.py`
 - **test_ssm_parameter_set_is_exactly_six()** (4 connections) — `deploy_aws/tests/test_stack.py`
@@ -14,7 +14,6 @@
 - **test_ecr_repos_have_no_lifecycle_rules_and_are_retained()** (3 connections) — `deploy_aws/tests/test_stack.py`
 - **test_events_stream_mapping_filters_out_ttl_removes()** (3 connections) — `deploy_aws/tests/test_stack.py`
 - **test_events_table_has_no_gsi()** (3 connections) — `deploy_aws/tests/test_stack.py`
-- **test_exit_observer_can_only_putitem_on_events_table()** (3 connections) — `deploy_aws/tests/test_stack.py`
 - **test_exit_observer_can_read_runs_table_only()** (3 connections) — `deploy_aws/tests/test_stack.py`
 - **test_prefix_switches_whole_set()** (3 connections) — `deploy_aws/tests/test_stack.py`
 - **test_reconcile_lambdas_share_per_run_concurrency_cap()** (3 connections) — `deploy_aws/tests/test_stack.py`
@@ -29,16 +28,17 @@
 - **test_ecs_stopped_eventbridge_rule()** (2 connections) — `deploy_aws/tests/test_stack.py`
 - **test_events_table_has_stream()** (2 connections) — `deploy_aws/tests/test_stack.py`
 - **test_events_table_seq_is_number_type()** (2 connections) — `deploy_aws/tests/test_stack.py`
-- *... and 39 more nodes in this community*
+- **test_execution_role_and_two_task_roles()** (2 connections) — `deploy_aws/tests/test_stack.py`
+- *... and 36 more nodes in this community*
 
 ## Relationships
 
-- [Advancer Permission Parity](Advancer_Permission_Parity.md) (4 shared connections)
-- [CDK App & AWS Provider CLI](CDK_App_%26_AWS_Provider_CLI.md) (4 shared connections)
+- [Advancer IAM Permissions](Advancer_IAM_Permissions.md) (8 shared connections)
+- [Lambda Asset Build](Lambda_Asset_Build.md) (3 shared connections)
 - [Worker Subnet Selection](Worker_Subnet_Selection.md) (3 shared connections)
 - [Backend CDK Stack](Backend_CDK_Stack.md) (2 shared connections)
-- [Lambda Asset Build Tests](Lambda_Asset_Build_Tests.md) (1 shared connections)
-- [Model ID Cross-Language Contract](Model_ID_Cross-Language_Contract.md) (1 shared connections)
+- [CDK App & Backend Stack](CDK_App_%26_Backend_Stack.md) (1 shared connections)
+- [Deploy CLI Doctor Checks](Deploy_CLI_Doctor_Checks.md) (1 shared connections)
 
 ## Source Files
 
@@ -47,7 +47,7 @@
 
 ## Audit Trail
 
-- EXTRACTED: 129 (100%)
+- EXTRACTED: 128 (100%)
 - INFERRED: 0 (0%)
 - AMBIGUOUS: 0 (0%)
 

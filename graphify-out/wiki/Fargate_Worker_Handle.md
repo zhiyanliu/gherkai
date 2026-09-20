@@ -1,44 +1,36 @@
 # Fargate Worker Handle
 
-> 24 nodes · cohesion 0.09
+> 14 nodes · cohesion 0.16
 
 ## Key Concepts
 
-- **_MissingThenStoppedEcs** (17 connections) — `core/tests/test_fargate_engine.py`
-- **_RoundsTable** (16 connections) — `core/tests/test_fargate_engine.py`
-- **_FakeEcs** (15 connections) — `core/tests/test_fargate_engine.py`
 - **_SeqEcs** (15 connections) — `core/tests/test_fargate_engine.py`
 - **FargateWorkerHandle** (12 connections) — `core/gherkai_core/adapters/fargate_engine.py`
-- **test_read_events_transient_missing_then_events_and_stopped()** (6 connections) — `core/tests/test_fargate_engine.py`
-- **test_read_events_persistent_missing_task_raises_after_grace()** (5 connections) — `core/tests/test_fargate_engine.py`
+- **_await_engine()** (6 connections) — `core/tests/test_fargate_engine.py`
+- **_stopped_resp()** (4 connections) — `core/tests/test_fargate_engine.py`
+- **test_await_exit_code_null_beyond_grace_settles_as_error()** (3 connections) — `core/tests/test_fargate_engine.py`
+- **test_await_exit_code_null_then_nonzero_landed_preserved()** (3 connections) — `core/tests/test_fargate_engine.py`
+- **test_await_exit_code_waits_out_null_then_reads_landed_code()** (3 connections) — `core/tests/test_fargate_engine.py`
 - **.stop()** (2 connections) — `core/gherkai_core/adapters/fargate_engine.py`
 - **.__init__()** (1 connections) — `core/gherkai_core/adapters/fargate_engine.py`
-- **一个在跑的 Fargate task 的句柄。stop() 翻成 StopTask（ADR 0026 机制层，对称…** (1 connections) — `core/gherkai_core/adapters/fargate_engine.py`
-- **请求优雅停止 = StopTask。 **grace_period_s 在 Fargate 上无法逐次传**（ADR 0024/0032）：容器…** (1 connections) — `core/gherkai_core/adapters/fargate_engine.py`
-- **.describe_tasks()** (1 connections) — `core/tests/test_fargate_engine.py`
-- **.__init__()** (1 connections) — `core/tests/test_fargate_engine.py`
-- **.describe_tasks()** (1 connections) — `core/tests/test_fargate_engine.py`
-- **.__init__()** (1 connections) — `core/tests/test_fargate_engine.py`
-- **构造 describe_tasks 响应的假 ecs client（moto exitCode 恒 0、lastStatus 由 describe…** (1 connections) — `core/tests/test_fargate_engine.py`
+- **一个正在运行的 Fargate task 的句柄。stop() 翻成 StopTask（ADR 0026 机制层，对称…** (1 connections) — `core/gherkai_core/adapters/fargate_engine.py`
+- **请求优雅停止即调 StopTask。 **grace_period_s 在 Fargate 上无法逐次传**（ADR 0024/0032）：容器…** (1 connections) — `core/gherkai_core/adapters/fargate_engine.py`
 - **按序返回 describe_tasks 响应的假 ecs（模拟 STOPPED 翻转后 exitCode 落值时序）。** (1 connections) — `core/tests/test_fargate_engine.py`
-- **前 missing_calls 次 describe → MISSING，之后 STOPPED exit 0。** (1 connections) — `core/tests/test_fargate_engine.py`
-- **无事件 + DescribeTasks 恒 MISSING → 连续超过宽限即抛可归因 RuntimeError（曾把空 tasks 当「未…** (1 connections) — `core/tests/test_fargate_engine.py`
-- **瞬时 MISSING（ECS 最终一致）→ 宽限内恢复 → 事件照常读、scope_done 后读到 exit 0，不误报。** (1 connections) — `core/tests/test_fargate_engine.py`
-- **.__init__()** (1 connections) — `core/tests/test_fargate_engine.py`
-- **.query()** (1 connections) — `core/tests/test_fargate_engine.py`
 - **.describe_tasks()** (1 connections) — `core/tests/test_fargate_engine.py`
 - **.__init__()** (1 connections) — `core/tests/test_fargate_engine.py`
 
 ## Relationships
 
-- [Job Explain & S3 Offload](Job_Explain_%26_S3_Offload.md) (13 shared connections)
-- [Fargate Engine Tests](Fargate_Engine_Tests.md) (9 shared connections)
-- [Event Formatting](Event_Formatting.md) (9 shared connections)
-- [Fargate Engine](Fargate_Engine.md) (5 shared connections)
-- [Cloud Boto3 Guards & EventLog](Cloud_Boto3_Guards_%26_EventLog.md) (5 shared connections)
-- [Event Gap Reading Tests](Event_Gap_Reading_Tests.md) (5 shared connections)
-- [Typed Errors & Severity](Typed_Errors_%26_Severity.md) (4 shared connections)
-- [Run State Projection](Run_State_Projection.md) (4 shared connections)
+- [Fargate Engine Tests](Fargate_Engine_Tests.md) (7 shared connections)
+- [Run Metadata & S3 Offload](Run_Metadata_%26_S3_Offload.md) (4 shared connections)
+- [Fargate Engine Adapter](Fargate_Engine_Adapter.md) (3 shared connections)
+- [Event Progress Formatting](Event_Progress_Formatting.md) (3 shared connections)
+- [Fargate Event Read Tests](Fargate_Event_Read_Tests.md) (2 shared connections)
+- [DynamoDB Event Log](DynamoDB_Event_Log.md) (1 shared connections)
+- [ECS Task Probe Tests](ECS_Task_Probe_Tests.md) (1 shared connections)
+- [Core Typed Errors](Core_Typed_Errors.md) (1 shared connections)
+- [Event Log & Projection](Event_Log_%26_Projection.md) (1 shared connections)
+- [Run State Rendering](Run_State_Rendering.md) (1 shared connections)
 
 ## Source Files
 
@@ -47,8 +39,8 @@
 
 ## Audit Trail
 
-- EXTRACTED: 37 (47%)
-- INFERRED: 42 (53%)
+- EXTRACTED: 24 (62%)
+- INFERRED: 15 (38%)
 - AMBIGUOUS: 0 (0%)
 
 ---

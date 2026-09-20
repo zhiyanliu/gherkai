@@ -2,7 +2,7 @@
 
 > God node · 134 connections · `core/gherkai_core/model.py`
 
-**Community:** [Job Explain & S3 Offload](Job_Explain_%26_S3_Offload.md)
+**Community:** [Run Metadata & S3 Offload](Run_Metadata_%26_S3_Offload.md)
 
 ## Connections by Relation
 
@@ -38,23 +38,23 @@
 - test_stores.py `EXTRACTED`
 - test_lifecycle_states.py `EXTRACTED`
 - serialize.py `EXTRACTED`
+- test_conditional_writes.py `EXTRACTED`
 - project.py `EXTRACTED`
 - test_cloud_reconcile.py `EXTRACTED`
 - test_report_store.py `EXTRACTED`
 - wire.py `EXTRACTED`
-- test_conditional_writes.py `EXTRACTED`
 - test_reconcile.py `EXTRACTED`
 - test_wire.py `EXTRACTED`
 - test_subprocess_engine.py `EXTRACTED`
+- ports.py `EXTRACTED`
 - schedule.py `EXTRACTED`
 - test_cloud_integration.py `EXTRACTED`
 - test_persist.py `EXTRACTED`
 - test_ddb_run_store.py `EXTRACTED`
 - test_arg_offload.py `EXTRACTED`
-- ports.py `EXTRACTED`
 
 ### rationale_for
-- 一个 job = 一个 scope = 一个会话边界 = schedule 交给单个 worker 的活（ADR 0016/0024/0025）。 `EXTRACTED`
+- 一个 job 就是一个 scope、一个会话边界，也就是 schedule 交给单个 worker 的活（ADR 0016/0024/0025）。 `EXTRACTED`
 
 ### uses
 - CollectSink `INFERRED`
@@ -68,8 +68,8 @@
 - TaskExited `INFERRED`
 - ResultStore `INFERRED`
 - _IncClock `INFERRED`
-- Timing `INFERRED`
 - _FakeEcs `INFERRED`
+- Timing `INFERRED`
 - Engine `INFERRED`
 - ReportStore `INFERRED`
 - SubprocessEngine `INFERRED`

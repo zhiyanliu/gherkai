@@ -20,7 +20,7 @@
 - **.__init__()** (1 connections) — `deploy_aws/gherkai_deploy_aws/lambdas/reconciler.py`
 - **reconciler Lambda（ADR 0034）：DDB events 表 Stream 变化 → reconcile.tick 推进一步。…** (1 connections) — `deploy_aws/gherkai_deploy_aws/lambdas/reconciler.py`
 - **job timeout 的云端到点触发器（ADR 0034「job timeout」节）：CloudLauncher 起 task 后 arm 一个…** (1 connections) — `deploy_aws/gherkai_deploy_aws/lambdas/reconciler.py`
-- **超时处置（ADR 0034「job timeout」节 cloud 档）：仍 running 才动手——ListTasks(startedBy=run_id)…** (1 connections) — `deploy_aws/gherkai_deploy_aws/lambdas/reconciler.py`
+- **超时处置（ADR 0034「job timeout」节的云端后端一侧）：仍 running 才动手——ListTasks(startedBy=run_id)…** (1 connections) — `deploy_aws/gherkai_deploy_aws/lambdas/reconciler.py`
 - **防御性超时扫（ADR 0034「job timeout」节 claimed_at ②，Scheduler 的双保险）：任何 tick 顺带对 RUNNING…** (1 connections) — `deploy_aws/gherkai_deploy_aws/lambdas/reconciler.py`
 - **本 run 各引擎的 worker task-def **revision ARN**（ADR 0038「读侧兼容口径」）。 ① definition 带…** (1 connections) — `deploy_aws/gherkai_deploy_aws/lambdas/reconciler.py`
 - **cloud 组合根：读 env 造 boto3 + 装配（RunStore/EventLog/CloudLauncher +…** (1 connections) — `deploy_aws/gherkai_deploy_aws/lambdas/reconciler.py`
@@ -32,12 +32,13 @@
 
 ## Relationships
 
-- [Reconciler Ports](Reconciler_Ports.md) (5 shared connections)
-- [Cloud Job Launcher](Cloud_Job_Launcher.md) (3 shared connections)
-- [ECS Exit Observer Lambda](ECS_Exit_Observer_Lambda.md) (2 shared connections)
+- [Reconcile Orchestration](Reconcile_Orchestration.md) (5 shared connections)
+- [Exit Observer Lambda](Exit_Observer_Lambda.md) (2 shared connections)
+- [Cloud Launcher](Cloud_Launcher.md) (2 shared connections)
 - [Lambda Handler Tests](Lambda_Handler_Tests.md) (1 shared connections)
-- [Cloud Boto3 Guards & EventLog](Cloud_Boto3_Guards_%26_EventLog.md) (1 shared connections)
-- [Runtime Composition Root](Runtime_Composition_Root.md) (1 shared connections)
+- [DynamoDB Event Log](DynamoDB_Event_Log.md) (1 shared connections)
+- [Run State Rendering](Run_State_Rendering.md) (1 shared connections)
+- [SSM Paths & Composition Root](SSM_Paths_%26_Composition_Root.md) (1 shared connections)
 
 ## Source Files
 

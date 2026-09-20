@@ -18,12 +18,12 @@
 
 ## Relationships
 
-- [Deploy Provider Tests](Deploy_Provider_Tests.md) (9 shared connections)
-- [AWS Deploy Provider](AWS_Deploy_Provider.md) (6 shared connections)
-- [CDK Bootstrap/Destroy CLI](CDK_Bootstrap-Destroy_CLI.md) (2 shared connections)
-- [CDK App & AWS Provider CLI](CDK_App_%26_AWS_Provider_CLI.md) (1 shared connections)
-- [Deploy CLI Test Doubles](Deploy_CLI_Test_Doubles.md) (1 shared connections)
-- [CloudFormation/SSM Test Doubles](CloudFormation-SSM_Test_Doubles.md) (1 shared connections)
+- [Deploy Provider Interface](Deploy_Provider_Interface.md) (13 shared connections)
+- [Provider Deploy Subverbs](Provider_Deploy_Subverbs.md) (2 shared connections)
+- [CDK Destroy/Bootstrap CLI](CDK_Destroy-Bootstrap_CLI.md) (2 shared connections)
+- [Deploy CLI Doctor Checks](Deploy_CLI_Doctor_Checks.md) (1 shared connections)
+- [CDK Invocation Tests](CDK_Invocation_Tests.md) (1 shared connections)
+- [AWS Client Stubs](AWS_Client_Stubs.md) (1 shared connections)
 
 ## Source Files
 

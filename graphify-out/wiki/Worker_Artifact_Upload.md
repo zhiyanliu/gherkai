@@ -11,8 +11,8 @@
 
 ## Relationships
 
-- [Artifact Uploader (Python)](Artifact_Uploader_%28Python%29.md) (3 shared connections)
-- [Nova Act Worker Package](Nova_Act_Worker_Package.md) (1 shared connections)
+- [Python Artifact Uploader](Python_Artifact_Uploader.md) (3 shared connections)
+- [Nova Act Worker Entry](Nova_Act_Worker_Entry.md) (1 shared connections)
 - [Artifact Upload Tests](Artifact_Upload_Tests.md) (1 shared connections)
 
 ## Source Files
