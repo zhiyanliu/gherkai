@@ -10,7 +10,7 @@
 | 文件 | 触发 | 干什么 |
 |---|---|---|
 | `ci.yml` | push 任意分支 / 所有 PR / 手动 | ① `uv sync --locked` + 根 `pytest`（全 workspace 成员，含 deploy_aws 的 CDK synth 测试）；② midscene `npm ci && npm run build && npm test`；③ `uv build --all-packages` smoke + 产物校验 + 发布 gate 演练（打本地临时 tag、不 push：版本必须逐字等于 tag） |
-| `release.yml` | push tag `v*` | gate（tag 形态 + CHANGELOG.md 有本版节 + 算出的版本与 tag 一致）→ ① PyPI → ② npm → ③ GHCR 基础镜像 → ④ GitHub Release（正文由 `.github/scripts/release_notes.py` 从 CHANGELOG.md 渲染） |
+| `release.yml` | push tag `v*` | gate（tag 形态 + CHANGELOG.md 有本版节 + 根 README 的 skill 安装命令钉本版 tag + 算出的版本与 tag 一致）→ ① PyPI → ② npm → ③ GHCR 基础镜像 → ④ GitHub Release（正文由 `.github/scripts/release_notes.py` 从 CHANGELOG.md 渲染） |
 | `pages.yml` | push 改动 `docs/diagrams/**` 或 `pages.yml` 自身（只在默认分支部署）/ 手动 | 只把 `docs/diagrams/` 原样上传 GitHub Pages（`index.html` + 已入库的可交互 HTML + SVG，不做任何构建）；Pages 的 build type 已切为 workflow，不再从分支根目录做 Jekyll 构建（ADR 0045 决策七） |
 
 发布是**一个动作**：`git tag vX.Y.Z && git push origin vX.Y.Z`。版本真源只有 git tag

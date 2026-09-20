@@ -1,4 +1,5 @@
-"""`.github/scripts/release_notes.py` 的行为护栏：gate 的「本 tag 在 CHANGELOG 里有节」与 Release 正文渲染（ADR 0045 决策五）。
+"""`.github/scripts/release_notes.py` 的行为护栏：gate 的「本 tag 在 CHANGELOG 里有节」（ADR 0045 决策五）与「README 的 skill
+安装命令钉本 tag」（ADR 0043 决策三），以及 Release 正文渲染。
 
 脚本只用标准库：发布链的 CHANGELOG gate 步用 `uv run --no-project python`（那个 job 已装 uv），Release 正文渲染步用
 runner 自带 `python3`，两条路径都不带项目依赖。这里按模块直接 import 测纯函数，再执行一次 CLI 面
@@ -77,15 +78,47 @@ def test_render_pins_links_to_the_tag():
     assert "gherkai[local]==1.4.4" in out and "@gherkai/worker-midscene@1.4.4" in out
 
 
-def test_cli_check_exit_codes(tmp_path: Path):
+SKILL_CMD = "npx skills add https://github.com/zhiyanliu/gherkai/tree/v{v}/cli/gherkai_cli/skills/gherkai -a claude-code -a codex"
+
+
+def test_skill_install_tag_problems():
+    m = _mod()
+    assert m.skill_install_tag_problems(SKILL_CMD.format(v="1.4.4"), "1.4.4", required=True) == []
+    stale = m.skill_install_tag_problems("x\n" + SKILL_CMD.format(v="1.4.3"), "1.4.4", required=True)
+    assert len(stale) == 1 and "第 2 行" in stale[0] and "v1.4.3" in stale[0] and "v1.4.4" in stale[0]
+    absent = m.skill_install_tag_problems("没有命令", "1.4.4", required=True)
+    assert len(absent) == 1 and "没有" in absent[0], "README 里丢了这条命令也要红"
+    assert m.skill_install_tag_problems("没有命令", "1.4.4", required=False) == [], "user guide 允许没有"
+    placeholder = SKILL_CMD.replace("v{v}", "v<版本>")
+    assert m.skill_install_tag_problems(placeholder, "1.4.4", required=False) == [], "占位符不是具体版本，不算"
+    fork = SKILL_CMD.format(v="1.4.4").replace("zhiyanliu/gherkai", "someone/fork")
+    assert m.skill_install_tag_problems(fork, "1.4.4", required=True) == [], "owner / repo 不写死"
+
+
+def _check(tmp_path: Path, version: str, readme_tag: str, guide_tag: str | None = None) -> subprocess.CompletedProcess[str]:
     cl = tmp_path / "CHANGELOG.md"
     cl.write_text(SAMPLE, encoding="utf-8")
-    ok = subprocess.run([sys.executable, str(SCRIPT), "check", "--version", "1.4.4", "--changelog", str(cl)],
-                        capture_output=True, text=True)
+    readme = tmp_path / "README.md"
+    readme.write_text(f"# x\n\n```bash\n{SKILL_CMD.format(v=readme_tag)}\n```\n" if readme_tag else "# x\n", encoding="utf-8")
+    guide = tmp_path / "user-guide"
+    guide.mkdir(exist_ok=True)
+    (guide / "getting-started.md").write_text(SKILL_CMD.format(v=guide_tag) if guide_tag else SKILL_CMD.replace("v{v}", "v<版本>"),
+                                              encoding="utf-8")
+    return subprocess.run([sys.executable, str(SCRIPT), "check", "--version", version, "--changelog", str(cl),
+                           "--readme", str(readme), "--user-guide", str(guide)], capture_output=True, text=True)
+
+
+def test_cli_check_exit_codes(tmp_path: Path):
+    ok = _check(tmp_path, "1.4.4", readme_tag="1.4.4")
     assert ok.returncode == 0, ok.stderr
-    bad = subprocess.run([sys.executable, str(SCRIPT), "check", "--version", "1.4.5", "--changelog", str(cl)],
-                         capture_output=True, text=True)
+    bad = _check(tmp_path, "1.4.5", readme_tag="1.4.5")
     assert bad.returncode == 1 and "::error::" in bad.stderr, "缺节必须非零退出并用 ::error:: 标注（gate 靠它红）"
+    stale = _check(tmp_path, "1.4.4", readme_tag="1.4.3")
+    assert stale.returncode == 1 and "v1.4.3" in stale.stderr and "README.md" in stale.stderr, "README 的 tag 忘了改要红"
+    missing = _check(tmp_path, "1.4.4", readme_tag="")
+    assert missing.returncode == 1 and "没有" in missing.stderr, "README 里没有这条命令要红"
+    guide_stale = _check(tmp_path, "1.4.4", readme_tag="1.4.4", guide_tag="1.4.2")
+    assert guide_stale.returncode == 1 and "getting-started.md" in guide_stale.stderr, "user guide 里带具体旧版本也要红"
 
 
 def test_repo_changelog_has_every_released_tag_and_unreleased():
@@ -103,3 +136,16 @@ def test_repo_changelog_has_every_released_tag_and_unreleased():
         except ValueError as e:
             missing.append(str(e))
     assert not missing, "已发行版本在 CHANGELOG.md 里缺节或为空：\n" + "\n".join(missing)
+
+
+def test_repo_readme_pins_skill_install_to_changelog_top_version():
+    """真 README / user guide 对照真值集：skill 安装命令钉的 tag 等于 CHANGELOG 顶部已发行版本（发版前两处同一次改）。"""
+    m = _mod()
+    changelog = (REPO / "CHANGELOG.md").read_text(encoding="utf-8")
+    released = [mt.group("version") for line in changelog.splitlines() if (mt := m.HEADING.match(line)) and mt.group("version") != "Unreleased"]
+    assert released, "CHANGELOG 里没有已发行版本节？"
+    top = released[0]
+    problems = [f"README.md：{p}" for p in m.skill_install_tag_problems((REPO / "README.md").read_text(encoding="utf-8"), top, required=True)]
+    for doc in sorted((REPO / "docs/user-guide").rglob("*.md")):
+        problems += [f"{doc.relative_to(REPO)}：{p}" for p in m.skill_install_tag_problems(doc.read_text(encoding="utf-8"), top, required=False)]
+    assert not problems, f"skill 安装命令没钉到 CHANGELOG 顶部版本 v{top}：\n" + "\n".join(problems)

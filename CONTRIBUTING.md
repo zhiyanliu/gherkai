@@ -132,7 +132,7 @@ uv run pytest core/tests -m integration          # 集成测试：假定真表/�
 | `cli/tests/test_user_facing_messages.py`       | 产品面文案不带内部指代：AST 扫五个生产包的 Python 字面量 + Midscene 的 `.mts` 源，注释与 docstring 放行                                                                                                                                                                                                            |
 | `cli/tests/test_package_readmes.py`            | 进包的 README（各包 pyproject `readme` 指向的那份 + npm `files` 里的）与各包 Summary：零内部指代 + 零相对链接；根 `README.md`：只查零内部指代（它的相对链接在 GitHub 上正常渲染，可达性由 `test_user_docs.py` 断言）；另断言每个包目录一份 `DEVELOPMENT.md`、根一份 `CONTRIBUTING.md`，以及 GitHub Release 正文的固定块     |
 | `cli/tests/test_user_docs.py`                  | 仓库内的用户文档（`docs/user-guide/**`、根 `README.md`、`CHANGELOG.md`）：零内部指代、相对链接可达、不把读者引向 contributor 侧文档（ADR / CONTEXT / CLAUDE.md / journey / ai-eng）、owner 表与目录两向差集；另守图：`docs/diagrams/` 的 JSON 图源与导出 SVG 成对、图源零内部指代、README / 本文 / `docs/**` 里不留 mermaid 块 |
-| `cli/tests/test_release_notes.py`              | `.github/scripts/release_notes.py` 两件事：「已发行 tag 在 `CHANGELOG.md` 里有非空节」的 gate 与 Release 正文渲染                                                                                                                                                                                                   |
+| `cli/tests/test_release_notes.py`              | `.github/scripts/release_notes.py` 三件事：「已发行 tag 在 `CHANGELOG.md` 里有非空节」与「根 README 的 `npx skills add` 命令钉本版 tag」两道 gate，以及 Release 正文渲染；另对照真 CHANGELOG / README                                                                                                                  |
 | `cli/tests/test_skill.py`                      | 随 wheel 发行的 agent skill：文案与指针形态、`gherkai <子命令> --flag` 组合对照 argparse 真值与「仅某命令」排他、反引号键名对照契约页、契约页转换副本相等、目录白名单与形态上限、评测 fixture 的 ignore 行为与可搬迁不变量                                                                                               |
 | `deploy_aws/tests/test_skill_deploy_tokens.py` | skill 里 `deploy` / `destroy` 那批命令 token 对照 provider 的真 parser（provider 位于 `[deploy-aws]` extra，命令行前端的测试不应强依赖它）                                                                                                                                                                          |
 
@@ -185,10 +185,10 @@ tools/graphify_refresh.sh --force    # 全量重抽（清残留节点时；费�
 **版本真源只有 git tag `vX.Y.Z`**——五个 Python 发行包、npm 包 `@gherkai/worker-midscene`、两个 worker 基础镜像同号（ADR 0037 决策 2b/7）。五个发行包的 pyproject 都写 `dynamic = ["version"]`、没有版本字段（uv-dynamic-versioning 从 tag 算；不发行的 workspace 根另写死 `0.0.0`）；`engines/midscene/package.json` 只留占位 `0.0.0-dev`，发布链在 `npm publish` 前按 tag 改写它，该行不应由人工维护。发布因此是一个动作，前提是该版的变更说明已写就：
 
 ```bash
-git tag vX.Y.Z && git push origin vX.Y.Z   # GitHub Actions 接手：gate（tag 形态 + CHANGELOG 有本版节 + 版本==tag）→ PyPI → npm → GHCR 基础镜像 → GitHub Release
+git tag vX.Y.Z && git push origin vX.Y.Z   # GitHub Actions 接手：gate（tag 形态 + CHANGELOG 有本版节 + README 的 skill 安装命令钉本版 tag + 版本==tag）→ PyPI → npm → GHCR 基础镜像 → GitHub Release
 ```
 
-发版前写 `CHANGELOG.md` 的该版节（Keep a Changelog 形态、使用者语言：小节名用 新增 / 变化 / 移除 / 修复，外加本项目自加的 升级须知）；发布 gate 校验本 tag 在 changelog 里有非空节，缺失则发版失败；GitHub Release 正文由该节加 `.github/release_body_footer.md` 的固定块组成，由 `.github/scripts/release_notes.py` 渲染（ADR 0045 决策五）。
+发版前写 `CHANGELOG.md` 的该版节（Keep a Changelog 形态、使用者语言：小节名用 新增 / 变化 / 移除 / 修复，外加本项目自加的 升级须知），并把根 `README.md` 里 `npx skills add …/tree/vX.Y.Z/…` 命令的 tag 改成本版；发布 gate 校验本 tag 在 changelog 里有非空节、README 的这条命令钉的是本版，任一不满足则发版失败（ADR 0043 决策三）；GitHub Release 正文由该节加 `.github/release_body_footer.md` 的固定块组成，由 `.github/scripts/release_notes.py` 渲染（ADR 0045 决策五）。
 
 发版后的验证中有一项需手动执行：把新版本部署到验证环境后，用 agent skill 的云端命令链（`doctor --backend cloud --prefix <前缀>` → `plan` → `submit` → `status --wait` → `explain`）在有凭证的机器上完整执行一次；云端后端这一侧是 skill 评测里唯一没被真实数据覆盖的部分（评测舞台刻意不配凭证），结论回填 ADR 0043「验证」节。同一次实际运行另需核验一项：Nova Act 的 workflow definition 名已改为产品名 `gherkai-worker`（原 spike 期代号），首次 `run --engine novaact` 须在使用方账户自动建出该名的 definition 并 run 到终态；create-if-not-exists 跨真实 AWS 边界，单测通过不构成证据（ADR 0004）。
 

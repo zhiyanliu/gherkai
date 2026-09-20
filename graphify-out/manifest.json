@@ -260,9 +260,9 @@
     "semantic_hash": "46506796a3741a0992133c3ce390e125"
   },
   "README.md": {
-    "mtime": 1789830865.233705,
-    "ast_hash": "a6422768545dade64a4b3a1d7c2072be",
-    "semantic_hash": "a6422768545dade64a4b3a1d7c2072be"
+    "mtime": 1789881500.9189827,
+    "ast_hash": "1fa149f5d52de6d02350275ae61be319",
+    "semantic_hash": ""
   },
   "cli/README.md": {
     "mtime": 1789845931.3331795,
@@ -995,9 +995,9 @@
     "semantic_hash": "7ac60700b75d8c7a06304f9a50958f34"
   },
   ".github/workflows/README.md": {
-    "mtime": 1789873461.3142548,
-    "ast_hash": "43d966110e7a00a0ffcda636ff2c372c",
-    "semantic_hash": "43d966110e7a00a0ffcda636ff2c372c"
+    "mtime": 1789881736.3162754,
+    "ast_hash": "ca778aae0e5853a761613df1e3569efa",
+    "semantic_hash": ""
   },
   ".github/workflows/ci.yml": {
     "mtime": 1789868878.1666837,
@@ -1005,9 +1005,9 @@
     "semantic_hash": "2c15740ff88481076149c17c3eafc170"
   },
   ".github/workflows/release.yml": {
-    "mtime": 1789871974.8929765,
-    "ast_hash": "31202662af8d901f435cc84ea9a104c4",
-    "semantic_hash": "31202662af8d901f435cc84ea9a104c4"
+    "mtime": 1789881736.3154194,
+    "ast_hash": "6d161401040d5850b97207fc4cb4a95e",
+    "semantic_hash": ""
   },
   "deploy_aws/tests/test_lambda_handlers.py": {
     "mtime": 1789873936.796909,
@@ -1170,9 +1170,9 @@
     "semantic_hash": "ab624bd065760f8a1b9621c9bde6cf84"
   },
   "docs/adr/0043-agent-skill-for-driving-gherkai.md": {
-    "mtime": 1789872727.3865392,
-    "ast_hash": "8ac4e023a6a691d12468eb4edcc6d362",
-    "semantic_hash": "8ac4e023a6a691d12468eb4edcc6d362"
+    "mtime": 1789881562.594386,
+    "ast_hash": "e31009017e85b86fbcbce592e43b0f41",
+    "semantic_hash": ""
   },
   "cli/gherkai_cli/skill_install.py": {
     "mtime": 1789871885.2242126,
@@ -1315,14 +1315,14 @@
     "semantic_hash": "4bdf0dc7599abb046caa2dac348ef2b1"
   },
   ".github/scripts/release_notes.py": {
-    "mtime": 1789871974.8926618,
-    "ast_hash": "e38845af13d68a89cd1edee76f5b7b3e",
-    "semantic_hash": "e38845af13d68a89cd1edee76f5b7b3e"
+    "mtime": 1789881668.1803226,
+    "ast_hash": "077e57c6ba1513ca5ab9462125a9f104",
+    "semantic_hash": ""
   },
   "cli/tests/test_release_notes.py": {
-    "mtime": 1789857112.9185474,
-    "ast_hash": "47c3617064f57fb2ff20c2fa2924f111",
-    "semantic_hash": "47c3617064f57fb2ff20c2fa2924f111"
+    "mtime": 1789881707.1795554,
+    "ast_hash": "b29d7fd7c440631a38b9b1e8f01d50a1",
+    "semantic_hash": ""
   },
   "cli/tests/test_user_docs.py": {
     "mtime": 1789871446.2158675,
@@ -1340,9 +1340,9 @@
     "semantic_hash": ""
   },
   "CONTRIBUTING.md": {
-    "mtime": 1789876012.4241521,
-    "ast_hash": "a711aa9f919f85fde865c6d3f6abfe6e",
-    "semantic_hash": "a711aa9f919f85fde865c6d3f6abfe6e"
+    "mtime": 1789881736.315972,
+    "ast_hash": "928dc8526f0b11c6915c287dc856ecb2",
+    "semantic_hash": ""
   },
   "docs/README.md": {
     "mtime": 1789831362.6666305,
@@ -1350,9 +1350,9 @@
     "semantic_hash": "92a868d9a75d55a6be99883975cbae1e"
   },
   "docs/adr/0045-documentation-layering-and-placement.md": {
-    "mtime": 1789875977.6423244,
-    "ast_hash": "af02bd495117e88f5e0215440ad56fb5",
-    "semantic_hash": "af02bd495117e88f5e0215440ad56fb5"
+    "mtime": 1789881562.5946774,
+    "ast_hash": "1ed186827e036df64126ff18fc7761ef",
+    "semantic_hash": ""
   },
   "docs/ai-eng/README.md": {
     "mtime": 1789875977.6432579,
@@ -1430,8 +1430,8 @@
     "semantic_hash": "fa215427d5fdcf279939874496185a48"
   },
   "docs/user-guide/getting-started.md": {
-    "mtime": 1789879282.7216325,
-    "ast_hash": "cab59786fd0135a035d7d06884a961ec",
+    "mtime": 1789881500.9191446,
+    "ast_hash": "789be4dc7b8c1f3904fb3a6c8f3e22bd",
     "semantic_hash": ""
   },
   "docs/user-guide/local-app-testing.md": {

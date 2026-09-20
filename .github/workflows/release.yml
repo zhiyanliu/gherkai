@@ -68,9 +68,10 @@ jobs:
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
-      - name: gate：CHANGELOG.md 里有本版本的节
+      - name: gate：CHANGELOG.md 有本版节、README 的 skill 安装命令钉本版 tag
         # 每版说明「不写发不出」（ADR 0045 决策五）：Release 正文为该节正文 + 固定装法块（.github/release_body_footer.md）。
-        # 放在 build 之前：缺节是编辑动作能补的，别先花几分钟 build 再红。
+        # 根 README 里 `npx skills add …/tree/vX.Y.Z/…` 写死发行 tag（ADR 0043 决策三），忘了改就在这里红。
+        # 放在 build 之前：缺节 / 旧 tag 是编辑动作能补的，别先花几分钟 build 再红。
         run: uv run --no-project python .github/scripts/release_notes.py check --version "${VERSION}"
         env:
           VERSION: ${{ steps.tag.outputs.version }}
