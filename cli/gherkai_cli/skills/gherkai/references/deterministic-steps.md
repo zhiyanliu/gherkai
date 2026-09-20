@@ -52,7 +52,8 @@ gherkai plan features/<x>.feature --steps-dir steps               # 该命中的
 
 ## 6 改一条已在用的 step
 
-- 改判定逻辑：单测，然后 `list-deterministic` 与 `plan`，云端还要重新构建镜像并 `gherkai deploy push-worker`。云端 worker 读的是镜像里那份，本机 `plan` 的标注不代表云端。
+- 改判定逻辑：单测，然后 `list-deterministic` 与 `plan`。
+- **任何改动**（逻辑、措辞、新增、删除）云端都要重新构建镜像并 `gherkai deploy push-worker` 才生效：云端 worker 读的是镜像里那份，本机 `plan` 的标注不代表云端。汇报里提醒一句。
 - 改措辞（`example`）：所有用到它的 feature 都要跟着改。宁可加一条新模式、旧模式保留一段过渡期，但两条模式不得同时命中同一句 step 文本。
 - 删 step：先全文搜索全部 feature 确认没人用；删后那些 step 会静默换回 AI 判定，`plan` 里标注消失是唯一信号。
 

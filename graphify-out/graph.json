@@ -37218,7 +37218,7 @@
       "label": "7 \u75c7\u72b6\u901f\u67e5",
       "file_type": "document",
       "source_file": "cli/gherkai_cli/skills/gherkai/references/deterministic-steps.md",
-      "source_location": "L59",
+      "source_location": "L60",
       "_origin": "ast",
       "id": "cli_gherkai_cli_skills_gherkai_references_deterministic_steps_7_\u75c7\u72b6\u901f\u67e5",
       "community": 134,
@@ -37229,7 +37229,7 @@
       "label": "8 \u4fee\u5b8c\u600e\u4e48\u6c47\u62a5",
       "file_type": "document",
       "source_file": "cli/gherkai_cli/skills/gherkai/references/deterministic-steps.md",
-      "source_location": "L72",
+      "source_location": "L73",
       "_origin": "ast",
       "id": "cli_gherkai_cli_skills_gherkai_references_deterministic_steps_8_\u4fee\u5b8c\u600e\u4e48\u6c47\u62a5",
       "community": 134,
@@ -132930,17 +132930,6 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "cli/gherkai_cli/skills/gherkai/references/deterministic-steps.md",
-      "source_location": "L59",
-      "weight": 1.0,
-      "_origin": "ast",
-      "source": "cli_gherkai_cli_skills_gherkai_references_deterministic_steps_\u786e\u5b9a\u6027_step_\u7684\u5199\u6cd5_\u4ece_\u80fd\u6ce8\u518c_\u5230_\u7a33_\u53ef\u8bca\u65ad_\u53ef\u7ef4\u62a4",
-      "target": "cli_gherkai_cli_skills_gherkai_references_deterministic_steps_7_\u75c7\u72b6\u901f\u67e5",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "cli/gherkai_cli/skills/gherkai/references/deterministic-steps.md",
       "source_location": "L6",
       "weight": 1.0,
       "_origin": "ast",
@@ -132952,7 +132941,18 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "cli/gherkai_cli/skills/gherkai/references/deterministic-steps.md",
-      "source_location": "L72",
+      "source_location": "L60",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "cli_gherkai_cli_skills_gherkai_references_deterministic_steps_\u786e\u5b9a\u6027_step_\u7684\u5199\u6cd5_\u4ece_\u80fd\u6ce8\u518c_\u5230_\u7a33_\u53ef\u8bca\u65ad_\u53ef\u7ef4\u62a4",
+      "target": "cli_gherkai_cli_skills_gherkai_references_deterministic_steps_7_\u75c7\u72b6\u901f\u67e5",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "cli/gherkai_cli/skills/gherkai/references/deterministic-steps.md",
+      "source_location": "L73",
       "weight": 1.0,
       "_origin": "ast",
       "source": "cli_gherkai_cli_skills_gherkai_references_deterministic_steps_\u786e\u5b9a\u6027_step_\u7684\u5199\u6cd5_\u4ece_\u80fd\u6ce8\u518c_\u5230_\u7a33_\u53ef\u8bca\u65ad_\u53ef\u7ef4\u62a4",
@@ -195388,5 +195388,5 @@
       "source_file": "docs/user-guide/configuration.md"
     }
   ],
-  "built_at_commit": "d6105090adbdf30c4e1b79b763b15b8599a66e06"
+  "built_at_commit": "4b8d0d2d1c24b0454ca63cd742a51f7aa966f4e4"
 }
