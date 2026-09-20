@@ -8,5 +8,6 @@
 | [`doc-health-review.md`](./doc-health-review.md) | 文档健康度复盘的**可复用任务指令**：六类问题、【强制】步骤、提纯审计、跨轮锚点 | 经 `.claude/commands/doc-health-review.md` 触发的 agent |
 | [`diagram-authoring.md`](./diagram-authoring.md) | 文档图作者化的**可复用任务指令**：类型选择、内容规则、布局清单（也是评审验收项）、archify 技法、自检与交付 | 经 `.claude/skills/doc-diagram/SKILL.md` 触发的 agent，新增或修改 `docs/diagrams/` 下的图时 |
 | [`code-health-review.md`](./code-health-review.md) | 代码健康度复盘的可复用任务指令：DEAD / STALE_INEFFICIENT / VIOLATES_ADR、热区、对抗验证 | 经 `.claude/commands/code-health-review.md` 触发的 agent |
+| [`guardrails.md`](./guardrails.md) | 三层护栏的操作手册：规则源 `_doc_rules.py` 的表与扫描面、hook 与提交闸门怎么工作、本地怎么跑、加一条规则的顺序、豁免与盲区（决策见 ADR 0046） | 加或改一条护栏规则时；hook 拦下自己却不明白为什么时 |
 
 写法约定与 ADR 相同：高密度、单一事实源、精确指针；不复述 ADR 的决策与理由。
