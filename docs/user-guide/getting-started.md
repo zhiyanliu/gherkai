@@ -4,12 +4,12 @@
 
 ## 按角色选安装形态
 
-| 你要做的事 | 角色 | 装什么 | 需要什么凭证 |
-|---|---|---|---|
-| 写 `.feature`、提交、看结果 | feature 作者（QA） | `gherkai`；要在本机运行再加下面两个 worker | 写用例不需要凭证；运行用例需要的凭证随执行方式与执行后端而不同，见[运行测试与查看结果](./running-and-results.md) |
-| 写 `steps/` 里的确定性 step、在本机验证、构建定制 worker 镜像 | 测试开发 | `gherkai[local]` + `@gherkai/worker-midscene` + 容器引擎 | 本机 AWS 凭证；不需要云端写权限，镜像交部署方推 |
-| 建立和维护共享的云端后端、推 worker 镜像 | 部署方 | `gherkai[deploy-aws]` + Node ≥ 22 + 容器引擎 | AWS 账号的部署权限（CloudFormation、IAM 建角色与策略并 `PassRole`、ECR、ECS、Lambda、EventBridge、VPC、SSM 等；完整清单见[云端后端](./cloud-backend.md)）；运行用例的凭证同上 |
-| 参与 gherkai 本身的开发 | contributor | 克隆仓库 | 见 [`CONTRIBUTING.md`](../../CONTRIBUTING.md) |
+| 你要做的事                                                  | 角色             | 装什么                                                   | 需要什么凭证                                                                                                                                                       |
+|-------------------------------------------------------------|------------------|----------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 写 `.feature`、提交、看结果                                   | feature 作者（QA） | `gherkai`；要在本机运行再加下面两个 worker                | 写用例不需要凭证；运行用例需要的凭证随执行方式与执行后端而不同，见[运行测试与查看结果](./running-and-results.md)                                                     |
+| 写 `steps/` 里的确定性 step、在本机验证、构建定制 worker 镜像 | 测试开发         | `gherkai[local]` + `@gherkai/worker-midscene` + 容器引擎 | 本机 AWS 凭证；不需要云端写权限，镜像交部署方推                                                                                                                      |
+| 建立和维护共享的云端后端、推 worker 镜像                     | 部署方           | `gherkai[deploy-aws]` + Node ≥ 22 + 容器引擎             | AWS 账号的部署权限（CloudFormation、IAM 建角色与策略并 `PassRole`、ECR、ECS、Lambda、EventBridge、VPC、SSM 等；完整清单见[云端后端](./cloud-backend.md)）；运行用例的凭证同上 |
+| 参与 gherkai 本身的开发                                     | contributor      | 克隆仓库                                                 | 见 [`CONTRIBUTING.md`](../../CONTRIBUTING.md)                                                                                                                      |
 
 一个人可以同时承担多个角色：本机开发时常常自己写被测应用、自己写确定性 step、自己构建镜像。团队分工时按上表拆开。
 
@@ -34,11 +34,11 @@ Nova Act 的 worker 随 `[local]` extra 装进同一个 Python 环境，Midscene
 
 ## 运行环境要求
 
-| 组件 | 要求 | 什么时候需要 |
-|---|---|---|
-| Python | ≥ 3.13，配 [uv](https://docs.astral.sh/uv/) | 命令行本体与 Nova Act worker |
-| Node.js | ≥ 22 | 在本机运行 Midscene worker；`gherkai deploy` |
-| 容器引擎 | docker | `gherkai deploy`（同步官方 worker 基础镜像）；构建与推送定制 worker 镜像 |
+| 组件                                | 要求                                           | 什么时候需要                                                                    |
+|-------------------------------------|------------------------------------------------|---------------------------------------------------------------------------------|
+| Python                              | ≥ 3.13，配 [uv](https://docs.astral.sh/uv/)     | 命令行本体与 Nova Act worker                                                    |
+| Node.js                             | ≥ 22                                           | 在本机运行 Midscene worker；`gherkai deploy`                                     |
+| 容器引擎                            | docker                                         | `gherkai deploy`（同步官方 worker 基础镜像）；构建与推送定制 worker 镜像           |
 | [ngrok](https://ngrok.com/download) | 可执行文件在 PATH 上 + authtoken（免费账号即可） | 仅用 `--expose-local` 测本机可达的应用时，见[测本机应用](./local-app-testing.md) |
 
 ## AWS 前置
@@ -52,11 +52,11 @@ Nova Act 的 worker 随 `[local]` extra 装进同一个 Python 环境，Midscene
 - 当前验证过的 region 是 `us-east-1`。换其它 region 之前，先确认下表三项服务与你要用的模型在该 region 都可用：`gherkai doctor --backend cloud --prefix <前缀>` 报出凭证与 region 的解析结果，模型与服务的可用性在 AWS 控制台确认。
 - 该 region 下的账号需要能用以下服务与模型：
 
-| 你要用的 | 需要开通 | 说明 |
-|---|---|---|
+| 你要用的      | 需要开通                                          | 说明                                                                                                                                                                                       |
+|---------------|---------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | Midscene 引擎 | Amazon Bedrock 上的模型 `us.openai.gpt-5.6-terra` | 默认模型。它经跨区推理在美国境内三个 region（us-east-1 / us-east-2 / us-west-2）处理，浏览器会话与产物仍在你选的 region。环境变量 `MIDSCENE_MODEL_ID` 可换成 Bedrock 上 Midscene 支持的其它模型 |
-| Nova Act 引擎 | Amazon Nova Act 服务 + 模型 `nova-act-v1.0` | 默认固定该版本，环境变量 `NOVA_MODEL_ID` 可指定其它模型；所需的 workflow definition 首次运行时自动创建 |
-| 两个引擎都要 | AgentCore Browser（`bedrock-agentcore`） | 每个 scope 一个会话 |
+| Nova Act 引擎 | Amazon Nova Act 服务 + 模型 `nova-act-v1.0`       | 默认固定该版本，环境变量 `NOVA_MODEL_ID` 可指定其它模型；所需的 workflow definition 首次运行时自动创建                                                                                       |
+| 两个引擎都要  | AgentCore Browser（`bedrock-agentcore`）            | 每个 scope 一个会话                                                                                                                                                                        |
 
 - 在本机运行（`--backend local`）同样需要 AWS 凭证：浏览器会话与模型都在云端，本机只运行 worker 进程。纯本地、不需要凭证的命令：`plan`、`list-engines`、`list-deterministic`、`skill install`，不带云端参数的 `doctor`，以及本机后端下只读本地报告目录的 `explain` 与 `status`（`status --wait` 会在本机接着把这个 run 推完，那时需要凭证）。
 - 实际运行产生 AWS 费用（模型调用 + 云端浏览器会话），以 AWS 账单为准。费用量级、以及哪种组合记到谁的账户，见[运行测试与查看结果](./running-and-results.md)。
@@ -81,7 +81,7 @@ gherkai doctor --backend cloud --prefix gherkai-    # 连带查凭证、region �
 ✓ engines.novaact: /path/to/python3 -m gherkai_worker_novaact（同 venv 模块 gherkai_worker_novaact）
 ✓ engines.any: 至少一个引擎的 worker 可用
 ✓ engines.model.novaact: 模型 nova-act-v1.0（本机 worker 自报）
-✓ steps.dir: 无 steps/ 目录：只有内建确定性 step（多数项目的常态）
+✓ steps.dir: 无 steps/ 目录：只有内建确定性 step
 ✓ steps.load.novaact: 1 条确定性 step（含内建）；无 steps/ 目录，仅内建
 ✓ aws.identity: 未查（给 --backend cloud 或 --prefix 才查云端）
 ✓ backend.reachability: 未查（同上）
@@ -171,12 +171,12 @@ gherkai explain <run_id>
 
 ## 下一步
 
-| 想做什么 | 去读 |
-|---|---|
-| 写 `.feature`，选引擎、scope 与超时 | [编写 .feature](./writing-features.md) |
-| 写自己的确定性 step | [编写确定性 step](./writing-deterministic-steps.md) |
-| 选执行方式与执行后端、读退出码、找报告与证据 | [运行测试与查看结果](./running-and-results.md) |
-| 测只在本机或内网可达的应用 | [测本机应用](./local-app-testing.md) |
-| 部署团队共享的云端后端 | [云端后端](./cloud-backend.md) |
-| 查某个选项或环境变量 | [配置](./configuration.md) |
-| 报错了 | [排错](./troubleshooting.md) |
+| 想做什么                                   | 去读                                                |
+|--------------------------------------------|-----------------------------------------------------|
+| 写 `.feature`，选引擎、scope 与超时          | [编写 .feature](./writing-features.md)              |
+| 写自己的确定性 step                        | [编写确定性 step](./writing-deterministic-steps.md) |
+| 选执行方式与执行后端、读退出码、找报告与证据 | [运行测试与查看结果](./running-and-results.md)      |
+| 测只在本机或内网可达的应用                 | [测本机应用](./local-app-testing.md)                |
+| 部署团队共享的云端后端                     | [云端后端](./cloud-backend.md)                      |
+| 查某个选项或环境变量                       | [配置](./configuration.md)                          |
+| 报错了                                     | [排错](./troubleshooting.md)                        |
