@@ -46,7 +46,7 @@
 ### 五、每版 changelog，Release 正文与链接钉 tag
 
 - 根 **`CHANGELOG.md`**（Keep a Changelog 形态），每版一节、使用者语言（新增 / 变化 / 修复 / 升级须知——如默认模型换代、需重跑 `gherkai deploy`），**发版前**由 contributor 侧 AI agent 从该版 commit 提炼、人审。
-- 发布链 gate **校验本 tag 在 CHANGELOG 里有节**，缺则发版失败——changelog 从「记得写」变成「不写发不出」。
+- 发布链 gate **校验本 tag 在 CHANGELOG 里有节**，缺则发版失败——changelog 从「记得写」变成「不写发不出」。同一 gate 另断言根 README 里 `npx skills add` 命令钉的 tag 等于本版（[0043](./0043-agent-skill-for-driving-gherkai.md) 决策三），发版前改 CHANGELOG 与改这个 tag 是同一次编辑。
 - GitHub Release 正文 = 该节正文 + 固定的装法 / 升级块（`.github/release_body_footer.md`，`.github/scripts/release_notes.py` 渲染）；块里指向仓库文档的链接**钉 `blob/vX.Y.Z/`**，每版说明与它链到的文档永远互相匹配，不随 HEAD 漂。**各包 README 里的链接仍指 `blob/HEAD/`**：它们是静态文件、随 wheel / tarball 逐字发出，钉 tag 要在构建期替换（见被拒方案）；包页只是入口、指向的是长期稳定的页面名，HEAD 可接受。各包 pyproject 的 `Changelog` URL 改指 `CHANGELOG.md`。
 - 被拒：GitHub 自动生成 release notes——本仓库无 PR 流、commit 信息是工程语言，生成物对使用者无用（`generate_release_notes: false`）。
 - 被拒：构建期替换包页链接为钉 tag——要给五个 wheel 与一个 npm 包各加一道 README 改写步骤，换来的只是入口页链接不随 HEAD 漂；入口页本身不承载会随版本变的细节，收益不抵复杂度。

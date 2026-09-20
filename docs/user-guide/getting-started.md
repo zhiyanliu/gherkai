@@ -113,10 +113,10 @@ gherkai skill install --print           # 只把正文打到标准输出，不�
 - 没装命令行也能取同一份 skill，版本自己指定：
 
 ```bash
-npx skills add https://github.com/zhiyanliu/gherkai/tree/v<版本>/cli/gherkai_cli/skills/gherkai --agent claude-code
+npx skills add https://github.com/zhiyanliu/gherkai/tree/v<版本>/cli/gherkai_cli/skills/gherkai -a claude-code -a codex   # 每个 -a 一个 agent，只装一处就只写一个
 ```
 
-这条路不经命令行，版本要自己指定：URL 里的 `v<版本>` 填你要跟随的 CLI 版本（tag 或 commit 均可，带斜杠的分支名不行——安装器在第一个斜杠处切断 ref）；写 `HEAD` 拿的是默认分支最新，可能比你装的命令行新。它装出的目录不带版本标记：之后改用 `gherkai skill install`，命令会因为目标目录不是它装的而停下并以退出码 2 结束，先把该目录移走或删掉再装。Codex 的用户级落点两条路也不同，`npx` 写 `~/.codex/skills/`。
+这条路不经命令行，版本要自己指定：URL 里的 `v<版本>` 填你要跟随的 CLI 版本（tag 或完整 commit 均可；带斜杠的分支名不行，安装器在第一个斜杠处切断 ref；`HEAD` 不是可用的 ref，安装器会报找不到分支）。不带 `/tree/…` 的仓库短写会克隆仓库默认分支，但在那里找不到这份 skill，只会找到本仓库自用的作图 skill。它装出的目录不带版本标记：之后改用 `gherkai skill install`，命令会因为目标目录不是它装的而停下并以退出码 2 结束，先把该目录移走或删掉再装。Codex 的用户级落点两条路也不同，`npx` 写 `~/.codex/skills/`。
 
 装完直接告诉 agent 要测什么，例如：
 

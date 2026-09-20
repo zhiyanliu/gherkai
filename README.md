@@ -29,6 +29,12 @@ uv tool install 'gherkai[deploy-aws]'       # 部署方：部署与维护云端�
 gherkai skill install          # 装给 Claude Code；--agent codex 装给 Codex，--agent all 两处都装
 ```
 
+也可以用 Agent Skills 通用安装器装同一份内容，URL 里的 tag 与你装的 gherkai 版本一致（`gherkai --version`）；两种装法的差别见 [开始使用 › 上手路径一](./docs/user-guide/getting-started.md#上手路径一交给-ai-agent)：
+
+```bash
+npx skills add https://github.com/zhiyanliu/gherkai/tree/v1.4.4/cli/gherkai_cli/skills/gherkai -a claude-code -a codex
+```
+
 然后告诉 agent 你要测什么，例如：「用 gherkai 给 `https://www.wikipedia.org` 的搜索功能写一条用例，完整运行一次后把结果汇报给我。」agent 会写 `.feature`、先做用例预检再运行、读失败证据、收窄范围后重试并汇报。
 
 ### 自己敲命令
