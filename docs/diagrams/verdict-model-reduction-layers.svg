@@ -450,7 +450,7 @@ rect.c-bg-rect { fill: var(--bg); }
         <text x="530" y="68" class="t-dim" font-size="9" font-weight="600" text-anchor="middle">03 / scenario</text>
 
         <rect data-graph-role="structural-frame" data-composition-frame-kind="stage" data-composition-frame-id="3" x="661" y="46" width="168" height="240" rx="10" class="c-lane" stroke-width="1"/>
-        <text x="745" y="68" class="t-dim" font-size="9" font-weight="600" text-anchor="middle">04 / job（= scope）</text>
+        <text x="745" y="68" class="t-dim" font-size="9" font-weight="600" text-anchor="middle">04 / job（即 scope）</text>
 
         <rect data-graph-role="structural-frame" data-composition-frame-kind="stage" data-composition-frame-id="4" x="876" y="46" width="168" height="240" rx="10" class="c-lane" stroke-width="1"/>
         <text x="960" y="68" class="t-dim" font-size="9" font-weight="600" text-anchor="middle">05 / run</text>
@@ -501,8 +501,8 @@ rect.c-bg-rect { fill: var(--bg); }
         <text x="530" y="189" class="t-external" font-size="7" text-anchor="middle">worker 侧</text>
         </g>
 
-        <g id="node-job" data-node-id="job" data-node-label="job 收场态" tabindex="0" role="button" aria-label="聚焦job 收场态，运行结束后才归约, 04 / job（= scope）" aria-pressed="false" data-node-kind="backend" data-node-sublabel="运行结束后才归约" data-node-tag="core 侧" data-node-context="04 / job（= scope）">
-          <title>job 收场态 · 运行结束后才归约 · 04 / job（= scope） · core 侧</title>
+        <g id="node-job" data-node-id="job" data-node-label="job 收场态" tabindex="0" role="button" aria-label="聚焦job 收场态，运行结束后才归约, 04 / job（即 scope）" aria-pressed="false" data-node-kind="backend" data-node-sublabel="运行结束后才归约" data-node-tag="core 侧" data-node-context="04 / job（即 scope）">
+          <title>job 收场态 · 运行结束后才归约 · 04 / job（即 scope） · core 侧</title>
           <rect x="689" y="142" width="112" height="58" rx="6" class="c-mask"/>
           <rect x="689" y="142" width="112" height="58" rx="6" class="c-backend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(695 148) scale(0.6875)">
@@ -553,4 +553,4 @@ rect.c-bg-rect { fill: var(--bg); }
           </g>
         </g>
       </svg>
-<!-- gherkai:source-sha256=a9bf4b538b4c1ea07961f6f9578ee8c30f22ffa198f90f157d8c577138238611 -->
+<!-- gherkai:source-sha256=90ac2e88b19a2493a44ce9d6acda642df7ea0748b837dd7773feb8ffc7570a6d -->

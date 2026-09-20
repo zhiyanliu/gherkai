@@ -40,8 +40,8 @@ ADR / CONTEXT 是随构建**逐步长起来**的：每次在前人文档上叠�
    - **留 / 删边界**：留「为何这样设计」（why / 被拒方案 / 决策脉络），删「分几步 / 施工节奏 / 过程编号」——判据即 CLAUDE.md 文档纪律首条给 ADR 划的内容边界，写入与审计同一把尺。
    - **不误伤**：把某次实测 / commit 当稳定证据内联引用的是自包含证据、不是沉积；`docs/journey/` 里过程坐标合法。过程编号作为叙事归本类，作为指向 journey 的悬空引用归 DEADLINK——同一句可能两症并发，按各自修法处理。
 6. **TONE（口吻 / 可读性 / 术语，对全部人读文档；判据 = ADR 0045 决策六与决策八）**：
-   - **使用者向文档**（`docs/user-guide/**`、根 README、各包 README、`CHANGELOG.md`、Release 正文 footer、agent skill）：产品说明口吻之外的写法都报——隐喻与俏皮话、同事口头语、施工叙事（「我们这次 / 本轮」）、无动词的标签句、面向同事而非使用者的措辞、术语未定义就用、晦涩内部术语。**处置：主观类待批**，报法 = 引原句 + 给改写句。
-   - **技术文档**（CONTRIBUTING / 各包 DEVELOPMENT / `.github/workflows/README.md` / internals / `tools/*.md`）：报俏皮话与口头语，不报密度（允许术语）。
+   - **使用者向文档**（`docs/user-guide/**`、根 README、各包 README、`CHANGELOG.md`、Release 正文 footer、agent skill）：产品说明口吻之外的写法都报——隐喻与俏皮话、同事口头语、施工叙事（「我们这次 / 本轮」）、无动词的标签句、面向同事而非使用者的措辞、术语未定义就用、晦涩内部术语、决策六列的三种 AI 侧缩写形态（符号当谓语、自造二字复合词、省略中心词的数字缩写，用户文档与 skill 正文另加箭头）。**处置：主观类待批**，报法 = 引原句 + 给改写句。
+   - **技术文档**（CONTRIBUTING / 各包 DEVELOPMENT / `.github/workflows/README.md` / internals / `tools/*.md`）：报俏皮话、口头语与决策六列的三种缩写形态（符号当谓语、自造二字复合词、省略中心词的数字缩写；箭头表顺序与因果不算），不报密度（允许术语）。
    - **术语面**：人读文档（含 internals 与图源）里出现 CONTEXT.md `_Avoid_` 登记的旧名或非规范名即报。**分流判据**：先查该词在护栏属哪张表——`COLLOQUIAL` 只约束人读层与产品文案、`RETIRED_TERMS` 管用词版本；量词「档」是唯一横跨两类的一项（在 `COLLOQUIAL` 里，但按 ADR 0045 决策六全仓禁用、含 AI 侧文档，护栏只扫得到人读面那一半）；`_Avoid_` 登记的是完整术语名时不推及其前缀或子串；同一退役名跨多篇时**必须一次做完并附全量落点**。发现规范术语本身不合书面标准时**不就地改文档**，报为「词表项」交 owner，改名走 ADR 0045 决策八的顺序（先词表、再传播）。
    - **护栏分工**：正则能抓的（禁词、退役旧名、口头语表）已由 `cli/tests/test_user_docs.py` / `test_package_readmes.py` / `test_skill.py` 机械挡住用户文档、图源、skill、包 README 四面；本类抓正则外的语义与可读性，并补技术文档与 internals 那半的术语面。contributor 侧 AI agent 文档不在本类射程。
 

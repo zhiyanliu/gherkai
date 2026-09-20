@@ -477,7 +477,7 @@ rect.c-bg-rect { fill: var(--bg); }
           <rect x="437.4" y="160" width="147.20000000000002" height="16" rx="3" class="c-mask"/>
           <text x="511" y="170" class="t-backend" font-size="9" text-anchor="middle">起 task 时设置一次性定时器</text>
         </g>
-        <text x="142" y="198" class="t-dim" font-size="7">到点 = 启动时刻 + 该 job 的墙钟预算；由启动方设置</text>
+        <text x="142" y="198" class="t-dim" font-size="7">到点：启动时刻 + 该 job 的墙钟预算；由启动方设置</text>
         </g>
 
         <g data-edge-from="alarm" data-edge-to="kicker" data-edge-label="到点调起，指定该 job" data-edge-key="1" data-edge-id="m-fire">
@@ -630,4 +630,4 @@ rect.c-bg-rect { fill: var(--bg); }
           </g>
         </g>
       </svg>
-<!-- gherkai:source-sha256=4b918d0d5cfbbc59521414b3f22a39f655018022fe45a944fbe513ca1cf2959b -->
+<!-- gherkai:source-sha256=5e42d2ab6177a15393cedc543e37bc6cb07355474788413a2f172a58fc48b2c1 -->

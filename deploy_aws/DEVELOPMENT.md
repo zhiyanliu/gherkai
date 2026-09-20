@@ -46,7 +46,7 @@
 
 ## Lambda 打包（`stack._build_lambda_asset`）
 
-三个 Lambda 共用一个 asset：本包 `gherkai_deploy_aws/lambdas/` 的两个 handler 源平铺在 **zip 根**（故 `exit_observer` 里 `from reconciler import …` 这条平级 import 成立；也因此 handler 源不做成本包的子包）+ 从**当前 venv 已安装位置**复制的 `gherkai_runtime` / `gherkai_core` / `gherkin` / `packaging` / `typing_extensions`（清单 = `stack.BackendStack.LAMBDA_ASSET_PACKAGES`，逐项经 `find_spec` 定位；单文件模块按原名置于根）。**不打包 `gherkai_cli`**（Lambda 侧不需要 argparse/render，ADR 0016「演进」节）；**boto3 由 Lambda runtime 自带、不打包**。
+三个 Lambda 共用一个 asset：本包 `gherkai_deploy_aws/lambdas/` 的两个 handler 源平铺在 **zip 根**（故 `exit_observer` 里 `from reconciler import …` 这条平级 import 成立；也因此 handler 源不做成本包的子包）+ 从**当前 venv 已安装位置**复制的 `gherkai_runtime` / `gherkai_core` / `gherkin` / `packaging` / `typing_extensions`（清单以 `stack.BackendStack.LAMBDA_ASSET_PACKAGES` 为准，逐项经 `find_spec` 定位；单文件模块按原名置于根）。**不打包 `gherkai_cli`**（Lambda 侧不需要 argparse/render，ADR 0016「演进」节）；**boto3 由 Lambda runtime 自带、不打包**。
 
 两条硬约束：
 
@@ -69,12 +69,12 @@ asset 落在 `gherkai deploy` 的临时工作目录（`GHERKAI_LAMBDA_ASSET_DIR`
 
 ## worker 镜像命令族
 
-`gherkai deploy` 的四步（全部幂等，重新运行收敛，ADR 0038）：① 登记模板 revision ARN 到 SSM（随 cdk 事务）→ ② 从 GHCR 同步当前版本基础镜像、推送为 `<版本>-base` → ③ 默认指针缺失则初始化为 `base`（已存在则保持不变）→ ④ 模板发生变化时用新模板 + 已记录的 digest 重派生既有 variant，末尾执行一次清理 pass。cdk 成功而后三步失败 → 退 1（不是 2：账户已被改动）。
+`gherkai deploy` 的四步（全部幂等，重新运行收敛，ADR 0038）：① 登记模板 revision ARN 到 SSM（随 cdk 事务）→ ② 从 GHCR 同步当前版本基础镜像、推送为 `<版本>-base` → ③ 默认指针缺失则初始化为 `base`（已存在则保持不变）→ ④ 模板发生变化时用新模板 + 已记录的 digest 重派生既有 variant，末尾执行一次清理 pass。cdk 成功而后三步失败 → 以退出码 1 结束（不是 2：账户已被改动）。
 
-`push-worker` 流程（细节与理由见 ADR 0038「push-worker 流程」）：版本 skew 前置（CLI **新于**后端 → 退 2，无放行入口）→ `inspect` 校验存在与架构 → ECR 登录 → tag + push → **推送后**再 `inspect` 取 digest（本地未推送的镜像没有 registry digest，`.Id` 是 config digest：注册可以通过，直到 RunTask 才报 `manifest unknown`）→ 按（模板 ARN、digest）查重 / 复用孤儿 / 否则从模板注册新 revision（血缘 tags：`gherkai:variant|version|digest|template`）→ 写 SSM 映射 → 旧 revision 打 `gherkai:retired-at` + 执行一次清理 pass。清理的两个前置条件及其判据见 [`docs/internals/cloud-backend-carriers.md`](../docs/internals/cloud-backend-carriers.md)（静默期数值以 `workers.RETIRE_QUIET_PERIOD` 常量为真源、文档不复写）；本包侧另有三条实现事实：仍被任何版本的 `worker-image` 映射引用的 revision 一律保留（同属保留判据，与运行中 run 引用检查并列），映射读取不完整时放弃本趟回收（读不全则无法判断哪些 revision 仍被引用），回收失败只输出警告、留给下次 pass。
+`push-worker` 流程（细节与理由见 ADR 0038「push-worker 流程」）：版本 skew 前置（CLI **新于**后端 → 退出码 2，无放行入口）→ `inspect` 校验存在与架构 → ECR 登录 → tag + push → **推送后**再 `inspect` 取 digest（本地未推送的镜像没有 registry digest，`.Id` 是 config digest：注册可以通过，直到 RunTask 才报 `manifest unknown`）→ 按（模板 ARN、digest）查重 / 复用孤儿 / 否则从模板注册新 revision（血缘 tags：`gherkai:variant|version|digest|template`）→ 写 SSM 映射 → 旧 revision 打 `gherkai:retired-at` + 执行一次清理 pass。清理的两个前置条件及其判据见 [`docs/internals/cloud-backend-carriers.md`](../docs/internals/cloud-backend-carriers.md)（静默期数值以 `workers.RETIRE_QUIET_PERIOD` 常量为真源、文档不复写）；本包侧另有三条实现事实：仍被任何版本的 `worker-image` 映射引用的 revision 一律保留（同属保留判据，与运行中 run 引用检查并列），映射读取不完整时放弃本趟回收（读不全则无法判断哪些 revision 仍被引用），回收失败只输出警告、留给下次 pass。
 
-- **`--container-engine` 为其它容器引擎预留**：当前只实装 `docker`（取值顺序 `--container-engine` > env `GHERKAI_CONTAINER_ENGINE` > `docker`），其它名字退 2、不静默回落（`container.resolve_container_engine`）。名字不被识别 = 纯参数问题、绝不改动账户；已安装但不可用 / 未安装 = 只警告（且只对纯发行版警告：dev/post/本地段版本原本就不经过同步基础镜像这一步，ADR 0038），退码语义归 cdk 之后的四步。容器引擎探活警告排在 `--vpc` 校验之后：缺 `--vpc` 会直接退 2，先输出两行警告会掩盖真正的失败原因。
-- **`delete-worker` 是占位**：退 2 并说明推迟的是回收策略（旧版本 variant 的 ECR tag / untagged 层），重议条件见 ADR 0038。
+- **`--container-engine` 为其它容器引擎预留**：当前只实装 `docker`（取值顺序 `--container-engine` > env `GHERKAI_CONTAINER_ENGINE` > `docker`），其它名字以退出码 2 结束、不静默回落（`container.resolve_container_engine`）。名字不被识别属纯参数问题、绝不改动账户；已安装但不可用或未安装则只警告（且只对纯发行版警告：dev/post/本地段版本原本就不经过同步基础镜像这一步，ADR 0038），退出码语义归 cdk 之后的四步。容器引擎探活警告排在 `--vpc` 校验之后：缺 `--vpc` 会直接以退出码 2 结束，先输出两行警告会掩盖真正的失败原因。
+- **`delete-worker` 是占位**：以退出码 2 结束并说明推迟的是回收策略（旧版本 variant 的 ECR tag / untagged 层），重议条件见 ADR 0038。
 - 子动词只声明在 `deploy` 上、不声明在 `destroy` 上（理由见 `cli.py._declares_worker_subverbs`）。
 
 ## 本地验证（不访问 AWS）

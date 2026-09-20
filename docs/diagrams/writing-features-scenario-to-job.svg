@@ -510,15 +510,15 @@ rect.c-bg-rect { fill: var(--bg); }
           <text x="120" y="255" class="t-muted" font-size="8" text-anchor="middle">未标 scope 名</text>
         </g>
 
-        <g id="node-jobBare" data-node-id="jobBare" data-node-label="各自一个 job" tabindex="0" role="button" aria-label="聚焦各自一个 job，编号 = 路径:行号, 未标 @scope 的 scenario › 归成 job" aria-pressed="false" data-node-kind="backend" data-node-sublabel="编号 = 路径:行号" data-node-context="未标 @scope 的 scenario › 归成 job">
-          <title>各自一个 job · 编号 = 路径:行号 · 未标 @scope 的 scenario › 归成 job</title>
+        <g id="node-jobBare" data-node-id="jobBare" data-node-label="各自一个 job" tabindex="0" role="button" aria-label="聚焦各自一个 job，编号写作 路径:行号, 未标 @scope 的 scenario › 归成 job" aria-pressed="false" data-node-kind="backend" data-node-sublabel="编号写作 路径:行号" data-node-context="未标 @scope 的 scenario › 归成 job">
+          <title>各自一个 job · 编号写作 路径:行号 · 未标 @scope 的 scenario › 归成 job</title>
           <rect x="248.39999999999998" y="217" width="148" height="52" rx="6" class="c-mask"/>
           <rect x="248.39999999999998" y="217" width="148" height="52" rx="6" class="c-backend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(254.39999999999998 223) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
           <text data-node-label="" x="322.4" y="238" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">各自一个 job</text>
-          <text x="322.4" y="255" class="t-muted" font-size="8" text-anchor="middle">编号 = 路径:行号</text>
+          <text x="322.4" y="255" class="t-muted" font-size="8" text-anchor="middle">编号写作 路径:行号</text>
         </g>
 
         <g id="node-gate" data-node-id="gate" data-node-label="并发上限" tabindex="0" role="button" aria-label="聚焦并发上限，同时执行的 job 数, 调度与执行 › 上限内启动" aria-pressed="false" data-node-kind="security" data-node-sublabel="同时执行的 job 数" data-node-context="调度与执行 › 上限内启动">
@@ -600,4 +600,4 @@ rect.c-bg-rect { fill: var(--bg); }
           </g>
         </g>
       </svg>
-<!-- gherkai:source-sha256=ea7f71bf6c34ee90e445bd535c58f21b5b51aa1d3cee7423246c466176373df2 -->
+<!-- gherkai:source-sha256=256567edddd0161add07f0cc42ef45c63c08161b3bcd30c011a0a11f1074941d -->

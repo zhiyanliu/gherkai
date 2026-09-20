@@ -30,7 +30,7 @@
 
 ### 升级须知
 
-- 在本机 local 后端运行用例的机器上，把命令行工具与你的用例用到的引擎 worker 升到同一版本（`uv tool upgrade gherkai`；Midscene worker 另外执行 `npm i -g @gherkai/worker-midscene@<CLI 版本>`），新的默认模型随 worker 一起升级；版本不一致会在运行前检查时退 2。安装形态见[开始使用](./docs/user-guide/getting-started.md)。
+- 在本机 local 后端运行用例的机器上，把命令行工具与你的用例用到的引擎 worker 升到同一版本（`uv tool upgrade gherkai`；Midscene worker 另外执行 `npm i -g @gherkai/worker-midscene@<CLI 版本>`），新的默认模型随 worker 一起升级；版本不一致会在运行前检查时以退出码 2 结束。安装形态见[开始使用](./docs/user-guide/getting-started.md)。
 - 部署方须重新执行 `gherkai deploy`：新的默认模型在新版本的 worker 基础镜像里，放宽后的模型调用权限也随部署更新。有自定义 worker 镜像 variant 的团队，从新版本的基础镜像重新构建后用 `gherkai deploy push-worker` 推送一次。升级步骤见[云端后端](./docs/user-guide/cloud-backend.md)。
 - 想继续用原来的 Midscene 模型：把 `MIDSCENE_MODEL_ID` 设为 `qwen.qwen3-vl-235b-a22b`（本机 local 后端设在 shell 里，云端 cloud 后端写进定制镜像的环境变量）。
 

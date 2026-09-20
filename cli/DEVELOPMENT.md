@@ -26,7 +26,7 @@ cli/gherkai_cli/
 
 组合根逻辑（compose/detached/names/tunnel/tunnel_host）位于平级的产品本体包 `runtime/gherkai_runtime/`，**不留在本包里**：Lambda 与 IaC 也要用它，留在前端里会迫使它们依赖 argparse 层（ADR 0016「演进」节）。cli 这个前端只剩 argparse 与标准 IO。
 
-已安装多个部署 provider（当前只有 aws 一个）时 `--provider <名>` 必给；只安装一个时可省略；未安装任何 provider 时报「装 `gherkai[deploy-aws]`」并退 `2`。
+已安装多个部署 provider（当前只有 aws 一个）时 `--provider <名>` 必给；只安装一个时可省略；未安装任何 provider 时报「装 `gherkai[deploy-aws]`」并以退出码 `2` 结束。
 
 **Node ≥ 22 是 `deploy` 的前置**（与 worker 的 `engines.node` 同一下限）：Python 版 CDK 是 jsii 绑定、import 时即启动
 node 子进程，cdk CLI 本身也以 npm 包形式分发；PATH 上存在 `cdk` 即使用它，否则回退到 `npx -y aws-cdk@2`。
@@ -50,7 +50,7 @@ uv run gherkai run features/wikipedia_generic.feature --backend cloud --prefix d
 
 `--backend cloud` 的表 / 桶 / cluster / task-def / SSM 里的子网·安全组与 worker 镜像 variant 指针**全由 `gherkai deploy` 供给**，
 手工建一张表和一个桶不足以支撑运行：启动 worker 前依次通过版本 skew 闸、资源 preflight（events 表 + cluster + 本 run 每个引擎的
-task-def + 桶，落库时另加 runs 表）、variant 解析、子网/安全组解析，任一项缺失即退 `2`。资源名一律由 `--prefix` 拼接，
+task-def + 桶，落库时另加 runs 表）、variant 解析、子网/安全组解析，任一项缺失即以退出码 `2` 结束。资源名一律由 `--prefix` 拼接，
 因此 `--prefix` 须与部署时一致；单独覆盖某个资源名或网络参数时才用 `run` 的六个单项覆盖 flag
 （`--ddb-table`/`--s3-bucket`/`--events-table`/`--cluster`/`--subnet`/`--security-group`；`submit` 只收前两个，其余取部署侧写进
 后端的值，三个 Lambda 无 flag、恒按 prefix 推导），逐项默认值与对应 SSM 参数见
@@ -100,7 +100,7 @@ adapter、复用同一条 `RunPersistence`，把状态落 DynamoDB、判定真�
   引擎环境未安装则自动降级为无标注。
 - 文本模式对 DataTable/DocString 多行参数只标注尺寸（`+dataTable(行×列)` / `+docString(N 行)`）以保持紧凑；
   核对参数**完整内容**须用 `--json`（携带 content/rows 全文）。
-- `plan` 退出码 0=可运行 / 2=配置错（`PlanError`：uri 冲突 / 同 scope 多 engine 等）。
+- `plan` 的退出码为 0 表示可运行，2 表示配置有误（`PlanError`：uri 冲突 / 同 scope 多 engine 等）。
 
 ## 为何拆 `submit` / `status`
 
@@ -117,9 +117,9 @@ local 无此上限（worker 运行在提交者自己的机器、以自己的凭�
 
 ## 退出码分层的切分线
 
-cloud 失败分层的切分线 = run 是否已真正开始执行：启动 worker 前的配置或可达性问题退 `2`，已开始执行之后的云端故障退 `1`。
+cloud 失败分层的切分线是 run 是否已真正开始执行：启动 worker 前的配置或可达性问题以退出码 `2` 结束，已开始执行之后的云端故障以退出码 `1` 结束。
 `submit` 的退出码衡量「提交成功与否」，`status --wait` 衡量「该 run 的判定是否通过」：`run` 在一条命令里合并的
-「提交 + 判定」由此被拆开（ADR 0034）。归码只有一处 helper，`_cmd_plan` 与 `_cmd_run` 共用：各写一份必然漂移。
+「提交 + 判定」由此被拆开（ADR 0034）。决定退出码的只有一处 helper，`_cmd_plan` 与 `_cmd_run` 共用：各写一份必然漂移。
 
 **preflight 次序是有意如此：版本 skew → 资源存在性 → variant 解析。** skew 的修复动作（`gherkai deploy`）同时补齐
 资源，也是重推镜像的前置；反过来先报「表不存在」或「variant 未推送」，只会导致一轮无效的 `--prefix` 排查或一轮无效的镜像推送。
@@ -131,7 +131,7 @@ deploy 会把自身版本写成后端的版本戳；四个 cloud 入口（`run`/
 | 比对结果 | 行为 |
 |---|---|
 | 同版本 | 放行，不提示 |
-| **CLI 新于后端** | 退 `2`，**无放行 flag** |
+| **CLI 新于后端** | 退出码 `2`，**无放行 flag** |
 | CLI 旧于后端 | 警告不拦截（以 `uv tool upgrade gherkai` 升级即可） |
 | 后端没有版本戳（早于本机制的部署） | 警告不拦截，并提示部署方执行一次 `gherkai deploy` 写入 |
 | 任一侧是开发版（含 `.dev`/`.post`/`+`） | 跳过比对，输出一条警告（dev 版逐提交前进，逐字比对会把每次都判成 skew） |

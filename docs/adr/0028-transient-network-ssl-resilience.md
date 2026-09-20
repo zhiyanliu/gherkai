@@ -41,25 +41,25 @@ worker **按白名单匹配具体瞬时异常类型**,不用宽基类兜底:
   不用宽 `OSError` 兜底（它与 `ssl.SSLError` 同继承 `OSError`、会把永久错也当瞬时），只匹配具体类型 + gaierror 按 errno 判。
 - **botocore `ClientError`（服务端瞬时故障，按错误码/HTTP 状态码细分，非整类）**:AgentCore 起会话
   （`start_browser_session`）是 boto3 调用,服务端瞬时不可用/限流时抛 `ClientError`——它**直接继承 `Exception`、
-  混着永久错**（`ValidationException`/`AccessDenied`）,**不能整类当瞬时**,须按码细分:
-  - 读 `e.response["Error"]["Code"]` ∈ **瞬时码集**（`RequestTimeout`/`RequestTimeoutException`/`PriorRequestNotComplete`）
-    **或节流码集**（`Throttling`/`ThrottlingException`/`ThrottledException`/`TooManyRequestsException`/`RequestLimitExceeded`/
+  混着永久错**（`ValidationException`/`AccessDenied`）,**不能整类当瞬时**,须按错误码细分:
+  - 读 `e.response["Error"]["Code"]` ∈ **瞬时错误码集**（`RequestTimeout`/`RequestTimeoutException`/`PriorRequestNotComplete`）
+    **或节流错误码集**（`Throttling`/`ThrottlingException`/`ThrottledException`/`TooManyRequestsException`/`RequestLimitExceeded`/
     `SlowDown`/`ServiceUnavailable` 等）→ 瞬时;
   - 或读 `e.response["ResponseMetadata"]["HTTPStatusCode"]` ∈ **{500,502,503,504}** → 瞬时;
   - 其余 `ClientError`（4xx 客户端错、`ValidationException`/`AccessDeniedException` 等永久错）→ **不归 network_error**。
-  - **码集对齐 botocore 权威常量**（`TransientRetryableChecker._TRANSIENT_ERROR_CODES`/`_TRANSIENT_STATUS_CODES`
+  - **错误码集对齐 botocore 权威常量**（`TransientRetryableChecker._TRANSIENT_ERROR_CODES`/`_TRANSIENT_STATUS_CODES`
     + `ThrottledRetryableChecker._THROTTLED_ERROR_CODES`）——**借判据、不借 API**:不硬构造 botocore 内部
     `RetryContext` 去调它的 `is_retryable()`（那要 http_response/parsed_response 等请求栈内部对象、跨版本脆，
-    且我们 catch 到的是被 Nova SDK 包了两层的异常、根本没有 RetryContext）,而是把它那张稳定的码/状态码表**内联**成
+    且我们 catch 到的是被 Nova SDK 包了两层的异常、根本没有 RetryContext）,而是把它那张稳定的错误码/状态码表**内联**成
     自己的白名单,判定对齐、无内部 API 依赖。**注意 SIGTERM 穿透仍靠我们的手写退避**（见上「worker 层退避」）——
     只借 botocore 的分类判据,绝不借它的重试执行（`time.sleep` 吞信号）。（**一处有意偏离**：另补 `ServiceUnavailable`/
-    `ServiceUnavailableException`——botocore 靠 `_TRANSIENT_STATUS_CODES` 的 503 兜它，服务端只给码不给 HTTP
+    `ServiceUnavailableException`——botocore 靠 `_TRANSIENT_STATUS_CODES` 的 503 兜它，服务端只给错误码不给 HTTP
     状态时兜不住，故显式列入；勿按「对齐」删回）
 - **穿透 Nova SDK 的两层包装靠异常链遍历（纠正旧猜测）**:AgentCore 会话建立失败时,底层 exc 被 Nova SDK
   包成 `BrowserAuthError(...) from exc`、再包成 `StartFailed(...) from e`（`agentcore_session_provider.py`/
   `nova_act.py`,**每层都带 `from`**）。故**不需要识别 `BrowserAuthError`/`StartFailed` 类本身**——
   `_is_transient_network` 遍历 `__cause__/__context__` 链能穿透到底层 exc 命中白名单。**真正的盲区是底层 exc 的
-  类型/码没被白名单覆盖**（boto `ClientError` 节流/5xx、`ConnectTimeoutError`/`ReadTimeoutError`）,本 ADR 补齐。
+  类型或错误码没被白名单覆盖**（boto `ClientError` 节流/5xx、`ConnectTimeoutError`/`ReadTimeoutError`）,本 ADR 补齐。
 - **建连阶段的「下游症状」异常按阶段判瞬时（真跑暴露的盲点补充）**：上一条"异常链能穿透到底层网络 exc"的假设**对一类真实故障不成立**——当 AgentCore 云端浏览器的 CDP/websocket 连接因网络断掉（如 `keepalive ping timeout`），**Playwright 内部把底层 socket 故障吞掉、只抛出一个"干净"的 `TargetClosedError`**（`CDPSession.send: Target page, context or browser has been closed`），它**不继承 `OSError`/`ConnectionError`、`__cause__`/`__context__` 均为 `None`**——异常链遍历穿透到底命中的就是这个不带任何网络语义的下游症状异常，白名单无从匹配 → 误判 `engine_error`、不重试（真跑复现：会话已 `start_browser_session` 成功，`with NovaAct.__enter__` 内 `CDPSession.send` 撞网络断 → `StartFailed`→`BrowserAuthError`，退 1 而非 80）。
   - **判据：`TargetClosedError` 语义模糊**（网络断 / 会话被正常关 / 浏览器真崩，都报同一句），整类当瞬时会违背下面「拿不准→不归 network」铁律。**故按阶段收窄**：只在**建连阶段**（`scope_started` 未 emit、`started=False`、act 无副作用——即已有的重试域物理边界）把 `TargetClosedError` 判瞬时；越过 `scope_started` 后（act 中途分类 `_classify_act_error`）**不认**它。依据：建连阶段 target 被关几乎必是建连期网络/连接故障（正常关闭/SIGTERM 走的是别的路径，且此阶段本就无 act 副作用、重试安全）。实现：`_is_transient_network(e, *, connecting=False)` 加阶段参数，仅建连域调用点传 `connecting=True`。这是**利用已有结构性保证（重试域=scope_started 之前）做精确收窄，不是宽兜底**，不违背「绝不重试 act」红线。**Midscene 对称**：`isTransientNetwork(e, connecting=false)`，建连域按 message 精确匹配 `has been closed`（TS 侧 Playwright 无稳定异常类可 `instanceof`，故按文案而非类型），越过建连域同样不认。
 - **Node（Midscene）**:error code `ECONNRESET`/`ECONNREFUSED`/`ETIMEDOUT`/`EPIPE`/`EAI_AGAIN`/`ECONNABORTED`
@@ -78,7 +78,7 @@ worker **按白名单匹配具体瞬时异常类型**,不用宽基类兜底:
 - **`EX_WORKER_NETWORK = 80`**（避开 POSIX sysexits 64-78 / shell 保留 126-128+n / 信号区）。
   **两个引擎 worker 必须用同一值**（各自硬编码 80——跨语言边界抄不掉）;core 侧只此一处：`core/gherkai_core/wire.py` 的 `EX_WORKER_NETWORK`（协议常量随协议层走，[0024](./0024-worker-core-protocol.md)），各 Engine adapter import 它、不再各抄一份。
 - worker 建连重试耗尽 + `scope_started` 未 emit → 退出 `80`。
-- 「码 → 异常」的翻译也在 `wire`（`raise_for_worker_exit(rc, code_label=...)`：80→`core.errors.WorkerNetworkError`、其余正非零→`RuntimeError`、0/负码放行）——**两个 Engine adapter 共用这一份**，各自只负责从自己的传输里取码（子进程 `proc.wait()` 的 returncode / Fargate `DescribeTasks` 的 exitCode，`code_label` 只影响诊断措辞）;曾各写一份同构映射、靠「与另一文件同值」的注释维持一致。
+- 「退出码 → 异常」的翻译也在 `wire`（`raise_for_worker_exit(rc, code_label=...)`：80→`core.errors.WorkerNetworkError`、其余正非零→`RuntimeError`、退出码 0 或负值放行）——**两个 Engine adapter 共用这一份**，各自只负责从自己的传输里取退出码（子进程 `proc.wait()` 的 returncode / Fargate `DescribeTasks` 的 exitCode，`code_label` 只影响诊断措辞）;曾各写一份同构映射、靠「与另一文件同值」的注释维持一致。
   `schedule._Worker._run_once` 在 generic `except` **之前**加 `except WorkerNetworkError` → 记 `error_type="network_error"`。
 - **`WorkerNetworkError` 定义在 `core/gherkai_core/errors.py`,不在 adapter**——否则 schedule 反依赖 adapter（违反 ports 六边形）。
 - 会话已起后的瞬时网络错（罕见）仍走 `step_done`/`scope_done` 的 `errorType` 字段,不用退出码。**已兑现**：act 中途失败时两个引擎 worker 复用 `_is_transient_network`/`isTransientNetwork` 判定，网络瞬时 → 标 `network_error`（否则 `engine_error`）——**仅诊断分类、不触发重试/恢复**（act 不幂等；且 `saw_step=True` + 走 step_done 非退出码 80，schedule 双条件 AND 天然不重试）。"act 中途恢复"仍 defer（见下）。

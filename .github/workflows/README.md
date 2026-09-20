@@ -10,7 +10,7 @@
 | 文件 | 触发 | 干什么 |
 |---|---|---|
 | `ci.yml` | push 任意分支 / 所有 PR / 手动 | ① `uv sync --locked` + 根 `pytest`（全 workspace 成员，含 deploy_aws 的 CDK synth 测试）；② midscene `npm ci && npm run build && npm test`；③ `uv build --all-packages` smoke + 产物校验 + 发布 gate 演练（打本地临时 tag、不 push：版本必须逐字等于 tag） |
-| `release.yml` | push tag `v*` | gate（tag 形态 + CHANGELOG.md 有本版节 + 算出的版本==tag）→ ① PyPI → ② npm → ③ GHCR 基础镜像 → ④ GitHub Release（正文由 `.github/scripts/release_notes.py` 从 CHANGELOG.md 渲染） |
+| `release.yml` | push tag `v*` | gate（tag 形态 + CHANGELOG.md 有本版节 + 算出的版本与 tag 一致）→ ① PyPI → ② npm → ③ GHCR 基础镜像 → ④ GitHub Release（正文由 `.github/scripts/release_notes.py` 从 CHANGELOG.md 渲染） |
 | `pages.yml` | push 改动 `docs/diagrams/**` 或 `pages.yml` 自身（只在默认分支部署）/ 手动 | 只把 `docs/diagrams/` 原样上传 GitHub Pages（`index.html` + 已入库的可交互 HTML + SVG，不做任何构建）；Pages 的 build type 已切为 workflow，不再从分支根目录做 Jekyll 构建（ADR 0045 决策七） |
 
 发布是**一个动作**：`git tag vX.Y.Z && git push origin vX.Y.Z`。版本真源只有 git tag
@@ -29,7 +29,7 @@ build（gate + uv build --all-packages + 产物校验 + 上传 artifact）
 ```
 
 - **`images` 依赖 `pypi`/`npm` 且带「等索引可见」一步**：基础镜像的 CI 形态按版本装已发行的 worker 包
-  （ADR 0037 决策 5「两态」），而上传成功 ≠ 立刻可装（索引过 CDN）。等待逻辑与完整理由在
+  （ADR 0037 决策 5「两态」），而上传成功不等于立刻可装（索引过 CDN）。等待逻辑与完整理由在
   `.github/scripts/wait_for_index.sh` 的头注释里。
 - **单独重新运行 `images` 是「PyPI 已发、镜像缺失」半发布态的修复动作**（ADR 0037 决策 8）：对同一 tag 幂等，
   且**重新运行旧版本不会动 `latest`**——`latest` 只在「本 tag 是全仓库版本序最大的**正式发行** tag」时才推。
@@ -37,7 +37,7 @@ build（gate + uv build --all-packages + 产物校验 + 上传 artifact）
 - **`npm` 可重新运行**：publish 前先 `npm view` 探一次，已发行就跳过（npm 不允许重发同版本）。
 - **fork 不会误发**：`pypi` / `npm` 两个 job 带 `if: github.repository == 'zhiyanliu/gherkai'`。
 - **只认正式发行 tag `vX.Y.Z`**：`v1.4.0rc1` 这类预发行在 gate 第一步就被拦——它是合法 PEP 440
-  但不是合法 semver（npm 要 `1.4.0-rc.1`），而 ADR 0037 决策 2b 明确不做 PEP 440→semver 的转换件；
+  但不是合法 semver（npm 要 `1.4.0-rc.1`），而 ADR 0037 决策 2b 明确不做 PEP 440 到 semver 的转换件；
   放进来就会「PyPI 发成功、npm 挂在 `npm version` 上」。演练 tag 因此**别 push 到本仓库**（下节）。
 
 ## 一次性人工前置（可一遍做完）
@@ -147,7 +147,7 @@ npm provenance、GHCR 推送与包可见性、以及「等索引可见」在真�
 
 CI 的 `images` job 用 index 态（按 tag 版本装已发行包）；发行前要验镜像内容，用 local 态喂本地产物——命令与 build-arg
 见各 `engines/*/Dockerfile` 头注释（`uv build --package gherkai-worker-novaact` 出 wheel、`npm pack` 出 tarball，
-`--build-arg WORKER_SOURCE=local`，context = 放产物的目录）。冒烟（不需要 AWS）：`docker run --rm --platform linux/amd64 <镜像> python -m gherkai_worker_novaact --capabilities` /
+`--build-arg WORKER_SOURCE=local`，context 即放产物的目录）。冒烟（不需要 AWS）：`docker run --rm --platform linux/amd64 <镜像> python -m gherkai_worker_novaact --capabilities` /
 `… <镜像> gherkai-worker-midscene --capabilities`（要给完整命令：上游 `node:22-slim` 镜像的 entrypoint 会把以 `-` 开头的首参当 node 选项）。index 态只能在首个正式发行后验（占位 `0.0.0` 是空包）。
 
 ## 维护

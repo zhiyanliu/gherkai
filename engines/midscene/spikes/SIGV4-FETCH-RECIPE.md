@@ -1,7 +1,7 @@
 # Midscene → Bedrock qwen3-vl 经 /openai/v1 的 SigV4 自签 fetch 配方
 
 > spike 实现笔记（非 ADR）。决策见 [ADR 0008](../../../docs/adr/0008-midscene-bedrock-auth-sigv4-selfsign.md)。
-> 来源：核实 smithy-typescript signature-v4 + openai-node v6.3.0 源码。**已端到端跑通**（HTTP 200 + 视觉识别 + 整条 Midscene 引擎全绿、断言 10/10，见 §6/§7；ADR 0008/0003 承重未知均已关闭）。
+> 来源：核实 smithy-typescript signature-v4 + openai-node v6.3.0 源码。**已端到端验证通过**（HTTP 200 + 视觉识别 + 整条 Midscene 引擎全绿、断言 10/10，见 §6/§7；ADR 0008/0003 承重未知均已关闭）。
 
 ## 1. 代码（注入 Midscene `createOpenAIClient`）
 
@@ -81,14 +81,14 @@ npm i @aws-sdk/signature-v4 @aws-sdk/protocol-http @aws-crypto/sha256-js @aws-sd
 |---|---|---|
 | **403 SignatureDoesNotMatch** | **过度签名易变头**（头号坑）：签了 SDK 整个 header 包，`x-stainless-retry-count`(重试 0→1)/`content-length`/`accept-encoding` 进了 SignedHeaders 又在 wire 上被改 | 只签手建 `{host, content-type}`，绝不快照+签 SDK 头 |
 | 403 | host 签成裸 hostname 但走了非 443 端口/代理 | baseURL host 不带端口；有端口则签 `u.host` |
-| 403 | signer region ≠ host region；或 sign 与 send 之间 body 被重新序列化；或复用了过期签名 | region 对齐；body 原样透传；每请求重签（别缓存 `signed`） |
+| 403 | signer region 与 host region 不一致；或 sign 与 send 之间 body 被重新序列化；或复用了过期签名 | region 对齐；body 原样透传；每请求重签（别缓存 `signed`） |
 | 403 auth 混乱 | openai 的 `Bearer unused` 没删掉 | 先 `headers.delete("authorization")` |
 | **400 ValidationException** | 签名 OK 但 payload 错：model id 错、`-instruct` 后缀错、字段不支持 | 用裸 `qwen.qwen3-vl-235b-a22b`，无 profile ARN |
 | 404 | 路径面错（`/v1` vs `/openai/v1`）或模型不在该 region | 保持 `/openai/v1`；确认 qwen3-vl 在 us-east-1 |
 | `ReferenceError: HttpRequest is not defined` | 漏 import | 加 `@aws-sdk/protocol-http` |
 | **400「value did not match any expected variant」** | Bedrock 的 OpenAI 兼容层不认 `image_url.detail: "original"`（OpenAI 原生认它；Midscene 的 gpt-5 / gpt-6 family 适配器对定位请求固定发它、无配置可关） | 签名**之前**从请求体删掉该字段（签名含 payload hash，签完再改即 403）——见 `engines/midscene/src/lib/agentcore-sigv4.mts` 的 `bedrockCompatBody()` / ADR 0044 决策 3 |
 
-## 4. 首跑最可能的失败 + 最快诊断
+## 4. 首次运行最可能的失败 + 最快诊断
 
 最可能：若有人"简化"成签 SDK 整个 header 包 → 403。诊断：Bedrock 403 响应体会回显它算的 `CanonicalRequest`/`SignedHeaders`，与 wire 上实际头一 diff 即见元凶。runner-up：漏 `HttpRequest` import（ReferenceError）或 4 个 AWS 包没装。
 
@@ -105,7 +105,7 @@ npm i @aws-sdk/signature-v4 @aws-sdk/protocol-http @aws-crypto/sha256-js @aws-sd
 
 ## 6. TS 端到端实测（2026-06-23，`engines/midscene/spikes/01-model-sigv4.ts`）—— 已全绿
 
-用 openai-node v6.3.0 + 本配方的 `sigv4Fetch`，在本账号实跑：
+用 openai-node v6.3.0 + 本配方的 `sigv4Fetch`，在本账号实际运行：
 - **[01a] 文本** → `"ok"`（HTTP 200）：TS SigV4 自签**字节匹配正确**，最小手建请求签名法有效，`Bearer unused` 删除有效，混版本 SigV4 包（3.370.0 / 3.1074.0）无兼容问题。**一次过，未撞 403。**
 - **[01b] 视觉**（64x64 真实 PNG，左红右蓝）→ `"Red Blue"`：image_url 经 SigV4 **过了 Bedrock 图像 sanitize**（此前 1x1 占位图 400 确认只是图不合格）；qwen3-vl 真能看图识别；openai-node 多模态 content 数组被接受。
 
@@ -113,13 +113,13 @@ npm i @aws-sdk/signature-v4 @aws-sdk/protocol-http @aws-crypto/sha256-js @aws-sd
 
 ## 7. 合体实测（第 3 段，`engines/midscene/spikes/03-midscene-grounding.ts`）—— 全通
 
-整条 Midscene 引擎端到端跑通（AgentCore 云端浏览器 + SigV4 自签 + 维基用例）：
+整条 Midscene 引擎端到端验证通过（AgentCore 云端浏览器 + SigV4 自签 + 维基用例）：
 - `aiAct('type "OpenAI" into the search input and submit the search')` → 真进到 `https://en.wikipedia.org/wiki/OpenAI`（58.9s，含规划+定位+多步动作）
 - A 确定性断言（url 含 `/wiki/OpenAI`）：pass
 - B AI 断言（`aiAssert`）×10：**10/10 pass，抖动率 0%，与 A 完全一致**，平均 10.45s/次
 - `report.html` 正常生成；真实整页截图过 Bedrock 图像 sanitize（无 400）
 
-### ⚠️ 关键坑（实跑才挖出，配方原文没有）：createOpenAIClient → 隔离 ModelConfigManager
+### ⚠️ 关键坑（实际运行才挖出，配方原文没有）：createOpenAIClient → 隔离 ModelConfigManager
 
 spike 期（`@midscene/core` 1.9.8）`agent/agent.js` 读到的形态是二分支：
 ```js

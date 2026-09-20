@@ -4,7 +4,7 @@
 
 本文是**入口页**，给出全景与边界。推进链细节、判定算法、产物落点、确定性 step 派发、云端载体的更新传播各有自己的 owner 页，下文只给链接，不重复其内容。使用者视角的操作与选项见 [`docs/user-guide/`](../user-guide/README.md)。
 
-**术语速览**（下文按此用词，完整术语见 [`CONTEXT.md`](../../CONTEXT.md)）：**scope** = 共享同一操作上下文的 scenario 分组，也是执行与调度的最小单位（一个 scope = 一个 job）；**worker** = 运行一个 job 的引擎进程；**adapter** = 将核心对接到某个具体落库 / 执行实现的可替换件；**组合根** = 选定并注入这些 adapter 的装配层。
+**术语速览**（下文按此用词，完整术语见 [`CONTEXT.md`](../../CONTEXT.md)）：**scope** 指共享同一操作上下文的 scenario 分组，也是执行与调度的最小单位（一个 scope 对应一个 job）；**worker** 指运行一个 job 的引擎进程；**adapter** 指将核心对接到某个具体落库 / 执行实现的可替换件；**组合根** 指选定并注入这些 adapter 的装配层。
 
 ## 1. 全景图
 
@@ -20,7 +20,7 @@
 | ② 产品层：CLI | `cli/gherkai_cli/`（`__main__.py` argparse 入口、`render.py`、`deploy.py`、`skill_install.py`） | 解析参数 → 读取 feature → 注入引擎解析器 → 调用核心 → 渲染文本与 `--json`；退出码由它给出。另有两个隐藏子命令（`_reconcile` / `_tunnel_watch`），它们是 `submit` fork 出的后台进程与隧道守护的入口，不供使用者直接调用；完整命令面与各命令的选项见 [`docs/user-guide/`](../user-guide/README.md) 与 `gherkai --help` | 不含判定逻辑、不含引擎知识；核心库不依赖这一层命令行入口。当前 CLI 是唯一前端，未来若新增其他前端（如 Web 界面，尚未实装），同样按这一分层直接调用 `gherkai-core`，不 shell-out CLI | [ADR 0016](../adr/0016-execution-architecture-core-lib-run-model.md)、[ADR 0041](../adr/0041-agent-facing-cli-affordances.md) |
 | ② 产品层：gherkai-runtime | `runtime/gherkai_runtime/`（`compose.py` 组合根、`names.py` 命名、`detached.py` 后台推进进程、`tunnel*.py` 隧道） | 把抽象的核心接线到具体实现：解析各引擎 worker 的拉起命令（四级顺序：env 覆写 → 同 venv 的 import 模块 → PATH 上的命令 → 按版本临时拉起；第二级仅 Python 引擎有，第四级仅 Nova Act 有）、按 `--backend` 注入 adapter、由 `--prefix` 推导全部云资源名、启动隧道、`submit` 时 fork 出脱离 CLI 的推进进程 | 不做判定与调度决策；命名纯函数零依赖，部署 provider 直接 import 同一份实现 | [ADR 0037](../adr/0037-distribution-and-packaging.md) 决策 3、[ADR 0033](../adr/0033-iac-aws-backend-and-composition-wiring.md)（两层命名）、[ADR 0035](../adr/0035-local-app-testing-via-tunnel.md)（隧道） |
 | ② 产品层：gherkai-core | `core/gherkai_core/`（`parse` / `scope` / `schedule` / `reconcile` / `project` / `persist` / `model` / `ports` / `wire` / `serialize` / `errors` / `adapters`） | 解析 `.feature`、分组成 job、并发调度或单步推进、把事件归约成判定、落库与归集报告。全部外部能力经 `ports.py` 的 `Engine` / `RunStore` / `ResultStore` / `ReportStore` 与 `reconcile.py` 的 `EventLog` / `Launcher` 六个注入口 | **零引擎依赖**：不 import 引擎，不感知 worker 是子进程还是容器；编排模块内不 import `subprocess` / `boto3` | [ADR 0016](../adr/0016-execution-architecture-core-lib-run-model.md)、[ADR 0025](../adr/0025-plan-module-feature-to-jobs.md)、[ADR 0026](../adr/0026-schedule-module.md)、[ADR 0034](../adr/0034-detached-batch-reconciler.md) |
-| ③ 执行层 | `engines/novaact/gherkai_worker_novaact/`、`engines/midscene/src/` | 各自接收一个 job（= 一个 scope），建立一个浏览器会话，逐 step 决定走确定性判定还是交由 AI 处理，把事件逐条上报核心，收集证据与引擎产物。两侧对称，使用同一套协议 | 不做跨 scope 的调度与判定归约；**对执行环境无知**（产物落点与上传目标都由注入决定） | [ADR 0024](../adr/0024-worker-core-protocol.md)、[ADR 0017](../adr/0017-cloud-execution-fargate-over-runtime.md)（云端 worker 的计算载体选 Fargate/ECS）、[ADR 0044](../adr/0044-engine-model-selection-and-override.md)（模型选定与覆写） |
+| ③ 执行层 | `engines/novaact/gherkai_worker_novaact/`、`engines/midscene/src/` | 各自接收一个 job（即一个 scope），建立一个浏览器会话，逐 step 决定走确定性判定还是交由 AI 处理，把事件逐条上报核心，收集证据与引擎产物。两侧对称，使用同一套协议 | 不做跨 scope 的调度与判定归约；**对执行环境无知**（产物落点与上传目标都由注入决定） | [ADR 0024](../adr/0024-worker-core-protocol.md)、[ADR 0017](../adr/0017-cloud-execution-fargate-over-runtime.md)（云端 worker 的计算载体选 Fargate/ECS）、[ADR 0044](../adr/0044-engine-model-selection-and-override.md)（模型选定与覆写） |
 | ④ 浏览器层 | Amazon Bedrock AgentCore Browser | 提供云端浏览器。两个 worker 都经 CDP 连入：Midscene 自行签名 SigV4 升级请求（浏览器标识 `aws.browser.v1`），Nova Act 经 SDK 的 `AgentCoreBrowserSessionProvider`。**每个 scope 一个会话**，会话生命周期在 worker 内 | 本机不安装 Chromium；会话不跨 scope 复用 | [ADR 0011](../adr/0011-agentcore-browser-system-default-vs-custom.md)（系统默认 browser vs 自建）、[ADR 0028](../adr/0028-transient-network-ssl-resilience.md)（会话跟踪与清理） |
 | ⑤ 被测应用 | 使用方的站点 | 公网可达的站点直连；只在本机或内网可达的应用经 `--expose-local` 启动的 ngrok 隧道回连，提交时把 job 文本里的原始 origin 替换成公网 URL | gherkai 不部署被测应用 | [ADR 0035](../adr/0035-local-app-testing-via-tunnel.md) |
 
@@ -35,7 +35,7 @@
 图注：两条回传的**物理通道**在四种组合下各不相同（本机管道 / 云端表、父进程 / 平台观察），本图只画两条回传的方向；通道与推进链的详解见 [`execution-and-reconciliation.md`](./execution-and-reconciliation.md)。
 
 1. **parse**：`.feature` 文本 → `Scenario` / `Step` 领域模型。第三方 Gherkin 解析器封装在 `parse.py` 之内，Background / Outline / DataTable / DocString 在这一步展开（[ADR 0025](../adr/0025-plan-module-feature-to-jobs.md)）。
-2. **scope 分组**：按 tag 把 scenario 归入 scope，校验 engine 与 timeout 的一致性，产出 `Job[]`。**一个 job 就是一个 scope**，也是调度与执行的最小单位。`plan` 另外对本批用到的**每个引擎**各启动一个瞬时本机 worker，查询这些 step 文本各命中哪条确定性模式（某个引擎查询不到时只缺少该引擎的标注，不影响 plan 本体）。前两步纯本地、零费用。
+2. **scope 分组**：按 tag 把 scenario 归入 scope，校验 engine 与 timeout 的一致性，产出 `Job[]`。**一个 job 就是一个 scope**，也是调度与执行的最小单位。`plan` 另外对本次 plan 用到的**每个引擎**各启动一个瞬时本机 worker，查询这些 step 文本各命中哪条确定性模式（某个引擎查询不到时只缺少该引擎的标注，不影响 plan 本体）。前两步纯本地、零费用。
 3. **begin**：写入 definition（run 元数据）与初始运行态。此后一切写入都经 `RunStore` / `ResultStore`，落点由注入的 adapter 决定（见 §4）。
 4. **驱动**：`run` 采用 `schedule.py` 的在线循环（每个 worker 一个线程，`--max-concurrency` 即同时活跃的浏览器会话数上限，缺省 1）；`submit` 采用 `reconcile.py` 的无状态单步推进，由每个 run 一个的本机后台进程、`status --wait` 的接力者或云端 Lambda 反复调用。两种驱动的对照、四种组合的详解见 [`execution-and-reconciliation.md`](./execution-and-reconciliation.md)。循环内反复发生以下两件事：
    - **每 scope 一个 worker**：核心经 `Engine` 启动 worker，worker 建立浏览器会话，逐 step 判断走哪条路径。step 派发的决策链、`steps/` 目录的两个真值源、worker 的两个非 job 入口（能力自述 `--capabilities`、正则匹配查询 `--match-steps`）见 [`deterministic-step-lifecycle.md`](./deterministic-step-lifecycle.md)。
@@ -57,7 +57,7 @@
 | worker 日志 | 输出到屏幕；`--quiet` 时写入 `<report-dir>/<run_id>/worker.log` | CloudWatch 日志组 `/<prefix>worker/<engine>` |
 | 前置 | 本机 AWS 凭证，以及所用引擎的 worker 已安装在本机 | 部署方已执行 `gherkai deploy --vpc <取值> --prefix <前缀>`；提交侧只需最小云端权限 |
 
-一个 `--prefix` = 一套完整环境，多环境通过多个 prefix 并存。云端侧由五种各自独立更新的载体构成（stack、Lambda asset、基础镜像、variant 镜像、SSM 参数），「改动为何未在云端生效」的反查表见 [`cloud-backend-carriers.md`](./cloud-backend-carriers.md)。
+一个 `--prefix` 即一套完整环境，多环境通过多个 prefix 并存。云端侧由五种各自独立更新的载体构成（stack、Lambda asset、基础镜像、variant 镜像、SSM 参数），「改动为何未在云端生效」的反查表见 [`cloud-backend-carriers.md`](./cloud-backend-carriers.md)。
 
 ## 5. 包与发行物
 

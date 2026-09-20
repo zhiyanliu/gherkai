@@ -122,7 +122,7 @@ core/gherkai_core/
 
 ### cli `--backend {local,cloud}`：组合根按开关注入 store + 执行引擎（兑现「换 adapter 核心不动」）
 
-云端 store adapter（DDB/S3，[0030](./0030-realtime-persistence-seam.md) 决定六）落地后，cli 加 `--backend {local,cloud}`（默认 `local`；`run`/`submit`/`status` 有，读判定的 `explain` 同形（[0042](./0042-step-evidence-and-explain.md) 决策四）、`doctor` 也收它但只切换查哪些检查项、不注入 store（[0041](./0041-agent-facing-cli-affordances.md) 决策四）——`submit` 与 `status` 的 backend 须一致，见 [0034](./0034-detached-batch-reconciler.md)；`plan` 纯本地不落库、不加）在组合根按开关选注入哪套 adapter。`RunPersistence`/`schedule` 只认 Store **port**，local↔cloud 切换**零改** core——这正是本 ADR「选实现=组合根注入」的第一次真实兑现。
+云端 store adapter（DDB/S3，[0030](./0030-realtime-persistence-seam.md) 决定六）落地后，cli 加 `--backend {local,cloud}`（默认 `local`；`run`/`submit`/`status` 有，读判定的 `explain` 也有（[0042](./0042-step-evidence-and-explain.md) 决策四）、`doctor` 也收它但只切换查哪些检查项、不注入 store（[0041](./0041-agent-facing-cli-affordances.md) 决策四）——`submit` 与 `status` 的 backend 须一致，见 [0034](./0034-detached-batch-reconciler.md)；`plan` 纯本地不落库、不加）在组合根按开关选注入哪套 adapter。`RunPersistence`/`schedule` 只认 Store **port**，local↔cloud 切换**零改** core——这正是本 ADR「选实现=组合根注入」的第一次真实兑现。
 
 **单一开关换齐存储三层 + 执行引擎、第一版不开混搭**：`--backend cloud` 一次把 RunStore→DDB、ResultStore/ReportStore→S3（+ 挂 offloader）三层存储全换，**并把执行引擎从 `SubprocessEngine` 换成 `FargateEngine`**（见下「决策 A：`--backend cloud` = 存储上云 + Fargate 执行（单一选项）」）。理由：三层存储后端不对等（上文已证不存在 `S3RunStore`/`DDBReportStore`），无有意义的混搭矩阵；「Local store + Fargate worker」是 **store⊥worker 正交轴**（上文「worker 产物 ⊥ store」）、是**组合根内部/e2e 可拼的矩阵、非用户 CLI 旋钮**，不需要 `--run-backend`/`--result-backend` 拆开（那是提前盖机器 + 组合爆炸测试负担）。
 
@@ -176,8 +176,8 @@ Fargate 执行环境配置（cluster / task-def / subnet / security-group / even
 - **`--backend cloud --no-report` 合法**：`--no-report` 既有语义=零落盘裸跑、与 backend 正交，**但决策 A 下它仍在 Fargate 执行**，故云端检查只减 store 那一半：store 侧校验/import/异常 gated 在 `need_cloud = do_report and cloud`（保「三个 store 一次不构造」的逃生舱）、runs 表也只在 `do_report` 时探；版本 skew 闸、events 表/cluster/桶/task-def 的 preflight、worker variant 解析与 subnet/sg 的 SSM 读取照常执行；`--no-report` 在云端后端另经 `build_fargate_engines(no_artifacts=True)` 让 worker 不生成/不上报原生产物（[0037](./0037-distribution-and-packaging.md) 决策 3）。
 
 **artifacts 落点指针按 backend 分支组装、全 URI 化（不硬编码本地路径「说谎」）**：`--json` 的 `artifacts` dict（`report_index`/`run_meta`/`run_state`/`jobs_dir`）**原先**硬编码本地文件路径，cloud 下这些数据落 DDB/S3、本地路径不存在——故按 backend 分支组装（已实装，落点算式收在 `compose.local_artifact_locations`/`cloud_artifact_locations` 单点）：
-- local：四项均 `file://` 完整路径（从裸路径升级为 URI，与 cloud 同形工整）。
-- cloud：`report_index`（取 `finalize()` 返回值）/`jobs_dir` = `s3://…`；`run_meta`/`run_state` = 自造 `ddb://<table>/<run_id>#META|#STATE` 诊断指针（与 s3:// 同形、纯展示、不被任何代码解析）。
+- local：四项均 `file://` 完整路径（从裸路径升级为 URI，与 cloud 写法一致、更工整）。
+- cloud：`report_index`（取 `finalize()` 返回值）/`jobs_dir` = `s3://…`；`run_meta`/`run_state` = 自造 `ddb://<table>/<run_id>#META|#STATE` 诊断指针（与 s3:// 写法相同、纯展示、不被任何代码解析）。
 - 第四返回值是 **`make_artifacts(run_id, report_index) -> dict` 工厂函数**（非现成 descriptor）——须在 finalize 拿到 `run_id` 与 `report_index` 后才能组装（`report_index` 可能因 write 失败被隔离而为 None，此时省略 `report_index` 键）；由 `build_local_stores`/`build_cloud_stores` 各自返回（各自最懂按 backend URI 化组装落点/前缀），`_cmd_run` 调它填 artifacts——**不给 Store port 加 `describe_artifacts`**（凭空扩接口面、6 个 adapter 全要实现，过度设计）。
 - `finalize()` 返回 None（`ReportStore.write` 失败被 `RunPersistence` 隔离，[0030](./0030-realtime-persistence-seam.md) 决定三）时 `report_index` 键不放裸 `'None'`——省略该键。（曾设 `_report_error` 字段留 traceback 供 cli 可选打 stderr，但 cli 从不消费、已删该悬空字段——写失败被静默隔离、报告可从 RunResult 重建。）
 
@@ -225,7 +225,7 @@ Fargate 执行环境配置（cluster / task-def / subnet / security-group / even
 
 **归属清算（同一判据的第二轮应用）**：初版抽包只搬了 `compose`/`detached`/`names`，隧道编排与云目标解析仍住 cli 皮内——按上面判据是错位（未来 WebUI/Lambda 两张皮得各复刻一遍，正是抽包时被三个非-CLI 消费者证伪的那个安置模式）。已按同一判据归位：
 
-- **云目标解析** → `compose.resolve_cloud_target(...) -> CloudTarget`（吃入口皮已解析的 flag，吐 prefix + 表/桶/cluster/三 Lambda 的**终名** + region/profile），cli 里三处逐行同形的「flag or env or `default_name(prefix, 基名)`」解析块随之消失；`compose` 的 `_BASE_*` 私有别名（抽 `names.py` 时为「保既有引用不动」留的兼容残留，却被皮当公共面消费）一并删掉，命名真源只余 `gherkai_runtime.names.BASE_*` 一处。
+- **云目标解析** → `compose.resolve_cloud_target(...) -> CloudTarget`（吃入口皮已解析的 flag，吐 prefix + 表/桶/cluster/三 Lambda 的**终名** + region/profile），cli 里三处逐行写法相同的「flag or env or `default_name(prefix, 基名)`」解析块随之消失；`compose` 的 `_BASE_*` 私有别名（抽 `names.py` 时为「保既有引用不动」留的兼容残留，却被皮当公共面消费）一并删掉，命名真源只余 `gherkai_runtime.names.BASE_*` 一处。
 - **隧道宿主编排** → 新 `tunnel_host.py`：起隧道 + 映射 definition + 隧道模式恒注入的额外请求头，以及 cloud 守护进程的轮询循环与其 TTL 算法（[0035](./0035-local-app-testing-via-tunnel.md) 决策 3）。**命名同上护栏**：叫 host（宿主，取自 0035 决策 3 的表头术语），不叫 worker——0024 的 worker 专指被 spawn 跑 scope 的引擎进程。
 - **产物空壳清理 / 云错误归类** → `compose.prune_empty_dirs`（本地落点是组合根算出来的，[0029](./0029-engine-artifacts-to-s3.md)）、`compose.is_botocore_error`。
 - **反向也校准**：`render_run_state`（`status` 的 RunState 人读渲染）从 `gherkai/detached.py` 移回 `cli/render.py`——**渲染是皮的事**；这条判据两个方向都得用，否则「下沉」会退化成「往 gherkai 里倒东西」。
@@ -264,4 +264,4 @@ G1/G2 是 v1.0 核心库 `.feature` 解析的前置——其声明语法**现已
   - **ports 落地状态**：四个 port 的 local adapter 均已建（详见上「留口子：核心注入接口（ports）」节）。**两个引擎 worker 均已落地**（落点见上「工程布局」树），两个引擎对称、同讲 0024 协议。
 - **现在不做**：无状态机制 / WebUI ——接口已留好，等云端真需要时填 adapter + 组合根换注入。**避免为想象中的云端预先盖机器。**（**已越过**：云端 store/执行 adapter + 组合根接线 + IaC 在 v1.1 填齐、**无状态批量运行机制 v1.2 已实装真跑通**——清单见上「版本切分」的 v1.1.0/v1.2.0 行；但无状态批量运行**不止「填 adapter」**、是驱动模型演进，故当初「等填 adapter」的乐观预期对它不成立，见上「这样上云…」处的 ⚠️ 分层注。）
 - **G1/G2**：声明语法（[0019](./0019-feature-tags-scope-and-engine.md)）与调度实现（[0025](./0025-plan-module-feature-to-jobs.md)/[0026](./0026-schedule-module.md)）均已落地——分工枚举见上「G1/G2 解析前置」节。
-- **多用例组织**：跑批入口（CLI 按路径跑一批）已落地；**按 tag / scenario 选子集已落地**——`--scope`/`--tags`/`--scenario` 三个可重复 flag 在 run/plan/submit 同形，谓词由皮组装、core `plan(features, config, select=…)` 在「scope 分组与 engine/timeout 解析之后、Job 组装之前」施加（不变量：筛选只减少「跑哪几条」，见 [0041](./0041-agent-facing-cli-affordances.md) 决策一）。旧的 cucumber `--tags` 选子集约定随 BDD runner 一并退役（见 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)）。**当初把它整体推给核心库的理由已被兑现**：选子集依赖核心库的调度层，在（已退役的）bdd 直跑层做只是临时件、核心库终究会重做；当初「真需要时加 CLI 选择面 + plan 入口过滤、是加法」的成本判断也应验了——0041 落的正是这个形状，`select` 缺省 None 即不筛，既有调用点不受影响。`features/` 目前是 v0.x 打磨用例 + v1.0 起补的手工真跑验证夹具（并发/scope 共享、确定性 step），仍未做目录/命名的有意组织。
+- **多用例组织**：跑批入口（CLI 按路径跑一批）已落地；**按 tag / scenario 选子集已落地**——`--scope`/`--tags`/`--scenario` 三个可重复 flag 在 run/plan/submit 写法相同，谓词由皮组装、core `plan(features, config, select=…)` 在「scope 分组与 engine/timeout 解析之后、Job 组装之前」施加（不变量：筛选只减少「跑哪几条」，见 [0041](./0041-agent-facing-cli-affordances.md) 决策一）。旧的 cucumber `--tags` 选子集约定随 BDD runner 一并退役（见 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)）。**当初把它整体推给核心库的理由已被兑现**：选子集依赖核心库的调度层，在（已退役的）bdd 直跑层做只是临时件、核心库终究会重做；当初「真需要时加 CLI 选择面 + plan 入口过滤、是加法」的成本判断也应验了——0041 落的正是这个形状，`select` 缺省 None 即不筛，既有调用点不受影响。`features/` 目前是 v0.x 打磨用例 + v1.0 起补的手工真跑验证夹具（并发/scope 共享、确定性 step），仍未做目录/命名的有意组织。

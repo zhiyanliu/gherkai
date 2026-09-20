@@ -45,7 +45,7 @@
 - **时序图（sequence）**：标签是单个矩形、不折行；牌子中心恒在两端参与者列心的中点，跨偶数列距的消息牌子必压中间那一列——文字控制在约 23 个字宽以内，括号说明放 `note`；参与者顺序决定穿越次数，按叙事从左到右排；加宽画布会撞 desktop-readability 门（宽度上限约 930）。
 - **数据流（dataflow）**：相邻 stage 容器间隙只有约 47 单位，横向流标签超过约 40 单位必压两侧虚线——标签要短；`meta.viewBox` 高度下限 360；单行时用统一 `yOffset` 居中。
 - **校验器的盲区**：共享端点的两条边之间的交叉与共线重叠**不报**（`properCrossings` 照样 0），标签压容器边框只要过了 clearance 也不报——所以「跑绿」不等于形态达标，布局意见只能靠折点数值 + PNG 局部放大判定。取精确折点不必起 Chrome：workflow 类型用 `validate … --layout-json`；dataflow / architecture 用 `node bin/archify.mjs render <type> <json> /tmp/x.html --quality standard` 后 grep `data-composition-points`。局部放大用 `sips -c <h> <w> --cropOffset <y> <x> <png> --out <crop.png>` 再 Read。
-- **端口模型（dataflow / architecture）**：同一侧的自动边按固定 14 单位分散，带 via / channel 的显式边一律锚在该侧中点——一侧同时有两条自动边和一条显式边，显式那条必夹在正中（±7 单位），箭头三角互压。因此每个节点每一侧最多放两条边，第三条换侧（顶 / 底）；同源同目标的两条边要各走不同入口侧（一条左侧、一条顶边），做成嵌套直角而不是并排同形——同一对节点的两条自动边会共用同一条走廊、竖段完全共线。
+- **端口模型（dataflow / architecture）**：同一侧的自动边按固定 14 单位分散，带 via / channel 的显式边一律锚在该侧中点——一侧同时有两条自动边和一条显式边，显式那条必夹在正中（±7 单位），箭头三角互压。因此每个节点每一侧最多放两条边，第三条换侧（顶 / 底）；同源同目标的两条边要各走不同入口侧（一条左侧、一条顶边），做成嵌套直角，而不是并排且形状一致——同一对节点的两条自动边会共用同一条走廊、竖段完全共线。
 - **改一条边的副作用**：把某条边改成 `straight` 或改侧后，自动路由会重算其它边，可能把别的边绕进已放置的标签而使 `straight` 被否（route-preset-conflict）——用 `toSide` / `fromSide` 把受影响的边钉回原侧。
 - **画布贴内容**：dataflow 横向几何固定（列距 215、容器宽 168），右侧留白由 `meta.viewBox[0]` 决定，最小宽度 = 图例单行宽度 + 80（图例换行会撞 legend/vertical-overflow）；收窄会改变长宽比，只对发布到 Pages 的交互版有 viewport-overflow 影响，静态 SVG 无碍。workflow v2 的画布由编译器算出，无 `meta.viewBox` 可调。
 - **图上文字同守口吻**：节点与图例里的字读者直接看到，隐喻（「烙进」）、口头语一律不用，护栏 `test_user_docs.py` 对图源扫禁词与口头语表。

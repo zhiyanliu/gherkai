@@ -17,7 +17,7 @@
 
 ![环境变量从你设的地方流到本机 CLI 进程、它起的子进程与云端 worker 容器，四类边分别是继承、由 gherkai 注入、被选项覆盖、不传](../diagrams/configuration-env-inheritance.svg)
 
-图注：你在 shell 里 export 的值由本机 CLI 进程继承，再传给它起的子进程；图里的「CLI 起的子进程」既指本机 worker 进程，也指部署时起的 cdk 子进程——两者都从 CLI 原样继承环境，也都会被 gherkai 注入的变量和解析后的选项值改写。云端 worker 容器不继承你的 shell，它的环境是 worker 镜像 `ENV` 里的值加上起这个任务的那一方注入的值。**继承** = 原样拿到上一级的值；**被覆盖** = 起子进程时用解析后的选项值改写同名变量；**不传** = 值到不了对面，要生效就设在对面；**由 gherkai 注入** = 由起这个进程的那一方写入，压过继承来的值（含镜像 `ENV` 里的同名项），清单见下文「由 gherkai 注入的环境变量」。部署命令（`deploy` / `destroy` / `push-worker`）本身也是本机 CLI 进程，只是通常在另一台机器上运行，上表把那台机器单列为「部署机」。云端任务在 `run --backend cloud` 下由本机 CLI 起，在 `submit --backend cloud` 下由后端起。哪个变量设在哪里生效，见下面各表的「在哪里设」栏。
+图注：你在 shell 里 export 的值由本机 CLI 进程继承，再传给它起的子进程；图里的「CLI 起的子进程」既指本机 worker 进程，也指部署时起的 cdk 子进程——两者都从 CLI 原样继承环境，也都会被 gherkai 注入的变量和解析后的选项值改写。云端 worker 容器不继承你的 shell，它的环境是 worker 镜像 `ENV` 里的值加上起这个任务的那一方注入的值。**继承**指原样拿到上一级的值；**被覆盖**指起子进程时用解析后的选项值改写同名变量；**不传**指值到不了对面，要生效就设在对面；**由 gherkai 注入**指由起这个进程的那一方写入，压过继承来的值（含镜像 `ENV` 里的同名项），清单见下文「由 gherkai 注入的环境变量」。部署命令（`deploy` / `destroy` / `push-worker`）本身也是本机 CLI 进程，只是通常在另一台机器上运行，上表把那台机器单列为「部署机」。云端任务在 `run --backend cloud` 下由本机 CLI 起，在 `submit --backend cloud` 下由后端起。哪个变量设在哪里生效，见下面各表的「在哪里设」栏。
 
 ## 模型选择
 
@@ -130,7 +130,7 @@ region 的完整解析链是 `--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > 
 | `--expose-local ORIGIN` | `run`、`plan`、`submit` | `run` / `submit` 上真起隧道，`plan` 上只做标注、不起隧道。前置与限制见 [`local-app-testing.md`](./local-app-testing.md) |
 | `--tunnel {ngrok}` | `run`、`submit` | 两个命令上同义，选 `--expose-local` 用哪个隧道服务，当前只有 `ngrok` 一个取值。存活时间上限 `--tunnel-ttl` 只有 `submit` 有，见 [`local-app-testing.md`](./local-app-testing.md) |
 | `--worker-variant NAME` | `run`、`submit` | 两个命令上同义，只在 `--backend cloud` 下起作用，本机后端忽略。variant 与默认指针见 [`cloud-backend.md`](./cloud-backend.md) |
-| `--grace S` | `run` | 只有本机后端用它。云端的停止宽限在部署时由 `gherkai deploy --stop-timeout` 定，`--backend cloud` 给这个选项会退 `2` |
+| `--grace S` | `run` | 只有本机后端用它。云端的停止宽限在部署时由 `gherkai deploy --stop-timeout` 定，`--backend cloud` 给这个选项会以退出码 2 结束 |
 | `--json` | `run`、`plan`、`status`、`explain`、`doctor`、`list-engines`、`list-deterministic`、`deploy list-workers` | 每个命令输出各自的 JSON 文档；`submit` 没有这个选项，它的输出本来就只有一个 `run_id` |
 | `--quiet` | `run` | 只影响进度输出与本机 worker 日志的落点 |
 | `--region R`、`--profile P` | `run`、`submit`、`status`、`explain`、`doctor`、`deploy`、`destroy`、`deploy push-worker`、`deploy list-workers` | 优先于同义的环境变量（解析链见上）。云端 worker 只收 region，凭证用它自己的任务角色 |

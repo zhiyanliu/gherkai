@@ -115,7 +115,7 @@ per-run 进程（观察者+reconciler 三合一）：spawn worker 子进程
    · proc.wait() 拿 exitcode 写 task_exited · 推演写本地 RunState · 启下一个 · 全 done 自退
 ```
 
-**同一份 core 推演码，两个宿主（Lambda / per-run 进程）各注入自己的 adapter**——local/cloud 对称落到 events 通道：两侧 reconciler 都从持久 events 重放推演，**唯一差别是存储介质**（DDB 表 vs 本地 SQLite）+ **谁把 worker 事件写进该存储**（cloud=worker 自己 PutItem，[0024](./0024-worker-core-protocol.md)；local=per-run 进程读 worker fd3 后旁路落 SQLite）。
+**同一份 core 推演代码，两个宿主（Lambda / per-run 进程）各注入自己的 adapter**——local/cloud 对称落到 events 通道：两侧 reconciler 都从持久 events 重放推演，**唯一差别是存储介质**（DDB 表 vs 本地 SQLite）+ **谁把 worker 事件写进该存储**（cloud=worker 自己 PutItem，[0024](./0024-worker-core-protocol.md)；local=per-run 进程读 worker fd3 后旁路落 SQLite）。
 
 **关键：local 的 worker 不改、对 SQLite 无知（实装校准）**——worker 仍讲 [0024](./0024-worker-core-protocol.md) fd3 协议吐原始 JSON 行（引擎无关、两执行环境同一份 worker），SQLite 落库是 per-run 进程侧 `SubprocessLauncher` 读 fd3 时旁路做的（存原始行 + 按到达序赋 worker 段单调 seq）。故「worker 写持久 events 存储」在 local 的准确表述是「per-run 进程代 worker 写」——worker 业务零改，对称性落在「事件最终进了持久可重放存储」这一层，非「worker 自己写哪」。
 
@@ -144,9 +144,9 @@ per-run 进程（观察者+reconciler 三合一）：spawn worker 子进程
 
 **「两件都要」（[0024](./0024-worker-core-protocol.md) 终止契约）在 reconciler 里成为对事件日志的纯谓词**——但**「内容完整（scope_done）」只对声称成功（exit==0）的进程要求**（真跑 crash worker 逼出的精确化）：
 
-- **`task_exited` 且 exit≠0（崩溃/网络码 80/SIGKILL）→ ERROR 终态，不等 `scope_done`**：worker 崩了根本没机会发 `scope_done`，此时**进程非干净终止本身就是终态信号**。若仍死等 `scope_done`，crash job 永远 RUNNING、reconciler 死循环（真跑 crash worker 复现，回归护栏 `core/tests/test_project.py::test_crash_no_scope_done_nonzero_exit_is_error`）。这一分支也覆盖「发完 scope_done 又非 0 退出」的误报 PASSED（exit≠0 一律 error，不看内容）。
+- **`task_exited` 且 exit≠0（崩溃/网络故障退出码 80/SIGKILL）→ ERROR 终态，不等 `scope_done`**：worker 崩了根本没机会发 `scope_done`，此时**进程非干净终止本身就是终态信号**。若仍死等 `scope_done`，crash job 永远 RUNNING、reconciler 死循环（真跑 crash worker 复现，回归护栏 `core/tests/test_project.py::test_crash_no_scope_done_nonzero_exit_is_error`）。这一分支也覆盖「发完 scope_done 又非 0 退出」的误报 PASSED（exit≠0 一律 error，不看内容）。
 - **`task_exited` 且 exit==0 → 要求 `scope_done`**：干净退出才谈「内容完整」。有 `scope_done` → scenario 归约终态（passed/failed/error）；干净退出却没 `scope_done`（矛盾：进程说成功、内容没发完）→ ERROR（judged error 比死循环安全）。
-- **`task_exited` 且退出码未知（观察者没能取到 exitCode）→ ERROR 终态**：STOPPED 事件是观察者的**唯一一次机会**（ECS 不会为补码再发一次事件），「等观察者补」在事件驱动模型里结构上不存在；退出码未知即不可判定为通过，判 error 比无界等待安全（观察者侧落哨兵码，见下「退出码缺失」条）。
+- **`task_exited` 且退出码未知（观察者没能取到 exitCode）→ ERROR 终态**：STOPPED 事件是观察者的**唯一一次机会**（ECS 不会为补齐退出码再发一次事件），「等观察者补」在事件驱动模型里结构上不存在；退出码未知即不可判定为通过，判 error 比无界等待安全（观察者侧落哨兵退出码，见下「退出码缺失」条）。
 - **无 `task_exited`（进程还没终止）→ RUNNING（见了 scope_started）/ PENDING（还没起）**。
 
 即：**进程终止（exit≠0）优先于内容完整判终态**；只有干净退出（exit==0）才回到「scope_done ∧ exit」的两件都要（实现见 `core.project._job_status`）。
@@ -155,7 +155,7 @@ per-run 进程（观察者+reconciler 三合一）：spawn worker 子进程
 
 **launch 失败补偿——「起不来」也是一种进程终止（机制二的推论，code-health 对抗验证逼出）**：CAS 抢占成功后 `launcher.launch(job)` 可能抛异常（RunTask 放置失败/容量不足/task-def 配错/Popen OSError——其中 task-def 名配错是**确定性触发器**、每 job 必炸），此时 job 已被置 RUNNING 却永无 events、无 task_exited（进程根本没起、平台侧观察者无从观察）——若异常裸穿 tick，job 永停 RUNNING、整批不可恢复 wedge，且三触发源都救不回（「状态全持久、断点续」的可恢复性断言被推翻）；cloud 侧 Stream 重试还会因 job 已 running 而「成功」no-op、掩盖故障。**修法 = launch 的宿主（tick）扮演「起不来」这一时刻的退出观察者**：catch 异常 → `event_log.record_exit(scope_id, 非0哨兵码)` → 下轮重放走「exit≠0 → ERROR」既有谓词收敛终态。不发明新状态、不加重试（launch 级重试属 job 级重试的既有留口子）、异常不中断本 tick 其余 job（失败隔离，[0026](./0026-schedule-module.md)）。回归护栏 `core/tests/test_reconcile.py::test_launch_failure_does_not_wedge_run`。
 
-**退出码缺失：观察者落哨兵、不留宽限态（修正）**：本 ADR 最初把「STOPPED 但 exitCode 未落值」定义为有界宽限态（投影保守 RUNNING、观察者"短暂重查 DescribeTasks"兜底），根据是 [0024](./0024-worker-core-protocol.md) 记的 `lastStatus==STOPPED` 与 exitCode 落值非原子。**修正理由（code-health 对抗验证发现）**：①「补码」在事件驱动下没有第二次机会——ECS 对一个 task 只发一次 STOPPED 事件，观察者无 ECS 权限也不该有（薄 handler），所以宽限态在实装里是**无界**的；②容器根本没跑起来的形态（`stopCode=TaskFailedToStart`：拉不到镜像、缺 secret、放置失败）exitCode **必然**缺失，不是延迟而是永不——按旧表判 RUNNING 即 run 永久 wedge、三触发源都救不回。**决定**：观察者对缺 exitCode 的 STOPPED **一律落非 0 哨兵**（与上条 launch 失败补偿同一常量 `PLATFORM_FAILED_EXIT=255`，core 单点定义）并带 `reason`（`stopCode: stoppedReason`，随 `task_exited` 进事件日志、投影进 job message 让用户看到归因）；`_job_status` 对「有退出记录、非超时、退出码未知」判 ERROR（防御：老版本观察者或未知写者仍写 None 时不 wedge）。STOPPED 事件锚在 `stoppedAt`（已过落值窗口），正常退出必带码——实测 H1/H2 见地基实测节；哨兵只在容器没跑过时出现。**真跑坐实（坏镜像 tag 的 detached run）**：task-def 指向不存在的 ECR tag 提交 → STOPPED 事件 `stopCode=TaskFailedToStart`、无 exitCode → 观察者落 255 + reason → reconciler 一轮 tick 判 error 并 finalize，**提交后 2m15s run 到终态**，jobs/*.json 的 message 为「worker 未能启动或未正常结束（平台侧未取到退出码）：TaskFailedToStart: CannotPullContainerError: … not found」；同一场景在修正前的实装下 run 永久 RUNNING。**被拒**：给观察者加 DescribeTasks 重查/延迟重试——要加 ECS IAM 与调度机器，服务的却是一个实测从未出现、且对 TaskFailedToStart 无意义（永不落值）的形态。
+**退出码缺失：观察者落哨兵、不留宽限态（修正）**：本 ADR 最初把「STOPPED 但 exitCode 未落值」定义为有界宽限态（投影保守 RUNNING、观察者"短暂重查 DescribeTasks"兜底），根据是 [0024](./0024-worker-core-protocol.md) 记的 `lastStatus==STOPPED` 与 exitCode 落值非原子。**修正理由（code-health 对抗验证发现）**：①补齐退出码在事件驱动下没有第二次机会——ECS 对一个 task 只发一次 STOPPED 事件，观察者无 ECS 权限也不该有（薄 handler），所以宽限态在实装里是**无界**的；②容器根本没跑起来的形态（`stopCode=TaskFailedToStart`：拉不到镜像、缺 secret、放置失败）exitCode **必然**缺失，不是延迟而是永不——按旧表判 RUNNING 即 run 永久 wedge、三触发源都救不回。**决定**：观察者对缺 exitCode 的 STOPPED **一律落非 0 哨兵**（与上条 launch 失败补偿同一常量 `PLATFORM_FAILED_EXIT=255`，core 单点定义）并带 `reason`（`stopCode: stoppedReason`，随 `task_exited` 进事件日志、投影进 job message 让用户看到归因）；`_job_status` 对「有退出记录、非超时、退出码未知」判 ERROR（防御：老版本观察者或未知写者仍写 None 时不 wedge）。STOPPED 事件锚在 `stoppedAt`（已过落值窗口），正常退出必带退出码——实测 H1/H2 见地基实测节；哨兵只在容器没跑过时出现。**真跑坐实（坏镜像 tag 的 detached run）**：task-def 指向不存在的 ECR tag 提交 → STOPPED 事件 `stopCode=TaskFailedToStart`、无 exitCode → 观察者落 255 + reason → reconciler 一轮 tick 判 error 并 finalize，**提交后 2m15s run 到终态**，jobs/*.json 的 message 为「worker 未能启动或未正常结束（平台侧未取到退出码）：TaskFailedToStart: CannotPullContainerError: … not found」；同一场景在修正前的实装下 run 永久 RUNNING。**被拒**：给观察者加 DescribeTasks 重查/延迟重试——要加 ECS IAM 与调度机器，服务的却是一个实测从未出现、且对 TaskFailedToStart 无意义（永不落值）的形态。
 
 ### 机制三：`RunState` 投影写带 HWM 条件写（防并发 lost-update）
 
@@ -225,7 +225,7 @@ adapter/组合根（Lambda handler / per-run 进程，注入具体 client）：
    CAS 写 / RunTask / PutItem(task_exited/finalize) / RunState 落库   # 所有副作用在此层
 ```
 
-**core 只吐「当前状态」与「建议动作」，绝不持 store、不 import boto3、不依赖执行环境。** Lambda handler 是 cloud 组合根（cold-start 读 env 造 adapter 注入纯 reconciler——**仍是组合根注入，不是 ports 内部 env-sniff 全局单例**，[0016](./0016-execution-architecture-core-lib-run-model.md) 禁的 GlobalConfigManager 反模式要在评审时守住别退化成它）；per-run 进程是 local 组合根。归约码作纯 core 函数被两宿主 import 复用 = 「不复制归约逻辑」的正解。
+**core 只吐「当前状态」与「建议动作」，绝不持 store、不 import boto3、不依赖执行环境。** Lambda handler 是 cloud 组合根（cold-start 读 env 造 adapter 注入纯 reconciler——**仍是组合根注入，不是 ports 内部 env-sniff 全局单例**，[0016](./0016-execution-architecture-core-lib-run-model.md) 禁的 GlobalConfigManager 反模式要在评审时守住别退化成它）；per-run 进程是 local 组合根。归约代码作纯 core 函数被两宿主 import 复用 = 「不复制归约逻辑」的正解。
 
 **`project` 的全量重放反转了 [0031](./0031-job-lifecycle-states-and-severity.md) 决定三的一处立场**（反向链已记在 0031 的 Status 头）：那里把「`_aggregate` 只算一次、`pending`/`running` 的入口过滤只是为未来增量聚合预留的前向口子」当作现状，而每轮 tick 全量重放会把真实含 `pending`/`running` 的 `jobs_state` 原样喂进 `_aggregate`——那条过滤在此路径**已承重**（缺它前置态会污染 run 级 status）。决定三的**决策**因此反被印证、不是被推翻。
 
@@ -250,7 +250,7 @@ adapter/组合根（Lambda handler / per-run 进程，注入具体 client）：
 
 moto 立即返回测不到事件投递/并发时序，健康网真跑不触发这些路径——故下列是「绿≠对」边界的唯一有效证据：
 
-- **H1 事件 payload 带 exitCode（4/4，含最硬的 SIGKILL 截断）**：正常退出 exitCode=0→payload 带 0；缺 job 非 0 退出=1→带 1；StopTask 软停=0→带 0；**忽略 SIGTERM 的 sleeper 被 SIGKILL 硬杀=137→payload 仍带 137**。结论：观察者从 STOPPED 事件读 exitCode 可靠（事件锚在 `stoppedAt`、已过 exitCode 落值窗口）→ 机制二「极薄观察者」成立；缺码时重查 DescribeTasks 的兜底整体被拒（见机制二「退出码缺失：观察者落哨兵、不留宽限态」条），缺码一律落非 0 哨兵 + `reason`。
+- **H1 事件 payload 带 exitCode（4/4，含最硬的 SIGKILL 截断）**：正常退出 exitCode=0→payload 带 0；缺 job 非 0 退出=1→带 1；StopTask 软停=0→带 0；**忽略 SIGTERM 的 sleeper 被 SIGKILL 硬杀=137→payload 仍带 137**。结论：观察者从 STOPPED 事件读 exitCode 可靠（事件锚在 `stoppedAt`、已过 exitCode 落值窗口）→ 机制二「极薄观察者」成立；缺退出码时重查 DescribeTasks 的兜底整体被拒（见机制二「退出码缺失：观察者落哨兵、不留宽限态」条），缺退出码一律落非 0 哨兵 + `reason`。
 - **H2 延迟**：EventBridge→Lambda 投递 **0.6s**（近瞬时）；但端到端「worker 真停(`executionStoppedAt`)→可归约」= **~27s**，瓶颈全在 ECS 平台 `executionStoppedAt→stoppedAt` 清理开销（STOPPED 事件锚在 `stoppedAt`）。放大了 [0032](./0032-fargate-execution-environment.md) 记的 ~11s 平台滞后。**级联每步有 ~20-30s 固有尾延迟**——对异步跑批可接受，`status --wait` 会有此尾延迟，属已知特性。
 - **H3/机制三/四 并发写序（真 DDB）**：HWM 条件写——B 写终态(hwm=20)后 A 用旧快照(hwm=10)迟到写被 `ConditionalCheckFailedException` 挡、终态未被刷回 running；同 hwm 重复写幂等。**DDB Streams 并发度=2**（4 job 触发 2 个并发 Lambda 实例）→ 坐实「并发 reconciler」前提真实、HWM 条件写用得上；**同 PK 严格保序**（每 job seq `[1..5]` 按序到达）。
 

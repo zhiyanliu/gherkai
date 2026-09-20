@@ -122,7 +122,7 @@
       "col": 1,
       "type": "backend",
       "label": "各自一个 job",
-      "sublabel": "编号 = 路径:行号",
+      "sublabel": "编号写作 路径:行号",
       "width": 148
     },
     {

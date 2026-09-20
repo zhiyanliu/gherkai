@@ -19,7 +19,7 @@ CLI 按以下顺序确定目录，命中即用：
 | 2 | 环境变量 `GHERKAI_STEPS_DIR` | 与上一条同义，适合固定在 shell 或 CI 环境里 |
 | 3 | `./steps` | 相对当前工作目录，存在即用 |
 
-选项或环境变量显式指定的目录不存在（或不是目录）时，命令退 2 并说明原因：明确指了一个位置而那里没有内容属于配置错误，其中的确定性 step 一条都加载不了。默认的 `./steps` 不存在**不算错**——多数项目没有确定性 step。目录会被解析成绝对路径，并记进这个 run 的元信息：`run` 与 `submit` 起的后台进程、以及后续用 `gherkai status` 把这个 run 推到终态的进程，读到的都是同一个目录，不会因为工作目录不同而换一套 step。
+选项或环境变量显式指定的目录不存在（或不是目录）时，命令以退出码 2 结束并说明原因：明确指了一个位置而那里没有内容属于配置错误，其中的确定性 step 一条都加载不了。默认的 `./steps` 不存在**不算错**——多数项目没有确定性 step。目录会被解析成绝对路径，并记进这个 run 的元信息：`run` 与 `submit` 起的后台进程、以及后续用 `gherkai status` 把这个 run 推到终态的进程，读到的都是同一个目录，不会因为工作目录不同而换一套 step。
 
 worker 启动时排序递归遍历该目录，两个引擎各取自己的扩展名：
 
@@ -114,7 +114,7 @@ handler 只拿到上下文与具名组。挂在这一步上的 DataTable / DocSt
 
 被匹配的是关键字之后的 step 原文，`Given` / `Then` 本身不参与匹配：正则里不要写关键字（`example` 里带关键字是给 feature 作者照抄用的）。step 文本外层的双引号如果有，也算在被匹配的文本里。
 
-模式按**子串**匹配 step 文本（不要求整句吻合），并且一条 step 文本**最多只能命中一条**模式。命中多条时这一步记 `error` 并列出撞上的模式；`gherkai plan` 会提前把冲突标成 `← ⚠`，此时 plan 自己仍退 0。
+模式按**子串**匹配 step 文本（不要求整句吻合），并且一条 step 文本**最多只能命中一条**模式。命中多条时这一步记 `error` 并列出撞上的模式；`gherkai plan` 会提前把冲突标成 `← ⚠`，此时 plan 自己的退出码仍是 0。
 
 引擎内建的 step 与你注册的 step 进同一张表，**没有覆盖优先级**：模式撞上就是冲突，得收紧其中一条或改 step 措辞。
 
@@ -150,7 +150,7 @@ gherkai plan features/*.feature --steps-dir ./steps                # 每个 step
 gherkai doctor --steps-dir ./steps                                 # 目录与加载结果
 ```
 
-- `list-deterministic`：每条打三行——说明、`示例:`、`模式:`；`--engine` 缺省 `novaact`；清单含内建与你注册的全部条目。该引擎的 worker 没装时命令退 2，并原地给出安装命令。
+- `list-deterministic`：每条打三行——说明、`示例:`、`模式:`；`--engine` 缺省 `novaact`；清单含内建与你注册的全部条目。该引擎的 worker 没装时命令以退出码 2 结束，并原地给出安装命令。
 - `plan`：命中的 step 后面标 `← 确定性: <说明>`，冲突标 `← ⚠`，走 AI 的不标（减少噪声）。某个引擎的 worker 不可用时 `plan` 不会失败，但该引擎的 step 一个标注都没有，stderr 会说明标注已降级——这种情况下不要把「没有标注」读成「都走 AI」。示例 `.feature` 在仓库的 [`features/`](../../features/) 目录。
 - `doctor`：`steps.dir` 显示解析到的目录（没有目录时说明只有内建 step），`steps.load.<引擎>` 显示该引擎加载后共有多少条。
 
@@ -162,11 +162,11 @@ gherkai doctor --steps-dir ./steps                                 # 目录与�
 
 | 症状 | 原因 | 怎么办 |
 |---|---|---|
-| `plan` / `run` / `submit` 在起第一个 job 前退 2，点名某个文件与异常 | 该文件有语法错误或缺依赖 | 先修那个文件 |
+| `plan` / `run` / `submit` 在起第一个 job 前以退出码 2 结束，点名某个文件与异常 | 该文件有语法错误或缺依赖 | 先修那个文件 |
 | 启动即报错并点名某条模式 | 注册时缺 `description` 或 `example` | 补齐两个字段 |
 | Midscene 报某个文件一条确定性 step 都没注册 | 该文件没在顶层调用 `deterministic(...)`，或按文件路径导入了另一处安装的同名包 | 确认顶层有注册调用，且导入写的是包名 `@gherkai/worker-midscene` |
-| 命令退 2，说 `--steps-dir` 或 `GHERKAI_STEPS_DIR` 指的目录不存在 | 路径写错或目录被移走 | 改成正确路径 |
-| `list-deterministic`、`plan` 或运行前检查退 2，只有一句解析错误、没点名文件 | worker 与命令行工具版本不一致 | 把两侧装成同版本后重试 |
+| 命令以退出码 2 结束，说 `--steps-dir` 或 `GHERKAI_STEPS_DIR` 指的目录不存在 | 路径写错或目录被移走 | 改成正确路径 |
+| `list-deterministic`、`plan` 或运行前检查以退出码 2 结束，只有一句解析错误、没点名文件 | worker 与命令行工具版本不一致 | 把两侧装成同版本后重试 |
 | 写了 `steps/` 却全部走 AI，或少了几条 | 目录没被读到；Midscene 侧文件用了 `.mts` / `.mjs` 以外的扩展名（被跳过，不报错）；或正则与 step 文本不匹配 | 确认 `--steps-dir` 指对，扩展名改成 `.mts` 或 `.mjs`，再用 `list-deterministic` 核对清单条数，对照 `example` 改 step 文本 |
 
 更多症状与处置见 [`troubleshooting.md`](./troubleshooting.md)。

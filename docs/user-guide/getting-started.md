@@ -45,7 +45,7 @@ Nova Act 的 worker 随 `[local]` extra 装进同一个 Python 环境，Midscene
 
 ![你的机器与 AWS 账户各持有哪些部件：命令行与本机 worker 在你的机器上，云端 worker、浏览器会话与模型服务在 AWS 账户里，被测应用在两者之外](../diagrams/getting-started-component-ownership.svg)
 
-图注：**本机后端** = `--backend local`（默认），**云端后端** = `--backend cloud`。图上两个后端的差别只有一处——worker 在哪运行：云端后端运行的是同样两个引擎，对浏览器会话与模型服务做同样的事。图上的「本机 worker」按引擎分开装，Nova Act 与 Midscene 各一份，见上面的[安装](#安装)。账户归属按后端不同：本机后端用你自己的账户，云端后端用部署方建后端的那个账户（可能是团队共用）；四种组合、结果落点、权限，以及哪种组合记到谁的账户，见[运行测试与查看结果](./running-and-results.md)。要开通哪些服务、模型在哪个 region 处理见下表。确定性 step 代码不在图上：本机后端由 worker 从本机目录加载，云端后端来自 worker 镜像，见[编写确定性 step](./writing-deterministic-steps.md)。被测应用不在公网时的隧道拓扑见[测本机应用](./local-app-testing.md)。
+图注：**本机后端**指 `--backend local`（默认），**云端后端**指 `--backend cloud`。图上两个后端的差别只有一处——worker 在哪运行：云端后端运行的是同样两个引擎，对浏览器会话与模型服务做同样的事。图上的「本机 worker」按引擎分开装，Nova Act 与 Midscene 各一份，见上面的[安装](#安装)。账户归属按后端不同：本机后端用你自己的账户，云端后端用部署方建后端的那个账户（可能是团队共用）；四种组合、结果落点、权限，以及哪种组合记到谁的账户，见[运行测试与查看结果](./running-and-results.md)。要开通哪些服务、模型在哪个 region 处理见下表。确定性 step 代码不在图上：本机后端由 worker 从本机目录加载，云端后端来自 worker 镜像，见[编写确定性 step](./writing-deterministic-steps.md)。被测应用不在公网时的隧道拓扑见[测本机应用](./local-app-testing.md)。
 
 - **凭证**走本机 AWS 默认凭证链：profile、环境变量、实例角色都可以，不需要额外的 API key。用 `--profile` 或 `AWS_PROFILE` 指定 profile。
 - **region 必须有出处**，按此顺序解析：`--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > profile 配置里的 region。四处都没有时不会自动补一个 region：命令照常开始执行，引擎会在启动时因缺 region 报错，该 scope 判为 error。
@@ -71,7 +71,7 @@ gherkai doctor                                      # 只查本机
 gherkai doctor --backend cloud --prefix gherkai-    # 连带查凭证、region 与云端后端（前缀与部署时一致）
 ```
 
-输出每行一个检查项。全部必修项通过退 `0`，任一必修项未通过退 `2`。加 `--json` 输出 `{ok, checks[]}`，每项含 `section` / `name` / `ok` / `required` / `detail`，脚本按 `required && !ok` 挑出阻塞项。
+输出每行一个检查项。全部必修项通过时退出码为 0，任一必修项未通过时退出码为 2。加 `--json` 输出 `{ok, checks[]}`，每项含 `section` / `name` / `ok` / `required` / `detail`，脚本按 `required && !ok` 挑出阻塞项。
 
 只查本机的一次实际输出（这台机器没装 Midscene worker，容器引擎的 daemon 也没起）：
 
@@ -108,7 +108,7 @@ gherkai skill install --global          # 装到用户级目录，对你所有�
 gherkai skill install --print           # 只把正文打到标准输出，不安装
 ```
 
-- 装进去的是与本机 CLI 同版本的那一份。重装是整目录替换，不留上一版残余；目标目录里如果是别的内容（不是本命令装的），命令会停下并退 `2`，不覆盖。
+- 装进去的是与本机 CLI 同版本的那一份。重装是整目录替换，不留上一版残余；目标目录里如果是别的内容（不是本命令装的），命令会停下并以退出码 2 结束，不覆盖。
 - 安装后会询问一次是否把提示行写进项目的 `CLAUDE.md` / `AGENTS.md`。用 `--pointer yes|no` 免交互；非交互环境默认不写，只打印那一行供你自己粘贴。
 - 没装命令行也能取同一份 skill，版本自己指定：
 
@@ -116,7 +116,7 @@ gherkai skill install --print           # 只把正文打到标准输出，不�
 npx skills add https://github.com/zhiyanliu/gherkai/tree/v<版本>/cli/gherkai_cli/skills/gherkai --agent claude-code
 ```
 
-这条路不经命令行，版本要自己指定：URL 里的 `v<版本>` 填你要跟随的 CLI 版本（tag 或 commit 均可，带斜杠的分支名不行——安装器在第一个斜杠处切断 ref）；写 `HEAD` 拿的是默认分支最新，可能比你装的命令行新。它装出的目录不带版本标记：之后改用 `gherkai skill install`，命令会因为目标目录不是它装的而停下并退 `2`，先把该目录移走或删掉再装。Codex 的用户级落点两条路也不同，`npx` 写 `~/.codex/skills/`。
+这条路不经命令行，版本要自己指定：URL 里的 `v<版本>` 填你要跟随的 CLI 版本（tag 或 commit 均可，带斜杠的分支名不行——安装器在第一个斜杠处切断 ref）；写 `HEAD` 拿的是默认分支最新，可能比你装的命令行新。它装出的目录不带版本标记：之后改用 `gherkai skill install`，命令会因为目标目录不是它装的而停下并以退出码 2 结束，先把该目录移走或删掉再装。Codex 的用户级落点两条路也不同，`npx` 写 `~/.codex/skills/`。
 
 装完直接告诉 agent 要测什么，例如：
 
@@ -165,7 +165,7 @@ gherkai explain <run_id>
 
 它给出本次运行会开几个 job（每个 job 对应一个云端浏览器会话）、各自用哪个引擎、每一步走确定性 step 还是走 AI。**先 plan 后执行**：`plan` 零费用，能在实际运行产生费用之前暴露写法与配置问题。
 
-用 `@engine:` tag 指定了引擎的用例，在本机运行要求该引擎的 worker 已安装，否则 `run` 停下并退 `2`。仓库示例里的 `engine_routing.feature` 两个 scenario 分别指定两个引擎，只装了一个引擎时改用未标 `@engine` 的用例，或用 `--scope` 只运行其中一个。
+用 `@engine:` tag 指定了引擎的用例，在本机运行要求该引擎的 worker 已安装，否则 `run` 停下并以退出码 2 结束。仓库示例里的 `engine_routing.feature` 两个 scenario 分别指定两个引擎，只装了一个引擎时改用未标 `@engine` 的用例，或用 `--scope` 只运行其中一个。
 
 `run` 结束时打印判定汇总与报告位置，退出码即判定结果。`explain` 只读证据、从不改变判定：它按书写顺序列出每一步，把没过的那一步展开成「问了 AI 什么、AI 看见了什么、为什么这么判、截图在哪」。退出码的含义、`submit` + `status` 的后台执行方式、本机与云端两个后端的差别、报告与证据的完整布局，都在[运行测试与查看结果](./running-and-results.md)。
 

@@ -1616,7 +1616,7 @@
   },
   "docs/diagrams/configuration-env-inheritance.json": {
     "mtime": 1789872010.518521,
-    "ast_hash": "1a92e33b2103106b45f2d1ca0ea12dd3",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "docs/diagrams/deterministic-steps-registry-overview.json": {
@@ -1641,7 +1641,7 @@
   },
   "docs/diagrams/execution-timeout-chain.json": {
     "mtime": 1789872010.518828,
-    "ast_hash": "cafe9a8e982ac6bed50bf5b16649dd28",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "docs/diagrams/getting-started-component-ownership.json": {
@@ -1666,17 +1666,17 @@
   },
   "docs/diagrams/verdict-model-job-outcome.json": {
     "mtime": 1789872010.5189803,
-    "ast_hash": "7da92ec276cd02a404b7c3ff97df3929",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "docs/diagrams/verdict-model-reduction-layers.json": {
     "mtime": 1789873461.3131845,
-    "ast_hash": "19436b796eae63a15184d01b5412a47a",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "docs/diagrams/writing-features-scenario-to-job.json": {
     "mtime": 1789872010.5192323,
-    "ast_hash": "88b03acd7726aa3952ad6abc8bfa247b",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   ".claude/hooks/sync-derived.sh": {

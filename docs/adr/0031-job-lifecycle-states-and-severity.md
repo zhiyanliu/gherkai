@@ -33,10 +33,10 @@ class Status(str, Enum):
 | 态 | 含义 | 对使用者 | 产生处（schedule） |
 |---|---|---|---|
 | `skipped` | **worker 从未 spawn**（`abort_flag` 已 set 时排队中的 job） | 没花钱，可无脑重跑 | 起 worker 前的 `abort_flag` 已 set 分支 |
-| `aborted` | 已 spawn、跑一半被 **fail-fast** 掐断 | 动过、有副作用、先看现场再重跑 | 事件循环中因 `abort_flag` 被 stop + 其「被主动停后以网络码退出」的竞态回填 |
+| `aborted` | 已 spawn、跑一半被 **fail-fast** 掐断 | 动过、有副作用、先看现场再重跑 | 事件循环中因 `abort_flag` 被 stop + 其「被主动停后以网络故障退出码退出」的竞态回填 |
 
 > **aborted 只认 fail-fast，不认 timeout**（实装关键，别踩）：超时与 fail-fast **两条路径都会主动停 worker**，被停的 worker
-> 随后可能以网络码退出。本 ADR 的 aborted **仅对应 fail-fast 中止**（`abort_flag` 触发）；**超时杀的 job 维持 `error` + `errorType=timeout`**
+> 随后可能以网络故障退出码退出。本 ADR 的 aborted **仅对应 fail-fast 中止**（`abort_flag` 触发）；**超时杀的 job 维持 `error` + `errorType=timeout`**
 > （[0026](./0026-schedule-module.md)/[0028](./0028-transient-network-ssl-resilience.md)），**不归 aborted**。回填条件要按来源拆开——
 > 看 `abort_flag`、不看「是否被自己停过」这类笼统标志，否则会把超时和 fail-fast 两类语义不同的中止混成一类、丢掉 timeout 分类。
 >

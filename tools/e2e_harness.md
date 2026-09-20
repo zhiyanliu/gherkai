@@ -15,7 +15,7 @@
 ## 前置条件
 
 - **AWS 凭证 + region us-east-1**（default profile 即可）。
-- **宿主 export 的 `GHERKAI_*` 一律不生效**：harness 与 adapter 同一起手式，组合根拥有的 worker env（`GHERKAI_STEPS_DIR` / `GHERKAI_NO_ARTIFACTS` / `GHERKAI_EXTRA_HTTP_HEADERS`）先被显式清空；只有 `--steps-dir`（或环境变量 `HARNESS_STEPS_DIR`）给的值会被显式注回。起手行会回显 `steps_dir=…`（`None` = 已清空），据此确认注入生效。
+- **宿主 export 的 `GHERKAI_*` 一律不生效**：harness 与 adapter 同一起手式，组合根拥有的 worker env（`GHERKAI_STEPS_DIR` / `GHERKAI_NO_ARTIFACTS` / `GHERKAI_EXTRA_HTTP_HEADERS`）先被显式清空；只有 `--steps-dir`（或环境变量 `HARNESS_STEPS_DIR`）给的值会被显式注回。起手行会回显 `steps_dir=…`（`None` 表示已清空），据此确认注入生效。
 - **一个可写 S3 桶**，经环境变量 `HARNESS_S3_BUCKET` 传入（**勿硬编码**账号相关值）。运行结束后自行清理桶内 `harness/<run-id>/` 前缀（见下「清理」）。
 - 用**仓库根的 workspace venv** 运行（`uv run python …`，等价 `.venv/bin/python`）：harness 复用真实 `gherkai_core.scope.plan` 生成 job（避免手写 JSON 造成漂移），并复用 `gherkai_runtime.compose` 的 worker 定位链；根 `uv sync` 已把 `gherkai_core` 与 `gherkai_runtime` 都装成 editable（ADR 0037 决策 2）。**cwd 与 `PYTHONPATH` 都不限**，这由 editable 安装保证：harness 不改 `sys.path`，只由 `__file__` 派生仓库根推导 `features/` 路径。worker 路径不由它推导，见下条四级定位链。
 - **worker 经四级定位链启动**（与 CLI 同一真源，ADR 0037 决策 3），harness 不按仓库布局拼接路径：novaact 随仓库根 `uv sync` 装进同一 workspace venv，即命中「同 venv `-m` 入口」，无需独立 venv；midscene 需先在 `engines/midscene/` 执行 `npm install && npm run build` 生成 `dist/bin.mjs`，再用 `GHERKAI_WORKER_MIDSCENE_CMD="node <仓库根绝对路径>/engines/midscene/dist/bin.mjs"` 显式覆写（第一级）。四级全 miss 抛 `WorkerNotFoundError`，并附安装指引。
@@ -62,16 +62,16 @@ harness 结尾打印 `=== HARNESS_REPORT_JSON ===` + 一段 JSON。关键字段�
 
 | 字段                         | 含义 / 判读方式                                                                                                      |
 |------------------------------|----------------------------------------------------------------------------------------------------------------------|
-| `hung`                       | **`true` = 失败**：worker SIGTERM 后 grace-cap 内没退、被 SIGKILL。中断正确性的首要红线                                 |
+| `hung`                       | **`true` 即失败**：worker SIGTERM 后 grace-cap 内没退、被 SIGKILL。中断正确性的首要红线                                 |
 | `exit_code`                  | 正常/协作停止应 `0`；网络耗尽 `80`（`EX_WORKER_NETWORK`）；会话释放失败 `1`                                              |
 | `grace_s`                    | SIGTERM→worker 退出实测秒数（`none` 时为 null）。应 « grace-cap                                                         |
-| `sample_valid`               | **判读的第一个字段**。`false` = 无效样本，两类：① 中断过早、盘与 S3 均为空（`n_lost=0` 源于无可丢失的文件，而非提前上传已保全）→ 换更晚时机重新运行；② 指定了 `--interrupt <时机>` 但该时机未触发、全程退化为 baseline（`kill_phase=null`；已知两条：`scenario` 时机遇到单 scenario scope、`connect` 的 2s 定时器发现建连已完成）→ 换时机，或换「多 scenario 归一个 `@scope`」的 feature 重新运行。属哪一类见 `sample_note` |
+| `sample_valid`               | **判读的第一个字段**。`false` 表示无效样本，两类：① 中断过早、盘与 S3 均为空（`n_lost=0` 源于无可丢失的文件，而非提前上传已保全）→ 换更晚时机重新运行；② 指定了 `--interrupt <时机>` 但该时机未触发、全程退化为 baseline（`kill_phase=null`；已知两条：`scenario` 时机遇到单 scenario scope、`connect` 的 2s 定时器发现建连已完成）→ 换时机，或换「多 scenario 归一个 `@scope`」的 feature 重新运行。属哪一类见 `sample_note` |
 | `sample_note`                | 以自然语言说明 `sample_valid` 的判定依据与丢失量                                                                     |
 | `lost_on_fargate` / `n_lost` | **盘上有、S3 无**的文件，即 Fargate 容器盘销毁时会真实丢失的部分；subprocess 下这些文件留在本地盘、**非真实丢失**       |
 | `bytes_lost`                 | 同上字节数                                                                                                           |
 | `disk_files` / `s3_files`    | 中断后盘上与 S3 上的文件清单（含 size）                                                                                |
 | `scope_done_emitted`         | 中断路径应 `false`（不 emit scope_done、不走 flush）；正常完成 `true`                                                    |
-| `kill_phase`                 | SIGTERM 实际落在哪个时机（`connect`/`act_midway`/`between_steps`/`after_scenario1`/`scope_end`）。**非空 = 信号已真实投递**（时机已触发但 worker 已先退出时不予记录，避免「有 phase 无投递」的假阳性）。`--interrupt none` 本就为 `null`；**指定了中断时机却为 `null` = 本次未发出 SIGTERM**（该时机未触发或 worker 已先退出），此时任何丢失/提前上传结论都不成立 |
+| `kill_phase`                 | SIGTERM 实际落在哪个时机（`connect`/`act_midway`/`between_steps`/`after_scenario1`/`scope_end`）。**非空即信号已真实投递**（时机已触发但 worker 已先退出时不予记录，避免「有 phase 无投递」的假阳性）。`--interrupt none` 本就为 `null`；**指定了中断时机却为 `null`，表示本次未发出 SIGTERM**（该时机未触发或 worker 已先退出），此时任何丢失/提前上传结论都不成立 |
 | `counts`                     | `step_started`/`step_done`/`scenario_done`/`n_scenarios`：核对中断落点是否如预期；`scenario` 时机要求 `n_scenarios>1`，否则该时机不触发（见下「实际运行陷阱」第 1 条 `@scope:` 分组） |
 
 ### 判读要点（易误判处）

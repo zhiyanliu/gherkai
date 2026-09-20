@@ -33,12 +33,12 @@ uv sync            # 在 repo 根运行一次，core/runtime/cli + 本 worker �
 ```
 
 依赖与版本锁定（`pyproject.toml`）：`requires-python = ">=3.13"`；SDK **锁定精确版本** `nova-act==3.4.187.0`
-（升级 = 改 pin → 全套测试 + 模型评测集实际运行 → 随发版说明，见 [ADR 0042](../../docs/adr/0042-step-evidence-and-explain.md) 决策六），
+（升级的步骤是改 pin → 全套测试 + 模型评测集实际运行 → 随发版说明，见 [ADR 0042](../../docs/adr/0042-step-evidence-and-explain.md) 决策六），
 `boto3>=1.34` 直接声明，不经 nova-act 传递依赖（ADR 0037 决策 2c）；包版本由 git tag 经 uv-dynamic-versioning 算出，不写入文件（ADR 0037 决策 2b）。
 
 ## 执行形态：薄 worker（pytest-bdd 已退役）
 
-执行入口是包入口 `python -m gherkai_worker_novaact`（= `gherkai_worker_novaact/run_scope.py` 的 `main()`），即被组合根 spawn 的薄 worker：core 自解析 `.feature`，把每个 step 经 [ADR 0024](../../docs/adr/0024-worker-core-protocol.md) 协议派发给 worker（[ADR 0022](../../docs/adr/0022-bdd-runner-retired-core-parses-thin-worker.md)）。**pytest-bdd 入口（`bdd/` 层）已随 v0.x BDD 层退役删除**。
+执行入口是包入口 `python -m gherkai_worker_novaact`（即 `gherkai_worker_novaact/run_scope.py` 的 `main()`），它是被组合根 spawn 的薄 worker：core 自解析 `.feature`，把每个 step 经 [ADR 0024](../../docs/adr/0024-worker-core-protocol.md) 协议派发给 worker（[ADR 0022](../../docs/adr/0022-bdd-runner-retired-core-parses-thin-worker.md)）。**pytest-bdd 入口（`bdd/` 层）已随 v0.x BDD 层退役删除**。
 
 `python -m gherkai_worker_novaact` 与 console script `gherkai-worker-novaact` 是**同一个 `main()`**（定位链第二、三级，ADR 0037 决策 3），行为逐字一致；**入口不做任何包装**（不起子进程、不改 fd）：worker 必须是组合根直接 spawn 的那个进程，中间任何包装层都会使 fd3 丢失（EVENTS_FD 经 `pass_fds` 继承，ADR 0024 三通道）。
 
@@ -58,7 +58,7 @@ worker 侧**只有这两个 flag**：确定性清单是 `--capabilities` 对象�
 
 | env | 缺省 | 作用 |
 |---|---|---|
-| `NOVA_MODEL_ID` | `nova-act-v1.0`（`lib/constants.py` 的 `MODEL_ID`） | 传给 `Workflow(model_id=...)` 的模型 id，同时是 `--capabilities` 的 `model_id`。默认锁定 GA 版本、不用 `nova-act-latest` 别名，更换默认值须随发版评估（[ADR 0044](../../docs/adr/0044-engine-model-selection-and-override.md) 决策 1/2 两引擎同律，现值登记在该 ADR）；Nova 侧的选型证据见 [ADR 0004](../../docs/adr/0004-novaact-iam-auth-via-workflow.md)「模型版本选择策略」 |
+| `NOVA_MODEL_ID` | `nova-act-v1.0`（`lib/constants.py` 的 `MODEL_ID`） | 传给 `Workflow(model_id=...)` 的模型 id，同时是 `--capabilities` 的 `model_id`。默认锁定 GA 版本、不用 `nova-act-latest` 别名，更换默认值须随发版评估（[ADR 0044](../../docs/adr/0044-engine-model-selection-and-override.md) 决策 1/2 两引擎规则一致，现值登记在该 ADR）；Nova 侧的选型证据见 [ADR 0004](../../docs/adr/0004-novaact-iam-auth-via-workflow.md)「模型版本选择策略」 |
 | `NOVA_ACT_TIMEOUT_S` | `120`（`run_scope.ACT_TIMEOUT_S`） | 单个 `act` / `act_get` 的超时上界（SDK 允许 [2,1800]）；真值在组合根，由它注入 worker（[ADR 0024](../../docs/adr/0024-worker-core-protocol.md) act 有界返回） |
 | `NOVA_GRACE_MARGIN_S` | `30`（`lib/constants.py`） | 自报 grace 下限的收尾余量：`min_grace_s = NOVA_ACT_TIMEOUT_S + NOVA_GRACE_MARGIN_S`。30 由真容器标定得出（会话释放 ≤9 秒 + 截图队列退出段排空 6 秒，留约两倍余量；推导写在该常量旁注） |
 | `NOVA_LOGS_DIR` | 无（不设即回落 SDK `mkdtemp` 出的临时目录） | Nova SDK 的 trajectory 落点，组合根注入 `<report_dir>/<run_id>/nova-trajectories` 绝对路径（子目录名的单一真源是 `runtime/gherkai_runtime/names.py` 的 `ARTIFACT_SUBDIR`）；worker 主流程与 uploader 都读它 |
@@ -77,7 +77,7 @@ worker 侧**只有这两个 flag**：确定性清单是 `--capabilities` 对象�
 
 ## 确定性 step：内建脚手架 vs 使用方的 `steps/`
 
-确定性注册表 = **本包内建脚手架**（`gherkai_worker_novaact/deterministic_steps.py`，一条 URL 确定性断言作范例）**+ 使用方项目里的 `steps/` 目录**（ADR 0037 决策 4）。使用方**不修改包内文件**（包内文件是发行内容，修改等同于 fork）；使用方侧的写法见 [user guide](../../docs/user-guide/writing-deterministic-steps.md)。
+确定性注册表由两部分组成：**本包内建脚手架**（`gherkai_worker_novaact/deterministic_steps.py`，一条 URL 确定性断言作范例）**与使用方项目里的 `steps/` 目录**（ADR 0037 决策 4）。使用方**不修改包内文件**（包内文件是发行内容，修改等同于 fork）；使用方侧的写法见 [user guide](../../docs/user-guide/writing-deterministic-steps.md)。
 
 steps 目录 worker **只认环境变量 `GHERKAI_STEPS_DIR`**：`--steps-dir` flag / 默认 `./steps` / 随 run definition 持久化，全部由 CLI 侧（组合根）解析后注入，worker 不自行推断路径（ADR 0037 决策 4）。手动直接运行 worker 时须自行设置该 env：
 
@@ -123,7 +123,7 @@ Nova Act 每次 `act`/`act_get` 各产出一个 trajectory HTML。落点分两�
 
 ## 容器镜像（面向发布方）
 
-`Dockerfile` = 云端后端（Fargate）的 worker **基础镜像**（`gherkai-worker-novaact` + SDK 运行时 + 协议层，**零使用方内容**）；使用方的定制层模板（`FROM <基础镜像>` + `COPY steps/` + `GHERKAI_STEPS_DIR`）与推送流程见 [ADR 0038](../../docs/adr/0038-worker-image-delivery.md)（包 README 已降为入口页、不再带模板）。
+`Dockerfile` 构建的是云端后端（Fargate）的 worker **基础镜像**（`gherkai-worker-novaact` + SDK 运行时 + 协议层，**零使用方内容**）；使用方的定制层模板（`FROM <基础镜像>` + `COPY steps/` + `GHERKAI_STEPS_DIR`）与推送流程见 [ADR 0038](../../docs/adr/0038-worker-image-delivery.md)（包 README 已降为入口页、不再带模板）。
 
 同一份 Dockerfile 有**两态**，由 `--build-arg WORKER_SOURCE=` 选择（ADR 0037 决策 5）：
 
