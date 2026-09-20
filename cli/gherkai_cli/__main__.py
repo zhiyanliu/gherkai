@@ -691,7 +691,7 @@ def _cmd_doctor(args) -> int:
     if steps_err:
         add("steps", "dir", False, steps_err)
     elif steps_dir is None:
-        add("steps", "dir", True, "无 steps/ 目录：只有内建确定性 step（多数项目的常态）", required=False)
+        add("steps", "dir", True, "无 steps/ 目录：只有内建确定性 step", required=False)
     else:
         add("steps", "dir", True, steps_dir, required=False)
     # 加载结果：有 steps 目录时验使用方 step 能否加载（必修——加载失败会静默降级成 AI，ADR 0037 决策 4 fail-loud）；
@@ -849,8 +849,8 @@ def _doctor_worker_grace(target, add, revisions: dict) -> None:
             details.append(
                 f"{eng}: 收尾需 {need:g}s > 云端停止宽限 {stop_timeout}s——极端情形（停止信号正好落在一次"
                 f"耗满时长上限的 AI 操作刚开始时）收尾会被强制终止：浏览器会话改由云端会话超时回收、该 scope 最后"
-                f"一两张截图可能没传上去。云端宽限还没顶到平台上限时，可让部署方运行一次 gherkai deploy --stop-timeout 抬高；"
-                f"已经在上限了就抬不动了，这条差距是平台限制、属已知并接受的代价，不必处理"
+                f"一两张截图可能没有保存至 S3。云端宽限尚未达到平台上限时，可让部署方运行一次 gherkai deploy --stop-timeout 提高超时配置；"
+                f"已达平台上限时则无法再提高——这条差距来自平台限制，属已知并接受的代价，不必处理"
             )
     if skipped:
         details.append(f"本机没有 {'/'.join(skipped)} 的 worker，跳过（只提交、不在本机运行不需要它）")
