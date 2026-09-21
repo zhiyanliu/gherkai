@@ -1170,8 +1170,8 @@
     "semantic_hash": "ab624bd065760f8a1b9621c9bde6cf84"
   },
   "docs/adr/0043-agent-skill-for-driving-gherkai.md": {
-    "mtime": 1789891572.3369086,
-    "ast_hash": "6a9963a507320458bda18709733582c0",
+    "mtime": 1789956057.9539173,
+    "ast_hash": "25263177ca30ac9b84305375e3e86795",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skill_install.py": {
@@ -1210,8 +1210,8 @@
     "semantic_hash": "3524df935b2e2f3423a244a3c54906fe"
   },
   "cli/gherkai_cli/skills/gherkai/SKILL.md": {
-    "mtime": 1789886933.780461,
-    "ast_hash": "47d2d3f272397d2f289fba4ead364dcf",
+    "mtime": 1789956057.952652,
+    "ast_hash": "e8f43ef20029806db418495a62a02138",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skills/gherkai/references/cli-json-contract.md": {
@@ -1230,13 +1230,13 @@
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skills/gherkai/references/setup-and-diagnosis.md": {
-    "mtime": 1789873013.0849776,
-    "ast_hash": "ad6c0e3333fb98e3bd5b30fc7ea22389",
-    "semantic_hash": "ad6c0e3333fb98e3bd5b30fc7ea22389"
+    "mtime": 1789955570.5444577,
+    "ast_hash": "153ed8fe51495995486ad2755c194772",
+    "semantic_hash": ""
   },
   "skills/gherkai-evals/evals.json": {
     "mtime": 1789890577.498961,
-    "ast_hash": "52bec4ceeea421483ee147de470a95d1",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "skills/gherkai-evals/trigger-eval.json": {
@@ -1335,8 +1335,8 @@
     "semantic_hash": ""
   },
   "CHANGELOG.md": {
-    "mtime": 1789884115.2323182,
-    "ast_hash": "70e200d2b54bb013a31d1d967edc7916",
+    "mtime": 1789955729.6335974,
+    "ast_hash": "7b16ecf5df92d5af4328bcf71b234aab",
     "semantic_hash": ""
   },
   "CONTRIBUTING.md": {
@@ -1752,6 +1752,16 @@
   "cli/gherkai_cli/skills/gherkai/references/deterministic-steps.md": {
     "mtime": 1789891572.3360214,
     "ast_hash": "6a134168fb319187acd662d355175b6b",
+    "semantic_hash": ""
+  },
+  "cli/skills/gherkai-evals/fixtures/tunnel-mismatch/vite.config.js": {
+    "mtime": 1789954987.4660225,
+    "ast_hash": "2dd93d8e0ca98f997c6763c47f21fa01",
+    "semantic_hash": ""
+  },
+  "cli/skills/gherkai-evals/fixtures/tunnel-mismatch/README.md": {
+    "mtime": 1789954987.468151,
+    "ast_hash": "761eb097880295481d4f7f77226aea01",
     "semantic_hash": ""
   }
 }

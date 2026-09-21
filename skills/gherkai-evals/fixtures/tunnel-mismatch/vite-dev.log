@@ -1,0 +1,9 @@
+  VITE v6.3.5  ready in 412 ms
+
+  ➜  Local:   http://localhost:3000/
+  ➜  Network: http://192.168.1.23:3000/
+
+Blocked request. This host ("a1b2c3d4e5f6.ngrok-free.app") is not allowed.
+To allow this host, add "a1b2c3d4e5f6.ngrok-free.app" to `server.allowedHosts` in vite.config.js.
+Blocked request. This host ("a1b2c3d4e5f6.ngrok-free.app") is not allowed.
+To allow this host, add "a1b2c3d4e5f6.ngrok-free.app" to `server.allowedHosts` in vite.config.js.
