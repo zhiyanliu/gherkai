@@ -549,6 +549,14 @@ export async function main(): Promise<number> {
     const extraHeaders = process.env.GHERKAI_EXTRA_HTTP_HEADERS;
     if (extraHeaders) await ctx.setExtraHTTPHeaders(JSON.parse(extraHeaders));
     const page = ctx.pages()[0] ?? (await ctx.newPage());
+    // 页面里补一个 `__name` 空实现（ADR 0037 决策 4 的 tsx loader 副作用）：worker 用 tsx 转译使用方的 `.mts` step 文件，
+    // esbuild 的 keepNames 会把函数包成 `__name(fn, "fn")`；这样的函数一旦经 page.evaluate / waitForFunction 序列化进页面，
+    // 页面里没有 `__name` 就抛 ReferenceError。使用方本地单测（node 直接执行、无 tsx）撞不到、云端一运行就全红，故由 worker
+    // 在每个文档里预置一个恒等实现：context 级 addInitScript 管此后的每次导航，evaluate 管当前已打开的文档。两处都传字符串——
+    // 本文件同样经 tsx 转译，传函数会把同一个问题带进去。
+    const NAME_SHIM = "globalThis.__name = globalThis.__name || ((fn) => fn);";
+    await ctx.addInitScript(NAME_SHIM);
+    await page.evaluate(NAME_SHIM).catch(() => {});
     const agent = new PlaywrightAgent(page, agentOpts());
     return { page, agent };
   }

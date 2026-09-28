@@ -440,9 +440,9 @@
     "semantic_hash": "2e97bc1b5eaae55d2e83f8b1e1f51829"
   },
   "docs/adr/0037-distribution-and-packaging.md": {
-    "mtime": 1789871622.1271164,
-    "ast_hash": "ee3d270ba0969e56147958b28c71e16d",
-    "semantic_hash": "ee3d270ba0969e56147958b28c71e16d"
+    "mtime": 1790587234.4820032,
+    "ast_hash": "46e7a4c74ec8658586ba5d70e4bd060d",
+    "semantic_hash": ""
   },
   "docs/adr/0038-worker-image-delivery.md": {
     "mtime": 1789871622.1277955,
@@ -760,9 +760,9 @@
     "semantic_hash": "f4f1b1adf124a8e1533f2e2935ff1027"
   },
   "engines/midscene/src/worker/run-scope.mts": {
-    "mtime": 1789873630.4515977,
-    "ast_hash": "29518cdae7343bac3670fc547988e941",
-    "semantic_hash": "29518cdae7343bac3670fc547988e941"
+    "mtime": 1790587037.9204109,
+    "ast_hash": "5a81947a4de926501be43f361f0c9fd8",
+    "semantic_hash": ""
   },
   "engines/midscene/src/worker/run-scope.test.mts": {
     "mtime": 1789873682.3376243,
