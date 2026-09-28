@@ -40,7 +40,7 @@ Midscene 对被测 UI 的语言不限。Nova Act 的支持范围是英文 UI：�
 
 ## 4 编写 feature 与 steps
 
-从需求与被测应用（代码、文档、真实页面）取信息时，优先取稳定的语义：标题、可见文案、流程结果，而不是选择器、类名这类实现细节。写法：
+期望值只来自需求（标题、可见文案、流程结果这类稳定语义）；看被测应用的代码与页面只为定位元素、实现动作，不把应用现状写成期望。写法：
 
 - 一条 scenario 讲一件事，五到八步以内；导航步写 `Given 打开 "http(s)://…"`（双引号内 URL 走导航），动作步写用户会怎么说（`When "在搜索框输入 Python 并提交搜索"`），断言写成页面级语义陈述（`Then "当前是 Python 的词条页"`、`Then "页面没有报错"`），别把子串规则、段落边界塞进断言，那是确定性 step 的活。
 - 需要接着上一条的页面状态继续，就把两条编进同一 `@scope`；互不相干的用例分开 scope 好并发，scope 名跨文件不能撞（见第 1 节）。被测 UI 非英文就标 `@engine:midscene`。单个 scope 会很长就标 `@timeout:<秒>`。
@@ -48,7 +48,7 @@ Midscene 对被测 UI 的语言不限。Nova Act 的支持范围是英文 UI：�
 - 公共前置步（登录、导航到基线页）写 `Background`：它展开进同一 feature 下每条 scenario 的最前面，步号从它的第一步 0 起数、scenario 里书写的步跟着后移（`explain --step N` 同此口径）；同一 `@scope` 里每条 scenario 都各自重新运行一遍它，别把导航塞进 `Background` 又指望后一条接着前一条的页面状态。
 - 同一流程换数据运行多遍写 `Scenario Outline` + `Examples`：每行数据展开成一条独立 scenario（占位符已代入），未标 `@scope` 时各成一个 job、`scope_id` 比普通 scenario 多一段数据行号，收窄后重新运行时照抄判定明细里的完整值；`--scenario` 要一次选中该 Outline 的全部数据行就只给声明行的行号（纯数字或 `:行号`）。
 - **什么时候配确定性 step**：URL 匹配、元素存在、精确数值、必须可复现、要快、出现频次高。两引擎各有最小模板与必填元数据（`description` / `example`，缺了启动即报错），见 `references/engines.md`。同一 feature 要在两个引擎上运行时正则两侧要成对写。内建一条 `Then 页面地址匹配 "<正则>"` 可直接用。**写代码时**（等待与判定、失败消息带现场、判定逻辑放 `_` 前缀模块并本地单测）按 `references/deterministic-steps.md`；改完的汇报带根因与改法、两侧清单与 `plan` 标注的核对结果、以后的自查方法三样。
-- 写完先 `gherkai list-deterministic --engine <名>` 核对你的 step 在清单里，再 `gherkai plan <feature>` 看每步标注：命中确定性的标 `← 确定性: <说明>`，其余走 AI。
+- 写新 step 前先看两个引擎的 `gherkai list-deterministic --engine <名>` 清单，已有的复用、同义模式不重复注册；写完再核对它在清单里，然后 `gherkai plan <feature>` 看每步标注：命中确定性的标 `← 确定性: <说明>`，其余走 AI。
 
 ## 5 工作循环
 
