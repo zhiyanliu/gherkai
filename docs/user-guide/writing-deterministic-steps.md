@@ -144,11 +144,12 @@ handler 只拿到上下文与具名组。挂在这一步上的 DataTable / DocSt
 
 ## 写得稳：等待与判定
 
-确定性 step 假失败的头号来源是**读了瞬时值**：`is_visible()` / `isVisible()`、直接取 `text_content()` 这类调用取的是当下那一瞬间，页面还在加载就判否，手动打开页面却明明能看到。三条规则：
+确定性 step 假失败的头号来源是**读了瞬时值**：`is_visible()` / `isVisible()`、直接取 `text_content()` 这类调用取的是当下那一瞬间，页面还在加载就判否，手动打开页面却明明能看到。四条规则：
 
 1. **用带等待的判定，不用瞬时值，也不用固定等待。** Python 侧用 Playwright 的 `expect(...)` 一族（`expect(page.locator(sel)).to_be_visible(timeout=...)`、`to_have_text(...)`、`to_have_url(...)`），它自动重试到超时，超时抛 `AssertionError`，这一步记 `failed`。Midscene 侧用 `locator.waitFor({ state, timeout })` 与 `page.waitForURL(...)`。固定 `sleep` 既慢又照样抖。
 2. **等待超时不是断言。** `locator.wait_for(...)` / `locator.waitFor(...)` 超时抛的是 Playwright 的 `TimeoutError`，不是断言异常，这一步会记 `error` 而不是 `failed`，退出码与报告都会把它当执行错误。要让它记 `failed`，捕获后转成 `AssertionError`（Python）或 `DeterministicAssertion`（Midscene），转换时把现场补进消息。
 3. **给等待一个几秒的上限。** Playwright 默认 30 秒，一条 step 等满 30 秒会吃掉这个 scope 的墙钟预算（`@timeout`），也拖慢整轮反馈。按页面实际响应给 3 到 10 秒。
+4. **瞬态窗口内的多个动作合成一次页面内调用。** 页面只停留一两秒的状态（答对后自动切题、会自动消失的提示）在云端容易漏判：step 代码与远程浏览器之间每次 Playwright 调用要往返几百毫秒，「点击、再点击、读数」分三次调用就落到了窗口之后，而本机单测因为浏览器就在旁边照样能过。把这几步写成一段页面内脚本，一次 `page.evaluate(...)` 完成并把读到的值一并返回，step 代码只做断言。传字符串时注意 Node 版 Playwright 不会自动调用字符串里的函数表达式（Python 版会），要把参数拼成 JSON 字面量、写成立即调用的表达式。
 
 Python 侧 `from playwright.sync_api import expect` 可以直接用：worker 环境自带 Playwright。Midscene 侧**运行期不要 import `playwright`**：step 文件所在目录没有 `node_modules`，worker 只把 `@gherkai/worker-midscene` 这一个包名解析到自己那份，别的包名解析不到；`import type { Page } from "playwright"` 只当类型用、编译期擦除，可以写。
 
