@@ -260,8 +260,8 @@
     "semantic_hash": "46506796a3741a0992133c3ce390e125"
   },
   "README.md": {
-    "mtime": 1789881500.9189827,
-    "ast_hash": "1fa149f5d52de6d02350275ae61be319",
+    "mtime": 1790654101.3129961,
+    "ast_hash": "ad55ab0225e142f6dcb5a3e5a9eef17d",
     "semantic_hash": ""
   },
   "cli/README.md": {
@@ -1170,8 +1170,8 @@
     "semantic_hash": "ab624bd065760f8a1b9621c9bde6cf84"
   },
   "docs/adr/0043-agent-skill-for-driving-gherkai.md": {
-    "mtime": 1790652174.9971936,
-    "ast_hash": "159d3f4cda506d3cc73128b6a5ff8132",
+    "mtime": 1790656802.9182708,
+    "ast_hash": "053fb5ac21454e3a120b57d8cd3dfa03",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skill_install.py": {
@@ -1335,8 +1335,8 @@
     "semantic_hash": ""
   },
   "CHANGELOG.md": {
-    "mtime": 1790650349.9993527,
-    "ast_hash": "72fcb0217e8509de92dfd0d58565f11d",
+    "mtime": 1790654141.8736699,
+    "ast_hash": "6694eb2d7538da1dee2510358d2ac60e",
     "semantic_hash": ""
   },
   "CONTRIBUTING.md": {

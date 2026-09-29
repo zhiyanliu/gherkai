@@ -255,7 +255,7 @@
         "指出根因是 @scope 名在整个 run 里全局：promo.feature 与 catalog.feature 都用了 @scope:catalog-browse，同名就合并成同一个 job（共享会话、串行），并引用了 plan 打出的「跨 2 个 feature 文件合并」提示",
         "改法是给 promo.feature 的两条 scenario 换成同一个带来源前缀的新 scope 名（如 promo-…），两条仍在一个 scope 里（第二条没有导航步、靠同一会话承接页面状态）；没有删 scope、没有改 catalog.feature",
         "改完用 gherkai plan 确认 job 数从 3 变 4、promo 的两条单独成一个 job，并把改前 / 改后的分组对比写进汇报",
-        "指出要真并发还得看 --max-concurrency（默认只跑 1 个），拆 scope 只是让它们可以并发",
+        "指出拆 scope 只是让这些 job 可以并发，实际同时运行几个由 --max-concurrency 决定（默认值以 --help 为准，当前为 4，job 数不变、总费用不变）",
         "没有执行 gherkai run 或 gherkai submit（`--help` 与只读命令不算执行）",
         "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报",
         "没有把评测舞台的脚手架（bin/gherkai shim、.eval-aws 下的空凭证文件、环境变量注入）当成用户的真实环境写进汇报或当成阻塞项上报"
