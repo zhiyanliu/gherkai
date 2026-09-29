@@ -370,9 +370,9 @@
     "semantic_hash": "629dd9c609e1139e78b0a5dda9807a97"
   },
   "docs/adr/0026-schedule-module.md": {
-    "mtime": 1789734085.168494,
-    "ast_hash": "18cb539ff871384b90fae57d0e9e0e6e",
-    "semantic_hash": "18cb539ff871384b90fae57d0e9e0e6e"
+    "mtime": 1790645163.0584137,
+    "ast_hash": "abfb000307fb460a3e8593952bee46d2",
+    "semantic_hash": ""
   },
   "docs/adr/0027-runreport-aggregation-index.md": {
     "mtime": 1789830705.774904,
@@ -455,8 +455,8 @@
     "semantic_hash": "d82024d7c70df2a1f5ae5d17ed9298ba"
   },
   "cli/gherkai_cli/__main__.py": {
-    "mtime": 1789879648.9418573,
-    "ast_hash": "152dbf4f0a8033221d78cd92337c578f",
+    "mtime": 1790645194.7021353,
+    "ast_hash": "ff9497c214bd8d6433002e918e26d8a8",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/render.py": {
@@ -1335,8 +1335,8 @@
     "semantic_hash": ""
   },
   "CHANGELOG.md": {
-    "mtime": 1790584584.9121368,
-    "ast_hash": "1ade39b4caf72d7f617b709310dae83e",
+    "mtime": 1790645163.0586238,
+    "ast_hash": "0bac6dd8d00f3d0b1cd1b27f7877921d",
     "semantic_hash": ""
   },
   "CONTRIBUTING.md": {
@@ -1440,9 +1440,9 @@
     "semantic_hash": "df274663b7ef7610d905c8b41ece1708"
   },
   "docs/user-guide/running-and-results.md": {
-    "mtime": 1789872950.35717,
-    "ast_hash": "539f5b740f4ebff5de5fa8b7cc112c72",
-    "semantic_hash": "539f5b740f4ebff5de5fa8b7cc112c72"
+    "mtime": 1790645163.0582905,
+    "ast_hash": "3ccf97f1ac0c2c1af23c13655f209462",
+    "semantic_hash": ""
   },
   "docs/user-guide/troubleshooting.md": {
     "mtime": 1789868573.6146474,
@@ -1450,8 +1450,8 @@
     "semantic_hash": "ee2eb40c2db990eee95652ea7519c92d"
   },
   "docs/user-guide/writing-deterministic-steps.md": {
-    "mtime": 1789883844.3741999,
-    "ast_hash": "0c2764dd34f432a4387f1350a7b14014",
+    "mtime": 1790589882.3296912,
+    "ast_hash": "f395b68e20ad7a806f85b1f656d7216b",
     "semantic_hash": ""
   },
   "docs/user-guide/writing-features.md": {
@@ -1750,8 +1750,8 @@
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skills/gherkai/references/deterministic-steps.md": {
-    "mtime": 1790584544.6501942,
-    "ast_hash": "90c407523526459fd450c5eaf218e0ca",
+    "mtime": 1790589882.3292043,
+    "ast_hash": "7b23f46d45010acaee8260344c2c2ed6",
     "semantic_hash": ""
   },
   "cli/skills/gherkai-evals/fixtures/tunnel-mismatch/vite.config.js": {

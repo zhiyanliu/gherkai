@@ -29,6 +29,11 @@ from gherkai_cli import render
 from gherkai_cli import skill_install as _skill_install
 
 
+# run / submit 的并发默认值（ADR 0026「并发上限」定为 4）：并发只改同时开几个浏览器会话，不改 job 数与总费用；
+# status --wait 与 reconcile 的同名 flag 只是提交记录缺值时的回落，取同一常量避免漂移。
+DEFAULT_MAX_CONCURRENCY = 4
+
+
 def _dist_version() -> str:
     """发行版本字符串（唯一真源是 git tag，经 uv-dynamic-versioning 写进包元数据，ADR 0037 决策 2b；
     代码内不复制版本号）。未以包形式安装（如直接以源码路径运行）时给可辨识的占位、不抛。"""
@@ -193,8 +198,9 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
         help="AI 断言（Then）投票次数（默认 1 即单次判定）；调高（如 3/5）启用抖动检测：执行 N 次取多数票",
     )
     run.add_argument(
-        "--max-concurrency", type=int, default=1,
-        help="同时运行的 worker 上限（默认 1，护真实 AWS 成本/配额）",
+        "--max-concurrency", type=int, default=DEFAULT_MAX_CONCURRENCY,
+        help=f"同时运行的 worker 上限（默认 {DEFAULT_MAX_CONCURRENCY}；并发只改同时开几个浏览器会话、不改 job 数与总费用，"
+             "配额紧可调低）",
     )
     run.add_argument(
         "--default-job-timeout", type=float, default=300.0, metavar="S",
@@ -326,8 +332,8 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
                     help="未标 @engine 的 scope 用的默认引擎")
     _add_selection_flags(sm)
     sm.add_argument("--assertion-votes", type=int, default=1, metavar="N", help="AI 断言投票次数（默认 1）")
-    sm.add_argument("--max-concurrency", type=int, default=1,
-                    help="同时运行的 worker 上限（默认 1）；随提交记录生效，云端后端受部署侧上限"
+    sm.add_argument("--max-concurrency", type=int, default=DEFAULT_MAX_CONCURRENCY,
+                    help=f"同时运行的 worker 上限（默认 {DEFAULT_MAX_CONCURRENCY}）；随提交记录生效，云端后端受部署侧上限"
                          "（后端 stack 的 MAX_CONCURRENCY）钳制")
     sm.add_argument(
         "--default-job-timeout", type=float, default=300.0, metavar="S",
@@ -383,7 +389,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
                     help="轮询到 run 达终态再返回（两路都支持，接力方式不同：local 在本机接着把它推到底；"
                          "cloud 检测卡住即触发云端接力）")
     # 本 flag 只是回落值：RunMeta 带 max_concurrency 时以它为准（提交时定的并发闸才是这个 run 的口径）。
-    st.add_argument("--max-concurrency", type=int, default=1,
+    st.add_argument("--max-concurrency", type=int, default=DEFAULT_MAX_CONCURRENCY,
                     help="[local --wait] 接力推进的并发上限：默认按提交时的值走，提交记录里没有值才用这里给的")
     st.add_argument("--json", action="store_true", help="输出机器可读 JSON（这个 run 的运行态 + 产物落点）")
     st.add_argument("--prefix", default=None, metavar="P",
@@ -424,7 +430,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     rc = sub.add_parser("_reconcile")
     rc.add_argument("run_id")
     rc.add_argument("--report-dir", default="reports")
-    rc.add_argument("--max-concurrency", type=int, default=1)
+    rc.add_argument("--max-concurrency", type=int, default=DEFAULT_MAX_CONCURRENCY)
     rc.add_argument("--region", default=None)
     rc.add_argument("--profile", default=None)
 

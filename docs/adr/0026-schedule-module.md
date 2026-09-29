@@ -44,6 +44,7 @@ opts = {                 // 时间单位统一为秒；代码字段名带 _s 后
 
 - `maxConcurrency` 默认 **4**（保守）：每个并行 worker = 一个 AgentCore 会话 + 持续模型调用，**产生真实费用**（[0024](./0024-worker-core-protocol.md) cost）。超出上限的 job 排队，有 worker 退出腾出槽位再起下一个。
 - 是**注入参数 + 保守默认**，不写死——本地全量可调高、配额紧可调低。
+- **CLI 默认值须与此对齐**：CLI 曾把 `--max-concurrency` 默认写成 1（「护成本」直觉），但并发不改 job 数与模型调用量、只改墙钟——演示项目 20 个 job 经云端后端实测，串行 1756 秒、并发 4 时 443 秒，每个 job 的墙钟不变。2026-09-29 对齐回 4（`run` / `submit`，以及 `status --wait` 与 reconcile 缺值时的回落）。
 
 ### 失败隔离（默认隔离，可配 fail-fast）
 
