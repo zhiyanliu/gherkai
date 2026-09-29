@@ -29,6 +29,8 @@
   python skills/gherkai-evals/run_evals.py --iteration 3 --include-opt-in --ids 6   # 实际运行 run / submit，要真 AWS
   python skills/gherkai-evals/run_evals.py --iteration 10 --ids 17,18 --arms with_skill,old_skill \
       --old-skill-src skills/gherkai-workspace/skill-snapshot-v1.4.4        # 新旧 skill 对照
+  --model 取 Bedrock 模型 id：fable global.anthropic.claude-fable-5-1[1m]（缺省）、opus global.anthropic.claude-opus-5[1m]、
+      sonnet us.anthropic.claude-sonnet-5、haiku us.anthropic.claude-haiku-4-5-20251001-v1:0；运行前删掉或收权本机样例项目（ADR 0043 决策七隔离面）
 """
 from __future__ import annotations
 

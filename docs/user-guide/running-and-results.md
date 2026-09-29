@@ -131,7 +131,7 @@ reports/<run_id>/
 ├─ run_meta.json       这个 run 提交了什么（run_id、并发、每个 job 的用例原文与预算）
 ├─ run_state.json      运行到哪了
 ├─ nova-trajectories/  Nova Act 引擎的轨迹与会话汇总，以及每步的 AI 证据与截图
-├─ midscene-run/       Midscene 引擎的报告与截图，以及每步的 AI 证据
+├─ midscene-run/       Midscene 引擎的报告与截图，以及每步的 AI 证据；log/ai-config.log 记录这次实际用的模型
 └─ worker.log          仅 `run --quiet` 且在本机运行时
 ```
 

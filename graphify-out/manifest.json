@@ -425,9 +425,9 @@
     "semantic_hash": "2d10a8c1c6e7f072eb3e330554f1fe5a"
   },
   "docs/adr/0035-local-app-testing-via-tunnel.md": {
-    "mtime": 1789843813.4086778,
-    "ast_hash": "d68ef42d63c43b2a4789be56982d2a9e",
-    "semantic_hash": "d68ef42d63c43b2a4789be56982d2a9e"
+    "mtime": 1790651148.1163492,
+    "ast_hash": "21508c67bad36bcaca3fb9b5559c21df",
+    "semantic_hash": ""
   },
   "cli/tests/test_tunnel_cli.py": {
     "mtime": 1789872327.9003513,
@@ -970,9 +970,9 @@
     "semantic_hash": "631ca2240e5307f4b9be6d72b120a55e"
   },
   "deploy_aws/gherkai_deploy_aws/stack.py": {
-    "mtime": 1789875977.641638,
-    "ast_hash": "ba7afe9e43b13a80e6ede21bb625a8a8",
-    "semantic_hash": "ba7afe9e43b13a80e6ede21bb625a8a8"
+    "mtime": 1790647073.2802298,
+    "ast_hash": "6eab95e21013e225c2e1e362216c7b09",
+    "semantic_hash": ""
   },
   "deploy_aws/tests/synth_fixture.py": {
     "mtime": 1788837394.704897,
@@ -1170,8 +1170,8 @@
     "semantic_hash": "ab624bd065760f8a1b9621c9bde6cf84"
   },
   "docs/adr/0043-agent-skill-for-driving-gherkai.md": {
-    "mtime": 1789956057.9539173,
-    "ast_hash": "25263177ca30ac9b84305375e3e86795",
+    "mtime": 1790651148.1180935,
+    "ast_hash": "f4705f237091021c9a48b34ac5ba748f",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skill_install.py": {
@@ -1210,8 +1210,8 @@
     "semantic_hash": "3524df935b2e2f3423a244a3c54906fe"
   },
   "cli/gherkai_cli/skills/gherkai/SKILL.md": {
-    "mtime": 1790584544.6499639,
-    "ast_hash": "f4fb56cde2f250f4cfd35a305832ec08",
+    "mtime": 1790650932.6346626,
+    "ast_hash": "1e8f2da073a678bfd800ec6f5c38a83c",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skills/gherkai/references/cli-json-contract.md": {
@@ -1230,13 +1230,13 @@
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skills/gherkai/references/setup-and-diagnosis.md": {
-    "mtime": 1789955570.5444577,
-    "ast_hash": "153ed8fe51495995486ad2755c194772",
+    "mtime": 1790651148.116902,
+    "ast_hash": "4cd2acf16c93fd098c08624c43b90841",
     "semantic_hash": ""
   },
   "skills/gherkai-evals/evals.json": {
     "mtime": 1789956057.9530616,
-    "ast_hash": "0c9e1492480ab5b078ec995a856c4369",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "skills/gherkai-evals/trigger-eval.json": {
@@ -1245,8 +1245,8 @@
     "semantic_hash": ""
   },
   "skills/gherkai-evals/run_evals.py": {
-    "mtime": 1789883339.0188684,
-    "ast_hash": "63f65f639ad5f9df8efd4a908224a7b2",
+    "mtime": 1790651164.2627556,
+    "ast_hash": "212880d8ed1ea33d7dae6528697cfaef",
     "semantic_hash": ""
   },
   "skills/gherkai-evals/trigger_eval.py": {
@@ -1335,13 +1335,13 @@
     "semantic_hash": ""
   },
   "CHANGELOG.md": {
-    "mtime": 1790645163.0586238,
-    "ast_hash": "0bac6dd8d00f3d0b1cd1b27f7877921d",
+    "mtime": 1790650349.9993527,
+    "ast_hash": "72fcb0217e8509de92dfd0d58565f11d",
     "semantic_hash": ""
   },
   "CONTRIBUTING.md": {
-    "mtime": 1789881736.315972,
-    "ast_hash": "928dc8526f0b11c6915c287dc856ecb2",
+    "mtime": 1790651148.1177514,
+    "ast_hash": "22e9a5c28c02b5d570808c3e219210a4",
     "semantic_hash": ""
   },
   "docs/README.md": {
@@ -1420,9 +1420,9 @@
     "semantic_hash": ""
   },
   "docs/user-guide/cloud-backend.md": {
-    "mtime": 1789872950.3574562,
-    "ast_hash": "6050eeeba4e0177915bc1b63821e8414",
-    "semantic_hash": "6050eeeba4e0177915bc1b63821e8414"
+    "mtime": 1790647073.280391,
+    "ast_hash": "138e1b4180435a96c68b14f809fc6261",
+    "semantic_hash": ""
   },
   "docs/user-guide/configuration.md": {
     "mtime": 1789871875.0604503,
@@ -1430,18 +1430,18 @@
     "semantic_hash": "fa215427d5fdcf279939874496185a48"
   },
   "docs/user-guide/getting-started.md": {
-    "mtime": 1789881500.9191446,
-    "ast_hash": "789be4dc7b8c1f3904fb3a6c8f3e22bd",
+    "mtime": 1790651148.1157715,
+    "ast_hash": "6d2f3b2f0451e1c140929193d80f9f27",
     "semantic_hash": ""
   },
   "docs/user-guide/local-app-testing.md": {
-    "mtime": 1789871396.6288135,
-    "ast_hash": "df274663b7ef7610d905c8b41ece1708",
-    "semantic_hash": "df274663b7ef7610d905c8b41ece1708"
+    "mtime": 1790651148.1166558,
+    "ast_hash": "73656977c9008cbf289bc8c1874e727f",
+    "semantic_hash": ""
   },
   "docs/user-guide/running-and-results.md": {
-    "mtime": 1790645163.0582905,
-    "ast_hash": "3ccf97f1ac0c2c1af23c13655f209462",
+    "mtime": 1790651148.1160266,
+    "ast_hash": "b83a02def9c3f3f8b4e23d9e43ec7b95",
     "semantic_hash": ""
   },
   "docs/user-guide/troubleshooting.md": {
@@ -1455,9 +1455,9 @@
     "semantic_hash": ""
   },
   "docs/user-guide/writing-features.md": {
-    "mtime": 1789872058.8606725,
-    "ast_hash": "14c7d8c47a9c4e541052009077bc09f9",
-    "semantic_hash": "14c7d8c47a9c4e541052009077bc09f9"
+    "mtime": 1790651148.1172297,
+    "ast_hash": "dd94e7f9bd064f0018a9c63e1b4ebacd",
+    "semantic_hash": ""
   },
   "tools/build_diagrams.mjs": {
     "mtime": 1789873038.5115404,

@@ -30,6 +30,8 @@ Nova Act 的 worker 随 `[local]` extra 装进同一个 Python 环境，Midscene
 
 升级：`uv tool upgrade gherkai`（安装时带的 extra 会沿用）；Midscene worker 另外执行 `npm i -g @gherkai/worker-midscene@<CLI 版本>`。CLI 与 worker 要求同版本，CLI 与已部署的云端后端也要求同版本，不一致时的处置见[排错](./troubleshooting.md)。
 
+刚发布的版本若在升级时提示找不到，多半是 uv 复用了缓存的软件包索引：给命令加 `--refresh`（如 `uv tool install --force --refresh 'gherkai[local]'`）即可。
+
 各发行包的页面：[`gherkai`](https://pypi.org/project/gherkai/)、[`gherkai-worker-novaact`](https://pypi.org/project/gherkai-worker-novaact/)、[`@gherkai/worker-midscene`](https://www.npmjs.com/package/@gherkai/worker-midscene)、[`gherkai-deploy-aws`](https://pypi.org/project/gherkai-deploy-aws/)。
 
 ## 运行环境要求

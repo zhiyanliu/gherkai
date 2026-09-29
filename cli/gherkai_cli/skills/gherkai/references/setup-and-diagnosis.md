@@ -90,6 +90,7 @@
 | 明明写了 `steps/` 却全走 AI | 目录没被读到或正则不匹配 | `list-deterministic --steps-dir …` 核对；对照 `example` 改 step 文本 |
 | `status` / `explain` 以退出码 2 结束、说找不到 run（提示只提 `submit`） | 三个参数与**产生这个 run 的那条命令**（`run` 或 `submit`）不一致 | 照那条命令逐字对齐 `--backend` / `--report-dir` / `--prefix` |
 | `--expose-local` 起隧道失败 | 没装 ngrok、或 authtoken 没配（配置文件与环境变量都没有）、或填的是 API key、或本机没外网 | 第 5 节 |
+| 经隧道访问时页面内跳转、语言切换这类不刷新页面的功能不起作用，直连本机正常 | 隧道地址带认证信息，应用用绝对地址调历史记录接口被浏览器以安全原因拒绝 | 隧道模式特有的假失败：让应用用相对地址更新地址栏，不改用例 |
 | 隧道已建立，每条 scenario 第一步导航就失败，应用日志里没有请求 | 选项值与 feature 书写的地址不一致（localhost 对 `127.0.0.1`、端口、大小写），地址没被替换 | 第 5 节：`plan --expose-local` 回显与 step 文本逐字对照，改成一致 |
 | 请求到了应用，页面返回 400 或「host not allowed」，本机直连正常 | 开发服务器校验 Host，拒绝了隧道域名 | 第 5 节：放行隧道域名（通配写法） |
 | run 中途开始每条 scenario 都导航失败 | 隧道已拆：本机关机或断网，或 `--tunnel-ttl` 到点 | 保持开机联网；批量大时给更长的 `--tunnel-ttl` |
