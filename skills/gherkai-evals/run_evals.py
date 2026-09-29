@@ -10,7 +10,8 @@
   等于邀请它顺着仓库读原始教材；放在 `<cli-dir>/skill/` 也不行（ADR 0043 验证节第三轮 eval 3 的 baseline 顺着 shim 指向的 cli-dir
   `grep` 到了它、读了 references/engines.md），必须是 baseline 无从枚举到的位置。
 - **过程断言只认工具流水**：每次运行都存 `tool_calls.json`（用了哪些命令、有没有实际执行、有没有装东西），答案自述不算证据；
-  `timing.json` 另记三个每轮必报的污染 / 效率指标（repo_touches / network_calls / skill_copy_touches）。
+  `timing.json` 另记每轮必报的污染 / 效率指标（repo_touches / network_calls / skill_copy_touches，以及记忆目录的 memory_reads / memory_writes）；
+  `tool_calls.json` 每条带 `output`（工具结果截 3000 字），评分者据此核实、不必重新执行。
 - **一次运行多遍**：跨 run 的方差是判「两臂差值是不是噪声」的前提，缺省 3 次。
 - **改进既有 skill 时的对照臂是旧版 skill**（skill-creator 的 old_skill 臂）：`--old-skill-src <目录>` 指一份改动前的
   skill 快照（放 gitignore 的 `skills/gherkai-workspace/skill-snapshot-<版本>/`），臂名 `old_skill`，处理与 with_skill 完全
@@ -117,14 +118,35 @@ def parse_events(raw: str) -> list[dict]:
     return events
 
 
+OUTPUT_MAX = 3000  # 每条工具结果在 tool_calls.json 里保留的最大字符数：够评分者核对命令输出，又不让文件失控
+
+
+def _result_text(content) -> str:
+    """tool_result 的 content 可能是字符串，也可能是 [{type:text,text:…}] 的列表；拼成一段纯文本。"""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(str(b.get("text", "")) if isinstance(b, dict) else str(b) for b in content)
+    return "" if content is None else str(content)
+
+
 def tool_calls_of(events: list[dict]) -> list[dict]:
-    calls = []
+    """按顺序抽出全部工具调用，并把对应的工具结果（截到 OUTPUT_MAX 字）挂在 `output` 上。
+    评分者靠它核实「命令真执行了、结果是什么」；此前只有输入没有输出，评分者只能自己重新执行（第八轮评分者批评）。"""
+    calls, by_id = [], {}
     for e in events:
-        if e.get("type") != "assistant":
-            continue
-        for c in e.get("message", {}).get("content", []):
-            if c.get("type") == "tool_use":
-                calls.append({"tool": c.get("name"), "input": c.get("input")})
+        if e.get("type") == "assistant":
+            for c in e.get("message", {}).get("content", []):
+                if c.get("type") == "tool_use":
+                    rec = {"tool": c.get("name"), "input": c.get("input"), "output": None}
+                    calls.append(rec)
+                    if c.get("id"):
+                        by_id[c["id"]] = rec
+        elif e.get("type") == "user":
+            for c in e.get("message", {}).get("content", []) if isinstance(e.get("message", {}).get("content"), list) else []:
+                if isinstance(c, dict) and c.get("type") == "tool_result" and c.get("tool_use_id") in by_id:
+                    text = _result_text(c.get("content"))
+                    by_id[c["tool_use_id"]]["output"] = text[:OUTPUT_MAX] + ("…" if len(text) > OUTPUT_MAX else "")
     return calls
 
 
@@ -242,7 +264,13 @@ def run_one(ev: dict, arm: str, run_no: int, it_dir: Path, cli_dir: Path, model:
     total_tokens = sum(int(usage.get(k, 0) or 0) for k in
                        ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "output_tokens"))
     metrics = pollution_metrics(calls, [skill_tmp, skill_root, cli_dir / "skill"])
-    metrics["memory_reads"] = sum(1 for c in calls if "/.claude/projects/" in json.dumps(c.get("input"), ensure_ascii=False))
+    # 记忆目录读写分开计（第八轮评分者批评：agent 往舞台对应的记忆目录写文件，此前一律计入 memory_reads）。
+    # 写入本身不是污染（写的是本次 run 的舞台会话），读到上一次 run 留下的才是——舞台路径每次带随机后缀且运行前后各清一次，
+    # 所以 memory_reads>0 仍要查 tool_calls.json 看读到了什么。
+    _MEM, _WRITERS = "/.claude/projects/", ("Write", "Edit", "MultiEdit", "NotebookEdit")
+    mem_calls = [c for c in calls if _MEM in json.dumps(c.get("input"), ensure_ascii=False)]
+    metrics["memory_writes"] = sum(1 for c in mem_calls if c.get("tool") in _WRITERS)
+    metrics["memory_reads"] = len(mem_calls) - metrics["memory_writes"]
     shutil.rmtree(skill_tmp, ignore_errors=True)
     _purge_session_dir(stage)
     (out_dir / "timing.json").write_text(json.dumps({
@@ -253,6 +281,25 @@ def run_one(ev: dict, arm: str, run_no: int, it_dir: Path, cli_dir: Path, model:
     collect_outputs(stage, out_dir, str(data.get("result", "")))
     print(f"[done] eval {eid} {arm} run-{run_no}: {dur:.0f}s calls={len(calls)} tokens={total_tokens} "
           f"repo={metrics['repo_touches']} net={metrics['network_calls']} err={data.get('is_error')}", flush=True)
+
+
+def purge_stale_stages(keep_prefix: str, max_age_s: float = 3 * 3600) -> int:
+    """删掉 STAGE_ROOT 下不属于本轮、且超过 max_age_s 未改动的旧舞台，返回删掉的个数。
+
+    舞台在 run 结束后有意保留给评分者看，但下一轮的被测 agent 会 `ls /tmp/gherkai-eval-stages` 翻到别的轮次同一 eval 的产物
+    （第八轮实测）。并发运行的几个模型轮次编号不同、目录新，靠 mtime 门槛不误删。"""
+    if not STAGE_ROOT.is_dir():
+        return 0
+    now, n = time.time(), 0
+    for d in STAGE_ROOT.iterdir():
+        try:
+            if d.name.startswith(keep_prefix) or now - d.stat().st_mtime < max_age_s:
+                continue
+            shutil.rmtree(d, ignore_errors=True)
+            n += 1
+        except OSError:
+            continue
+    return n
 
 
 def main() -> None:
@@ -268,7 +315,12 @@ def main() -> None:
                     help=f"已备好的仓库外 CLI 目录（缺省 {DEFAULT_CLI_DIR}，见 materialize.py --prepare-cli）")
     ap.add_argument("--include-opt-in", action="store_true", help="连 opt_in 的 eval 一起运行（实际运行 run / submit、要真 AWS）")
     ap.add_argument("--old-skill-src", default="", help="old_skill 臂用的旧版 skill 快照目录（含 SKILL.md；放 gitignore 的 workspace 下）")
+    ap.add_argument("--keep-stages", action="store_true", help="不清理别的轮次留下的旧舞台（缺省运行前删掉 3 小时前的）")
     a = ap.parse_args()
+    if not a.keep_stages:
+        n = purge_stale_stages(f"iteration-{a.iteration}-")
+        if n:
+            print(f"清掉 {n} 个旧舞台（别的轮次、3 小时前）", flush=True)
 
     cli_dir = Path(a.cli_dir).resolve()
     if not (cli_dir / "venv" / "bin" / "gherkai").is_file():

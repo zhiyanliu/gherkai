@@ -45,7 +45,7 @@ def main() -> None:
             continue
         if not a.json:
             print(f"\n== {it}")
-            print(f"{'eval':40} {'arm':14} {'n':>2} {'秒':>5} {'usd':>6} {'repo':>4} {'skill':>5} {'net':>3} {'err':>3} {'pass':>5}")
+            print(f"{'eval':40} {'arm':14} {'n':>2} {'秒':>5} {'usd':>6} {'repo':>4} {'skill':>5} {'net':>3} {'mem':>5} {'err':>3} {'pass':>5}")
         for (ev, arm), ds in sorted(rows.items()):
             n = len(ds)
             rec = {
@@ -55,6 +55,8 @@ def main() -> None:
                 "repo_touches": sum(x.get("repo_touches", 0) for x in ds),
                 "skill_copy_touches": sum(x.get("skill_copy_touches", 0) for x in ds),
                 "network_calls": sum(x.get("network_calls", 0) for x in ds),
+                "memory_reads": sum(x.get("memory_reads", 0) for x in ds),
+                "memory_writes": sum(x.get("memory_writes", 0) for x in ds),
                 "errors": sum(1 for x in ds if x.get("num_turns") is None),
                 "graded": sum(1 for x in ds if x["_pass_rate"] is not None),
                 "pass_rate": (round(sum(x["_pass_rate"] for x in ds if x["_pass_rate"] is not None)
@@ -69,7 +71,7 @@ def main() -> None:
                 flag = " ← 污染" if rec["contaminated"] else ""
                 pr = f"{rec['pass_rate']:.2f}" if rec["pass_rate"] is not None else "-"
                 print(f"{ev[:40]:40} {arm:14} {n:>2} {rec['avg_seconds']:>5} {rec['cost_usd']:>6.2f} {rec['repo_touches']:>4} "
-                      f"{rec['skill_copy_touches']:>5} {rec['network_calls']:>3} {rec['errors']:>3} {pr:>5}{flag}")
+                      f"{rec['skill_copy_touches']:>5} {rec['network_calls']:>3} {str(rec['memory_reads']) + '/' + str(rec['memory_writes']):>5} {rec['errors']:>3} {pr:>5}{flag}")
         if not a.json:
             for arm in ("with_skill", "old_skill", "without_skill"):
                 ds = [x for (ev, a_), xs in rows.items() if a_ == arm for x in xs]
