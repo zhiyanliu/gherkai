@@ -112,7 +112,7 @@ ssh <host> 'cd ~/<repo-copy> && export PATH=$PATH:~/.local/bin && AWS_REGION=<re
 - 远端 `.venv` 里的发行版本是**上次 `uv sync` 时的快照**（`uv run` 会重新安装 editable 成员，但版本串取决于当时的 git 状态）；worker 镜像 tag 含精确版本串，因此这份 checkout **不能**执行 cloud `run` / `submit`（variant 解析找不到 `<该版本>-base`，退出码 2 是设计内提示）；验证云端侧新代码只能用只读命令，或另推 dev 版 variant（`gherkai deploy push-worker`，见 ADR 0038）。
 - Midscene 的 dev worker：`cd engines/midscene && npm run build` 构建出 `dist/bin.mjs`，再将其软链为 PATH 上的 `gherkai-worker-midscene`（或设 `GHERKAI_WORKER_MIDSCENE_CMD`），CLI 即可按定位链定位到它。
 - 需要一份带 error act 的证据（验证 `explain` 的错误分支）时：设 `NOVA_ACT_TIMEOUT_S=2`，使 Nova 的 act 必然超时。
-- ssh 的长时间等待会被远端中断：连接加 `-o ServerAliveInterval=15`，`status --wait` 这类长等待改为 15 秒一轮的 `status --json` 轮询；长任务用 `setsid nohup … > log 2>&1 < /dev/null &` 启动（不接管标准输入，ssh 才能立刻返回），再轮询日志；远端命令行里别写会匹配到自身的 `pkill -f` / `pgrep -f` 模式，模式文本出现在自己的命令行里会杀掉自己的会话。偶发 kex 阶段被拒（TCP 可达、sshd 拒绝）时等待几分钟重试，无需重启实例。
+- ssh 的长时间等待会被远端中断：连接加 `-o ServerAliveInterval=15`，`status --wait` 这类长等待改为 15 秒一轮的 `status --json` 轮询；长任务用 `setsid nohup … > log 2>&1 < /dev/null &` 启动（不接管标准输入，ssh 才能立刻返回），再轮询日志；`setsid` 只有 Linux 有，macOS 本机上没有它，命令会静默不执行，本机后台任务改用 `nohup … &` 或工具自带的后台执行；ssh 偶尔不随远端任务启动而返回，结束本地的 ssh 客户端即可，远端任务不受影响；远端命令行里别写会匹配到自身的 `pkill -f` / `pgrep -f` 模式，模式文本出现在自己的命令行里会杀掉自己的会话。偶发 kex 阶段被拒（TCP 可达、sshd 拒绝）时等待几分钟重试，无需重启实例。
 - 查模型用量看 CloudWatch 而不是账单：`bedrock-runtime` 的调用（Nova Act、Claude）计在命名空间 `AWS/Bedrock`（维度 ModelId）并进 CloudTrail 管理事件；Midscene worker 走的 OpenAI 兼容端点（bedrock-mantle）计在 `AWS/BedrockMantle`（维度 Model、Project），不进 CloudTrail 管理事件，CloudTrail 里对应的事件名是 `ChatCompletions`。Cost Explorer 滞后约 36 小时，且各模型分散在不同服务名下（2026-09-16 实测）。
 - 录制评测 fixture 的远端步骤见 ADR 0043 决策七；知识图刷新见下节。
 
