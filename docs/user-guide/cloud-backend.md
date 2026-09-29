@@ -36,7 +36,7 @@ uv tool install 'gherkai[deploy-aws]'      # 部署包随 CLI 的 extra 一起�
 
 云端两种执行方式的差别都源自「谁拉起 worker 任务」：`submit` 的任务由后端拉起；`run --backend cloud` 的任务由你自己的 CLI 进程拉起并等到运行结束。下面的并发上限与[团队成员的最小权限](#团队成员需要的最小云端权限)两处都由这一条决定。
 
-`submit --backend cloud` 提交的一个 run，并行 job 数为 `min(提交时 --max-concurrency 的值, 部署侧上限 8)`；给的值超过上限时提交命令打印一行提示，并按 8 并行。`run --backend cloud` 的并行度就是 `--max-concurrency`，不受这个上限约束。
+`submit --backend cloud` 提交的一个 run，并行 job 数为 `min(提交时 --max-concurrency 的值, 部署侧上限 20)`；给的值超过上限时提交命令打印一行提示，并按 20 并行。`run --backend cloud` 的并行度就是 `--max-concurrency`，不受这个上限约束。
 
 ## 首次部署
 

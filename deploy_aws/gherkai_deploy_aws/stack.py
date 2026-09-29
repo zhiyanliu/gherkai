@@ -59,7 +59,9 @@ class BackendStack(Stack):
     # 部署侧 per-run 并发 cap（**非真源**：真源是 definition 的 max_concurrency，推进器取 min，ADR 0034 机制四）。task 计入
     # 部署方账单，故部署方保留总量控制权、钳住提交侧声明。reconciler 与 kicker 两个推进器**必须同值**（首批与续起并行度
     # 一致）——单点在此，两个推进器共用同一份 advancer_env（同值由结构保证，不靠人对齐）。
-    DEPLOY_SIDE_MAX_CONCURRENCY = 8
+    # 取 20：提交侧默认 4，cap 只在提交者明确要更高并发时起作用；单 run 20 个 Fargate task 远在账户配额之内，真正的
+    # 天花板是模型服务的速率限制（并发高了 5xx/限流更常见），那是 worker 重试面的事、不由 cap 兜。
+    DEPLOY_SIDE_MAX_CONCURRENCY = 20
     DEFAULT_STOP_TIMEOUT_S = 120  # 默认贴 Fargate 上限：尽量给 worker 会话释放+安全点提前上传的预算（grace 真容器校准见 ADR 0032），可 -c stop_timeout= 覆盖
 
     def __init__(self, scope: Construct, construct_id: str, *, prefix: str, **kwargs) -> None:
