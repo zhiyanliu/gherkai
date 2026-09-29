@@ -85,6 +85,7 @@ gherkai 自己不含模型，也不接收任何数据。每个 AI step 的操作
 | 每个版本改了什么、升级要做什么                         | [CHANGELOG](./CHANGELOG.md)                                                                                                  |
 | 系统内部如何运转                                      | [`docs/internals/`](./docs/internals/README.md)                                                                              |
 | 参与开发                                              | [`CONTRIBUTING.md`](./CONTRIBUTING.md)                                                                                       |
+| 看一个完整的使用方项目：被测应用、用例与 step、QA 团队的工作方法 | [gherkai-webapp-demo](https://github.com/zhiyanliu/gherkai-webapp-demo)                                                       |
 
 全部文档的地图在 [`docs/README.md`](./docs/README.md)。发行包页面：[`gherkai`](https://pypi.org/project/gherkai/) · [`gherkai-worker-novaact`](https://pypi.org/project/gherkai-worker-novaact/) · [`@gherkai/worker-midscene`](https://www.npmjs.com/package/@gherkai/worker-midscene) · [`gherkai-deploy-aws`](https://pypi.org/project/gherkai-deploy-aws/) · 库 [`gherkai-core`](https://pypi.org/project/gherkai-core/) / [`gherkai-runtime`](https://pypi.org/project/gherkai-runtime/)。示例用例在 [`features/`](./features/)。
 
