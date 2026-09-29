@@ -388,6 +388,30 @@ test("stepEvidenceRef：page.url() 抛（页面已关）→ url 记 null，其�
   assert.ok(doc.acts[0].frames.length > 0);
 });
 
+test("stepEvidenceRef：落盘的 evidence.json 里隧道凭据已脱敏（ADR 0035 决策 5），仍是合法 JSON", async () => {
+  // step 文本、AI 指令、页面地址、thought、消息都带凭据内嵌的地址：写出的文件里 userinfo 段一律换成 ***。
+  const cred = "https://u1:p1@h.example/";
+  const runDir = tmpRun();
+  const { uploader } = spyUploader();
+  const agent = { dump: { executions: [exec(task({ type: "Insight", subType: "Boolean", output: false,
+    thought: `已打开 ${cred}home`, shot: "s1" }))] } };
+  const produced = await stepEvidenceRef({ runDir, scopeId: "sc", uploader, logFn: () => {} }, {
+    scenarioId: "s:1", step: { index: 0, keyword: "Then", text: `页面 ${cred}home 显示欢迎语` }, status: "failed",
+    message: `页面停在 ${cred}home 未跳转`, agent, execFrom: 0, page: { url: () => `${cred}home` },
+    prompt: `确认 ${cred}home 已加载`, votes: [false], error: null,
+  });
+  assert.notEqual(produced, null);
+  const raw = fs.readFileSync(evidenceFile(runDir, "s:1", 0), "utf-8");
+  assert.ok(!raw.includes("u1:p1@"), "凭据不该出现在 evidence.json 里");
+  assert.ok(raw.includes("***@"));
+  const doc = JSON.parse(raw) as EvidenceDoc;
+  assert.equal(doc.step.text, "页面 https://***@h.example/home 显示欢迎语");
+  assert.equal(doc.message, "页面停在 https://***@h.example/home 未跳转");
+  assert.equal(doc.acts[0].prompt, "确认 https://***@h.example/home 已加载");
+  assert.equal(doc.acts[0].url, "https://***@h.example/home");
+  assert.equal(doc.acts[0].frames[0].thought, "已打开 https://***@h.example/home");
+});
+
 test("stepEvidenceRef：落盘失败 → 日志一行 + 返 null，绝不抛", async () => {
   // runDir 指到一个**文件**上 → mkdir 必失败（真失败，不打桩）
   const bogus = fs.mkdtempSync(path.join(os.tmpdir(), "evid-"));

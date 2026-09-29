@@ -35,6 +35,19 @@ def test_emit_preserves_chinese_ensure_ascii_false(tmp_path, monkeypatch):
     assert "\\u" not in raw             # 没被转义
 
 
+def test_emit_masks_tunnel_credentials_in_serialized_line(tmp_path, monkeypatch):
+    # 隧道凭据不出 worker（ADR 0035 决策 5）：确定性 step 的失败消息带 page.url()，写出的整行里 userinfo 已换成 ***。
+    f = tmp_path / "ev.jsonl"
+    fd = os.open(str(f), os.O_WRONLY | os.O_CREAT | os.O_TRUNC)
+    monkeypatch.setenv("EVENTS_FD", str(fd))
+    EventSink.from_env().emit({"type": "step_done", "status": "failed",
+                               "message": "页面停在 https://u1:p1@h.example/ 未跳转"})
+    raw = f.read_text(encoding="utf-8")
+    assert "u1:p1@" not in raw
+    assert "https://***@h.example/" in raw
+    assert json.loads(raw)["message"] == "页面停在 https://***@h.example/ 未跳转"   # 仍是一条合法 JSON
+
+
 def test_from_env_falls_back_to_stdout_when_no_events_fd(monkeypatch, capsys):
     # 无 EVENTS_FD（手动直接运行）→ 回落 stdout，便于调试。
     monkeypatch.delenv("EVENTS_FD", raising=False)

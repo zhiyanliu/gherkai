@@ -24,6 +24,8 @@ import sys
 import time
 from typing import TextIO
 
+from gherkai_worker_novaact.lib.redact import redact_url_userinfo
+
 # events 表 TTL（ADR 0033 / 0024）：每条 event item 写 expires_at=now+7d（epoch 秒），IaC 在该属性开 DDB TTL
 # 自动过期。events 是进度脚手架（权威在 RunReport/ResultStore），留 7 天供事后调查失败 run。
 # **改值须同步全部解码方（反向依赖）**：下游把本值当共享常量反解 emit 时刻——core 侧 event_log/ddb.py 的
@@ -93,7 +95,7 @@ class EventSink:
         fd 态：write+flush（每条 flush 保序、ensure_ascii=False 保中文，与旧内联逐字节一致）。
         DDB 态：PutItem(PK=run_id#scope_id, SK=自增 seq, body=JSON line)——SK 单调自增（scope 内串行、无需协调）。
         """
-        line = json.dumps(event, ensure_ascii=False)
+        line = redact_url_userinfo(json.dumps(event, ensure_ascii=False))  # 隧道凭据不出 worker（ADR 0035 决策 5）
         if self._table_name is not None:
             self._seq += 1
             self._ddb().put_item(Item={

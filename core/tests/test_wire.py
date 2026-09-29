@@ -176,6 +176,21 @@ def test_event_from_line():
     assert ev.status == Status.PASSED
 
 
+def test_step_done_message_masks_tunnel_credentials():
+    """解码时盖住 step_done.message 里的隧道凭据（ADR 0035 决策 5）：第三方 worker 没脱敏也进不了判定记录。"""
+    line = json.dumps({"type": "step_done", "scenarioId": "s:0", "stepIndex": 0, "status": "failed",
+                       "errorType": "assertion_failed",
+                       "message": "页面停在 https://u1:p1@h.example/home 未跳转"}, ensure_ascii=False)
+    ev = event_from_line(line)
+    assert isinstance(ev, StepDone)
+    assert ev.message == "页面停在 https://***@h.example/home 未跳转"
+
+
+def test_step_done_without_message_stays_none():
+    ev = event_from_json({"type": "step_done", "scenarioId": "s:0", "stepIndex": 0, "status": "passed"})
+    assert isinstance(ev, StepDone) and ev.message is None
+
+
 # ---- 未知 type 报错（不静默吞）----
 def test_unknown_event_type_raises():
     import pytest

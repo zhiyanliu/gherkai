@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 
 from gherkai_core.errors import WorkerNetworkError
+from gherkai_core.redact import redact_url_userinfo
 from gherkai_core.model import (
     Cost,
     Event,
@@ -137,7 +138,7 @@ def event_from_json(d: dict) -> Event:
             votes=_votes_from_json(d.get("votes")),
             cost=_cost_from_json(d.get("cost")),
             error_type=d.get("errorType"),
-            message=d.get("message"),
+            message=redact_url_userinfo(d.get("message")),  # 隧道凭据不进判定记录（ADR 0035 决策 5）：盖住解码后的视图（含第三方 worker），原始事件行不改
             report_refs=_report_refs_from_json(d.get("reportRefs")),  # step 级产物：两引擎的 kind=evidence + Nova 的 kind=trajectory（ADR 0042 决策一 / 0027 下沉）
         )
     if t == "step_skipped":

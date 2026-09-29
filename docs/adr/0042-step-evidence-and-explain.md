@@ -39,7 +39,7 @@
       "index": 0,
       "prompt": "页面显示「登录成功」",         // gherkai 交给引擎的指令（step 文本 + 多行参数），不含 SDK 追加的输出格式样板
       "vote": true | false | null,               // 本次调用计入判定的那一票；null = 本 act 不是投票调用（When/Given 的动作）
-      "url": "https://…" | null,                 // 调用结束时的页面 URL（Nova = 末 frame 的 active_url；Midscene = worker 取 page.url()）
+      "url": "https://…" | null,                 // 调用结束时的页面 URL（Nova = 末 frame 的 active_url；Midscene = worker 取 page.url()）；隧道模式下 userinfo 段已换成 ***（ADR 0035 决策 5，写盘前对整份 JSON 脱敏）
       "frames": [                                // 引擎内部逐步观察-思考-动作；Nova = TrajectoryStep，Midscene = ExecutionTask
         { "url": "https://…" | null,             // 逐 frame URL 仅 Nova 有；Midscene 的 task 不带 URL → null
           "thought": "I am on the login page. … Returning false." | null,

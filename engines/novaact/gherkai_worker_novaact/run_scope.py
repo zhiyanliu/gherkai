@@ -51,6 +51,7 @@ from nova_act.types.workflow import set_current_workflow, get_current_workflow
 from gherkai_worker_novaact.lib.workflow_setup import ensure_workflow_definition
 from gherkai_worker_novaact.lib.constants import MODEL_ID, WORKFLOW_DEF, NOVA_GRACE_MARGIN_S  # 共享常量（单一真理源）
 from gherkai_worker_novaact.lib.event_sink import EventSink  # 事件出口（ADR 0024 I/O 边缘可注入接口；fd 态 / DDB 态两态）
+from gherkai_worker_novaact.lib.redact import redact_url_userinfo  # 隧道凭据脱敏（ADR 0035 决策 5）：截断前先脱敏
 from gherkai_worker_novaact.lib.job_source import JobSource  # job 入口（同上）
 from gherkai_worker_novaact.lib.artifact_upload import ArtifactUploader  # 产物 S3 上传（ADR 0029；无落点 env 时 no-op 报 file://）
 
@@ -743,7 +744,7 @@ def _error_text(e: BaseException) -> str:
     msg = getattr(e, "message", None)
     text = msg if isinstance(msg, str) and msg.strip() else str(e)
     first = next((ln.strip() for ln in text.splitlines() if ln.strip()), "")
-    first = " ".join(first.split())
+    first = redact_url_userinfo(" ".join(first.split()))  # 先脱敏再截断：截在 userinfo 中间会丢掉 `@`、让出口处的规则失效（ADR 0035 决策 5）
     return f"{type(e).__name__}: {first[:300]}" if first else type(e).__name__
 
 

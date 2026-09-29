@@ -207,3 +207,23 @@ def test_log_sink_receives_worker_logs_and_keeps_stderr_clean(capsys):
         time.sleep(0.02)  # pump 是 daemon 线程，等它把噪声行写完
     assert "[worker s:out] " + "x" * 64 in sink.getvalue()
     assert "[worker" not in capsys.readouterr().err
+
+
+def test_pump_log_masks_tunnel_credentials_in_sink_and_stderr(capsys):
+    """worker 日志逐行转发时盖住隧道凭据（ADR 0035 决策 5）：写 log_sink 与写本进程 stderr 两条分支都要盖。
+
+    直接喂 `_pump_log` 一个行迭代器：转发线程怎么接上这个函数已由上面那条真子进程用例覆盖，这里只锁逐行改写。"""
+    import io
+
+    from gherkai_core.adapters.subprocess_engine import _pump_log
+
+    lines = ["navigate to https://u1:p1@h.example/login\n", "plain line\n"]
+    sink = io.StringIO()
+    _pump_log(iter(lines), "s", "err", sink)
+    assert sink.getvalue() == ("[worker s:err] navigate to https://***@h.example/login\n"
+                               "[worker s:err] plain line\n")
+
+    _pump_log(iter(lines), "s", "out")   # 不给 sink：写本进程 stderr（capsys 下不是终端，不上色）
+    err = capsys.readouterr().err
+    assert "u1:p1@" not in err
+    assert "[worker s:out] navigate to https://***@h.example/login\n" in err

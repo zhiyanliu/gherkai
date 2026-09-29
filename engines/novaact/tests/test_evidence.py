@@ -239,6 +239,34 @@ def test_undecodable_image_leaves_screenshot_null(tmp_path):
     assert written.screenshots == []   # 没写下的图不入队（队列里不许有幻影文件）
 
 
+def test_write_step_evidence_masks_tunnel_credentials(tmp_path):
+    """隧道凭据不进 evidence（ADR 0035 决策 5）：step 文本、act 指令、frame 地址、thought、消息里的 userinfo 都换成 ***，
+    写出的仍是合法 JSON。"""
+    cred = "https://u1:p1@h.example/"
+    traj = _synthetic(2, thought_at=(1,))
+    traj["steps"][0]["active_url"] = cred + "login"
+    traj["steps"][1]["active_url"] = cred + "home"
+    traj["steps"][1]["program"]["calls"][0]["kwargs"]["value"] = f"已打开 {cred}home"   # thought 复述了地址
+    traj_path = tmp_path / "act_0_trajectory.json"
+    traj_path.write_text(json.dumps(traj), encoding="utf-8")
+    written = ev.write_step_evidence(
+        base_dir=tmp_path, scope_id="s", scenario_id="sc:1", step_index=0, keyword="Given",
+        text=f'打开 "{cred}login"', status="failed", message=f"页面停在 {cred}home 未跳转",
+        acts=[ev.ActRecord(index=0, prompt=f"确认 {cred}home 已加载", vote=False, trajectory_path=str(traj_path))],
+        ref_for=lambda p: f"file://{p}")
+    raw = Path(written.json_path).read_text(encoding="utf-8")
+    assert "u1:p1@" not in raw
+    assert "***@" in raw
+    doc = json.loads(raw)
+    assert doc["step"]["text"] == '打开 "https://***@h.example/login"'
+    assert doc["message"] == "页面停在 https://***@h.example/home 未跳转"
+    act = doc["acts"][0]
+    assert act["prompt"] == "确认 https://***@h.example/home 已加载"
+    assert act["url"] == "https://***@h.example/home"
+    assert act["frames"][0]["url"] == "https://***@h.example/login"
+    assert act["frames"][1]["thought"] == "已打开 https://***@h.example/home"
+
+
 # ---- _run_step 钩子（ADR 0042 决策一「怎么挂」/ 决策二 best-effort）----
 class _Result:
     def __init__(self, value=True, traj=None, tw=None):
@@ -672,3 +700,13 @@ def test_exception_path_drains_and_still_raises(main_fakes):
     with pytest.raises(RuntimeError, match="会话炸了"):
         rs.main()
     assert trace == [("nova_exit",), ("cdp_exit",), ("drain", rs.EVIDENCE_DRAIN_EXIT_S)]
+
+
+def test_error_text_redacts_before_truncation():
+    """隧道地址落在 300 字边界上时先脱敏再截断（ADR 0035 决策 5）：截在 userinfo 中间会丢掉 `@`、出口处的规则就抓不到。"""
+    from gherkai_worker_novaact.run_scope import _error_text
+    pad = "x" * 280
+    e = RuntimeError(f"{pad} https://Ab12Cd34:XyZ09PqRsTuVw@h.ngrok.example/?lang=en")
+    out = _error_text(e)
+    assert "Ab12Cd34" not in out and "XyZ09" not in out
+    assert "https://***@" in out

@@ -36,3 +36,10 @@ test("oneLineError: 截断按码点——非 BMP 字符压在边界上也不会�
   assert.ok(got.endsWith("😀"), `边界上的字符要么整个留、要么整个丢：${JSON.stringify(got.slice(-3))}`);
   assert.equal(Buffer.from(got, "utf8").toString("utf8"), got, "须能无损 utf-8 编码（孤立代理项在这里现形）");
 });
+
+test("oneLineError: 隧道地址落在截断边界上也先脱敏再截（截在 userinfo 中间会丢掉 @、出口处的规则就抓不到）", () => {
+  const pad = "x".repeat(280);
+  const out = oneLineError(`${pad} https://Ab12Cd34:XyZ09PqRsTuVw@h.ngrok.example/?lang=en`);
+  assert.ok(!out.includes("Ab12Cd34") && !out.includes("XyZ09"));
+  assert.ok(out.includes("https://***@"));
+});

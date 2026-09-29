@@ -108,6 +108,41 @@ def test_submit_local_writes_tunnel_file_for_per_run_cleanup(tmp_path, monkeypat
     assert "u1:p1@t.ngrok-free.app" in json.dumps(meta, ensure_ascii=False)
 
 
+def test_run_json_masks_tunnel_credentials_but_run_meta_keeps_them(tmp_path, monkeypatch, capsys):
+    """run --json 的输出脱敏、落盘的 run 定义保留明文（ADR 0035 决策 5）。
+
+    stdout 里 step 文本与判定消息的隧道地址都是 `https://***@…`；run_meta.json 要被推进器读回执行，凭据必须原样在。"""
+    calls = []
+    _patch_tunnel(monkeypatch, calls)
+
+    def fake_schedule(run_meta, engines, sink, opts=None, on_job_complete=None, on_event=None):
+        results = []
+        for j in run_meta.jobs:
+            jr = JobResult(job=j, status=Status.FAILED,
+                           message="页面停在 https://u1:p1@t.ngrok-free.app/login 未跳转")
+            results.append(jr)
+            if on_job_complete is not None:
+                on_job_complete(jr)
+        return RunResult(run_meta=run_meta, status=Status.FAILED, jobs=results)
+
+    monkeypatch.setattr(m, "schedule", fake_schedule)
+    report_dir = tmp_path / "reports"
+    rc = m.main(["run", str(_write_feature(tmp_path)), "--json", "--report-dir", str(report_dir),
+                 "--expose-local", "http://localhost:3000"])
+    assert rc == 1
+    out = capsys.readouterr().out
+    doc = json.loads(out)                                   # 脱敏后仍是单一可解析文档
+    assert "u1:p1@" not in out
+    step_text = doc["run_meta"]["jobs"][0]["scenarios"][0]["steps"][0]["text"]
+    assert "https://***@t.ngrok-free.app/login" in step_text
+    assert doc["jobs"][0]["message"] == "页面停在 https://***@t.ngrok-free.app/login 未跳转"
+    assert doc["artifacts"]["run_meta"].endswith("run_meta.json")   # 产物落点照常折进同一文档
+    run_dirs = [d for d in report_dir.iterdir() if d.is_dir()]
+    assert len(run_dirs) == 1
+    persisted = (run_dirs[0] / "run_meta.json").read_text(encoding="utf-8")
+    assert "https://u1:p1@t.ngrok-free.app/login" in persisted
+
+
 def test_tunnel_watch_entry_wires_argparse_to_host_and_prints(monkeypatch, capsys):
     """_tunnel_watch 入口：argparse → tunnel_host.watch_run_and_stop_tunnel + 打印拆除原因。
 

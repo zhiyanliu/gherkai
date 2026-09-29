@@ -15,6 +15,7 @@ import sys
 from dataclasses import replace
 from pathlib import Path
 
+from gherkai_core.redact import redact_deep
 from gherkai_core.model import TERMINAL_STATUSES, Event, RunMeta, Status
 from gherkai_core.parse import FeatureParseError
 from gherkai_core.persist import RunPersistence
@@ -2211,7 +2212,7 @@ def _cmd_run(args) -> int:
     # 7) 核心产出 → stdout（--json：单一 JSON 文档，把产物落点折进同一对象保可解析；否则人看文本汇总）。
     #    产物落点提示属诊断 → stderr（不论模式），不污染被重定向的 stdout 主输出。
     if use_json:
-        out = render.to_dict(result)
+        out = redact_deep(render.to_dict(result))  # 定义里的隧道地址带凭据，展示层脱敏、落盘的 run_meta 不动（ADR 0035 决策 5）
         if artifacts:
             out["artifacts"] = artifacts
         print(json.dumps(out, ensure_ascii=False, indent=2))

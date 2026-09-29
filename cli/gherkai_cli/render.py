@@ -5,6 +5,7 @@ core 产出纯数据（RunResult、Event）；怎么展示是前端的事，故�
 from __future__ import annotations
 
 from gherkai_core.model import Event, Job, JobResult, RunResult, RunState, Status
+from gherkai_core.redact import redact_deep
 from gherkai_core.serialize import to_dict  # 单一真理源（ADR 0027）：cli --json 与 manifest 共用
 # ReportRef → dict 与 jobs/*.json、run --json 同一份（单一序列化真源，ADR 0027）；explain 的 report_refs 原样搬。
 from gherkai_core.serialize import ref_to_dict
@@ -307,7 +308,7 @@ def explain_to_dict(*, run_id: str, status: str | None, results: list[JobResult]
             "has_step_records": bool(recorded),
             "scenarios": scenarios,
         })
-    return {"run_id": run_id, "status": status, "scopes": scopes}
+    return redact_deep({"run_id": run_id, "status": status, "scopes": scopes})  # 定义里的隧道地址与证据可能带凭据：整份脱敏（ADR 0035 决策 5）
 
 
 def _ref_line(rr: dict) -> str:

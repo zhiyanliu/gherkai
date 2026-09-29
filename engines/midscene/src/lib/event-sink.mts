@@ -16,6 +16,7 @@
 // - fd 态（subprocess）：写 EVENTS_FD fd（fs.writeSync 同步保序——async 签名下 await 立即完成的同步写、时序不变）；无 / 非法 → 回落 fd 1=stdout。
 // - DDB 态（Fargate 化）：EVENTS_DDB_TABLE+RUN_ID+SCOPE_ID 注入 → PutItem 到 events 表（PK=run_id#scope_id、
 //   SK=进程内自增 seq、body=JSON line）。判据是有没有注入 EVENTS_DDB_TABLE，非「是否 Fargate」（ADR 0016 红线）。
+import { redactUrlUserinfo } from "./redact.mjs";
 import * as fs from "node:fs";
 import { DynamoDBClient, PutItemCommand } from "@aws-sdk/client-dynamodb";
 
@@ -91,7 +92,7 @@ export class EventSink {
   // DDB 态：PutItem(PK=run_id#scope_id, SK=自增 seq, body=JSON line)，套 AbortSignal.timeout 封顶（退出有界，ADR 0024）。
   // **只暴露 emit、绝不暴露底层 fd/stdout 句柄、绝不把事件挪回 stdout**（守三通道分离）。worker 是 producer/client、不 listen。
   async emit(event: unknown): Promise<void> {
-    const line = JSON.stringify(event);
+    const line = redactUrlUserinfo(JSON.stringify(event));  // 隧道凭据不出 worker（ADR 0035 决策 5）
     if (this.tableName !== undefined) {
       this.seq += 1;
       await this.client_().send(

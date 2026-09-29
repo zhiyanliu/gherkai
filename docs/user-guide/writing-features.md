@@ -168,7 +168,7 @@ Scenario: Midscene 在中文 UI 上搜索并断言
 - **不要把密码、令牌、密钥、真实客户数据写进 `.feature`**，DataTable 与 DocString 里同样不要写。
 - 需要登录的用例用**只在测试环境有效**的凭据；凭据本身不写进 step 文本，由确定性 step 从环境变量读（环境变量在哪设见 [`configuration.md`](./configuration.md)）。
 - 报告目录（云端后端下是产物桶）按内部资料对待：里面有 step 原文、页面截图与引擎的 AI 证据。位置见 [`running-and-results.md`](./running-and-results.md)。
-- 一个例外是隧道凭据：用 `--expose-local` 测本机应用时，basic-auth 凭据由 gherkai 自动生成并内嵌在地址里，必然出现在提示与报告中——生成方式与失效时机见 [`local-app-testing.md`](./local-app-testing.md)。
+- 一个例外是隧道凭据：用 `--expose-local` 测本机应用时，basic-auth 凭据由 gherkai 自动生成并内嵌在地址里，会进入发给模型的提示与引擎自己的原生产物；gherkai 自己写的失败消息、证据与 `explain` 输出里，凭据段显示为 `***`。生成方式、失效时机与哪些地方仍是明文见 [`local-app-testing.md`](./local-app-testing.md)。
 
 ## 写完先自检
 

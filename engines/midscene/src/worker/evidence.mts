@@ -24,6 +24,7 @@ import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { oneLineError } from "./error-text.mjs";  // act.error 与 step_done.message 同一条压行规则
+import { redactUrlUserinfo } from "../lib/redact.mjs";  // 隧道凭据不进 evidence（ADR 0035 决策 5）
 
 /** evidence schema 版本（ADR 0042 决策六第 3 道防线：消费端据此判「不认识的版本」）。 */
 export const EVIDENCE_SCHEMA_VERSION = 1;
@@ -331,7 +332,7 @@ async function writeEvidence(
 ): Promise<string> {
   const file = evidenceFile(runDir, doc.scenario_id, doc.step_index);
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, JSON.stringify(doc, null, 2), "utf-8");
+  fs.writeFileSync(file, redactUrlUserinfo(JSON.stringify(doc, null, 2)), "utf-8");
   return await uploader.toReportRef(file);
 }
 

@@ -33,6 +33,17 @@ test("emit is one JSON object per line (JSON Lines)", async () => {
   delete process.env.EVENTS_FD;
 });
 
+test("emit 写出的整行里隧道凭据已脱敏（ADR 0035 决策 5），仍是一条合法 JSON", async () => {
+  // 确定性 step 的失败消息带 page.url()：userinfo 段换成 ***，凭据不出 worker。
+  const { sink, read } = fdSink();
+  await sink.emit({ type: "step_done", status: "failed", message: "页面停在 https://u1:p1@h.example/ 未跳转" });
+  const raw = read();
+  assert.ok(!raw.includes("u1:p1@"), "凭据不该出现在事件行里");
+  assert.ok(raw.includes("https://***@h.example/"));
+  assert.equal(JSON.parse(raw.trim()).message, "页面停在 https://***@h.example/ 未跳转");
+  delete process.env.EVENTS_FD;
+});
+
 test("fromEnv 回落 fd 1 (stdout) when no EVENTS_FD; emit 不抛", async () => {
   // 无 EVENTS_FD（手动直接运行）→ 回落 fd 1=stdout。不做 fd 重定向（会污染 node:test 输出、脆弱）——
   // 断言回落目标**确实是 fd 1**（读内部 fd）——否则改成 fd 2 也照绿（review：回落测试须验目标 fd）。

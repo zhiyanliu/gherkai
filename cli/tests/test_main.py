@@ -1658,18 +1658,19 @@ def _explain_job(*, scope_id="features/login.feature:6"):
 
 
 def _explain_run(tmp_path, *, evidence=..., run_status=None, with_results=True, job_only=False,
-                 evidence_text=None):
+                 evidence_text=None, job=None):
     """在 tmp_path/reports 下搭一个 run：run_meta/run_state + 一份 JobResult（+ 真 evidence.json）。
 
     evidence=None → step 2 不挂 evidence ref（no_ref）；evidence_text 给非 JSON 串 → unreadable；
     with_results=False → 只落 run_meta/run_state（detached run 未 finalize 的零文件形态）；
-    job_only=True → JobResult 有 job 级判定但零 step 记录（worker 没起来/起来就被掐）。
+    job_only=True → JobResult 有 job 级判定但零 step 记录（worker 没起来/起来就被掐）；
+    job 给了就替换默认的 `_explain_job()`（scenario id 与 step 数须与之一致，判定记录照默认那份搭）。
     """
     from gherkai_core.model import (JobResult, JobState, ReportRef, RunMeta, RunState, ScenarioResult,
                                     Status as S, StepResult, Votes)
     root = tmp_path / "reports"
     run_id = "20260910T080630Z-9fa261"
-    job = _explain_job()
+    job = job or _explain_job()
     refs2 = [ReportRef(kind="trajectory", ref="file:///tmp/act-0.html", label="act 0")]
     if evidence is not ... or evidence_text is not None:
         payload = evidence_text if evidence_text is not None else json.dumps(evidence, ensure_ascii=False)
@@ -1810,6 +1811,44 @@ def test_explain_all_expands_passed_and_full_drops_the_text_budget(tmp_path, cap
     assert "无 AI 证据" not in passed_block           # 默认不展开 passed
     _rc, out, _ = _explain(capsys, root, run_id, "--all")
     assert "无 AI 证据" in out.split("step 0  Given")[1].split("step 1")[0]
+
+
+def test_explain_masks_tunnel_credentials_in_text_and_json(tmp_path, capsys):
+    """隧道模式下定义里的 step 文本与证据里的地址、指令都带凭据：explain 两种形态都只显示 `https://***@…`
+    （ADR 0035 决策 5）。落盘的 run 定义与证据文件不在本用例的断言范围内。"""
+    import dataclasses
+
+    cred = "https://u1:p1@h.example/"
+    base = _explain_job()
+    open_step = f'打开 "{cred}login"'
+    scenarios = tuple(
+        dataclasses.replace(sc, steps=(dataclasses.replace(sc.steps[0], text=open_step), *sc.steps[1:]))
+        for sc in base.scenarios)
+    job = dataclasses.replace(base, scenarios=scenarios)
+    evidence = _evidence_fixture(thought=f"I am on {cred}login.\n看到「密码错误」。Returning false.")
+    act = evidence["acts"][0]
+    act["url"] = f"{cred}login"
+    act["prompt"] = f"确认 {cred}login 显示「登录成功」"
+    for fr in act["frames"]:
+        fr["url"] = f"{cred}login"
+    root, run_id = _explain_run(tmp_path, evidence=evidence, job=job)
+
+    rc, out, _ = _explain(capsys, root, run_id)
+    assert rc == 0
+    assert "u1:p1@" not in out
+    assert "url=https://***@h.example/login" in out                       # 证据里的页面地址
+    assert 'step 0  Given 打开 "https://***@h.example/login"' in out        # 定义里的 step 文本
+
+    rc, out, _ = _explain(capsys, root, run_id, "--json")
+    assert rc == 0
+    assert "u1:p1@" not in out
+    doc = json.loads(out)
+    s1 = doc["scopes"][0]["scenarios"][0]
+    assert s1["steps"][0]["text"] == '打开 "https://***@h.example/login"'
+    ev = s1["steps"][2]["evidence"]
+    assert ev["acts"][0]["url"] == "https://***@h.example/login"
+    assert ev["acts"][0]["prompt"] == "确认 https://***@h.example/login 显示「登录成功」"
+    assert ev["acts"][0]["frames"][1]["thought"].startswith("I am on https://***@h.example/login.")
 
 
 def test_explain_long_thought_is_truncated_with_pointer(tmp_path, capsys):

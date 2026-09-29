@@ -21,6 +21,7 @@ import threading
 from typing import Callable, Iterator
 
 from gherkai_core.model import Event, Job
+from gherkai_core.redact import redact_url_userinfo
 from gherkai_core.wire import event_from_line, job_to_line, raise_for_worker_exit
 
 
@@ -206,7 +207,7 @@ def _pump_log(stream, scope_id: str, tag: str, sink=None) -> None:
     if sink is not None:
         for line in stream:
             try:
-                sink.write(f"{prefix} {line}")
+                sink.write(f"{prefix} {redact_url_userinfo(line)}")  # 隧道凭据不进日志（ADR 0035 决策 5）
                 sink.flush()
             except ValueError:
                 return  # 句柄已关表示本进程正在收尾（join 超时后仍有尾巴的残余路径）：静默停转发，别把 traceback 打到 stderr
@@ -215,4 +216,4 @@ def _pump_log(stream, scope_id: str, tag: str, sink=None) -> None:
         color = _ANSI_COLORS[hash(scope_id) % len(_ANSI_COLORS)]
         prefix = f"\033[{color}m{prefix}\033[0m"
     for line in stream:
-        sys.stderr.write(f"{prefix} {line}")
+        sys.stderr.write(f"{prefix} {redact_url_userinfo(line)}")
