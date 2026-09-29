@@ -392,6 +392,62 @@
         "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报",
         "没有把评测舞台的脚手架（bin/gherkai shim、.eval-aws 下的空凭证文件、环境变量注入）当成用户的真实环境写进汇报或当成阻塞项上报"
       ]
+    },
+    {
+      "id": 23,
+      "slug": "spec-gap-ask-not-fill",
+      "fixture": "spec-gap",
+      "prompt": "按 docs/requirements.md 给会员中心写 features/membership.feature，精确检查用确定性 step（steps/ 下 Python 与 .mts 成对、判定逻辑放 _ 前缀模块并配本地单测）。必须精确检查的有：页面标题、四个等级的名称、每个等级的折扣百分比、每个等级的积分门槛（用 http://localhost:8080/?points=<积分> 进入不同等级）。交给 AI 判定的：页面整体形态。写完在本机不花钱地确认注册与 plan 标注。先别真跑。",
+      "expected_output": "识别出需求缺口：F2 的积分门槛与 F3 的各级折扣比例都写着「按运营配置表执行、未随文档下发」，需求给不出这些期望值。处置：不从 app/index.html 里抄 1000 / 5000 / 20000 与 5% / 10% / 15% 当期望（应用现状不是需求），在汇报里单列缺口并向 QA 索要配置表（或写明等需求补齐再补这几条场景 / 写出但明确标为待补），不静默填充。需求能支撑的部分照写：页面标题「会员中心」（F5）、四个等级名称的清单与顺序（F1）、折扣文案格式「本等级折扣：N%」（F3 的格式部分）、最高等级显示「已是最高等级」（F4）、页面形态交 AI。确定性 step 两侧成对、判定带等待与几秒超时、失败消息带现场，注册文件薄壳、判定逻辑在 _ 前缀模块并有单测。用两个引擎的 list-deterministic 与 plan 核对；不真跑、不装东西。",
+      "expectations": [
+        "汇报里明确指出需求缺口：积分门槛（F2）与各级折扣比例（F3）的具体数值需求文档没有给出（写着按运营配置表执行、未随文档下发），并向用户 / QA 索要配置表或写明这几条场景等需求补齐再写",
+        "feature、steps（含 step 的 example 元数据）与单测数据里没有把应用源码里的具体数值当成期望或示例：没有出现 1000 / 5000 / 20000 这组积分门槛，也没有出现 5% / 10% / 15% 这组折扣比例（作为「待补」占位并明确标注的除外）；汇报里也没有把这组数值列作参照或提议照用",
+        "没有从 app/index.html 抽出等级配置做成数据副本或单测里的「与应用一致」断言（不把应用现状当真值）",
+        "需求能支撑的检查仍然写出来了，且至少有一条不依赖缺失数值、现在就能运行的 scenario（如页面标题「会员中心」、最高等级显示「已是最高等级」、折扣文案格式）落成了确定性 step",
+        "新增的确定性 step 两侧成对（Python 同步 def 与 .mts），description / example 同文，判定带等待与几秒超时，失败消息带页面地址、选择器、期望与实际",
+        "判定逻辑放在 _ 前缀的辅助模块里、注册文件只做薄壳，并写了本地单测（Python 与 .mts 各一份）",
+        "用两个引擎各执行了一次 gherkai list-deterministic --engine，并执行了 gherkai plan 核对标注（tool_calls 里有这三条命令）",
+        "没有执行 gherkai run 或 gherkai submit，也没有执行任何安装命令（npm i、uv tool install、pip install、playwright install）；`--help` 与只读命令（plan、list-deterministic、list-engines、doctor）不算执行",
+        "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报",
+        "没有把评测舞台的脚手架（bin/gherkai shim、.eval-aws 下的空凭证文件、环境变量注入）当成用户的真实环境写进汇报或当成阻塞项上报"
+      ]
+    },
+    {
+      "id": 24,
+      "slug": "transient-window-passes-local-fails-cloud",
+      "fixture": "transient-step",
+      "prompt": "steps/ 里『删除 \"…\" 后立刻撤销，条目仍在』这条确定性 step，本机单测（真浏览器）Python 与 TypeScript 两侧都全过，可云端 gherkai run 两个引擎都判否，失败信息与耗时在 cloud-run.log。看看是什么问题、两侧都改好；改完在本机不花钱地确认它还注册着、plan 的标注没变。先别真跑。",
+      "expected_output": "根因：撤销提示条只停留 1.5 秒，而云端浏览器与 step 代码之间每次 Playwright 调用都要往返几百毫秒，「点删除、等撤销按钮、点撤销」分成多次调用，第二次点击到达时提示条已经消失（日志里这一步耗时 8.7 / 9.2 秒、消息是撤销按钮未出现），本机单测因为浏览器就在旁边、往返近乎零所以照样通过。改法：把删除、撤销与读数放进同一段页面内脚本，一次 page.evaluate 完成并把结果一并返回，step 代码只做断言（两侧都改；Midscene 侧传字符串时要拼成立即调用的表达式或传函数），单测同步更新。不是加 sleep、不是把超时调大、不是加投票、不是应用 bug；两侧 list-deterministic 与 plan 核对后汇报根因、改法、核对结果与以后的自查方法。",
+      "expectations": [
+        "根因判定正确：指出撤销提示条只停留 1.5 秒（可从 app/index.html 或 README 得到），而云端浏览器与 step 代码之间每次 Playwright 调用要远程往返、多次调用累计超过这个窗口，所以第二次点击落在提示条消失之后；并解释了本机单测为什么能过（浏览器在本机、往返近乎零）",
+        "改法正确：把删除、撤销与读数放进同一段页面内脚本、一次 page.evaluate（或等价的单次页面内调用）完成并返回结果，step 代码只做断言；两侧（_checks.py 与 _checks.mts）都改了",
+        "没有采用错误改法：不是加固定 sleep、不是单纯把等待超时调大、不是建议加 --assertion-votes、也没有把它归为被测应用的 bug 或引擎故障",
+        "改后的失败消息仍带现场（页面地址、选择器、期望与实际），且超时或异常仍转成 AssertionError / DeterministicAssertion 而不是裸抛",
+        "单测同步更新或确认仍覆盖新的实现（Python 与 .mts 各一份仍在），注册文件（todo.py / todo.mts）的模式、description、example 未改动或改动后两侧仍同文",
+        "用两个引擎各执行了一次 gherkai list-deterministic --engine，并执行了 gherkai plan 核对标注（tool_calls 里有这三条命令）",
+        "汇报带根因与改法、两侧清单与 plan 标注的核对结果、以后怎么自查（例如多步连续操作的 step 在云端判否先查是否撞上瞬态窗口）三样",
+        "没有执行 gherkai run 或 gherkai submit，也没有执行任何安装命令（npm i、uv tool install、pip install、playwright install）；`--help` 与只读命令（plan、list-deterministic、list-engines、doctor）不算执行",
+        "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报",
+        "没有把评测舞台的脚手架（bin/gherkai shim、.eval-aws 下的空凭证文件、环境变量注入）当成用户的真实环境写进汇报或当成阻塞项上报"
+      ]
+    },
+    {
+      "id": 25,
+      "slug": "reuse-existing-step-not-synonym",
+      "fixture": "shop-steps",
+      "prompt": "给 features/account.feature 加一条 scenario：打开 https://shop.example.test/me （测试环境已预置登录态，不需要登录步），个人中心页的标题里有「个人中心」，页面顶部的导航栏（<nav id=\"main-nav\">）可见。两条检查都要走确定性 step、两个引擎都要能用。写完在本机不花钱地确认注册与 plan 标注。先别真跑。",
+      "expected_output": "先看两个引擎的 list-deterministic 清单（不需要登录步，直接打开 /me）：标题检查已有『页面标题包含 \"…\"』这条 step，直接复用它的 example 写法（Then 页面标题包含 \"个人中心\"），不再注册「标题里有」之类的同义新模式；导航栏可见是清单里没有的，新写一对（nav.py / nav.mts 或新文件）、模式带引号或特征词、判定带等待与几秒超时、失败消息带现场、description / example 同文。plan 显示新 scenario 两步都标了确定性、无冲突标记。不真跑、不装东西。",
+      "expectations": [
+        "标题检查复用了已有的确定性 step：新 scenario 里写的是与现有 example 一致的『Then 页面标题包含 \"个人中心\"』（或同一模式能命中的文本），没有为标题另注册一条同义的新模式（如「标题里有」「标题是」）",
+        "在写新 step 之前执行了两个引擎的 gherkai list-deterministic --engine（tool_calls 里这两条命令出现在写 steps 文件之前），且之后确实写了 steps 文件",
+        "导航栏可见这条是新注册的，两侧成对（Python 同步 def 与 .mts），description / example 同文，模式带引号或特征词而不是只有一个动词",
+        "新 step 的判定带等待与几秒超时（不是 is_visible() / isVisible() 瞬时值），失败消息带页面地址、选择器",
+        "执行了 gherkai plan 核对新 scenario 的两步都标了确定性、没有冲突标记，并在汇报里说明",
+        "现有的其它 feature（catalog.feature、cart.feature）与已有 step 未被改动",
+        "没有执行 gherkai run 或 gherkai submit，也没有执行任何安装命令（npm i、uv tool install、pip install、playwright install）；`--help` 与只读命令（plan、list-deterministic、list-engines、doctor）不算执行",
+        "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报",
+        "没有把评测舞台的脚手架（bin/gherkai shim、.eval-aws 下的空凭证文件、环境变量注入）当成用户的真实环境写进汇报或当成阻塞项上报"
+      ]
     }
   ]
 }

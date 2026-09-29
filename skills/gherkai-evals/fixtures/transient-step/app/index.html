@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>待办清单</title>
+<style>#toast{display:none;position:fixed;bottom:16px;left:16px;background:#333;color:#fff;padding:8px 12px}#toast.show{display:block}</style></head>
+<body>
+<h1>待办清单</h1>
+<ul id="todos">
+  <li data-text="买牛奶">买牛奶 <button class="del">删除</button></li>
+  <li data-text="交电费">交电费 <button class="del">删除</button></li>
+  <li data-text="回邮件">回邮件 <button class="del">删除</button></li>
+</ul>
+<div id="toast">已删除 <button id="undo">撤销</button></div>
+<script>
+  let removed = null, timer = null;
+  const toast = document.getElementById('toast');
+  document.getElementById('todos').addEventListener('click', (e) => {
+    if (!e.target.classList.contains('del')) return;
+    const li = e.target.closest('li');
+    removed = { node: li, next: li.nextElementSibling };
+    li.remove();
+    toast.classList.add('show');
+    clearTimeout(timer);
+    timer = setTimeout(() => { toast.classList.remove('show'); removed = null; }, 1500);
+  });
+  document.getElementById('undo').addEventListener('click', () => {
+    if (!removed) return;
+    document.getElementById('todos').insertBefore(removed.node, removed.next);
+    removed = null;
+    toast.classList.remove('show');
+    clearTimeout(timer);
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>会员中心</title>
+<style>body{font-family:sans-serif;max-width:480px;margin:40px auto}.card{border:1px solid #ccc;padding:16px;border-radius:8px}</style>
+</head>
+<body>
+<h1>会员中心</h1>
+<div class="card">
+  <p>累计积分：<span id="points">0</span></p>
+  <p>当前等级：<strong id="level-name"></strong></p>
+  <p id="discount"></p>
+  <p id="next-level"></p>
+</div>
+<script>
+  // 等级门槛与折扣：运营配置表的本期取值（前端暂时写死，后续改为接口下发）
+  const LEVELS = [
+    { name: '普通会员', min: 0,     discount: 0 },
+    { name: '银卡会员', min: 1000,  discount: 5 },
+    { name: '金卡会员', min: 5000,  discount: 10 },
+    { name: '钻石会员', min: 20000, discount: 15 },
+  ];
+  const points = Math.max(0, parseInt(new URLSearchParams(location.search).get('points') || '0', 10) || 0);
+  let idx = 0;
+  LEVELS.forEach((l, i) => { if (points >= l.min) idx = i; });
+  const level = LEVELS[idx];
+  document.getElementById('points').textContent = String(points);
+  document.getElementById('level-name').textContent = level.name;
+  document.getElementById('discount').textContent = `本等级折扣：${level.discount}%`;
+  const next = LEVELS[idx + 1];
+  document.getElementById('next-level').textContent = next
+    ? `距 ${next.name} 还差 ${next.min - points} 积分`
+    : '已是最高等级';
+</script>
+</body>
+</html>

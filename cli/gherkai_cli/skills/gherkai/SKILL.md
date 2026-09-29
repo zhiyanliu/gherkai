@@ -40,14 +40,14 @@ Midscene 对被测 UI 的语言不限。Nova Act 的支持范围是英文 UI：�
 
 ## 4 编写 feature 与 steps
 
-期望值只来自需求（标题、可见文案、流程结果这类稳定语义）；看被测应用的代码与页面只为定位元素、实现动作，不把应用现状写成期望。写法：
+期望值只来自需求（标题、可见文案、流程结果这类稳定语义）；看被测应用的代码与页面只为定位元素、实现动作，不把应用现状写成期望。需求给不出某条期望要的值、范围或清单时不猜、不从应用里补——应用里的取值不进用例、不进单测数据、也不当「参照」列进汇报或提议照用；缺口不阻塞其余交付：先写完不依赖它的 feature、steps 与单测并核对，汇报末尾再列缺口、向人索要；缺值的场景等需求补齐再写，或先写出并用显眼的待补标记占位。写法：
 
-- 一条 scenario 讲一件事，五到八步以内；导航步写 `Given 打开 "http(s)://…"`（双引号内 URL 走导航），动作步写用户会怎么说（`When "在搜索框输入 Python 并提交搜索"`），断言写成页面级语义陈述（`Then "当前是 Python 的词条页"`、`Then "页面没有报错"`），别把子串规则、段落边界塞进断言，那是确定性 step 的活。
+- 一条 scenario 讲一件事，五到八步以内；导航步写 `Given 打开 "http(s)://…"`（双引号内 URL 走导航），动作步写用户会怎么说、只描述这一步的动作（`When "在搜索框输入 Python 并提交搜索"`；写「点击第 1 组」不写「选择第 1 组」——写成目标模型会做到底、越过这一步继续操作），断言写成页面级语义陈述（`Then "当前是 Python 的词条页"`、`Then "页面没有报错"`），别把子串规则、段落边界塞进断言，那是确定性 step 的活。
 - 需要接着上一条的页面状态继续，就把两条编进同一 `@scope`；互不相干的用例分开 scope 好并发，scope 名跨文件不能撞（见第 1 节）。被测 UI 非英文就标 `@engine:midscene`。单个 scope 会很长就标 `@timeout:<秒>`。
 - DataTable / DocString 可以挂在 AI 步下，随 step 一起喂给模型。
-- 公共前置步（登录、导航到基线页）写 `Background`：它展开进同一 feature 下每条 scenario 的最前面，步号从它的第一步 0 起数、scenario 里书写的步跟着后移（`explain --step N` 同此口径）；同一 `@scope` 里每条 scenario 都各自重新运行一遍它，别把导航塞进 `Background` 又指望后一条接着前一条的页面状态。
-- 同一流程换数据运行多遍写 `Scenario Outline` + `Examples`：每行数据展开成一条独立 scenario（占位符已代入），未标 `@scope` 时各成一个 job、`scope_id` 比普通 scenario 多一段数据行号，收窄后重新运行时照抄判定明细里的完整值；`--scenario` 要一次选中该 Outline 的全部数据行就只给声明行的行号（纯数字或 `:行号`）。
-- **什么时候配确定性 step**：URL 匹配、元素存在、精确数值、必须可复现、要快、出现频次高。两引擎各有最小模板与必填元数据（`description` / `example`，缺了启动即报错），见 `references/engines.md`。同一 feature 要在两个引擎上运行时正则两侧要成对写。内建一条 `Then 页面地址匹配 "<正则>"` 可直接用。**写代码时**（等待与判定、失败消息带现场、判定逻辑放 `_` 前缀模块并本地单测）按 `references/deterministic-steps.md`；改完的汇报带根因与改法、两侧清单与 `plan` 标注的核对结果、以后的自查方法三样。
+- 公共前置步写 `Background`：它展开进每条 scenario 的最前面，步号从它的第一步 0 起数、scenario 里的步跟着后移（`explain --step N` 同此口径）；同一 `@scope` 里每条 scenario 都各自重新运行它，别指望后一条接着前一条的页面状态。
+- 同一流程换数据写 `Scenario Outline` + `Examples`：每行展开成一条独立 scenario，未标 `@scope` 时各成一个 job、`scope_id` 多一段数据行号，收窄时照抄判定明细里的完整值；`--scenario` 给声明行的行号即选中全部数据行。
+- **什么时候配确定性 step**：URL 匹配、元素存在、精确数值、必须可复现、要快、出现频次高。最小模板与必填元数据（`description` / `example`）见 `references/engines.md`，两引擎都用时两侧成对写。内建一条 `Then 页面地址匹配 "<正则>"` 可直接用。**写代码时**（等待与判定、失败消息带现场、判定逻辑放 `_` 前缀模块并本地单测）按 `references/deterministic-steps.md`；改完的汇报带根因与改法、两侧清单与 `plan` 标注的核对结果、以后的自查方法三样。
 - 写新 step 前先看两个引擎的 `gherkai list-deterministic --engine <名>` 清单，已有的复用、同义模式不重复注册；写完再核对它在清单里，然后 `gherkai plan <feature>` 看每步标注：命中确定性的标 `← 确定性: <说明>`，其余走 AI。
 
 ## 5 工作循环
@@ -69,7 +69,7 @@ Midscene 对被测 UI 的语言不限。Nova Act 的支持范围是英文 UI：�
 
 | 谁有 | flag | 什么时候动 |
 |---|---|---|
-| `run` / `submit` 共用，多数 `plan` 也收 | `--default-engine` `--assertion-votes` `--default-job-timeout` `--steps-dir` `--scope` `--tags` `--scenario` `--expose-local`（这 8 个 `plan` 也收：用例预检要与实际运行一致就照样给）；`--max-concurrency` `--report-dir`（`plan` 不收） | `--assertion-votes 3` 查 AI 断言抖动；`--max-concurrency` 默认很保守（护成本与配额），scope 多且互不相干时调大；`--default-job-timeout` 只管未标 `@timeout` 的 scope。默认值都以 `--help` 为准，别背数字 |
+| `run` / `submit` 共用，多数 `plan` 也收 | `--default-engine` `--assertion-votes` `--default-job-timeout` `--steps-dir` `--scope` `--tags` `--scenario` `--expose-local`（这 8 个 `plan` 也收：用例预检要与实际运行一致就照样给）；`--max-concurrency` `--report-dir`（`plan` 不收） | `--assertion-votes 3` 查 AI 断言抖动；`--max-concurrency` 只改同时开几个会话、不改总账，scope 多且互不相干时调大；`--default-job-timeout` 只管未标 `@timeout` 的 scope。默认值都以 `--help` 为准，别背数字 |
 | 仅 `run` | `--fail-fast` `--quiet` `--no-report` `--grace` | `--quiet` 少占屏幕与上下文、worker 日志改落文件，判定明细与证据照落；`--no-report` 连 `explain` 一起废掉——判定明细与 AI 证据都不落盘，事后 `explain` 找不到这个 run，失败原因只剩本次输出里每步那一句，想细看只能再花钱重新运行，所以只在确定不用读失败原因的纯 CI 门禁上用；`--grace` 别调小，过小直接以退出码 2 结束、且会泄漏浏览器会话 |
 | 仅 `submit` | `--tunnel-ttl` | 只在 cloud + `--expose-local` 时有意义 |
 | cloud 后端：`doctor` / `run` / `submit` / `status` / `explain` 各要给（`plan` 不吃） | `--backend cloud` `--prefix` `--region` `--profile` `--worker-variant`（仅 `run` / `submit`） | `--backend` / `--prefix` / `--report-dir` 必须与产生这个 run 的那条命令逐字一致，不一致即以退出码 2 结束、说找不到这个 run；`--region` 要指同一个 region（换了就查不到），`--profile` 换成另一个指向同账号同 region 的 profile 不影响；`--worker-variant` 选云端 worker 镜像上的确定性 step 集，不给用部署侧默认指针 |

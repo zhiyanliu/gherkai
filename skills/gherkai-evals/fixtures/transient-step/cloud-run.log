@@ -1,0 +1,24 @@
+plan: 2 job(s)  (default_engine=novaact)
+  - scope='features/todo.feature:4' engine=midscene scenarios=1
+  - scope='features/todo.feature:9' engine=novaact scenarios=1
+隧道已建立：http://localhost:8080 -> https://<隧道域名>（本次运行内有效）
+
+===== 运行结果 =====
+  总状态: failed
+  总墙钟时长: 96.4s
+  job 'features/todo.feature:4': failed  [18213 tokens]
+    scope 墙钟: 61.2s
+    scenario 'features/todo.feature:4': failed  (60.1s)
+      step 0: passed (3.4s)
+      step 1: failed (8.7s)
+        原因: 删除后撤销按钮未出现（页面 https://<隧道域名>/，选择器 #undo）
+      step 2: passed (15.9s)
+  job 'features/todo.feature:9': failed  [12.3s agent-time]
+    scope 墙钟: 58.8s
+    scenario 'features/todo.feature:9': failed  (57.7s)
+      step 0: passed (4.1s)
+      step 1: failed (9.2s)
+        原因: 删除后撤销按钮未出现（页面 https://<隧道域名>/，选择器 #undo）
+      step 2: passed (12.3s)
+
+本机复核：uv run pytest steps/test_checks.py → 2 passed；node --test steps/todo.test.mts → 1 passed。
