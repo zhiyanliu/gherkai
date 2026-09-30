@@ -12,7 +12,7 @@
 ## Relationships
 
 - [Artifact Upload Tests](Artifact_Upload_Tests.md) (2 shared connections)
-- [Artifact Uploader](Artifact_Uploader.md) (1 shared connections)
+- [Artifact Uploader (Python)](Artifact_Uploader_%28Python%29.md) (1 shared connections)
 
 ## Source Files
 

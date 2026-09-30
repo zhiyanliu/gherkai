@@ -4,7 +4,7 @@
 
 ## Key Concepts
 
-- **_FakeTable** (12 connections) — `cli/tests/test_backend_cloud.py`
+- **_FakeTable** (8 connections) — `cli/tests/test_backend_cloud.py`
 - **.get_item()** (1 connections) — `cli/tests/test_backend_cloud.py`
 - **.__init__()** (1 connections) — `cli/tests/test_backend_cloud.py`
 - **.load()** (1 connections) — `cli/tests/test_backend_cloud.py`
@@ -14,10 +14,8 @@
 
 ## Relationships
 
-- [Run Result Aggregation Tree](Run_Result_Aggregation_Tree.md) (3 shared connections)
 - [Cloud Backend CLI Tests](Cloud_Backend_CLI_Tests.md) (1 shared connections)
-- [Run State Projection](Run_State_Projection.md) (1 shared connections)
-- [SSM Path Naming](SSM_Path_Naming.md) (1 shared connections)
+- [Cloud Composition Helpers](Cloud_Composition_Helpers.md) (1 shared connections)
 
 ## Source Files
 
@@ -25,8 +23,8 @@
 
 ## Audit Trail
 
-- EXTRACTED: 7 (58%)
-- INFERRED: 5 (42%)
+- EXTRACTED: 7 (88%)
+- INFERRED: 1 (12%)
 - AMBIGUOUS: 0 (0%)
 
 ---

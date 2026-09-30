@@ -33,10 +33,10 @@
 
 ## Relationships
 
-- [Artifact Uploader](Artifact_Uploader.md) (6 shared connections)
+- [Artifact Uploader (Python)](Artifact_Uploader_%28Python%29.md) (6 shared connections)
 - [Upload Call Recorder](Upload_Call_Recorder.md) (2 shared connections)
 - [Nova Artifact Upload](Nova_Artifact_Upload.md) (1 shared connections)
-- [Fail-loud Config Validation](Fail-loud_Config_Validation.md) (1 shared connections)
+- [Assembly Mismatch Fail-Loud](Assembly_Mismatch_Fail-Loud.md) (1 shared connections)
 - [No-op Local Uploader](No-op_Local_Uploader.md) (1 shared connections)
 
 ## Source Files

@@ -9,8 +9,8 @@
 
 ## Relationships
 
-- [CLI Command Handlers](CLI_Command_Handlers.md) (1 shared connections)
-- [CLI Run Command Tests](CLI_Run_Command_Tests.md) (1 shared connections)
+- [CLI Command Entrypoints](CLI_Command_Entrypoints.md) (1 shared connections)
+- [CLI Run Wiring Tests](CLI_Run_Wiring_Tests.md) (1 shared connections)
 
 ## Source Files
 

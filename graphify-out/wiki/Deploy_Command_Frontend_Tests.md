@@ -1,6 +1,6 @@
 # Deploy Command Frontend Tests
 
-> 58 nodes · cohesion 0.07
+> 60 nodes · cohesion 0.06
 
 ## Key Concepts
 
@@ -8,6 +8,7 @@
 - **_StubProvider** (23 connections) — `cli/tests/test_deploy_cmd.py`
 - **_FakeEP** (21 connections) — `cli/tests/test_deploy_cmd.py`
 - **_patch_eps()** (21 connections) — `cli/tests/test_deploy_cmd.py`
+- **gherkai_cli/__init__.py** (7 connections) — `cli/gherkai_cli/__init__.py`
 - **test_cli_version_is_handed_to_provider()** (7 connections) — `cli/tests/test_deploy_cmd.py`
 - **test_dispatch_maps_command_face_to_provider_method()** (7 connections) — `cli/tests/test_deploy_cmd.py`
 - **._record()** (6 connections) — `cli/tests/test_deploy_cmd.py`
@@ -28,24 +29,26 @@
 - **test_unknown_provider_name_lists_installed()** (5 connections) — `cli/tests/test_deploy_cmd.py`
 - **test_help_works_without_provider_and_explains_why()** (4 connections) — `cli/tests/test_deploy_cmd.py`
 - **test_zero_providers_points_at_the_extra()** (4 connections) — `cli/tests/test_deploy_cmd.py`
-- **test_non_deploy_command_does_not_load_any_provider()** (3 connections) — `cli/tests/test_deploy_cmd.py`
-- *... and 33 more nodes in this community*
+- *... and 35 more nodes in this community*
 
 ## Relationships
 
-- [CLI Entry and Plan](CLI_Entry_and_Plan.md) (20 shared connections)
-- [CLI Command Handlers](CLI_Command_Handlers.md) (1 shared connections)
-- [Deploy Command Frontend](Deploy_Command_Frontend.md) (1 shared connections)
-- [CLI Parser Construction](CLI_Parser_Construction.md) (1 shared connections)
-- [Provider Resolution and Doctor](Provider_Resolution_and_Doctor.md) (1 shared connections)
+- [Plan Command CLI Tests](Plan_Command_CLI_Tests.md) (20 shared connections)
+- [CLI Command Entrypoints](CLI_Command_Entrypoints.md) (2 shared connections)
+- [Deploy Provider Discovery](Deploy_Provider_Discovery.md) (2 shared connections)
+- [Engine Listing and JSON Contract](Engine_Listing_and_JSON_Contract.md) (1 shared connections)
+- [CLI Run Wiring Tests](CLI_Run_Wiring_Tests.md) (1 shared connections)
+- [Result Tree Text Rendering](Result_Tree_Text_Rendering.md) (1 shared connections)
+- [Skill Docs Guardrail Tests](Skill_Docs_Guardrail_Tests.md) (1 shared connections)
 
 ## Source Files
 
+- `cli/gherkai_cli/__init__.py`
 - `cli/tests/test_deploy_cmd.py`
 
 ## Audit Trail
 
-- EXTRACTED: 135 (100%)
+- EXTRACTED: 141 (100%)
 - INFERRED: 0 (0%)
 - AMBIGUOUS: 0 (0%)
 

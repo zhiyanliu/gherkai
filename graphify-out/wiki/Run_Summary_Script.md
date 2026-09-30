@@ -10,7 +10,7 @@
 
 ## Relationships
 
-- [Agent Skill Doc Guards](Agent_Skill_Doc_Guards.md) (1 shared connections)
+- [Skill Docs Guardrail Tests](Skill_Docs_Guardrail_Tests.md) (1 shared connections)
 
 ## Source Files
 

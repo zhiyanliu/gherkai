@@ -1,4 +1,4 @@
-# Machine-readable Output Contract
+# Machine-Readable Output Contract
 
 > 1 nodes · cohesion 1.00
 

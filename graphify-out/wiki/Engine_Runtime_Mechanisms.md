@@ -33,7 +33,7 @@
 
 ## Relationships
 
-- [Core Protocol Documentation](Core_Protocol_Documentation.md) (6 shared connections)
+- [Package Contributor Docs](Package_Contributor_Docs.md) (6 shared connections)
 
 ## Source Files
 

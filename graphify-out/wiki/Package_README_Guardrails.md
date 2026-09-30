@@ -21,7 +21,7 @@
 
 ## Relationships
 
-- [Doc Rule Helpers](Doc_Rule_Helpers.md) (1 shared connections)
+- [Doc Rules Scan Sources](Doc_Rules_Scan_Sources.md) (1 shared connections)
 
 ## Source Files
 

@@ -1,44 +1,41 @@
 # Container Engine Errors
 
-> 15 nodes · cohesion 0.13
+> 8 nodes · cohesion 0.29
 
 ## Key Concepts
 
-- **ContainerError** (22 connections) — `deploy_aws/gherkai_deploy_aws/container.py`
-- **CountingEcs** (9 connections) — `deploy_aws/tests/test_workers.py`
-- **Spy** (9 connections) — `deploy_aws/tests/test_workers.py`
-- **CleanupOutcome** (6 connections) — `deploy_aws/gherkai_deploy_aws/workers.py`
+- **container.py** (12 connections) — `deploy_aws/gherkai_deploy_aws/container.py`
+- **ContainerError** (10 connections) — `deploy_aws/gherkai_deploy_aws/container.py`
+- **UnsupportedContainerEngine** (8 connections) — `deploy_aws/gherkai_deploy_aws/container.py`
 - **.pull()** (2 connections) — `deploy_aws/tests/test_workers.py`
 - **Exception** (1 connections)
+- **容器引擎口子（ADR 0038「容器引擎口子」）：worker 镜像交付碰容器引擎的**唯一落点**。 **只五个动词**：`inspect`（存在 +…** (1 connections) — `deploy_aws/gherkai_deploy_aws/container.py`
 - **容器引擎侧的失败（**用户可修**：引擎没装、daemon 没起、镜像不存在、push 被拒……）。 `str(exc)`…** (1 connections) — `deploy_aws/gherkai_deploy_aws/container.py`
-- **一次 pass 的结果：删掉的 revision + 留到下次的（ARN、原因）。**生产调用点（push-worker / deploy 末步） 只看…** (1 connections) — `deploy_aws/gherkai_deploy_aws/workers.py`
-- **.describe_task_definition()** (1 connections) — `deploy_aws/tests/test_workers.py`
-- **.__getattr__()** (1 connections) — `deploy_aws/tests/test_workers.py`
-- **.__init__()** (1 connections) — `deploy_aws/tests/test_workers.py`
-- **boto3 client 的记名壳（验「这一步之前一次 AWS 都没调」）。** (1 connections) — `deploy_aws/tests/test_workers.py`
-- **ECS client 的记参壳（数「同一个 task-def 被 describe 了几次」）——`Spy` 只记方法名，数不出这个。** (1 connections) — `deploy_aws/tests/test_workers.py`
-- **.__getattr__()** (1 connections) — `deploy_aws/tests/test_workers.py`
-- **.__init__()** (1 connections) — `deploy_aws/tests/test_workers.py`
+- **要求了本期未实装的容器引擎（ADR 0038：只 docker）。** (1 connections) — `deploy_aws/gherkai_deploy_aws/container.py`
 
 ## Relationships
 
-- [Worker Image Management Tests](Worker_Image_Management_Tests.md) (11 shared connections)
-- [Container Engine Wrapper](Container_Engine_Wrapper.md) (9 shared connections)
-- [Worker Image Lifecycle](Worker_Image_Lifecycle.md) (7 shared connections)
-- [Task Definition Lineage Cleanup](Task_Definition_Lineage_Cleanup.md) (1 shared connections)
-- [Task Definition Cleanup](Task_Definition_Cleanup.md) (1 shared connections)
-- [Run Result Aggregation Tree](Run_Result_Aggregation_Tree.md) (1 shared connections)
+- [Container Engine Tests](Container_Engine_Tests.md) (5 shared connections)
+- [Container Engine Wrapper](Container_Engine_Wrapper.md) (3 shared connections)
+- [Worker Push Deploy Tests](Worker_Push_Deploy_Tests.md) (2 shared connections)
+- [Container Engine Resolution](Container_Engine_Resolution.md) (2 shared connections)
+- [Engine Probe & Inspect](Engine_Probe_%26_Inspect.md) (2 shared connections)
+- [Worker Image Management](Worker_Image_Management.md) (1 shared connections)
+- [Deploy Provider Tests](Deploy_Provider_Tests.md) (1 shared connections)
+- [Image Platform Info](Image_Platform_Info.md) (1 shared connections)
+- [Repo Digest Selection](Repo_Digest_Selection.md) (1 shared connections)
+- [Deploy CLI Backend Helpers](Deploy_CLI_Backend_Helpers.md) (1 shared connections)
+- [AWS Deploy Provider](AWS_Deploy_Provider.md) (1 shared connections)
 
 ## Source Files
 
 - `deploy_aws/gherkai_deploy_aws/container.py`
-- `deploy_aws/gherkai_deploy_aws/workers.py`
 - `deploy_aws/tests/test_workers.py`
 
 ## Audit Trail
 
-- EXTRACTED: 30 (68%)
-- INFERRED: 14 (32%)
+- EXTRACTED: 24 (86%)
+- INFERRED: 4 (14%)
 - AMBIGUOUS: 0 (0%)
 
 ---

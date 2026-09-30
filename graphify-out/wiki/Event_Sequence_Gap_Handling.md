@@ -12,8 +12,8 @@
 ## Relationships
 
 - [Fargate Engine Tests](Fargate_Engine_Tests.md) (2 shared connections)
-- [Cloud Event Drain Tests](Cloud_Event_Drain_Tests.md) (1 shared connections)
-- [Event Gap & ECS Polling](Event_Gap_%26_ECS_Polling.md) (1 shared connections)
+- [Worker Exit Drain Tests](Worker_Exit_Drain_Tests.md) (1 shared connections)
+- [Event Gap Grace Tests](Event_Gap_Grace_Tests.md) (1 shared connections)
 
 ## Source Files
 

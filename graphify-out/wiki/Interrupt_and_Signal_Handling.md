@@ -1,6 +1,6 @@
 # Interrupt and Signal Handling
 
-> 46 nodes · cohesion 0.06
+> 47 nodes · cohesion 0.06
 
 ## Key Concepts
 
@@ -22,20 +22,21 @@
 - **test_vote_loop_stops_midway_no_bogus_verdict()** (4 connections) — `engines/novaact/tests/test_interrupt_model.py`
 - **_aggregate()** (3 connections) — `engines/novaact/gherkai_worker_novaact/run_scope.py`
 - **_Meta** (3 connections) — `engines/novaact/tests/test_interrupt_model.py`
+- **_reset_stop()** (3 connections) — `engines/novaact/tests/test_interrupt_model.py`
 - **test_on_signal_does_no_io_even_if_stderr_is_locked()** (3 connections) — `engines/novaact/tests/test_interrupt_model.py`
 - **.__init__()** (2 connections) — `engines/novaact/tests/test_interrupt_model.py`
 - **.act()** (2 connections) — `engines/novaact/tests/test_interrupt_model.py`
 - **.act_get()** (2 connections) — `engines/novaact/tests/test_interrupt_model.py`
 - **test_backoff_interrupted_times_out_without_stop()** (2 connections) — `engines/novaact/tests/test_interrupt_model.py`
 - **test_backoff_interrupted_wakes_on_stop()** (2 connections) — `engines/novaact/tests/test_interrupt_model.py`
-- **test_scenario_done_emitted_when_not_stopped()** (2 connections) — `engines/novaact/tests/test_interrupt_model.py`
-- *... and 21 more nodes in this community*
+- *... and 22 more nodes in this community*
 
 ## Relationships
 
-- [Step Execution Dispatch](Step_Execution_Dispatch.md) (9 shared connections)
-- [Nova Act Worker](Nova_Act_Worker.md) (9 shared connections)
-- [Test Fixtures and Conftest](Test_Fixtures_and_Conftest.md) (2 shared connections)
+- [Step and Scenario Execution](Step_and_Scenario_Execution.md) (9 shared connections)
+- [Nova Act Worker Runtime](Nova_Act_Worker_Runtime.md) (6 shared connections)
+- [Nova Worker Process Entry](Nova_Worker_Process_Entry.md) (3 shared connections)
+- [CLI Test Fixtures](CLI_Test_Fixtures.md) (2 shared connections)
 
 ## Source Files
 
@@ -44,7 +45,7 @@
 
 ## Audit Trail
 
-- EXTRACTED: 86 (99%)
+- EXTRACTED: 87 (99%)
 - INFERRED: 1 (1%)
 - AMBIGUOUS: 0 (0%)
 

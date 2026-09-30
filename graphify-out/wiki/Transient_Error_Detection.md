@@ -33,10 +33,11 @@
 
 ## Relationships
 
-- [Nova Act Worker](Nova_Act_Worker.md) (5 shared connections)
-- [Step Execution Dispatch](Step_Execution_Dispatch.md) (2 shared connections)
-- [Evidence Upload Tests](Evidence_Upload_Tests.md) (1 shared connections)
-- [Release Notes Tooling](Release_Notes_Tooling.md) (1 shared connections)
+- [Nova Act Worker Runtime](Nova_Act_Worker_Runtime.md) (4 shared connections)
+- [Step and Scenario Execution](Step_and_Scenario_Execution.md) (2 shared connections)
+- [Nova Worker Process Entry](Nova_Worker_Process_Entry.md) (1 shared connections)
+- [Single-Line Error Text](Single-Line_Error_Text.md) (1 shared connections)
+- [Release Notes Rendering](Release_Notes_Rendering.md) (1 shared connections)
 
 ## Source Files
 

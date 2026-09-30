@@ -14,7 +14,7 @@
 
 ## Relationships
 
-- [Midscene Run Scope](Midscene_Run_Scope.md) (1 shared connections)
+- [Midscene Run Scope Worker](Midscene_Run_Scope_Worker.md) (1 shared connections)
 
 ## Source Files
 

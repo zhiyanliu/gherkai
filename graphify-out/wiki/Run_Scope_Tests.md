@@ -22,11 +22,11 @@
 
 ## Relationships
 
-- [Midscene Run Scope](Midscene_Run_Scope.md) (5 shared connections)
+- [Midscene Run Scope Worker](Midscene_Run_Scope_Worker.md) (5 shared connections)
 - [Artifact Upload & Error Text](Artifact_Upload_%26_Error_Text.md) (3 shared connections)
-- [Midscene Resolve Hooks](Midscene_Resolve_Hooks.md) (3 shared connections)
+- [TypeScript Entry and Hooks](TypeScript_Entry_and_Hooks.md) (3 shared connections)
 - [Model Spike Scripts](Model_Spike_Scripts.md) (2 shared connections)
-- [Step Argument & Sink Tests](Step_Argument_%26_Sink_Tests.md) (1 shared connections)
+- [Worker Step Arguments](Worker_Step_Arguments.md) (1 shared connections)
 
 ## Source Files
 

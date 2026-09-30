@@ -9,7 +9,7 @@
 
 ## Relationships
 
-- [AWS & Playwright Dependencies](AWS_%26_Playwright_Dependencies.md) (1 shared connections)
+- [NPM Dependencies](NPM_Dependencies.md) (1 shared connections)
 
 ## Source Files
 

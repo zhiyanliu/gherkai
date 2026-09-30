@@ -1,8 +1,8 @@
 # JobResult
 
-> God node · 84 connections · `core/gherkai_core/model.py`
+> God node · 82 connections · `core/gherkai_core/model.py`
 
-**Community:** [Run Result Aggregation Tree](Run_Result_Aggregation_Tree.md)
+**Community:** [Result Tree Text Rendering](Result_Tree_Text_Rendering.md)
 
 ## Connections by Relation
 
@@ -79,14 +79,12 @@
 ### uses
 - ScheduleOpts `INFERRED`
 - EventRecord `INFERRED`
-- RunStore `INFERRED`
 - TaskExited `INFERRED`
 - RunPersistence `INFERRED`
-- ResultStore `INFERRED`
+- RunStore `INFERRED`
 - Timing `INFERRED`
 - LocalResultStore `INFERRED`
-- Engine `INFERRED`
-- ReportStore `INFERRED`
+- ResultStore `INFERRED`
 - Action `INFERRED`
 - NonTerminalSnapshot `INFERRED`
 - _Worker `INFERRED`
@@ -95,8 +93,10 @@
 - S3ResultStore `INFERRED`
 - EngineResolver `INFERRED`
 - JobSink `INFERRED`
+- ReportStore `INFERRED`
 - Sink `INFERRED`
 - _Heartbeat `INFERRED`
+- Engine `INFERRED`
 
 ---
 

@@ -1,8 +1,8 @@
 # Status
 
-> God node · 106 connections · `core/gherkai_core/model.py`
+> God node · 97 connections · `core/gherkai_core/model.py`
 
-**Community:** [Run Result Aggregation Tree](Run_Result_Aggregation_Tree.md)
+**Community:** [Result Tree Text Rendering](Result_Tree_Text_Rendering.md)
 
 ## Connections by Relation
 
@@ -24,20 +24,20 @@
 - test_stores.py `EXTRACTED`
 - test_lifecycle_states.py `EXTRACTED`
 - serialize.py `EXTRACTED`
-- test_conditional_writes.py `EXTRACTED`
 - project.py `EXTRACTED`
+- test_conditional_writes.py `EXTRACTED`
 - wire.py `EXTRACTED`
 - test_cloud_reconcile.py `EXTRACTED`
 - test_report_store.py `EXTRACTED`
 - test_wire.py `EXTRACTED`
 - test_reconcile.py `EXTRACTED`
-- test_subprocess_engine.py `EXTRACTED`
 - schedule.py `EXTRACTED`
-- test_cloud_integration.py `EXTRACTED`
 - ports.py `EXTRACTED`
+- test_cloud_integration.py `EXTRACTED`
 - test_persist.py `EXTRACTED`
 - run_store/local.py `EXTRACTED`
 - test_ddb_run_store.py `EXTRACTED`
+- test_arg_offload.py `EXTRACTED`
 
 ### inherits
 - Enum `EXTRACTED`
@@ -69,22 +69,22 @@
 - ScheduleOpts `INFERRED`
 - DynamoDBRunStore `INFERRED`
 - EventRecord `INFERRED`
-- RunStore `INFERRED`
 - TaskExited `INFERRED`
 - RunPersistence `INFERRED`
-- ResultStore `INFERRED`
 - _IncClock `INFERRED`
+- RunStore `INFERRED`
 - _FakeEcs `INFERRED`
 - Timing `INFERRED`
-- Aws `INFERRED`
-- Engine `INFERRED`
-- ReportStore `INFERRED`
+- ResultStore `INFERRED`
 - Action `INFERRED`
 - NonTerminalSnapshot `INFERRED`
 - _Worker `INFERRED`
 - _NetRaiseEngine `INFERRED`
 - _AbortProbeEngine `INFERRED`
 - FakeLauncher `INFERRED`
+- _MissingThenStoppedEcs `INFERRED`
+- _FakeSchedulerClient `INFERRED`
+- SubprocessLauncher `INFERRED`
 
 ---
 

@@ -12,7 +12,7 @@
 
 ## Relationships
 
-- [CLI Docs and ADRs](CLI_Docs_and_ADRs.md) (1 shared connections)
+- [Package Contributor Docs](Package_Contributor_Docs.md) (1 shared connections)
 
 ## Source Files
 

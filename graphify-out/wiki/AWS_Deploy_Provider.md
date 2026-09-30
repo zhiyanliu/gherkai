@@ -1,49 +1,48 @@
 # AWS Deploy Provider
 
-> 92 nodes · cohesion 0.05
+> 29 nodes · cohesion 0.10
 
 ## Key Concepts
 
 - **Provider** (95 connections) — `deploy_aws/gherkai_deploy_aws/cli.py`
-- **test_provider.py** (90 connections) — `deploy_aws/tests/test_provider.py`
-- **_parse()** (52 connections) — `deploy_aws/tests/test_provider.py`
-- **_stub_backend()** (21 connections) — `deploy_aws/tests/test_provider.py`
-- **_argv()** (9 connections) — `deploy_aws/tests/test_provider.py`
-- **test_deploy_warns_about_missing_container_engine_only_for_pure_release_versions()** (6 connections) — `deploy_aws/tests/test_provider.py`
-- **test_missing_cdk_stops_deploy_before_any_aws_read()** (6 connections) — `deploy_aws/tests/test_provider.py`
-- **test_synth_only_pins_a_relative_dir_to_the_callers_cwd()** (6 connections) — `deploy_aws/tests/test_provider.py`
-- **_AbsentEngine** (5 connections) — `deploy_aws/tests/test_provider.py`
-- **Path** (5 connections)
-- **test_bootstrap_needs_no_vpc_and_never_loads_the_app()** (5 connections) — `deploy_aws/tests/test_provider.py`
-- **test_deploy_passes_require_approval_through()** (5 connections) — `deploy_aws/tests/test_provider.py`
-- **test_deploy_rejects_an_unimplemented_container_engine_before_touching_the_account()** (5 connections) — `deploy_aws/tests/test_provider.py`
-- **test_deploy_runs_the_worker_image_steps_after_a_successful_cdk()** (5 connections) — `deploy_aws/tests/test_provider.py`
-- **test_deploy_skips_the_worker_image_steps_when_cdk_fails()** (5 connections) — `deploy_aws/tests/test_provider.py`
-- **test_deploy_without_require_approval_leaves_it_to_cdk()** (5 connections) — `deploy_aws/tests/test_provider.py`
-- **test_destroy_yes_passes_force_to_cdk_and_is_off_by_default()** (5 connections) — `deploy_aws/tests/test_provider.py`
-- **test_diff_invokes_cdk_with_app_output_and_context()** (5 connections) — `deploy_aws/tests/test_provider.py`
-- **test_missing_node_reports_cleanly_and_skips_cdk()** (5 connections) — `deploy_aws/tests/test_provider.py`
-- **test_refresh_context_discards_the_cache_before_running()** (5 connections) — `deploy_aws/tests/test_provider.py`
-- **test_vpc_absent_hint_for_existing_environment_without_record()** (5 connections) — `deploy_aws/tests/test_provider.py`
-- **test_vpc_absent_hint_names_the_recorded_tier_for_an_existing_environment()** (5 connections) — `deploy_aws/tests/test_provider.py`
-- **test_vpc_absent_parses_but_every_synthesizing_verb_exits_2()** (5 connections) — `deploy_aws/tests/test_provider.py`
-- **_parse_destroy()** (4 connections) — `deploy_aws/tests/test_provider.py`
-- **test_a_bad_profile_exits_2_at_the_entry_not_a_traceback()** (4 connections) — `deploy_aws/tests/test_provider.py`
-- *... and 67 more nodes in this community*
+- **.add_arguments()** (8 connections) — `deploy_aws/gherkai_deploy_aws/cli.py`
+- **._add_worker_subverbs()** (6 connections) — `deploy_aws/gherkai_deploy_aws/cli.py`
+- **ArgumentParser** (6 connections)
+- **._add_container_engine_flag()** (5 connections) — `deploy_aws/gherkai_deploy_aws/cli.py`
+- **._add_locator_flags()** (4 connections) — `deploy_aws/gherkai_deploy_aws/cli.py`
+- **._declares_worker_subverbs()** (4 connections) — `deploy_aws/gherkai_deploy_aws/cli.py`
+- **._is_destroy_parser()** (4 connections) — `deploy_aws/gherkai_deploy_aws/cli.py`
+- **test_contributed_flag_surface_is_exactly_the_provider_specific_set()** (3 connections) — `deploy_aws/tests/test_provider.py`
+- **test_provider_doctor_reports_toolchain()** (3 connections) — `deploy_aws/tests/test_provider.py`
+- **test_the_two_action_knobs_are_only_on_deploy()** (3 connections) — `deploy_aws/tests/test_provider.py`
+- **test_worker_subverb_surface_is_exactly_three_and_only_on_deploy()** (3 connections) — `deploy_aws/tests/test_provider.py`
+- **.delete_worker()** (2 connections) — `deploy_aws/gherkai_deploy_aws/cli.py`
+- **test_app_command_uses_current_interpreter_and_module()** (2 connections) — `deploy_aws/tests/test_provider.py`
+- **test_generated_cdk_json_carries_app_and_feature_flags_verbatim()** (2 connections) — `deploy_aws/tests/test_provider.py`
+- **test_provider_name_is_aws()** (2 connections) — `deploy_aws/tests/test_provider.py`
+- **test_yes_is_destroy_only()** (2 connections) — `deploy_aws/tests/test_provider.py`
+- **AWS provider——`gherkai deploy` 族命令在 AWS 上的实现（接缝契约见模块头）。** (1 connections) — `deploy_aws/gherkai_deploy_aws/cli.py`
+- **把 provider 特有 flag 挂上 CLI 给的 parser。…** (1 connections) — `deploy_aws/gherkai_deploy_aws/cli.py`
+- **这个 parser 是 **destroy** 的那个吗（`prog` 末段判，同 `_declares_worker_subverbs` 的口径）。** (1 connections) — `deploy_aws/gherkai_deploy_aws/cli.py`
+- **这个 parser 是 **deploy** 的那个吗？ 前端对 deploy 与 destroy **各调一次** `add_arguments`（两者共用…** (1 connections) — `deploy_aws/gherkai_deploy_aws/cli.py`
+- **`push-worker` / `list-workers` / `delete-worker` 三个子动词（ADR 0038）。…** (1 connections) — `deploy_aws/gherkai_deploy_aws/cli.py`
+- **`--container-engine`（ADR 0038「容器引擎口子」）：这一期只 docker，别的名字以退出码 2 结束、不静默回落。** (1 connections) — `deploy_aws/gherkai_deploy_aws/cli.py`
+- **子动词也收 `--prefix` / `--region` / `--profile`。 **`default=SUPPRESS`…** (1 connections) — `deploy_aws/gherkai_deploy_aws/cli.py`
+- **留的口子（ADR 0038「命令族」）：**尚未提供**，以退出码 2 结束并说清为什么与将来怎么落。…** (1 connections) — `deploy_aws/gherkai_deploy_aws/cli.py`
+- *... and 4 more nodes in this community*
 
 ## Relationships
 
-- [CDK Invocation Fakes](CDK_Invocation_Fakes.md) (25 shared connections)
-- [CDK App and Deploy CLI](CDK_App_and_Deploy_CLI.md) (17 shared connections)
-- [CDK Command Wrapper](CDK_Command_Wrapper.md) (14 shared connections)
-- [Worker Deploy CLI](Worker_Deploy_CLI.md) (9 shared connections)
-- [CFN/SSM Client Stubs](CFN-SSM_Client_Stubs.md) (8 shared connections)
-- [Deploy CLI Arguments](Deploy_CLI_Arguments.md) (6 shared connections)
-- [Skill Deploy Token Tests](Skill_Deploy_Token_Tests.md) (2 shared connections)
-- [Container Engine Wrapper](Container_Engine_Wrapper.md) (2 shared connections)
-- [Worker Delete Command Stub](Worker_Delete_Command_Stub.md) (1 shared connections)
-- [Test Fixtures and Conftest](Test_Fixtures_and_Conftest.md) (1 shared connections)
-- [Provider Module Import Isolation](Provider_Module_Import_Isolation.md) (1 shared connections)
+- [Deploy Provider Tests](Deploy_Provider_Tests.md) (43 shared connections)
+- [Provider Deploy Commands](Provider_Deploy_Commands.md) (17 shared connections)
+- [CDK Context Cache](CDK_Context_Cache.md) (7 shared connections)
+- [Deploy CLI Backend Helpers](Deploy_CLI_Backend_Helpers.md) (7 shared connections)
+- [CDK Deploy Argv Tests](CDK_Deploy_Argv_Tests.md) (5 shared connections)
+- [AWS Client Stubs](AWS_Client_Stubs.md) (3 shared connections)
+- [CDK Destroy Confirmation](CDK_Destroy_Confirmation.md) (2 shared connections)
+- [Skill Deploy Token Guardrail](Skill_Deploy_Token_Guardrail.md) (2 shared connections)
+- [Container Engine Errors](Container_Engine_Errors.md) (1 shared connections)
+- [Container Engine Probe Stub](Container_Engine_Probe_Stub.md) (1 shared connections)
 
 ## Source Files
 
@@ -52,8 +51,8 @@
 
 ## Audit Trail
 
-- EXTRACTED: 294 (97%)
-- INFERRED: 8 (3%)
+- EXTRACTED: 118 (93%)
+- INFERRED: 9 (7%)
 - AMBIGUOUS: 0 (0%)
 
 ---

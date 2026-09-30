@@ -1,8 +1,8 @@
 # RunMeta
 
-> God node · 120 connections · `core/gherkai_core/model.py`
+> God node · 117 connections · `core/gherkai_core/model.py`
 
-**Community:** [Job Domain Models](Job_Domain_Models.md)
+**Community:** [Run Definition Domain Model](Run_Definition_Domain_Model.md)
 
 ## Connections by Relation
 
@@ -36,22 +36,22 @@
 - test_project.py `EXTRACTED`
 - test_stores.py `EXTRACTED`
 - serialize.py `EXTRACTED`
-- test_conditional_writes.py `EXTRACTED`
 - project.py `EXTRACTED`
+- test_conditional_writes.py `EXTRACTED`
 - test_cloud_reconcile.py `EXTRACTED`
 - test_report_store.py `EXTRACTED`
 - test_reconcile.py `EXTRACTED`
-- test_subprocess_engine.py `EXTRACTED`
 - schedule.py `EXTRACTED`
-- test_cloud_integration.py `EXTRACTED`
 - ports.py `EXTRACTED`
+- test_cloud_integration.py `EXTRACTED`
 - test_persist.py `EXTRACTED`
 - run_store/local.py `EXTRACTED`
 - test_ddb_run_store.py `EXTRACTED`
-- test_arg_offload.py `EXTRACTED`
 - reconcile.py `EXTRACTED`
+- test_arg_offload.py `EXTRACTED`
 - test_sqlite_event_log.py `EXTRACTED`
 - run_store/ddb.py `EXTRACTED`
+- persist.py `EXTRACTED`
 
 ### rationale_for
 - 一次 run 的 **definition**（前置身份，执行前由 plan 产出 + 组合根生成确定，不从 RunResult 反推）。… `EXTRACTED`
@@ -71,27 +71,25 @@
 - _meta() `EXTRACTED`
 - .create_run() `EXTRACTED`
 - .save_run() `EXTRACTED`
-- _rm() `EXTRACTED`
 - _meta() `EXTRACTED`
 - .save_run() `EXTRACTED`
 - .create_run() `EXTRACTED`
 - .begin() `EXTRACTED`
-- _build_run_meta() `EXTRACTED`
+- .load_run_meta() `EXTRACTED`
+- _meta() `EXTRACTED`
 
 ### uses
 - LocalRunStore `INFERRED`
 - ScheduleOpts `INFERRED`
 - DynamoDBRunStore `INFERRED`
 - EventRecord `INFERRED`
-- RunStore `INFERRED`
 - TaskExited `INFERRED`
 - RunPersistence `INFERRED`
-- ResultStore `INFERRED`
 - _IncClock `INFERRED`
+- RunStore `INFERRED`
 - _FakeEcs `INFERRED`
 - Timing `INFERRED`
-- Engine `INFERRED`
-- ReportStore `INFERRED`
+- ResultStore `INFERRED`
 - Action `INFERRED`
 - NonTerminalSnapshot `INFERRED`
 - _Worker `INFERRED`
@@ -99,6 +97,8 @@
 - _FakeSchedulerClient `INFERRED`
 - SubprocessLauncher `INFERRED`
 - EngineResolver `INFERRED`
+- JobSink `INFERRED`
+- ReportStore `INFERRED`
 
 ---
 

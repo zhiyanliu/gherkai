@@ -2,7 +2,7 @@
 
 > God node · 216 connections · `cli/gherkai_cli/__main__.py`
 
-**Community:** [CLI Entry and Plan](CLI_Entry_and_Plan.md)
+**Community:** [Plan Command CLI Tests](Plan_Command_CLI_Tests.md)
 
 ## Connections by Relation
 

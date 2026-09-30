@@ -2,7 +2,7 @@
 
 > God node · 127 connections · `core/gherkai_core/model.py`
 
-**Community:** [Run State Store](Run_State_Store.md)
+**Community:** [Run State Rendering](Run_State_Rendering.md)
 
 ## Connections by Relation
 
@@ -22,10 +22,10 @@
 - test_offload_round_trip_real() `EXTRACTED`
 - test_finalize_writes_verdicts_before_commit_point() `EXTRACTED`
 - test_build_wires_arg_offloader_so_step_argument_bodies_read_back() `EXTRACTED`
-- _cmd_submit() `EXTRACTED`
 - test_tick_with_ddb_backend() `EXTRACTED`
 - test_detached_flag_on_state_item() `EXTRACTED`
 - test_worker_task_def_arns_on_state_item() `EXTRACTED`
+- _cmd_submit() `INFERRED`
 - _mk_state() `EXTRACTED`
 
 ### contains
@@ -35,12 +35,12 @@
 - test_project.py `EXTRACTED`
 - test_stores.py `EXTRACTED`
 - serialize.py `EXTRACTED`
-- test_conditional_writes.py `EXTRACTED`
 - project.py `EXTRACTED`
+- test_conditional_writes.py `EXTRACTED`
 - test_cloud_reconcile.py `EXTRACTED`
 - test_reconcile.py `EXTRACTED`
-- test_cloud_integration.py `EXTRACTED`
 - ports.py `EXTRACTED`
+- test_cloud_integration.py `EXTRACTED`
 - run_store/local.py `EXTRACTED`
 - test_ddb_run_store.py `EXTRACTED`
 - test_arg_offload.py `EXTRACTED`
@@ -77,23 +77,23 @@
 - LocalRunStore `INFERRED`
 - DynamoDBRunStore `INFERRED`
 - EventRecord `INFERRED`
-- RunStore `INFERRED`
 - TaskExited `INFERRED`
 - RunPersistence `INFERRED`
-- ResultStore `INFERRED`
+- RunStore `INFERRED`
 - _FakeEcs `INFERRED`
 - Timing `INFERRED`
-- Engine `INFERRED`
-- ReportStore `INFERRED`
+- ResultStore `INFERRED`
 - Action `INFERRED`
 - NonTerminalSnapshot `INFERRED`
 - FakeLauncher `INFERRED`
 - _FakeSchedulerClient `INFERRED`
 - EngineResolver `INFERRED`
 - JobSink `INFERRED`
+- ReportStore `INFERRED`
 - _RecorderWatch `INFERRED`
 - _FakeEcsClient `INFERRED`
 - Sink `INFERRED`
+- _FakeStartEngine `INFERRED`
 
 ---
 

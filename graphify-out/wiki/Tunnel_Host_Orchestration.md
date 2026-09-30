@@ -4,7 +4,7 @@
 
 ## Key Concepts
 
-- **gherkai_runtime/__init__.py** (14 connections) — `runtime/gherkai_runtime/__init__.py`
+- **gherkai_runtime/__init__.py** (12 connections) — `runtime/gherkai_runtime/__init__.py`
 - **tunnel_host.py** (10 connections) — `runtime/gherkai_runtime/tunnel_host.py`
 - **start_tunnel_for_jobs()** (7 connections) — `runtime/gherkai_runtime/tunnel_host.py`
 - **TunnelSetup** (4 connections) — `runtime/gherkai_runtime/tunnel_host.py`
@@ -18,18 +18,18 @@
 
 ## Relationships
 
-- [Tunnel Host Daemon](Tunnel_Host_Daemon.md) (6 shared connections)
-- [Job Domain Models](Job_Domain_Models.md) (4 shared connections)
-- [SSM Path Naming](SSM_Path_Naming.md) (2 shared connections)
-- [Tunnel Provider](Tunnel_Provider.md) (2 shared connections)
-- [CLI Command Handlers](CLI_Command_Handlers.md) (1 shared connections)
-- [Test Fixtures and Conftest](Test_Fixtures_and_Conftest.md) (1 shared connections)
-- [JSON Contract Guards](JSON_Contract_Guards.md) (1 shared connections)
-- [CLI Run Command Tests](CLI_Run_Command_Tests.md) (1 shared connections)
-- [Tunnel CLI Wiring](Tunnel_CLI_Wiring.md) (1 shared connections)
-- [Local Detached Execution](Local_Detached_Execution.md) (1 shared connections)
-- [Cloud Resource Resolution](Cloud_Resource_Resolution.md) (1 shared connections)
-- [Resource Naming Source](Resource_Naming_Source.md) (1 shared connections)
+- [Tunnel Host Watchdog](Tunnel_Host_Watchdog.md) (6 shared connections)
+- [Run Definition Domain Model](Run_Definition_Domain_Model.md) (3 shared connections)
+- [Tunnel Provider Seam](Tunnel_Provider_Seam.md) (2 shared connections)
+- [CLI Test Fixtures](CLI_Test_Fixtures.md) (1 shared connections)
+- [Engine Listing and JSON Contract](Engine_Listing_and_JSON_Contract.md) (1 shared connections)
+- [CLI Run Wiring Tests](CLI_Run_Wiring_Tests.md) (1 shared connections)
+- [Tunnel CLI Wiring Tests](Tunnel_CLI_Wiring_Tests.md) (1 shared connections)
+- [Local Detached Reconcile](Local_Detached_Reconcile.md) (1 shared connections)
+- [Composition Root Helpers](Composition_Root_Helpers.md) (1 shared connections)
+- [SSM Path Naming](SSM_Path_Naming.md) (1 shared connections)
+- [Rich Text UI Presentation](Rich_Text_UI_Presentation.md) (1 shared connections)
+- [Resource Naming and Variants](Resource_Naming_and_Variants.md) (1 shared connections)
 
 ## Source Files
 
@@ -39,7 +39,7 @@
 
 ## Audit Trail
 
-- EXTRACTED: 35 (97%)
+- EXTRACTED: 33 (97%)
 - INFERRED: 1 (3%)
 - AMBIGUOUS: 0 (0%)
 

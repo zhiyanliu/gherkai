@@ -4,7 +4,7 @@
 
 ## Key Concepts
 
-- **_FakeS3** (11 connections) — `cli/tests/test_backend_cloud.py`
+- **_FakeS3** (7 connections) — `cli/tests/test_backend_cloud.py`
 - **.head_bucket()** (1 connections) — `cli/tests/test_backend_cloud.py`
 - **.__init__()** (1 connections) — `cli/tests/test_backend_cloud.py`
 - **.put_object()** (1 connections) — `cli/tests/test_backend_cloud.py`
@@ -12,10 +12,8 @@
 
 ## Relationships
 
-- [Run Result Aggregation Tree](Run_Result_Aggregation_Tree.md) (3 shared connections)
 - [Cloud Backend CLI Tests](Cloud_Backend_CLI_Tests.md) (2 shared connections)
-- [Run State Projection](Run_State_Projection.md) (1 shared connections)
-- [SSM Path Naming](SSM_Path_Naming.md) (1 shared connections)
+- [Cloud Composition Helpers](Cloud_Composition_Helpers.md) (1 shared connections)
 
 ## Source Files
 
@@ -23,8 +21,8 @@
 
 ## Audit Trail
 
-- EXTRACTED: 6 (55%)
-- INFERRED: 5 (45%)
+- EXTRACTED: 6 (86%)
+- INFERRED: 1 (14%)
 - AMBIGUOUS: 0 (0%)
 
 ---

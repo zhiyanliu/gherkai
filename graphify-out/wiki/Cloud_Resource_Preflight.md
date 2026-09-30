@@ -33,12 +33,13 @@
 
 ## Relationships
 
-- [Cloud Resource Resolution](Cloud_Resource_Resolution.md) (19 shared connections)
-- [Feature Planning Core](Feature_Planning_Core.md) (4 shared connections)
-- [Run State Store](Run_State_Store.md) (4 shared connections)
-- [Run Result Aggregation Tree](Run_Result_Aggregation_Tree.md) (4 shared connections)
-- [SSM Path Naming](SSM_Path_Naming.md) (2 shared connections)
-- [Resource Naming Source](Resource_Naming_Source.md) (1 shared connections)
+- [Composition Root Helpers](Composition_Root_Helpers.md) (19 shared connections)
+- [Plan and Scope Seam](Plan_and_Scope_Seam.md) (4 shared connections)
+- [Run State Rendering](Run_State_Rendering.md) (4 shared connections)
+- [Result Tree Text Rendering](Result_Tree_Text_Rendering.md) (4 shared connections)
+- [SSM Path Naming](SSM_Path_Naming.md) (1 shared connections)
+- [Cloud Engine Resolver Build](Cloud_Engine_Resolver_Build.md) (1 shared connections)
+- [Cloud Composition Helpers](Cloud_Composition_Helpers.md) (1 shared connections)
 
 ## Source Files
 

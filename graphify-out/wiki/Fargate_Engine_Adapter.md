@@ -4,7 +4,7 @@
 
 ## Key Concepts
 
-- **FargateEngine** (31 connections) — `core/gherkai_core/adapters/fargate_engine.py`
+- **FargateEngine** (24 connections) — `core/gherkai_core/adapters/fargate_engine.py`
 - **._read_events()** (11 connections) — `core/gherkai_core/adapters/fargate_engine.py`
 - **.run_scope()** (7 connections) — `core/gherkai_core/adapters/fargate_engine.py`
 - **TaskProbe** (6 connections) — `core/gherkai_core/adapters/fargate_engine.py`
@@ -32,17 +32,17 @@
 
 ## Relationships
 
-- [Run Result Aggregation Tree](Run_Result_Aggregation_Tree.md) (6 shared connections)
-- [Fargate Engine Tests](Fargate_Engine_Tests.md) (5 shared connections)
-- [Job Domain Models](Job_Domain_Models.md) (4 shared connections)
-- [Typed Errors and Wire Protocol](Typed_Errors_and_Wire_Protocol.md) (4 shared connections)
-- [Event Gap & ECS Polling](Event_Gap_%26_ECS_Polling.md) (3 shared connections)
-- [Fargate Worker Handle](Fargate_Worker_Handle.md) (3 shared connections)
-- [Event Log Adapters](Event_Log_Adapters.md) (2 shared connections)
-- [Cloud Event Drain Tests](Cloud_Event_Drain_Tests.md) (1 shared connections)
-- [SSM Path Naming](SSM_Path_Naming.md) (1 shared connections)
-- [Boto Guard and Arg Offload](Boto_Guard_and_Arg_Offload.md) (1 shared connections)
-- [DynamoDB Event Log](DynamoDB_Event_Log.md) (1 shared connections)
+- [Fargate Engine Tests](Fargate_Engine_Tests.md) (4 shared connections)
+- [Event Wire Serialization](Event_Wire_Serialization.md) (4 shared connections)
+- [Event Gap Grace Tests](Event_Gap_Grace_Tests.md) (3 shared connections)
+- [ECS Task Exit Probing](ECS_Task_Exit_Probing.md) (2 shared connections)
+- [Core Adapters Documentation](Core_Adapters_Documentation.md) (2 shared connections)
+- [Run Definition Domain Model](Run_Definition_Domain_Model.md) (2 shared connections)
+- [Worker Log Event Formatting](Worker_Log_Event_Formatting.md) (2 shared connections)
+- [Fargate Worker Handle](Fargate_Worker_Handle.md) (2 shared connections)
+- [Worker Exit Drain Tests](Worker_Exit_Drain_Tests.md) (1 shared connections)
+- [Boto3 Adapter Guard](Boto3_Adapter_Guard.md) (1 shared connections)
+- [Event Keys & Exit Records](Event_Keys_%26_Exit_Records.md) (1 shared connections)
 
 ## Source Files
 
@@ -51,8 +51,8 @@
 
 ## Audit Trail
 
-- EXTRACTED: 53 (78%)
-- INFERRED: 15 (22%)
+- EXTRACTED: 53 (87%)
+- INFERRED: 8 (13%)
 - AMBIGUOUS: 0 (0%)
 
 ---

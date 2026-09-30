@@ -34,11 +34,11 @@
 ## Relationships
 
 - [Run Scope Tests](Run_Scope_Tests.md) (2 shared connections)
-- [Midscene Run Scope](Midscene_Run_Scope.md) (2 shared connections)
-- [Midscene Resolve Hooks](Midscene_Resolve_Hooks.md) (1 shared connections)
+- [Midscene Run Scope Worker](Midscene_Run_Scope_Worker.md) (2 shared connections)
+- [TypeScript Entry and Hooks](TypeScript_Entry_and_Hooks.md) (1 shared connections)
 - [Artifact Upload & Error Text](Artifact_Upload_%26_Error_Text.md) (1 shared connections)
-- [Event Sink & Job Source](Event_Sink_%26_Job_Source.md) (1 shared connections)
-- [Step Argument & Sink Tests](Step_Argument_%26_Sink_Tests.md) (1 shared connections)
+- [TypeScript Worker IO Edges](TypeScript_Worker_IO_Edges.md) (1 shared connections)
+- [Worker Step Arguments](Worker_Step_Arguments.md) (1 shared connections)
 
 ## Source Files
 
