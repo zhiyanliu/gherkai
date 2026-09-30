@@ -2,7 +2,7 @@
 
 浏览器运行在云端，访问不到 `http://localhost:3000`。本机 local 与云端 cloud 两个后端在这一点上相同：local 只是把 worker 进程放在你的机器上，浏览器始终在云端，所以两个后端测本机应用都要用 `--expose-local`。
 
-本页讲 `--expose-local` 的前置、行为、隧道的持有进程、存活时间上限与限制。执行方式与执行后端四种组合的选择、结果读法与退出码见 [`running-and-results.md`](./running-and-results.md)；选项与环境变量总表见 [`configuration.md`](./configuration.md)；按症状排障见 [`troubleshooting.md`](./troubleshooting.md)。
+`--expose-local` 的前置、行为、隧道的持有进程、存活时间上限与限制如下。执行方式与执行后端四种组合的选择、结果读法与退出码见 [`running-and-results.md`](./running-and-results.md)；选项与环境变量总表见 [`configuration.md`](./configuration.md)；按症状排障见 [`troubleshooting.md`](./troubleshooting.md)。
 
 ## 工作方式
 

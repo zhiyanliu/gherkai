@@ -1,6 +1,6 @@
 # 编写确定性 step
 
-本页讲怎么把必须精确、不能因模型判断而波动的检查写成代码：`steps/` 目录约定、Python（Nova Act 引擎）与 TypeScript（Midscene 引擎）两侧并排的注册 API、`description` / `example` 的作用、加载失败的表现，以及如何核对与带到云端。哪些判定该写成确定性 step、哪些留给 AI 由 [`writing-features.md`](./writing-features.md) 讲；命令、退出码与报告见 [`running-and-results.md`](./running-and-results.md)；镜像与部署流程见 [`cloud-backend.md`](./cloud-backend.md)。
+把必须精确、不能因模型判断而波动的检查写成代码，涉及以下内容：`steps/` 目录约定、Python（Nova Act 引擎）与 TypeScript（Midscene 引擎）两侧并排的注册 API、`description` / `example` 的作用、加载失败的表现，以及如何核对与带到云端。哪些判定该写成确定性 step、哪些留给 AI 由 [`writing-features.md`](./writing-features.md) 讲；命令、退出码与报告见 [`running-and-results.md`](./running-and-results.md)；镜像与部署流程见 [`cloud-backend.md`](./cloud-backend.md)。
 
 ## 写之前
 

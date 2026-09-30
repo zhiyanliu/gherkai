@@ -1,6 +1,6 @@
 # 部署与维护云端后端
 
-本页面向**部署方**：在自己的 AWS 账户里建齐 `--backend cloud` 所需的资源、维护 worker 镜像、升级与拆除。怎么提交 run、看判定与退出码见 [`running-and-results.md`](./running-and-results.md)；环境变量总表见 [`configuration.md`](./configuration.md)；后端由哪几个部分拼成、一次改动传播到哪里见 [`../internals/cloud-backend-carriers.md`](../internals/cloud-backend-carriers.md)。
+**部署方**按以下内容在自己的 AWS 账户里建齐 `--backend cloud` 所需的资源、维护 worker 镜像、升级与拆除。怎么提交 run、看判定与退出码见 [`running-and-results.md`](./running-and-results.md)；环境变量总表见 [`configuration.md`](./configuration.md)；后端由哪几个部分拼成、一次改动传播到哪里见 [`../internals/cloud-backend-carriers.md`](../internals/cloud-backend-carriers.md)。
 
 云端后端只需部署方装与维护。团队里只提交 run 的成员不装部署包，用[下面的最小权限](#团队成员需要的最小云端权限)即可。
 

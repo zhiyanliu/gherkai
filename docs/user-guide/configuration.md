@@ -1,6 +1,6 @@
 # 配置：环境变量与通用选项
 
-本页是 gherkai 环境变量与跨命令选项的清单：每一项做什么、默认值是多少、在哪里设才生效。命令怎么用、结果与退出码怎么读见 [`running-and-results.md`](./running-and-results.md)；安装与 AWS 前置见 [`getting-started.md`](./getting-started.md)；报错的处置见 [`troubleshooting.md`](./troubleshooting.md)。
+gherkai 的环境变量与跨命令选项清单如下：每一项做什么、默认值是多少、在哪里设置才生效。命令怎么用、结果与退出码怎么读见 [`running-and-results.md`](./running-and-results.md)；安装与 AWS 前置见 [`getting-started.md`](./getting-started.md)；报错的处置见 [`troubleshooting.md`](./troubleshooting.md)。
 
 ## 配置生效的四个位置
 

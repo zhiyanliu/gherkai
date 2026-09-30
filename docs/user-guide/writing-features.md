@@ -1,8 +1,8 @@
 # 编写 .feature
 
-本页讲 `.feature` 文件怎么写：一个最小骨架长什么样，哪些 step 交给 AI、哪些必须精确，AI 断言怎么写才稳定，投票次数怎么用，`@scope` / `@engine` / `@timeout` 三个 tag 的语义，Gherkin 各种写法的支持范围，按引擎调整写法（含非英文 UI），以及哪些内容不该写进 `.feature`。确定性 step 的代码怎么写见 [`writing-deterministic-steps.md`](./writing-deterministic-steps.md)；运行命令、选项、退出码与结果位置见 [`running-and-results.md`](./running-and-results.md)。
+`.feature` 文件的写法包括：最小骨架的形态，哪些 step 交给 AI、哪些必须精确，AI 断言怎么写才稳定，投票次数怎么用，`@scope` / `@engine` / `@timeout` 三个 tag 的语义，Gherkin 各种写法的支持范围，按引擎调整写法（含非英文 UI），以及哪些内容不该写进 `.feature`。确定性 step 的代码怎么写见 [`writing-deterministic-steps.md`](./writing-deterministic-steps.md)；运行命令、选项、退出码与结果位置见 [`running-and-results.md`](./running-and-results.md)。
 
-本页引用的片段出自仓库的 [`features/`](../../features/) 目录。
+引用的片段出自仓库的 [`features/`](../../features/) 目录。
 
 ## 一个最小的 .feature
 
@@ -17,7 +17,7 @@ Feature: 维基百科搜索
     Then "当前页面是关于 OpenAI 的维基百科词条页"
 ```
 
-本页后面的代码块都是节选。抄用时补上所属文件的 `Feature:` 行：缺这一行时解析失败，报错指向文件第 1 行。
+以下代码块都是节选。抄用时补上所属文件的 `Feature:` 行：缺这一行时解析失败，报错指向文件第 1 行。
 
 ## 一个 step 的三种执行路径
 

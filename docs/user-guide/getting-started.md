@@ -1,6 +1,6 @@
 # 开始使用
 
-本页回答三个问题：装什么、需要哪些 AWS 前置、第一次怎么完整运行。gherkai 把 `.feature` 里的每个 step 交给 AI 引擎，由引擎操作云端浏览器并做出判定；需要精确判定的 step 由确定性 step 代码接管（引擎自带一条判页面地址的，其余由项目自己写，见[编写确定性 step](./writing-deterministic-steps.md)）。各部件的归属见下面的 [AWS 前置](#aws-前置)。本页不讲 `.feature` 的写法（见[编写 .feature](./writing-features.md)）、执行方式与执行后端四种组合的差别与退出码（见[运行测试与查看结果](./running-and-results.md)）、云端后端的部署（见[云端后端](./cloud-backend.md)）、选项与环境变量总表（见[配置](./configuration.md)）、报错处置（见[排错](./troubleshooting.md)）。
+开始使用 gherkai 要解决三个问题：安装什么、需要哪些 AWS 前置、第一次怎么完整运行。gherkai 把 `.feature` 里的每个 step 交给 AI 引擎，由引擎操作云端浏览器并做出判定；需要精确判定的 step 由确定性 step 代码接管（引擎自带一条判页面地址的，其余由项目自己写，见[编写确定性 step](./writing-deterministic-steps.md)）。各部件的归属见下面的 [AWS 前置](#aws-前置)。`.feature` 的写法见[编写 .feature](./writing-features.md)；执行方式与执行后端四种组合的差别与退出码见[运行测试与查看结果](./running-and-results.md)；云端后端的部署见[云端后端](./cloud-backend.md)；选项与环境变量总表见[配置](./configuration.md)；报错处置见[排错](./troubleshooting.md)。
 
 ## 按角色选安装形态
 
