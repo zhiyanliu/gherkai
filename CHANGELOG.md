@@ -10,7 +10,7 @@
 
 ### 变化
 
-- 人读输出里多行同结构的清单统一改为表格（带框线、按显示宽度对齐、随终端宽度折行）：`deploy list-workers` 的 variant 表、`list-engines`、`list-deterministic`、`status` 的 job 清单；`list-workers` 的推送时间换算到 UTC、精确到分钟，默认 variant 以 `*` 标出。`--json` 的机读形态不变。命令行的依赖新增 `rich`。
+- 人读输出统一由 rich 渲染：多行同结构的清单改为带框线的表格（`deploy list-workers`、`list-engines`、`list-deterministic`、`status` 的 job 清单、`doctor`），层级结构改为带引导线的树（`run` 的判定汇总、`plan`、`explain`），判定与状态词按语义上色（通过绿、失败红、出错紫红、中止亮红、跳过淡显），标准输出不是终端或 `NO_COLOR` 为非空值时不带颜色，`FORCE_COLOR` 可强制带颜色；表格里的标识列（scope_id、示例、模式、tag、地址）不折断，说明类列只在终端过窄时折行，非终端输出每行保持一行。`list-workers` 的推送时间换算到 UTC、精确到分钟，默认 variant 以 `*` 标出。`--json` 的机读形态不变。命令行的依赖新增 `rich`。
 
 ## [1.4.6] - 2026-09-29
 

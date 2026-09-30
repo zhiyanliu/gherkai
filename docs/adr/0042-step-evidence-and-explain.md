@@ -117,24 +117,26 @@ evidence 的抽取、落盘、上传任一环失败 → worker 日志一行、�
 
 ```
 run 20260910T080630Z-9fa261  status=failed
-scope features/login.feature:6  engine=novaact  status=failed  session=01a0…
-  scenario features/login.feature:12  密码错误时不放行  failed
-    step 0  Given 打开 "https://app.example.com/login"      passed  (1.1s)
-    step 1  When 输入用户名「alice」与密码「wrong」           passed  (9.4s)
-    step 2  Then 页面显示「登录成功」                        failed  votes 0/1  (12.1s)
-      message: AI 断言未过多数票（0/1）：页面显示「登录成功」
-      act 0  vote=false  url=https://app.example.com/login
-        thought: I am on the login page. The task asks whether the page shows "登录成功".
-                 I see an error banner "密码错误" instead. Returning false.
-        screenshot: file:///…/evidence/…/step-2/act-0-frame-4.jpg
-        其余 4 个 frame 已省略（--full 查看）
-    step 3  When 点击「退出」                                 passed  (3.2s)
-  scenario features/login.feature:20  锁定账户提示  error
-    step 0  Given 打开 "https://app.example.com/login"      error  (network_error)
-      message: worker 建连失败（网络/SSL 瞬时故障）：…
-      无 AI 证据
-    step 1  Then 页面提示「账户已锁定」                      skipped  ⚠ 因前置 step error 被跳过（未执行）
+└── scope features/login.feature:6  engine=novaact  status=failed  session=01a0…
+    ├── scenario features/login.feature:12  密码错误时不放行  failed
+    │   ├── step 0  Given 打开 "https://app.example.com/login"  passed  (1.1s)
+    │   ├── step 1  When 输入用户名「alice」与密码「wrong」  passed  (9.4s)
+    │   ├── step 2  Then 页面显示「登录成功」  failed  votes 0/1  (12.1s)
+    │   │   ├── message: AI 断言未过多数票（0/1）：页面显示「登录成功」
+    │   │   └── act 0  vote=false  url=https://app.example.com/login
+    │   │       ├── thought: I am on the login page. The task asks whether the page shows "登录成功".
+    │   │       │            I see an error banner "密码错误" instead. Returning false.
+    │   │       ├── screenshot: file:///…/evidence/…/step-2/act-0-frame-4.jpg
+    │   │       └── 其余 4 个 frame 已省略（--full 查看）
+    │   └── step 3  When 点击「退出」  passed  (3.2s)
+    └── scenario features/login.feature:20  锁定账户提示  error
+        ├── step 0  Given 打开 "https://app.example.com/login"  error  (network_error)
+        │   ├── message: worker 建连失败（网络/SSL 瞬时故障）：…
+        │   └── 无 AI 证据
+        └── step 1  Then 页面提示「账户已锁定」  skipped  ⚠ 因前置 step error 被跳过（未执行）
 ```
+
+层级自 2026-09-30 起由 rich 的树渲染：引导线代替两格缩进，见 [0047](./0047-cli-human-readable-tables-with-rich.md)；节点文字、字段名与多行推理的续行对齐（对齐到 `thought: ` 之后）不变。
 
 **文本 key = JSON 字段名**：`message:` / `thought:` / `screenshot:` / `error:` 与 `vote=` / `url=` / `status=` 同一规则，文本与 `--json` 一一对应、agent 零翻译；中文只用于整句提示（「无 AI 证据」「无记录（未执行或未上报）」「其余 N 个 frame 已省略」「因前置 step error 被跳过」）与 run 的人读文本。
 

@@ -108,7 +108,7 @@ handler 只拿到上下文与具名组。挂在这一步上的 DataTable / DocSt
 
 两个字段都**必填**，缺一个则注册时报错、点名那条模式，worker 起不来。它们是 feature 作者唯一能看到的接口：
 
-- `description`：一句话说明这一步做什么。`gherkai list-deterministic` 每条的第一行就是它，`gherkai plan` 的命中标注 `← 确定性: <说明>` 也用它。
+- `description`：一句话说明这一步做什么。`gherkai list-deterministic` 的「说明」列就是它，`gherkai plan` 的命中标注 `← 确定性: <说明>` 也用它。
 - `example`：一条可以直接抄进 `.feature` 的 step 文本，出现在 `gherkai list-deterministic` 的「示例」列。
 
 写 `example` 时用你希望 feature 作者照抄的完整措辞（含 `Given` / `Then` 关键字），因为它就是对方的复制源。
@@ -317,7 +317,7 @@ gherkai plan features/*.feature --steps-dir ./steps                # 每个 step
 gherkai doctor --steps-dir ./steps                                 # 目录与加载结果
 ```
 
-- `list-deterministic`：每条打三行——说明、`示例:`、`模式:`；`--engine` 缺省 `novaact`；清单含内建与你注册的全部条目。该引擎的 worker 没装时命令以退出码 2 结束，并原地给出安装命令。
+- `list-deterministic`：一张三列表格——示例、说明、模式，每条一行；`--engine` 缺省 `novaact`；清单含内建与你注册的全部条目。该引擎的 worker 没装时命令以退出码 2 结束，并原地给出安装命令。
 - `plan`：命中的 step 后面标 `← 确定性: <说明>`，冲突标 `← ⚠`，走 AI 的不标（减少噪声）。某个引擎的 worker 不可用时 `plan` 不会失败，但该引擎的 step 一个标注都没有，stderr 会说明标注已降级——这种情况下不要把「没有标注」读成「都走 AI」。示例 `.feature` 在仓库的 [`features/`](../../features/) 目录。
 - `doctor`：`steps.dir` 显示解析到的目录（没有目录时说明只有内建 step），`steps.load.<引擎>` 显示该引擎加载后共有多少条。
 

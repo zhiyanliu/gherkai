@@ -16,7 +16,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from gherkai_core.redact import redact_deep
-from gherkai_runtime.textui import render_table
+from gherkai_runtime.textui import render_table, styled
 from gherkai_core.model import TERMINAL_STATUSES, Event, RunMeta, Status
 from gherkai_core.parse import FeatureParseError
 from gherkai_core.persist import RunPersistence
@@ -617,7 +617,8 @@ def _cmd_list_deterministic(args) -> int:
         return 0
     # 表格渲染（ADR 0047）：示例列是 feature 作者的复制源，放最前
     print(render_table(["示例", "说明", "模式"],
-                       [[e.get("example", ""), e.get("description", "（无描述）"), e.get("pattern", "")] for e in entries]))
+                       [[e.get("example", ""), e.get("description", "（无描述）"), e.get("pattern", "")] for e in entries],
+                       wrap=[1]))  # 示例与模式是复制源、不折断；说明列可折
     return 0
 
 
@@ -649,7 +650,7 @@ def _cmd_list_engines(args) -> int:
         ["引擎", "状态", "拉起命令", "来源"],
         [[r["engine"], "可用", " ".join(r["cmd"]) + (f"（cwd {r['cwd']}）" if r["cwd"] else ""), r["source"]]
          if r["available"] else [r["engine"], "未定位到 worker 运行时", r["hint"], "-"]
-         for r in rows]))
+         for r in rows], wrap=[2]))  # 拉起命令 / 安装指引是长文本，可折
     return 0
 
 
@@ -734,9 +735,13 @@ def _cmd_doctor(args) -> int:
     if args.json:
         print(json.dumps({"ok": ok_all, "checks": checks}, ensure_ascii=False, indent=2))
     else:
+        # 表格渲染（ADR 0047）：结果列 ✓ 过、✗ 必修项没过、- 可选能力缺失；说明列由表格折行
+        rows = []
         for c in checks:
             mark = "✓" if c["ok"] else ("✗" if c["required"] else "-")
-            print(f"{mark} {c['section']}.{c['name']}: {c['detail']}")
+            rows.append([styled(mark, "green" if c["ok"] else ("red" if c["required"] else "yellow")),
+                         f"{c['section']}.{c['name']}", c["detail"]])
+        print(render_table(["结果", "检查项", "说明"], rows, wrap=[2]))  # 说明列可折，结果与检查项不折
         if any(c["section"] == "provider" and not c["ok"] for c in checks):
             print("\n部署工具链有缺口（provider 段）：只影响 gherkai deploy / push-worker，不影响提交与本机运行")
         print("\n自检通过" if ok_all else "\n自检有失败项（✗ 为必修；- 为可选能力缺失）")

@@ -47,3 +47,11 @@ def _stub_engine_capabilities(monkeypatch):
     compose._CAPABILITIES_CACHE.clear()
     yield
     compose._CAPABILITIES_CACHE.clear()
+
+
+@pytest.fixture(autouse=True)
+def _presentation_is_environment_independent(monkeypatch):
+    """人读渲染（ADR 0047）不随运行测试的终端变化：固定关色、表格不按终端取宽——否则 `pytest -s` 在真实终端里会因 ANSI 与折行假红。"""
+    from gherkai_runtime import textui
+    monkeypatch.setattr(textui, "use_color", lambda: False)
+    monkeypatch.setattr(textui, "output_width", lambda: textui.NO_WRAP_WIDTH)

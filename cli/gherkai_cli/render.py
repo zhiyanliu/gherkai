@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from gherkai_core.model import Event, Job, JobResult, RunResult, RunState, Status
 from gherkai_core.redact import redact_deep
-from gherkai_runtime.textui import render_table
+from gherkai_runtime.textui import DIM, Text, TreeNode, render_table, render_tree, status_text, styled  # rich 只经 textui 进来（ADR 0047 渲染面单点）
 from gherkai_core.serialize import to_dict  # 单一真理源（ADR 0027）：cli --json 与 manifest 共用
 # ReportRef → dict 与 jobs/*.json、run --json 同一份（单一序列化真源，ADR 0027）；explain 的 report_refs 原样搬。
 from gherkai_core.serialize import ref_to_dict
@@ -51,7 +51,7 @@ def _ms(duration_ms: float | None) -> str:
     return f"{duration_ms / 1000:.1f}s" if duration_ms is not None else "?"
 
 
-# 连锁失败旁注的措辞（ADR 0031 决定六）：run 的文本汇总（`render_text`）与 explain 的 step 行（`_step_lines`）
+# 连锁失败旁注的措辞（ADR 0031 决定六）：run 的文本汇总（`render_text`）与 explain 的 step 节点（`_add_step`）
 # 共用这一句；RunReport index.html 里还有措辞相同的第三份，在 core 的 ReportStore 侧（跨包不共享常量），
 # 改这句要一并改那边。
 _SHORTCIRCUIT_NOTE = "⚠ 因前置 step error 被跳过（未执行）"
@@ -64,12 +64,17 @@ def render_text(result: RunResult) -> str:
     但 job/scenario/step/scope 是领域概念（feature 作者写 feature、看 plan 都在用），保留原词。JSON 模式（to_dict）是
     机器读的、字段名照旧。
     """
-    out: list[str] = ["", "===== 运行结果 =====", f"  总状态: {result.status.value}"]
+    return "\n" + render_tree(run_tree(result))
+
+
+def run_tree(result: RunResult) -> TreeNode:
+    """run 汇总的树（`render_text` 的结构；测试按节点归属断言，不按排版）。"""
+    root = TreeNode(Text.assemble("运行结果  总状态: ", status_text(result.status.value)))
     if result.duration_ms is not None:
-        out.append(f"  总墙钟时长: {_ms(result.duration_ms)}")
+        root.add(f"总墙钟时长: {_ms(result.duration_ms)}")
     cost_bits = _cost_bits(result.total_tokens, result.total_time_worked_s)
     if cost_bits:
-        out.append(f"  成本原生量合计: {' + '.join(cost_bits)}")
+        root.add(f"成本原生量合计: {' + '.join(cost_bits)}")
 
     for jr in result.jobs:
         jbits = _cost_bits(jr.total_tokens, jr.total_time_worked_s)
@@ -80,12 +85,12 @@ def render_text(result: RunResult) -> str:
             err = f"  ({jr.error_type}: {jr.message})" if jr.message else f"  ({jr.error_type})"  # 空 message 不留吊着的冒号（与报告页判法一致）
         else:
             err = f"  ({jr.message})" if jr.message else ""
-        out.append(f"  job {jr.scope_id!r}: {jr.status.value}{cost_str}{err}")
+        jn = root.add(Text.assemble(f"job {jr.scope_id!r}: ", status_text(jr.status.value), styled(cost_str, DIM), err))
         if jr.duration_ms is not None:
-            out.append(f"    scope 墙钟: {_ms(jr.duration_ms)}")
+            jn.add(f"scope 墙钟: {_ms(jr.duration_ms)}")
         for sr in jr.scenarios:
             dur = f"  ({_ms(sr.duration_ms)})" if sr.duration_ms is not None else ""
-            out.append(f"    scenario {sr.scenario_id!r}: {sr.status.value}{dur}")
+            sn = jn.add(Text.assemble(f"scenario {sr.scenario_id!r}: ", status_text(sr.status.value), dur))
             for st in sr.steps:
                 # total>1 才显投票 tally（与 format_event/index.html 一致；1/1 无抖动意义，不显）
                 v = f" 投票 {st.votes.yes}/{st.votes.total}" if st.votes and st.votes.total > 1 else ""
@@ -93,23 +98,24 @@ def render_text(result: RunResult) -> str:
                 # 上游 error 后 worker 跳过了它、没在损坏环境上执行。旁注解释"为何 skipped"，读 shortcircuited 这个
                 # 正交布尔（比旧的"按 status 顺序猜 error 后 failed"精确）；不改判定/severity（守纯 reducer 红线）。
                 note = f"  {_SHORTCIRCUIT_NOTE}" if st.shortcircuited else ""
-                out.append(f"      step {st.index}: {st.status.value} ({_ms(st.duration_ms)}){v}{note}")
+                stn = sn.add(Text.assemble(f"step {st.index}: ", status_text(st.status.value),
+                                           f" ({_ms(st.duration_ms)}){v}{note}"))
                 # step 级失败原因（ADR 0042 决策三）：与 job 行同样处理——有 message 就显，人读视图不只剩一个光秃的态
                 if st.message:
-                    out.append(f"        原因: {_one_line(st.message)}")
-                # step 级原生报告产物（Nova trajectory 挂这层，来自 step_done 下沉，ADR 0027）——缩进深一级
+                    stn.add(f"原因: {_one_line(st.message)}")
+                # step 级原生报告产物（Nova trajectory 挂这层，来自 step_done 下沉，ADR 0027）
                 for rr in st.report_refs:
-                    out.append(f"        report（{rr.label or rr.kind}）: {rr.ref}")
+                    stn.add(styled(f"report（{rr.label or rr.kind}）: {rr.ref}", DIM))
             # scenario 级原生报告产物：当前引擎均不填（Nova 已下沉 step 级、Midscene 报 scope 级），
             # 保留作扩展兜底——未来引擎若在 scenario_done 报 report_refs 仍能显示（不透明搬运哲学，ADR 0027）
             for rr in sr.report_refs:
-                out.append(f"      report（{rr.label or rr.kind}）: {rr.ref}")
+                sn.add(styled(f"report（{rr.label or rr.kind}）: {rr.ref}", DIM))
         if jr.session_id:
-            out.append(f"    session id: {jr.session_id}")
+            jn.add(styled(f"session id: {jr.session_id}", DIM))
         # scope 级原生报告产物（Midscene report.html 挂这层，来自 scope_done）
         for rr in jr.report_refs:
-            out.append(f"    report（{rr.label or rr.kind}）: {rr.ref}")
-    return "\n".join(out)
+            jn.add(styled(f"report（{rr.label or rr.kind}）: {rr.ref}", DIM))
+    return root
 
 
 def render_run_state(state: RunState) -> str:
@@ -120,7 +126,7 @@ def render_run_state(state: RunState) -> str:
     lines = [f"run {state.run_id}: {state.status.value}"]
     if state.jobs:  # job 清单是同构表（ADR 0047）；无会话血缘的 job 该格显示 -
         lines.append(render_table(["scope_id", "状态", "session"],
-                                  [[sid, js.status.value, js.session_id or None] for sid, js in state.jobs.items()]))
+                                  [[sid, status_text(js.status.value), js.session_id or None] for sid, js in state.jobs.items()]))
     if state.ended_at:
         lines.append(f"ended_at={state.ended_at}")
     return "\n".join(lines)
@@ -134,22 +140,25 @@ def render_plan_text(jobs: list[Job], default_engine: str, dispatch: dict | None
     dispatch（可选，ADR 0036 决策 4）：{(scope_id, scenario_id, step_index): probe}——worker 的命中
     自述。命中 → 行尾标「← 确定性:」；冲突 → 标 ⚠（实际运行该 step 将 error）；None/缺失 → 不标（默认 AI，少噪声）。
     """
+    return render_tree(plan_tree(jobs, default_engine, dispatch))
+
+
+def plan_tree(jobs: list[Job], default_engine: str, dispatch: dict | None = None) -> TreeNode:
+    """plan 视图的树（`render_plan_text` 的结构）。"""
     n_scenarios = sum(len(j.scenarios) for j in jobs)
-    out: list[str] = [
-        "===== plan（用例预检，未执行）=====",
-        f"  {len(jobs)} job(scope)  ·  {n_scenarios} scenario  ·  default_engine={default_engine}",
-    ]
+    root = TreeNode(f"plan（用例预检，未执行）  {len(jobs)} job(scope)  ·  {n_scenarios} scenario  ·  default_engine={default_engine}")
     for j in jobs:
         votes = f"  votes={j.assertion_votes}" if j.assertion_votes != 1 else ""
         # name 只在与 scope_id 不同时显示：named scope 二者同为 @scope 值（重复无信息）；未标 scope 时 id 是 uri:line、name 是标题
         name = f" (name={j.scope_name!r})" if j.scope_name != j.scope_id else ""
-        out.append(f"  job scope={j.scope_id!r}{name} engine={j.engine}{votes}")
+        jn = root.add(f"job scope={j.scope_id!r}{name} engine={j.engine}{votes}")
         for sc in j.scenarios:
-            out.append(f"    scenario {sc.id!r}  ({len(sc.steps)} step)")
+            sn = jn.add(f"scenario {sc.id!r}  ({len(sc.steps)} step)")
             for st in sc.steps:
-                out.append(f"      [{st.index}] {st.keyword} {st.text}{_arg_hint(st.argument)}"
-                           f"{_dispatch_hint(dispatch, j.scope_id, sc.id, st.index)}")
-    return "\n".join(out)
+                hint = _dispatch_hint(dispatch, j.scope_id, sc.id, st.index)
+                sn.add(Text.assemble(f"[{st.index}] {st.keyword} {st.text}{_arg_hint(st.argument)}",
+                                     styled(hint, "yellow" if "⚠" in hint else "green")))
+    return root
 
 
 def _dispatch_hint(dispatch: dict | None, scope_id: str, scenario_id: str, step_index: int) -> str:
@@ -223,7 +232,7 @@ def explain_step_expands(step: dict, *, expand_passed: bool) -> bool:
     **同时兼作「要不要去读 evidence」的判据**（`explain_to_dict` 的 `wants_evidence`）：文本模式下不展开就不读，
     省掉云端逐 step 一次 GetObject 的白下载；`--json` 契约要求全给，那一路不传本谓词。
 
-    **无记录的 step 不经本谓词**：文本侧由 `_step_lines` 提前打「无记录（未执行或未上报）」直接返回，
+    **无记录的 step 不经本谓词**：文本侧由 `_add_step` 提前打「无记录（未执行或未上报）」直接返回，
     `explain_to_dict` 的 `st is not None` 守卫也不会把它交给 `wants_evidence`。下面那行只作全函数防御——
     让这个导出的谓词对任意 step dict 都给出正确答案，当前没有调用点能进到那里。
     """
@@ -325,23 +334,18 @@ def _evidence_ref(step: dict) -> str:
     return ""
 
 
-def _thought_lines(thought: str, indent: str, *, ref: str, full: bool) -> list[str]:
-    """一段推理文本 → 文本行（超预算截断，除 --full；多行原文的续行对齐到 `thought: ` 之后）。
-
-    文本形态的 key 一律用 `--json` 的字段名（thought / screenshot / message / error，与 vote= / url= 规则一致）——
-    agent 读文本再对 JSON 零翻译；中文只留给整句提示。
-    """
+def _thought_text(thought: str, *, ref: str, full: bool) -> str:
+    """一段推理文本（超预算截断，除 --full）。文本形态的 key 一律用 `--json` 的字段名（thought / screenshot /
+    message / error，与 vote= / url= 规则一致）——agent 读文本再对 JSON 零翻译；中文只留给整句提示。"""
     text = thought
     if not full and len(text) > _THOUGHT_BUDGET:
         text = text[:_THOUGHT_BUDGET] + f"…（已截断；完整内容见 --json 或 evidence.json：{ref}）"
-    head = f"{indent}thought: "
-    cont = indent + " " * len("thought: ")
-    parts = text.split("\n")
-    return [head + parts[0]] + [cont + p for p in parts[1:]]
+    head = "thought: "
+    return head + text.replace("\n", "\n" + " " * len(head))  # 多行原文的续行对齐到 key 之后（树只在最前加引导线）
 
 
-def _act_lines(act: dict, *, ref: str, full: bool) -> list[str]:
-    """一次 AI 调用（evidence 的 act）→ 文本行。
+def _add_act(parent: TreeNode, act: dict, *, ref: str, full: bool) -> None:
+    """一次 AI 调用（evidence 的 act）→ 树节点。
 
     默认预算：只渲染**最后一个带推理的 frame**（判否理由通常落在末次观察）及其截图，其余 frame 只报个数；
     `--full` 逐 frame 全文。frames 为空是 Nova 出错 act 的正常形态（SDK 不落轨迹 json，ADR 0042 决策一），
@@ -352,36 +356,36 @@ def _act_lines(act: dict, *, ref: str, full: bool) -> list[str]:
     bits = [f"act {act.get('index')}", "vote=" + ("null" if vote is None else ("true" if vote else "false"))]
     if act.get("url"):
         bits.append(f"url={act['url']}")
-    lines = ["      " + "  ".join(bits)]
+    an = parent.add("  ".join(bits))
     if act.get("error"):
-        lines.append(f"        error: {_one_line(act['error'])}")
+        an.add(f"error: {_one_line(act['error'])}")
     frames = act.get("frames") or []
     if full:
         for j, fr in enumerate(frames):
             url = fr.get("url")
-            lines.append(f"        frame {j}" + (f"  url={url}" if url else ""))
+            fn = an.add(f"frame {j}" + (f"  url={url}" if url else ""))
             if fr.get("thought"):
-                lines += _thought_lines(fr["thought"], "          ", ref=ref, full=True)
+                fn.add(_thought_text(fr["thought"], ref=ref, full=True))
             if fr.get("screenshot"):
-                lines.append(f"          screenshot: {fr['screenshot']}")
-        return lines
+                fn.add(styled(f"screenshot: {fr['screenshot']}", DIM))
+        return
     last = next((i for i in range(len(frames) - 1, -1, -1) if frames[i].get("thought")), None)
     if last is not None:
-        lines += _thought_lines(frames[last]["thought"], "        ", ref=ref, full=False)
+        an.add(_thought_text(frames[last]["thought"], ref=ref, full=False))
         if frames[last].get("screenshot"):
-            lines.append(f"        screenshot: {frames[last]['screenshot']}")
+            an.add(styled(f"screenshot: {frames[last]['screenshot']}", DIM))
     omitted = len(frames) - (0 if last is None else 1)
     if omitted > 0:
-        lines.append(f"        其余 {omitted} 个 frame 已省略（--full 查看）")
-    return lines
+        an.add(styled(f"其余 {omitted} 个 frame 已省略（--full 查看）", DIM))
 
 
-def _step_lines(step: dict, *, expand_passed: bool, full: bool) -> list[str]:
-    """一个 step → 文本行：状态行（+ 投票 / 归因 / 时长 / 短路旁注）、原因行，展开时再加证据。"""
-    head = f"    step {step['index']}  {step['keyword']} {step['text']}"
+def _add_step(parent: TreeNode, step: dict, *, expand_passed: bool, full: bool) -> None:
+    """一个 step → 树节点：状态行（+ 投票 / 归因 / 时长 / 短路旁注），下挂原因行，展开时再挂证据。"""
+    head = f"step {step['index']}  {step['keyword']} {step['text']}"
     if step["record_missing"]:
-        return [f"{head}  {_NO_RECORD}"]
-    bits = [step["status"]]
+        parent.add(Text.assemble(head, "  ", styled(_NO_RECORD, "yellow")))
+        return
+    bits = []
     if step["votes"]:
         bits.append(f"votes {step['votes']['yes']}/{step['votes']['total']}")
     # 归因只在 error 步显示：断言没过的归因恒是「断言未过」、原因行已说清，再打一遍只是噪声
@@ -391,36 +395,42 @@ def _step_lines(step: dict, *, expand_passed: bool, full: bool) -> list[str]:
         bits.append(f"({_ms(step['duration_ms'])})")
     if step["shortcircuited"]:
         bits.append(_SHORTCIRCUIT_NOTE)
-    lines = [head + "  " + "  ".join(bits)]
+    stn = parent.add(Text.assemble(head, "  ", status_text(step["status"]), ("  " + "  ".join(bits)) if bits else ""))
     if step["message"]:
-        lines.append(f"      message: {_one_line(step['message'])}")
+        stn.add(f"message: {_one_line(step['message'])}")
     if not explain_step_expands(step, expand_passed=expand_passed):
-        return lines
+        return
     ev = step["evidence"]
     if ev is None:
         miss = step["evidence_missing"]
         # 短路的 step 不打「无 AI 证据」：它根本没执行，状态行的旁注已说明，再说一遍是废话
         if miss and not (miss == "no_ref" and step["shortcircuited"]):
-            lines.append(f"      {_EVIDENCE_MISSING_TEXT.get(miss, _EVIDENCE_MISSING_TEXT['no_ref'])}")
+            stn.add(_EVIDENCE_MISSING_TEXT.get(miss, _EVIDENCE_MISSING_TEXT["no_ref"]))
         # 兜底指针：证据缺了，把该 step 的其它产物 ref 列出来，让人还有地方看（ADR 0042 决策四「文本预算」末条）
-        lines += [f"      {_ref_line(rr)}" for rr in step["report_refs"]]
-        return lines
+        for rr in step["report_refs"]:
+            stn.add(styled(_ref_line(rr), DIM))
+        return
     ref = _evidence_ref(step)
     for act in ev.get("acts") or []:
-        lines += _act_lines(act, ref=ref, full=full)
-    return lines
+        _add_act(stn, act, ref=ref, full=full)
 
 
 def render_explain_text(doc: dict, *, expand_passed: bool = False, full: bool = False) -> str:
     """explain 的人/agent 可读文本（`explain_to_dict` 的文档 → 多行摘要，ADR 0042 决策四「文本形态」）。
 
-    文本是「一次读进上下文的摘要」而非 evidence 全文转写，故默认带预算（见 `_act_lines`）；`--full` 关掉预算。
+    文本是「一次读进上下文的摘要」而非 evidence 全文转写，故默认带预算（见 `_add_act`）；`--full` 关掉预算。
     """
-    out: list[str] = [f"run {doc['run_id']}  status={doc['status']}"]
+    return render_tree(explain_tree(doc, expand_passed=expand_passed, full=full))
+
+
+def explain_tree(doc: dict, *, expand_passed: bool = False, full: bool = False) -> TreeNode:
+    """explain 文本形态的树（`render_explain_text` 的结构）。"""
+    root = TreeNode(Text.assemble(f"run {doc['run_id']}  status=", status_text(doc["status"])))
     for sc in doc["scopes"]:
         sess = f"  session={sc['session_id']}" if sc["session_id"] else ""
-        out.append(f"scope {sc['scope_id']}  engine={sc['engine']}  status={sc['status']}{sess}")
-        out += [f"  {_ref_line(rr)}" for rr in sc["report_refs"]]
+        scn = root.add(Text.assemble(f"scope {sc['scope_id']}  engine={sc['engine']}  status=", status_text(sc["status"]), sess))
+        for rr in sc["report_refs"]:
+            scn.add(styled(_ref_line(rr), DIM))
         # 一个 step 记录都没有的 job（worker 没起来 / 起来就被掐）：判定只剩 job 级这一层，单独打一段，
         # 免得读者在一片「无记录」里找不到「到底为什么」。
         if not sc["has_step_records"]:  # job 级事实（explain_to_dict 按未筛判定树算），不在筛后的 steps 上重算
@@ -429,15 +439,16 @@ def render_explain_text(doc: dict, *, expand_passed: bool = False, full: bool = 
                 why = f"  ({sc['error_type']}: {sc['message'] or ''})"
             elif sc["message"]:
                 why = f"  ({sc['message']})"
-            out.append(f"  判定：{sc['status']}{why}")
-            out.append("  诊断细节见 worker 日志")
+            scn.add(f"判定：{sc['status']}{why}")
+            scn.add("诊断细节见 worker 日志")
         if sc["aborted_hint"]:
-            out.append(f"  {sc['aborted_hint']}")
+            scn.add(sc["aborted_hint"])
         for scen in sc["scenarios"]:
-            out.append(f"  scenario {scen['scenario_id']}  {scen['name']}  {scen['status'] or _NO_RECORD}")
+            scen_n = scn.add(Text.assemble(f"scenario {scen['scenario_id']}  {scen['name']}  ",
+                                           status_text(scen["status"]) if scen["status"] else styled(_NO_RECORD, "yellow")))
             for step in scen["steps"]:
-                out += _step_lines(step, expand_passed=expand_passed, full=full)
-    return "\n".join(out)
+                _add_step(scen_n, step, expand_passed=expand_passed, full=full)
+    return root
 
 
 # to_dict 已移入 gherkai_core.serialize（单一真理源，cli 与 manifest 共用），从那里 re-export。

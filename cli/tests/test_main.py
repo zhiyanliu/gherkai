@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from gherkai_core.model import JobResult, RunResult, Status
@@ -1413,7 +1414,7 @@ def test_doctor_cloud_worker_grace_shortfall_is_optional_gap_not_failure(monkeyp
     # 人读形态：- 标可选缺失、末行点明 - 的含义（同 provider 段可选项）
     _stub_stop_timeout(monkeypatch, 120)
     assert m.main(["doctor", "--backend", "cloud", "--prefix", "vfy-", "--region", "us-east-1"]) == 0
-    assert "- backend.worker.grace" in capsys.readouterr().out
+    assert re.search(r"-\s*│\s*backend\.worker\.grace", capsys.readouterr().out)   # 表格：结果列 - 与检查项同行
 
 
 def test_doctor_cloud_worker_grace_unset_stop_timeout_is_reported(monkeypatch, capsys):
@@ -1457,7 +1458,8 @@ def test_doctor_provider_section_comes_from_provider_doctor(monkeypatch, capsys)
     # 人读形态：✗ 标必修、- 标可选缺失
     assert m.main(["doctor"]) == 2
     out = capsys.readouterr().out
-    assert "✗ provider.node" in out and "- provider.container-engine" in out and "自检有失败项" in out
+    assert re.search(r"✗\s*│\s*provider\.node", out) and re.search(r"-\s*│\s*provider\.container-engine", out)
+    assert "自检有失败项" in out
     assert "部署工具链有缺口" in out  # provider 段缺项单独点出，别混在通用的可选缺失里
 
 
@@ -1554,7 +1556,7 @@ def test_doctor_reports_worker_self_reported_model(tmp_path, monkeypatch, capsys
 
     assert m.main(["doctor"]) == 0  # 文本视图同一行
     out = capsys.readouterr().out
-    assert f"✓ engines.model.novaact: 模型 {FAKE_MODEL_ID['novaact']}（本机 worker 自报）" in out
+    assert re.search(r"✓\s*│\s*engines\.model\.novaact\s*│\s*模型 " + re.escape(FAKE_MODEL_ID["novaact"]) + r"（本机 worker 自报）", out)  # 同一行
     # 文本按 add 的插入序逐行打 → 模型行须落在 engines 段内（steps 段之前），否则两段交错
     assert out.index("engines.model.novaact") < out.index("steps.dir")
 
@@ -1617,7 +1619,7 @@ def test_scope_filter_selects_whole_named_scope_by_id(tmp_path, capsys):
     assert _plan_names(capsys) == ["停留"]
     assert m.main(["plan", str(p), "--scope", "browse"]) == 0
     out = capsys.readouterr().out
-    assert out.startswith("===== plan") and "job scope='browse' engine=" in out and "(name=" not in out
+    assert out.startswith("plan（用例预检") and "job scope='browse' engine=" in out and "(name=" not in out
     assert m.main(["plan", str(p), "--scope", ""]) == 2 and "--scope 的值不能为空" in capsys.readouterr().err
 
 

@@ -73,30 +73,34 @@ gherkai doctor                                      # 只查本机
 gherkai doctor --backend cloud --prefix gherkai-    # 连带查凭证、region 与云端后端（前缀与部署时一致）
 ```
 
-输出每行一个检查项。全部必修项通过时退出码为 0，任一必修项未通过时退出码为 2。加 `--json` 输出 `{ok, checks[]}`，每项含 `section` / `name` / `ok` / `required` / `detail`，脚本按 `required && !ok` 挑出阻塞项。
+输出是一张表，每个检查项一行，说明过长时在终端内折行。全部必修项通过时退出码为 0，任一必修项未通过时退出码为 2。加 `--json` 输出 `{ok, checks[]}`，每项含 `section` / `name` / `ok` / `required` / `detail`，脚本按 `required && !ok` 挑出阻塞项。
 
 只查本机的一次实际输出（这台机器没装 Midscene worker，容器引擎的 daemon 也没起）：
 
 ```text
-✓ cli.version: gherkai <版本>，Python 3.13.14
-- engines.midscene: 引擎 midscene 的 worker 运行时未找到。装法：npm i -g @gherkai/worker-midscene（需 Node ≥ 22）……
-✓ engines.novaact: /path/to/python3 -m gherkai_worker_novaact（同 venv 模块 gherkai_worker_novaact）
-✓ engines.any: 至少一个引擎的 worker 可用
-✓ engines.model.novaact: 模型 nova-act-v1.0（本机 worker 自报）
-✓ steps.dir: 无 steps/ 目录：只有内建确定性 step
-✓ steps.load.novaact: 1 条确定性 step（含内建）；无 steps/ 目录，仅内建
-✓ aws.identity: 未查（给 --backend cloud 或 --prefix 才查云端）
-✓ backend.reachability: 未查（同上）
-✓ provider.node: node /path/to/node
-✓ provider.cdk: /path/to/cdk
-- provider.container-engine: `docker` 在 PATH 上但连不上 daemon……
+╭──────┬───────────────────────────┬─────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ 结果 │ 检查项                    │ 说明                                                                                            │
+├──────┼───────────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ ✓    │ cli.version               │ gherkai <版本>，Python 3.13.14                                                                  │
+│ -    │ engines.midscene          │ 引擎 midscene 的 worker 运行时未找到。装法：npm i -g @gherkai/worker-midscene（需 Node ≥ 22）…… │
+│ ✓    │ engines.novaact           │ /path/to/python3 -m gherkai_worker_novaact（同 venv 模块 gherkai_worker_novaact）               │
+│ ✓    │ engines.any               │ 至少一个引擎的 worker 可用                                                                      │
+│ ✓    │ engines.model.novaact     │ 模型 nova-act-v1.0（本机 worker 自报）                                                          │
+│ ✓    │ steps.dir                 │ 无 steps/ 目录：只有内建确定性 step                                                             │
+│ ✓    │ steps.load.novaact        │ 1 条确定性 step（含内建）；无 steps/ 目录，仅内建                                               │
+│ ✓    │ aws.identity              │ 未查（给 --backend cloud 或 --prefix 才查云端）                                                 │
+│ ✓    │ backend.reachability      │ 未查（同上）                                                                                    │
+│ ✓    │ provider.node             │ node /path/to/node                                                                              │
+│ ✓    │ provider.cdk              │ /path/to/cdk                                                                                    │
+│ -    │ provider.container-engine │ `docker` 在 PATH 上但连不上 daemon……                                                            │
+╰──────┴───────────────────────────┴─────────────────────────────────────────────────────────────────────────────────────────────────╯
 
 部署工具链有缺口（provider 段）：只影响 gherkai deploy / push-worker，不影响提交与本机运行
 
 自检通过
 ```
 
-`steps.load.*` 的条数含引擎自带的那一条，所以没有 `steps/` 目录时它也不为零。每一行查什么、`✗` 与 `-` 分别怎么处置，见[排错](./troubleshooting.md)。
+`steps.load.*` 的条数含引擎自带的那一条，所以没有 `steps/` 目录时它也不为零。每一项查什么、`✗` 与 `-` 分别怎么处置，见[排错](./troubleshooting.md)。
 
 ## 上手路径一：交给 AI agent
 
@@ -157,12 +161,11 @@ gherkai explain <run_id>
 `plan` 的输出形如：
 
 ```text
-===== plan（用例预检，未执行）=====
-  1 job(scope)  ·  1 scenario  ·  default_engine=novaact
-  job scope='features/smoke.feature:3' (name='打开示例站点') engine=novaact
-    scenario 'features/smoke.feature:3'  (2 step)
-      [0] Given 打开 "https://example.com"
-      [1] Then "页面包含 Example Domain 字样"
+plan（用例预检，未执行）  1 job(scope)  ·  1 scenario  ·  default_engine=novaact
+└── job scope='features/smoke.feature:3' (name='打开示例站点') engine=novaact
+    └── scenario 'features/smoke.feature:3'  (2 step)
+        ├── [0] Given 打开 "https://example.com"
+        └── [1] Then "页面包含 Example Domain 字样"
 ```
 
 它给出本次运行会开几个 job（每个 job 对应一个云端浏览器会话）、各自用哪个引擎、每一步走确定性 step 还是走 AI。**先 plan 后执行**：`plan` 零费用，能在实际运行产生费用之前暴露写法与配置问题。

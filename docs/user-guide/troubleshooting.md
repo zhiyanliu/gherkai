@@ -10,7 +10,7 @@ gherkai doctor --backend cloud --prefix gherkai- --report-dir reports/   # 连�
 gherkai doctor --json             # 机读 {ok, checks[]}
 ```
 
-自检只做读操作：不建浏览器会话、不调模型，不产生模型费用。输出每行一个检查项，行首三种标记：
+自检只做读操作：不建浏览器会话、不调模型，不产生模型费用。输出是一张表，每个检查项一行，「结果」列有三种标记：
 
 | 标记 | 含义 |
 |---|---|

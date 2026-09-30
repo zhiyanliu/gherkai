@@ -267,10 +267,10 @@ def test_render_text_step_reason_line_is_single_line_and_only_when_present():
     ])])
     out = render.render_text(RunResult(run_meta=RunMeta(run_id="r", created_at="", jobs=(job,)), status=Status.ERROR, jobs=[jr]))
     lines = out.splitlines()
-    reason = [ln for ln in lines if ln.startswith("        原因: ")]
-    assert reason == ["        原因: ActTimeoutError: 超时 at foo at bar"]
-    i0 = lines.index("      step 0: passed (0.0s)")
-    assert not lines[i0 + 1].startswith("        原因")
+    reason = [ln for ln in lines if "原因: " in ln]          # 树形渲染：只断言内容（ADR 0047）
+    assert len(reason) == 1 and reason[0].endswith("原因: ActTimeoutError: 超时 at foo at bar")
+    i0 = next(i for i, ln in enumerate(lines) if "step 0: passed (0.0s)" in ln)
+    assert "原因" not in lines[i0 + 1]
 
 
 def test_job_line_with_error_type_but_no_message_has_no_orphan_colon():
@@ -281,3 +281,21 @@ def test_job_line_with_error_type_but_no_message_has_no_orphan_colon():
     meta = RunMeta(run_id="r", created_at="2026-01-01T00:00:00Z", jobs=(job,))
     out = render.render_text(RunResult(run_meta=meta, status=Status.ERROR, jobs=[jr]))
     assert "(worker_crashed)" in out and "None" not in out
+
+
+
+def test_run_tree_attaches_reason_and_refs_under_their_step():
+    """层级归属（ADR 0047）：原因与产物地址挂在所属 step 下，不挂到 scenario 或 job。"""
+    from gherkai_core.model import ReportRef
+    job = Job(scope_id="s", scope_name="s", engine="novaact", scenarios=())
+    st1 = StepResult(index=1, status=Status.FAILED, duration_ms=5.0, message="断言未过",
+                     report_refs=[ReportRef(kind="evidence", ref="file:///e.json")])
+    jr = JobResult(job=job, status=Status.FAILED, scenarios=[ScenarioResult(scenario_id="s:1", status=Status.FAILED, steps=[
+        StepResult(index=0, status=Status.PASSED, duration_ms=1.0), st1])])
+    root = render.run_tree(RunResult(run_meta=RunMeta(run_id="r", created_at="", jobs=(job,)), status=Status.FAILED, jobs=[jr]))
+    step1 = root.find("step 1: ")
+    assert step1 is not None
+    labels = [str(c.label) for c in step1.children]
+    assert any(l.startswith("原因: 断言未过") for l in labels) and any("file:///e.json" in l for l in labels)
+    scenario = root.find("scenario 's:1'")
+    assert not any("原因" in str(c.label) for c in scenario.children)   # 原因不挂在 scenario 层

@@ -51,6 +51,14 @@ def aws():
         )
 
 
+@pytest.fixture(autouse=True)
+def _presentation_is_environment_independent(monkeypatch):
+    """人读渲染（ADR 0047）不随运行测试的终端变化：固定关色、表格不按终端取宽——否则 `pytest -s` 在真实终端里会因 ANSI 与折行假红。"""
+    from gherkai_runtime import textui
+    monkeypatch.setattr(textui, "use_color", lambda: False)
+    monkeypatch.setattr(textui, "output_width", lambda: textui.NO_WRAP_WIDTH)
+
+
 def seed_backend(aws: workers.Aws, *, stamp: str | None = VERSION, cpu: str = "1024") -> dict[str, str]:
     """把「`gherkai deploy` 已经运行过一次」的后端摆出来：ECR repo ×2 + 模板 revision ×2（SSM worker-template）
     + 版本戳 + runs 表（带 status GSI）。返回 {engine: 模板 revision ARN}。
