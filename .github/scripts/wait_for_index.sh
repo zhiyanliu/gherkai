@@ -28,9 +28,11 @@ case "$kind" in
     header='Accept: application/vnd.pypi.simple.v1+json'
     ;;
   npm)
-    # registry 的 packument 按版本取：404 表示还没可见，200 表示该版本已在元数据里。
-    url="https://registry.npmjs.org/${name//\//%2F}/${version}"
-    header='Accept: application/json'
+    # 取 npm install 解析时读的那份**精简 packument**（整包的 versions 表，`Accept: application/vnd.npm.install-v1+json`），
+    # 不取按版本的单条元数据 `/<name>/<version>`：两者经 CDN 各自缓存，单条早可见不代表 install 已能解析到——
+    # 1.4.7 发布时单条第 5 次探测即可见、随后的 `npm install -g <name>@1.4.7` 仍报 No matching version found。
+    url="https://registry.npmjs.org/${name//\//%2F}"
+    header='Accept: application/vnd.npm.install-v1+json'
     ;;
   *)
     echo "::error::第一个参数只能是 pypi 或 npm，收到：$kind" >&2
@@ -50,7 +52,8 @@ for i in $(seq 1 "$attempts"); do
         fi
         ;;
       npm)
-        if printf '%s' "$body" | grep -qF -- "\"version\":\"${version}\"" || printf '%s' "$body" | grep -qF -- "\"version\": \"${version}\""; then
+        # 精简 packument 的 versions 表以版本号为键：`"1.4.7":{...}`。
+        if printf '%s' "$body" | grep -qF -- "\"${version}\":"; then
           echo "::notice::${name}@${version} 已在 npm registry 可见（第 ${i} 次探测）"
           exit 0
         fi
