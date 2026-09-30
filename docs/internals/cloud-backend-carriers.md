@@ -52,7 +52,7 @@
 
 **①→② 之间的提交会被拒绝，这是预期行为**：提交侧四个 cloud 入口（`run` / `submit` / `status` / `explain`）都先经过 `compose.check_backend_skew`，CLI 新于后端 → `SKEW_BLOCK` → 退出码 2、**无放行口**；② 执行完即恢复。不希望改动本机安装的部署方可以用 `uvx --from 'gherkai[deploy-aws]==X.Y.Z' gherkai deploy` 先升级后端。
 
-**③ 不能提前到 ② 之前**：镜像 tag 含 CLI 版本（`names.image_tag`），提前推送等于推入一个后端尚不解析的版本命名空间。`push-worker` / `list-workers` 各自带同一道 skew 闸（`workers._skew_gate`）拦截此情形：CLI 新于后端时以退出码 2 结束，并输出一行以「不放行的理由：」开头的说明。`gherkai deploy` 的四步**有意不做**这道前置——它本身就是修改版本戳的动作，前置放在 cdk 之前会拦住自己、放在 cdk 之后则恒真。
+**③ 不能提前到 ② 之前**：镜像 tag 含 CLI 版本（`names.image_tag`），提前推送等于推入一个后端尚不解析的版本命名空间。`push-worker` / `list-workers` 各自带同一道 skew 闸（`workers._skew_gate`）拦截此情形：CLI 新于后端时以退出码 2 结束，并输出一行以「不提供放行选项的原因：」开头的说明。`gherkai deploy` 的四步**有意不做**这道前置——它本身就是修改版本戳的动作，前置放在 cdk 之前会拦住自己、放在 cdk 之后则恒真。
 
 **② 内部的顺序同样固定**：第 1 步（把模板 revision ARN 登记进 SSM）是 **stack 资源**、随 cdk 事务；第 2/3/4 步在 cdk 之后执行。故 cdk 成功而后三步失败 → 以退出码 **1** 结束，且提示「stack 已生效；重新运行 `gherkai deploy` 幂等收敛」——归并为 2（语义是「什么都没发生」）会误导。
 

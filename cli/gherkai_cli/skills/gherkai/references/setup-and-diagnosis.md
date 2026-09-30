@@ -73,8 +73,8 @@
 
 部署时后端记下自己的版本，每条 cloud 命令动资源前先比对：
 
-- **CLI 比后端新时拒绝，以退出码 2 结束，没有强行放行的开关。** 出路：部署方 `gherkai deploy` 把后端升上来；或临时用与后端同版本的 CLI：`uvx --from 'gherkai==<后端版本>' gherkai …`，不动本机安装。
-- CLI 比后端旧时只警告不拦，`uv tool upgrade gherkai` 跟上。
+- **CLI 比后端新时拒绝，以退出码 2 结束，没有强行放行的开关。** 处理：部署方运行 `gherkai deploy` 把后端升级到同版本；或临时使用与后端同版本的 CLI：`uvx --from 'gherkai==<后端版本>' gherkai …`，不改动本机安装。
+- CLI 比后端旧时只提示、不拦，用 `uv tool upgrade gherkai` 升级。
 - 升级顺序：部署方先升 CLI、立刻 `gherkai deploy`，其他人再升自己的 CLI；中间窗口里提交被拒是预期。
 
 ## 7 症状与处置

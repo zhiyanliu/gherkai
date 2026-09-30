@@ -841,7 +841,7 @@ def test_list_workers_is_blocked_by_skew(aws):
     seed_backend(aws, stamp="1.3.0")
     out, text = _out()
     assert workers.list_workers(prefix=PREFIX, cli_version=VERSION, aws=aws, out=out) == 2
-    assert "版本 skew" in text()
+    assert "版本不一致" in text()
 
 
 def test_skew_gate_read_failure_exits_2_without_a_traceback(aws):
@@ -857,11 +857,11 @@ def test_skew_gate_read_failure_exits_2_without_a_traceback(aws):
     broken = workers.Aws(ssm=_BrokenSsm(), ecs=aws.ecs, ecr=aws.ecr, ddb=aws.ddb)
     out, text = _out()
     assert workers.list_workers(prefix=PREFIX, cli_version=VERSION, aws=broken, out=out) == 2
-    assert "读不到后端版本戳" in text() and "凭证" in text()
+    assert "读取后端版本戳失败" in text() and "凭证" in text()
     out2, text2 = _out()
     assert workers.push_worker("acme:img", engine="novaact", variant="v", cli_version=VERSION,
                                prefix=PREFIX, container=FakeContainer(), aws=broken, now=NOW, out=out2) == 2
-    assert "读不到后端版本戳" in text2()
+    assert "读取后端版本戳失败" in text2()
 
 
 def test_list_workers_reports_unreachable_aws_without_a_traceback():

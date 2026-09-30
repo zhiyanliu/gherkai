@@ -738,7 +738,7 @@ def _skew_gate(compose, *, prefix: str, cli_version: str | None, ssm, out) -> in
     except Exception as exc:
         # 读戳失败（凭证/权限/region/网络）——`read_backend_version` 有意把这类异常抛给入口前端决定退出码，
         # 本模块就是那个前端：归到「前置失败」这一类、不抛 traceback（同 `cli._guard_vpc_spec` 的口径）。
-        out(f"读不到后端版本戳（SSM {names.ssm_path(prefix, names.BACKEND_VERSION_KEY)}）：{exc}\n"
+        out(f"读取后端版本戳失败（SSM 参数 {names.ssm_path(prefix, names.BACKEND_VERSION_KEY)}）：{exc}\n"
             f"需要可用的凭证与 region（--region / AWS_REGION / --profile），以及 ssm:GetParameter 权限。")
         return EXIT_PRECONDITION
     if verdict != compose.SKEW_BLOCK:
@@ -746,10 +746,9 @@ def _skew_gate(compose, *, prefix: str, cli_version: str | None, ssm, out) -> in
             out(message)
         return None
     out(message)
-    out(f"（本命令来自部署包，随 gherkai[deploy-aws] extra 安装，故临时用同版本 CLI 时要带上这个 extra："
-        f"uvx --from 'gherkai[deploy-aws]=={stamp}' gherkai deploy …）\n"
-        f"不放行的理由：CLI 版本新于后端会把镜像推进一个没人解析的版本命名空间"
-        f"（tag 含 CLI 版本），而提交者那边的提交前检查又会提示他回到这一步、形成死循环。")
+    out(f"本命令随 gherkai[deploy-aws] 扩展安装，临时使用同版本 CLI 时写作：uvx --from 'gherkai[deploy-aws]=={stamp}' gherkai deploy …\n"
+        f"不提供放行选项的原因：worker 镜像标签含 CLI 版本，CLI 领先于后端时推送的镜像不会被后端使用，"
+        f"提交者仍会被要求先升级后端。")
     return EXIT_PRECONDITION
 
 

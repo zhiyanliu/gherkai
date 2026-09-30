@@ -1337,8 +1337,8 @@ def _cloud_skew_gate(target) -> "tuple[int | None, str | None]":
         return 2, None
     except Exception as e:
         if compose.is_botocore_error(e):
-            _progress(f"--backend cloud 读版本戳失败（SSM {_names.ssm_path(target.prefix, _names.BACKEND_VERSION_KEY)}"
-                      f"——凭证/region/权限？）：{e}")
+            _progress(f"--backend cloud 读取后端版本戳失败（SSM 参数 {_names.ssm_path(target.prefix, _names.BACKEND_VERSION_KEY)}），"
+                      f"请检查凭证、region 与权限：{e}")
             return 2, None
         raise
     if msg:

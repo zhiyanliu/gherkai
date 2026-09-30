@@ -1085,29 +1085,28 @@ def check_version_skew(ssm_version: str | None, cli_version: str | None) -> tupl
     mine = cli_version
     if not ssm_version:
         return SKEW_WARN, (
-            f"提示：后端没有版本戳（SSM /<prefix>backend/{_names.BACKEND_VERSION_KEY}）——这个部署早于版本戳机制，本次不比对版本、不拦。"
-            "请部署方运行一次 `gherkai deploy` 把戳写上。"
+            f"提示：后端没有版本戳（SSM 参数 /<prefix>backend/{_names.BACKEND_VERSION_KEY}），该部署早于版本戳机制，"
+            "本次不比对版本、照常执行。请部署方运行一次 gherkai deploy 写入版本戳。"
         )
     if not mine:
-        return SKEW_SKIP, "提示：跳过版本比对——本机未以包形式安装（从源码直接运行），取不到自身版本。"
+        return SKEW_SKIP, "提示：本机的 gherkai 不是以包形式安装（从源码直接运行），取不到自身版本，跳过版本比对。"
     cmp = _release_cmp(mine, ssm_version)  # None 表示任一侧非纯发行版（判序 3）；补零比较在 _release_cmp
     if cmp is None:
         return SKEW_SKIP, (
-            f"提示：跳过版本比对——CLI {mine} / 后端 {ssm_version} 中有非纯发行版本"
-            f"（.dev/.post/本地段，逐提交前进，逐字比会把每次都判成 skew）。"
+            f"提示：CLI {mine} 与后端 {ssm_version} 中有一侧不是正式发行版本（带 .dev、.post 或本地版本段），跳过版本比对。"
         )
     if cmp == 0:
         return SKEW_OK, ""
     if cmp > 0:
         return SKEW_BLOCK, (
-            f"版本 skew：本机 CLI {mine} 新于后端 {ssm_version}——拒绝执行（无放行口：新 CLI 写的"
-            f"任务定义由旧后端读是真风险）。两条出路：\n"
-            f"  ① 部署方把后端升上来：gherkai deploy（升到 {mine}）\n"
-            f"  ② 临时用与后端同版本的 CLI、不动本机安装：uvx --from 'gherkai=={ssm_version}' gherkai …"
+            f"版本不一致：本机 CLI {mine} 新于后端 {ssm_version}，拒绝执行。新版本 CLI 写出的任务定义，旧版本后端读不懂，"
+            f"因此不提供强行放行的选项。可选的处理：\n"
+            f"  1. 部署方把后端升级到 {mine}：gherkai deploy\n"
+            f"  2. 临时使用与后端同版本的 CLI，不改动本机安装：uvx --from 'gherkai=={ssm_version}' gherkai …"
         )
     return SKEW_WARN, (
-        f"提示：本机 CLI {mine} 旧于后端 {ssm_version}（不拦——旧 CLI 写的任务定义新后端读得懂）。"
-        f"要跟上：uv tool upgrade gherkai。"
+        f"提示：本机 CLI {mine} 旧于后端 {ssm_version}，照常执行；旧版本 CLI 写出的任务定义新版本后端能读。"
+        f"升级 CLI：uv tool upgrade gherkai。"
     )
 
 
@@ -1244,13 +1243,13 @@ def _variant_miss_hint(*, engine: str, variant: str, tag: str, what: str,
     """
     if _release_cmp(cli_version, backend_version or "") == -1:
         return (f"引擎 {engine} 的 worker variant {variant!r} 解析失败（{what}）：本机 CLI {cli_version} "
-                f"旧于后端 {backend_version}，你看到的是后端版本命名空间下没有这份镜像。"
-                f"先把 CLI 升到后端版本（uv tool upgrade gherkai，或 uvx --from 'gherkai=={backend_version}' gherkai …）"
-                f"再提交——**别**照旧版本推镜像（推的 tag 后端不解析）。")
-    return (f"引擎 {engine} 的 worker variant {variant!r} 解析失败（{what}，镜像 tag {tag}）。"
-            f"让部署方推上去：gherkai deploy push-worker <本地镜像> --engine {engine} --variant {variant}"
-            f"（build 镜像时必须带 --platform linux/amd64）；或临时用 --worker-variant base 先运行"
-            f"（部署方执行过本版本 gherkai deploy 即有）。")
+                f"旧于后端 {backend_version}，该 variant 在旧版本下没有镜像。"
+                f"请先把 CLI 升到后端版本（uv tool upgrade gherkai，或临时 uvx --from 'gherkai=={backend_version}' gherkai …）"
+                f"再提交；不要按旧版本推送镜像，后端不会使用它。")
+    return (f"引擎 {engine} 的 worker variant {variant!r} 解析失败（{what}，镜像标签 {tag}）。"
+            f"请部署方推送该 variant：gherkai deploy push-worker <本地镜像> --engine {engine} --variant {variant}"
+            f"（构建镜像时必须带 --platform linux/amd64）；或临时使用 --worker-variant base 运行"
+            f"（部署方执行过本版本的 gherkai deploy 即有）。")
 
 
 def resolve_worker_variant(
@@ -1276,8 +1275,8 @@ def resolve_worker_variant(
     """
     if not cli_version:
         raise WorkerVariantError(
-            "取不到本机 CLI 版本（未以包形式安装、从源码直接运行）——worker 镜像 tag 含 CLI 版本，无从解析。"
-            "装成包（uv tool install gherkai / uvx）后再提交云端后端。")
+            "取不到本机 CLI 版本（不是以包形式安装、从源码直接运行），worker 镜像标签含 CLI 版本，无法解析 variant。"
+            "请以包形式安装（uv tool install gherkai 或 uvx）后再提交云端后端。")
     if ssm is None:
         ssm = _make_ssm_client(region=region, profile=profile)
     if variant is None:

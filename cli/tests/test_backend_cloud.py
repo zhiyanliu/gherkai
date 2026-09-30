@@ -818,7 +818,7 @@ def test_skew_real_judgement_end_to_end(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(m, "_installed_version", lambda: "1.2.0")
     rc2 = m.main(["submit", str(_write_feature(tmp_path)), "--backend", "cloud", "--region", "us-east-1"])
     assert rc2 == 0 and len(preflight_calls) == 1
-    assert "版本 skew" not in capsys.readouterr().err
+    assert "版本不一致" not in capsys.readouterr().err
 
 
 def test_skew_read_failure_exits_2_naming_the_parameter(tmp_path, monkeypatch, capsys):
