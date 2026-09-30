@@ -26,7 +26,7 @@ pipx install --python 3.13 --fetch-python missing gherkai   # 不用 uv 时的�
 
 pipx 那一行的 `--python 3.13` 是必要的：pipx 只在请求了某个版本、而本机又没有它时才下载解释器，不指定版本就会用默认解释器，默认解释器低于 3.13 时安装失败。
 
-Nova Act 的 worker 随 `[local]` extra 装进同一个 Python 环境，Midscene 的 worker 是 Node 包、走 npm。只用 `--backend cloud` 提交的人两个都不用装，worker 运行在云端。`gherkai list-engines` 打印本机检测到哪个引擎可用，缺的那个原地给出安装命令。用 pipx 或 uvx 装 extra 时，包名写成 `'gherkai[local]'`。
+Nova Act 的 worker 随 `[local]` extra 装进同一个 Python 环境，Midscene 的 worker 是 Node 包、走 npm。`npm i -g` 写入 npm 的全局目录：该目录属于系统时（如发行版自带的 Node 把全局包放在 `/usr/lib/node_modules`），安装与升级都要加 `sudo`，否则报 `EACCES`；不想用 `sudo` 就先把全局目录改到用户目录（`npm config set prefix ~/.npm-global`，并把其下的 `bin` 加进 PATH）。只用 `--backend cloud` 提交的人两个都不用装，worker 运行在云端。`gherkai list-engines` 打印本机检测到哪个引擎可用，缺的那个原地给出安装命令。用 pipx 或 uvx 装 extra 时，包名写成 `'gherkai[local]'`。
 
 升级：`uv tool upgrade gherkai`（安装时带的 extra 会沿用）；Midscene worker 另外执行 `npm i -g @gherkai/worker-midscene@<CLI 版本>`。CLI 与 worker 要求同版本，CLI 与已部署的云端后端也要求同版本，不一致时的处置见[排错](./troubleshooting.md)。
 
