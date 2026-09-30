@@ -28,6 +28,7 @@ task 时用的是 revision（不可变快照），故重推同名 variant 不会
 from __future__ import annotations
 
 import base64
+from gherkai_runtime.textui import render_table  # 表格渲染单点（ADR 0047）
 import json
 import sys
 from dataclasses import dataclass, field
@@ -971,8 +972,7 @@ def list_workers(*, prefix: str, cli_version: str | None, engines=None, region=N
             rows = [[v["variant"] + (" *" if v["variant"] == default else ""), v["tag"],
                      names.short_digest(v["digest"]), _pushed_at_human(v["pushed_at"]), _short_arn(v["revision_arn"])]
                     for v in variants]
-            for line in _table(["variant", "tag", "digest", "推送时间（UTC）", "revision"], rows):
-                out("  " + line)
+            out(render_table(["variant", "tag", "digest", "推送时间（UTC）", "revision"], rows))
         for item in info["pending_cleanup"]:
             if item["reason"] == "retired":
                 out(f"  待清理 {_cell(_short_arn(item['revision_arn']), 28)}已退休 {item['retired_at']}（variant {item['variant']}）")
@@ -1012,21 +1012,6 @@ def _pushed_at_human(iso: str | None) -> str:
     if dt.tzinfo is not None:
         dt = dt.astimezone(timezone.utc)
     return dt.strftime("%Y-%m-%d %H:%M")
-
-
-def _table(headers: list[str], rows: list[list[str]]) -> list[str]:
-    """按显示宽度对齐的文本表：每列宽度取表头与各格中最宽者再加两格，最后一列不补空格。"""
-    widths = [max(_shown_width(str(cell)) for cell in col) + 2 for col in zip(headers, *rows)]
-    lines = []
-    for row in [headers, *rows]:
-        cells = [str(c) for c in row]
-        lines.append("".join(_cell(c, w) for c, w in zip(cells[:-1], widths[:-1])) + cells[-1])
-    return lines
-
-
-def _shown_width(text: str) -> int:
-    import unicodedata
-    return sum(2 if unicodedata.east_asian_width(ch) in "WF" else 1 for ch in text)
 
 
 def _cell(text: str, width: int) -> str:

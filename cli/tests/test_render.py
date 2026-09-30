@@ -230,8 +230,8 @@ def test_render_run_state_lists_jobs_and_session_lineage():
     })
     s = render.render_run_state(state)
     assert s.splitlines()[0] == "run r1: running"
-    assert "  - a: passed  session=sess-1" in s   # 有会话血缘则显
-    assert "  - b: running" in s and "session=None" not in s  # 无则不显、不打裸 None
+    assert "sess-1" in s and "passed" in s          # 有会话血缘则显（表格渲染，只断言内容，ADR 0047）
+    assert "running" in s and "None" not in s        # 无则显 -，不打裸 None
     assert "ended_at" not in s  # 未达终态、无 ended_at 时不打该行
 
 

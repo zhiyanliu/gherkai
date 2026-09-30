@@ -797,6 +797,7 @@ source = { editable = "runtime" }
 dependencies = [
     { name = "gherkai-core" },
     { name = "packaging" },
+    { name = "rich" },
 ]
 
 [package.optional-dependencies]
@@ -809,6 +810,7 @@ requires-dist = [
     { name = "gherkai-core", editable = "core" },
     { name = "gherkai-core", extras = ["aws"], marker = "extra == 'aws'", editable = "core" },
     { name = "packaging", specifier = ">=24" },
+    { name = "rich", specifier = ">=13" },
 ]
 provides-extras = ["aws"]
 

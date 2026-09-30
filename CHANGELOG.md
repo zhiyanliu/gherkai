@@ -10,7 +10,7 @@
 
 ### 变化
 
-- `gherkai deploy list-workers` 的文本输出改为按显示宽度对齐的表格：推送时间换算到 UTC、精确到分钟，默认 variant 在表中以 `*` 标出；`--json` 的机读形态不变。
+- 人读输出里多行同结构的清单统一改为表格（带框线、按显示宽度对齐、随终端宽度折行）：`deploy list-workers` 的 variant 表、`list-engines`、`list-deterministic`、`status` 的 job 清单；`list-workers` 的推送时间换算到 UTC、精确到分钟，默认 variant 以 `*` 标出。`--json` 的机读形态不变。命令行的依赖新增 `rich`。
 
 ## [1.4.6] - 2026-09-29
 

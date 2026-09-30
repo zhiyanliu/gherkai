@@ -15,9 +15,9 @@
     "semantic_hash": ""
   },
   "cli/tests/test_render.py": {
-    "mtime": 1789872327.8998685,
-    "ast_hash": "a7ce32f125dc31dd050bbf70971475f0",
-    "semantic_hash": "a7ce32f125dc31dd050bbf70971475f0"
+    "mtime": 1790738220.9668849,
+    "ast_hash": "8b830260b8c4204b80e41bebccda9363",
+    "semantic_hash": ""
   },
   "core/pyproject.toml": {
     "mtime": 1789868545.8180885,
@@ -455,13 +455,13 @@
     "semantic_hash": "d82024d7c70df2a1f5ae5d17ed9298ba"
   },
   "cli/gherkai_cli/__main__.py": {
-    "mtime": 1790661189.4775321,
-    "ast_hash": "8921e53c50e149836684ccfe6ac0767d",
+    "mtime": 1790738220.965665,
+    "ast_hash": "1db89769f68e26be12bd944a6bd98139",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/render.py": {
-    "mtime": 1790659556.8871484,
-    "ast_hash": "a43c5d523153b60d9b299b070d667c85",
+    "mtime": 1790738220.9660757,
+    "ast_hash": "bae3c05cee52ac10946850efdfb1cc8e",
     "semantic_hash": ""
   },
   "core/gherkai_core/__init__.py": {
@@ -650,9 +650,9 @@
     "semantic_hash": "ecc528ff86538935ad5c18fc2fde0ea1"
   },
   "runtime/pyproject.toml": {
-    "mtime": 1789869821.8711445,
-    "ast_hash": "4debcb6fd190ee0d248f4db64c4afef9",
-    "semantic_hash": "4debcb6fd190ee0d248f4db64c4afef9"
+    "mtime": 1790738145.4822302,
+    "ast_hash": "6e9cfc5c2c320e755ab52bf93596c2de",
+    "semantic_hash": ""
   },
   "runtime/tests/test_compose.py": {
     "mtime": 1789875977.6398427,
@@ -1020,8 +1020,8 @@
     "semantic_hash": "2aa3004a9fc6b9ee20dbcc25d60382a0"
   },
   "deploy_aws/gherkai_deploy_aws/workers.py": {
-    "mtime": 1790737674.11439,
-    "ast_hash": "942fcded088a50ba2248df44e29613a2",
+    "mtime": 1790738220.9665306,
+    "ast_hash": "7089cc4be700820c85ab3c6eaaf95a1f",
     "semantic_hash": ""
   },
   "runtime/tests/test_names_worker.py": {
@@ -1335,8 +1335,8 @@
     "semantic_hash": ""
   },
   "CHANGELOG.md": {
-    "mtime": 1790737649.1545248,
-    "ast_hash": "236468339e878e72bbb51d70d81faf2c",
+    "mtime": 1790738220.9673696,
+    "ast_hash": "4bf3ace798c9f88793ca672be3b95fe3",
     "semantic_hash": ""
   },
   "CONTRIBUTING.md": {
@@ -1450,8 +1450,8 @@
     "semantic_hash": ""
   },
   "docs/user-guide/writing-deterministic-steps.md": {
-    "mtime": 1790730498.052471,
-    "ast_hash": "66ef831a8ca34b0b09c31e22c7f06833",
+    "mtime": 1790738220.9672673,
+    "ast_hash": "28a4ff7b2a2ce347a056b1eb439cbaaf",
     "semantic_hash": ""
   },
   "docs/user-guide/writing-features.md": {
@@ -1792,6 +1792,21 @@
   "engines/novaact/tests/test_redact.py": {
     "mtime": 1790662141.6518393,
     "ast_hash": "cdb91b35fac44179062f5a8bc4a1a214",
+    "semantic_hash": ""
+  },
+  "runtime/gherkai_runtime/textui.py": {
+    "mtime": 1790738220.9646325,
+    "ast_hash": "af5bc5a82ec7506137a48acaaa59ed2b",
+    "semantic_hash": ""
+  },
+  "runtime/tests/test_textui.py": {
+    "mtime": 1790738220.9670072,
+    "ast_hash": "ca9f924a7d05115baecad5c58b2afe0b",
+    "semantic_hash": ""
+  },
+  "docs/adr/0047-cli-human-readable-tables-with-rich.md": {
+    "mtime": 1790738145.45111,
+    "ast_hash": "a6784aa386024ec038b1040656fd9ef7",
     "semantic_hash": ""
   }
 }

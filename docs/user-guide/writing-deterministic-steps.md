@@ -109,7 +109,7 @@ handler 只拿到上下文与具名组。挂在这一步上的 DataTable / DocSt
 两个字段都**必填**，缺一个则注册时报错、点名那条模式，worker 起不来。它们是 feature 作者唯一能看到的接口：
 
 - `description`：一句话说明这一步做什么。`gherkai list-deterministic` 每条的第一行就是它，`gherkai plan` 的命中标注 `← 确定性: <说明>` 也用它。
-- `example`：一条可以直接抄进 `.feature` 的 step 文本，出现在 `gherkai list-deterministic` 的「示例」行。
+- `example`：一条可以直接抄进 `.feature` 的 step 文本，出现在 `gherkai list-deterministic` 的「示例」列。
 
 写 `example` 时用你希望 feature 作者照抄的完整措辞（含 `Given` / `Then` 关键字），因为它就是对方的复制源。
 

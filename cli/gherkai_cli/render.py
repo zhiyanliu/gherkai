@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from gherkai_core.model import Event, Job, JobResult, RunResult, RunState, Status
 from gherkai_core.redact import redact_deep
+from gherkai_runtime.textui import render_table
 from gherkai_core.serialize import to_dict  # 单一真理源（ADR 0027）：cli --json 与 manifest 共用
 # ReportRef → dict 与 jobs/*.json、run --json 同一份（单一序列化真源，ADR 0027）；explain 的 report_refs 原样搬。
 from gherkai_core.serialize import ref_to_dict
@@ -117,9 +118,9 @@ def render_run_state(state: RunState) -> str:
     local/cloud 两路共用一份（保两路一致，ADR 0034）——渲染是前端的事，故住这里而非产品本体层。
     """
     lines = [f"run {state.run_id}: {state.status.value}"]
-    for sid, js in state.jobs.items():
-        sess = f"  session={js.session_id}" if js.session_id else ""
-        lines.append(f"  - {sid}: {js.status.value}{sess}")
+    if state.jobs:  # job 清单是同构表（ADR 0047）；无会话血缘的 job 该格显示 -
+        lines.append(render_table(["scope_id", "状态", "session"],
+                                  [[sid, js.status.value, js.session_id or None] for sid, js in state.jobs.items()]))
     if state.ended_at:
         lines.append(f"ended_at={state.ended_at}")
     return "\n".join(lines)

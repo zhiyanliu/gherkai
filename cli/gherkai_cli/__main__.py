@@ -16,6 +16,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from gherkai_core.redact import redact_deep
+from gherkai_runtime.textui import render_table
 from gherkai_core.model import TERMINAL_STATUSES, Event, RunMeta, Status
 from gherkai_core.parse import FeatureParseError
 from gherkai_core.persist import RunPersistence
@@ -613,10 +614,10 @@ def _cmd_list_deterministic(args) -> int:
     print(f"引擎 {args.engine} 的确定性 step（{len(entries)} 条；由该引擎 worker 的注册表维护）：")
     if not entries:
         print("  （空——该引擎当前没有注册任何确定性 step，全部 step 走 AI）")
-    for e in entries:
-        print(f"  - {e.get('description', '（无描述）')}")
-        print(f"    示例: {e.get('example', '')}")
-        print(f"    模式: {e.get('pattern', '')}")
+        return 0
+    # 表格渲染（ADR 0047）：示例列是 feature 作者的复制源，放最前
+    print(render_table(["示例", "说明", "模式"],
+                       [[e.get("example", ""), e.get("description", "（无描述）"), e.get("pattern", "")] for e in entries]))
     return 0
 
 
@@ -643,13 +644,12 @@ def _cmd_list_engines(args) -> int:
         print(json.dumps(rows, ensure_ascii=False, indent=2))
         return 0
     print("可用引擎（本机 worker 运行时的探测结果）：")
-    for r in rows:
-        if not r["available"]:
-            print(f"  - {r['engine']}: <未定位到 worker 运行时>")
-            print(f"    {r['hint']}")
-            continue
-        print(f"  - {r['engine']}: {' '.join(r['cmd'])}")
-        print(f"    来源: {r['source']}" + (f"    cwd: {r['cwd']}" if r["cwd"] else ""))
+    # 表格渲染（ADR 0047）：没定位到的引擎把安装指引放在「拉起命令」列，同一张表里看全两引擎
+    print(render_table(
+        ["引擎", "状态", "拉起命令", "来源"],
+        [[r["engine"], "可用", " ".join(r["cmd"]) + (f"（cwd {r['cwd']}）" if r["cwd"] else ""), r["source"]]
+         if r["available"] else [r["engine"], "未定位到 worker 运行时", r["hint"], "-"]
+         for r in rows]))
     return 0
 
 

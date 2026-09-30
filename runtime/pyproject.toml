@@ -29,6 +29,7 @@ Changelog = "https://github.com/zhiyanliu/gherkai/blob/HEAD/CHANGELOG.md"
 dependencies = [
     "gherkai-core=={{ version }}",
     "packaging>=24",
+    "rich>=13",  # 人读输出的表格渲染（ADR 0047）：cli 与 deploy provider 共用的呈现件住本包
 ]
 # 云端装配（build_cloud_stores/build_fargate_engines）走可选 extra：主依赖不含 boto3（ADR 0016/0030）。
 optional-dependencies = { aws = ["gherkai-core[aws]=={{ version }}"] }
