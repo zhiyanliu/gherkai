@@ -260,8 +260,8 @@
     "semantic_hash": "46506796a3741a0992133c3ce390e125"
   },
   "README.md": {
-    "mtime": 1790662322.2166495,
-    "ast_hash": "bfa52bb528cb003150ca740df619e8e0",
+    "mtime": 1790669539.7507732,
+    "ast_hash": "f171df52f56bd924219b05793d498ea6",
     "semantic_hash": ""
   },
   "cli/README.md": {
@@ -1020,9 +1020,9 @@
     "semantic_hash": "2aa3004a9fc6b9ee20dbcc25d60382a0"
   },
   "deploy_aws/gherkai_deploy_aws/workers.py": {
-    "mtime": 1789873691.3026295,
-    "ast_hash": "537419e2d3c6b925200948f6e117dcbc",
-    "semantic_hash": "537419e2d3c6b925200948f6e117dcbc"
+    "mtime": 1790737674.11439,
+    "ast_hash": "942fcded088a50ba2248df44e29613a2",
+    "semantic_hash": ""
   },
   "runtime/tests/test_names_worker.py": {
     "mtime": 1789871889.8072453,
@@ -1335,13 +1335,13 @@
     "semantic_hash": ""
   },
   "CHANGELOG.md": {
-    "mtime": 1790662322.2164865,
-    "ast_hash": "f357c1d336fadcac5b8331be1d8f531a",
+    "mtime": 1790737649.1545248,
+    "ast_hash": "236468339e878e72bbb51d70d81faf2c",
     "semantic_hash": ""
   },
   "CONTRIBUTING.md": {
-    "mtime": 1790651148.1177514,
-    "ast_hash": "22e9a5c28c02b5d570808c3e219210a4",
+    "mtime": 1790730571.7105954,
+    "ast_hash": "6dd4bb12d5ae4877825f9c8ae299ab0c",
     "semantic_hash": ""
   },
   "docs/README.md": {
@@ -1350,8 +1350,8 @@
     "semantic_hash": "92a868d9a75d55a6be99883975cbae1e"
   },
   "docs/adr/0045-documentation-layering-and-placement.md": {
-    "mtime": 1789881562.5946774,
-    "ast_hash": "1ed186827e036df64126ff18fc7761ef",
+    "mtime": 1790730553.544807,
+    "ast_hash": "0036b8621ed7e6784005ab87e1d5fed6",
     "semantic_hash": ""
   },
   "docs/ai-eng/README.md": {
@@ -1420,43 +1420,43 @@
     "semantic_hash": ""
   },
   "docs/user-guide/cloud-backend.md": {
-    "mtime": 1790647073.280391,
-    "ast_hash": "138e1b4180435a96c68b14f809fc6261",
+    "mtime": 1790730498.0512412,
+    "ast_hash": "09a03049df8323575f96335ce74e584b",
     "semantic_hash": ""
   },
   "docs/user-guide/configuration.md": {
-    "mtime": 1789871875.0604503,
-    "ast_hash": "fa215427d5fdcf279939874496185a48",
-    "semantic_hash": "fa215427d5fdcf279939874496185a48"
+    "mtime": 1790730498.0511103,
+    "ast_hash": "4026747d47621c299560fbc2bea1ccc3",
+    "semantic_hash": ""
   },
   "docs/user-guide/getting-started.md": {
-    "mtime": 1790651148.1157715,
-    "ast_hash": "6d2f3b2f0451e1c140929193d80f9f27",
+    "mtime": 1790736749.7849655,
+    "ast_hash": "44e9d27a587d379d064b5616ed1a67cd",
     "semantic_hash": ""
   },
   "docs/user-guide/local-app-testing.md": {
-    "mtime": 1790659724.2025776,
-    "ast_hash": "f71100fc7aea16b91b2bbc27160223b5",
+    "mtime": 1790730498.0515354,
+    "ast_hash": "6203649fea1effa7882e493412b2242a",
     "semantic_hash": ""
   },
   "docs/user-guide/running-and-results.md": {
-    "mtime": 1790651148.1160266,
-    "ast_hash": "b83a02def9c3f3f8b4e23d9e43ec7b95",
+    "mtime": 1790730498.0516357,
+    "ast_hash": "5e4c3422b75594de759814a15c492305",
     "semantic_hash": ""
   },
   "docs/user-guide/troubleshooting.md": {
-    "mtime": 1789868573.6146474,
-    "ast_hash": "ee2eb40c2db990eee95652ea7519c92d",
-    "semantic_hash": "ee2eb40c2db990eee95652ea7519c92d"
+    "mtime": 1790730498.051963,
+    "ast_hash": "72411ebc66cf8fcec0dac903990d5070",
+    "semantic_hash": ""
   },
   "docs/user-guide/writing-deterministic-steps.md": {
-    "mtime": 1790589882.3296912,
-    "ast_hash": "f395b68e20ad7a806f85b1f656d7216b",
+    "mtime": 1790730498.052471,
+    "ast_hash": "66ef831a8ca34b0b09c31e22c7f06833",
     "semantic_hash": ""
   },
   "docs/user-guide/writing-features.md": {
-    "mtime": 1790659724.20225,
-    "ast_hash": "d116a028ddc04a6d87c453b4f31c1004",
+    "mtime": 1790730498.052365,
+    "ast_hash": "695aed4ee59a428887e4d94bc0b5ea2e",
     "semantic_hash": ""
   },
   "tools/build_diagrams.mjs": {
@@ -1485,9 +1485,9 @@
     "semantic_hash": "ad6e10c61f8232c522b37a99e1c94356"
   },
   "docs/user-guide/faq.md": {
-    "mtime": 1789868573.6147768,
-    "ast_hash": "32d2371a617c7d1d095d02edb3af3a8d",
-    "semantic_hash": "32d2371a617c7d1d095d02edb3af3a8d"
+    "mtime": 1790730498.0508037,
+    "ast_hash": "62dea2c0d83e54fad340b1c57674858c",
+    "semantic_hash": ""
   },
   "docs/diagrams/architecture-overview-layers.svg": {
     "mtime": 1789854493.9963286,

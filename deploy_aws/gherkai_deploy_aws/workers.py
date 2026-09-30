@@ -960,20 +960,19 @@ def list_workers(*, prefix: str, cli_version: str | None, engines=None, region=N
     if as_json:  # 机读形态（ADR 0041 决策三）：同一份 doc、不另拼
         out(json.dumps(doc, ensure_ascii=False, indent=2))
         return EXIT_OK
-    out(f"prefix {prefix}    版本 {version}    默认 variant {default or '（未初始化——运行一次 gherkai deploy）'}")
+    out(f"prefix {prefix}    版本 {version}    默认 variant {default or '（未初始化——运行一次 gherkai deploy）'}"
+        + ("（表中以 * 标出）" if default else ""))
     for engine, info in doc["engines"].items():
         out(f"\n== {engine}（family {info['family']}，ECR repo {info['ecr_repo']}）==")
         variants = info["variants"]
         if not variants:
             out("  （本版本还没有任何 variant——`gherkai deploy` 会同步基础镜像，或 push-worker 推一个）")
         else:
-            tag_w = max(28, max(len(v["tag"]) for v in variants) + 2)  # dev 版 tag 很长，列宽随内容
-            out("  " + _cell("variant", 16) + _cell("tag", tag_w) + _cell("digest", 20)
-                + _cell("推送时间", 28) + "revision")
-            for v in variants:
-                out("  " + _cell(v["variant"], 16) + _cell(v["tag"], tag_w)
-                    + _cell(names.short_digest(v["digest"]), 20) + _cell(v["pushed_at"] or "-", 28)
-                    + _short_arn(v["revision_arn"]))
+            rows = [[v["variant"] + (" *" if v["variant"] == default else ""), v["tag"],
+                     names.short_digest(v["digest"]), _pushed_at_human(v["pushed_at"]), _short_arn(v["revision_arn"])]
+                    for v in variants]
+            for line in _table(["variant", "tag", "digest", "推送时间（UTC）", "revision"], rows):
+                out("  " + line)
         for item in info["pending_cleanup"]:
             if item["reason"] == "retired":
                 out(f"  待清理 {_cell(_short_arn(item['revision_arn']), 28)}已退休 {item['retired_at']}（variant {item['variant']}）")
@@ -998,6 +997,36 @@ def _pending_cleanup(aws: Aws, *, family: str, mapped: set) -> list[dict]:
             items.append({"revision_arn": rev.arn, "reason": "orphan", "variant": rev.tags.get(names.TAG_VARIANT, "?"),
                           "retired_at": None, "registered_at": reg})
     return items
+
+
+def _pushed_at_human(iso: str | None) -> str:
+    """推送时间的人读形态：`2026-09-29T07:09:14.961520+00:00` → `2026-09-29 07:09`（换算到 UTC、到分钟）。
+    机读形态（`--json`）仍是完整的 ISO 串；缺值给 `-`；解析不了的原样返回、不抛。"""
+    if not iso:
+        return "-"
+    from datetime import datetime, timezone
+    try:
+        dt = datetime.fromisoformat(iso)
+    except ValueError:
+        return iso
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc)
+    return dt.strftime("%Y-%m-%d %H:%M")
+
+
+def _table(headers: list[str], rows: list[list[str]]) -> list[str]:
+    """按显示宽度对齐的文本表：每列宽度取表头与各格中最宽者再加两格，最后一列不补空格。"""
+    widths = [max(_shown_width(str(cell)) for cell in col) + 2 for col in zip(headers, *rows)]
+    lines = []
+    for row in [headers, *rows]:
+        cells = [str(c) for c in row]
+        lines.append("".join(_cell(c, w) for c, w in zip(cells[:-1], widths[:-1])) + cells[-1])
+    return lines
+
+
+def _shown_width(text: str) -> int:
+    import unicodedata
+    return sum(2 if unicodedata.east_asian_width(ch) in "WF" else 1 for ch in text)
 
 
 def _cell(text: str, width: int) -> str:
