@@ -227,3 +227,62 @@ def test_pump_log_masks_tunnel_credentials_in_sink_and_stderr(capsys):
     err = capsys.readouterr().err
     assert "u1:p1@" not in err
     assert "[worker s:out] navigate to https://***@h.example/login\n" in err
+
+
+# ---- worker 日志前缀的颜色（ADR 0047）：只标来源 scope、按 job 启动顺序分配、不含红绿、开关走统一策略 ----
+import pytest as _pytest
+
+
+@_pytest.fixture(autouse=True)
+def _color_env_independent(monkeypatch):
+    """本模块的颜色断言不受运行测试的 shell 影响：清掉 NO_COLOR / FORCE_COLOR / TERM=dumb，让「是否终端」成为唯一变量。"""
+    for k in ("NO_COLOR", "FORCE_COLOR"):
+        monkeypatch.delenv(k, raising=False)
+    if monkeypatch.__class__ and __import__("os").environ.get("TERM") == "dumb":
+        monkeypatch.delenv("TERM", raising=False)
+    from gherkai_core.adapters import subprocess_engine as se
+    se._reset_scope_colors()
+    yield
+    se._reset_scope_colors()
+
+
+def test_scope_colors_assigned_in_order_without_collision_and_stable():
+    from gherkai_core.adapters import subprocess_engine as se
+
+    scopes = [f"features/x.feature:{n}" for n in (6, 16, 24, 33, 41, 50, 62, 70)]
+    colors = [se._scope_color(s) for s in scopes]
+    assert len(set(colors)) == len(scopes) == len(se._ANSI_COLORS)   # 前 8 个 scope 互不撞色
+    assert colors == list(se._ANSI_COLORS)                            # 按首次出现顺序依次取色
+    assert [se._scope_color(s) for s in scopes] == colors             # 同一 scope 恒同色
+    assert se._scope_color("features/x.feature:99") == se._ANSI_COLORS[0]  # 第 9 个起循环
+
+
+def test_palette_excludes_verdict_and_default_colors():
+    """红绿留给判定语义（通过绿 / 失败红），白与默认色留给 core 自身的行。"""
+    from gherkai_core.adapters import subprocess_engine as se
+
+    assert not {31, 91, 32, 92, 37, 39, 97} & set(se._ANSI_COLORS)
+    assert len(se._ANSI_COLORS) == 8
+
+
+def test_pump_log_colors_prefix_only_when_policy_says_so(monkeypatch, capsys):
+    from gherkai_core.adapters import subprocess_engine as se
+
+    # capsys 下 stderr 不是终端：默认不上色
+    se._pump_log(iter(["a\n"]), "s1", "err")
+    assert capsys.readouterr().err == "[worker s1:err] a\n"
+
+    # FORCE_COLOR 非空：非终端也上色，色码来自注册表（不上色的那次不占色，s2 是首个登记的 scope、取第一色）
+    monkeypatch.setenv("FORCE_COLOR", "1")
+    se._pump_log(iter(["b\n"]), "s2", "out")
+    err = capsys.readouterr().err
+    assert err == f"\033[{se._ANSI_COLORS[0]}m[worker s2:out]\033[0m b\n"
+
+    # 调用方给定的 color 优先（run_scope 在 job 启动时取色、两条流同色）
+    se._pump_log(iter(["c\n"]), "s2", "err", None, se._ANSI_COLORS[3])
+    assert capsys.readouterr().err == f"\033[{se._ANSI_COLORS[3]}m[worker s2:err]\033[0m c\n"
+
+    # NO_COLOR 非空：即使 FORCE_COLOR 也在，也不上色
+    monkeypatch.setenv("NO_COLOR", "1")
+    se._pump_log(iter(["d\n"]), "s2", "err")
+    assert capsys.readouterr().err == "[worker s2:err] d\n"

@@ -135,9 +135,9 @@
     "semantic_hash": "2d7c1d82db054ae8ba800fac7de634cc"
   },
   "core/tests/test_subprocess_engine.py": {
-    "mtime": 1790660613.0035095,
-    "ast_hash": "bdfc8e11d4529c5a7edcc079a7c8044e",
-    "semantic_hash": "bdfc8e11d4529c5a7edcc079a7c8044e"
+    "mtime": 1790749883.1936111,
+    "ast_hash": "2a1d5024736f70757184a86a87a0d7f3",
+    "semantic_hash": ""
   },
   "core/tests/test_wire.py": {
     "mtime": 1790660612.6404083,
@@ -455,8 +455,8 @@
     "semantic_hash": "d82024d7c70df2a1f5ae5d17ed9298ba"
   },
   "cli/gherkai_cli/__main__.py": {
-    "mtime": 1790748572.2567935,
-    "ast_hash": "6ad50b3dc64445827817528f2b8abdbb",
+    "mtime": 1790749811.8923893,
+    "ast_hash": "90131bfb99278c25e0754aa2035c8f57",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/render.py": {
@@ -555,9 +555,9 @@
     "semantic_hash": "be6536a84282527d7870846da248cf15"
   },
   "core/gherkai_core/adapters/subprocess_engine.py": {
-    "mtime": 1790659528.9529588,
-    "ast_hash": "d68e1cbf877800d56ebcfe8e53d44c5f",
-    "semantic_hash": "d68e1cbf877800d56ebcfe8e53d44c5f"
+    "mtime": 1790749811.8918948,
+    "ast_hash": "458a87248864dc4a11da46976eccf88b",
+    "semantic_hash": ""
   },
   "core/gherkai_core/errors.py": {
     "mtime": 1788766077.6164393,
@@ -1075,9 +1075,9 @@
     "semantic_hash": "e8fb32d2717ac0d013c0de02ea60f9f9"
   },
   "core/DEVELOPMENT.md": {
-    "mtime": 1789798771.1130152,
-    "ast_hash": "a7473215080c9525987d095366e96ee1",
-    "semantic_hash": "a7473215080c9525987d095366e96ee1"
+    "mtime": 1790750006.2889771,
+    "ast_hash": "34bf9c102151f8009fee1a96380f7e70",
+    "semantic_hash": ""
   },
   "runtime/DEVELOPMENT.md": {
     "mtime": 1790742003.5797186,
@@ -1335,8 +1335,8 @@
     "semantic_hash": "886fd70dadbb69e1ee36307f08b3148a"
   },
   "CHANGELOG.md": {
-    "mtime": 1790748572.258286,
-    "ast_hash": "7bd56cf08f543a359d9dd7f22e0e69e7",
+    "mtime": 1790749811.8929853,
+    "ast_hash": "59b64cec6136a7155b697135c4d6e06b",
     "semantic_hash": ""
   },
   "CONTRIBUTING.md": {
@@ -1425,9 +1425,9 @@
     "semantic_hash": "09a03049df8323575f96335ce74e584b"
   },
   "docs/user-guide/configuration.md": {
-    "mtime": 1790740816.8998153,
-    "ast_hash": "ba89f1e3d0d09258c083863c837c54e8",
-    "semantic_hash": "ba89f1e3d0d09258c083863c837c54e8"
+    "mtime": 1790749811.8926103,
+    "ast_hash": "ba3e1500caf27d23ac714c816b7229bf",
+    "semantic_hash": ""
   },
   "docs/user-guide/getting-started.md": {
     "mtime": 1790742101.1130893,
@@ -1445,9 +1445,9 @@
     "semantic_hash": "5e4c3422b75594de759814a15c492305"
   },
   "docs/user-guide/troubleshooting.md": {
-    "mtime": 1790740816.8990023,
-    "ast_hash": "744c03819b7c8e073dedab70869a595f",
-    "semantic_hash": "744c03819b7c8e073dedab70869a595f"
+    "mtime": 1790749811.8928645,
+    "ast_hash": "3446b921c1a8dddeeee296f24e56be4e",
+    "semantic_hash": ""
   },
   "docs/user-guide/writing-deterministic-steps.md": {
     "mtime": 1790740816.899411,
@@ -1795,9 +1795,9 @@
     "semantic_hash": "cdb91b35fac44179062f5a8bc4a1a214"
   },
   "runtime/gherkai_runtime/textui.py": {
-    "mtime": 1790740655.7962918,
-    "ast_hash": "1483d2031c7ca6a657b5cccee9775d1d",
-    "semantic_hash": "1483d2031c7ca6a657b5cccee9775d1d"
+    "mtime": 1790749811.8911254,
+    "ast_hash": "fbe8e71b87c2397b096481aa62f37ca3",
+    "semantic_hash": ""
   },
   "runtime/tests/test_textui.py": {
     "mtime": 1790740706.8125432,
@@ -1805,8 +1805,18 @@
     "semantic_hash": "05008683f1b754f245c9511c277a6d44"
   },
   "docs/adr/0047-cli-human-readable-tables-with-rich.md": {
-    "mtime": 1790741973.158482,
-    "ast_hash": "6a12ae0b4b6c1e60c2b874ed7022ea8c",
-    "semantic_hash": "6a12ae0b4b6c1e60c2b874ed7022ea8c"
+    "mtime": 1790749811.8924994,
+    "ast_hash": "d0d7d90de2a7b59742f57b9bf0e958fd",
+    "semantic_hash": ""
+  },
+  "core/gherkai_core/termcolor.py": {
+    "mtime": 1790749811.8720057,
+    "ast_hash": "7c6b6e46d477d95ee53e35469632c078",
+    "semantic_hash": ""
+  },
+  "core/tests/test_termcolor.py": {
+    "mtime": 1790749850.812309,
+    "ast_hash": "136d4acb70f0b2757bab87d32ffa1a44",
+    "semantic_hash": ""
   }
 }

@@ -81,7 +81,7 @@ region 的完整解析链是 `--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > 
 | `MIDSCENE_MODEL_ID` | Midscene 用哪个模型 | `us.openai.gpt-5.6-terra` | 本机 shell、variant 镜像 `ENV` |
 | `MIDSCENE_MODEL_FAMILY` | 显式指定模型家族，优先于自动推断 | 无（按模型 id 推断） | 本机 shell、variant 镜像 `ENV` |
 | `GHERKAI_STEPS_DIR` | 你自己的确定性 step 目录，`--steps-dir` 没给时用它 | `./steps` 存在即用 | 本机 shell、variant 镜像 `ENV` |
-| `NO_COLOR` | 设为非空值即关闭人读输出里的颜色（`TERM=dumb` 同效）；标准输出不是终端时本来就不带颜色，`FORCE_COLOR` 为非空值时强制带颜色（如 `\| less -R`） | 未设 | 本机 shell |
+| `NO_COLOR` | 设为非空值即关闭人读输出里的颜色，包括本机 worker 日志行的来源前缀（`TERM=dumb` 同效）；标准输出不是终端时本来就不带颜色，`FORCE_COLOR` 为非空值时强制带颜色（如 `\| less -R`） | 未设 | 本机 shell |
 
 - `NOVA_ACT_TIMEOUT_S` 由起 worker 的那一侧读取后注给 worker：`run`（两个后端都算）与 `submit --backend local` 用发起命令的 shell 里的值；`submit --backend local` 提交的 run 之后由 `gherkai status --wait` 接着推完时，用运行 `status` 的那个 shell 里的值；`submit --backend cloud` 的任务由云端起，固定用 120 秒。
 - `NOVA_ACT_TIMEOUT_S` 与 `NOVA_GRACE_MARGIN_S` 相加就是 Nova 引擎自报的最小停止宽限（默认 150 秒；Midscene 自报的是固定的 31 秒），调大前者会同时抬高本机运行所允许的最小 `--grace`。

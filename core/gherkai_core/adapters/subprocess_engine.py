@@ -21,6 +21,7 @@ import threading
 from typing import Callable, Iterator
 
 from gherkai_core.model import Event, Job
+from gherkai_core.termcolor import use_color
 from gherkai_core.redact import redact_url_userinfo
 from gherkai_core.wire import event_from_line, job_to_line, raise_for_worker_exit
 
@@ -114,8 +115,9 @@ class SubprocessEngine:
         # **先起 pump、再写 stdin**：job JSON 可能很大（DataTable/DocString），写 stdin 会在管道满时阻塞；此刻 worker 若已在往
         # stdout/stderr 吐（SDK import 噪声）而无人读，父卡 stdin.write、子卡 stdout.write ——互锁。线程是 daemon、EOF 自然退出，
         # 下面 stdin 失败分支 kill/wait 后它们随管道关闭结束。
-        pumps = (threading.Thread(target=_pump_log, args=(proc.stdout, job.scope_id, "out", self._log_sink), daemon=True),
-                 threading.Thread(target=_pump_log, args=(proc.stderr, job.scope_id, "err", self._log_sink), daemon=True))
+        color = _scope_color(job.scope_id)  # 按 job 启动顺序取色，两条流同色（见 _ANSI_COLORS 的注释）
+        pumps = (threading.Thread(target=_pump_log, args=(proc.stdout, job.scope_id, "out", self._log_sink, color), daemon=True),
+                 threading.Thread(target=_pump_log, args=(proc.stderr, job.scope_id, "err", self._log_sink, color), daemon=True))
         for t in pumps:
             t.start()
         try:
@@ -186,20 +188,39 @@ def _read_events(
         raise_for_worker_exit(rc, code_label="returncode")
 
 
-# worker 行的 ANSI 前景色调色板（按 scope_id 哈希挑一个，保证同一 worker 每次同色）。
-# 12 色分别是 31-36（红/绿/黄/蓝/品/青）与 91-96（各自亮版）。
-# **有意排除 37/39/97（白/默认/亮白）**：默认前景色保留给 cli main/core 自己的输出
-# （`[core <scope>:event]` 进度、plan:/run_id=/RunReport: 等，它们一律不上色、即默认色，见 cli/gherkai_cli/__main__.py
-# 的 _progress）。这样 core 行与 worker 行的颜色域**物理不相交**、并发批量运行时一眼能分辨「core 说的」vs
-# 「worker 透传的」。改本调色板时**勿加入 37/39/97**，否则会与 core 的默认色撞、破坏这条约定。
-_ANSI_COLORS = (31, 32, 33, 34, 35, 36, 91, 92, 93, 94, 95, 96)
+# worker 行前缀的 ANSI 前景色调色板：颜色只标**来源 scope**，与 out/err、与严重程度无关（ADR 0047）。
+# 8 色为 33-36（黄/品/蓝/青）与 93-96（各自亮版）。两组有意排除：
+#   - 31/91（红）与 32/92（绿）——ADR 0047 起判定汇总里红表示失败、绿表示通过，日志前缀再用红绿会被读成判定；
+#   - 37/39/97（白/默认/亮白）——默认前景色保留给 cli main/core 自己的输出（`[core <scope>:event]` 进度、plan:/run_id=
+#     等，见 cli/gherkai_cli/__main__.py 的 _progress），core 行与 worker 行的颜色域物理不相交、并发时一眼能分辨。
+# 颜色按 job **启动顺序**依次分配（`_scope_color`）：同一次运行内前 8 个 scope 互不撞色，同一 plan 下颜色稳定；曾按
+# scope_id 的 Python 哈希取模，4 个 scope 约四成的运行会撞色、且哈希按进程随机化导致每次运行颜色不同。
+_ANSI_COLORS = (33, 35, 34, 36, 93, 95, 94, 96)
+_scope_colors: dict[str, int] = {}
+_scope_colors_lock = threading.Lock()
 
 
-def _pump_log(stream, scope_id: str, tag: str, sink=None) -> None:
+def _scope_color(scope_id: str) -> int:
+    """scope 的前缀色：首次出现时按出现顺序取下一色，之后恒同色（进程内注册表，一次 run 一个进程）。"""
+    with _scope_colors_lock:
+        if scope_id not in _scope_colors:
+            _scope_colors[scope_id] = _ANSI_COLORS[len(_scope_colors) % len(_ANSI_COLORS)]
+        return _scope_colors[scope_id]
+
+
+def _reset_scope_colors() -> None:
+    """测试用：清空进程内的颜色注册表。"""
+    with _scope_colors_lock:
+        _scope_colors.clear()
+
+
+def _pump_log(stream, scope_id: str, tag: str, sink=None, color: int | None = None) -> None:
     """把 worker 的 stdout（SDK 噪声，tag=out）/ stderr（诊断，tag=err）实时透传为本进程日志。
 
-    带 [worker <scope_id>:<tag>] 前缀，多 worker 并发时区分来源。sink=None 写本进程 stderr、仅当它是终端（isatty）
-    时才上色——管道/文件/CI 输出纯文本，避免 ANSI 乱码；sink 给了文件句柄则写它（无颜色码，逐行 flush 让 tail 可见）。
+    带 [worker <scope_id>:<tag>] 前缀，多 worker 并发时区分来源。sink=None 写本进程 stderr，是否上色按统一策略
+    （`termcolor.use_color(sys.stderr)`：`NO_COLOR` / `FORCE_COLOR` / `TERM=dumb` / 是否终端）——管道/文件/CI 输出纯文本，
+    避免 ANSI 乱码；前缀色由 `color` 给出（调用方在 job 启动时取 `_scope_color`，两条流同色），缺省时按 scope_id 取。
+    sink 给了文件句柄则写它（无颜色码，逐行 flush 让 tail 可见）。
     """
     if stream is None:
         return
@@ -212,8 +233,9 @@ def _pump_log(stream, scope_id: str, tag: str, sink=None) -> None:
             except ValueError:
                 return  # 句柄已关表示本进程正在收尾（join 超时后仍有尾巴的残余路径）：静默停转发，别把 traceback 打到 stderr
         return
-    if sys.stderr.isatty():
-        color = _ANSI_COLORS[hash(scope_id) % len(_ANSI_COLORS)]
+    if use_color(sys.stderr):
+        if color is None:
+            color = _scope_color(scope_id)
         prefix = f"\033[{color}m{prefix}\033[0m"
     for line in stream:
         sys.stderr.write(f"{prefix} {redact_url_userinfo(line)}")

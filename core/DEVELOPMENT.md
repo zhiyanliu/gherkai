@@ -31,6 +31,8 @@ core/gherkai_core/
 ├── project.py    ← 无状态批量运行纯归约投影（ADR 0034）：project(meta, records)→RunState + project_full(meta, records)→RunResult（终值判定/报告用）+ plan_next(state, max_concurrency)→actions + reduce_event（与 schedule 共用一份归约）+ projected_run_status（投影写应记录的 run 级 status，两 RunStore adapter 共用）
 ├── reconcile.py  ← 无状态批量运行推进编排（ADR 0034）：`EventLog` / `Launcher` 两个 port 在此定义（与消费它们的推进器同处）+ tick(run_id, meta, event_log, run_store, launcher, max_concurrency, *, now_iso, result_store=None)：幂等、多触发源、CAS/HWM 条件写；启动 job 经注入的 Launcher（core 不 import boto3）；finalize 分支在 CAS 前写入判定真值（ADR 0030 决定三写序）+ finalize_report(...)（done 后写 RunReport，cloud Lambda/local per-run 两宿主共用）
 ├── persist.py    ← RunPersistence：编排 Store ports 随进度实时落库（commit-point 写序，ADR 0030）
+├── redact.py     ← 隧道凭据脱敏（`scheme://用户:口令@主机` 的 userinfo 段换成 `***`；worker 日志转发、事件解码、CLI 出口共用，ADR 0035 决策 5）
+├── termcolor.py  ← 终端颜色开关的统一策略（`NO_COLOR` / `FORCE_COLOR` / `TERM=dumb` / 目标流是否终端）；worker 日志前缀与 runtime 的 textui 共用，ADR 0047
 └── adapters/
     ├── subprocess_engine.py        ← Engine 实装（local）：spawn worker 子进程 + 读事件流
     ├── fargate_engine.py           ← Engine 实装（cloud）：RunTask 启动 Fargate 容器（task-def 恒为组合根注入的**显式 revision ARN**、绝不 family 名，ADR 0038）+ job-in 经 S3 / events-out 经 DDB / stop→StopTask + start_scope fire-and-forget（ADR 0024/0032/0034）

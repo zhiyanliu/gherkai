@@ -14,6 +14,8 @@ import io
 import os
 import shutil
 import sys
+
+from gherkai_core.termcolor import color_env_override
 from typing import Iterable, Sequence
 
 from rich import box
@@ -34,12 +36,11 @@ NO_WRAP_WIDTH = 100_000  # 不折行时给控制台的名义宽度（树恒用�
 
 
 def use_color() -> bool:
-    """`NO_COLOR` 为非空值或 `TERM=dumb` → 不上色；`FORCE_COLOR` 为非空值 → 上色（如 `| less -R`）；否则看标准输出是否为终端。
-    `NO_COLOR` / `FORCE_COLOR` 的非空语义同 no-color.org 与 rich。"""
-    if os.environ.get("NO_COLOR", "") != "" or os.environ.get("TERM") == "dumb":
-        return False
-    if os.environ.get("FORCE_COLOR", "") != "":
-        return True
+    """标准输出上的人读输出要不要带颜色：`NO_COLOR` 为非空值或 `TERM=dumb` → 不上色；`FORCE_COLOR` 为非空值 → 上色
+    （如 `| less -R`）；否则看标准输出是否为终端。策略与 worker 日志前缀共用一份（`gherkai_core.termcolor`）。"""
+    override = color_env_override()
+    if override is not None:
+        return override
     return _stdout_is_tty()
 
 
