@@ -30,7 +30,7 @@ worker 的能力自述入口（`--capabilities`，契约见「5.」）**不建�
 ### 3. CLI 子命令 `list-deterministic --engine <name>`
 
 - **按引擎查询**（对齐 `run` 的引擎选择逻辑）：`--engine` 默认 `novaact`（与 `--default-engine` 缺省一致）、choices 来自引擎注册表——只返回指定引擎的清单，不做全量聚合。
-- `--json` 输出机器可读（stdout 只放核心产出，对齐既有输出契约）；文本模式渲染 description/example/pattern。
+- `--json` 输出机器可读（stdout 只放核心产出，对齐既有输出契约）；文本模式以表格呈现示例、说明、模式三列（示例列在前，是 feature 作者的复制来源；ADR 0047）。
 - `--steps-dir DIR`（flag > env `GHERKAI_STEPS_DIR` > 默认 `./steps` 存在即用）：查询入口同样加载使用方的确定性 step 目录，故清单 = 内建脚手架 + 使用方定制；解析与加载机制见 [0037](./0037-distribution-and-packaging.md) 决策 4。
 - 纯本地 spawn（秒级）、零 AWS；清单取能力自述对象的 `deterministic_steps`（`compose.query_capabilities`）；worker 起不来/输出非 JSON → 退 2 带诊断。
 

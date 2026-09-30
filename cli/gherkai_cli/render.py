@@ -58,7 +58,7 @@ _SHORTCIRCUIT_NOTE = "⚠ 因前置 step error 被跳过（未执行）"
 
 
 def render_text(result: RunResult) -> str:
-    """RunResult → 人看的多行汇总（嵌套 job/scenario/step + 时长 + 成本 + 报告指针）。
+    """RunResult → 人看的判定汇总树（job → scenario → step，带时长、成本与报告指针；ADR 0047）。
 
     面向人的文本模式：用自然的词、不用变量名式术语（RunResult/sessionId/step[0] 这类）；
     但 job/scenario/step/scope 是领域概念（feature 作者写 feature、看 plan 都在用），保留原词。JSON 模式（to_dict）是
@@ -135,7 +135,7 @@ def render_run_state(state: RunState) -> str:
 # ---- 用例预检（plan）渲染：纯本地、零费用，展示 .feature → scope/job 分组 ----
 
 def render_plan_text(jobs: list[Job], default_engine: str, dispatch: dict | None = None) -> str:
-    """plan 产出 Job[] → 人看的多行预检视图（scope/engine/scenario/step，不实际运行）。
+    """plan 产出的 Job[] → 人读的树形预检视图（job → scenario → step 及派发标注，不实际运行；结构见 plan_tree，ADR 0047）。
 
     dispatch（可选，ADR 0036 决策 4）：{(scope_id, scenario_id, step_index): probe}——worker 的命中
     自述。命中 → 行尾标「← 确定性:」；冲突 → 标 ⚠（实际运行该 step 将 error）；None/缺失 → 不标（默认 AI，少噪声）。
@@ -313,8 +313,8 @@ def explain_to_dict(*, run_id: str, status: str | None, results: list[JobResult]
             "aborted_hint": (_ABORTED_PARTIAL_HINT
                              if jr.status in (Status.ABORTED, Status.ERROR) and 0 < len(recorded) < total_steps
                              else None),
-            # 「这个 job 有没有任何 step 记录」是 job 的事实、按未筛的判定树算一次——渲染层据此打 job 判定块；
-            # 曾在筛后的 scenarios 上重算，--scenario/--step 筛剩无记录 step 时会把有完整记录的 job 误打成零记录。
+            # 「这个 job 有没有任何 step 记录」是 job 的事实、按未筛的判定树算一次——渲染层据此在 scope 节点下给出 job 级判定；
+            # 曾在筛后的 scenarios 上重算，--scenario/--step 筛剩无记录 step 时会把有完整记录的 job 误判为零记录。
             "has_step_records": bool(recorded),
             "scenarios": scenarios,
         })
@@ -416,7 +416,7 @@ def _add_step(parent: TreeNode, step: dict, *, expand_passed: bool, full: bool) 
 
 
 def render_explain_text(doc: dict, *, expand_passed: bool = False, full: bool = False) -> str:
-    """explain 的人/agent 可读文本（`explain_to_dict` 的文档 → 多行摘要，ADR 0042 决策四「文本形态」）。
+    """explain 的人与 agent 可读文本（`explain_to_dict` 的文档渲染为树形摘要，节点文字依 ADR 0042 决策四「文本形态」，树形渲染见 ADR 0047）。
 
     文本是「一次读进上下文的摘要」而非 evidence 全文转写，故默认带预算（见 `_add_act`）；`--full` 关掉预算。
     """
@@ -431,8 +431,8 @@ def explain_tree(doc: dict, *, expand_passed: bool = False, full: bool = False) 
         scn = root.add(Text.assemble(f"scope {sc['scope_id']}  engine={sc['engine']}  status=", status_text(sc["status"]), sess))
         for rr in sc["report_refs"]:
             scn.add(styled(_ref_line(rr), DIM))
-        # 一个 step 记录都没有的 job（worker 没起来 / 起来就被掐）：判定只剩 job 级这一层，单独打一段，
-        # 免得读者在一片「无记录」里找不到「到底为什么」。
+        # 一个 step 记录都没有的 job（worker 没起来 / 起来就被掐）：判定只剩 job 级这一层，在 scope 节点下单独列出
+        # 判定与诊断指引，免得读者在一片「无记录」里找不到「到底为什么」。
         if not sc["has_step_records"]:  # job 级事实（explain_to_dict 按未筛判定树算），不在筛后的 steps 上重算
             why = ""
             if sc["error_type"]:

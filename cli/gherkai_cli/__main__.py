@@ -678,8 +678,8 @@ def _cmd_doctor(args) -> int:
 
     steps_dir, steps_err = _steps_dir_or_error(args)
     # 对每个可用引擎执行**一次** worker 自述，同一份对象供两段：engines 段的模型行、steps 段的加载结果。
-    # 先全部问完、再按段 add：文本视图按 add 的插入序逐行打（见下方渲染），模型行若挨着自己的 load 行插就会让
-    # engines / steps 两段交错、分组读不下去。
+    # 先完成全部自述、再按段 add：文本视图的表格行按 add 的插入顺序排列（见下方渲染），模型行若紧邻自身的 load 行
+    # 插入，会使 engines / steps 两段交错、分组难以阅读。
     described: list[tuple[str, dict | None, str]] = []
     if not steps_err:
         for r in rows:
@@ -1179,9 +1179,11 @@ def _progress(*args, **kwargs) -> None:
     这样 `gherkai run … --json > r.json` 拿到纯净 JSON、`gherkai run … > summary.txt` 拿到纯净文本汇总，
     进度（plan/event/run_id/RunReport 落点）照样在终端可见、不污染被重定向的主输出。
 
-    **不上色（即终端默认前景色）是有意约定**：默认色专属 cli main/core 的输出（含 `[core …:event]`），
-    与 worker 透传行的调色板物理不相交——worker 调色板有意排除白/默认色（见 subprocess_engine._ANSI_COLORS），
-    故并发批量运行期间「core 说的」恒默认色、「worker 透传的」恒有色，一眼可分。给 core 输出加色前先想清这条约定。
+    **stderr 上的进度与诊断行不上色（即终端默认前景色）是有意约定**：默认色专属 cli main/core 的进度输出
+    （含 `[core …:event]`），与 worker 透传行的调色板物理不相交——worker 调色板有意排除白/默认色
+    （见 subprocess_engine._ANSI_COLORS），故并发批量运行期间「core 说的」恒默认色、「worker 透传的」恒有色，
+    一眼可分。stdout 上的汇总树与表格按 ADR 0047 使用语义颜色，但只在批量运行结束后输出、不与透传行交错；
+    给 stderr 进度行加色前先考虑这条约定。
     """
     kwargs.setdefault("file", sys.stderr)
     print(*args, **kwargs)

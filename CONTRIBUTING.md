@@ -40,7 +40,7 @@ v1 定位尚有一项验收未完成，前置条件是取得可用的真实业�
 ├── .vscode/settings.json      ← 放行中文排版符号的 unicodeHighlight（真同形字符仍高亮）
 ├── docs/                      ← 全部文档；按读者的分层与归位见 ADR 0045（三类读者、四个入口）
 │   ├── README.md              ← 文档地图：使用者 / contributor / 想懂机理的人 / contributor 侧 AI agent 各自的入口
-│   ├── adr/                   ← 架构决策记录（0001-0045，每篇带 Status 头）
+│   ├── adr/                   ← 架构决策记录（0001-0047，每篇带 Status 头）
 │   ├── internals/             ← 机理横切解读（只讲 how、权威在 ADR + code）；篇目与主题归属见 docs/internals/README.md
 │   ├── user-guide/            ← 使用者文档，一个主题一篇 owner（篇目与 owner 表见 docs/user-guide/README.md）
 │   ├── ai-eng/                ← contributor 侧 AI agent 的工作文档：README.md（该层入口）+ REFERENCES.md（外部一手来源）+ {doc,code}-health-review.md（两条复盘方法）+ diagram-authoring.md（作图方法）

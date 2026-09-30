@@ -43,7 +43,7 @@ gherkai 的直接操作者越来越多是使用者侧 AI agent（Claude Code / C
 
 ### 四、`doctor`：一个入口、按组件分组
 
-- `gherkai doctor [--backend cloud --prefix P --region R --profile NAME --report-dir DIR] [--steps-dir DIR] [--json]`：**只读**自检，按组件分组输出，每项 `{ok, required, 一句诊断（怎么办）}`。**退出码只看 `required` 项**：全过退 0，任一 `required` 项 fail 退 2（agent 可直接分流）；`required=false` 的项失败只作能力展示、不改退出码（另一个引擎没定位到、容器引擎 daemon 没起、未装 `[deploy-aws]` extra；未查的云端项标 ok + `required=false`）。人读形态 `✗` = 必修、`-` = 可选项未过。`required` 的判据 = **这次要跑的那个后端真跑得起来吗**。字段与项名取值见 `docs/internals/cli-json-contract.md`（单一事实源，不在此复述）。
+- `gherkai doctor [--backend cloud --prefix P --region R --profile NAME --report-dir DIR] [--steps-dir DIR] [--json]`：**只读**自检，检查项按组件归类（机读形态以 `section` 字段表示），每项 `{ok, required, 一句诊断（怎么办）}`。**退出码只看 `required` 项**：全过退 0，任一 `required` 项 fail 退 2（agent 可直接分流）；`required=false` 的项失败只作能力展示、不改退出码（另一个引擎没定位到、容器引擎 daemon 没起、未装 `[deploy-aws]` extra；未查的云端项标 ok + `required=false`）。人读形态为三列表格（结果、检查项、说明，ADR 0047），检查项列写作「组件.项名」；结果列 `✓` 表示通过，`✗` 表示必修项未通过，`-` 表示可选项未通过。`required` 的判据 = **这次要跑的那个后端真跑得起来吗**。字段与项名取值见 `docs/internals/cli-json-contract.md`（单一事实源，不在此复述）。
 - 组件与归属（**按 extra 实施、单入口汇总**——自检能力跟着它检查的组件走，入口只做编排）：
   - `cli`：版本、Python。
   - `engines`：两引擎的定位链结果（同 `list-engines`），各自 `required=false`（缺一个不算故障）；聚合项「至少一个可用」为 required 闸门——两个都定位不到时本机后端一个 job 也起不来；`--backend cloud` 时该聚合项降为可选（只提交、不在本机跑的人不需要 worker）。

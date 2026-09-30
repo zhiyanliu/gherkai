@@ -16,7 +16,7 @@ https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/writing-determini
 
 **模式**。匹配是子串搜索、不锚定，一条 step 文本命中多条模式即记 error，所以模式要窄：带引号参数与特征词，参数组写 `[^"]+`（不写 `.+`，第二对引号会被贪婪吞掉），正则里不写 `Given` / `Then` 关键字。两侧方言只差具名组：Python `(?P<name>…)`，Midscene `(?<name>…)`。别让新模式与内建的 `页面地址(?:精确)?匹配 "…"` 有重叠的命中面。
 
-**元数据**。`description` 一句话说这一步判什么，是 `gherkai list-deterministic` 与 `gherkai plan` 打给用例作者看的那行；`example` 是用例作者会照抄进 feature 的完整 step 文本（含关键字）。**`example` 的措辞就是接口**：改它等于改所有用到它的 feature，定下来别轻易动。
+**元数据**。`description` 一句话说这一步判什么，是 `gherkai list-deterministic` 清单「说明」列与 `gherkai plan` 命中标注里给用例作者看的那句说明；`example` 是用例作者会照抄进 feature 的完整 step 文本（含关键字）。**`example` 的措辞就是接口**：改它等于改所有用到它的 feature，定下来别轻易动。
 
 **handler**。签名见 `references/engines.md` 第 3 节；Python 侧必须是同步函数，写成 `async def` 的那一步直接记 error。handler 只拿到上下文与具名组，DataTable 与 DocString 不会传进来。同一 scope 的 scenario 串行共享一个浏览器会话，所以 handler 别假定页面是新鲜的、别在断言步里导航、别留下会改变后续 step 的状态（新开标签页、切换 frame 不复位）。
 

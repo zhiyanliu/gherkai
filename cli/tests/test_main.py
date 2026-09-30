@@ -1557,7 +1557,7 @@ def test_doctor_reports_worker_self_reported_model(tmp_path, monkeypatch, capsys
     assert m.main(["doctor"]) == 0  # 文本视图同一行
     out = capsys.readouterr().out
     assert re.search(r"✓\s*│\s*engines\.model\.novaact\s*│\s*模型 " + re.escape(FAKE_MODEL_ID["novaact"]) + r"（本机 worker 自报）", out)  # 同一行
-    # 文本按 add 的插入序逐行打 → 模型行须落在 engines 段内（steps 段之前），否则两段交错
+    # 表格各行按 add 的插入顺序排列，故模型行须位于 engines 段内（steps 段之前），否则两段交错
     assert out.index("engines.model.novaact") < out.index("steps.dir")
 
 

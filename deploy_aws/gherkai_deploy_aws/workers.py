@@ -973,11 +973,12 @@ def list_workers(*, prefix: str, cli_version: str | None, engines=None, region=N
                      names.short_digest(v["digest"]), _pushed_at_human(v["pushed_at"]), _short_arn(v["revision_arn"])]
                     for v in variants]
             out(render_table(["variant", "tag", "digest", "推送时间（UTC）", "revision"], rows))
+        # 待清理条目分已退休与孤儿两类、字段不同，不构成同结构的清单，按 ADR 0047 保持逐行输出、不手工对齐列。
         for item in info["pending_cleanup"]:
             if item["reason"] == "retired":
-                out(f"  待清理 {_cell(_short_arn(item['revision_arn']), 28)}已退休 {item['retired_at']}（variant {item['variant']}）")
+                out(f"  待清理 {_short_arn(item['revision_arn'])}  已退休 {item['retired_at']}（variant {item['variant']}）")
             else:
-                out(f"  待清理 {_cell(_short_arn(item['revision_arn']), 28)}孤儿：无任何版本的映射引用"
+                out(f"  待清理 {_short_arn(item['revision_arn'])}  孤儿：无任何版本的映射引用"
                     f"（variant {item['variant']}，注册于 {item['registered_at'] or '?'}）")
     return EXIT_OK
 
@@ -1012,16 +1013,5 @@ def _pushed_at_human(iso: str | None) -> str:
     if dt.tzinfo is not None:
         dt = dt.astimezone(timezone.utc)
     return dt.strftime("%Y-%m-%d %H:%M")
-
-
-def _cell(text: str, width: int) -> str:
-    """定宽列（**按显示宽度补，不按字符数**）：中文表头字符占两列，用 `f"{s:<28}"` 会让整张表歪掉。
-
-    只认「东亚宽/全角」这一类（`unicodedata.east_asian_width` 的 W/F）——够表头用；数据列受 tag 字符集约束、恒 ASCII。
-    """
-    import unicodedata
-
-    shown = sum(2 if unicodedata.east_asian_width(ch) in "WF" else 1 for ch in text)
-    return text + " " * max(1, width - shown)
 
 

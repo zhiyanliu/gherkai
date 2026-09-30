@@ -865,7 +865,7 @@ def test_deploy_warns_about_missing_container_engine_only_for_pure_release_versi
 
 
 def test_provider_doctor_reports_toolchain(monkeypatch):
-    """`gherkai doctor` 的 provider 段（ADR 0041 决策四）：node / cdk 必需，容器引擎可选；全部只读、不碰 AWS。"""
+    """`gherkai doctor` 的 provider 段（ADR 0041 决策四）：node、cdk、容器引擎三项均为可选（required=False）；全部只读，不访问 AWS。"""
     from types import SimpleNamespace
 
     from gherkai_deploy_aws import container as container_mod

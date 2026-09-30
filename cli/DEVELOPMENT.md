@@ -17,14 +17,14 @@ WebUI 将来是另一个前端，**直接调 core、复用产品本体 `gherkai_
 cli/gherkai_cli/
 ├── __main__.py   ← argparse 前端：run/submit/status/explain/plan/list-engines/doctor/list-deterministic/deploy/destroy/skill（嵌套 `skill install`），外加两个内部隐藏子命令（靠不传 `help` + 收窄 subparsers 的 `metavar` 隐去，**别改用 `argparse.SUPPRESS`**——会以「==SUPPRESS==」漏进 `--help`，理由见 `__main__.py` 该处注释；由 submit 以 setsid fork 启动、不供用户直接调用）：`_reconcile`（local 后端 per-run 推进进程入口，ADR 0034）/ `_tunnel_watch`（cloud submit 的隧道守护进程入口，ADR 0035 决策 3）——解析 → 调 gherkai_runtime.compose/gherkai_core → 注入 RunPersistence 实时落库 → 调 render；定义退出码
 ├── deploy.py     ← deploy/destroy 的命令面 + 部署 provider 发现（entry point group `gherkai.deploy`）；**零 IaC 知识**、不 import aws_cdk（ADR 0037 决策 6）
-├── render.py     ← 表层渲染：0024 事件 → 进度行；RunResult → 文本汇总 / JSON；RunState → status 视图；
+├── render.py     ← 表层渲染：0024 事件 → 进度行；RunResult → 树形汇总 / JSON；RunState → status 视图（表格与树经 `gherkai_runtime.textui` 渲染）；
 │                    JobResult + evidence → explain 的文本/JSON（两形态同源，见模块内 explain 节的注释）
 ├── skill_install.py ← `gherkai skill install`：importlib.resources 定位包内 skills/gherkai/、整目录收敛 + `.gherkai-skill-version` 标记、`--print`（ADR 0043 决策三）
 └── skills/gherkai/  ← 随 wheel 发行的 agent skill（SKILL.md + references/；hatchling 把包目录内的非 `.py` 文件一并收进 wheel；sdist 侧由 `include` 白名单整目录收录）。references/cli-json-contract.md **不手写**：
                      由 `tools/render_skill_contract.py` 从 docs/internals/cli-json-contract.md 确定性生成（ADR 0043 决策四）
 ```
 
-组合根逻辑（compose/detached/names/tunnel/tunnel_host）位于平级的产品本体包 `runtime/gherkai_runtime/`，**不留在本包里**：Lambda 与 IaC 也要用它，留在前端里会迫使它们依赖 argparse 层（ADR 0016「演进」节）。cli 这个前端只剩 argparse 与标准 IO。
+组合根逻辑（compose/detached/names/tunnel/tunnel_host）位于平级的产品本体包 `runtime/gherkai_runtime/`，**不留在本包里**：Lambda 与 IaC 也要用它，留在前端里会迫使它们依赖 argparse 层（ADR 0016「演进」节）。cli 这个前端只剩 argparse 与标准 IO；表格、树与状态颜色的呈现件同样在 runtime（`gherkai_runtime.textui`，ADR 0047），cli 不直接 import rich。
 
 已安装多个部署 provider（当前只有 aws 一个）时 `--provider <名>` 必给；只安装一个时可省略；未安装任何 provider 时报「装 `gherkai[deploy-aws]`」并以退出码 `2` 结束。
 

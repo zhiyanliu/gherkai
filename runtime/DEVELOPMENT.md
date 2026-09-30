@@ -10,7 +10,7 @@
 
 ## 模块
 
-包内五个模块（`__init__.py` 只有包说明、无逻辑）：
+包内六个模块（`__init__.py` 只有包说明、无逻辑）：
 
 - `compose.py` —— 组合根/引擎注册表，按职责分四组：
   - **worker 拉起**：`resolve_worker_cmd`（四级定位链，ADR 0037 决策 3——env 覆写 `GHERKAI_WORKER_<ENGINE>_CMD`（+ 可选
@@ -41,6 +41,9 @@
 - `tunnel_host.py` —— 隧道**宿主**编排（ADR 0035 决策 3）：启动隧道 + 映射 definition + 恒注入的额外请求头
   （`TUNNEL_EXTRA_HTTP_HEADERS`）；cloud submit 守护进程的轮询循环与其 TTL 算法（`compute_watch_ttl_s` 按 definition 计算：
   Σ 各 job 预算 + 启动/级联余量 `CLOUD_STARTUP_MARGIN_S`，执行侧不超时的 job 按 `UNBOUNDED_JOB_BUDGET_S` 记账）
+- `textui.py` —— 人读输出的呈现件（ADR 0047）：`render_table` / `render_tree` / `TreeNode` / `status_text` / `styled` / `plain`
+  与 re-export 的 `Text`；框线、宽度（终端宽度或不折行的名义宽度）、哪些列可折行、颜色开关（`use_color`：`NO_COLOR` /
+  `FORCE_COLOR` / `TERM=dumb` / 是否终端）与状态色映射 `STATUS_STYLE` 全在此一处；cli 与部署 provider 只经本模块使用 rich
 
 ## 从 checkout 运行 / 测试
 
@@ -66,6 +69,7 @@ worker 定位链第四级（`uvx`）与 fd 传递的相互作用是实际运行�
 - [0036](../docs/adr/0036-deterministic-capability-discovery.md) 确定性能力自述
 - [0037](../docs/adr/0037-distribution-and-packaging.md) 分发与打包（三名分离、worker 定位链、版本 skew）
 - [0038](../docs/adr/0038-worker-image-delivery.md) worker 镜像交付（variant → 显式 revision、镜像 tag 归一化）
+- [0047](../docs/adr/0047-cli-human-readable-tables-with-rich.md) 人读输出的表格、树与状态颜色（`textui`）
 
 参与开发的总入口（环境、测试、发布链、文档地图）见根 [`CONTRIBUTING.md`](../CONTRIBUTING.md)；执行与推进的机理解读见
 [`docs/internals/`](../docs/internals/README.md)。

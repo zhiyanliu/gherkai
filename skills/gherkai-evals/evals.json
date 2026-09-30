@@ -83,12 +83,12 @@
     {
       "id": 5,
       "prompt": "这个项目里的 gherkai 现在能不能用 midscene 引擎跑？如果不能，缺什么、怎么补？先别装任何东西。",
-      "expected_output": "跑 gherkai doctor 与/或 gherkai list-engines，按 engines.midscene 一行给结论；不可用时给安装命令（npm i -g @gherkai/worker-midscene）与 region/凭证前置说明；不执行安装。",
+      "expected_output": "跑 gherkai doctor 与/或 gherkai list-engines，按 engines.midscene 那一项给结论；不可用时给安装命令（npm i -g @gherkai/worker-midscene）与 region/凭证前置说明；不执行安装。",
       "expectations": [
         "执行了 gherkai doctor 或 gherkai list-engines 来判断，而不是靠猜或只看文件",
         "没有执行 gherkai run 或 gherkai submit（`--help` 与只读命令不算执行）",
         "指出真跑还缺 AWS region 与凭证（舞台里两份 AWS 配置文件为空）、缺了会在起会话时失败，而不是只报「引擎可用」",
-        "结论引用了 midscene 引擎那一行的探测结果",
+        "结论引用了 midscene 引擎那一项的探测结果",
         "结论正确：判为可用并说出来源（这里 midscene worker 由环境变量指定），没有建议无用的 npm 安装",
         "没有执行任何安装命令（npm ls 这类只读命令不算）",
         "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报",
