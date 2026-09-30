@@ -1,8 +1,8 @@
 # RunMeta
 
-> God node · 119 connections · `core/gherkai_core/model.py`
+> God node · 120 connections · `core/gherkai_core/model.py`
 
-**Community:** [Run Metadata & S3 Offload](Run_Metadata_%26_S3_Offload.md)
+**Community:** [Job Domain Models](Job_Domain_Models.md)
 
 ## Connections by Relation
 
@@ -22,11 +22,11 @@
 - _sample_run() `EXTRACTED`
 - test_offload_round_trip_real() `EXTRACTED`
 - test_build_wires_arg_offloader_so_step_argument_bodies_read_back() `EXTRACTED`
+- test_run_tree_attaches_reason_and_refs_under_their_step() `EXTRACTED`
 - test_detached_flag_on_state_item() `EXTRACTED`
 - test_worker_task_def_arns_on_state_item() `EXTRACTED`
 - test_index_html_shortcircuit_note_matches_cli_wording() `EXTRACTED`
 - test_render_text_shows_step_level_report_refs() `EXTRACTED`
-- test_render_text_step_reason_line_is_single_line_and_only_when_present() `EXTRACTED`
 
 ### contains
 - model.py `EXTRACTED`
@@ -42,16 +42,16 @@
 - test_report_store.py `EXTRACTED`
 - test_reconcile.py `EXTRACTED`
 - test_subprocess_engine.py `EXTRACTED`
-- ports.py `EXTRACTED`
 - schedule.py `EXTRACTED`
 - test_cloud_integration.py `EXTRACTED`
+- ports.py `EXTRACTED`
 - test_persist.py `EXTRACTED`
 - run_store/local.py `EXTRACTED`
 - test_ddb_run_store.py `EXTRACTED`
 - test_arg_offload.py `EXTRACTED`
+- reconcile.py `EXTRACTED`
 - test_sqlite_event_log.py `EXTRACTED`
 - run_store/ddb.py `EXTRACTED`
-- reconcile.py `EXTRACTED`
 
 ### rationale_for
 - 一次 run 的 **definition**（前置身份，执行前由 plan 产出 + 组合根生成确定，不从 RunResult 反推）。… `EXTRACTED`
@@ -84,8 +84,8 @@
 - DynamoDBRunStore `INFERRED`
 - EventRecord `INFERRED`
 - RunStore `INFERRED`
-- RunPersistence `INFERRED`
 - TaskExited `INFERRED`
+- RunPersistence `INFERRED`
 - ResultStore `INFERRED`
 - _IncClock `INFERRED`
 - _FakeEcs `INFERRED`

@@ -1,15 +1,15 @@
 # Job
 
-> God node · 134 connections · `core/gherkai_core/model.py`
+> God node · 135 connections · `core/gherkai_core/model.py`
 
-**Community:** [Run Metadata & S3 Offload](Run_Metadata_%26_S3_Offload.md)
+**Community:** [Job Domain Models](Job_Domain_Models.md)
 
 ## Connections by Relation
 
 ### calls
 - _job() `EXTRACTED`
-- plan() `EXTRACTED`
 - _meta() `EXTRACTED`
+- plan() `EXTRACTED`
 - _job() `EXTRACTED`
 - _seed_run() `EXTRACTED`
 - _jr() `EXTRACTED`
@@ -25,8 +25,8 @@
 - _job() `EXTRACTED`
 - _jr() `EXTRACTED`
 - test_build_wires_arg_offloader_so_step_argument_bodies_read_back() `EXTRACTED`
+- test_run_tree_attaches_reason_and_refs_under_their_step() `EXTRACTED`
 - test_detached_flag_on_state_item() `EXTRACTED`
-- test_worker_task_def_arns_on_state_item() `EXTRACTED`
 
 ### contains
 - model.py `EXTRACTED`
@@ -40,15 +40,15 @@
 - serialize.py `EXTRACTED`
 - test_conditional_writes.py `EXTRACTED`
 - project.py `EXTRACTED`
+- wire.py `EXTRACTED`
 - test_cloud_reconcile.py `EXTRACTED`
 - test_report_store.py `EXTRACTED`
-- wire.py `EXTRACTED`
-- test_reconcile.py `EXTRACTED`
 - test_wire.py `EXTRACTED`
+- test_reconcile.py `EXTRACTED`
 - test_subprocess_engine.py `EXTRACTED`
-- ports.py `EXTRACTED`
 - schedule.py `EXTRACTED`
 - test_cloud_integration.py `EXTRACTED`
+- ports.py `EXTRACTED`
 - test_persist.py `EXTRACTED`
 - test_ddb_run_store.py `EXTRACTED`
 - test_arg_offload.py `EXTRACTED`

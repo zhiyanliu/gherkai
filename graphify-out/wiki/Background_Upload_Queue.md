@@ -10,7 +10,7 @@
 
 ## Relationships
 
-- [Python Artifact Uploader](Python_Artifact_Uploader.md) (2 shared connections)
+- [Artifact Uploader](Artifact_Uploader.md) (2 shared connections)
 
 ## Source Files
 

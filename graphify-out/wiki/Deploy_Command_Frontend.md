@@ -1,56 +1,35 @@
 # Deploy Command Frontend
 
-> 60 nodes · cohesion 0.06
+> 7 nodes · cohesion 0.33
 
 ## Key Concepts
 
-- **test_deploy_cmd.py** (27 connections) — `cli/tests/test_deploy_cmd.py`
-- **_StubProvider** (23 connections) — `cli/tests/test_deploy_cmd.py`
-- **_FakeEP** (21 connections) — `cli/tests/test_deploy_cmd.py`
-- **_patch_eps()** (21 connections) — `cli/tests/test_deploy_cmd.py`
-- **gherkai_cli/__init__.py** (9 connections) — `cli/gherkai_cli/__init__.py`
-- **test_cli_version_is_handed_to_provider()** (7 connections) — `cli/tests/test_deploy_cmd.py`
-- **test_dispatch_maps_command_face_to_provider_method()** (7 connections) — `cli/tests/test_deploy_cmd.py`
-- **._record()** (6 connections) — `cli/tests/test_deploy_cmd.py`
-- **test_cli_does_not_import_aws_cdk()** (6 connections) — `cli/tests/test_deploy_cmd.py`
-- **test_command_face_flags_reach_provider()** (6 connections) — `cli/tests/test_deploy_cmd.py`
-- **test_entry_point_class_gets_instantiated()** (6 connections) — `cli/tests/test_deploy_cmd.py`
-- **test_multiple_providers_require_provider_flag()** (6 connections) — `cli/tests/test_deploy_cmd.py`
-- **test_multiple_providers_selected_by_name()** (6 connections) — `cli/tests/test_deploy_cmd.py`
-- **test_provider_exit_code_is_passed_through()** (6 connections) — `cli/tests/test_deploy_cmd.py`
-- **test_provider_flags_contributed_and_reach_provider()** (6 connections) — `cli/tests/test_deploy_cmd.py`
-- **test_single_provider_needs_no_provider_flag()** (6 connections) — `cli/tests/test_deploy_cmd.py`
-- **test_synth_only_dir_lands_on_args()** (6 connections) — `cli/tests/test_deploy_cmd.py`
-- **test_three_actions_are_mutually_exclusive()** (6 connections) — `cli/tests/test_deploy_cmd.py`
-- **test_provider_init_failure_is_named_not_traceback()** (5 connections) — `cli/tests/test_deploy_cmd.py`
-- **test_provider_load_failure_is_named_not_traceback()** (5 connections) — `cli/tests/test_deploy_cmd.py`
-- **test_provider_subverb_seam_takes_precedence()** (5 connections) — `cli/tests/test_deploy_cmd.py`
-- **test_readonly_flags_cannot_be_combined_with_a_provider_subverb()** (5 connections) — `cli/tests/test_deploy_cmd.py`
-- **test_unknown_provider_name_lists_installed()** (5 connections) — `cli/tests/test_deploy_cmd.py`
-- **test_help_works_without_provider_and_explains_why()** (4 connections) — `cli/tests/test_deploy_cmd.py`
-- **test_zero_providers_points_at_the_extra()** (4 connections) — `cli/tests/test_deploy_cmd.py`
-- *... and 35 more nodes in this community*
+- **deploy.py** (10 connections) — `cli/gherkai_cli/deploy.py`
+- **add_parsers()** (4 connections) — `cli/gherkai_cli/deploy.py`
+- **_add_provider_flag()** (4 connections) — `cli/gherkai_cli/deploy.py`
+- **ArgumentParser** (1 connections)
+- **`gherkai deploy` / `gherkai destroy` 的命令行前端：provider 发现 + 命令面 flag，**不含任何 IaC…** (1 connections) — `cli/gherkai_cli/deploy.py`
+- **把 `deploy` / `destroy` 两个子命令贴到主 parser 上；`provider` 已解析则让它贴自己的 flag。 解析结果经…** (1 connections) — `cli/gherkai_cli/deploy.py`
+- **`--provider`：只在装了多个 provider 时必给（装一个时省略即用它，ADR 0037 决策 6）。** (1 connections) — `cli/gherkai_cli/deploy.py`
 
 ## Relationships
 
-- [CLI Plan Command Behavior](CLI_Plan_Command_Behavior.md) (20 shared connections)
-- [CLI Command Dispatch](CLI_Command_Dispatch.md) (4 shared connections)
-- [Cloud Backend CLI Tests](Cloud_Backend_CLI_Tests.md) (1 shared connections)
-- [JSON Field Contract Tests](JSON_Field_Contract_Tests.md) (1 shared connections)
-- [CLI Entry Wiring Tests](CLI_Entry_Wiring_Tests.md) (1 shared connections)
-- [Explain Rendering Tests](Explain_Rendering_Tests.md) (1 shared connections)
-- [Skill Doc Flag Guardrails](Skill_Doc_Flag_Guardrails.md) (1 shared connections)
-- [Deploy Provider Resolution](Deploy_Provider_Resolution.md) (1 shared connections)
+- [Provider Resolution and Doctor](Provider_Resolution_and_Doctor.md) (2 shared connections)
+- [CLI Command Handlers](CLI_Command_Handlers.md) (1 shared connections)
+- [Deploy Command Frontend Tests](Deploy_Command_Frontend_Tests.md) (1 shared connections)
+- [CDK Command Wrapper](CDK_Command_Wrapper.md) (1 shared connections)
+- [CLI Docs and ADRs](CLI_Docs_and_ADRs.md) (1 shared connections)
+- [CDK App and Deploy CLI](CDK_App_and_Deploy_CLI.md) (1 shared connections)
+- [CLI Parser Construction](CLI_Parser_Construction.md) (1 shared connections)
 
 ## Source Files
 
-- `cli/gherkai_cli/__init__.py`
-- `cli/tests/test_deploy_cmd.py`
+- `cli/gherkai_cli/deploy.py`
 
 ## Audit Trail
 
-- EXTRACTED: 143 (100%)
-- INFERRED: 0 (0%)
+- EXTRACTED: 14 (93%)
+- INFERRED: 1 (7%)
 - AMBIGUOUS: 0 (0%)
 
 ---

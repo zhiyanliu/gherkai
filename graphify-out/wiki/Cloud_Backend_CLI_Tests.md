@@ -33,18 +33,16 @@
 
 ## Relationships
 
-- [CLI Plan Command Behavior](CLI_Plan_Command_Behavior.md) (52 shared connections)
-- [Cloud Status Command](Cloud_Status_Command.md) (5 shared connections)
+- [CLI Entry and Plan](CLI_Entry_and_Plan.md) (53 shared connections)
+- [Cloud Status Command Tests](Cloud_Status_Command_Tests.md) (5 shared connections)
+- [Job Domain Models](Job_Domain_Models.md) (2 shared connections)
 - [Fake S3 Client](Fake_S3_Client.md) (2 shared connections)
-- [CLI Entry Wiring Tests](CLI_Entry_Wiring_Tests.md) (2 shared connections)
-- [Run State Rendering](Run_State_Rendering.md) (1 shared connections)
-- [Deploy Command Frontend](Deploy_Command_Frontend.md) (1 shared connections)
-- [CLI Command Dispatch](CLI_Command_Dispatch.md) (1 shared connections)
+- [Doctor Self-Check](Doctor_Self-Check.md) (2 shared connections)
+- [CLI Command Handlers](CLI_Command_Handlers.md) (1 shared connections)
 - [Fake DynamoDB Table](Fake_DynamoDB_Table.md) (1 shared connections)
-- [Backend CDK Stack](Backend_CDK_Stack.md) (1 shared connections)
-- [Submit & Tunnel CLI Wiring](Submit_%26_Tunnel_CLI_Wiring.md) (1 shared connections)
-- [CLI Parser Assembly](CLI_Parser_Assembly.md) (1 shared connections)
-- [SSM Paths & Composition Root](SSM_Paths_%26_Composition_Root.md) (1 shared connections)
+- [Release Notes Tooling](Release_Notes_Tooling.md) (1 shared connections)
+- [CLI Parser Construction](CLI_Parser_Construction.md) (1 shared connections)
+- [SSM Path Naming](SSM_Path_Naming.md) (1 shared connections)
 
 ## Source Files
 

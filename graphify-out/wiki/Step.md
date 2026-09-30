@@ -2,7 +2,7 @@
 
 > God node · 72 connections · `core/gherkai_core/model.py`
 
-**Community:** [Run Metadata & S3 Offload](Run_Metadata_%26_S3_Offload.md)
+**Community:** [Job Domain Models](Job_Domain_Models.md)
 
 ## Connections by Relation
 
@@ -25,8 +25,8 @@
 - test_detached_flag_on_state_item() `EXTRACTED`
 - test_worker_task_def_arns_on_state_item() `EXTRACTED`
 - _job() `EXTRACTED`
+- _explain_job() `EXTRACTED`
 - test_meta_json_holds_pointers_not_payload() `EXTRACTED`
-- test_reader_without_offloader_fails_loud_on_offloaded_meta() `EXTRACTED`
 
 ### contains
 - model.py `EXTRACTED`
@@ -38,10 +38,10 @@
 - test_stores.py `EXTRACTED`
 - serialize.py `EXTRACTED`
 - test_conditional_writes.py `EXTRACTED`
-- test_cloud_reconcile.py `EXTRACTED`
 - wire.py `EXTRACTED`
-- test_reconcile.py `EXTRACTED`
+- test_cloud_reconcile.py `EXTRACTED`
 - test_wire.py `EXTRACTED`
+- test_reconcile.py `EXTRACTED`
 - test_subprocess_engine.py `EXTRACTED`
 - test_cloud_integration.py `EXTRACTED`
 - test_ddb_run_store.py `EXTRACTED`

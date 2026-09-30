@@ -1,15 +1,13 @@
 # Local Report Store
 
-> 37 nodes · cohesion 0.18
+> 34 nodes · cohesion 0.18
 
 ## Key Concepts
 
 - **LocalReportStore** (39 connections) — `core/gherkai_core/adapters/report_store/local.py`
 - **test_report_store.py** (37 connections) — `core/tests/test_report_store.py`
-- **ReportRef** (30 connections) — `core/gherkai_core/model.py`
 - **_jr()** (21 connections) — `core/tests/test_report_store.py`
 - **_rr()** (21 connections) — `core/tests/test_report_store.py`
-- **_run_with_refs()** (19 connections) — `core/tests/test_report_store.py`
 - **Path** (18 connections)
 - **_uri_to_path()** (13 connections) — `core/tests/test_report_store.py`
 - **test_index_html_no_taint_on_plain_failed()** (8 connections) — `core/tests/test_report_store.py`
@@ -29,33 +27,34 @@
 - **test_index_html_links_and_summary()** (5 connections) — `core/tests/test_report_store.py`
 - **test_report_files_keep_explicit_mode_under_tight_umask()** (5 connections) — `core/tests/test_report_store.py`
 - **test_writes_manifest_and_index()** (5 connections) — `core/tests/test_report_store.py`
-- *... and 12 more nodes in this community*
+- **test_href_relativized_for_artifact_in_run_tree()** (4 connections) — `core/tests/test_report_store.py`
+- **test_manifest_shape()** (4 connections) — `core/tests/test_report_store.py`
+- *... and 9 more nodes in this community*
 
 ## Relationships
 
-- [Explain Rendering Tests](Explain_Rendering_Tests.md) (26 shared connections)
-- [S3 Report Store](S3_Report_Store.md) (14 shared connections)
-- [Report Store Adapters](Report_Store_Adapters.md) (7 shared connections)
-- [Event Progress Formatting](Event_Progress_Formatting.md) (6 shared connections)
-- [Local & S3 Result Stores](Local_%26_S3_Result_Stores.md) (5 shared connections)
-- [Run Metadata & S3 Offload](Run_Metadata_%26_S3_Offload.md) (5 shared connections)
-- [Run State Rendering](Run_State_Rendering.md) (3 shared connections)
-- [S3 Result Store Port](S3_Result_Store_Port.md) (3 shared connections)
-- [SSM Paths & Composition Root](SSM_Paths_%26_Composition_Root.md) (2 shared connections)
-- [Worker Capability Query](Worker_Capability_Query.md) (2 shared connections)
-- [Atomic Result Store](Atomic_Result_Store.md) (2 shared connections)
-- [Local File Backend Preflight](Local_File_Backend_Preflight.md) (1 shared connections)
+- [Result Store & Report Refs](Result_Store_%26_Report_Refs.md) (22 shared connections)
+- [S3 Report Store Tests](S3_Report_Store_Tests.md) (16 shared connections)
+- [Run Result Aggregation Tree](Run_Result_Aggregation_Tree.md) (14 shared connections)
+- [Job Domain Models](Job_Domain_Models.md) (6 shared connections)
+- [Atomic Write and Report Stores](Atomic_Write_and_Report_Stores.md) (4 shared connections)
+- [Report Index Collection](Report_Index_Collection.md) (2 shared connections)
+- [Event Formatting](Event_Formatting.md) (2 shared connections)
+- [Local Backend Preflight No-op](Local_Backend_Preflight_No-op.md) (1 shared connections)
+- [SSM Path Naming](SSM_Path_Naming.md) (1 shared connections)
+- [Local Subprocess Launcher](Local_Subprocess_Launcher.md) (1 shared connections)
+- [Run Store Adapters](Run_Store_Adapters.md) (1 shared connections)
+- [Local Detached Execution](Local_Detached_Execution.md) (1 shared connections)
 
 ## Source Files
 
 - `core/gherkai_core/adapters/report_store/local.py`
-- `core/gherkai_core/model.py`
 - `core/tests/test_report_store.py`
 
 ## Audit Trail
 
-- EXTRACTED: 192 (94%)
-- INFERRED: 13 (6%)
+- EXTRACTED: 162 (93%)
+- INFERRED: 12 (7%)
 - AMBIGUOUS: 0 (0%)
 
 ---

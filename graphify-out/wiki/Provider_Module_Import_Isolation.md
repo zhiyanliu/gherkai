@@ -9,7 +9,7 @@
 
 ## Relationships
 
-- [Deploy Provider Interface](Deploy_Provider_Interface.md) (1 shared connections)
+- [AWS Deploy Provider](AWS_Deploy_Provider.md) (1 shared connections)
 
 ## Source Files
 

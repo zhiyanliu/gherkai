@@ -4,7 +4,7 @@
 
 ## Key Concepts
 
-- **test_adr_hygiene.py** (19 connections) — `cli/tests/test_adr_hygiene.py`
+- **test_adr_hygiene.py** (18 connections) — `cli/tests/test_adr_hygiene.py`
 - **prose_lines()** (9 connections) — `cli/tests/_doc_rules.py`
 - **Path** (8 connections)
 - **test_ai_side_docs_avoid_coined_compounds()** (6 connections) — `cli/tests/test_adr_hygiene.py`
@@ -29,10 +29,9 @@
 
 ## Relationships
 
-- [Doc Scanning Rules](Doc_Scanning_Rules.md) (7 shared connections)
-- [Skill Doc Flag Guardrails](Skill_Doc_Flag_Guardrails.md) (2 shared connections)
-- [User Docs Guardrails](User_Docs_Guardrails.md) (2 shared connections)
-- [Contributor Guardrail Docs](Contributor_Guardrail_Docs.md) (1 shared connections)
+- [Doc Rule Helpers](Doc_Rule_Helpers.md) (7 shared connections)
+- [Agent Skill Doc Guards](Agent_Skill_Doc_Guards.md) (2 shared connections)
+- [User Doc Guards](User_Doc_Guards.md) (2 shared connections)
 
 ## Source Files
 
@@ -41,7 +40,7 @@
 
 ## Audit Trail
 
-- EXTRACTED: 51 (100%)
+- EXTRACTED: 50 (100%)
 - INFERRED: 0 (0%)
 - AMBIGUOUS: 0 (0%)
 

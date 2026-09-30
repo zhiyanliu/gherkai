@@ -17,8 +17,8 @@
 
 ## Relationships
 
-- [Step Dispatch & Voting](Step_Dispatch_%26_Voting.md) (2 shared connections)
-- [AWS Test Fixtures (moto)](AWS_Test_Fixtures_%28moto%29.md) (1 shared connections)
+- [Step Execution Dispatch](Step_Execution_Dispatch.md) (2 shared connections)
+- [Test Fixtures and Conftest](Test_Fixtures_and_Conftest.md) (1 shared connections)
 
 ## Source Files
 

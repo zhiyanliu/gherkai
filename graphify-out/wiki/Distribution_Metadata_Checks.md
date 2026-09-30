@@ -4,7 +4,7 @@
 
 ## Key Concepts
 
-- **check_dist_metadata.py** (11 connections) — `.github/scripts/check_dist_metadata.py`
+- **check_dist_metadata.py** (8 connections) — `.github/scripts/check_dist_metadata.py`
 - **main()** (8 connections) — `.github/scripts/check_dist_metadata.py`
 - **Path** (6 connections)
 - **check_skill_payload()** (5 connections) — `.github/scripts/check_dist_metadata.py`
@@ -22,7 +22,7 @@
 
 ## Relationships
 
-- [Release Notes Automation](Release_Notes_Automation.md) (3 shared connections)
+- No strong cross-community connections detected
 
 ## Source Files
 
@@ -30,7 +30,7 @@
 
 ## Audit Trail
 
-- EXTRACTED: 29 (100%)
+- EXTRACTED: 26 (100%)
 - INFERRED: 0 (0%)
 - AMBIGUOUS: 0 (0%)
 

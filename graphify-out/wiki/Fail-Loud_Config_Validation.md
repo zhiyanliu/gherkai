@@ -1,4 +1,4 @@
-# Fail-Loud Config Validation
+# Fail-loud Config Validation
 
 > 2 nodes · cohesion 1.00
 

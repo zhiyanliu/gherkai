@@ -1,11 +1,11 @@
 # Run Scheduling Core
 
-> 52 nodes · cohesion 0.22
+> 60 nodes · cohesion 0.20
 
 ## Key Concepts
 
 - **test_schedule.py** (72 connections) — `core/tests/test_schedule.py`
-- **schedule()** (66 connections) — `core/gherkai_core/schedule.py`
+- **schedule()** (63 connections) — `core/gherkai_core/schedule.py`
 - **CollectSink** (60 connections) — `core/tests/fake_engine.py`
 - **FakeEngine** (56 connections) — `core/tests/fake_engine.py`
 - **FakeResolver** (53 connections) — `core/tests/fake_engine.py`
@@ -13,6 +13,13 @@
 - **_rm()** (48 connections) — `core/tests/test_schedule.py`
 - **ScheduleOpts** (47 connections) — `core/gherkai_core/schedule.py`
 - **_passing_events()** (31 connections) — `core/tests/test_schedule.py`
+- **test_abort_then_clean_eof_is_aborted_not_passed()** (15 connections) — `core/tests/test_schedule.py`
+- **test_fail_fast_batch_errors()** (14 connections) — `core/tests/test_schedule.py`
+- **test_step_skipped_reduced_to_skipped_shortcircuited()** (13 connections) — `core/tests/test_schedule.py`
+- **test_scope_report_refs_reduced()** (12 connections) — `core/tests/test_schedule.py`
+- **test_step_report_refs_reduced()** (12 connections) — `core/tests/test_schedule.py`
+- **test_step_skipped_does_not_pollute_scenario_or_run_status()** (12 connections) — `core/tests/test_schedule.py`
+- **test_step_skipped_without_scenario_done_still_recorded()** (12 connections) — `core/tests/test_schedule.py`
 - **test_timeout_with_fake_clock()** (12 connections) — `core/tests/test_schedule.py`
 - **test_network_error_not_retried_when_session_started()** (11 connections) — `core/tests/test_schedule.py`
 - **test_on_job_complete_exception_stops_inflight_workers_before_raise()** (11 connections) — `core/tests/test_schedule.py`
@@ -22,29 +29,22 @@
 - **test_three_level_durations()** (10 connections) — `core/tests/test_schedule.py`
 - **test_fail_fast_queued_job_is_skipped()** (9 connections) — `core/tests/test_lifecycle_states.py`
 - **test_network_error_during_timeout_is_timeout_not_aborted()** (9 connections) — `core/tests/test_lifecycle_states.py`
-- **test_grace_at_or_above_min_grace_ok()** (9 connections) — `core/tests/test_schedule.py`
-- **test_grace_below_min_grace_raises()** (9 connections) — `core/tests/test_schedule.py`
-- **test_grace_nonpositive_raises()** (9 connections) — `core/tests/test_schedule.py`
-- **test_mixed_legs_each_native_metric_aggregated_separately()** (9 connections) — `core/tests/test_schedule.py`
-- **test_network_error_exhausted_is_network_error()** (9 connections) — `core/tests/test_schedule.py`
-- **test_network_error_retried_then_succeeds()** (9 connections) — `core/tests/test_schedule.py`
-- **test_no_fail_fast_lets_others_finish()** (9 connections) — `core/tests/test_schedule.py`
-- *... and 27 more nodes in this community*
+- *... and 35 more nodes in this community*
 
 ## Relationships
 
-- [Event Progress Formatting](Event_Progress_Formatting.md) (115 shared connections)
-- [Core Typed Errors](Core_Typed_Errors.md) (31 shared connections)
-- [Subprocess Engine Tests](Subprocess_Engine_Tests.md) (16 shared connections)
-- [Run Metadata & S3 Offload](Run_Metadata_%26_S3_Offload.md) (14 shared connections)
-- [S3 Result Store Port](S3_Result_Store_Port.md) (11 shared connections)
-- [Event Log & Projection](Event_Log_%26_Projection.md) (4 shared connections)
-- [Run State Rendering](Run_State_Rendering.md) (4 shared connections)
-- [Job Sink Primitives](Job_Sink_Primitives.md) (2 shared connections)
-- [Explain Rendering Tests](Explain_Rendering_Tests.md) (2 shared connections)
-- [Backend CDK Stack](Backend_CDK_Stack.md) (1 shared connections)
-- [Local Result Store](Local_Result_Store.md) (1 shared connections)
-- [Core Package Docs](Core_Package_Docs.md) (1 shared connections)
+- [Event Formatting](Event_Formatting.md) (82 shared connections)
+- [Event Log Adapters](Event_Log_Adapters.md) (20 shared connections)
+- [Subprocess Engine Adapter Tests](Subprocess_Engine_Adapter_Tests.md) (16 shared connections)
+- [Job Domain Models](Job_Domain_Models.md) (15 shared connections)
+- [Job Status Severity Aggregation](Job_Status_Severity_Aggregation.md) (14 shared connections)
+- [Run Result Aggregation Tree](Run_Result_Aggregation_Tree.md) (10 shared connections)
+- [Fake Worker Test Doubles](Fake_Worker_Test_Doubles.md) (10 shared connections)
+- [Typed Errors and Wire Protocol](Typed_Errors_and_Wire_Protocol.md) (8 shared connections)
+- [Job Worker Execution](Job_Worker_Execution.md) (3 shared connections)
+- [Result Store & Report Refs](Result_Store_%26_Report_Refs.md) (3 shared connections)
+- [Local Result Store](Local_Result_Store.md) (2 shared connections)
+- [Release Notes Tooling](Release_Notes_Tooling.md) (1 shared connections)
 
 ## Source Files
 
@@ -55,8 +55,8 @@
 
 ## Audit Trail
 
-- EXTRACTED: 466 (93%)
-- INFERRED: 34 (7%)
+- EXTRACTED: 500 (93%)
+- INFERRED: 35 (7%)
 - AMBIGUOUS: 0 (0%)
 
 ---

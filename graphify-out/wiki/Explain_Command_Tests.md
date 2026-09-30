@@ -1,12 +1,13 @@
 # Explain Command Tests
 
-> 28 nodes · cohesion 0.11
+> 31 nodes · cohesion 0.10
 
 ## Key Concepts
 
-- **_explain_run()** (25 connections) — `cli/tests/test_main.py`
-- **_explain()** (14 connections) — `cli/tests/test_main.py`
-- **_evidence_fixture()** (5 connections) — `cli/tests/test_main.py`
+- **_explain_run()** (26 connections) — `cli/tests/test_main.py`
+- **_explain()** (15 connections) — `cli/tests/test_main.py`
+- **_evidence_fixture()** (6 connections) — `cli/tests/test_main.py`
+- **test_explain_masks_tunnel_credentials_in_text_and_json()** (6 connections) — `cli/tests/test_main.py`
 - **test_explain_long_thought_is_truncated_with_pointer()** (5 connections) — `cli/tests/test_main.py`
 - **test_explain_scenario_selector_matches_id_line_title_and_ors()** (5 connections) — `cli/tests/test_main.py`
 - **test_explain_unreadable_and_unsupported_evidence()** (5 connections) — `cli/tests/test_main.py`
@@ -19,6 +20,7 @@
 - **test_explain_nonterminal_sync_run_says_partial()** (4 connections) — `cli/tests/test_main.py`
 - **test_explain_step_needs_scenario_and_lists_candidates_when_absent()** (4 connections) — `cli/tests/test_main.py`
 - **test_explain_text_renders_reason_thought_screenshot_and_gaps()** (4 connections) — `cli/tests/test_main.py`
+- **test_explain_unknown_run_and_scope_exit_2()** (3 connections) — `cli/tests/test_main.py`
 - **在 tmp_path/reports 下搭一个 run：run_meta/run_state + 一份 JobResult（+ 真…** (1 connections) — `cli/tests/test_main.py`
 - **文本形态（ADR 0042 决策四）：原因行、末个带推理的 frame 的 think + 截图、被省略 frame 计数、 短路旁注只在…** (1 connections) — `cli/tests/test_main.py`
 - **--json：stdout 只有一个可严格解析的文档；无记录 step 给 status=null + record_missing； 有记录但没挂…** (1 connections) — `cli/tests/test_main.py`
@@ -26,21 +28,19 @@
 - **--step 单给即以退出码 2 结束（步号没有归属）；命中的 scenario 都没有第 N 步 → 同样以退出码 2 结束并列出候选 id 与步数；…** (1 connections) — `cli/tests/test_main.py`
 - **显式 --step 点名的那一步即展开证据（点名就是想看），不必再给 --all；默认视图对同一 passed 步仍不展开。** (1 connections) — `cli/tests/test_main.py`
 - **--all 也展开 passed step；--full 逐 frame 全文（省略计数消失、无推理的 frame 也现身）。** (1 connections) — `cli/tests/test_main.py`
-- **单段推理超预算 → 截断并指出完整内容在哪（--json 或那份 evidence.json）；--full 不截断。** (1 connections) — `cli/tests/test_main.py`
-- **读不到/解不开 → unreadable；schema_version 不认识 → unsupported_schema。两者都不影响退出码（0）。** (1 connections) — `cli/tests/test_main.py`
-- **detached run 未终态时零判定明细（全 job 终态才一次性落）→ 退出码 0 + 一行提示；--json 不打提示、 stdout…** (1 connections) — `cli/tests/test_main.py`
-- *... and 3 more nodes in this community*
+- **隧道模式下定义里的 step 文本与证据里的地址、指令都带凭据：explain 两种形态都只显示 `https://***@…` （ADR 0035 决策…** (1 connections) — `cli/tests/test_main.py`
+- *... and 6 more nodes in this community*
 
 ## Relationships
 
-- [CLI Entry Wiring Tests](CLI_Entry_Wiring_Tests.md) (16 shared connections)
-- [Explain Rendering Tests](Explain_Rendering_Tests.md) (3 shared connections)
-- [CLI Plan Command Behavior](CLI_Plan_Command_Behavior.md) (2 shared connections)
-- [Run Metadata & S3 Offload](Run_Metadata_%26_S3_Offload.md) (2 shared connections)
-- [Run State Rendering](Run_State_Rendering.md) (2 shared connections)
-- [Local Report Store](Local_Report_Store.md) (1 shared connections)
-- [Event Progress Formatting](Event_Progress_Formatting.md) (1 shared connections)
-- [S3 Result Store Port](S3_Result_Store_Port.md) (1 shared connections)
+- [CLI Run Command Tests](CLI_Run_Command_Tests.md) (17 shared connections)
+- [Result Store & Report Refs](Result_Store_%26_Report_Refs.md) (4 shared connections)
+- [CLI Entry and Plan](CLI_Entry_and_Plan.md) (3 shared connections)
+- [Job Domain Models](Job_Domain_Models.md) (3 shared connections)
+- [Event Formatting](Event_Formatting.md) (1 shared connections)
+- [Run Result Aggregation Tree](Run_Result_Aggregation_Tree.md) (1 shared connections)
+- [Cloud Store Adapters](Cloud_Store_Adapters.md) (1 shared connections)
+- [Run State Store](Run_State_Store.md) (1 shared connections)
 
 ## Source Files
 
@@ -48,7 +48,7 @@
 
 ## Audit Trail
 
-- EXTRACTED: 68 (100%)
+- EXTRACTED: 76 (100%)
 - INFERRED: 0 (0%)
 - AMBIGUOUS: 0 (0%)
 

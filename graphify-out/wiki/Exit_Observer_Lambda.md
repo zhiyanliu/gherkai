@@ -4,7 +4,7 @@
 
 ## Key Concepts
 
-- **exit_observer.py** (7 connections) — `deploy_aws/gherkai_deploy_aws/lambdas/exit_observer.py`
+- **exit_observer.py** (9 connections) — `deploy_aws/gherkai_deploy_aws/lambdas/exit_observer.py`
 - **handler()** (5 connections) — `deploy_aws/gherkai_deploy_aws/lambdas/exit_observer.py`
 - **exit_from_task()** (5 connections) — `deploy_aws/gherkai_deploy_aws/lambdas/reconciler.py`
 - **_event_log()** (4 connections) — `deploy_aws/gherkai_deploy_aws/lambdas/exit_observer.py`
@@ -19,10 +19,11 @@
 
 ## Relationships
 
-- [Reconciler Lambda](Reconciler_Lambda.md) (2 shared connections)
+- [Reconciler Lambda](Reconciler_Lambda.md) (3 shared connections)
 - [Lambda Handler Tests](Lambda_Handler_Tests.md) (1 shared connections)
-- [DynamoDB Event Log](DynamoDB_Event_Log.md) (1 shared connections)
-- [Run Metadata & S3 Offload](Run_Metadata_%26_S3_Offload.md) (1 shared connections)
+- [CDK App and Deploy CLI](CDK_App_and_Deploy_CLI.md) (1 shared connections)
+- [Cloud Reconcile Tests](Cloud_Reconcile_Tests.md) (1 shared connections)
+- [Run State Store](Run_State_Store.md) (1 shared connections)
 
 ## Source Files
 
@@ -31,8 +32,8 @@
 
 ## Audit Trail
 
-- EXTRACTED: 18 (90%)
-- INFERRED: 2 (10%)
+- EXTRACTED: 20 (91%)
+- INFERRED: 2 (9%)
 - AMBIGUOUS: 0 (0%)
 
 ---

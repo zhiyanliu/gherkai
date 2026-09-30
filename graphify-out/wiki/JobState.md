@@ -2,7 +2,7 @@
 
 > God node · 101 connections · `core/gherkai_core/model.py`
 
-**Community:** [Run State Rendering](Run_State_Rendering.md)
+**Community:** [Cloud Store Adapters](Cloud_Store_Adapters.md)
 
 ## Connections by Relation
 
@@ -39,8 +39,8 @@
 - project.py `EXTRACTED`
 - test_cloud_reconcile.py `EXTRACTED`
 - test_reconcile.py `EXTRACTED`
-- ports.py `EXTRACTED`
 - test_cloud_integration.py `EXTRACTED`
+- ports.py `EXTRACTED`
 - run_store/local.py `EXTRACTED`
 - test_ddb_run_store.py `EXTRACTED`
 - run_store/ddb.py `EXTRACTED`
@@ -63,8 +63,8 @@
 - DynamoDBRunStore `INFERRED`
 - EventRecord `INFERRED`
 - RunStore `INFERRED`
-- RunPersistence `INFERRED`
 - TaskExited `INFERRED`
+- RunPersistence `INFERRED`
 - ResultStore `INFERRED`
 - _FakeEcs `INFERRED`
 - Timing `INFERRED`

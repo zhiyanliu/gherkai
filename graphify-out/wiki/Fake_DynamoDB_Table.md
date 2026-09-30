@@ -14,12 +14,10 @@
 
 ## Relationships
 
+- [Run Result Aggregation Tree](Run_Result_Aggregation_Tree.md) (3 shared connections)
 - [Cloud Backend CLI Tests](Cloud_Backend_CLI_Tests.md) (1 shared connections)
-- [S3 Result Store Port](S3_Result_Store_Port.md) (1 shared connections)
-- [Explain Rendering Tests](Explain_Rendering_Tests.md) (1 shared connections)
-- [Event Log & Projection](Event_Log_%26_Projection.md) (1 shared connections)
-- [Run State Rendering](Run_State_Rendering.md) (1 shared connections)
-- [SSM Paths & Composition Root](SSM_Paths_%26_Composition_Root.md) (1 shared connections)
+- [Run State Projection](Run_State_Projection.md) (1 shared connections)
+- [SSM Path Naming](SSM_Path_Naming.md) (1 shared connections)
 
 ## Source Files
 

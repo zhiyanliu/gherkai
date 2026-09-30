@@ -4,7 +4,7 @@
 
 ## Key Concepts
 
-- **Run 生命周期导出 SVG** (0 connections) — `docs/diagrams/architecture-overview-run-lifecycle.svg`
+- **run 生命周期图（SVG）** (0 connections) — `docs/diagrams/architecture-overview-run-lifecycle.svg`
 
 ## Relationships
 

@@ -2,7 +2,7 @@
 
 > God node · 106 connections · `core/gherkai_core/model.py`
 
-**Community:** [Run State Rendering](Run_State_Rendering.md)
+**Community:** [Run Result Aggregation Tree](Run_Result_Aggregation_Tree.md)
 
 ## Connections by Relation
 
@@ -26,15 +26,15 @@
 - serialize.py `EXTRACTED`
 - test_conditional_writes.py `EXTRACTED`
 - project.py `EXTRACTED`
+- wire.py `EXTRACTED`
 - test_cloud_reconcile.py `EXTRACTED`
 - test_report_store.py `EXTRACTED`
-- wire.py `EXTRACTED`
-- test_reconcile.py `EXTRACTED`
 - test_wire.py `EXTRACTED`
+- test_reconcile.py `EXTRACTED`
 - test_subprocess_engine.py `EXTRACTED`
-- ports.py `EXTRACTED`
 - schedule.py `EXTRACTED`
 - test_cloud_integration.py `EXTRACTED`
+- ports.py `EXTRACTED`
 - test_persist.py `EXTRACTED`
 - run_store/local.py `EXTRACTED`
 - test_ddb_run_store.py `EXTRACTED`
@@ -70,8 +70,8 @@
 - DynamoDBRunStore `INFERRED`
 - EventRecord `INFERRED`
 - RunStore `INFERRED`
-- RunPersistence `INFERRED`
 - TaskExited `INFERRED`
+- RunPersistence `INFERRED`
 - ResultStore `INFERRED`
 - _IncClock `INFERRED`
 - _FakeEcs `INFERRED`

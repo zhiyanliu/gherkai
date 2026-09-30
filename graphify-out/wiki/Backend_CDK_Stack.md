@@ -1,13 +1,13 @@
 # Backend CDK Stack
 
-> 37 nodes · cohesion 0.09
+> 34 nodes · cohesion 0.10
 
 ## Key Concepts
 
 - **BackendStack** (26 connections) — `deploy_aws/gherkai_deploy_aws/stack.py`
-- **ValueError** (21 connections)
 - **.__init__()** (11 connections) — `deploy_aws/gherkai_deploy_aws/stack.py`
 - **._reconcile_lambdas()** (7 connections) — `deploy_aws/gherkai_deploy_aws/stack.py`
+- **._installed_import_source()** (5 connections) — `deploy_aws/gherkai_deploy_aws/stack.py`
 - **._worker_subnet_ids()** (5 connections) — `deploy_aws/gherkai_deploy_aws/stack.py`
 - **IVpc** (5 connections)
 - **._build_lambda_asset()** (4 connections) — `deploy_aws/gherkai_deploy_aws/stack.py`
@@ -18,45 +18,34 @@
 - **._resolve_stop_timeout()** (4 connections) — `deploy_aws/gherkai_deploy_aws/stack.py`
 - **._resolve_version()** (4 connections) — `deploy_aws/gherkai_deploy_aws/stack.py`
 - **._ssm_network()** (4 connections) — `deploy_aws/gherkai_deploy_aws/stack.py`
-- **_read_ssm_list()** (4 connections) — `runtime/gherkai_runtime/compose.py`
 - **._advancer_function()** (3 connections) — `deploy_aws/gherkai_deploy_aws/stack.py`
 - **._ssm_deployment_stamp()** (3 connections) — `deploy_aws/gherkai_deploy_aws/stack.py`
 - **._task_definitions()** (3 connections) — `deploy_aws/gherkai_deploy_aws/stack.py`
-- **test_value_error_not_transient()** (3 connections) — `engines/novaact/tests/test_transient_network.py`
 - **._storage()** (2 connections) — `deploy_aws/gherkai_deploy_aws/stack.py`
 - **._worker_sg_id()** (2 connections) — `deploy_aws/gherkai_deploy_aws/stack.py`
-- **test_version_context_is_required()** (2 connections) — `deploy_aws/tests/test_stack.py`
 - **Role** (2 connections)
 - **Cluster** (1 connections)
 - **Construct** (1 connections)
-- *... and 12 more nodes in this community*
+- **后端版本戳（PEP 440 字符串）：**`-c version=` 必给、无隐式默认**。 单一真源是发起这次部署的命令（`gherkai deploy`…** (1 connections) — `deploy_aws/gherkai_deploy_aws/stack.py`
+- **建/取 VPC，**并把生效的取值记进 `self._vpc_spec`**（写 SSM 供下次 deploy 三态比对，ADR 0037 决策 6）。…** (1 connections) — `deploy_aws/gherkai_deploy_aws/stack.py`
+- **worker task 落哪些 subnet——「优先公有子网、无则回落私有」这条契约的**唯一落点**（ADR 0033）。 三个消费者必须恒等（都喂同一个…** (1 connections) — `deploy_aws/gherkai_deploy_aws/stack.py`
+- *... and 9 more nodes in this community*
 
 ## Relationships
 
-- [Lambda Asset Build](Lambda_Asset_Build.md) (5 shared connections)
-- [CDK App & Backend Stack](CDK_App_%26_Backend_Stack.md) (3 shared connections)
-- [SSM Paths & Composition Root](SSM_Paths_%26_Composition_Root.md) (3 shared connections)
+- [Synth and Lambda Asset Tests](Synth_and_Lambda_Asset_Tests.md) (5 shared connections)
+- [CDK App and Deploy CLI](CDK_App_and_Deploy_CLI.md) (3 shared connections)
 - [CDK Stack Synth Tests](CDK_Stack_Synth_Tests.md) (2 shared connections)
-- [Transient Network Detection](Transient_Network_Detection.md) (2 shared connections)
-- [Worker Locator & AWS Resolution](Worker_Locator_%26_AWS_Resolution.md) (2 shared connections)
-- [Provider Deploy Subverbs](Provider_Deploy_Subverbs.md) (2 shared connections)
-- [Step Dispatch & Voting](Step_Dispatch_%26_Voting.md) (2 shared connections)
-- [Scope Tag Resolution](Scope_Tag_Resolution.md) (1 shared connections)
-- [Cloud Backend CLI Tests](Cloud_Backend_CLI_Tests.md) (1 shared connections)
-- [Run Scheduling Core](Run_Scheduling_Core.md) (1 shared connections)
-- [Wire Protocol Serialization](Wire_Protocol_Serialization.md) (1 shared connections)
+- [Release Notes Tooling](Release_Notes_Tooling.md) (2 shared connections)
 
 ## Source Files
 
 - `deploy_aws/gherkai_deploy_aws/stack.py`
-- `deploy_aws/tests/test_stack.py`
-- `engines/novaact/tests/test_transient_network.py`
-- `runtime/gherkai_runtime/compose.py`
 
 ## Audit Trail
 
-- EXTRACTED: 68 (77%)
-- INFERRED: 20 (23%)
+- EXTRACTED: 64 (97%)
+- INFERRED: 2 (3%)
 - AMBIGUOUS: 0 (0%)
 
 ---

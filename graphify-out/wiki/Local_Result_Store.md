@@ -1,10 +1,10 @@
 # Local Result Store
 
-> 37 nodes · cohesion 0.10
+> 41 nodes · cohesion 0.09
 
 ## Key Concepts
 
-- **RunPersistence** (31 connections) — `core/gherkai_core/persist.py`
+- **RunPersistence** (28 connections) — `core/gherkai_core/persist.py`
 - **test_persist.py** (27 connections) — `core/tests/test_persist.py`
 - **LocalResultStore** (22 connections) — `core/gherkai_core/adapters/result_store/local.py`
 - **_jr()** (11 connections) — `core/tests/test_persist.py`
@@ -18,6 +18,7 @@
 - **test_finalize_with_report_store_returns_uri()** (6 connections) — `core/tests/test_persist.py`
 - **test_finalize_without_report_store_returns_none()** (6 connections) — `core/tests/test_persist.py`
 - **.save_job_result()** (5 connections) — `core/gherkai_core/adapters/result_store/local.py`
+- **.begin()** (5 connections) — `core/gherkai_core/persist.py`
 - **.on_event()** (5 connections) — `core/gherkai_core/persist.py`
 - **.on_job_complete()** (5 connections) — `core/gherkai_core/persist.py`
 - **.load_all()** (4 connections) — `core/gherkai_core/adapters/result_store/local.py`
@@ -25,26 +26,25 @@
 - **test_begin_writes_all_pending_initial_state()** (4 connections) — `core/tests/test_persist.py`
 - **test_on_job_complete_saves_result_before_job_state()** (4 connections) — `core/tests/test_persist.py`
 - **result_store/__init__.py** (3 connections) — `core/gherkai_core/adapters/result_store/__init__.py`
+- **.finalize()** (3 connections) — `core/gherkai_core/persist.py`
 - **.__init__()** (2 connections) — `core/gherkai_core/adapters/result_store/local.py`
 - **.preflight()** (2 connections) — `core/gherkai_core/adapters/result_store/local.py`
-- **ResultStore adapters（ADR 0016）：local（本包 `local.py`）+ S3（`s3.py`，ADR 0030 决定六）。…** (1 connections) — `core/gherkai_core/adapters/result_store/__init__.py`
-- **Path** (1 connections)
-- *... and 12 more nodes in this community*
+- *... and 16 more nodes in this community*
 
 ## Relationships
 
-- [Run State Rendering](Run_State_Rendering.md) (14 shared connections)
-- [Local & S3 Result Stores](Local_%26_S3_Result_Stores.md) (12 shared connections)
-- [S3 Result Store Port](S3_Result_Store_Port.md) (11 shared connections)
-- [Event Progress Formatting](Event_Progress_Formatting.md) (7 shared connections)
-- [Explain Rendering Tests](Explain_Rendering_Tests.md) (6 shared connections)
-- [Run Metadata & S3 Offload](Run_Metadata_%26_S3_Offload.md) (6 shared connections)
-- [Event Log & Projection](Event_Log_%26_Projection.md) (5 shared connections)
-- [Atomic Result Store](Atomic_Result_Store.md) (3 shared connections)
-- [Worker Capability Query](Worker_Capability_Query.md) (1 shared connections)
-- [Local Reconcile Rebuild](Local_Reconcile_Rebuild.md) (1 shared connections)
-- [Atomic File Writes](Atomic_File_Writes.md) (1 shared connections)
-- [Run & Submit Commands](Run_%26_Submit_Commands.md) (1 shared connections)
+- [Run Result Aggregation Tree](Run_Result_Aggregation_Tree.md) (23 shared connections)
+- [Cloud Store Adapters](Cloud_Store_Adapters.md) (12 shared connections)
+- [Job Domain Models](Job_Domain_Models.md) (8 shared connections)
+- [Run Store Adapters](Run_Store_Adapters.md) (6 shared connections)
+- [Event Formatting](Event_Formatting.md) (6 shared connections)
+- [Run State Projection](Run_State_Projection.md) (5 shared connections)
+- [Result Store & Report Refs](Result_Store_%26_Report_Refs.md) (3 shared connections)
+- [Run State Store](Run_State_Store.md) (2 shared connections)
+- [Run Scheduling Core](Run_Scheduling_Core.md) (2 shared connections)
+- [Local Detached Execution](Local_Detached_Execution.md) (1 shared connections)
+- [Atomic Write and Report Stores](Atomic_Write_and_Report_Stores.md) (1 shared connections)
+- [CLI Command Handlers](CLI_Command_Handlers.md) (1 shared connections)
 
 ## Source Files
 
@@ -55,7 +55,7 @@
 
 ## Audit Trail
 
-- EXTRACTED: 124 (89%)
+- EXTRACTED: 127 (89%)
 - INFERRED: 15 (11%)
 - AMBIGUOUS: 0 (0%)
 

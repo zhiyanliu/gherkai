@@ -1,8 +1,8 @@
 # main()
 
-> God node · 215 connections · `cli/gherkai_cli/__main__.py`
+> God node · 216 connections · `cli/gherkai_cli/__main__.py`
 
-**Community:** [CLI Plan Command Behavior](CLI_Plan_Command_Behavior.md)
+**Community:** [CLI Entry and Plan](CLI_Entry_and_Plan.md)
 
 ## Connections by Relation
 
@@ -12,11 +12,11 @@
 - _cmd_run() `EXTRACTED`
 - test_explain_cloud_reads_evidence_from_s3() `EXTRACTED`
 - _build_parser() `EXTRACTED`
+- _cmd_doctor() `EXTRACTED`
 - _cmd_submit() `EXTRACTED`
 - _cmd_plan() `EXTRACTED`
 - test_variant_gate_only_probes_engines_the_run_uses() `EXTRACTED`
 - test_submit_cloud_keeps_tunnel_after_daemon_fork() `EXTRACTED`
-- _cmd_doctor() `EXTRACTED`
 - test_run_cloud_resolves_variant_into_definition_and_engines() `EXTRACTED`
 - _cmd_status() `EXTRACTED`
 - test_cloud_does_not_ask_local_worker_for_grace_floor() `EXTRACTED`

@@ -22,12 +22,11 @@
 
 ## Relationships
 
-- [TypeScript Worker Run Scope](TypeScript_Worker_Run_Scope.md) (5 shared connections)
-- [TS Artifact & Event Sink](TS_Artifact_%26_Event_Sink.md) (2 shared connections)
-- [Artifact Upload Tests (TS)](Artifact_Upload_Tests_%28TS%29.md) (2 shared connections)
-- [Deterministic Step Resolution (TS)](Deterministic_Step_Resolution_%28TS%29.md) (2 shared connections)
-- [Engine Spike Scripts](Engine_Spike_Scripts.md) (2 shared connections)
-- [Worker Bin & Step Loading](Worker_Bin_%26_Step_Loading.md) (1 shared connections)
+- [Midscene Run Scope](Midscene_Run_Scope.md) (5 shared connections)
+- [Artifact Upload & Error Text](Artifact_Upload_%26_Error_Text.md) (3 shared connections)
+- [Midscene Resolve Hooks](Midscene_Resolve_Hooks.md) (3 shared connections)
+- [Model Spike Scripts](Model_Spike_Scripts.md) (2 shared connections)
+- [Step Argument & Sink Tests](Step_Argument_%26_Sink_Tests.md) (1 shared connections)
 
 ## Source Files
 

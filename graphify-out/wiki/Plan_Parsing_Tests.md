@@ -33,9 +33,9 @@
 
 ## Relationships
 
-- [Plan Job Generation](Plan_Job_Generation.md) (17 shared connections)
-- [Feature File Parsing](Feature_File_Parsing.md) (3 shared connections)
-- [Scope Tag Resolution](Scope_Tag_Resolution.md) (2 shared connections)
+- [Feature Planning Core](Feature_Planning_Core.md) (17 shared connections)
+- [Gherkin Feature Parsing](Gherkin_Feature_Parsing.md) (3 shared connections)
+- [Scope Tag Grouping](Scope_Tag_Grouping.md) (2 shared connections)
 
 ## Source Files
 

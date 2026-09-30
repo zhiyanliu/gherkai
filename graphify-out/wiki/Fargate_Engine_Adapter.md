@@ -1,11 +1,10 @@
 # Fargate Engine Adapter
 
-> 28 nodes · cohesion 0.11
+> 25 nodes · cohesion 0.12
 
 ## Key Concepts
 
 - **FargateEngine** (31 connections) — `core/gherkai_core/adapters/fargate_engine.py`
-- **event_from_line()** (15 connections) — `core/gherkai_core/wire.py`
 - **._read_events()** (11 connections) — `core/gherkai_core/adapters/fargate_engine.py`
 - **.run_scope()** (7 connections) — `core/gherkai_core/adapters/fargate_engine.py`
 - **TaskProbe** (6 connections) — `core/gherkai_core/adapters/fargate_engine.py`
@@ -18,8 +17,7 @@
 - **Event** (3 connections)
 - **Job** (3 connections)
 - **test_artifact_injection_kwargs_are_mandatory()** (3 connections) — `core/tests/test_fargate_engine.py`
-- **Event** (2 connections)
-- **test_event_from_line()** (2 connections) — `core/tests/test_wire.py`
+- **.__init__()** (2 connections) — `core/gherkai_core/adapters/fargate_engine.py`
 - **NamedTuple** (1 connections)
 - **Engine port 的 Fargate 实现（组合根注入 boto3 client + run 级配置）。对称 SubprocessEngine。…** (1 connections) — `core/gherkai_core/adapters/fargate_engine.py`
 - **fire-and-forget 起一个 Fargate task 执行 job，返回 task_arn（ADR 0034：无状态批量运行的 Engine…** (1 connections) — `core/gherkai_core/adapters/fargate_engine.py`
@@ -29,34 +27,32 @@
 - **task STOPPED 后的终读：强一致 Query 补最终一致可能还没看到的末尾事件（ADR 0024 读一致性条）。…** (1 connections) — `core/gherkai_core/adapters/fargate_engine.py`
 - **DescribeTasks 探一次 task 终态 + 退出码，返回 TaskProbe(stopped, exit_code, missing)（ADR…** (1 connections) — `core/gherkai_core/adapters/fargate_engine.py`
 - **轮询 DescribeTasks 直到拿到确定的 exitCode——scope_done 后读退出码用（ADR 0024「事件流结束信号」）。…** (1 connections) — `core/gherkai_core/adapters/fargate_engine.py`
-- *... and 3 more nodes in this community*
+- **一次 DescribeTasks 探测的结果——**三个正交事实各自命名**（ADR 0024「exitCode 落值延迟」；前两个见下、第三个…** (1 connections) — `core/gherkai_core/adapters/fargate_engine.py`
+- **产物落点两参数**必给关键字、无缺省**：cloud 下两者必注，漏传即静默丢产物（实际运行暴露过一次）。 与 ADR 0038 的显式 revision…** (1 connections) — `core/tests/test_fargate_engine.py`
 
 ## Relationships
 
-- [DynamoDB Event Log](DynamoDB_Event_Log.md) (6 shared connections)
-- [Wire Protocol Serialization](Wire_Protocol_Serialization.md) (6 shared connections)
-- [Fargate Engine Tests](Fargate_Engine_Tests.md) (4 shared connections)
+- [Run Result Aggregation Tree](Run_Result_Aggregation_Tree.md) (6 shared connections)
+- [Fargate Engine Tests](Fargate_Engine_Tests.md) (5 shared connections)
+- [Job Domain Models](Job_Domain_Models.md) (4 shared connections)
+- [Typed Errors and Wire Protocol](Typed_Errors_and_Wire_Protocol.md) (4 shared connections)
+- [Event Gap & ECS Polling](Event_Gap_%26_ECS_Polling.md) (3 shared connections)
 - [Fargate Worker Handle](Fargate_Worker_Handle.md) (3 shared connections)
-- [Fargate Event Read Tests](Fargate_Event_Read_Tests.md) (3 shared connections)
-- [Event Progress Formatting](Event_Progress_Formatting.md) (3 shared connections)
-- [S3 Report Store](S3_Report_Store.md) (3 shared connections)
-- [ECS Task Probe Tests](ECS_Task_Probe_Tests.md) (2 shared connections)
-- [Run Metadata & S3 Offload](Run_Metadata_%26_S3_Offload.md) (2 shared connections)
-- [SSM Paths & Composition Root](SSM_Paths_%26_Composition_Root.md) (2 shared connections)
-- [Subprocess Engine Adapter](Subprocess_Engine_Adapter.md) (2 shared connections)
-- [AWS Adapter Clients](AWS_Adapter_Clients.md) (1 shared connections)
+- [Event Log Adapters](Event_Log_Adapters.md) (2 shared connections)
+- [Cloud Event Drain Tests](Cloud_Event_Drain_Tests.md) (1 shared connections)
+- [SSM Path Naming](SSM_Path_Naming.md) (1 shared connections)
+- [Boto Guard and Arg Offload](Boto_Guard_and_Arg_Offload.md) (1 shared connections)
+- [DynamoDB Event Log](DynamoDB_Event_Log.md) (1 shared connections)
 
 ## Source Files
 
 - `core/gherkai_core/adapters/fargate_engine.py`
-- `core/gherkai_core/wire.py`
 - `core/tests/test_fargate_engine.py`
-- `core/tests/test_wire.py`
 
 ## Audit Trail
 
-- EXTRACTED: 67 (82%)
-- INFERRED: 15 (18%)
+- EXTRACTED: 53 (78%)
+- INFERRED: 15 (22%)
 - AMBIGUOUS: 0 (0%)
 
 ---

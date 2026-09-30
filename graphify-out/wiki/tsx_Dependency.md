@@ -1,4 +1,4 @@
-# tsx Dependency
+# TSX Dependency
 
 > 2 nodes · cohesion 1.00
 
@@ -9,7 +9,7 @@
 
 ## Relationships
 
-- [NPM Dependencies](NPM_Dependencies.md) (1 shared connections)
+- [AWS & Playwright Dependencies](AWS_%26_Playwright_Dependencies.md) (1 shared connections)
 
 ## Source Files
 

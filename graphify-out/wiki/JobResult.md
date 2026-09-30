@@ -1,8 +1,8 @@
 # JobResult
 
-> God node · 83 connections · `core/gherkai_core/model.py`
+> God node · 84 connections · `core/gherkai_core/model.py`
 
-**Community:** [S3 Result Store Port](S3_Result_Store_Port.md)
+**Community:** [Run Result Aggregation Tree](Run_Result_Aggregation_Tree.md)
 
 ## Connections by Relation
 
@@ -12,6 +12,7 @@
 - test_explain_cloud_reads_evidence_from_s3() `EXTRACTED`
 - test_explain_to_dict_drops_unmatched_scopes_and_keeps_job_fact() `EXTRACTED`
 - _sample_run() `EXTRACTED`
+- test_run_tree_attaches_reason_and_refs_under_their_step() `EXTRACTED`
 - test_index_html_shortcircuit_note_matches_cli_wording() `EXTRACTED`
 - test_render_text_shows_step_level_report_refs() `EXTRACTED`
 - test_render_text_step_reason_line_is_single_line_and_only_when_present() `EXTRACTED`
@@ -36,8 +37,8 @@
 - serialize.py `EXTRACTED`
 - project.py `EXTRACTED`
 - test_report_store.py `EXTRACTED`
-- ports.py `EXTRACTED`
 - schedule.py `EXTRACTED`
+- ports.py `EXTRACTED`
 - test_persist.py `EXTRACTED`
 - persist.py `EXTRACTED`
 - test_s3_result_store.py `EXTRACTED`
@@ -61,9 +62,9 @@
 - _reduce_scope() `EXTRACTED`
 - reduce_event() `EXTRACTED`
 - _jr() `EXTRACTED`
+- explain_to_dict() `EXTRACTED`
 - ._run_once() `EXTRACTED`
 - _big_job_result() `EXTRACTED`
-- explain_to_dict() `EXTRACTED`
 - ._reduce() `EXTRACTED`
 - .load_all() `EXTRACTED`
 - .save_job_result() `EXTRACTED`
@@ -79,8 +80,8 @@
 - ScheduleOpts `INFERRED`
 - EventRecord `INFERRED`
 - RunStore `INFERRED`
-- RunPersistence `INFERRED`
 - TaskExited `INFERRED`
+- RunPersistence `INFERRED`
 - ResultStore `INFERRED`
 - Timing `INFERRED`
 - LocalResultStore `INFERRED`
