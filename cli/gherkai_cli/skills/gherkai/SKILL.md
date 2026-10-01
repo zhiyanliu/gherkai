@@ -23,7 +23,7 @@ gherkai 把 Gherkin `.feature` 里的每一步交给云端浏览器里的 AI 引
 - **一步三种执行路径**。默认走 AI：`Given` / `When` 的文本是动作，`Then` 的文本是布尔断言（可投票）。命中项目 `steps/` 里注册的正则则走确定性代码：不问 AI、不投票、可复现。另有一条内建捷径：文本里**双引号**内的内容以 `http://` / `https://` 开头时，整段引号内容当作地址、该步直接导航（本机应用照写的 `http://localhost:3000` 同样命中；单引号不触发），不耗 AI。派发优先级依次是确定性命中、双引号 URL 导航、AI。
 - **边界**：精确检查（URL、DOM、数值、必须可复现、要快）交给确定性 step，出现频次高的检查（`Background` 前置、`Scenario Outline` 每行、要投票的断言）也优先写成确定性——它零模型费用、毫秒级完成（AI 步一步要几秒到几十秒），整套用例的墙钟与会话时长跟着降；模糊、一次性、页面变化多、靠语义理解的交给 AI。
 - **scope 与 tag**：`@scope:<名>` 把多条 scenario 编进同一个 job，共享一个浏览器会话、串行执行（后一条接着前一条留下的页面状态）；未标 scope 的 scenario 各成一个 job，`scope_id` 就是这条 scenario 的 id：`<文件>:<行号>`，`Scenario Outline` 展开出的每条再多一段 Examples 数据行的行号——别自己拼，从判定明细 / `plan --json` / 筛空时打出的候选清单里逐字复制。**scope 名在整个 run 里是全局的**：两个 feature 文件写了同一个名字就合并成一个 job（并发变串行、互不相干的用例锁进同一会话，`@engine` / `@timeout` 按合并后的全体解析、两边标了不同值整个 run 拒绝运行），撞名只在 stderr 提示一行，所以名字带来源前缀（`checkout-happy-path`），别用 `login` / `smoke` 这种通名；也别把 scope 名写成 `<文件>:<行号>` 的形状——与某条未标 scope 的 scenario 编号相等时整个 run 以退出码 2 拒绝运行。`@engine:novaact|midscene` 选引擎，`@timeout:<秒>` 给该 scope 的墙钟预算；其它 tag 只是普通标签，靠 `--tags` 筛。feature 行的 tag 会传给其下每条 scenario——`@scope` 标在 feature 行就是把整个文件塞进一个串行 job，要的是这个再标。
-- **引号只是书写习惯**：AI 步把关键字之后那段文本交给模型（整段被双引号包起来时，外层那对引号会去掉）；确定性 step 的正则匹配的是没去引号的原文——对象是关键字之后的那段文本、引号照留，正则里别写关键字，写用例时的写法要与它的 `example` 一致。匹配是**子串搜索、不自动锚定**，所以模式要写窄：带上引号与特征词（像内建那条 `页面地址匹配 "<正则>"` 的形状），别只写一个动词——宽模式会顺带命中本该走 AI 的步、悄悄换掉它的判法，两条模式同时命中一个 step 则该步直接记 error；宽窄靠 `gherkai plan` 的标注验。`And` / `But` 承前一步的关键字；`*` 或开头就是 `And` 会被拒（判不出动作还是断言）。
+- **引号只是书写习惯**：AI 步把关键字之后那段文本交给模型（整段被双引号包起来时外层引号去掉）；确定性 step 的正则匹配的是关键字之后、没去引号的原文，写用例时照它的 `example` 写。匹配是子串搜索、不锚定：宽模式会顺带命中本该走 AI 的步、悄悄换掉它的判法，两条模式同时命中一个 step 则该步记 error，宽窄靠 `gherkai plan` 的标注验（模式怎么写窄见 `references/deterministic-steps.md` 第 2 节）。`And` / `But` 承前一步的关键字；`*` 或开头就是 `And` 会被拒（判不出动作还是断言）。
 
 ## 2 引擎怎么选
 
@@ -35,7 +35,7 @@ Midscene 对被测 UI 的语言不限。Nova Act 的支持范围是英文 UI：�
 - `submit`：提交即返回，stdout 只打一个 `run_id`，退出码 0 只表示提交成功；判定看 `status <run_id> --wait`。local 后端由本机一个脱离 CLI 的后台进程推进（本机需开机）；cloud 后端由云端推进，提交后关机也会运行到结束。
 - **cloud 一条线**：依次执行 `doctor --backend cloud --prefix P`、`plan`、`submit --backend cloud --prefix P`、`status --backend cloud --prefix P --wait`、`explain --backend cloud --prefix P`。`plan` 不依赖后端、两个后端都要先执行一次；但它的确定性标注问的是**本机** steps，云端实际运行用的是 worker 镜像里那份，标注只代表本机视图。`status` / `explain` 的 `--backend` / `--report-dir` / `--prefix` 必须与**产生这个 run 的那条命令**（`run` 或 `submit`）逐字一致——本机 `run --report-dir out/` 之后也得 `explain <run_id> --report-dir out/`；不一致就以退出码 2 结束、说找不到这个 run（那句提示只提 `submit`，按上面那条对齐参数，不要照它只改 `submit`）。
 - **部署云端后端是部署方的事，你不自己运行 `gherkai deploy`**（改 AWS 资源与 IAM）。用 `doctor` 判缺什么，把该运行的命令与前置交给人；推定制 variant 镜像的 `gherkai deploy push-worker` 不改 IAM，你可以运行。细节见 `references/cloud-backend.md`。
-- **被测应用在本机 / 内网时**：浏览器在云端，`http://localhost:3000` 不可达。唯一做法是 `--expose-local <feature 里书写的原始 origin>`，feature 照写原始地址，提交时替换成带每 run 一换凭据的公网 URL；选项值须与 feature 书写逐字一致（前缀字符串匹配，localhost 与 `127.0.0.1` 不互认），Host 放行与排障入口见 `references/setup-and-diagnosis.md` 第 5 节。`run` / `submit` / `plan` 都收（`plan` 只标注、不起隧道、也不校验地址是否匹配得上）。前置两条，`doctor` 都不查：本机装好 ngrok 且在 PATH 上（下载 https://ngrok.com/download ），以及配好 authtoken（`ngrok config add-authtoken <token>`，或环境变量 `NGROK_AUTHTOKEN`，任一处即可），少哪条都在起隧道时失败。`submit` 后隧道由本机后台进程持有，本机须保持开机联网到 run 终态，这是「提交后关机也会运行到结束」的唯一例外。
+- **被测应用在本机 / 内网时**：浏览器在云端，`http://localhost:3000` 不可达。唯一做法是 `--expose-local <feature 里书写的原始 origin>`，feature 照写原始地址，提交时替换成带每 run 一换凭据的公网 URL；选项值须与 feature 书写逐字一致（前缀字符串匹配，localhost 与 `127.0.0.1` 不互认）。`run` / `submit` / `plan` 都收（`plan` 只标注、不起隧道、也不校验地址是否匹配得上）。前置是本机的 ngrok 与其 authtoken，`doctor` 不查、缺了在起隧道时失败；前置、Host 放行与排障入口见 `references/setup-and-diagnosis.md` 第 5 节。`submit` 后隧道由本机后台进程持有，本机须保持开机联网到 run 终态，这是「提交后关机也会运行到结束」的唯一例外。
 - **`--tunnel-ttl`（仅 `submit`）**——只在 cloud 后端且开了隧道时才有意义：隧道守护进程的兜底 TTL，缺省为这个 run 各 job 预算之和加余量；到点**无条件**拆隧道，调小会在 run 未完时断掉被测应用的入口，别为「省一点」去调它。
 
 ## 4 编写 feature 与 steps
@@ -47,7 +47,7 @@ Midscene 对被测 UI 的语言不限。Nova Act 的支持范围是英文 UI：�
 - DataTable / DocString 可以挂在 AI 步下，随 step 一起喂给模型。
 - 公共前置步写 `Background`：它展开进每条 scenario 的最前面，步号从它的第一步 0 起数、scenario 里的步跟着后移（`explain --step N` 同此口径）；同一 `@scope` 里每条 scenario 各自重新运行它，别指望后一条接着前一条的页面状态。
 - 同一流程换数据写 `Scenario Outline` + `Examples`：每行展开成一条独立 scenario，未标 `@scope` 时各成一个 job、`scope_id` 多一段数据行号，收窄时照抄判定明细里的完整值；`--scenario` 给声明行的行号即选中全部数据行。
-- **什么时候配确定性 step**：URL 匹配、元素存在、精确数值、必须可复现、要快、出现频次高。最小模板与必填元数据（`description` / `example`）见 `references/engines.md`，两引擎都用时两侧成对写。内建一条 `Then 页面地址匹配 "<正则>"` 可直接用。**写代码时**按 `references/deterministic-steps.md`（等待与判定、失败消息带现场、判定逻辑放 `_` 前缀模块并本地单测）；汇报带根因与改法、两侧清单与 `plan` 标注的核对结果、自查方法三样。
+- **配确定性 step** 按第 1 节的边界判；最小模板与必填元数据（`description` / `example`）见 `references/engines.md`，两引擎都用时两侧成对写。内建一条 `Then 页面地址匹配 "<正则>"` 可直接用。**写代码时**按 `references/deterministic-steps.md`（等待与判定、失败消息带现场、判定逻辑放 `_` 前缀模块并本地单测）；汇报带根因与改法、两侧清单与 `plan` 标注的核对结果、自查方法三样。
 - 写新 step 前先看两个引擎的 `gherkai list-deterministic --engine <名>` 清单，已有的复用、同义模式不重复注册；写完再核对它在清单里，然后 `gherkai plan <feature>` 看每步标注：命中确定性的标 `← 确定性: <说明>`，其余走 AI。
 
 ## 5 工作循环
@@ -59,18 +59,17 @@ Midscene 对被测 UI 的语言不限。Nova Act 的支持范围是英文 UI：�
 5. 修：断言写法问题改 feature（只动要改的那一步、别增删其它行——未标 scope 的 scenario 用行号当 id，行号一漂，旧报告与 `--scope` 的值就都指不到了）；精确检查改成确定性 step；语言面问题换引擎；确是被测应用的 bug 就交给人定夺。**要说「是被测应用的 bug」之前先复投**：AI 断言默认只判一次（`explain` 里那步打 `votes 0/1` 就是只判了一次），判否也可能是模型这一次没看准——收窄到那一条再多投几票：`gherkai run <feature> --scope <scope_id> --assertion-votes 3`（票数作用于本 run 每条 AI 断言、费用随票数涨，所以务必先收窄）。三票一致判否才报 bug；出现分歧票就是抖动或断言措辞歧义，改成直白的语义陈述或落到确定性 step。**例外：Nova Act 引擎下非英文页面的词匹配判否是系统性的，复投只增加费用、不要给 `--assertion-votes`，直接走第 2 节的三条出路。****四种处置都按第 9 节汇报**——人要知道的不只「哪条是产品 bug」，还有「你替他改了什么、为什么」：改断言写法、换引擎都动了验收口径，不报等于悄悄放宽了这条用例。
 6. **收窄后重新运行**（`run` / `submit` / `plan` 同一套）：`--scope ID` 的值就是判定明细里的 `scope_id`，重新运行失败的 job 最直接；`--scenario SEL`（完整 scenario id、行号、或标题片段，区分大小写；给 `Scenario Outline` 声明行的行号表示选中它展开的全部数据行）；`--tags TAG[,TAG]`（一个值内的逗号表示任一命中，重复给表示都要命中，@ 可省）。`--scope` / `--scenario` 可重复、任一命中；`--tags` 重复给时都要命中；不同类同给时都要满足。筛成空集时以退出码 2 结束并列出全部候选，照着改。
 7. `steps/` 里任一文件加载失败，`plan` / `run` / `submit` 都会在起第一个 job 前整个 run 拒绝运行并以退出码 2 结束，错误点名文件与异常。先修那个文件，不是怀疑 feature。显式给的 `--steps-dir` 不存在同样以退出码 2 结束；缺省 `./steps` 不存在不算错。
-8. 只写了一侧的确定性 step，在另一引擎上这一步会悄悄换回 AI 判定，执行前预检不替你发现（它只查本次用到的引擎）。两引擎都用时 `list-deterministic --engine` 各查一遍。
 
 ## 6 机读读法
 
-字段表在 `references/cli-json-contract.md`。几条读法：`message` 恒为「为何不是 passed」，job 级与 step 级同义，通过时为 null；`record_missing` 为 true 表示骨架里有这一步、判定明细里没有它的记录（没运行到或没上报），此时 `status` / `votes` / `error_type` / `message` / `duration_ms` 全为 null，但 `report_refs` 是空数组、`shortcircuited` 恒 false，判有没有记录只看 `record_missing`；`evidence_missing` 非 null 表示这一步没读到机读证据：`no_ref` 混着「确定性 step 与导航步本就不产」「AI 运行了但抽取失败」「没有记录」三种、分不开，`unreadable` 表示指针在但读不到，`unsupported_schema` 表示格式版本不认，要区分「没运行」与「运行了但没产证据」一律看 `record_missing`；`aborted_hint` 非 null 表示这个 job 终态是 aborted 或 error、且判定明细里只有部分 step 的记录，别据此判终态，终态看同层 `status`；`has_step_records` 是 job 级事实、不随筛选变化，为 false 时判定只剩 job 级那一层。`run --json` 的 `artifacts` 给报告与判定明细位置，`--no-report` 时这个键省略（例外：本机运行且给了 `--quiet` 时只剩 `worker_log`）；`status --json` 的 `artifacts` 恒在、给的是约定落点，未到终态那些路径可能还没写出来，存在不代表终态，终态看同层 `status`。
+字段表与每个字段的读法在 `references/cli-json-contract.md`。三条最容易踩的：`message` 恒为「为何不是 passed」，job 级与 step 级同义，通过时为 null；判一步「有没有记录」只看 `record_missing`（`evidence_missing` 的 `no_ref` 分不开「本就不产证据」「抽取失败」「没有记录」三种；`unreadable` 是指针在但读不到，`unsupported_schema` 是格式版本不认）；终态只看同层 `status`，`aborted_hint` 与 `status --json` 里 `artifacts` 路径的存在都不是终态判据。
 
 ## 7 选项按「谁有这个 flag」分组
 
 | 谁有 | flag | 什么时候动 |
 |---|---|---|
 | `run` / `submit` 共用，多数 `plan` 也收 | `--default-engine` `--assertion-votes` `--default-job-timeout` `--steps-dir` `--scope` `--tags` `--scenario` `--expose-local`（这 8 个 `plan` 也收：用例预检要与实际运行一致就照样给）；`--max-concurrency` `--report-dir`（`plan` 不收） | `--assertion-votes 3` 查 AI 断言抖动；`--max-concurrency` 只改同时开几个会话、不改总账，scope 多且互不相干时调大；`--default-job-timeout` 只管未标 `@timeout` 的 scope。默认值都以 `--help` 为准，别背数字 |
-| 仅 `run` | `--fail-fast` `--quiet` `--no-report` `--grace` | `--quiet` 少占屏幕与上下文、worker 日志改落文件，判定明细与证据照落；`--no-report` 连 `explain` 一起废掉——判定明细与 AI 证据都不落盘，事后 `explain` 找不到这个 run，失败原因只剩本次输出里每步那一句，想细看只能再花钱重新运行，所以只在确定不用读失败原因的纯 CI 门禁上用；`--grace` 别调小，过小直接以退出码 2 结束、且会泄漏浏览器会话 |
+| 仅 `run` | `--fail-fast` `--quiet` `--no-report` `--grace` | `--quiet` 少占屏幕与上下文、worker 日志改落文件，判定明细与证据照落；`--no-report` 连 `explain` 一起废掉——判定明细与 AI 证据都不落盘，事后 `explain` 找不到这个 run，失败原因只剩本次输出里每步那一句，想细看只能再花钱重新运行，所以只在确定不用读失败原因的纯 CI 门禁上用；`--grace` 见第 10 节 |
 | 仅 `submit` | `--tunnel-ttl` | 只在 cloud + `--expose-local` 时有意义 |
 | cloud 后端：`doctor` / `run` / `submit` / `status` / `explain` 各要给（`plan` 不吃） | `--backend cloud` `--prefix` `--region` `--profile` `--worker-variant`（仅 `run` / `submit`） | `--backend` / `--prefix` / `--report-dir` 必须与产生这个 run 的那条命令逐字一致，不一致即以退出码 2 结束、说找不到这个 run；`--region` 要指同一个 region（换了就查不到），`--profile` 换成另一个指向同账号同 region 的 profile 不影响；`--worker-variant` 选云端 worker 镜像上的确定性 step 集，不给用部署侧默认指针 |
 | 查询类各自有 | `status --json`、`explain --json`、`plan --json`、`doctor --json`、`list-engines --json`、`list-deterministic --json` | `run --json` 有、`submit` 没有：run_id 走 stdout，进度与判定看 `status --json` |
@@ -109,12 +108,10 @@ job 级：
 
 ## 10 别做的事
 
-- 别把 `submit` 的退出码 0 当通过：它只说提交成功，判定还没出。
-- 别把不带 `--wait` 的 `status` 退出码 0 当通过：未到终态它的退出码也是 0。
 - 别解析人读文本、HTML 报告或引擎原生 trajectory 文件：人读排版会变，报告是派生视图、文件名会变；机读用 `--json`，读证据用 `explain`。
 - 别自己拼产物位置：顺判定明细里的 `ref`（产物指针）走，本机与 S3 两侧同一形式。
 - cloud 后端改了 steps 不 `push-worker` 等于没改：云端 worker 读的是镜像里那份，本机 `plan` 的标注不代表云端。
-- 别只写一侧的确定性 step：另一引擎上会静默落回 AI，run 还可能「通过」。
-- 别调小 `--grace`（仅 `run` 有，且只对本机后端；cloud 后端给了它会以退出码 2 结束）：云端的停止宽限在部署侧的 `gherkai deploy --stop-timeout`，归部署方。
+- 别只写一侧的确定性 step：另一引擎上会静默落回 AI、run 还可能「通过」，执行前预检只查本次用到的引擎、不替你发现；两引擎都用时 `list-deterministic --engine` 各查一遍。
+- 别调小 `--grace`（仅 `run` 有，且只对本机后端；cloud 后端给了它会以退出码 2 结束）：本机给得过小会在开始执行前以退出码 2 结束，勉强够用的值会在中止时漏关浏览器会话、继续计费；云端的停止宽限在部署侧的 `gherkai deploy --stop-timeout`，归部署方。
 - 别为了「验证一下改动」就 `run` / `submit`：每次实际运行都开云端浏览器会话、花真钱，改完用 `plan`（零费用）验写法与标注；实际运行只在人要结果时做。
 - 别自己运行 `gherkai deploy` / `gherkai destroy`：交给人，你负责准备命令与前置清单。
