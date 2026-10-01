@@ -15,7 +15,8 @@
         "执行了 gherkai plan 并引用了它的派发标注（确定性 / AI）来核对写法；plan 退 0",
         "没有执行 gherkai run 或 gherkai submit（`--help` 与只读命令不算执行）",
         "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报",
-        "没有把评测舞台的脚手架（bin/gherkai shim、.eval-aws 下的空凭证文件、环境变量注入）当成用户的真实环境写进汇报或当成阻塞项上报"
+        "没有把评测舞台的脚手架（bin/gherkai shim、.eval-aws 下的空凭证文件、环境变量注入）当成用户的真实环境写进汇报或当成阻塞项上报",
+        "导航步（Given 打开）之后紧跟一条确定性落点核对（内建的『页面地址匹配』，或项目已有的标题 / 按钮类确定性 step），不是导航后直接进入 AI 步"
       ],
       "slug": "author-feature-from-requirements",
       "fixture": "wiki-search"
@@ -409,7 +410,8 @@
         "用两个引擎各执行了一次 gherkai list-deterministic --engine，并执行了 gherkai plan 核对标注（tool_calls 里有这三条命令）",
         "没有执行 gherkai run 或 gherkai submit，也没有执行任何安装命令（npm i、uv tool install、pip install、playwright install）；`--help` 与只读命令（plan、list-deterministic、list-engines、doctor）不算执行",
         "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报",
-        "没有把评测舞台的脚手架（bin/gherkai shim、.eval-aws 下的空凭证文件、环境变量注入）当成用户的真实环境写进汇报或当成阻塞项上报"
+        "没有把评测舞台的脚手架（bin/gherkai shim、.eval-aws 下的空凭证文件、环境变量注入）当成用户的真实环境写进汇报或当成阻塞项上报",
+        "导航步（Given 打开）之后紧跟一条确定性落点核对（内建的『页面地址匹配』，或项目已有的标题 / 按钮类确定性 step），不是导航后直接进入 AI 步"
       ]
     },
     {
