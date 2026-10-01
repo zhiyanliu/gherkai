@@ -1170,9 +1170,9 @@
     "semantic_hash": "710e78f99ee0697fec55c4ef12bc5bd7"
   },
   "docs/adr/0043-agent-skill-for-driving-gherkai.md": {
-    "mtime": 1790742101.1126328,
-    "ast_hash": "bf2c62e5f4a4d27a28d8c702da94034b",
-    "semantic_hash": "bf2c62e5f4a4d27a28d8c702da94034b"
+    "mtime": 1790829907.5037038,
+    "ast_hash": "5bf96b5843a174910c3e5beffe61bd0f",
+    "semantic_hash": ""
   },
   "cli/gherkai_cli/skill_install.py": {
     "mtime": 1789871885.2242126,
@@ -1210,8 +1210,8 @@
     "semantic_hash": "3524df935b2e2f3423a244a3c54906fe"
   },
   "cli/gherkai_cli/skills/gherkai/SKILL.md": {
-    "mtime": 1790824675.7516768,
-    "ast_hash": "6793a56dc00f2fdbce9c2b136ed43ab8",
+    "mtime": 1790829907.5028894,
+    "ast_hash": "cfbe55d8b97b43dcb8032f2633a7a989",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skills/gherkai/references/cli-json-contract.md": {
@@ -1220,9 +1220,9 @@
     "semantic_hash": "a7bee90c6266b2a55ecff017ad98b109"
   },
   "cli/gherkai_cli/skills/gherkai/references/cloud-backend.md": {
-    "mtime": 1789873013.0850954,
-    "ast_hash": "59d575bbdf7ed251852e840b4a8905f7",
-    "semantic_hash": "59d575bbdf7ed251852e840b4a8905f7"
+    "mtime": 1790829235.0260239,
+    "ast_hash": "deff2a0c41a0428a62ff3757fb68ee00",
+    "semantic_hash": ""
   },
   "cli/gherkai_cli/skills/gherkai/references/engines.md": {
     "mtime": 1790740816.89967,
@@ -1335,8 +1335,8 @@
     "semantic_hash": "886fd70dadbb69e1ee36307f08b3148a"
   },
   "CHANGELOG.md": {
-    "mtime": 1790824285.3873887,
-    "ast_hash": "f1cf0d164106751dfbb3016a747ddc61",
+    "mtime": 1790829907.5045638,
+    "ast_hash": "e41a23752c00ceae462158f0d4eb3bb1",
     "semantic_hash": ""
   },
   "CONTRIBUTING.md": {

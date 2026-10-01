@@ -108,6 +108,7 @@ job 级：
 
 ## 10 别做的事
 
+- 别把 `submit` 的退出码 0、或不带 `--wait` 的 `status` 退出码 0 当通过：判定只看 `run` 或 `status --wait` 的退出码（第 8 节）。
 - 别解析人读文本、HTML 报告或引擎原生 trajectory 文件：人读排版会变，报告是派生视图、文件名会变；机读用 `--json`，读证据用 `explain`。
 - 别自己拼产物位置：顺判定明细里的 `ref`（产物指针）走，本机与 S3 两侧同一形式。
 - cloud 后端改了 steps 不 `push-worker` 等于没改：云端 worker 读的是镜像里那份，本机 `plan` 的标注不代表云端。

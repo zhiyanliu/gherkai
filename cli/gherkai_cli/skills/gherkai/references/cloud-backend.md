@@ -7,8 +7,8 @@ https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/cloud-backend.md 
 
 | 谁 | 做什么 | agent 的角色 |
 |---|---|---|
-| 部署方 | `gherkai deploy` 建 / 改后端，`gherkai deploy push-worker` 推 worker 镜像，`gherkai destroy` 拆，管 IAM 与网络 | **不自己运行**。用 `doctor` 判缺什么，把命令与前置清单交给人 |
-| 测试开发 | 写确定性 step，构建定制 worker 镜像，交部署方推送 | 可以运行（不改 IAM） |
+| 部署方 | `gherkai deploy` 建 / 改后端，`gherkai destroy` 拆，管 IAM 与网络 | **不自己运行**。用 `doctor` 判缺什么，把命令与前置清单交给人 |
+| 测试开发 | 写确定性 step，构建定制 worker 镜像并用 `gherkai deploy push-worker` 推送、注册为 variant | 可以运行（不改 IAM） |
 | QA / CI | 依次执行 `submit --backend cloud`、`status --wait`、`explain` | 直接运行 |
 
 ## 2 交给部署方的清单
