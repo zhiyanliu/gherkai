@@ -357,6 +357,173 @@ def refresh():
                       "duration_seconds": duration, "protected_srt_unchanged": True}), flush=True)
 
 
+def web_captions():
+    """Create an always-captioned web copy without changing the source video."""
+    from fractions import Fraction
+    from PIL import Image, ImageDraw, ImageFont, ImageChops, ImageStat
+
+    parser = argparse.ArgumentParser(description=web_captions.__doc__)
+    parser.add_argument("--source-video", type=Path, required=True)
+    parser.add_argument("--subtitles", type=Path, required=True)
+    parser.add_argument("--font", type=Path, required=True)
+    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--stage", type=Path, required=True)
+    args = parser.parse_args()
+    assert not args.output.exists(), "Use a new output file"
+    args.stage.mkdir(parents=True, exist_ok=True)
+    protected = protected_state(args.subtitles)
+    source_sha = digest(args.source_video)
+    original = probe(args.source_video)
+    source_stream = next(s for s in original["streams"] if s["codec_type"] == "video")
+    width, height = source_stream["width"], source_stream["height"]
+    fps = Fraction(source_stream["r_frame_rate"])
+    duration = float(original["format"]["duration"])
+    total_frames = round(duration * fps)
+    assert (width, height, fps) == (1920, 1080, 60), "This layout requires 1080p at 60 fps"
+    bar_height = 120
+    font = ImageFont.truetype(str(args.font), 44)
+    ffmpeg = shutil.which("ffmpeg")
+    selected = cues(args.subtitles.read_text())
+    embedded = run([ffmpeg, "-v", "error", "-i", str(args.source_video),
+                    "-map", "0:s:0", "-c:s", "srt", "-f", "srt", "-"])
+    assert cues(embedded) == selected, "Source captions differ from the selected SRT"
+
+    def frame_at(timestamp):
+        h, m, s, ms = map(int, re.split(r"[:,]", timestamp.strip()))
+        value = Fraction(((h * 60 + m) * 60 + s) * 1000 + ms, 1000) * fps
+        return (value.numerator + value.denominator - 1) // value.denominator
+
+    def caption_image(text, number):
+        image = Image.new("RGB", (width, bar_height), "#202136")
+        draw = ImageDraw.Draw(image)
+        lines = []
+        for paragraph in text.splitlines():
+            line = ""
+            for character in paragraph:
+                if line and draw.textlength(line + character, font=font) > width - 140:
+                    lines.append(line)
+                    line = character
+                else:
+                    line += character
+            lines.append(line)
+        assert len(lines) <= 2, "Caption exceeds the two-line layout"
+        for index, line in enumerate(lines):
+            box = draw.textbbox((0, 0), line, font=font)
+            y = bar_height / 2 + (index - (len(lines) - 1) / 2) * 54
+            draw.text(((width - (box[2] - box[0])) / 2 - box[0],
+                       y - (box[3] - box[1]) / 2 - box[1]),
+                      line, font=font, fill="#F8FAFC")
+        path = args.stage / f"caption-{number:03}.png"
+        image.save(path)
+        return path.resolve()
+
+    blank = caption_image("", 0)
+    spans = []
+    cursor = 0
+    for number, cue in enumerate(selected, 1):
+        start, end = map(frame_at, cue["time"].split("-->"))
+        assert cursor <= start < end <= total_frames, cue["time"]
+        if start > cursor:
+            spans.append((cursor, start, blank))
+        spans.append((start, end, caption_image(cue["text"], number)))
+        cursor = end
+    if cursor < total_frames:
+        spans.append((cursor, total_frames, blank))
+    concat = args.stage / "captions.ffconcat"
+    assert all("'" not in str(path) for _, _, path in spans)
+    concat.write_text("ffconcat version 1.0\n" + "".join(
+        f"file '{path}'\noption framerate {fps}\nduration {float((end-start)/fps):.12f}\n"
+        for start, end, path in spans
+    ) + f"file '{spans[-1][2]}'\noption framerate {fps}\n")
+    bar_video = args.stage / "caption-bar.mp4"
+    run([ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin", "-n",
+         "-f", "concat", "-safe", "0", "-i", str(concat),
+         "-vf", f"fps={fps},scale=out_color_matrix=bt709,format=yuv420p",
+         "-frames:v", str(total_frames), "-an", "-c:v", "libx264",
+         "-preset", "fast", "-tune", "stillimage", "-crf", "18",
+         "-threads", "2", "-colorspace", "bt709", "-color_primaries", "bt709",
+         "-color_trc", "bt709", "-color_range", "tv", str(bar_video)],
+        args.stage / "caption-bar.log")
+    print(json.dumps({"caption_count": len(selected), "bar_rendered": True}), flush=True)
+    chapter_titles = args.stage / "chapter-titles.srt"
+    chapter_titles.write_text("".join(
+        f"{i}\n{srt_time(float(c['start_time']))} --> {srt_time(float(c['end_time']))}\n"
+        f"{c['tags']['title']}\n\n"
+        for i, c in enumerate(original["chapters"], 1)
+    ))
+    run([ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin", "-n",
+         "-i", str(args.source_video), "-i", str(bar_video), "-i", str(chapter_titles),
+         "-filter_complex", "[0:v:0][1:v:0]vstack=inputs=2[v]",
+         "-map", "[v]", "-map", "0:a:0", "-map", "2:s:0",
+         "-map_metadata", "0", "-map_chapters", "0",
+         "-frames:v", str(total_frames), "-c:v", "libx264", "-preset", "fast",
+         "-tune", "stillimage", "-crf", "18", "-threads", "4",
+         "-c:a", "copy", "-c:s", "mov_text",
+         "-metadata:s:s:0", "handler_name=Chapter titles", "-disposition:s:0", "0",
+         "-colorspace", "bt709", "-color_primaries", "bt709",
+         "-color_trc", "bt709", "-color_range", "tv",
+         "-movflags", "+faststart", str(args.output)], args.stage / "web-video.log")
+    link_chapter_title_track(args.output)
+    current = probe(args.output)
+    assert not current.get("probe_warnings")
+    assert current["chapters"] == original["chapters"]
+    assert current["format"]["duration"] == original["format"]["duration"]
+    assert packets(args.source_video, "a:0") == packets(args.output, "a:0")
+    check_frames = {i: path for start, end, path in spans for i in (start, end-1)}
+    indices = sorted(check_frames)
+    def select_frames(values):
+        if len(values) == 1:
+            return f"eq(n\\,{values[0]})"
+        middle = len(values) // 2
+        return f"({select_frames(values[:middle])}+{select_frames(values[middle:])})"
+    expression = select_frames(indices)
+    raw = subprocess.run([
+        ffmpeg, "-v", "error", "-i", str(args.output), "-map", "0:v:0",
+        "-vf", f"select={expression},crop={width}:{bar_height}:0:{height},"
+               "scale=480:30,format=rgb24",
+        "-fps_mode", "vfr", "-f", "rawvideo", "-",
+    ], capture_output=True, check=True).stdout
+    size = 480 * 30 * 3
+    assert len(raw) == len(indices) * size
+    def reference_image(path):
+        result = subprocess.run([
+            ffmpeg, "-v", "error", "-i", str(path), "-vf",
+            "scale=out_color_matrix=bt709,format=yuv420p,"
+            "scale=480:30:in_color_matrix=bt709,format=rgb24",
+            "-frames:v", "1", "-f", "rawvideo", "-",
+        ], capture_output=True, check=True)
+        return path, Image.frombytes("RGB", (480, 30), result.stdout)
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        references = dict(pool.map(reference_image, set(check_frames.values())))
+    errors = []
+    for position, index in enumerate(indices):
+        actual = Image.frombytes("RGB", (480, 30), raw[position*size:(position+1)*size])
+        expected = references[check_frames[index]]
+        error = sum(ImageStat.Stat(ImageChops.difference(actual, expected)).mean) / 3
+        assert error < 2, ("caption boundary", index, error)
+        errors.append(error)
+    run([ffmpeg, "-v", "error", "-i", str(args.output),
+         "-map", "0:v:0", "-map", "0:a:0", "-f", "null", "-"],
+        args.stage / "decode.log")
+    assert protected_state(args.subtitles) == protected
+    assert digest(args.source_video) == source_sha
+    report = {
+        "status": "pass", "sha256": digest(args.output), "bytes": args.output.stat().st_size,
+        "source_video_sha256": source_sha, "caption_sha256": protected["sha256"],
+        "caption_count": len(selected), "duration_seconds": duration,
+        "width": width, "height": height + bar_height, "fps": float(fps),
+        "captions": "burned_in", "caption_bar_height": bar_height,
+        "caption_font": font.getname()[0], "caption_font_size": 44,
+        "caption_boundary_frames_checked": len(indices),
+        "maximum_caption_pixel_error": max(errors),
+        "caption_timing_maximum_delay_seconds": float(1/fps),
+        "audio_samples_and_timestamps_preserved": True, "chapters_unchanged": True,
+        "source_video_and_srt_unchanged": True, "complete_decode": "pass",
+    }
+    write_json(args.stage / "verification.json", report)
+    print(json.dumps(report, ensure_ascii=False), flush=True)
+
+
 def subtitles():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source-video", type=Path, required=True)
@@ -416,12 +583,14 @@ def subtitles():
 
 if __name__ == "__main__":
     if len(sys.argv) < 2 or sys.argv[1] in {"-h", "--help"}:
-        print("Usage: video.py {refresh|subtitles} [options]\nEach command accepts --help. Inputs are preserved; use a new output path.")
+        print("Usage: video.py {refresh|subtitles|web-captions} [options]\nEach command accepts --help. Inputs are preserved; use a new output path.")
     else:
         command = sys.argv.pop(1)
         if command == "refresh":
             refresh()
         elif command == "subtitles":
             subtitles()
+        elif command == "web-captions":
+            web_captions()
         else:
-            raise SystemExit("Unknown command; choose refresh or subtitles")
+            raise SystemExit("Unknown command; choose refresh, subtitles, or web-captions")

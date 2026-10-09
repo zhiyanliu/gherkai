@@ -260,8 +260,8 @@
     "semantic_hash": "46506796a3741a0992133c3ce390e125"
   },
   "README.md": {
-    "mtime": 1791515153.5230289,
-    "ast_hash": "02ce3fc4878a05476a48414c10e67b09",
+    "mtime": 1791516329.8481398,
+    "ast_hash": "6d0d7a4b40fb3d9fa7c29e5533766f08",
     "semantic_hash": ""
   },
   "cli/README.md": {
@@ -1340,12 +1340,12 @@
     "semantic_hash": ""
   },
   "CONTRIBUTING.md": {
-    "mtime": 1791513203.3082097,
+    "mtime": 1791515428.9979522,
     "ast_hash": "674446d4ddbad3d6596c890ce5c152c7",
     "semantic_hash": ""
   },
   "docs/README.md": {
-    "mtime": 1791511705.0011747,
+    "mtime": 1791515428.9984376,
     "ast_hash": "06ee708c034ff94fc4618c5b14c5c4f9",
     "semantic_hash": ""
   },
@@ -1705,7 +1705,7 @@
     "semantic_hash": "68252ee02a81952e2bf1b49cc1361338"
   },
   "cli/tests/test_adr_hygiene.py": {
-    "mtime": 1791511705.0020194,
+    "mtime": 1791515428.9983058,
     "ast_hash": "2c9eae538e1ee7a13c5cc2761fb0bc91",
     "semantic_hash": ""
   },
@@ -1820,58 +1820,58 @@
     "semantic_hash": "136d4acb70f0b2757bab87d32ffa1a44"
   },
   "docs/presentations/value-method/manifest.json": {
-    "mtime": 1791515153.5228667,
-    "ast_hash": "528f9fd40d1b04abc616e2b2a332bb08",
+    "mtime": 1791516329.8538134,
+    "ast_hash": "1273fc924c93f42f37a642bed51f66ef",
     "semantic_hash": ""
   },
   "tools/presentations/gemini_image.py": {
-    "mtime": 1790842711.3283393,
+    "mtime": 1791515429.0541108,
     "ast_hash": "401ec940096c6bb26f62b3c60bf1dfd9",
     "semantic_hash": ""
   },
   "tools/presentations/minimax_narration.py": {
-    "mtime": 1791510856.104745,
+    "mtime": 1791515429.0542092,
     "ast_hash": "029dac86260ef464f0e7a67502218479",
     "semantic_hash": ""
   },
   "tools/presentations/video.py": {
-    "mtime": 1791514997.591469,
-    "ast_hash": "383f67c6db68c74acb8db6951d4570bc",
+    "mtime": 1791516157.9903631,
+    "ast_hash": "b7614358af857d90519fee4357c3e953",
     "semantic_hash": ""
   },
   "docs/presentations/README.md": {
-    "mtime": 1791511705.000459,
+    "mtime": 1791515428.99856,
     "ast_hash": "ba725d038743e7e3c65c6e8fe8ee4f48",
     "semantic_hash": ""
   },
   "docs/presentations/value-method/README.md": {
-    "mtime": 1791514524.2321873,
-    "ast_hash": "58dc3aae835382a3ae4162f00e46f7e9",
+    "mtime": 1791516157.9908462,
+    "ast_hash": "ade2cf686e270d7a3293c7985a8db353",
     "semantic_hash": ""
   },
   "docs/presentations/value-method/chapters.md": {
-    "mtime": 1791453450.962255,
+    "mtime": 1791515428.998791,
     "ast_hash": "36d310e7a73c29184c53511cddee9308",
     "semantic_hash": ""
   },
   "docs/presentations/value-method/narration.md": {
-    "mtime": 1791452245.8564525,
+    "mtime": 1791515429.0467923,
     "ast_hash": "a7fd784e7cb20b0dd235cc8d46fddf1e",
     "semantic_hash": ""
   },
   "docs/presentations/value-method/speaker-notes.md": {
-    "mtime": 1791510855.4260113,
+    "mtime": 1791515429.0468895,
     "ast_hash": "8853dd2a1f3599c58cbc52db73a005c0",
     "semantic_hash": ""
   },
   "tools/presentations/README.md": {
-    "mtime": 1791514997.5916002,
-    "ast_hash": "49a7325d1b7a58b0fb7cbe51d97e7780",
+    "mtime": 1791516157.9905937,
+    "ast_hash": "7cfedb045800643c382a031522e04994",
     "semantic_hash": ""
   },
   "tools/presentations/production.md": {
-    "mtime": 1791514997.5917165,
-    "ast_hash": "bf7bd2e51862572f2984f27d0d1f4395",
+    "mtime": 1791516157.990722,
+    "ast_hash": "0044f170604f2387ee9241018f3d56f3",
     "semantic_hash": ""
   }
 }

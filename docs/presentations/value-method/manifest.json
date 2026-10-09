@@ -315,7 +315,7 @@
     "chapters_unchanged": true,
     "opening_frame_ssim": 0.993095
   },
-  "materials_sha256": "47df2f3382084f25f10ba8744d722a237960e5777e3c8656207488fb8998f5bd",
+  "materials_sha256": "44ab231059496565022e206634140d65d9dcf5f95264a0c47e70de630caccb03",
   "files": {
     "gherkai-value-method-v12.pptx": {
       "bytes": 11076819,
@@ -342,13 +342,42 @@
       "sha256": "64f45a6b771b3be42e3a31968494da8fbe0e93d927aa488c56fe35a5c47db4c0"
     },
     "gherkai-value-method-v12-materials.zip": {
-      "bytes": 36143141,
-      "sha256": "47df2f3382084f25f10ba8744d722a237960e5777e3c8656207488fb8998f5bd"
+      "bytes": 36143602,
+      "sha256": "44ab231059496565022e206634140d65d9dcf5f95264a0c47e70de630caccb03"
     }
   },
   "version": "v12",
   "opening_frame": "first_slide",
   "ending_fade_seconds": 0.1,
   "ending_black_hold_seconds": 0.15,
-  "readme_video_url": "https://github.com/user-attachments/assets/00eaeb62-c94b-443e-96ce-7389e27fbacc"
+  "readme_video_url": "https://github.com/user-attachments/assets/5cfdb622-b0b4-4a3f-a783-d7d9dd8d8627",
+  "readme_video": {
+    "status": "pass",
+    "sha256": "d714735b0250e56a5bd949b5778a457a1dd531e16aa87007d74dcbc89aacca39",
+    "bytes": 25860777,
+    "source_video_sha256": "b788aa2e17a0370f41808edc4e52a56d2157f59c1e8b132e21f0f406d6f44225",
+    "caption_sha256": "52246cac52d7056feca454e6cb8af409bb7f8632284eebcf317c295453556f84",
+    "caption_count": 94,
+    "duration_seconds": 265.75,
+    "width": 1920,
+    "height": 1200,
+    "fps": 60.0,
+    "captions": "burned_in",
+    "caption_bar_height": 120,
+    "caption_font": "Hiragino Sans GB",
+    "caption_font_size": 44,
+    "caption_boundary_frames_checked": 247,
+    "maximum_caption_pixel_error": 0.2946990740740741,
+    "caption_timing_maximum_delay_seconds": 0.016666666666666666,
+    "audio_samples_and_timestamps_preserved": true,
+    "chapters_unchanged": true,
+    "source_video_and_srt_unchanged": true,
+    "complete_decode": "pass",
+    "muted_by_default": true,
+    "anonymous_playback": true,
+    "slide_area_ssim_checks": {
+      "first_frame": 0.998744,
+      "at_31_seconds": 0.999418
+    }
+  }
 }

@@ -15,4 +15,6 @@
 | [视频章节](https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/presentations/value-method/chapters.md) | 按主题定位视频内容 |
 | [文件清单](https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/presentations/value-method/manifest.json) | 文件校验值和逐页时间线 |
 
+[仓库首页](https://github.com/zhiyanliu/gherkai#价值与方法)的内嵌视频默认静音，并在画面下方显示字幕；上表的下载视频保留可开关的字幕轨。
+
 实际操作示例见 [gherkai-webapp-demo](https://github.com/zhiyanliu/gherkai-webapp-demo)，安装与使用见 [用户指南](https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/README.md)。

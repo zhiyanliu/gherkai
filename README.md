@@ -12,7 +12,7 @@
 
 ## 价值与方法
 
-https://github.com/user-attachments/assets/00eaeb62-c94b-443e-96ce-7389e27fbacc
+https://github.com/user-attachments/assets/5cfdb622-b0b4-4a3f-a783-d7d9dd8d8627
 
 [演示文稿、字幕与配套资料](./docs/presentations/value-method/README.md)
 

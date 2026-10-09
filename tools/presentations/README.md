@@ -1,6 +1,6 @@
 # 演示制作与媒体工具
 
-这些工具负责生图、按页配音和更新成片。最终交付不依赖旧版 PPT 构建脚本。需要 Python 3.10+；视频操作还需 FFmpeg 与 FFprobe。密钥及声音 ID 不在仓库内。
+这些工具负责生图、按页配音和更新成片。最终交付不依赖旧版 PPT 构建脚本。需要 Python 3.10+；视频操作还需 FFmpeg 与 FFprobe。网页字幕版另需 Pillow 和覆盖中文的字体文件。密钥及声音 ID 不在仓库内。
 
 ## 制作资料
 
@@ -93,3 +93,20 @@ python3 tools/presentations/video.py subtitles \
 画面更新检查第 0 帧为完整首页、逐页画面、直切、结尾淡出与完整解码；字幕替换核对文字、时间轴和视频/音频媒体包不变。两者均检查字幕源未被改写。输出日志仅供当次验收，交付后删除。
 
 新讲稿、新语速或新页数需要重新生成时间线和合成音轨，不能用此画面更新工具代替。素材包的逐页原始配音和正文供后续制作复用；第一份视频无需重新配音。
+
+## 网页字幕版
+
+GitHub 首页使用字幕直接写入画面的播放版，默认静音时也可阅读。字幕位于原幻灯片下方的独立区域，不遮挡页面；源视频和人工修订的 SRT 保持不变。输出为 1920×1200，原幻灯片保持 1920×1080，底部字幕栏高 120 像素。此版本的字幕固定显示，下载版仍保留独立字幕轨。
+
+安装 Pillow 后运行；字体路径按本机配置填写：
+
+```bash
+python3 tools/presentations/video.py web-captions \
+  --source-video docs/presentations/value-method/gherkai-value-method-v12.mp4 \
+  --subtitles docs/presentations/value-method/gherkai-value-method-v12.srt \
+  --font "/System/Library/Fonts/Hiragino Sans GB.ttc" \
+  --output tools/presentations/work/github-captioned.mp4 \
+  --stage tools/presentations/work/github-captions
+```
+
+工具复用原音轨和章节，检查每条字幕的起止画面及源文件校验值。字幕时刻按 60 fps 对齐，显示误差小于一帧。上传验收后的播放版，更新首页视频附件地址及交付 manifest 中的 `readme_video` 校验记录。播放版托管在 GitHub 附件服务，仓库保留源视频、字幕和生成工具。
