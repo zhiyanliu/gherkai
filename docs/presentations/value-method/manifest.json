@@ -1,7 +1,7 @@
 {
   "title": "gherkai 价值与方法",
   "deck_sha256": "6a37047b4c49c655d7325392e0f54e744ccbf77f58b976e1deec53a262c914f1",
-  "video_sha256": "cda4ee4c627a2026e24977262ddaf2497a76717f838419d245ddf790a0952c49",
+  "video_sha256": "b788aa2e17a0370f41808edc4e52a56d2157f59c1e8b132e21f0f406d6f44225",
   "video_seconds": 265.75,
   "width": 1920,
   "height": 1080,
@@ -11,9 +11,8 @@
   "speed": 1.02,
   "emotion": "happy",
   "playback_multiplier": 1.1,
-  "transition_style": "cuts_with_black_bookends",
+  "transition_style": "cuts_with_closing_fade",
   "transition_seconds": 0,
-  "boundary_fade_seconds": 0.1,
   "brand_pronunciation": "用户已选定 A：格儿凯中文连读，格音开头、保留儿化。",
   "pages": [
     {
@@ -301,28 +300,30 @@
   "materials_file": "gherkai-value-method-v12-materials.zip",
   "duration": 265.75,
   "caption_count": 94,
-  "boundary_black_hold_seconds": 0.15,
   "verification": {
     "status": "pass",
     "ppt_pages": 14,
     "caption_count": 94,
-    "source_deck_video_and_srt_bytes_preserved": true,
     "caption_text_and_timing_match_video": true,
     "complete_decode": "pass",
     "native_tables_charts_and_workbook_preserved": true,
     "page_transitions": "13 hard cuts",
-    "bookends": "0.1-second fades with 0.15-second black holds",
-    "minimum_slide_ssim": 0.992019
+    "bookends": "first slide at frame zero; ending 0.1-second fade with 0.15-second black hold",
+    "minimum_slide_ssim": 0.992019,
+    "source_deck_and_srt_bytes_preserved": true,
+    "audio_and_subtitle_samples_and_timestamps_preserved": true,
+    "chapters_unchanged": true,
+    "opening_frame_ssim": 0.993095
   },
-  "materials_sha256": "751728ebb59c8c17842b77c2f53eb267f31156d344b678e6f8941f361ce361b9",
+  "materials_sha256": "47df2f3382084f25f10ba8744d722a237960e5777e3c8656207488fb8998f5bd",
   "files": {
     "gherkai-value-method-v12.pptx": {
       "bytes": 11076819,
       "sha256": "6a37047b4c49c655d7325392e0f54e744ccbf77f58b976e1deec53a262c914f1"
     },
     "gherkai-value-method-v12.mp4": {
-      "bytes": 16813469,
-      "sha256": "cda4ee4c627a2026e24977262ddaf2497a76717f838419d245ddf790a0952c49"
+      "bytes": 16587066,
+      "sha256": "b788aa2e17a0370f41808edc4e52a56d2157f59c1e8b132e21f0f406d6f44225"
     },
     "gherkai-value-method-v12.srt": {
       "bytes": 7013,
@@ -341,9 +342,13 @@
       "sha256": "64f45a6b771b3be42e3a31968494da8fbe0e93d927aa488c56fe35a5c47db4c0"
     },
     "gherkai-value-method-v12-materials.zip": {
-      "bytes": 36142975,
-      "sha256": "751728ebb59c8c17842b77c2f53eb267f31156d344b678e6f8941f361ce361b9"
+      "bytes": 36143141,
+      "sha256": "47df2f3382084f25f10ba8744d722a237960e5777e3c8656207488fb8998f5bd"
     }
   },
-  "version": "v12"
+  "version": "v12",
+  "opening_frame": "first_slide",
+  "ending_fade_seconds": 0.1,
+  "ending_black_hold_seconds": 0.15,
+  "readme_video_url": "https://github.com/user-attachments/assets/00eaeb62-c94b-443e-96ce-7389e27fbacc"
 }

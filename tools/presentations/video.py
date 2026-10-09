@@ -162,14 +162,14 @@ def packets(path, stream):
 
 
 def verify_hard_cuts(ffmpeg, video, timeline, qa):
-    """Confirm unchanged full slide frames at cuts, plus the two black fades."""
+    """Confirm the first slide at frame zero, hard cuts, and the closing fade."""
     fps = timeline["fps"]
     total = round(timeline["duration"] * fps)
-    fade_frames = round(timeline["boundary_fade_seconds"] * fps)
-    hold_frames = round(timeline["boundary_black_hold_seconds"] * fps)
-    opening_start = hold_frames
+    fade_frames = round(timeline["ending_fade_seconds"] * fps)
+    hold_frames = round(timeline["ending_black_hold_seconds"] * fps)
+    opening_end = min(round(.5 * fps), timeline["pages"][0]["frames"] - 1)
     ending_start = total - hold_frames - fade_frames
-    ranges = [(0,opening_start+fade_frames+1),(ending_start,total-1)]
+    ranges = [(0,opening_end),(ending_start,total-1)]
     for page in timeline["pages"][1:]:
         boundary = round(page["start"] * fps)
         ranges.append((boundary-6,boundary+6))
@@ -188,11 +188,14 @@ def verify_hard_cuts(ffmpeg, video, timeline, qa):
     assert len(result.stdout)==len(indices)*size
     frames={n:result.stdout[i*size:(i+1)*size] for i,n in enumerate(indices)}
     mean=lambda n:sum(frames[n])/size
-    assert mean(0)<2 and mean(total-1)<2
+    assert mean(0)>50 and mean(total-1)<2
+    opening_errors=[]
+    for index in range(opening_end+1):
+        error=sum(abs(a-b) for a,b in zip(frames[index],frames[opening_end]))/size
+        assert error<.5, ("opening",index,error)
+        opening_errors.append(error)
     for step in range(fade_frames+1):
-        opening_ratio=mean(opening_start+step)/mean(opening_start+fade_frames)
         closing_ratio=mean(ending_start+step)/mean(ending_start)
-        assert abs(opening_ratio-step/fade_frames)<.04
         assert abs(closing_ratio-(1-step/fade_frames))<.04
     cuts=[]
     for page in timeline["pages"][1:]:
@@ -207,9 +210,11 @@ def verify_hard_cuts(ffmpeg, video, timeline, qa):
         assert mean(boundary-1)>50 and mean(boundary)>50
         cuts.append({"to_page":page["page"],"mode":"cut",
                      "maximum_stability_error":round(max(errors),4)})
-    report={"status":"pass","page_transitions":cuts,"opening":"black",
-            "ending":"black","opening_fade_seconds":timeline["boundary_fade_seconds"],
-            "ending_fade_seconds":timeline["boundary_fade_seconds"],
+    report={"status":"pass","page_transitions":cuts,"opening":"first_slide",
+            "opening_fade_seconds":0,"opening_black_hold_seconds":0,
+            "opening_maximum_stability_error":round(max(opening_errors),4),
+            "ending":"black","ending_fade_seconds":timeline["ending_fade_seconds"],
+            "ending_black_hold_seconds":timeline["ending_black_hold_seconds"],
             "page_fades":False}
     write_json(qa/"hard-cuts-and-bookends.json",report)
     return report
@@ -242,7 +247,8 @@ def refresh():
     timeline = json.loads(args.timeline.read_text())
     fps = timeline["fps"]
     duration = timeline["duration"]
-    assert timeline["transition_style"] == "cuts_with_black_bookends"
+    assert timeline["transition_style"] == "cuts_with_closing_fade"
+    assert timeline["opening_frame"] == "first_slide"
     assert float(original["format"]["duration"]) == duration
     ffmpeg = shutil.which("ffmpeg")
     embedded = run([ffmpeg, "-v", "error", "-nostdin", "-i", str(args.source_video),
@@ -261,10 +267,8 @@ def refresh():
 
     def render(page):
         filters = ["scale=out_color_matrix=bt709", "format=yuv420p"]
-        fade = timeline["boundary_fade_seconds"]
-        hold = timeline["boundary_black_hold_seconds"]
-        if page["page"] == 1:
-            filters.append(f"fade=t=in:st={hold:.9f}:d={fade:.9f}:color=black")
+        fade = timeline["ending_fade_seconds"]
+        hold = timeline["ending_black_hold_seconds"]
         if page["page"] == len(pages):
             filters.append(f"fade=t=out:st={page['duration']-fade-hold:.9f}:d={fade:.9f}:color=black")
         run([
@@ -319,7 +323,7 @@ def refresh():
                                  "samples_and_timestamps": "identical"})
 
     def frame_check(page):
-        at = min(page["start"] + 5, page["end"] - .5)
+        at = 0 if page["page"] == 1 else min(page["start"] + 5, page["end"] - .5)
         result = run([
             ffmpeg, "-hide_banner", "-nostdin", "-ss", str(at), "-i", str(args.output),
             "-i", page["slide_path"], "-filter_complex",
@@ -332,7 +336,7 @@ def refresh():
         return {"page": page["page"], "ssim": score}
     with ThreadPoolExecutor(max_workers=2) as pool:
         frame_checks = list(pool.map(frame_check, pages))
-    # New images use the already-approved timing and bookend filters. Inspect actual output frames.
+    # Inspect actual output frames for the cover start, cuts, and closing fade.
     cuts = verify_hard_cuts(ffmpeg, args.output, updated_timeline, args.stage)
     run([ffmpeg, "-v", "error", "-nostdin", "-i", str(args.output),
          "-map", "0:v:0", "-map", "0:a:0", "-f", "null", "-"], args.stage / "decode.log")
