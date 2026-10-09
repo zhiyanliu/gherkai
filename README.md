@@ -10,6 +10,14 @@
 
 同一份 `.feature` 可以在本机运行，也可以提交到团队共享的云端后端执行；查询类命令都有 `--json` 输出，AI agent（如 Claude Code、Codex）可以直接驾驭。
 
+## 价值与方法
+
+4 分 26 秒了解 gherkai：用业务用例驱动测试，组合 AI 与确定性步骤，将结果与证据带回迭代。
+
+https://github.com/user-attachments/assets/8174f872-e247-47bc-8beb-91d06470b8e2
+
+[演示文稿、字幕与配套资料](./docs/presentations/value-method/README.md)
+
 ## 安装
 
 ```bash
