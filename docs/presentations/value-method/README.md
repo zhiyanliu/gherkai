@@ -6,7 +6,7 @@
 
 | 资料 | 用途 |
 |---|---|
-| [PowerPoint](https://github.com/zhiyanliu/gherkai/raw/HEAD/docs/presentations/value-method/gherkai-value-method-v12.pptx) | 可编辑文稿，含逐页讲者备注、原生表格和图表 |
+| [Deck（PPTX）](https://github.com/zhiyanliu/gherkai/raw/HEAD/docs/presentations/value-method/gherkai-value-method-v12.pptx) | 可编辑文稿，含逐页讲者备注、原生表格和图表 |
 | [讲解视频](https://github.com/zhiyanliu/gherkai/raw/HEAD/docs/presentations/value-method/gherkai-value-method-v12.mp4) | 1080p 视频，含中文字幕和章节 |
 | [字幕](https://github.com/zhiyanliu/gherkai/raw/HEAD/docs/presentations/value-method/gherkai-value-method-v12.srt) | 与视频对应的 SRT 字幕 |
 | [素材包](https://github.com/zhiyanliu/gherkai/raw/HEAD/docs/presentations/value-method/gherkai-value-method-v12-materials.zip) | PPT、逐页画面、原始配音、口播稿、字幕和时间线 |

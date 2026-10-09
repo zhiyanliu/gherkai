@@ -12,7 +12,7 @@
 
 ## 价值与方法
 
-4 分 26 秒了解 gherkai：用业务用例驱动测试，组合 AI 与确定性步骤，将结果与证据带回迭代。
+了解 gherkai：用业务用例驱动测试，组合 AI 与确定性步骤，将结果与证据带回迭代。
 
 https://github.com/user-attachments/assets/8174f872-e247-47bc-8beb-91d06470b8e2
 

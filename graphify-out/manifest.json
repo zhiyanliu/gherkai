@@ -260,8 +260,8 @@
     "semantic_hash": "46506796a3741a0992133c3ce390e125"
   },
   "README.md": {
-    "mtime": 1791511705.0009215,
-    "ast_hash": "ee3087dd6cae7537ef115e272abf8e79",
+    "mtime": 1791514524.2320232,
+    "ast_hash": "68c32d4615ecec8c27ef09c8b612c55c",
     "semantic_hash": ""
   },
   "cli/README.md": {
@@ -1845,8 +1845,8 @@
     "semantic_hash": ""
   },
   "docs/presentations/value-method/README.md": {
-    "mtime": 1791511705.0005243,
-    "ast_hash": "bd26770462978686e8896482be004e26",
+    "mtime": 1791514524.2321873,
+    "ast_hash": "58dc3aae835382a3ae4162f00e46f7e9",
     "semantic_hash": ""
   },
   "docs/presentations/value-method/chapters.md": {
