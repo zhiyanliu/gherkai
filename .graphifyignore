@@ -3,3 +3,10 @@
 # 且 graphify 按扩展名当 jpeg 送 Bedrock 会被拒（image/jpeg 声明 vs PNG 字节），整块语义抽取跟着失败。
 skills/gherkai-evals/fixtures/
 skills/gherkai-workspace/
+
+# 演示交付的内容由 Markdown 讲稿保留；媒体与图标不重复进入知识图。
+docs/presentations/**/*.pptx
+docs/presentations/**/*.mp4
+docs/presentations/**/*.srt
+docs/presentations/**/*.zip
+tools/presentations/assets/

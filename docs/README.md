@@ -9,6 +9,8 @@
 | **想懂机理的技术读者**（架构、执行模型、云端载体） | [`internals/`](./internals/README.md) | 每篇只讲系统如何运转（how），权威在 ADR 与代码；配图的图源与静态图在 [`diagrams/`](./diagrams/)（改图与形态见 internals 索引） |
 | **contributor 侧 AI agent**（在本仓库里干活的 AI agent） | [`CLAUDE.md`](../CLAUDE.md)（项目约定） | [`adr/`](./adr/)（稳定决策：what / why / trade-off）；[`CONTEXT.md`](../CONTEXT.md)（领域概念与术语）；[`ai-eng/`](./ai-eng/README.md)（外部一手来源、复盘与作图方法）；`journey/`（跨会话任务的过程暂存，随任务收尾清空） |
 
+评估 gherkai 的采用价值与工作方法，可查看 [演示文稿和讲解视频](https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/presentations/README.md)。
+
 ## 三条阅读规则
 
 - **权威在 ADR 与代码**。user guide 与 internals 都是派生视图：与 ADR 或代码冲突时以后者为准，并提 issue 或直接修正文档。

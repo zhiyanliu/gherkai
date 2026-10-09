@@ -1,1 +1,4 @@
 graphify-out/graph.json merge=graphify
+
+# Preserve approved subtitle bytes, including the final SRT cue separator.
+docs/presentations/**/*.srt -text whitespace=-blank-at-eof

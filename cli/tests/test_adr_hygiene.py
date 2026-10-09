@@ -20,7 +20,7 @@ ADR_DIR = REPO / "docs" / "adr"
 JOURNEY_DIR = REPO / "docs" / "journey"
 STATUS = re.compile(r"^> \*\*Status:\*\* (Accepted|Draft|Historical|Superseded-by|Partially-superseded-by)\b")
 NUMBERED = re.compile(r"^\d{4}-[a-z0-9]+(?:-[a-z0-9]+)*\.md$")
-KEBAB = re.compile(r"^[a-z0-9]+(?:[.-][a-z0-9]+)*\.(md|json|svg|html|png)$")
+KEBAB = re.compile(r"^[a-z0-9]+(?:[.-][a-z0-9]+)*\.(md|json|svg|html|png|pptx|mp4|srt|zip)$")
 # 约定俗成的全大写入口文件（CLAUDE.md 文档纪律「文档文件名」条的唯一例外）。
 UPPER_OK = {"README.md", "REFERENCES.md"}
 

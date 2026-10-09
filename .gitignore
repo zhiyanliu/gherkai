@@ -118,3 +118,7 @@ docs/diagrams/*.html
 !docs/diagrams/index.html
 !docs/diagrams/run-execution.html
 !docs/diagrams/cloud-delivery-identity.html
+
+# 演示材料的制作缓存；正式交付在 docs/presentations/
+/tools/presentations/work/
+/.chart-data-*/

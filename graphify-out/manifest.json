@@ -260,9 +260,9 @@
     "semantic_hash": "46506796a3741a0992133c3ce390e125"
   },
   "README.md": {
-    "mtime": 1790753065.744983,
-    "ast_hash": "8325993269750a722f20debb79a06603",
-    "semantic_hash": "8325993269750a722f20debb79a06603"
+    "mtime": 1791511705.0009215,
+    "ast_hash": "ee3087dd6cae7537ef115e272abf8e79",
+    "semantic_hash": ""
   },
   "cli/README.md": {
     "mtime": 1789845931.3331795,
@@ -1235,8 +1235,8 @@
     "semantic_hash": "33495d622cbafc211417eb3c794f5173"
   },
   "skills/gherkai-evals/evals.json": {
-    "mtime": 1790742026.049702,
-    "ast_hash": "",
+    "mtime": 1790829907.5043106,
+    "ast_hash": "293964fd87569d4ecff42ba39037a230",
     "semantic_hash": ""
   },
   "skills/gherkai-evals/trigger-eval.json": {
@@ -1340,14 +1340,14 @@
     "semantic_hash": ""
   },
   "CONTRIBUTING.md": {
-    "mtime": 1790741973.1598516,
-    "ast_hash": "5812b267ca1a199f6232f2a9e24fac43",
-    "semantic_hash": "5812b267ca1a199f6232f2a9e24fac43"
+    "mtime": 1791513203.3082097,
+    "ast_hash": "674446d4ddbad3d6596c890ce5c152c7",
+    "semantic_hash": ""
   },
   "docs/README.md": {
-    "mtime": 1789831362.6666305,
-    "ast_hash": "92a868d9a75d55a6be99883975cbae1e",
-    "semantic_hash": "92a868d9a75d55a6be99883975cbae1e"
+    "mtime": 1791511705.0011747,
+    "ast_hash": "06ee708c034ff94fc4618c5b14c5c4f9",
+    "semantic_hash": ""
   },
   "docs/adr/0045-documentation-layering-and-placement.md": {
     "mtime": 1790730553.544807,
@@ -1705,9 +1705,9 @@
     "semantic_hash": "68252ee02a81952e2bf1b49cc1361338"
   },
   "cli/tests/test_adr_hygiene.py": {
-    "mtime": 1789875066.6311665,
-    "ast_hash": "a47c438e9cf3270a1a06f05b53862262",
-    "semantic_hash": "a47c438e9cf3270a1a06f05b53862262"
+    "mtime": 1791511705.0020194,
+    "ast_hash": "2c9eae538e1ee7a13c5cc2761fb0bc91",
+    "semantic_hash": ""
   },
   "cli/tests/test_context_glossary.py": {
     "mtime": 1789875066.6334743,
@@ -1818,5 +1818,60 @@
     "mtime": 1790749850.812309,
     "ast_hash": "136d4acb70f0b2757bab87d32ffa1a44",
     "semantic_hash": "136d4acb70f0b2757bab87d32ffa1a44"
+  },
+  "docs/presentations/value-method/manifest.json": {
+    "mtime": 1791511196.0681834,
+    "ast_hash": "61ab1e39f42bc3b7987da366f3bd6423",
+    "semantic_hash": ""
+  },
+  "tools/presentations/gemini_image.py": {
+    "mtime": 1790842711.3283393,
+    "ast_hash": "401ec940096c6bb26f62b3c60bf1dfd9",
+    "semantic_hash": ""
+  },
+  "tools/presentations/minimax_narration.py": {
+    "mtime": 1791510856.104745,
+    "ast_hash": "029dac86260ef464f0e7a67502218479",
+    "semantic_hash": ""
+  },
+  "tools/presentations/video.py": {
+    "mtime": 1791510856.1110368,
+    "ast_hash": "c84f574b127cc8ce04c69efcfbd5c282",
+    "semantic_hash": ""
+  },
+  "docs/presentations/README.md": {
+    "mtime": 1791511705.000459,
+    "ast_hash": "ba725d038743e7e3c65c6e8fe8ee4f48",
+    "semantic_hash": ""
+  },
+  "docs/presentations/value-method/README.md": {
+    "mtime": 1791511705.0005243,
+    "ast_hash": "bd26770462978686e8896482be004e26",
+    "semantic_hash": ""
+  },
+  "docs/presentations/value-method/chapters.md": {
+    "mtime": 1791453450.962255,
+    "ast_hash": "36d310e7a73c29184c53511cddee9308",
+    "semantic_hash": ""
+  },
+  "docs/presentations/value-method/narration.md": {
+    "mtime": 1791452245.8564525,
+    "ast_hash": "a7fd784e7cb20b0dd235cc8d46fddf1e",
+    "semantic_hash": ""
+  },
+  "docs/presentations/value-method/speaker-notes.md": {
+    "mtime": 1791510855.4260113,
+    "ast_hash": "8853dd2a1f3599c58cbc52db73a005c0",
+    "semantic_hash": ""
+  },
+  "tools/presentations/README.md": {
+    "mtime": 1791513203.308025,
+    "ast_hash": "fffdb6f4dac74fe81ac5a77f16a6d300",
+    "semantic_hash": ""
+  },
+  "tools/presentations/production.md": {
+    "mtime": 1791513203.3078718,
+    "ast_hash": "cc0ecd3bc89acfdee7ad0b3e2eb0c436",
+    "semantic_hash": ""
   }
 }

@@ -77,6 +77,7 @@ v1 定位尚有一项验收未完成，前置条件是取得可用的真实业�
 | `render_skill_contract.py`                      | 把 `--json` 契约页确定性转换为 agent skill 里的副本（ADR 0043 决策四）                                                                                                                                        |
 | `doc_rules_check.py`                            | 人读文本的措辞与悬空指针护栏命令行入口：`--changed` 只报本次改动的行、`--staged` 扫暂存区（hook 与提交闸门调用它；规则在 `cli/tests/_doc_rules.py`，见下文「测试」节「护栏三层」段） |
 | `git-hooks/pre-commit`                          | 可选的 git 提交闸门（`git config core.hooksPath tools/git-hooks` 启用），与 Claude Code 的提交闸门共用同一份规则 |
+| `presentations/` | 演示材料的生图、配音、视频更新工具；用法见 [媒体工具说明](https://github.com/zhiyanliu/gherkai/blob/HEAD/tools/presentations/README.md)，制作规范见 [演示维护资料](https://github.com/zhiyanliu/gherkai/blob/HEAD/tools/presentations/production.md) |
 | `graphify_refresh.sh`                           | 知识图的 LLM 侧刷新（见下文「知识图刷新」）                                                                                                                                                                      |
 
 ## 开发环境（从 checkout 运行）
