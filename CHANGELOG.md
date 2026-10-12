@@ -8,6 +8,10 @@
 
 ## [Unreleased]
 
+### 变化
+
+- Midscene worker 的 SDK 从 `@midscene/web` 1.12.8 升到 1.15.1（Playwright 仍为 1.63.0）。对使用者的可见变化只有 Midscene 自己的报告页样式随新版改变；模型请求形态、证据与 `explain` 输出不变。
+
 ## [1.4.9] - 2026-10-12
 
 ### 变化
