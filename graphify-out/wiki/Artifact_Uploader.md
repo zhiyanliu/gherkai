@@ -36,14 +36,14 @@
 - [Artifact Upload Tests](Artifact_Upload_Tests.md) (6 shared connections)
 - [Nova Artifact Upload](Nova_Artifact_Upload.md) (3 shared connections)
 - [Background Upload Queue](Background_Upload_Queue.md) (2 shared connections)
-- [Local No-Op Uploader](Local_No-Op_Uploader.md) (1 shared connections)
-- [Nova Act Worker Entry](Nova_Act_Worker_Entry.md) (1 shared connections)
-- [Uploader Enablement Check](Uploader_Enablement_Check.md) (1 shared connections)
+- [No-op Local Uploader](No-op_Local_Uploader.md) (1 shared connections)
+- [Nova Act Worker Package](Nova_Act_Worker_Package.md) (1 shared connections)
+- [Uploader Enabled Check](Uploader_Enabled_Check.md) (1 shared connections)
 - [Upload Queue Drain](Upload_Queue_Drain.md) (1 shared connections)
-- [Worker Event Sink & Redaction](Worker_Event_Sink_%26_Redaction.md) (1 shared connections)
+- [Worker Event Sink](Worker_Event_Sink.md) (1 shared connections)
 - [Upload Call Recorder](Upload_Call_Recorder.md) (1 shared connections)
 - [Worker Job Source Input](Worker_Job_Source_Input.md) (1 shared connections)
-- [Step Evidence Records](Step_Evidence_Records.md) (1 shared connections)
+- [Step Evidence Extraction](Step_Evidence_Extraction.md) (1 shared connections)
 
 ## Source Files
 

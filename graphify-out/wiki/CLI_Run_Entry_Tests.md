@@ -33,18 +33,18 @@
 
 ## Relationships
 
-- [CLI Plan Command Behavior](CLI_Plan_Command_Behavior.md) (66 shared connections)
-- [Doctor Self-Check Command](Doctor_Self-Check_Command.md) (30 shared connections)
+- [CLI Plan And Doctor Tests](CLI_Plan_And_Doctor_Tests.md) (66 shared connections)
+- [Doctor Self-check Tests](Doctor_Self-check_Tests.md) (30 shared connections)
 - [Explain Command Tests](Explain_Command_Tests.md) (17 shared connections)
-- [Status Render Output](Status_Render_Output.md) (8 shared connections)
-- [Job/Scenario Explain Model](Job-Scenario_Explain_Model.md) (5 shared connections)
-- [Local Tunnel Exposure Tests](Local_Tunnel_Exposure_Tests.md) (4 shared connections)
-- [Cloud Store Composition Root](Cloud_Store_Composition_Root.md) (2 shared connections)
-- [CLI Command Dispatch Entry](CLI_Command_Dispatch_Entry.md) (2 shared connections)
-- [Run State Rendering & DDB Store](Run_State_Rendering_%26_DDB_Store.md) (2 shared connections)
-- [Result Rendering & Explain](Result_Rendering_%26_Explain.md) (2 shared connections)
-- [Cloud Launcher & Fargate Adapters](Cloud_Launcher_%26_Fargate_Adapters.md) (1 shared connections)
-- [Deploy Command Frontend Tests](Deploy_Command_Frontend_Tests.md) (1 shared connections)
+- [Status Rendering & Exit Codes](Status_Rendering_%26_Exit_Codes.md) (8 shared connections)
+- [Job Explain Data Model](Job_Explain_Data_Model.md) (5 shared connections)
+- [Tunnel CLI Wiring Tests](Tunnel_CLI_Wiring_Tests.md) (4 shared connections)
+- [Run State Store](Run_State_Store.md) (3 shared connections)
+- [SSM Paths And Compose](SSM_Paths_And_Compose.md) (2 shared connections)
+- [CLI Command Entry Points](CLI_Command_Entry_Points.md) (2 shared connections)
+- [Explain Reads And Report Store](Explain_Reads_And_Report_Store.md) (2 shared connections)
+- [Cloud Adapter Boundary Modules](Cloud_Adapter_Boundary_Modules.md) (1 shared connections)
+- [Deploy Command Frontend](Deploy_Command_Frontend.md) (1 shared connections)
 
 ## Source Files
 

@@ -1,6 +1,6 @@
 # Worker Job Source Input
 
-> 70 nodes · cohesion 0.05
+> 68 nodes · cohesion 0.05
 
 ## Key Concepts
 
@@ -29,27 +29,26 @@
 - **download_subtitles()** (4 connections) — `tools/presentations/minimax_narration.py`
 - **NoRedirect** (4 connections) — `tools/presentations/minimax_narration.py`
 - **post()** (4 connections) — `tools/presentations/minimax_narration.py`
-- *... and 45 more nodes in this community*
+- *... and 43 more nodes in this community*
 
 ## Relationships
 
-- [Cloud Store Composition Root](Cloud_Store_Composition_Root.md) (3 shared connections)
-- [Worker Event Sink & Redaction](Worker_Event_Sink_%26_Redaction.md) (2 shared connections)
-- [Nova Act Worker Entry](Nova_Act_Worker_Entry.md) (2 shared connections)
-- [Backend CDK Stack Constructs](Backend_CDK_Stack_Constructs.md) (2 shared connections)
-- [Step Execution & Error Classification](Step_Execution_%26_Error_Classification.md) (2 shared connections)
-- [AWS Target & Network Resolution](AWS_Target_%26_Network_Resolution.md) (1 shared connections)
-- [Documentation Guardrail Rules](Documentation_Guardrail_Rules.md) (1 shared connections)
-- [Feature Parsing & Errors](Feature_Parsing_%26_Errors.md) (1 shared connections)
+- [Nova Act Worker Package](Nova_Act_Worker_Package.md) (2 shared connections)
+- [Worker Event Sink](Worker_Event_Sink.md) (2 shared connections)
+- [AWS Target Resolution](AWS_Target_Resolution.md) (2 shared connections)
+- [SSM Paths And Compose](SSM_Paths_And_Compose.md) (2 shared connections)
+- [CDK Command Wrapper](CDK_Command_Wrapper.md) (2 shared connections)
+- [Backend CDK Stack](Backend_CDK_Stack.md) (2 shared connections)
+- [Step Execution Dispatch](Step_Execution_Dispatch.md) (2 shared connections)
+- [Docs And Skill Guardrails](Docs_And_Skill_Guardrails.md) (1 shared connections)
+- [Feature File Parsing](Feature_File_Parsing.md) (1 shared connections)
 - [Cloud Backend CLI Wiring Tests](Cloud_Backend_CLI_Wiring_Tests.md) (1 shared connections)
-- [Schedule Module Tests](Schedule_Module_Tests.md) (1 shared connections)
-- [Wire Protocol Serialization](Wire_Protocol_Serialization.md) (1 shared connections)
-- [Deploy Provider Commands](Deploy_Provider_Commands.md) (1 shared connections)
+- [Run Scheduling Events Core](Run_Scheduling_Events_Core.md) (1 shared connections)
+- [Event Wire Protocol](Event_Wire_Protocol.md) (1 shared connections)
 
 ## Source Files
 
 - `.github/scripts/release_notes.py`
-- `engines/novaact/gherkai_worker_novaact/lib/event_sink.py`
 - `engines/novaact/gherkai_worker_novaact/lib/job_source.py`
 - `engines/novaact/tests/test_job_source.py`
 - `runtime/gherkai_runtime/compose.py`
@@ -61,7 +60,7 @@
 
 ## Audit Trail
 
-- EXTRACTED: 119 (82%)
+- EXTRACTED: 117 (82%)
 - INFERRED: 26 (18%)
 - AMBIGUOUS: 0 (0%)
 

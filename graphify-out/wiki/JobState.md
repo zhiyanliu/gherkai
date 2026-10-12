@@ -2,7 +2,7 @@
 
 > God node · 101 connections · `core/gherkai_core/model.py`
 
-**Community:** [Job State Serialization](Job_State_Serialization.md)
+**Community:** [DynamoDB Job State Store](DynamoDB_Job_State_Store.md)
 
 ## Connections by Relation
 

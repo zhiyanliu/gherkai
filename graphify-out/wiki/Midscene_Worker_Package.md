@@ -21,10 +21,10 @@
 
 ## Relationships
 
-- [Package Files Manifest](Package_Files_Manifest.md) (1 shared connections)
-- [NPM Scripts](NPM_Scripts.md) (1 shared connections)
+- [Package Published Files](Package_Published_Files.md) (1 shared connections)
+- [Build & Test Scripts](Build_%26_Test_Scripts.md) (1 shared connections)
 - [AWS SDK Dependencies](AWS_SDK_Dependencies.md) (1 shared connections)
-- [Dev Dependencies](Dev_Dependencies.md) (1 shared connections)
+- [TypeScript Dev Dependencies](TypeScript_Dev_Dependencies.md) (1 shared connections)
 - [Repository Metadata](Repository_Metadata.md) (1 shared connections)
 
 ## Source Files

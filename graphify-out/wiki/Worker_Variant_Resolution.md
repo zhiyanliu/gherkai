@@ -1,13 +1,12 @@
 # Worker Variant Resolution
 
-> 49 nodes · cohesion 0.07
+> 47 nodes · cohesion 0.07
 
 ## Key Concepts
 
 - **test_worker_variant.py** (31 connections) — `runtime/tests/test_worker_variant.py`
 - **_seed()** (23 connections) — `runtime/tests/test_worker_variant.py`
 - **_resolve()** (16 connections) — `runtime/tests/test_worker_variant.py`
-- **resolve_default_worker_task_defs()** (14 connections) — `runtime/gherkai_runtime/compose.py`
 - **worker_image_key()** (8 connections) — `runtime/gherkai_runtime/names.py`
 - **test_digest_not_in_ecr_is_a_miss()** (8 connections) — `runtime/tests/test_worker_variant.py`
 - **_register_revision()** (6 connections) — `runtime/tests/test_worker_variant.py`
@@ -29,25 +28,26 @@
 - **test_one_engine_missing_fails_whole_resolution()** (4 connections) — `runtime/tests/test_worker_variant.py`
 - **test_unused_engine_not_probed()** (4 connections) — `runtime/tests/test_worker_variant.py`
 - **test_variant_none_uses_default_pointer()** (4 connections) — `runtime/tests/test_worker_variant.py`
-- *... and 24 more nodes in this community*
+- **（引擎，镜像 tag）→ revision 映射的 SSM 键（相对键，全路径为 `ssm_path(prefix, 本键)`）。 值是…** (1 connections) — `runtime/gherkai_runtime/names.py`
+- *... and 22 more nodes in this community*
 
 ## Relationships
 
-- [Cloud Store Composition Root](Cloud_Store_Composition_Root.md) (17 shared connections)
-- [Resource Naming Source](Resource_Naming_Source.md) (9 shared connections)
-- [Test Fixtures & Conftest](Test_Fixtures_%26_Conftest.md) (2 shared connections)
-- [Cloud Launcher & Fargate Adapters](Cloud_Launcher_%26_Fargate_Adapters.md) (1 shared connections)
-- [Task Stop Timeout Read](Task_Stop_Timeout_Read.md) (1 shared connections)
+- [SSM Paths And Compose](SSM_Paths_And_Compose.md) (13 shared connections)
+- [Runtime Naming Source](Runtime_Naming_Source.md) (9 shared connections)
+- [Cloud Compose Root](Cloud_Compose_Root.md) (2 shared connections)
+- [Test Fixtures And Env](Test_Fixtures_And_Env.md) (1 shared connections)
+- [Moto SSM/ECS/ECR Clients](Moto_SSM-ECS-ECR_Clients.md) (1 shared connections)
+- [Task Def Stop Timeout](Task_Def_Stop_Timeout.md) (1 shared connections)
 
 ## Source Files
 
-- `runtime/gherkai_runtime/compose.py`
 - `runtime/gherkai_runtime/names.py`
 - `runtime/tests/test_worker_variant.py`
 
 ## Audit Trail
 
-- EXTRACTED: 117 (100%)
+- EXTRACTED: 108 (100%)
 - INFERRED: 0 (0%)
 - AMBIGUOUS: 0 (0%)
 

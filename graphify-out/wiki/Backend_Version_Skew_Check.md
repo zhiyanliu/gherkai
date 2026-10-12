@@ -1,12 +1,10 @@
 # Backend Version Skew Check
 
-> 20 nodes · cohesion 0.15
+> 16 nodes · cohesion 0.15
 
 ## Key Concepts
 
 - **_StampSsm** (14 connections) — `runtime/tests/test_compose.py`
-- **read_backend_version()** (10 connections) — `runtime/gherkai_runtime/compose.py`
-- **check_backend_skew()** (7 connections) — `runtime/gherkai_runtime/compose.py`
 - **_client_error()** (5 connections) — `runtime/tests/test_compose.py`
 - **test_check_backend_skew_propagates_read_errors()** (5 connections) — `runtime/tests/test_compose.py`
 - **test_read_backend_version_missing_parameter_is_none_not_raise()** (5 connections) — `runtime/tests/test_compose.py`
@@ -15,8 +13,6 @@
 - **test_check_backend_skew_reads_stamp_then_judges()** (4 connections) — `runtime/tests/test_compose.py`
 - **test_read_backend_version_blank_value_is_none()** (3 connections) — `runtime/tests/test_compose.py`
 - **test_read_backend_version_reads_prefixed_path()** (3 connections) — `runtime/tests/test_compose.py`
-- **读后端版本戳 SSM 参数（`ssm_path(prefix, BACKEND_VERSION_KEY)`，由 stack 资源随部署事务写入，ADR…** (1 connections) — `runtime/gherkai_runtime/compose.py`
-- **读后端版本戳 + 判 skew 一步到位（ADR 0037 决策 7）——**编排住产品本体、不住入口前端**：CLI / WebUI /…** (1 connections) — `runtime/gherkai_runtime/compose.py`
 - **假 ssm：读版本戳参数。`value=None` 模拟 `ParameterNotFound`（本机制之前部署的环境）。** (1 connections) — `runtime/tests/test_compose.py`
 - **`ParameterNotFound` → None（决策 7 判「警告不拦」）——若翻成异常，本机制之前部署的所有环境会被锁死。** (1 connections) — `runtime/tests/test_compose.py`
 - **凭证/权限/region 类错误照抛——由入口前端归到自己的退出码层，不伪装成「没有戳」。** (1 connections) — `runtime/tests/test_compose.py`
@@ -27,21 +23,20 @@
 
 ## Relationships
 
-- [AWS Target & Network Resolution](AWS_Target_%26_Network_Resolution.md) (10 shared connections)
-- [Cloud Store Composition Root](Cloud_Store_Composition_Root.md) (5 shared connections)
-- [Feature Parsing & Errors](Feature_Parsing_%26_Errors.md) (1 shared connections)
-- [Run State Rendering & DDB Store](Run_State_Rendering_%26_DDB_Store.md) (1 shared connections)
-- [Cloud Launcher & Fargate Adapters](Cloud_Launcher_%26_Fargate_Adapters.md) (1 shared connections)
+- [AWS Target Resolution](AWS_Target_Resolution.md) (9 shared connections)
+- [SSM Paths And Compose](SSM_Paths_And_Compose.md) (7 shared connections)
+- [Feature File Parsing](Feature_File_Parsing.md) (1 shared connections)
+- [Run State Store](Run_State_Store.md) (1 shared connections)
+- [Cloud Adapter Boundary Modules](Cloud_Adapter_Boundary_Modules.md) (1 shared connections)
 
 ## Source Files
 
-- `runtime/gherkai_runtime/compose.py`
 - `runtime/tests/test_compose.py`
 
 ## Audit Trail
 
-- EXTRACTED: 43 (93%)
-- INFERRED: 3 (7%)
+- EXTRACTED: 34 (92%)
+- INFERRED: 3 (8%)
 - AMBIGUOUS: 0 (0%)
 
 ---

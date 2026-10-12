@@ -33,9 +33,9 @@
 
 ## Relationships
 
-- [Scenario Evidence Tests](Scenario_Evidence_Tests.md) (12 shared connections)
-- [Nova Act Worker Entry](Nova_Act_Worker_Entry.md) (6 shared connections)
-- [Test Fixtures & Conftest](Test_Fixtures_%26_Conftest.md) (1 shared connections)
+- [Scenario Evidence Keys](Scenario_Evidence_Keys.md) (12 shared connections)
+- [Nova Act Worker Package](Nova_Act_Worker_Package.md) (6 shared connections)
+- [Test Fixtures And Env](Test_Fixtures_And_Env.md) (1 shared connections)
 
 ## Source Files
 

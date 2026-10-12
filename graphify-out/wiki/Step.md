@@ -2,7 +2,7 @@
 
 > God node · 72 connections · `core/gherkai_core/model.py`
 
-**Community:** [Job/Scenario Explain Model](Job-Scenario_Explain_Model.md)
+**Community:** [Job Explain Data Model](Job_Explain_Data_Model.md)
 
 ## Connections by Relation
 

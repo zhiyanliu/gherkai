@@ -1,6 +1,6 @@
 # Lambda Handler Event Parsing Tests
 
-> 121 nodes · cohesion 0.03
+> 122 nodes · cohesion 0.03
 
 ## Key Concepts
 
@@ -29,28 +29,31 @@
 - **test_handle_timeout_noop_when_exit_in_flight()** (4 connections) — `deploy_aws/tests/test_lambda_handlers.py`
 - **test_handle_timeout_noop_when_job_terminal()** (4 connections) — `deploy_aws/tests/test_lambda_handlers.py`
 - **test_handle_timeout_stops_matching_task()** (4 connections) — `deploy_aws/tests/test_lambda_handlers.py`
-- *... and 96 more nodes in this community*
+- *... and 97 more nodes in this community*
 
 ## Relationships
 
-- [Job/Scenario Explain Model](Job-Scenario_Explain_Model.md) (22 shared connections)
-- [Cloud Launcher & Fargate Adapters](Cloud_Launcher_%26_Fargate_Adapters.md) (8 shared connections)
-- [SQLite Event Log Adapter](SQLite_Event_Log_Adapter.md) (4 shared connections)
-- [Job State Serialization](Job_State_Serialization.md) (4 shared connections)
-- [Run State Rendering & DDB Store](Run_State_Rendering_%26_DDB_Store.md) (4 shared connections)
-- [Exit Observer Lambda](Exit_Observer_Lambda.md) (2 shared connections)
-- [Result Rendering & Explain](Result_Rendering_%26_Explain.md) (1 shared connections)
-- [Test Fixtures & Conftest](Test_Fixtures_%26_Conftest.md) (1 shared connections)
-- [DynamoDB Event Log](DynamoDB_Event_Log.md) (1 shared connections)
+- [Job Explain Data Model](Job_Explain_Data_Model.md) (22 shared connections)
+- [Run State Store](Run_State_Store.md) (6 shared connections)
+- [DynamoDB Job State Store](DynamoDB_Job_State_Store.md) (5 shared connections)
+- [Step Argument S3 Offload](Step_Argument_S3_Offload.md) (5 shared connections)
+- [Reconcile Lambdas](Reconcile_Lambdas.md) (2 shared connections)
+- [Cloud Adapter Boundary Modules](Cloud_Adapter_Boundary_Modules.md) (2 shared connections)
+- [Result Tree Rendering](Result_Tree_Rendering.md) (1 shared connections)
+- [Detached Local Run Host](Detached_Local_Run_Host.md) (1 shared connections)
+- [Test Fixtures And Env](Test_Fixtures_And_Env.md) (1 shared connections)
+- [Cloud Launcher Reconcile Tests](Cloud_Launcher_Reconcile_Tests.md) (1 shared connections)
+- [SQLite Event Log](SQLite_Event_Log.md) (1 shared connections)
 
 ## Source Files
 
+- `core/gherkai_core/model.py`
 - `deploy_aws/tests/test_lambda_handlers.py`
 
 ## Audit Trail
 
-- EXTRACTED: 221 (95%)
-- INFERRED: 12 (5%)
+- EXTRACTED: 221 (94%)
+- INFERRED: 13 (6%)
 - AMBIGUOUS: 0 (0%)
 
 ---

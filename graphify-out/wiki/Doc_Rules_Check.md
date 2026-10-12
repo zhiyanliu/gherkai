@@ -15,7 +15,7 @@
 
 ## Relationships
 
-- [Doc Rules Source](Doc_Rules_Source.md) (3 shared connections)
+- [Human Doc Rules Source](Human_Doc_Rules_Source.md) (3 shared connections)
 
 ## Source Files
 

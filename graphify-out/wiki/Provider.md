@@ -2,7 +2,7 @@
 
 > God node · 100 connections · `deploy_aws/gherkai_deploy_aws/cli.py`
 
-**Community:** [Deploy Provider & Container Seam](Deploy_Provider_%26_Container_Seam.md)
+**Community:** [AWS Deploy Provider Tests](AWS_Deploy_Provider_Tests.md)
 
 ## Connections by Relation
 

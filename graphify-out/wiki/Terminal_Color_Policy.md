@@ -26,11 +26,10 @@
 
 ## Relationships
 
-- [SQLite Event Log Adapter](SQLite_Event_Log_Adapter.md) (2 shared connections)
-- [Human-Readable Text UI](Human-Readable_Text_UI.md) (2 shared connections)
-- [Core Library Concepts & ADRs](Core_Library_Concepts_%26_ADRs.md) (1 shared connections)
-- [Subprocess Engine Logging](Subprocess_Engine_Logging.md) (1 shared connections)
-- [CLI JSON Contract Tests](CLI_JSON_Contract_Tests.md) (1 shared connections)
+- [Subprocess Engine Adapter](Subprocess_Engine_Adapter.md) (3 shared connections)
+- [Text UI Rendering](Text_UI_Rendering.md) (2 shared connections)
+- [Contributor Docs And ADRs](Contributor_Docs_And_ADRs.md) (1 shared connections)
+- [Engine Listing JSON Contract](Engine_Listing_JSON_Contract.md) (1 shared connections)
 
 ## Source Files
 

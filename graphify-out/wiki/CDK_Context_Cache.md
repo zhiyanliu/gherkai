@@ -1,6 +1,6 @@
 # CDK Context Cache
 
-> 11 nodes · cohesion 0.24
+> 13 nodes · cohesion 0.21
 
 ## Key Concepts
 
@@ -9,8 +9,10 @@
 - **context_cache_path()** (6 connections) — `deploy_aws/gherkai_deploy_aws/cli.py`
 - **test_context_cache_is_saved_after_the_run_and_seeded_into_the_next_fresh_work_dir()** (6 connections) — `deploy_aws/tests/test_provider.py`
 - **test_context_cache_survives_a_failed_cdk_run()** (6 connections) — `deploy_aws/tests/test_provider.py`
+- **Path** (5 connections)
 - **test_refresh_context_discards_the_cache_before_running()** (5 connections) — `deploy_aws/tests/test_provider.py`
 - **test_context_cache_is_per_prefix()** (3 connections) — `deploy_aws/tests/test_provider.py`
+- **.__call__()** (2 connections) — `deploy_aws/tests/test_provider.py`
 - **CDK 环境查询缓存（`cdk.context.json`）的持久化位置：`$XDG_CACHE_HOME`（缺省…** (1 connections) — `deploy_aws/gherkai_deploy_aws/cli.py`
 - **`subprocess.run` 替身：像真 cdk 做过 from_lookup 那样，在 cwd 写下 `cdk.context.json`；并记下进…** (1 connections) — `deploy_aws/tests/test_provider.py`
 - **工作目录一次性 → 若每次空着进去，cdk 会对缺失的 lookup 值先用占位 VPC 预合成一遍（触发模板校验 warning、 多一轮查询）。缓存按…** (1 connections) — `deploy_aws/tests/test_provider.py`
@@ -18,12 +20,11 @@
 
 ## Relationships
 
-- [Deploy Provider & Container Seam](Deploy_Provider_%26_Container_Seam.md) (13 shared connections)
-- [CDK Command Execution](CDK_Command_Execution.md) (2 shared connections)
-- [CDK Command Invocation](CDK_Command_Invocation.md) (2 shared connections)
-- [CDK App & AWS Provider CLI](CDK_App_%26_AWS_Provider_CLI.md) (1 shared connections)
-- [Deploy Preflight Stubs](Deploy_Preflight_Stubs.md) (1 shared connections)
-- [AWS Client Test Doubles](AWS_Client_Test_Doubles.md) (1 shared connections)
+- [AWS Deploy Provider Tests](AWS_Deploy_Provider_Tests.md) (16 shared connections)
+- [CDK Command Wrapper](CDK_Command_Wrapper.md) (2 shared connections)
+- [AWS Deploy CLI Provider](AWS_Deploy_CLI_Provider.md) (1 shared connections)
+- [Deploy Prerequisite Stubs](Deploy_Prerequisite_Stubs.md) (1 shared connections)
+- [CloudFormation/SSM Fakes](CloudFormation-SSM_Fakes.md) (1 shared connections)
 
 ## Source Files
 
@@ -32,7 +33,7 @@
 
 ## Audit Trail
 
-- EXTRACTED: 32 (97%)
+- EXTRACTED: 36 (97%)
 - INFERRED: 1 (3%)
 - AMBIGUOUS: 0 (0%)
 

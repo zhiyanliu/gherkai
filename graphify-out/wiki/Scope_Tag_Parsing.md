@@ -14,8 +14,8 @@
 
 ## Relationships
 
-- [Engine Port And Job Plan](Engine_Port_And_Job_Plan.md) (2 shared connections)
-- [DynamoDB Events Transport](DynamoDB_Events_Transport.md) (1 shared connections)
+- [Engine Port & Job Planning](Engine_Port_%26_Job_Planning.md) (2 shared connections)
+- [DynamoDB Events Transport ADR](DynamoDB_Events_Transport_ADR.md) (1 shared connections)
 
 ## Source Files
 

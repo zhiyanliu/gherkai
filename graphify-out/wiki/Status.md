@@ -2,7 +2,7 @@
 
 > God node · 106 connections · `core/gherkai_core/model.py`
 
-**Community:** [Cloud Launcher & Fargate Adapters](Cloud_Launcher_%26_Fargate_Adapters.md)
+**Community:** [Cloud Adapter Boundary Modules](Cloud_Adapter_Boundary_Modules.md)
 
 ## Connections by Relation
 

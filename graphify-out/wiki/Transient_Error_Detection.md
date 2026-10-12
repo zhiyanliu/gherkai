@@ -33,9 +33,9 @@
 
 ## Relationships
 
-- [Nova Act Worker Entry](Nova_Act_Worker_Entry.md) (5 shared connections)
-- [Step Execution & Error Classification](Step_Execution_%26_Error_Classification.md) (2 shared connections)
-- [Scenario Evidence Tests](Scenario_Evidence_Tests.md) (1 shared connections)
+- [Nova Act Worker Package](Nova_Act_Worker_Package.md) (5 shared connections)
+- [Step Execution Dispatch](Step_Execution_Dispatch.md) (2 shared connections)
+- [Single-Line Error Text](Single-Line_Error_Text.md) (1 shared connections)
 - [Worker Job Source Input](Worker_Job_Source_Input.md) (1 shared connections)
 
 ## Source Files

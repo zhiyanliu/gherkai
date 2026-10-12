@@ -260,9 +260,9 @@
     "semantic_hash": "46506796a3741a0992133c3ce390e125"
   },
   "README.md": {
-    "mtime": 1791531472.5715444,
-    "ast_hash": "6d0d7a4b40fb3d9fa7c29e5533766f08",
-    "semantic_hash": "6d0d7a4b40fb3d9fa7c29e5533766f08"
+    "mtime": 1791785967.611686,
+    "ast_hash": "0845ac5851b138d33ba279b096f233bc",
+    "semantic_hash": "0845ac5851b138d33ba279b096f233bc"
   },
   "cli/README.md": {
     "mtime": 1789845931.0,
@@ -1335,9 +1335,9 @@
     "semantic_hash": "886fd70dadbb69e1ee36307f08b3148a"
   },
   "CHANGELOG.md": {
-    "mtime": 1791531472.5715444,
-    "ast_hash": "e41a23752c00ceae462158f0d4eb3bb1",
-    "semantic_hash": "e41a23752c00ceae462158f0d4eb3bb1"
+    "mtime": 1791785967.611686,
+    "ast_hash": "1ea8c356b3311d8a3644d1388f2d02ee",
+    "semantic_hash": "1ea8c356b3311d8a3644d1388f2d02ee"
   },
   "CONTRIBUTING.md": {
     "mtime": 1791531472.5715444,

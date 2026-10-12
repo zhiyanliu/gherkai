@@ -32,12 +32,13 @@
 
 ## Relationships
 
-- [AWS Target & Network Resolution](AWS_Target_%26_Network_Resolution.md) (18 shared connections)
-- [Feature Parsing & Errors](Feature_Parsing_%26_Errors.md) (4 shared connections)
-- [Run State Rendering & DDB Store](Run_State_Rendering_%26_DDB_Store.md) (4 shared connections)
-- [Cloud Launcher & Fargate Adapters](Cloud_Launcher_%26_Fargate_Adapters.md) (4 shared connections)
-- [Cloud Store Composition Root](Cloud_Store_Composition_Root.md) (2 shared connections)
-- [Resource Naming Source](Resource_Naming_Source.md) (1 shared connections)
+- [AWS Target Resolution](AWS_Target_Resolution.md) (18 shared connections)
+- [Feature File Parsing](Feature_File_Parsing.md) (4 shared connections)
+- [Run State Store](Run_State_Store.md) (4 shared connections)
+- [Cloud Adapter Boundary Modules](Cloud_Adapter_Boundary_Modules.md) (4 shared connections)
+- [Runtime Naming Source](Runtime_Naming_Source.md) (1 shared connections)
+- [Cloud Compose Root](Cloud_Compose_Root.md) (1 shared connections)
+- [SSM Paths And Compose](SSM_Paths_And_Compose.md) (1 shared connections)
 
 ## Source Files
 

@@ -26,7 +26,7 @@
 
 - [Midscene Worker Package](Midscene_Worker_Package.md) (1 shared connections)
 - [Bedrock AgentCore SDK](Bedrock_AgentCore_SDK.md) (1 shared connections)
-- [DynamoDB SDK Dependency](DynamoDB_SDK_Dependency.md) (1 shared connections)
+- [DynamoDB SDK Client](DynamoDB_SDK_Client.md) (1 shared connections)
 - [OpenAI Dependency](OpenAI_Dependency.md) (1 shared connections)
 - [tsx Dependency](tsx_Dependency.md) (1 shared connections)
 

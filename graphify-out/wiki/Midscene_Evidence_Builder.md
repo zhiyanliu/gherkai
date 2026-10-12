@@ -33,7 +33,7 @@
 
 ## Relationships
 
-- [Upload And Error Text Tests](Upload_And_Error_Text_Tests.md) (1 shared connections)
+- [Artifact Upload & Error Text Tests](Artifact_Upload_%26_Error_Text_Tests.md) (1 shared connections)
 
 ## Source Files
 

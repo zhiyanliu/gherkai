@@ -10,8 +10,8 @@
 
 ## Relationships
 
-- [Skill CLI Command Linting](Skill_CLI_Command_Linting.md) (1 shared connections)
-- [Doc Rules Source](Doc_Rules_Source.md) (1 shared connections)
+- [Skill Markdown Command Linting](Skill_Markdown_Command_Linting.md) (1 shared connections)
+- [Human Doc Rules Source](Human_Doc_Rules_Source.md) (1 shared connections)
 
 ## Source Files
 

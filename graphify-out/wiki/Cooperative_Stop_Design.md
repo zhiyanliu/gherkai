@@ -16,7 +16,7 @@
 ## Relationships
 
 - [Worker Termination Contract](Worker_Termination_Contract.md) (1 shared connections)
-- [Stop Grace Timeouts](Stop_Grace_Timeouts.md) (1 shared connections)
+- [Graceful Stop Contract](Graceful_Stop_Contract.md) (1 shared connections)
 
 ## Source Files
 

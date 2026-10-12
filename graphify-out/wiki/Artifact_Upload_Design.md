@@ -20,10 +20,9 @@
 
 ## Relationships
 
-- [Core Library Concepts & ADRs](Core_Library_Concepts_%26_ADRs.md) (2 shared connections)
-- [Schedule Concurrency & Termination](Schedule_Concurrency_%26_Termination.md) (1 shared connections)
-- [Cloud Backend Docs & Diagrams](Cloud_Backend_Docs_%26_Diagrams.md) (1 shared connections)
-- [Model Selection ADRs](Model_Selection_ADRs.md) (1 shared connections)
+- [Execution Architecture ADRs](Execution_Architecture_ADRs.md) (3 shared connections)
+- [Contributor Docs And ADRs](Contributor_Docs_And_ADRs.md) (1 shared connections)
+- [Schedule Governance Knobs](Schedule_Governance_Knobs.md) (1 shared connections)
 
 ## Source Files
 

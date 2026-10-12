@@ -2,7 +2,7 @@
 
 > God node · 127 connections · `core/gherkai_core/model.py`
 
-**Community:** [Run State Rendering & DDB Store](Run_State_Rendering_%26_DDB_Store.md)
+**Community:** [Run State Store](Run_State_Store.md)
 
 ## Connections by Relation
 

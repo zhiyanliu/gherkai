@@ -33,17 +33,18 @@
 
 ## Relationships
 
-- [CLI Plan Command Behavior](CLI_Plan_Command_Behavior.md) (52 shared connections)
-- [Cloud Status Command](Cloud_Status_Command.md) (5 shared connections)
-- [Cloud Launcher & Fargate Adapters](Cloud_Launcher_%26_Fargate_Adapters.md) (2 shared connections)
+- [CLI Plan And Doctor Tests](CLI_Plan_And_Doctor_Tests.md) (52 shared connections)
+- [Cloud Status CLI Tests](Cloud_Status_CLI_Tests.md) (5 shared connections)
 - [Fake S3 Client](Fake_S3_Client.md) (2 shared connections)
-- [Doctor Self-Check Command](Doctor_Self-Check_Command.md) (2 shared connections)
-- [Deploy Command Frontend Tests](Deploy_Command_Frontend_Tests.md) (1 shared connections)
-- [CLI Command Dispatch Entry](CLI_Command_Dispatch_Entry.md) (1 shared connections)
-- [Fake DDB Table & SQLite Records](Fake_DDB_Table_%26_SQLite_Records.md) (1 shared connections)
+- [Doctor Self-check Tests](Doctor_Self-check_Tests.md) (2 shared connections)
+- [Cloud Adapter Boundary Modules](Cloud_Adapter_Boundary_Modules.md) (1 shared connections)
+- [Deploy Command Frontend](Deploy_Command_Frontend.md) (1 shared connections)
+- [CLI Command Entry Points](CLI_Command_Entry_Points.md) (1 shared connections)
+- [Fake DynamoDB Table](Fake_DynamoDB_Table.md) (1 shared connections)
 - [Worker Job Source Input](Worker_Job_Source_Input.md) (1 shared connections)
-- [Job/Scenario Explain Model](Job-Scenario_Explain_Model.md) (1 shared connections)
-- [Deploy CLI Provider Discovery](Deploy_CLI_Provider_Discovery.md) (1 shared connections)
+- [Job Explain Data Model](Job_Explain_Data_Model.md) (1 shared connections)
+- [CLI Parser & Selection Flags](CLI_Parser_%26_Selection_Flags.md) (1 shared connections)
+- [Step Argument S3 Offload](Step_Argument_S3_Offload.md) (1 shared connections)
 
 ## Source Files
 

@@ -1,44 +1,48 @@
 # SQLite Event Log
 
-> 19 nodes · cohesion 0.15
+> 15 nodes · cohesion 0.19
 
 ## Key Concepts
 
-- **test_sqlite_event_log.py** (21 connections) — `core/tests/test_sqlite_event_log.py`
-- **_log()** (10 connections) — `core/tests/test_sqlite_event_log.py`
-- **test_records_feed_project_to_terminal()** (8 connections) — `core/tests/test_sqlite_event_log.py`
-- **test_append_idempotent_same_seq()** (3 connections) — `core/tests/test_sqlite_event_log.py`
-- **test_exit_code_none_stored()** (3 connections) — `core/tests/test_sqlite_event_log.py`
-- **test_exit_record_independent_keyspace()** (3 connections) — `core/tests/test_sqlite_event_log.py`
-- **test_has_exit_single_scope()** (3 connections) — `core/tests/test_sqlite_event_log.py`
-- **test_opening_a_v140_shaped_db_adds_the_reason_column()** (3 connections) — `core/tests/test_sqlite_event_log.py`
-- **test_record_exit_reason_roundtrip()** (3 connections) — `core/tests/test_sqlite_event_log.py`
-- **test_append_and_read_back_events()** (2 connections) — `core/tests/test_sqlite_event_log.py`
-- **test_max_seq_empty_is_zero()** (2 connections) — `core/tests/test_sqlite_event_log.py`
-- **SqliteEventLog 测试（ADR 0034）：持久事件通道往返 + 与 project 联通。 存原始 JSON 行→读回解析成…** (1 connections) — `core/tests/test_sqlite_event_log.py`
-- **唯一存活的迁移分支必须有红灯：v1.4.0（已发行）建的 exits 表没有 reason 列，新版接力同一 run 的 events.db 时…** (1 connections) — `core/tests/test_sqlite_event_log.py`
-- **退出记录走独立键空间（机制一）：不占 events 的 seq，records() 里 kind='exit'。** (1 connections) — `core/tests/test_sqlite_event_log.py`
-- **has_exit 只看本 scope 的退出记录（对位 DdbEventLog.has_exit）：worker 事件不算、别的 scope 不串扰。** (1 connections) — `core/tests/test_sqlite_event_log.py`
-- **exit_code=None（退出码未知，仅超时处置直写时出现）可存、读回仍是 None——投影侧判 ERROR、不是宽限态（ADR 0034…** (1 connections) — `core/tests/test_sqlite_event_log.py`
-- **同 (scope,seq) 重写幂等（重放/重试无副作用，镜像 DDB PutItem 幂等）。** (1 connections) — `core/tests/test_sqlite_event_log.py`
-- **端到端：SQLite records() → project() 推出正确终态（两件都要齐 → passed）。** (1 connections) — `core/tests/test_sqlite_event_log.py`
-- **reason（平台侧归因串，port 对称 DDB）随退出记录落库、records() 读回；不传则 None。** (1 connections) — `core/tests/test_sqlite_event_log.py`
+- **SqliteEventLog** (27 connections) — `core/gherkai_core/adapters/event_log/sqlite.py`
+- **._connect()** (8 connections) — `core/gherkai_core/adapters/event_log/sqlite.py`
+- **.append_event()** (3 connections) — `core/gherkai_core/adapters/event_log/sqlite.py`
+- **.has_exit()** (3 connections) — `core/gherkai_core/adapters/event_log/sqlite.py`
+- **.__init__()** (3 connections) — `core/gherkai_core/adapters/event_log/sqlite.py`
+- **._init_schema()** (3 connections) — `core/gherkai_core/adapters/event_log/sqlite.py`
+- **.max_seq()** (3 connections) — `core/gherkai_core/adapters/event_log/sqlite.py`
+- **.record_exit()** (3 connections) — `core/gherkai_core/adapters/event_log/sqlite.py`
+- **Connection** (1 connections)
+- **Path** (1 connections)
+- **某 scope 当前 events 的 max seq（per-run 进程读 fd3 时续号用；空 → 0）。** (1 connections) — `core/gherkai_core/adapters/event_log/sqlite.py`
+- **本机 SQLite 事件日志（组合根注入路径；per-run 进程写、reconciler 读）。** (1 connections) — `core/gherkai_core/adapters/event_log/sqlite.py`
+- **追加一条 worker 事件（原始 JSON 行）。INSERT OR REPLACE：同 (scope,seq) 幂等（重放/重试无副作用）。** (1 connections) — `core/gherkai_core/adapters/event_log/sqlite.py`
+- **写平台侧退出记录（per-run 进程 proc.wait() 拿到 exitcode 后调，机制二）。INSERT OR REPLACE 幂等。…** (1 connections) — `core/gherkai_core/adapters/event_log/sqlite.py`
+- **单个 scope 有没有退出记录（**只读**，exits 主键点查）——对位 `DdbEventLog.has_exit`，两侧结构相同。** (1 connections) — `core/gherkai_core/adapters/event_log/sqlite.py`
 
 ## Relationships
 
-- [Job/Scenario Explain Model](Job-Scenario_Explain_Model.md) (6 shared connections)
-- [Cloud Launcher & Fargate Adapters](Cloud_Launcher_%26_Fargate_Adapters.md) (5 shared connections)
-- [SQLite Event Log Adapter](SQLite_Event_Log_Adapter.md) (4 shared connections)
-- [Fake DDB Table & SQLite Records](Fake_DDB_Table_%26_SQLite_Records.md) (2 shared connections)
+- [EventLog And Launcher Ports](EventLog_And_Launcher_Ports.md) (3 shared connections)
+- [SQLite Event Log Tests](SQLite_Event_Log_Tests.md) (3 shared connections)
+- [Detached Launcher Reconcile Loop](Detached_Launcher_Reconcile_Loop.md) (2 shared connections)
+- [Cloud Adapter Boundary Modules](Cloud_Adapter_Boundary_Modules.md) (2 shared connections)
+- [Event Wire Protocol](Event_Wire_Protocol.md) (2 shared connections)
+- [Timestamp & Wallclock Utils](Timestamp_%26_Wallclock_Utils.md) (2 shared connections)
+- [Local Reconcile Rebuild](Local_Reconcile_Rebuild.md) (1 shared connections)
+- [Detached Local Run Host](Detached_Local_Run_Host.md) (1 shared connections)
+- [Subprocess Engine & Launcher](Subprocess_Engine_%26_Launcher.md) (1 shared connections)
+- [Reconciler Event Projection](Reconciler_Event_Projection.md) (1 shared connections)
+- [CLI Command Entry Points](CLI_Command_Entry_Points.md) (1 shared connections)
+- [Lambda Handler Event Parsing Tests](Lambda_Handler_Event_Parsing_Tests.md) (1 shared connections)
 
 ## Source Files
 
-- `core/tests/test_sqlite_event_log.py`
+- `core/gherkai_core/adapters/event_log/sqlite.py`
 
 ## Audit Trail
 
-- EXTRACTED: 43 (100%)
-- INFERRED: 0 (0%)
+- EXTRACTED: 33 (82%)
+- INFERRED: 7 (18%)
 - AMBIGUOUS: 0 (0%)
 
 ---

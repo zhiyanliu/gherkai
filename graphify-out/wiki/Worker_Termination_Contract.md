@@ -13,11 +13,11 @@
 
 ## Relationships
 
-- [Engine Port And Job Plan](Engine_Port_And_Job_Plan.md) (2 shared connections)
-- [DynamoDB Events Transport](DynamoDB_Events_Transport.md) (1 shared connections)
+- [Engine Port & Job Planning](Engine_Port_%26_Job_Planning.md) (2 shared connections)
+- [DynamoDB Events Transport ADR](DynamoDB_Events_Transport_ADR.md) (1 shared connections)
 - [Gherkin Parse Seam](Gherkin_Parse_Seam.md) (1 shared connections)
 - [Cooperative Stop Design](Cooperative_Stop_Design.md) (1 shared connections)
-- [Stop Grace Timeouts](Stop_Grace_Timeouts.md) (1 shared connections)
+- [Graceful Stop Contract](Graceful_Stop_Contract.md) (1 shared connections)
 
 ## Source Files
 

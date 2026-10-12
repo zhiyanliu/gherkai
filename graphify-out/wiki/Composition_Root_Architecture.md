@@ -30,8 +30,9 @@
 
 ## Relationships
 
-- [Core Library Concepts & ADRs](Core_Library_Concepts_%26_ADRs.md) (3 shared connections)
-- [Model Selection ADRs](Model_Selection_ADRs.md) (1 shared connections)
+- [Contributor Docs And ADRs](Contributor_Docs_And_ADRs.md) (2 shared connections)
+- [Execution Architecture ADRs](Execution_Architecture_ADRs.md) (1 shared connections)
+- [Engine And Model ADRs](Engine_And_Model_ADRs.md) (1 shared connections)
 
 ## Source Files
 

@@ -24,8 +24,8 @@
 
 ## Relationships
 
-- [Midscene Run Scope Worker](Midscene_Run_Scope_Worker.md) (2 shared connections)
-- [Upload And Error Text Tests](Upload_And_Error_Text_Tests.md) (1 shared connections)
+- [Midscene Worker Run Scope](Midscene_Worker_Run_Scope.md) (2 shared connections)
+- [Artifact Upload & Error Text Tests](Artifact_Upload_%26_Error_Text_Tests.md) (1 shared connections)
 
 ## Source Files
 

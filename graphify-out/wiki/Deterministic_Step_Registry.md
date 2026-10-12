@@ -1,20 +1,13 @@
 # Deterministic Step Registry
 
-> 38 nodes · cohesion 0.08
+> 21 nodes · cohesion 0.15
 
 ## Key Concepts
 
 - **deterministic()** (15 connections) — `engines/novaact/gherkai_worker_novaact/deterministic.py`
-- **deterministic.py** (14 connections) — `engines/novaact/gherkai_worker_novaact/deterministic.py`
 - **test_deterministic.py** (14 connections) — `engines/novaact/tests/test_deterministic.py`
 - **match()** (10 connections) — `engines/novaact/gherkai_worker_novaact/deterministic.py`
-- **_hits()** (5 connections) — `engines/novaact/gherkai_worker_novaact/deterministic.py`
-- **match_batch()** (5 connections) — `engines/novaact/gherkai_worker_novaact/deterministic.py`
-- **deterministic_steps.py** (5 connections) — `engines/novaact/gherkai_worker_novaact/deterministic_steps.py`
-- **DeterministicConflict** (4 connections) — `engines/novaact/gherkai_worker_novaact/deterministic.py`
 - **test_match_batch_hit_miss_conflict()** (4 connections) — `engines/novaact/tests/test_deterministic.py`
-- **url_matches()** (3 connections) — `engines/novaact/gherkai_worker_novaact/deterministic_steps.py`
-- **_isolate()** (3 connections) — `engines/novaact/tests/test_deterministic.py`
 - **test_handler_assertion_propagates()** (3 connections) — `engines/novaact/tests/test_deterministic.py`
 - **test_list_registry_reflects_registrations()** (3 connections) — `engines/novaact/tests/test_deterministic.py`
 - **test_miss_returns_none()** (3 connections) — `engines/novaact/tests/test_deterministic.py`
@@ -22,35 +15,38 @@
 - **test_multiple_hits_raises_conflict()** (3 connections) — `engines/novaact/tests/test_deterministic.py`
 - **test_no_named_groups_empty_dict()** (3 connections) — `engines/novaact/tests/test_deterministic.py`
 - **test_register_and_match_with_named_groups()** (3 connections) — `engines/novaact/tests/test_deterministic.py`
-- **clear()** (2 connections) — `engines/novaact/gherkai_worker_novaact/deterministic.py`
-- **_Entry** (2 connections) — `engines/novaact/gherkai_worker_novaact/deterministic.py`
 - **gherkai-worker-novaact README (PyPI 入口页)** (2 connections) — `engines/novaact/README.md`
 - **test_registry_dump_via_capabilities_real_subprocess()** (2 connections) — `engines/novaact/tests/test_deterministic.py`
 - **test_worker_match_steps_mode_real_subprocess()** (2 connections) — `engines/novaact/tests/test_deterministic.py`
-- **deterministic** (1 connections)
-- **Exception** (1 connections)
-- *... and 13 more nodes in this community*
+- **装饰器：把 handler 按正则 pattern 登记进注册表。 description/example 必填（ADR…** (1 connections) — `engines/novaact/gherkai_worker_novaact/deterministic.py`
+- **在注册表里找命中 text 的唯一 handler。 返回 (handler, groups_dict) 或 None（未命中走 AI）。命中多条 →…** (1 connections) — `engines/novaact/gherkai_worker_novaact/deterministic.py`
+- **确定性注册表单测（ADR 0022）——纯单元，不连 AWS、不起浏览器。 运行（从 repo 根）：uv run pytest -q…** (1 connections) — `engines/novaact/tests/test_deterministic.py`
+- **--match-steps 自述模式真子进程：stdin JSON 数组 → 逐条命中结果（真 step 命中面与派发一致）。** (1 connections) — `engines/novaact/tests/test_deterministic.py`
+- **description/example 必填（ADR 0036：注册即暴露，缺元数据意味着能力不可发现，fail-loud）。** (1 connections) — `engines/novaact/tests/test_deterministic.py`
+- **注册表清单经自述入口出去（ADR 0036「2.」/「5.」）真子进程：`--capabilities` 的 `deterministic_steps`…** (1 connections) — `engines/novaact/tests/test_deterministic.py`
+- **match_batch（ADR 0036 决策 4）：命中/未命中/冲突结构化返回（冲突不抛——plan 是用例预检、不是执行）。** (1 connections) — `engines/novaact/tests/test_deterministic.py`
 
 ## Relationships
 
-- [Nova Act Worker Entry](Nova_Act_Worker_Entry.md) (4 shared connections)
-- [Deterministic Step Loading](Deterministic_Step_Loading.md) (4 shared connections)
-- [Step Execution & Error Classification](Step_Execution_%26_Error_Classification.md) (3 shared connections)
+- [Deterministic Step Registry](Deterministic_Step_Registry.md) (7 shared connections)
+- [Step Execution Dispatch](Step_Execution_Dispatch.md) (2 shared connections)
+- [Built-in Deterministic Steps](Built-in_Deterministic_Steps.md) (1 shared connections)
 - [Worker Job Source Input](Worker_Job_Source_Input.md) (1 shared connections)
-- [Model Selection ADRs](Model_Selection_ADRs.md) (1 shared connections)
-- [Test Fixtures & Conftest](Test_Fixtures_%26_Conftest.md) (1 shared connections)
+- [User Step Directory Loading](User_Step_Directory_Loading.md) (1 shared connections)
+- [Execution Architecture ADRs](Execution_Architecture_ADRs.md) (1 shared connections)
+- [Nova Act Worker Package](Nova_Act_Worker_Package.md) (1 shared connections)
+- [Capability Registry Self-Description](Capability_Registry_Self-Description.md) (1 shared connections)
 
 ## Source Files
 
 - `engines/novaact/README.md`
 - `engines/novaact/gherkai_worker_novaact/deterministic.py`
-- `engines/novaact/gherkai_worker_novaact/deterministic_steps.py`
 - `engines/novaact/tests/test_deterministic.py`
 
 ## Audit Trail
 
-- EXTRACTED: 69 (97%)
-- INFERRED: 2 (3%)
+- EXTRACTED: 44 (96%)
+- INFERRED: 2 (4%)
 - AMBIGUOUS: 0 (0%)
 
 ---

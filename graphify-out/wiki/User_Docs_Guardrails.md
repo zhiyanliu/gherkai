@@ -33,9 +33,9 @@
 
 ## Relationships
 
-- [Doc Rules Source](Doc_Rules_Source.md) (3 shared connections)
-- [ADR Hygiene Checks](ADR_Hygiene_Checks.md) (2 shared connections)
-- [Skill CLI Command Linting](Skill_CLI_Command_Linting.md) (2 shared connections)
+- [Human Doc Rules Source](Human_Doc_Rules_Source.md) (3 shared connections)
+- [ADR Hygiene Tests](ADR_Hygiene_Tests.md) (2 shared connections)
+- [Skill Markdown Command Linting](Skill_Markdown_Command_Linting.md) (2 shared connections)
 
 ## Source Files
 

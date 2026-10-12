@@ -21,7 +21,7 @@
 
 ## Relationships
 
-- [Video Manifest Metadata](Video_Manifest_Metadata.md) (1 shared connections)
+- [Video Material Manifest](Video_Material_Manifest.md) (1 shared connections)
 
 ## Source Files
 
