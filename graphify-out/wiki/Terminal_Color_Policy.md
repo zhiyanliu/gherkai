@@ -5,8 +5,8 @@
 ## Key Concepts
 
 - **use_color()** (11 connections) — `core/gherkai_core/termcolor.py`
-- **termcolor.py** (10 connections) — `core/gherkai_core/termcolor.py`
-- **test_termcolor.py** (10 connections) — `core/tests/test_termcolor.py`
+- **test_termcolor.py** (11 connections) — `core/tests/test_termcolor.py`
+- **termcolor.py** (8 connections) — `core/gherkai_core/termcolor.py`
 - **_clean_env()** (6 connections) — `core/tests/test_termcolor.py`
 - **test_stream_decides_when_no_env()** (5 connections) — `core/tests/test_termcolor.py`
 - **_Tty** (5 connections) — `core/tests/test_termcolor.py`
@@ -26,9 +26,11 @@
 
 ## Relationships
 
-- [Rich Text UI Presentation](Rich_Text_UI_Presentation.md) (4 shared connections)
-- [Core Adapters Documentation](Core_Adapters_Documentation.md) (3 shared connections)
-- [Worker Log Event Formatting](Worker_Log_Event_Formatting.md) (1 shared connections)
+- [SQLite Event Log Adapter](SQLite_Event_Log_Adapter.md) (2 shared connections)
+- [Human-Readable Text UI](Human-Readable_Text_UI.md) (2 shared connections)
+- [Core Library Concepts & ADRs](Core_Library_Concepts_%26_ADRs.md) (1 shared connections)
+- [Subprocess Engine Logging](Subprocess_Engine_Logging.md) (1 shared connections)
+- [CLI JSON Contract Tests](CLI_JSON_Contract_Tests.md) (1 shared connections)
 
 ## Source Files
 
@@ -37,8 +39,8 @@
 
 ## Audit Trail
 
-- EXTRACTED: 42 (98%)
-- INFERRED: 1 (2%)
+- EXTRACTED: 42 (100%)
+- INFERRED: 0 (0%)
 - AMBIGUOUS: 0 (0%)
 
 ---

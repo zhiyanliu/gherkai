@@ -15,8 +15,8 @@
 
 ## Relationships
 
-- [Cloud Backend CLI Tests](Cloud_Backend_CLI_Tests.md) (5 shared connections)
-- [Plan Command CLI Tests](Plan_Command_CLI_Tests.md) (3 shared connections)
+- [Cloud Backend CLI Wiring Tests](Cloud_Backend_CLI_Wiring_Tests.md) (5 shared connections)
+- [CLI Plan Command Behavior](CLI_Plan_Command_Behavior.md) (3 shared connections)
 
 ## Source Files
 

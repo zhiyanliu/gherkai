@@ -1,0 +1,54 @@
+# CDK Stack Synthesis Tests
+
+> 65 nodes · cohesion 0.06
+
+## Key Concepts
+
+- **test_stack.py** (58 connections) — `deploy_aws/tests/test_stack.py`
+- **make_template()** (50 connections) — `deploy_aws/tests/synth_fixture.py`
+- **_ssm_params()** (10 connections) — `deploy_aws/tests/test_stack.py`
+- **test_ssm_parameter_set_is_exactly_six()** (4 connections) — `deploy_aws/tests/test_stack.py`
+- **test_ssm_vpc_spec_new_carries_created_vpc_id()** (4 connections) — `deploy_aws/tests/test_stack.py`
+- **test_ssm_worker_template_arn_per_engine_refs_task_def()** (4 connections) — `deploy_aws/tests/test_stack.py`
+- **test_worker_subnets_single_source_across_ssm_and_lambda_env()** (4 connections) — `deploy_aws/tests/test_stack.py`
+- **_joined_refs()** (3 connections) — `deploy_aws/tests/test_stack.py`
+- **test_advancers_can_read_backend_ssm_params_for_the_compat_fallback()** (3 connections) — `deploy_aws/tests/test_stack.py`
+- **test_ecr_repos_have_no_lifecycle_rules_and_are_retained()** (3 connections) — `deploy_aws/tests/test_stack.py`
+- **test_events_stream_mapping_filters_out_ttl_removes()** (3 connections) — `deploy_aws/tests/test_stack.py`
+- **test_events_table_has_no_gsi()** (3 connections) — `deploy_aws/tests/test_stack.py`
+- **test_exit_observer_can_read_runs_table_only()** (3 connections) — `deploy_aws/tests/test_stack.py`
+- **test_prefix_switches_whole_set()** (3 connections) — `deploy_aws/tests/test_stack.py`
+- **test_reconcile_lambdas_share_per_run_concurrency_cap()** (3 connections) — `deploy_aws/tests/test_stack.py`
+- **test_runs_table_has_the_sparse_status_gsi_for_worker_cleanup()** (3 connections) — `deploy_aws/tests/test_stack.py`
+- **test_ssm_version_parameter_from_context()** (3 connections) — `deploy_aws/tests/test_stack.py`
+- **test_ssm_vpc_spec_default_dossier()** (3 connections) — `deploy_aws/tests/test_stack.py`
+- **test_ssm_vpc_spec_reuse_existing_records_the_id()** (3 connections) — `deploy_aws/tests/test_stack.py`
+- **test_task_role_resource_arns_narrowed()** (3 connections) — `deploy_aws/tests/test_stack.py`
+- **test_worker_template_arn_is_not_injected_into_any_lambda_env()** (3 connections) — `deploy_aws/tests/test_stack.py`
+- **test_artifacts_bucket_job_in_lifecycle()** (2 connections) — `deploy_aws/tests/test_stack.py`
+- **test_artifacts_bucket_private()** (2 connections) — `deploy_aws/tests/test_stack.py`
+- **test_ecs_stopped_eventbridge_rule()** (2 connections) — `deploy_aws/tests/test_stack.py`
+- **test_events_table_has_stream()** (2 connections) — `deploy_aws/tests/test_stack.py`
+- *... and 40 more nodes in this community*
+
+## Relationships
+
+- [Advancer IAM Permissions](Advancer_IAM_Permissions.md) (8 shared connections)
+- [Backend CDK Stack Constructs](Backend_CDK_Stack_Constructs.md) (4 shared connections)
+- [CDK App & AWS Provider CLI](CDK_App_%26_AWS_Provider_CLI.md) (2 shared connections)
+- [Lambda Asset Build Tests](Lambda_Asset_Build_Tests.md) (1 shared connections)
+
+## Source Files
+
+- `deploy_aws/tests/synth_fixture.py`
+- `deploy_aws/tests/test_stack.py`
+
+## Audit Trail
+
+- EXTRACTED: 131 (100%)
+- INFERRED: 0 (0%)
+- AMBIGUOUS: 0 (0%)
+
+---
+
+*Part of the graphify knowledge wiki. See [index](index.md) to navigate.*

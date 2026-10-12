@@ -5,7 +5,7 @@
 ## Key Concepts
 
 - **worker --match-steps 批量匹配查询** (1 connections) — `docs/adr/0036-deterministic-capability-discovery.md`
-- **plan 派发命中标注（best-effort 降级）** (1 connections) — `docs/adr/0036-deterministic-capability-discovery.md`
+- **plan 命中标注（best-effort 按引擎降级）** (1 connections) — `docs/adr/0036-deterministic-capability-discovery.md`
 
 ## Relationships
 

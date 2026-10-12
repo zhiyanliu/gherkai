@@ -1,58 +1,68 @@
 # S3 Result Store
 
-> 25 nodes · cohesion 0.12
+> 66 nodes · cohesion 0.05
 
 ## Key Concepts
 
+- **JobResult** (84 connections) — `core/gherkai_core/model.py`
+- **serialize.py** (45 connections) — `core/gherkai_core/serialize.py`
+- **job_result_from_dict()** (22 connections) — `core/gherkai_core/serialize.py`
 - **S3ResultStore** (17 connections) — `core/gherkai_core/adapters/result_store/s3.py`
+- **job_result_to_dict()** (15 connections) — `core/gherkai_core/serialize.py`
 - **test_s3_result_store.py** (15 connections) — `core/tests/test_s3_result_store.py`
 - **_job_def()** (14 connections) — `core/tests/test_stores.py`
+- **result_store/s3.py** (9 connections) — `core/gherkai_core/adapters/result_store/s3.py`
+- **job_to_dict()** (9 connections) — `core/gherkai_core/serialize.py`
+- **job_from_dict()** (8 connections) — `core/gherkai_core/serialize.py`
 - **test_job_timeout_s_round_trip()** (6 connections) — `core/tests/test_stores.py`
+- **test_step_message_survives_round_trip_and_missing_key_is_none()** (6 connections) — `core/tests/test_stores.py`
 - **.load_all()** (5 connections) — `core/gherkai_core/adapters/result_store/s3.py`
 - **.load_job_result()** (5 connections) — `core/gherkai_core/adapters/result_store/s3.py`
 - **.save_job_result()** (5 connections) — `core/gherkai_core/adapters/result_store/s3.py`
-- **test_result_store_scope_id_not_path_traversal()** (5 connections) — `core/tests/test_stores.py`
+- **.on_job_complete()** (5 connections) — `core/gherkai_core/persist.py`
+- **_scenario_def_from_dict()** (5 connections) — `core/gherkai_core/serialize.py`
+- **_step_from_dict()** (5 connections) — `core/gherkai_core/serialize.py`
+- **test_new_states_round_trip()** (5 connections) — `core/tests/test_lifecycle_states.py`
+- **.load_all()** (4 connections) — `core/gherkai_core/adapters/result_store/local.py`
+- **.load_job_result()** (4 connections) — `core/gherkai_core/adapters/result_store/local.py`
 - **._key()** (4 connections) — `core/gherkai_core/adapters/result_store/s3.py`
-- **test_prefix_isolates_runs()** (4 connections) — `core/tests/test_s3_result_store.py`
-- **._jobs_prefix()** (3 connections) — `core/gherkai_core/adapters/result_store/s3.py`
-- **test_load_all_paginated_preserves_failed_verdict()** (3 connections) — `core/tests/test_s3_result_store.py`
-- **test_load_all_paginates_beyond_1000()** (3 connections) — `core/tests/test_s3_result_store.py`
-- **test_load_all_stable_order()** (3 connections) — `core/tests/test_s3_result_store.py`
-- **test_scope_id_with_slash_not_subprefix()** (3 connections) — `core/tests/test_s3_result_store.py`
-- **.preflight()** (2 connections) — `core/gherkai_core/adapters/result_store/s3.py`
-- **test_save_load_round_trip()** (2 connections) — `core/tests/test_s3_result_store.py`
-- **Job** (2 connections)
-- **ResultStore 的 S3 实装（组合根注入 boto3 s3 client + bucket + 可选 key 前缀）。行为对拍…** (1 connections) — `core/gherkai_core/adapters/result_store/s3.py`
-- **把单个 JobResult 存成一个 S3 对象（写面，追加语义即同 key 覆盖，幂等）。** (1 connections) — `core/gherkai_core/adapters/result_store/s3.py`
-- **读回单个 JobResult（按键取，无需查询）；不存在返回 None。** (1 connections) — `core/gherkai_core/adapters/result_store/s3.py`
-- **读回某 run 的全部 JobResult（CI 遍历用）。无则空 list。 **必须翻页**：list_objects_v2 单页硬上限 1000…** (1 connections) — `core/gherkai_core/adapters/result_store/s3.py`
-- **探活（ADR 0030 决定七）：begin 前探桶可达，桶不存在/无权限即抛（cli 接住→以退出码 2 结束）。** (1 connections) — `core/gherkai_core/adapters/result_store/s3.py`
-- **S3ResultStore 对拍测试（ADR 0030 决定六 / 0016）：与 LocalResultStore 同一批行为断言，moto…** (1 connections) — `core/tests/test_s3_result_store.py`
-- **test_load_missing_returns_none()** (1 connections) — `core/tests/test_s3_result_store.py`
+- **_argument_from_dict()** (4 connections) — `core/gherkai_core/serialize.py`
+- **_scenario_def_to_dict()** (4 connections) — `core/gherkai_core/serialize.py`
+- **_step_to_dict()** (4 connections) — `core/gherkai_core/serialize.py`
+- *... and 41 more nodes in this community*
 
 ## Relationships
 
-- [Result Tree Text Rendering](Result_Tree_Text_Rendering.md) (12 shared connections)
-- [Run State Rendering](Run_State_Rendering.md) (8 shared connections)
-- [Result Store Serialization](Result_Store_Serialization.md) (6 shared connections)
-- [Run Definition Domain Model](Run_Definition_Domain_Model.md) (4 shared connections)
-- [DynamoDB Run Store](DynamoDB_Run_Store.md) (2 shared connections)
-- [S3 Step Argument Offload](S3_Step_Argument_Offload.md) (2 shared connections)
-- [CLI Test Fixtures](CLI_Test_Fixtures.md) (1 shared connections)
-- [Boto3 Adapter Guard](Boto3_Adapter_Guard.md) (1 shared connections)
-- [Core Adapters Documentation](Core_Adapters_Documentation.md) (1 shared connections)
-- [Run Persistence Orchestration](Run_Persistence_Orchestration.md) (1 shared connections)
+- [Cloud Launcher & Fargate Adapters](Cloud_Launcher_%26_Fargate_Adapters.md) (34 shared connections)
+- [Job State Serialization](Job_State_Serialization.md) (31 shared connections)
+- [Result Rendering & Explain](Result_Rendering_%26_Explain.md) (16 shared connections)
+- [Job/Scenario Explain Model](Job-Scenario_Explain_Model.md) (15 shared connections)
+- [Local Result Store & Persistence](Local_Result_Store_%26_Persistence.md) (7 shared connections)
+- [Severity Aggregation & Fake Engine](Severity_Aggregation_%26_Fake_Engine.md) (7 shared connections)
+- [Local Result Store](Local_Result_Store.md) (6 shared connections)
+- [Fake DDB Table & SQLite Records](Fake_DDB_Table_%26_SQLite_Records.md) (5 shared connections)
+- [Local Report Store](Local_Report_Store.md) (5 shared connections)
+- [Boto3 Guard & Arg Offload](Boto3_Guard_%26_Arg_Offload.md) (3 shared connections)
+- [Test Fixtures & Conftest](Test_Fixtures_%26_Conftest.md) (3 shared connections)
+- [Explain JSON & Redaction](Explain_JSON_%26_Redaction.md) (3 shared connections)
 
 ## Source Files
 
+- `core/gherkai_core/adapters/result_store/local.py`
 - `core/gherkai_core/adapters/result_store/s3.py`
+- `core/gherkai_core/model.py`
+- `core/gherkai_core/persist.py`
+- `core/gherkai_core/ports.py`
+- `core/gherkai_core/serialize.py`
+- `core/tests/conftest.py`
+- `core/tests/test_lifecycle_states.py`
 - `core/tests/test_s3_result_store.py`
 - `core/tests/test_stores.py`
 
 ## Audit Trail
 
-- EXTRACTED: 71 (97%)
-- INFERRED: 2 (3%)
+- EXTRACTED: 245 (91%)
+- INFERRED: 25 (9%)
 - AMBIGUOUS: 0 (0%)
 
 ---

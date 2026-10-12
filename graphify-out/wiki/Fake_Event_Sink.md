@@ -17,8 +17,8 @@
 
 ## Relationships
 
-- [Step and Scenario Execution](Step_and_Scenario_Execution.md) (2 shared connections)
-- [CLI Test Fixtures](CLI_Test_Fixtures.md) (1 shared connections)
+- [Step Execution & Error Classification](Step_Execution_%26_Error_Classification.md) (2 shared connections)
+- [Test Fixtures & Conftest](Test_Fixtures_%26_Conftest.md) (1 shared connections)
 
 ## Source Files
 

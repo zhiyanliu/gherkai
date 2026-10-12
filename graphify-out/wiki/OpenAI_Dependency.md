@@ -9,7 +9,7 @@
 
 ## Relationships
 
-- [NPM Dependencies](NPM_Dependencies.md) (1 shared connections)
+- [AWS SDK Dependencies](AWS_SDK_Dependencies.md) (1 shared connections)
 
 ## Source Files
 

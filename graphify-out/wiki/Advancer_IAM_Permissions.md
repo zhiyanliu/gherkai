@@ -19,7 +19,7 @@
 
 ## Relationships
 
-- [CDK Stack Synth Tests](CDK_Stack_Synth_Tests.md) (8 shared connections)
+- [CDK Stack Synthesis Tests](CDK_Stack_Synthesis_Tests.md) (8 shared connections)
 
 ## Source Files
 

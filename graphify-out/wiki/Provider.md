@@ -1,13 +1,15 @@
 # Provider
 
-> God node · 95 connections · `deploy_aws/gherkai_deploy_aws/cli.py`
+> God node · 100 connections · `deploy_aws/gherkai_deploy_aws/cli.py`
 
-**Community:** [AWS Deploy Provider](AWS_Deploy_Provider.md)
+**Community:** [Deploy Provider & Container Seam](Deploy_Provider_%26_Container_Seam.md)
 
 ## Connections by Relation
 
 ### calls
+- workers.py `EXTRACTED`
 - _parse() `EXTRACTED`
+- container.py `EXTRACTED`
 - test_context_cache_is_saved_after_the_run_and_seeded_into_the_next_fresh_work_dir() `EXTRACTED`
 - test_context_cache_survives_a_failed_cdk_run() `EXTRACTED`
 - test_deploy_warns_about_missing_container_engine_only_for_pure_release_versions() `EXTRACTED`
@@ -25,8 +27,6 @@
 - test_refresh_context_discards_the_cache_before_running() `EXTRACTED`
 - test_vpc_absent_hint_for_existing_environment_without_record() `EXTRACTED`
 - test_vpc_absent_hint_names_the_recorded_tier_for_an_existing_environment() `EXTRACTED`
-- test_vpc_absent_parses_but_every_synthesizing_verb_exits_2() `EXTRACTED`
-- _parse_destroy() `EXTRACTED`
 
 ### contains
 - cli.py `EXTRACTED`
@@ -59,6 +59,11 @@
 
 ### rationale_for
 - AWS provider——`gherkai deploy` 族命令在 AWS 上的实现（接缝契约见模块头）。 `EXTRACTED`
+
+### references
+- gherkai_deploy_aws/names.py `EXTRACTED`
+- gherkai-deploy-aws contributor 手册 `EXTRACTED`
+- app.py `EXTRACTED`
 
 ### uses
 - _Recorder `INFERRED`

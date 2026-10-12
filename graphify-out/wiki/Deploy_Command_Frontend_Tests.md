@@ -8,7 +8,7 @@
 - **_StubProvider** (23 connections) — `cli/tests/test_deploy_cmd.py`
 - **_FakeEP** (21 connections) — `cli/tests/test_deploy_cmd.py`
 - **_patch_eps()** (21 connections) — `cli/tests/test_deploy_cmd.py`
-- **gherkai_cli/__init__.py** (7 connections) — `cli/gherkai_cli/__init__.py`
+- **gherkai_cli/__init__.py** (9 connections) — `cli/gherkai_cli/__init__.py`
 - **test_cli_version_is_handed_to_provider()** (7 connections) — `cli/tests/test_deploy_cmd.py`
 - **test_dispatch_maps_command_face_to_provider_method()** (7 connections) — `cli/tests/test_deploy_cmd.py`
 - **._record()** (6 connections) — `cli/tests/test_deploy_cmd.py`
@@ -33,13 +33,14 @@
 
 ## Relationships
 
-- [Plan Command CLI Tests](Plan_Command_CLI_Tests.md) (20 shared connections)
-- [CLI Command Entrypoints](CLI_Command_Entrypoints.md) (2 shared connections)
-- [Deploy Provider Discovery](Deploy_Provider_Discovery.md) (2 shared connections)
-- [Engine Listing and JSON Contract](Engine_Listing_and_JSON_Contract.md) (1 shared connections)
-- [CLI Run Wiring Tests](CLI_Run_Wiring_Tests.md) (1 shared connections)
-- [Result Tree Text Rendering](Result_Tree_Text_Rendering.md) (1 shared connections)
-- [Skill Docs Guardrail Tests](Skill_Docs_Guardrail_Tests.md) (1 shared connections)
+- [CLI Plan Command Behavior](CLI_Plan_Command_Behavior.md) (20 shared connections)
+- [Deploy CLI Provider Discovery](Deploy_CLI_Provider_Discovery.md) (3 shared connections)
+- [CLI Command Dispatch Entry](CLI_Command_Dispatch_Entry.md) (2 shared connections)
+- [Cloud Backend CLI Wiring Tests](Cloud_Backend_CLI_Wiring_Tests.md) (1 shared connections)
+- [CLI JSON Contract Tests](CLI_JSON_Contract_Tests.md) (1 shared connections)
+- [CLI Run Entry Tests](CLI_Run_Entry_Tests.md) (1 shared connections)
+- [Result Rendering & Explain](Result_Rendering_%26_Explain.md) (1 shared connections)
+- [Skill CLI Command Linting](Skill_CLI_Command_Linting.md) (1 shared connections)
 
 ## Source Files
 
@@ -48,7 +49,7 @@
 
 ## Audit Trail
 
-- EXTRACTED: 141 (100%)
+- EXTRACTED: 143 (100%)
 - INFERRED: 0 (0%)
 - AMBIGUOUS: 0 (0%)
 

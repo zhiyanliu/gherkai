@@ -1,8 +1,8 @@
 # Scenario
 
-> God node · 72 connections · `core/gherkai_core/model.py`
+> God node · 73 connections · `core/gherkai_core/model.py`
 
-**Community:** [Run Definition Domain Model](Run_Definition_Domain_Model.md)
+**Community:** [Job/Scenario Explain Model](Job-Scenario_Explain_Model.md)
 
 ## Connections by Relation
 
@@ -12,8 +12,8 @@
 - _job() `EXTRACTED`
 - _seed_run() `EXTRACTED`
 - _timeout_built() `EXTRACTED`
+- _job() `EXTRACTED`
 - parse_feature() `EXTRACTED`
-- _job() `INFERRED`
 - _job_def() `EXTRACTED`
 - _seed_finished_run() `EXTRACTED`
 - test_offload_unblocks_oversized_docstring_real() `EXTRACTED`
@@ -38,6 +38,7 @@
 - test_stores.py `EXTRACTED`
 - serialize.py `EXTRACTED`
 - test_conditional_writes.py `EXTRACTED`
+- test_subprocess_engine.py `EXTRACTED`
 - wire.py `EXTRACTED`
 - test_cloud_reconcile.py `EXTRACTED`
 - test_wire.py `EXTRACTED`

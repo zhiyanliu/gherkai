@@ -1,8 +1,8 @@
 # JobResult
 
-> God node · 82 connections · `core/gherkai_core/model.py`
+> God node · 84 connections · `core/gherkai_core/model.py`
 
-**Community:** [Result Tree Text Rendering](Result_Tree_Text_Rendering.md)
+**Community:** [S3 Result Store](S3_Result_Store.md)
 
 ## Connections by Relation
 
@@ -37,8 +37,8 @@
 - serialize.py `EXTRACTED`
 - project.py `EXTRACTED`
 - test_report_store.py `EXTRACTED`
-- schedule.py `EXTRACTED`
 - ports.py `EXTRACTED`
+- schedule.py `EXTRACTED`
 - test_persist.py `EXTRACTED`
 - persist.py `EXTRACTED`
 - test_s3_result_store.py `EXTRACTED`
@@ -79,12 +79,14 @@
 ### uses
 - ScheduleOpts `INFERRED`
 - EventRecord `INFERRED`
+- RunStore `INFERRED`
 - TaskExited `INFERRED`
 - RunPersistence `INFERRED`
-- RunStore `INFERRED`
+- ResultStore `INFERRED`
 - Timing `INFERRED`
 - LocalResultStore `INFERRED`
-- ResultStore `INFERRED`
+- Engine `INFERRED`
+- ReportStore `INFERRED`
 - Action `INFERRED`
 - NonTerminalSnapshot `INFERRED`
 - _Worker `INFERRED`
@@ -93,10 +95,8 @@
 - S3ResultStore `INFERRED`
 - EngineResolver `INFERRED`
 - JobSink `INFERRED`
-- ReportStore `INFERRED`
 - Sink `INFERRED`
 - _Heartbeat `INFERRED`
-- Engine `INFERRED`
 
 ---
 

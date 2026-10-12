@@ -6,13 +6,13 @@
 
 - **_read_events()** (8 connections) — `core/gherkai_core/adapters/subprocess_engine.py`
 - **.run_scope()** (8 connections) — `core/gherkai_core/adapters/subprocess_engine.py`
-- **SubprocessWorkerHandle** (6 connections) — `core/gherkai_core/adapters/subprocess_engine.py`
+- **SubprocessWorkerHandle** (7 connections) — `core/gherkai_core/adapters/subprocess_engine.py`
 - **_join_pumps()** (4 connections) — `core/gherkai_core/adapters/subprocess_engine.py`
+- **Event** (2 connections)
+- **Popen** (2 connections)
 - **.__init__()** (2 connections) — `core/gherkai_core/adapters/subprocess_engine.py`
 - **.stop()** (2 connections) — `core/gherkai_core/adapters/subprocess_engine.py`
 - **.wait()** (2 connections) — `core/gherkai_core/adapters/subprocess_engine.py`
-- **Event** (2 connections)
-- **Popen** (2 connections)
 - **Job** (1 connections)
 - **有界等 worker 日志 pump 线程结束（进程退了它们读到 EOF 就完）。超时不等——孙进程可能仍持写端。** (1 connections) — `core/gherkai_core/adapters/subprocess_engine.py`
 - **逐行读 fd3（纯 ADR 0024 事件）→ Event。worker 异常退出且 returncode>0 时抛错（schedule 记 error）。…** (1 connections) — `core/gherkai_core/adapters/subprocess_engine.py`
@@ -21,9 +21,11 @@
 
 ## Relationships
 
-- [Core Adapters Documentation](Core_Adapters_Documentation.md) (3 shared connections)
-- [Event Wire Serialization](Event_Wire_Serialization.md) (3 shared connections)
-- [Worker Log Event Formatting](Worker_Log_Event_Formatting.md) (3 shared connections)
+- [SQLite Event Log Adapter](SQLite_Event_Log_Adapter.md) (4 shared connections)
+- [Job/Scenario Explain Model](Job-Scenario_Explain_Model.md) (2 shared connections)
+- [Subprocess Engine Logging](Subprocess_Engine_Logging.md) (2 shared connections)
+- [Wire Protocol Serialization](Wire_Protocol_Serialization.md) (1 shared connections)
+- [Job Serialization](Job_Serialization.md) (1 shared connections)
 
 ## Source Files
 
@@ -31,8 +33,8 @@
 
 ## Audit Trail
 
-- EXTRACTED: 21 (84%)
-- INFERRED: 4 (16%)
+- EXTRACTED: 24 (92%)
+- INFERRED: 2 (8%)
 - AMBIGUOUS: 0 (0%)
 
 ---
