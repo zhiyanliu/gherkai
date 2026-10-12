@@ -158,7 +158,7 @@ run 20260910T080630Z-9fa261  status=failed
 
 ### 六、SDK 版本钉死 + 格式漂移的防线
 
-两引擎的 SDK 依赖**钉精确版本**（Nova `nova-act==3.4.187.0`；Midscene `@midscene/web 1.12.8`、`playwright` / `@playwright/test` 1.63.0），升级是有评估的显式发布动作——与 [0004](./0004-novaact-iam-auth-via-workflow.md)「模型版本选择策略」同一逻辑：用户拿到的就是我们测过的。**曾用范围版本（`>=` / `^`）的教训**：发行版 npm worker 与云端基础镜像都是装包时解析依赖、无 lock，2026-09 实查用户实际跑的是 `@midscene/web` 1.12.8，而仓库锁文件与全部测试停在 1.9.8——测试保护的不是用户跑的版本，本机 worker 与云端镜像还可能各装到不同版本。升级流程：改 pin → 全套测试 + 评测集真跑（两引擎各自的 wikipedia 用例与失败探针）→ 随发版并在 Release 正文点明。升级时的回归护栏四道：
+两引擎的 SDK 依赖**钉精确版本**（Nova `nova-act==3.4.187.0`；Midscene `@midscene/web 1.15.1`（2026-10-12 自 1.12.8 升，见下「历次升级」）、`playwright` / `@playwright/test` 1.63.0），升级是有评估的显式发布动作——与 [0004](./0004-novaact-iam-auth-via-workflow.md)「模型版本选择策略」同一逻辑：用户拿到的就是我们测过的。**曾用范围版本（`>=` / `^`）的教训**：发行版 npm worker 与云端基础镜像都是装包时解析依赖、无 lock，2026-09 实查用户实际跑的是 `@midscene/web` 1.12.8，而仓库锁文件与全部测试停在 1.9.8——测试保护的不是用户跑的版本，本机 worker 与云端镜像还可能各装到不同版本。升级流程：改 pin → 全套测试 + 评测集真跑（两引擎各自的 wikipedia 用例与失败探针）→ 随发版并在 Release 正文点明。升级时的回归护栏四道：
 
 1. 映射函数只读表中列出的少数字段、每个字段当可选，读不到就 null、不抛；判别按值不按 SDK 标志（`is_tool` / `is_return` 之训）；Nova 的 `prompt` 被 SDK 改写、同属「不能照抄 SDK 字段」。
 2. 每引擎一份**由真产物裁成的 fixture**（Nova：真 `_trajectory.json` 去掉 base64；Midscene：真 execution 的 JSON），测试断言映射结果——格式漂移在升版跑测试时变红。
@@ -166,6 +166,10 @@ run 20260910T080630Z-9fa261  status=failed
 4. **Nova 的「json 存在」前提押在一个与 SDK 自身文档相悖的实现细节上**：写盘条件只有「传了 `logs_directory` 且 act 有 step」，与 `replayable` 无关，而 SDK 公开属性却按 `replayable` 判该路径「不可用」。SDK 未来把写盘收进 `replayable` 门 → 所有 Nova evidence 静默变空，fixture 测试**照不出**（它只测映射函数）。故验证清单必有一条**真跑**断言 trajectory json 真落盘且 `frames` 非空。**不靠「顺手打开 replayable」消除该风险**：`simplified_dom` 是必填字段、现恒为空串，一开 `replayable` 每 frame 的简化 DOM 就写进 json，单 act 体量在 300 KB 上再显著上涨。
 
 agent / skill 只依赖 evidence schema 与 `explain` 输出，两者都是我们自己的东西；SDK 耦合被关进每个 worker 的一个函数里且有测试盯着。这是本方案相对「在 skill 里教 agent 读 SDK 产物」的核心优势。
+
+**历次升级**（每次按上面的流程走、结论留此）：
+
+- **Midscene 1.12.8 → 1.15.1（2026-10-12）**。动机是在探索移动设备方向之前先与上游拉平，少背一次跨大版本迁移；移动方向本身用不用 Midscene 的哪些能力尚未定。差距 8 个版本，逐项对照我们的接缝：模型调用链重构两次并加入 Responses API——新键 `MIDSCENE_MODEL_PROTOCOL`（openai-chat 默认 / openai-responses）与 `MIDSCENE_MODEL_STREAM_MODE`（默认 non-stream），我们的隔离 modelConfig 只传模型名 / 地址 / key / 家族四项、不传新键即落默认，线上请求形态不变；[0008](./0008-midscene-bedrock-auth-sigv4-selfsign.md) 依赖的「给 `modelConfig` 即隔离管理器且采纳 `createOpenAIClient`」分支原样成立，legacy 家族推导仍在。dump 的类型声明只增不删（57 行差异全是 `rawAssistantOutput` 一类新增字段），`persistExecutionDump` 与截图目录 `dirname(reportPath)/screenshots` 逻辑未变，`metrics.totalTokens` 未变；`PlaywrightAgent` 多两个可选构造项（页面 html 就位检查超时默认 5 秒、Puppeteer 专用网络空闲等待）。报告页重设计属使用者可见变化、worker 不解析它。本地 tsc 与 196 条单测通过；真跑见「验证」节。1.12.9 起上游暴露了设备适配器的 schema 与类型，是移动方向探索时可能用到的面，是否采用待 spike 后定。
 
 ## 被拒方案
 
@@ -237,3 +241,4 @@ agent / skill 只依赖 evidence schema 与 `explain` 输出，两者都是我�
 **对抗审查真跑核出并已吸收**：Nova 侧 boto3 的 `upload_file` 默认把传输交给 s3transfer 的非 daemon 线程池，解释器退出时被 atexit join——黑洞端点下 `drain(1.0)` 返回后进程 11.2 s 才退（多拖一次 client 超时），「daemon 队列线程 + 有界 drain」的退出账目失真；改为 `TransferConfig(use_threads=False)` 让传输落在队列线程内后 1.15 s 退出，drain 预算即退出成本。同批：drain 超时后队列线程静默（不再上传、不写 stderr，避开 finalization 期写 buffered stderr 的致命错窗口）；Midscene 链尾结构性 `.catch`。
 
 **单测护栏**：两引擎映射函数对真产物 fixture（含 Midscene 的 error task、Nova 的 N 票）；best-effort 路径（抽取 / 上传抛异常 → `step_done` 照发、无 evidence ref、status 不变）；serialize round-trip 带非默认 step message；`explain` 本机 / 云端两个后端读取、`record_missing` 与三种 `evidence_missing`、多命中 `--scenario` + `--step`、退出码；云端后端 skew 三态；契约护栏含 evidence 夹具。
+- **Midscene 1.12.8 → 1.15.1 升级真跑（2026-10-12，跳板机、dev 树 worker 经 `GHERKAI_WORKER_MIDSCENE_CMD` 接入、本机后端、默认模型 GPT-5.6 Terra）**：wikipedia 三条 feature 全 passed，AI 步 evidence 齐（两个 run 合计 7 步带 evidence、19 帧、7 张截图文件全部存在非空），导航步与确定性步照旧 `no_ref`；产物目录形态不变（`evidence/`、`log/ai-config.log` 仍写模型名、`report/` 下 `<n>.execution.json` + report.html + `screenshots/`）。失败探针（刻意为假的页面断言）判否并带 1 act / 1 帧 / 有 thought 的 evidence；使用方 `.mts` 步经 `page.evaluate` 进页面照常（tsx keepNames 的 `__name` 垫片与新版 agent 共存）。单测 196 条与 CLI / core 测试全绿只作前置、不作证据。
