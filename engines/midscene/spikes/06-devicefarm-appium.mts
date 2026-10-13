@@ -1,11 +1,16 @@
-// 移动设备方向的 spike A：Device Farm 远程访问会话 + 托管 Appium 端点 + Midscene 自定义界面适配器（AbstractInterface），
-// 在一台 Android 真机的 Chrome 上执行设备网页。测量四样：会话建立与停止耗时、WebDriver 命令往返、
-// AI 步耗时与 token、evidence 原料（dump.executions 与截图落盘）是否照旧。
+// 移动设备方向的 spike A / B：Device Farm 远程访问会话 + 托管 Appium 端点 + Midscene 自定义界面适配器（AbstractInterface），
+// 在一台真机上执行设备网页（Android Chrome / iOS Safari）或原生应用（Android，经 Device Farm 上传并安装 APK）。
+// 测量四样：会话建立与停止耗时、WebDriver 命令往返、AI 步耗时与 token、evidence 原料（dump.executions 与截图落盘）是否照旧。
 //
 // 运行（跳板机，实例角色即凭证；Bedrock 走 AWS_REGION，Device Farm 固定 us-west-2）：
 //   cd engines/midscene && AWS_REGION=us-east-1 MIDSCENE_RUN_DIR=/tmp/spike06 node --import tsx spikes/06-devicefarm-appium.mts
-// 可选 env：DF_PROJECT_ARN（缺省按名 gherkai-spike 查）、DF_DEVICE_ARN（缺省 Redmi Note 13 / Android 15）、
-//   SPIKE_SKIP_AI=1（只量会话与命令往返，不调模型）。
+// 可选 env：
+//   DF_PLATFORM=android|ios（缺省 android）      DF_DEVICE_ARN（缺省按平台各一台默认机）
+//   SPIKE_SCENARIO=web|app（缺省 web）            DF_PROJECT_ARN（缺省按名 gherkai-spike 查）
+//   DF_APP_URL（app 场景：APK 的 https 地址）      DF_APP_ARN（已上传过的 Device Farm 应用 ARN，给了就不再上传）
+//   DF_APP_PACKAGE（缺省 org.wikipedia）          DF_APP_INSTALL=devicefarm|appium（缺省 devicefarm：上传后 InstallToRemoteAccessSession；
+//                                                 appium：用 appium:app 让 Appium 主机自己下载安装——实测 Device Farm 的主机不出公网、下载失败，留作对照）
+//   SPIKE_SKIP_AI=1（只量会话与命令往返，不调模型）
 // 结果落 $MIDSCENE_RUN_DIR/spike06-results.json；无论成败最后都停会话（设备按分钟计费）。
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -17,20 +22,35 @@ import {
   CreateRemoteAccessSessionCommand,
   GetRemoteAccessSessionCommand,
   StopRemoteAccessSessionCommand,
+  CreateUploadCommand,
+  GetUploadCommand,
+  ListUploadsCommand,
+  InstallToRemoteAccessSessionCommand,
 } from "@aws-sdk/client-device-farm";
 import { AbstractInterface, defineActionsFromInputPrimitives, type DeviceAction } from "@midscene/core/device";
 import { Agent } from "@midscene/core/agent";
 import { getBaseUrl, MODEL, modelFamily, sigv4Fetch } from "../src/lib/agentcore-sigv4.mjs";
 
 const DF_REGION = "us-west-2";
-const DEVICE_ARN = process.env.DF_DEVICE_ARN
-  || "arn:aws:devicefarm:us-west-2::device:653D5AB0CD6B4EA88DFAE9AD4386F608"; // Xiaomi Redmi Note 13, Android 15
+const PLATFORM = (process.env.DF_PLATFORM ?? "android") as "android" | "ios";
+const SCENARIO = (process.env.SPIKE_SCENARIO ?? "web") as "web" | "app";
+const DEFAULT_DEVICE = {
+  android: "arn:aws:devicefarm:us-west-2::device:653D5AB0CD6B4EA88DFAE9AD4386F608", // Xiaomi Redmi Note 13, Android 15
+  ios: "arn:aws:devicefarm:us-west-2::device:BDC0E688BC0F4CE7BEE056028DB32001",     // Apple iPhone 7, iOS 15.8.4
+}[PLATFORM];
+const DEVICE_ARN = process.env.DF_DEVICE_ARN || DEFAULT_DEVICE;
 const RUN_DIR = process.env.MIDSCENE_RUN_DIR || "/tmp/spike06";
 const SKIP_AI = process.env.SPIKE_SKIP_AI === "1";
+const APP_URL = process.env.DF_APP_URL;
+const APP_ARN = process.env.DF_APP_ARN;
+const APP_PACKAGE = process.env.DF_APP_PACKAGE ?? "org.wikipedia";
+const APP_INSTALL = process.env.DF_APP_INSTALL ?? "devicefarm";
 const START_URL = "https://en.m.wikipedia.org/wiki/OpenAI";
 
 type Driver = Awaited<ReturnType<typeof remote>>;
-const results: Record<string, unknown> = { device_arn: DEVICE_ARN, model: MODEL, started_at: new Date().toISOString() };
+const results: Record<string, unknown> = {
+  platform: PLATFORM, scenario: SCENARIO, device_arn: DEVICE_ARN, model: MODEL, started_at: new Date().toISOString(),
+};
 const log = (m: string) => console.log(`[06 ${new Date().toISOString().slice(11, 19)}] ${m}`);
 const ms = (t0: number) => Math.round(performance.now() - t0);
 async function timed<T>(name: string, fn: () => Promise<T>): Promise<T> {
@@ -38,6 +58,12 @@ async function timed<T>(name: string, fn: () => Promise<T>): Promise<T> {
   try { return await fn(); } finally { const d = ms(t0); (results.timings ??= {} as Record<string, number[]>); const tm = results.timings as Record<string, number[]>; (tm[name] ??= []).push(d); log(`${name}: ${d} ms`); }
 }
 const sleep = (t: number) => new Promise((r) => setTimeout(r, t));
+// WebdriverIO 把服务端错误体塞进 message，有时是对象，直接拼字符串只剩 [object Object]；把能拿到的字段都展开
+const errText = (e: unknown): string => {
+  const o = e as Record<string, unknown>;
+  const parts = [o?.name, typeof o?.message === "string" ? o.message : JSON.stringify(o?.message), o?.stacktrace, o?.data ? JSON.stringify(o.data) : undefined];
+  return parts.filter(Boolean).join(" | ").slice(0, 600);
+};
 
 // ---- Device Farm 会话 ----
 const df = new DeviceFarmClient({ region: DF_REGION });
@@ -50,7 +76,7 @@ async function projectArn(): Promise<string> {
 }
 async function startSession(project: string): Promise<{ arn: string; endpoint: string }> {
   const created = await df.send(new CreateRemoteAccessSessionCommand({
-    projectArn: project, deviceArn: DEVICE_ARN, name: `spike06-${Date.now()}`,
+    projectArn: project, deviceArn: DEVICE_ARN, name: `spike06-${PLATFORM}-${SCENARIO}-${Date.now()}`,
     configuration: { billingMethod: "METERED" },
   }));
   const arn = created.remoteAccessSession!.arn!;
@@ -83,27 +109,97 @@ async function stopSession(arn: string): Promise<void> {
   }
 }
 
+// ---- 应用上传与安装（Device Farm 路径）----
+// 上传是项目级资源，处理成功后可跨会话复用；安装是会话级动作。
+async function ensureAppUpload(project: string): Promise<string> {
+  if (APP_ARN) return APP_ARN;
+  if (!APP_URL) throw new Error("app 场景需要 DF_APP_URL 或 DF_APP_ARN");
+  const name = path.basename(new URL(APP_URL).pathname);
+  const existing = await df.send(new ListUploadsCommand({ arn: project, type: PLATFORM === "ios" ? "IOS_APP" : "ANDROID_APP" }));
+  const hit = existing.uploads?.find((u) => u.name === name && u.status === "SUCCEEDED");
+  if (hit?.arn) { log(`复用已上传的应用 ${name}`); results.app_upload_reused = true; return hit.arn; }
+  const local = path.join(RUN_DIR, name);
+  if (!fs.existsSync(local)) {
+    await timed("app_download", async () => { const r = await fetch(APP_URL); if (!r.ok) throw new Error(`下载 APK 失败：${r.status}`); fs.writeFileSync(local, Buffer.from(await r.arrayBuffer())); });
+  }
+  const bytes = fs.readFileSync(local);
+  results.app_bytes = bytes.length;
+  const created = await df.send(new CreateUploadCommand({ projectArn: project, name, type: PLATFORM === "ios" ? "IOS_APP" : "ANDROID_APP", contentType: "application/octet-stream" }));
+  const upload = created.upload!;
+  await timed("app_upload_put", async () => {
+    const r = await fetch(upload.url!, { method: "PUT", body: bytes, headers: { "Content-Type": "application/octet-stream" } });
+    if (!r.ok) throw new Error(`PUT 到 Device Farm 预签名地址失败：${r.status}`);
+  });
+  await timed("app_upload_processing", async () => {
+    for (;;) {
+      const g = await df.send(new GetUploadCommand({ arn: upload.arn! }));
+      const st = g.upload!.status;
+      if (st === "SUCCEEDED") { results.app_upload_metadata = g.upload!.metadata?.slice(0, 600); return; }
+      if (st === "FAILED") throw new Error(`Device Farm 处理上传失败：${g.upload!.message ?? ""} ${g.upload!.metadata ?? ""}`.slice(0, 500));
+      await sleep(5_000);
+    }
+  });
+  return upload.arn!;
+}
+async function installApp(driver: Driver, sessionArn: string, appArn: string): Promise<void> {
+  await timed("app_install_call", async () => {
+    const r = await df.send(new InstallToRemoteAccessSessionCommand({ remoteAccessSessionArn: sessionArn, appArn }));
+    results.app_install_response = { status: r.appUpload?.status, message: r.appUpload?.message };
+  });
+  await timed("app_install_until_present", async () => {
+    const t0 = performance.now();
+    for (;;) {
+      if (await driver.isAppInstalled(APP_PACKAGE)) return;
+      if (ms(t0) > 5 * 60_000) throw new Error(`安装 5 分钟后 ${APP_PACKAGE} 仍未出现在设备上`);
+      await sleep(5_000);
+    }
+  });
+}
+
 // ---- WebDriver 连接与命令往返 ----
+function caps(): Record<string, unknown> {
+  const common = { "appium:newCommandTimeout": 900 };   // 模型思考几十秒，别让 Appium 把会话当闲置回收
+  if (PLATFORM === "ios") {
+    return { platformName: "iOS", "appium:automationName": "XCUITest", ...(SCENARIO === "web" ? { browserName: "Safari" } : {}), ...common };
+  }
+  if (SCENARIO === "web") return { platformName: "Android", "appium:automationName": "UiAutomator2", browserName: "Chrome", ...common };
+  // app 场景：Device Farm 路径先连会话（不带应用能力）、再装再启；appium 路径由 Appium 主机按 appium:app 下载安装
+  return {
+    platformName: "Android", "appium:automationName": "UiAutomator2", "appium:noReset": true,
+    ...(APP_INSTALL === "appium" && APP_URL ? { "appium:app": APP_URL, "appium:appPackage": APP_PACKAGE } : {}),
+    ...common,
+  };
+}
 async function connect(endpoint: string): Promise<Driver> {
   const u = new URL(endpoint);
   return remote({
     protocol: u.protocol.replace(":", ""), hostname: u.hostname,
     port: u.port ? Number(u.port) : 443, path: u.pathname + u.search,
     logLevel: "warn",
-    capabilities: {
-      platformName: "Android",
-      "appium:automationName": "UiAutomator2",
-      browserName: "Chrome",
-      "appium:newCommandTimeout": 900,   // 模型思考几十秒，别让 Appium 把会话当闲置回收
-    },
+    capabilities: caps(),
   });
 }
 function pngSize(b64: string): { width: number; height: number } {
   const buf = Buffer.from(b64.slice(0, 64), "base64"); // IHDR 在前 24 字节内
   return { width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) };
 }
+const elementId = (ref: unknown): string => Object.values(ref as Record<string, string>)[0];
+// WebdriverIO 把非标准错误体压成 [object Object]；对失败的路由再发一次原始 HTTP 请求，记下状态码与响应体
+async function rawProbe(endpoint: string, driver: Driver, route: string): Promise<unknown> {
+  try {
+    const base = endpoint.replace(/\/$/, "");
+    const r = await fetch(`${base}/session/${driver.sessionId}/${route}`);
+    const body = (await r.text()).slice(0, 800);
+    (results.raw_probes ??= {} as Record<string, unknown>);
+    (results.raw_probes as Record<string, unknown>)[route] = { status: r.status, body };
+    log(`原始探针 ${route}: HTTP ${r.status} ${body.slice(0, 300)}`);
+    return body;
+  } catch (e) { log(`原始探针 ${route} 本身失败：${errText(e)}`); return undefined; }
+}
 
 // ---- Midscene 适配器：截图、尺寸、动作三件 ----
+// 截图与手势都在 NATIVE_APP 上下文：整屏像素坐标系（Android 的 mobile: 手势直接用像素；iOS 的 XCUITest 手势用点，
+// 按截图像素宽 / 窗口点宽的比例换算）。网页上下文（Android 的 CHROMIUM、iOS 的 WEBVIEW_*）只在读地址、历史后退时临时切入。
 class AppiumInterface extends AbstractInterface {
   interfaceType = "appium-webdriver";
   // AbstractInterface 把这些声明为「可选的抽象成员」，子类仍须给出声明；spike 不实现的一律显式置 undefined。
@@ -114,107 +210,309 @@ class AppiumInterface extends AbstractInterface {
   afterInvokeAction = undefined;
   getElementsNodeTree = undefined;
   evaluateJavaScript = undefined;
-  describe = () => `Device Farm Appium 端点上的 Android Chrome（${DEVICE_ARN.slice(-12)}）`;
-  constructor(private readonly d: Driver) { super(); }
-  // 截图与手势都在 NATIVE_APP 上下文：整屏像素坐标系，与 UiAutomator2 的 mobile: 手势同一坐标系。
-  // （第一轮在 CHROMIUM 上下文截图拿到的是视口图，纵向少一个状态栏加地址栏的偏移，点击全部落空。）
+  describe = () => `Device Farm Appium 端点上的 ${PLATFORM} ${SCENARIO}（${DEVICE_ARN.slice(-12)}）`;
+  private scale = 1;                 // 截图像素 / 手势坐标单位；Android 为 1，iOS 首次用到时按窗口点宽算出
+  private webCtx: string | undefined; // 网页上下文名，首次用到时查
   private async native<T>(fn: () => Promise<T>): Promise<T> {
     const cur = await this.d.getContext();
     if (cur !== "NATIVE_APP") await this.d.switchContext("NATIVE_APP");
     return fn();
   }
+  private async inWeb<T>(fn: () => Promise<T>): Promise<T> {
+    const cur = (await this.d.getContext()) as string;
+    if (cur === "NATIVE_APP" || !this.webCtx) {
+      const cs = (await this.d.getContexts()) as string[];
+      this.webCtx = cs.find((c) => c !== "NATIVE_APP");
+      if (!this.webCtx) throw new Error(`没有网页上下文：${JSON.stringify(cs)}`);
+    }
+    if (cur !== this.webCtx) await this.d.switchContext(this.webCtx);
+    try { return await fn(); } finally { if (cur !== this.webCtx) await this.d.switchContext(cur); }
+  }
   async screenshotBase64(): Promise<string> { return "data:image/png;base64," + await this.native(() => this.d.takeScreenshot()); }
   async size() {
     const shot = await this.native(() => this.d.takeScreenshot());
-    return pngSize(shot);
+    const px = pngSize(shot);
+    if (PLATFORM === "ios" && this.scale === 1) {
+      const info = await this.native(() => this.d.execute("mobile: deviceScreenInfo")).catch(() => undefined) as { scale?: number } | undefined;
+      if (info?.scale) { this.scale = info.scale; results.ios_scale = { px, device_screen_info: info, scale: this.scale }; }
+      else { const rect = await this.native(() => this.d.getWindowRect()); this.scale = px.width / rect.width; results.ios_scale = { px, window_points: rect, scale: this.scale }; }
+    }
+    return px;
+  }
+  private pt(v: number): number { return Math.round((v / this.scale) * 100) / 100; }
+  // iOS 没有键码，输入有多条候选路线，哪条可用随 iOS 版本变；AI 阶段前先用确定性探针逐条实测（见 iosTypingProbe），
+  // 把实测落字的路线排在前面。候选：
+  //   web-active-element：网页上下文里的活动元素加 sendKeys（Safari 远程检查器的 type 原子，合成事件）；
+  //   legacy-keys-raw：Appium 旧版 POST /keys（XCUITest 在原生上下文转给 WDA 的 /wda/keys，打到第一响应者）；
+  //   w3c-key-actions-native：W3C 键盘动作（WebdriverIO 的 keys；iPhone 7 / iOS 15.8 上不报错但不落字、每次 52 秒）；
+  //   native-active-element：NATIVE_APP 的活动元素加 sendKeys（iPhone 7 / iOS 15.8 上报无此元素）。
+  // mobile: keys 只在 iOS 17+ 的 iPad 上有效，不列入。
+  static typeRouteOrder: string[] = ["web-active-element", "legacy-keys-raw", "w3c-key-actions-native", "native-active-element"];
+  private typeRoute: string | undefined;
+  constructor(private readonly d: Driver, private readonly endpoint: string) { super(); }
+  typingRoutes(text: string): Array<[string, () => Promise<void>]> {
+    const all: Record<string, () => Promise<void>> = {
+      "web-active-element": () => this.inWeb(async () => { const ref = await this.d.getActiveElement(); await this.d.elementSendKeys(elementId(ref), text); }),
+      "legacy-keys-raw": () => this.native(async () => {
+        const r = await fetch(`${this.endpoint.replace(/\/$/, "")}/session/${this.d.sessionId}/keys`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ value: [...text] }) });
+        if (!r.ok) throw new Error(`POST /keys HTTP ${r.status} ${(await r.text()).slice(0, 300)}`);
+      }),
+      "w3c-key-actions-native": () => this.native(async () => { await this.d.keys(text); }),
+      "native-active-element": () => this.native(async () => { const ref = await this.d.getActiveElement(); await this.d.elementSendKeys(elementId(ref), text); }),
+    };
+    return AppiumInterface.typeRouteOrder.map((n) => [n, all[n]] as [string, () => Promise<void>]);
+  }
+  private async iosSendKeys(text: string): Promise<void> {
+    const routes = this.typingRoutes(text);
+    const ordered = this.typeRoute ? [...routes.filter((r) => r[0] === this.typeRoute), ...routes.filter((r) => r[0] !== this.typeRoute)] : routes;
+    const errors: string[] = [];
+    for (const [name, fn] of ordered) {
+      try {
+        await fn();
+        this.typeRoute = name;
+        ((results.ios_type_routes ??= []) as string[]).push(name);
+        return;
+      } catch (e) { errors.push(`${name}: ${errText(e)}`); }
+    }
+    ((results.ios_type_errors ??= []) as string[]).push(errors.join(" || "));
+    throw new Error(`iOS 输入全部路线失败：${errors.join(" || ")}`);
+  }
+  private async swipe(from: { x: number; y: number }, to: { x: number; y: number }, durationMs = 400): Promise<void> {
+    await this.d.performActions([{
+      type: "pointer", id: "finger1", parameters: { pointerType: "touch" },
+      actions: [
+        { type: "pointerMove", duration: 0, x: this.pt(from.x), y: this.pt(from.y) },
+        { type: "pointerDown", button: 0 },
+        { type: "pause", duration: 100 },
+        { type: "pointerMove", duration: durationMs, x: this.pt(to.x), y: this.pt(to.y) },
+        { type: "pointerUp", button: 0 },
+      ],
+    }]);
+    await this.d.releaseActions().catch(() => {});
   }
   actionSpace(): DeviceAction[] {
     const d = this.d;
-    const key = (name: string) => ({ Enter: 66, Return: 66, Backspace: 67, Tab: 61, Back: 4, Home: 3, Escape: 111 } as Record<string, number>)[name];
+    const ios = PLATFORM === "ios";
+    const androidKey = (name: string) => ({ Enter: 66, Return: 66, Backspace: 67, Tab: 61, Back: 4, Home: 3, Escape: 111 } as Record<string, number>)[name];
     return defineActionsFromInputPrimitives({
       pointer: {
-        tap: async (p) => { await d.execute("mobile: clickGesture", { x: Math.round(p.x), y: Math.round(p.y) }); },
-        longPress: async (p, o) => { await d.execute("mobile: longClickGesture", { x: Math.round(p.x), y: Math.round(p.y), duration: o?.duration ?? 800 }); },
+        tap: async (p) => {
+          if (ios) await d.execute("mobile: tap", { x: this.pt(p.x), y: this.pt(p.y) });
+          else await d.execute("mobile: clickGesture", { x: Math.round(p.x), y: Math.round(p.y) });
+        },
+        longPress: async (p, o) => {
+          const dur = o?.duration ?? 800;
+          if (ios) await d.execute("mobile: touchAndHold", { x: this.pt(p.x), y: this.pt(p.y), duration: dur / 1000 });
+          else await d.execute("mobile: longClickGesture", { x: Math.round(p.x), y: Math.round(p.y), duration: dur });
+        },
       },
       keyboard: {
-        typeText: async (value) => { await d.execute("mobile: type", { text: value }); },
-        keyboardPress: async (name) => { const k = key(name); if (k === undefined) throw new Error(`未映射的键：${name}`); await d.execute("mobile: pressKey", { keycode: k }); },
-        clearInput: async () => { for (let i = 0; i < 40; i++) await d.execute("mobile: pressKey", { keycode: 67 }); },
+        typeText: async (value) => { if (ios) await this.iosSendKeys(value); else await d.execute("mobile: type", { text: value }); },
+        keyboardPress: async (name) => {
+          if (ios) {
+            const ch = ({ Enter: "\n", Return: "\n", Backspace: "\b" } as Record<string, string>)[name];
+            if (ch === undefined) throw new Error(`iOS 上未映射的键：${name}`);
+            await this.iosSendKeys(ch);
+          } else {
+            const k = androidKey(name); if (k === undefined) throw new Error(`未映射的键：${name}`);
+            await d.execute("mobile: pressKey", { keycode: k });
+          }
+        },
+        clearInput: async () => {
+          if (ios) await this.iosSendKeys("\b".repeat(40));
+          else for (let i = 0; i < 40; i++) await d.execute("mobile: pressKey", { keycode: 67 });
+        },
       },
       scroll: {
         scroll: async (param) => {
           const s = await this.size();
           const dir = (param as { direction?: string }).direction ?? "down";
           const dist = (param as { distance?: number }).distance ?? Math.round(s.height * 0.5);
-          await d.execute("mobile: scrollGesture", { left: 0, top: Math.round(s.height * 0.2), width: s.width, height: Math.round(s.height * 0.6), direction: dir, percent: Math.min(1, dist / s.height) });
+          if (ios) {
+            // 手指方向与内容方向相反：向下看内容时手指上滑
+            const cx = s.width / 2, cy = s.height / 2, dy = Math.min(dist, s.height * 0.6) / 2, dx = Math.min(dist, s.width * 0.6) / 2;
+            const vec = { down: [0, -dy], up: [0, dy], right: [-dx, 0], left: [dx, 0] }[dir] ?? [0, -dy];
+            await this.swipe({ x: cx - vec[0], y: cy - vec[1] }, { x: cx + vec[0], y: cy + vec[1] });
+          } else {
+            await d.execute("mobile: scrollGesture", { left: 0, top: Math.round(s.height * 0.2), width: s.width, height: Math.round(s.height * 0.6), direction: dir, percent: Math.min(1, dist / s.height) });
+          }
         },
       },
       system: {
-        backButton: async () => { await d.execute("mobile: pressKey", { keycode: 4 }); },
-        homeButton: async () => { await d.execute("mobile: pressKey", { keycode: 3 }); },
+        backButton: async () => {
+          if (ios) await this.inWeb(() => d.back());               // Safari 没有系统返回键，用历史后退
+          else await d.execute("mobile: pressKey", { keycode: 4 });
+        },
+        homeButton: async () => {
+          if (ios) await d.execute("mobile: pressButton", { name: "home" });
+          else await d.execute("mobile: pressKey", { keycode: 3 });
+        },
       },
     }, { size: () => this.size(), includeSwipe: false });
   }
-  url = async () => { const cur = await this.d.getContext(); if (cur !== "CHROMIUM") await this.d.switchContext("CHROMIUM"); const u = await this.d.getUrl(); if (cur !== "CHROMIUM") await this.d.switchContext(cur as string); return u; };
+  url = async () => (SCENARIO === "web" ? this.inWeb(() => this.d.getUrl()).catch((e) => { results.url_error = errText(e); return ""; }) : "");
   async destroy() { /* 会话由 main 统一收 */ }
+}
+
+// ---- iOS 输入探针（确定性，不调模型）----
+// 在 AI 点开搜索框之后对已聚焦的输入框逐条路线输入一段文本，经网页上下文读回活动元素的 value 判断是否落字，记录耗时与错误，
+// 再按实测结果把可用路线排到前面。网页上下文不可用的系统（iOS 26.3 实测）读不回 value，只能记错误、靠后续 AI 步判断。
+// 直接用 CSS 找搜索框并原子点击的做法在 iPhone 7 上拿到的是隐藏的输入框（元素不可见），所以借 AI 的点击来聚焦。
+async function iosTypingProbe(iface: AppiumInterface, driver: Driver): Promise<void> {
+  const report: Array<Record<string, unknown>> = [];
+  const web = (results.contexts as string[]).find((c) => c !== "NATIVE_APP");
+  if (!web) { results.ios_typing_probe = "无网页上下文"; return; }
+  const readBack = async (): Promise<string | undefined> => {
+    const cur = (await driver.getContext()) as string;
+    try {
+      await driver.switchContext(web);
+      const ref = await driver.getActiveElement();
+      return (await driver.getElementAttribute(elementId(ref), "value")) ?? undefined;
+    } finally { await driver.switchContext(cur).catch(() => {}); }
+  };
+  const clear = async (): Promise<void> => {
+    const cur = (await driver.getContext()) as string;
+    try { await driver.switchContext(web); const ref = await driver.getActiveElement(); await driver.elementClear(elementId(ref)); }
+    finally { await driver.switchContext(cur).catch(() => {}); }
+  };
+  for (const [name, fn] of iface.typingRoutes("Playwright")) {
+    const rec: Record<string, unknown> = { route: name };
+    const t0 = performance.now();
+    try {
+      await fn();                               // 路线内部自行切上下文
+      rec.type_ms = ms(t0);
+      const value = await readBack().catch((e) => { rec.readback_error = errText(e); return undefined; });
+      rec.value = value; rec.ok = typeof value === "string" && value.includes("Playwright");
+      await clear().catch(() => {});
+    } catch (e) { rec.error = errText(e); }
+    rec.total_ms = ms(t0);
+    report.push(rec);
+    log(`输入探针 ${name}: ${JSON.stringify(rec)}`);
+  }
+  results.ios_typing_probe = report;
+  const good = report.filter((r) => r.ok).sort((a, b) => (a.type_ms as number) - (b.type_ms as number)).map((r) => r.route as string);
+  const rest = AppiumInterface.typeRouteOrder.filter((n) => !good.includes(n));
+  AppiumInterface.typeRouteOrder = [...good, ...rest];
+  results.ios_type_route_order = AppiumInterface.typeRouteOrder;
+}
+
+// ---- 两个场景的 AI 步 ----
+type Stepper = (kind: "act" | "bool", prompt: string) => Promise<unknown>;
+async function webSteps(step: Stepper, probe?: () => Promise<void>): Promise<void> {
+  await step("bool", "这是维基百科上 OpenAI 的词条页");
+  await step("act", "点击维基百科页面上的搜索图标（放大镜）");
+  await step("bool", "页面上出现了可输入的搜索框");
+  if (probe) await probe().catch((e) => { results.ios_typing_probe_error = errText(e); log(`输入探针整体失败（继续）：${results.ios_typing_probe_error}`); });
+  await step("act", "在搜索框输入 Playwright 并点击搜索结果里的 Playwright 条目");
+  await step("bool", "当前页面是 Playwright 的维基百科词条页");
+  await step("bool", "页面顶部有一条红色横幅写着本站已永久关闭");  // 刻意为假：量判否路径
+}
+async function appSteps(step: Stepper): Promise<void> {
+  // 首次启动有引导页（Skip / Continue）与可能的系统权限弹窗；先问再动，避免条件式动作提示
+  if (await step("bool", "屏幕上有系统权限请求弹窗（如允许通知）") === true) await step("act", "点击不允许或 Don't allow 关闭系统弹窗");
+  if (await step("bool", "这是维基百科应用的引导页（欢迎页或介绍页，底部有翻页箭头、Skip 或 Continue 按钮）") === true) await step("act", "跳过引导：底部有 Skip 就点 Skip；没有就点右下角的蓝色箭头翻到下一页，直到出现 Skip 或 Get started 并点它，进入应用首页");
+  if (await step("bool", "屏幕上有系统权限请求弹窗（如允许通知）") === true) await step("act", "点击不允许或 Don't allow 关闭系统弹窗");
+  // 第一轮实测：首页顶部没有搜索栏（搜索是底部标签），精确命中「Playwright」打开的是剧作家词条；两条断言按真实界面改写
+  await step("bool", "这是维基百科应用的首页，底部导航栏里有 Search 标签");
+  await step("act", "点击底部的 Search 标签，在搜索框输入 Playwright，然后点击搜索结果中标题为 Playwright (software) 的那一条");
+  await step("bool", "当前打开的词条标题是 Playwright (software)，正文提到浏览器自动化或 Microsoft");
+  await step("bool", "屏幕顶部有一条红色横幅写着本站已永久关闭");  // 刻意为假：量判否路径
 }
 
 async function main(): Promise<number> {
   fs.mkdirSync(RUN_DIR, { recursive: true });
   const project = await projectArn();
-  log(`项目 ${project.slice(-20)}，设备 ${DEVICE_ARN.slice(-12)}，模型 ${MODEL}（${modelFamily()}），Bedrock ${getBaseUrl()}`);
+  log(`项目 ${project.slice(-20)}，平台 ${PLATFORM}，场景 ${SCENARIO}，设备 ${DEVICE_ARN.slice(-12)}，模型 ${MODEL}（${modelFamily()}），Bedrock ${getBaseUrl()}`);
+  const appArn = SCENARIO === "app" && APP_INSTALL === "devicefarm" ? await ensureAppUpload(project) : undefined;
   const session = await startSession(project);
   let driver: Driver | undefined;
   let rc = 0;
   try {
     driver = await timed("webdriver_connect", () => connect(session.endpoint));
     results.caps = (driver as unknown as { capabilities: unknown }).capabilities;
-    log(`caps: ${JSON.stringify(results.caps).slice(0, 300)}`);
+    results.server_status = await driver.status().catch((e) => ({ error: errText(e) }));
+    log(`caps: ${JSON.stringify(results.caps).slice(0, 400)}`);
     for (let i = 0; i < 3; i++) {
       const shot = await timed("cmd_screenshot", () => driver!.takeScreenshot());
       if (i === 0) { results.screenshot_px = pngSize(shot); results.screenshot_b64_kb = Math.round(shot.length / 1024); }
-      await timed("cmd_window_rect", () => driver!.getWindowRect());
+      await timed("cmd_window_rect", () => driver!.getWindowRect()).catch(async (e) => { if (!results.window_rect_error) { results.window_rect_error = errText(e); log(`window rect 失败（继续）：${results.window_rect_error}`); await rawProbe(session.endpoint, driver!, "window/rect"); } });
     }
     results.contexts = await timed("cmd_get_contexts", () => driver!.getContexts());
+    results.context_initial = await driver.getContext();
     await driver.switchContext("NATIVE_APP");
     for (let i = 0; i < 2; i++) { const shot = await timed("cmd_screenshot_native", () => driver!.takeScreenshot()); if (i === 0) results.screenshot_native_px = pngSize(shot); }
-    await driver.switchContext("CHROMIUM");
-    results.window_rect = await driver.getWindowRect();
-    await timed("cmd_navigate", () => driver!.url(START_URL));
-    results.title_after_nav = await timed("cmd_get_title", () => driver!.getTitle());
-    results.url_after_nav = await timed("cmd_get_url", () => driver!.getUrl());
-    try {  // 探针失败不该拖垮 AI 阶段
-      const h1s = await timed("cmd_find_h1", async () => await driver!.$$("h1"));
-      results.h1_count = h1s.length;
-      results.h1_text = h1s.length ? await timed("cmd_get_text", async () => await h1s[0].getText()) : null;
-      results.page_source_kb = Math.round((await timed("cmd_page_source", () => driver!.getPageSource())).length / 1024);
-    } catch (e) { results.probe_error = String((e as Error).message).slice(0, 200); log(`探针失败（继续）：${results.probe_error}`); }
-    log(`导航后标题「${results.title_after_nav}」 h1「${results.h1_text}」 contexts=${JSON.stringify(results.contexts)} rect=${JSON.stringify(results.window_rect)} shot=${JSON.stringify(results.screenshot_px)}`);
+    results.window_rect_native = await driver.getWindowRect().catch((e) => ({ error: errText(e) }));
+    if (PLATFORM === "ios") results.device_screen_info = await driver.execute("mobile: deviceScreenInfo").catch((e) => ({ error: errText(e) }));
+
+    if (SCENARIO === "app") {
+      if (appArn) await installApp(driver, session.arn, appArn);
+      await timed("app_activate", () => driver!.activateApp(APP_PACKAGE));
+      await sleep(3000);
+      // 控件树探针：确定性 step 在原生应用里能拿到什么
+      const src = await timed("cmd_page_source", () => driver!.getPageSource());
+      results.page_source_kb = Math.round(src.length / 1024);
+      fs.writeFileSync(path.join(RUN_DIR, "page-source-after-launch.xml"), src);
+      results.resource_ids_sample = [...new Set([...src.matchAll(/resource-id="([^"]+)"/g)].map((m) => m[1]).filter(Boolean))].slice(0, 25);
+      results.contexts_in_app = await driver.getContexts();
+      // UiAutomator2 在动作与截图前默认等界面空闲（waitForIdleTimeout 10 秒），有动画的页面会把一张截图拖到几秒；量一下关掉的效果
+      for (let i = 0; i < 2; i++) await timed("cmd_screenshot_app_default_idle", () => driver!.takeScreenshot());
+      await driver.updateSettings({ waitForIdleTimeout: 0 }).catch((e) => { results.update_settings_error = errText(e); });
+      for (let i = 0; i < 2; i++) await timed("cmd_screenshot_app_idle0", () => driver!.takeScreenshot());
+      try {
+        const found = await timed("cmd_find_by_id", async () => await driver!.$$(`id=${APP_PACKAGE}:id/search_container`));
+        results.find_search_container = found.length;
+      } catch (e) { results.probe_error = errText(e); }
+    } else {
+      const webCtx = (results.contexts as string[]).find((c) => c !== "NATIVE_APP");
+      if (webCtx) await driver.switchContext(webCtx);
+      results.window_rect_web = await driver.getWindowRect().catch((e) => ({ error: errText(e) }));
+      await timed("cmd_navigate", () => driver!.url(START_URL)).catch((e) => { results.navigate_error = errText(e); log(`导航失败（继续）：${results.navigate_error}`); });
+      results.title_after_nav = await timed("cmd_get_title", () => driver!.getTitle()).catch(async (e) => { await rawProbe(session.endpoint, driver!, "title"); return { error: errText(e) }; });
+      if (PLATFORM === "ios" && (results.navigate_error || typeof results.title_after_nav !== "string")) {
+        // 网页上下文不可用时的替代导航：XCTest 侧的 deepLink 让 Safari 打开地址（不经远程检查器）
+        await driver.switchContext("NATIVE_APP").catch(() => {});
+        await timed("cmd_deeplink_navigate", () => driver!.execute("mobile: deepLink", { url: START_URL, bundleId: "com.apple.mobilesafari" }))
+          .then(() => { results.deeplink_navigate = "ok"; }).catch((e) => { results.deeplink_navigate = errText(e); log(`deepLink 导航失败（继续）：${results.deeplink_navigate}`); });
+        await sleep(4000);
+      }
+      results.url_after_nav = await timed("cmd_get_url", () => driver!.getUrl()).catch(async (e) => { await rawProbe(session.endpoint, driver!, "url"); return { error: errText(e) }; });
+      try {  // 探针失败不该拖垮 AI 阶段
+        const h1s = await timed("cmd_find_h1", async () => await driver!.$$("h1"));
+        results.h1_count = h1s.length;
+        results.h1_text = h1s.length ? await timed("cmd_get_text", async () => await h1s[0].getText()) : null;
+        results.page_source_kb = Math.round((await timed("cmd_page_source", () => driver!.getPageSource())).length / 1024);
+      } catch (e) { results.probe_error = errText(e); log(`探针失败（继续）：${results.probe_error}`); }
+      log(`导航后标题「${results.title_after_nav}」 h1「${results.h1_text}」 contexts=${JSON.stringify(results.contexts)} rect=${JSON.stringify(results.window_rect_web)} shot=${JSON.stringify(results.screenshot_px)}`);
+    }
 
     if (!SKIP_AI) {
-      const iface = new AppiumInterface(driver);
+      const iface = new AppiumInterface(driver, session.endpoint);
       const agent = new Agent(iface, {
-        generateReport: true, persistExecutionDump: true, replanningCycleLimit: 4,
+        generateReport: true, persistExecutionDump: true, replanningCycleLimit: SCENARIO === "app" ? 8 : 4,
         modelConfig: { MIDSCENE_MODEL_NAME: MODEL, MIDSCENE_MODEL_BASE_URL: getBaseUrl(), MIDSCENE_MODEL_API_KEY: "unused", MIDSCENE_MODEL_FAMILY: modelFamily() },
         createOpenAIClient: async () => new OpenAI({ baseURL: getBaseUrl(), apiKey: "unused", fetch: sigv4Fetch }) as never,
       } as never);
       const ai: Record<string, unknown>[] = [];
-      const step = async (kind: "act" | "bool", prompt: string) => {
+      const step: Stepper = async (kind, prompt) => {
         const t0 = performance.now(); let out: unknown; let err: string | undefined;
-        try { out = kind === "act" ? await agent.aiAct(prompt) : await agent.aiBoolean(prompt); } catch (e) { err = String((e as Error).message ?? e).slice(0, 300); }
+        try { out = kind === "act" ? await agent.aiAct(prompt) : await agent.aiBoolean(prompt); } catch (e) { err = errText(e); }
         const m = (agent as unknown as { metrics?: { totalTokens?: number } }).metrics;
         const rec = { kind, prompt, ms: ms(t0), result: out, error: err, total_tokens_so_far: m?.totalTokens, executions: (agent.dump?.executions ?? []).length };
         ai.push(rec); log(`AI ${kind} ${rec.ms} ms tokens=${rec.total_tokens_so_far} result=${JSON.stringify(out)} ${err ? "ERR " + err : ""}`);
+        return out;
       };
-      await step("bool", "这是维基百科上 OpenAI 的词条页");
-      await step("act", "点击页面顶部的搜索图标");
-      await step("bool", "页面上出现了可输入的搜索框");
-      await step("act", "在搜索框输入 Playwright 并点击搜索结果里的 Playwright 条目");
-      await step("bool", "当前页面是 Playwright 的维基百科词条页");
-      await step("bool", "页面顶部有一条红色横幅写着本站已永久关闭");  // 刻意为假：量判否路径
+      if (SCENARIO === "web") await webSteps(step, PLATFORM === "ios" ? () => iosTypingProbe(iface, driver!) : undefined); else await appSteps(step);
       results.ai_steps = ai;
-      await driver.switchContext("CHROMIUM");   // AI 阶段结束时停在 NATIVE_APP，读地址要回网页上下文（第三轮在此报 url 未实现）
-      results.url_after_ai = await driver.getUrl();
+      if (SCENARIO === "web") results.url_after_ai = await iface.url();
+      if (SCENARIO === "app") {
+        // 词条页的控件树：确定性 step 在原生应用里能拿到什么（第一轮只看了 Compose 引导页，树几乎为空）
+        const src = await timed("cmd_page_source_after_ai", () => driver!.getPageSource()).catch(() => "");
+        fs.writeFileSync(path.join(RUN_DIR, "page-source-after-ai.xml"), src);
+        results.page_source_after_ai_kb = Math.round(src.length / 1024);
+        results.resource_ids_after_ai = [...new Set([...src.matchAll(/resource-id="([^"]+)"/g)].map((m) => m[1]).filter(Boolean))].slice(0, 40);
+        results.texts_after_ai = [...new Set([...src.matchAll(/ text="([^"]{2,60})"/g)].map((m) => m[1]))].slice(0, 20);
+        results.contexts_after_ai = await driver.getContexts().catch(() => []);
+      }
       await agent.destroy().catch(() => {});
       const shotsDir = path.join(RUN_DIR, "report", "screenshots");
       results.report_dir = fs.existsSync(path.join(RUN_DIR, "report")) ? fs.readdirSync(path.join(RUN_DIR, "report")).slice(0, 10) : null;
@@ -224,7 +522,7 @@ async function main(): Promise<number> {
       fs.writeFileSync(path.join(RUN_DIR, "spike06-executions.json"), JSON.stringify(execs, (k, v) => (k === "base64" ? undefined : v), 2));
     }
   } catch (e) {
-    rc = 1; results.error = String((e as Error).stack ?? e).slice(0, 2000); log(`失败：${(e as Error).message}`);
+    rc = 1; results.error = errText(e) + " | " + String((e as Error).stack ?? "").slice(0, 1200); log(`失败：${errText(e)}`);
   } finally {
     if (driver) await timed("webdriver_delete_session", () => driver!.deleteSession()).catch((e) => log(`deleteSession: ${(e as Error).message}`));
     await stopSession(session.arn).catch((e) => log(`stop: ${(e as Error).message}`));

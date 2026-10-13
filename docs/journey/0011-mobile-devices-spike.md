@@ -64,7 +64,8 @@ deterministic(pattern, {
 
 ## 进度
 
-- 2026-10-13：权限核过、项目 `gherkai-spike` 已建；spike A 脚本 `engines/midscene/spikes/06-devicefarm-appium.mts`，在跳板机跑了三轮（Redmi Note 13 / Android 15 / Chrome，模型 GPT-5.6 Terra 经 us-east-1 Bedrock）。
+- 2026-10-13：权限核过、项目 `gherkai-spike` 已建；spike A 脚本 `engines/midscene/spikes/06-devicefarm-appium.mts`，在跳板机执行了三轮（Redmi Note 13 / Android 15 / Chrome，模型 GPT-5.6 Terra 经 us-east-1 Bedrock）。
+- 2026-10-13（续）：同一脚本加平台与场景开关（`DF_PLATFORM`、`SPIKE_SCENARIO`、`DF_APP_URL`），iOS Safari 两台各执行到 6 步全对（iPhone 7 / iOS 15.8.4 三轮、iPhone 17 Pro / iOS 26.3.1 四轮），原生应用（维基百科 Android 客户端）两轮；数据见下两节。清单第 1、2、3、4、5、6、7 项有了实测，第 8、9、10、11、12 项未动。
 
 ## spike A 数据（设备网页，Android Chrome）
 
@@ -82,6 +83,41 @@ deterministic(pattern, {
 
 **适配器要点**：`appium:newCommandTimeout` 必须抬高（默认 60 秒，模型思考期间会被回收）；`url()` 要临时切回 CHROMIUM；WebdriverIO 的 `$()` 严格模式会在页面有两个同名元素时抛错，确定性 step 的写法要用 `$$()` 或更窄选择器。
 
-**设备清单补充**：远程访问可用的 iOS 真机以 iPhone XR / X / SE（iOS 15 到 16）为主，另有 iPhone Air（iOS 26.3.1）；Pixel 9 系列（Android 15 / 17）与 Pixel Tablet 可用。
+**设备清单补充**：远程访问可用的 iOS 真机 14 台，iOS 15.0 到 26.6（iPhone 6s / 7 / 11 / 12 / 13 / 14 / 16 / 16 Plus / 17 Pro、iPad 9 / Pro），当天高可用；Pixel 9 系列（Android 15 / 17）与 Pixel Tablet 可用。
 
-**待做**：iOS Safari 一轮；原生应用一轮（spike B，需定一个开源 APK 与一个依赖国内网络的应用）；并发到 2 台时第三个请求的表现；evidence 抽取真跑。
+## spike A 数据（设备网页，iOS Safari：iPhone 7 / iOS 15.8.4 与 iPhone 17 Pro / iOS 26.3.1）
+
+**会话与建连**：RUNNING 61 到 72 秒，与 Android 同级；Appium 建连差距大：iPhone 7 为 65 秒（WebDriverAgent 在老机器上启动慢），iPhone 17 Pro 为 17 秒。StopRemoteAccessSession 后 iOS 会话在 STOPPING 停留超过 2 分钟（Android 60 到 85 秒到 COMPLETED），计费分钟在 COMPLETED 后才出现（iOS 各轮 1.6 到 5.3 分钟）；worker 只需发出 Stop 即可退出，不必等 COMPLETED。Device Farm 的 Appium 服务端是 2.11.5（`GET /status`）。
+
+**截图与坐标**：iOS 截图不分上下文，都是整屏像素（750x1334、1206x2622），0.3 到 0.8 秒一张，没有 Android 视口截图 10 秒的问题。XCUITest 手势用点不用像素，比例取 `mobile: deviceScreenInfo` 的 `scale`（2 与 3），截图像素除以比例即手势坐标；两台机器动作全部命中。`getWindowRect` 在 iOS 26.3 上两种上下文都报错，不能用它反推比例。
+
+**网页上下文按系统版本分水岭**：iOS 15.8 的 Safari 网页上下文完整可用（导航 1.5 到 1.8 秒、标题与地址 0.2 秒、找元素 0.25 秒、page source 1.8 到 2.0 秒，与 Android 同级）。iOS 26.3 的网页上下文整体不可用：`window/rect`、`title`、`url`、`elements` 都返回 WebKit 远程检查器错误 `'Runtime' domain was not found`（Device Farm 的 appium-xcuitest-driver 对 iOS 26 的检查器协议过旧），`driver.url()` 不报错但页面没动。替代导航是 XCTest 侧的 `mobile: deepLink`（0.3 秒，Safari 打开地址），之后全程只用原生上下文：截图、点、输入都通，6 步全对。**含义**：iOS 26 上 DOM 选择器类的确定性 step 在 Device Farm 现状下做不了，只能原生控件树或 AI；这是 Device Farm 侧版本问题，不是方案问题，设计里要把「网页上下文不可用」当成一种运行时能力缺口处理而不是假定它一定在。
+
+**输入路线**（iOS 没有键码，四条候选在 AI 点开并聚焦搜索框之后逐条实测、经网页上下文读回 value）：
+
+| 路线 | iPhone 7 / iOS 15.8.4 | iPhone 17 Pro / iOS 26.3.1 |
+|---|---|---|
+| 网页上下文活动元素加 sendKeys（远程检查器 type 原子） | 落字，1.3 秒 | 网页上下文不可用，不通 |
+| Appium 旧版 `POST /keys`（XCUITest 转 WDA `/wda/keys`，打到第一响应者） | 不报错、不落字，51 秒（WDA 等键盘超时） | 落字，是这台机器上唯一通的路线 |
+| W3C 键盘动作（WebdriverIO 的 `keys`） | 不报错、不落字，50 到 53 秒 | 未单测（AI 阶段没轮到） |
+| NATIVE_APP 活动元素加 sendKeys | 报无此元素 | 网页上下文探针失败、未单测 |
+
+`mobile: keys` 只在 iOS 17+ 的 iPad 上有效，没列入。**含义**：没有一条路线同时覆盖两代系统，适配器必须按能力探测择路（网页上下文可用则走原子路线，否则走 `/wda/keys`），且失败的路线不抛错、只耗 50 秒，不能靠异常回落，要靠读回或超时判定。
+
+**AI 步**：两台各 6 步全对（iPhone 7 两轮、iPhone 17 Pro 一轮）；iPhone 7 合计 4.0 到 4.8 万 token（动作步 15 到 16 秒 / 1.6 万与 16 到 23 秒 / 1.6 到 2.4 万），iPhone 17 Pro 合计 6.2 万 token（动作步 21 秒 / 2.0 万与 40 秒 / 3.0 万）。两处提示词教训：iOS 26 的 Safari 地址栏在底部，「点击页面顶部的搜索图标」会让模型以「顶部没有」拒做，改成只说搜索图标；输入路线失败时模型会反复重试到重规划上限、再烧 4 万 token，所以路线必须先确定性探明再交给 AI。
+
+**并发**：三个远程访问会话同时 RUNNING（两台 iOS 加一台 Android），另有两个 STOPPING，创建全部被接受；文档写的默认 2 台并发没有在本账号出现，`service-quotas` 查不到 Device Farm 的配额项。worker 侧仍要按「创建会话可能被拒」写重试与排队，上限以账号实测为准。
+
+## spike B 数据（原生应用：维基百科 Android 客户端 50611，Redmi Note 13）
+
+**装应用只有 Device Farm 上传一条路**：`CreateUpload`（ANDROID_APP）拿预签名地址 PUT 88 MB 用 7 秒，服务端处理 5.4 秒，`metadata` 给出包名与版本（`org.wikipedia`、50611）、可按名复用；会话 RUNNING 后 `InstallToRemoteAccessSession` 调用 0.2 秒返回，设备上 `isAppInstalled` 11.6 到 11.7 秒后为真，`activateApp` 0.4 到 0.5 秒。`appium:app` 给公网地址让 Appium 主机自己下载的路线失败：主机报 `Failed to download app … Download returned empty or failed`，Device Farm 的 Appium 主机不出公网；这一轮白耗 1.2 设备分钟。**含义**：`[apps]` 里的应用要由 CLI / worker 先上传成 Device Farm 的 upload（按内容哈希复用），会话内再安装；不能把地址直接塞给 Appium。
+
+**不带应用能力的 UiAutomator2 会话可以建**（先连、再装、再启），建连 13 秒；Device Farm 给会话加了 `autoGrantPermissions`、`skipUnlock`、`suppressKillServer`、`printPageSourceOnFindFailure` 等默认能力。
+
+**截图**：应用内 2.0 到 2.2 秒一张（Chrome 会话的原生截图 0.6 到 1.0 秒；桌面启动器上 4.4 到 5.3 秒），`waitForIdleTimeout` 设 0 没有变化，差距另有原因待查；每个 AI 步因此多一到两秒。
+
+**AI 步**：两轮各 8 步，判断全部与真实界面一致。第一轮两条为假是断言写错了（首页顶部没有搜索栏、搜索在底部标签；精确命中「Playwright」打开的是剧作家词条不是软件），第二轮改写后全真。引导页有五页、Skip 在第五页才出现，一条「跳过引导」动作步走了 5 次规划、50 秒、5.2 万 token，`replanningCycleLimit` 4 不够、放到 8；「底部 Search 标签、输入、点 Playwright (software)」动作步 65 到 76 秒、6.5 到 8.7 万 token，途中还自行关掉了一张推广浮层。全轮 12.6 到 14.8 万 token、5.4 到 5.8 设备分钟。原生应用的动作步比网页贵一倍以上：页面长、每轮规划都带整屏截图。
+
+**控件树**：引导页是 Compose（`androidx.compose.ui.platform.ComposeView` 下全是无文本、无 resource-id 的 `android.view.View`），page source 6 KB、只有 `action_bar_root` 与 `android:id/content` 两个 id，确定性 step 在这种页面上拿不到任何锚点。词条页是经典 View：page source 11 KB，有 21 个 resource-id（`page_toolbar_button_search`、`page_save`、`page_find_in_article`、`page_web_view`、`tabsCountText` 等）与工具栏文本（Save、Language、Find in article、Theme、Contents、Search Wikipedia），原生控件层的确定性 step 可按 id 或文本锚定；词条正文在 `page_web_view` 里，上下文列表始终只有 `NATIVE_APP` 与 `WEBVIEW_chrome`（应用自己的 WebView 不可调试、没有网页上下文），正文内容拿不到 DOM。**含义**：原生应用上确定性 step 的可用面取决于被测应用的实现（经典 View 可锚、Compose 无 testTag 不可锚、WebView 正文不可锚），skill 里要把「先看 page source 再决定写不写确定性 step」写成规则。
+
+**待做**：evidence 抽取真跑（第 6 项）；失败形态（第 8 项）、费用折算（第 9 项）、国内网络应用（第 10 项，待定应用）、假 driver 的 API 面（第 11 项）、Midscene iOS 包的网关 WDA 形态（第 12 项）。
