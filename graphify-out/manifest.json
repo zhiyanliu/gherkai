@@ -145,8 +145,8 @@
     "semantic_hash": "0a704a7601112ff4482c279ee6c29009"
   },
   "engines/midscene/package.json": {
-    "mtime": 1791789781.2591858,
-    "ast_hash": "d4d8509478d75577e64754256aaf4caf",
+    "mtime": 1791877964.4419367,
+    "ast_hash": "6c888e9eeedd15b0c666c4168afbd228",
     "semantic_hash": ""
   },
   "engines/midscene/spikes/01-model-sigv4.ts": {
@@ -1130,8 +1130,8 @@
     "semantic_hash": "75eca3c62cac20b9c6ca991a92c452ff"
   },
   "docs/adr/0042-step-evidence-and-explain.md": {
-    "mtime": 1791790578.1909606,
-    "ast_hash": "823a20733e174e6fabbd6339b17206e5",
+    "mtime": 1791790928.0810518,
+    "ast_hash": "48c99492d5c8c107cc8e9b57d3c02898",
     "semantic_hash": ""
   },
   "engines/midscene/src/worker/evidence.mts": {
@@ -1873,5 +1873,15 @@
     "mtime": 1791516157.990722,
     "ast_hash": "0044f170604f2387ee9241018f3d56f3",
     "semantic_hash": "0044f170604f2387ee9241018f3d56f3"
+  },
+  "engines/midscene/spikes/06-devicefarm-appium.mts": {
+    "mtime": 1791879503.7510543,
+    "ast_hash": "2083a1b6f0c7e5d77a7bbf3bc7743419",
+    "semantic_hash": ""
+  },
+  "docs/journey/0011-mobile-devices-spike.md": {
+    "mtime": 1791879603.7326884,
+    "ast_hash": "2d3d92a7d7bcf2d32466e7706ba4b243",
+    "semantic_hash": ""
   }
 }
