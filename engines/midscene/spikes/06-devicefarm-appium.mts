@@ -166,7 +166,8 @@ async function installApp(driver: Driver, sessionArn: string, appArn: string): P
 function caps(): Record<string, unknown> {
   const common = { "appium:newCommandTimeout": 900 };   // 模型思考几十秒，别让 Appium 把会话当闲置回收
   if (PLATFORM === "ios") {
-    return { platformName: "iOS", "appium:automationName": "XCUITest", ...(SCENARIO === "web" ? { browserName: "Safari" } : {}), ...common };
+    // app 场景不带 bundleId：先连（XCUITest 落在主屏）、经 Device Farm 装、再 activateApp；DF_APP_PACKAGE 在 iOS 上就是 bundle id
+    return { platformName: "iOS", "appium:automationName": "XCUITest", ...(SCENARIO === "web" ? { browserName: "Safari" } : { "appium:noReset": true }), ...common };
   }
   if (SCENARIO === "web" || SCENARIO === "egress") return { platformName: "Android", "appium:automationName": "UiAutomator2", browserName: "Chrome", ...common };
   if (SCENARIO === "faults") return { platformName: "Android", "appium:automationName": "UiAutomator2", "appium:noReset": true, ...common };
@@ -336,10 +337,16 @@ class AppiumInterface extends AbstractInterface {
           const dir = (param as { direction?: string }).direction ?? "down";
           const dist = (param as { distance?: number }).distance ?? Math.round(s.height * 0.5);
           if (ios) {
-            // 手指方向与内容方向相反：向下看内容时手指上滑
-            const cx = s.width / 2, cy = s.height / 2, dy = Math.min(dist, s.height * 0.6) / 2, dx = Math.min(dist, s.width * 0.6) / 2;
-            const vec = { down: [0, -dy], up: [0, dy], right: [-dx, 0], left: [dx, 0] }[dir] ?? [0, -dy];
-            await this.swipe({ x: cx - vec[0], y: cy - vec[1] }, { x: cx + vec[0], y: cy + vec[1] });
+            // 手指方向与内容方向相反：向下看内容时手指上滑。首选 XCUITest 的 mobile: swipe（整个应用窗口上的真实轻扫手势），
+            // W3C 指针拖动在 iOS 26 的分页视图（UIPageViewController）上实测不翻页，只作回落。
+            const finger = ({ down: "up", up: "down", right: "left", left: "right" } as Record<string, string>)[dir] ?? "up";
+            try { await d.execute("mobile: swipe", { direction: finger }); }
+            catch (e) {
+              ((results.ios_swipe_fallbacks ??= []) as string[]).push(errText(e).slice(0, 160));
+              const cx = s.width / 2, cy = s.height / 2, dy = Math.min(dist, s.height * 0.6) / 2, dx = Math.min(dist, s.width * 0.6) / 2;
+              const vec = { down: [0, -dy], up: [0, dy], right: [-dx, 0], left: [dx, 0] }[dir] ?? [0, -dy];
+              await this.swipe({ x: cx - vec[0], y: cy - vec[1] }, { x: cx + vec[0], y: cy + vec[1] });
+            }
           } else {
             await d.execute("mobile: scrollGesture", { left: 0, top: Math.round(s.height * 0.2), width: s.width, height: Math.round(s.height * 0.6), direction: dir, percent: Math.min(1, dist / s.height) });
           }
@@ -492,6 +499,30 @@ async function webSteps(step: Stepper, probe?: () => Promise<void>): Promise<voi
   await step("bool", "当前页面是 Playwright 的维基百科词条页");
   await step("bool", "页面顶部有一条红色横幅写着本站已永久关闭");  // 刻意为假：量判否路径
 }
+// AWS Device Farm 的 iOS 示例应用（aws-device-farm-sample-app-for-ios 预构建 IPA）：标签栏加多种控件的演示页
+async function iosSampleAppSteps(step: Stepper): Promise<void> {
+  if (await step("bool", "屏幕上有系统弹窗（权限请求或提示）") === true) await step("act", "关闭系统弹窗（点 Don't Allow、OK 或 Not Now）");
+  await step("bool", "这是 AWS Device Farm 示例应用的首页，底部标签栏里有 Home、HTTP、Native、Inputs、More");
+  // 第一轮实测：Inputs 标签是十页横向分页（第一页是 textview），点页码圆点不翻页；按真实结构写
+  await step("act", "点击底部的 Inputs 标签，然后在示例卡片上向左滑动翻页，直到出现带 Text Field 文本输入框的页面为止，点进第一个输入框并输入 Playwright");
+  await step("bool", "某个文本输入框里显示着 Playwright");
+  await step("act", "点击底部的 More 标签，点 Alerts，再点能弹出 alert 的按钮");
+  await step("bool", "屏幕上出现了一个弹窗（alert），带标题与 OK 按钮");
+  await step("bool", "屏幕顶部有一条红色横幅写着本应用已永久下线");  // 刻意为假：量判否路径
+}
+// 高德地图（com.autonavi.minimap）：首启有隐私协议与权限弹窗；量搜索与地图瓦片在美国机群上的表现
+async function amapSteps(step: Stepper): Promise<void> {
+  for (let i = 0; i < 3; i++) {
+    const dlg = await step("bool", "屏幕上有隐私政策、用户协议或系统权限请求弹窗");
+    if (dlg !== true) break;
+    await step("act", "关闭当前弹窗：隐私协议点同意或同意并继续；系统权限点仅在使用中允许或允许；其它提示点知道了或关闭");
+  }
+  await step("bool", "这是高德地图首页，能看到地图画面与顶部的搜索框");
+  await step("bool", "地图瓦片已经加载出来，能看到道路、地名或建筑轮廓，而不是空白或灰色格子");
+  await step("act", "点击顶部搜索框，输入 北京南站，然后点击搜索结果列表里的第一条");
+  await step("bool", "屏幕上显示了北京南站的位置详情卡片或地图上有北京南站的标注");
+  await step("bool", "屏幕顶部有一条红色横幅写着本应用已永久下线");  // 刻意为假：量判否路径
+}
 async function appSteps(step: Stepper): Promise<void> {
   // 首次启动有引导页（Skip / Continue）与可能的系统权限弹窗；先问再动，避免条件式动作提示
   if (await step("bool", "屏幕上有系统权限请求弹窗（如允许通知）") === true) await step("act", "点击不允许或 Don't allow 关闭系统弹窗");
@@ -533,20 +564,47 @@ async function main(): Promise<number> {
       if (appArn) await installApp(driver, session.arn, appArn);
       await timed("app_activate", () => driver!.activateApp(APP_PACKAGE));
       await sleep(3000);
+      if (PLATFORM === "android") {
+        // 高德首轮：activateApp 返回了、设备却一直停在桌面。查应用状态（4 前台 / 3 后台 / 1 未运行），不在前台就按活动名显式启动，再抓 logcat 看有没有崩溃
+        const states: Array<[number, unknown]> = [];
+        const poll = async (n: number) => { for (let i = 0; i < n; i++) { states.push([ms(t0), await driver!.queryAppState(APP_PACKAGE).catch((e) => errText(e))]); await sleep(2000); } };
+        const t0 = performance.now();
+        await poll(4);
+        const fg = () => states.some(([, st]) => st === 4);
+        if (!fg() && process.env.DF_APP_ACTIVITY) {
+          await timed("app_start_activity", () => driver!.execute("mobile: startActivity", { intent: `${APP_PACKAGE}/${process.env.DF_APP_ACTIVITY}` })).catch((e) => { results.app_start_activity_error = errText(e); });
+          await poll(5);
+        }
+        results.app_states = states;
+        results.app_current_package = await driver.getCurrentPackage().catch((e) => errText(e));
+        try {
+          const lines = (await driver.getLogs("logcat")) as Array<{ message?: string }>;
+          const hits = lines.map((l) => l.message ?? "").filter((m) => /autonavi|minimap|AndroidRuntime|FATAL|has died|Force-stopping|ANR/i.test(m)).slice(-40);
+          results.app_logcat_hits = hits.map((m) => m.slice(0, 220));
+          fs.writeFileSync(path.join(RUN_DIR, "logcat-after-launch.txt"), lines.map((l) => l.message ?? "").join("\n"));
+        } catch (e) { results.app_logcat_error = errText(e); }
+        log(`应用状态轨迹 ${JSON.stringify(states)} 前台包 ${results.app_current_package} logcat 命中 ${(results.app_logcat_hits as string[] | undefined)?.length ?? "无"}`);
+      }
       // 控件树探针：确定性 step 在原生应用里能拿到什么
       const src = await timed("cmd_page_source", () => driver!.getPageSource());
       results.page_source_kb = Math.round(src.length / 1024);
       fs.writeFileSync(path.join(RUN_DIR, "page-source-after-launch.xml"), src);
       results.resource_ids_sample = [...new Set([...src.matchAll(/resource-id="([^"]+)"/g)].map((m) => m[1]).filter(Boolean))].slice(0, 25);
+      if (PLATFORM === "ios") {
+        results.ios_names_sample = [...new Set([...src.matchAll(/ name="([^"]{1,60})"/g)].map((m) => m[1]))].slice(0, 30);
+        results.ios_types_sample = [...new Set([...src.matchAll(/<(XCUIElementType\w+)/g)].map((m) => m[1]))].slice(0, 30);
+      }
       results.contexts_in_app = await driver.getContexts();
       // UiAutomator2 在动作与截图前默认等界面空闲（waitForIdleTimeout 10 秒），有动画的页面会把一张截图拖到几秒；量一下关掉的效果
       for (let i = 0; i < 2; i++) await timed("cmd_screenshot_app_default_idle", () => driver!.takeScreenshot());
       await driver.updateSettings({ waitForIdleTimeout: 0 }).catch((e) => { results.update_settings_error = errText(e); });
       for (let i = 0; i < 2; i++) await timed("cmd_screenshot_app_idle0", () => driver!.takeScreenshot());
-      try {
-        const found = await timed("cmd_find_by_id", async () => await driver!.$$(`id=${APP_PACKAGE}:id/search_container`));
-        results.find_search_container = found.length;
-      } catch (e) { results.probe_error = errText(e); }
+      if (PLATFORM === "android") {
+        try {
+          const found = await timed("cmd_find_by_id", async () => await driver!.$$(`id=${APP_PACKAGE}:id/search_container`));
+          results.find_search_container = found.length;
+        } catch (e) { results.probe_error = errText(e); }
+      }
     } else if (SCENARIO === "egress") {
       await egressProbe(driver, session.endpoint);
     } else if (SCENARIO === "faults") {
@@ -579,7 +637,7 @@ async function main(): Promise<number> {
     if (!SKIP_AI && SCENARIO !== "egress") {
       const iface = new AppiumInterface(driver, session.endpoint);
       const agent = new Agent(iface, {
-        generateReport: true, persistExecutionDump: true, replanningCycleLimit: SCENARIO === "app" ? 8 : 4,
+        generateReport: true, persistExecutionDump: true, replanningCycleLimit: SCENARIO === "app" ? 12 : 4,
         modelConfig: { MIDSCENE_MODEL_NAME: MODEL, MIDSCENE_MODEL_BASE_URL: getBaseUrl(), MIDSCENE_MODEL_API_KEY: "unused", MIDSCENE_MODEL_FAMILY: modelFamily() },
         createOpenAIClient: async () => new OpenAI({ baseURL: getBaseUrl(), apiKey: "unused", fetch: sigv4Fetch }) as never,
       } as never);
@@ -611,7 +669,7 @@ async function main(): Promise<number> {
         return out;
       };
       if (SCENARIO === "web") await webSteps(step, PLATFORM === "ios" ? () => iosTypingProbe(iface, driver!) : undefined);
-      else if (SCENARIO === "app") await appSteps(step);
+      else if (SCENARIO === "app") await (PLATFORM === "ios" ? iosSampleAppSteps(step) : APP_PACKAGE === "com.autonavi.minimap" ? amapSteps(step) : appSteps(step));
       else if (SCENARIO === "faults") await faultSteps(step, driver, session.arn);
       results.ai_steps = ai;
       if (SCENARIO === "web") results.url_after_ai = await iface.url();
@@ -622,6 +680,10 @@ async function main(): Promise<number> {
         results.page_source_after_ai_kb = Math.round(src.length / 1024);
         results.resource_ids_after_ai = [...new Set([...src.matchAll(/resource-id="([^"]+)"/g)].map((m) => m[1]).filter(Boolean))].slice(0, 40);
         results.texts_after_ai = [...new Set([...src.matchAll(/ text="([^"]{2,60})"/g)].map((m) => m[1]))].slice(0, 20);
+        if (PLATFORM === "ios") {
+          results.ios_names_after_ai = [...new Set([...src.matchAll(/ name="([^"]{1,60})"/g)].map((m) => m[1]))].slice(0, 40);
+          results.ios_labels_after_ai = [...new Set([...src.matchAll(/ label="([^"]{1,60})"/g)].map((m) => m[1]))].slice(0, 30);
+        }
         results.contexts_after_ai = await driver.getContexts().catch(() => []);
       }
       await agent.destroy().catch(() => {});

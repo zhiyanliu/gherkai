@@ -66,7 +66,9 @@ deterministic(pattern, {
 
 - 2026-10-13：权限核过、项目 `gherkai-spike` 已建；spike A 脚本 `engines/midscene/spikes/06-devicefarm-appium.mts`，在跳板机执行了三轮（Redmi Note 13 / Android 15 / Chrome，模型 GPT-5.6 Terra 经 us-east-1 Bedrock）。
 - 2026-10-13（续）：同一脚本加平台与场景开关（`DF_PLATFORM`、`SPIKE_SCENARIO`、`DF_APP_URL`），iOS Safari 两台各执行到 6 步全对（iPhone 7 / iOS 15.8.4 三轮、iPhone 17 Pro / iOS 26.3.1 四轮），原生应用（维基百科 Android 客户端）两轮；数据见下两节。
-- 2026-10-14：脚本加 `egress`（出网探针）与 `faults`（失败形态）两个场景并接入 worker 的 evidence 抽取；清单第 6、8、9、11、12 项有了实测或结论，第 10 项完成网络部分、应用本体等 APK，第 5 项补了 `appium:app` 安装路线。两天共 20 个会话、约 69 设备分钟。
+- 2026-10-14：脚本加 `egress`（出网探针）与 `faults`（失败形态）两个场景并接入 worker 的 evidence 抽取；清单第 6、8、9、11、12 项有了实测或结论，第 5 项补了 `appium:app` 安装路线与 iOS 原生应用（AWS 示例 IPA，两台 iPhone 各两轮），第 10 项网络部分量到、应用本体（高德地图）装上但启动即自退。两天共 25 个会话、约 103 设备分钟。
+
+**待做**：设备忙的形态（等遇到）；evidence 上传器与 explain 端对设备产物的整链真跑（抽取已核，上传与阅读未动）；国内网络影响的应用侧量化（要换一个不做环境自检的国内应用）。
 
 ## spike A 数据（设备网页，Android Chrome）
 
@@ -121,6 +123,20 @@ deterministic(pattern, {
 
 **控件树**：引导页是 Compose（`androidx.compose.ui.platform.ComposeView` 下全是无文本、无 resource-id 的 `android.view.View`），page source 6 KB、只有 `action_bar_root` 与 `android:id/content` 两个 id，确定性 step 在这种页面上拿不到任何锚点。词条页是经典 View：page source 11 KB，有 21 个 resource-id（`page_toolbar_button_search`、`page_save`、`page_find_in_article`、`page_web_view`、`tabsCountText` 等）与工具栏文本（Save、Language、Find in article、Theme、Contents、Search Wikipedia），原生控件层的确定性 step 可按 id 或文本锚定；词条正文在 `page_web_view` 里，上下文列表始终只有 `NATIVE_APP` 与 `WEBVIEW_chrome`（应用自己的 WebView 不可调试、没有网页上下文），正文内容拿不到 DOM。**含义**：原生应用上确定性 step 的可用面取决于被测应用的实现（经典 View 可锚、Compose 无 testTag 不可锚、WebView 正文不可锚），skill 里要把「先看 page source 再决定写不写确定性 step」写成规则。
 
+## spike B 数据（原生应用：iOS，AWS Device Farm 示例应用，iPhone 7 / iOS 15.8.4 与 iPhone 17 Pro / iOS 26.3.1）
+
+iOS 应用只能装 .ipa，App Store 不提供文件，公开可得的只有 AWS 为 Device Farm 发布的示例应用预构建 IPA（aws-device-farm-sample-app-for-ios 仓库 `prebuilt/`，2018 年构建，bundle id `Amazon.AWSDeviceFarmiOSReferenceAppDemoReinvent2018`，标签栏加多种控件的演示页）。**含义**：使用方测 iOS 应用必须自带开发版 IPA，Device Farm 会重签名；两代系统都装得上这个 2018 年的包。
+
+**装与连**：上传 2 MB 用 1.8 秒、处理 5.4 秒；`InstallToRemoteAccessSession` 后 6.1 到 6.3 秒出现在设备上，`activateApp` 1.4 到 1.8 秒。不带 bundleId 的 XCUITest 会话建连只要 1.4 到 1.6 秒（Safari 会话的 17 到 65 秒多在起浏览器与接远程检查器上）。应用内截图 0.3 到 0.6 秒；主屏上 2 到 3.4 秒。
+
+**输入路线在原生应用里不同于 Safari**：两代系统都是 `POST /keys`（WDA 的 `/wda/keys`）落字，iPhone 7 上在 Safari 里不通的这条在原生文本框里通了——第一响应者是原生 UITextField 时 WDA 能打字，是网页内容时不能。所以择路的维度是 ui_kind 乘系统版本：应用一律 `/wda/keys`；网页按系统版本（15.x 网页原子路线、26.x `/wda/keys`）。
+
+**滚动**：W3C 指针拖动在 iOS 26 的分页视图（UIPageViewController）上不翻页，`mobile: swipe` 两代都翻；适配器的 iOS 滚动首选 `mobile: swipe`。
+
+**AI 步**（第二轮，7 步两台全部判对）：翻十页分页找到文本框并输入，iPhone 7 为 73 秒 / 11.6 万 token，iPhone 17 Pro 为 89 秒 / 13.4 万 token（每翻一页一轮规划，`replanningCycleLimit` 要 12）；打开 Alerts 并触发弹窗 25 秒 / 4.1 万 token；断言步 4 到 6 秒、约 2 到 3 千 token。全轮 16.7 到 18.9 万 token。第一轮失败是我的步骤措辞没按应用结构写（分页点点不翻页、Swipe 在动作集外），不是平台问题。
+
+**控件树**：XCUITest 的 page source 给 `XCUIElementType*` 类型加 `name` / `label`（无障碍标识），示例应用首页 3 到 4 KB、弹窗页 11 到 14 KB，标签、按钮、弹窗标题与 OK 按钮都有名字可锚；上下文只有 `NATIVE_APP`。**含义**：iOS 原生应用的确定性 step 可按无障碍标识或文本锚定，前提同 Android：被测应用给了标识。
+
 ## 清单第 6、8 到 12 项（2026-10-14）
 
 **第 6 项 evidence 抽取零改动可用**：spike 脚本直接 import worker 的 `buildEvidence` 与 `executionsLength`（`engines/midscene/src/worker/evidence.mts`），按 worker 的做法在每个 AI 步起点记 `agent.dump.executions` 长度、步末切片喂入。失败形态那一轮三步全部产出 evidence：动作步 4 帧 2 张截图、含 thought 与 actions，`act.error` 带 Midscene 的错误文本；断言步 1 帧 1 张截图；会话被外部 Stop 的那步 1 帧 0 张截图（截图还没来得及落盘，这是事实不是抽取失败）。引用到的截图文件全部存在（`missing_files` 为 0）。原因：抽取只读 SDK 的 dump 结构与 `report/screenshots/` 落盘，不碰浏览器，换成 Appium 界面后 dump 形态不变。**含义**：设备 worker 复用 evidence 模块与上传器即可，`url` 字段在应用场景填空。
@@ -140,17 +156,19 @@ deterministic(pattern, {
 
 **第 9 项 费用折算**（单价：Device Farm 按量 0.17 美元每设备分钟、不计量槽位 250 美元每月、免费 1000 分钟；AgentCore Browser 0.0895 美元每 vCPU 小时加 0.00945 美元每 GB 小时；GPT-5.6 Terra 标准层输入 2.20、输出 13.20 美元每百万 token；Fargate 0.0405 美元每 vCPU 小时加 0.0044 美元每 GB 小时。采集日 2026-10-14）。桌面对照用同一组 6 步在跳板机本机 Midscene worker（1.15.1）上执行：
 
-| 项 | 桌面（AgentCore 形态估算） | Android Chrome 真机 | iOS Safari 真机 | Android 原生应用 |
-|---|---|---|---|---|
-| 6 步 token | 5.5 万（动作步 1.9 万与 2.8 万，断言步约 2 千） | 5.9 万 | 4.0 到 6.2 万 | 12.6 到 14.8 万 |
-| 6 步墙钟 | 76 秒 | 约 100 秒 | 约 70 到 100 秒 | 约 180 到 200 秒 |
-| 模型费（按 95% 输入估） | 约 0.15 美元 | 约 0.16 美元 | 约 0.11 到 0.17 美元 | 约 0.35 到 0.40 美元 |
-| 会话费 | 浏览器加 worker 不到 0.01 美元 | 设备分钟 2.0 到 4.5 分钟即 0.34 到 0.77 美元 | 1.6 到 5.3 分钟即 0.28 到 0.90 美元 | 5.4 到 5.8 分钟即 0.92 到 0.98 美元 |
-| 每条 scenario 合计 | 约 0.15 美元 | 约 0.5 到 0.9 美元 | 约 0.4 到 1.1 美元 | 约 1.3 到 1.4 美元 |
+| 项 | 桌面（AgentCore 形态估算） | Android Chrome 真机 | iOS Safari 真机 | Android 原生应用 | iOS 原生应用 |
+|---|---|---|---|---|---|
+| 步数与 token | 6 步 5.5 万（动作步 1.9 万与 2.8 万，断言步约 2 千） | 6 步 5.9 万 | 6 步 4.0 到 6.2 万 | 8 步 12.6 到 14.8 万 | 7 步 16.7 到 18.9 万（翻十页那一步占 11.6 到 13.4 万） |
+| 墙钟 | 76 秒 | 约 100 秒 | 约 70 到 100 秒 | 约 180 到 200 秒 | 约 130 到 150 秒 |
+| 模型费（按 95% 输入估） | 约 0.15 美元 | 约 0.16 美元 | 约 0.11 到 0.17 美元 | 约 0.35 到 0.40 美元 | 约 0.45 到 0.50 美元 |
+| 会话费 | 浏览器加 worker 不到 0.01 美元 | 设备分钟 2.0 到 4.5 分钟即 0.34 到 0.77 美元 | 1.6 到 5.3 分钟即 0.28 到 0.90 美元 | 5.4 到 5.8 分钟即 0.92 到 0.98 美元 | 3.2 到 5.2 分钟即 0.55 到 0.88 美元 |
+| 每条 scenario 合计 | 约 0.15 美元 | 约 0.5 到 0.9 美元 | 约 0.4 到 1.1 美元 | 约 1.3 到 1.4 美元 | 约 1.0 到 1.4 美元 |
 
-token 与模型费桌面和真机同量级（同一模型、同样靛截图驱动），真机贵出来的全是设备分钟，其中会话建立 60 到 72 秒、停止到 COMPLETED 60 到 150 秒是每会话固定开销且计入分钟（FAQ：从准备设备到清理完毕都计）。**含义**：设备会话必须按 scope 复用而不是按 scenario 开（与桌面同策略），固定开销摊到多条 scenario 上才划算；每月每平台设备分钟超过约 1470 分钟（250 除以 0.17）时不计量槽位更便宜，`[devices]` 配置要能选 billingMethod。
+token 与模型费桌面和真机同量级（同一模型、同样靠截图驱动），原生应用贵在动作步要翻页、每轮规划带整屏截图；真机贵出来的另一半是设备分钟，其中会话建立 60 到 72 秒、停止到 COMPLETED 60 到 150 秒是每会话固定开销且计入分钟（FAQ：从准备设备到清理完毕都计）。**含义**：设备会话必须按 scope 复用而不是按 scenario 开（与桌面同策略），固定开销摊到多条 scenario 上才划算；每月每平台设备分钟超过约 1470 分钟（250 除以 0.17）时不计量槽位更便宜，`[devices]` 配置要能选 billingMethod。
 
-**第 10 项 国内网络**（真机侧，Redmi Note 13 Chrome，us-west-2）：设备出网源 IP 落在官方公布的设备地址段 99.78.197.0/29 内。同一台设备顺序打开：维基百科 3.0 秒；百度 31 秒；高德网页版 119 秒；天气网 74 秒；微博 7 秒但落到「Sina Visitor System」反爬页。**含义**：依赖国内后端的应用在美国机群上页面加载慢一到两个量级，`@timeout` 与 Appium 的 `newCommandTimeout` 都要按此放宽，且部分站点按 IP 判定会给机器人页；Device Farm 官方的网络手段只有 deviceProxy（2025-02 新增，公共设备与 iOS 上是否生效无依据）与私有设备加 VPC-ENI 经客户 NAT，没有 VPN。高德地图应用本体：官方下载源（amap.com、应用宝）从境外（跳板机新加坡、本机）均连不上，APK 待境内下载后放到跳板机再测。
+**第 10 项 国内网络**（真机侧，Redmi Note 13 Chrome，us-west-2）：设备出网源 IP 落在官方公布的设备地址段 99.78.197.0/29 内。同一台设备顺序打开：维基百科 3.0 秒；百度 31 秒；高德网页版 119 秒；天气网 74 秒；微博 7 秒但落到「Sina Visitor System」反爬页。**含义**：依赖国内后端的应用在美国机群上页面加载慢一到两个量级，`@timeout` 与 Appium 的 `newCommandTimeout` 都要按此放宽，且部分站点按 IP 判定会给机器人页；Device Farm 官方的网络手段只有 deviceProxy（2025-02 新增，公共设备与 iOS 上是否生效无依据）与私有设备加 VPC-ENI 经客户 NAT，没有 VPN。
+
+**高德地图应用本体（17.01.0 正式版，官方 CDN 直链，194 MB，`com.autonavi.minimap`）**：官方下载源只对境内网络开放，APK 由境内网络下载后放到跳板机；Device Farm 上传 19.5 秒、处理 5.4 秒，会话内安装 23 秒。**但应用在这台公共真机上启动即自行退出**：`activateApp` 与按活动名显式启动都返回成功，应用状态轨迹只在启动后短暂到过后台态、随即回到未运行；logcat 里是进程自己正常退出（退出码 0、没有异常栈），启动页到地图主活动都创建过。这是应用侧的环境自检主动退出，不是崩溃，也不是 Device Farm 的安装或启动问题；AI 步随后面对的是桌面，六条判断全部如实判否。**含义**：带环境自检的国内消费级应用在公共真机上可能根本不给测，这是被测应用的限制、要在设计文档里写明「启动后应用自行退出」属于 pre-check 应报的失败形态（应用状态轨迹是判据）；本工具不做任何规避。国内网络影响的量化只取到了真机浏览器那组数据。
 
 **Appium 主机侧出网**（兼核第 5 项的安装路径）：`appium:app` 填 f-droid.org 公网地址与 S3 预签名地址，配 `appium:autoLaunch: false`，两条都下载并安装成功（见 spike B 数据节）。官方文档对托管 Appium 主机的出网与出口 IP 没有说法，这是现场证据；出口 IP 未测（要一个自己控制的 https 服务端看访问日志）。
 
@@ -158,4 +176,3 @@ token 与模型费桌面和真机同量级（同一模型、同样靛截图驱�
 
 **第 12 项 Midscene iOS 包对 Appium 端点**：读 `@midscene/ios@1.15.1` 与 `@midscene/webdriver` 源码并对照 appium 2.11.5 / base-driver 9.11.5 / xcuitest-driver 7.35.1 的路由表（解包在 /tmp 核对），三处硬阻断：连接前先探 `GET /status` 并要求响应含 `sessionId`，Appium 的 `/status` 只有 ready / message / build（Device Farm 端点实测亦如此）；建会话的 caps 里 `automationName` 等不带 `appium:` 前缀，Appium 直接拒；所有手势、按键、启动应用走 `/wda/*` 直连路由，Appium 一律 404、只经 `mobile:` 命令暴露。能通的只有截图、window/rect、actions、元素查找与点击、url。网关模式 `wdaBaseUrl` 保留路径前缀这一点没问题，`sessionId` 可复用。**结论**：不接，继续用自己的 WebdriverIO 适配器；值得借的是逻辑而非传输层——收键盘策略与 DPR 回退算法（截图长边除以窗口长边取整）。
 
-**待做**：高德地图应用本体（等 APK）；设备忙的形态（等遇到）；evidence 上传器与 explain 端对设备产物的整链真跑（抽取已核，上传与阅读未动）。
