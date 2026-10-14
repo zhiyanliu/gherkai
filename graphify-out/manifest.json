@@ -1883,5 +1883,10 @@
     "mtime": 1791956802.5353215,
     "ast_hash": "c180dc5709d078a19e749da02788a702",
     "semantic_hash": ""
+  },
+  "docs/journey/0012-mobile-devices-design-consolidated.md": {
+    "mtime": 1791968800.5639696,
+    "ast_hash": "c7e23cda121cff0f4a6f735b68744f42",
+    "semantic_hash": ""
   }
 }
