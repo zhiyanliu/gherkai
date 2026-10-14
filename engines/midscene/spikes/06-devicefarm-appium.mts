@@ -166,6 +166,7 @@ async function installApp(driver: Driver, sessionArn: string, appArn: string): P
 // ---- WebDriver 连接与命令往返 ----
 function caps(): Record<string, unknown> {
   const common = { "appium:newCommandTimeout": 900 };   // 模型思考几十秒，别让 Appium 把会话当闲置回收
+  if (PLATFORM === "ios" && SCENARIO === "egress") return { platformName: "iOS", "appium:automationName": "XCUITest", "appium:noReset": true, ...common };
   if (PLATFORM === "ios") {
     // app 场景不带 bundleId：先连（XCUITest 落在主屏）、经 Device Farm 装、再 activateApp；DF_APP_PACKAGE 在 iOS 上就是 bundle id
     return { platformName: "iOS", "appium:automationName": "XCUITest", ...(SCENARIO === "web" ? { browserName: "Safari" } : { "appium:noReset": true }), ...common };
@@ -249,18 +250,32 @@ class AppiumInterface extends AbstractInterface {
     return px;
   }
   private pt(v: number): number { return Math.round((v / this.scale) * 100) / 100; }
-  // iOS 没有键码，输入有多条候选路线，哪条可用随 iOS 版本变；AI 阶段前先用确定性探针逐条实测（见 iosTypingProbe），
-  // 把实测落字的路线排在前面。候选：
+  // iOS 没有键码。两台 iPhone（iOS 15.8 / 26.3）在 Safari 与原生应用上逐条实测后的结论：W3C 标准路线就够——
+  // 网页上下文可用时对网页活动元素 sendKeys，否则对原生活动元素 sendKeys；旧版 /keys 与 W3C 键盘动作只留作对照。候选：
   //   web-active-element：网页上下文里的活动元素加 sendKeys（Safari 远程检查器的 type 原子，合成事件）；
   //   legacy-keys-raw：Appium 旧版 POST /keys（XCUITest 在原生上下文转给 WDA 的 /wda/keys，打到第一响应者）；
   //   w3c-key-actions-native：W3C 键盘动作（WebdriverIO 的 keys；iPhone 7 / iOS 15.8 上不报错但不落字、每次 52 秒）；
   //   native-active-element：NATIVE_APP 的活动元素加 sendKeys（iPhone 7 / iOS 15.8 上报无此元素）。
   // mobile: keys 只在 iOS 17+ 的 iPad 上有效，不列入。
-  static typeRouteOrder: string[] = ["web-active-element", "legacy-keys-raw", "w3c-key-actions-native", "native-active-element"];
+  // 两台 iPhone 实测后的定稿顺序：标准路线在前（网页上下文可用则网页活动元素，否则原生活动元素），旧版 /keys 只留作对照
+  static typeRouteOrder: string[] = ["web-active-element", "native-active-element", "legacy-keys-raw"];
   private typeRoute: string | undefined;
+  /** 探针或确定性步骤已知的目标输入框元素 id；有它时「direct-element-sendkeys」路线可用 */
+  knownFieldId: string | undefined;
   constructor(private readonly d: Driver, private readonly endpoint: string) { super(); }
   typingRoutes(text: string): Array<[string, () => Promise<void>]> {
     const all: Record<string, () => Promise<void>> = {
+      // 标准路线一：按「持有键盘焦点」谓词找到元素，再对元素 sendKeys（W3C 的 element/value）
+      "predicate-focus-sendkeys": () => this.native(async () => {
+        const els = await this.d.$$("-ios predicate string:hasKeyboardFocus == 1");
+        if (!els.length) throw new Error("没有持有键盘焦点的元素");
+        await this.d.elementSendKeys(els[0].elementId, text);
+      }),
+      // 标准路线二：对已知元素直接 sendKeys（确定性步骤或探针自己找到的输入框）
+      "direct-element-sendkeys": () => this.native(async () => {
+        if (!this.knownFieldId) throw new Error("没有已知的输入框元素");
+        await this.d.elementSendKeys(this.knownFieldId, text);
+      }),
       "web-active-element": () => this.inWeb(async () => { const ref = await this.d.getActiveElement(); await this.d.elementSendKeys(elementId(ref), text); }),
       "legacy-keys-raw": () => this.native(async () => {
         const r = await fetch(`${this.endpoint.replace(/\/$/, "")}/session/${this.d.sessionId}/keys`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ value: [...text] }) });
@@ -269,7 +284,8 @@ class AppiumInterface extends AbstractInterface {
       "w3c-key-actions-native": () => this.native(async () => { await this.d.keys(text); }),
       "native-active-element": () => this.native(async () => { const ref = await this.d.getActiveElement(); await this.d.elementSendKeys(elementId(ref), text); }),
     };
-    return AppiumInterface.typeRouteOrder.map((n) => [n, all[n]] as [string, () => Promise<void>]);
+    const order = this.knownFieldId ? ["direct-element-sendkeys", ...AppiumInterface.typeRouteOrder] : AppiumInterface.typeRouteOrder;
+    return order.map((n) => [n, all[n]] as [string, () => Promise<void>]);
   }
   private async iosSendKeys(text: string): Promise<void> {
     const routes = this.typingRoutes(text);
@@ -375,19 +391,24 @@ class AppiumInterface extends AbstractInterface {
 // 直接用 CSS 找搜索框并原子点击的做法在 iPhone 7 上拿到的是隐藏的输入框（元素不可见），所以借 AI 的点击来聚焦。
 async function iosTypingProbe(iface: AppiumInterface, driver: Driver): Promise<void> {
   const report: Array<Record<string, unknown>> = [];
-  const web = (results.contexts as string[]).find((c) => c !== "NATIVE_APP");
-  if (!web) { results.ios_typing_probe = "无网页上下文"; return; }
+  const web = (results.contexts as string[]).find((c) => c !== "NATIVE_APP") ?? "NATIVE_APP";
   const readBack = async (): Promise<string | undefined> => {
     const cur = (await driver.getContext()) as string;
     try {
       await driver.switchContext(web);
       const ref = await driver.getActiveElement();
       return (await driver.getElementAttribute(elementId(ref), "value")) ?? undefined;
+    } catch {
+      // 网页上下文不可用（iOS 26）：从原生树读持有焦点元素的 value
+      await driver.switchContext("NATIVE_APP").catch(() => {});
+      const els = await driver.$$("-ios predicate string:hasKeyboardFocus == 1");
+      return els.length ? ((await driver.getElementAttribute(els[0].elementId, "value")) ?? undefined) : undefined;
     } finally { await driver.switchContext(cur).catch(() => {}); }
   };
   const clear = async (): Promise<void> => {
     const cur = (await driver.getContext()) as string;
     try { await driver.switchContext(web); const ref = await driver.getActiveElement(); await driver.elementClear(elementId(ref)); }
+    catch { await driver.switchContext("NATIVE_APP").catch(() => {}); const ref = await driver.getActiveElement(); await driver.elementClear(elementId(ref)); }
     finally { await driver.switchContext(cur).catch(() => {}); }
   };
   for (const [name, fn] of iface.typingRoutes("Playwright")) {
@@ -440,7 +461,9 @@ async function egressProbe(driver: Driver, endpoint: string): Promise<void> {
     try {
       const u = new URL(endpoint);
       d = await remote({ protocol: u.protocol.replace(":", ""), hostname: u.hostname, port: u.port ? Number(u.port) : 443, path: u.pathname + u.search, logLevel: "warn",
-        capabilities: { platformName: "Android", "appium:automationName": "UiAutomator2", "appium:app": url, "appium:autoLaunch": false, "appium:noReset": true, "appium:newCommandTimeout": 900 } });
+        capabilities: PLATFORM === "ios"
+          ? { platformName: "iOS", "appium:automationName": "XCUITest", "appium:app": url, "appium:autoLaunch": false, "appium:noReset": true, "appium:newCommandTimeout": 900 }
+          : { platformName: "Android", "appium:automationName": "UiAutomator2", "appium:app": url, "appium:autoLaunch": false, "appium:noReset": true, "appium:newCommandTimeout": 900 } });
       const session_ms = ms(t0);
       const installed = pkg ? await d.isAppInstalled(pkg) : undefined;
       host[name] = { ok: true, session_ms, installed, pkg };
@@ -512,6 +535,39 @@ async function faultSteps(step: Stepper, driver: Driver, sessionArn: string): Pr
   }
   results.fault_after_stop_commands = after;
   log(`外部 Stop 之后：${JSON.stringify(after)}`);
+}
+
+// ---- 原生应用上的输入探针（确定性，不调模型；AWS 示例应用 More → Login 页有文本框）----
+async function iosAppTypingProbe(driver: Driver, endpoint: string): Promise<void> {
+  await driver.switchContext("NATIVE_APP").catch(() => {});
+  const tap = async (sel: string) => { const els = await driver.$$(sel); if (!els.length) throw new Error(`找不到 ${sel}`); await els[0].click(); await sleep(1200); };
+  await tap("~More");
+  await tap("~Login");
+  const fields = await driver.$$("-ios class chain:**/XCUIElementTypeTextField");
+  results.app_text_fields = fields.length;
+  if (!fields.length) { results.ios_typing_probe = "Login 页没有文本框"; return; }
+  const field = fields[0];
+  const iface = new AppiumInterface(driver, endpoint);
+  iface.knownFieldId = field.elementId;
+  const report: Array<Record<string, unknown>> = [];
+  for (const [name, fn] of iface.typingRoutes("Playwright")) {
+    if (name === "web-active-element") continue;   // 原生应用没有网页上下文
+    const rec: Record<string, unknown> = { route: name };
+    const t0 = performance.now();
+    try {
+      await field.click(); await sleep(600);        // 每条路线前重新聚焦
+      await driver.elementClear(field.elementId).catch(() => {});
+      const t1 = performance.now();
+      await fn();
+      rec.type_ms = ms(t1);
+      const value = (await driver.getElementAttribute(field.elementId, "value")) ?? undefined;
+      rec.value = value; rec.ok = typeof value === "string" && value.includes("Playwright");
+    } catch (e) { rec.error = errText(e); }
+    rec.total_ms = ms(t0);
+    report.push(rec);
+    log(`应用输入探针 ${name}: ${JSON.stringify(rec)}`);
+  }
+  results.ios_typing_probe = report;
 }
 
 // ---- 两个场景的 AI 步 ----
@@ -674,6 +730,7 @@ async function main(): Promise<number> {
       log(`导航后标题「${results.title_after_nav}」 h1「${results.h1_text}」 contexts=${JSON.stringify(results.contexts)} rect=${JSON.stringify(results.window_rect_web)} shot=${JSON.stringify(results.screenshot_px)}`);
     }
 
+    if (SKIP_AI && SCENARIO === "app" && PLATFORM === "ios") await iosAppTypingProbe(driver, session.endpoint).catch((e) => { results.ios_typing_probe_error = errText(e); log(`应用输入探针整体失败：${results.ios_typing_probe_error}`); });
     if (!SKIP_AI && SCENARIO !== "egress" && SCENARIO !== "cap") {
       const iface = new AppiumInterface(driver, session.endpoint);
       const agent = new Agent(iface, {

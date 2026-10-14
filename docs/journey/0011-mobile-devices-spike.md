@@ -100,12 +100,13 @@ deterministic(pattern, {
 
 | 路线 | iPhone 7 / iOS 15.8.4 | iPhone 17 Pro / iOS 26.3.1 |
 |---|---|---|
-| 网页上下文活动元素加 sendKeys（远程检查器 type 原子） | 落字，1.3 秒 | 网页上下文不可用，不通 |
-| Appium 旧版 `POST /keys`（XCUITest 转 WDA `/wda/keys`，打到第一响应者） | 不报错、不落字，51 秒（WDA 等键盘超时） | 落字，是这台机器上唯一通的路线 |
-| W3C 键盘动作（WebdriverIO 的 `keys`） | 不报错、不落字，50 到 53 秒 | 未单测（AI 阶段没轮到） |
-| NATIVE_APP 活动元素加 sendKeys | 报无此元素 | 网页上下文探针失败、未单测 |
+| 网页上下文活动元素加 sendKeys（W3C 标准，经远程检查器 type 原子） | 落字，1.3 秒 | 网页上下文不可用，不通 |
+| NATIVE_APP 活动元素加 sendKeys（W3C 标准 `GET /element/active` 加 `element/value`） | 报无此元素 | 落字，1.4 秒（读回要靠下一步截图：探针两条路线各打一遍后字段里出现了重复文本） |
+| Appium 旧版 `POST /keys`（XCUITest 转 WDA `/wda/keys`） | 不报错、不落字，51 秒（WDA 等键盘超时） | 落字，1.2 秒 |
+| W3C 键盘动作（WebdriverIO 的 `keys`） | 不报错、不落字，50 到 53 秒 | 未单测 |
+| 谓词 `hasKeyboardFocus == 1` 找元素 | 找不到元素 | 找不到元素 |
 
-`mobile: keys` 只在 iOS 17+ 的 iPad 上有效，没列入。**含义**：没有一条路线同时覆盖两代系统，适配器必须按能力探测择路（网页上下文可用则走原子路线，否则走 `/wda/keys`），且失败的路线不抛错、只耗 50 秒，不能靠异常回落，要靠读回或超时判定。
+`mobile: keys` 只在 iOS 17+ 的 iPad 上有效，没列入。**含义**：标准路线就够、不需要 `/wda/keys`——网页上下文可用时对网页活动元素 sendKeys，不可用时对原生活动元素 sendKeys；两条都是 W3C 的 `element/active` 加 `element/value`，差别只在当时所在的上下文。失败的路线有的不抛错、只耗 50 秒，所以择路要靠会话开头的能力探测（网页上下文是否可用）一次定下，不能在运行期试错回落。
 
 **AI 步**：两台各 6 步全对（iPhone 7 两轮、iPhone 17 Pro 一轮）；iPhone 7 合计 4.0 到 4.8 万 token（动作步 15 到 16 秒 / 1.6 万与 16 到 23 秒 / 1.6 到 2.4 万），iPhone 17 Pro 合计 6.2 万 token（动作步 21 秒 / 2.0 万与 40 秒 / 3.0 万）。两处提示词教训：iOS 26 的 Safari 地址栏在底部，「点击页面顶部的搜索图标」会让模型以「顶部没有」拒做，改成只说搜索图标；输入路线失败时模型会反复重试到重规划上限、再烧 4 万 token，所以路线必须先确定性探明再交给 AI。
 
@@ -127,9 +128,18 @@ deterministic(pattern, {
 
 iOS 应用只能装 .ipa，App Store 不提供文件，公开可得的只有 AWS 为 Device Farm 发布的示例应用预构建 IPA（aws-device-farm-sample-app-for-ios 仓库 `prebuilt/`，2018 年构建，bundle id `Amazon.AWSDeviceFarmiOSReferenceAppDemoReinvent2018`，标签栏加多种控件的演示页）。**含义**：使用方测 iOS 应用必须自带开发版 IPA，Device Farm 会重签名；两代系统都装得上这个 2018 年的包。
 
-**装与连**：上传 2 MB 用 1.8 秒、处理 5.4 秒；`InstallToRemoteAccessSession` 后 6.1 到 6.3 秒出现在设备上，`activateApp` 1.4 到 1.8 秒。不带 bundleId 的 XCUITest 会话建连只要 1.4 到 1.6 秒（Safari 会话的 17 到 65 秒多在起浏览器与接远程检查器上）。应用内截图 0.3 到 0.6 秒；主屏上 2 到 3.4 秒。
+**装与连**：上传 2 MB 用 1.8 秒、处理 5.4 秒；`InstallToRemoteAccessSession` 后 6.1 到 6.3 秒出现在设备上，`activateApp` 1.4 到 1.8 秒。IPA 放 S3、以预签名地址交给 `appium:app`（配 `appium:autoLaunch: false`）在 iPhone 17 Pro 上 3.8 秒装上，没有经过 Device Farm 的上传与重签名——这个 IPA 自带 2018 年的 provisioning profile，使用方自己签的开发包是否同样可装未验。Device Farm 对上传件的保留期是 30 天、日志与录像 400 天（官方数据保留表），上传形态要按内容哈希复用并容忍过期重传。不带 bundleId 的 XCUITest 会话建连只要 1.4 到 1.6 秒（Safari 会话的 17 到 65 秒多在起浏览器与接远程检查器上）。应用内截图 0.3 到 0.6 秒；主屏上 2 到 3.4 秒。
 
-**输入路线在原生应用里不同于 Safari**：两代系统都是 `POST /keys`（WDA 的 `/wda/keys`）落字，iPhone 7 上在 Safari 里不通的这条在原生文本框里通了——第一响应者是原生 UITextField 时 WDA 能打字，是网页内容时不能。所以择路的维度是 ui_kind 乘系统版本：应用一律 `/wda/keys`；网页按系统版本（15.x 网页原子路线、26.x `/wda/keys`）。
+**输入路线在原生应用里不同于 Safari**，且标准路线可用（示例应用 More → Login 页的文本框，确定性探针逐条实测、按元素 value 读回）：
+
+| 路线 | iPhone 7 / iOS 15.8.4 | iPhone 17 Pro / iOS 26.3.1 |
+|---|---|---|
+| 对已知元素 `element/value`（W3C 标准 sendKeys） | 落字，0.8 秒 | 落字，0.9 秒 |
+| `GET /element/active` 加 sendKeys（W3C 标准） | 落字，1.1 秒 | 落字，1.2 秒 |
+| Appium 旧版 `POST /keys`（WDA `/wda/keys`） | 落字，1.0 秒 | 落字，1.2 秒 |
+| 谓词 `hasKeyboardFocus == 1` 找元素 | 找不到元素 | 找不到元素 |
+
+**含义**：原生应用上输入全走 W3C 标准路线——确定性 step 对自己定位到的元素 sendKeys，AI 步对活动元素 sendKeys，不需要 `/wda/keys`；Safari 网页上的输入才是难点（见下条），差别在第一响应者是原生 UITextField 还是网页内容。
 
 **滚动**：W3C 指针拖动在 iOS 26 的分页视图（UIPageViewController）上不翻页，`mobile: swipe` 两代都翻；适配器的 iOS 滚动首选 `mobile: swipe`。
 
@@ -146,7 +156,7 @@ iOS 应用只能装 .ipa，App Store 不提供文件，公开可得的只有 AWS
 | 形态 | 制造方式 | 观察 |
 |---|---|---|
 | 设备不支持远程访问 | 对自动化专用机型调 CreateRemoteAccessSession | API 同步抛 ArgumentException「device does not support remote access」，零设备分钟 |
-| 并发超限 / 设备忙 | 对同一机型连发 6 个会话请求 | 前 5 个全部到 RUNNING（同机型至少 5 台，机群没被占满）；第 6 个落在 `PENDING_CONCURRENCY`，message 明说「reached the account level concurrency limit」、排队等槽位而不是报错，Stop 可直接撤回。本账号远程访问并发上限实测为 5；机型本身被占满（BUSY）当天没遇到 |
+| 并发超限 / 设备忙 | 对同一机型连发 6 个会话请求 | 前 5 个全部到 RUNNING（同机型至少 5 台，机群没被占满）；第 6 个落在 `PENDING_CONCURRENCY`，message 明说「reached the account level concurrency limit」、排队等槽位而不是报错，Stop 可直接撤回。本账号远程访问并发上限实测为 5；排队的会话在前面的会话到 COMPLETED 后自动转 PREPARING（一次实测排了 6 分钟，STOPPING 中的会话占着槽位）；机型本身被占满（BUSY）当天没遇到 |
 | 应用在 AI 步中途被杀 | 步开始 4 秒后 `terminateApp` | 模型从截图看出回到桌面，33 秒后 TaskExecutionError「app exited to the home screen」；后续断言步照常判否；evidence 完整 |
 | 模型名错误 | 第二个 Agent 用不存在的模型名 | 15 秒、两次尝试后 TaskExecutionError，内含 Bedrock 的 400「provided model identifier is invalid」，文本可直接进 step 消息 |
 | 会话被外部 Stop | 步开始 5 秒后调 StopRemoteAccessSession | 正在执行的 AI 步 8 秒内失败，错误是 ValidationException「Device Farm session is not currently running <会话 ARN>」；之后每个 WebDriver 命令 2.2 秒同样报错；`deleteSession` 报连接已关；再调 Stop 报「Invalid parameter RemoteAccessSession」 |

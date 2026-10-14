@@ -1875,13 +1875,13 @@
     "semantic_hash": "0044f170604f2387ee9241018f3d56f3"
   },
   "engines/midscene/spikes/06-devicefarm-appium.mts": {
-    "mtime": 1791947479.0971491,
-    "ast_hash": "94c82d11020343533425aaa20fdc6fc7",
+    "mtime": 1791953737.590849,
+    "ast_hash": "20b5cc859c1924575340826c0da80bda",
     "semantic_hash": ""
   },
   "docs/journey/0011-mobile-devices-spike.md": {
-    "mtime": 1791948337.1321127,
-    "ast_hash": "39a106f733cc5a3bc988a4f62d110f65",
+    "mtime": 1791953737.3409486,
+    "ast_hash": "8f682bdbf7c9987e5a3ab77ae79c9741",
     "semantic_hash": ""
   }
 }
