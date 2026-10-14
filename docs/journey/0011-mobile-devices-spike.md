@@ -139,18 +139,18 @@ iOS 应用只能装 .ipa，App Store 不提供文件，公开可得的只有 AWS
 
 ## 清单第 6、8 到 12 项（2026-10-14）
 
-**第 6 项 evidence 抽取零改动可用**：spike 脚本直接 import worker 的 `buildEvidence` 与 `executionsLength`（`engines/midscene/src/worker/evidence.mts`），按 worker 的做法在每个 AI 步起点记 `agent.dump.executions` 长度、步末切片喂入。失败形态那一轮三步全部产出 evidence：动作步 4 帧 2 张截图、含 thought 与 actions，`act.error` 带 Midscene 的错误文本；断言步 1 帧 1 张截图；会话被外部 Stop 的那步 1 帧 0 张截图（截图还没来得及落盘，这是事实不是抽取失败）。引用到的截图文件全部存在（`missing_files` 为 0）。原因：抽取只读 SDK 的 dump 结构与 `report/screenshots/` 落盘，不碰浏览器，换成 Appium 界面后 dump 形态不变。**含义**：设备 worker 复用 evidence 模块与上传器即可，`url` 字段在应用场景填空。
+**第 6 项 evidence 抽取零改动可用**：spike 脚本直接 import worker 的 `buildEvidence` 与 `executionsLength`（`engines/midscene/src/worker/evidence.mts`），按 worker 的做法在每个 AI 步起点记 `agent.dump.executions` 长度、步末切片喂入。失败形态那一轮三步全部产出 evidence：动作步 4 帧 2 张截图、含 thought 与 actions，`act.error` 带 Midscene 的错误文本；断言步 1 帧 1 张截图；会话被外部 Stop 的那步 1 帧 0 张截图（截图还没来得及落盘，这是事实不是抽取失败）。引用到的截图文件全部存在（`missing_files` 为 0）。原因：抽取只读 SDK 的 dump 结构与 `report/screenshots/` 落盘，不碰浏览器，换成 Appium 界面后 dump 形态不变。消费端也核了：把 iPhone 7 原生应用那轮产出的两份 evidence（29 帧的动作步、判否的断言步）放进一次真实本机运行的产物目录替换对应 step 的文件，`gherkai explain` 文本与 `--json` 两种形态都正常渲染——推理、动作、截图 URI、票数齐全，`evidence_missing` 为空。**含义**：设备 worker 复用 evidence 模块、上传器与 explain 即可，`url` 字段在应用场景填空；未真跑的只剩上传器把设备截图送到 S3 这一段（纯字节上传，与来源无关）。
 
 **第 8 项 失败形态**（Android，Redmi Note 13）：
 
 | 形态 | 制造方式 | 观察 |
 |---|---|---|
 | 设备不支持远程访问 | 对自动化专用机型调 CreateRemoteAccessSession | API 同步抛 ArgumentException「device does not support remote access」，零设备分钟 |
-| 设备忙 | 当天公共机群无 BUSY 机型，未复现 | 待遇到时补；worker 要把「创建被拒 / 排队」当常态 |
+| 并发超限 / 设备忙 | 对同一机型连发 6 个会话请求 | 前 5 个全部到 RUNNING（同机型至少 5 台，机群没被占满）；第 6 个落在 `PENDING_CONCURRENCY`，message 明说「reached the account level concurrency limit」、排队等槽位而不是报错，Stop 可直接撤回。本账号远程访问并发上限实测为 5；机型本身被占满（BUSY）当天没遇到 |
 | 应用在 AI 步中途被杀 | 步开始 4 秒后 `terminateApp` | 模型从截图看出回到桌面，33 秒后 TaskExecutionError「app exited to the home screen」；后续断言步照常判否；evidence 完整 |
 | 模型名错误 | 第二个 Agent 用不存在的模型名 | 15 秒、两次尝试后 TaskExecutionError，内含 Bedrock 的 400「provided model identifier is invalid」，文本可直接进 step 消息 |
 | 会话被外部 Stop | 步开始 5 秒后调 StopRemoteAccessSession | 正在执行的 AI 步 8 秒内失败，错误是 ValidationException「Device Farm session is not currently running <会话 ARN>」；之后每个 WebDriver 命令 2.2 秒同样报错；`deleteSession` 报连接已关；再调 Stop 报「Invalid parameter RemoteAccessSession」 |
-| 150 分钟上限 | 未测（太长） | 按文档：到点自动 COMPLETED，表现应同外部 Stop |
+| 150 分钟上限 | `cap` 场景：每分钟一条命令加一次状态查询，挂满上限 | 2026-10-14 03:14 UTC 起在跳板机后台执行（`/tmp/spike06-cap2/cap-timeline.json`；首轮心跳命令选错、两分钟即收尾），结果待补；预期到点自动 COMPLETED、表现同外部 Stop |
 
 **含义**：三类失败的错误文本都可机械区分（ArgumentException / ValidationException 带「not currently running」/ 模型 400），worker 可据此分类成 engine_error 与 network_error 而不是笼统的 failed；外部 Stop 后不要再调 Stop 与 deleteSession 做清理，报错即退出。
 
@@ -170,7 +170,9 @@ token 与模型费桌面和真机同量级（同一模型、同样靠截图驱�
 
 **高德地图应用本体（17.01.0 正式版，官方 CDN 直链，194 MB，`com.autonavi.minimap`）**：官方下载源只对境内网络开放，APK 由境内网络下载后放到跳板机；Device Farm 上传 19.5 秒、处理 5.4 秒，会话内安装 23 秒。**但应用在这台公共真机上启动即自行退出**：`activateApp` 与按活动名显式启动都返回成功，应用状态轨迹只在启动后短暂到过后台态、随即回到未运行；logcat 里是进程自己正常退出（退出码 0、没有异常栈），启动页到地图主活动都创建过。这是应用侧的环境自检主动退出，不是崩溃，也不是 Device Farm 的安装或启动问题；AI 步随后面对的是桌面，六条判断全部如实判否。**含义**：带环境自检的国内消费级应用在公共真机上可能根本不给测，这是被测应用的限制、要在设计文档里写明「启动后应用自行退出」属于 pre-check 应报的失败形态（应用状态轨迹是判据）；本工具不做任何规避。国内网络影响的量化只取到了真机浏览器那组数据。
 
-**Appium 主机侧出网**（兼核第 5 项的安装路径）：`appium:app` 填 f-droid.org 公网地址与 S3 预签名地址，配 `appium:autoLaunch: false`，两条都下载并安装成功（见 spike B 数据节）。官方文档对托管 Appium 主机的出网与出口 IP 没有说法，这是现场证据；出口 IP 未测（要一个自己控制的 https 服务端看访问日志）。
+**Appium 主机侧出网**（兼核第 5 项的安装路径）：`appium:app` 填 f-droid.org 公网地址与 S3 预签名地址，配 `appium:autoLaunch: false`，两条都下载并安装成功（见 spike B 数据节）。官方文档对托管 Appium 主机的出网与出口 IP 没有说法，这是现场证据；出口 IP 未测——可行的办法只有让主机访问一个自己能看访问日志的 https 端点，用第三方请求记录站的做法被本机的自动模式安全策略拦下、不绕，自建端点（Lambda 函数地址）需要账号里有可用的执行角色，待 owner 决定要不要做。
+
+**替代国内应用的现状**：中国天气新版、12306、哔哩哔哩的官方下载页对脚本抓取都不开放（重定向环、错误页、403），weather.com.cn 上能直链的只有 2013 年的中国天气通 3.1.4（目标系统太老、Android 15 装不上）。脚本已备好对任意包名的通用步骤组（关弹窗、确认首页、搜索一个词），owner 给任何一个国内应用的 APK 即可补这一轮。
 
 **第 11 项 假 driver 的 API 面与 Chrome for Testing**：适配器加确定性探针实际用到的 WebdriverIO 面——会话：`status`、`sessionId`、`deleteSession`；上下文：`getContext`、`getContexts`、`switchContext`；画面：`takeScreenshot`、`getWindowRect`、`getPageSource`；手势与按键：`execute("mobile: …")`（Android 的 clickGesture / longClickGesture / type / pressKey / scrollGesture，iOS 的 tap / touchAndHold / pressButton / deepLink / deviceScreenInfo）、`performActions` 加 `releaseActions`、`keys`、原始 `POST /keys`；元素：`$` / `$$`（CSS、`id=`、xpath）、`getText`、`getValue`、`getAttribute`、`click`、`isDisplayed`、`getActiveElement`、`elementSendKeys`、`elementClear`、`getElementAttribute`；网页：`url`、`getUrl`、`getTitle`、`back`；应用：`isAppInstalled`、`activateApp`、`terminateApp`、`updateSettings`。确定性 step 的作者在应用上只会用到元素与上下文那两组加 `getPageSource`，所以假 driver 的最小面是：声明式元素树（class、resource-id / name、text、content-desc、bounds、displayed、enabled）、选择器解析（`id=`、`~` 无障碍 id、`android=` / `-ios predicate string`、xpath 子集）、元素动作改状态（click 触发回调、setValue 写 text）、`waitForDisplayed` 的时间语义、把树渲染成 page source XML；手势类 `execute` 一律不进假 driver（那是 AI 步的事）。Chrome for Testing：WebdriverIO 10 不配 Selenium 服务时自行下载浏览器与驱动，没装 Chrome 的跳板机首次建会话 18 秒（含下载，Chrome 399 MB 加 chromedriver 24 MB），装了 Chrome 的 Mac 用已装浏览器配匹配驱动 6 秒；**缓存落在 `os.tmpdir()`**（`/tmp/chrome`、`/tmp/chromedriver`）而不是 `~/.cache`，重启即丢，单测脚手架要显式给 `cacheDir` 或 `WEBDRIVER_CACHE_DIR`。
 

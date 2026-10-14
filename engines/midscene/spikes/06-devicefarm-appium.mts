@@ -10,6 +10,7 @@
 //     egress：设备侧出网事实（源 IP、国内外站点导航耗时）与 Appium 主机侧 appium:app 公网 / S3 预签名地址下载对照
 //            （DF_EGRESS_URL_A 公网 APK 地址、DF_EGRESS_URL_B S3 预签名地址、DF_EGRESS_PKG 该 APK 的包名）
 //     faults：失败形态——模型名错误、应用被外部杀掉、会话被外部 Stop 时适配器与 Agent 各报什么、多久报出来
+//     cap：150 分钟会话上限——每分钟发一条命令并查会话状态，记录命令开始失败的时刻与最终状态（SPIKE_CAP_MAX_MIN 缺省 165）
 //   DF_APP_URL（app 场景：APK 的 https 地址）      DF_APP_ARN（已上传过的 Device Farm 应用 ARN，给了就不再上传）
 //   DF_APP_PACKAGE（缺省 org.wikipedia）          DF_APP_INSTALL=devicefarm|appium（缺省 devicefarm：上传后 InstallToRemoteAccessSession；
 //                                                 appium：用 appium:app 让 Appium 主机自己下载安装——公网 https 与 S3 预签名地址实测都能装；
@@ -38,7 +39,7 @@ import { buildEvidence, executionsLength } from "../src/worker/evidence.mjs";
 
 const DF_REGION = "us-west-2";
 const PLATFORM = (process.env.DF_PLATFORM ?? "android") as "android" | "ios";
-const SCENARIO = (process.env.SPIKE_SCENARIO ?? "web") as "web" | "app" | "egress" | "faults";
+const SCENARIO = (process.env.SPIKE_SCENARIO ?? "web") as "web" | "app" | "egress" | "faults" | "cap";
 const DEFAULT_DEVICE = {
   android: "arn:aws:devicefarm:us-west-2::device:653D5AB0CD6B4EA88DFAE9AD4386F608", // Xiaomi Redmi Note 13, Android 15
   ios: "arn:aws:devicefarm:us-west-2::device:BDC0E688BC0F4CE7BEE056028DB32001",     // Apple iPhone 7, iOS 15.8.4
@@ -169,7 +170,7 @@ function caps(): Record<string, unknown> {
     // app 场景不带 bundleId：先连（XCUITest 落在主屏）、经 Device Farm 装、再 activateApp；DF_APP_PACKAGE 在 iOS 上就是 bundle id
     return { platformName: "iOS", "appium:automationName": "XCUITest", ...(SCENARIO === "web" ? { browserName: "Safari" } : { "appium:noReset": true }), ...common };
   }
-  if (SCENARIO === "web" || SCENARIO === "egress") return { platformName: "Android", "appium:automationName": "UiAutomator2", browserName: "Chrome", ...common };
+  if (SCENARIO === "web" || SCENARIO === "egress" || SCENARIO === "cap") return { platformName: "Android", "appium:automationName": "UiAutomator2", browserName: "Chrome", ...common };
   if (SCENARIO === "faults") return { platformName: "Android", "appium:automationName": "UiAutomator2", "appium:noReset": true, ...common };
   // app 场景：Device Farm 路径先连会话（不带应用能力）、再装再启；appium 路径由 Appium 主机按 appium:app 下载安装
   return {
@@ -451,6 +452,31 @@ async function egressProbe(driver: Driver, endpoint: string): Promise<void> {
   results.host_app_download = host;
 }
 
+// ---- 150 分钟上限探针（清单第 1 项）----
+// 每 60 秒：一条轻命令（读标题）加一次 GetRemoteAccessSession；记录每分钟的状态，命令连续失败三次或会话离开 RUNNING 即收尾。
+async function capProbe(driver: Driver, sessionArn: string): Promise<void> {
+  const maxMin = Number(process.env.SPIKE_CAP_MAX_MIN ?? "165");
+  const timeline: Array<Record<string, unknown>> = [];
+  const t0 = performance.now();
+  let fails = 0;
+  // 心跳用 window/rect：两种上下文都实现（title 在 NATIVE_APP 下报资源不存在，首轮因此两分钟就收尾了）
+  for (let minute = 0; minute <= maxMin; minute++) {
+    const rec: Record<string, unknown> = { minute, at: new Date().toISOString() };
+    try { const t1 = performance.now(); rec.rect = await driver.getWindowRect(); rec.cmd_ms = ms(t1); fails = 0; }
+    catch (e) { rec.cmd_error = errText(e).slice(0, 200); fails++; }
+    try { const g = await df.send(new GetRemoteAccessSessionCommand({ arn: sessionArn })); rec.status = g.remoteAccessSession?.status; rec.message = g.remoteAccessSession?.message?.slice(0, 160); rec.device_minutes = g.remoteAccessSession?.deviceMinutes?.metered; }
+    catch (e) { rec.status_error = errText(e).slice(0, 160); }
+    timeline.push(rec);
+    log(`cap ${minute} min: ${JSON.stringify(rec)}`);
+    fs.writeFileSync(path.join(RUN_DIR, "cap-timeline.json"), JSON.stringify(timeline, null, 1));
+    if (fails >= 3 || (rec.status && rec.status !== "RUNNING")) break;
+    await sleep(60_000);
+  }
+  results.cap_timeline_minutes = timeline.length;
+  results.cap_last = timeline[timeline.length - 1];
+  results.cap_elapsed_ms = ms(t0);
+}
+
 // ---- 失败形态（清单第 8 项）----
 // 三种人为制造的失败：模型名错误（模型侧 4xx）、应用在 AI 步中途被杀、Device Farm 会话在 AI 步中途被外部 Stop。
 async function faultSteps(step: Stepper, driver: Driver, sessionArn: string): Promise<void> {
@@ -521,6 +547,18 @@ async function amapSteps(step: Stepper): Promise<void> {
   await step("bool", "地图瓦片已经加载出来，能看到道路、地名或建筑轮廓，而不是空白或灰色格子");
   await step("act", "点击顶部搜索框，输入 北京南站，然后点击搜索结果列表里的第一条");
   await step("bool", "屏幕上显示了北京南站的位置详情卡片或地图上有北京南站的标注");
+  await step("bool", "屏幕顶部有一条红色横幅写着本应用已永久下线");  // 刻意为假：量判否路径
+}
+// 任意未知包名的应用：关弹窗、确认到了首页、找搜索入口搜一个词；给后续换被测应用（如别的国内应用）直接用
+async function genericAppSteps(step: Stepper): Promise<void> {
+  for (let i = 0; i < 3; i++) {
+    const dlg = await step("bool", "屏幕上有隐私政策、用户协议、系统权限请求或广告弹窗");
+    if (dlg !== true) break;
+    await step("act", "关闭当前弹窗：协议类点同意或同意并继续；系统权限点仅在使用中允许或允许；广告与提示点关闭、跳过或知道了");
+  }
+  await step("bool", "当前显示的是这个应用自己的首页，不是系统桌面、启动页或登录墙");
+  await step("act", "找到应用里的搜索入口，输入 北京 并发起搜索");
+  await step("bool", "屏幕上出现了与「北京」相关的搜索结果");
   await step("bool", "屏幕顶部有一条红色横幅写着本应用已永久下线");  // 刻意为假：量判否路径
 }
 async function appSteps(step: Stepper): Promise<void> {
@@ -607,6 +645,8 @@ async function main(): Promise<number> {
       }
     } else if (SCENARIO === "egress") {
       await egressProbe(driver, session.endpoint);
+    } else if (SCENARIO === "cap") {
+      await capProbe(driver, session.arn);
     } else if (SCENARIO === "faults") {
       if (appArn) await installApp(driver, session.arn, appArn);
       await timed("app_activate", () => driver!.activateApp(APP_PACKAGE));
@@ -634,7 +674,7 @@ async function main(): Promise<number> {
       log(`导航后标题「${results.title_after_nav}」 h1「${results.h1_text}」 contexts=${JSON.stringify(results.contexts)} rect=${JSON.stringify(results.window_rect_web)} shot=${JSON.stringify(results.screenshot_px)}`);
     }
 
-    if (!SKIP_AI && SCENARIO !== "egress") {
+    if (!SKIP_AI && SCENARIO !== "egress" && SCENARIO !== "cap") {
       const iface = new AppiumInterface(driver, session.endpoint);
       const agent = new Agent(iface, {
         generateReport: true, persistExecutionDump: true, replanningCycleLimit: SCENARIO === "app" ? 12 : 4,
@@ -669,7 +709,7 @@ async function main(): Promise<number> {
         return out;
       };
       if (SCENARIO === "web") await webSteps(step, PLATFORM === "ios" ? () => iosTypingProbe(iface, driver!) : undefined);
-      else if (SCENARIO === "app") await (PLATFORM === "ios" ? iosSampleAppSteps(step) : APP_PACKAGE === "com.autonavi.minimap" ? amapSteps(step) : appSteps(step));
+      else if (SCENARIO === "app") await (PLATFORM === "ios" ? iosSampleAppSteps(step) : APP_PACKAGE === "com.autonavi.minimap" ? amapSteps(step) : APP_PACKAGE === "org.wikipedia" ? appSteps(step) : genericAppSteps(step));
       else if (SCENARIO === "faults") await faultSteps(step, driver, session.arn);
       results.ai_steps = ai;
       if (SCENARIO === "web") results.url_after_ai = await iface.url();
