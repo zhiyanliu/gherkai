@@ -114,7 +114,7 @@ deterministic(pattern, {
 
 ## spike B 数据（原生应用：维基百科 Android 客户端 50611，Redmi Note 13）
 
-**装应用有两条路，都通**。其一 Device Farm 上传：`CreateUpload`（ANDROID_APP）拿预签名地址 PUT 88 MB 用 7 秒，服务端处理 5.4 秒，`metadata` 给出包名与版本（`org.wikipedia`、50611）、可按名复用；会话 RUNNING 后 `InstallToRemoteAccessSession` 调用 0.2 秒返回，设备上 `isAppInstalled` 11.6 到 17.4 秒后为真，`activateApp` 0.4 到 0.5 秒。其二 `appium:app` 给 https 地址让 Appium 主机下载安装：公网地址（f-droid.org 的 10 MB APK）与 S3 预签名地址（88 MB）配 `appium:autoLaunch: false` 都在建会话时装上（16 与 21 秒含下载），说明 **Device Farm 的 Appium 主机能出公网也能到 S3**。此前两次失败各有别的原因：对 releases.wikimedia.org 报「Download returned empty or failed」是那个源站对主机侧请求的个别表现；不给 `appium:autoLaunch: false` 又没配 appPackage / appActivity 时下载装好了却卡在启动，报「Cannot start the application … adbExec」。**含义**：`[apps]` 可以同时接受本地文件（CLI 上传成 Device Farm upload，按内容哈希复用）与 https 地址（直接交 Appium，受每条 Appium 命令 4 分钟上限约束，大包走上传）；两条都要显式给包名、不靠 Appium 猜启动活动。
+**装应用两条路都通，定下只用 S3 一条**。其一 Device Farm 上传：`CreateUpload`（ANDROID_APP）拿预签名地址 PUT 88 MB 用 7 秒，服务端处理 5.4 秒，`metadata` 给出包名与版本（`org.wikipedia`、50611）、可按名复用；会话 RUNNING 后 `InstallToRemoteAccessSession` 调用 0.2 秒返回，设备上 `isAppInstalled` 11.6 到 17.4 秒后为真，`activateApp` 0.4 到 0.5 秒。其二 `appium:app` 给 https 地址让 Appium 主机下载安装：公网地址（f-droid.org 的 10 MB APK）与 S3 预签名地址（88 MB）配 `appium:autoLaunch: false` 都在建会话时装上（16 与 21 秒含下载），说明 **Device Farm 的 Appium 主机能出公网也能到 S3**。此前两次失败各有别的原因：对 releases.wikimedia.org 报「Download returned empty or failed」是那个源站对主机侧请求的个别表现；不给 `appium:autoLaunch: false` 又没配 appPackage / appActivity 时下载装好了却卡在启动，报「Cannot start the application … adbExec」。**含义**：应用分发走 S3 一条路——CLI 把本地文件按内容哈希放进现有产物桶（QA 机器权限不变），worker 建会话前预签名、交给 `appium:app`；iOS 的签名由 Device Farm 在这条路径上重做（见 iOS 节的未签名与 ad-hoc 变体实测），Device Farm 的上传 API 不引入。约束是单条 Appium 命令 4 分钟上限，S3 到主机实测约 6 MB 每秒；两个平台都要显式给包名或 bundle id、不靠 Appium 猜启动活动。
 
 **不带应用能力的 UiAutomator2 会话可以建**（先连、再装、再启），建连 13 秒；Device Farm 给会话加了 `autoGrantPermissions`、`skipUnlock`、`suppressKillServer`、`printPageSourceOnFindFailure` 等默认能力。
 
@@ -128,7 +128,7 @@ deterministic(pattern, {
 
 iOS 应用只能装 .ipa，App Store 不提供文件，公开可得的只有 AWS 为 Device Farm 发布的示例应用预构建 IPA（aws-device-farm-sample-app-for-ios 仓库 `prebuilt/`，2018 年构建，bundle id `Amazon.AWSDeviceFarmiOSReferenceAppDemoReinvent2018`，标签栏加多种控件的演示页）。**含义**：使用方测 iOS 应用必须自带开发版 IPA，Device Farm 会重签名；两代系统都装得上这个 2018 年的包。
 
-**装与连**：上传 2 MB 用 1.8 秒、处理 5.4 秒；`InstallToRemoteAccessSession` 后 6.1 到 6.3 秒出现在设备上，`activateApp` 1.4 到 1.8 秒。IPA 放 S3、以预签名地址交给 `appium:app`（配 `appium:autoLaunch: false`）在 iPhone 17 Pro 上 3.8 秒装上，没有经过 Device Farm 的上传与重签名——这个 IPA 自带 2018 年的 provisioning profile，使用方自己签的开发包是否同样可装未验。Device Farm 对上传件的保留期是 30 天、日志与录像 400 天（官方数据保留表），上传形态要按内容哈希复用并容忍过期重传。不带 bundleId 的 XCUITest 会话建连只要 1.4 到 1.6 秒（Safari 会话的 17 到 65 秒多在起浏览器与接远程检查器上）。应用内截图 0.3 到 0.6 秒；主屏上 2 到 3.4 秒。
+**装与连**：上传 2 MB 用 1.8 秒、处理 5.4 秒；`InstallToRemoteAccessSession` 后 6.1 到 6.3 秒出现在设备上，`activateApp` 1.4 到 1.8 秒。IPA 放 S3、以预签名地址交给 `appium:app`（配 `appium:autoLaunch: false`）在 iPhone 17 Pro 上 3.8 秒装上。签名无关性专门验过：这个 IPA 自带的 provisioning profile 2018 年即过期、只登记了一台设备，照样能装；再把它拆成**完全未签名**与**ad-hoc 签名**（`codesign -s -`，无身份、无 profile）两个变体放 S3 走同一路径，两个都在 3.6 秒内装上并启动到前台（`queryAppState` 为 4）。**结论**：Device Farm 在 Appium 的安装路径上也做重签名，使用方的 IPA 不论怎么签都能装，应用分发只需 S3 一条通路，Device Farm 的上传 API 不必引入。Device Farm 对上传件的保留期是 30 天、日志与录像 400 天（官方数据保留表）。不带 bundleId 的 XCUITest 会话建连只要 1.4 到 1.6 秒（Safari 会话的 17 到 65 秒多在起浏览器与接远程检查器上）。应用内截图 0.3 到 0.6 秒；主屏上 2 到 3.4 秒。
 
 **输入路线在原生应用里不同于 Safari**，且标准路线可用（示例应用 More → Login 页的文本框，确定性探针逐条实测、按元素 value 读回）：
 
@@ -160,7 +160,7 @@ iOS 应用只能装 .ipa，App Store 不提供文件，公开可得的只有 AWS
 | 应用在 AI 步中途被杀 | 步开始 4 秒后 `terminateApp` | 模型从截图看出回到桌面，33 秒后 TaskExecutionError「app exited to the home screen」；后续断言步照常判否；evidence 完整 |
 | 模型名错误 | 第二个 Agent 用不存在的模型名 | 15 秒、两次尝试后 TaskExecutionError，内含 Bedrock 的 400「provided model identifier is invalid」，文本可直接进 step 消息 |
 | 会话被外部 Stop | 步开始 5 秒后调 StopRemoteAccessSession | 正在执行的 AI 步 8 秒内失败，错误是 ValidationException「Device Farm session is not currently running <会话 ARN>」；之后每个 WebDriver 命令 2.2 秒同样报错；`deleteSession` 报连接已关；再调 Stop 报「Invalid parameter RemoteAccessSession」 |
-| 150 分钟上限 | `cap` 场景：每分钟一条命令加一次状态查询，挂满上限 | 2026-10-14 03:11 UTC 起在跳板机后台执行（`/tmp/spike06-cap2/cap-timeline.json`；首轮心跳命令选错、两分钟即收尾），结果待补；预期到点自动 COMPLETED、表现同外部 Stop |
+| 150 分钟上限 | `cap` 场景：每分钟一条命令加一次状态查询，挂满上限 | 会话创建后约 150.4 分钟（RUNNING 后约 149 分钟）命令开始报「The remote access session is shutting down. Please check Device Farm logs」，此时 GetRemoteAccessSession 仍报 RUNNING；一分钟后端点改报 AccessDeniedException「Invalid pre-signed URL」（端点地址随会话作废）；再一分钟 API 到 COMPLETED、result 为 STOPPED，计费 150.29 分钟（从创建算、不从 RUNNING 算）。**含义**：上限按创建时刻计、worker 的会话预算要从 CreateRemoteAccessSession 起算并留出建会话的 60 到 80 秒；「shutting down」与「Invalid pre-signed URL」两条错误文本都唯一对应到期，可直接映射为会话到期类错误 |
 
 **含义**：三类失败的错误文本都可机械区分（ArgumentException / ValidationException 带「not currently running」/ 模型 400），worker 可据此分类成 engine_error 与 network_error 而不是笼统的 failed；外部 Stop 后不要再调 Stop 与 deleteSession 做清理，报错即退出。
 

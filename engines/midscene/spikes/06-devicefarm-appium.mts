@@ -466,7 +466,13 @@ async function egressProbe(driver: Driver, endpoint: string): Promise<void> {
           : { platformName: "Android", "appium:automationName": "UiAutomator2", "appium:app": url, "appium:autoLaunch": false, "appium:noReset": true, "appium:newCommandTimeout": 900 } });
       const session_ms = ms(t0);
       const installed = pkg ? await d.isAppInstalled(pkg) : undefined;
-      host[name] = { ok: true, session_ms, installed, pkg };
+      // 装上还要能启动：签名不被设备接受的包 isAppInstalled 可能为真却启动即死
+      let launch: unknown;
+      if (pkg && installed) {
+        try { await d.activateApp(pkg); await sleep(3000); launch = { state: await d.queryAppState(pkg) }; }   // 4 为前台
+        catch (e) { launch = { error: errText(e).slice(0, 300) }; }
+      }
+      host[name] = { ok: true, session_ms, installed, pkg, launch };
       if (pkg && installed) { await d.removeApp(pkg).catch(() => {}); }   // 下一条地址装的是另一个包，不互相干扰；维基百科包留给后续运行也无妨
     } catch (e) { host[name] = { ok: false, ms: ms(t0), error: errText(e).replace(/\?X-Amz[^ ]*/g, "?<签名已略>").slice(0, 1400) }; }
     finally { if (d) await d.deleteSession().catch(() => {}); }
