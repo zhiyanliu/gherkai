@@ -150,7 +150,7 @@ iOS 应用只能装 .ipa，App Store 不提供文件，公开可得的只有 AWS
 | 应用在 AI 步中途被杀 | 步开始 4 秒后 `terminateApp` | 模型从截图看出回到桌面，33 秒后 TaskExecutionError「app exited to the home screen」；后续断言步照常判否；evidence 完整 |
 | 模型名错误 | 第二个 Agent 用不存在的模型名 | 15 秒、两次尝试后 TaskExecutionError，内含 Bedrock 的 400「provided model identifier is invalid」，文本可直接进 step 消息 |
 | 会话被外部 Stop | 步开始 5 秒后调 StopRemoteAccessSession | 正在执行的 AI 步 8 秒内失败，错误是 ValidationException「Device Farm session is not currently running <会话 ARN>」；之后每个 WebDriver 命令 2.2 秒同样报错；`deleteSession` 报连接已关；再调 Stop 报「Invalid parameter RemoteAccessSession」 |
-| 150 分钟上限 | `cap` 场景：每分钟一条命令加一次状态查询，挂满上限 | 2026-10-14 03:14 UTC 起在跳板机后台执行（`/tmp/spike06-cap2/cap-timeline.json`；首轮心跳命令选错、两分钟即收尾），结果待补；预期到点自动 COMPLETED、表现同外部 Stop |
+| 150 分钟上限 | `cap` 场景：每分钟一条命令加一次状态查询，挂满上限 | 2026-10-14 03:11 UTC 起在跳板机后台执行（`/tmp/spike06-cap2/cap-timeline.json`；首轮心跳命令选错、两分钟即收尾），结果待补；预期到点自动 COMPLETED、表现同外部 Stop |
 
 **含义**：三类失败的错误文本都可机械区分（ArgumentException / ValidationException 带「not currently running」/ 模型 400），worker 可据此分类成 engine_error 与 network_error 而不是笼统的 failed；外部 Stop 后不要再调 Stop 与 deleteSession 做清理，报错即退出。
 
@@ -172,7 +172,7 @@ token 与模型费桌面和真机同量级（同一模型、同样靠截图驱�
 
 **Appium 主机侧出网**（兼核第 5 项的安装路径）：`appium:app` 填 f-droid.org 公网地址与 S3 预签名地址，配 `appium:autoLaunch: false`，两条都下载并安装成功（见 spike B 数据节）。官方文档对托管 Appium 主机的出网与出口 IP 没有说法，这是现场证据；出口 IP 未测——可行的办法只有让主机访问一个自己能看访问日志的 https 端点，用第三方请求记录站的做法被本机的自动模式安全策略拦下、不绕，自建端点（Lambda 函数地址）需要账号里有可用的执行角色，待 owner 决定要不要做。
 
-**替代国内应用的现状**：中国天气新版、12306、哔哩哔哩的官方下载页对脚本抓取都不开放（重定向环、错误页、403），weather.com.cn 上能直链的只有 2013 年的中国天气通 3.1.4（目标系统太老、Android 15 装不上）。脚本已备好对任意包名的通用步骤组（关弹窗、确认首页、搜索一个词），owner 给任何一个国内应用的 APK 即可补这一轮。
+**替代国内应用：中国天气 9.1.0.14（owner 提供的 APK，包名 `com.hf`，启动活动 `WelcomeActivity`，目标 SDK 34）**：上传 7 秒、处理 5.4 秒、会话内安装 11.7 秒；`activateApp` 与按活动名显式启动都返回成功，系统日志显示启动页进程创建后随即死亡（与高德同一形态：自行退出、无异常栈），应用状态轨迹全程停在「未运行」。两款国内消费级应用在同一台公共真机上同一表现，而维基百科客户端与 AWS 示例应用正常，差别在前者带的第三方 SDK 环境自检（反调试 / 自动化检测）。**含义**：国内消费级应用的线上包基本不可在公共真机上测，使用方得提供关闭自检的测试包（QA 包），这是产品说明里要写明的前提；本工具不做任何规避。官方下载源的脚本抓取对境外一律不开放（中国天气新版、12306、哔哩哔哩都重定向环或 403），APK 只能由境内人工取得。脚本已备好对任意包名的通用步骤组（关弹窗、确认首页、搜索一个词），下一个样本给 APK 即可直接执行。
 
 **第 11 项 假 driver 的 API 面与 Chrome for Testing**：适配器加确定性探针实际用到的 WebdriverIO 面——会话：`status`、`sessionId`、`deleteSession`；上下文：`getContext`、`getContexts`、`switchContext`；画面：`takeScreenshot`、`getWindowRect`、`getPageSource`；手势与按键：`execute("mobile: …")`（Android 的 clickGesture / longClickGesture / type / pressKey / scrollGesture，iOS 的 tap / touchAndHold / pressButton / deepLink / deviceScreenInfo）、`performActions` 加 `releaseActions`、`keys`、原始 `POST /keys`；元素：`$` / `$$`（CSS、`id=`、xpath）、`getText`、`getValue`、`getAttribute`、`click`、`isDisplayed`、`getActiveElement`、`elementSendKeys`、`elementClear`、`getElementAttribute`；网页：`url`、`getUrl`、`getTitle`、`back`；应用：`isAppInstalled`、`activateApp`、`terminateApp`、`updateSettings`。确定性 step 的作者在应用上只会用到元素与上下文那两组加 `getPageSource`，所以假 driver 的最小面是：声明式元素树（class、resource-id / name、text、content-desc、bounds、displayed、enabled）、选择器解析（`id=`、`~` 无障碍 id、`android=` / `-ios predicate string`、xpath 子集）、元素动作改状态（click 触发回调、setValue 写 text）、`waitForDisplayed` 的时间语义、把树渲染成 page source XML；手势类 `execute` 一律不进假 driver（那是 AI 步的事）。Chrome for Testing：WebdriverIO 10 不配 Selenium 服务时自行下载浏览器与驱动，没装 Chrome 的跳板机首次建会话 18 秒（含下载，Chrome 399 MB 加 chromedriver 24 MB），装了 Chrome 的 Mac 用已装浏览器配匹配驱动 6 秒；**缓存落在 `os.tmpdir()`**（`/tmp/chrome`、`/tmp/chromedriver`）而不是 `~/.cache`，重启即丢，单测脚手架要显式给 `cacheDir` 或 `WEBDRIVER_CACHE_DIR`。
 
