@@ -14,8 +14,9 @@ class WorkerNetworkError(RuntimeError):
     """
 
 
-class PlanError(ValueError):
-    """feature 写法/配置违约，拒绝运行（ADR 0019/0025）：engine 冲突、多 @scope 值、步骤关键字判不出等。
+class FeatureContractError(ValueError):
+    """用例契约违约（feature 写法或配置违约），拒绝运行（ADR 0019/0025）：engine 冲突、多 @scope 值、步骤关键字判不出等。
+    按「是什么」命名而不按「在哪一步被发现」命名：parse 与 scope 两层都会抛，run 与 plan 都会遇到，不专属 plan 阶段。
 
     定义在此（而非 scope.py）：parse 与 scope 两层都会抛（parse 抛会与 scope→parse 的依赖成环），
     共享错误类型归 errors.py（同 WorkerNetworkError 的安置理由）。scope.py re-export 保既有 import 路径。

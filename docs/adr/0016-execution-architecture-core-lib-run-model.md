@@ -256,7 +256,7 @@ G1/G2 是 v1.0 核心库 `.feature` 解析的前置——其声明语法**现已
 
 - **G1 — session scope 声明**：✅ `@scope:<name>` tag（相同值同 scope、串行共享会话；不同值并行；未标各自独立）。tag 两个引擎可读已验证。
 - **G2 — 引擎选择**：✅ `@engine:<x>` tag 选引擎（scope 级属性、容错缺省、冲突报错）；v1.0 只选引擎不交叉。两个引擎路由已验证。
-- 声明语法（[0019](./0019-feature-tags-scope-and-engine.md)）与**调度实现**（scope 串/并行、会话共享、冲突校验）均已落地：scope 分组 + engine/timeout 冲突校验见 [0025](./0025-plan-module-feature-to-jobs.md)（多值直接 `PlanError`），job 间并发/失败隔离/超时兜底见 [0026](./0026-schedule-module.md)；scope 内串行由 worker 消化。
+- 声明语法（[0019](./0019-feature-tags-scope-and-engine.md)）与**调度实现**（scope 串/并行、会话共享、冲突校验）均已落地：scope 分组 + engine/timeout 冲突校验见 [0025](./0025-plan-module-feature-to-jobs.md)（多值直接 `FeatureContractError`），job 间并发/失败隔离/超时兜底见 [0026](./0026-schedule-module.md)；scope 内串行由 worker 消化。
 
 ## 现在做 / 现在不做
 

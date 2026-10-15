@@ -199,7 +199,7 @@ def test_plan_json_shape(tmp_path, capsys):
 
 
 def test_plan_rejects_engine_conflict(tmp_path, capsys):
-    # 同 scope 多 engine → PlanError，预检在实际运行前拦截、以退出码 2 结束（省钱）
+    # 同 scope 多 engine → FeatureContractError，预检在实际运行前拦截、以退出码 2 结束（省钱）
     feat = tmp_path / "conflict.feature"
     feat.write_text(
         "@scope:x @engine:midscene\nFeature: F\n  Scenario: a\n    When \"x\"\n"

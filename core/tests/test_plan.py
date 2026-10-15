@@ -5,7 +5,7 @@ import logging
 
 import pytest
 
-from gherkai_core.scope import FeatureSource, PlanConfig, PlanError, plan
+from gherkai_core.scope import FeatureSource, PlanConfig, FeatureContractError, plan
 
 CFG = PlanConfig(default_engine="midscene")
 
@@ -151,7 +151,7 @@ def test_cross_file_scope_merge_warns(caplog):
 # ---- 重复 uri → 报错（接口违约，与上面跨文件 @scope 合并正交：那是 warning、这是 error）----
 def test_duplicate_uri_errors():
     f = FeatureSource("dup.feature", "Feature: D\n  Scenario: s\n    When \"x\"\n")
-    with pytest.raises(PlanError, match="给了两次"):
+    with pytest.raises(FeatureContractError, match="给了两次"):
         plan([f, f], CFG)  # 同一文件喂两遍属调用方 bug，fail-fast
 
 
@@ -200,7 +200,7 @@ def test_timeout_absent_and_no_default_is_none():
 
 
 def test_timeout_conflict_errors():
-    with pytest.raises(PlanError, match="多个 @timeout"):
+    with pytest.raises(FeatureContractError, match="多个 @timeout"):
         _plan(
             """Feature: F
   @scope:x @timeout:60
@@ -215,9 +215,9 @@ def test_timeout_conflict_errors():
 
 def test_timeout_invalid_values_error():
     # 非数字 / 非正数都拒（「标了 tag 但想不超时」不成立——删 tag 走缺省）
-    with pytest.raises(PlanError, match="不是数字"):
+    with pytest.raises(FeatureContractError, match="不是数字"):
         _plan('Feature: F\n  @scope:x @timeout:abc\n  Scenario: a\n    When "x"\n')
-    with pytest.raises(PlanError, match="正数"):
+    with pytest.raises(FeatureContractError, match="正数"):
         _plan('Feature: F\n  @scope:x @timeout:0\n  Scenario: a\n    When "x"\n')
 
 
@@ -225,13 +225,13 @@ def test_timeout_invalid_values_error():
 def test_timeout_non_finite_values_error(raw: str):
     # float() 收 nan/inf（不抛 ValueError）且都不满足 <=0 → 须显式拒：下游推进器一律用 `>` 比较 deadline，
     # nan/inf 会让超时保护静默失效（标了 tag 却永不超时，正是 ADR 0019 声明预算语义要拒的形态）。
-    with pytest.raises(PlanError, match="正数"):
+    with pytest.raises(FeatureContractError, match="正数"):
         _plan(f'Feature: F\n  @scope:x @timeout:{raw}\n  Scenario: a\n    When "x"\n')
 
 
 # ---- 同一 scope 多个不同 engine → 报错 ----
 def test_engine_conflict_errors():
-    with pytest.raises(PlanError, match="多个 @engine"):
+    with pytest.raises(FeatureContractError, match="多个 @engine"):
         _plan(
             """Feature: F
   @scope:x @engine:midscene
@@ -246,7 +246,7 @@ def test_engine_conflict_errors():
 
 # ---- 一个 scenario 多个不同 @scope 值（feature 级传播 + scenario 级）→ 报错 ----
 def test_multi_scope_errors():
-    with pytest.raises(PlanError, match="多个 @scope"):
+    with pytest.raises(FeatureContractError, match="多个 @scope"):
         _plan(
             """@scope:outer
 Feature: F
@@ -306,7 +306,7 @@ def test_named_scope_colliding_with_unlabeled_scenario_id_errors():
     （状态 Map / 结果文件 / claim），撞上等于丢结果，故 fail-fast。
     """
     # `Scenario: plain` 在第 2 行 → 它的 scope_id 是 t.feature:2
-    with pytest.raises(PlanError, match="编号相同"):
+    with pytest.raises(FeatureContractError, match="编号相同"):
         _plan(
             """Feature: T
   Scenario: plain
@@ -325,7 +325,7 @@ def test_scope_id_collision_errors_regardless_of_order():
     某成员的标题，跨文件那条 warning 也被吞掉。
     """
     # `Scenario: plain` 在第 5 行
-    with pytest.raises(PlanError, match="编号相同"):
+    with pytest.raises(FeatureContractError, match="编号相同"):
         _plan(
             """Feature: T
   @scope:t.feature:5
@@ -342,7 +342,7 @@ def test_scope_id_collision_across_files_errors(named_first: bool):
     """跨文件同构输入：两种 features 顺序都报错（此前只有「未标在前」那种顺序才打得出 warning）。"""
     fa = FeatureSource("a.feature", 'Feature: A\n  @scope:b.feature:2\n  Scenario: a1\n    When "x"\n')
     fb = FeatureSource("b.feature", 'Feature: B\n  Scenario: b1\n    When "y"\n')  # b1 在第 2 行
-    with pytest.raises(PlanError, match="编号相同"):
+    with pytest.raises(FeatureContractError, match="编号相同"):
         plan([fa, fb] if named_first else [fb, fa], CFG)
 
 
@@ -355,7 +355,7 @@ def test_scope_id_collision_errors_even_when_narrowed_away():
         "t.feature",
         'Feature: T\n  Scenario: plain\n    When "x"\n  @scope:t.feature:2\n  Scenario: hijack\n    When "y"\n',
     )
-    with pytest.raises(PlanError, match="编号相同"):
+    with pytest.raises(FeatureContractError, match="编号相同"):
         plan([f], CFG, select=lambda p, k: p.scenario.name == "hijack")
 
 
@@ -410,22 +410,22 @@ def test_assertion_votes_from_config_propagates_to_all_jobs():
 
 
 def test_star_step_keyword_fails_fast():
-    """`*` 步骤 type='Unknown'（gherkin 实测）→ PlanError,不静默兜底成 Given（假绿方向的错标）。"""
+    """`*` 步骤 type='Unknown'（gherkin 实测）→ FeatureContractError,不静默兜底成 Given（假绿方向的错标）。"""
     import pytest
-    from gherkai_core.errors import PlanError
+    from gherkai_core.errors import FeatureContractError
     from gherkai_core.parse import parse_feature
 
-    with pytest.raises(PlanError, match="关键字无法判定"):
+    with pytest.raises(FeatureContractError, match="关键字无法判定"):
         parse_feature("x.feature", "Feature: t\n  Scenario: s\n    * 页面显示 OpenAI 词条\n")
 
 
 def test_leading_and_keyword_fails_fast():
-    """无前驱非连接词的首条 And 同判不出 → PlanError;有前驱的 And 正常继承不受影响。"""
+    """无前驱非连接词的首条 And 同判不出 → FeatureContractError;有前驱的 And 正常继承不受影响。"""
     import pytest
-    from gherkai_core.errors import PlanError
+    from gherkai_core.errors import FeatureContractError
     from gherkai_core.parse import parse_feature
 
-    with pytest.raises(PlanError, match="关键字无法判定"):
+    with pytest.raises(FeatureContractError, match="关键字无法判定"):
         parse_feature("y.feature", "Feature: t\n  Scenario: s\n    And 先看一眼\n")
     r = parse_feature("z.feature", "Feature: t\n  Scenario: s\n    Given 打开页面\n    And 再看一眼\n")
     assert [st.keyword for st in r[0].scenario.steps] == ["Given", "Given"]  # 继承前驱,照常
@@ -433,10 +433,10 @@ def test_leading_and_keyword_fails_fast():
 
 @pytest.mark.parametrize("tag", ["@scope:", "@engine:", "@timeout:"])
 def test_bare_tag_without_value_errors_with_location(tag: str):
-    """裸 `@scope:` / `@engine:` / `@timeout:`（空值）→ PlanError（ADR 0025：标了 tag 就得给值），且消息带 `uri:line`
-    定位（本模块其余 PlanError 都带；@timeout 原走「不是数字」路径带 scope 定位，收口到空值分支后不能丢）。
+    """裸 `@scope:` / `@engine:` / `@timeout:`（空值）→ FeatureContractError（ADR 0025：标了 tag 就得给值），且消息带 `uri:line`
+    定位（本模块其余 FeatureContractError 都带；@timeout 原走「不是数字」路径带 scope 定位，收口到空值分支后不能丢）。
     曾无声放行：裸 @scope: 跨文件合并成一个空名 scope、裸 @engine: 把 engine 置空串顶掉缺省。"""
-    with pytest.raises(PlanError, match="缺少值") as ei:
+    with pytest.raises(FeatureContractError, match="缺少值") as ei:
         _plan(f'Feature: F\n  {tag}\n  Scenario: a\n    When "x"\n')
     assert "t.feature:" in str(ei.value)
 
@@ -474,7 +474,7 @@ def test_plan_select_dropped_scope_does_not_block_iteration():
             "  @scope:bad @engine:novaact\n  Scenario: a\n    When \"x\"\n"
             "  @scope:bad @engine:midscene\n  Scenario: b\n    When \"y\"\n"
             "  Scenario: c\n    When \"z\"\n")
-    with pytest.raises(PlanError, match="多个 @engine"):
+    with pytest.raises(FeatureContractError, match="多个 @engine"):
         plan([FeatureSource("t.feature", text)], CFG)
     [job] = plan([FeatureSource("t.feature", text)], CFG, select=lambda p, scope_id: p.scenario.name == "c")
     assert [s.name for s in job.scenarios] == ["c"]

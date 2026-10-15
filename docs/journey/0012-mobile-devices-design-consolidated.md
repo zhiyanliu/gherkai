@@ -16,8 +16,8 @@
 ## 1 测试目标模型（拟 ADR 0048）
 
 - 三个正交维度：engine（谁思考，不扩）、device（desktop / android / ios）、ui_kind（web / app）。桌面只有 web，不造空位。
-- 两个 scope 级 tag，声明、feature 级继承、冲突处理照 ADR 0019 的三条规则：`@device:android` / `@device:ios`（缺省 desktop）；`@app:<别名>`（有则 ui_kind 为 app、别名查 `[apps]`，无则 web）。未知取值与同一 scope 内不一致都报 PlanError。应用由 worker 在建会话后启动，scenario 之间先 terminate 再 activate；不要求「第一步必须是打开」，core 不解析 step 文本。【复盘改动：原「引号内等于别名即启动」方案撤回，它让 core 匹配 step 文本、与 worker 的导航识别形成两份事实源】
-- `@engine` 路由到不支持该目标的引擎（含缺省引擎 novaact）→ PlanError，消息给出改法（标 `@engine:midscene` 或改默认引擎）。
+- 两个 scope 级 tag，声明、feature 级继承、冲突处理照 ADR 0019 的三条规则：`@device:android` / `@device:ios`（缺省 desktop）；`@app:<别名>`（有则 ui_kind 为 app、别名查 `[apps]`，无则 web）。未知取值与同一 scope 内不一致都报 FeatureContractError。应用由 worker 在建会话后启动，scenario 之间先 terminate 再 activate；不要求「第一步必须是打开」，core 不解析 step 文本。【复盘改动：原「引号内等于别名即启动」方案撤回，它让 core 匹配 step 文本、与 worker 的导航识别形成两份事实源】
+- `@engine` 路由到不支持该目标的引擎（含缺省引擎 novaact）→ FeatureContractError，消息给出改法（标 `@engine:midscene` 或改默认引擎）。
 - core 改动：plan 解析两个 tag；Job 携带 target（device、ui_kind、应用条目：别名、S3 键、包名或 bundle id）与设备选择的**具体值**（设备 ARN 或筛选条件、billing_method、项目 ARN，由 CLI 从配置解析后写入，云端与 detached 不读配置文件）；执行前预检——目标不在 worker 能力自述里拒绝、墙钟预算超过 `max_session_s` 拒绝；plan 给出将开的设备会话数。
 - 某条确定性 step 在该目标没有实现时，plan 标注为走 AI；运行期网页上下文不可用（iOS 26 在 Device Farm 现状下）时，需要 DOM 的确定性 step 记 error 并说明，不转 AI。
 - 内建的「页面地址匹配」step 声明 targets 并补 webdriver 实现；skill 的「导航后紧跟确定性落点核对」规则在设备网页上照用，应用目标上改为 AI 断言落点。
@@ -83,6 +83,6 @@
 
 ## 9 待 owner 拍板
 
-1. **界面类型与应用的声明方式**：显式 `@app:<别名>` tag（推荐，core 只读 tag、一个 scope 一个应用由 PlanError 机械保证），还是沿用「打开 "别名"」由 step 文本推断（违反 0022、两份事实源）。
+1. **界面类型与应用的声明方式**：显式 `@app:<别名>` tag（推荐，core 只读 tag、一个 scope 一个应用由 FeatureContractError 机械保证），还是沿用「打开 "别名"」由 step 文本推断（违反 0022、两份事实源）。
 2. **Device Farm 的录像与日志**：默认不下载、只记会话 ARN 并在 explain 里给控制台链接（推荐，同时消解收尾误判超时、Appium 日志带凭证、数据保留三个问题）；还是在 scope_done 之后多等 1 到 3 分钟下载录像进产物。
 3. **job 墙钟起算点**：沿用 0034 从 claim 起算、文档写明含取设备开销（推荐）；还是改协议为设备另立起算点。

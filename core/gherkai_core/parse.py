@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from gherkin import Compiler, Parser
 from gherkin.errors import CompositeParserException
 
-from gherkai_core.errors import PlanError
+from gherkai_core.errors import FeatureContractError
 from gherkai_core.model import Scenario, Step, StepArgument
 
 # 自有别名：把 gherkin 的解析异常对外暴露成 core 的 FeatureParseError，使消费层（cli）能捕获
@@ -45,7 +45,7 @@ class ParsedScenario:
 # pickle step type → 我们的 keyword（And/But 已被 Compiler 折叠继承上一条非连接词的类型）。
 # 例外：`*` 步骤（gherkin 不把它当连接词，故**无论前驱是什么**都不继承）与无 Given/When/Then 可继承的
 # And/But（scenario 首步就是 And，或前驱是 `*`）Compiler 给 type='Unknown'——**判不出即拒绝猜**，由下面的
-# _step_keyword 抛 PlanError（ADR 0025），故本表**不设**默认值。
+# _step_keyword 抛 FeatureContractError（ADR 0025），故本表**不设**默认值。
 _TYPE_TO_KEYWORD = {"Context": "Given", "Action": "When", "Outcome": "Then"}
 
 
@@ -59,7 +59,7 @@ def _step_keyword(pickle_step: dict, scenario_id: str) -> str:
     """
     kw = _TYPE_TO_KEYWORD.get(pickle_step.get("type", ""))
     if kw is None:
-        raise PlanError(
+        raise FeatureContractError(
             f"步骤关键字无法判定（scenario {scenario_id}、step 文本 {pickle_step.get('text', '')!r}）："
             "`*` 或无前驱的 And/But 判不出 Given/When/Then（派发语义），请写明关键字")
     return kw

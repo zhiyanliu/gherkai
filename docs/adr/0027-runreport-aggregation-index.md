@@ -37,7 +37,7 @@
 - **生成权在组合根**（`runtime/gherkai_runtime/compose.py` / 未来 WebUI bootstrap），不在 `schedule` 内部生成。理由：WebUI 语义是「提交即返回 runId、之后轮询」——runId 必须**先于**跑批存在；schedule 内部生成会与该模型打架。也避免 schedule 内部 `uuid`/时钟破坏其「fake-clock 可确定性单测」的定位。
 - **run_id 落进 `RunMeta`（definition），`RunResult` 经 property 取**：组合根生成 run_id 后包成 `RunMeta(run_id, created_at, jobs)` 喂 `schedule(run_meta, ...)`；`RunResult` 持 `run_meta`、`run_id` 经 property delegate（自描述：落库后用自身字段对上主键）。run_id 归位 definition 层属「三层切分」（见 [0016](./0016-execution-architecture-core-lib-run-model.md)）。
 - run_id 对调用方**不透明**，只保证「可排序 + 抗碰撞」（实现用时间戳前缀 + 随机尾，格式留 `compose` 实现、不入本 ADR 契约）。
-- **生命周期**：run_id 在组合根生成（先于 `schedule`）。`plan` 阶段失败（feature 读不到 / `PlanError`）发生在 schedule 之前 → 不生成 run_id、不产 RunReport。
+- **生命周期**：run_id 在组合根生成（先于 `schedule`）。`plan` 阶段失败（feature 读不到 / `FeatureContractError`）发生在 schedule 之前 → 不生成 run_id、不产 RunReport。
 
 ## JobResult 自带 `engine`（经持有的 `Job`）
 

@@ -25,7 +25,7 @@ core/gherkai_core/
 ├── scope.py      ← tag 分组 + engine 校验 → Job[]；对外 plan(features, config, *, select=None) -> Job[]（select 是 `--scope/--tags/--scenario` 的筛选谓词，筛选只缩小要运行的范围、不增不改，ADR 0041 决策一）
 ├── serialize.py  ← 领域模型↔dict 的单一序列化真理源（store adapter 复用，ADR 0016/0027）
 ├── wire.py       ← Job↔JSON 与 0024 事件↔JSON 的线序列化 + 退出码约定 EX_WORKER_NETWORK/raise_for_worker_exit（两 Engine adapter 共用一份，ADR 0024/0028）；worker↔core 协议的实装处
-├── errors.py     ← core 类型化异常：WorkerNetworkError（network_error 重试分类，ADR 0028）/ PlanError（feature 写法与配置违约，parse/scope 共用，ADR 0019/0025）
+├── errors.py     ← core 类型化异常：WorkerNetworkError（network_error 重试分类，ADR 0028）/ FeatureContractError（feature 写法与配置违约，parse/scope 共用，ADR 0019/0025）
 ├── ports.py      ← Engine / WorkerHandle / EngineResolver / Sink / JobSink / RunStore / ResultStore / ReportStore 接口（组合根注入）；**另两个 port（`EventLog` / `Launcher`）定义在 `reconcile.py`**，只服务无状态推进路径（ADR 0034），清点注入面时须同时查看两处，理由见 `ports.py` 模块头
 ├── schedule.py   ← schedule(run_meta, engines, sink, opts, on_job_complete?, on_event?) -> RunResult（同步 run：并发/隔离/超时/优雅停）
 ├── project.py    ← 无状态批量运行纯归约投影（ADR 0034）：project(meta, records)→RunState + project_full(meta, records)→RunResult（终值判定/报告用）+ plan_next(state, max_concurrency)→actions + reduce_event（与 schedule 共用一份归约）+ projected_run_status（投影写应记录的 run 级 status，两 RunStore adapter 共用）

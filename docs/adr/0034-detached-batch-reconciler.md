@@ -185,7 +185,7 @@ reconciler 逻辑上是「唯一写者」，**物理上是并发实例**（实�
 
 **产品语义**：job timeout 是用户对「一个 job 最多跑多久（墙钟，含启动开销）」的预算，属 run 的 definition、与推进方式（同步/detached）无关。此前它只在同步路径实现了一半（`--timeout` 是 ScheduleOpts 运行参数、不进 definition），detached 路径完全没有——local 挂死永 running、cloud task 无限跑、计费失控（经 grace 校准适用面复盘发现，[0032](./0032-fargate-execution-environment.md)「适用面注记」）。
 
-**两层声明、tag 优先**（复刻 `@engine`/`--default-engine` 同构模式，[0019](./0019-feature-tags-scope-and-engine.md) tag 体系扩展）：feature 层 scope 级 `@timeout:N`（秒，N>0，同 scope 声明不一致 → PlanError——同 `@engine` 冲突先例；用例内容决定预算主体、QA/TE 在用例旁声明）+ CLI 层 `--default-job-timeout`（未标 tag 的 job 用它兜底；`<=0`=不超时）。**flag 命名两个前缀都承重**：`default-` 防「误当强制值、被 tag 覆盖时错愕」；`job-` 消歧对象（act 级 `ACT_TIMEOUT_S`/将来可能的 run 级总预算并存，留 `--default-run-timeout` 对称位）。原 `--timeout` 已改名、未留 alias。**先不做**（防过度设计）：run 级总墙钟预算；「CI 强制收紧压过 tag」层（真实冲突出现再议）。
+**两层声明、tag 优先**（复刻 `@engine`/`--default-engine` 同构模式，[0019](./0019-feature-tags-scope-and-engine.md) tag 体系扩展）：feature 层 scope 级 `@timeout:N`（秒，N>0，同 scope 声明不一致 → FeatureContractError——同 `@engine` 冲突先例；用例内容决定预算主体、QA/TE 在用例旁声明）+ CLI 层 `--default-job-timeout`（未标 tag 的 job 用它兜底；`<=0`=不超时）。**flag 命名两个前缀都承重**：`default-` 防「误当强制值、被 tag 覆盖时错愕」；`job-` 消歧对象（act 级 `ACT_TIMEOUT_S`/将来可能的 run 级总预算并存，留 `--default-run-timeout` 对称位）。原 `--timeout` 已改名、未留 alias。**先不做**（防过度设计）：run 级总墙钟预算；「CI 强制收紧压过 tag」层（真实冲突出现再议）。
 
 **载体 = definition**：两层在组合根解析定值后固化进 `Job.timeout_s`（None=不超时），随 RunMeta 持久化——推进器只认它，`ScheduleOpts.job_timeout_s` 退役（缺省解析在组合根一次完成，core 不复制两层逻辑）。worker 不消费 timeout（enforce 全在推进器侧，worker 只需继续守 flag-only 停止契约）。
 

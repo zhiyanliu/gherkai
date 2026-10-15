@@ -100,7 +100,7 @@ adapter、复用同一条 `RunPersistence`，把状态落 DynamoDB、判定真�
   引擎环境未安装则自动降级为无标注。
 - 文本模式对 DataTable/DocString 多行参数只标注尺寸（`+dataTable(行×列)` / `+docString(N 行)`）以保持紧凑；
   核对参数**完整内容**须用 `--json`（携带 content/rows 全文）。
-- `plan` 的退出码为 0 表示可运行，2 表示配置有误（`PlanError`：uri 冲突 / 同 scope 多 engine 等）。
+- `plan` 的退出码为 0 表示可运行，2 表示配置有误（`FeatureContractError`：uri 冲突 / 同 scope 多 engine 等）。
 
 ## 为何拆 `submit` / `status`
 

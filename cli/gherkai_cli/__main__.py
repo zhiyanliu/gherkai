@@ -20,7 +20,7 @@ from gherkai_runtime.textui import render_table, styled
 from gherkai_core.model import TERMINAL_STATUSES, Event, RunMeta, Status
 from gherkai_core.parse import FeatureParseError
 from gherkai_core.persist import RunPersistence
-from gherkai_core.scope import PlanConfig, PlanError, plan
+from gherkai_core.scope import PlanConfig, FeatureContractError, plan
 from gherkai_core.schedule import ScheduleOpts, schedule
 
 from gherkai_runtime import compose
@@ -946,7 +946,7 @@ def _load_and_plan(args) -> "list | int":
             f"同一个 .feature 传了多次，已按一次算（忽略 {len(dup_paths)} 个重复路径："
             + "、".join(str(p) for p in dup_paths) + "）"
         )
-    # 2) plan：.feature → Job[]（uri 互异/engine 冲突等违约 → PlanError；gherkin 语法错 → FeatureParseError）
+    # 2) plan：.feature → Job[]（uri 互异/engine 冲突等违约 → FeatureContractError；gherkin 语法错 → FeatureParseError）
     try:
         cfg = PlanConfig(
             default_engine=args.default_engine,
@@ -978,7 +978,7 @@ def _load_and_plan(args) -> "list | int":
             _progress(f"未知引擎 {unknown}（可用：{sorted(_names.ENGINES)}）——@engine tag 拼错？")
             return 2
         return jobs
-    except PlanError as e:
+    except FeatureContractError as e:
         _progress(f"plan 失败（配置矛盾，拒绝运行）：{e}")
         return 2
     except FeatureParseError as e:
@@ -1141,7 +1141,7 @@ def _cmd_plan(args) -> int:
     **零 AWS、零花费、零副作用**（标注会起本地瞬时 worker 子进程做 match 自述——非执行 job；失败自动降级）。
 
     与 _cmd_run 共用 `_load_and_plan`（votes 校验 + load_feature + plan），但到此为止——
-    省钱验证 feature 写法、看分组、暴露 PlanError。退出码与 run 一致（0 ok / 2 配置错）。
+    省钱验证 feature 写法、看分组、暴露 FeatureContractError。退出码与 run 一致（0 ok / 2 配置错）。
     """
     jobs = _load_and_plan(args)
     if isinstance(jobs, int):  # 前置失败 → 退出码

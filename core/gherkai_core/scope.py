@@ -20,7 +20,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from gherkai_core.model import Job
-from gherkai_core.errors import PlanError  # re-export（既有 `from gherkai_core.scope import PlanError` 不变）
+from gherkai_core.errors import FeatureContractError  # re-export（既有 `from gherkai_core.scope import FeatureContractError` 不变）
 from gherkai_core.parse import ParsedScenario, parse_feature
 
 logger = logging.getLogger("gherkai_core.scope")
@@ -58,7 +58,7 @@ def _values_with_prefix(tags: tuple[str, ...], prefix: str, where: str) -> list[
             if not v:
                 # 空值 fail-fast（ADR 0025，与 @timeout 立场一致：标了 tag 就得给有效值、想走缺省就删 tag）。否则裸 @scope:
                 # 会跨文件静默合并成一个空名 scope、裸 @engine: 会把 engine 置成空串顶掉缺省。
-                raise PlanError(f"{where}：tag {t!r} 缺少值：标了 {prefix} 就得给值（想走缺省就删掉这个 tag）")
+                raise FeatureContractError(f"{where}：tag {t!r} 缺少值：标了 {prefix} 就得给值（想走缺省就删掉这个 tag）")
             if v not in seen:
                 seen.append(v)
     return seen
@@ -67,11 +67,11 @@ def _values_with_prefix(tags: tuple[str, ...], prefix: str, where: str) -> list[
 def _scope_key(parsed: ParsedScenario) -> tuple[str | None, str]:
     """解析一个 scenario 的 scope 归属 → (scope_value 或 None, 用于派生的 scenario_id)。
 
-    多个不同 @scope 值 → PlanError（ADR 0025，与 engine 冲突对称）。
+    多个不同 @scope 值 → FeatureContractError（ADR 0025，与 engine 冲突对称）。
     """
     scope_values = _values_with_prefix(parsed.tags, _SCOPE_PREFIX, parsed.scenario.id)
     if len(scope_values) > 1:
-        raise PlanError(
+        raise FeatureContractError(
             f"scenario {parsed.scenario.id!r} 解析出多个 @scope 值 {scope_values}："
             f"一个 scenario 只能属一个 scope（会话边界）。"
             f"检查 feature 级 @scope 传播是否与 scenario 级 @scope 冲突。"
@@ -87,7 +87,7 @@ def _resolve_engine(scope_id: str, members: list[ParsedScenario], default_engine
             if v not in engines:
                 engines.append(v)
     if len(engines) > 1:
-        raise PlanError(
+        raise FeatureContractError(
             f"scope {scope_id!r} 出现多个 @engine 值 {engines}："
             f"同一 scope 跨引擎在物理上自相矛盾（共享会话又是两个不共享的会话），拒绝运行。"
         )
@@ -97,8 +97,8 @@ def _resolve_engine(scope_id: str, members: list[ParsedScenario], default_engine
 def _resolve_timeout(scope_id: str, members: list[ParsedScenario], default: float | None) -> float | None:
     """解析一个 scope 的 job 墙钟预算：与 _resolve_engine 同构（ADR 0019 @timeout）。
 
-    缺省用 default；任一标了 @timeout:N 则全 scope 继承；多个不同值 → PlanError（同 scope 一个预算）。
-    N 必须是**有限**正数（非数字 / <=0 / nan / inf → PlanError——「标了 tag 但想不超时」不成立，删 tag
+    缺省用 default；任一标了 @timeout:N 则全 scope 继承；多个不同值 → FeatureContractError（同 scope 一个预算）。
+    N 必须是**有限**正数（非数字 / <=0 / nan / inf → FeatureContractError——「标了 tag 但想不超时」不成立，删 tag
     走缺省即可）。nan/inf 须显式拒：`float()` 收它们（`float("nan")`/`"inf"`/`"1e400"` 都不抛），而下游
     推进器一律用 `>` 比较 deadline，nan/inf 会让超时保护静默失效（标了 tag 却永不超时）。
     """
@@ -108,7 +108,7 @@ def _resolve_timeout(scope_id: str, members: list[ParsedScenario], default: floa
             if v not in raws:
                 raws.append(v)
     if len(raws) > 1:
-        raise PlanError(
+        raise FeatureContractError(
             f"scope {scope_id!r} 出现多个 @timeout 值 {raws}："
             f"同一 scope 只能有一个 job 墙钟预算，拒绝运行。"
         )
@@ -118,9 +118,9 @@ def _resolve_timeout(scope_id: str, members: list[ParsedScenario], default: floa
     try:
         n = float(raw)
     except ValueError:
-        raise PlanError(f"scope {scope_id!r} 的 @timeout:{raw} 不是数字：须为正数秒。") from None
+        raise FeatureContractError(f"scope {scope_id!r} 的 @timeout:{raw} 不是数字：须为正数秒。") from None
     if not math.isfinite(n) or n <= 0:
-        raise PlanError(
+        raise FeatureContractError(
             f"scope {scope_id!r} 的 @timeout:{raw} 须为正数秒；不想超时就删掉 tag 走缺省。"
         )
     return n
@@ -137,7 +137,7 @@ def plan(features: list[FeatureSource], config: PlanConfig, *,
     谓词由调用方按 `--scope/--tags/--scenario` 组装，core 只收 `(ParsedScenario, scope_id) → bool`、不认 flag 语义
     （scope_id 一并传入：业务概念「scope」的筛选按分组键判，不逼调用方从 tags 反推）。筛后为空返回 []。
 
-    严格契约：`features` 的 uri 必须互异（uri 是 scenarioId 前缀，重复会撞 id）。重复 → PlanError。
+    严格契约：`features` 的 uri 必须互异（uri 是 scenarioId 前缀，重复会撞 id）。重复 → FeatureContractError。
     这是**接口违约**校验，与「跨文件同 @scope 合并」（领域语义、warning、见下文 scope 分组）正交：
     前者防脏输入（同一文件喂两遍），后者是有意的跨文件会话共享。收集 feature 时的去重等便利逻辑
     由调用方（CLI/WebUI）负责，core 窄腰只接 uri 互异的列表（ADR 0025）。
@@ -146,7 +146,7 @@ def plan(features: list[FeatureSource], config: PlanConfig, *,
     seen_uris: set[str] = set()
     for f in features:
         if f.uri in seen_uris:
-            raise PlanError(
+            raise FeatureContractError(
                 f"同一个 .feature 给了两次：{f.uri!r}（重复会让两份的 scenario 编号撞在一起、结果错乱）。"
                 f"每个文件只给一次。"
             )
@@ -175,7 +175,7 @@ def plan(features: list[FeatureSource], config: PlanConfig, *,
     collided = sorted({k for named, k in groups if named} & {k for named, k in groups if not named})
     if collided:
         joined = "、".join(collided)
-        raise PlanError(
+        raise FeatureContractError(
             f"@scope 的值和某条 scenario 的编号相同：{joined}。"
             f"没标 @scope 的 scenario 用自己的编号（文件:行号）当会话名，撞上会把两条 scenario 并进同一个会话、"
             f"运行结果互相覆盖。给这个 @scope 换个名字。"
