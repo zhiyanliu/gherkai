@@ -365,8 +365,8 @@
     "semantic_hash": "01bc939adc6973eaad56c15f4fdbedb6"
   },
   "docs/adr/0024-worker-core-protocol.md": {
-    "mtime": 1792054552.889628,
-    "ast_hash": "c4925c006bcfc8bfd454880c66529bdc",
+    "mtime": 1792055138.562468,
+    "ast_hash": "f7ef0d904ec97f075caf752805aaa84b",
     "semantic_hash": ""
   },
   "docs/adr/0026-schedule-module.md": {
@@ -390,13 +390,13 @@
     "semantic_hash": "953d3ef9a0916c76b25a91a0532806d0"
   },
   "docs/adr/0031-job-lifecycle-states-and-severity.md": {
-    "mtime": 1792054552.8897455,
-    "ast_hash": "93b7051ebcb136384a1f273c5ff39f27",
+    "mtime": 1792055138.5631526,
+    "ast_hash": "b0a9ddee21570862c32cb1a9052e1893",
     "semantic_hash": ""
   },
   "docs/adr/0032-fargate-execution-environment.md": {
-    "mtime": 1792054611.2341042,
-    "ast_hash": "d008a0221a46f9515ac3371dadc55d43",
+    "mtime": 1792055138.562608,
+    "ast_hash": "a7feec7bf63f7f209fbff785cf7ef7a3",
     "semantic_hash": ""
   },
   "docs/adr/0033-iac-aws-backend-and-composition-wiring.md": {
@@ -405,8 +405,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0034-detached-batch-reconciler.md": {
-    "mtime": 1792054578.0945451,
-    "ast_hash": "f9743291c0c72f45a816a15b8e392d13",
+    "mtime": 1792055138.561807,
+    "ast_hash": "6b60462dec6679df9e16473b2440c5a4",
     "semantic_hash": ""
   },
   "engines/midscene/README.md": {
@@ -1165,8 +1165,8 @@
     "semantic_hash": "710e78f99ee0697fec55c4ef12bc5bd7"
   },
   "docs/adr/0043-agent-skill-for-driving-gherkai.md": {
-    "mtime": 1792054629.9196956,
-    "ast_hash": "ba6aca23b53a65f57fa3967f0266c8be",
+    "mtime": 1792055155.8513567,
+    "ast_hash": "652ff3c37c89a586303db7bcfd09d946",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skill_install.py": {
@@ -1895,8 +1895,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0051-device-session-lifecycle-and-app-distribution.md": {
-    "mtime": 1792054552.890194,
-    "ast_hash": "6fd212845d73f2e703e797c4bda28684",
+    "mtime": 1792055138.5627842,
+    "ast_hash": "38a2c62456858a266d383ebb10fa93e8",
     "semantic_hash": ""
   },
   "docs/adr/0052-appium-interface-adapter-and-platform-differences.md": {

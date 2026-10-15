@@ -179,7 +179,7 @@ per-run 进程（观察者+reconciler 三合一）：spawn worker 子进程
 - **明细补全与判定分开**：明细只依据已收到的完成事实。收到 `scope_done.status = error` 即对 definition 中无事件的 scenario 合成 scenario 级 SKIPPED 及其全部 step 的 `SKIPPED(shortcircuited=False)`；在途 scenario 整条不合成（[0031](./0031-job-lifecycle-states-and-severity.md) 决定一、三、六）；之后到达的 timeout、abort 或非零退出只改变判定与归因，不撤销已合成的明细。没有收到 `scope_done` 时不合成；在途明细（有 `step_started` 无 `step_done` 的 step、有 `scenario_started` 无 `scenario_done` 的 scenario）不合成任何记录，保持缺记录状态，由 `explain` 表示「有现场可查」。
 - **U 非空时无论判定为何**，job message 追加产品语言提示「设备会话未能确认停止，可能仍在计费，请在设备控制台核对并手动停止」，并列出 U 中各项的会话名，`attempted` 的尝试标为「结果未知的创建尝试」、与「已创建但未确认停止」的会话分开列（尝试只有名字可列，这正是使用方到控制台核对时需要的）。
 - **停止后继续有界消费完整事件流**：推进器作出停止决定后，仍把触发该决定的当前事件与后续事件全部归约，直到 EOF 或排空上界（宽限加余量）。同步路径曾先从迭代器取事件、再查 deadline、再归约，触发超时检查的那条事件本身没有被归约，停止后到达的 `session_closed` 也会丢失，使 U 算错；无状态路径重放全部已写事件，天然满足。
-- **双路径对拍是实施护栏**：同一组事件矩阵（前置 scope 级 error 加退出 0、scope 级 error 后超时、停止后到达的 `session_opened`、未确认的 `session_closed`、timeout 与 abort 同时成立（同步路径）、零 scenario 的 `scope_done`、接力者直接落 `timed_out`、cloud tick 对无踪 task 直写 `timed_out`、先判 abort 而收尾期间 deadline 才到仍为 abort、无 ARN 的未知 Create 加取消、已记真实 ARN 后到达的 `attempted` `session_opened`（job 的 session_id 不变、`sessions[]` 多出一项 null、两个计量键都不计它））输入两条路径，判定、归因与明细逐项相等。
+- **双路径对拍是实施护栏**：同一组事件矩阵（前置 scope 级 error 加退出 0、scope 级 error 后超时、停止后到达的 `session_opened`、未确认的 `session_closed`、零 scenario 的 `scope_done`、接力者直接落 `timed_out`、cloud tick 对无踪 task 直写 `timed_out`、无 ARN 的未知 Create 加取消、已记真实 ARN 后到达的 `attempted` `session_opened`（job 的 session_id 不变、`sessions[]` 多出一项 null、两个计量键都不计它））输入两条路径，判定、归因与明细逐项相等；含 abort 的行（timeout 与 abort 同时成立、先判 abort 而收尾期间 deadline 才到仍为 abort）只输入同步路径，fail-fast 宿主到无状态路径后再加入共同矩阵。
 
 ### 机制三：`RunState` 投影写带 HWM 条件写（防并发 lost-update）
 
@@ -268,7 +268,7 @@ adapter/组合根（Lambda handler / per-run 进程，注入具体 client）：
 - **(a) store/engine 后端替换**（local↔DDB/S3、subprocess↔Fargate）= 注入、核心不动——[0033](./0033-iac-aws-backend-and-composition-wiring.md) 已真部署真跑证实，**保留**。
 - **(b) 无状态提交-收集**（本 ADR）= **驱动模型演进**：同步 `ThreadPoolExecutor` 循环解体为无状态事件驱动 tick、抽纯 `project()`/`plan_next()` 供两宿主复用、可能增 Engine port 形状、严格并发从进程内线程池迁到 store CAS——**核心与接口要动**。这比「只换 adapter」大得多，[0016](./0016-execution-architecture-core-lib-run-model.md)/[0026](./0026-schedule-module.md) 把 (a)(b) 混为一谈、over-claim 了。
 
-存活的是**纯归约器**（`project`），消失的是**同步驱动循环**（ThreadPool/as_completed/abort_flag/fail-fast `_stop_all`/进程内并发闸）——后者在无状态路径重新宿主为 reconciler。同步 `run` 路径仍用现驱动循环（两种驱动模型并存，按命令分流）。
+存活的是**纯归约器**（`project`），消失的是**同步驱动循环**（ThreadPool/as_completed/abort_flag/fail-fast `_stop_all`/进程内并发闸）——后者在无状态路径重新宿主为 reconciler，其中 fail-fast 的 `_stop_all` 尚未宿主（`submit` 不提供该选项，`stop_reason` 在该路径只有 none / timeout，见机制二）。同步 `run` 路径仍用现驱动循环（两种驱动模型并存，按命令分流）。
 
 ## 地基实测（2026-07-19，真实 AWS 账户/us-east-1；6 个真 Fargate task——其中 4 个构成 H1 退出场景矩阵——+ 真 DDB Streams/条件写）
 
