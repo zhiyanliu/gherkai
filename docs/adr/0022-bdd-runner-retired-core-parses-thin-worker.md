@@ -91,3 +91,4 @@ def color_is(ctx, sel, hex):
 ## 重议
 
 - 若将来通用 step 之外确实需要丰富的 step 库 / BDD 报告生态，重新评估是否引回某种 runner。当前「一条 catch-all + 少量确定性 step」的模型不需要。
+- **设备目标**：[0048](./0048-test-targets-device-and-ui-kind.md) 加入 `@device:` 与 `@app:` 时沿用本篇「匹配不进 core」的红线——界面类型由 tag 声明而不由 step 文本推断。

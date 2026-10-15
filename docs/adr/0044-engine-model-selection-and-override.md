@@ -52,3 +52,4 @@
 - [0042](./0042-step-evidence-and-explain.md) 决策六：SDK 版本钉死，与本 ADR 的模型锁定同一逻辑。
 - [0003](./0003-midscene-grounding-qwen3vl-bedrock.md)：被本 ADR 取代的前一代 Midscene 模型选型（其 Status 头已标 Superseded-by 本 ADR）；Bedrock `/openai/v1` 接线契约与被排除替代集仍有效。
 - [0012](./0012-planning-shares-qwen3vl-no-text-planner.md)：planning 不设独立模型槽、由本 ADR 的默认模型兼任（其 Status 头已改 Partially-superseded-by 本 ADR）。
+- **重规划上限**：设备目标缺省 12、桌面行为不变，作为 worker 侧覆盖项进入本篇的覆盖链，见 [0052](./0052-appium-interface-adapter-and-platform-differences.md)。

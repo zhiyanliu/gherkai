@@ -1,6 +1,6 @@
 # 0036. 确定性能力暴露：worker 自述注册表，CLI 按引擎查询
 
-> **Status:** Accepted（`plan` 标注降级的例外与 `--steps-dir` 查询面由 [0037](./0037-distribution-and-packaging.md) 决策 4 追加；清单从独立 flag 并入能力自述对象，见「5.」）—— 清单查询（`list-deterministic`）、plan 命中标注与能力自述均已实现。
+> **Status:** Partially-superseded-by 0050 —— 决策 1 的注册面签名由 [0050](./0050-deterministic-step-handles-and-testing.md) 扩成按句柄种类分键的多实现形态（单函数写法原样兼容），能力自述的 step 清单随之带目标；其余不变（`plan` 标注降级的例外与 `--steps-dir` 查询面由 [0037](./0037-distribution-and-packaging.md) 决策 4 追加；清单从独立 flag 并入能力自述对象，见「5.」）—— 清单查询（`list-deterministic`）、plan 命中标注与能力自述均已实现。
 
 ## 背景与问题
 
@@ -69,3 +69,4 @@ worker argv 带 `--capabilities` 时：**不建会话、不读 stdin、零费用
 
 - **与 [0027](./0027-runreport-aggregation-index.md)「确定性 step 产物可观测性」口子的区分**：那是「跑完之后看见做了什么」（run 产物层），本 ADR 是「跑之前知道有什么/会命中什么」（definition 前的查询层）——同源（确定性对外不透明）不同事，各自演进。
 - 元数据是注册契约的一部分：缺 description/example 的注册应 fail-loud（防"能力存在但不可发现"回潮）。
+- **目标维度**：每条确定性 step 可用的目标（设备与界面类型）如何自述与标注，见 [0049](./0049-worker-capabilities-targets-keys.md) 与 [0050](./0050-deterministic-step-handles-and-testing.md)。

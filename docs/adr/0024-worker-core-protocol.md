@@ -261,3 +261,4 @@ core 的 `schedule`/汇总逻辑应能用一个**假 worker**（in-memory adapte
 
 - 第三个引擎 / 新计费轴的扩展方式见上「成本信封」扩展条。
 - 若产品确需工具直接给美元 → 在**消费层**（CLI/报告/WebUI）加费率配置做折算，而非在 worker/core 内置费率（保持 core 纯搬运）。
+- **错误类别集的扩充**（按「类别集可扩充」规则）：设备目标新增 `precheck_failed`、`acquire_timeout`、`session_lost` 三个类别，定义与处置见 [0051](./0051-device-session-lifecycle-and-app-distribution.md)；能力自述增键见 [0049](./0049-worker-capabilities-targets-keys.md)。

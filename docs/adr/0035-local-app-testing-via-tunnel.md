@@ -1,6 +1,6 @@
 # 0035. 本地应用测试：自动隧道把开发机上的被测应用暴露给云端浏览器
 
-> **Status:** Accepted —— 设计与实现均已落地：`--expose-local` 在 run/plan/submit 三命令 + `runtime/gherkai_runtime/tunnel.py`（ngrok provider + URL 映射）与 `runtime/gherkai_runtime/tunnel_host.py`（宿主编排：起隧道/映射 definition/守护循环与其 TTL），四种「执行方式 × 执行后端」组合全支持（URL 映射、三形态隧道宿主 + 兜底拆除、额外请求头注入）。
+> **Status:** Partially-superseded-by 0051 —— 决策 4 的「凭据内嵌地址」被 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 改为「令牌换 cookie」（iOS Safari 不采用地址内嵌凭据，统一后桌面与设备一条路），其余决策不变；设计与实现均已落地：`--expose-local` 在 run/plan/submit 三命令 + `runtime/gherkai_runtime/tunnel.py`（ngrok provider + URL 映射）与 `runtime/gherkai_runtime/tunnel_host.py`（宿主编排：起隧道/映射 definition/守护循环与其 TTL），四种「执行方式 × 执行后端」组合全支持（URL 映射、三形态隧道宿主 + 兜底拆除、额外请求头注入）。
 
 ## 背景与问题
 
@@ -89,3 +89,4 @@
 - 隧道仅在 `--expose-local` 显式给出时起——默认路径零新依赖、零出网变化。
 - worker/core 对隧道无知（映射在组合根完成）；额外请求头**不新增 worker↔core 协议事件**——definition 层加一个 omit-when-None 字段（`RunMeta.extra_http_headers`）+ 复用既有 env 注入面，core 只搬运不解释语义。
 - 本机关机/断网 = 隧道断 = run 以导航失败（AI 报错形态）告终——明示边界，submit 时提示，不做「断线重连恢复」（隧道进程崩溃同理；测试可重跑，不值守护复杂度）。
+- **与设备目标的关系**：隧道在 Android Chrome 与 iOS Safari 上的鉴权方式、脱敏规则对查询串凭证的扩展，归 [0051](./0051-device-session-lifecycle-and-app-distribution.md)；本篇的地址映射与三形态宿主不变。

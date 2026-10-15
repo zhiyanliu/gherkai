@@ -1,6 +1,6 @@
 # `.feature` 用 Gherkin tag 声明 scope 与 engine（G1/G2）
 
-> **Status:** Partially-superseded-by 0022 —— `@scope:`/`@engine:`/`@timeout:` 三个 tag 的**语义不变**（仍是当前权威；`@timeout:` 随 [0034](./0034-detached-batch-reconciler.md) 加入本体系）；其读取/路由/调度实现从「两套 runner 各自方言（cucumber `--tags` 过滤 / pytest-bdd conftest 把带值 tag 转 marker + skip）」统一为「核心库解析 tag + 调度层据 tag 分组/选引擎」。下文「已验证」段描述的两套 runner 消费机制是 v0.x 形态；核心库「调度实现」由 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md) 落地。
+> **Status:** Partially-superseded-by 0022, 0048 —— 语义 tag 的集合由 [0048](./0048-test-targets-device-and-ui-kind.md) 加入 `@device:` 与 `@app:` 两个后不再是「三个」，但本篇定下的三条 tag 规则（声明、继承、冲突）原样适用于新 tag；`@scope:`/`@engine:`/`@timeout:` 三个 tag 的**语义不变**（仍是当前权威；`@timeout:` 随 [0034](./0034-detached-batch-reconciler.md) 加入本体系）；其读取/路由/调度实现从「两套 runner 各自方言（cucumber `--tags` 过滤 / pytest-bdd conftest 把带值 tag 转 marker + skip）」统一为「核心库解析 tag + 调度层据 tag 分组/选引擎」。下文「已验证」段描述的两套 runner 消费机制是 v0.x 形态；核心库「调度实现」由 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md) 落地。
 
 QA 在 `.feature` 里用 **Gherkin 原生 tag** 声明三类配置元信息：会话作用域（scope，G1）、引擎选择（engine，G2）与 job 墙钟预算（timeout，随 [0034](./0034-detached-batch-reconciler.md) 加入）。配置走结构化 tag、测试意图走自然语言 step——各司其职。
 

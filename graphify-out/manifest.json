@@ -1874,16 +1874,6 @@
     "ast_hash": "5b4ba518edaf491c432f42d20037d6b7",
     "semantic_hash": ""
   },
-  "docs/journey/0011-mobile-devices-spike.md": {
-    "mtime": 1791956802.5353215,
-    "ast_hash": "c180dc5709d078a19e749da02788a702",
-    "semantic_hash": ""
-  },
-  "docs/journey/0012-mobile-devices-design-consolidated.md": {
-    "mtime": 1792032873.726322,
-    "ast_hash": "17b3c718dc632110b37f7fc5d257e814",
-    "semantic_hash": ""
-  },
   "docs/internals/midscene-bedrock-sigv4-signing.md": {
     "mtime": 1792027570.159904,
     "ast_hash": "eeafaee170c69b0665abc8bab2bfa531",

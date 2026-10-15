@@ -198,6 +198,8 @@ agent / skill 只依赖 evidence schema 与 `explain` 输出，两者都是我�
 - **被中止的 job，explain 找不到它已产的 evidence**。未完成 scenario 不发 `scenario_done`，其 step 记录不进 `jobs/*.json`，evidence 指针只留在事件记录里；explain 现在只打 `aborted_hint`。**触发信号**：skill 用起来后 agent 在被中止 job 上排障时反复撞到这行提示、要靠人去 S3 翻。**预案**：core 暴露事件流读接缝（RunStore / EventLog 层），explain 对 `aborted_hint` 的 job 从事件记录补取 evidence ref；与「detached run 中途可见」共用同一接缝，一并立项。
 - **云端 job 判 error(timeout) 且该 job 有 step 记录时，`explain` 文本不打 scope 级判定行**（一个 step 记录都没有的 job 仍单独打「判定：…」段；两种情况的原因都在 `--json` 里）：决策四的可读性缺口，v1.4.3 发版验证观察到。**触发信号**：使用者在文本输出里看到 `status=error`、却找不到该 job 判否的原因。
 
+- **设备目标的证据字段与平台旁证**：evidence 增加设备专有字段（锚点表、失败步控件树、机型与系统版本）并把「承载平台的产物只留链接、不进 run 产物」写成两条路共用的规则，见 [0051](./0051-device-session-lifecycle-and-app-distribution.md)。
+
 ## 影响面
 
 **code**
