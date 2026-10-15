@@ -33,7 +33,7 @@ CLAUDE.md 里的多数纪律是**正向要求**：「写人读文本前按决策
 
 ## 被拒方案（护栏）
 
-- **全靠 CLAUDE.md 正向提示**：本轮约 1000 处违规都写在 CLAUDE.md 已有要求之后，且别的 contributor 读不到 agent 的个人 memory。
+- **全靠 CLAUDE.md 正向提示**：引入护栏前的一次全仓扫描查出约 1000 处违规，都写在 CLAUDE.md 已有要求之后，且别的 contributor 读不到 agent 的个人 memory。
 - **只用 git hook**：不随仓库分发、只对人有效，Claude Code 的 Bash 提交也绕不过它但拿不到即时反馈；故 git hook 只作 opt-in 补充。
 - **hook 只提醒不阻断**：与正向提示同一失败形态——被滚过去。阻断式的前提是低误报与只报改动行，两者本 ADR 都做了。
 - **hook 全文件扫**：改一行报出全文件历史命中，一次清扫进行中会刷屏；改动行判据用 `git diff -U0 HEAD` 直接给出、零成本。
