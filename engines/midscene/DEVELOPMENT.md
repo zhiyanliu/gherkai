@@ -75,6 +75,8 @@ npm run build       # tsc → dist/*.mjs
 npm test            # node --import tsx --test "src/**/*.test.mts"
 ```
 
+改依赖后更新 `package-lock.json` 要用与 CI 相同的 npm 大版本（Node 22 自带的 npm 10，CI 与 worker 镜像都按 `.github/workflows/ci.yml` 的 `NODE_VERSION` 取）：本机 npm 更新时执行 `npx npm@10 install --package-lock-only`。更新的 npm 写出的锁，npm 10 可能读不出完整依赖树（出现过嵌套包的依赖列表缺项），CI 的 `npm ci` 会以「package.json 与锁不同步」失败。
+
 让 CLI 指向本 checkout（dev 态没有已安装的 npm 包，走 worker 定位链**第一级** env 覆写，ADR 0037 决策 3）：
 
 ```bash
