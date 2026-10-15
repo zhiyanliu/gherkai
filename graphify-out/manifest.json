@@ -1870,8 +1870,8 @@
     "semantic_hash": "0044f170604f2387ee9241018f3d56f3"
   },
   "engines/midscene/spikes/06-devicefarm-appium.mts": {
-    "mtime": 1792035392.7080266,
-    "ast_hash": "5b4ba518edaf491c432f42d20037d6b7",
+    "mtime": 1792045658.638955,
+    "ast_hash": "f2eca9fac0eca5fbcfb7987fdc40dafb",
     "semantic_hash": ""
   },
   "docs/internals/midscene-bedrock-sigv4-signing.md": {
@@ -1910,8 +1910,13 @@
     "semantic_hash": ""
   },
   "docs/journey/0013-mobile-devices-implementation.md": {
-    "mtime": 1792034704.3746498,
-    "ast_hash": "6b6451c4c53906dcff695884f85843be",
+    "mtime": 1792047276.9179187,
+    "ast_hash": "dd650388c6fe49e850c582eefa4ace4d",
+    "semantic_hash": ""
+  },
+  "docs/journey/0014-mobile-devices-adr-revision-proposal.md": {
+    "mtime": 1792047843.424029,
+    "ast_hash": "b54d730a3f890b67c43800caf560e00b",
     "semantic_hash": ""
   }
 }

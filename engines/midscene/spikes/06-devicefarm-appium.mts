@@ -20,13 +20,15 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import OpenAI from "openai";
-import { remote } from "webdriverio";
+import { remote, attach } from "webdriverio";
 import {
   DeviceFarmClient,
   ListProjectsCommand,
   CreateRemoteAccessSessionCommand,
   GetRemoteAccessSessionCommand,
   StopRemoteAccessSessionCommand,
+  ListRemoteAccessSessionsCommand,
+  ListArtifactsCommand,
   CreateUploadCommand,
   GetUploadCommand,
   ListUploadsCommand,
@@ -39,7 +41,13 @@ import { buildEvidence, executionsLength } from "../src/worker/evidence.mjs";
 
 const DF_REGION = "us-west-2";
 const PLATFORM = (process.env.DF_PLATFORM ?? "android") as "android" | "ios";
-const SCENARIO = (process.env.SPIKE_SCENARIO ?? "web") as "web" | "app" | "egress" | "faults" | "cap";
+const SCENARIO = (process.env.SPIKE_SCENARIO ?? "web") as "web" | "app" | "egress" | "faults" | "cap" | "warmup" | "timeouts" | "release";
+// 隧道「令牌换 cookie」预热、超时分层与会话释放三类探针的输入（见各 probe 函数头注释）
+const TUNNEL_BASE = (process.env.DF_TUNNEL_BASE ?? "").replace(/\/$/, "");
+const TUNNEL_TOKEN = process.env.DF_TUNNEL_TOKEN ?? "";
+const XSITE_ORIGIN = process.env.DF_XSITE_ORIGIN ?? "https://example.com";
+const WARMUP_ROUTE = (process.env.DF_WARMUP_ROUTE ?? (process.env.DF_PLATFORM === "ios" ? "deeplink" : "url")) as "url" | "deeplink";
+const NCT_S = process.env.DF_NCT ? Number(process.env.DF_NCT) : 900;
 const DEFAULT_DEVICE = {
   android: "arn:aws:devicefarm:us-west-2::device:653D5AB0CD6B4EA88DFAE9AD4386F608", // Xiaomi Redmi Note 13, Android 15
   ios: "arn:aws:devicefarm:us-west-2::device:BDC0E688BC0F4CE7BEE056028DB32001",     // Apple iPhone 7, iOS 15.8.4
@@ -58,6 +66,12 @@ const results: Record<string, unknown> = {
   platform: PLATFORM, scenario: SCENARIO, device_arn: DEVICE_ARN, model: MODEL, started_at: new Date().toISOString(),
 };
 const log = (m: string) => console.log(`[06 ${new Date().toISOString().slice(11, 19)}] ${m}`);
+// webdriver 10.0.2 的 newSession 在客户端超时后会留下一个未处理的 rejected promise（实测：进程因 unhandledRejection 直接退出、
+// finally 没有机会执行、设备会话泄漏）。探针记录它并继续运行；worker 实现同样需要这一层兜底。
+process.on("unhandledRejection", (reason) => {
+  ((results.unhandled_rejections ??= []) as string[]).push(errText(reason).slice(0, 300));
+  log(`unhandledRejection（已记录、继续）：${errText(reason).slice(0, 200)}`);
+});
 const ms = (t0: number) => Math.round(performance.now() - t0);
 async function timed<T>(name: string, fn: () => Promise<T>): Promise<T> {
   const t0 = performance.now();
@@ -165,7 +179,13 @@ async function installApp(driver: Driver, sessionArn: string, appArn: string): P
 
 // ---- WebDriver 连接与命令往返 ----
 function caps(): Record<string, unknown> {
-  const common = { "appium:newCommandTimeout": 900 };   // 模型思考几十秒，别让 Appium 把会话当闲置回收
+  const common = { "appium:newCommandTimeout": NCT_S };   // 模型思考几十秒，别让 Appium 把会话当闲置回收；timeouts 场景按 DF_NCT 调小以测它的计时语义
+  // 预热与超时探针都在系统浏览器里做
+  if (SCENARIO === "warmup" || SCENARIO === "timeouts" || SCENARIO === "release") {
+    return PLATFORM === "ios"
+      ? { platformName: "iOS", "appium:automationName": "XCUITest", browserName: "Safari", ...common }
+      : { platformName: "Android", "appium:automationName": "UiAutomator2", browserName: "Chrome", ...common };
+  }
   // egress：要导航站点时带 Safari（否则 iOS 没有网页上下文、url 命令会挂住）；只做主机侧安装试验时不带浏览器
   if (PLATFORM === "ios" && SCENARIO === "egress") return { platformName: "iOS", "appium:automationName": "XCUITest", ...(process.env.DF_EGRESS_SKIP_NAV === "1" ? { "appium:noReset": true } : { browserName: "Safari" }), ...common };
   if (PLATFORM === "ios") {
@@ -711,15 +731,283 @@ async function appSteps(step: Stepper, probe?: () => Promise<void>): Promise<voi
   await step("bool", "屏幕顶部有一条红色横幅写着本站已永久关闭");  // 刻意为假：量判否路径
 }
 
+// ---- 隧道「令牌换 cookie」预热探针（SPIKE_SCENARIO=warmup）----
+// 跳板机上 ngrok 以 /tmp/measure 的流量策略暴露上游：预热路径凭令牌下发 __Host- 前缀的会话 cookie 并返回带标记的页面，
+// 页面脚本再向校验路径发一次只凭 cookie 放行的请求，成功后把标记改成 READY。探针不依赖网页上下文：标记从原生控件树里读。
+const MARKERS = [
+  "GHERKAI TUNNEL READY", "GHERKAI TUNNEL DENIED", "GHERKAI TUNNEL ERROR", "GHERKAI TUNNEL WARMUP", "GHERKAI TUNNEL AUTH REQUIRED",
+  "GHERKAI UPSTREAM INDEX", "TUNNEL-COOKIE-PRESENT", "TUNNEL-COOKIE-ABSENT", "GHERKAI POST RECEIVED", "GHERKAI POST PROBE GET",
+  "GHERKAI UPSTREAM 404", "GHERKAI NEWTAB", "GHERKAI TAB2", "GHERKAI SLOW DONE", "Visit Site", "ngrok",
+];
+async function webCtxOf(driver: Driver): Promise<string | undefined> {
+  const cs = (await driver.getContexts()) as string[];
+  return cs.find((c) => c !== "NATIVE_APP");
+}
+// 「可用」= 切进去后 5 秒内能读回标题（iOS 26.3 列得出 WEBVIEW、切换也成功，但任何网页命令都挂住）
+async function usableWebCtx(driver: Driver): Promise<string | undefined> {
+  const web = await webCtxOf(driver).catch(() => undefined);
+  if (!web) return undefined;
+  try {
+    await driver.switchContext(web);
+    const ok = await Promise.race([driver.getTitle().then(() => true), sleep(5000).then(() => false)]);
+    return ok ? web : undefined;
+  } catch { return undefined; } finally { await driver.switchContext("NATIVE_APP").catch(() => {}); }
+}
+async function nativeMarkers(driver: Driver): Promise<{ found: string[]; kb: number; ms: number }> {
+  const cur = (await driver.getContext()) as string;
+  if (cur !== "NATIVE_APP") await driver.switchContext("NATIVE_APP");
+  const t0 = performance.now();
+  const src = await driver.getPageSource();
+  return { found: MARKERS.filter((m) => src.includes(m)), kb: Math.round(src.length / 1024), ms: ms(t0) };
+}
+async function waitMarkers(driver: Driver, want: string[], timeoutMs: number): Promise<Record<string, unknown>> {
+  const t0 = performance.now(); let polls = 0; let last: { found: string[]; kb: number; ms: number } = { found: [], kb: 0, ms: 0 };
+  while (ms(t0) < timeoutMs) {
+    polls++;
+    try { last = await nativeMarkers(driver); } catch (e) { return { hit: null, error: errText(e), waited: ms(t0), polls }; }
+    const hit = want.find((w) => last.found.includes(w));
+    if (hit) return { hit, found: last.found, waited: ms(t0), polls, source_kb: last.kb, source_ms: last.ms };
+    await sleep(1000);
+  }
+  return { hit: null, found: last.found, waited: ms(t0), polls, source_kb: last.kb };
+}
+async function navigateTo(driver: Driver, target: string, route: "url" | "deeplink"): Promise<Record<string, unknown>> {
+  const t0 = performance.now();
+  try {
+    if (route === "deeplink") {
+      await driver.switchContext("NATIVE_APP").catch(() => {});
+      await driver.execute("mobile: deepLink", PLATFORM === "ios" ? { url: target, bundleId: "com.apple.mobilesafari" } : { url: target, package: "com.android.chrome" });
+    } else {
+      const web = await webCtxOf(driver);
+      if (!web) throw new Error("没有网页上下文，url 路线不可用");
+      await driver.switchContext(web);
+      try { await driver.url(target); } finally { await driver.switchContext("NATIVE_APP").catch(() => {}); }
+    }
+    return { route, ms: ms(t0) };
+  } catch (e) { return { route, ms: ms(t0), error: errText(e) }; }
+}
+async function webTitle(driver: Driver): Promise<unknown> {
+  const web = await webCtxOf(driver).catch(() => undefined);
+  if (!web) return null;
+  try { await driver.switchContext(web); return await driver.getTitle(); } catch (e) { return { error: errText(e).slice(0, 200) }; } finally { await driver.switchContext("NATIVE_APP").catch(() => {}); }
+}
+async function shot(driver: Driver, name: string): Promise<void> {
+  try { fs.writeFileSync(path.join(RUN_DIR, name), Buffer.from(await driver.takeScreenshot(), "base64")); } catch { /* 截图失败不影响探针 */ }
+}
+const warmupUrl = (token: string) => `${TUNNEL_BASE}/.well-known/gherkai-tunnel-auth?gherkai_tunnel_token=${token}`;
+// 预热核心：导航预热地址、等标记；给 warmup 与 timeouts 两个场景共用
+async function warmupCore(driver: Driver, route: "url" | "deeplink"): Promise<Record<string, unknown>> {
+  if (!TUNNEL_BASE || !TUNNEL_TOKEN) throw new Error("需要 DF_TUNNEL_BASE 与 DF_TUNNEL_TOKEN");
+  const nav = await navigateTo(driver, warmupUrl(TUNNEL_TOKEN), route);
+  const wait = await waitMarkers(driver, ["GHERKAI TUNNEL READY", "GHERKAI TUNNEL DENIED", "GHERKAI TUNNEL ERROR", "GHERKAI TUNNEL AUTH REQUIRED", "Visit Site"], 25_000);
+  const title = await webTitle(driver);
+  await shot(driver, "warmup.png");
+  log(`预热（${route}）：导航 ${JSON.stringify(nav)} 标记 ${JSON.stringify(wait)} 标题 ${JSON.stringify(title)}`);
+  return { nav, wait, title };
+}
+async function warmupProbe(driver: Driver): Promise<void> {
+  const rec: Record<string, unknown> = { route: WARMUP_ROUTE }; results.warmup = rec;
+  rec.contexts_initial = await driver.getContexts().catch((e) => errText(e));
+  if (PLATFORM === "ios") rec.ios_contexts_initial = await driver.execute("mobile: getContexts").catch((e) => errText(e).slice(0, 300));
+  // 1. 预热
+  rec.warmup = await warmupCore(driver, WARMUP_ROUTE);
+  // 2. 业务页：cookie 应放行，页面显示 cookie 是否到达上游
+  rec.index_nav = await navigateTo(driver, `${TUNNEL_BASE}/`, WARMUP_ROUTE);
+  rec.index_wait = await waitMarkers(driver, ["GHERKAI UPSTREAM INDEX", "GHERKAI TUNNEL AUTH REQUIRED", "Visit Site"], 25_000);
+  await shot(driver, "index.png");
+  log(`业务页：${JSON.stringify(rec.index_wait)}`);
+  // 3. 负例：错令牌 → 401 页；之后业务页仍应放行（cookie 未被破坏）
+  rec.wrong_token_nav = await navigateTo(driver, warmupUrl("wrong-token"), WARMUP_ROUTE);
+  rec.wrong_token_wait = await waitMarkers(driver, ["GHERKAI TUNNEL AUTH REQUIRED", "GHERKAI TUNNEL READY", "Visit Site"], 20_000);
+  rec.index_after_wrong_nav = await navigateTo(driver, `${TUNNEL_BASE}/`, WARMUP_ROUTE);
+  rec.index_after_wrong_wait = await waitMarkers(driver, ["GHERKAI UPSTREAM INDEX", "GHERKAI TUNNEL AUTH REQUIRED"], 20_000);
+  log(`错令牌：${JSON.stringify(rec.wrong_token_wait)}；之后业务页：${JSON.stringify(rec.index_after_wrong_wait)}`);
+  // 4. 跨站 POST 回跳（SameSite=None 的收益）：从第三方站点的页面提交表单到隧道域；需要网页上下文执行脚本
+  rec.usable_web_ctx = await usableWebCtx(driver);
+  const web = rec.usable_web_ctx as string | undefined;
+  if (web) {
+    try {
+      await driver.switchContext(web);
+      await driver.url(XSITE_ORIGIN);
+      rec.contexts_on_xsite = await driver.getContexts();
+      await driver.execute(
+        "var f=document.createElement('form');f.method='POST';f.action=arguments[0];var i=document.createElement('input');i.name='a';i.value='xsite';f.appendChild(i);document.body.appendChild(f);f.submit();",
+        `${TUNNEL_BASE}/post-probe`,
+      );
+      await driver.switchContext("NATIVE_APP").catch(() => {});
+      rec.xsite_post_wait = await waitMarkers(driver, ["GHERKAI POST RECEIVED", "GHERKAI TUNNEL AUTH REQUIRED", "Visit Site"], 20_000);
+      await shot(driver, "xsite-post.png");
+    } catch (e) { rec.xsite_post_error = errText(e); await driver.switchContext("NATIVE_APP").catch(() => {}); }
+  } else rec.xsite_post_wait = "跳过：无可用网页上下文，无法从第三方页面提交表单";
+  log(`跨站 POST：${JSON.stringify(rec.xsite_post_wait ?? rec.xsite_post_error)}`);
+  // 6. 切到别的应用再切回，会话 cookie 是否保留
+  try {
+    if (PLATFORM === "ios") { await driver.execute("mobile: pressButton", { name: "home" }); await sleep(3000); await driver.activateApp("com.apple.mobilesafari"); }
+    else { await driver.execute("mobile: pressKey", { keycode: 3 }); await sleep(3000); await driver.activateApp("com.android.chrome"); }
+    await sleep(1500);
+    rec.index_after_appswitch_nav = await navigateTo(driver, `${TUNNEL_BASE}/`, WARMUP_ROUTE);
+    rec.index_after_appswitch_wait = await waitMarkers(driver, ["GHERKAI UPSTREAM INDEX", "GHERKAI TUNNEL AUTH REQUIRED"], 20_000);
+  } catch (e) { rec.appswitch_error = errText(e); }
+  log(`切应用后业务页：${JSON.stringify(rec.index_after_appswitch_wait ?? rec.appswitch_error)}`);
+  // 5. target=_blank 后的网页上下文候选数（iOS 的 WEBVIEW 身份问题）
+  rec.newtab_nav = await navigateTo(driver, `${TUNNEL_BASE}/newtab`, WARMUP_ROUTE);
+  await waitMarkers(driver, ["GHERKAI NEWTAB"], 15_000);
+  rec.contexts_before_newtab = await driver.getContexts().catch((e) => errText(e));
+  try {
+    const web2 = await usableWebCtx(driver);
+    if (web2) { await driver.switchContext(web2); await driver.execute("document.getElementById('lnk').click()"); await driver.switchContext("NATIVE_APP").catch(() => {}); rec.newtab_click = "web ctx script"; }
+    else { const el = await driver.$(PLATFORM === "ios" ? '-ios predicate string:label == "OPEN TAB2"' : 'android=new UiSelector().text("OPEN TAB2")'); await el.click(); rec.newtab_click = "native tap"; }
+  } catch (e) { rec.newtab_click = { error: errText(e).slice(0, 200) }; }
+  await sleep(3000);
+  rec.contexts_after_newtab = await driver.getContexts().catch((e) => errText(e));
+  if (PLATFORM === "ios") rec.ios_contexts_after_newtab = await driver.execute("mobile: getContexts").catch((e) => errText(e).slice(0, 400));
+  rec.markers_after_newtab = await nativeMarkers(driver).catch((e) => errText(e));
+  log(`新标签页：点击 ${JSON.stringify(rec.newtab_click)} 上下文 ${JSON.stringify(rec.contexts_after_newtab)}`);
+}
+
+// ---- 超时分层探针（SPIKE_SCENARIO=timeouts）----
+// (a) 同一会话挂两个客户端实例、各设单请求超时，看哪个生效（webdriver 10 按 sessionId 共享 dispatcher）；
+// (b) W3C pageLoad 是否在网页上下文生效、超时后的错误形态与会话可用性；
+// (c) appium:newCommandTimeout（caps 里按 DF_NCT 调小）在长命令执行期间是否计时，到期后能否再 newSession。
+async function timeoutsProbe(driver: Driver, endpoint: string, sessionArn: string): Promise<void> {
+  const rec: Record<string, unknown> = { nct_s: NCT_S }; results.timeouts = rec;
+  rec.warmup = await warmupCore(driver, WARMUP_ROUTE);
+  const web = await webCtxOf(driver);
+  if (!web) { rec.skipped = "无网页上下文：慢导航类探针读不回结果"; return; }
+  await driver.switchContext(web);
+  const u = new URL(endpoint);
+  const slow = (s: number) => `${TUNNEL_BASE}/slow?s=${s}`;
+  const run = async (label: string, fn: () => Promise<unknown>) => { const t0 = performance.now(); try { await fn(); rec[label] = { ms: ms(t0), outcome: "完成" }; } catch (e) { rec[label] = { ms: ms(t0), error: errText(e).slice(0, 300) }; } log(`${label}: ${JSON.stringify(rec[label])}`); };
+  // (a)
+  try {
+    const b = await attach({
+      sessionId: driver.sessionId, capabilities: (driver as unknown as { capabilities: Record<string, unknown> }).capabilities,
+      protocol: u.protocol.replace(":", ""), hostname: u.hostname, port: u.port ? Number(u.port) : 443, path: u.pathname + u.search,
+      logLevel: "warn", connectionRetryTimeout: 3000, connectionRetryCount: 0,
+    } as never);
+    await run("a_attached_client_3s_timeout_slow8", () => b.url(slow(8)));
+  } catch (e) { rec.a_attach_error = errText(e); }
+  await run("a_primary_client_default_timeout_slow8", () => driver.url(slow(8)));
+  // (b)
+  await driver.setTimeout({ pageLoad: 3000 }).catch((e) => { rec.b_set_pageload_error = errText(e); });
+  rec.b_timeouts_read = await driver.getTimeouts().catch((e) => errText(e));
+  await run("b_pageload_3s_slow10", () => driver.url(slow(10)));
+  rec.b_usable_after = await driver.getTitle().then((t) => ({ title: t })).catch((e) => ({ error: errText(e).slice(0, 200) }));
+  await driver.setTimeout({ pageLoad: 300_000 }).catch(() => {});
+  // (c)
+  await run(`c_long_command_${NCT_S + 10}s_with_nct_${NCT_S}s`, () => driver.url(slow(NCT_S + 10)));
+  rec.c_after_long_command = await driver.getTitle().then((t) => ({ title: t })).catch((e) => ({ error: errText(e).slice(0, 200) }));
+  await sleep((NCT_S + 5) * 1000);
+  rec.c_after_idle = await driver.getTitle().then((t) => ({ title: t })).catch((e) => ({ error: errText(e).slice(0, 200) }));
+  rec.c_remote_session_status = (await df.send(new GetRemoteAccessSessionCommand({ arn: sessionArn }))).remoteAccessSession?.status;
+  await run("c_renew_session", async () => { const d2 = await connect(endpoint); rec.c_renew_session_id = d2.sessionId; await d2.deleteSession().catch(() => {}); });
+}
+// newSession 的客户端超时（2 秒）先触发时，服务端是否仍把会话建出来、随后正常 newSession 是否受影响
+async function newSessionTimeoutProbe(endpoint: string): Promise<void> {
+  const rec: Record<string, unknown> = {}; results.newsession_probe = rec;
+  const u = new URL(endpoint); const base = endpoint.replace(/\/$/, "");
+  const listSessions = async () => {
+    const out: Record<string, unknown> = {};
+    for (const r of ["sessions", "appium/sessions"]) { try { const res = await fetch(`${base}/${r}`); out[r] = { status: res.status, body: (await res.text()).slice(0, 400) }; } catch (e) { out[r] = errText(e).slice(0, 200); } }
+    return out;
+  };
+  rec.sessions_before = await listSessions();
+  const t0 = performance.now();
+  try {
+    const d = await remote({ protocol: u.protocol.replace(":", ""), hostname: u.hostname, port: u.port ? Number(u.port) : 443, path: u.pathname + u.search, logLevel: "warn", connectionRetryTimeout: 2000, connectionRetryCount: 0, capabilities: caps() });
+    rec.short_timeout_newsession = { ms: ms(t0), outcome: "2 秒内居然成功", sessionId: d.sessionId }; await d.deleteSession().catch(() => {});
+  } catch (e) { rec.short_timeout_newsession = { ms: ms(t0), error: errText(e).slice(0, 300) }; }
+  rec.sessions_right_after = await listSessions();
+  await sleep(75_000);
+  rec.sessions_after_75s = await listSessions();
+  log(`newSession 客户端超时探针：${JSON.stringify(rec).slice(0, 900)}`);
+}
+
+// ---- 会话释放探针（SPIKE_SCENARIO=release，不走通用主流程）----
+// 会话名长度与同名、按名列举的可见时延、排队中撤回是否计费、并行 Stop 与 Get 的耗时、Stop 返回体、重复 Stop 与 Stop 后 deleteSession 的报错形态、
+// 有无 deleteSession 两种收尾下的产物（录像、日志）与 deviceMinutes。
+async function releaseProbe(project: string): Promise<void> {
+  const rec: Record<string, unknown> = {}; results.release = rec;
+  const create = (name: string) => df.send(new CreateRemoteAccessSessionCommand({ projectArn: project, deviceArn: DEVICE_ARN, name, configuration: { billingMethod: "METERED" } }));
+  const listByName = async (name: string) => (await df.send(new ListRemoteAccessSessionsCommand({ arn: project }))).remoteAccessSessions?.filter((s) => s.name === name).map((s) => ({ arn: s.arn?.slice(-12), status: s.status })) ?? [];
+  const stop = async (arn: string) => { const t0 = performance.now(); const r = await df.send(new StopRemoteAccessSessionCommand({ arn })); return { ms: ms(t0), returned_status: r.remoteAccessSession?.status, returned_device_minutes: r.remoteAccessSession?.deviceMinutes, returned_keys: Object.keys(r.remoteAccessSession ?? {}) }; };
+  const waitRunning = async (arn: string) => {
+    const t0 = performance.now();
+    for (;;) {
+      const s = (await df.send(new GetRemoteAccessSessionCommand({ arn }))).remoteAccessSession!;
+      if (s.status === "RUNNING" && s.endpoints?.remoteDriverEndpoint) return { ms: ms(t0), endpoint: s.endpoints.remoteDriverEndpoint, created: s.created, started: s.started };
+      if (["COMPLETED", "STOPPING", "ERRORED", "FAILED"].includes(s.status!)) throw new Error(`会话 ${s.status} ${s.message ?? ""}`);
+      if (ms(t0) > 15 * 60_000) throw new Error("15 分钟未 RUNNING");
+      await sleep(5000);
+    }
+  };
+  const waitDone = async (arn: string) => {
+    const t0 = performance.now();
+    for (;;) {
+      const s = (await df.send(new GetRemoteAccessSessionCommand({ arn }))).remoteAccessSession!;
+      if (s.status === "COMPLETED" || ms(t0) > 6 * 60_000) {
+        const arts: Record<string, unknown> = {};
+        for (const type of ["FILE", "LOG", "SCREENSHOT"] as const) { try { arts[type] = ((await df.send(new ListArtifactsCommand({ arn, type }))).artifacts ?? []).map((x) => `${x.type}:${x.name}.${x.extension}`); } catch (e) { arts[type] = errText(e).slice(0, 120); } }
+        return { ms_to_completed: ms(t0), status: s.status, device_minutes: s.deviceMinutes, created: s.created, started: s.started, stopped: s.stopped, artifacts: arts };
+      }
+      await sleep(10_000);
+    }
+  };
+  // 1. 名字长度与排队中撤回
+  const long256 = "spike06-release-" + "x".repeat(256 - 16);
+  let pendingArn: string | undefined;
+  try { const r = await create(long256); pendingArn = r.remoteAccessSession!.arn!; rec.name_256 = { ok: true, status: r.remoteAccessSession!.status }; } catch (e) { rec.name_256 = { error: errText(e).slice(0, 200) }; }
+  try { const r = await create(long256 + "y"); rec.name_257 = { ok: true }; await df.send(new StopRemoteAccessSessionCommand({ arn: r.remoteAccessSession!.arn! })).catch(() => {}); } catch (e) { rec.name_257 = { error: errText(e).slice(0, 200) }; }
+  if (pendingArn) { try { rec.pending_stop = await stop(pendingArn); } catch (e) { rec.pending_stop = { error: errText(e).slice(0, 200) }; } }
+  log(`名字：256 ${JSON.stringify(rec.name_256)} 257 ${JSON.stringify(rec.name_257)} 排队中撤回 ${JSON.stringify(rec.pending_stop)}`);
+  // 2. 同名并行创建与按名可见时延
+  const name = `spike06-release-${Date.now()}`;
+  const t0c = performance.now();
+  const [a, b] = await Promise.all([create(name), create(name)]);
+  rec.same_name_parallel = { ms: ms(t0c), statuses: [a.remoteAccessSession!.status, b.remoteAccessSession!.status] };
+  const arns = [a.remoteAccessSession!.arn!, b.remoteAccessSession!.arn!];
+  const tv = performance.now(); let seen: unknown[] = [];
+  for (let i = 0; i < 30; i++) { seen = await listByName(name); if (seen.length >= 2) break; await sleep(1000); }
+  rec.list_by_name = { ms: ms(tv), count: seen.length, seen };
+  log(`同名并行创建 ${JSON.stringify(rec.same_name_parallel)}；按名可见 ${JSON.stringify(rec.list_by_name)}`);
+  // 3. 等 RUNNING、各连一次 Appium、A 先 deleteSession，再并行 Stop
+  const [ra, rb] = await Promise.all(arns.map(waitRunning));
+  rec.running = { a: { ms: ra.ms, created: ra.created, started: ra.started }, b: { ms: rb.ms, created: rb.created, started: rb.started } };
+  const [da, db] = await Promise.all([connect(ra.endpoint), connect(rb.endpoint)]);
+  await Promise.all([da, db].map((d) => d.takeScreenshot().catch(() => "")));
+  const tdel = performance.now(); await da.deleteSession().catch((e) => { rec.a_delete_error = errText(e).slice(0, 200); }); rec.a_delete_ms = ms(tdel);
+  const [sa, sb] = await Promise.all([stop(arns[0]), stop(arns[1])]);
+  rec.stop = { a_after_delete: sa, b_without_delete: sb };
+  const tget = performance.now(); const ga = (await df.send(new GetRemoteAccessSessionCommand({ arn: arns[0] }))).remoteAccessSession!;
+  rec.get_right_after_stop = { ms: ms(tget), status: ga.status, device_minutes: ga.deviceMinutes, stopped: ga.stopped };
+  try { rec.duplicate_stop = await stop(arns[0]); } catch (e) { rec.duplicate_stop = { error: errText(e).slice(0, 300) }; }
+  try { await db.deleteSession(); rec.b_delete_after_stop = "ok"; } catch (e) { rec.b_delete_after_stop = errText(e).slice(0, 300); }
+  log(`Stop ${JSON.stringify(rec.stop)}；Get ${JSON.stringify(rec.get_right_after_stop)}；重复 Stop ${JSON.stringify(rec.duplicate_stop)}`);
+  // 4. 到 COMPLETED 的时长、计量、时间戳与产物
+  const [ca, cb] = await Promise.all([waitDone(arns[0]), waitDone(arns[1])]);
+  rec.completed = { a_with_delete: ca, b_without_delete: cb };
+  if (pendingArn) rec.pending_stop_final = await waitDone(pendingArn);
+  log(`完成：${JSON.stringify(rec.completed).slice(0, 1200)}`);
+}
+
 async function main(): Promise<number> {
   fs.mkdirSync(RUN_DIR, { recursive: true });
   const project = await projectArn();
+  if (SCENARIO === "release") {
+    let rc = 0;
+    try { await releaseProbe(project); } catch (e) { rc = 1; results.error = errText(e); log(`失败：${errText(e)}`); }
+    results.finished_at = new Date().toISOString();
+    fs.writeFileSync(path.join(RUN_DIR, "spike06-results.json"), JSON.stringify(results, null, 2));
+    log(`结果：${path.join(RUN_DIR, "spike06-results.json")}`);
+    return rc;
+  }
   log(`项目 ${project.slice(-20)}，平台 ${PLATFORM}，场景 ${SCENARIO}，设备 ${DEVICE_ARN.slice(-12)}，模型 ${MODEL}（${modelFamily()}），Bedrock ${getBaseUrl()}`);
   const appArn = (SCENARIO === "app" && APP_INSTALL === "devicefarm") || SCENARIO === "faults" ? await ensureAppUpload(project) : undefined;
   const session = await startSession(project);
   let driver: Driver | undefined;
   let rc = 0;
   try {
+    if (SCENARIO === "timeouts" && process.env.DF_NEWSESSION_PROBE === "1") await newSessionTimeoutProbe(session.endpoint);
     driver = await timed("webdriver_connect", () => connect(session.endpoint));
     results.caps = (driver as unknown as { capabilities: unknown }).capabilities;
     results.server_status = await driver.status().catch((e) => ({ error: errText(e) }));
@@ -789,6 +1077,10 @@ async function main(): Promise<number> {
       if (appArn) await installApp(driver, session.arn, appArn);
       await timed("app_activate", () => driver!.activateApp(APP_PACKAGE));
       await sleep(3000);
+    } else if (SCENARIO === "warmup") {
+      await warmupProbe(driver);
+    } else if (SCENARIO === "timeouts") {
+      await timeoutsProbe(driver, session.endpoint, session.arn);
     } else {
       const webCtx = (results.contexts as string[]).find((c) => c !== "NATIVE_APP");
       if (webCtx) await driver.switchContext(webCtx);
@@ -814,7 +1106,7 @@ async function main(): Promise<number> {
 
     if (SKIP_AI && SCENARIO === "app" && PLATFORM === "ios") await iosAppTypingProbe(driver, session.endpoint).catch((e) => { results.ios_typing_probe_error = errText(e); log(`应用输入探针整体失败：${results.ios_typing_probe_error}`); });
     if (SKIP_AI && SCENARIO === "app" && PLATFORM === "android") await androidAppTypingProbe(driver).catch((e) => { results.android_typing_probe_error = errText(e); log(`Android 应用输入探针整体失败：${results.android_typing_probe_error}`); });
-    if (!SKIP_AI && SCENARIO !== "egress" && SCENARIO !== "cap") {
+    if (!SKIP_AI && SCENARIO !== "egress" && SCENARIO !== "cap" && SCENARIO !== "warmup" && SCENARIO !== "timeouts") {
       const iface = new AppiumInterface(driver, session.endpoint);
       const agent = new Agent(iface, {
         generateReport: true, persistExecutionDump: true, replanningCycleLimit: SCENARIO === "app" ? 12 : 4,
