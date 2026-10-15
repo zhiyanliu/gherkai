@@ -28,4 +28,4 @@
 - 第 1 段（模型连接）：openai-node + sigv4Fetch 调 qwen3-vl，文本 `"ok"` + 视觉 `"Red Blue"`，**一次过未撞 403**——SigV4 字节匹配正确。
 - 第 2 段（浏览器连接/CDP）：`StartBrowserSession` + SigV4 签 upgrade（service `bedrock-agentcore`）+ Playwright `connectOverCDP` 连上云端浏览器、导航维基。
 - 第 3 段（合体）：Midscene 经 `createOpenAIClient` 注入 sigv4Fetch，在 AgentCore 云端浏览器跑通 `aiAct` + 断言，出 `report.html`。
-- **关键实现坑**（配方笔记 §7）：给 `opts.modelConfig` 即切隔离 ModelConfigManager——隔离态只读该对象、不读 `overrideAIConfig`/env，故模型配置必须随它一起给。（1.9.8 时给 `createOpenAIClient` 或 `modelConfig` 任一即切隔离；1.12.8 起只给前者会用 `AgentScopedModelConfigManager` 包住全局管理器、仍读 env——本项目两者都给，落在隔离支。）
+- **关键实现坑**（签名契约与失败模式的机理解读见 `docs/internals/midscene-bedrock-sigv4-signing.md`）：给 `opts.modelConfig` 即切隔离 ModelConfigManager——隔离态只读该对象、不读 `overrideAIConfig`/env，故模型配置必须随它一起给。（1.9.8 时给 `createOpenAIClient` 或 `modelConfig` 任一即切隔离；1.12.8 起只给前者会用 `AgentScopedModelConfigManager` 包住全局管理器、仍读 env——本项目两者都给，落在隔离支。）

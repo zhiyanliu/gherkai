@@ -22,7 +22,7 @@
 - 模型：默认 `us.openai.gpt-5.6-terra`（`lib/agentcore-sigv4.mts` 的 `DEFAULT_MODEL`，选定依据 [ADR 0044](../../docs/adr/0044-engine-model-selection-and-override.md)「现值」），env `MIDSCENE_MODEL_ID` 覆盖取值、`MIDSCENE_MODEL_FAMILY` 覆盖家族；缺省 family 按模型 id 推断，推断表是同文件的 `MODEL_FAMILY_PATTERNS`（**唯一一份，不得在别处复制**；决策与理由见 ADR 0044 决策 2），推不出即在 worker 启动期抛错，不回落到任意 family。family 决定 Midscene 用哪套提示词与请求参数，经 `worker/run-scope.mts` 的 `modelConfig()` 交给 SDK。
 - base URL：`https://bedrock-runtime.${AWS_REGION}.amazonaws.com/openai/v1`（region 惰性读 `AWS_REGION`，未设即 fail-loud，不硬编码 `us-east-1`；见 `src/lib/agentcore-sigv4.mts` 的 `getRegion()` / `getBaseUrl()`、[ADR 0033](../../docs/adr/0033-iac-aws-backend-and-composition-wiring.md)）
 - 接线：经 Midscene `createOpenAIClient` 注入带 SigV4 签名的自定义 `fetch`
-- 配方与失败模式：[`spikes/SIGV4-FETCH-RECIPE.md`](./spikes/SIGV4-FETCH-RECIPE.md)
+- 签名契约与失败模式：[`docs/internals/midscene-bedrock-sigv4-signing.md`](../../docs/internals/midscene-bedrock-sigv4-signing.md)
 
 > **历史事实已变**：2026-06 实测 Bedrock 上的 gpt-5.5 不支持 chat-completions，据此把 GPT 系排除在主力模型之外（[ADR 0002](../../docs/adr/0002-midscene-not-driven-by-gpt55.md)，Status 已 Superseded-by 0044）；2026-09 实查 GPT-5.6 与 GPT-6 经 inference profile 支持 `/openai/v1/chat/completions` 且视觉通道可用，默认因此改为 GPT-5.6 Terra、family 取 `gpt-5`；对 GPT 系的排除结论随之作废。Qwen3-VL 仍是 `MIDSCENE_MODEL_ID` 的可选值（选型历史见 [ADR 0003](../../docs/adr/0003-midscene-grounding-qwen3vl-bedrock.md)）。
 
@@ -36,7 +36,7 @@ src/
 ├── worker/            ← 薄 worker：`run-scope.mts`（派发 / 会话 / 事件 / 信号收尾 / 两个非 job 入口的分派）、`deterministic.mts`（确定性注册表）、`deterministic.steps.mts`（内建脚手架）、`user-steps.mts`（使用方 steps 加载）、`argument.mts`（step 多行参数拼接：DataTable/DocString → 附加文本；两引擎须同一拼法）、`evidence.mts`（step 级机读证据：引擎 dump 裁剪为 evidence.json 供 explain 消费，[ADR 0042](../../docs/adr/0042-step-evidence-and-explain.md)）、`error-text.mts`（失败原因压缩为一行有界文本，与 Nova 的 `_error_text` 规则一致）；本目录下还有各模块的 `*.test.mts` 与测试夹具 `fixtures/`
 └── lib/               ← I/O 边缘组件：`job-source.mts`（job 入口）· `event-sink.mts`（事件出口）· `artifact-upload.mts`（产物上传）· `agentcore-sigv4.mts`（SigV4 与模型常量）
 dist/                  ← tsc 产物（*.mjs + *.d.mts），发布物；不入库
-spikes/                ← 五段式自检脚本（不进包、不编译）
+spikes/                ← 分段自检脚本（不进包、不编译）：01 到 05 为桌面链路（模型连接、浏览器连接、合体、规划探针、否定断言），06 为移动真机方向的 Device Farm 加 Appium 探针
 ```
 
 测试都是 `src/**/*.test.mts`，按 tsconfig 的 `exclude` 不进 `dist`。**但测试并非一律与源码同目录**：`lib/` 四个模块的测试（`agentcore-sigv4.test.mts` / `artifact-upload.test.mts` / `event-sink.test.mts` / `job-source.test.mts`）与夹具 `fixtures/` 都落在 `src/worker/` 下，新增测试沿用该位置，不另起 `src/lib/*.test.mts`。

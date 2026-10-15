@@ -11,7 +11,7 @@
 
 **接线要点（与文档/直觉相悖，务必照抄）**：
 - 路径用 `bedrock-runtime` 的 `/openai/v1`，**不是**裸 `/v1`，**不是** `bedrock-mantle`。
-- family `qwen3-vl`：代码经 `opts.modelConfig` 传 `MIDSCENE_MODEL_FAMILY`（按模型 id 推断或 env 显式给，[0044](./0044-engine-model-selection-and-override.md) 决策 2）；曾用 legacy 开关 `MIDSCENE_USE_QWEN3_VL=true`（`SIGV4-FETCH-RECIPE.md` 里仍是旧写法），两者在 SDK 内等价。
+- family `qwen3-vl`：代码经 `opts.modelConfig` 传 `MIDSCENE_MODEL_FAMILY`（按模型 id 推断或 env 显式给，[0044](./0044-engine-model-selection-and-override.md) 决策 2）；曾用 legacy 开关 `MIDSCENE_USE_QWEN3_VL=true`，两者在 SDK 内等价。
 - gpt-5.5 连可选 planner 都当不了（Midscene 无 Responses 路径），**直接弃用**，别留在任何 `MIDSCENE_*_MODEL_*` 槽位。
 
 **已在本账号实测（2026-06-22）**：用 IAM/SigV4 凭证向 `bedrock-runtime.us-west-2.amazonaws.com/openai/v1/chat/completions` 发真实请求，`qwen.qwen3-vl-235b-a22b` 返回 HTTP 200。证实：模型访问已授予、chat-completions 协议可用、在本账号 region 可达。

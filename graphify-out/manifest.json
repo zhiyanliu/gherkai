@@ -355,8 +355,8 @@
     "semantic_hash": "0c57d7d1c7e717ce5e58fa830b85f12c"
   },
   "docs/adr/0022-bdd-runner-retired-core-parses-thin-worker.md": {
-    "mtime": 1792027846.7281983,
-    "ast_hash": "764a1b3882b3c6334676703aeabebdc7",
+    "mtime": 1792028378.8092313,
+    "ast_hash": "be9deab7270def19a868ef20829a4c72",
     "semantic_hash": ""
   },
   "docs/adr/0023-novaact-acting-python-locked-no-ts-core.md": {
