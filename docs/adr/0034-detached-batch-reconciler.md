@@ -1,6 +1,6 @@
 # 无状态批量运行：CLI 提交 → 事件驱动推进 → 轮询收集（CQRS + reconciler）
 
-> **Status:** Accepted —— **已全部实装、local+cloud 两路端到端真部署真跑通**（落点横跨 core `project`/`reconcile`、cli `submit`/`status`、runtime `detached`、`deploy_aws` 的三 Lambda 与 Stream/EventBridge；真实 AWS 账户/us-east-1 真跑：local submit→per-run 推进→passed，cloud submit→kicker 冷启动→事件驱动链→passed，含卡死救活真验）。纠正 [0016](./0016-execution-architecture-core-lib-run-model.md)「无状态化=加 adapter+换注入、核心不动」对本能力的过强断言（见下「对 0016 的纠正」；0016/0024/0026/0031 已同步标 Partially-superseded-by 本 ADR，0030 标其「重议」条已由本 ADR 落地）。
+> **Status:** Partially-superseded-by 0051 —— [0051](./0051-device-session-lifecycle-and-app-distribution.md) 点名改写三处：机制二 `exit==0` 一行（改为先看 `scope_done.status` 与 scenario 判定集，终结判定收进两条归约路径共用的终结函数与真值表）、「job timeout」节的 worker 消费条与 `--default-job-timeout` 的 flag 承诺（worker 只为自检读墙钟预算；设备 scope 有目标缺省与下限）、停止后的事件消费（停止后仍有界归约完整事件流）；其余条文不变。被改写的部分（终结函数与真值表、设备 scope 的缺省墙钟与下限、worker 读 `timeoutS` 自检）随 1.5 实施；1.4 范围内的条文**已全部实装、local+cloud 两路端到端真部署真跑通**（落点横跨 core `project`/`reconcile`、cli `submit`/`status`、runtime `detached`、`deploy_aws` 的三 Lambda 与 Stream/EventBridge；真实 AWS 账户/us-east-1 真跑：local submit→per-run 推进→passed，cloud submit→kicker 冷启动→事件驱动链→passed，含卡死救活真验）。纠正 [0016](./0016-execution-architecture-core-lib-run-model.md)「无状态化=加 adapter+换注入、核心不动」对本能力的过强断言（见下「对 0016 的纠正」；0016/0024/0026/0031 已同步标 Partially-superseded-by 本 ADR，0030 标其「重议」条已由本 ADR 落地）。
 
 同步 `run` 是**「CLI 阻塞跑一批」**：组合根同进程 `schedule()` 持 `ThreadPoolExecutor`、`as_completed` 收敛到全批完成才返回。本 ADR 落地的产品项（曾是产品线唯一未做项、非加固）= **「CLI 提交完就走、异步收集」**（[0016](./0016-execution-architecture-core-lib-run-model.md) v1.2 已完成 + [0017](./0017-cloud-execution-fargate-over-runtime.md) batch shape）——新增 `submit`/`status` 命令、同步 `run` 保留不变。本 ADR 定这套无状态批量运行的架构、数据模型、并发/写序不变量与被拒方案护栏。
 
@@ -144,18 +144,42 @@ per-run 进程（观察者+reconciler 三合一）：spawn worker 子进程
 
 **「两件都要」（[0024](./0024-worker-core-protocol.md) 终止契约）在 reconciler 里成为对事件日志的纯谓词**——但**「内容完整（scope_done）」只对声称成功（exit==0）的进程要求**（真跑 crash worker 逼出的精确化）：
 
-- **`task_exited` 且 exit≠0（崩溃/网络故障退出码 80/SIGKILL）→ ERROR 终态，不等 `scope_done`**：worker 崩了根本没机会发 `scope_done`，此时**进程非干净终止本身就是终态信号**。若仍死等 `scope_done`，crash job 永远 RUNNING、reconciler 死循环（真跑 crash worker 复现，回归护栏 `core/tests/test_project.py::test_crash_no_scope_done_nonzero_exit_is_error`）。这一分支也覆盖「发完 scope_done 又非 0 退出」的误报 PASSED（exit≠0 一律 error，不看内容）。
-- **`task_exited` 且 exit==0 → 要求 `scope_done`**：干净退出才谈「内容完整」。有 `scope_done` → scenario 归约终态（passed/failed/error）；干净退出却没 `scope_done`（矛盾：进程说成功、内容没发完）→ ERROR（judged error 比死循环安全）。
+- **`task_exited` 且 exit≠0（崩溃/网络故障退出码 80/SIGKILL）→ ERROR 终态，不等 `scope_done`**：worker 崩了根本没机会发 `scope_done`，此时**进程非干净终止本身就是终态信号**。若仍死等 `scope_done`，crash job 永远 RUNNING、reconciler 死循环（真跑 crash worker 复现，回归护栏 `core/tests/test_project.py::test_crash_no_scope_done_nonzero_exit_is_error`）。这一分支也覆盖「发完 scope_done 又非 0 退出」的误报 PASSED（exit≠0 一律 error，不看内容；唯推进器已主动中止的 job 按下「终结函数与真值表」先判 timeout 或 aborted）。
+- **`task_exited` 且 exit==0 → 要求 `scope_done`**：干净退出才谈「内容完整」。有 `scope_done` → 先看 `scope_done.status`（为 error 即 ERROR，归因按下表：未确认集非空为 `release_failed`、否则取其 `errorType`；它承载 worker 报告的执行前失败与执行中途的会话丢失，[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 4），再看 scenario 判定集（为空即 ERROR，消息「worker 未报告任何 scenario 判定」——否则 `_aggregate([])` 把零 scenario 的 `scope_done` 判成 PASSED），再 scenario 归约终态（passed/failed/error）；干净退出却没 `scope_done`（矛盾：进程说成功、内容没发完）→ ERROR（judged error 比死循环安全）。完整的判定顺序见下「终结函数与真值表」。
 - **`task_exited` 且退出码未知（观察者没能取到 exitCode）→ ERROR 终态**：STOPPED 事件是观察者的**唯一一次机会**（ECS 不会为补齐退出码再发一次事件），「等观察者补」在事件驱动模型里结构上不存在；退出码未知即不可判定为通过，判 error 比无界等待安全（观察者侧落哨兵退出码，见下「退出码缺失」条）。
-- **无 `task_exited`（进程还没终止）→ RUNNING（见了 scope_started）/ PENDING（还没起）**。
+- **无 `task_exited`（进程还没终止）→ RUNNING（见了 `session_opened` 或 `scope_started`）/ PENDING（还没起）**：设备 scope 在 `scope_started` 之前先发 `session_opened`（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 4），取设备期间 job 即算 RUNNING。
 
-即：**进程终止（exit≠0）优先于内容完整判终态**；只有干净退出（exit==0）才回到「scope_done ∧ exit」的两件都要（实现见 `core.project._job_status`）。
+即：**进程终止（exit≠0）优先于内容完整判终态**；只有干净退出（exit==0）才回到「scope_done ∧ exit」的两件都要（实现见 `core.project._job_status`）。推进器的主动停止判定（超时、fail-fast 中止）又优先于两者，完整顺序见下「终结函数与真值表」。
 
 **`task_exited` 的判定不设「已见 scope_started」前置**（code-health 对抗验证逼出的精确化）：上表按「有无 task_exited」为一级键——**零事件 + exit==0**（构造期 SIGTERM → flag-only handler 构造完成即 `return 0`，[0024](./0024-worker-core-protocol.md) 设计内行为）与**零事件 + 退出码缺失**（TaskFailedToStart，如镜像拉取失败的 STOPPED 事件无 exitCode，观察者落哨兵）都必须走上表对应分支（两者皆 ERROR），**不得因「没见 scope_started」短路成 PENDING**——PENDING 与已 claim 的 RUNNING 基线单调合并后 job 永停 RUNNING、`plan_next` 既不提议也不 finalize、run 永不收敛（探针复现：4 轮 tick 不推进且 events 不再新增、永不自愈）。回归护栏 `core/tests/test_project.py` 的 exit-without-events 真值表用例。
 
 **launch 失败补偿——「起不来」也是一种进程终止（机制二的推论，code-health 对抗验证逼出）**：CAS 抢占成功后 `launcher.launch(job)` 可能抛异常（RunTask 放置失败/容量不足/task-def 配错/Popen OSError——其中 task-def 名配错是**确定性触发器**、每 job 必炸），此时 job 已被置 RUNNING 却永无 events、无 task_exited（进程根本没起、平台侧观察者无从观察）——若异常裸穿 tick，job 永停 RUNNING、整批不可恢复 wedge，且三触发源都救不回（「状态全持久、断点续」的可恢复性断言被推翻）；cloud 侧 Stream 重试还会因 job 已 running 而「成功」no-op、掩盖故障。**修法 = launch 的宿主（tick）扮演「起不来」这一时刻的退出观察者**：catch 异常 → `event_log.record_exit(scope_id, 非0哨兵码)` → 下轮重放走「exit≠0 → ERROR」既有谓词收敛终态。不发明新状态、不加重试（launch 级重试属 job 级重试的既有留口子）、异常不中断本 tick 其余 job（失败隔离，[0026](./0026-schedule-module.md)）。回归护栏 `core/tests/test_reconcile.py::test_launch_failure_does_not_wedge_run`。
 
 **退出码缺失：观察者落哨兵、不留宽限态（修正）**：本 ADR 最初把「STOPPED 但 exitCode 未落值」定义为有界宽限态（投影保守 RUNNING、观察者"短暂重查 DescribeTasks"兜底），根据是 [0024](./0024-worker-core-protocol.md) 记的 `lastStatus==STOPPED` 与 exitCode 落值非原子。**修正理由（code-health 对抗验证发现）**：①补齐退出码在事件驱动下没有第二次机会——ECS 对一个 task 只发一次 STOPPED 事件，观察者无 ECS 权限也不该有（薄 handler），所以宽限态在实装里是**无界**的；②容器根本没跑起来的形态（`stopCode=TaskFailedToStart`：拉不到镜像、缺 secret、放置失败）exitCode **必然**缺失，不是延迟而是永不——按旧表判 RUNNING 即 run 永久 wedge、三触发源都救不回。**决定**：观察者对缺 exitCode 的 STOPPED **一律落非 0 哨兵**（与上条 launch 失败补偿同一常量 `PLATFORM_FAILED_EXIT=255`，core 单点定义）并带 `reason`（`stopCode: stoppedReason`，随 `task_exited` 进事件日志、投影进 job message 让用户看到归因）；`_job_status` 对「有退出记录、非超时、退出码未知」判 ERROR（防御：老版本观察者或未知写者仍写 None 时不 wedge）。STOPPED 事件锚在 `stoppedAt`（已过落值窗口），正常退出必带退出码——实测 H1/H2 见地基实测节；哨兵只在容器没跑过时出现。**真跑坐实（坏镜像 tag 的 detached run）**：task-def 指向不存在的 ECR tag 提交 → STOPPED 事件 `stopCode=TaskFailedToStart`、无 exitCode → 观察者落 255 + reason → reconciler 一轮 tick 判 error 并 finalize，**提交后 2m15s run 到终态**，jobs/*.json 的 message 为「worker 未能启动或未正常结束（平台侧未取到退出码）：TaskFailedToStart: CannotPullContainerError: … not found」；同一场景在修正前的实装下 run 永久 RUNNING。**被拒**：给观察者加 DescribeTasks 重查/延迟重试——要加 ECS IAM 与调度机器，服务的却是一个实测从未出现、且对 TaskFailedToStart 无意义（永不落值）的形态。
+
+#### 终结函数与真值表
+
+**两条归约路径共用一个终结函数**：同步路径（`schedule` 的每 job 驱动）与无状态路径（`project` 的 `_reduce_scope`）都只调它，事件归约本身继续只累积事实、不下判定——判定逻辑分两处写必然漂移（同步路径曾在事件分支先判 timeout、异常与 EOF 分支先判 abort，两处顺序相反）。输入：
+
+- **`stop_reason ∈ {none, timeout, abort}`**：推进器的主动处置判定，不论是否实际发出了停止命令。**首次仲裁规则只有一条**：推进器第一次对该 job 作出停止决定的那一刻落定；若此刻 deadline 已过且 fail-fast 标志也已置，取 timeout（本 job 自己的预算事实比来自其他 job 的连带中止更具体，也是使用方能直接处置的原因）。`_stop_all` 批量中止时，对每个受影响的 job 在那一刻按同一规则当场落定（deadline 未过的记 abort）。同步路径把落定值写进 JobResult，之后任何分支不改写。无状态路径没有 fail-fast（`submit` 不提供该选项），`stop_reason` 只可能是 none 或 timeout：推进器在写退出记录时写入 `timed_out`，它有三个来源——deadline 到点处置后经观察链写入的退出记录、接力者在观察链丢失时直接落的记录（见「job timeout」节 `claimed_at` 条①）、cloud tick 在两个 task 列表都无踪时直写的记录——重放只读记录、不再仲裁。
+- **退出信息**（退出码，或未知）、**`scope_done` 及其 `status`**、**scenario 判定集**。
+- **未确认集 U**：发过 `session_opened` 而没有 `release: confirmed` 的 `session_closed` 的会话，按配对键（`sessionId`，没有时用会话名）计算；`origin: attempted` 的尝试永远不会被确认，天然在 U 里（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 4、5）。
+
+| 条件（按行序取第一个命中） | 判定 | 归因 |
+|---|---|---|
+| `stop_reason = timeout` | ERROR | `timeout` |
+| `stop_reason = abort` | ABORTED | 无 |
+| 退出码非零或未知 | ERROR | U 非空为 `release_failed`；否则退出码 80 为 `network_error`，其余为 `engine_error` |
+| 退出码 0，无 `scope_done` | ERROR | `engine_error` |
+| 退出码 0，`scope_done.status = error` | ERROR | U 非空为 `release_failed`，否则取 `scope_done.errorType` |
+| 退出码 0，`scope_done` 无 status，scenario 判定集为空 | ERROR | `engine_error`，消息「worker 未报告任何 scenario 判定」 |
+| 退出码 0，`scope_done` 无 status，判定集非空 | `_aggregate`（原规则） | U 非空（worker 违约）时改判 ERROR、`release_failed` |
+| 未退出 | 见过 `session_opened` 或 `scope_started` 为 RUNNING，否则 PENDING | |
+
+- **明细补全与判定分开**：明细只依据已收到的完成事实。收到 `scope_done.status = error` 即对 definition 中既无 `step_started` 也无 `step_skipped` 的 step 合成 `SKIPPED(shortcircuited=False)`、对无事件的 scenario 合成 scenario 级 SKIPPED（[0031](./0031-job-lifecycle-states-and-severity.md) 决定一、三、六）；之后到达的 timeout、abort 或非零退出只改变判定与归因，不撤销已合成的明细。没有收到 `scope_done` 时不合成；在途明细（有 `step_started` 无 `step_done` 的 step、有 `scenario_started` 无 `scenario_done` 的 scenario）不合成任何记录，保持缺记录状态，由 `explain` 表示「有现场可查」。
+- **U 非空时无论判定为何**，job message 追加产品语言提示「设备会话未能确认停止，可能仍在计费，请在设备控制台核对并手动停止」，并列出 U 中各项的会话名（`attempted` 的尝试只有名字可列，这正是使用方到控制台核对时需要的）。
+- **停止后继续有界消费完整事件流**：推进器作出停止决定后，仍把触发该决定的当前事件与后续事件全部归约，直到 EOF 或排空上界（宽限加余量）。同步路径曾先从迭代器取事件、再查 deadline、再归约，触发超时检查的那条事件本身没有被归约，停止后到达的 `session_closed` 也会丢失，使 U 算错；无状态路径重放全部已写事件，天然满足。
+- **双路径对拍是实施护栏**：同一组事件矩阵（前置 scope 级 error 加退出 0、scope 级 error 后超时、停止后到达的 `session_opened`、未确认的 `session_closed`、timeout 与 abort 同时成立（同步路径）、零 scenario 的 `scope_done`、接力者直接落 `timed_out`、cloud tick 对无踪 task 直写 `timed_out`、先判 abort 而收尾期间 deadline 才到仍为 abort、无 ARN 的未知 Create 加取消）输入两条路径，判定、归因与明细逐项相等。
 
 ### 机制三：`RunState` 投影写带 HWM 条件写（防并发 lost-update）
 
@@ -185,9 +209,9 @@ reconciler 逻辑上是「唯一写者」，**物理上是并发实例**（实�
 
 **产品语义**：job timeout 是用户对「一个 job 最多跑多久（墙钟，含启动开销）」的预算，属 run 的 definition、与推进方式（同步/detached）无关。此前它只在同步路径实现了一半（`--timeout` 是 ScheduleOpts 运行参数、不进 definition），detached 路径完全没有——local 挂死永 running、cloud task 无限跑、计费失控（经 grace 校准适用面复盘发现，[0032](./0032-fargate-execution-environment.md)「适用面注记」）。
 
-**两层声明、tag 优先**（复刻 `@engine`/`--default-engine` 同构模式，[0019](./0019-feature-tags-scope-and-engine.md) tag 体系扩展）：feature 层 scope 级 `@timeout:N`（秒，N>0，同 scope 声明不一致 → FeatureContractError——同 `@engine` 冲突先例；用例内容决定预算主体、QA/TE 在用例旁声明）+ CLI 层 `--default-job-timeout`（未标 tag 的 job 用它兜底；`<=0`=不超时）。**flag 命名两个前缀都承重**：`default-` 防「误当强制值、被 tag 覆盖时错愕」；`job-` 消歧对象（act 级 `ACT_TIMEOUT_S`/将来可能的 run 级总预算并存，留 `--default-run-timeout` 对称位）。原 `--timeout` 已改名、未留 alias。**先不做**（防过度设计）：run 级总墙钟预算；「CI 强制收紧压过 tag」层（真实冲突出现再议）。
+**两层声明、tag 优先**（复刻 `@engine`/`--default-engine` 同构模式，[0019](./0019-feature-tags-scope-and-engine.md) tag 体系扩展）：feature 层 scope 级 `@timeout:N`（秒，N>0，同 scope 声明不一致 → FeatureContractError——同 `@engine` 冲突先例；用例内容决定预算主体、QA/TE 在用例旁声明）+ CLI 层 `--default-job-timeout`。**覆盖顺序与校验顺序**（设备 scope 的缺省与下限见 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 2）：① 按来源取值：`@timeout:N` tag → 显式给出的 `--default-job-timeout`（选项、环境变量、配置文件任一来源；argparse 缺省为「未指定」哨兵，以区分内建 300 与显式给出的 300）→ 目标缺省（设备 scope 为获取预算加 900 秒，桌面为 300 秒）；② 非正的 `--default-job-timeout` 只表示「非设备 scope 不超时」，设备 scope 在这一步落到目标缺省、不被拒绝（设备 scope 不存在不超时）；归一化只接受有限数，拒绝 NaN 与 Infinity；③ 下限校验只对 tag 与显式正值：设备 scope 的值低于获取预算加 180 秒时抛 FeatureContractError、以退出码 2 结束，消息说明可能还没拿到设备就被判超时；目标缺省自身满足下限、不校验。900 与 180 是待校准的缺省策略，不是经验证的预算保证。**flag 命名两个前缀都承重**：`default-` 防「误当强制值、被 tag 覆盖时错愕」；`job-` 消歧对象（act 级 `ACT_TIMEOUT_S`/将来可能的 run 级总预算并存，留 `--default-run-timeout` 对称位）。原 `--timeout` 已改名、未留 alias。**先不做**（防过度设计）：run 级总墙钟预算；「CI 强制收紧压过 tag」层（真实冲突出现再议）。
 
-**载体 = definition**：两层在组合根解析定值后固化进 `Job.timeout_s`（None=不超时），随 RunMeta 持久化——推进器只认它，`ScheduleOpts.job_timeout_s` 退役（缺省解析在组合根一次完成，core 不复制两层逻辑）。worker 不消费 timeout（enforce 全在推进器侧，worker 只需继续守 flag-only 停止契约）。
+**载体 = definition**：两层声明与目标缺省在组合根（及 core 的 plan 层，按目标选用缺省与下限）解析定值后固化进 `Job.timeout_s`（None 表示不超时，设备 scope 不取此值），随 RunMeta 持久化——推进器只认它，`ScheduleOpts.job_timeout_s` 退役（组合根解析两层声明与显式值，plan 层按目标补缺省并校验下限，推进器只认 `Job.timeout_s`；两层声明的解析仍只在一处）。worker 不强制执行 timeout（到点处置全在推进器侧，worker 只需继续守 flag-only 停止契约）；唯一读取是建会话前把 Job 携带的墙钟预算（[0024](./0024-worker-core-protocol.md) worker 输入的 `timeoutS`）与能力自述的 `max_session_s` 比较作自检，不计时、不自停（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 2）。
 
 **enforce 统一形态 =「launch 时挂到点回调；到点若未终态则 stop；stop 后走既有退出观察链收敛」**，三路各自落地：
 
@@ -201,7 +225,7 @@ reconciler 逻辑上是「唯一写者」，**物理上是并发实例**（实�
 
 **武装先于 RunTask**：起 task 失败时 tick 会补偿 record_exit，但若补偿也失败（双失败）job 永停 RUNNING——先建的 schedule 到点仍收敛，最后兜底不因 launch 失败缺位；失败 launch 留下的 schedule 到点走 no-op/直接收敛并自动删，零残留。
 
-**`timed_out` 归因链**：`TaskExited.timed_out`（退出记录新字段，独立键空间内的属性、不动键结构）——local 由 launcher 标志传入；cloud 经 **StopTask 的 `reason` 参数原样出现在 STOPPED 事件 `detail.stoppedReason`** 这条现成通道传递（零新键空间/零新事件类型）。`_job_status` 见 timed_out → ERROR，`_reduce_scope` 归因 `error_type="timeout"`——与同步路径归因语义对齐（超时是主动中止、非引擎故障，但按 [0031](./0031-job-lifecycle-states-and-severity.md) 决定一超时记 error+timeout）。
+**`timed_out` 归因链**：`TaskExited.timed_out`（退出记录新字段，独立键空间内的属性、不动键结构）——local 由 launcher 标志传入；cloud 经 **StopTask 的 `reason` 参数原样出现在 STOPPED 事件 `detail.stoppedReason`** 这条现成通道传递（零新键空间/零新事件类型）。`timed_out` 有三个来源、同为终结函数的 `stop_reason = timeout`（见机制二「终结函数与真值表」）：deadline 到点处置后经观察链写入的退出记录；接力者在观察链丢失时直接落的 `timed_out`（见下 `claimed_at` 条①）；cloud tick 在 RUNNING 与 STOPPED 两个 task 列表都无踪时直写的 `timed_out`（见上执行方式表）。`_job_status` 见 timed_out → ERROR，`_reduce_scope` 归因 `error_type="timeout"`——与同步路径归因语义对齐（超时是主动中止、非引擎故障，但按 [0031](./0031-job-lifecycle-states-and-severity.md) 决定一超时记 error+timeout）。
 
 **`JobState.claimed_at`**（`try_claim_job` 时写，机制四扩展）：① local 接力（per-run 崩后 `status --wait`）据此恢复 deadline——自家新 claim 的 job 有 timer；**他人 claim、无 handle** 的 RUNNING job 超预算（+余量）且无退出记录 → 观察链已死（timer 随 owner 进程丢、worker 因 fd3 断管随之早亡）→ 直接 `record_exit(timed_out=True)` 收敛（不与下方被拒方案「处置者直接写 task_exited」冲突：那条拒的是**有活观察链时**绕过它；若 owner 尚活，其 timer 同一 deadline 早已触发、真退出记录同带 timed_out，后到覆盖归因不变）；② cloud tick 的**防御性顺带扫**——任何 tick 对 running 且 `now-claimed_at > timeout` 的 job 走同一超时处置（Scheduler 的双保险：CreateSchedule 失败/schedule 丢失时，后续任何事件触发的 tick 都能补救）；③ status 可显示已跑时长。timeout 从 claim 起算（含拉镜像等启动开销——简单可预期，文档写明）。
 

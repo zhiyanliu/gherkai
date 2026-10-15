@@ -1,6 +1,6 @@
 # 网络/SSL 瞬时错误的鲁棒性：两层重试 + network_error 分类（务实加固，非 enterprise resilience）
 
-> **Status:** Accepted
+> **Status:** Partially-superseded-by 0051 —— [0051](./0051-device-session-lifecycle-and-app-distribution.md) 为设备目标在六处作加法扩展并改写了被扩展的原句：「决定」总纲表（设备 worker 的退避不套用 4 次尝试、设备 job 不进 core 重试）、硬约束（Device Farm 的 Create 不可重放；只读原语的传输层重试例外，出处是 [0052](./0052-appium-interface-adapter-and-platform-differences.md) 决策 6）、core 层重试门槛（双条件改三条件）、关键不变量（预热失败与设备 worker 不用退出码 80）、会话血缘残留缺口、worker 层退避；其余条文不变。
 
 实测中 worker 建连（开 AgentCore 会话 / SigV4 握手 / CDP 连接）常遇 `ssl.SSLEOFError`（UNEXPECTED_EOF）
 等**网络瞬时故障**——一次抖动就让已产生费用的 job 直接废（worker returncode=1 → core 记 engine_error，零重试）。
@@ -11,8 +11,8 @@
 
 | 层 | 谁重试 | 重试什么 | 默认 |
 |---|---|---|---|
-| **① worker 内** | 两个引擎 worker 自己 | **仅建连/开会话段**（幂等、未产生副作用） | 开（4 次尝试） |
-| **② core/schedule** | schedule 对整个 job | 仅 `network_error` 且「会话未起」的 job 重新 spawn worker | **关**（`network_retry=0`） |
+| **① worker 内** | 两个引擎 worker 自己 | **仅建连/开会话段**（幂等、未产生副作用）；设备 worker 对 Device Farm 控制面与 Appium 建连的重试改在获取预算内手写退避，不套用 4 次尝试（见下「worker 层退避」） | 开（4 次尝试） |
+| **② core/schedule** | schedule 对整个 job | 仅 `network_error` 且「会话未起」且目标不是设备的 job 重新 spawn worker | **关**（`network_retry=0`） |
 
 两层职责分离:worker 层扛「单进程内的瞬时抖动」（最近故障点、最省）；core 层扛「worker 进程级失败」
 （spawn 后整体没起来）。乘积上界 = worker 4 × core(1+network_retry)，靠**小常量封顶**——
@@ -28,6 +28,8 @@
   **任何一方越过此点都永久退出重试域**。这是**结构性保证**,不靠「小心编码」。
 - 幂等性依据:建连段每个操作都可安全重放——`StartBrowserSession`（新会话）、`cdp_session`/SigV4 握手
   （无状态签名）、`connectOverCDP`（新连接）、`ensure_workflow_definition`（create-if-not-exists 幂等,[0004](./0004-novaact-iam-auth-via-workflow.md)）。
+- **执行期只读原语的传输层有界重试不在本节禁令之内**：它既不是建连重试也不是 act 重试；白名单与次数归 [0052](./0052-appium-interface-adapter-and-platform-differences.md) 决策 6。
+- **Device Farm 的 `CreateRemoteAccessSession` 不在可安全重放之列**：它没有幂等令牌，重放可能多建一个计费会话。设备 worker 对它关闭 SDK 自动重试，重试与孤儿核对归 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 3。
 
 ## network_error 分类:白名单具体瞬时类型
 
@@ -72,7 +74,7 @@ worker **按白名单匹配具体瞬时异常类型**,不用宽基类兜底:
 
 ## 关键不变量:退出码携带 network 信号
 
-建连失败**发生在任何事件 emit 之前**（`scope_started` 都没发,fd3 零事件）——worker 无法走事件通道告诉 core。
+桌面 worker 的建连失败**发生在任何事件 emit 之前**（`scope_started` 都没发,fd3 零事件）——此时没有事件通道可用；设备 worker 在执行前已有 `session_opened` 与 `scope_done` 作载体，不使用退出码（见下）。
 故用**专用退出码**作 out-of-band 信号:
 
 - **`EX_WORKER_NETWORK = 80`**（避开 POSIX sysexits 64-78 / shell 保留 126-128+n / 信号区）。
@@ -81,12 +83,14 @@ worker **按白名单匹配具体瞬时异常类型**,不用宽基类兜底:
 - 「退出码 → 异常」的翻译也在 `wire`（`raise_for_worker_exit(rc, code_label=...)`：80→`core.errors.WorkerNetworkError`、其余正非零→`RuntimeError`、退出码 0 或负值放行）——**两个 Engine adapter 共用这一份**，各自只负责从自己的传输里取退出码（子进程 `proc.wait()` 的 returncode / Fargate `DescribeTasks` 的 exitCode，`code_label` 只影响诊断措辞）;曾各写一份同构映射、靠「与另一文件同值」的注释维持一致。
   `schedule._Worker._run_once` 在 generic `except` **之前**加 `except WorkerNetworkError` → 记 `error_type="network_error"`。
 - **`WorkerNetworkError` 定义在 `core/gherkai_core/errors.py`,不在 adapter**——否则 schedule 反依赖 adapter（违反 ports 六边形）。
-- 会话已起后的瞬时网络错（罕见）仍走 `step_done`/`scope_done` 的 `errorType` 字段,不用退出码。**已兑现**：act 中途失败时两个引擎 worker 复用 `_is_transient_network`/`isTransientNetwork` 判定，网络瞬时 → 标 `network_error`（否则 `engine_error`）——**仅诊断分类、不触发重试/恢复**（act 不幂等；且 `saw_step=True` + 走 step_done 非退出码 80，schedule 双条件 AND 天然不重试）。"act 中途恢复"仍 defer（见下）。
+- **隧道预热失败不是建连失败**：不用退出码 80，经 `scope_done{status: error, errorType}` 传递（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 13）；设备 worker 不使用 80（worker 自判的执行前失败走 `scope_done` 的 scope 级判定；获取期间收到停止信号的终结不发 `scope_done`，判定由推进器的停止原因给出，见 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 4、5）。
+- 会话已起后的瞬时网络错（罕见）仍走 `step_done`/`scope_done` 的 `errorType` 字段,不用退出码。**已兑现**：act 中途失败时两个引擎 worker 复用 `_is_transient_network`/`isTransientNetwork` 判定，网络瞬时 → 标 `network_error`（否则 `engine_error`）——**仅诊断分类、不触发重试/恢复**（act 不幂等；且 `saw_step=True` + 走 step_done 非退出码 80，schedule 重试门槛的 AND 条件天然不满足、不重试）。"act 中途恢复"仍 defer（见下）。
 
 ## worker 层退避
 
 - **手写指数退避**（`[0.5, 1, 2]s`,4 次尝试,总 ~3.5s < schedule 默认 grace 5s）——**不用 botocore/urllib3
   内部 retry**:① 停止信号要能穿透退避;② 重试面可审计、有界。
+- **设备 worker 同理**：对 Device Farm 控制面调用关闭 SDK 自动重试（`maxAttempts = 1`）、每次调用显式请求超时，退避同样手写、停止信号可穿透；退避在获取预算内进行，不套用本节的 4 次尝试常量（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 2、3）。
 - **停止信号穿透退避的机制**（随 [0024](./0024-worker-core-protocol.md) flag-only 中断模型更新）:退避用 `_stop.wait(backoff)`（`threading.Event.wait` 带超时）而非 `time.sleep(backoff)`——SIGTERM/SIGINT handler `set` 标志后 `wait` **立即返回**（实测 flag-only 下 `time.sleep` 不被打断、`Event.wait` 0.3s 内醒；PEP 475）。**被拒**：旧机制靠「`time.sleep` 被信号 handler 的 raise 打断」——已随 handler 去 raise 废弃（handler 不再 raise，`time.sleep` 会跑满，见 [0024](./0024-worker-core-protocol.md) 被拒方案）。
 - 每次 attempt 用**全新**建连对象:Nova 新 `provider`+`cdp_session`+`NovaAct`（with `__exit__` 清掉本次部分会话）;
   Midscene 每次 attempt 失败先 `cleanup()` 释放本次可能已建的会话 + 重置 `browser`/`sessionId`。
@@ -105,7 +109,7 @@ worker **按白名单匹配具体瞬时异常类型**,不用宽基类兜底:
 - core 层退避公式：第 N 次重试前 sleep `min(2.0 × attempt, 4.0)` 秒（attempt 1→2s、2→4s、3+→封顶 4s），
   与 worker 层退避（`[0.5,1,2]s`,见上）相互独立、各管各层。退避秒数硬编码在调用点（固定 core 行为,非可配项;
   仅 `retry_sleep` 本身可注入以便单测）。
-- 重试门槛**双条件 AND**:`error_type == "network_error"` AND **本次零 `step_done`**（`saw_step=False`,证明会话未起、act 没跑、无副作用）。
+- 重试门槛**三条件 AND**:`error_type == "network_error"` AND **本次零 `step_done`**（`saw_step=False`,证明会话未起、act 没跑、无副作用）AND **job 目标不是设备**（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 2：设备 worker 在获取预算内手写退避、不使用退出码 80，core 重新拉起 worker 会重付取设备开销）。
 - **fail_fast / timeout 优先级高于 network 重试**:它们已主动中止 job,不再重跑。
 - `schedule._Worker.run` 包重试循环,`_run_once` 返回 `(JobResult, is_network, saw_step)`;对 schedule 主循环透明（先跑完所有 attempt 得终值,再交 fail_fast 判定）。
 - `Job.timeout_s` deadline **跨 attempt 不重置**（覆盖所有 attempt 之和,否则重试绕过超时）。预算载体在 definition（`@timeout:N` tag 或 `--default-job-timeout` 定值,见 [0034](./0034-detached-batch-reconciler.md)「job timeout」节）。设了预算的 CI 须满足 `Job.timeout_s > (network_retry+1) × (worker 退避预算 + 单次建连时间)`。
@@ -117,8 +121,9 @@ worker **按白名单匹配具体瞬时异常类型**,不用宽基类兜底:
 - **会话血缘随首事件回传**:`session_id` 原仅由 `scope_done` 携带——worker 被超时/SIGTERM 中途打断时 `scope_done` 从不 emit，core 侧 `run_state` 该 job 的 `session_id=null`，**会话明明已起却记不到血缘**（诊断/计费断线，正是上面静默超时场景的伴生缺口）。修复：worker 在 **`scope_started`** 即带 `sessionId` 回传（会话一起就报），schedule 的 `_reduce` 在 `ScopeStarted` 分支也捕获它；`scope_done` 仍带（冗余兜底）。`ScopeStarted` 协议加 optional `session_id` 字段。
   - **残留缺口：「会话已起 ⟷ `scope_started` 已 emit」之间仍有窗口（真跑暴露，defer 记录）**——上面「提前到 `scope_started`」的修复**假设这个时间差可忽略，但对 Nova 建连崩溃不成立**。Nova 的 `session_id` 由 `nova.get_session_id()` 取，而它**要 `with NovaAct.__enter__` 成功后才拿得到**；会话却在 `__enter__` **内部**（`start_browser_session` 成功）就已建立、开始计费。若崩在 `__enter__` 内（如 `CDPSession.send` 撞网络断 → `StartFailed`，即上「建连阶段的下游症状异常」条的 `TargetClosedError` 场景），worker **连 `get_session_id()` 都没执行到、更没 emit `scope_started`** → core 侧 `session_id=null`。**实测**：Nova 日志明写 `AgentCore browser session started: session=…`（会话真起、真计费），但 `run_state` 该 job `session_id=null`——**花了钱的会话血缘丢失**，排查/审计找不到它。
     - **为何「建连阶段识别 TargetClosedError」那条修复不连带解决它**：那条让此类故障归 `network_error` 并触发建连重试，但**重试耗尽后仍崩在 `__enter__` 内**——每个 attempt 都拿不到 id，最终血缘照样 null（那条修的是分类/重试，不是血缘回传，两者正交）。
-    - **未来方向（要动协议，defer）**：真修需让 worker 在会话建立成功的更早点 out-of-band 上报 session_id（不等 `scope_done`）——现已提前到 `scope_started`（见上），进一步可走早于 `scope_started` 的带外信号（`session_opened` 事件 / 类似退出码 80）。**血缘回传越早、未来若做主动 reaper 能兜的窗口越大**——但不做 reaper（泄漏靠 AgentCore session TTL 兜底，见 [0024](./0024-worker-core-protocol.md)「已接受代价」），故此增强也 defer。
+    - **未来方向（要动协议，defer）**：真修需让 worker 在会话建立成功的更早点 out-of-band 上报 session_id（不等 `scope_done`）——现已提前到 `scope_started`（见上），进一步可走早于 `scope_started` 的带外信号（`session_opened` 事件已由 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 4 加入协议、目前只有设备 worker 发出；桌面 Nova 改发它仍受下条 SDK 限制，桌面 Midscene 在 `StartBrowserSession` 返回后即持有 id、改发即可消除此窗口，目前未做）。**血缘回传越早、未来若做主动 reaper 能兜的窗口越大**——但不做 reaper（泄漏靠 AgentCore session TTL 兜底，见 [0024](./0024-worker-core-protocol.md)「已接受代价」），故此增强也 defer。
       - **SDK 硬限制（不因决策改变的事实）**：`get_session_id()` 与 `__enter__` 内已建立、已计费的时序见上。故 worker 层**拿不到「`__enter__` 内部那一刻」的 id**（SDK 私有）——血缘上报只能提前到 `__enter__` 返回后，**能缩小、但无法消除**「会话已计费而血缘 null」的窗口。真正消除需 SDK 暴露 early hook 或 core 侧从 CloudWatch 捞——超本 ADR 范围。
+    - **设备会话的血缘另有载体**：由 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 4 的 `session_opened` 在 `CreateRemoteAccessSession` 返回后即回传（早于一切长耗时动作）；ARN 未知的创建尝试以会话名承载血缘（0051 决策 3）。该缺口因此只剩桌面两种：Nova 受 SDK 限制，Midscene 改发 `session_opened` 即可消除、目前未做。
 - **Midscene SIGTERM 会话泄漏两窗口已根治**:
   - **重试放大的 in-flight 会话窗口**:会话跟踪从「单一 `sessionId` 快照」重构为**待清理会话集**——每次 `StartBrowserSession` 成功即把 id 入集（含被重试丢弃的中间 attempt 会话），cleanup 遍历集逐个 Stop。彻底解决「重试时 sessionId 被后一 attempt 覆盖/置空 → handler 只能 Stop 当前快照、漏掉在途/已弃会话」。剩余仅「Start 已发 RPC 但 id 未返回」一瞬，由一个在途标记 + 短暂兜底等待覆盖。
   - **`StopBrowserSession` 超 `grace_period`**:每个 Stop 套超时预算（挂死即放弃、记 `cleanupFailed` 让泄漏可观测，不被 SIGKILL 打断到一半）；cleanup **并行** Stop（`Promise.all` 而非串行）——否则重试积累的 N 个泄漏会话串行会把 cleanup 拖过 grace 被 SIGKILL 截断（正是本修复要防的泄漏）。并行后最坏 cleanup 墙钟与会话数无关、< cli 默认 grace。常量值与算术见 `engines/midscene/src/worker/run-scope.mts`（代码为准，ADR 不复制以免漂移）。

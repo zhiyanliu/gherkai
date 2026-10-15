@@ -7,13 +7,17 @@
 ## 接口（深模块，小）
 
 ```
-plan(features: [{uri, text}], config: {defaultEngine, defaultAssertionVotes, defaultJobTimeout}, *, select?: (ParsedScenario, scopeId) -> bool) -> Job[]
+plan(features: [{uri, text}], config: {defaultEngine, defaultAssertionVotes,
+                                      defaultJobTimeout,        // 显式给出的 --default-job-timeout；未指定为 null
+                                      defaultDeviceJobTimeout,  // 设备 scope 的缺省墙钟，CLI 按获取预算算出传入
+                                      minDeviceJobTimeout},     // 设备 scope 的墙钟下限，同上
+     *, select?: (ParsedScenario, scopeId) -> bool) -> Job[]
 
 Job = {
   scopeId, scopeName, engine, assertionVotes,   // votes 维度语义权威在 ADR 0014，本模块只透传
-  timeoutS,                                     // job 墙钟预算秒（null=不超时）；tag 语义权威在 ADR 0019、
+  timeoutS,                                     // job 墙钟预算秒（null=不超时，仅非设备 scope；设备 scope 恒为有限正数）；tag 语义权威在 ADR 0019、
                                                 // 设计取舍与三路 enforce 在 ADR 0034，本模块只解析 + 校验；
-                                                // 属 definition 层、不进 worker 的 job line（worker 不消费 timeoutS）
+                                                // 属 definition 层；1.5 起作为可选键进 worker 的 job line，只供建会话前与 max_session_s 比较作自检（ADR 0051）
   scenarios: [
     { id, name, steps: [ { index, keyword, text, argument? } ] }
   ]
@@ -21,7 +25,7 @@ Job = {
 ```
 
 - **接受 feature 内容（`{uri, text}`）而非路径** → core 不碰文件系统（skill：accept dependencies, don't create them），纯数据 in / 纯数据 out，可被 test 直接喂字符串。读文件是组合根/CLI 的事。
-- **输出 `Job[]` 承载 [0024](./0024-worker-core-protocol.md) 协议输入的全部内容（definition 层的 `timeoutS` 除外，不上线）**：一个 Job = 一个 scope = 一个会话边界 = schedule 交给单个 worker 的活。
+- **输出 `Job[]` 承载 [0024](./0024-worker-core-protocol.md) 协议输入的全部内容（`timeoutS` 以可选键上线，只供 worker 自检，见 0024 与 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 2）**：一个 Job = 一个 scope = 一个会话边界 = schedule 交给单个 worker 的活。
 - **`select` 谓词（可选，[0041](./0041-agent-facing-cli-affordances.md) 决策一追加）**：scenario 筛选施加在**分组与 engine/timeout 解析之后、Job 组装之前**。不变量：**筛选只减少「跑哪几条」**——scope 的引擎、墙钟预算、会话身份一律按**全量**成员解析，与不筛时逐字一致；整组被筛空的 scope 不进任何 job（且在解析 engine/timeout 之前跳过），`_scope_key` 仍对全量成员校验。`None` = 不筛，下文其余语义均按不筛描述；谓词由调用方组装，core 不认 flag 语义——`--scope/--tags/--scenario` 的语义、设计取舍与被拒方案见 [0041](./0041-agent-facing-cli-affordances.md) 决策一。
 - **删除测试**：删掉本模块，「按 tag 分组 + engine 校验 + Gherkin 展开」会在 CLI / 未来 WebUI 各写一遍 → 它在挣钱。
 
@@ -70,7 +74,8 @@ Job = {
 ### timeout 解析（scope 级，规则同 [0019](./0019-feature-tags-scope-and-engine.md)）
 
 本模块兑现 job 墙钟预算（`@timeout:N`）解析的校验实现，与 engine 解析同构；tag 语义权威在 [0019](./0019-feature-tags-scope-and-engine.md)、两层设计取舍与三路 enforce 在 [0034](./0034-detached-batch-reconciler.md)「job timeout」节，本模块只解析定值、填进 `Job.timeoutS`：
-- 整 scope 未标 `@timeout` → 用 `config.defaultJobTimeout`（未给 = 不超时）；
+- 整 scope 未标 `@timeout` → 用显式给出的 `config.defaultJobTimeout`；显式值缺失或非正时，非设备 scope 不超时，设备 scope 取 `config.defaultDeviceJobTimeout`、不报错（设备 scope 不存在「不超时」）；
+- 设备 scope 的 tag 或显式正值低于 `config.minDeviceJobTimeout` → 报错（可能还没拿到设备就被判超时）；目标缺省自身不校验。两个设备数值由 CLI 算出传入，覆盖顺序与数值归 [0034](./0034-detached-batch-reconciler.md)「job timeout」节与 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 2，本模块不复述；
 - scope 内任一 scenario 标了 → 全 scope 继承；
 - 同 scope 多个不同 `@timeout` 值 → 报错拒运行（一个 job = 一个预算，同 engine 冲突先例）；
 - 值非**有限正数**（非数字 / `<=0` / `nan` / `inf`）→ 报错（「标了 tag 却想不超时」不成立——删 tag 走缺省即可，不静默当无预算）。`nan`/`inf` 须**显式**拒：`float()` 收它们（`nan`/`inf`/`1e400` 都不抛）且都不满足 `<=0`，而三路推进器一律用 `>` 比较 deadline/预算——nan 让比较恒 False、inf 是无穷预算，两者都把「标了 tag」静默变成「永不超时」（校验器用 `math.isfinite` 拦）。
@@ -115,7 +120,7 @@ Job = {
 - 一个 scenario 多个不同 `@scope` 值（feature 级传播 + scenario 级）→ 报错；feature 级 `@scope` 传播（无冲突时）→ 正常归一个 scope；
 - scope 缺省 engine → 用 defaultEngine；scope 内任一 scenario 标了 → 全 scope 继承；
 - 同一 scope 多个不同 `@timeout` → 报错；`@timeout` 非数字 / `<=0` / `nan` / `inf`（含 `1e400` 溢出成 inf）→ 报错；
-- timeout 缺省兜底 + tag 优先（同一批里标了 `@timeout` 的 scope 走 tag、未标的走 `defaultJobTimeout`）；无 tag 又无缺省 → 不超时；
+- timeout 缺省兜底 + tag 优先（同一批里标了 `@timeout` 的 scope 走 tag、未标的走 `defaultJobTimeout`）；无 tag 又无显式值 → 非设备 scope 不超时、设备 scope 取设备缺省；设备 scope 遇非正显式值取设备缺省、不报错；设备 scope 的 tag 或显式值低于下限 → 报错；
 - 未标 scope 的 scenario → 各自独立成 job（含未标 scope 的 Outline → N 个 job 不撞 id）；
 - **`@scope` 的值撞未标 scope 的 scenario id → 报错**（同文件 / 跨文件、named 在前与在后共四种顺序都报，钉死判定与遍历顺序无关）；值等于某条**自身已标 `@scope`** 的 scenario 的 id → 不报错（钉死不误杀）；
 - 裸 `@scope:` / `@engine:` / `@timeout:`（空值）→ 报错，且消息带 `uri:line` 定位；

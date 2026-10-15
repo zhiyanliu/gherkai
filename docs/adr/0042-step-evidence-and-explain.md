@@ -1,6 +1,6 @@
 # 0042. step 级机读证据（evidence）与 `gherkai explain`
 
-> **Status:** Accepted（2026-09-11）—— 六项决策已实装并有护栏；两引擎在本机与云端两个后端的真跑证据见「验证」节；影响面所列反向链（0024 / 0027 / 0029 / 0032 / 0037 / 0041 / CONTEXT）已逐条落。后续修订：决策四的 `--step` 展开口径在 v1.4.2 发版验证后改为「显式 `--step` 即展开」（首版口径要求再加 `--all`、被判反直觉；见决策四「输入」段）。
+> **Status:** Accepted（2026-09-11）—— 六项决策已实装并有护栏；两引擎在本机与云端两个后端的真跑证据见「验证」节；影响面所列反向链（0024 / 0027 / 0029 / 0032 / 0037 / 0041 / CONTEXT）已逐条落。设备目标的例外由 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 8 引入并已在本篇原位登记：决策一（失败的确定性与导航 step 也产 evidence、schema 1 加设备键）、决策二（失败步的界面快照采集计入 job 墙钟）、决策四（scope 级 error 后合成的 SKIPPED 与 `step_kind`）、决策五（`device_session` 只作链接）。后续修订：决策四的 `--step` 展开口径在 v1.4.2 发版验证后改为「显式 `--step` 即展开」（首版口径要求再加 `--all`、被判反直觉；见决策四「输入」段）。
 
 ## 背景
 
@@ -24,7 +24,7 @@
 
 **谁产**：worker。引擎知识按 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)/[0027](./0027-runreport-aggregation-index.md) 只住 worker，而 step 结束那一刻 worker 手里有能拿到的全部材料：Nova 是本 step 各**正常返回**的 act 刚写盘的 trajectory json（抛错的 act 无 json，见背景表）；Midscene 是 `agent.dump.executions` 里本 step 新增的 execution（内存活对象，抛错的 task 仍在数组里、带 `errorMessage`）。**不是** CLI 事后去解析 SDK 产物（见被拒方案）。
 
-**产什么**：每个跑过 AI 的 step 一份 `evidence.json` + 若干截图文件，schema 由 gherkai 定义、两引擎格式相同。「act」在此指**一次 AI 调用**（Nova 的 `act`/`act_get`，Midscene 的一次 `ai*`），是 evidence 这份引擎侧产物的结构词，不是 domain model 的字段——与 0027「`act_count` 不进 model」不冲突。
+**产什么**：每个跑过 AI 的 step 一份 `evidence.json` + 若干截图文件，schema 由 gherkai 定义、两引擎格式相同。**设备目标的例外**（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 8）：判为 failed 或 error 的确定性与导航 step 也产一份（`acts: []`），passed 的不产；字段在 `schema_version` 1 上加键——`step_kind`（`ai` / `deterministic` / `navigation`）、顶层 `url` 与 `url_missing`（`no_web_context` / `not_applicable` / `timeout` / `error`）、`controls{items[{type, id, text, a11y_id}], total, truncated}` 与 `controls_missing`、`page_source`（独立文件的 URI，走截图的后台队列）与 `page_source_truncated`；控件摘要与原始控件树只在 failed / error step 上采集，由界面接缝在 step 末采好交给 evidence 模块（[0052](./0052-appium-interface-adapter-and-platform-differences.md) 决策 2），evidence 模块保持纯映射、不发 WebDriver 命令；`controls`、`page_source`（独立文件）与顶层 `url` 写盘前都经脱敏出口处理，规则同时覆盖 XML 实体转义形态（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 11）。「act」在此指**一次 AI 调用**（Nova 的 `act`/`act_get`，Midscene 的一次 `ai*`），是 evidence 这份引擎侧产物的结构词，不是 domain model 的字段——与 0027「`act_count` 不进 model」不冲突。
 
 ```jsonc
 {
@@ -39,7 +39,7 @@
       "index": 0,
       "prompt": "页面显示「登录成功」",         // gherkai 交给引擎的指令（step 文本 + 多行参数），不含 SDK 追加的输出格式样板
       "vote": true | false | null,               // 本次调用计入判定的那一票；null = 本 act 不是投票调用（When/Given 的动作）
-      "url": "https://…" | null,                 // 调用结束时的页面 URL（Nova = 末 frame 的 active_url；Midscene = worker 取 page.url()）；隧道模式下 userinfo 段已换成 ***（ADR 0035 决策 5，写盘前对整份 JSON 脱敏）
+      "url": "https://…" | null,                 // 调用结束时的页面 URL（Nova = 末 frame 的 active_url；Midscene = worker 取 page.url()）；写盘前对整份 JSON 经脱敏出口处理（ADR 0035 决策 5：userinfo 段、签名类查询参数与隧道令牌参数的值换成 ***）
       "frames": [                                // 引擎内部逐步观察-思考-动作；Nova = TrajectoryStep，Midscene = ExecutionTask
         { "url": "https://…" | null,             // 逐 frame URL 仅 Nova 有；Midscene 的 task 不带 URL → null
           "thought": "I am on the login page. … Returning false." | null,
@@ -64,7 +64,7 @@
 | act | 一个 trajectory 文件（一次 act / act_get；N 票断言 = N 个 act） | 一个 execution（一次 `aiAct` / `aiBoolean` / `aiQuery`） |
 | act.prompt | worker 自己构造的指令串（同送给 `act` 的那个）；**不取** json 的 `prompt`——`act_get` 时 SDK 在尾部追加了 `, format output with jsonschema: {...}` | worker 自己构造的指令串；`execution.name` 形如「Act - <指令>」「Boolean - <断言>」，是 SDK 展示名、不当真值 |
 | act.vote | `bool(r.matches_schema and r.parsed_response)`，与 `step_done` 的票源同一表达式（不要用 `result` 反推：模型回非 JSON 或不过 schema 时 `matches_schema=False` 记 no，而 return call 的 kwargs 里仍留着看似为真的原文） | `aiBoolean` 的返回值 |
-| act.url | 末 frame 的 `active_url` | step 末取一次 `page.url()`（同 step 各 act 共用；同一 step 内页面通常不变） |
+| act.url | 末 frame 的 `active_url` | step 末取一次 `page.url()`（同 step 各 act 共用；同一 step 内页面通常不变）；设备目标上由界面接缝采集的快照提供，无可用网页上下文时为 null 并以顶层 `url_missing` 说明（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 8） |
 | frame | `steps[i]` | `tasks[i]` |
 | frame.url | `steps[i].active_url` | null（`uiContext` 只有 shotSize / dpr / screenshot） |
 | frame.thought | `steps[i].program.calls` 中 `name == "think"` 的 `kwargs.value`（多个则换行拼接） | `tasks[i].thought` 非空则取之；否则回落 `tasks[i].output.thought`（真产物：`Insight/Boolean` 的推理在 `thought`，`Planning/Plan` 的推理在 `output.thought`；`Planning/Locate` 带空串、`Action Space/*` 无 → null，按值判非空） |
@@ -90,7 +90,7 @@ evidence 的抽取、落盘、上传任一环失败 → worker 日志一行、�
 
 **实现约束（否则「零影响」不成立）**：evidence 的抽取 / 落盘 / `to_report_ref` / 挂 ref 必须整体裹在自己的 try 里，且位于 step 的 act 异常分类路径**之外**——Nova `_run_step` 的外层 `except Exception` 会把 try 体内任何异常经 `_classify_act_error` 转成 `status="error"`，evidence 若裸放进去，一次上传抖动就把已成的 passed 判定翻成 network_error / engine_error。`to_report_ref` 自身的「失败即抛」契约不动，best-effort 由调用方 try + 日志实现，写法对齐两 worker 现有 scope 级 report 的兜法。**承诺边界**：best-effort 只覆盖 evidence 自身失败；S3 整体不可用时同 step 的 trajectory 上传按 0029 原规则仍报错 → 该 step 仍会变 error，本条不承诺那种场景下 step 保持 passed。
 
-代价：evidence.json 在 emit `step_done` 之前落盘并上传一次（小文件）；Nova 侧 passed step 多解一张 base64 图落盘，failed / error step 最多解 min(M, K × 票数) 张；Midscene 侧零解码（引用 SDK 已落盘文件）。每 step 增加的临界路径耗时为一次小文件 PutObject 加本地 IO；截图字节由后台队列在下个 step 期间上传，不占临界路径。
+代价：evidence.json 在 emit `step_done` 之前落盘并上传一次（小文件）；Nova 侧 passed step 多解一张 base64 图落盘，failed / error step 最多解 min(M, K × 票数) 张；Midscene 侧零解码（引用 SDK 已落盘文件）。每 step 增加的临界路径耗时为一次小文件 PutObject 加本地 IO；截图字节由后台队列在下个 step 期间上传，不占临界路径。**设备目标的例外**：failed / error step 在 `step_done` 之前多一次有界的界面快照采集（地址读取与控件摘要共用一个短预算，原始控件树只在此时取），这段时间按步累加计入 job 墙钟，用户文档写明；采集失败照本决策的 best-effort 处理，唯一例外是采集中发现会话丢失（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 4）。
 
 ### 三、`StepResult` 补 `message`，进 `jobs/*.json`
 
@@ -108,8 +108,8 @@ evidence 的抽取、落盘、上传任一环失败 → worker 日志一行、�
 
 **记录缺口的两种情形，分开表达**：
 
-- **JobResult 只含收到 `scenario_done` 的 scenario**——worker 被外部中止（超时 / fail-fast / 信号）时未完成的 scenario 不算判定、其 step 记录不进 `jobs/*.json`。explain 以 job 定义为骨架逐 scenario / 逐 step 渲染，无记录的 step 文本打「无记录（未执行或未上报）」、JSON 给 `status: null` + `record_missing: true`；无任何 step 记录的 job 单独渲染一段 job 判定块（status / error_type / message + job 级 report_refs + 「诊断细节见 worker 日志」）。被中止 job 里已跑完的 step 其 evidence 已产且已上传，但 ref 只在事件记录里；**本 ADR 不让 explain 读事件流**（compose 现只暴露三个 store，加事件接缝是另一件事），输出里提示「本 job 被中止，部分已执行 step 的证据未进判定记录」。
-- **step 有记录但无 evidence** → `evidence: null` + `evidence_missing: "no_ref" | "unreadable" | "unsupported_schema"`。`no_ref` 覆盖「确定性 / URL 导航 step 本就不产」、「AI 跑了但抽取失败」以及「无判定记录的 step」（没记录自然没指针、与 `record_missing` 同现）三种，结果树分不出前两种；文本打「无 AI 证据」。
+- **JobResult 只含收到 `scenario_done` 的 scenario，以及 scope 级 error 后由 core 合成的 scenario 级 SKIPPED**（worker 发 `scope_done{status: error}` 后，definition 中无事件的 scenario 与其 step 合成 `SKIPPED`、`shortcircuited=False`，[0031](./0031-job-lifecycle-states-and-severity.md) 决定一；文本打「未执行（scope 级错误，原因见 job 判定）」）——worker 被外部中止（超时 / fail-fast / 信号）时未完成的 scenario 不算判定、其 step 记录不进 `jobs/*.json`。explain 以 job 定义为骨架逐 scenario / 逐 step 渲染，无记录的 step 文本打「无记录（未执行或未上报）」、JSON 给 `status: null` + `record_missing: true`；无任何 step 记录的 job 单独渲染一段 job 判定块（status / error_type / message + job 级 report_refs + 「诊断细节见 worker 日志」）。被中止 job 里已跑完的 step 其 evidence 已产且已上传，但 ref 只在事件记录里；**本 ADR 不让 explain 读事件流**（compose 现只暴露三个 store，加事件接缝是另一件事），输出里提示「本 job 被中止，部分已执行 step 的证据未进判定记录」。
+- **step 有记录但无 evidence** → `evidence: null` + `evidence_missing: "no_ref" | "unreadable" | "unsupported_schema"`。`no_ref` 覆盖「确定性 / URL 导航 step 本就不产」（设备目标上 failed / error 的确定性或导航 step 缺 ref 则属抽取失败，[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 8）、「AI 跑了但抽取失败」以及「无判定记录的 step」（没记录自然没指针、与 `record_missing` 同现）三种，结果树分不出前两种；文本打「无 AI 证据」。设备 evidence 的 `step_kind` 让渲染层区分「无 act 是正常的」与「抽取丢了」。
 
 **未终态 run 分两种情形**：同步 `run` 中途可见已完成 job（逐 job 落 ResultStore），文本形态经 stderr 提示「run 仍在运行，以下为已完成部分」（stdout 只放核心产出，与 `status` 的提示规则一致）；`submit` 的 detached run（本地 per-run 进程与云端 reconciler 同一份 tick）在全 job 终态 finalize 时才一次性落 ResultStore，未终态时零文件——explain 退 0、只打一行「判定明细尚未落地，可先用各后端对应的 `status … --wait` 等到终态」，**提示里给出可原样跑通的整条命令**（local 带 `--report-dir`、cloud 带 `--backend cloud --prefix <已解析的 prefix>`）：只写 `status <run_id> --wait` 的简写在云端后端会落回本机后端、报「未找到 run」并把人引去查 `--report-dir`。让 detached run 中途可见需从事件流逐 scope 归约，属另一个决策。`--json` 下不打任何提示行（0041 决策三：stdout 只有一个 JSON 文档），机读侧靠顶层 `status` 自明。
 
@@ -153,7 +153,7 @@ run 20260910T080630Z-9fa261  status=failed
 ### 五、与 [0027](./0027-runreport-aggregation-index.md) 的关系：铁律不破，一条消费端规则按层收窄，一个留口子用对的方式填上
 
 - 铁律（`model / wire / schedule` 对 `ReportRef` 永久不透明搬运、永不解析产物内容、永不按 kind 分支）不变。新增的 `StepResult.message` 是搬事件里既有的字符串，不是解析产物。
-- 0027「消费端只当 URI 用、不 stat / open」写在皮层只打链接的年代，本 ADR 把它**按层收窄**：`model / wire / schedule / ReportStore` 永不 open / fetch / 改写 ref 不变；皮层侧（`compose.read_resource` 与 `explain`）**只对 gherkai 自有 schema 的 ref（`kind == "evidence"`）解引用**，对引擎原生产物（`report` / `trajectory` / `summary`）仍只当链接、永不解析。解引用许可绑在「内容是不是我们自己定义的 schema」上，不是「皮层就能随便打开产物」。0027 该条原地改写并反向链本 ADR。
+- 0027「消费端只当 URI 用、不 stat / open」写在皮层只打链接的年代，本 ADR 把它**按层收窄**：`model / wire / schedule / ReportStore` 永不 open / fetch / 改写 ref 不变；皮层侧（`compose.read_resource` 与 `explain`）**只对 gherkai 自有 schema 的 ref（`kind == "evidence"`）解引用**，对引擎原生产物（`report` / `trajectory` / `summary`）与设备会话的探测结论文件（`kind == "device_session"`，[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 8）仍只当链接、永不解析。解引用许可绑在「内容是不是我们自己定义的 schema」上，不是「皮层就能随便打开产物」。0027 该条原地改写并反向链本 ADR。
 - 0027 留口子「trajectory 内部结构化提取」由本 ADR 落地，位置是 **worker**（引擎知识的唯一住处）。0027 的 kind 例举补 `evidence`、「Midscene 保持 scope 级」改为「Midscene 的 report 仍 scope 级，evidence 下沉 step 级」、留口子条目标已落地。
 
 ### 六、SDK 版本钉死 + 格式漂移的防线
@@ -187,7 +187,7 @@ agent / skill 只依赖 evidence schema 与 `explain` 输出，两者都是我�
 - **断言时向模型要理由**（Nova `BOOL_SCHEMA` → `{result, reason}`、Midscene `aiBoolean` → 带 reason 的 `aiQuery`）：一行就知道为什么判否，但改了断言提问方式、影响判定质量与两引擎对标口径（[0010](./0010-spike-as-apples-to-apples-benchmark.md)、[0014](./0014-ai-first-assertions.md)），需单独 ADR + 真跑对比。先看 thought 文本够不够用。
 - **Nova error act 的现场截图**（失败点直接 `nova.page.screenshot()` + `page.url`）：可补上 Nova 侧 error step 的空 frames，但 CDP 断连类失败下该路径自身也不可用，仍是 best-effort；不混进映射表当既有来源，等 explain 用起来看是否真缺。
 - **explain 读事件流找回被中止 job 的 evidence ref**、**detached run 中途可见**：都要新的 core 接缝，各自另议（触发信号见下「重议闸门」）。
-- 确定性 step 的 evidence（当时 URL / 截图）：0027 另一留口子，本 ADR 不动。
+- 桌面确定性 step 的 evidence（当时 URL / 截图）：0027 另一留口子，本 ADR 不动；设备目标上判为 failed / error 的确定性与导航 step 产一份只含界面快照的 evidence，见决策一的设备例外。
 - 报告 index.html 内嵌渲染 evidence（截图缩略、thought 折叠）：皮层富渲染，等 explain 用起来再定形态。
 
 ## 已知缺口与重议闸门

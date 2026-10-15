@@ -1,6 +1,6 @@
 # job 生命周期态：skipped / aborted + severity 数值序
 
-> **Status:** Partially-superseded-by 0034 —— 生命周期态/severity/短路语义等**结论均不变**；变的是两处实现细节立场：① 决定五「退出码读内存 `RunResult` 终值」对**异步 submit（CLI 脱离）路径**不适用（脱离后无内存终值，判定退出码由 `status --wait` 读回终态 `RunState` 给出），见下决定五数据源的 ⚠️ 注；② 决定三的「`_aggregate` 只算一次 / 前置态过滤只是前向口子」被反转——无状态投影每轮 tick 全量重放调 `_aggregate`，前置态过滤在该路径**已承重**（决定三的**决策**本身反被印证、非被推翻）。两处均见 [0034](./0034-detached-batch-reconciler.md)。
+> **Status:** Partially-superseded-by 0034, 0051 —— [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 4 引入 scope 级 error 后做四处加法：决定一加 scenario 级合成 SKIPPED 与在途明细的显式规则，决定三加「合成的 scenario 级 SKIPPED 不进 `_aggregate`」，决定四加 `scope_done` 携带的 scope 级 `status`，决定六加 `shortcircuited=False` 的 step 级 SKIPPED。[0034](./0034-detached-batch-reconciler.md) 的改写如下：生命周期态/severity/短路语义等**结论均不变**；变的是两处实现细节立场：① 决定五「退出码读内存 `RunResult` 终值」对**异步 submit（CLI 脱离）路径**不适用（脱离后无内存终值，判定退出码由 `status --wait` 读回终态 `RunState` 给出），见下决定五数据源的 ⚠️ 注；② 决定三的「`_aggregate` 只算一次 / 前置态过滤只是前向口子」被反转——无状态投影每轮 tick 全量重放调 `_aggregate`，前置态过滤在该路径**已承重**（决定三的**决策**本身反被印证、非被推翻）。两处均见 [0034](./0034-detached-batch-reconciler.md)。
 
 给 `Status` 加两个 **core 派生态**——`skipped`（排队没起）与 `aborted`（跑一半被掐）——并定义一套
 **severity 数值序**，解决「`'error' < 'failed'` 字母序与严重度反向」的坑、并把 fail-fast 中止的 job 从
@@ -26,7 +26,7 @@ fail-fast（[0026](./0026-schedule-module.md)：任一 job error → 中止整�
 ```python
 class Status(str, Enum):
     PASSED = "passed"; FAILED = "failed"; ERROR = "error"
-    SKIPPED = "skipped"    # core 派生：fail-fast 下 worker 从未 spawn。没执行/没花钱/可无脑重跑。session_id 必 None
+    SKIPPED = "skipped"    # core 派生。job 级：fail-fast 下 worker 从未 spawn，没执行/没花钱/可无脑重跑，session_id 必 None；step 级与 scenario 级见决定六、决定一
     ABORTED = "aborted"    # core 派生：fail-fast 下跑一半被掐。有副作用/有现场可查。session_id 保留不清
 ```
 
@@ -43,20 +43,22 @@ class Status(str, Enum):
 > **network 重试耗尽的 job 也不是 skipped**：[0028](./0028-transient-network-ssl-resilience.md) 的 core 层 network 重试门槛是
 > 「network_error 且 `saw_step=False`」，耗尽后该 job 记 `error`。它同样 `saw_step=False`，但**已经开过会话/建连尝试（已计费）**——
 > `saw_step=False` 只表「可安全重试」、不表「没花钱/没起」。故它仍是 `error`、**正常进 run 级聚合**，不归 skipped/aborted。
-> skipped 的边界严格是「worker 从未 spawn」。
+> job 级 skipped 的边界严格是「worker 从未 spawn」。
 
 - **加进同一个 `Status` enum**（而非新开 enum）：`Status` 是 scenario/step/job/run **一切判定状态的统一承载**，
   `serialize` 全靠 `Status(d["status"])` round-trip、`index.html`/`render` 全靠 `status.value` 渲染——单点扩 enum
   即全链路自然识别。新开 enum 会让 `JobResult.status` 变 `Union`，serialize/render/html 全要分两套分支，破坏「status 单一类型」的深模块性质。
-- **它们是 core 在 fail-fast 路径派生赋的 job 级态，不是 worker 上报态**：worker 只在 `*_done` 事件报三态
-  （`passed`/`failed`/`error`，[0024](./0024-worker-core-protocol.md)）；skipped/aborted 由 `schedule` 在 worker 没起 / 已被掐时
-  本地构造 `JobResult` 时赋。故 aborted **只活在 job 级（scope 级）**；**skipped 后来下探到 step 级**（scope 内短路，见决定六），
-  但两级的 SKIPPED **都由 core 本地构造、永不经 `StepDone.status` 上报**（`step_skipped` 是独立事件、非 step_done 的 status 值）。
+- **它们是 core 派生态，不是 worker 上报态**：worker 只在 `step_done` / `scenario_done` 事件报三态
+  （`passed`/`failed`/`error`，[0024](./0024-worker-core-protocol.md)）；job 级 skipped/aborted 由 `schedule` 在 fail-fast 路径上、worker 没起 / 已被掐时
+  本地构造 `JobResult` 时赋。故 aborted **只活在 job 级（scope 级）**；**skipped 后来下探到 step 级**（scope 内短路，见决定六）**与 scenario 级**（见下「scenario 级 SKIPPED」条），
+  但各级的 SKIPPED **都由 core 本地构造、永不经 `StepDone.status` / `ScenarioDone.status` 上报**（`step_skipped` 是独立事件、非 step_done 的 status 值）。
+- **scenario 级 SKIPPED**：只由 core 在收到 `scope_done.status = error` 后，对 definition 中没有任何事件的 scenario 合成（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 4，job 判定归 [0034](./0034-detached-batch-reconciler.md) 机制二「终结函数与真值表」）。含义是「scope 未就绪或会话丢失，该 scenario 未执行」；它所在的 job 的判定按真值表给出，一般为 `error`，之后到达 fail-fast 中止时为 `aborted`。合成只依据已收到的完成事实，之后到达的超时、fail-fast 中止或非零退出只改变 job 判定与归因，不撤销已合成的明细；没有收到 `scope_done` 时不合成；在途 scenario（有 `scenario_started` 无 `scenario_done`）内尚未开始的 step 也不合成。
+- **在途明细的显式规则**：有 `step_started` 无 `step_done` 的 step、有 `scenario_started` 无 `scenario_done` 的 scenario，**不合成任何记录**，保持缺记录状态，由 `explain` 的 `record_missing` 表示「有现场可查」（[0042](./0042-step-evidence-and-explain.md)）。理由：这类明细已经开始执行、可能留下副作用，合成 SKIPPED 会把「执行过、结论未知」误写成「未执行」；job 级的 aborted 已经承载「被中止、先看现场」这一层含义，明细层不另立态。
 
 ## 决定一·补：`pending` / `running` —— 生命周期前置态，非判定状态
 
 实时写（[0030](./0030-realtime-persistence-seam.md)）需要两个**前置态**表示「还没出判定」：`pending`（run 开始时 `create_run` 把每个 job 摆这态）
-/ `running`（worker 起了、收到 `scope_started` 后刷这态）。它们和 skipped/aborted 一样**只活在 job 级（`JobState.status` / 进而 `RunState`）**、
+/ `running`（worker 起了、收到 `scope_started` 后刷这态）。它们和 aborted 一样**只活在 job 级（`JobState.status` / 进而 `RunState`）**、
 绝不进 `JobResult.status`（JobResult 是终态判定，只会是 passed/failed/error/skipped/aborted）、绝不进 wire。**不变量的强制点 = `project_full`**（detached 收尾聚合，[0034](./0034-detached-batch-reconciler.md)）：收尾快照里任一 job 仍非终态即抛、本轮不落任何判定真值（归约中间态用 JobResult 作载体不算违背——只有落库/上 wire 的那份受约束）；同步 run 路径由 schedule 的归约器天然只产终态。
 
 **承载方式**：加进同一个 `Status` enum（`PENDING="pending"` / `RUNNING="running"`），理由同 skipped/aborted（统一类型、serialize/render 单点识别）。
@@ -92,9 +94,9 @@ run 级（聚合用）：
 
 **视觉映射（severity 序在报告着色上的落法）**：每个终态各配一个可区分的颜色、**别走兜底灰**——`aborted` 要**比 error 更扎眼**（severity 最高、有现场最该被人看），且**别和兜底灰混**；`skipped` 用**弱化灰**（最轻、最该被无视），但须与兜底灰可分。否则新态全走兜底灰、aborted 看不出严重。（前置态 pending/running 另配「进行中」视觉，见决定一·补；落点符号见下「touch points」的 `_STATUS_COLOR`。）
 
-**为何 run 级不含 skipped/aborted**（验证过的关键洞察）：skipped/aborted **只在 fail-fast 路径产生**，
+**为何 run 级不含 skipped/aborted**（验证过的关键洞察）：job 级 skipped/aborted **只在 fail-fast 路径产生**，
 而 fail-fast 的唯一触发条件是「某 job 已经 `error`」——那个 error job 在 run 级聚合里已把 run 顶成 `error`。
-所以无论 skipped/aborted 怎么算，run 必为 error，它俩**根本不需要进 run 级比较**。它们是 job 级、单写者
+所以无论 skipped/aborted 怎么算，run 必为 error，它俩**根本不需要进 run 级比较**（scenario 级与 step 级的合成 SKIPPED——决定一、决定六——只出现在收到 `scope_done.status = error` 的 job 里，该 job 判为 error 或 aborted，同样不进 run 级比较）。它们是 job 级、单写者
 （fail-fast 主线程 / worker 自己一次写定终态）、**不参与 run 级单调升级**。
 
 ## 决定三：`_aggregate` 入口过滤 skipped/aborted（把正确性钉进函数，不靠外部不变量）
@@ -119,17 +121,20 @@ def _aggregate(statuses):
   一旦未来引入**非-fail-fast 的 skip**（如主动 `--skip`），「全 skipped 无 error」的 run 会被误判 `passed`。
   入口过滤把正确性钉死在 `_aggregate` 内、不依赖「skipped 必伴随 error」这个外部假设。
 - **scenario 内归约路径不改**（喂进去的全是 worker 三态，永不含 skipped/aborted）。
+- **合成的 scenario 级 SKIPPED 不喂给 `_aggregate`**（决定一）：它只进 JobResult 的明细，不进 scenario 判定集；该 job 的判定来自 [0034](./0034-detached-batch-reconciler.md) 机制二「终结函数与真值表」（`scope_done.status = error` 在无主动停止、退出码 0 时判 ERROR，归因见真值表），不经 scenario 归约。`_NON_VERDICT` 含 SKIPPED 是第二道保险，真正的保证是「压根不喂进去」，与决定六对 step 级 SKIPPED 的处理同一取向。
 - **两路调用者、两种喂入**（[0034](./0034-detached-batch-reconciler.md) 落地后的现状）：`_aggregate` 被 ① 同步 `schedule` 归约 `RunResult` 时调一次
   （喂进的全是终态、前置态过滤是 no-op）② 无状态投影 `project`/`project_full` 调（`project` 每轮 tick 调、真实喂入前置态）
   两路复用**同一份**——同一过滤名单/severity 表使两路收敛到同一终值（这正是当年留口子的意图）。落库的 `RunState.status`
   也不再「由 `finalize` 一次写定」：无状态路径下每轮投影写都落 run 级 status（钳在 `pending`/`running`——run 级终态是
   `finalize` 这个 commit point 的专属，[0030](./0030-realtime-persistence-seam.md) / [0034](./0034-detached-batch-reconciler.md) 机制三），终态仍由 `finalize` 一次落定。
 
-## 决定四：[0024](./0024-worker-core-protocol.md) 线协议不改，只补一句澄清
+## 决定四：[0024](./0024-worker-core-protocol.md) 线协议对 step 与 scenario 的判定保持三态，scope 级 error 另有载体
 
-worker↔core 的 JSON 线协议**保持三态**（worker 永远只报 passed/failed/error；skipped/aborted 时 worker 根本没起或已被掐、
+worker↔core 的 JSON 线协议对 step / scenario 的判定**保持三态**（worker 永远只报 passed/failed/error；skipped/aborted 时 worker 根本没起或已被掐、
 不可能也不需要上报）。skipped/aborted 与线协议**正交**。[0024](./0024-worker-core-protocol.md) 的「`status` 三态」条已带这句澄清：
 skipped/aborted（连同前置态 pending/running）是 core 内态、非 worker 上报态、不进 wire。
+
+- **`scope_done` 可带 `status: error` 与 `errorType` / `message`**（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 4，三个可选字段同进同出）：它是 **scope 级判定**的载体，用于 `scope_started` 之前的执行前失败与执行中的会话丢失，`status` 只允许 `error`；它**不是 step 的第 4 态**，worker 对 step 仍只报三态。core 收到它后才合成决定一的 scenario 级 SKIPPED 与决定六的 `shortcircuited=False` step 级 SKIPPED，这些合成态同样不进 wire。
 
 ## 决定五：退出码改基于 run 级 severity
 
@@ -154,7 +159,7 @@ cli 退出码从「`status.value == 'passed'` 才 0」改为**基于 run 级 sev
   枚举值（它已在 severity 表 = -1、已被 `_NON_VERDICT` 覆盖）——**在 StepResult 层，SKIPPED 直观表达「这步没跑」**，
   人/AI 一眼可读。**但它由 core 本地赋、不经 wire**（同 job 级 skipped/aborted 的性质：core 派生态、非 worker 上报态）。
 - **`shortcircuited: bool` 是与判定轴正交的第二维**：status 轴回答「跑出什么结论」（passed/failed/error/skipped），
-  shortcircuited 轴回答「为什么 skipped」（True=因上游短路而被跳过）。渲染层的连锁失败旁注**改读 shortcircuited**
+  shortcircuited 轴回答「为什么 skipped」（True 表示因上游短路而被跳过，False 见下「scope 级 error 后合成的 step 级 SKIPPED」条）。渲染层的连锁失败旁注**改读 shortcircuited**
   （见 [0028](./0028-transient-network-ssl-resilience.md) 从「error 后 failed」迁到「被短路的 step」），比原「按 status 顺序猜」更精确、判据单一。
 
 **关键不变量：step 级 SKIPPED 绝不写进 `scenario_status`**（守 severity/`_aggregate` 零污染）。`_reduce` 处理 `step_skipped`
@@ -162,14 +167,17 @@ cli 退出码从「`status.value == 'passed'` 才 0」改为**基于 run 级 sev
 （决定三的 `_NON_VERDICT` 已含 SKIPPED，是双重保险；但真正的保证是「压根不喂进去」）。scenario/job 的判定状态由「上游那个 error step」
 决定，与「后面短路了几个 step」无关。
 
+**scope 级 error 后合成的 step 级 SKIPPED**（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 4 的加法）：`StepResult(status=SKIPPED, shortcircuited=False)` **只出现在 job 处于 scope 级 error 时**（收到 `scope_done.status = error`），含义是「scope 未就绪或会话丢失，这步未执行」。它由 core 对 definition 中既无 `step_started` 也无 `step_skipped` 的 step 合成，不经 wire；同样不写 `scenario_status`、不进 `_aggregate`。有 `step_started` 无 `step_done` 的在途 step 不合成（决定一「在途明细的显式规则」）。旧落盘缺 `shortcircuited` 键时默认 False（serialize 的 `.get` 默认值）。
+
 **job 级 skipped（决定一）与 step 级 shortcircuited 是两个不同层次，别混**：
 
 | | 谁 skip | 有 StepResult 吗 | 承载 |
 |---|---|---|---|
 | **job 级 fail-fast skip**（决定一） | 整个 job 从未 spawn | **无**（`JobResult.scenarios=[]`） | `JobResult.status = SKIPPED`（session_id 必 None、没花钱） |
 | **step 级短路**（本决定） | job 起了、scope 内上游 error 后跳过后续 step | **有**（worker 发 step_skipped、core 建 StepResult） | `StepResult(status=SKIPPED, shortcircuited=True)`（会话已起、花过钱） |
+| **scope 级 error 后合成**（决定一、本决定） | job 起了、收到 `scope_done.status = error`，未执行的 scenario / step | **有**（core 合成，worker 不发事件） | scenario 级 SKIPPED 与 `StepResult(status=SKIPPED, shortcircuited=False)`（job 判为 `error` 或 `aborted`，可能已产生会话费用） |
 
-两级都复用 `Status.SKIPPED` 表「没跑」，语义一致、只是层级不同。
+各级都复用 `Status.SKIPPED` 表「没跑」，语义一致、只是层级与成因不同。
 
 **判据锁 `status==error`（不看 error_type）**：无论哪个引擎、network_error 还是 engine_error 都触发短路，两个引擎对称——
 这也回避了 [0028](./0028-transient-network-ssl-resilience.md) 记的「两个引擎 SSL 分类不对称」欠账对短路的影响（那只影响 errorType 文案、不影响 error 这个 status）。
@@ -179,8 +187,8 @@ cli 退出码从「`status.value == 'passed'` 才 0」改为**基于 run 级 sev
 
 - `core/gherkai_core/model.py`：`Status` 的 SKIPPED/ABORTED（判定派生态）+ PENDING/RUNNING（前置态；注释标明 core 内态、非 wire）；`_STATUS_SEVERITY`（仅终态）+ `severity()` 比较辅助；`_NON_VERDICT` 过滤名单；`TERMINAL_STATUSES`（终态真源，取补于 `_PRE_TERMINAL`，决定一·补末条）；`StepSkipped` 事件（frozen dataclass `scenario_id`/`step_index`，无 status/votes/cost）入 `Event` Union + `StepResult.shortcircuited`（正交布尔，决定六）。
 - `core/gherkai_core/schedule.py`：job 级 SKIPPED/ABORTED 的赋态点——起 worker 前 `abort_flag` 已 set → SKIPPED（worker 从未 spawn）；事件循环中因 `abort_flag` 被 stop + 其 WorkerNetworkError 竞态回填 → ABORTED；**超时（deadline）分支维持 `error`+`errorType=timeout`、不归 aborted**（回填判断看 `abort_flag`，不看「是否被自己停过」这类笼统标志——超时与 fail-fast 两条路径都会主动停 worker）。
-- `core/gherkai_core/project.py`：`_aggregate`（入口过滤 `_NON_VERDICT`；两路共用的真源，`schedule._aggregate` 为其别名，决定三）；`reduce_event` 的 `StepSkipped` 分支 → 暂存 `StepResult(status=SKIPPED, shortcircuited=True)`，**绝不写 `scenario_status`**（被短路 step 无 `step_started`，`duration_ms` 恒 None——没跑=无墙钟）。
-- `core/gherkai_core/wire.py`：`event_from_json` 的 `step_skipped` 分支（加法，不碰 step_done 三态解析）。
+- `core/gherkai_core/project.py`：`_aggregate`（入口过滤 `_NON_VERDICT`；两路共用的真源，`schedule._aggregate` 为其别名，决定三）；`reduce_event` 的 `StepSkipped` 分支 → 暂存 `StepResult(status=SKIPPED, shortcircuited=True)`，**绝不写 `scenario_status`**（被短路 step 无 `step_started`，`duration_ms` 恒 None——没跑=无墙钟）；收到 `scope_done.status = error` 后合成 scenario 级 SKIPPED 与 `shortcircuited=False` 的 step 级 SKIPPED（决定一、决定六，合成态不进 `_aggregate`）。
+- `core/gherkai_core/wire.py`：`event_from_json` 的 `step_skipped` 分支（加法，不碰 step_done 三态解析）；`scope_done` 的可选 `status` / `errorType` / `message`（决定四，`status` 只接受 `error`）。
 - `core/gherkai_core/serialize.py`：JobResult/RunResult 链路靠 `Status(str,Enum)` 天然 round-trip 新值（单测覆盖 skipped/aborted）；StepResult to/from_dict 的 `shortcircuited`（`.get` 默认 False，向后兼容旧落盘）。（**注**：`RunState` 链路的 `run_state_to/from_dict` 归 [0030](./0030-realtime-persistence-seam.md) touch points，非本 enum 的落点。）
 - `core/gherkai_core/adapters/report_store/local.py`：`_STATUS_COLOR`（每态各一色 + 兜底灰 `#57606a`；着色意图见决定二「视觉映射」）；index.html 的连锁失败旁注读 `shortcircuited`。
 - `cli/gherkai_cli/render.py`：文本汇总的连锁失败旁注同读 `shortcircuited`（被短路 step 显 skipped 态 + 旁注）。
@@ -190,7 +198,7 @@ cli 退出码从「`status.value == 'passed'` 才 0」改为**基于 run 级 sev
 
 ## 重议 / 留口子
 
-- **主动 skip 的退出码语义待定**：本 ADR 的 skipped 是 fail-fast 派生态（必伴随 error → 退非 0）。
+- **主动 skip 的退出码语义待定**：本 ADR 的 job 级 skipped 是 fail-fast 派生态（必伴随 error → 退非 0）。
   若未来引入**用户主动 skip 某 scope**（非 fail-fast），「全 skipped、无 error」的 run 退 0 还是非 0
   取决于「批次不完整算不算失败」——这需真实需求才好定，届时单独定（决定三的 `_aggregate` 入口过滤已为此留好正确性兜底）。
 - severity 序若随新态/新引擎扩充，集中改 `_STATUS_SEVERITY` 一处即可。

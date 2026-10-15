@@ -1,6 +1,6 @@
 # 0048. 测试目标：设备与界面类型两个维度、`@device` 与 `@app` 标签、core 的执行前预检
 
-> **Status:** Accepted（2026-10-15）——1.5 移动真机支持的入口篇：定义测试目标模型与 core 一侧的全部改动，部分取代 [0019](./0019-feature-tags-scope-and-engine.md) 的「三个语义 tag」表述（tag 体系扩为五个）；worker 能力自述、确定性 step 句柄、设备会话、Appium 适配、项目配置文件分别见 0049 到 0053。
+> **Status:** Accepted（2026-10-15）——1.5 移动真机支持的入口篇：定义测试目标模型与 core 一侧的全部改动，部分取代 [0019](./0019-feature-tags-scope-and-engine.md) 的「三个语义 tag」表述（tag 体系扩为五个）；worker 能力自述、确定性 step 句柄、设备会话、Appium 适配、项目配置文件分别见 0049 到 0053。决策 2、3、6、7、8 随 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 的事件契约与收尾顺序同日改写（scenario 间不复位；Job 的 `target` 与具名 `device_request`；网页上下文前提由 `requires` 声明、类别 `capability_unavailable`；超时上界与隧道预热）。
 
 ## 背景与问题
 
@@ -32,27 +32,29 @@
 - `@app:<别名>`：声明本 scope 测原生应用，别名在项目配置文件的 `[apps]` 节里绑定到应用文件与包名或 bundle id（[0053](./0053-project-config-file.md)）。不标即 web。
 - 声明、继承与冲突完全照 [0019](./0019-feature-tags-scope-and-engine.md) 给 `@engine:` 定的三条：scope 内任一 scenario 标了即整个 scope 生效；feature 级 tag 由其下 scenario 继承；同一 scope 内取值不一致即 FeatureContractError，不静默取其一。原因与 engine 相同：一个 scope 共享一个会话，「既在 Android 上又在 iOS 上」「同一会话里是两个应用」在物理上自相矛盾。
 - 以下情形同样报 FeatureContractError（产品语言加退出码 2，与现有用例契约违约的呈现一致）：`@device:` 取值不在 `android` / `ios` 之内；`@app:` 出现在桌面目标上；`@app:` 的别名在 `[apps]` 里查不到；`@app:` 的别名在 `[apps]` 里没有该 scope 所在平台的条目（如别名只绑定了 Android 应用，却用在 `@device:ios` 的 scope 上）。
-- 应用的启动由 worker 在建立设备会话后执行，scenario 之间先 terminate 再 activate（会话生命周期归 [0051](./0051-device-session-lifecycle-and-app-distribution.md)）。用例**不需要**写「打开某应用」作为第一步；写了也只是一条普通的 AI 动作步，core 不解析它。
+- 应用的启动由 worker 在建立设备会话后执行一次，scenario 之间不自动重启、不自动复位（同 scope 的 scenario 共享被测对象的状态，[0019](./0019-feature-tags-scope-and-engine.md)；会话生命周期归 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 1）。需要干净起点的用例在 Background 里写内建确定性 step「重新启动应用」（[0052](./0052-appium-interface-adapter-and-platform-differences.md) 决策 3）。用例**不需要**写「打开某应用」作为第一步；写了也只是一条普通的 AI 动作步，core 不解析它。
 
 ### 3. core 的三处改动
 
 **解析。** plan 模块在既有的 `@scope` / `@engine` / `@timeout` 之外解析 `@device` 与 `@app`，按第 2 条的规则归约到 scope，得出每个 job 的目标。core 只读 tag，不匹配 step 文本。
 
-**Job 携带目标与设备选择的具体值。** job 的定义新增两组字段：
+**Job 携带目标与设备请求的具体值。** job 的定义新增两个字段：
 
-- target：`device`、`ui_kind`，ui_kind 为 app 时再带应用条目（别名、应用文件在产物桶里的 S3 键、包名或 bundle id）；
-- 设备选择：设备 ARN 或筛选条件、`billing_method`、Device Farm 项目 ARN、获取预算（默认值见 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 2）；本机后端另带安装包所在的应用桶名（[0053](./0053-project-config-file.md)）。
+- `target`：`device`、`ui_kind`，ui_kind 为 app 时再带应用条目 `app{alias, bucket, key, sha256, app_id}`（别名、安装包的完整 S3 位置、包名或 bundle id）；
+- `device_request`：具名结构，带判别值 `provider = "aws-device-farm"`，字段为 `device_arn` 与 `os_version` 二选一、`billing_method`、`project_arn`、`acquire_timeout_s`（默认值见 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 2）。1.5 只有一个服务商，名字明说服务商而不起「中立」名，免得读者误以为已有一层抽象；形态过滤由 worker 固定只取手机，不进 Job。
 
-这些值由 CLI 在组装 run 时从选项、环境变量与项目配置文件解析成**具体值**写入（取值顺序见 [0053](./0053-project-config-file.md)），之后的任何推进器（本机后台进程、云端 Lambda、Fargate 上的 worker）都只读 job 里的值、不读配置文件。理由与 [0035](./0035-local-app-testing-via-tunnel.md) 把额外请求头放进 run 定义相同：后台与云端推进器和 CLI 不在同一进程、甚至不在同一台机器，配置文件与环境变量传不过去；definition 自包含也让同一个 run 在任何推进器上得出相同的设备选择。应用文件的上传与 S3 键的生成归 [0051](./0051-device-session-lifecycle-and-app-distribution.md)。
+两个形态、两个时点：core 由 tag 构造 Job 时只填 `target`，`device_request` 为空（`plan` 用这个形态，不访问任何 AWS 服务）；`run` / `submit` 在组合根填入 `device_request`——云端的 `project_arn` 读 SSM，缺失即在提交前以退出码 2 结束，消息「部署未启用设备支持」（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 10）。写 definition 之前与推进器读 definition 时各做一次结构校验：非桌面当且仅当 `device_request` 存在、`project_arn` 非空、ARN 与 `os_version` 恰有一个、字段类型正确；取值域校验（`billing_method` 的枚举、`os_version` 为点分数字串、ARN 前缀）在 CLI，报错形态与命令行给错一致、退出码 2。core 不读、不比较任何服务商状态。发给 worker 的 Job 另带可选 `timeoutS`（只供建会话前的自检，[0024](./0024-worker-core-protocol.md)），由一条 Python 到 TS 的往返测试守字段集合一致。
+
+这些值由 CLI 在组装 run 时解析成**具体值**写入：选项、环境变量与项目配置文件按 [0053](./0053-project-config-file.md) 的取值顺序取值；云端后端的 `project_arn` 读部署写下的 SSM 参数，安装包放进部署建立的产物桶（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 9、10），配置文件里的 `project-arn` / `app-bucket` 在云端不生效。之后的任何推进器（本机后台进程、云端 Lambda、Fargate 上的 worker）都只读 job 里的值、不读配置文件。理由与 [0035](./0035-local-app-testing-via-tunnel.md) 把额外请求头放进 run 定义相同：后台与云端推进器和 CLI 不在同一进程、甚至不在同一台机器，配置文件与环境变量传不过去；definition 自包含也让同一个 run 在任何推进器上得出相同的设备选择。应用文件的上传与 S3 键的生成归 [0051](./0051-device-session-lifecycle-and-app-distribution.md)。
 
 **本机后端的执行前预检增加两项目标检查。** 依据是 worker 的能力自述（增键规则归 [0049](./0049-worker-capabilities-targets-keys.md)）：
 
 - 目标不在该引擎 worker 声明的 `targets` 里，拒绝执行；
-- job 墙钟预算超过该目标的 `max_session_s`，拒绝执行。`max_session_s` 不等于 Device Farm 远程访问会话的 150 分钟上限，而是由 worker 用 150 分钟减去收尾余量算出（[0049](./0049-worker-capabilities-targets-keys.md) 决策 4）；桌面条目不带此键，表示不施加会话级上限。缺省预算如何以 `max_session_s` 为上限归 [0051](./0051-device-session-lifecycle-and-app-distribution.md)。
+- job 墙钟预算超过该目标的 `max_session_s`，拒绝执行。`max_session_s` 不等于 Device Farm 远程访问会话的 150 分钟上限，而是由 worker 用 150 分钟减去收尾余量算出（[0049](./0049-worker-capabilities-targets-keys.md) 决策 4）；桌面条目不带此键，表示不施加会话级上限。设备 scope 的缺省墙钟与下限由 core 的 plan 层按目标给出（获取预算加 900 秒，下限获取预算加 180 秒，设备 scope 不存在「不超时」），覆盖与校验顺序归 [0034](./0034-detached-batch-reconciler.md)「job timeout」节与 [0019](./0019-feature-tags-scope-and-engine.md)。
 
 两项都在建立任何设备会话之前完成，故不产生费用。cloud 后端在提交前只有 plan 标注，执行时由 worker 在建会话前自检同样两项，不满足即记 `precheck_failed`（[0049](./0049-worker-capabilities-targets-keys.md) 决策 7、[0051](./0051-device-session-lifecycle-and-app-distribution.md)），同样不产生会话费用。
 
-job 墙钟预算的语义沿用 [0034](./0034-detached-batch-reconciler.md)：自推进器启动这个 job 起算，不为设备另立起算点；取设备开销（创建到 Appium 可用，约 1 到 2.5 分钟）计在墙钟预算之内，停止到会话结束的收尾时间只计设备分钟、不占墙钟（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 2）。
+job 墙钟预算的语义沿用 [0034](./0034-detached-batch-reconciler.md)：自推进器 claim 这个 job 起算，不为设备另立起算点；取设备开销（创建到 Appium 可用，约 1 到 2.5 分钟）计在墙钟预算之内，停止到会话结束的收尾时间只计设备分钟、不占墙钟（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 2）。
 
 ### 4. 目标不受支持时的拒绝：由能力自述决定，消息给出改法
 
@@ -69,20 +71,21 @@ job 墙钟预算的语义沿用 [0034](./0034-detached-batch-reconciler.md)：�
 - 汇总给出这次 run 将开的设备会话数（一个设备 scope 一个会话，[0051](./0051-device-session-lifecycle-and-app-distribution.md)）。plan 不写金额：单价随计费方式与区域变化，费用模型归 [0051](./0051-device-session-lifecycle-and-app-distribution.md)；会话数是 feature 作者能直接控制的量。
 - 某条确定性 step 在该目标上没有实现（它的句柄声明与 worker `targets` 的交集里没有这个目标，[0050](./0050-deterministic-step-handles-and-testing.md)），plan 把它标注为走 AI。这比 1.4 的情形更安全：1.4 里只写了一侧引擎实现的 step 会在另一引擎上静默落到 AI，现在落到 AI 之前就可见。
 
-### 6. 运行期网页上下文不可用：需要 DOM 的确定性 step 记 error，不转 AI
+### 6. 运行期网页上下文不可用：声明了前提的确定性 step 记 error，不转 AI
 
 - 网页上下文在部分设备与系统版本上运行期才知道是否可用（探测归 [0052](./0052-appium-interface-adapter-and-platform-differences.md)）；现状是 iOS 26 的 Safari 在 Device Farm 当前提供的 Appium 驱动下网页上下文整体不可用。
-- 此时 plan 已标注为确定性的、需要 DOM 的 step 记 error，消息说明「这台设备上取不到网页内容，确定性检查无法执行」与可选做法（换系统版本、改写为 AI 断言）。**不转 AI**：plan 的标注是 feature 作者读到的契约，运行期悄悄换成 AI 判定会改变判定依据而不留痕，属于静默降级。
+- **前提由注册元数据显式声明**：需要网页上下文的 `webdriver` 条目声明 `requires: ["web_context"]`（[0050](./0050-deterministic-step-handles-and-testing.md) 决策 1），能力自述把它带进 step 级 `targets`，plan 标注「确定性（需要网页上下文；设备不提供时记为错误）」（[0049](./0049-worker-capabilities-targets-keys.md)）。core 只把 worker 报来的已知取值映射成产品文案，不推断 handler 的行为。
+- 运行期：探测**确认**不提供时，worker 不调用 handler，step 记 error、类别 `capability_unavailable`，消息说明「这台设备上取不到网页内容，确定性检查无法执行」与可选做法（改写为 AI 断言、换设备）；探测**出错**（列上下文的调用失败、传输层错误或会话异常这类无法区分设备能力的情形；有候选但网页命令持续超时而原生命令正常属于确认不提供，归类规则在 [0052](./0052-appium-interface-adapter-and-platform-differences.md) 决策 5）时同样不调用 handler，但类别记 `engine_error`、消息「未能确认设备是否提供网页上下文」，以免把瞬时故障说成「重试不会变」。没有声明前提却调用了 `withWebContext` 的 handler，由 `withWebContext` 抛出同一类别。**不转 AI**：plan 的标注是 feature 作者读到的契约，运行期悄悄换成 AI 判定会改变判定依据而不留痕，属于静默降级。
 
 ### 7. 内建「页面地址匹配」step 与落点核对规则
 
-- 内建的 `Then 页面地址匹配 "<正则>"` 声明 targets，并补上 webdriver 实现，在设备网页目标上照常可用。
-- skill 与用户指南的「导航后紧跟一条确定性落点核对」规则在设备网页上照用；应用目标没有页面地址（evidence 的 `url` 为 null），这条规则在应用目标上改为一条 AI 断言核对落点。
+- 内建的 `Then 页面地址匹配 "<正则>"` 声明 targets，并补上 `webdriver` 实现（条目声明 `requires: ["web_context"]`，不限定 `devices`——iOS 15.8 与 18.6 的网页上下文实测完整可用），在网页上下文可用的设备网页目标上可用；不可用时按决策 6 记 error。读 Safari 地址栏原生元素作地址替代来源未经实测，不采用。
+- skill 与用户指南的「导航后紧跟一条确定性落点核对」规则按目标分写：`@device:android` 的网页目标用确定性地址核对；`@device:ios` 的网页目标在 1.5 推荐用 AI 断言核对落点（[0031](./0031-job-lifecycle-states-and-severity.md) 的短路锁定在 `status == error`，网页上下文不可用的 iOS 驱动上一次地址核对失败会废掉整条 scenario）；应用目标没有页面地址（evidence 的 `url` 为 null），改为一条 AI 断言核对落点。device 是作者显式声明的维度，按它分写作规则不违反 [0052](./0052-appium-interface-adapter-and-platform-differences.md) 决策 1。
 
 ### 8. 被测环境可达性
 
-- Device Farm 只在 us-west-2，被测对象由从美国出网的公共真机访问，出网地址落在 Device Farm 公布的设备地址段内。依赖国内后端的被测对象加载会慢一到两个数量级，部分站点按来源地址返回反爬页（数据见「实测依据」）。工具不自动放宽预算：Appium 的 `newCommandTimeout` 须覆盖实测 31 到 119 秒的页面加载（[0052](./0052-appium-interface-adapter-and-platform-differences.md) 决策 6），被测站点本身加载慢由使用方调大 `@timeout`（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 2）。用户指南写明这一前提。
-- **设备网页经隧道暴露可测本机应用**（[0035](./0035-local-app-testing-via-tunnel.md)）：URL 映射发生在组装 job 时、对 worker 透明，设备目标不改这一点。隧道鉴权对桌面、Android、iOS 统一为「令牌换 cookie」一条路，已在桌面 Chromium、Android Chrome 与 iPhone 16（iOS 18.6）Safari 上验证；鉴权方案、已知边界、对隧道服务商的要求与脱敏归 [0051](./0051-device-session-lifecycle-and-app-distribution.md)。
+- Device Farm 只在 us-west-2，被测对象由从美国出网的公共真机访问，出网地址落在 Device Farm 公布的设备地址段内。依赖国内后端的被测对象加载会慢一到两个数量级，部分站点按来源地址返回反爬页（数据见「实测依据」）。工具不自动放宽预算：单条命令的真实上界是 WebDriver 客户端的请求超时，页面加载上限只是尽力而为（分层表归 [0052](./0052-appium-interface-adapter-and-platform-differences.md) 决策 6）；单次加载超过页面加载上限的站点在 1.5 不受支持，调大 `@timeout` 只解决多次加载累积的墙钟不足（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 2）。用户指南写明这一前提。
+- **设备网页经隧道暴露可测本机应用**（[0035](./0035-local-app-testing-via-tunnel.md)）：URL 映射发生在组装 job 时、对 worker 透明；鉴权由 worker 在被测对象就绪前做一次预热导航完成，worker 不感知令牌与 cookie 的值。隧道鉴权对桌面、Android、iOS 统一为「令牌换 cookie」一条路，已在桌面 Chromium 与四台公共真机（Android 15、iOS 15.8、iOS 18.6、iOS 26.3）上验证；鉴权方案、预热判据、已知边界、对隧道服务商的要求与脱敏归 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 13。
 - **原生应用连本机或私网后端，1.5 不支持。** 隧道暴露只替换 step 文本里的地址，应用自己的后端地址打包在应用里，工具不改写应用；让公共真机进入使用方私网需要私有设备加 VPC-ENI，不在 1.5 范围内。用户指南写明这一限制。
 
 ### 9. 不做
@@ -99,7 +102,7 @@ job 墙钟预算的语义沿用 [0034](./0034-detached-batch-reconciler.md)：�
 |---|---|---|
 | iOS 网页上下文按系统版本分化 | iOS 15.8 的 Safari 网页上下文完整可用（导航 1.5 到 1.8 秒、找元素约 0.25 秒）；iOS 26.3 的 `title` / `url` / `elements` 全部返回 WebKit 远程检查器错误，导航只能改走原生侧的 deepLink | 第 6 条：网页上下文是运行期能力缺口，不能假定存在 |
 | 没有网页上下文时导航命令挂住 | iOS 会话没有网页上下文时调 `url` 不报错，而是反复超时重试 | 第 6 条：需要 DOM 的 step 必须以探测结果为前提，记 error 而非等待 |
-| 浏览器经隧道访问本机应用 | 「令牌换 cookie」在桌面 Chromium、Android Chrome 与 iPhone 16（iOS 18.6）Safari 上均通过，边缘侧四种请求情形的响应均符合预期；地址内嵌凭据在 iOS Safari（15.8 与 18.6）上不被采用、改弹系统级鉴权表单 | 第 8 条：设备网页目标可经隧道测本机应用，鉴权方案统一（详见 [0051](./0051-device-session-lifecycle-and-app-distribution.md)） |
+| 浏览器经隧道访问本机应用 | 「令牌换 cookie、worker 预热一次」在桌面 Chromium 与四台公共真机（Android 15、iOS 15.8、iOS 18.6、iOS 26.3）上均通过：预热标记 1 到 2 秒内在原生控件树读到、业务页放行、错令牌得 401 页；四台都没有出现隧道服务商的警告页；地址内嵌凭据在 iOS Safari（15.8 与 18.6）上不被采用、改弹系统级鉴权表单 | 第 8 条：设备网页目标可经隧道测本机应用，鉴权方案统一（详见 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 13） |
 | 国内后端对从美国出网的公共真机的可达性 | 同一台真机顺序打开：维基百科 3.0 秒，百度 31 秒，天气网 74 秒，高德网页版 119 秒；微博 7 秒但落到反爬页 | 第 8 条：可达性与时长是被测环境的前提，要写进用户指南 |
 | 原生应用里的网页内容 | Android 原生应用会话的上下文列表只有原生上下文与应用内不可调试的 WebView，正文取不到 DOM | 第 2 条与第 9 条：ui_kind 由声明决定，不从运行期上下文推断；不做混合流 |
 
@@ -120,7 +123,7 @@ job 墙钟预算的语义沿用 [0034](./0034-detached-batch-reconciler.md)：�
 - 本篇定目标模型、tag 语义、core 的解析、job 字段、执行前预检的目标检查与 plan 标注；不定下列内容：
   - 能力自述的 `targets` / step 级 `targets` / `max_session_s` 键与缺键语义、doctor 与 `list-deterministic` 的呈现、引擎能力矩阵：[0049](./0049-worker-capabilities-targets-keys.md)。
   - 确定性 step 的多句柄注册、句柄按 ui_kind 与平台的过滤、handler 上下文、测试分层：[0050](./0050-deterministic-step-handles-and-testing.md)。
-  - 设备会话的生命周期、获取预算、错误类别 `precheck_failed` / `acquire_timeout` / `session_lost` 及其在 `scope_started` 之前的传递、隧道鉴权、应用分发、费用、权限与安全：[0051](./0051-device-session-lifecycle-and-app-distribution.md)。
+  - 设备会话的生命周期与事件契约（`session_opened` / `session_closed`、`scope_done` 的 scope 级判定）、设备解析、获取预算、错误类别 `precheck_failed` / `acquire_timeout` / `session_lost` / `release_failed`、终结四阶段、隧道鉴权、应用分发、计量、权限与安全：[0051](./0051-device-session-lifecycle-and-app-distribution.md)。
   - 驱动适配器、会话开头的能力探测（含网页上下文是否可用）、设备上的导航与输入：[0052](./0052-appium-interface-adapter-and-platform-differences.md)。
   - `gherkai.toml` 的节与键、取值顺序、`[apps]` 与 `[devices]`：[0053](./0053-project-config-file.md)。
 - tag 体系的声明、继承、冲突三条规则仍以 [0019](./0019-feature-tags-scope-and-engine.md) 为准，本篇只是把它扩到两个新 tag。

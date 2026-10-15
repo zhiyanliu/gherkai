@@ -1,6 +1,6 @@
 # 0053. 项目配置文件 gherkai.toml
 
-> **Status:** Accepted（2026-10-15）——项目级配置文件 `gherkai.toml` 的定位、取值顺序、节与键，以及设备选择的显式规则。
+> **Status:** Accepted（2026-10-15）——项目级配置文件 `gherkai.toml` 的定位、取值顺序、节与键，以及设备选择的用户面规则。决策 1、2、3、4、6 随 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 的修订同日改写：设备解析的算法移入 0051 决策 3（本篇只留用户面语义）、`default-job-timeout` 的最后一层改为按目标补缺省、`os-version` 按点分段族匹配、`billing-method` 可按平台覆盖、资源名的入库指引，护栏补 `[devices]` 键集对照与设备段形态的测试（含账号不一致告警）。
 
 ## 背景与问题
 
@@ -20,7 +20,7 @@
 
 - 文件名 `gherkai.toml`。查找规则：`--config PATH`、环境变量 `GHERKAI_CONFIG`、当前目录下的 `gherkai.toml` 依次优先。缺省位置不存在不算错（等同于没有配置文件）；显式给出的路径不存在、或文件不是合法 TOML，以退出码 2 结束并点名文件与出错位置。
 - **读它的只有运行侧 CLI 进程**：`run`、`plan`、`submit`、`status`、`explain`、`doctor`、`list-deterministic`。worker、云端后端（Fargate、Lambda）、部署命令（`deploy`、`destroy`、`deploy push-worker`、`deploy list-workers`）都不读。
-- **解析发生在组合根，产物是具体值**：CLI 把配置文件、选项、环境变量合成后的结果写进 definition 与 Job（设备 ARN 或筛选条件、`billing_method`、获取预算、项目 ARN、应用条目的 S3 键与包名或 bundle id，字段形态见 [0048](./0048-test-targets-device-and-ui-kind.md)）。所有启动 worker 的宿主一律从 definition 读回，不重新解析配置文件。这沿用 [0037](./0037-distribution-and-packaging.md) 决策 4 对 `steps_dir` 的同一惯例：只有随 definition 走，三个本机宿主（各自 CWD 不同）与云端宿主才对同一个 run 一致，提交之后修改配置文件也不会改变已提交 run 的判定条件。
+- **解析发生在组合根，产物是具体值**：CLI 把配置文件、选项、环境变量合成后的结果写进 definition 与 Job（具名的设备请求：设备 ARN 或筛选条件、`billing_method`、获取预算、项目 ARN；应用条目的完整 S3 位置与包名或 bundle id，字段形态见 [0048](./0048-test-targets-device-and-ui-kind.md) 决策 3）。所有启动 worker 的宿主一律从 definition 读回，不重新解析配置文件。这沿用 [0037](./0037-distribution-and-packaging.md) 决策 4 对 `steps_dir` 的同一惯例：只有随 definition 走，三个本机宿主（各自 CWD 不同）与云端宿主才对同一个 run 一致，提交之后修改配置文件也不会改变已提交 run 的判定条件。
 - 解析用 Python 标准库 `tomllib`（CLI 要求 Python 3.13 起），零新增依赖；CLI 只读不写，不提供 `config set` 一类改写命令。
 - `doctor` 显示本次加载的配置文件绝对路径，或「未使用配置文件」，便于排查「我改的配置为什么没生效」。
 
@@ -31,6 +31,7 @@
 - 对每个可配置项，按上述顺序取第一个给出的值。没有对应环境变量的项，跳过该层。
 - 配置文件排在环境变量之后，是因为环境变量是「本次调用的临时覆盖」的惯用载体（CI 矩阵、单次排障），文件是项目的稳定基线；反过来排会让 CI 里的环境变量被入库文件静默覆盖。
 - region 因此依次取 `--region`、`AWS_REGION`、`AWS_DEFAULT_REGION`、配置文件的 `region`、AWS profile 配置里的 region，前者优先；gherkai 仍不自行补默认 region。
+- **`default-job-timeout` 的最后一层不是固定值**：选项、环境变量或配置文件任一来源给出的值都算「显式给出」；都没有给时由 plan 层按 scope 的目标补缺省（桌面 300 秒；设备 scope 为获取预算加执行余量，显式值另受下限校验，设备 scope 不存在「不超时」）。覆盖与校验顺序归 [0034](./0034-detached-batch-reconciler.md)「job timeout」节与 [0019](./0019-feature-tags-scope-and-engine.md) `@timeout` 节，缺省数值归 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 2。
 - **路径类值相对配置文件所在目录解析**（`steps-dir`、`report-dir`、`[apps]` 里的 `file`），解析成绝对路径后写进 definition。选项与环境变量里的路径仍相对当前目录，与现有行为一致。这样无论在项目哪一级目录执行，同一份文件给出同一组路径。
 
 ### 3. 节与键
@@ -65,8 +66,8 @@ ios     = { file = "build/Wikipedia.ipa", bundle-id = "org.wikimedia.wikipedia" 
 - **`[common]` 与 `[cloud]` 的键与选项同词**：键名是选项长名去掉前导 `--`、连字符保留（`--default-engine` 对应 `default-engine`）。值经与 argparse 同一套类型转换与取值范围校验，非法值的报错形态与在命令行上给错一致。某个键对当前命令不适用（如 `grace` 之于 `plan`）时忽略，因为配置文件是项目级的、各命令只取自己有的那几项。
 - **可配置的只是「环境型」选项**：后端与资源名、引擎与 step 目录、投票与预算、并发、隧道、variant 一类每个项目基本固定的值。**按次选择型选项不进配置文件**：`--scope`、`--tags`、`--scenario`、`--step`、`--json`、`--quiet`、`--wait`、`--config` 本身以及位置参数。把它们写进文件，会让某次调用的范围在不显眼处被收窄，排查成本远高于每次多输入一个选项。
 - **未知键以退出码 2 结束**，点名文件、节与键名。拼错的键若被静默忽略，表现是「配置没生效」，比直接报错更难发现（与 [0036](./0036-deterministic-capability-discovery.md) 对自述契约 fail-loud 同一取向）。
-- **`[devices]`**：每个平台一张子表 `[devices.android]` / `[devices.ios]`，二选一给出 `arn`（指定一台设备）或 `os-version`（平台加系统版本筛选），两者都给以退出码 2 结束。`billing-method` 内建默认 `METERED`；月用量足够大时 `UNMETERED`（不计量槽位）更便宜，取舍见实测依据。`acquire-timeout-s` 的默认值见 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 2，超出预算记 `acquire_timeout`（处置语义同在 0051）。
-- **`project-arn` 与 `app-bucket` 只供本机后端**：云端后端的 Device Farm 项目由 `gherkai deploy` 建立、ARN 存 SSM，安装包放进现有产物桶（[0051](./0051-device-session-lifecycle-and-app-distribution.md)）。`--backend cloud` 下文件里给了这两项，提示一句「云端后端使用部署时建立的项目与产物桶，本项不生效」、不拦截，与 [0037](./0037-distribution-and-packaging.md) 决策 4 对云端 `--steps-dir` 的处理同一形态。
+- **`[devices]`**：每个平台一张子表 `[devices.android]` / `[devices.ios]`，二选一给出 `arn`（指定一台设备）或 `os-version`（平台加系统版本的族匹配，必须写成 TOML 字符串——写成数字会被解析成浮点，以退出码 2 结束并提示加引号），两者都给以退出码 2 结束。`billing-method` 内建默认 `METERED`，可在平台子表里覆盖（不计量槽位按平台购买）；月用量足够大时 `UNMETERED`（不计量槽位）更便宜，取舍见实测依据。`acquire-timeout-s` 的默认值与上界见 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 2，超出预算记 `acquire_timeout`（处置语义同在 0051）。
+- **`project-arn` 与 `app-bucket` 只供本机后端**：云端后端的 Device Farm 项目由 `gherkai deploy` 建立、ARN 存 SSM，安装包放进现有产物桶（项目与 SSM 见 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 10，产物桶见决策 9）。`--backend cloud` 下文件里给了这两项，提示一句「云端后端使用部署时建立的项目与产物桶，本项不生效」、不拦截，与 [0037](./0037-distribution-and-packaging.md) 决策 4 对云端 `--steps-dir` 的处理同一形态。两项是与账号、区域绑定的资源名，不是凭据：团队共用同一个账号时可以入库共享；项目要在多个账号或环境中执行时，改用 `GHERKAI_DEVICE_FARM_PROJECT_ARN` / `GHERKAI_APP_BUCKET` 按环境给出，入库值会被环境变量覆盖（决策 2）。本机后端下 `project-arn` 里的账号与当前凭证所属账号不一致时，CLI 在提交前警告并点名两个账号，不拦截。
 - **`[apps]`**：每个别名一张子表，按平台各给一个条目：`file`（本地安装包，相对配置文件目录）加 `package`（Android）或 `bundle-id`（iOS），两者都必须显式给出（不靠 Appium 推断启动活动，理由见 [0051](./0051-device-session-lifecycle-and-app-distribution.md)）。`@app` 引用的别名不在 `[apps]` 里、或该别名缺少 scope 所在平台的条目，按 [0048](./0048-test-targets-device-and-ui-kind.md) 报 FeatureContractError；`plan` 同样报错，因为它只读本地文件、不违背零 AWS。安装包的上传（按内容哈希放进桶）发生在 `run` / `submit`，`plan` 只核对文件存在。
 
 ### 4. 设备选择要求显式，筛选的挑选规则确定
@@ -76,13 +77,12 @@ ios     = { file = "build/Wikipedia.ipa", bundle-id = "org.wikimedia.wikipedia" 
   > 这个 run 里有在 Android 设备上执行的 scope，但没有指定用哪台设备。请在 gherkai.toml 的 [devices.android] 里给出 arn 或 os-version，或用 --android-device-arn 指定。
 
 - **选项与环境变量**：`--android-device-arn` / `--ios-device-arn`（环境变量 `GHERKAI_ANDROID_DEVICE_ARN` / `GHERKAI_IOS_DEVICE_ARN`）、`--device-farm-project-arn`（`GHERKAI_DEVICE_FARM_PROJECT_ARN`）、`--app-bucket`（`GHERKAI_APP_BUCKET`），按决策 2 的顺序覆盖配置文件。按平台分开命名，是因为一个 run 可以同时含 Android 与 iOS 的 scope，单个 `--device-arn` 无法表达。筛选条件只在配置文件里给，命令行只接受 ARN。
-- **ARN 直接使用**：worker 以该 ARN 建立远程访问会话，不事先查可用性；该机型全部单元被占用时会话停在 `PENDING_DEVICE` 等待（Device Farm 远程访问会话的状态枚举），与并发排队同处置，受 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 的获取预算约束。
-- **筛选条件由 worker 在获取设备时解析**（不是 CLI 在提交时解析）：设备可用性随时间变化，detached 提交可能在数分钟后才真正启动 worker，提交时解析出的 ARN 到那时可能已不可用。解析规则：
-  1. 列出 Device Farm 公共设备，取平台相符、系统版本与 `os-version` 完全相等、支持远程访问的设备；
-  2. 丢弃可用性为 `BUSY` 或 `TEMPORARY_NOT_AVAILABLE` 的设备；
-  3. 余下的按可用性 `HIGHLY_AVAILABLE` 在先、`AVAILABLE` 在后排序，同级按设备 ARN 字典序，取第一台；
-  4. 一台都没有时，在获取预算内间隔重查；预算用尽记 `acquire_timeout`（[0051](./0051-device-session-lifecycle-and-app-distribution.md)），消息里说明「符合条件的设备当前都忙或不可用」与所用的筛选条件。
-- 排序确定，是为了同一份配置在设备池不变时总选中同一台设备、判定可复现；实际分到的机型与系统版本由 evidence 的 scope 表头记录（[0051](./0051-device-session-lifecycle-and-app-distribution.md)），设备池变化导致的换机因此可追溯。`plan` 不调用 Device Farm，只原样展示配置的 ARN 或筛选条件。
+- **ARN 直接使用**：worker 以该 ARN 建立远程访问会话，不事先查可用性、不做静态过滤、不核对形态；该机型全部单元被占用时会话排队等待，与并发排队同处置，受获取预算约束；ARN 被同步拒绝（不存在、已下架、不支持远程访问）记 `precheck_failed`（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 3）。
+- **筛选条件由 worker 在获取设备时解析**（不是 CLI 在提交时解析）：设备可用性随时间变化，detached 提交可能在数分钟后才真正启动 worker，提交时解析出的 ARN 到那时可能已不可用。本篇只定用户面语义，解析算法归 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 3：
+  - `os-version` 按点分段的族匹配——配置值按点切段，设备版本的前几段完全相等即命中（`18` 命中 `18.x.y`，`18.6` 命中 `18.6` 与 `18.6.2`、不命中 `18.60`，`18.1` 不命中 `18.10`），写全段即精确匹配；只写前缀时 `plan` 提示「设备池新增版本时实际分到的版本可能改变，写全版本号可以固定」。
+  - 只取手机形态与支持远程访问的设备；零候选不进入繁忙等待，记 `precheck_failed`（再列举一次的判据见 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 3），消息给出条件与最接近的可用版本。
+  - 匹配候选中先排除繁忙与暂不可用的设备，再按版本号高、可用性高、ARN 字典序取第一台；全部繁忙才在获取预算内等待，预算用尽记 `acquire_timeout`，消息说明「符合条件的设备当前都忙」与所用的筛选条件。
+- 排序确定，是为了同一份配置在设备池不变时总选中同一台设备、判定可复现；实际分到的机型与系统版本由 evidence 的 scope 表头记录（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 8），设备池变化导致的换机因此可追溯。`plan` 不调用 Device Farm，只原样展示配置的 ARN 或筛选条件。
 
 ### 5. 与 ADR 0044 覆盖链的关系：worker 侧覆盖项不进配置文件
 
@@ -92,7 +92,8 @@ ios     = { file = "build/Wikipedia.ipa", bundle-id = "org.wikimedia.wikipedia" 
 
 ### 6. 护栏
 
-- **键集差集**：测试从 argparse 定义推出各命令的长选项全集，减去决策 3 的按次选择型排除名单，与配置解析器接受的 `[common]` / `[cloud]` 键集逐项对照；新增选项时漏改任一侧即失败。排除名单本身在测试里显式列出，新增按次选择型选项必须有意识地加入名单。
+- **键集差集**：测试从 argparse 定义推出各命令的长选项全集，减去决策 3 的按次选择型排除名单，与配置解析器接受的 `[common]` / `[cloud]` 键集逐项对照；新增选项时漏改任一侧即失败。排除名单本身在测试里显式列出，新增按次选择型选项必须有意识地加入名单。`[devices]` 与平台子表的键集没有对应选项，由解析器的接受集与本 ADR 决策 3 的键表直接对照，表里多一键或少一键都失败。
+- **设备段的形态**：测试覆盖平台子表 `arn` 与 `os-version` 二选一（都给以退出码 2 结束；平台有设备 scope 而任何来源都没有给出选择时，`run` / `submit` 以退出码 2 结束、`plan` 只警告，见决策 4）、`os-version` 写成 TOML 数字时的退出码 2 与加引号提示、`billing-method` 的平台覆盖、以及本机后端下 `project-arn` 账号与当前凭证账号不一致的告警文本；解析结果断言为 Job 里的具名设备请求（[0048](./0048-test-targets-device-and-ui-kind.md) 决策 3）。
 - **路径基准**：测试覆盖在子目录执行、`--config` 指向别处两种情形，断言 definition 里的路径以配置文件目录为基准。
 - **宿主不读文件**：测试断言 worker 注入 env 与 Job 载荷由 definition 生成，`status --wait` 接力者在另一 CWD 下得到与提交时相同的设备与应用值。
 
@@ -102,12 +103,12 @@ ios     = { file = "build/Wikipedia.ipa", bundle-id = "org.wikimedia.wikipedia" 
 
 | 观察 | 数据 | 支撑的决策 |
 |---|---|---|
-| 同一账号远程访问并发 | 同机型连发 6 个会话请求，前 5 个进入 RUNNING，第 6 个进入 `PENDING_CONCURRENCY` 排队而不是报错；排队实测最长约 6 分钟，排队中的会话不计费 | 获取预算必须可配，且要覆盖排队时间 |
+| 同一账号远程访问并发 | 同机型连发 6 个会话请求，前 5 个进入 RUNNING，第 6 个进入 `PENDING_CONCURRENCY` 排队而不是报错；排队实测最长约 6 分钟；排队中撤回的会话返回体与 Get 都没有 `deviceMinutes` 字段，是否计费以账单为准 | 获取预算必须可配，且要覆盖排队时间 |
 | 取设备开销 | 创建到 RUNNING：Android 51 到 72 秒、iOS 61 到 72 秒；加上 Appium 建连，创建到 Appium 可用约 1 到 2.5 分钟，计入 job 墙钟与设备分钟 | `acquire-timeout-s` 的默认值不能低于分钟级 |
 | 停止到 COMPLETED | Android 60 到 85 秒，iOS 超过 2 分钟（最长约 150 秒），只计设备分钟、不占 job 墙钟 | 费用估算要计入收尾分钟；与获取预算无关 |
 | 计费方式的拐点 | 不计量槽位 250 美元每月除以计量单价 0.17 美元每分钟，约 1470 分钟每月每平台 | `billing-method` 必须可选，而不是内建固定 |
 | 系统版本决定能力 | iOS 15.8 的 Safari 网页上下文完整可用，iOS 26.3 的网页上下文整体不可用 | 筛选条件以系统版本为必给项，而不是只按平台挑 |
-| 设备忙 | 历次实测中未遇到机型被占满（BUSY）的情形；指定 ARN 而设备被占用时的会话状态在 API 状态枚举里是 `PENDING_DEVICE`（排队等设备），同机型 5 台并发都分到了不同单元 | 筛选时丢弃 BUSY 是保守选择；指定 ARN 时的等待由 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 的获取预算处理 |
+| 设备忙 | 历次实测中未遇到机型被占满（BUSY）的情形；指定 ARN 而设备被占用时的会话状态在 API 状态枚举里是 `PENDING_DEVICE`（排队等设备），同机型 5 台并发都分到了不同单元 | 筛选时排除繁忙设备是保守选择（算法归 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 3）；指定 ARN 时的等待由获取预算处理 |
 
 ## 被拒方案（护栏）
 
@@ -126,7 +127,7 @@ ios     = { file = "build/Wikipedia.ipa", bundle-id = "org.wikimedia.wikipedia" 
 - [0048](./0048-test-targets-device-and-ui-kind.md)：`@device` 与 `@app` tag 的语义、Job 里 target 与设备选择字段的形态、别名缺失时的 FeatureContractError；本 ADR 只定这些值从哪里来。
 - [0049](./0049-worker-capabilities-targets-keys.md)：worker 能力自述的 `targets` 与 `max_session_s`；worker 自检据它记 `precheck_failed`，与配置文件无关。
 - [0050](./0050-deterministic-step-handles-and-testing.md)：确定性 step 的多句柄注册；`steps-dir` 只是其目录的又一个取值来源。
-- [0051](./0051-device-session-lifecycle-and-app-distribution.md)：获取预算的默认值与超时类别、会话排队与 BUSY 的运行期处置、安装包上传与预签名、Device Farm 项目的建立与 SSM、权限表（含 worker 解析筛选条件所需的设备列表读权限）、`billingMethod` 的费用模型。
+- [0051](./0051-device-session-lifecycle-and-app-distribution.md)：设备解析的算法（列举、静态过滤、选择、零候选与繁忙等待）、获取预算的默认值与上界、超时类别、安装包的键布局、保留承诺与预签名、Device Farm 项目的建立与 SSM、权限（登记在 [0033](./0033-iac-aws-backend-and-composition-wiring.md)）、`billingMethod` 的费用模型。
 - [0052](./0052-appium-interface-adapter-and-platform-differences.md)：重规划上限等驱动侧固定规则及其覆盖方式。
 - [0044](./0044-engine-model-selection-and-override.md)：worker 侧覆盖项的覆盖链，本 ADR 不改变它。
 - [0037](./0037-distribution-and-packaging.md) 决策 4：「解析在组合根、随 definition 持久化」的先例，本 ADR 把它推广到全部配置项。

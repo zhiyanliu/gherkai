@@ -1,6 +1,6 @@
 # 0050. 确定性 step 多句柄注册与测试分层
 
-> **Status:** Accepted（2026-10-15）——部分取代 [0036](./0036-deterministic-capability-discovery.md) 决策 1 的注册面签名（handler 位置从单个函数改为按句柄种类分键，单函数写法保持有效），扩展 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md) 的注册表；匹配语义、元数据必填、角色边界不变。
+> **Status:** Accepted（2026-10-15）——部分取代 [0036](./0036-deterministic-capability-discovery.md) 决策 1 的注册面签名（handler 位置从单个函数改为按句柄种类分键，单函数写法保持有效），扩展 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md) 的注册表；匹配语义、元数据必填、角色边界不变。决策 1、2、4 随 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 的修订同日改写：条目可声明前提 `requires`，`ctx.driver` 是受命令守卫的代理，已有运行的 evidence 只在失败步含控件信息。
 
 ## 背景与问题
 
@@ -34,7 +34,8 @@ deterministic("^页面显示「(?<text>[^」]+)」$", {
 - **注册期校验**（违反即加载失败，按 [0037](./0037-distribution-and-packaging.md) 决策 4 的加载失败处理）：未知句柄种类、`uiKinds` 或 `devices` 的未知取值、同一条 step 的两个 `webdriver` 条目覆盖同一个（设备，界面类型）组合。最后一条防止「两个实现谁生效」的歧义，与 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md) 对模式冲突的处理同理。
 - **step 的 `targets` 由句柄推出**：`playwright` 对应 desktop / web，每个 `webdriver` 条目对应其设备与界面类型的组合；实际可用目标再与 worker 自身的 `targets` 取交集，规则与呈现归 [0049](./0049-worker-capabilities-targets-keys.md)。目标上没有句柄的 step 由 plan 标注为走 AI，网页上下文在运行期不可用时的 error 处理归 [0048](./0048-test-targets-device-and-ui-kind.md)。
 - **跨 step 的命中与目标无关**：一段 step 文本命中哪些 pattern，仍按 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md) 的模式冲突规则判定（最多命中一条、多条即冲突报错），判定时不看当前目标；句柄条目的过滤只在命中之后起作用。命中的那条 step 在当前目标上没有句柄时，这段文本走 AI，不顺延到下一条能匹配的 pattern。理由：顺延会让同一段文本在不同目标上匹配到不同 pattern、执行不同语义的 handler，而 plan 与能力自述按 pattern 关联目标，顺延后两者都对不上实际派发。
-- **内建的「页面地址匹配」step** 补一个 `webdriver` 条目（`uiKinds: ["web"]`），在设备网页上照常可用。
+- **条目可声明前提 `requires`**（可选，字符串数组，1.5 只有 `web_context`）：含 `web_context` 的条目在探测确认设备不提供网页上下文时不被调用、step 记 error 并带类别 `capability_unavailable`（规则归 [0048](./0048-test-targets-device-and-ui-kind.md) 决策 6）。注册期按封闭集合校验取值，未知取值加载失败；含 `web_context` 时 `uiKinds` 必须恰为 `["web"]`（应用目标固定原生上下文，前提没有定义）。推出能力自述时，`requires` 不同的条目拆成不同的 step 级 `targets` 条目、不聚合（[0049](./0049-worker-capabilities-targets-keys.md)）。Python 侧字段与校验同构，纳入跨语言 fixture。
+- **内建的「页面地址匹配」step** 补一个 `webdriver` 条目（`uiKinds: ["web"]`，`requires: ["web_context"]`，不限定 `devices`），在网页上下文可用的设备网页目标上可用；不可用时按上一条记 error。
 
 **Python 完全同构**：同一组键与条目字段，取字典形态，`webdriver` 句柄拿到的 `driver` 是 Appium Python Client 的 driver；装饰器写法与现状相同、等价于只有 `playwright`，多句柄形态的具体签名随实现定，要求是键名、条目字段、校验规则与 TS 逐项一致。两侧共用一套跨语言 fixture（同一组注册输入，断言推出的 `targets` 与校验结果相同）来核对注册语义。1.5 没有 Python 设备引擎（Nova Act 驱动的是 Playwright 浏览器，没有设备路径），这块 API 面由 fixture 与注册期校验验收，不以真机执行为前提。
 
@@ -44,15 +45,15 @@ deterministic("^页面显示「(?<text>[^」]+)」$", {
 
 | 字段 | 含义 |
 |---|---|
-| `driver` | WebdriverIO 客户端（Python 侧为 Appium Python Client 的 driver） |
+| `driver` | 受命令守卫的 WebdriverIO 客户端代理（Python 侧为 Appium Python Client 的 driver）：step 结束、取消或进入终结后，经旧引用发出的调用被拒绝；命令结果未知后，本 step 内有副作用的命令被拒绝（守卫归 [0052](./0052-appium-interface-adapter-and-platform-differences.md) 决策 6） |
 | `device` | `{ platform, osVersion, scale }`：平台（取值与 device 维度相同，`android` 或 `ios`）、会话回报的系统版本、坐标比例（iOS 取设备报告的 scale，Android 为 1）。字段不叫 `target`，避免与 Job 携带的测试目标同名 |
 | `uiKind` | `web` 或 `app` |
 | `appId` | 包名或 bundle id，只在 app 目标上有值 |
 | `log` | 写进本 step 诊断的日志函数 |
-| `withWebContext(fn)` | 切到属于被测对象的网页上下文执行 `fn`，结束（含抛错）后切回原生上下文 |
+| `withWebContext(fn)` | 每次重新定位属于被测对象的网页上下文（不缓存句柄，[0052](./0052-appium-interface-adapter-and-platform-differences.md) 决策 5），切入后执行 `fn`，结束（含抛错）后切回原生上下文；多个候选或零候选时抛错、不猜 |
 
 - **不变量：step 结束时会话处在原生上下文。** 截图与手势都在原生上下文执行，AI 步开始前也会回到原生上下文（[0052](./0052-appium-interface-adapter-and-platform-differences.md)）；handler 若自行 `switchContext` 不切回，后果是下一步截图坐标错位、点击全部落空。`withWebContext` 是切换上下文的推荐方式；handler 直接调用 `switchContext` 时，worker 在 step 结束后核对并复原，复原失败记 error。
-- **网页上下文只认属于被测对象的那个**（判定规则归 [0052](./0052-appium-interface-adapter-and-platform-differences.md)）。会话开头的能力探测判定网页上下文不可用时，`withWebContext` 抛错、step 记 error，消息说明当前设备不提供网页上下文、建议改用 AI 步或换系统版本；不转 AI。
+- **网页上下文只认属于被测对象的那个**（判定规则归 [0052](./0052-appium-interface-adapter-and-platform-differences.md)）。会话开头的能力探测确认设备不提供网页上下文时，声明了 `requires: ["web_context"]` 的条目不被调用、step 记 error（类别 `capability_unavailable`），消息说明当前设备不提供网页上下文、建议改用 AI 步或换设备；探测出错（无法确认设备是否提供）时同样不调用，类别记 `engine_error`（规则归 [0048](./0048-test-targets-device-and-ui-kind.md) 决策 6）。没有声明却调用 `withWebContext` 的 handler 由它按同一规则抛出。两种情况都不转 AI。
 - **不提供的内容**：不暴露 Device Farm 会话、端点地址、应用的 S3 位置，也不提供「当前是不是 iOS 26」一类判断函数；设备差异由条目过滤表达，版本差异由能力探测在 worker 内处理。
 
 **写进作者文档的输入与定位事实**（据 Android 与 iOS 真机上逐条路线的实测，详见「实测依据」）：
@@ -82,7 +83,7 @@ deterministic("^页面显示「(?<text>[^」]+)」$", {
 
 - **期望只来自需求**：step 断言什么由需求文档、验收标准、用例本身决定。
 - **材料只定位置，不定期望**：页面源、控件树、截图、已有运行的 evidence 用来找到元素在哪、叫什么，不用来决定「应该显示什么」。
-- **动态材料的来源平铺列出、不排先后**：应用仓库的源码与测试标识；桌面上的开发者工具或 Playwright；Appium Inspector 或 WebDriver 客户端连上一个 Device Farm 远程访问会话；已有运行留下的 evidence（设备目标上含每步的控件信息，字段归 [0051](./0051-device-session-lifecycle-and-app-distribution.md)）。
+- **动态材料的来源平铺列出、不排先后**：应用仓库的源码与测试标识；桌面上的开发者工具或 Playwright；Appium Inspector 或 WebDriver 客户端连上一个 Device Farm 远程访问会话；已有运行留下的 evidence（设备目标上判为 failed 或 error 的 step 含控件摘要与原始控件树，字段归 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 8）。
 - **agent 自行开设备会话须项目约定放行**，且无论成败都必须收尾（停止会话），因为设备会话按分钟计费、有并发上限。
 - **原生应用上先看控件有没有稳定标识**，再决定写不写确定性 step；没有标识就写 AI 步，不用坐标或层级位置拼凑定位。
 - **一条动作步只表达一屏之内的意图**：跨多屏的长流程拆成多步。这条同时约束 AI 步——实测中跨五页引导或十页分页的单条动作步需要 5 到 12 轮规划，token 与失败面都随之放大。
@@ -134,7 +135,7 @@ deterministic("^页面显示「(?<text>[^」]+)」$", {
 
 - **目标模型、`@device` 与 `@app` tag、plan 标注规则、网页上下文不可用时记 error**：[0048](./0048-test-targets-device-and-ui-kind.md)。
 - **能力自述的 `targets` 键、step 级 `targets` 的交集规则与 `list-deterministic` / doctor 呈现**：[0049](./0049-worker-capabilities-targets-keys.md)。本 ADR 只规定 step 的目标如何从句柄推出。
-- **设备会话的创建与收尾、evidence 的设备字段、应用分发**：[0051](./0051-device-session-lifecycle-and-app-distribution.md)。
-- **驱动适配器、能力探测（含输入路线选择）、上下文切换规则、适配器侧护栏**：[0052](./0052-appium-interface-adapter-and-platform-differences.md)。
+- **设备会话的创建与收尾、事件契约、evidence 的设备字段、应用分发**：[0051](./0051-device-session-lifecycle-and-app-distribution.md)。
+- **驱动适配器、能力探测（含输入路线选择）、网页上下文的重新定位、命令守卫与结果未知的处置、适配器侧护栏**：[0052](./0052-appium-interface-adapter-and-platform-differences.md)。
 - **项目配置文件里的设备与应用别名**：[0053](./0053-project-config-file.md)。
 - 匹配语义（worker 侧、core 对 step 语义无知）、元数据必填、使用方 `steps/` 目录的加载与失败处理不变：[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)、[0036](./0036-deterministic-capability-discovery.md)、[0037](./0037-distribution-and-packaging.md)。确定性 step 与 AI 断言的分工不变：[0014](./0014-ai-first-assertions.md)、[0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md)。
