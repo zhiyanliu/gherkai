@@ -166,7 +166,8 @@ async function installApp(driver: Driver, sessionArn: string, appArn: string): P
 // ---- WebDriver 连接与命令往返 ----
 function caps(): Record<string, unknown> {
   const common = { "appium:newCommandTimeout": 900 };   // 模型思考几十秒，别让 Appium 把会话当闲置回收
-  if (PLATFORM === "ios" && SCENARIO === "egress") return { platformName: "iOS", "appium:automationName": "XCUITest", "appium:noReset": true, ...common };
+  // egress：要导航站点时带 Safari（否则 iOS 没有网页上下文、url 命令会挂住）；只做主机侧安装试验时不带浏览器
+  if (PLATFORM === "ios" && SCENARIO === "egress") return { platformName: "iOS", "appium:automationName": "XCUITest", ...(process.env.DF_EGRESS_SKIP_NAV === "1" ? { "appium:noReset": true } : { browserName: "Safari" }), ...common };
   if (PLATFORM === "ios") {
     // app 场景不带 bundleId：先连（XCUITest 落在主屏）、经 Device Farm 装、再 activateApp；DF_APP_PACKAGE 在 iOS 上就是 bundle id
     return { platformName: "iOS", "appium:automationName": "XCUITest", ...(SCENARIO === "web" ? { browserName: "Safari" } : { "appium:noReset": true }), ...common };
@@ -283,8 +284,10 @@ class AppiumInterface extends AbstractInterface {
       }),
       "w3c-key-actions-native": () => this.native(async () => { await this.d.keys(text); }),
       "native-active-element": () => this.native(async () => { const ref = await this.d.getActiveElement(); await this.d.elementSendKeys(elementId(ref), text); }),
+      "mobile-type": () => this.native(async () => { await this.d.execute("mobile: type", { text }); }),   // Android UiAutomator2 专有
     };
-    const order = this.knownFieldId ? ["direct-element-sendkeys", ...AppiumInterface.typeRouteOrder] : AppiumInterface.typeRouteOrder;
+    const base = PLATFORM === "android" ? ["web-active-element", "native-active-element", "mobile-type"] : AppiumInterface.typeRouteOrder;
+    const order = this.knownFieldId ? ["direct-element-sendkeys", ...base] : base;
     return order.map((n) => [n, all[n]] as [string, () => Promise<void>]);
   }
   private async iosSendKeys(text: string): Promise<void> {
@@ -436,17 +439,53 @@ async function iosTypingProbe(iface: AppiumInterface, driver: Driver): Promise<v
 async function egressProbe(driver: Driver, endpoint: string): Promise<void> {
   const web = (results.contexts as string[]).find((c) => c !== "NATIVE_APP");
   if (web) await driver.switchContext(web);
+  else if (process.env.DF_EGRESS_SITES) { results.device_navigation = "没有网页上下文，跳过导航"; }
   const nav: Record<string, unknown> = {};
-  const sites = process.env.DF_EGRESS_SKIP_NAV === "1" ? [] : ["https://checkip.amazonaws.com/", "https://www.wikipedia.org/", "https://www.baidu.com/", "https://m.amap.com/", "https://www.weather.com.cn/", "https://m.weibo.cn/"];
-  for (const u of sites) {
+  const sites = process.env.DF_EGRESS_SITES ? process.env.DF_EGRESS_SITES.split(",").map((x) => x.trim()).filter(Boolean)
+    : process.env.DF_EGRESS_SKIP_NAV === "1" ? [] : ["https://checkip.amazonaws.com/", "https://www.wikipedia.org/", "https://www.baidu.com/", "https://m.amap.com/", "https://www.weather.com.cn/", "https://m.weibo.cn/"];
+  const mask = (u: string) => u.replace(/\/\/[^@/]+@/, "//<凭证已略>@");   // 隧道地址带 userinfo，日志里不落明文
+  for (const u of web ? sites : []) {
     const t0 = performance.now();
     try {
       await driver.url(u);
       const title = await driver.getTitle();
-      const body = u.includes("checkip") ? String(await driver.execute("return document.body.innerText")).trim().slice(0, 60) : undefined;
-      nav[u] = { ms: ms(t0), title: String(title).slice(0, 60), body };
-    } catch (e) { nav[u] = { ms: ms(t0), error: errText(e) }; }
-    log(`导航 ${u}: ${JSON.stringify(nav[u])}`);
+      const body = String(await driver.execute("return document.body ? document.body.innerText : ''")).trim().slice(0, 80);
+      const landed = mask(String(await driver.getUrl().catch(() => "?"))).slice(0, 90);   // 实际落在哪个地址：导航被拒时页面不变
+      nav[mask(u)] = { ms: ms(t0), title: String(title).slice(0, 60), body, landed };
+      // iOS Safari 对地址里内嵌的凭据不予采用、弹原生「Sign in to <host>」表单（实测）；在原生上下文把凭据填进去并提交，验证这条处置可行
+      if (PLATFORM === "ios" && process.env.DF_EGRESS_BASICAUTH === "1" && /\/\/[^@/]+@/.test(u)) {
+        const t1 = performance.now();
+        const [user, pass] = new URL(u).username ? [new URL(u).username, new URL(u).password] : ["", ""];
+        const cur = (await driver.getContext()) as string;
+        await driver.switchContext("NATIVE_APP");
+        const sheet = await driver.$$("-ios predicate string:label BEGINSWITH 'Sign in to'");
+        const rec: Record<string, unknown> = { sheet_found: sheet.length > 0 };
+        if (sheet.length) {
+          // 每一步前重新查找：填完用户名后表单会重排，先前拿到的元素引用会失效（首轮实测 stale element）
+          const find = (sel: string) => driver.$$(sel);
+          const fields = await find("-ios class chain:**/XCUIElementTypeTextField");
+          if (fields.length) {
+            // 用 W3C 标准的 element/value 填：WebdriverIO 的 keys 在 iOS 上生成的键盘动作缺 keyUp 配对、WDA 直接拒绝
+            await fields[0].click(); await driver.elementSendKeys((await find("-ios class chain:**/XCUIElementTypeTextField"))[0].elementId, user);
+            const secure = await find("-ios class chain:**/XCUIElementTypeSecureTextField");
+            if (secure.length) { await secure[0].click(); await driver.elementSendKeys((await find("-ios class chain:**/XCUIElementTypeSecureTextField"))[0].elementId, pass); }
+            const btn = await find("-ios predicate string:label == 'Sign In' AND type == 'XCUIElementTypeButton'");
+            if (btn.length) await btn[0].click();
+            await sleep(3000);
+            await driver.switchContext(cur);
+            rec.title_after = String(await driver.getTitle()).slice(0, 60); rec.landed_after = mask(String(await driver.getUrl())).slice(0, 90); rec.ms = ms(t1);
+          } else { rec.fields = fields.length; await driver.switchContext(cur); }
+        } else { await driver.switchContext(cur); }
+        results.ios_basic_auth_sheet = rec; log(`iOS 鉴权表单处置: ${JSON.stringify(rec)}`);
+      }
+      if (process.env.DF_EGRESS_SHOTS === "1") {   // 原生整屏截图：看导航被拒时屏幕上是什么（如系统鉴权弹窗）
+        const cur = (await driver.getContext()) as string;
+        await driver.switchContext("NATIVE_APP"); const shot = await driver.takeScreenshot(); await driver.switchContext(cur);
+        fs.mkdirSync(path.join(RUN_DIR, "nav-shots"), { recursive: true });
+        fs.writeFileSync(path.join(RUN_DIR, "nav-shots", `${Object.keys(nav).length}.png`), Buffer.from(shot, "base64"));
+      }
+    } catch (e) { nav[mask(u)] = { ms: ms(t0), error: errText(e).replace(/\/\/[^@/]+@/g, "//<凭证已略>@") }; }
+    log(`导航 ${mask(u)}: ${JSON.stringify(nav[mask(u)])}`);
   }
   results.device_navigation = nav;
   await driver.deleteSession().catch(() => {});
@@ -576,6 +615,39 @@ async function iosAppTypingProbe(driver: Driver, endpoint: string): Promise<void
   results.ios_typing_probe = report;
 }
 
+// ---- Android 原生应用上的输入探针（确定性，不调模型；维基百科客户端：底部 Search 标签进搜索页，搜索框是 EditText）----
+async function androidAppTypingProbe(driver: Driver): Promise<void> {
+  await driver.switchContext("NATIVE_APP").catch(() => {});
+  const report: Array<Record<string, unknown>> = [];
+  // 搜索框的类名随实现变（EditText / AutoCompleteTextView / SearchAutoComplete），按类名正则找，找不到再取当前持有焦点的控件
+  let fields = await driver.$$("android=new UiSelector().classNameMatches(\".*(EditText|AutoCompleteTextView|SearchAutoComplete).*\")");
+  if (!fields.length) fields = await driver.$$("android=new UiSelector().focused(true)");
+  results.app_text_fields = fields.length;
+  if (!fields.length) {
+    const src = await driver.getPageSource();
+    results.android_typing_probe = { error: "搜索页没找到输入控件", classes: [...new Set([...src.matchAll(/class="([^"]+)"/g)].map((m) => m[1]))].slice(0, 30), report };
+    log(`Android 应用输入探针：没找到输入控件，页面类名 ${JSON.stringify(results.android_typing_probe)}`);
+    return;
+  }
+  const field = fields[0];
+  const routes: Array<[string, () => Promise<void>]> = [
+    ["direct-element-sendkeys", async () => { await driver.elementSendKeys(field.elementId, "Playwright"); }],
+    ["native-active-element", async () => { const ref = await driver.getActiveElement(); await driver.elementSendKeys(elementId(ref), "Playwright"); }],
+    ["mobile-type", async () => { await driver.execute("mobile: type", { text: "Playwright" }); }],
+  ];
+  for (const [name, fn] of routes) {
+    const rec: Record<string, unknown> = { route: name };
+    const t0 = performance.now();
+    try {
+      await field.click(); await sleep(500); await driver.elementClear(field.elementId).catch(() => {});
+      const t1 = performance.now(); await fn(); rec.type_ms = ms(t1);
+      const value = await field.getText(); rec.value = value; rec.ok = typeof value === "string" && value.includes("Playwright");
+    } catch (e) { rec.error = errText(e); }
+    rec.total_ms = ms(t0); report.push(rec); log(`Android 应用输入探针 ${name}: ${JSON.stringify(rec)}`);
+  }
+  results.android_typing_probe = report;
+}
+
 // ---- 两个场景的 AI 步 ----
 type Stepper = (kind: "act" | "bool", prompt: string) => Promise<unknown>;
 async function webSteps(step: Stepper, probe?: () => Promise<void>): Promise<void> {
@@ -623,13 +695,17 @@ async function genericAppSteps(step: Stepper): Promise<void> {
   await step("bool", "屏幕上出现了与「北京」相关的搜索结果");
   await step("bool", "屏幕顶部有一条红色横幅写着本应用已永久下线");  // 刻意为假：量判否路径
 }
-async function appSteps(step: Stepper): Promise<void> {
+async function appSteps(step: Stepper, probe?: () => Promise<void>): Promise<void> {
   // 首次启动有引导页（Skip / Continue）与可能的系统权限弹窗；先问再动，避免条件式动作提示
   if (await step("bool", "屏幕上有系统权限请求弹窗（如允许通知）") === true) await step("act", "点击不允许或 Don't allow 关闭系统弹窗");
   if (await step("bool", "这是维基百科应用的引导页（欢迎页或介绍页，底部有翻页箭头、Skip 或 Continue 按钮）") === true) await step("act", "跳过引导：底部有 Skip 就点 Skip；没有就点右下角的蓝色箭头翻到下一页，直到出现 Skip 或 Get started 并点它，进入应用首页");
   if (await step("bool", "屏幕上有系统权限请求弹窗（如允许通知）") === true) await step("act", "点击不允许或 Don't allow 关闭系统弹窗");
   // 第一轮实测：首页顶部没有搜索栏（搜索是底部标签），精确命中「Playwright」打开的是剧作家词条；两条断言按真实界面改写
   await step("bool", "这是维基百科应用的首页，底部导航栏里有 Search 标签");
+  if (PLATFORM === "android" && process.env.DF_ANDROID_TYPING_PROBE === "1") {
+    await step("act", "点击底部的 Search 标签，然后点击搜索框让它获得焦点");
+    if (probe) await probe().catch((e) => { results.android_typing_probe_error = errText(e); log(`Android 应用输入探针整体失败：${results.android_typing_probe_error}`); });
+  }
   await step("act", "点击底部的 Search 标签，在搜索框输入 Playwright，然后点击搜索结果中标题为 Playwright (software) 的那一条");
   await step("bool", "当前打开的词条标题是 Playwright (software)，正文提到浏览器自动化或 Microsoft");
   await step("bool", "屏幕顶部有一条红色横幅写着本站已永久关闭");  // 刻意为假：量判否路径
@@ -737,6 +813,7 @@ async function main(): Promise<number> {
     }
 
     if (SKIP_AI && SCENARIO === "app" && PLATFORM === "ios") await iosAppTypingProbe(driver, session.endpoint).catch((e) => { results.ios_typing_probe_error = errText(e); log(`应用输入探针整体失败：${results.ios_typing_probe_error}`); });
+    if (SKIP_AI && SCENARIO === "app" && PLATFORM === "android") await androidAppTypingProbe(driver).catch((e) => { results.android_typing_probe_error = errText(e); log(`Android 应用输入探针整体失败：${results.android_typing_probe_error}`); });
     if (!SKIP_AI && SCENARIO !== "egress" && SCENARIO !== "cap") {
       const iface = new AppiumInterface(driver, session.endpoint);
       const agent = new Agent(iface, {
@@ -771,8 +848,8 @@ async function main(): Promise<number> {
         ai.push(rec); log(`AI ${kind} ${rec.ms} ms tokens=${rec.total_tokens_so_far} result=${JSON.stringify(out)} ${err ? "ERR " + err : ""} evidence=${JSON.stringify(rec.evidence ?? rec.evidence_error)}`);
         return out;
       };
-      if (SCENARIO === "web") await webSteps(step, PLATFORM === "ios" ? () => iosTypingProbe(iface, driver!) : undefined);
-      else if (SCENARIO === "app") await (PLATFORM === "ios" ? iosSampleAppSteps(step) : APP_PACKAGE === "com.autonavi.minimap" ? amapSteps(step) : APP_PACKAGE === "org.wikipedia" ? appSteps(step) : genericAppSteps(step));
+      if (SCENARIO === "web") await webSteps(step, () => iosTypingProbe(iface, driver!));   // 探针两个平台都做，名字沿用
+      else if (SCENARIO === "app") await (PLATFORM === "ios" ? iosSampleAppSteps(step) : APP_PACKAGE === "com.autonavi.minimap" ? amapSteps(step) : APP_PACKAGE === "org.wikipedia" ? appSteps(step, () => androidAppTypingProbe(driver!)) : genericAppSteps(step));
       else if (SCENARIO === "faults") await faultSteps(step, driver, session.arn);
       results.ai_steps = ai;
       if (SCENARIO === "web") results.url_after_ai = await iface.url();

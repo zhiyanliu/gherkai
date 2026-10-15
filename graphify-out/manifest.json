@@ -225,8 +225,8 @@
     "semantic_hash": "c3b3c061a1ee89a9972bf161d7606e8a"
   },
   "docs/adr/0019-feature-tags-scope-and-engine.md": {
-    "mtime": 1792027607.6467903,
-    "ast_hash": "2b2cc3b4b59b53ea427a53513f68b230",
+    "mtime": 1792032788.814795,
+    "ast_hash": "d7c0b564fd449029e21dc64cea8d3aab",
     "semantic_hash": ""
   },
   "docs/adr/0020-step-phrasing-default-ai-deterministic-scaffold.md": {
@@ -255,9 +255,9 @@
     "semantic_hash": "c65a25d5f14b3a5772ddfb3c55abbfeb"
   },
   "CONTEXT.md": {
-    "mtime": 1789875291.7808676,
-    "ast_hash": "46506796a3741a0992133c3ce390e125",
-    "semantic_hash": "46506796a3741a0992133c3ce390e125"
+    "mtime": 1792033189.027401,
+    "ast_hash": "53b7fe4dd8675fae77372183fdaf8d26",
+    "semantic_hash": ""
   },
   "README.md": {
     "mtime": 1791785411.7193887,
@@ -355,8 +355,8 @@
     "semantic_hash": "0c57d7d1c7e717ce5e58fa830b85f12c"
   },
   "docs/adr/0022-bdd-runner-retired-core-parses-thin-worker.md": {
-    "mtime": 1792028378.8092313,
-    "ast_hash": "be9deab7270def19a868ef20829a4c72",
+    "mtime": 1792032788.815165,
+    "ast_hash": "ad9405dfca3a908c0cb4a23b02f55ef4",
     "semantic_hash": ""
   },
   "docs/adr/0023-novaact-acting-python-locked-no-ts-core.md": {
@@ -365,9 +365,9 @@
     "semantic_hash": "01bc939adc6973eaad56c15f4fdbedb6"
   },
   "docs/adr/0024-worker-core-protocol.md": {
-    "mtime": 1789872727.3851695,
-    "ast_hash": "629dd9c609e1139e78b0a5dda9807a97",
-    "semantic_hash": "629dd9c609e1139e78b0a5dda9807a97"
+    "mtime": 1792032788.815564,
+    "ast_hash": "fe8c323319eee6a8fb4cf37fa05fb9b7",
+    "semantic_hash": ""
   },
   "docs/adr/0026-schedule-module.md": {
     "mtime": 1790645163.0584137,
@@ -405,8 +405,8 @@
     "semantic_hash": "3e65e12df93e5405f26cd5ef6825f084"
   },
   "docs/adr/0034-detached-batch-reconciler.md": {
-    "mtime": 1792027607.6464257,
-    "ast_hash": "08542d82b7e02c1c4ea6537bea9a67fc",
+    "mtime": 1792032788.8157804,
+    "ast_hash": "89ef8d3a15256b836f8f6dbc563cb349",
     "semantic_hash": ""
   },
   "engines/midscene/README.md": {
@@ -420,9 +420,9 @@
     "semantic_hash": "2d10a8c1c6e7f072eb3e330554f1fe5a"
   },
   "docs/adr/0035-local-app-testing-via-tunnel.md": {
-    "mtime": 1790661189.4770696,
-    "ast_hash": "cb74ff3d98cee6600da2359a82015172",
-    "semantic_hash": "cb74ff3d98cee6600da2359a82015172"
+    "mtime": 1792032788.814955,
+    "ast_hash": "0482aedde34a776705d58fd3fbdcc092",
+    "semantic_hash": ""
   },
   "cli/tests/test_tunnel_cli.py": {
     "mtime": 1790660629.5660517,
@@ -430,8 +430,8 @@
     "semantic_hash": "4615408f2225dfc8ef7eb346c9f5e3c9"
   },
   "docs/adr/0036-deterministic-capability-discovery.md": {
-    "mtime": 1792027607.6475184,
-    "ast_hash": "1047757acd3618854734ce1601d3f645",
+    "mtime": 1792032788.8150616,
+    "ast_hash": "e9b2d15c451f2a4e1e53b95749a4d7c1",
     "semantic_hash": ""
   },
   "docs/adr/0037-distribution-and-packaging.md": {
@@ -1125,8 +1125,8 @@
     "semantic_hash": "75eca3c62cac20b9c6ca991a92c452ff"
   },
   "docs/adr/0042-step-evidence-and-explain.md": {
-    "mtime": 1791790928.0810518,
-    "ast_hash": "48c99492d5c8c107cc8e9b57d3c02898",
+    "mtime": 1792032788.8159642,
+    "ast_hash": "55e101e09c4542f542739d0f348dd7c3",
     "semantic_hash": ""
   },
   "engines/midscene/src/worker/evidence.mts": {
@@ -1305,9 +1305,9 @@
     "semantic_hash": ""
   },
   "docs/adr/0044-engine-model-selection-and-override.md": {
-    "mtime": 1789871622.1316,
-    "ast_hash": "4bdf0dc7599abb046caa2dac348ef2b1",
-    "semantic_hash": "4bdf0dc7599abb046caa2dac348ef2b1"
+    "mtime": 1792032788.8160586,
+    "ast_hash": "f607b02ceb5b5c4bba1bcaf6be1d17a7",
+    "semantic_hash": ""
   },
   ".github/scripts/release_notes.py": {
     "mtime": 1789881668.1803226,
@@ -1870,8 +1870,8 @@
     "semantic_hash": "0044f170604f2387ee9241018f3d56f3"
   },
   "engines/midscene/spikes/06-devicefarm-appium.mts": {
-    "mtime": 1791956033.460524,
-    "ast_hash": "7dcbf24c9caa0087c6ab5038ee605afd",
+    "mtime": 1792035392.7080266,
+    "ast_hash": "5b4ba518edaf491c432f42d20037d6b7",
     "semantic_hash": ""
   },
   "docs/journey/0011-mobile-devices-spike.md": {
@@ -1880,13 +1880,48 @@
     "semantic_hash": ""
   },
   "docs/journey/0012-mobile-devices-design-consolidated.md": {
-    "mtime": 1792027607.6484234,
-    "ast_hash": "10d77b2bb52ed9dd3d4d28eec4c37541",
+    "mtime": 1792032873.726322,
+    "ast_hash": "17b3c718dc632110b37f7fc5d257e814",
     "semantic_hash": ""
   },
   "docs/internals/midscene-bedrock-sigv4-signing.md": {
     "mtime": 1792027570.159904,
     "ast_hash": "eeafaee170c69b0665abc8bab2bfa531",
+    "semantic_hash": ""
+  },
+  "docs/adr/0048-test-targets-device-and-ui-kind.md": {
+    "mtime": 1792034112.1232324,
+    "ast_hash": "0d0e99aba83a0d94cc103149e2e08b10",
+    "semantic_hash": ""
+  },
+  "docs/adr/0049-worker-capabilities-targets-keys.md": {
+    "mtime": 1792034112.123368,
+    "ast_hash": "529131452689675aee1a7e54625ef0ea",
+    "semantic_hash": ""
+  },
+  "docs/adr/0050-deterministic-step-handles-and-testing.md": {
+    "mtime": 1792035808.5004473,
+    "ast_hash": "e8d97382af4d9226928932f46ca8e625",
+    "semantic_hash": ""
+  },
+  "docs/adr/0051-device-session-lifecycle-and-app-distribution.md": {
+    "mtime": 1792034112.1236324,
+    "ast_hash": "39291ba2685897c6e80a5d6c5e86d6e8",
+    "semantic_hash": ""
+  },
+  "docs/adr/0052-appium-interface-adapter-and-platform-differences.md": {
+    "mtime": 1792035808.5005927,
+    "ast_hash": "f326d80cff871a419cd74709580aa147",
+    "semantic_hash": ""
+  },
+  "docs/adr/0053-project-config-file.md": {
+    "mtime": 1792034112.1238425,
+    "ast_hash": "80b6df577b68d494c1ee11ecab319038",
+    "semantic_hash": ""
+  },
+  "docs/journey/0013-mobile-devices-implementation.md": {
+    "mtime": 1792034704.3746498,
+    "ast_hash": "6b6451c4c53906dcff695884f85843be",
     "semantic_hash": ""
   }
 }
