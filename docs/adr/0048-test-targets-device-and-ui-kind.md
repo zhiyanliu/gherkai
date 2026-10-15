@@ -75,7 +75,7 @@ job 墙钟预算的语义沿用 [0034](./0034-detached-batch-reconciler.md)：�
 
 - 网页上下文在部分设备与系统版本上运行期才知道是否可用（探测归 [0052](./0052-appium-interface-adapter-and-platform-differences.md)）；现状是 iOS 26 的 Safari 在 Device Farm 当前提供的 Appium 驱动下网页上下文整体不可用。
 - **前提由注册元数据显式声明**：需要网页上下文的 `webdriver` 条目声明 `requires: ["web_context"]`（[0050](./0050-deterministic-step-handles-and-testing.md) 决策 1），能力自述把它带进 step 级 `targets`，plan 标注「确定性（需要网页上下文；设备不提供时记为错误）」（[0049](./0049-worker-capabilities-targets-keys.md)）。core 只把 worker 报来的已知取值映射成产品文案，不推断 handler 的行为。
-- 运行期：探测**确认**不提供时，worker 不调用 handler，step 记 error、类别 `capability_unavailable`，消息说明「这台设备上取不到网页内容，确定性检查无法执行」与可选做法（改写为 AI 断言、换设备）；探测**出错**（列上下文的调用失败、传输层错误或会话异常这类无法区分设备能力的情形；有候选但网页命令持续超时而原生命令正常属于确认不提供，归类规则在 [0052](./0052-appium-interface-adapter-and-platform-differences.md) 决策 5）时同样不调用 handler，但类别记 `engine_error`、消息「未能确认设备是否提供网页上下文」，以免把瞬时故障说成「重试不会变」。没有声明前提却调用了 `withWebContext` 的 handler，由 `withWebContext` 抛出同一类别。**不转 AI**：plan 的标注是 feature 作者读到的契约，运行期悄悄换成 AI 判定会改变判定依据而不留痕，属于静默降级。
+- 运行期：探测**确认**不提供时，worker 不调用 handler，step 记 error、类别 `capability_unavailable`，消息说明「这台设备上取不到网页内容，确定性检查无法执行」与可选做法（改写为 AI 断言、换设备）；探测**出错**（列上下文的调用失败、传输层错误或会话异常这类无法区分设备能力的情形；有候选但网页命令持续超时而原生命令正常属于确认不提供，归类规则在 [0052](./0052-appium-interface-adapter-and-platform-differences.md) 决策 5）时同样不调用 handler，但类别记 `engine_error`、消息「未能确认设备是否提供网页上下文」，以免把瞬时故障说成「重试不会变」。没有声明前提却调用了 `withWebContext` 的 handler，由 `withWebContext` 抛出同一类别。**不转 AI**：plan 的标注是 feature 作者读到的契约，运行期悄悄换成 AI 判定会改变判定依据而不留痕，属于静默降级。这个类别在 iOS 网页目标上可能少被触发（决策 7 推荐 iOS 的落点核对用 AI 断言），保留它是因为处置语义与 `engine_error` 不同（重试不会变）；样本积累后再议是否合并。
 
 ### 7. 内建「页面地址匹配」step 与落点核对规则
 

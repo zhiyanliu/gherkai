@@ -63,7 +63,7 @@
 
 ### 4. `max_session_s`：目标的单次会话上限，由 worker 从自己的常量算出
 
-- 语义：worker 在该目标上能持有一次会话的最长秒数，计时起点与会话服务的计费起点一致（Device Farm 为 CreateRemoteAccessSession 的时刻）。
+- 语义：worker 在该目标上能持有一次会话的最长秒数，计时起点为会话创建时刻（Device Farm 为 CreateRemoteAccessSession 的时刻；计费口径以账单为准，[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 7）。
 - 取值：Device Farm 的 150 分钟上限减去 worker 收尾所需的余量（deleteSession 与 StopRemoteAccessSession 等释放步骤排在 `scope_done` 之前，[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 5），由 worker 内的预算常量算出、不在 CLI 或文档里另写字面量；与 `min_grace_s` 由收尾预算常量算出是同一做法（[0036](./0036-deterministic-capability-discovery.md) 决策 5）。
 - 消费：job 墙钟预算（自推进器 claim 这个 job 起算，[0034](./0034-detached-batch-reconciler.md)）超过该目标的 `max_session_s` 时，本机后端在执行前预检里拒绝（[0048](./0048-test-targets-device-and-ui-kind.md)），云端后端由 worker 在建会话前读取 Job 输入携带的 `timeoutS`、与该目标的 `max_session_s` 比较作自检拒绝（决策 7）。设备 scope 的缺省墙钟由 core 的 plan 层给出（[0034](./0034-detached-batch-reconciler.md)「job timeout」节），显式值与 tag 的下限校验也在 core；获取预算与会话生命周期归 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 2。会话在 job 启动之后才创建，故墙钟不超过 `max_session_s` 即保证会话寿命不超过上限，不必为设备另立起算点。取设备的开销（创建到 Appium 可用，约 1 到 2.5 分钟）计入墙钟；停止到 COMPLETED 的时间发生在 job 结束之后，只计设备分钟、不占墙钟。
 - **按目标给值，不做顶层单值**：同一 worker 的桌面与设备会话上限来源不同，顶层单值只能取最小值，会把桌面 job 也限制在设备的上限之内。

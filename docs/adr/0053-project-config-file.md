@@ -104,8 +104,8 @@ ios     = { file = "build/Wikipedia.ipa", bundle-id = "org.wikimedia.wikipedia" 
 | 观察 | 数据 | 支撑的决策 |
 |---|---|---|
 | 同一账号远程访问并发 | 同机型连发 6 个会话请求，前 5 个进入 RUNNING，第 6 个进入 `PENDING_CONCURRENCY` 排队而不是报错；排队实测最长约 6 分钟；排队中撤回的会话返回体与 Get 都没有 `deviceMinutes` 字段，是否计费以账单为准 | 获取预算必须可配，且要覆盖排队时间 |
-| 取设备开销 | 创建到 RUNNING：Android 51 到 72 秒、iOS 61 到 72 秒；加上 Appium 建连，创建到 Appium 可用约 1 到 2.5 分钟，计入 job 墙钟与设备分钟 | `acquire-timeout-s` 的默认值不能低于分钟级 |
-| 停止到 COMPLETED | Android 60 到 85 秒，iOS 超过 2 分钟（最长约 150 秒），只计设备分钟、不占 job 墙钟 | 费用估算要计入收尾分钟；与获取预算无关 |
+| 取设备开销 | 创建到 RUNNING：Android 51 到 72 秒、iOS 61 到 72 秒；加上 Appium 建连，创建到 Appium 可用约 1 到 2.5 分钟，计入 job 墙钟，并计入服务商回报的设备分钟 | `acquire-timeout-s` 的默认值不能低于分钟级 |
+| 停止到 COMPLETED | Android 60 到 85 秒，iOS 超过 2 分钟（最长约 150 秒），只计入服务商回报的设备分钟、不占 job 墙钟 | 费用口径以账单为准、估算时不能漏掉收尾一段；与获取预算无关 |
 | 计费方式的拐点 | 不计量槽位 250 美元每月除以计量单价 0.17 美元每分钟，约 1470 分钟每月每平台 | `billing-method` 必须可选，而不是内建固定 |
 | 系统版本决定能力 | iOS 15.8 的 Safari 网页上下文完整可用，iOS 26.3 的网页上下文整体不可用 | 筛选条件以系统版本为必给项，而不是只按平台挑 |
 | 设备忙 | 历次实测中未遇到机型被占满（BUSY）的情形；指定 ARN 而设备被占用时的会话状态在 API 状态枚举里是 `PENDING_DEVICE`（排队等设备），同机型 5 台并发都分到了不同单元 | 筛选时排除繁忙设备是保守选择（算法归 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 3）；指定 ARN 时的等待由获取预算处理 |

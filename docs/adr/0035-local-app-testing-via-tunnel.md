@@ -75,7 +75,7 @@
 - **规则两条、三份同文实现**：① 把文本里每个 `scheme://userinfo@host` 的 userinfo 段替换成 `***`（`https://***@host`，沿用 pip / git 的显示惯例）。正则作用于 `://` 之后、`@` 之前不含 `/ ? # @ 空白 " \` 的一段，所以能直接作用在已序列化的 JSON 行上而不破坏结构。② 签名类查询参数与隧道令牌参数 `gherkai_tunnel_token` 的值替换成 `***`，并同时覆盖 XML 实体转义形态（控件树属性里 `&` 写成 `&amp;`；[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 11）。不做「拿本次凭据精确回替」：本次凭据分在不同持有者手里——隧道令牌随 definition 下发，设备端点与预签名地址由 worker 在运行时生成且不进任何事件（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 11），core 的 `wire.py` 与 CLI 的 `explain` 这些出口拿不到全部凭据，要回替就得把秘密再传一遍；按形态匹配不需要传递秘密，三份实现的行为也一致。实现三份（`gherkai_core/redact.py`、Nova worker `lib/redact.py`、Midscene worker `lib/redact.mts`）——Nova worker 零 core 依赖、Midscene 是另一种语言，三份文件头互指、测试用同一组用例。
 - **收口在出口、不在产生点**：worker 两处（事件 `emit` 序列化后的整行、evidence.json 写盘前的整份），core 两处（`wire.py` 解码事件 `message` 时、`subprocess_engine` 转发 worker 日志每行时），CLI 两处（`explain` 的机读文档整份深度脱敏、`run --json` 输出整份深度脱敏）。放在出口是为了把 `steps/` 里使用方自写 handler 的消息、SDK 自己的 stdout 一并盖住，而不是逐个改消息模板。导航实参（`go_to_url` / `page.goto` 的参数）与 job 文本本身不经过这些出口，凭据照常生效。
 - **明确不脱敏（执行依赖明文）**：`run_meta.json`（0600） / DDB META / S3 参数卸载对象 / Fargate job-in 里的 run 定义（推进器要读回会话预热地址注入 worker）、流量策略临时文件（0600）、worker 进程环境里的预热地址、云端 RunTask 的 `containerOverrides`。`jobs/*.json` 不在此列：它只被 `status` 与 `explain` 读取、不是执行输入，且现方案下 step 文本不含秘密，保持 0644 以便 CI 读取。另有一处**原样落库**：worker 发出的原始事件行（本机 detached 的 SQLite 事件库、云端的 DDB events 表）在解码前写入，两个官方 worker 已在 emit 处脱敏、故行内干净，第三方 worker 若不脱敏则行内有明文——core 的 `wire.py` 只盖住解码后的视图。也不改引擎原生产物（Nova 轨迹 html / json、Midscene 报告 html）、云端 CloudWatch 里的 SDK stdout 与 Device Farm 的录像、Appium 日志——它们由 SDK 或服务商写、不经我们的出口，仍按「短命凭据」对待，用户指南与 skill 的安全段照实说明。
-- **已知残余**：模型在 thought 里复述地址时若去掉了 `scheme://` 只写 `用户:口令@主机`，规则抓不到；worker 把异常文本压成一行并截到 300 字时先脱敏再截断（否则截在 userinfo 中间会丢掉 `@`、规则失效）；纯 ASCII 逗号把地址与邮箱连写（`https://a.com,x@b.com`）仍会误吞到邮箱的 `@`；隧道 cookie 会到达被测应用的访问日志（剥离是服务商的付费功能）。
+- **已知残余**：模型在 thought 里复述地址时若去掉了 `scheme://` 只写 `用户:口令@主机`，规则抓不到；worker 把异常文本压成一行并截到 300 字时先脱敏再截断（否则截在 userinfo 中间会丢掉 `@`、规则失效）；纯 ASCII 逗号把地址与邮箱连写（`https://a.com,x@b.com`）仍会误吞到邮箱的 `@`；隧道 cookie 会到达被测应用的访问日志（剥离是服务商的付费功能）；云端 RunTask 的 `containerOverrides` 带预热地址，task 停止后约 1 小时内仍可经 `ecs:DescribeTasks` 读到，CloudTrail 是否记录该字段待实施期核实。
 
 ## 被拒/被缓方案（护栏）
 
@@ -88,6 +88,6 @@
 
 - 隧道仅在 `--expose-local` 显式给出时起——默认路径零新依赖、零出网变化。
 - core 对隧道无知（映射在组合根完成）；worker 只做一次预热导航并确认页面标记，不感知令牌与 cookie 的值（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 13）。额外请求头与会话预热地址**不新增 worker↔core 协议事件**——definition 层各加一个 omit-when-None 字段（`RunMeta.extra_http_headers`、会话预热地址）+ 复用既有 env 注入面（`GHERKAI_EXTRA_HTTP_HEADERS`、`GHERKAI_SESSION_WARMUP_URL`），core 只搬运不解释语义。
-- **definition 完整性不变量**：隧道模式下 definition 必带「额外请求头」与「会话预热地址」两项；worker 收到额外请求头却没有预热地址即记 `precheck_failed`「后端未传递会话预热地址，部署版本可能低于命令行工具，请重新部署」——两个既有事实绑成一个完整性判据，能抓到旧后端丢字段的部署残缺，不按文本猜测。
+- **definition 完整性不变量**：隧道模式下 definition 必带「额外请求头」与「会话预热地址」两项；worker 收到额外请求头却没有预热地址即记 `precheck_failed`「后端未传递会话预热地址，部署版本可能低于命令行工具，请重新部署」——两个既有事实绑成一个完整性判据，能抓到旧后端丢字段的部署残缺，不按文本猜测；它要防的开发版本混搭场景见 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 13。
 - 本机关机/断网 = 隧道断 = run 以导航失败（AI 报错形态）告终——明示边界，submit 时提示，不做「断线重连恢复」（隧道进程崩溃同理；测试可重跑，不值守护复杂度）。
 - **与设备目标的关系**：鉴权契约（预热页面的三种可见结果与归因、cookie 规格、边缘策略的规则数约束、导航路线由能力探测决定）、脱敏规则对查询串凭证的扩展，归 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 11 与 13；本篇的地址映射与三形态宿主不变。

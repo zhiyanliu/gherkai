@@ -84,7 +84,7 @@ worker **按白名单匹配具体瞬时异常类型**,不用宽基类兜底:
   `schedule._Worker._run_once` 在 generic `except` **之前**加 `except WorkerNetworkError` → 记 `error_type="network_error"`。
 - **`WorkerNetworkError` 定义在 `core/gherkai_core/errors.py`,不在 adapter**——否则 schedule 反依赖 adapter（违反 ports 六边形）。
 - **隧道预热失败不是建连失败**：不用退出码 80，经 `scope_done{status: error, errorType}` 传递（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 13）；设备 worker 不使用 80（worker 自判的执行前失败走 `scope_done` 的 scope 级判定；获取期间收到停止信号的终结不发 `scope_done`，判定由推进器的停止原因给出，见 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 4、5）。
-- 会话已起后的瞬时网络错（罕见）仍走 `step_done`/`scope_done` 的 `errorType` 字段,不用退出码。**已兑现**：act 中途失败时两个引擎 worker 复用 `_is_transient_network`/`isTransientNetwork` 判定，网络瞬时 → 标 `network_error`（否则 `engine_error`）——**仅诊断分类、不触发重试/恢复**（act 不幂等；且 `saw_step=True` + 走 step_done 非退出码 80，schedule 重试门槛的 AND 条件天然不满足、不重试）。"act 中途恢复"仍 defer（见下）。
+- 会话已起后的瞬时网络错（罕见）仍走 `step_done`/`scope_done` 的 `errorType` 字段,不用退出码。**已兑现**：act 中途失败时两个引擎 worker 复用 `_is_transient_network`/`isTransientNetwork` 判定，网络瞬时 → 标 `network_error`（否则 `engine_error`；设备 worker 的结果未知命令另按 [0052](./0052-appium-interface-adapter-and-platform-differences.md) 决策 6 归类：会话非 RUNNING 为 `session_lost`、RUNNING 为 `engine_error`）——**仅诊断分类、不触发重试/恢复**（act 不幂等；且 `saw_step=True` + 走 step_done 非退出码 80，schedule 重试门槛的 AND 条件天然不满足、不重试）。"act 中途恢复"仍 defer（见下）。
 
 ## worker 层退避
 

@@ -16,7 +16,7 @@
 | `status` | `passed` / `failed` / `error` | run 级判定：任一 job 为 error 则 error；任一为 failed 则 failed；否则 passed。job 级的 `skipped` / `aborted` 不参与 run 级聚合，故 run 级不出现这两个值 |
 | `duration_ms` | number \| null | run 级墙钟（含并发，不等于各 job 之和） |
 | `total_tokens` / `total_time_worked_s` | number \| null | 跨 job 的引擎原生量合计（Midscene 上报 tokens、Nova 上报 agent 工作秒）；无引擎上报时为 null，**不折算为美元** |
-| `device_observed_s` / `device_observed_missing` | number / int \| 省略 | 仅当 run 含设备目标 job 时出现：各设备 job 的 `device_observed_s` 之和，与 `observed_s` 为 null 的会话总数（不计入合计） |
+| `device_observed_s` / `device_observed_missing` | number / int \| 省略 | 仅当 run 含设备目标 job 时出现：各设备 job 的 `device_observed_s` 之和，与 `origin` 为 `created` / `discovered` 而 `observed_s` 为 null 的会话总数（不计入合计；`attempted` 的尝试两键都不计） |
 | `jobs[]` | array | 每个 job（即一个 scope）的判定，见下 |
 | `run_meta` | object | 本次 run 的任务定义（提交时固定），见下 |
 | `artifacts` | object | 产物落点，见下；`--no-report` 时**省略**（例外：local 后端 `--no-report --quiet` 仍保留 `worker_log` 一个键） |
@@ -31,7 +31,7 @@
 | `total_tokens` / `total_time_worked_s` | number \| null | 本 job 的原生量合计（失败的 act 也计入） |
 | `session_id` | string \| null | 引擎会话 id（血缘；可与 worker 日志 / 轨迹目录对应）；设备目标为 Device Farm 远程访问会话的 ARN |
 | `sessions[]` | array \| 省略 | 仅设备目标：本 job 开过或尝试过的每个远程访问会话一项——`session_id`（结果未知的创建尝试为 null）、`name`（会话名）、`origin`（`created` / `discovered` / `attempted`）、`release`（`confirmed` / `unconfirmed`）、`observed_s`（worker 观察到的占用秒数，缺则 null）、`provider_minutes`（服务商回报的 `{total, metered, unmetered}` 快照，缺则 null） |
-| `device_observed_s` / `device_observed_missing` | number / int \| 省略 | 仅设备目标：本 job 各会话 `observed_s` 之和，与 `observed_s` 为 null 的会话数（不计入合计；逐条见 `sessions[]`） |
+| `device_observed_s` / `device_observed_missing` | number / int \| 省略 | 仅设备目标：本 job 各会话 `observed_s` 之和，与 `origin` 为 `created` / `discovered` 而 `observed_s` 为 null 的会话数（不计入合计；`attempted` 的尝试两键都不计，逐条见 `sessions[]`） |
 | `error_type` | string \| null | job 级归因（如 `timeout`、`precheck_failed`、`acquire_timeout`、`session_lost`、`release_failed`）；skipped/aborted 恒 null、原因在 `message`。`release_failed` 表示有会话未能确认停止，`message` 列出会话名 |
 | `message` | string \| null | job 级未达 passed 的原因原文（超时、未启动、fail-fast 被中止、worker 异常退出等）；passed 时为 null。**`message` 在本契约里恒表原因**：只出现在非 passed 态上，job 级与 step 级同义 |
 | `report_refs[]` | array | job 级原生产物指针：`kind`（`summary` / `report`）、`ref`（`file://` 或 `s3://` URI）、`label` |

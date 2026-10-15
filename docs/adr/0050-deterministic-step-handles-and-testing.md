@@ -75,6 +75,7 @@ deterministic("^页面显示「(?<text>[^」]+)」$", {
 - **handler 保持薄**：读值与操作留在 handler，判定抽成纯函数，第一层就能覆盖大部分逻辑。
 - **离线执行要固定缓存目录**：WebdriverIO 在未配 Selenium 服务时自行下载 Chrome for Testing 与驱动，缓存缺省位于系统临时目录、系统重启后丢失；脚手架与文档要求显式指定缓存目录（`cacheDir` 或 `WEBDRIVER_CACHE_DIR`）。
 - **真机验收是验收，不是单元测试**：缺省由人或 CI 触发；agent 能否自行开设备会话由项目约定决定（见决策 4）。
+- **已接受代价与重议条件**：真机验收这一层每次都要经过取设备的等待（约 1 到 2.5 分钟）并按设备分钟计费，1.5 不为它提供加速路径，靠前两层离线测试把大部分迭代挡在真机之外。出现以下任一信号时重新讨论内循环加速：使用方反馈真机验收占了设备 step 写作耗时的主要部分；离线层覆盖不了的原生应用 step 成为设备 step 的多数。候选方案须守 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 1 的会话归属单一与收尾责任单一（不跨 scope 或跨 job 复用会话），例如本机模拟器层，或由作者在 gherkai 之外自行持有的调试会话。
 - 本 ADR 的分层只针对使用方写的确定性 step；worker 自身的驱动适配器与设备模块的护栏归 [0052](./0052-appium-interface-adapter-and-platform-differences.md)。
 
 ### 4. 写作方法（进 user guide 与 agent skill）

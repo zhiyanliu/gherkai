@@ -20,7 +20,7 @@
 ### 1. 一个 scope 一个远程访问会话，scenario 之间不复位
 
 - **做什么**：worker 为每个 scope 创建一个 Device Farm 远程访问会话，会话名按决策 3 的规则生成。应用目标在会话建好后安装并启动一次；scenario 之间不重新导航、不重启应用，scope 内状态共享沿用 [0019](./0019-feature-tags-scope-and-engine.md) 的契约（同 scope 的 scenario 串行、共享被测对象的会话与操作状态、允许操作依赖），全部测试目标适用。需要干净起点的用例在 Background 里显式写内建确定性 step「重新启动应用」（只对应用目标注册，实现归 [0052](./0052-appium-interface-adapter-and-platform-differences.md)）；agent skill 的写作规则缺省为多 scenario 的应用 feature 放这一步。
-- **为什么**：每个会话有两段固定开销，都计入设备分钟：取设备开销（创建到 Appium 可用，约 1 到 2.5 分钟，另占墙钟）与停止到 COMPLETED（Android 约 1 分钟、iOS 最长约 2.5 分钟，不占墙钟）。按 scope 复用才能把它们摊到多条 scenario 上。隐式复位会让同一份 feature 加上 `@device` 后语义静默改变，terminate 加 activate 又不清持久数据、只是半隔离；准备动作失败时也没有 step 可挂。显式 Background step 的失败就是本 scenario 内一个普通 step 的 error，短路只作用于本 scenario。
+- **为什么**：每个会话有两段固定开销，实测都计入服务商回报的设备分钟：取设备开销（创建到 Appium 可用，约 1 到 2.5 分钟，另占墙钟）与停止到 COMPLETED（Android 约 1 分钟、iOS 最长约 2.5 分钟，不占墙钟）。按 scope 复用才能把它们摊到多条 scenario 上。隐式复位会让同一份 feature 加上 `@device` 后语义静默改变，terminate 加 activate 又不清持久数据、只是半隔离；准备动作失败时也没有 step 可挂。显式 Background step 的失败就是本 scenario 内一个普通 step 的 error，短路只作用于本 scenario。
 - **不做**：不按 scenario 开会话；不跨 scope 或跨 job 复用会话（会话归属与收尾责任必须单一）；不在 scenario 之间做任何自动复位。
 
 ### 2. 时间预算：会话预算从创建起算，获取预算从进入设备解析起算，job 墙钟沿用 0034
@@ -35,7 +35,7 @@
 
 - **设备解析**（输入是 [0053](./0053-project-config-file.md) `[devices]` 的 `arn` 或 `os-version`）：完整分页列举公共设备；静态过滤平台、点分段版本族（配置值按点切段，设备版本的前几段完全相等即命中：`18` 命中 `18.x.y`，`18.1` 不命中 `18.10`，写全段即精确匹配）、手机形态（固定，不开放配置）、支持远程访问。首轮零候选再列举一次，仍为零即 `precheck_failed`，消息给出条件与最接近的可用版本；等待期间候选变空不改判。选择规则：在全部匹配候选中先排除 BUSY 与 TEMPORARY_NOT_AVAILABLE，再按版本号高、HIGHLY_AVAILABLE 优于 AVAILABLE、ARN 字典序取第一台；全部繁忙才在获取预算内等待。只写版本前缀时 plan 提示「设备池新增版本时实际分到的版本可能改变，写全版本号可以固定」。直接给 ARN 时不做静态过滤，被同步拒绝（不存在、已下架、不支持远程访问）记 `precheck_failed`。
 - **创建与重试**：Device Farm 客户端 `maxAttempts = 1`、每次调用显式请求超时（Create、Get、List 10 秒，Stop 3 秒，终结期 Get 5 秒），重试一律由 worker 在获取预算内手写退避，停止信号可穿透。创建被拒（限流、机型繁忙）在预算内重试；Appium newSession 的瞬时失败只重试 newSession、不重建会话；设备单元拒装驱动辅助包（如厂商 ROM 的 `INSTALL_FAILED_USER_RESTRICTED`）是这台单元的状态，改为重建会话换一台，至多一次，被替换的会话先 Stop。并发上限以账号实际值为准，不在代码里写死；超过上限时会话停在 `PENDING_CONCURRENCY`，worker 把排队当正常等待计入获取预算；STOPPING 中的会话仍占着槽位。
-- **会话名**：固定前缀、run_id、scope_id 的安全编码与尝试序号组成，长度封顶 256 字符（实测 256 接受、257 拒绝），编码规则在 worker 的设备模块单点定义。同名会话可以并行创建、名字没有唯一性，所以尝试序号是名字的一部分，按名列举后再按序号对应。
+- **会话名**：固定前缀、run_id、scope_id 的安全编码与尝试序号组成，长度封顶 256 字符（实测 256 接受、257 拒绝），编码规则：`gherkai:<run_id>:<尝试序号>:<scope_id 编码>`，scope_id 里 `A-Z a-z 0-9 . _ -` 之外的字符按 UTF-8 字节百分号编码；总长超过 256 时只截 scope_id 段并在其后接 `~` 加完整 scope_id 的 SHA-256 前 8 位十六进制，前缀、run_id 与尝试序号三段永不截断，按名列举时据这三段匹配。规则在 worker 的设备模块单点实现，worker 列举时按同一规则重算名字。同名会话可以并行创建、名字没有唯一性，所以尝试序号是名字的一部分，按名列举后再按序号对应。
 - **结果未知的创建尝试**：Create 请求超时或连接中断时该尝试记为「待核」。待核只能由正面证据消除——按名列举命中，登记进待清理集并发 `session_opened(origin: discovered)`，随后与其他会话一样释放并确认。列举为空不构成排除证据（实测只证明成功返回的 Create 在 1 秒内按名可见，没有证明结果未知的请求在服务端如何处理，也不能排除它在列举之后才出现），所以不设「等多久为空就算没建」的窗口。每次重试前与每条终结路径（正常收尾、SIGTERM、异常退出）都核对一次，核对须在预算内处理分页（`ListRemoteAccessSessions` 带 `nextToken`、无服务端按名过滤），未扫完即视为未核对。终结时仍待核的尝试按决策 5 发 `attempted` 的成对事件并以退出码 1 结束。Create 没有幂等令牌，按名查询是补救不是幂等保证。这是有意的保守：代价是罕见的误报「请核对控制台」，换来不漏报一个可能计费到上限的会话。
 
 ### 4. 事件契约：`scope_started` 是执行就绪，会话血缘与计量走 `session_opened` / `session_closed`，执行前失败走 `scope_done` 的 scope 级判定
@@ -44,9 +44,9 @@
 - **成对事件承载会话血缘**（[0024](./0024-worker-core-protocol.md) 事件集的加法扩展）：
   - `session_opened{scopeId, sessionId?, name, origin: created | discovered | attempted, device?{platform, model, osVersion, unit}}`：Create 返回 ARN 后、一切长耗时动作之前发出（`created`）；按名找回的孤儿会话也发（`discovered`，device 可缺）；结果未知且终结时仍未排除的创建尝试也发一条（`attempted`，`sessionId` 为 null、只带会话名），使 worker 知道的待核事实有协议载体。
   - `session_closed{scopeId, sessionId?, name, release: confirmed | unconfirmed, observedS?, providerMinutes?}`：该会话的处置最终结束时发出，每个会话恰一条，不先发 unconfirmed 再补 confirmed。不带「为何停止」的枚举，原因进 worker 日志与 message。
-  - 配对键是 `sessionId`，没有时用 `name`。sessionId、name 与 device 对 core 不透明，端点地址不进任何字段。[0024](./0024-worker-core-protocol.md) 的配对规则改为「`scope_started` 是首条执行事件；其前只允许 `session_opened` 与 `session_closed`」。桌面 worker 不发这两种事件，桌面路径零变化。同步路径的 `persist.on_event` 收到 `session_opened` 即把 job 刷成 RUNNING 并带 session_id，收到 `scope_started` 时改写为执行会话的 id。
+  - 配对键是 `sessionId`，没有时用 `name`。sessionId、name 与 device 对 core 不透明，端点地址不进任何字段。[0024](./0024-worker-core-protocol.md) 的配对规则改为「`scope_started` 是首条执行事件；其前只允许 `session_opened` 与 `session_closed`」。桌面 worker 不发这两种事件，桌面路径零变化。同步路径的 `persist.on_event` 收到 `session_opened` 即把 job 刷成 RUNNING 并带 session_id，收到 `scope_started` 时改写为执行会话的 id；`JobState.session_id` 优先取 `scope_started` 的值，没有时退回最近一条非 `attempted` 的 `session_opened`。`origin: attempted` 的 `session_opened` 不改写 job 已记的 session_id：已有值保留，没有则保持 null，它只作为 `sessions[]` 里 `session_id` 为 null 的一项进入摘要与未确认集；推进器投影（[0034](./0034-detached-batch-reconciler.md) 机制二、三）用同一规则，任何路径都不用 null 覆盖已有的 session_id（DDB 逐属性写入显式 null 同样会擦掉已有值，「未提及属性保留」防不住）。
 - **确认停止只认状态**：`GetRemoteAccessSession` 读到 STOPPING 或 COMPLETED，或 Stop 返回体中的状态为两者之一（实测 Stop 约 0.2 秒返回、返回体带 `status: STOPPING`，可直接作确认；对已停会话重复 Stop 报 ArgumentException「Invalid parameter RemoteAccessSession」）。Stop 报任何错误都补查一次状态，不按错误类别推断。
-- **执行前失败走 `scope_done{status: error, errorType, message}`**，不发 `scope_started`，不发任何 scenario 或 step 事件。`ScopeDone` 加三个可选字段（同进同出，`status` 只允许 `error`）；判定由 `status` 承载，`errorType` 只回答原因，[0024](./0024-worker-core-protocol.md)「错误归因不是第二根判定轴」原则不变。core 收到 `scope_done.status = error` 后对 definition 中既无 `step_started` 也无 `step_skipped` 的 step 合成 `SKIPPED(shortcircuited=False)`、对无事件的 scenario 合成 scenario 级 SKIPPED（[0031](./0031-job-lifecycle-states-and-severity.md) 决定一、三、六的加法）；终结判定的真值表归 [0034](./0034-detached-batch-reconciler.md) 机制二。桌面 worker 在隧道预热失败时也走这条路（决策 13），所以新字段出现在「1.5 CLI 发起、带设备目标或预热地址」的 run 中。
+- **执行前失败走 `scope_done{status: error, errorType, message}`**，不发 `scope_started`，不发任何 scenario 或 step 事件。`ScopeDone` 加三个可选字段（同进同出，`status` 只允许 `error`）；判定由 `status` 承载，`errorType` 只回答原因，[0024](./0024-worker-core-protocol.md)「错误归因不是第二根判定轴」原则不变。core 收到 `scope_done.status = error` 后对 definition 中无事件的 scenario 合成 scenario 级 SKIPPED，并对其全部 step 合成 `SKIPPED(shortcircuited=False)`；在途 scenario（有 `scenario_started` 无 `scenario_done`）整条不合成，其未开始的 step 也不合成（[0031](./0031-job-lifecycle-states-and-severity.md) 决定一、三、六的加法）；终结判定的真值表归 [0034](./0034-detached-batch-reconciler.md) 机制二。桌面 worker 在隧道预热失败时也走这条路（决策 13），所以新字段出现在「1.5 CLI 发起、带设备目标或预热地址」的 run 中。
 - **错误归因类别**（[0024](./0024-worker-core-protocol.md) 类别集按「随真实失败样本扩充」的规则加项，[机读输出契约](../internals/cli-json-contract.md)同步加法扩展）：
 
 | 形态 | 判据 | 归因 | 处置 |
@@ -78,6 +78,7 @@
   2. **终结核对**（至多 5 秒，`ListRemoteAccessSessions` 按名列举、含分页）：对全部待核尝试按决策 3 的规则处理；阶段结束仍待核的尝试，各发 `session_opened(origin: attempted, name)` 与 `session_closed(release: unconfirmed, name)`。
   3. **释放阶段**（25 秒，全部待清理会话并行、共享截止线）：每个会话 Stop（3 秒）→ 失败则 Get 补查（5 秒）→ 退避 → 再 Stop 一次 → 再补查；到线即记 `release: unconfirmed`。SIGTERM 路径不调 `deleteSession`（Stop 决定计费，deleteSession 只是 Appium 侧的收尾）。
   4. **事件与产物**：每会话 `session_closed`、中断兜底上传（10 秒）、截图队列排空（6 秒）。
+  终结只执行一次：信号重复、超时与信号同时到达这类交叠或重入不重新进入四阶段；真实会话按 ARN 去重、每会话恰一条 `session_closed`，待核尝试按名只发一对 `attempted` 事件。
   `min_grace_s` 由四段推导：10 + 5 + 25 + 10 + 6 加事件写出与余量约 7.5，约 64 秒，低于 Fargate `stopTimeout` 的 120 秒；各段上限以网络退化实测校准后定数（[0049](./0049-worker-capabilities-targets-keys.md) 决策 5）。
 - **Stop 规则只有一条**：会话状态仍为 RUNNING 就发一次幂等 Stop（覆盖按年龄到期而 API 仍报 RUNNING 的情形）；已是 STOPPING 或 COMPLETED 则不发 Stop、不调 `deleteSession`。
 - **会话丢失序列**：当前 step `step_done{error, session_lost}` → 本 scenario 余下 step `step_skipped`（`shortcircuited=True`）→ `scenario_done{error}` → 后续 scenario 不发事件 → 收尾 → `session_closed` → `scope_done{status: error, errorType: session_lost}`；后续 scenario 由 core 合成 SKIPPED。
@@ -91,7 +92,7 @@
 
 ### 7. 设备计量：只报原生量
 
-- `session_closed.observedS` 是 worker 观察到该会话的时长：起点为 Create 返回时刻（孤儿为列举发现时刻），止点为发出 Stop 或确认其已停止的时刻；缺失记 null，null 不等于 0。`providerMinutes` 保留 AWS 原形 `{total, metered, unmetered}` 快照，可缺。core 把 `observedS` 合计成 job 与 run 级「设备占用时长」（机读键 `device_observed_s`），`observedS` 为 null 的会话不计入合计、另以 `device_observed_missing` 计数，两键同层成对、只在含设备目标时出现；不折算货币、不估计计费量、不写任何依赖计费起点的断言，用户文档只说明口径不同、以账单为准。[0024](./0024-worker-core-protocol.md)「cost 只挂 `step_done`」改为「`step_done` 与 `session_closed` 各挂各的原生量，每个字段只在一层出现，core 逐字段跨层合计」。
+- `session_closed.observedS` 是 worker 观察到该会话的时长：起点为 Create 返回时刻（孤儿为列举发现时刻），止点为发出 Stop 或确认其已停止的时刻；缺失记 null，null 不等于 0。`providerMinutes` 保留 AWS 原形 `{total, metered, unmetered}` 快照，可缺。core 把 `observedS` 合计成 job 与 run 级「设备占用时长」（机读键 `device_observed_s`），`observedS` 为 null 的会话不计入合计、另以 `device_observed_missing` 计数，两键同层成对、只在含设备目标时出现；`device_observed_missing` 只计 `origin` 为 `created` 或 `discovered` 的会话，`attempted` 的尝试既不计入合计也不计入该计数、只在 `sessions[]` 里以 `origin` 区分——尝试连会话是否存在都没有证实，与「会话存在但缺计量」是两种事实，混进同一个计数会误导使用方；人读展示把它们标为「结果未知的创建尝试」、不当作缺计量的会话；不折算货币、不估计计费量、不写任何依赖计费起点的断言，用户文档只说明口径不同、以账单为准。[0024](./0024-worker-core-protocol.md)「cost 只挂 `step_done`」改为「`step_done` 与 `session_closed` 各挂各的原生量，每个字段只在一层出现，core 逐字段跨层合计」。
 - **计费方式可配**（配置键 `billing-method`，取值 METERED / UNMETERED，对应 Device Farm API 的 `billingMethod`，允许按平台覆盖，取值来源归 [0053](./0053-project-config-file.md)）：按量 0.17 美元每设备分钟，不计量槽位 250 美元每月；每平台每月超过约 1470 设备分钟时不计量槽位更便宜。它是每次创建请求的参数，随 Job 走。
 
 ### 8. 设备目标的 evidence 字段
@@ -134,7 +135,7 @@
 - **边缘策略**（在 ngrok 免费层实测的两条硬约束之内：每个策略至多 5 条规则，`remove-headers` 为付费功能）定为 4 条：预热路径凭令牌返回 200 页面并下发 cookie；预热路径其余情形 401；校验路径 `/.well-known/gherkai-tunnel-check` 只凭 cookie 放行、返回 200 空体；其余路径 cookie 不等于 C 则 401，命中即原样转发（校验路径的拒绝也落到这条）。cookie 规格 `__Host-gherkai_tunnel=C; Secure; HttpOnly; Path=/; SameSite=None`，无 Domain、无 Max-Age，撤销靠「隧道关闭、策略消失」加精确等值比对；多个同名 cookie 任一命中即放行；同名查询参数在非预热路径上原样转发。预热响应带 `Cache-Control: no-store` 与 `Referrer-Policy: no-referrer`。不剥离转发给上游的隧道 cookie（付费功能），C 会进入被测应用的访问日志，列为已知边界。SameSite 取 None：这枚 cookie 只守隧道可达性、不承载被测应用的会话语义，测试浏览器一次性且只访问被测应用及其跳转目标，换来第三方登录的跨站 POST 回跳零配置可用（桌面 Chromium、Android Chrome、iOS 15.8 与 18.6 Safari 实测成立）。
 - **预热页面有三种可见结果，确认判据三端同一条**：预热页面脚本向校验路径发一次请求，成功则把标题与正文标记改为 READY，得到 401 改为 DENIED，请求失败改为 ERROR；令牌错误时预热路径直接返回 401 页，正文标记 AUTH REQUIRED。worker 不依赖网页上下文：桌面读响应状态与标记，设备在原生控件树里查找标记文本（Safari 与 Chrome 把网页正文暴露为可访问性节点）。归因：READY 即就绪；DENIED 或 AUTH REQUIRED 是确定性拒绝，`precheck_failed`；ERROR 或预算内无任何标记，原地重导航有界重试，耗尽后 `engine_error`。两者都不归 `network_error`（[0028](./0028-transient-network-ssl-resilience.md) 的分类红线：鉴权失败与拿不准的失败不得归瞬时网络故障），桌面也不用退出码 80，一律经 `scope_done{status: error, errorType}` 传递（决策 4）。
 - **导航路线由能力探测决定，不按系统版本分支**（[0052](./0052-appium-interface-adapter-and-platform-differences.md) 决策 5）：网页上下文可用（能在短预算内执行一条只读命令）时走 `url`，不可用时走 `mobile: deepLink`。实测给出两条反例支撑这一原则：iOS 15.8 上 `mobile: deepLink` 不受支持，只能走 `url`；iOS 18.6 上先用 deepLink 再切网页上下文，网页命令全部挂住，改走 `url` 则全部通过；iOS 26.3 网页上下文列得出、切得进但命令挂住，只能走 deepLink。
-- **definition 完整性不变量**（[0035](./0035-local-app-testing-via-tunnel.md) 的加法）：隧道模式下 definition 必带「额外请求头」与「会话预热地址」两项；worker 收到额外请求头却没有预热地址即 `precheck_failed`「后端未传递会话预热地址，部署版本可能低于命令行工具，请重新部署」。它把两个既有事实绑成一个完整性判据，不按文本猜测，能抓到旧后端丢字段的部署残缺。
+- **definition 完整性不变量**（[0035](./0035-local-app-testing-via-tunnel.md) 的加法）：隧道模式下 definition 必带「额外请求头」与「会话预热地址」两项；worker 收到额外请求头却没有预热地址即 `precheck_failed`「后端未传递会话预热地址，部署版本可能低于命令行工具，请重新部署」。它把两个既有事实绑成一个完整性判据，不按文本猜测，能抓到旧后端丢字段的部署残缺。为什么不能只靠版本闸门与零判定护栏：正式版无戳旧后端已由 [0037](./0037-distribution-and-packaging.md) 决策 7 的缺戳例外拦在提交前；剩下的是开发版本混搭（skew 检查对非纯净版本跳过比较），这时旧开发版 Lambda 读新 definition 会丢掉会话预热地址，新 worker 在没有预热的情况下执行，导航与地址核对可能在 401 页上通过，判定集非空、零判定护栏抓不到，所以只能在 worker 侧拿两个既有事实做完整性判据拦截。
 - **能力与拒绝点**：worker 能力自述加一个键声明支持会话预热（[0049](./0049-worker-capabilities-targets-keys.md)，schema 1 加键）；本机后端在执行前预检里核对，`--expose-local` 下遇不声明的 worker 拒绝；云端依靠按版本解析镜像与 [0037](./0037-distribution-and-packaging.md) 决策 7 的缺戳例外；第三方 worker 的表现是导航得到 401 页，页面正文用产品语言说明「此地址需要测试会话」。
 - **为什么统一**：iOS Safari 不采用地址内嵌凭据（被拒方案），iOS 必须换方案；同一方案在桌面与 Android 上同样成立，统一后只有一套鉴权、一套脱敏与一组用例。附带收益：跳转后文档地址不再带 userinfo，[0035](./0035-local-app-testing-via-tunnel.md) 决策 4 记录的「被测应用用绝对地址调 `history.pushState` 时抛 SecurityError」这类假失败随之消失，`page.url()` 与失败消息里也不再出现凭据；地址断言与正则参数不再被令牌污染。
 - **对隧道服务商的要求**：边缘能按路径、查询参数与 cookie 精确值分支，并返回带固定头的自定义响应；现行服务商 ngrok 的流量策略在本项目所用的免费层账号上实测具备。不具备该能力的服务商不能作为隧道实现，启动隧道时 fail-loud。四台真机实测都没有出现免费层警告页；若服务商改变行为，设备目标在隧道模式下要求付费层。
@@ -154,7 +155,7 @@
 |---|---|---|
 | 创建到 RUNNING | Android 51 到 92 秒；iOS 61 到 82 秒 | 1、2 |
 | Appium 建连 | Android 13 到 26 秒；新 iPhone 5 到 17 秒，老 iPhone 65 秒 | 1、2 |
-| 停止到 COMPLETED | Android 52 到 85 秒；iOS 超过 2 分钟、最长约 150 秒；主动停止时计费算到 COMPLETED | 1、5、7 |
+| 停止到 COMPLETED | Android 52 到 85 秒；iOS 超过 2 分钟、最长约 150 秒；主动停止时服务商回报的设备分钟算到 COMPLETED | 1、5、7 |
 | 上限 | 创建后约 150.4 分钟端点开始拒绝命令、此时 API 仍报 RUNNING，约一分钟后端点报预签名地址失效，再约一分钟到 COMPLETED；计费 150.29 分钟 | 2、4 |
 | 并发 | 同机型连发 6 个请求，前 5 个到 RUNNING，第 6 个进 `PENDING_CONCURRENCY` 排队、Stop 可撤回；一次排队约 6 分钟，STOPPING 中的会话占着槽位 | 2、3、5 |
 | 机型不支持远程访问 | 创建时同步抛错，零设备分钟 | 4 |
@@ -191,6 +192,11 @@
 - **`scope_done` 先于收尾、收尾失败不影响判定**：与 [0034](./0034-detached-batch-reconciler.md) 机制二「发完 `scope_done` 又非零退出一律 error」及 [0024](./0024-worker-core-protocol.md)「释放优先」矛盾，会隐藏计费泄漏（决策 5）。
 - **SIGTERM 时在安全点结束当前 step**：Midscene 没有单动作返回上界，宽限一到即 SIGKILL，Stop 发不出去（决策 5）。
 - **worker 维护 job 截止线作为 0034 的例外**：worker 不知道 claim 时刻与拉镜像耗时，且出现两个超时执行面（决策 2）。
+- **设备 scope 沿用桌面的 300 秒缺省墙钟、只在 plan 输出提示**：job 墙钟从 claim 起算，取设备开销算在里面；获取预算内建默认 600 秒已经超过 300 秒，按缺省提交的设备 job 在设备就绪前就会判超时，提示改变不了结果。改为按目标补缺省（获取预算加 900 秒），下限为获取预算加 180 秒，低于下限以退出码 2 拒绝（决策 2）。
+- **族内只在最高版本的设备里选（最高版本全忙就等待，不选同族较低版本）**：最高版本的设备全忙时会把获取预算耗在等待上，最终可能记 `acquire_timeout`，而同族较低版本同样满足使用方写的版本前缀；需要固定版本时写全版本号即精确匹配，只写前缀时 plan 会提示实际分到的版本可能变化（决策 3）。
+- **保留没有可触发护栏测试的机制层**：终结四阶段、命令守卫、definition 格式版本各对应一个实测或代码核实过的故障（会话泄漏、晚到命令、旧读端误判），不是防御性堆叠；实施时某一层若没有能触发它的护栏测试，删去该层而不是保留（决策 5、[0052](./0052-appium-interface-adapter-and-platform-differences.md) 决策 6、[0037](./0037-distribution-and-packaging.md) 决策 7）。
+- **`session_opened` 带获取耗时 `acquireMs`**：可由事件时间戳推导，又不是服务商原生量，与「只报原生量」冲突（决策 7）。
+- **为开发版本混搭另设拒绝机制**：开发版本混搭不在 [0037](./0037-distribution-and-packaging.md) 的兼容承诺内，为不受支持的组合加机制是额外的设计成本；definition 完整性不变量（决策 13、[0035](./0035-local-app-testing-via-tunnel.md)）不增加成本，又能抓到真实的部署残缺，因此只保留它。
 - **按平台常量估计计费量进成本信封**：违反 [0024](./0024-worker-core-protocol.md)「只报原生量」，计费起点与排队是否计费未实测（决策 7）。
 - **「等待 W 秒列举为空即视为未创建」消除待核尝试**：实测只覆盖成功返回的 Create，证明不了结果未知的请求在服务端如何处理（决策 3）。
 - **新增 `device_setup_failed` 与 `device_unresponsive` 类别**：没有与现有类别处置不同的真实样本，按 [0024](./0024-worker-core-protocol.md) 的扩充规则等样本（决策 4）。
@@ -205,7 +211,7 @@
 - **会话结束即删除 Device Farm 会话结果**：与 `explain` 给控制台链接的承诺冲突；清扫由人显式触发的命令列为后续候选（决策 11）。
 - **隧道凭据内嵌地址（沿用 0035 决策 4）**：iOS Safari 不采用地址内嵌凭据、改弹原生鉴权表单；桌面上还会让绝对地址的 `history.pushState` 抛 SecurityError（决策 13）。
 - **令牌作为查询参数写进 step 文本**：映射器无法区分导航地址与 [0048](./0048-test-targets-device-and-ui-kind.md) 决策 7 的正则参数（令牌拼进正则后 `?` 成为量词），且令牌进入 AI 提示、Midscene 报告、`jobs/*.json` 与设备录像（决策 13）。
-- **每个 scenario 前重新预热**：设备上预热是一次导航、会改变页面状态，与决策 1 的「不隐式复位」冲突；iOS 26 又无法观测结果。
+- **每个 scenario 前重新预热**：设备上预热是一次导航、会改变页面状态，与决策 1 的「不隐式复位」冲突，每次还要重做路线选择。
 - **按系统版本选择导航路线**：iOS 15.8 不支持 deepLink、iOS 18.6 deepLink 后网页上下文挂住、iOS 26.3 只能 deepLink，三者无法用版本号分段表达，能力探测才是判据（决策 13）。
 - **剥离转发给上游的隧道 cookie**：ngrok 免费层的付费功能（决策 13）。
 - **驱动适配器用 XCUITest 填写 iOS 系统鉴权表单**：鉴权是否成功未证实，把隧道鉴权耦合进 iOS 驱动、每个新会话都要重做。

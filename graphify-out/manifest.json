@@ -235,13 +235,13 @@
     "semantic_hash": "1a9385efd59d5b84cde1783649d2dcc2"
   },
   "docs/adr/0025-plan-module-feature-to-jobs.md": {
-    "mtime": 1792052948.2908874,
-    "ast_hash": "add69c032aa8a77461141bc7926f6db9",
+    "mtime": 1792054552.886123,
+    "ast_hash": "9a92d11690f0f29ed0e77eeac4147869",
     "semantic_hash": ""
   },
   "docs/adr/0028-transient-network-ssl-resilience.md": {
-    "mtime": 1792050031.2137601,
-    "ast_hash": "e8dab38c2ae098d9f4fda4f4fed58ae6",
+    "mtime": 1792054552.8900168,
+    "ast_hash": "4bb1f0effd4f3edd67b3a28295a343d8",
     "semantic_hash": ""
   },
   "tools/e2e_harness.md": {
@@ -365,8 +365,8 @@
     "semantic_hash": "01bc939adc6973eaad56c15f4fdbedb6"
   },
   "docs/adr/0024-worker-core-protocol.md": {
-    "mtime": 1792052948.2916708,
-    "ast_hash": "2ac33f715326af9e9649796088834039",
+    "mtime": 1792054552.889628,
+    "ast_hash": "c4925c006bcfc8bfd454880c66529bdc",
     "semantic_hash": ""
   },
   "docs/adr/0026-schedule-module.md": {
@@ -380,9 +380,9 @@
     "semantic_hash": ""
   },
   "docs/adr/0029-engine-artifacts-to-s3.md": {
-    "mtime": 1789843813.4085495,
-    "ast_hash": "b1d8fdd7c54626fca1d1e7fef3566535",
-    "semantic_hash": "b1d8fdd7c54626fca1d1e7fef3566535"
+    "mtime": 1792054629.9178984,
+    "ast_hash": "e00b02177a199936ee2b4bfe1d099e88",
+    "semantic_hash": ""
   },
   "docs/adr/0030-realtime-persistence-seam.md": {
     "mtime": 1789830767.560095,
@@ -390,14 +390,14 @@
     "semantic_hash": "953d3ef9a0916c76b25a91a0532806d0"
   },
   "docs/adr/0031-job-lifecycle-states-and-severity.md": {
-    "mtime": 1792050033.8497627,
-    "ast_hash": "62c114ef200a0f399a569cf456a83a84",
+    "mtime": 1792054552.8897455,
+    "ast_hash": "93b7051ebcb136384a1f273c5ff39f27",
     "semantic_hash": ""
   },
   "docs/adr/0032-fargate-execution-environment.md": {
-    "mtime": 1789843813.4086144,
-    "ast_hash": "3a3d11c6686c2a609094a3f29502d0de",
-    "semantic_hash": "3a3d11c6686c2a609094a3f29502d0de"
+    "mtime": 1792054611.2341042,
+    "ast_hash": "d008a0221a46f9515ac3371dadc55d43",
+    "semantic_hash": ""
   },
   "docs/adr/0033-iac-aws-backend-and-composition-wiring.md": {
     "mtime": 1792053004.2773914,
@@ -405,8 +405,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0034-detached-batch-reconciler.md": {
-    "mtime": 1792050032.5342615,
-    "ast_hash": "f173d17052488cb524fc51049863f402",
+    "mtime": 1792054578.0945451,
+    "ast_hash": "f9743291c0c72f45a816a15b8e392d13",
     "semantic_hash": ""
   },
   "engines/midscene/README.md": {
@@ -420,8 +420,8 @@
     "semantic_hash": "2d10a8c1c6e7f072eb3e330554f1fe5a"
   },
   "docs/adr/0035-local-app-testing-via-tunnel.md": {
-    "mtime": 1792052948.2859638,
-    "ast_hash": "4e3347aa40ea6c043a56b58743106fb5",
+    "mtime": 1792054552.8884008,
+    "ast_hash": "1d893e0dc3ea282c3efc06b3e23ac9cf",
     "semantic_hash": ""
   },
   "cli/tests/test_tunnel_cli.py": {
@@ -435,8 +435,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0037-distribution-and-packaging.md": {
-    "mtime": 1792051829.3238323,
-    "ast_hash": "cf2095f2d9b6e253084845398af9fbdc",
+    "mtime": 1792054552.8878064,
+    "ast_hash": "2e272e07c2bebeeb9289d00730f52d87",
     "semantic_hash": ""
   },
   "docs/adr/0038-worker-image-delivery.md": {
@@ -1165,9 +1165,9 @@
     "semantic_hash": "710e78f99ee0697fec55c4ef12bc5bd7"
   },
   "docs/adr/0043-agent-skill-for-driving-gherkai.md": {
-    "mtime": 1790829907.5037038,
-    "ast_hash": "5bf96b5843a174910c3e5beffe61bd0f",
-    "semantic_hash": "5bf96b5843a174910c3e5beffe61bd0f"
+    "mtime": 1792054629.9196956,
+    "ast_hash": "ba6aca23b53a65f57fa3967f0266c8be",
+    "semantic_hash": ""
   },
   "cli/gherkai_cli/skill_install.py": {
     "mtime": 1789871885.2242126,
@@ -1210,8 +1210,8 @@
     "semantic_hash": "cfbe55d8b97b43dcb8032f2633a7a989"
   },
   "cli/gherkai_cli/skills/gherkai/references/cli-json-contract.md": {
-    "mtime": 1792052948.500007,
-    "ast_hash": "e1f61f5a408bd666bb5434987abb9b93",
+    "mtime": 1792053990.5971165,
+    "ast_hash": "ab43a3e79746534211c69d4f36afad85",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skills/gherkai/references/cloud-backend.md": {
@@ -1385,8 +1385,8 @@
     "semantic_hash": "ad0d33c7ec1a11544091b40d18eebac2"
   },
   "docs/internals/cli-json-contract.md": {
-    "mtime": 1792052948.292726,
-    "ast_hash": "5555281cb3770f119373f4b646c6e179",
+    "mtime": 1792053989.705375,
+    "ast_hash": "38e11a83a524f9facdd8af8ba87c9ccf",
     "semantic_hash": ""
   },
   "docs/internals/cloud-backend-carriers.md": {
@@ -1720,9 +1720,9 @@
     "semantic_hash": "b1bbb3523f9fad35bd362d690d9385b5"
   },
   "docs/adr/0046-guardrail-layers-tests-hooks-and-lean-claude-md.md": {
-    "mtime": 1789876012.4242916,
-    "ast_hash": "a0b881444ec702f4cea797f7b3b7aa0a",
-    "semantic_hash": "a0b881444ec702f4cea797f7b3b7aa0a"
+    "mtime": 1792054611.2349772,
+    "ast_hash": "a01c16c0355c575af4c5399c9c04d809",
+    "semantic_hash": ""
   },
   ".claude/hooks/commit-gate.sh": {
     "mtime": 1789875066.6237447,
@@ -1880,38 +1880,38 @@
     "semantic_hash": ""
   },
   "docs/adr/0048-test-targets-device-and-ui-kind.md": {
-    "mtime": 1792052948.2878733,
-    "ast_hash": "1279e37d7992c79dadbbe7439c773a46",
+    "mtime": 1792054552.8891706,
+    "ast_hash": "b6c3751c3274fdffec577655bbf77774",
     "semantic_hash": ""
   },
   "docs/adr/0049-worker-capabilities-targets-keys.md": {
-    "mtime": 1792050035.0433457,
-    "ast_hash": "b5fd95923b6de68b1461109f6c0309d9",
+    "mtime": 1792054552.8871164,
+    "ast_hash": "41474b54a65016bcea657cd13c165cfd",
     "semantic_hash": ""
   },
   "docs/adr/0050-deterministic-step-handles-and-testing.md": {
-    "mtime": 1792052948.287995,
-    "ast_hash": "b6890f2f11ebe60a410067db30100b91",
+    "mtime": 1792053989.7056165,
+    "ast_hash": "3c07bd78adf71593a42c542c0d0f225c",
     "semantic_hash": ""
   },
   "docs/adr/0051-device-session-lifecycle-and-app-distribution.md": {
-    "mtime": 1792052948.2914083,
-    "ast_hash": "81297b881a802216fa2057efe6162038",
+    "mtime": 1792054552.890194,
+    "ast_hash": "6fd212845d73f2e703e797c4bda28684",
     "semantic_hash": ""
   },
   "docs/adr/0052-appium-interface-adapter-and-platform-differences.md": {
-    "mtime": 1792052948.2873845,
-    "ast_hash": "24355922a32f79b815ee7ed40810a0fb",
+    "mtime": 1792054552.8886762,
+    "ast_hash": "d4f2aac90aa9458565b9628b4425e809",
     "semantic_hash": ""
   },
   "docs/adr/0053-project-config-file.md": {
-    "mtime": 1792052948.288458,
-    "ast_hash": "e537ce01ed6e0924412a0a044cabb80c",
+    "mtime": 1792054552.887598,
+    "ast_hash": "5e580711ef1a911093b26980e173ff99",
     "semantic_hash": ""
   },
   "docs/journey/0013-mobile-devices-implementation.md": {
-    "mtime": 1792053088.172528,
-    "ast_hash": "830ca736d68a73ab96e15b9342a62856",
+    "mtime": 1792053989.7062068,
+    "ast_hash": "e38f9f0ecf670fc3f2d8aad8f41d4b52",
     "semantic_hash": ""
   }
 }
