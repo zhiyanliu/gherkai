@@ -365,8 +365,8 @@
     "semantic_hash": "01bc939adc6973eaad56c15f4fdbedb6"
   },
   "docs/adr/0024-worker-core-protocol.md": {
-    "mtime": 1792055138.562468,
-    "ast_hash": "f7ef0d904ec97f075caf752805aaa84b",
+    "mtime": 1792056573.8083012,
+    "ast_hash": "cc03556fa41107f69e656281b50d816d",
     "semantic_hash": ""
   },
   "docs/adr/0026-schedule-module.md": {
@@ -1060,8 +1060,8 @@
     "semantic_hash": "f57720be81008703884b8db8163e3d2b"
   },
   "engines/midscene/DEVELOPMENT.md": {
-    "mtime": 1792027634.101773,
-    "ast_hash": "2b5ab15ecfa03310ce16de4228e0e4a6",
+    "mtime": 1792056068.1199954,
+    "ast_hash": "80afe2784c6e011dcfeaaef5fe1eaabe",
     "semantic_hash": ""
   },
   "engines/novaact/DEVELOPMENT.md": {
@@ -1895,8 +1895,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0051-device-session-lifecycle-and-app-distribution.md": {
-    "mtime": 1792055138.5627842,
-    "ast_hash": "38a2c62456858a266d383ebb10fa93e8",
+    "mtime": 1792056573.808475,
+    "ast_hash": "9332b57e0b63d246b36520a48d278459",
     "semantic_hash": ""
   },
   "docs/adr/0052-appium-interface-adapter-and-platform-differences.md": {
