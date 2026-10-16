@@ -567,6 +567,7 @@
 
 **完整性审查补认领**
 
+- 应用目标上的网址 step（0048 决策 7，deepLink spike 已定）：识别引号内任意 scheme://；Android 发命令前按 RFC 3986 校验并拦 ; ' ( )，deepLink 带 package，报 unable to resolve Intent 记 capability_unavailable，成功后轮询前台包名；iOS 带 bundleId、成功即已送达；首次遇到 WebDriverAgent 不支持打开地址即缓存为设备不支持；前台应用查询进只读白名单。护栏测试：字符集校验用例（含 | ; 截断风险的字符）、三种失败情形的归类、缓存只记能力否定。
 - 红线测试补：scenario 前核对在第一条 scenario 前不调用、年龄恰到边界、探测成功后下一条照常执行、失败按会话状态分流 session_lost / engine_error；释放与 session_closed 先于 scope_done；安装包 HeadObject 回 404 或 403 时 Create 零调用（存在性检查必须排在建会话之前）。
 - 设备模块的两条护栏测试：系统版本与机型只经会话能力对象的唯一读取点进入；两个驱动适配器的命令契约快照。Device Farm 客户端只在 TS 设备模块构造的断言。0052 决策 8、0051 决策 10。
 - 接缝第四项边界义务「scenario 前核对」（本轮补进 0052 决策 2）。

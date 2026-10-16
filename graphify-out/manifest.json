@@ -230,9 +230,9 @@
     "semantic_hash": ""
   },
   "docs/adr/0020-step-phrasing-default-ai-deterministic-scaffold.md": {
-    "mtime": 1789831962.0843134,
-    "ast_hash": "1a9385efd59d5b84cde1783649d2dcc2",
-    "semantic_hash": "1a9385efd59d5b84cde1783649d2dcc2"
+    "mtime": 1792133427.0397253,
+    "ast_hash": "2de3da1a3b4a875dc9d0be4427372d61",
+    "semantic_hash": ""
   },
   "docs/adr/0025-plan-module-feature-to-jobs.md": {
     "mtime": 1792117727.1992226,
@@ -365,8 +365,8 @@
     "semantic_hash": "01bc939adc6973eaad56c15f4fdbedb6"
   },
   "docs/adr/0024-worker-core-protocol.md": {
-    "mtime": 1792056573.8083012,
-    "ast_hash": "cc03556fa41107f69e656281b50d816d",
+    "mtime": 1792133427.0400167,
+    "ast_hash": "c9c3b774c5266b3af77bd3a03e399899",
     "semantic_hash": ""
   },
   "docs/adr/0026-schedule-module.md": {
@@ -1880,8 +1880,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0048-test-targets-device-and-ui-kind.md": {
-    "mtime": 1792117896.7178216,
-    "ast_hash": "f8006caca39d99d2c0a44de5ef1f4f38",
+    "mtime": 1792133427.018202,
+    "ast_hash": "0485be4aefd600d820a5a37163f67f2c",
     "semantic_hash": ""
   },
   "docs/adr/0049-worker-capabilities-targets-keys.md": {
@@ -1895,13 +1895,13 @@
     "semantic_hash": ""
   },
   "docs/adr/0051-device-session-lifecycle-and-app-distribution.md": {
-    "mtime": 1792118515.385745,
-    "ast_hash": "8d51292801b07717c34e62739a8917cf",
+    "mtime": 1792133427.019182,
+    "ast_hash": "20baa5dd6f9544117d6409d3be6992a9",
     "semantic_hash": ""
   },
   "docs/adr/0052-appium-interface-adapter-and-platform-differences.md": {
-    "mtime": 1792118515.3852081,
-    "ast_hash": "67c5c4d452816687817efe10808a69e7",
+    "mtime": 1792133427.0186694,
+    "ast_hash": "55da30106f7fd2140446d6bfbdb16ba0",
     "semantic_hash": ""
   },
   "docs/adr/0053-project-config-file.md": {
@@ -1910,13 +1910,13 @@
     "semantic_hash": ""
   },
   "docs/journey/0013-mobile-devices-implementation.md": {
-    "mtime": 1792132268.1495209,
-    "ast_hash": "c7156d67edfe7a38a986b3618246d75f",
+    "mtime": 1792133462.3479898,
+    "ast_hash": "a398b52a830c59dd80de4b4662c39938",
     "semantic_hash": ""
   },
   "docs/journey/0015-mobile-devices-implementation-batches.md": {
-    "mtime": 1792118801.8980172,
-    "ast_hash": "fcc1add0602776be39e30ef5caae06be",
+    "mtime": 1792133462.37005,
+    "ast_hash": "729ddad30a37ee6a3a866df2904baf10",
     "semantic_hash": ""
   }
 }

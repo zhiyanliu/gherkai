@@ -62,12 +62,15 @@
 | 会话到期 | 会话年龄（从创建起算）达到 `max_session_s`，或端点拒绝命令而 API 仍报 RUNNING | `session_lost` | 同上，发一次幂等 Stop |
 | 命令结果未知 | 客户端请求超时或连接中断，且会话仍 RUNNING | `engine_error`，消息写明「可能已执行也可能未执行」 | 本 scenario 短路；下一 scenario 前只读存活探测，失败即 scope 级 error（[0052](./0052-appium-interface-adapter-and-platform-differences.md) 决策 2 的 scenario 前核对、决策 6） |
 | 需要网页上下文的确定性 step 落在不提供它的设备上 | 探测确认不提供 | `capability_unavailable`（step 级，[0052](./0052-appium-interface-adapter-and-platform-differences.md)） | 改写为 AI 断言或换设备 |
+| 应用目标的网址 step：设备不支持深层链接 | 首次 `mobile: deepLink` 报 WebDriverAgent 不支持打开地址（iOS 15.8 实测） | `capability_unavailable`（step 级，结论缓存到会话，[0048](./0048-test-targets-device-and-ui-kind.md) 决策 7） | 改写为 AI 步或换设备 |
+| 应用目标的网址 step：应用未处理该地址（Android） | 命令报「unable to resolve Intent」，或命令成功后前台不是被测应用 | 前者 `capability_unavailable`、后者 `engine_error`（step 级） | 改地址，或确认应用声明了该链接 |
+| 应用目标的网址 step：地址含驱动传不过的字符（Android） | 发命令前按 RFC 3986 校验命中 `; ' ( )` 或非 URI 字符 | `capability_unavailable`（step 级，不发命令） | 改为百分号编码 |
 | 释放未确认 | 终结时存在 `release: unconfirmed` 的会话或 `attempted` 的尝试 | `release_failed`（core 由配对推出） | 到控制台按会话名核对并手动停止 |
 | 模型 4xx | Bedrock 返回 4xx | `engine_error` | 沿用现有归因 |
 | 应用中途被杀 | 模型从截图判出回到桌面 | 由该 step 的判定给出 | 不另设类别 |
 
 - **类别的处置语义**：`precheck_failed` 表示「没开始测、重试也不会变」，处置是改用例、换测试包或换设备；`acquire_timeout` 表示「设备一时拿不到」，处置是稍后重试或提高获取预算；`session_lost` 表示「测到一半设备没了」，判定不完整，job 级不重试；`release_failed` 表示「判定可能完整但会话可能仍在计费」，无论最终归因为何 message 都追加提示并列出会话名。不新增 `device_setup_failed` 与 `device_unresponsive`，等真实样本（[0024](./0024-worker-core-protocol.md) 的扩充规则）。
-- **判定靠查状态，不匹配错误文本**：命令失败时 worker 查一次 `GetRemoteAccessSession`。到期按会话年龄判定，不等状态翻转：150 分钟上限到点前后端点已拒绝命令而 API 还要再报约一分钟 RUNNING。
+- **会话丢失的判定靠查状态，不匹配错误文本**：命令失败时 worker 先查一次 `GetRemoteAccessSession`，非 RUNNING 即 `session_lost`；仍 RUNNING 时才允许匹配两条实测过的驱动错误文本（深层链接的「不支持打开地址」与「unable to resolve Intent」，[0048](./0048-test-targets-device-and-ui-kind.md) 决策 7），匹配不上的按该命令所属规则归 `engine_error`。到期按会话年龄判定，不等状态翻转：150 分钟上限到点前后端点已拒绝命令而 API 还要再报约一分钟 RUNNING。
 - **用户可见消息**只说发生了什么、为什么、怎么办，例如「这台设备不支持远程会话，换一台型号后重试」「应用启动后立即自行退出，通常是应用带有运行环境检测；请提供关闭检测的测试包」「在等待时间内没有拿到可用设备，请稍后重试或调大获取设备的等待时间」「设备会话在执行中途结束，本 scope 余下的 step 未执行；可缩短 scope 或检查是否有人手动停止了会话」「设备会话未能确认停止，可能仍在计费，请在设备控制台核对并手动停止」。
 
 ### 5. 收尾顺序、终结四阶段与退出码
@@ -180,6 +183,7 @@
 | newSession 客户端超时 | 2 秒超时后立即与 75 秒后 `GET /sessions` 均为空（两平台；只说明两个时点无残留）；一次运行中进程在该超时后直接退出、复测未复现 | 3、5 |
 | Midscene 1.15.1 对中止的行为 | 假界面在首个动作抛「结果未知」并置 `abortSignal` 后，`aiAct` 15 毫秒内拒绝，之后零动作、零截图（两种模式各一次） | 12 |
 | IAM 策略模拟器 | `ListDevices` 于 `*` 允许；`GetDevice` 允许；`CreateRemoteAccessSession` 于本项目加 `device:*` 允许、于其他项目隐式拒绝；会话 Get 于本项目前缀允许、于其他项目拒绝；`ListRemoteAccessSessions` 于本项目允许；未授予的 `DeleteRemoteAccessSession` 拒绝。会话 Get 一项是假阳性，见下一行 | 10 |
+| 深层链接 | Android 指定包名的链接 1 秒内到目标页，不指定包名系统交给 Chrome；驱动经 shell 传地址，`; ' ( ) | < >` 出错且 `| ;` 截断后部分执行；iOS 18.6 / 26.3 指定 bundleId 0.3 秒到前台、地址原样送达、应用忽略链接不可观测；iOS 15.8 带 bundleId 2.4 秒报不支持、不带时挂住 481 秒；重签后注册的 scheme 保留（细节在 [0052](./0052-appium-interface-adapter-and-platform-differences.md) 实测依据） | 4 |
 | 会话端点结构 | 两次真机会话各取一次：`remoteDriverEndpoint` 形如 `https://devicefarm-interactive-global.us-west-2.api.aws/remote-endpoint/<令牌>`，没有查询参数、不以 `/` 结尾，令牌段约 2440 个字符、只含字母与数字；`interactiveEndpoint`（wss）带 SigV4 预签名查询参数 `X-Amz-Date`、`X-Amz-Credential`、`X-Amz-Algorithm`、`arn`、`X-Amz-SignedHeaders`、`X-Amz-Signature`、`X-Amz-Security-Token`；两者都没有 userinfo。只记录结构与参数名，不记录任何值 | 11 |
 | IAM 真实角色闭环 | 按 0033 权限表建 worker、CLI、部署方三个角色，assume 后逐动作正反面共 33 项：只授会话前缀时会话 Get 与 Stop 被拒、拒绝消息点名项目 ARN，其余 31 项与权限表一致；同一会话上的对照显示，Get / Stop 只授会话前缀或只授项目 ARN 都被拒、拒绝消息点名未授的那一种，两种同授全部放行。会话名取 2 字符、5 字符、32 位十六进制（task id 形态）与 SDK 缺省形态，结论都相同。策略模拟器对只授会话前缀判允许，是假阳性：它只按给定的会话 ARN 求值，不知道 Device Farm 还要对项目 ARN 鉴权。设计阶段的隔离探针曾在只授会话前缀时得到放行，复查发现那几次 AssumeRole 因会话名只有一个字符未通过参数校验（STS 要求至少两个字符），导出的凭据是空串，调用回落到了权限更大的执行机角色，那些结果不作数；探针在 assume 之后应先核对调用者身份。应用前缀：带前缀条件的 `ListBucket` 下，缺失键的 HeadObject 回 404、GetObject 回 `NoSuchKey`，前缀外的读写与未授的删除被拒；部署方 `CreateProject` 于 `*` 放行、未授的 `DeleteProject` 被拒 | 9、10 |
 | 单价 | 按量 0.17 美元每设备分钟，不计量槽位 250 美元每月，盈亏点约 1470 分钟每平台每月 | 7 |

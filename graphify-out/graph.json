@@ -36791,10 +36791,10 @@
       "source_file": "docs/adr/0048-test-targets-device-and-ui-kind.md",
       "source_location": "L1",
       "_origin": "ast",
+      "id": "docs_adr_0048_test_targets_device_and_ui_kind_0048_\u6d4b\u8bd5\u76ee\u6807_\u8bbe\u5907\u4e0e\u754c\u9762\u7c7b\u578b\u4e24\u4e2a\u7ef4\u5ea6_device_\u4e0e_app_\u6807\u7b7e_core_\u7684\u6267\u884c\u524d\u9884\u68c0",
       "community": 102,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "0048. \u6d4b\u8bd5\u76ee\u6807:\u8bbe\u5907\u4e0e\u754c\u9762\u7c7b\u578b\u4e24\u4e2a\u7ef4\u5ea6\u3001`@device` \u4e0e `@app` \u6807\u7b7e\u3001core \u7684\u6267\u884c\u524d\u9884\u68c0",
-      "id": "docs_adr_0048_test_targets_device_and_ui_kind_0048_\u6d4b\u8bd5\u76ee\u6807_\u8bbe\u5907\u4e0e\u754c\u9762\u7c7b\u578b\u4e24\u4e2a\u7ef4\u5ea6_device_\u4e0e_app_\u6807\u7b7e_core_\u7684\u6267\u884c\u524d\u9884\u68c0"
+      "norm_label": "0048. \u6d4b\u8bd5\u76ee\u6807:\u8bbe\u5907\u4e0e\u754c\u9762\u7c7b\u578b\u4e24\u4e2a\u7ef4\u5ea6\u3001`@device` \u4e0e `@app` \u6807\u7b7e\u3001core \u7684\u6267\u884c\u524d\u9884\u68c0"
     },
     {
       "label": "1. \u6d4b\u8bd5\u76ee\u6807\u7531\u4e09\u4e2a\u6b63\u4ea4\u7ef4\u5ea6\u63cf\u8ff0\uff1aengine\u3001device\u3001ui_kind",
@@ -36802,10 +36802,10 @@
       "source_file": "docs/adr/0048-test-targets-device-and-ui-kind.md",
       "source_location": "L18",
       "_origin": "ast",
+      "id": "docs_adr_0048_test_targets_device_and_ui_kind_1_\u6d4b\u8bd5\u76ee\u6807\u7531\u4e09\u4e2a\u6b63\u4ea4\u7ef4\u5ea6\u63cf\u8ff0_engine_device_ui_kind",
       "community": 102,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "1. \u6d4b\u8bd5\u76ee\u6807\u7531\u4e09\u4e2a\u6b63\u4ea4\u7ef4\u5ea6\u63cf\u8ff0:engine\u3001device\u3001ui_kind",
-      "id": "docs_adr_0048_test_targets_device_and_ui_kind_1_\u6d4b\u8bd5\u76ee\u6807\u7531\u4e09\u4e2a\u6b63\u4ea4\u7ef4\u5ea6\u63cf\u8ff0_engine_device_ui_kind"
+      "norm_label": "1. \u6d4b\u8bd5\u76ee\u6807\u7531\u4e09\u4e2a\u6b63\u4ea4\u7ef4\u5ea6\u63cf\u8ff0:engine\u3001device\u3001ui_kind"
     },
     {
       "label": "2. \u4e24\u4e2a scope \u7ea7 tag\uff1a`@device` \u4e0e `@app`",
@@ -36813,10 +36813,10 @@
       "source_file": "docs/adr/0048-test-targets-device-and-ui-kind.md",
       "source_location": "L29",
       "_origin": "ast",
+      "id": "docs_adr_0048_test_targets_device_and_ui_kind_2_\u4e24\u4e2a_scope_\u7ea7_tag_device_\u4e0e_app",
       "community": 102,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "2. \u4e24\u4e2a scope \u7ea7 tag:`@device` \u4e0e `@app`",
-      "id": "docs_adr_0048_test_targets_device_and_ui_kind_2_\u4e24\u4e2a_scope_\u7ea7_tag_device_\u4e0e_app"
+      "norm_label": "2. \u4e24\u4e2a scope \u7ea7 tag:`@device` \u4e0e `@app`"
     },
     {
       "label": "3. core \u7684\u4e09\u5904\u6539\u52a8",
@@ -36824,10 +36824,10 @@
       "source_file": "docs/adr/0048-test-targets-device-and-ui-kind.md",
       "source_location": "L37",
       "_origin": "ast",
+      "id": "docs_adr_0048_test_targets_device_and_ui_kind_3_core_\u7684\u4e09\u5904\u6539\u52a8",
       "community": 102,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "3. core \u7684\u4e09\u5904\u6539\u52a8",
-      "id": "docs_adr_0048_test_targets_device_and_ui_kind_3_core_\u7684\u4e09\u5904\u6539\u52a8"
+      "norm_label": "3. core \u7684\u4e09\u5904\u6539\u52a8"
     },
     {
       "label": "4. \u76ee\u6807\u4e0d\u53d7\u652f\u6301\u65f6\u7684\u62d2\u7edd\uff1a\u7531\u80fd\u529b\u81ea\u8ff0\u51b3\u5b9a\uff0c\u6d88\u606f\u7ed9\u51fa\u6539\u6cd5",
@@ -36835,10 +36835,10 @@
       "source_file": "docs/adr/0048-test-targets-device-and-ui-kind.md",
       "source_location": "L59",
       "_origin": "ast",
+      "id": "docs_adr_0048_test_targets_device_and_ui_kind_4_\u76ee\u6807\u4e0d\u53d7\u652f\u6301\u65f6\u7684\u62d2\u7edd_\u7531\u80fd\u529b\u81ea\u8ff0\u51b3\u5b9a_\u6d88\u606f\u7ed9\u51fa\u6539\u6cd5",
       "community": 102,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "4. \u76ee\u6807\u4e0d\u53d7\u652f\u6301\u65f6\u7684\u62d2\u7edd:\u7531\u80fd\u529b\u81ea\u8ff0\u51b3\u5b9a,\u6d88\u606f\u7ed9\u51fa\u6539\u6cd5",
-      "id": "docs_adr_0048_test_targets_device_and_ui_kind_4_\u76ee\u6807\u4e0d\u53d7\u652f\u6301\u65f6\u7684\u62d2\u7edd_\u7531\u80fd\u529b\u81ea\u8ff0\u51b3\u5b9a_\u6d88\u606f\u7ed9\u51fa\u6539\u6cd5"
+      "norm_label": "4. \u76ee\u6807\u4e0d\u53d7\u652f\u6301\u65f6\u7684\u62d2\u7edd:\u7531\u80fd\u529b\u81ea\u8ff0\u51b3\u5b9a,\u6d88\u606f\u7ed9\u51fa\u6539\u6cd5"
     },
     {
       "label": "5. plan \u7684\u6807\u6ce8",
@@ -36846,10 +36846,10 @@
       "source_file": "docs/adr/0048-test-targets-device-and-ui-kind.md",
       "source_location": "L68",
       "_origin": "ast",
+      "id": "docs_adr_0048_test_targets_device_and_ui_kind_5_plan_\u7684\u6807\u6ce8",
       "community": 102,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "5. plan \u7684\u6807\u6ce8",
-      "id": "docs_adr_0048_test_targets_device_and_ui_kind_5_plan_\u7684\u6807\u6ce8"
+      "norm_label": "5. plan \u7684\u6807\u6ce8"
     },
     {
       "label": "6. \u8fd0\u884c\u671f\u7f51\u9875\u4e0a\u4e0b\u6587\u4e0d\u53ef\u7528\uff1a\u58f0\u660e\u4e86\u524d\u63d0\u7684\u786e\u5b9a\u6027 step \u8bb0 error\uff0c\u4e0d\u8f6c AI",
@@ -36857,43 +36857,43 @@
       "source_file": "docs/adr/0048-test-targets-device-and-ui-kind.md",
       "source_location": "L74",
       "_origin": "ast",
+      "id": "docs_adr_0048_test_targets_device_and_ui_kind_6_\u8fd0\u884c\u671f\u7f51\u9875\u4e0a\u4e0b\u6587\u4e0d\u53ef\u7528_\u58f0\u660e\u4e86\u524d\u63d0\u7684\u786e\u5b9a\u6027_step_\u8bb0_error_\u4e0d\u8f6c_ai",
       "community": 102,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "6. \u8fd0\u884c\u671f\u7f51\u9875\u4e0a\u4e0b\u6587\u4e0d\u53ef\u7528:\u58f0\u660e\u4e86\u524d\u63d0\u7684\u786e\u5b9a\u6027 step \u8bb0 error,\u4e0d\u8f6c ai",
-      "id": "docs_adr_0048_test_targets_device_and_ui_kind_6_\u8fd0\u884c\u671f\u7f51\u9875\u4e0a\u4e0b\u6587\u4e0d\u53ef\u7528_\u58f0\u660e\u4e86\u524d\u63d0\u7684\u786e\u5b9a\u6027_step_\u8bb0_error_\u4e0d\u8f6c_ai"
+      "norm_label": "6. \u8fd0\u884c\u671f\u7f51\u9875\u4e0a\u4e0b\u6587\u4e0d\u53ef\u7528:\u58f0\u660e\u4e86\u524d\u63d0\u7684\u786e\u5b9a\u6027 step \u8bb0 error,\u4e0d\u8f6c ai"
     },
     {
-      "label": "7. \u5185\u5efa\u300c\u9875\u9762\u5730\u5740\u5339\u914d\u300dstep \u4e0e\u843d\u70b9\u6838\u5bf9\u89c4\u5219",
+      "label": "7. \u5185\u5efa\u300c\u9875\u9762\u5730\u5740\u5339\u914d\u300dstep\u3001\u5e94\u7528\u76ee\u6807\u4e0a\u7684\u7f51\u5740 step \u4e0e\u843d\u70b9\u6838\u5bf9\u89c4\u5219",
       "file_type": "document",
       "source_file": "docs/adr/0048-test-targets-device-and-ui-kind.md",
       "source_location": "L80",
       "_origin": "ast",
+      "id": "docs_adr_0048_test_targets_device_and_ui_kind_7_\u5185\u5efa_\u9875\u9762\u5730\u5740\u5339\u914d_step_\u5e94\u7528\u76ee\u6807\u4e0a\u7684\u7f51\u5740_step_\u4e0e\u843d\u70b9\u6838\u5bf9\u89c4\u5219",
       "community": 102,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "7. \u5185\u5efa\u300c\u9875\u9762\u5730\u5740\u5339\u914d\u300dstep \u4e0e\u843d\u70b9\u6838\u5bf9\u89c4\u5219",
-      "id": "docs_adr_0048_test_targets_device_and_ui_kind_7_\u5185\u5efa_\u9875\u9762\u5730\u5740\u5339\u914d_step_\u4e0e\u843d\u70b9\u6838\u5bf9\u89c4\u5219"
+      "norm_label": "7. \u5185\u5efa\u300c\u9875\u9762\u5730\u5740\u5339\u914d\u300dstep\u3001\u5e94\u7528\u76ee\u6807\u4e0a\u7684\u7f51\u5740 step \u4e0e\u843d\u70b9\u6838\u5bf9\u89c4\u5219"
     },
     {
       "label": "8. \u88ab\u6d4b\u73af\u5883\u53ef\u8fbe\u6027",
       "file_type": "document",
       "source_file": "docs/adr/0048-test-targets-device-and-ui-kind.md",
-      "source_location": "L85",
+      "source_location": "L91",
       "_origin": "ast",
+      "id": "docs_adr_0048_test_targets_device_and_ui_kind_8_\u88ab\u6d4b\u73af\u5883\u53ef\u8fbe\u6027",
       "community": 102,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "8. \u88ab\u6d4b\u73af\u5883\u53ef\u8fbe\u6027",
-      "id": "docs_adr_0048_test_targets_device_and_ui_kind_8_\u88ab\u6d4b\u73af\u5883\u53ef\u8fbe\u6027"
+      "norm_label": "8. \u88ab\u6d4b\u73af\u5883\u53ef\u8fbe\u6027"
     },
     {
       "label": "9. \u4e0d\u505a",
       "file_type": "document",
       "source_file": "docs/adr/0048-test-targets-device-and-ui-kind.md",
-      "source_location": "L91",
+      "source_location": "L97",
       "_origin": "ast",
+      "id": "docs_adr_0048_test_targets_device_and_ui_kind_9_\u4e0d\u505a",
       "community": 102,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "9. \u4e0d\u505a",
-      "id": "docs_adr_0048_test_targets_device_and_ui_kind_9_\u4e0d\u505a"
+      "norm_label": "9. \u4e0d\u505a"
     },
     {
       "label": "\u51b3\u7b56",
@@ -36901,21 +36901,21 @@
       "source_file": "docs/adr/0048-test-targets-device-and-ui-kind.md",
       "source_location": "L16",
       "_origin": "ast",
+      "id": "docs_adr_0048_test_targets_device_and_ui_kind_\u51b3\u7b56",
       "community": 102,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "\u51b3\u7b56",
-      "id": "docs_adr_0048_test_targets_device_and_ui_kind_\u51b3\u7b56"
+      "norm_label": "\u51b3\u7b56"
     },
     {
       "label": "\u5b9e\u6d4b\u4f9d\u636e",
       "file_type": "document",
       "source_file": "docs/adr/0048-test-targets-device-and-ui-kind.md",
-      "source_location": "L97",
+      "source_location": "L103",
       "_origin": "ast",
+      "id": "docs_adr_0048_test_targets_device_and_ui_kind_\u5b9e\u6d4b\u4f9d\u636e",
       "community": 102,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "\u5b9e\u6d4b\u4f9d\u636e",
-      "id": "docs_adr_0048_test_targets_device_and_ui_kind_\u5b9e\u6d4b\u4f9d\u636e"
+      "norm_label": "\u5b9e\u6d4b\u4f9d\u636e"
     },
     {
       "label": "\u80cc\u666f\u4e0e\u95ee\u9898",
@@ -36923,32 +36923,32 @@
       "source_file": "docs/adr/0048-test-targets-device-and-ui-kind.md",
       "source_location": "L5",
       "_origin": "ast",
+      "id": "docs_adr_0048_test_targets_device_and_ui_kind_\u80cc\u666f\u4e0e\u95ee\u9898",
       "community": 102,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "\u80cc\u666f\u4e0e\u95ee\u9898",
-      "id": "docs_adr_0048_test_targets_device_and_ui_kind_\u80cc\u666f\u4e0e\u95ee\u9898"
+      "norm_label": "\u80cc\u666f\u4e0e\u95ee\u9898"
     },
     {
       "label": "\u88ab\u62d2\u65b9\u6848\uff08\u62a4\u680f\uff09",
       "file_type": "document",
       "source_file": "docs/adr/0048-test-targets-device-and-ui-kind.md",
-      "source_location": "L109",
+      "source_location": "L115",
       "_origin": "ast",
+      "id": "docs_adr_0048_test_targets_device_and_ui_kind_\u88ab\u62d2\u65b9\u6848_\u62a4\u680f",
       "community": 102,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "\u88ab\u62d2\u65b9\u6848(\u62a4\u680f)",
-      "id": "docs_adr_0048_test_targets_device_and_ui_kind_\u88ab\u62d2\u65b9\u6848_\u62a4\u680f"
+      "norm_label": "\u88ab\u62d2\u65b9\u6848(\u62a4\u680f)"
     },
     {
       "label": "\u8fb9\u754c\u4e0e\u4e92\u94fe",
       "file_type": "document",
       "source_file": "docs/adr/0048-test-targets-device-and-ui-kind.md",
-      "source_location": "L122",
+      "source_location": "L131",
       "_origin": "ast",
+      "id": "docs_adr_0048_test_targets_device_and_ui_kind_\u8fb9\u754c\u4e0e\u4e92\u94fe",
       "community": 102,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "\u8fb9\u754c\u4e0e\u4e92\u94fe",
-      "id": "docs_adr_0048_test_targets_device_and_ui_kind_\u8fb9\u754c\u4e0e\u4e92\u94fe"
+      "norm_label": "\u8fb9\u754c\u4e0e\u4e92\u94fe"
     },
     {
       "label": "`subprocess.run` \u66ff\u8eab\uff1a\u8bb0\u4e0b argv/cwd/env\uff0c\u8fd4\u56de\u7ed9\u5b9a returncode\u3002",
@@ -37341,10 +37341,10 @@
       "source_file": "docs/adr/0052-appium-interface-adapter-and-platform-differences.md",
       "source_location": "L1",
       "_origin": "ast",
+      "id": "docs_adr_0052_appium_interface_adapter_and_platform_differences_0052_appium_\u754c\u9762\u9002\u914d\u4e0e\u5e73\u53f0\u5dee\u5f02\u5904\u7406",
       "community": 107,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "0052. appium \u754c\u9762\u9002\u914d\u4e0e\u5e73\u53f0\u5dee\u5f02\u5904\u7406",
-      "id": "docs_adr_0052_appium_interface_adapter_and_platform_differences_0052_appium_\u754c\u9762\u9002\u914d\u4e0e\u5e73\u53f0\u5dee\u5f02\u5904\u7406"
+      "norm_label": "0052. appium \u754c\u9762\u9002\u914d\u4e0e\u5e73\u53f0\u5dee\u5f02\u5904\u7406"
     },
     {
       "label": "1. \u5e73\u53f0\u5dee\u5f02\u5206\u4e09\u5c42\u5904\u7406\uff0c\u8bbe\u5907\u4ee3\u7801\u4e0d\u51fa\u73b0\u7cfb\u7edf\u7248\u672c\u53f7\u4e0e\u673a\u578b\u540d",
@@ -37352,10 +37352,10 @@
       "source_file": "docs/adr/0052-appium-interface-adapter-and-platform-differences.md",
       "source_location": "L13",
       "_origin": "ast",
+      "id": "docs_adr_0052_appium_interface_adapter_and_platform_differences_1_\u5e73\u53f0\u5dee\u5f02\u5206\u4e09\u5c42\u5904\u7406_\u8bbe\u5907\u4ee3\u7801\u4e0d\u51fa\u73b0\u7cfb\u7edf\u7248\u672c\u53f7\u4e0e\u673a\u578b\u540d",
       "community": 107,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "1. \u5e73\u53f0\u5dee\u5f02\u5206\u4e09\u5c42\u5904\u7406,\u8bbe\u5907\u4ee3\u7801\u4e0d\u51fa\u73b0\u7cfb\u7edf\u7248\u672c\u53f7\u4e0e\u673a\u578b\u540d",
-      "id": "docs_adr_0052_appium_interface_adapter_and_platform_differences_1_\u5e73\u53f0\u5dee\u5f02\u5206\u4e09\u5c42\u5904\u7406_\u8bbe\u5907\u4ee3\u7801\u4e0d\u51fa\u73b0\u7cfb\u7edf\u7248\u672c\u53f7\u4e0e\u673a\u578b\u540d"
+      "norm_label": "1. \u5e73\u53f0\u5dee\u5f02\u5206\u4e09\u5c42\u5904\u7406,\u8bbe\u5907\u4ee3\u7801\u4e0d\u51fa\u73b0\u7cfb\u7edf\u7248\u672c\u53f7\u4e0e\u673a\u578b\u540d"
     },
     {
       "label": "2. \u754c\u9762\u63a5\u7f1d\uff1arun-scope \u53ea\u901a\u8fc7\u4e00\u4e2a\u63a5\u53e3\u64cd\u4f5c\u88ab\u6d4b\u5bf9\u8c61",
@@ -37363,10 +37363,10 @@
       "source_file": "docs/adr/0052-appium-interface-adapter-and-platform-differences.md",
       "source_location": "L20",
       "_origin": "ast",
+      "id": "docs_adr_0052_appium_interface_adapter_and_platform_differences_2_\u754c\u9762\u63a5\u7f1d_run_scope_\u53ea\u901a\u8fc7\u4e00\u4e2a\u63a5\u53e3\u64cd\u4f5c\u88ab\u6d4b\u5bf9\u8c61",
       "community": 107,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "2. \u754c\u9762\u63a5\u7f1d:run-scope \u53ea\u901a\u8fc7\u4e00\u4e2a\u63a5\u53e3\u64cd\u4f5c\u88ab\u6d4b\u5bf9\u8c61",
-      "id": "docs_adr_0052_appium_interface_adapter_and_platform_differences_2_\u754c\u9762\u63a5\u7f1d_run_scope_\u53ea\u901a\u8fc7\u4e00\u4e2a\u63a5\u53e3\u64cd\u4f5c\u88ab\u6d4b\u5bf9\u8c61"
+      "norm_label": "2. \u754c\u9762\u63a5\u7f1d:run-scope \u53ea\u901a\u8fc7\u4e00\u4e2a\u63a5\u53e3\u64cd\u4f5c\u88ab\u6d4b\u5bf9\u8c61"
     },
     {
       "label": "3. \u8bbe\u5907\u6a21\u5757\u7684\u5212\u5206",
@@ -37374,10 +37374,10 @@
       "source_file": "docs/adr/0052-appium-interface-adapter-and-platform-differences.md",
       "source_location": "L43",
       "_origin": "ast",
+      "id": "docs_adr_0052_appium_interface_adapter_and_platform_differences_3_\u8bbe\u5907\u6a21\u5757\u7684\u5212\u5206",
       "community": 107,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "3. \u8bbe\u5907\u6a21\u5757\u7684\u5212\u5206",
-      "id": "docs_adr_0052_appium_interface_adapter_and_platform_differences_3_\u8bbe\u5907\u6a21\u5757\u7684\u5212\u5206"
+      "norm_label": "3. \u8bbe\u5907\u6a21\u5757\u7684\u5212\u5206"
     },
     {
       "label": "4. \u9a71\u52a8\u9002\u914d\u5668\uff1a\u5e73\u53f0\u4e13\u5c5e\u547d\u4ee4\u53ea\u5728\u8fd9\u91cc\u51fa\u73b0",
@@ -37385,10 +37385,10 @@
       "source_file": "docs/adr/0052-appium-interface-adapter-and-platform-differences.md",
       "source_location": "L60",
       "_origin": "ast",
+      "id": "docs_adr_0052_appium_interface_adapter_and_platform_differences_4_\u9a71\u52a8\u9002\u914d\u5668_\u5e73\u53f0\u4e13\u5c5e\u547d\u4ee4\u53ea\u5728\u8fd9\u91cc\u51fa\u73b0",
       "community": 107,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "4. \u9a71\u52a8\u9002\u914d\u5668:\u5e73\u53f0\u4e13\u5c5e\u547d\u4ee4\u53ea\u5728\u8fd9\u91cc\u51fa\u73b0",
-      "id": "docs_adr_0052_appium_interface_adapter_and_platform_differences_4_\u9a71\u52a8\u9002\u914d\u5668_\u5e73\u53f0\u4e13\u5c5e\u547d\u4ee4\u53ea\u5728\u8fd9\u91cc\u51fa\u73b0"
+      "norm_label": "4. \u9a71\u52a8\u9002\u914d\u5668:\u5e73\u53f0\u4e13\u5c5e\u547d\u4ee4\u53ea\u5728\u8fd9\u91cc\u51fa\u73b0"
     },
     {
       "label": "5. \u80fd\u529b\u63a2\u6d4b\uff1a\u6bcf\u4f1a\u8bdd\u4e00\u6b21\uff0c\u80fd\u529b\u7ed3\u8bba\u7f13\u5b58\u3001\u4e0a\u4e0b\u6587\u53e5\u67c4\u6bcf\u6b21\u91cd\u65b0\u5b9a\u4f4d",
@@ -37396,54 +37396,54 @@
       "source_file": "docs/adr/0052-appium-interface-adapter-and-platform-differences.md",
       "source_location": "L77",
       "_origin": "ast",
+      "id": "docs_adr_0052_appium_interface_adapter_and_platform_differences_5_\u80fd\u529b\u63a2\u6d4b_\u6bcf\u4f1a\u8bdd\u4e00\u6b21_\u80fd\u529b\u7ed3\u8bba\u7f13\u5b58_\u4e0a\u4e0b\u6587\u53e5\u67c4\u6bcf\u6b21\u91cd\u65b0\u5b9a\u4f4d",
       "community": 107,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "5. \u80fd\u529b\u63a2\u6d4b:\u6bcf\u4f1a\u8bdd\u4e00\u6b21,\u80fd\u529b\u7ed3\u8bba\u7f13\u5b58\u3001\u4e0a\u4e0b\u6587\u53e5\u67c4\u6bcf\u6b21\u91cd\u65b0\u5b9a\u4f4d",
-      "id": "docs_adr_0052_appium_interface_adapter_and_platform_differences_5_\u80fd\u529b\u63a2\u6d4b_\u6bcf\u4f1a\u8bdd\u4e00\u6b21_\u80fd\u529b\u7ed3\u8bba\u7f13\u5b58_\u4e0a\u4e0b\u6587\u53e5\u67c4\u6bcf\u6b21\u91cd\u65b0\u5b9a\u4f4d"
+      "norm_label": "5. \u80fd\u529b\u63a2\u6d4b:\u6bcf\u4f1a\u8bdd\u4e00\u6b21,\u80fd\u529b\u7ed3\u8bba\u7f13\u5b58\u3001\u4e0a\u4e0b\u6587\u53e5\u67c4\u6bcf\u6b21\u91cd\u65b0\u5b9a\u4f4d"
     },
     {
       "label": "6. \u56fa\u5b9a\u89c4\u5219",
       "file_type": "document",
       "source_file": "docs/adr/0052-appium-interface-adapter-and-platform-differences.md",
-      "source_location": "L92",
+      "source_location": "L93",
       "_origin": "ast",
+      "id": "docs_adr_0052_appium_interface_adapter_and_platform_differences_6_\u56fa\u5b9a\u89c4\u5219",
       "community": 107,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "6. \u56fa\u5b9a\u89c4\u5219",
-      "id": "docs_adr_0052_appium_interface_adapter_and_platform_differences_6_\u56fa\u5b9a\u89c4\u5219"
+      "norm_label": "6. \u56fa\u5b9a\u89c4\u5219"
     },
     {
       "label": "7. Midscene \u590d\u7528\u8fb9\u754c",
       "file_type": "document",
       "source_file": "docs/adr/0052-appium-interface-adapter-and-platform-differences.md",
-      "source_location": "L119",
+      "source_location": "L120",
       "_origin": "ast",
+      "id": "docs_adr_0052_appium_interface_adapter_and_platform_differences_7_midscene_\u590d\u7528\u8fb9\u754c",
       "community": 107,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "7. midscene \u590d\u7528\u8fb9\u754c",
-      "id": "docs_adr_0052_appium_interface_adapter_and_platform_differences_7_midscene_\u590d\u7528\u8fb9\u754c"
+      "norm_label": "7. midscene \u590d\u7528\u8fb9\u754c"
     },
     {
       "label": "8. \u62a4\u680f",
       "file_type": "document",
       "source_file": "docs/adr/0052-appium-interface-adapter-and-platform-differences.md",
-      "source_location": "L127",
+      "source_location": "L128",
       "_origin": "ast",
+      "id": "docs_adr_0052_appium_interface_adapter_and_platform_differences_8_\u62a4\u680f",
       "community": 107,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "8. \u62a4\u680f",
-      "id": "docs_adr_0052_appium_interface_adapter_and_platform_differences_8_\u62a4\u680f"
+      "norm_label": "8. \u62a4\u680f"
     },
     {
       "label": "9. \u672a\u6765\u65b9\u5411\uff08\u4e0d\u5728 1.5 \u8303\u56f4\uff09",
       "file_type": "document",
       "source_file": "docs/adr/0052-appium-interface-adapter-and-platform-differences.md",
-      "source_location": "L136",
+      "source_location": "L137",
       "_origin": "ast",
+      "id": "docs_adr_0052_appium_interface_adapter_and_platform_differences_9_\u672a\u6765\u65b9\u5411_\u4e0d\u5728_1_5_\u8303\u56f4",
       "community": 107,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "9. \u672a\u6765\u65b9\u5411(\u4e0d\u5728 1.5 \u8303\u56f4)",
-      "id": "docs_adr_0052_appium_interface_adapter_and_platform_differences_9_\u672a\u6765\u65b9\u5411_\u4e0d\u5728_1_5_\u8303\u56f4"
+      "norm_label": "9. \u672a\u6765\u65b9\u5411(\u4e0d\u5728 1.5 \u8303\u56f4)"
     },
     {
       "label": "\u51b3\u7b56",
@@ -37451,21 +37451,21 @@
       "source_file": "docs/adr/0052-appium-interface-adapter-and-platform-differences.md",
       "source_location": "L11",
       "_origin": "ast",
+      "id": "docs_adr_0052_appium_interface_adapter_and_platform_differences_\u51b3\u7b56",
       "community": 107,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "\u51b3\u7b56",
-      "id": "docs_adr_0052_appium_interface_adapter_and_platform_differences_\u51b3\u7b56"
+      "norm_label": "\u51b3\u7b56"
     },
     {
       "label": "\u5b9e\u6d4b\u4f9d\u636e",
       "file_type": "document",
       "source_file": "docs/adr/0052-appium-interface-adapter-and-platform-differences.md",
-      "source_location": "L141",
+      "source_location": "L142",
       "_origin": "ast",
+      "id": "docs_adr_0052_appium_interface_adapter_and_platform_differences_\u5b9e\u6d4b\u4f9d\u636e",
       "community": 107,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "\u5b9e\u6d4b\u4f9d\u636e",
-      "id": "docs_adr_0052_appium_interface_adapter_and_platform_differences_\u5b9e\u6d4b\u4f9d\u636e"
+      "norm_label": "\u5b9e\u6d4b\u4f9d\u636e"
     },
     {
       "label": "\u80cc\u666f\u4e0e\u95ee\u9898",
@@ -37473,32 +37473,32 @@
       "source_file": "docs/adr/0052-appium-interface-adapter-and-platform-differences.md",
       "source_location": "L5",
       "_origin": "ast",
+      "id": "docs_adr_0052_appium_interface_adapter_and_platform_differences_\u80cc\u666f\u4e0e\u95ee\u9898",
       "community": 107,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "\u80cc\u666f\u4e0e\u95ee\u9898",
-      "id": "docs_adr_0052_appium_interface_adapter_and_platform_differences_\u80cc\u666f\u4e0e\u95ee\u9898"
+      "norm_label": "\u80cc\u666f\u4e0e\u95ee\u9898"
     },
     {
       "label": "\u88ab\u62d2\u65b9\u6848\uff08\u62a4\u680f\uff09",
       "file_type": "document",
       "source_file": "docs/adr/0052-appium-interface-adapter-and-platform-differences.md",
-      "source_location": "L187",
+      "source_location": "L190",
       "_origin": "ast",
+      "id": "docs_adr_0052_appium_interface_adapter_and_platform_differences_\u88ab\u62d2\u65b9\u6848_\u62a4\u680f",
       "community": 107,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "\u88ab\u62d2\u65b9\u6848(\u62a4\u680f)",
-      "id": "docs_adr_0052_appium_interface_adapter_and_platform_differences_\u88ab\u62d2\u65b9\u6848_\u62a4\u680f"
+      "norm_label": "\u88ab\u62d2\u65b9\u6848(\u62a4\u680f)"
     },
     {
       "label": "\u8fb9\u754c\u4e0e\u4e92\u94fe",
       "file_type": "document",
       "source_file": "docs/adr/0052-appium-interface-adapter-and-platform-differences.md",
-      "source_location": "L209",
+      "source_location": "L212",
       "_origin": "ast",
+      "id": "docs_adr_0052_appium_interface_adapter_and_platform_differences_\u8fb9\u754c\u4e0e\u4e92\u94fe",
       "community": 107,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "\u8fb9\u754c\u4e0e\u4e92\u94fe",
-      "id": "docs_adr_0052_appium_interface_adapter_and_platform_differences_\u8fb9\u754c\u4e0e\u4e92\u94fe"
+      "norm_label": "\u8fb9\u754c\u4e0e\u4e92\u94fe"
     },
     {
       "label": "arg_offload.py",
@@ -46323,10 +46323,10 @@
       "source_file": "docs/journey/0015-mobile-devices-implementation-batches.md",
       "source_location": "L1",
       "_origin": "ast",
+      "id": "docs_journey_0015_mobile_devices_implementation_batches",
       "community": 201,
       "community_name": "\u79fb\u52a8\u771f\u673a\u652f\u6301\uff081.5\uff09\uff1a\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "norm_label": "0015-mobile-devices-implementation-batches.md",
-      "id": "docs_journey_0015_mobile_devices_implementation_batches"
+      "norm_label": "0015-mobile-devices-implementation-batches.md"
     },
     {
       "label": "1. B1-capabilities\uff1a\u80fd\u529b\u81ea\u8ff0\u589e\u952e\uff08\u4e24\u4e2a worker \u53ea\u58f0\u660e\u684c\u9762\u7f51\u9875\uff1bCLI \u552f\u4e00\u6821\u9a8c\u5904\u4e0e\u4ea4\u96c6\uff1bdoctor\u3001list-deterministic \u5448\u73b0\uff09",
@@ -46334,10 +46334,10 @@
       "source_file": "docs/journey/0015-mobile-devices-implementation-batches.md",
       "source_location": "L8",
       "_origin": "ast",
+      "id": "docs_journey_0015_mobile_devices_implementation_batches_1_b1_capabilities_\u80fd\u529b\u81ea\u8ff0\u589e\u952e_\u4e24\u4e2a_worker_\u53ea\u58f0\u660e\u684c\u9762\u7f51\u9875_cli_\u552f\u4e00\u6821\u9a8c\u5904\u4e0e\u4ea4\u96c6_doctor_list_deterministic_\u5448\u73b0",
       "community": 201,
       "community_name": "\u79fb\u52a8\u771f\u673a\u652f\u6301\uff081.5\uff09\uff1a\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "norm_label": "1. b1-capabilities:\u80fd\u529b\u81ea\u8ff0\u589e\u952e(\u4e24\u4e2a worker \u53ea\u58f0\u660e\u684c\u9762\u7f51\u9875;cli \u552f\u4e00\u6821\u9a8c\u5904\u4e0e\u4ea4\u96c6;doctor\u3001list-deterministic \u5448\u73b0)",
-      "id": "docs_journey_0015_mobile_devices_implementation_batches_1_b1_capabilities_\u80fd\u529b\u81ea\u8ff0\u589e\u952e_\u4e24\u4e2a_worker_\u53ea\u58f0\u660e\u684c\u9762\u7f51\u9875_cli_\u552f\u4e00\u6821\u9a8c\u5904\u4e0e\u4ea4\u96c6_doctor_list_deterministic_\u5448\u73b0"
+      "norm_label": "1. b1-capabilities:\u80fd\u529b\u81ea\u8ff0\u589e\u952e(\u4e24\u4e2a worker \u53ea\u58f0\u660e\u684c\u9762\u7f51\u9875;cli \u552f\u4e00\u6821\u9a8c\u5904\u4e0e\u4ea4\u96c6;doctor\u3001list-deterministic \u5448\u73b0)"
     },
     {
       "label": "2. B5-core-events-termination\uff1acore \u4fa7\u4f1a\u8bdd\u4e8b\u4ef6\u3001scope \u7ea7 error\u3001\u5408\u6210 SKIPPED\u3001\u7ec8\u7ed3\u51fd\u6570\u4e0e\u771f\u503c\u8868\u3001\u8ba1\u91cf\u5408\u8ba1\u3001explain \u5448\u73b0",
@@ -46345,10 +46345,10 @@
       "source_file": "docs/journey/0015-mobile-devices-implementation-batches.md",
       "source_location": "L75",
       "_origin": "ast",
+      "id": "docs_journey_0015_mobile_devices_implementation_batches_2_b5_core_events_termination_core_\u4fa7\u4f1a\u8bdd\u4e8b\u4ef6_scope_\u7ea7_error_\u5408\u6210_skipped_\u7ec8\u7ed3\u51fd\u6570\u4e0e\u771f\u503c\u8868_\u8ba1\u91cf\u5408\u8ba1_explain_\u5448\u73b0",
       "community": 201,
       "community_name": "\u79fb\u52a8\u771f\u673a\u652f\u6301\uff081.5\uff09\uff1a\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "norm_label": "2. b5-core-events-termination:core \u4fa7\u4f1a\u8bdd\u4e8b\u4ef6\u3001scope \u7ea7 error\u3001\u5408\u6210 skipped\u3001\u7ec8\u7ed3\u51fd\u6570\u4e0e\u771f\u503c\u8868\u3001\u8ba1\u91cf\u5408\u8ba1\u3001explain \u5448\u73b0",
-      "id": "docs_journey_0015_mobile_devices_implementation_batches_2_b5_core_events_termination_core_\u4fa7\u4f1a\u8bdd\u4e8b\u4ef6_scope_\u7ea7_error_\u5408\u6210_skipped_\u7ec8\u7ed3\u51fd\u6570\u4e0e\u771f\u503c\u8868_\u8ba1\u91cf\u5408\u8ba1_explain_\u5448\u73b0"
+      "norm_label": "2. b5-core-events-termination:core \u4fa7\u4f1a\u8bdd\u4e8b\u4ef6\u3001scope \u7ea7 error\u3001\u5408\u6210 skipped\u3001\u7ec8\u7ed3\u51fd\u6570\u4e0e\u771f\u503c\u8868\u3001\u8ba1\u91cf\u5408\u8ba1\u3001explain \u5448\u73b0"
     },
     {
       "label": "3. B2-core-target-job\uff1a\u6d4b\u8bd5\u76ee\u6807\u4e0e Job \u5f62\u6001\uff08core \u4fa7 tag \u5f52\u7ea6\u3001target \u4e24\u5f62\u6001\u3001\u6309\u76ee\u6807\u7684 timeout\u3001plan \u6807\u6ce8\u4e0e\u76ee\u6807\u62d2\u7edd\u3001\u4e24\u4e2a worker \u5efa\u4f1a\u8bdd\u524d\u81ea\u68c0\uff09",
@@ -46356,10 +46356,10 @@
       "source_file": "docs/journey/0015-mobile-devices-implementation-batches.md",
       "source_location": "L156",
       "_origin": "ast",
+      "id": "docs_journey_0015_mobile_devices_implementation_batches_3_b2_core_target_job_\u6d4b\u8bd5\u76ee\u6807\u4e0e_job_\u5f62\u6001_core_\u4fa7_tag_\u5f52\u7ea6_target_\u4e24\u5f62\u6001_\u6309\u76ee\u6807\u7684_timeout_plan_\u6807\u6ce8\u4e0e\u76ee\u6807\u62d2\u7edd_\u4e24\u4e2a_worker_\u5efa\u4f1a\u8bdd\u524d\u81ea\u68c0",
       "community": 201,
       "community_name": "\u79fb\u52a8\u771f\u673a\u652f\u6301\uff081.5\uff09\uff1a\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "norm_label": "3. b2-core-target-job:\u6d4b\u8bd5\u76ee\u6807\u4e0e job \u5f62\u6001(core \u4fa7 tag \u5f52\u7ea6\u3001target \u4e24\u5f62\u6001\u3001\u6309\u76ee\u6807\u7684 timeout\u3001plan \u6807\u6ce8\u4e0e\u76ee\u6807\u62d2\u7edd\u3001\u4e24\u4e2a worker \u5efa\u4f1a\u8bdd\u524d\u81ea\u68c0)",
-      "id": "docs_journey_0015_mobile_devices_implementation_batches_3_b2_core_target_job_\u6d4b\u8bd5\u76ee\u6807\u4e0e_job_\u5f62\u6001_core_\u4fa7_tag_\u5f52\u7ea6_target_\u4e24\u5f62\u6001_\u6309\u76ee\u6807\u7684_timeout_plan_\u6807\u6ce8\u4e0e\u76ee\u6807\u62d2\u7edd_\u4e24\u4e2a_worker_\u5efa\u4f1a\u8bdd\u524d\u81ea\u68c0"
+      "norm_label": "3. b2-core-target-job:\u6d4b\u8bd5\u76ee\u6807\u4e0e job \u5f62\u6001(core \u4fa7 tag \u5f52\u7ea6\u3001target \u4e24\u5f62\u6001\u3001\u6309\u76ee\u6807\u7684 timeout\u3001plan \u6807\u6ce8\u4e0e\u76ee\u6807\u62d2\u7edd\u3001\u4e24\u4e2a worker \u5efa\u4f1a\u8bdd\u524d\u81ea\u68c0)"
     },
     {
       "label": "4. B3-config-submit\uff1a\u9879\u76ee\u914d\u7f6e\u6587\u4ef6\u3001\u7ec4\u5408\u6839\u586b device_request\u3001definition \u683c\u5f0f\u7248\u672c\u3001CLI \u4fa7\u5e94\u7528\u4e0a\u4f20",
@@ -46367,10 +46367,10 @@
       "source_file": "docs/journey/0015-mobile-devices-implementation-batches.md",
       "source_location": "L224",
       "_origin": "ast",
+      "id": "docs_journey_0015_mobile_devices_implementation_batches_4_b3_config_submit_\u9879\u76ee\u914d\u7f6e\u6587\u4ef6_\u7ec4\u5408\u6839\u586b_device_request_definition_\u683c\u5f0f\u7248\u672c_cli_\u4fa7\u5e94\u7528\u4e0a\u4f20",
       "community": 201,
       "community_name": "\u79fb\u52a8\u771f\u673a\u652f\u6301\uff081.5\uff09\uff1a\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "norm_label": "4. b3-config-submit:\u9879\u76ee\u914d\u7f6e\u6587\u4ef6\u3001\u7ec4\u5408\u6839\u586b device_request\u3001definition \u683c\u5f0f\u7248\u672c\u3001cli \u4fa7\u5e94\u7528\u4e0a\u4f20",
-      "id": "docs_journey_0015_mobile_devices_implementation_batches_4_b3_config_submit_\u9879\u76ee\u914d\u7f6e\u6587\u4ef6_\u7ec4\u5408\u6839\u586b_device_request_definition_\u683c\u5f0f\u7248\u672c_cli_\u4fa7\u5e94\u7528\u4e0a\u4f20"
+      "norm_label": "4. b3-config-submit:\u9879\u76ee\u914d\u7f6e\u6587\u4ef6\u3001\u7ec4\u5408\u6839\u586b device_request\u3001definition \u683c\u5f0f\u7248\u672c\u3001cli \u4fa7\u5e94\u7528\u4e0a\u4f20"
     },
     {
       "label": "5. B4-steps-registry\uff1a\u786e\u5b9a\u6027 step \u591a\u53e5\u67c4\u6ce8\u518c\uff08targets\u3001requires\u3001driver \u4ee3\u7406\u7684\u6ce8\u518c\u9762\uff09",
@@ -46378,10 +46378,10 @@
       "source_file": "docs/journey/0015-mobile-devices-implementation-batches.md",
       "source_location": "L307",
       "_origin": "ast",
+      "id": "docs_journey_0015_mobile_devices_implementation_batches_5_b4_steps_registry_\u786e\u5b9a\u6027_step_\u591a\u53e5\u67c4\u6ce8\u518c_targets_requires_driver_\u4ee3\u7406\u7684\u6ce8\u518c\u9762",
       "community": 201,
       "community_name": "\u79fb\u52a8\u771f\u673a\u652f\u6301\uff081.5\uff09\uff1a\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "norm_label": "5. b4-steps-registry:\u786e\u5b9a\u6027 step \u591a\u53e5\u67c4\u6ce8\u518c(targets\u3001requires\u3001driver \u4ee3\u7406\u7684\u6ce8\u518c\u9762)",
-      "id": "docs_journey_0015_mobile_devices_implementation_batches_5_b4_steps_registry_\u786e\u5b9a\u6027_step_\u591a\u53e5\u67c4\u6ce8\u518c_targets_requires_driver_\u4ee3\u7406\u7684\u6ce8\u518c\u9762"
+      "norm_label": "5. b4-steps-registry:\u786e\u5b9a\u6027 step \u591a\u53e5\u67c4\u6ce8\u518c(targets\u3001requires\u3001driver \u4ee3\u7406\u7684\u6ce8\u518c\u9762)"
     },
     {
       "label": "6. B7-tunnel\uff1a\u96a7\u9053\u6539\u4e3a\u4ee4\u724c\u6362 cookie\uff08\u684c\u9762\u5148\u884c\uff09\u3001\u684c\u9762 worker \u7684\u9884\u70ed\u5931\u8d25\u51fa\u53e3\u3001\u8131\u654f\u89c4\u5219\u4e09\u6761",
@@ -46389,10 +46389,10 @@
       "source_file": "docs/journey/0015-mobile-devices-implementation-batches.md",
       "source_location": "L363",
       "_origin": "ast",
+      "id": "docs_journey_0015_mobile_devices_implementation_batches_6_b7_tunnel_\u96a7\u9053\u6539\u4e3a\u4ee4\u724c\u6362_cookie_\u684c\u9762\u5148\u884c_\u684c\u9762_worker_\u7684\u9884\u70ed\u5931\u8d25\u51fa\u53e3_\u8131\u654f\u89c4\u5219\u4e09\u6761",
       "community": 201,
       "community_name": "\u79fb\u52a8\u771f\u673a\u652f\u6301\uff081.5\uff09\uff1a\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "norm_label": "6. b7-tunnel:\u96a7\u9053\u6539\u4e3a\u4ee4\u724c\u6362 cookie(\u684c\u9762\u5148\u884c)\u3001\u684c\u9762 worker \u7684\u9884\u70ed\u5931\u8d25\u51fa\u53e3\u3001\u8131\u654f\u89c4\u5219\u4e09\u6761",
-      "id": "docs_journey_0015_mobile_devices_implementation_batches_6_b7_tunnel_\u96a7\u9053\u6539\u4e3a\u4ee4\u724c\u6362_cookie_\u684c\u9762\u5148\u884c_\u684c\u9762_worker_\u7684\u9884\u70ed\u5931\u8d25\u51fa\u53e3_\u8131\u654f\u89c4\u5219\u4e09\u6761"
+      "norm_label": "6. b7-tunnel:\u96a7\u9053\u6539\u4e3a\u4ee4\u724c\u6362 cookie(\u684c\u9762\u5148\u884c)\u3001\u684c\u9762 worker \u7684\u9884\u70ed\u5931\u8d25\u51fa\u53e3\u3001\u8131\u654f\u89c4\u5219\u4e09\u6761"
     },
     {
       "label": "7. B8-deploy-iac\uff1a\u90e8\u7f72\u4fa7\uff1a\u6743\u9650\u3001Device Farm \u9879\u76ee\u627e\u56de\u6216\u5efa\u7acb\u3001SSM\u3001doctor \u8bbe\u5907\u9879",
@@ -46400,10 +46400,10 @@
       "source_file": "docs/journey/0015-mobile-devices-implementation-batches.md",
       "source_location": "L435",
       "_origin": "ast",
+      "id": "docs_journey_0015_mobile_devices_implementation_batches_7_b8_deploy_iac_\u90e8\u7f72\u4fa7_\u6743\u9650_device_farm_\u9879\u76ee\u627e\u56de\u6216\u5efa\u7acb_ssm_doctor_\u8bbe\u5907\u9879",
       "community": 201,
       "community_name": "\u79fb\u52a8\u771f\u673a\u652f\u6301\uff081.5\uff09\uff1a\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "norm_label": "7. b8-deploy-iac:\u90e8\u7f72\u4fa7:\u6743\u9650\u3001device farm \u9879\u76ee\u627e\u56de\u6216\u5efa\u7acb\u3001ssm\u3001doctor \u8bbe\u5907\u9879",
-      "id": "docs_journey_0015_mobile_devices_implementation_batches_7_b8_deploy_iac_\u90e8\u7f72\u4fa7_\u6743\u9650_device_farm_\u9879\u76ee\u627e\u56de\u6216\u5efa\u7acb_ssm_doctor_\u8bbe\u5907\u9879"
+      "norm_label": "7. b8-deploy-iac:\u90e8\u7f72\u4fa7:\u6743\u9650\u3001device farm \u9879\u76ee\u627e\u56de\u6216\u5efa\u7acb\u3001ssm\u3001doctor \u8bbe\u5907\u9879"
     },
     {
       "label": "8. B6-midscene-device\uff1aMidscene worker \u8bbe\u5907\u6a21\u5757\uff08\u63a5\u7f1d\u3001\u547d\u4ee4\u5b88\u536b\u3001\u80fd\u529b\u63a2\u6d4b\u3001\u9002\u914d\u5668\u3001\u7ec8\u7ed3\u56db\u9636\u6bb5\u3001evidence\uff09",
@@ -46411,10 +46411,10 @@
       "source_file": "docs/journey/0015-mobile-devices-implementation-batches.md",
       "source_location": "L506",
       "_origin": "ast",
+      "id": "docs_journey_0015_mobile_devices_implementation_batches_8_b6_midscene_device_midscene_worker_\u8bbe\u5907\u6a21\u5757_\u63a5\u7f1d_\u547d\u4ee4\u5b88\u536b_\u80fd\u529b\u63a2\u6d4b_\u9002\u914d\u5668_\u7ec8\u7ed3\u56db\u9636\u6bb5_evidence",
       "community": 201,
       "community_name": "\u79fb\u52a8\u771f\u673a\u652f\u6301\uff081.5\uff09\uff1a\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "norm_label": "8. b6-midscene-device:midscene worker \u8bbe\u5907\u6a21\u5757(\u63a5\u7f1d\u3001\u547d\u4ee4\u5b88\u536b\u3001\u80fd\u529b\u63a2\u6d4b\u3001\u9002\u914d\u5668\u3001\u7ec8\u7ed3\u56db\u9636\u6bb5\u3001evidence)",
-      "id": "docs_journey_0015_mobile_devices_implementation_batches_8_b6_midscene_device_midscene_worker_\u8bbe\u5907\u6a21\u5757_\u63a5\u7f1d_\u547d\u4ee4\u5b88\u536b_\u80fd\u529b\u63a2\u6d4b_\u9002\u914d\u5668_\u7ec8\u7ed3\u56db\u9636\u6bb5_evidence"
+      "norm_label": "8. b6-midscene-device:midscene worker \u8bbe\u5907\u6a21\u5757(\u63a5\u7f1d\u3001\u547d\u4ee4\u5b88\u536b\u3001\u80fd\u529b\u63a2\u6d4b\u3001\u9002\u914d\u5668\u3001\u7ec8\u7ed3\u56db\u9636\u6bb5\u3001evidence)"
     },
     {
       "label": "\u79fb\u52a8\u771f\u673a\u652f\u6301\uff081.5\uff09\uff1a\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
@@ -46422,10 +46422,10 @@
       "source_file": "docs/journey/0015-mobile-devices-implementation-batches.md",
       "source_location": "L3",
       "_origin": "ast",
+      "id": "docs_journey_0015_mobile_devices_implementation_batches_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
       "community": 201,
       "community_name": "\u79fb\u52a8\u771f\u673a\u652f\u6301\uff081.5\uff09\uff1a\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "norm_label": "\u79fb\u52a8\u771f\u673a\u652f\u6301(1.5):\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "id": "docs_journey_0015_mobile_devices_implementation_batches_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5"
+      "norm_label": "\u79fb\u52a8\u771f\u673a\u652f\u6301(1.5):\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5"
     },
     {
       "label": "\u88f8\u6784\u9020\uff1a\u53ea\u88c5 _read_events \u8def\u5f84\u8981\u7528\u7684\u5c5e\u6027\uff08\u4e0d\u8d77 RunTask\uff09\u3002",
@@ -53594,10 +53594,10 @@
       "source_file": "docs/adr/0048-test-targets-device-and-ui-kind.md",
       "source_location": "L1",
       "_origin": "ast",
+      "id": "docs_adr_0048_test_targets_device_and_ui_kind",
       "community": 50,
       "community_name": "ADR 0037: \u5206\u53d1\u4e0e\u6253\u5305",
-      "norm_label": "0048-test-targets-device-and-ui-kind.md",
-      "id": "docs_adr_0048_test_targets_device_and_ui_kind"
+      "norm_label": "0048-test-targets-device-and-ui-kind.md"
     },
     {
       "label": "0049-worker-capabilities-targets-keys.md",
@@ -53627,10 +53627,10 @@
       "source_file": "docs/adr/0051-device-session-lifecycle-and-app-distribution.md",
       "source_location": "L1",
       "_origin": "ast",
+      "id": "docs_adr_0051_device_session_lifecycle_and_app_distribution",
       "community": 50,
       "community_name": "ADR 0037: \u5206\u53d1\u4e0e\u6253\u5305",
-      "norm_label": "0051-device-session-lifecycle-and-app-distribution.md",
-      "id": "docs_adr_0051_device_session_lifecycle_and_app_distribution"
+      "norm_label": "0051-device-session-lifecycle-and-app-distribution.md"
     },
     {
       "label": "0052-appium-interface-adapter-and-platform-differences.md",
@@ -53638,10 +53638,10 @@
       "source_file": "docs/adr/0052-appium-interface-adapter-and-platform-differences.md",
       "source_location": "L1",
       "_origin": "ast",
+      "id": "docs_adr_0052_appium_interface_adapter_and_platform_differences",
       "community": 50,
       "community_name": "ADR 0037: \u5206\u53d1\u4e0e\u6253\u5305",
-      "norm_label": "0052-appium-interface-adapter-and-platform-differences.md",
-      "id": "docs_adr_0052_appium_interface_adapter_and_platform_differences"
+      "norm_label": "0052-appium-interface-adapter-and-platform-differences.md"
     },
     {
       "label": "0053-project-config-file.md",
@@ -59611,65 +59611,65 @@
       "source_file": "docs/adr/0051-device-session-lifecycle-and-app-distribution.md",
       "source_location": "L1",
       "_origin": "ast",
+      "id": "docs_adr_0051_device_session_lifecycle_and_app_distribution_0051_\u8bbe\u5907\u4f1a\u8bdd\u751f\u547d\u5468\u671f\u4e0e\u5e94\u7528\u5206\u53d1",
       "community": 87,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "0051. \u8bbe\u5907\u4f1a\u8bdd\u751f\u547d\u5468\u671f\u4e0e\u5e94\u7528\u5206\u53d1",
-      "id": "docs_adr_0051_device_session_lifecycle_and_app_distribution_0051_\u8bbe\u5907\u4f1a\u8bdd\u751f\u547d\u5468\u671f\u4e0e\u5e94\u7528\u5206\u53d1"
+      "norm_label": "0051. \u8bbe\u5907\u4f1a\u8bdd\u751f\u547d\u5468\u671f\u4e0e\u5e94\u7528\u5206\u53d1"
     },
     {
       "label": "10. \u533a\u57df\u3001\u9879\u76ee\u4e0e\u6743\u9650",
       "file_type": "document",
       "source_file": "docs/adr/0051-device-session-lifecycle-and-app-distribution.md",
-      "source_location": "L113",
+      "source_location": "L116",
       "_origin": "ast",
+      "id": "docs_adr_0051_device_session_lifecycle_and_app_distribution_10_\u533a\u57df_\u9879\u76ee\u4e0e\u6743\u9650",
       "community": 87,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "10. \u533a\u57df\u3001\u9879\u76ee\u4e0e\u6743\u9650",
-      "id": "docs_adr_0051_device_session_lifecycle_and_app_distribution_10_\u533a\u57df_\u9879\u76ee\u4e0e\u6743\u9650"
+      "norm_label": "10. \u533a\u57df\u3001\u9879\u76ee\u4e0e\u6743\u9650"
     },
     {
       "label": "11. \u5b89\u5168\uff1a\u7aef\u70b9\u8131\u654f\u4e0e\u6570\u636e\u4fdd\u7559",
       "file_type": "document",
       "source_file": "docs/adr/0051-device-session-lifecycle-and-app-distribution.md",
-      "source_location": "L121",
+      "source_location": "L124",
       "_origin": "ast",
+      "id": "docs_adr_0051_device_session_lifecycle_and_app_distribution_11_\u5b89\u5168_\u7aef\u70b9\u8131\u654f\u4e0e\u6570\u636e\u4fdd\u7559",
       "community": 87,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "11. \u5b89\u5168:\u7aef\u70b9\u8131\u654f\u4e0e\u6570\u636e\u4fdd\u7559",
-      "id": "docs_adr_0051_device_session_lifecycle_and_app_distribution_11_\u5b89\u5168_\u7aef\u70b9\u8131\u654f\u4e0e\u6570\u636e\u4fdd\u7559"
+      "norm_label": "11. \u5b89\u5168:\u7aef\u70b9\u8131\u654f\u4e0e\u6570\u636e\u4fdd\u7559"
     },
     {
       "label": "12. \u547d\u4ee4\u7684\u771f\u5b9e\u4e0a\u754c\u4e0e\u7ed3\u679c\u672a\u77e5",
       "file_type": "document",
       "source_file": "docs/adr/0051-device-session-lifecycle-and-app-distribution.md",
-      "source_location": "L128",
+      "source_location": "L131",
       "_origin": "ast",
+      "id": "docs_adr_0051_device_session_lifecycle_and_app_distribution_12_\u547d\u4ee4\u7684\u771f\u5b9e\u4e0a\u754c\u4e0e\u7ed3\u679c\u672a\u77e5",
       "community": 87,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "12. \u547d\u4ee4\u7684\u771f\u5b9e\u4e0a\u754c\u4e0e\u7ed3\u679c\u672a\u77e5",
-      "id": "docs_adr_0051_device_session_lifecycle_and_app_distribution_12_\u547d\u4ee4\u7684\u771f\u5b9e\u4e0a\u754c\u4e0e\u7ed3\u679c\u672a\u77e5"
+      "norm_label": "12. \u547d\u4ee4\u7684\u771f\u5b9e\u4e0a\u754c\u4e0e\u7ed3\u679c\u672a\u77e5"
     },
     {
       "label": "13. \u96a7\u9053\u9274\u6743\uff1a\u4ee4\u724c\u6362 cookie\uff0cworker \u9884\u70ed\u4e00\u6b21\uff0c\u684c\u9762\u3001Android\u3001iOS \u4e00\u6761\u8def",
       "file_type": "document",
       "source_file": "docs/adr/0051-device-session-lifecycle-and-app-distribution.md",
-      "source_location": "L132",
+      "source_location": "L135",
       "_origin": "ast",
+      "id": "docs_adr_0051_device_session_lifecycle_and_app_distribution_13_\u96a7\u9053\u9274\u6743_\u4ee4\u724c\u6362_cookie_worker_\u9884\u70ed\u4e00\u6b21_\u684c\u9762_android_ios_\u4e00\u6761\u8def",
       "community": 87,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "13. \u96a7\u9053\u9274\u6743:\u4ee4\u724c\u6362 cookie,worker \u9884\u70ed\u4e00\u6b21,\u684c\u9762\u3001android\u3001ios \u4e00\u6761\u8def",
-      "id": "docs_adr_0051_device_session_lifecycle_and_app_distribution_13_\u96a7\u9053\u9274\u6743_\u4ee4\u724c\u6362_cookie_worker_\u9884\u70ed\u4e00\u6b21_\u684c\u9762_android_ios_\u4e00\u6761\u8def"
+      "norm_label": "13. \u96a7\u9053\u9274\u6743:\u4ee4\u724c\u6362 cookie,worker \u9884\u70ed\u4e00\u6b21,\u684c\u9762\u3001android\u3001ios \u4e00\u6761\u8def"
     },
     {
       "label": "14. \u524d\u63d0\uff1a\u56fd\u5185\u6d88\u8d39\u7ea7\u5e94\u7528\u7684\u7ebf\u4e0a\u5305\u4f1a\u81ea\u884c\u9000\u51fa",
       "file_type": "document",
       "source_file": "docs/adr/0051-device-session-lifecycle-and-app-distribution.md",
-      "source_location": "L146",
+      "source_location": "L149",
       "_origin": "ast",
+      "id": "docs_adr_0051_device_session_lifecycle_and_app_distribution_14_\u524d\u63d0_\u56fd\u5185\u6d88\u8d39\u7ea7\u5e94\u7528\u7684\u7ebf\u4e0a\u5305\u4f1a\u81ea\u884c\u9000\u51fa",
       "community": 87,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "14. \u524d\u63d0:\u56fd\u5185\u6d88\u8d39\u7ea7\u5e94\u7528\u7684\u7ebf\u4e0a\u5305\u4f1a\u81ea\u884c\u9000\u51fa",
-      "id": "docs_adr_0051_device_session_lifecycle_and_app_distribution_14_\u524d\u63d0_\u56fd\u5185\u6d88\u8d39\u7ea7\u5e94\u7528\u7684\u7ebf\u4e0a\u5305\u4f1a\u81ea\u884c\u9000\u51fa"
+      "norm_label": "14. \u524d\u63d0:\u56fd\u5185\u6d88\u8d39\u7ea7\u5e94\u7528\u7684\u7ebf\u4e0a\u5305\u4f1a\u81ea\u884c\u9000\u51fa"
     },
     {
       "label": "1. \u4e00\u4e2a scope \u4e00\u4e2a\u8fdc\u7a0b\u8bbf\u95ee\u4f1a\u8bdd\uff0cscenario \u4e4b\u95f4\u4e0d\u590d\u4f4d",
@@ -59677,10 +59677,10 @@
       "source_file": "docs/adr/0051-device-session-lifecycle-and-app-distribution.md",
       "source_location": "L20",
       "_origin": "ast",
+      "id": "docs_adr_0051_device_session_lifecycle_and_app_distribution_1_\u4e00\u4e2a_scope_\u4e00\u4e2a\u8fdc\u7a0b\u8bbf\u95ee\u4f1a\u8bdd_scenario_\u4e4b\u95f4\u4e0d\u590d\u4f4d",
       "community": 87,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "1. \u4e00\u4e2a scope \u4e00\u4e2a\u8fdc\u7a0b\u8bbf\u95ee\u4f1a\u8bdd,scenario \u4e4b\u95f4\u4e0d\u590d\u4f4d",
-      "id": "docs_adr_0051_device_session_lifecycle_and_app_distribution_1_\u4e00\u4e2a_scope_\u4e00\u4e2a\u8fdc\u7a0b\u8bbf\u95ee\u4f1a\u8bdd_scenario_\u4e4b\u95f4\u4e0d\u590d\u4f4d"
+      "norm_label": "1. \u4e00\u4e2a scope \u4e00\u4e2a\u8fdc\u7a0b\u8bbf\u95ee\u4f1a\u8bdd,scenario \u4e4b\u95f4\u4e0d\u590d\u4f4d"
     },
     {
       "label": "2. \u65f6\u95f4\u9884\u7b97\uff1a\u4f1a\u8bdd\u9884\u7b97\u4ece\u521b\u5efa\u8d77\u7b97\uff0c\u83b7\u53d6\u9884\u7b97\u4ece\u8fdb\u5165\u8bbe\u5907\u89e3\u6790\u8d77\u7b97\uff0cjob \u5899\u949f\u6cbf\u7528 0034",
@@ -59688,10 +59688,10 @@
       "source_file": "docs/adr/0051-device-session-lifecycle-and-app-distribution.md",
       "source_location": "L26",
       "_origin": "ast",
+      "id": "docs_adr_0051_device_session_lifecycle_and_app_distribution_2_\u65f6\u95f4\u9884\u7b97_\u4f1a\u8bdd\u9884\u7b97\u4ece\u521b\u5efa\u8d77\u7b97_\u83b7\u53d6\u9884\u7b97\u4ece\u8fdb\u5165\u8bbe\u5907\u89e3\u6790\u8d77\u7b97_job_\u5899\u949f\u6cbf\u7528_0034",
       "community": 87,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "2. \u65f6\u95f4\u9884\u7b97:\u4f1a\u8bdd\u9884\u7b97\u4ece\u521b\u5efa\u8d77\u7b97,\u83b7\u53d6\u9884\u7b97\u4ece\u8fdb\u5165\u8bbe\u5907\u89e3\u6790\u8d77\u7b97,job \u5899\u949f\u6cbf\u7528 0034",
-      "id": "docs_adr_0051_device_session_lifecycle_and_app_distribution_2_\u65f6\u95f4\u9884\u7b97_\u4f1a\u8bdd\u9884\u7b97\u4ece\u521b\u5efa\u8d77\u7b97_\u83b7\u53d6\u9884\u7b97\u4ece\u8fdb\u5165\u8bbe\u5907\u89e3\u6790\u8d77\u7b97_job_\u5899\u949f\u6cbf\u7528_0034"
+      "norm_label": "2. \u65f6\u95f4\u9884\u7b97:\u4f1a\u8bdd\u9884\u7b97\u4ece\u521b\u5efa\u8d77\u7b97,\u83b7\u53d6\u9884\u7b97\u4ece\u8fdb\u5165\u8bbe\u5907\u89e3\u6790\u8d77\u7b97,job \u5899\u949f\u6cbf\u7528 0034"
     },
     {
       "label": "3. \u8bbe\u5907\u89e3\u6790\u3001\u521b\u5efa\u4e0e\u5b64\u513f\u9632\u62a4",
@@ -59699,10 +59699,10 @@
       "source_file": "docs/adr/0051-device-session-lifecycle-and-app-distribution.md",
       "source_location": "L34",
       "_origin": "ast",
+      "id": "docs_adr_0051_device_session_lifecycle_and_app_distribution_3_\u8bbe\u5907\u89e3\u6790_\u521b\u5efa\u4e0e\u5b64\u513f\u9632\u62a4",
       "community": 87,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "3. \u8bbe\u5907\u89e3\u6790\u3001\u521b\u5efa\u4e0e\u5b64\u513f\u9632\u62a4",
-      "id": "docs_adr_0051_device_session_lifecycle_and_app_distribution_3_\u8bbe\u5907\u89e3\u6790_\u521b\u5efa\u4e0e\u5b64\u513f\u9632\u62a4"
+      "norm_label": "3. \u8bbe\u5907\u89e3\u6790\u3001\u521b\u5efa\u4e0e\u5b64\u513f\u9632\u62a4"
     },
     {
       "label": "4. \u4e8b\u4ef6\u5951\u7ea6\uff1a`scope_started` \u662f\u6267\u884c\u5c31\u7eea\uff0c\u4f1a\u8bdd\u8840\u7f18\u4e0e\u8ba1\u91cf\u8d70 `session_opened` / `session_closed`\uff0c\u6267\u884c\u524d\u5931\u8d25\u8d70 `scope_done` \u7684 scope \u7ea7\u5224\u5b9a",
@@ -59710,65 +59710,65 @@
       "source_file": "docs/adr/0051-device-session-lifecycle-and-app-distribution.md",
       "source_location": "L41",
       "_origin": "ast",
+      "id": "docs_adr_0051_device_session_lifecycle_and_app_distribution_4_\u4e8b\u4ef6\u5951\u7ea6_scope_started_\u662f\u6267\u884c\u5c31\u7eea_\u4f1a\u8bdd\u8840\u7f18\u4e0e\u8ba1\u91cf\u8d70_session_opened_session_closed_\u6267\u884c\u524d\u5931\u8d25\u8d70_scope_done_\u7684_scope_\u7ea7\u5224\u5b9a",
       "community": 87,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "4. \u4e8b\u4ef6\u5951\u7ea6:`scope_started` \u662f\u6267\u884c\u5c31\u7eea,\u4f1a\u8bdd\u8840\u7f18\u4e0e\u8ba1\u91cf\u8d70 `session_opened` / `session_closed`,\u6267\u884c\u524d\u5931\u8d25\u8d70 `scope_done` \u7684 scope \u7ea7\u5224\u5b9a",
-      "id": "docs_adr_0051_device_session_lifecycle_and_app_distribution_4_\u4e8b\u4ef6\u5951\u7ea6_scope_started_\u662f\u6267\u884c\u5c31\u7eea_\u4f1a\u8bdd\u8840\u7f18\u4e0e\u8ba1\u91cf\u8d70_session_opened_session_closed_\u6267\u884c\u524d\u5931\u8d25\u8d70_scope_done_\u7684_scope_\u7ea7\u5224\u5b9a"
+      "norm_label": "4. \u4e8b\u4ef6\u5951\u7ea6:`scope_started` \u662f\u6267\u884c\u5c31\u7eea,\u4f1a\u8bdd\u8840\u7f18\u4e0e\u8ba1\u91cf\u8d70 `session_opened` / `session_closed`,\u6267\u884c\u524d\u5931\u8d25\u8d70 `scope_done` \u7684 scope \u7ea7\u5224\u5b9a"
     },
     {
       "label": "5. \u6536\u5c3e\u987a\u5e8f\u3001\u7ec8\u7ed3\u56db\u9636\u6bb5\u4e0e\u9000\u51fa\u7801",
       "file_type": "document",
       "source_file": "docs/adr/0051-device-session-lifecycle-and-app-distribution.md",
-      "source_location": "L73",
+      "source_location": "L76",
       "_origin": "ast",
+      "id": "docs_adr_0051_device_session_lifecycle_and_app_distribution_5_\u6536\u5c3e\u987a\u5e8f_\u7ec8\u7ed3\u56db\u9636\u6bb5\u4e0e\u9000\u51fa\u7801",
       "community": 87,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "5. \u6536\u5c3e\u987a\u5e8f\u3001\u7ec8\u7ed3\u56db\u9636\u6bb5\u4e0e\u9000\u51fa\u7801",
-      "id": "docs_adr_0051_device_session_lifecycle_and_app_distribution_5_\u6536\u5c3e\u987a\u5e8f_\u7ec8\u7ed3\u56db\u9636\u6bb5\u4e0e\u9000\u51fa\u7801"
+      "norm_label": "5. \u6536\u5c3e\u987a\u5e8f\u3001\u7ec8\u7ed3\u56db\u9636\u6bb5\u4e0e\u9000\u51fa\u7801"
     },
     {
       "label": "6. \u6cc4\u6f0f\u62a4\u680f",
       "file_type": "document",
       "source_file": "docs/adr/0051-device-session-lifecycle-and-app-distribution.md",
-      "source_location": "L88",
+      "source_location": "L91",
       "_origin": "ast",
+      "id": "docs_adr_0051_device_session_lifecycle_and_app_distribution_6_\u6cc4\u6f0f\u62a4\u680f",
       "community": 87,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "6. \u6cc4\u6f0f\u62a4\u680f",
-      "id": "docs_adr_0051_device_session_lifecycle_and_app_distribution_6_\u6cc4\u6f0f\u62a4\u680f"
+      "norm_label": "6. \u6cc4\u6f0f\u62a4\u680f"
     },
     {
       "label": "7. \u8bbe\u5907\u8ba1\u91cf\uff1a\u53ea\u62a5\u539f\u751f\u91cf",
       "file_type": "document",
       "source_file": "docs/adr/0051-device-session-lifecycle-and-app-distribution.md",
-      "source_location": "L93",
+      "source_location": "L96",
       "_origin": "ast",
+      "id": "docs_adr_0051_device_session_lifecycle_and_app_distribution_7_\u8bbe\u5907\u8ba1\u91cf_\u53ea\u62a5\u539f\u751f\u91cf",
       "community": 87,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "7. \u8bbe\u5907\u8ba1\u91cf:\u53ea\u62a5\u539f\u751f\u91cf",
-      "id": "docs_adr_0051_device_session_lifecycle_and_app_distribution_7_\u8bbe\u5907\u8ba1\u91cf_\u53ea\u62a5\u539f\u751f\u91cf"
+      "norm_label": "7. \u8bbe\u5907\u8ba1\u91cf:\u53ea\u62a5\u539f\u751f\u91cf"
     },
     {
       "label": "8. \u8bbe\u5907\u76ee\u6807\u7684 evidence \u5b57\u6bb5",
       "file_type": "document",
       "source_file": "docs/adr/0051-device-session-lifecycle-and-app-distribution.md",
-      "source_location": "L98",
+      "source_location": "L101",
       "_origin": "ast",
+      "id": "docs_adr_0051_device_session_lifecycle_and_app_distribution_8_\u8bbe\u5907\u76ee\u6807\u7684_evidence_\u5b57\u6bb5",
       "community": 87,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "8. \u8bbe\u5907\u76ee\u6807\u7684 evidence \u5b57\u6bb5",
-      "id": "docs_adr_0051_device_session_lifecycle_and_app_distribution_8_\u8bbe\u5907\u76ee\u6807\u7684_evidence_\u5b57\u6bb5"
+      "norm_label": "8. \u8bbe\u5907\u76ee\u6807\u7684 evidence \u5b57\u6bb5"
     },
     {
       "label": "9. \u5e94\u7528\u5206\u53d1\uff1aS3 \u5355\u4e00\u901a\u8def",
       "file_type": "document",
       "source_file": "docs/adr/0051-device-session-lifecycle-and-app-distribution.md",
-      "source_location": "L105",
+      "source_location": "L108",
       "_origin": "ast",
+      "id": "docs_adr_0051_device_session_lifecycle_and_app_distribution_9_\u5e94\u7528\u5206\u53d1_s3_\u5355\u4e00\u901a\u8def",
       "community": 87,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "9. \u5e94\u7528\u5206\u53d1:s3 \u5355\u4e00\u901a\u8def",
-      "id": "docs_adr_0051_device_session_lifecycle_and_app_distribution_9_\u5e94\u7528\u5206\u53d1_s3_\u5355\u4e00\u901a\u8def"
+      "norm_label": "9. \u5e94\u7528\u5206\u53d1:s3 \u5355\u4e00\u901a\u8def"
     },
     {
       "label": "\u51b3\u7b56",
@@ -59776,21 +59776,21 @@
       "source_file": "docs/adr/0051-device-session-lifecycle-and-app-distribution.md",
       "source_location": "L18",
       "_origin": "ast",
+      "id": "docs_adr_0051_device_session_lifecycle_and_app_distribution_\u51b3\u7b56",
       "community": 87,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "\u51b3\u7b56",
-      "id": "docs_adr_0051_device_session_lifecycle_and_app_distribution_\u51b3\u7b56"
+      "norm_label": "\u51b3\u7b56"
     },
     {
       "label": "\u5b9e\u6d4b\u4f9d\u636e",
       "file_type": "document",
       "source_file": "docs/adr/0051-device-session-lifecycle-and-app-distribution.md",
-      "source_location": "L150",
+      "source_location": "L153",
       "_origin": "ast",
+      "id": "docs_adr_0051_device_session_lifecycle_and_app_distribution_\u5b9e\u6d4b\u4f9d\u636e",
       "community": 87,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "\u5b9e\u6d4b\u4f9d\u636e",
-      "id": "docs_adr_0051_device_session_lifecycle_and_app_distribution_\u5b9e\u6d4b\u4f9d\u636e"
+      "norm_label": "\u5b9e\u6d4b\u4f9d\u636e"
     },
     {
       "label": "\u80cc\u666f\u4e0e\u95ee\u9898",
@@ -59798,32 +59798,32 @@
       "source_file": "docs/adr/0051-device-session-lifecycle-and-app-distribution.md",
       "source_location": "L5",
       "_origin": "ast",
+      "id": "docs_adr_0051_device_session_lifecycle_and_app_distribution_\u80cc\u666f\u4e0e\u95ee\u9898",
       "community": 87,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "\u80cc\u666f\u4e0e\u95ee\u9898",
-      "id": "docs_adr_0051_device_session_lifecycle_and_app_distribution_\u80cc\u666f\u4e0e\u95ee\u9898"
+      "norm_label": "\u80cc\u666f\u4e0e\u95ee\u9898"
     },
     {
       "label": "\u88ab\u62d2\u65b9\u6848\uff08\u62a4\u680f\uff09",
       "file_type": "document",
       "source_file": "docs/adr/0051-device-session-lifecycle-and-app-distribution.md",
-      "source_location": "L187",
+      "source_location": "L191",
       "_origin": "ast",
+      "id": "docs_adr_0051_device_session_lifecycle_and_app_distribution_\u88ab\u62d2\u65b9\u6848_\u62a4\u680f",
       "community": 87,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "\u88ab\u62d2\u65b9\u6848(\u62a4\u680f)",
-      "id": "docs_adr_0051_device_session_lifecycle_and_app_distribution_\u88ab\u62d2\u65b9\u6848_\u62a4\u680f"
+      "norm_label": "\u88ab\u62d2\u65b9\u6848(\u62a4\u680f)"
     },
     {
       "label": "\u8fb9\u754c\u4e0e\u4e92\u94fe",
       "file_type": "document",
       "source_file": "docs/adr/0051-device-session-lifecycle-and-app-distribution.md",
-      "source_location": "L225",
+      "source_location": "L229",
       "_origin": "ast",
+      "id": "docs_adr_0051_device_session_lifecycle_and_app_distribution_\u8fb9\u754c\u4e0e\u4e92\u94fe",
       "community": 87,
       "community_name": "\u51b3\u7b56",
-      "norm_label": "\u8fb9\u754c\u4e0e\u4e92\u94fe",
-      "id": "docs_adr_0051_device_session_lifecycle_and_app_distribution_\u8fb9\u754c\u4e0e\u4e92\u94fe"
+      "norm_label": "\u8fb9\u754c\u4e0e\u4e92\u94fe"
     },
     {
       "label": "Connection",
@@ -163014,31 +163014,42 @@
       "source_location": "L1",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0048_test_targets_device_and_ui_kind",
-      "target": "docs_adr_0048_test_targets_device_and_ui_kind_0048_\u6d4b\u8bd5\u76ee\u6807_\u8bbe\u5907\u4e0e\u754c\u9762\u7c7b\u578b\u4e24\u4e2a\u7ef4\u5ea6_device_\u4e0e_app_\u6807\u7b7e_core_\u7684\u6267\u884c\u524d\u9884\u68c0"
+      "target": "docs_adr_0048_test_targets_device_and_ui_kind_0048_\u6d4b\u8bd5\u76ee\u6807_\u8bbe\u5907\u4e0e\u754c\u9762\u7c7b\u578b\u4e24\u4e2a\u7ef4\u5ea6_device_\u4e0e_app_\u6807\u7b7e_core_\u7684\u6267\u884c\u524d\u9884\u68c0",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/adr/0048-test-targets-device-and-ui-kind.md",
-      "source_location": "L109",
+      "source_location": "L103",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0048_test_targets_device_and_ui_kind_0048_\u6d4b\u8bd5\u76ee\u6807_\u8bbe\u5907\u4e0e\u754c\u9762\u7c7b\u578b\u4e24\u4e2a\u7ef4\u5ea6_device_\u4e0e_app_\u6807\u7b7e_core_\u7684\u6267\u884c\u524d\u9884\u68c0",
-      "target": "docs_adr_0048_test_targets_device_and_ui_kind_\u88ab\u62d2\u65b9\u6848_\u62a4\u680f"
+      "target": "docs_adr_0048_test_targets_device_and_ui_kind_\u5b9e\u6d4b\u4f9d\u636e",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/adr/0048-test-targets-device-and-ui-kind.md",
-      "source_location": "L122",
+      "source_location": "L115",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0048_test_targets_device_and_ui_kind_0048_\u6d4b\u8bd5\u76ee\u6807_\u8bbe\u5907\u4e0e\u754c\u9762\u7c7b\u578b\u4e24\u4e2a\u7ef4\u5ea6_device_\u4e0e_app_\u6807\u7b7e_core_\u7684\u6267\u884c\u524d\u9884\u68c0",
-      "target": "docs_adr_0048_test_targets_device_and_ui_kind_\u8fb9\u754c\u4e0e\u4e92\u94fe"
+      "target": "docs_adr_0048_test_targets_device_and_ui_kind_\u88ab\u62d2\u65b9\u6848_\u62a4\u680f",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/adr/0048-test-targets-device-and-ui-kind.md",
+      "source_location": "L131",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "docs_adr_0048_test_targets_device_and_ui_kind_0048_\u6d4b\u8bd5\u76ee\u6807_\u8bbe\u5907\u4e0e\u754c\u9762\u7c7b\u578b\u4e24\u4e2a\u7ef4\u5ea6_device_\u4e0e_app_\u6807\u7b7e_core_\u7684\u6267\u884c\u524d\u9884\u68c0",
+      "target": "docs_adr_0048_test_targets_device_and_ui_kind_\u8fb9\u754c\u4e0e\u4e92\u94fe",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -163047,9 +163058,9 @@
       "source_location": "L16",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0048_test_targets_device_and_ui_kind_0048_\u6d4b\u8bd5\u76ee\u6807_\u8bbe\u5907\u4e0e\u754c\u9762\u7c7b\u578b\u4e24\u4e2a\u7ef4\u5ea6_device_\u4e0e_app_\u6807\u7b7e_core_\u7684\u6267\u884c\u524d\u9884\u68c0",
-      "target": "docs_adr_0048_test_targets_device_and_ui_kind_\u51b3\u7b56"
+      "target": "docs_adr_0048_test_targets_device_and_ui_kind_\u51b3\u7b56",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -163058,20 +163069,9 @@
       "source_location": "L5",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0048_test_targets_device_and_ui_kind_0048_\u6d4b\u8bd5\u76ee\u6807_\u8bbe\u5907\u4e0e\u754c\u9762\u7c7b\u578b\u4e24\u4e2a\u7ef4\u5ea6_device_\u4e0e_app_\u6807\u7b7e_core_\u7684\u6267\u884c\u524d\u9884\u68c0",
-      "target": "docs_adr_0048_test_targets_device_and_ui_kind_\u80cc\u666f\u4e0e\u95ee\u9898"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "docs/adr/0048-test-targets-device-and-ui-kind.md",
-      "source_location": "L97",
-      "weight": 1.0,
-      "_origin": "ast",
-      "confidence_score": 1.0,
-      "source": "docs_adr_0048_test_targets_device_and_ui_kind_0048_\u6d4b\u8bd5\u76ee\u6807_\u8bbe\u5907\u4e0e\u754c\u9762\u7c7b\u578b\u4e24\u4e2a\u7ef4\u5ea6_device_\u4e0e_app_\u6807\u7b7e_core_\u7684\u6267\u884c\u524d\u9884\u68c0",
-      "target": "docs_adr_0048_test_targets_device_and_ui_kind_\u5b9e\u6d4b\u4f9d\u636e"
+      "target": "docs_adr_0048_test_targets_device_and_ui_kind_\u80cc\u666f\u4e0e\u95ee\u9898",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -163080,9 +163080,9 @@
       "source_location": "L18",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0048_test_targets_device_and_ui_kind_\u51b3\u7b56",
-      "target": "docs_adr_0048_test_targets_device_and_ui_kind_1_\u6d4b\u8bd5\u76ee\u6807\u7531\u4e09\u4e2a\u6b63\u4ea4\u7ef4\u5ea6\u63cf\u8ff0_engine_device_ui_kind"
+      "target": "docs_adr_0048_test_targets_device_and_ui_kind_1_\u6d4b\u8bd5\u76ee\u6807\u7531\u4e09\u4e2a\u6b63\u4ea4\u7ef4\u5ea6\u63cf\u8ff0_engine_device_ui_kind",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -163091,9 +163091,9 @@
       "source_location": "L29",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0048_test_targets_device_and_ui_kind_\u51b3\u7b56",
-      "target": "docs_adr_0048_test_targets_device_and_ui_kind_2_\u4e24\u4e2a_scope_\u7ea7_tag_device_\u4e0e_app"
+      "target": "docs_adr_0048_test_targets_device_and_ui_kind_2_\u4e24\u4e2a_scope_\u7ea7_tag_device_\u4e0e_app",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -163102,9 +163102,9 @@
       "source_location": "L37",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0048_test_targets_device_and_ui_kind_\u51b3\u7b56",
-      "target": "docs_adr_0048_test_targets_device_and_ui_kind_3_core_\u7684\u4e09\u5904\u6539\u52a8"
+      "target": "docs_adr_0048_test_targets_device_and_ui_kind_3_core_\u7684\u4e09\u5904\u6539\u52a8",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -163113,9 +163113,9 @@
       "source_location": "L59",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0048_test_targets_device_and_ui_kind_\u51b3\u7b56",
-      "target": "docs_adr_0048_test_targets_device_and_ui_kind_4_\u76ee\u6807\u4e0d\u53d7\u652f\u6301\u65f6\u7684\u62d2\u7edd_\u7531\u80fd\u529b\u81ea\u8ff0\u51b3\u5b9a_\u6d88\u606f\u7ed9\u51fa\u6539\u6cd5"
+      "target": "docs_adr_0048_test_targets_device_and_ui_kind_4_\u76ee\u6807\u4e0d\u53d7\u652f\u6301\u65f6\u7684\u62d2\u7edd_\u7531\u80fd\u529b\u81ea\u8ff0\u51b3\u5b9a_\u6d88\u606f\u7ed9\u51fa\u6539\u6cd5",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -163124,9 +163124,9 @@
       "source_location": "L68",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0048_test_targets_device_and_ui_kind_\u51b3\u7b56",
-      "target": "docs_adr_0048_test_targets_device_and_ui_kind_5_plan_\u7684\u6807\u6ce8"
+      "target": "docs_adr_0048_test_targets_device_and_ui_kind_5_plan_\u7684\u6807\u6ce8",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -163135,9 +163135,9 @@
       "source_location": "L74",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0048_test_targets_device_and_ui_kind_\u51b3\u7b56",
-      "target": "docs_adr_0048_test_targets_device_and_ui_kind_6_\u8fd0\u884c\u671f\u7f51\u9875\u4e0a\u4e0b\u6587\u4e0d\u53ef\u7528_\u58f0\u660e\u4e86\u524d\u63d0\u7684\u786e\u5b9a\u6027_step_\u8bb0_error_\u4e0d\u8f6c_ai"
+      "target": "docs_adr_0048_test_targets_device_and_ui_kind_6_\u8fd0\u884c\u671f\u7f51\u9875\u4e0a\u4e0b\u6587\u4e0d\u53ef\u7528_\u58f0\u660e\u4e86\u524d\u63d0\u7684\u786e\u5b9a\u6027_step_\u8bb0_error_\u4e0d\u8f6c_ai",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -163146,20 +163146,9 @@
       "source_location": "L80",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0048_test_targets_device_and_ui_kind_\u51b3\u7b56",
-      "target": "docs_adr_0048_test_targets_device_and_ui_kind_7_\u5185\u5efa_\u9875\u9762\u5730\u5740\u5339\u914d_step_\u4e0e\u843d\u70b9\u6838\u5bf9\u89c4\u5219"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "docs/adr/0048-test-targets-device-and-ui-kind.md",
-      "source_location": "L85",
-      "weight": 1.0,
-      "_origin": "ast",
-      "confidence_score": 1.0,
-      "source": "docs_adr_0048_test_targets_device_and_ui_kind_\u51b3\u7b56",
-      "target": "docs_adr_0048_test_targets_device_and_ui_kind_8_\u88ab\u6d4b\u73af\u5883\u53ef\u8fbe\u6027"
+      "target": "docs_adr_0048_test_targets_device_and_ui_kind_7_\u5185\u5efa_\u9875\u9762\u5730\u5740\u5339\u914d_step_\u5e94\u7528\u76ee\u6807\u4e0a\u7684\u7f51\u5740_step_\u4e0e\u843d\u70b9\u6838\u5bf9\u89c4\u5219",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -163168,9 +163157,20 @@
       "source_location": "L91",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0048_test_targets_device_and_ui_kind_\u51b3\u7b56",
-      "target": "docs_adr_0048_test_targets_device_and_ui_kind_9_\u4e0d\u505a"
+      "target": "docs_adr_0048_test_targets_device_and_ui_kind_8_\u88ab\u6d4b\u73af\u5883\u53ef\u8fbe\u6027",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/adr/0048-test-targets-device-and-ui-kind.md",
+      "source_location": "L97",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "docs_adr_0048_test_targets_device_and_ui_kind_\u51b3\u7b56",
+      "target": "docs_adr_0048_test_targets_device_and_ui_kind_9_\u4e0d\u505a",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -163465,20 +163465,20 @@
       "source_location": "L1",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0051_device_session_lifecycle_and_app_distribution",
-      "target": "docs_adr_0051_device_session_lifecycle_and_app_distribution_0051_\u8bbe\u5907\u4f1a\u8bdd\u751f\u547d\u5468\u671f\u4e0e\u5e94\u7528\u5206\u53d1"
+      "target": "docs_adr_0051_device_session_lifecycle_and_app_distribution_0051_\u8bbe\u5907\u4f1a\u8bdd\u751f\u547d\u5468\u671f\u4e0e\u5e94\u7528\u5206\u53d1",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/adr/0051-device-session-lifecycle-and-app-distribution.md",
-      "source_location": "L150",
+      "source_location": "L153",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0051_device_session_lifecycle_and_app_distribution_0051_\u8bbe\u5907\u4f1a\u8bdd\u751f\u547d\u5468\u671f\u4e0e\u5e94\u7528\u5206\u53d1",
-      "target": "docs_adr_0051_device_session_lifecycle_and_app_distribution_\u5b9e\u6d4b\u4f9d\u636e"
+      "target": "docs_adr_0051_device_session_lifecycle_and_app_distribution_\u5b9e\u6d4b\u4f9d\u636e",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -163487,31 +163487,31 @@
       "source_location": "L18",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0051_device_session_lifecycle_and_app_distribution_0051_\u8bbe\u5907\u4f1a\u8bdd\u751f\u547d\u5468\u671f\u4e0e\u5e94\u7528\u5206\u53d1",
-      "target": "docs_adr_0051_device_session_lifecycle_and_app_distribution_\u51b3\u7b56"
+      "target": "docs_adr_0051_device_session_lifecycle_and_app_distribution_\u51b3\u7b56",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/adr/0051-device-session-lifecycle-and-app-distribution.md",
-      "source_location": "L187",
+      "source_location": "L191",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0051_device_session_lifecycle_and_app_distribution_0051_\u8bbe\u5907\u4f1a\u8bdd\u751f\u547d\u5468\u671f\u4e0e\u5e94\u7528\u5206\u53d1",
-      "target": "docs_adr_0051_device_session_lifecycle_and_app_distribution_\u88ab\u62d2\u65b9\u6848_\u62a4\u680f"
+      "target": "docs_adr_0051_device_session_lifecycle_and_app_distribution_\u88ab\u62d2\u65b9\u6848_\u62a4\u680f",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/adr/0051-device-session-lifecycle-and-app-distribution.md",
-      "source_location": "L225",
+      "source_location": "L229",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0051_device_session_lifecycle_and_app_distribution_0051_\u8bbe\u5907\u4f1a\u8bdd\u751f\u547d\u5468\u671f\u4e0e\u5e94\u7528\u5206\u53d1",
-      "target": "docs_adr_0051_device_session_lifecycle_and_app_distribution_\u8fb9\u754c\u4e0e\u4e92\u94fe"
+      "target": "docs_adr_0051_device_session_lifecycle_and_app_distribution_\u8fb9\u754c\u4e0e\u4e92\u94fe",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -163520,75 +163520,86 @@
       "source_location": "L5",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0051_device_session_lifecycle_and_app_distribution_0051_\u8bbe\u5907\u4f1a\u8bdd\u751f\u547d\u5468\u671f\u4e0e\u5e94\u7528\u5206\u53d1",
-      "target": "docs_adr_0051_device_session_lifecycle_and_app_distribution_\u80cc\u666f\u4e0e\u95ee\u9898"
+      "target": "docs_adr_0051_device_session_lifecycle_and_app_distribution_\u80cc\u666f\u4e0e\u95ee\u9898",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/adr/0051-device-session-lifecycle-and-app-distribution.md",
-      "source_location": "L105",
+      "source_location": "L101",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0051_device_session_lifecycle_and_app_distribution_\u51b3\u7b56",
-      "target": "docs_adr_0051_device_session_lifecycle_and_app_distribution_9_\u5e94\u7528\u5206\u53d1_s3_\u5355\u4e00\u901a\u8def"
+      "target": "docs_adr_0051_device_session_lifecycle_and_app_distribution_8_\u8bbe\u5907\u76ee\u6807\u7684_evidence_\u5b57\u6bb5",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/adr/0051-device-session-lifecycle-and-app-distribution.md",
-      "source_location": "L113",
+      "source_location": "L108",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0051_device_session_lifecycle_and_app_distribution_\u51b3\u7b56",
-      "target": "docs_adr_0051_device_session_lifecycle_and_app_distribution_10_\u533a\u57df_\u9879\u76ee\u4e0e\u6743\u9650"
+      "target": "docs_adr_0051_device_session_lifecycle_and_app_distribution_9_\u5e94\u7528\u5206\u53d1_s3_\u5355\u4e00\u901a\u8def",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/adr/0051-device-session-lifecycle-and-app-distribution.md",
-      "source_location": "L121",
+      "source_location": "L116",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0051_device_session_lifecycle_and_app_distribution_\u51b3\u7b56",
-      "target": "docs_adr_0051_device_session_lifecycle_and_app_distribution_11_\u5b89\u5168_\u7aef\u70b9\u8131\u654f\u4e0e\u6570\u636e\u4fdd\u7559"
+      "target": "docs_adr_0051_device_session_lifecycle_and_app_distribution_10_\u533a\u57df_\u9879\u76ee\u4e0e\u6743\u9650",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/adr/0051-device-session-lifecycle-and-app-distribution.md",
-      "source_location": "L128",
+      "source_location": "L124",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0051_device_session_lifecycle_and_app_distribution_\u51b3\u7b56",
-      "target": "docs_adr_0051_device_session_lifecycle_and_app_distribution_12_\u547d\u4ee4\u7684\u771f\u5b9e\u4e0a\u754c\u4e0e\u7ed3\u679c\u672a\u77e5"
+      "target": "docs_adr_0051_device_session_lifecycle_and_app_distribution_11_\u5b89\u5168_\u7aef\u70b9\u8131\u654f\u4e0e\u6570\u636e\u4fdd\u7559",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/adr/0051-device-session-lifecycle-and-app-distribution.md",
-      "source_location": "L132",
+      "source_location": "L131",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0051_device_session_lifecycle_and_app_distribution_\u51b3\u7b56",
-      "target": "docs_adr_0051_device_session_lifecycle_and_app_distribution_13_\u96a7\u9053\u9274\u6743_\u4ee4\u724c\u6362_cookie_worker_\u9884\u70ed\u4e00\u6b21_\u684c\u9762_android_ios_\u4e00\u6761\u8def"
+      "target": "docs_adr_0051_device_session_lifecycle_and_app_distribution_12_\u547d\u4ee4\u7684\u771f\u5b9e\u4e0a\u754c\u4e0e\u7ed3\u679c\u672a\u77e5",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/adr/0051-device-session-lifecycle-and-app-distribution.md",
-      "source_location": "L146",
+      "source_location": "L135",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0051_device_session_lifecycle_and_app_distribution_\u51b3\u7b56",
-      "target": "docs_adr_0051_device_session_lifecycle_and_app_distribution_14_\u524d\u63d0_\u56fd\u5185\u6d88\u8d39\u7ea7\u5e94\u7528\u7684\u7ebf\u4e0a\u5305\u4f1a\u81ea\u884c\u9000\u51fa"
+      "target": "docs_adr_0051_device_session_lifecycle_and_app_distribution_13_\u96a7\u9053\u9274\u6743_\u4ee4\u724c\u6362_cookie_worker_\u9884\u70ed\u4e00\u6b21_\u684c\u9762_android_ios_\u4e00\u6761\u8def",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/adr/0051-device-session-lifecycle-and-app-distribution.md",
+      "source_location": "L149",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "docs_adr_0051_device_session_lifecycle_and_app_distribution_\u51b3\u7b56",
+      "target": "docs_adr_0051_device_session_lifecycle_and_app_distribution_14_\u524d\u63d0_\u56fd\u5185\u6d88\u8d39\u7ea7\u5e94\u7528\u7684\u7ebf\u4e0a\u5305\u4f1a\u81ea\u884c\u9000\u51fa",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -163597,9 +163608,9 @@
       "source_location": "L20",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0051_device_session_lifecycle_and_app_distribution_\u51b3\u7b56",
-      "target": "docs_adr_0051_device_session_lifecycle_and_app_distribution_1_\u4e00\u4e2a_scope_\u4e00\u4e2a\u8fdc\u7a0b\u8bbf\u95ee\u4f1a\u8bdd_scenario_\u4e4b\u95f4\u4e0d\u590d\u4f4d"
+      "target": "docs_adr_0051_device_session_lifecycle_and_app_distribution_1_\u4e00\u4e2a_scope_\u4e00\u4e2a\u8fdc\u7a0b\u8bbf\u95ee\u4f1a\u8bdd_scenario_\u4e4b\u95f4\u4e0d\u590d\u4f4d",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -163608,9 +163619,9 @@
       "source_location": "L26",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0051_device_session_lifecycle_and_app_distribution_\u51b3\u7b56",
-      "target": "docs_adr_0051_device_session_lifecycle_and_app_distribution_2_\u65f6\u95f4\u9884\u7b97_\u4f1a\u8bdd\u9884\u7b97\u4ece\u521b\u5efa\u8d77\u7b97_\u83b7\u53d6\u9884\u7b97\u4ece\u8fdb\u5165\u8bbe\u5907\u89e3\u6790\u8d77\u7b97_job_\u5899\u949f\u6cbf\u7528_0034"
+      "target": "docs_adr_0051_device_session_lifecycle_and_app_distribution_2_\u65f6\u95f4\u9884\u7b97_\u4f1a\u8bdd\u9884\u7b97\u4ece\u521b\u5efa\u8d77\u7b97_\u83b7\u53d6\u9884\u7b97\u4ece\u8fdb\u5165\u8bbe\u5907\u89e3\u6790\u8d77\u7b97_job_\u5899\u949f\u6cbf\u7528_0034",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -163619,9 +163630,9 @@
       "source_location": "L34",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0051_device_session_lifecycle_and_app_distribution_\u51b3\u7b56",
-      "target": "docs_adr_0051_device_session_lifecycle_and_app_distribution_3_\u8bbe\u5907\u89e3\u6790_\u521b\u5efa\u4e0e\u5b64\u513f\u9632\u62a4"
+      "target": "docs_adr_0051_device_session_lifecycle_and_app_distribution_3_\u8bbe\u5907\u89e3\u6790_\u521b\u5efa\u4e0e\u5b64\u513f\u9632\u62a4",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -163630,53 +163641,42 @@
       "source_location": "L41",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0051_device_session_lifecycle_and_app_distribution_\u51b3\u7b56",
-      "target": "docs_adr_0051_device_session_lifecycle_and_app_distribution_4_\u4e8b\u4ef6\u5951\u7ea6_scope_started_\u662f\u6267\u884c\u5c31\u7eea_\u4f1a\u8bdd\u8840\u7f18\u4e0e\u8ba1\u91cf\u8d70_session_opened_session_closed_\u6267\u884c\u524d\u5931\u8d25\u8d70_scope_done_\u7684_scope_\u7ea7\u5224\u5b9a"
+      "target": "docs_adr_0051_device_session_lifecycle_and_app_distribution_4_\u4e8b\u4ef6\u5951\u7ea6_scope_started_\u662f\u6267\u884c\u5c31\u7eea_\u4f1a\u8bdd\u8840\u7f18\u4e0e\u8ba1\u91cf\u8d70_session_opened_session_closed_\u6267\u884c\u524d\u5931\u8d25\u8d70_scope_done_\u7684_scope_\u7ea7\u5224\u5b9a",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/adr/0051-device-session-lifecycle-and-app-distribution.md",
-      "source_location": "L73",
+      "source_location": "L76",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0051_device_session_lifecycle_and_app_distribution_\u51b3\u7b56",
-      "target": "docs_adr_0051_device_session_lifecycle_and_app_distribution_5_\u6536\u5c3e\u987a\u5e8f_\u7ec8\u7ed3\u56db\u9636\u6bb5\u4e0e\u9000\u51fa\u7801"
+      "target": "docs_adr_0051_device_session_lifecycle_and_app_distribution_5_\u6536\u5c3e\u987a\u5e8f_\u7ec8\u7ed3\u56db\u9636\u6bb5\u4e0e\u9000\u51fa\u7801",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/adr/0051-device-session-lifecycle-and-app-distribution.md",
-      "source_location": "L88",
+      "source_location": "L91",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0051_device_session_lifecycle_and_app_distribution_\u51b3\u7b56",
-      "target": "docs_adr_0051_device_session_lifecycle_and_app_distribution_6_\u6cc4\u6f0f\u62a4\u680f"
+      "target": "docs_adr_0051_device_session_lifecycle_and_app_distribution_6_\u6cc4\u6f0f\u62a4\u680f",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/adr/0051-device-session-lifecycle-and-app-distribution.md",
-      "source_location": "L93",
+      "source_location": "L96",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0051_device_session_lifecycle_and_app_distribution_\u51b3\u7b56",
-      "target": "docs_adr_0051_device_session_lifecycle_and_app_distribution_7_\u8bbe\u5907\u8ba1\u91cf_\u53ea\u62a5\u539f\u751f\u91cf"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "docs/adr/0051-device-session-lifecycle-and-app-distribution.md",
-      "source_location": "L98",
-      "weight": 1.0,
-      "_origin": "ast",
-      "confidence_score": 1.0,
-      "source": "docs_adr_0051_device_session_lifecycle_and_app_distribution_\u51b3\u7b56",
-      "target": "docs_adr_0051_device_session_lifecycle_and_app_distribution_8_\u8bbe\u5907\u76ee\u6807\u7684_evidence_\u5b57\u6bb5"
+      "target": "docs_adr_0051_device_session_lifecycle_and_app_distribution_7_\u8bbe\u5907\u8ba1\u91cf_\u53ea\u62a5\u539f\u751f\u91cf",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -163685,9 +163685,9 @@
       "source_location": "L1",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0052_appium_interface_adapter_and_platform_differences",
-      "target": "docs_adr_0052_appium_interface_adapter_and_platform_differences_0052_appium_\u754c\u9762\u9002\u914d\u4e0e\u5e73\u53f0\u5dee\u5f02\u5904\u7406"
+      "target": "docs_adr_0052_appium_interface_adapter_and_platform_differences_0052_appium_\u754c\u9762\u9002\u914d\u4e0e\u5e73\u53f0\u5dee\u5f02\u5904\u7406",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -163696,42 +163696,42 @@
       "source_location": "L11",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0052_appium_interface_adapter_and_platform_differences_0052_appium_\u754c\u9762\u9002\u914d\u4e0e\u5e73\u53f0\u5dee\u5f02\u5904\u7406",
-      "target": "docs_adr_0052_appium_interface_adapter_and_platform_differences_\u51b3\u7b56"
+      "target": "docs_adr_0052_appium_interface_adapter_and_platform_differences_\u51b3\u7b56",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/adr/0052-appium-interface-adapter-and-platform-differences.md",
-      "source_location": "L141",
+      "source_location": "L142",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0052_appium_interface_adapter_and_platform_differences_0052_appium_\u754c\u9762\u9002\u914d\u4e0e\u5e73\u53f0\u5dee\u5f02\u5904\u7406",
-      "target": "docs_adr_0052_appium_interface_adapter_and_platform_differences_\u5b9e\u6d4b\u4f9d\u636e"
+      "target": "docs_adr_0052_appium_interface_adapter_and_platform_differences_\u5b9e\u6d4b\u4f9d\u636e",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/adr/0052-appium-interface-adapter-and-platform-differences.md",
-      "source_location": "L187",
+      "source_location": "L190",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0052_appium_interface_adapter_and_platform_differences_0052_appium_\u754c\u9762\u9002\u914d\u4e0e\u5e73\u53f0\u5dee\u5f02\u5904\u7406",
-      "target": "docs_adr_0052_appium_interface_adapter_and_platform_differences_\u88ab\u62d2\u65b9\u6848_\u62a4\u680f"
+      "target": "docs_adr_0052_appium_interface_adapter_and_platform_differences_\u88ab\u62d2\u65b9\u6848_\u62a4\u680f",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/adr/0052-appium-interface-adapter-and-platform-differences.md",
-      "source_location": "L209",
+      "source_location": "L212",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0052_appium_interface_adapter_and_platform_differences_0052_appium_\u754c\u9762\u9002\u914d\u4e0e\u5e73\u53f0\u5dee\u5f02\u5904\u7406",
-      "target": "docs_adr_0052_appium_interface_adapter_and_platform_differences_\u8fb9\u754c\u4e0e\u4e92\u94fe"
+      "target": "docs_adr_0052_appium_interface_adapter_and_platform_differences_\u8fb9\u754c\u4e0e\u4e92\u94fe",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -163740,31 +163740,31 @@
       "source_location": "L5",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0052_appium_interface_adapter_and_platform_differences_0052_appium_\u754c\u9762\u9002\u914d\u4e0e\u5e73\u53f0\u5dee\u5f02\u5904\u7406",
-      "target": "docs_adr_0052_appium_interface_adapter_and_platform_differences_\u80cc\u666f\u4e0e\u95ee\u9898"
+      "target": "docs_adr_0052_appium_interface_adapter_and_platform_differences_\u80cc\u666f\u4e0e\u95ee\u9898",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/adr/0052-appium-interface-adapter-and-platform-differences.md",
-      "source_location": "L119",
+      "source_location": "L120",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0052_appium_interface_adapter_and_platform_differences_\u51b3\u7b56",
-      "target": "docs_adr_0052_appium_interface_adapter_and_platform_differences_7_midscene_\u590d\u7528\u8fb9\u754c"
+      "target": "docs_adr_0052_appium_interface_adapter_and_platform_differences_7_midscene_\u590d\u7528\u8fb9\u754c",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/adr/0052-appium-interface-adapter-and-platform-differences.md",
-      "source_location": "L127",
+      "source_location": "L128",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0052_appium_interface_adapter_and_platform_differences_\u51b3\u7b56",
-      "target": "docs_adr_0052_appium_interface_adapter_and_platform_differences_8_\u62a4\u680f"
+      "target": "docs_adr_0052_appium_interface_adapter_and_platform_differences_8_\u62a4\u680f",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -163773,20 +163773,20 @@
       "source_location": "L13",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0052_appium_interface_adapter_and_platform_differences_\u51b3\u7b56",
-      "target": "docs_adr_0052_appium_interface_adapter_and_platform_differences_1_\u5e73\u53f0\u5dee\u5f02\u5206\u4e09\u5c42\u5904\u7406_\u8bbe\u5907\u4ee3\u7801\u4e0d\u51fa\u73b0\u7cfb\u7edf\u7248\u672c\u53f7\u4e0e\u673a\u578b\u540d"
+      "target": "docs_adr_0052_appium_interface_adapter_and_platform_differences_1_\u5e73\u53f0\u5dee\u5f02\u5206\u4e09\u5c42\u5904\u7406_\u8bbe\u5907\u4ee3\u7801\u4e0d\u51fa\u73b0\u7cfb\u7edf\u7248\u672c\u53f7\u4e0e\u673a\u578b\u540d",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/adr/0052-appium-interface-adapter-and-platform-differences.md",
-      "source_location": "L136",
+      "source_location": "L137",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0052_appium_interface_adapter_and_platform_differences_\u51b3\u7b56",
-      "target": "docs_adr_0052_appium_interface_adapter_and_platform_differences_9_\u672a\u6765\u65b9\u5411_\u4e0d\u5728_1_5_\u8303\u56f4"
+      "target": "docs_adr_0052_appium_interface_adapter_and_platform_differences_9_\u672a\u6765\u65b9\u5411_\u4e0d\u5728_1_5_\u8303\u56f4",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -163795,9 +163795,9 @@
       "source_location": "L20",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0052_appium_interface_adapter_and_platform_differences_\u51b3\u7b56",
-      "target": "docs_adr_0052_appium_interface_adapter_and_platform_differences_2_\u754c\u9762\u63a5\u7f1d_run_scope_\u53ea\u901a\u8fc7\u4e00\u4e2a\u63a5\u53e3\u64cd\u4f5c\u88ab\u6d4b\u5bf9\u8c61"
+      "target": "docs_adr_0052_appium_interface_adapter_and_platform_differences_2_\u754c\u9762\u63a5\u7f1d_run_scope_\u53ea\u901a\u8fc7\u4e00\u4e2a\u63a5\u53e3\u64cd\u4f5c\u88ab\u6d4b\u5bf9\u8c61",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -163806,9 +163806,9 @@
       "source_location": "L43",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0052_appium_interface_adapter_and_platform_differences_\u51b3\u7b56",
-      "target": "docs_adr_0052_appium_interface_adapter_and_platform_differences_3_\u8bbe\u5907\u6a21\u5757\u7684\u5212\u5206"
+      "target": "docs_adr_0052_appium_interface_adapter_and_platform_differences_3_\u8bbe\u5907\u6a21\u5757\u7684\u5212\u5206",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -163817,9 +163817,9 @@
       "source_location": "L60",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0052_appium_interface_adapter_and_platform_differences_\u51b3\u7b56",
-      "target": "docs_adr_0052_appium_interface_adapter_and_platform_differences_4_\u9a71\u52a8\u9002\u914d\u5668_\u5e73\u53f0\u4e13\u5c5e\u547d\u4ee4\u53ea\u5728\u8fd9\u91cc\u51fa\u73b0"
+      "target": "docs_adr_0052_appium_interface_adapter_and_platform_differences_4_\u9a71\u52a8\u9002\u914d\u5668_\u5e73\u53f0\u4e13\u5c5e\u547d\u4ee4\u53ea\u5728\u8fd9\u91cc\u51fa\u73b0",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -163828,20 +163828,20 @@
       "source_location": "L77",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0052_appium_interface_adapter_and_platform_differences_\u51b3\u7b56",
-      "target": "docs_adr_0052_appium_interface_adapter_and_platform_differences_5_\u80fd\u529b\u63a2\u6d4b_\u6bcf\u4f1a\u8bdd\u4e00\u6b21_\u80fd\u529b\u7ed3\u8bba\u7f13\u5b58_\u4e0a\u4e0b\u6587\u53e5\u67c4\u6bcf\u6b21\u91cd\u65b0\u5b9a\u4f4d"
+      "target": "docs_adr_0052_appium_interface_adapter_and_platform_differences_5_\u80fd\u529b\u63a2\u6d4b_\u6bcf\u4f1a\u8bdd\u4e00\u6b21_\u80fd\u529b\u7ed3\u8bba\u7f13\u5b58_\u4e0a\u4e0b\u6587\u53e5\u67c4\u6bcf\u6b21\u91cd\u65b0\u5b9a\u4f4d",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/adr/0052-appium-interface-adapter-and-platform-differences.md",
-      "source_location": "L92",
+      "source_location": "L93",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0052_appium_interface_adapter_and_platform_differences_\u51b3\u7b56",
-      "target": "docs_adr_0052_appium_interface_adapter_and_platform_differences_6_\u56fa\u5b9a\u89c4\u5219"
+      "target": "docs_adr_0052_appium_interface_adapter_and_platform_differences_6_\u56fa\u5b9a\u89c4\u5219",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -164092,9 +164092,9 @@
       "source_location": "L3",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0015_mobile_devices_implementation_batches",
-      "target": "docs_journey_0015_mobile_devices_implementation_batches_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5"
+      "target": "docs_journey_0015_mobile_devices_implementation_batches_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -164103,9 +164103,9 @@
       "source_location": "L156",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0015_mobile_devices_implementation_batches_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "target": "docs_journey_0015_mobile_devices_implementation_batches_3_b2_core_target_job_\u6d4b\u8bd5\u76ee\u6807\u4e0e_job_\u5f62\u6001_core_\u4fa7_tag_\u5f52\u7ea6_target_\u4e24\u5f62\u6001_\u6309\u76ee\u6807\u7684_timeout_plan_\u6807\u6ce8\u4e0e\u76ee\u6807\u62d2\u7edd_\u4e24\u4e2a_worker_\u5efa\u4f1a\u8bdd\u524d\u81ea\u68c0"
+      "target": "docs_journey_0015_mobile_devices_implementation_batches_3_b2_core_target_job_\u6d4b\u8bd5\u76ee\u6807\u4e0e_job_\u5f62\u6001_core_\u4fa7_tag_\u5f52\u7ea6_target_\u4e24\u5f62\u6001_\u6309\u76ee\u6807\u7684_timeout_plan_\u6807\u6ce8\u4e0e\u76ee\u6807\u62d2\u7edd_\u4e24\u4e2a_worker_\u5efa\u4f1a\u8bdd\u524d\u81ea\u68c0",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -164114,9 +164114,9 @@
       "source_location": "L224",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0015_mobile_devices_implementation_batches_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "target": "docs_journey_0015_mobile_devices_implementation_batches_4_b3_config_submit_\u9879\u76ee\u914d\u7f6e\u6587\u4ef6_\u7ec4\u5408\u6839\u586b_device_request_definition_\u683c\u5f0f\u7248\u672c_cli_\u4fa7\u5e94\u7528\u4e0a\u4f20"
+      "target": "docs_journey_0015_mobile_devices_implementation_batches_4_b3_config_submit_\u9879\u76ee\u914d\u7f6e\u6587\u4ef6_\u7ec4\u5408\u6839\u586b_device_request_definition_\u683c\u5f0f\u7248\u672c_cli_\u4fa7\u5e94\u7528\u4e0a\u4f20",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -164125,9 +164125,9 @@
       "source_location": "L307",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0015_mobile_devices_implementation_batches_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "target": "docs_journey_0015_mobile_devices_implementation_batches_5_b4_steps_registry_\u786e\u5b9a\u6027_step_\u591a\u53e5\u67c4\u6ce8\u518c_targets_requires_driver_\u4ee3\u7406\u7684\u6ce8\u518c\u9762"
+      "target": "docs_journey_0015_mobile_devices_implementation_batches_5_b4_steps_registry_\u786e\u5b9a\u6027_step_\u591a\u53e5\u67c4\u6ce8\u518c_targets_requires_driver_\u4ee3\u7406\u7684\u6ce8\u518c\u9762",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -164136,9 +164136,9 @@
       "source_location": "L363",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0015_mobile_devices_implementation_batches_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "target": "docs_journey_0015_mobile_devices_implementation_batches_6_b7_tunnel_\u96a7\u9053\u6539\u4e3a\u4ee4\u724c\u6362_cookie_\u684c\u9762\u5148\u884c_\u684c\u9762_worker_\u7684\u9884\u70ed\u5931\u8d25\u51fa\u53e3_\u8131\u654f\u89c4\u5219\u4e09\u6761"
+      "target": "docs_journey_0015_mobile_devices_implementation_batches_6_b7_tunnel_\u96a7\u9053\u6539\u4e3a\u4ee4\u724c\u6362_cookie_\u684c\u9762\u5148\u884c_\u684c\u9762_worker_\u7684\u9884\u70ed\u5931\u8d25\u51fa\u53e3_\u8131\u654f\u89c4\u5219\u4e09\u6761",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -164147,9 +164147,9 @@
       "source_location": "L435",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0015_mobile_devices_implementation_batches_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "target": "docs_journey_0015_mobile_devices_implementation_batches_7_b8_deploy_iac_\u90e8\u7f72\u4fa7_\u6743\u9650_device_farm_\u9879\u76ee\u627e\u56de\u6216\u5efa\u7acb_ssm_doctor_\u8bbe\u5907\u9879"
+      "target": "docs_journey_0015_mobile_devices_implementation_batches_7_b8_deploy_iac_\u90e8\u7f72\u4fa7_\u6743\u9650_device_farm_\u9879\u76ee\u627e\u56de\u6216\u5efa\u7acb_ssm_doctor_\u8bbe\u5907\u9879",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -164158,9 +164158,9 @@
       "source_location": "L506",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0015_mobile_devices_implementation_batches_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "target": "docs_journey_0015_mobile_devices_implementation_batches_8_b6_midscene_device_midscene_worker_\u8bbe\u5907\u6a21\u5757_\u63a5\u7f1d_\u547d\u4ee4\u5b88\u536b_\u80fd\u529b\u63a2\u6d4b_\u9002\u914d\u5668_\u7ec8\u7ed3\u56db\u9636\u6bb5_evidence"
+      "target": "docs_journey_0015_mobile_devices_implementation_batches_8_b6_midscene_device_midscene_worker_\u8bbe\u5907\u6a21\u5757_\u63a5\u7f1d_\u547d\u4ee4\u5b88\u536b_\u80fd\u529b\u63a2\u6d4b_\u9002\u914d\u5668_\u7ec8\u7ed3\u56db\u9636\u6bb5_evidence",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -164169,9 +164169,9 @@
       "source_location": "L75",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0015_mobile_devices_implementation_batches_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "target": "docs_journey_0015_mobile_devices_implementation_batches_2_b5_core_events_termination_core_\u4fa7\u4f1a\u8bdd\u4e8b\u4ef6_scope_\u7ea7_error_\u5408\u6210_skipped_\u7ec8\u7ed3\u51fd\u6570\u4e0e\u771f\u503c\u8868_\u8ba1\u91cf\u5408\u8ba1_explain_\u5448\u73b0"
+      "target": "docs_journey_0015_mobile_devices_implementation_batches_2_b5_core_events_termination_core_\u4fa7\u4f1a\u8bdd\u4e8b\u4ef6_scope_\u7ea7_error_\u5408\u6210_skipped_\u7ec8\u7ed3\u51fd\u6570\u4e0e\u771f\u503c\u8868_\u8ba1\u91cf\u5408\u8ba1_explain_\u5448\u73b0",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -164180,9 +164180,9 @@
       "source_location": "L8",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0015_mobile_devices_implementation_batches_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "target": "docs_journey_0015_mobile_devices_implementation_batches_1_b1_capabilities_\u80fd\u529b\u81ea\u8ff0\u589e\u952e_\u4e24\u4e2a_worker_\u53ea\u58f0\u660e\u684c\u9762\u7f51\u9875_cli_\u552f\u4e00\u6821\u9a8c\u5904\u4e0e\u4ea4\u96c6_doctor_list_deterministic_\u5448\u73b0"
+      "target": "docs_journey_0015_mobile_devices_implementation_batches_1_b1_capabilities_\u80fd\u529b\u81ea\u8ff0\u589e\u952e_\u4e24\u4e2a_worker_\u53ea\u58f0\u660e\u684c\u9762\u7f51\u9875_cli_\u552f\u4e00\u6821\u9a8c\u5904\u4e0e\u4ea4\u96c6_doctor_list_deterministic_\u5448\u73b0",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -199629,23 +199629,12 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "docs/adr/0048-test-targets-device-and-ui-kind.md",
-      "source_location": "L117",
-      "weight": 1.0,
-      "_origin": "ast",
-      "confidence_score": 1.0,
-      "source": "docs_adr_0048_test_targets_device_and_ui_kind",
-      "target": "docs_adr_0020_step_phrasing_default_ai_deterministic_scaffold"
-    },
-    {
-      "relation": "references",
-      "confidence": "EXTRACTED",
-      "source_file": "docs/adr/0048-test-targets-device-and-ui-kind.md",
       "source_location": "L12",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0048_test_targets_device_and_ui_kind",
-      "target": "docs_adr_0022_bdd_runner_retired_core_parses_thin_worker"
+      "target": "docs_adr_0022_bdd_runner_retired_core_parses_thin_worker",
+      "confidence_score": 1.0
     },
     {
       "relation": "references",
@@ -199654,9 +199643,9 @@
       "source_location": "L27",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0048_test_targets_device_and_ui_kind",
-      "target": "docs_adr_0052_appium_interface_adapter_and_platform_differences"
+      "target": "docs_adr_0052_appium_interface_adapter_and_platform_differences",
+      "confidence_score": 1.0
     },
     {
       "relation": "references",
@@ -199665,9 +199654,9 @@
       "source_location": "L3",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0048_test_targets_device_and_ui_kind",
-      "target": "docs_adr_0019_feature_tags_scope_and_engine"
+      "target": "docs_adr_0019_feature_tags_scope_and_engine",
+      "confidence_score": 1.0
     },
     {
       "relation": "references",
@@ -199676,9 +199665,9 @@
       "source_location": "L3",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0048_test_targets_device_and_ui_kind",
-      "target": "docs_adr_0051_device_session_lifecycle_and_app_distribution"
+      "target": "docs_adr_0051_device_session_lifecycle_and_app_distribution",
+      "confidence_score": 1.0
     },
     {
       "relation": "references",
@@ -199687,9 +199676,9 @@
       "source_location": "L32",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0048_test_targets_device_and_ui_kind",
-      "target": "docs_adr_0053_project_config_file"
+      "target": "docs_adr_0053_project_config_file",
+      "confidence_score": 1.0
     },
     {
       "relation": "references",
@@ -199698,9 +199687,9 @@
       "source_location": "L34",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0048_test_targets_device_and_ui_kind",
-      "target": "docs_adr_0025_plan_module_feature_to_jobs"
+      "target": "docs_adr_0025_plan_module_feature_to_jobs",
+      "confidence_score": 1.0
     },
     {
       "relation": "references",
@@ -199709,9 +199698,9 @@
       "source_location": "L46",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0048_test_targets_device_and_ui_kind",
-      "target": "docs_adr_0024_worker_core_protocol"
+      "target": "docs_adr_0024_worker_core_protocol",
+      "confidence_score": 1.0
     },
     {
       "relation": "references",
@@ -199720,9 +199709,9 @@
       "source_location": "L48",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0048_test_targets_device_and_ui_kind",
-      "target": "docs_adr_0035_local_app_testing_via_tunnel"
+      "target": "docs_adr_0035_local_app_testing_via_tunnel",
+      "confidence_score": 1.0
     },
     {
       "relation": "references",
@@ -199731,9 +199720,9 @@
       "source_location": "L50",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0048_test_targets_device_and_ui_kind",
-      "target": "docs_adr_0049_worker_capabilities_targets_keys"
+      "target": "docs_adr_0049_worker_capabilities_targets_keys",
+      "confidence_score": 1.0
     },
     {
       "relation": "references",
@@ -199742,9 +199731,9 @@
       "source_location": "L53",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0048_test_targets_device_and_ui_kind",
-      "target": "docs_adr_0034_detached_batch_reconciler"
+      "target": "docs_adr_0034_detached_batch_reconciler",
+      "confidence_score": 1.0
     },
     {
       "relation": "references",
@@ -199753,9 +199742,9 @@
       "source_location": "L65",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0048_test_targets_device_and_ui_kind",
-      "target": "docs_adr_0036_deterministic_capability_discovery"
+      "target": "docs_adr_0036_deterministic_capability_discovery",
+      "confidence_score": 1.0
     },
     {
       "relation": "references",
@@ -199764,9 +199753,9 @@
       "source_location": "L72",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0048_test_targets_device_and_ui_kind",
-      "target": "docs_adr_0050_deterministic_step_handles_and_testing"
+      "target": "docs_adr_0050_deterministic_step_handles_and_testing",
+      "confidence_score": 1.0
     },
     {
       "relation": "references",
@@ -199775,9 +199764,20 @@
       "source_location": "L83",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0048_test_targets_device_and_ui_kind",
-      "target": "docs_adr_0031_job_lifecycle_states_and_severity"
+      "target": "docs_adr_0020_step_phrasing_default_ai_deterministic_scaffold",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/adr/0048-test-targets-device-and-ui-kind.md",
+      "source_location": "L87",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "docs_adr_0048_test_targets_device_and_ui_kind",
+      "target": "docs_adr_0031_job_lifecycle_states_and_severity",
+      "confidence_score": 1.0
     },
     {
       "relation": "references",
@@ -199992,34 +199992,34 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "docs/adr/0051-device-session-lifecycle-and-app-distribution.md",
-      "source_location": "L100",
+      "source_location": "L103",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0051_device_session_lifecycle_and_app_distribution",
-      "target": "docs_adr_0029_engine_artifacts_to_s3"
+      "target": "docs_adr_0029_engine_artifacts_to_s3",
+      "confidence_score": 1.0
     },
     {
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "docs/adr/0051-device-session-lifecycle-and-app-distribution.md",
-      "source_location": "L100",
+      "source_location": "L103",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0051_device_session_lifecycle_and_app_distribution",
-      "target": "docs_adr_0042_step_evidence_and_explain"
+      "target": "docs_adr_0042_step_evidence_and_explain",
+      "confidence_score": 1.0
     },
     {
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "docs/adr/0051-device-session-lifecycle-and-app-distribution.md",
-      "source_location": "L115",
+      "source_location": "L118",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0051_device_session_lifecycle_and_app_distribution",
-      "target": "docs_adr_0033_iac_aws_backend_and_composition_wiring"
+      "target": "docs_adr_0033_iac_aws_backend_and_composition_wiring",
+      "confidence_score": 1.0
     },
     {
       "relation": "references",
@@ -200028,31 +200028,20 @@
       "source_location": "L22",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0051_device_session_lifecycle_and_app_distribution",
-      "target": "docs_adr_0019_feature_tags_scope_and_engine"
+      "target": "docs_adr_0019_feature_tags_scope_and_engine",
+      "confidence_score": 1.0
     },
     {
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "docs/adr/0051-device-session-lifecycle-and-app-distribution.md",
-      "source_location": "L233",
+      "source_location": "L237",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0051_device_session_lifecycle_and_app_distribution",
-      "target": "docs_adr_0039_user_facing_surfaces_no_internal_references"
-    },
-    {
-      "relation": "references",
-      "confidence": "EXTRACTED",
-      "source_file": "docs/adr/0051-device-session-lifecycle-and-app-distribution.md",
-      "source_location": "L3",
-      "weight": 1.0,
-      "_origin": "ast",
-      "confidence_score": 1.0,
-      "source": "docs_adr_0051_device_session_lifecycle_and_app_distribution",
-      "target": "docs_adr_0024_worker_core_protocol"
+      "target": "docs_adr_0039_user_facing_surfaces_no_internal_references",
+      "confidence_score": 1.0
     },
     {
       "relation": "references",
@@ -200061,9 +200050,9 @@
       "source_location": "L3",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0051_device_session_lifecycle_and_app_distribution",
-      "target": "docs_adr_0028_transient_network_ssl_resilience"
+      "target": "docs_adr_0024_worker_core_protocol",
+      "confidence_score": 1.0
     },
     {
       "relation": "references",
@@ -200072,9 +200061,9 @@
       "source_location": "L3",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0051_device_session_lifecycle_and_app_distribution",
-      "target": "docs_adr_0031_job_lifecycle_states_and_severity"
+      "target": "docs_adr_0028_transient_network_ssl_resilience",
+      "confidence_score": 1.0
     },
     {
       "relation": "references",
@@ -200083,9 +200072,9 @@
       "source_location": "L3",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0051_device_session_lifecycle_and_app_distribution",
-      "target": "docs_adr_0034_detached_batch_reconciler"
+      "target": "docs_adr_0031_job_lifecycle_states_and_severity",
+      "confidence_score": 1.0
     },
     {
       "relation": "references",
@@ -200094,9 +200083,9 @@
       "source_location": "L3",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0051_device_session_lifecycle_and_app_distribution",
-      "target": "docs_adr_0035_local_app_testing_via_tunnel"
+      "target": "docs_adr_0034_detached_batch_reconciler",
+      "confidence_score": 1.0
     },
     {
       "relation": "references",
@@ -200105,9 +200094,9 @@
       "source_location": "L3",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0051_device_session_lifecycle_and_app_distribution",
-      "target": "docs_adr_0037_distribution_and_packaging"
+      "target": "docs_adr_0035_local_app_testing_via_tunnel",
+      "confidence_score": 1.0
     },
     {
       "relation": "references",
@@ -200116,9 +200105,9 @@
       "source_location": "L3",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0051_device_session_lifecycle_and_app_distribution",
-      "target": "docs_adr_0052_appium_interface_adapter_and_platform_differences"
+      "target": "docs_adr_0037_distribution_and_packaging",
+      "confidence_score": 1.0
     },
     {
       "relation": "references",
@@ -200127,9 +200116,20 @@
       "source_location": "L3",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0051_device_session_lifecycle_and_app_distribution",
-      "target": "docs_adr_0053_project_config_file"
+      "target": "docs_adr_0052_appium_interface_adapter_and_platform_differences",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/adr/0051-device-session-lifecycle-and-app-distribution.md",
+      "source_location": "L3",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "docs_adr_0051_device_session_lifecycle_and_app_distribution",
+      "target": "docs_adr_0053_project_config_file",
+      "confidence_score": 1.0
     },
     {
       "relation": "references",
@@ -200138,42 +200138,31 @@
       "source_location": "L50",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0051_device_session_lifecycle_and_app_distribution",
-      "target": "docs_internals_cli_json_contract"
+      "target": "docs_internals_cli_json_contract",
+      "confidence_score": 1.0
     },
     {
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "docs/adr/0052-appium-interface-adapter-and-platform-differences.md",
-      "source_location": "L113",
+      "source_location": "L114",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0052_appium_interface_adapter_and_platform_differences",
-      "target": "docs_adr_0044_engine_model_selection_and_override"
+      "target": "docs_adr_0044_engine_model_selection_and_override",
+      "confidence_score": 1.0
     },
     {
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "docs/adr/0052-appium-interface-adapter-and-platform-differences.md",
-      "source_location": "L121",
+      "source_location": "L122",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0052_appium_interface_adapter_and_platform_differences",
-      "target": "docs_adr_0042_step_evidence_and_explain"
-    },
-    {
-      "relation": "references",
-      "confidence": "EXTRACTED",
-      "source_file": "docs/adr/0052-appium-interface-adapter-and-platform-differences.md",
-      "source_location": "L215",
-      "weight": 1.0,
-      "_origin": "ast",
-      "confidence_score": 1.0,
-      "source": "docs_adr_0052_appium_interface_adapter_and_platform_differences",
-      "target": "docs_adr_0053_project_config_file"
+      "target": "docs_adr_0042_step_evidence_and_explain",
+      "confidence_score": 1.0
     },
     {
       "relation": "references",
@@ -200182,9 +200171,20 @@
       "source_location": "L218",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0052_appium_interface_adapter_and_platform_differences",
-      "target": "docs_adr_0022_bdd_runner_retired_core_parses_thin_worker"
+      "target": "docs_adr_0053_project_config_file",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "source_file": "docs/adr/0052-appium-interface-adapter-and-platform-differences.md",
+      "source_location": "L221",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "docs_adr_0052_appium_interface_adapter_and_platform_differences",
+      "target": "docs_adr_0022_bdd_runner_retired_core_parses_thin_worker",
+      "confidence_score": 1.0
     },
     {
       "relation": "references",
@@ -200193,9 +200193,9 @@
       "source_location": "L30",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0052_appium_interface_adapter_and_platform_differences",
-      "target": "docs_adr_0031_job_lifecycle_states_and_severity"
+      "target": "docs_adr_0031_job_lifecycle_states_and_severity",
+      "confidence_score": 1.0
     },
     {
       "relation": "references",
@@ -200204,9 +200204,9 @@
       "source_location": "L58",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_adr_0052_appium_interface_adapter_and_platform_differences",
-      "target": "docs_adr_0036_deterministic_capability_discovery"
+      "target": "docs_adr_0036_deterministic_capability_discovery",
+      "confidence_score": 1.0
     },
     {
       "relation": "references",
@@ -223180,5 +223180,5 @@
       "source_file": "docs/adr/0043-agent-skill-for-driving-gherkai.md"
     }
   ],
-  "built_at_commit": "890494c29b353cfc6234d3e9f40ab1bedde60b5f"
+  "built_at_commit": "850b4ebd02a2e29277ece706f53b9e4606ce6734"
 }

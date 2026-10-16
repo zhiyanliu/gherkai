@@ -20,14 +20,14 @@
   - iOS 18.6 与 26.3 指定 bundleId：已注册 scheme 的链接 0.3 秒到前台，后台与冷启动同样；地址不经 shell，含括号、引号、`;`、`&` 的地址原样送达（Safari 回显核对）；Device Farm 重签后 Info.plist 里注册的 scheme 保留。**应用不处理的地址（未注册 scheme、无关 https）命令照样成功、应用照样到前台**，系统只负责送达，应用是否跳转外部不可观测。Universal Links 未测（需受控域名的关联文件，重签可能去掉 associated-domains 授权）。
   - iOS 15.8 带 bundleId 时 2.4 秒报 WebDriverAgent「The current Xcode SDK does not support opening of URLs with given application」，首次调用即可识别为设备不支持；Device Farm 公共设备上系统「地图」被禁止启动，不能当被测对象。
   - 由此的实现规则：设备不支持按首次调用的该报错识别、记 `capability_unavailable` 并缓存结论（只缓存能力否定，地址被拒与超时不进缓存）；Android「应用未处理该地址」记 `capability_unavailable`（处置是改写 step、重试不会变；Codex 第十二轮同意，并指出不能据此把 `engine_error` 说成「暗示可重试」，0051 已用它表示禁止补发的结果未知）；命令成功后核对前台包名或 bundleId 是被测应用，允许短暂轮询，不是即记 error。
-- **待 owner 定两项**：① iOS 上这一步的成功契约只能是「地址已送达、应用在前台」，应用忽略链接时本步 passed、由紧跟的落点核对判 failed（不是 error、不短路）——是接受这个契约并写进用户文档，还是 iOS 应用目标暂不支持网址导航。② 应用目标上是否把引号内任意 `scheme://` 识别为深层链接：作者推荐识别（实测两平台可靠、iOS 第三方应用的 https 链接多半不可用），Codex 第十二轮维持「不自动识别、由显式确定性 step 承接」（新证据只回答了命令能否执行，没回答出现 scheme 是否代表导航意图，如 `When 输入 "shop://x"`）。定下后写进 0048 决策 7、0052 决策 4 / 5 / 6、0051 决策 4 类别表，并按 Codex 列的位置同步 0020:23、0024:134。
+- **owner 已定（2026-10-16）**：① 接受 iOS 上网址 step 的成功契约为「地址已送达、应用在前台」，应用忽略链接时由紧跟的落点核对判 failed，写进用户文档；② 应用目标上识别引号内任意 `scheme://`。两项连同 spike 结论已写进 0048 决策 7 与被拒方案、0052 决策 4 / 5 / 6 与实测依据、0051 决策 4 类别表与实测依据，0020 第 3 条与 0024「worker 派发」段加注，Status 头反向链。Codex 第十二轮对 ② 持不同意见（出现 scheme 不等于导航意图），owner 按作者建议定，理由记在 0048 被拒方案。
 - 实施尚未开始。次序（各批的依赖、红线测试与易错点在 journey 0015）：① 能力自述增键（两个 worker 只声明桌面网页）→ ② core 的会话事件、scope 级 error 与终结函数（对桌面是修复：负退出码、零 scenario、超时与中止同时成立的仲裁三处判定改变，写进 CHANGELOG）→ ③ core 的目标与 Job 形态，与两个 worker 建会话前自检同批发布（第一个能产出非桌面 Job 的批次；设备模块完成前，非桌面目标由本机预检与云端 worker 自检拦住）→ ④ 配置文件与提交侧（前移定义 SSM 键名、保留期常量与预热字段）→ ⑤ 确定性 step 注册面 → ⑥ 隧道令牌换 cookie（桌面先行）→ ⑦ 部署侧 → ⑧ Midscene 设备模块 → 文档与 skill。⑦ 可与 ⑧ 的准备并行。
 
 ## documenting 清单（ADR 0048 到 0053 第 7 类内容的汇总，实施期逐项完成）
 
 新页：
 
-- user guide：`engines.md`（引擎能力矩阵，差集测试守）；设备主题页（`@device` 与 `@app` 写法、应用别名、设备选择与 `gherkai.toml` 的 `[devices]`、费用含取设备开销与口径以账单为准、限制：国内消费级应用线上包自退、iOS 26 的 DOM、Compose 无标识、数据驻留 us-west-2 与 400 天）。
+- user guide：`engines.md`（引擎能力矩阵，差集测试守）；设备主题页（`@device` 与 `@app` 写法、应用别名、应用目标上含网址的 step 走深层链接：Android 要带可被应用处理的地址且 `; ' ( )` 须百分号编码，iOS 只保证送达、要紧跟落点核对，老设备记为不支持；设备选择与 `gherkai.toml` 的 `[devices]`、费用含取设备开销与口径以账单为准、限制：国内消费级应用线上包自退、iOS 26 的 DOM、Compose 无标识、数据驻留 us-west-2 与 400 天）。
 - docs/internals：设备会话与 Appium 适配的机理解读一篇（权威指回 0051 / 0052）；`docs/internals/README.md` 登记新篇。`cli-json-contract.md` 的加法扩展已随 ADR 改写完成，实施时按真渲染器样例核对、补护栏夹具。
 
 既有用户文档的触点（按页列，每页都要补 1.5 的新内容，不只是新页）：

@@ -68,7 +68,7 @@ scenario 前核对 ／ step 前核对 ／ step 后复原并核对 ／ 采集界�
 | 输入 | `mobile: type` | W3C 活动元素 sendKeys（`element/active` 加 `element/value`），所在上下文由探测结果定 |
 | 按键 / 主屏 | `mobile: pressKey` | `mobile: pressButton` |
 | 坐标单位 | 截图像素 | 点，等于截图像素除以探测得到的比例 |
-| 导航 | 探测结论为「提供」时在网页上下文调 `url`，「不提供」与「探测出错」都走 `mobile: deepLink` | 同左；路线由探测而非系统版本决定——实测 iOS 15.8 不支持 `mobile: deepLink`、iOS 26.3 只能 deepLink、iOS 18.6 先 deepLink 再用网页上下文会让网页命令全部挂住 |
+| 导航 | 网页目标：探测结论为「提供」时在网页上下文调 `url`，「不提供」与「探测出错」都走 `mobile: deepLink` 交给系统浏览器。应用目标：`mobile: deepLink` 带 package 交给被测应用，发命令前按 RFC 3986 校验地址字符（驱动经 `adb shell am start -d` 传地址，`; ' ( )` 与非 URI 字符会让命令出错或截断，[0048](./0048-test-targets-device-and-ui-kind.md) 决策 7）；命令成功后核对前台包名 | 网页目标同左，路线由探测而非系统版本决定——实测 iOS 15.8 不支持 `mobile: deepLink`、iOS 26.3 只能 deepLink、iOS 18.6 先 deepLink 再用网页上下文会让网页命令全部挂住。应用目标：`mobile: deepLink` 带 bundleId，地址不经 shell、原样送达，成功只表示已送达且应用在前台 |
 
 - **Android 输入用 `mobile: type`**：W3C 路线在 Android Chrome 上不可靠（见实测依据），而 `mobile: type` 快且 AI 步靠它全部通过。
 - **iOS 输入走 W3C 标准路线**：网页上下文可用时对网页活动元素 sendKeys，不可用时对原生活动元素 sendKeys；原生应用里同样走 W3C 路线。不用 Appium 旧版 `POST /keys`（转发到 WebDriverAgent 的 `/wda/keys`）。
@@ -84,6 +84,7 @@ scenario 前核对 ／ step 前核对 ／ step 后复原并核对 ／ 采集界�
 - **输入路线**（iOS）：由网页上下文是否可用决定在哪个上下文取活动元素；Android 固定为 `mobile: type`、不探测。
 - **坐标比例**：iOS 取 `mobile: deviceScreenInfo` 的 `scale`；Android 为 1。
 - **Appium 版本**：取自 `/status`，只记入诊断。
+- **深层链接支持**（仅应用目标）：不预先探测，首次 `mobile: deepLink` 遇到 WebDriverAgent「不支持打开地址」类报错即记为「不提供」并缓存到会话（[0048](./0048-test-targets-device-and-ui-kind.md) 决策 7）；只缓存能力否定，地址被拒与结果未知不进缓存。这是「一次定下」的惰性例外：预先探测要么多开一次应用，要么没有可用的只读命令。
 
 为什么一次定下、不在运行期试错回落：失败的路线有的不抛错，只是空等 50 秒左右；路线失败时模型还会反复重试到重规划上限，额外消耗数万 token。择路必须在交给 AI 之前确定。
 
@@ -111,7 +112,7 @@ scenario 前核对 ／ step 前核对 ／ step 后复原并核对 ／ 采集界�
   | ⑩ 终结四阶段 | 进入终结 | worker | 0051 决策 5 的四个阶段与各自截止线 | 释放未确认即 `release_failed` | 见 0051 决策 5 |
 
   不变量：① 不超过 ②；设备 scope 的 ① 不小于 ③ 加最短余量；⑥ 大于 ⑦ 加余量，只是为了给服务端先报的机会——实测 Android Chrome 上 `pageLoad` 设 3 秒、10 秒慢页在 14.6 秒后才报 timeout，iOS Safari 上设置不被反映、`url` 在 3.2 秒返回而页面未加载完，所以 ⑦ 不能当上界；⑧ 不小于最长命令间空闲（含单次模型规划）加余量；⑤ 到 ⑧ 由适配器显式设定，不依赖 SDK 缺省；同一会话上建连、执行、探测用不同的客户端实例设不同超时（实测两个实例各自的 `connectionRetryTimeout` 各自生效）。重规划上限缺省 12（原生应用的翻页类动作每翻一页消耗一轮规划，实测需要到 12；必须有限），桌面目标行为不变，覆盖走 [0044](./0044-engine-model-selection-and-override.md) 决策 2 的 worker 侧 env 覆盖形态。不存在「step 预算」：Midscene 没有可控的单 act 时间上限，`abortSignal` 只在规划轮之间生效。
-- **执行期关闭传输层自动重试**：执行实例 `connectionRetryCount = 0`（webdriver 10.0.2 在客户端超时与多数服务端错误上以原请求体重发，点击与输入会被重复执行）。只读原语白名单——截图、取上下文列表、page source、已确认网页上下文中的读取地址（不含导航）、`/status`、`deviceScreenInfo`——由适配器重试 1 次，只对网络错误码与 502、503、504，按原语列、不按 HTTP 方法判。
+- **执行期关闭传输层自动重试**：执行实例 `connectionRetryCount = 0`（webdriver 10.0.2 在客户端超时与多数服务端错误上以原请求体重发，点击与输入会被重复执行）。只读原语白名单——截图、取上下文列表、page source、已确认网页上下文中的读取地址（不含导航）、前台应用查询（`getCurrentPackage` / `mobile: activeAppInfo`）、`/status`、`deviceScreenInfo`——由适配器重试 1 次，只对网络错误码与 502、503、504，按原语列、不按 HTTP 方法判。
 - **命令守卫**：会话级的 driver 代理，交给 Midscene 适配器、内建导航与确定性 handler（[0050](./0050-deterministic-step-handles-and-testing.md) 决策 2 的 `ctx.driver`）的都是它。守卫维护两件状态：**当前执行令牌**（step 开始时发出，**在 step 结束、取消或进入终结的那一刻立即撤销**，不等下一 step；带旧令牌或无令牌的调用一律拒绝，覆盖 handler 在 `await` 之后恢复执行、step 结束后保留的引用、以及 SIGTERM 收尾与主执行并存的窗口；收尾自身的调用由生命周期管理方经自己的通道执行）与**结果未知标志**（置位后本 step 内一切有副作用的命令被拒绝，只读白名单放行）。实测 Midscene 1.15.1 在适配器抛错并置 `abortSignal` 后立即结束 act、不再发任何动作，所以守卫的必要性来自 handler 与晚到引用，保留为纵深防御。
 - **结果未知的命令**（客户端超时或连接中断，且不在白名单）：守卫置结果未知标志并中止当前 act 的 `abortSignal`；worker 查一次会话状态，非 RUNNING 按 `session_lost`，RUNNING 则当前 step 记 error、类别 `engine_error`、消息「设备在等待时间内没有回应，这一步可能已执行也可能未执行」，本 scenario 短路；下一条 scenario 前做一次只读存活探测（截图，即决策 2 的 scenario 前核对），失败先查会话状态，非 RUNNING 发 `scope_done{status: error, errorType: session_lost}`、否则发 `scope_done{status: error, errorType: engine_error}`，由 core 合成余下 SKIPPED。任何层都不补发。
 - **隧道预热由适配器执行一次，不感知令牌与 cookie 的值**：在能力探测之后、`scope_started` 之前，按探测结论选路线（可用网页上下文走 `url`，否则 `mobile: deepLink`）导航 worker 收到的预热地址，在原生控件树里查找页面标记（READY / DENIED / ERROR / AUTH REQUIRED），归因规则归 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 13；适配器不处理 iOS Safari 的系统鉴权表单。预热地址与设备端点写进诊断与错误文本时同样经 0051 决策 11 的脱敏出口。
@@ -157,6 +158,8 @@ scenario 前核对 ／ step 前核对 ／ step 后复原并核对 ／ 采集界�
 **网页上下文**：iOS 15.8 的 Safari 网页上下文完整可用，导航、标题、找元素与 Android 同级。iOS 26.3 的网页命令在实测中出现两种失败形态：一种是 `window/rect`、`title`、`url`、`elements` 立即返回检查器错误 `'Runtime' domain was not found`、`url` 不报错但页面不动；另一种是 WEBVIEW 列得出、切得进，但任何网页命令都挂到 120 秒客户端超时。两种都说明网页上下文不可用，判据因此定为短预算内成功执行一条只读命令（决策 5）；改用 `mobile: deepLink`（0.3 秒）导航、之后全程原生上下文，6 步全对。iOS 没有可用网页上下文时调 url 会挂住，请求超时后反复重试，并阻塞同一客户端上的后续命令（「因上一请求过久而超时」）。iOS 15.8 与 18.6 上 `mobile: getContexts` 返回每个 WEBVIEW 的标题与地址；`target=_blank` 的脚本点击后仍只有一个 WEBVIEW，Android 始终只有一个 `CHROMIUM`。维基百科 Android 客户端的上下文列表始终只有 `NATIVE_APP` 与 `WEBVIEW_chrome`，后者拿不到正文 DOM。
 
 **导航路线**：iOS 15.8 上 `mobile: deepLink` 报「当前 Xcode SDK 不支持打开地址」，`url` 路线通过；iOS 18.6 上先 deepLink 再切网页上下文，网页命令全部挂到 120 秒超时并重试三次，改走 `url` 则全部通过；iOS 26.3 只能 deepLink。
+
+**深层链接**（应用目标；Android 15 维基百科客户端与 Chrome，iOS 15.8、18.6、26.3 用注册了自定义 scheme 的未签名示例包与 Safari）：Android 指定 package 时能处理的链接 1 秒内打开目标页，后台与冷启动同样；应用不处理的主机或路径时命令报「unable to resolve Intent」、不离开被测应用；不指定 package 时系统交给 Chrome。驱动经 `adb shell am start -d` 传地址：含 `; ' ( ) | < >` 的地址命令出错，`|` 与 `;` 让命令截断后部分执行（报错的同时打开了截断的地址），`+ % [ ] { } & = # ! * $ , ~` 与已百分号编码的字符逐字送达（以 Chrome 回显页的 `location.href` 对比标准化原值），`mobile: startActivity` 同样经 shell、同样出错，单引号包裹地址会把驱动加的反斜杠留在地址里。iOS 18.6 与 26.3 指定 bundleId 时已注册 scheme 的链接 0.3 秒到前台，后台与冷启动同样，地址不经 shell、含括号引号与 `;` 的地址原样送达（Safari 回显核对）；Device Farm 重签后 Info.plist 注册的 scheme 保留；未注册的 scheme 与无关的 https 地址命令照样成功、应用照样到前台，应用是否跳转外部不可观测。iOS 15.8 带 bundleId 时 2.4 秒报 WebDriverAgent「The current Xcode SDK does not support opening of URLs with given application」，不带时命令挂住（4 次 120 秒客户端超时，481 秒）。Device Farm 公共设备上系统「地图」被禁止启动，不能当被测对象。
 
 **超时语义**（Android Chrome 与 iOS 18.6 Safari）：同一会话上两个 webdriver 10.0.2 客户端实例各自的 `connectionRetryTimeout` 各自生效（3 秒实例 3.0 秒超时，缺省实例完成同一慢导航）；Android `pageLoad` 设 3 秒、10 秒慢页 14.6 秒后才报 timeout，会话仍可用；iOS `pageLoad` 设置不被反映，`url` 在 3.2 秒返回而页面未加载完；`newCommandTimeout` 15 秒下 25 秒长命令在两平台都正常完成、空闲 20 秒后 `invalid session id`，远程访问会话仍 RUNNING，重新 newSession 5.6 到 17 秒成功；newSession 客户端 2 秒超时后立即与 75 秒后服务端都无残留会话（两个时点）。
 

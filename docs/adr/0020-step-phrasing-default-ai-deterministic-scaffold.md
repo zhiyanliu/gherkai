@@ -1,6 +1,6 @@
 # Step 措辞：默认 AI 判断（QA 零预设）+ 确定性 step 脚手架（工程角色按需自建）
 
-> **Status:** Partially-superseded-by 0022/0037 —— 「裸 `When/Then`→默认 AI；确定性=脚手架、测试开发按需建、QA 零代码」核心语义**不变**；落地机制被 0022 反转（从「cucumber 补丁 + pytest-bdd 原生区分」转为「核心库解析关键字 + worker catch-all/确定性注册表派发」，确定性 step 的收集方式从「被 BDD runner 自动收集」转为「写在脚手架文件里、由 worker import 触发注册进注册表」；当时脚手架落在各引擎 `worker/` 目录，见 0022「迁移」条的实装偏差纠正）。**[0037](./0037-distribution-and-packaging.md)（Accepted，随 v1.4.0）再移定制面**：使用方的确定性 step 写在**使用方项目的 `steps/` 目录**（worker 启动时加载，`@deterministic` 注册机制与脚手架同一条），worker 包内脚手架（`engines/novaact/gherkai_worker_novaact/deterministic_steps.py`、`engines/midscene/src/worker/deterministic.steps.mts`）只留内建示范的确定性 step——故「确定性 step 仍住脚手架文件」**只对内建的那些成立**；「QA 零预设、确定性 step 由测试开发维护」的角色边界不变。下文「Midscene 靠补丁」段属被取代的 v0.x 形态。
+> **Status:** Partially-superseded-by 0022/0037 —— 「裸 `When/Then`→默认 AI；确定性=脚手架、测试开发按需建、QA 零代码」核心语义**不变**；落地机制被 0022 反转（从「cucumber 补丁 + pytest-bdd 原生区分」转为「核心库解析关键字 + worker catch-all/确定性注册表派发」，确定性 step 的收集方式从「被 BDD runner 自动收集」转为「写在脚手架文件里、由 worker import 触发注册进注册表」；当时脚手架落在各引擎 `worker/` 目录，见 0022「迁移」条的实装偏差纠正）。**[0037](./0037-distribution-and-packaging.md)（Accepted，随 v1.4.0）再移定制面**：使用方的确定性 step 写在**使用方项目的 `steps/` 目录**（worker 启动时加载，`@deterministic` 注册机制与脚手架同一条），worker 包内脚手架（`engines/novaact/gherkai_worker_novaact/deterministic_steps.py`、`engines/midscene/src/worker/deterministic.steps.mts`）只留内建示范的确定性 step——故「确定性 step 仍住脚手架文件」**只对内建的那些成立**；「QA 零预设、确定性 step 由测试开发维护」的角色边界不变。下文「Midscene 靠补丁」段属被取代的 v0.x 形态。**[0048](./0048-test-targets-device-and-ui-kind.md) 决策 7 在应用目标上扩展第 3 条的分流**：引号内任意 `scheme://…` 都走内建导航、经 `mobile: deepLink` 交给被测应用（第 3 条已就地加注）。
 
 断言类 step 的措辞设计，使「AI 柔性主导」([0014](./0014-ai-first-assertions.md)/[0015](./0015-v1-positioning-smoke-not-regression.md)) 落到 QA 的真实书写体验上。
 
@@ -20,8 +20,8 @@
    - **落地现状**：脚手架现各内置**一个**演示/验证用的 URL 确定性 step `页面地址(?:精确)?匹配 "<正则>"`（`features/deterministic_step.feature` 实跑验证），取代当初"空脚手架、零具体 step"的设想；落地形态与真实路径见 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)「实现状态」段——**确定性 step 仍写在脚手架文件里、注册表只是收集机制**（实装偏差纠正见 0022「迁移」条），它由测试开发维护、非 QA 预设，"QA 零预设"不破。**注册表现同时是能力自述面**（[0036](./0036-deterministic-capability-discovery.md)：注册即暴露——`@deterministic` 的 description/example 必填、QA 可用 `list-deterministic` 主动查已有的确定性 step）：**「主动查」不等于「预设措辞」**，本条"QA 零预设"不变量仍成立。
    - 两个引擎脚手架对齐。
 
-3. **URL 形态自动分流（导航不写死动词）**：QA 写到 URL 时（如 `Given 打开 "https://..."` / `访问 "https://..."` / `前往 "https://..."`），工具**按 step 文本里有没有 URL 字面量**（引号内 `https?://…`）自动分流，**不锁动词**：
-   - **含 URL → 内建确定性导航**（code 抽出 URL 直接 `goto`/`go_to_url`，精确、不浪费 AI、不会被理解成"搜索"而跑偏）。动词随便写，QA 不必记固定措辞——对齐本 ADR"QA 只写自然语言"。
+3. **URL 形态自动分流（导航不写死动词）**：QA 写到 URL 时（如 `Given 打开 "https://..."` / `访问 "https://..."` / `前往 "https://..."`），工具**按 step 文本里有没有 URL 字面量**自动分流，**不锁动词**（网页目标认引号内 `https?://…`；应用目标认引号内任意 `scheme://…`，含自定义 scheme，[0048](./0048-test-targets-device-and-ui-kind.md) 决策 7）：
+   - **含 URL → 内建确定性导航**（网页目标 code 抽出 URL 直接 `goto`/`go_to_url`；应用目标经 `mobile: deepLink` 交给被测应用，做不到时 step 级 fail-fast、不转 AI，[0048](./0048-test-targets-device-and-ui-kind.md) 决策 7。精确、不浪费 AI、不会被理解成"搜索"而跑偏）。动词随便写，QA 不必记固定措辞——对齐本 ADR"QA 只写自然语言"。
    - **不含 URL → 回落默认 AI**（如 `访问 OpenAI 的维基页` / `回到首页` → `aiAct`/`act`，让引擎自己导航）。
    - 这是 A（确定性）+ B（AI）的组合：URL 已知时享受精确，未知时享受柔性。**退路**：若 URL 检测出现误伤（句中只是提及 URL、并非要导航），把 code 路退化成全 AI（B）。
    - **落点 = worker 的派发逻辑**（不在 core，对齐 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)「core 对 step 语义无知」；协议形态见 [0024](./0024-worker-core-protocol.md)）。取代了早先 `Given 打开 "{url}"` 的固定措辞写法。
