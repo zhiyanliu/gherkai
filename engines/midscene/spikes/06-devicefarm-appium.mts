@@ -11,6 +11,7 @@
 //            （DF_EGRESS_URL_A 公网 APK 地址、DF_EGRESS_URL_B S3 预签名地址、DF_EGRESS_PKG 该 APK 的包名）
 //     faults：失败形态——模型名错误、应用被外部杀掉、会话被外部 Stop 时适配器与 Agent 各报什么、多久报出来
 //     cap：150 分钟会话上限——每分钟发一条命令并查会话状态，记录命令开始失败的时刻与最终状态（SPIKE_CAP_MAX_MIN 缺省 165）
+//     deeplink：应用目标上 mobile: deepLink 能否把被测应用带到某一页（Android 维基百科客户端需 DF_APP_ARN；iOS 用系统「地图」）
 //   DF_APP_URL（app 场景：APK 的 https 地址）      DF_APP_ARN（已上传过的 Device Farm 应用 ARN，给了就不再上传）
 //   DF_APP_PACKAGE（缺省 org.wikipedia）          DF_APP_INSTALL=devicefarm|appium（缺省 devicefarm：上传后 InstallToRemoteAccessSession；
 //                                                 appium：用 appium:app 让 Appium 主机自己下载安装——公网 https 与 S3 预签名地址实测都能装；
@@ -41,7 +42,7 @@ import { buildEvidence, executionsLength } from "../src/worker/evidence.mjs";
 
 const DF_REGION = "us-west-2";
 const PLATFORM = (process.env.DF_PLATFORM ?? "android") as "android" | "ios";
-const SCENARIO = (process.env.SPIKE_SCENARIO ?? "web") as "web" | "app" | "egress" | "faults" | "cap" | "warmup" | "timeouts" | "release";
+const SCENARIO = (process.env.SPIKE_SCENARIO ?? "web") as "web" | "app" | "egress" | "faults" | "cap" | "warmup" | "timeouts" | "release" | "deeplink";
 // 隧道「令牌换 cookie」预热、超时分层与会话释放三类探针的输入（见各 probe 函数头注释）
 const TUNNEL_BASE = (process.env.DF_TUNNEL_BASE ?? "").replace(/\/$/, "");
 const TUNNEL_TOKEN = process.env.DF_TUNNEL_TOKEN ?? "";
@@ -990,6 +991,126 @@ async function releaseProbe(project: string): Promise<void> {
   log(`完成：${JSON.stringify(rec.completed).slice(0, 1200)}`);
 }
 
+// ---- 深层链接探针：应用目标上含网址的 step 能否用 mobile: deepLink 把被测应用带到某一页 ----
+// 每个用例记录命令结果与耗时、之后的前台应用、页面上是否出现目标内容（轮询原生控件树）。只用原生上下文。
+// Android：被测应用为维基百科客户端（DF_APP_ARN 给出上传），覆盖指定包名、连续两次、后台、冷启动、应用不处理的网址、
+//          同域名错误路径、不指定包名的系统分发对照、自定义 scheme。
+// iOS：没有注册了 scheme 的第三方安装包，用系统「地图」验证同一机制；iOS 15.8 上只记录「不支持」的确切报错形态。
+async function foreground(driver: Driver): Promise<Record<string, unknown>> {
+  if (PLATFORM === "ios") {
+    const info = await driver.execute("mobile: activeAppInfo").catch((e) => ({ error: errText(e) })) as Record<string, unknown>;
+    return { bundleId: info.bundleId, name: info.name, error: info.error };
+  }
+  return {
+    package: await driver.getCurrentPackage().catch((e) => `ERR ${errText(e).slice(0, 120)}`),
+    activity: await driver.getCurrentActivity().catch((e) => `ERR ${errText(e).slice(0, 120)}`),
+  };
+}
+async function waitMarker(driver: Driver, marker: string | undefined, maxMs: number): Promise<{ hit: boolean; ms: number; source_kb: number; texts: string[] }> {
+  const t0 = performance.now();
+  let last = "";
+  for (;;) {
+    last = await driver.getPageSource().catch(() => "");
+    if (marker && last.includes(marker)) break;
+    if (ms(t0) > maxMs) break;
+    await sleep(1000);
+  }
+  const attr = PLATFORM === "ios" ? / (?:label|name|value)="([^"]{2,60})"/g : / text="([^"]{2,60})"/g;
+  return { hit: !!marker && last.includes(marker), ms: ms(t0), source_kb: Math.round(last.length / 1024), texts: [...new Set([...last.matchAll(attr)].map((m) => m[1]))].slice(0, 12) };
+}
+async function deeplinkCase(driver: Driver, name: string, args: Record<string, unknown>, marker?: string, prep?: () => Promise<unknown>): Promise<void> {
+  const rec: Record<string, unknown> = { name, args };
+  if (prep) rec.prep = await prep().then(() => "ok").catch((e) => errText(e).slice(0, 200));
+  rec.fg_before = await foreground(driver);
+  const t0 = performance.now();
+  try { rec.result = await driver.execute("mobile: deepLink", args) ?? "ok"; rec.ok = true; } catch (e) { rec.ok = false; rec.error = errText(e); }
+  rec.call_ms = ms(t0);
+  rec.marker = marker ? { text: marker, ...(await waitMarker(driver, marker, 12_000)) } : await waitMarker(driver, undefined, 0);
+  rec.fg_after = await foreground(driver);
+  if (PLATFORM === "android") rec.app_state = await driver.queryAppState(APP_PACKAGE).catch((e) => errText(e).slice(0, 120));
+  ((results.deeplink ??= []) as unknown[]).push(rec);
+  log(`deepLink ${name}: ok=${rec.ok} ${rec.call_ms} ms marker=${JSON.stringify((rec.marker as { hit?: boolean }).hit)} fg=${JSON.stringify(rec.fg_after)} ${rec.error ? "ERR " + String(rec.error).slice(0, 200) : ""}`);
+}
+// 第二轮（DF_DL_ROUND=2）：Android 补测网址里 shell 特殊字符的处置与替代路线；iOS 用注册了自定义 scheme 的未签名示例包
+// （Device Farm 安装时重签），DF_APP_PACKAGE 给 bundle id。iOS 15.8 只记第一个用例的报错形态，不带 bundleId 的调用在该版本上挂住。
+async function deeplinkRound2(driver: Driver, sessionArn: string, appArn: string | undefined): Promise<void> {
+  const pkg = APP_PACKAGE;
+  if (appArn) await installApp(driver, sessionArn, appArn);
+  await timed("app_activate", () => driver.activateApp(pkg));
+  await sleep(4000);
+  results.deeplink_launch = { fg: await foreground(driver), view: await waitMarker(driver, undefined, 0) };
+  if (PLATFORM === "android") {
+    const home = () => driver.execute("mobile: pressKey", { keycode: 3 });
+    await deeplinkCase(driver, "encoded_parens", { url: "https://en.wikipedia.org/wiki/Selenium_%28software%29", package: pkg }, "Testing framework");
+    await deeplinkCase(driver, "ampersand_query", { url: "https://en.wikipedia.org/wiki/Cucumber?x=1&y=2", package: pkg }, "Cucumber", async () => { await home(); await sleep(2000); });
+    await deeplinkCase(driver, "single_quoted_parens", { url: "'https://en.wikipedia.org/wiki/Gherkin_(language)'", package: pkg }, "Gherkin");
+    // 替代路线：mobile: startActivity 带 action / uri / package，看转义是否同样经过两层 shell
+    {
+      const rec: Record<string, unknown> = { name: "start_activity_parens_ampersand" };
+      rec.fg_before = await foreground(driver);
+      const t0 = performance.now();
+      try { await driver.execute("mobile: startActivity", { intent: `${pkg}/.page.PageActivity`, action: "android.intent.action.VIEW", uri: "https://en.wikipedia.org/wiki/Selenium_(software)?a=1&b=2", wait: true }); rec.ok = true; } catch (e) { rec.ok = false; rec.error = errText(e); }
+      rec.call_ms = ms(t0); rec.marker = { text: "Testing framework", ...(await waitMarker(driver, "Testing framework", 10_000)) }; rec.fg_after = await foreground(driver);
+      ((results.deeplink ??= []) as unknown[]).push(rec); log(`startActivity: ok=${rec.ok} ${rec.error ? String(rec.error).slice(0, 300) : ""}`);
+    }
+    await deeplinkCase(driver, "cold_start", { url: "https://en.wikipedia.org/wiki/Cucumber", package: pkg }, "Cucumber", async () => { await driver.terminateApp(pkg); await sleep(2000); });
+    await deeplinkCase(driver, "custom_scheme_with_package", { url: "wikipedia://en.wikipedia.org/wiki/Appium", package: pkg }, "Appium");
+    await deeplinkCase(driver, "system_dispatch_handled_no_package", { url: "https://en.wikipedia.org/wiki/Appium" }, "Appium", async () => { await home(); await sleep(2000); });
+    return;
+  }
+  const home = () => driver.execute("mobile: pressButton", { name: "home" });
+  await deeplinkCase(driver, "custom_scheme_with_bundle", { url: "gherkaispike://item/42", bundleId: pkg });
+  if ((results.deeplink as Array<{ ok: boolean }>)[0].ok === false) return;
+  await deeplinkCase(driver, "custom_scheme_query_ampersand", { url: "gherkaispike://item/42?x=1&y=(2)", bundleId: pkg });
+  await deeplinkCase(driver, "from_background", { url: "gherkaispike://item/43", bundleId: pkg }, undefined, async () => { await home(); await sleep(2500); });
+  await deeplinkCase(driver, "cold_start", { url: "gherkaispike://item/44", bundleId: pkg }, undefined, async () => { await driver.terminateApp(pkg); await sleep(2000); });
+  await deeplinkCase(driver, "unhandled_https_with_bundle", { url: "https://www.example.com/", bundleId: pkg });
+  await deeplinkCase(driver, "unhandled_scheme_with_bundle", { url: "otherspike://x", bundleId: pkg });
+  await deeplinkCase(driver, "system_dispatch_custom_no_bundle", { url: "gherkaispike://item/45" }, undefined, async () => { await home(); await sleep(2000); });
+  await deeplinkCase(driver, "safari_baseline_with_bundle", { url: "https://en.m.wikipedia.org/wiki/Appium", bundleId: "com.apple.mobilesafari" }, "Appium");
+}
+async function deeplinkProbe(driver: Driver, sessionArn: string, appArn: string | undefined): Promise<void> {
+  if (process.env.DF_DL_ROUND === "2") return deeplinkRound2(driver, sessionArn, appArn);
+  if (PLATFORM === "android") {
+    const pkg = APP_PACKAGE;
+    if (appArn) await installApp(driver, sessionArn, appArn);
+    await timed("app_activate", () => driver.activateApp(pkg));
+    await sleep(4000);
+    results.deeplink_launch = { fg: await foreground(driver), view: await waitMarker(driver, undefined, 0) };
+    const home = () => driver.execute("mobile: pressKey", { keycode: 3 });
+    await deeplinkCase(driver, "handled_with_package", { url: "https://en.wikipedia.org/wiki/Appium", package: pkg }, "Appium");
+    await deeplinkCase(driver, "consecutive_second", { url: "https://en.wikipedia.org/wiki/Selenium_(software)", package: pkg }, "Selenium");
+    const back = await driver.back().then(() => "ok").catch((e) => errText(e).slice(0, 160));
+    await sleep(2000);
+    results.deeplink_back_after_second = { back, fg: await foreground(driver), view: await waitMarker(driver, "Appium", 4000) };
+    await deeplinkCase(driver, "from_background", { url: "https://en.wikipedia.org/wiki/WebDriver", package: pkg }, "WebDriver", async () => { await home(); await sleep(2500); });
+    await deeplinkCase(driver, "cold_start", { url: "https://en.wikipedia.org/wiki/Android_(operating_system)", package: pkg }, "Android", async () => { await driver.terminateApp(pkg); await sleep(2000); });
+    await deeplinkCase(driver, "unhandled_host_with_package", { url: "https://www.example.com/", package: pkg }, "Example Domain");
+    await deeplinkCase(driver, "handled_host_odd_path_with_package", { url: "https://en.wikipedia.org/static/no-such-page", package: pkg });
+    await deeplinkCase(driver, "handled_other_language_with_package", { url: "https://de.wikipedia.org/wiki/Appium", package: pkg }, "Appium");
+    await deeplinkCase(driver, "custom_scheme_with_package", { url: "wikipedia://en.wikipedia.org/wiki/Kotlin_(programming_language)", package: pkg }, "Kotlin");
+    await deeplinkCase(driver, "system_dispatch_handled_no_package", { url: "https://en.wikipedia.org/wiki/Gherkin_(language)" }, "Gherkin", async () => { await home(); await sleep(2000); });
+    await deeplinkCase(driver, "system_dispatch_unhandled_no_package", { url: "https://www.example.com/" }, "Example Domain", async () => { await home(); await sleep(2000); });
+    return;
+  }
+  // iOS：系统「地图」
+  const maps = "com.apple.Maps";
+  const home = () => driver.execute("mobile: pressButton", { name: "home" });
+  await deeplinkCase(driver, "custom_scheme_with_bundle", { url: "maps://?q=Seattle", bundleId: maps }, "Seattle");
+  if (results.deeplink && (results.deeplink as Array<{ ok: boolean }>)[0].ok === false) {
+    // 不支持的设备：再记一次不带 bundleId 的形态就收尾
+    await deeplinkCase(driver, "no_bundle_on_unsupported", { url: "maps://?q=Seattle" }, "Seattle");
+    return;
+  }
+  await deeplinkCase(driver, "consecutive_second", { url: "maps://?q=Portland", bundleId: maps }, "Portland");
+  await deeplinkCase(driver, "https_universal_with_bundle", { url: "https://maps.apple.com/?q=Boston", bundleId: maps }, "Boston");
+  await deeplinkCase(driver, "unhandled_https_with_bundle", { url: "https://www.example.com/", bundleId: maps }, "Example Domain");
+  await deeplinkCase(driver, "from_background", { url: "maps://?q=Denver", bundleId: maps }, "Denver", async () => { await home(); await sleep(2500); });
+  await deeplinkCase(driver, "cold_start", { url: "maps://?q=Chicago", bundleId: maps }, "Chicago", async () => { await driver.terminateApp(maps); await sleep(2000); });
+  await deeplinkCase(driver, "system_dispatch_universal_no_bundle", { url: "https://maps.apple.com/?q=Austin" }, "Austin", async () => { await home(); await sleep(2000); });
+  await deeplinkCase(driver, "system_dispatch_unhandled_no_bundle", { url: "https://www.example.com/" }, "Example Domain", async () => { await home(); await sleep(2000); });
+}
+
 async function main(): Promise<number> {
   fs.mkdirSync(RUN_DIR, { recursive: true });
   const project = await projectArn();
@@ -1002,7 +1123,7 @@ async function main(): Promise<number> {
     return rc;
   }
   log(`项目 ${project.slice(-20)}，平台 ${PLATFORM}，场景 ${SCENARIO}，设备 ${DEVICE_ARN.slice(-12)}，模型 ${MODEL}（${modelFamily()}），Bedrock ${getBaseUrl()}`);
-  const appArn = (SCENARIO === "app" && APP_INSTALL === "devicefarm") || SCENARIO === "faults" ? await ensureAppUpload(project) : undefined;
+  const appArn = (SCENARIO === "app" && APP_INSTALL === "devicefarm") || SCENARIO === "faults" || (SCENARIO === "deeplink" && (PLATFORM === "android" || process.env.DF_DL_ROUND === "2")) ? await ensureAppUpload(project) : undefined;
   const session = await startSession(project);
   let driver: Driver | undefined;
   let rc = 0;
@@ -1077,6 +1198,8 @@ async function main(): Promise<number> {
       if (appArn) await installApp(driver, session.arn, appArn);
       await timed("app_activate", () => driver!.activateApp(APP_PACKAGE));
       await sleep(3000);
+    } else if (SCENARIO === "deeplink") {
+      await deeplinkProbe(driver, session.arn, appArn);
     } else if (SCENARIO === "warmup") {
       await warmupProbe(driver);
     } else if (SCENARIO === "timeouts") {
@@ -1106,7 +1229,7 @@ async function main(): Promise<number> {
 
     if (SKIP_AI && SCENARIO === "app" && PLATFORM === "ios") await iosAppTypingProbe(driver, session.endpoint).catch((e) => { results.ios_typing_probe_error = errText(e); log(`应用输入探针整体失败：${results.ios_typing_probe_error}`); });
     if (SKIP_AI && SCENARIO === "app" && PLATFORM === "android") await androidAppTypingProbe(driver).catch((e) => { results.android_typing_probe_error = errText(e); log(`Android 应用输入探针整体失败：${results.android_typing_probe_error}`); });
-    if (!SKIP_AI && SCENARIO !== "egress" && SCENARIO !== "cap" && SCENARIO !== "warmup" && SCENARIO !== "timeouts") {
+    if (!SKIP_AI && SCENARIO !== "egress" && SCENARIO !== "cap" && SCENARIO !== "warmup" && SCENARIO !== "timeouts" && SCENARIO !== "deeplink") {
       const iface = new AppiumInterface(driver, session.endpoint);
       const agent = new Agent(iface, {
         generateReport: true, persistExecutionDump: true, replanningCycleLimit: SCENARIO === "app" ? 12 : 4,
