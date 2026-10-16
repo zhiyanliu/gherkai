@@ -1069,7 +1069,116 @@ async function deeplinkRound2(driver: Driver, sessionArn: string, appArn: string
   await deeplinkCase(driver, "system_dispatch_custom_no_bundle", { url: "gherkaispike://item/45" }, undefined, async () => { await home(); await sleep(2000); });
   await deeplinkCase(driver, "safari_baseline_with_bundle", { url: "https://en.m.wikipedia.org/wiki/Appium", bundleId: "com.apple.mobilesafari" }, "Appium");
 }
+// 第三轮（DF_DL_ROUND=3，仅 Android）：网址保真——以 Chrome 为被测应用、指定 package 打开会回显地址的页面，
+// 在网页上下文读 location.href，与原网址的 WHATWG 标准化形式逐字对比；比较原样、百分号编码括号、单引号包裹、
+// 预加反斜杠四种传递方式。期望值只做浏览器本来就会做的标准化，不替任何传递方式「修正」差异。
+async function deeplinkRound3(driver: Driver): Promise<void> {
+  const chrome = "com.android.chrome";
+  const urls = [
+    "https://httpbin.org/anything/p(1)?a=1&b=(2)",
+    "https://httpbin.org/anything/q?x=%28already%29&y=a+b&z=1;2",
+    "https://httpbin.org/anything/r?s=it's&t=!*$,~",
+    "https://httpbin.org/anything/f?k=v#frag",
+  ];
+  const transforms: Record<string, (u: string) => string> = {
+    raw: (u) => u,
+    pct_parens: (u) => u.replace(/\(/g, "%28").replace(/\)/g, "%29"),
+    single_quoted: (u) => `'${u.replace(/'/g, `'\\''`)}'`,
+  };
+  await timed("chrome_activate", () => driver.activateApp(chrome)).catch(() => {});
+  await sleep(3000);
+  const out: Record<string, unknown>[] = [];
+  for (const orig of urls) {
+    const expected = new URL(orig).href;
+    for (const [tname, tf] of Object.entries(transforms)) {
+      const rec: Record<string, unknown> = { orig, transform: tname, expected };
+      const t0 = performance.now();
+      try { await driver.execute("mobile: deepLink", { url: tf(orig), package: chrome }); rec.ok = true; } catch (e) { rec.ok = false; rec.error = errText(e).slice(0, 300); }
+      rec.call_ms = ms(t0);
+      if (rec.ok) {
+        await sleep(3500);
+        rec.fg = await foreground(driver);
+        try {
+          const ctxs = (await driver.getContexts()) as string[];
+          const web = ctxs.find((c) => c.startsWith("CHROMIUM") || c.startsWith("WEBVIEW_chrome"));
+          if (web) {
+            await driver.switchContext(web);
+            // Chrome 每次 deepLink 开一个新标签页：读全部标签页的地址，逐字等于期望值即算保真
+            const handles = await driver.getWindowHandles();
+            const hrefs: string[] = [];
+            for (const h of handles) { await driver.switchToWindow(h); hrefs.push(String(await driver.execute("return location.href"))); }
+            rec.tabs = hrefs.length;
+            rec.equal = hrefs.includes(expected);
+            rec.hrefs = hrefs;
+            rec.href = hrefs.find((h) => h === expected) ?? hrefs.slice(-1)[0];
+            await driver.switchContext("NATIVE_APP");
+          } else rec.href_error = `无网页上下文：${JSON.stringify(ctxs)}`;
+        } catch (e) { rec.href_error = errText(e).slice(0, 200); await driver.switchContext("NATIVE_APP").catch(() => {}); }
+      }
+      out.push(rec);
+      log(`保真 ${tname} ${orig}: ok=${rec.ok} equal=${rec.equal} href=${String(rec.href ?? rec.href_error ?? rec.error).slice(0, 160)}`);
+    }
+  }
+  results.deeplink_fidelity = out;
+}
+// 第四轮（DF_DL_ROUND=4）：确定原样传递的安全字符集。Android 同第三轮、只用原样传递；iOS 指定 Safari 的 bundleId 打开
+// 回显页，不读网页上下文（iOS 上 deepLink 之后网页命令会挂住），而在原生控件树里找回显 JSON 的 "url" 字段。
+async function deeplinkRound4(driver: Driver): Promise<void> {
+  const out: Record<string, unknown>[] = [];
+  if (PLATFORM === "android") {
+    const chrome = "com.android.chrome";
+    // DF_DL_URLS（空格分隔）可覆盖清单，用于逐字符隔离
+    const urls = process.env.DF_DL_URLS ? process.env.DF_DL_URLS.split(" ") : [
+      "https://httpbin.org/anything/m?a=1&b=2&c=x%20y",
+      "https://httpbin.org/anything/s?t=!*$,~",
+      "https://httpbin.org/anything/e?q=a%26b&r=%3B&u=%27",
+      "https://httpbin.org/anything/h?k=v&w=2#frag",
+    ];
+    await driver.activateApp(chrome).catch(() => {});
+    await sleep(3000);
+    for (const orig of urls) {
+      const expected = new URL(orig).href;
+      const rec: Record<string, unknown> = { orig, expected };
+      try { await driver.execute("mobile: deepLink", { url: orig, package: chrome }); rec.ok = true; } catch (e) { rec.ok = false; rec.error = errText(e).slice(0, 300); }
+      if (rec.ok) {
+        await sleep(3500);
+        try {
+          const web = ((await driver.getContexts()) as string[]).find((c) => c.startsWith("CHROMIUM") || c.startsWith("WEBVIEW_chrome"));
+          await driver.switchContext(web!);
+          const hrefs: string[] = [];
+          for (const h of await driver.getWindowHandles()) { await driver.switchToWindow(h); hrefs.push(String(await driver.execute("return location.href"))); }
+          rec.equal = hrefs.includes(expected); rec.href = hrefs.find((h) => h === expected) ?? hrefs.slice(-1)[0];
+          await driver.switchContext("NATIVE_APP");
+        } catch (e) { rec.href_error = errText(e).slice(0, 200); await driver.switchContext("NATIVE_APP").catch(() => {}); }
+      }
+      out.push(rec); log(`安全集 ${orig}: ok=${rec.ok} equal=${rec.equal} href=${String(rec.href ?? rec.href_error ?? rec.error).slice(0, 140)}`);
+    }
+  } else {
+    const safari = "com.apple.mobilesafari";
+    const urls = [
+      "https://httpbin.org/anything/p(1)?a=1&b=(2)",
+      "https://httpbin.org/anything/q?x=%28already%29&y=a+b&z=1;2",
+      "https://httpbin.org/anything/r?s=it's&t=!*$,~",
+      "https://httpbin.org/anything/m?a=1&b=2&c=x%20y",
+    ];
+    for (const orig of urls) {
+      const rec: Record<string, unknown> = { orig, expected: new URL(orig).href };
+      try { await driver.execute("mobile: deepLink", { url: orig, bundleId: safari }); rec.ok = true; } catch (e) { rec.ok = false; rec.error = errText(e).slice(0, 300); }
+      if (rec.ok) {
+        await sleep(5000);
+        const src = await driver.getPageSource().catch(() => "");
+        const decoded = src.replace(/&quot;/g, "\"").replace(/&amp;/g, "&").replace(/&apos;/g, "'").replace(/&#39;/g, "'");
+        rec.echo_urls = [...new Set([...decoded.matchAll(/"url":\s*"([^"]+)"/g)].map((m) => m[1]))].slice(0, 4);
+        rec.fg = await foreground(driver);
+      }
+      out.push(rec); log(`iOS 送达 ${orig}: ok=${rec.ok} echo=${JSON.stringify(rec.echo_urls ?? rec.error).slice(0, 200)}`);
+    }
+  }
+  results.deeplink_safe_set = out;
+}
 async function deeplinkProbe(driver: Driver, sessionArn: string, appArn: string | undefined): Promise<void> {
+  if (process.env.DF_DL_ROUND === "4") return deeplinkRound4(driver);
+  if (process.env.DF_DL_ROUND === "3") return deeplinkRound3(driver);
   if (process.env.DF_DL_ROUND === "2") return deeplinkRound2(driver, sessionArn, appArn);
   if (PLATFORM === "android") {
     const pkg = APP_PACKAGE;
@@ -1123,7 +1232,7 @@ async function main(): Promise<number> {
     return rc;
   }
   log(`项目 ${project.slice(-20)}，平台 ${PLATFORM}，场景 ${SCENARIO}，设备 ${DEVICE_ARN.slice(-12)}，模型 ${MODEL}（${modelFamily()}），Bedrock ${getBaseUrl()}`);
-  const appArn = (SCENARIO === "app" && APP_INSTALL === "devicefarm") || SCENARIO === "faults" || (SCENARIO === "deeplink" && (PLATFORM === "android" || process.env.DF_DL_ROUND === "2")) ? await ensureAppUpload(project) : undefined;
+  const appArn = (SCENARIO === "app" && APP_INSTALL === "devicefarm") || SCENARIO === "faults" || (SCENARIO === "deeplink" && !["3", "4"].includes(process.env.DF_DL_ROUND ?? "") && (PLATFORM === "android" || process.env.DF_DL_ROUND === "2")) ? await ensureAppUpload(project) : undefined;
   const session = await startSession(project);
   let driver: Driver | undefined;
   let rc = 0;
