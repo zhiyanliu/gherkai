@@ -32,7 +32,7 @@
 - 配置文件排在环境变量之后，是因为环境变量是「本次调用的临时覆盖」的惯用载体（CI 矩阵、单次排障），文件是项目的稳定基线；反过来排会让 CI 里的环境变量被入库文件静默覆盖。
 - region 因此依次取 `--region`、`AWS_REGION`、`AWS_DEFAULT_REGION`、配置文件的 `region`、AWS profile 配置里的 region，前者优先；gherkai 仍不自行补默认 region。
 - **`default-job-timeout` 的最后一层不是固定值**：选项、环境变量或配置文件任一来源给出的值都算「显式给出」；都没有给时由 plan 层按 scope 的目标补缺省（桌面 300 秒；设备 scope 为获取预算加执行余量，显式值另受下限校验，设备 scope 不存在「不超时」）。覆盖与校验顺序归 [0034](./0034-detached-batch-reconciler.md)「job timeout」节与 [0019](./0019-feature-tags-scope-and-engine.md) `@timeout` 节，缺省数值归 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 2。
-- **路径类值相对配置文件所在目录解析**（`steps-dir`、`report-dir`、`[apps]` 里的 `file`），解析成绝对路径后写进 definition。选项与环境变量里的路径仍相对当前目录，与现有行为一致。这样无论在项目哪一级目录执行，同一份文件给出同一组路径。
+- **路径类值相对配置文件所在目录解析**（`steps-dir`、`[apps]` 里的 `file`，以及本机后端下的 `report-dir`）。`steps-dir` 解析成绝对路径后写进 definition；`file` 解析成绝对路径后用于上传，definition 里记的是上传后的 S3 位置（[0048](./0048-test-targets-device-and-ui-kind.md) 决策 3）；本机后端的 `report-dir` 决定报告与判定明细的落点，不进 definition。选项与环境变量里的路径仍相对当前目录，与现有行为一致。这样无论在项目哪一级目录执行，同一份文件给出同一组路径。**云端后端下 `report-dir` 不是路径**：它是产物桶内的键前缀，原样使用、不做绝对化，并与推进器 Lambda 的 `REPORT_DIR` 核对一致（[0033](./0033-iac-aws-backend-and-composition-wiring.md)、[0034](./0034-detached-batch-reconciler.md)），与选项、环境变量给出时同一形态。
 
 ### 3. 节与键
 
@@ -63,8 +63,8 @@ android = { file = "build/app-release.apk", package = "org.wikipedia" }
 ios     = { file = "build/Wikipedia.ipa", bundle-id = "org.wikimedia.wikipedia" }
 ```
 
-- **`[common]` 与 `[cloud]` 的键与选项同词**：键名是选项长名去掉前导 `--`、连字符保留（`--default-engine` 对应 `default-engine`）。值经与 argparse 同一套类型转换与取值范围校验，非法值的报错形态与在命令行上给错一致。某个键对当前命令不适用（如 `grace` 之于 `plan`）时忽略，因为配置文件是项目级的、各命令只取自己有的那几项。
-- **可配置的只是「环境型」选项**：后端与资源名、引擎与 step 目录、投票与预算、并发、隧道、variant 一类每个项目基本固定的值。**按次选择型选项不进配置文件**：`--scope`、`--tags`、`--scenario`、`--step`、`--json`、`--quiet`、`--wait`、`--config` 本身以及位置参数。把它们写进文件，会让某次调用的范围在不显眼处被收窄，排查成本远高于每次多输入一个选项。
+- **`[common]` 与 `[cloud]` 的键与选项同词**：键名是选项长名去掉前导 `--`、连字符保留（`--default-engine` 对应 `default-engine`）。值经与 argparse 同一套类型转换与取值范围校验，非法值的报错形态与在命令行上给错一致。某个键对当前命令不适用（如 `grace` 之于 `plan`）时忽略，因为配置文件是项目级的、各命令只取自己有的那几项。`[devices]` 的键不受同词规则约束：命令行上设备选项平铺、要带平台或服务前缀，配置文件里有节层级、不需要前缀，对应关系见决策 4 与决策 6 的映射表。
+- **可配置的只是「环境型」选项**：后端与资源名、引擎与 step 目录、投票与预算、并发、隧道、variant 一类每个项目基本固定的值。**按次选择型选项不进配置文件**：`--scope`、`--tags`、`--scenario`、`--step`、`--json`、`--quiet`、`--wait`、`explain` 的 `--all` 与 `--full`、`run` 的 `--fail-fast` 与 `--no-report`、`list-deterministic` 的 `--engine`、`--config` 本身以及位置参数。判据：只影响本次的范围、输出形态、中止方式、落盘取舍或查询对象的选项，都属按次选择型。把它们写进文件，会让某次调用的范围、输出或中止语义在不显眼处改变（如 `--fail-fast` 入库后其余 job 会被悄悄跳过，`--no-report` 入库后报告悄悄缺失），排查成本远高于每次多输入一个选项。`submit` 的 `--tunnel-ttl` 属环境型，与隧道一类同样可配置。
 - **未知键以退出码 2 结束**，点名文件、节与键名。拼错的键若被静默忽略，表现是「配置没生效」，比直接报错更难发现（与 [0036](./0036-deterministic-capability-discovery.md) 对自述契约 fail-loud 同一取向）。
 - **`[devices]`**：每个平台一张子表 `[devices.android]` / `[devices.ios]`，二选一给出 `arn`（指定一台设备）或 `os-version`（平台加系统版本的族匹配，必须写成 TOML 字符串——写成数字会被解析成浮点，以退出码 2 结束并提示加引号），两者都给以退出码 2 结束。`billing-method` 内建默认 `METERED`，可在平台子表里覆盖（不计量槽位按平台购买）；月用量足够大时 `UNMETERED`（不计量槽位）更便宜，取舍见实测依据。`acquire-timeout-s` 的默认值与上界见 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 2，超出预算记 `acquire_timeout`（处置语义同在 0051）。
 - **`project-arn` 与 `app-bucket` 只供本机后端**：云端后端的 Device Farm 项目由 `gherkai deploy` 建立、ARN 存 SSM，安装包放进现有产物桶（项目与 SSM 见 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 10，产物桶见决策 9）。`--backend cloud` 下文件里给了这两项，提示一句「云端后端使用部署时建立的项目与产物桶，本项不生效」、不拦截，与 [0037](./0037-distribution-and-packaging.md) 决策 4 对云端 `--steps-dir` 的处理同一形态。两项是与账号、区域绑定的资源名，不是凭据：团队共用同一个账号时可以入库共享；项目要在多个账号或环境中执行时，改用 `GHERKAI_DEVICE_FARM_PROJECT_ARN` / `GHERKAI_APP_BUCKET` 按环境给出，入库值会被环境变量覆盖（决策 2）。本机后端下 `project-arn` 里的账号与当前凭证所属账号不一致时，CLI 在提交前警告并点名两个账号，不拦截。
@@ -92,7 +92,8 @@ ios     = { file = "build/Wikipedia.ipa", bundle-id = "org.wikimedia.wikipedia" 
 
 ### 6. 护栏
 
-- **键集差集**：测试从 argparse 定义推出各命令的长选项全集，减去决策 3 的按次选择型排除名单，与配置解析器接受的 `[common]` / `[cloud]` 键集逐项对照；新增选项时漏改任一侧即失败。排除名单本身在测试里显式列出，新增按次选择型选项必须有意识地加入名单。`[devices]` 与平台子表的键集没有对应选项，由解析器的接受集与本 ADR 决策 3 的键表直接对照，表里多一键或少一键都失败。
+- **键集差集**：测试从 argparse 定义推出各命令的长选项全集，断言它恰好等于「决策 3 的按次选择型排除名单 + `[common]` / `[cloud]` 的同词键 + 设备映射表」三者之和；新增选项时漏改任一侧即失败。排除名单与设备映射表都在测试里显式列出，新增选项必须有意识地归入其中一类。设备映射表：`--android-device-arn` 对 `[devices.android] arn`、`--ios-device-arn` 对 `[devices.ios] arn`、`--device-farm-project-arn` 对 `[devices] project-arn`、`--app-bucket` 对 `[devices] app-bucket`。这四项是环境型、在配置文件里有键，不能放进排除名单——那等于在测试里写一条「不可配置」的假事实。`[devices]` 里没有对应选项的键（`os-version`、`billing-method` 及其平台覆盖、`acquire-timeout-s`）由解析器的接受集与本 ADR 决策 3 的键表直接对照，表里多一键或少一键都失败。
+- **云端 `report-dir` 不绝对化**：测试覆盖云端后端加配置文件 `report-dir` 的情形，断言交给前置检查与存储的值与文件里的原值逐字相同。
 - **设备段的形态**：测试覆盖平台子表 `arn` 与 `os-version` 二选一（都给以退出码 2 结束；平台有设备 scope 而任何来源都没有给出选择时，`run` / `submit` 以退出码 2 结束、`plan` 只警告，见决策 4）、`os-version` 写成 TOML 数字时的退出码 2 与加引号提示、`billing-method` 的平台覆盖、以及本机后端下 `project-arn` 账号与当前凭证账号不一致的告警文本；解析结果断言为 Job 里的具名设备请求（[0048](./0048-test-targets-device-and-ui-kind.md) 决策 3）。
 - **路径基准**：测试覆盖在子目录执行、`--config` 指向别处两种情形，断言 definition 里的路径以配置文件目录为基准。
 - **宿主不读文件**：测试断言 worker 注入 env 与 Job 载荷由 definition 生成，`status --wait` 接力者在另一 CWD 下得到与提交时相同的设备与应用值。

@@ -43,7 +43,7 @@
 - **step 级 `requires`**：`deterministic_steps[*].targets` 的条目可带可选的 `requires`（字符串数组），声明该句柄在这个目标上执行的运行期前提。1.5 只有一个取值 `web_context`（设备会话提供可用的网页上下文，探测规则归 [0052](./0052-appium-interface-adapter-and-platform-differences.md) 决策 5）。worker 在注册期按封闭集合校验取值；CLI 只核形态（字符串数组），未知取值不拒绝、在各视图中原样显示，以免 CLI 与 worker 的取值集合形成第二事实源。`requires` 不同的条目拆开列出、不聚合进同一条目，因为聚合后无法表达「同一 step 在桌面无前提、在设备上需要网页上下文」。
 - **会话预热支持键**：顶层加一个布尔键，语义为「该 worker 支持隧道会话预热」，键名由实现定；预热的流程与拒绝点归 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 13。
 - **为什么不升版**：[0036](./0036-deterministic-capability-discovery.md) 规定 `schema_version` 只在既有键的语义变化时递增。上述各键都是新增，且各自带缺键语义（决策 2），既有键 `min_grace_s`、`deterministic_steps` 的条目字段、`model_id` 的含义一律不变。现行契约校验只核已知键、容忍多余键，故旧 CLI 读新 worker 不受影响；新 CLI 读旧 worker 按缺键语义处理。
-- **校验位置不变**：新键与旧键一样，在 CLI 侧唯一的自述契约校验处核形态（device 取值属于 desktop / android / ios，`ui_kinds` 非空且属于 web / app，desktop 只允许 web，`max_session_s` 为正有限数，`requires` 为字符串数组，预热键为布尔），不合契约照旧 fail-loud、不写缓存，不散到 plan、doctor、`list-deterministic` 各自校验。
+- **校验位置不变**：新键与旧键一样，在 CLI 侧唯一的自述契约校验处核形态（device 取值属于 desktop / android / ios，`ui_kinds` 非空且属于 web / app，desktop 只允许 web，`max_session_s` 为正有限数，`requires` 为字符串数组，预热键为布尔；唯一性：顶层 `targets` 的 device 不重复（`max_session_s` 按 device 只能有一个值，取最小或取第一条之类的容忍规则会让 CLI 预检与 worker 自检各写一套消歧逻辑），任何位置的 `ui_kinds` 与 `requires` 元素不重复，step 级条目不出现 device、`ui_kinds`、`requires` 三项完全相同的重复），不合契约照旧 fail-loud、不写缓存，不散到 plan、doctor、`list-deterministic` 各自校验。
 - **不做**：不新增自述入口，不为目标另开 flag；不把「目标到句柄种类」的映射放进协议（desktop 对应 playwright 句柄、设备对应 webdriver 句柄是 [0050](./0050-deterministic-step-handles-and-testing.md) 的注册规则，消费方不需要据此做判断）。
 
 ### 2. 缺键语义：缺 `targets` 即「只有 desktop / web」
@@ -57,7 +57,7 @@
 ### 3. step 实际可用目标是句柄声明与 worker `targets` 的交集
 
 - worker 在 `deterministic_steps[*].targets` 里**原样**报出注册时声明的目标（由句柄种类与 `uiKinds`、`devices` 过滤推出，规则归 [0050](./0050-deterministic-step-handles-and-testing.md)），不预先与自己的顶层 `targets` 求交。
-- CLI 在契约校验同一处计算交集，plan、`list-deterministic`、doctor 只消费交集结果。交集是两份结构化声明的集合运算，不涉及 step 文本，与 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)「匹配放 worker」的红线相容。交集结果保留每个条目的 `requires`；同一 device 与 ui_kind 只是 `requires` 不同的条目各自成条、不合并。
+- CLI 在契约校验同一处计算交集，plan、`list-deterministic`、doctor 只消费交集结果。交集是两份结构化声明的集合运算，不涉及 step 文本，与 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)「匹配放 worker」的红线相容。交集结果保留每个条目的 `requires`；同一 device 与 ui_kind 只是 `requires` 不同的条目各自成条、不合并（只适用于 step 级；顶层 `targets` 按 device 唯一，见决策 1）。
 - **为什么不由 worker 报交集**：声明了但 worker 不支持的目标是测试开发需要看见的信息。典型是 Python steps 目录里写了 webdriver 句柄，而 Nova Act worker 没有设备目标；若 worker 先求交，这条句柄在任何视图里都消失，测试开发无从得知它永远不会被调用。
 - `--match-steps` 的输入输出不变：plan 用命中结果里的 `pattern` 关联自述清单中该条目的交集目标，再按 scope 的目标标注。跨 step 的命中冲突仍按 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md) 的模式冲突规则处理，与目标无关；命中的条目在该 scope 目标上没有句柄时，这条 step 标注为走 AI，不顺延到下一条能匹配的 pattern（[0050](./0050-deterministic-step-handles-and-testing.md) 决策 1）。顺延会让同一文本在不同目标上执行语义不同的实现，测试开发从 step 文本看不出实际调用的是哪一条。
 

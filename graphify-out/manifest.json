@@ -235,8 +235,8 @@
     "semantic_hash": "1a9385efd59d5b84cde1783649d2dcc2"
   },
   "docs/adr/0025-plan-module-feature-to-jobs.md": {
-    "mtime": 1792054552.886123,
-    "ast_hash": "9a92d11690f0f29ed0e77eeac4147869",
+    "mtime": 1792117727.1992226,
+    "ast_hash": "118cfc4880ccd938f017f75ba61b99ea",
     "semantic_hash": ""
   },
   "docs/adr/0028-transient-network-ssl-resilience.md": {
@@ -420,8 +420,8 @@
     "semantic_hash": "2d10a8c1c6e7f072eb3e330554f1fe5a"
   },
   "docs/adr/0035-local-app-testing-via-tunnel.md": {
-    "mtime": 1792054552.8884008,
-    "ast_hash": "1d893e0dc3ea282c3efc06b3e23ac9cf",
+    "mtime": 1792117765.085117,
+    "ast_hash": "77ef3eab789eb4dda8caee261867b304",
     "semantic_hash": ""
   },
   "cli/tests/test_tunnel_cli.py": {
@@ -435,8 +435,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0037-distribution-and-packaging.md": {
-    "mtime": 1792054552.8878064,
-    "ast_hash": "2e272e07c2bebeeb9289d00730f52d87",
+    "mtime": 1792117727.202694,
+    "ast_hash": "020c0afc82b39017b515efcdec1b62e4",
     "semantic_hash": ""
   },
   "docs/adr/0038-worker-image-delivery.md": {
@@ -1125,8 +1125,8 @@
     "semantic_hash": "75eca3c62cac20b9c6ca991a92c452ff"
   },
   "docs/adr/0042-step-evidence-and-explain.md": {
-    "mtime": 1792052948.289082,
-    "ast_hash": "847f19a2b9f98c39045317c9afe262f8",
+    "mtime": 1792117727.2038357,
+    "ast_hash": "f8f4efbd4a2692f8b51fd0c423932108",
     "semantic_hash": ""
   },
   "engines/midscene/src/worker/evidence.mts": {
@@ -1210,8 +1210,8 @@
     "semantic_hash": "cfbe55d8b97b43dcb8032f2633a7a989"
   },
   "cli/gherkai_cli/skills/gherkai/references/cli-json-contract.md": {
-    "mtime": 1792053990.5971165,
-    "ast_hash": "ab43a3e79746534211c69d4f36afad85",
+    "mtime": 1792117727.3705678,
+    "ast_hash": "5ba1cb39258cb2d1f92c1b9421d1f04a",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skills/gherkai/references/cloud-backend.md": {
@@ -1385,8 +1385,8 @@
     "semantic_hash": "ad0d33c7ec1a11544091b40d18eebac2"
   },
   "docs/internals/cli-json-contract.md": {
-    "mtime": 1792053989.705375,
-    "ast_hash": "38e11a83a524f9facdd8af8ba87c9ccf",
+    "mtime": 1792117727.2042034,
+    "ast_hash": "7fee3d778c044faeaa6d4aa7d8e91cc8",
     "semantic_hash": ""
   },
   "docs/internals/cloud-backend-carriers.md": {
@@ -1880,13 +1880,13 @@
     "semantic_hash": ""
   },
   "docs/adr/0048-test-targets-device-and-ui-kind.md": {
-    "mtime": 1792054552.8891706,
-    "ast_hash": "b6c3751c3274fdffec577655bbf77774",
+    "mtime": 1792117896.7178216,
+    "ast_hash": "f8006caca39d99d2c0a44de5ef1f4f38",
     "semantic_hash": ""
   },
   "docs/adr/0049-worker-capabilities-targets-keys.md": {
-    "mtime": 1792054552.8871164,
-    "ast_hash": "41474b54a65016bcea657cd13c165cfd",
+    "mtime": 1792117727.1987529,
+    "ast_hash": "b1eee6fd6ebf077ca2715767a7e13f91",
     "semantic_hash": ""
   },
   "docs/adr/0050-deterministic-step-handles-and-testing.md": {
@@ -1895,23 +1895,28 @@
     "semantic_hash": ""
   },
   "docs/adr/0051-device-session-lifecycle-and-app-distribution.md": {
-    "mtime": 1792115831.5196652,
-    "ast_hash": "bb3c9baac7bdbb1d608e8bc09c4bb0fc",
+    "mtime": 1792117727.202258,
+    "ast_hash": "f48cb1349bec01d1dfe8354341d4797f",
     "semantic_hash": ""
   },
   "docs/adr/0052-appium-interface-adapter-and-platform-differences.md": {
-    "mtime": 1792054552.8886762,
-    "ast_hash": "d4f2aac90aa9458565b9628b4425e809",
+    "mtime": 1792117896.7179928,
+    "ast_hash": "5633379143b0daefbfda56aaede7aaa0",
     "semantic_hash": ""
   },
   "docs/adr/0053-project-config-file.md": {
-    "mtime": 1792054552.887598,
-    "ast_hash": "5e580711ef1a911093b26980e173ff99",
+    "mtime": 1792117727.2033188,
+    "ast_hash": "90531c05990510e054c5f419e8c6aa79",
     "semantic_hash": ""
   },
   "docs/journey/0013-mobile-devices-implementation.md": {
-    "mtime": 1792115857.1061513,
-    "ast_hash": "2ca02976869bce5e5479d94d5a4d158a",
+    "mtime": 1792117915.277898,
+    "ast_hash": "2776ec61afd1ecdd5411d8b2de3d67c7",
+    "semantic_hash": ""
+  },
+  "docs/journey/0015-mobile-devices-implementation-batches.md": {
+    "mtime": 1792117896.7185004,
+    "ast_hash": "8fe8c5850436c8cefb29f3af974ec03f",
     "semantic_hash": ""
   }
 }

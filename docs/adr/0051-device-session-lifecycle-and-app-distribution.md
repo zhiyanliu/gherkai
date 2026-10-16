@@ -60,7 +60,7 @@
 | 获取预算耗尽 | 决策 2 | `acquire_timeout` | 收尾会话 |
 | 会话丢失（被外部停止） | `GetRemoteAccessSession` 状态不是 RUNNING | `session_lost` | 当前 step 记 error、本 scenario 余下 step 记 skipped、后续 scenario 由 core 合成 skipped；状态仍 RUNNING 才发 Stop |
 | 会话到期 | 会话年龄（从创建起算）达到 `max_session_s`，或端点拒绝命令而 API 仍报 RUNNING | `session_lost` | 同上，发一次幂等 Stop |
-| 命令结果未知 | 客户端请求超时或连接中断，且会话仍 RUNNING | `engine_error`，消息写明「可能已执行也可能未执行」 | 本 scenario 短路；下一 scenario 前只读存活探测，失败即 scope 级 error（[0052](./0052-appium-interface-adapter-and-platform-differences.md) 决策 6） |
+| 命令结果未知 | 客户端请求超时或连接中断，且会话仍 RUNNING | `engine_error`，消息写明「可能已执行也可能未执行」 | 本 scenario 短路；下一 scenario 前只读存活探测，失败即 scope 级 error（[0052](./0052-appium-interface-adapter-and-platform-differences.md) 决策 2 的 scenario 前核对、决策 6） |
 | 需要网页上下文的确定性 step 落在不提供它的设备上 | 探测确认不提供 | `capability_unavailable`（step 级，[0052](./0052-appium-interface-adapter-and-platform-differences.md)） | 改写为 AI 断言或换设备 |
 | 释放未确认 | 终结时存在 `release: unconfirmed` 的会话或 `attempted` 的尝试 | `release_failed`（core 由配对推出） | 到控制台按会话名核对并手动停止 |
 | 模型 4xx | Bedrock 返回 4xx | `engine_error` | 沿用现有归因 |
@@ -114,13 +114,13 @@
 
 - Device Farm 只在 us-west-2，worker 与 Python 侧的 Device Farm 客户端固定该区域（[0033](./0033-iac-aws-backend-and-composition-wiring.md)「region 全可配」的唯一例外）；S3 与 SSM 客户端仍用后端所在区域。
 - **调用归属**：worker 的设备模块是执行期唯一调用 Device Farm SDK 的地方（设备列举与查询、会话创建、查询、停止、按名列举）；Python 侧的部署与诊断模块（`gherkai-runtime[aws]`，延迟导入）承担 `deploy` 找回或建立项目、`doctor` 列举会话，不创建、不停止会话；推进器不调 Device Farm。护栏测试：客户端只在这两个模块构造，core 零引用。
-- **项目**：只有 `deploy` 子命令在 cdk 之前用 SDK 找回或建立项目 `{prefix}devices`（先读 SSM 参数、再按名称列举；命中多个以退出码 2 结束），ARN 作为命令自派生的 context 交给 stack（[0037](./0037-distribution-and-packaging.md) 决策 6 的闭集加 `device_farm_project`），stack 写 SSM 参数并按权限表给 task role 授权；`diff` 不建立项目，SSM 已有值时沿用、没有时以「待建立」占位；`destroy` 保留项目（含会话记录与录像，与 [0033](./0033-iac-aws-backend-and-composition-wiring.md) 对承载数据的资源 RETAIN 同一取向），拆除手册写明项目须手动删除。部署方无 Device Farm 权限时：SSM 已有 ARN 则沿用并警告；没有则警告并跳过，云端带设备目标的 run 在提交前因缺 ARN 以退出码 2 结束，消息「部署未启用设备支持」。本机后端的项目 ARN 走配置（[0053](./0053-project-config-file.md)）。
+- **项目**：只有 `deploy` 子命令在 cdk 之前用 SDK 找回或建立项目 `{prefix}devices`（先读 SSM 参数、再按名称列举；命中多个以退出码 2 结束），ARN 作为命令自派生的 context 交给 stack（[0037](./0037-distribution-and-packaging.md) 决策 6 的闭集加 `device_farm_project`），stack 写 SSM 参数并按权限表给 task role 授权；SSM 已有 ARN 时先调 GetProject 核对：成功即沿用；NotFound（项目被手动删除，拆除手册允许这样做）警告一句后转入按名称列举，命中一个用它、命中多个以退出码 2 结束、没有就建立，新 ARN 经 stack 覆盖 SSM 与授权，旧项目的会话记录与录像已随删除消失，`explain` 指向旧会话的控制台链接随之失效；AccessDenied 走下面的无权限降级；限流、网络等其他错误以退出码 1 结束，不猜测。`diff` 不建立项目，按同一规则只读核对：SSM 有值且 GetProject 成功时沿用，参数不存在、stack 不存在或 NotFound 时以「待建立」占位；`diff`、`--synth-only` 与 `destroy` 读 SSM 遇到其他失败（无凭证、AccessDenied、网络、限流）一律以退出码 2 结束，消息写明读的是哪个 SSM 路径、需要哪些权限——读不到就回落占位，会让 `diff` 把已部署的设备授权显示成删除，误导依据它核对变更的人。唯一例外是 `--synth-only` 在完全没有凭证时回落占位，并在 stderr 警告导出的模板不含设备会话授权、与已部署的 stack 不一致，因为无凭证导出是 [0037](./0037-distribution-and-packaging.md) 决策 6 已有的能力；`destroy` 保留项目（含会话记录与录像，与 [0033](./0033-iac-aws-backend-and-composition-wiring.md) 对承载数据的资源 RETAIN 同一取向），拆除手册写明项目须手动删除。部署方无 Device Farm 权限时：SSM 已有 ARN 则沿用并警告；没有则警告并跳过，云端带设备目标的 run 在提交前因缺 ARN 以退出码 2 结束，消息「部署未启用设备支持」。本机后端的项目 ARN 走配置（[0053](./0053-project-config-file.md)）。
 - **权限按动作与资源类型逐项登记在 [0033](./0033-iac-aws-backend-and-composition-wiring.md) 的权限表**（据 AWS 服务授权参考：`ListDevices` 不支持资源级限制；`CreateRemoteAccessSession` 同时需要 `project` 与 `device` 两种资源；会话的查询与停止要同时授本项目前缀下的 `session` 资源与本项目的 `project` 资源（真实角色实测：只授其中一种即被拒，拒绝消息点名另一种）；`ListRemoteAccessSessions` 按 `project`），本 ADR 只记主体与动作：worker 需要设备列举与查询、会话创建、查询、停止、按名列举，以及应用前缀的读取与前缀列举；CLI 需要应用前缀的读、写、分段上传中止与打标签（云端），以及 `doctor` 的会话列举；deploy 需要项目的列举、查询与建立。该表已用按表建立的真实角色逐项核过允许与拒绝（见实测依据）；策略模拟器对会话查询与停止给出了假阳性，权限表的变更以真实角色实测为准、不以模拟器为准。
 - 本机后端驱动真机时 worker 在 QA 机器上执行，QA 机器须具备 worker 一行的全部权限；用户文档按执行后端分别写明。
 
 ### 11. 安全：端点脱敏与数据保留
 
-- **端点是凭证**：Appium 端点与预签名地址的签名在查询串里。[0035](./0035-local-app-testing-via-tunnel.md) 决策 5 的三份脱敏实现加一条规则：签名类查询参数与隧道令牌查询参数（决策 13）的值替换成 `***`，并同时覆盖 XML 实体转义形态（查询串里的 `&` 在控件树属性中写成 `&amp;`）；三份共用同一组用例。会话被外部停止后 `deleteSession` 报 UND_ERR_CLOSED，WebdriverIO 把整条带签名的端点地址拼进错误文本，这条规则必须覆盖这种形态（实测）。
+- **端点是凭证**：Appium 端点的凭据在路径里（`/remote-endpoint/<令牌>`，没有查询参数），会话交互端点与 S3 预签名地址的签名在查询串里（实测）。[0035](./0035-local-app-testing-via-tunnel.md) 决策 5 的三份脱敏实现为此加两条规则：封闭名单里的签名类查询参数与隧道令牌参数（决策 13）的值替换成 `***`，同时覆盖 XML 实体转义形态（查询串里的 `&` 在控件树属性中写成 `&amp;`）；Appium 端点 `/remote-endpoint/` 之后的令牌段替换成 `***`。名单与匹配形态以 0035 决策 5 为准，三份共用同一组用例，用例收一条按实测结构构造的端点地址作边界样本。会话被外部停止后 `deleteSession` 报 UND_ERR_CLOSED，WebdriverIO 把整条带签名的端点地址拼进错误文本，这条规则必须覆盖这种形态（实测）。
 - **端点不进任何事件**，也不进 evidence、scope 诊断与日志；WebdriverIO 日志级别固定为 error。验收要求：用一次故意建连失败的真机执行，核对报错文本里的签名已被盖住。
 - **不取** Device Farm 的 Appium 服务器日志与 TCP dump（前者带端点凭证，后者含被测应用流量）。
 - **数据保留**：公共设备会话结束后 Device Farm 清除应用与数据；录像与日志由 Device Farm 保留 400 天、驻留 us-west-2，worker 与推进器不删除任何会话（删除会让 `explain` 的控制台链接失效）。用户文档写明保留期、驻留地、控制台删除方法与「使用专用测试账号」的建议；按保留天数清扫已完成会话的 CLI 命令列为后续候选。
@@ -180,6 +180,7 @@
 | newSession 客户端超时 | 2 秒超时后立即与 75 秒后 `GET /sessions` 均为空（两平台；只说明两个时点无残留）；一次运行中进程在该超时后直接退出、复测未复现 | 3、5 |
 | Midscene 1.15.1 对中止的行为 | 假界面在首个动作抛「结果未知」并置 `abortSignal` 后，`aiAct` 15 毫秒内拒绝，之后零动作、零截图（两种模式各一次） | 12 |
 | IAM 策略模拟器 | `ListDevices` 于 `*` 允许；`GetDevice` 允许；`CreateRemoteAccessSession` 于本项目加 `device:*` 允许、于其他项目隐式拒绝；会话 Get 于本项目前缀允许、于其他项目拒绝；`ListRemoteAccessSessions` 于本项目允许；未授予的 `DeleteRemoteAccessSession` 拒绝。会话 Get 一项是假阳性，见下一行 | 10 |
+| 会话端点结构 | 两次真机会话各取一次：`remoteDriverEndpoint` 形如 `https://devicefarm-interactive-global.us-west-2.api.aws/remote-endpoint/<令牌>`，没有查询参数、不以 `/` 结尾，令牌段约 2440 个字符、只含字母与数字；`interactiveEndpoint`（wss）带 SigV4 预签名查询参数 `X-Amz-Date`、`X-Amz-Credential`、`X-Amz-Algorithm`、`arn`、`X-Amz-SignedHeaders`、`X-Amz-Signature`、`X-Amz-Security-Token`；两者都没有 userinfo。只记录结构与参数名，不记录任何值 | 11 |
 | IAM 真实角色闭环 | 按 0033 权限表建 worker、CLI、部署方三个角色，assume 后逐动作正反面共 33 项：只授会话前缀时会话 Get 与 Stop 被拒、拒绝消息点名项目 ARN，其余 31 项与权限表一致；同一会话上的对照显示，Get / Stop 只授会话前缀或只授项目 ARN 都被拒、拒绝消息点名未授的那一种，两种同授全部放行。例外是 assume 时会话名只有一个字符，此时授任一种即放行，这是模拟器与早期隔离探针误判的来源；两个字符起（含 32 位十六进制的 task id 形态与 SDK 缺省形态）一律要求两种同授。应用前缀：带前缀条件的 `ListBucket` 下，缺失键的 HeadObject 回 404、GetObject 回 `NoSuchKey`，前缀外的读写与未授的删除被拒；部署方 `CreateProject` 于 `*` 放行、未授的 `DeleteProject` 被拒 | 9、10 |
 | 单价 | 按量 0.17 美元每设备分钟，不计量槽位 250 美元每月，盈亏点约 1470 分钟每平台每月 | 7 |
 

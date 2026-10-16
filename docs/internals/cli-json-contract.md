@@ -72,7 +72,7 @@
 | `engine` | `novaact` / `midscene` | 该 scope 的引擎 |
 | `assertion_votes` | int | AI 断言投票次数 |
 | `timeout_s` | number \| 省略 | job 墙钟预算秒；**不超时时整个键省略**（不是 null），`--default-job-timeout <=0` 即此形态（只对桌面目标；设备目标始终有值）。判断「不超时」用 `"timeout_s" not in job`，而非 `is None` |
-| `target` | object | 测试目标：`device`（`desktop` / `android` / `ios`）、`ui_kind`（`web` / `app`）；`ui_kind` 为 `app` 时另带 `app`（`alias`、`bucket`、`key`、`sha256`、`app_id`：安装包在 S3 的完整位置与包名或 bundle id） |
+| `target` | object | 测试目标：`device`（`desktop` / `android` / `ios`）、`ui_kind`（`web` / `app`）；`ui_kind` 为 `app` 时另带 `app`（`alias`、`bucket`、`key`、`sha256`、`app_id`：安装包在 S3 的完整位置与包名或 bundle id；`plan --json` 里只有 `alias` 与 `app_id`，安装包在 `run` / `submit` 时才上传，位置三项恒省略） |
 | `device_request` | object \| 省略 | 仅设备目标：`provider`（当前只有 `aws-device-farm`）、`device_arn` 或 `os_version`（二选一）、`billing_method`（`METERED` / `UNMETERED`）、`project_arn`、`acquire_timeout_s`；`plan --json` 里恒省略（plan 不解析设备请求） |
 | `scenarios[]` | array | `id`、`name`、`steps[]`：`index`、`keyword`（Given/When/Then）、`text`、`argument`（多行参数：`kind` 为 `docString` 时带 `content`，为 `dataTable` 时带 `rows`；无则省略） |
 
@@ -129,7 +129,7 @@ step 级证据视图：判定树（**骨架是提交时的 job 定义**）与每
 | 键 | 类型 | 含义 |
 |---|---|---|
 | `aborted_hint` | string \| null | 非 null 表示该 job 终态是 `aborted` 或 `error`、且判定明细里只有**部分** step 的记录（一条记录都没有时不给出此提示）：已执行 step 的证据已产出，但指针未写入判定记录。不应据此判断终态，终态见同层 `status` |
-| `has_step_records` | bool | 该 job 在判定明细里是否有任何 step 记录（按整个 job 统计，不随 `--scenario` / `--step` 筛选变化）；false 表示判定只有 job 级一层 |
+| `has_step_records` | bool | 该 job 在判定明细里是否有任何 step 记录（按整个 job 统计，不随 `--scenario` / `--step` 筛选变化；含本工具在 scope 级 error 后补记的 skipped 记录）；false 表示判定只有 job 级一层 |
 
 `scenarios[]` 每项包含 `scenario_id`、`name`、`status`（**null 表示这条 scenario 没有判定记录**：worker 被外部中止时，
 未执行完的 scenario 不进入判定明细）、`steps[]`：

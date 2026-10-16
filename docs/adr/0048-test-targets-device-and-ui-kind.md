@@ -31,7 +31,7 @@
 - `@device:android` / `@device:ios`：声明设备。不标即桌面。
 - `@app:<别名>`：声明本 scope 测原生应用，别名在项目配置文件的 `[apps]` 节里绑定到应用文件与包名或 bundle id（[0053](./0053-project-config-file.md)）。不标即 web。
 - 声明、继承与冲突完全照 [0019](./0019-feature-tags-scope-and-engine.md) 给 `@engine:` 定的三条：scope 内任一 scenario 标了即整个 scope 生效；feature 级 tag 由其下 scenario 继承；同一 scope 内取值不一致即 FeatureContractError，不静默取其一。原因与 engine 相同：一个 scope 共享一个会话，「既在 Android 上又在 iOS 上」「同一会话里是两个应用」在物理上自相矛盾。
-- 以下情形同样报 FeatureContractError（产品语言加退出码 2，与现有用例契约违约的呈现一致）：`@device:` 取值不在 `android` / `ios` 之内；`@app:` 出现在桌面目标上；`@app:` 的别名在 `[apps]` 里查不到；`@app:` 的别名在 `[apps]` 里没有该 scope 所在平台的条目（如别名只绑定了 Android 应用，却用在 `@device:ios` 的 scope 上）。
+- 以下情形同样报 FeatureContractError（产品语言加退出码 2，与现有用例契约违约的呈现一致）：`@device:` 取值不在 `android` / `ios` 之内；`@app:` 出现在桌面目标上；`@app:` 的别名在 `[apps]` 里查不到；`@app:` 的别名在 `[apps]` 里没有该 scope 所在平台的条目（如别名只绑定了 Android 应用，却用在 `@device:ios` 的 scope 上）。别名核对在 core 的 plan 模块：组合根把 `[apps]` 解析成「别名到平台与包名或 bundle id」的纯数据表传入（[0025](./0025-plan-module-feature-to-jobs.md) 接口），core 不读文件，别名违约与其他 tag 违约在同一处报错。
 - 应用的启动由 worker 在建立设备会话后执行一次，scenario 之间不自动重启、不自动复位（同 scope 的 scenario 共享被测对象的状态，[0019](./0019-feature-tags-scope-and-engine.md)；会话生命周期归 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 1）。需要干净起点的用例在 Background 里写内建确定性 step「重新启动应用」（[0052](./0052-appium-interface-adapter-and-platform-differences.md) 决策 3）。用例**不需要**写「打开某应用」作为第一步；写了也只是一条普通的 AI 动作步，core 不解析它。
 
 ### 3. core 的三处改动
@@ -40,10 +40,10 @@
 
 **Job 携带目标与设备请求的具体值。** job 的定义新增两个字段：
 
-- `target`：`device`、`ui_kind`，ui_kind 为 app 时再带应用条目 `app{alias, bucket, key, sha256, app_id}`（别名、安装包的完整 S3 位置、包名或 bundle id）；
+- `target`：`device`、`ui_kind`，ui_kind 为 app 时再带应用条目 `app`。它有两个形态：core 构造的 plan 形态只有 `{alias, app_id}`；`run` / `submit` 在组合根上传安装包后（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 9）补齐为 `{alias, bucket, key, sha256, app_id}`（别名、安装包的完整 S3 位置、包名或 bundle id）。位置三项同进同出，不在 plan 形态里只放 sha256；
 - `device_request`：具名结构，带判别值 `provider = "aws-device-farm"`，字段为 `device_arn` 与 `os_version` 二选一、`billing_method`、`project_arn`、`acquire_timeout_s`（默认值见 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 2）。1.5 只有一个服务商，名字明说服务商而不起「中立」名，免得读者误以为已有一层抽象；形态过滤由 worker 固定只取手机，不进 Job。
 
-两个形态、两个时点：core 由 tag 构造 Job 时只填 `target`，`device_request` 为空（`plan` 用这个形态，不访问任何 AWS 服务）；`run` / `submit` 在组合根填入 `device_request`——云端的 `project_arn` 读 SSM，缺失即在提交前以退出码 2 结束，消息「部署未启用设备支持」（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 10）。写 definition 之前与推进器读 definition 时各做一次结构校验：非桌面当且仅当 `device_request` 存在、`project_arn` 非空、ARN 与 `os_version` 恰有一个、字段类型正确；取值域校验（`billing_method` 的枚举、`os_version` 为点分数字串、ARN 前缀）在 CLI，报错形态与命令行给错一致、退出码 2。core 不读、不比较任何服务商状态。发给 worker 的 Job 另带可选 `timeoutS`（只供建会话前的自检，[0024](./0024-worker-core-protocol.md)），由一条 Python 到 TS 的往返测试守字段集合一致。
+两个形态、两个时点：core 由 tag 构造 Job 时只填 `target`，`device_request` 为空（`plan` 用这个形态，不访问任何 AWS 服务）；`run` / `submit` 在组合根填入 `device_request`——云端的 `project_arn` 读 SSM，缺失即在提交前以退出码 2 结束，消息「部署未启用设备支持」（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 10）。写 definition 之前与推进器读 definition 时各做一次结构校验：非桌面当且仅当 `device_request` 存在、`project_arn` 非空、ARN 与 `os_version` 恰有一个、ui_kind 为 app 时 `app` 的五项齐全且非空、ui_kind 为 web 时不带 `app`、字段类型正确（definition 里没有半成品形态，推进器与 worker 只见到完整的应用条目）；取值域校验（`billing_method` 的枚举、`os_version` 为点分数字串、ARN 前缀）在 CLI，报错形态与命令行给错一致、退出码 2。core 不读、不比较任何服务商状态。发给 worker 的 Job 另带可选 `timeoutS`（只供建会话前的自检，[0024](./0024-worker-core-protocol.md)），由一条 Python 到 TS 的往返测试守字段集合一致。
 
 这些值由 CLI 在组装 run 时解析成**具体值**写入：选项、环境变量与项目配置文件按 [0053](./0053-project-config-file.md) 的取值顺序取值；云端后端的 `project_arn` 读部署写下的 SSM 参数，安装包放进部署建立的产物桶（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 9、10），配置文件里的 `project-arn` / `app-bucket` 在云端不生效。之后的任何推进器（本机后台进程、云端 Lambda、Fargate 上的 worker）都只读 job 里的值、不读配置文件。理由与 [0035](./0035-local-app-testing-via-tunnel.md) 把额外请求头放进 run 定义相同：后台与云端推进器和 CLI 不在同一进程、甚至不在同一台机器，配置文件与环境变量传不过去；definition 自包含也让同一个 run 在任何推进器上得出相同的设备选择。应用文件的上传与 S3 键的生成归 [0051](./0051-device-session-lifecycle-and-app-distribution.md)。
 
@@ -107,6 +107,7 @@ job 墙钟预算的语义沿用 [0034](./0034-detached-batch-reconciler.md)：�
 | 原生应用里的网页内容 | Android 原生应用会话的上下文列表只有原生上下文与应用内不可调试的 WebView，正文取不到 DOM | 第 2 条与第 9 条：ui_kind 由声明决定，不从运行期上下文推断；不做混合流 |
 
 ## 被拒方案（护栏）
+
 
 - **从 step 文本推断 ui_kind 与应用**（双引号内是地址即网页、等于已绑定别名即启动应用）：被拒。它让 core 匹配 step 文本，违反 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md) 的「匹配放 worker」红线；同时与 worker 的导航识别构成两份事实源，二者对同一句话的判断会漂移。显式 `@app:` 让「一个 scope 一个应用」由 FeatureContractError 机械保证。
 - **要求「第一步必须是打开应用」**：被拒。这是用 step 文本承载配置，core 要么解析它（同上），要么无法校验；应用由 worker 在会话建立后启动即可，用例保持只写测试意图。

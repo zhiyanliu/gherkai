@@ -11,7 +11,8 @@ plan(features: [{uri, text}], config: {defaultEngine, defaultAssertionVotes,
                                       defaultJobTimeout,        // 显式给出的 --default-job-timeout；未指定为 null
                                       defaultDesktopJobTimeout, // 桌面 scope 的缺省墙钟（300 秒），CLI 传入
                                       defaultDeviceJobTimeout,  // 设备 scope 的缺省墙钟，CLI 按获取预算算出传入
-                                      minDeviceJobTimeout},     // 设备 scope 的墙钟下限，同上
+                                      minDeviceJobTimeout,      // 设备 scope 的墙钟下限，同上
+                                      apps},                    // {别名: {平台: 包名或 bundle id}}，CLI 从 [apps] 读出传入；纯数据，不带文件路径
      *, select?: (ParsedScenario, scopeId) -> bool) -> Job[]
 
 Job = {
@@ -19,6 +20,9 @@ Job = {
   timeoutS,                                     // job 墙钟预算秒（null=不超时，仅非设备 scope；设备 scope 恒为有限正数）；tag 语义权威在 ADR 0019、
                                                 // 设计取舍与三路 enforce 在 ADR 0034，本模块只解析 + 校验；
                                                 // 属 definition 层；1.5 起作为可选键进 worker 的 job line，只供建会话前与 max_session_s 比较作自检（ADR 0051）
+  target,                                       // {device, ui_kind, app?}；scope 级，规则与校验见 ADR 0048 决策 2、3。本模块按 config.apps 核对别名
+                                                // 与平台、违约抛 FeatureContractError；产出的 app 只有 {alias, app_id}（plan 形态），安装包位置由
+                                                // 组合根在 run / submit 上传后补入，device_request 同样由组合根填
   scenarios: [
     { id, name, steps: [ { index, keyword, text, argument? } ] }
   ]
