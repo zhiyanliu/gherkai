@@ -45,6 +45,10 @@
 - `cli/tests/ 下新增引擎能力矩阵差集测试（如 test_engines_matrix.py）`：解析 docs/user-guide/engines.md 表格，与两个 worker 无环境变量覆盖时的自述逐行比对（targets、model_id、由目标推出的句柄种类），多一行、少一行、值不符都失败。（0049 决策 8）
 - `新增跨语言一致性检查（两侧各自的测试，或共用 fixture）`：两个 worker 的顶层 targets 与清单项 targets 的字段名、形态一致（snake_case 的 ui_kinds/max_session_s/requires，TS 侧不能写成 uiKinds 驼峰），否则 CLI 校验会对某一侧报 fail-loud。（0049 决策 1；0050 决策 1（跨语言 fixture））
 
+**完整性审查补认领**
+
+- 红线测试补：顶层重复 device（尤其同 device 带不同 max_session_s）、重复的 ui_kinds 或 requires 元素、完全重复的 step 条目都拒绝且不写缓存。0049 决策 1。
+
 **真跑或对抗核查才算数的结论**
 
 - 新 CLI 读旧 worker：装已发布的 1.4 worker（PyPI 上的 gherkai-worker-novaact，npm 上的 @gherkai/worker-midscene），用新 CLI 跑 doctor 和 list-deterministic。要真跑确认缺键语义生效：显示桌面网页、不报契约错误。
@@ -68,72 +72,7 @@
 涉及的主要文件：/Users/lzy/workspace/yaozhou/runtime/gherkai_runtime/compose.py、/Users/lzy/workspace/yaozhou/cli/gherkai_cli/__main__.py、/Users/lzy/workspace/yaozhou/engines/novaact/gherkai_worker_novaact/run_scope.py、/Users/lzy/workspace/yaozhou/engines/midscene/src/worker/run-scope.mts。
 
 
-## 2. B2-core-target-job：测试目标与 Job 形态（core 侧 tag 归约、target 两形态、按目标的 timeout、plan 标注与目标拒绝）
-
-规模 M。
-
-
-**依赖**
-
-- B3-config-submit：提供 [apps] 别名映射（alias -> 平台 -> {file, package/bundle-id}）与 [devices.<平台>].acquire-timeout-s，用来算 default_device/min_device；之后在组合根填 device_request、上传安装包并补齐 AppRef 的 bucket/key/sha256、写 definition 前调用本批的 validate_job_definition。本批先用 0051 内建 600 秒，apps 映射用空表占位
-- B6-midscene-device：TS 侧 Job interface（engines/midscene/src/lib/job-source.mts）扩展 timeoutS/target/deviceRequest，跨语言 golden 测试要它跟上才能转绿
-- B1-capabilities：plan 标注（0048 决策 5 的目标行与会话数显示，决策 4 的「引擎不支持该目标」拒绝）消费本批的 Job.target；本批只产出 target，不做能力比对
-
-**改动面**
-
-- `core/gherkai_core/model.py` · 新增 Target / AppRef / DeviceFarmRequest 三个 frozen dataclass（放在 Job 之前的「输入侧」段）：Target(device: Literal['desktop','android','ios']='desktop', ui_kind: Literal['web','app']='web', app: AppRef|None=None)；AppRef(alias, app_id, bucket: str|None, key: str|None, sha256: str|None)，plan 形态只有 alias 与 app_id，位置三项由 run/submit 上传后补齐；DeviceFarmRequest(provider: Literal['aws-device-farm'], device_arn: str|None, os_version: str|None, billing_method: str, project_arn: str, acquire_timeout_s: float)。名字直接写明服务商，不起中立名，也不加形态字段（形态由 worker 固定只取手机）。另配一个模块级常量，列出五种合法组合 desktop/web、android/web、android/app、ios/web、ios/app（0048 决策 1、决策 3）
-- `core/gherkai_core/model.py` · class Job：新增 target: Target = Target()（缺省 desktop/web，现有构造点不受影响）和 device_request: DeviceFarmRequest|None = None。改写 timeout_s 的注释：原文「worker 不消费」改为「worker 只在建会话前拿它与 max_session_s 比较作自检，不计时」，并写明设备 scope 恒为有限正数（0048 决策 3；0034「job timeout」节载体条；0051 决策 2）
-- `core/gherkai_core/model.py（或新建 core/gherkai_core/target.py）` · 新增纯函数 validate_job_definition(job) -> None：做结构校验，违约抛契约型异常：非桌面目标当且仅当 device_request 存在；project_arn 非空；device_arn 与 os_version 恰有一个；字段类型正确；(device, ui_kind) 属于合法组合；ui_kind=app 当且仅当 app 存在；桌面目标不得带 app。取值域校验（billing_method 枚举、os_version 点分数字、ARN 前缀）不放这里，归 CLI。plan 形态的 Job（device_request 为空）不走这道校验，或者另给 plan 形态一个宽松入口，两种形态要分开（0048 决策 3「写 definition 之前与推进器读 definition 时各做一次结构校验」）
-- `core/gherkai_core/scope.py` · 常量段与新增 _resolve_target(scope_id, members, apps) -> Target：新增 _DEVICE_PREFIX='@device:' 和 _APP_PREFIX='@app:'，复用 _values_with_prefix，空值因此自动报错。规则与 _resolve_engine 同构：任一成员标了，整个 scope 生效；同一 scope 内出现多个不同值报 FeatureContractError。另四种情形也报 FeatureContractError：@device 取值不是 android/ios（显式写 @device:desktop 也报）；@app 出现在桌面 scope；别名在 apps 里查不到；别名缺本平台条目。device 与 app 两个维度分别做冲突判定。核对 apps 需要 CLI 注入的 apps 映射（见 open_questions）（0048 决策 2、决策 3「解析」；0019 三条规则）
-- `core/gherkai_core/scope.py` · class PlanConfig：字段改成 0025 接口：default_job_timeout_s 的语义改为「显式给出的值，未指定为 None」，并且要能区分三态：未指定 / 显式非正 / 显式正值。现在 CLI 把 <=0 归一成 None，与「未指定」撞在一起，必须拆开，可以把非正值原样传进来，或另加一个哨兵。新增 default_desktop_job_timeout_s（300）、default_device_job_timeout_s、min_device_job_timeout_s（后两者由 CLI 按获取预算算出），以及 apps 映射（alias -> {platform -> app_id}）（0025 接口段与「timeout 解析」节；0034「job timeout」节覆盖顺序①②）
-- `core/gherkai_core/scope.py` · _resolve_timeout：签名加上目标（或 is_device）和整份 config。顺序：① 有 tag 用 tag，否则用显式值，再否则用目标缺省（桌面 300，设备取 default_device）；② 显式非正：非设备 scope 返回 None（不超时），设备 scope 落到设备缺省、不报错；③ 下限只对 tag 与显式正值校验：设备 scope 低于 min_device 抛 FeatureContractError，消息说明可能还没拿到设备就被判超时；目标缺省本身不校验。保留现有的有限正数校验和冲突校验（0034「job timeout」节覆盖顺序与校验顺序；0019 @timeout 段；0025「timeout 解析」节）
-- `core/gherkai_core/scope.py` · plan() 第 3 步循环与模块 docstring：跳过筛空 scope 之后，先对全量成员调 _resolve_target，再把目标交给 _resolve_timeout（timeout 依赖目标），最后 Job(..., target=target)，device_request 保持 None。筛选的不变量照旧：目标也按全量成员解析。模块 docstring 的「语义」列表补上 device/app 两条，timeout 那条改写为按目标给缺省与下限（0048 决策 3；0041 决策一不变量（经 0025 select 条））
-- `core/gherkai_core/wire.py` · job_to_json：按可选键追加三项：timeoutS（job.timeout_s 不为 None 才写）；target（非桌面才写，也可以一律写，待定，见 open_questions），形状 {device, uiKind, app?{alias, bucket, key, sha256, appId}}；deviceRequest（不为 None 才写）。新增私有 _target_to_json / _device_request_to_json，同文件保持手写映射。现有键 scope/engine/scenarios/assertionVotes 不动（0024 输入行「可选键 timeoutS / deviceRequest / target」；0048 决策 3）
-- `core/gherkai_core/serialize.py` · job_to_dict / job_from_dict：持久化 target 与 device_request，桌面目标且 device_request 为 None 时不写这两个键（omit），旧落盘缺键读回 desktop/web 与 None，往返恒等。job_from_dict 读回后调 validate_job_definition，对应推进器读 definition 时的那次校验；写端那次在组合根，归 B3。字段名用 snake_case，与本文件其余持久化键一致（0048 决策 3（definition 自包含、读时结构校验）；serialize 模块头的往返约束）
-- `core/gherkai_core/parse.py` · 无需改动：ParsedScenario.tags 已合并 feature 级与 scenario 级，继承规则已由 gherkin Compiler 兑现；只需把 ParsedScenario docstring 里「按 @scope/@engine」的举例补上 device/app（0048 决策 2 继承条）
-- `cli/gherkai_cli/__main__.py` · run / plan / submit 三处 --default-job-timeout 的 argparse（约 208、306、341 行）：default 由 300.0 改为「未指定」哨兵（None），type 换成只收有限数的转换函数（拒绝 nan/inf，报错形态与 argparse 一致）。help 改写：默认按目标给出（桌面 300 秒，设备另算）；<=0 只让非设备 scope 不超时（0034「job timeout」节①②（argparse 缺省为未指定哨兵、归一化只接受有限数））
-- `cli/gherkai_cli/__main__.py` · _load_and_plan 里的 PlanConfig 组装（约 951-960 行）：不再把 <=0 归一成 None，按三态原样传入；补上 default_desktop_job_timeout_s=300、default_device_job_timeout_s=acquire+900、min_device_job_timeout_s=acquire+180 和 apps 映射。acquire 取 0051 内建 600 秒，配置文件覆盖接上后改由 B3 提供。约 2165 行打印 default_job_timeout 的那一行要能处理 None（0025 接口；0051 决策 2；0053 default-job-timeout 条）
-- `tools/e2e_harness.py` · 约 64 行 PlanConfig(default_engine=..., default_assertion_votes=...)：新字段缺省一旦生效，这里的桌面 job 会从「不超时」变成 300 秒。需要确认 harness 是否依赖不超时，必要时显式传参（0034「job timeout」节（桌面缺省 300））
-- `core/gherkai_core/scope.py 模块头、docs/adr/0025（如实现偏离接口段）` · 文档校准：实现落地后按差集逐项核对 0025 接口段的 config 字段与 PlanConfig 实际字段；0025 若要补 apps 字段，先改 ADR（CLAUDE.md 文档纪律；0025 接口段）
-
-**先写的护栏测试**
-
-- `core/tests/test_plan.py`：@device 与 @app 的归约：feature 级 @device:android 由 scenario 继承；同一 scope 里一条标 android、一条不标，整个 scope 都是 android；同一 scope 里 android 与 ios 并存报 FeatureContractError；同一 scope 里两个不同 @app 别名报错；@device:desktop 与 @device:foo 都报错；裸 @device: 和 @app: 报错且消息带 uri:line（扩展 test_bare_tag_without_value_errors_with_location 的参数）（0048 决策 2）
-- `core/tests/test_plan.py`：@app 的合法性：@app 用在桌面 scope 报错；别名不在 apps 映射里报错；别名只有 android 条目却用在 @device:ios 的 scope 上报错；合法时 Job.target == Target('android','app',AppRef(alias, app_id, None, None, None))，device_request 为 None（0048 决策 2、决策 3（plan 形态只填 target））
-- `core/tests/test_plan.py`：按目标解析 timeout 的真值表：未指定加桌面得 300；未指定加设备得 acquire+900；显式 0 或负值加桌面得 None；显式 0 或负值加设备得设备缺省、不报错；显式正值低于下限加设备报 FeatureContractError；@timeout:N 低于下限加设备报错；N 等于下限通过；tag 优先于显式值；设备缺省本身低于下限也不校验（构造 default_device < min 的 config 验证不抛）。改写 test_timeout_absent_and_no_default_is_none，因为无 tag 无显式值的桌面 scope 不再是 None（0034「job timeout」节①②③；0019 @timeout 段；0025 test cases 第 124 行）
-- `core/tests/test_plan.py`：select 不变量扩到 target：筛掉部分成员后，Job.target 和按目标得出的 timeout_s 与全量解析逐字一致；被整组筛空的 scope 里即便有 @device 冲突，也不拦本次迭代（0041 决策一（经 0025 select 条）；0048 决策 3）
-- `core/tests/test_wire.py`：协议字段红线：桌面且无 timeout 的 job，job_to_json 的键集合与现状完全相同（scope/engine/scenarios/assertionVotes），旧 worker 零变化；有 timeout 时多出 timeoutS；设备 app 的 job 输出 target.device/uiKind/app.{alias,bucket,key,sha256,appId} 和 deviceRequest.{provider='aws-device-farm', deviceArn 或 osVersion 二选一, billingMethod, projectArn, acquireTimeoutS}；用键集合差集断言，不逐个读（0024 输入行可选键；0048 决策 3）
-- `core/tests/test_serialize.py（或现有 serialize 往返测试所在文件）`：job_from_dict(job_to_dict(job)) == job 对桌面、android/web、ios/app（带 device_request）三种形态都成立；桌面 job 的 dict 里没有 target/device_request 键；旧落盘缺键读回 desktop/web；读回非桌面却缺 device_request、ARN 与 os_version 同时出现或同时缺失、project_arn 为空，都由 validate_job_definition 拒绝（0048 决策 3 结构校验；serialize 往返约束）
-- `core/tests/test_plan.py 或新建 core/tests/test_target.py`：差集护栏：合法组合常量 == {desktop/web, android/web, android/app, ios/web, ios/app}；Target 的 device 与 ui_kind 取值域等于 0048 决策 1 表格；DeviceFarmRequest 的字段集合 == {provider, device_arn, os_version, billing_method, project_arn, acquire_timeout_s}（0048 决策 1、决策 3）
-- `engines/midscene/src/worker/job-source.test.mts 加 Python 侧 fixture 生成（core/tests/test_wire.py 写出 golden JSON）`：Python 到 TS 的往返：由 job_to_json 生成桌面、android/web、ios/app 三份 golden 行，TS 的 Job 类型解析后再序列化，键集合与 Python 一致；以后任一侧加字段而另一侧没跟，测试就会变红。TS 的 Job interface 扩展本身归 B6，但 fixture 与断言应在本批先立起来（0048 决策 3「由一条 Python 到 TS 的往返测试守字段集合一致」）
-- `cli/tests（argparse 相关测试）`：--default-job-timeout 不给时 args 值为哨兵 None，PlanConfig 拿到「未指定」；给 300 时为显式 300（与内建 300 可区分）；给 nan 或 inf 以退出码 2 结束（0034「job timeout」节①②）
-
-**完整性审查补认领**
-
-- 本机执行前预检的两项目标检查（目标不在该引擎 targets 里、墙钟超过 max_session_s）与 plan 的目标拒绝（FeatureContractError、消息给两种改法；能力查询失败时只警告），消费 B1 的 engine_targets。0048 决策 4、0049 决策 4。
-- plan 的目标标注：每个 job 行显示目标，汇总这次 run 要开的设备会话数，同步到 plan --json。0048 决策 5、0049 决策 6。
-- Python 到 TS 的 Job 往返测试（target、deviceRequest、timeoutS 与嵌套 app 的字段集合），TS 侧 job-source.mts 的类型同批扩展。0048 决策 3。
-
-**真跑或对抗核查才算数的结论**
-
-- 版本错位：新 CLI 写入带 target/device_request 的 RunMeta，若被旧版 cloud Lambda 推进器读（旧 job_from_dict 忽略未知键），设备 job 会被当作桌面 job 静默起桌面 worker。要在真部署上确认 CLI 与后端版本不一致时有拦截（版本一致性检查覆盖这条路径），或者确认这一路不可达。单测证明不了
-- Fargate 路径：带 target/deviceRequest/timeoutS 的 job 行经 S3 PutObject 后，由真实 Midscene 与 Nova 镜像的 JobSource 读回，旧字段行为不变（Nova 遇到多出的 timeoutS 键不出错）。至少用 tools/e2e_harness.py 真跑一次桌面 job，确认加了 timeoutS 后两引擎行为与之前一致
-- 桌面缺省由「CLI 内建 300」改为「哨兵加 plan 层补 300」之后，同步 run、local submit、cloud submit 三路推进器对桌面 job 的到点处置时刻不变。可用短 @timeout 与不标 tag 各真跑一次（local 与 cloud）核对 timed_out 归因
-
-**易错点**
-
-本批最容易做错的有三件事。
-
-1）timeout 的「未指定」与「显式非正」混成一个 None。现状 CLI 把 <=0 归一成 None，argparse 的 default 又是 300.0。只在 core 里补按目标给缺省，而 CLI 照旧把 300 当显式值传进来，设备 scope 会被 300 秒的显式值顶掉，而且 300 低于下限 780，会被误拒（或者误放行）。必须先改 argparse 哨兵和 PlanConfig 的三态，再写 _resolve_timeout，顺序是：目标先解析，再解析 timeout；下限只校验 tag 与显式正值。
-
-2）协议向后兼容。job_to_json 对桌面且无 timeout 的 job，键集合必须与现状逐字一致，job_to_dict 对桌面 job 也不写新键。否则旧镜像、旧落盘、旧 Lambda 会出现差异，CLI 新、Lambda 旧时，设备 job 还可能被静默当成桌面 job（见 real_run_checks）。
-
-另外，target 必须和 engine、timeout 一样按全量成员解析（0041 不变量），不能在 select 之后解析。显式写 @device:desktop 按 0048 的字面规定是错误，测试要钉住，免得实现者顺手放行。
-
-涉及文件：/Users/lzy/workspace/yaozhou/core/gherkai_core/scope.py、model.py、wire.py、serialize.py，/Users/lzy/workspace/yaozhou/cli/gherkai_cli/__main__.py（约 208、306、341、951 行），/Users/lzy/workspace/yaozhou/tools/e2e_harness.py（约 64 行）。
-
-
-## 3. B5-core-events-termination：core 侧会话事件、scope 级 error、合成 SKIPPED、终结函数与真值表、计量合计、explain 呈现
+## 2. B5-core-events-termination：core 侧会话事件、scope 级 error、合成 SKIPPED、终结函数与真值表、计量合计、explain 呈现
 
 规模 L。
 
@@ -184,6 +123,9 @@
 
 **完整性审查补认领**
 
+- 次序校正：B5 排在 B2 之前，先让 core 认 scope_done 的 status 字段与合成 SKIPPED，B2 的 worker 自检才有出口。凡依赖「是否设备目标」判据的部分（sessions[] 与计量键的出现条件等）先按缺省桌面实现，B2 落地 target 时补上。
+- 本批对桌面是修复、不是零变化：负退出码（SIGKILL）不再按干净退出处理；零 scenario 的 scope_done 由 PASSED 改判 ERROR；超时与 fail-fast 同时成立时统一按首次仲裁取 timeout（现状两条分支顺序相反）。三处写进 CHANGELOG。
+- 红线测试补：scope_done 的 status / errorType / message 部分出现即拒绝；桌面完整成功、scope_done 之后 SIGKILL、异常、退出码 80、EOF 各出口上 abort 与 deadline 的对拍。
 - 双路径对拍护栏：同一组事件矩阵分别输入同步 schedule 与无状态 project，判定、归因与明细逐项相等；含 abort 的行只输入同步路径。0034 机制二。
 - explain 渲染设备 evidence 的新字段（step_kind、url / url_missing、controls / controls_missing、page_source / page_source_truncated），设备上 failed / error 的确定性或导航 step 缺 ref 算抽取失败。0042 决策一、四。
 - explain 与 run 的 scope 表头从 session_opened.device 与 scope_started.sessionId 派生；device_session 只渲染成链接；按会话 ARN 给出 Device Farm 控制台链接。0051 决策 8。
@@ -209,6 +151,74 @@
 - 代表会话 session_id 规则。现在 reduce_event 的 ScopeDone 分支只要带值就会覆盖 scope_started 的值，这与 0024 已写明的规则冲突，要一起改。persist.on_event 面对的是两个整项覆盖 JobState 的 adapter，必须在内存里自己维护代表会话，任何写入都不能带 None。
 - 合成 SKIPPED 必须放在共用的 reduce_event 里，判据是「零事件」（scenario_started、scenario_done、任何 step 事件都没有），不能只看有没有 scenario_done，否则在途 scenario 会被误写成未执行。
 - 契约护栏的 _mk 会悄悄丢掉 model 里还没有的字段。先写的护栏测试必须加一条「样例里确实有 sessions 键」的正向断言，否则测试在空集上直接变绿。
+
+
+## 3. B2-core-target-job：测试目标与 Job 形态（core 侧 tag 归约、target 两形态、按目标的 timeout、plan 标注与目标拒绝、两个 worker 建会话前自检）
+
+规模 M。
+
+
+**依赖**
+
+- B3-config-submit：提供 [apps] 别名映射（alias -> 平台 -> {file, package/bundle-id}）与 [devices.<平台>].acquire-timeout-s，用来算 default_device/min_device；之后在组合根填 device_request、上传安装包并补齐 AppRef 的 bucket/key/sha256、写 definition 前调用本批的 validate_job_definition。本批先用 0051 内建 600 秒，apps 映射用空表占位
+- B6-midscene-device：TS 侧 Job interface（engines/midscene/src/lib/job-source.mts）扩展 timeoutS/target/deviceRequest，跨语言 golden 测试要它跟上才能转绿
+- B1-capabilities：plan 标注（0048 决策 5 的目标行与会话数显示，决策 4 的「引擎不支持该目标」拒绝）消费本批的 Job.target；本批只产出 target，不做能力比对
+
+**改动面**
+
+- `core/gherkai_core/model.py` · 新增 Target / AppRef / DeviceFarmRequest 三个 frozen dataclass（放在 Job 之前的「输入侧」段）：Target(device: Literal['desktop','android','ios']='desktop', ui_kind: Literal['web','app']='web', app: AppRef|None=None)；AppRef(alias, app_id, bucket: str|None, key: str|None, sha256: str|None)，plan 形态只有 alias 与 app_id，位置三项由 run/submit 上传后补齐；DeviceFarmRequest(provider: Literal['aws-device-farm'], device_arn: str|None, os_version: str|None, billing_method: str, project_arn: str, acquire_timeout_s: float)。名字直接写明服务商，不起中立名，也不加形态字段（形态由 worker 固定只取手机）。另配一个模块级常量，列出五种合法组合 desktop/web、android/web、android/app、ios/web、ios/app（0048 决策 1、决策 3）
+- `core/gherkai_core/model.py` · class Job：新增 target: Target = Target()（缺省 desktop/web，现有构造点不受影响）和 device_request: DeviceFarmRequest|None = None。改写 timeout_s 的注释：原文「worker 不消费」改为「worker 只在建会话前拿它与 max_session_s 比较作自检，不计时」，并写明设备 scope 恒为有限正数（0048 决策 3；0034「job timeout」节载体条；0051 决策 2）
+- `core/gherkai_core/model.py（或新建 core/gherkai_core/target.py）` · 新增纯函数 validate_job_definition(job) -> None：做结构校验，违约抛契约型异常：非桌面目标当且仅当 device_request 存在；project_arn 非空；device_arn 与 os_version 恰有一个；字段类型正确；(device, ui_kind) 属于合法组合；ui_kind=app 当且仅当 app 存在；桌面目标不得带 app。取值域校验（billing_method 枚举、os_version 点分数字、ARN 前缀）不放这里，归 CLI。plan 形态的 Job（device_request 为空）不走这道校验，或者另给 plan 形态一个宽松入口，两种形态要分开（0048 决策 3「写 definition 之前与推进器读 definition 时各做一次结构校验」）
+- `core/gherkai_core/scope.py` · 常量段与新增 _resolve_target(scope_id, members, apps) -> Target：新增 _DEVICE_PREFIX='@device:' 和 _APP_PREFIX='@app:'，复用 _values_with_prefix，空值因此自动报错。规则与 _resolve_engine 同构：任一成员标了，整个 scope 生效；同一 scope 内出现多个不同值报 FeatureContractError。另四种情形也报 FeatureContractError：@device 取值不是 android/ios（显式写 @device:desktop 也报）；@app 出现在桌面 scope；别名在 apps 里查不到；别名缺本平台条目。device 与 app 两个维度分别做冲突判定。核对 apps 需要 CLI 注入的 apps 映射（见 open_questions）（0048 决策 2、决策 3「解析」；0019 三条规则）
+- `core/gherkai_core/scope.py` · class PlanConfig：字段改成 0025 接口：default_job_timeout_s 的语义改为「显式给出的值，未指定为 None」，并且要能区分三态：未指定 / 显式非正 / 显式正值。现在 CLI 把 <=0 归一成 None，与「未指定」撞在一起，必须拆开，可以把非正值原样传进来，或另加一个哨兵。新增 default_desktop_job_timeout_s（300）、default_device_job_timeout_s、min_device_job_timeout_s（后两者由 CLI 按获取预算算出），以及 apps 映射（alias -> {platform -> app_id}）（0025 接口段与「timeout 解析」节；0034「job timeout」节覆盖顺序①②）
+- `core/gherkai_core/scope.py` · _resolve_timeout：签名加上目标（或 is_device）和整份 config。顺序：① 有 tag 用 tag，否则用显式值，再否则用目标缺省（桌面 300，设备取 default_device）；② 显式非正：非设备 scope 返回 None（不超时），设备 scope 落到设备缺省、不报错；③ 下限只对 tag 与显式正值校验：设备 scope 低于 min_device 抛 FeatureContractError，消息说明可能还没拿到设备就被判超时；目标缺省本身不校验。保留现有的有限正数校验和冲突校验（0034「job timeout」节覆盖顺序与校验顺序；0019 @timeout 段；0025「timeout 解析」节）
+- `core/gherkai_core/scope.py` · plan() 第 3 步循环与模块 docstring：跳过筛空 scope 之后，先对全量成员调 _resolve_target，再把目标交给 _resolve_timeout（timeout 依赖目标），最后 Job(..., target=target)，device_request 保持 None。筛选的不变量照旧：目标也按全量成员解析。模块 docstring 的「语义」列表补上 device/app 两条，timeout 那条改写为按目标给缺省与下限（0048 决策 3；0041 决策一不变量（经 0025 select 条））
+- `core/gherkai_core/wire.py` · job_to_json：按可选键追加三项：timeoutS（job.timeout_s 不为 None 才写）；target（非桌面才写，也可以一律写，待定，见 open_questions），形状 {device, uiKind, app?{alias, bucket, key, sha256, appId}}；deviceRequest（不为 None 才写）。新增私有 _target_to_json / _device_request_to_json，同文件保持手写映射。现有键 scope/engine/scenarios/assertionVotes 不动（0024 输入行「可选键 timeoutS / deviceRequest / target」；0048 决策 3）
+- `core/gherkai_core/serialize.py` · job_to_dict / job_from_dict：持久化 target 与 device_request，桌面目标且 device_request 为 None 时不写这两个键（omit），旧落盘缺键读回 desktop/web 与 None，往返恒等。job_from_dict 读回后调 validate_job_definition，对应推进器读 definition 时的那次校验；写端那次在组合根，归 B3。字段名用 snake_case，与本文件其余持久化键一致（0048 决策 3（definition 自包含、读时结构校验）；serialize 模块头的往返约束）
+- `core/gherkai_core/parse.py` · 无需改动：ParsedScenario.tags 已合并 feature 级与 scenario 级，继承规则已由 gherkin Compiler 兑现；只需把 ParsedScenario docstring 里「按 @scope/@engine」的举例补上 device/app（0048 决策 2 继承条）
+- `cli/gherkai_cli/__main__.py` · run / plan / submit 三处 --default-job-timeout 的 argparse（约 208、306、341 行）：default 由 300.0 改为「未指定」哨兵（None），type 换成只收有限数的转换函数（拒绝 nan/inf，报错形态与 argparse 一致）。help 改写：默认按目标给出（桌面 300 秒，设备另算）；<=0 只让非设备 scope 不超时（0034「job timeout」节①②（argparse 缺省为未指定哨兵、归一化只接受有限数））
+- `cli/gherkai_cli/__main__.py` · _load_and_plan 里的 PlanConfig 组装（约 951-960 行）：不再把 <=0 归一成 None，按三态原样传入；补上 default_desktop_job_timeout_s=300、default_device_job_timeout_s=acquire+900、min_device_job_timeout_s=acquire+180 和 apps 映射。acquire 取 0051 内建 600 秒，配置文件覆盖接上后改由 B3 提供。约 2165 行打印 default_job_timeout 的那一行要能处理 None（0025 接口；0051 决策 2；0053 default-job-timeout 条）
+- `tools/e2e_harness.py` · 约 64 行 PlanConfig(default_engine=..., default_assertion_votes=...)：新字段缺省一旦生效，这里的桌面 job 会从「不超时」变成 300 秒。需要确认 harness 是否依赖不超时，必要时显式传参（0034「job timeout」节（桌面缺省 300））
+- `core/gherkai_core/scope.py 模块头、docs/adr/0025（如实现偏离接口段）` · 文档校准：实现落地后按差集逐项核对 0025 接口段的 config 字段与 PlanConfig 实际字段；0025 若要补 apps 字段，先改 ADR（CLAUDE.md 文档纪律；0025 接口段）
+
+**先写的护栏测试**
+
+- `core/tests/test_plan.py`：@device 与 @app 的归约：feature 级 @device:android 由 scenario 继承；同一 scope 里一条标 android、一条不标，整个 scope 都是 android；同一 scope 里 android 与 ios 并存报 FeatureContractError；同一 scope 里两个不同 @app 别名报错；@device:desktop 与 @device:foo 都报错；裸 @device: 和 @app: 报错且消息带 uri:line（扩展 test_bare_tag_without_value_errors_with_location 的参数）（0048 决策 2）
+- `core/tests/test_plan.py`：@app 的合法性：@app 用在桌面 scope 报错；别名不在 apps 映射里报错；别名只有 android 条目却用在 @device:ios 的 scope 上报错；合法时 Job.target == Target('android','app',AppRef(alias, app_id, None, None, None))，device_request 为 None（0048 决策 2、决策 3（plan 形态只填 target））
+- `core/tests/test_plan.py`：按目标解析 timeout 的真值表：未指定加桌面得 300；未指定加设备得 acquire+900；显式 0 或负值加桌面得 None；显式 0 或负值加设备得设备缺省、不报错；显式正值低于下限加设备报 FeatureContractError；@timeout:N 低于下限加设备报错；N 等于下限通过；tag 优先于显式值；设备缺省本身低于下限也不校验（构造 default_device < min 的 config 验证不抛）。改写 test_timeout_absent_and_no_default_is_none，因为无 tag 无显式值的桌面 scope 不再是 None（0034「job timeout」节①②③；0019 @timeout 段；0025 test cases 第 124 行）
+- `core/tests/test_plan.py`：select 不变量扩到 target：筛掉部分成员后，Job.target 和按目标得出的 timeout_s 与全量解析逐字一致；被整组筛空的 scope 里即便有 @device 冲突，也不拦本次迭代（0041 决策一（经 0025 select 条）；0048 决策 3）
+- `core/tests/test_wire.py`：协议字段红线：桌面且无 timeout 的 job，job_to_json 的键集合与现状完全相同（scope/engine/scenarios/assertionVotes），旧 worker 零变化；有 timeout 时多出 timeoutS；设备 app 的 job 输出 target.device/uiKind/app.{alias,bucket,key,sha256,appId} 和 deviceRequest.{provider='aws-device-farm', deviceArn 或 osVersion 二选一, billingMethod, projectArn, acquireTimeoutS}；用键集合差集断言，不逐个读（0024 输入行可选键；0048 决策 3）
+- `core/tests/test_serialize.py（或现有 serialize 往返测试所在文件）`：job_from_dict(job_to_dict(job)) == job 对桌面、android/web、ios/app（带 device_request）三种形态都成立；桌面 job 的 dict 里没有 target/device_request 键；旧落盘缺键读回 desktop/web；读回非桌面却缺 device_request、ARN 与 os_version 同时出现或同时缺失、project_arn 为空，都由 validate_job_definition 拒绝（0048 决策 3 结构校验；serialize 往返约束）
+- `core/tests/test_plan.py 或新建 core/tests/test_target.py`：差集护栏：合法组合常量 == {desktop/web, android/web, android/app, ios/web, ios/app}；Target 的 device 与 ui_kind 取值域等于 0048 决策 1 表格；DeviceFarmRequest 的字段集合 == {provider, device_arn, os_version, billing_method, project_arn, acquire_timeout_s}（0048 决策 1、决策 3）
+- `engines/midscene/src/worker/job-source.test.mts 加 Python 侧 fixture 生成（core/tests/test_wire.py 写出 golden JSON）`：Python 到 TS 的往返：由 job_to_json 生成桌面、android/web、ios/app 三份 golden 行，TS 的 Job 类型解析后再序列化，键集合与 Python 一致；以后任一侧加字段而另一侧没跟，测试就会变红。TS 的 Job interface 扩展本身归 B6，但 fixture 与断言应在本批先立起来（0048 决策 3「由一条 Python 到 TS 的往返测试守字段集合一致」）
+- `cli/tests（argparse 相关测试）`：--default-job-timeout 不给时 args 值为哨兵 None，PlanConfig 拿到「未指定」；给 300 时为显式 300（与内建 300 可区分）；给 nan 或 inf 以退出码 2 结束（0034「job timeout」节①②）
+
+**完整性审查补认领**
+
+- 两个 worker 建会话前的自检（Job 的 target 与 timeoutS 对照自身 targets 与 max_session_s，不满足发 scope_done{status: error, errorType: precheck_failed}）；Nova worker 必须读 target，否则设备 job 落到 Nova 镜像会被当桌面执行。0049 决策 7。
+- 发布边界（第十轮同僚复核指出）：本批是第一个能产出非桌面 Job 的批次，必须与上面的 worker 自检同批发布，并依赖 B5 已让 core 认 scope_done 的 status 字段。这样在 B6 完成前，非桌面目标由设计内的机制拦住：没有 worker 声明设备目标，本机预检拒绝、云端 worker 记 precheck_failed，不需要临时闸门。
+- 红线测试补：plan --json 的 app 恰有 alias 与 app_id 两键；完整 definition 的应用条目五项逐项缺失、空值、错类型、半成品，在写入与读取两处都拒绝；跨语言往返测试必须在删掉一个 TS 侧契约字段后确实失败（JobSource 只是 JSON.parse，「解析再序列化」会假绿，要对照显式的字段清单）。
+- 本机执行前预检的两项目标检查（目标不在该引擎 targets 里、墙钟超过 max_session_s）与 plan 的目标拒绝（FeatureContractError、消息给两种改法；能力查询失败时只警告），消费 B1 的 engine_targets。0048 决策 4、0049 决策 4。
+- plan 的目标标注：每个 job 行显示目标，汇总这次 run 要开的设备会话数，同步到 plan --json。0048 决策 5、0049 决策 6。
+- Python 到 TS 的 Job 往返测试（target、deviceRequest、timeoutS 与嵌套 app 的字段集合），TS 侧 job-source.mts 的类型同批扩展。0048 决策 3。
+
+**真跑或对抗核查才算数的结论**
+
+- 版本错位：新 CLI 写入带 target/device_request 的 RunMeta，若被旧版 cloud Lambda 推进器读（旧 job_from_dict 忽略未知键），设备 job 会被当作桌面 job 静默起桌面 worker。要在真部署上确认 CLI 与后端版本不一致时有拦截（版本一致性检查覆盖这条路径），或者确认这一路不可达。单测证明不了
+- Fargate 路径：带 target/deviceRequest/timeoutS 的 job 行经 S3 PutObject 后，由真实 Midscene 与 Nova 镜像的 JobSource 读回，旧字段行为不变（Nova 遇到多出的 timeoutS 键不出错）。至少用 tools/e2e_harness.py 真跑一次桌面 job，确认加了 timeoutS 后两引擎行为与之前一致
+- 桌面缺省由「CLI 内建 300」改为「哨兵加 plan 层补 300」之后，同步 run、local submit、cloud submit 三路推进器对桌面 job 的到点处置时刻不变。可用短 @timeout 与不标 tag 各真跑一次（local 与 cloud）核对 timed_out 归因
+
+**易错点**
+
+本批最容易做错的有三件事。
+
+1）timeout 的「未指定」与「显式非正」混成一个 None。现状 CLI 把 <=0 归一成 None，argparse 的 default 又是 300.0。只在 core 里补按目标给缺省，而 CLI 照旧把 300 当显式值传进来，设备 scope 会被 300 秒的显式值顶掉，而且 300 低于下限 780，会被误拒（或者误放行）。必须先改 argparse 哨兵和 PlanConfig 的三态，再写 _resolve_timeout，顺序是：目标先解析，再解析 timeout；下限只校验 tag 与显式正值。
+
+2）协议向后兼容。job_to_json 对桌面且无 timeout 的 job，键集合必须与现状逐字一致，job_to_dict 对桌面 job 也不写新键。否则旧镜像、旧落盘、旧 Lambda 会出现差异，CLI 新、Lambda 旧时，设备 job 还可能被静默当成桌面 job（见 real_run_checks）。
+
+另外，target 必须和 engine、timeout 一样按全量成员解析（0041 不变量），不能在 select 之后解析。显式写 @device:desktop 按 0048 的字面规定是错误，测试要钉住，免得实现者顺手放行。
+
+涉及文件：/Users/lzy/workspace/yaozhou/core/gherkai_core/scope.py、model.py、wire.py、serialize.py，/Users/lzy/workspace/yaozhou/cli/gherkai_cli/__main__.py（约 208、306、341、951 行），/Users/lzy/workspace/yaozhou/tools/e2e_harness.py（约 64 行）。
 
 
 ## 4. B3-config-submit：项目配置文件、组合根填 device_request、definition 格式版本、CLI 侧应用上传
@@ -258,6 +268,8 @@
 
 **完整性审查补认领**
 
+- 次序校正：完整结构校验放在应用上传补齐 bucket / key / sha256 之后、持久化之前；只补完 device_request 就做完整校验会挡住合法的应用提交（0048 决策 3 不定义半成品形态）。
+- 本批前移定义三个纯接口，供后续批次消费：SSM 设备项目参数的键名常量（与 BACKEND_VERSION_KEY 并列）、应用对象保留期常量 E 与 R、RunMeta 的会话预热地址字段（B7 只填值、B8 只读键名）。
 - 云端推进器读到更高 definition 格式时不推进、记诊断、把 run 标为 error 并带升级提示（Lambda 侧）。0037 决策 7。
 - 0053 决策 6 的护栏测试：键集差集（排除名单 + 同词键 + 设备映射表）、设备段形态、路径基准、宿主不读文件、云端 report-dir 不绝对化。
 - 真跑核对：CopyObject 同键刷新后 S3 生命周期是否按新创建时间重新计时（决定 E − R 复用规则是否成立）。0051 决策 9。
@@ -348,7 +360,7 @@
 次要风险：命令守卫与 withWebContext 的实现归设备批次，但 ctx.driver 的语义在本批写进类型与文档。要提醒设备批次：守卫必须覆盖 $() / $$() 返回的元素对象，只包浏览器对象的顶层方法不够。
 
 
-## 6. B7-tunnel：隧道改为令牌换 cookie（桌面先行）、两个 worker 的执行前失败出口与自检、脱敏规则三条
+## 6. B7-tunnel：隧道改为令牌换 cookie（桌面先行）、桌面 worker 的预热失败出口、脱敏规则三条
 
 规模 L。
 
@@ -400,7 +412,7 @@
 
 **完整性审查补认领**
 
-- 两个 worker 建会话前的自检（Job 的 target 与 timeoutS 对照自身 targets 与 max_session_s，不满足发 scope_done{status: error, errorType: precheck_failed}）；Nova worker 必须读 target，否则设备 job 落到 Nova 镜像会被当桌面执行。0049 决策 7。
+- 红线测试补：把已实测的边缘鉴权矩阵固化为测试——正确 cookie 也不能绕过错误令牌或 POST 预热，业务路径只带令牌不放行，多个同名 cookie 的处置，.well-known 请求不到达上游；只断言策略文件的形状不够。
 - 脱敏规则 ② 的封闭名单与规则 ③ 的 Appium 端点路径令牌（本轮补进 0035 决策 5），三份实现共用用例，含一条按实测结构构造的端点地址。
 - 真跑核对：预热的三个失败分支（边缘拒收 cookie、校验返回 401、请求失败）各实际触发一次。0052 决策 8。
 
@@ -465,6 +477,7 @@
 
 **完整性审查补认领**
 
+- 红线测试补：SSM 参数缺失与无凭证、拒绝、网络、限流分开处置；只有完全无凭证的 --synth-only 可占位并警告；旧 ARN NotFound 后零、一、多个命中三种结果；无凭证且无 region 时仍能离线导出。
 - 护栏测试：Device Farm 客户端在 Python 侧只在 runtime 的设备模块构造，core 不引用它（TS 侧的同类断言归 B6）。0051 决策 10。
 - SSM 值失效时 deploy 的 GetProject 核对、diff / --synth-only / destroy 的读失败处置（本轮补进 0051 决策 10 与 0037 决策 6）。
 
@@ -543,7 +556,7 @@
 - `engines/midscene/src/device/probe.test.mts`：归类真值表（假 driver）：重试后候选仍为零 → 不提供；有候选、切得进，只读命令超时而原生只读命令正常 → 不提供；列上下文本身失败或传输层错误 → 探测出错；原生只读命令也失败 → 先查会话状态，丢失则归 session_lost；原生应用会话里出现 WEBVIEW_chrome 不算候选；应用目标不探测网页上下文。另断言探测使用独立的短超时客户端实例，而不是 Promise.race；比例读取失败时按 DPR 回退规则计算（0052 决策 5）
 - `engines/midscene/src/device/web-context.test.mts`：withWebContext 与设备上的导航：多候选与零候选（短等待后再列一次）都记 engine_error，并使用 ADR 原文消息，能力结论不翻转；fn 执行中句柄失效不在 fn 内重试。为 evidence 读地址时，多候选或零候选只把 url 置 null，url_missing 记 error 或 timeout，step 判定不变；能力结论为「不提供」时绝不调用 url（0052 决策 5）
 - `engines/midscene/src/worker/run-scope.test.mts（新增 step 顺序契约组）`：用记录调用序列的假接缝断言：step_started → preStep → 执行 → 读地址（只在要产 evidence、目标是网页、结论为「提供」时） → restore → 控件采集（只在 failed 或 error） → evidence → step_done → enqueue。preStep 失败时 handler 与 AI 都不被调用，记 engine_error；restore 失败时最终判定为 error，原判定写进 message；restore 期间会话丢失归 session_lost；requires:web_context 遇「不提供」记 capability_unavailable、遇「探测出错」记 engine_error，都不调 handler、不转 AI。桌面接缝下的事件流与现有测试逐字节一致（回归）（0052 决策 2，0050 决策 1、2）
-- `engines/midscene/src/worker/run-scope.test.mts（事件序列与退出码组）`：执行前失败：scope_started 之前只有 session_opened 与 session_closed，然后发 scope_done{status:'error', errorType}，没有任何 scenario 或 step 事件，退出码 0。session_lost：当前 step error、余下 step_skipped（shortcircuited）、scenario_done error，后续 scenario 零事件，最后 scope_done{status:error, errorType:session_lost}。结果未知后存活探测失败：下一条 scenario 不发 scenario_started，直接发 scope_done{error, engine_error}。设备路径的退出码只会是 0 或 1，永不出现 80；有 unconfirmed 会话或 attempted 尝试时退出码为 1。收到额外请求头却没有预热地址：桌面与设备都记 precheck_failed（0051 决策 4、5，0052 决策 6，0051 决策 13）
+- `engines/midscene/src/worker/run-scope.test.mts（事件序列与退出码组）`：执行前失败：scope_started 之前只有 session_opened 与 session_closed，然后发 scope_done{status:'error', errorType}，没有任何 scenario 或 step 事件，退出码 0。session_lost：当前 step error、余下 step_skipped（shortcircuited）、scenario_done error，后续 scenario 零事件，最后 scope_done{status:error, errorType:session_lost}。结果未知后存活探测失败：下一条 scenario 不发 scenario_started，先查会话状态，非 RUNNING 发 scope_done{error, session_lost}、否则发 scope_done{error, engine_error}。设备路径的退出码只会是 0 或 1，永不出现 80；有 unconfirmed 会话或 attempted 尝试时退出码为 1。收到额外请求头却没有预热地址：桌面与设备都记 precheck_failed（0051 决策 4、5，0052 决策 6，0051 决策 13）
 - `engines/midscene/src/device/finalize.test.mts`：假时钟下断言：四个阶段各自的截止线；SIGTERM 路径不调 deleteSession；正常路径的顺序为 destroy → 上传 → deleteSession → 核对 → 释放 → session_closed → scope_done → 排空；每个真实会话按 ARN 去重、恰有一条 session_closed，不会先 unconfirmed 再补 confirmed；待核尝试只发一对 attempted 事件；信号重复到达、超时与信号交叠时只进入一次四阶段；只有状态为 RUNNING 才发 Stop；Stop 报错后补查 Get；确认只认 STOPPING 或 COMPLETED；进入终结的那一刻撤销令牌并 abort act（0051 决策 5）
 - `engines/midscene/src/device/session.test.mts`：版本族匹配：'18' 命中 18.x.y，'18.1' 不命中 18.10，写全段即精确匹配。选择顺序：先排除 BUSY 与 TEMPORARY_NOT_AVAILABLE，再按版本号降序、HIGHLY_AVAILABLE 优先、ARN 字典序。零候选重列一次仍为零 → precheck_failed，消息带最接近的可用版本。Create 结果未知只能由按名列举命中来消除，列举为空不构成排除；分页没扫完视为未核对。换台至多一次，剩余预算不足 150s 不再换台，被替换的会话先 Stop。observedS 的起止点正确，缺失记 null 而不是 0（0051 决策 3、7）
 - `engines/midscene/src/device/session-name.test.mts`：名字格式与段序正确；scope 哈希是 SHA-256 前 16 位十六进制；A-Z a-z 0-9 . _ - 之外的字符按 UTF-8 字节百分号编码；总长超过 256 时只截最后一段，其余四段永不截断；按整名相等匹配，同一 run 内不同 scope 不互认（0051 决策 3）
@@ -554,6 +567,7 @@
 
 **完整性审查补认领**
 
+- 红线测试补：scenario 前核对在第一条 scenario 前不调用、年龄恰到边界、探测成功后下一条照常执行、失败按会话状态分流 session_lost / engine_error；释放与 session_closed 先于 scope_done；安装包 HeadObject 回 404 或 403 时 Create 零调用（存在性检查必须排在建会话之前）。
 - 设备模块的两条护栏测试：系统版本与机型只经会话能力对象的唯一读取点进入；两个驱动适配器的命令契约快照。Device Farm 客户端只在 TS 设备模块构造的断言。0052 决策 8、0051 决策 10。
 - 接缝第四项边界义务「scenario 前核对」（本轮补进 0052 决策 2）。
 - 真跑核对：一次故意建连失败的真机执行，核对报错文本里的路径令牌与签名已被盖住。0051 决策 11。

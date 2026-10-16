@@ -10,7 +10,7 @@
 - **硬上限且从创建起算**：单个会话最多 150 分钟、不可调。
 - **失败形态多出几类且发生在 `scope_started` 之前**：设备、被测应用或 worker 自检在执行前判定不可用；获取设备超过预算；隧道预热被拒；会话在执行中途被外部停止或到期。现有错误归因类别集（[0024](./0024-worker-core-protocol.md)）没有对应项，现有协议也没有 scope 级失败的载体。
 - **释放失败与终止判定耦合**：Stop 失败即会话继续计费到上限；[0034](./0034-detached-batch-reconciler.md) 规定发完 `scope_done` 又非零退出一律 error，现有 Midscene worker 也是先清理再发 `scope_done`，设备会话的收尾顺序必须与两者一致。
-- **端点地址本身是凭证**：Appium 端点与预签名地址把签名放在查询串里，现有脱敏规则（[0035](./0035-local-app-testing-via-tunnel.md) 决策 5）只剥 userinfo。
+- **端点地址本身是凭证**：Appium 端点把令牌放在路径里（`/remote-endpoint/<令牌>`），会话交互端点与 S3 预签名地址把签名放在查询串里（实测，决策 11），而原有脱敏规则（[0035](./0035-local-app-testing-via-tunnel.md) 决策 5）只剥 userinfo。
 - **隧道鉴权在 iOS 上不成立，且设备浏览器没有注入请求头的通道**：[0035](./0035-local-app-testing-via-tunnel.md) 决策 4 把凭据内嵌进隧道地址，iOS Safari 不采用这种凭据、改弹系统级鉴权表单；决策 4 用请求头绕过隧道服务商警告页的做法在设备浏览器上没有对等物。
 
 此外，原生应用要先装到设备上，需要一条应用分发通路；设备分钟是新的计费轴，要进成本可观测性；Device Farm 只在 us-west-2，权限与数据驻留要写明。
@@ -25,7 +25,7 @@
 
 ### 2. 时间预算：会话预算从创建起算，获取预算从进入设备解析起算，job 墙钟沿用 0034
 
-- **会话预算**：会话的 150 分钟上限从 `CreateRemoteAccessSession` 那一刻算。worker 的会话预算因此从创建起算，并为创建留出余量。`max_session_s` 由 worker 从 150 分钟减去收尾余量算出并写进能力自述（[0049](./0049-worker-capabilities-targets-keys.md) 决策 4）。worker 另按会话年龄做后备：年龄达到 `max_session_s` 时当前 step 记 error、余下 step 记 skipped、发 Stop、归因 `session_lost`。
+- **会话预算**：会话的 150 分钟上限从 `CreateRemoteAccessSession` 那一刻算。worker 的会话预算因此从创建起算，并为创建留出余量。`max_session_s` 由 worker 从 150 分钟减去收尾余量算出并写进能力自述（[0049](./0049-worker-capabilities-targets-keys.md) 决策 4）。worker 另按会话年龄做后备，两种时点的事件序列不同：年龄在 step 中途到达时，当前 step 记 error、本 scenario 余下 step 记 skipped，再按决策 5 收尾、发 `scope_done{status: error, errorType: session_lost}`；在两条 scenario 之间到达时，由 [0052](./0052-appium-interface-adapter-and-platform-differences.md) 决策 2 的 scenario 前核对终止 scope，不再发下一条 `scenario_started`，同样收尾后发 `scope_done{status: error, errorType: session_lost}`。两种情形下余下 scenario 都由 core 合成 SKIPPED（决策 4）。
 - **获取预算**：从进入设备解析起算（按筛选条件时是首次设备列举，直接给 ARN 时是首次创建请求），止于被测对象就绪（决策 4 的 `scope_started` 时刻）；覆盖筛选与繁忙等待、创建与限流退避、排队、准备、newSession 含应用安装、至多一次换台重建、`activateApp` 与自退采样、能力探测、隧道预热。内建默认 600 秒，项目配置可覆盖（[0053](./0053-project-config-file.md) 的 `[devices]`），上界 3600 秒；跨换台重建不重置，剩余不足 150 秒不再换台。到期归因 `acquire_timeout`，判据型失败归 `precheck_failed`。获取期的瞬时错误在预算内由 worker 手写退避，不进 [0028](./0028-transient-network-ssl-resilience.md) 的网络重试，也不触发 core 的 job 级重试（[0028](./0028-transient-network-ssl-resilience.md) core 层重试门槛加「job 目标不是设备」）：排队与机型繁忙不是瞬时网络故障，core 重拉 worker 会重付取设备开销。默认值依据：创建到 RUNNING 约 1 分钟、Appium 建连 13 到 65 秒、并发排队实测最长约 6 分钟，三项相加约 8.5 分钟，600 秒留出余量又不让排队无限等待；换台重建与繁忙等待下是否够用在实施期校准。
 - **job 墙钟预算不另立起算点**：沿用 [0034](./0034-detached-batch-reconciler.md)，自推进器 claim 这个 job 起算；取设备开销含在其中，停止到 COMPLETED 只计设备分钟、不占墙钟。设备 scope 的缺省墙钟由 core 的 plan 层按目标给出（缺省为获取预算加 900 秒，下限为获取预算加 180 秒，设备 scope 不存在「不超时」；覆盖顺序与校验顺序归 [0034](./0034-detached-batch-reconciler.md)「job timeout」节与 [0019](./0019-feature-tags-scope-and-engine.md)），worker 只在建会话前读 Job 携带的墙钟预算与 `max_session_s` 比较作自检（[0049](./0049-worker-capabilities-targets-keys.md) 决策 7），不计时、不自停。
 - **单条命令与页面加载的上界归 [0052](./0052-appium-interface-adapter-and-platform-differences.md) 决策 6 的分层表**：客户端请求超时是单条命令的真实上界，`pageLoad` 只是尽力而为，`newCommandTimeout` 只计命令之间的空闲。被测站点单次加载超过页面加载上限的在 1.5 不受支持，调大 `@timeout` 只解决多次加载累积的墙钟不足。
@@ -181,7 +181,7 @@
 | Midscene 1.15.1 对中止的行为 | 假界面在首个动作抛「结果未知」并置 `abortSignal` 后，`aiAct` 15 毫秒内拒绝，之后零动作、零截图（两种模式各一次） | 12 |
 | IAM 策略模拟器 | `ListDevices` 于 `*` 允许；`GetDevice` 允许；`CreateRemoteAccessSession` 于本项目加 `device:*` 允许、于其他项目隐式拒绝；会话 Get 于本项目前缀允许、于其他项目拒绝；`ListRemoteAccessSessions` 于本项目允许；未授予的 `DeleteRemoteAccessSession` 拒绝。会话 Get 一项是假阳性，见下一行 | 10 |
 | 会话端点结构 | 两次真机会话各取一次：`remoteDriverEndpoint` 形如 `https://devicefarm-interactive-global.us-west-2.api.aws/remote-endpoint/<令牌>`，没有查询参数、不以 `/` 结尾，令牌段约 2440 个字符、只含字母与数字；`interactiveEndpoint`（wss）带 SigV4 预签名查询参数 `X-Amz-Date`、`X-Amz-Credential`、`X-Amz-Algorithm`、`arn`、`X-Amz-SignedHeaders`、`X-Amz-Signature`、`X-Amz-Security-Token`；两者都没有 userinfo。只记录结构与参数名，不记录任何值 | 11 |
-| IAM 真实角色闭环 | 按 0033 权限表建 worker、CLI、部署方三个角色，assume 后逐动作正反面共 33 项：只授会话前缀时会话 Get 与 Stop 被拒、拒绝消息点名项目 ARN，其余 31 项与权限表一致；同一会话上的对照显示，Get / Stop 只授会话前缀或只授项目 ARN 都被拒、拒绝消息点名未授的那一种，两种同授全部放行。例外是 assume 时会话名只有一个字符，此时授任一种即放行，这是模拟器与早期隔离探针误判的来源；两个字符起（含 32 位十六进制的 task id 形态与 SDK 缺省形态）一律要求两种同授。应用前缀：带前缀条件的 `ListBucket` 下，缺失键的 HeadObject 回 404、GetObject 回 `NoSuchKey`，前缀外的读写与未授的删除被拒；部署方 `CreateProject` 于 `*` 放行、未授的 `DeleteProject` 被拒 | 9、10 |
+| IAM 真实角色闭环 | 按 0033 权限表建 worker、CLI、部署方三个角色，assume 后逐动作正反面共 33 项：只授会话前缀时会话 Get 与 Stop 被拒、拒绝消息点名项目 ARN，其余 31 项与权限表一致；同一会话上的对照显示，Get / Stop 只授会话前缀或只授项目 ARN 都被拒、拒绝消息点名未授的那一种，两种同授全部放行。会话名取 2 字符、5 字符、32 位十六进制（task id 形态）与 SDK 缺省形态，结论都相同。策略模拟器对只授会话前缀判允许，是假阳性：它只按给定的会话 ARN 求值，不知道 Device Farm 还要对项目 ARN 鉴权。设计阶段的隔离探针曾在只授会话前缀时得到放行，复查发现那几次 AssumeRole 因会话名只有一个字符未通过参数校验（STS 要求至少两个字符），导出的凭据是空串，调用回落到了权限更大的执行机角色，那些结果不作数；探针在 assume 之后应先核对调用者身份。应用前缀：带前缀条件的 `ListBucket` 下，缺失键的 HeadObject 回 404、GetObject 回 `NoSuchKey`，前缀外的读写与未授的删除被拒；部署方 `CreateProject` 于 `*` 放行、未授的 `DeleteProject` 被拒 | 9、10 |
 | 单价 | 按量 0.17 美元每设备分钟，不计量槽位 250 美元每月，盈亏点约 1470 分钟每平台每月 | 7 |
 
 ## 被拒方案（护栏）
