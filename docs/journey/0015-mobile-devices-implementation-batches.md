@@ -484,7 +484,7 @@
 **真跑或对抗核查才算数的结论**
 
 - 真部署后，用 Midscene task role 的真实凭证（在容器内，或按同一份 CDK 产出的策略 assume）把 worker 的全部设备动作正反面走一遍。0033 明写「尚未经真部署后的 task role 端到端验证」；CDK 会合并或改写 statement、拼 Fn::Join，合成出的策略不等于 spike 手写的 JSON，单测只能比对形态
-- 会话 Get/Stop 要用 task id 形态、两个字符以上的会话名去验。spike 实测：assume 会话名只有一个字符时只授一种资源也会放行，是假阳性；ECS task role 的会话名是 32 位十六进制 task id，要在真 task 上确认两种资源同授才放行、只授一种就被拒
+- 会话 Get/Stop 的两种资源同授要在真 task 上再确认一次（ECS task role 的调用者身份由 ECS 签发，不经探针的 AssumeRole）：同授放行、只授一种被拒。探针验证时 assume 之后先核对调用者身份，会话名至少两个字符
 - CDK 生成的 ListBucket 条件（StringLike s3:prefix apps/*）下，缺失键的 HeadObject 回 404、无权限回 403，在部署后的真实桶上复核
 - deploy 的项目生命周期跑一整轮真账户：首次部署建立项目，再次部署经 SSM 复用，destroy 后项目还在、SSM 参数被删，同 prefix 重新部署时按名找回同一个项目；后端在 us-east-1 时，Device Farm 调用落在 us-west-2、SSM 落在后端区域
 - 部署方没有 Device Farm 权限时，真实报错码的形态（AccessDeniedException 还是别的），决定降级分类写得对不对；mock 给不出真实错误码
