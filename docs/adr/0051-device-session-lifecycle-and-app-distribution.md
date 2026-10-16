@@ -115,7 +115,7 @@
 - Device Farm 只在 us-west-2，worker 与 Python 侧的 Device Farm 客户端固定该区域（[0033](./0033-iac-aws-backend-and-composition-wiring.md)「region 全可配」的唯一例外）；S3 与 SSM 客户端仍用后端所在区域。
 - **调用归属**：worker 的设备模块是执行期唯一调用 Device Farm SDK 的地方（设备列举与查询、会话创建、查询、停止、按名列举）；Python 侧的部署与诊断模块（`gherkai-runtime[aws]`，延迟导入）承担 `deploy` 找回或建立项目、`doctor` 列举会话，不创建、不停止会话；推进器不调 Device Farm。护栏测试：客户端只在这两个模块构造，core 零引用。
 - **项目**：只有 `deploy` 子命令在 cdk 之前用 SDK 找回或建立项目 `{prefix}devices`（先读 SSM 参数、再按名称列举；命中多个以退出码 2 结束），ARN 作为命令自派生的 context 交给 stack（[0037](./0037-distribution-and-packaging.md) 决策 6 的闭集加 `device_farm_project`），stack 写 SSM 参数并按权限表给 task role 授权；`diff` 不建立项目，SSM 已有值时沿用、没有时以「待建立」占位；`destroy` 保留项目（含会话记录与录像，与 [0033](./0033-iac-aws-backend-and-composition-wiring.md) 对承载数据的资源 RETAIN 同一取向），拆除手册写明项目须手动删除。部署方无 Device Farm 权限时：SSM 已有 ARN 则沿用并警告；没有则警告并跳过，云端带设备目标的 run 在提交前因缺 ARN 以退出码 2 结束，消息「部署未启用设备支持」。本机后端的项目 ARN 走配置（[0053](./0053-project-config-file.md)）。
-- **权限按动作与资源类型逐项登记在 [0033](./0033-iac-aws-backend-and-composition-wiring.md) 的权限表**（据 AWS 服务授权参考：`ListDevices` 不支持资源级限制；`CreateRemoteAccessSession` 同时需要 `project` 与 `device` 两种资源；会话的查询与停止按 `session` 资源收窄到本项目前缀；`ListRemoteAccessSessions` 按 `project`），本 ADR 只记主体与动作：worker 需要设备列举与查询、会话创建、查询、停止、按名列举，以及应用前缀的读取与前缀列举；CLI 需要应用前缀的读、写、分段上传中止与打标签（云端），以及 `doctor` 的会话列举；deploy 需要项目的列举、查询与建立。IAM 策略模拟器对该表逐项核过允许与拒绝（见实测依据），真实角色的闭环实测列为实施前置。
+- **权限按动作与资源类型逐项登记在 [0033](./0033-iac-aws-backend-and-composition-wiring.md) 的权限表**（据 AWS 服务授权参考：`ListDevices` 不支持资源级限制；`CreateRemoteAccessSession` 同时需要 `project` 与 `device` 两种资源；会话的查询与停止要同时授本项目前缀下的 `session` 资源与本项目的 `project` 资源（真实角色实测：只授其中一种即被拒，拒绝消息点名另一种）；`ListRemoteAccessSessions` 按 `project`），本 ADR 只记主体与动作：worker 需要设备列举与查询、会话创建、查询、停止、按名列举，以及应用前缀的读取与前缀列举；CLI 需要应用前缀的读、写、分段上传中止与打标签（云端），以及 `doctor` 的会话列举；deploy 需要项目的列举、查询与建立。该表已用按表建立的真实角色逐项核过允许与拒绝（见实测依据）；策略模拟器对会话查询与停止给出了假阳性，权限表的变更以真实角色实测为准、不以模拟器为准。
 - 本机后端驱动真机时 worker 在 QA 机器上执行，QA 机器须具备 worker 一行的全部权限；用户文档按执行后端分别写明。
 
 ### 11. 安全：端点脱敏与数据保留
@@ -179,7 +179,8 @@
 | 超时语义 | 同一会话两个 webdriver 10.0.2 客户端实例各自的 `connectionRetryTimeout` 各自生效（3 秒实例 3.0 秒超时，缺省实例完成同一慢导航），两平台相同；Android Chrome `pageLoad` 设 3 秒、10 秒慢页 14.6 秒后才报 timeout；iOS Safari 设置不被反映、`url` 在 3.2 秒返回而页面未加载完；`newCommandTimeout` 15 秒下 25 秒长命令在两平台都正常完成、空闲 20 秒后 `invalid session id`，远程访问会话仍 RUNNING，重新 newSession 5.6 到 17 秒成功 | 2、12 |
 | newSession 客户端超时 | 2 秒超时后立即与 75 秒后 `GET /sessions` 均为空（两平台；只说明两个时点无残留）；一次运行中进程在该超时后直接退出、复测未复现 | 3、5 |
 | Midscene 1.15.1 对中止的行为 | 假界面在首个动作抛「结果未知」并置 `abortSignal` 后，`aiAct` 15 毫秒内拒绝，之后零动作、零截图（两种模式各一次） | 12 |
-| IAM 策略模拟器 | `ListDevices` 于 `*` 允许；`GetDevice` 允许；`CreateRemoteAccessSession` 于本项目加 `device:*` 允许、于其他项目隐式拒绝；会话 Get 于本项目前缀允许、于其他项目拒绝；`ListRemoteAccessSessions` 于本项目允许；未授予的 `DeleteRemoteAccessSession` 拒绝 | 10 |
+| IAM 策略模拟器 | `ListDevices` 于 `*` 允许；`GetDevice` 允许；`CreateRemoteAccessSession` 于本项目加 `device:*` 允许、于其他项目隐式拒绝；会话 Get 于本项目前缀允许、于其他项目拒绝；`ListRemoteAccessSessions` 于本项目允许；未授予的 `DeleteRemoteAccessSession` 拒绝。会话 Get 一项是假阳性，见下一行 | 10 |
+| IAM 真实角色闭环 | 按 0033 权限表建 worker、CLI、部署方三个角色，assume 后逐动作正反面共 33 项：只授会话前缀时会话 Get 与 Stop 被拒、拒绝消息点名项目 ARN，其余 31 项与权限表一致；同一会话上的对照显示，Get / Stop 只授会话前缀或只授项目 ARN 都被拒、拒绝消息点名未授的那一种，两种同授全部放行。例外是 assume 时会话名只有一个字符，此时授任一种即放行，这是模拟器与早期隔离探针误判的来源；两个字符起（含 32 位十六进制的 task id 形态与 SDK 缺省形态）一律要求两种同授。应用前缀：带前缀条件的 `ListBucket` 下，缺失键的 HeadObject 回 404、GetObject 回 `NoSuchKey`，前缀外的读写与未授的删除被拒；部署方 `CreateProject` 于 `*` 放行、未授的 `DeleteProject` 被拒 | 9、10 |
 | 单价 | 按量 0.17 美元每设备分钟，不计量槽位 250 美元每月，盈亏点约 1470 分钟每平台每月 | 7 |
 
 ## 被拒方案（护栏）

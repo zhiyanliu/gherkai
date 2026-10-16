@@ -9,6 +9,7 @@
 - 2026-10-15：ADR 0048 到 0053 写成并通过复审；CONTEXT.md 词表加目标、界面类型、应用别名、远程访问会话、驱动适配器、能力探测、确定性 step SDK 七条，旧词条三条改写；ADR 0019 / 0035 / 0036 的 Status 头标部分取代，0022 / 0024 / 0034 / 0042 / 0044 加互链。spike 脚本 `engines/midscene/spikes/06-devicefarm-appium.mts` 保留为真机能力探测的雏形，实施时演化成 `tools/` 下的真机重新探测工具。
 - 2026-10-15（续）：定稿后的专家复审与 Codex 同僚复核发现 0051 的事件契约与收尾顺序、预算分层、隧道令牌载体、scenario 间复位、evidence 衔接、Job 形态六处要改。修订方案经六轮同僚复核达成共识、定稿前实测（边缘契约、桌面与四台真机的预热闭环、导航路线、网页上下文身份、Midscene 中止行为、webdriver 超时语义、会话释放、IAM 策略模拟）全部完成，结论已内联进各 ADR 的实测依据。
 - 2026-10-15（续二）：按修订方案改写 ADR 完成：0051 整篇重写（决策 1 到 14，新增设备解析与命令守卫、result-unknown、隧道令牌换 cookie）；0024 / 0028 / 0034 / 0031 / 0049 / 0037 就地改写被反转句并加 Status 反向链；0035 / 0052 / 0048 / 0050 / 0053 / 0042 / 0019 / 0033 / 0027 / 0025 按条改写；CONTEXT.md 加设备请求、设备解析、获取预算三条，改隧道暴露、远程访问会话、能力探测、step 证据四条；`docs/internals/cli-json-contract.md` 加法扩展（会话列表、设备计量、新错误类别、`run_meta` 的格式版本与会话预热地址、Job 的 `target` 与 `device_request`、evidence 的设备键、`list-deterministic` 的目标两键、doctor 的设备两项）。修订方案 journey 吸收后删除。
+- 2026-10-16：IAM 真实角色闭环 spike 完成（跳板机一次性脚本，在 `/tmp/iam-spike/`）：按 0033 权限表建 worker、CLI、部署方三个角色逐动作正反面核对，31 项与表一致；会话 Get / Stop 必须同授会话前缀与项目 ARN，原表只授前者、策略模拟器判允许是假阳性，0033 与 0051 已改并内联证据。
 - 实施尚未开始。建议次序：0049（能力自述增键，零风险、可独立发）→ 0048 与 0053（core 的 tag 解析、Job 字段、配置文件）→ 0050（注册面）→ 0051 与 0052（worker 设备模块）→ 文档与 skill。
 
 ## documenting 清单（ADR 0048 到 0053 第 7 类内容的汇总，实施期逐项完成）
@@ -51,6 +52,5 @@
 - 计费：起点、排队是否计费、`deviceMinutes` 是否实时累计；claim 到进入设备解析的启动开销；真实设备 scope 的执行耗时分布（校准 0051 决策 2 的 900 秒与 180 秒）。
 - 控件摘要与 page source 的采集耗时与字节量。
 - Device Farm 接口形态：`ListDevices` 的 os 字段格式与 formFactor 取值；UNMETERED 无槽位时 Create 的行为；项目名唯一性与按名找回；`ListRemoteAccessSessions` 返回体是否带签名端点。
-- S3 同键 CopyObject 刷新后过期是否重新计时；前缀 `ListBucket` 下 HeadObject 缺失键是否稳定 404。
+- S3 同键 CopyObject 刷新后过期是否重新计时。
 - CloudTrail 的 RunTask 记录是否含 `containerOverrides`（0035 决策 5 的不脱敏清单依据）。
-- 真实 IAM 角色闭环：按 0033 权限表建测试角色各走一次（设计阶段只做了策略模拟）。

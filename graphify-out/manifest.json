@@ -400,8 +400,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0033-iac-aws-backend-and-composition-wiring.md": {
-    "mtime": 1792053004.2773914,
-    "ast_hash": "bb8aefae2b829add3828ea346ca947e6",
+    "mtime": 1792115831.5205488,
+    "ast_hash": "684456891a9733b0ba0c6e196da09573",
     "semantic_hash": ""
   },
   "docs/adr/0034-detached-batch-reconciler.md": {
@@ -1895,8 +1895,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0051-device-session-lifecycle-and-app-distribution.md": {
-    "mtime": 1792056573.808475,
-    "ast_hash": "9332b57e0b63d246b36520a48d278459",
+    "mtime": 1792115831.5196652,
+    "ast_hash": "bb3c9baac7bdbb1d608e8bc09c4bb0fc",
     "semantic_hash": ""
   },
   "docs/adr/0052-appium-interface-adapter-and-platform-differences.md": {
@@ -1910,8 +1910,8 @@
     "semantic_hash": ""
   },
   "docs/journey/0013-mobile-devices-implementation.md": {
-    "mtime": 1792053989.7062068,
-    "ast_hash": "e38f9f0ecf670fc3f2d8aad8f41d4b52",
+    "mtime": 1792115857.1061513,
+    "ast_hash": "2ca02976869bce5e5479d94d5a4d158a",
     "semantic_hash": ""
   }
 }
