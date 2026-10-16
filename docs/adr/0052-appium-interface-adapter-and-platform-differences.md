@@ -95,7 +95,7 @@ scenario 前核对 ／ step 前核对 ／ step 后复原并核对 ／ 采集界�
 - **截图与手势都在原生上下文**。Android 网页上下文的截图是视口图、慢一个数量级，且与原生手势的坐标系差一个状态栏加地址栏的偏移；iOS 截图本就不分上下文。
 - **AI 步开始前切回原生上下文**；step 结束时会话在原生上下文，这是确定性 step 句柄必须遵守的不变量（句柄上下文与 `withWebContext` 归 [0050](./0050-deterministic-step-handles-and-testing.md)）；决策 2 的 step 前核对与复原核对把它变成接缝的义务。
 - **滚动**：iOS 用 `mobile: swipe`，Android 用 `scrollGesture`；不用 W3C 指针拖动模拟滚动。
-- **导航以「网页上下文可用」为前提**：可用时在网页上下文调 url；不可用时走 `mobile: deepLink`。没有可用网页上下文时调 url 不报错而是挂住，所以前提必须先判，不能靠超时处理。
+- **网页目标的导航以「网页上下文可用」为前提**：可用时在网页上下文调 url；不可用时走 `mobile: deepLink` 交给系统浏览器。没有可用网页上下文时调 url 不报错而是挂住，所以前提必须先判，不能靠超时处理。应用目标不探测网页上下文，导航固定为带 package / bundleId 的 `mobile: deepLink`（决策 4、[0048](./0048-test-targets-device-and-ui-kind.md) 决策 7）。
 - **超时分层表**（设备目标的全部时间上界与重试许可都在这一张表里；[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 2、12 与 [0048](./0048-test-targets-device-and-ui-kind.md) 决策 8 指向本表）：
 
   | 层 | 起点 | 执行者 | 覆盖 | 到期归因 | 重试 |

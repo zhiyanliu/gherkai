@@ -365,8 +365,8 @@
     "semantic_hash": "01bc939adc6973eaad56c15f4fdbedb6"
   },
   "docs/adr/0024-worker-core-protocol.md": {
-    "mtime": 1792133427.0400167,
-    "ast_hash": "c9c3b774c5266b3af77bd3a03e399899",
+    "mtime": 1792133666.7447379,
+    "ast_hash": "552c01e2ca52079805965322d3c207ec",
     "semantic_hash": ""
   },
   "docs/adr/0026-schedule-module.md": {
@@ -1880,8 +1880,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0048-test-targets-device-and-ui-kind.md": {
-    "mtime": 1792133427.018202,
-    "ast_hash": "0485be4aefd600d820a5a37163f67f2c",
+    "mtime": 1792133666.7452319,
+    "ast_hash": "8156cdcb5940b9bf2a69d0d07be3ca17",
     "semantic_hash": ""
   },
   "docs/adr/0049-worker-capabilities-targets-keys.md": {
@@ -1895,13 +1895,13 @@
     "semantic_hash": ""
   },
   "docs/adr/0051-device-session-lifecycle-and-app-distribution.md": {
-    "mtime": 1792133427.019182,
-    "ast_hash": "20baa5dd6f9544117d6409d3be6992a9",
+    "mtime": 1792133666.745533,
+    "ast_hash": "63361498a45791c37a1b5c6caedc8865",
     "semantic_hash": ""
   },
   "docs/adr/0052-appium-interface-adapter-and-platform-differences.md": {
-    "mtime": 1792133427.0186694,
-    "ast_hash": "55da30106f7fd2140446d6bfbdb16ba0",
+    "mtime": 1792133666.745015,
+    "ast_hash": "68dfd59c1f5c6bce62e6167ad8131fe5",
     "semantic_hash": ""
   },
   "docs/adr/0053-project-config-file.md": {

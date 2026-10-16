@@ -115,7 +115,7 @@ job 墙钟预算的语义沿用 [0034](./0034-detached-batch-reconciler.md)：�
 ## 被拒方案（护栏）
 
 - **应用目标上不支持网址导航、一律记 error，深层链接列为未来方向**：scenario 之间不复位（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 1），每条 scenario 都要先把应用带到已知页面，没有深层链接就只能让 AI 从当前页面点回去，慢、费 token、随界面变动失败；实测两个平台指定应用的深层链接都可靠（决策 7）。
-- **应用目标上自定义 scheme 不自动识别、由显式确定性 step 承接**：误判面（`When 输入 "shop://x"` 被当成导航）与网页目标上已接受的 `https?://` 规则属同一类，[0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md) 已为此留了退路；iOS 第三方应用的 https 深层链接依赖关联域名与重签后可能丢失的授权，只认 https 会让 iOS 应用目标上这个功能基本用不上。误判成为真实痛点时按 0020 的退路处理，不先为它多造一条写法。
+- **应用目标上自定义 scheme 不自动识别、由显式确定性 step 承接**：误判面（`When 输入 "shop://x"` 被当成导航）与网页目标上已接受的 `https?://` 规则属同一类，[0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md) 已为此留了退路；iOS 第三方应用的 https 深层链接（Universal Links）依赖关联域名配置与应用授权，本轮未实测，所以不能承诺它可用，自定义 scheme 则两个平台都实测可靠；显式确定性 step 同样能承接自定义 scheme，两方案的差别只在「使用方要不要为此多学一种写法」，owner 取不多造写法。误判成为真实痛点时按 0020 的退路处理。
 - **Android 上静默把 `( ) ' ;` 改写成百分号编码再传**：`%28` 与 `(` 对应用的 intent-filter 匹配未必等价，改写后成功与否都不是使用方写的那个地址；校验并提示改法（决策 7）。
 
 - **从 step 文本推断 ui_kind 与应用**（双引号内是地址即网页、等于已绑定别名即启动应用）：被拒。它让 core 匹配 step 文本，违反 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md) 的「匹配放 worker」红线；同时与 worker 的导航识别构成两份事实源，二者对同一句话的判断会漂移。显式 `@app:` 让「一个 scope 一个应用」由 FeatureContractError 机械保证。
