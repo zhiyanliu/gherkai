@@ -1,7 +1,7 @@
 # Graph Report - yaozhou  (2026-10-16)
 
 ## Corpus Check
-- 359 files · ~577,562 words
+- 359 files · ~577,705 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -10,7 +10,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `c2162ddb`
+- Built from commit: `890494c2`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -1172,7 +1172,7 @@ Nodes (9): NgrokTunnel, ngrok 实现（ADR 0035 决策 1，当前唯一 provider
   docs/diagrams/getting-started-component-ownership.svg · relation: conceptually_related_to
 
 ## Knowledge Gaps
-- **520 isolated node(s):** `PLATFORM`, `SCENARIO`, `TUNNEL_BASE`, `WARMUP_ROUTE`, `Driver` (+515 more)
+- **520 isolated node(s):** `现场`, `documenting 清单（ADR 0048 到 0053 第 7 类内容的汇总，实施期逐项完成）`, `实施期要核的点（ADR 已定、实施时顺手验证）`, `DeterministicAssertion`, `DeterministicConflict` (+515 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **40 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
