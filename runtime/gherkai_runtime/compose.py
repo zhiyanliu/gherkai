@@ -717,7 +717,7 @@ def match_deterministic(engine: str, items: list[dict], *, steps_dir: str | Path
     核对条目的 keywords 声明，不进模式匹配（ADR 0050 决策 1）。
     异常语义同 `query_capabilities`（调用方 plan 做 best-effort 降级）。
     """
-    return _ask_worker(engine, "--match-steps", what="match 查询", steps_dir=steps_dir,
+    return _ask_worker(engine, "--match-steps", what="确定性 step 查询", steps_dir=steps_dir,  # what 进用户可见的失败文案（ADR 0039：不带协议名）
                        timeout_s=timeout_s, payload=json.dumps(items, ensure_ascii=False).encode("utf-8"))
 
 

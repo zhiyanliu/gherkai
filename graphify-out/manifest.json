@@ -620,8 +620,8 @@
     "semantic_hash": "cb5346fd214c36aabf47fdf937c0281b"
   },
   "runtime/gherkai_runtime/compose.py": {
-    "mtime": 1792996259.190547,
-    "ast_hash": "4bedb2f5e3ee5f02ed7a12e010a99965",
+    "mtime": 1792996797.0259109,
+    "ast_hash": "33c022ddc923baaf484ecdbc2f254063",
     "semantic_hash": ""
   },
   "runtime/gherkai_runtime/detached.py": {
@@ -650,8 +650,8 @@
     "semantic_hash": "6e9cfc5c2c320e755ab52bf93596c2de"
   },
   "runtime/tests/test_compose.py": {
-    "mtime": 1792996259.1953528,
-    "ast_hash": "fdecab16d710ee6bfcc91540be5bbf58",
+    "mtime": 1792996797.0261798,
+    "ast_hash": "76744e43c8950888f585fe3959b76194",
     "semantic_hash": ""
   },
   "runtime/tests/test_detached_launcher.py": {

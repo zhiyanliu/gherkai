@@ -1375,6 +1375,11 @@ def test_match_deterministic_feeds_stdin_and_parses(monkeypatch, novaact_env_cmd
     items = [{"keyword": "Then", "text": '"https://x.example/"'}, {"keyword": "When", "text": "没有这条"}]
     assert compose.match_deterministic("midscene", items) == [{"keyword_mismatch": "nav", "keywords": ["Given", "When"]}, None]
     assert _json.loads(captured["input"].decode()) == items
+    # 失败文案是用户可见文本（plan 以它收尾、退出码 2）：说「确定性 step 查询失败」，不带 --match-steps 这类协议名（ADR 0039）
+    _P.returncode, _P.stderr = 2, b"demo.py: SyntaxError"
+    with pytest.raises(compose.WorkerSelfDescribeError) as ei:
+        compose.match_deterministic("midscene", items)
+    assert "确定性 step 查询失败" in str(ei.value) and "match" not in str(ei.value).lower()
 
 
 # ---- read_task_def_stop_timeout（doctor 的 cloud 侧对照值，ADR 0032 真容器校准结论 4）----
