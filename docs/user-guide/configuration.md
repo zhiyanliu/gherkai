@@ -9,7 +9,7 @@ gherkai 的环境变量与跨命令选项清单如下：每一项做什么、默
 | 位置 | 谁读它 | 怎么设 |
 |---|---|---|
 | 本机 CLI 进程 | `gherkai run` / `plan` / `submit` / `status` / `explain` / `doctor` / `list-engines` / `list-deterministic` 本身 | 在运行命令的 shell 里 export |
-| 本机 worker 进程 | 本机后端（`--backend local`）下由 CLI 起的引擎 worker。`plan`、`list-deterministic`、`doctor` 也各起一次本机 worker 读它的确定性 step 信息（`doctor` 还读它自报的模型），与 `--backend` 无关 | 同上 |
+| 本机 worker 进程 | 本机后端（`--backend local`）下由 CLI 起的引擎 worker。`plan`、`list-deterministic`、`doctor` 也各起一次本机 worker 读它的确定性 step 信息（`doctor` 还读它自报的模型与测试目标），与 `--backend` 无关 | 同上 |
 | 云端 worker 容器 | 云端后端（`--backend cloud`）下在 Fargate 上运行的 worker | 把变量写进 worker 镜像 variant 的 `ENV`，再用 `gherkai deploy push-worker` 推上去（见 [`cloud-backend.md`](./cloud-backend.md)） |
 | 部署机 | `gherkai deploy` / `destroy` / `push-worker` | 在运行部署命令的 shell 里 export |
 

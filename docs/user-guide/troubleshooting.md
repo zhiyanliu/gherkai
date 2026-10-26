@@ -30,7 +30,7 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 | `engines.model.<引擎>` | 该引擎 worker 自述成功时 | 这台机器起 job 时**实际会用**的模型 id，由 worker 自报。展示项 |
 | `engines.targets.<引擎>` | 该引擎 worker 自述成功时 | 该引擎 worker 支持的测试目标（桌面网页、Android 网页这类名称），带会话上限的目标附分钟数；由 worker 自报，不支持设备不算失败。展示项；两引擎的能力矩阵见 [`engines.md`](./engines.md) |
 | `steps.dir` | 总是 | 解析到的确定性 step 目录。没有 `steps/` 目录是多数项目的常态；`--steps-dir` 或 `GHERKAI_STEPS_DIR` 指的路径不是目录时是必修失败 |
-| `steps.load.<引擎>` | 每个可用引擎（`steps.dir` 判 `✗` 时不问自述，本行与 `engines.model.<引擎>` 都不出现） | 该引擎加载到多少条确定性 step（含内建）。有 steps 目录时必修，没有时只是可选 |
+| `steps.load.<引擎>` | 每个可用引擎（`steps.dir` 判 `✗` 时不问自述，本行与 `engines.model.<引擎>`、`engines.targets.<引擎>` 都不出现） | 该引擎加载到多少条确定性 step（含内建）。有 steps 目录时必修，没有时只是可选 |
 | `aws.region` | 云端（region 只剩 profile 配置这一处可取时——`--profile` / `AWS_PROFILE` 指的 profile 读不出来，这一行不出现，失败报在 `aws.identity` 那行） | 落实到的 region。四处都没有 region 时必修失败 |
 | `aws.identity` | 总是（云端而 `aws.region` 判 `✗` 时不出现） | 调用者身份。凭证不可用或 profile 名不存在时必修失败；未给云端参数时这一行只标「未查（给 --backend cloud 或 --prefix 才查云端）」 |
 | `backend.reachability` | 未给云端参数时，或给了云端参数而 `aws.region`、`aws.identity` 先失败时（两者都通过就没有这一行，下面几行即实际探测结果） | 这一行只交代云端为什么没查：三种情形依次标「未查（同上）」/「未查：region 还没解析出来」/「未查：凭证先过不了」，后两种同时标 `-`——真正的失败在它上面那一行，`backend.*` 其余各行都不出现 |

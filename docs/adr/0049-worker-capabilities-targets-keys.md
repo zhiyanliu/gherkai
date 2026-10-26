@@ -57,7 +57,7 @@
 ### 3. step 实际可用目标是句柄声明与 worker `targets` 的交集
 
 - worker 在 `deterministic_steps[*].targets` 里**原样**报出注册时声明的目标（由句柄种类与 `uiKinds`、`devices` 过滤推出，规则归 [0050](./0050-deterministic-step-handles-and-testing.md)），不预先与自己的顶层 `targets` 求交。
-- CLI 在契约校验同一处计算交集，plan、`list-deterministic`、doctor 只消费交集结果。交集是两份结构化声明的集合运算，不涉及 step 文本，与 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)「匹配放 worker」的红线相容。交集结果保留每个条目的 `requires`；同一 device 与 ui_kind 只是 `requires` 不同的条目各自成条、不合并（只适用于 step 级；顶层 `targets` 按 device 唯一，见决策 1）。
+- 交集由 CLI 一侧算：实现与契约校验住同一个组合根模块、以纯函数提供（消费点调用时算，不改写缓存的自述对象），plan、`list-deterministic`、doctor 只消费结果、不各自求交或补缺省值。交集是两份结构化声明的集合运算，不涉及 step 文本，与 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)「匹配放 worker」的红线相容。交集结果保留每个条目的 `requires`；同一 device 与 ui_kind 只是 `requires` 不同的条目各自成条、不合并（只适用于 step 级；顶层 `targets` 按 device 唯一，见决策 1）。
 - **为什么不由 worker 报交集**：声明了但 worker 不支持的目标是测试开发需要看见的信息。典型是 Python steps 目录里写了 webdriver 句柄，而 Nova Act worker 没有设备目标；若 worker 先求交，这条句柄在任何视图里都消失，测试开发无从得知它永远不会被调用。
 - `--match-steps` 的输入加关键字、输出加「命中但关键字不符」一态（[0036](./0036-deterministic-capability-discovery.md)、[0050](./0050-deterministic-step-handles-and-testing.md) 决策 1），其余不变：plan 用命中结果里的 `pattern` 关联自述清单中该条目的交集目标，再按 scope 的目标标注；关键字不符的 step 标注为写法错误。跨 step 的命中冲突仍按 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md) 的模式冲突规则处理，与目标无关；命中的条目在该 scope 目标上没有句柄时，这条 step 标注为走 AI，不顺延到下一条能匹配的 pattern（[0050](./0050-deterministic-step-handles-and-testing.md) 决策 1）。顺延会让同一文本在不同目标上执行语义不同的实现，测试开发从 step 文本看不出实际调用的是哪一条。
 
