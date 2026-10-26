@@ -1265,15 +1265,22 @@ def test_fail_fast_between_check_and_spawn_on_retry_aborts_the_attempt():
             captured["w"].abort_flag.set()
         return engine
 
+    import time
+
     sch._Worker.__init__ = spy
+    t0 = time.monotonic()
     try:
         res = schedule(_rm([_job("a")]), resolver, CollectSink(),
                        opts=ScheduleOpts(max_concurrency=1, network_retry=2, retry_sleep=lambda s: None, grace_period_s=1.0))
     finally:
         sch._Worker.__init__ = orig
+    elapsed = time.monotonic() - t0
     jr = res.jobs[0]
     assert engine.run_count["a"] == 2 and (jr.status, jr.error_type) == (Status.ABORTED, None), (jr.status, jr.error_type, jr.message)
-    assert engine.handles["a"].stopped  # 新 handle 确被停（不是靠 FakeEngine 自然 EOF）
+    assert engine.handles["a"].stopped
+    # 新 handle 是被 spawn 之后的停止请求停下的：假 worker 没收到停止请求会等满 5 秒才自然 EOF（之后收尾的幂等停也会把 stopped 置位），
+    # 故耗时上界才是真正的护栏
+    assert elapsed < 3.0, elapsed
 
 
 def test_device_job_network_error_is_not_retried(monkeypatch):

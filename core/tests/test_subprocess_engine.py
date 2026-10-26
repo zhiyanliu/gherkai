@@ -183,7 +183,9 @@ def test_fail_fast_stops_multiple_deaf_victims_in_parallel(tmp_path):
                     if ready == {"v1", "v2", "c"}:
                         gate.write_text("go")  # 两个 victim 与 crash job 都已就绪：放 crash job 崩（它在 scenario_started 之后等这个文件）
 
-    grace = 2.0
+    # 宽限取 3 秒：上界 2*grace 之内还要容下 crash job 退出时日志线程最多 2 秒的收尾等待（SubprocessEngine 的 _join_pumps），
+    # 并行停约 grace 加这段等待、串行停至少 2*grace 加这段等待，两者仍分得开
+    grace = 3.0
     jobs = [_mode_job("c", "crash"), _mode_job("v1", "deaf"), _mode_job("v2", "deaf")]
     sink = _Sink()
     result = schedule(_rm(jobs), lambda name: engine, sink,
@@ -194,7 +196,7 @@ def test_fail_fast_stops_multiple_deaf_victims_in_parallel(tmp_path):
     # crash job 的退出时刻（触发 _stop_all 的那一刻）不可直接得，改从「放行」时刻起算：放行后 crash job 在几十毫秒内退出，
     # 放行到 run 结束的时间约等于一份宽限（三个进程都已就绪，启动耗时不计入）
     elapsed = time.time() - gate.stat().st_mtime  # 文件 mtime 是墙钟，不能与 monotonic 相减
-    assert grace <= elapsed < 2 * grace - 0.2, elapsed  # 串行逐个等宽限至少要两份
+    assert grace <= elapsed < 2 * grace - 0.2, elapsed  # 并行停：一份宽限加日志收尾等待；串行逐个等宽限至少两份
 
 
 def _assert_process_gone(pid: int, within_s: float = 5.0) -> None:
@@ -208,6 +210,16 @@ def _assert_process_gone(pid: int, within_s: float = 5.0) -> None:
             return
         time.sleep(0.1)
     raise AssertionError(f"进程 {pid} 仍存活")
+
+
+def _wait_pids(pid_file, n: int, within_s: float = 5.0) -> list[int]:
+    """等 pid 文件里出现至少 n 行（孙进程由它自己登记，可能比父进程晚一点）；到时返回当前已有的。"""
+    deadline = time.monotonic() + within_s
+    while True:
+        pids = [int(x) for x in pid_file.read_text().split()] if pid_file.exists() else []
+        if len(pids) >= n or time.monotonic() >= deadline:
+            return pids
+        time.sleep(0.05)
 
 
 def _kill_quietly(pid: int) -> None:
@@ -275,13 +287,12 @@ def test_done_then_deaf_fdholder_hits_drain_bound_and_is_judged_timeout(tmp_path
         jr = result.jobs[0]
         assert (jr.status, jr.error_type) == (Status.ERROR, "timeout"), (jr.status, jr.error_type, jr.message)
         assert grace + DRAIN_MARGIN_S <= elapsed < grace + DRAIN_MARGIN_S + 8.0, elapsed  # 等到了排空上界、之后不再等
-        pids = [int(x) for x in pid_file.read_text().split()]
-        assert len(pids) == 2  # 父进程与孙进程各一行（孙进程自己登记，父进程被强杀也不丢）
+        pids = _wait_pids(pid_file, 2)
+        assert len(pids) == 2, pids  # 父进程与孙进程各一行（孙进程自己登记，父进程被强杀也不丢）
         _assert_process_gone(pids[0])  # worker 本体已被 SIGKILL
     finally:
-        time.sleep(0.2)  # 孙进程的 pid 由它自己写入，给它一点启动时间再读
-        for line in (pid_file.read_text().split() if pid_file.exists() else []):
-            _kill_quietly(int(line))  # 回收持有写端的孙进程（测试夹具自己的责任）
+        for pid in _wait_pids(pid_file, 2):  # 孙进程的 pid 由它自己写入：轮询等它登记完再回收（测试夹具自己的责任）
+            _kill_quietly(pid)
 
 
 def test_done_then_deaf_worker_is_killed_after_hurry_exit_and_judged_timeout(tmp_path):
