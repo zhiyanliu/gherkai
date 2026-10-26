@@ -700,9 +700,9 @@
     "semantic_hash": "634442c2e8bef2df90b74fcd1a554ac7"
   },
   "engines/midscene/src/lib/job-source.mts": {
-    "mtime": 1789872429.8108466,
-    "ast_hash": "dbd29c129dbf5dd1594963a5fa2e0661",
-    "semantic_hash": "dbd29c129dbf5dd1594963a5fa2e0661"
+    "mtime": 1793009767.2576468,
+    "ast_hash": "c24be8502fa7955f35c97ca9d9c7a060",
+    "semantic_hash": ""
   },
   "engines/midscene/src/resolve-hook.mts": {
     "mtime": 1789857291.728386,
@@ -750,13 +750,13 @@
     "semantic_hash": "aa21f192bf51cc996ff97488e8ad0cc5"
   },
   "engines/midscene/src/worker/job-source.test.mts": {
-    "mtime": 1789780403.3592117,
-    "ast_hash": "f4f1b1adf124a8e1533f2e2935ff1027",
-    "semantic_hash": "f4f1b1adf124a8e1533f2e2935ff1027"
+    "mtime": 1793009767.2587729,
+    "ast_hash": "3c29ac77f054c3979764b8cd2b4209f0",
+    "semantic_hash": ""
   },
   "engines/midscene/src/worker/run-scope.mts": {
-    "mtime": 1792996259.193963,
-    "ast_hash": "70af393132762f3ceec8db6f41a3c86f",
+    "mtime": 1793009767.2583716,
+    "ast_hash": "b9ecdfcc614751d5c7bf7a019d5ef5dc",
     "semantic_hash": ""
   },
   "engines/midscene/src/worker/run-scope.test.mts": {
@@ -830,8 +830,8 @@
     "semantic_hash": "af42daf4af68fc11996d8c223310eb1e"
   },
   "engines/novaact/gherkai_worker_novaact/run_scope.py": {
-    "mtime": 1792996259.1933284,
-    "ast_hash": "730a207a1ac74ed2c55cdb33a5e14006",
+    "mtime": 1793009767.2571363,
+    "ast_hash": "1eaf43e75f359a4def434630a8b759f8",
     "semantic_hash": ""
   },
   "engines/novaact/gherkai_worker_novaact/user_steps.py": {
@@ -1982,6 +1982,26 @@
   "engines/fixtures/job-lines.json": {
     "mtime": 1793008735.4679253,
     "ast_hash": "dc799fb85c96dd9a4fac632448a6636d",
+    "semantic_hash": ""
+  },
+  "engines/midscene/src/lib/precheck.mts": {
+    "mtime": 1793009767.2573214,
+    "ast_hash": "a7e13de0e671565ce5df7e0399f39a03",
+    "semantic_hash": ""
+  },
+  "engines/midscene/src/worker/precheck.test.mts": {
+    "mtime": 1793009767.2584743,
+    "ast_hash": "224747c5d20b570124fe7256babb0847",
+    "semantic_hash": ""
+  },
+  "engines/novaact/gherkai_worker_novaact/lib/precheck.py": {
+    "mtime": 1793009767.2564986,
+    "ast_hash": "fe3eb2738ae694ffbe1a05d096014759",
+    "semantic_hash": ""
+  },
+  "engines/novaact/tests/test_precheck.py": {
+    "mtime": 1793009767.2572532,
+    "ast_hash": "c51925162e8950d08dec2be8da7dcfd1",
     "semantic_hash": ""
   }
 }

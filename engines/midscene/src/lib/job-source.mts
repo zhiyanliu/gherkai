@@ -12,7 +12,29 @@
 // **无「回落调试」分支**：stdin 本就是手动直接运行的入口，subprocess 态即调试态。
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 
-interface Job { scope: { id: string; name: string }; engine: string; scenarios: unknown[]; assertionVotes?: number }
+// core 发来的 job 行（ADR 0024 输入形状；0048 决策 3 的可选键）。字段清单 JOB_KEYS 由 job-source.test.mts 与
+// engines/fixtures/job-lines.json（Python 侧 job_to_json 的 golden）对照：任一侧加字段而另一侧没跟，测试就会变红。
+export interface JobApp { alias: string; bucket: string | null; key: string | null; sha256: string | null; appId: string }
+export interface JobTargetShape { device: string; uiKind: string; app?: JobApp }
+export interface JobDeviceRequest {
+  provider: string; deviceArn?: string; osVersion?: string; billingMethod: string; projectArn: string; acquireTimeoutS: number;
+}
+export interface Job {
+  scope: { id: string; name: string };
+  engine: string;
+  scenarios: unknown[];
+  assertionVotes?: number;
+  timeoutS?: number;            // 只供建会话前自检（ADR 0051 决策 2），不计时
+  target?: JobTargetShape;      // 非桌面才有（ADR 0048 决策 3）
+  deviceRequest?: JobDeviceRequest;
+}
+/** TS 侧认得的字段清单（显式写出，不从类型推导——JobSource 只是 JSON.parse，「解析再序列化」证不了什么）。 */
+export const JOB_KEYS = {
+  top: ["scope", "engine", "scenarios", "assertionVotes", "timeoutS", "target", "deviceRequest"],
+  target: ["device", "uiKind", "app"],
+  app: ["alias", "bucket", "key", "sha256", "appId"],
+  deviceRequest: ["provider", "deviceArn", "osVersion", "billingMethod", "projectArn", "acquireTimeoutS"],
+} as const;
 
 export class JobSource {
   private uri: string | undefined;
