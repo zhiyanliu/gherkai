@@ -84,7 +84,7 @@ scenario 前核对 ／ step 前核对 ／ step 后复原并核对 ／ 采集界�
 - **输入路线**（iOS）：由网页上下文是否可用决定在哪个上下文取活动元素；Android 固定为 `mobile: type`、不探测。
 - **坐标比例**：iOS 取 `mobile: deviceScreenInfo` 的 `scale`；Android 为 1。
 - **Appium 版本**：取自 `/status`，只记入诊断。
-- **深层链接支持**（仅应用目标）：不预先探测，首次 `mobile: deepLink` 遇到 WebDriverAgent「不支持打开地址」类报错即记为「不提供」并缓存到会话（[0048](./0048-test-targets-device-and-ui-kind.md) 决策 7）；只缓存能力否定，地址被拒与结果未知不进缓存。这是「一次定下」的惰性例外：预先探测要么多开一次应用，要么没有可用的只读命令。
+- **DeepLink 支持**（仅应用目标）：不预先探测，首次 `mobile: deepLink` 遇到 WebDriverAgent「不支持打开地址」类报错即记为「不提供」并缓存到会话（[0048](./0048-test-targets-device-and-ui-kind.md) 决策 7）；只缓存能力否定，地址被拒与结果未知不进缓存。这是「一次定下」的惰性例外：预先探测要么多开一次应用，要么没有可用的只读命令。
 
 为什么一次定下、不在运行期试错回落：失败的路线有的不抛错，只是空等 50 秒左右；路线失败时模型还会反复重试到重规划上限，额外消耗数万 token。择路必须在交给 AI 之前确定。
 
@@ -159,7 +159,7 @@ scenario 前核对 ／ step 前核对 ／ step 后复原并核对 ／ 采集界�
 
 **导航路线**：iOS 15.8 上 `mobile: deepLink` 报「当前 Xcode SDK 不支持打开地址」，`url` 路线通过；iOS 18.6 上先 deepLink 再切网页上下文，网页命令全部挂到 120 秒超时并重试三次，改走 `url` 则全部通过；iOS 26.3 只能 deepLink。
 
-**深层链接**（应用目标；Android 15 维基百科客户端与 Chrome，iOS 15.8、18.6、26.3 用注册了自定义 scheme 的未签名示例包与 Safari）：Android 指定 package 时能处理的链接 1 秒内打开目标页，后台与冷启动同样；应用不处理的主机或路径时命令报「unable to resolve Intent」、不离开被测应用；不指定 package 时系统交给 Chrome。驱动经 `adb shell am start -d` 传地址：含 `; ' ( ) | < >` 的地址命令出错，`|` 与 `;` 让命令截断后部分执行（报错的同时打开了截断的地址），`+ % [ ] { } & = # ! * $ , ~` 与已百分号编码的字符逐字送达（以 Chrome 回显页的 `location.href` 对比标准化原值），`mobile: startActivity` 同样经 shell、同样出错，单引号包裹地址会把驱动加的反斜杠留在地址里。iOS 18.6 与 26.3 指定 bundleId 时已注册 scheme 的链接 0.3 秒到前台，后台与冷启动同样，地址不经 shell、含括号引号与 `;` 的地址原样送达（Safari 回显核对）；Device Farm 重签后 Info.plist 注册的 scheme 保留；未注册的 scheme 与无关的 https 地址命令照样成功、应用照样到前台，应用是否跳转外部不可观测。iOS 15.8 带 bundleId 时 2.4 秒报 WebDriverAgent「The current Xcode SDK does not support opening of URLs with given application」，不带时命令挂住（4 次 120 秒客户端超时，481 秒）。Device Farm 公共设备上系统「地图」被禁止启动，不能当被测对象。
+**DeepLink**（应用目标；Android 15 维基百科客户端与 Chrome，iOS 15.8、18.6、26.3 用注册了自定义 scheme 的未签名示例包与 Safari）：Android 指定 package 时能处理的链接 1 秒内打开目标页，后台与冷启动同样；应用不处理的主机或路径时命令报「unable to resolve Intent」、不离开被测应用；不指定 package 时系统交给 Chrome。驱动经 `adb shell am start -d` 传地址：含 `; ' ( ) | < >` 的地址命令出错，`|` 与 `;` 让命令截断后部分执行（报错的同时打开了截断的地址），`+ % [ ] { } & = # ! * $ , ~` 与已百分号编码的字符逐字送达（以 Chrome 回显页的 `location.href` 对比标准化原值），`mobile: startActivity` 同样经 shell、同样出错，单引号包裹地址会把驱动加的反斜杠留在地址里。iOS 18.6 与 26.3 指定 bundleId 时已注册 scheme 的链接 0.3 秒到前台，后台与冷启动同样，地址不经 shell、含括号引号与 `;` 的地址原样送达（Safari 回显核对）；Device Farm 重签后 Info.plist 注册的 scheme 保留；未注册的 scheme 与无关的 https 地址命令照样成功、应用照样到前台，应用是否跳转外部不可观测。iOS 15.8 带 bundleId 时 2.4 秒报 WebDriverAgent「The current Xcode SDK does not support opening of URLs with given application」，不带时命令挂住（4 次 120 秒客户端超时，481 秒）。Device Farm 公共设备上系统「地图」被禁止启动，不能当被测对象。
 
 **超时语义**（Android Chrome 与 iOS 18.6 Safari）：同一会话上两个 webdriver 10.0.2 客户端实例各自的 `connectionRetryTimeout` 各自生效（3 秒实例 3.0 秒超时，缺省实例完成同一慢导航）；Android `pageLoad` 设 3 秒、10 秒慢页 14.6 秒后才报 timeout，会话仍可用；iOS `pageLoad` 设置不被反映，`url` 在 3.2 秒返回而页面未加载完；`newCommandTimeout` 15 秒下 25 秒长命令在两平台都正常完成、空闲 20 秒后 `invalid session id`，远程访问会话仍 RUNNING，重新 newSession 5.6 到 17 秒成功；newSession 客户端 2 秒超时后立即与 75 秒后服务端都无残留会话（两个时点）。
 

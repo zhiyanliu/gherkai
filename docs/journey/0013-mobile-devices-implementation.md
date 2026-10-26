@@ -21,25 +21,26 @@
   - iOS 15.8 带 bundleId 时 2.4 秒报 WebDriverAgent「The current Xcode SDK does not support opening of URLs with given application」，首次调用即可识别为设备不支持；Device Farm 公共设备上系统「地图」被禁止启动，不能当被测对象。
   - 由此的实现规则：设备不支持按首次调用的该报错识别、记 `capability_unavailable` 并缓存结论（只缓存能力否定，地址被拒与超时不进缓存）；Android「应用未处理该地址」记 `capability_unavailable`（处置是改写 step、重试不会变；Codex 第十二轮同意，并指出不能据此把 `engine_error` 说成「暗示可重试」，0051 已用它表示禁止补发的结果未知）；命令成功后核对前台包名或 bundleId 是被测应用，允许短暂轮询，不是即记 error。
 - **owner 已定（2026-10-16）**：① 接受 iOS 上网址 step 的成功契约为「地址已送达、应用在前台」，应用忽略链接时由紧跟的落点核对判 failed，写进用户文档；② 应用目标上识别引号内任意 `scheme://`。两项连同 spike 结论已写进 0048 决策 7 与被拒方案、0052 决策 4 / 5 / 6 与实测依据、0051 决策 4 类别表与实测依据，0020 第 3 条与 0024「worker 派发」段加注，Status 头反向链。Codex 第十二轮对 ② 持不同意见（出现 scheme 不等于导航意图），owner 按作者建议定，理由记在 0048 被拒方案。
-- 实施尚未开始。次序（各批的依赖、红线测试与易错点在 journey 0015）：① 能力自述增键（两个 worker 只声明桌面网页）→ ② core 的会话事件、scope 级 error 与终结函数（对桌面是修复：负退出码、零 scenario、超时与中止同时成立的仲裁三处判定改变，写进 CHANGELOG）→ ③ core 的目标与 Job 形态，与两个 worker 建会话前自检同批发布（第一个能产出非桌面 Job 的批次；设备模块完成前，非桌面目标由本机预检与云端 worker 自检拦住）→ ④ 配置文件与提交侧（前移定义 SSM 键名、保留期常量与预热字段）→ ⑤ 确定性 step 注册面 → ⑥ 隧道令牌换 cookie（桌面先行）→ ⑦ 部署侧 → ⑧ Midscene 设备模块 → 文档与 skill。⑦ 可与 ⑧ 的准备并行。
+- 2026-10-26：导航规则修订（由 DeepLink 讨论引出，owner 定稿）：导航判据改为「Given / When 后整句是一个地址」（加不加引号都一样），不再用动词或「引号里出现网址」；导航成为注册表里唯一的内建条目，plan 与 list-deterministic 对它的标注与其它确定性 step 一致，这取代了 0020 原来「误伤就整体退回全 AI」的退路；Then 后只有地址按注册表的关键字声明规则记 error；曾内置的「页面地址匹配」step 退役，示范改进文档与 `steps/` 模板；术语定为 DeepLink（词表立条，深层链接进 Avoid 与退役词表）。落在 0020 第 2、3 条、0018、0022、0024、0036、0048 决策 7、0050 决策 1 与 CONTEXT。实施作为第 0 批、排在能力自述之前，是 1.4 行为的不兼容变更，进 CHANGELOG。
+- 实施尚未开始。次序（各批的依赖、红线测试与易错点在 journey 0015）：⓪ 导航规则与注册面关键字声明（两个 worker 的派发与注册表、删内建 step、plan 标注、契约页、skill 与用户指南、CHANGELOG；桌面直接受影响，自己发）→ ① 能力自述增键（两个 worker 只声明桌面网页）→ ② core 的会话事件、scope 级 error 与终结函数（对桌面是修复：负退出码、零 scenario、超时与中止同时成立的仲裁三处判定改变，写进 CHANGELOG）→ ③ core 的目标与 Job 形态，与两个 worker 建会话前自检同批发布（第一个能产出非桌面 Job 的批次；设备模块完成前，非桌面目标由本机预检与云端 worker 自检拦住）→ ④ 配置文件与提交侧（前移定义 SSM 键名、保留期常量与预热字段）→ ⑤ 确定性 step 注册面 → ⑥ 隧道令牌换 cookie（桌面先行）→ ⑦ 部署侧 → ⑧ Midscene 设备模块 → 文档与 skill。⑦ 可与 ⑧ 的准备并行。
 
 ## documenting 清单（ADR 0048 到 0053 第 7 类内容的汇总，实施期逐项完成）
 
 新页：
 
-- user guide：`engines.md`（引擎能力矩阵，差集测试守）；设备主题页（`@device` 与 `@app` 写法、应用别名、应用目标上含网址的 step 走深层链接：Android 要带可被应用处理的地址且 `; ' ( )` 须百分号编码，iOS 只保证送达、要紧跟落点核对，老设备记为不支持；设备选择与 `gherkai.toml` 的 `[devices]`、费用含取设备开销与口径以账单为准、限制：国内消费级应用线上包自退、iOS 26 的 DOM、Compose 无标识、数据驻留 us-west-2 与 400 天）。
+- user guide：`engines.md`（引擎能力矩阵，差集测试守）；设备主题页（`@device` 与 `@app` 写法、应用别名、应用目标上含网址的 step 走DeepLink：Android 要带可被应用处理的地址且 `; ' ( )` 须百分号编码，iOS 只保证送达、要紧跟落点核对，老设备记为不支持；设备选择与 `gherkai.toml` 的 `[devices]`、费用含取设备开销与口径以账单为准、限制：国内消费级应用线上包自退、iOS 26 的 DOM、Compose 无标识、数据驻留 us-west-2 与 400 天）。
 - docs/internals：设备会话与 Appium 适配的机理解读一篇（权威指回 0051 / 0052）；`docs/internals/README.md` 登记新篇。`cli-json-contract.md` 的加法扩展已随 ADR 改写完成，实施时按真渲染器样例核对、补护栏夹具。
 
 既有用户文档的触点（按页列，每页都要补 1.5 的新内容，不只是新页）：
 
-- `writing-features.md`：「三个有语义的 tag」改为五个，加 `@device` / `@app` 的写法、组合规则与缺省；`@timeout` 加「缺省按目标、设备 scope 有下限」；「按引擎选写法」旁加「按目标选写法」（导航后落点核对按 Android 网页 / iOS 网页 / 应用分写，设备上 scenario 之间不复位、需要时用内建「重新启动应用」step）；「写完先自检」提 plan 对目标的标注。
+- `writing-features.md`：「一个 step 的三种执行路径」里导航写法改为「Given / When 后整句一个地址」，说明 Then 后只有地址与句中提及地址的处理；「三个有语义的 tag」改为五个，加 `@device` / `@app` 的写法、组合规则与缺省；`@timeout` 加「缺省按目标、设备 scope 有下限」；「按引擎选写法」旁加「按目标选写法」（导航后落点核对按 Android 网页 / iOS 网页 / 应用分写，设备上 scenario 之间不复位、需要时用内建「重新启动应用」step）；「写完先自检」提 plan 对目标的标注。
 - `running-and-results.md`：常用选项加 `--android-device-arn` / `--ios-device-arn` / `--device-farm-project-arn` / `--app-bucket` / `--config`，以及 `--default-job-timeout` 对设备 scope 的语义（非正值不等于不超时、低于下限被拒）；退出码加 definition 格式版本不匹配与设备缺项的 2；「结果在哪」加会话列表、设备占用时长与 `device_session` 链接；explain 节加设备证据（失败的确定性与导航 step 也有证据、控件摘要、原始控件树）；「费用量级」加设备分钟。
 - `getting-started.md`：doctor 自检加 `targets.<engine>` / `devices.project` / `devices.sessions` 三行的读法；「AWS 前置」加 Device Farm（只在 us-west-2、首次 deploy 建项目、权限指 cloud-backend）。
 - `troubleshooting.md`：「各行查什么」加上述三行；隧道节改为令牌换 cookie 的故障形态（预热失败的消息与处置）；新增设备节：会话类错误与五个新错误类别（`precheck_failed` / `acquire_timeout` / `session_lost` / `release_failed` 为 job 级，`capability_unavailable` 为 step 级）。
 - `configuration.md`：「配置生效的四个位置」改为五个（加 `gherkai.toml`：路径基准、`--config`、与选项和环境变量的优先序）；环境变量表加 `GHERKAI_ANDROID_DEVICE_ARN` / `GHERKAI_IOS_DEVICE_ARN` / `GHERKAI_DEVICE_FARM_PROJECT_ARN` / `GHERKAI_APP_BUCKET`；「由 gherkai 注入的环境变量」加 `GHERKAI_SESSION_WARMUP_URL`；「跨命令通用选项」加 `--config`。
 - `cloud-backend.md`：「后端包含什么」加 Device Farm 项目；「首次部署」加项目的找回或建立与部署方无权限时的降级；「团队成员需要的最小云端权限」加三方权限表（提交者、部署方、worker）；「拆除与清理」加项目保留与手动删除命令；「费用」加设备分钟；「退出码与常见错误」加「部署未启用设备支持」；「版本与升级」加两条不受支持的组合：同一 report 目录混用 1.4 与 1.5 CLI 读写、开发版本混搭（0037 决策 7）。
 - `local-app-testing.md`：「工作方式」加 worker 预热一步；「安全」改为令牌换 cookie（含 cookie 会到达被测应用访问日志的残余）；「限制」加设备浏览器依赖服务商不弹警告页、免费层策略规则数；「常见故障」加预热失败的三个分支。
-- `writing-deterministic-steps.md`：「注册一条 step」加 `targets` 与 `requires`；「handler 拿到什么」加 webdriver 句柄与上下文六字段；「内建的确定性 step」加「页面地址匹配」的设备实现与「重新启动应用」；「在本机核对」加 `list-deterministic` 的 `targets` / `available_targets`；「两侧对称地写」加设备目标的对称要求；材料规则与验收定位（0050 决策 4）。
+- `writing-deterministic-steps.md`：「内建的确定性 step」一节删去，改为「`steps/` 模板」一节（地址精确核对的写法示例，设备网页目标带 `requires`）；「注册一条 step」加 `targets`、`requires` 与 `keywords`；「handler 拿到什么」加 webdriver 句柄与上下文六字段；「内建的确定性 step」加「页面地址匹配」的设备实现与「重新启动应用」；「在本机核对」加 `list-deterministic` 的 `targets` / `available_targets`；「两侧对称地写」加设备目标的对称要求；材料规则与验收定位（0050 决策 4）。
 - `faq.md`：改写「它在什么浏览器里运行？能测移动端视口，或换成 Firefox、Safari 吗？」（真机经 Device Farm，Safari 即 iOS 真机 Safari）；加「测真机要多少钱、必须用 AWS 吗」。
 - `docs/user-guide/README.md`：索引登记 `engines.md` 与设备主题页。
 - 包入口页：`engines/midscene/README.md` 加设备支持一段（Appium、Device Farm）；`deploy_aws/README.md` 加 Device Farm 项目与权限一句；`cli/README.md` 与根 `README.md` 门面各一句。
@@ -47,7 +48,7 @@
 
 其它读者的文档：
 
-- skill：路由表加设备；`references/` 加设备写法；确定性 step 参考按 0050 决策 4 改（期望来自需求、材料只定位置、来源平铺、agent 开会话须项目约定、长流程拆步）；评测集加设备用例（写 `@device` 用例、写一条 webdriver step、处置 precheck_failed）；不出现「先 AI 后硬化」类流程暗示。
+- skill：导航写法改为整句地址，「导航步后紧跟确定性落点核对」改为「紧跟一条落点核对；要精确核对地址就自写确定性 step」，`references/deterministic-steps.md` 给地址核对的模板；路由表加设备；`references/` 加设备写法；确定性 step 参考按 0050 决策 4 改（期望来自需求、材料只定位置、来源平铺、agent 开会话须项目约定、长流程拆步）；评测集加设备用例（写 `@device` 用例、写一条 webdriver step、处置 precheck_failed）；不出现「先 AI 后硬化」类流程暗示。
 - CONTRIBUTING：发版后验证项加真机验收矩阵；`tools/` 的真机重新探测工具使用方法。
 
 ## 实施期要核的点（ADR 已定、实施时顺手验证）

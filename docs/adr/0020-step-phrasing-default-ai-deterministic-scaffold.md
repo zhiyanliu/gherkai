@@ -1,6 +1,6 @@
 # Step 措辞：默认 AI 判断（QA 零预设）+ 确定性 step 脚手架（工程角色按需自建）
 
-> **Status:** Partially-superseded-by 0022/0037 —— 「裸 `When/Then`→默认 AI；确定性=脚手架、测试开发按需建、QA 零代码」核心语义**不变**；落地机制被 0022 反转（从「cucumber 补丁 + pytest-bdd 原生区分」转为「核心库解析关键字 + worker catch-all/确定性注册表派发」，确定性 step 的收集方式从「被 BDD runner 自动收集」转为「写在脚手架文件里、由 worker import 触发注册进注册表」；当时脚手架落在各引擎 `worker/` 目录，见 0022「迁移」条的实装偏差纠正）。**[0037](./0037-distribution-and-packaging.md)（Accepted，随 v1.4.0）再移定制面**：使用方的确定性 step 写在**使用方项目的 `steps/` 目录**（worker 启动时加载，`@deterministic` 注册机制与脚手架同一条），worker 包内脚手架（`engines/novaact/gherkai_worker_novaact/deterministic_steps.py`、`engines/midscene/src/worker/deterministic.steps.mts`）只留内建示范的确定性 step——故「确定性 step 仍住脚手架文件」**只对内建的那些成立**；「QA 零预设、确定性 step 由测试开发维护」的角色边界不变。下文「Midscene 靠补丁」段属被取代的 v0.x 形态。**[0048](./0048-test-targets-device-and-ui-kind.md) 决策 7 在应用目标上扩展第 3 条的分流**：引号内任意 `scheme://…` 都走内建导航、经 `mobile: deepLink` 交给被测应用（第 3 条已就地加注）。
+> **Status:** Partially-superseded-by 0022/0037 —— 「裸 `When/Then`→默认 AI；确定性=脚手架、测试开发按需建、QA 零代码」核心语义**不变**；落地机制被 0022 反转（从「cucumber 补丁 + pytest-bdd 原生区分」转为「核心库解析关键字 + worker catch-all/确定性注册表派发」，确定性 step 的收集方式从「被 BDD runner 自动收集」转为「写在脚手架文件里、由 worker import 触发注册进注册表」；当时脚手架落在各引擎 `worker/` 目录，见 0022「迁移」条的实装偏差纠正）。**[0037](./0037-distribution-and-packaging.md)（Accepted，随 v1.4.0）再移定制面**：使用方的确定性 step 写在**使用方项目的 `steps/` 目录**（worker 启动时加载，`@deterministic` 注册机制与脚手架同一条），worker 包内脚手架（`engines/novaact/gherkai_worker_novaact/deterministic_steps.py`、`engines/midscene/src/worker/deterministic.steps.mts`）只留内建示范的确定性 step——故「确定性 step 仍住脚手架文件」**只对内建的那些成立**；「QA 零预设、确定性 step 由测试开发维护」的角色边界不变。下文「Midscene 靠补丁」段属被取代的 v0.x 形态。**第 2、3 条于 2026-10-26 修订**：导航的判据改为「Given / When 后整句是一个地址」，退路从功能开关改为 plan 可见；脚手架曾内置的「页面地址匹配」step 退役，注册表只剩导航一条内建条目；应用目标上任意 scheme 经 DeepLink 交给被测应用（[0048](./0048-test-targets-device-and-ui-kind.md) 决策 7）。两条已就地改写。
 
 断言类 step 的措辞设计，使「AI 柔性主导」([0014](./0014-ai-first-assertions.md)/[0015](./0015-v1-positioning-smoke-not-regression.md)) 落到 QA 的真实书写体验上。
 
@@ -17,14 +17,16 @@
 
 2. **确定性 step = 脚手架，QA 零预设**：少数"必须精确、不容 AI 抖动"的断言（URL/DOM 精确查），做成脚手架文件 `engines/midscene/src/worker/deterministic.steps.mts`（Midscene）/ `engines/novaact/gherkai_worker_novaact/deterministic_steps.py`（Nova Act），与各引擎 worker 主模块同级（分别与 `run-scope.mts` / `run_scope.py` 同目录；迁移史见 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)「迁移」条）；使用方自己的确定性 step 写在项目 `steps/` 目录（[0037](./0037-distribution-and-packaging.md) 决策 4），内含**说明注释**教测试开发怎么加、怎么和 `.feature` 呼应。
    - **对 QA 零预设**：QA 永不碰确定性 step、不学任何措辞——它由**测试开发角色**按真实需求维护（避免过度设计，同 [0018](./0018-generic-steps-capability.md) 删"取数原语"的教训）。
-   - **落地现状**：脚手架现各内置**一个**演示/验证用的 URL 确定性 step `页面地址(?:精确)?匹配 "<正则>"`（`features/deterministic_step.feature` 实跑验证），取代当初"空脚手架、零具体 step"的设想；落地形态与真实路径见 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)「实现状态」段——**确定性 step 仍写在脚手架文件里、注册表只是收集机制**（实装偏差纠正见 0022「迁移」条），它由测试开发维护、非 QA 预设，"QA 零预设"不破。**注册表现同时是能力自述面**（[0036](./0036-deterministic-capability-discovery.md)：注册即暴露——`@deterministic` 的 description/example 必填、QA 可用 `list-deterministic` 主动查已有的确定性 step）：**「主动查」不等于「预设措辞」**，本条"QA 零预设"不变量仍成立。
+   - **内建 step 退役（2026-10-26 修订）**：脚手架曾各内置一条演示兼验证用的 `页面地址(?:精确)?匹配 "<正则>"`，自 1.5 起退役。理由：产品自带一条有固定措辞的 step，等于产品替项目决定哪些确定性 step 存在，违背本条「由测试开发按真实需求维护」的角色边界，也让 QA 多背一句措辞；「演示」该放在用户指南、agent skill 的参考与 `steps/` 模板里，由使用方复制进自己的项目。退役后注册表里唯一的内建条目是第 3 条的导航，它没有措辞、只有结构。**注册表同时是能力自述面**（[0036](./0036-deterministic-capability-discovery.md)：注册即暴露——`@deterministic` 的 description / example 必填、QA 可用 `list-deterministic` 主动查已有的确定性 step）：「主动查」不等于「预设措辞」，本条「QA 零预设」不变量仍成立。被拒的保留理由「它是 skill「导航后紧跟确定性落点核对」规则的载体」不成立：规则改为「紧跟一条落点核对；要精确核对地址就自写一条确定性 step」，模板给出写法即可。
    - 两个引擎脚手架对齐。
 
-3. **URL 形态自动分流（导航不写死动词）**：QA 写到 URL 时（如 `Given 打开 "https://..."` / `访问 "https://..."` / `前往 "https://..."`），工具**按 step 文本里有没有 URL 字面量**自动分流，**不锁动词**（网页目标认引号内 `https?://…`；应用目标认引号内任意 `scheme://…`，含自定义 scheme，[0048](./0048-test-targets-device-and-ui-kind.md) 决策 7）：
-   - **含 URL → 内建确定性导航**（网页目标 code 抽出 URL 直接 `goto`/`go_to_url`；应用目标经 `mobile: deepLink` 交给被测应用，做不到时 step 级 fail-fast、不转 AI，[0048](./0048-test-targets-device-and-ui-kind.md) 决策 7。精确、不浪费 AI、不会被理解成"搜索"而跑偏）。动词随便写，QA 不必记固定措辞——对齐本 ADR"QA 只写自然语言"。
-   - **不含 URL → 回落默认 AI**（如 `访问 OpenAI 的维基页` / `回到首页` → `aiAct`/`act`，让引擎自己导航）。
-   - 这是 A（确定性）+ B（AI）的组合：URL 已知时享受精确，未知时享受柔性。**退路**：若 URL 检测出现误伤（句中只是提及 URL、并非要导航），把 code 路退化成全 AI（B）。
-   - **落点 = worker 的派发逻辑**（不在 core，对齐 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)「core 对 step 语义无知」；协议形态见 [0024](./0024-worker-core-protocol.md)）。取代了早先 `Given 打开 "{url}"` 的固定措辞写法。
+3. **导航的判据是结构，不是措辞**：一条 step 去掉关键字后**整句只是一个地址**（加不加引号都一样），且关键字是 Given 或 When，才是导航。worker 把它当注册表里**唯一的内建条目**处理（模式 = 整句为地址，适用关键字 Given / When），所以 plan 与 `list-deterministic` 对它的标注与其它确定性 step 一致，派发顺序只剩「注册表命中走精确实现，否则走 AI」两段。
+   - **网页目标**：地址须是 http(s)，用 `goto` / `go_to_url` 打开；非 http(s) 的地址记 error（浏览器打不开自定义 scheme），不转 AI。**应用目标**：任意 scheme（含 http(s)）都经 `mobile: deepLink` 带包名或 bundleId 交给被测应用，做不到时 step 级 fail-fast，规则归 [0048](./0048-test-targets-device-and-ui-kind.md) 决策 7。目标来自 scope 的声明（[0048](./0048-test-targets-device-and-ui-kind.md) 决策 2），不从 step 文本推断。
+   - **不是整句** → 不是导航，走 AI：`When 在输入框输入 "https://…"` 是在输入，`Then 分享面板里的链接是 "https://…"` 是在断言。**Then 后只有一个地址** → 命中模式但关键字不符，按注册表的通用规则（[0050](./0050-deterministic-step-handles-and-testing.md) 决策 1 的关键字声明）记 error、提示「这条写法只在 Given / When 下有意义」，不交给 AI——AI 看截图看不到地址栏，交给它必然失败且原因不明。
+   - **不含地址 → 回落默认 AI**（如 `访问 OpenAI 的维基页` / `回到首页` → `aiAct` / `act`，让引擎自己导航）。
+   - **退路 = plan 可见**：导航与其它确定性 step 一样在 plan 里逐条标出（「内建导航：打开 …」「内建导航：经 DeepLink 交给被测应用」），残余的误判（Given / When 里单独写一个地址却不是要打开它）在花钱执行之前就能看到并改写。
+   - **被取代的两代写法（护栏）**：① 固定措辞 `Given 打开 "{url}"`——要 QA 背措辞；② 「引号里出现网址就导航」（v1.0 到 v1.4）——`Then 分享链接是 "https://…"` 这类断言被误当导航，当年的退路是「误伤就把整个功能退回全 AI」，粗到不可用。也不用动词词表（打开 / 访问 / 前往…）：词表永远不全，漏一个就静默走 AI，且仍要背词。结构判据零词表、零歧义：一句话只有一个地址时，不可能是在「提及」它。
+   - **落点 = worker 的派发逻辑**（不在 core，对齐 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)「core 对 step 语义无知」；协议形态见 [0024](./0024-worker-core-protocol.md)）。
 
 ## 角色边界（关键）
 

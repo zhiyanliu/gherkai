@@ -31,7 +31,7 @@ worker 的能力自述入口（`--capabilities`，契约见「5.」）**不建�
 
 - **按引擎查询**（对齐 `run` 的引擎选择逻辑）：`--engine` 默认 `novaact`（与 `--default-engine` 缺省一致）、choices 来自引擎注册表——只返回指定引擎的清单，不做全量聚合。
 - `--json` 输出机器可读（stdout 只放核心产出，对齐既有输出契约）；文本模式以表格呈现示例、说明、模式三列（示例列在前，是 feature 作者的复制来源；ADR 0047）。
-- `--steps-dir DIR`（flag > env `GHERKAI_STEPS_DIR` > 默认 `./steps` 存在即用）：查询入口同样加载使用方的确定性 step 目录，故清单 = 内建脚手架 + 使用方定制；解析与加载机制见 [0037](./0037-distribution-and-packaging.md) 决策 4。
+- `--steps-dir DIR`（flag > env `GHERKAI_STEPS_DIR` > 默认 `./steps` 存在即用）：查询入口同样加载使用方的确定性 step 目录，故清单 = 内建导航条目 + 使用方定制；解析与加载机制见 [0037](./0037-distribution-and-packaging.md) 决策 4。
 - 纯本地 spawn（秒级）、零 AWS；清单取能力自述对象的 `deterministic_steps`（`compose.query_capabilities`）；worker 起不来/输出非 JSON → 退 2 带诊断。
 
 ### 4. plan 命中标注：「我写的这句会不会命中」
@@ -52,7 +52,7 @@ worker argv 带 `--capabilities` 时：**不建会话、不读 stdin、零费用
 ```
 
 - `min_grace_s` 是 [0024](./0024-worker-core-protocol.md) grace 硬约束的下限——Nova = `NOVA_ACT_TIMEOUT_S`（组合根注入的 env，缺省 120）+ margin（worker 常量，可 env 覆盖）；Midscene = SIGTERM 收尾序列各段超时预算之和 + 余量，由 worker 里那些预算常量算出、不另写字面量。
-- `deterministic_steps` 是注册表清单（「2.」）。该入口与 job 模式、match 查询一样**先加载 steps 目录**（[0037](./0037-distribution-and-packaging.md) 决策 4），故清单 = 内建脚手架 + 使用方定制，加载失败在这里就 fail-loud——`run` 的执行前预检因此只需 spawn 一次：同一份自述同时给出「steps 加载成功、清单、grace 下限、模型」。
+- `deterministic_steps` 是注册表清单（「2.」）。该入口与 job 模式、match 查询一样**先加载 steps 目录**（[0037](./0037-distribution-and-packaging.md) 决策 4），故清单 = 内建导航条目 + 使用方定制，加载失败在这里就 fail-loud——`run` 的执行前预检因此只需 spawn 一次：同一份自述同时给出「steps 加载成功、清单、grace 下限、模型」。
 - `model_id` 是该 worker 起 job 时会用的模型 id——两引擎规则一致：「默认锁定一个具体 id + worker 一侧 env 覆盖」，各自的默认值与覆盖 env 见 [0044](./0044-engine-model-selection-and-override.md) 决策 1/2；`doctor` 据此显示当前模型——覆盖过 env 的机器一眼可见。
 - **worker 只有两个非 job 入口**：本入口（自述、无输入）与 `--match-steps`（查询、stdin 喂 step 文本，「4.」）。**加键不加入口**：将来的能力（如 browser 后端，[0037](./0037-distribution-and-packaging.md) 被拒方案 / 未来项）都是本对象的新键；`schema_version` 只在既有键语义变化时递增。
 
