@@ -177,13 +177,11 @@ def _read_events(
     # fd3 耗尽表示 worker 关了事件通道。等它真正退出，拿 returncode。
     proc.wait()
     rc = proc.returncode
-    if rc is not None and rc > 0:
-        # 此 rc 检查仅在 fd3 自然 EOF（worker 自行退出）后执行——schedule 主动停 worker 走 _stop() 后
-        # 即 return、放弃此 generator（GeneratorExit 在 yield 处冒出，不到这里），故主动停的退出码不经此。
-        # 0 表示正常；负码表示被 SIGKILL 强杀（grace 超时，schedule 主动停的尾路径，不到此检查）；
-        # 正非零表示 worker 自行异常退出（崩溃/会话清理失败 exit 1 / 网络故障退出码 80）→ 抛错让 schedule 记 error。
-        # 注：两个引擎 worker 与 echo_worker 均自装 SIGTERM handler 后 process.exit/sys.exit（正码），
-        # 故「负码即 SIGTERM」不成立——负码只来自 SIGKILL，且那条路径不经此检查（见上）。
+    if rc is not None and rc != 0:
+        # fd3 自然 EOF 后拿退出码：0 表示正常；正非零表示 worker 自行异常退出（崩溃 / 会话清理失败的 1 / 网络故障的 80）；
+        # 负码表示被信号强杀（SIGKILL 为 -9：grace 超时后 stop() 的兜底，或外部 kill -9）——进程非干净终止本身即终态
+        # 信号（ADR 0034 机制二），一律翻成异常让 schedule 的终结函数按「退出码非零」判。schedule 停止后仍有界消费到 EOF
+        # （ADR 0051 决策 5），故主动停的退出码也经此；两个引擎 worker 收 SIGTERM 后以正码退出，负码只来自 SIGKILL。
         # 码→异常的翻译在 wire（协议级，与 Fargate adapter 共用一份，ADR 0024「退出码约定」）。
         raise_for_worker_exit(rc, code_label="returncode")
 

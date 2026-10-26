@@ -1,0 +1,217 @@
+"""终结函数与真值表（ADR 0034 机制二）、代表会话规则、scope 级 error 的合成 SKIPPED、设备计量合计（ADR 0051 决策 4、7）。
+
+纯函数直测：按真值表逐行参数化，并验证按行序取第一个命中的行。两条归约路径的对拍在 test_termination_parity。
+"""
+from __future__ import annotations
+
+import pytest
+
+from gherkai_core.model import (
+    Job,
+    JobResult,
+    Scenario,
+    ScenarioDone,
+    ScenarioStarted,
+    ScopeDone,
+    ScopeStarted,
+    SessionClosed,
+    SessionOpened,
+    SessionRecord,
+    Status,
+    Step,
+    StepDone,
+    StepStarted,
+)
+from gherkai_core.project import (
+    RELEASE_FAILED_HINT,
+    Timing,
+    apply_device_metering,
+    device_metering,
+    finalize_job,
+    reduce_event,
+    representative_session,
+    unconfirmed_sessions,
+)
+from gherkai_core.serialize import job_result_from_dict, job_result_to_dict
+
+
+def _job(n_scenarios: int = 3, timeout_s: float | None = 60.0) -> Job:
+    scs = tuple(Scenario(id=f"s:{i}", name=f"sc{i}", steps=(Step(0, "Given", "a"), Step(1, "Then", "b"))) for i in range(n_scenarios))
+    return Job(scope_id="s", scope_name="s", engine="midscene", scenarios=scs, timeout_s=timeout_s)
+
+
+def _confirmed(name: str = "n1") -> SessionRecord:
+    return SessionRecord(session_id=f"arn:{name}", name=name, origin="created", release="confirmed", observed_s=1.0)
+
+
+def _unconfirmed(name: str = "n2") -> SessionRecord:
+    return SessionRecord(session_id=f"arn:{name}", name=name, origin="created", release="unconfirmed")
+
+
+def _attempted(name: str = "n3") -> SessionRecord:
+    return SessionRecord(session_id=None, name=name, origin="attempted", release="unconfirmed")
+
+
+def _fin(**kw):
+    base = dict(job=_job(), stop_reason="none", exited=True, exit_code=0, exit_reason=None, saw_scope_started=True,
+                saw_session_opened=False, scope_done=ScopeDone(scope_id="s"), scenario_status={"s:0": Status.PASSED},
+                sessions=[])
+    base.update(kw)
+    return finalize_job(**base)
+
+
+# ---- 真值表逐行 ----
+
+@pytest.mark.parametrize("kw, status, error_type, in_message", [
+    # 行 1：timeout 优先于一切（含 U 非空与非零退出）
+    (dict(stop_reason="timeout", exit_code=137, sessions=[_unconfirmed()]), Status.ERROR, "timeout", "job 超时（预算 60s，已中止）"),
+    (dict(stop_reason="timeout", job=_job(timeout_s=None)), Status.ERROR, "timeout", "job 超时（已中止）"),
+    # 行 2：abort → ABORTED、归因为空（优先于非零退出）
+    (dict(stop_reason="abort", exit_code=1), Status.ABORTED, None, "fail-fast"),
+    # 行 3：退出码非零 / 未知
+    (dict(exit_code=1, sessions=[_unconfirmed()]), Status.ERROR, "release_failed", RELEASE_FAILED_HINT),
+    (dict(exit_code=80), Status.ERROR, "network_error", "建连失败"),
+    (dict(exit_code=1), Status.ERROR, "engine_error", "worker 非正常退出（exit 1"),
+    (dict(exit_code=-9), Status.ERROR, "engine_error", "exit -9"),
+    (dict(exit_code=None), Status.ERROR, "engine_error", "退出码未知"),
+    (dict(exit_code=None, exit_reason="解析失败"), Status.ERROR, "engine_error", "worker 异常：解析失败"),
+    (dict(exit_code=255, exit_reason="TaskFailedToStart: 拉不到镜像"), Status.ERROR, "engine_error", "平台侧未取到退出码）：TaskFailedToStart"),
+    # 行 4：退出码 0、无 scope_done
+    (dict(scope_done=None), Status.ERROR, "engine_error", "没有报完这次运行的结果"),
+    # 行 5：scope_done.status = error → 取其归因；U 非空改 release_failed
+    (dict(scope_done=ScopeDone(scope_id="s", status=Status.ERROR, error_type="acquire_timeout", message="没拿到设备")),
+     Status.ERROR, "acquire_timeout", "没拿到设备"),
+    (dict(scope_done=ScopeDone(scope_id="s", status=Status.ERROR, error_type="session_lost", message="m"), sessions=[_attempted()]),
+     Status.ERROR, "release_failed", "结果未知的创建尝试：n3"),
+    # 行 6：零 scenario → ERROR（曾被 _aggregate([]) 判成 PASSED）
+    (dict(scenario_status={}), Status.ERROR, "engine_error", "worker 未报告任何 scenario 判定"),
+    # 行 7：判定集非空 → _aggregate；U 非空改判 release_failed
+    (dict(scenario_status={"s:0": Status.PASSED, "s:1": Status.FAILED}), Status.FAILED, None, None),
+    (dict(scenario_status={"s:0": Status.PASSED}, sessions=[_confirmed()]), Status.PASSED, None, None),
+    (dict(scenario_status={"s:0": Status.PASSED}, sessions=[_confirmed(), _unconfirmed("x")]), Status.ERROR, "release_failed", "未确认停止的会话：x"),
+])
+def test_truth_table_rows(kw, status, error_type, in_message):
+    term = _fin(**kw)
+    assert (term.status, term.error_type) == (status, error_type), term
+    if in_message is None:
+        assert term.message is None
+    else:
+        assert in_message in (term.message or ""), term.message
+
+
+def test_not_exited_is_running_or_pending():
+    assert _fin(exited=False, exit_code=None, scope_done=None, scenario_status={}).status == Status.RUNNING
+    assert _fin(exited=False, exit_code=None, scope_done=None, scenario_status={}, saw_scope_started=False,
+                saw_session_opened=True).status == Status.RUNNING  # 只见过 session_opened（取设备期间）也算 RUNNING
+    assert _fin(exited=False, exit_code=None, scope_done=None, scenario_status={}, saw_scope_started=False).status == Status.PENDING
+
+
+def test_release_failed_hint_lists_sessions_and_attempts_separately_even_on_timeout():
+    """U 非空时无论判定为何都追加提示：会话名与「结果未知的创建尝试」分开列。"""
+    term = _fin(stop_reason="timeout", sessions=[_unconfirmed("a"), _attempted("b"), _confirmed("c")])
+    assert term.error_type == "timeout"
+    assert "未确认停止的会话：a" in term.message and "结果未知的创建尝试：b" in term.message and "c" not in term.message.split("会话：")[1].split("；")[0]
+    assert unconfirmed_sessions([_unconfirmed("a"), _attempted("b"), _confirmed("c")]) == [_unconfirmed("a"), _attempted("b")]
+
+
+# ---- 代表会话（ADR 0051 决策 4 / 0024 sessionId 取值优先级）----
+
+def test_representative_session_rules():
+    sid, locked = representative_session(None, False, SessionOpened(scope_id="s", name="A", origin="created", session_id="A"))
+    assert (sid, locked) == ("A", False)
+    sid, locked = representative_session(sid, locked, SessionOpened(scope_id="s", name="B", origin="created", session_id="B"))  # 换台：后到覆盖
+    assert sid == "B"
+    sid, locked = representative_session(sid, locked, SessionOpened(scope_id="s", name="T", origin="attempted"))  # attempted 不写入
+    assert sid == "B"
+    sid, locked = representative_session(sid, locked, ScopeStarted(scope_id="s", session_id="B"))  # 锁定
+    assert (sid, locked) == ("B", True)
+    sid, locked = representative_session(sid, locked, SessionOpened(scope_id="s", name="C", origin="discovered", session_id="C"))
+    assert sid == "B"  # 锁定后不改写
+    sid, locked = representative_session(sid, locked, ScopeDone(scope_id="s", session_id="D"))
+    assert sid == "B"  # scope_done 不覆盖已取到的值
+    assert representative_session(None, False, ScopeDone(scope_id="s", session_id="D"))[0] == "D"  # 没值时 scope_done 补
+    assert representative_session(None, False, SessionOpened(scope_id="s", name="T", origin="attempted"))[0] is None  # 只有 attempted → None
+
+
+def test_reduce_event_tracks_sessions_and_representative_session():
+    result = JobResult(job=_job(), status=Status.PENDING)
+    ss: dict = {}
+    t = Timing()
+    reduce_event(SessionOpened(scope_id="s", name="A", origin="created", session_id="arn:A", device={"platform": "android"}), result, ss, t, 1.0)
+    reduce_event(SessionOpened(scope_id="s", name="B", origin="created", session_id="arn:B"), result, ss, t, 2.0)
+    reduce_event(ScopeStarted(scope_id="s", session_id="arn:B"), result, ss, t, 3.0)
+    reduce_event(SessionOpened(scope_id="s", name="T", origin="attempted"), result, ss, t, 4.0)
+    reduce_event(SessionClosed(scope_id="s", name="A", release="confirmed", session_id="arn:A", observed_s=10.0,
+                               provider_minutes={"total": 1, "metered": 1, "unmetered": 0}), result, ss, t, 5.0)
+    reduce_event(SessionClosed(scope_id="s", name="T", release="unconfirmed"), result, ss, t, 6.0)  # attempted 按名配对
+    reduce_event(ScopeDone(scope_id="s", session_id="arn:C"), result, ss, t, 7.0)
+    assert result.session_id == "arn:B"
+    assert [(s.session_id, s.name, s.origin, s.release, s.observed_s) for s in result.sessions] == [
+        ("arn:A", "A", "created", "confirmed", 10.0), ("arn:B", "B", "created", None, None), (None, "T", "attempted", "unconfirmed", None)]
+    assert result.sessions[0].provider_minutes == {"total": 1, "metered": 1, "unmetered": 0}
+    # 同一 ARN 重发 session_opened 不重复登记
+    reduce_event(SessionOpened(scope_id="s", name="A", origin="created", session_id="arn:A"), result, ss, t, 8.0)
+    assert len(result.sessions) == 3
+
+
+# ---- 合成 SKIPPED（ADR 0051 决策 4；0031 决定一、六）----
+
+def _run_events(events, job=None):
+    result = JobResult(job=job or _job(), status=Status.PENDING)
+    ss: dict = {}
+    t = Timing()
+    for i, ev in enumerate(events):
+        reduce_event(ev, result, ss, t, float(i))
+    return result, ss
+
+
+def test_scope_error_synthesizes_skipped_only_for_zero_event_scenarios():
+    result, ss = _run_events([
+        ScopeStarted(scope_id="s", session_id="x"),
+        ScenarioStarted(scenario_id="s:0"), StepDone(scenario_id="s:0", step_index=0, status=Status.PASSED),
+        StepDone(scenario_id="s:0", step_index=1, status=Status.PASSED), ScenarioDone(scenario_id="s:0", status=Status.PASSED),
+        ScenarioStarted(scenario_id="s:1"), StepStarted(scenario_id="s:1", step_index=0),  # 在途：有 started 无 done
+        ScopeDone(scope_id="s", status=Status.ERROR, error_type="session_lost", message="设备没了"),
+    ])
+    by = {sr.scenario_id: sr for sr in result.scenarios}
+    assert set(by) == {"s:0", "s:2"}  # 在途的 s:1 整条不合成
+    assert by["s:2"].status == Status.SKIPPED
+    assert [(st.index, st.status, st.shortcircuited, st.duration_ms) for st in by["s:2"].steps] == [
+        (0, Status.SKIPPED, False, None), (1, Status.SKIPPED, False, None)]
+    assert "s:2" not in ss  # 合成的 SKIPPED 不写 scenario_status（不进 _aggregate）
+    back = job_result_from_dict(job_result_to_dict(result))  # 序列化往返保留 shortcircuited=False
+    assert [st.shortcircuited for st in back.scenarios[1].steps] == [False, False]
+
+
+def test_no_synthesis_without_scope_error():
+    result, _ = _run_events([ScopeStarted(scope_id="s"), ScopeDone(scope_id="s")])  # 正常 scope_done 不带 status
+    assert result.scenarios == []
+    result, _ = _run_events([ScopeStarted(scope_id="s")])  # 没有 scope_done
+    assert result.scenarios == []
+
+
+def test_synthesis_happens_at_scope_done_and_later_events_do_not_undo_it():
+    result, ss = _run_events([ScopeDone(scope_id="s", status=Status.ERROR, error_type="precheck_failed", message="m")])
+    assert [sr.status for sr in result.scenarios] == [Status.SKIPPED] * 3 and ss == {}
+    # 之后到达的事件（如停止后的 session_closed）不撤销明细
+    reduce_event(SessionClosed(scope_id="s", name="n", release="confirmed"), result, ss, Timing(), 9.0)
+    assert len(result.scenarios) == 3
+
+
+# ---- 设备计量（ADR 0051 决策 7）----
+
+def test_device_metering_counts_created_and_discovered_only():
+    sessions = [
+        SessionRecord(session_id="a", name="a", origin="created", release="confirmed", observed_s=10.0),
+        SessionRecord(session_id="b", name="b", origin="discovered", release="confirmed", observed_s=None),
+        SessionRecord(session_id="c", name="c", origin="created", release=None),  # 没收到 session_closed
+        SessionRecord(session_id=None, name="d", origin="attempted", release="unconfirmed"),
+        SessionRecord(session_id="e", name="e", origin="created", release="confirmed", observed_s=0.0),  # 0 计入合计、不算缺失
+    ]
+    assert device_metering(sessions) == (10.0, 2)
+    jr = JobResult(job=_job(), status=Status.ERROR, sessions=sessions)
+    apply_device_metering(jr)
+    assert (jr.device_observed_s, jr.device_observed_missing) == (10.0, 2)
+    desktop = JobResult(job=_job(), status=Status.PASSED)
+    apply_device_metering(desktop)
+    assert (desktop.device_observed_s, desktop.device_observed_missing) == (None, None)  # 桌面 job 两键都 None（序列化省键）

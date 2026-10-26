@@ -28,9 +28,11 @@ from gherkai_core.model import (
     RunResult,
     RunState,
     ScopeStarted,
+    SessionOpened,
     Status,
 )
 from gherkai_core.ports import ReportStore, ResultStore, RunStore
+from gherkai_core.project import representative_session
 
 
 class RunPersistence:
@@ -52,6 +54,9 @@ class RunPersistence:
         self._result_store = result_store
         self._report_store = report_store
         self._lock = threading.Lock()  # 单一 store 锁：串行所有写 store 的入口（RUNNING 刷 + 终态刷，跨线程）
+        # 每个 scope 的代表会话与锁定状态（ADR 0051 决策 4）：两个 RunStore adapter 的 update_job_state 都整项覆盖 JobState，
+        # 本服务须自己记住代表会话，任何写入都不能用 None 覆盖已有的 session_id。规则函数与 reduce_event 共用一份。
+        self._session: dict[str, tuple[str | None, bool]] = {}
 
     def begin(self, run_meta: RunMeta, *, started_at: str) -> None:
         """run 开始（schedule 之前）：先探活三个 store，再写 definition + 初始全 pending 运行态。
@@ -82,16 +87,23 @@ class RunPersistence:
 
     def on_event(self, event: Event) -> None:
         """事件旁路观察者（注入 schedule 的 on_event，在 sink_lock **之外**调，ADR 0030 决定三）：
-        收 ScopeStarted 实时刷该 job 为 RUNNING（带 session_id 血缘）。
+        收 SessionOpened（origin 不是 attempted，ADR 0051 决策 4：取设备期间 job 即算 RUNNING）或 ScopeStarted 实时刷该 job 为
+        RUNNING，session_id 按代表会话规则（scope_started 的值一经取到锁定；此前取最近一条非 attempted 的 session_opened；
+        attempted 不写入），写入永不带 None 覆盖已有值。
 
         在 worker 线程被调、多 worker 并发——故写 store 经本服务的锁串行（跨线程安全）。
         放在 sink_lock 外，故这次磁盘 RMW 不阻塞别的 worker 的进度显示（与 sink 分离的关键）。
         """
-        if isinstance(event, ScopeStarted):
+        if isinstance(event, (ScopeStarted, SessionOpened)):
             with self._lock:
+                current, locked = self._session.get(event.scope_id, (None, False))
+                session_id, locked = representative_session(current, locked, event)
+                self._session[event.scope_id] = (session_id, locked)
+                if isinstance(event, SessionOpened) and event.origin == "attempted" and session_id is None:
+                    return  # 结果未知的尝试不产生带 None 的写入（job 态由后续事件或终态刷落）
                 self._run_store.update_job_state(
                     self._run_id,
-                    JobState(scope_id=event.scope_id, status=Status.RUNNING, session_id=event.session_id),
+                    JobState(scope_id=event.scope_id, status=Status.RUNNING, session_id=session_id),
                 )
 
     def on_job_complete(self, jr: JobResult) -> None:
@@ -101,9 +113,12 @@ class RunPersistence:
         """
         with self._lock:
             self._result_store.save_job_result(self._run_id, jr)  # 数据面判定真值【先】
+            # 终态写带 session_id：JobResult.session_id 按同一代表会话规则归约而来；它为 None 时退回本服务已记的值，
+            # 不用 None 覆盖（ADR 0051 决策 4）
+            remembered = self._session.get(jr.scope_id, (None, False))[0]
             self._run_store.update_job_state(                     # 控制面 job 终态【后】
                 self._run_id,
-                JobState(scope_id=jr.scope_id, status=jr.status, session_id=jr.session_id),
+                JobState(scope_id=jr.scope_id, status=jr.status, session_id=jr.session_id or remembered),
             )
 
     def finalize(self, result: RunResult, *, ended_at: str) -> str | None:

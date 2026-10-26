@@ -29,12 +29,22 @@ from gherkai_core.model import (
     RunMeta,
     RunResult,
     ScopeDone,
+    ScopeStarted,
+    SessionOpened,
     Status,
     StepDone,
 )
-from gherkai_core.errors import WorkerNetworkError
+from gherkai_core.errors import WorkerExitError
 from gherkai_core.ports import EngineResolver, JobSink, Sink
-from gherkai_core.project import Timing as _Timing, _aggregate as _project_aggregate, reduce_event
+from gherkai_core.project import (
+    Timing as _Timing,
+    _aggregate as _project_aggregate,
+    apply_device_metering,
+    finalize_job,
+    is_device_job,
+    reduce_event,
+    run_device_metering,
+)
 
 import queue as _queue
 
@@ -61,10 +71,10 @@ def _heartbeat_wrap(events, poll_interval_s, deadline):
     纯 `Iterator[Event]`（不渗实现细节）。事件正常流动时 q.get 即时返回、永不注入心跳——故 fake-clock 单测的
     clock 读取序列不变（reader 线程只搬事件、绝不读 clock）。
 
-    poll_interval_s<=0 或 deadline is None（不超时）时，退化为直接转发内层（不起线程、零开销，保留既有行为）。
+    poll_interval_s<=0 时退化为直接转发内层（不起线程）。deadline 为 None 时也起心跳：fail-fast 的中止与停止后的排空上界
+    （ADR 0034「停止后继续有界消费」）同样要靠心跳醒来检查，不只服务超时。事件正常流动时 q.get 即时返回、永不注入心跳。
     """
-    # 不需要心跳的场景（无超时上限）：直接转发，省一个线程（也让无 deadline 的既有路径行为完全不变）。
-    if deadline is None or poll_interval_s <= 0:
+    if poll_interval_s <= 0:
         yield from events
         return
 
@@ -100,6 +110,11 @@ def _heartbeat_wrap(events, poll_interval_s, deadline):
                # 等 DescribeTasks STOPPED 读 exitCode（与 subprocess 无条件 proc.wait() 同构，ADR 0024「事件流结束信号」），
                # 其中 exit>0 经 wire.raise_for_worker_exit 走上面的 exc 分支、唯 exit==0 落此 done。
             return
+
+
+# 停止后继续消费事件流的排空上界余量（秒，ADR 0034「停止后继续有界消费」）：作出停止决定后最多再等 grace 加这段余量，
+# 让 worker 收 SIGTERM 后走完收尾（设备会话的 session_closed 要在这段里到达才能算进未确认集），之后不再等。
+DRAIN_MARGIN_S = 5.0
 
 
 @dataclass
@@ -151,6 +166,26 @@ class _Worker:
         # ADR 0030 决定三并发不变量；落库自身的线程安全由观察者自持锁保证，如 RunPersistence._lock）。
         self.on_event = on_event
         self.handle = None  # 暴露给 fail-fast：其他 job 崩时外部可 stop 本 worker
+        # stop_reason 首次仲裁（ADR 0034 机制二）：第一次对本 job 作出停止决定的那一刻落定，之后任何分支只读不改。
+        # 规则只有一条：那一刻 deadline 已过就取 timeout（即使 abort_flag 也已置位），否则取 abort。
+        self._stop_reason = "none"
+        self._stop_lock = threading.Lock()
+        self._deadline: float | None = None
+        self._finished = False  # 已返回 JobResult 的 worker 不再被 _stop_all 改写
+
+    def decide_stop(self) -> str:
+        """对本 job 落定停止原因并（首次）向 worker 发停止请求；已落定的直接返回。事件循环、异常分支与 schedule._stop_all
+        都只经此一处落定，不各自判断。"""
+        with self._stop_lock:
+            if self._finished:
+                return self._stop_reason
+            first = self._stop_reason == "none"
+            if first:
+                now = self.opts.clock()
+                self._stop_reason = "timeout" if (self._deadline is not None and now > self._deadline) else "abort"
+        if first:
+            self._stop()
+        return self._stop_reason
 
     def run(self) -> JobResult:
         """运行一个 job，含网络瞬时故障的选择性重试（ADR 0028）。
@@ -163,36 +198,56 @@ class _Worker:
         # 各拿一整份 timeout、绕过超时上限。run 级算一次，所有 _run_once 共用。
         # 预算载体在 definition（Job.timeout_s，@timeout tag 或组合根缺省填充——ADR 0034「job timeout」节）。
         deadline = (self.opts.clock() + self.job.timeout_s) if self.job.timeout_s else None
+        self._deadline = deadline
         last: JobResult | None = None
-        for attempt in range(self.opts.network_retry + 1):
-            if attempt > 0:
-                # 仅在「上次是 network_error 且会话未起」时走到这；退避用注入 sleep（保 fake-clock 纯净）
-                self.opts.retry_sleep(min(2.0 * attempt, 4.0))
-            result, is_network, saw_step = self._run_once(deadline)
-            last = result
-            # 可重试的条件是 network_error + 会话未起（零 step_done）+ 未被 fail-fast 中止 + 还有重试额度
-            retriable = (
-                is_network
-                and not saw_step
-                and not self.abort_flag.is_set()
-                and attempt < self.opts.network_retry
-            )
-            if not retriable:
-                return result
-        return last  # 不可达：循环末次迭代 retriable 必 False → 上面必 return；此处仅供类型收窄（否则视为可能隐式 return None）
+        try:
+            for attempt in range(self.opts.network_retry + 1):
+                if attempt > 0:
+                    # 仅在「上次是 network_error 且会话未起」时走到这；退避用注入 sleep（保 fake-clock 纯净）
+                    self.opts.retry_sleep(min(2.0 * attempt, 4.0))
+                result, is_network, saw_step = self._run_once(deadline)
+                last = result
+                if self.opts.fail_fast and result.status == Status.ERROR:
+                    # fail-fast 的中止标志在 worker 线程里、判定一出就置（不等主线程的 as_completed 轮到它）：排队中的下一个 job
+                    # 在起 worker 前就能看到它 → SKIPPED（没花钱），而不是刚起来就被中止成 ABORTED。主线程的 _stop_all 随后
+                    # 对仍在运行的 worker 落定 stop_reason 并发停止请求（标志幂等）。
+                    self.abort_flag.set()
+                # 可重试的条件是 network_error + 会话未起（零 step_done）+ 未被 fail-fast 中止 + 还有重试额度
+                # + job 目标不是设备（ADR 0051 决策 2：设备会话的建连失败不做 job 级重试）
+                retriable = (
+                    is_network
+                    and not saw_step
+                    and not self.abort_flag.is_set()
+                    and attempt < self.opts.network_retry
+                    and not is_device_job(self.job)
+                )
+                if not retriable:
+                    return result
+            return last  # 不可达：循环末次迭代 retriable 必 False → 上面必 return；此处仅供类型收窄（否则视为可能隐式 return None）
+        finally:
+            with self._stop_lock:
+                self._finished = True
 
     def _run_once(self, deadline: float | None) -> tuple[JobResult, bool, bool]:
         """单次执行 job。返回 (JobResult, 是否 network_error, 是否 emit 过 step_done)。
 
         deadline：run 级共享的超时截止（None 表示不超时）；跨 attempt 不重置（ADR 0028）。
+        判定与归因只由终结函数给出（ADR 0034 机制二）：本方法只准备输入——stop_reason（首次仲裁落定）、退出信息
+        （EOF 为 0 / WorkerExitError 取其码 / 其它异常为未知）、scope_done 事实、scenario 判定集、会话记录。
+        作出停止决定后**不立即返回**：先把触发决定的那条事件照常处理，再继续消费直到 EOF、退出异常或排空上界
+        （决定时刻加 grace 再加余量），停止后到达的 session_closed 才能被归约、未确认集才算得对。
         """
         job = self.job
         result = JobResult(job=job, status=Status.PASSED)
         scenario_status: dict[str, Status] = {}
         saw_step = False  # 是否观察到 step_done（会话已起、act 可能有副作用 → 不可 job 级重试，ADR 0028）
-        saw_scope_done = False  # 是否见到 scope_done（内容完整，ADR 0024/0026——EOF 后落归约终态的前提）
+        saw_scope_started = saw_session_opened = False
+        scope_done: ScopeDone | None = None
         # 时长追踪（core 用事件到达时间戳算墙钟，ADR 0024；clock 与超时复用同一注入时钟）：
         timing = _Timing()
+        # 本次 attempt 的 stop_reason 从 none 起（上一 attempt 若被停就不会重试，故这里恒为 none）
+        with self._stop_lock:
+            self._stop_reason = "none"
 
         # 起 worker 前先看是否已被 fail-fast 中止（排队中的 job 不该再起、不产生费用）。
         # worker 从未 spawn → SKIPPED（没执行/没花钱/可无脑重新运行，ADR 0031），非 error。
@@ -212,95 +267,75 @@ class _Worker:
             return result, False, saw_step
 
         clock = self.opts.clock
-        # 包心跳（ADR 0028）：worker 静默卡死时让下面的事件循环能周期性醒来查 deadline/abort，
-        # 而非永久阻塞在 next(raw_events) 的管道读上。无 deadline 时退化为直接转发（不起线程）。
+        # 包心跳（ADR 0028）：worker 静默卡死时让下面的事件循环能周期性醒来查 deadline / abort / 排空上界，
+        # 而非永久阻塞在 next(raw_events) 的管道读上。
         events = _heartbeat_wrap(raw_events, self.opts.heartbeat_interval_s, deadline)
+        drain_deadline: float | None = None  # 停止决定后的排空上界（grace 加余量）
+        exited = False
+        exit_code: int | None = None
+        exit_reason: str | None = None
+
+        def _on_stop_decided() -> None:
+            nonlocal drain_deadline
+            if drain_deadline is None:
+                drain_deadline = clock() + self.opts.grace_period_s + DRAIN_MARGIN_S
 
         try:
             for event in events:
-                # 事件间检查：超时 / fail-fast → 优雅停 worker（ADR 0026）。
-                # 这两条优先于 network 重试：已主动中止的 job 不再重新运行（ADR 0028）。
-                if deadline is not None and clock() > deadline:
-                    self._stop()
-                    result.status = Status.ERROR
-                    result.error_type = "timeout"
-                    result.message = f"job 超时（>{self.job.timeout_s}s）"
-                    return result, False, saw_step
-                if self.abort_flag.is_set():
-                    self._stop()
-                    # 已 spawn、执行到一半被 fail-fast 掐 → ABORTED（有副作用/有现场可查，ADR 0031），非 error。
-                    # 注意与上面 timeout 分支区分：超时仍是 error+timeout，只有 abort_flag 触发的中止才 ABORTED。
-                    result.status = Status.ABORTED
-                    result.error_type = None
-                    result.message = "fail-fast：其他 job 失败，本 job 被中止"
-                    return result, False, saw_step
+                # 排空上界（只对**之前**作出的停止决定生效）：到点就不再等 worker 的收尾事件，退出信息按未知处理、判定由 stop_reason 决定
+                if drain_deadline is not None and clock() > drain_deadline:
+                    break
+                # 事件间检查：超时 / fail-fast → 首次仲裁落定并优雅停 worker（ADR 0026 / 0034 机制二）；触发决定的这条事件
+                # 本身照常处理（下面不 return），之后继续消费直到 EOF 或排空上界。
+                if self._stop_reason == "none":
+                    if (deadline is not None and clock() > deadline) or self.abort_flag.is_set():
+                        self.decide_stop()
+                if self._stop_reason != "none":
+                    _on_stop_decided()
 
-                # _Heartbeat 是 _heartbeat_wrap 的静默心跳（worker 卡住不吐事件时，让上面的 deadline/abort
-                # 检查能周期性执行，ADR 0028）。不是领域事件、不 emit、不归约——查完超时即跳过，等下一个真事件或心跳。
-                # 用 isinstance（而非 is _HEARTBEAT）使静态类型能把 event 收窄回 Event（消除下面 _emit/_reduce 的告警）。
+                # _Heartbeat 是 _heartbeat_wrap 的静默心跳（worker 卡住不吐事件时，让上面的检查能周期性执行，ADR 0028）。
+                # 不是领域事件、不 emit、不归约——查完即跳过，等下一个真事件或心跳。
                 if isinstance(event, _Heartbeat):
                     continue
 
                 if isinstance(event, StepDone):
                     saw_step = True  # 会话已起、有 act 执行 → 封掉 job 级重试（防重复副作用）
+                if isinstance(event, ScopeStarted):
+                    saw_scope_started = True
+                if isinstance(event, SessionOpened):
+                    saw_session_opened = True
                 if isinstance(event, ScopeDone):
-                    saw_scope_done = True  # 内容完整信号（ADR 0024/0026：EOF 后落归约终态的前提）
+                    scope_done = event  # 内容完整信号（ADR 0024/0026）；带 status=error 即 scope 级判定（ADR 0051 决策 4）
                 self._emit(event)
                 if self.on_event is not None:
                     self.on_event(event)  # 旁路观察者：在 sink_lock 外调（实时落库不阻塞别的 worker 进度显示）
                 self._reduce(event, result, scenario_status, timing, clock())
-        except WorkerNetworkError as e:  # 建连失败、重试耗尽（ADR 0028）：可被 job 级重试
-            self._stop()
-            result.status = Status.ERROR
-            # 竞态防护（ADR 0028）：worker 卡在建连退避里不吐事件时，上面的 timeout/abort 分支没机会执行
-            # （for-event 阻塞在读），worker 最终以退出码 80 结束、直达此处。故在此**重新判**超时/fail-fast：
-            # 若墙钟已超 / 已被 fail-fast 中止，则这是「主动中止」语义、**不重试**（主动中止优先于 network 重试），
-            # 不能让超时预算被建连退避绕过。**按来源拆开**（ADR 0031）：fail-fast 中止→ABORTED，超时→error+timeout，
-            # 按来源看 abort_flag、不看「是否被自己停过」（timeout 与 fail-fast 都会主动停 worker，混判即丢 timeout
-            # 分类）；abort 先判，故 abort 优先。
-            if self.abort_flag.is_set():
-                result.status = Status.ABORTED
-                result.error_type = None
-                result.message = f"worker 被 fail-fast 中止后以网络故障退出码退出：{e}"
-                return result, False, saw_step
-            if deadline is not None and clock() > deadline:
-                result.error_type = "timeout"
-                result.message = f"job 超时（>{self.job.timeout_s}s）——建连退避期间超时"
-                return result, False, saw_step
-            result.error_type = "network_error"
-            result.message = f"worker 建连失败（网络/SSL 瞬时故障）：{e}"
-            return result, True, saw_step
-        except Exception as e:  # worker 迭代中崩（其它异常退出）
-            self._stop()
-            result.status = Status.ERROR
-            result.error_type = "engine_error"
-            result.message = f"worker 异常：{e}"
-            return result, False, saw_step
-
-        # 事件流正常 EOF。落归约终态前先校验内容完整（ADR 0024「两件都要」在同步路径的落点，0026）：
-        # worker 被协作停（fail-fast/timeout 的 handle.stop）后按契约不吐 in-flight 的 scenario_done/
-        # scope_done、干净退出（exit 0）→ 流自然 EOF——不校验就直落归约，部分完成的 job 会拿已完成的
-        # scenario 聚合出 PASSED（假绿）。未见 scope_done 按来源分流，对齐 project._job_status 口径。
-        if not saw_scope_done:
-            self._stop()
-            if self.abort_flag.is_set():
-                result.status = Status.ABORTED  # fail-fast 掐停（ADR 0031：执行到一半被掐、有现场可查）
-                result.error_type = None
-                result.message = "fail-fast：其他 job 失败，本 job 被中止（worker 收停后干净退出）"
-                return result, False, saw_step
-            result.status = Status.ERROR
-            if deadline is not None and clock() > deadline:
-                result.error_type = "timeout"
-                result.message = f"job 超时（>{self.job.timeout_s}s）——worker 收停后干净退出"
             else:
-                # exit==0 却缺 scope_done，这是进程声称成功、内容没发完的矛盾形态。
-                result.error_type = "engine_error"
-                result.message = "worker 正常退出但没有报完这次运行的结果——按错误处理（详见 worker 日志）"
-            return result, False, saw_step
+                exited, exit_code = True, 0  # 事件流自然 EOF：worker 干净退出（adapter 对非零退出码抛 WorkerExitError）
+        except WorkerExitError as e:  # worker 以非零退出码结束（含网络故障的 80、被信号强杀的负码，ADR 0034 机制二）
+            exited, exit_code, exit_reason = True, e.exit_code, str(e)
+        except Exception as e:  # 迭代中其它异常（事件行解析失败等）：退出信息未知
+            exited, exit_code, exit_reason = True, None, str(e)
+        if self._stop_reason == "none" and exited and (exit_code != 0 or scope_done is None):
+            # 内容不完整（非零退出 / 干净退出却没发 scope_done）的 worker 若其实已过 deadline / 已被 fail-fast 中止（卡在建连退避里
+            # 不吐事件、事件间检查没机会执行；或收停后干净退出），按首次仲裁落定主动处置——不能让超时预算被建连退避绕过
+            # （ADR 0028 竞态防护，归入同一仲裁规则）。内容完整（带 scope_done 的干净退出）不再回判：判定已成。
+            if (deadline is not None and clock() > deadline) or self.abort_flag.is_set():
+                self.decide_stop()
+        if self._stop_reason != "none":
+            self._stop()  # 幂等：首次仲裁时已停过；排空上界退出时再确认一次停止请求已发
+        if not exited:
+            # 排空上界到了还没 EOF：退出信息未知（判定由 stop_reason 决定，这里只影响消息）
+            exited, exit_code, exit_reason = True, None, "停止后在排空上界内未等到 worker 退出"
 
-        # 正常运行结束（内容完整）：job 状态取各 scenario 归约
-        result.status = _aggregate(list(scenario_status.values()))
-        return result, False, saw_step
+        term = finalize_job(
+            job=job, stop_reason=self._stop_reason, exited=exited, exit_code=exit_code, exit_reason=exit_reason,
+            saw_scope_started=saw_scope_started, saw_session_opened=saw_session_opened, scope_done=scope_done,
+            scenario_status=scenario_status, sessions=result.sessions,
+        )
+        result.status, result.error_type, result.message = term.status, term.error_type, term.message
+        apply_device_metering(result)  # 设备计量两键（ADR 0051 决策 7）：桌面 job 保持 None
+        return result, term.error_type == "network_error", saw_step
 
     def _emit(self, event: Event) -> None:
         with self.sink_lock:  # 多 worker 并发 → 串行化 sink 调用（sink 实现不必线程安全）
@@ -365,9 +400,12 @@ def schedule(
     job_results: list[JobResult] = []
 
     def _stop_all() -> None:
+        # fail-fast 批量中止（ADR 0034 机制二首次仲裁）：先置 abort_flag（排队中的 job 起 worker 前看到它 → SKIPPED），
+        # 再对每个仍在运行的 worker 当场落定 stop_reason（deadline 已过的取 timeout）并发停止请求；已返回的 worker 不改。
         abort_flag.set()
         for w in workers:
-            w._stop()
+            if w.handle is not None:
+                w.decide_stop()
 
     with ThreadPoolExecutor(max_workers=max(1, opts.max_concurrency)) as pool:
         future_to_worker = {pool.submit(w.run): w for w in workers}
@@ -403,4 +441,5 @@ def schedule(
         total_tokens=sum(tok) if tok else None,
         total_time_worked_s=sum(tw) if tw else None,
         duration_ms=run_duration_ms,
+        **run_device_metering(job_results),  # 设备计量 run 级合计（ADR 0051 决策 7，与 project_full 同一份写法）
     )

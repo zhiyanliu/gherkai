@@ -144,6 +144,85 @@ def test_index_html_shortcircuit_note_matches_cli_wording():
     assert txt.count(render._SHORTCIRCUIT_NOTE) == 1   # 只挂被短路那一步，且与文本渲染逐字相同
 
 
+def test_index_html_scope_skipped_note_matches_cli_wording():
+    """跨包措辞护栏（ADR 0051 决策 4 / 0031 决定六）：scope 级 error 后合成的 skipped（shortcircuited=False）在报告入口页与文本树是同一句，
+    且不与被短路的旁注混用。"""
+    import html as html_mod
+
+    from gherkai_core.adapters.report_store.local import render_index_html
+
+    job = Job(scope_id="s", scope_name="s", engine="midscene", scenarios=())
+    run = RunResult(
+        run_meta=RunMeta(run_id="r", created_at="", jobs=(job,)),
+        status=Status.ERROR,
+        jobs=[JobResult(job=job, status=Status.ERROR, error_type="session_lost", message="设备没了", scenarios=[
+            ScenarioResult(scenario_id="s:0", status=Status.SKIPPED, steps=[
+                StepResult(index=0, status=Status.SKIPPED, shortcircuited=False),
+                StepResult(index=1, status=Status.SKIPPED, shortcircuited=False)]),
+        ])],
+    )
+    manifest = {"run_id": run.run_id, "created_at": "", "report_index": []}
+    txt = html_mod.unescape(render_index_html(manifest, run))
+    assert txt.count(render._SCOPE_SKIPPED_NOTE) == 2 and render._SHORTCIRCUIT_NOTE not in txt
+    tree = render.render_text(run)
+    assert tree.count(render._SCOPE_SKIPPED_NOTE) == 2 and render._SHORTCIRCUIT_NOTE not in tree
+
+
+def test_run_tree_shows_device_metering_and_unconfirmed_sessions():
+    """设备 job（ADR 0051 决策 7；0034 机制二 U 集）：设备占用时长与缺计量会话数、未确认停止的会话名、结果未知的创建尝试单独标；桌面 job 不出这些行。"""
+    from gherkai_core.model import SessionRecord
+
+    job = Job(scope_id="d", scope_name="d", engine="midscene", scenarios=())
+    sessions = [SessionRecord(session_id="arn:a", name="n-a", origin="created", release="confirmed", observed_s=90.0),
+                SessionRecord(session_id="arn:b", name="n-b", origin="created", release="unconfirmed", observed_s=None),
+                SessionRecord(session_id=None, name="n-c", origin="attempted", release="unconfirmed")]
+    jr = JobResult(job=job, status=Status.ERROR, error_type="release_failed", message="m", sessions=sessions,
+                   device_observed_s=90.0, device_observed_missing=1)
+    run = RunResult(run_meta=RunMeta(run_id="r", created_at="", jobs=(job,)), status=Status.ERROR, jobs=[jr],
+                    device_observed_s=90.0, device_observed_missing=1)
+    txt = render.render_text(run)
+    assert "设备占用时长合计: 90.0s（另有 1 个会话缺计量）" in txt
+    assert "设备占用时长: 90.0s（另有 1 个会话缺计量）" in txt
+    assert "未确认停止的会话: n-b" in txt and "结果未知的创建尝试: n-c" in txt and "n-a" not in txt.split("未确认停止的会话: ")[1].split("\n")[0]
+    desktop = render.render_text(_sample_run())
+    assert "设备占用" not in desktop and "未确认停止" not in desktop
+
+
+def test_explain_carries_sessions_and_metering_and_skips_evidence_note_for_synthesized_skipped():
+    from gherkai_core.model import Scenario, SessionRecord, Step
+
+    sc = Scenario(id="d:0", name="n", steps=(Step(0, "Given", "a"), Step(1, "Then", "b")))
+    job = Job(scope_id="d", scope_name="d", engine="midscene", scenarios=(sc,))
+    jr = JobResult(job=job, status=Status.ERROR, error_type="precheck_failed", message="设备不支持", session_id=None,
+                   sessions=[SessionRecord(session_id=None, name="n-t", origin="attempted", release="unconfirmed")],
+                   device_observed_s=0.0, device_observed_missing=0,
+                   scenarios=[ScenarioResult(scenario_id="d:0", status=Status.SKIPPED, steps=[
+                       StepResult(index=0, status=Status.SKIPPED, shortcircuited=False),
+                       StepResult(index=1, status=Status.SKIPPED, shortcircuited=False)])])
+    doc = render.explain_to_dict(run_id="r", status="error", results=[jr], evidence_reader=lambda refs: (None, "no_ref"))
+    scope = doc["scopes"][0]
+    assert scope["sessions"][0]["origin"] == "attempted" and scope["device_observed_s"] == 0.0 and scope["device_observed_missing"] == 0
+    assert scope["has_step_records"] is True  # 合成记录也是记录：判定块不按「零记录」渲染
+    txt = render.render_explain_text(doc, expand_passed=True)
+    assert txt.count(render._SCOPE_SKIPPED_NOTE) == 2 and "无 AI 证据" not in txt
+    assert "结果未知的创建尝试: n-t" in txt
+    desktop = render.explain_to_dict(run_id="r", status="passed", results=[_sample_run().jobs[0]], evidence_reader=lambda refs: (None, "no_ref"))
+    assert "sessions" not in desktop["scopes"][0]  # 桌面 job 省键
+
+
+def test_format_event_renders_session_events_without_endpoints():
+    from gherkai_core.model import SessionClosed, SessionOpened
+
+    opened = render.format_event(SessionOpened(scope_id="s", name="gherkai:r:ab:1:s", origin="created", session_id="arn:x",
+                                                device={"platform": "android", "model": "m"}))
+    assert opened == "session_opened origin=created name=gherkai:r:ab:1:s"
+    closed = render.format_event(SessionClosed(scope_id="s", name="n", release="unconfirmed", observed_s=12.5))
+    assert closed == "session_closed release=unconfirmed name=n observed_s=12.5"
+    from gherkai_core.model import ScopeDone
+    assert render.format_event(ScopeDone(scope_id="s", status=Status.ERROR, error_type="acquire_timeout", message="m")) == \
+        "scope_done status=error error_type=acquire_timeout"
+
+
 def test_render_text_no_annotation_on_plain_failed():
     # 反向护栏（ADR 0031 决定六）：普通 failed（shortcircuited=False，含"error 后的 failed"）不加旁注——
     # 判据迁到 shortcircuited 后，只有真被短路的 step 才加旁注，避免误伤正常业务失败。

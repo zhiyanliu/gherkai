@@ -26,6 +26,7 @@ from gherkai_core.model import (
     RunResult,
     RunState,
     Scenario,
+    SessionRecord,
     Status,
     Step,
     StepArgument,
@@ -120,6 +121,28 @@ def _votes_from_dict(d: dict | None) -> Votes | None:
     return Votes(yes=d["yes"], total=d["total"]) if d else None
 
 
+def _session_to_dict(s: SessionRecord) -> dict:
+    """SessionRecord → dict（ADR 0051 决策 7，机读键见 cli-json-contract 的 jobs[].sessions[]）。release 为 None（没收到
+    session_closed）时写端归为 unconfirmed：契约只列 confirmed / unconfirmed，终结时没收到即视为未确认（ADR 0034 机制二 U 集）。"""
+    return {"session_id": s.session_id, "name": s.name, "origin": s.origin,
+            "release": s.release if s.release is not None else "unconfirmed",
+            "observed_s": s.observed_s, "provider_minutes": s.provider_minutes}
+
+
+def _session_from_dict(d: dict) -> SessionRecord:
+    return SessionRecord(session_id=d.get("session_id"), name=d["name"], origin=d["origin"],
+                         release=d.get("release"), observed_s=d.get("observed_s"),
+                         provider_minutes=d.get("provider_minutes"))
+
+
+def _device_keys(sessions: list[SessionRecord], observed_s: float | None, missing: int | None) -> dict:
+    """设备 job 才有的三个键（ADR 0051 决策 7）：有会话记录或计量键有值即写出；桌面 job 三者皆空 → 省键。"""
+    if not sessions and observed_s is None and missing is None:
+        return {}
+    return {"sessions": [_session_to_dict(s) for s in sessions],
+            "device_observed_s": observed_s, "device_observed_missing": missing}
+
+
 def job_result_to_dict(jr: JobResult, *, include_job: bool = True) -> dict:
     """JobResult → dict。两种形态，由 include_job 选，顶层 def 字段也随之不同（避免任一形态里出现冗余）：
 
@@ -145,6 +168,7 @@ def job_result_to_dict(jr: JobResult, *, include_job: bool = True) -> dict:
         "session_id": jr.session_id,
         "error_type": jr.error_type,
         "message": jr.message,
+        **_device_keys(jr.sessions, jr.device_observed_s, jr.device_observed_missing),
         "report_refs": [ref_to_dict(rr) for rr in jr.report_refs],
         "scenarios": [
             {
@@ -217,6 +241,10 @@ def job_result_from_dict(d: dict, *, job: Job | None = None) -> JobResult:
         report_refs=tuple(_ref_from_dict(r) for r in d.get("report_refs", [])),
         error_type=d.get("error_type"),
         message=d.get("message"),
+        # 设备会话与计量（ADR 0051 决策 7）：旧落盘 / 桌面 job 无这些键 → 空列表与 None
+        sessions=[_session_from_dict(s) for s in d.get("sessions", [])],
+        device_observed_s=d.get("device_observed_s"),
+        device_observed_missing=d.get("device_observed_missing"),
     )
 
 
@@ -233,6 +261,9 @@ def to_dict(result: RunResult) -> dict:
         "duration_ms": result.duration_ms,
         "total_tokens": result.total_tokens,
         "total_time_worked_s": result.total_time_worked_s,
+        # 设备计量的 run 级合计（ADR 0051 决策 7）：run 里没有设备 job 时省键
+        **({"device_observed_s": result.device_observed_s, "device_observed_missing": result.device_observed_missing}
+           if result.device_observed_s is not None or result.device_observed_missing is not None else {}),
         "jobs": [job_result_to_dict(jr, include_job=False) for jr in result.jobs],
     }
 
@@ -251,6 +282,8 @@ def from_dict(d: dict) -> RunResult:
         total_tokens=d.get("total_tokens"),
         total_time_worked_s=d.get("total_time_worked_s"),
         duration_ms=d.get("duration_ms"),
+        device_observed_s=d.get("device_observed_s"),
+        device_observed_missing=d.get("device_observed_missing"),
     )
 
 

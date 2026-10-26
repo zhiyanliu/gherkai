@@ -207,19 +207,23 @@ def test_ex_worker_network_value_is_protocol_pinned():
 
 
 def test_raise_for_worker_exit_maps_codes():
-    """码→异常的分类（schedule 按类型分流：WorkerNetworkError→network_error 可重试 / RuntimeError→error）。
-
-    0 与负码不抛：负码只来自 SIGKILL（schedule 主动停 worker 的尾路径），非 worker 自报的故障、不在此翻译。
-    """
+    """码→异常的分类（ADR 0034 机制二「退出信息」）：0 不抛；80 → WorkerNetworkError（可重试的 network_error）；其余非零含负码
+    → WorkerExitError 带原码。负码（SIGKILL 为 -9）曾按干净退出处理——进程非干净终止本身即终态信号，不再放行。"""
     import pytest
 
-    from gherkai_core.errors import WorkerNetworkError
+    from gherkai_core.errors import WorkerExitError, WorkerNetworkError
     from gherkai_core.wire import raise_for_worker_exit
 
     raise_for_worker_exit(0, code_label="returncode")   # 正常退出
-    raise_for_worker_exit(-9, code_label="returncode")  # SIGKILL 强杀
-    with pytest.raises(WorkerNetworkError):
+    with pytest.raises(WorkerExitError) as killed:
+        raise_for_worker_exit(-9, code_label="returncode")  # SIGKILL 强杀：非零 → 终态信号
+    assert killed.value.exit_code == -9 and not isinstance(killed.value, WorkerNetworkError)
+    with pytest.raises(WorkerNetworkError) as net:
         raise_for_worker_exit(80, code_label="returncode")
+    assert isinstance(net.value, WorkerExitError) and net.value.exit_code == 80  # 网络故障是退出码异常的子类
+    with pytest.raises(WorkerExitError) as one:
+        raise_for_worker_exit(1, code_label="exitCode")
+    assert one.value.exit_code == 1
 
 
 def test_raise_for_worker_exit_label_names_the_transport_field():

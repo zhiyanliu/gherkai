@@ -157,6 +157,12 @@ ErrorType = Literal[
     "engine_error",  # error 态：引擎内部/通用异常（Midscene 通用 Error 归此）
     "navigation_error",  # error 态：导航失败
     "network_error",  # error 态：网络/SSL/连接层瞬时故障（建连失败，可重试，ADR 0028）
+    # 设备目标按扩充规则加的五项（ADR 0051 决策 4 类别表、ADR 0024「errorType」条）：
+    "precheck_failed",  # scope 级：执行前判定不可用（目标不受支持、墙钟预算超过会话上限、设备零候选、应用启动即自退…），重试不会变
+    "acquire_timeout",  # scope 级：获取设备超过预算，稍后重试或调大获取预算
+    "session_lost",  # scope 级：会话在执行中途被外部停止或到期，判定不完整、job 级不重试
+    "capability_unavailable",  # step 级：这一步需要的能力当前目标上不提供（网页上下文、DeepLink…），改写 step 或换目标
+    "release_failed",  # scope 级：会话未能确认停止、可能仍在计费；worker 不直接报，由 core 从会话事件配对推出
 ]
 
 
@@ -254,13 +260,49 @@ class ScenarioDone:
 @dataclass(frozen=True)
 class ScopeDone:
     scope_id: str
-    session_id: str | None = None  # AgentCore 会话血缘
+    session_id: str | None = None  # 会话血缘（AgentCore 会话 id 或设备远程访问会话 ARN）
     report_refs: tuple[ReportRef, ...] = ()
+    # scope 级 error 的载体（ADR 0051 决策 4 / 0024「scope_done 的可选 status / errorType / message」）：被测对象未能就绪
+    # （自检不通过、获取超时、隧道预热被拒）或执行中途会话丢失时，worker 以 status=error 结束整个 scope。三者**同进同出**：
+    # 正常路径三个都是 None、形态不变；status 只允许 ERROR（判定仍只由 status 承载，error_type 只回答原因）。
+    # core 据此对 definition 中无事件的 scenario 合成 SKIPPED（ADR 0031 决定一），终结判定归 0034 机制二的真值表。
+    status: Status | None = None
+    error_type: str | None = None
+    message: str | None = None
     type: Literal["scope_done"] = "scope_done"
+
+
+@dataclass(frozen=True)
+class SessionOpened:
+    """设备会话打开（ADR 0051 决策 4 / 0024「会话事件」）：Create 返回 ARN 后立即发（origin=created）；按名找回的孤儿会话
+    （discovered，device 可缺）；结果未知且终结时仍未排除的创建尝试（attempted，session_id 为 None、只带会话名）。
+    只出现在 scope_started 之前或 scope 的收尾段；桌面 worker 不发。device 对 core 不透明、原样搬运。"""
+
+    scope_id: str
+    name: str  # 会话名（配对键的回退；attempted 只有它）
+    origin: Literal["created", "discovered", "attempted"]
+    session_id: str | None = None
+    device: dict | None = None  # {platform, model, osVersion, unit}，不透明
+    type: Literal["session_opened"] = "session_opened"
+
+
+@dataclass(frozen=True)
+class SessionClosed:
+    """设备会话处置结束（ADR 0051 决策 4、7）：每个会话恰一条；release 是否确认停止；observed_s 是 worker 观察到的占用秒数
+    （缺则 None，None 不等于 0）；provider_minutes 是服务商回报的 {total, metered, unmetered} 快照，不透明、可缺。"""
+
+    scope_id: str
+    name: str
+    release: Literal["confirmed", "unconfirmed"]
+    session_id: str | None = None
+    observed_s: float | None = None
+    provider_minutes: dict | None = None
+    type: Literal["session_closed"] = "session_closed"
 
 
 Event = (
     ScopeStarted | ScenarioStarted | StepStarted | StepDone | StepSkipped | ScenarioDone | ScopeDone
+    | SessionOpened | SessionClosed
 )
 
 
@@ -303,6 +345,24 @@ class ScenarioResult:
 
 
 @dataclass
+class SessionRecord:
+    """一个 job 开过或尝试过的一个远程访问会话（ADR 0051 决策 4、7）：由 session_opened / session_closed 按配对键
+    （session_id，缺则 name）归约。release 为 None 表示没收到 session_closed（终结时按未确认处理，落盘写 unconfirmed）。"""
+
+    session_id: str | None
+    name: str
+    origin: str  # created / discovered / attempted
+    release: str | None = None  # confirmed / unconfirmed / None（未收到 session_closed）
+    observed_s: float | None = None
+    provider_minutes: dict | None = None
+
+    @property
+    def confirmed(self) -> bool:
+        """是否已确认停止；attempted 的尝试永远不会被确认（ADR 0034 机制二未确认集 U 的成员判据）。"""
+        return self.release == "confirmed" and self.origin != "attempted"
+
+
+@dataclass
 class JobResult:
     """单个 job（即 scope）的归约结果（数据面判定 + 持有它的 definition）。
 
@@ -322,6 +382,12 @@ class JobResult:
     report_refs: tuple[ReportRef, ...] = ()  # scope 级原生报告产物指针（来自 scope_done，进 RunReport，ADR 0024）
     error_type: str | None = None  # job 级失败（worker 崩/超时）时有
     message: str | None = None
+    # 设备会话（ADR 0051 决策 4、7）：本 job 开过或尝试过的每个远程访问会话一项（桌面 job 为空）；设备计量两键成对、
+    # 只在设备 job 上有值（None 表示非设备 job，序列化时省键）：device_observed_s 是 origin 为 created / discovered 且
+    # observed_s 非 None 的各项之和，device_observed_missing 是同类 origin 里 observed_s 为 None 的项数；attempted 两键都不计。
+    sessions: list[SessionRecord] = field(default_factory=list)
+    device_observed_s: float | None = None
+    device_observed_missing: int | None = None
 
     # definition 字段经 property delegate 给 job（读法稳定、存储唯一，ADR 0016）
     @property
@@ -354,6 +420,9 @@ class RunResult:
     total_tokens: int | None = None  # 跨 job 的 token 合计（None 表示无引擎报 token）
     total_time_worked_s: float | None = None  # 跨 job 的 agent 工作时长合计（None 表示无引擎报时长）
     duration_ms: float | None = None  # 整个 run 的墙钟时长（schedule 整体包住；含并发，不等于各 scope 时长之和）
+    # 设备计量的 run 级合计（ADR 0051 决策 7）：各设备 job 两键之和；run 里没有设备 job 时为 None（序列化省键）。
+    device_observed_s: float | None = None
+    device_observed_missing: int | None = None
 
     @property
     def run_id(self) -> str:

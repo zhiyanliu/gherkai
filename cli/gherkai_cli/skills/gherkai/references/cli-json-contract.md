@@ -111,7 +111,7 @@ step 级证据视图：判定树（**骨架是提交时的 job 定义**）与每
 | `status` | 同 `status` 一节：`pending` / `running` / `passed` / `failed` / `error` | run 级运行态；未到终态时文档只含已落地的 job |
 | `scopes[]` | array | 每个 job 一项，见下；指定 `--scenario` / `--step` 时**无一命中的 scope 整条不出现**（不产生空条目），此时条数可少于该 run 的 job 数 |
 
-`scopes[]` 每项包含 `scope_id`、`engine`、`status`、`error_type`、`message`、`session_id`、`sessions[]` 与 `device_observed_s`（仅设备目标，形状同 `run --json`）、`report_refs[]`（形状同 `run --json`，
+`scopes[]` 每项包含 `scope_id`、`engine`、`status`、`error_type`、`message`、`session_id`、`sessions[]` 与 `device_observed_s` / `device_observed_missing`（仅设备目标，形状同 `run --json`）、`report_refs[]`（形状同 `run --json`，
 原样取自判定明细中的指针，不做解析；设备目标另有 `kind=device_session`，指向会话开头能力探测结论的文件，只给链接、不解析）、`scenarios[]`，另加：
 
 | 键 | 类型 | 含义 |

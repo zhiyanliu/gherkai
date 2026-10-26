@@ -212,3 +212,31 @@ def test_running_phase_has_no_data_plane_file_until_complete(tmp_path):
     assert [jr.scope_id for jr in result_store.load_all("r")] == ["s"]
     # 控制面：同步刷成终态
     assert run_store.load_run_state("r").jobs["s"].status == Status.PASSED
+
+
+# ---- 会话事件（ADR 0051 决策 4）：session_opened 刷 RUNNING 带代表会话；attempted 不产生带 None 的写入；锁定后不改写 ----
+def test_on_event_session_opened_sets_running_and_never_writes_none_session_id():
+    from gherkai_core.model import SessionOpened
+
+    calls, run, result, report = _recording()
+    p = RunPersistence("r", run, result, report)
+    p.on_event(SessionOpened(scope_id="a", name="A", origin="created", session_id="arn:A"))
+    p.on_event(SessionOpened(scope_id="a", name="T", origin="attempted"))            # 结果未知的尝试：不写 None
+    p.on_event(SessionOpened(scope_id="a", name="B", origin="created", session_id="arn:B"))  # 换台：后到覆盖
+    p.on_event(ScopeStarted(scope_id="a", session_id="arn:B"))                        # 锁定
+    p.on_event(SessionOpened(scope_id="a", name="C", origin="discovered", session_id="arn:C"))  # 锁定后不改写
+    p.on_job_complete(_jr("a", Status.ERROR, session_id=None))                        # 终态写退回已记的代表会话
+    updates = [js for (s, m, js) in calls if m == "update_job_state"]
+    assert [(js.status, js.session_id) for js in updates] == [
+        (Status.RUNNING, "arn:A"), (Status.RUNNING, "arn:A"), (Status.RUNNING, "arn:B"), (Status.RUNNING, "arn:B"),
+        (Status.RUNNING, "arn:B"), (Status.ERROR, "arn:B")]
+    assert all(js.session_id is not None for js in updates)
+
+
+def test_on_event_only_attempted_sessions_write_nothing():
+    from gherkai_core.model import SessionOpened
+
+    calls, run, result, report = _recording()
+    p = RunPersistence("r", run, result, report)
+    p.on_event(SessionOpened(scope_id="a", name="T", origin="attempted"))
+    assert [m for (_, m, _) in calls if m == "update_job_state"] == []

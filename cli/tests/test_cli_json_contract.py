@@ -76,17 +76,36 @@ def _sample_run_result() -> M.RunResult:
     jr = _mk(M.JobResult, job=job, status=M.Status.FAILED, scenarios=[sr], session_id="s", duration_ms=20.0,
              total_time_worked_s=3.5, total_tokens=120, error_type="timeout", message="m",
              report_refs=(M.ReportRef(kind="summary", ref="file:///s.json", label="summary"),))
-    meta = _mk(M.RunMeta, run_id="r", created_at="t", jobs=(job,), max_concurrency=2, steps_dir="/p/steps",
+    # 设备 job（ADR 0051 决策 4、7）：三种 origin 的会话各一项、两个计量键、scope 级 error 后合成的 skipped（shortcircuited=False）
+    dev_steps = (M.Step(0, "Given", '"https://x"'), M.Step(1, "Then", "对吗"))
+    dev_job = _mk(M.Job, scope_id="d.feature:3", scope_name="设备", engine="midscene",
+                  scenarios=(M.Scenario(id="d.feature:3", name="设备", steps=dev_steps),), timeout_s=600.0)
+    dev_sr = _mk(M.ScenarioResult, scenario_id="d.feature:3", status=M.Status.SKIPPED, steps=[
+        _mk(M.StepResult, index=0, status=M.Status.SKIPPED, shortcircuited=False),
+        _mk(M.StepResult, index=1, status=M.Status.SKIPPED, shortcircuited=False)])
+    sessions = [_mk(M.SessionRecord, session_id="arn:a", name="n-a", origin="created", release="confirmed", observed_s=10.0,
+                    provider_minutes={"total": 1, "metered": 1, "unmetered": 0}),
+                _mk(M.SessionRecord, session_id="arn:b", name="n-b", origin="discovered", release="unconfirmed", observed_s=None),
+                _mk(M.SessionRecord, session_id=None, name="n-c", origin="attempted", release="unconfirmed")]
+    dev_jr = _mk(M.JobResult, job=dev_job, status=M.Status.ERROR, scenarios=[dev_sr], session_id="arn:a",
+                 error_type="release_failed", message="m", sessions=sessions, device_observed_s=10.0, device_observed_missing=1)
+    meta = _mk(M.RunMeta, run_id="r", created_at="t", jobs=(job, dev_job), max_concurrency=2, steps_dir="/p/steps",
                worker_variant="base", worker_task_defs={"novaact": "arn"}, extra_http_headers=(("X-Test", "y"),))
-    return _mk(M.RunResult, run_meta=meta, status=M.Status.FAILED, jobs=[jr], duration_ms=30.0,
-               total_time_worked_s=3.5, total_tokens=120)
+    return _mk(M.RunResult, run_meta=meta, status=M.Status.ERROR, jobs=[jr, dev_jr], duration_ms=30.0,
+               total_time_worked_s=3.5, total_tokens=120, device_observed_s=10.0, device_observed_missing=1)
 
 
 def test_run_json_keys_are_documented():
     doc = render.to_dict(_sample_run_result())
     doc["artifacts"] = {**compose.local_artifact_locations("/tmp/x", "r"), "worker_log": "file:///tmp/w.log"}
-    # extra_http_headers / worker_task_defs 的**值**是用户自定键（请求头名 / 引擎名），不是契约键
-    _assert_documented(doc, section="run --json", ignore={"X-Test", "novaact"})
+    # 正向断言：样例里确实有设备会话与计量键（_mk 会悄悄丢掉 model 里还没有的字段，没有这条护栏会在空集上直接变绿）
+    dev = next(j for j in doc["jobs"] if j["scope_id"] == "d.feature:3")
+    assert {"sessions", "device_observed_s", "device_observed_missing"} <= set(dev) and len(dev["sessions"]) == 3
+    assert {"device_observed_s", "device_observed_missing"} <= set(doc)
+    assert "sessions" not in next(j for j in doc["jobs"] if j["scope_id"] == "f.feature:3")  # 桌面 job 省键
+    # extra_http_headers / worker_task_defs 的**值**是用户自定键（请求头名 / 引擎名），不是契约键；provider_minutes 是服务商原形快照、
+    # 对 core 不透明（ADR 0051 决策 7），到它为止不下钻
+    _assert_documented(doc, section="run --json", ignore={"X-Test", "novaact"}, opaque={"provider_minutes"})
 
 
 def test_plan_json_keys_are_documented():

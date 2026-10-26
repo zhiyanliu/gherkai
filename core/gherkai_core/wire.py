@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import json
 
-from gherkai_core.errors import WorkerNetworkError
+from gherkai_core.errors import WorkerExitError, WorkerNetworkError
 from gherkai_core.redact import redact_url_userinfo
 from gherkai_core.model import (
     Cost,
@@ -29,6 +29,8 @@ from gherkai_core.model import (
     ScenarioStarted,
     ScopeDone,
     ScopeStarted,
+    SessionClosed,
+    SessionOpened,
     Status,
     Step,
     StepArgument,
@@ -152,11 +154,43 @@ def event_from_json(d: dict) -> Event:
             report_refs=_report_refs_from_json(d.get("reportRefs")),
         )
     if t == "scope_done":
+        # scope 级 error 的可选三字段（ADR 0051 决策 4 / 0024）：同进同出、status 只许 "error"。部分出现或 status 取别的值
+        # 都是 worker 违约，按协议层 fail-loud（与未知事件类型同一口径）——core 要按 status 分支，猜不得。
+        present = [k for k in ("status", "errorType", "message") if k in d]
+        if present and len(present) != 3:
+            raise ValueError(f"scope_done 的 status / errorType / message 须同时出现或同时缺省，现只有 {present}（不符合 worker↔core 协议）")
+        if present and d["status"] != "error":
+            raise ValueError(f"scope_done 的 status 只允许 \"error\"，收到 {d['status']!r}（不符合 worker↔core 协议）")
         return ScopeDone(
             scope_id=d["scopeId"],
             session_id=d.get("sessionId"),
             report_refs=_report_refs_from_json(d.get("reportRefs")),
+            status=Status.ERROR if present else None,
+            error_type=d.get("errorType") if present else None,
+            message=redact_url_userinfo(d.get("message")) if present else None,  # 预热失败的消息可能带地址（ADR 0035 决策 5）
         )
+    if t == "session_opened":
+        # 设备会话打开（ADR 0051 决策 4）：origin 封闭集合（core 按它分支：attempted 不写代表会话、永远在未确认集里）；
+        # sessionId 为 null 时 name 必须有值（配对键回退）。device 不透明原样搬运。
+        origin = d.get("origin")
+        if origin not in ("created", "discovered", "attempted"):
+            raise ValueError(f"session_opened 的 origin 取值未知：{origin!r}（不符合 worker↔core 协议）")
+        name = d.get("name")
+        if not isinstance(name, str) or not name:
+            raise ValueError("session_opened 缺 name（sessionId 可为 null，name 是配对键的回退，必须有值）")
+        return SessionOpened(scope_id=d["scopeId"], name=name, origin=origin,
+                             session_id=d.get("sessionId"), device=d.get("device"))
+    if t == "session_closed":
+        release = d.get("release")
+        if release not in ("confirmed", "unconfirmed"):
+            raise ValueError(f"session_closed 的 release 取值未知：{release!r}（不符合 worker↔core 协议）")
+        name = d.get("name")
+        if not isinstance(name, str) or not name:
+            raise ValueError("session_closed 缺 name（sessionId 可为 null，name 是配对键的回退，必须有值）")
+        return SessionClosed(scope_id=d["scopeId"], name=name, release=release,
+                             session_id=d.get("sessionId"),
+                             observed_s=d.get("observedS"),  # null 保持 None、不改成 0（null 不等于 0，ADR 0051 决策 7）
+                             provider_minutes=d.get("providerMinutes"))
     raise ValueError(f"未知事件 type: {t!r}（不符合 worker↔core 协议）")
 
 
@@ -180,14 +214,14 @@ EX_WORKER_NETWORK = 80
 def raise_for_worker_exit(rc: int, *, code_label: str) -> None:
     """worker 退出码 → 异常（协议翻译，各 Engine adapter 共用的单一事实源）。
 
-    80 → `WorkerNetworkError`（schedule 记 network_error、可重试整 job，ADR 0028）；其余正非零 →
-    `RuntimeError`（worker 异常退出，schedule 记 error）；0 与负码 → 不抛（正常退出 / 被 SIGKILL 强杀，
-    后者由调用方各自处置）。
+    80 → `WorkerNetworkError`（schedule 记 network_error、可重试整 job，ADR 0028）；其余非零（含负码：被信号强杀，
+    SIGKILL 为 -9）→ `WorkerExitError`（带原码；进程非干净终止本身即终态信号，ADR 0034 机制二）；0 → 不抛。
+    终结函数据异常上的 exit_code 判「退出码非零」一行，不从消息文本解析。
 
     code_label 只进消息文本：各传输的退出码字段名不同（子进程 `returncode` / ECS `exitCode`），诊断行
     须说该传输的话（也是既有测试匹配的措辞）。
     """
     if rc == EX_WORKER_NETWORK:
-        raise WorkerNetworkError(f"worker 建连失败（网络/SSL 瞬时故障），退出码 {rc}")
-    if rc > 0:
-        raise RuntimeError(f"worker 异常退出 {code_label}={rc}")
+        raise WorkerNetworkError(f"worker 建连失败（网络/SSL 瞬时故障），退出码 {rc}", rc)
+    if rc != 0:
+        raise WorkerExitError(rc, f"worker 异常退出 {code_label}={rc}")

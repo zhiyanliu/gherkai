@@ -758,3 +758,104 @@ def test_abort_then_clean_eof_is_aborted_not_passed():
     assert v_jr.status in (Status.PASSED, Status.ABORTED)
     v_scope_done_seen = any(isinstance(e, ScopeDone) and e.scope_id == "v" for e in sink.events)
     assert (v_jr.status == Status.PASSED) == v_scope_done_seen  # 假绿不可能：没内容完整就没有 PASSED
+
+
+# ---- 停止后继续有界消费 + stop_reason 首次仲裁（ADR 0034 机制二；0051 决策 5）----
+
+def test_tail_events_after_stop_are_still_reduced_and_release_confirmed():
+    """超时处置后 worker 收 SIGTERM 走收尾、发出 session_closed(confirmed)：core 停止后继续消费到 EOF，U 为空、消息里没有释放失败提示。"""
+    from gherkai_core.model import SessionClosed, SessionOpened
+
+    scope = "d"
+    events = [SessionOpened(scope_id=scope, name="n", origin="created", session_id="arn:n"),
+              ScopeStarted(scope_id=scope, session_id="arn:n"), ScenarioStarted(scenario_id="d:0")]
+    tail = [SessionClosed(scope_id=scope, name="n", release="confirmed", session_id="arn:n", observed_s=3.0)]
+    engine = FakeEngine({scope: events}, tail_after_stop={scope: tail})
+
+    class _Clock:  # 第 7 次读时一次性越过 deadline（事件处理约每条读两次时钟），之后慢走——排空上界（grace 加余量）不该被假时钟立刻耗尽
+        def __init__(self): self.n = 0; self.t = 0.0
+        def __call__(self):
+            self.n += 1; self.t += 1000.0 if self.n == 7 else 0.001; return self.t
+
+    res = schedule(_rm([_job(scope, timeout_s=5.0)]), FakeResolver(engine), CollectSink(),
+                   opts=ScheduleOpts(max_concurrency=1, clock=_Clock(), heartbeat_interval_s=0.05, grace_period_s=1.0))
+    jr = res.jobs[0]
+    assert (jr.status, jr.error_type) == (Status.ERROR, "timeout")
+    assert [s.release for s in jr.sessions] == ["confirmed"] and (jr.device_observed_s, jr.device_observed_missing) == (3.0, 0)
+    assert "未能确认停止" not in (jr.message or "")
+    assert engine.handles[scope].stopped
+
+
+def test_timeout_wins_over_abort_when_deadline_already_passed_on_every_branch():
+    """首次仲裁：那一刻 deadline 已过就取 timeout，即使 abort_flag 也已置位——事件分支、WorkerExitError 分支、EOF 分支都一样。"""
+    from gherkai_core.errors import WorkerExitError
+
+    def run(scope: str, engine: FakeEngine, flag_set_first: bool) -> Status:
+        class _Clock:
+            def __init__(self): self.n = 0
+            def __call__(self):  # 前两次读（run 起点、deadline 基点）为 0；之后一律在 deadline 之后、慢走（别把排空上界也耗尽）
+                self.n += 1; return 0.0 if self.n <= 2 else 1000.0 + self.n * 0.001
+
+        import gherkai_core.schedule as sch
+        captured = {}
+        orig = sch._Worker.__init__
+
+        def spy(self, *a, **kw):
+            orig(self, *a, **kw)
+            if flag_set_first:
+                self.abort_flag.set()  # 起 worker 前就置位会得 SKIPPED；这里改成在首事件前置位
+            captured["w"] = self
+        sch._Worker.__init__ = spy
+        try:
+            res = schedule(_rm([_job(scope, timeout_s=1.0)]), FakeResolver(engine), CollectSink(),
+                           opts=ScheduleOpts(max_concurrency=1, clock=_Clock(), heartbeat_interval_s=0.05, grace_period_s=1.0))
+        finally:
+            sch._Worker.__init__ = orig
+        return res.jobs[0]
+
+    # 事件分支：第一条事件到达时 deadline 已过
+    jr = run("ev", FakeEngine({"ev": _passing_events("ev", "ev:0")}), flag_set_first=False)
+    assert (jr.status, jr.error_type) == (Status.ERROR, "timeout")
+    # WorkerExitError 分支：零事件、worker 以 80 退出，而 deadline 已过 → timeout（不是 network_error、不重试）
+    eng = FakeEngine({"net": []}, exit_code={"net": 80})
+    jr = run("net", eng, flag_set_first=False)
+    assert (jr.status, jr.error_type) == (Status.ERROR, "timeout") and eng.run_count["net"] == 1
+    # EOF 分支：零事件干净退出而 deadline 已过 → timeout（而非「没有报完结果」的 engine_error）
+    jr = run("eof", FakeEngine({"eof": []}), flag_set_first=False)
+    assert (jr.status, jr.error_type) == (Status.ERROR, "timeout")
+
+
+def test_sigkill_negative_exit_code_is_error_not_clean():
+    """被信号强杀（负退出码）不再按干净退出处理（ADR 0034 机制二）：零事件、exit -9 → ERROR engine_error，消息带退出码。"""
+    engine = FakeEngine({"k": []}, exit_code={"k": -9})
+    res = schedule(_rm([_job("k")]), FakeResolver(engine), CollectSink(), opts=ScheduleOpts(max_concurrency=1))
+    jr = res.jobs[0]
+    assert (jr.status, jr.error_type) == (Status.ERROR, "engine_error") and "exit -9" in jr.message
+
+
+def test_scope_done_after_nonzero_exit_is_error_and_zero_scenario_scope_done_is_error():
+    """发完 scope_done 又非零退出 → ERROR（不是 PASSED）；零 scenario 的 scope_done 以 0 退出 → ERROR「未报告任何 scenario 判定」。"""
+    engine = FakeEngine({"a": _passing_events("a", "a:0"), "z": [ScopeStarted(scope_id="z"), ScopeDone(scope_id="z")]},
+                        exit_code={"a": 1})
+    res = schedule(_rm([_job("a"), _job("z")]), FakeResolver(engine), CollectSink(), opts=ScheduleOpts(max_concurrency=2))
+    by = {jr.scope_id: jr for jr in res.jobs}
+    assert (by["a"].status, by["a"].error_type) == (Status.ERROR, "engine_error") and "exit 1" in by["a"].message
+    assert (by["z"].status, by["z"].error_type) == (Status.ERROR, "engine_error") and "未报告任何 scenario 判定" in by["z"].message
+
+
+def test_run_level_device_metering_sums_device_jobs_and_omits_for_desktop_runs():
+    from gherkai_core.model import SessionClosed, SessionOpened
+
+    def dev(scope: str, observed: float | None):
+        return [SessionOpened(scope_id=scope, name=scope, origin="created", session_id=f"arn:{scope}"),
+                ScopeStarted(scope_id=scope, session_id=f"arn:{scope}"), *_passing_events(scope, f"{scope}:0")[:-1],
+                SessionClosed(scope_id=scope, name=scope, release="confirmed", session_id=f"arn:{scope}", observed_s=observed),
+                ScopeDone(scope_id=scope)]
+    engine = FakeEngine({"d1": dev("d1", 10.0), "d2": dev("d2", None), "desk": _passing_events("desk", "desk:0")})
+    res = schedule(_rm([_job("d1"), _job("d2"), _job("desk")]), FakeResolver(engine), CollectSink(), opts=ScheduleOpts(max_concurrency=3))
+    assert (res.device_observed_s, res.device_observed_missing) == (10.0, 1)
+    desk = next(jr for jr in res.jobs if jr.scope_id == "desk")
+    assert (desk.device_observed_s, desk.device_observed_missing) == (None, None)
+    only_desk = schedule(_rm([_job("desk")]), FakeResolver(FakeEngine({"desk": _passing_events("desk", "desk:0")})), CollectSink(),
+                         opts=ScheduleOpts(max_concurrency=1))
+    assert (only_desk.device_observed_s, only_desk.device_observed_missing) == (None, None)

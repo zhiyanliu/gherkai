@@ -6,12 +6,28 @@ core 反依赖 adapter（违反 ports.py 六边形「adapter 一律组合根注�
 from __future__ import annotations
 
 
-class WorkerNetworkError(RuntimeError):
+class WorkerExitError(RuntimeError):
+    """worker 进程以非零退出码结束（ADR 0024「退出码约定」/ 0034 机制二「退出信息」）。
+
+    `wire.raise_for_worker_exit` 把非零退出码翻成本异常（两个 Engine adapter 共用），`exit_code` 带原码：正码是 worker 自报
+    （崩溃 / 会话清理失败的 1 / 网络故障的 80），负码是被信号强杀（SIGKILL 为 -9）。终结函数据此判「退出码非零」一行，
+    不再从消息文本里解析退出码。
+    """
+
+    def __init__(self, exit_code: int, message: str) -> None:
+        super().__init__(message)
+        self.exit_code = exit_code
+
+
+class WorkerNetworkError(WorkerExitError):
     """worker 以「网络/SSL 瞬时故障」专用退出码退出（建连失败、重试耗尽，ADR 0028）。
 
     `wire.raise_for_worker_exit` 把该退出码翻成本异常（两个 Engine adapter 共用）；schedule 据此把 job 记 error_type="network_error"，
-    并在「会话未起（零 step_done）」时选择性重试整个 job。
+    并在「会话未起（零 step_done）」时选择性重试整个 job。是 WorkerExitError 的子类（exit_code 恒为网络故障退出码）。
     """
+
+    def __init__(self, message: str, exit_code: int = 80) -> None:
+        super().__init__(exit_code, message)
 
 
 class FeatureContractError(ValueError):

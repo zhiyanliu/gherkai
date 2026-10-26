@@ -275,6 +275,17 @@ def render_index_html(manifest: dict, result: RunResult) -> str:
             meta_bits.append(" · ".join(jbits))
         if jr.session_id:
             meta_bits.append(f"会话 <code>{esc(jr.session_id)}</code>")
+        # 设备会话摘要（ADR 0051 决策 7）：占用时长与缺计量会话数；未确认停止的会话按名列出，结果未知的创建尝试单独标
+        if jr.device_observed_s is not None or jr.device_observed_missing is not None:
+            missing = jr.device_observed_missing or 0
+            meta_bits.append(f"设备占用 {_fmt_ms((jr.device_observed_s or 0.0) * 1000.0)}"
+                             + (f"（另有 {missing} 个会话缺计量）" if missing else ""))
+        unconfirmed = [s.name for s in jr.sessions if not s.confirmed and s.origin != "attempted"]
+        attempted = [s.name for s in jr.sessions if s.origin == "attempted"]
+        if unconfirmed:
+            meta_bits.append("未确认停止的会话 " + "、".join(f"<code>{esc(n)}</code>" for n in unconfirmed))
+        if attempted:
+            meta_bits.append("结果未知的创建尝试 " + "、".join(f"<code>{esc(n)}</code>" for n in attempted))
         err = _reason_html(jr.error_type, jr.message)
 
         scen_blocks = []
@@ -293,10 +304,12 @@ def render_index_html(manifest: dict, result: RunResult) -> str:
                 # 下面这句与 cli 文本渲染的旁注措辞相同（那边提成了 `gherkai_cli.render._SHORTCIRCUIT_NOTE`；
                 # core 不能 import cli，故跨包不共享常量）——改一处要改两处，由 cli 侧的
                 # test_index_html_shortcircuit_note_matches_cli_wording 逐字锁定（那边两包都 import 得到）。
+                # scope 级 error 后合成的 skipped（shortcircuited=False，ADR 0051 决策 4）另一句；两句字面量都与 cli 侧逐字相同。
                 taint = (
                     ' <span class="taint">⚠ 因前置 step error 被跳过（未执行）</span>'
-                    if st.shortcircuited else ""
-                )
+                    if st.shortcircuited else (
+                        ' <span class="taint">未执行（scope 级错误，原因见 job 判定）</span>'
+                        if st.status.value == "skipped" else ""))
                 st_anchor = _node_anchor(jr.scope_id, sr.scenario_id, st.index)
                 step_rows.append(
                     f'<li id="{st_anchor}">{_dot(st.status.value)}<span class="stp">step[{st.index}]</span> '

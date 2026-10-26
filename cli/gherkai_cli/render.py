@@ -16,10 +16,17 @@ def format_event(ev: Event) -> str:
     """单个 ADR 0024 事件 → 一行进度文本（不含 scope_id——scope 归调用方的 `[core <scope>:event]` 前缀，
     见 cli/gherkai_cli/__main__.py 的 sink；行内只留前缀没有的 scenario_id/step_index/status/votes/cost）。"""
     parts: list[str] = [ev.type]
-    for attr in ("scenario_id", "step_index", "status"):
+    for attr in ("scenario_id", "step_index", "status", "origin", "release", "error_type"):
         v = getattr(ev, attr, None)
         if v is not None:
             parts.append(f"{attr}={getattr(v, 'value', v)}")
+    # 会话事件（ADR 0051 决策 4）：只显会话名与计量，不显端点（事件本就不带端点地址）
+    name = getattr(ev, "name", None)
+    if name is not None:
+        parts.append(f"name={name}")
+    observed = getattr(ev, "observed_s", None)
+    if observed is not None:
+        parts.append(f"observed_s={observed}")
     votes = getattr(ev, "votes", None)
     if votes and votes.total > 1:  # total==1 即单次判定，无抖动 tally 意义，不显（避免 1/1 噪声）
         parts.append(f"votes={votes.yes}/{votes.total}")
@@ -55,6 +62,36 @@ def _ms(duration_ms: float | None) -> str:
 # 共用这一句；RunReport index.html 里还有措辞相同的第三份，在 core 的 ReportStore 侧（跨包不共享常量），
 # 改这句要一并改那边。
 _SHORTCIRCUIT_NOTE = "⚠ 因前置 step error 被跳过（未执行）"
+# scope 级 error 后合成的 skipped（status=skipped 且 shortcircuited=False，ADR 0051 决策 4 / 0031 决定六）：这一步没执行，
+# 原因在 job 判定（被测对象未就绪或会话丢失）。报告入口页有同一句字面量（core 不能 import cli），由 test_render 逐字锁定。
+_SCOPE_SKIPPED_NOTE = "未执行（scope 级错误，原因见 job 判定）"
+_ATTEMPTED_LABEL = "结果未知的创建尝试"
+
+
+def _step_note(status: str, shortcircuited: bool) -> str:
+    """step 行旁注：被短路的 skipped 与 scope 级 error 后合成的 skipped 各一句（ADR 0031 决定六两种 SKIPPED）。"""
+    if shortcircuited:
+        return _SHORTCIRCUIT_NOTE
+    if status == "skipped":
+        return _SCOPE_SKIPPED_NOTE
+    return ""
+
+
+def session_lines(jr: JobResult) -> list[str]:
+    """job 的设备会话摘要行（ADR 0051 决策 7；0034 机制二 U 集）：设备占用时长与缺计量会话数；未确认停止的会话按名列出，
+    结果未知的创建尝试单独标出。桌面 job 返回空列表。run 文本树与 explain 文本共用。"""
+    lines: list[str] = []
+    if jr.device_observed_s is not None or jr.device_observed_missing is not None:
+        missing = jr.device_observed_missing or 0
+        lines.append(f"设备占用时长: {_ms((jr.device_observed_s or 0.0) * 1000.0)}"
+                     + (f"（另有 {missing} 个会话缺计量）" if missing else ""))
+    unconfirmed = [s for s in jr.sessions if not s.confirmed and s.origin != "attempted"]
+    attempted = [s for s in jr.sessions if s.origin == "attempted"]
+    if unconfirmed:
+        lines.append("未确认停止的会话: " + "、".join(s.name for s in unconfirmed))
+    if attempted:
+        lines.append(f"{_ATTEMPTED_LABEL}: " + "、".join(s.name for s in attempted))
+    return lines
 
 
 def render_text(result: RunResult) -> str:
@@ -75,6 +112,10 @@ def run_tree(result: RunResult) -> TreeNode:
     cost_bits = _cost_bits(result.total_tokens, result.total_time_worked_s)
     if cost_bits:
         root.add(f"成本原生量合计: {' + '.join(cost_bits)}")
+    if result.device_observed_s is not None or result.device_observed_missing is not None:
+        missing = result.device_observed_missing or 0
+        root.add(f"设备占用时长合计: {_ms((result.device_observed_s or 0.0) * 1000.0)}"
+                 + (f"（另有 {missing} 个会话缺计量）" if missing else ""))
 
     for jr in result.jobs:
         jbits = _cost_bits(jr.total_tokens, jr.total_time_worked_s)
@@ -94,10 +135,10 @@ def run_tree(result: RunResult) -> TreeNode:
             for st in sr.steps:
                 # total>1 才显投票 tally（与 format_event/index.html 一致；1/1 无抖动意义，不显）
                 v = f" 投票 {st.votes.yes}/{st.votes.total}" if st.votes and st.votes.total > 1 else ""
-                # 连锁失败旁注（ADR 0031 决定六）：被 scope 内短路的 step（shortcircuited=True，status=skipped）——
-                # 上游 error 后 worker 跳过了它、没在损坏环境上执行。旁注解释"为何 skipped"，读 shortcircuited 这个
-                # 正交布尔（比旧的"按 status 顺序猜 error 后 failed"精确）；不改判定/severity（守纯 reducer 红线）。
-                note = f"  {_SHORTCIRCUIT_NOTE}" if st.shortcircuited else ""
+                # 旁注（ADR 0031 决定六）：被 scope 内短路的 step（shortcircuited=True）解释"为何 skipped"；scope 级 error 后合成的
+                # skipped（shortcircuited=False）说明这一步没执行、原因在 job 判定。都读正交布尔，不改判定/severity（守纯 reducer 红线）。
+                n = _step_note(st.status.value, st.shortcircuited)
+                note = f"  {n}" if n else ""
                 stn = sn.add(Text.assemble(f"step {st.index}: ", status_text(st.status.value),
                                            f" ({_ms(st.duration_ms)}){v}{note}"))
                 # step 级失败原因（ADR 0042 决策三）：与 job 行同样处理——有 message 就显，人读视图不只剩一个光秃的态
@@ -112,6 +153,8 @@ def run_tree(result: RunResult) -> TreeNode:
                 sn.add(styled(f"report（{rr.label or rr.kind}）: {rr.ref}", DIM))
         if jr.session_id:
             jn.add(styled(f"session id: {jr.session_id}", DIM))
+        for line in session_lines(jr):  # 设备会话摘要（ADR 0051 决策 7）
+            jn.add(line)
         # scope 级原生报告产物（Midscene report.html 挂这层，来自 scope_done）
         for rr in jr.report_refs:
             jn.add(styled(f"report（{rr.label or rr.kind}）: {rr.ref}", DIM))
@@ -341,7 +384,7 @@ def explain_to_dict(*, run_id: str, status: str | None, results: list[JobResult]
             })
         if (scenario_ids is not None or step_index is not None) and not scenarios:
             continue  # 筛选生效且本 scope 无一命中：不产空壳 scope（文本与 JSON 规则一致）
-        scopes.append({
+        scope_doc = {
             "scope_id": jr.scope_id,
             "engine": jr.engine,
             "status": jr.status.value,
@@ -357,8 +400,17 @@ def explain_to_dict(*, run_id: str, status: str | None, results: list[JobResult]
             # 曾在筛后的 scenarios 上重算，--scenario/--step 筛剩无记录 step 时会把有完整记录的 job 误判为零记录。
             "has_step_records": bool(recorded),
             "scenarios": scenarios,
-        })
+        }
+        # 设备会话与计量（ADR 0051 决策 7）：仅设备目标，形状同 run --json 的 jobs[]；桌面 job 省键
+        scope_doc.update(_device_keys_for_explain(jr))
+        scopes.append(scope_doc)
     return redact_deep({"run_id": run_id, "status": status, "scopes": scopes})  # 定义里的隧道地址与证据可能带凭据：整份脱敏（ADR 0035 决策 5）
+
+
+def _device_keys_for_explain(jr: JobResult) -> dict:
+    from gherkai_core.serialize import job_result_to_dict  # 同一份键形状（sessions[] / 两个计量键），不另写第二份序列化
+    d = job_result_to_dict(jr, include_job=False)
+    return {k: d[k] for k in ("sessions", "device_observed_s", "device_observed_missing") if k in d}
 
 
 def _ref_line(rr: dict) -> str:
@@ -433,8 +485,9 @@ def _add_step(parent: TreeNode, step: dict, *, expand_passed: bool, full: bool) 
         bits.append(f"({step['error_type']})")
     if step["duration_ms"] is not None:
         bits.append(f"({_ms(step['duration_ms'])})")
-    if step["shortcircuited"]:
-        bits.append(_SHORTCIRCUIT_NOTE)
+    n = _step_note(step["status"], step["shortcircuited"])
+    if n:
+        bits.append(n)
     stn = parent.add(Text.assemble(head, "  ", status_text(step["status"]), ("  " + "  ".join(bits)) if bits else ""))
     if step["message"]:
         stn.add(f"message: {_one_line(step['message'])}")
@@ -443,8 +496,8 @@ def _add_step(parent: TreeNode, step: dict, *, expand_passed: bool, full: bool) 
     ev = step["evidence"]
     if ev is None:
         miss = step["evidence_missing"]
-        # 短路的 step 不打「无 AI 证据」：它根本没执行，状态行的旁注已说明，再说一遍是废话
-        if miss and not (miss == "no_ref" and step["shortcircuited"]):
+        # 没执行的 step（被短路，或 scope 级 error 后合成的 skipped）不打「无 AI 证据」：状态行的旁注已说明，再说一遍是废话
+        if miss and not (miss == "no_ref" and (step["shortcircuited"] or step["status"] == "skipped")):
             stn.add(_EVIDENCE_MISSING_TEXT.get(miss, _EVIDENCE_MISSING_TEXT["no_ref"]))
         # 兜底指针：证据缺了，把该 step 的其它产物 ref 列出来，让人还有地方看（ADR 0042 决策四「文本预算」末条）
         for rr in step["report_refs"]:
@@ -453,6 +506,23 @@ def _add_step(parent: TreeNode, step: dict, *, expand_passed: bool, full: bool) 
     ref = _evidence_ref(step)
     for act in ev.get("acts") or []:
         _add_act(stn, act, ref=ref, full=full)
+
+
+def _explain_session_lines(sc: dict) -> list[str]:
+    """explain 文档里一个 scope 的设备会话摘要行（与 session_lines 同一口径，输入是机读文档的 dict 形态）。"""
+    lines: list[str] = []
+    if "device_observed_s" in sc or "device_observed_missing" in sc:
+        missing = sc.get("device_observed_missing") or 0
+        lines.append(f"设备占用时长: {_ms((sc.get('device_observed_s') or 0.0) * 1000.0)}"
+                     + (f"（另有 {missing} 个会话缺计量）" if missing else ""))
+    sessions = sc.get("sessions") or []
+    unconfirmed = [s for s in sessions if s.get("release") != "confirmed" and s.get("origin") != "attempted"]
+    attempted = [s for s in sessions if s.get("origin") == "attempted"]
+    if unconfirmed:
+        lines.append("未确认停止的会话: " + "、".join(s["name"] for s in unconfirmed))
+    if attempted:
+        lines.append(f"{_ATTEMPTED_LABEL}: " + "、".join(s["name"] for s in attempted))
+    return lines
 
 
 def render_explain_text(doc: dict, *, expand_passed: bool = False, full: bool = False) -> str:
@@ -471,6 +541,8 @@ def explain_tree(doc: dict, *, expand_passed: bool = False, full: bool = False) 
         scn = root.add(Text.assemble(f"scope {sc['scope_id']}  engine={sc['engine']}  status=", status_text(sc["status"]), sess))
         for rr in sc["report_refs"]:
             scn.add(styled(_ref_line(rr), DIM))
+        for line in _explain_session_lines(sc):  # 设备会话摘要（ADR 0051 决策 7），与 run 文本同一口径
+            scn.add(line)
         # 一个 step 记录都没有的 job（worker 没起来 / 起来就被掐）：判定只剩 job 级这一层，在 scope 节点下单独列出
         # 判定与诊断指引，免得读者在一片「无记录」里找不到「到底为什么」。
         if not sc["has_step_records"]:  # job 级事实（explain_to_dict 按未筛判定树算），不在筛后的 steps 上重算

@@ -12,6 +12,7 @@
 
 - 引擎 worker 的能力自述带上支持的测试目标：`gherkai doctor` 多一行 `engines.targets.<引擎>`，显示该引擎支持的测试目标（当前两个引擎都只有桌面网页）；`gherkai list-deterministic` 多一列「目标」，显示每条确定性 step 在该引擎上实际可用的目标，声明了该引擎不支持的目标时单独注明；`--json` 每项多 `targets`（worker 原样报出）与 `available_targets`（与引擎支持的目标求交后的结果）。旧版本 worker 没有这些字段时按「只支持桌面网页」处理，不报错。
 - 用户指南新增引擎能力矩阵一页（`docs/user-guide/engines.md`）：引擎 × 测试目标 × 确定性 step 的句柄 × 默认模型 × 计价公式。
+- 判定记录为设备会话预留的字段：`run --json` 与 `explain --json` 的 job 可带 `sessions[]`（每个远程访问会话的名称、来源、是否确认停止、占用秒数）与 `device_observed_s` / `device_observed_missing` 两个计量键，run 级同样合计；桌面用例不出现这些键。文本输出对设备 job 显示设备占用时长，并列出未能确认停止的会话名。worker 在被测对象未就绪时报出的 scope 级错误会把未执行的 scenario 标为 `skipped`、旁注「未执行（scope 级错误，原因见 job 判定）」。
 
 ### 变化
 
@@ -20,6 +21,8 @@
 - **引擎不再内建 `页面地址匹配 "<正则>"` 这条确定性 step**。要精确核对地址，把仓库 `features/steps/` 里的模板复制进项目的 `steps/`（两个引擎各一份）；用到它而没有带上这条 step 的现有用例，升级后这一步改由 AI 判定，`gherkai plan` 里这一步不再带确定性标注。
 - 确定性 step 可以声明接受的关键字（`keywords`），内建导航只接受 `Given` / `When`：`Then` 后只写一个地址的 step 记 `error`、不交给 AI。`plan` 的文本视图用 ⚠ 标出这类 step，`--json` 的 `deterministic` 多一态 `keyword_mismatch`；`list-deterministic` 多一列「关键字」，`--json` 每项多 `keywords`。
 - 确定性 step 带 DataTable / DocString 时这一步记 `error`；此前多行参数被静默忽略。
+- **job 的终结判定统一为一张真值表**，本机 `run` 与后台 `submit` 两条路径用同一份判定。对桌面用例有三处可见变化：worker 被强制结束（负退出码，如被系统 kill -9）不再按正常退出处理，这一步之前会按内容判定、现在一律记 `error`；worker 正常退出却一条 scenario 判定都没报的 job 由 `passed` 改为 `error`（原因写「worker 未报告任何 scenario 判定」）；一个 job 同时触发超时与 fail-fast 中止时统一按超时归因（`error` 加 `timeout`），此前两条路径的顺序不一致。超时与中止的消息也统一为「job 超时（预算 Ns，已中止）」。
+- 本机 `run` 在决定停止一个 job 之后继续读完 worker 的收尾事件（最多等到停止宽限再加几秒），worker 在收尾里报出的事实不再丢失。
 
 ## [1.4.9] - 2026-10-12
 

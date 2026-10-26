@@ -27,6 +27,9 @@ from gherkai_core.model import (
     ScenarioStarted,
     ScopeDone,
     ScopeStarted,
+    SessionClosed,
+    SessionOpened,
+    SessionRecord,
     Status,
     StepDone,
     StepResult,
@@ -34,6 +37,7 @@ from gherkai_core.model import (
     StepStarted,
     _NON_VERDICT,
 )
+from gherkai_core.wire import EX_WORKER_NETWORK
 
 
 # ============================================================================
@@ -53,6 +57,45 @@ class Timing:
     scenario_start: dict[str, float] = field(default_factory=dict)
     step_start: dict[tuple[str, int], float] = field(default_factory=dict)
     steps: dict[str, list[StepResult]] = field(default_factory=dict)  # scenario_id → 暂存 StepResult
+    # 代表会话是否已由 scope_started 锁定（ADR 0051 决策 4 / 0024 sessionId 取值优先级）：锁定后任何 session_opened 都不改写
+    session_locked: bool = False
+    # 见过任何事件（scenario_started / step 事件 / scenario_done）的 scenario：scope 级 error 时据此判「零事件」才合成 SKIPPED
+    seen_scenarios: set[str] = field(default_factory=set)
+
+
+def representative_session(current: str | None, locked: bool, event: Event) -> tuple[str | None, bool]:
+    """代表会话（JobState / JobResult 的 session_id）的取值规则（ADR 0051 决策 4 / 0024 sessionId 取值优先级）——
+    reduce_event 与 persist.on_event 共用这一份，两条路径不各写一套。
+
+    scope_started 带 sessionId 即为执行会话、一经取到锁定；锁定前取最近一条 origin 不是 attempted 的 session_opened
+    （换台重建时后到的覆盖先到的）；attempted 永不写入、不覆盖已有值；scope_done 只在还没有值时补。任何路径都不用 None
+    覆盖已有值。返回 (新的代表会话, 新的锁定状态)。"""
+    if isinstance(event, ScopeStarted):
+        if event.session_id is not None:
+            return event.session_id, True
+        return current, locked
+    if isinstance(event, SessionOpened):
+        if locked or event.origin == "attempted" or event.session_id is None:
+            return current, locked
+        return event.session_id, locked
+    if isinstance(event, ScopeDone):
+        if current is None and event.session_id is not None:
+            return event.session_id, locked
+        return current, locked
+    return current, locked
+
+
+def _session_key(session_id: str | None, name: str) -> str:
+    """会话事件的配对键：sessionId，缺省时回退为会话名（ADR 0051 决策 4）。"""
+    return session_id if session_id is not None else f"name:{name}"
+
+
+def _find_session(sessions: list[SessionRecord], session_id: str | None, name: str) -> SessionRecord | None:
+    key = _session_key(session_id, name)
+    for s in sessions:
+        if _session_key(s.session_id, s.name) == key:
+            return s
+    return None
 
 
 def reduce_event(
@@ -67,13 +110,30 @@ def reduce_event(
     **这是 `schedule._Worker._reduce` 提炼出的同一份逻辑**（schedule delegate 到此，零行为变化）。
     now 是事件到达 core 的墙钟（同步路径下取 schedule 注入的 clock()；无状态路径下由 reconciler 从 events
     表 item 的 emit 时刻还原）。纯函数：只改传入的 result/scenario_status/timing，无 I/O。
+    会话事件（ADR 0051 决策 4、7）在这里归约成 result.sessions 并按代表会话规则更新 result.session_id；scope 级 error
+    （scope_done.status == error）在这里对零事件的 scenario 合成 SKIPPED 明细——两条归约路径的明细出自同一份代码。
     """
+    # 代表会话（ADR 0051 决策 4）：与 persist.on_event 共用同一规则函数
+    result.session_id, timing.session_locked = representative_session(result.session_id, timing.session_locked, event)
+    if isinstance(event, (ScenarioStarted, StepStarted, StepDone, StepSkipped, ScenarioDone)):
+        timing.seen_scenarios.add(event.scenario_id)
     # started 事件：记各级起始时间戳（now 是事件到达 core 的墙钟，ADR 0024）
     if isinstance(event, ScopeStarted):
         timing.scope_start = now
-        # 会话血缘随首事件即落（ADR 0028）：超时/中止时 scope_done 不会到，但 session_id 此刻已记下。
-        if event.session_id is not None:
-            result.session_id = event.session_id
+    elif isinstance(event, SessionOpened):
+        # 每个会话一项，按配对键去重（同一 ARN 重发不重复登记）；attempted 的尝试也进清单（session_id 为 None、只有名）
+        if _find_session(result.sessions, event.session_id, event.name) is None:
+            result.sessions.append(SessionRecord(session_id=event.session_id, name=event.name, origin=event.origin))
+    elif isinstance(event, SessionClosed):
+        rec = _find_session(result.sessions, event.session_id, event.name)
+        if rec is None:
+            # 协议要求先 opened 再 closed；没见过 opened 的 closed 仍登记（会话确实存在过，计量与确认集都要算它），
+            # origin 按 created 记——这是 worker 违约下的保守补全，不丢任何会话事实。
+            rec = SessionRecord(session_id=event.session_id, name=event.name, origin="created")
+            result.sessions.append(rec)
+        rec.release = event.release
+        rec.observed_s = event.observed_s
+        rec.provider_minutes = event.provider_minutes
     elif isinstance(event, ScenarioStarted):
         timing.scenario_start[event.scenario_id] = now
     elif isinstance(event, StepStarted):
@@ -117,13 +177,28 @@ def reduce_event(
             )
         )
     elif isinstance(event, ScopeDone):
-        # 仅在带值时设——别让 scope_done 的 None 覆盖已从 scope_started 捕获的血缘（ADR 0028）。
-        if event.session_id is not None:
-            result.session_id = event.session_id
+        # 代表会话已由上面的 representative_session 处理（scope_done 只在还没有值时补，不覆盖已取到的值，ADR 0024）。
         if event.report_refs:
             result.report_refs = result.report_refs + event.report_refs
         if timing.scope_start is not None:
             result.duration_ms = (now - timing.scope_start) * 1000.0
+        if event.status == Status.ERROR:
+            synthesize_skipped(result, timing)
+
+
+def synthesize_skipped(result: JobResult, timing: Timing) -> None:
+    """scope 级 error 后的明细补全（ADR 0051 决策 4；0031 决定一、六）：对 definition 中**零事件**的 scenario 按定义顺序追加
+    scenario 级 SKIPPED，其全部 step 为 SKIPPED(shortcircuited=False, duration_ms=None)。在途 scenario（见过任何事件而没有
+    scenario_done）整条不合成、其未开始的 step 也不合成；不写 scenario_status（合成的 SKIPPED 不进 _aggregate）。
+    明细只依据已收到的完成事实：之后到达的超时、abort 或非零退出只改变判定与归因，不撤销这里合成的明细。"""
+    done = {sr.scenario_id for sr in result.scenarios}
+    for sc in result.job.scenarios:
+        if sc.id in done or sc.id in timing.seen_scenarios:
+            continue
+        result.scenarios.append(ScenarioResult(
+            scenario_id=sc.id, status=Status.SKIPPED,
+            steps=[StepResult(index=st.index, status=Status.SKIPPED, duration_ms=None, shortcircuited=False) for st in sc.steps],
+        ))
 
 
 # ============================================================================
@@ -257,45 +332,153 @@ def _reduce_scope(job: Job, recs: list[EventRecord]) -> tuple[JobResult, Status,
     result = JobResult(job=job, status=Status.PENDING)
     scenario_status: dict[str, Status] = {}
     timing = Timing()
-    saw_scope_started = saw_scope_done = False
+    saw_scope_started = saw_session_opened = False
+    scope_done: ScopeDone | None = None
     for r in evs:
         ev = r.event
         if ev is None:  # evs 已按 kind=='event' 且 event 非 None 过滤，这里显式窄化（类型层面）
             continue
         if isinstance(ev, ScopeStarted):
             saw_scope_started = True
+        if isinstance(ev, SessionOpened):
+            saw_session_opened = True
         if isinstance(ev, ScopeDone):
-            saw_scope_done = True
+            scope_done = ev
         reduce_event(ev, result, scenario_status, timing, r.emit_ts or 0.0)
     exits = [r.exited for r in recs if r.kind == "exit" and r.exited is not None]
     exited = exits[0] if exits else None
-    status = _job_status(saw_scope_started, saw_scope_done, exited, scenario_status)
-    result.status = status
-    if exited is not None and exited.timed_out:
-        # 归因对齐同步路径（[0031] 决定一：超时是主动中止、记 error+timeout）。投影路径的 job 级归因只由本函数写
-        # （reduce_event 只累积 scenario/step 明细与成本，不写 JobResult 的 error_type/message），故超时分支
-        # 先判即定——stop 是超时处置发起的，超时是根因。
-        result.error_type = "timeout"
-        result.message = (f"job 超时（预算 {job.timeout_s}s，已中止）"
-                          if job.timeout_s else "job 超时（已中止）")
-    elif status == Status.ERROR and result.message is None and exited is not None:
-        # 兜底归因（detached 实际运行教训：worker 起来即崩 → 零事件、判 error、message 全空——使用方无从排障）。
-        # `result.message is None` 是防御性守卫（当前恒真：job 级归因只在本函数写）——若将来 reduce 期开始写
-        # job 级归因，它保证那份归因不被这里的兜底文案盖掉；`exited is not None` 供下面 `exited.exit_code`
-        # 类型收窄（status==ERROR 已蕴含它非 None，见 `_job_status`）。诊断细节在 worker stderr（local 落
-        # reconcile.log / cloud 落 CloudWatch task 日志），这里给指向。
-        if exited.exit_code == PLATFORM_FAILED_EXIT:
-            # 平台侧哨兵：起 task 失败（tick 补偿）或容器没能开始运行（观察者，带 reason）——不是 worker 自己的码
-            why = f"：{exited.reason}" if exited.reason else "——详见部署侧日志"
-            result.message = f"worker 未能启动或未正常结束（平台侧未取到退出码）{why}"
-        elif exited.exit_code is None:
-            result.message = "worker 已终止但退出码未知——无法判定为通过，按错误处理"
-        elif exited.exit_code != 0:
-            result.message = f"worker 非正常退出（exit {exited.exit_code}；事件流里没有失败原因——详见 worker 日志）"
-        elif exited.exit_code == 0 and not saw_scope_done:
-            # exit==0 却缺 scope_done，这是进程声称成功、内容没发完的矛盾形态。
-            result.message = "worker 正常退出但没有报完这次运行的结果——按错误处理（详见 worker 日志）"
-    return result, status, max_seq
+    # 终结判定只由终结函数写（ADR 0034 机制二）：reduce_event 只累积明细、成本与会话记录。无状态路径没有 fail-fast，
+    # stop_reason 只可能是 none 或 timeout（推进器写退出记录时带 timed_out）。
+    term = finalize_job(
+        job=job,
+        stop_reason="timeout" if (exited is not None and exited.timed_out) else "none",
+        exited=exited is not None,
+        exit_code=exited.exit_code if exited is not None else None,
+        exit_reason=exited.reason if exited is not None else None,
+        saw_scope_started=saw_scope_started,
+        saw_session_opened=saw_session_opened,
+        scope_done=scope_done,
+        scenario_status=scenario_status,
+        sessions=result.sessions,
+    )
+    result.status, result.error_type, result.message = term.status, term.error_type, term.message
+    apply_device_metering(result)  # 设备计量两键（ADR 0051 决策 7）：桌面 job 保持 None
+    return result, term.status, max_seq
+
+
+# ============================================================================
+# 终结函数与真值表（ADR 0034 机制二）：同步 schedule 与无状态 project 两条路径共用，判定逻辑只此一份
+# ============================================================================
+
+
+@dataclass(frozen=True)
+class Termination:
+    """终结函数的输出：job 的判定、归因与消息。"""
+
+    status: Status
+    error_type: str | None
+    message: str | None
+
+
+RELEASE_FAILED_HINT = "设备会话未能确认停止，可能仍在计费，请在设备控制台核对并手动停止"
+
+
+def unconfirmed_sessions(sessions: list[SessionRecord]) -> list[SessionRecord]:
+    """未确认集 U（ADR 0034 机制二）：发过 session_opened 而没有 release: confirmed 的会话；attempted 的尝试天然在内。"""
+    return [s for s in sessions if not s.confirmed]
+
+
+def _release_failed_message(unconfirmed: list[SessionRecord]) -> str:
+    """U 非空时追加到 job message 的产品语言提示：列出会话名；attempted 的尝试另列为「结果未知的创建尝试」。"""
+    created = [s.name for s in unconfirmed if s.origin != "attempted"]
+    attempted = [s.name for s in unconfirmed if s.origin == "attempted"]
+    parts = [RELEASE_FAILED_HINT]
+    if created:
+        parts.append("未确认停止的会话：" + "、".join(created))
+    if attempted:
+        parts.append("结果未知的创建尝试：" + "、".join(attempted))
+    return "；".join(parts)
+
+
+def device_metering(sessions: list[SessionRecord]) -> tuple[float, int]:
+    """设备计量合计（ADR 0051 决策 7）：origin 为 created / discovered 且 observed_s 非 None 的各项之和，与同类 origin 里
+    observed_s 为 None 的项数（含没收到 session_closed 的会话）；attempted 两者都不计。observed_s 为 0.0 计入合计、不计缺失。"""
+    real = [s for s in sessions if s.origin != "attempted"]
+    return (sum(s.observed_s for s in real if s.observed_s is not None),
+            sum(1 for s in real if s.observed_s is None))
+
+
+def is_device_job(job: Job) -> bool:
+    """job 的测试目标是否为设备（判据取 Job 上的目标字段；目标字段落地前所有 job 都是桌面网页，恒 False）。"""
+    target = getattr(job, "target", None)
+    return target is not None and getattr(target, "device", "desktop") != "desktop"
+
+
+def apply_device_metering(result: JobResult) -> None:
+    """按会话记录给 JobResult 填两个设备计量键：设备 job 或已有会话记录的 job 才赋值，桌面 job 保持 None（序列化省键）。"""
+    if result.sessions or is_device_job(result.job):
+        result.device_observed_s, result.device_observed_missing = device_metering(result.sessions)
+
+
+def finalize_job(
+    *,
+    job: Job,
+    stop_reason: str,
+    exited: bool,
+    exit_code: int | None,
+    exit_reason: str | None,
+    saw_scope_started: bool,
+    saw_session_opened: bool,
+    scope_done: ScopeDone | None,
+    scenario_status: dict[str, Status],
+    sessions: list[SessionRecord],
+) -> Termination:
+    """终结函数（ADR 0034 机制二「终结函数与真值表」）：按行序取第一个命中的行给出 (status, error_type, message)。
+
+    输入：stop_reason 取 none、timeout、abort 之一（推进器首次仲裁落定的主动处置）；退出信息（exited 为 False 即未退出；exited
+    且 exit_code 为 None 即退出码未知）；是否见到 scope_done 及其 status / errorType / message；scenario 判定集；会话记录
+    （未确认集 U 由此算出）。exit_reason 是平台侧归因或异常文本，只进消息。
+    U 非空时不论判定为何，message 都追加产品语言提示并列出会话名。两条归约路径只负责准备输入，判定逻辑不写第二份。"""
+    unconfirmed = unconfirmed_sessions(sessions)
+    budget = f"（预算 {job.timeout_s:g}s，已中止）" if job.timeout_s else "（已中止）"
+    if stop_reason == "timeout":
+        status, error_type, message = Status.ERROR, "timeout", f"job 超时{budget}"
+    elif stop_reason == "abort":
+        status, error_type, message = Status.ABORTED, None, "fail-fast：其他 job 失败，本 job 被中止"
+    elif not exited:
+        status = Status.RUNNING if (saw_session_opened or saw_scope_started) else Status.PENDING
+        error_type, message = None, None
+    elif exit_code is None or exit_code != 0:
+        status = Status.ERROR
+        if unconfirmed:
+            error_type, message = "release_failed", None
+        elif exit_code == EX_WORKER_NETWORK:
+            error_type, message = "network_error", f"worker 建连失败（网络/SSL 瞬时故障）：{exit_reason}" if exit_reason else "worker 建连失败（网络/SSL 瞬时故障），退出码 80"
+        elif exit_code == PLATFORM_FAILED_EXIT:
+            why = f"：{exit_reason}" if exit_reason else "——详见部署侧日志"
+            error_type, message = "engine_error", f"worker 未能启动或未正常结束（平台侧未取到退出码）{why}"
+        elif exit_code is None:
+            error_type = "engine_error"
+            message = f"worker 异常：{exit_reason}" if exit_reason else "worker 已终止但退出码未知——无法判定为通过，按错误处理"
+        else:
+            error_type, message = "engine_error", f"worker 非正常退出（exit {exit_code}；事件流里没有失败原因——详见 worker 日志）"
+    elif scope_done is None:
+        status, error_type = Status.ERROR, "engine_error"
+        message = "worker 正常退出但没有报完这次运行的结果——按错误处理（详见 worker 日志）"
+    elif scope_done.status == Status.ERROR:
+        status = Status.ERROR
+        error_type, message = ("release_failed", None) if unconfirmed else (scope_done.error_type, scope_done.message)
+    elif not scenario_status:
+        status, error_type, message = Status.ERROR, "engine_error", "worker 未报告任何 scenario 判定"
+    else:
+        status = _aggregate(list(scenario_status.values()))
+        error_type, message = None, None
+        if unconfirmed:  # worker 违约：判定完整却有会话未确认停止 → 改判 ERROR、release_failed
+            status, error_type = Status.ERROR, "release_failed"
+    if unconfirmed:
+        hint = _release_failed_message(unconfirmed)
+        message = f"{message}；{hint}" if message else hint
+    return Termination(status=status, error_type=error_type, message=message)
 
 
 class NonTerminalSnapshot(RuntimeError):
@@ -342,7 +525,18 @@ def project_full(meta: RunMeta, records: list[EventRecord], *, run_duration_ms: 
         duration_ms=run_duration_ms,
         total_tokens=sum(tok) if tok else None,
         total_time_worked_s=sum(tw) if tw else None,
+        **run_device_metering(job_results),
     )
+
+
+def run_device_metering(job_results: list[JobResult]) -> dict:
+    """run 级设备计量合计（ADR 0051 决策 7）：各设备 job 两键之和；没有设备 job 时两键都是 None（序列化省键）。
+    同步 schedule 与无状态 project_full 共用这一份写法。"""
+    dev = [jr for jr in job_results if jr.device_observed_s is not None or jr.device_observed_missing is not None]
+    if not dev:
+        return {"device_observed_s": None, "device_observed_missing": None}
+    return {"device_observed_s": sum(jr.device_observed_s or 0.0 for jr in dev),
+            "device_observed_missing": sum(jr.device_observed_missing or 0 for jr in dev)}
 
 
 def _job_status(
@@ -350,8 +544,14 @@ def _job_status(
     saw_scope_done: bool,
     exited: TaskExited | None,
     scenario_status: dict[str, Status],
+    *,
+    saw_session_opened: bool = False,
+    scope_done_status: Status | None = None,
+    sessions: list[SessionRecord] | None = None,
 ) -> Status:
-    """单个 job 的态（ADR 0034 机制二「两件都要」纯谓词，含 worker 崩溃修正）。
+    """单个 job 的态——终结函数（`finalize_job`，ADR 0034 机制二真值表）的薄委托，只取 status；保留此名供既有引用与测试。
+
+    下面的 docstring 记录的是「两件都要」谓词的来历与各分支的理由，判定逻辑本身在 finalize_job 一处。
 
     「两件都要」的**内容完整（scope_done）要求只对声称成功（exit==0）的进程成立**——退出码非零时进程非干净
     终止（崩溃/网络故障/SIGKILL），scope_done 本就不会来（worker 崩了没机会发），此时进程终止本身即终态信号，
@@ -368,24 +568,24 @@ def _job_status(
         · exit_code == 0 且 saw_scope_done → scenario 归约的终态（passed/failed/error）；
         · exit_code == 0 但没 scope_done（含零事件干净退出）→ ERROR（内容不完整但进程说成功，两者矛盾，
           judged as error 比 running 死循环安全）。
-    - 无 task_exited（进程还没终止）：saw_scope_started → RUNNING；否则 PENDING（还没起/还没写事件）。
+    - 无 task_exited（进程还没终止）：见过 session_opened 或 scope_started → RUNNING；否则 PENDING（还没起/还没写事件）。
     """
-    if exited is not None:
-        if exited.timed_out:
-            # 超时处置的 stop（ADR 0034「job timeout」节）：不论 exit_code 形态（协作以退出码 0 退出 / SIGKILL / 未落值），
-            # 处置本身即终态信号——归 ERROR，归因由 _reduce_scope 补 error_type="timeout"。
-            return Status.ERROR
-        if exited.exit_code is None:
-            return Status.ERROR  # 有退出记录却无码 → 不可判定为通过；判 RUNNING 会永久 wedge（补码没有第二次机会）
-        if exited.exit_code != 0:
-            return Status.ERROR  # 进程非干净终止 → 终态（crash/网络故障/SIGKILL/launch 失败统一收敛）
-        # 到此 exit_code == 0（干净退出）：内容完整才算数
-        if not saw_scope_done:
-            return Status.ERROR  # 干净退出却没发完 scope_done（含零事件）：矛盾 → error（不死循环）
-        return _aggregate(list(scenario_status.values()))
-    if saw_scope_started:
-        return Status.RUNNING  # 会话已起、进程还在运行
-    return Status.PENDING  # 还没起/还没写事件（也无退出信号）
+    probe_job = Job(scope_id="_", scope_name="_", engine="_", scenarios=())
+    scope_done = ScopeDone(scope_id="_", status=scope_done_status,
+                           error_type="engine_error" if scope_done_status == Status.ERROR else None,
+                           message=None) if saw_scope_done else None
+    return finalize_job(
+        job=probe_job,
+        stop_reason="timeout" if (exited is not None and exited.timed_out) else "none",
+        exited=exited is not None,
+        exit_code=exited.exit_code if exited is not None else None,
+        exit_reason=exited.reason if exited is not None else None,
+        saw_scope_started=saw_scope_started,
+        saw_session_opened=saw_session_opened,
+        scope_done=scope_done,
+        scenario_status=scenario_status,
+        sessions=sessions or [],
+    ).status
 
 
 def _lifecycle_rank(status: Status) -> int:

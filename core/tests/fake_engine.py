@@ -8,7 +8,7 @@ from __future__ import annotations
 import threading
 from typing import Callable, Iterator
 
-from gherkai_core.errors import WorkerNetworkError
+from gherkai_core.errors import WorkerExitError, WorkerNetworkError
 from gherkai_core.model import Event, Job
 
 
@@ -16,10 +16,15 @@ class FakeWorkerHandle:
     def __init__(self) -> None:
         self.stopped = False
         self.stop_grace: float | None = None
+        self._stop_event = threading.Event()  # 配了收尾事件的假 worker 在事件发完后等它（模拟 worker 活着、等被停）
 
     def stop(self, grace_period_s: float) -> None:
         self.stopped = True
         self.stop_grace = grace_period_s
+        self._stop_event.set()
+
+    def wait_stopped(self, timeout_s: float) -> bool:
+        return self._stop_event.wait(timeout_s)
 
 
 class FakeEngine:
@@ -36,12 +41,19 @@ class FakeEngine:
         crash_after: dict[str, int] | None = None,
         network_crash_after: dict[str, int] | None = None,
         on_event: Callable[[str, int], None] | None = None,
+        tail_after_stop: dict[str, list[Event]] | None = None,
+        exit_code: dict[str, int] | None = None,
     ) -> None:
         self.behaviors = behaviors
         self.crash_after = crash_after or {}
         # network_crash_after: scope_id -> 第 N 个事件后抛 WorkerNetworkError（模拟建连失败，ADR 0028）。
         # N=0 模拟「会话未起就建连失败」（零事件）。每个 scope_id 的崩溃次数可用 list 表达递减（模拟重试后成功）。
         self.network_crash_after = network_crash_after or {}
+        # tail_after_stop: scope_id -> 被 schedule 停止后仍吐出的收尾事件（模拟 worker 收 SIGTERM 后走终结四阶段、发
+        # session_closed，ADR 0051 决策 5；core 须在停止后继续有界消费才收得到，ADR 0034 机制二）。
+        self.tail_after_stop = tail_after_stop or {}
+        # exit_code: scope_id -> 事件流结束后以该非零退出码退出（抛 WorkerExitError，模拟 worker 发完事件又异常退出 / 被 SIGKILL）
+        self.exit_code = exit_code or {}
         self.run_count: dict[str, int] = {}  # 每个 scope_id 被 run_scope 的次数（验证 job 级重试）
         self.on_event = on_event
         self.handles: dict[str, FakeWorkerHandle] = {}
@@ -64,7 +76,10 @@ class FakeEngine:
         net_crash_at = nc[attempt] if isinstance(nc, list) and attempt < len(nc) else (nc if isinstance(nc, int) else None)
         i = 0
         for ev in events:
-            if handle.stopped:  # 被 schedule 优雅停 → worker 配合退出（ADR 0024 终止契约）
+            if handle.stopped:  # 被 schedule 优雅停 → worker 配合退出（ADR 0024 终止契约），收尾事件另由 tail_after_stop 给
+                for tail in self.tail_after_stop.get(job.scope_id, []):
+                    yield tail
+                self._maybe_exit(job)
                 return
             if net_crash_at is not None and i >= net_crash_at:
                 raise WorkerNetworkError(f"fake worker {job.scope_id} 建连失败（attempt {attempt}）")
@@ -77,6 +92,19 @@ class FakeEngine:
         # 事件流走完后若仍要 network-crash（net_crash_at 不小于事件数，模拟「零/少事件就建连失败」）
         if net_crash_at is not None and i >= net_crash_at:
             raise WorkerNetworkError(f"fake worker {job.scope_id} 建连失败（attempt {attempt}）")
+        if self.tail_after_stop.get(job.scope_id):
+            # 真 worker 发完事件后仍活着、等被停（这里的事件由后台 reader 线程抢先读完，不等就会在 stop 到达前 EOF）；
+            # 等到停止请求再发收尾事件（模拟 SIGTERM 后的终结四阶段）。等不到即按 EOF 结束（测试不配 stop 时不挂死）。
+            handle.wait_stopped(5.0)
+            if handle.stopped:
+                for tail in self.tail_after_stop[job.scope_id]:
+                    yield tail
+        self._maybe_exit(job)
+
+    def _maybe_exit(self, job: Job) -> None:
+        rc = self.exit_code.get(job.scope_id)
+        if rc:
+            raise WorkerExitError(rc, f"fake worker {job.scope_id} 异常退出 returncode={rc}")
 
 
 class CollectSink:
