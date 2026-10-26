@@ -138,7 +138,7 @@ def render_plan_text(jobs: list[Job], default_engine: str, dispatch: dict | None
     """plan 产出的 Job[] → 人读的树形预检视图（job → scenario → step 及派发标注，不实际运行；结构见 plan_tree，ADR 0047）。
 
     dispatch（可选，ADR 0036 决策 4）：{(scope_id, scenario_id, step_index): probe}——worker 的命中
-    自述。命中 → 行尾标「← 确定性:」；冲突 → 标 ⚠（实际运行该 step 将 error）；None/缺失 → 不标（默认 AI，少噪声）。
+    自述。命中 → 行尾标「← 确定性:」；冲突或关键字不符 → 标 ⚠（实际运行该 step 将 error）；None/缺失 → 不标（默认 AI，少噪声）。
     """
     return render_tree(plan_tree(jobs, default_engine, dispatch))
 
@@ -168,6 +168,9 @@ def _dispatch_hint(dispatch: dict | None, scope_id: str, scenario_id: str, step_
         return ""
     if "conflict" in probe:
         return "  ← ⚠ 命中多条确定性模式（实际执行该 step 将 error；请测试开发收紧注册表里的匹配模式）"
+    if "keyword_mismatch" in probe:
+        kws = " / ".join(probe.get("keywords") or [])
+        return f"  ← ⚠ 写法与关键字不符：这条 step 只在 {kws} 下有意义（实际执行该 step 将 error）"
     return f"  ← 确定性: {probe.get('description', probe.get('pattern', ''))}"
 
 
@@ -190,7 +193,7 @@ def plan_to_dict(jobs: list[Job], default_engine: str, dispatch: dict | None = N
     """plan 产出 → 机器可读 dict（--json）。复用 gherkai_core.serialize 的 job 序列化保单一真理源。
 
     dispatch 非 None 时给每个 step dict 注入 "deterministic" 键（plan 视图字段、非 definition——
-    值为 worker 自述的命中结果：null / {"pattern","description"} / {"conflict":[...]}，ADR 0036）。
+    值为 worker 自述的命中结果：null / {"pattern","description"} / {"conflict":[...]} / {"keyword_mismatch","keywords"}，ADR 0036）。
     """
     from gherkai_core.serialize import job_to_dict
     job_dicts = []

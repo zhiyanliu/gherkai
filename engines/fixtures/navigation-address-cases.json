@@ -1,0 +1,18 @@
+{
+  "_comment": "内建导航模式的跨语言对拍用例（ADR 0020 第 3 条）：两个引擎的 ADDRESS_PATTERN 对每条 text 须给出相同的命中结果，命中时 url 组相同。hit 为 false 的文本走 AI。消费者：engines/novaact/tests/test_deterministic.py 与 engines/midscene/src/worker/deterministic.test.mts。",
+  "cases": [
+    {"text": "\"https://www.wikipedia.org/\"", "hit": true, "url": "https://www.wikipedia.org/"},
+    {"text": "https://en.wikipedia.org/wiki/OpenAI", "hit": true, "url": "https://en.wikipedia.org/wiki/OpenAI"},
+    {"text": "  \"https://example.com/a?b=1&c=2#x\"  ", "hit": true, "url": "https://example.com/a?b=1&c=2#x"},
+    {"text": "\"shop://product/42\"", "hit": true, "url": "shop://product/42", "note": "任意 scheme 都命中；网页目标上由 handler 记 error"},
+    {"text": "\"HTTPS://EXAMPLE.COM/\"", "hit": true, "url": "HTTPS://EXAMPLE.COM/"},
+    {"text": "\"https://example.com", "hit": true, "url": "https://example.com", "note": "引号不配对：模式命中，handler 记 error"},
+    {"text": "打开 \"https://example.com/\"", "hit": false, "note": "1.4 的旧写法，整句交给 AI"},
+    {"text": "\"https://example.com/\"。", "hit": false, "note": "不剥标点"},
+    {"text": "\"https://example.com/\" \"https://example.org/\"", "hit": false, "note": "两个地址不是整句一个地址"},
+    {"text": "tel:123", "hit": false, "note": "没有 ://"},
+    {"text": "\"https://example.com/a b\"", "hit": false, "note": "含未编码空格"},
+    {"text": "'https://example.com/'", "hit": false, "note": "单引号不是地址的一部分"},
+    {"text": "首页", "hit": false}
+  ]
+}

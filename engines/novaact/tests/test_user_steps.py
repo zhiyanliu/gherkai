@@ -216,7 +216,8 @@ def test_capabilities_subprocess_includes_user_steps(tmp_path):
     caps = json.loads(proc.stdout.decode("utf-8"))
     patterns = [e["pattern"] for e in caps["deterministic_steps"]]  # 清单是自述对象的一个键（ADR 0036「5.」）
     assert "P-user-visible" in patterns
-    assert any("页面地址" in p for p in patterns)  # 内建脚手架仍在（叠加、不是替换）
+    from gherkai_worker_novaact.deterministic_steps import ADDRESS_PATTERN
+    assert ADDRESS_PATTERN in patterns  # 内建导航条目仍在（叠加、不是替换，ADR 0020 第 3 条）
 
 
 def test_broken_steps_dir_makes_capabilities_exit_nonzero(tmp_path):

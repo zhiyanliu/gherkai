@@ -50,9 +50,9 @@ def test_capabilities_shape_and_min_grace_from_injected_act_timeout():
     assert NOVA_GRACE_MARGIN_S > 0  # margin 须 > 0（ADR 0024：act 有界返回之后还要会话释放 + 截图排空）
     steps = caps["deterministic_steps"]  # 注册表清单（ADR 0036「2.」），内建脚手架至少一条
     assert isinstance(steps, list) and steps, caps
-    assert all(set(e) == {"pattern", "description", "example"} for e in steps), steps
+    assert all(set(e) == {"pattern", "description", "example", "keywords"} for e in steps), steps
     assert all(e["pattern"] and e["description"] and e["example"] for e in steps), steps
-    assert any("页面地址" in e["pattern"] for e in steps), steps  # 脚手架注册的真 step 在表里
+    assert [e["keywords"] for e in steps] == [["Given", "When"]], steps  # 脚手架只有内建导航一条（ADR 0020 第 2、3 条）
     assert isinstance(caps["model_id"], str) and caps["model_id"], caps  # 组合根按「非空字符串」校验这一位
 
 

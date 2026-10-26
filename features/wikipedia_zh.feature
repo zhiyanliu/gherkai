@@ -6,7 +6,7 @@ Feature: 中文维基搜索（非英文 UI 探针）
 
   @engine:midscene @scope:zh-midscene
   Scenario: Midscene 在中文 UI 上搜索并断言
-    Given 打开 "https://zh.wikipedia.org/"
+    Given "https://zh.wikipedia.org/"
     Then "页面没有出现服务器错误"
     When "在搜索框输入 人工智能 并提交搜索"
     Then "当前页面是关于人工智能的维基百科词条页"
@@ -14,7 +14,7 @@ Feature: 中文维基搜索（非英文 UI 探针）
 
   @engine:novaact @scope:zh-novaact
   Scenario: Nova Act 在中文 UI 上搜索并断言
-    Given 打开 "https://zh.wikipedia.org/"
+    Given "https://zh.wikipedia.org/"
     Then "页面没有出现服务器错误"
     When "在搜索框输入 人工智能 并提交搜索"
     Then "当前页面是关于人工智能的维基百科词条页"

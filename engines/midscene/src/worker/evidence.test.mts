@@ -643,7 +643,7 @@ test("runStep：URL 导航 step（不调 AI）→ 不产 evidence", async () => 
   const { uploader, uploaded } = spyUploader();
   const { events, sink } = collector();
   const { agent } = dumpAgent();
-  await runStep(agent, stepPage, "s:1", { index: 0, keyword: "Given", text: '打开 "https://shop.example.com/"' }, 1, sink,
+  await runStep(agent, stepPage, "s:1", { index: 0, keyword: "Given", text: '"https://shop.example.com/"' }, 1, sink,
     { runDir, scopeId: "sc", uploader, logFn: () => {} });
   const done = events.find((e) => e.type === "step_done");
   assert.equal(done.status, "passed");

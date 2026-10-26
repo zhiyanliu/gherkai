@@ -3,7 +3,7 @@ Feature: 促销页
 
   @scope:catalog-browse
   Scenario: 促销区能看到打折标记
-    Given 打开 "https://books.toscrape.com/"
+    Given "https://books.toscrape.com/"
     Then "页面上有带价格的图书列表"
 
   @scope:catalog-browse

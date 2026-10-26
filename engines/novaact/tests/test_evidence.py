@@ -369,7 +369,7 @@ def test_raised_act_evidence_records_error_with_empty_frames(logs_dir):
 
 def test_deterministic_and_nav_steps_produce_no_evidence(logs_dir):
     sink = _Sink()
-    rs._run_step(_Nova(), "sc:1", {"index": 0, "keyword": "Given", "text": '打开 "https://example.com"'},
+    rs._run_step(_Nova(), "sc:1", {"index": 0, "keyword": "Given", "text": '"https://example.com"'},
                  1, sink, scope_id="sc")
     assert "reportRefs" not in _done(sink)
     assert not (logs_dir / "evidence").exists()
@@ -492,7 +492,7 @@ def test_no_enqueue_when_step_wrote_no_screenshot(logs_dir, monkeypatch):
     u = rs._get_uploader()
     monkeypatch.setattr(u, "enqueue", lambda paths: trace.append(("enqueue", list(paths))))
     sink = _TracingSink(trace)
-    rs._run_step(_Nova(), "sc:1", {"index": 0, "keyword": "Given", "text": '打开 "https://example.com"'},
+    rs._run_step(_Nova(), "sc:1", {"index": 0, "keyword": "Given", "text": '"https://example.com"'},
                  1, sink, scope_id="sc")
     assert [t[0] for t in trace] == ["emit", "emit"]
 

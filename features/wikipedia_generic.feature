@@ -4,6 +4,6 @@
 Feature: Wikipedia 搜索（通用 step 风格）
 
   Scenario: 搜索 OpenAI 并进入词条
-    Given 打开 "https://www.wikipedia.org/"
+    Given "https://www.wikipedia.org/"
     When "在搜索框输入 OpenAI 并提交搜索"
     Then "当前页面是关于 OpenAI 的维基百科词条页"

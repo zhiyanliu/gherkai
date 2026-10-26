@@ -13,6 +13,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { spawn } from "node:child_process";
 import { collectStepFiles, loadUserSteps } from "./user-steps.mjs";
+import { ADDRESS_PATTERN } from "./deterministic.steps.mjs";  // 内建导航条目的模式（真实运行层核对它仍在清单里）
 
 function tmpSteps(files: Record<string, string>): string {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "gherkai-steps-test-"));
@@ -134,7 +135,7 @@ deterministic('嵌套 step', () => {}, { description: "d2", example: "e2" });\n`
   assert.equal(code, 0, `应以退出码 0 结束，stderr=${err}`);
   const patterns = JSON.parse(out).deterministic_steps.map((e: { pattern: string }) => e.pattern);
   // 内建脚手架 + 两个使用方 step 同在一张表里（ADR 0036「真值单一」：注册表是内建加使用方）。
-  assert.ok(patterns.some((p: string) => p.includes("页面地址")), `内建该在：${patterns}`);
+  assert.ok(patterns.includes(ADDRESS_PATTERN), `内建导航该在：${patterns}`);
   assert.ok(patterns.includes('自定义 step "(?<x>[^"]+)"'), `使用方 .mts 该在：${patterns}`);
   assert.ok(patterns.includes("嵌套 step"), `使用方 .mjs 该在：${patterns}`);
 });

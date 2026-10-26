@@ -20,11 +20,11 @@ I/O 契约两态（判据一律是「注入了哪个 env」、非「是否 Farga
   单 act 套 timeout=ACT_TIMEOUT_S 使 in-flight act 有界返回，标志位总能在有限时间被检测。
 
 派发（优先级顺序，ADR 0022/0020/0024）：
-  ① 确定性注册表命中（不投票、可复现，ADR 0022）——表即本包内建脚手架 `deterministic_steps.py`
-     + 使用方 `GHERKAI_STEPS_DIR` 目录下的注册（ADR 0037 决策 4）
-  ② step.text 含 URL 字面量（引号内 https?://）→ 内建确定性导航 go_to_url（不浪费 AI）
-  ③ AI catch-all：keyword=Then → act_get(BOOL) + N 次投票（AI 断言，带 votes）；
-     keyword=When / Given 且非 URL → act（AI 动作/前置动作，无 votes）
+  ① 确定性注册表命中（不投票、可复现，ADR 0022）——表即本包脚手架 `deterministic_steps.py` 里的内建导航
+     （Given / When 后整句是一个地址，ADR 0020 第 3 条）+ 使用方 `GHERKAI_STEPS_DIR` 目录下的注册（ADR 0037 决策 4）；
+     命中但关键字不在条目声明里 → error、不转 AI（ADR 0050 决策 1）；带 DataTable / DocString → error（ADR 0024）
+  ② AI catch-all：keyword=Then → act_get(BOOL) + N 次投票（AI 断言，带 votes）；
+     keyword=When / Given → act（AI 动作/前置动作，无 votes）
 
 cost（ADR 0024）：Nova SDK 原生给 time_worked_s，worker 只报该原生量；core 合计、美元折算交消费者（不内置费率）。
 
@@ -107,7 +107,6 @@ EVIDENCE_DRAIN_SCOPE_END_S = 30.0
 EVIDENCE_DRAIN_EXIT_S = 6.0
 
 
-_URL_IN_QUOTES = re.compile(r'"(https?://[^"]+)"')
 
 
 class _DeterministicCtx:
@@ -123,6 +122,10 @@ class _DeterministicCtx:
     @property
     def page(self):
         return self._nova.page
+
+    def navigate(self, url: str) -> None:
+        """引擎的导航原语（内建导航条目用它打开地址，ADR 0020 第 3 条）：Nova 用 SDK 的 `go_to_url`。"""
+        self._nova.go_to_url(url)
 
 # 事件 sink（ADR 0024「I/O 边缘可注入接口」）：worker 主流程唯一事件出口，抽进 lib/event_sink.py
 # （对称 _uploader、可注入、可测；subprocess 态写 EVENTS_FD fd、无则回落 stdout 调试）。emit 作参数注入
@@ -277,7 +280,7 @@ def _attach_evidence(ev: dict, *, scope_id: str | None, scenario_id: str, step: 
     network_error / engine_error。故这里吞掉一切异常、只留一行日志。
     `status` / `message` 从要 emit 的事件里取（不另算一份，免两份漂）。**追加而非赋值**：`_attach_traj_refs`
     是整体赋值，两者各自赋值会互相覆盖 → 本函数须在它之后调、并 extend 同一个列表。
-    没有 AI 调用的 step（确定性命中 / URL 导航）不产 evidence。
+    没有 AI 调用的 step（确定性命中，含内建导航）不产 evidence。
     """
     try:
         if _no_artifacts() or not acts:
@@ -317,7 +320,7 @@ def _enqueue_evidence_shots(paths: list[str]) -> None:
 def _emit_step_done(sink: EventSink, ev: dict, *, scope_id: str | None, scenario_id: str,
                     step: dict, acts: list) -> None:
     """**有 AI 调用的 step** 判定已成后的唯一收尾出口：产 evidence → 挂 ref → emit → 才把截图交后台队列
-    （确定性命中 / URL 导航步不产 evidence，判定即 `sink.emit`、不经本函数）。
+    （确定性命中的 step，含内建导航，不产 evidence，判定即 `sink.emit`、不经本函数）。
 
     三条出口（Then 投票 / When·Given 动作 / except 失败）共用一份——这个顺序是契约（ADR 0042 决策一
     「上传时机分两类」），三处各手写一遍时加第四条出口或调顺序必漂（`_attach_traj_refs` 收口前正是如此）。
@@ -368,15 +371,14 @@ def _run_step(nova, scenario_id: str, step: dict, votes_n: int, sink: EventSink,
 
     votes_n：AI 断言（Then）投票次数（来自 job.assertionVotes，ADR 0014）；1 表示不做抖动检测。
     trajectory 收集在**本 step 局部**（每次 AI act 一个），随该 step 的 step_done 报出 step 级 reportRefs
-    （ADR 0027 下沉：act 挂到其所属 step，不再聚合到 scenario 级）。确定性命中/URL 导航步不调 act、无 trajectory。
+    （ADR 0027 下沉：act 挂到其所属 step，不再聚合到 scenario 级）。确定性命中的 step（含内建导航）不调 act、无 trajectory。
 
     scope_id：只为写进 evidence 的自包含头（ADR 0042 决策一），由 main 经 `_run_scenario` 透传；
     缺省 None → evidence 该字段为 null（schema 逐字段容缺），判定与事件不受影响。
 
     派发优先级（ADR 0022/0020/0024）：
-      ① 确定性注册表命中（测试开发注册的精确 handler，不投票、可复现）
-      ② 内建 URL 导航（step 含引号内 URL）
-      ③ Then → AI 断言 + 投票 / When·Given → AI 动作（默认 catch-all）
+      ① 确定性注册表命中（含内建导航条目；精确 handler，不投票、可复现；关键字不符或带多行参数 → error）
+      ② Then → AI 断言 + 投票 / When·Given → AI 动作（默认 catch-all）
     """
     idx = step["index"]
     keyword = step["keyword"]
@@ -388,9 +390,21 @@ def _run_step(nova, scenario_id: str, step: dict, votes_n: int, sink: EventSink,
 
     sink.emit({"type": "step_started", "scenarioId": scenario_id, "stepIndex": idx})  # step 时长起点
     try:
-        # ① 确定性注册表（ADR 0022）：命中走精确 handler、不投票；AssertionError→failed，其它→error
-        hit = _deterministic.match(text)
+        # ① 确定性注册表（ADR 0022；内建导航也是其中一条，ADR 0020 第 3 条）：命中走精确 handler、不投票；
+        #    AssertionError→failed，其它→error。命中但关键字不在条目声明里（ADR 0050 决策 1）→ error、不转 AI、不顺延。
+        try:
+            hit = _deterministic.match(text, keyword)
+        except _deterministic.DeterministicKeywordMismatch as km:
+            sink.emit({"type": "step_done", "scenarioId": scenario_id, "stepIndex": idx,
+                       "status": "error", "errorType": "engine_error", "message": str(km)})
+            return "error"
         if hit is not None:
+            if step.get("argument") is not None:
+                # 确定性 handler 不接收多行参数（ADR 0024）：带了即记 error，不静默忽略
+                sink.emit({"type": "step_done", "scenarioId": scenario_id, "stepIndex": idx,
+                           "status": "error", "errorType": "engine_error",
+                           "message": f"确定性 step 不接受多行参数（DataTable / DocString）：{text}"})
+                return "error"
             handler, groups = hit
             ctx = _DeterministicCtx(nova)
             try:
@@ -408,13 +422,6 @@ def _run_step(nova, scenario_id: str, step: dict, votes_n: int, sink: EventSink,
                     "message": str(ae) or f"确定性断言未过：{text}",
                 })
                 return "failed"
-            sink.emit({"type": "step_done", "scenarioId": scenario_id, "stepIndex": idx, "status": "passed"})
-            return "passed"
-
-        url_match = _URL_IN_QUOTES.search(text)
-        if url_match:
-            # ② 内建确定性导航（ADR 0020）：抽 URL 直接 go_to_url，不浪费 AI
-            nova.go_to_url(url_match.group(1))
             sink.emit({"type": "step_done", "scenarioId": scenario_id, "stepIndex": idx, "status": "passed"})
             return "passed"
 

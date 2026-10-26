@@ -47,9 +47,9 @@ def test_no_ansi_when_stdout_is_not_a_tty_and_none_shows_dash():
 def test_markup_and_emoji_codes_in_user_text_render_literally():
     text = render_table(["step"], [['[red]Then[/] :smile: [link=http://x]y[/link]']], width=200)
     assert "[red]Then[/] :smile: [link=http://x]y[/link]" in text
-    tree = TreeNode("[bold]根[/bold]"); tree.add("[0] Given 打开 \"http://a\"")
+    tree = TreeNode("[bold]根[/bold]"); tree.add("[0] Given \"http://a\"")
     out = render_tree(tree)
-    assert "[bold]根[/bold]" in out and '[0] Given 打开 "http://a"' in out
+    assert "[bold]根[/bold]" in out and '[0] Given "http://a"' in out
 
 
 def test_color_is_emitted_when_enabled_and_absent_when_disabled(monkeypatch):

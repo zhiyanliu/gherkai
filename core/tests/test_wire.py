@@ -29,7 +29,7 @@ def test_job_to_json_shape():
                 id="t.feature:5",
                 name="搜索",
                 steps=(
-                    Step(0, "Given", '打开 "https://x"'),
+                    Step(0, "Given", '"https://x"'),
                     Step(1, "When", "搜索 OpenAI"),
                     Step(2, "Then", "进入词条页"),
                 ),
@@ -43,7 +43,7 @@ def test_job_to_json_shape():
     assert len(d["scenarios"]) == 1
     sc = d["scenarios"][0]
     assert sc["id"] == "t.feature:5"
-    assert sc["steps"][0] == {"index": 0, "keyword": "Given", "text": '打开 "https://x"'}
+    assert sc["steps"][0] == {"index": 0, "keyword": "Given", "text": '"https://x"'}
     # 无 argument 的 step 不带 argument 键
     assert "argument" not in sc["steps"][1]
 

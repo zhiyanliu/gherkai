@@ -546,6 +546,17 @@ def query_capabilities(engine: str, *, steps_dir: str | Path | None = None,
             f"引擎 {engine} 自述的确定性 step 清单不是数组：{caps.get('deterministic_steps')!r}"
             "——worker 与命令行工具版本不一致？两者须同版本安装。"
         )
+    # 条目的 keywords 声明（ADR 0050 决策 1）：可缺（旧 worker，视为接受全部关键字）；有则须是封闭集合里不重复的非空数组。
+    for entry in caps["deterministic_steps"]:
+        kws = entry.get("keywords") if isinstance(entry, dict) else None
+        if kws is None:
+            continue
+        if (not isinstance(kws, list) or not kws or len(set(kws)) != len(kws)
+                or any(k not in ("Given", "When", "Then") for k in kws)):
+            raise RuntimeError(
+                f"引擎 {engine} 自述的确定性 step 条目 keywords 不合契约：{kws!r}"
+                "——worker 与命令行工具版本不一致？两者须同版本安装。"
+            )
     # 模型 id 同类校验：doctor 据它显示「这台机器实际会用的模型」（ADR 0004「模型版本选择策略」的 env 覆盖因此
     # 可见）。缺键 / 空串会让那一行显示成没信息的「模型 」，等于把「不知道」伪装成「知道了」——与下限、清单同为
     # 版本/实现不一致的信号，一并 fail-loud。
@@ -558,17 +569,19 @@ def query_capabilities(engine: str, *, steps_dir: str | Path | None = None,
     return caps
 
 
-def match_deterministic(engine: str, texts: list[str], *, steps_dir: str | Path | None = None,
+def match_deterministic(engine: str, items: list[dict], *, steps_dir: str | Path | None = None,
                         timeout_s: float = 60.0) -> list[dict | None]:
-    """批量问某引擎 worker「这些 step 文本各命中哪条确定性模式」（ADR 0036 决策 4，plan 标注用）。
+    """批量问某引擎 worker「这些 step 各命中哪条确定性模式」（ADR 0036 决策 4，plan 标注用）。
 
-    spawn `worker --match-steps`、stdin 喂 JSON 文本数组、收逐条结果（None 表示走 AI /
-    {"pattern","description"} 表示命中 / {"conflict":[...]} 表示命中多条——实际运行时将 error，用例预检提前暴露）。
-    匹配语义 100% 在 worker（同一注册表同一 search 实现），CLI 零复刻（ADR 0022「匹配放 worker」红线）。
+    items 每项 `{"keyword", "text"}`；spawn `worker --match-steps`、stdin 喂 JSON 数组、收逐条结果（None 表示走 AI /
+    {"pattern","description"} 表示命中 / {"conflict":[...]} 表示命中多条 / {"keyword_mismatch", "keywords"} 表示命中的
+    条目不接受这个关键字——后两种实际运行时将 error，用例预检提前暴露）。
+    匹配语义 100% 在 worker（同一注册表同一 search 实现），CLI 零复刻（ADR 0022「匹配放 worker」红线）；关键字只用于
+    核对条目的 keywords 声明，不进模式匹配（ADR 0050 决策 1）。
     异常语义同 `query_capabilities`（调用方 plan 做 best-effort 降级）。
     """
     return _ask_worker(engine, "--match-steps", what="match 查询", steps_dir=steps_dir,
-                       timeout_s=timeout_s, payload=json.dumps(texts, ensure_ascii=False).encode("utf-8"))
+                       timeout_s=timeout_s, payload=json.dumps(items, ensure_ascii=False).encode("utf-8"))
 
 
 def make_resolver(engines: dict[str, Engine]):

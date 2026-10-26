@@ -615,9 +615,11 @@ def _cmd_list_deterministic(args) -> int:
     if not entries:
         print("  （空——该引擎当前没有注册任何确定性 step，全部 step 走 AI）")
         return 0
-    # 表格渲染（ADR 0047）：示例列是 feature 作者的复制源，放最前
-    print(render_table(["示例", "说明", "模式"],
-                       [[e.get("example", ""), e.get("description", "（无描述）"), e.get("pattern", "")] for e in entries],
+    # 表格渲染（ADR 0047）：示例列是 feature 作者的复制源，放最前；关键字列只在条目有声明时有内容（缺省接受全部）
+    print(render_table(["示例", "说明", "模式", "关键字"],
+                       [[e.get("example", ""), e.get("description", "（无描述）"), e.get("pattern", ""),
+                         " / ".join(e["keywords"]) if e.get("keywords") and len(e["keywords"]) < 3 else "任意"]
+                        for e in entries],
                        wrap=[1]))  # 示例与模式是复制源、不折断；说明列可折
     return 0
 
@@ -1030,8 +1032,9 @@ def _validate_worker_variant(args) -> bool:
 def _probe_deterministic_dispatch(jobs, steps_dir: str | None) -> dict | None:
     """plan 的派发预期标注（ADR 0036 决策 4）：按引擎分组 step 文本、批量问 worker 命中结果。
 
-    返回 {(scope_id, scenario_id, step_index): probe} 或 None（全部引擎都没问成）。match 用**裸 step 文本**
-    ——与 worker 实际执行时派发的匹配面完全一致（不 unquote、不拼 argument，ADR 0024）。按引擎 best-effort：
+    返回 {(scope_id, scenario_id, step_index): probe} 或 None（全部引擎都没问成）。match 用**裸 step 文本**加关键字
+    ——与 worker 实际执行时派发的匹配面完全一致（不 unquote、不拼 argument，ADR 0024；关键字只用于核对条目的
+    keywords 声明，ADR 0050 决策 1）。按引擎 best-effort：
     某引擎查询失败只让该引擎的 job 无标注（stderr 警告），不影响其他引擎与 plan 本体——**含定位链 miss**
     （该引擎运行时没装，ADR 0037 决策 3 明确 plan 保持本降级、不像 run/submit 那样以退出码 2 结束）。**例外**：worker
     起来了但自述非零退出（WorkerSelfDescribeError，典型情形是使用方 steps 加载失败）原样抛出、由 `_cmd_plan` 以退出码 2 结束
@@ -1042,12 +1045,12 @@ def _probe_deterministic_dispatch(jobs, steps_dir: str | None) -> dict | None:
     for j in jobs:
         for sc in j.scenarios:
             for st in sc.steps:
-                by_engine.setdefault(j.engine, []).append(((j.scope_id, sc.id, st.index), st.text))
+                by_engine.setdefault(j.engine, []).append(((j.scope_id, sc.id, st.index), {"keyword": st.keyword, "text": st.text}))
     dispatch: dict = {}
     ok_any = False
     for engine, items in by_engine.items():
         try:
-            probes = compose.match_deterministic(engine, [t for _, t in items], steps_dir=steps_dir)
+            probes = compose.match_deterministic(engine, [it for _, it in items], steps_dir=steps_dir)
         except compose.WorkerSelfDescribeError:
             raise  # 使用方 steps 加载失败：不降级、由 _cmd_plan 以退出码 2 结束（ADR 0037 决策 4「提交侧同样前置」）
         except (ValueError, RuntimeError) as e:
@@ -1055,7 +1058,7 @@ def _probe_deterministic_dispatch(jobs, steps_dir: str | None) -> dict | None:
             continue
         ok_any = True
         for (key, _), probe in zip(items, probes):
-            if probe:  # 只记命中/冲突（AI=None 不进表，渲染端缺失即不标）
+            if probe:  # 只记命中/冲突/关键字不符（AI=None 不进表，渲染端缺失即不标）
                 dispatch[key] = probe
     return dispatch if ok_any else None
 
@@ -1167,6 +1170,10 @@ def _cmd_plan(args) -> int:
         # 「一条 step 最多命中一条模式」是注册表侧的硬约束（判据见 ADR 0022）；下面这句是产品面文案。
         _progress("⚠ 存在命中多条确定性模式的 step（见上标注）：实际执行时这些 step 将 error——"
                   "请测试开发收紧注册表里的匹配模式，让每条 step 只命中一条。")
+    if dispatch and any(p_ and "keyword_mismatch" in p_ for p_ in dispatch.values()):
+        # 条目的关键字声明是注册表侧的契约（ADR 0050 决策 1）；典型是 Then 后只写了一个地址。
+        _progress("⚠ 存在写法与关键字不符的 step（见上标注）：实际执行时这些 step 将 error——"
+                  "请改用标注里给出的关键字，或改写这一步。")
     if getattr(args, "expose_local", None):
         # 标注而不替换（ADR 0035 决策 2）：隧道 URL 是运行时产物，plan 零副作用、显示原始地址
         _progress(f"注：{args.expose_local} 将在 run/submit 时经隧道替换为公网 URL（plan 显示原始地址）")

@@ -7,13 +7,13 @@ Feature: 维基鲁棒性边界打磨
 
   # 2a：多步但动作可控（搜索+打开词条，两步）——隔离"多步本身"是否是问题
   Scenario: 多步骤可控动作 + 模糊判定
-    Given 打开 "https://www.wikipedia.org/"
+    Given "https://www.wikipedia.org/"
     When "搜索 OpenAI 并打开它的维基词条页"
     # ④ 模糊/主观判定：没有客观对错，看 AI 投票稳不稳
     Then "当前页面是一个内容详实、结构完整的百科条目"
 
   # 2b：多步含开放性动作（点正文里"第一个带链接的词"，结果不可预测）——隔离"开放动作"的边界
   Scenario: 多步骤含开放动作
-    Given 打开 "https://www.wikipedia.org/"
+    Given "https://www.wikipedia.org/"
     When "搜索 OpenAI，打开它的维基词条，然后点击词条正文里第一个带链接的词"
     Then "当前停留在维基百科的某个词条页"

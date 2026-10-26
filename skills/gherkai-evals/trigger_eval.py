@@ -42,7 +42,7 @@ REPO = HERE.parent.parent
 EVAL_SET = HERE / "trigger-eval.json"
 WORKSPACE = REPO / "skills" / "gherkai-workspace"
 DEFAULT_CLI_DIR = Path("/tmp/gherkai-eval-cli")
-FEATURE = ('Feature: 登录\n  Scenario: 正常登录\n    Given 打开 "https://example.com/"\n'
+FEATURE = ('Feature: 登录\n  Scenario: 正常登录\n    Given "https://example.com/"\n'
            '    Then "页面标题是 Example Domain"\n')
 # 判触发：Skill(gherkai)，或读了装进去的那份 SKILL.md。
 SKILL_MD_TAIL = "skills/gherkai/SKILL.md"

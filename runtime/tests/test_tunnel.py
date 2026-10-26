@@ -41,11 +41,11 @@ BASE = "https://u:p@abc.ngrok-free.app"
 
 
 def test_map_replaces_step_text_prefix():
-    jobs = [_job_with('打开 "http://localhost:3000/login?next=/home"')]
+    jobs = [_job_with('"http://localhost:3000/login?next=/home"')]
     out = map_origin_in_jobs(jobs, "http://localhost:3000", BASE)
-    assert out[0].scenarios[0].steps[0].text == f'打开 "{BASE}/login?next=/home"'
+    assert out[0].scenarios[0].steps[0].text == f'"{BASE}/login?next=/home"'
     # 原 definition 不可变（frozen 重建，不是原地改）
-    assert jobs[0].scenarios[0].steps[0].text.startswith('打开 "http://localhost:3000')
+    assert jobs[0].scenarios[0].steps[0].text.startswith('"http://localhost:3000')
 
 
 def test_map_replaces_docstring_and_datatable():
@@ -58,7 +58,7 @@ def test_map_replaces_docstring_and_datatable():
 
 
 def test_map_leaves_non_matching_urls_untouched():
-    jobs = [_job_with('打开 "https://wikipedia.org" 再看 "http://127.0.0.1:3000"')]
+    jobs = [_job_with('"https://wikipedia.org" 再看 "http://127.0.0.1:3000"')]
     out = map_origin_in_jobs(jobs, "http://localhost:3000", BASE)
     # 前缀字符串级匹配：localhost 与 127.0.0.1 不互认（ADR 0035 决策 2，文档写明）
     assert out[0].scenarios[0].steps[0].text == jobs[0].scenarios[0].steps[0].text

@@ -651,6 +651,7 @@ def test_list_deterministic_text_and_json(monkeypatch, capsys):
     assert m.main(["list-deterministic", "--engine", "midscene"]) == 0
     out = capsys.readouterr().out
     assert "断言某事" in out and 'Then p "v"' in out and calls == ["midscene"]
+    assert "关键字" in out and "任意" in out  # 条目没有 keywords 声明（旧 worker）→ 显示接受任意关键字
     assert m.main(["list-deterministic", "--json"]) == 0  # 默认 novaact（对齐 run 缺省）
     doc = json.loads(capsys.readouterr().out)
     assert doc == {"engine": "novaact", "deterministic_steps": entries}  # 键集不变：不带 min_grace_s 等自述项
@@ -675,8 +676,9 @@ def _det_feature(tmp_path):
 
 def test_plan_annotates_deterministic_hits(tmp_path, monkeypatch, capsys):
     """plan 标注：worker 自述命中 → 行尾「← 确定性:」；AI step 不标（噪声控制）。"""
-    def fake_match(engine, texts, steps_dir=None):
-        return [({"pattern": "p", "description": "URL 断言"} if "页面地址" in t else None) for t in texts]
+    def fake_match(engine, items, steps_dir=None):
+        assert all(set(it) == {"keyword", "text"} for it in items), items  # 探针每项带关键字与裸文本（ADR 0036 / 0050 决策 1）
+        return [({"pattern": "p", "description": "URL 断言"} if "页面地址" in it["text"] else None) for it in items]
 
     monkeypatch.setattr(m.compose, "match_deterministic", fake_match)
     assert m.main(["plan", str(_det_feature(tmp_path))]) == 0
@@ -688,16 +690,36 @@ def test_plan_annotates_deterministic_hits(tmp_path, monkeypatch, capsys):
 def test_plan_conflict_annotated_and_warned(tmp_path, monkeypatch, capsys):
     """冲突预检（实际运行将 error 的注册表配置错）：行内 ⚠ 标注 + stderr 警告；plan 本体仍 0。"""
     monkeypatch.setattr(m.compose, "match_deterministic",
-                        lambda engine, texts, steps_dir=None: [{"conflict": ["p1", "p2"]} for _ in texts])
+                        lambda engine, items, steps_dir=None: [{"conflict": ["p1", "p2"]} for _ in items])
     assert m.main(["plan", str(_det_feature(tmp_path))]) == 0
     captured = capsys.readouterr()
     assert "⚠ 命中多条确定性模式" in captured.out
     assert "收紧注册表里的匹配模式" in captured.err
 
 
+def test_plan_keyword_mismatch_annotated_and_warned(tmp_path, monkeypatch, capsys):
+    """命中但关键字不符（ADR 0050 决策 1，典型是 Then 后只写一个地址）：行内 ⚠ 标出接受的关键字 + stderr 警告；plan 本体仍 0。"""
+    f = tmp_path / "kw.feature"
+    f.write_text('Feature: k\n  Scenario: s\n    Given "https://x"\n    Then "https://x"\n', encoding="utf-8")
+
+    def fake_match(engine, items, steps_dir=None):
+        return [({"pattern": "nav", "description": "内建导航"} if it["keyword"] != "Then"
+                 else {"keyword_mismatch": "nav", "keywords": ["Given", "When"]}) for it in items]
+
+    monkeypatch.setattr(m.compose, "match_deterministic", fake_match)
+    assert m.main(["plan", str(f)]) == 0
+    captured = capsys.readouterr()
+    assert "← 确定性: 内建导航" in captured.out
+    assert "⚠ 写法与关键字不符：这条 step 只在 Given / When 下有意义" in captured.out
+    assert "写法与关键字不符" in captured.err
+    assert m.main(["plan", str(f), "--json"]) == 0
+    steps = json.loads(capsys.readouterr().out)["jobs"][0]["scenarios"][0]["steps"]
+    assert steps[1]["deterministic"] == {"keyword_mismatch": "nav", "keywords": ["Given", "When"]}
+
+
 def test_plan_annotation_degrades_gracefully(tmp_path, monkeypatch, capsys):
     """标注 best-effort：引擎环境未装/查询失败 → 无标注 + stderr 警告，plan 核心输出不受影响。"""
-    def boom(engine, texts, steps_dir=None):
+    def boom(engine, items, steps_dir=None):
         raise RuntimeError("worker 起不来")
 
     monkeypatch.setattr(m.compose, "match_deterministic", boom)
@@ -709,8 +731,8 @@ def test_plan_annotation_degrades_gracefully(tmp_path, monkeypatch, capsys):
 
 def test_plan_json_carries_deterministic_field(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(m.compose, "match_deterministic",
-                        lambda engine, texts, steps_dir=None: [({"pattern": "p", "description": "d"}
-                                                                if "页面地址" in t else None) for t in texts])
+                        lambda engine, items, steps_dir=None: [({"pattern": "p", "description": "d"}
+                                                                if "页面地址" in it["text"] else None) for it in items])
     assert m.main(["plan", str(_det_feature(tmp_path)), "--json"]) == 0
     doc = json.loads(capsys.readouterr().out)
     steps = doc["jobs"][0]["scenarios"][0]["steps"]
@@ -845,7 +867,7 @@ def test_list_deterministic_worker_not_found_exits_2(monkeypatch, capsys):
 def test_plan_degrades_when_worker_runtime_missing(tmp_path, monkeypatch, capsys):
     """plan 的分叉与 run/submit **相反**（ADR 0037 决策 3 明示 + ADR 0036 决策 4）：保持 best-effort 降级——
     只丢该引擎的派发标注 + stderr 警告，plan 本体照出、以退出码 0 结束（feature 作者没装引擎运行时也该能预检写法）。"""
-    def boom(engine, texts, steps_dir=None):
+    def boom(engine, items, steps_dir=None):
         raise _miss("midscene")
 
     monkeypatch.setattr(m.compose, "match_deterministic", boom)

@@ -33,7 +33,7 @@ def _echo_resolver(mode: str):
 def _job(sid: str, timeout_s: float | None = None) -> Job:
     return Job(scope_id=sid, scope_name=sid, engine="novaact", timeout_s=timeout_s,
                scenarios=(Scenario(id=f"{sid}:0", name="sc", steps=(
-                   Step(0, "Given", '打开 "https://x"'), Step(1, "When", "搜索"), Step(2, "Then", "进入"),
+                   Step(0, "Given", '"https://x"'), Step(1, "When", "搜索"), Step(2, "Then", "进入"),
                )),))
 
 

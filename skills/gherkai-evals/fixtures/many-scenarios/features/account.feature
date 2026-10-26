@@ -3,7 +3,7 @@ Feature: 登录
 
   @scope:login-flow
   Scenario: 打开登录页
-    Given 打开 "https://the-internet.herokuapp.com/login"
+    Given "https://the-internet.herokuapp.com/login"
     Then "页面上有用户名和密码两个输入框"
 
   @scope:login-flow

@@ -2,7 +2,7 @@ Feature: 示例商店结算
   加入购物车后角标与标题的检查。
 
   Background:
-    Given 打开 "https://shop.example.test/"
+    Given "https://shop.example.test/"
 
   Scenario: 加入购物车后角标出现
     When "点击第一件商品的加入购物车按钮"

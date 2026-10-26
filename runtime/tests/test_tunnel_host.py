@@ -17,7 +17,7 @@ INFO = gtunnel.TunnelInfo(url="https://t.ngrok-free.app", auth="u1:p1", pid=4242
 def _job(scope_id: str, timeout_s: float | None) -> Job:
     return Job(scope_id=scope_id, scope_name=scope_id, engine="midscene", timeout_s=timeout_s,
                scenarios=(Scenario(id=f"{scope_id}:1", name="sc",
-                                   steps=(Step(0, "Given", '打开 "http://localhost:3000/a"'),)),))
+                                   steps=(Step(0, "Given", '"http://localhost:3000/a"'),)),))
 
 
 # ---- start_tunnel_for_jobs：起隧道 → 映射 definition → 恒注入 header（决策 1/2/4）----
@@ -37,8 +37,8 @@ def test_start_tunnel_for_jobs_maps_and_injects_headers(monkeypatch):
     assert setup.info is INFO
     assert setup.extra_http_headers == {"ngrok-skip-browser-warning": "1"}
     # 映射后是新 Job（definition 不可变）：原 jobs 不动
-    assert setup.jobs[0].scenarios[0].steps[0].text == '打开 "https://u1:p1@t.ngrok-free.app/a"'
-    assert jobs[0].scenarios[0].steps[0].text == '打开 "http://localhost:3000/a"'
+    assert setup.jobs[0].scenarios[0].steps[0].text == '"https://u1:p1@t.ngrok-free.app/a"'
+    assert jobs[0].scenarios[0].steps[0].text == '"http://localhost:3000/a"'
 
 
 def test_start_tunnel_for_jobs_propagates_tunnel_error(monkeypatch):

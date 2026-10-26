@@ -32,7 +32,7 @@ def _job(scope_id: str = "s", timeout_s: float | None = None) -> Job:
         scope_id=scope_id, scope_name=scope_id, engine="novaact", timeout_s=timeout_s,
         scenarios=(
             Scenario(id=f"{scope_id}:0", name="sc", steps=(
-                Step(0, "Given", '打开 "https://x"'),
+                Step(0, "Given", '"https://x"'),
                 Step(1, "When", "搜索"),
                 Step(2, "Then", "进入页面"),
             )),

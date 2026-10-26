@@ -991,7 +991,7 @@ async function releaseProbe(project: string): Promise<void> {
   log(`完成：${JSON.stringify(rec.completed).slice(0, 1200)}`);
 }
 
-// ---- 深层链接探针：应用目标上含网址的 step 能否用 mobile: deepLink 把被测应用带到某一页 ----
+// ---- DeepLink 探针：应用目标上含网址的 step 能否用 mobile: deepLink 把被测应用带到某一页 ----
 // 每个用例记录命令结果与耗时、之后的前台应用、页面上是否出现目标内容（轮询原生控件树）。只用原生上下文。
 // Android：被测应用为维基百科客户端（DF_APP_ARN 给出上传），覆盖指定包名、连续两次、后台、冷启动、应用不处理的网址、
 //          同域名错误路径、不指定包名的系统分发对照、自定义 scheme。

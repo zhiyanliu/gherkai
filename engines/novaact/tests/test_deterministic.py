@@ -2,6 +2,7 @@
 
 运行（从 repo 根）：uv run pytest -q engines/novaact/tests/test_deterministic.py
 """
+import re
 import pytest
 
 from gherkai_worker_novaact import deterministic as d
@@ -74,7 +75,31 @@ def test_list_registry_reflects_registrations():
         lambda ctx, p: None)
     got = d.list_registry()
     assert got == [{"pattern": r'页面地址匹配 "(?P<p>.+)"', "description": "断言 URL",
-                    "example": 'Then 页面地址匹配 "/x"'}]
+                    "example": 'Then 页面地址匹配 "/x"', "keywords": ["Given", "When", "Then"]}]  # 缺省接受全部关键字
+
+
+def test_keywords_declaration_normalized_and_validated():
+    """条目可声明适用关键字（ADR 0050 决策 1）：封闭集合、非空、不重复，自述按规范顺序给出。"""
+    d.deterministic(r"仅 Then", description="x", example="y", keywords=("Then",))(lambda ctx: None)
+    d.deterministic(r"先 When 后 Given", description="x", example="y", keywords=["When", "Given"])(lambda ctx: None)
+    assert [e["keywords"] for e in d.list_registry()] == [["Then"], ["Given", "When"]]
+    with pytest.raises(ValueError, match="不能为空"):
+        d.deterministic(r"a", description="x", example="y", keywords=())
+    with pytest.raises(ValueError, match="未知取值"):
+        d.deterministic(r"b", description="x", example="y", keywords=("And",))
+    with pytest.raises(ValueError, match="重复"):
+        d.deterministic(r"c", description="x", example="y", keywords=("Then", "Then"))
+
+
+def test_match_checks_keyword_after_hit():
+    """命中模式但关键字不在条目声明里 → DeterministicKeywordMismatch（不转 AI、不顺延）；不传关键字则不核对（兼容）。"""
+    d.deterministic(r"仅给定", description="x", example="y", keywords=("Given",))(lambda ctx: None)
+    assert d.match("仅给定", "Given") is not None
+    assert d.match("仅给定") is not None
+    with pytest.raises(d.DeterministicKeywordMismatch) as ei:
+        d.match("仅给定", "Then")
+    assert "只在 Given 下有意义" in str(ei.value) and "当前关键字是 Then" in str(ei.value)
+    assert ei.value.pattern == r"仅给定" and ei.value.keywords == ("Given",)
 
 
 def test_registry_dump_via_capabilities_real_subprocess():
@@ -86,12 +111,35 @@ def test_registry_dump_via_capabilities_real_subprocess():
 
     # 真子进程按**分发形态**拉起（ADR 0037 决策 3 定位链第二级 `python -m …`），不再指脚本路径——
     # 组合根 spawn 的就是这条 cmd，测的即生产拉起方式。
+    import os as _os
+    env = {k: v for k, v in _os.environ.items() if k != "GHERKAI_STEPS_DIR"}  # 只看脚手架自身的条目
     proc = subprocess.run([_sys.executable, "-m", "gherkai_worker_novaact", "--capabilities"],
-                          capture_output=True, timeout=60)
+                          capture_output=True, timeout=60, env=env)
     assert proc.returncode == 0, proc.stderr.decode()[-300:]
     entries = _json.loads(proc.stdout.decode("utf-8"))["deterministic_steps"]
-    assert any("页面地址" in e["pattern"] for e in entries)
+    from gherkai_worker_novaact.deterministic_steps import ADDRESS_PATTERN
+    # 脚手架差集：内建导航是唯一的内建条目（ADR 0020 第 2、3 条）——曾内置的「页面地址匹配」已退役，示范进 features/steps/。
+    assert [e["pattern"] for e in entries] == [ADDRESS_PATTERN], entries
+    assert entries[0]["keywords"] == ["Given", "When"], entries
     assert all(e.get("description") and e.get("example") for e in entries)
+
+
+def test_address_pattern_cross_engine_fixture():
+    """内建导航模式的跨语言对拍（ADR 0020 第 3 条）：同一组文本在两引擎上命中结果与 url 组一致，用例集只有一份
+    （engines/fixtures/navigation-address-cases.json，Midscene 侧的 deterministic.test.mts 读同一个文件）。"""
+    import json as _json
+    from pathlib import Path
+
+    from gherkai_worker_novaact.deterministic_steps import ADDRESS_PATTERN
+    cases = _json.loads((Path(__file__).resolve().parents[2] / "fixtures" / "navigation-address-cases.json")
+                        .read_text(encoding="utf-8"))["cases"]
+    assert len(cases) >= 10
+    pat = re.compile(ADDRESS_PATTERN)
+    for c in cases:
+        m = pat.search(c["text"])
+        assert (m is not None) == c["hit"], c
+        if m:
+            assert m.group("url") == c["url"], c
 
 
 def test_match_batch_hit_miss_conflict():
@@ -104,16 +152,32 @@ def test_match_batch_hit_miss_conflict():
     assert got[2] == {"pattern": r"地址(?P<a>.+)", "description": "x"}
 
 
+def test_match_batch_items_with_keyword():
+    """match_batch 的每项可带关键字（{keyword, text}，ADR 0036 / 0050 决策 1）：命中但关键字不符 → keyword_mismatch。"""
+    d.deterministic(r"仅给定", description="x", example="y", keywords=("Given",))(lambda ctx: None)
+    got = d.match_batch([{"keyword": "Given", "text": "仅给定"}, {"keyword": "Then", "text": "仅给定"},
+                         {"keyword": "Then", "text": "没命中"}, "仅给定"])
+    assert got[0] == {"pattern": r"仅给定", "description": "x"}
+    assert got[1] == {"keyword_mismatch": r"仅给定", "keywords": ["Given"]}
+    assert got[2] is None
+    assert got[3] == {"pattern": r"仅给定", "description": "x"}  # 裸字符串（旧版命令行工具）不核对关键字
+
+
 def test_worker_match_steps_mode_real_subprocess():
     """--match-steps 自述模式真子进程：stdin JSON 数组 → 逐条命中结果（真 step 命中面与派发一致）。"""
     import json as _json
     import subprocess
     import sys as _sys
 
-    payload = _json.dumps(['页面地址匹配 "wikipedia"', "纯人话断言"]).encode("utf-8")
+    payload = _json.dumps([{"keyword": "Given", "text": '"https://www.wikipedia.org/"'},
+                           {"keyword": "Then", "text": "https://www.wikipedia.org/"},
+                           {"keyword": "When", "text": '在输入框输入 "https://x.example/"'},
+                           "https://bare.example/"]).encode("utf-8")
     proc = subprocess.run([_sys.executable, "-m", "gherkai_worker_novaact", "--match-steps"],
                           input=payload, capture_output=True, timeout=60)
     assert proc.returncode == 0, proc.stderr.decode()[-300:]
     got = _json.loads(proc.stdout.decode("utf-8"))
-    assert got[0] is not None and "页面地址" in got[0]["pattern"]
-    assert got[1] is None
+    assert got[0] is not None and "://" in got[0]["pattern"] and "内建导航" in got[0]["description"]
+    assert got[1] == {"keyword_mismatch": got[0]["pattern"], "keywords": ["Given", "When"]}  # Then 后只有地址
+    assert got[2] is None  # 句子里还有别的内容 → 不是导航、走 AI
+    assert got[3] is not None and got[3]["pattern"] == got[0]["pattern"]  # 旧形态的裸字符串仍可用

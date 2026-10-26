@@ -49,7 +49,7 @@ echo '<job json>' | AWS_REGION=us-east-1 uv run python -m gherkai_worker_novaact
 
 # 两个非 job 入口（不建会话、不执行 job、零 AWS，[ADR 0036](../../docs/adr/0036-deterministic-capability-discovery.md)）；cli 的 `list-deterministic` / `doctor` / run 前置 / plan 标注即转述它们：
 uv run gherkai-worker-novaact --capabilities                          # 能力自述：{schema_version, engine, min_grace_s, deterministic_steps, model_id}（清单 = 注册表 pattern + description + example）
-echo '["页面地址匹配 \"/wiki/OpenAI\""]' | uv run python -m gherkai_worker_novaact --match-steps   # 批量查询这些 step 各命中什么
+echo '[{"keyword":"Given","text":"\"https://example.com/\""}]' | uv run python -m gherkai_worker_novaact --match-steps   # 批量查询这些 step 各命中什么（内建导航在表里）
 ```
 
 worker 侧**只有这两个 flag**：确定性清单是 `--capabilities` 对象的 `deterministic_steps` 键，**没有 `--list-deterministic` 入口**（加键不加入口，ADR 0036「5.」）；未识别的 flag 会进入 job 模式并读取 stdin，不会输出不完整的自述。

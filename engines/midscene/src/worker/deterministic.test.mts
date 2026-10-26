@@ -2,6 +2,10 @@
 // 运行：npm test（node --import tsx --test "src/**/*.test.mts"）
 import { test, beforeEach } from "node:test";
 import assert from "node:assert";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { fileURLToPath } from "node:url";
+import { ADDRESS_PATTERN } from "./deterministic.steps.mjs";  // 内建导航条目的模式（import 副作用注册的条目被 beforeEach 清掉）
 import {
   deterministic,
   match,
@@ -9,6 +13,7 @@ import {
   _clear,
   DeterministicConflict,
   DeterministicAssertion,
+  DeterministicKeywordMismatch,
   listRegistry,
 } from "./deterministic.mjs";
 
@@ -58,8 +63,36 @@ test("缺元数据注册 fail-loud（ADR 0036：能力必须可发现）", () =>
 test("listRegistry 自述含 pattern/description/example（ADR 0036）", () => {
   deterministic('页面地址匹配 "(?<p>.+)"', () => {}, { description: "断言 URL", example: 'Then 页面地址匹配 "/x"' });
   assert.deepEqual(listRegistry(), [
-    { pattern: '页面地址匹配 "(?<p>.+)"', description: "断言 URL", example: 'Then 页面地址匹配 "/x"' },
-  ]);
+    { pattern: '页面地址匹配 "(?<p>.+)"', description: "断言 URL", example: 'Then 页面地址匹配 "/x"', keywords: ["Given", "When", "Then"] },
+  ]);  // 缺省接受全部关键字
+});
+
+test("keywords 声明：封闭集合、非空、不重复，自述按规范顺序（ADR 0050 决策 1）", () => {
+  deterministic("仅 Then", () => {}, { description: "x", example: "y", keywords: ["Then"] });
+  deterministic("先 When 后 Given", () => {}, { description: "x", example: "y", keywords: ["When", "Given"] });
+  assert.deepEqual(listRegistry().map((e) => e.keywords), [["Then"], ["Given", "When"]]);
+  assert.throws(() => deterministic("a", () => {}, { description: "x", example: "y", keywords: [] }), /不能为空/);
+  assert.throws(() => deterministic("b", () => {}, { description: "x", example: "y", keywords: ["And" as any] }), /未知取值/);
+  assert.throws(() => deterministic("c", () => {}, { description: "x", example: "y", keywords: ["Then", "Then"] }), /重复/);
+});
+
+test("match 在命中后核对关键字：不符 → DeterministicKeywordMismatch；不传关键字不核对（兼容）", () => {
+  deterministic("仅给定", () => {}, { description: "x", example: "y", keywords: ["Given"] });
+  assert.ok(match("仅给定", "Given"));
+  assert.ok(match("仅给定"));
+  assert.throws(() => match("仅给定", "Then"), (e: any) =>
+    e instanceof DeterministicKeywordMismatch && /只在 Given 下有意义/.test(e.message) && /当前关键字是 Then/.test(e.message)
+    && e.pattern === "仅给定" && JSON.stringify(e.keywords) === JSON.stringify(["Given"]));
+});
+
+test("matchBatch 的每项可带关键字：命中但不符 → keyword_mismatch；裸字符串不核对", () => {
+  deterministic("仅给定", () => {}, { description: "x", example: "y", keywords: ["Given"] });
+  const got = matchBatch([{ keyword: "Given", text: "仅给定" }, { keyword: "Then", text: "仅给定" },
+    { keyword: "Then", text: "没命中" }, "仅给定"]);
+  assert.deepEqual(got[0], { pattern: "仅给定", description: "x" });
+  assert.deepEqual(got[1], { keyword_mismatch: "仅给定", keywords: ["Given"] });
+  assert.equal(got[2], null);
+  assert.deepEqual(got[3], { pattern: "仅给定", description: "x" });
 });
 
 
@@ -70,4 +103,17 @@ test("matchBatch：命中/未命中/冲突结构化返回（ADR 0036 决策 4，
   assert.deepEqual(got[0], { conflict: ['页面地址匹配 "(?<p>[^"]+)"', "地址(?<a>.+)"] });
   assert.equal(got[1], null);
   assert.deepEqual(got[2], { pattern: "地址(?<a>.+)", description: "x" });
+});
+
+test("内建导航模式的跨语言对拍：engines/fixtures 的用例集在 JS 侧给出相同的命中与 url 组（ADR 0020 第 3 条）", () => {
+  // 用例集只有一份（engines/fixtures/navigation-address-cases.json），Nova 侧的 test_deterministic.py 读同一个文件。
+  const file = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../fixtures/navigation-address-cases.json");
+  const { cases } = JSON.parse(fs.readFileSync(file, "utf8")) as { cases: Array<{ text: string; hit: boolean; url?: string }> };
+  assert.ok(cases.length >= 10);
+  const re = new RegExp(ADDRESS_PATTERN);
+  for (const c of cases) {
+    const m = re.exec(c.text);
+    assert.equal(m !== null, c.hit, JSON.stringify(c));
+    if (m) assert.equal(m.groups?.url, c.url, JSON.stringify(c));
+  }
 });

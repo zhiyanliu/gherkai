@@ -87,11 +87,59 @@ def _done(evts):
 
 # ---- 派发分支 ----
 def test_given_url_goes_to_nav_no_ai(captured):
+    """内建导航（ADR 0020 第 3 条）：Given / When 后整句是一个地址，加不加引号都走 go_to_url、不调 AI。"""
+    for text in ('"https://example.com"', "https://example.com", '  "https://example.com/a?b=1&c=2"  '):
+        nova = _FakeNova(); captured.clear()
+        r = rs._run_step(nova, "Given" and "sc:0", _step("Given", text), 1, captured)
+        assert r == "passed", text
+        assert nova.calls == [("go_to_url", text.strip().strip('"'))], text  # 不浪费 AI
+        assert _done(captured).get("votes") is None  # 确定性导航无 votes
+    nova = _FakeNova(); captured.clear()
+    assert rs._run_step(nova, "sc:0", _step("When", "http://localhost:3000/login"), 1, captured) == "passed"
+    assert nova.calls == [("go_to_url", "http://localhost:3000/login")]
+
+
+def test_sentence_containing_url_is_not_navigation(captured):
+    """句子里还有别的内容 → 不是导航，走 AI（ADR 0020 第 3 条：判据是整句为地址，不是「引号里出现网址」）。"""
     nova = _FakeNova()
-    r = rs._run_step(nova, "sc:0", _step("Given", '打开 "https://example.com"'), 1, captured)
+    r = rs._run_step(nova, "sc:0", _step("When", '在输入框输入 "https://example.com"'), 1, captured)
     assert r == "passed"
-    assert nova.calls == [("go_to_url", "https://example.com")]  # 不浪费 AI
-    assert _done(captured).get("votes") is None  # 确定性导航无 votes
+    assert [c[0] for c in nova.calls] == ["act"]  # 交给 AI 动作，没有导航
+    nova = _FakeNova(); captured.clear()
+    rs._run_step(nova, "sc:0", _step("Given", '"https://example.com"。'), 1, captured)  # 末尾多一个句号：不剥标点
+    assert [c[0] for c in nova.calls] == ["act"]
+    nova = _FakeNova(); captured.clear()
+    rs._run_step(nova, "sc:0", _step("Given", "tel:123"), 1, captured)  # 没有 :// 不是地址
+    assert [c[0] for c in nova.calls] == ["act"]
+
+
+def test_then_with_bare_url_is_error_not_ai(captured):
+    """Then 后只有一个地址：命中内建导航但关键字不符（ADR 0050 决策 1）→ error、不转 AI、不导航。"""
+    nova = _FakeNova()
+    r = rs._run_step(nova, "sc:0", _step("Then", '"https://example.com"'), 1, captured)
+    assert r == "error" and nova.calls == []
+    ev = _done(captured)
+    assert ev["status"] == "error" and ev["errorType"] == "engine_error"
+    assert "只在 Given / When 下有意义" in ev["message"] and "当前关键字是 Then" in ev["message"]
+
+
+def test_navigation_rejects_non_http_scheme_and_unbalanced_quotes(captured):
+    """网页目标只能打开 http(s) 地址；引号不配对也记 error（ADR 0020 第 3 条）。"""
+    nova = _FakeNova()
+    assert rs._run_step(nova, "sc:0", _step("Given", '"shop://product/42"'), 1, captured) == "error"
+    assert nova.calls == [] and "只能打开 http(s) 地址" in _done(captured)["message"]
+    nova = _FakeNova(); captured.clear()
+    assert rs._run_step(nova, "sc:0", _step("Given", '"https://example.com'), 1, captured) == "error"
+    assert nova.calls == [] and "引号不配对" in _done(captured)["message"]
+
+
+def test_deterministic_hit_with_argument_is_error(captured):
+    """确定性 step 不接收多行参数（ADR 0024）：带 DataTable / DocString 即记 error，不静默忽略。"""
+    nova = _FakeNova()
+    step = _step("Given", '"https://example.com"')
+    step["argument"] = {"kind": "docString", "content": "x"}
+    assert rs._run_step(nova, "sc:0", step, 1, captured) == "error"
+    assert nova.calls == [] and "不接受多行参数" in _done(captured)["message"]
 
 
 def test_when_natural_language_goes_to_act(captured):
@@ -252,7 +300,7 @@ def test_then_votes_multiple_trajectories_on_one_step(captured):
 def test_deterministic_and_url_steps_have_no_traj_refs(captured):
     # 确定性导航步不调 act → 无 trajectory、step_done 不带 reportRefs
     nova = _FakeNova()
-    rs._run_step(nova, "sc:0", _step("Given", '打开 "https://example.com"'), 1, captured)
+    rs._run_step(nova, "sc:0", _step("Given", '"https://example.com"'), 1, captured)
     assert "reportRefs" not in _done(captured)
 
 
@@ -277,7 +325,7 @@ def test_run_scenario_shortcircuits_after_error(captured):
     # 上游 step（导航）error → 后续 step 不调 AI（省钱）、发 step_skipped。判据锁 status==error。
     nova = _NavErrorNova(ConnectionError("SSL reset"))
     steps = [
-        _step("Given", '打开 "https://broken.example"', 0),  # 导航失败 → error
+        _step("Given", '"https://broken.example"', 0),  # 导航失败 → error
         _step("When", '"在页面上操作"', 1),                    # 应被短路（不调 act）
         _step("Then", '"页面有预期内容"', 2),                   # 应被短路（不调 act_get）
     ]

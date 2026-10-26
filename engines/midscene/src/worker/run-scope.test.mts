@@ -34,7 +34,8 @@ function fakeAgent(boolSeq: boolean[] = []) {
     calls,
   };
 }
-const fakePage = { goto: async () => {} } as any;
+const gotoCalls: string[] = [];
+const fakePage = { goto: async (url: string) => { gotoCalls.push(url); } } as any;
 
 async function importMod() {
   // run-scope.mts 无入口守卫、也不在顶层执行 main（入口是 bin.mts，ADR 0037 决策 3）→ import 只拿具名导出。
@@ -134,15 +135,61 @@ test("aggregate 优先级 error>failed>passed", async () => {
 });
 
 // ---- runStep 派发分支 ----
-test("runStep: Given 含引号 URL → 走 page.goto、passed、无 AI 调用", async () => {
+test("runStep: Given / When 后整句是一个地址 → 走 page.goto、passed、无 AI 调用（加不加引号都一样，ADR 0020 第 3 条）", async () => {
+  const { runStep } = await importMod();
+  for (const text of ['"https://example.com"', "https://example.com", '  "https://example.com/a?b=1&c=2"  ']) {
+    const { agent, calls } = fakeAgent();
+    gotoCalls.length = 0;
+    const r = await runStep(agent, fakePage, "sc:0", step("Given", text), 1, testSink);
+    assert.equal(r, "passed", text);
+    assert.deepEqual(calls, []);  // 不浪费 AI
+    assert.deepEqual(gotoCalls, [text.trim().replace(/^"|"$/g, "")], text);
+    const ev = events().filter((e) => e.type === "step_done").at(-1);  // 循环内取本轮的 step_done
+    assert.equal(ev.status, "passed");
+    assert.equal(ev.votes, undefined);  // 确定性导航无 votes
+  }
+  const { agent } = fakeAgent();
+  gotoCalls.length = 0;
+  assert.equal(await runStep(agent, fakePage, "sc:0", step("When", "http://localhost:3000/login"), 1, testSink), "passed");
+  assert.deepEqual(gotoCalls, ["http://localhost:3000/login"]);
+});
+
+test("runStep: 句子里还有别的内容、末尾带标点、没有 :// → 不是导航，走 AI", async () => {
+  const { runStep } = await importMod();
+  for (const text of ['在输入框输入 "https://example.com"', '"https://example.com"。', "tel:123"]) {
+    const { agent, calls } = fakeAgent();
+    gotoCalls.length = 0;
+    await runStep(agent, fakePage, "sc:0", step("When", text), 1, testSink);
+    assert.deepEqual(calls, ["aiAct"], text);
+    assert.deepEqual(gotoCalls, [], text);
+  }
+});
+
+test("runStep: Then 后只有一个地址 → 命中内建导航但关键字不符 → error、不转 AI、不导航（ADR 0050 决策 1）", async () => {
   const { runStep } = await importMod();
   const { agent, calls } = fakeAgent();
-  const r = await runStep(agent, fakePage, "sc:0", step("Given", '打开 "https://example.com"'), 1, testSink);
-  assert.equal(r, "passed");
-  assert.deepEqual(calls, []);  // 不浪费 AI
+  gotoCalls.length = 0;
+  const r = await runStep(agent, fakePage, "sc:0", step("Then", '"https://example.com"'), 1, testSink);
+  assert.equal(r, "error");
+  assert.deepEqual(calls, []); assert.deepEqual(gotoCalls, []);
   const ev = events().find((e) => e.type === "step_done");
-  assert.equal(ev.status, "passed");
-  assert.equal(ev.votes, undefined);  // 确定性导航无 votes
+  assert.equal(ev.status, "error"); assert.equal(ev.errorType, "engine_error");
+  assert.match(ev.message, /只在 Given \/ When 下有意义/); assert.match(ev.message, /当前关键字是 Then/);
+});
+
+test("runStep: 网页目标上非 http(s) 地址、引号不配对 → error；带多行参数的确定性 step → error", async () => {
+  const { runStep } = await importMod();
+  for (const [text, re] of [['"shop://product/42"', /只能打开 http\(s\) 地址/], ['"https://example.com', /引号不配对/]] as const) {
+    const { agent } = fakeAgent();
+    gotoCalls.length = 0;
+    assert.equal(await runStep(agent, fakePage, "sc:0", step("Given", text), 1, testSink), "error", text);
+    assert.deepEqual(gotoCalls, []);
+    assert.match(events().filter((e) => e.type === "step_done").at(-1).message, re);  // 循环内取本轮的 step_done
+  }
+  const { agent } = fakeAgent();
+  const withArg = { ...step("Given", '"https://example.com"'), argument: { kind: "docString", content: "x" } };
+  assert.equal(await runStep(agent, fakePage, "sc:0", withArg, 1, testSink), "error");
+  assert.match(events().filter((e) => e.type === "step_done").at(-1).message, /不接受多行参数/);
 });
 
 test("runStep: When 自然语言 → 走 aiAct、passed、无 votes", async () => {
@@ -622,7 +669,7 @@ test("makeGuardedCleanup: reset() 忘掉在途记忆 → 可再清一次（建�
 // 看不见它（写法看着都对、绿也照绿）。故这条 spawn 真 worker、喂超 64KB（pipe 缓冲）的 payload，断言 stdout
 // 是完整可解析 JSON——护住「写完再退」的机制（见 run-scope.mts writeStdoutFlushed 注释里两种失败写法）。
 test("--match-steps: 超 64KB payload 经 pipe 完整送出（ADR 0036，不被 exit 截断）", async () => {
-  const texts = new Array(2000).fill('页面地址匹配 "/wiki/OpenAI"');  // 命中项，输出 ≈330KB > 64KB
+  const texts = new Array(2000).fill('"https://en.wikipedia.org/wiki/OpenAI"');  // 命中内建导航，输出 ≈300KB > 64KB
   // spawn 的是**真入口** bin.mts（ADR 0037 决策 3：进程即 worker、bin 装 loader 后调 main）——
   // 截断只发生在「真 pipe + 真 process.exit + 真 tsx 非阻塞 fd 1」的组合里，故必须走入口那条路。
   const proc = spawn(process.execPath, [path.join(import.meta.dirname, "..", "bin.mts"), "--match-steps"],
@@ -677,12 +724,15 @@ test("--capabilities: 一个 JSON 对象即以退出码 0 结束；五键含 det
   assert.ok(Array.isArray(got.deterministic_steps) && got.deterministic_steps.length > 0,
     `清单该非空（内建脚手架至少一条）：${raw}`);
   for (const e of got.deterministic_steps) {
-    assert.deepEqual(Object.keys(e).sort(), ["description", "example", "pattern"], `清单项形状：${JSON.stringify(e)}`);
+    assert.deepEqual(Object.keys(e).sort(), ["description", "example", "keywords", "pattern"], `清单项形状：${JSON.stringify(e)}`);
     for (const k of ["pattern", "description", "example"]) {
       assert.equal(typeof e[k], "string", `${k} 该是串：${JSON.stringify(e)}`);
       assert.ok(e[k].length > 0, `${k} 不该空：${JSON.stringify(e)}`);
     }
   }
+  // 脚手架只有内建导航一条（ADR 0020 第 2、3 条）：整句为地址、只接 Given / When；曾内置的「页面地址匹配」已退役。
+  assert.deepEqual(got.deterministic_steps.map((e: any) => e.keywords), [["Given", "When"]], raw);
+  assert.ok(got.deterministic_steps.every((e: any) => !e.pattern.includes("页面地址")), raw);
   // 自报值必须**由收尾预算常量算出**（改某段预算、下限自动跟着走；见 run-scope.mts minGraceSeconds 注释）——
   // 故这里复算而不是照抄一个数。**它挡的是漂移、不是写法**：某段预算改了而出口没跟着走即红；改成与今值相等的
   // 字面量 31 仍然绿（那一格靠下面的绝对值断言 + code review 挡）。

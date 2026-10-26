@@ -30,7 +30,7 @@ def _job_def(scope_id: str, scope_name: str, engine: str) -> Job:
         scope_id=scope_id, scope_name=scope_name, engine=engine,
         scenarios=(
             Scenario(id=f"{scope_id}", name=scope_name, steps=(
-                Step(0, "Given", '打开 "https://x"'),
+                Step(0, "Given", '"https://x"'),
                 Step(1, "When", "搜索 OpenAI"),
             )),
         ),

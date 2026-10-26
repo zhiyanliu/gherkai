@@ -19,7 +19,7 @@ def test_background_prepended():
     jobs = _plan(
         """Feature: F
   Background:
-    Given 打开 "https://x"
+    Given "https://x"
   Scenario: s1
     When "做事"
   Scenario: s2
@@ -31,7 +31,7 @@ def test_background_prepended():
     for j in jobs:
         sc = j.scenarios[0]
         assert sc.steps[0].keyword == "Given"
-        assert sc.steps[0].text == '打开 "https://x"'  # background 前插
+        assert sc.steps[0].text == '"https://x"'  # background 前插
         assert sc.steps[1].keyword == "When"
 
 
@@ -124,7 +124,7 @@ def test_out_of_order_steps_preserved():
     jobs = _plan(
         """Feature: F
   Scenario: 乱序
-    Given 打开 "https://x"
+    Given "https://x"
     Then "没有错误"
     When "搜索"
     Then "进入页面"

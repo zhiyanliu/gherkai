@@ -5,18 +5,18 @@
     {
       "id": 1,
       "prompt": "这个项目用 gherkai 做 UI 测试。按这段需求给我写一个用例并做预检，先别真跑：打开 https://example.com/ 首页能看到大标题 Example Domain；点击 More information... 链接后会到 iana.org 的页面——这一条 URL 检查要精确、不能靠 AI 猜。",
-      "expected_output": "新建一个 .feature：导航步用 Given + 引号内 URL，标题检查写成页面级语义的 AI 断言，点链接是 AI 动作，URL 检查用内建确定性 step `Then 页面地址匹配 \"iana\\.org\"`（或自写一条并注册进 steps/）；跑 gherkai plan 看标注，报告哪步走确定性、哪步走 AI；不执行 run。",
+      "expected_output": "新建一个 .feature：导航步是 Given 后整句一个地址（可带双引号），标题检查写成页面级语义的 AI 断言，点链接是 AI 动作，URL 检查用项目 steps/ 里已有的确定性 step `Then 页面地址匹配 \"iana\\.org\"`（或自写一条并注册进 steps/）；跑 gherkai plan 看标注，报告哪步走确定性、哪步走 AI；不执行 run。",
       "expectations": [
-        "产出的 .feature 用 Given 加双引号内的 http(s) URL 作导航步",
-        "URL 检查复用内建的『页面地址匹配』确定性 step（或 steps/ 里新注册的一条），不是自然语言断言",
+        "产出的 .feature 的导航步是 Given 后整句一个 http(s) 地址（可带双引号），地址前后没有别的字",
+        "URL 检查复用项目 steps/ 里已注册的『页面地址匹配』确定性 step（或新注册的一条），不是自然语言断言",
         "正则鲁棒：锚定主机（对 https://iana.org.evil.com/ 不命中）、同时接受 iana.org 与 www.iana.org、不把跳转后的路径写死；评分时用产出的正则跑三次：对实测 301 终点地址须命中、对 https://iana.org/domains/example（裸主机）须命中、对 https://iana.org.evil.com/ 须不命中",
-        "先用 gherkai list-deterministic 确认内建的『页面地址匹配』已存在、直接复用，没有重复自写一侧的 URL step",
+        "先用 gherkai list-deterministic 确认『页面地址匹配』已在清单里、直接复用，没有重复自写一侧的 URL step",
         "标题检查写成页面级语义陈述的 Then 断言，而不是子串规则、段落边界或选择器 / DOM 标签",
         "执行了 gherkai plan 并引用了它的派发标注（确定性 / AI）来核对写法；plan 退 0",
         "没有执行 gherkai run 或 gherkai submit（`--help` 与只读命令不算执行）",
         "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报",
         "没有把评测舞台的脚手架（bin/gherkai shim、.eval-aws 下的空凭证文件、环境变量注入）当成用户的真实环境写进汇报或当成阻塞项上报",
-        "导航步（Given 打开）之后紧跟一条确定性落点核对（内建的『页面地址匹配』，或项目已有的标题 / 按钮类确定性 step），不是导航后直接进入 AI 步"
+        "导航步之后紧跟一条确定性落点核对（项目 steps/ 里的『页面地址匹配』、标题或按钮类确定性 step；项目没有就新写一条），不是导航后直接进入 AI 步"
       ],
       "slug": "author-feature-from-requirements",
       "fixture": "wiki-search"
@@ -54,7 +54,7 @@
         "两侧正则语义一致、description 与 example 同文；handler 用各自引擎的取 URL 方式（Python 的 page.url 属性 / JS 的 page.url() 方法）",
         "分别对 novaact 与 midscene 执行了 gherkai list-deterministic --engine 核对，且两侧清单都含这条",
         "模式够窄：gherkai plan 的输出里，一条含『页面地址』字样的长句 AI 步没有被新模式标成确定性（只看正则长相不算验证）",
-        "新模式与内建的『页面地址匹配』不会同时命中同一个 step（双命中该步会记 error）；原有 feature 的 plan 标注没有变化",
+        "新模式与 steps/ 里已有的『页面地址匹配』不会同时命中同一个 step（双命中该步会记 error），也不会命中整句只是地址的导航步；原有 feature 的 plan 标注没有变化",
         "失败语义正确：Python 侧抛 AssertionError、Midscene 侧抛 DeterministicAssertion（抛别的异常会被记成 error 而不是 failed）",
         "没有执行任何安装命令（npm i、uv tool install、pip install）",
         "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报",
@@ -267,10 +267,10 @@
       "slug": "author-outline-with-background",
       "fixture": "wiki-search",
       "prompt": "再给英文维基写一条参数化的用例：分别搜索 Python、Rust、Go 三个词，确认每次都到了对应的词条页；每一条都要从首页 https://en.wikipedia.org/wiki/Main_Page 开始。请用 Scenario Outline 加 Background 来写，写完用 plan 看看会分成几个 job、每条的 id 和步号是什么样，解释给我。先别真跑。",
-      "expected_output": "Background 里放导航步 Given 打开 首页；Scenario Outline 里 When 搜索 <name>、Then 页面地址匹配 \"/wiki/<slug>\"（确定性）或页面级语义断言；Examples 三行；plan 显示展开成 3 条 scenario / 3 个 job（未标 scope），id 形如 features/x.feature:<声明行>:<数据行>，每条的第 0 步是 Background 的导航步；说明 Background 在每条里各自重跑、不能靠它承接上一条的页面状态；不执行 run。",
+      "expected_output": "Background 里放导航步（Given 后整句是首页地址）；Scenario Outline 里 When 搜索 <name>、Then 页面地址匹配 \"/wiki/<slug>\"（确定性）或页面级语义断言；Examples 三行；plan 显示展开成 3 条 scenario / 3 个 job（未标 scope），id 形如 features/x.feature:<声明行>:<数据行>，每条的第 0 步是 Background 的导航步；说明 Background 在每条里各自重跑、不能靠它承接上一条的页面状态；不执行 run。",
       "expectations": [
-        "新建一个 feature 文件（放在 features/ 下），用 Background 放首页导航步（Given + 双引号内 URL），Scenario Outline + Examples 三行参数化搜索词；没有改动 fixture 已有的 features/wiki_search.feature 与 steps/",
-        "词条页的确认二选一且各有判据：用内建确定性 step『页面地址匹配』带占位符（如 \"/wiki/<slug>\"，Examples 需带 slug 列）且 plan 里该步带「← 确定性」标注；或写成页面级语义断言（「当前是 <name> 的词条页」）并说明为何不用确定性（如 slug 与搜索词不一致、消歧义页）。两种都不得把精确文本匹配写成 AI 子串断言",
+        "新建一个 feature 文件（放在 features/ 下），用 Background 放首页导航步（Given 后整句一个地址，可带双引号），Scenario Outline + Examples 三行参数化搜索词；没有改动 fixture 已有的 features/wiki_search.feature 与 steps/",
+        "词条页的确认二选一且各有判据：用 steps/ 里已有的确定性 step『页面地址匹配』带占位符（如 \"/wiki/<slug>\"，Examples 需带 slug 列）且 plan 里该步带「← 确定性」标注；或写成页面级语义断言（「当前是 <name> 的词条页」）并说明为何不用确定性（如 slug 与搜索词不一致、消歧义页）。两种都不得把精确文本匹配写成 AI 子串断言",
         "用 gherkai plan 验证过，并正确解释：展开成 3 条独立 scenario / 3 个 job（未标 @scope），id 比普通 scenario 多一段 Examples 数据行号",
         "正确解释步号口径：Background 的导航步是每条 scenario 的第 0 步，scenario 里书写的步跟着后移（explain --step N 同此口径）",
         "正确说明 Background 的执行语义：同一 scope 里每条 scenario 都各自重跑一遍 Background，不能靠它承接上一条的页面状态",
@@ -411,7 +411,7 @@
         "没有执行 gherkai run 或 gherkai submit，也没有执行任何安装命令（npm i、uv tool install、pip install、playwright install）；`--help` 与只读命令（plan、list-deterministic、list-engines、doctor）不算执行",
         "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报",
         "没有把评测舞台的脚手架（bin/gherkai shim、.eval-aws 下的空凭证文件、环境变量注入）当成用户的真实环境写进汇报或当成阻塞项上报",
-        "导航步（Given 打开）之后紧跟一条确定性落点核对（内建的『页面地址匹配』，或项目已有的标题 / 按钮类确定性 step），不是导航后直接进入 AI 步"
+        "导航步之后紧跟一条确定性落点核对（项目 steps/ 里的『页面地址匹配』、标题或按钮类确定性 step；项目没有就新写一条），不是导航后直接进入 AI 步"
       ]
     },
     {

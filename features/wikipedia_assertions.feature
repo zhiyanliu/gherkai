@@ -2,7 +2,7 @@
 Feature: 维基断言能力打磨
 
   Scenario: AI 断言 + 否定断言（纯人话，无路由关键词）
-    Given 打开 "https://www.wikipedia.org/"
+    Given "https://www.wikipedia.org/"
     # 否定/不存在断言 → 直接写人话，默认 AI 判（AI 能理解否定陈述）
     Then "页面没有出现服务器错误"
     # 取数意图 → 直接写人话让 AI 判（不必"取数再比较"）

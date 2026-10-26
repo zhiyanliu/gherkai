@@ -1,7 +1,7 @@
 Feature: 商品目录
 
   Background:
-    Given 打开 "https://shop.example.test/catalog"
+    Given "https://shop.example.test/catalog"
 
   Scenario: 目录页可达
     Then "页面顶部有导航栏"

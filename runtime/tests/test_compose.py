@@ -605,6 +605,9 @@ _OK_TAIL = _OK_STEPS + _OK_MODEL  # 两个合法的尾键：拿它填「缺陷�
     b'{"schema_version": 1, "engine": "midscene", "min_grace_s": 31' + _OK_TAIL + b'}',  # 自称另一引擎
     b'{"schema_version": 2, "engine": "novaact", "min_grace_s": 150' + _OK_TAIL + b'}',   # 版本不认识
     b'{"engine": "novaact", "min_grace_s": 150' + _OK_TAIL + b'}',                        # 缺格式版本
+    b'{' + _OK_HEAD + b', "min_grace_s": 150, "deterministic_steps": [{"pattern": "p", "description": "d", "example": "e", "keywords": []}]' + _OK_MODEL + b'}',          # keywords 空
+    b'{' + _OK_HEAD + b', "min_grace_s": 150, "deterministic_steps": [{"pattern": "p", "description": "d", "example": "e", "keywords": ["And"]}]' + _OK_MODEL + b'}',     # keywords 未知取值
+    b'{' + _OK_HEAD + b', "min_grace_s": 150, "deterministic_steps": [{"pattern": "p", "description": "d", "example": "e", "keywords": ["Then", "Then"]}]' + _OK_MODEL + b'}',  # keywords 重复
 ])
 def test_query_capabilities_rejects_off_contract_answer(monkeypatch, novaact_env_cmd, fresh_caps_cache, payload):
     """自述不合契约 → fail-loud（与「输出非 JSON」同类），且不写缓存。校验放在这一个函数里，**每个消费者

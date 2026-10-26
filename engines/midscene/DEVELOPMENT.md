@@ -52,7 +52,7 @@ echo '<job json>' | AWS_REGION=us-east-1 node dist/bin.mjs
 
 # 两个非 job 入口（不建会话、不执行 job、零 AWS，[ADR 0036](../../docs/adr/0036-deterministic-capability-discovery.md)）；cli 的 `list-deterministic` / `doctor` / run 前置 / plan 标注即转述它们：
 node dist/bin.mjs --capabilities                          # 能力自述：{schema_version, engine, min_grace_s, deterministic_steps, model_id}（清单 = 注册表 pattern + description + example）
-echo '["页面地址匹配 \"/wiki/OpenAI\""]' | node dist/bin.mjs --match-steps   # 批量查询这些 step 各自命中的确定性 pattern
+echo '[{"keyword":"Given","text":"\"https://example.com/\""}]' | node dist/bin.mjs --match-steps   # 批量查询这些 step 各自命中的确定性 pattern（内建导航在表里）
 ```
 
 worker 侧**只有这两个 flag**：确定性清单是 `--capabilities` 对象的 `deterministic_steps` 键，**没有 `--list-deterministic` 入口**（加键不加入口，ADR 0036「5.」）。`min_grace_s` 由 `worker/run-scope.mts` 的收尾各段预算常量算出（`minGraceSeconds()`：在途窗口 + 会话 Stop + 关 browser + 单次上传超时 + 截图队列退出段排空 + `MIN_GRACE_MARGIN_MS`），**不另写字面量**；缺省为 **31** 秒。模型 family 的校验同样在入口分派之前，因此非法配置在 `--capabilities` 这条 run 前置检查里即被拦下。

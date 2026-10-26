@@ -35,7 +35,7 @@ import { EventSink } from "../lib/event-sink.mjs";  // 事件出口（ADR 0024�
 import { JobSource } from "../lib/job-source.mjs";  // job 入口（同上）
 // 确定性 step 注册表（ADR 0022）+ 测试开发写 step 用的脚手架。
 // import 脚手架即触发其顶层 deterministic(...) 注册副作用（对称 Nova 引擎 import deterministic_steps）。
-import { match as matchDeterministic, DeterministicAssertion, listRegistry, matchBatch } from "./deterministic.mjs";
+import { match as matchDeterministic, DeterministicAssertion, DeterministicKeywordMismatch, listRegistry, matchBatch, type MatchItem } from "./deterministic.mjs";
 import { buildInstruction } from "./argument.mjs";
 // step 级机读证据（ADR 0042）：SDK 结构 → gherkai 自有 schema 的映射与落盘全住那个模块；此处只挂钩子。
 import { stepEvidenceRef, executionsLength, EVIDENCE_KIND, ENGINE, type EvidenceHook } from "./evidence.mjs";
@@ -166,7 +166,6 @@ function modelConfig() {
     MIDSCENE_MODEL_FAMILY: modelFamily(),
   };
 }
-const URL_IN_QUOTES = /"(https?:\/\/[^"]+)"/;
 
 // 事件出口抽进 ../lib/event-sink.mts（ADR 0024「I/O 边缘可注入接口」）：可注入、可测；subprocess 态写
 // EVENTS_FD fd（无则回落 stdout 调试）。emit 为 async（合理不对称：为 Fargate 化的 DDB PutItem（aws-sdk-js）
@@ -393,8 +392,8 @@ export async function main(): Promise<number> {
   if (process.argv.includes("--match-steps")) {
     const chunks: Buffer[] = [];
     for await (const c of process.stdin) chunks.push(c as Buffer);
-    const texts: string[] = JSON.parse(Buffer.concat(chunks).toString("utf-8"));
-    await writeStdoutFlushed(JSON.stringify(matchBatch(texts)) + "\n");
+    const items: MatchItem[] = JSON.parse(Buffer.concat(chunks).toString("utf-8"));  // {keyword, text}[]；旧版 CLI 给裸字符串
+    await writeStdoutFlushed(JSON.stringify(matchBatch(items)) + "\n");
     return 0;
   }
   // 引擎能力自述（ADR 0036「5.」）：一个 JSON 对象即退，同样不建会话、不读 stdin、零费用。
@@ -768,11 +767,27 @@ async function runStep(
     }
   };
   try {
-    // ① 确定性注册表（ADR 0022）：命中走精确 handler、不投票；AssertionError→failed，其它→error
-    const hit = matchDeterministic(text);
+    // ① 确定性注册表（ADR 0022；内建导航也是其中一条，ADR 0020 第 3 条）：命中走精确 handler、不投票；
+    //    AssertionError→failed，其它→error。命中但关键字不在条目声明里（ADR 0050 决策 1）→ error、不转 AI、不顺延。
+    let hit;
+    try {
+      hit = matchDeterministic(text, keyword);
+    } catch (e) {
+      if (e instanceof DeterministicKeywordMismatch) {
+        await sink.emit({ type: "step_done", scenarioId, stepIndex: index, status: "error", errorType: "engine_error", message: e.message });
+        return "error";
+      }
+      throw e;
+    }
     if (hit) {
+      if (step.argument != null) {
+        // 确定性 handler 不接收多行参数（ADR 0024）：带了即记 error，不静默忽略
+        await sink.emit({ type: "step_done", scenarioId, stepIndex: index, status: "error", errorType: "engine_error",
+          message: `确定性 step 不接受多行参数（DataTable / DocString）：${text}` });
+        return "error";
+      }
       try {
-        await hit.handler({ page }, hit.groups);
+        await hit.handler({ page, navigate: (url) => page.goto(url, { waitUntil: "domcontentloaded", timeout: 60_000 }).then(() => undefined) }, hit.groups);
       } catch (e) {
         if (e instanceof DeterministicAssertion || (e as Error).name === "AssertionError") {
           await sink.emit({
@@ -784,13 +799,6 @@ async function runStep(
         }
         throw e; // 其它异常 → 落到下面 catch，记 error
       }
-      await sink.emit({ type: "step_done", scenarioId, stepIndex: index, status: "passed" });
-      return "passed";
-    }
-    const urlMatch = URL_IN_QUOTES.exec(text);
-    if (urlMatch) {
-      // ② 内建确定性导航（ADR 0020）：抽 URL 直接 goto，不浪费 AI
-      await page.goto(urlMatch[1], { waitUntil: "domcontentloaded", timeout: 60_000 });
       await sink.emit({ type: "step_done", scenarioId, stepIndex: index, status: "passed" });
       return "passed";
     }
@@ -817,7 +825,7 @@ async function runStep(
       await emitWithEvidence(ev, passed ? "passed" : "failed", null);
       return passed ? "passed" : "failed";
     }
-    // When / Given（非 URL）→ AI 动作（无 votes）
+    // When / Given → AI 动作（无 votes）
     instr = buildInstruction(step.text, step.argument as any);
     await agent.aiAct(instr);
     const ev: Record<string, unknown> = { type: "step_done", scenarioId, stepIndex: index, status: "passed" };
