@@ -9,6 +9,8 @@
 
 规模 M。来源：2026-10-26 的 0020 修订（导航判据改为「Given / When 后整句是一个地址」，内建「页面地址匹配」step 退役，注册表条目可声明关键字），见 0020 第 2、3 条、0050 决策 1、0048 决策 7。
 
+**进度（2026-10-26）**：已落地并提交（code 一笔、文档一笔），两引擎桌面真跑核过（跳板机）：不带引号的整句地址导航、Then 后只有地址记 error、`shop://` 在网页目标记 error、导航 step 带 DocString 记 error、句中带地址走 AI、`features/steps` 的页面地址匹配按确定性执行；pytest 1999 绿、Midscene 203 绿。待 Codex 同僚复核闭合。与下方底稿的出入：① 「全仓不再出现『页面地址匹配』措辞」的 grep 守卫不立——该措辞作为 `steps/` 模板名合法出现在文档与 `features/steps/`，改以脚手架差集测试守（两引擎自述清单只有内建导航一条）；② 跨语言 fixture 落在 `engines/fixtures/navigation-address-cases.json`，两引擎单测共读；③ 内建导航的 description 定为「内建导航：整句只是一个地址时直接打开它（网页目标只接受 http(s) 地址）」；④ 关键字不符的错误消息按条目的 description 点名、末尾给改法；⑤ 真跑发现 example.com 页面已无「Example Domain」大标题，`engine_routing.feature` 与 getting-started 示例的断言随之改写；⑥ 评测集里以「打开 https://example.com/ 看到大标题 Example Domain、点 More information」为需求的那条用例前提已与该页现状不符，评测只做 plan 不真跑、暂未改。
+
 **依赖**
 
 - 无；改的是 1.4 已有行为，两个 worker 与 CLI 同批发。后续批次以它为前提：B1 的注册表条目 targets 测试按退役后的清单写；B4 的注册面在 keywords 之上加 targets / requires；B6 的设备导航复用内建导航条目的 webdriver 句柄。
@@ -19,7 +21,7 @@
 - `engines/novaact/gherkai_worker_novaact/run_scope.py` · 派发（_URL_IN_QUOTES 分支）：同上（0020 第 3 条）
 - `engines/midscene/src/worker/deterministic.mts` 与 `deterministic.steps.mts` · 注册面与脚手架：条目加可选 keywords（Given / When / Then 子集，注册期校验）；match() 接收关键字、区分「未命中」与「命中但关键字不符」；脚手架只留内建导航条目（模式 = 去掉关键字后整句为地址，引号可有可无；playwright 句柄打开 http(s)，非 http(s) 记 error），删「页面地址匹配」（0050 决策 1、0020 第 2 条）
 - `engines/novaact/gherkai_worker_novaact/deterministic.py` 与 `deterministic_steps.py` · 注册面与脚手架：Python 同构——keywords、match(keyword, text)、内建导航条目、删「页面地址匹配」（0050 决策 1）
-- 两侧的 listRegistry / list_registry · 能力自述：清单项带 keywords（缺省全部）；内建导航条目的 description 为「内建导航：打开地址」、example 为 `Given "https://…"`（0036、0049 决策 6）
+- 两侧的 listRegistry / list_registry · 能力自述：清单项带 keywords（缺省全部）；内建导航条目的 description 为「内建导航：整句只是一个地址时直接打开它（网页目标只接受 http(s) 地址）」、example 为 `Given "https://www.wikipedia.org/"`（0036、0049 决策 6）
 - `cli/gherkai_cli/__main__.py` 与 `render.py` · plan 标注、list-deterministic：导航按确定性 step 标注（网页目标「内建导航：打开 <地址>」；应用目标「内建导航：经 DeepLink 交给被测应用」在 B6 落地后出现）；Then 后只有地址在 plan 里标为错误写法——由 worker 的派发探针以 keyword_mismatch 报出，CLI 只转述；网页目标非 http(s) 地址 plan 不预检、执行时由 playwright 句柄记 error（0020 第 3 条、0048 决策 7）
 - `docs/internals/cli-json-contract.md` · plan 的 steps[].deterministic 与 list-deterministic：加 keywords 键；导航条目的形态与说明（0036）
 - `features/*.feature`、core/tests、cli/tests 里的用例与夹具：`Given 打开 "…"` 改为 `Given "…"`；依赖内建「页面地址匹配」的用例改用测试自带的 steps/ 夹具（0018）
@@ -37,7 +39,7 @@
 
 **真跑或对抗核查才算数的结论**
 
-- 两引擎本机真跑一条只含整句地址导航与 AI 断言的 feature（桌面），确认派发与 plan 标注一致；`tools/e2e_harness.py` 的现有用例改写后照常通过。
+- 两引擎本机真跑一条只含整句地址导航与 AI 断言的 feature（桌面），确认派发与 plan 标注一致——已做（见上「进度」）；`tools/e2e_harness.py` 读的 features/ 已随导航写法改写，本批未另跑它。
 
 **易错点**
 

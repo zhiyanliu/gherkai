@@ -38,7 +38,7 @@ Midscene 侧只加载 `.mts` / `.mjs`。这两个扩展名恒按 ESM 解析，�
 
 ## 注册一条 step
 
-Nova Act 引擎用装饰器 `@deterministic(pattern, *, description, example)`：
+Nova Act 引擎用装饰器 `@deterministic(pattern, *, description, example, keywords=None)`：
 
 ```python
 # steps/login.py
@@ -53,7 +53,7 @@ def login(ctx, user):
     ctx.page.click("#submit")
 ```
 
-Midscene 引擎用函数 `deterministic(pattern, handler, { description, example })`，在文件顶层调用：
+Midscene 引擎用函数 `deterministic(pattern, handler, { description, example, keywords? })`，在文件顶层调用：
 
 ```ts
 // steps/login.mts
@@ -72,13 +72,15 @@ deterministic(
 );
 ```
 
+`keywords` 可选：声明这条 step 接受哪些 Gherkin 关键字（`Given` / `When` / `Then` 的子集，Nova Act 写 `keywords=("Then",)`，Midscene 写 `keywords: ["Then"]`），不写就三个都接受。step 文本命中了模式而关键字不在声明里时，这一步记 `error`、不交给 AI，`gherkai plan` 会提前用 ⚠ 标出。断言类 step 声明只接受 `Then`，可以挡住 `Given 页面地址匹配 "…"` 这种写法；`And` / `But` 按它承接的那条算。
+
 Midscene 侧的 step 文件只从包名 `@gherkai/worker-midscene` 导入，可用的导出是 `deterministic`、`DeterministicAssertion` 以及 `DeterministicCtx` / `DeterministicHandler` / `DeterministicMeta` 三个类型。
 
 你的项目不需要 `package.json` 或 `node_modules`，也不必在项目里另装这个包：worker 在加载你的 step 文件之前，把这个包名解析到它自己那一份。反过来，把导入写成指向某个安装位置的文件路径（例如另一处 `node_modules` 里的 `dist/index.mjs`）会加载到第二份副本，注册落进 worker 不读的那张表，worker 会报这个文件一条 step 都没注册并拒绝启动。
 
 ## handler 拿到什么
 
-两侧的第一个参数都是上下文，`ctx.page` 是 Playwright 的 `Page`；正则的具名组是第二个入参：
+两侧的第一个参数都是上下文：`ctx.page` 是 Playwright 的 `Page`，`ctx.navigate(url)` 打开一个地址（内建导航用的就是它）；正则的具名组是第二个入参：
 
 | | Nova Act 引擎 | Midscene 引擎 |
 |---|---|---|
@@ -87,7 +89,7 @@ Midscene 侧的 step 文件只从包名 `@gherkai/worker-midscene` 导入，可�
 | 无具名组时 | 只收 `ctx` | `groups` 是空对象 |
 | 同步 / 异步 | **必须是同步 `def`**：写成 `async def` 的那一步直接记 `error`，因为函数体里的断言不会被执行 | 可以是 `async`，worker 会 `await` |
 
-handler 只拿到上下文与具名组。挂在这一步上的 DataTable / DocString 不会传进来，多行参数只对 AI step 有效。
+handler 只拿到上下文与具名组。多行参数只对 AI step 有效：挂在确定性 step 上的 DataTable / DocString 会让这一步记 `error`，不会被静默丢掉。
 
 需要异步判定时只能写在 Midscene 侧。
 
@@ -110,6 +112,7 @@ handler 只拿到上下文与具名组。挂在这一步上的 DataTable / DocSt
 
 - `description`：一句话说明这一步做什么。`gherkai list-deterministic` 的「说明」列就是它，`gherkai plan` 的命中标注 `← 确定性: <说明>` 也用它。
 - `example`：一条可以直接抄进 `.feature` 的 step 文本，出现在 `gherkai list-deterministic` 的「示例」列。
+- `keywords`（可选）：出现在 `gherkai list-deterministic` 的「关键字」列，没有声明时显示「任意」。
 
 写 `example` 时用你希望 feature 作者照抄的完整措辞（含 `Given` / `Then` 关键字），因为它就是对方的复制源。
 
@@ -119,20 +122,13 @@ handler 只拿到上下文与具名组。挂在这一步上的 DataTable / DocSt
 
 模式按**子串**匹配 step 文本（不要求整句吻合），并且一条 step 文本**最多只能命中一条**模式。命中多条时这一步记 `error` 并列出撞上的模式；`gherkai plan` 会提前把冲突标成 `← ⚠`，此时 plan 自己的退出码仍是 0。
 
-引擎内建的 step 与你注册的 step 进同一张表，**没有覆盖优先级**：模式撞上就是冲突，得收紧其中一条或改 step 措辞。
+引擎内建的导航与你注册的 step 进同一张表，**没有覆盖优先级**：模式撞上就是冲突，得收紧其中一条或改 step 措辞。
 
-## 内建的确定性 step
+## 内建的导航与 `steps/` 模板
 
-两个引擎各内建一条，装上引擎即可用，无需写任何文件：
+引擎只内建一条确定性 step：导航。`Given` / `When` 之后整句只是一个地址时直接打开它，写法与注意事项见 [`writing-features.md`](./writing-features.md)。它在 `gherkai list-deterministic` 的清单里、`gherkai plan` 也照常标注，「关键字」列是 `Given / When`。
 
-| 引擎 | 注册的模式 | 在 `.feature` 里怎么写 |
-|---|---|---|
-| Nova Act | `页面地址(?:精确)?匹配 "(?P<pattern>[^"]+)"` | `Then 页面地址匹配 "/wiki/OpenAI"` |
-| Midscene | `页面地址(?:精确)?匹配 "(?<pattern>[^"]+)"` | 同上 |
-
-它断言当前页面地址匹配给定正则，措辞「页面地址匹配」与「页面地址精确匹配」都命中。
-
-另有一条内置的导航行为不进注册表：step 文本里双引号内的内容以 `http://` 或 `https://` 开头时，worker 把整段引号内容当作地址直接打开、不调模型，因此它不出现在清单和 `plan` 标注里。写法与注意事项见 [`writing-features.md`](./writing-features.md)。
+判定类的 step 一条都不内建：措辞属于项目，由项目在 `steps/` 里注册（1.4 及之前版本内建的 `页面地址匹配 "<正则>"` 已退役）。仓库的 [`features/steps/`](../../features/steps/) 目录放着可直接复制的模板：`url_matches.py` 与 `url_matches.mts` 成对实现 `Then 页面地址匹配 "<正则>"`，复制进项目的 `steps/` 后按需改措辞与判定。
 
 当前实际有哪些，以 `gherkai list-deterministic --engine <引擎>` 的输出为准。
 

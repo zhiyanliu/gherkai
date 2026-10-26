@@ -1,6 +1,6 @@
 # 开始使用
 
-开始使用 gherkai 要解决三个问题：安装什么、需要哪些 AWS 前置、第一次怎么完整运行。gherkai 把 `.feature` 里的每个 step 交给 AI 引擎，由引擎操作云端浏览器并做出判定；需要精确判定的 step 由确定性 step 代码接管（引擎自带一条判页面地址的，其余由项目自己写，见[编写确定性 step](./writing-deterministic-steps.md)）。各部件的归属见下面的 [AWS 前置](#aws-前置)。`.feature` 的写法见[编写 .feature](./writing-features.md)；执行方式与执行后端四种组合的差别与退出码见[运行测试与查看结果](./running-and-results.md)；云端后端的部署见[云端后端](./cloud-backend.md)；选项与环境变量总表见[配置](./configuration.md)；报错处置见[排错](./troubleshooting.md)。
+开始使用 gherkai 要解决三个问题：安装什么、需要哪些 AWS 前置、第一次怎么完整运行。gherkai 把 `.feature` 里的每个 step 交给 AI 引擎，由引擎操作云端浏览器并做出判定；需要精确判定的 step 由确定性 step 代码接管（引擎只自带导航一条，判定类的由项目自己写，见[编写确定性 step](./writing-deterministic-steps.md)）。各部件的归属见下面的 [AWS 前置](#aws-前置)。`.feature` 的写法见[编写 .feature](./writing-features.md)；执行方式与执行后端四种组合的差别与退出码见[运行测试与查看结果](./running-and-results.md)；云端后端的部署见[云端后端](./cloud-backend.md)；选项与环境变量总表见[配置](./configuration.md)；报错处置见[排错](./troubleshooting.md)。
 
 ## 按角色选安装形态
 
@@ -138,8 +138,8 @@ agent 会自己做用例预检、实际运行前把本次运行的规模报给�
 Feature: 冒烟
 
   Scenario: 打开示例站点
-    Given 打开 "https://example.com"
-    Then "页面包含 Example Domain 字样"
+    Given "https://example.com"
+    Then "页面说明这个域名用于文档示例"
 ```
 
 仓库里另有一组示例用例在 [`features/`](../../features/)，克隆仓库、或把其中的文件复制进你的项目就能用。`.feature` 的完整写法见[编写 .feature](./writing-features.md)。
@@ -164,8 +164,8 @@ gherkai explain <run_id>
 plan（用例预检，未执行）  1 job(scope)  ·  1 scenario  ·  default_engine=novaact
 └── job scope='features/smoke.feature:3' (name='打开示例站点') engine=novaact
     └── scenario 'features/smoke.feature:3'  (2 step)
-        ├── [0] Given 打开 "https://example.com"
-        └── [1] Then "页面包含 Example Domain 字样"
+        ├── [0] Given "https://example.com"  ← 确定性: 内建导航：整句只是一个地址时直接打开它（网页目标只接受 http(s) 地址）
+        └── [1] Then "页面说明这个域名用于文档示例"
 ```
 
 它给出本次运行会开几个 job（每个 job 对应一个云端浏览器会话）、各自用哪个引擎、每一步走确定性 step 还是走 AI。**先 plan 后执行**：`plan` 零费用，能在实际运行产生费用之前暴露写法与配置问题。

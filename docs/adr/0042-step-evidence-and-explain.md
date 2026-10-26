@@ -109,7 +109,7 @@ evidence 的抽取、落盘、上传任一环失败 → worker 日志一行、�
 **记录缺口的两种情形，分开表达**：
 
 - **JobResult 只含收到 `scenario_done` 的 scenario，以及 scope 级 error 后由 core 合成的 scenario 级 SKIPPED**（worker 发 `scope_done{status: error}` 后，definition 中无事件的 scenario 与其 step 合成 `SKIPPED`、`shortcircuited=False`，[0031](./0031-job-lifecycle-states-and-severity.md) 决定一；文本打「未执行（scope 级错误，原因见 job 判定）」）——worker 被外部中止（超时 / fail-fast / 信号）时未完成的 scenario 不算判定、其 step 记录不进 `jobs/*.json`。explain 以 job 定义为骨架逐 scenario / 逐 step 渲染，无记录的 step 文本打「无记录（未执行或未上报）」、JSON 给 `status: null` + `record_missing: true`；job 判为 error 或 aborted 且带 error_type 时，文本总打一行「判定：status (error_type: message)」，与有无 step 记录无关；「诊断细节见 worker 日志」与 job 级 report_refs 那一段仍只在一条 step 记录都没有时打。`has_step_records` 计入 core 合成的 SKIPPED 记录，与 JSON 的 steps 数组一致；全部 scenario 都是合成记录的 job（如 `precheck_failed`）靠判定行显示原因，合成 step 上「原因见 job 判定」的提示由此落到实处。被中止 job 里已跑完的 step 其 evidence 已产且已上传，但 ref 只在事件记录里；**本 ADR 不让 explain 读事件流**（compose 现只暴露三个 store，加事件接缝是另一件事），输出里提示「本 job 被中止，部分已执行 step 的证据未进判定记录」。
-- **step 有记录但无 evidence** → `evidence: null` + `evidence_missing: "no_ref" | "unreadable" | "unsupported_schema"`。`no_ref` 覆盖「确定性 / URL 导航 step 本就不产」（设备目标上 failed / error 的确定性或导航 step 缺 ref 则属抽取失败，[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 8）、「AI 跑了但抽取失败」以及「无判定记录的 step」（没记录自然没指针、与 `record_missing` 同现）三种，结果树分不出前两种；文本打「无 AI 证据」。设备 evidence 的 `step_kind` 让渲染层区分「无 act 是正常的」与「抽取丢了」。
+- **step 有记录但无 evidence** → `evidence: null` + `evidence_missing: "no_ref" | "unreadable" | "unsupported_schema"`。`no_ref` 覆盖「确定性 step（含内建导航）本就不产」（设备目标上 failed / error 的确定性或导航 step 缺 ref 则属抽取失败，[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 8）、「AI 跑了但抽取失败」以及「无判定记录的 step」（没记录自然没指针、与 `record_missing` 同现）三种，结果树分不出前两种；文本打「无 AI 证据」。设备 evidence 的 `step_kind` 让渲染层区分「无 act 是正常的」与「抽取丢了」。
 
 **未终态 run 分两种情形**：同步 `run` 中途可见已完成 job（逐 job 落 ResultStore），文本形态经 stderr 提示「run 仍在运行，以下为已完成部分」（stdout 只放核心产出，与 `status` 的提示规则一致）；`submit` 的 detached run（本地 per-run 进程与云端 reconciler 同一份 tick）在全 job 终态 finalize 时才一次性落 ResultStore，未终态时零文件——explain 退 0、只打一行「判定明细尚未落地，可先用各后端对应的 `status … --wait` 等到终态」，**提示里给出可原样跑通的整条命令**（local 带 `--report-dir`、cloud 带 `--backend cloud --prefix <已解析的 prefix>`）：只写 `status <run_id> --wait` 的简写在云端后端会落回本机后端、报「未找到 run」并把人引去查 `--report-dir`。让 detached run 中途可见需从事件流逐 scope 归约，属另一个决策。`--json` 下不打任何提示行（0041 决策三：stdout 只有一个 JSON 文档），机读侧靠顶层 `status` 自明。
 
@@ -119,7 +119,7 @@ evidence 的抽取、落盘、上传任一环失败 → worker 日志一行、�
 run 20260910T080630Z-9fa261  status=failed
 └── scope features/login.feature:6  engine=novaact  status=failed  session=01a0…
     ├── scenario features/login.feature:12  密码错误时不放行  failed
-    │   ├── step 0  Given 打开 "https://app.example.com/login"  passed  (1.1s)
+    │   ├── step 0  Given "https://app.example.com/login"  passed  (1.1s)
     │   ├── step 1  When 输入用户名「alice」与密码「wrong」  passed  (9.4s)
     │   ├── step 2  Then 页面显示「登录成功」  failed  votes 0/1  (12.1s)
     │   │   ├── message: AI 断言未过多数票（0/1）：页面显示「登录成功」
@@ -130,7 +130,7 @@ run 20260910T080630Z-9fa261  status=failed
     │   │       └── 其余 4 个 frame 已省略（--full 查看）
     │   └── step 3  When 点击「退出」  passed  (3.2s)
     └── scenario features/login.feature:20  锁定账户提示  error
-        ├── step 0  Given 打开 "https://app.example.com/login"  error  (network_error)
+        ├── step 0  Given "https://app.example.com/login"  error  (network_error)
         │   ├── message: worker 建连失败（网络/SSL 瞬时故障）：…
         │   └── 无 AI 证据
         └── step 1  Then 页面提示「账户已锁定」  skipped  ⚠ 因前置 step error 被跳过（未执行）

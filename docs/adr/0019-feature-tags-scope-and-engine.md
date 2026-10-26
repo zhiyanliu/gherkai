@@ -36,7 +36,7 @@ QA 在 `.feature` 里用 **Gherkin 原生 tag** 声明三类配置元信息：�
 # step 措辞见 ADR 0020（默认 AI：When/Then 后跟纯自然语言，无路由关键词）
 @scope:login @engine:midscene
 Scenario: 登录
-  Given 打开 "https://app.example.com"
+  Given "https://app.example.com"
   When "用账号密码登录"
 
 @scope:login                       # 继承 scope:login 的 engine=midscene；与上条串行、共享会话

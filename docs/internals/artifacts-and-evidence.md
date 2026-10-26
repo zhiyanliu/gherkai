@@ -65,7 +65,7 @@
 
 ![证据链：worker 在 step 判定成立时把证据指针写进判定真值，并把现场抽取为自有格式的证据明细；explain 只解引用自有格式的那一份，引擎原生产物只以链接引用；截图地址确定性算出，字节随后上传](../diagrams/artifacts-evidence-chain.svg)
 
-图注：只有**调用过 AI 的 step** 走这条链：确定性命中与 URL 导航步的判定直接发事件、不产 evidence（`explain` 因此输出「无 AI 证据」，见 §4）。local 后端没有异步上传这一环：截图字节在 `evidence.json` 落盘时已经在盘上，异步上传只发生在 cloud 后端。图上四个落点的确切文件名与相对路径见 §2 表（`jobs/<enc>.json`、`evidence/<scenario 键>/step-<n>/evidence.json`、帧截图、两个引擎的原生产物子目录）；`explain` 与 `run` / `status` 各自回答什么问题见 §4。
+图注：只有**调用过 AI 的 step** 走这条链：确定性命中（含内建导航）的判定直接发事件、不产 evidence（`explain` 因此输出「无 AI 证据」，见 §4）。local 后端没有异步上传这一环：截图字节在 `evidence.json` 落盘时已经在盘上，异步上传只发生在 cloud 后端。图上四个落点的确切文件名与相对路径见 §2 表（`jobs/<enc>.json`、`evidence/<scenario 键>/step-<n>/evidence.json`、帧截图、两个引擎的原生产物子目录）；`explain` 与 `run` / `status` 各自回答什么问题见 §4。
 
 这条链由以下四点确定：
 

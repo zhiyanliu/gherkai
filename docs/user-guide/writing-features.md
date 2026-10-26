@@ -12,7 +12,7 @@
 Feature: 维基百科搜索
 
   Scenario: 搜索并判定
-    Given 打开 "https://www.wikipedia.org/"
+    Given "https://www.wikipedia.org/"
     When "在搜索框输入 OpenAI 并提交搜索"
     Then "当前页面是关于 OpenAI 的维基百科词条页"
 ```
@@ -21,17 +21,18 @@ Feature: 维基百科搜索
 
 ## 一个 step 的三种执行路径
 
-worker 拿到一个 step 后按固定顺序决定它走哪条执行路径：
+worker 拿到一个 step 后先查确定性 step 的注册表，命中就走代码，没命中才交给 AI。注册表里引擎只内建一条（导航），其余都由项目在 `steps/` 目录里注册：
 
-| 顺序 | 命中条件 | 怎么执行 |
+| 执行路径 | 命中条件 | 怎么执行 |
 |---|---|---|
-| ① 确定性 step | step 文本命中项目 `steps/` 目录里注册的正则，或引擎内建的正则 | 调用注册的函数，用 Playwright 直接查页面。不问 AI、不投票、逐次可复现 |
-| ② 导航 | step 文本的双引号内**以** `http://` 或 `https://` 开头（小写；大写不命中） | 直接打开这个地址。不问 AI。引号内直到下一个双引号之间的全部内容都当成地址，所以引号里只写地址、不要再接别的话。单引号不触发 |
+| ① 导航（内建的确定性 step） | `Given` / `When` 之后**整句只是一个地址**：`Given "https://example.com/"` 与 `Given https://example.com/` 都算，加不加双引号一样；地址前后再有别的字就不算，多一个句号也不算 | 直接打开这个地址，不问 AI。网页上只接受 `http://` / `https://` 地址，写别的协议这一步记 `error`。它与其它确定性 step 一样出现在 `gherkai list-deterministic` 的清单与 `gherkai plan` 的标注里 |
+| ② 项目注册的确定性 step | step 文本命中项目 `steps/` 目录里注册的正则 | 调用注册的函数，用 Playwright 直接查页面。不问 AI、不投票、逐次可复现 |
 | ③ AI（默认） | 以上都不命中 | `Then` 的文本当布尔断言交给模型判真假（可投票）；`Given` / `When` 的文本当动作交给模型执行 |
 
 表脚注：
 
-- 关键字只决定第 ③ 条执行路径怎么派发：`Then` 是断言，`Given` / `When` 是动作，`And` / `But` 承接前一条的身份。前两条执行路径都不看关键字，所以 `Then 页面地址是 "https://example.com/a"` 也会被当成导航步——直接打开这个地址并记通过，断言不会发生。要判 URL 就用确定性 step：两个引擎各内建一条 `Then 页面地址匹配 "<正则>"`，装了对应引擎的 worker 即可用，无需写任何文件（见 [`writing-deterministic-steps.md`](./writing-deterministic-steps.md)）。
+- 关键字在 AI 路径上决定派发：`Then` 是断言，`Given` / `When` 是动作，`And` / `But` 承接前一条的身份。确定性 step 可以声明自己接受哪些关键字，内建导航只接受 `Given` / `When`：`Then "https://example.com/a"` 命中的是导航、关键字却不符，这一步记 `error`，既不打开地址也不交给 AI，`gherkai plan` 会提前用 ⚠ 标出。要核对地址就写一条确定性 step，仓库的 [`features/steps/`](../../features/steps/) 目录有可直接复制的模板 `Then 页面地址匹配 "<正则>"`（见 [`writing-deterministic-steps.md`](./writing-deterministic-steps.md)）。
+- 句子里带着地址的 step 不是导航：`When 在地址栏输入 "https://example.com/"` 整句交给 AI 执行。要打开一个地址，就单独写成一行整句地址。
 - 外层双引号只是书写习惯。交给模型前会被去掉；确定性 step 的正则匹配的是关键字之后的原文、引号照留。
 
 ## 什么交给 AI，什么必须精确
@@ -51,7 +52,7 @@ worker 拿到一个 step 后按固定顺序决定它走哪条执行路径：
 - **不要把子串规则、段落边界、选择器写进断言**（「第三段第二句包含 X」「`#total` 的值等于 42」）。这类检查交给确定性 step。
 - **判定前先让待判定的内容进入视口**：弹窗、Cookie 提示、捐款横幅都可能把目标内容推出屏幕，模型会如实判否。用一个动作步先关闭遮挡并滚动到目标位置。
 - **一个 When 只做一件事，并且只描述这一步的动作**。多个动作压在一句话里，模型可能只完成前半句；拆成多个 When，失败时也能定位到具体哪一步。也别把动作写成目标：写「点击第 1 组」而不是「选择第 1 组」，写成目标时模型会把它做到底、越过这一步继续操作（一次真实运行里它点完分组后自行答完了整组题）。
-- **导航之后先用一条确定性 step 核对落点**，例如 `页面上有 "开始挑战" 按钮`，或内建的 `页面地址匹配`。应用没有启动、启动的不是它、地址写错时，这一步在一秒内判否，原因直接写出页面内容；没有这一步时，后面的每个 AI 步都会各花几秒和数千 token 去尝试，再以「找不到按钮」出错。
+- **导航之后先用一条确定性 step 核对落点**，例如 `页面上有 "开始挑战" 按钮`，或 `页面地址匹配 "<正则>"`（模板在仓库的 [`features/steps/`](../../features/steps/)，复制进项目的 `steps/` 即可用）。应用没有启动、启动的不是它、地址写错时，这一步在一秒内判否，原因直接写出页面内容；没有这一步时，后面的每个 AI 步都会各花几秒和数千 token 去尝试，再以「找不到按钮」出错。
 - **一条 scenario 讲一件事**，步数控制在个位数；需要接着上一条的页面状态继续，用 `@scope` 把它们编到一起，而不是写成一条很长的 scenario。
 - **判否时先提高票数复测，再改用例**：AI 断言默认只判一次，把 `--assertion-votes` 调到 3 或 5 后仍一致判否，才说明是被测应用的问题（用法见下一节）。票数出现分歧说明结果有波动或措辞有歧义，把断言改直白，或落成确定性 step。
 
@@ -59,7 +60,7 @@ worker 拿到一个 step 后按固定顺序决定它走哪条执行路径：
 
 ```gherkin
 Scenario: 维基百科首页与 OpenAI 词条首段的 AI 断言
-  Given 打开 "https://www.wikipedia.org/"
+  Given "https://www.wikipedia.org/"
   Then "页面没有出现服务器错误"
   Then "页面上展示的语言版本超过 5 种"
   When "在搜索框输入 OpenAI 并提交搜索"
@@ -114,7 +115,7 @@ Scenario: 维基百科首页与 OpenAI 词条首段的 AI 断言
 ```gherkin
 @scope:browse
 Scenario: 进入 OpenAI 词条页
-  Given 打开 "https://en.wikipedia.org/wiki/OpenAI"
+  Given "https://en.wikipedia.org/wiki/OpenAI"
   Then "当前页面是关于 OpenAI 的维基百科词条"
 
 @scope:browse
@@ -155,7 +156,7 @@ Scenario: 仍停留在 OpenAI 词条页
 ```gherkin
 @engine:midscene @scope:zh-midscene
 Scenario: Midscene 在中文 UI 上搜索并断言
-  Given 打开 "https://zh.wikipedia.org/"
+  Given "https://zh.wikipedia.org/"
   Then "页面没有出现服务器错误"
   When "在搜索框输入 人工智能 并提交搜索"
   Then "当前页面是关于人工智能的维基百科词条页"
