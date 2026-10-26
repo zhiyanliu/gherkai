@@ -291,6 +291,19 @@ def test_clean_exit_without_any_event_is_error():
     assert state.jobs["a"].status == Status.ERROR
 
 
+def test_projection_keeps_baseline_session_id_when_events_only_carry_attempted():
+    """代表会话（ADR 0051 决策 4）：events 只带 attempted 的 session_opened（没有 ARN）时，project() 带 baseline 合并不会用 None
+    覆盖库里已记的 session_id。"""
+    from gherkai_core.model import JobState, RunState, SessionOpened
+
+    meta = _meta("a")
+    baseline = RunState(run_id="run-1", status=Status.RUNNING,
+                        jobs={"a": JobState("a", Status.RUNNING, session_id="arn:a")}, high_water_mark=0)
+    recs = [EventRecord(scope_id="a", kind="event", seq=1, event=SessionOpened(scope_id="a", name="t", origin="attempted"), emit_ts=1.0)]
+    state = project(meta, recs, baseline=baseline)
+    assert (state.jobs["a"].session_id, state.jobs["a"].status) == ("arn:a", Status.RUNNING)
+
+
 def test_clean_exit_without_events_converges_with_claimed_baseline():
     """同上,带「已 claim RUNNING」基线也必须收敛到 ERROR(终态 rank > running,单调合并不回退)。"""
     from gherkai_core.model import JobState, RunState

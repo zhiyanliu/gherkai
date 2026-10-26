@@ -75,12 +75,28 @@ def test_scope_done_optional_fields_come_and_go_together():
                               "message": "在等待时间内没有拿到可用设备 https://u:p@h.example/x"})
     assert failed.status == Status.ERROR and failed.error_type == "acquire_timeout"
     assert failed.message == "在等待时间内没有拿到可用设备 https://***@h.example/x"  # 与 step_done 同样脱敏（ADR 0035 决策 5）
-    for partial in ({"status": "error"}, {"errorType": "precheck_failed"}, {"status": "error", "errorType": "precheck_failed"},
-                    {"message": "m"}):
+    for partial in ({"status": "error"}, {"errorType": "precheck_failed"}, {"message": "m"},
+                    {"status": "error", "errorType": "precheck_failed"}, {"status": "error", "message": "m"},
+                    {"errorType": "precheck_failed", "message": "m"}):
         with pytest.raises(ValueError, match="同时出现或同时缺省"):
             event_from_json({"type": "scope_done", "scopeId": "s", **partial})
     with pytest.raises(ValueError, match="只允许"):
         event_from_json({"type": "scope_done", "scopeId": "s", "status": "passed", "errorType": "x", "message": "m"})
+    for bad in (None, "", 7):  # 键在而值为 null / 空串 / 非字符串：scope 级 error 没有归因，与缺键同罪
+        with pytest.raises(ValueError, match="errorType 须为非空字符串"):
+            event_from_json({"type": "scope_done", "scopeId": "s", "status": "error", "errorType": bad, "message": "m"})
+    nullmsg = event_from_json({"type": "scope_done", "scopeId": "s", "status": "error", "errorType": "precheck_failed", "message": None})
+    assert (nullmsg.status, nullmsg.error_type, nullmsg.message) == (Status.ERROR, "precheck_failed", None)  # message 可为 null
+
+
+def test_session_closed_observed_s_must_be_numeric_or_null():
+    base = {"type": "session_closed", "scopeId": "s", "name": "n", "release": "confirmed"}
+    assert event_from_json({**base, "observedS": None}).observed_s is None
+    assert event_from_json({**base, "observedS": 12}).observed_s == 12
+    assert event_from_json({**base, "observedS": 0.5}).observed_s == 0.5
+    for bad in ("12", True, [1], {"s": 1}):
+        with pytest.raises(ValueError, match="observedS 须为数值或 null"):
+            event_from_json({**base, "observedS": bad})
 
 
 def test_error_type_category_set_is_exactly_the_eleven_of_adr_0024():

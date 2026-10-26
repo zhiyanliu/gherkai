@@ -206,6 +206,27 @@ def test_explain_carries_sessions_and_metering_and_skips_evidence_note_for_synth
     txt = render.render_explain_text(doc, expand_passed=True)
     assert txt.count(render._SCOPE_SKIPPED_NOTE) == 2 and "无 AI 证据" not in txt
     assert "结果未知的创建尝试: n-t" in txt
+    assert "判定：error  (precheck_failed: 设备不支持)" in txt and "诊断细节见 worker 日志" not in txt  # 全是合成记录也打判定行
+
+
+def test_explain_prints_verdict_line_for_error_with_error_type_regardless_of_records():
+    """ADR 0042 决策四：job 判 error / aborted 且带 error_type 时总打判定行，与有无 step 记录无关；「诊断细节见 worker 日志」只在零记录时打；
+    passed / failed 有记录时不打判定行。"""
+    from gherkai_core.model import Scenario, Step
+
+    sc = Scenario(id="d:0", name="n", steps=(Step(0, "Given", "a"),))
+    job = Job(scope_id="d", scope_name="d", engine="midscene", scenarios=(sc,))
+    recorded = [ScenarioResult(scenario_id="d:0", status=Status.PASSED, steps=[StepResult(index=0, status=Status.PASSED)])]
+
+    def text(jr):
+        return render.render_explain_text(render.explain_to_dict(run_id="r", status=jr.status.value, results=[jr],
+                                                                 evidence_reader=lambda refs: (None, "no_ref")), expand_passed=True)
+
+    with_records = text(JobResult(job=job, status=Status.ERROR, error_type="release_failed", message="m", scenarios=recorded))
+    assert "判定：error  (release_failed: m)" in with_records and "诊断细节见 worker 日志" not in with_records
+    zero = text(JobResult(job=job, status=Status.ERROR, error_type="timeout", message="job 超时"))
+    assert "判定：error  (timeout: job 超时)" in zero and "诊断细节见 worker 日志" in zero
+    assert "判定：" not in text(JobResult(job=job, status=Status.PASSED, scenarios=recorded))
     desktop = render.explain_to_dict(run_id="r", status="passed", results=[_sample_run().jobs[0]], evidence_reader=lambda refs: (None, "no_ref"))
     assert "sessions" not in desktop["scopes"][0]  # 桌面 job 省键
 

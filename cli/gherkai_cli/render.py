@@ -14,7 +14,8 @@ from gherkai_core.serialize import ref_to_dict
 
 def format_event(ev: Event) -> str:
     """单个 ADR 0024 事件 → 一行进度文本（不含 scope_id——scope 归调用方的 `[core <scope>:event]` 前缀，
-    见 cli/gherkai_cli/__main__.py 的 sink；行内只留前缀没有的 scenario_id/step_index/status/votes/cost）。"""
+    见 cli/gherkai_cli/__main__.py 的 sink；行内只留前缀没有的 scenario_id/step_index/status/error_type/votes/cost，
+    会话事件另显 origin/release/name/observed_s（ADR 0051 决策 4）；step_done 与 scope_done 带归因时也显 error_type）。"""
     parts: list[str] = [ev.type]
     for attr in ("scenario_id", "step_index", "status", "origin", "release", "error_type"):
         v = getattr(ev, attr, None)
@@ -543,15 +544,18 @@ def explain_tree(doc: dict, *, expand_passed: bool = False, full: bool = False) 
             scn.add(styled(_ref_line(rr), DIM))
         for line in _explain_session_lines(sc):  # 设备会话摘要（ADR 0051 决策 7），与 run 文本同一口径
             scn.add(line)
-        # 一个 step 记录都没有的 job（worker 没起来 / 起来就被掐）：判定只剩 job 级这一层，在 scope 节点下单独列出
-        # 判定与诊断指引，免得读者在一片「无记录」里找不到「到底为什么」。
-        if not sc["has_step_records"]:  # job 级事实（explain_to_dict 按未筛判定树算），不在筛后的 steps 上重算
+        # 判定行（ADR 0042 决策四）：job 判 error / aborted 且带 error_type 时总打一行「判定：status (error_type: message)」，与有无
+        # step 记录无关——全部 scenario 都是合成记录的设备 job（如 precheck_failed）靠它显示原因，合成 step 上「原因见 job 判定」
+        # 才落到实处；一个 step 记录都没有的 job（worker 没起来 / 起来就被掐）另加诊断指引，免得读者在一片「无记录」里找不到原因。
+        # has_step_records 是 job 级事实（explain_to_dict 按未筛判定树算），不在筛后的 steps 上重算。
+        if (sc["status"] in ("error", "aborted") and sc["error_type"]) or not sc["has_step_records"]:
             why = ""
             if sc["error_type"]:
                 why = f"  ({sc['error_type']}: {sc['message'] or ''})"
             elif sc["message"]:
                 why = f"  ({sc['message']})"
             scn.add(f"判定：{sc['status']}{why}")
+        if not sc["has_step_records"]:
             scn.add("诊断细节见 worker 日志")
         if sc["aborted_hint"]:
             scn.add(sc["aborted_hint"])

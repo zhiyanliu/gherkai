@@ -15,8 +15,8 @@
     "semantic_hash": ""
   },
   "cli/tests/test_render.py": {
-    "mtime": 1792999483.4599118,
-    "ast_hash": "98bcd18871d09c0a56bad08643fd114d",
+    "mtime": 1793001961.1787767,
+    "ast_hash": "1064f54a610cd11e9a13af3605327829",
     "semantic_hash": ""
   },
   "core/pyproject.toml": {
@@ -35,8 +35,8 @@
     "semantic_hash": "b27350a1a5fdbd430f8be967a782ec2d"
   },
   "core/tests/fake_engine.py": {
-    "mtime": 1792999115.155349,
-    "ast_hash": "d4d792975f7ff9428a7bf81f70928707",
+    "mtime": 1793001532.300174,
+    "ast_hash": "5ea12f94917d61326be40d5735603e14",
     "semantic_hash": ""
   },
   "core/tests/fixtures/echo_worker.py": {
@@ -95,9 +95,9 @@
     "semantic_hash": ""
   },
   "core/tests/test_project.py": {
-    "mtime": 1789875977.638207,
-    "ast_hash": "fc552f67417b0a0fc33933a5228e4438",
-    "semantic_hash": "fc552f67417b0a0fc33933a5228e4438"
+    "mtime": 1793001961.1782854,
+    "ast_hash": "a5fa9312a648cbc646a5f31e8ce66091",
+    "semantic_hash": ""
   },
   "core/tests/test_reconcile.py": {
     "mtime": 1789872127.564982,
@@ -120,8 +120,8 @@
     "semantic_hash": "22dabb28f8d1742bebdc1553241300bc"
   },
   "core/tests/test_schedule.py": {
-    "mtime": 1792998978.8342092,
-    "ast_hash": "b17bb3f56135a10eab4dd235edc6de96",
+    "mtime": 1793001961.177516,
+    "ast_hash": "fe3c9b5644b9b2c43eeef9f3ec7bb309",
     "semantic_hash": ""
   },
   "core/tests/test_sqlite_event_log.py": {
@@ -455,8 +455,8 @@
     "semantic_hash": ""
   },
   "cli/gherkai_cli/render.py": {
-    "mtime": 1792999299.5834918,
-    "ast_hash": "1c8f00ac60ac8f7d025d19579ac7f98c",
+    "mtime": 1793001510.4168065,
+    "ast_hash": "ef25c06fbd063276043fa45a887b582a",
     "semantic_hash": ""
   },
   "core/gherkai_core/__init__.py": {
@@ -550,8 +550,8 @@
     "semantic_hash": "be6536a84282527d7870846da248cf15"
   },
   "core/gherkai_core/adapters/subprocess_engine.py": {
-    "mtime": 1792997816.7085555,
-    "ast_hash": "adf9eeda17e9645308afa01d433187a8",
+    "mtime": 1793001510.4163096,
+    "ast_hash": "5b63e2286bbde3e4299c6e013080479a",
     "semantic_hash": ""
   },
   "core/gherkai_core/errors.py": {
@@ -580,8 +580,8 @@
     "semantic_hash": "0d06a7c119f4bcfad3908886c7a43179"
   },
   "core/gherkai_core/project.py": {
-    "mtime": 1792998143.6659768,
-    "ast_hash": "191e9daba5c303f32fd0d20c16a33ba5",
+    "mtime": 1793002039.4905202,
+    "ast_hash": "41f6348958382050f2cc4699d57ccc65",
     "semantic_hash": ""
   },
   "core/gherkai_core/reconcile.py": {
@@ -590,8 +590,8 @@
     "semantic_hash": "62d0f31135110ffe79d8770fdf7cacc3"
   },
   "core/gherkai_core/schedule.py": {
-    "mtime": 1792998885.1663556,
-    "ast_hash": "09fba1f5dfb46d10fad423f1dc50147f",
+    "mtime": 1793001510.4145613,
+    "ast_hash": "7249242845072b4f650ce10d2a2cc9c8",
     "semantic_hash": ""
   },
   "core/gherkai_core/scope.py": {
@@ -605,8 +605,8 @@
     "semantic_hash": ""
   },
   "core/gherkai_core/wire.py": {
-    "mtime": 1792997816.7082345,
-    "ast_hash": "722f3af45a75f280f1c08d1afb2e023c",
+    "mtime": 1793001510.41607,
+    "ast_hash": "e01db68da3bca564077da2b45750fbea",
     "semantic_hash": ""
   },
   "pyproject.toml": {
@@ -1120,8 +1120,8 @@
     "semantic_hash": "f6577c5027baaaf0f30a35eb7657451c"
   },
   "cli/tests/test_cli_json_contract.py": {
-    "mtime": 1792999451.6477828,
-    "ast_hash": "368f0319a0663c31c0e884c9dc30e6d1",
+    "mtime": 1793001961.1791198,
+    "ast_hash": "5d5f20382ad01cd4de2d4c3fed37922f",
     "semantic_hash": ""
   },
   "docs/adr/0042-step-evidence-and-explain.md": {
@@ -1330,8 +1330,8 @@
     "semantic_hash": "886fd70dadbb69e1ee36307f08b3148a"
   },
   "CHANGELOG.md": {
-    "mtime": 1792999680.2029932,
-    "ast_hash": "8dd19ff096a9b48b300725b53660d9fe",
+    "mtime": 1793001961.1793969,
+    "ast_hash": "0d7aa56b3162235e344c8121b0f169db",
     "semantic_hash": ""
   },
   "CONTRIBUTING.md": {
@@ -1660,8 +1660,8 @@
     "semantic_hash": ""
   },
   "docs/diagrams/verdict-model-job-outcome.json": {
-    "mtime": 1793000049.9664807,
-    "ast_hash": "",
+    "mtime": 1793000090.5149899,
+    "ast_hash": "e5007702deb13ce1a7d5d651613a13ac",
     "semantic_hash": ""
   },
   "docs/diagrams/verdict-model-reduction-layers.json": {
@@ -1950,18 +1950,18 @@
     "semantic_hash": ""
   },
   "core/tests/test_session_events.py": {
-    "mtime": 1792997886.1488962,
-    "ast_hash": "1fc0a165585e9ffed063e6d467fdbdfa",
+    "mtime": 1793001961.1772628,
+    "ast_hash": "e361187dccca8ea69bebe71e5ec6d532",
     "semantic_hash": ""
   },
   "core/tests/test_terminal.py": {
-    "mtime": 1792998697.4483423,
-    "ast_hash": "5ee93e7de2a7a32608ac280a92d54687",
+    "mtime": 1793002039.490687,
+    "ast_hash": "1f5092120c83265c2f62e540e3fdbd14",
     "semantic_hash": ""
   },
   "core/tests/test_termination_parity.py": {
-    "mtime": 1792999115.155202,
-    "ast_hash": "4937a1014f132c7b343c580bb7c1a2bc",
+    "mtime": 1793001961.1780689,
+    "ast_hash": "6790a0b5cf054b3db56fd37a60dce259",
     "semantic_hash": ""
   }
 }

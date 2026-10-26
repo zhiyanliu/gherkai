@@ -65,26 +65,42 @@ def _fin(**kw):
 @pytest.mark.parametrize("kw, status, error_type, in_message", [
     # 行 1：timeout 优先于一切（含 U 非空与非零退出）
     (dict(stop_reason="timeout", exit_code=137, sessions=[_unconfirmed()]), Status.ERROR, "timeout", "job 超时（预算 60s，已中止）"),
-    (dict(stop_reason="timeout", job=_job(timeout_s=None)), Status.ERROR, "timeout", "job 超时（已中止）"),
-    # 行 2：abort → ABORTED、归因为空（优先于非零退出）
+    (dict(stop_reason="timeout", job=_job(timeout_s=None), scope_done=None), Status.ERROR, "timeout", "job 超时（已中止）"),
+    (dict(stop_reason="timeout", exit_code=1), Status.ERROR, "timeout", "job 超时"),  # scope_done 已到但非零退出：不算内容完整
+    # 行 2：abort → ABORTED、归因为空（优先于非零退出）；U 非空不改判定、只追加提示
     (dict(stop_reason="abort", exit_code=1), Status.ABORTED, None, "fail-fast"),
-    # 行 3：退出码非零 / 未知
+    (dict(stop_reason="abort", exit_code=1, sessions=[_unconfirmed()]), Status.ABORTED, None, RELEASE_FAILED_HINT),
+    # 内容完整（干净退出且有 scope_done）后停止原因不再改写判定：判定按内容给出
+    (dict(stop_reason="timeout"), Status.PASSED, None, None),
+    (dict(stop_reason="abort", scenario_status={"s:0": Status.FAILED}), Status.FAILED, None, None),
+    (dict(stop_reason="timeout", sessions=[_unconfirmed()]), Status.ERROR, "release_failed", RELEASE_FAILED_HINT),
+    (dict(stop_reason="timeout", scope_done=ScopeDone(scope_id="s", status=Status.ERROR, error_type="acquire_timeout", message="没拿到设备")),
+     Status.ERROR, "acquire_timeout", "没拿到设备"),
+    # 行 3：退出码非零 / 未知；U 非空只改归因、退出原因的消息保留
     (dict(exit_code=1, sessions=[_unconfirmed()]), Status.ERROR, "release_failed", RELEASE_FAILED_HINT),
+    (dict(exit_code=1, sessions=[_unconfirmed()]), Status.ERROR, "release_failed", "worker 非正常退出（exit 1"),
+    (dict(exit_code=-9, sessions=[_unconfirmed(), _attempted()]), Status.ERROR, "release_failed", "exit -9"),
     (dict(exit_code=80), Status.ERROR, "network_error", "建连失败"),
     (dict(exit_code=1), Status.ERROR, "engine_error", "worker 非正常退出（exit 1"),
+    (dict(exit_code=1, scope_done=ScopeDone(scope_id="s", status=Status.ERROR, error_type="acquire_timeout", message="没拿到设备")),
+     Status.ERROR, "engine_error", "没拿到设备；worker 随后非正常退出（exit 1）"),  # 先报 scope 级 error 再非零退出：原因保留
     (dict(exit_code=-9), Status.ERROR, "engine_error", "exit -9"),
     (dict(exit_code=None), Status.ERROR, "engine_error", "退出码未知"),
     (dict(exit_code=None, exit_reason="解析失败"), Status.ERROR, "engine_error", "worker 异常：解析失败"),
-    (dict(exit_code=255, exit_reason="TaskFailedToStart: 拉不到镜像"), Status.ERROR, "engine_error", "平台侧未取到退出码）：TaskFailedToStart"),
-    # 行 4：退出码 0、无 scope_done
+    (dict(exit_code=255, exit_reason="TaskFailedToStart: 拉不到镜像"), Status.ERROR, "engine_error", "平台侧未取到退出码时也记此码）：TaskFailedToStart"),
+    # 行 4：退出码 0、无 scope_done（U 非空也不改判 release_failed，只追加提示）
     (dict(scope_done=None), Status.ERROR, "engine_error", "没有报完这次运行的结果"),
-    # 行 5：scope_done.status = error → 取其归因；U 非空改 release_failed
+    (dict(scope_done=None, sessions=[_unconfirmed()]), Status.ERROR, "engine_error", RELEASE_FAILED_HINT),
+    # 行 5：scope_done.status = error → 取其归因；U 非空改 release_failed、worker 报的消息保留
     (dict(scope_done=ScopeDone(scope_id="s", status=Status.ERROR, error_type="acquire_timeout", message="没拿到设备")),
      Status.ERROR, "acquire_timeout", "没拿到设备"),
     (dict(scope_done=ScopeDone(scope_id="s", status=Status.ERROR, error_type="session_lost", message="m"), sessions=[_attempted()]),
      Status.ERROR, "release_failed", "结果未知的创建尝试：n3"),
-    # 行 6：零 scenario → ERROR（曾被 _aggregate([]) 判成 PASSED）
+    (dict(scope_done=ScopeDone(scope_id="s", status=Status.ERROR, error_type="session_lost", message="设备会话中途丢失"), sessions=[_attempted()]),
+     Status.ERROR, "release_failed", "设备会话中途丢失"),
+    # 行 6：零 scenario → ERROR（曾被 _aggregate([]) 判成 PASSED）；U 非空同样只追加提示
     (dict(scenario_status={}), Status.ERROR, "engine_error", "worker 未报告任何 scenario 判定"),
+    (dict(scenario_status={}, sessions=[_unconfirmed()]), Status.ERROR, "engine_error", "worker 未报告任何 scenario 判定"),
     # 行 7：判定集非空 → _aggregate；U 非空改判 release_failed
     (dict(scenario_status={"s:0": Status.PASSED, "s:1": Status.FAILED}), Status.FAILED, None, None),
     (dict(scenario_status={"s:0": Status.PASSED}, sessions=[_confirmed()]), Status.PASSED, None, None),
@@ -106,9 +122,15 @@ def test_not_exited_is_running_or_pending():
     assert _fin(exited=False, exit_code=None, scope_done=None, scenario_status={}, saw_scope_started=False).status == Status.PENDING
 
 
+def test_network_exit_message_is_not_duplicated_and_reason_only_appends():
+    """退出码 80 的消息只有一句（同步路径不再把异常文本当平台归因传入）；平台归因存在时作为后缀追加。"""
+    assert _fin(exit_code=80).message == "worker 建连失败（网络/SSL 瞬时故障），退出码 80"
+    assert _fin(exit_code=80, exit_reason="Essential container exited").message.endswith("退出码 80：Essential container exited")
+
+
 def test_release_failed_hint_lists_sessions_and_attempts_separately_even_on_timeout():
     """U 非空时无论判定为何都追加提示：会话名与「结果未知的创建尝试」分开列。"""
-    term = _fin(stop_reason="timeout", sessions=[_unconfirmed("a"), _attempted("b"), _confirmed("c")])
+    term = _fin(stop_reason="timeout", scope_done=None, sessions=[_unconfirmed("a"), _attempted("b"), _confirmed("c")])
     assert term.error_type == "timeout"
     assert "未确认停止的会话：a" in term.message and "结果未知的创建尝试：b" in term.message and "c" not in term.message.split("会话：")[1].split("；")[0]
     assert unconfirmed_sessions([_unconfirmed("a"), _attempted("b"), _confirmed("c")]) == [_unconfirmed("a"), _attempted("b")]
@@ -154,6 +176,24 @@ def test_reduce_event_tracks_sessions_and_representative_session():
     assert len(result.sessions) == 3
 
 
+def test_session_pairing_falls_back_to_name_when_one_side_lacks_session_id():
+    """配对键（ADR 0024）：一侧带 sessionId、另一侧缺省的同名事件配成一条记录（不多登记、不误判未确认）；缺省侧后来带上的 ARN 补进记录；
+    同名而 ARN 不同的两条真实会话不混为一条。"""
+    result, ss = _run_events([
+        SessionOpened(scope_id="s", name="A", origin="created", session_id="arn:A"),
+        SessionClosed(scope_id="s", name="A", release="confirmed", observed_s=4.0),  # 没带 sessionId
+        SessionOpened(scope_id="s", name="T", origin="attempted"),
+        SessionClosed(scope_id="s", name="T", release="confirmed", session_id="arn:T", observed_s=1.0),  # 事后才知道 ARN
+        SessionOpened(scope_id="s", name="B", origin="created", session_id="arn:B1"),
+        SessionOpened(scope_id="s", name="B", origin="created", session_id="arn:B2"),
+    ])
+    by = {(s.name, s.session_id): s for s in result.sessions}
+    assert set(by) == {("A", "arn:A"), ("T", "arn:T"), ("B", "arn:B1"), ("B", "arn:B2")}
+    assert by[("A", "arn:A")].release == "confirmed" and by[("A", "arn:A")].observed_s == 4.0
+    assert by[("T", "arn:T")].origin == "attempted" and not by[("T", "arn:T")].confirmed  # 补了 ARN，origin 不改、仍在 U 里
+    assert unconfirmed_sessions(result.sessions) == [by[("T", "arn:T")], by[("B", "arn:B1")], by[("B", "arn:B2")]]
+
+
 # ---- 合成 SKIPPED（ADR 0051 决策 4；0031 决定一、六）----
 
 def _run_events(events, job=None):
@@ -181,6 +221,16 @@ def test_scope_error_synthesizes_skipped_only_for_zero_event_scenarios():
     assert "s:2" not in ss  # 合成的 SKIPPED 不写 scenario_status（不进 _aggregate）
     back = job_result_from_dict(job_result_to_dict(result))  # 序列化往返保留 shortcircuited=False
     assert [st.shortcircuited for st in back.scenarios[1].steps] == [False, False]
+
+
+def test_scenario_done_after_synthesis_replaces_the_synthesized_record():
+    """worker 违约（scope_done 之后仍发 scenario_done）时同一 scenario 只留一条记录：真实判定取代合成的 SKIPPED。"""
+    result, ss = _run_events([
+        ScopeDone(scope_id="s", status=Status.ERROR, error_type="session_lost", message="m"),
+        ScenarioStarted(scenario_id="s:1"), ScenarioDone(scenario_id="s:1", status=Status.FAILED),
+    ])
+    assert [sr.scenario_id for sr in result.scenarios] == ["s:0", "s:1", "s:2"]
+    assert [sr.status for sr in result.scenarios] == [Status.SKIPPED, Status.FAILED, Status.SKIPPED] and ss == {"s:1": Status.FAILED}
 
 
 def test_no_synthesis_without_scope_error():

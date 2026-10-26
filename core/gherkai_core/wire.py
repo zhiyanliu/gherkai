@@ -161,6 +161,9 @@ def event_from_json(d: dict) -> Event:
             raise ValueError(f"scope_done 的 status / errorType / message 须同时出现或同时缺省，现只有 {present}（不符合 worker↔core 协议）")
         if present and d["status"] != "error":
             raise ValueError(f"scope_done 的 status 只允许 \"error\"，收到 {d['status']!r}（不符合 worker↔core 协议）")
+        if present and (not isinstance(d["errorType"], str) or not d["errorType"]):
+            # 键在而值为 null / 空串与缺键同罪：scope 级 error 没有归因，使用方无从处置
+            raise ValueError(f"scope_done 的 errorType 须为非空字符串，收到 {d['errorType']!r}（不符合 worker↔core 协议）")
         return ScopeDone(
             scope_id=d["scopeId"],
             session_id=d.get("sessionId"),
@@ -187,9 +190,13 @@ def event_from_json(d: dict) -> Event:
         name = d.get("name")
         if not isinstance(name, str) or not name:
             raise ValueError("session_closed 缺 name（sessionId 可为 null，name 是配对键的回退，必须有值）")
+        observed = d.get("observedS")
+        if observed is not None and (isinstance(observed, bool) or not isinstance(observed, (int, float))):
+            # core 要把它合计成设备占用时长：非数值在协议层按 worker 违约报，不留到求和时才抛
+            raise ValueError(f"session_closed 的 observedS 须为数值或 null，收到 {observed!r}（不符合 worker↔core 协议）")
         return SessionClosed(scope_id=d["scopeId"], name=name, release=release,
                              session_id=d.get("sessionId"),
-                             observed_s=d.get("observedS"),  # null 保持 None、不改成 0（null 不等于 0，ADR 0051 决策 7）
+                             observed_s=observed,  # null 保持 None、不改成 0（null 不等于 0，ADR 0051 决策 7）
                              provider_minutes=d.get("providerMinutes"))
     raise ValueError(f"未知事件 type: {t!r}（不符合 worker↔core 协议）")
 

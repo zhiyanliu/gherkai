@@ -21,7 +21,8 @@
 - **引擎不再内建 `页面地址匹配 "<正则>"` 这条确定性 step**。要精确核对地址，把仓库 `features/steps/` 里的模板复制进项目的 `steps/`（两个引擎各一份）；用到它而没有带上这条 step 的现有用例，升级后这一步改由 AI 判定，`gherkai plan` 里这一步不再带确定性标注。
 - 确定性 step 可以声明接受的关键字（`keywords`），内建导航只接受 `Given` / `When`：`Then` 后只写一个地址的 step 记 `error`、不交给 AI。`plan` 的文本视图用 ⚠ 标出这类 step，`--json` 的 `deterministic` 多一态 `keyword_mismatch`；`list-deterministic` 多一列「关键字」，`--json` 每项多 `keywords`。
 - 确定性 step 带 DataTable / DocString 时这一步记 `error`；此前多行参数被静默忽略。
-- **job 的终结判定统一为一张真值表**，本机 `run` 与后台 `submit` 两条路径用同一份判定。对桌面用例有三处可见变化：worker 被强制结束（负退出码，如被系统 kill -9）不再按正常退出处理，这一步之前会按内容判定、现在一律记 `error`；worker 正常退出却一条 scenario 判定都没报的 job 由 `passed` 改为 `error`（原因写「worker 未报告任何 scenario 判定」）；一个 job 同时触发超时与 fail-fast 中止时统一按超时归因（`error` 加 `timeout`），此前两条路径的顺序不一致。超时与中止的消息也统一为「job 超时（预算 Ns，已中止）」。
+- **job 的终结判定由本机 `run` 与后台 `submit` 共用同一份规则**。对现有桌面用例的可见变化：worker 被强制结束（负退出码，如被系统 kill -9）此前按正常退出处理、现在一律记 `error`；worker 正常退出却一条 scenario 判定都没报的 job 由 `passed` 改为 `error`（原因写「worker 未报告任何 scenario 判定」）；后台 `submit` 里 worker 崩溃或非零退出的 job 此前没有错误类别、现在记 `engine_error`，以网络故障退出码退出的记 `network_error`（与本机 `run` 一致）；超时与 fail-fast 中止同时成立的 job 按作出停止决定那一刻的事实归因（那一刻已超时记 `timeout`，否则记中止），此前本机 `run` 内部不同分支的判定顺序不一致；两条路径上超时的消息统一为「job 超时（预算 Ns，已中止）」；判定记录里的 `session_id` 以 worker 开始执行时报的会话为准，收尾时报的不再覆盖它。
+- worker 已报完全部结果、只是收尾拖过了预算的 job，判定按内容给出、不记超时；本机 `run` 在这种情形下只催 worker 收尾。
 - 本机 `run` 在决定停止一个 job 之后继续读完 worker 的收尾事件（最多等到停止宽限再加几秒），worker 在收尾里报出的事实不再丢失。
 
 ## [1.4.9] - 2026-10-12

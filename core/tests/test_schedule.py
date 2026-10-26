@@ -787,42 +787,179 @@ def test_tail_events_after_stop_are_still_reduced_and_release_confirmed():
 
 
 def test_timeout_wins_over_abort_when_deadline_already_passed_on_every_branch():
-    """首次仲裁：那一刻 deadline 已过就取 timeout，即使 abort_flag 也已置位——事件分支、WorkerExitError 分支、EOF 分支都一样。"""
+    """首次仲裁：那一刻 deadline 已过就取 timeout，即使 abort_flag 也已置位——事件分支、WorkerExitError 分支、EOF 分支都一样；
+    deadline 未过时同样的置位则判 abort（ABORTED）。abort_flag 在 worker 已 spawn、首事件之前置位（起 worker 前置位会得 SKIPPED）。"""
+    import gherkai_core.schedule as sch
     from gherkai_core.errors import WorkerExitError
 
-    def run(scope: str, engine: FakeEngine, flag_set_first: bool) -> Status:
+    def run(scope: str, behavior, *, deadline_passed: bool, set_flag: bool):
         class _Clock:
             def __init__(self): self.n = 0
             def __call__(self):  # 前两次读（run 起点、deadline 基点）为 0；之后一律在 deadline 之后、慢走（别把排空上界也耗尽）
-                self.n += 1; return 0.0 if self.n <= 2 else 1000.0 + self.n * 0.001
+                self.n += 1
+                if not deadline_passed:
+                    return self.n * 0.001
+                return 0.0 if self.n <= 2 else 1000.0 + self.n * 0.001
 
-        import gherkai_core.schedule as sch
         captured = {}
         orig = sch._Worker.__init__
 
         def spy(self, *a, **kw):
             orig(self, *a, **kw)
-            if flag_set_first:
-                self.abort_flag.set()  # 起 worker 前就置位会得 SKIPPED；这里改成在首事件前置位
             captured["w"] = self
+
+        def gen(job):  # worker 已 spawn、首事件前把 fail-fast 标志置位（模拟其他 job 恰在此刻失败）
+            if set_flag:
+                captured["w"].abort_flag.set()
+            return behavior(job)
+
         sch._Worker.__init__ = spy
         try:
-            res = schedule(_rm([_job(scope, timeout_s=1.0)]), FakeResolver(engine), CollectSink(),
+            res = schedule(_rm([_job(scope, timeout_s=1.0)]), FakeResolver(FakeEngine({scope: gen})), CollectSink(),
                            opts=ScheduleOpts(max_concurrency=1, clock=_Clock(), heartbeat_interval_s=0.05, grace_period_s=1.0))
         finally:
             sch._Worker.__init__ = orig
         return res.jobs[0]
 
-    # 事件分支：第一条事件到达时 deadline 已过
-    jr = run("ev", FakeEngine({"ev": _passing_events("ev", "ev:0")}), flag_set_first=False)
+    def events(job):  # 事件分支：首事件到达时检查（内容不完整——没有 scope_done）
+        return iter([ScopeStarted(scope_id="s"), ScenarioStarted(scenario_id="s:0")])
+
+    def network_exit(job):  # WorkerExitError 分支：零事件、worker 以 80 退出
+        raise WorkerExitError(80, "fake 建连失败")
+
+    def eof(job):  # EOF 分支：零事件干净退出
+        return iter([])
+
+    for behavior in (events, network_exit, eof):
+        jr = run("s", behavior, deadline_passed=True, set_flag=True)
+        assert (jr.status, jr.error_type) == (Status.ERROR, "timeout"), behavior.__name__  # 不是 ABORTED / network_error / engine_error
+    for behavior in (events, network_exit, eof):
+        jr = run("s", behavior, deadline_passed=False, set_flag=True)
+        assert (jr.status, jr.error_type) == (Status.ABORTED, None), behavior.__name__
+
+
+def test_drain_bound_ends_consumption_when_worker_hangs_after_stop():
+    """排空上界（ADR 0034 机制二）：停止请求后 worker 卡死、再无事件也不退出 → 消费在 grace 加余量处终止、不挂死；判定由 stop_reason 给出。"""
+    import time
+
+    scope = "h"
+
+    class _Clock:  # 第 5 次读（第二条事件的事件间检查）越过 deadline；之后每次读前进 1 秒，排空上界（1 加 5 秒）几次心跳内到点
+        def __init__(self): self.n = 0; self.t = 0.0
+        def __call__(self):
+            self.n += 1
+            self.t += 1000.0 if self.n == 5 else (1.0 if self.n > 5 else 0.001)
+            return self.t
+
+    engine = FakeEngine({scope: [ScopeStarted(scope_id=scope), ScenarioStarted(scenario_id="h:0")]}, hang_after_stop={scope})
+    t0 = time.monotonic()
+    res = schedule(_rm([_job(scope, timeout_s=5.0)]), FakeResolver(engine), CollectSink(),
+                   opts=ScheduleOpts(max_concurrency=1, clock=_Clock(), heartbeat_interval_s=0.05, grace_period_s=1.0))
+    assert time.monotonic() - t0 < 3.0  # 不等真实的 6 秒、也不永远等
+    jr = res.jobs[0]
+    assert (jr.status, jr.error_type) == (Status.ERROR, "timeout") and engine.handles[scope].stopped
+
+
+def test_deadline_after_scope_done_hurries_exit_but_keeps_verdict():
+    """内容完整后不再仲裁（ADR 0034 机制二）：scope_done 已到、worker 收尾期间 deadline 到点 → 只催停（发停止请求），判定仍按内容（PASSED）。"""
+    scope = "p"
+    events = _passing_events(scope, "p:0")  # 末尾带 scope_done
+    n = len(events)
+
+    class _Clock:  # 事件各读两次时钟；全部处理完后的第一次心跳检查（第 2n+3 次读）越过 deadline
+        def __init__(self): self.n = 0; self.t = 0.0
+        def __call__(self):
+            self.n += 1; self.t += 1000.0 if self.n == 2 * n + 3 else 0.001; return self.t
+
+    engine = FakeEngine({scope: events}, tail_after_stop={scope: []})  # 发完事件后活着等停（模拟释放阶段拖过预算）
+    res = schedule(_rm([_job(scope, timeout_s=5.0)]), FakeResolver(engine), CollectSink(),
+                   opts=ScheduleOpts(max_concurrency=1, clock=_Clock(), heartbeat_interval_s=0.05, grace_period_s=1.0))
+    jr = res.jobs[0]
+    assert (jr.status, jr.error_type) == (Status.PASSED, None) and engine.handles[scope].stopped
+
+
+def test_fail_fast_does_not_preempt_network_retry():
+    """开 fail_fast 时，可重试的瞬时网络故障（零 step_done 的 network_error）先重试、不触发整批中止；重试成功则 run 通过。"""
+    engine = FakeEngine({"a": _passing_events("a", "a:0"), "b": _passing_events("b", "b:0")}, network_crash_after={"a": [0]})
+    res = schedule(_rm([_job("a"), _job("b")]), FakeResolver(engine), CollectSink(),
+                   opts=ScheduleOpts(max_concurrency=1, fail_fast=True, network_retry=1, retry_sleep=lambda s: None))
+    assert engine.run_count["a"] == 2 and res.status == Status.PASSED
+    assert [jr.status for jr in res.jobs] == [Status.PASSED, Status.PASSED]
+
+
+def test_fail_fast_stops_running_workers_from_main_thread_without_heartbeat():
+    """fail-fast：主线程的 _stop_all 对仍在运行的 worker 当场落定并发停止请求，不依赖该 worker 自己的心跳检查（这里关掉心跳、
+    victim 卡在等停里看不到 abort_flag）。那一刻 deadline 未过的 victim 记 ABORTED，已过的记 timeout。"""
+    import time
+
+    def run(scope: str, timeout_s: float | None, crash_delay_s: float):
+        crash_now = threading.Event()
+
+        def crash_gen(job):
+            yield ScenarioStarted(scenario_id="c:0")
+            crash_now.wait(timeout=5)
+            time.sleep(crash_delay_s)
+            raise RuntimeError("crash job 崩了")
+
+        def on_event(scope_id, i):
+            if scope_id == scope:
+                crash_now.set()  # victim 吐出首事件后让 crash job 崩
+
+        engine = FakeEngine({scope: [ScopeStarted(scope_id=scope)], "c": crash_gen}, on_event=on_event,
+                            tail_after_stop={scope: []})  # victim 发完事件后活着等停
+        t0 = time.monotonic()
+        res = schedule(_rm([_job(scope, timeout_s=timeout_s), _job("c")]), FakeResolver(engine), CollectSink(),
+                       opts=ScheduleOpts(max_concurrency=2, fail_fast=True, heartbeat_interval_s=0, grace_period_s=1.0))
+        assert time.monotonic() - t0 < crash_delay_s + 3.0  # 没等到 FakeEngine 的 5 秒等停超时：停止请求由主线程当场发出
+        return next(jr for jr in res.jobs if jr.scope_id == scope)
+
+    jr = run("v", timeout_s=None, crash_delay_s=0.0)
+    assert (jr.status, jr.error_type) == (Status.ABORTED, None)
+    jr = run("w", timeout_s=0.3, crash_delay_s=0.8)  # 实时钟：crash job 崩时 victim 的 deadline 已过 → _stop_all 当场落定 timeout
     assert (jr.status, jr.error_type) == (Status.ERROR, "timeout")
-    # WorkerExitError 分支：零事件、worker 以 80 退出，而 deadline 已过 → timeout（不是 network_error、不重试）
-    eng = FakeEngine({"net": []}, exit_code={"net": 80})
-    jr = run("net", eng, flag_set_first=False)
-    assert (jr.status, jr.error_type) == (Status.ERROR, "timeout") and eng.run_count["net"] == 1
-    # EOF 分支：零事件干净退出而 deadline 已过 → timeout（而非「没有报完结果」的 engine_error）
-    jr = run("eof", FakeEngine({"eof": []}), flag_set_first=False)
-    assert (jr.status, jr.error_type) == (Status.ERROR, "timeout")
+
+
+def test_abort_decided_before_deadline_stays_aborted_when_deadline_passes_during_tail():
+    """首次仲裁：先判 abort（那一刻 deadline 未过），收尾期间 deadline 才到 → 仍 ABORTED；停止后到达的收尾事件照常归约。"""
+    from gherkai_core.model import SessionClosed, SessionOpened
+
+    crash_now = threading.Event()
+
+    def crash_gen(job):
+        yield ScenarioStarted(scenario_id="c:0")
+        crash_now.wait(timeout=5)
+        raise RuntimeError("crash job 崩了")
+
+    def on_event(scope_id, i):
+        if scope_id == "v":
+            crash_now.set()
+
+    tail = [SessionClosed(scope_id="v", name="n", release="confirmed", session_id="arn:n", observed_s=1.0)]
+    engine = FakeEngine({"v": [SessionOpened(scope_id="v", name="n", origin="created", session_id="arn:n"),
+                               ScopeStarted(scope_id="v", session_id="arn:n")], "c": crash_gen},
+                        on_event=on_event, tail_after_stop={"v": tail}, tail_delay_s=0.6)
+    res = schedule(_rm([_job("v", timeout_s=0.3), _job("c")]), FakeResolver(engine), CollectSink(),
+                   opts=ScheduleOpts(max_concurrency=2, fail_fast=True, heartbeat_interval_s=0.05, grace_period_s=1.0))
+    v = next(jr for jr in res.jobs if jr.scope_id == "v")
+    assert (v.status, v.error_type) == (Status.ABORTED, None)
+    assert [s.release for s in v.sessions] == ["confirmed"] and "未能确认停止" not in (v.message or "")
+
+
+def test_device_job_network_error_is_not_retried(monkeypatch):
+    """设备 job 的建连失败不做 job 级重试（ADR 0051 决策 2）：同样的零 step_done network_error，桌面 job 重试、设备 job 不重试。"""
+    import gherkai_core.schedule as sch
+
+    def run():
+        engine = FakeEngine({"a": _passing_events("a", "a:0")}, network_crash_after={"a": [0]})
+        res = schedule(_rm([_job("a")]), FakeResolver(engine), CollectSink(),
+                       opts=ScheduleOpts(max_concurrency=1, network_retry=1, retry_sleep=lambda s: None))
+        return engine.run_count["a"], res.jobs[0]
+
+    n, jr = run()
+    assert n == 2 and jr.status == Status.PASSED
+    monkeypatch.setattr(sch, "is_device_job", lambda job: True)  # 目标字段落地前恒 False，这里钉住门槛本身
+    n, jr = run()
+    assert n == 1 and (jr.status, jr.error_type) == (Status.ERROR, "network_error")
 
 
 def test_sigkill_negative_exit_code_is_error_not_clean():

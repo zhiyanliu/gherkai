@@ -85,15 +85,15 @@ def representative_session(current: str | None, locked: bool, event: Event) -> t
     return current, locked
 
 
-def _session_key(session_id: str | None, name: str) -> str:
-    """会话事件的配对键：sessionId，缺省时回退为会话名（ADR 0051 决策 4）。"""
-    return session_id if session_id is not None else f"name:{name}"
-
-
 def _find_session(sessions: list[SessionRecord], session_id: str | None, name: str) -> SessionRecord | None:
-    key = _session_key(session_id, name)
+    """按配对键找会话记录（ADR 0024「配对键是 sessionId，缺省时回退为 name」）：事件带 sessionId 时先按它找；找不到或事件不带时
+    按会话名找，但只配对双方至少一侧没有 sessionId 的记录——同名而 ARN 不同的两条真实会话不混为一条。"""
+    if session_id is not None:
+        for s in sessions:
+            if s.session_id == session_id:
+                return s
     for s in sessions:
-        if _session_key(s.session_id, s.name) == key:
+        if s.name == name and (s.session_id is None or session_id is None):
             return s
     return None
 
@@ -107,7 +107,8 @@ def reduce_event(
 ) -> None:
     """把单个 worker 事件归约进 JobResult（就地累积，ADR 0024/0026）。
 
-    **这是 `schedule._Worker._reduce` 提炼出的同一份逻辑**（schedule delegate 到此，零行为变化）。
+    **这是 `schedule._Worker._reduce` 提炼出的同一份逻辑**（schedule delegate 到此）。代表会话按 ADR 0024 的取值优先级：
+    scope_done 只在还没有值时补、不覆盖 scope_started 已取到的值（此前曾覆盖，属桌面可见变化、记在 CHANGELOG）。
     now 是事件到达 core 的墙钟（同步路径下取 schedule 注入的 clock()；无状态路径下由 reconciler 从 events
     表 item 的 emit 时刻还原）。纯函数：只改传入的 result/scenario_status/timing，无 I/O。
     会话事件（ADR 0051 决策 4、7）在这里归约成 result.sessions 并按代表会话规则更新 result.session_id；scope 级 error
@@ -131,6 +132,8 @@ def reduce_event(
             # origin 按 created 记——这是 worker 违约下的保守补全，不丢任何会话事实。
             rec = SessionRecord(session_id=event.session_id, name=event.name, origin="created")
             result.sessions.append(rec)
+        if rec.session_id is None and event.session_id is not None:
+            rec.session_id = event.session_id  # 按名配上的记录此前没有 ARN：补上，origin 不改
         rec.release = event.release
         rec.observed_s = event.observed_s
         rec.provider_minutes = event.provider_minutes
@@ -167,15 +170,20 @@ def reduce_event(
     elif isinstance(event, ScenarioDone):
         scenario_status[event.scenario_id] = event.status
         ss = timing.scenario_start.get(event.scenario_id)
-        result.scenarios.append(
-            ScenarioResult(
-                scenario_id=event.scenario_id,
-                status=event.status,
-                steps=timing.steps.get(event.scenario_id, []),
-                duration_ms=(now - ss) * 1000.0 if ss is not None else None,
-                report_refs=event.report_refs,
-            )
+        sr = ScenarioResult(
+            scenario_id=event.scenario_id,
+            status=event.status,
+            steps=timing.steps.get(event.scenario_id, []),
+            duration_ms=(now - ss) * 1000.0 if ss is not None else None,
+            report_refs=event.report_refs,
         )
+        # 同一 scenario 只留一条记录：scope 级 error 后已合成 SKIPPED 的 scenario 若仍收到 scenario_done（worker 违约），
+        # 以真实判定取代合成记录，不让同一 scenario_id 出现两条
+        existing = next((i for i, x in enumerate(result.scenarios) if x.scenario_id == event.scenario_id), None)
+        if existing is None:
+            result.scenarios.append(sr)
+        else:
+            result.scenarios[existing] = sr
     elif isinstance(event, ScopeDone):
         # 代表会话已由上面的 representative_session 处理（scope_done 只在还没有值时补，不覆盖已取到的值，ADR 0024）。
         if event.report_refs:
@@ -233,7 +241,7 @@ class TaskExited:
     exit_code: int | None = None
     # 超时归因（ADR 0034「job timeout」节）：本次退出是否由 timeout 处置的 stop 所致。
     # local 由 launcher 的 timer 标志传入；cloud 经 StopTask reason → STOPPED 事件 detail.stoppedReason
-    # 哨兵串还原。_job_status 见它 → ERROR，_reduce_scope 归因 error_type="timeout"。
+    # 哨兵串还原。终结函数据此取 stop_reason = timeout（内容完整的干净退出除外，见 finalize_job）。
     timed_out: bool = False
     reason: str | None = None  # 平台侧归因（观察者落哨兵时带），见类 docstring
 
@@ -438,36 +446,49 @@ def finalize_job(
     输入：stop_reason 取 none、timeout、abort 之一（推进器首次仲裁落定的主动处置）；退出信息（exited 为 False 即未退出；exited
     且 exit_code 为 None 即退出码未知）；是否见到 scope_done 及其 status / errorType / message；scenario 判定集；会话记录
     （未确认集 U 由此算出）。exit_reason 是平台侧归因或异常文本，只进消息。
-    U 非空时不论判定为何，message 都追加产品语言提示并列出会话名。两条归约路径只负责准备输入，判定逻辑不写第二份。"""
+    内容完整（干净退出且发了 scope_done）后停止原因不再改写判定：判定已成，收尾拖过预算只改变推进器是否催停，不改结论——
+    同步路径收到 scope_done 后不再落定停止原因，无状态路径的 timed_out 记录遇到它同样不改判，两条路径由这里同一条件保证；
+    非零退出或退出码未知不算内容完整，照常受前两行约束。
+    U 非空时不论判定为何，归因改 release_failed 的行保留原因消息，message 都追加产品语言提示并列出会话名。
+    两条归约路径只负责准备输入，判定逻辑不写第二份。"""
     unconfirmed = unconfirmed_sessions(sessions)
     budget = f"（预算 {job.timeout_s:g}s，已中止）" if job.timeout_s else "（已中止）"
-    if stop_reason == "timeout":
+    content_complete = exited and exit_code == 0 and scope_done is not None
+    if stop_reason == "timeout" and not content_complete:
         status, error_type, message = Status.ERROR, "timeout", f"job 超时{budget}"
-    elif stop_reason == "abort":
+    elif stop_reason == "abort" and not content_complete:
         status, error_type, message = Status.ABORTED, None, "fail-fast：其他 job 失败，本 job 被中止"
     elif not exited:
         status = Status.RUNNING if (saw_session_opened or saw_scope_started) else Status.PENDING
         error_type, message = None, None
     elif exit_code is None or exit_code != 0:
         status = Status.ERROR
-        if unconfirmed:
-            error_type, message = "release_failed", None
-        elif exit_code == EX_WORKER_NETWORK:
-            error_type, message = "network_error", f"worker 建连失败（网络/SSL 瞬时故障）：{exit_reason}" if exit_reason else "worker 建连失败（网络/SSL 瞬时故障），退出码 80"
+        if exit_code == EX_WORKER_NETWORK:
+            error_type = "network_error"
+            message = "worker 建连失败（网络/SSL 瞬时故障），退出码 80" + (f"：{exit_reason}" if exit_reason else "")
         elif exit_code == PLATFORM_FAILED_EXIT:
-            why = f"：{exit_reason}" if exit_reason else "——详见部署侧日志"
-            error_type, message = "engine_error", f"worker 未能启动或未正常结束（平台侧未取到退出码）{why}"
+            # 平台侧哨兵（无状态路径观察者缺退出码时落它）；本机 worker 真以 255 退出也走这行，措辞对两种来源都成立
+            why = f"：{exit_reason}" if exit_reason else "——详见 worker 日志或部署侧日志"
+            error_type, message = "engine_error", f"worker 未能启动或未正常结束（退出码 255；平台侧未取到退出码时也记此码）{why}"
         elif exit_code is None:
             error_type = "engine_error"
             message = f"worker 异常：{exit_reason}" if exit_reason else "worker 已终止但退出码未知——无法判定为通过，按错误处理"
+        elif scope_done is not None and scope_done.status == Status.ERROR:
+            # worker 先报了 scope 级 error 再非零退出（设备 worker 有未确认会话时以 1 退出，ADR 0051 决策 5）：归因按本行，
+            # 原因消息保留 worker 报的那句，不说「事件流里没有失败原因」
+            error_type = "engine_error"
+            message = f"{scope_done.message or scope_done.error_type}；worker 随后非正常退出（exit {exit_code}）"
         else:
             error_type, message = "engine_error", f"worker 非正常退出（exit {exit_code}；事件流里没有失败原因——详见 worker 日志）"
+        if unconfirmed:
+            error_type = "release_failed"  # 归因改释放失败，退出原因的消息保留、提示在下面追加
     elif scope_done is None:
         status, error_type = Status.ERROR, "engine_error"
         message = "worker 正常退出但没有报完这次运行的结果——按错误处理（详见 worker 日志）"
     elif scope_done.status == Status.ERROR:
-        status = Status.ERROR
-        error_type, message = ("release_failed", None) if unconfirmed else (scope_done.error_type, scope_done.message)
+        status, error_type, message = Status.ERROR, scope_done.error_type, scope_done.message
+        if unconfirmed:
+            error_type = "release_failed"  # worker 报的原因消息保留
     elif not scenario_status:
         status, error_type, message = Status.ERROR, "engine_error", "worker 未报告任何 scenario 判定"
     else:

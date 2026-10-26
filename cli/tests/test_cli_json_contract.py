@@ -186,8 +186,11 @@ def _sample_evidence() -> dict:
 
 
 def test_explain_json_keys_are_documented():
-    """explain 的样例由**真渲染器**从手搭 JobResult + evidence 夹具生成（否则 evidence 那批键根本不进比对）。"""
-    jr = _sample_run_result().jobs[0]
-    doc = render.explain_to_dict(run_id="r", status="failed", results=[jr],
+    """explain 的样例由**真渲染器**从手搭 JobResult + evidence 夹具生成（否则 evidence 那批键根本不进比对）；桌面与设备 job 各一个，
+    设备 job 的 sessions[] 与两个计量键也进差集。"""
+    doc = render.explain_to_dict(run_id="r", status="failed", results=list(_sample_run_result().jobs),
                                  evidence_reader=lambda refs: (_sample_evidence(), None))
-    _assert_documented(doc, section="explain --json", opaque={"args", "result"})
+    dev = next(s for s in doc["scopes"] if s["scope_id"] == "d.feature:3")
+    assert {"sessions", "device_observed_s", "device_observed_missing"} <= set(dev) and len(dev["sessions"]) == 3  # 正向断言，防空集变绿
+    assert "sessions" not in next(s for s in doc["scopes"] if s["scope_id"] == "f.feature:3")
+    _assert_documented(doc, section="explain --json", opaque={"args", "result", "provider_minutes"})

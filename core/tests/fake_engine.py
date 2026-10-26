@@ -43,6 +43,8 @@ class FakeEngine:
         on_event: Callable[[str, int], None] | None = None,
         tail_after_stop: dict[str, list[Event]] | None = None,
         exit_code: dict[str, int] | None = None,
+        tail_delay_s: float = 0.0,
+        hang_after_stop: set[str] | None = None,
     ) -> None:
         self.behaviors = behaviors
         self.crash_after = crash_after or {}
@@ -51,9 +53,14 @@ class FakeEngine:
         self.network_crash_after = network_crash_after or {}
         # tail_after_stop: scope_id -> 被 schedule 停止后仍吐出的收尾事件（模拟 worker 收 SIGTERM 后走终结四阶段、发
         # session_closed，ADR 0051 决策 5；core 须在停止后继续有界消费才收得到，ADR 0034 机制二）。
+        # 键存在即表示「发完事件后活着等被停」（值可为空列表：等停、无收尾事件）；不配键的 scope 发完事件即 EOF。
         self.tail_after_stop = tail_after_stop or {}
         # exit_code: scope_id -> 事件流结束后以该非零退出码退出（抛 WorkerExitError，模拟 worker 发完事件又异常退出 / 被 SIGKILL）
         self.exit_code = exit_code or {}
+        # tail_delay_s: 收到停止请求后隔多久才发收尾事件（模拟释放阶段耗时；配合实时钟测「先判 abort、收尾期间 deadline 才到」）
+        self.tail_delay_s = tail_delay_s
+        # hang_after_stop: 收到停止请求后卡死、永不 EOF（模拟收尾挂住的 worker；由 schedule 的排空上界兜底）
+        self.hang_after_stop = hang_after_stop or set()
         self.run_count: dict[str, int] = {}  # 每个 scope_id 被 run_scope 的次数（验证 job 级重试）
         self.on_event = on_event
         self.handles: dict[str, FakeWorkerHandle] = {}
@@ -77,8 +84,7 @@ class FakeEngine:
         i = 0
         for ev in events:
             if handle.stopped:  # 被 schedule 优雅停 → worker 配合退出（ADR 0024 终止契约），收尾事件另由 tail_after_stop 给
-                for tail in self.tail_after_stop.get(job.scope_id, []):
-                    yield tail
+                yield from self._tail(job)
                 self._maybe_exit(job)
                 return
             if net_crash_at is not None and i >= net_crash_at:
@@ -92,14 +98,21 @@ class FakeEngine:
         # 事件流走完后若仍要 network-crash（net_crash_at 不小于事件数，模拟「零/少事件就建连失败」）
         if net_crash_at is not None and i >= net_crash_at:
             raise WorkerNetworkError(f"fake worker {job.scope_id} 建连失败（attempt {attempt}）")
-        if self.tail_after_stop.get(job.scope_id):
+        if job.scope_id in self.tail_after_stop or job.scope_id in self.hang_after_stop:
             # 真 worker 发完事件后仍活着、等被停（这里的事件由后台 reader 线程抢先读完，不等就会在 stop 到达前 EOF）；
             # 等到停止请求再发收尾事件（模拟 SIGTERM 后的终结四阶段）。等不到即按 EOF 结束（测试不配 stop 时不挂死）。
             handle.wait_stopped(5.0)
             if handle.stopped:
-                for tail in self.tail_after_stop[job.scope_id]:
-                    yield tail
+                yield from self._tail(job)
         self._maybe_exit(job)
+
+    def _tail(self, job: Job) -> Iterator[Event]:
+        if job.scope_id in self.hang_after_stop:
+            threading.Event().wait()  # 永不返回：reader 线程是 daemon，不挡测试进程退出
+        if self.tail_delay_s:
+            import time
+            time.sleep(self.tail_delay_s)
+        yield from self.tail_after_stop.get(job.scope_id, [])
 
     def _maybe_exit(self, job: Job) -> None:
         rc = self.exit_code.get(job.scope_id)
