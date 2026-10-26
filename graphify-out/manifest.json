@@ -40,8 +40,8 @@
     "semantic_hash": ""
   },
   "core/tests/fixtures/echo_worker.py": {
-    "mtime": 1793006646.801513,
-    "ast_hash": "ac9aaa12a075648c646b54643acf1f26",
+    "mtime": 1793007275.4984488,
+    "ast_hash": "1677a0c6a54d95a6f7c6aec626f135f0",
     "semantic_hash": ""
   },
   "core/tests/test_arg_offload.py": {
@@ -120,8 +120,8 @@
     "semantic_hash": "22dabb28f8d1742bebdc1553241300bc"
   },
   "core/tests/test_schedule.py": {
-    "mtime": 1793006516.8318448,
-    "ast_hash": "0b3e866af5380f88ab7f8284fc01637f",
+    "mtime": 1793007315.2233238,
+    "ast_hash": "3463ee7e82c07ba94e089fb557d0b5fb",
     "semantic_hash": ""
   },
   "core/tests/test_sqlite_event_log.py": {
@@ -135,8 +135,8 @@
     "semantic_hash": ""
   },
   "core/tests/test_subprocess_engine.py": {
-    "mtime": 1793006609.9945767,
-    "ast_hash": "c6784e370623a2d83b166c74f979480a",
+    "mtime": 1793007275.4988515,
+    "ast_hash": "01abd809f1b3cdc9d96a8b53b506043e",
     "semantic_hash": ""
   },
   "core/tests/test_wire.py": {
@@ -590,8 +590,8 @@
     "semantic_hash": "62d0f31135110ffe79d8770fdf7cacc3"
   },
   "core/gherkai_core/schedule.py": {
-    "mtime": 1793006609.9942834,
-    "ast_hash": "ece97238d35af7478da283e467d60321",
+    "mtime": 1793007275.4980433,
+    "ast_hash": "5cd9b64f4e92e122bc7a283cbee01c95",
     "semantic_hash": ""
   },
   "core/gherkai_core/scope.py": {
@@ -1960,8 +1960,8 @@
     "semantic_hash": ""
   },
   "core/tests/test_termination_parity.py": {
-    "mtime": 1793006516.8316305,
-    "ast_hash": "5691f342feca99ebf55ddb48e6c86f7c",
+    "mtime": 1793007275.4989734,
+    "ast_hash": "2e710c980b5d00f7957f121316482e75",
     "semantic_hash": ""
   },
   "core/gherkai_core/device_session.py": {

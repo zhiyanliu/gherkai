@@ -153,8 +153,9 @@ def test_sync_and_stateless_paths_agree(row: Row):
 
 
 def test_crash_row_sync_side_really_exits_with_unknown_code():
-    """「接力者直接落 timed_out」一行的同步侧输入确实是退出码未知：去掉超时处置后同一事件流判 engine_error 且消息是 worker 异常
-    （若 FakeEngine 没在事件发完后崩溃，同步侧会以退出码 0 结束、消息变成「没有报完这次运行的结果」，对拍只是碰巧相等）。"""
+    """「接力者直接落 timed_out」一行的同步侧输入确实是退出码未知：去掉超时处置后同一事件流按退出码未知归因（会话 a 未确认，
+    归因改为 release_failed）且消息是 worker 异常（若 FakeEngine 没在事件发完后崩溃，同步侧会以退出码 0 结束、消息变成
+    「没有报完这次运行的结果」，对拍只是碰巧相等）。"""
     row = next(r for r in MATRIX if r.name == "接力者直接落 timed_out（退出码未知）")
     plain = Row(row.name, row.events, row.tail, row.exit_code, timed_out=False, timeout_s=None, crash=True)
     jr = _sync(plain)

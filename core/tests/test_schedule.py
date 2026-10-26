@@ -1242,6 +1242,37 @@ def test_synthesized_details_survive_sync_path_timeout_and_abort(trigger):
     assert all(st.status == Status.SKIPPED and not st.shortcircuited for sr in jr.scenarios for st in sr.steps)
 
 
+def test_fail_fast_between_check_and_spawn_on_retry_aborts_the_attempt():
+    """起 worker 前的检查到 spawn 之间的窗口（无法原子化）：重试时 fail-fast 恰在其中置位，worker 已起——立即落定 abort 并停它，
+    判 ABORTED（不是 SKIPPED，也不是重试执行完之后的 PASSED），且不再有第三次 spawn。"""
+    import gherkai_core.schedule as sch
+
+    captured = {}
+    orig = sch._Worker.__init__
+
+    def spy(self, *a, **kw):
+        orig(self, *a, **kw)
+        captured["w"] = self
+
+    engine = FakeEngine({"a": _passing_events("a", "a:0")}, network_crash_after={"a": [0]})
+    calls = {"n": 0}
+
+    def resolver(name):  # 第二次解析（重试那次）时置位：恰落在起 worker 前的检查之后、spawn 之前
+        calls["n"] += 1
+        if calls["n"] == 2:
+            captured["w"].abort_flag.set()
+        return engine
+
+    sch._Worker.__init__ = spy
+    try:
+        res = schedule(_rm([_job("a")]), resolver, CollectSink(),
+                       opts=ScheduleOpts(max_concurrency=1, network_retry=2, retry_sleep=lambda s: None))
+    finally:
+        sch._Worker.__init__ = orig
+    jr = res.jobs[0]
+    assert engine.run_count["a"] == 2 and (jr.status, jr.error_type) == (Status.ABORTED, None), (jr.status, jr.error_type, jr.message)
+
+
 def test_device_job_network_error_is_not_retried(monkeypatch):
     """设备 job 的建连失败不做 job 级重试（ADR 0051 决策 2）：同样的零 step_done network_error，桌面 job 重试、设备 job 不重试。"""
     import gherkai_core.schedule as sch

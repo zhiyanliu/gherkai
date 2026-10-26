@@ -162,24 +162,106 @@ def _mode_job(scope_id: str, mode: str, timeout_s: float | None = None) -> Job:
     return Job(scope_id=j.scope_id, scope_name=f"mode:{mode}", engine=j.engine, scenarios=j.scenarios, timeout_s=timeout_s)
 
 
-def test_fail_fast_stops_multiple_hanging_victims_in_parallel():
-    """fail-fast 对多个仍在运行的真子进程：先全部落定再并行发 SIGTERM，两个 victim 都判 ABORTED、都协作退出、总耗时远小于逐个等宽限。"""
+def test_fail_fast_stops_multiple_deaf_victims_in_parallel():
+    """fail-fast 对多个仍在运行的真子进程：先全部落定再并行发停止请求。victim 无视 SIGTERM（各自要等满宽限才被 SIGKILL），
+    并行停的总耗时约等于一份宽限、串行停至少两份——耗时上界把并行钉死；两个 victim 都判 ABORTED（停止原因在 SIGKILL 之前已落定）。"""
     engine = _engine("pass")  # mode 由各 job 的 scope.name 给
-    jobs = [_mode_job("c", "crash"), _mode_job("v1", "hang"), _mode_job("v2", "hang")]
+    grace = 2.0
+    jobs = [_mode_job("c", "crash"), _mode_job("v1", "deaf"), _mode_job("v2", "deaf")]
     t0 = time.monotonic()
     result = schedule(_rm(jobs), lambda name: engine, CollectSink(),
-                      opts=ScheduleOpts(max_concurrency=3, fail_fast=True, grace_period_s=5.0, heartbeat_interval_s=0.2))
+                      opts=ScheduleOpts(max_concurrency=3, fail_fast=True, grace_period_s=grace, heartbeat_interval_s=0.2))
     elapsed = time.monotonic() - t0
     by = {jr.scope_id: jr for jr in result.jobs}
     assert (by["c"].status, by["c"].error_type) == (Status.ERROR, "engine_error")
     assert (by["v1"].status, by["v1"].error_type) == (Status.ABORTED, None) and (by["v2"].status, by["v2"].error_type) == (Status.ABORTED, None)
-    assert elapsed < 8.0, elapsed  # victim 收 SIGTERM 即退（不等满宽限），两个并行停、不是串行各等一遍
+    assert grace <= elapsed < 2 * grace - 0.2, elapsed  # 一份宽限内两个都停完：串行逐个等宽限至少要两份
 
 
-def test_done_then_deaf_worker_is_killed_after_hurry_exit_and_judged_timeout():
+def _assert_process_gone(pid: int, within_s: float = 5.0) -> None:
+    import os
+
+    deadline = time.monotonic() + within_s
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return
+        time.sleep(0.1)
+    raise AssertionError(f"进程 {pid} 仍存活")
+
+
+def _kill_quietly(pid: int) -> None:
+    import os
+    import signal as _signal
+
+    try:
+        os.kill(pid, _signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+
+
+def test_concurrent_stop_calls_on_same_handle_are_safe():
+    """同一 handle 的两次 stop 重叠（主线程的批量停与 worker 线程收尾时的幂等停）：都正常返回、不抛，进程被回收。"""
+    import threading
+
+    engine = _engine("deaf")
+    handle, events = engine.run_scope(_job("s"))
+    assert next(iter(events)).type == "scope_started"
+    errors: list[BaseException] = []
+
+    def stop():
+        try:
+            handle.stop(0.5)
+        except BaseException as e:  # noqa: BLE001
+            errors.append(e)
+
+    threads = [threading.Thread(target=stop) for _ in range(2)]
+    t0 = time.monotonic()
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=5.0)
+    assert not any(t.is_alive() for t in threads) and not errors, errors
+    assert time.monotonic() - t0 < 3.0
+    proc = handle._proc  # type: ignore[attr-defined]
+    assert proc.wait(timeout=3.0) is not None and proc.returncode != 0
+
+
+def test_done_then_deaf_fdholder_hits_drain_bound_and_is_judged_timeout(tmp_path):
+    """强杀后事件管道仍不 EOF（孙进程持有写端）：reader 线程永远读不到 EOF，schedule 只能在排空上界到点结束消费、按退出码未知
+    回判——deadline 已过记 timeout；耗时落在宽限加余量之后，不挂死。"""
+    import os
+
+    from gherkai_core.schedule import DRAIN_MARGIN_S
+
+    pid_file = tmp_path / "pid"
+    engine = SubprocessEngine(cmd=[sys.executable, _WORKER],
+                              env={**os.environ, "WORKER_MODE": "done_then_deaf_fdholder", "WORKER_PID_FILE": str(pid_file)})
+    grace = 0.5
+    t0 = time.monotonic()
+    try:
+        result = schedule(_rm([_job("s", timeout_s=1.0)]), lambda name: engine, CollectSink(),
+                          opts=ScheduleOpts(grace_period_s=grace, heartbeat_interval_s=0.2))
+        elapsed = time.monotonic() - t0
+        jr = result.jobs[0]
+        assert (jr.status, jr.error_type) == (Status.ERROR, "timeout"), (jr.status, jr.error_type, jr.message)
+        assert grace + DRAIN_MARGIN_S <= elapsed < grace + DRAIN_MARGIN_S + 8.0, elapsed  # 等到了排空上界、之后不再等
+        pids = [int(x) for x in pid_file.read_text().split()]
+        assert len(pids) == 2
+        _assert_process_gone(pids[0])  # worker 本体已被 SIGKILL
+    finally:
+        for line in (pid_file.read_text().split() if pid_file.exists() else []):
+            _kill_quietly(int(line))  # 回收持有写端的孙进程（测试夹具自己的责任）
+
+
+def test_done_then_deaf_worker_is_killed_after_hurry_exit_and_judged_timeout(tmp_path):
     """内容完整（scope_done 已到）后 worker 挂死且无视 SIGTERM：deadline 到点催停 → 宽限耗尽 SIGKILL → 管道 EOF、负退出码 →
     非干净退出不算内容完整，按首次仲裁回判 timeout（与无状态路径的 timed_out 一致）；不挂死。"""
-    engine = _engine("done_then_deaf")
+    import os
+
+    pid_file = tmp_path / "pid"
+    engine = SubprocessEngine(cmd=[sys.executable, _WORKER], env={**os.environ, "WORKER_MODE": "done_then_deaf", "WORKER_PID_FILE": str(pid_file)})
     t0 = time.monotonic()
     result = schedule(_rm([_job("s", timeout_s=1.0)]), lambda name: engine, CollectSink(),
                       opts=ScheduleOpts(grace_period_s=0.5, heartbeat_interval_s=0.2))
@@ -187,7 +269,9 @@ def test_done_then_deaf_worker_is_killed_after_hurry_exit_and_judged_timeout():
     jr = result.jobs[0]
     assert (jr.status, jr.error_type) == (Status.ERROR, "timeout"), (jr.status, jr.error_type, jr.message)
     assert [sr.status for sr in jr.scenarios] == [Status.PASSED]  # 内容已完整的明细保留
-    assert elapsed < 12.0, elapsed
+    # 走的是 SIGKILL 后管道 EOF 的路，不是排空上界兜底：耗时远小于 deadline 加宽限加余量，且 worker 进程已被回收
+    assert elapsed < 4.5, elapsed
+    _assert_process_gone(int(pid_file.read_text().split()[0]))
 
 
 def test_done_then_slow_worker_keeps_content_verdict_despite_deadline():

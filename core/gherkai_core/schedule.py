@@ -294,6 +294,10 @@ class _Worker:
             )
             result.status, result.error_type, result.message = term.status, term.error_type, term.message
             return result, False, saw_step
+        # 起 worker 前的检查到 spawn 之间有一段无法原子化的窗口：fail-fast 恰在其中置位时 worker 已起——立即落定 abort 并发停止请求
+        # （在起 reader 线程之前，它最多白起一次、不执行任何 step），判定由终结函数按停止原因给出，不记 SKIPPED、也不保留上次的判定。
+        if self.abort_flag.is_set():
+            self.decide_stop()
 
         clock = self.opts.clock
         # 包心跳（ADR 0028）：worker 静默卡死时让下面的事件循环能周期性醒来查 deadline / abort / 排空上界，
