@@ -432,6 +432,9 @@ def explain_to_dict(*, run_id: str, status: str | None, results: list[JobResult]
         }
         # 设备会话与计量（ADR 0051 决策 7）：仅设备目标，形状同 run --json 的 jobs[]；桌面 job 省键
         scope_doc.update(_device_keys_for_explain(jr))
+        url = console_url(jr.session_id)  # 代表会话是 Device Farm 会话 ARN 时给控制台链接（ADR 0051 决策 8）；桌面省键
+        if url:
+            scope_doc["console_url"] = url
         scopes.append(scope_doc)
     return redact_deep({"run_id": run_id, "status": status, "scopes": scopes})  # 定义里的隧道地址与证据可能带凭据：整份脱敏（ADR 0035 决策 5）
 
@@ -516,11 +519,7 @@ def _add_device_evidence(stn: TreeNode, ev: dict, *, full: bool) -> None:
         controls = ev.get("controls")
         if isinstance(controls, dict):
             items = controls.get("items") or []
-            head = f"controls: {len(items)} 项"
-            if controls.get("total") is not None:
-                head += f"（total {controls['total']}）"
-            if controls.get("truncated"):
-                head += "  已截断"
+            head = f"controls: items={len(items)}  total={_jv(controls.get('total'))}  truncated={_jv(bool(controls.get('truncated')))}"
             cn = stn.add(head)
             shown = items if full else items[:_CONTROLS_BUDGET]
             for it in shown:
@@ -577,20 +576,31 @@ def _add_step(parent: TreeNode, step: dict, *, expand_passed: bool, full: bool, 
         _add_act(stn, act, ref=ref, full=full)
 
 
+def _jv(v) -> str:
+    """explain 文本里的标量值按 JSON 写法（null / true / false），与 --json 零翻译。"""
+    if v is None:
+        return "null"
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    return str(v)
+
+
 def _explain_session_lines(sc: dict) -> list[str]:
-    """explain 文档里一个 scope 的设备会话摘要行（与 session_lines 同一口径，输入是机读文档的 dict 形态）。"""
+    """explain 文档里一个 scope 的设备表头与会话摘要（ADR 0051 决策 7、8）。文本 key 一律用 JSON 字段名（ADR 0042 决策四
+    「文本 key = JSON 字段名」，agent 读文本再对 --json 零翻译）：device 取代表会话那条、console_url、两个计量键、sessions 逐项带
+    origin / release / observed_s。run 的人读文本（session_lines / device_header_lines）才用中文整句。"""
     lines: list[str] = []
-    if "device_observed_s" in sc or "device_observed_missing" in sc:
-        missing = sc.get("device_observed_missing") or 0
-        lines.append(f"设备占用时长: {_ms((sc.get('device_observed_s') or 0.0) * 1000.0)}"
-                     + (f"（另有 {missing} 个会话缺计量）" if missing else ""))
     sessions = sc.get("sessions") or []
-    unconfirmed = [s for s in sessions if s.get("release") != "confirmed" and s.get("origin") != "attempted"]
-    attempted = [s for s in sessions if s.get("origin") == "attempted"]
-    if unconfirmed:
-        lines.append("未确认停止的会话: " + "、".join(s["name"] for s in unconfirmed))
-    if attempted:
-        lines.append(f"{_ATTEMPTED_LABEL}: " + "、".join(s["name"] for s in attempted))
+    device = representative_device([_SessionView(s) for s in sessions], sc.get("session_id"))
+    if device:
+        lines.append("device: " + "  ".join(f"{k}={device[k]}" for k in ("platform", "model", "osVersion", "unit") if device.get(k)))
+    if sc.get("console_url"):
+        lines.append(f"console_url: {sc['console_url']}")
+    if "device_observed_s" in sc or "device_observed_missing" in sc:
+        lines.append(f"device_observed_s: {_jv(sc.get('device_observed_s'))}  device_observed_missing: {_jv(sc.get('device_observed_missing'))}")
+    if sessions:
+        lines.append("sessions: " + "、".join(
+            f"{s['name']} (origin={s['origin']}, release={_jv(s.get('release'))}, observed_s={_jv(s.get('observed_s'))})" for s in sessions))
     return lines
 
 
@@ -611,9 +621,7 @@ def explain_tree(doc: dict, *, expand_passed: bool = False, full: bool = False) 
         for rr in sc["report_refs"]:
             scn.add(styled(_ref_line(rr), DIM))
         device = "sessions" in sc or "device_observed_s" in sc  # 设备 job 的机读键只在设备目标出现（ADR 0051 决策 7）
-        for line in device_header_lines(sc.get("sessions") or [], sc["session_id"]):  # 设备描述与控制台链接（ADR 0051 决策 8）
-            scn.add(line)
-        for line in _explain_session_lines(sc):  # 设备会话摘要（ADR 0051 决策 7），与 run 文本同一口径
+        for line in _explain_session_lines(sc):  # 设备表头与会话摘要（ADR 0051 决策 7、8），文本 key 用 JSON 字段名
             scn.add(line)
         # 判定行（ADR 0042 决策四）：job 判 error / aborted 且带 error_type 时总打一行「判定：status (error_type: message)」，与有无
         # step 记录无关——全部 scenario 都是合成记录的设备 job（如 precheck_failed）靠它显示原因，合成 step 上「原因见 job 判定」

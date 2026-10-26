@@ -177,9 +177,10 @@ class _Worker:
         self._content_complete = False  # 已收到 scope_done（非零退出时回落为 False）：decide_stop 对它不再落定
         self._stop_requested_at: float | None = None  # 首次向 worker 发停止请求的时刻；排空上界从这里起算，不含 stop() 自身的阻塞
 
-    def decide_stop(self) -> str:
+    def decide_stop(self, *, stop: bool = True) -> str:
         """对本 job 落定停止原因并（首次）向 worker 发停止请求；已落定、已返回或内容已完整的直接返回现值。事件循环、异常分支与
-        schedule._stop_all 都只经此一处落定，不各自判断。"""
+        schedule._stop_all 都只经此一处落定，不各自判断。stop=False 只落定不发请求（_stop_all 先对全部 worker 落定、再并行发停止
+        请求：停止请求会阻塞到 worker 退出或宽限到点，边落定边停会把后一个 worker 的仲裁推到它的 deadline 之后）。"""
         with self._stop_lock:
             if self._finished or self._content_complete:
                 return self._stop_reason
@@ -188,7 +189,7 @@ class _Worker:
                 now = self.opts.clock()
                 self._stop_reason = "timeout" if (self._deadline is not None and now > self._deadline) else "abort"
                 self._stop_requested_at = now
-        if first:
+        if first and stop:
             self._stop()
         return self._stop_reason
 
@@ -220,6 +221,12 @@ class _Worker:
                 if attempt > 0:
                     # 仅在「上次是 network_error 且会话未起」时走到这；退避用注入 sleep（保 fake-clock 纯净）
                     self.opts.retry_sleep(min(2.0 * attempt, 4.0))
+                    if self.abort_flag.is_set():
+                        # 退避期间整批被 fail-fast 中止：不再重试，也不把已经运行过一次的 job 记成「未启动」的 SKIPPED——
+                        # 保留上次的 network_error 判定，消息注明没有再重试
+                        assert last is not None
+                        last.message = (f"{last.message}；" if last.message else "") + "fail-fast：其他 job 失败，未再重试"
+                        return last
                 result, is_network, saw_step = self._run_once(deadline)
                 last = result
                 # 可重试的条件是 network_error + 会话未起（零 step_done）+ 未被 fail-fast 中止 + 还有重试额度
@@ -296,6 +303,7 @@ class _Worker:
         exited = False
         exit_code: int | None = None
         exit_reason: str | None = None
+        stop_needed = False  # 普通异常后 worker 可能还活着，收尾时要补发停止请求
 
         try:
             for event in events:
@@ -339,23 +347,24 @@ class _Worker:
                 exited, exit_code = True, 0  # 事件流自然 EOF：worker 干净退出（adapter 对非零退出码抛 WorkerExitError）
         except WorkerExitError as e:  # worker 以非零退出码结束（含网络故障的 80、被信号强杀的负码，ADR 0034 机制二）
             exited, exit_code = True, e.exit_code  # 退出码本身就是全部信息：消息由终结函数按码给出，不再把异常文本当平台归因传入
-        except Exception as e:  # 迭代中其它异常（事件行解析失败、sink 抛错等）：退出信息未知，worker 可能还活着 → 停它（别留孤儿进程）
+        except Exception as e:  # 迭代中其它异常（事件行解析失败、sink 抛错等）：退出信息未知，worker 可能还活着 → 下面停它（别留孤儿进程）
             exited, exit_code, exit_reason = True, None, f"worker 异常：{e}"
-            self._stop()
-        if exited and exit_code != 0:
+            stop_needed = True
+        if not exited:
+            # 排空上界到了还没 EOF：退出信息未知。先记下再仲裁——它同样是「内容不完整」（催停后卡死的 worker 该与无状态路径一样记超时）
+            exited, exit_code, exit_reason = True, None, "停止后在排空上界内未等到 worker 退出"
+        if exit_code != 0:
             with self._stop_lock:
                 self._content_complete = False  # 非干净退出不算内容完整（进程终止优先于内容完整，ADR 0034 机制二）
-        if self._stop_reason == "none" and exited and (exit_code != 0 or scope_done is None):
+        if self._stop_reason == "none" and (exit_code != 0 or scope_done is None):
             # 内容不完整（非零退出 / 干净退出却没发 scope_done）的 worker 若其实已过 deadline / 已被 fail-fast 中止（卡在建连退避里
             # 不吐事件、事件间检查没机会执行；或收到停止请求后干净退出），按首次仲裁落定主动处置——不能让超时预算被建连退避绕过
             # （ADR 0028 竞态防护，归入同一仲裁规则）。内容完整（带 scope_done 的干净退出）不再回判：判定已成。
+            # 仲裁在发停止请求**之前**：停止请求会阻塞到宽限到点，先停再仲裁会把停止前已成立的 abort 改写成 timeout。
             if (deadline is not None and clock() > deadline) or self.abort_flag.is_set():
-                self.decide_stop()
-        if self._stop_requested_at is not None:
-            self._stop()  # 幂等：首次请求时已停过；排空上界退出时再确认一次停止请求已发
-        if not exited:
-            # 排空上界到了还没 EOF：退出信息未知（判定由 stop_reason 决定，这里只影响消息）
-            exited, exit_code, exit_reason = True, None, "停止后在排空上界内未等到 worker 退出"
+                self.decide_stop(stop=False)
+        if self._stop_requested_at is not None or stop_needed:
+            self._stop()  # 幂等：首次请求时多半已停过；排空上界退出或普通异常后再确认一次停止请求已发
 
         term = finalize_job(
             job=job, stop_reason=self._stop_reason, exited=exited, exit_code=exit_code, exit_reason=exit_reason,
@@ -430,11 +439,19 @@ def schedule(
 
     def _stop_all() -> None:
         # fail-fast 批量中止（ADR 0034 机制二首次仲裁）：先置 abort_flag（排队中的 job 起 worker 前看到它 → SKIPPED），
-        # 再对每个仍在运行的 worker 当场落定 stop_reason（deadline 已过的取 timeout）并发停止请求；已返回的 worker 不改。
+        # 再对每个仍在运行的 worker **当场**落定 stop_reason（deadline 已过的取 timeout）；已返回或内容已完整的 worker 不改。
+        # 先全部落定、再并行发停止请求：停止请求会阻塞到 worker 退出或宽限到点，边落定边停会让前一个 worker 消耗的宽限把后一个的
+        # 仲裁推到它的 deadline 之后。停止请求各起一个线程（daemon、不等）；worker 线程收尾时还会幂等地再发一次。
         abort_flag.set()
+        decided_now = []
         for w in workers:
-            if w.handle is not None:
-                w.decide_stop()
+            if w.handle is None:
+                continue
+            before = w._stop_reason
+            if w.decide_stop(stop=False) != "none" and before == "none":
+                decided_now.append(w)
+        for w in decided_now:
+            threading.Thread(target=w._stop, name=f"gherkai-stop-{w.job.scope_id}", daemon=True).start()
 
     batch_aborted = False  # fail-fast 的整批中止只做一次
     with ThreadPoolExecutor(max_workers=max(1, opts.max_concurrency)) as pool:

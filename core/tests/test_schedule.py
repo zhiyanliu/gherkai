@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import threading
 
+import pytest
+
 from gherkai_core.model import (
     RunMeta,
     Cost,
@@ -967,6 +969,223 @@ def test_generic_exception_still_stops_worker_and_spawn_failure_goes_through_fin
 
     res = schedule(_rm([_job("z", timeout_s=1.0)]), FakeResolver(Boom()), CollectSink(), opts=ScheduleOpts(max_concurrency=1, clock=_Clock()))
     assert (res.jobs[0].status, res.jobs[0].error_type) == (Status.ERROR, "timeout")
+
+
+def test_stop_all_decides_for_every_worker_before_any_blocking_stop():
+    """fail-fast 批量中止：先对全部运行中的 worker 落定停止原因、再发停止请求。真 stop() 会阻塞到宽限到点，边落定边停会让前一个 worker
+    消耗的宽限把后一个的仲裁推到它的 deadline 之后、把本该的 ABORTED 记成 timeout。这里让假 stop() 把假时钟推过所有 deadline。"""
+    class _Clock:
+        def __init__(self): self.t = 0.0
+        def __call__(self): self.t += 0.001; return self.t
+
+    clock = _Clock()
+    seen = {"v1": threading.Event(), "v2": threading.Event()}
+
+    def crash_gen(job):
+        yield ScenarioStarted(scenario_id="c:0")
+        seen["v1"].wait(5)
+        seen["v2"].wait(5)
+        raise RuntimeError("crash job 崩了")
+
+    def on_event(scope_id, i):
+        if scope_id in seen:
+            seen[scope_id].set()
+
+    engine = FakeEngine({"v1": [ScopeStarted(scope_id="v1")], "v2": [ScopeStarted(scope_id="v2")], "c": crash_gen},
+                        on_event=on_event, tail_after_stop={"v1": [], "v2": []},
+                        # 模拟 victim 的 stop() 阻塞消耗的宽限：越过所有 deadline（crash job 自己收尾的 stop 不算，它发生在批量中止之前）
+                        on_stop=lambda scope: scope.startswith("v") and setattr(clock, "t", clock.t + 1000.0))
+    res = schedule(_rm([_job("v1", timeout_s=50.0), _job("v2", timeout_s=50.0), _job("c")]), FakeResolver(engine), CollectSink(),
+                   opts=ScheduleOpts(max_concurrency=3, fail_fast=True, heartbeat_interval_s=0, grace_period_s=1.0, clock=clock))
+    by = {jr.scope_id: (jr.status, jr.error_type) for jr in res.jobs}
+    assert by["v1"] == (Status.ABORTED, None) and by["v2"] == (Status.ABORTED, None), by
+
+
+def test_generic_exception_arbitrates_before_blocking_stop():
+    """普通异常分支先按首次仲裁落定、再发停止请求：停止前已成立的 abort 不被停止期间越过的 deadline 改成 timeout。"""
+    import gherkai_core.schedule as sch
+
+    class _Clock:
+        def __init__(self): self.t = 0.0
+        def __call__(self): self.t += 0.001; return self.t
+
+    clock = _Clock()
+    captured = {}
+    orig = sch._Worker.__init__
+
+    def spy(self, *a, **kw):
+        orig(self, *a, **kw)
+        captured["w"] = self
+
+    def gen(job):  # 零事件：整批已被中止，随后事件流以普通异常断掉
+        captured["w"].abort_flag.set()
+        raise RuntimeError("解析失败")
+
+    engine = FakeEngine({"x": gen}, on_stop=lambda scope: setattr(clock, "t", clock.t + 1000.0))
+    sch._Worker.__init__ = spy
+    try:
+        res = schedule(_rm([_job("x", timeout_s=50.0)]), FakeResolver(engine), CollectSink(),
+                       opts=ScheduleOpts(max_concurrency=1, heartbeat_interval_s=0.05, grace_period_s=1.0, clock=clock))
+    finally:
+        sch._Worker.__init__ = orig
+    jr = res.jobs[0]
+    assert (jr.status, jr.error_type) == (Status.ABORTED, None) and engine.handles["x"].stopped
+
+
+def test_hang_after_hurry_exit_is_timeout_like_stateless_path():
+    """内容完整后催停、worker 却卡死不退出：排空上界到点按「退出码未知」回判——deadline 已过记 timeout，与无状态路径的 timed_out 记录一致。"""
+    scope = "p"
+    events = _passing_events(scope, "p:0")
+    n = len(events)
+
+    class _Clock:
+        def __init__(self): self.n = 0; self.t = 0.0
+        def __call__(self):
+            self.n += 1
+            self.t += 1000.0 if self.n == 2 * n + 3 else (1.0 if self.n > 2 * n + 3 else 0.001)
+            return self.t
+
+    engine = FakeEngine({scope: events}, hang_after_stop={scope})
+    res = schedule(_rm([_job(scope, timeout_s=5.0)]), FakeResolver(engine), CollectSink(),
+                   opts=ScheduleOpts(max_concurrency=1, clock=_Clock(), heartbeat_interval_s=0.05, grace_period_s=1.0))
+    assert (res.jobs[0].status, res.jobs[0].error_type) == (Status.ERROR, "timeout")
+
+
+def test_fail_fast_during_retry_backoff_keeps_network_error_not_skipped():
+    """退避期间整批被 fail-fast 中止：不再重试，但已经运行过一次的 job 保留上次的 network_error 判定（不记成「未启动」的 SKIPPED）。"""
+    import gherkai_core.schedule as sch
+
+    captured = {}
+    orig = sch._Worker.__init__
+
+    def spy(self, *a, **kw):
+        orig(self, *a, **kw)
+        captured["w"] = self
+
+    engine = FakeEngine({"a": _passing_events("a", "a:0")}, network_crash_after={"a": [0]})
+    sch._Worker.__init__ = spy
+    try:
+        res = schedule(_rm([_job("a")]), FakeResolver(engine), CollectSink(),
+                       opts=ScheduleOpts(max_concurrency=1, network_retry=1, retry_sleep=lambda s: captured["w"].abort_flag.set()))
+    finally:
+        sch._Worker.__init__ = orig
+    jr = res.jobs[0]
+    assert engine.run_count["a"] == 1 and (jr.status, jr.error_type) == (Status.ERROR, "network_error")
+    assert "未再重试" in jr.message
+
+
+def test_drain_bound_counts_from_stop_request_not_after_blocking_stop():
+    """排空上界从停止请求时刻起算：真 stop() 阻塞消耗的宽限不再额外加进上界。假 stop() 把时钟推进很多，正确实现随后第一次心跳检查就到点；
+    若从 stop() 返回后起算，还要再等满宽限加余量（多读六次以上时钟）。"""
+    scope = "h"
+
+    class _Clock:
+        def __init__(self): self.n = 0; self.t = 0.0; self.n_at_stop = None
+        def __call__(self):
+            self.n += 1
+            self.t += 1000.0 if self.n == 5 else (1.0 if self.n > 5 else 0.001)
+            return self.t
+
+    clock = _Clock()
+
+    def on_stop(scope_id):
+        clock.t += 100.0  # 模拟 stop() 阻塞消耗的时间（远超宽限加余量）
+        if clock.n_at_stop is None:
+            clock.n_at_stop = clock.n
+
+    engine = FakeEngine({scope: [ScopeStarted(scope_id=scope), ScenarioStarted(scenario_id="h:0")]}, hang_after_stop={scope}, on_stop=on_stop)
+    res = schedule(_rm([_job(scope, timeout_s=5.0)]), FakeResolver(engine), CollectSink(),
+                   opts=ScheduleOpts(max_concurrency=1, clock=clock, heartbeat_interval_s=0.05, grace_period_s=1.0))
+    assert (res.jobs[0].status, res.jobs[0].error_type) == (Status.ERROR, "timeout")
+    assert clock.n - clock.n_at_stop <= 4, clock.n - clock.n_at_stop
+
+
+def test_drain_bound_applies_without_deadline_under_fail_fast():
+    """没有 deadline 的 job 被 fail-fast 中止后卡死不退出：排空上界同样起作用（靠心跳醒来），不挂死，判 ABORTED。"""
+    import time
+
+    class _Clock:
+        def __init__(self): self.t = 0.0; self.stopped = False
+        def __call__(self): self.t += 1.0 if self.stopped else 0.001; return self.t
+
+    clock = _Clock()
+    crash_now = threading.Event()
+
+    def crash_gen(job):
+        yield ScenarioStarted(scenario_id="c:0")
+        crash_now.wait(5)
+        raise RuntimeError("崩")
+
+    def on_event(scope_id, i):
+        if scope_id == "v":
+            crash_now.set()
+
+    def on_stop(scope_id):
+        if scope_id == "v":
+            clock.stopped = True  # 停止请求之后每次读时钟前进一秒，排空上界几次心跳内到点
+
+    engine = FakeEngine({"v": [ScopeStarted(scope_id="v")], "c": crash_gen}, on_event=on_event, hang_after_stop={"v"}, on_stop=on_stop)
+    t0 = time.monotonic()
+    res = schedule(_rm([_job("v"), _job("c")]), FakeResolver(engine), CollectSink(),
+                   opts=ScheduleOpts(max_concurrency=2, fail_fast=True, heartbeat_interval_s=0.05, grace_period_s=1.0, clock=clock))
+    assert time.monotonic() - t0 < 3.0
+    v = next(jr for jr in res.jobs if jr.scope_id == "v")
+    assert (v.status, v.error_type) == (Status.ABORTED, None)
+
+
+@pytest.mark.parametrize("exit_kind", ["sigkill", "network", "exception"])
+@pytest.mark.parametrize("trigger", ["deadline", "abort"])
+def test_non_clean_exit_after_complete_content_is_re_arbitrated(exit_kind, trigger):
+    """内容完整（scope_done 已到）之后 worker 非干净退出（SIGKILL 负码 / 80 / 普通异常）：不算内容完整，按首次仲裁回判——
+    deadline 已过记 timeout、已被 fail-fast 中止记 ABORTED，而不是 engine_error / network_error。"""
+    import gherkai_core.schedule as sch
+    from gherkai_core.errors import WorkerExitError
+
+    scope = "p"
+    events = _passing_events(scope, "p:0")
+    n = len(events)
+    captured = {}
+    orig = sch._Worker.__init__
+
+    def spy(self, *a, **kw):
+        orig(self, *a, **kw)
+        captured["w"] = self
+
+    class _Clock:  # deadline 触发：全部事件处理完后的下一次读越过 deadline
+        def __init__(self): self.n = 0; self.t = 0.0
+        def __call__(self):
+            self.n += 1
+            self.t += 1000.0 if (trigger == "deadline" and self.n == 2 * n + 3) else 0.001
+            return self.t
+
+    done = threading.Event()
+
+    class _Sink(CollectSink):
+        def __call__(self, ev):
+            super().__call__(ev)
+            if isinstance(ev, ScopeDone):
+                done.set()  # core 已把 scope_done 记为内容完整
+
+    def gen(job):
+        yield from events
+        done.wait(5)
+        if trigger == "abort":
+            captured["w"].abort_flag.set()
+        if exit_kind == "sigkill":
+            raise WorkerExitError(-9, "x")
+        if exit_kind == "network":
+            raise WorkerExitError(80, "x")
+        raise RuntimeError("崩")
+
+    sch._Worker.__init__ = spy
+    try:
+        res = schedule(_rm([_job(scope, timeout_s=5.0)]), FakeResolver(FakeEngine({scope: gen})), _Sink(),
+                       opts=ScheduleOpts(max_concurrency=1, clock=_Clock(), heartbeat_interval_s=0.05, grace_period_s=1.0))
+    finally:
+        sch._Worker.__init__ = orig
+    jr = res.jobs[0]
+    expected = (Status.ERROR, "timeout") if trigger == "deadline" else (Status.ABORTED, None)
+    assert (jr.status, jr.error_type) == expected, jr.message
 
 
 def test_device_job_network_error_is_not_retried(monkeypatch):

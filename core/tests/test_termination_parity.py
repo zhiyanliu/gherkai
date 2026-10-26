@@ -79,6 +79,9 @@ MATRIX = [
     # 先收到 scope 级 error、收尾期间才过 deadline：内容完整（干净退出）→ 判定按内容、已合成的 SKIPPED 不撤销
     Row("scope 级 error 后超时", [_opened("a"), ScopeDone(scope_id=SCOPE, status=Status.ERROR, error_type="acquire_timeout", message="没拿到设备")],
         [_closed("a")], 0, timed_out=True, timeout_s=5.0),
+    # scope 级 error 后非零退出且超时：非零退出不算内容完整 → 停止原因生效记 timeout，合成明细保留
+    Row("scope 级 error 后非零退出且超时", [_opened("a"), ScopeDone(scope_id=SCOPE, status=Status.ERROR, error_type="acquire_timeout", message="没拿到设备")],
+        [], 1, timed_out=True, timeout_s=5.0),
     Row("停止后到达的 session_opened", [_opened("a"), ScopeStarted(scope_id=SCOPE, session_id="arn:a"), *_passed_scenario(0)],
         [_opened("t", origin="attempted", sid=None), _closed("t", release="unconfirmed", observed_s=None, sid=None), _closed("a")],
         1, timed_out=True, timeout_s=5.0),
@@ -200,6 +203,9 @@ def test_matrix_covers_expected_verdicts():
     pre = by["scope 级 error 后超时"]  # 内容完整后不再仲裁：判定按 worker 报的 scope 级 error，合成明细保留
     assert (pre.status, pre.error_type, pre.message) == (Status.ERROR, "acquire_timeout", "没拿到设备")
     assert [sr.status for sr in pre.scenarios] == [Status.SKIPPED, Status.SKIPPED] and pre.sessions[0].release == "confirmed"
+    nz = by["scope 级 error 后非零退出且超时"]
+    assert nz.error_type == "timeout" and [sr.status for sr in nz.scenarios] == [Status.SKIPPED, Status.SKIPPED]
+    assert "未确认停止的会话：a" in nz.message
     opened_late = by["停止后到达的 session_opened"]
     assert opened_late.error_type == "timeout" and [s.origin for s in opened_late.sessions] == ["created", "attempted"]
     assert "结果未知的创建尝试：t" in opened_late.message and "未确认停止的会话" not in opened_late.message

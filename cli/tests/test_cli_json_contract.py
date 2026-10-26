@@ -60,6 +60,9 @@ def _mk(cls, **kw):
     return cls(**{k: v for k, v in kw.items() if k in names})
 
 
+_DF_ARN = "arn:aws:devicefarm:us-west-2:123456789012:session:p/s/00000"  # 真形状的会话 ARN：explain 才会给 console_url
+
+
 def _sample_run_result() -> M.RunResult:
     """把所有可选字段都填上（votes/cost/report_refs/argument 两种/extra headers/worker_variant…），键才收得全。"""
     steps = (M.Step(0, "Given", '打开 "https://x"'),
@@ -83,12 +86,12 @@ def _sample_run_result() -> M.RunResult:
     dev_sr = _mk(M.ScenarioResult, scenario_id="d.feature:3", status=M.Status.SKIPPED, steps=[
         _mk(M.StepResult, index=0, status=M.Status.SKIPPED, shortcircuited=False),
         _mk(M.StepResult, index=1, status=M.Status.SKIPPED, shortcircuited=False)])
-    sessions = [_mk(M.SessionRecord, session_id="arn:a", name="n-a", origin="created", release="confirmed", observed_s=10.0,
+    sessions = [_mk(M.SessionRecord, session_id=_DF_ARN, name="n-a", origin="created", release="confirmed", observed_s=10.0,
                     provider_minutes={"total": 1, "metered": 1, "unmetered": 0},
                     device={"platform": "android", "model": "Pixel 8", "osVersion": "14", "unit": "u"}),
                 _mk(M.SessionRecord, session_id="arn:b", name="n-b", origin="discovered", release="unconfirmed", observed_s=None),
                 _mk(M.SessionRecord, session_id=None, name="n-c", origin="attempted", release="unconfirmed")]
-    dev_jr = _mk(M.JobResult, job=dev_job, status=M.Status.ERROR, scenarios=[dev_sr], session_id="arn:a",
+    dev_jr = _mk(M.JobResult, job=dev_job, status=M.Status.ERROR, scenarios=[dev_sr], session_id=_DF_ARN,
                  error_type="release_failed", message="m", sessions=sessions, device_observed_s=10.0, device_observed_missing=1)
     meta = _mk(M.RunMeta, run_id="r", created_at="t", jobs=(job, dev_job), max_concurrency=2, steps_dir="/p/steps",
                worker_variant="base", worker_task_defs={"novaact": "arn"}, extra_http_headers=(("X-Test", "y"),))
@@ -196,6 +199,6 @@ def test_explain_json_keys_are_documented():
     doc = render.explain_to_dict(run_id="r", status="failed", results=list(_sample_run_result().jobs),
                                  evidence_reader=lambda refs: (_sample_evidence(), None))
     dev = next(s for s in doc["scopes"] if s["scope_id"] == "d.feature:3")
-    assert {"sessions", "device_observed_s", "device_observed_missing"} <= set(dev) and len(dev["sessions"]) == 3  # 正向断言，防空集变绿
+    assert {"sessions", "device_observed_s", "device_observed_missing", "console_url"} <= set(dev) and len(dev["sessions"]) == 3  # 正向断言，防空集变绿
     assert "sessions" not in next(s for s in doc["scopes"] if s["scope_id"] == "f.feature:3")
     _assert_documented(doc, section="explain --json", opaque={"args", "result", "provider_minutes", "device"})

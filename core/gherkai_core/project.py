@@ -127,8 +127,11 @@ def reduce_event(
         rec = _find_session(result.sessions, event.session_id, event.name)
         if rec is None:
             result.sessions.append(SessionRecord(session_id=event.session_id, name=event.name, origin=event.origin, device=event.device))
-        elif rec.device is None and event.device is not None:
-            rec.device = event.device
+        else:
+            if rec.session_id is None and event.session_id is not None:
+                rec.session_id = event.session_id  # 按名命中的记录此前没有 ARN：补上，之后同名异 ARN 的会话才不会再并进这一条
+            if rec.device is None and event.device is not None:
+                rec.device = event.device
     elif isinstance(event, SessionClosed):
         rec = _find_session(result.sessions, event.session_id, event.name)
         if rec is None:
@@ -277,10 +280,10 @@ def project(meta: RunMeta, records: list[EventRecord], baseline: RunState | None
 
     全量重放（非增量）→ 天然幂等、抗乱序、抗重投（ADR 0034 机制三前提）。步骤：
     1. 按 scope_id 分组 records；每组内 kind='event' 的按 seq 升序喂 reduce_event 归约出 JobResult；
-    2. 「两件都要」纯谓词（机制二，谓词全文的单一真源是 `_job_status`，别在两处各写一份）：以「有无
-       task_exited」为一级键——有退出记录时进程终止本身即终态信号（退出码非零 → ERROR；exit==0 且见
-       scope_done → scenario 归约终态；exit==0 无 scope_done（含零事件）→ ERROR；退出码未知 →
-       ERROR）；无退出记录时见 scope_started → RUNNING、否则 PENDING。
+    2. 终结判定（机制二「终结函数与真值表」，单一真源是 `finalize_job`，`_job_status` 是它的薄委托，别在两处各写一份）：
+       有退出记录时进程终止本身即终态信号（stop_reason 为 timeout / abort 且内容不完整 → 对应终态；退出码非零或未知 → ERROR；
+       exit==0 且见 scope_done → scope 级 error 或 scenario 归约终态；exit==0 无 scope_done（含零事件）→ ERROR）；无退出记录时
+       见 session_opened 或 scope_started → RUNNING、否则 PENDING。
     3. 聚合成 RunState：各 JobState（scope_id→status/session_id）+ run 总 status（_aggregate 终态）+
        high_water_mark（所有 scope 的 worker 段 max seq，机制三条件写用）。
 
@@ -331,9 +334,9 @@ def project(meta: RunMeta, records: list[EventRecord], baseline: RunState | None
 def _reduce_scope(job: Job, recs: list[EventRecord]) -> tuple[JobResult, Status, int]:
     """单 scope 归约（project / project_full 共用一份，避免归约逻辑双写漂移）：
 
-    events 段按 seq 升序喂 reduce_event 归约出完整 JobResult；退出记录（独立键空间）取 exit_code 判「两件都要」。
+    events 段按 seq 升序喂 reduce_event 归约出完整 JobResult；退出记录（独立键空间）给终结函数退出信息与 stop_reason。
     返回 (完整 JobResult, 派生 status, 该 scope 的 worker 段 max seq)。JobResult.status 会被派生 status 覆盖
-    （reduce 期只累积 scenario 明细，最终 job 态由 _job_status 的「两件都要」谓词定）。
+    （reduce 期只累积 scenario 明细，最终 job 态由 finalize_job 的真值表定，机制二）。
     """
     evs = sorted([r for r in recs if r.kind == "event" and r.event is not None],
                  key=lambda r: (r.seq if r.seq is not None else 0))
@@ -467,6 +470,7 @@ def finalize_job(
         error_type, message = None, None
     elif exit_code is None or exit_code != 0:
         status = Status.ERROR
+        said = scope_done.status == Status.ERROR if scope_done is not None else False  # worker 先报了 scope 级 error 再非零退出
         if exit_code == EX_WORKER_NETWORK:
             error_type = "network_error"
             message = "worker 建连失败（网络/SSL 瞬时故障），退出码 80" + (f"：{exit_reason}" if exit_reason else "")
@@ -478,13 +482,13 @@ def finalize_job(
             error_type = "engine_error"
             # exit_reason 由调用方带上下文写好（同步路径：「worker 异常：…」/「起 worker 失败：…」；平台侧：观察者的归因）
             message = exit_reason if exit_reason else "worker 已终止但退出码未知——无法判定为通过，按错误处理"
-        elif scope_done is not None and scope_done.status == Status.ERROR:
-            # worker 先报了 scope 级 error 再非零退出（设备 worker 有未确认会话时以 1 退出，ADR 0051 决策 5）：归因按本行，
-            # 原因消息保留 worker 报的那句，不说「事件流里没有失败原因」
-            error_type = "engine_error"
-            message = f"{scope_done.message or scope_done.error_type}；worker 随后非正常退出（exit {exit_code}）"
+        elif said:
+            error_type, message = "engine_error", f"worker 随后非正常退出（exit {exit_code}）"
         else:
             error_type, message = "engine_error", f"worker 非正常退出（exit {exit_code}；事件流里没有失败原因——详见 worker 日志）"
+        if said:
+            # 原因消息保留 worker 报的那句（设备 worker 有未确认会话时以 1 退出，ADR 0051 决策 5），退出的说明接在后面
+            message = f"{scope_done.message or scope_done.error_type}；{message}"
         if unconfirmed:
             error_type = "release_failed"  # 归因改释放失败，退出原因的消息保留、提示在下面追加
     elif scope_done is None:

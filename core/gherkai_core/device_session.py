@@ -38,10 +38,13 @@ def console_url(session_arn: str | None) -> str | None:
 
 
 def representative_device(sessions, session_id: str | None) -> dict | None:
-    """scope 表头用的设备描述：代表会话（session_id）那条记录的 device；它没有时取首条带 device 的记录。"""
-    for s in sessions:
-        if session_id is not None and s.session_id == session_id and s.device:
-            return s.device
+    """scope 表头用的设备描述：代表会话（session_id）那条记录的 device。代表会话已定而它没有 device 时返回 None（不借别的会话
+    的机型配它的控制台链接）；没有代表会话时取首条带 device 的记录。"""
+    if session_id is not None:
+        for s in sessions:
+            if s.session_id == session_id:
+                return s.device or None
+        return None
     for s in sessions:
         if s.device:
             return s.device

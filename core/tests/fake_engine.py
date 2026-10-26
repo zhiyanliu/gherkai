@@ -13,14 +13,17 @@ from gherkai_core.model import Event, Job
 
 
 class FakeWorkerHandle:
-    def __init__(self) -> None:
+    def __init__(self, on_stop: Callable[[], None] | None = None) -> None:
         self.stopped = False
         self.stop_grace: float | None = None
         self._stop_event = threading.Event()  # 配了收尾事件的假 worker 在事件发完后等它（模拟 worker 活着、等被停）
+        self._on_stop = on_stop  # 测试钩子：模拟真 stop() 阻塞消耗的时间（如推进假时钟）
 
     def stop(self, grace_period_s: float) -> None:
         self.stopped = True
         self.stop_grace = grace_period_s
+        if self._on_stop is not None:
+            self._on_stop()
         self._stop_event.set()
 
     def wait_stopped(self, timeout_s: float) -> bool:
@@ -45,6 +48,7 @@ class FakeEngine:
         exit_code: dict[str, int] | None = None,
         tail_delay_s: float = 0.0,
         hang_after_stop: set[str] | None = None,
+        on_stop: Callable[[str], None] | None = None,
     ) -> None:
         self.behaviors = behaviors
         self.crash_after = crash_after or {}
@@ -61,13 +65,15 @@ class FakeEngine:
         self.tail_delay_s = tail_delay_s
         # hang_after_stop: 收到停止请求后卡死、永不 EOF（模拟收尾挂住的 worker；由 schedule 的排空上界兜底）
         self.hang_after_stop = hang_after_stop or set()
+        # on_stop: handle.stop() 被调时的钩子（传 scope_id），模拟真 stop() 阻塞在 proc.wait(grace) 消耗的时间（测试里推进假时钟）
+        self.on_stop = on_stop
         self.run_count: dict[str, int] = {}  # 每个 scope_id 被 run_scope 的次数（验证 job 级重试）
         self.on_event = on_event
         self.handles: dict[str, FakeWorkerHandle] = {}
         self._lock = threading.Lock()
 
     def run_scope(self, job: Job) -> tuple[FakeWorkerHandle, Iterator[Event]]:
-        handle = FakeWorkerHandle()
+        handle = FakeWorkerHandle(on_stop=(lambda: self.on_stop(job.scope_id)) if self.on_stop is not None else None)
         with self._lock:
             self.handles[job.scope_id] = handle
             attempt = self.run_count.get(job.scope_id, 0)
@@ -98,6 +104,8 @@ class FakeEngine:
         # 事件流走完后若仍要 network-crash（net_crash_at 不小于事件数，模拟「零/少事件就建连失败」）
         if net_crash_at is not None and i >= net_crash_at:
             raise WorkerNetworkError(f"fake worker {job.scope_id} 建连失败（attempt {attempt}）")
+        if crash_at is not None and i >= crash_at:  # 同理：crash_after 等于事件数即「发完全部事件后崩」（退出码未知）
+            raise RuntimeError(f"fake worker {job.scope_id} 在第 {i} 个事件后崩溃")
         if job.scope_id in self.tail_after_stop or job.scope_id in self.hang_after_stop:
             # 真 worker 发完事件后仍活着、等被停（这里的事件由后台 reader 线程抢先读完，不等就会在 stop 到达前 EOF）；
             # 等到停止请求再发收尾事件（模拟 SIGTERM 后的终结四阶段）。等不到即按 EOF 结束（测试不配 stop 时不挂死）。

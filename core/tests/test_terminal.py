@@ -227,6 +227,25 @@ def test_scope_error_synthesizes_skipped_only_for_zero_event_scenarios():
     assert [st.shortcircuited for st in back.scenarios[1].steps] == [False, False]
 
 
+def test_session_opened_by_name_fills_arn_and_later_arn_is_a_new_session():
+    """按名命中的记录补 ARN：discovered（无 ARN）→ opened(A) 配成一条并补上 A；再来 opened(B) 是另一条真实会话，不并进去。"""
+    result, _ = _run_events([
+        SessionOpened(scope_id="s", name="n", origin="discovered"),
+        SessionOpened(scope_id="s", name="n", origin="created", session_id="arn:A"),
+        SessionOpened(scope_id="s", name="n", origin="created", session_id="arn:B"),
+    ])
+    assert [(s.session_id, s.origin) for s in result.sessions] == [("arn:A", "discovered"), ("arn:B", "created")]
+
+
+def test_finalize_after_synthesis_keeps_synthesized_details():
+    """合成明细与判定分开（ADR 0034 机制二）：scope 级 error 合成 SKIPPED 后，终结函数判 timeout / abort 不撤销明细。"""
+    sd = ScopeDone(scope_id="s", status=Status.ERROR, error_type="acquire_timeout", message="没拿到设备")
+    result, ss = _run_events([sd])
+    for stop_reason, status in (("timeout", Status.ERROR), ("abort", Status.ABORTED)):
+        term = _fin(stop_reason=stop_reason, exit_code=1, scope_done=sd, scenario_status=ss)  # 非零退出：内容不完整，停止原因生效
+        assert term.status == status and [sr.status for sr in result.scenarios] == [Status.SKIPPED] * 3
+
+
 def test_scenario_done_after_synthesis_replaces_the_synthesized_record():
     """worker 违约（scope_done 之后仍发 scenario_done）时同一 scenario 只留一条记录：真实判定取代合成的 SKIPPED。"""
     result, ss = _run_events([

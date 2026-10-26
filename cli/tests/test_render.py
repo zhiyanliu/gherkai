@@ -205,7 +205,9 @@ def test_explain_carries_sessions_and_metering_and_skips_evidence_note_for_synth
     assert scope["has_step_records"] is True  # 合成记录也是记录：判定块不按「零记录」渲染
     txt = render.render_explain_text(doc, expand_passed=True)
     assert txt.count(render._SCOPE_SKIPPED_NOTE) == 2 and "无 AI 证据" not in txt
-    assert "结果未知的创建尝试: n-t" in txt
+    # explain 文本 key 用 JSON 字段名（ADR 0042 决策四）：会话逐项带 origin / release / observed_s，计量两键按名
+    assert "sessions: n-t (origin=attempted, release=unconfirmed, observed_s=null)" in txt
+    assert "device_observed_s: 0.0  device_observed_missing: 0" in txt and "结果未知的创建尝试" not in txt
     assert "判定：error  (precheck_failed: 设备不支持)" in txt and "诊断细节见 worker 日志" not in txt  # 全是合成记录也打判定行
 
 
@@ -252,12 +254,22 @@ def test_device_header_lines_show_device_and_console_link():
     assert "设备: ios iPhone 15 17.5 （u-1）" in txt and f"设备控制台: {url}" in txt  # 取代表会话（session_id）那条的 device，不取首条
     doc = render.explain_to_dict(run_id="r", status="passed", results=[jr], evidence_reader=lambda refs: (None, "no_ref"))
     etxt = render.render_explain_text(doc)
-    assert "设备: ios iPhone 15 17.5 （u-1）" in etxt and f"设备控制台: {url}" in etxt
+    # explain 的文本 key 用 JSON 字段名（ADR 0042 决策四）；控制台链接同时进 explain JSON 的 scopes[].console_url
+    assert "device: platform=ios  model=iPhone 15  osVersion=17.5  unit=u-1" in etxt and f"console_url: {url}" in etxt
+    assert doc["scopes"][0]["console_url"] == url
     assert doc["scopes"][0]["sessions"][1]["device"] == {"platform": "ios", "model": "iPhone 15", "osVersion": "17.5", "unit": "u-1"}
+    assert "sessions: n0 (origin=created, release=confirmed, observed_s=1.0)、n1 (origin=created, release=confirmed, observed_s=2.0)" in etxt
     page = html_mod.unescape(render_index_html({"run_id": "r", "created_at": "", "report_index": []}, run))
     assert "设备 ios iPhone 15 17.5 （u-1）" in page and f'href="{url}"' in page
     desktop = render.render_text(_sample_run())
     assert "设备:" not in desktop and "设备控制台" not in desktop
+    # 代表会话已定而它没有 device：不借别的会话的机型（否则旧机型配新会话的链接）
+    bare = JobResult(job=job, status=Status.PASSED, session_id=arn, device_observed_s=3.0, device_observed_missing=0,
+                     sessions=[sessions[0], SessionRecord(session_id=arn, name="n1", origin="created", release="confirmed", observed_s=2.0)])
+    bare_run = RunResult(run_meta=RunMeta(run_id="r", created_at="", jobs=(job,)), status=Status.PASSED, jobs=[bare])
+    assert "设备:" not in render.render_text(bare_run) and f"设备控制台: {url}" in render.render_text(bare_run)
+    bare_doc = render.explain_to_dict(run_id="r", status="passed", results=[bare], evidence_reader=lambda refs: (None, "no_ref"))
+    assert "device:" not in render.render_explain_text(bare_doc) and "console_url" in bare_doc["scopes"][0]
 
 
 def test_console_url_only_for_session_arns():
@@ -296,7 +308,7 @@ def test_explain_renders_device_evidence_fields_and_extraction_failure():
     doc = render.explain_to_dict(run_id="r", status="failed", results=[jr], evidence_reader=reader)
     txt = render.render_explain_text(doc)
     assert "step_kind: navigation" in txt and "url: null  (url_missing: no_web_context)" in txt
-    assert "controls: 26 项（total 40）  已截断" in txt and "type=Button  id=login  text=登录  a11y_id=btn-login" in txt
+    assert "controls: items=26  total=40  truncated=true" in txt and "type=Button  id=login  text=登录  a11y_id=btn-login" in txt
     assert "其余 6 项已省略（--full 查看）" in txt and "page_source: file:///ps.xml  (page_source_truncated: true)" in txt
     assert "step_kind: ai" not in txt and "url: https://x/y" in txt and "controls: null  (controls_missing: timeout)" in txt
     assert render._DEVICE_EVIDENCE_LOST in txt and "无 AI 证据" not in txt
