@@ -154,6 +154,77 @@ def test_silent_worker_timeout_fires_via_heartbeat():
     assert elapsed < 15.0, f"超时应靠心跳准时触发，实际耗时 {elapsed:.1f}s（疑似退回阻塞死等）"
 
 
+# ---- 停止与收尾的真子进程护栏（ADR 0034 机制二：首次仲裁、内容完整后不再仲裁、停止后有界消费）----
+
+
+def _mode_job(scope_id: str, mode: str, timeout_s: float | None = None) -> Job:
+    j = _job(scope_id, timeout_s=timeout_s)
+    return Job(scope_id=j.scope_id, scope_name=f"mode:{mode}", engine=j.engine, scenarios=j.scenarios, timeout_s=timeout_s)
+
+
+def test_fail_fast_stops_multiple_hanging_victims_in_parallel():
+    """fail-fast 对多个仍在运行的真子进程：先全部落定再并行发 SIGTERM，两个 victim 都判 ABORTED、都协作退出、总耗时远小于逐个等宽限。"""
+    engine = _engine("pass")  # mode 由各 job 的 scope.name 给
+    jobs = [_mode_job("c", "crash"), _mode_job("v1", "hang"), _mode_job("v2", "hang")]
+    t0 = time.monotonic()
+    result = schedule(_rm(jobs), lambda name: engine, CollectSink(),
+                      opts=ScheduleOpts(max_concurrency=3, fail_fast=True, grace_period_s=5.0, heartbeat_interval_s=0.2))
+    elapsed = time.monotonic() - t0
+    by = {jr.scope_id: jr for jr in result.jobs}
+    assert (by["c"].status, by["c"].error_type) == (Status.ERROR, "engine_error")
+    assert (by["v1"].status, by["v1"].error_type) == (Status.ABORTED, None) and (by["v2"].status, by["v2"].error_type) == (Status.ABORTED, None)
+    assert elapsed < 8.0, elapsed  # victim 收 SIGTERM 即退（不等满宽限），两个并行停、不是串行各等一遍
+
+
+def test_done_then_deaf_worker_is_killed_after_hurry_exit_and_judged_timeout():
+    """内容完整（scope_done 已到）后 worker 挂死且无视 SIGTERM：deadline 到点催停 → 宽限耗尽 SIGKILL → 管道 EOF、负退出码 →
+    非干净退出不算内容完整，按首次仲裁回判 timeout（与无状态路径的 timed_out 一致）；不挂死。"""
+    engine = _engine("done_then_deaf")
+    t0 = time.monotonic()
+    result = schedule(_rm([_job("s", timeout_s=1.0)]), lambda name: engine, CollectSink(),
+                      opts=ScheduleOpts(grace_period_s=0.5, heartbeat_interval_s=0.2))
+    elapsed = time.monotonic() - t0
+    jr = result.jobs[0]
+    assert (jr.status, jr.error_type) == (Status.ERROR, "timeout"), (jr.status, jr.error_type, jr.message)
+    assert [sr.status for sr in jr.scenarios] == [Status.PASSED]  # 内容已完整的明细保留
+    assert elapsed < 12.0, elapsed
+
+
+def test_done_then_slow_worker_keeps_content_verdict_despite_deadline():
+    """内容完整后收尾拖过预算、被催停后协作以 0 退出：判定按内容（PASSED），不记超时（ADR 0034 机制二「内容完整后不再仲裁」）。"""
+    engine = _engine("done_then_slow")
+    t0 = time.monotonic()
+    result = schedule(_rm([_job("s", timeout_s=1.0)]), lambda name: engine, CollectSink(),
+                      opts=ScheduleOpts(grace_period_s=5.0, heartbeat_interval_s=0.2))
+    elapsed = time.monotonic() - t0
+    jr = result.jobs[0]
+    assert (jr.status, jr.error_type) == (Status.PASSED, None), (jr.status, jr.error_type, jr.message)
+    assert elapsed < 10.0, elapsed
+
+
+def test_bad_event_line_stops_the_still_running_worker(tmp_path):
+    """事件行解析失败（worker 违约）后 worker 还活着：schedule 记未知退出、并向它发停止请求，进程被回收、不留孤儿。"""
+    import os
+
+    pid_file = tmp_path / "pid"
+    env = {**os.environ, "WORKER_MODE": "bad_line", "WORKER_PID_FILE": str(pid_file)}
+    engine = SubprocessEngine(cmd=[sys.executable, _WORKER], env=env)
+    result = schedule(_rm([_job("s")]), lambda name: engine, CollectSink(),
+                      opts=ScheduleOpts(grace_period_s=5.0, heartbeat_interval_s=0.2))
+    jr = result.jobs[0]
+    assert (jr.status, jr.error_type) == (Status.ERROR, "engine_error") and jr.message.startswith("worker 异常：")
+    pid = int(pid_file.read_text().split()[0])
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            break
+        time.sleep(0.1)
+    else:
+        raise AssertionError(f"worker 进程 {pid} 在停止请求后仍存活")
+
+
 # ---- ADR 0028「会话血缘随首事件回传」条：session_id 经 scope_started 提前回传 → 超时/中止 scope_done 缺席时仍记得到血缘 ----
 def test_session_id_captured_from_scope_started_on_timeout():
     engine = _engine("silent")

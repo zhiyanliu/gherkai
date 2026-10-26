@@ -1188,6 +1188,60 @@ def test_non_clean_exit_after_complete_content_is_re_arbitrated(exit_kind, trigg
     assert (jr.status, jr.error_type) == expected, jr.message
 
 
+@pytest.mark.parametrize("trigger", ["deadline", "abort"])
+def test_synthesized_details_survive_sync_path_timeout_and_abort(trigger):
+    """合成明细与判定分开（ADR 0034 机制二）：scope 级 error 合成 SKIPPED 之后 worker 非零退出且已过 deadline / 已被 fail-fast 中止，
+    同步路径判 timeout / ABORTED，合成的明细原样保留在 JobResult 里。"""
+    import gherkai_core.schedule as sch
+    from gherkai_core.errors import WorkerExitError
+    from gherkai_core.model import SessionOpened
+
+    scope = "d"
+    events = [SessionOpened(scope_id=scope, name="n", origin="created", session_id="arn:n"),
+              ScopeDone(scope_id=scope, status=Status.ERROR, error_type="acquire_timeout", message="没拿到设备")]
+    n = len(events)
+    captured = {}
+    orig = sch._Worker.__init__
+
+    def spy(self, *a, **kw):
+        orig(self, *a, **kw)
+        captured["w"] = self
+
+    class _Clock:
+        def __init__(self): self.n = 0; self.t = 0.0
+        def __call__(self):
+            self.n += 1
+            self.t += 1000.0 if (trigger == "deadline" and self.n == 2 * n + 3) else 0.001
+            return self.t
+
+    done = threading.Event()
+
+    class _Sink(CollectSink):
+        def __call__(self, ev):
+            super().__call__(ev)
+            if isinstance(ev, ScopeDone):
+                done.set()
+
+    def gen(job):
+        yield from events
+        done.wait(5)
+        if trigger == "abort":
+            captured["w"].abort_flag.set()
+        raise WorkerExitError(1, "x")
+
+    sch._Worker.__init__ = spy
+    try:
+        res = schedule(_rm([_job(scope, n_scenarios=2, timeout_s=5.0)]), FakeResolver(FakeEngine({scope: gen})), _Sink(),
+                       opts=ScheduleOpts(max_concurrency=1, clock=_Clock(), heartbeat_interval_s=0.05, grace_period_s=1.0))
+    finally:
+        sch._Worker.__init__ = orig
+    jr = res.jobs[0]
+    expected = (Status.ERROR, "timeout") if trigger == "deadline" else (Status.ABORTED, None)
+    assert (jr.status, jr.error_type) == expected, jr.message
+    assert [sr.status for sr in jr.scenarios] == [Status.SKIPPED, Status.SKIPPED]
+    assert all(st.status == Status.SKIPPED and not st.shortcircuited for sr in jr.scenarios for st in sr.steps)
+
+
 def test_device_job_network_error_is_not_retried(monkeypatch):
     """设备 job 的建连失败不做 job 级重试（ADR 0051 决策 2）：同样的零 step_done network_error，桌面 job 重试、设备 job 不重试。"""
     import gherkai_core.schedule as sch

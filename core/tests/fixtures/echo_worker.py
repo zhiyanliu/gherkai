@@ -13,6 +13,12 @@
   WORKER_MODE=deaf   → **忽略 SIGTERM**（SIG_IGN），吐 scope_started 后死循环不退——模拟 worker 无视优雅停
                        （如真卡死、handler 失效）。测 adapter 的 terminate→grace 超时→**SIGKILL 兜底**分支
                        （SubprocessWorkerHandle.stop 的 TimeoutExpired→proc.kill()），这条尾路径其余 mode 都不踩。
+  WORKER_MODE=done_then_deaf → 发完全部事件（含 scope_done）后忽略 SIGTERM、永不退出（模拟收尾挂死）——测 schedule 在
+                       内容完整后 deadline 到点催停、宽限耗尽强杀、管道 EOF 后按负退出码回判（ADR 0034 机制二）
+  WORKER_MODE=done_then_slow → 发完全部事件后等 SIGTERM 再以 0 退出（模拟收尾拖过预算但协作退出）——判定按内容、不记超时
+  WORKER_MODE=bad_line → 吐 scope_started 后写一行不是 JSON 的东西，然后等 SIGTERM——测 core 解析失败后仍停掉活着的 worker
+  mode 也可以由 job 的 scope.name 以 "mode:<名>" 指定：同一个 engine 实例下的各个 job 由此使用不同的行为（需要多个 job 同时运行的 fail-fast 测试会用到）。
+  WORKER_PID_FILE=<路径> → 启动时把自己的 pid 写进去（测试据此确认进程确已被回收）。
 
 EVENTS: 真 worker 的 scope_started 带 sessionId（ADR 0028 血缘随首事件回传），echo 也带，保协议一致。
 """
@@ -55,8 +61,14 @@ def main():
         sys.stdout.write("x" * noise + "\n")
         sys.stdout.flush()
     job = json.loads(sys.stdin.readline())
-    mode = os.environ.get("WORKER_MODE", "pass")
     scope = job["scope"]
+    mode = os.environ.get("WORKER_MODE", "pass")
+    if isinstance(scope.get("name"), str) and scope["name"].startswith("mode:"):
+        mode = scope["name"][len("mode:"):]
+    pid_file = os.environ.get("WORKER_PID_FILE")
+    if pid_file:
+        with open(pid_file, "a", encoding="utf-8") as fh:
+            fh.write(f"{os.getpid()}\n")
 
     if mode == "deaf":
         # 忽略 SIGTERM（模拟无视优雅停/handler 失效）→ 逼 adapter 走 grace 超时 → SIGKILL 兜底。
@@ -76,6 +88,14 @@ def main():
         # 吐 scope_started 后死循环、**不响应 SIGTERM**（SIG_IGN）→ adapter grace 超时后 SIGKILL 强杀。
         while True:
             time.sleep(0.05)
+
+    if mode == "bad_line":
+        # 一行不是 JSON 的东西：core 的 wire 解析抛错 → schedule 走普通异常分支，须向本进程发停止请求（否则本进程一直活着）
+        _events_out.write("this is not json\n")
+        _events_out.flush()
+        while not _stopped:
+            time.sleep(0.05)
+        return
 
     if mode == "silent":
         # 吐 scope_started + scenario_started 后**静默死循环**（不再吐任何事件、不退出）——模拟
@@ -103,6 +123,16 @@ def main():
         emit({"type": "scenario_done", "scenarioId": sid, "status": "passed"})
 
     emit({"type": "scope_done", "scopeId": scope["id"], "sessionId": "echo-sess"})
+
+    if mode == "done_then_deaf":
+        # 内容已完整，收尾却挂死且无视 SIGTERM：只有 SIGKILL 能结束本进程（管道随之 EOF、退出码为负）
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        while True:
+            time.sleep(0.05)
+    if mode == "done_then_slow":
+        # 内容已完整，收尾拖到被催停才退出（协作、退出码 0）
+        while not _stopped:
+            time.sleep(0.05)
 
 
 if __name__ == "__main__":

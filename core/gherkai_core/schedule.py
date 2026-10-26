@@ -221,13 +221,7 @@ class _Worker:
                 if attempt > 0:
                     # 仅在「上次是 network_error 且会话未起」时走到这；退避用注入 sleep（保 fake-clock 纯净）
                     self.opts.retry_sleep(min(2.0 * attempt, 4.0))
-                    if self.abort_flag.is_set():
-                        # 退避期间整批被 fail-fast 中止：不再重试，也不把已经运行过一次的 job 记成「未启动」的 SKIPPED——
-                        # 保留上次的 network_error 判定，消息注明没有再重试
-                        assert last is not None
-                        last.message = (f"{last.message}；" if last.message else "") + "fail-fast：其他 job 失败，未再重试"
-                        return last
-                result, is_network, saw_step = self._run_once(deadline)
+                result, is_network, saw_step = self._run_once(deadline, previous=last)
                 last = result
                 # 可重试的条件是 network_error + 会话未起（零 step_done）+ 未被 fail-fast 中止 + 还有重试额度
                 # + job 目标不是设备（ADR 0051 决策 2：设备会话的建连失败不做 job 级重试）
@@ -251,10 +245,11 @@ class _Worker:
             with self._stop_lock:
                 self._finished = True
 
-    def _run_once(self, deadline: float | None) -> tuple[JobResult, bool, bool]:
+    def _run_once(self, deadline: float | None, previous: JobResult | None = None) -> tuple[JobResult, bool, bool]:
         """单次执行 job。返回 (JobResult, 是否 network_error, 是否 emit 过 step_done)。
 
-        deadline：run 级共享的超时截止（None 表示不超时）；跨 attempt 不重置（ADR 0028）。
+        deadline：run 级共享的超时截止（None 表示不超时）；跨 attempt 不重置（ADR 0028）。previous 是上一次 attempt 的判定
+        （只在重试时有）：起 worker 前发现整批已被 fail-fast 中止，就保留它、不把已经运行过一次的 job 记成「未启动」。
         判定与归因只由终结函数给出（ADR 0034 机制二）：本方法只准备输入——stop_reason（首次仲裁落定）、退出信息
         （EOF 为 0 / WorkerExitError 取其码 / 其它异常为未知）、scope_done 事实、scenario 判定集、会话记录。
         作出停止决定后**不立即返回**：先把触发决定的那条事件照常处理，再继续消费直到 EOF、退出异常或排空上界
@@ -275,7 +270,12 @@ class _Worker:
 
         # 起 worker 前先看是否已被 fail-fast 中止（排队中的 job 不该再起、不产生费用）。
         # worker 从未 spawn → SKIPPED（没执行/没花钱/可无脑重新运行，ADR 0031），非 error。
+        # 重试再次起 worker 之前才被中止的 job 已经运行过一次：不再重试，保留上次的 network_error 判定并注明（在这里判断、不在退避
+        # 之后判断——退避之后到起 worker 之前仍有窗口，fail-fast 恰在窗口里置位时曾把它覆盖成 SKIPPED）。
         if self.abort_flag.is_set():
+            if previous is not None:
+                previous.message = (f"{previous.message}；" if previous.message else "") + "fail-fast：其他 job 失败，未再重试"
+                return previous, False, saw_step
             result.status = Status.SKIPPED
             result.error_type = None
             result.message = "fail-fast：本次运行已中止，未启动（worker 未 spawn）"
