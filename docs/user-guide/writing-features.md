@@ -25,7 +25,7 @@ worker 拿到一个 step 后先查确定性 step 的注册表，命中就走代�
 
 | 执行路径 | 命中条件 | 怎么执行 |
 |---|---|---|
-| ① 导航（内建的确定性 step） | `Given` / `When` 之后**整句只是一个地址**：`Given "https://example.com/"` 与 `Given https://example.com/` 都算，加不加双引号一样；地址前后再有别的字就不算，多一个句号也不算 | 直接打开这个地址，不问 AI。网页上只接受 `http://` / `https://` 地址，写别的协议这一步记 `error`。它与其它确定性 step 一样出现在 `gherkai list-deterministic` 的清单与 `gherkai plan` 的标注里 |
+| ① 导航（内建的确定性 step） | `Given` / `When` 之后**整句只是一个地址**：`Given "https://example.com/"` 与 `Given https://example.com/` 都算，加不加双引号一样；地址前后再有别的字就不算，多一个句号也不算；地址本身以括号或句号结尾时加双引号写，引号内一律原样当地址 | 直接打开这个地址，不问 AI。网页上只接受 `http://` / `https://` 地址，写别的协议这一步记 `error`。它与其它确定性 step 一样出现在 `gherkai list-deterministic` 的清单与 `gherkai plan` 的标注里 |
 | ② 项目注册的确定性 step | step 文本命中项目 `steps/` 目录里注册的正则 | 调用注册的函数，用 Playwright 直接查页面。不问 AI、不投票、逐次可复现 |
 | ③ AI（默认） | 以上都不命中 | `Then` 的文本当布尔断言交给模型判真假（可投票）；`Given` / `When` 的文本当动作交给模型执行 |
 
@@ -138,7 +138,7 @@ Scenario: 仍停留在 OpenAI 词条页
 | 中文关键字（`功能:` / `背景:` / `场景:` / `场景大纲:` / `例子:` / `假如` / `当` / `那么` / `并且` / `而且` / `但是`） | 支持 | 文件第一行须写 `# language: zh-CN`；不写这一行时中文关键字解析失败，报错指向第 1 行。关键字用哪种语言写不影响派发：`那么` 等于 `Then`（断言），`假如` / `当` 等于 `Given` / `When`（动作） |
 | `*` 开头的步；前面没有可继承关键字的 `And` / `But`（scenario 第一步且这个 feature 没有 `Background`，或紧跟在 `*` 之后） | 不支持 | 判不出是动作还是断言，整个 run 拒绝运行；改成写明关键字 |
 
-三点补充：step 文本用什么语言与关键字用什么语言无关，中文 step 文本配英文关键字是本页所有示例的写法；命中确定性 step 的那一步，挂在它上面的 DataTable / DocString 不会传给函数，多行参数只对 AI step 有效；`.feature` 有语法错误时整个 run 拒绝运行，消息带出错的行号与列号。
+三点补充：step 文本用什么语言与关键字用什么语言无关，中文 step 文本配英文关键字是本页所有示例的写法；多行参数只对 AI step 有效，命中确定性 step（含导航）的那一步挂了 DataTable / DocString 会记 `error`；`.feature` 有语法错误时整个 run 拒绝运行，消息带出错的行号与列号。
 
 ## 按引擎选写法
 

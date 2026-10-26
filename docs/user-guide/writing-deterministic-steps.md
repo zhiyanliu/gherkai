@@ -313,8 +313,8 @@ gherkai plan features/*.feature --steps-dir ./steps                # 每个 step
 gherkai doctor --steps-dir ./steps                                 # 目录与加载结果
 ```
 
-- `list-deterministic`：一张三列表格——示例、说明、模式，每条一行；`--engine` 缺省 `novaact`；清单含内建与你注册的全部条目。该引擎的 worker 没装时命令以退出码 2 结束，并原地给出安装命令。
-- `plan`：命中的 step 后面标 `← 确定性: <说明>`，冲突标 `← ⚠`，走 AI 的不标（减少噪声）。某个引擎的 worker 不可用时 `plan` 不会失败，但该引擎的 step 一个标注都没有，stderr 会说明标注已降级——这种情况下不要把「没有标注」读成「都走 AI」。示例 `.feature` 在仓库的 [`features/`](../../features/) 目录。
+- `list-deterministic`：一张四列表格——示例、说明、模式、关键字（没有声明的显示「任意」），每条一行；`--engine` 缺省 `novaact`；清单含内建与你注册的全部条目。该引擎的 worker 没装时命令以退出码 2 结束，并原地给出安装命令。
+- `plan`：命中的 step 后面标 `← 确定性: <说明>`，冲突与写法同关键字不符的都标 `← ⚠`（后者写出这条 step 接受的关键字），走 AI 的不标（减少噪声）。某个引擎的 worker 不可用时 `plan` 不会失败，但该引擎的 step 一个标注都没有，stderr 会说明标注已降级——这种情况下不要把「没有标注」读成「都走 AI」。示例 `.feature` 在仓库的 [`features/`](../../features/) 目录。
 - `doctor`：`steps.dir` 显示解析到的目录（没有目录时说明只有内建 step），`steps.load.<引擎>` 显示该引擎加载后共有多少条。
 
 这些命令都不建浏览器会话、不调模型，不产生模型费用。
@@ -327,6 +327,7 @@ gherkai doctor --steps-dir ./steps                                 # 目录与�
 |---|---|---|
 | `plan` / `run` / `submit` 在起第一个 job 前以退出码 2 结束，点名某个文件与异常 | 该文件有语法错误或缺依赖 | 先修那个文件 |
 | 启动即报错并点名某条模式 | 注册时缺 `description` 或 `example` | 补齐两个字段 |
+| 启动即报错并点名某条模式，消息提到 `keywords` | `keywords` 声明为空、有重复，或取值不在 `Given` / `When` / `Then` 之内 | 改成这三个关键字的非空子集，或去掉声明 |
 | Midscene 报某个文件一条确定性 step 都没注册 | 该文件没在顶层调用 `deterministic(...)`，或按文件路径导入了另一处安装的同名包 | 确认顶层有注册调用，且导入写的是包名 `@gherkai/worker-midscene` |
 | 命令以退出码 2 结束，说 `--steps-dir` 或 `GHERKAI_STEPS_DIR` 指的目录不存在 | 路径写错或目录被移走 | 改成正确路径 |
 | `list-deterministic`、`plan` 或运行前检查以退出码 2 结束，只有一句解析错误、没点名文件 | worker 与命令行工具版本不一致 | 把两侧装成同版本后重试 |

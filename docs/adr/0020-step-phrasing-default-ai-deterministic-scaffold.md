@@ -1,6 +1,6 @@
 # Step 措辞：默认 AI 判断（QA 零预设）+ 确定性 step 脚手架（工程角色按需自建）
 
-> **Status:** Partially-superseded-by 0022/0037 —— 「裸 `When/Then`→默认 AI；确定性=脚手架、测试开发按需建、QA 零代码」核心语义**不变**；落地机制被 0022 反转（从「cucumber 补丁 + pytest-bdd 原生区分」转为「核心库解析关键字 + worker catch-all/确定性注册表派发」，确定性 step 的收集方式从「被 BDD runner 自动收集」转为「写在脚手架文件里、由 worker import 触发注册进注册表」；当时脚手架落在各引擎 `worker/` 目录，见 0022「迁移」条的实装偏差纠正）。**[0037](./0037-distribution-and-packaging.md)（Accepted，随 v1.4.0）再移定制面**：使用方的确定性 step 写在**使用方项目的 `steps/` 目录**（worker 启动时加载，`@deterministic` 注册机制与脚手架同一条），worker 包内脚手架（`engines/novaact/gherkai_worker_novaact/deterministic_steps.py`、`engines/midscene/src/worker/deterministic.steps.mts`）只留内建示范的确定性 step——故「确定性 step 仍住脚手架文件」**只对内建的那些成立**；「QA 零预设、确定性 step 由测试开发维护」的角色边界不变。下文「Midscene 靠补丁」段属被取代的 v0.x 形态。**第 2、3 条于 2026-10-26 修订**：导航的判据改为「Given / When 后整句是一个地址」，退路从功能开关改为 plan 可见；脚手架曾内置的「页面地址匹配」step 退役，注册表只剩导航一条内建条目；应用目标上任意 scheme 经 DeepLink 交给被测应用（[0048](./0048-test-targets-device-and-ui-kind.md) 决策 7）。两条已就地改写。
+> **Status:** Partially-superseded-by 0022/0037 —— 「裸 `When/Then`→默认 AI；确定性=脚手架、测试开发按需建、QA 零代码」核心语义**不变**；落地机制被 0022 反转（从「cucumber 补丁 + pytest-bdd 原生区分」转为「核心库解析关键字 + worker catch-all/确定性注册表派发」，确定性 step 的收集方式从「被 BDD runner 自动收集」转为「写在脚手架文件里、由 worker import 触发注册进注册表」；当时脚手架落在各引擎 `worker/` 目录，见 0022「迁移」条的实装偏差纠正）。**[0037](./0037-distribution-and-packaging.md)（Accepted，随 v1.4.0）再移定制面**：使用方的确定性 step 写在**使用方项目的 `steps/` 目录**（worker 启动时加载，`@deterministic` 注册机制与脚手架同一条），worker 包内脚手架（`engines/novaact/gherkai_worker_novaact/deterministic_steps.py`、`engines/midscene/src/worker/deterministic.steps.mts`）只承载内建导航这一条（曾内置的示范 step 已退役，示范进 `features/steps/` 模板）——故「确定性 step 仍住脚手架文件」**只对内建导航成立**；「QA 零预设、确定性 step 由测试开发维护」的角色边界不变。下文「Midscene 靠补丁」段属被取代的 v0.x 形态。**第 2、3 条于 2026-10-26 修订**：导航的判据改为「Given / When 后整句是一个地址」，退路从功能开关改为 plan 可见；脚手架曾内置的「页面地址匹配」step 退役，注册表只剩导航一条内建条目；应用目标上任意 scheme 经 DeepLink 交给被测应用（[0048](./0048-test-targets-device-and-ui-kind.md) 决策 7）。两条已就地改写。
 
 断言类 step 的措辞设计，使「AI 柔性主导」([0014](./0014-ai-first-assertions.md)/[0015](./0015-v1-positioning-smoke-not-regression.md)) 落到 QA 的真实书写体验上。
 
@@ -25,7 +25,7 @@
    - **网页目标**：地址须是 http(s)，用 `goto` / `go_to_url` 打开；非 http(s) 的地址在执行时由句柄记 error「网页目标只能打开 http(s) 地址」，不转 AI。plan 对它仍标「内建导航」、不预检协议：匹配探针与目标无关（[0049](./0049-worker-capabilities-targets-keys.md) 决策 3 与被拒方案），协议是否受支持是该目标句柄的执行期判定。**应用目标**：任意 scheme（含 http(s)）都经 `mobile: deepLink` 带包名或 bundleId 交给被测应用，做不到时 step 级 fail-fast，规则归 [0048](./0048-test-targets-device-and-ui-kind.md) 决策 7。目标来自 scope 的声明（[0048](./0048-test-targets-device-and-ui-kind.md) 决策 2），不从 step 文本推断。
    - **不是整句** → 不是导航，走 AI：`When 在输入框输入 "https://…"` 是在输入，`Then 分享面板里的链接是 "https://…"` 是在断言。**Then 后只有一个地址** → 命中模式但关键字不符，按注册表的通用规则（[0050](./0050-deterministic-step-handles-and-testing.md) 决策 1 的关键字声明）记 error、提示「这条写法只在 Given / When 下有意义」，不交给 AI：裸地址已保留为导航语法，Then 后只有地址没有表达任何断言谓词，交给 AI 等于让模型猜要断言什么。
    - **不含地址 → 回落默认 AI**（如 `访问 OpenAI 的维基页` / `回到首页` → `aiAct` / `act`，让引擎自己导航）。
-   - **退路 = plan 可见**：导航与其它确定性 step 一样在 plan 里逐条标出（「内建导航：打开 …」「内建导航：经 DeepLink 交给被测应用」），残余的误判（Given / When 里单独写一个地址却不是要打开它）在花钱执行之前就能看到并改写。
+   - **退路 = plan 可见**：导航与其它确定性 step 一样在 plan 里逐条标出，标注用条目的 description（当前为「内建导航：整句只是一个地址时直接打开它（网页目标只接受 http(s) 地址）」；应用目标上经 DeepLink 的说明文字随 webdriver 句柄落地，[0048](./0048-test-targets-device-and-ui-kind.md) 决策 7），残余的误判（Given / When 里单独写一个地址却不是要打开它）在花钱执行之前就能看到并改写。
    - **被取代的两代写法（护栏）**：① 固定措辞 `Given 打开 "{url}"`——要 QA 背措辞；② 「引号里出现网址就导航」（v1.0 到 v1.4）——`Then 分享链接是 "https://…"` 这类断言被误当导航，当年的退路是「误伤就把整个功能退回全 AI」，粗到不可用。也不用动词词表（打开 / 访问 / 前往…）：词表永远不全，漏一个就静默走 AI，且仍要背词。结构判据零词表、零歧义：一句话只有一个地址时，不可能是在「提及」它。
    - **落点 = worker 的派发逻辑**（不在 core，对齐 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)「core 对 step 语义无知」；协议形态见 [0024](./0024-worker-core-protocol.md)）。
 
@@ -34,7 +34,7 @@
 > 角色正名与边界矩阵的单一真源现为 [0040](./0040-consumer-role-model-and-terminology.md)（「测试开发」即当时所称 test engineer）；本节保留当时的决策内容。
 
 - **QA**：永远只写 `.feature` 纯自然语言 → 默认走 AI。**"零代码"对 QA 成立。**
-- **测试开发**（会写代码）：偶尔需精确核对时，在确定性脚手架里写一小段 Playwright 查询 step。这是 BDD 原本的角色分工，**不破坏 QA 零代码**。（当时的落点 = worker 包内脚手架文件；**定制面已由 [0037](./0037-distribution-and-packaging.md) 决策 4 反转**——使用方的确定性 step 写进项目里的 `steps/` 目录、加载进同一张确定性注册表（各引擎的扩展名与 `steps/` 目录的解析顺序（flag > env > 默认）见该决策），worker 包内脚手架只留内建示范的确定性 step：那是发行包内容，改它等于 fork。角色分工本身不变。）
+- **测试开发**（会写代码）：偶尔需精确核对时，在确定性脚手架里写一小段 Playwright 查询 step。这是 BDD 原本的角色分工，**不破坏 QA 零代码**。（当时的落点 = worker 包内脚手架文件；**定制面已由 [0037](./0037-distribution-and-packaging.md) 决策 4 反转**——使用方的确定性 step 写进项目里的 `steps/` 目录、加载进同一张确定性注册表（各引擎的扩展名与 `steps/` 目录的解析顺序（flag > env > 默认）见该决策），worker 包内脚手架只承载内建导航这一条（曾内置的示范 step 已退役，示范进 `features/steps/` 模板）：那是发行包内容，改它等于 fork。角色分工本身不变。）
 
 ## 删除的过时措辞
 

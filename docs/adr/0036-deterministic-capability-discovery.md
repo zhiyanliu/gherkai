@@ -21,7 +21,7 @@ TS `deterministic(pattern, handler, { description, example })` / Python `@determ
 
 ### 2. worker 自述：注册表清单是能力自述对象的一个键
 
-worker 的能力自述入口（`--capabilities`，契约见「5.」）**不建会话、不读 stdin、零费用**，返回对象里的 `deterministic_steps` 键就是注册表清单：JSON 数组，每项 `pattern`（原始串）+ `description` + `example`。
+worker 的能力自述入口（`--capabilities`，契约见「5.」）**不建会话、不读 stdin、零费用**，返回对象里的 `deterministic_steps` 键就是注册表清单：JSON 数组，每项 `pattern`（原始串）+ `description` + `example` + `keywords`（接受的关键字，[0050](./0050-deterministic-step-handles-and-testing.md) 决策 1；缺省三个全部）。
 
 - **真值单一**：清单直接从注册表代码生成，engine 侧加/改确定性 step，查询结果即时跟随——零第二事实源。
 - **跨语言被既有架构吸收**：TS/Python 注册表无法被 CLI（Python）直接 import，「spawn 子进程 + 结构化输出」正是本项目 worker 交互的既有形态（[0024](./0024-worker-core-protocol.md)）；自述是 worker 的第二个入口形态（第一个是跑 job），不触碰 job 协议本身。
@@ -48,7 +48,7 @@ worker 的能力自述入口（`--capabilities`，契约见「5.」）**不建�
 worker argv 带 `--capabilities` 时：**不建会话、不读 stdin、零费用**，把自己的能力声明作一个 JSON 对象打到 stdout、退出 0：
 
 ```json
-{"schema_version": 1, "engine": "<name>", "min_grace_s": <number>, "deterministic_steps": [{"pattern": "...", "description": "...", "example": "..."}], "model_id": "<该 worker 实际会用的模型 id>"}
+{"schema_version": 1, "engine": "<name>", "min_grace_s": <number>, "deterministic_steps": [{"pattern": "...", "description": "...", "example": "...", "keywords": ["Given", "When"]}], "model_id": "<该 worker 实际会用的模型 id>"}
 ```
 
 - `min_grace_s` 是 [0024](./0024-worker-core-protocol.md) grace 硬约束的下限——Nova = `NOVA_ACT_TIMEOUT_S`（组合根注入的 env，缺省 120）+ margin（worker 常量，可 env 覆盖）；Midscene = SIGTERM 收尾序列各段超时预算之和 + 余量，由 worker 里那些预算常量算出、不另写字面量。

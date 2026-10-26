@@ -4,7 +4,7 @@
 > 与 `cli/gherkai_cli/render.py`（渲染器）、`runtime/gherkai_runtime/compose.py`（`artifacts` 四键的落点拼装：`local_artifact_locations` / `cloud_artifact_locations`）、`cli/gherkai_cli/__main__.py`（`doctor` / `list-engines`，另注入 `artifacts.worker_log`）、
 > `deploy_aws/gherkai_deploy_aws/workers.py`（`list-workers`）；worker 侧两组：`engines/novaact/gherkai_worker_novaact/evidence.py`
 > 与 `engines/midscene/src/worker/evidence.mts`（`evidence` 的固定键，两引擎结构相同）、`engines/novaact/gherkai_worker_novaact/deterministic.py`
-> 的 `list_registry()` 与 `engines/midscene/src/worker/deterministic.mts` 的 `listRegistry()`（`list-deterministic` 的三键，worker 自述、CLI 只转述）。
+> 的 `list_registry()` 与 `engines/midscene/src/worker/deterministic.mts` 的 `listRegistry()`（`list-deterministic` 每项的四键，worker 自述、CLI 只转述）。
 > 本页与 code 的一致性由护栏保证：`cli/tests/test_cli_json_contract.py` 与 `deploy_aws/tests/test_workers.py` 用真渲染器生成样例
 > （`explain` 的 `evidence` 用一份与两引擎映射测试结构相同的手写夹具）、递归收集全部键名（`actions[].args` 与 `acts[].result` 两个引擎透传节点不向下递归）、
 > 逐个断言出现在本页，漏键即测试失败。本页只说明有哪些字段、各自的含义与出现条件，不说明理由——理由在 ADR。
