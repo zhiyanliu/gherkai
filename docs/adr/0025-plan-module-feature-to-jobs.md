@@ -31,7 +31,7 @@ Job = {
 
 - **接受 feature 内容（`{uri, text}`）而非路径** → core 不碰文件系统（skill：accept dependencies, don't create them），纯数据 in / 纯数据 out，可被 test 直接喂字符串。读文件是组合根/CLI 的事。
 - **输出 `Job[]` 承载 [0024](./0024-worker-core-protocol.md) 协议输入的全部内容（`timeoutS` 以可选键上线，只供 worker 自检，见 0024 与 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 2）**：一个 Job = 一个 scope = 一个会话边界 = schedule 交给单个 worker 的活。
-- **`select` 谓词（可选，[0041](./0041-agent-facing-cli-affordances.md) 决策一追加）**：scenario 筛选施加在**分组与 engine/timeout 解析之后、Job 组装之前**。不变量：**筛选只减少「跑哪几条」**——scope 的引擎、墙钟预算、会话身份一律按**全量**成员解析，与不筛时逐字一致；整组被筛空的 scope 不进任何 job（且在解析 engine/timeout 之前跳过），`_scope_key` 仍对全量成员校验。`None` = 不筛，下文其余语义均按不筛描述；谓词由调用方组装，core 不认 flag 语义——`--scope/--tags/--scenario` 的语义、设计取舍与被拒方案见 [0041](./0041-agent-facing-cli-affordances.md) 决策一。
+- **`select` 谓词（可选，[0041](./0041-agent-facing-cli-affordances.md) 决策一追加）**：scenario 筛选施加在**分组与 engine/target/timeout 解析之后、Job 组装之前**。不变量：**筛选只减少「跑哪几条」**——scope 的引擎、测试目标、墙钟预算、会话身份一律按**全量**成员解析，与不筛时逐字一致；整组被筛空的 scope 不进任何 job（且在解析 engine/target/timeout 之前跳过），`_scope_key` 仍对全量成员校验。`None` = 不筛，下文其余语义均按不筛描述；谓词由调用方组装，core 不认 flag 语义——`--scope/--tags/--scenario` 的语义、设计取舍与被拒方案见 [0041](./0041-agent-facing-cli-affordances.md) 决策一。
 - **删除测试**：删掉本模块，「按 tag 分组 + engine 校验 + Gherkin 展开」会在 CLI / 未来 WebUI 各写一遍 → 它在挣钱。
 
 ## 内部实现（深，但借力官方 Compiler）
@@ -130,7 +130,7 @@ Job = {
 - **`@scope` 的值撞未标 scope 的 scenario id → 报错**（同文件 / 跨文件、named 在前与在后共四种顺序都报，钉死判定与遍历顺序无关）；值等于某条**自身已标 `@scope`** 的 scenario 的 id → 不报错（钉死不误杀）；
 - 裸 `@scope:` / `@engine:` / `@timeout:`（空值）→ 报错，且消息带 `uri:line` 定位；
 - Rule 内嵌 scenario：行号经 `astNodeIds` 下钻 Rule 回查到真实行 → 多个 Rule 场景 id 互异、不塌成 `<uri>:None`；
-- `select` 谓词（[0041](./0041-agent-facing-cli-affordances.md) 决策一）：筛后 scope 的 engine/timeout 与全量解析逐字一致；整组被筛空的 scope 其 tag 冲突不拦本次迭代；
+- `select` 谓词（[0041](./0041-agent-facing-cli-affordances.md) 决策一）：筛后 scope 的 engine/target/timeout 与全量解析逐字一致；整组被筛空的 scope 其 tag 冲突不拦本次迭代；
 - id 派生稳定可追溯。
 
 ## 现在做 / 留口子
