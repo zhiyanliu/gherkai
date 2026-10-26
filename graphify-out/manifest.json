@@ -1910,13 +1910,13 @@
     "semantic_hash": ""
   },
   "docs/journey/0013-mobile-devices-implementation.md": {
-    "mtime": 1793009696.632597,
-    "ast_hash": "05f0f9a77b26b4b9171df93083985700",
+    "mtime": 1793010352.0129006,
+    "ast_hash": "ac54f46837b0047a9ae91f2a31c72ad6",
     "semantic_hash": ""
   },
   "docs/journey/0015-mobile-devices-implementation-batches.md": {
-    "mtime": 1793009696.6299608,
-    "ast_hash": "287d2709d5d4565895c0115e31fe2509",
+    "mtime": 1793010352.0126023,
+    "ast_hash": "3796506daf970605338b78b854d79b42",
     "semantic_hash": ""
   },
   "features/steps/url_matches.mts": {
