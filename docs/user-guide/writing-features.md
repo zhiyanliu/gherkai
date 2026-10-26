@@ -25,7 +25,7 @@ worker 拿到一个 step 后先查确定性 step 的注册表，命中就走代�
 
 | 执行路径 | 命中条件 | 怎么执行 |
 |---|---|---|
-| ① 导航（内建的确定性 step） | `Given` / `When` 之后**整句只是一个地址**：`Given "https://example.com/"` 与 `Given https://example.com/` 都算，加不加双引号一样；地址前后再有别的字就不算，多一个句号也不算；地址本身以括号或句号结尾时加双引号写，引号内一律原样当地址 | 直接打开这个地址，不问 AI。网页上只接受 `http://` / `https://` 地址，写别的协议这一步记 `error`。它与其它确定性 step 一样出现在 `gherkai list-deterministic` 的清单与 `gherkai plan` 的标注里 |
+| ① 导航（内建的确定性 step） | `Given` / `When` 之后**整句只是一个地址**：`Given "https://example.com/"` 与 `Given https://example.com/` 都算，加不加双引号一样；地址前后再有别的字就不算；不带引号的地址末尾若是句号、逗号、分号、冒号、叹号、问号或右括号、右引号这类标点（ASCII 与全角都算），整句也不算地址、交给 AI；地址本身以这些字符结尾时加双引号写，引号内一律原样当地址 | 直接打开这个地址，不问 AI。网页上只接受 `http://` / `https://` 地址，写别的协议这一步记 `error`。它与其它确定性 step 一样出现在 `gherkai list-deterministic` 的清单与 `gherkai plan` 的标注里 |
 | ② 项目注册的确定性 step | step 文本命中项目 `steps/` 目录里注册的正则 | 调用注册的函数，用 Playwright 直接查页面。不问 AI、不投票、逐次可复现 |
 | ③ AI（默认） | 以上都不命中 | `Then` 的文本当布尔断言交给模型判真假（可投票）；`Given` / `When` 的文本当动作交给模型执行 |
 
