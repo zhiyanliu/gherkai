@@ -183,20 +183,26 @@ def test_fail_fast_stops_multiple_deaf_victims_in_parallel(tmp_path):
                     if ready == {"v1", "v2", "c"}:
                         gate.write_text("go")  # 两个 victim 与 crash job 都已就绪：放 crash job 崩（它在 scenario_started 之后等这个文件）
 
-    # 宽限取 3 秒：上界 2*grace 之内还要容下 crash job 退出时日志线程最多 2 秒的收尾等待（SubprocessEngine 的 _join_pumps），
-    # 并行停约 grace 加这段等待、串行停至少 2*grace 加这段等待，两者仍分得开
     grace = 3.0
     jobs = [_mode_job("c", "crash"), _mode_job("v1", "deaf"), _mode_job("v2", "deaf")]
     sink = _Sink()
-    result = schedule(_rm(jobs), lambda name: engine, sink,
+    stop_phase_start: list[float] = []
+
+    def on_job_complete(jr):
+        # crash job 的判定回调紧接着就是主线程的 _stop_all：从这里起算，crash job 退出时两条日志线程各至多 2 秒的收尾等待
+        # （SubprocessEngine 的 _join_pumps）发生在它之前、不混进上界
+        if jr.scope_id == "c":
+            stop_phase_start.append(time.monotonic())
+
+    result = schedule(_rm(jobs), lambda name: engine, sink, on_job_complete=on_job_complete,
                       opts=ScheduleOpts(max_concurrency=3, fail_fast=True, grace_period_s=grace, heartbeat_interval_s=0))
+    end = time.monotonic()
     by = {jr.scope_id: jr for jr in result.jobs}
     assert (by["c"].status, by["c"].error_type) == (Status.ERROR, "engine_error")
     assert (by["v1"].status, by["v1"].error_type) == (Status.ABORTED, None) and (by["v2"].status, by["v2"].error_type) == (Status.ABORTED, None)
-    # crash job 的退出时刻（触发 _stop_all 的那一刻）不可直接得，改从「放行」时刻起算：放行后 crash job 在几十毫秒内退出，
-    # 放行到 run 结束的时间约等于一份宽限（三个进程都已就绪，启动耗时不计入）
-    elapsed = time.time() - gate.stat().st_mtime  # 文件 mtime 是墙钟，不能与 monotonic 相减
-    assert grace <= elapsed < 2 * grace - 0.2, elapsed  # 并行停：一份宽限加日志收尾等待；串行逐个等宽限至少两份
+    assert len(stop_phase_start) == 1
+    elapsed = end - stop_phase_start[0]
+    assert grace <= elapsed < 2 * grace - 0.2, elapsed  # 并行停：约一份宽限（两个 victim 同时等满宽限被强杀）；串行逐个等宽限至少两份
 
 
 def _assert_process_gone(pid: int, within_s: float = 5.0) -> None:
