@@ -146,7 +146,7 @@ def _join_pumps(pumps, timeout_s: float) -> None:
 def _read_events(
     proc: subprocess.Popen, events_r: int, raw_sink: "Callable[[str], None] | None" = None, pumps: tuple = ()
 ) -> Iterator[Event]:
-    """逐行读 fd3（纯 ADR 0024 事件）→ Event。worker 异常退出且 returncode>0 时抛错（schedule 记 error）。
+    """逐行读 fd3（纯 ADR 0024 事件）→ Event。worker 以非零退出码（含被信号强杀的负码）结束时抛错（终结函数按退出码判）。
 
     纯阻塞行读、纯 `Iterator[Event]`——**不掺心跳**。worker 静默卡死时本迭代器会阻塞在读上，由
     schedule 层的 `_heartbeat_wrap`（后台线程 + queue 超时）兜底唤醒并查超时（ADR 0026/0028）。

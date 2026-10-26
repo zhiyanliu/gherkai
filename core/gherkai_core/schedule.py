@@ -264,9 +264,12 @@ class _Worker:
         scope_done: ScopeDone | None = None
         # 时长追踪（core 用事件到达时间戳算墙钟，ADR 0024；clock 与超时复用同一注入时钟）：
         timing = _Timing()
-        # 本次 attempt 的 stop_reason 从 none 起（上一 attempt 若被停就不会重试，故这里恒为 none）
+        # 本次 attempt 的 stop_reason 从 none 起（上一 attempt 若被停就不会重试，故这里恒为 none）；上一 attempt 的 handle 也清掉——
+        # 否则 _stop_all 会对着已退出的旧 handle 落定、而新 handle 起来后无人停它
         with self._stop_lock:
             self._stop_reason = "none"
+            self._stop_requested_at = None
+            self.handle = None
 
         # 起 worker 前先看是否已被 fail-fast 中止（排队中的 job 不该再起、不产生费用）。
         # worker 从未 spawn → SKIPPED（没执行/没花钱/可无脑重新运行，ADR 0031），非 error。
@@ -294,10 +297,12 @@ class _Worker:
             )
             result.status, result.error_type, result.message = term.status, term.error_type, term.message
             return result, False, saw_step
-        # 起 worker 前的检查到 spawn 之间有一段无法原子化的窗口：fail-fast 恰在其中置位时 worker 已起——立即落定 abort 并发停止请求
-        # （在起 reader 线程之前，它最多白起一次、不执行任何 step），判定由终结函数按停止原因给出，不记 SKIPPED、也不保留上次的判定。
-        if self.abort_flag.is_set():
-            self.decide_stop()
+        # 起 worker 前的检查到 spawn 之间有一段无法原子化的窗口：fail-fast 恰在其中置位（或 _stop_all 已对本 job 落定）时 worker 已起——
+        # 立即落定并向新 handle 发停止请求，让它尽早停（worker 收到信号前已执行的部分照常归约）。停止请求另起线程发：它会阻塞到
+        # worker 退出或宽限到点，若在这里同步等、下面的 reader 线程还没起，worker 收尾时写事件管道无人读、管道写满即被卡死到强杀。
+        if self.abort_flag.is_set() or self._stop_reason != "none":
+            self.decide_stop(stop=False)
+            threading.Thread(target=self._stop, name=f"gherkai-stop-{job.scope_id}", daemon=True).start()
 
         clock = self.opts.clock
         # 包心跳（ADR 0028）：worker 静默卡死时让下面的事件循环能周期性醒来查 deadline / abort / 排空上界，

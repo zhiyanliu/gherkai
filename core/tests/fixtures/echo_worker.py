@@ -21,6 +21,7 @@
   WORKER_MODE=bad_line → 吐 scope_started 后写一行不是 JSON 的东西，然后等 SIGTERM——测 core 解析失败后仍停掉活着的 worker
   mode 也可以由 job 的 scope.name 以 "mode:<名>" 指定：同一个 engine 实例下的各个 job 由此使用不同的行为（需要多个 job 同时运行的 fail-fast 测试会用到）。
   WORKER_PID_FILE=<路径> → 启动时把自己的 pid 写进去（测试据此确认进程确已被回收）。
+  WORKER_CRASH_AFTER_FILE=<路径> → crash 形态先等这个文件出现（至多 10 秒）再崩：让测试控制「其它 job 都就绪之后再触发 fail-fast」。
 
 EVENTS: 真 worker 的 scope_started 带 sessionId（ADR 0028 血缘随首事件回传），echo 也带，保协议一致。
 """
@@ -115,6 +116,11 @@ def main():
                 time.sleep(0.05)
             return
         if mode == "crash":
+            gate = os.environ.get("WORKER_CRASH_AFTER_FILE")
+            if gate:
+                deadline = time.monotonic() + 10.0
+                while not os.path.exists(gate) and time.monotonic() < deadline:
+                    time.sleep(0.02)
             sys.stderr.write("echo_worker: simulated crash\n")
             sys.exit(3)
         for step in sc["steps"]:
@@ -127,6 +133,8 @@ def main():
     emit({"type": "scope_done", "scopeId": scope["id"], "sessionId": "echo-sess"})
 
     if mode in ("done_then_deaf", "done_then_deaf_fdholder"):
+        # 先无视 SIGTERM 再起孙进程：否则孙进程已起、pid 还没写进文件时一个 SIGTERM 就让本进程退出，孙进程成了无人回收的孤儿
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
         if mode == "done_then_deaf_fdholder" and _events_fd:
             # 一个只会睡觉的子进程继承事件管道的写端：本进程被强杀后它仍持有写端、管道不 EOF；pid 追加进 pid 文件供测试回收
             import subprocess
@@ -135,7 +143,6 @@ def main():
                 with open(pid_file, "a", encoding="utf-8") as fh:
                     fh.write(f"{child.pid}\n")
         # 内容已完整，收尾却挂死且无视 SIGTERM：只有 SIGKILL 能结束本进程（无孙进程持写端时管道随之 EOF、退出码为负）
-        signal.signal(signal.SIGTERM, signal.SIG_IGN)
         while True:
             time.sleep(0.05)
     if mode == "done_then_slow":

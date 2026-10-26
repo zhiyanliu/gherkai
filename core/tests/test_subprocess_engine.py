@@ -162,20 +162,38 @@ def _mode_job(scope_id: str, mode: str, timeout_s: float | None = None) -> Job:
     return Job(scope_id=j.scope_id, scope_name=f"mode:{mode}", engine=j.engine, scenarios=j.scenarios, timeout_s=timeout_s)
 
 
-def test_fail_fast_stops_multiple_deaf_victims_in_parallel():
-    """fail-fast 对多个仍在运行的真子进程：先全部落定再并行发停止请求。victim 无视 SIGTERM（各自要等满宽限才被 SIGKILL），
-    并行停的总耗时约等于一份宽限、串行停至少两份——耗时上界把并行钉死；两个 victim 都判 ABORTED（停止原因在 SIGKILL 之前已落定）。"""
-    engine = _engine("pass")  # mode 由各 job 的 scope.name 给
+def test_fail_fast_stops_multiple_deaf_victims_in_parallel(tmp_path):
+    """fail-fast 对多个仍在运行的真子进程：先全部落定再并行发停止请求。关掉心跳，victim 的线程阻塞在管道读上、看不到 abort_flag，
+    只有主线程的 _stop_all 能停它们；victim 无视 SIGTERM（各自要等满宽限才被 SIGKILL），并行停的总耗时约等于一份宽限、串行停至少两份
+    ——耗时上界把并行钉死；crash job 等两个 victim 都已装好 SIG_IGN 并发出 scope_started 才崩。两个 victim 都判 ABORTED。"""
+    import os
+    import threading
+
+    gate = tmp_path / "crash-now"
+    engine = SubprocessEngine(cmd=[sys.executable, _WORKER], env={**os.environ, "WORKER_MODE": "pass", "WORKER_CRASH_AFTER_FILE": str(gate)})
+    ready: set[str] = set()
+    lock = threading.Lock()
+
+    class _Sink(CollectSink):
+        def __call__(self, ev):
+            super().__call__(ev)
+            if isinstance(ev, ScopeStarted) and ev.scope_id in ("v1", "v2"):
+                with lock:
+                    ready.add(ev.scope_id)
+                    if ready == {"v1", "v2"}:
+                        gate.write_text("go")  # 两个 victim 都就绪：放 crash job 崩
+
     grace = 2.0
     jobs = [_mode_job("c", "crash"), _mode_job("v1", "deaf"), _mode_job("v2", "deaf")]
-    t0 = time.monotonic()
-    result = schedule(_rm(jobs), lambda name: engine, CollectSink(),
-                      opts=ScheduleOpts(max_concurrency=3, fail_fast=True, grace_period_s=grace, heartbeat_interval_s=0.2))
-    elapsed = time.monotonic() - t0
+    sink = _Sink()
+    result = schedule(_rm(jobs), lambda name: engine, sink,
+                      opts=ScheduleOpts(max_concurrency=3, fail_fast=True, grace_period_s=grace, heartbeat_interval_s=0))
     by = {jr.scope_id: jr for jr in result.jobs}
     assert (by["c"].status, by["c"].error_type) == (Status.ERROR, "engine_error")
     assert (by["v1"].status, by["v1"].error_type) == (Status.ABORTED, None) and (by["v2"].status, by["v2"].error_type) == (Status.ABORTED, None)
-    assert grace <= elapsed < 2 * grace - 0.2, elapsed  # 一份宽限内两个都停完：串行逐个等宽限至少要两份
+    # 耗时从 crash job 的 ScopeDone 之后、即它退出触发 _stop_all 起算不可得，改从「放行」时刻起算：放行到 run 结束的时间约等于一份宽限
+    elapsed = time.time() - gate.stat().st_mtime  # 文件 mtime 是墙钟，不能与 monotonic 相减
+    assert grace <= elapsed < 2 * grace - 0.2, elapsed  # 串行逐个等宽限至少要两份
 
 
 def _assert_process_gone(pid: int, within_s: float = 5.0) -> None:
@@ -216,14 +234,23 @@ def test_concurrent_stop_calls_on_same_handle_are_safe():
         except BaseException as e:  # noqa: BLE001
             errors.append(e)
 
-    threads = [threading.Thread(target=stop) for _ in range(2)]
-    t0 = time.monotonic()
+    barrier = threading.Barrier(2)
+    spans: dict[int, tuple[float, float]] = {}
+
+    def stop_at_barrier(i: int):
+        barrier.wait(timeout=5.0)  # 两个线程同一刻发起
+        t0 = time.monotonic()
+        stop()
+        spans[i] = (t0, time.monotonic())
+
+    threads = [threading.Thread(target=stop_at_barrier, args=(i,)) for i in range(2)]
     for t in threads:
         t.start()
     for t in threads:
         t.join(timeout=5.0)
     assert not any(t.is_alive() for t in threads) and not errors, errors
-    assert time.monotonic() - t0 < 3.0
+    # 两次调用确实重叠：后开始的在先结束的之前开始（deaf worker 让每次 stop 至少阻塞满宽限）
+    assert max(s[0] for s in spans.values()) < min(s[1] for s in spans.values()), spans
     proc = handle._proc  # type: ignore[attr-defined]
     assert proc.wait(timeout=3.0) is not None and proc.returncode != 0
 
