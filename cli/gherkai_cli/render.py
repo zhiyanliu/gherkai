@@ -215,12 +215,15 @@ def render_plan_text(jobs: list[Job], default_engine: str, dispatch: dict | None
 def plan_tree(jobs: list[Job], default_engine: str, dispatch: dict | None = None) -> TreeNode:
     """plan 视图的树（`render_plan_text` 的结构）。"""
     n_scenarios = sum(len(j.scenarios) for j in jobs)
-    root = TreeNode(f"plan（用例预检，未执行）  {len(jobs)} job(scope)  ·  {n_scenarios} scenario  ·  default_engine={default_engine}")
+    # 设备会话数（ADR 0048 决策 5）：一个设备 scope 一个会话；plan 不写金额（单价随计费方式与区域变化），会话数是作者能直接控制的量
+    root = TreeNode(f"plan（用例预检，未执行）  {len(jobs)} job(scope)  ·  {n_scenarios} scenario  ·  设备会话 {device_session_count(jobs)}"
+                    f"  ·  default_engine={default_engine}")
     for j in jobs:
         votes = f"  votes={j.assertion_votes}" if j.assertion_votes != 1 else ""
         # name 只在与 scope_id 不同时显示：named scope 二者同为 @scope 值（重复无信息）；未标 scope 时 id 是 uri:line、name 是标题
         name = f" (name={j.scope_name!r})" if j.scope_name != j.scope_id else ""
-        jn = root.add(f"job scope={j.scope_id!r}{name} engine={j.engine}{votes}")
+        # 每个 job 行显示测试目标（ADR 0048 决策 5），紧凑写法 desktop/web、android/app:shop
+        jn = root.add(f"job scope={j.scope_id!r}{name} engine={j.engine} target={j.target.as_text()}{votes}")
         for sc in j.scenarios:
             sn = jn.add(f"scenario {sc.id!r}  ({len(sc.steps)} step)")
             for st in sc.steps:
@@ -295,6 +298,11 @@ def _arg_hint(arg) -> str:
     return f"  +{arg.kind}"
 
 
+def device_session_count(jobs: list[Job]) -> int:
+    """这次 run 将建立的设备会话数（ADR 0048 决策 5 / 0051）：一个设备 scope 一个会话。"""
+    return sum(1 for j in jobs if not j.target.is_desktop)
+
+
 def plan_to_dict(jobs: list[Job], default_engine: str, dispatch: dict | None = None) -> dict:
     """plan 产出 → 机器可读 dict（--json）。复用 gherkai_core.serialize 的 job 序列化保单一真理源。
 
@@ -314,6 +322,7 @@ def plan_to_dict(jobs: list[Job], default_engine: str, dispatch: dict | None = N
         "default_engine": default_engine,
         "job_count": len(jobs),
         "scenario_count": sum(len(j.scenarios) for j in jobs),
+        "device_session_count": device_session_count(jobs),  # ADR 0048 决策 5
         "jobs": job_dicts,
     }
 

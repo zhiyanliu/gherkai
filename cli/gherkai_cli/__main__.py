@@ -17,7 +17,7 @@ from pathlib import Path
 
 from gherkai_core.redact import redact_deep
 from gherkai_runtime.textui import render_table, styled
-from gherkai_core.model import TERMINAL_STATUSES, Event, RunMeta, Status
+from gherkai_core.model import DEFAULT_ACQUIRE_TIMEOUT_S, TERMINAL_STATUSES, Event, RunMeta, Status
 from gherkai_core.parse import FeatureParseError
 from gherkai_core.persist import RunPersistence
 from gherkai_core.scope import PlanConfig, FeatureContractError, plan
@@ -205,9 +205,9 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
              "配额紧可调低）",
     )
     run.add_argument(
-        "--default-job-timeout", type=float, default=300.0, metavar="S",
-        help="未标 @timeout 的 scope 用的 job 墙钟预算秒（默认 300；<=0 表示不超时）；"
-             "标了 @timeout:N tag 的按 tag 走（同 @engine/--default-engine 模式）",
+        "--default-job-timeout", type=_finite_float, default=None, metavar="S",
+        help="未标 @timeout 的 scope 用的 job 墙钟预算秒（不给时按测试目标取缺省：桌面 300，设备按取设备预算另算；"
+             "<=0 表示非设备 scope 不超时，设备 scope 仍取缺省）；标了 @timeout:N tag 的按 tag 走（同 @engine/--default-engine 模式）",
     )
     # 下限判据（为何必须 ≥ 单个 act 时长 + 收尾预算、以及为何改由 worker 自报）见 ADR 0024；help 只讲怎么用。
     run.add_argument(
@@ -303,9 +303,9 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     pl = sub.add_parser("plan", help="对 .feature 做用例预检：看 scope/job 分组 + 校验配置，不实际运行（零费用）")
     pl.add_argument("features", nargs="+", type=Path, help="一个或多个 .feature 路径")
     pl.add_argument(
-        "--default-job-timeout", type=float, default=300.0, metavar="S",
-        help="未标 @timeout 的 scope 用的 job 墙钟预算秒（默认 300；<=0 表示不超时）——与 run/submit 同源，"
-             "让 plan 算出的 Job 与实际运行一致",
+        "--default-job-timeout", type=_finite_float, default=None, metavar="S",
+        help="未标 @timeout 的 scope 用的 job 墙钟预算秒（不给时按测试目标取缺省：桌面 300，设备按取设备预算另算；"
+             "<=0 表示非设备 scope 不超时）——与 run/submit 同源，让 plan 算出的 Job 与实际运行一致",
     )
     pl.add_argument(
         "--default-engine", choices=sorted(_names.ENGINES), default="novaact",
@@ -338,8 +338,9 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
                     help=f"同时运行的 worker 上限（默认 {DEFAULT_MAX_CONCURRENCY}）；随提交记录生效，云端后端受部署侧上限"
                          "（后端 stack 的 MAX_CONCURRENCY）钳制")
     sm.add_argument(
-        "--default-job-timeout", type=float, default=300.0, metavar="S",
-        help="未标 @timeout 的 scope 用的 job 墙钟预算秒（默认 300；<=0 表示不超时）；标了 @timeout:N 的按 tag 走",
+        "--default-job-timeout", type=_finite_float, default=None, metavar="S",
+        help="未标 @timeout 的 scope 用的 job 墙钟预算秒（不给时按测试目标取缺省：桌面 300，设备按取设备预算另算；"
+             "<=0 表示非设备 scope 不超时）；标了 @timeout:N 的按 tag 走",
     )
     sm.add_argument(
         "--expose-local", default=None, metavar="ORIGIN",
@@ -584,11 +585,18 @@ def _preflight_worker_runtimes(jobs, steps_dir: str | None) -> int | None:
             _progress(f"引擎运行时缺失，拒绝运行：{e}")
             return 2
         try:
-            compose.query_capabilities(engine, steps_dir=steps_dir)
+            caps = compose.query_capabilities(engine, steps_dir=steps_dir)
         except (ValueError, RuntimeError) as e:
             # 含 WorkerSelfDescribeError（worker 起来了但非零退出）与超时 / 输出非 JSON / 自述不合契约；
             # 文案中性、点到两种成因（见 _SELF_DESCRIBE_CAUSES）。
             _progress(f"引擎 {engine} 的 worker 自述失败，拒绝运行：{e}\n{_SELF_DESCRIBE_CAUSES}")
+            return 2
+        # 执行前预检的两项目标检查（ADR 0048 决策 3、4）：目标不在该引擎声明的 targets 里、墙钟预算超过会话上限——都在建立任何会话之前拒绝，
+        # 不产生费用；归类为用例契约违约（改法在用例或命令行上），以退出码 2 结束。
+        rejections = _target_rejections([j for j in jobs if j.engine == engine], caps)
+        if rejections:
+            for msg in rejections:
+                _progress(msg)
             return 2
     return None
 
@@ -920,6 +928,45 @@ def _doctor_provider(args, add) -> None:
         add("provider", getattr(provider, "name", "provider"), False, f"provider 自检出错：{e}", required=False)
 
 
+def _finite_float(raw: str) -> float:
+    """`--default-job-timeout` 的类型转换（ADR 0034「job timeout」节②）：只收有限数。`float()` 会收下 nan / inf / 1e400，而三路推进器一律用
+    `>` 比较 deadline，它们会把预算静默变成「永不超时」；报错形态与 argparse 其它类型错一致（退出码 2）。"""
+    import math
+
+    try:
+        v = float(raw)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"须为数字（收到 {raw!r}）") from None
+    if not math.isfinite(v):
+        raise argparse.ArgumentTypeError(f"须为有限数（收到 {raw!r}）")
+    return v
+
+
+def _target_rejections(jobs, caps: dict) -> list[str]:
+    """按引擎能力自述核对各 job 的测试目标（ADR 0048 决策 4；0049 决策 4）：目标不在该引擎 worker 声明的 targets 里、或 job 墙钟预算超过
+    该目标的会话上限，各给一条产品语言消息并指出改法。core 不内置引擎名到目标的对照，只看自述。"""
+    supported = compose.worker_targets(caps)
+    out: list[str] = []
+    for j in jobs:
+        t = j.target
+        label = render.target_label(t.device, t.ui_kind)
+        if not compose.target_supported(supported, t.device, t.ui_kind):
+            first = j.scenarios[0].id if j.scenarios else j.scope_id
+            out.append(
+                f"场景 {first} 所在的 scope 要求在{label}上执行，但它使用的引擎 {j.engine} 不支持这个目标"
+                f"（它支持：{render.targets_label(supported, with_requires=False)}）。请在这个 scope 的任一场景上加 @engine:<支持该目标的引擎>，"
+                f"或用 --default-engine 更改默认引擎；各引擎支持的目标见 gherkai doctor。"
+            )
+            continue
+        limit = compose.target_session_limit(supported, t.device)
+        if limit is not None and j.timeout_s is not None and j.timeout_s > limit:
+            out.append(
+                f"scope {j.scope_id!r} 的 job 墙钟预算 {j.timeout_s:g} 秒超过了引擎 {j.engine} 在{label}上的会话上限 {limit:g} 秒："
+                f"请调低这个 scope 的 @timeout 或 --default-job-timeout。"
+            )
+    return out
+
+
 def _load_and_plan(args) -> "list | int":
     """plan 与 run 的共享前置装配：votes 校验 → 读 feature → plan。
 
@@ -974,13 +1021,19 @@ def _load_and_plan(args) -> "list | int":
         )
     # 2) plan：.feature → Job[]（uri 互异/engine 冲突等违约 → FeatureContractError；gherkin 语法错 → FeatureParseError）
     try:
+        # 取设备预算（ADR 0051 决策 2）：内建 600 秒；项目配置覆盖接上后改由配置给出。设备 scope 的缺省墙钟与下限由它推出。
+        acquire_s = DEFAULT_ACQUIRE_TIMEOUT_S
         cfg = PlanConfig(
             default_engine=args.default_engine,
             default_assertion_votes=args.assertion_votes,
-            # 两层设定的缺省层（ADR 0019 @timeout / ADR 0034「job timeout」节）：标了 @timeout: 的 scope
-            # 按 tag 走，未标的用本缺省；<=0 归一成 None（不超时）。载体在 definition（Job.timeout_s），
-            # 三路推进器（同步 schedule / local per-run / cloud）各自 enforce。
-            default_job_timeout_s=(args.default_job_timeout if args.default_job_timeout > 0 else None),
+            # 两层设定的缺省层（ADR 0019 @timeout / ADR 0034「job timeout」节）：标了 @timeout: 的 scope 按 tag 走；未标的用显式给出的
+            # --default-job-timeout（None 即「未指定」，plan 层按目标补缺省；<=0 只让非设备 scope 不超时，三态原样传入、不在这里归一）。
+            # 载体在 definition（Job.timeout_s），三路推进器（同步 schedule / local per-run / cloud）各自 enforce。
+            default_job_timeout_s=args.default_job_timeout,
+            default_desktop_job_timeout_s=300.0,
+            default_device_job_timeout_s=acquire_s + 900.0,
+            min_device_job_timeout_s=acquire_s + 180.0,
+            apps={},  # 应用别名表由项目配置给出（ADR 0053 [apps]），配置文件接上前为空：@app 一律报「查不到」
         )
         select = _build_selector(args)
         jobs = plan(features, cfg, select=select)
@@ -1132,7 +1185,7 @@ def _plan_and_preflight(args, *, list_jobs: bool) -> "tuple[list, str | None] | 
     _progress(f"plan: {len(jobs)} job(s)  (default_engine={args.default_engine})")
     if list_jobs:
         for j in jobs:
-            _progress(f"  - scope={j.scope_id!r} engine={j.engine} scenarios={len(j.scenarios)}")
+            _progress(f"  - scope={j.scope_id!r} engine={j.engine} target={j.target.as_text()} scenarios={len(j.scenarios)}")
 
     # 使用方确定性 step 目录（ADR 0037 决策 4）：解析一次 → 写进 definition + 注给本进程/宿主起的 worker。
     steps_dir = _resolve_steps_dir_for_backend(args)
@@ -1176,6 +1229,24 @@ def _cmd_plan(args) -> int:
     steps_dir = _resolve_steps_dir(args)
     if isinstance(steps_dir, int):
         return steps_dir
+
+    # 目标拒绝（ADR 0048 决策 4）：按引擎能力自述核对各 job 的测试目标，不受支持即与其它用例契约违约同样以退出码 2 结束、消息给出改法；
+    # 自述取不到（引擎没装、查询失败）只警告、不判定，最终由执行前预检拒绝。使用方 steps 加载失败那种自述失败由下面的派发标注查询
+    # 原样抛出、以退出码 2 结束，这里不重复判。
+    rejections: list[str] = []
+    for engine in sorted({j.engine for j in jobs}):
+        try:
+            caps = compose.query_capabilities(engine, steps_dir=steps_dir)
+        except compose.WorkerSelfDescribeError:
+            continue  # 交给下面的派发标注查询报（同一成因、同一句提示）
+        except (compose.WorkerNotFoundError, ValueError, RuntimeError) as e:
+            _progress(f"（目标核对降级）引擎 {engine} 的能力自述取不到，该引擎 job 的测试目标未核对、将由执行前检查拒绝：{e}")
+            continue
+        rejections.extend(_target_rejections([j for j in jobs if j.engine == engine], caps))
+    if rejections:
+        for msg in rejections:
+            _progress(msg)
+        return 2
 
     # 派发预期标注（ADR 0036 决策 4）：按引擎批量问 worker「哪些 step 命中确定性」。best-effort——
     # 引擎环境未装/查询失败只降级为无标注+stderr 警告，plan 核心功能保持零依赖（不因标注挂掉）。
@@ -2195,7 +2266,8 @@ def _cmd_run(args) -> int:
     # 这里起的是 schedule 的进程内驱动，非 reconcile.tick 那条推进路径（ADR 0034）。
     _progress(
         f"run_id={run_id}  开始运行：启动 worker 建立 AgentCore 云端浏览器会话（将产生 AWS 费用）  "
-        f"max_concurrency={args.max_concurrency} default_job_timeout={args.default_job_timeout}s ..."
+        f"max_concurrency={args.max_concurrency} "
+        f"default_job_timeout={'按目标缺省' if args.default_job_timeout is None else f'{args.default_job_timeout:g}s'} ..."
     )
 
     # 5) schedule：执行 RunMeta（definition）→ RunResult（timeout<=0 → 不超时）。

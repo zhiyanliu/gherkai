@@ -30,6 +30,11 @@ class WorkerNetworkError(WorkerExitError):
         super().__init__(exit_code, message)
 
 
+class DefinitionContractError(ValueError):
+    """definition 的结构违约（ADR 0048 决策 3）：非桌面目标没有设备请求、应用条目不完整、设备请求字段不成对等。
+    写 definition 之前（组合根）与推进器读 definition 时各核一次；plan 形态的 Job 不走它（那一形态本来就没有设备请求）。"""
+
+
 class FeatureContractError(ValueError):
     """用例契约违约（feature 写法或配置违约），拒绝运行（ADR 0019/0025）：engine 冲突、多 @scope 值、步骤关键字判不出等。
     按「是什么」命名而不按「在哪一步被发现」命名：parse 与 scope 两层都会抛，run 与 plan 都会遇到，不专属 plan 阶段。

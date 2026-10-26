@@ -1,0 +1,114 @@
+{
+  "_comment": "core 发给 worker 的 job 行三种形态的 golden（ADR 0048 决策 3 的 Python 到 TS 往返测试）：core/tests/test_wire.py 核 job_to_json 的产出与此逐字相等，engines/midscene/src/worker/job-source.test.mts 核 TS 的 Job 字段清单与此的键集合一致。改协议形状时同步改这里并让两侧测试跟上。",
+  "jobs": {
+    "desktop": {
+      "scope": {
+        "id": "web",
+        "name": "web"
+      },
+      "engine": "novaact",
+      "scenarios": [
+        {
+          "id": "f.feature:3",
+          "name": "s",
+          "steps": [
+            {
+              "index": 0,
+              "keyword": "Given",
+              "text": "https://x/"
+            },
+            {
+              "index": 1,
+              "keyword": "Then",
+              "text": "看到标题"
+            }
+          ]
+        }
+      ],
+      "assertionVotes": 1
+    },
+    "android_web": {
+      "scope": {
+        "id": "aw",
+        "name": "aw"
+      },
+      "engine": "midscene",
+      "scenarios": [
+        {
+          "id": "f.feature:3",
+          "name": "s",
+          "steps": [
+            {
+              "index": 0,
+              "keyword": "Given",
+              "text": "https://x/"
+            },
+            {
+              "index": 1,
+              "keyword": "Then",
+              "text": "看到标题"
+            }
+          ]
+        }
+      ],
+      "assertionVotes": 3,
+      "timeoutS": 1500.0,
+      "target": {
+        "device": "android",
+        "uiKind": "web"
+      },
+      "deviceRequest": {
+        "provider": "aws-device-farm",
+        "billingMethod": "METERED",
+        "projectArn": "arn:aws:devicefarm:us-west-2:123456789012:project:p",
+        "acquireTimeoutS": 600.0,
+        "osVersion": "15"
+      }
+    },
+    "ios_app": {
+      "scope": {
+        "id": "ia",
+        "name": "ia"
+      },
+      "engine": "midscene",
+      "scenarios": [
+        {
+          "id": "f.feature:3",
+          "name": "s",
+          "steps": [
+            {
+              "index": 0,
+              "keyword": "Given",
+              "text": "https://x/"
+            },
+            {
+              "index": 1,
+              "keyword": "Then",
+              "text": "看到标题"
+            }
+          ]
+        }
+      ],
+      "assertionVotes": 1,
+      "timeoutS": 900.0,
+      "target": {
+        "device": "ios",
+        "uiKind": "app",
+        "app": {
+          "alias": "shop",
+          "bucket": "b",
+          "key": "apps/sha/shop.ipa",
+          "sha256": "abababababababababababababababababababababababababababababababab",
+          "appId": "com.example.Shop"
+        }
+      },
+      "deviceRequest": {
+        "provider": "aws-device-farm",
+        "billingMethod": "UNMETERED",
+        "projectArn": "arn:aws:devicefarm:us-west-2:123456789012:project:p",
+        "acquireTimeoutS": 900.0,
+        "deviceArn": "arn:aws:devicefarm:us-west-2::device:D1"
+      }
+    }
+  }
+}

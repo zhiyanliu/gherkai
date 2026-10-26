@@ -17,6 +17,9 @@ cost 只含 engine 报的原生量、不折美元（ADR 0024）；report_refs �
 from __future__ import annotations
 
 from gherkai_core.model import (
+    DEFAULT_ACQUIRE_TIMEOUT_S,
+    AppRef,
+    DeviceFarmRequest,
     Job,
     JobResult,
     JobState,
@@ -31,6 +34,7 @@ from gherkai_core.model import (
     Step,
     StepArgument,
     StepResult,
+    Target,
     Votes,
 )
 
@@ -87,18 +91,70 @@ def job_to_dict(job: Job) -> dict:
         "assertion_votes": job.assertion_votes,
         # timeout_s：omit-when-None（无预算就不写这个键，旧落盘兼容；ADR 0034「job timeout」节）
         **({"timeout_s": job.timeout_s} if job.timeout_s is not None else {}),
+        # target / device_request（ADR 0048 决策 3）：桌面网页且无设备请求时省键（旧落盘缺键读回 desktop/web 与 None，往返恒等）
+        **({"target": _target_to_dict(job.target)} if not job.target.is_desktop else {}),
+        **({"device_request": _device_request_to_dict(job.device_request)} if job.device_request is not None else {}),
     }
 
 
-def job_from_dict(d: dict) -> Job:
-    return Job(
+def job_from_dict(d: dict, *, validate: bool = True) -> Job:
+    """dict → Job。validate=True 时按 ADR 0048 决策 3 做推进器读 definition 时的那次结构校验（违约抛 DefinitionContractError）；
+    plan 形态或测试夹具可传 False。"""
+    job = Job(
         scope_id=d["scope_id"],
         scope_name=d["scope_name"],
         engine=d["engine"],
         scenarios=tuple(_scenario_def_from_dict(sc) for sc in d.get("scenarios", [])),
         assertion_votes=d.get("assertion_votes", 1),  # 向后兼容旧落盘（无此键 → 默认 1）
         timeout_s=d.get("timeout_s"),  # 向后兼容：旧落盘无此键 → None，表示不超时（ADR 0034）
+        target=_target_from_dict(d.get("target")),
+        device_request=_device_request_from_dict(d.get("device_request")),
     )
+    if validate:
+        from gherkai_core.target import validate_job_definition  # 读时校验（ADR 0048 决策 3）；延迟导入避免 model/serialize 环
+        validate_job_definition(job)
+    return job
+
+
+def _target_to_dict(t: Target) -> dict:
+    out: dict = {"device": t.device, "ui_kind": t.ui_kind}
+    if t.app is not None:
+        # plan 形态只有 alias 与 app_id、位置三项省略；definition 形态五项齐全（ADR 0048 决策 3）
+        app = {"alias": t.app.alias, "app_id": t.app.app_id}
+        for k in ("bucket", "key", "sha256"):
+            v = getattr(t.app, k)
+            if v is not None:
+                app[k] = v
+        out["app"] = app
+    return out
+
+
+def _target_from_dict(d: dict | None) -> Target:
+    if d is None:
+        return Target()
+    app = d.get("app")
+    return Target(device=d["device"], ui_kind=d["ui_kind"],
+                  app=AppRef(alias=app["alias"], app_id=app["app_id"], bucket=app.get("bucket"), key=app.get("key"),
+                             sha256=app.get("sha256")) if app is not None else None)
+
+
+def _device_request_to_dict(r: DeviceFarmRequest) -> dict:
+    out: dict = {"provider": r.provider, "billing_method": r.billing_method, "project_arn": r.project_arn,
+                 "acquire_timeout_s": r.acquire_timeout_s}
+    if r.device_arn is not None:
+        out["device_arn"] = r.device_arn
+    if r.os_version is not None:
+        out["os_version"] = r.os_version
+    return out
+
+
+def _device_request_from_dict(d: dict | None) -> DeviceFarmRequest | None:
+    if d is None:
+        return None
+    return DeviceFarmRequest(project_arn=d["project_arn"], device_arn=d.get("device_arn"), os_version=d.get("os_version"),
+                             billing_method=d.get("billing_method", "METERED"),
+                             acquire_timeout_s=d.get("acquire_timeout_s", DEFAULT_ACQUIRE_TIMEOUT_S),
+                             provider=d.get("provider", "aws-device-farm"))
 
 
 # ============================================================================

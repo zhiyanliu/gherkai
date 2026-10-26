@@ -20,6 +20,7 @@ from gherkai_core.errors import WorkerExitError, WorkerNetworkError
 from gherkai_core.redact import redact_url_userinfo
 from gherkai_core.model import (
     Cost,
+    DeviceFarmRequest,
     Event,
     Job,
     ReportRef,
@@ -37,6 +38,7 @@ from gherkai_core.model import (
     StepDone,
     StepSkipped,
     StepStarted,
+    Target,
     Votes,
 )
 
@@ -71,8 +73,13 @@ def _scenario_to_json(sc: Scenario) -> dict:
 
 
 def job_to_json(job: Job) -> dict:
-    """Job → JSON dict（喂 worker stdin，ADR 0024 输入形状）。"""
-    return {
+    """Job → JSON dict（喂 worker stdin，ADR 0024 输入形状）。
+
+    三个可选键（ADR 0024「可选键 timeoutS / deviceRequest / target」、0048 决策 3）只在有值时写：`timeoutS` 供 worker 建会话前与
+    max_session_s 比较作自检；`target` 只在非桌面目标写（桌面 job 的键集合与 1.4 逐字相同，旧 worker 零变化）；`deviceRequest`
+    在组合根填入后才有。字段集合由 Python 到 TS 的往返测试守（engines/fixtures/job-lines.json）。
+    """
+    d = {
         "scope": {"id": job.scope_id, "name": job.scope_name},
         "engine": job.engine,
         "scenarios": [_scenario_to_json(sc) for sc in job.scenarios],
@@ -80,6 +87,31 @@ def job_to_json(job: Job) -> dict:
         # camelCase 与协议其余字段一致；前缀 assertion 点明只作用于 AI 断言（动作 step 无投票）。
         "assertionVotes": job.assertion_votes,
     }
+    if job.timeout_s is not None:
+        d["timeoutS"] = job.timeout_s
+    if not job.target.is_desktop:
+        d["target"] = _target_to_json(job.target)
+    if job.device_request is not None:
+        d["deviceRequest"] = _device_request_to_json(job.device_request)
+    return d
+
+
+def _target_to_json(t: Target) -> dict:
+    out: dict = {"device": t.device, "uiKind": t.ui_kind}
+    if t.app is not None:
+        # 发给 worker 的应用条目是完整形态（definition 里只有完整形态，ADR 0048 决策 3）；五项都写出
+        out["app"] = {"alias": t.app.alias, "bucket": t.app.bucket, "key": t.app.key, "sha256": t.app.sha256, "appId": t.app.app_id}
+    return out
+
+
+def _device_request_to_json(r: DeviceFarmRequest) -> dict:
+    out: dict = {"provider": r.provider, "billingMethod": r.billing_method, "projectArn": r.project_arn,
+                 "acquireTimeoutS": r.acquire_timeout_s}
+    if r.device_arn is not None:
+        out["deviceArn"] = r.device_arn
+    if r.os_version is not None:
+        out["osVersion"] = r.os_version
+    return out
 
 
 def job_to_line(job: Job) -> str:

@@ -689,6 +689,19 @@ def available_targets(declared: list[dict], supported: list[dict]) -> list[dict]
     return out
 
 
+def target_supported(targets: list[dict], device: str, ui_kind: str) -> bool:
+    """worker 自述的 targets 是否含某个 (device, ui_kind)（ADR 0048 决策 4 的拒绝判据：core 不内置引擎名到目标的对照，只看自述）。"""
+    return any(t["device"] == device and ui_kind in t["ui_kinds"] for t in targets)
+
+
+def target_session_limit(targets: list[dict], device: str) -> float | None:
+    """某 device 条目声明的会话上限 max_session_s（ADR 0049 决策 2）；桌面条目不带此键即不施加会话级上限，返回 None。"""
+    for t in targets:
+        if t["device"] == device:
+            return t.get("max_session_s")
+    return None
+
+
 def unsupported_targets(declared: list[dict], supported: list[dict]) -> list[dict]:
     """声明了但 worker 不支持的部分（ADR 0049 决策 3 要让测试开发看见「这条句柄永远不会被调用」）：按 device 匹配后
     ui_kinds 取差，整个 device 不支持则整条保留；条目保留 requires。纯函数。"""

@@ -5,6 +5,8 @@
 from __future__ import annotations
 
 import json
+
+import pytest
 import re
 from pathlib import Path
 
@@ -185,6 +187,77 @@ def test_plan_text_shows_scope_grouping(tmp_path, capsys):
     assert "1 job(scope)" in out
     assert "engine=midscene" in out          # @engine tag 生效
     assert "Then" in out and "对吗" in out    # step 预览
+
+
+# ---- 测试目标与按目标的 timeout（ADR 0048 决策 4、5；0034「job timeout」节）----
+
+def test_plan_shows_target_and_device_session_count(tmp_path, capsys):
+    feat = _write_feature(tmp_path)
+    assert m.main(["plan", str(feat)]) == 0
+    out = capsys.readouterr().out
+    assert "target=desktop/web" in out and "设备会话 0" in out
+    assert m.main(["plan", str(feat), "--json"]) == 0
+    doc = json.loads(capsys.readouterr().out)
+    assert doc["device_session_count"] == 0 and "target" not in doc["jobs"][0]  # 桌面 job 省 target 键
+    assert doc["jobs"][0]["timeout_s"] == 300.0  # 不给 --default-job-timeout（哨兵「未指定」）：plan 层按目标补桌面缺省 300
+
+
+def test_default_job_timeout_sentinel_explicit_and_non_finite(tmp_path, capsys):
+    feat = _write_feature(tmp_path)
+    assert m.main(["plan", str(feat), "--json", "--default-job-timeout", "0"]) == 0
+    assert "timeout_s" not in json.loads(capsys.readouterr().out)["jobs"][0]  # 显式非正：桌面 scope 不超时
+    assert m.main(["plan", str(feat), "--json", "--default-job-timeout", "120"]) == 0
+    assert json.loads(capsys.readouterr().out)["jobs"][0]["timeout_s"] == 120.0  # 显式 120 与内建缺省可区分
+    for bad in ("nan", "inf", "1e400", "abc"):  # 归一化只接受有限数（nan / inf 会让超时保护静默失效）
+        with pytest.raises(SystemExit) as ei:
+            m.main(["plan", str(feat), "--default-job-timeout", bad])
+        assert ei.value.code == 2
+        assert "--default-job-timeout" in capsys.readouterr().err
+
+
+def test_device_target_rejected_by_plan_and_preflight_when_engine_lacks_target(tmp_path, monkeypatch, capsys):
+    """ADR 0048 决策 4：假 worker 自述只有桌面网页，标了 @device:android 的 scope 在 plan 与 run 的执行前预检都以退出码 2 结束、消息给出改法；
+    不建立任何会话（run 不该走到 schedule）。"""
+    feat = tmp_path / "dev.feature"
+    feat.write_text("@device:android\nFeature: F\n  Scenario: a\n    When \"做事\"\n", encoding="utf-8")
+    assert m.main(["plan", str(feat)]) == 2
+    err = capsys.readouterr().err
+    assert "不支持这个目标" in err and "Android 网页" in err and "@engine:" in err and "--default-engine" in err
+    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
+    assert m.main(["run", str(feat), "--no-report"]) == 2
+    assert "不支持这个目标" in capsys.readouterr().err
+
+
+def test_plan_target_check_degrades_when_capabilities_unavailable(tmp_path, monkeypatch, capsys):
+    """能力自述取不到（引擎没装、查询失败）时 plan 只警告、不判定（ADR 0048 决策 4），最终由执行前预检拒绝。"""
+    feat = tmp_path / "dev.feature"
+    feat.write_text("@device:android\nFeature: F\n  Scenario: a\n    When \"做事\"\n", encoding="utf-8")
+
+    def unavailable(engine, *, steps_dir=None, timeout_s=60.0):
+        raise RuntimeError("自述超时")
+
+    def no_match(*a, **k):
+        raise RuntimeError("查询失败")
+
+    monkeypatch.setattr(compose, "query_capabilities", unavailable)
+    monkeypatch.setattr(compose, "match_deterministic", no_match)
+    assert m.main(["plan", str(feat)]) == 0
+    err = capsys.readouterr().err
+    assert "目标核对降级" in err and "不支持这个目标" not in err
+
+
+def test_target_rejections_flag_timeout_over_session_limit():
+    """执行前预检的第二项目标检查（ADR 0048 决策 3）：job 墙钟预算超过该目标的会话上限即拒绝；桌面条目不带上限不检查。"""
+    from gherkai_core.model import Job, Scenario, Step, Target
+
+    caps = {"targets": [{"device": "android", "ui_kinds": ["web", "app"], "max_session_s": 8000.0}, {"device": "desktop", "ui_kinds": ["web"]}]}
+    scs = (Scenario(id="f:1", name="n", steps=(Step(0, "When", "x"),)),)
+    over = Job(scope_id="s", scope_name="s", engine="midscene", scenarios=scs, timeout_s=9000.0, target=Target(device="android", ui_kind="web"))
+    [msg] = m._target_rejections([over], caps)
+    assert "超过了引擎 midscene 在Android 网页上的会话上限 8000 秒" in msg and "--default-job-timeout" in msg
+    within = Job(scope_id="s", scope_name="s", engine="midscene", scenarios=scs, timeout_s=7000.0, target=Target(device="android", ui_kind="web"))
+    desktop = Job(scope_id="d", scope_name="d", engine="midscene", scenarios=scs, timeout_s=99999.0)
+    assert m._target_rejections([within, desktop], caps) == []
 
 
 def test_plan_json_shape(tmp_path, capsys):

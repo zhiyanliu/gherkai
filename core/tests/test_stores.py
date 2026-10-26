@@ -2,6 +2,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from gherkai_core.adapters.run_store.local import LocalRunStore
 from gherkai_core.adapters.result_store.local import LocalResultStore
 from gherkai_core.serialize import from_dict, job_result_from_dict, job_result_to_dict, to_dict
@@ -303,6 +305,75 @@ def test_job_timeout_s_round_trip():
     assert job_from_dict(job_to_dict(j)).timeout_s is None
     jt = Job(scope_id="t", scope_name="t", engine="midscene", scenarios=j.scenarios, timeout_s=90.0)
     assert job_from_dict(job_to_dict(jt)).timeout_s == 90.0
+
+
+def test_job_target_and_device_request_round_trip_and_omission():
+    """Job.target / device_request（ADR 0048 决策 3）：桌面 job 两键都省（旧落盘缺键读回 desktop/web 与 None）；android/web 与 ios/app
+    （带 device_request）往返恒等；plan 形态的应用条目只写 alias 与 app_id。"""
+    from gherkai_core.model import AppRef, DeviceFarmRequest, Target
+    from gherkai_core.serialize import job_from_dict, job_to_dict
+
+    j = _job_def("s", "s", "midscene")
+    d = job_to_dict(j)
+    assert "target" not in d and "device_request" not in d
+    assert job_from_dict(d).target == Target() and job_from_dict(d).device_request is None
+    dr = DeviceFarmRequest(project_arn="arn:p", os_version="15")
+    aw = Job(scope_id="aw", scope_name="aw", engine="midscene", scenarios=j.scenarios, timeout_s=1500.0,
+             target=Target(device="android", ui_kind="web"), device_request=dr)
+    assert job_from_dict(job_to_dict(aw)) == aw
+    assert set(job_to_dict(aw)["device_request"]) == {"provider", "billing_method", "project_arn", "acquire_timeout_s", "os_version"}
+    ia = Job(scope_id="ia", scope_name="ia", engine="midscene", scenarios=j.scenarios, timeout_s=900.0,
+             target=Target(device="ios", ui_kind="app", app=AppRef(alias="shop", app_id="com.example.Shop", bucket="b", key="k", sha256="h")),
+             device_request=DeviceFarmRequest(project_arn="arn:p", device_arn="arn:d", billing_method="UNMETERED"))
+    assert job_from_dict(job_to_dict(ia)) == ia
+    plan_form = Job(scope_id="p", scope_name="p", engine="midscene", scenarios=j.scenarios, timeout_s=900.0,
+                    target=Target(device="ios", ui_kind="app", app=AppRef(alias="shop", app_id="com.example.Shop")))
+    assert job_to_dict(plan_form)["target"]["app"] == {"alias": "shop", "app_id": "com.example.Shop"}  # 位置三项省略
+    assert job_from_dict(job_to_dict(plan_form), validate=False) == plan_form
+
+
+@pytest.mark.parametrize("patch, match", [
+    (lambda d: d.pop("device_request"), "非桌面目标当且仅当带设备请求"),
+    (lambda d: d["device_request"].update(device_arn="arn:d"), "恰给一个"),
+    (lambda d: d["device_request"].pop("os_version"), "恰给一个"),
+    (lambda d: d["device_request"].update(project_arn=""), "缺 project_arn"),
+    (lambda d: d["device_request"].update(acquire_timeout_s=0), "有限正数"),
+    (lambda d: d["target"].update(ui_kind="app"), "必须带应用条目"),
+    (lambda d: d.pop("timeout_s"), "设备 scope 不存在"),
+])
+def test_job_from_dict_rejects_malformed_device_definitions(patch, match):
+    """推进器读 definition 时的结构校验（ADR 0048 决策 3）：非桌面却缺设备请求、ARN 与版本同给或同缺、project_arn 为空、
+    预算非有限正数、应用目标缺应用条目、设备 scope 无墙钟预算，都拒绝。"""
+    from gherkai_core.errors import DefinitionContractError
+    from gherkai_core.model import DeviceFarmRequest, Target
+    from gherkai_core.serialize import job_from_dict, job_to_dict
+
+    j = _job_def("s", "s", "midscene")
+    aw = Job(scope_id="aw", scope_name="aw", engine="midscene", scenarios=j.scenarios, timeout_s=1500.0,
+             target=Target(device="android", ui_kind="web"), device_request=DeviceFarmRequest(project_arn="arn:p", os_version="15"))
+    d = job_to_dict(aw)
+    patch(d)
+    with pytest.raises(DefinitionContractError, match=match):
+        job_from_dict(d)
+
+
+def test_job_from_dict_rejects_incomplete_app_entry_and_desktop_with_app():
+    from gherkai_core.errors import DefinitionContractError
+    from gherkai_core.model import AppRef, DeviceFarmRequest, Target
+    from gherkai_core.serialize import job_from_dict, job_to_dict
+
+    j = _job_def("s", "s", "midscene")
+    dr = DeviceFarmRequest(project_arn="arn:p", device_arn="arn:d")
+    for app in (AppRef(alias="shop", app_id="x"), AppRef(alias="shop", app_id="x", bucket="b", key="k", sha256=""),
+                AppRef(alias="", app_id="x", bucket="b", key="k", sha256="h")):
+        bad = Job(scope_id="ia", scope_name="ia", engine="midscene", scenarios=j.scenarios, timeout_s=900.0,
+                  target=Target(device="ios", ui_kind="app", app=app), device_request=dr)
+        with pytest.raises(DefinitionContractError, match="应用条目"):
+            job_from_dict(job_to_dict(bad))
+    d = job_to_dict(j)
+    d["target"] = {"device": "desktop", "ui_kind": "app", "app": {"alias": "a", "app_id": "b", "bucket": "c", "key": "d", "sha256": "e"}}
+    with pytest.raises(DefinitionContractError, match="不是合法组合"):
+        job_from_dict(d)
 
 
 def test_run_meta_extra_http_headers_round_trip():

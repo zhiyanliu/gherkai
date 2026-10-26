@@ -48,6 +48,60 @@ def test_job_to_json_shape():
     assert "argument" not in sc["steps"][1]
 
 
+def test_job_to_json_key_set_unchanged_for_desktop_without_timeout():
+    """协议红线（ADR 0024 可选键、0048 决策 3）：桌面且无 timeout 的 job，job_to_json 的键集合与 1.4 完全相同——旧 worker 零变化。"""
+    job = Job(scope_id="s", scope_name="s", engine="novaact", scenarios=())
+    assert set(job_to_json(job)) == {"scope", "engine", "scenarios", "assertionVotes"}
+    assert set(job_to_json(Job(scope_id="s", scope_name="s", engine="novaact", scenarios=(), timeout_s=300.0))) == \
+        {"scope", "engine", "scenarios", "assertionVotes", "timeoutS"}
+
+
+def _device_jobs() -> dict[str, Job]:
+    """三种形态（engines/fixtures/job-lines.json 的同一组输入）：桌面无预算、Android 网页（按版本族选设备）、iOS 应用（指定设备 ARN）。"""
+    from gherkai_core.model import AppRef, DeviceFarmRequest, Target
+
+    steps = (Step(0, "Given", "https://x/"), Step(1, "Then", "看到标题"))
+    scs = (Scenario(id="f.feature:3", name="s", steps=steps),)
+    return {
+        "desktop": Job(scope_id="web", scope_name="web", engine="novaact", scenarios=scs, assertion_votes=1),
+        "android_web": Job(scope_id="aw", scope_name="aw", engine="midscene", scenarios=scs, assertion_votes=3, timeout_s=1500.0,
+                           target=Target(device="android", ui_kind="web"),
+                           device_request=DeviceFarmRequest(project_arn="arn:aws:devicefarm:us-west-2:123456789012:project:p",
+                                                            os_version="15", billing_method="METERED", acquire_timeout_s=600.0)),
+        "ios_app": Job(scope_id="ia", scope_name="ia", engine="midscene", scenarios=scs, assertion_votes=1, timeout_s=900.0,
+                       target=Target(device="ios", ui_kind="app",
+                                     app=AppRef(alias="shop", app_id="com.example.Shop", bucket="b", key="apps/sha/shop.ipa", sha256="ab" * 32)),
+                       device_request=DeviceFarmRequest(project_arn="arn:aws:devicefarm:us-west-2:123456789012:project:p",
+                                                        device_arn="arn:aws:devicefarm:us-west-2::device:D1", billing_method="UNMETERED",
+                                                        acquire_timeout_s=900.0)),
+    }
+
+
+def test_job_to_json_device_shapes_and_key_sets():
+    """设备 job 的可选键形态（ADR 0048 决策 3 / 0024）：target.device / uiKind / app.{alias,bucket,key,sha256,appId}，
+    deviceRequest.{provider, deviceArn 或 osVersion 二选一, billingMethod, projectArn, acquireTimeoutS}；按键集合差集断言。"""
+    jobs = _device_jobs()
+    aw = job_to_json(jobs["android_web"])
+    assert set(aw) == {"scope", "engine", "scenarios", "assertionVotes", "timeoutS", "target", "deviceRequest"}
+    assert aw["target"] == {"device": "android", "uiKind": "web"}
+    assert set(aw["deviceRequest"]) == {"provider", "osVersion", "billingMethod", "projectArn", "acquireTimeoutS"}
+    ia = job_to_json(jobs["ios_app"])
+    assert set(ia["target"]) == {"device", "uiKind", "app"} and set(ia["target"]["app"]) == {"alias", "bucket", "key", "sha256", "appId"}
+    assert set(ia["deviceRequest"]) == {"provider", "deviceArn", "billingMethod", "projectArn", "acquireTimeoutS"}
+    assert ia["deviceRequest"]["provider"] == "aws-device-farm" and ia["target"]["app"]["appId"] == "com.example.Shop"
+
+
+def test_job_lines_golden_matches_fixture_shared_with_midscene():
+    """Python 到 TS 的往返（ADR 0048 决策 3）：三份 golden 行只有一份（engines/fixtures/job-lines.json），本测试核 Python 侧产出逐字相等，
+    Midscene 侧 job-source.test.mts 核 TS 的 Job 类型字段清单与同一文件的键集合一致——任一侧加字段而另一侧没跟，测试就会变红。"""
+    import json
+    from pathlib import Path
+
+    fixture = json.loads((Path(__file__).resolve().parents[2] / "engines" / "fixtures" / "job-lines.json").read_text(encoding="utf-8"))
+    produced = {name: job_to_json(job) for name, job in _device_jobs().items()}
+    assert fixture["jobs"] == produced, "golden 与 job_to_json 产出不一致：改了协议形状就同步改 fixture（并让 TS 侧测试跟上）"
+
+
 def test_job_to_json_assertion_votes_passthrough():
     # assertionVotes 原样透传进协议（组合根设的非默认值，worker 据此执行 N 次取多数票）
     job = Job(scope_id="s", scope_name="s", engine="midscene", scenarios=(), assertion_votes=5)

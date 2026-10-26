@@ -91,6 +91,7 @@
 |---|---|---|
 | `default_engine` | string | 未标 `@engine` 的 scope 使用的引擎 |
 | `job_count` / `scenario_count` | int | 筛选后的数量（`--scope` / `--tags` / `--scenario` 生效后；多个筛选 flag 同时给出时需全部满足） |
+| `device_session_count` | int | 这次 run 将建立的设备会话数：一个设备目标的 scope 一个会话，全部桌面时为 0 |
 | `jobs[]` | array | 与 `run_meta.jobs[]` 结构相同；每个 step **可能**额外带一个 `deterministic` 键（出现条件见下） |
 
 `steps[].deterministic` 四态：至少一个引擎自述成功时，该键在**每个** step 上都出现。`null` 表示该 step 交由 AI 执行；带 `pattern` 与 `description`

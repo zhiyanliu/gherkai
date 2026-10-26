@@ -5,6 +5,7 @@ import logging
 
 import pytest
 
+from gherkai_core.model import AppRef, Target
 from gherkai_core.scope import FeatureSource, PlanConfig, FeatureContractError, plan
 
 CFG = PlanConfig(default_engine="midscene")
@@ -193,10 +194,127 @@ def test_timeout_default_fills_untagged_tag_wins():
     assert untagged.timeout_s == 120.0  # 未标的走缺省
 
 
-def test_timeout_absent_and_no_default_is_none():
-    # 无 tag、无缺省（CFG 的 default_job_timeout_s=None）→ 不超时
+def test_timeout_absent_and_unspecified_default_falls_back_by_target():
+    # 无 tag、未指定显式值（default_job_timeout_s=None）→ 按目标补缺省：桌面 300（ADR 0034「job timeout」节；曾是「不超时」）
     jobs = _plan('Feature: F\n  Scenario: s\n    When "x"\n')
-    assert jobs[0].timeout_s is None
+    assert jobs[0].timeout_s == 300.0 and jobs[0].target == Target()
+
+
+# ---- 按目标解析 timeout 的真值表（ADR 0034「job timeout」节 ①②③；0051 决策 2；0025「timeout 解析」）----
+DEV_CFG = PlanConfig(default_engine="midscene", default_device_job_timeout_s=1500.0, min_device_job_timeout_s=780.0)
+DEVICE_SCOPE = 'Feature: F\n  @scope:d @device:android\n  Scenario: a\n    When "x"\n'
+DESKTOP_SCOPE = 'Feature: F\n  @scope:w\n  Scenario: a\n    When "x"\n'
+
+
+def _cfg(**kw) -> PlanConfig:
+    base = dict(default_engine="midscene", default_device_job_timeout_s=1500.0, min_device_job_timeout_s=780.0)
+    base.update(kw)
+    return PlanConfig(**base)
+
+
+@pytest.mark.parametrize("text, cfg, expected", [
+    (DESKTOP_SCOPE, _cfg(), 300.0),                                        # 未指定 + 桌面 → 桌面缺省
+    (DEVICE_SCOPE, _cfg(), 1500.0),                                        # 未指定 + 设备 → 设备缺省（获取预算加 900）
+    (DESKTOP_SCOPE, _cfg(default_job_timeout_s=0.0), None),               # 显式 0 + 桌面 → 不超时
+    (DESKTOP_SCOPE, _cfg(default_job_timeout_s=-5.0), None),              # 显式负值 + 桌面 → 不超时
+    (DEVICE_SCOPE, _cfg(default_job_timeout_s=0.0), 1500.0),              # 显式 0 + 设备 → 设备缺省、不报错（设备 scope 不存在不超时）
+    (DEVICE_SCOPE, _cfg(default_job_timeout_s=-5.0), 1500.0),
+    (DESKTOP_SCOPE, _cfg(default_job_timeout_s=300.0), 300.0),            # 显式 300 与内建 300 可区分：都给 300
+    (DEVICE_SCOPE, _cfg(default_job_timeout_s=780.0), 780.0),             # 显式值等于下限 → 通过
+    (DEVICE_SCOPE, _cfg(default_job_timeout_s=900.0), 900.0),
+    (DESKTOP_SCOPE, _cfg(default_job_timeout_s=10.0), 10.0),              # 桌面不设下限
+])
+def test_timeout_by_target_truth_table(text, cfg, expected):
+    [job] = _plan(text, cfg=cfg)
+    assert job.timeout_s == expected
+
+
+def test_timeout_tag_wins_over_explicit_default_and_passes_device_floor():
+    [job] = _plan('Feature: F\n  @scope:d @device:android @timeout:780\n  Scenario: a\n    When "x"\n', cfg=_cfg(default_job_timeout_s=2000.0))
+    assert job.timeout_s == 780.0  # tag 优先于显式值；等于下限通过
+
+
+@pytest.mark.parametrize("text, cfg", [
+    ('Feature: F\n  @scope:d @device:android @timeout:779\n  Scenario: a\n    When "x"\n', _cfg()),             # tag 低于下限
+    (DEVICE_SCOPE, _cfg(default_job_timeout_s=300.0)),                                                            # 显式正值低于下限
+])
+def test_device_timeout_below_floor_errors(text, cfg):
+    with pytest.raises(FeatureContractError, match="低于设备目标的下限 780 秒") as ei:
+        _plan(text, cfg=cfg)
+    assert "还没开始执行就会被判超时" in str(ei.value)
+
+
+def test_device_default_itself_is_not_checked_against_floor():
+    # 目标缺省自身不过下限校验（构造 default_device < min 的 config 验证不抛）
+    [job] = _plan(DEVICE_SCOPE, cfg=_cfg(default_device_job_timeout_s=100.0, min_device_job_timeout_s=780.0))
+    assert job.timeout_s == 100.0
+
+
+def test_default_timeout_must_be_finite():
+    with pytest.raises(FeatureContractError, match="有限数"):
+        _plan(DESKTOP_SCOPE, cfg=_cfg(default_job_timeout_s=float("inf")))
+
+
+# ---- @device 与 @app 的归约（ADR 0048 决策 2：声明、继承、冲突照 @engine 的三条）----
+APPS = {"shop": {"android": "com.example.shop", "ios": "com.example.Shop"}, "pay": {"android": "com.example.pay"}}
+
+
+def test_device_and_app_tags_resolve_target():
+    jobs = _plan("""Feature: F
+  @scope:s @device:android @app:shop
+  Scenario: a
+    When "x"
+  @scope:s
+  Scenario: b
+    When "y"
+  @device:ios
+  Scenario: c
+    When "z"
+  Scenario: d
+    When "w"
+""", cfg=_cfg(apps=APPS))
+    by = {j.scope_id: j for j in jobs}
+    assert by["s"].target == Target(device="android", ui_kind="app", app=AppRef(alias="shop", app_id="com.example.shop"))  # 任一成员标了，整个 scope 生效
+    assert by["s"].device_request is None  # plan 形态
+    c = next(j for j in jobs if j.scope_name == "c")
+    assert c.target == Target(device="ios", ui_kind="web")
+    d = next(j for j in jobs if j.scope_name == "d")
+    assert d.target == Target()
+
+
+def test_feature_level_device_tag_is_inherited():
+    jobs = _plan('@device:android\nFeature: F\n  Scenario: a\n    When "x"\n  Scenario: b\n    When "y"\n', cfg=_cfg())
+    assert all(j.target == Target(device="android", ui_kind="web") for j in jobs) and len(jobs) == 2
+
+
+@pytest.mark.parametrize("text, match", [
+    ('Feature: F\n  @scope:s @device:android\n  Scenario: a\n    When "x"\n  @scope:s @device:ios\n  Scenario: b\n    When "y"\n', "多个 @device"),
+    ('Feature: F\n  @scope:s @device:android @app:shop\n  Scenario: a\n    When "x"\n  @scope:s @app:pay\n  Scenario: b\n    When "y"\n', "多个 @app"),
+    ('Feature: F\n  @device:desktop\n  Scenario: a\n    When "x"\n', "不是 android 或 ios"),
+    ('Feature: F\n  @device:foo\n  Scenario: a\n    When "x"\n', "不是 android 或 ios"),
+    ('Feature: F\n  @app:shop\n  Scenario: a\n    When "x"\n', "却没有标 @device"),
+    ('Feature: F\n  @device:android @app:nope\n  Scenario: a\n    When "x"\n', "查不到"),
+    ('Feature: F\n  @device:ios @app:pay\n  Scenario: a\n    When "x"\n', "没有 ios 平台的条目"),
+])
+def test_device_and_app_tag_violations_error(text, match):
+    with pytest.raises(FeatureContractError, match=match):
+        _plan(text, cfg=_cfg(apps=APPS))
+
+
+def test_plan_select_keeps_target_and_target_based_timeout():
+    """select 不变量扩到目标（ADR 0041 决策一经 0025）：筛掉带 tag 的成员后，Job.target 与按目标得出的 timeout_s 与全量解析逐字一致；
+    被整组筛空的 scope 里即便有 @device 冲突也不拦本次迭代。"""
+    text = ("Feature: F\n"
+            "  @scope:s @device:android @app:shop\n  Scenario: a\n    When \"x\"\n"
+            "  @scope:s\n  Scenario: b\n    When \"y\"\n"
+            "  @scope:bad @device:android\n  Scenario: c\n    When \"z\"\n"
+            "  @scope:bad @device:ios\n  Scenario: d\n    When \"w\"\n")
+    cfg = _cfg(apps=APPS)
+    with pytest.raises(FeatureContractError, match="多个 @device"):
+        plan([FeatureSource("t.feature", text)], cfg)
+    [job] = plan([FeatureSource("t.feature", text)], cfg, select=lambda p, scope_id: p.scenario.name == "b")
+    assert job.target == Target(device="android", ui_kind="app", app=AppRef(alias="shop", app_id="com.example.shop"))
+    assert job.timeout_s == 1500.0 and [s.name for s in job.scenarios] == ["b"]
 
 
 def test_timeout_conflict_errors():
@@ -431,7 +549,7 @@ def test_leading_and_keyword_fails_fast():
     assert [st.keyword for st in r[0].scenario.steps] == ["Given", "Given"]  # 继承前驱,照常
 
 
-@pytest.mark.parametrize("tag", ["@scope:", "@engine:", "@timeout:"])
+@pytest.mark.parametrize("tag", ["@scope:", "@engine:", "@timeout:", "@device:", "@app:"])
 def test_bare_tag_without_value_errors_with_location(tag: str):
     """裸 `@scope:` / `@engine:` / `@timeout:`（空值）→ FeatureContractError（ADR 0025：标了 tag 就得给值），且消息带 `uri:line`
     定位（本模块其余 FeatureContractError 都带；@timeout 原走「不是数字」路径带 scope 定位，收口到空值分支后不能丢）。

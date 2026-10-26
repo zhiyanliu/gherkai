@@ -52,6 +52,62 @@ class Scenario:
     steps: tuple[Step, ...]
 
 
+# ============================================================================
+# 测试目标（ADR 0048）：device 与 ui_kind 两个维度合称目标，engine 是独立的第三个维度；应用目标带应用条目；
+# 设备请求是具名结构、由组合根从配置解析成具体值后随 definition 走（core 只校验形态、不解释服务商状态）
+# ============================================================================
+
+# 获取预算的内建默认秒数（ADR 0051 决策 2）：项目配置可覆盖、上界 3600；设备 scope 的缺省墙钟与下限由它推出（加 900 / 加 180）。
+DEFAULT_ACQUIRE_TIMEOUT_S = 600.0
+# 合法的 (device, ui_kind) 组合（ADR 0048 决策 1）：桌面只有网页，不为桌面应用预留空位。
+VALID_TARGETS: frozenset[tuple[str, str]] = frozenset({
+    ("desktop", "web"), ("android", "web"), ("android", "app"), ("ios", "web"), ("ios", "app"),
+})
+
+
+@dataclass(frozen=True)
+class AppRef:
+    """应用目标的应用条目（ADR 0048 决策 3）。两个形态：plan 形态只有别名与包名或 bundle id；run / submit 在组合根上传安装包后
+    补齐 S3 位置三项（bucket / key / sha256 同进同出），definition 里只有完整形态。"""
+
+    alias: str
+    app_id: str  # Android 的包名或 iOS 的 bundle id
+    bucket: str | None = None
+    key: str | None = None
+    sha256: str | None = None
+
+
+@dataclass(frozen=True)
+class Target:
+    """一个 scope 运行在什么上面（ADR 0048 决策 1）：设备与界面类型；ui_kind 为 app 时带应用条目。缺省即桌面网页。"""
+
+    device: Literal["desktop", "android", "ios"] = "desktop"
+    ui_kind: Literal["web", "app"] = "web"
+    app: AppRef | None = None
+
+    @property
+    def is_desktop(self) -> bool:
+        return self.device == "desktop"
+
+    def as_text(self) -> str:
+        """机读与 plan 文本共用的紧凑写法（ADR 0048 决策 5 的形态）：`desktop/web`、`android/app:shop`。"""
+        base = f"{self.device}/{self.ui_kind}"
+        return f"{base}:{self.app.alias}" if self.app is not None else base
+
+
+@dataclass(frozen=True)
+class DeviceFarmRequest:
+    """向 AWS Device Farm 要哪台设备（ADR 0048 决策 3）：名字明说服务商、不起中立名；`device_arn` 与 `os_version` 二选一。
+    取值域（billing_method 的枚举、os_version 的点分形态、ARN 前缀）由 CLI 校验，core 只校验形态。"""
+
+    project_arn: str
+    device_arn: str | None = None
+    os_version: str | None = None
+    billing_method: str = "METERED"
+    acquire_timeout_s: float = DEFAULT_ACQUIRE_TIMEOUT_S
+    provider: Literal["aws-device-farm"] = "aws-device-farm"
+
+
 @dataclass(frozen=True)
 class Job:
     """一个 job 就是一个 scope、一个会话边界，也就是 schedule 交给单个 worker 的活（ADR 0016/0024/0025）。"""
@@ -63,9 +119,16 @@ class Job:
     # AI 断言（Then）投票次数（治判定抖动，ADR 0014）：worker 执行该断言 N 次取多数票。
     # 默认 1（不抖动检测，结果/日志最直观）；调高（如 3/5）才启用抖动治理。组合根经 --assertion-votes 设。
     assertion_votes: int = 1
-    # job 墙钟预算秒（ADR 0034「job timeout」节）：@timeout:N tag 或组合根填充的 --default-job-timeout；
-    # None 表示不超时。载体是 definition（timeout 是「要运行什么」的预算约束），推进器各自 enforce、worker 不消费。
+    # job 墙钟预算秒（ADR 0034「job timeout」节）：@timeout:N tag、显式给出的 --default-job-timeout，或 plan 层按目标补的缺省
+    # （桌面 300，设备为获取预算加 900）；None 表示不超时，只有非设备 scope 可取（设备 scope 恒为有限正数，ADR 0048 决策 3 /
+    # 0051 决策 2）。载体是 definition（timeout 是「要运行什么」的预算约束），推进器各自 enforce；worker 只在建会话前拿它与
+    # 能力自述的 max_session_s 比较作自检，不计时、不自停。
     timeout_s: float | None = None
+    # 测试目标（ADR 0048）：由 @device / @app 归约，缺省桌面网页；现有构造点不受影响。
+    target: Target = Target()
+    # 设备请求（ADR 0048 决策 3）：plan 形态为 None（不访问任何 AWS 服务）；run / submit 在组合根填入。非桌面目标当且仅当它存在
+    # ——definition 写前与推进器读时由 gherkai_core.target.validate_job_definition 校验。
+    device_request: DeviceFarmRequest | None = None
 
 
 # ============================================================================
