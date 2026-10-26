@@ -21,7 +21,8 @@ from gherkai_runtime import compose
 FAKE_MIN_GRACE_S = {"novaact": 150.0, "midscene": 31.0}
 # 假注册表清单：内容无所谓，只要形状对（pattern/description/example）、条数可数——用例断言的是「清单出自自述对象」。
 FAKE_DETERMINISTIC_STEPS = [
-    {"pattern": '^"?(?P<url>https?://[^"]+)"?$', "description": "内建导航", "example": 'Given "https://x"', "keywords": ["Given", "When"]},
+    {"pattern": '^"?(?P<url>https?://[^"]+)"?$', "description": "内建导航", "example": 'Given "https://x"', "keywords": ["Given", "When"],
+     "targets": [{"device": "desktop", "ui_kinds": ["web"]}]},
     {"pattern": "页面地址匹配 \"(?P<re>[^\"]+)\"", "description": "断言地址", "example": '那么 页面地址匹配 "x"'},  # 旧形态：无 keywords 键
 ]
 # 假自报模型 id：形状对（非空字符串）、两引擎不同即够——doctor 的模型行断言的是「这个值出自自述对象」。

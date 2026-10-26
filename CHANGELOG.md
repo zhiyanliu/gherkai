@@ -8,6 +8,11 @@
 
 ## [Unreleased]
 
+### 新增
+
+- 引擎 worker 的能力自述带上支持的测试目标：`gherkai doctor` 多一行 `engines.targets.<引擎>`，显示该引擎支持的测试目标（当前两个引擎都只有桌面网页）；`gherkai list-deterministic` 多一列「目标」，显示每条确定性 step 在该引擎上实际可用的目标，声明了该引擎不支持的目标时单独注明；`--json` 每项多 `targets`（worker 原样报出）与 `available_targets`（与引擎支持的目标求交后的结果）。旧版本 worker 没有这些字段时按「只支持桌面网页」处理，不报错。
+- 用户指南新增引擎能力矩阵一页（`docs/user-guide/engines.md`）：引擎 × 测试目标 × 确定性 step 的句柄 × 默认模型 × 计价公式。
+
 ### 变化
 
 - Midscene worker 的 SDK 从 `@midscene/web` 1.12.8 升到 1.15.1（Playwright 仍为 1.63.0）。对使用者的可见变化只有 Midscene 自己的报告页样式随新版改变；模型请求形态、证据与 `explain` 输出不变。

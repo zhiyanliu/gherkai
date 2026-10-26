@@ -87,11 +87,24 @@ export function registrySize(): number {
   return REGISTRY.length;
 }
 
+/** 条目有实现的一个测试目标（ADR 0049 决策 1）：协议面的 snake_case 键；requires 是该句柄在此目标上的运行期前提（1.5 只有
+ *  web_context），不同 requires 的条目拆开列、不聚合。 */
+export interface StepTarget {
+  device: string;
+  ui_kinds: string[];
+  requires?: string[];
+}
+
+/** 条目有实现的测试目标由句柄推出（ADR 0050 决策 1）：本模块的条目目前只有 playwright 一种句柄，对应桌面网页；
+ *  worker 原样报出、不与自己的顶层 targets 求交（交集由 CLI 在契约校验处算，ADR 0049 决策 3）。 */
+export const PLAYWRIGHT_TARGET: Readonly<StepTarget> = { device: "desktop", ui_kinds: ["web"] };
+
 export interface RegistryEntry {
   pattern: string;
   description: string;
   example: string;
   keywords: Keyword[];
+  targets: StepTarget[];
 }
 
 /** 注册表自述（ADR 0036「2.」）：这份清单就是 worker `--capabilities` 自述对象的 `deterministic_steps`
@@ -99,6 +112,7 @@ export interface RegistryEntry {
 export function listRegistry(): RegistryEntry[] {
   return REGISTRY.map((e) => ({
     pattern: e.raw, description: e.meta.description, example: e.meta.example, keywords: [...e.keywords],
+    targets: [{ device: PLAYWRIGHT_TARGET.device, ui_kinds: [...PLAYWRIGHT_TARGET.ui_kinds] }],
   }));
 }
 

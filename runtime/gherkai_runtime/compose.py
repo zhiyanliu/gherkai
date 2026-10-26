@@ -571,8 +571,128 @@ def query_capabilities(engine: str, *, steps_dir: str | Path | None = None,
             f"引擎 {engine} 自述的模型 id 不是非空字符串：{caps.get('model_id')!r}"
             "——worker 与命令行工具版本不一致？两者须同版本安装。"
         )
+    # 测试目标相关的键（ADR 0049 决策 1）：顶层 targets、每个清单项的 targets、会话预热支持键。都可缺（缺键语义见
+    # worker_targets / step_targets），有则形态须合契约；交集不在这里算、不改写对象（消费点经下面的纯函数取）。
+    _validate_targets(engine, caps.get("targets"), where="顶层 targets", top_level=True)
+    for entry in caps["deterministic_steps"]:
+        _validate_targets(engine, entry.get("targets"), where=f"确定性 step 条目 {entry.get('pattern')!r} 的 targets",
+                          top_level=False)
+    if SESSION_WARMUP_KEY in caps and not isinstance(caps[SESSION_WARMUP_KEY], bool):
+        raise RuntimeError(
+            f"引擎 {engine} 自述的会话预热支持键 {SESSION_WARMUP_KEY} 不是布尔值：{caps[SESSION_WARMUP_KEY]!r}"
+            "——worker 与命令行工具版本不一致？两者须同版本安装。"
+        )
     _CAPABILITIES_CACHE[key] = caps
     return caps
+
+
+# ---- 测试目标（ADR 0049）：契约校验、缺键语义与交集都只在本模块这一处实现，plan / list-deterministic / doctor 只消费 ----
+
+TARGET_DEVICES = ("desktop", "android", "ios")
+UI_KINDS = ("web", "app")
+# 会话预热支持键（ADR 0049 决策 1、0051 决策 13）：顶层布尔，缺键即不支持；本机 --expose-local 对不声明的 worker 的拒绝
+# 归隧道那一侧，这里只定键名与形态。
+SESSION_WARMUP_KEY = "session_warmup"
+
+
+def _validate_targets(engine: str, targets, *, where: str, top_level: bool) -> None:
+    """targets 数组的形态校验（ADR 0049 决策 1）：缺键放行（None）；有则每项 device 取 TARGET_DEVICES 之一、ui_kinds 非空
+    不重复且都取 UI_KINDS 之一、desktop 只允许 ["web"]；顶层条目 device 不重复、可带 max_session_s（正有限数、排除 bool）；step 级
+    条目可带 requires（字符串数组、不重复，取值不核——取值集合归 worker 注册期校验，CLI 不另立第二事实源），
+    且不出现 device / ui_kinds / requires 三项完全相同的重复条目。不合即 RuntimeError（调用方不写缓存）。"""
+    if targets is None:
+        return
+    bad = RuntimeError(f"引擎 {engine} 自述的{where}不合契约：{targets!r}——worker 与命令行工具版本不一致？两者须同版本安装。")
+    if not isinstance(targets, list):
+        raise bad
+    seen: list[tuple] = []
+    for t in targets:
+        if not isinstance(t, dict) or t.get("device") not in TARGET_DEVICES:
+            raise bad
+        kinds = t.get("ui_kinds")
+        if (not isinstance(kinds, list) or not kinds or not all(isinstance(k, str) for k in kinds)
+                or len(set(kinds)) != len(kinds) or any(k not in UI_KINDS for k in kinds)):
+            raise bad
+        if t["device"] == "desktop" and kinds != ["web"]:
+            raise bad
+        if top_level:
+            if "requires" in t:
+                raise bad
+            if "max_session_s" in t:
+                ms = t["max_session_s"]
+                if isinstance(ms, bool) or not isinstance(ms, (int, float)) or not math.isfinite(ms) or ms <= 0:
+                    raise bad
+            fingerprint: tuple = (t["device"],)
+        else:
+            if "max_session_s" in t:
+                raise bad
+            req = t.get("requires")
+            if req is not None and (not isinstance(req, list) or not all(isinstance(r, str) for r in req)
+                                    or len(set(req)) != len(req)):
+                raise bad
+            fingerprint = (t["device"], tuple(kinds), tuple(req or ()))
+        if fingerprint in seen:
+            raise bad
+        seen.append(fingerprint)
+
+
+def _default_targets() -> list[dict]:
+    return [{"device": "desktop", "ui_kinds": ["web"]}]
+
+
+def worker_targets(caps: dict) -> list[dict]:
+    """worker 支持的测试目标（ADR 0049 决策 2 的缺键语义）：缺 targets 的旧 worker 只支持桌面网页——1.5 之前所有 worker
+    的真实能力；不能解释为「全部目标」或「未知、放行」。返回副本。"""
+    raw = caps.get("targets")
+    if raw is None:
+        return _default_targets()
+    return [dict(t, ui_kinds=list(t["ui_kinds"])) for t in raw]
+
+
+def step_targets(entry: dict) -> list[dict]:
+    """某条确定性 step 声明的目标（worker 原样报出）；缺键即只在桌面网页上有实现（ADR 0049 决策 2）。返回副本。"""
+    raw = entry.get("targets")
+    if raw is None:
+        return _default_targets()
+    return [dict(t, ui_kinds=list(t["ui_kinds"]), **({"requires": list(t["requires"])} if "requires" in t else {}))
+            for t in raw]
+
+
+def available_targets(declared: list[dict], supported: list[dict]) -> list[dict]:
+    """step 实际可用的目标是声明目标与 worker 支持目标的交集（ADR 0049 决策 3）：按 device 匹配、ui_kinds 取交
+    （保持声明顺序），交出来为空的条目丢弃；每个条目原样保留 requires，同一 device 与 ui_kind 只是 requires 不同的条目
+    各自成条、不合并。纯函数。"""
+    by_device = {t["device"]: t for t in supported}
+    out: list[dict] = []
+    for t in declared:
+        w = by_device.get(t["device"])
+        if w is None:
+            continue
+        kinds = [k for k in t["ui_kinds"] if k in w["ui_kinds"]]
+        if not kinds:
+            continue
+        item = {"device": t["device"], "ui_kinds": kinds}
+        if "requires" in t:
+            item["requires"] = list(t["requires"])
+        out.append(item)
+    return out
+
+
+def unsupported_targets(declared: list[dict], supported: list[dict]) -> list[dict]:
+    """声明了但 worker 不支持的部分（ADR 0049 决策 3 要让测试开发看见「这条句柄永远不会被调用」）：按 device 匹配后
+    ui_kinds 取差，整个 device 不支持则整条保留；条目保留 requires。纯函数。"""
+    by_device = {t["device"]: t for t in supported}
+    out: list[dict] = []
+    for t in declared:
+        w = by_device.get(t["device"])
+        kinds = [k for k in t["ui_kinds"] if w is None or k not in w["ui_kinds"]]
+        if not kinds:
+            continue
+        item = {"device": t["device"], "ui_kinds": kinds}
+        if "requires" in t:
+            item["requires"] = list(t["requires"])
+        out.append(item)
+    return out
 
 
 def match_deterministic(engine: str, items: list[dict], *, steps_dir: str | Path | None = None,

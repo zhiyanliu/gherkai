@@ -784,6 +784,11 @@ def _classify_act_error(e: BaseException) -> str:
 
 CAPABILITIES_SCHEMA_VERSION = 1  # 只在键语义变化时递增（ADR 0036「5.」）
 
+# 本 worker 支持的测试目标（ADR 0049 决策 1、9）：Nova Act SDK 只驱动 Playwright 浏览器，没有设备路径，故只有桌面网页；
+# 不带 max_session_s（浏览器会话不施加会话级上限，ADR 0049 决策 2）。**单一来源**：能力自述报它，建会话前的自检
+# （ADR 0049 决策 7）也核它，不在自检里另写一份。键名是协议面的 snake_case（ui_kinds），与 Midscene 侧逐字相同。
+WORKER_TARGETS: tuple[dict, ...] = ({"device": "desktop", "ui_kinds": ["web"]},)
+
 
 def _capabilities() -> dict[str, object]:
     """本 worker 的能力声明（`--capabilities` 的 stdout，ADR 0036「5.」）。
@@ -805,6 +810,7 @@ def _capabilities() -> dict[str, object]:
         "schema_version": CAPABILITIES_SCHEMA_VERSION,
         "engine": _evidence.ENGINE,  # 与 evidence 里报的引擎名同源，不另写字面量
         "min_grace_s": ACT_TIMEOUT_S + NOVA_GRACE_MARGIN_S,
+        "targets": [{"device": t["device"], "ui_kinds": list(t["ui_kinds"])} for t in WORKER_TARGETS],  # ADR 0049 决策 1
         "deterministic_steps": _deterministic.list_registry(),  # 同一张注册表（ADR 0036「2.」真值单一）
         "model_id": MODEL_ID,  # 与下面 Workflow(model_id=...) 同一常量（ADR 0004「模型版本选择策略」）
     }

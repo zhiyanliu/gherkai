@@ -161,6 +161,38 @@ def plan_tree(jobs: list[Job], default_engine: str, dispatch: dict | None = None
     return root
 
 
+# 测试目标的产品语言名称（ADR 0049 决策 6；ADR 0039：用户可见文本不带内部指代）——list-deterministic、doctor、plan 共用这一份。
+_DEVICE_LABEL = {"desktop": "桌面", "android": "Android", "ios": "iOS"}
+_UI_KIND_LABEL = {"web": "网页", "app": "应用"}
+_REQUIRES_LABEL = {"web_context": "需要网页上下文"}
+
+
+def target_label(device: str, ui_kind: str) -> str:
+    """(device, ui_kind) → 「桌面网页」「Android 应用」这类名称；未知取值原样拼出（自述形态由组合根校验，这里只呈现）。"""
+    d = _DEVICE_LABEL.get(device, device)
+    k = _UI_KIND_LABEL.get(ui_kind, ui_kind)
+    return f"{d}{k}" if device == "desktop" else f"{d} {k}"
+
+
+def requires_label(requires: list[str]) -> str:
+    """前提清单 → 「需要网页上下文」；未知取值按「需要 <取值>」原样显示（ADR 0049 决策 1：CLI 不另立取值集合）。"""
+    return "、".join(_REQUIRES_LABEL.get(r, f"需要 {r}") for r in requires)
+
+
+def targets_label(targets: list[dict], *, with_requires: bool = True, with_session_limit: bool = False) -> str:
+    """一组目标条目 → 「桌面网页、Android 网页（需要网页上下文）」；带 max_session_s 的条目按分钟附会话上限（doctor 用）。"""
+    parts: list[str] = []
+    for t in targets:
+        names = "、".join(target_label(t["device"], k) for k in t["ui_kinds"])
+        notes: list[str] = []
+        if with_requires and t.get("requires"):
+            notes.append(requires_label(t["requires"]))
+        if with_session_limit and t.get("max_session_s") is not None:
+            notes.append(f"会话上限 {t['max_session_s'] / 60:g} 分钟")
+        parts.append(names + (f"（{'；'.join(notes)}）" if notes else ""))
+    return "、".join(parts)
+
+
 def _dispatch_hint(dispatch: dict | None, scope_id: str, scenario_id: str, step_index: int) -> str:
     """step 的派发预期标注（ADR 0036）：确定性命中/冲突才标，AI 默认不标（噪声控制）。"""
     probe = (dispatch or {}).get((scope_id, scenario_id, step_index))

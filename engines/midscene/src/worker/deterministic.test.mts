@@ -64,8 +64,9 @@ test("缺元数据注册 fail-loud（ADR 0036：能力必须可发现）", () =>
 test("listRegistry 自述含 pattern/description/example（ADR 0036）", () => {
   deterministic('页面地址匹配 "(?<p>.+)"', () => {}, { description: "断言 URL", example: 'Then 页面地址匹配 "/x"' });
   assert.deepEqual(listRegistry(), [
-    { pattern: '页面地址匹配 "(?<p>.+)"', description: "断言 URL", example: 'Then 页面地址匹配 "/x"', keywords: ["Given", "When", "Then"] },
-  ]);  // 缺省接受全部关键字
+    { pattern: '页面地址匹配 "(?<p>.+)"', description: "断言 URL", example: 'Then 页面地址匹配 "/x"', keywords: ["Given", "When", "Then"],
+      targets: [{ device: "desktop", ui_kinds: ["web"] }] },  // 缺省接受全部关键字；只有 playwright 句柄 → 桌面网页（ADR 0050 决策 1）
+  ]);
 });
 
 test("keywords 声明：封闭集合、非空、不重复，自述按规范顺序（ADR 0050 决策 1）", () => {

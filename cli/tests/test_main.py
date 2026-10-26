@@ -656,9 +656,38 @@ def test_list_deterministic_text_and_json(monkeypatch, capsys):
     assert "关键字" in out and "任意" in out  # 条目没有 keywords 声明（旧 worker）→ 显示接受任意关键字
     assert "Given / When" in out  # 声明了子集的条目按声明显示
     assert out.count("任意") == 2  # 没声明的与三个全声明的都显示「任意」
+    assert "目标" in out and out.count("桌面网页") == 3  # 条目与 worker 都没声明 targets → 按缺键语义都是桌面网页（ADR 0049 决策 2）
     assert m.main(["list-deterministic", "--json"]) == 0  # 默认 novaact（对齐 run 缺省）
     doc = json.loads(capsys.readouterr().out)
-    assert doc == {"engine": "novaact", "deterministic_steps": entries}  # 键集不变：不带 min_grace_s 等自述项
+    desktop = [{"device": "desktop", "ui_kinds": ["web"]}]
+    # 每项是 worker 原样条目加 CLI 算出的 available_targets（ADR 0049 决策 6）；不带 min_grace_s 等自述项
+    assert doc == {"engine": "novaact", "deterministic_steps": [dict(e, available_targets=desktop) for e in entries]}
+
+
+def test_list_deterministic_targets_column_intersection_and_unsupported_note(monkeypatch, capsys):
+    """目标列（ADR 0049 决策 3、6）：列交集目标、带前提的条目附前提；声明了但该引擎不支持的目标单独注明——那条句柄永远不会被
+    这个引擎调用，测试开发要看见；--json 同时保留 worker 原样的 targets 与 CLI 算出的 available_targets，两者分开。"""
+    entries = [{"pattern": "a", "description": "跨目标核对", "example": "Then a", "targets": [
+                   {"device": "desktop", "ui_kinds": ["web"]},
+                   {"device": "android", "ui_kinds": ["web", "app"], "requires": ["web_context"]},
+                   {"device": "ios", "ui_kinds": ["app"]}]},
+               {"pattern": "b", "description": "只有设备", "example": "Then b", "targets": [{"device": "ios", "ui_kinds": ["web"]}]}]
+    monkeypatch.setattr(m.compose, "query_capabilities",
+                        lambda engine, *, steps_dir=None, timeout_s=60.0: {
+                            "schema_version": 1, "engine": engine, "min_grace_s": 31.0, "model_id": "m",
+                            "targets": [{"device": "desktop", "ui_kinds": ["web"]}, {"device": "android", "ui_kinds": ["web"], "max_session_s": 8880}],
+                            "deterministic_steps": entries})
+    assert m.main(["list-deterministic", "--engine", "midscene"]) == 0
+    out = capsys.readouterr().out
+    assert "桌面网页、Android 网页（需要网页上下文）" in out
+    assert "声明了「Android 应用、iOS 应用」，此引擎不支持" in out
+    assert "（此引擎上无可用目标）；声明了「iOS 网页」，此引擎不支持" in out
+    assert m.main(["list-deterministic", "--engine", "midscene", "--json"]) == 0
+    doc = json.loads(capsys.readouterr().out)
+    assert doc["deterministic_steps"][0]["targets"] == entries[0]["targets"]  # 原样
+    assert doc["deterministic_steps"][0]["available_targets"] == [
+        {"device": "desktop", "ui_kinds": ["web"]}, {"device": "android", "ui_kinds": ["web"], "requires": ["web_context"]}]
+    assert doc["deterministic_steps"][1]["available_targets"] == []
 
 
 def test_list_deterministic_worker_failure_exits_2(monkeypatch, capsys):
@@ -1040,7 +1069,8 @@ def test_plan_exits_2_when_user_steps_fail_to_load(tmp_path, monkeypatch, capsys
     monkeypatch.setattr(compose, "match_deterministic", boom)
     rc = m.main(["plan", str(feat), "--steps-dir", str(steps)])
     assert rc == 2
-    assert "steps 加载失败" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "plan 拒绝出结果" in err and "版本不一致" in err  # 不降级；成因提示（steps 加载失败或版本不一致）与其它入口同一句
 
 
 def test_plan_degrades_when_worker_missing(tmp_path, monkeypatch, capsys):
@@ -1587,6 +1617,34 @@ def test_doctor_reports_worker_self_reported_model(tmp_path, monkeypatch, capsys
     assert out.index("engines.model.novaact") < out.index("steps.dir")
 
 
+def test_doctor_reports_worker_targets_with_session_limit_minutes(tmp_path, monkeypatch, capsys):
+    """doctor 出一行 engines.targets.<engine>（ADR 0049 决策 6）：目标清单取自同一次自述、纯展示（required=False）；带
+    max_session_s 的目标附分钟数；不展示 requires；缺 targets 的旧 worker 按缺键语义显示桌面网页；不支持设备不算失败。"""
+    _fake_locator(monkeypatch, available=("novaact", "midscene")); _no_provider(monkeypatch)
+    monkeypatch.delenv("GHERKAI_STEPS_DIR", raising=False); monkeypatch.chdir(tmp_path)
+    stubbed = compose.query_capabilities  # conftest 的假自述：不带 targets（旧 worker 形态）
+
+    def with_targets(engine, **kw):
+        caps = dict(stubbed(engine, **kw))
+        if engine == "midscene":
+            caps["targets"] = [{"device": "desktop", "ui_kinds": ["web"]},
+                               {"device": "android", "ui_kinds": ["web", "app"], "max_session_s": 8880}]
+            caps["deterministic_steps"] = [dict(caps["deterministic_steps"][0],
+                                                targets=[{"device": "android", "ui_kinds": ["web"], "requires": ["web_context"]}])]
+        return caps
+
+    monkeypatch.setattr(m.compose, "query_capabilities", with_targets)
+    assert m.main(["doctor", "--json"]) == 0
+    by = {(c["section"], c["name"]): c for c in json.loads(capsys.readouterr().out)["checks"]}
+    nova = by[("engines", "targets.novaact")]
+    assert nova["ok"] is True and nova["required"] is False and nova["detail"] == "支持的测试目标：桌面网页（本机 worker 自报）"
+    mid = by[("engines", "targets.midscene")]["detail"]
+    assert "桌面网页、Android 网页、Android 应用（会话上限 148 分钟）" in mid and "网页上下文" not in mid
+    assert m.main(["doctor"]) == 0
+    out = capsys.readouterr().out
+    assert out.index("engines.targets.novaact") < out.index("steps.dir")  # 仍在 engines 段内
+
+
 def test_doctor_omits_model_row_when_self_describe_fails(tmp_path, monkeypatch, capsys):
     """自述失败（版本不一致 / 起不来 / 使用方 steps 报错）→ **没有** 模型行：模型未知就不出这一行，
     不拿占位符冒充事实（失败本身由 steps.load 那行报）。"""
@@ -1597,6 +1655,7 @@ def test_doctor_omits_model_row_when_self_describe_fails(tmp_path, monkeypatch, 
     assert m.main(["doctor", "--json"]) == 0  # 无 steps/ 目录 → 自述失败只是可选项
     by = {(c["section"], c["name"]): c for c in json.loads(capsys.readouterr().out)["checks"]}
     assert ("engines", "model.novaact") not in by
+    assert ("engines", "targets.novaact") not in by  # 目标行与模型行同一口径：自述失败就不出
     assert not by[("steps", "load.novaact")]["ok"]
 
 

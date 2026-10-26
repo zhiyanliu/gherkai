@@ -89,9 +89,15 @@ def deterministic(pattern: str, *, description: str, example: str,
     return register
 
 
+# 条目有实现的测试目标（ADR 0049 决策 1、3）：由句柄推出（ADR 0050 决策 1）——本引擎的条目只有 playwright 一种句柄，
+# 对应桌面网页；worker 原样报出、不与自己的顶层 targets 求交（交集由 CLI 在契约校验处算）。
+PLAYWRIGHT_TARGET: dict = {"device": "desktop", "ui_kinds": ["web"]}
+
+
 def list_registry() -> list[dict]:
     """注册表自述（ADR 0036「2.」）：作自述入口 `--capabilities` 的 `deterministic_steps` 键给 CLI 转述。"""
-    return [{"pattern": e.raw, "description": e.description, "example": e.example, "keywords": list(e.keywords)}
+    return [{"pattern": e.raw, "description": e.description, "example": e.example, "keywords": list(e.keywords),
+             "targets": [{"device": PLAYWRIGHT_TARGET["device"], "ui_kinds": list(PLAYWRIGHT_TARGET["ui_kinds"])}]}
             for e in _REGISTRY]
 
 

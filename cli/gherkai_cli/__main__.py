@@ -601,26 +601,43 @@ def _cmd_list_deterministic(args) -> int:
         return steps_dir
     try:
         # 清单即能力自述对象的 deterministic_steps 键（ADR 0036「5.」「加键不加入口」：worker 只有两个非 job 入口）
-        entries = compose.query_capabilities(args.engine, steps_dir=steps_dir)["deterministic_steps"]
+        caps = compose.query_capabilities(args.engine, steps_dir=steps_dir)
     except compose.WorkerNotFoundError as e:  # 定位链 miss：消息自带安装指引，别再叠版本不一致的猜测
         _progress(f"list-deterministic 失败：{e}")
         return 2
     except (ValueError, RuntimeError) as e:  # 与运行前检查同一口径（两种成因）
         _progress(f"list-deterministic 失败：{e}\n{_SELF_DESCRIBE_CAUSES}")
         return 2
+    entries = caps["deterministic_steps"]
+    # 每条 step 的实际可用目标是声明目标与该引擎支持目标的交集（ADR 0049 决策 3；交集与缺键语义都在 compose 一处实现，
+    # 这里只消费）；声明了但该引擎不支持的部分单独注明——那条句柄永远不会被这个引擎调用，测试开发要看见。
+    supported = compose.worker_targets(caps)
+    rows = [(e, compose.step_targets(e)) for e in entries]
     if args.json:
-        print(json.dumps({"engine": args.engine, "deterministic_steps": entries}, ensure_ascii=False, indent=2))
+        out = [dict(e, available_targets=compose.available_targets(declared, supported)) for e, declared in rows]
+        print(json.dumps({"engine": args.engine, "deterministic_steps": out}, ensure_ascii=False, indent=2))
         return 0
     print(f"引擎 {args.engine} 的确定性 step（{len(entries)} 条；由该引擎 worker 的注册表维护）：")
     if not entries:
         print("  （空——该引擎当前没有注册任何确定性 step，全部 step 走 AI）")
         return 0
-    # 表格渲染（ADR 0047）：示例列是 feature 作者的复制源，放最前；关键字列只在条目有声明时有内容（缺省接受全部）
-    print(render_table(["示例", "说明", "模式", "关键字"],
+
+    def target_cell(declared: list[dict]) -> str:
+        avail = compose.available_targets(declared, supported)
+        missing = compose.unsupported_targets(declared, supported)
+        text = render.targets_label(avail) if avail else "（此引擎上无可用目标）"
+        if missing:
+            text += f"；声明了「{render.targets_label(missing, with_requires=False)}」，此引擎不支持"
+        return text
+
+    # 表格渲染（ADR 0047）：示例列是 feature 作者的复制源，放最前；关键字列只在条目有声明时有内容（缺省接受全部）；
+    # 目标列列交集目标，带前提的条目附前提，不按目标过滤（ADR 0049 决策 6）
+    print(render_table(["示例", "说明", "模式", "关键字", "目标"],
                        [[e.get("example", ""), e.get("description", "（无描述）"), e.get("pattern", ""),
-                         " / ".join(e["keywords"]) if e.get("keywords") and len(e["keywords"]) < 3 else "任意"]
-                        for e in entries],
-                       wrap=[1]))  # 示例与模式是复制源、不折断；说明列可折
+                         " / ".join(e["keywords"]) if e.get("keywords") and len(e["keywords"]) < 3 else "任意",
+                         target_cell(declared)]
+                        for e, declared in rows],
+                       wrap=[1, 2, 4]))  # 示例是 feature 作者的复制源、不折断；说明、模式（内建导航的模式很长，要原文用 --json）与目标列可折
     return 0
 
 
@@ -697,6 +714,13 @@ def _cmd_doctor(args) -> int:
     for engine, caps, _err in described:
         if caps is not None:
             add("engines", f"model.{engine}", True, f"模型 {caps['model_id']}（本机 worker 自报）", required=False)
+    # 目标行（ADR 0049 决策 6）：该引擎 worker 支持的测试目标，带会话上限的目标附分钟数；纯展示、不展示 requires、
+    # 不支持设备不算失败；与模型行同源于同一次自述，自述失败时同样不出这一行（缺键的旧 worker 按缺键语义显示桌面网页）。
+    for engine, caps, _err in described:
+        if caps is not None:
+            add("engines", f"targets.{engine}", True,
+                f"支持的测试目标：{render.targets_label(compose.worker_targets(caps), with_requires=False, with_session_limit=True)}"
+                "（本机 worker 自报）", required=False)
 
     if steps_err:
         add("steps", "dir", False, steps_err)
@@ -1158,7 +1182,9 @@ def _cmd_plan(args) -> int:
     try:
         dispatch = _probe_deterministic_dispatch(jobs, steps_dir)
     except compose.WorkerSelfDescribeError as e:
-        _progress(f"使用方 steps 加载失败，plan 拒绝出结果（否则标注静默缺失，即定制 step 被悄悄换成 AI）：{e}")
+        # 唯一不降级的失败（ADR 0036 决策 4）：成因可能是使用方 steps 加载失败，也可能是 worker 与 CLI 版本不一致（旧 worker
+        # 不认新的 match 查询输入形态），两种都不能降级成「无标注」——那等于把定制 step 悄悄换成 AI。成因提示与其它入口同一句。
+        _progress(f"引擎 worker 的 match 查询失败，plan 拒绝出结果（否则标注静默缺失，即定制 step 被悄悄换成 AI）：{e}{_SELF_DESCRIBE_CAUSES}")
         return 2
 
     # 核心产出 → stdout（与 run 的输出契约一致：--json 单文档 / 否则人看文本）

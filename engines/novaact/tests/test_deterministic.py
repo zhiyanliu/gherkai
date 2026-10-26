@@ -75,7 +75,8 @@ def test_list_registry_reflects_registrations():
         lambda ctx, p: None)
     got = d.list_registry()
     assert got == [{"pattern": r'页面地址匹配 "(?P<p>.+)"', "description": "断言 URL",
-                    "example": 'Then 页面地址匹配 "/x"', "keywords": ["Given", "When", "Then"]}]  # 缺省接受全部关键字
+                    "example": 'Then 页面地址匹配 "/x"', "keywords": ["Given", "When", "Then"],  # 缺省接受全部关键字
+                    "targets": [{"device": "desktop", "ui_kinds": ["web"]}]}]  # 只有 playwright 句柄 → 桌面网页（ADR 0050 决策 1）
 
 
 def test_keywords_declaration_normalized_and_validated():

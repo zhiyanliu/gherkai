@@ -32,7 +32,7 @@ def _clean_env(**extra: str) -> dict:
 
 
 def test_capabilities_shape_and_min_grace_from_injected_act_timeout():
-    """键集恰五个，且 `min_grace_s` 是注入的 `NOVA_ACT_TIMEOUT_S` 加 worker 侧 margin（组合根查它当 grace 下限）。
+    """键集恰六个，且 `min_grace_s` 是注入的 `NOVA_ACT_TIMEOUT_S` 加 worker 侧 margin（组合根查它当 grace 下限）。
 
     键集**全等**断言（非「至少含」）：ADR 0036「5.」的自述对象是消费侧按键取的契约面，多一个未声明的键
     或少一个键都要连 `schema_version` 一起议——「至少含」照不出多出来的键。
@@ -43,16 +43,21 @@ def test_capabilities_shape_and_min_grace_from_injected_act_timeout():
     out = proc.stdout.decode("utf-8")
     assert len(out.strip().splitlines()) == 1, out  # stdout 只此一个 JSON 对象（消费侧整段 json.loads）
     caps = json.loads(out)
-    assert set(caps) == {"schema_version", "engine", "min_grace_s", "deterministic_steps", "model_id"}, caps
-    assert caps["schema_version"] == 1  # 只加键不改既有键语义 → 版本不递增（ADR 0036「5.」）
+    assert set(caps) == {"schema_version", "engine", "min_grace_s", "targets", "deterministic_steps", "model_id"}, caps
+    assert caps["schema_version"] == 1  # 只加键不改既有键语义 → 版本不递增（ADR 0036「5.」；0049 决策 1 增键不升版）
+    # 测试目标（ADR 0049 决策 1、2、9）：显式写出、只有桌面网页、不带 max_session_s（浏览器会话不施加会话级上限）；
+    # 键是协议面的 snake_case，与 Midscene 侧逐字相同（CLI 的契约校验对两侧同一道）
+    assert caps["targets"] == [{"device": "desktop", "ui_kinds": ["web"]}], caps
     assert caps["engine"] == "novaact"
     assert caps["min_grace_s"] == 7 + NOVA_GRACE_MARGIN_S
     assert NOVA_GRACE_MARGIN_S > 0  # margin 须 > 0（ADR 0024：act 有界返回之后还要会话释放 + 截图排空）
     steps = caps["deterministic_steps"]  # 注册表清单（ADR 0036「2.」），内建脚手架至少一条
     assert isinstance(steps, list) and steps, caps
-    assert all(set(e) == {"pattern", "description", "example", "keywords"} for e in steps), steps
+    assert all(set(e) == {"pattern", "description", "example", "keywords", "targets"} for e in steps), steps
     assert all(e["pattern"] and e["description"] and e["example"] for e in steps), steps
     assert [e["keywords"] for e in steps] == [["Given", "When"]], steps  # 脚手架只有内建导航一条（ADR 0020 第 2、3 条）
+    # 条目的目标由句柄推出（ADR 0050 决策 1）：只有 playwright 句柄 → 桌面网页；worker 原样报出、不与顶层求交（ADR 0049 决策 3）
+    assert [e["targets"] for e in steps] == [[{"device": "desktop", "ui_kinds": ["web"]}]], steps
     assert isinstance(caps["model_id"], str) and caps["model_id"], caps  # 组合根按「非空字符串」校验这一位
 
 

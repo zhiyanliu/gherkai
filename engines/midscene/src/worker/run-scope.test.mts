@@ -757,7 +757,7 @@ test("--match-steps: 真入口按 {keyword, text} 回答四态——Then 后只�
 // 且「不建会话、不读 stdin、零费用」只有真实运行才看得见——本测试不喂 stdin、不给 AWS 凭证，照样该以退出码 0 结束。
 // 起源码形态的 bin 要有 TS 转译能力：`--import tsx` 传绝对 URL（与 cwd 无关），不靠 Node 原生 type stripping
 // （那要 Node ≥22.18，而包只声明 >=22——同 user-steps.test.mts 的真实运行层）。
-test("--capabilities: 一个 JSON 对象即以退出码 0 结束；五键含 deterministic_steps/model_id；min_grace_s 是收尾各段预算之和加余量、当前为 31s", async () => {
+test("--capabilities: 一个 JSON 对象即以退出码 0 结束；六键含 targets/deterministic_steps/model_id；min_grace_s 是收尾各段预算之和加余量、当前为 31s", async () => {
   const {
     INFLIGHT_SETTLE_MS, STOP_SESSION_BUDGET_MS, BROWSER_CLOSE_BUDGET_MS, QUEUE_DRAIN_EXIT_MS, MIN_GRACE_MARGIN_MS,
   } = await importMod();
@@ -779,8 +779,11 @@ test("--capabilities: 一个 JSON 对象即以退出码 0 结束；五键含 det
   // 键集恰为五个（ADR 0036「5.」）：多一个键就意味着自述契约变了（组合根核 schema_version 的前提），少一个则
   // 消费侧读到 undefined；清单并入本对象后不再有独立的清单 flag（同 ADR 被拒方案「每个自述项一个独立 flag」）。
   assert.deepEqual(Object.keys(got).sort(),
-    ["deterministic_steps", "engine", "min_grace_s", "model_id", "schema_version"], `键集：${raw}`);
+    ["deterministic_steps", "engine", "min_grace_s", "model_id", "schema_version", "targets"], `键集：${raw}`);
   assert.equal(got.schema_version, 1);
+  // 测试目标（ADR 0049 决策 1、2）：设备模块落地前只显式声明桌面网页，不带 max_session_s；键是协议面的 snake_case
+  // （ui_kinds，不是注册面的 uiKinds），与 Nova 侧逐字相同——CLI 的契约校验对两侧同一道，驼峰会被判不合契约
+  assert.deepEqual(got.targets, [{ device: "desktop", ui_kinds: ["web"] }], raw);
   assert.equal(got.engine, "midscene");
   // model_id 是起 job 时交给 Midscene SDK 的那个模型名（ADR 0036「5.」：doctor 据此显示当前模型）。
   assert.equal(typeof got.model_id, "string", `model_id 该是串：${raw}`);
@@ -791,7 +794,9 @@ test("--capabilities: 一个 JSON 对象即以退出码 0 结束；五键含 det
   assert.ok(Array.isArray(got.deterministic_steps) && got.deterministic_steps.length > 0,
     `清单该非空（内建脚手架至少一条）：${raw}`);
   for (const e of got.deterministic_steps) {
-    assert.deepEqual(Object.keys(e).sort(), ["description", "example", "keywords", "pattern"], `清单项形状：${JSON.stringify(e)}`);
+    assert.deepEqual(Object.keys(e).sort(), ["description", "example", "keywords", "pattern", "targets"], `清单项形状：${JSON.stringify(e)}`);
+    // 条目的目标由句柄推出（ADR 0050 决策 1）：只有 playwright 句柄 → 桌面网页；原样报出、不与顶层求交（ADR 0049 决策 3）
+    assert.deepEqual(e.targets, [{ device: "desktop", ui_kinds: ["web"] }], JSON.stringify(e));
     for (const k of ["pattern", "description", "example"]) {
       assert.equal(typeof e[k], "string", `${k} 该是串：${JSON.stringify(e)}`);
       assert.ok(e[k].length > 0, `${k} 不该空：${JSON.stringify(e)}`);

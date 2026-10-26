@@ -85,6 +85,14 @@ export const MIN_GRACE_MARGIN_MS = 7500;
 // 自述对象的 schema 版本（ADR 0036「5.」：只在既有键语义变化时递增；加键不递增）。
 const CAPABILITIES_SCHEMA_VERSION = 1;
 
+/** 本 worker 支持的测试目标（ADR 0049 决策 1）。1.5 的设备模块（Appium 经 Device Farm）落地前只声明桌面网页：提前声明
+ *  android / ios 会让新 CLI 把设备 job 交给一个还不会驱动设备的 worker；设备条目连同从释放预算常量算出的 max_session_s
+ *  随设备模块一起加。**单一来源**：能力自述报它，建会话前的自检（ADR 0049 决策 7）也核它。键是协议面的 snake_case
+ *  （ui_kinds / max_session_s），不是注册面的驼峰（uiKinds），与 Nova 侧 WORKER_TARGETS 逐字相同。 */
+export const WORKER_TARGETS: ReadonlyArray<{ device: string; ui_kinds: string[]; max_session_s?: number }> = [
+  { device: "desktop", ui_kinds: ["web"] },
+];
+
 /** 本引擎自报给组合根的 grace 下限，单位秒（ADR 0024「引擎自报下限」，经 `--capabilities` 出口，
  *  契约见 ADR 0036「5. worker 自述：--capabilities」）。
  *
@@ -411,6 +419,7 @@ export async function main(): Promise<number> {
       schema_version: CAPABILITIES_SCHEMA_VERSION,
       engine: ENGINE,  // 与 evidence 报的引擎名同源，不另写字面量
       min_grace_s: minGraceSeconds(),
+      targets: WORKER_TARGETS.map((t) => ({ ...t, ui_kinds: [...t.ui_kinds] })),  // ADR 0049 决策 1
       deterministic_steps: listRegistry(),
       model_id: MODEL,
     }) + "\n");

@@ -612,6 +612,28 @@ _OK_TAIL = _OK_STEPS + _OK_MODEL  # 两个合法的尾键：拿它填「缺陷�
     b'{' + _OK_HEAD + b', "min_grace_s": 150, "deterministic_steps": [{"pattern": "p", "description": "d", "example": "e", "keywords": "Given"}]' + _OK_MODEL + b'}',  # keywords 不是数组
     b'{' + _OK_HEAD + b', "min_grace_s": 150, "deterministic_steps": [{"pattern": "p", "description": "d", "example": "e", "keywords": [["Given"]]}]' + _OK_MODEL + b'}',  # 元素不是字符串（进 set 会 TypeError，须先核类型）
     b'{' + _OK_HEAD + b', "min_grace_s": 150, "deterministic_steps": ["p"]' + _OK_MODEL + b'}',  # 清单项不是对象（消费者 e.get 会崩在无关处）
+    # ---- 测试目标相关键（ADR 0049 决策 1）：顶层 targets ----
+    b'{' + _OK_HEAD + b', "min_grace_s": 150, "targets": {}' + _OK_TAIL + b'}',                                                  # targets 不是数组
+    b'{' + _OK_HEAD + b', "min_grace_s": 150, "targets": [{"device": "tv", "ui_kinds": ["web"]}]' + _OK_TAIL + b'}',              # 未知 device
+    b'{' + _OK_HEAD + b', "min_grace_s": 150, "targets": [{"device": "android", "ui_kinds": []}]' + _OK_TAIL + b'}',              # ui_kinds 空
+    b'{' + _OK_HEAD + b', "min_grace_s": 150, "targets": [{"device": "android", "ui_kinds": ["web", "web"]}]' + _OK_TAIL + b'}',  # ui_kinds 重复
+    b'{' + _OK_HEAD + b', "min_grace_s": 150, "targets": [{"device": "android", "ui_kinds": ["tv"]}]' + _OK_TAIL + b'}',          # 未知 ui_kind
+    b'{' + _OK_HEAD + b', "min_grace_s": 150, "targets": [{"device": "desktop", "ui_kinds": ["web", "app"]}]' + _OK_TAIL + b'}',  # desktop 带 app
+    b'{' + _OK_HEAD + b', "min_grace_s": 150, "targets": [{"device": "android", "ui_kinds": ["web"], "max_session_s": 0}]' + _OK_TAIL + b'}',        # max_session_s 为 0
+    b'{' + _OK_HEAD + b', "min_grace_s": 150, "targets": [{"device": "android", "ui_kinds": ["web"], "max_session_s": -1}]' + _OK_TAIL + b'}',       # 负数
+    b'{' + _OK_HEAD + b', "min_grace_s": 150, "targets": [{"device": "android", "ui_kinds": ["web"], "max_session_s": "8880"}]' + _OK_TAIL + b'}',   # 字符串
+    b'{' + _OK_HEAD + b', "min_grace_s": 150, "targets": [{"device": "android", "ui_kinds": ["web"], "max_session_s": true}]' + _OK_TAIL + b'}',     # bool
+    b'{' + _OK_HEAD + b', "min_grace_s": 150, "targets": [{"device": "android", "ui_kinds": ["web"], "max_session_s": 1e999}]' + _OK_TAIL + b'}',    # Infinity
+    b'{' + _OK_HEAD + b', "min_grace_s": 150, "targets": [{"device": "android", "ui_kinds": ["web"]}, {"device": "android", "ui_kinds": ["app"], "max_session_s": 10}]' + _OK_TAIL + b'}',  # 顶层 device 重复
+    b'{' + _OK_HEAD + b', "min_grace_s": 150, "targets": [{"device": "android", "ui_kinds": ["web"], "requires": ["web_context"]}]' + _OK_TAIL + b'}',  # 顶层条目不带 requires
+    # ---- step 级 targets ----
+    b'{' + _OK_HEAD + b', "min_grace_s": 150, "deterministic_steps": [{"pattern": "p", "description": "d", "example": "e", "targets": "desktop"}]' + _OK_MODEL + b'}',  # 不是数组
+    b'{' + _OK_HEAD + b', "min_grace_s": 150, "deterministic_steps": [{"pattern": "p", "description": "d", "example": "e", "targets": [{"device": "android", "ui_kinds": ["web"], "requires": "web_context"}]}]' + _OK_MODEL + b'}',  # requires 不是数组
+    b'{' + _OK_HEAD + b', "min_grace_s": 150, "deterministic_steps": [{"pattern": "p", "description": "d", "example": "e", "targets": [{"device": "android", "ui_kinds": ["web"], "requires": ["web_context", "web_context"]}]}]' + _OK_MODEL + b'}',  # requires 重复
+    b'{' + _OK_HEAD + b', "min_grace_s": 150, "deterministic_steps": [{"pattern": "p", "description": "d", "example": "e", "targets": [{"device": "android", "ui_kinds": ["web"], "max_session_s": 10}]}]' + _OK_MODEL + b'}',  # step 级条目不带 max_session_s
+    b'{' + _OK_HEAD + b', "min_grace_s": 150, "deterministic_steps": [{"pattern": "p", "description": "d", "example": "e", "targets": [{"device": "android", "ui_kinds": ["web"]}, {"device": "android", "ui_kinds": ["web"]}]}]' + _OK_MODEL + b'}',  # 完全重复的 step 级条目
+    # ---- 会话预热支持键 ----
+    b'{' + _OK_HEAD + b', "min_grace_s": 150, "session_warmup": "yes"' + _OK_TAIL + b'}',  # 预热键不是 bool
 ])
 def test_query_capabilities_rejects_off_contract_answer(monkeypatch, novaact_env_cmd, fresh_caps_cache, payload):
     """自述不合契约 → fail-loud（与「输出非 JSON」同类），且不写缓存。校验放在这一个函数里，**每个消费者
@@ -640,6 +662,61 @@ def test_query_capabilities_accepts_keywords_declaration_and_missing_key(monkeyp
     monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: _fake_caps_proc(payload))
     caps = compose.query_capabilities("novaact")
     assert [e.get("keywords") for e in caps["deterministic_steps"]] == [["Given", "When"], ["Given", "When", "Then"], None]
+
+
+def test_query_capabilities_accepts_target_keys_and_keeps_unknown_requires(monkeypatch, novaact_env_cmd, fresh_caps_cache):
+    """测试目标相关键合契约的形态都放行（ADR 0049 决策 1）：顶层多 device、设备条目带 max_session_s、step 级条目带 requires
+    （取值不核：未知字符串如 "foo" 原样保留，取值集合归 worker 注册期校验）、预热键为 bool；同一 device 与 ui_kind 只是
+    requires 不同的两个 step 级条目不算重复；未知的顶层键照旧容忍（向前兼容）。"""
+    import subprocess
+
+    payload = (b'{' + _OK_HEAD + b', "min_grace_s": 150, "session_warmup": true, "future_key": 1, "targets": ['
+               b'{"device": "desktop", "ui_kinds": ["web"]}, {"device": "android", "ui_kinds": ["web", "app"], "max_session_s": 8880}], '
+               b'"deterministic_steps": [{"pattern": "a", "description": "d", "example": "e", "targets": ['
+               b'{"device": "desktop", "ui_kinds": ["web"]}, {"device": "android", "ui_kinds": ["web"], "requires": ["web_context"]}, '
+               b'{"device": "android", "ui_kinds": ["web"], "requires": ["foo"]}]}]' + _OK_MODEL + b'}')
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: _fake_caps_proc(payload))
+    caps = compose.query_capabilities("novaact")
+    assert caps["targets"][1]["max_session_s"] == 8880
+    assert caps["deterministic_steps"][0]["targets"][2]["requires"] == ["foo"]  # 原样保留
+    assert compose._CAPABILITIES_CACHE != {}
+
+
+def test_target_defaults_follow_missing_key_semantics():
+    """缺键语义（ADR 0049 决策 2）：顶层缺 targets、step 级缺 targets 都归一为桌面网页——不是「全部目标」、不是「未知放行」；
+    缺 max_session_s 即无上限（键不出现）；有键时原样取、返回的是副本。"""
+    assert compose.worker_targets({"deterministic_steps": []}) == [{"device": "desktop", "ui_kinds": ["web"]}]
+    assert compose.step_targets({"pattern": "p"}) == [{"device": "desktop", "ui_kinds": ["web"]}]
+    caps = {"targets": [{"device": "android", "ui_kinds": ["web", "app"], "max_session_s": 8880}]}
+    got = compose.worker_targets(caps)
+    assert got == caps["targets"] and got is not caps["targets"] and got[0] is not caps["targets"][0]
+    assert "max_session_s" not in compose.worker_targets({"targets": [{"device": "desktop", "ui_kinds": ["web"]}]})[0]
+    entry = {"targets": [{"device": "ios", "ui_kinds": ["web"], "requires": ["web_context"]}]}
+    assert compose.step_targets(entry) == entry["targets"] and compose.step_targets(entry)[0] is not entry["targets"][0]
+
+
+def test_available_and_unsupported_targets_are_pure_set_operations():
+    """交集（ADR 0049 决策 3）：按 device 匹配、ui_kinds 取交、空则丢弃；requires 原样带入；同一 device 与 ui_kind 只是 requires
+    不同的两条各自保留、不合并。差集给出「声明了但不支持」的部分：整个 device 不支持则整条保留，部分 ui_kind 不支持则只剩那部分。"""
+    declared = [{"device": "desktop", "ui_kinds": ["web"]},
+                {"device": "android", "ui_kinds": ["web", "app"], "requires": ["web_context"]},
+                {"device": "android", "ui_kinds": ["web"]},
+                {"device": "ios", "ui_kinds": ["web"]}]
+    only_desktop = [{"device": "desktop", "ui_kinds": ["web"]}]
+    assert compose.available_targets(declared, only_desktop) == [{"device": "desktop", "ui_kinds": ["web"]}]
+    assert compose.unsupported_targets(declared, only_desktop) == [
+        {"device": "android", "ui_kinds": ["web", "app"], "requires": ["web_context"]},
+        {"device": "android", "ui_kinds": ["web"]},
+        {"device": "ios", "ui_kinds": ["web"]}]
+    android_web = only_desktop + [{"device": "android", "ui_kinds": ["web"], "max_session_s": 8880}]
+    assert compose.available_targets(declared, android_web) == [
+        {"device": "desktop", "ui_kinds": ["web"]},
+        {"device": "android", "ui_kinds": ["web"], "requires": ["web_context"]},  # web 与 app 交出 web，requires 原样
+        {"device": "android", "ui_kinds": ["web"]}]  # 与上一条只差 requires：各自成条
+    assert compose.unsupported_targets(declared, android_web) == [
+        {"device": "android", "ui_kinds": ["app"], "requires": ["web_context"]},
+        {"device": "ios", "ui_kinds": ["web"]}]
+    assert compose.available_targets([], android_web) == [] and compose.unsupported_targets([], android_web) == []
 
 
 def test_query_capabilities_wrong_engine_names_the_misconfiguration(monkeypatch, novaact_env_cmd, fresh_caps_cache):

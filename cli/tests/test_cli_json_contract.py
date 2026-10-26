@@ -114,7 +114,10 @@ def test_list_engines_and_deterministic_json_keys_are_documented(monkeypatch):
     monkeypatch.setattr(m.compose, "resolve_worker_cmd", fake)
     _assert_documented(m._probe_engines(), section="list-engines --json")
     # list-deterministic：CLI 原样转述自述对象里的清单行（pattern/description/example/keywords 四键，ADR 0036「5.」）
-    _assert_documented({"engine": "novaact", "deterministic_steps": [{"pattern": "p", "description": "d", "example": "e", "keywords": ["Given", "When"]}]},
+    _assert_documented({"engine": "novaact", "deterministic_steps": [{
+        "pattern": "p", "description": "d", "example": "e", "keywords": ["Given", "When"],
+        "targets": [{"device": "desktop", "ui_kinds": ["web"]}, {"device": "android", "ui_kinds": ["web"], "requires": ["web_context"]}],
+        "available_targets": [{"device": "desktop", "ui_kinds": ["web"]}]}]},
                        section="list-deterministic --json")
 
 
@@ -125,7 +128,8 @@ def test_doctor_json_keys_are_documented(monkeypatch, capsys):
     monkeypatch.setattr(m._deploy, "resolve_provider", lambda name=None: (None, "没有可用的部署 provider"))
     monkeypatch.setattr(m.compose, "query_capabilities", lambda engine, *, steps_dir=None, timeout_s=60.0: {
         "schema_version": 1, "engine": engine, "min_grace_s": 150.0, "deterministic_steps": [],
-        "model_id": "nova-act-v1.0"})  # 自述五键齐（doctor 的模型行取 model_id，ADR 0036「5.」）
+        "targets": [{"device": "desktop", "ui_kinds": ["web"]}, {"device": "android", "ui_kinds": ["web"], "max_session_s": 8880}],
+        "model_id": "nova-act-v1.0"})  # 自述六键齐（doctor 的模型行取 model_id、目标行取 targets，ADR 0036「5.」、0049 决策 6）
     assert m.main(["doctor", "--json"]) == 0
     _assert_documented(json.loads(capsys.readouterr().out), section="doctor --json")
 
