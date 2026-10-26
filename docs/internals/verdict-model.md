@@ -13,7 +13,7 @@
 | **票**（单次投票） | 一次布尔 AI 调用的返回值 | Nova：`act_get(instruction, BOOL_SCHEMA)` → `bool(r.matches_schema and r.parsed_response)`；Midscene：`agent.aiBoolean(instr)` |
 | **step** | AI 断言（`Then`）：`yes > N/2` → `passed`/`failed`，事件带 `votes={yes,total}`。确定性注册表命中（含内建导航）：`AssertionError`→`failed`、其它异常→`error`。`When`·`Given` 的 AI 动作步：正常返回→`passed`、抛异常→`error` | `_run_step`（Nova）/ `runStep`（Midscene） |
 | **scenario** | 任一 step `error`→`error`；任一 `failed`→`failed`；否则 `passed`。**被短路跳过的 step 不进入该列表** | worker 侧 `_aggregate` / `aggregate`；结论经 `scenario_done` 事件上报 |
-| **job**（即 scope） | 同步 `run` 与无状态批量运行共用一个终结函数与真值表（ADR 0034 机制二）：按行序取第一个命中——推进器首次仲裁落定的停止原因（timeout / abort，只约束内容不完整的 job）→ 退出码非零或未知 → 干净退出无 `scope_done` → `scope_done` 带 scope 级 error → scenario 判定集为空 → 各 scenario 归约；会话未确认停止时归因改 `release_failed`（§3c 图画的是同步路径的事件收场） | `project.finalize_job`（`schedule._Worker._run_once` 与 `project._reduce_scope` 只准备输入） |
+| **job**（即 scope） | 同步 `run` 与无状态批量运行共用一个终结函数与真值表（ADR 0034 机制二）：按行序取第一个命中——推进器首次仲裁落定的停止原因（timeout / abort，只约束内容不完整的 job）→ 退出码非零或未知 → 干净退出无 `scope_done` → `scope_done` 带 scope 级 error → scenario 判定集为空 → 各 scenario 归约；会话未确认停止时，非零退出、scope 级 error 与正常归约三处的归因改 `release_failed`、其余行只追加提示（§3c 图画的是同步路径的事件收场） | `project.finalize_job`（`schedule._Worker._run_once` 与 `project._reduce_scope` 只准备输入） |
 | **run** | 任一 job `error`→`error`；任一 `failed`→`failed`；否则 `passed`。**入口先滤掉非判定状态** | `project._aggregate`（唯一实现，`schedule._aggregate` 是它的别名） |
 
 几点补充：
@@ -40,7 +40,7 @@
 | `skipped` | **core 本地赋值**（三处，见 §3a / §3c 图） | job（fail-fast 下 worker 从未 spawn）· scenario 与其 step（scope 级 error 后对无事件的 scenario 合成）· step（scope 内短路） | 该单元未执行 | job 级：未执行、未产生费用，可直接重新运行（但整个 run 里必然伴随另一个 job 的 `error`，根因在别处）。scenario 级：根因是 job 级的 scope 级 error，看 job 的 `error_type` 与 `message`。step 级：根因是其上游的 `error` step，或所属 scenario 整条未执行 |
 | `aborted` | **core 本地赋值**（终结函数：停止原因为 fail-fast 中止、且内容不完整） | job | 已启动，运行中被终止 | **不宜直接重新运行**：会话已被操作过、可能留下副作用；先查现场（`session_id` 已保留，可对上 worker 日志与轨迹） |
 | `pending` | `create_run` 写初始态 | job（`JobState`）·run（`RunState`） | 尚未启动 | 等待；提交较久而**所有** job 仍为 pending 时，`status` 会提示用 `--wait` 接力推进 |
-| `running` | 收到 `scope_started` 后写入 / 无状态路径 CAS claim | job·run | 执行中 | 等待 / `status --wait` |
+| `running` | 收到 `session_opened`（取设备期间）或 `scope_started` 后写入 / 无状态路径 CAS claim | job·run | 执行中 | 等待 / `status --wait` |
 
 两条边界容易读错：
 
