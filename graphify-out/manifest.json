@@ -1060,13 +1060,13 @@
     "semantic_hash": "f57720be81008703884b8db8163e3d2b"
   },
   "engines/midscene/DEVELOPMENT.md": {
-    "mtime": 1792991499.442898,
-    "ast_hash": "3f41fdb97af2d027282989802ab83d5d",
+    "mtime": 1793010635.0875008,
+    "ast_hash": "851a2d4a38136d945b7e0ee30945ffe3",
     "semantic_hash": ""
   },
   "engines/novaact/DEVELOPMENT.md": {
-    "mtime": 1792991499.4426582,
-    "ast_hash": "9699815fe3fca3158a9520afa5c26fe7",
+    "mtime": 1793010635.0869696,
+    "ast_hash": "43550839585ebebccdad4465e9d8ed69",
     "semantic_hash": ""
   },
   "core/DEVELOPMENT.md": {
@@ -1910,13 +1910,13 @@
     "semantic_hash": ""
   },
   "docs/journey/0013-mobile-devices-implementation.md": {
-    "mtime": 1793010352.0129006,
-    "ast_hash": "ac54f46837b0047a9ae91f2a31c72ad6",
+    "mtime": 1793010635.1171596,
+    "ast_hash": "937bd73ddf74cf7e095c21c8876e7707",
     "semantic_hash": ""
   },
   "docs/journey/0015-mobile-devices-implementation-batches.md": {
-    "mtime": 1793010352.0126023,
-    "ast_hash": "3796506daf970605338b78b854d79b42",
+    "mtime": 1793010635.1169796,
+    "ast_hash": "d6dc43dff5ebe24567a0861a9da5f1bc",
     "semantic_hash": ""
   },
   "features/steps/url_matches.mts": {

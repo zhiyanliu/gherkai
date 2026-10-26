@@ -19,7 +19,7 @@ gherkai_worker_novaact/
 ├── deterministic_steps.py  ← 包内建脚手架：只有内建导航一条（Given / When 后整句是一个地址；判定类示范进 features/steps/ 模板）
 ├── user_steps.py           ← 使用方 `steps/` 目录的加载（fail-loud，退出码 `EX_STEPS_LOAD = 2`）
 ├── evidence.py             ← step 级机读证据：Nova trajectory 裁成自有 schema 的 `evidence.json`（[ADR 0042](../../docs/adr/0042-step-evidence-and-explain.md)）
-└── lib/                    ← I/O 边缘与常量：`job_source.py`（job 入口）· `event_sink.py`（事件出口）· `artifact_upload.py`（产物上传）· `workflow_setup.py`（workflow definition 的 create-if-not-exists）· `constants.py`（`MODEL_ID` / `WORKFLOW_DEF` / `NOVA_GRACE_MARGIN_S`）；`__init__.py` 说明这组为何单独成子包
+└── lib/                    ← I/O 边缘与常量：`job_source.py`（job 入口）· `event_sink.py`（事件出口）· `artifact_upload.py`（产物上传）· `precheck.py`（建会话前按自己的 targets 核对 job 的目标与墙钟预算）· `workflow_setup.py`（workflow definition 的 create-if-not-exists）· `constants.py`（`MODEL_ID` / `WORKFLOW_DEF` / `NOVA_GRACE_MARGIN_S`）；`__init__.py` 说明这组为何单独成子包
 ```
 
 `tests/` 是 pytest 用例（`fixtures/` 中是真产物裁出的 trajectory 与一个中断用 worker），`spikes/` 是可独立运行的对标脚本。

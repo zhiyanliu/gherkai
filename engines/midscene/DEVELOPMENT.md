@@ -34,12 +34,12 @@ src/
 ├── index.mts          ← 包的公开 API：使用方 step 文件 import 的 { deterministic, DeterministicAssertion, 类型 }
 ├── resolve-hook.mts   ← 裸 specifier "@gherkai/worker-midscene" → worker 自身安装位置（随 dist 发布的独立入口）
 ├── worker/            ← 薄 worker：`run-scope.mts`（派发 / 会话 / 事件 / 信号收尾 / 两个非 job 入口的分派）、`deterministic.mts`（确定性注册表）、`deterministic.steps.mts`（内建脚手架）、`user-steps.mts`（使用方 steps 加载）、`argument.mts`（step 多行参数拼接：DataTable/DocString → 附加文本；两引擎须同一拼法）、`evidence.mts`（step 级机读证据：引擎 dump 裁剪为 evidence.json 供 explain 消费，[ADR 0042](../../docs/adr/0042-step-evidence-and-explain.md)）、`error-text.mts`（失败原因压缩为一行有界文本，与 Nova 的 `_error_text` 规则一致）；本目录下还有各模块的 `*.test.mts` 与测试夹具 `fixtures/`
-└── lib/               ← I/O 边缘组件：`job-source.mts`（job 入口）· `event-sink.mts`（事件出口）· `artifact-upload.mts`（产物上传）· `agentcore-sigv4.mts`（SigV4 与模型常量）
+└── lib/               ← I/O 边缘组件：`job-source.mts`（job 入口）· `event-sink.mts`（事件出口）· `artifact-upload.mts`（产物上传）· `agentcore-sigv4.mts`（SigV4 与模型常量）· `redact.mts`（隧道凭据脱敏）· `precheck.mts`（建会话前按自己的 targets 核对 job 的目标与墙钟预算）
 dist/                  ← tsc 产物（*.mjs + *.d.mts），发布物；不入库
 spikes/                ← 分段自检脚本（不进包、不编译）：01 到 05 为桌面链路（模型连接、浏览器连接、合体、规划探针、否定断言），06 为移动真机方向的 Device Farm 加 Appium 探针
 ```
 
-测试都是 `src/**/*.test.mts`，按 tsconfig 的 `exclude` 不进 `dist`。**但测试并非一律与源码同目录**：`lib/` 四个模块的测试（`agentcore-sigv4.test.mts` / `artifact-upload.test.mts` / `event-sink.test.mts` / `job-source.test.mts`）与夹具 `fixtures/` 都落在 `src/worker/` 下，新增测试沿用该位置，不另起 `src/lib/*.test.mts`。
+测试都是 `src/**/*.test.mts`，按 tsconfig 的 `exclude` 不进 `dist`。**但测试并非一律与源码同目录**：`lib/` 各模块的测试（`agentcore-sigv4.test.mts` / `artifact-upload.test.mts` / `event-sink.test.mts` / `job-source.test.mts` / `precheck.test.mts`）与夹具 `fixtures/` 都落在 `src/worker/` 下，新增测试沿用该位置，不另起 `src/lib/*.test.mts`。
 
 ## 执行形态：薄 worker（cucumber 已退役）
 

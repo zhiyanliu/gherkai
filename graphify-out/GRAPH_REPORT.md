@@ -1,7 +1,7 @@
 # Graph Report - yaozhou  (2026-10-26)
 
 ## Corpus Check
-- 376 files · ~605,966 words
+- 376 files · ~606,155 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -10,7 +10,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `ec34fc30`
+- Built from commit: `2e10fac8`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -1405,7 +1405,7 @@ Nodes (18): _index_ast_lines(), _map_argument(), parse_feature(), ParsedScenario
   docs/diagrams/getting-started-component-ownership.svg · relation: conceptually_related_to
 
 ## Knowledge Gaps
-- **639 isolated node(s):** `StepArgument`, `Row`, `Job`, `JobApp`, `JobDeviceRequest` (+634 more)
+- **639 isolated node(s):** `现场`, `documenting 清单（ADR 0048 到 0053 第 7 类内容的汇总，实施期逐项完成）`, `实施期要核的点（ADR 已定、实施时顺手验证）`, `0. B0-navigation：导航规则与注册面关键字声明（1.4 行为的不兼容变更，自己发）`, `1. B1-capabilities：能力自述增键（两个 worker 只声明桌面网页；CLI 唯一校验处与交集；doctor、list-deterministic 呈现）` (+634 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **133 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 

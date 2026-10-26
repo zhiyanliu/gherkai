@@ -201,6 +201,8 @@
 
 规模 M。
 
+**进度（2026-10-26）**：已落地（三笔 code：core 的目标模型与 plan / wire / serialize、CLI 与 compose、两个 worker 的自检与 TS 侧字段契约），pytest 全量 2235 绿、Midscene node 测试 213 绿。真跑核对：① 本机真子进程（不碰 AWS）——两个真实 worker 收到 android/web 的 job 都只发 scope_done{error, precheck_failed}、不发 scope_started、以 0 退出，core 判 ERROR / precheck_failed 并把两个 step 合成 skipped；② 跳板机桌面真跑两引擎（Nova 109 秒、Midscene 63 秒，都 passed）——job 行带 timeoutS=300 两个 worker 行为不变，落盘的 run_meta 只多 timeout_s、没有 target / device_request 键。待双轨复核。与下方底稿的出入：① 结构校验放新模块 `gherkai_core.target`，`job_from_dict` 带 `validate` 开关（缺省开；plan 形态与测试夹具关）；② `Target.as_text()` 给出 `desktop/web`、`android/app:shop` 的紧凑写法，plan 文本与 run 的 job 列表行都用它；③ 设备缺省与下限由 PlanConfig 自带缺省值（按内建取设备预算 600 推出 1500 / 780），CLI 显式传入同样的值、配置文件接上后改由 B3 算；④ 发给 worker 的 `target` 只在非桌面写，桌面 job 的键集合与 1.4 相同（`timeoutS` 在有预算时写，桌面缺省 300 也写——旧 worker 不读该键，两引擎真跑证实）；⑤ plan 的目标拒绝在自述取不到时只警告，WorkerSelfDescribeError 交给随后的派发标注查询报；⑥ 两个 worker 的自检消息里的目标名称（桌面网页 / Android 应用）各自维护一份，与 CLI 的 `render.target_label` 同口径、由各侧测试钉住。未做、留到后续批：plan 把「在该目标上没有实现的确定性 step」标注为走 AI（0048 决策 5 第三条，依赖 B4 的句柄声明）；用户指南与 skill 对 @device / @app 的说明（设备尚不可用，放到文档批）；Fargate 路径带新键的 job 行经 S3 读回的真跑（要等新镜像推送，B8）；版本错位的拦截（新 CLI 写的带目标 definition 被旧 Lambda 读）依赖 0037 决策 7 的版本一致性检查，在部署批真部署上核。
+
 
 **依赖**
 
