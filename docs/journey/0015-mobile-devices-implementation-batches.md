@@ -20,7 +20,7 @@
 - `engines/midscene/src/worker/deterministic.mts` 与 `deterministic.steps.mts` · 注册面与脚手架：条目加可选 keywords（Given / When / Then 子集，注册期校验）；match() 接收关键字、区分「未命中」与「命中但关键字不符」；脚手架只留内建导航条目（模式 = 去掉关键字后整句为地址，引号可有可无；playwright 句柄打开 http(s)，非 http(s) 记 error），删「页面地址匹配」（0050 决策 1、0020 第 2 条）
 - `engines/novaact/gherkai_worker_novaact/deterministic.py` 与 `deterministic_steps.py` · 注册面与脚手架：Python 同构——keywords、match(keyword, text)、内建导航条目、删「页面地址匹配」（0050 决策 1）
 - 两侧的 listRegistry / list_registry · 能力自述：清单项带 keywords（缺省全部）；内建导航条目的 description 为「内建导航：打开地址」、example 为 `Given "https://…"`（0036、0049 决策 6）
-- `cli/gherkai_cli/__main__.py` 与 `render.py` · plan 标注、list-deterministic：导航按确定性 step 标注（网页目标「内建导航：打开 <地址>」；应用目标「内建导航：经 DeepLink 交给被测应用」在 B6 落地后出现）；Then 后只有地址、网页目标非 http(s) 地址在 plan 里标为错误写法——由 worker 的派发探针报出，CLI 只转述（0020 第 3 条、0048 决策 7）
+- `cli/gherkai_cli/__main__.py` 与 `render.py` · plan 标注、list-deterministic：导航按确定性 step 标注（网页目标「内建导航：打开 <地址>」；应用目标「内建导航：经 DeepLink 交给被测应用」在 B6 落地后出现）；Then 后只有地址在 plan 里标为错误写法——由 worker 的派发探针以 keyword_mismatch 报出，CLI 只转述；网页目标非 http(s) 地址 plan 不预检、执行时由 playwright 句柄记 error（0020 第 3 条、0048 决策 7）
 - `docs/internals/cli-json-contract.md` · plan 的 steps[].deterministic 与 list-deterministic：加 keywords 键；导航条目的形态与说明（0036）
 - `features/*.feature`、core/tests、cli/tests 里的用例与夹具：`Given 打开 "…"` 改为 `Given "…"`；依赖内建「页面地址匹配」的用例改用测试自带的 steps/ 夹具（0018）
 - `cli/gherkai_cli/skills/gherkai/SKILL.md`、`references/*.md`、评测集：导航写法、落点核对规则、deterministic-steps 参考加地址核对模板；评测断言同步（0043、0048 决策 7）
@@ -361,11 +361,11 @@
 - `engines/midscene/src/worker/deterministic.mts` · listRegistry()：每项加 `targets`：playwright 推出 {device:'desktop', ui_kinds:['web']}；每个 webdriver 条目按 device 展开、按（device, requires）聚合 ui_kinds，requires 非空时带 `requires`、不同 requires 的拆条不聚合；输出字段用协议的 snake_case（ui_kinds），原样报声明、不与 worker 顶层 targets 求交。顺序取规范序（见 open_questions 第 1 条）（0050 决策 1；0049 决策 1、3）
 - `engines/midscene/src/worker/deterministic.mts` · match() / Match 类型 + 新增纯函数 selectHandler：scan()/matchBatch() 不动（命中与目标无关、--match-steps 输入输出不变）；match() 返回值改为 {entry 句柄集, groups}；新增 `selectHandler(hit, target:{device, uiKind})` → {kind:'playwright', fn} | {kind:'webdriver', fn, requires} | null。null 表示命中的 pattern 在当前目标上没有句柄，调用方走 AI，绝不顺延到下一个 pattern（0050 决策 1（跨 step 的命中与目标无关）；0049 决策 3）
 - `engines/midscene/src/worker/run-scope.mts` · _runStep 派发 ①（约 772 行 matchDeterministic 分支）：桌面路径：hit 后 selectHandler(hit, {device:'desktop', uiKind:'web'})；为 null 时跳过 ① 落到 AI（现状是任何命中都调用 handler({page})，只有 webdriver 句柄的 step 在桌面上会把 page 喂给 webdriver handler 或直接崩）。设备路径的 requires 前置判定（capability_unavailable / engine_error）与 WebdriverCtx 构造在此留接缝，实现归设备批次（0050 决策 1、决策 2；0048 决策 6）
-- `engines/midscene/src/worker/deterministic.steps.mts` · 内建「页面地址匹配」注册：改为 {playwright: 现 handler, webdriver: {uiKinds:['web'], requires:['web_context'], handler: (ctx,{pattern}) => ctx.withWebContext(() => ctx.driver.getUrl()) 后同样正则判定、抛 DeterministicAssertion}}，不限定 devices；文件头 handler 约定注释补 webdriver 形态（0050 决策 1 末条；0048 决策 7）
+- `engines/midscene/src/worker/deterministic.steps.mts` · 脚手架只有内建导航条目（B0 已退役「页面地址匹配」）：本批给它补 webdriver 形态的约定注释；地址精确核对的 webdriver 写法（withWebContext 读地址后正则判定、抛 DeterministicAssertion，requires:['web_context']）作为 steps/ 模板示范进用户指南与 skill 参考，不进脚手架（0050 决策 1、2；0020 第 2 条）
 - `engines/midscene/src/index.mts` · 公开导出面：再导出新增类型 DeterministicHandlers / WebdriverEntry / WebdriverCtx；头注释示例补多句柄写法；match/selectHandler 仍不对使用方开放（0050 决策 1、2；0037 决策 4）
 - `engines/novaact/gherkai_worker_novaact/deterministic.py` · _Entry / deterministic() / list_registry() / match()：同构：_Entry.handler 改为规范化句柄集（playwright 可空 + webdriver 条目元组）；装饰器 `@deterministic(pattern, description=, example=)` 维持等价 playwright；新增多句柄注册形态（字典 {'playwright': fn, 'webdriver': [ {...}, ... ]}，具体签名随实现定），同一套注册期校验与 TS 逐项一致；list_registry 加 targets（同一推出与聚合规则）；新增 select_handler(hit, device, ui_kind)；_hits/match_batch 不动（0050 决策 1「Python 完全同构」）
 - `engines/novaact/gherkai_worker_novaact/run_scope.py` · _run_step 派发 ①（约 392 行）：hit 后按 desktop/web 选 playwright 句柄；无 playwright 句柄（只写了 webdriver 的 Python step）时走 AI、不调用 handler、不报错——Nova 没有设备路径，这类 step 在本 worker 上永远走 AI，靠 targets 原样自述让测试开发看见（0050 决策 1；0049 决策 3、9）
-- `engines/novaact/gherkai_worker_novaact/deterministic_steps.py` · url_matches：是否也补 webdriver 条目：Python 侧没有设备路径，补了只出现在自述 targets 里、永远不会被调用；建议不补（见 open_questions 第 4 条），若补则 handler 体与 TS 对称（0050 决策 1 末条；0049 决策 9）
+- `engines/novaact/gherkai_worker_novaact/deterministic_steps.py` · 脚手架同样只有内建导航条目（B0 已退役 url_matches）：Python 侧没有设备路径，不补 webdriver 形态的示范；多句柄注册面的 Python 同构由跨语言 fixture 验收（0050 决策 1；0049 决策 9）
 - `新增跨语言 fixture（如 engines/ 下两侧都能读到的共享 JSON）` · 注册输入与期望输出：一组注册输入（句柄键、条目字段、handler 用占位）配期望：推出的 targets（规范序）或期望的校验失败类别；TS 测试与 pytest 各自读同一份文件断言（0050 决策 1「两侧共用一套跨语言 fixture」）
 - `docs/user-guide/writing-deterministic-steps.md 与 skill 的确定性 step 参考` · 注册面、ctx 字段、写作方法：补多句柄注册、targets/requires 含义、七字段 ctx（含 app.restart()）与原生上下文不变量、输入与定位事实、测试分层（离线缓存目录 cacheDir / WEBDRIVER_CACHE_DIR）、写作方法六条；不出现「先 AI 后硬化」建议。按 0039/0045 产品口吻，不写 ADR 编号（0050 决策 2、3、4、被拒方案）
 
@@ -375,7 +375,7 @@
 - `engines/midscene/src/worker/deterministic.test.mts`：单函数写法向后兼容：deterministic(p, fn, meta) 的 targets 恰为 [{device:'desktop', ui_kinds:['web']}]，selectHandler(desktop/web) 返回该 fn；现有全部用例不改仍绿（0050 决策 1「单函数写法保持有效」；0049 决策 2）
 - `engines/midscene/src/worker/deterministic.test.mts 与 test_deterministic.py`：不顺延红线：注册 A（只 webdriver android/app）与 B（另一个 pattern、playwright），若某文本同时命中两者 → 仍是冲突（命中与目标无关）；只命中 A 时 selectHandler(desktop/web) 返回 null，不回落到 B；matchBatch 输出形态不变（无 targets 字段）（0050 决策 1（跨 step 的命中与目标无关）；0049 决策 3）
 - `engines/midscene/src/worker/run-scope.test.mts（及 Nova 对应派发测试）`：桌面派发：命中只有 webdriver 句柄的 step 时不调用任何 handler、走 AI 分支（用桩 agent 断言发生了 AI 调用、step 未记 error）（0050 决策 1；0049 决策 9）
-- `engines/midscene/src/worker/deterministic.test.mts`：内建「页面地址匹配」的自述 targets 恰为 desktop/web 无前提，加 android/web 与 ios/web 各一条带 requires:['web_context']（与 0049 示例第二条一致）；webdriver handler 用伪 ctx（withWebContext 直接调用 fn、driver.getUrl 返回定值）判定通过与 DeterministicAssertion 两向（0050 决策 1 末条；0048 决策 7）
+- `engines/midscene/src/worker/deterministic.test.mts`：用测试自带的 steps/ 夹具注册一条带 webdriver 条目（requires:['web_context']）的地址核对 step，断言推出的 targets 为 desktop/web 无前提加 android/web 与 ios/web 各一条带 requires（与 0049 示例第二条一致）；webdriver handler 用伪 ctx（withWebContext 直接调用 fn、driver.getUrl 返回定值）判定通过与 DeterministicAssertion 两向（0050 决策 1；0048 决策 7）
 - `engines/midscene/src/worker/user-steps.test.mts（真实运行层）与 test_user_steps.py`：真 loader 下使用方 steps 文件用多句柄形态注册、经 --capabilities 输出带 targets；注册期校验失败的 steps 文件让 worker 以加载失败退出、诊断带文件名（0050 决策 1 注册期校验；0037 决策 4）
 - `cli 侧能力自述契约测试（与能力自述批次共建）`：两个 worker 真子进程 --capabilities 输出的 deterministic_steps[*].targets 通过 CLI 唯一契约校验（device/ui_kinds/requires 形态）（0049 决策 1）
 
@@ -383,7 +383,7 @@
 
 - 命令守卫对 WebdriverIO 元素对象是否也生效：handler 经 ctx.driver.$() 拿到元素后在 step 结束后再调用 el.click()，必须被拒；Proxy 只包浏览器对象顶层方法时元素命令会绕过守卫，要用真实 WebdriverIO 客户端（Appium fake driver 或 Chrome for Testing）验证，mock 证明不了
 - withWebContext 在真机上切入与（含抛错时）切回原生上下文、handler 自行 switchContext 不切回时 worker 复原：Android Chrome 与 iOS 15.8/18.6 Safari 各一次，下一条 AI 步截图坐标正确
-- 内建「页面地址匹配」webdriver 条目：Android Chrome 真机读地址判定通过；iOS 26.3 Safari 上记 error、类别 capability_unavailable、不调 handler、不转 AI
+- steps/ 模板里的地址核对 step（webdriver 条目，requires:['web_context']）：Android Chrome 真机读地址判定通过；iOS 26.3 Safari 上记 error、类别 capability_unavailable、不调 handler、不转 AI
 - 真 loader（repo 外临时目录、真 dynamic import）下使用方 steps 文件 import 新增的类型与多句柄形态，注册进同一张表（类型只在编译期，但转译器对 type-only import 的处理要真跑确认不残留运行期 import 到 webdriverio）
 - 离线层：本机 WebdriverIO 加 Chrome for Testing 打开材料页执行设备网页句柄，缓存目录显式指定后重启机器不重新下载（文档承诺的行为）
 
@@ -581,7 +581,7 @@
 - `engines/midscene/src/device/interface.mts（新）` · 界面实现：AppiumInterface extends AbstractInterface：实现截图（原生上下文）、尺寸、defineActionsFromInputPrimitives 动作集，原语全部经适配器与守卫下发。系统版本与机型只经唯一的会话能力读取点进入诊断。spike 里的 class AppiumInterface 是原型，要去掉其中的 PLATFORM、SCENARIO 全局分支（0052 决策 3、7）
 - `engines/midscene/src/device/app.mts（新）` · 应用启停：建会话前对应用键做存在性检查，404 与 403 都记 precheck_failed，消息不同；对键预签名。建好后 activateApp 并采样应用状态，回到「未运行」即 precheck_failed。为句柄上下文的 `app.restart()` 提供 terminate、activate、采样三个原语，采样到自退记 engine_error（0052 决策 3，0051 决策 9、14）
 - `engines/midscene/src/device/warmup.mts（新）与桌面实现中的预热` · 隧道预热：设备上按探测结论选 url 或 deepLink，导航 GHERKAI_SESSION_WARMUP_URL 一次，再在原生 page source 里找标记：READY 即就绪；DENIED 或 AUTH REQUIRED 归 precheck_failed；ERROR 或无任何标记时原地重导航、有界重试，耗尽归 engine_error，永不归 network_error。桌面用 page.goto 读响应状态与标记。预热地址只经脱敏出口进入诊断。可复用 spike 的 navigateTo、waitMarkers、nativeMarkers 结构（0052 决策 6（预热），0051 决策 13）
-- `engines/midscene/src/device/surface.mts（新）` · 设备侧接缝实现：串起解析 → Create → 等 RUNNING → 存在性检查与预签名 → newSession → activateApp 与采样 → 探测 → 预热，全程受获取预算约束，到期归 acquire_timeout；完成后 run-scope 才发 scope_started，sessionId 填会话 ARN。实现 step 前核对、复原核对（命令失败先查会话状态）、快照（按条件读地址；在原生上下文取控件与 page_source）、取确定性句柄 ctx{driver, device{platform,osVersion,scale}, uiKind, appId, log, withWebContext}（0052 决策 2，0051 决策 4，0050 决策 2）
+- `engines/midscene/src/device/surface.mts（新）` · 设备侧接缝实现：串起解析 → Create → 等 RUNNING → 存在性检查与预签名 → newSession → activateApp 与采样 → 探测 → 预热，全程受获取预算约束，到期归 acquire_timeout；完成后 run-scope 才发 scope_started，sessionId 填会话 ARN。实现 step 前核对、复原核对（命令失败先查会话状态）、快照（按条件读地址；在原生上下文取控件与 page_source）、取确定性句柄 ctx{driver, device{platform,osVersion,scale}, uiKind, appId, app{restart}, log, withWebContext}（0052 决策 2，0051 决策 4，0050 决策 2）
 - `engines/midscene/src/worker/deterministic.steps.mts` · 内建导航条目加 webdriver 句柄：应用目标经 DeepLink（0048 决策 7），网页目标按能力探测择路（0052 决策 4）；不注册「重新启动应用」与「页面地址匹配」（产品不内置有措辞的 step，0020 第 2 条），两者的示范进 steps/ 模板，重启经 ctx.app.restart()（0050 决策 1、2）
 - `tools/（新，真机重新探测工具）` · 如 tools/device_reprobe.mts 或 .py 包装：在真实会话里逐项执行探测与原语，生成能力矩阵，并与 adapter 和 probe 测试 fixture 做差集。这是长期资产，注释守悬空指针红线（0052 决策 8）
 - `engines/midscene/DEVELOPMENT.md、CONTRIBUTING.md` · 真机验收矩阵、设备模块说明：写明人工触发的真机验收矩阵：Android 加两代 iOS、网页加应用、故障演练、iOS 26 整链路单列一行，列为发版后验证项。DEVELOPMENT 补设备模块的划分与动态加载约定（0052 决策 8）

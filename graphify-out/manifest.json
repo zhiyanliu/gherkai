@@ -230,8 +230,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0020-step-phrasing-default-ai-deterministic-scaffold.md": {
-    "mtime": 1792986203.84521,
-    "ast_hash": "cc78a8e0b37ebd8cd296f299f6266bde",
+    "mtime": 1792986570.8107932,
+    "ast_hash": "f0e4355a2a9546d3e1896df26f2379f2",
     "semantic_hash": ""
   },
   "docs/adr/0025-plan-module-feature-to-jobs.md": {
@@ -1910,13 +1910,13 @@
     "semantic_hash": ""
   },
   "docs/journey/0013-mobile-devices-implementation.md": {
-    "mtime": 1792986252.0399854,
-    "ast_hash": "03d3bd0fb1d573a9a582f0d2adf883bf",
+    "mtime": 1792986570.8131304,
+    "ast_hash": "f307a3d0b6db15081e75fb33a432568e",
     "semantic_hash": ""
   },
   "docs/journey/0015-mobile-devices-implementation-batches.md": {
-    "mtime": 1792986288.0237198,
-    "ast_hash": "d04e608da4094f1a1987e70d213685e6",
+    "mtime": 1792986570.8130112,
+    "ast_hash": "e45df99665113b92092478d66106b5a4",
     "semantic_hash": ""
   }
 }
