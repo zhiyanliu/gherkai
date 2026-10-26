@@ -118,6 +118,8 @@
 
 规模 L。
 
+**进度（2026-10-26）**：已落地（model / wire / errors / serialize、project 的会话归约与代表会话、合成 SKIPPED、终结函数 `finalize_job` 与真值表、设备计量；schedule 的 stop_reason 首次仲裁与停止后有界消费；persist 的代表会话；render / 报告页 / explain 的设备摘要与合成 skipped 旁注；FakeEngine 的收尾事件与非零退出码），单测含真值表逐行、代表会话、合成 SKIPPED、计量、双路径对拍八行、停止后排空、首次仲裁三分支、SIGKILL 负码、零 scenario；真跑（跳板机，Nova 真子进程）：`@timeout:20` 的 scope 在第二步中途超时 → job 判 error、归因 timeout、消息「job 超时（预算 20s，已中止）」，总墙钟 27 秒（停止后排空没有拖到上界）；对执行中的 worker `kill -9` → job 判 error、归因 engine_error、消息带「exit -9」（负退出码不再按干净退出处理）。待双轨复核。与下方底稿的出入：① 退出信息不新建类型，终结函数直接收 `exited` / `exit_code` / `exit_reason` 三个参数；② 「是否设备目标」在 Job 带目标之前按 `is_device_job` 恒 False 实现，设备计量两键在「有会话记录或设备 job」时赋值（桌面 job 保持 None、省键）；③ `_job_status` 保留为终结函数的薄委托（既有测试与 ADR 指针不动）；④ fail-fast 的中止标志在 worker 线程里判定一出就置（不等主线程），排队中的下一个 job 才能稳定地在起 worker 前看到它、记 SKIPPED；⑤ 心跳包装在无 deadline 时也起（排空上界与 fail-fast 的检查都靠它醒来）；⑥ 没见过 `session_opened` 的 `session_closed` 按 created 登记（worker 违约时不丢会话事实）；⑦ 合成 skipped 的旁注在 render 与报告页各一份字面量、由 test_render 跨包锁定（同短路旁注的做法）。
+
 
 **依赖**
 

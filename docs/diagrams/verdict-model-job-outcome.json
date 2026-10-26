@@ -64,6 +64,7 @@
       "ab",
       "ne",
       "ee2",
+      "wk",
       "agg"
     ],
     "requiredEdges": [
@@ -78,6 +79,10 @@
       {
         "from": "q5",
         "to": "agg"
+      },
+      {
+        "from": "q4",
+        "to": "ne"
       }
     ]
   },
@@ -105,7 +110,7 @@
       "col": 2,
       "type": "security",
       "label": "被主动中止？",
-      "sublabel": "事件流逐条复查",
+      "sublabel": "停止决定时一次落定",
       "width": 148
     },
     {
@@ -113,8 +118,8 @@
       "lane": "laneChain",
       "col": 3,
       "type": "security",
-      "label": "网络专用退出码？",
-      "sublabel": "worker 上报",
+      "label": "非零退出或不全？",
+      "sublabel": "退出码未知 / 缺 scope_done",
       "width": 152
     },
     {
@@ -122,7 +127,8 @@
       "lane": "laneChain",
       "col": 4,
       "type": "security",
-      "label": "非零退出或不全？",
+      "label": "scope 级 error？",
+      "sublabel": "worker 自报",
       "width": 152
     },
     {
@@ -131,7 +137,7 @@
       "col": 5,
       "type": "backend",
       "label": "各 scenario 归约",
-      "sublabel": "正常退出、内容完整",
+      "sublabel": "无判定记 engine_error",
       "width": 152
     },
     {
@@ -177,17 +183,27 @@
       "col": 3,
       "type": "external",
       "label": "network_error",
-      "sublabel": "建连耗尽 · error",
+      "sublabel": "网络故障 · error",
       "width": 132
     },
     {
       "id": "ee2",
       "lane": "laneOut",
-      "col": 4,
+      "col": 3,
       "type": "external",
       "label": "engine_error",
-      "sublabel": "默认 · error",
-      "width": 132
+      "sublabel": "其余 · error",
+      "width": 132,
+      "yOffset": 76
+    },
+    {
+      "id": "wk",
+      "lane": "laneOut",
+      "col": 4,
+      "type": "external",
+      "label": "worker 报的归因",
+      "sublabel": "scope 级 error · error",
+      "width": 152
     }
   ],
   "edges": [
@@ -231,7 +247,7 @@
       "id": "q5-agg",
       "from": "q5",
       "to": "agg",
-      "label": "均不是",
+      "label": "否",
       "variant": "emphasis",
       "role": "main",
       "route": "straight"
@@ -256,7 +272,8 @@
       "to": "to",
       "label": "墙钟到点",
       "variant": "security",
-      "role": "error"
+      "role": "error",
+      "labelSegment": 2
     },
     {
       "id": "q3-ab",
@@ -264,30 +281,62 @@
       "to": "ab",
       "label": "fail-fast",
       "variant": "security",
-      "role": "error"
+      "role": "error",
+      "labelSegment": 2
     },
     {
       "id": "q4-ne",
       "from": "q4",
       "to": "ne",
-      "label": "是",
+      "label": "网络退出码",
       "variant": "security",
       "role": "error",
       "via": [
         [
           691.6,
           304
+        ],
+        [
+          609.6,
+          304
+        ],
+        [
+          609.6,
+          450
         ]
       ],
-      "labelAt": [
-        691.6,
-        294
-      ]
+      "toSide": "left",
+      "labelSegment": 2,
+      "labelDx": 4
     },
     {
-      "id": "q5-ee2",
-      "from": "q5",
+      "id": "q4-ee2",
+      "from": "q4",
       "to": "ee2",
+      "label": "其余",
+      "variant": "security",
+      "role": "error",
+      "via": [
+        [
+          691.6,
+          304
+        ],
+        [
+          773.6,
+          304
+        ],
+        [
+          773.6,
+          526
+        ]
+      ],
+      "toSide": "right",
+      "labelSegment": 2
+    },
+    {
+      "id": "q5-wk",
+      "from": "q5",
+      "to": "wk",
       "label": "是",
       "variant": "security",
       "role": "error",
@@ -296,10 +345,6 @@
           881.6,
           304
         ]
-      ],
-      "labelAt": [
-        881.6,
-        294
       ]
     }
   ],
@@ -308,16 +353,17 @@
       "dot": "amber",
       "title": "顺序即判据",
       "items": [
-        "先判定是否启动，再判定是否被主动中止，最后才看事件流的结束方式",
+        "先判定是否启动，再判定是否被主动中止，然后看退出与内容是否完整，最后才做 scenario 归约",
         "前一判据一旦命中即就地定案，不再进入后续判据",
-        "两条主动中止路径归因不同：仅 fail-fast 记 aborted，墙钟到点记 timeout"
+        "主动中止的原因在作出停止决定的那一刻落定：墙钟已过记 timeout，否则记 aborted；之后 worker 如何退出都不改写"
       ]
     },
     {
       "dot": "rose",
       "title": "例外与边界",
       "items": [
-        "worker 以非零退出码异常退出时不再复查中止与超时，即便中止已发起、墙钟已过，一律记 engine_error",
+        "设备会话未确认停止时，非零退出、scope 级 error 与正常归约三处的归因都改为 release_failed",
+        "scope 级 error 先于空判定集检查：worker 在执行前报的失败保留它自己的归因",
         "建连失败的 job 已建立会话并已计费，因此不记 skipped，照常进入整个 run 的聚合",
         "skipped 与 aborted 不带归因，未产出判定的原因只写在 message 里"
       ]

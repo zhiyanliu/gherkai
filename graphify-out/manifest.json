@@ -1405,8 +1405,8 @@
     "semantic_hash": "1124542e9184fea7c5edb92b40e7c686"
   },
   "docs/internals/verdict-model.md": {
-    "mtime": 1792999680.2041183,
-    "ast_hash": "d1e91a5dc8394f6ae4becb0a1246e634",
+    "mtime": 1793000119.0812674,
+    "ast_hash": "b1d754420a70adee0e6baa43ac5d5097",
     "semantic_hash": ""
   },
   "docs/user-guide/README.md": {
@@ -1565,8 +1565,8 @@
     "semantic_hash": "3ad7724c58dba874ed958e67cb8127af"
   },
   "docs/diagrams/verdict-model-job-outcome.svg": {
-    "mtime": 1792999950.2172966,
-    "ast_hash": "58bbc757f57bcd3c570793cb026d2d97",
+    "mtime": 1793000304.2767951,
+    "ast_hash": "d4a253de2342aa71277e75b05dccb073",
     "semantic_hash": ""
   },
   "docs/diagrams/verdict-model-reduction-layers.svg": {
@@ -1660,8 +1660,8 @@
     "semantic_hash": ""
   },
   "docs/diagrams/verdict-model-job-outcome.json": {
-    "mtime": 1792999990.5729976,
-    "ast_hash": "c4e96be2f028ec67be4367c408f4db62",
+    "mtime": 1793000049.9664807,
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "docs/diagrams/verdict-model-reduction-layers.json": {
@@ -1962,11 +1962,6 @@
   "core/tests/test_termination_parity.py": {
     "mtime": 1792999115.155202,
     "ast_hash": "4937a1014f132c7b343c580bb7c1a2bc",
-    "semantic_hash": ""
-  },
-  "docs/diagrams/verdict-model-job-outcome.png": {
-    "mtime": 1792999951.0623,
-    "ast_hash": "1f185a99a31c62c0d6342819e8762fb2",
     "semantic_hash": ""
   }
 }
