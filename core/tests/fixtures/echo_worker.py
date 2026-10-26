@@ -136,12 +136,12 @@ def main():
         # 先无视 SIGTERM 再起孙进程：否则孙进程已起、pid 还没写进文件时一个 SIGTERM 就让本进程退出，孙进程成了无人回收的孤儿
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
         if mode == "done_then_deaf_fdholder" and _events_fd:
-            # 一个只会睡觉的子进程继承事件管道的写端：本进程被强杀后它仍持有写端、管道不 EOF；pid 追加进 pid 文件供测试回收
+            # 一个只会睡觉的子进程继承事件管道的写端：本进程被强杀后它仍持有写端、管道不 EOF。它的 pid 由它**自己**追加进 pid 文件
+            # （SIG_IGN 封不住 SIGKILL：若由本进程在 spawn 之后登记，强杀恰落在中间就留下无人回收的孤儿）
             import subprocess
-            child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"], pass_fds=(int(_events_fd),))
-            if pid_file:
-                with open(pid_file, "a", encoding="utf-8") as fh:
-                    fh.write(f"{child.pid}\n")
+            register = (f"import os, time\nwith open({pid_file!r}, 'a', encoding='utf-8') as fh:\n    fh.write(f'{{os.getpid()}}\\n')\n"
+                        if pid_file else "import time\n") + "time.sleep(120)\n"
+            subprocess.Popen([sys.executable, "-c", register], pass_fds=(int(_events_fd),))
         # 内容已完整，收尾却挂死且无视 SIGTERM：只有 SIGKILL 能结束本进程（无孙进程持写端时管道随之 EOF、退出码为负）
         while True:
             time.sleep(0.05)

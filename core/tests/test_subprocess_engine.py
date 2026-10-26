@@ -177,11 +177,11 @@ def test_fail_fast_stops_multiple_deaf_victims_in_parallel(tmp_path):
     class _Sink(CollectSink):
         def __call__(self, ev):
             super().__call__(ev)
-            if isinstance(ev, ScopeStarted) and ev.scope_id in ("v1", "v2"):
+            if isinstance(ev, ScopeStarted) and ev.scope_id in ("v1", "v2", "c"):
                 with lock:
                     ready.add(ev.scope_id)
-                    if ready == {"v1", "v2"}:
-                        gate.write_text("go")  # 两个 victim 都就绪：放 crash job 崩
+                    if ready == {"v1", "v2", "c"}:
+                        gate.write_text("go")  # 两个 victim 与 crash job 都已就绪：放 crash job 崩（它在 scenario_started 之后等这个文件）
 
     grace = 2.0
     jobs = [_mode_job("c", "crash"), _mode_job("v1", "deaf"), _mode_job("v2", "deaf")]
@@ -191,7 +191,8 @@ def test_fail_fast_stops_multiple_deaf_victims_in_parallel(tmp_path):
     by = {jr.scope_id: jr for jr in result.jobs}
     assert (by["c"].status, by["c"].error_type) == (Status.ERROR, "engine_error")
     assert (by["v1"].status, by["v1"].error_type) == (Status.ABORTED, None) and (by["v2"].status, by["v2"].error_type) == (Status.ABORTED, None)
-    # 耗时从 crash job 的 ScopeDone 之后、即它退出触发 _stop_all 起算不可得，改从「放行」时刻起算：放行到 run 结束的时间约等于一份宽限
+    # crash job 的退出时刻（触发 _stop_all 的那一刻）不可直接得，改从「放行」时刻起算：放行后 crash job 在几十毫秒内退出，
+    # 放行到 run 结束的时间约等于一份宽限（三个进程都已就绪，启动耗时不计入）
     elapsed = time.time() - gate.stat().st_mtime  # 文件 mtime 是墙钟，不能与 monotonic 相减
     assert grace <= elapsed < 2 * grace - 0.2, elapsed  # 串行逐个等宽限至少要两份
 
@@ -275,9 +276,10 @@ def test_done_then_deaf_fdholder_hits_drain_bound_and_is_judged_timeout(tmp_path
         assert (jr.status, jr.error_type) == (Status.ERROR, "timeout"), (jr.status, jr.error_type, jr.message)
         assert grace + DRAIN_MARGIN_S <= elapsed < grace + DRAIN_MARGIN_S + 8.0, elapsed  # 等到了排空上界、之后不再等
         pids = [int(x) for x in pid_file.read_text().split()]
-        assert len(pids) == 2
+        assert len(pids) == 2  # 父进程与孙进程各一行（孙进程自己登记，父进程被强杀也不丢）
         _assert_process_gone(pids[0])  # worker 本体已被 SIGKILL
     finally:
+        time.sleep(0.2)  # 孙进程的 pid 由它自己写入，给它一点启动时间再读
         for line in (pid_file.read_text().split() if pid_file.exists() else []):
             _kill_quietly(int(line))  # 回收持有写端的孙进程（测试夹具自己的责任）
 

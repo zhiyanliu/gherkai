@@ -1254,7 +1254,9 @@ def test_fail_fast_between_check_and_spawn_on_retry_aborts_the_attempt():
         orig(self, *a, **kw)
         captured["w"] = self
 
-    engine = FakeEngine({"a": _passing_events("a", "a:0")}, network_crash_after={"a": [0]})
+    # 第二次 attempt 的假 worker 不发事件、活着等停止请求（tail_after_stop 的键存在即等停）：这样它只能被停止请求结束，
+    # 判定不可能靠「自己执行完」变成 PASSED，ABORTED 与「新 handle 确被停」才是确定性的断言
+    engine = FakeEngine({"a": []}, network_crash_after={"a": [0]}, tail_after_stop={"a": []})
     calls = {"n": 0}
 
     def resolver(name):  # 第二次解析（重试那次）时置位：恰落在起 worker 前的检查之后、spawn 之前
@@ -1266,11 +1268,12 @@ def test_fail_fast_between_check_and_spawn_on_retry_aborts_the_attempt():
     sch._Worker.__init__ = spy
     try:
         res = schedule(_rm([_job("a")]), resolver, CollectSink(),
-                       opts=ScheduleOpts(max_concurrency=1, network_retry=2, retry_sleep=lambda s: None))
+                       opts=ScheduleOpts(max_concurrency=1, network_retry=2, retry_sleep=lambda s: None, grace_period_s=1.0))
     finally:
         sch._Worker.__init__ = orig
     jr = res.jobs[0]
     assert engine.run_count["a"] == 2 and (jr.status, jr.error_type) == (Status.ABORTED, None), (jr.status, jr.error_type, jr.message)
+    assert engine.handles["a"].stopped  # 新 handle 确被停（不是靠 FakeEngine 自然 EOF）
 
 
 def test_device_job_network_error_is_not_retried(monkeypatch):
