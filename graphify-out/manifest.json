@@ -405,8 +405,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0034-detached-batch-reconciler.md": {
-    "mtime": 1792055138.561807,
-    "ast_hash": "6b60462dec6679df9e16473b2440c5a4",
+    "mtime": 1793002396.6587756,
+    "ast_hash": "4a0a190fadde74177c2e6d9d83cca846",
     "semantic_hash": ""
   },
   "engines/midscene/README.md": {
@@ -1380,8 +1380,8 @@
     "semantic_hash": "d3da2befac141dfdafb55d8b5d5d8ac4"
   },
   "docs/internals/artifacts-and-evidence.md": {
-    "mtime": 1792989152.8437972,
-    "ast_hash": "af3ccdefacaa54c18f5b4e2288531caa",
+    "mtime": 1793002396.6602273,
+    "ast_hash": "ce4e72e86501917d58b0c5beae66ac53",
     "semantic_hash": ""
   },
   "docs/internals/cli-json-contract.md": {
@@ -1405,8 +1405,8 @@
     "semantic_hash": "1124542e9184fea7c5edb92b40e7c686"
   },
   "docs/internals/verdict-model.md": {
-    "mtime": 1793000119.0812674,
-    "ast_hash": "b1d754420a70adee0e6baa43ac5d5097",
+    "mtime": 1793002396.6599548,
+    "ast_hash": "a93824211e1bb3d51212aa06b623b883",
     "semantic_hash": ""
   },
   "docs/user-guide/README.md": {
@@ -1910,13 +1910,13 @@
     "semantic_hash": ""
   },
   "docs/journey/0013-mobile-devices-implementation.md": {
-    "mtime": 1792999680.2048829,
-    "ast_hash": "eb93dc38cb6bfa3ba4ccc1d98edd74f7",
+    "mtime": 1793002396.660475,
+    "ast_hash": "4375f6e1f15b9bc367461ac3ff3c538a",
     "semantic_hash": ""
   },
   "docs/journey/0015-mobile-devices-implementation-batches.md": {
-    "mtime": 1792999966.4265192,
-    "ast_hash": "f2d5c4dd7465114d5e3a23f1f63f749c",
+    "mtime": 1793002396.661076,
+    "ast_hash": "e6f60d3b85b10fba42b93b2b16352203",
     "semantic_hash": ""
   },
   "features/steps/url_matches.mts": {
