@@ -96,7 +96,7 @@ export interface StepTarget {
 }
 
 /** 条目有实现的测试目标由句柄推出（ADR 0050 决策 1）：本模块的条目目前只有 playwright 一种句柄，对应桌面网页；
- *  worker 原样报出、不与自己的顶层 targets 求交（交集由 CLI 在契约校验处算，ADR 0049 决策 3）。 */
+ *  worker 原样报出、不与自己的顶层 targets 求交（交集由命令行工具一侧算，ADR 0049 决策 3）。 */
 export const PLAYWRIGHT_TARGET: Readonly<StepTarget> = { device: "desktop", ui_kinds: ["web"] };
 
 export interface RegistryEntry {

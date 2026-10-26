@@ -83,6 +83,7 @@ gherkai 自己不含模型，也不接收任何数据。每个 AI step 的操作
 | 安装、前置要求、第一次完整运行                          | [开始使用](./docs/user-guide/getting-started.md)                                                                             |
 | 写 `.feature`、写确定性 step                           | [编写 .feature](./docs/user-guide/writing-features.md) · [编写确定性 step](./docs/user-guide/writing-deterministic-steps.md) |
 | 四种组合、选项、退出码、结果在哪                         | [运行测试与查看结果](./docs/user-guide/running-and-results.md)                                                               |
+| 两个引擎各能在什么目标上运行、默认模型、计价公式         | [引擎能力矩阵](./docs/user-guide/engines.md)                                                                                   |
 | 测只在本机 / 内网可达的应用                           | [测本机或内网里的被测应用](./docs/user-guide/local-app-testing.md)                                                           |
 | 部署与维护团队的云端后端                              | [部署与维护云端后端](./docs/user-guide/cloud-backend.md)                                                                     |
 | 环境变量与选项总表                                    | [配置](./docs/user-guide/configuration.md)                                                                                   |

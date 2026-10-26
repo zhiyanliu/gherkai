@@ -90,7 +90,7 @@ def deterministic(pattern: str, *, description: str, example: str,
 
 
 # 条目有实现的测试目标（ADR 0049 决策 1、3）：由句柄推出（ADR 0050 决策 1）——本引擎的条目只有 playwright 一种句柄，
-# 对应桌面网页；worker 原样报出、不与自己的顶层 targets 求交（交集由 CLI 在契约校验处算）。
+# 对应桌面网页；worker 原样报出、不与自己的顶层 targets 求交（交集由命令行工具一侧算，ADR 0049 决策 3）。
 PLAYWRIGHT_TARGET: dict = {"device": "desktop", "ui_kinds": ["web"]}
 
 

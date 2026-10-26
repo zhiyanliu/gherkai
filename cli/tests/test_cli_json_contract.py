@@ -106,19 +106,23 @@ def test_status_json_keys_are_documented():
     _assert_documented(doc, section="status --json")
 
 
-def test_list_engines_and_deterministic_json_keys_are_documented(monkeypatch):
+def test_list_engines_and_deterministic_json_keys_are_documented(monkeypatch, capsys):
     def fake(name, *, version=None):
         if name == "novaact":
             return compose.WorkerCmd(cmd=["python", "-m", "gherkai_worker_novaact"], cwd=None, source="同 venv 模块 gherkai_worker_novaact")
         raise compose.WorkerNotFoundError(name, "未找到")
     monkeypatch.setattr(m.compose, "resolve_worker_cmd", fake)
     _assert_documented(m._probe_engines(), section="list-engines --json")
-    # list-deterministic：CLI 原样转述自述对象里的清单行（pattern/description/example/keywords 四键，ADR 0036「5.」）
-    _assert_documented({"engine": "novaact", "deterministic_steps": [{
-        "pattern": "p", "description": "d", "example": "e", "keywords": ["Given", "When"],
-        "targets": [{"device": "desktop", "ui_kinds": ["web"]}, {"device": "android", "ui_kinds": ["web"], "requires": ["web_context"]}],
-        "available_targets": [{"device": "desktop", "ui_kinds": ["web"]}]}]},
-                       section="list-deterministic --json")
+    # list-deterministic：样例取真实命令的 --json 输出（worker 原样条目加 CLI 追加的 available_targets，ADR 0049 决策 6），
+    # 以后 CLI 再追加键也进对照
+    monkeypatch.setattr(m.compose, "query_capabilities", lambda engine, *, steps_dir=None, timeout_s=60.0: {
+        "schema_version": 1, "engine": engine, "min_grace_s": 150.0, "model_id": "nova-act-v1.0",
+        "targets": [{"device": "desktop", "ui_kinds": ["web"]}],
+        "deterministic_steps": [{"pattern": "p", "description": "d", "example": "e", "keywords": ["Given", "When"],
+                                 "targets": [{"device": "desktop", "ui_kinds": ["web"]},
+                                             {"device": "android", "ui_kinds": ["web"], "requires": ["web_context"]}]}]})
+    assert m.main(["list-deterministic", "--engine", "novaact", "--json"]) == 0
+    _assert_documented(json.loads(capsys.readouterr().out), section="list-deterministic --json")
 
 
 def test_doctor_json_keys_are_documented(monkeypatch, capsys):
@@ -131,7 +135,13 @@ def test_doctor_json_keys_are_documented(monkeypatch, capsys):
         "targets": [{"device": "desktop", "ui_kinds": ["web"]}, {"device": "android", "ui_kinds": ["web"], "max_session_s": 8880}],
         "model_id": "nova-act-v1.0"})  # 自述六键齐（doctor 的模型行取 model_id、目标行取 targets，ADR 0036「5.」、0049 决策 6）
     assert m.main(["doctor", "--json"]) == 0
-    _assert_documented(json.loads(capsys.readouterr().out), section="doctor --json")
+    doc = json.loads(capsys.readouterr().out)
+    _assert_documented(doc, section="doctor --json")
+    # 项名是 `name` 的**值**，键名护栏照不出它：把按引擎后缀的项名归一成 `<engine>` 形态后逐个核对契约页里写了
+    page = DOC.read_text(encoding="utf-8")
+    for name in {c["name"] for c in doc["checks"]}:
+        generic = re.sub(r"\.(novaact|midscene)$", ".<engine>", name)
+        assert f"`{generic}`" in page, f"[doctor --json] 项名 {name}（{generic}）没写进 docs/internals/cli-json-contract.md"
 
 
 def _sample_evidence() -> dict:

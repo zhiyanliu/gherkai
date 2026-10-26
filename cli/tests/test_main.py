@@ -657,6 +657,7 @@ def test_list_deterministic_text_and_json(monkeypatch, capsys):
     assert "Given / When" in out  # 声明了子集的条目按声明显示
     assert out.count("任意") == 2  # 没声明的与三个全声明的都显示「任意」
     assert "目标" in out and out.count("桌面网页") == 3  # 条目与 worker 都没声明 targets → 按缺键语义都是桌面网页（ADR 0049 决策 2）
+    assert "^nav$" in out  # 模式列是复制源、不折行（ADR 0047 标识列）
     assert m.main(["list-deterministic", "--json"]) == 0  # 默认 novaact（对齐 run 缺省）
     doc = json.loads(capsys.readouterr().out)
     desktop = [{"device": "desktop", "ui_kinds": ["web"]}]
@@ -671,7 +672,7 @@ def test_list_deterministic_targets_column_intersection_and_unsupported_note(mon
                    {"device": "desktop", "ui_kinds": ["web"]},
                    {"device": "android", "ui_kinds": ["web", "app"], "requires": ["web_context"]},
                    {"device": "ios", "ui_kinds": ["app"]}]},
-               {"pattern": "b", "description": "只有设备", "example": "Then b", "targets": [{"device": "ios", "ui_kinds": ["web"]}]}]
+               {"pattern": "b", "description": "只有设备", "example": "Then b", "targets": [{"device": "ios", "ui_kinds": ["web"], "requires": ["foo"]}]}]
     monkeypatch.setattr(m.compose, "query_capabilities",
                         lambda engine, *, steps_dir=None, timeout_s=60.0: {
                             "schema_version": 1, "engine": engine, "min_grace_s": 31.0, "model_id": "m",
@@ -680,8 +681,8 @@ def test_list_deterministic_targets_column_intersection_and_unsupported_note(mon
     assert m.main(["list-deterministic", "--engine", "midscene"]) == 0
     out = capsys.readouterr().out
     assert "桌面网页、Android 网页（需要网页上下文）" in out
-    assert "声明了「Android 应用、iOS 应用」，此引擎不支持" in out
-    assert "（此引擎上无可用目标）；声明了「iOS 网页」，此引擎不支持" in out
+    assert "声明了「Android 应用（需要网页上下文）、iOS 应用」，此引擎不支持" in out  # 不支持的目标同样带前提
+    assert "（此引擎上无可用目标）；声明了「iOS 网页（需要 foo）」，此引擎不支持" in out  # 未知前提原样显示（ADR 0049 决策 1）
     assert m.main(["list-deterministic", "--engine", "midscene", "--json"]) == 0
     doc = json.loads(capsys.readouterr().out)
     assert doc["deterministic_steps"][0]["targets"] == entries[0]["targets"]  # 原样
@@ -1638,8 +1639,11 @@ def test_doctor_reports_worker_targets_with_session_limit_minutes(tmp_path, monk
     by = {(c["section"], c["name"]): c for c in json.loads(capsys.readouterr().out)["checks"]}
     nova = by[("engines", "targets.novaact")]
     assert nova["ok"] is True and nova["required"] is False and nova["detail"] == "支持的测试目标：桌面网页（本机 worker 自报）"
-    mid = by[("engines", "targets.midscene")]["detail"]
-    assert "桌面网页、Android 网页、Android 应用（会话上限 148 分钟）" in mid and "网页上下文" not in mid
+    mid = by[("engines", "targets.midscene")]
+    assert mid["ok"] is True and mid["required"] is False  # 不支持设备不算失败、支持设备也只是展示
+    assert "桌面网页、Android 网页、Android 应用（会话上限 148 分钟）" in mid["detail"]
+    assert m.render.targets_label([{"device": "ios", "ui_kinds": ["web"], "max_session_s": 1000}], with_session_limit=True) == "iOS 网页（会话上限 16.7 分钟）"
+    assert m.render.targets_label([], with_session_limit=True) == "无"  # worker 声明不支持任何目标
     assert m.main(["doctor"]) == 0
     out = capsys.readouterr().out
     assert out.index("engines.targets.novaact") < out.index("steps.dir")  # 仍在 engines 段内

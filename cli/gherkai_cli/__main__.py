@@ -627,7 +627,7 @@ def _cmd_list_deterministic(args) -> int:
         missing = compose.unsupported_targets(declared, supported)
         text = render.targets_label(avail) if avail else "（此引擎上无可用目标）"
         if missing:
-            text += f"；声明了「{render.targets_label(missing, with_requires=False)}」，此引擎不支持"
+            text += f"；声明了「{render.targets_label(missing)}」，此引擎不支持"
         return text
 
     # 表格渲染（ADR 0047）：示例列是 feature 作者的复制源，放最前；关键字列只在条目有声明时有内容（缺省接受全部）；
@@ -637,7 +637,7 @@ def _cmd_list_deterministic(args) -> int:
                          " / ".join(e["keywords"]) if e.get("keywords") and len(e["keywords"]) < 3 else "任意",
                          target_cell(declared)]
                         for e, declared in rows],
-                       wrap=[1, 2, 4]))  # 示例是 feature 作者的复制源、不折断；说明、模式（内建导航的模式很长，要原文用 --json）与目标列可折
+                       wrap=[1, 4]))  # 示例与模式是复制源、不折断（ADR 0047 标识列）；说明与目标列可折
     return 0
 
 
@@ -1061,7 +1061,7 @@ def _probe_deterministic_dispatch(jobs, steps_dir: str | None) -> dict | None:
     keywords 声明，ADR 0050 决策 1）。按引擎 best-effort：
     某引擎查询失败只让该引擎的 job 无标注（stderr 警告），不影响其他引擎与 plan 本体——**含定位链 miss**
     （该引擎运行时没装，ADR 0037 决策 3 明确 plan 保持本降级、不像 run/submit 那样以退出码 2 结束）。**例外**：worker
-    起来了但自述非零退出（WorkerSelfDescribeError，典型情形是使用方 steps 加载失败）原样抛出、由 `_cmd_plan` 以退出码 2 结束
+    起来了但自述非零退出（WorkerSelfDescribeError，典型情形是使用方 steps 加载失败，或 worker 与 CLI 版本不一致、旧 worker 不认新的查询输入形态）原样抛出、由 `_cmd_plan` 以退出码 2 结束
     ——那是使用方代码错误，降级成无标注等于静默把定制 step 换成 AI（ADR 0037 决策 4）。
     steps_dir 透传给 worker 自述入口，使标注反映使用方定制 step（ADR 0037 决策 4）。
     """
@@ -1184,7 +1184,7 @@ def _cmd_plan(args) -> int:
     except compose.WorkerSelfDescribeError as e:
         # 唯一不降级的失败（ADR 0036 决策 4）：成因可能是使用方 steps 加载失败，也可能是 worker 与 CLI 版本不一致（旧 worker
         # 不认新的 match 查询输入形态），两种都不能降级成「无标注」——那等于把定制 step 悄悄换成 AI。成因提示与其它入口同一句。
-        _progress(f"引擎 worker 的 match 查询失败，plan 拒绝出结果（否则标注静默缺失，即定制 step 被悄悄换成 AI）：{e}{_SELF_DESCRIBE_CAUSES}")
+        _progress(f"向引擎 worker 查询确定性 step 失败，plan 拒绝出结果（否则标注静默缺失，即定制 step 被悄悄换成 AI）：{e}\n{_SELF_DESCRIBE_CAUSES}")
         return 2
 
     # 核心产出 → stdout（与 run 的输出契约一致：--json 单文档 / 否则人看文本）

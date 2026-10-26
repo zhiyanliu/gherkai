@@ -413,7 +413,7 @@ export async function main(): Promise<number> {
   // Midscene SDK 的模型名，即 modelConfig() 的 MIDSCENE_MODEL_NAME，与它同源引用 lib/agentcore-sigv4 的 MODEL
   // 常量、此处不另写字面量（否则自述会与实际用的模型漂移，而 doctor 正是拿这个键显示「当前用哪个模型」）。
   // **加键不加入口**（ADR 0036「5.」）：新增自述项都是本对象的新键、不再开第二个 flag——组合根一次 spawn
-  // 就同时拿到「steps 加载成功 / 清单 / grace 下限 / 模型」。
+  // 就同时拿到「steps 加载成功 / 清单 / grace 下限 / 目标 / 模型」；targets 见 WORKER_TARGETS（ADR 0049 决策 1）。
   if (process.argv.includes("--capabilities")) {
     await writeStdoutFlushed(JSON.stringify({
       schema_version: CAPABILITIES_SCHEMA_VERSION,

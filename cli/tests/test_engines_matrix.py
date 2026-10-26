@@ -51,6 +51,14 @@ def test_matrix_lists_exactly_the_two_engines():
     assert {r["engine"] for r in matrix_rows()} == set(names.ENGINES)
 
 
+def test_matrix_target_names_are_the_product_labels():
+    """目标列只能用产品语言名称（render.target_label 产出的那一套）：Midscene 行由 npm 侧按手抄的名称映射核，这里把两侧
+    名称拼法钉在同一来源上，改了 render 的名称而没改矩阵或 TS 测试里的副本时在此失败。"""
+    labels = {target_label(d, k) for d in ("desktop", "android", "ios") for k in ("web", "app")} - {target_label("desktop", "app")}
+    for r in matrix_rows():
+        assert r["target"] in labels, f"矩阵目标名 {r['target']!r} 不是产品名称之一：{sorted(labels)}"
+
+
 def test_matrix_rows_for_novaact_match_the_worker_self_description():
     """Nova 行逐行对照真子进程的自述（剥掉 NOVA_* / GHERKAI_* / AWS_* 等覆盖，取无覆盖时的默认值）。"""
     keep = ("PATH", "PYTHONPATH", "PYTHONHOME", "HOME", "TMPDIR", "LANG", "LC_ALL", "SYSTEMROOT", "VIRTUAL_ENV")

@@ -534,7 +534,7 @@ def query_capabilities(engine: str, *, steps_dir: str | Path | None = None,
     raw = caps.get("min_grace_s")
     # 契约校验：非负有限数（bool 是 int 子类、单独挡）。不合契约意味着 worker 与 CLI 不同版本 / 自述实现错，
     # 与「输出非 JSON」同类 fail-loud——把它当 0 会让 core 的 grace 护栏形同废除。
-    if isinstance(raw, bool) or not isinstance(raw, (int, float)) or not math.isfinite(raw) or raw < 0:
+    if not _is_finite_number(raw) or raw < 0:
         raise RuntimeError(
             f"引擎 {engine} 自述的最短停止宽限不是非负有限数：{raw!r}"
             "——worker 与命令行工具版本不一致？两者须同版本安装。"
@@ -573,10 +573,12 @@ def query_capabilities(engine: str, *, steps_dir: str | Path | None = None,
         )
     # 测试目标相关的键（ADR 0049 决策 1）：顶层 targets、每个清单项的 targets、会话预热支持键。都可缺（缺键语义见
     # worker_targets / step_targets），有则形态须合契约；交集不在这里算、不改写对象（消费点经下面的纯函数取）。
-    _validate_targets(engine, caps.get("targets"), where="顶层 targets", top_level=True)
+    if "targets" in caps:  # 只有缺键算旧 worker；显式 null 不合契约
+        _validate_targets(engine, caps["targets"], where="顶层 targets", top_level=True)
     for entry in caps["deterministic_steps"]:
-        _validate_targets(engine, entry.get("targets"), where=f"确定性 step 条目 {entry.get('pattern')!r} 的 targets",
-                          top_level=False)
+        if "targets" in entry:
+            _validate_targets(engine, entry["targets"], where=f"确定性 step 条目 {entry.get('pattern')!r} 的 targets",
+                              top_level=False)
     if SESSION_WARMUP_KEY in caps and not isinstance(caps[SESSION_WARMUP_KEY], bool):
         raise RuntimeError(
             f"引擎 {engine} 自述的会话预热支持键 {SESSION_WARMUP_KEY} 不是布尔值：{caps[SESSION_WARMUP_KEY]!r}"
@@ -595,13 +597,22 @@ UI_KINDS = ("web", "app")
 SESSION_WARMUP_KEY = "session_warmup"
 
 
+def _is_finite_number(x) -> bool:
+    """有限的 int / float（bool 单独挡；超出 float 范围的大整数按「不是有限数」处理，不让 math.isfinite 的 OverflowError 漏出）。"""
+    if isinstance(x, bool) or not isinstance(x, (int, float)):
+        return False
+    try:
+        return math.isfinite(x)
+    except OverflowError:
+        return False
+
+
 def _validate_targets(engine: str, targets, *, where: str, top_level: bool) -> None:
-    """targets 数组的形态校验（ADR 0049 决策 1）：缺键放行（None）；有则每项 device 取 TARGET_DEVICES 之一、ui_kinds 非空
-    不重复且都取 UI_KINDS 之一、desktop 只允许 ["web"]；顶层条目 device 不重复、可带 max_session_s（正有限数、排除 bool）；step 级
-    条目可带 requires（字符串数组、不重复，取值不核——取值集合归 worker 注册期校验，CLI 不另立第二事实源），
-    且不出现 device / ui_kinds / requires 三项完全相同的重复条目。不合即 RuntimeError（调用方不写缓存）。"""
-    if targets is None:
-        return
+    """targets 数组的形态校验（ADR 0049 决策 1）：调用方只在键存在时调用（缺键是旧 worker、放行；显式 null 不合契约）；
+    每项 device 取 TARGET_DEVICES 之一、ui_kinds 非空不重复且都取 UI_KINDS 之一、desktop 只允许 ["web"]；顶层条目 device
+    不重复、可带 max_session_s（正有限数、排除 bool）；step 级条目可带 requires（字符串数组、不重复，取值不核——取值集合归
+    worker 注册期校验，CLI 不另立第二事实源），且不出现 device / ui_kinds / requires 三项完全相同的重复条目。
+    不合即 RuntimeError（调用方不写缓存）。"""
     bad = RuntimeError(f"引擎 {engine} 自述的{where}不合契约：{targets!r}——worker 与命令行工具版本不一致？两者须同版本安装。")
     if not isinstance(targets, list):
         raise bad
@@ -620,17 +631,17 @@ def _validate_targets(engine: str, targets, *, where: str, top_level: bool) -> N
                 raise bad
             if "max_session_s" in t:
                 ms = t["max_session_s"]
-                if isinstance(ms, bool) or not isinstance(ms, (int, float)) or not math.isfinite(ms) or ms <= 0:
+                if not _is_finite_number(ms) or ms <= 0:
                     raise bad
             fingerprint: tuple = (t["device"],)
         else:
             if "max_session_s" in t:
                 raise bad
             req = t.get("requires")
-            if req is not None and (not isinstance(req, list) or not all(isinstance(r, str) for r in req)
+            if "requires" in t and (not isinstance(req, list) or not all(isinstance(r, str) for r in req)
                                     or len(set(req)) != len(req)):
-                raise bad
-            fingerprint = (t["device"], tuple(kinds), tuple(req or ()))
+                raise bad  # 显式 null 与非字符串元素都不合契约（step_targets 会原样复制它）
+            fingerprint = (t["device"], frozenset(kinds), frozenset(req or ()))  # 元素相同只是顺序不同也算重复
         if fingerprint in seen:
             raise bad
         seen.append(fingerprint)

@@ -632,6 +632,17 @@ _OK_TAIL = _OK_STEPS + _OK_MODEL  # 两个合法的尾键：拿它填「缺陷�
     b'{' + _OK_HEAD + b', "min_grace_s": 150, "deterministic_steps": [{"pattern": "p", "description": "d", "example": "e", "targets": [{"device": "android", "ui_kinds": ["web"], "requires": ["web_context", "web_context"]}]}]' + _OK_MODEL + b'}',  # requires 重复
     b'{' + _OK_HEAD + b', "min_grace_s": 150, "deterministic_steps": [{"pattern": "p", "description": "d", "example": "e", "targets": [{"device": "android", "ui_kinds": ["web"], "max_session_s": 10}]}]' + _OK_MODEL + b'}',  # step 级条目不带 max_session_s
     b'{' + _OK_HEAD + b', "min_grace_s": 150, "deterministic_steps": [{"pattern": "p", "description": "d", "example": "e", "targets": [{"device": "android", "ui_kinds": ["web"]}, {"device": "android", "ui_kinds": ["web"]}]}]' + _OK_MODEL + b'}',  # 完全重复的 step 级条目
+    b'{' + _OK_HEAD + b', "min_grace_s": 150, "targets": null' + _OK_TAIL + b'}',  # 顶层 targets 显式 null（只有缺键算旧 worker）
+    b'{' + _OK_HEAD + b', "min_grace_s": 150, "targets": [{"device": "android", "ui_kinds": ["web", 1]}]' + _OK_TAIL + b'}',  # ui_kinds 元素不是字符串
+    b'{' + _OK_HEAD + b', "min_grace_s": 150, "targets": [{"device": "android", "ui_kinds": ["web"], "max_session_s": 10}, {"device": "android", "ui_kinds": ["app"], "max_session_s": 20}]' + _OK_TAIL + b'}',  # 同 device 两条都带 max_session_s
+    b'{' + _OK_HEAD + b', "min_grace_s": 150, "targets": [{"device": "android", "ui_kinds": ["web"], "max_session_s": 1' + b"0" * 400 + b'}]' + _OK_TAIL + b'}',  # 超出 float 范围的整数
+    b'{' + _OK_HEAD + b', "min_grace_s": 1' + b"0" * 400 + _OK_TAIL + b'}',  # min_grace_s 同样的超大整数（同一判定）
+    b'{' + _OK_HEAD + b', "min_grace_s": 150, "deterministic_steps": [{"pattern": "p", "description": "d", "example": "e", "targets": null}]' + _OK_MODEL + b'}',  # step 级 targets 显式 null
+    b'{' + _OK_HEAD + b', "min_grace_s": 150, "deterministic_steps": [{"pattern": "p", "description": "d", "example": "e", "targets": [{"device": "android", "ui_kinds": ["web"], "requires": null}]}]' + _OK_MODEL + b'}',  # requires 显式 null
+    b'{' + _OK_HEAD + b', "min_grace_s": 150, "deterministic_steps": [{"pattern": "p", "description": "d", "example": "e", "targets": [{"device": "android", "ui_kinds": ["web"], "requires": ["web_context", 1]}]}]' + _OK_MODEL + b'}',  # requires 元素不是字符串
+    b'{' + _OK_HEAD + b', "min_grace_s": 150, "deterministic_steps": [{"pattern": "p", "description": "d", "example": "e", "targets": [{"device": "android", "ui_kinds": ["web", "app"]}, {"device": "android", "ui_kinds": ["app", "web"]}]}]' + _OK_MODEL + b'}',  # 只是顺序不同的重复 step 级条目
+    b'{' + _OK_HEAD + b', "min_grace_s": 150, "deterministic_steps": [{"pattern": "p", "description": "d", "example": "e", "targets": [{"device": "tv", "ui_kinds": ["web"]}]}]' + _OK_MODEL + b'}',  # step 级未知 device
+    b'{' + _OK_HEAD + b', "min_grace_s": 150, "deterministic_steps": [{"pattern": "p", "description": "d", "example": "e", "targets": [{"device": "desktop", "ui_kinds": ["web", "app"]}]}]' + _OK_MODEL + b'}',  # step 级 desktop 带 app
     # ---- 会话预热支持键 ----
     b'{' + _OK_HEAD + b', "min_grace_s": 150, "session_warmup": "yes"' + _OK_TAIL + b'}',  # 预热键不是 bool
 ])
@@ -717,6 +728,13 @@ def test_available_and_unsupported_targets_are_pure_set_operations():
         {"device": "android", "ui_kinds": ["app"], "requires": ["web_context"]},
         {"device": "ios", "ui_kinds": ["web"]}]
     assert compose.available_targets([], android_web) == [] and compose.unsupported_targets([], android_web) == []
+    # 同 device 但界面类型无交集 → 整条丢弃；结果按声明顺序、不按 worker 顺序
+    only_app = [{"device": "android", "ui_kinds": ["app"]}]
+    assert compose.available_targets([{"device": "android", "ui_kinds": ["web"]}], only_app) == []
+    assert compose.unsupported_targets([{"device": "android", "ui_kinds": ["web"]}], only_app) == [{"device": "android", "ui_kinds": ["web"]}]
+    reversed_decl = [{"device": "ios", "ui_kinds": ["web"]}, {"device": "desktop", "ui_kinds": ["web"]}]
+    both = [{"device": "desktop", "ui_kinds": ["web"]}, {"device": "ios", "ui_kinds": ["web"]}]
+    assert [t["device"] for t in compose.available_targets(reversed_decl, both)] == ["ios", "desktop"]
 
 
 def test_query_capabilities_wrong_engine_names_the_misconfiguration(monkeypatch, novaact_env_cmd, fresh_caps_cache):

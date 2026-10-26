@@ -776,7 +776,7 @@ test("--capabilities: 一个 JSON 对象即以退出码 0 结束；六键含 tar
   const raw = Buffer.concat(out).toString("utf-8");
   assert.equal(code, 0, `应以退出码 0 结束，stderr=${Buffer.concat(err).toString("utf-8")}`);
   const got = JSON.parse(raw);
-  // 键集恰为五个（ADR 0036「5.」）：多一个键就意味着自述契约变了（组合根核 schema_version 的前提），少一个则
+  // 键集恰为六个（ADR 0036「5.」、0049 决策 1）：多一个键就意味着自述契约变了（组合根核 schema_version 的前提），少一个则
   // 消费侧读到 undefined；清单并入本对象后不再有独立的清单 flag（同 ADR 被拒方案「每个自述项一个独立 flag」）。
   assert.deepEqual(Object.keys(got).sort(),
     ["deterministic_steps", "engine", "min_grace_s", "model_id", "schema_version", "targets"], `键集：${raw}`);
