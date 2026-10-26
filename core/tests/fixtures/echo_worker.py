@@ -21,6 +21,7 @@
   WORKER_MODE=bad_line → 吐 scope_started 后写一行不是 JSON 的东西，然后等 SIGTERM——测 core 解析失败后仍停掉活着的 worker
   mode 也可以由 job 的 scope.name 以 "mode:<名>" 指定：同一个 engine 实例下的各个 job 由此使用不同的行为（需要多个 job 同时运行的 fail-fast 测试会用到）。
   WORKER_PID_FILE=<路径> → 启动时把自己的 pid 写进去（测试据此确认进程确已被回收）。
+  WORKER_PID_DIR=<目录> → 启动时把自己的 pid 写进 <目录>/<scope id>.pid（同一 engine 实例下多个 job 各自可辨）。
   WORKER_CRASH_AFTER_FILE=<路径> → crash 形态先等这个文件出现（至多 10 秒）再崩：让测试控制「其它 job 都就绪之后再触发 fail-fast」。
 
 EVENTS: 真 worker 的 scope_started 带 sessionId（ADR 0028 血缘随首事件回传），echo 也带，保协议一致。
@@ -71,6 +72,10 @@ def main():
     pid_file = os.environ.get("WORKER_PID_FILE")
     if pid_file:
         with open(pid_file, "a", encoding="utf-8") as fh:
+            fh.write(f"{os.getpid()}\n")
+    pid_dir = os.environ.get("WORKER_PID_DIR")
+    if pid_dir:
+        with open(os.path.join(pid_dir, f"{scope['id']}.pid"), "w", encoding="utf-8") as fh:
             fh.write(f"{os.getpid()}\n")
 
     if mode == "deaf":

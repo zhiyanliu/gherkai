@@ -170,7 +170,8 @@ def test_fail_fast_stops_multiple_deaf_victims_in_parallel(tmp_path):
     import threading
 
     gate = tmp_path / "crash-now"
-    engine = SubprocessEngine(cmd=[sys.executable, _WORKER], env={**os.environ, "WORKER_MODE": "pass", "WORKER_CRASH_AFTER_FILE": str(gate)})
+    engine = SubprocessEngine(cmd=[sys.executable, _WORKER],
+                              env={**os.environ, "WORKER_MODE": "pass", "WORKER_CRASH_AFTER_FILE": str(gate), "WORKER_PID_DIR": str(tmp_path)})
     ready: set[str] = set()
     lock = threading.Lock()
 
@@ -189,20 +190,42 @@ def test_fail_fast_stops_multiple_deaf_victims_in_parallel(tmp_path):
     stop_phase_start: list[float] = []
 
     def on_job_complete(jr):
-        # crash job 的判定回调紧接着就是主线程的 _stop_all：从这里起算，crash job 退出时两条日志线程各至多 2 秒的收尾等待
-        # （SubprocessEngine 的 _join_pumps）发生在它之前、不混进上界
+        # crash job 的判定回调紧接着就是主线程的 _stop_all：从这里起算（crash job 自己退出时的日志收尾等待发生在它之前）
         if jr.scope_id == "c":
             stop_phase_start.append(time.monotonic())
 
+    # 只量「victim 进程何时死掉」：由测试线程按 pid 轮询，不含 reader 读到 EOF、日志线程收尾、线程池收尾这些与并行无关的等待
+    import threading as _threading
+    deaths: dict[str, float] = {}
+
+    def watch(scope_id: str):
+        pid_file = tmp_path / f"{scope_id}.pid"
+        while not pid_file.exists():
+            time.sleep(0.02)
+        pid = int(pid_file.read_text().split()[0])
+        while True:
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                deaths[scope_id] = time.monotonic()
+                return
+            time.sleep(0.02)
+
+    watchers = [_threading.Thread(target=watch, args=(s,), daemon=True) for s in ("v1", "v2")]
+    for t in watchers:
+        t.start()
     result = schedule(_rm(jobs), lambda name: engine, sink, on_job_complete=on_job_complete,
                       opts=ScheduleOpts(max_concurrency=3, fail_fast=True, grace_period_s=grace, heartbeat_interval_s=0))
-    end = time.monotonic()
+    for t in watchers:
+        t.join(timeout=5.0)
     by = {jr.scope_id: jr for jr in result.jobs}
     assert (by["c"].status, by["c"].error_type) == (Status.ERROR, "engine_error")
     assert (by["v1"].status, by["v1"].error_type) == (Status.ABORTED, None) and (by["v2"].status, by["v2"].error_type) == (Status.ABORTED, None)
-    assert len(stop_phase_start) == 1
-    elapsed = end - stop_phase_start[0]
-    assert grace <= elapsed < 2 * grace - 0.2, elapsed  # 并行停：约一份宽限（两个 victim 同时等满宽限被强杀）；串行逐个等宽限至少两份
+    assert len(stop_phase_start) == 1 and set(deaths) == {"v1", "v2"}, deaths
+    spans = {s: deaths[s] - stop_phase_start[0] for s in deaths}
+    # 并行停：两个 victim 都在约一份宽限后被强杀；串行逐个等宽限时后一个至少两份
+    assert all(grace - 0.3 <= v for v in spans.values()), spans
+    assert max(spans.values()) < 2 * grace - 0.3, spans
 
 
 def _assert_process_gone(pid: int, within_s: float = 5.0) -> None:
