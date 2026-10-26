@@ -1661,7 +1661,7 @@
   },
   "docs/diagrams/verdict-model-job-outcome.json": {
     "mtime": 1793005435.401719,
-    "ast_hash": "",
+    "ast_hash": "3925e7dfbed0cacbca2d0d34e35af8eb",
     "semantic_hash": ""
   },
   "docs/diagrams/verdict-model-reduction-layers.json": {
@@ -1910,13 +1910,13 @@
     "semantic_hash": ""
   },
   "docs/journey/0013-mobile-devices-implementation.md": {
-    "mtime": 1793003350.926479,
-    "ast_hash": "ca24ef9f0dcd281a71c16764c2795a7b",
+    "mtime": 1793005951.8456478,
+    "ast_hash": "5b7a7685d8f81ec6efd3acb05e29518d",
     "semantic_hash": ""
   },
   "docs/journey/0015-mobile-devices-implementation-batches.md": {
-    "mtime": 1793003350.9261773,
-    "ast_hash": "7469ed04ecfe737f6695f6d182db1592",
+    "mtime": 1793005951.8454795,
+    "ast_hash": "4ff38688f1d586aba0bc4dea38765e3b",
     "semantic_hash": ""
   },
   "features/steps/url_matches.mts": {
