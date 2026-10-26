@@ -1661,7 +1661,7 @@
   },
   "docs/diagrams/verdict-model-job-outcome.json": {
     "mtime": 1793005435.401719,
-    "ast_hash": "3925e7dfbed0cacbca2d0d34e35af8eb",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "docs/diagrams/verdict-model-reduction-layers.json": {
@@ -1967,11 +1967,6 @@
   "core/gherkai_core/device_session.py": {
     "mtime": 1793004838.1140437,
     "ast_hash": "b02c2481ffa7181317c385d38dd0938d",
-    "semantic_hash": ""
-  },
-  "docs/diagrams/verdict-model-job-outcome.png": {
-    "mtime": 1793005436.2004864,
-    "ast_hash": "8b10a245845008081ebc99726aa1fabc",
     "semantic_hash": ""
   }
 }

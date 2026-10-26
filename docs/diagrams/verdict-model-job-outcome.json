@@ -12,7 +12,7 @@
           "label": "判据：命中即定案"
         },
         "backend": {
-          "label": "照常归约"
+          "label": "照常推进"
         },
         "external": {
           "label": "记录的收场态"
@@ -33,13 +33,13 @@
   "phases": [
     {
       "id": "phStart",
-      "label": "启动前定案",
+      "label": "启动",
       "fromCol": 0,
       "toCol": 1
     },
     {
       "id": "phRun",
-      "label": "启动后：先看是否主动中止，再看事件流如何结束",
+      "label": "启动后：先看是否主动中止，再看退出与内容",
       "fromCol": 2,
       "toCol": 5,
       "variant": "emphasis"
@@ -59,7 +59,6 @@
     ],
     "allowedTerminals": [
       "sk",
-      "ee1",
       "to",
       "ab",
       "ne",
@@ -100,9 +99,10 @@
       "id": "q2",
       "lane": "laneChain",
       "col": 1,
-      "type": "security",
-      "label": "worker 能启动？",
-      "width": 144
+      "type": "backend",
+      "label": "起 worker",
+      "width": 144,
+      "sublabel": "起不来按退出码未知"
     },
     {
       "id": "q3",
@@ -147,15 +147,6 @@
       "type": "external",
       "label": "skipped",
       "sublabel": "从未启动 · 无归因",
-      "width": 132
-    },
-    {
-      "id": "ee1",
-      "lane": "laneOut",
-      "col": 1,
-      "type": "external",
-      "label": "engine_error",
-      "sublabel": "启动失败 · error",
       "width": 132
     },
     {
@@ -220,7 +211,6 @@
       "id": "q2-q3",
       "from": "q2",
       "to": "q3",
-      "label": "已启动",
       "variant": "emphasis",
       "role": "main",
       "route": "straight"
@@ -260,13 +250,6 @@
       "role": "branch"
     },
     {
-      "id": "q2-ee1",
-      "from": "q2",
-      "to": "ee1",
-      "variant": "security",
-      "role": "error"
-    },
-    {
       "id": "q3-to",
       "from": "q3",
       "to": "to",
@@ -290,24 +273,7 @@
       "to": "ne",
       "label": "网络退出码",
       "variant": "security",
-      "role": "error",
-      "via": [
-        [
-          691.6,
-          304
-        ],
-        [
-          609.6,
-          304
-        ],
-        [
-          609.6,
-          450
-        ]
-      ],
-      "toSide": "left",
-      "labelSegment": 2,
-      "labelDx": 4
+      "role": "error"
     },
     {
       "id": "q4-ee2",
@@ -315,23 +281,7 @@
       "to": "ee2",
       "label": "其余",
       "variant": "security",
-      "role": "error",
-      "via": [
-        [
-          691.6,
-          304
-        ],
-        [
-          773.6,
-          304
-        ],
-        [
-          773.6,
-          526
-        ]
-      ],
-      "toSide": "right",
-      "labelSegment": 2
+      "role": "error"
     },
     {
       "id": "q5-wk",
@@ -339,13 +289,7 @@
       "to": "wk",
       "label": "是",
       "variant": "security",
-      "role": "error",
-      "via": [
-        [
-          881.6,
-          304
-        ]
-      ]
+      "role": "error"
     }
   ],
   "cards": [
@@ -353,16 +297,17 @@
       "dot": "amber",
       "title": "顺序即判据",
       "items": [
-        "先判定是否启动，再判定是否被主动中止，然后看退出与内容是否完整，最后才做 scenario 归约",
+        "先判 fail-fast 是否已中止，再起 worker（起不来按退出码未知进后面的判据），然后判是否被主动中止，再看退出与内容是否完整，最后才做 scenario 归约",
         "前一判据一旦命中即就地定案，不再进入后续判据",
-        "主动中止的原因在作出停止决定的那一刻落定：墙钟已过记 timeout，否则记 aborted；之后 worker 如何退出都不改写"
+        "主动中止的原因在作出停止决定的那一刻落定：墙钟已过记 timeout，否则记 aborted；之后 worker 如何退出都不改写",
+        "内容完整（干净退出且发了 scope_done）的 job 不受「被主动中止」约束：收尾拖过预算只催停，判定按内容"
       ]
     },
     {
       "dot": "rose",
       "title": "例外与边界",
       "items": [
-        "设备会话未确认停止时，非零退出、scope 级 error 与正常归约三处的归因都改为 release_failed",
+        "设备会话未确认停止时，非零退出、scope 级 error 与正常归约三处的归因都改为 release_failed，原因消息保留",
         "scope 级 error 先于空判定集检查：worker 在执行前报的失败保留它自己的归因",
         "建连失败的 job 已建立会话并已计费，因此不记 skipped，照常进入整个 run 的聚合",
         "skipped 与 aborted 不带归因，未产出判定的原因只写在 message 里"
