@@ -52,7 +52,7 @@ scenario 前核对 ／ step 前核对 ／ step 后复原并核对 ／ 采集界�
 | 能力探测 | 决策 5 |
 | 驱动适配器 | UiAutomator2 与 XCUITest 各一，按会话回报的 `automationName` 选一次 |
 | 界面实现 | 继承 `AbstractInterface`：截图、尺寸、动作原语，原语经驱动适配器下发 |
-| 应用启停 | 安装后启动一次、启动后状态采样；内建确定性 step「重新启动应用」（只对应用目标注册：terminate 加 activate 加启动采样，采样到自退记 error、类别 `engine_error`） |
+| 应用启停 | 安装后启动一次、启动后状态采样；向句柄上下文暴露 `app.restart()`（只在应用目标上有值：terminate 加 activate 加启动采样，采样到自退抛错、step 记 error、类别 `engine_error`；[0050](./0050-deterministic-step-handles-and-testing.md) 决策 2），供使用方自写的重启 step 调用——产品不内置有措辞的 step（[0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md) 第 2 条） |
 | 隧道预热 | 按探测结论选路线导航预热地址一次，在原生控件树里确认标记（决策 6） |
 
 设备模块动态加载：桌面路径与 `--capabilities` 不加载 WebdriverIO 与 Device Farm SDK。为什么：能力自述要求零费用、快速返回（[0036](./0036-deterministic-capability-discovery.md)），桌面使用方不应为设备依赖付启动成本。

@@ -284,8 +284,8 @@ PROSE_DOCUMENTED_KEYS = frozenset({
     # run_meta 那段散文（契约页「顶层 = RunResult + run_meta + artifacts」之后的 `run_meta`（definition）段）
     "created_at", "format", "max_concurrency", "steps_dir", "worker_variant", "worker_task_defs", "extra_http_headers",
     "session_warmup_url",
-    # plan / run 的 `steps[].deterministic` 三态那段
-    "conflict",
+    # plan / run 的 `steps[].deterministic` 四态那段
+    "conflict", "keyword_mismatch",
 })
 
 # 形如键但不是键的 token：引擎名、状态值、错误码、doctor 的段名与项名、目录名、子命令名、JSON 字面量。

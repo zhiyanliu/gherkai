@@ -73,7 +73,7 @@
 
 **先写的护栏测试**
 
-- `engines/novaact/tests/test_capabilities.py`：真子进程：键集全等断言改为六键（加 targets）；targets == [{device: desktop, ui_kinds: [web]}]，不带 max_session_s；schema_version 仍是 1；deterministic_steps 每项键集为 {pattern, description, example, targets}，内建「页面地址」条目的 targets == [desktop/web]。（0049 决策 1、2、9）
+- `engines/novaact/tests/test_capabilities.py`：真子进程：键集全等断言改为六键（加 targets）；targets == [{device: desktop, ui_kinds: [web]}]，不带 max_session_s；schema_version 仍是 1；deterministic_steps 每项键集为 {pattern, description, example, keywords, targets}，内建导航条目的 targets == [desktop/web]、keywords == [Given, When]。（0049 决策 1、2、9）
 - `engines/midscene/src/worker/run-scope.test.mts`：同上，真进程跑 --capabilities：六键全等，targets 显式含 desktop/web，desktop 条目不带 max_session_s，清单项含 targets；min_grace_s 断言本批不动（升到约 64 秒归设备收尾那一批）。（0049 决策 1、2、5）
 - `runtime/tests/test_compose.py`：扩 test_query_capabilities_rejects_off_contract_answer 的参数表：未知 device、ui_kinds 为空、未知 ui_kind、desktop 带 app、max_session_s 为 0/负数/字符串/true/Infinity、step 级 targets 不是数组、requires 不是字符串数组、预热键不是 bool → 都抛 RuntimeError 且 _CAPABILITIES_CACHE 为空。另加正面用例：requires 含未知字符串（如 "foo"）时放行并原样保留。（0049 决策 1）
 - `runtime/tests/test_compose.py`：缺键语义：顶层缺 targets 与 step 级缺 targets 都归一为 desktop/web；缺 max_session_s 表示无上限；不能被解释为「全部目标」。多出来的未知顶层键照旧容忍（向前兼容）。（0049 决策 2）
@@ -356,7 +356,7 @@
 
 **改动面**
 
-- `engines/midscene/src/worker/deterministic.mts` · 类型段（DeterministicCtx / DeterministicHandler / Entry）：保留现 DeterministicCtx{page} 与 DeterministicHandler 作 playwright 句柄类型；新增 WebdriverCtx（driver / device{platform,osVersion,scale} / uiKind / appId / log / withWebContext 六字段，driver 类型只做 type import，实现由设备批次注入）、WebdriverEntry{uiKinds?, devices?, requires?, handler}、DeterministicHandlers{playwright?, webdriver?: WebdriverEntry | WebdriverEntry[]}；Entry 由单 handler 改为规范化后的 {playwright?: fn, webdriver: NormalizedEntry[]}（uiKinds/devices 缺省展开为全集、requires 缺省为 []）（0050 决策 1、决策 2）
+- `engines/midscene/src/worker/deterministic.mts` · 类型段（DeterministicCtx / DeterministicHandler / Entry）：保留现 DeterministicCtx{page} 与 DeterministicHandler 作 playwright 句柄类型；新增 WebdriverCtx（driver / device{platform,osVersion,scale} / uiKind / appId / app / log / withWebContext 七字段，driver 类型只做 type import，实现由设备批次注入）、WebdriverEntry{uiKinds?, devices?, requires?, handler}、DeterministicHandlers{playwright?, webdriver?: WebdriverEntry | WebdriverEntry[]}；Entry 由单 handler 改为规范化后的 {playwright?: fn, webdriver: NormalizedEntry[]}（uiKinds/devices 缺省展开为全集、requires 缺省为 []）（0050 决策 1、决策 2）
 - `engines/midscene/src/worker/deterministic.mts` · deterministic(pattern, handler, meta)：第二参改为 `DeterministicHandler | DeterministicHandlers`；函数形态等价于 {playwright: fn}。注册期校验（违反即抛、走 0037 决策 4 的加载失败）：未知句柄键；uiKinds 不属 web/app、devices 不属 android/ios；requires 不属封闭集合 {web_context}；含 web_context 时 uiKinds 必须恰为 ["web"]（因此缺省 uiKinds 加 web_context 也拒）；同一 step 两个 webdriver 条目覆盖同一（device, uiKind）组合（不论 requires 是否相同）；handler 非函数。保留现有 meta 必填校验（0050 决策 1；0048 决策 6）
 - `engines/midscene/src/worker/deterministic.mts` · listRegistry()：每项加 `targets`：playwright 推出 {device:'desktop', ui_kinds:['web']}；每个 webdriver 条目按 device 展开、按（device, requires）聚合 ui_kinds，requires 非空时带 `requires`、不同 requires 的拆条不聚合；输出字段用协议的 snake_case（ui_kinds），原样报声明、不与 worker 顶层 targets 求交。顺序取规范序（见 open_questions 第 1 条）（0050 决策 1；0049 决策 1、3）
 - `engines/midscene/src/worker/deterministic.mts` · match() / Match 类型 + 新增纯函数 selectHandler：scan()/matchBatch() 不动（命中与目标无关、--match-steps 输入输出不变）；match() 返回值改为 {entry 句柄集, groups}；新增 `selectHandler(hit, target:{device, uiKind})` → {kind:'playwright', fn} | {kind:'webdriver', fn, requires} | null。null 表示命中的 pattern 在当前目标上没有句柄，调用方走 AI，绝不顺延到下一个 pattern（0050 决策 1（跨 step 的命中与目标无关）；0049 决策 3）
@@ -367,7 +367,7 @@
 - `engines/novaact/gherkai_worker_novaact/run_scope.py` · _run_step 派发 ①（约 392 行）：hit 后按 desktop/web 选 playwright 句柄；无 playwright 句柄（只写了 webdriver 的 Python step）时走 AI、不调用 handler、不报错——Nova 没有设备路径，这类 step 在本 worker 上永远走 AI，靠 targets 原样自述让测试开发看见（0050 决策 1；0049 决策 3、9）
 - `engines/novaact/gherkai_worker_novaact/deterministic_steps.py` · url_matches：是否也补 webdriver 条目：Python 侧没有设备路径，补了只出现在自述 targets 里、永远不会被调用；建议不补（见 open_questions 第 4 条），若补则 handler 体与 TS 对称（0050 决策 1 末条；0049 决策 9）
 - `新增跨语言 fixture（如 engines/ 下两侧都能读到的共享 JSON）` · 注册输入与期望输出：一组注册输入（句柄键、条目字段、handler 用占位）配期望：推出的 targets（规范序）或期望的校验失败类别；TS 测试与 pytest 各自读同一份文件断言（0050 决策 1「两侧共用一套跨语言 fixture」）
-- `docs/user-guide/writing-deterministic-steps.md 与 skill 的确定性 step 参考` · 注册面、ctx 字段、写作方法：补多句柄注册、targets/requires 含义、六字段 ctx 与原生上下文不变量、输入与定位事实、测试分层（离线缓存目录 cacheDir / WEBDRIVER_CACHE_DIR）、写作方法六条；不出现「先 AI 后硬化」建议。按 0039/0045 产品口吻，不写 ADR 编号（0050 决策 2、3、4、被拒方案）
+- `docs/user-guide/writing-deterministic-steps.md 与 skill 的确定性 step 参考` · 注册面、ctx 字段、写作方法：补多句柄注册、targets/requires 含义、七字段 ctx（含 app.restart()）与原生上下文不变量、输入与定位事实、测试分层（离线缓存目录 cacheDir / WEBDRIVER_CACHE_DIR）、写作方法六条；不出现「先 AI 后硬化」建议。按 0039/0045 产品口吻，不写 ADR 编号（0050 决策 2、3、4、被拒方案）
 
 **先写的护栏测试**
 
@@ -550,7 +550,7 @@
 
 - B1-capabilities：--capabilities 输出 targets 与 max_session_s、会话预热支持键，以及建会话前的 targets 自检函数（B6 提供 device/limits 的常量，B1 消费；自检失败时调用 B6 新增的 scope_done{status:error} 出口）
 - B2-core-target-job：Job 的 target{device, ui_kind, app{alias,bucket,key,sha256,app_id}}、device_request{provider, device_arn|os_version, billing_method, project_arn, acquire_timeout_s}、timeoutS 的线上形态，以及 Python 到 TS 的字段往返 fixture
-- B4-steps-registry：webdriver 句柄种类、uiKinds 与 devices 过滤、requires 封闭集，以及按 (device, ui_kind) 匹配并返回条目及其 requires 的 match API；B6 构造它定义的 ctx 六字段
+- B4-steps-registry：webdriver 句柄种类、uiKinds 与 devices 过滤、requires 封闭集，以及按 (device, ui_kind) 匹配并返回条目及其 requires 的 match API；B6 构造它定义的 ctx 七字段
 - B5-core-events-termination：core 认 session_opened、session_closed、ScopeDone 的 status/errorType/message 三个新字段，新错误类别（precheck_failed、acquire_timeout、session_lost、capability_unavailable、release_failed），新配对规则与合成 SKIPPED；B6 发事件的形状以 B5 的 wire.py 为准
 - B7-tunnel：env GHERKAI_SESSION_WARMUP_URL 的注入、预热页的标记字符串、令牌参数名 gherkai_tunnel_token，以及三份脱敏实现共用的规则与用例（签名类参数集合）
 - B8-deploy-iac：真跑依赖 task role 的 Device Farm 权限、应用前缀的 s3:ListBucket（使缺失返回 404）、project ARN 写进 SSM
@@ -579,10 +579,10 @@
 - `engines/midscene/src/device/probe.mts（新）` · 能力探测：建连后、预热前执行一次。网页上下文（只对网页目标）判为三类：提供、不提供、探测出错。判据是在 5s 预算内经独立探测实例成功执行一条只读命令，有界重试一次，按证据性质归类。spike 里的 usableWebCtx 用 Promise.race，这正是 ADR 拒绝的方案，不能照搬。另外取 iOS 输入路线、坐标比例（iOS 读 deviceScreenInfo.scale，失败时按截图长边除以窗口长边取整回退；Android 为 1）、/status 的 Appium 版本、候选数。只缓存结论，不缓存句柄；结论写进 device-session.json 与 worker 日志（0052 决策 5、7（DPR 回退规则自写））
 - `engines/midscene/src/device/adapters/uiautomator2.mts 与 xcuitest.mts（新）` · 驱动适配器：按会话回报的 automationName 选一次。原语映射照 0052 决策 4 的表：点击、长按、滚动用 mobile: swipe 与 scrollGesture，不用 W3C 指针拖动；输入在 Android 用 mobile: type，iOS 对活动元素 sendKeys，所在上下文由探测定，不用 POST /keys；按键与主屏；iOS 坐标按点（像素除以比例）；导航按探测结论走 url 或 mobile: deepLink。从控件树抽取控件摘要 items[{type,id,text,a11y_id}]、total、truncated，只在 failed 或 error 时调用。`mobile:` 命令不得出现在这两个文件之外。spike 里 AppiumInterface 的 typingRoutes 多路线试错与 swipe 回落都不能保留（ADR 拒绝运行期试错回落）（0052 决策 1、4、6）
 - `engines/midscene/src/device/interface.mts（新）` · 界面实现：AppiumInterface extends AbstractInterface：实现截图（原生上下文）、尺寸、defineActionsFromInputPrimitives 动作集，原语全部经适配器与守卫下发。系统版本与机型只经唯一的会话能力读取点进入诊断。spike 里的 class AppiumInterface 是原型，要去掉其中的 PLATFORM、SCENARIO 全局分支（0052 决策 3、7）
-- `engines/midscene/src/device/app.mts（新）` · 应用启停：建会话前对应用键做存在性检查，404 与 403 都记 precheck_failed，消息不同；对键预签名。建好后 activateApp 并采样应用状态，回到「未运行」即 precheck_failed。为内建 step「重新启动应用」提供 terminate、activate、采样三个原语，采样到自退记 engine_error（0052 决策 3，0051 决策 9、14）
+- `engines/midscene/src/device/app.mts（新）` · 应用启停：建会话前对应用键做存在性检查，404 与 403 都记 precheck_failed，消息不同；对键预签名。建好后 activateApp 并采样应用状态，回到「未运行」即 precheck_failed。为句柄上下文的 `app.restart()` 提供 terminate、activate、采样三个原语，采样到自退记 engine_error（0052 决策 3，0051 决策 9、14）
 - `engines/midscene/src/device/warmup.mts（新）与桌面实现中的预热` · 隧道预热：设备上按探测结论选 url 或 deepLink，导航 GHERKAI_SESSION_WARMUP_URL 一次，再在原生 page source 里找标记：READY 即就绪；DENIED 或 AUTH REQUIRED 归 precheck_failed；ERROR 或无任何标记时原地重导航、有界重试，耗尽归 engine_error，永不归 network_error。桌面用 page.goto 读响应状态与标记。预热地址只经脱敏出口进入诊断。可复用 spike 的 navigateTo、waitMarkers、nativeMarkers 结构（0052 决策 6（预热），0051 决策 13）
 - `engines/midscene/src/device/surface.mts（新）` · 设备侧接缝实现：串起解析 → Create → 等 RUNNING → 存在性检查与预签名 → newSession → activateApp 与采样 → 探测 → 预热，全程受获取预算约束，到期归 acquire_timeout；完成后 run-scope 才发 scope_started，sessionId 填会话 ARN。实现 step 前核对、复原核对（命令失败先查会话状态）、快照（按条件读地址；在原生上下文取控件与 page_source）、取确定性句柄 ctx{driver, device{platform,osVersion,scale}, uiKind, appId, log, withWebContext}（0052 决策 2，0051 决策 4，0050 决策 2）
-- `engines/midscene/src/worker/deterministic.steps.mts` · 内建 step 注册：注册两个 webdriver 条目，注册面用 B4 提供的 API：「重新启动应用」（uiKinds:['app']）；「页面地址匹配」（uiKinds:['web']、requires:['web_context']，内部经 withWebContext 读地址）（0052 决策 3（应用启停），0050 决策 1，0051 决策 1）
+- `engines/midscene/src/worker/deterministic.steps.mts` · 内建导航条目加 webdriver 句柄：应用目标经 DeepLink（0048 决策 7），网页目标按能力探测择路（0052 决策 4）；不注册「重新启动应用」与「页面地址匹配」（产品不内置有措辞的 step，0020 第 2 条），两者的示范进 steps/ 模板，重启经 ctx.app.restart()（0050 决策 1、2）
 - `tools/（新，真机重新探测工具）` · 如 tools/device_reprobe.mts 或 .py 包装：在真实会话里逐项执行探测与原语，生成能力矩阵，并与 adapter 和 probe 测试 fixture 做差集。这是长期资产，注释守悬空指针红线（0052 决策 8）
 - `engines/midscene/DEVELOPMENT.md、CONTRIBUTING.md` · 真机验收矩阵、设备模块说明：写明人工触发的真机验收矩阵：Android 加两代 iOS、网页加应用、故障演练、iOS 26 整链路单列一行，列为发版后验证项。DEVELOPMENT 补设备模块的划分与动态加载约定（0052 决策 8）
 
@@ -605,7 +605,7 @@
 
 **完整性审查补认领**
 
-- 应用目标上的网址 step（0048 决策 7，deepLink spike 已定）：识别引号内任意 scheme://；Android 发命令前按 RFC 3986 校验并拦 ; ' ( )，deepLink 带 package，报 unable to resolve Intent 记 capability_unavailable，成功后轮询前台包名；iOS 带 bundleId、成功即已送达；首次遇到 WebDriverAgent 不支持打开地址即缓存为设备不支持；前台应用查询进只读白名单。护栏测试：字符集校验用例（含 | ; 截断风险的字符）、三种失败情形的归类、缓存只记能力否定。
+- 应用目标上的导航 step（0048 决策 7，deepLink spike 已定）：导航判据为 Given / When 后整句是一个地址，应用目标接受任意 scheme；Android 发命令前按 RFC 3986 校验并拦 ; ' ( )，deepLink 带 package，报 unable to resolve Intent 记 capability_unavailable，成功后轮询前台包名；iOS 带 bundleId、成功即已送达；首次遇到 WebDriverAgent 不支持打开地址即缓存为设备不支持；前台应用查询进只读白名单。护栏测试：字符集校验用例（含 | ; 截断风险的字符）、三种失败情形的归类、缓存只记能力否定。
 - 红线测试补：scenario 前核对在第一条 scenario 前不调用、年龄恰到边界、探测成功后下一条照常执行、失败按会话状态分流 session_lost / engine_error；释放与 session_closed 先于 scope_done；安装包 HeadObject 回 404 或 403 时 Create 零调用（存在性检查必须排在建会话之前）。
 - 设备模块的两条护栏测试：系统版本与机型只经会话能力对象的唯一读取点进入；两个驱动适配器的命令契约快照。Device Farm 客户端只在 TS 设备模块构造的断言。0052 决策 8、0051 决策 10。
 - 接缝第四项边界义务「scenario 前核对」（本轮补进 0052 决策 2）。

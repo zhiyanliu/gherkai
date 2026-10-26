@@ -40,7 +40,7 @@
 - `configuration.md`：「配置生效的四个位置」改为五个（加 `gherkai.toml`：路径基准、`--config`、与选项和环境变量的优先序）；环境变量表加 `GHERKAI_ANDROID_DEVICE_ARN` / `GHERKAI_IOS_DEVICE_ARN` / `GHERKAI_DEVICE_FARM_PROJECT_ARN` / `GHERKAI_APP_BUCKET`；「由 gherkai 注入的环境变量」加 `GHERKAI_SESSION_WARMUP_URL`；「跨命令通用选项」加 `--config`。
 - `cloud-backend.md`：「后端包含什么」加 Device Farm 项目；「首次部署」加项目的找回或建立与部署方无权限时的降级；「团队成员需要的最小云端权限」加三方权限表（提交者、部署方、worker）；「拆除与清理」加项目保留与手动删除命令；「费用」加设备分钟；「退出码与常见错误」加「部署未启用设备支持」；「版本与升级」加两条不受支持的组合：同一 report 目录混用 1.4 与 1.5 CLI 读写、开发版本混搭（0037 决策 7）。
 - `local-app-testing.md`：「工作方式」加 worker 预热一步；「安全」改为令牌换 cookie（含 cookie 会到达被测应用访问日志的残余）；「限制」加设备浏览器依赖服务商不弹警告页、免费层策略规则数；「常见故障」加预热失败的三个分支。
-- `writing-deterministic-steps.md`：「内建的确定性 step」一节删去，改为「`steps/` 模板」一节（地址精确核对的写法示例，设备网页目标带 `requires`）；「注册一条 step」加 `targets`、`requires` 与 `keywords`；「handler 拿到什么」加 webdriver 句柄与上下文六字段；「内建的确定性 step」加「页面地址匹配」的设备实现与「重新启动应用」；「在本机核对」加 `list-deterministic` 的 `targets` / `available_targets`；「两侧对称地写」加设备目标的对称要求；材料规则与验收定位（0050 决策 4）。
+- `writing-deterministic-steps.md`：「内建的确定性 step」一节删去，改为「`steps/` 模板」一节（地址精确核对的写法示例，设备网页目标带 `requires`）；「注册一条 step」加 `targets`、`requires` 与 `keywords`；「handler 拿到什么」加 webdriver 句柄与上下文七字段（含 `app.restart()`）；「`steps/` 模板」一节给出地址精确核对与重启应用两条示范；「在本机核对」加 `list-deterministic` 的 `targets` / `available_targets`；「两侧对称地写」加设备目标的对称要求；材料规则与验收定位（0050 决策 4）。
 - `faq.md`：改写「它在什么浏览器里运行？能测移动端视口，或换成 Firefox、Safari 吗？」（真机经 Device Farm，Safari 即 iOS 真机 Safari）；加「测真机要多少钱、必须用 AWS 吗」。
 - `docs/user-guide/README.md`：索引登记 `engines.md` 与设备主题页。
 - 包入口页：`engines/midscene/README.md` 加设备支持一段（Appium、Device Farm）；`deploy_aws/README.md` 加 Device Farm 项目与权限一句；`cli/README.md` 与根 `README.md` 门面各一句。

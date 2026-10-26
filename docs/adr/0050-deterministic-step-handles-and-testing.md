@@ -40,9 +40,9 @@ deterministic("^页面显示「(?<text>[^」]+)」$", {
 
 **Python 完全同构**：同一组键与条目字段，取字典形态，`webdriver` 句柄拿到的 `driver` 是 Appium Python Client 的 driver；装饰器写法与现状相同、等价于只有 `playwright`，多句柄形态的具体签名随实现定，要求是键名、条目字段、校验规则与 TS 逐项一致。两侧共用一套跨语言 fixture（同一组注册输入，断言推出的 `targets` 与校验结果相同）来核对注册语义。1.5 没有 Python 设备引擎（Nova Act 驱动的是 Playwright 浏览器，没有设备路径），这块 API 面由 fixture 与注册期校验验收，不以真机执行为前提。
 
-### 2. handler 上下文：六个字段与一条不变量
+### 2. handler 上下文：七个字段与一条不变量
 
-`webdriver` 句柄的 `ctx` 只有六个字段：
+`webdriver` 句柄的 `ctx` 只有七个字段：
 
 | 字段 | 含义 |
 |---|---|
@@ -50,6 +50,7 @@ deterministic("^页面显示「(?<text>[^」]+)」$", {
 | `device` | `{ platform, osVersion, scale }`：平台（取值与 device 维度相同，`android` 或 `ios`）、会话回报的系统版本、坐标比例（iOS 取设备报告的 scale，Android 为 1）。字段不叫 `target`，避免与 Job 携带的测试目标同名 |
 | `uiKind` | `web` 或 `app` |
 | `appId` | 包名或 bundle id，只在 app 目标上有值 |
+| `app` | 只在 app 目标上有值，唯一方法 `restart()`：terminate 加 activate 加启动采样，采样到应用自退即抛错（原语归 [0052](./0052-appium-interface-adapter-and-platform-differences.md) 决策 3）。它替代了曾计划内置的「重新启动应用」step：产品不内置有措辞的 step（[0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md) 第 2 条），需要干净起点的项目在 `steps/` 里写一条调用它的 step，模板给出 |
 | `log` | 写进本 step 诊断的日志函数 |
 | `withWebContext(fn)` | 每次重新定位属于被测对象的网页上下文（不缓存句柄，[0052](./0052-appium-interface-adapter-and-platform-differences.md) 决策 5），切入后执行 `fn`，结束（含抛错）后切回原生上下文；多个候选或零候选时抛错、不猜 |
 

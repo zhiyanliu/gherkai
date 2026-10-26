@@ -14,7 +14,7 @@ QA 在 `.feature` 里用 **Gherkin 原生 tag** 声明三类配置元信息：�
 ## tag 语义
 
 ### `@scope:<name>`（G1 — 会话作用域）
-- 相同 `@scope:X` 的 scenario 归入**同一 scope**：串行、共享被测对象的会话与操作状态——桌面浏览器的页面，设备上的网页或应用（有操作依赖，如"登录"→"在登录态下改昵称"）。同一 scope 的 scenario 之间 worker 不做任何自动复位，全部测试目标适用；需要干净起点时由用例在 Background 里显式写出（设备应用目标有内建的「重新启动应用」step，[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 1）。
+- 相同 `@scope:X` 的 scenario 归入**同一 scope**：串行、共享被测对象的会话与操作状态——桌面浏览器的页面，设备上的网页或应用（有操作依赖，如"登录"→"在登录态下改昵称"）。同一 scope 的 scenario 之间 worker 不做任何自动复位，全部测试目标适用；需要干净起点时由用例在 Background 里显式写出（设备应用目标上写一条调用句柄上下文 `app.restart()` 的自写确定性 step，模板给出，[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 1、[0050](./0050-deterministic-step-handles-and-testing.md) 决策 2）。
 - 不同 scope 值之间：**并行**、互不共享。
 - 未标 scope 的 scenario：各自独立（自成一个单元）。
 - scope 是**执行单元 = Job**（[0016](./0016-execution-architecture-core-lib-run-model.md)）。

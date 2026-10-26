@@ -93,8 +93,8 @@
 | `job_count` / `scenario_count` | int | 筛选后的数量（`--scope` / `--tags` / `--scenario` 生效后；多个筛选 flag 同时给出时需全部满足） |
 | `jobs[]` | array | 与 `run_meta.jobs[]` 结构相同；每个 step **可能**额外带一个 `deterministic` 键（出现条件见下） |
 
-`steps[].deterministic` 三态：至少一个引擎自述成功时，该键在**每个** step 上都出现。`null` 表示该 step 交由 AI 执行；带 `pattern` 与 `description`
-表示命中该确定性 step（设备目标上另带 `requires`：该实现的前提，当前只有 `web_context`，设备不提供时这一步会记 error 而不转 AI；命中的模式在该 scope 的目标上没有实现时同样为 `null`，stderr 说明走 AI 的原因）；带 `conflict`（命中的模式列表）表示多条模式同时命中，实际执行该 step 会记 error（需先调整模式或 step 措辞）。
+`steps[].deterministic` 四态：至少一个引擎自述成功时，该键在**每个** step 上都出现。`null` 表示该 step 交由 AI 执行；带 `pattern` 与 `description`
+表示命中该确定性 step（设备目标上另带 `requires`：该实现的前提，当前只有 `web_context`，设备不提供时这一步会记 error 而不转 AI；命中的模式在该 scope 的目标上没有实现时同样为 `null`，stderr 说明走 AI 的原因）；带 `conflict`（命中的模式列表）表示多条模式同时命中，实际执行该 step 会记 error（需先调整模式或 step 措辞）；带 `keyword_mismatch`（命中的模式）与 `keywords`（该 step 接受的关键字）表示这条写法在当前关键字下无意义，实际执行会记 error（如 Then 后只写一个地址）。
 **全部引擎都取不到 worker 自述时该键在每个 step 上一律省略**（不是 null；stderr 有「标注降级」提示）。部分引擎降级时，该引擎的 step 同样是
 `null`、机读层与「交由 AI」不可区分；降级的引擎名见 stderr 的提示行。
 
@@ -199,7 +199,7 @@ step 级证据视图：判定树（**骨架是提交时的 job 定义**）与每
 ## `gherkai list-deterministic --engine <名> --json`
 
 顶层 `engine` + `deterministic_steps[]`，每项 `pattern`（正则，命中即按确定性 step 执行）、`description` / `example`（step 作者登记的说明与示例；
-写 `.feature` 时以 `example` 的表述为准）、`targets[]`（worker 原样报出的该 step 有实现的目标：每项 `device`、`ui_kinds[]`，可带 `requires[]`）与 `available_targets[]`（由本工具与该引擎支持的目标求交后的结果，形状相同；声明了但该引擎不支持的目标不在其中）。
+写 `.feature` 时以 `example` 的表述为准）、`keywords[]`（这条 step 接受的 Gherkin 关键字，缺省为 Given、When、Then 全部）、`targets[]`（worker 原样报出的该 step 有实现的目标：每项 `device`、`ui_kinds[]`，可带 `requires[]`）与 `available_targets[]`（由本工具与该引擎支持的目标求交后的结果，形状相同；声明了但该引擎不支持的目标不在其中）。
 
 ## `gherkai doctor --json`
 

@@ -19,7 +19,7 @@
 
 ### 1. 一个 scope 一个远程访问会话，scenario 之间不复位
 
-- **做什么**：worker 为每个 scope 创建一个 Device Farm 远程访问会话，会话名按决策 3 的规则生成。应用目标在会话建好后安装并启动一次；scenario 之间不重新导航、不重启应用，scope 内状态共享沿用 [0019](./0019-feature-tags-scope-and-engine.md) 的契约（同 scope 的 scenario 串行、共享被测对象的会话与操作状态、允许操作依赖），全部测试目标适用。需要干净起点的用例在 Background 里显式写内建确定性 step「重新启动应用」（只对应用目标注册，实现归 [0052](./0052-appium-interface-adapter-and-platform-differences.md)）；agent skill 的写作规则缺省为多 scenario 的应用 feature 放这一步。
+- **做什么**：worker 为每个 scope 创建一个 Device Farm 远程访问会话，会话名按决策 3 的规则生成。应用目标在会话建好后安装并启动一次；scenario 之间不重新导航、不重启应用，scope 内状态共享沿用 [0019](./0019-feature-tags-scope-and-engine.md) 的契约（同 scope 的 scenario 串行、共享被测对象的会话与操作状态、允许操作依赖），全部测试目标适用。需要干净起点的用例在 Background 里显式写一条自写的确定性 step，调用句柄上下文的 `app.restart()`（只在应用目标上有值，原语归 [0052](./0052-appium-interface-adapter-and-platform-differences.md) 决策 3、句柄归 [0050](./0050-deterministic-step-handles-and-testing.md) 决策 2；产品不内置有措辞的 step，[0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md) 第 2 条）；agent skill 的写作规则缺省为多 scenario 的应用 feature 放这一步，并给出模板。
 - **为什么**：每个会话有两段固定开销，实测都计入服务商回报的设备分钟：取设备开销（创建到 Appium 可用，约 1 到 2.5 分钟，另占墙钟）与停止到 COMPLETED（Android 约 1 分钟、iOS 最长约 2.5 分钟，不占墙钟）。按 scope 复用才能把它们摊到多条 scenario 上。隐式复位会让同一份 feature 加上 `@device` 后语义静默改变，terminate 加 activate 又不清持久数据、只是半隔离；准备动作失败时也没有 step 可挂。显式 Background step 的失败就是本 scenario 内一个普通 step 的 error，短路只作用于本 scenario。
 - **不做**：不按 scenario 开会话；不跨 scope 或跨 job 复用会话（会话归属与收尾责任必须单一）；不在 scenario 之间做任何自动复位。
 
@@ -231,7 +231,7 @@
 - 本 ADR 不管目标如何声明、本机后端执行前预检对不受支持目标的拒绝、被测环境可达性结论、Job 的 `target` 与 `device_request` 字段形态：归 [0048](./0048-test-targets-device-and-ui-kind.md)；隧道鉴权方案由本 ADR 决策 13 承接。
 - `targets` 与 `max_session_s` 的键形态、缺键语义、`min_grace_s` 的推导、会话预热支持键、worker 自检：归 [0049](./0049-worker-capabilities-targets-keys.md)。
 - handler 上下文、受命令守卫的 `driver` 代理、确定性 step 的测试分层：归 [0050](./0050-deterministic-step-handles-and-testing.md)。
-- 驱动适配器、能力探测与网页上下文身份、导航前提、内建「重新启动应用」step、控件摘要表的抽取方式、超时分层表、只读白名单与命令守卫：归 [0052](./0052-appium-interface-adapter-and-platform-differences.md)。
+- 驱动适配器、能力探测与网页上下文身份、导航前提、应用重启原语、控件摘要表的抽取方式、超时分层表、只读白名单与命令守卫：归 [0052](./0052-appium-interface-adapter-and-platform-differences.md)。
 - `[devices]`（`arn` 或 `os-version`、`billing-method`、获取预算的覆盖、本机后端的项目 ARN 与应用桶）与 `[apps]`：归 [0053](./0053-project-config-file.md)。
 - 终结判定的真值表、首次停止原因的仲裁、停止后有界读事件、设备 scope 的缺省墙钟与覆盖顺序：归 [0034](./0034-detached-batch-reconciler.md)；`@timeout` 的设备缺省：归 [0019](./0019-feature-tags-scope-and-engine.md)。
 - 沿用并扩展：错误归因类别集、事件集与成本信封 [0024](./0024-worker-core-protocol.md)；网络重试与只读重试例外 [0028](./0028-transient-network-ssl-resilience.md)；上传器 [0029](./0029-engine-artifacts-to-s3.md)；派生态与合成 SKIPPED [0031](./0031-job-lifecycle-states-and-severity.md)；权限表与 region 例外 [0033](./0033-iac-aws-backend-and-composition-wiring.md)；URL 映射、隧道生命周期、脱敏规则与 definition 完整性不变量 [0035](./0035-local-app-testing-via-tunnel.md)；context 闭集、缺戳例外与 definition 格式版本 [0037](./0037-distribution-and-packaging.md)；用户可见消息 [0039](./0039-user-facing-surfaces-no-internal-references.md)；evidence [0042](./0042-step-evidence-and-explain.md)。
