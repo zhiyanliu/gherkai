@@ -35,7 +35,7 @@ import { EventSink } from "../lib/event-sink.mjs";  // 事件出口（ADR 0024�
 import { JobSource } from "../lib/job-source.mjs";  // job 入口（同上）
 // 确定性 step 注册表（ADR 0022）+ 测试开发写 step 用的脚手架。
 // import 脚手架即触发其顶层 deterministic(...) 注册副作用（对称 Nova 引擎 import deterministic_steps）。
-import { match as matchDeterministic, DeterministicAssertion, DeterministicKeywordMismatch, listRegistry, matchBatch, type MatchItem } from "./deterministic.mjs";
+import { match as matchDeterministic, DeterministicAssertion, DeterministicConflict, DeterministicKeywordMismatch, listRegistry, matchBatch, type MatchItem } from "./deterministic.mjs";
 import { buildInstruction } from "./argument.mjs";
 // step 级机读证据（ADR 0042）：SDK 结构 → gherkai 自有 schema 的映射与落盘全住那个模块；此处只挂钩子。
 import { stepEvidenceRef, executionsLength, EVIDENCE_KIND, ENGINE, type EvidenceHook } from "./evidence.mjs";
@@ -776,7 +776,9 @@ async function runStep(
     try {
       hit = matchDeterministic(text, keyword);
     } catch (e) {
-      if (e instanceof DeterministicKeywordMismatch) {
+      // 关键字不符与命中多条都是注册表层面的写法 / 配置错误：直接记 engine_error，不经消息文本的网络启发
+      // （冲突消息内联 step 原文与各条模式，其中的 ssl / timeout 字样不是网络故障；对齐 Nova 按异常类型分类）。
+      if (e instanceof DeterministicKeywordMismatch || e instanceof DeterministicConflict) {
         await sink.emit({ type: "step_done", scenarioId, stepIndex: index, status: "error", errorType: "engine_error", message: e.message });
         return "error";
       }

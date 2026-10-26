@@ -487,7 +487,7 @@ def test_screenshots_enqueued_only_after_step_done_emit(logs_dir, monkeypatch):
 
 
 def test_no_enqueue_when_step_wrote_no_screenshot(logs_dir, monkeypatch):
-    """确定性 / URL 导航 step 不产 evidence → 一次入队都不该有（队列里不许有幻影文件）。"""
+    """确定性 step（含内建导航）不产 evidence → 一次入队都不该有（队列里不许有幻影文件）。"""
     trace: list = []
     u = rs._get_uploader()
     monkeypatch.setattr(u, "enqueue", lambda paths: trace.append(("enqueue", list(paths))))

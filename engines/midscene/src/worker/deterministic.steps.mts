@@ -26,14 +26,15 @@ import { deterministic } from "./deterministic.mjs";
 
 // 地址的形态是 scheme://rest：scheme 按 RFC 3986（字母开头，字母、数字、`+ - .`），rest 非空且不含空白与双引号。
 // 只允许一对包住整句的双引号（q1 / q2 两组用来核对配对；不带引号时 q2 组不参与匹配、取值为 undefined）。
-// 不剥标点：不带引号的地址末尾若是句号、逗号、问号这类标点或右括号，整句就不是「一个地址」、走 AI——
-// `When https://example.com/。` 多半是把地址写进了一句话；地址本身以括号或句号结尾时加引号即可
-// （`"https://en.wikipedia.org/wiki/Foo_(bar)"`，引号内一律原样当地址）。
-// 空白只认 ASCII 空白、不用 `\s`：JS 与 Python 两种正则方言的 `\s` 字符集不同（JS 含 U+FEFF、Python 含 U+0085 与
-// U+001C 到 U+001F），用 `\s` 会让同一条 step 在两引擎上派发不同；BOM 因此不算空白、带 BOM 的整句不命中。
+// 不剥标点：不带引号的地址末尾若是句号、逗号、分号、冒号、叹号、问号、省略号这类标点，或右括号、右引号（ASCII 与
+// 全角都算，见模式里的否定后顾字符集），整句就不是「一个地址」、走 AI——`When https://example.com/。` 多半是把地址
+// 写进了一句话；地址本身以这些字符结尾时加引号即可（`"https://en.wikipedia.org/wiki/Foo_(bar)"`，引号内一律原样当地址）。
+// 空白显式列出、不用 `\s`：ASCII 空白加不换行空格（U+00A0）与全角空格（U+3000，中文输入法在行尾容易多打一个）。
+// JS 与 Python 两种正则方言的 `\s` 字符集不同（JS 含 U+FEFF、Python 含 U+0085 与 U+001C 到 U+001F），用 `\s` 会让
+// 同一条 step 在两引擎上派发不同；BOM 因此不算空白，开头带 BOM 的整句不命中（BOM 不是字母、也不是空白）。
 // `tel:123`（没有 `://`）、含未编码空格的地址、一个普通裸词都不命中。与 Nova 侧的 ADDRESS_PATTERN 除具名组写法
 // （Python 的 `(?P<name>` 对应这里的 `(?<name>`）外逐字相同，由 engines/fixtures/navigation-address-cases.json 对拍。
-export const ADDRESS_PATTERN = String.raw`^[ \t\r\n\f\v]*(?<q1>"?)(?<url>[A-Za-z][A-Za-z0-9+.\-]*://[^" \t\r\n\f\v]+)(?:(?<q2>")|(?<![.,;:!?)\]}。，、；：！？）】」』〉》]))[ \t\r\n\f\v]*$`;
+export const ADDRESS_PATTERN = String.raw`^[ \t\r\n\f\v\u00a0\u3000]*(?<q1>"?)(?<url>[A-Za-z][A-Za-z0-9+.\-]*://[^" \t\r\n\f\v\u00a0\u3000]+)(?:(?<q2>")|(?<![.,;:!?)\]}。，、；：！？）】」』〉》］｝〕．…”’〗]))[ \t\r\n\f\v\u00a0\u3000]*$`;
 export const WEB_SCHEMES = ["http", "https"];
 
 deterministic(

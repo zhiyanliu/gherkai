@@ -1,51 +1,328 @@
 {
   "_comment": "内建导航与注册表的跨语言对拍用例（ADR 0020 第 3 条、0050 决策 1）。消费者：engines/novaact/tests/test_deterministic.py 与 engines/midscene/src/worker/deterministic.test.mts，两侧读同一个文件。cases：两个引擎的 ADDRESS_PATTERN 对每条 text 须给出相同的命中结果，命中时 url 组相同，hit 为 false 的文本走 AI。registry：清空注册表后按顺序注册 entries，清单的 keywords 与 matchBatch 对 probes 的回答两侧须一致；pattern 用 Python 具名组写法，JS 侧把 (?P< 换成 (?<；<NAV> 指内建导航的 ADDRESS_PATTERN。",
   "cases": [
-    {"text": "\"https://www.wikipedia.org/\"", "hit": true, "url": "https://www.wikipedia.org/"},
-    {"text": "https://en.wikipedia.org/wiki/OpenAI", "hit": true, "url": "https://en.wikipedia.org/wiki/OpenAI"},
-    {"text": "  \"https://example.com/a?b=1&c=2#x\"  ", "hit": true, "url": "https://example.com/a?b=1&c=2#x"},
-    {"text": "\thttps://example.com/\t", "hit": true, "url": "https://example.com/", "note": "两侧空白只认 ASCII 空白"},
-    {"text": "\"shop://product/42\"", "hit": true, "url": "shop://product/42", "note": "任意 scheme 都命中；网页目标上由 handler 记 error"},
-    {"text": "\"HTTPS://EXAMPLE.COM/\"", "hit": true, "url": "HTTPS://EXAMPLE.COM/"},
-    {"text": "\"https://example.com", "hit": true, "url": "https://example.com", "note": "引号不配对：模式命中，handler 记 error"},
-    {"text": "https://example.com\"", "hit": true, "url": "https://example.com", "note": "引号不配对：模式命中，handler 记 error"},
-    {"text": "\"https://example.com/.\"", "hit": true, "url": "https://example.com/.", "note": "引号内一律原样当地址，末尾标点不剥"},
-    {"text": "\"https://en.wikipedia.org/wiki/Foo_(bar)\"", "hit": true, "url": "https://en.wikipedia.org/wiki/Foo_(bar)"},
-    {"text": "https://example.com/?q=1", "hit": true, "url": "https://example.com/?q=1", "note": "问号在中间不算末尾标点"},
-    {"text": "https://a\u0085b.example/", "hit": true, "url": "https://a\u0085b.example/", "note": "U+0085 只在 Python 的 \\s 里；两侧都不当空白"},
-    {"text": "打开 \"https://example.com/\"", "hit": false, "note": "1.4 的旧写法，整句交给 AI"},
-    {"text": "\"https://example.com/\"。", "hit": false, "note": "引号外的标点：不剥标点"},
-    {"text": "https://example.com/。", "hit": false, "note": "不带引号、末尾句号：不是整句一个地址"},
-    {"text": "https://example.com/.", "hit": false, "note": "不带引号、末尾 ASCII 句号"},
-    {"text": "https://example.com/)", "hit": false, "note": "不带引号、末尾右括号"},
-    {"text": "https://en.wikipedia.org/wiki/Foo_(bar)", "hit": false, "note": "地址本身以括号结尾：不带引号时走 AI，要导航就加引号"},
-    {"text": "\"https://example.com/.", "hit": false, "note": "引号不配对且末尾标点：不命中、走 AI"},
-    {"text": "\"https://example.com/\" \"https://example.org/\"", "hit": false, "note": "两个地址不是整句一个地址"},
-    {"text": "tel:123", "hit": false, "note": "没有 ://"},
-    {"text": "\"https://example.com/a b\"", "hit": false, "note": "含未编码空格"},
-    {"text": "'https://example.com/'", "hit": false, "note": "单引号不是地址的一部分"},
-    {"text": "﻿https://example.com/", "hit": false, "note": "BOM 不算空白（JS 的 \\s 含它、Python 的不含）：两侧都不命中"},
-    {"text": "首页", "hit": false}
+    {
+      "text": "\"https://www.wikipedia.org/\"",
+      "hit": true,
+      "url": "https://www.wikipedia.org/"
+    },
+    {
+      "text": "https://en.wikipedia.org/wiki/OpenAI",
+      "hit": true,
+      "url": "https://en.wikipedia.org/wiki/OpenAI"
+    },
+    {
+      "text": "  \"https://example.com/a?b=1&c=2#x\"  ",
+      "hit": true,
+      "url": "https://example.com/a?b=1&c=2#x"
+    },
+    {
+      "text": "\thttps://example.com/\t",
+      "hit": true,
+      "url": "https://example.com/",
+      "note": "两侧空白只认 ASCII 空白"
+    },
+    {
+      "text": "\"shop://product/42\"",
+      "hit": true,
+      "url": "shop://product/42",
+      "note": "任意 scheme 都命中；网页目标上由 handler 记 error"
+    },
+    {
+      "text": "\"HTTPS://EXAMPLE.COM/\"",
+      "hit": true,
+      "url": "HTTPS://EXAMPLE.COM/"
+    },
+    {
+      "text": "\"https://example.com",
+      "hit": true,
+      "url": "https://example.com",
+      "note": "引号不配对：模式命中，handler 记 error"
+    },
+    {
+      "text": "https://example.com\"",
+      "hit": true,
+      "url": "https://example.com",
+      "note": "引号不配对：模式命中，handler 记 error"
+    },
+    {
+      "text": "\"https://example.com/.\"",
+      "hit": true,
+      "url": "https://example.com/.",
+      "note": "引号内一律原样当地址，末尾标点不剥"
+    },
+    {
+      "text": "\"https://en.wikipedia.org/wiki/Foo_(bar)\"",
+      "hit": true,
+      "url": "https://en.wikipedia.org/wiki/Foo_(bar)"
+    },
+    {
+      "text": "https://example.com/?q=1",
+      "hit": true,
+      "url": "https://example.com/?q=1",
+      "note": "问号在中间不算末尾标点"
+    },
+    {
+      "text": "https://ab.example/",
+      "hit": true,
+      "url": "https://ab.example/",
+      "note": "U+0085 只在 Python 的 \\s 里；两侧都不当空白"
+    },
+    {
+      "text": "https://example.com/　",
+      "hit": true,
+      "url": "https://example.com/",
+      "note": "行尾多一个全角空格：当空白剥去"
+    },
+    {
+      "text": " \"https://example.com/\"",
+      "hit": true,
+      "url": "https://example.com/",
+      "note": "不换行空格当空白剥去"
+    },
+    {
+      "text": "https://a　b.example/",
+      "hit": false,
+      "note": "地址中间的全角空格：含空白，不是地址"
+    },
+    {
+      "text": "https://example.com/．",
+      "hit": false,
+      "note": "不带引号、末尾全角句点"
+    },
+    {
+      "text": "https://example.com/］",
+      "hit": false,
+      "note": "不带引号、末尾全角右方括号"
+    },
+    {
+      "text": "https://example.com/…",
+      "hit": false,
+      "note": "不带引号、末尾省略号"
+    },
+    {
+      "text": "https://example.com/”",
+      "hit": false,
+      "note": "不带引号、末尾右双引号"
+    },
+    {
+      "text": "https://example.com/﻿",
+      "hit": true,
+      "url": "https://example.com/﻿",
+      "note": "末尾 BOM 不是空白也不是标点：两侧都命中并进地址（只有开头的 BOM 挡住整句）"
+    },
+    {
+      "text": "打开 \"https://example.com/\"",
+      "hit": false,
+      "note": "1.4 的旧写法，整句交给 AI"
+    },
+    {
+      "text": "\"https://example.com/\"。",
+      "hit": false,
+      "note": "引号外的标点：不剥标点"
+    },
+    {
+      "text": "https://example.com/。",
+      "hit": false,
+      "note": "不带引号、末尾句号：不是整句一个地址"
+    },
+    {
+      "text": "https://example.com/.",
+      "hit": false,
+      "note": "不带引号、末尾 ASCII 句号"
+    },
+    {
+      "text": "https://example.com/)",
+      "hit": false,
+      "note": "不带引号、末尾右括号"
+    },
+    {
+      "text": "https://en.wikipedia.org/wiki/Foo_(bar)",
+      "hit": false,
+      "note": "地址本身以括号结尾：不带引号时走 AI，要导航就加引号"
+    },
+    {
+      "text": "\"https://example.com/.",
+      "hit": false,
+      "note": "引号不配对且末尾标点：不命中、走 AI"
+    },
+    {
+      "text": "\"https://example.com/\" \"https://example.org/\"",
+      "hit": false,
+      "note": "两个地址不是整句一个地址"
+    },
+    {
+      "text": "tel:123",
+      "hit": false,
+      "note": "没有 ://"
+    },
+    {
+      "text": "\"https://example.com/a b\"",
+      "hit": false,
+      "note": "含未编码空格"
+    },
+    {
+      "text": "'https://example.com/'",
+      "hit": false,
+      "note": "单引号不是地址的一部分"
+    },
+    {
+      "text": "﻿https://example.com/",
+      "hit": false,
+      "note": "BOM 不算空白（JS 的 \\s 含它、Python 的不含）：两侧都不命中"
+    },
+    {
+      "text": "首页",
+      "hit": false
+    }
   ],
   "registry": {
     "entries": [
-      {"pattern": "<NAV>", "description": "nav", "example": "Given \"https://x.example/\"", "keywords": ["Given", "When"]},
-      {"pattern": "仅给定 \"(?P<x>[^\"]+)\"", "description": "d1", "example": "Given 仅给定 \"a\"", "keywords": ["When", "Given"]},
-      {"pattern": "任意关键字", "description": "d2", "example": "Then 任意关键字"},
-      {"pattern": "https?://conflict\\.example(?P<rest>[^\"]*)", "description": "d3", "example": "Given https://conflict.example/"}
+      {
+        "pattern": "<NAV>",
+        "description": "nav",
+        "example": "Given \"https://x.example/\"",
+        "keywords": [
+          "Given",
+          "When"
+        ]
+      },
+      {
+        "pattern": "仅给定 \"(?P<x>[^\"]+)\"",
+        "description": "d1",
+        "example": "Given 仅给定 \"a\"",
+        "keywords": [
+          "When",
+          "Given"
+        ]
+      },
+      {
+        "pattern": "任意关键字",
+        "description": "d2",
+        "example": "Then 任意关键字"
+      },
+      {
+        "pattern": "https?://conflict\\.example(?P<rest>[^\"]*)",
+        "description": "d3",
+        "example": "Given https://conflict.example/"
+      }
     ],
-    "expected_keywords": [["Given", "When"], ["Given", "When"], ["Given", "When", "Then"], ["Given", "When", "Then"]],
+    "expected_keywords": [
+      [
+        "Given",
+        "When"
+      ],
+      [
+        "Given",
+        "When"
+      ],
+      [
+        "Given",
+        "When",
+        "Then"
+      ],
+      [
+        "Given",
+        "When",
+        "Then"
+      ]
+    ],
     "probes": [
-      {"keyword": "Given", "text": "仅给定 \"a\"", "expect": {"pattern": "仅给定 \"(?P<x>[^\"]+)\"", "description": "d1"}},
-      {"keyword": "When", "text": "仅给定 \"a\"", "expect": {"pattern": "仅给定 \"(?P<x>[^\"]+)\"", "description": "d1"}},
-      {"keyword": "Then", "text": "仅给定 \"a\"", "expect": {"keyword_mismatch": "仅给定 \"(?P<x>[^\"]+)\"", "keywords": ["Given", "When"]}},
-      {"keyword": "Then", "text": "任意关键字", "expect": {"pattern": "任意关键字", "description": "d2"}},
-      {"keyword": "Given", "text": "\"https://x.example/\"", "expect": {"pattern": "<NAV>", "description": "nav"}},
-      {"keyword": "When", "text": "https://x.example/", "expect": {"pattern": "<NAV>", "description": "nav"}},
-      {"keyword": "Then", "text": "\"https://x.example/\"", "expect": {"keyword_mismatch": "<NAV>", "keywords": ["Given", "When"]}},
-      {"text": "\"https://x.example/\"", "expect": {"pattern": "<NAV>", "description": "nav"}, "note": "裸字符串形态不核关键字"},
-      {"keyword": "Given", "text": "https://conflict.example/a", "expect": {"conflict": ["<NAV>", "https?://conflict\\.example(?P<rest>[^\"]*)"]}, "note": "使用方的宽模式也匹配裸地址：按冲突规则报、不做覆盖"},
-      {"keyword": "When", "text": "没有这条", "expect": null}
+      {
+        "keyword": "Given",
+        "text": "仅给定 \"a\"",
+        "expect": {
+          "pattern": "仅给定 \"(?P<x>[^\"]+)\"",
+          "description": "d1"
+        }
+      },
+      {
+        "keyword": "When",
+        "text": "仅给定 \"a\"",
+        "expect": {
+          "pattern": "仅给定 \"(?P<x>[^\"]+)\"",
+          "description": "d1"
+        }
+      },
+      {
+        "keyword": "Then",
+        "text": "仅给定 \"a\"",
+        "expect": {
+          "keyword_mismatch": "仅给定 \"(?P<x>[^\"]+)\"",
+          "keywords": [
+            "Given",
+            "When"
+          ]
+        }
+      },
+      {
+        "keyword": "Then",
+        "text": "任意关键字",
+        "expect": {
+          "pattern": "任意关键字",
+          "description": "d2"
+        }
+      },
+      {
+        "keyword": "Given",
+        "text": "\"https://x.example/\"",
+        "expect": {
+          "pattern": "<NAV>",
+          "description": "nav"
+        }
+      },
+      {
+        "keyword": "When",
+        "text": "https://x.example/",
+        "expect": {
+          "pattern": "<NAV>",
+          "description": "nav"
+        }
+      },
+      {
+        "keyword": "Then",
+        "text": "\"https://x.example/\"",
+        "expect": {
+          "keyword_mismatch": "<NAV>",
+          "keywords": [
+            "Given",
+            "When"
+          ]
+        }
+      },
+      {
+        "text": "\"https://x.example/\"",
+        "expect": {
+          "pattern": "<NAV>",
+          "description": "nav"
+        },
+        "note": "裸字符串形态不核关键字"
+      },
+      {
+        "keyword": null,
+        "text": "仅给定 \"a\"",
+        "expect": {
+          "pattern": "仅给定 \"(?P<x>[^\"]+)\"",
+          "description": "d1"
+        },
+        "note": "keyword 为 null 与缺键同义、不核关键字"
+      },
+      {
+        "keyword": "Given",
+        "text": "https://conflict.example/a",
+        "expect": {
+          "conflict": [
+            "<NAV>",
+            "https?://conflict\\.example(?P<rest>[^\"]*)"
+          ]
+        },
+        "note": "使用方的宽模式也匹配裸地址：按冲突规则报、不做覆盖"
+      },
+      {
+        "keyword": "When",
+        "text": "没有这条",
+        "expect": null
+      }
     ]
   }
 }

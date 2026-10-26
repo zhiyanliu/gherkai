@@ -113,7 +113,7 @@ def test_list_engines_and_deterministic_json_keys_are_documented(monkeypatch):
         raise compose.WorkerNotFoundError(name, "未找到")
     monkeypatch.setattr(m.compose, "resolve_worker_cmd", fake)
     _assert_documented(m._probe_engines(), section="list-engines --json")
-    # list-deterministic：CLI 原样转述自述对象里的清单行（pattern/description/example 三键，ADR 0036「5.」）
+    # list-deterministic：CLI 原样转述自述对象里的清单行（pattern/description/example/keywords 四键，ADR 0036「5.」）
     _assert_documented({"engine": "novaact", "deterministic_steps": [{"pattern": "p", "description": "d", "example": "e", "keywords": ["Given", "When"]}]},
                        section="list-deterministic --json")
 

@@ -215,6 +215,20 @@ test("runStep: 确定性 handler 抛的错按异常形态分类——消息文�
   assert.equal(events().filter((e) => e.type === "step_done").at(-1).errorType, "network_error");
 });
 
+test("runStep: 命中多条模式（使用方宽模式与内建导航同时命中）→ error、engine_error、不转 AI、不导航——冲突消息里的 ssl 字样不算网络故障", async () => {
+  const { runStep } = await importMod();
+  const { deterministic } = await import("./deterministic.mjs");
+  deterministic(String.raw`https?://ssl\.example(?<rest>[^"]*)`, () => {},
+    { description: "测试：与内建导航撞车的宽模式", example: "Given https://ssl.example/" });
+  const { agent, calls } = fakeAgent();
+  gotoCalls.length = 0;
+  assert.equal(await runStep(agent, fakePage, "sc:0", step("Given", "https://ssl.example/a"), 1, testSink), "error");
+  assert.deepEqual(calls, []); assert.deepEqual(gotoCalls, []);
+  const ev = events().filter((e) => e.type === "step_done").at(-1);
+  assert.equal(ev.errorType, "engine_error");
+  assert.match(ev.message, /命中多条确定性模式/);
+});
+
 test("runStep: When 自然语言 → 走 aiAct、passed、无 votes", async () => {
   const { runStep } = await importMod();
   const { agent, calls } = fakeAgent();
@@ -708,22 +722,29 @@ test("--match-steps: 超 64KB payload 经 pipe 完整送出（ADR 0036，不被 
   assert.equal(got.length, texts.length, "逐条命中结果不该丢");
 });
 
-test("--match-steps: 真入口按 {keyword, text} 回答四态——Then 后只有地址是 keyword_mismatch、Given 命中内建导航、裸字符串不核关键字（ADR 0036、0050 决策 1）", async () => {
+test("--match-steps: 真入口按 {keyword, text} 回答四态——Then 后只有地址是 keyword_mismatch、Given 命中内建导航、使用方宽模式与内建导航同时命中是 conflict、裸字符串不核关键字、未命中是 null（ADR 0036、0050 决策 1）", async () => {
   const { ADDRESS_PATTERN } = await import("./deterministic.steps.mjs");
+  // 使用方 steps 目录里一条与内建导航撞车的宽模式（经真入口的 GHERKAI_STEPS_DIR 加载，ADR 0037 决策 4）
+  const stepsDir = fs.mkdtempSync(path.join(os.tmpdir(), "gherkai-match-conflict-"));
+  const wide = String.raw`https?://conflict\.example(?<rest>[^"]*)`;
+  fs.writeFileSync(path.join(stepsDir, "wide.mts"),
+    `import { deterministic } from "@gherkai/worker-midscene";\ndeterministic(String.raw\`${wide}\`, () => {}, { description: "d", example: "Given https://conflict.example/" });\n`);
   const items = [{ keyword: "Then", text: '"https://x.example/"' }, { keyword: "Given", text: '"https://x.example/"' },
-                 '"https://x.example/"', { keyword: "When", text: "没有这条" }];
+                 { keyword: "Given", text: "https://conflict.example/a" }, '"https://x.example/"', { keyword: "When", text: "没有这条" }];
   const proc = spawn(process.execPath, [path.join(import.meta.dirname, "..", "bin.mts"), "--match-steps"],
-    { stdio: ["pipe", "pipe", "pipe"], env: Object.fromEntries(Object.entries(process.env).filter(([k]) => k !== "GHERKAI_STEPS_DIR")) });
+    { stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, GHERKAI_STEPS_DIR: stepsDir } });
   proc.stdin.end(JSON.stringify(items));
-  const out: Buffer[] = [];
-  proc.stdout.on("data", (c) => out.push(c));
+  const out: Buffer[] = []; const err: Buffer[] = [];
+  proc.stdout.on("data", (c) => out.push(c)); proc.stderr.on("data", (c) => err.push(c));
   const code: number = await new Promise((r) => proc.on("close", r));
-  assert.equal(code, 0);
+  fs.rmSync(stepsDir, { recursive: true, force: true });
+  assert.equal(code, 0, Buffer.concat(err).toString("utf-8"));
   const got = JSON.parse(Buffer.concat(out).toString("utf-8"));
   assert.deepEqual(got[0], { keyword_mismatch: ADDRESS_PATTERN, keywords: ["Given", "When"] });
   assert.equal(got[1].pattern, ADDRESS_PATTERN); assert.equal(typeof got[1].description, "string");
-  assert.equal(got[2].pattern, ADDRESS_PATTERN);
-  assert.equal(got[3], null);
+  assert.deepEqual(got[2], { conflict: [ADDRESS_PATTERN, wide] });
+  assert.equal(got[3].pattern, ADDRESS_PATTERN);
+  assert.equal(got[4], null);
 });
 
 

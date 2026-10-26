@@ -611,6 +611,7 @@ _OK_TAIL = _OK_STEPS + _OK_MODEL  # 两个合法的尾键：拿它填「缺陷�
     b'{' + _OK_HEAD + b', "min_grace_s": 150, "deterministic_steps": [{"pattern": "p", "description": "d", "example": "e", "keywords": null}]' + _OK_MODEL + b'}',  # keywords 显式 null（只有缺键算旧 worker）
     b'{' + _OK_HEAD + b', "min_grace_s": 150, "deterministic_steps": [{"pattern": "p", "description": "d", "example": "e", "keywords": "Given"}]' + _OK_MODEL + b'}',  # keywords 不是数组
     b'{' + _OK_HEAD + b', "min_grace_s": 150, "deterministic_steps": [{"pattern": "p", "description": "d", "example": "e", "keywords": [["Given"]]}]' + _OK_MODEL + b'}',  # 元素不是字符串（进 set 会 TypeError，须先核类型）
+    b'{' + _OK_HEAD + b', "min_grace_s": 150, "deterministic_steps": ["p"]' + _OK_MODEL + b'}',  # 清单项不是对象（消费者 e.get 会崩在无关处）
 ])
 def test_query_capabilities_rejects_off_contract_answer(monkeypatch, novaact_env_cmd, fresh_caps_cache, payload):
     """自述不合契约 → fail-loud（与「输出非 JSON」同类），且不写缓存。校验放在这一个函数里，**每个消费者

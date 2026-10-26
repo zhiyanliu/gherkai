@@ -70,7 +70,7 @@ deterministic(
 - 判定映射：Nova 抛 `AssertionError`、Midscene 抛 `DeterministicAssertion`（或 node:assert 的 AssertionError）时该步判 **failed**；抛其它异常时判 **error**。
 - 遍历：目录排序递归。两引擎都跳过**以 `_` 开头的文件或目录**（`_selectors.py` / `_pages/` 都算，整棵目录都不加载）——不注册 step 的辅助模块（页面对象、选择器常量、共享 helper）放那里，step 文件相对 import 它照样可用。Nova 只认 `*.py`、另跳过 `test_*.py`；Midscene 只认 `.mts` / `.mjs`（恒为 ESM，与项目 package.json 无关；`.ts` / `.js` 在收集阶段就被跳过——不 import、不报错、清单里没有）、另跳过 `*.test.*`。
 - 可选 `keywords` 声明这条 step 接受的关键字（Nova `keywords=("Then",)`、Midscene `keywords: ["Then"]`，缺省三个都接受）；命中了模式而关键字不符的步记 error、不转 AI。断言类 step 声明只接受 `Then`。
-- 引擎只内建一条确定性 step：导航（`Given` / `When` 后整句是一个地址），它在清单与 `plan` 标注里与其它条目一样出现、只接受 `Given` / `When`。判定类 step 一律由项目注册，撞上同一 pattern 不做覆盖，按冲突处理。地址核对的现成模板（两侧成对的 `Then 页面地址匹配 "<正则>"`）在 https://github.com/zhiyanliu/gherkai/tree/HEAD/features/steps ，复制进项目 `steps/` 即可。
+- 引擎只内建一条确定性 step：导航（`Given` / `When` 后整句是一个地址），它在清单与 `plan` 标注里与其它条目一样出现、只接受 `Given` / `When`。判定类 step 一律由项目注册，注册了同一个模式不做覆盖，按冲突处理。地址核对的现成模板（两侧成对的 `Then 页面地址匹配 "<正则>"`）在 https://github.com/zhiyanliu/gherkai/tree/HEAD/features/steps ，复制进项目 `steps/` 即可。
 
 ## 4 两侧成对
 
@@ -84,7 +84,7 @@ deterministic(
 | `steps/` 下某个文件 import 失败（语法错、缺依赖、Midscene 用了 `.ts`） | `plan` / `run` / `submit` 在起第一个 job 前整个 run 以退出码 2 结束，点名文件与异常，**不跳过** | 先修那个文件，不是怀疑 feature |
 | Midscene 某个 step 文件一条都没注册 | 非 0 退出并点名 | 多半 import 到了第二份 `@gherkai/worker-midscene`，检查项目里有没有另一份 |
 | `--steps-dir`（或 `GHERKAI_STEPS_DIR`）指的目录不存在 | 直接以退出码 2 结束：明确指了一个地方而那里没东西 | 改路径；缺省 `./steps` 不存在不算错 |
-| 一个 step 文本命中多条 pattern | 该步记 error 并列出撞上的 pattern；`plan` 会提前暴露 | 收窄其中一条正则 |
+| 一个 step 文本命中多条 pattern | 该步记 error 并列出同时命中的 pattern；`plan` 会提前暴露 | 收窄其中一条正则 |
 | 明明写了 `steps/` 却全走 AI | 目录没被读到、或正则与 step 文本不匹配 | 确认 `--steps-dir` 指对；`list-deterministic --steps-dir …` 看清单里有没有你那条；对照 `example` 改 step 文本 |
 | `engine_error` 说起 worker 失败 | worker 没装或版本与 CLI 不一致 | 见 `references/setup-and-diagnosis.md` |
 

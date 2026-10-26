@@ -549,7 +549,12 @@ def query_capabilities(engine: str, *, steps_dir: str | Path | None = None,
     # 条目的 keywords 声明（ADR 0050 决策 1）：可缺键（旧 worker，视为接受全部关键字）；有键则须是封闭集合里不重复的
     # 非空字符串数组（显式 null 也不合契约）。先核元素类型再去重：非字符串元素进 set() 会抛 TypeError，绕过这里的契约错误。
     for entry in caps["deterministic_steps"]:
-        if not isinstance(entry, dict) or "keywords" not in entry:
+        if not isinstance(entry, dict):
+            raise RuntimeError(
+                f"引擎 {engine} 自述的确定性 step 清单项不是对象：{entry!r}"
+                "——worker 与命令行工具版本不一致？两者须同版本安装。"
+            )
+        if "keywords" not in entry:
             continue
         kws = entry["keywords"]
         if (not isinstance(kws, list) or not kws or not all(isinstance(k, str) for k in kws)
