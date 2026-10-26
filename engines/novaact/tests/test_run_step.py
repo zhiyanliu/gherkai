@@ -140,6 +140,25 @@ def test_navigation_rejects_non_http_scheme_and_unbalanced_quotes(captured):
         assert _done(captured)["errorType"] == "engine_error"
 
 
+def test_conflict_with_builtin_navigation_is_bounded_engine_error(captured):
+    """使用方宽模式与内建导航同时命中（ADR 0022 冲突规则）→ error、engine_error、不转 AI、不导航；消息一行有界、
+    不带异常类型名（与 Midscene 侧一致）。"""
+    _d.deterministic(r'https?://ssl\.example(?P<rest>[^"]*)', description="测试：与内建导航撞车的宽模式",
+                     example="Given https://ssl.example/")(lambda ctx, **groups: None)
+    try:
+        nova = _FakeNova()
+        assert rs._run_step(nova, "sc:0", _step("Given", "https://ssl.example/a"), 1, captured) == "error"
+        assert nova.calls == []
+        ev = _done(captured)
+        assert ev["errorType"] == "engine_error" and "命中多条确定性模式" in ev["message"]
+        assert not ev["message"].startswith("Deterministic")
+        nova = _FakeNova(); captured.clear()
+        rs._run_step(nova, "sc:0", _step("Given", "https://ssl.example/" + "a" * 1000), 1, captured)
+        assert len(_done(captured)["message"]) <= 300
+    finally:
+        _d._REGISTRY[:] = [e for e in _d._REGISTRY if "ssl" not in e.raw]  # 不把测试条目留给同进程的其它测试
+
+
 def test_deterministic_hit_with_argument_is_error(captured):
     """确定性 step 不接收多行参数（ADR 0024）：带 DataTable / DocString 即记 error，不静默忽略。"""
     nova = _FakeNova()

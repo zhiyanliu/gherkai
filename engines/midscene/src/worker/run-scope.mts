@@ -39,7 +39,7 @@ import { match as matchDeterministic, DeterministicAssertion, DeterministicConfl
 import { buildInstruction } from "./argument.mjs";
 // step 级机读证据（ADR 0042）：SDK 结构 → gherkai 自有 schema 的映射与落盘全住那个模块；此处只挂钩子。
 import { stepEvidenceRef, executionsLength, EVIDENCE_KIND, ENGINE, type EvidenceHook } from "./evidence.mjs";
-import { errorText } from "./error-text.mjs";  // 失败原因压成一行有界文本（ADR 0042；与 evidence 侧同一规则）
+import { errorText, oneLineError } from "./error-text.mjs";  // 失败原因压成一行有界文本（ADR 0042；与 evidence 侧同一规则）
 import "./deterministic.steps.mjs";  // 内建脚手架（ADR 0022 退役 bdd 层后迁入 worker/）——**先于**使用方 steps 注册
 import { loadUserSteps } from "./user-steps.mjs";  // 使用方 steps/ 目录的加载（ADR 0037 决策 4）
 
@@ -779,7 +779,8 @@ async function runStep(
       // 关键字不符与命中多条都是注册表层面的写法 / 配置错误：直接记 engine_error，不经消息文本的网络启发
       // （冲突消息内联 step 原文与各条模式，其中的 ssl / timeout 字样不是网络故障；对齐 Nova 按异常类型分类）。
       if (e instanceof DeterministicKeywordMismatch || e instanceof DeterministicConflict) {
-        await sink.emit({ type: "step_done", scenarioId, stepIndex: index, status: "error", errorType: "engine_error", message: e.message });
+        // 消息走与其它失败同一条有界归一化（一行、封顶）但不带异常类型名（类型名是内部指代，ADR 0039）；与 Nova 侧一致
+        await sink.emit({ type: "step_done", scenarioId, stepIndex: index, status: "error", errorType: "engine_error", message: oneLineError(e.message) });
         return "error";
       }
       throw e;

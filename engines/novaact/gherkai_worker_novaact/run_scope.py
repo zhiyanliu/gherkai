@@ -391,9 +391,11 @@ def _run_step(nova, scenario_id: str, step: dict, votes_n: int, sink: EventSink,
         #    AssertionError→failed，其它→error。命中但关键字不在条目声明里（ADR 0050 决策 1）→ error、不转 AI、不顺延。
         try:
             hit = _deterministic.match(text, keyword)
-        except _deterministic.DeterministicKeywordMismatch as km:
+        except (_deterministic.DeterministicKeywordMismatch, _deterministic.DeterministicConflict) as reg_err:
+            # 关键字不符与命中多条都是注册表层面的写法 / 配置错误：直接记 engine_error；消息走与其它失败同一条
+            # 有界归一化（一行、封顶）但不带异常类型名（类型名是内部指代，ADR 0039）。与 Midscene 侧一致。
             sink.emit({"type": "step_done", "scenarioId": scenario_id, "stepIndex": idx,
-                       "status": "error", "errorType": "engine_error", "message": str(km)})
+                       "status": "error", "errorType": "engine_error", "message": _one_line(str(reg_err))})
             return "error"
         if hit is not None:
             if step.get("argument") is not None:
@@ -746,10 +748,15 @@ def _error_text(e: BaseException) -> str:
     不是堆栈，完整对象在 worker 日志里。
     """
     msg = getattr(e, "message", None)
-    text = msg if isinstance(msg, str) and msg.strip() else str(e)
+    first = _one_line(msg if isinstance(msg, str) and msg.strip() else str(e))
+    return f"{type(e).__name__}: {first}" if first else type(e).__name__
+
+
+def _one_line(text: str) -> str:
+    """多行文本 → 一行有界原因（首个非空行、折叠空白、先脱敏再封顶 300 字）；`_error_text` 与注册表层面的 error 消息共用。"""
     first = next((ln.strip() for ln in text.splitlines() if ln.strip()), "")
     first = redact_url_userinfo(" ".join(first.split()))  # 先脱敏再截断：截在 userinfo 中间会丢掉 `@`、让出口处的规则失效（ADR 0035 决策 5）
-    return f"{type(e).__name__}: {first[:300]}" if first else type(e).__name__
+    return first[:300]
 
 
 def _classify_act_error(e: BaseException) -> str:

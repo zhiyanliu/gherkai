@@ -20,7 +20,7 @@
       "text": "\thttps://example.com/\t",
       "hit": true,
       "url": "https://example.com/",
-      "note": "两侧空白只认 ASCII 空白"
+      "note": "两侧的空白集合显式列出（ASCII 空白加 U+00A0、U+3000），制表符在其中"
     },
     {
       "text": "\"shop://product/42\"",

@@ -227,6 +227,10 @@ test("runStep: 命中多条模式（使用方宽模式与内建导航同时命�
   const ev = events().filter((e) => e.type === "step_done").at(-1);
   assert.equal(ev.errorType, "engine_error");
   assert.match(ev.message, /命中多条确定性模式/);
+  // 消息有界且不带异常类型名（与其它失败同一条归一化，ADR 0042 / 0039）：超长地址撞车时也只留一行、封顶 300 码点
+  assert.equal(await runStep(agent, fakePage, "sc:0", step("Given", "https://ssl.example/" + "a".repeat(1000)), 1, testSink), "error");
+  const long = events().filter((e) => e.type === "step_done").at(-1).message as string;
+  assert.ok([...long].length <= 300, `${[...long].length} 码点`); assert.doesNotMatch(long, /^Deterministic/);
 });
 
 test("runStep: When 自然语言 → 走 aiAct、passed、无 votes", async () => {

@@ -755,13 +755,13 @@
     "semantic_hash": "f4f1b1adf124a8e1533f2e2935ff1027"
   },
   "engines/midscene/src/worker/run-scope.mts": {
-    "mtime": 1792992444.5979507,
-    "ast_hash": "76b6b20305f91778f0b2c6dcc18e6f6d",
+    "mtime": 1792993093.313883,
+    "ast_hash": "e36eac5ac53e2999f578dd5f75f661f0",
     "semantic_hash": ""
   },
   "engines/midscene/src/worker/run-scope.test.mts": {
-    "mtime": 1792992444.5988524,
-    "ast_hash": "d74045948a74bdf1afc7b8db3eb8b79a",
+    "mtime": 1792993076.1160026,
+    "ast_hash": "623ccbd40c402a4a0e4092850d3d7ca7",
     "semantic_hash": ""
   },
   "engines/midscene/src/worker/user-steps.mts": {
@@ -830,8 +830,8 @@
     "semantic_hash": "af42daf4af68fc11996d8c223310eb1e"
   },
   "engines/novaact/gherkai_worker_novaact/run_scope.py": {
-    "mtime": 1792991114.407836,
-    "ast_hash": "6febe7d4255ad7c5e111293ddd7b865b",
+    "mtime": 1792993093.3149478,
+    "ast_hash": "63736c75d8972e9c198672c52e428ead",
     "semantic_hash": ""
   },
   "engines/novaact/gherkai_worker_novaact/user_steps.py": {
@@ -880,8 +880,8 @@
     "semantic_hash": "5f9698f1d63459a3150de51aa520aa0a"
   },
   "engines/novaact/tests/test_run_step.py": {
-    "mtime": 1792991377.0502303,
-    "ast_hash": "384f6aa529ad96837a1568d14ec482af",
+    "mtime": 1792993093.3155158,
+    "ast_hash": "7c72c8dcc98e7255dda3737eae42eae5",
     "semantic_hash": ""
   },
   "engines/novaact/tests/test_transient_network.py": {
@@ -1915,8 +1915,8 @@
     "semantic_hash": ""
   },
   "docs/journey/0015-mobile-devices-implementation-batches.md": {
-    "mtime": 1792992534.8991895,
-    "ast_hash": "7c6740df43cad4a4ee8a0e4b43595a80",
+    "mtime": 1792993178.9114482,
+    "ast_hash": "2c36c2bb76156f610144c5fe74e71dce",
     "semantic_hash": ""
   },
   "features/steps/url_matches.mts": {
@@ -1931,7 +1931,7 @@
   },
   "engines/fixtures/navigation-address-cases.json": {
     "mtime": 1792992444.5985177,
-    "ast_hash": "a91dc57a02a2cc2983408e88168a9227",
+    "ast_hash": "",
     "semantic_hash": ""
   }
 }
