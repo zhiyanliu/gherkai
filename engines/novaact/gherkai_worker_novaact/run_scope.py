@@ -40,7 +40,6 @@ from __future__ import annotations
 import inspect
 import json
 import os
-import re
 import signal
 import sys
 import threading
@@ -107,13 +106,11 @@ EVIDENCE_DRAIN_SCOPE_END_S = 30.0
 EVIDENCE_DRAIN_EXIT_S = 6.0
 
 
-
-
 class _DeterministicCtx:
-    """传给确定性 handler 的上下文：暴露 Playwright `page`（精确 DOM/URL 查，不走 AI）。
+    """传给确定性 handler 的上下文：暴露 Playwright `page`（精确 DOM/URL 查，不走 AI）与导航原语 `navigate(url)`。
 
     Nova 把底层 Playwright Page 暴露在 `nova.page`（spike 已验证）。handler 拿它做
-    `ctx.page.url` / `ctx.page.locator(...)` 这类确定性判定。
+    `ctx.page.url` / `ctx.page.locator(...)` 这类确定性判定；内建导航条目用 `navigate`（ADR 0020 第 3 条）。
     """
 
     def __init__(self, nova) -> None:

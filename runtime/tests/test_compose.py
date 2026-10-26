@@ -608,6 +608,9 @@ _OK_TAIL = _OK_STEPS + _OK_MODEL  # 两个合法的尾键：拿它填「缺陷�
     b'{' + _OK_HEAD + b', "min_grace_s": 150, "deterministic_steps": [{"pattern": "p", "description": "d", "example": "e", "keywords": []}]' + _OK_MODEL + b'}',          # keywords 空
     b'{' + _OK_HEAD + b', "min_grace_s": 150, "deterministic_steps": [{"pattern": "p", "description": "d", "example": "e", "keywords": ["And"]}]' + _OK_MODEL + b'}',     # keywords 未知取值
     b'{' + _OK_HEAD + b', "min_grace_s": 150, "deterministic_steps": [{"pattern": "p", "description": "d", "example": "e", "keywords": ["Then", "Then"]}]' + _OK_MODEL + b'}',  # keywords 重复
+    b'{' + _OK_HEAD + b', "min_grace_s": 150, "deterministic_steps": [{"pattern": "p", "description": "d", "example": "e", "keywords": null}]' + _OK_MODEL + b'}',  # keywords 显式 null（只有缺键算旧 worker）
+    b'{' + _OK_HEAD + b', "min_grace_s": 150, "deterministic_steps": [{"pattern": "p", "description": "d", "example": "e", "keywords": "Given"}]' + _OK_MODEL + b'}',  # keywords 不是数组
+    b'{' + _OK_HEAD + b', "min_grace_s": 150, "deterministic_steps": [{"pattern": "p", "description": "d", "example": "e", "keywords": [["Given"]]}]' + _OK_MODEL + b'}',  # 元素不是字符串（进 set 会 TypeError，须先核类型）
 ])
 def test_query_capabilities_rejects_off_contract_answer(monkeypatch, novaact_env_cmd, fresh_caps_cache, payload):
     """自述不合契约 → fail-loud（与「输出非 JSON」同类），且不写缓存。校验放在这一个函数里，**每个消费者
@@ -623,6 +626,19 @@ def test_query_capabilities_rejects_off_contract_answer(monkeypatch, novaact_env
     with pytest.raises(RuntimeError):
         compose.query_capabilities("novaact")
     assert compose._CAPABILITIES_CACHE == {}
+
+
+def test_query_capabilities_accepts_keywords_declaration_and_missing_key(monkeypatch, novaact_env_cmd, fresh_caps_cache):
+    """keywords 合契约的形态都放行：声明子集、声明全部、缺键（旧 worker，视为接受全部）——反例见上一条。"""
+    import subprocess
+
+    payload = (b'{' + _OK_HEAD + b', "min_grace_s": 150, "deterministic_steps": ['
+               b'{"pattern": "a", "description": "d", "example": "e", "keywords": ["Given", "When"]}, '
+               b'{"pattern": "b", "description": "d", "example": "e", "keywords": ["Given", "When", "Then"]}, '
+               b'{"pattern": "c", "description": "d", "example": "e"}]' + _OK_MODEL + b'}')
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: _fake_caps_proc(payload))
+    caps = compose.query_capabilities("novaact")
+    assert [e.get("keywords") for e in caps["deterministic_steps"]] == [["Given", "When"], ["Given", "When", "Then"], None]
 
 
 def test_query_capabilities_wrong_engine_names_the_misconfiguration(monkeypatch, novaact_env_cmd, fresh_caps_cache):
@@ -1258,6 +1274,11 @@ def test_match_deterministic_feeds_stdin_and_parses(monkeypatch, novaact_env_cmd
     assert captured["cmd"][-1] == "--match-steps"
     import json as _json
     assert _json.loads(captured["input"].decode()) == ["a", "b"]
+    # 新契约形态（ADR 0036 / 0050 决策 1）：每项 {keyword, text} 原样送进 stdin，四态里的 keyword_mismatch 原样回传
+    _P.stdout = b'[{"keyword_mismatch": "nav", "keywords": ["Given", "When"]}, null]'
+    items = [{"keyword": "Then", "text": '"https://x.example/"'}, {"keyword": "When", "text": "没有这条"}]
+    assert compose.match_deterministic("midscene", items) == [{"keyword_mismatch": "nav", "keywords": ["Given", "When"]}, None]
+    assert _json.loads(captured["input"].decode()) == items
 
 
 # ---- read_task_def_stop_timeout（doctor 的 cloud 侧对照值，ADR 0032 真容器校准结论 4）----

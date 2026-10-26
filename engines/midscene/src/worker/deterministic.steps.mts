@@ -24,18 +24,24 @@
 // Nova Act 侧的对称脚手架见 gherkai_worker_novaact 的 deterministic_steps 模块。
 import { deterministic } from "./deterministic.mjs";
 
-// 地址的形态是 scheme://rest：scheme 按 RFC 3986（字母开头，字母、数字、`+ - .`），rest 非空且不含空白与双引号；
-// 只允许一对包住整句的双引号（q1 / q2 两组用来核对配对），不剥标点——末尾多一个句号就不是「整句是地址」、走 AI。
-// `tel:123`（没有 `://`）、含未编码空格的地址、一个普通裸词都不命中。与 Nova 侧的 ADDRESS_PATTERN 逐字相同
-// （Python 的 `(?P<name>` 对应这里的 `(?<name>`），跨语言 fixture 对拍。
-export const ADDRESS_PATTERN = '^\\s*(?<q1>"?)(?<url>[A-Za-z][A-Za-z0-9+.\\-]*://[^"\\s]+)(?<q2>"?)\\s*$';
+// 地址的形态是 scheme://rest：scheme 按 RFC 3986（字母开头，字母、数字、`+ - .`），rest 非空且不含空白与双引号。
+// 只允许一对包住整句的双引号（q1 / q2 两组用来核对配对；不带引号时 q2 组不参与匹配、取值为 undefined）。
+// 不剥标点：不带引号的地址末尾若是句号、逗号、问号这类标点或右括号，整句就不是「一个地址」、走 AI——
+// `When https://example.com/。` 多半是把地址写进了一句话；地址本身以括号或句号结尾时加引号即可
+// （`"https://en.wikipedia.org/wiki/Foo_(bar)"`，引号内一律原样当地址）。
+// 空白只认 ASCII 空白、不用 `\s`：JS 与 Python 两种正则方言的 `\s` 字符集不同（JS 含 U+FEFF、Python 含 U+0085 与
+// U+001C 到 U+001F），用 `\s` 会让同一条 step 在两引擎上派发不同；BOM 因此不算空白、带 BOM 的整句不命中。
+// `tel:123`（没有 `://`）、含未编码空格的地址、一个普通裸词都不命中。与 Nova 侧的 ADDRESS_PATTERN 除具名组写法
+// （Python 的 `(?P<name>` 对应这里的 `(?<name>`）外逐字相同，由 engines/fixtures/navigation-address-cases.json 对拍。
+export const ADDRESS_PATTERN = String.raw`^[ \t\r\n\f\v]*(?<q1>"?)(?<url>[A-Za-z][A-Za-z0-9+.\-]*://[^" \t\r\n\f\v]+)(?:(?<q2>")|(?<![.,;:!?)\]}。，、；：！？）】」』〉》]))[ \t\r\n\f\v]*$`;
 export const WEB_SCHEMES = ["http", "https"];
 
 deterministic(
   ADDRESS_PATTERN,
   async ({ navigate }, { q1, url, q2 }) => {
-    if (q1 !== q2) {
-      throw new Error(`地址两侧的引号不配对：${JSON.stringify(q1 + url + q2)}——要么都加双引号，要么都不加`);
+    const close = q2 ?? "";  // 不带引号的写法里 q2 组不参与匹配
+    if (q1 !== close) {
+      throw new Error(`地址两侧的引号不配对：${JSON.stringify(q1 + url + close)}——要么都加双引号，要么都不加`);
     }
     const scheme = url.split("://", 1)[0].toLowerCase();
     if (!WEB_SCHEMES.includes(scheme)) {

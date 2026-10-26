@@ -32,10 +32,17 @@ from __future__ import annotations
 
 from gherkai_worker_novaact.deterministic import deterministic
 
-# 地址的形态是 scheme://rest：scheme 按 RFC 3986（字母开头，字母、数字、`+ - .`），rest 非空且不含空白与双引号；
-# 只允许一对包住整句的双引号（q1 / q2 两组用来核对配对），不剥标点——末尾多一个句号就不是「整句是地址」、走 AI。
-# `tel:123`（没有 `://`）、含未编码空格的地址、一个普通裸词都不命中。
-ADDRESS_PATTERN = r'^\s*(?P<q1>"?)(?P<url>[A-Za-z][A-Za-z0-9+.\-]*://[^"\s]+)(?P<q2>"?)\s*$'
+# 地址的形态是 scheme://rest：scheme 按 RFC 3986（字母开头，字母、数字、`+ - .`），rest 非空且不含空白与双引号。
+# 只允许一对包住整句的双引号（q1 / q2 两组用来核对配对；不带引号时 q2 组不参与匹配、取值为 None）。
+# 不剥标点：不带引号的地址末尾若是句号、逗号、问号这类标点或右括号，整句就不是「一个地址」、走 AI——
+# `When https://example.com/。` 多半是把地址写进了一句话；地址本身以括号或句号结尾时加引号即可
+# （`"https://en.wikipedia.org/wiki/Foo_(bar)"`，引号内一律原样当地址）。
+# 空白只认 ASCII 空白、不用 `\s`：Python 与 JS 两种正则方言的 `\s` 字符集不同（JS 含 U+FEFF、Python 含 U+0085 与
+# U+001C 到 U+001F），用 `\s` 会让同一条 step 在两引擎上派发不同；BOM 因此不算空白、带 BOM 的整句不命中。
+# `tel:123`（没有 `://`）、含未编码空格的地址、一个普通裸词都不命中。两引擎的模式串除具名组写法（`(?P<` 对 `(?<`）外
+# 逐字相同，由 engines/fixtures/navigation-address-cases.json 对拍。
+ADDRESS_PATTERN = (r'^[ \t\r\n\f\v]*(?P<q1>"?)(?P<url>[A-Za-z][A-Za-z0-9+.\-]*://[^" \t\r\n\f\v]+)'
+                   r'(?:(?P<q2>")|(?<![.,;:!?)\]}。，、；：！？）】」』〉》]))[ \t\r\n\f\v]*$')
 WEB_SCHEMES = ("http", "https")
 
 
@@ -43,8 +50,9 @@ WEB_SCHEMES = ("http", "https")
                description="内建导航：整句只是一个地址时直接打开它（网页目标只接受 http(s) 地址）",
                example='Given "https://www.wikipedia.org/"',
                keywords=("Given", "When"))
-def navigate(ctx, q1: str, url: str, q2: str) -> None:
+def navigate(ctx, q1: str, url: str, q2: str | None) -> None:
     """内建导航（ADR 0020 第 3 条）：整句为地址的 Given / When step，直接打开，不走 AI。"""
+    q2 = q2 or ""  # 不带引号的写法里 q2 组不参与匹配
     if q1 != q2:
         raise ValueError(f"地址两侧的引号不配对：{(q1 + url + q2)!r}——要么都加双引号，要么都不加")
     scheme = url.split("://", 1)[0].lower()

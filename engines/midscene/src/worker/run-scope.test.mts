@@ -156,7 +156,7 @@ test("runStep: Given / When 后整句是一个地址 → 走 page.goto、passed�
 
 test("runStep: 句子里还有别的内容、末尾带标点、没有 :// → 不是导航，走 AI", async () => {
   const { runStep } = await importMod();
-  for (const text of ['在输入框输入 "https://example.com"', '"https://example.com"。', "tel:123"]) {
+  for (const text of ['在输入框输入 "https://example.com"', '"https://example.com"。', "https://example.com/。", "https://example.com/)", "tel:123"]) {
     const { agent, calls } = fakeAgent();
     gotoCalls.length = 0;
     await runStep(agent, fakePage, "sc:0", step("When", text), 1, testSink);
@@ -179,17 +179,40 @@ test("runStep: Then 后只有一个地址 → 命中内建导航但关键字不�
 
 test("runStep: 网页目标上非 http(s) 地址、引号不配对 → error；带多行参数的确定性 step → error", async () => {
   const { runStep } = await importMod();
-  for (const [text, re] of [['"shop://product/42"', /只能打开 http\(s\) 地址/], ['"https://example.com', /引号不配对/]] as const) {
-    const { agent } = fakeAgent();
+  for (const [text, re] of [['"shop://product/42"', /只能打开 http\(s\) 地址/], ['"https://example.com', /引号不配对/],
+                            ['https://example.com"', /引号不配对/], ['"shop://timeout"', /只能打开 http\(s\) 地址/]] as const) {
+    const { agent, calls } = fakeAgent();
     gotoCalls.length = 0;
     assert.equal(await runStep(agent, fakePage, "sc:0", step("Given", text), 1, testSink), "error", text);
-    assert.deepEqual(gotoCalls, []);
-    assert.match(events().filter((e) => e.type === "step_done").at(-1).message, re);  // 循环内取本轮的 step_done
+    assert.deepEqual(gotoCalls, []); assert.deepEqual(calls, [], text);  // 不导航、不转 AI
+    const ev = events().filter((e) => e.type === "step_done").at(-1);  // 循环内取本轮的 step_done
+    assert.match(ev.message, re);
+    assert.equal(ev.errorType, "engine_error", text);  // 写法错误是执行错误：消息里的 timeout 字样不是网络故障的证据（对齐 Nova 按异常类型分类）
   }
-  const { agent } = fakeAgent();
-  const withArg = { ...step("Given", '"https://example.com"'), argument: { kind: "docString", content: "x" } };
-  assert.equal(await runStep(agent, fakePage, "sc:0", withArg, 1, testSink), "error");
-  assert.match(events().filter((e) => e.type === "step_done").at(-1).message, /不接受多行参数/);
+  for (const argument of [{ kind: "docString", content: "x" }, { kind: "dataTable", rows: [["a", "b"]] }]) {
+    const { agent, calls } = fakeAgent();
+    gotoCalls.length = 0;
+    const withArg = { ...step("Given", '"https://example.com"'), argument };
+    assert.equal(await runStep(agent, fakePage, "sc:0", withArg, 1, testSink), "error");
+    assert.deepEqual(gotoCalls, []); assert.deepEqual(calls, []);
+    const ev = events().filter((e) => e.type === "step_done").at(-1);
+    assert.match(ev.message, /不接受多行参数/); assert.equal(ev.errorType, "engine_error");
+  }
+});
+
+test("runStep: 确定性 handler 抛的错按异常形态分类——消息文本里的 ssl / timeout 不算网络故障，带 ECONNRESET code 的才算", async () => {
+  const { runStep } = await importMod();
+  const { deterministic } = await import("./deterministic.mjs");
+  deterministic('抛出消息 "(?<msg>[^"]+)"', (_ctx, { msg }) => { throw new Error(msg); },
+    { description: "测试：handler 抛带给定消息的错", example: 'When 抛出消息 "x"' });
+  deterministic("抛出网络断线", () => { throw Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" }); },
+    { description: "测试：handler 抛带 code 的网络错", example: "When 抛出网络断线" });
+  for (const text of ['抛出消息 "等待 https://ssl.example 超时 timeout"', '抛出消息 "handshake 字样也不算"']) {
+    assert.equal(await runStep(fakeAgent().agent, fakePage, "sc:0", step("When", text), 1, testSink), "error", text);
+    assert.equal(events().filter((e) => e.type === "step_done").at(-1).errorType, "engine_error", text);
+  }
+  assert.equal(await runStep(fakeAgent().agent, fakePage, "sc:0", step("When", "抛出网络断线"), 1, testSink), "error");
+  assert.equal(events().filter((e) => e.type === "step_done").at(-1).errorType, "network_error");
 });
 
 test("runStep: When 自然语言 → 走 aiAct、passed、无 votes", async () => {
@@ -685,6 +708,24 @@ test("--match-steps: 超 64KB payload 经 pipe 完整送出（ADR 0036，不被 
   assert.equal(got.length, texts.length, "逐条命中结果不该丢");
 });
 
+test("--match-steps: 真入口按 {keyword, text} 回答四态——Then 后只有地址是 keyword_mismatch、Given 命中内建导航、裸字符串不核关键字（ADR 0036、0050 决策 1）", async () => {
+  const { ADDRESS_PATTERN } = await import("./deterministic.steps.mjs");
+  const items = [{ keyword: "Then", text: '"https://x.example/"' }, { keyword: "Given", text: '"https://x.example/"' },
+                 '"https://x.example/"', { keyword: "When", text: "没有这条" }];
+  const proc = spawn(process.execPath, [path.join(import.meta.dirname, "..", "bin.mts"), "--match-steps"],
+    { stdio: ["pipe", "pipe", "pipe"], env: Object.fromEntries(Object.entries(process.env).filter(([k]) => k !== "GHERKAI_STEPS_DIR")) });
+  proc.stdin.end(JSON.stringify(items));
+  const out: Buffer[] = [];
+  proc.stdout.on("data", (c) => out.push(c));
+  const code: number = await new Promise((r) => proc.on("close", r));
+  assert.equal(code, 0);
+  const got = JSON.parse(Buffer.concat(out).toString("utf-8"));
+  assert.deepEqual(got[0], { keyword_mismatch: ADDRESS_PATTERN, keywords: ["Given", "When"] });
+  assert.equal(got[1].pattern, ADDRESS_PATTERN); assert.equal(typeof got[1].description, "string");
+  assert.equal(got[2].pattern, ADDRESS_PATTERN);
+  assert.equal(got[3], null);
+});
+
 
 // ---- 能力自述 --capabilities（ADR 0036「5.」）：JSON 形状 + min_grace_s 的来路（ADR 0024「引擎自报下限」）----
 // **真实运行入口**：组合根消费的就是这条路（spawn worker → 读 stdout 一行 JSON → 拿 min_grace_s 当 grace 下限），
@@ -701,7 +742,8 @@ test("--capabilities: 一个 JSON 对象即以退出码 0 结束；五键含 det
   const { MODEL } = await import("../lib/agentcore-sigv4.mjs");
   const proc = spawn(process.execPath, [
     "--import", import.meta.resolve("tsx"), path.join(import.meta.dirname, "..", "bin.mts"), "--capabilities",
-  ], { stdio: ["ignore", "pipe", "pipe"] });
+  ], { stdio: ["ignore", "pipe", "pipe"],
+       env: Object.fromEntries(Object.entries(process.env).filter(([k]) => k !== "GHERKAI_STEPS_DIR")) });  // 只看脚手架自身的条目（对齐 Nova 侧）
   const out: Buffer[] = []; const err: Buffer[] = [];
   proc.stdout.on("data", (c) => out.push(c));
   proc.stderr.on("data", (c) => err.push(c));

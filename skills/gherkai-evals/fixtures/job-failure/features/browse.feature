@@ -1,7 +1,7 @@
 Feature: 词条浏览
 
   Background:
-    Given 打开 "https://en.wikipedia.org/wiki/Main_Page"
+    Given "https://en.wikipedia.org/wiki/Main_Page"
 
   @scope:deep-dive @timeout:20
   Scenario: 长流程：搜索、进入词条、跳到历史一节

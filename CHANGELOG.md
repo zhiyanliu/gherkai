@@ -12,7 +12,7 @@
 
 - Midscene worker 的 SDK 从 `@midscene/web` 1.12.8 升到 1.15.1（Playwright 仍为 1.63.0）。对使用者的可见变化只有 Midscene 自己的报告页样式随新版改变；模型请求形态、证据与 `explain` 输出不变。
 - **导航步的写法改为「`Given` / `When` 之后整句只是一个地址」**，加不加双引号都一样（`Given "https://example.com/"` 与 `Given https://example.com/` 都算）。此前「双引号内以 http(s) 开头就导航」的判法不再使用：`Given 打开 "https://…"` 这类句子里带地址的 step 不再导航，整句交给 AI 执行；升级后请把导航步改成整句地址。导航现在是确定性 step 注册表里的一条，`gherkai plan` 对它的标注、`gherkai list-deterministic` 的清单与其它确定性 step 一致。
-- **引擎不再内建 `页面地址匹配 "<正则>"` 这条确定性 step**。要精确核对地址，把仓库 `features/steps/` 里的模板复制进项目的 `steps/`（两个引擎各一份）；用到它而没有带上这条 step 的现有用例，升级后这一步改由 AI 判定，`gherkai plan` 的标注会显示出来。
+- **引擎不再内建 `页面地址匹配 "<正则>"` 这条确定性 step**。要精确核对地址，把仓库 `features/steps/` 里的模板复制进项目的 `steps/`（两个引擎各一份）；用到它而没有带上这条 step 的现有用例，升级后这一步改由 AI 判定，`gherkai plan` 里这一步不再带确定性标注。
 - 确定性 step 可以声明接受的关键字（`keywords`），内建导航只接受 `Given` / `When`：`Then` 后只写一个地址的 step 记 `error`、不交给 AI。`plan` 的文本视图用 ⚠ 标出这类 step，`--json` 的 `deterministic` 多一态 `keyword_mismatch`；`list-deterministic` 多一列「关键字」，`--json` 每项多 `keywords`。
 - 确定性 step 带 DataTable / DocString 时这一步记 `error`；此前多行参数被静默忽略。
 

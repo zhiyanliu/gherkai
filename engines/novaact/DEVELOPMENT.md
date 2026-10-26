@@ -16,7 +16,7 @@ gherkai_worker_novaact/
 ├── __main__.py             ← 包入口，argv 直通 `run_scope.main`（console script 指向同一个 main，零包装）
 ├── run_scope.py            ← 薄 worker 主流程：job 循环、step 派发、会话与信号收尾、两个非 job 入口的分派
 ├── deterministic.py        ← 确定性 step 注册表：`@deterministic` 登记、单条匹配与批量 match
-├── deterministic_steps.py  ← 包内建脚手架 step（一条 URL 确定性断言作范例）
+├── deterministic_steps.py  ← 包内建脚手架：只有内建导航一条（Given / When 后整句是一个地址；判定类示范进 features/steps/ 模板）
 ├── user_steps.py           ← 使用方 `steps/` 目录的加载（fail-loud，退出码 `EX_STEPS_LOAD = 2`）
 ├── evidence.py             ← step 级机读证据：Nova trajectory 裁成自有 schema 的 `evidence.json`（[ADR 0042](../../docs/adr/0042-step-evidence-and-explain.md)）
 └── lib/                    ← I/O 边缘与常量：`job_source.py`（job 入口）· `event_sink.py`（事件出口）· `artifact_upload.py`（产物上传）· `workflow_setup.py`（workflow definition 的 create-if-not-exists）· `constants.py`（`MODEL_ID` / `WORKFLOW_DEF` / `NOVA_GRACE_MARGIN_S`）；`__init__.py` 说明这组为何单独成子包
@@ -48,7 +48,7 @@ uv sync            # 在 repo 根运行一次，core/runtime/cli + 本 worker �
 echo '<job json>' | AWS_REGION=us-east-1 uv run python -m gherkai_worker_novaact
 
 # 两个非 job 入口（不建会话、不执行 job、零 AWS，[ADR 0036](../../docs/adr/0036-deterministic-capability-discovery.md)）；cli 的 `list-deterministic` / `doctor` / run 前置 / plan 标注即转述它们：
-uv run gherkai-worker-novaact --capabilities                          # 能力自述：{schema_version, engine, min_grace_s, deterministic_steps, model_id}（清单 = 注册表 pattern + description + example）
+uv run gherkai-worker-novaact --capabilities                          # 能力自述：{schema_version, engine, min_grace_s, deterministic_steps, model_id}（清单每项 pattern、description、example、keywords）
 echo '[{"keyword":"Given","text":"\"https://example.com/\""}]' | uv run python -m gherkai_worker_novaact --match-steps   # 批量查询这些 step 各命中什么（内建导航在表里）
 ```
 
@@ -77,7 +77,7 @@ worker 侧**只有这两个 flag**：确定性清单是 `--capabilities` 对象�
 
 ## 确定性 step：内建脚手架 vs 使用方的 `steps/`
 
-确定性注册表由两部分组成：**本包内建脚手架**（`gherkai_worker_novaact/deterministic_steps.py`，一条 URL 确定性断言作范例）**与使用方项目里的 `steps/` 目录**（ADR 0037 决策 4）。使用方**不修改包内文件**（包内文件是发行内容，修改等同于 fork）；使用方侧的写法见 [user guide](../../docs/user-guide/writing-deterministic-steps.md)。
+确定性注册表由两部分组成：**本包内建脚手架**（`gherkai_worker_novaact/deterministic_steps.py`，只有内建导航一条；曾内置的「页面地址匹配」已退役，示范进仓库 `features/steps/`）**与使用方项目里的 `steps/` 目录**（ADR 0037 决策 4）。使用方**不修改包内文件**（包内文件是发行内容，修改等同于 fork）；使用方侧的写法见 [user guide](../../docs/user-guide/writing-deterministic-steps.md)。
 
 steps 目录 worker **只认环境变量 `GHERKAI_STEPS_DIR`**：`--steps-dir` flag / 默认 `./steps` / 随 run definition 持久化，全部由 CLI 侧（组合根）解析后注入，worker 不自行推断路径（ADR 0037 决策 4）。手动直接运行 worker 时须自行设置该 env：
 

@@ -90,7 +90,7 @@ def test_given_url_goes_to_nav_no_ai(captured):
     """内建导航（ADR 0020 第 3 条）：Given / When 后整句是一个地址，加不加引号都走 go_to_url、不调 AI。"""
     for text in ('"https://example.com"', "https://example.com", '  "https://example.com/a?b=1&c=2"  '):
         nova = _FakeNova(); captured.clear()
-        r = rs._run_step(nova, "Given" and "sc:0", _step("Given", text), 1, captured)
+        r = rs._run_step(nova, "sc:0", _step("Given", text), 1, captured)
         assert r == "passed", text
         assert nova.calls == [("go_to_url", text.strip().strip('"'))], text  # 不浪费 AI
         assert _done(captured).get("votes") is None  # 确定性导航无 votes
@@ -111,6 +111,10 @@ def test_sentence_containing_url_is_not_navigation(captured):
     nova = _FakeNova(); captured.clear()
     rs._run_step(nova, "sc:0", _step("Given", "tel:123"), 1, captured)  # 没有 :// 不是地址
     assert [c[0] for c in nova.calls] == ["act"]
+    for text in ("https://example.com/。", "https://example.com/)", "https://en.wikipedia.org/wiki/Foo_(bar)"):
+        nova = _FakeNova(); captured.clear()
+        rs._run_step(nova, "sc:0", _step("When", text), 1, captured)  # 不带引号、末尾是标点或右括号：不是整句一个地址
+        assert [c[0] for c in nova.calls] == ["act"], text
 
 
 def test_then_with_bare_url_is_error_not_ai(captured):
@@ -128,9 +132,12 @@ def test_navigation_rejects_non_http_scheme_and_unbalanced_quotes(captured):
     nova = _FakeNova()
     assert rs._run_step(nova, "sc:0", _step("Given", '"shop://product/42"'), 1, captured) == "error"
     assert nova.calls == [] and "只能打开 http(s) 地址" in _done(captured)["message"]
-    nova = _FakeNova(); captured.clear()
-    assert rs._run_step(nova, "sc:0", _step("Given", '"https://example.com'), 1, captured) == "error"
-    assert nova.calls == [] and "引号不配对" in _done(captured)["message"]
+    assert _done(captured)["errorType"] == "engine_error"  # 写法错误是执行错误，不是网络故障、不是断言未过
+    for text in ('"https://example.com', 'https://example.com"'):
+        nova = _FakeNova(); captured.clear()
+        assert rs._run_step(nova, "sc:0", _step("Given", text), 1, captured) == "error", text
+        assert nova.calls == [] and "引号不配对" in _done(captured)["message"], text
+        assert _done(captured)["errorType"] == "engine_error"
 
 
 def test_deterministic_hit_with_argument_is_error(captured):
@@ -138,6 +145,12 @@ def test_deterministic_hit_with_argument_is_error(captured):
     nova = _FakeNova()
     step = _step("Given", '"https://example.com"')
     step["argument"] = {"kind": "docString", "content": "x"}
+    assert rs._run_step(nova, "sc:0", step, 1, captured) == "error"
+    assert nova.calls == [] and "不接受多行参数" in _done(captured)["message"]
+    assert _done(captured)["errorType"] == "engine_error"
+    nova = _FakeNova(); captured.clear()
+    step = _step("Given", '"https://example.com"')
+    step["argument"] = {"kind": "dataTable", "rows": [["a", "b"]]}
     assert rs._run_step(nova, "sc:0", step, 1, captured) == "error"
     assert nova.calls == [] and "不接受多行参数" in _done(captured)["message"]
 

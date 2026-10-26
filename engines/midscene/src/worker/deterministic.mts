@@ -156,7 +156,7 @@ export function match(text: string, keyword?: string): Match | null {
 /** 批量 match 查询（ADR 0036 决策 4）：plan 命中标注用——对每条 step 回答「命中哪条 / 冲突 / 关键字不符 / 未命中」。
  * 每项是 `{keyword, text}`；也接受裸字符串（旧版命令行工具的形态，此时不核对关键字）。
  * 与 match() 共用 scan()（同一扫描实现面），冲突不抛、结构化返回（plan 是用例预检、不是执行）。 */
-export type MatchItem = string | { keyword?: string; text: string };
+export type MatchItem = string | { keyword?: string | null; text: string };
 export type MatchProbe =
   | null
   | { pattern: string; description: string }
@@ -165,7 +165,7 @@ export type MatchProbe =
 
 export function matchBatch(items: MatchItem[]): MatchProbe[] {
   return items.map((item) => {
-    const keyword = typeof item === "string" ? undefined : item.keyword;
+    const keyword = typeof item === "string" ? undefined : (item.keyword ?? undefined);  // null 与缺键同义（对齐 Nova 侧 is not None）
     const text = typeof item === "string" ? item : item.text;
     const hits = scan(text);
     if (hits.length === 0) return null;

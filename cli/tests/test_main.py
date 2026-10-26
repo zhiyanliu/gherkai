@@ -642,7 +642,9 @@ def test_render_status_json_no_hint(capsys):
 def test_list_deterministic_text_and_json(monkeypatch, capsys):
     """清单取自能力自述对象的 deterministic_steps 键（ADR 0036「5.」「加键不加入口」），文本与 --json 的形状
     逐字不变——自述对象的其它键（下限/身份位）**不得**漏进输出。"""
-    entries = [{"pattern": 'p "(?P<x>[^"]+)"', "description": "断言某事", "example": 'Then p "v"'}]
+    entries = [{"pattern": 'p "(?P<x>[^"]+)"', "description": "断言某事", "example": 'Then p "v"'},
+               {"pattern": "^nav$", "description": "只在动作关键字下", "example": "Given nav", "keywords": ["Given", "When"]},
+               {"pattern": "^all$", "description": "三个关键字都声明", "example": "Then all", "keywords": ["Given", "When", "Then"]}]
     calls = []
     monkeypatch.setattr(m.compose, "query_capabilities",
                         lambda engine, *, steps_dir=None, timeout_s=60.0: calls.append(engine) or
@@ -652,6 +654,8 @@ def test_list_deterministic_text_and_json(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "断言某事" in out and 'Then p "v"' in out and calls == ["midscene"]
     assert "关键字" in out and "任意" in out  # 条目没有 keywords 声明（旧 worker）→ 显示接受任意关键字
+    assert "Given / When" in out  # 声明了子集的条目按声明显示
+    assert out.count("任意") == 2  # 没声明的与三个全声明的都显示「任意」
     assert m.main(["list-deterministic", "--json"]) == 0  # 默认 novaact（对齐 run 缺省）
     doc = json.loads(capsys.readouterr().out)
     assert doc == {"engine": "novaact", "deterministic_steps": entries}  # 键集不变：不带 min_grace_s 等自述项
@@ -1671,11 +1675,11 @@ def _evidence_fixture(*, step_index=2, thought="I am on the login page.\n看到�
 
 def _explain_job(*, scope_id="features/login.feature:6"):
     from gherkai_core.model import Job, Scenario, Step
-    s1 = (Step(0, "Given", '打开 "https://app.example.com/login"'),
+    s1 = (Step(0, "Given", '"https://app.example.com/login"'),
           Step(1, "When", "输入用户名「alice」与密码「wrong」"),
           Step(2, "Then", "页面显示「登录成功」"),
           Step(3, "When", "点击「退出」"))
-    s2 = (Step(0, "Given", '打开 "https://app.example.com/login"'), Step(1, "Then", "页面提示「账户已锁定」"))
+    s2 = (Step(0, "Given", '"https://app.example.com/login"'), Step(1, "Then", "页面提示「账户已锁定」"))
     return Job(scope_id=scope_id, scope_name="登录", engine="novaact",
                scenarios=(Scenario(id="features/login.feature:12", name="密码错误时不放行", steps=s1),
                           Scenario(id="features/login.feature:20", name="锁定账户提示", steps=s2)))
@@ -1757,7 +1761,7 @@ def test_explain_text_renders_reason_thought_screenshot_and_gaps(tmp_path, capsy
     assert "screenshot: file:///tmp/act-0-frame-4.jpg" in out
     assert "其余 1 个 frame 已省略（--full 查看）" in out          # 两个 frame，只渲染了带推理的那个
     assert "step 3  When 点击「退出」  无记录（未执行或未上报）" in out
-    assert "step 0  Given 打开 \"https://app.example.com/login\"  error  (network_error)" in out
+    assert "step 0  Given \"https://app.example.com/login\"  error  (network_error)" in out
     assert "无 AI 证据" in out and "report（act 0）: file:///tmp/act-1.html" in out   # 缺证据 → 兜底指针
     marker = "⚠ 因前置 step error 被跳过（未执行）"
     assert out.count(marker) == 1 and marker in out.split("step 1  Then 页面提示「账户已锁定」")[1]
@@ -1830,7 +1834,7 @@ def test_explain_all_expands_passed_and_full_drops_the_text_budget(tmp_path, cap
     _rc, out, _ = _explain(capsys, root, run_id, "--full")
     assert "其余" not in out and "frame 0  url=https://app.example.com" in out and "frame 1" in out
     _rc, out, _ = _explain(capsys, root, run_id)
-    assert "step 0  Given 打开 \"https://app.example.com/login\"  passed  (1.1s)" in out
+    assert "step 0  Given \"https://app.example.com/login\"  passed  (1.1s)" in out
     passed_block = out.split("step 0  Given")[1].split("step 1")[0]
     assert "无 AI 证据" not in passed_block           # 默认不展开 passed
     _rc, out, _ = _explain(capsys, root, run_id, "--all")

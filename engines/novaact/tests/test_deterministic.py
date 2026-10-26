@@ -142,6 +142,36 @@ def test_address_pattern_cross_engine_fixture():
             assert m.group("url") == c["url"], c
 
 
+def test_registry_cross_engine_fixture():
+    """注册表语义的跨语言对拍（ADR 0050 决策 1、0022 冲突规则）：同一组注册输入，两侧清单的 keywords 与 match_batch
+    对探针的回答一致。用例集与上一条同一个文件的 registry 段，`<NAV>` 代入内建导航的 ADDRESS_PATTERN；
+    其中一条是「使用方的宽模式也匹配裸地址 → 冲突、不做覆盖」。"""
+    import json as _json
+    from pathlib import Path
+
+    from gherkai_worker_novaact.deterministic_steps import ADDRESS_PATTERN
+    reg = _json.loads((Path(__file__).resolve().parents[2] / "fixtures" / "navigation-address-cases.json")
+                      .read_text(encoding="utf-8"))["registry"]
+
+    def sub(v):
+        if isinstance(v, str):
+            return ADDRESS_PATTERN if v == "<NAV>" else v
+        if isinstance(v, list):
+            return [sub(x) for x in v]
+        if isinstance(v, dict):
+            return {k: sub(x) for k, x in v.items()}
+        return v
+
+    d.clear()
+    for e in reg["entries"]:
+        d.deterministic(sub(e["pattern"]), description=e["description"], example=e["example"],
+                        keywords=e.get("keywords"))(lambda ctx, **groups: None)
+    assert [x["keywords"] for x in d.list_registry()] == reg["expected_keywords"]
+    for p in reg["probes"]:
+        item = {"keyword": p["keyword"], "text": p["text"]} if "keyword" in p else p["text"]
+        assert d.match_batch([item]) == [sub(p["expect"])], p
+
+
 def test_match_batch_hit_miss_conflict():
     """match_batch（ADR 0036 决策 4）：命中/未命中/冲突结构化返回（冲突不抛——plan 是用例预检、不是执行）。"""
     d.deterministic(r'页面地址匹配 "(?P<p>[^"]+)"', description="断言 URL", example="Then …")(lambda ctx, p: None)

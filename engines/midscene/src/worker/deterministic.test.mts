@@ -6,6 +6,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ADDRESS_PATTERN } from "./deterministic.steps.mjs";  // 内建导航条目的模式（import 副作用注册的条目被 beforeEach 清掉）
+import type { Keyword } from "./deterministic.mjs";
 import {
   deterministic,
   match,
@@ -115,5 +116,30 @@ test("内建导航模式的跨语言对拍：engines/fixtures 的用例集在 JS
     const m = re.exec(c.text);
     assert.equal(m !== null, c.hit, JSON.stringify(c));
     if (m) assert.equal(m.groups?.url, c.url, JSON.stringify(c));
+  }
+});
+
+test("注册表语义的跨语言对拍：同一组注册输入，清单的 keywords 与 matchBatch 对探针的回答与 Nova 侧一致（ADR 0050 决策 1、0022 冲突规则）", () => {
+  // 夹具的 pattern 用 Python 具名组写法，这里换成 JS 方言；<NAV> 代入内建导航的 ADDRESS_PATTERN。
+  const file = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../fixtures/navigation-address-cases.json");
+  const reg = JSON.parse(fs.readFileSync(file, "utf8")).registry as {
+    entries: Array<{ pattern: string; description: string; example: string; keywords?: Keyword[] }>;
+    expected_keywords: string[][];
+    probes: Array<{ keyword?: string; text: string; expect: unknown }>;
+  };
+  const sub = (v: unknown): unknown => {
+    if (typeof v === "string") return v === "<NAV>" ? ADDRESS_PATTERN : v.replace(/\(\?P</g, "(?<");
+    if (Array.isArray(v)) return v.map(sub);
+    if (v && typeof v === "object") return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, sub(x)]));
+    return v;
+  };
+  _clear();
+  for (const e of reg.entries) {
+    deterministic(sub(e.pattern) as string, () => {}, { description: e.description, example: e.example, keywords: e.keywords });
+  }
+  assert.deepEqual(listRegistry().map((e) => e.keywords), reg.expected_keywords);
+  for (const p of reg.probes) {
+    const item = "keyword" in p ? { keyword: p.keyword, text: p.text } : p.text;
+    assert.deepEqual(matchBatch([item]), [sub(p.expect)], JSON.stringify(p));
   }
 });

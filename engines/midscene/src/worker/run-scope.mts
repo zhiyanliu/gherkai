@@ -126,7 +126,7 @@ const AWS_TRANSIENT_STATUS = new Set([500, 502, 503, 504]);
 // 与 Nova 侧对称（Nova SDK 建连时主动 CDPSession.send 会撞出它；Midscene connectOverCDP 通常招 websocket
 // TLS 错、已被下面正则命中，故此路径 Midscene 实际少见——防御性对称）。因语义模糊（网络断/会话正常关/浏览器真崩
 // 同报一句），**只建连阶段认**（此阶段 act 无副作用、重试安全）；act 中途（connecting=false）不认，守铁律。
-function isTransientNetwork(e: unknown, connecting = false): boolean {
+function isTransientNetwork(e: unknown, connecting = false, byMessage = true): boolean {
   let cur = e as {
     code?: string; name?: string; message?: string; cause?: unknown;
     $metadata?: { httpStatusCode?: number }; $retryable?: { throttling?: boolean };
@@ -142,7 +142,9 @@ function isTransientNetwork(e: unknown, connecting = false): boolean {
     if (cur.$metadata?.httpStatusCode != null && AWS_TRANSIENT_STATUS.has(cur.$metadata.httpStatusCode)) return true;
     if (cur.$retryable?.throttling === true) return true;
     const msg = cur.message ?? "";
-    if (/\b(socket hang up|ssl|tls|econnreset|epipe|timeout|handshake|UNEXPECTED_EOF)\b/i.test(msg)) return true;
+    // byMessage=false 时跳过消息文本启发（确定性 handler 抛的错常把 step 原文——地址、选择器——嵌进消息，其中的
+    // ssl / timeout 字样不是网络故障的证据；Nova 侧按异常类型分类，两侧由此对齐）
+    if (byMessage && /\b(socket hang up|ssl|tls|econnreset|epipe|timeout|handshake|UNEXPECTED_EOF)\b/i.test(msg)) return true;
     // 建连阶段额外认 Playwright 连接被关（下游症状）——精确匹配 "has been closed"（TargetClosedError），
     // 不用宽 "closed"（正常关闭也含）。TS Playwright 无稳定异常类可 instanceof，故按 message。
     if (connecting && /has been closed/i.test(msg)) return true;
@@ -741,13 +743,14 @@ async function runStep(
 ): Promise<string> {
   const { index, keyword, text } = step;
   await sink.emit({ type: "step_started", scenarioId, stepIndex: index });  // step 时长起点
-  // 本 step 起点的累计 token：成功与失败路径都按增量算成本（确定性/URL 分支不调 AI、增量为 0 → 不带 cost）
+  // 本 step 起点的累计 token：成功与失败路径都按增量算成本（确定性 step 含内建导航不调 AI、增量为 0 → 不带 cost）
   const tokBefore = cumulativeTokens(agent);
   // 本 step 起点的 execution 数（ADR 0042 决策一）：step 末按它从 agent.dump.executions 切出本 step 新增的。
   // **在 try 之外**：executionsLength 自己吞异常，绝不能让「记起点」这步冒泡（那会连 step_done 都发不出）。
   const execFrom = executionsLength(agent);
   const votes: boolean[] = [];        // 逐票结果（进 evidence 的 act.vote；多数票数学仍看 yes 计数）
   let instr: string | null = null;    // 交给引擎的指令（进 evidence 的 act.prompt）；null 表示本 step 没调 AI
+  let fromHandler = false;            // 异常来自确定性 handler：分类时不按消息文本启发（见下 catch）
   // 本 step 判定已成之后的收尾出口（三条出口共用）：产 evidence → 挂 ref → **emit** → 才把截图交后台队列。
   // **这个顺序是契约**（ADR 0042 决策一「上传时机分两类」）：evidence.json 的 ref 必须随 step_done 走，故它
   // 即时传；截图字节反过来——emit 之前入队就是把字节又压回判定前面，主流程该做的是发完判定立刻进下一 step。
@@ -797,6 +800,7 @@ async function runStep(
           });
           return "failed";
         }
+        fromHandler = true;
         throw e; // 其它异常 → 落到下面 catch，记 error
       }
       await sink.emit({ type: "step_done", scenarioId, stepIndex: index, status: "passed" });
@@ -838,7 +842,7 @@ async function runStep(
     // engine_error 更准。**仅分类、不触发重试/恢复**：act 不幂等，schedule job 级重试要求「会话未起（零
     // step_done）」，此处 step_started 早已 emit、saw_step=True，双条件 AND 天然不满足；本失败走 step_done
     // 事件流（非退出码 80），core 侧 is_network=False。"act 中途恢复"仍 defer，这里只把失败原因记准。
-    const errorType = isTransientNetwork(e) ? "network_error" : "engine_error";
+    const errorType = isTransientNetwork(e, false, !fromHandler) ? "network_error" : "engine_error";
     // message 与 evidence 的 error 同过 errorText（一行、有界；Playwright 异常的 message 常拖着多行 call
     // log，规则与理由见 error-text.mts，Nova 侧 `_error_text` 是对称版）。两处必须同一份文本：evidence 冗余
     // step_done 的 message 以自包含（ADR 0042 决策一）。

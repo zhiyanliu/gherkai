@@ -103,7 +103,7 @@ GHERKAI_WORKER_MIDSCENE_CMD="node $(pwd)/src/bin.mts"     # 需 Node ≥ 22.18�
 
 抛出而非在本模块 `process.exit`：退出码由入口（`bin.mts`）统一落地（非零、且不是 [ADR 0028](../../docs/adr/0028-transient-network-ssl-resilience.md) 的网络专用 80），本模块保持可单测。
 
-内建脚手架 step 在 `src/worker/deterministic.steps.mts`（一条 URL 确定性断言作范例）；使用方 step 与内建 **pattern 冲突时不做覆盖**，按 ADR 0036 的 conflict 语义在用例预检（`plan`）暴露。使用方侧的写法见 [user guide](../../docs/user-guide/writing-deterministic-steps.md)。
+内建脚手架在 `src/worker/deterministic.steps.mts`（只有内建导航一条；曾内置的「页面地址匹配」已退役，示范进仓库 `features/steps/`）；使用方 step 与内建 **pattern 冲突时不做覆盖**，按 ADR 0036 的 conflict 语义在用例预检（`plan`）暴露。使用方侧的写法见 [user guide](../../docs/user-guide/writing-deterministic-steps.md)。
 
 ## 报告与产物落点
 
