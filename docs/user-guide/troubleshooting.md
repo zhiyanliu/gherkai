@@ -28,6 +28,7 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 | `engines.novaact`、`engines.midscene` | 总是 | 该引擎 worker 的拉起命令与来源；找不到时这一行就是该引擎的安装指引。单个引擎缺失只标 `-` |
 | `engines.any` | 总是 | 至少一个引擎的 worker 可用（本机运行的前提）。必修；`--backend cloud` 下降为可选，因为云端 worker 在容器里运行 |
 | `engines.model.<引擎>` | 该引擎 worker 自述成功时 | 这台机器起 job 时**实际会用**的模型 id，由 worker 自报。展示项 |
+| `engines.targets.<引擎>` | 该引擎 worker 自述成功时 | 该引擎 worker 支持的测试目标（桌面网页、Android 网页这类名称），带会话上限的目标附分钟数；由 worker 自报，不支持设备不算失败。展示项；两引擎的能力矩阵见 [`engines.md`](./engines.md) |
 | `steps.dir` | 总是 | 解析到的确定性 step 目录。没有 `steps/` 目录是多数项目的常态；`--steps-dir` 或 `GHERKAI_STEPS_DIR` 指的路径不是目录时是必修失败 |
 | `steps.load.<引擎>` | 每个可用引擎（`steps.dir` 判 `✗` 时不问自述，本行与 `engines.model.<引擎>` 都不出现） | 该引擎加载到多少条确定性 step（含内建）。有 steps 目录时必修，没有时只是可选 |
 | `aws.region` | 云端（region 只剩 profile 配置这一处可取时——`--profile` / `AWS_PROFILE` 指的 profile 读不出来，这一行不出现，失败报在 `aws.identity` 那行） | 落实到的 region。四处都没有 region 时必修失败 |

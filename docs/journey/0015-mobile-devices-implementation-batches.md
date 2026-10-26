@@ -49,6 +49,8 @@
 
 规模 M。
 
+**进度（2026-10-26）**：已落地，待真跑核查与双轨复核。与下方底稿的出入：① 交集与缺键语义不挂在缓存对象上、不改写自述对象——`compose` 提供纯函数 `worker_targets` / `step_targets` / `available_targets` / `unsupported_targets`，`list-deterministic` 与 doctor 调用它们，契约校验仍只在 `query_capabilities` 一处；② 没有加 `engine_targets(engine)` 访问器，doctor 用的是它已拿到的那份自述，等本机执行前预检（B2）有消费者时再加；③ plan 按目标标注这一项按底稿所述挪到 B2 之后；④ 引擎能力矩阵的差集测试按 CI 的两个 job 拆成两份：pytest 侧核表格结构与 Nova 行（真起 Nova worker），npm 侧 `engines-matrix.test.mts` 核 Midscene 行（真起 Midscene worker），两侧合起来覆盖「多一行、少一行、值不符」；⑤ 会话预热支持键定名 `session_warmup`（顶层布尔，worker 本批不发）；⑥ 目标的产品语言名称放 `cli/gherkai_cli/render.py`（`target_label` / `targets_label` / `requires_label`），doctor 的会话上限按分钟显示；⑦ 用户指南 README 的篇目表顺手改掉第 0 批遗留的「双引号地址直接导航」。 兼容性真跑（跳板机，2026-10-26）：新 CLI 读 1.4.9 的两个 worker——doctor 的目标行按缺键语义显示桌面网页、list-deterministic --json 带 available_targets、不报契约错误；旧 1.4.9 CLI 读新 worker——doctor / list-deterministic / plan 照常（多余键被容忍）；新 CLI 读新 worker——两引擎目标行与 available_targets 都对。另见一处第 0 批的版本不一致形态：新 CLI 对 1.4.9 worker 的 `--match-steps` 送 `{keyword, text}`，旧 Nova worker 抛 TypeError 使 plan 以退出码 2 结束、旧 Midscene worker 对对象原样匹配得 null 使步骤静默标为走 AI；两者都在「worker 与命令行工具须同版本安装」的既有规则之内，不另做兼容分支，只把 plan 这条失败的消息改为点出版本不一致的成因（与其它入口同一句提示）。
+
 
 **依赖**
 

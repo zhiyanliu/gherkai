@@ -313,7 +313,7 @@ gherkai plan features/*.feature --steps-dir ./steps                # 每个 step
 gherkai doctor --steps-dir ./steps                                 # 目录与加载结果
 ```
 
-- `list-deterministic`：一张四列表格——示例、说明、模式、关键字（没有声明的显示「任意」），每条一行；`--engine` 缺省 `novaact`；清单含内建与你注册的全部条目。该引擎的 worker 没装时命令以退出码 2 结束，并原地给出安装命令。
+- `list-deterministic`：一张五列表格——示例、说明、模式、关键字（没有声明的显示「任意」）、目标（这条 step 在该引擎上实际可用的测试目标；声明了该引擎不支持的目标时单独注明，含义见 [`engines.md`](./engines.md)），每条一行；`--engine` 缺省 `novaact`；清单含内建与你注册的全部条目。该引擎的 worker 没装时命令以退出码 2 结束，并原地给出安装命令。
 - `plan`：命中的 step 后面标 `← 确定性: <说明>`，冲突与写法同关键字不符的都标 `← ⚠`（后者写出这条 step 接受的关键字），走 AI 的不标（减少噪声）。某个引擎的 worker 不可用时 `plan` 不会失败，但该引擎的 step 一个标注都没有，stderr 会说明标注已降级——这种情况下不要把「没有标注」读成「都走 AI」。示例 `.feature` 在仓库的 [`features/`](../../features/) 目录。
 - `doctor`：`steps.dir` 显示解析到的目录（没有目录时说明只有内建 step），`steps.load.<引擎>` 显示该引擎加载后共有多少条。
 

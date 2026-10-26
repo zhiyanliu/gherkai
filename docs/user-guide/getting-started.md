@@ -86,6 +86,7 @@ gherkai doctor --backend cloud --prefix gherkai-    # 连带查凭证、region �
 │ ✓    │ engines.novaact           │ /path/to/python3 -m gherkai_worker_novaact（同 venv 模块 gherkai_worker_novaact）               │
 │ ✓    │ engines.any               │ 至少一个引擎的 worker 可用                                                                      │
 │ ✓    │ engines.model.novaact     │ 模型 nova-act-v1.0（本机 worker 自报）                                                          │
+│ ✓    │ engines.targets.novaact   │ 支持的测试目标：桌面网页（本机 worker 自报）                                                    │
 │ ✓    │ steps.dir                 │ 无 steps/ 目录：只有内建确定性 step                                                             │
 │ ✓    │ steps.load.novaact        │ 1 条确定性 step（含内建）；无 steps/ 目录，仅内建                                               │
 │ ✓    │ aws.identity              │ 未查（给 --backend cloud 或 --prefix 才查云端）                                                 │

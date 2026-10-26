@@ -101,7 +101,7 @@ variant / 默认指针 / revision / digest 这些载体本身（SSM 键、ECR ta
 | 注册时报「缺 description/example」 | 注册即暴露：元数据必填，缺失则这条 step 不进能力清单、feature 作者无法发现它 | 补一句说明 + 一条可直接复制的 step 文本 |
 | worker 启动即非零退出、stderr 指出某个文件 | 目录里**任一**文件 import 失败（语法/依赖错） | 修复该文件；Nova 用 `EX_STEPS_LOAD`（即 2）、Midscene 由 `bin.mts` 统一返回非零退出码（有意不用 `80`，那是网络故障退出码） |
 | `--steps-dir` / `GHERKAI_STEPS_DIR` 指向的目录不存在 → 退出码 2 | 显式指定了一个位置，而该位置不存在或不是目录，即配置错误（`_steps_dir_or_error`） | 改为正确路径。缺省的 `./steps` 不存在**不算错误**，多数项目本就没有确定性 step |
-| `plan` 直接以退出码 2 结束，提示「使用方 steps 加载失败」 | `plan` 自己的标注探活（`--match-steps`，`_probe_deterministic_dispatch` → `compose.match_deterministic`）遇到 `WorkerSelfDescribeError`；`run` / `submit` 另有一道等价的本机前置，走 `--capabilities`（`_preflight_worker_runtimes`；两命令共用 `_plan_and_preflight`） | 同上，修复该文件。这是 `plan` 唯一**不降级**的失败：降级为「无标注」等于让读者误以为那些 step 会走 AI |
+| `plan` 直接以退出码 2 结束，提示「引擎 worker 的 match 查询失败，plan 拒绝出结果」并给出成因提示（使用方 steps 加载失败，或 worker 与 CLI 版本不一致） | `plan` 自己的标注探活（`--match-steps`，`_probe_deterministic_dispatch` → `compose.match_deterministic`）遇到 `WorkerSelfDescribeError`；`run` / `submit` 另有一道等价的本机前置，走 `--capabilities`（`_preflight_worker_runtimes`；两命令共用 `_plan_and_preflight`） | 同上，修复该文件。这是 `plan` 唯一**不降级**的失败：降级为「无标注」等于让读者误以为那些 step 会走 AI |
 | `plan` 只输出一行「（标注降级）引擎 X … 无派发标注」，计划本体照常输出 | 该引擎运行时未定位到（四级定位链全 miss），属环境问题 | 安装该引擎，或忽略（`plan` 对 miss 一律 best-effort；`run`/`submit`/`list-deterministic` 对同一件事以退出码 2 结束） |
 | 某 step 实际执行时记 `error`，`message` 里列出多条模式 | 一条 step 命中多条模式 | 收紧模式，或改 step 措辞避开；`plan` 会提前用 ⚠ 标出 |
 | `submit --backend cloud` 以退出码 2 结束，提示 variant 解析失败 | 请求的 variant 在该引擎当前版本下未推送过 / revision 已清理 / digest 已删除 | 由部署方 `push-worker` 推送；紧急情况下可临时用 `--worker-variant base`（`gherkai deploy` 已把本版本基础镜像同步成 `base`）。CLI 旧于后端时提示改为「先升 CLI」，因为向旧版本命名空间推 tag 无法消除版本不一致 |
