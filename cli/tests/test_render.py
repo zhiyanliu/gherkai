@@ -231,6 +231,82 @@ def test_explain_prints_verdict_line_for_error_with_error_type_regardless_of_rec
     assert "sessions" not in desktop["scopes"][0]  # 桌面 job 省键
 
 
+def test_device_header_lines_show_device_and_console_link():
+    """scope 表头（ADR 0051 决策 8）：代表会话的设备描述一行、会话 ARN 对应的 Device Farm 控制台链接一行，run 文本、explain 文本与报告页三处
+    同一口径；桌面 job 没有这两行。"""
+    import html as html_mod
+
+    from gherkai_core.adapters.report_store.local import render_index_html
+    from gherkai_core.model import SessionRecord
+
+    arn = "arn:aws:devicefarm:us-west-2:123456789012:session:proj-1/sess-1/00000"
+    job = Job(scope_id="d", scope_name="d", engine="midscene", scenarios=())
+    sessions = [SessionRecord(session_id="arn:aws:devicefarm:us-west-2:123456789012:session:proj-1/sess-0/00000", name="n0", origin="created",
+                              release="confirmed", observed_s=1.0, device={"platform": "android", "model": "Pixel 8"}),
+                SessionRecord(session_id=arn, name="n1", origin="created", release="confirmed", observed_s=2.0,
+                              device={"platform": "ios", "model": "iPhone 15", "osVersion": "17.5", "unit": "u-1"})]
+    jr = JobResult(job=job, status=Status.PASSED, session_id=arn, sessions=sessions, device_observed_s=3.0, device_observed_missing=0)
+    run = RunResult(run_meta=RunMeta(run_id="r", created_at="", jobs=(job,)), status=Status.PASSED, jobs=[jr])
+    url = "https://us-west-2.console.aws.amazon.com/devicefarm/home?region=us-west-2#/mobile/projects/proj-1/sessions/sess-1"
+    txt = render.render_text(run)
+    assert "设备: ios iPhone 15 17.5 （u-1）" in txt and f"设备控制台: {url}" in txt  # 取代表会话（session_id）那条的 device，不取首条
+    doc = render.explain_to_dict(run_id="r", status="passed", results=[jr], evidence_reader=lambda refs: (None, "no_ref"))
+    etxt = render.render_explain_text(doc)
+    assert "设备: ios iPhone 15 17.5 （u-1）" in etxt and f"设备控制台: {url}" in etxt
+    assert doc["scopes"][0]["sessions"][1]["device"] == {"platform": "ios", "model": "iPhone 15", "osVersion": "17.5", "unit": "u-1"}
+    page = html_mod.unescape(render_index_html({"run_id": "r", "created_at": "", "report_index": []}, run))
+    assert "设备 ios iPhone 15 17.5 （u-1）" in page and f'href="{url}"' in page
+    desktop = render.render_text(_sample_run())
+    assert "设备:" not in desktop and "设备控制台" not in desktop
+
+
+def test_console_url_only_for_session_arns():
+    from gherkai_core.device_session import console_url, device_label
+
+    assert console_url(None) is None and console_url("01a0-agentcore-session") is None  # 桌面 AgentCore 会话 id 不是设备 ARN
+    assert console_url("arn:aws:devicefarm:us-west-2:123456789012:session:p/s") == \
+        "https://us-west-2.console.aws.amazon.com/devicefarm/home?region=us-west-2#/mobile/projects/p/sessions/s"
+    assert device_label(None) is None and device_label({}) is None and device_label({"model": "m"}) == "m"
+
+
+def test_explain_renders_device_evidence_fields_and_extraction_failure():
+    """设备 evidence 的加键（ADR 0051 决策 8 / 0042 决策一、四）：step_kind 非 ai 时点明、url 取不到给 url_missing、controls 按预算列项并给
+    total 与截断、controls_missing、page_source 地址与截断标记；设备上 failed 的 step 缺 ref 打抽取失败而非「无 AI 证据」；桌面 evidence
+    不出现这些行。"""
+    from gherkai_core.model import ReportRef, Scenario, SessionRecord, Step
+
+    sc = Scenario(id="d:0", name="n", steps=(Step(0, "Given", "a"), Step(1, "Then", "b"), Step(2, "Then", "c")))
+    job = Job(scope_id="d", scope_name="d", engine="midscene", scenarios=(sc,))
+    jr = JobResult(job=job, status=Status.FAILED, device_observed_s=1.0, device_observed_missing=0,
+                   sessions=[SessionRecord(session_id="arn:x", name="n", origin="created", release="confirmed", observed_s=1.0)],
+                   scenarios=[ScenarioResult(scenario_id="d:0", status=Status.FAILED, steps=[
+                       StepResult(index=0, status=Status.FAILED, report_refs=(ReportRef(kind="evidence", ref="file:///e0.json"),)),
+                       StepResult(index=1, status=Status.FAILED, report_refs=(ReportRef(kind="evidence", ref="file:///e1.json"),)),
+                       StepResult(index=2, status=Status.FAILED)])])  # 缺 ref
+    ev0 = {"schema_version": 1, "step_kind": "navigation", "url": None, "url_missing": "no_web_context",
+           "controls": {"items": [{"type": "Button", "id": "login", "text": "登录", "a11y_id": "btn-login"}]
+                        + [{"type": "Text", "text": f"t{i}"} for i in range(25)], "total": 40, "truncated": True},
+           "page_source": "file:///ps.xml", "page_source_truncated": True, "acts": []}
+    ev1 = {"schema_version": 1, "step_kind": "ai", "url": "https://x/y", "controls": None, "controls_missing": "timeout", "acts": []}
+    table = {"file:///e0.json": (ev0, None), "file:///e1.json": (ev1, None)}
+
+    def reader(refs):
+        return table.get(refs[0].ref, (None, "no_ref")) if refs else (None, "no_ref")
+
+    doc = render.explain_to_dict(run_id="r", status="failed", results=[jr], evidence_reader=reader)
+    txt = render.render_explain_text(doc)
+    assert "step_kind: navigation" in txt and "url: null  (url_missing: no_web_context)" in txt
+    assert "controls: 26 项（total 40）  已截断" in txt and "type=Button  id=login  text=登录  a11y_id=btn-login" in txt
+    assert "其余 6 项已省略（--full 查看）" in txt and "page_source: file:///ps.xml  (page_source_truncated: true)" in txt
+    assert "step_kind: ai" not in txt and "url: https://x/y" in txt and "controls: null  (controls_missing: timeout)" in txt
+    assert render._DEVICE_EVIDENCE_LOST in txt and "无 AI 证据" not in txt
+    full = render.render_explain_text(doc, full=True)
+    assert "其余 6 项已省略" not in full and "text=t24" in full
+    desktop_doc = render.explain_to_dict(run_id="r", status="failed", results=[_sample_run().jobs[0]], evidence_reader=lambda refs: (None, "no_ref"))
+    desktop = render.render_explain_text(desktop_doc)
+    assert "step_kind" not in desktop and render._DEVICE_EVIDENCE_LOST not in desktop
+
+
 def test_format_event_renders_session_events_without_endpoints():
     from gherkai_core.model import SessionClosed, SessionOpened
 

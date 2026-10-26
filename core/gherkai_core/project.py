@@ -122,9 +122,13 @@ def reduce_event(
     if isinstance(event, ScopeStarted):
         timing.scope_start = now
     elif isinstance(event, SessionOpened):
-        # 每个会话一项，按配对键去重（同一 ARN 重发不重复登记）；attempted 的尝试也进清单（session_id 为 None、只有名）
-        if _find_session(result.sessions, event.session_id, event.name) is None:
-            result.sessions.append(SessionRecord(session_id=event.session_id, name=event.name, origin=event.origin))
+        # 每个会话一项，按配对键去重（同一 ARN 重发不重复登记）；attempted 的尝试也进清单（session_id 为 None、只有名）；
+        # device 原样留在记录上（scope 表头由它派生，ADR 0051 决策 8）
+        rec = _find_session(result.sessions, event.session_id, event.name)
+        if rec is None:
+            result.sessions.append(SessionRecord(session_id=event.session_id, name=event.name, origin=event.origin, device=event.device))
+        elif rec.device is None and event.device is not None:
+            rec.device = event.device
     elif isinstance(event, SessionClosed):
         rec = _find_session(result.sessions, event.session_id, event.name)
         if rec is None:
@@ -472,7 +476,8 @@ def finalize_job(
             error_type, message = "engine_error", f"worker 未能启动或未正常结束（退出码 255；平台侧未取到退出码时也记此码）{why}"
         elif exit_code is None:
             error_type = "engine_error"
-            message = f"worker 异常：{exit_reason}" if exit_reason else "worker 已终止但退出码未知——无法判定为通过，按错误处理"
+            # exit_reason 由调用方带上下文写好（同步路径：「worker 异常：…」/「起 worker 失败：…」；平台侧：观察者的归因）
+            message = exit_reason if exit_reason else "worker 已终止但退出码未知——无法判定为通过，按错误处理"
         elif scope_done is not None and scope_done.status == Status.ERROR:
             # worker 先报了 scope 级 error 再非零退出（设备 worker 有未确认会话时以 1 退出，ADR 0051 决策 5）：归因按本行，
             # 原因消息保留 worker 报的那句，不说「事件流里没有失败原因」

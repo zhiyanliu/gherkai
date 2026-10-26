@@ -86,7 +86,7 @@ def _fin(**kw):
      Status.ERROR, "engine_error", "没拿到设备；worker 随后非正常退出（exit 1）"),  # 先报 scope 级 error 再非零退出：原因保留
     (dict(exit_code=-9), Status.ERROR, "engine_error", "exit -9"),
     (dict(exit_code=None), Status.ERROR, "engine_error", "退出码未知"),
-    (dict(exit_code=None, exit_reason="解析失败"), Status.ERROR, "engine_error", "worker 异常：解析失败"),
+    (dict(exit_code=None, exit_reason="worker 异常：解析失败"), Status.ERROR, "engine_error", "worker 异常：解析失败"),  # 消息由调用方带上下文
     (dict(exit_code=255, exit_reason="TaskFailedToStart: 拉不到镜像"), Status.ERROR, "engine_error", "平台侧未取到退出码时也记此码）：TaskFailedToStart"),
     # 行 4：退出码 0、无 scope_done（U 非空也不改判 release_failed，只追加提示）
     (dict(scope_done=None), Status.ERROR, "engine_error", "没有报完这次运行的结果"),
@@ -171,9 +171,13 @@ def test_reduce_event_tracks_sessions_and_representative_session():
     assert [(s.session_id, s.name, s.origin, s.release, s.observed_s) for s in result.sessions] == [
         ("arn:A", "A", "created", "confirmed", 10.0), ("arn:B", "B", "created", None, None), (None, "T", "attempted", "unconfirmed", None)]
     assert result.sessions[0].provider_minutes == {"total": 1, "metered": 1, "unmetered": 0}
-    # 同一 ARN 重发 session_opened 不重复登记
+    assert result.sessions[0].device == {"platform": "android"} and result.sessions[1].device is None  # device 原样留在记录上
+    # 同一 ARN 重发 session_opened 不重复登记；补发的 device 填进已有记录
     reduce_event(SessionOpened(scope_id="s", name="A", origin="created", session_id="arn:A"), result, ss, t, 8.0)
-    assert len(result.sessions) == 3
+    reduce_event(SessionOpened(scope_id="s", name="B", origin="created", session_id="arn:B", device={"model": "m"}), result, ss, t, 8.5)
+    assert len(result.sessions) == 3 and result.sessions[1].device == {"model": "m"}
+    back = job_result_from_dict(job_result_to_dict(result))  # 序列化往返保留 device
+    assert [s.device for s in back.sessions] == [{"platform": "android"}, {"model": "m"}, None]
 
 
 def test_session_pairing_falls_back_to_name_when_one_side_lacks_session_id():
@@ -231,6 +235,21 @@ def test_scenario_done_after_synthesis_replaces_the_synthesized_record():
     ])
     assert [sr.scenario_id for sr in result.scenarios] == ["s:0", "s:1", "s:2"]
     assert [sr.status for sr in result.scenarios] == [Status.SKIPPED, Status.FAILED, Status.SKIPPED] and ss == {"s:1": Status.FAILED}
+
+
+@pytest.mark.parametrize("inflight", [
+    [StepStarted(scenario_id="s:1", step_index=0)],
+    [StepDone(scenario_id="s:1", step_index=0, status=Status.PASSED)],
+    ["step_skipped"],
+    [ScenarioStarted(scenario_id="s:1")],
+], ids=["step_started", "step_done", "step_skipped", "scenario_started"])
+def test_any_single_event_marks_scenario_in_flight(inflight):
+    """零事件判据：见过任何一种事件（不只 scenario_started）的 scenario 都算在途、整条不合成。"""
+    from gherkai_core.model import StepSkipped
+
+    events = [StepSkipped(scenario_id="s:1", step_index=1) if e == "step_skipped" else e for e in inflight]
+    result, _ = _run_events([*events, ScopeDone(scope_id="s", status=Status.ERROR, error_type="session_lost", message="m")])
+    assert [sr.scenario_id for sr in result.scenarios] == ["s:0", "s:2"]
 
 
 def test_no_synthesis_without_scope_error():

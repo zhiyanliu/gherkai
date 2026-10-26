@@ -277,10 +277,15 @@ class _Worker:
         try:
             engine = self.engines(job.engine)
             self.handle, raw_events = engine.run_scope(job)
-        except Exception as e:  # 起 worker 失败（spawn 失败等）
-            result.status = Status.ERROR
-            result.error_type = "engine_error"
-            result.message = f"起 worker 失败：{e}"
+        except Exception as e:  # 起 worker 失败（spawn 失败等）：「起不来」也是一种进程终止（ADR 0034 机制二 launch 失败补偿的同步版），
+            # 以退出码未知进共用的终结流程——已过 deadline / 已被 fail-fast 中止的照常按首次仲裁落定，不绕过
+            if (deadline is not None and self.opts.clock() > deadline) or self.abort_flag.is_set():
+                self.decide_stop()
+            term = finalize_job(
+                job=job, stop_reason=self._stop_reason, exited=True, exit_code=None, exit_reason=f"起 worker 失败：{e}",
+                saw_scope_started=False, saw_session_opened=False, scope_done=None, scenario_status={}, sessions=[],
+            )
+            result.status, result.error_type, result.message = term.status, term.error_type, term.message
             return result, False, saw_step
 
         clock = self.opts.clock
@@ -334,8 +339,9 @@ class _Worker:
                 exited, exit_code = True, 0  # 事件流自然 EOF：worker 干净退出（adapter 对非零退出码抛 WorkerExitError）
         except WorkerExitError as e:  # worker 以非零退出码结束（含网络故障的 80、被信号强杀的负码，ADR 0034 机制二）
             exited, exit_code = True, e.exit_code  # 退出码本身就是全部信息：消息由终结函数按码给出，不再把异常文本当平台归因传入
-        except Exception as e:  # 迭代中其它异常（事件行解析失败等）：退出信息未知
-            exited, exit_code, exit_reason = True, None, str(e)
+        except Exception as e:  # 迭代中其它异常（事件行解析失败、sink 抛错等）：退出信息未知，worker 可能还活着 → 停它（别留孤儿进程）
+            exited, exit_code, exit_reason = True, None, f"worker 异常：{e}"
+            self._stop()
         if exited and exit_code != 0:
             with self._stop_lock:
                 self._content_complete = False  # 非干净退出不算内容完整（进程终止优先于内容完整，ADR 0034 机制二）

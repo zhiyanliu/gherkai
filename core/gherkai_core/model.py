@@ -355,6 +355,7 @@ class SessionRecord:
     release: str | None = None  # confirmed / unconfirmed / None（未收到 session_closed）
     observed_s: float | None = None
     provider_minutes: dict | None = None
+    device: dict | None = None  # session_opened.device 原样（platform / model / osVersion / unit，对 core 不透明；scope 表头由它派生，ADR 0051 决策 8）
 
     @property
     def confirmed(self) -> bool:

@@ -150,13 +150,34 @@ def test_sync_and_stateless_paths_agree(row: Row):
 
 
 def test_stateless_run_level_device_metering():
-    """无状态路径的 run 级设备计量合计（ADR 0051 决策 7）与 job 级一致。"""
+    """无状态路径的 run 级设备计量合计（ADR 0051 决策 7）：多 job 求和、缺计量数相加，与各 job 级一致；桌面 job 不计入。"""
     row = next(r for r in MATRIX if r.name == "完整成功的设备 job")
     job = _job(row.timeout_s)
-    records = [EventRecord(scope_id=SCOPE, kind="event", seq=i + 1, event=ev, emit_ts=float(i)) for i, ev in enumerate(row.events)]
-    records.append(EventRecord(scope_id=SCOPE, kind="exit", exited=TaskExited(scope_id=SCOPE, exit_code=0)))
-    res = project_full(RunMeta(run_id="r", created_at="", jobs=(job,)), records)
-    assert (res.device_observed_s, res.device_observed_missing) == (12.5, 0) == (res.jobs[0].device_observed_s, res.jobs[0].device_observed_missing)
+    other = Job(scope_id="dev2", scope_name="dev2", engine="midscene",
+                scenarios=(Scenario(id="dev2:0", name="sc0", steps=(Step(0, "Given", "a"),)),))
+    desktop = Job(scope_id="web", scope_name="web", engine="novaact",
+                  scenarios=(Scenario(id="web:0", name="sc0", steps=(Step(0, "Given", "a"),)),))
+    other_events = [SessionOpened(scope_id="dev2", name="b", origin="created", session_id="arn:b"),
+                    SessionOpened(scope_id="dev2", name="c", origin="discovered", session_id="arn:c"),
+                    ScopeStarted(scope_id="dev2", session_id="arn:b"),
+                    ScenarioStarted(scenario_id="dev2:0"), StepDone(scenario_id="dev2:0", step_index=0, status=Status.PASSED),
+                    ScenarioDone(scenario_id="dev2:0", status=Status.PASSED),
+                    SessionClosed(scope_id="dev2", name="b", release="confirmed", session_id="arn:b", observed_s=2.5),
+                    SessionClosed(scope_id="dev2", name="c", release="confirmed", session_id="arn:c", observed_s=None),
+                    ScopeDone(scope_id="dev2")]
+    web_events = [ScopeStarted(scope_id="web"), ScenarioStarted(scenario_id="web:0"),
+                  StepDone(scenario_id="web:0", step_index=0, status=Status.PASSED), ScenarioDone(scenario_id="web:0", status=Status.PASSED),
+                  ScopeDone(scope_id="web")]
+    records = []
+    for scope, evs in ((SCOPE, row.events), ("dev2", other_events), ("web", web_events)):
+        records += [EventRecord(scope_id=scope, kind="event", seq=i + 1, event=ev, emit_ts=float(i)) for i, ev in enumerate(evs)]
+        records.append(EventRecord(scope_id=scope, kind="exit", exited=TaskExited(scope_id=scope, exit_code=0)))
+    res = project_full(RunMeta(run_id="r", created_at="", jobs=(job, other, desktop)), records)
+    by = {jr.scope_id: jr for jr in res.jobs}
+    assert (by[SCOPE].device_observed_s, by[SCOPE].device_observed_missing) == (12.5, 0)
+    assert (by["dev2"].device_observed_s, by["dev2"].device_observed_missing) == (2.5, 1)
+    assert (by["web"].device_observed_s, by["web"].device_observed_missing) == (None, None)
+    assert (res.device_observed_s, res.device_observed_missing) == (15.0, 1)
 
 
 def test_matrix_covers_expected_verdicts():

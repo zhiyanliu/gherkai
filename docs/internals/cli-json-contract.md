@@ -42,7 +42,7 @@
 | `duration_ms` | number \| null | scope 墙钟（会话起止） |
 | `total_tokens` / `total_time_worked_s` | number \| null | 本 job 的原生量合计（失败的 act 也计入） |
 | `session_id` | string \| null | 引擎会话 id（血缘；可与 worker 日志 / 轨迹目录对应）；设备目标为 Device Farm 远程访问会话的 ARN |
-| `sessions[]` | array \| 省略 | 仅设备目标：本 job 开过或尝试过的每个远程访问会话一项——`session_id`（结果未知的创建尝试为 null）、`name`（会话名）、`origin`（`created` / `discovered` / `attempted`）、`release`（`confirmed` / `unconfirmed`）、`observed_s`（worker 观察到的占用秒数，缺则 null）、`provider_minutes`（服务商回报的 `{total, metered, unmetered}` 快照，缺则 null） |
+| `sessions[]` | array \| 省略 | 仅设备目标：本 job 开过或尝试过的每个远程访问会话一项——`session_id`（结果未知的创建尝试为 null）、`name`（会话名）、`origin`（`created` / `discovered` / `attempted`）、`release`（`confirmed` / `unconfirmed`）、`observed_s`（worker 观察到的占用秒数，缺则 null）、`provider_minutes`（服务商回报的 `{total, metered, unmetered}` 快照，缺则 null）、`device`（worker 原样报出的设备描述，形如 `{platform, model, osVersion, unit}`、对本工具不透明，缺则 null；文本输出的「设备」一行与报告页的设备描述由代表会话的这一项派生） |
 | `device_observed_s` / `device_observed_missing` | number / int \| 省略 | 仅设备目标：本 job 各会话 `observed_s` 之和，与 `origin` 为 `created` / `discovered` 而 `observed_s` 为 null 的会话数（不计入合计；`attempted` 的尝试两键都不计，逐条见 `sessions[]`） |
 | `error_type` | string \| null | job 级归因（如 `timeout`、`precheck_failed`、`acquire_timeout`、`session_lost`、`release_failed`）；skipped/aborted 恒 null、原因在 `message`。`release_failed` 表示有会话未能确认停止，`message` 列出会话名 |
 | `message` | string \| null | job 级未达 passed 的原因原文（超时、未启动、fail-fast 被中止、worker 异常退出等）；passed 时为 null。**`message` 在本契约里恒表原因**：只出现在非 passed 态上，job 级与 step 级同义 |
@@ -157,7 +157,7 @@ step 级证据视图：判定树（**骨架是提交时的 job 定义**）与每
 | `acts[]` | array | 本 step 中的每次 AI 调用一项（N 票断言对应 N 项），见下；设备目标上判为 failed / error 的确定性与导航 step 也有一份证据，此时为空数组 |
 | `step_kind` | `ai` / `deterministic` / `navigation` \| 省略 | 仅设备目标：这一步的执行方式；据它区分「没有 act 是正常的」与「证据抽取失败」 |
 | `url` / `url_missing` | string \| null / string \| null | 仅设备目标：step 结束时的页面地址；取不到时 `url` 为 null 并由 `url_missing` 说明原因（`no_web_context` 设备不提供网页上下文、`not_applicable` 应用目标、`timeout`、`error`） |
-| `controls` / `controls_missing` | object \| null / string \| null | 仅设备目标且仅 failed / error 步：`controls` 为 `{items[{type, id, text, a11y_id}], total, truncated}`，`items` 为空数组表示采集成功但这一屏没有可识别控件；采集失败时 `controls` 为 null、`controls_missing` 为 `timeout` 或 `error`；passed 步与桌面目标省略 |
+| `controls` / `controls_missing` | object \| null / string \| null | 仅设备目标且仅 failed / error 步：`controls` 是一个对象，含 `items[]`（每项 `type` / `id` / `text` / `a11y_id`，空数组表示采集成功但这一屏没有可识别控件）、`total`（采到的控件总数）与 `truncated`（`items[]` 是否因上限被截断）；采集失败时 `controls` 为 null、`controls_missing` 为 `timeout` 或 `error`；passed 步与桌面目标省略 |
 | `page_source` / `page_source_truncated` | string \| null / bool | 仅设备目标且仅 failed / error 步：原始控件树文件的地址（`file://` 或 `s3://`，只给地址不内嵌）与它是否因超过大小上限被截断 |
 
 `acts[]` 每项：

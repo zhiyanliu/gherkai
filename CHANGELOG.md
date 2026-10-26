@@ -12,7 +12,7 @@
 
 - 引擎 worker 的能力自述带上支持的测试目标：`gherkai doctor` 多一行 `engines.targets.<引擎>`，显示该引擎支持的测试目标（当前两个引擎都只有桌面网页）；`gherkai list-deterministic` 多一列「目标」，显示每条确定性 step 在该引擎上实际可用的目标，声明了该引擎不支持的目标时单独注明；`--json` 每项多 `targets`（worker 原样报出）与 `available_targets`（与引擎支持的目标求交后的结果）。旧版本 worker 没有这些字段时按「只支持桌面网页」处理，不报错。
 - 用户指南新增引擎能力矩阵一页（`docs/user-guide/engines.md`）：引擎 × 测试目标 × 确定性 step 的句柄 × 默认模型 × 计价公式。
-- 判定记录为设备会话预留的字段：`run --json` 与 `explain --json` 的 job 可带 `sessions[]`（每个远程访问会话的名称、来源、是否确认停止、占用秒数）与 `device_observed_s` / `device_observed_missing` 两个计量键，run 级同样合计；桌面用例不出现这些键。文本输出对设备 job 显示设备占用时长，并列出未能确认停止的会话名。worker 在被测对象未就绪时报出的 scope 级错误会把未执行的 scenario 标为 `skipped`、旁注「未执行（scope 级错误，原因见 job 判定）」。
+- 判定记录为设备会话预留的字段：`run --json` 与 `explain --json` 的 job 可带 `sessions[]`（每个远程访问会话的名称、来源、是否确认停止、占用秒数）与 `device_observed_s` / `device_observed_missing` 两个计量键，run 级同样合计；桌面用例不出现这些键。文本输出与报告页对设备 job 显示设备描述、Device Farm 控制台链接、设备占用时长，并列出未能确认停止的会话名；`explain` 对设备目标的证据显示这一步的执行方式、页面地址、控件摘要与控件树文件地址，设备上判为 failed / error 的 step 缺证据时按抽取失败提示。worker 在被测对象未就绪时报出的 scope 级错误会把未执行的 scenario 标为 `skipped`、旁注「未执行（scope 级错误，原因见 job 判定）」。
 
 ### 变化
 
@@ -21,7 +21,7 @@
 - **引擎不再内建 `页面地址匹配 "<正则>"` 这条确定性 step**。要精确核对地址，把仓库 `features/steps/` 里的模板复制进项目的 `steps/`（两个引擎各一份）；用到它而没有带上这条 step 的现有用例，升级后这一步改由 AI 判定，`gherkai plan` 里这一步不再带确定性标注。
 - 确定性 step 可以声明接受的关键字（`keywords`），内建导航只接受 `Given` / `When`：`Then` 后只写一个地址的 step 记 `error`、不交给 AI。`plan` 的文本视图用 ⚠ 标出这类 step，`--json` 的 `deterministic` 多一态 `keyword_mismatch`；`list-deterministic` 多一列「关键字」，`--json` 每项多 `keywords`。
 - 确定性 step 带 DataTable / DocString 时这一步记 `error`；此前多行参数被静默忽略。
-- **job 的终结判定由本机 `run` 与后台 `submit` 共用同一份规则**。对现有桌面用例的可见变化：worker 被强制结束（负退出码，如被系统 kill -9）此前按正常退出处理、现在一律记 `error`；worker 正常退出却一条 scenario 判定都没报的 job 由 `passed` 改为 `error`（原因写「worker 未报告任何 scenario 判定」）；后台 `submit` 里 worker 崩溃或非零退出的 job 此前没有错误类别、现在记 `engine_error`，以网络故障退出码退出的记 `network_error`（与本机 `run` 一致）；超时与 fail-fast 中止同时成立的 job 按作出停止决定那一刻的事实归因（那一刻已超时记 `timeout`，否则记中止），此前本机 `run` 内部不同分支的判定顺序不一致；两条路径上超时的消息统一为「job 超时（预算 Ns，已中止）」；判定记录里的 `session_id` 以 worker 开始执行时报的会话为准，收尾时报的不再覆盖它。
+- **job 的终结判定由本机 `run` 与后台 `submit` 共用同一份规则**。对现有桌面用例的可见变化：worker 被强制结束（负退出码，如被系统 kill -9）此前按正常退出处理、现在按非正常退出处理（记 `error`；已被超时或 fail-fast 中止处置的 job 仍按那个处置记）；worker 正常退出却一条 scenario 判定都没报的 job 由 `passed` 改为 `error`（原因写「worker 未报告任何 scenario 判定」）；后台 `submit` 里 worker 崩溃或非零退出的 job 此前没有错误类别、现在记 `engine_error`，以网络故障退出码退出的记 `network_error`（与本机 `run` 一致）；超时与 fail-fast 中止同时成立的 job 按作出停止决定那一刻的事实归因（那一刻已超时记 `timeout`，否则记中止），此前本机 `run` 内部不同分支的判定顺序不一致；两条路径上超时的消息统一为「job 超时（预算 Ns，已中止）」；判定记录里的 `session_id` 以 worker 开始执行时报的会话为准，收尾时报的不再覆盖它。
 - worker 已报完全部结果、只是收尾拖过了预算的 job，判定按内容给出、不记超时；本机 `run` 在这种情形下只催 worker 收尾。
 - 本机 `run` 在决定停止一个 job 之后继续读完 worker 的收尾事件（最多等到停止宽限再加几秒），worker 在收尾里报出的事实不再丢失。
 

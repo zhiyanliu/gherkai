@@ -10,6 +10,7 @@ from gherkai_runtime.textui import DIM, Text, TreeNode, render_table, render_tre
 from gherkai_core.serialize import to_dict  # 单一真理源（ADR 0027）：cli --json 与 manifest 共用
 # ReportRef → dict 与 jobs/*.json、run --json 同一份（单一序列化真源，ADR 0027）；explain 的 report_refs 原样搬。
 from gherkai_core.serialize import ref_to_dict
+from gherkai_core.device_session import console_url, device_label, representative_device
 
 
 def format_event(ev: Event) -> str:
@@ -76,6 +77,28 @@ def _step_note(status: str, shortcircuited: bool) -> str:
     if status == "skipped":
         return _SCOPE_SKIPPED_NOTE
     return ""
+
+
+def device_header_lines(sessions, session_id: str | None) -> list[str]:
+    """scope 表头的设备两行（ADR 0051 决策 8）：代表会话的设备描述、会话 ARN 对应的 Device Farm 控制台链接；桌面 job 两行都没有。
+    run 文本树与 explain 文本共用；入参既可是 SessionRecord 列表也可是机读文档里的 dict 列表。"""
+    recs = [_SessionView(s) if isinstance(s, dict) else s for s in sessions]
+    lines: list[str] = []
+    label = device_label(representative_device(recs, session_id))
+    if label:
+        lines.append(f"设备: {label}")
+    url = console_url(session_id)
+    if url:
+        lines.append(f"设备控制台: {url}")
+    return lines
+
+
+class _SessionView:
+    """机读文档里 sessions[] 一项的 dict → 具 session_id / device 属性的视图（让 representative_device 两种输入同一份代码）。"""
+
+    def __init__(self, d: dict) -> None:
+        self.session_id = d.get("session_id")
+        self.device = d.get("device")
 
 
 def session_lines(jr: JobResult) -> list[str]:
@@ -154,6 +177,8 @@ def run_tree(result: RunResult) -> TreeNode:
                 sn.add(styled(f"report（{rr.label or rr.kind}）: {rr.ref}", DIM))
         if jr.session_id:
             jn.add(styled(f"session id: {jr.session_id}", DIM))
+        for line in device_header_lines(jr.sessions, jr.session_id):  # 设备描述与控制台链接（ADR 0051 决策 8）
+            jn.add(line)
         for line in session_lines(jr):  # 设备会话摘要（ADR 0051 决策 7）
             jn.add(line)
         # scope 级原生报告产物（Midscene report.html 挂这层，来自 scope_done）
@@ -307,6 +332,9 @@ _EVIDENCE_MISSING_TEXT = {
     "unreadable": "AI 证据读不到（文件不在或内容已损坏）",
     "unsupported_schema": "AI 证据的格式版本这个版本的 gherkai 认不出（升级后再看）",
 }
+# 设备目标上 failed / error 的 step（含确定性与导航 step）都应产 evidence，缺指针即抽取失败（ADR 0042 决策四 / 0051 决策 8）
+_DEVICE_EVIDENCE_LOST = "证据缺失（设备目标上这一步应产证据，抽取失败）"
+_CONTROLS_BUDGET = 20  # 文本形态默认最多列出的控件条数（--full 全列）
 
 
 def explain_step_expands(step: dict, *, expand_passed: bool) -> bool:
@@ -472,7 +500,42 @@ def _add_act(parent: TreeNode, act: dict, *, ref: str, full: bool) -> None:
         an.add(styled(f"其余 {omitted} 个 frame 已省略（--full 查看）", DIM))
 
 
-def _add_step(parent: TreeNode, step: dict, *, expand_passed: bool, full: bool) -> None:
+def _add_device_evidence(stn: TreeNode, ev: dict, *, full: bool) -> None:
+    """设备 evidence 的加键（ADR 0051 决策 8 / 0042 决策一）→ 树节点，key 一律用 JSON 字段名（文本与 --json 零翻译）。
+    step_kind 不是 ai 时点明（没有 act 是正常形态，不是抽取丢了）；顶层 url 取不到时给 url_missing 的原因；controls 默认只列
+    前若干条（--full 全列），采集失败给 controls_missing；page_source 只给地址、截断时标出。桌面 evidence 没有这些键，整段不出现。"""
+    kind = ev.get("step_kind")
+    if kind and kind != "ai":
+        stn.add(f"step_kind: {kind}")
+    if "url" in ev or "url_missing" in ev:
+        if ev.get("url"):
+            stn.add(f"url: {ev['url']}")
+        elif ev.get("url_missing"):
+            stn.add(f"url: null  (url_missing: {ev['url_missing']})")
+    if "controls" in ev or "controls_missing" in ev:
+        controls = ev.get("controls")
+        if isinstance(controls, dict):
+            items = controls.get("items") or []
+            head = f"controls: {len(items)} 项"
+            if controls.get("total") is not None:
+                head += f"（total {controls['total']}）"
+            if controls.get("truncated"):
+                head += "  已截断"
+            cn = stn.add(head)
+            shown = items if full else items[:_CONTROLS_BUDGET]
+            for it in shown:
+                bits = [f"{k}={it[k]}" for k in ("type", "id", "text", "a11y_id") if it.get(k) not in (None, "")]
+                cn.add("  ".join(bits) if bits else "（空项）")
+            if len(items) > len(shown):
+                cn.add(styled(f"其余 {len(items) - len(shown)} 项已省略（--full 查看）", DIM))
+        elif ev.get("controls_missing"):
+            stn.add(f"controls: null  (controls_missing: {ev['controls_missing']})")
+    if ev.get("page_source"):
+        tail = "  (page_source_truncated: true)" if ev.get("page_source_truncated") else ""
+        stn.add(styled(f"page_source: {ev['page_source']}{tail}", DIM))
+
+
+def _add_step(parent: TreeNode, step: dict, *, expand_passed: bool, full: bool, device: bool = False) -> None:
     """一个 step → 树节点：状态行（+ 投票 / 归因 / 时长 / 短路旁注），下挂原因行，展开时再挂证据。"""
     head = f"step {step['index']}  {step['keyword']} {step['text']}"
     if step["record_missing"]:
@@ -499,12 +562,17 @@ def _add_step(parent: TreeNode, step: dict, *, expand_passed: bool, full: bool) 
         miss = step["evidence_missing"]
         # 没执行的 step（被短路，或 scope 级 error 后合成的 skipped）不打「无 AI 证据」：状态行的旁注已说明，再说一遍是废话
         if miss and not (miss == "no_ref" and (step["shortcircuited"] or step["status"] == "skipped")):
-            stn.add(_EVIDENCE_MISSING_TEXT.get(miss, _EVIDENCE_MISSING_TEXT["no_ref"]))
+            if miss == "no_ref" and device and step["status"] in ("failed", "error"):
+                # 设备目标上 failed / error 的 step 不论种类都应产 evidence：缺指针是抽取失败，不是「本就不产」
+                stn.add(_DEVICE_EVIDENCE_LOST)
+            else:
+                stn.add(_EVIDENCE_MISSING_TEXT.get(miss, _EVIDENCE_MISSING_TEXT["no_ref"]))
         # 兜底指针：证据缺了，把该 step 的其它产物 ref 列出来，让人还有地方看（ADR 0042 决策四「文本预算」末条）
         for rr in step["report_refs"]:
             stn.add(styled(_ref_line(rr), DIM))
         return
     ref = _evidence_ref(step)
+    _add_device_evidence(stn, ev, full=full)  # 设备 evidence 的加键（桌面 evidence 无这些键，整段不出现）
     for act in ev.get("acts") or []:
         _add_act(stn, act, ref=ref, full=full)
 
@@ -542,6 +610,9 @@ def explain_tree(doc: dict, *, expand_passed: bool = False, full: bool = False) 
         scn = root.add(Text.assemble(f"scope {sc['scope_id']}  engine={sc['engine']}  status=", status_text(sc["status"]), sess))
         for rr in sc["report_refs"]:
             scn.add(styled(_ref_line(rr), DIM))
+        device = "sessions" in sc or "device_observed_s" in sc  # 设备 job 的机读键只在设备目标出现（ADR 0051 决策 7）
+        for line in device_header_lines(sc.get("sessions") or [], sc["session_id"]):  # 设备描述与控制台链接（ADR 0051 决策 8）
+            scn.add(line)
         for line in _explain_session_lines(sc):  # 设备会话摘要（ADR 0051 决策 7），与 run 文本同一口径
             scn.add(line)
         # 判定行（ADR 0042 决策四）：job 判 error / aborted 且带 error_type 时总打一行「判定：status (error_type: message)」，与有无
@@ -563,7 +634,7 @@ def explain_tree(doc: dict, *, expand_passed: bool = False, full: bool = False) 
             scen_n = scn.add(Text.assemble(f"scenario {scen['scenario_id']}  {scen['name']}  ",
                                            status_text(scen["status"]) if scen["status"] else styled(_NO_RECORD, "yellow")))
             for step in scen["steps"]:
-                _add_step(scen_n, step, expand_passed=expand_passed, full=full)
+                _add_step(scen_n, step, expand_passed=expand_passed, full=full, device=device)
     return root
 
 

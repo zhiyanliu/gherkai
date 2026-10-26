@@ -945,6 +945,30 @@ def test_abort_decided_before_deadline_stays_aborted_when_deadline_passes_during
     assert [s.release for s in v.sessions] == ["confirmed"] and "未能确认停止" not in (v.message or "")
 
 
+def test_generic_exception_still_stops_worker_and_spawn_failure_goes_through_finalize():
+    """事件流中的普通异常（解析失败 / sink 抛错）后仍向 worker 发停止请求（别留孤儿进程）；起 worker 失败以退出码未知进终结函数：
+    消息保留「起 worker 失败」，已过 deadline 的按首次仲裁记 timeout。"""
+    engine = FakeEngine({"x": [ScopeStarted(scope_id="x"), ScenarioStarted(scenario_id="x:0")]}, crash_after={"x": 1})
+    res = schedule(_rm([_job("x")]), FakeResolver(engine), CollectSink(), opts=ScheduleOpts(max_concurrency=1))
+    jr = res.jobs[0]
+    assert (jr.status, jr.error_type) == (Status.ERROR, "engine_error") and jr.message.startswith("worker 异常：")
+    assert engine.handles["x"].stopped
+
+    class Boom:
+        def run_scope(self, job):
+            raise OSError("spawn 失败")
+
+    res = schedule(_rm([_job("y")]), FakeResolver(Boom()), CollectSink(), opts=ScheduleOpts(max_concurrency=1))
+    assert (res.jobs[0].status, res.jobs[0].error_type, res.jobs[0].message) == (Status.ERROR, "engine_error", "起 worker 失败：spawn 失败")
+
+    class _Clock:  # run 起点与 deadline 基点为 0，之后一律在 deadline 之后
+        def __init__(self): self.n = 0
+        def __call__(self): self.n += 1; return 0.0 if self.n <= 2 else 1000.0
+
+    res = schedule(_rm([_job("z", timeout_s=1.0)]), FakeResolver(Boom()), CollectSink(), opts=ScheduleOpts(max_concurrency=1, clock=_Clock()))
+    assert (res.jobs[0].status, res.jobs[0].error_type) == (Status.ERROR, "timeout")
+
+
 def test_device_job_network_error_is_not_retried(monkeypatch):
     """设备 job 的建连失败不做 job 级重试（ADR 0051 决策 2）：同样的零 step_done network_error，桌面 job 重试、设备 job 不重试。"""
     import gherkai_core.schedule as sch

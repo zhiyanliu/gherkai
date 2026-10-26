@@ -22,6 +22,7 @@ from typing import Callable
 from urllib.parse import urlparse
 from urllib.request import url2pathname
 
+from gherkai_core.device_session import console_url, device_label, representative_device
 from gherkai_core.adapters._atomic import atomic_write_json, atomic_write_text
 from gherkai_core.model import ReportRef, ResourceUri, RunResult
 
@@ -275,6 +276,13 @@ def render_index_html(manifest: dict, result: RunResult) -> str:
             meta_bits.append(" · ".join(jbits))
         if jr.session_id:
             meta_bits.append(f"会话 <code>{esc(jr.session_id)}</code>")
+        # 设备描述与控制台链接（ADR 0051 决策 8）：由代表会话的 session_opened.device 与会话 ARN 派生，与 cli 侧同一份辅助函数
+        label = device_label(representative_device(jr.sessions, jr.session_id))
+        if label:
+            meta_bits.append(f"设备 {esc(label)}")
+        url = console_url(jr.session_id)
+        if url:
+            meta_bits.append(f'<a href="{esc(url)}">设备控制台</a>')
         # 设备会话摘要（ADR 0051 决策 7）：占用时长与缺计量会话数；未确认停止的会话按名列出，结果未知的创建尝试单独标
         if jr.device_observed_s is not None or jr.device_observed_missing is not None:
             missing = jr.device_observed_missing or 0

@@ -126,13 +126,13 @@ def _session_to_dict(s: SessionRecord) -> dict:
     session_closed）时写端归为 unconfirmed：契约只列 confirmed / unconfirmed，终结时没收到即视为未确认（ADR 0034 机制二 U 集）。"""
     return {"session_id": s.session_id, "name": s.name, "origin": s.origin,
             "release": s.release if s.release is not None else "unconfirmed",
-            "observed_s": s.observed_s, "provider_minutes": s.provider_minutes}
+            "observed_s": s.observed_s, "provider_minutes": s.provider_minutes, "device": s.device}
 
 
 def _session_from_dict(d: dict) -> SessionRecord:
     return SessionRecord(session_id=d.get("session_id"), name=d["name"], origin=d["origin"],
                          release=d.get("release"), observed_s=d.get("observed_s"),
-                         provider_minutes=d.get("provider_minutes"))
+                         provider_minutes=d.get("provider_minutes"), device=d.get("device"))
 
 
 def _device_keys(sessions: list[SessionRecord], observed_s: float | None, missing: int | None) -> dict:
