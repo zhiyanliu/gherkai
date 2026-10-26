@@ -506,7 +506,7 @@ def query_capabilities(engine: str, *, steps_dir: str | Path | None = None,
     且使用方 steps 加载失败在这里就 fail-loud；不给时组合根拥有的键被显式清（见 `_ask_worker`），即「无使用方
     step」的情形（grace 下限与 step 无关，故 `engine_min_grace` 走这一种）。
     异常语义见 `_ask_worker`（调用方各自分叉：`run`/`submit`/`list-deterministic` 退出码为 2、doctor 只报一行、
-    `plan` 那侧走 match 查询）；输出不是 JSON 对象 → RuntimeError。
+    `plan` 的目标核对取不到自述只警告、派发标注走 match 查询）；输出不是 JSON 对象 → RuntimeError。
     """
     key = (engine, None if steps_dir is None else str(steps_dir))
     cached = _CAPABILITIES_CACHE.get(key)

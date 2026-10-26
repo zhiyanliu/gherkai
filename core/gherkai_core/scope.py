@@ -1,4 +1,4 @@
-"""scope seam（ADR 0025）：解析后的 scenario 按 tag 分组 + engine/timeout 校验 → Job[]。
+"""scope seam（ADR 0025）：解析后的 scenario 按 tag 分组 + engine/target/timeout 校验 → Job[]。
 
 对外入口 plan(features, config) -> list[Job]：core 的窄腰第一步（解析→分组），
 产出的 Job 正是 worker↔core 协议（ADR 0024）的输入形状。
@@ -59,7 +59,7 @@ class PlanConfig:
     default_desktop_job_timeout_s: float = 300.0
     default_device_job_timeout_s: float = DEFAULT_ACQUIRE_TIMEOUT_S + 900.0
     min_device_job_timeout_s: float = DEFAULT_ACQUIRE_TIMEOUT_S + 180.0
-    # 应用别名表（ADR 0048 决策 2 / 0053 [apps]）：别名 → 平台 → 包名或 bundle id，纯数据、不带文件路径；core 据此核对 @app。
+    # 应用别名表（ADR 0048 决策 2 / 0053 [apps]）：别名到平台、再到包名或 bundle id 的两级映射，纯数据、不带文件路径；core 据此核对 @app。
     apps: dict[str, dict[str, str]] = field(default_factory=dict)
 
 
@@ -134,7 +134,7 @@ def _resolve_target(scope_id: str, members: list[ParsedScenario], apps: dict[str
     device = devices[0] if devices else "desktop"
     if devices and device not in _DEVICES:
         raise FeatureContractError(
-            f"scope {scope_id!r} 的 @device:{device} 不是 android 或 ios（桌面网页不用标 @device，删掉这个 tag 即可）。"
+            f"scope {scope_id!r} 的 @device:{device} 不是 android 或 ios：请改为这两个值之一；桌面网页不标 @device。"
         )
     if not aliases:
         return Target(device=device, ui_kind="web")
@@ -186,7 +186,8 @@ def _resolve_timeout(scope_id: str, members: list[ParsedScenario], config: PlanC
             raise FeatureContractError(f"scope {scope_id!r} 的 @timeout:{raw} 不是数字：须为正数秒。") from None
         if not math.isfinite(n) or n <= 0:
             raise FeatureContractError(
-                f"scope {scope_id!r} 的 @timeout:{raw} 须为正数秒；不想超时就删掉 tag 走缺省。"
+                f"scope {scope_id!r} 的 @timeout:{raw} 须为正数秒；要走缺省预算就删掉这个 tag"
+                f"（桌面 scope 可用 --default-job-timeout 0 关闭超时，设备 scope 不能关闭）。"
             )
         source = f"@timeout:{raw}"
     else:
@@ -194,16 +195,16 @@ def _resolve_timeout(scope_id: str, members: list[ParsedScenario], config: PlanC
         if explicit is None:
             return config.default_device_job_timeout_s if is_device else config.default_desktop_job_timeout_s
         if not math.isfinite(explicit):
-            raise FeatureContractError(f"默认 job 墙钟预算须为有限数，收到 {explicit!r}。")
+            raise FeatureContractError(f"--default-job-timeout 须为有限数，收到 {explicit!r}；要关闭桌面 scope 的超时给 0。")
         if explicit <= 0:
             return config.default_device_job_timeout_s if is_device else None
         n = explicit
-        source = f"默认 job 墙钟预算 {explicit:g} 秒"
+        source = f"--default-job-timeout {explicit:g}"
     if is_device and n < config.min_device_job_timeout_s:
         raise FeatureContractError(
             f"scope {scope_id!r} 的 job 墙钟预算 {n:g} 秒（来自 {source}）低于设备目标的下限 {config.min_device_job_timeout_s:g} 秒："
-            f"取设备就可能用掉大部分预算，还没开始执行就会被判超时。请调到至少 {config.min_device_job_timeout_s:g} 秒，"
-            f"或删掉它走设备缺省（{config.default_device_job_timeout_s:g} 秒）。"
+            f"获取设备就可能用掉大部分预算，还没开始执行就会被判超时。请把它调到至少 {config.min_device_job_timeout_s:g} 秒，"
+            f"或去掉这个显式预算、让设备 scope 走缺省（{config.default_device_job_timeout_s:g} 秒）。"
         )
     return n
 
@@ -212,9 +213,9 @@ def plan(features: list[FeatureSource], config: PlanConfig, *,
          select: Callable[[ParsedScenario, str], bool] | None = None) -> list[Job]:
     """core 窄腰第一步：一组 .feature → 可调度的 Job 列表（ADR 0025）。
 
-    select（ADR 0041 决策一）：scenario 筛选谓词，在 **scope 分组与 engine/timeout 解析之后、Job 组装之前**施加。
-    不变量：筛选只减少「运行哪几条」——scope 的引擎、job 墙钟预算、会话身份一律按**全量**成员解析，与不筛时逐字一致（否则筛后
-    执行的与全量执行的不是同一件事，迭代结论不可迁移）。整组被筛空的 scope 不进任何 job（且在解析 engine/timeout 之前跳过，
+    select（ADR 0041 决策一）：scenario 筛选谓词，在 **scope 分组与 engine/target/timeout 解析之后、Job 组装之前**施加。
+    不变量：筛选只减少「运行哪几条」——scope 的引擎、测试目标、job 墙钟预算、会话身份一律按**全量**成员解析，与不筛时逐字一致（否则筛后
+    执行的与全量执行的不是同一件事，迭代结论不可迁移）。整组被筛空的 scope 不进任何 job（且在解析 engine/target/timeout 之前跳过，
     它内部的 tag 冲突不拦本次迭代）；`_scope_key` 仍对全量成员校验（一个 scenario 多个 @scope 照样 fail-fast）。None 表示不筛。
     谓词由调用方按 `--scope/--tags/--scenario` 组装，core 只收 `(ParsedScenario, scope_id) → bool`、不认 flag 语义
     （scope_id 一并传入：业务概念「scope」的筛选按分组键判，不逼调用方从 tags 反推）。筛后为空返回 []。
@@ -234,7 +235,7 @@ def plan(features: list[FeatureSource], config: PlanConfig, *,
             )
         seen_uris.add(f.uri)
 
-    # 1) 解析所有 feature → ParsedScenario（带 tags）。select 不在此施加：分组与 engine/timeout 要看全量成员（ADR 0041 决策一）
+    # 1) 解析所有 feature → ParsedScenario（带 tags）。select 不在此施加：分组与 engine/target/timeout 要看全量成员（ADR 0041 决策一）
     all_parsed: list[ParsedScenario] = []
     for f in features:
         all_parsed.extend(parse_feature(f.uri, f.text))

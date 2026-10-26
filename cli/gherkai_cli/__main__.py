@@ -21,6 +21,8 @@ from gherkai_core.model import DEFAULT_ACQUIRE_TIMEOUT_S, TERMINAL_STATUSES, Eve
 from gherkai_core.parse import FeatureParseError
 from gherkai_core.persist import RunPersistence
 from gherkai_core.scope import PlanConfig, FeatureContractError, plan
+from gherkai_core.errors import DefinitionContractError
+from gherkai_core.target import validate_job_definition
 from gherkai_core.schedule import ScheduleOpts, schedule
 
 from gherkai_runtime import compose
@@ -206,8 +208,9 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     )
     run.add_argument(
         "--default-job-timeout", type=_finite_float, default=None, metavar="S",
-        help="未标 @timeout 的 scope 用的 job 墙钟预算秒（不给时按测试目标取缺省：桌面 300，设备按取设备预算另算；"
-             "<=0 表示非设备 scope 不超时，设备 scope 仍取缺省）；标了 @timeout:N tag 的按 tag 走（同 @engine/--default-engine 模式）",
+        help="未标 @timeout 的 scope 用的 job 墙钟预算秒（不给时按测试目标取缺省：桌面 300 秒，设备为获取预算加 900 秒；"
+             "给 <=0 只让桌面 scope 不超时，设备 scope 仍取缺省；给正值时设备 scope 不得低于获取预算加 180 秒）；"
+             "标了 @timeout:N 的按 tag 走",
     )
     # 下限判据（为何必须 ≥ 单个 act 时长 + 收尾预算、以及为何改由 worker 自报）见 ADR 0024；help 只讲怎么用。
     run.add_argument(
@@ -304,8 +307,9 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     pl.add_argument("features", nargs="+", type=Path, help="一个或多个 .feature 路径")
     pl.add_argument(
         "--default-job-timeout", type=_finite_float, default=None, metavar="S",
-        help="未标 @timeout 的 scope 用的 job 墙钟预算秒（不给时按测试目标取缺省：桌面 300，设备按取设备预算另算；"
-             "<=0 表示非设备 scope 不超时）——与 run/submit 同源，让 plan 算出的 Job 与实际运行一致",
+        help="未标 @timeout 的 scope 用的 job 墙钟预算秒（不给时按测试目标取缺省：桌面 300 秒，设备为获取预算加 900 秒；"
+             "给 <=0 只让桌面 scope 不超时，设备 scope 仍取缺省；给正值时设备 scope 不得低于获取预算加 180 秒）；"
+             "标了 @timeout:N 的按 tag 走——与 run/submit 同源，让 plan 算出的 Job 与实际运行一致",
     )
     pl.add_argument(
         "--default-engine", choices=sorted(_names.ENGINES), default="novaact",
@@ -339,8 +343,9 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
                          "（后端 stack 的 MAX_CONCURRENCY）钳制")
     sm.add_argument(
         "--default-job-timeout", type=_finite_float, default=None, metavar="S",
-        help="未标 @timeout 的 scope 用的 job 墙钟预算秒（不给时按测试目标取缺省：桌面 300，设备按取设备预算另算；"
-             "<=0 表示非设备 scope 不超时）；标了 @timeout:N 的按 tag 走",
+        help="未标 @timeout 的 scope 用的 job 墙钟预算秒（不给时按测试目标取缺省：桌面 300 秒，设备为获取预算加 900 秒；"
+             "给 <=0 只让桌面 scope 不超时，设备 scope 仍取缺省；给正值时设备 scope 不得低于获取预算加 180 秒）；"
+             "标了 @timeout:N 的按 tag 走",
     )
     sm.add_argument(
         "--expose-local", default=None, metavar="ORIGIN",
@@ -570,7 +575,8 @@ def _preflight_worker_runtimes(jobs, steps_dir: str | None) -> int | None:
 
     - 定位链四级全 miss → 打安装指引 + **以退出码 2 结束**：「运行时没装」是环境/配置问题，属「没开始执行就被拒」层，
       不该变成一批 job 级 `engine_error`（更不该运行到一半才发现）。
-    - **每个引擎恒问一次能力自述**（`--capabilities`，ADR 0036「5.」）：worker 非零退出 → 转述其诊断 + **以退出码 2 结束**。
+    - **每个引擎恒问一次能力自述**（`--capabilities`，ADR 0036「5.」）：worker 非零退出 → 转述其诊断 + **以退出码 2 结束**；
+      自述到手后再做两项目标检查（ADR 0048 决策 3、4）：job 的测试目标不在该引擎声明的 targets 里、或墙钟预算超过该目标的会话上限 → 退出码 2。
       否则 `submit` 会「提交成功」后逐 job error、诊断只落 reconcile.log——那是静默降级（ADR 0037 决策 4
       「提交侧同样前置」）。**不再按「有没有 steps 目录」分支**：这一份自述同时给出「steps 加载成功 + 清单 +
       grace 下限」（ADR 0036「5.」），恒问一次后 `_cmd_run` 的 grace 下限（`compose.engine_min_grace`）命中同一份
@@ -949,7 +955,7 @@ def _target_rejections(jobs, caps: dict) -> list[str]:
     out: list[str] = []
     for j in jobs:
         t = j.target
-        label = render.target_label(t.device, t.ui_kind)
+        label = render.spaced(render.target_label(t.device, t.ui_kind))
         if not compose.target_supported(supported, t.device, t.ui_kind):
             first = j.scenarios[0].id if j.scenarios else j.scope_id
             out.append(
@@ -965,6 +971,18 @@ def _target_rejections(jobs, caps: dict) -> list[str]:
                 f"请调低这个 scope 的 @timeout 或 --default-job-timeout。"
             )
     return out
+
+
+def _validate_definition(jobs) -> int | None:
+    """写 definition 之前的结构校验（ADR 0048 决策 3 的第一处；第二处在推进器读 definition 时）。plan 形态的设备 job（组合根尚未填入
+    设备请求）在这里被拒，否则写出的 definition 会到推进器读时才被拒、而提交已经显示成功。返回 2 或 None。"""
+    for j in jobs:
+        try:
+            validate_job_definition(j)
+        except DefinitionContractError as e:
+            _progress(f"scope {j.scope_id!r} 的运行定义不完整，拒绝写入：{e}。设备目标的设备请求要等项目配置接入后才会由本工具填入。")
+            return 2
+    return None
 
 
 def _load_and_plan(args) -> "list | int":
@@ -1198,6 +1216,10 @@ def _plan_and_preflight(args, *, list_jobs: bool) -> "tuple[list, str | None] | 
         miss = _preflight_worker_runtimes(jobs, steps_dir)
         if miss is not None:
             return miss
+    # 写 definition 之前的结构校验（两个后端都做；云端后端没有本机预检，设备目标在这里被拦住）
+    bad = _validate_definition(jobs)
+    if bad is not None:
+        return bad
     return jobs, steps_dir
 
 
@@ -1230,17 +1252,19 @@ def _cmd_plan(args) -> int:
     if isinstance(steps_dir, int):
         return steps_dir
 
-    # 目标拒绝（ADR 0048 决策 4）：按引擎能力自述核对各 job 的测试目标，不受支持即与其它用例契约违约同样以退出码 2 结束、消息给出改法；
-    # 自述取不到（引擎没装、查询失败）只警告、不判定，最终由执行前预检拒绝。使用方 steps 加载失败那种自述失败由下面的派发标注查询
-    # 原样抛出、以退出码 2 结束，这里不重复判。
+    # 目标拒绝（ADR 0048 决策 4）：按引擎能力自述核对各 job 的测试目标，不受支持即与其它用例契约违约同样以退出码 2 结束、消息给出改法。
+    # 只问有非桌面 job 的引擎（桌面网页没有会话上限、所有 worker 都支持，核对无意义）；自述取不到（引擎没装、查询失败）只警告、不判定；
+    # worker 起来了但自述非零退出（使用方 steps 加载失败、版本不一致）与派发标注查询同一口径以退出码 2 结束，不能静默。
     rejections: list[str] = []
-    for engine in sorted({j.engine for j in jobs}):
+    for engine in sorted({j.engine for j in jobs if not j.target.is_desktop}):
         try:
             caps = compose.query_capabilities(engine, steps_dir=steps_dir)
-        except compose.WorkerSelfDescribeError:
-            continue  # 交给下面的派发标注查询报（同一成因、同一句提示）
+        except compose.WorkerSelfDescribeError as e:
+            _progress(f"引擎 {engine} 的 worker 自述失败，plan 拒绝出结果：{e}\n{_SELF_DESCRIBE_CAUSES}")
+            return 2
         except (compose.WorkerNotFoundError, ValueError, RuntimeError) as e:
-            _progress(f"（目标核对降级）引擎 {engine} 的能力自述取不到，该引擎 job 的测试目标未核对、将由执行前检查拒绝：{e}")
+            _progress(f"（目标核对降级）引擎 {engine} 的能力自述取不到，该引擎 job 的测试目标未核对——本机后端由执行前预检拒绝，"
+                      f"云端由 worker 在建会话前自检拒绝：{e}")
             continue
         rejections.extend(_target_rejections([j for j in jobs if j.engine == engine], caps))
     if rejections:

@@ -357,6 +357,137 @@ def test_job_from_dict_rejects_malformed_device_definitions(patch, match):
         job_from_dict(d)
 
 
+def _ios_app_job(scenarios, **over):
+    from gherkai_core.model import AppRef, DeviceFarmRequest, Target
+
+    base = dict(scope_id="ia", scope_name="ia", engine="midscene", scenarios=scenarios, timeout_s=900.0,
+                target=Target(device="ios", ui_kind="app", app=AppRef(alias="shop", app_id="com.example.Shop", bucket="b", key="k", sha256="h")),
+                device_request=DeviceFarmRequest(project_arn="arn:p", device_arn="arn:d", billing_method="UNMETERED"))
+    base.update(over)
+    return Job(**base)
+
+
+@pytest.mark.parametrize("field", ["alias", "app_id", "bucket", "key", "sha256"])
+@pytest.mark.parametrize("bad", [None, "", 7], ids=["missing", "empty", "wrong-type"])
+def test_validate_definition_rejects_each_incomplete_app_field(field, bad):
+    """写前校验（ADR 0048 决策 3）：应用条目五项逐项缺失、空值、错类型都拒绝——直接调校验函数，不只经读端。"""
+    import dataclasses
+
+    from gherkai_core.errors import DefinitionContractError
+    from gherkai_core.target import validate_job_definition
+
+    j = _job_def("s", "s", "midscene")
+    good = _ios_app_job(j.scenarios)
+    validate_job_definition(good)  # 完整形态通过
+    app = dataclasses.replace(good.target.app, **{field: bad})
+    bad_job = dataclasses.replace(good, target=dataclasses.replace(good.target, app=app))
+    with pytest.raises(DefinitionContractError, match=f"应用条目缺 {field}"):
+        validate_job_definition(bad_job)
+
+
+@pytest.mark.parametrize("over, match", [
+    (dict(device_request=None), "非桌面目标当且仅当带设备请求"),
+    (dict(timeout_s=None), "设备 scope 不存在"),
+    (dict(timeout_s=float("inf")), "有限正数"),
+    (dict(timeout_s=10 ** 400), "有限正数"),  # 超出 float 范围的整数：不是 OverflowError 漏出去
+])
+def test_validate_definition_rejects_device_job_variants(over, match):
+    from gherkai_core.errors import DefinitionContractError
+    from gherkai_core.target import validate_job_definition
+
+    j = _job_def("s", "s", "midscene")
+    with pytest.raises(DefinitionContractError, match=match):
+        validate_job_definition(_ios_app_job(j.scenarios, **over))
+
+
+@pytest.mark.parametrize("patch, match", [
+    (dict(device_arn=123), "device_arn 须为非空文本或不设"),  # 错类型不当作「未提供」
+    (dict(device_arn=[]), "device_arn 须为非空文本或不设"),
+    (dict(device_arn=None, os_version=None), "恰给一个"),
+    (dict(os_version="15"), "恰给一个"),  # 与已有的 device_arn 两个都给
+    (dict(project_arn=None), "缺 project_arn"),
+    (dict(billing_method=None), "缺 billing_method"),
+    (dict(acquire_timeout_s=10 ** 400), "有限正数"),
+    (dict(acquire_timeout_s=True), "有限正数"),
+    (dict(provider="other"), "服务商未知"),
+])
+def test_validate_definition_rejects_device_request_variants(patch, match):
+    import dataclasses
+
+    from gherkai_core.errors import DefinitionContractError
+    from gherkai_core.target import validate_job_definition
+
+    j = _job_def("s", "s", "midscene")
+    good = _ios_app_job(j.scenarios)
+    bad = dataclasses.replace(good, device_request=dataclasses.replace(good.device_request, **patch))
+    with pytest.raises(DefinitionContractError, match=match):
+        validate_job_definition(bad)
+
+
+def test_validate_definition_rejects_desktop_with_device_request_or_app_and_web_with_app():
+    """「当且仅当」的反向分支：桌面 job 带设备请求、桌面带应用条目、网页界面带应用条目、应用界面无应用条目，都拒绝；错类型的 device 也拒绝。"""
+    import dataclasses
+
+    from gherkai_core.errors import DefinitionContractError
+    from gherkai_core.model import AppRef, DeviceFarmRequest, Target
+    from gherkai_core.target import validate_job_definition
+
+    j = _job_def("s", "s", "midscene")
+    app = AppRef(alias="a", app_id="b", bucket="c", key="d", sha256="e")
+    cases = [
+        (Job(scope_id="d", scope_name="d", engine="midscene", scenarios=j.scenarios, device_request=DeviceFarmRequest(project_arn="p", os_version="15")), "非桌面目标当且仅当带设备请求"),
+        (Job(scope_id="d", scope_name="d", engine="midscene", scenarios=j.scenarios, target=Target(device="desktop", ui_kind="app", app=app)), "不是合法组合"),
+        (Job(scope_id="d", scope_name="d", engine="midscene", scenarios=j.scenarios, timeout_s=900.0, target=Target(device="android", ui_kind="web", app=app),
+             device_request=DeviceFarmRequest(project_arn="p", os_version="15")), "为网页时不得带"),
+        (Job(scope_id="d", scope_name="d", engine="midscene", scenarios=j.scenarios, timeout_s=900.0, target=Target(device="android", ui_kind="app", app=None),
+             device_request=DeviceFarmRequest(project_arn="p", os_version="15")), "必须带应用条目"),
+        (dataclasses.replace(_ios_app_job(j.scenarios), target=Target(device=[], ui_kind="web")), "不是合法组合"),  # 错类型不抛 TypeError
+    ]
+    for job, match in cases:
+        with pytest.raises(DefinitionContractError, match=match):
+            validate_job_definition(job)
+
+
+@pytest.mark.parametrize("mutate, match", [
+    (lambda d: d.update(target="android/web"), "形态不对"),                      # target 不是对象
+    (lambda d: d["target"].pop("device"), "不是合法组合"),                        # 缺 device
+    (lambda d: d["target"].pop("ui_kind"), "不是合法组合"),
+    (lambda d: d["target"].update(app="shop"), "形态不对"),                       # app 不是对象
+    (lambda d: d["target"]["app"].pop("alias"), "应用条目缺 alias"),
+    (lambda d: d["target"]["app"].pop("app_id"), "应用条目缺 app_id"),
+    (lambda d: d.update(device_request="x"), "形态不对"),
+    (lambda d: d["device_request"].pop("project_arn"), "缺 project_arn"),
+    (lambda d: d["device_request"].pop("billing_method"), "缺 billing_method"),   # 读端不补缺省值
+    (lambda d: d["device_request"].pop("acquire_timeout_s"), "有限正数"),
+    (lambda d: d["device_request"].pop("provider"), "服务商未知"),
+])
+def test_job_from_dict_maps_missing_keys_and_wrong_shapes_to_definition_error(mutate, match):
+    """读时校验（ADR 0048 决策 3）：键缺失与形态不对也归 DefinitionContractError（不漏 KeyError / TypeError），读端不替缺键补缺省值。"""
+    from gherkai_core.errors import DefinitionContractError
+    from gherkai_core.serialize import job_from_dict, job_to_dict
+
+    j = _job_def("s", "s", "midscene")
+    d = job_to_dict(_ios_app_job(j.scenarios))
+    mutate(d)
+    with pytest.raises(DefinitionContractError, match=match):
+        job_from_dict(d)
+
+
+def test_job_to_dict_keeps_target_for_illegal_desktop_app_so_read_side_can_reject():
+    """写端只对 desktop/web 且无应用条目省键：非法的桌面应用目标不会因省键而在往返后变成合法的 desktop/web。"""
+    from gherkai_core.errors import DefinitionContractError
+    from gherkai_core.model import AppRef, Target
+    from gherkai_core.serialize import job_from_dict, job_to_dict
+
+    j = _job_def("s", "s", "midscene")
+    bad = Job(scope_id="d", scope_name="d", engine="midscene", scenarios=j.scenarios,
+              target=Target(device="desktop", ui_kind="app", app=AppRef(alias="a", app_id="b", bucket="c", key="d", sha256="e")))
+    d = job_to_dict(bad)
+    assert "target" in d
+    with pytest.raises(DefinitionContractError, match="不是合法组合"):
+        job_from_dict(d)
+
+
 def test_job_from_dict_rejects_incomplete_app_entry_and_desktop_with_app():
     from gherkai_core.errors import DefinitionContractError
     from gherkai_core.model import AppRef, DeviceFarmRequest, Target

@@ -32,7 +32,7 @@ import { sigv4Fetch, signCdpUpgrade, getBaseUrl, MODEL, modelFamily, getRegion }
 // （中断兜底提前上传那一段的预算，见下 minGraceSeconds），单一真值住上传器、此处只引用。
 import { ArtifactUploader, UPLOAD_TIMEOUT_MS } from "../lib/artifact-upload.mjs";
 import { EventSink } from "../lib/event-sink.mjs";  // 事件出口（ADR 0024「I/O 边缘可注入接口」，两态见该模块头）
-import { JobSource } from "../lib/job-source.mjs";  // job 入口（同上）
+import { JobSource, type Job as WireJob } from "../lib/job-source.mjs";  // job 入口（同上）；Job 类型是 core 发来的 job 行形状
 import { precheckTarget } from "../lib/precheck.mjs";  // 建会话前的目标与预算自检（ADR 0049 决策 7）
 // 确定性 step 注册表（ADR 0022）+ 测试开发写 step 用的脚手架。
 // import 脚手架即触发其顶层 deterministic(...) 注册副作用（对称 Nova 引擎 import deterministic_steps）。
@@ -307,10 +307,8 @@ async function shutdownSequence(deps: ShutdownDeps): Promise<number> {
 
 interface Step { index: number; keyword: string; text: string; argument?: unknown }
 interface Scenario { id: string; name: string; steps: Step[] }
-interface Job {
-  scope: { id: string; name: string }; engine: string; scenarios: Scenario[]; assertionVotes?: number;
-  timeoutS?: number; target?: { device: string; uiKind: string; app?: unknown };  // 可选键（ADR 0024 / 0048 决策 3）：只供建会话前自检
-}
+// 与 lib/job-source.mts 导出的 Job 同一形状（可选键 timeoutS / target / deviceRequest，ADR 0024 / 0048 决策 3），只把 scenarios 收窄成本文件的 Scenario
+interface Job extends Omit<WireJob, "scenarios"> { scenarios: Scenario[] }
 
 
 // Midscene/Bedrock 原生量 token 累计（ADR 0024：engine 只报原生量，core 不算美元）。

@@ -39,7 +39,7 @@ dist/                  ← tsc 产物（*.mjs + *.d.mts），发布物；不入�
 spikes/                ← 分段自检脚本（不进包、不编译）：01 到 05 为桌面链路（模型连接、浏览器连接、合体、规划探针、否定断言），06 为移动真机方向的 Device Farm 加 Appium 探针
 ```
 
-测试都是 `src/**/*.test.mts`，按 tsconfig 的 `exclude` 不进 `dist`。**但测试并非一律与源码同目录**：`lib/` 各模块的测试（`agentcore-sigv4.test.mts` / `artifact-upload.test.mts` / `event-sink.test.mts` / `job-source.test.mts` / `precheck.test.mts`）与夹具 `fixtures/` 都落在 `src/worker/` 下，新增测试沿用该位置，不另起 `src/lib/*.test.mts`。
+测试都是 `src/**/*.test.mts`，按 tsconfig 的 `exclude` 不进 `dist`。**但测试并非一律与源码同目录**：`lib/` 各模块的测试（`agentcore-sigv4.test.mts` / `artifact-upload.test.mts` / `event-sink.test.mts` / `job-source.test.mts` / `redact.test.mts` / `precheck.test.mts`）与夹具 `fixtures/` 都落在 `src/worker/` 下，新增测试沿用该位置，不另起 `src/lib/*.test.mts`。
 
 ## 执行形态：薄 worker（cucumber 已退役）
 

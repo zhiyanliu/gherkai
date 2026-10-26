@@ -195,7 +195,7 @@ def test_plan_shows_target_and_device_session_count(tmp_path, capsys):
     feat = _write_feature(tmp_path)
     assert m.main(["plan", str(feat)]) == 0
     out = capsys.readouterr().out
-    assert "target=desktop/web" in out and "设备会话 0" in out
+    assert "target=desktop/web" in out and "远程访问会话 0" in out
     assert m.main(["plan", str(feat), "--json"]) == 0
     doc = json.loads(capsys.readouterr().out)
     assert doc["device_session_count"] == 0 and "target" not in doc["jobs"][0]  # 桌面 job 省 target 键
@@ -213,6 +213,71 @@ def test_default_job_timeout_sentinel_explicit_and_non_finite(tmp_path, capsys):
             m.main(["plan", str(feat), "--default-job-timeout", bad])
         assert ei.value.code == 2
         assert "--default-job-timeout" in capsys.readouterr().err
+
+
+def test_plan_config_receives_sentinel_explicit_value_and_device_defaults(tmp_path, monkeypatch):
+    """CLI 组装的 PlanConfig：不给 --default-job-timeout 传「未指定」哨兵 None（与显式 300 可区分）；设备缺省与下限按内建获取预算算出
+    （600 加 900 / 600 加 180）；桌面缺省 300。"""
+    box = {}
+    real_plan = m.plan
+
+    def spy(features, cfg, **kw):
+        box["cfg"] = cfg
+        return real_plan(features, cfg, **kw)
+
+    monkeypatch.setattr(m, "plan", spy)
+    feat = _write_feature(tmp_path)
+    assert m.main(["plan", str(feat)]) == 0
+    cfg = box["cfg"]
+    assert cfg.default_job_timeout_s is None
+    assert (cfg.default_desktop_job_timeout_s, cfg.default_device_job_timeout_s, cfg.min_device_job_timeout_s) == (300.0, 1500.0, 780.0)
+    assert m.main(["plan", str(feat), "--default-job-timeout", "300"]) == 0
+    assert box["cfg"].default_job_timeout_s == 300.0
+
+
+@pytest.mark.parametrize("cmd", ["run", "submit"])
+def test_run_and_submit_reject_non_finite_default_job_timeout(tmp_path, cmd, capsys):
+    """三处 --default-job-timeout 各自声明：run 与 submit 对 nan / inf 同样以退出码 2 结束（argparse 层）。"""
+    feat = _write_feature(tmp_path)
+    for bad in ("nan", "inf"):
+        with pytest.raises(SystemExit) as ei:
+            m.main([cmd, str(feat), "--default-job-timeout", bad])
+        assert ei.value.code == 2 and "--default-job-timeout" in capsys.readouterr().err
+
+
+def test_plan_shows_device_target_and_session_count_when_engine_supports_it(tmp_path, monkeypatch, capsys):
+    """ADR 0048 决策 5：引擎自述支持 Android 时，plan 显示 target=android/web、远程访问会话数 1，--json 里 device_session_count 为 1、
+    job 带 target、timeout_s 取设备缺省 1500。"""
+    feat = tmp_path / "dev.feature"
+    feat.write_text("@device:android\nFeature: F\n  Scenario: a\n    When \"做事\"\n", encoding="utf-8")
+
+    def caps_with_android(engine, *, steps_dir=None, timeout_s=60.0):
+        return {"schema_version": 1, "engine": engine, "min_grace_s": 150.0, "deterministic_steps": [], "model_id": "m",
+                "targets": [{"device": "desktop", "ui_kinds": ["web"]}, {"device": "android", "ui_kinds": ["web", "app"], "max_session_s": 8000.0}]}
+
+    def no_match(*a, **k):
+        raise RuntimeError("查询失败")
+
+    monkeypatch.setattr(compose, "query_capabilities", caps_with_android)
+    monkeypatch.setattr(compose, "match_deterministic", no_match)
+    assert m.main(["plan", str(feat)]) == 0
+    out = capsys.readouterr().out
+    assert "target=android/web" in out and "远程访问会话 1" in out
+    assert m.main(["plan", str(feat), "--json"]) == 0
+    doc = json.loads(capsys.readouterr().out)
+    assert doc["device_session_count"] == 1
+    assert doc["jobs"][0]["target"] == {"device": "android", "ui_kind": "web"} and doc["jobs"][0]["timeout_s"] == 1500.0
+
+
+def test_validate_definition_rejects_plan_form_device_job_before_writing():
+    """写 definition 之前的结构校验（ADR 0048 决策 3 第一处）：组合根尚未填入设备请求的设备 job 以退出码 2 被拒；桌面 job 放行。"""
+    from gherkai_core.model import Job, Scenario, Step, Target
+
+    scs = (Scenario(id="f:1", name="n", steps=(Step(0, "When", "x"),)),)
+    device = Job(scope_id="d", scope_name="d", engine="midscene", scenarios=scs, timeout_s=1500.0, target=Target(device="android", ui_kind="web"))
+    desktop = Job(scope_id="w", scope_name="w", engine="midscene", scenarios=scs, timeout_s=300.0)
+    assert m._validate_definition([desktop]) is None
+    assert m._validate_definition([desktop, device]) == 2
 
 
 def test_device_target_rejected_by_plan_and_preflight_when_engine_lacks_target(tmp_path, monkeypatch, capsys):
@@ -254,7 +319,7 @@ def test_target_rejections_flag_timeout_over_session_limit():
     scs = (Scenario(id="f:1", name="n", steps=(Step(0, "When", "x"),)),)
     over = Job(scope_id="s", scope_name="s", engine="midscene", scenarios=scs, timeout_s=9000.0, target=Target(device="android", ui_kind="web"))
     [msg] = m._target_rejections([over], caps)
-    assert "超过了引擎 midscene 在Android 网页上的会话上限 8000 秒" in msg and "--default-job-timeout" in msg
+    assert "超过了引擎 midscene 在 Android 网页上的会话上限 8000 秒" in msg and "--default-job-timeout" in msg
     within = Job(scope_id="s", scope_name="s", engine="midscene", scenarios=scs, timeout_s=7000.0, target=Target(device="android", ui_kind="web"))
     desktop = Job(scope_id="d", scope_name="d", engine="midscene", scenarios=scs, timeout_s=99999.0)
     assert m._target_rejections([within, desktop], caps) == []

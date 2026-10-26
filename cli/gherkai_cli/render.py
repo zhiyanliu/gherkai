@@ -215,8 +215,8 @@ def render_plan_text(jobs: list[Job], default_engine: str, dispatch: dict | None
 def plan_tree(jobs: list[Job], default_engine: str, dispatch: dict | None = None) -> TreeNode:
     """plan 视图的树（`render_plan_text` 的结构）。"""
     n_scenarios = sum(len(j.scenarios) for j in jobs)
-    # 设备会话数（ADR 0048 决策 5）：一个设备 scope 一个会话；plan 不写金额（单价随计费方式与区域变化），会话数是作者能直接控制的量
-    root = TreeNode(f"plan（用例预检，未执行）  {len(jobs)} job(scope)  ·  {n_scenarios} scenario  ·  设备会话 {device_session_count(jobs)}"
+    # 远程访问会话数（ADR 0048 决策 5）：一个设备 scope 一个会话；plan 不写金额（单价随计费方式与区域变化），会话数是作者能直接控制的量
+    root = TreeNode(f"plan（用例预检，未执行）  {len(jobs)} job(scope)  ·  {n_scenarios} scenario  ·  远程访问会话 {device_session_count(jobs)}"
                     f"  ·  default_engine={default_engine}")
     for j in jobs:
         votes = f"  votes={j.assertion_votes}" if j.assertion_votes != 1 else ""
@@ -238,6 +238,13 @@ def plan_tree(jobs: list[Job], default_engine: str, dispatch: dict | None = None
 _DEVICE_LABEL = {"desktop": "桌面", "android": "Android", "ios": "iOS"}
 _UI_KIND_LABEL = {"web": "网页", "app": "应用"}
 _REQUIRES_LABEL = {"web_context": "需要网页上下文"}
+
+
+def spaced(label: str) -> str:
+    """把名称嵌进中文句子时，拉丁字母开头或结尾处补一个空格（「在 Android 网页上」而不是「在Android 网页上」）；全中文的名称原样。"""
+    head = " " if label[:1].isascii() and label[:1].isalnum() else ""
+    tail = " " if label[-1:].isascii() and label[-1:].isalnum() else ""
+    return f"{head}{label}{tail}"
 
 
 def target_label(device: str, ui_kind: str) -> str:
@@ -299,7 +306,7 @@ def _arg_hint(arg) -> str:
 
 
 def device_session_count(jobs: list[Job]) -> int:
-    """这次 run 将建立的设备会话数（ADR 0048 决策 5 / 0051）：一个设备 scope 一个会话。"""
+    """这次 run 将建立的远程访问会话数（ADR 0048 决策 5 / 0051）：一个设备 scope 一个会话。"""
     return sum(1 for j in jobs if not j.target.is_desktop)
 
 

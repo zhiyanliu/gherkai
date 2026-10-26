@@ -201,7 +201,6 @@ def test_timeout_absent_and_unspecified_default_falls_back_by_target():
 
 
 # ---- 按目标解析 timeout 的真值表（ADR 0034「job timeout」节 ①②③；0051 决策 2；0025「timeout 解析」）----
-DEV_CFG = PlanConfig(default_engine="midscene", default_device_job_timeout_s=1500.0, min_device_job_timeout_s=780.0)
 DEVICE_SCOPE = 'Feature: F\n  @scope:d @device:android\n  Scenario: a\n    When "x"\n'
 DESKTOP_SCOPE = 'Feature: F\n  @scope:w\n  Scenario: a\n    When "x"\n'
 
@@ -250,9 +249,29 @@ def test_device_default_itself_is_not_checked_against_floor():
     assert job.timeout_s == 100.0
 
 
-def test_default_timeout_must_be_finite():
-    with pytest.raises(FeatureContractError, match="有限数"):
-        _plan(DESKTOP_SCOPE, cfg=_cfg(default_job_timeout_s=float("inf")))
+@pytest.mark.parametrize("bad", [float("inf"), float("nan")])
+def test_default_timeout_must_be_finite(bad):
+    with pytest.raises(FeatureContractError, match="--default-job-timeout 须为有限数"):
+        _plan(DESKTOP_SCOPE, cfg=_cfg(default_job_timeout_s=bad))
+
+
+def test_plan_config_defaults_derive_from_builtin_acquire_budget():
+    """PlanConfig 自带的设备缺省与下限按内建获取预算 600 推出（加 900 / 加 180，ADR 0051 决策 2）；桌面缺省 300。"""
+    cfg = PlanConfig(default_engine="midscene")
+    assert (cfg.default_desktop_job_timeout_s, cfg.default_device_job_timeout_s, cfg.min_device_job_timeout_s) == (300.0, 1500.0, 780.0)
+
+
+def test_device_tag_on_a_later_member_still_applies_to_whole_scope():
+    """「任一成员标了即整个 scope 生效」不只看首个成员：带 tag 的成员排在后面也生效。"""
+    jobs = _plan("""Feature: F
+  @scope:s
+  Scenario: a
+    When "x"
+  @scope:s @device:ios
+  Scenario: b
+    When "y"
+""", cfg=_cfg())
+    assert [j.target for j in jobs] == [Target(device="ios", ui_kind="web")] and jobs[0].timeout_s == 1500.0
 
 
 # ---- @device 与 @app 的归约（ADR 0048 决策 2：声明、继承、冲突照 @engine 的三条）----
@@ -551,7 +570,7 @@ def test_leading_and_keyword_fails_fast():
 
 @pytest.mark.parametrize("tag", ["@scope:", "@engine:", "@timeout:", "@device:", "@app:"])
 def test_bare_tag_without_value_errors_with_location(tag: str):
-    """裸 `@scope:` / `@engine:` / `@timeout:`（空值）→ FeatureContractError（ADR 0025：标了 tag 就得给值），且消息带 `uri:line`
+    """裸 `@scope:` / `@engine:` / `@timeout:` / `@device:` / `@app:`（空值）→ FeatureContractError（ADR 0025：标了 tag 就得给值），且消息带 `uri:line`
     定位（本模块其余 FeatureContractError 都带；@timeout 原走「不是数字」路径带 scope 定位，收口到空值分支后不能丢）。
     曾无声放行：裸 @scope: 跨文件合并成一个空名 scope、裸 @engine: 把 engine 置空串顶掉缺省。"""
     with pytest.raises(FeatureContractError, match="缺少值") as ei:

@@ -92,7 +92,7 @@ def job_to_dict(job: Job) -> dict:
         # timeout_s：omit-when-None（无预算就不写这个键，旧落盘兼容；ADR 0034「job timeout」节）
         **({"timeout_s": job.timeout_s} if job.timeout_s is not None else {}),
         # target / device_request（ADR 0048 决策 3）：桌面网页且无设备请求时省键（旧落盘缺键读回 desktop/web 与 None，往返恒等）
-        **({"target": _target_to_dict(job.target)} if not job.target.is_desktop else {}),
+        **({"target": _target_to_dict(job.target)} if job.target != Target() else {}),  # 只有 desktop/web 且无应用条目才省键
         **({"device_request": _device_request_to_dict(job.device_request)} if job.device_request is not None else {}),
     }
 
@@ -116,6 +116,11 @@ def job_from_dict(d: dict, *, validate: bool = True) -> Job:
     return job
 
 
+def _definition_error(what: str, d, e: Exception) -> "DefinitionContractError":
+    from gherkai_core.errors import DefinitionContractError
+    return DefinitionContractError(f"definition 里的 {what} 形态不对（{type(e).__name__}：{e}）：{d!r}")
+
+
 def _target_to_dict(t: Target) -> dict:
     out: dict = {"device": t.device, "ui_kind": t.ui_kind}
     if t.app is not None:
@@ -130,12 +135,19 @@ def _target_to_dict(t: Target) -> dict:
 
 
 def _target_from_dict(d: dict | None) -> Target:
+    """缺键即桌面网页（旧落盘与桌面 job 的正常形态）。形态不对（不是对象、缺 device / ui_kind、应用条目缺别名或包名）按定义违约报，
+    不让 KeyError / TypeError 漏出去——读时校验承诺的是 DefinitionContractError（ADR 0048 决策 3）。"""
     if d is None:
         return Target()
-    app = d.get("app")
-    return Target(device=d["device"], ui_kind=d["ui_kind"],
-                  app=AppRef(alias=app["alias"], app_id=app["app_id"], bucket=app.get("bucket"), key=app.get("key"),
-                             sha256=app.get("sha256")) if app is not None else None)
+    try:
+        app = d.get("app")
+        app_ref = None
+        if app is not None:
+            app_ref = AppRef(alias=app.get("alias"), app_id=app.get("app_id"), bucket=app.get("bucket"), key=app.get("key"),
+                             sha256=app.get("sha256"))  # 缺项留 None，由 validate_job_definition 按「五项齐全」拒绝
+        return Target(device=d.get("device"), ui_kind=d.get("ui_kind"), app=app_ref)
+    except (AttributeError, TypeError) as e:
+        raise _definition_error("target", d, e) from None
 
 
 def _device_request_to_dict(r: DeviceFarmRequest) -> dict:
@@ -149,12 +161,16 @@ def _device_request_to_dict(r: DeviceFarmRequest) -> dict:
 
 
 def _device_request_from_dict(d: dict | None) -> DeviceFarmRequest | None:
+    """读端不补缺省值：definition 里存的是组合根解析出的具体值（ADR 0048 决策 3 / 0053），缺键就留 None、由 validate_job_definition 拒绝；
+    形态不对按定义违约报。"""
     if d is None:
         return None
-    return DeviceFarmRequest(project_arn=d["project_arn"], device_arn=d.get("device_arn"), os_version=d.get("os_version"),
-                             billing_method=d.get("billing_method", "METERED"),
-                             acquire_timeout_s=d.get("acquire_timeout_s", DEFAULT_ACQUIRE_TIMEOUT_S),
-                             provider=d.get("provider", "aws-device-farm"))
+    try:
+        return DeviceFarmRequest(project_arn=d.get("project_arn"), device_arn=d.get("device_arn"), os_version=d.get("os_version"),
+                                 billing_method=d.get("billing_method"), acquire_timeout_s=d.get("acquire_timeout_s"),
+                                 provider=d.get("provider"))
+    except (AttributeError, TypeError) as e:
+        raise _definition_error("device_request", d, e) from None
 
 
 # ============================================================================

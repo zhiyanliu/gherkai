@@ -28,13 +28,21 @@ export interface Job {
   target?: JobTargetShape;      // 非桌面才有（ADR 0048 决策 3）
   deviceRequest?: JobDeviceRequest;
 }
-/** TS 侧认得的字段清单（显式写出，不从类型推导——JobSource 只是 JSON.parse，「解析再序列化」证不了什么）。 */
+/** TS 侧认得的字段清单（显式写出，不从类型推导——JobSource 只是 JSON.parse，「解析再序列化」证不了什么）。
+ *  与上面的接口双向绑定：`satisfies` 保证清单里每个键都是接口的键，下面的类型断言保证接口的每个键都在清单里——任一侧漏一项，
+ *  `npm run build` 的类型检查就失败；运行期由 job-source.test.mts 对照 golden。 */
 export const JOB_KEYS = {
-  top: ["scope", "engine", "scenarios", "assertionVotes", "timeoutS", "target", "deviceRequest"],
-  target: ["device", "uiKind", "app"],
-  app: ["alias", "bucket", "key", "sha256", "appId"],
-  deviceRequest: ["provider", "deviceArn", "osVersion", "billingMethod", "projectArn", "acquireTimeoutS"],
-} as const;
+  top: ["scope", "engine", "scenarios", "assertionVotes", "timeoutS", "target", "deviceRequest"] as const satisfies ReadonlyArray<keyof Job>,
+  target: ["device", "uiKind", "app"] as const satisfies ReadonlyArray<keyof JobTargetShape>,
+  app: ["alias", "bucket", "key", "sha256", "appId"] as const satisfies ReadonlyArray<keyof JobApp>,
+  deviceRequest: ["provider", "deviceArn", "osVersion", "billingMethod", "projectArn", "acquireTimeoutS"] as const satisfies ReadonlyArray<keyof JobDeviceRequest>,
+};
+type Missing<K extends string, L extends readonly string[]> = Exclude<K, L[number]>;
+const _everyJobKeyListed: Missing<keyof Job, typeof JOB_KEYS.top> extends never ? true : never = true;
+const _everyTargetKeyListed: Missing<keyof JobTargetShape, typeof JOB_KEYS.target> extends never ? true : never = true;
+const _everyAppKeyListed: Missing<keyof JobApp, typeof JOB_KEYS.app> extends never ? true : never = true;
+const _everyRequestKeyListed: Missing<keyof JobDeviceRequest, typeof JOB_KEYS.deviceRequest> extends never ? true : never = true;
+void _everyJobKeyListed; void _everyTargetKeyListed; void _everyAppKeyListed; void _everyRequestKeyListed;
 
 export class JobSource {
   private uri: string | undefined;
