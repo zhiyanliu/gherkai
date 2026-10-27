@@ -60,7 +60,7 @@ worker 收到的只有 `keyword` + 裸 `text`（+可选多行参数）。派发�
 - **同一张表**：内建脚手架（Nova `deterministic_steps.py` / Midscene `deterministic.steps.mts`）靠模块顶层 import 的副作用注册，使用方的 `steps/` 靠 `load_user_steps` / `loadUserSteps` 注册，两者写进的是同一个 `_REGISTRY` / `REGISTRY`；三个入口都在加载之后才分流。所以清单列出的、`plan` 标注的、实际执行时派发的，是同一份真值，**没有第二事实源可漂移**（这也是「外置清单文件」被拒的理由，见 ADR 0036 被拒方案）。
 - **同一个扫描面**：`match()` 与 `match_batch()` 共用 `_hits()`（Nova）、`match()` 与 `matchBatch()` 共用 `scan()`（Midscene）。两个消费者只在「命中数与关键字如何处置」上分叉（实际执行时抛 `DeterministicConflict` / `DeterministicKeywordMismatch`，预检返回结构化 `{"conflict": [...]}` / `{"keyword_mismatch": …, "keywords": […]}`），匹配语义本身只有一份实现。
 
-`plan` 因此仍然是**零 AWS、零花费、零副作用**，但它确实会启动进程：CLI 按引擎分组 step 文本，每个引擎至多 spawn 两次瞬时本地 worker：一次 match 查询（`compose.match_deterministic` → `compose._ask_worker`，带 `timeout_s` 预算，默认值见 code），一次能力自述（`compose.query_capabilities`，按引擎与 steps 目录缓存，目标核对与命中的目标核对共用）。自述入口不建立浏览器会话、不访问 AWS、秒级返回，因此「plan 不花钱」这一承诺仍然成立；不再成立的只是早期的「plan 不起 worker」。
+`plan` 因此仍然是**零 AWS、零花费、零副作用**，但它确实会启动进程：CLI 按引擎分组 step 文本，每个引擎会 spawn 一到数次瞬时本地 worker：match 查询一次（`compose.match_deterministic` → `compose._ask_worker`，带 `timeout_s` 预算，默认值见 code）；能力自述（`compose.query_capabilities`）成功后按引擎与 steps 目录缓存、目标核对与命中的目标核对共用一份，自述失败（超时、输出不合契约）不写缓存，后一步再问一次。自述入口不建立浏览器会话、不访问 AWS、秒级返回，因此「plan 不花钱」这一承诺仍然成立；不再成立的只是早期的「plan 不起 worker」。
 
 文本视图只标注少数派：命中标 `← 确定性: <description>`、冲突与关键字不符标 `← ⚠`，走 AI 的**不标**（噪声控制，`render.py` `_dispatch_hint`）。`--json` 的 `deterministic` 键是四态（`null` / 命中 / `conflict` / `keyword_mismatch`），在每个 step 上一律省略也有含义；字段级语义见 [`cli-json-contract.md`](./cli-json-contract.md)，本文不重复。冲突与关键字不符在 `plan` 只产生 ⚠ 与 stderr 警告，**退出码仍 0**：feature 作者手上能做的只有改 step 措辞，修注册表不是他能做的动作。
 
