@@ -113,6 +113,8 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 | `run` / `submit --backend cloud` 以退出码 2 结束，`--backend cloud 资源缺失：<资源>（用 --prefix=… 拼出）不存在`；或自检的 `backend.resources` 标 `✗` | `--prefix` 与部署用的不一致，或该 prefix 下还没部署过 | 用部署方给的 prefix，并确认 region 与账户也是部署时那一套；`--report-dir` 同样要与提交时一致 |
 | 自检的 `backend.version` 标 `✗`，`读不到后端版本戳（prefix 配错或后端未部署？）` | 读这个参数本身失败：凭证、权限或网络不通 | 先按上一行核对 prefix 与 region，再确认当前凭证有读 SSM 参数的权限 |
 | 云端 job 判 `error`，报告里看不出原因 | 失败发生在容器里 | 先用 `gherkai status <run_id> --backend cloud` 看 job 的 `message`，再用 `gherkai explain <run_id> --backend cloud` 看证据；worker 容器日志在 CloudWatch 日志组 `/<prefix>worker/<引擎>`，默认前缀下即 `/gherkai-worker/novaact` 与 `/gherkai-worker/midscene` |
+| `run` / `submit --backend cloud` 以退出码 2 结束，`后端没有版本戳 … 带设备目标或 --expose-local 的 run 不能提交到它` | 这个后端部署早于本版本、从未升级，它丢得掉这类 run 的关键信息 | 请部署方运行 `gherkai deploy` 升级后端；纯桌面且不经隧道的 run 不受影响 |
+| 提交以退出码 2 结束，`部署未启用设备支持` | 部署时没有建立 Device Farm 项目：部署版本早于本功能，或部署方没有 Device Farm 权限 | 请部署方用有 Device Farm 权限的凭证重新运行 `gherkai deploy` |
 | 以退出码 2 结束，`--grace 在云端不生效` | 云端的停止宽限由部署方在部署时用 `gherkai deploy --stop-timeout` 设定，运行时给这个选项不生效 | 去掉 `--grace`。`doctor --backend cloud` 的 `backend.worker.grace` 行会比对部署侧设的宽限够不够 |
 
 ## 提交后进度停住
@@ -127,6 +129,21 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 | `ngrok 隧道未就绪（…s 内拿不到公网 URL）`，提示 authtoken 未配置或无外网 | authtoken 没配，或本机连不上外网 | 运行 `ngrok config add-authtoken <token>`，或设 `NGROK_AUTHTOKEN`；两处任一即可。前置与限制见[测本机应用](./local-app-testing.md) |
 
 `gherkai doctor` 不查隧道前置，隧道问题只会在 `run` / `submit` 起隧道时暴露。隧道特有的其它症状见[测本机应用](./local-app-testing.md)的「常见故障」。
+
+## 项目配置文件与设备目标
+
+| 症状 | 原因 | 处置 |
+|---|---|---|
+| `配置文件 … 里有不认识的键 …`，随后列出可用的键 | 键名拼错，或把只影响本次调用的选项写进了文件 | 键名是选项长名去掉 `--`，可用键见[配置](./configuration.md)「项目配置文件」；只影响本次调用的选项在命令行上给 |
+| `配置文件 … 不是合法的 TOML：…` | 文件语法错 | 按报出的行列改 |
+| `… os-version = 18.6 要写成字符串、加引号` | 版本号写成了数字，会被当成浮点数读、末尾的 0 丢失 | 写成 `os-version = "18.6"` |
+| `这个 run 里有在 Android 设备上执行的 scope，但没有指定用哪台设备` | 该平台没有任何来源给出设备 | 在 `gherkai.toml` 的 `[devices.android]` 给 `arn` 或 `os-version`，或用 `--android-device-arn`（iOS 同理）；`plan` 对此只警告 |
+| `… 给的设备 ARN 形态不对：这看起来是项目 ARN、不是设备 ARN` | 把别的 ARN 贴进了设备 ARN 的位置 | 设备 ARN 形如 `arn:aws:devicefarm:<区域>::device:<设备 id>`，账号段为空；项目 ARN 形如 `arn:aws:devicefarm:<区域>:<账号>:project:<项目 id>` |
+| `本机运行设备 scope 需要一个 Device Farm 项目，但没有指定` / `需要一个放安装包的 S3 桶，但没有指定` | 本机后端驱动真机要自己给项目与应用桶 | 在 `[devices]` 给 `project-arn` / `app-bucket`，或用 `--device-farm-project-arn` / `--app-bucket`、环境变量 `GHERKAI_DEVICE_FARM_PROJECT_ARN` / `GHERKAI_APP_BUCKET` |
+| `注意：Device Farm 项目 … 属于账号 X，当前凭证属于账号 Y` | 项目 ARN 与当前凭证不在同一账号，多半是复制了别的环境的 ARN | 换对的项目或凭证；这条只警告不拦 |
+| `安装包不存在：…（配置文件 [apps.<别名>.<平台>] 的 file）` | `file` 指向的文件不在 | 路径相对配置文件所在目录，核对路径与构建产物 |
+| `status` / `explain` 以退出码 2 结束，`这个 run 的提交记录由更新版本的 gherkai … 写出` 或 `由更早版本的 … 写出` | 提交记录的格式与本机 CLI 不一致 | 更新的：`uv tool upgrade gherkai`；更早的：用写出它的那个版本查看（`uvx --from 'gherkai==<版本>' gherkai status …`）或重新提交。同一个报告目录不要混用 1.4 与 1.5 的 CLI |
+| job 判 `error`、类别 `precheck_failed`，消息「这个 job 的格式版本是 …：命令行工具与 worker 的版本不一致」或「这个 job 没有带测试目标」 | 起 job 的命令行工具与 worker 不是同一版本 | 把两者装成同一版本；云端用与命令行工具同版本的 worker 镜像（部署方运行 `gherkai deploy`） |
 
 ## 其它以退出码 2 结束的错误
 

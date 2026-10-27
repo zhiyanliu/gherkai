@@ -97,6 +97,10 @@ _Avoid_: 平台、运行环境
 测试目标里被测对象的形态：网页由浏览器承载，应用是装在设备上的原生应用。由 `@app:` tag 声明，不由 step 文本推断（见 ADR 0048）。
 _Avoid_: 原生、形态
 
+**项目配置文件 (project configuration file)**:
+与 `.feature` 一起入库的 `gherkai.toml`，承载每个项目基本固定的选项、设备选择与应用别名；只有运行侧的命令行读它，读出的值解析成具体值随 definition 走（见 ADR 0053）。
+_Avoid_: config 文件、toml 配置
+
 **应用别名 (app alias)**:
 项目配置文件里给被测应用起的名字，绑定安装包与包名或 bundle id；用例只写别名，不写包的位置（见 ADR 0053）。
 _Avoid_: app 名、包别名

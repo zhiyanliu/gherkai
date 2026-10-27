@@ -128,7 +128,7 @@ CDK 的资源变更打完之后，命令继续做 worker 镜像的三步，最�
 
 ## 版本与升级
 
-后端记一个版本戳，提交前检查拿它比对 CLI 版本。**CLI 比后端新时拒绝执行并以退出码 2 结束**（新 CLI 写的任务定义旧后端读不懂，没有放行选项）；CLI 比后端旧时只打印一行提示、照常提交，所以团队成员可以晚一步再升。任一侧不是发行版本、或后端还没有版本戳时跳过比对。CLI 与后端保持同版本，因此升级是三步：
+后端记一个版本戳，提交前检查拿它比对 CLI 版本。**CLI 比后端新时拒绝执行并以退出码 2 结束**（新 CLI 写的任务定义旧后端读不懂，没有放行选项）；CLI 比后端旧时只打印一行提示、照常提交，所以团队成员可以晚一步再升。任一侧不是发行版本时跳过比对。后端还没有版本戳（部署早于本版本、从未升级）时，纯桌面且不经隧道的 run 只提示、照常提交，带设备目标或 `--expose-local` 的 run 以退出码 2 结束、要先升级部署。CLI 与后端保持同版本，因此升级是三步：
 
 1. 部署方 `uv tool upgrade gherkai`（安装时带的 extra 沿用）。
 2. 部署方立刻 `gherkai deploy --vpc <与上次相同的取值> --prefix <同前缀>`：新模板、新版本基础镜像同步进 ECR、对本版本已有的 variant 重新派生。
@@ -140,13 +140,15 @@ CDK 的资源变更打完之后，命令继续做 worker 镜像的三步，最�
 
 图注：窗口一里被拦下的只有刚升级的那台部署机——它的提交、查结果与读证据（`explain`）、推镜像与列镜像都过不去；其他成员的 CLI 仍与后端同版本，提交前检查直接放行、不受影响。`deploy` 自己不过这道版本比对，所以第 2 步照常执行。窗口二里被拦下的是已升到新版本的提交者——自定义 variant 在新版本下还没有镜像，止于第 3 步重推完成；这段里还没升级的成员，CLI 旧于后端只被打一行提示、不拦，而镜像标签由**提交者本机的 CLI 版本**拼出（对应上面「variant 按版本隔离」），他解析到的仍是自己那一版的镜像。窗口二只出现在默认指针指的是自定义 variant（或提交时显式选了自定义 variant）的情形——指针是 `base` 且不显式指定时，第 2 步已经把新版本的基础镜像备好了。图上只画这两段窗口的起止。
 
+升级 CLI 之后，`status` / `explain` 读旧版本写出的提交记录以退出码 2 结束并点名写出它的版本，用那个版本的 CLI 查看（`uvx --from 'gherkai==<版本>' gherkai status …`）或重新提交；同一个报告目录不要混用 1.4 与 1.5 的 CLI 读写，1.4 的 CLI 读 1.5 的记录会静默误判。
+
 两段窗口里被拒的命令都以退出码 2 结束。窗口一在第 2 步执行完后即恢复，不想动本机安装的部署方可以用 `uvx --from 'gherkai[deploy-aws]==X.Y.Z' gherkai deploy` 先把后端升上来；窗口二里可让提交者临时用 `--worker-variant base`。顺序不能倒过来：后端由 CLI 的部署包部署，版本戳的值就是发起该次部署的 CLI 的版本。第 3 步也不能提前到第 2 步之前：镜像标签含 CLI 版本，提前推等于推到一个后端还不识别的版本标签下，`push-worker` 与 `list-workers` 会拒绝并以退出码 2 结束。
 
 ## 团队成员需要的最小云端权限
 
 同一套后端可以给团队成员两级不同大小的权限，凭证越少的那一级越适合 CI 与低权限机器。执行方式与执行后端四种组合的对照见 [`running-and-results.md`](./running-and-results.md)，这里只说云端两级的差别：
 
-- **`submit` + `status`**：运行记录表读写、只读探活（表、桶、集群、任务定义、后端 Lambda）、调用 `<prefix>kicker` Lambda、读 `/<prefix>backend/*` 参数、产物桶 `s3:PutObject`（用例含多行参数时才触发），以及 variant 解析要的只读 `ecr:DescribeImages` 与 `ecs:DescribeTaskDefinition`。**不需要任何 ECS 写权限**，worker 任务由后端的 Lambda 拉起。
+- **`submit` + `status`**：运行记录表读写、只读探活（表、桶、集群、任务定义、后端 Lambda）、调用 `<prefix>kicker` Lambda、读 `/<prefix>backend/*` 参数、产物桶 `s3:PutObject`（用例含多行参数时才触发），以及 variant 解析要的只读 `ecr:DescribeImages` 与 `ecs:DescribeTaskDefinition`。**不需要任何 ECS 写权限**，worker 任务由后端的 Lambda 拉起。提交带设备目标或 `@app` 的 scope 时，另需读 `/<prefix>backend/device-farm-project` 参数（已含在上面的参数读权限里），以及产物桶 `apps/` 前缀的读、写、分段上传中止与打标签，和该前缀的列举。
 - **`run --backend cloud`**：运行记录表读写、只读探活、读 `/<prefix>backend/*` 参数、variant 解析的只读权限（同上），再加起停与查询 Fargate 任务的权限、把 worker 的任务角色与执行角色传给 ECS 的权限（`iam:PassRole`）、以及上传 job 到产物桶的权限——起任务的是你自己的进程（见上「后端包含什么」），因此不需要调用 Lambda 的权限。
 
 ## 拆除与清理

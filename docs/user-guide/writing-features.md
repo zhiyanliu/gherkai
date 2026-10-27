@@ -94,11 +94,12 @@ Scenario: 维基百科首页与 OpenAI 词条首段的 AI 断言
 
 - **写在 Feature 行、`Rule` 行、`Examples` 块上的 tag 都会传给其下（或其展开出的）每一条 scenario**。`@scope` 标在 Feature 行等于把整个文件编成一个串行 job，标在 `Rule` 行等于把这条规则下的 scenario 编成一个。
 - **传下来的 `@scope` 不能被单条 scenario 覆盖**：同一条 scenario 解析出两个不同的 `@scope` 值即整个 run 拒绝运行。要按 scenario 分组，就不要在 Feature 行或 `Rule` 行标 `@scope`。
-- **`@engine` 与 `@timeout` 按 scope 生效**：scope 里任一条 scenario 标了，整个 scope 继承；同一个 scope 出现两个不同值，整个 run 拒绝运行（同一个会话不可能同时属于两个引擎，一个 job 也只能有一个预算）。都没标时用命令行的 `--default-engine`（默认 `novaact`）与 `--default-job-timeout`（默认 300 秒，`<=0` 表示不超时）。
+- **`@engine` 与 `@timeout` 按 scope 生效**：scope 里任一条 scenario 标了，整个 scope 继承；同一个 scope 出现两个不同值，整个 run 拒绝运行（同一个会话不可能同时属于两个引擎，一个 job 也只能有一个预算）。都没标时用命令行的 `--default-engine`（默认 `novaact`）与 `--default-job-timeout`（不给时桌面 scope 为 300 秒；给 `<=0` 表示桌面 scope 不超时；两者也可写进项目配置文件，见[配置](./configuration.md)）。
 - **scope 名在整个 run 里是全局的**：两个 `.feature` 文件写了同一个名字就合并成一个 job，本可并发的两条用例只能串行共享一个会话。名字带上来源前缀（`checkout-happy-path`、`admin-login`），不要用 `login`、`smoke` 这类通名。
 - **未标 `@scope` 的 job 用 `<文件路径>:<行号>` 当编号**。因此 `@scope` 的值不要写成这个形状：正好等于同一个 run 里某条未标 scope 的 scenario 编号时，整个 run 拒绝运行。
 - **标了 tag 就得给值**：`@scope:`、`@engine:`、`@timeout:` 后面空着会被拒绝；想用默认值就删掉这个 tag。`@timeout` 的值必须是正数秒。连冒号和值一起漏掉、只写 `@scope` 不会报错：它会被当成普通标签忽略，这条 scenario 仍各自成为一个 job。分组没生效时先用 `gherkai plan` 看分组结果。
 - **预算从这个 job 启动时算起**，云端后端下包含拉取 worker 镜像等启动开销；到点这个 job 会被停下，判定记为出错、原因是超时。
+- **`@device:<平台>` 与 `@app:<别名>` 为设备目标预留**：声明、继承与冲突的规则与 `@engine` 相同，`@app` 的别名要在项目配置文件的 `[apps]` 里绑定安装包（见[配置](./configuration.md)）。当前两个引擎都只支持桌面网页，标了这两个 tag 的 scope 会在 `plan` 与执行前被拒绝并给出改法。
 - **其它 tag 都是普通标签**，没有内置语义，用来配合 `--tags` 挑一部分 scenario 运行。
 - 以上校验都在起第一个 job 之前完成，任一条不满足即整个 run 拒绝运行，不产生模型与浏览器费用。用 `gherkai plan` 提前验。
 
