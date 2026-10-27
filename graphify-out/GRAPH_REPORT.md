@@ -10,7 +10,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `29f0d3d5`
+- Built from commit: `1081af22`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -486,12 +486,12 @@
 10. `Scenario` - 66 edges
 
 ## Surprising Connections (you probably didn't know these)
-- `--interrupt 中断时机矩阵` --shares_data_with--> `plan()`  [EXTRACTED]
-  tools/e2e_harness.md → core/gherkai_core/scope.py
 - `render()` --references--> `docs/internals/cli-json-contract.md（机读字段级参考页）`  [EXTRACTED]
   tools/render_skill_contract.py → docs/adr/0045-documentation-layering-and-placement.md
 - `e2e_harness.py（opt-in 手动端到端验证脚本）` --calls--> `resolve_worker_cmd()`  [EXTRACTED]
   tools/e2e_harness.md → runtime/gherkai_runtime/compose.py
+- `--interrupt 中断时机矩阵` --shares_data_with--> `plan()`  [EXTRACTED]
+  tools/e2e_harness.md → core/gherkai_core/scope.py
 - `scenario 到 job 图` --conceptually_related_to--> `架构总览：五层结构、一次 run 的生命周期、包与发行物`  [AMBIGUOUS]
   docs/diagrams/writing-features-scenario-to-job.svg → docs/internals/architecture-overview.md
 - `执行与推进模型导览（run/submit × local/cloud）` --references--> `run 执行图`  [AMBIGUOUS]
@@ -1573,7 +1573,7 @@ Nodes (22): list_workers(), _pushed_at_human(), 推送时间的人读形态：`2
   docs/diagrams/getting-started-component-ownership.svg · relation: conceptually_related_to
 
 ## Knowledge Gaps
-- **666 isolated node(s):** `背景与问题`, `1. 注册面：handler 位置按句柄种类分键`, `2. handler 上下文：七个字段与一条不变量`, `3. 测试分层`, `4. 写作方法（进 user guide 与 agent skill）` (+661 more)
+- **666 isolated node(s):** `现场`, `documenting 清单（ADR 0048 到 0053 第 7 类内容的汇总，实施期逐项完成）`, `实施期要核的点（ADR 已定、实施时顺手验证）`, `0. B0-navigation：导航规则与注册面关键字声明（1.4 行为的不兼容变更，自己发）`, `1. B1-capabilities：能力自述增键（两个 worker 只声明桌面网页；CLI 唯一校验处与交集；doctor、list-deterministic 呈现）` (+661 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **206 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 

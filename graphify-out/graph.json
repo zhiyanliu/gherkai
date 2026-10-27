@@ -48964,10 +48964,10 @@
       "source_file": "docs/adr/0050-deterministic-step-handles-and-testing.md",
       "source_location": "L1",
       "_origin": "ast",
-      "id": "docs_adr_0050_deterministic_step_handles_and_testing_0050_\u786e\u5b9a\u6027_step_\u591a\u53e5\u67c4\u6ce8\u518c\u4e0e\u6d4b\u8bd5\u5206\u5c42",
       "community": 150,
       "community_name": "0050. \u786e\u5b9a\u6027 step \u591a\u53e5\u67c4\u6ce8\u518c\u4e0e\u6d4b\u8bd5\u5206\u5c42",
-      "norm_label": "0050. \u786e\u5b9a\u6027 step \u591a\u53e5\u67c4\u6ce8\u518c\u4e0e\u6d4b\u8bd5\u5206\u5c42"
+      "norm_label": "0050. \u786e\u5b9a\u6027 step \u591a\u53e5\u67c4\u6ce8\u518c\u4e0e\u6d4b\u8bd5\u5206\u5c42",
+      "id": "docs_adr_0050_deterministic_step_handles_and_testing_0050_\u786e\u5b9a\u6027_step_\u591a\u53e5\u67c4\u6ce8\u518c\u4e0e\u6d4b\u8bd5\u5206\u5c42"
     },
     {
       "label": "1. \u6ce8\u518c\u9762\uff1ahandler \u4f4d\u7f6e\u6309\u53e5\u67c4\u79cd\u7c7b\u5206\u952e",
@@ -48975,10 +48975,10 @@
       "source_file": "docs/adr/0050-deterministic-step-handles-and-testing.md",
       "source_location": "L16",
       "_origin": "ast",
-      "id": "docs_adr_0050_deterministic_step_handles_and_testing_1_\u6ce8\u518c\u9762_handler_\u4f4d\u7f6e\u6309\u53e5\u67c4\u79cd\u7c7b\u5206\u952e",
       "community": 150,
       "community_name": "0050. \u786e\u5b9a\u6027 step \u591a\u53e5\u67c4\u6ce8\u518c\u4e0e\u6d4b\u8bd5\u5206\u5c42",
-      "norm_label": "1. \u6ce8\u518c\u9762:handler \u4f4d\u7f6e\u6309\u53e5\u67c4\u79cd\u7c7b\u5206\u952e"
+      "norm_label": "1. \u6ce8\u518c\u9762:handler \u4f4d\u7f6e\u6309\u53e5\u67c4\u79cd\u7c7b\u5206\u952e",
+      "id": "docs_adr_0050_deterministic_step_handles_and_testing_1_\u6ce8\u518c\u9762_handler_\u4f4d\u7f6e\u6309\u53e5\u67c4\u79cd\u7c7b\u5206\u952e"
     },
     {
       "label": "2. handler \u4e0a\u4e0b\u6587\uff1a\u4e03\u4e2a\u5b57\u6bb5\u4e0e\u4e00\u6761\u4e0d\u53d8\u91cf",
@@ -48986,10 +48986,10 @@
       "source_file": "docs/adr/0050-deterministic-step-handles-and-testing.md",
       "source_location": "L43",
       "_origin": "ast",
-      "id": "docs_adr_0050_deterministic_step_handles_and_testing_2_handler_\u4e0a\u4e0b\u6587_\u4e03\u4e2a\u5b57\u6bb5\u4e0e\u4e00\u6761\u4e0d\u53d8\u91cf",
       "community": 150,
       "community_name": "0050. \u786e\u5b9a\u6027 step \u591a\u53e5\u67c4\u6ce8\u518c\u4e0e\u6d4b\u8bd5\u5206\u5c42",
-      "norm_label": "2. handler \u4e0a\u4e0b\u6587:\u4e03\u4e2a\u5b57\u6bb5\u4e0e\u4e00\u6761\u4e0d\u53d8\u91cf"
+      "norm_label": "2. handler \u4e0a\u4e0b\u6587:\u4e03\u4e2a\u5b57\u6bb5\u4e0e\u4e00\u6761\u4e0d\u53d8\u91cf",
+      "id": "docs_adr_0050_deterministic_step_handles_and_testing_2_handler_\u4e0a\u4e0b\u6587_\u4e03\u4e2a\u5b57\u6bb5\u4e0e\u4e00\u6761\u4e0d\u53d8\u91cf"
     },
     {
       "label": "3. \u6d4b\u8bd5\u5206\u5c42",
@@ -48997,10 +48997,10 @@
       "source_file": "docs/adr/0050-deterministic-step-handles-and-testing.md",
       "source_location": "L69",
       "_origin": "ast",
-      "id": "docs_adr_0050_deterministic_step_handles_and_testing_3_\u6d4b\u8bd5\u5206\u5c42",
       "community": 150,
       "community_name": "0050. \u786e\u5b9a\u6027 step \u591a\u53e5\u67c4\u6ce8\u518c\u4e0e\u6d4b\u8bd5\u5206\u5c42",
-      "norm_label": "3. \u6d4b\u8bd5\u5206\u5c42"
+      "norm_label": "3. \u6d4b\u8bd5\u5206\u5c42",
+      "id": "docs_adr_0050_deterministic_step_handles_and_testing_3_\u6d4b\u8bd5\u5206\u5c42"
     },
     {
       "label": "4. \u5199\u4f5c\u65b9\u6cd5\uff08\u8fdb user guide \u4e0e agent skill\uff09",
@@ -49008,10 +49008,10 @@
       "source_file": "docs/adr/0050-deterministic-step-handles-and-testing.md",
       "source_location": "L84",
       "_origin": "ast",
-      "id": "docs_adr_0050_deterministic_step_handles_and_testing_4_\u5199\u4f5c\u65b9\u6cd5_\u8fdb_user_guide_\u4e0e_agent_skill",
       "community": 150,
       "community_name": "0050. \u786e\u5b9a\u6027 step \u591a\u53e5\u67c4\u6ce8\u518c\u4e0e\u6d4b\u8bd5\u5206\u5c42",
-      "norm_label": "4. \u5199\u4f5c\u65b9\u6cd5(\u8fdb user guide \u4e0e agent skill)"
+      "norm_label": "4. \u5199\u4f5c\u65b9\u6cd5(\u8fdb user guide \u4e0e agent skill)",
+      "id": "docs_adr_0050_deterministic_step_handles_and_testing_4_\u5199\u4f5c\u65b9\u6cd5_\u8fdb_user_guide_\u4e0e_agent_skill"
     },
     {
       "label": "5. \u5ef6\u540e\uff1a\u786e\u5b9a\u6027 step SDK",
@@ -49019,10 +49019,10 @@
       "source_file": "docs/adr/0050-deterministic-step-handles-and-testing.md",
       "source_location": "L95",
       "_origin": "ast",
-      "id": "docs_adr_0050_deterministic_step_handles_and_testing_5_\u5ef6\u540e_\u786e\u5b9a\u6027_step_sdk",
       "community": 150,
       "community_name": "0050. \u786e\u5b9a\u6027 step \u591a\u53e5\u67c4\u6ce8\u518c\u4e0e\u6d4b\u8bd5\u5206\u5c42",
-      "norm_label": "5. \u5ef6\u540e:\u786e\u5b9a\u6027 step sdk"
+      "norm_label": "5. \u5ef6\u540e:\u786e\u5b9a\u6027 step sdk",
+      "id": "docs_adr_0050_deterministic_step_handles_and_testing_5_\u5ef6\u540e_\u786e\u5b9a\u6027_step_sdk"
     },
     {
       "label": "\u51b3\u7b56",
@@ -49030,10 +49030,10 @@
       "source_file": "docs/adr/0050-deterministic-step-handles-and-testing.md",
       "source_location": "L14",
       "_origin": "ast",
-      "id": "docs_adr_0050_deterministic_step_handles_and_testing_\u51b3\u7b56",
       "community": 150,
       "community_name": "0050. \u786e\u5b9a\u6027 step \u591a\u53e5\u67c4\u6ce8\u518c\u4e0e\u6d4b\u8bd5\u5206\u5c42",
-      "norm_label": "\u51b3\u7b56"
+      "norm_label": "\u51b3\u7b56",
+      "id": "docs_adr_0050_deterministic_step_handles_and_testing_\u51b3\u7b56"
     },
     {
       "label": "\u5b9e\u6d4b\u4f9d\u636e",
@@ -49041,10 +49041,10 @@
       "source_file": "docs/adr/0050-deterministic-step-handles-and-testing.md",
       "source_location": "L99",
       "_origin": "ast",
-      "id": "docs_adr_0050_deterministic_step_handles_and_testing_\u5b9e\u6d4b\u4f9d\u636e",
       "community": 150,
       "community_name": "0050. \u786e\u5b9a\u6027 step \u591a\u53e5\u67c4\u6ce8\u518c\u4e0e\u6d4b\u8bd5\u5206\u5c42",
-      "norm_label": "\u5b9e\u6d4b\u4f9d\u636e"
+      "norm_label": "\u5b9e\u6d4b\u4f9d\u636e",
+      "id": "docs_adr_0050_deterministic_step_handles_and_testing_\u5b9e\u6d4b\u4f9d\u636e"
     },
     {
       "label": "\u80cc\u666f\u4e0e\u95ee\u9898",
@@ -49052,10 +49052,10 @@
       "source_file": "docs/adr/0050-deterministic-step-handles-and-testing.md",
       "source_location": "L5",
       "_origin": "ast",
-      "id": "docs_adr_0050_deterministic_step_handles_and_testing_\u80cc\u666f\u4e0e\u95ee\u9898",
       "community": 150,
       "community_name": "0050. \u786e\u5b9a\u6027 step \u591a\u53e5\u67c4\u6ce8\u518c\u4e0e\u6d4b\u8bd5\u5206\u5c42",
-      "norm_label": "\u80cc\u666f\u4e0e\u95ee\u9898"
+      "norm_label": "\u80cc\u666f\u4e0e\u95ee\u9898",
+      "id": "docs_adr_0050_deterministic_step_handles_and_testing_\u80cc\u666f\u4e0e\u95ee\u9898"
     },
     {
       "label": "\u88ab\u62d2\u65b9\u6848\uff08\u62a4\u680f\uff09",
@@ -49063,10 +49063,10 @@
       "source_file": "docs/adr/0050-deterministic-step-handles-and-testing.md",
       "source_location": "L129",
       "_origin": "ast",
-      "id": "docs_adr_0050_deterministic_step_handles_and_testing_\u88ab\u62d2\u65b9\u6848_\u62a4\u680f",
       "community": 150,
       "community_name": "0050. \u786e\u5b9a\u6027 step \u591a\u53e5\u67c4\u6ce8\u518c\u4e0e\u6d4b\u8bd5\u5206\u5c42",
-      "norm_label": "\u88ab\u62d2\u65b9\u6848(\u62a4\u680f)"
+      "norm_label": "\u88ab\u62d2\u65b9\u6848(\u62a4\u680f)",
+      "id": "docs_adr_0050_deterministic_step_handles_and_testing_\u88ab\u62d2\u65b9\u6848_\u62a4\u680f"
     },
     {
       "label": "\u8fb9\u754c\u4e0e\u4e92\u94fe",
@@ -49074,10 +49074,10 @@
       "source_file": "docs/adr/0050-deterministic-step-handles-and-testing.md",
       "source_location": "L138",
       "_origin": "ast",
-      "id": "docs_adr_0050_deterministic_step_handles_and_testing_\u8fb9\u754c\u4e0e\u4e92\u94fe",
       "community": 150,
       "community_name": "0050. \u786e\u5b9a\u6027 step \u591a\u53e5\u67c4\u6ce8\u518c\u4e0e\u6d4b\u8bd5\u5206\u5c42",
-      "norm_label": "\u8fb9\u754c\u4e0e\u4e92\u94fe"
+      "norm_label": "\u8fb9\u754c\u4e0e\u4e92\u94fe",
+      "id": "docs_adr_0050_deterministic_step_handles_and_testing_\u8fb9\u754c\u4e0e\u4e92\u94fe"
     },
     {
       "label": "_atomic.py",
@@ -52014,10 +52014,10 @@
       "source_file": "docs/journey/0013-mobile-devices-implementation.md",
       "source_location": "L1",
       "_origin": "ast",
+      "id": "docs_journey_0013_mobile_devices_implementation",
       "community": 190,
       "community_name": "\u79fb\u52a8\u771f\u673a\u652f\u6301\uff081.5\uff09\uff1a\u5b9e\u65bd\u8fdb\u5ea6\u603b\u7eb2",
-      "norm_label": "0013-mobile-devices-implementation.md",
-      "id": "docs_journey_0013_mobile_devices_implementation"
+      "norm_label": "0013-mobile-devices-implementation.md"
     },
     {
       "label": "documenting \u6e05\u5355\uff08ADR 0048 \u5230 0053 \u7b2c 7 \u7c7b\u5185\u5bb9\u7684\u6c47\u603b\uff0c\u5b9e\u65bd\u671f\u9010\u9879\u5b8c\u6210\uff09",
@@ -52025,10 +52025,10 @@
       "source_file": "docs/journey/0013-mobile-devices-implementation.md",
       "source_location": "L27",
       "_origin": "ast",
+      "id": "docs_journey_0013_mobile_devices_implementation_documenting_\u6e05\u5355_adr_0048_\u5230_0053_\u7b2c_7_\u7c7b\u5185\u5bb9\u7684\u6c47\u603b_\u5b9e\u65bd\u671f\u9010\u9879\u5b8c\u6210",
       "community": 190,
       "community_name": "\u79fb\u52a8\u771f\u673a\u652f\u6301\uff081.5\uff09\uff1a\u5b9e\u65bd\u8fdb\u5ea6\u603b\u7eb2",
-      "norm_label": "documenting \u6e05\u5355(adr 0048 \u5230 0053 \u7b2c 7 \u7c7b\u5185\u5bb9\u7684\u6c47\u603b,\u5b9e\u65bd\u671f\u9010\u9879\u5b8c\u6210)",
-      "id": "docs_journey_0013_mobile_devices_implementation_documenting_\u6e05\u5355_adr_0048_\u5230_0053_\u7b2c_7_\u7c7b\u5185\u5bb9\u7684\u6c47\u603b_\u5b9e\u65bd\u671f\u9010\u9879\u5b8c\u6210"
+      "norm_label": "documenting \u6e05\u5355(adr 0048 \u5230 0053 \u7b2c 7 \u7c7b\u5185\u5bb9\u7684\u6c47\u603b,\u5b9e\u65bd\u671f\u9010\u9879\u5b8c\u6210)"
     },
     {
       "label": "\u5b9e\u65bd\u671f\u8981\u6838\u7684\u70b9\uff08ADR \u5df2\u5b9a\u3001\u5b9e\u65bd\u65f6\u987a\u624b\u9a8c\u8bc1\uff09",
@@ -52036,10 +52036,10 @@
       "source_file": "docs/journey/0013-mobile-devices-implementation.md",
       "source_location": "L54",
       "_origin": "ast",
+      "id": "docs_journey_0013_mobile_devices_implementation_\u5b9e\u65bd\u671f\u8981\u6838\u7684\u70b9_adr_\u5df2\u5b9a_\u5b9e\u65bd\u65f6\u987a\u624b\u9a8c\u8bc1",
       "community": 190,
       "community_name": "\u79fb\u52a8\u771f\u673a\u652f\u6301\uff081.5\uff09\uff1a\u5b9e\u65bd\u8fdb\u5ea6\u603b\u7eb2",
-      "norm_label": "\u5b9e\u65bd\u671f\u8981\u6838\u7684\u70b9(adr \u5df2\u5b9a\u3001\u5b9e\u65bd\u65f6\u987a\u624b\u9a8c\u8bc1)",
-      "id": "docs_journey_0013_mobile_devices_implementation_\u5b9e\u65bd\u671f\u8981\u6838\u7684\u70b9_adr_\u5df2\u5b9a_\u5b9e\u65bd\u65f6\u987a\u624b\u9a8c\u8bc1"
+      "norm_label": "\u5b9e\u65bd\u671f\u8981\u6838\u7684\u70b9(adr \u5df2\u5b9a\u3001\u5b9e\u65bd\u65f6\u987a\u624b\u9a8c\u8bc1)"
     },
     {
       "label": "\u73b0\u573a",
@@ -52047,10 +52047,10 @@
       "source_file": "docs/journey/0013-mobile-devices-implementation.md",
       "source_location": "L7",
       "_origin": "ast",
+      "id": "docs_journey_0013_mobile_devices_implementation_\u73b0\u573a",
       "community": 190,
       "community_name": "\u79fb\u52a8\u771f\u673a\u652f\u6301\uff081.5\uff09\uff1a\u5b9e\u65bd\u8fdb\u5ea6\u603b\u7eb2",
-      "norm_label": "\u73b0\u573a",
-      "id": "docs_journey_0013_mobile_devices_implementation_\u73b0\u573a"
+      "norm_label": "\u73b0\u573a"
     },
     {
       "label": "\u79fb\u52a8\u771f\u673a\u652f\u6301\uff081.5\uff09\uff1a\u5b9e\u65bd\u8fdb\u5ea6\u603b\u7eb2",
@@ -52058,10 +52058,10 @@
       "source_file": "docs/journey/0013-mobile-devices-implementation.md",
       "source_location": "L3",
       "_origin": "ast",
+      "id": "docs_journey_0013_mobile_devices_implementation_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u8fdb\u5ea6\u603b\u7eb2",
       "community": 190,
       "community_name": "\u79fb\u52a8\u771f\u673a\u652f\u6301\uff081.5\uff09\uff1a\u5b9e\u65bd\u8fdb\u5ea6\u603b\u7eb2",
-      "norm_label": "\u79fb\u52a8\u771f\u673a\u652f\u6301(1.5):\u5b9e\u65bd\u8fdb\u5ea6\u603b\u7eb2",
-      "id": "docs_journey_0013_mobile_devices_implementation_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u8fdb\u5ea6\u603b\u7eb2"
+      "norm_label": "\u79fb\u52a8\u771f\u673a\u652f\u6301(1.5):\u5b9e\u65bd\u8fdb\u5ea6\u603b\u7eb2"
     },
     {
       "label": "tunnel_host.py",
@@ -53326,10 +53326,10 @@
       "source_file": "docs/journey/0015-mobile-devices-implementation-batches.md",
       "source_location": "L1",
       "_origin": "ast",
+      "id": "docs_journey_0015_mobile_devices_implementation_batches",
       "community": 201,
       "community_name": "\u79fb\u52a8\u771f\u673a\u652f\u6301\uff081.5\uff09\uff1a\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "norm_label": "0015-mobile-devices-implementation-batches.md",
-      "id": "docs_journey_0015_mobile_devices_implementation_batches"
+      "norm_label": "0015-mobile-devices-implementation-batches.md"
     },
     {
       "label": "0. B0-navigation\uff1a\u5bfc\u822a\u89c4\u5219\u4e0e\u6ce8\u518c\u9762\u5173\u952e\u5b57\u58f0\u660e\uff081.4 \u884c\u4e3a\u7684\u4e0d\u517c\u5bb9\u53d8\u66f4\uff0c\u81ea\u5df1\u53d1\uff09",
@@ -53337,10 +53337,10 @@
       "source_file": "docs/journey/0015-mobile-devices-implementation-batches.md",
       "source_location": "L8",
       "_origin": "ast",
+      "id": "docs_journey_0015_mobile_devices_implementation_batches_0_b0_navigation_\u5bfc\u822a\u89c4\u5219\u4e0e\u6ce8\u518c\u9762\u5173\u952e\u5b57\u58f0\u660e_1_4_\u884c\u4e3a\u7684\u4e0d\u517c\u5bb9\u53d8\u66f4_\u81ea\u5df1\u53d1",
       "community": 201,
       "community_name": "\u79fb\u52a8\u771f\u673a\u652f\u6301\uff081.5\uff09\uff1a\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "norm_label": "0. b0-navigation:\u5bfc\u822a\u89c4\u5219\u4e0e\u6ce8\u518c\u9762\u5173\u952e\u5b57\u58f0\u660e(1.4 \u884c\u4e3a\u7684\u4e0d\u517c\u5bb9\u53d8\u66f4,\u81ea\u5df1\u53d1)",
-      "id": "docs_journey_0015_mobile_devices_implementation_batches_0_b0_navigation_\u5bfc\u822a\u89c4\u5219\u4e0e\u6ce8\u518c\u9762\u5173\u952e\u5b57\u58f0\u660e_1_4_\u884c\u4e3a\u7684\u4e0d\u517c\u5bb9\u53d8\u66f4_\u81ea\u5df1\u53d1"
+      "norm_label": "0. b0-navigation:\u5bfc\u822a\u89c4\u5219\u4e0e\u6ce8\u518c\u9762\u5173\u952e\u5b57\u58f0\u660e(1.4 \u884c\u4e3a\u7684\u4e0d\u517c\u5bb9\u53d8\u66f4,\u81ea\u5df1\u53d1)"
     },
     {
       "label": "1. B1-capabilities\uff1a\u80fd\u529b\u81ea\u8ff0\u589e\u952e\uff08\u4e24\u4e2a worker \u53ea\u58f0\u660e\u684c\u9762\u7f51\u9875\uff1bCLI \u552f\u4e00\u6821\u9a8c\u5904\u4e0e\u4ea4\u96c6\uff1bdoctor\u3001list-deterministic \u5448\u73b0\uff09",
@@ -53348,10 +53348,10 @@
       "source_file": "docs/journey/0015-mobile-devices-implementation-batches.md",
       "source_location": "L48",
       "_origin": "ast",
+      "id": "docs_journey_0015_mobile_devices_implementation_batches_1_b1_capabilities_\u80fd\u529b\u81ea\u8ff0\u589e\u952e_\u4e24\u4e2a_worker_\u53ea\u58f0\u660e\u684c\u9762\u7f51\u9875_cli_\u552f\u4e00\u6821\u9a8c\u5904\u4e0e\u4ea4\u96c6_doctor_list_deterministic_\u5448\u73b0",
       "community": 201,
       "community_name": "\u79fb\u52a8\u771f\u673a\u652f\u6301\uff081.5\uff09\uff1a\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "norm_label": "1. b1-capabilities:\u80fd\u529b\u81ea\u8ff0\u589e\u952e(\u4e24\u4e2a worker \u53ea\u58f0\u660e\u684c\u9762\u7f51\u9875;cli \u552f\u4e00\u6821\u9a8c\u5904\u4e0e\u4ea4\u96c6;doctor\u3001list-deterministic \u5448\u73b0)",
-      "id": "docs_journey_0015_mobile_devices_implementation_batches_1_b1_capabilities_\u80fd\u529b\u81ea\u8ff0\u589e\u952e_\u4e24\u4e2a_worker_\u53ea\u58f0\u660e\u684c\u9762\u7f51\u9875_cli_\u552f\u4e00\u6821\u9a8c\u5904\u4e0e\u4ea4\u96c6_doctor_list_deterministic_\u5448\u73b0"
+      "norm_label": "1. b1-capabilities:\u80fd\u529b\u81ea\u8ff0\u589e\u952e(\u4e24\u4e2a worker \u53ea\u58f0\u660e\u684c\u9762\u7f51\u9875;cli \u552f\u4e00\u6821\u9a8c\u5904\u4e0e\u4ea4\u96c6;doctor\u3001list-deterministic \u5448\u73b0)"
     },
     {
       "label": "2. B5-core-events-termination\uff1acore \u4fa7\u4f1a\u8bdd\u4e8b\u4ef6\u3001scope \u7ea7 error\u3001\u5408\u6210 SKIPPED\u3001\u7ec8\u7ed3\u51fd\u6570\u4e0e\u771f\u503c\u8868\u3001\u8ba1\u91cf\u5408\u8ba1\u3001explain \u5448\u73b0",
@@ -53359,10 +53359,10 @@
       "source_file": "docs/journey/0015-mobile-devices-implementation-batches.md",
       "source_location": "L117",
       "_origin": "ast",
+      "id": "docs_journey_0015_mobile_devices_implementation_batches_2_b5_core_events_termination_core_\u4fa7\u4f1a\u8bdd\u4e8b\u4ef6_scope_\u7ea7_error_\u5408\u6210_skipped_\u7ec8\u7ed3\u51fd\u6570\u4e0e\u771f\u503c\u8868_\u8ba1\u91cf\u5408\u8ba1_explain_\u5448\u73b0",
       "community": 201,
       "community_name": "\u79fb\u52a8\u771f\u673a\u652f\u6301\uff081.5\uff09\uff1a\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "norm_label": "2. b5-core-events-termination:core \u4fa7\u4f1a\u8bdd\u4e8b\u4ef6\u3001scope \u7ea7 error\u3001\u5408\u6210 skipped\u3001\u7ec8\u7ed3\u51fd\u6570\u4e0e\u771f\u503c\u8868\u3001\u8ba1\u91cf\u5408\u8ba1\u3001explain \u5448\u73b0",
-      "id": "docs_journey_0015_mobile_devices_implementation_batches_2_b5_core_events_termination_core_\u4fa7\u4f1a\u8bdd\u4e8b\u4ef6_scope_\u7ea7_error_\u5408\u6210_skipped_\u7ec8\u7ed3\u51fd\u6570\u4e0e\u771f\u503c\u8868_\u8ba1\u91cf\u5408\u8ba1_explain_\u5448\u73b0"
+      "norm_label": "2. b5-core-events-termination:core \u4fa7\u4f1a\u8bdd\u4e8b\u4ef6\u3001scope \u7ea7 error\u3001\u5408\u6210 skipped\u3001\u7ec8\u7ed3\u51fd\u6570\u4e0e\u771f\u503c\u8868\u3001\u8ba1\u91cf\u5408\u8ba1\u3001explain \u5448\u73b0"
     },
     {
       "label": "3. B2-core-target-job\uff1a\u6d4b\u8bd5\u76ee\u6807\u4e0e Job \u5f62\u6001\uff08core \u4fa7 tag \u5f52\u7ea6\u3001target \u4e24\u5f62\u6001\u3001\u6309\u76ee\u6807\u7684 timeout\u3001plan \u6807\u6ce8\u4e0e\u76ee\u6807\u62d2\u7edd\u3001\u4e24\u4e2a worker \u5efa\u4f1a\u8bdd\u524d\u81ea\u68c0\uff09",
@@ -53370,10 +53370,10 @@
       "source_file": "docs/journey/0015-mobile-devices-implementation-batches.md",
       "source_location": "L200",
       "_origin": "ast",
+      "id": "docs_journey_0015_mobile_devices_implementation_batches_3_b2_core_target_job_\u6d4b\u8bd5\u76ee\u6807\u4e0e_job_\u5f62\u6001_core_\u4fa7_tag_\u5f52\u7ea6_target_\u4e24\u5f62\u6001_\u6309\u76ee\u6807\u7684_timeout_plan_\u6807\u6ce8\u4e0e\u76ee\u6807\u62d2\u7edd_\u4e24\u4e2a_worker_\u5efa\u4f1a\u8bdd\u524d\u81ea\u68c0",
       "community": 201,
       "community_name": "\u79fb\u52a8\u771f\u673a\u652f\u6301\uff081.5\uff09\uff1a\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "norm_label": "3. b2-core-target-job:\u6d4b\u8bd5\u76ee\u6807\u4e0e job \u5f62\u6001(core \u4fa7 tag \u5f52\u7ea6\u3001target \u4e24\u5f62\u6001\u3001\u6309\u76ee\u6807\u7684 timeout\u3001plan \u6807\u6ce8\u4e0e\u76ee\u6807\u62d2\u7edd\u3001\u4e24\u4e2a worker \u5efa\u4f1a\u8bdd\u524d\u81ea\u68c0)",
-      "id": "docs_journey_0015_mobile_devices_implementation_batches_3_b2_core_target_job_\u6d4b\u8bd5\u76ee\u6807\u4e0e_job_\u5f62\u6001_core_\u4fa7_tag_\u5f52\u7ea6_target_\u4e24\u5f62\u6001_\u6309\u76ee\u6807\u7684_timeout_plan_\u6807\u6ce8\u4e0e\u76ee\u6807\u62d2\u7edd_\u4e24\u4e2a_worker_\u5efa\u4f1a\u8bdd\u524d\u81ea\u68c0"
+      "norm_label": "3. b2-core-target-job:\u6d4b\u8bd5\u76ee\u6807\u4e0e job \u5f62\u6001(core \u4fa7 tag \u5f52\u7ea6\u3001target \u4e24\u5f62\u6001\u3001\u6309\u76ee\u6807\u7684 timeout\u3001plan \u6807\u6ce8\u4e0e\u76ee\u6807\u62d2\u7edd\u3001\u4e24\u4e2a worker \u5efa\u4f1a\u8bdd\u524d\u81ea\u68c0)"
     },
     {
       "label": "4. B3-config-submit\uff1a\u9879\u76ee\u914d\u7f6e\u6587\u4ef6\u3001\u7ec4\u5408\u6839\u586b device_request\u3001definition \u683c\u5f0f\u7248\u672c\u3001CLI \u4fa7\u5e94\u7528\u4e0a\u4f20",
@@ -53381,10 +53381,10 @@
       "source_file": "docs/journey/0015-mobile-devices-implementation-batches.md",
       "source_location": "L271",
       "_origin": "ast",
+      "id": "docs_journey_0015_mobile_devices_implementation_batches_4_b3_config_submit_\u9879\u76ee\u914d\u7f6e\u6587\u4ef6_\u7ec4\u5408\u6839\u586b_device_request_definition_\u683c\u5f0f\u7248\u672c_cli_\u4fa7\u5e94\u7528\u4e0a\u4f20",
       "community": 201,
       "community_name": "\u79fb\u52a8\u771f\u673a\u652f\u6301\uff081.5\uff09\uff1a\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "norm_label": "4. b3-config-submit:\u9879\u76ee\u914d\u7f6e\u6587\u4ef6\u3001\u7ec4\u5408\u6839\u586b device_request\u3001definition \u683c\u5f0f\u7248\u672c\u3001cli \u4fa7\u5e94\u7528\u4e0a\u4f20",
-      "id": "docs_journey_0015_mobile_devices_implementation_batches_4_b3_config_submit_\u9879\u76ee\u914d\u7f6e\u6587\u4ef6_\u7ec4\u5408\u6839\u586b_device_request_definition_\u683c\u5f0f\u7248\u672c_cli_\u4fa7\u5e94\u7528\u4e0a\u4f20"
+      "norm_label": "4. b3-config-submit:\u9879\u76ee\u914d\u7f6e\u6587\u4ef6\u3001\u7ec4\u5408\u6839\u586b device_request\u3001definition \u683c\u5f0f\u7248\u672c\u3001cli \u4fa7\u5e94\u7528\u4e0a\u4f20"
     },
     {
       "label": "5. B4-steps-registry\uff1a\u786e\u5b9a\u6027 step \u591a\u53e5\u67c4\u6ce8\u518c\uff08targets\u3001requires\u3001driver \u4ee3\u7406\u7684\u6ce8\u518c\u9762\uff09",
@@ -53392,43 +53392,43 @@
       "source_file": "docs/journey/0015-mobile-devices-implementation-batches.md",
       "source_location": "L361",
       "_origin": "ast",
+      "id": "docs_journey_0015_mobile_devices_implementation_batches_5_b4_steps_registry_\u786e\u5b9a\u6027_step_\u591a\u53e5\u67c4\u6ce8\u518c_targets_requires_driver_\u4ee3\u7406\u7684\u6ce8\u518c\u9762",
       "community": 201,
       "community_name": "\u79fb\u52a8\u771f\u673a\u652f\u6301\uff081.5\uff09\uff1a\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "norm_label": "5. b4-steps-registry:\u786e\u5b9a\u6027 step \u591a\u53e5\u67c4\u6ce8\u518c(targets\u3001requires\u3001driver \u4ee3\u7406\u7684\u6ce8\u518c\u9762)",
-      "id": "docs_journey_0015_mobile_devices_implementation_batches_5_b4_steps_registry_\u786e\u5b9a\u6027_step_\u591a\u53e5\u67c4\u6ce8\u518c_targets_requires_driver_\u4ee3\u7406\u7684\u6ce8\u518c\u9762"
+      "norm_label": "5. b4-steps-registry:\u786e\u5b9a\u6027 step \u591a\u53e5\u67c4\u6ce8\u518c(targets\u3001requires\u3001driver \u4ee3\u7406\u7684\u6ce8\u518c\u9762)"
     },
     {
       "label": "6. B7-tunnel\uff1a\u96a7\u9053\u6539\u4e3a\u4ee4\u724c\u6362 cookie\uff08\u684c\u9762\u5148\u884c\uff09\u3001\u684c\u9762 worker \u7684\u9884\u70ed\u5931\u8d25\u51fa\u53e3\u3001\u8131\u654f\u89c4\u5219\u4e09\u6761",
       "file_type": "document",
       "source_file": "docs/journey/0015-mobile-devices-implementation-batches.md",
-      "source_location": "L419",
+      "source_location": "L421",
       "_origin": "ast",
+      "id": "docs_journey_0015_mobile_devices_implementation_batches_6_b7_tunnel_\u96a7\u9053\u6539\u4e3a\u4ee4\u724c\u6362_cookie_\u684c\u9762\u5148\u884c_\u684c\u9762_worker_\u7684\u9884\u70ed\u5931\u8d25\u51fa\u53e3_\u8131\u654f\u89c4\u5219\u4e09\u6761",
       "community": 201,
       "community_name": "\u79fb\u52a8\u771f\u673a\u652f\u6301\uff081.5\uff09\uff1a\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "norm_label": "6. b7-tunnel:\u96a7\u9053\u6539\u4e3a\u4ee4\u724c\u6362 cookie(\u684c\u9762\u5148\u884c)\u3001\u684c\u9762 worker \u7684\u9884\u70ed\u5931\u8d25\u51fa\u53e3\u3001\u8131\u654f\u89c4\u5219\u4e09\u6761",
-      "id": "docs_journey_0015_mobile_devices_implementation_batches_6_b7_tunnel_\u96a7\u9053\u6539\u4e3a\u4ee4\u724c\u6362_cookie_\u684c\u9762\u5148\u884c_\u684c\u9762_worker_\u7684\u9884\u70ed\u5931\u8d25\u51fa\u53e3_\u8131\u654f\u89c4\u5219\u4e09\u6761"
+      "norm_label": "6. b7-tunnel:\u96a7\u9053\u6539\u4e3a\u4ee4\u724c\u6362 cookie(\u684c\u9762\u5148\u884c)\u3001\u684c\u9762 worker \u7684\u9884\u70ed\u5931\u8d25\u51fa\u53e3\u3001\u8131\u654f\u89c4\u5219\u4e09\u6761"
     },
     {
       "label": "7. B8-deploy-iac\uff1a\u90e8\u7f72\u4fa7\uff1a\u6743\u9650\u3001Device Farm \u9879\u76ee\u627e\u56de\u6216\u5efa\u7acb\u3001SSM\u3001doctor \u8bbe\u5907\u9879",
       "file_type": "document",
       "source_file": "docs/journey/0015-mobile-devices-implementation-batches.md",
-      "source_location": "L491",
+      "source_location": "L493",
       "_origin": "ast",
+      "id": "docs_journey_0015_mobile_devices_implementation_batches_7_b8_deploy_iac_\u90e8\u7f72\u4fa7_\u6743\u9650_device_farm_\u9879\u76ee\u627e\u56de\u6216\u5efa\u7acb_ssm_doctor_\u8bbe\u5907\u9879",
       "community": 201,
       "community_name": "\u79fb\u52a8\u771f\u673a\u652f\u6301\uff081.5\uff09\uff1a\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "norm_label": "7. b8-deploy-iac:\u90e8\u7f72\u4fa7:\u6743\u9650\u3001device farm \u9879\u76ee\u627e\u56de\u6216\u5efa\u7acb\u3001ssm\u3001doctor \u8bbe\u5907\u9879",
-      "id": "docs_journey_0015_mobile_devices_implementation_batches_7_b8_deploy_iac_\u90e8\u7f72\u4fa7_\u6743\u9650_device_farm_\u9879\u76ee\u627e\u56de\u6216\u5efa\u7acb_ssm_doctor_\u8bbe\u5907\u9879"
+      "norm_label": "7. b8-deploy-iac:\u90e8\u7f72\u4fa7:\u6743\u9650\u3001device farm \u9879\u76ee\u627e\u56de\u6216\u5efa\u7acb\u3001ssm\u3001doctor \u8bbe\u5907\u9879"
     },
     {
       "label": "8. B6-midscene-device\uff1aMidscene worker \u8bbe\u5907\u6a21\u5757\uff08\u63a5\u7f1d\u3001\u547d\u4ee4\u5b88\u536b\u3001\u80fd\u529b\u63a2\u6d4b\u3001\u9002\u914d\u5668\u3001\u7ec8\u7ed3\u56db\u9636\u6bb5\u3001evidence\uff09",
       "file_type": "document",
       "source_file": "docs/journey/0015-mobile-devices-implementation-batches.md",
-      "source_location": "L562",
+      "source_location": "L564",
       "_origin": "ast",
+      "id": "docs_journey_0015_mobile_devices_implementation_batches_8_b6_midscene_device_midscene_worker_\u8bbe\u5907\u6a21\u5757_\u63a5\u7f1d_\u547d\u4ee4\u5b88\u536b_\u80fd\u529b\u63a2\u6d4b_\u9002\u914d\u5668_\u7ec8\u7ed3\u56db\u9636\u6bb5_evidence",
       "community": 201,
       "community_name": "\u79fb\u52a8\u771f\u673a\u652f\u6301\uff081.5\uff09\uff1a\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "norm_label": "8. b6-midscene-device:midscene worker \u8bbe\u5907\u6a21\u5757(\u63a5\u7f1d\u3001\u547d\u4ee4\u5b88\u536b\u3001\u80fd\u529b\u63a2\u6d4b\u3001\u9002\u914d\u5668\u3001\u7ec8\u7ed3\u56db\u9636\u6bb5\u3001evidence)",
-      "id": "docs_journey_0015_mobile_devices_implementation_batches_8_b6_midscene_device_midscene_worker_\u8bbe\u5907\u6a21\u5757_\u63a5\u7f1d_\u547d\u4ee4\u5b88\u536b_\u80fd\u529b\u63a2\u6d4b_\u9002\u914d\u5668_\u7ec8\u7ed3\u56db\u9636\u6bb5_evidence"
+      "norm_label": "8. b6-midscene-device:midscene worker \u8bbe\u5907\u6a21\u5757(\u63a5\u7f1d\u3001\u547d\u4ee4\u5b88\u536b\u3001\u80fd\u529b\u63a2\u6d4b\u3001\u9002\u914d\u5668\u3001\u7ec8\u7ed3\u56db\u9636\u6bb5\u3001evidence)"
     },
     {
       "label": "\u79fb\u52a8\u771f\u673a\u652f\u6301\uff081.5\uff09\uff1a\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
@@ -53436,10 +53436,10 @@
       "source_file": "docs/journey/0015-mobile-devices-implementation-batches.md",
       "source_location": "L3",
       "_origin": "ast",
+      "id": "docs_journey_0015_mobile_devices_implementation_batches_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
       "community": 201,
       "community_name": "\u79fb\u52a8\u771f\u673a\u652f\u6301\uff081.5\uff09\uff1a\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "norm_label": "\u79fb\u52a8\u771f\u673a\u652f\u6301(1.5):\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "id": "docs_journey_0015_mobile_devices_implementation_batches_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5"
+      "norm_label": "\u79fb\u52a8\u771f\u673a\u652f\u6301(1.5):\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5"
     },
     {
       "label": "Path",
@@ -56824,10 +56824,10 @@
       "source_file": "docs/adr/0050-deterministic-step-handles-and-testing.md",
       "source_location": "L1",
       "_origin": "ast",
-      "id": "docs_adr_0050_deterministic_step_handles_and_testing",
       "community": 282,
       "community_name": "ADR 0037: \u5206\u53d1\u4e0e\u6253\u5305",
-      "norm_label": "0050-deterministic-step-handles-and-testing.md"
+      "norm_label": "0050-deterministic-step-handles-and-testing.md",
+      "id": "docs_adr_0050_deterministic_step_handles_and_testing"
     },
     {
       "label": "0051-device-session-lifecycle-and-app-distribution.md",
@@ -179139,9 +179139,9 @@
       "source_location": "L1",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_adr_0050_deterministic_step_handles_and_testing",
-      "target": "docs_adr_0050_deterministic_step_handles_and_testing_0050_\u786e\u5b9a\u6027_step_\u591a\u53e5\u67c4\u6ce8\u518c\u4e0e\u6d4b\u8bd5\u5206\u5c42",
-      "confidence_score": 1.0
+      "target": "docs_adr_0050_deterministic_step_handles_and_testing_0050_\u786e\u5b9a\u6027_step_\u591a\u53e5\u67c4\u6ce8\u518c\u4e0e\u6d4b\u8bd5\u5206\u5c42"
     },
     {
       "relation": "contains",
@@ -179150,9 +179150,9 @@
       "source_location": "L129",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_adr_0050_deterministic_step_handles_and_testing_0050_\u786e\u5b9a\u6027_step_\u591a\u53e5\u67c4\u6ce8\u518c\u4e0e\u6d4b\u8bd5\u5206\u5c42",
-      "target": "docs_adr_0050_deterministic_step_handles_and_testing_\u88ab\u62d2\u65b9\u6848_\u62a4\u680f",
-      "confidence_score": 1.0
+      "target": "docs_adr_0050_deterministic_step_handles_and_testing_\u88ab\u62d2\u65b9\u6848_\u62a4\u680f"
     },
     {
       "relation": "contains",
@@ -179161,9 +179161,9 @@
       "source_location": "L138",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_adr_0050_deterministic_step_handles_and_testing_0050_\u786e\u5b9a\u6027_step_\u591a\u53e5\u67c4\u6ce8\u518c\u4e0e\u6d4b\u8bd5\u5206\u5c42",
-      "target": "docs_adr_0050_deterministic_step_handles_and_testing_\u8fb9\u754c\u4e0e\u4e92\u94fe",
-      "confidence_score": 1.0
+      "target": "docs_adr_0050_deterministic_step_handles_and_testing_\u8fb9\u754c\u4e0e\u4e92\u94fe"
     },
     {
       "relation": "contains",
@@ -179172,9 +179172,9 @@
       "source_location": "L14",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_adr_0050_deterministic_step_handles_and_testing_0050_\u786e\u5b9a\u6027_step_\u591a\u53e5\u67c4\u6ce8\u518c\u4e0e\u6d4b\u8bd5\u5206\u5c42",
-      "target": "docs_adr_0050_deterministic_step_handles_and_testing_\u51b3\u7b56",
-      "confidence_score": 1.0
+      "target": "docs_adr_0050_deterministic_step_handles_and_testing_\u51b3\u7b56"
     },
     {
       "relation": "contains",
@@ -179183,9 +179183,9 @@
       "source_location": "L5",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_adr_0050_deterministic_step_handles_and_testing_0050_\u786e\u5b9a\u6027_step_\u591a\u53e5\u67c4\u6ce8\u518c\u4e0e\u6d4b\u8bd5\u5206\u5c42",
-      "target": "docs_adr_0050_deterministic_step_handles_and_testing_\u80cc\u666f\u4e0e\u95ee\u9898",
-      "confidence_score": 1.0
+      "target": "docs_adr_0050_deterministic_step_handles_and_testing_\u80cc\u666f\u4e0e\u95ee\u9898"
     },
     {
       "relation": "contains",
@@ -179194,9 +179194,9 @@
       "source_location": "L99",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_adr_0050_deterministic_step_handles_and_testing_0050_\u786e\u5b9a\u6027_step_\u591a\u53e5\u67c4\u6ce8\u518c\u4e0e\u6d4b\u8bd5\u5206\u5c42",
-      "target": "docs_adr_0050_deterministic_step_handles_and_testing_\u5b9e\u6d4b\u4f9d\u636e",
-      "confidence_score": 1.0
+      "target": "docs_adr_0050_deterministic_step_handles_and_testing_\u5b9e\u6d4b\u4f9d\u636e"
     },
     {
       "relation": "contains",
@@ -179205,9 +179205,9 @@
       "source_location": "L16",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_adr_0050_deterministic_step_handles_and_testing_\u51b3\u7b56",
-      "target": "docs_adr_0050_deterministic_step_handles_and_testing_1_\u6ce8\u518c\u9762_handler_\u4f4d\u7f6e\u6309\u53e5\u67c4\u79cd\u7c7b\u5206\u952e",
-      "confidence_score": 1.0
+      "target": "docs_adr_0050_deterministic_step_handles_and_testing_1_\u6ce8\u518c\u9762_handler_\u4f4d\u7f6e\u6309\u53e5\u67c4\u79cd\u7c7b\u5206\u952e"
     },
     {
       "relation": "contains",
@@ -179216,9 +179216,9 @@
       "source_location": "L43",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_adr_0050_deterministic_step_handles_and_testing_\u51b3\u7b56",
-      "target": "docs_adr_0050_deterministic_step_handles_and_testing_2_handler_\u4e0a\u4e0b\u6587_\u4e03\u4e2a\u5b57\u6bb5\u4e0e\u4e00\u6761\u4e0d\u53d8\u91cf",
-      "confidence_score": 1.0
+      "target": "docs_adr_0050_deterministic_step_handles_and_testing_2_handler_\u4e0a\u4e0b\u6587_\u4e03\u4e2a\u5b57\u6bb5\u4e0e\u4e00\u6761\u4e0d\u53d8\u91cf"
     },
     {
       "relation": "contains",
@@ -179227,9 +179227,9 @@
       "source_location": "L69",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_adr_0050_deterministic_step_handles_and_testing_\u51b3\u7b56",
-      "target": "docs_adr_0050_deterministic_step_handles_and_testing_3_\u6d4b\u8bd5\u5206\u5c42",
-      "confidence_score": 1.0
+      "target": "docs_adr_0050_deterministic_step_handles_and_testing_3_\u6d4b\u8bd5\u5206\u5c42"
     },
     {
       "relation": "contains",
@@ -179238,9 +179238,9 @@
       "source_location": "L84",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_adr_0050_deterministic_step_handles_and_testing_\u51b3\u7b56",
-      "target": "docs_adr_0050_deterministic_step_handles_and_testing_4_\u5199\u4f5c\u65b9\u6cd5_\u8fdb_user_guide_\u4e0e_agent_skill",
-      "confidence_score": 1.0
+      "target": "docs_adr_0050_deterministic_step_handles_and_testing_4_\u5199\u4f5c\u65b9\u6cd5_\u8fdb_user_guide_\u4e0e_agent_skill"
     },
     {
       "relation": "contains",
@@ -179249,9 +179249,9 @@
       "source_location": "L95",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_adr_0050_deterministic_step_handles_and_testing_\u51b3\u7b56",
-      "target": "docs_adr_0050_deterministic_step_handles_and_testing_5_\u5ef6\u540e_\u786e\u5b9a\u6027_step_sdk",
-      "confidence_score": 1.0
+      "target": "docs_adr_0050_deterministic_step_handles_and_testing_5_\u5ef6\u540e_\u786e\u5b9a\u6027_step_sdk"
     },
     {
       "relation": "contains",
@@ -179843,9 +179843,9 @@
       "source_location": "L3",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0013_mobile_devices_implementation",
-      "target": "docs_journey_0013_mobile_devices_implementation_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u8fdb\u5ea6\u603b\u7eb2"
+      "target": "docs_journey_0013_mobile_devices_implementation_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u8fdb\u5ea6\u603b\u7eb2",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -179854,9 +179854,9 @@
       "source_location": "L27",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0013_mobile_devices_implementation_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u8fdb\u5ea6\u603b\u7eb2",
-      "target": "docs_journey_0013_mobile_devices_implementation_documenting_\u6e05\u5355_adr_0048_\u5230_0053_\u7b2c_7_\u7c7b\u5185\u5bb9\u7684\u6c47\u603b_\u5b9e\u65bd\u671f\u9010\u9879\u5b8c\u6210"
+      "target": "docs_journey_0013_mobile_devices_implementation_documenting_\u6e05\u5355_adr_0048_\u5230_0053_\u7b2c_7_\u7c7b\u5185\u5bb9\u7684\u6c47\u603b_\u5b9e\u65bd\u671f\u9010\u9879\u5b8c\u6210",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -179865,9 +179865,9 @@
       "source_location": "L54",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0013_mobile_devices_implementation_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u8fdb\u5ea6\u603b\u7eb2",
-      "target": "docs_journey_0013_mobile_devices_implementation_\u5b9e\u65bd\u671f\u8981\u6838\u7684\u70b9_adr_\u5df2\u5b9a_\u5b9e\u65bd\u65f6\u987a\u624b\u9a8c\u8bc1"
+      "target": "docs_journey_0013_mobile_devices_implementation_\u5b9e\u65bd\u671f\u8981\u6838\u7684\u70b9_adr_\u5df2\u5b9a_\u5b9e\u65bd\u65f6\u987a\u624b\u9a8c\u8bc1",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -179876,9 +179876,9 @@
       "source_location": "L7",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0013_mobile_devices_implementation_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u8fdb\u5ea6\u603b\u7eb2",
-      "target": "docs_journey_0013_mobile_devices_implementation_\u73b0\u573a"
+      "target": "docs_journey_0013_mobile_devices_implementation_\u73b0\u573a",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -179887,9 +179887,9 @@
       "source_location": "L3",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0015_mobile_devices_implementation_batches",
-      "target": "docs_journey_0015_mobile_devices_implementation_batches_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5"
+      "target": "docs_journey_0015_mobile_devices_implementation_batches_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -179898,9 +179898,9 @@
       "source_location": "L117",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0015_mobile_devices_implementation_batches_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "target": "docs_journey_0015_mobile_devices_implementation_batches_2_b5_core_events_termination_core_\u4fa7\u4f1a\u8bdd\u4e8b\u4ef6_scope_\u7ea7_error_\u5408\u6210_skipped_\u7ec8\u7ed3\u51fd\u6570\u4e0e\u771f\u503c\u8868_\u8ba1\u91cf\u5408\u8ba1_explain_\u5448\u73b0"
+      "target": "docs_journey_0015_mobile_devices_implementation_batches_2_b5_core_events_termination_core_\u4fa7\u4f1a\u8bdd\u4e8b\u4ef6_scope_\u7ea7_error_\u5408\u6210_skipped_\u7ec8\u7ed3\u51fd\u6570\u4e0e\u771f\u503c\u8868_\u8ba1\u91cf\u5408\u8ba1_explain_\u5448\u73b0",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -179909,9 +179909,9 @@
       "source_location": "L200",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0015_mobile_devices_implementation_batches_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "target": "docs_journey_0015_mobile_devices_implementation_batches_3_b2_core_target_job_\u6d4b\u8bd5\u76ee\u6807\u4e0e_job_\u5f62\u6001_core_\u4fa7_tag_\u5f52\u7ea6_target_\u4e24\u5f62\u6001_\u6309\u76ee\u6807\u7684_timeout_plan_\u6807\u6ce8\u4e0e\u76ee\u6807\u62d2\u7edd_\u4e24\u4e2a_worker_\u5efa\u4f1a\u8bdd\u524d\u81ea\u68c0"
+      "target": "docs_journey_0015_mobile_devices_implementation_batches_3_b2_core_target_job_\u6d4b\u8bd5\u76ee\u6807\u4e0e_job_\u5f62\u6001_core_\u4fa7_tag_\u5f52\u7ea6_target_\u4e24\u5f62\u6001_\u6309\u76ee\u6807\u7684_timeout_plan_\u6807\u6ce8\u4e0e\u76ee\u6807\u62d2\u7edd_\u4e24\u4e2a_worker_\u5efa\u4f1a\u8bdd\u524d\u81ea\u68c0",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -179920,9 +179920,9 @@
       "source_location": "L271",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0015_mobile_devices_implementation_batches_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "target": "docs_journey_0015_mobile_devices_implementation_batches_4_b3_config_submit_\u9879\u76ee\u914d\u7f6e\u6587\u4ef6_\u7ec4\u5408\u6839\u586b_device_request_definition_\u683c\u5f0f\u7248\u672c_cli_\u4fa7\u5e94\u7528\u4e0a\u4f20"
+      "target": "docs_journey_0015_mobile_devices_implementation_batches_4_b3_config_submit_\u9879\u76ee\u914d\u7f6e\u6587\u4ef6_\u7ec4\u5408\u6839\u586b_device_request_definition_\u683c\u5f0f\u7248\u672c_cli_\u4fa7\u5e94\u7528\u4e0a\u4f20",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -179931,20 +179931,20 @@
       "source_location": "L361",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0015_mobile_devices_implementation_batches_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "target": "docs_journey_0015_mobile_devices_implementation_batches_5_b4_steps_registry_\u786e\u5b9a\u6027_step_\u591a\u53e5\u67c4\u6ce8\u518c_targets_requires_driver_\u4ee3\u7406\u7684\u6ce8\u518c\u9762"
+      "target": "docs_journey_0015_mobile_devices_implementation_batches_5_b4_steps_registry_\u786e\u5b9a\u6027_step_\u591a\u53e5\u67c4\u6ce8\u518c_targets_requires_driver_\u4ee3\u7406\u7684\u6ce8\u518c\u9762",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/journey/0015-mobile-devices-implementation-batches.md",
-      "source_location": "L419",
+      "source_location": "L421",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0015_mobile_devices_implementation_batches_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "target": "docs_journey_0015_mobile_devices_implementation_batches_6_b7_tunnel_\u96a7\u9053\u6539\u4e3a\u4ee4\u724c\u6362_cookie_\u684c\u9762\u5148\u884c_\u684c\u9762_worker_\u7684\u9884\u70ed\u5931\u8d25\u51fa\u53e3_\u8131\u654f\u89c4\u5219\u4e09\u6761"
+      "target": "docs_journey_0015_mobile_devices_implementation_batches_6_b7_tunnel_\u96a7\u9053\u6539\u4e3a\u4ee4\u724c\u6362_cookie_\u684c\u9762\u5148\u884c_\u684c\u9762_worker_\u7684\u9884\u70ed\u5931\u8d25\u51fa\u53e3_\u8131\u654f\u89c4\u5219\u4e09\u6761",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -179953,31 +179953,31 @@
       "source_location": "L48",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0015_mobile_devices_implementation_batches_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "target": "docs_journey_0015_mobile_devices_implementation_batches_1_b1_capabilities_\u80fd\u529b\u81ea\u8ff0\u589e\u952e_\u4e24\u4e2a_worker_\u53ea\u58f0\u660e\u684c\u9762\u7f51\u9875_cli_\u552f\u4e00\u6821\u9a8c\u5904\u4e0e\u4ea4\u96c6_doctor_list_deterministic_\u5448\u73b0"
+      "target": "docs_journey_0015_mobile_devices_implementation_batches_1_b1_capabilities_\u80fd\u529b\u81ea\u8ff0\u589e\u952e_\u4e24\u4e2a_worker_\u53ea\u58f0\u660e\u684c\u9762\u7f51\u9875_cli_\u552f\u4e00\u6821\u9a8c\u5904\u4e0e\u4ea4\u96c6_doctor_list_deterministic_\u5448\u73b0",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/journey/0015-mobile-devices-implementation-batches.md",
-      "source_location": "L491",
+      "source_location": "L493",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0015_mobile_devices_implementation_batches_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "target": "docs_journey_0015_mobile_devices_implementation_batches_7_b8_deploy_iac_\u90e8\u7f72\u4fa7_\u6743\u9650_device_farm_\u9879\u76ee\u627e\u56de\u6216\u5efa\u7acb_ssm_doctor_\u8bbe\u5907\u9879"
+      "target": "docs_journey_0015_mobile_devices_implementation_batches_7_b8_deploy_iac_\u90e8\u7f72\u4fa7_\u6743\u9650_device_farm_\u9879\u76ee\u627e\u56de\u6216\u5efa\u7acb_ssm_doctor_\u8bbe\u5907\u9879",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/journey/0015-mobile-devices-implementation-batches.md",
-      "source_location": "L562",
+      "source_location": "L564",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0015_mobile_devices_implementation_batches_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "target": "docs_journey_0015_mobile_devices_implementation_batches_8_b6_midscene_device_midscene_worker_\u8bbe\u5907\u6a21\u5757_\u63a5\u7f1d_\u547d\u4ee4\u5b88\u536b_\u80fd\u529b\u63a2\u6d4b_\u9002\u914d\u5668_\u7ec8\u7ed3\u56db\u9636\u6bb5_evidence"
+      "target": "docs_journey_0015_mobile_devices_implementation_batches_8_b6_midscene_device_midscene_worker_\u8bbe\u5907\u6a21\u5757_\u63a5\u7f1d_\u547d\u4ee4\u5b88\u536b_\u80fd\u529b\u63a2\u6d4b_\u9002\u914d\u5668_\u7ec8\u7ed3\u56db\u9636\u6bb5_evidence",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -179986,9 +179986,9 @@
       "source_location": "L8",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0015_mobile_devices_implementation_batches_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "target": "docs_journey_0015_mobile_devices_implementation_batches_0_b0_navigation_\u5bfc\u822a\u89c4\u5219\u4e0e\u6ce8\u518c\u9762\u5173\u952e\u5b57\u58f0\u660e_1_4_\u884c\u4e3a\u7684\u4e0d\u517c\u5bb9\u53d8\u66f4_\u81ea\u5df1\u53d1"
+      "target": "docs_journey_0015_mobile_devices_implementation_batches_0_b0_navigation_\u5bfc\u822a\u89c4\u5219\u4e0e\u6ce8\u518c\u9762\u5173\u952e\u5b57\u58f0\u660e_1_4_\u884c\u4e3a\u7684\u4e0d\u517c\u5bb9\u53d8\u66f4_\u81ea\u5df1\u53d1",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -219894,9 +219894,9 @@
       "source_location": "L10",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_adr_0050_deterministic_step_handles_and_testing",
-      "target": "docs_adr_0052_appium_interface_adapter_and_platform_differences",
-      "confidence_score": 1.0
+      "target": "docs_adr_0052_appium_interface_adapter_and_platform_differences"
     },
     {
       "relation": "references",
@@ -219905,9 +219905,9 @@
       "source_location": "L144",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_adr_0050_deterministic_step_handles_and_testing",
-      "target": "docs_adr_0053_project_config_file",
-      "confidence_score": 1.0
+      "target": "docs_adr_0053_project_config_file"
     },
     {
       "relation": "references",
@@ -219916,9 +219916,9 @@
       "source_location": "L145",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_adr_0050_deterministic_step_handles_and_testing",
-      "target": "docs_adr_0014_ai_first_assertions",
-      "confidence_score": 1.0
+      "target": "docs_adr_0014_ai_first_assertions"
     },
     {
       "relation": "references",
@@ -219927,9 +219927,9 @@
       "source_location": "L3",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_adr_0050_deterministic_step_handles_and_testing",
-      "target": "docs_adr_0022_bdd_runner_retired_core_parses_thin_worker",
-      "confidence_score": 1.0
+      "target": "docs_adr_0022_bdd_runner_retired_core_parses_thin_worker"
     },
     {
       "relation": "references",
@@ -219938,9 +219938,9 @@
       "source_location": "L3",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_adr_0050_deterministic_step_handles_and_testing",
-      "target": "docs_adr_0036_deterministic_capability_discovery",
-      "confidence_score": 1.0
+      "target": "docs_adr_0036_deterministic_capability_discovery"
     },
     {
       "relation": "references",
@@ -219949,9 +219949,9 @@
       "source_location": "L3",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_adr_0050_deterministic_step_handles_and_testing",
-      "target": "docs_adr_0051_device_session_lifecycle_and_app_distribution",
-      "confidence_score": 1.0
+      "target": "docs_adr_0051_device_session_lifecycle_and_app_distribution"
     },
     {
       "relation": "references",
@@ -219960,9 +219960,9 @@
       "source_location": "L34",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_adr_0050_deterministic_step_handles_and_testing",
-      "target": "docs_adr_0037_distribution_and_packaging",
-      "confidence_score": 1.0
+      "target": "docs_adr_0037_distribution_and_packaging"
     },
     {
       "relation": "references",
@@ -219971,9 +219971,9 @@
       "source_location": "L38",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_adr_0050_deterministic_step_handles_and_testing",
-      "target": "docs_adr_0020_step_phrasing_default_ai_deterministic_scaffold",
-      "confidence_score": 1.0
+      "target": "docs_adr_0020_step_phrasing_default_ai_deterministic_scaffold"
     },
     {
       "relation": "references",
@@ -250202,5 +250202,5 @@
       "source_file": "docs/adr/0043-agent-skill-for-driving-gherkai.md"
     }
   ],
-  "built_at_commit": "29f0d3d57290e6fba3e3a06085f293f731d46bf7"
+  "built_at_commit": "1081af22421fb11fab3581963b38afca7140ca40"
 }
